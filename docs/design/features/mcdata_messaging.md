@@ -148,6 +148,11 @@ MCDATA-AS 게이트 (모두 controlling function 검사, TS 24.282 §9.2.2):
   보관 레코드에 file_* 필드를 남긴다. 파일 크기 상한의 실효 강제 지점은 CSC 업로드 단.
 - 수신 앱: 그룹문서 `max-data-size-auto-recv` 이내면 자동 다운로드, 초과분은 말풍선 탭으로
   수동 다운로드 → FileProvider ACTION_VIEW 로 열기 (`files/mcdata/`).
+- **단말 SDK(`libcimsue`, [ue_sdk.md](ue_sdk.md))**: `CscClient::uploadFd`(그룹 FD 면 `group` 지정 → 서버 게이트, 1:1 은 없음) →
+  `Engine::sendGroupFd`/`sendFd`(request-type `group-fd`/`one-to-one-fd`, 두 파트) · 수신 `onSds(fd=true, fileUrl·fileName·fileSize·fileType)` ·
+  `CscClient::downloadFd`(FILEURL 의 **경로만** 취해 자기 CSC 로 — Bearer 를 FILEURL 의 호스트로 보내지 않고, 발신자가 다른 주소로 올렸어도 같은
+  NAS 저장소에서 받는다). C API `cimsue_csc_upload_fd/download_fd`·`cimsue_engine_send_group_fd/send_fd`, .NET `CscClient.UploadFd/DownloadFd`·
+  `Account.SendGroupFd/SendFd`. 관제 데스크톱은 자동 다운로드를 하지 않고 [받기]로 받는다([dispatch_desktop_ui.md](dispatch_desktop_ui.md) §4.4).
 - **시험(계측기)**: libcsim `SimSession::SendFd`(IdMS 토큰 → `POST /mcdata/fd` → FD SIGNALLING MESSAGE)·`DownloadFd`(`GET`, Bearer) +
   `McDataSds::buildGroupFd|buildOneToOneFd`/`parse`(FILEURL·Metadata) — 워커 단계 `fd_send`/`fd_recv`, 지표 `fd_upload_ms`·`fd_delay_ms`·
   `fd_download_ms`·`fd_download_pct`, 동봉 `MCDATA-FD-GROUP`·`MCDATA-FD-1TO1`([test_instrument.md](test_instrument.md) §3.1 ⑪″). 신원의

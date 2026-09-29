@@ -96,6 +96,71 @@ TEST(SdsCodec, OneToOneSdsRoundTrip) {
     EXPECT_NE(b.body.find("<request-type>one-to-one-sds</request-type>"), std::string::npos);
     EXPECT_EQ(b.body.find("group-sds"), std::string::npos);
     EXPECT_NE(b.body.find("<mcdataURI>tel:1002</mcdataURI>"), std::string::npos);
+    // 받는 쪽에서 request-uri 는 나 자신이다 — 그룹으로 오인하지 않는다(내 번호 스레드가 생기지 않게).
+    EXPECT_EQ(out.groupUri, "");
+}
+
+TEST(SdsCodec, FdSignallingTlvLayout) {
+    // cspsim fdSignallingTlv · Android McDataCodec.buildFd 와 같은 바이트(mcdata_messaging.md §4.5)
+    std::string conv(32, 'a'), msg(32, 'b');
+    FdFile f; f.url = "https://csc:4430/mcdata/fd/0123"; f.name = "현장\"사진\".jpg"; f.size = 1234; f.type = "image/jpeg";
+    std::string tlv = mcdata::fdSignallingTlv(conv, msg, f, 0x0102030405L);
+    EXPECT_EQ((uint8_t)tlv[0], mcdata::kMsgFdSignalling);
+    EXPECT_EQ((uint8_t)tlv[1], 0x01); EXPECT_EQ((uint8_t)tlv[5], 0x05);
+    ASSERT_EQ((uint8_t)tlv[38], 0x78);                       // Payload IE (TLV-E)
+    size_t l = ((uint8_t)tlv[39] << 8) | (uint8_t)tlv[40];
+    EXPECT_EQ(l, 1 + f.url.size());
+    EXPECT_EQ((uint8_t)tlv[41], 0x04);                       // FILEURL
+    EXPECT_EQ(tlv.substr(42, f.url.size()), f.url);
+    size_t m = 41 + l;
+    ASSERT_EQ((uint8_t)tlv[m], 0x79);                        // Metadata IE (TLV-E)
+    EXPECT_EQ(tlv.substr(m + 3), "name:\"현장사진.jpg\" size:1234 type:image/jpeg");   // 이름의 따옴표는 뺀다
+    FdFile noType = f; noType.type.clear();
+    EXPECT_NE(mcdata::fdSignallingTlv(conv, msg, noType, 0).find("type:application/octet-stream"), std::string::npos);
+}
+
+TEST(SdsCodec, GroupFdRoundTrip) {
+    std::string conv = mcdata::conversationIdOf("g001"), msg = mcdata::newMessageId();
+    FdFile f; f.url = "https://10.0.0.1:4430/mcdata/fd/0123456789abcdef0123456789abcdef"; f.name = "보고서 1.pdf"; f.size = 52428800; f.type = "application/pdf";
+    mcdata::Body b = mcdata::buildGroupFd("tel:g001", f, conv, msg, 1700000000L);
+    EXPECT_NE(b.body.find("<request-type>group-fd</request-type>"), std::string::npos);
+    EXPECT_EQ(b.body.find(mcdata::kCtPayload), std::string::npos);      // DATA PAYLOAD 파트 없음 — 두 파트
+    SdsMessage out;
+    ASSERT_TRUE(mcdata::parse(b.contentType, b.body, out));
+    EXPECT_TRUE(out.fd);
+    EXPECT_EQ(out.groupUri, "tel:g001");
+    EXPECT_EQ(out.convId, conv); EXPECT_EQ(out.msgId, msg); EXPECT_EQ(out.timeSec, 1700000000L);
+    EXPECT_EQ(out.fileUrl, f.url); EXPECT_EQ(out.fileName, f.name); EXPECT_EQ(out.fileSize, f.size); EXPECT_EQ(out.fileType, f.type);
+    EXPECT_EQ(out.text, "");
+}
+
+TEST(SdsCodec, OneToOneFdHasNoGroupUri) {
+    std::string conv = mcdata::conversationIdOneToOne("1001", "1002"), msg = mcdata::newMessageId();
+    FdFile f; f.url = "https://csc/mcdata/fd/ab"; f.name = "a.txt"; f.size = 3; f.type = "text/plain";
+    mcdata::Body b = mcdata::buildOneToOneFd("tel:1002", f, conv, msg, 1700000000L);
+    EXPECT_NE(b.body.find("<request-type>one-to-one-fd</request-type>"), std::string::npos);
+    SdsMessage out;
+    ASSERT_TRUE(mcdata::parse(b.contentType, b.body, out));
+    EXPECT_TRUE(out.fd);
+    EXPECT_EQ(out.groupUri, "");
+    EXPECT_EQ(out.fileName, "a.txt"); EXPECT_EQ(out.fileSize, 3);
+}
+
+TEST(SdsCodec, FdParserSkipsOptionalIesAndOldSenderIsGroup) {
+    // 선택 IE(§15.1.3) — FD disposition 0x9x·mandatory download 0xAx(TV 1)·InReplyTo 0x21(TV 17)·Application ID 0x22(TV 2) 가
+    //   Payload 앞에 와도 FILEURL·Metadata 를 읽는다. request-type 이 없는 옛 발신자의 request-uri 는 그룹으로 본다.
+    FdFile f; f.url = "https://csc/mcdata/fd/cd"; f.name = "x.bin"; f.size = 9; f.type = "application/octet-stream";
+    std::string tlv = mcdata::fdSignallingTlv(std::string(32, '1'), std::string(32, '2'), f, 1);
+    tlv.insert(38, std::string("\x91\xA1\x21", 3) + std::string(16, '\x07') + std::string("\x22\x05", 2));
+    std::string body = "--b\r\nContent-Type: application/vnd.3gpp.mcdata-info+xml\r\n\r\n"
+                       "<mcdatainfo><mcdata-Params><mcdata-request-uri><mcdataURI>tel:g009</mcdataURI></mcdata-request-uri></mcdata-Params></mcdatainfo>\r\n"
+                       "--b\r\nContent-Type: application/vnd.3gpp.mcdata-signalling\r\nContent-Transfer-Encoding: base64\r\n\r\n" +
+                       mcdata::base64Encode(tlv) + "\r\n--b--\r\n";
+    SdsMessage out;
+    ASSERT_TRUE(mcdata::parse("multipart/mixed;boundary=b", body, out));
+    EXPECT_TRUE(out.fd);
+    EXPECT_EQ(out.fileUrl, f.url); EXPECT_EQ(out.fileName, "x.bin"); EXPECT_EQ(out.fileSize, 9);
+    EXPECT_EQ(out.groupUri, "tel:g009");
 }
 
 TEST(McpttXml, InfoBuildParseAndBareId) {

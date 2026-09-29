@@ -26,6 +26,17 @@ public sealed class MessageStore : IDisposable
             CREATE INDEX IF NOT EXISTS ix_messages_thread ON messages(kind, thread_key, time);
             CREATE INDEX IF NOT EXISTS ix_messages_msgid ON messages(msg_id);
             """);
+        // FD 첨부 열(mcdata_messaging.md §4.5) — 앞선 판의 DB 에는 없어 없으면 붙인다
+        AddColumn("file_type", "TEXT NOT NULL DEFAULT ''");
+        AddColumn("local_path", "TEXT NOT NULL DEFAULT ''");
+    }
+
+    private void AddColumn(string name, string decl)
+    {
+        using var cmd = _db.CreateCommand();
+        cmd.CommandText = "SELECT COUNT(*) FROM pragma_table_info('messages') WHERE name=@n";
+        cmd.Parameters.AddWithValue("@n", name);
+        if ((long)cmd.ExecuteScalar()! == 0) Exec($"ALTER TABLE messages ADD COLUMN {name} {decl}");
     }
 
     /// <summary>재기동 시 잔존 PENDING 은 FAILED 로 마감(재전송 유도 — mcdata_messaging.md §5).</summary>
@@ -41,8 +52,8 @@ public sealed class MessageStore : IDisposable
     {
         using var cmd = _db.CreateCommand();
         cmd.CommandText = """
-            INSERT INTO messages(kind, thread_key, direction, peer, peer_name, group_uri, conv_id, msg_id, token, text, time, state, file_name, file_url, file_size, read)
-            VALUES(@kind, @thread, @dir, @peer, @peer_name, @group, @conv, @msg, @token, @text, @time, @state, @fname, @furl, @fsize, @read);
+            INSERT INTO messages(kind, thread_key, direction, peer, peer_name, group_uri, conv_id, msg_id, token, text, time, state, file_name, file_url, file_size, read, file_type, local_path)
+            VALUES(@kind, @thread, @dir, @peer, @peer_name, @group, @conv, @msg, @token, @text, @time, @state, @fname, @furl, @fsize, @read, @ftype, @local);
             SELECT last_insert_rowid();
             """;
         cmd.Parameters.AddWithValue("@kind", (int)m.Kind);
@@ -61,8 +72,17 @@ public sealed class MessageStore : IDisposable
         cmd.Parameters.AddWithValue("@furl", m.FileUrl);
         cmd.Parameters.AddWithValue("@fsize", m.FileSize);
         cmd.Parameters.AddWithValue("@read", m.Read ? 1 : 0);
+        cmd.Parameters.AddWithValue("@ftype", m.FileType);
+        cmd.Parameters.AddWithValue("@local", m.LocalPath);
         m.Id = (long)cmd.ExecuteScalar()!;
     }
+
+    /// <summary>FD 발신 — 업로드가 끝나 FILEURL 이 생겼다(+ 알림 발신의 msgId·token·상태).</summary>
+    public void UpdateFile(long id, string fileUrl, string msgId, long token, SendState state) =>
+        Exec("UPDATE messages SET file_url=@u, msg_id=@m, token=@t, state=@s WHERE id=@id",
+             ("@u", fileUrl), ("@m", msgId), ("@t", token), ("@s", (int)state), ("@id", id));
+    /// <summary>FD 수신 — 받은 파일의 로컬 경로.</summary>
+    public void UpdateLocalPath(long id, string path) => Exec("UPDATE messages SET local_path=@p WHERE id=@id", ("@p", path), ("@id", id));
 
     public void UpdateState(long id, SendState state) => Exec("UPDATE messages SET state=@s WHERE id=@id", ("@s", (int)state), ("@id", id));
     public void UpdateToken(long id, long token) => Exec("UPDATE messages SET token=@t WHERE id=@id", ("@t", token), ("@id", id));
@@ -76,7 +96,7 @@ public sealed class MessageStore : IDisposable
     {
         var list = new List<Message>();
         using var cmd = _db.CreateCommand();
-        cmd.CommandText = "SELECT id, kind, thread_key, direction, peer, peer_name, group_uri, conv_id, msg_id, token, text, time, state, file_name, file_url, file_size, read FROM messages ORDER BY time";
+        cmd.CommandText = "SELECT id, kind, thread_key, direction, peer, peer_name, group_uri, conv_id, msg_id, token, text, time, state, file_name, file_url, file_size, read, file_type, local_path FROM messages ORDER BY time";
         using var r = cmd.ExecuteReader();
         while (r.Read())
         {
@@ -86,7 +106,7 @@ public sealed class MessageStore : IDisposable
                 Peer = r.GetString(4), PeerName = r.GetString(5), GroupUri = r.GetString(6), ConvId = r.GetString(7), MsgId = r.GetString(8),
                 Token = r.GetInt64(9), Text = r.GetString(10), Time = DateTimeOffset.FromUnixTimeSeconds(r.GetInt64(11)).LocalDateTime,
                 State = (SendState)r.GetInt32(12), FileName = r.GetString(13), FileUrl = r.GetString(14), FileSize = r.GetInt64(15),
-                Read = r.GetInt32(16) != 0,
+                Read = r.GetInt32(16) != 0, FileType = r.GetString(17), LocalPath = r.GetString(18),
             });
         }
         return list;

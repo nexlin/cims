@@ -263,6 +263,14 @@ typedef struct {
     int64_t     file_size;
 } cimsue_sds_message_t;
 
+/** MCData FD 로 알릴 파일(types.h FdFile) — send_group_fd/send_fd 입력. url = csc_upload_fd 결과, 문자열 NULL = 빈 값. */
+typedef struct {
+    const char* url;
+    const char* name;
+    const char* type;                   /* MIME (NULL·빈 값 = application/octet-stream) */
+    int64_t     size;
+} cimsue_fd_file_t;
+
 typedef struct {
     uint32_t rx_packets, rx_bytes, rx_loss, rx_discard;
     uint32_t tx_packets, tx_bytes;
@@ -412,6 +420,16 @@ CIMSUE_API cimsue_status_t CIMSUE_CALL cimsue_engine_send_sds_notification(cimsu
                                                                            const char* peer, const char* conv_id,
                                                                            const char* msg_id, int32_t notif_type,
                                                                            int64_t* token_out);
+
+/* MCData FD (TS 24.282 §10.2 — 파일은 먼저 cimsue_csc_upload_fd 로 올린다) */
+/** 그룹 FD 알림 발신(request-type group-fd). msg_id_out·token_out 규약은 send_group_sds 와 같다. */
+CIMSUE_API cimsue_status_t CIMSUE_CALL cimsue_engine_send_group_fd(cimsue_engine_t* e, int32_t account_id,
+                                                                   const char* group_id, const cimsue_fd_file_t* file,
+                                                                   char* msg_id_out, int32_t msg_id_cap, int64_t* token_out);
+/** 1:1 FD 알림 발신(request-type one-to-one-fd). peer = 상대 bare 번호. */
+CIMSUE_API cimsue_status_t CIMSUE_CALL cimsue_engine_send_fd(cimsue_engine_t* e, int32_t account_id,
+                                                             const char* peer, const cimsue_fd_file_t* file,
+                                                             char* msg_id_out, int32_t msg_id_cap, int64_t* token_out);
 
 /* 장치 */
 /** 반환 개수, *out 은 스냅샷 배열(다음 조회까지 유효). */
@@ -575,6 +593,14 @@ typedef struct {
     int32_t        body_len;
 } cimsue_http_result_t;
 
+/** MCData FD 업로드 결과(csc.h FdUpload) — url 을 cimsue_fd_file_t.url 로 넘긴다. */
+typedef struct {
+    const char* id;
+    const char* url;
+    const char* name;
+    int64_t     size;
+} cimsue_fd_upload_t;
+
 /** 그룹 문서 멤버 — role = chair | participant. */
 typedef struct {
     const char* uri;
@@ -630,6 +656,15 @@ CIMSUE_API cimsue_status_t CIMSUE_CALL cimsue_csc_request(cimsue_csc_t* c, const
                                                           const char* path, const char* content_type, const uint8_t* body,
                                                           int32_t body_len, const char* accept, const char* if_match,
                                                           const char* if_none_match, cimsue_http_result_t* out);
+/** MCData FD 업로드(octet-stream). group_id(NULL·빈 값 = 1:1)면 서버가 allow_fd·멤버십으로 게이트. 반환 = cimsue_csc_request 규약
+ *  (0 / HTTP 상태 — 403 게이트·404 그룹·413 상한 / -1 전송 실패). *out 은 핸들 스냅샷. */
+CIMSUE_API cimsue_status_t CIMSUE_CALL cimsue_csc_upload_fd(cimsue_csc_t* c, const char* access_token, const uint8_t* data,
+                                                            int32_t data_len, const char* name, const char* mime,
+                                                            const char* group_id, cimsue_fd_upload_t* out);
+/** MCData FD 다운로드 — url = 받은 FILEURL. 경로(/mcdata/fd/{id})만 취해 이 CSC 에 요청(Bearer 를 다른 호스트로 보내지 않음),
+ *  FD 경로가 아니면 -2. 산출 = cimsue_csc_request 와 같은 핸들 스냅샷(body = 파일 바이트). */
+CIMSUE_API cimsue_status_t CIMSUE_CALL cimsue_csc_download_fd(cimsue_csc_t* c, const char* access_token, const char* url,
+                                                              cimsue_http_result_t* out);
 /* HTTPS 서버 인증서 만료 관측(CscClient::tlsPeerExpiry) — 문자열은 그 핸들의 다음 호출까지 유효 */
 CIMSUE_API void CIMSUE_CALL cimsue_csc_tls_peer_expiry(cimsue_csc_t* c, cimsue_tls_peer_expiry_t* out);
 CIMSUE_API cimsue_status_t CIMSUE_CALL cimsue_csc_get_user_profile(cimsue_csc_t* c, const char* access_token,
@@ -679,7 +714,7 @@ typedef enum {
     CIMSUE_STRUCT_CSC_ENDPOINT, CIMSUE_STRUCT_TOKEN_SET, CIMSUE_STRUCT_SERVICE_ENDPOINT, CIMSUE_STRUCT_SERVICE_PROFILE,
     CIMSUE_STRUCT_DISPATCH_PROFILE, CIMSUE_STRUCT_PROFILE, CIMSUE_STRUCT_GROUP_SUMMARY, CIMSUE_STRUCT_XCAP_DOC,
     CIMSUE_STRUCT_DISPATCH_MEMBER, CIMSUE_STRUCT_DISPATCH_TARGET, CIMSUE_STRUCT_GROUP_MEMBER, CIMSUE_STRUCT_GROUP_DOC,
-    CIMSUE_STRUCT_HTTP_RESULT, CIMSUE_STRUCT_TLS_PEER_EXPIRY,
+    CIMSUE_STRUCT_HTTP_RESULT, CIMSUE_STRUCT_TLS_PEER_EXPIRY, CIMSUE_STRUCT_FD_FILE, CIMSUE_STRUCT_FD_UPLOAD,
     CIMSUE_STRUCT_COUNT_
 } cimsue_struct_id_t;
 /** 구조체의 sizeof(이 DLL 의 컴파일 결과). 모르는 id 는 -1. */

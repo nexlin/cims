@@ -5,7 +5,7 @@ namespace DispatchDesktop.Services;
 
 public static class ResponseText
 {
-    public enum Area { Pickup, Transfer, Join, PttListen, PttJoin, PttPrivate, PttAdhoc, Emergency, Sds, Sms, Register, Call, Group, Management, Recording }
+    public enum Area { Pickup, Transfer, Join, PttListen, PttJoin, PttPrivate, PttAdhoc, Emergency, Sds, Sms, Register, Call, Group, Management, Recording, File }
 
     public static Area AreaOf(Operation op) => op switch
     {
@@ -72,6 +72,26 @@ public static class ResponseText
         (Area.Recording, 404) => "녹취가 없습니다",
         (Area.Recording, 502) => "녹취 서버(OAM)에 닿지 않습니다",
         (Area.Recording, 500) => "녹취 변환에 실패했습니다 — [다시 변환]",
+        // MCData FD 콘텐츠 서버(POST/GET /mcdata/fd, mcdata_messaging.md §4.5) — 403 은 본문으로 세분(ForFileError)
+        (Area.File, 401) => "로그인이 만료됐습니다 — 다시 로그인하세요",
+        (Area.File, 403) => "파일 전송 권한이 없습니다",
+        (Area.File, 404) => "그룹 또는 파일이 서버에 없습니다",
+        (Area.File, 413) => "파일이 너무 큽니다 (서버 한도)",
+        (Area.File, 503) => "서버 파일 저장소가 설정되지 않았습니다 (운영자)",
+        (Area.File, -2) => "받을 수 없는 파일 주소입니다",
+        _ => null,
+    };
+
+    /// <summary>FD 콘텐츠 서버 오류 본문(`{"error":"…"}` 문장형, csc services/mcdata_fd.py) → 문구. 없으면 null.</summary>
+    public static string? ForFileError(string error) => error switch
+    {
+        _ when error.StartsWith("file distribution disabled", StringComparison.Ordinal) => "이 그룹은 파일 전송이 꺼져 있습니다 (그룹 설정 — 파일 전송 허용)",
+        _ when error.StartsWith("not a member", StringComparison.Ordinal) => "그룹 멤버가 아니라 파일을 보낼 수 없습니다",
+        _ when error.StartsWith("unknown group", StringComparison.Ordinal) => "서버에 없는 그룹입니다",
+        _ when error.StartsWith("file too large", StringComparison.Ordinal) => "파일이 너무 큽니다 (서버 한도)",
+        _ when error.StartsWith("file not found", StringComparison.Ordinal) || error.StartsWith("file content missing", StringComparison.Ordinal)
+            => "파일이 서버에 없습니다 (보관 기간이 지났을 수 있습니다)",
+        "insufficient_scope" => "토큰 권한이 부족합니다 — 다시 로그인하세요",
         _ => null,
     };
 
@@ -163,6 +183,11 @@ public static class ResponseText
             var (err, detail) = GroupError(reason);
             if (err.Length > 0 && ForManagementError(err, detail, Field(reason, "where")) is { } mg) return mg;
             if (err.Length == 0 && reason.Contains("required", StringComparison.OrdinalIgnoreCase)) return "필수 항목이 빠졌습니다: " + reason;
+        }
+        if (area == Area.File)
+        {
+            var (err, _) = GroupError(reason);
+            if (err.Length > 0 && ForFileError(err) is { } f) return f;
         }
         string? t = For(area, code);
         if (t is not null) return t;

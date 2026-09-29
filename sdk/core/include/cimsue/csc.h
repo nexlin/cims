@@ -85,6 +85,8 @@ struct GroupSummary { std::string uri, displayName, etag; int memberCount = -1; 
 struct XcapDoc { std::string body, etag; bool notModified = false; };
 /** 임의 HTTP 요청 산출(request) — status 는 HTTP 상태(0 = 전송 실패), body 는 바이트 그대로(이진 가능). */
 struct HttpResult { int status = 0; std::string contentType, etag, body; };
+/** MCData FD 업로드 결과(POST /mcdata/fd 201) — url 이 FD SIGNALLING 의 FILEURL(Engine::sendGroupFd/sendFd 의 FdFile.url). */
+struct FdUpload { std::string id, url, name; int64_t size = 0; };
 
 /** 그룹 문서 멤버(list/entry). role = chair | participant (mcpttgi:participant-type). */
 struct GroupMember { std::string uri, name; std::string role = "participant"; int priority = 5; };
@@ -134,6 +136,17 @@ public:
     Result request(const std::string& accessToken, const std::string& method, const std::string& path,
                    const std::string& contentType, const std::string& body, const std::string& accept,
                    const std::string& ifMatch, const std::string& ifNoneMatch, HttpResult& out);
+    // ── MCData FD 콘텐츠 서버(TS 24.282 §10.2 — mcdata_messaging.md §4.5, 토큰 scope 3gpp:mc:data_service) ──
+    /** 파일 업로드(octet-stream). groupId 가 비지 않으면 그룹 FD — 서버가 그룹 allow_fd·업로더 멤버십으로 게이트(403, 없는 그룹 404).
+     *  비면 1:1. 413 = 서버 상한(McDataFd.MaxBytes) 초과. 실패 code = HTTP 상태(전송 실패 -1). */
+    Result uploadFd(const std::string& accessToken, const std::string& data, const std::string& name,
+                    const std::string& mime, const std::string& groupId, FdUpload& out);
+    /** 파일 다운로드 — url 은 받은 FD 의 FILEURL. 경로(/mcdata/fd/{id})만 취해 **이 CSC** 에 요청한다: Bearer 를 다른 호스트로
+     *  보내지 않고, 발신자가 다른 주소(FQDN·다른 노드)로 올렸어도 같은 사이트 저장소에서 받는다. 경로가 FD 가 아니면 fail(-2).
+     *  out.body = 파일 바이트, out.contentType = 저장 MIME. */
+    Result downloadFd(const std::string& accessToken, const std::string& url, HttpResult& out);
+    /** FILEURL → 콘텐츠 서버 경로(/mcdata/fd/{id}). FD 경로가 아니면 빈 문자열(시험용 공개). */
+    static std::string fdPathOf(const std::string& url);
     /** HTTPS 서버 인증서 만료 관측 — 마지막 성공 TLS 요청에서 본 CSC 인증서(§8.6.2). 아직 요청이 없으면 valid=false. */
     TlsPeerExpiry tlsPeerExpiry() const;
     Result getUserProfile(const std::string& accessToken, const std::string& userUri, const std::string& etag, XcapDoc& out) {

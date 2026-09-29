@@ -71,6 +71,8 @@ public sealed record HttpResponse(int Status, string ContentType, string ETag, b
     /// <summary>본문을 UTF-8 문자열로(JSON·텍스트 응답).</summary>
     public string Text => System.Text.Encoding.UTF8.GetString(Body);
 }
+/// <summary>MCData FD 업로드 결과(csc.h FdUpload) — Url 을 FdFile.Url 로 넘겨 Account.SendGroupFd/SendFd 로 알린다.</summary>
+public sealed record FdUpload(string Id, string Url, string Name, long Size);
 
 /// <summary>그룹 문서 멤버 — Role = chair | participant.</summary>
 public sealed class GroupMember
@@ -275,6 +277,40 @@ public sealed unsafe class CscClient : IDisposable
             return st == 0 ? Result<HttpResponse>.Success(v) : new Result<HttpResponse>(st, Engine.LastError(), v);
         }
     }
+
+    /// <summary>MCData FD 업로드(octet-stream, TS 24.282 §10.2). groupId 가 있으면 그룹 FD — 서버가 allow_fd·업로더 멤버십으로 게이트(403, 없는 그룹 404),
+    /// null 이면 1:1. 413 = 서버 상한 초과. 실패 Code = HTTP 상태(전송 실패 -1).</summary>
+    public Result<FdUpload> UploadFd(string accessToken, byte[] data, string name, string? mime, string? groupId)
+    {
+        ArgumentNullException.ThrowIfNull(data);
+        lock (_gate)
+        {
+            cimsue_fd_upload_t u;
+            int st;
+            fixed (byte* d = data)
+                st = cimsue_csc_upload_fd(Handle, accessToken, d, data.Length, name, mime, groupId, &u);
+            return st == 0 ? Result<FdUpload>.Success(new FdUpload(Utf8.Str(u.id), Utf8.Str(u.url), Utf8.Str(u.name), u.size))
+                           : Result<FdUpload>.Fail(st, Engine.LastError());
+        }
+    }
+    public Task<Result<FdUpload>> UploadFdAsync(string accessToken, byte[] data, string name, string? mime, string? groupId, CancellationToken ct = default) =>
+        Task.Run(() => UploadFd(accessToken, data, name, mime, groupId), ct);
+
+    /// <summary>MCData FD 다운로드 — url = 받은 FILEURL. 경로(/mcdata/fd/{id})만 취해 이 CSC 에 요청한다(Bearer 를 다른 호스트로 보내지 않음).
+    /// FD 경로가 아니면 Fail(-2). Value.Body = 파일 바이트. 실패 규약은 Request 와 같다.</summary>
+    public Result<HttpResponse> DownloadFd(string accessToken, string url)
+    {
+        lock (_gate)
+        {
+            cimsue_http_result_t r;
+            int st = cimsue_csc_download_fd(Handle, accessToken, url, &r);
+            var v = new HttpResponse(r.status, Utf8.Str(r.content_type), Utf8.Str(r.etag),
+                                     r.body != null && r.body_len > 0 ? new ReadOnlySpan<byte>(r.body, r.body_len).ToArray() : Array.Empty<byte>());
+            return st == 0 ? Result<HttpResponse>.Success(v) : new Result<HttpResponse>(st, Engine.LastError(), v);
+        }
+    }
+    public Task<Result<HttpResponse>> DownloadFdAsync(string accessToken, string url, CancellationToken ct = default) =>
+        Task.Run(() => DownloadFd(accessToken, url), ct);
 
     /// <summary>JSON 본문 편의 — body 문자열은 UTF-8 로, Accept/Content-Type = application/json.</summary>
     public Result<HttpResponse> RequestJson(string accessToken, string method, string path, string? json = null, string? ifMatch = null, string? ifNoneMatch = null) =>

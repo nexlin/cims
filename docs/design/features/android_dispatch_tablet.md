@@ -1263,10 +1263,11 @@ SCO 가 죽는다. A2DP 만이 통신 경로 밖이라 혼자 갈라질 수 있�
   대조 검사가 막는다(§9). 남은 선결 조건은 **`ue_sdk.md` §5.3 이 `PttController` 의 이전 대상지로 지목한
   코어 `domain/` 이 아직 없다**는 것이다 — `sdk/core/src` 에 해당 모듈이 없어, 전환 착수 전에 `domain` 을
   만들지 아니면 그 로직을 앱 계층에 둘지 정해야 한다.
-- **다중 채널 동시 발언** — 코어에 발언 대상 집합 API(`setTalkTargets(callIds[])`, 승인된 세션 전부로 같은
-  캡처 송출, 대상별 floor 이벤트)가 들어오기 전까지 발언 바는 대상 1개만 허용한다. 3GPP 에 UE 다중 그룹
-  동시 발언 절차가 없어 단말 팬아웃으로 푼다(서버 변경 없음). 발언 바·칩·게이지는 집합 기준으로 만들어
-  상수 하나로 열리게 둔다.
+- **다중 채널 동시 발언** — 코어는 세션마다 floor participant·마이크 결선(`micOpen` → `wireMedia`)을 따로 들어
+  승인된 세션 전부로 같은 캡처를 보낸다 — 별도 코어 API 없이 앱이 대상마다 `floorRequest` 하면 된다(단말 팬아웃,
+  서버 변경 없음 — 데스크톱 구현 [dispatch_desktop_ui.md](dispatch_desktop_ui.md) §4.1). 태블릿은 «요청한 것만 해제»
+  불변(`speakingCallIds`·`applyTargets`)을 이미 갖췄고 `MULTI_TALK_SUPPORTED`(false)만 남았다. 열 때 잠금 발언 해제를
+  «요청한 대상이 전부 끝났을 때»로 맞춘다(지금 `onFloorLost` 는 한 채널의 회수로 잠금을 푼다).
 - **② 타인 세션 섹션** — 서버 계약은 확정·구현됐다([dispatch_center.md](dispatch_center.md) §5.6a).
   코어 `dialogWatch` 가 PTT 계정으로도 구독하고 `<mcptt>` 확장을 이벤트 필드로 내야 앱이 카드를 묶는다.
 - **U10 관측** — `MediaSource.active/level` 에 실시간 값이 없다(SDP 라벨만 있다). 감청 상세의 레벨 미터는
@@ -1276,7 +1277,9 @@ SCO 가 죽는다. A2DP 만이 통신 경로 밖이라 혼자 갈라질 수 있�
   변경**이라 별도 단계로 다룬다. ② 유선·USB-C 헤드셋 측정 — SCO/A2DP 배타성이 없어 요구 방향
   (통화=헤드셋)이 될 수 있으나 **미측정**이다. ③ 헤드셋 종류별 정책 표 확정. 측정 도구는
   `android/audio-probe`(일회성 탐침, 앱 빌드와 무관).
-- **MCData MSRP·FD** — 코어에 없다. 관제 앱은 쓰지 않으므로 이 앱의 차단 요인은 아니다.
+- **MCData FD·MSRP** — FD 는 코어에 있다(`CscClient::uploadFd/downloadFd`·`Engine::sendGroupFd/sendFd`, 수신
+  `onSds(fd)` — 데스크톱 관제 앱이 쓴다). 태블릿 ④ 는 아직 글만 다루고 FD 알림 필드를 버린다. MSRP(media plane
+  SDS)는 코어에 없다.
 - **자동 수락 분리** — `AccountConfig.autoAnswerMcptt` 가 그룹콜·사설콜 공통이다. 관제석은 그룹콜 자동 +
   사설콜 수동이 맞아 코어 플래그 분리가 필요하다.
 - **대표번호로 발신** — 코어 `dial` 에 `P-Preferred-Identity` 헤더 옵션이 필요하다(서버 계약은 확정).

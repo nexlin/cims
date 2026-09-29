@@ -127,6 +127,29 @@ std::string sdsPayloadTlv(const std::string& text) {
     return s;
 }
 
+std::string fdSignallingTlv(const std::string& convId, const std::string& msgId, const FdFile& file, int64_t timeSec) {
+    // FD SIGNALLING PAYLOAD(§15.1.3) = 유형·Date-time·ConvID·MsgID + Payload IE 0x78(TLV-E, content-type FILEURL 0x04 + URL)
+    //   + Metadata IE 0x79(TLV-E, RFC 5547 file-selector name/size/type). 원천 cspsim McDataSds.cpp·Android McDataCodec.kt 와 같은 바이트.
+    std::string name = file.name;
+    for (size_t p; (p = name.find('"')) != std::string::npos;) name.erase(p, 1);
+    std::string meta = "name:\"" + name + "\" size:" + std::to_string(file.size) + " type:" +
+                       (file.type.empty() ? std::string("application/octet-stream") : file.type);
+    std::string s;
+    s += (char)kMsgFdSignalling;
+    putDateTime(s, timeSec);
+    s += hexDecode(convId);
+    s += hexDecode(msgId);
+    size_t l = 1 + file.url.size();
+    s += (char)0x78;
+    s += (char)((l >> 8) & 0xFF); s += (char)(l & 0xFF);
+    s += (char)0x04;                                // FILEURL
+    s += file.url;
+    s += (char)0x79;
+    s += (char)((meta.size() >> 8) & 0xFF); s += (char)(meta.size() & 0xFF);
+    s += meta;
+    return s;
+}
+
 static std::string infoXml(const std::string& requestType, const std::string& uri) {
     return "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
            "<mcdatainfo xmlns=\"urn:3gpp:ns:mcdataInfo:1.0\">\n"
@@ -168,6 +191,26 @@ Body buildGroupSds(const std::string& groupUri, const std::string& text, const s
 Body buildOneToOneSds(const std::string& peerUri, const std::string& text, const std::string& convId,
                       const std::string& msgId, bool requestDelivery, int64_t timeSec) {
     return buildSds("one-to-one-sds", peerUri, text, convId, msgId, requestDelivery, timeSec);
+}
+
+static Body buildFd(const char* requestType, const std::string& uri, const FdFile& file,
+                    const std::string& convId, const std::string& msgId, int64_t timeSec) {
+    std::string boundary = "mcdata-fd-" + msgId.substr(0, 14);
+    std::string body;
+    appendPart(body, boundary, kCtInfo, nullptr, infoXml(requestType, uri));
+    appendPart(body, boundary, kCtSignalling, "base64", base64Encode(fdSignallingTlv(convId, msgId, file, timeSec)));
+    body += "--" + boundary + "--\r\n";
+    return Body{"multipart/mixed;boundary=" + boundary, body};
+}
+
+Body buildGroupFd(const std::string& groupUri, const FdFile& file, const std::string& convId,
+                  const std::string& msgId, int64_t timeSec) {
+    return buildFd("group-fd", groupUri, file, convId, msgId, timeSec);
+}
+
+Body buildOneToOneFd(const std::string& peerUri, const FdFile& file, const std::string& convId,
+                     const std::string& msgId, int64_t timeSec) {
+    return buildFd("one-to-one-fd", peerUri, file, convId, msgId, timeSec);
 }
 
 Body buildNotification(const std::string& convId, const std::string& msgId, int notifType, int64_t timeSec) {
@@ -242,6 +285,17 @@ static std::string mcdataUri(const std::string& xml, const std::string& elem) {
     return b == std::string::npos ? std::string() : v.substr(b, t - b + 1);
 }
 
+static std::string elemText(const std::string& xml, const std::string& elem) {
+    size_t p = xml.find("<" + elem + ">");
+    if (p == std::string::npos) return std::string();
+    p += elem.size() + 2;
+    size_t e = xml.find("</" + elem + ">", p);
+    if (e == std::string::npos) return std::string();
+    std::string v = xml.substr(p, e - p);
+    size_t b = v.find_first_not_of(" \t\r\n"), t = v.find_last_not_of(" \t\r\n");
+    return b == std::string::npos ? std::string() : v.substr(b, t - b + 1);
+}
+
 bool parse(const std::string& contentType, const std::string& body, SdsMessage& out) {
     std::string boundary = boundaryOf(contentType);
     if (boundary.empty()) {
@@ -254,7 +308,9 @@ bool parse(const std::string& contentType, const std::string& body, SdsMessage& 
     for (auto& p : splitParts(body, boundary)) {
         std::string raw = p.b64 ? base64Decode(p.content) : p.content;
         if (p.ct == kCtInfo) {
-            out.groupUri = mcdataUri(raw, "mcdata-request-uri");
+            // 1:1(one-to-one-sds/-fd)의 request-uri 는 받는 사람(나)이다 — 그룹으로 오인하면 내 번호 스레드가 생긴다.
+            //   request-type 이 없으면(옛 발신자) request-uri 를 그룹으로 본다.
+            if (elemText(raw, "request-type").rfind("one-to-one", 0) != 0) out.groupUri = mcdataUri(raw, "mcdata-request-uri");
         } else if (p.ct == kCtSignalling) {
             if (raw.size() < 38) continue;
             haveSig = true;
@@ -282,18 +338,24 @@ bool parse(const std::string& contentType, const std::string& body, SdsMessage& 
                 out.timeSec = readDateTime(raw, 1);
                 out.convId = hexEncode(raw.substr(6, 16));
                 out.msgId = hexEncode(raw.substr(22, 16));
+                // 선택 IE(§15.1.3): FD disposition 요청 0x9x·mandatory download 0xAx(TV 1) · InReplyTo 0x21(TV 17) ·
+                //   Application ID 0x22(TV 2) · Payload 0x78 / Metadata 0x79(TLV-E). 모르는 IE 에서 멈춘다(길이를 알 수 없다).
                 size_t i = 38;
-                while (i + 3 <= raw.size()) {
+                while (i < raw.size()) {
                     int iei = (unsigned char)raw[i];
+                    if ((iei & 0xF0) == 0x90 || (iei & 0xF0) == 0xA0) { i += 1; continue; }
+                    if (iei == 0x21) { i += 17; continue; }
+                    if (iei == 0x22) { i += 2; continue; }
+                    if ((iei != 0x78 && iei != 0x79) || i + 3 > raw.size()) break;
                     size_t l = ((unsigned char)raw[i + 1] << 8) | (unsigned char)raw[i + 2];
                     if (i + 3 + l > raw.size()) break;
                     std::string v = raw.substr(i + 3, l);
-                    if (iei == 0x78 && !v.empty()) out.fileUrl = v.substr(1);
+                    if (iei == 0x78 && !v.empty() && (unsigned char)v[0] == 0x04) out.fileUrl = v.substr(1);   // FILEURL
                     else if (iei == 0x79) {
-                        // name:"x" size:N type:mime
+                        // name:"x" size:N type:mime (RFC 5547 file-selector)
                         size_t n = v.find("name:\""); if (n != std::string::npos) { size_t q = v.find('"', n + 6); if (q != std::string::npos) out.fileName = v.substr(n + 6, q - n - 6); }
-                        size_t sz = v.find("size:"); if (sz != std::string::npos) out.fileSize = std::atol(v.c_str() + sz + 5);
-                        size_t ty = v.find("type:"); if (ty != std::string::npos) out.fileType = v.substr(ty + 5);
+                        size_t sz = v.find("size:"); if (sz != std::string::npos) out.fileSize = std::atoll(v.c_str() + sz + 5);
+                        size_t ty = v.find("type:"); if (ty != std::string::npos) { size_t te = v.find(' ', ty); out.fileType = v.substr(ty + 5, te == std::string::npos ? std::string::npos : te - ty - 5); }
                     }
                     i += 3 + l;
                 }

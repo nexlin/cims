@@ -27,16 +27,29 @@ public sealed partial class Message : ObservableObject
     public DateTime Time { get; init; } = DateTime.Now;
     [ObservableProperty] private SendState _state;
     [ObservableProperty] private bool _read;
+    // ── MCData FD 첨부(mcdata_messaging.md §4.5·§5) ──
     public string FileName { get; init; } = "";
-    public string FileUrl { get; init; } = "";
+    /// <summary>FILEURL — 수신은 FD 알림 값, 발신은 업로드가 끝난 뒤 채워진다(빈 값 = 아직 안 올라감 → 재전송이 업로드부터).</summary>
+    public string FileUrl { get; set; } = "";
     public long FileSize { get; init; }
+    public string FileType { get; init; } = "";
+    /// <summary>이 PC 의 파일 — 발신 원본 또는 받은 파일. 비면 아직 안 받음(수신).</summary>
+    [ObservableProperty] private string _localPath = "";
+    /// <summary>진행 문구("올리는 중…"·"받는 중…") — 비면 진행 없음.</summary>
+    [ObservableProperty] private string _transferNote = "";
     public bool IsOut => Direction == MessageDirection.Out;
     public bool IsAttachment => FileName.Length > 0 || FileUrl.Length > 0;
+    public bool HasLocalFile => LocalPath.Length > 0 && System.IO.File.Exists(LocalPath);
+    public bool IsTransferring => TransferNote.Length > 0;
+    public bool CanDownload => IsAttachment && !IsOut && !HasLocalFile && !IsTransferring && FileUrl.Length > 0;
+    public string FileSizeText => FileSize <= 0 ? "" : FileSize < 1024 ? $"{FileSize} B" : FileSize < 1024 * 1024 ? $"{FileSize / 1024.0:0.#} KB" : $"{FileSize / (1024.0 * 1024):0.#} MB";
     public string StateMark => State switch
     {
         SendState.Pending => "🕓", SendState.Sent => "✓", SendState.Delivered => "✓✓", SendState.Failed => "⚠ 재전송", _ => "",
     };
     partial void OnStateChanged(SendState value) => OnPropertyChanged(nameof(StateMark));
+    partial void OnLocalPathChanged(string value) { OnPropertyChanged(nameof(HasLocalFile)); OnPropertyChanged(nameof(CanDownload)); }
+    partial void OnTransferNoteChanged(string value) { OnPropertyChanged(nameof(IsTransferring)); OnPropertyChanged(nameof(CanDownload)); }
 }
 
 public sealed partial class MessageThread : ObservableObject

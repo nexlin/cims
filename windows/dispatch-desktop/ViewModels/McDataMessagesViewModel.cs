@@ -1,4 +1,5 @@
-// ① 오른쪽 아래 — MCData 메시지(SDS). 그룹 = groupUri 스레드, 1:1 = 발신자 스레드. disposition 요청은 delivered 자동 회신, 통지 수신 → ✓✓.
+// ④ PTT 메시지 — MCData SDS·FD. 그룹 = groupUri 스레드, 1:1 = 상대 번호 스레드(양방향). disposition 요청은 delivered 자동 회신, 통지 수신 → ✓✓.
+// 파일(FD) = 📎·끌어 놓기 → CSC 콘텐츠 서버 업로드 → FD 알림 MESSAGE, 받은 파일은 [받기]로 다운로드\CIMS 에 저장(mcdata_messaging.md §4.5).
 // 발신 결과 상관: SendGroupSds 가 (msgId, token) 을 주고 최종 응답은 RequestCompleted(MESSAGE, token) 으로 오므로 token 으로 짝을 맞춘다
 // (SMS 와 같은 규칙 — disposition 통지 발신의 완료 이벤트는 어느 메시지에도 맞지 않아 무시된다).
 using CimsUe;
@@ -16,7 +17,9 @@ public sealed class McDataMessagesViewModel : MessagesViewModelBase
         s.Groups.CollectionChanged += (_, _) => { foreach (var g in s.Groups) if (ThreadMap.TryGetValue(g.Uri, out var t)) t.Title = g.Name; };
     }
 
-    protected override bool SendAllowed(MessageThread t) => t.IsGroup;     // 1:1 SDS 발신 API 는 코어 후속(§13) — 수신·표시만
+    /// <summary>그룹 스레드 = 그룹 SDS·FD, 1:1 스레드(키 = 상대 번호) = one-to-one SDS·FD.</summary>
+    protected override bool SendAllowed(MessageThread t) => true;
+    public override bool SupportsAttachments => true;
     protected override string TitleOfKey(string key) => S.NameOfPtt(key);
 
     private void OnSds(SdsMessage m)
@@ -35,7 +38,7 @@ public sealed class McDataMessagesViewModel : MessagesViewModelBase
             Kind = MessageKind.McData, ThreadKey = key, Direction = MessageDirection.In, Peer = m.FromUri, PeerName = S.NameOfPtt(m.FromUri),
             GroupUri = m.GroupUri, ConvId = m.ConvId, MsgId = m.MsgId, Text = m.Text,
             Time = m.TimeSec > 0 ? DateTimeOffset.FromUnixTimeSeconds(m.TimeSec).LocalDateTime : DateTime.Now,
-            FileName = m.FileName, FileUrl = m.FileUrl, FileSize = m.FileSize,
+            FileName = m.FileName, FileUrl = m.FileUrl, FileSize = m.FileSize, FileType = m.FileType,
         };
         Put(msgIn, persist: true);
         string gname = S.Groups.FirstOrDefault(g => g.Uri == m.GroupUri || g.Id == UserPartConverter.UserPart(m.GroupUri))?.Name ?? UserPartConverter.UserPart(m.GroupUri);
@@ -49,24 +52,87 @@ public sealed class McDataMessagesViewModel : MessagesViewModelBase
     {
         if (!CanSend || Selected is null) return;
         string text = Input.Trim();
-        string groupId = UserPartConverter.UserPart(Selected.Key);
-        var r = S.SendGroupSds(groupId, text);
-        var msg = new Message
-        {
-            Kind = MessageKind.McData, ThreadKey = Selected.Key, Direction = MessageDirection.Out, Peer = "", GroupUri = Selected.Key,
-            MsgId = r.Ok ? r.Value.MsgId : "", Token = r.Ok ? r.Value.Token : 0, Text = text, State = r.Ok ? SendState.Pending : SendState.Failed, Read = true,
-        };
+        var t = Selected;
+        var r = t.IsGroup ? S.SendGroupSds(UserPartConverter.UserPart(t.Key), text) : S.SendSds(t.Key, text);
+        var msg = NewOut(t, text: text);
+        msg.MsgId = r.Ok ? r.Value.MsgId : ""; msg.Token = r.Ok ? r.Value.Token : 0; msg.State = r.Ok ? SendState.Pending : SendState.Failed;
         Put(msg, persist: true);
         Input = "";
     }
 
+    /// <summary>스레드의 발신 메시지 — 그룹이면 GroupUri, 1:1 이면 Peer(상대 번호).</summary>
+    private static Message NewOut(MessageThread t, string text = "", string fileName = "", long fileSize = 0, string fileType = "", string localPath = "") => new()
+    {
+        Kind = MessageKind.McData, ThreadKey = t.Key, Direction = MessageDirection.Out,
+        Peer = t.IsGroup ? "" : t.Key, GroupUri = t.IsGroup ? t.Key : "", Read = true,
+        Text = text, FileName = fileName, FileSize = fileSize, FileType = fileType, LocalPath = localPath,
+    };
+
     protected override void ResendCore(Message m)
     {
         if (m.State != SendState.Failed || !m.IsOut) return;
-        var r = S.SendGroupSds(UserPartConverter.UserPart(m.GroupUri), m.Text);
+        if (m.IsAttachment) { _ = SendFileCore(m); return; }
+        var r = m.GroupUri.Length > 0 ? S.SendGroupSds(UserPartConverter.UserPart(m.GroupUri), m.Text) : S.SendSds(m.ThreadKey, m.Text);
         if (r.Ok) { m.MsgId = r.Value.MsgId; m.Token = r.Value.Token; }          // 새 msgId 로 disposition 통지가 맞물린다
         m.State = r.Ok ? SendState.Pending : SendState.Failed;
         S.Messages.UpdateResend(m.Id, m.MsgId, m.Token, m.State);
+    }
+
+    // ── 파일(MCData FD, mcdata_messaging.md §4.5) — 업로드 → FD 알림. 그룹은 서버가 allow_fd·멤버십으로 게이트 ──
+    protected override async Task AttachCore()
+    {
+        if (!CanAttach || Selected is null) return;
+        var dlg = new Microsoft.Win32.OpenFileDialog { Title = $"{Selected.Title} — 보낼 파일", Filter = "모든 파일|*.*", Multiselect = true };
+        if (dlg.ShowDialog() != true) return;
+        var t = Selected;
+        foreach (var path in dlg.FileNames) await SendFileAsync(t, path);
+    }
+
+    /// <summary>파일 하나를 스레드로 보낸다(📎·끌어 놓기 공용). 말풍선을 먼저 세우고(올리는 중…) 업로드가 끝나면 FD 알림을 보낸다.</summary>
+    public async Task SendFileAsync(MessageThread t, string path)
+    {
+        System.IO.FileInfo fi;
+        try { fi = new System.IO.FileInfo(path); } catch (Exception ex) { S.Notify.Error("파일을 읽을 수 없습니다", ex.Message); return; }
+        if (!fi.Exists) return;
+        if (fi.Length == 0) { S.Notify.Info("빈 파일은 보낼 수 없습니다", fi.Name); return; }
+        if (fi.Length > DispatchSession.MaxFileBytes)
+        { S.Notify.Error($"파일이 너무 큽니다 — 최대 {DispatchSession.MaxFileBytes / (1024 * 1024)} MB", $"{fi.Name} · {fi.Length / (1024.0 * 1024):0.#} MB"); return; }
+        var msg = NewOut(t, fileName: fi.Name, fileSize: fi.Length, fileType: AppPaths.MimeOf(path), localPath: fi.FullName);
+        msg.State = SendState.Pending;
+        Put(msg, persist: true);
+        await SendFileCore(msg);
+    }
+
+    /// <summary>업로드(FILEURL 이 아직 없으면) → FD 알림 발신. 재전송도 여기 — 이미 올린 파일은 알림만 다시 보낸다.</summary>
+    private async Task SendFileCore(Message m)
+    {
+        bool group = m.GroupUri.Length > 0;
+        string target = group ? UserPartConverter.UserPart(m.GroupUri) : m.ThreadKey;
+        m.State = SendState.Pending;
+        if (m.FileUrl.Length == 0)
+        {
+            if (!m.HasLocalFile) { Fail(m, "원본 파일이 없어 다시 보낼 수 없습니다", m.LocalPath); return; }
+            m.TransferNote = "올리는 중…";
+            byte[] data;
+            try { data = await System.IO.File.ReadAllBytesAsync(m.LocalPath); }
+            catch (Exception ex) when (ex is System.IO.IOException or UnauthorizedAccessException) { m.TransferNote = ""; Fail(m, "파일을 읽을 수 없습니다", ex.Message); return; }
+            var up = await S.UploadFileAsync(data, m.FileName, m.FileType, group ? target : null);
+            m.TransferNote = "";
+            if (!up.Ok) { Fail(m, null, null); return; }
+            m.FileUrl = up.Value.Url;
+        }
+        var r = group ? S.SendGroupFd(target, new FdFile(m.FileUrl, m.FileName, m.FileType, m.FileSize))
+                      : S.SendFd(target, new FdFile(m.FileUrl, m.FileName, m.FileType, m.FileSize));
+        if (r.Ok) { m.MsgId = r.Value.MsgId; m.Token = r.Value.Token; }
+        m.State = r.Ok ? SendState.Pending : SendState.Failed;
+        S.Messages.UpdateFile(m.Id, m.FileUrl, m.MsgId, m.Token, m.State);
+    }
+
+    private void Fail(Message m, string? title, string? detail)
+    {
+        m.State = SendState.Failed;
+        S.Messages.UpdateState(m.Id, SendState.Failed);
+        if (title is not null) S.Notify.Error(title, detail ?? "");
     }
 
     protected override void OnRequestCompleted(RequestResult r)
@@ -88,5 +154,18 @@ public sealed class McDataMessagesViewModel : MessagesViewModelBase
     public string FollowText => FocusGroup is null ? "따라가기" : $"{FocusGroup.Name} 따라가기";
     public void ClearFocus() => FocusGroup = null;
     public void OpenGroup(GroupInfo g) => SelectKey(g.Uri, g.Name, true);
+
+    /// <summary>--ui-preview-canvas 표본 — 저장하지 않는 말풍선(글 · 받은 파일 · 올리는 중인 파일).</summary>
+    public void SeedPreview(GroupInfo g)
+    {
+        var now = DateTime.Now;
+        Put(new Message { Kind = MessageKind.McData, ThreadKey = g.Uri, Direction = MessageDirection.In, Peer = "tel:1004", PeerName = "박경장", GroupUri = g.Uri,
+                          Text = "교대 인원 2명 추가 배치 바랍니다", Time = now.AddMinutes(-3), Read = true }, persist: false);
+        Put(new Message { Kind = MessageKind.McData, ThreadKey = g.Uri, Direction = MessageDirection.In, Peer = "tel:1003", PeerName = "이순경", GroupUri = g.Uri,
+                          FileName = "현장사진_01.jpg", FileUrl = "https://csc/mcdata/fd/0", FileSize = 1258291, FileType = "image/jpeg", Time = now.AddMinutes(-2), Read = true }, persist: false);
+        Put(new Message { Kind = MessageKind.McData, ThreadKey = g.Uri, Direction = MessageDirection.Out, GroupUri = g.Uri, FileName = "순찰 구역 변경.pdf", FileSize = 348160,
+                          FileType = "application/pdf", Time = now.AddMinutes(-1), State = SendState.Pending, TransferNote = "올리는 중…", Read = true }, persist: false);
+        SelectKey(g.Uri, g.Name, true);
+    }
     public void OpenUser(string number) => SelectKey(UserPartConverter.UserPart(number), S.NameOfPtt(number), false);
 }

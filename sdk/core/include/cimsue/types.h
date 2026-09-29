@@ -262,7 +262,7 @@ struct RosterEntry {
 struct SdsMessage {
     int accountId = -1;
     std::string fromUri;
-    std::string groupUri;             // mcdata-info request-uri (그룹 SDS)
+    std::string groupUri;             // 그룹 SDS·FD 의 mcdata-info request-uri. 1:1(request-type one-to-one-*)은 빈 값 — request-uri 가 받는 사람(나)이다
     std::string convId, msgId;        // UUID hex32
     int64_t timeSec = 0;
     int dispositionReq = 0;           // 0 없음 / 1 delivery / 2 read / 3 both
@@ -272,6 +272,13 @@ struct SdsMessage {
     bool fd = false;                  // FD SIGNALLING (파일 URL)
     std::string fileUrl, fileName, fileType;
     int64_t fileSize = 0;
+};
+
+/** MCData FD 로 알릴 파일 — FD SIGNALLING PAYLOAD 의 Payload(FILEURL)·Metadata(name/size/type) (TS 24.282 §15.1.3·
+ *  mcdata_messaging.md §4.5). url 은 콘텐츠 서버 업로드 결과(CscClient::uploadFd 의 FdUpload.url). */
+struct FdFile {
+    std::string url, name, type;      // type = MIME(비면 application/octet-stream)
+    int64_t size = 0;
 };
 
 /** SDS 발신의 즉시 결과. 최종 응답은 onRequestResult(MESSAGE, token) 으로 오므로 앱이 token 으로 상관한다

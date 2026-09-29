@@ -346,6 +346,51 @@ Result CscClient::request(const std::string& accessToken, const std::string& met
     return httpFail(r, "request");
 }
 
+Result CscClient::uploadFd(const std::string& accessToken, const std::string& data, const std::string& name,
+                           const std::string& mime, const std::string& groupId, FdUpload& out) {
+    if (data.empty()) return Result::fail(-2, "uploadFd: empty file");
+    std::string path = "/mcdata/fd?name=" + enc(name.empty() ? "file.bin" : name) +
+                       "&type=" + enc(mime.empty() ? "application/octet-stream" : mime);
+    if (!groupId.empty()) path += "&group=" + enc(groupId);
+    http::Response r = impl_->request("POST", impl_->ep.baseUrl() + path,
+                                      {{"Authorization", "Bearer " + accessToken}, {"Content-Type", "application/octet-stream"},
+                                       {"Accept", "application/json"}}, data);
+    if (r.status / 100 != 2) return httpFail(r, "uploadFd");
+    Json j(r.body);
+    if (!j.root) return Result::fail(-2, "uploadFd: bad json");
+    FdUpload u;
+    u.id = Json::str(j.root, "id"); u.url = Json::str(j.root, "url"); u.name = Json::str(j.root, "name", name);
+    u.size = Json::num(j.root, "size", (int)data.size());
+    if (u.url.empty()) return Result::fail(-2, "uploadFd: no url");
+    // 서버가 Host 헤더 없이 상대 경로를 주면 이 CSC 의 절대 URL 로 — 받는 쪽이 FILEURL 을 그대로 쓴다.
+    if (u.url[0] == '/') u.url = impl_->ep.baseUrl() + u.url;
+    out = u;
+    return Result::success();
+}
+
+std::string CscClient::fdPathOf(const std::string& url) {
+    std::string path = url;
+    size_t s = url.find("://");
+    if (s != std::string::npos) {
+        size_t p = url.find('/', s + 3);
+        path = p == std::string::npos ? std::string() : url.substr(p);
+    }
+    const std::string prefix = "/mcdata/fd/";
+    if (path.compare(0, prefix.size(), prefix) != 0) return std::string();
+    std::string id = path.substr(prefix.size());
+    size_t q = id.find_first_of("?#/");
+    if (q != std::string::npos) id = id.substr(0, q);
+    if (id.empty()) return std::string();
+    for (char c : id) if (!std::isxdigit((unsigned char)c)) return std::string();
+    return prefix + id;
+}
+
+Result CscClient::downloadFd(const std::string& accessToken, const std::string& url, HttpResult& out) {
+    std::string path = fdPathOf(url);
+    if (path.empty()) return Result::fail(-2, "downloadFd: not a FD url");
+    return request(accessToken, "GET", path, "", "", "*/*", "", "", out);
+}
+
 Result CscClient::xcapGet(const std::string& accessToken, const std::string& path, const std::string& accept,
                           const std::string& ifNoneMatch, XcapDoc& out) {
     std::map<std::string, std::string> h{{"Authorization", "Bearer " + accessToken}, {"Accept", accept}};

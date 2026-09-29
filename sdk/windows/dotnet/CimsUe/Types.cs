@@ -206,8 +206,11 @@ public sealed record RosterEntry(string Uri, string Status);
 /// <summary>그룹 로스터 NOTIFY 한 벌. Full = 전체 스냅샷.</summary>
 public sealed record RosterUpdate(int AccountId, string GroupId, IReadOnlyList<RosterEntry> Users, bool Full);
 
-/// <summary>MCData SDS (TS 24.282) — 수신 메시지·disposition 통지·FD. DispositionReq: 0 없음/1 delivery/2 read/3 both.
-/// NotifType: 1 undelivered/2 delivered/3 read/4 delivered+read.</summary>
+/// <summary>MCData FD 로 알릴 파일(types.h FdFile) — Url = CscClient.UploadFd 결과, Type = MIME(빈 값 = application/octet-stream).</summary>
+public sealed record FdFile(string Url, string Name, string Type, long Size);
+
+/// <summary>MCData SDS (TS 24.282) — 수신 메시지·disposition 통지·FD. GroupUri = 그룹 SDS·FD 의 request-uri(1:1 은 빈 값 — FromUri 가 상대).
+/// DispositionReq: 0 없음/1 delivery/2 read/3 both. NotifType: 1 undelivered/2 delivered/3 read/4 delivered+read.</summary>
 public sealed record SdsMessage(int AccountId, string FromUri, string GroupUri, string ConvId, string MsgId, long TimeSec,
                                 int DispositionReq, string Text, bool Notification, int NotifType,
                                 bool Fd, string FileUrl, string FileName, string FileType, long FileSize);

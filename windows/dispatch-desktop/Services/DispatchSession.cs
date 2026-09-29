@@ -197,6 +197,7 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
     {
         _history?.Dispose(); _history = null;                    // 이전 CSC 클라이언트 위에서 돌던 폴링 정지
         _csc?.Dispose();
+        _fdCsc?.Dispose(); _fdCsc = null;
         var s = Settings.Current;
         _csc = new CscClient(new CscEndpoint
         {
@@ -1303,8 +1304,11 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
     private readonly Dictionary<int, List<string>> _adhocMembers = new();
     public IReadOnlyList<string> AdhocMembersOf(int callId) => _adhocMembers.TryGetValue(callId, out var m) ? m : Array.Empty<string>();
 
-    public Result FloorRequest(SessionItem s) => Show(Engine.GetCall(s.CallId).FloorRequest(), ResponseText.Area.PttJoin);
-    public Result FloorRelease(SessionItem s) => Engine.GetCall(s.CallId).FloorRelease();
+    public Result FloorRequest(SessionItem s) { var r = Show(Engine.GetCall(s.CallId).FloorRequest(), ResponseText.Area.PttJoin); SyncFloor(s); return r; }
+    public Result FloorRelease(SessionItem s) { var r = Engine.GetCall(s.CallId).FloorRelease(); SyncFloor(s); return r; }
+    /// <summary>요청(→Requesting)·해제(→Idle/Listening)는 코어가 이벤트 없이 상태만 바꾼다 — 세션 투영을 즉시 맞춘다
+    /// (그러지 않으면 다음 floor 이벤트 전까지 IsRequesting 이 옛 값이라 잠금 발언 판정이 어긋난다).</summary>
+    private void SyncFloor(SessionItem s) { if (s.IsLive) s.Floor = Engine.GetCall(s.CallId).FloorInfo; }
     public Result FloorQueueCancel(SessionItem s) => Engine.GetCall(s.CallId).FloorQueueCancel();
 
     // 메시지
@@ -1313,6 +1317,86 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
     {
         if (Ptt is null) return Result<SdsSend>.Fail(-1, "PTT 계정 없음");
         var r = Ptt.SendGroupSds(groupId, text, requestDelivery: true);
+        if (!r.Ok) Notify.Error(ResponseText.Describe(ResponseText.Area.Sds, r.Code, r.Reason), r.ToString());
+        return r;
+    }
+
+    /// <summary>1:1 SDS 발신(request-type one-to-one-sds) — peer = 상대 번호. 반환 규약은 SendGroupSds 와 같다.</summary>
+    public Result<SdsSend> SendSds(string peer, string text)
+    {
+        if (Ptt is null) return Result<SdsSend>.Fail(-1, "PTT 계정 없음");
+        var r = Ptt.SendSds(UserPartConverter.UserPart(peer), text, requestDelivery: true);
+        if (!r.Ok) Notify.Error(ResponseText.Describe(ResponseText.Area.Sds, r.Code, r.Reason), r.ToString());
+        return r;
+    }
+
+    // ── MCData FD (mcdata_messaging.md §4.5 — 업로드 → FD 알림 MESSAGE → 받는 쪽이 URL 로 다운로드) ──
+    /// <summary>발신 파일 상한 — 서버 McDataFd.MaxBytes 기본값. 넘는 파일은 읽기 전에 막는다(메모리에 통째로 올리는 경로).</summary>
+    public const long MaxFileBytes = 50L * 1024 * 1024;
+    /// <summary>파일 전송 전용 CSC 핸들 — 한 핸들의 요청은 직렬화되므로 큰 파일이 이력 폴링·관리 조회를 막지 않게 따로 둔다.</summary>
+    private CscClient? _fdCsc;
+    private CscClient? FdCsc()
+    {
+        if (_csc is null) return null;
+        var ep = _csc.Endpoint;
+        return _fdCsc ??= new CscClient(new CscEndpoint { Host = ep.Host, Port = ep.Port, VerifyServer = ep.VerifyServer, CaPem = ep.CaPem });
+    }
+
+    /// <summary>파일 업로드 — groupId 가 있으면 그룹 FD(서버 allow_fd·멤버십 게이트), null 이면 1:1. 401 은 강제 갱신 후 한 번 재시도.</summary>
+    public async Task<Result<FdUpload>> UploadFileAsync(byte[] data, string name, string mime, string? groupId, CancellationToken ct = default)
+    {
+        var csc = FdCsc();
+        if (csc is null || await AccessTokenAsync(ct) is not { } tk) return Result<FdUpload>.Fail(-1, "로그인 전");
+        var r = await csc.UploadFdAsync(tk, data, name, mime, groupId, ct);
+        if (!r.Ok && r.Code == 401 && await RenewAccessTokenAsync(tk, ct) is { } fresh && fresh != tk)
+            r = await csc.UploadFdAsync(fresh, data, name, mime, groupId, ct);
+        if (r.Ok) Log.Info($"fd upload {name} {data.Length}B group={groupId ?? "-"} → {r.Value.Id}");
+        else { Log.Warn($"fd upload {name}: {r}"); Notify.Error(ResponseText.Describe(ResponseText.Area.File, r.Code, r.Reason), r.ToString()); }
+        return r;
+    }
+
+    /// <summary>받은 파일 다운로드 → 받은 파일 폴더(다운로드\CIMS)에 저장, 경로를 준다. 같은 이름이 있으면 "(n)" 을 붙인다.</summary>
+    public async Task<Result<string>> DownloadFileAsync(string url, string name, CancellationToken ct = default)
+    {
+        var csc = FdCsc();
+        if (csc is null || await AccessTokenAsync(ct) is not { } tk) return Result<string>.Fail(-1, "로그인 전");
+        var r = await csc.DownloadFdAsync(tk, url, ct);
+        if (!r.Ok && r.Code == 401 && await RenewAccessTokenAsync(tk, ct) is { } fresh && fresh != tk)
+            r = await csc.DownloadFdAsync(fresh, url, ct);
+        if (!r.Ok)
+        {
+            string body = r.Value?.Body is { Length: > 0 } b ? System.Text.Encoding.UTF8.GetString(b) : r.Reason;
+            Log.Warn($"fd download {url}: {r.Code} {body}");
+            Notify.Error(ResponseText.Describe(ResponseText.Area.File, r.Code, body), r.ToString());
+            return Result<string>.Fail(r.Code, body);
+        }
+        try
+        {
+            string path = AppPaths.UniqueFile(AppPaths.ReceivedFilesDir, name.Length > 0 ? name : "file.bin");
+            await System.IO.File.WriteAllBytesAsync(path, r.Value.Body, ct);
+            Log.Info($"fd download {url} → {path} ({r.Value.Body.Length}B)");
+            return Result<string>.Success(path);
+        }
+        catch (Exception ex) when (ex is System.IO.IOException or UnauthorizedAccessException)
+        {
+            Log.Warn($"fd download {url}: cannot write — {ex.Message}");
+            Notify.Error("받은 파일을 저장할 수 없습니다", ex.Message);
+            return Result<string>.Fail(-3, ex.Message);
+        }
+    }
+
+    public Result<SdsSend> SendGroupFd(string groupId, FdFile file)
+    {
+        if (Ptt is null) return Result<SdsSend>.Fail(-1, "PTT 계정 없음");
+        var r = Ptt.SendGroupFd(groupId, file);
+        if (!r.Ok) Notify.Error(ResponseText.Describe(ResponseText.Area.Sds, r.Code, r.Reason), r.ToString());
+        return r;
+    }
+
+    public Result<SdsSend> SendFd(string peer, FdFile file)
+    {
+        if (Ptt is null) return Result<SdsSend>.Fail(-1, "PTT 계정 없음");
+        var r = Ptt.SendFd(UserPartConverter.UserPart(peer), file);
         if (!r.Ok) Notify.Error(ResponseText.Describe(ResponseText.Area.Sds, r.Code, r.Reason), r.ToString());
         return r;
     }
@@ -1358,6 +1442,7 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
         Endpoints.Dispose();
         Engine.Dispose();
         _csc?.Dispose();
+        _fdCsc?.Dispose();
         Messages.Dispose();
     }
 }

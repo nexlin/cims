@@ -38,10 +38,16 @@ Body buildGroupSds(const std::string& groupUri, const std::string& text, const s
 /** 1:1 SDS 발신 본문(request-type one-to-one-sds). peerUri 예 "tel:1002" — 받는 사람. */
 Body buildOneToOneSds(const std::string& peerUri, const std::string& text, const std::string& convId,
                       const std::string& msgId, bool requestDelivery, int64_t timeSec);
+/** 그룹 FD 발신 본문(request-type group-fd) — mcdata-info + FD SIGNALLING PAYLOAD 두 파트(DATA PAYLOAD 없음, §4.5). */
+Body buildGroupFd(const std::string& groupUri, const FdFile& file, const std::string& convId,
+                  const std::string& msgId, int64_t timeSec);
+/** 1:1 FD 발신 본문(request-type one-to-one-fd). peerUri = 받는 사람. */
+Body buildOneToOneFd(const std::string& peerUri, const FdFile& file, const std::string& convId,
+                     const std::string& msgId, int64_t timeSec);
 /** SDS NOTIFICATION(전달/읽음 통지) 본문 — 원 발신자 1:1 대상. */
 Body buildNotification(const std::string& convId, const std::string& msgId, int notifType, int64_t timeSec);
 
-/** multipart/mixed MCData 본문 파싱 — mcdata-signalling 파트가 없으면 false. */
+/** multipart/mixed MCData 본문 파싱 — mcdata-signalling 파트가 없으면 false. groupUri 는 그룹 request-type 일 때만 채운다. */
 bool parse(const std::string& contentType, const std::string& body, SdsMessage& out);
 
 // 유틸(시험용 공개)
@@ -51,6 +57,7 @@ std::string hexEncode(const std::string& raw);
 std::string hexDecode(const std::string& hex);
 std::string sdsSignallingTlv(const std::string& convId, const std::string& msgId, bool requestDelivery, int64_t timeSec);
 std::string sdsPayloadTlv(const std::string& text);
+std::string fdSignallingTlv(const std::string& convId, const std::string& msgId, const FdFile& file, int64_t timeSec);
 
 }  // namespace mcdata
 }  // namespace cimsue

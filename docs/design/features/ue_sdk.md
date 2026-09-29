@@ -107,13 +107,16 @@ sdk/core/
                         floor_participant(§6.2.4 상태머신 + UDP 소켓 + Ack keepalive·Revoke Release 재전송·MSN 폐기·
                         요청 시한·Granted Duration 자체 종료·청취 전용) — 원천 android FloorClient.kt
     mcptt/              mcptt_xml — mcptt-info·resource-lists·affiliation-command 빌더, mcptt-info/conference-info 파서
-    mcdata/             sds_codec — TS 24.282 SDS SIGNALLING/DATA PAYLOAD/NOTIFICATION TLV + multipart(base64) 빌드·파싱
+    mcdata/             sds_codec — TS 24.282 SDS SIGNALLING/DATA PAYLOAD/NOTIFICATION·FD SIGNALLING TLV + multipart(base64) 빌드·파싱
                         (그룹/1:1 은 mcdata-info 의 request-type·request-uri 만 다르다 — `buildGroupSds`/`buildOneToOneSds`,
+                         FD = `buildGroupFd`/`buildOneToOneFd`(mcdata-info + FD SIGNALLING 두 파트, FILEURL·Metadata — cspsim·Android 와 같은 바이트),
                          conversation ID 는 그룹당(`conversationIdOf`)·쌍당(`conversationIdOneToOne`, 쌍 정렬)),
-                        Java 호환 conversation id (확장: MSRP 미디어평면·FD 업/다운로드)
+                        파싱은 request-type 이 `one-to-one-*` 이면 `groupUri` 를 비운다(1:1 의 request-uri = 받는 사람), FD 선택 IE(0x9x·0xAx·0x21·0x22)는 건너뛴다.
+                        Java 호환 conversation id (확장: MSRP 미디어평면)
     csc/                csc_client — IdMS OAuth2 PKCE(S256) 로그인·refresh, `/provisioning/me`(services→AccountConfig,
-                        dispatch 블록), GMS 그룹 목록, XCAP GET(ETag/304). 공개 헤더 `cimsue/csc.h` — Engine 과 독립, 동기 호출,
-                        자체 JSON 파서(pjlib 비의존)
+                        dispatch 블록), GMS 그룹 목록, XCAP GET(ETag/304), MCData FD 콘텐츠 서버(`uploadFd` = POST /mcdata/fd
+                        octet-stream·group 지정 시 서버 게이트, `downloadFd` = FILEURL 의 경로만 취해 자기 CSC 로 — Bearer 를 다른 호스트로
+                        보내지 않음). 공개 헤더 `cimsue/csc.h` — Engine 과 독립, 동기 호출, 자체 JSON 파서(pjlib 비의존)
     http/               https_client — ITransport(주입 가능) + OpenSSL 기본 구현(HTTP/1.1, chunked, 신뢰 앵커 PEM)
     csc/                OAuth2 PKCE(IdMS) · XCAP(GMS 그룹·CMS user-profile/service-config, ETag) ·
                         `/provisioning/me` · `/provisioning/directory` · FD 스토어 — HTTP 전송은 인터페이스(§4.4)
@@ -383,6 +386,10 @@ sdk/windows/
 추가 재생 라우트(≥1)   = 데스크 스피커 ← PTT 그룹콜 청취 채널  (Engine::setCallRoute(callId, route))
 기본 캡처 장치         = 헤드셋 마이크  (하나만 — floor Granted 에서만 결선)
 ```
+
+캡처 장치는 하나지만 결선은 **호마다**다 — MCPTT 세션은 각자 floor participant 와 `micOpen` 을 들고 `wireMedia` 가 그 호의
+`mic → call` 만 잇고 끊는다(단일 발언 호 가정 없음, bridge 가 한 원천을 여러 sink 로 보낸다). 그래서 관제석의 다중 채널 동시 발언은
+별도 코어 API 없이 앱이 대상 세션마다 `floorRequest` 하는 **단말 팬아웃**이다(dispatch_desktop_ui.md §4.1 — 요청한 세션만 해제하는 불변은 앱 몫).
 
 앱은 `audioDevices()` 로 고른 장치 id 를 `setAudioDevices`/`addPlaybackRoute` 에 넘기고, 장치 핫플러그는 .NET 파사드의
 `AudioEndpoints`(`IMMNotificationClient` COM interop) 가 감지해 `refreshAudioDevices()` 를 부른다. 두 장치 동시 출력의 지연·에코는

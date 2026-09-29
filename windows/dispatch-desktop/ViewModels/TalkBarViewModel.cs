@@ -1,5 +1,5 @@
 // ① 발언 바(§4.1) — 발언 대상 집합(① 카드 체크)의 투영: PTT 버튼(누르는 동안 대상 전부 floorRequest / 떼면 floorRelease) · 대상 칩(대상별 floor 상태) ·
-// 남은 발언 게이지(승인된 대상 중 최소) · 잠금 발언 토글. 다중 채널 동시 발언은 단말 팬아웃(SDK 과제, §13) — 그 전엔 대상 1개만 허용(MultiTalkSupported).
+// 남은 발언 게이지(승인된 대상 중 최소) · 잠금 발언 토글. 다중 채널 동시 발언 = 단말 팬아웃 — floor 요청·해제의 소유는 PttChannelsViewModel(_talking).
 using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -24,9 +24,6 @@ public sealed partial class TalkTargetChip : ObservableObject
 
 public sealed partial class TalkBarViewModel : ObservableObject
 {
-    /// <summary>libcimsue 발언 대상 집합 API(setTalkTargets) 도입 뒤 true — 그 전엔 체크 1개(PttChannelsViewModel.MaxTargets).</summary>
-    public const bool MultiTalkSupported = false;
-
     private readonly DispatchSession _s;
     private readonly PttChannelsViewModel _channels;
     public ObservableCollection<TalkTargetChip> Targets { get; } = new();
@@ -45,7 +42,8 @@ public sealed partial class TalkBarViewModel : ObservableObject
         s.Floor += (_, e) =>
         {
             Refresh();
-            if (e.Event.Kind == CimsUe.FloorEventKind.TalkLimit || e.Event.Kind == CimsUe.FloorEventKind.Revoked) IsLocked = false;
+            // 잠금 발언은 요청해 둔 대상이 전부 끝나야 풀린다 — 한 채널의 회수·시한(TalkLimit·Revoked·Denied)이 나머지 발언을 풀지 않는다
+            if (IsLocked && !_channels.IsTalking) IsLocked = false;
             if (e.Event.Kind == CimsUe.FloorEventKind.Denied && Targets.Count > 0 && Targets.All(t => !t.IsGranted && !t.IsRequesting && !t.IsQueued))
             { AllDeniedFlash = true; _ = Task.Delay(1000).ContinueWith(_ => AllDeniedFlash = false, TaskScheduler.FromCurrentSynchronizationContext()); }
         };
@@ -97,13 +95,13 @@ public sealed partial class TalkBarViewModel : ObservableObject
     {
         if (!HasTargets) return;
         if (LockTalkEnabled && IsLocked) { PttUpCore(); IsLocked = false; return; }
-        foreach (var t in Targets) t.Card.PttDown();
+        _channels.PttDown();
         if (LockTalkEnabled) IsLocked = true;
         Refresh();
     }
     /// <summary>뗌 — 잠금 중이면 무시(다음 클릭이 해제).</summary>
     public void PttUp() { if (LockTalkEnabled && IsLocked) return; PttUpCore(); }
-    private void PttUpCore() { foreach (var t in Targets) t.Card.PttUp(); Refresh(); }
+    private void PttUpCore() { _channels.PttRelease(); Refresh(); }
 
     [RelayCommand] private void Focus(TalkTargetChip t) => FocusRequested?.Invoke(this, t.Card);
     [RelayCommand] private void Remove(TalkTargetChip t) => _channels.ToggleTargetCommand.Execute(t.Card);

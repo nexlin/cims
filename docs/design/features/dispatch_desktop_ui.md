@@ -39,7 +39,7 @@
 | PTT 그룹 발언(단일·다중 채널) | ① 카드 체크(발언 대상) + PTT 키 | ① 발언 바 PTT 버튼 / 핫키 — 대상 전부에 floor 요청 | `joinGroupCall`·`floorRequest/Release`(대상별) |
 | PTT 사설콜 발신 | PTT 사용자 1명 | ① 빠른 발신 줄 Enter · [사설콜 ▾] 팝오버 · 사람 메뉴 · `Ctrl+K` | `startPrivateCall(peer, {fullDuplex, emergency})` |
 | PTT 애드혹 그룹콜 발신 | PTT 사용자 N명 | ① [애드혹 ▾] 팝오버 다중 선택 · 사람 메뉴 [애드혹에 추가] | `joinGroupCall("adhoc-<나>-<epoch>", {members[]})` |
-| MCData 문자(그룹·1:1·첨부) | SDS | ④ PTT 메시지(포커스 채널 따라가기) | `sendGroupSds`·`onSds`·`sendSdsNotification` |
+| MCData 문자(그룹·1:1·첨부) | SDS · FD | ④ PTT 메시지(포커스 채널 따라가기) — 입력 줄 [📎]·끌어 놓기 | `sendGroupSds`/`sendSds`·`onSds`·`sendSdsNotification` · FD = `CscClient::uploadFd`→`sendGroupFd`/`sendFd`, 받기 `downloadFd` |
 | PTT 세션 상황 인지·청취 | conference 로스터·floor | ①② 카드 2줄(발언자·참가) · ② [청취] 토글 / [창으로] · ⑤ 이벤트 | `subscribeConference`→`onRoster`, `joinGroupCall(listenOnly)` |
 | 대표번호 착신 응대 | INVITE `P-Called-Party-ID`=pilot | ③ 대기열 + 착신 배너 | `CallInfo.calledParty` → `answer` |
 | 링 중인 대표번호 호 당겨받기 | 대기열 링잉 | ③ 대기열 [당겨받기] | `pickup(code, pilot)` |
@@ -224,12 +224,18 @@
 - **발언 대상** = ① 카드 왼쪽 **체크**(☑). 참여 중인 멤버 그룹·애드혹·사설콜(반이중)만 체크 가능, 미참여·전이중 사설콜은 체크 비활성(전이중은 항상 열린 마이크 — 카드 [음소거]).
   체크가 없으면 PTT 는 비활성 + 발언 바 안내("내 채널 카드의 체크로 고르세요").
 - **PTT 버튼**(40px): 누르는 동안 대상 전부에 `floorRequest`, 떼면 `floorRelease`. 색 = 대기 녹색 외곽 · 요청 중 주황 · **발언 중 녹색 채움** · 일부만 승인이면 녹색 채움 +
-  "n/m" · 전부 거부 빨강 1초. **잠금 발언** 토글(설정, 기본 꺼짐 — 클릭으로 누름 유지, 다시 클릭/`TalkLimit` 로 해제; 풋스위치·긴 공지용).
+  "n/m" · 전부 거부 빨강 1초. **잠금 발언** 토글(설정, 기본 꺼짐 — 클릭으로 누름 유지, 다시 클릭 또는 요청한 대상이 **전부** 끝나면(`TalkLimit`·`Revoked`·`Denied`) 해제 —
+  한 채널의 회수가 나머지 발언을 풀지 않는다; 풋스위치·긴 공지용).
 - **대상 칩** = 채널 이름 + 상태 점 + 문구: 요청 전(회색) · 승인(녹색) · 대기 n번째(주황) · 거부·사유(빨강, `causeText`) · 발언 중 남은 시간은 승인된 대상 중 **최소값**을
   발언 바 오른쪽 게이지에. 칩 클릭 = 그 카드 포커스, 칩 × = 체크 해제. 대상이 하나면 지금의 "선택 채널" 과 같다.
 - **발언 세트**(선택, **미구현** — §13): 체크 조합을 이름으로 저장(예: "야간" = 순찰1+순찰2) — 발언 바 [세트 ▾], `Ctrl+Shift+F1..F4`. `layout.json` 옆 `talksets.json`.
 - **핫키**: `Ctrl+n` = 카드 n 포커스 **+ 발언 대상을 그 채널 하나로**(단일 모드 복귀), `Ctrl+Shift+n` = 카드 n 체크 토글(다중 추가). 관제 밖 화면에서도 같다(§3.5).
-- **동시 발언 = 단말 팬아웃**(SDK 과제, §13): 대상 세션마다 floor 요청 · 승인된 세션 전부로 같은 마이크 송출 · 부분 상태(일부 승인/대기/거부)를 이벤트로. 서버 변경 없음.
+- **동시 발언 = 단말 팬아웃**: 3GPP 에 UE 의 다중 그룹 동시 발언 절차가 없어 단말이 편다 — 대상 세션마다 `floorRequest`, 코어가 **승인된 세션마다** 같은 캡처를 결선한다
+  (세션별 floor participant·`micOpen` → `wireMedia`, 단일 발언 호 가정 없음 — ue_sdk.md §6.3). 부분 상태(일부 승인/대기/거부)는 세션별 floor 이벤트 그대로. 서버 변경 없음,
+  대상 수 상한 없음. 발언 세트·핫키 외 별도 코어 API 는 두지 않는다(대상 집합은 앱의 화면 상태).
+- **요청한 floor 만 해제한다**(불변): 앱은 floor 를 요청해 둔 세션 집합을 발언 대상(체크)과 **따로** 든다. 누른 채 대상이 바뀌면(칩 ×·`Ctrl+n`·애드혹 우선·세션 종료)
+  빠진 세션에 곧바로 `floorRelease` — 그러지 않으면 화면은 새 대상을 가리키는데 마이크는 옛 채널로 계속 나간다. 뗌도 «현재 대상» 이 아니라 요청한 집합 전부를 상태와 무관하게
+  놓는다(요청 직후 Granted 전에 떼도 반드시 놓게 — 코어 release 는 유휴에서 no-op). 요청·해제 직후 세션 floor 상태를 코어에서 다시 읽어 투영을 맞춘다(요청은 이벤트 없이 Requesting).
 
 **사람 메뉴**(로스터 칩·⑤ 행 발신자·③ 그룹원 칩·주소록 행 우클릭/클릭): 머리 = 이름 · PTT 번호 · 내선, 항목 = [사설콜][애드혹에 추가][SDS 메시지] / [통화 <내선>][문자].
 회선이 없는 항목은 비활성. **통합 검색** `Ctrl+K` = 같은 행동을 이름 하나로(사람 행 = 소속·PTT 상태·내선 상태 + 행동 버튼, 그룹 행 = [채널로][멤버 추가]; ↑↓ 이동 · Enter 첫 행동 · Tab 행동 이동).
@@ -303,9 +309,16 @@
 **④ PTT 메시지**(하단 왼쓰) — [mcdata_messaging.md](mcdata_messaging.md) §5 의 앱 동작:
 - 머리: `[● <포커스 채널> 따라가기]` 토글(기본 켬 — ① 포커스 카드의 그룹 스레드로 이동) · 검색 · ↗. 스레드 칩(그룹 = `groupUri`, 1:1 = 상대 — `threadKeyOf` 규칙, 미읽음 수,
   "모든 스레드" 고정 칩) → 선택 스레드의 말풍선(발신 상태 🕓→✓→✓✓/⚠ 재전송, 그룹 수신은 발신자 라벨, 첨부 카드) → 입력 + [📎](FD) + [전송].
-- 발신 `sendGroupSds(acc_ptt, groupId, text, requestDelivery)` → `(msgId, token)` · 최종 응답 `onRequestCompleted(MESSAGE, token)` 을 **token 으로** 상관해 2xx=SENT
-  (자동 회신하는 disposition 통지의 완료 이벤트는 어느 메시지에도 맞지 않아 무시) · disposition 요청 수신은 `sendSdsNotification(delivered)` 자동 회신 · `onSds(notification)` 을
-  msgId 로 상관 → ✓✓(재전송은 새 msgId·token 을 메시지에 덮어쓴다). 1:1 SDS 는 사설콜 상대·사람 메뉴 [SDS] 로(스레드 키 = 상대 번호 user part).
+- 발신 그룹 `sendGroupSds(acc_ptt, groupId, text, requestDelivery)` / 1:1 `sendSds(acc_ptt, peer, …)` → `(msgId, token)` · 최종 응답 `onRequestCompleted(MESSAGE, token)` 을
+  **token 으로** 상관해 2xx=SENT (자동 회신하는 disposition 통지의 완료 이벤트는 어느 메시지에도 맞지 않아 무시) · disposition 요청 수신은 `sendSdsNotification(delivered)` 자동 회신 ·
+  `onSds(notification)` 을 msgId 로 상관 → ✓✓(재전송은 새 msgId·token 을 메시지에 덮어쓴다). 1:1 스레드(사설콜 상대·사람 메뉴 [SDS]·받은 1:1, 키 = 상대 번호 user part)도
+  글·파일을 보낸다 — 받은 1:1 은 코어가 request-type(`one-to-one-*`)을 보고 `groupUri` 를 비워 준다.
+- **파일(FD, [mcdata_messaging.md](mcdata_messaging.md) §4.5)**: [📎](다중 선택)·말풍선 영역에 끌어 놓기 → 말풍선을 먼저 세우고("올리는 중…") 전용 CSC 핸들로
+  `uploadFd`(그룹 = `group` 지정 — 서버가 `allow_fd`·멤버십 게이트, 1:1 = 없음) → `sendGroupFd`/`sendFd`(FILEURL·name/size/type) → token 상관은 글과 같다.
+  상한 50 MB(서버 `McDataFd.MaxBytes` 기본) — 넘으면 읽기 전에 막는다. 재전송 = FILEURL 이 없으면 업로드부터, 있으면 알림만. 받은 파일은 이름·크기 + [받기](↓) — 관제석은
+  자동으로 받지 않는다(그룹 파일이 쌓이는 자리라 관제사가 고른다). 받기 = `downloadFd`(FILEURL 의 경로만 취해 **자기 CSC** 로 — Bearer 를 다른 호스트로 보내지 않음) →
+  `다운로드\CIMS\<이름>`(겹치면 "(n)") 저장 후 연결 프로그램으로 열기, 이름 클릭 = 열기(안 받았으면 받기), 폴더 아이콘 = 탐색기에서 보기. 거부 사유는 §9 `Area.File`
+  (`allow_fd` 꺼짐·비멤버·413·보관 만료).
 - 보관: 로컬 SQLite(`%APPDATA%\CIMS\dispatch-desktop\messages.db`) 최근 30일(설정). 미읽음은 패널이 접혀 있어도 머리 배지 + ① 카드 `✉ n`.
 
 **⑤ PTT 이벤트**(하단 가운데) — PTT 세계에서 **방금 일어난 것**의 흐름. 진행 중 상태는 ①② 카드가 맡고 여기는 이벤트만.
@@ -528,6 +541,7 @@ VoLTE 감청 하나 = 창 하나, PTT 청취는 ② 카드 토글이 기본이�
 | 긴급 개시 | 403 | "긴급 호출 자격이 없습니다" | mcptt_emergency_modes §4.2·§7 |
 | 일제 통화 개시 | 403 | "그룹 멤버가 아닙니다"(PTT 참여와 같다) | mcptt_broadcast_group_call §3.1 |
 | MCData SDS | 403 / 413 / 404·408·503 | "그룹 문자 권한 없음 / 너무 긺(서버 한도) / 전송 실패 — 재전송" | mcdata §4·§5 |
+| MCData 파일(FD 업·다운로드) | 403 / 404 / 413 / 503 | 본문 `error` 로 세분 — "이 그룹은 파일 전송이 꺼져 있습니다" · "그룹 멤버가 아니라 파일을 보낼 수 없습니다" · "파일이 서버에 없습니다(보관 기간)" · "파일이 너무 큽니다(서버 한도)" · "서버 파일 저장소가 설정되지 않았습니다" | mcdata §4.5 (csc `mcdata_fd.py`) |
 | SMS·LMS | 404 / 480 | "상대가 등록되어 있지 않습니다 / 응답 없음" | MESSAGE 1:1 전달 |
 | SMS·LMS | 413 | "문자가 너무 깁니다(서버 한도)" | `max_sds_size` |
 | 등록 | 401/403 | "인증 실패 — 다시 로그인" | sip_access_security |
@@ -565,11 +579,12 @@ windows/dispatch-desktop/                 DispatchDesktop.csproj — net10.0-win
                                 화면 VM 셋 = HistoryScreen/GroupsScreen/AdminScreen 을 앱 수명 동안 하나씩 소유, 로그인 뒤 첫 진입 때 `LoadScreensAsync`, ② 를 위해 그룹 목록은 로그인 직후 적재) ·
                                 자동 복귀 규칙(`ReturnIfSessionStarted`) · ⑤⑥ [이력에서 보기] · `SeedCanvasPreview`(개발 스위치)
     PttChannelsViewModel        ① — ChannelCard(멤버 그룹 전부 + 내가 건 사설콜·애드혹, 핀 순서 고정) · **포커스**(`Selected`, 같은 카드 재클릭 = 접힘, 애드혹 우선 자동 포커스) ·
-                                **발언 대상**(카드 `IsChecked` 집합 — `ToggleTarget`/`SetSingleTarget`/`ClearTargets`, `MaxTargets` = SDK 팬아웃 전 1, 세션 종료·전이중 전환 시 자동 해제) ·
+                                **발언 대상**(카드 `IsChecked` 집합 — `ToggleTarget`/`SetSingleTarget`/`ClearTargets`, 상한 없음, 세션 종료·전이중 전환·Permission 0(일제 통화 수신) 시 자동 해제) ·
+                                **floor 소유**(`_talking` = 요청해 둔 세션 — `PttDown`/`PttRelease`, 대상 변경은 전부 `OnTargetsChanged` 를 지나 빠진 세션을 해제, `IsTalking`) ·
                                 카드 2줄(`Line2` — 발언자·마지막 발언/애드혹 응답/사설콜 라우트·번호, 대기면 마지막 세션 — 로스터 관측 시작·종료로 기록) · 3줄(`RosterPreview` 10 + `+n`, `CanEdit`, [일제 통화] `CanBroadcast` — 편성 그룹·진행 중 세션 없음) ·
                                 `Unread`(④ 미읽음 → ✉ n) · `SelectIndex`(Ctrl+n)·`ToggleIndex`(Ctrl+Shift+n) · 사람 메뉴·스레드·편집 요청 이벤트
-    TalkBarViewModel            ① 발언 바 — 대상 칩(`TalkTargetChip`: 승인/요청/대기 n번째/거부·사유) · `PttDown/Up` = 대상 전부 floorRequest/Release · `PttText`(발언 중·n/m·요청 중·거부) ·
-                                `MinGauge`(승인된 대상 중 최소 남은 발언) · 잠금 발언(`LockTalkEnabled` 설정 + `IsLocked` — TalkLimit/Revoked 로 해제) · `MultiTalkSupported` 상수(false — §13)
+    TalkBarViewModel            ① 발언 바 — 대상 칩(`TalkTargetChip`: 승인/요청/대기 n번째/거부·사유) · `PttDown/Up` → PttChannels `PttDown`/`PttRelease` · `PttText`(발언 중·n/m·요청 중·거부) ·
+                                `MinGauge`(승인된 대상 중 최소 남은 발언) · 잠금 발언(`LockTalkEnabled` 설정 + `IsLocked` — 요청한 대상이 전부 끝나면(`!IsTalking`) 해제)
     PttOriginateViewModel       ① 팝오버(PttOriginateView) — 사설콜/애드혹 모드 · PTT 주소록(사용자/그룹/다이얼패드) · 애드혹 선택 칩 · `IsComposingAdhoc`(바깥 클릭 닫힘 방지) ·
                                 `Close`([취소]) · `PrivateCallTo`/`AddAdhoc`(사람 메뉴) · 그룹 행 [채널로]·[새 그룹]/[편집]/[삭제](드로어)
     ScopedChannelsViewModel     ② — ScopedCard(청취 범위 `GroupInfo` / 관리 범위 `ManagedGroup`) 섹션 Listen·Others(서버 과제 — 빈 섹션)·Manage(기본 접힘, 설정 기억) ·
@@ -579,7 +594,8 @@ windows/dispatch-desktop/                 DispatchDesktop.csproj — net10.0-win
                                 칩 → ⑥ 필터) · CallCard(`DtmfOpen` DTMF 팝오버 3×4 + 보낸 자릿수, `TransferOpen` 전달 팝오버 blind/attended, 상대 이름 → 사람 메뉴) · `Rebuild`(스냅샷)
     CallOriginateViewModel      ③ [▦ ▾] 팝오버(CallOriginateView) — [다이얼패드|주소록|최근] 하나(마지막 선택 기억), `Number`·`Suggestions` 는 ③ 빠른 발신 줄이 공유
     SmsMessagesViewModel        ③ [문자] 팝오버 — `Recipient`(받는 사람 줄 → 스레드) · text/plain MESSAGE 스레드 · token 상관 · 외부망 비활성 (MessagesViewModelBase — `ToggleFollow`·`UnreadOf`·`UnreadChanged`)
-    McDataMessagesViewModel     ④ — 스레드·말풍선·disposition 자동 회신·발신 token 으로 MESSAGE 최종 응답 상관 · `FollowGroup`/`FocusGroup`(머리 [● <채널> 따라가기])
+    McDataMessagesViewModel     ④ — 스레드(그룹·1:1 양방향)·말풍선·disposition 자동 회신·발신 token 으로 MESSAGE 최종 응답 상관 · `FollowGroup`/`FocusGroup`(머리 [● <채널> 따라가기]) ·
+                                파일 `AttachCore`([📎])·`SendFileAsync`(끌어 놓기 공용 — 업로드 → FD 알림, 재전송) · 첨부 말풍선 명령(`DownloadFile`/`OpenFile`/`ShowFile`)은 MessagesViewModelBase
     PttActivityViewModel        ⑤ — 이벤트 링 버퍼만(진행 중 행 없음) · `Pinned`(활성 긴급/임박 세션 고정 행) · 필터 all|talk|emergency · `FollowFocus`+`FocusTitle`(포커스 채널만) · 행 클릭 [채널로]·SDS [답장]
     CallActivityViewModel       ⑥ — 세션 행(dialog 쌍 결합) + 최근 기록, 필터 all|pilot|missed|outgoing|transfer|monitor(오늘 데스크 칩)
     PersonActionsViewModel      사람 메뉴 + Ctrl+K — 서버 전화번호부의 PTT 번호·내선을 사람 하나(`PersonEntry`, 이름+조직 키)로 묶고 PTT 상태(로스터)·내선 상태(dialog) 표시,
@@ -598,8 +614,9 @@ windows/dispatch-desktop/                 DispatchDesktop.csproj — net10.0-win
                             등록 단말 속성 = User-Agent `CIMS-Dispatch/<앱 버전> (<OS>; <모델>)` · Contact `+sip.instance` 기기 고유 `urn:uuid:`(파사드 `DeviceIdentity` — mcptt_management_views.md §4.1)
                             계정 = PTT 서비스 전부 + **전화 계열은 SDK 가 고른 `Profile.PhoneService` 하나**(유선 voip 우선·이동 volte 폴백) — volte·voip 를 둘 다 등록하면 이동 번호까지 관제석에 포크되고 전화 계정 참조를 마지막 계정이 덮어쓴다) ·
             Notifications(토스트·배너) · SettingsStore(json — FollowChannelThread/FollowChannelEvents/LockTalk/ScopedManageExpanded 등) · LayoutStore(프리셋, 패널 집합 버전) ·
-            MessageStore(SQLite: mcdata/sms) · ActivityLog(링 버퍼·CSV) · HotKeyMap · AudioPolicy(라우트 기본값) · AdhocIdFactory(adhoc-<나>-<epoch>) ·
-            DirectoryService(그룹원·PTT 사용자·연락처 CSV) · ResponseText(§9 사전 + Area.Management/Recording 오류 본문 `error` 사전) · AppLog(%APPDATA% logs, 7일) ·
+            MessageStore(SQLite: mcdata/sms, FD 열 file_type·local_path 는 없으면 붙임) · ActivityLog(링 버퍼·CSV) · HotKeyMap · AudioPolicy(라우트 기본값) · AdhocIdFactory(adhoc-<나>-<epoch>) ·
+            DirectoryService(그룹원·PTT 사용자·연락처 CSV) · ResponseText(§9 사전 + Area.Management/Recording/File 오류 본문 `error` 사전) · AppLog(%APPDATA% logs, 7일) ·
+            FD 전송(DispatchSession `UploadFileAsync`/`DownloadFileAsync` — 전용 CSC 핸들, 401 강제 갱신 1회) · AppPaths(`ReceivedFilesDir` = 다운로드\CIMS, `UniqueFile`, `MimeOf`) ·
             ManagementClient(관리 평면 — CscClient.Request 위 얇은 클라이언트: directory admin CRUD·그룹 목록·이력 창 조회·녹취 메타/오디오 202 재시도)
   Views/    PttChannelsPanel(① — 머리·빠른 발신 줄+제안/발신 Popup·발언 바·카드 2/3줄, 코드비하인드 = 카드 클릭 포커스(버튼·체크 제외)·PTT press/release) ·
             ScopedChannelsPanel(② — 필터 줄·섹션·카드, 조작은 호버/선택 때) · CallDeskPanel(③ — 빠른 발신 줄+[▦ ▾]/[문자] Popup·그룹원 띠·대기열·오늘 데스크·내 통화 카드+DTMF/전달 Popup) ·
@@ -624,8 +641,6 @@ windows/dispatch-desktop/                 DispatchDesktop.csproj — net10.0-win
   `XmlLayoutSerializer` XML 을 `layout.json` 에 이름별로 보관("기본 배치" 는 XAML 기본). 패널 집합(ContentId)이 바뀌면 `LayoutStore.CurrentVersion` 을 올려 저장 XML 을 버린다.
 - **팝오버 = WPF `Popup`**(비모달, `StaysOpen=False` — 바깥 클릭 닫힘, 애드혹 구성 중은 `StaysOpen` 바인딩으로 유지). 팝오버 안 버튼은 `Focusable=False` 로 두어 입력란의
   키보드 포커스가 옮겨 가며 제안 목록이 닫히는 일이 없게 한다. 팝오버는 별 HWND 라 `--ui-preview-shot` 렌더에 안 찍힌다.
-- 동시 발언(다중 체크)은 `TalkBarViewModel.MultiTalkSupported` 가 false 인 동안 체크가 1개로 옮겨 가며(안내 토스트), SDK 팬아웃(§13)이 들어오면 상수만 바꾼다 — 발언 바·칩·게이지는
-  이미 집합 기준이다.
 
 - 파사드 이벤트(`CimsUe.Engine` 의 `CallStateChanged`·`FloorChanged`·`DialogInfo`…)는 UI 스레드로 마샬링돼 온다(ue_sdk.md §6.4) — ViewModel 은
   `ObservableCollection` 직접 갱신.
@@ -644,8 +659,6 @@ windows/dispatch-desktop/                 DispatchDesktop.csproj — net10.0-win
 
 ## 13. 미해결 / 향후 과제
 
-- **SDK 과제 — 다중 채널 동시 발언(단말 팬아웃)**: `libcimsue` 에 발언 대상 집합 API(`setTalkTargets(callIds[])` · `floorRequest/Release` 를 집합에 적용 · 승인된 세션 전부로 같은 캡처 송출 ·
-  대상별 floor 상태 이벤트). 3GPP 는 UE 의 다중 그룹 동시 발언 절차가 없어 단말 쪽 팬아웃으로 구현한다(서버 변경 없음). 그 전까지 발언 바는 대상 1개만 허용한다.
 - **앱 과제 — 타인 간 사설콜·애드혹 세션(② 타인 세션 섹션)**: 서버 계약은 확정·구현됐다([dispatch_center.md §5.6a](dispatch_center.md)) —
   `dispatch.members[].pttId` 에 `Event: dialog` 구독(VoLTE `volteAor` 와 같은 `dialogWatch`) → PTT 세션 참가 leg 마다 dialog(remote = 세션 URI
   `sip:priv-…|adhoc-…|g002@<ptt 도메인>`, 확장 `<mcptt session-type initiator emergency imminent-peril/>`). 앱: 같은 remote 의 dialog 를 한 카드로

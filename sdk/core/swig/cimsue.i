@@ -85,8 +85,8 @@ using namespace cimsue;
     }
     $1 = &_tmp;
 }
-// 적용 대상은 **이진인 둘뿐**이다 — Windows 파사드와 같은 타입으로 맞춘다
-// (HttpResponse.Body = byte[] / XcapDoc.Body = string / Account.SendRequest(body) = string).
+// 적용 대상은 **이진인 것뿐**이다 — Windows 파사드와 같은 타입으로 맞춘다
+// (HttpResponse.Body = byte[] / CscClient.UploadFd(data) = byte[] / XcapDoc.Body = string / Account.SendRequest(body) = string).
 // XcapDoc.body(XCAP XML)와 Engine::sendRequest 의 SIP 본문은 텍스트라 String 으로 둔다.
 // 적용 자체는 %include 사이에 둔다(§ 아래) — SWIG 는 함수별 파라미터 한정(CscClient::request::body)을
 // 지원하지 않으므로, %apply 가 "그 뒤에 파싱되는 선언에만 걸린다"는 위치 의존성을 쓴다.
@@ -97,13 +97,14 @@ using namespace cimsue;
 // engine.h 를 먼저 — Engine::sendRequest 의 SIP 본문은 텍스트라 아래 이진 적용 전에 통과시킨다.
 %include "cimsue/engine.h"
 
-// 여기부터 csc.h 끝까지 `const std::string& body` 는 이진(byte[])이다 — HttpResult.body 와
-// CscClient::request 의 요청 본문이 대상. XcapDoc.body 만 XML 텍스트라 멤버 한정으로 되돌린다
+// 여기부터 csc.h 끝까지 `const std::string& body`·`data` 는 이진(byte[])이다 — HttpResult.body 와
+// CscClient::request 의 요청 본문, CscClient::uploadFd 의 파일 바이트가 대상. XcapDoc.body 만 XML 텍스트라 멤버 한정으로 되돌린다
 // (멤버는 %naturalvar 때문에 const 참조 typemap 을 타고, 이름 한정 패턴이 무한정 패턴을 이긴다).
-%apply const std::string& BINARY { const std::string& body };
+%apply const std::string& BINARY { const std::string& body, const std::string& data };
 %apply const std::string&        { const std::string& cimsue::XcapDoc::body };
 %include "cimsue/csc.h"
 %clear const std::string& body;
+%clear const std::string& data;
 
 // ── 값 컨테이너 ────────────────────────────────────────────────────────────────
 // %template 은 대상 타입이 선언된 뒤에 와야 한다(위 %include 다음).

@@ -171,4 +171,15 @@ public class CscTests
         // 서버 인증서 만료 관측(§8.6.2) — 요청 전엔 관측 없음
         Assert.Same(TlsPeerExpiry.None, c.TlsPeerExpiry);
     }
+
+    [Fact]
+    public void FdGuardsRunBeforeNetwork()
+    {
+        // FD 경로가 아닌 URL 은 요청하지 않는다(Bearer 누설 방지) · 빈 파일은 올리지 않는다 — 둘 다 코어가 -2 로 끊는다
+        using var c = new CscClient(new CscEndpoint { Host = "127.0.0.1", Port = 1 });
+        var d = c.DownloadFd("tok", "https://127.0.0.1/provisioning/me");
+        Assert.False(d.Ok); Assert.Equal(-2, d.Code);
+        var u = c.UploadFd("tok", Array.Empty<byte>(), "a.txt", null, null);
+        Assert.False(u.Ok); Assert.Equal(-2, u.Code);
+    }
 }

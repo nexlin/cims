@@ -152,10 +152,6 @@ public sealed partial class ChannelCard : ObservableObject
     [RelayCommand] private void Emergency() { if (Group is not null) _s.EmergencyCall(Group); }
     [RelayCommand] private void Broadcast() { if (Group is not null && CanBroadcast) _s.BroadcastCall(Group); }
     [RelayCommand] private void CancelQueue() { if (Session is not null) _s.FloorQueueCancel(Session); }
-
-    /// <summary>발언 바가 대상마다 부른다.</summary>
-    public void PttDown() { if (Session is not null && CanCheck) _s.FloorRequest(Session); }
-    public void PttUp() { if (Session is not null && CanCheck && (IsSpeaking || IsRequesting || IsQueued)) _s.FloorRelease(Session); }
 }
 
 public sealed record RosterRow(string Name, string Uri, string Status, bool IsMe, bool IsSpeaking)
@@ -176,8 +172,13 @@ public sealed partial class PttChannelsViewModel : ObservableObject
     public int JoinedCount => Cards.Count(c => c.IsJoined);
     public int TargetCount => Cards.Count(c => c.IsChecked);
     public IEnumerable<ChannelCard> Targets => Cards.Where(c => c.IsChecked);
-    /// <summary>동시 발언 대상 상한 — SDK 팬아웃(§13) 전에는 1.</summary>
-    public int MaxTargets => TalkBarViewModel.MultiTalkSupported ? 99 : 1;
+
+    /// <summary>floor 를 요청해 둔 세션 — 발언 대상(체크)과 따로 든다. 해제를 «현재 대상» 으로 하면 누른 채 대상이 바뀌었을 때
+    /// (Ctrl+n·애드혹 우선·칩 ✕·세션 종료) 옛 채널에 floorRelease 가 가지 않아 그 채널로 마이크가 계속 나간다(마이크 차단은 코어
+    /// floor participant 의 release 가 한다). 불변: 대상에서 빠진 세션은 반드시 floorRelease 를 받고 여기서 빠진다(OnTargetsChanged).</summary>
+    private readonly HashSet<SessionItem> _talking = new();
+    /// <summary>요청해 둔 세션 중 아직 발언·요청·대기 중인 것이 있는가 — 잠금 발언 해제 판정.</summary>
+    public bool IsTalking => _talking.Any(x => x.IsSpeaking || x.IsRequesting || x.IsQueued);
 
     public event EventHandler<ChannelCard?>? SelectionChanged;
     /// <summary>발언 대상 집합이 바뀌었다(체크·해제·세션 종료).</summary>
@@ -219,7 +220,7 @@ public sealed partial class PttChannelsViewModel : ObservableObject
         }
         Renumber();
         Select(Cards.FirstOrDefault(c => c.Id == selId) ?? Cards.FirstOrDefault(), collapseSame: false);
-        TargetsChanged?.Invoke(this, EventArgs.Empty);
+        OnTargetsChanged();
     }
 
     private void Renumber() { int i = 1; foreach (var c in Cards) c.Index = i++; OnPropertyChanged(nameof(JoinedCount)); OnPropertyChanged(nameof(TargetCount)); }
@@ -262,7 +263,7 @@ public sealed partial class PttChannelsViewModel : ObservableObject
                         Cards.Remove(c);
                         Renumber();
                         if (Selected == c) Select(_previousSelection is not null && Cards.Contains(_previousSelection) ? _previousSelection : Cards.FirstOrDefault(), collapseSame: false);
-                        if (wasTarget) TargetsChanged?.Invoke(this, EventArgs.Empty);
+                        if (wasTarget) OnTargetsChanged();
                     }
                 }
                 break;
@@ -318,34 +319,49 @@ public sealed partial class PttChannelsViewModel : ObservableObject
     public void ToggleIndex(int n) { var c = Cards.FirstOrDefault(x => x.Index == n); if (c is not null) ToggleTarget(c); }
 
     // ── 발언 대상 ──
+    // 동시 발언 = 단말 팬아웃(§4.1) — 3GPP 에 UE 의 다중 그룹 동시 발언 절차가 없어 대상 세션마다 floor 를 따로 요청하고,
+    // 코어가 승인된 세션마다 같은 마이크를 결선한다(세션별 floor participant·micOpen). 상한 없음, 서버 변경 없음.
     [RelayCommand]
     private void ToggleTarget(ChannelCard c)
     {
         if (!c.CanCheck) { if (c.Session is null && c.Group is not null) _s.Notify.Info($"{c.Title} — 먼저 [참여]하세요"); return; }
-        if (c.IsChecked) { SetChecked(c, false); return; }
-        if (TargetCount >= MaxTargets)
-        {
-            // 상한(SDK 팬아웃 전 1개) — 가장 오래된 대상을 내리고 이 카드로 바꾼다
-            foreach (var x in Cards.Where(x => x.IsChecked).ToList()) x.IsChecked = false;
-            if (!TalkBarViewModel.MultiTalkSupported) _s.Notify.Info("동시 발언은 SDK 팬아웃 뒤 지원 — 발언 대상 1개", "지금은 체크가 옮겨 갑니다. Ctrl+n 으로 채널을 고르세요.");
-        }
-        SetChecked(c, true);
+        SetChecked(c, !c.IsChecked);
     }
 
     public void SetSingleTarget(ChannelCard c)
     {
         foreach (var x in Cards) x.IsChecked = x == c && c.CanCheck;
-        OnPropertyChanged(nameof(TargetCount)); TargetsChanged?.Invoke(this, EventArgs.Empty);
+        OnTargetsChanged();
     }
 
     private void SetChecked(ChannelCard c, bool on)
     {
         if (c.IsChecked == on) return;
         c.IsChecked = on;
-        OnPropertyChanged(nameof(TargetCount)); TargetsChanged?.Invoke(this, EventArgs.Empty);
+        OnTargetsChanged();
     }
 
-    [RelayCommand] private void ClearTargets() { foreach (var x in Cards) x.IsChecked = false; OnPropertyChanged(nameof(TargetCount)); TargetsChanged?.Invoke(this, EventArgs.Empty); }
+    [RelayCommand] private void ClearTargets() { foreach (var x in Cards) x.IsChecked = false; OnTargetsChanged(); }
+
+    /// <summary>대상 변경은 전부 여기를 지난다 — 대상에서 빠진 세션의 floor 를 놓고(_talking 불변) 알린다.</summary>
+    private void OnTargetsChanged()
+    {
+        foreach (var x in _talking.Where(x => !Cards.Any(c => c.IsChecked && c.Session == x)).ToList()) Release(x);
+        OnPropertyChanged(nameof(TargetCount));
+        TargetsChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    // ── 발언(floor) ──
+    /// <summary>PTT 누름 — 대상 전부에 floorRequest. 이전 요청이 남아 있으면(대상 밖) 먼저 푼다.</summary>
+    public void PttDown()
+    {
+        var sessions = Cards.Where(c => c.IsChecked && c.CanCheck).Select(c => c.Session!).ToList();
+        foreach (var x in _talking.Except(sessions).ToList()) Release(x);
+        foreach (var x in sessions) { _talking.Add(x); _s.FloorRequest(x); }
+    }
+    /// <summary>PTT 뗌 — 요청해 둔 세션 전부 해제. 상태를 보지 않는다(요청 직후 Granted 전에 떼도 반드시 놓는다 — 코어 release 는 유휴에서 no-op).</summary>
+    public void PttRelease() { foreach (var x in _talking.ToList()) Release(x); }
+    private void Release(SessionItem x) { _talking.Remove(x); if (x.IsLive) _s.FloorRelease(x); }
     [RelayCommand] private void PersonMenu(RosterRow r) => PersonMenuRequested?.Invoke(this, r.Uri);
     [RelayCommand] private void OpenThread(ChannelCard c) { if (c.Group is not null) ThreadRequested?.Invoke(this, c.Group); }
     [RelayCommand] private void EditGroup(ChannelCard c) { if (c.Group is not null) EditRequested?.Invoke(this, c.Group); }

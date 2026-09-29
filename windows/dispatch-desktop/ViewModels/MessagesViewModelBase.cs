@@ -22,6 +22,9 @@ public abstract partial class MessagesViewModelBase : ObservableObject
     public int UnreadTotal => Threads.Sum(t => t.Unread);
     public bool HasSelection => Selected is not null;
     public bool CanSend => Selected is not null && Input.Trim().Length > 0 && SendAllowed(Selected);
+    /// <summary>첨부(📎)를 쓰는 패널인가 — MCData FD 만(SMS·LMS 는 첨부 없음).</summary>
+    public virtual bool SupportsAttachments => false;
+    public bool CanAttach => SupportsAttachments && Selected is not null && SendAllowed(Selected);
 
     protected MessagesViewModelBase(DispatchSession s, MessageKind kind)
     {
@@ -37,7 +40,7 @@ public abstract partial class MessagesViewModelBase : ObservableObject
     partial void OnSelectedChanged(MessageThread? value)
     {
         if (value is not null && value.Unread > 0) { value.MarkRead(); S.Messages.MarkRead(value.Key, Kind); OnPropertyChanged(nameof(UnreadTotal)); }
-        OnPropertyChanged(nameof(HasSelection)); OnPropertyChanged(nameof(CanSend));
+        OnPropertyChanged(nameof(HasSelection)); OnPropertyChanged(nameof(CanSend)); OnPropertyChanged(nameof(CanAttach));
     }
     partial void OnInputChanged(string value) => OnPropertyChanged(nameof(CanSend));
 
@@ -83,6 +86,39 @@ public abstract partial class MessagesViewModelBase : ObservableObject
     protected void RaiseUnread() => UnreadChanged?.Invoke(this, EventArgs.Empty);
     [RelayCommand] private void Send() => SendCore();
     [RelayCommand] private void Resend(Message m) => ResendCore(m);
+    [RelayCommand] private Task Attach() => AttachCore();
     protected abstract void SendCore();
     protected abstract void ResendCore(Message m);
+    protected virtual Task AttachCore() => Task.CompletedTask;
+
+    // ── 첨부 말풍선(받기·열기·폴더) ──
+    /// <summary>받은 파일 받기 — 받은 파일 폴더(다운로드\CIMS)에 저장하고 경로를 기록한다. 끝나면 연다.</summary>
+    [RelayCommand]
+    private async Task DownloadFile(Message m)
+    {
+        if (!m.CanDownload) return;
+        m.TransferNote = "받는 중…";
+        var r = await S.DownloadFileAsync(m.FileUrl, m.FileName);
+        m.TransferNote = "";
+        if (!r.Ok) return;
+        m.LocalPath = r.Value;
+        S.Messages.UpdateLocalPath(m.Id, r.Value);
+        OpenFile(m);
+    }
+    /// <summary>열기 — 연결된 프로그램(셸). 받지 않은 수신 파일이면 받기부터.</summary>
+    [RelayCommand]
+    private void OpenFile(Message m)
+    {
+        if (!m.HasLocalFile) { if (m.CanDownload) _ = DownloadFile(m); return; }
+        try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(m.LocalPath) { UseShellExecute = true }); }
+        catch (Exception ex) { S.Notify.Error("파일을 열 수 없습니다", ex.Message); }
+    }
+    /// <summary>탐색기에서 파일 위치 보기.</summary>
+    [RelayCommand]
+    private void ShowFile(Message m)
+    {
+        if (!m.HasLocalFile) return;
+        try { System.Diagnostics.Process.Start("explorer.exe", $"/select,\"{m.LocalPath}\""); }
+        catch (Exception ex) { S.Notify.Error("폴더를 열 수 없습니다", ex.Message); }
+    }
 }

@@ -1370,6 +1370,52 @@ SdsSend Engine::sendSds(int accountId, const std::string& peer, const std::strin
     return out;
 }
 
+SdsSend Engine::sendGroupFd(int accountId, const std::string& groupId, const FdFile& file) {
+    SdsSend out;
+    if (!impl_->running) { out.code = -1; out.reason = "not running"; return out; }
+    if (file.url.empty()) { out.code = -2; out.reason = "empty file url"; return out; }
+    std::string msgId = mcdata::newMessageId();
+    int64_t token = impl_->nextToken++;
+    out.token = token;
+    bool ok = impl_->ctl.runSync([=]() -> bool {
+        Impl* o = impl_.get();
+        auto ic = o->accountCfgs.find(accountId);
+        if (ic == o->accountCfgs.end()) return false;
+        // 그룹 SDS 와 같은 대화(conversation ID) — 파일도 그 그룹 스레드에 놓인다.
+        mcdata::Body b = mcdata::buildGroupFd("tel:" + groupId, file, mcdata::conversationIdOf(groupId), msgId,
+                                              (int64_t)std::time(nullptr));
+        return o->doSendRequest(accountId, "MESSAGE", "sip:" + groupId + "@" + ic->second.domain, b.contentType, b.body, {}, token) >= 0;
+    });
+    if (!ok) { out.code = -3; out.reason = "send failed"; return out; }
+    out.ok = true;
+    out.msgId = msgId;
+    return out;
+}
+
+SdsSend Engine::sendFd(int accountId, const std::string& peer, const FdFile& file) {
+    SdsSend out;
+    if (!impl_->running) { out.code = -1; out.reason = "not running"; return out; }
+    if (file.url.empty()) { out.code = -2; out.reason = "empty file url"; return out; }
+    std::string to = mcptt::bareId(peer);
+    if (to.empty())       { out.code = -2; out.reason = "empty peer";     return out; }
+    std::string msgId = mcdata::newMessageId();
+    int64_t token = impl_->nextToken++;
+    out.token = token;
+    bool ok = impl_->ctl.runSync([=]() -> bool {
+        Impl* o = impl_.get();
+        auto ic = o->accountCfgs.find(accountId);
+        if (ic == o->accountCfgs.end()) return false;
+        std::string me = mcptt::bareId(ic->second.effectiveMcpttId());
+        mcdata::Body b = mcdata::buildOneToOneFd("tel:" + to, file, mcdata::conversationIdOneToOne(me, to), msgId,
+                                                 (int64_t)std::time(nullptr));
+        return o->doSendRequest(accountId, "MESSAGE", "sip:" + to + "@" + ic->second.domain, b.contentType, b.body, {}, token) >= 0;
+    });
+    if (!ok) { out.code = -3; out.reason = "send failed"; return out; }
+    out.ok = true;
+    out.msgId = msgId;
+    return out;
+}
+
 SdsSend Engine::sendSdsNotification(int accountId, const std::string& peer, const std::string& convId,
                                     const std::string& msgId, int notifType) {
     SdsSend out;

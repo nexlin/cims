@@ -257,6 +257,57 @@ struct FakeTransport : http::ITransport {
 };
 }  // namespace
 
+TEST(Csc, FdUploadDownload) {
+    auto tp = std::make_shared<FakeTransport>();
+    CscEndpoint ep; ep.host = "csc.example"; ep.port = 4430;
+    CscClient c(ep, tp);
+
+    // 그룹 FD 업로드 — octet-stream 본문 그대로, 쿼리 name·type·group(인코딩), 201 → url/size
+    tp->next.status = 201;
+    tp->next.body = "{\"id\":\"0123456789abcdef0123456789abcdef\",\"url\":\"https://10.0.0.1:4430/mcdata/fd/0123456789abcdef0123456789abcdef\",\"size\":5,\"name\":\"현장 1.jpg\"}";
+    FdUpload up;
+    Result r = c.uploadFd("tok", std::string("\x00\x01\x02\x03\x04", 5), "현장 1.jpg", "image/jpeg", "g001", up);
+    ASSERT_TRUE(r.ok) << r.reason;
+    EXPECT_EQ(tp->lastMethod, "POST");
+    EXPECT_EQ(tp->lastUrl.rfind(ep.baseUrl() + "/mcdata/fd?name=", 0), 0u);
+    EXPECT_NE(tp->lastUrl.find("&type=image%2Fjpeg"), std::string::npos);
+    EXPECT_NE(tp->lastUrl.find("&group=g001"), std::string::npos);
+    EXPECT_EQ(tp->lastUrl.find(' '), std::string::npos);
+    EXPECT_EQ(tp->lastHeaders.at("Content-Type"), "application/octet-stream");
+    EXPECT_EQ(tp->lastHeaders.at("Authorization"), "Bearer tok");
+    EXPECT_EQ(tp->lastBody.size(), 5u);
+    EXPECT_EQ(up.id, "0123456789abcdef0123456789abcdef"); EXPECT_EQ(up.size, 5); EXPECT_EQ(up.name, "현장 1.jpg");
+    EXPECT_EQ(up.url, "https://10.0.0.1:4430/mcdata/fd/0123456789abcdef0123456789abcdef");
+
+    // 1:1 — group 쿼리 없음. 서버가 Host 없이 상대 경로를 주면 이 CSC 절대 URL 로 채운다
+    tp->next.body = "{\"id\":\"ab\",\"url\":\"/mcdata/fd/ab\",\"size\":1}";
+    r = c.uploadFd("tok", "x", "a.txt", "", "", up);
+    ASSERT_TRUE(r.ok);
+    EXPECT_EQ(tp->lastUrl.find("group="), std::string::npos);
+    EXPECT_NE(tp->lastUrl.find("type=application%2Foctet-stream"), std::string::npos);
+    EXPECT_EQ(up.url, ep.baseUrl() + "/mcdata/fd/ab");
+
+    // 게이트 거부 = HTTP 상태 그대로
+    tp->next = http::Response(); tp->next.status = 403; tp->next.body = "{\"error\":\"file distribution disabled for this group\"}";
+    r = c.uploadFd("tok", "x", "a.txt", "text/plain", "g002", up);
+    EXPECT_FALSE(r.ok); EXPECT_EQ(r.code, 403);
+    EXPECT_FALSE(c.uploadFd("tok", "", "a.txt", "", "", up).ok);            // 빈 파일은 보내지 않는다
+
+    // 다운로드 — FILEURL 의 호스트가 달라도 경로만 취해 이 CSC 로(Bearer 를 다른 호스트로 보내지 않는다)
+    tp->next = http::Response(); tp->next.status = 200; tp->next.body = std::string("\x89PNG\x00", 5);
+    tp->next.headers = {{"content-type", "image/png"}};
+    HttpResult out;
+    r = c.downloadFd("tok", "https://other.example:9999/mcdata/fd/0123456789abcdef0123456789abcdef", out);
+    ASSERT_TRUE(r.ok) << r.reason;
+    EXPECT_EQ(tp->lastMethod, "GET");
+    EXPECT_EQ(tp->lastUrl, ep.baseUrl() + "/mcdata/fd/0123456789abcdef0123456789abcdef");
+    EXPECT_EQ(out.body.size(), 5u); EXPECT_EQ(out.contentType, "image/png");
+    EXPECT_EQ(CscClient::fdPathOf("/mcdata/fd/ab?x=1"), "/mcdata/fd/ab");
+    EXPECT_EQ(CscClient::fdPathOf("https://h/other/ab"), "");
+    EXPECT_EQ(CscClient::fdPathOf("https://h/mcdata/fd/../../etc"), "");
+    EXPECT_EQ(c.downloadFd("tok", "https://h/provisioning/me", out).code, -2);
+}
+
 TEST(Csc, GenericRequestHeadersBinaryAndStatusMapping) {
     auto tp = std::make_shared<FakeTransport>();
     CscEndpoint ep; ep.host = "csc.example"; ep.port = 4430;

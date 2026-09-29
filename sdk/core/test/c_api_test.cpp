@@ -287,6 +287,8 @@ TEST(CApi, GroupDocRoundTripAndAbi) {
     EXPECT_EQ(cimsue_struct_size(CIMSUE_STRUCT_GROUP_MEMBER), (int32_t)sizeof(cimsue_group_member_t));
     EXPECT_EQ(cimsue_struct_size(CIMSUE_STRUCT_DISPATCH_MEMBER), (int32_t)sizeof(cimsue_dispatch_member_t));
     EXPECT_EQ(cimsue_struct_size(CIMSUE_STRUCT_DISPATCH_TARGET), (int32_t)sizeof(cimsue_dispatch_target_t));
+    EXPECT_EQ(cimsue_struct_size(CIMSUE_STRUCT_FD_FILE), (int32_t)sizeof(cimsue_fd_file_t));
+    EXPECT_EQ(cimsue_struct_size(CIMSUE_STRUCT_FD_UPLOAD), (int32_t)sizeof(cimsue_fd_upload_t));
     EXPECT_EQ(cimsue_struct_size(CIMSUE_STRUCT_COUNT_), -1);
 
     // 프로파일 dispatch 확장 평탄화

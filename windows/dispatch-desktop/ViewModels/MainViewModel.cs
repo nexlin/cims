@@ -350,6 +350,7 @@ public sealed partial class MainViewModel : ObservableObject
         patrol.Floor = new CimsUe.FloorInfo(CimsUe.FloorState.Speaking, Array.Empty<CimsUe.Talker>(), true, 0, -1, 0, "", 0, 1, 0, 0);
         patrol.Speaker = "나"; patrol.TalkGauge = 0.6;
         PttChannels.Tick(); TalkBar.Refresh(); Scoped.Rebuild();
+        McData.SeedPreview(s.Groups[0]);
     }
 
     public void Tick(DateTime now)

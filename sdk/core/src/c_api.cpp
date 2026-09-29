@@ -516,6 +516,8 @@ struct cimsue_csc {
     cimsue_http_result_t       httpC{};
     TlsPeerExpiry              tlsPeer;
     cimsue_tls_peer_expiry_t   tlsPeerC{};
+    FdUpload                   fd;
+    cimsue_fd_upload_t         fdC{};
 };
 
 namespace {
@@ -541,6 +543,12 @@ void fillHttp(cimsue_csc_t* c) {
     c->httpC.etag = C(c->http.etag);
     c->httpC.body = reinterpret_cast<const uint8_t*>(c->http.body.data());
     c->httpC.body_len = (int32_t)c->http.body.size();
+}
+
+FdFile fdFileOf(const cimsue_fd_file_t* f) {
+    FdFile o;
+    if (f) { o.url = S(f->url); o.name = S(f->name); o.type = S(f->type); o.size = f->size; }
+    return o;
 }
 
 }  // namespace
@@ -818,6 +826,28 @@ cimsue_status_t CIMSUE_CALL cimsue_engine_send_sds(cimsue_engine_t* e, int32_t a
     return CIMSUE_OK;
 }
 
+cimsue_status_t CIMSUE_CALL cimsue_engine_send_group_fd(cimsue_engine_t* e, int32_t account_id, const char* group_id,
+                                                        const cimsue_fd_file_t* file, char* msg_id_out,
+                                                        int32_t msg_id_cap, int64_t* token_out) {
+    if (!e) { g_lastError = "no engine"; return -1; }
+    SdsSend r = e->eng.sendGroupFd(account_id, S(group_id), fdFileOf(file));
+    if (token_out) *token_out = r.token;
+    if (!r.ok) { g_lastError = r.reason.empty() ? "sendGroupFd failed" : r.reason; return -1; }
+    copyOut(r.msgId, msg_id_out, msg_id_cap);
+    return CIMSUE_OK;
+}
+
+cimsue_status_t CIMSUE_CALL cimsue_engine_send_fd(cimsue_engine_t* e, int32_t account_id, const char* peer,
+                                                  const cimsue_fd_file_t* file, char* msg_id_out,
+                                                  int32_t msg_id_cap, int64_t* token_out) {
+    if (!e) { g_lastError = "no engine"; return -1; }
+    SdsSend r = e->eng.sendFd(account_id, S(peer), fdFileOf(file));
+    if (token_out) *token_out = r.token;
+    if (!r.ok) { g_lastError = r.reason.empty() ? "sendFd failed" : r.reason; return -1; }
+    copyOut(r.msgId, msg_id_out, msg_id_cap);
+    return CIMSUE_OK;
+}
+
 cimsue_status_t CIMSUE_CALL cimsue_engine_send_sds_notification(cimsue_engine_t* e, int32_t account_id,
                                                                 const char* peer, const char* conv_id,
                                                                 const char* msg_id, int32_t notif_type, int64_t* token_out) {
@@ -1031,6 +1061,28 @@ cimsue_status_t CIMSUE_CALL cimsue_csc_request(cimsue_csc_t* c, const char* acce
     return st;
 }
 
+cimsue_status_t CIMSUE_CALL cimsue_csc_upload_fd(cimsue_csc_t* c, const char* access_token, const uint8_t* data,
+                                                 int32_t data_len, const char* name, const char* mime,
+                                                 const char* group_id, cimsue_fd_upload_t* out) {
+    if (!c) return -1;
+    c->fd = FdUpload();
+    std::string d = (data && data_len > 0) ? std::string(reinterpret_cast<const char*>(data), (size_t)data_len) : std::string();
+    cimsue_status_t st = ret(c->cli->uploadFd(S(access_token), d, S(name), S(mime), S(group_id), c->fd));
+    c->fdC.id = C(c->fd.id); c->fdC.url = C(c->fd.url); c->fdC.name = C(c->fd.name); c->fdC.size = c->fd.size;
+    if (out) *out = c->fdC;
+    return st;
+}
+
+cimsue_status_t CIMSUE_CALL cimsue_csc_download_fd(cimsue_csc_t* c, const char* access_token, const char* url,
+                                                   cimsue_http_result_t* out) {
+    if (!c) return -1;
+    c->http = HttpResult();
+    cimsue_status_t st = ret(c->cli->downloadFd(S(access_token), S(url), c->http));
+    fillHttp(c);
+    if (out) *out = c->httpC;
+    return st;
+}
+
 cimsue_status_t CIMSUE_CALL cimsue_csc_get_user_profile(cimsue_csc_t* c, const char* access_token,
                                                         const char* user_uri, const char* etag,
                                                         cimsue_xcap_doc_t* out) {
@@ -1134,6 +1186,8 @@ int32_t CIMSUE_CALL cimsue_struct_size(cimsue_struct_id_t id) {
     case CIMSUE_STRUCT_DISPATCH_TARGET:   return (int32_t)sizeof(cimsue_dispatch_target_t);
     case CIMSUE_STRUCT_GROUP_MEMBER:      return (int32_t)sizeof(cimsue_group_member_t);
     case CIMSUE_STRUCT_GROUP_DOC:         return (int32_t)sizeof(cimsue_group_doc_t);
+    case CIMSUE_STRUCT_FD_FILE:           return (int32_t)sizeof(cimsue_fd_file_t);
+    case CIMSUE_STRUCT_FD_UPLOAD:         return (int32_t)sizeof(cimsue_fd_upload_t);
     default:                              return -1;
     }
 }

@@ -115,6 +115,13 @@ public:
     SdsSend sendSdsNotification(int accountId, const std::string& peer, const std::string& convId,
                                 const std::string& msgId, int notifType);
 
+    // ── MCData FD (TS 24.282 §10.2 — HTTP 콘텐츠 서버 경유, mcdata_messaging.md §4.5) ──
+    /** 그룹 FD 알림 발신 — file 은 먼저 CscClient::uploadFd(groupId 지정)로 올린 결과. MESSAGE 본문 = mcdata-info(group-fd)
+     *  + FD SIGNALLING PAYLOAD(FILEURL·Metadata). 서버가 그룹 allow_fd 로 게이트·팬아웃한다. 반환·상관 규약은 sendGroupSds 와 같다. */
+    SdsSend sendGroupFd(int accountId, const std::string& groupId, const FdFile& file);
+    /** 1:1 FD 알림 발신(request-type one-to-one-fd) — file 은 groupId 없이 올린 결과. peer 는 상대 bare 번호. */
+    SdsSend sendFd(int accountId, const std::string& peer, const FdFile& file);
+
     // ── 장치 ──
     std::vector<AudioDeviceInfo> audioDevices() const;
     /** 장치 목록 재열거(핫플러그 뒤). 플랫폼 SDK 가 장치 변경 통지(WM_DEVICECHANGE 등)에서 부른다. */

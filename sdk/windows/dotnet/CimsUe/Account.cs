@@ -122,6 +122,36 @@ public sealed unsafe class Account
         return Result<SdsSend>.Success(new SdsSend(Utf8.Str(buf), token));
     }
 
+    // ── MCData FD (TS 24.282 §10.2 — 파일은 먼저 CscClient.UploadFd 로 올린다) ──
+    /// <summary>그룹 FD 알림 발신(request-type group-fd) — file = 그룹 지정 업로드 결과. 반환·상관 규약은 SendGroupSds 와 같다.</summary>
+    public Result<SdsSend> SendGroupFd(string groupId, FdFile file)
+    {
+        ArgumentNullException.ThrowIfNull(file);
+        using var s = new NativeStrings();
+        var f = ToNative(file, s);
+        byte* buf = stackalloc byte[64];
+        long token = -1;
+        int st = cimsue_engine_send_group_fd(Engine.Handle, Id, groupId, &f, buf, 64, &token);
+        if (st != 0) return Result<SdsSend>.Fail(st, Engine.LastError());
+        return Result<SdsSend>.Success(new SdsSend(Utf8.Str(buf), token));
+    }
+
+    /// <summary>1:1 FD 알림 발신(request-type one-to-one-fd) — file = 그룹 없이 올린 결과, peer = 상대 bare 번호.</summary>
+    public Result<SdsSend> SendFd(string peer, FdFile file)
+    {
+        ArgumentNullException.ThrowIfNull(file);
+        using var s = new NativeStrings();
+        var f = ToNative(file, s);
+        byte* buf = stackalloc byte[64];
+        long token = -1;
+        int st = cimsue_engine_send_fd(Engine.Handle, Id, peer, &f, buf, 64, &token);
+        if (st != 0) return Result<SdsSend>.Fail(st, Engine.LastError());
+        return Result<SdsSend>.Success(new SdsSend(Utf8.Str(buf), token));
+    }
+
+    private static cimsue_fd_file_t ToNative(FdFile f, NativeStrings s) =>
+        new() { url = s.Add(f.Url), name = s.Add(f.Name), type = s.Add(f.Type), size = f.Size };
+
     /// <summary>SDS disposition 통지(1:1 대상 peer bare 번호). notifType 1~4. Value = 요청 token.</summary>
     public Result<long> SendSdsNotification(string peer, string convId, string msgId, int notifType)
     {

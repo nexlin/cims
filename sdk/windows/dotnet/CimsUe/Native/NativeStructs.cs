@@ -415,6 +415,24 @@ internal unsafe struct cimsue_http_result_t
 }
 
 [StructLayout(LayoutKind.Sequential)]
+internal unsafe struct cimsue_fd_file_t
+{
+    public byte* url;
+    public byte* name;
+    public byte* type;
+    public long size;
+}
+
+[StructLayout(LayoutKind.Sequential)]
+internal unsafe struct cimsue_fd_upload_t
+{
+    public byte* id;
+    public byte* url;
+    public byte* name;
+    public long size;
+}
+
+[StructLayout(LayoutKind.Sequential)]
 internal unsafe struct cimsue_group_member_t
 {
     public byte* uri;
@@ -451,6 +469,6 @@ internal enum cimsue_struct_id_t
     ENGINE_CONFIG = 0, ACCOUNT_CONFIG, CALL_OPTIONS, GROUP_CALL_OPTIONS, HEADER, REG_INFO, MCPTT_INFO, MEDIA_SOURCE, CALL_INFO,
     TALKER, FLOOR_EVENT, FLOOR_INFO, REQUEST_RESULT, DIALOG_INFO, ROSTER_ENTRY, SDS_MESSAGE, STREAM_STATS, AUDIO_DEVICE_INFO,
     LISTENER, CSC_ENDPOINT, TOKEN_SET, SERVICE_ENDPOINT, SERVICE_PROFILE, DISPATCH_PROFILE, PROFILE, GROUP_SUMMARY, XCAP_DOC,
-    DISPATCH_MEMBER, DISPATCH_TARGET, GROUP_MEMBER, GROUP_DOC, HTTP_RESULT, TLS_PEER_EXPIRY,
+    DISPATCH_MEMBER, DISPATCH_TARGET, GROUP_MEMBER, GROUP_DOC, HTTP_RESULT, TLS_PEER_EXPIRY, FD_FILE, FD_UPLOAD,
     COUNT_,
 }

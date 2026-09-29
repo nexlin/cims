@@ -76,4 +76,20 @@ public partial class MessagesView : UserControl
             e.Handled = true;
         }
     }
+
+    // 파일 끌어 놓기 — 📎 와 같은 경로(MCData FD). 첨부를 쓰지 않는 패널(SMS)·스레드 미선택이면 받지 않는다.
+    private void Root_DragOver(object sender, DragEventArgs e)
+    {
+        bool ok = DataContext is McDataMessagesViewModel { CanAttach: true } && e.Data.GetDataPresent(DataFormats.FileDrop);
+        e.Effects = ok ? DragDropEffects.Copy : DragDropEffects.None;
+        e.Handled = true;
+    }
+
+    private async void Root_Drop(object sender, DragEventArgs e)
+    {
+        if (DataContext is not McDataMessagesViewModel { CanAttach: true, Selected: { } t } vm) return;
+        if (e.Data.GetData(DataFormats.FileDrop) is not string[] files) return;
+        e.Handled = true;
+        foreach (var f in files.Where(System.IO.File.Exists)) await vm.SendFileAsync(t, f);
+    }
 }
