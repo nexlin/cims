@@ -1,4 +1,4 @@
-// ③ 오른쪽 아래 — SMS·LMS: SIP MESSAGE text/plain 1:1 (§4.3). 발신 token 으로 최종 응답 상관. 외부망 번호는 전화 회선 프로파일의
+// [통화] «기록» 의 문자 — SMS·LMS: SIP MESSAGE text/plain 1:1 (§4.4). 발신 token 으로 최종 응답 상관. 외부망 번호는 전화 회선 프로파일의
 // capabilities.smsGateway 가 켜져 있을 때만 전송(게이트웨이 = IBCF→SMSC TS 24.341 / SMPP, §13).
 using CimsUe;
 using DispatchDesktop.Converters;
@@ -93,6 +93,15 @@ public sealed class SmsMessagesViewModel : MessagesViewModelBase
         m.State = ok ? SendState.Sent : SendState.Failed;
         S.Messages.UpdateState(m.Id, m.State);
         if (!ok) S.Notify.Error(ResponseText.Describe(ResponseText.Area.Sms, r.Code, r.Reason), $"{r.Code} {r.Reason}");
+    }
+
+    /// <summary>--ui-preview-canvas 표본 — 저장하지 않는 문자(받은·보낸).</summary>
+    public void SeedPreview(string number, params (bool Out, string Text, int MinutesAgo)[] items)
+    {
+        string key = UserPartConverter.UserPart(number);
+        foreach (var (o, text, ago) in items)
+            Put(new Message { Kind = MessageKind.Sms, ThreadKey = key, Direction = o ? MessageDirection.Out : MessageDirection.In, Peer = number, PeerName = S.Directory.NameOf(key),
+                              Text = text, Time = DateTime.Now.AddMinutes(-ago), Read = o, State = o ? SendState.Sent : SendState.None }, persist: false);
     }
 
     public void OpenNumber(string number)

@@ -1,4 +1,4 @@
-// 감청 창 — 창 닫기 = 종료(설정 "닫기 전 확인"), 원 세션 종료 → "통화 종료됨" 3초 후 자동 닫힘, 위치 기억(프리셋 Monitor).
+// 감청 창 — [창으로] 로 연 별창(기본 표면은 인라인 행·타 채널 행). 창 닫기 = 종료(설정 "닫기 전 확인"), 원 세션 종료 → "통화 종료됨" 3초 후 자동 닫힘, 위치 기억(layout.json Monitor).
 using System.ComponentModel;
 using System.Windows;
 using DispatchDesktop.Services;
@@ -18,7 +18,7 @@ public partial class MonitorWindow : Window
         InitializeComponent();
         _vm = vm; _s = s; _layout = layout;
         DataContext = vm;
-        var b = layout.Current.Monitor;
+        var b = layout.File.Monitor;
         if (b.Left is double bl && b.Top is double bt) { Left = bl; Top = bt; }
         if (b.Width > 0) Width = b.Width;
         if (b.Height > 0) Height = b.Height;
@@ -30,7 +30,7 @@ public partial class MonitorWindow : Window
     private void Remember()
     {
         if (WindowState != WindowState.Normal) return;
-        var m = _layout.Current.Monitor;
+        var m = _layout.File.Monitor;
         m.Left = Left; m.Top = Top; m.Width = Width; m.Height = Height;
     }
 

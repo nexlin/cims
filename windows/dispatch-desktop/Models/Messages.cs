@@ -1,11 +1,11 @@
-// 메시지 모델 — MCData SDS(①)·SMS/LMS(③) 공용. 스레드 키 규칙: 그룹 = groupUri, 1:1 = 상대(mcdata_messaging.md §5 threadKeyOf).
+// 메시지 모델 — MCData SDS([무전] «메시지»)·SMS/LMS([통화] «기록») 공용. 스레드 키 규칙: 그룹 = groupUri, 1:1 = 상대(mcdata_messaging.md §5 threadKeyOf).
 using CommunityToolkit.Mvvm.ComponentModel;
 
 namespace DispatchDesktop.Models;
 
 public enum MessageKind { McData, Sms }
 public enum MessageDirection { In, Out }
-/// <summary>발신 상태 말풍선: 🕓 Pending → ✓ Sent → ✓✓ Delivered / ⚠ Failed(재전송).</summary>
+/// <summary>발신 상태 말풍선: 보내는 중(Pending) → ✓ Sent → ✓✓ Delivered / 실패 Failed([재전송]).</summary>
 public enum SendState { None, Pending, Sent, Delivered, Failed }
 
 public sealed partial class Message : ObservableObject
@@ -43,9 +43,10 @@ public sealed partial class Message : ObservableObject
     public bool IsTransferring => TransferNote.Length > 0;
     public bool CanDownload => IsAttachment && !IsOut && !HasLocalFile && !IsTransferring && FileUrl.Length > 0;
     public string FileSizeText => FileSize <= 0 ? "" : FileSize < 1024 ? $"{FileSize} B" : FileSize < 1024 * 1024 ? $"{FileSize / 1024.0:0.#} KB" : $"{FileSize / (1024.0 * 1024):0.#} MB";
+    /// <summary>보낸 말풍선 아래 상태 — 보내는 중 · ✓(서버 수락) · ✓✓(전달 확인) · 실패([재전송]).</summary>
     public string StateMark => State switch
     {
-        SendState.Pending => "🕓", SendState.Sent => "✓", SendState.Delivered => "✓✓", SendState.Failed => "⚠ 재전송", _ => "",
+        SendState.Pending => "· 보내는 중", SendState.Sent => "✓", SendState.Delivered => "✓✓", SendState.Failed => "· 실패", _ => "",
     };
     partial void OnStateChanged(SendState value) => OnPropertyChanged(nameof(StateMark));
     partial void OnLocalPathChanged(string value) { OnPropertyChanged(nameof(HasLocalFile)); OnPropertyChanged(nameof(CanDownload)); }
@@ -67,6 +68,26 @@ public sealed partial class MessageThread : ObservableObject
 
     public MessageThread(string key, MessageKind kind, string title) { Key = key; Kind = kind; _title = title; }
 
+    /// <summary>대화 목록 줄(§4.4) — 아바타 첫 글자 · 종류 라벨 · 마지막 말 미리 보기(«나: …» / «박경장: …» / 파일 이름) · 시각.</summary>
+    public string Initial => Title.Trim().Length > 0 ? Title.Trim()[..1] : "?";
+    public string KindText => IsGroup ? "그룹" : "1:1";
+    public string LastPreview
+    {
+        get
+        {
+            var m = Messages.LastOrDefault();
+            if (m is null) return "";
+            string body = m.Text.Length > 0 ? m.Text : m.IsAttachment ? "파일 " + m.FileName : "";
+            string who = m.IsOut ? "나" : IsGroup ? m.PeerName : "";
+            return who.Length > 0 ? $"{who}: {body}" : body;
+        }
+    }
+    public string LastTimeText => LastTime == default ? "" : LastTime.Date == DateTime.Today ? LastTime.ToString("HH:mm") : LastTime.ToString("M/d");
+    public bool HasUnread => Unread > 0;
+    partial void OnTitleChanged(string value) => OnPropertyChanged(nameof(Initial));
+    partial void OnUnreadChanged(int value) => OnPropertyChanged(nameof(HasUnread));
+    partial void OnLastTimeChanged(DateTime value) => OnPropertyChanged(nameof(LastTimeText));
+
     public void Add(Message m)
     {
         int i = Messages.Count;
@@ -74,6 +95,7 @@ public sealed partial class MessageThread : ObservableObject
         Messages.Insert(i, m);
         if (m.Time > LastTime) LastTime = m.Time;
         if (!m.Read && m.Direction == MessageDirection.In) Unread++;
+        OnPropertyChanged(nameof(LastPreview));
     }
 
     public void MarkRead()

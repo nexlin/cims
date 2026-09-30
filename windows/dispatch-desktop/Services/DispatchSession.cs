@@ -522,7 +522,7 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
             _history.Start(new[] { HistoryKind.Call, HistoryKind.Ptt, HistoryKind.Message });
     }
 
-    /// <summary>이력 항목 → ②④ 내역 행. 내가 당사자인 항목은 이미 로컬 행이 있으니 건너뛴다 — 서버 이력의 몫은 관제 범위 안 타인의 통화·세션·메시지.
+    /// <summary>이력 항목 → «이벤트»·«기록» 행. 내가 당사자인 항목은 이미 로컬 행이 있으니 건너뛴다 — 서버 이력의 몫은 관제 범위 안 타인의 통화·세션·메시지.
     /// 대표번호 호(부재·동료 응답·내 응답)도 로컬(대표번호 dialog, RecordPilotOutcome)이 즉시 기록하고 이력엔 응답자 필드가 없어 구분이 안 되므로 건너뛴다.</summary>
     private void OnHistory(HistoryEntry e)
     {
@@ -700,7 +700,7 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
     /// <summary>새 그룹 uri — XCAP 은 클라이언트가 문서를 명명한다. 정규형 `tel:g-&lt;소문자 hex 8&gt;`(mcptt_api.md §2; `adhoc-`/`priv-` 예약).</summary>
     public string NewGroupUri() => "tel:g-" + Guid.NewGuid().ToString("N")[..8];
 
-    /// <summary>그룹 종류(prearranged|chat) 반영 — GMS 목록엔 없어 관리 목록(/provisioning/directory/groups)에서 받는다. ① [일제 통화] 판정(편성 그룹만).</summary>
+    /// <summary>그룹 종류(prearranged|chat) 반영 — GMS 목록엔 없어 관리 목록(/provisioning/directory/groups)에서 받는다. [일제 통화] 판정(편성 그룹만).</summary>
     public void NoteGroupTypes(IEnumerable<(string Id, string SessionType)> types)
     {
         foreach (var (id, t) in types) if (id.Length > 0 && t.Length > 0) _groupTypes[id] = t;
@@ -987,7 +987,7 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
     }
 
     /// <summary>내가 연 그룹 통화에 필수 멤버가 응답하지 않은 채 진행됐다(TS 24.379 §6.3.3.3 — 서버 INFO `<non-acknowledged-user>`, 개시자 프로파일
-    /// allow-to-receive-non-acknowledged-users-information 일 때만 온다). ⑤ 이벤트 + 토스트 — 누가 듣지 못하는지 관제사가 알아야 한다.</summary>
+    /// allow-to-receive-non-acknowledged-users-information 일 때만 온다). «이벤트» + 토스트 — 누가 듣지 못하는지 관제사가 알아야 한다.</summary>
     private void OnNonAcknowledged(CallInfo ci)
     {
         var s = Find(ci.CallId);
@@ -1001,7 +1001,7 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
     }
 
     /// <summary>세션 조건 변화(코어 onMcpttCondition — 호 상태와 다른 흐름). 조건만 옮기고, 늦게 닿은 끝난 호의 것은 그 호를 되살리지 않는다.
-    /// 진행 중 격상·해제·«이미 긴급인 그룹에 합류»(합류 200 OK 동봉)가 여기로 배너·카드·⑤ 에 선다.</summary>
+    /// 진행 중 격상·해제·«이미 긴급인 그룹에 합류»(합류 200 OK 동봉)가 여기로 배너·카드·«이벤트» 에 선다.</summary>
     private void OnCondition(McpttConditionChange c)
     {
         var s = Find(c.Info.CallId);
@@ -1030,7 +1030,7 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
             case SessionKind.PttPrivate: Activity.Add(ActivityPanel.Ptt, ActivityKind.Private, $"개별 통화 {s.Title}", ci.Dir == CallDir.Incoming ? "착신" : "발신"); break;
             case SessionKind.PttAdhoc: Activity.Add(ActivityPanel.Ptt, ActivityKind.Adhoc, $"애드혹 그룹 {s.Title}", $"{s.AdhocMembers.Count}명"); break;
             case SessionKind.PttListen: Activity.Add(ActivityPanel.Ptt, ActivityKind.ListenStart, $"청취 시작 {s.Title}"); break;
-            case SessionKind.VolteMonitor: Activity.Add(ActivityPanel.Call, ActivityKind.ListenStart, $"청취 시작 {s.Title}"); break;
+            case SessionKind.VolteMonitor: Activity.Add(ActivityPanel.Call, ActivityKind.ListenStart, $"청취 시작 {s.Title}", number: s.PeerNumber); break;
             case SessionKind.PttChannel when op == Operation.Broadcast: Activity.Add(ActivityPanel.Ptt, ActivityKind.SessionStart, $"{s.Title} 일제 통화 개시"); break;
             case SessionKind.PttChannel when s.IsBroadcast: Activity.Add(ActivityPanel.Ptt, ActivityKind.SessionStart, $"{s.Title} 일제 통화", Directory.Label(ci.Mcptt.CallingUserId)); break;
         }
@@ -1040,7 +1040,7 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
     }
 
     /// <summary>개시 200 OK 의 P-Answer-State: Unconfirmed(RFC 4964) — 서버가 멤버 확인 전에 받았다(첫 멤버가 붙기 전의 말은 서버가 담았다 재생한다,
-    /// TS 24.379 §10.1.1.2.1.1 2A) "may indicate to the MCPTT user"). ⑤ 에 한 번 적는다.</summary>
+    /// TS 24.379 §10.1.1.2.1.1 2A) "may indicate to the MCPTT user"). «이벤트» 에 한 번 적는다.</summary>
     private void NoteAnswerState(SessionItem s)
     {
         if (s.AnswerStateNoted || !s.IsActive || s.Info.Dir != CallDir.Outgoing || !string.Equals(s.Info.AnswerState, "Unconfirmed", StringComparison.OrdinalIgnoreCase)) return;
@@ -1090,7 +1090,7 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
                 Activity.Add(ActivityPanel.Call, ActivityKind.Outgoing, $"발신 {MyExtension} → {s.Title}", s.ConnectedAt is null ? Fail(s) : dur.Trim(' ', '·'), number: s.PeerNumber);
                 break;
             case SessionKind.VolteMonitor:
-                Activity.Add(ActivityPanel.Call, ActivityKind.ListenEnd, $"청취 종료 {s.Title}", dur.Trim(' ', '·'));
+                Activity.Add(ActivityPanel.Call, ActivityKind.ListenEnd, $"청취 종료 {s.Title}", dur.Trim(' ', '·'), number: s.PeerNumber);
                 break;
             case SessionKind.PttListen:
                 Activity.Add(ActivityPanel.Ptt, ActivityKind.ListenEnd, $"청취 종료 {s.Title}", dur.Trim(' ', '·'));
@@ -1233,15 +1233,18 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
                 s.TalkGauge = 0; s.TalkLimitNear = false;
                 break;
             case FloorEventKind.Denied:
-                s.FloorNote = ev.CauseText.Length > 0 ? ev.CauseText : "요청 거부"; CloseTalk(s, now); break;
+                s.FloorNote = ev.CauseText.Length > 0 ? ev.CauseText : "요청 거부"; CloseTalk(s, now);
+                Activity.Add(ActivityPanel.Ptt, ActivityKind.Error, $"{s.Title} 발언 요청 거부", ev.CauseText); break;
             case FloorEventKind.Revoked:
-                s.FloorNote = ev.CauseText.Length > 0 ? ev.CauseText : "발언권 회수"; CloseTalk(s, now); break;
+                s.FloorNote = ev.CauseText.Length > 0 ? ev.CauseText : "발언권 회수"; CloseTalk(s, now);
+                Activity.Add(ActivityPanel.Ptt, ActivityKind.Error, $"{s.Title} 발언권 회수", ev.CauseText); break;
             case FloorEventKind.QueuePosition:
                 s.FloorNote = ev.QueuePosition >= 0 ? $"대기 {ev.QueuePosition + 1}번째" : "대기열"; break;
             case FloorEventKind.QueueCancelled:
                 s.FloorNote = ""; break;
             case FloorEventKind.RequestTimeout:
-                s.FloorNote = "요청 시간 초과"; break;
+                s.FloorNote = "요청 시간 초과";
+                Activity.Add(ActivityPanel.Ptt, ActivityKind.Error, $"{s.Title} 발언 요청 시간 초과"); break;
             case FloorEventKind.TalkLimit:
                 s.TalkLimitNear = true; break;
         }
@@ -1299,7 +1302,10 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
     public bool IsMe(string uri) => string.Equals(UserPartConverter.UserPart(uri), MyPttNumber, StringComparison.Ordinal)
                                    || string.Equals(UserPartConverter.UserPart(uri), MyExtension, StringComparison.Ordinal);
 
-    // ── dialog (BLF·대기열·④) ──
+    /// <summary>--ui-preview-canvas 표본 — 코어 구독 없이 dialog 행을 심는다(대기열·진행 중·그룹원 칸).</summary>
+    public void SeedPreviewDialog(DialogInfo d) => OnDialog(d);
+
+    // ── dialog (BLF·대기열·진행 중) ──
     private void OnDialog(DialogInfo d)
     {
         Log.Info($"dialog watched={d.Watched} id={d.Id} state={d.State} dir={d.Direction} remote={d.RemoteIdentity} callid={d.CallId} full={d.Full}");
@@ -1311,7 +1317,7 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
         {
             // dialog id(Call-ID+태그)는 양 당사자에게 같은 하나의 dialog 다 — 종료는 entity 가 무엇이든 그 id 의 행 전부에 적용한다.
             // (CSP 가 대표번호 포크 호 종료 NOTIFY 의 entity/direction 을 다른 회선으로 붙여 보내는 경우가 있어 — 서버 결함 보고 —
-            //  entity|id 키만 보면 ③ 띠·④ 진행 중에 "통화 중" 행이 남는다.)
+            //  entity|id 키만 보면 «관제 그룹원»·«진행 중» 에 "통화 중" 행이 남는다.)
             var ended = Dialogs.Where(x => x.Id == d.Id).ToList();
             if (ended.Count == 0) return;
             foreach (var r in ended)
@@ -1395,7 +1401,7 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
         return Track(Volte.Join(row.Watched, row.Info), Operation.Join);
     }
 
-    public int MonitorCount => Sessions.Count(s => s.IsWindow);
+    public int MonitorCount => Sessions.Count(s => s.IsListenLeg);
 
     public Result Answer(SessionItem s) => Show(Engine.GetCall(s.CallId).Answer(), ResponseText.Area.Call);
     public Result Reject(SessionItem s) => Show(Engine.GetCall(s.CallId).Reject(486), ResponseText.Area.Call);

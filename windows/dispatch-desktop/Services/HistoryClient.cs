@@ -1,6 +1,6 @@
 // 서버 통합 이력 폴링(P3b) — `GET /provisioning/history?kind=call|ptt|message&since=<cursor>&limit=N` (CSC 4430, PKCE 토큰, ETag/304).
 //
-// 역할: 관제 범위 안에서 끝난 통화·PTT 세션·메시지를 수초 지연으로 ②④ 내역 패널에 합친다. 진행 중 상태는 dialog/conference 구독이
+// 역할: 관제 범위 안에서 끝난 통화·PTT 세션·메시지를 수초 지연으로 «이벤트»·«기록» 에 합친다. 진행 중 상태는 dialog/conference 구독이
 // 정본이라 이 클라이언트는 live 를 대체하지 않는다. 서버가 아직 이 API 를 내지 않으면(404/501) 첫 탐침에서 조용히 꺼진다 —
 // 계약이 확정되면 파서(Parse)만 맞춘다. 요청 형태와 응답 기대치는 dispatch_desktop_ui.md §13.
 //

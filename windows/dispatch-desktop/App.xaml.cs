@@ -89,10 +89,24 @@ public partial class App : Application
             // 관리 화면은 관리 범위 검사를 건너뛴다(프로파일이 없다). 구 스위치 --ui-preview-management = admin.
             string? screenArg = e.Args.FirstOrDefault(a => a.StartsWith("--ui-preview-screen=", StringComparison.OrdinalIgnoreCase))?.Split('=', 2)[1]
                                 ?? (e.Args.Contains("--ui-preview-management", StringComparer.OrdinalIgnoreCase) ? "admin" : null);
+            // 창의 Loaded(스냅샷 재구성 — 화면을 관제로 되돌린다) 뒤에 적용해야 그 화면이 찍힌다
             if (screenArg is not null && _mainVm is not null)
-                _mainVm.Screen = screenArg.ToLowerInvariant() switch { "history" => Models.AppScreen.History, "groups" => Models.AppScreen.PttGroups, _ => Models.AppScreen.Admin };
-            // --ui-preview-canvas: 관제 캔버스(§3.1)에 표본 채널·세션을 심어 카드 2/3줄·발언 바·② 섹션·③ 카드를 그려 본다.
-            if (e.Args.Contains("--ui-preview-canvas", StringComparer.OrdinalIgnoreCase) && _mainVm is not null) _mainVm.SeedCanvasPreview();
+            {
+                var screen = screenArg.ToLowerInvariant() switch { "history" => Models.AppScreen.History, "groups" => Models.AppScreen.PttGroups, _ => Models.AppScreen.Admin };
+                var vmS = _mainVm;
+                _main!.Dispatcher.BeginInvoke(DispatcherPriority.ContextIdle, () => vmS.Screen = screen);
+            }
+            // --ui-preview-canvas: 관제 두 화면(§3.1)에 표본 채널·세션·대기열·기록·메시지를 심는다. --ui-preview-banner=alerts|incoming|none 으로 배너 층을 고른다.
+            string Arg(string name) => e.Args.FirstOrDefault(a => a.StartsWith(name + "=", StringComparison.OrdinalIgnoreCase))?.Split('=', 2)[1] ?? "";
+            if (e.Args.Contains("--ui-preview-canvas", StringComparer.OrdinalIgnoreCase) && _mainVm is not null)
+            {
+                _mainVm.SeedCanvasPreview(Arg("--ui-preview-banner") is { Length: > 0 } banner ? banner : "alerts");
+                // --ui-preview-mode=ptt|call · --ui-preview-panel=channel|other|users|group|event|dir · --ui-preview-keypad — 창이 뜬 뒤(RestoreFromSnapshot 다음) 적용
+                string mode = Arg("--ui-preview-mode"), panel = Arg("--ui-preview-panel");
+                bool keypad = e.Args.Contains("--ui-preview-keypad", StringComparer.OrdinalIgnoreCase);
+                var vm0 = _mainVm;
+                _main!.Dispatcher.BeginInvoke(DispatcherPriority.ContextIdle, () => vm0.ApplyPreview(mode, panel, keypad));
+            }
             // --ui-preview-history=call|ptt: 이력 화면(§4.6)에 표본 하루를 심어(시간대 밴드·표/카드·선택 세션 패널) 서버 없이 그려 본다.
             if (e.Args.FirstOrDefault(a => a.StartsWith("--ui-preview-history=", StringComparison.OrdinalIgnoreCase))?.Split('=', 2)[1] is { Length: > 0 } histKind && _mainVm is not null)
                 _mainVm.HistoryScreen.SeedPreview(histKind.Equals("ptt", StringComparison.OrdinalIgnoreCase) ? Models.HistoryKind.Ptt : Models.HistoryKind.Call);
@@ -100,15 +114,6 @@ public partial class App : Application
             if (e.Args.FirstOrDefault(a => a.StartsWith("--ui-preview-zoom=", StringComparison.OrdinalIgnoreCase))?.Split('=', 2)[1] is { Length: > 0 } zoomArg && _mainVm is not null
                 && double.TryParse(zoomArg, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double z))
                 _mainVm.HistoryScreen.TalkZoom = Math.Clamp(z, 1, ViewModels.SessionHistoryViewModel.TalkZoomMax);
-            // --ui-preview-popover=private|adhoc: ① 발신 팝오버를 그 모드로 채워(애드혹 = 주소록 두 명 체크) --ui-preview-shot 옆 <png>.popover.png 로도 그린다 —
-            //   Popup 은 별도 창이라 주 창 렌더에 찍히지 않는다. 주소록은 --ui-preview-canvas 표본.
-            string? popoverMode = e.Args.FirstOrDefault(a => a.StartsWith("--ui-preview-popover=", StringComparison.OrdinalIgnoreCase))?.Split('=', 2)[1];
-            if (popoverMode is "private" or "adhoc" && _mainVm is not null)
-            {
-                var po = _mainVm.PttOriginate;
-                po.Mode = popoverMode;
-                if (popoverMode == "adhoc") foreach (var u in po.Users.Take(2).ToList()) po.ToggleAdhocCommand.Execute(u);
-            }
             // --ui-preview-shot=<png>: 주 창을 그려 PNG 로 저장하고 종료 — 화면 잠금·원격 세션에서도 XAML 점검이 되게(화면 캡처가 아니라 WPF 렌더).
             if (e.Args.FirstOrDefault(a => a.StartsWith("--ui-preview-shot=", StringComparison.OrdinalIgnoreCase))?.Split('=', 2)[1] is { Length: > 0 } shot && _main is not null)
             {
@@ -126,18 +131,6 @@ public partial class App : Application
                         using var fs = System.IO.File.Create(shot);
                         enc.Save(fs);
                         _log?.Info($"preview shot {pw}x{ph} → {shot}");
-                        if (popoverMode is "private" or "adhoc" && _mainVm is not null)
-                        {
-                            var host = new System.Windows.Controls.Border { Width = 520, Height = 540, Style = (Style)FindResource("PopPanel"),
-                                                                            Child = new Views.PttOriginateView { DataContext = _mainVm.PttOriginate } };
-                            host.Measure(new Size(520, 540)); host.Arrange(new Rect(0, 0, 520, 540)); host.UpdateLayout();
-                            var prt = new System.Windows.Media.Imaging.RenderTargetBitmap(520, 540, 96, 96, System.Windows.Media.PixelFormats.Pbgra32);
-                            prt.Render(host);
-                            var penc = new System.Windows.Media.Imaging.PngBitmapEncoder();
-                            penc.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(prt));
-                            using var pfs = System.IO.File.Create(shot + ".popover.png");
-                            penc.Save(pfs);
-                        }
                     }
                     catch (Exception ex) { _log?.Error("preview shot", ex); }
                     IsExiting = true;                       // 표본 세션·감청 창의 종료 확인을 띄우지 않는다. ExitApp(Logout)은 저장된 로그인을 지우므로 쓰지 않는다
@@ -196,21 +189,11 @@ public partial class App : Application
     {
         var dict = Resources.MergedDictionaries;
         bool dark = theme == "dark";
-        // AvalonDock VS2013 테마 사전은 **앱 전역**에도 병합한다 — DockingManager.Theme 만 놓으면 도킹 크롬이 상태를 바꿀 때(탭 전환·캡션 버튼 글리프)
-        //   ComponentResourceKey(ToolWindowTab*·PanelBorderBrush …) 조회가 매니저 밖(별창·팝업·어도너)에서 실패해 "Resource not found" 경고가 계속 난다.
-        var dockUri = new Uri($"pack://application:,,,/AvalonDock.Themes.VS2013;component/{(dark ? "DarkTheme" : "LightTheme")}.xaml");
-        var dock = dict.FirstOrDefault(d => d.Source is not null && d.Source.OriginalString.Contains("AvalonDock.Themes.VS2013", StringComparison.OrdinalIgnoreCase));
-        if (dock is null || !dock.Source!.OriginalString.EndsWith(dockUri.OriginalString[dockUri.OriginalString.LastIndexOf('/')..], StringComparison.OrdinalIgnoreCase))
-        {
-            if (dock is not null) dict.Remove(dock);
-            dict.Insert(0, new ResourceDictionary { Source = dockUri });
-        }
         var uri = new Uri(dark ? "Themes/Dark.xaml" : "Themes/Light.xaml", UriKind.Relative);
         var current = dict.FirstOrDefault(d => d.Source is not null && (d.Source.OriginalString.EndsWith("Themes/Light.xaml", StringComparison.OrdinalIgnoreCase) || d.Source.OriginalString.EndsWith("Themes/Dark.xaml", StringComparison.OrdinalIgnoreCase)));
         if (current is not null && current.Source!.OriginalString.EndsWith(uri.OriginalString, StringComparison.OrdinalIgnoreCase)) return;
         if (current is not null) dict.Remove(current);
         dict.Insert(0, new ResourceDictionary { Source = uri });
-        _main?.ApplyDockTheme(theme);
     }
 
     /// <summary>자격 만료로 끝난 세션의 사유 — 다음 로그인 창에 한 번 띄운다.</summary>

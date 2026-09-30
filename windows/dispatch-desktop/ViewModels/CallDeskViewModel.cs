@@ -1,4 +1,4 @@
-// ③ 일반통화 운영(왼쪽) — 관제 그룹원 상태 띠(BLF)·대표번호 대기열·내 통화 카드 (§4.3). 전부 DialogInfo·CallInfo 의 투영.
+// [통화] «통화»(§4.3) — 대표번호 대기열·내 통화 카드·관제 그룹원(BLF 4열) · 오늘 집계(«기록» 머리). 전부 DialogInfo·CallInfo 의 투영.
 using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -30,10 +30,18 @@ public sealed partial class MemberChip : ObservableObject
     public bool CanPickup => IsRinging && !IsMe;
     public bool CanMonitor => IsTalking && !IsMe && _s.CanMonitorCalls && _s.MonitorOfDialog(Dialog!.Info.CallId) is null;
     public bool IsMonitoring => IsTalking && _s.MonitorOfDialog(Dialog!.Info.CallId) is not null;
+    /// <summary>4열 칸(§4.3) — 내선(굵게) · 이름 · 상태·경과 · 조작 하나([당겨받기] / [청취] / «청취 중»).</summary>
+    public string ExtText => _s.Directory.DisplayNumber(Extension);
+    public string NameText => IsMe ? "(나)" : Name;
+    public string StateLine => IsIdle ? "대기" : $"{StateText} {DispatchSession.Fmt(Elapsed)}";
+    public bool HasAction => CanPickup || CanMonitor || IsMonitoring;
+    public string ActionText => CanPickup ? "당겨받기" : IsMonitoring ? "청취 중" : "청취";
+    [RelayCommand] private void Act() { if (CanPickup) Pickup(); else if (CanMonitor) Monitor(); }
 
     public void Refresh()
     {
-        foreach (var p in new[] { nameof(State), nameof(StateText), nameof(Peer), nameof(Elapsed), nameof(IsRinging), nameof(IsTalking), nameof(IsIdle), nameof(CanPickup), nameof(CanMonitor), nameof(IsMonitoring) })
+        foreach (var p in new[] { nameof(State), nameof(StateText), nameof(Peer), nameof(Elapsed), nameof(IsRinging), nameof(IsTalking), nameof(IsIdle), nameof(CanPickup), nameof(CanMonitor), nameof(IsMonitoring),
+                                  nameof(StateLine), nameof(HasAction), nameof(ActionText) })
             OnPropertyChanged(p);
     }
     partial void OnDialogChanged(DialogRow? value) => Refresh();
@@ -66,10 +74,12 @@ public sealed partial class QueueItem : ObservableObject
     /// <summary>울리는 그룹원(각 내선 dialog 의 early 로 추정, RLS 전).</summary>
     public string Ringing => string.Join(", ", _s.Dialogs.Where(d => d != Dialog && d.IsEarly && d.IsIncomingLeg && !_s.IsPilot(d.Watched)
                                                              && UserPartConverter.UserPart(d.Info.RemoteIdentity) == UserPartConverter.UserPart(Dialog.Info.RemoteIdentity))
-                                                   .Select(d => d.WatchedNumber));
+                                                   .Select(d => _s.Directory.Label(d.WatchedNumber)));
     public bool RingsMe => _s.Sessions.Any(x => x.IsIncoming && UserPartConverter.UserPart(x.Info.RemoteUri) == UserPartConverter.UserPart(Dialog.Info.RemoteIdentity));
     public string AnsweredBy => IsAnswered ? "응답: " + (_s.Dialogs.FirstOrDefault(d => d != Dialog && d.IsConfirmed && UserPartConverter.UserPart(d.Info.RemoteIdentity) == UserPartConverter.UserPart(Dialog.Info.RemoteIdentity)) is { } m ? _s.Directory.Label(m.WatchedNumber) : "") : "";
-    public void Refresh() { foreach (var p in new[] { nameof(Elapsed), nameof(IsRinging), nameof(IsAnswered), nameof(Ringing), nameof(RingsMe), nameof(AnsweredBy), nameof(Caller) }) OnPropertyChanged(p); }
+    /// <summary>대기열 줄 보조 — 울리는 동안 "울림 7003 서상황, 7004 한지원", 응답되면 "응답: 7004 한지원".</summary>
+    public string InfoLine => IsRinging ? (Ringing.Length > 0 ? $"울림 {Ringing}" : "울림") : AnsweredBy;
+    public void Refresh() { foreach (var p in new[] { nameof(Elapsed), nameof(IsRinging), nameof(IsAnswered), nameof(Ringing), nameof(RingsMe), nameof(AnsweredBy), nameof(Caller), nameof(InfoLine) }) OnPropertyChanged(p); }
     [RelayCommand] private void Pickup() => _s.Pickup(Pilot);
     /// <summary>이 호의 내 착신 leg 만 받는다 — 직접 착신과 동시에 울릴 때 다른 호를 받지 않도록.</summary>
     [RelayCommand] private void Answer()
@@ -103,7 +113,10 @@ public sealed partial class CallCard : ObservableObject
     public bool CanResume => Session.IsHeld;
     public bool CanTransfer => (Session.IsActive || Session.IsHeld) && !IsConsult;
     public bool CanComplete => IsConsult && Session.IsActive;
-    public void Refresh() { foreach (var p in new[] { nameof(Title), nameof(PathBadge), nameof(IsConsult), nameof(HasTransferNote), nameof(CanAnswer), nameof(CanHold), nameof(CanResume), nameof(CanTransfer), nameof(CanComplete) }) OnPropertyChanged(p); }
+    /// <summary>보류 중 카드는 한 줄로 접는다(상대 · 보류 경과 · [보류 해제][종료]) — 활성 통화가 조작을 다 가진다.</summary>
+    public bool IsCompact => Session.IsHeld && !IsConsult;
+    public string StateLine => $"{Session.StateText} {DispatchSession.Fmt(Session.Elapsed)}";
+    public void Refresh() { foreach (var p in new[] { nameof(Title), nameof(PathBadge), nameof(IsConsult), nameof(HasTransferNote), nameof(CanAnswer), nameof(CanHold), nameof(CanResume), nameof(CanTransfer), nameof(CanComplete), nameof(IsCompact), nameof(StateLine) }) OnPropertyChanged(p); }
 
     [RelayCommand] private void Answer() => _s.Answer(Session);
     [RelayCommand] private void Reject() => _s.Reject(Session);
@@ -137,8 +150,6 @@ public sealed partial class CallDeskViewModel : ObservableObject
 
     public event EventHandler<string>? FillRequested;
     public event EventHandler<string>? MenuRequested;
-    /// <summary>오늘 데스크 칩 클릭 → ⑥ 필터(all|pilot|missed|outgoing|transfer|monitor).</summary>
-    public event EventHandler<string>? DeskFilterRequested;
 
     public CallDeskViewModel(DispatchSession s)
     {
@@ -167,7 +178,7 @@ public sealed partial class CallDeskViewModel : ObservableObject
     }
 
     public bool HasDesk => _s.HasDesk;
-    // 오늘 데스크(§4.3) — 이 데스크의 집계: 대표번호 착신(내 응답·동료 응답)과 내 직접 착신. 서버 이력의 타인 간 통화(IsOthers)는 제외.
+    // 오늘 집계(«기록» 머리, §4.4) — 이 데스크의 집계: 대표번호 착신(내 응답·동료 응답)과 내 직접 착신. 서버 이력의 타인 간 통화(IsOthers)는 제외.
     private IEnumerable<ActivityRow> Today => _s.Activity.Call.Where(r => !r.IsOthers && r.Time.Date == DateTime.Today);
     public int TodayAnswered => Today.Count(r => r.Kind == ActivityKind.Incoming);
     public int TodayMissed => Today.Count(r => r.IsMissed);
@@ -177,9 +188,10 @@ public sealed partial class CallDeskViewModel : ObservableObject
     public string EmptyQueueText => "대기 호 없음";
     public bool QueueEmpty => Queue.Count == 0;
     public int QueueCount => Queue.Count;
+    public int CallCount => Calls.Count;
+    public int MemberCount => Members.Count;
     public string PilotText => _s.PilotId.Length > 0 ? "대표 " + UserPartConverter.UserPart(_s.PilotId) : "";
     private void RefreshDesk() { foreach (var p in new[] { nameof(TodayAnswered), nameof(TodayMissed), nameof(TodayOutgoing), nameof(TodayTransfer), nameof(TodayMonitor) }) OnPropertyChanged(p); }
-    [RelayCommand] private void DeskFilter(string f) => DeskFilterRequested?.Invoke(this, f);
 
     private void RebuildMembers()
     {
@@ -195,7 +207,7 @@ public sealed partial class CallDeskViewModel : ObservableObject
             chip.Dialog = _s.Dialogs.FirstOrDefault(d => d.WatchedNumber == c.Number);
             Members.Add(chip);
         }
-        OnPropertyChanged(nameof(HasDesk)); OnPropertyChanged(nameof(MemberExtensions));
+        OnPropertyChanged(nameof(HasDesk)); OnPropertyChanged(nameof(MemberExtensions)); OnPropertyChanged(nameof(MemberCount));
     }
 
     private void OnDialog(DialogRow d)
@@ -254,6 +266,6 @@ public sealed partial class CallDeskViewModel : ObservableObject
         foreach (var m in Members) m.Refresh();
         foreach (var q in Queue) q.Refresh();
         foreach (var c in Calls) c.Refresh();
-        OnPropertyChanged(nameof(EmptyQueueText)); OnPropertyChanged(nameof(QueueEmpty)); OnPropertyChanged(nameof(QueueCount)); OnPropertyChanged(nameof(PilotText));
+        OnPropertyChanged(nameof(EmptyQueueText)); OnPropertyChanged(nameof(QueueEmpty)); OnPropertyChanged(nameof(QueueCount)); OnPropertyChanged(nameof(PilotText)); OnPropertyChanged(nameof(CallCount));
     }
 }

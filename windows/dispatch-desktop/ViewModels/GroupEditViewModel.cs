@@ -162,6 +162,19 @@ public sealed partial class GroupEditViewModel : ObservableObject
         Filter();
     }
 
+    /// <summary>[사용자] 패널에서 고른 사람을 새 그룹 멤버로(참가자) — 패널 «새 PTT 그룹».</summary>
+    public void AddMembers(IEnumerable<(string Number, string Name)> people)
+    {
+        foreach (var (number, name) in people) AddMember(_s.ToTelUri(number), name, chair: false);
+        Filter();
+    }
+
+    /// <summary>패널 «새 PTT 그룹» 의 세션 종류 알약.</summary>
+    public bool IsPrearranged => SessionType == "prearranged";
+    public bool IsChat => SessionType == "chat";
+    [RelayCommand] private void SetSessionType(string t) { if (SessionTypes.Contains(t)) SessionType = t; }
+    partial void OnSessionTypeChanged(string value) { OnPropertyChanged(nameof(IsPrearranged)); OnPropertyChanged(nameof(IsChat)); }
+
     private void AddMember(string uri, string name, bool chair, bool required = false, int? priority = null)
     {
         string number = UserPartConverter.UserPart(uri);

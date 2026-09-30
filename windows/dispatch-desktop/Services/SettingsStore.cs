@@ -35,21 +35,20 @@ public sealed class AppSettings
     public bool AutoHoldOnAnswer { get; set; } = true;
     public bool ConfirmCloseMonitor { get; set; } = true;
     public int MaxMonitorWindows { get; set; } = 4;
+    /// <summary>[무전] «메시지» 따라가기 — 채널 카드를 누르면 그 채널 대화로(기본 켬, §4.4).</summary>
     public bool FollowChannelThread { get; set; } = true;
-    /// <summary>⑤ PTT 이벤트 — 포커스 채널 따라가기(기본 켬, §4.4).</summary>
-    public bool FollowChannelEvents { get; set; } = true;
+    /// <summary>[무전] «이벤트» 따라가기 — 새 줄이 오면 맨 위로(기본 켬, §4.4).</summary>
+    public bool FollowEvents { get; set; } = true;
     /// <summary>잠금 발언(§4.1) — PTT 를 클릭으로 누름 유지(풋스위치·긴 공지용). 기본 꺼짐.</summary>
     public bool LockTalk { get; set; } = false;
-    /// <summary>② 관리 범위 섹션 펼침 상태(기본 접힘, §4.2).</summary>
-    public bool ScopedManageExpanded { get; set; } = false;
     public bool MinimizeToTray { get; set; } = true;
     public int MessageRetentionDays { get; set; } = 30;
 
     // 표시
-    /// <summary>light | dark</summary>
+    /// <summary>light | dark — 기본 밝게(«모드마다 한 화면» 시안이 밝은 테마로 그려졌다, §3.2).</summary>
     public string Theme { get; set; } = "light";
-    /// <summary>pad | book | recent — 일반통화 발신 세그먼트, 마지막 선택 기억(§4.3).</summary>
-    public string OriginateMode { get; set; } = "book";
+    /// <summary>화면 구성 판 — 2 = 모드마다 한 화면. 옛 판(0·1 — 도킹 6패널)의 설정을 처음 읽을 때 테마를 밝게로 한 번 되돌린다.</summary>
+    public int UiVersion { get; set; } = SettingsStore.CurrentUiVersion;
     /// <summary>주소록 CSV 경로 재지정(비면 %APPDATA% 의 directory.csv, 없으면 앱 옆 directory.sample.csv).</summary>
     public string DirectoryCsv { get; set; } = "";
     public int LogLevel { get; set; } = 3;
@@ -62,6 +61,7 @@ public sealed class SettingsStore
         WriteIndented = true, DefaultIgnoreCondition = JsonIgnoreCondition.Never, Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
     };
 
+    public const int CurrentUiVersion = 2;
     public AppSettings Current { get; private set; } = new();
     public event EventHandler? Changed;
 
@@ -70,7 +70,17 @@ public sealed class SettingsStore
         try
         {
             if (File.Exists(AppPaths.Settings))
-                Current = JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(AppPaths.Settings), Json) ?? new AppSettings();
+            {
+                string text = File.ReadAllText(AppPaths.Settings);
+                Current = JsonSerializer.Deserialize<AppSettings>(text, Json) ?? new AppSettings();
+                // UiVersion 이 없던 판(도킹 6패널)의 저장값 — 새 화면의 기본 테마(밝게)로 한 번 되돌린다. 어둡게는 설정에서 다시 고른다
+                if (!text.Contains("\"UiVersion\"", StringComparison.Ordinal) || Current.UiVersion < CurrentUiVersion)
+                {
+                    Current.Theme = "light";
+                    Current.UiVersion = CurrentUiVersion;
+                    Save();
+                }
+            }
         }
         catch (Exception) { Current = new AppSettings(); }
     }

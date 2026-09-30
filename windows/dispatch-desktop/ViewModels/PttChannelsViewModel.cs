@@ -1,5 +1,6 @@
-// ① 내 채널 — 멤버 그룹 전부 + 내가 건 개별 통화·애드혹 그룹 통화의 채널 카드(§4.1). 카드 = 코어 세션·그룹 로스터의 투영.
-// 포커스(보는 채널, 카드 하나·테두리 Primary) ≠ 발언 대상(말하는 채널, 카드 왼쪽 체크 집합 — 발언 바 TalkBarViewModel 이 투영).
+// [무전] 내 채널 — 멤버 그룹 전부 + 내가 건 개별 통화·애드혹 그룹 통화의 채널 카드(§4.1). 카드 = 코어 세션·그룹 로스터의 투영.
+// 카드 네 줄(«핀 번호. 이름» · 발언자 · 접속자 · 참가·경과) + 조작 하나(✓ 발언 대상 / 음소거 / [참여][긴급]).
+// 고른 카드(= 오른쪽 채널 상세가 열린 카드, 테두리 남색) ≠ 발언 대상(말하는 채널, ✓ 집합 — 발언 바 TalkBarViewModel 이 투영).
 // 정렬은 핀 순서 고정(Ctrl+n 근육 기억) — 진행 중이라고 위로 올리지 않는다. 필터·검색 없음(항상 전부).
 using System.Collections.ObjectModel;
 using CimsUe;
@@ -18,14 +19,14 @@ public sealed partial class ChannelCard : ObservableObject
     public CardKind Kind { get; }
     public GroupInfo? Group { get; }
     [ObservableProperty] private SessionItem? _session;
-    /// <summary>포커스 카드(3줄) — 하나만.</summary>
+    /// <summary>고른 카드 — 오른쪽 채널 상세가 이 카드를 보고 있다(하나만).</summary>
     [ObservableProperty] private bool _isSelected;
-    /// <summary>발언 대상(체크) — 참여 중인 반이중 세션만 체크 가능.</summary>
+    /// <summary>발언 대상(✓) — 참여 중인 반이중 세션만 켤 수 있다.</summary>
     [ObservableProperty] private bool _isChecked;
     [ObservableProperty] private bool _deniedFlash;
     /// <summary>핀 번호(Ctrl+n) — 카드가 빠지면 다시 매겨진다.</summary>
     [ObservableProperty] private int _index;
-    /// <summary>미읽음 SDS(④ 스레드) — 1줄 배지 ✉ n.</summary>
+    /// <summary>미읽음 SDS(«메시지» 스레드) — 1줄 수 배지.</summary>
     [ObservableProperty] private int _unread;
     // 2줄 보조 — 마지막 발언(진행 중)·마지막 세션(대기)
     [ObservableProperty] private string _lastSpeaker = "";
@@ -58,7 +59,8 @@ public sealed partial class ChannelCard : ObservableObject
     }
 
     public string Id => Group?.Id ?? Session?.Info.GroupId ?? Session?.CallId.ToString() ?? "";
-    public string Title => Kind == CardKind.Member ? Group!.Name : Kind == CardKind.Adhoc ? "애드혹 · " + string.Join(", ", AdhocChips.Take(3)) + (AdhocChips.Count > 3 ? $" +{AdhocChips.Count - 3}" : "") : Session?.Title ?? "";
+    /// <summary>이름 — 멤버 그룹 = 그룹명, 애드혹 = 초대한 사람 앞 둘 + "+n"(라벨 «애드혹» 이 종류를 말한다), 개별 = 상대.</summary>
+    public string Title => Kind == CardKind.Member ? Group!.Name : Kind == CardKind.Adhoc ? string.Join(", ", AdhocChips.Take(2)) + (AdhocChips.Count > 2 ? $" +{AdhocChips.Count - 2}" : "") : Session?.Title ?? "";
     public string Badge => Kind switch { CardKind.Member => "멤버", CardKind.Private => "개별", _ => "애드혹" };
     public string Duplex => Kind == CardKind.Private ? (Session?.IsFullDuplex == true ? "전이중" : "반이중") : "";
     public bool IsMember => Kind == CardKind.Member;
@@ -115,8 +117,7 @@ public sealed partial class ChannelCard : ObservableObject
     public bool CanToggleRoute => Session is not null && _s.Audio.HasSpeaker;
     public bool IsMuted => Session?.Info.Muted == true;
     public bool HasUnread => Unread > 0;
-    /// <summary>2줄 — 진행 중: [발언 없음 ·] 보조(① 마지막 발언·시각 / 애드혹 응답 n/m / 개별 통화 라우트·번호·발신 시각). 대기: 마지막 세션.</summary>
-    public string Line2 => IsJoined ? string.Join(" · ", new[] { HasSpeaker ? "" : "발언 없음", Aux() }.Where(x => x.Length > 0)) : Group is null ? "" : LastSessionText;
+    /// <summary>보조 — 마지막 발언·시각 / 애드혹 응답 n/m / 개별 통화 라우트·번호·발신 시각(카드 툴팁 DetailTip).</summary>
     private string Aux() => Kind switch
     {
         CardKind.Adhoc => (IsBroadcast ? (IsBroadcastInitiator ? "일제 통화 · 발언을 놓으면 종료 · " : "일제 통화 · 수신 전용 · ") : "") + $"응답 {AdhocAnswered}/{Session!.AdhocMembers.Count}",
@@ -129,16 +130,56 @@ public sealed partial class ChannelCard : ObservableObject
     private int AdhocAnswered => Session is null ? 0 : Math.Min(Session.AdhocMembers.Count, _s.Groups.FirstOrDefault(g => g.Id == Session.Info.GroupId)?.ConnectedCount ?? 0);
     public string LastSessionText => LastSessionEnd is DateTime e ? $"마지막 세션 {e:HH:mm} · {DispatchSession.Fmt(LastSessionLength)} · 참가 {LastParticipants}"
                                      : Group?.HasSession == true ? $"세션 진행 중 · 참가 {Participants} · 미참여" : "세션 없음";
-    /// <summary>3줄 로스터 칩 — 발언 중 녹색, 나 점선, 청취 멤버는 listenVisibility=visible 일 때만.</summary>
+    /// <summary>접속 로스터 — 발언 중 표시, 청취 멤버는 listenVisibility=visible 일 때만(3줄·채널 상세 «접속»).</summary>
     public IReadOnlyList<RosterRow> Roster => (Group?.Roster ?? Array.Empty<RosterEntry>())
         .Where(r => r.Status != "listener" || !_s.ListenHidden)
         .Select(r => new RosterRow(_s.NameOfPtt(r.Uri), r.Uri, r.Status, _s.IsMe(r.Uri), Speaker.Length > 0 && _s.NameOfPtt(r.Uri) == Speaker)).ToList();
-    /// <summary>3줄 칩은 앞 10명 + "+n" — 큰 그룹이 카드를 먹지 않게(전체는 [로스터 전체]).</summary>
-    public IReadOnlyList<RosterRow> RosterPreview => Roster.OrderByDescending(r => r.IsSpeaking).ThenByDescending(r => r.IsMe).Take(10).ToList();
-    public int RosterMore => Math.Max(0, Roster.Count - 10);
-    public bool HasRosterMore => RosterMore > 0;
     public bool CanEdit => Group?.IsOwner == true;
     public IReadOnlyList<string> AdhocChips => Session?.AdhocMembers.Select(_s.NameOfPtt).ToList() ?? new List<string>();
+
+    // ── 카드 네 줄(§4.1, 시안 E1) ──
+    /// <summary>1줄 — «핀 번호. 이름». 핀 번호는 Ctrl+n(발언 대상을 이 채널 하나로)의 n.</summary>
+    public string NumberedTitle => $"{Index}. {Title}";
+    /// <summary>2줄 — 참여 중: 발언자·경과 / 일제 통화 / 발언 없음(floor 사유가 있으면 그것). 미참여: «대기 · 멤버 n» / «세션 진행 중».</summary>
+    public string SubLine => IsJoined
+        ? HasSpeaker ? $"발언 {Speaker} {DispatchSession.Fmt(SpeakerElapsed)}"
+          : IsBroadcast ? (IsBroadcastInitiator ? "일제 통화 · 발언을 놓으면 종료" : "일제 통화 · 수신 전용")
+          : FloorNote.Length > 0 ? FloorNote
+          : IsFullDuplex ? $"전이중 · {(RouteIsSpeaker ? "스피커" : "헤드셋")}" : "발언 없음"
+        : Group?.HasSession == true ? "세션 진행 중" : $"대기 · 멤버 {Group?.MemberCount ?? 0}";
+    /// <summary>2줄 강조 — 내가 발언 중이면 녹색 굵게, floor 사유(거부·회수)는 빨강.</summary>
+    public bool SubIsMe => IsJoined && IsSpeaking;
+    public bool SubIsWarn => IsJoined && !HasSpeaker && !IsBroadcast && FloorNote.Length > 0 && !IsQueued;
+    /// <summary>3줄 — 접속자(나 먼저, 앞 셋 + "+n") / 미참여. 애드혹 = 초대한 사람, 개별 = 상대 · 나.</summary>
+    public string RosterLine
+    {
+        get
+        {
+            if (!IsJoined) return "미참여";
+            IEnumerable<string> names = Kind switch
+            {
+                CardKind.Adhoc => AdhocChips.Prepend("나"),
+                CardKind.Private => new[] { Session?.Title ?? "", "나" },
+                _ => Roster.Where(r => r.Status == "connected").OrderByDescending(r => r.IsMe).Select(r => r.IsMe ? "나" : r.Name).DefaultIfEmpty("나"),
+            };
+            var list = names.Where(n => n.Length > 0).ToList();
+            return string.Join(" · ", list.Take(3)) + (list.Count > 3 ? $" +{list.Count - 3}" : "");
+        }
+    }
+    /// <summary>4줄 — 참가 n · 경과 / 참가 n · 진행(미참여) / 대기.</summary>
+    public string MetaLine => IsJoined ? $"참가 {(IsPrivate ? 2 : Math.Max(1, Participants))} · {DispatchSession.Fmt(Elapsed)}"
+                            : Group?.HasSession == true ? $"참가 {Group.ConnectedCount} · 진행(미참여)"
+                            : LastSessionEnd is DateTime e ? $"대기 · 마지막 {e:HH:mm}" : "대기";
+    /// <summary>카드 툴팁 — 2줄 보조의 긴 판(마지막 발언·애드혹 응답·개별 통화 라우트·마지막 세션).</summary>
+    public string DetailTip => IsJoined ? string.Join(" · ", new[] { HasSpeaker ? "" : "발언 없음", Aux() }.Where(x => x.Length > 0)) : LastSessionText;
+    // 조작 하나(§4.1) — 참여 중 반이중 = ✓(일제 수신이면 점선 비활성) · 전이중 개별 통화 = 음소거 · 미참여 멤버 그룹 = [참여][긴급]
+    public bool ShowTarget => IsJoined && !IsFullDuplex;
+    public bool ShowMute => IsJoined && IsFullDuplex;
+    public bool ShowJoin => IsMember && !IsJoined;
+    public string TargetTip => !CanCheck ? CheckTip : IsChecked ? "발언 대상 — 누르면 뺀다" : "발언 대상으로 넣기";
+    public string MuteTip => IsMuted ? "음소거 중 — 누르면 해제" : "음소거(마이크 끄기)";
+    partial void OnIndexChanged(int value) => OnPropertyChanged(nameof(NumberedTitle));
+    partial void OnIsCheckedChanged(bool value) => OnPropertyChanged(nameof(TargetTip));
 
     public void Refresh()
     {
@@ -146,20 +187,23 @@ public sealed partial class ChannelCard : ObservableObject
                                   nameof(Speaker), nameof(HasSpeaker), nameof(SpeakerElapsed), nameof(Elapsed), nameof(IsEmergency), nameof(IsImminentPeril), nameof(IsSpeaking),
                                   nameof(IsRequesting), nameof(IsQueued), nameof(TalkGauge), nameof(TalkLimitNear), nameof(FloorNote), nameof(RouteIsSpeaker),
                                   nameof(CanToggleRoute), nameof(IsMuted), nameof(Roster), nameof(AdhocChips), nameof(MemberText), nameof(IsFullDuplex), nameof(Duplex),
-                                  nameof(Line2), nameof(LastSessionText), nameof(RosterPreview), nameof(RosterMore), nameof(HasRosterMore), nameof(CanEdit),
+                                  nameof(LastSessionText), nameof(CanEdit),
                                   nameof(CheckTip), nameof(IsBroadcast), nameof(IsBroadcastInitiator), nameof(CanBroadcast), nameof(BroadcastTip),
-                                  nameof(CanPressBroadcast), nameof(CanEmergency), nameof(EmergencyTip), nameof(CanCancelEmergency) })
+                                  nameof(CanPressBroadcast), nameof(CanEmergency), nameof(EmergencyTip), nameof(CanCancelEmergency),
+                                  nameof(NumberedTitle), nameof(SubLine), nameof(SubIsMe), nameof(SubIsWarn), nameof(RosterLine), nameof(MetaLine), nameof(DetailTip),
+                                  nameof(ShowTarget), nameof(ShowMute), nameof(ShowJoin), nameof(TargetTip), nameof(MuteTip) })
             OnPropertyChanged(p);
         if (HasSpeaker && Speaker != LastSpeaker) { LastSpeaker = Speaker; LastSpeakerAt = DateTime.Now; }
         else if (HasSpeaker) LastSpeakerAt ??= DateTime.Now;
     }
 
     /// <summary>세션(참여 또는 로스터 관측)이 끝났다 — 2줄 "마지막 세션" 갱신.</summary>
-    public void RecordSessionEnd(TimeSpan length, int participants) { LastSessionEnd = DateTime.Now; LastSessionLength = length; LastParticipants = participants; OnPropertyChanged(nameof(Line2)); OnPropertyChanged(nameof(LastSessionText)); }
+    public void RecordSessionEnd(TimeSpan length, int participants) { LastSessionEnd = DateTime.Now; LastSessionLength = length; LastParticipants = participants; OnPropertyChanged(nameof(LastSessionText)); OnPropertyChanged(nameof(DetailTip)); OnPropertyChanged(nameof(MetaLine)); }
 
     partial void OnSessionChanging(SessionItem? value) { if (Session is not null && Session != value) Session.PropertyChanged -= _onSource; }
     partial void OnSessionChanged(SessionItem? value) { if (value is not null) value.PropertyChanged += _onSource; Refresh(); }
     partial void OnUnreadChanged(int value) => OnPropertyChanged(nameof(HasUnread));
+    partial void OnLastSessionEndChanged(DateTime? value) => OnPropertyChanged(nameof(MetaLine));
 
     [RelayCommand] private void Join() { if (Group is not null) _s.JoinChannel(Group); }
     [RelayCommand] private void Leave() { if (Session is not null) { if (Kind == CardKind.Member) _s.LeaveChannel(Session); else _s.Hangup(Session); } }
@@ -180,10 +224,9 @@ public sealed record RosterRow(string Name, string Uri, string Status, bool IsMe
 public sealed partial class PttChannelsViewModel : ObservableObject
 {
     private readonly DispatchSession _s;
-    private ChannelCard? _previousSelection;
 
     public ObservableCollection<ChannelCard> Cards { get; } = new();
-    /// <summary>포커스 카드(보는 채널) — ④ 스레드·⑤ 필터가 따라온다.</summary>
+    /// <summary>고른 카드(채널 상세가 보는 채널) — «메시지» 가 그 채널 대화로 따라간다(따라가기 켬).</summary>
     [ObservableProperty] private ChannelCard? _selected;
     public int JoinedCount => Cards.Count(c => c.IsJoined);
     public int TargetCount => Cards.Count(c => c.IsChecked);
@@ -201,10 +244,6 @@ public sealed partial class PttChannelsViewModel : ObservableObject
     public event EventHandler? TargetsChanged;
     /// <summary>로스터 칩·카드 클릭 → 사람 메뉴(§4.1). 메뉴는 MainViewModel.People.</summary>
     public event EventHandler<string>? PersonMenuRequested;
-    /// <summary>✉ n 배지 클릭 → ④ 스레드.</summary>
-    public event EventHandler<GroupInfo>? ThreadRequested;
-    /// <summary>3줄 [편집](내 소유 그룹) → 채널 편집 드로어.</summary>
-    public event EventHandler<GroupInfo>? EditRequested;
 
     public PttChannelsViewModel(DispatchSession s)
     {
@@ -236,7 +275,7 @@ public sealed partial class PttChannelsViewModel : ObservableObject
             if (checkedIds.Contains(c.Id) && c.CanCheck) c.IsChecked = true;
         }
         Renumber();
-        Select(Cards.FirstOrDefault(c => c.Id == selId) ?? Cards.FirstOrDefault(), collapseSame: false);
+        Select(Cards.FirstOrDefault(c => c.Id == selId), collapseSame: false);      // 고른 카드가 없으면 없음(채널 상세가 열릴 때만 고른다)
         OnTargetsChanged();
     }
 
@@ -253,8 +292,8 @@ public sealed partial class PttChannelsViewModel : ObservableObject
                     if (!added) { card.RecordSessionEnd(item.Elapsed, Math.Max(card.Participants, card.LastParticipants)); if (card.IsChecked) SetChecked(card, false); }
                     if (!added && _bcHold is { } h && h.Card == card && h.CallId == item.CallId) ClearHold(h);    // 서버·코어가 먼저 끝냈다
                     card.Session = added ? item : null;
-                    // 일제 통화 개시 — 곧 말하려는 채널: 포커스 + 단일 발언 대상("내가 건 호 우선"과 같은 규칙)
-                    if (added && item.Operation == Operation.Broadcast) { Select(card, collapseSame: false); SetSingleTarget(card); }
+                    // 일제 통화 개시 — 곧 말하려는 채널: 단일 발언 대상("내가 건 호 우선"과 같은 규칙)
+                    if (added && item.Operation == Operation.Broadcast) SetSingleTarget(card);
                 }
                 break;
             case SessionKind.PttPrivate:
@@ -264,12 +303,8 @@ public sealed partial class PttChannelsViewModel : ObservableObject
                     var c = new ChannelCard(_s, item);
                     Cards.Add(c);
                     Renumber();
-                    // "내가 건 호 우선" 규칙 — 내가 건 애드혹 그룹 통화·반이중 개별 통화는 자동 포커스 + 단일 발언 대상(발신자가 곧 말하려는 채널)
-                    if (c.IsAdhoc || !c.IsFullDuplex)
-                    {
-                        _previousSelection = Selected; Select(c, collapseSame: false);
-                        if (item.Info.Dir == CallDir.Outgoing) SetSingleTarget(c);
-                    }
+                    // "내가 건 호 우선" 규칙 — 내가 건 애드혹 그룹 통화·반이중 개별 통화는 단일 발언 대상(발신자가 곧 말하려는 채널)
+                    if ((c.IsAdhoc || !c.IsFullDuplex) && item.Info.Dir == CallDir.Outgoing) SetSingleTarget(c);
                 }
                 else
                 {
@@ -280,7 +315,7 @@ public sealed partial class PttChannelsViewModel : ObservableObject
                         bool wasTarget = c.IsChecked;
                         Cards.Remove(c);
                         Renumber();
-                        if (Selected == c) Select(_previousSelection is not null && Cards.Contains(_previousSelection) ? _previousSelection : Cards.FirstOrDefault(), collapseSame: false);
+                        if (Selected == c) Select(null, collapseSame: false);
                         if (wasTarget) OnTargetsChanged();
                     }
                 }
@@ -315,7 +350,7 @@ public sealed partial class PttChannelsViewModel : ObservableObject
     }
 
     // ── 포커스 ──
-    /// <summary>카드 클릭 — 같은 카드를 다시 클릭하면 접힌다(포커스 없음). Ctrl+n·자동 포커스는 접지 않는다.</summary>
+    /// <summary>카드 고르기 — 같은 카드를 다시 고르면 풀린다(채널 상세 닫힘). 자동 선택(내가 건 호 우선)은 풀지 않는다.</summary>
     public void Select(ChannelCard? c, bool collapseSame = true)
     {
         if (collapseSame && c is not null && Selected == c) c = null;
@@ -325,13 +360,14 @@ public sealed partial class PttChannelsViewModel : ObservableObject
     }
 
     [RelayCommand] private void SelectCard(ChannelCard c) => Select(c);
-    /// <summary>Ctrl+n — 카드 n 포커스 + 발언 대상을 그 채널 하나로(단일 모드 복귀).</summary>
+    /// <summary>Ctrl+n — 발언 대상을 카드 n 하나로(단일 모드 복귀) + «메시지» 가 그 채널로 따라간다. 채널 상세는 열지 않는다.</summary>
+    public event EventHandler<ChannelCard>? IndexPicked;
     public void SelectIndex(int n)
     {
         var c = Cards.FirstOrDefault(x => x.Index == n);
         if (c is null) return;
-        Select(c, collapseSame: false);
         if (c.CanCheck) SetSingleTarget(c);
+        IndexPicked?.Invoke(this, c);
     }
     /// <summary>Ctrl+Shift+n — 카드 n 체크 토글(다중 추가).</summary>
     public void ToggleIndex(int n) { var c = Cards.FirstOrDefault(x => x.Index == n); if (c is not null) ToggleTarget(c); }
@@ -401,6 +437,9 @@ public sealed partial class PttChannelsViewModel : ObservableObject
         if (h.Released) FinishHold(h);
     }
     public void BroadcastUp() { if (!_s.Settings.Current.LockTalk) BroadcastEnd(); }
+    /// <summary>HoldButton 용 — 누름/뗌(채널 상세 [일제 통화]).</summary>
+    [RelayCommand] private void BroadcastPress(ChannelCard c) => BroadcastDown(c);
+    [RelayCommand] private void BroadcastRelease() => BroadcastUp();
     private void BroadcastEnd()
     {
         var h = _bcHold;
@@ -417,21 +456,9 @@ public sealed partial class PttChannelsViewModel : ObservableObject
     private void ClearHold(BroadcastHold h) { if (_bcHold == h) _bcHold = null; h.Card.IsBroadcastHeld = false; }
 
     [RelayCommand] private void PersonMenu(RosterRow r) => PersonMenuRequested?.Invoke(this, r.Uri);
-    [RelayCommand] private void OpenThread(ChannelCard c) { if (c.Group is not null) ThreadRequested?.Invoke(this, c.Group); }
-    [RelayCommand] private void EditGroup(ChannelCard c) { if (c.Group is not null) EditRequested?.Invoke(this, c.Group); }
 
     public void Tick() { foreach (var c in Cards) if (c.Session is not null) c.Refresh(); }
 
-    /// <summary>④ 미읽음 → 카드 배지.</summary>
+    /// <summary>«메시지» 미읽음 → 카드 수 배지.</summary>
     public void SetUnread(Func<GroupInfo, int> unreadOf) { foreach (var c in Cards) if (c.Group is not null) c.Unread = unreadOf(c.Group); }
-
-    /// <summary>[채널로] — ① 카드(멤버 그룹·내 개별/애드혹)로 포커스만 옮긴다. 합류하지 않는다 — 참여는 카드의 [참여]다.
-    /// ① 에 카드가 없으면(청취 범위 그룹 등) false — 호출자가 ② 카드로 옮긴다(비멤버 sendrecv 합류는 서버가 403, TS 24.379 §10.1.1).</summary>
-    public bool FocusGroup(string groupId)
-    {
-        var c = Cards.FirstOrDefault(x => x.Id == groupId);
-        if (c is null) return false;
-        Select(c, collapseSame: false);
-        return true;
-    }
 }

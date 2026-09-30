@@ -1,4 +1,4 @@
-// 사람 메뉴 + 통합 검색 Ctrl+K (§4.1) — 서버 전화번호부(VoLTE·PTT 번호 동시)를 사람 단위로 묶어, 회선별 행동(개별 통화·애드혹에 추가·SDS / 통화·문자)을 한 곳에서.
+// 사람 메뉴 + 통합 검색 Ctrl+K (§4.1) — 서버 전화번호부(VoLTE·PTT 번호 동시)를 사람 단위로 묶어, 회선별 행동(통화·문자 / 개별 통화·무전 메시지·애드혹에 추가 / 기록 보기)을 한 곳에서.
 // 사람 행 = 이름 · 소속 · PTT 상태(로스터 파생) · 내선 상태(dialog) + 행동 버튼. 그룹 행 = [채널로][멤버 추가]. 행동은 이벤트로 MainViewModel 이 잇는다.
 using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -47,7 +47,7 @@ public sealed partial class PersonActionsViewModel : ObservableObject
     public ObservableCollection<object> Results { get; } = new();
     public bool HasResults => Results.Count > 0;
 
-    // ── 사람 메뉴(로스터 칩·⑤ 행·③ 그룹원 칩·주소록 행) ──
+    // ── 사람 메뉴(채널 상세 로스터·사용자·주소록 줄·그룹원 칸·기록 머리) ──
     [ObservableProperty] private bool _menuOpen;
     [ObservableProperty] private PersonEntry? _menuEntry;
 
@@ -58,6 +58,8 @@ public sealed partial class PersonActionsViewModel : ObservableObject
     public event EventHandler<string>? SmsRequested;
     public event EventHandler<string>? ChannelRequested;
     public event EventHandler<GroupInfo>? AddMemberRequested;
+    /// <summary>[기록 보기] — [통화] «기록» 에서 그 사람의 통화·문자 한 줄기.</summary>
+    public event EventHandler<string>? RecordRequested;
 
     public PersonActionsViewModel(DispatchSession s)
     {
@@ -160,6 +162,7 @@ public sealed partial class PersonActionsViewModel : ObservableObject
     [RelayCommand] private void Sms(PersonEntry p) { if (p.HasLine) SmsRequested?.Invoke(this, p.Extension); Close(); }
     [RelayCommand] private void Channel(GroupEntry g) { ChannelRequested?.Invoke(this, g.Group.Id); Close(); }
     [RelayCommand] private void AddMember(GroupEntry g) { AddMemberRequested?.Invoke(this, g.Group); Close(); }
+    [RelayCommand] private void Record(PersonEntry p) { string n = p.HasLine ? p.Extension : p.PttNumber; if (n.Length > 0) RecordRequested?.Invoke(this, n); Close(); }
     private void Close() { MenuOpen = false; SearchOpen = false; }
 
     /// <summary>Ctrl+K 목록 — ↑↓ 이동, Enter = 첫 행동(사람: PTT 번호 있으면 개별 통화, 없으면 통화 / 그룹: 채널로).</summary>

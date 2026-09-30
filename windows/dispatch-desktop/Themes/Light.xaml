@@ -5,7 +5,7 @@
     <SolidColorBrush x:Key="Brush.BgSoft" Color="#F8FAFC" />
     <SolidColorBrush x:Key="Brush.Surface" Color="#FFFFFF" />
     <SolidColorBrush x:Key="Brush.Surface2" Color="#EEF1F7" />
-    <SolidColorBrush x:Key="Brush.Hover" Color="#F2F6FE" />
+    <SolidColorBrush x:Key="Brush.Hover" Color="#F2F4F9" />
     <SolidColorBrush x:Key="Brush.Border" Color="#E5E8F1" />
     <SolidColorBrush x:Key="Brush.BorderStrong" Color="#C9CFE0" />
     <SolidColorBrush x:Key="Brush.Text" Color="#161A2B" />
@@ -13,18 +13,38 @@
     <SolidColorBrush x:Key="Brush.Primary" Color="#4F46E5" />
     <SolidColorBrush x:Key="Brush.PrimarySoft" Color="#EEF2FF" />
     <SolidColorBrush x:Key="Brush.Ring" Color="#D97706" />
-    <SolidColorBrush x:Key="Brush.RingSoft" Color="#FFF4E0" />
+    <SolidColorBrush x:Key="Brush.RingSoft" Color="#FEF5E6" />
     <SolidColorBrush x:Key="Brush.Talk" Color="#16A34A" />
     <SolidColorBrush x:Key="Brush.TalkSoft" Color="#ECFDF5" />
     <SolidColorBrush x:Key="Brush.Held" Color="#2563EB" />
     <SolidColorBrush x:Key="Brush.HeldSoft" Color="#E8F0FF" />
     <SolidColorBrush x:Key="Brush.Mon" Color="#7C3AED" />
-    <SolidColorBrush x:Key="Brush.MonSoft" Color="#F3ECFF" />
-    <SolidColorBrush x:Key="Brush.Listen" Color="#0D9488" />
+    <SolidColorBrush x:Key="Brush.MonSoft" Color="#F7F3FF" />
+    <SolidColorBrush x:Key="Brush.Listen" Color="#0F766E" />
     <SolidColorBrush x:Key="Brush.ListenSoft" Color="#E6F7F5" />
-    <SolidColorBrush x:Key="Brush.Emg" Color="#DC2626" />
-    <SolidColorBrush x:Key="Brush.EmgSoft" Color="#FFF1F2" />
+    <SolidColorBrush x:Key="Brush.Emg" Color="#C62828" />
+    <SolidColorBrush x:Key="Brush.EmgSoft" Color="#FDECEA" />
     <SolidColorBrush x:Key="Brush.MeterTrack" Color="#E5E8F1" />
     <SolidColorBrush x:Key="Brush.Wire" Color="#9AA3B8" />
     <SolidColorBrush x:Key="Brush.OnAccent" Color="#FFFFFF" />
+    <!-- 시안 «모드마다 한 화면» — 무채 + 남색(Primary) 한 가지 + 상태색. 먹(Ink) = 채운 버튼·선택 칩, TextSoft = 보조 글자, Faint = 흐린 글자·빈 체크 -->
+    <SolidColorBrush x:Key="Brush.Ink" Color="#161A2B" />
+    <SolidColorBrush x:Key="Brush.OnInk" Color="#FFFFFF" />
+    <SolidColorBrush x:Key="Brush.TextSoft" Color="#334155" />
+    <SolidColorBrush x:Key="Brush.Faint" Color="#94A3B8" />
+    <SolidColorBrush x:Key="Brush.Panel" Color="#F6F7FA" />
+    <SolidColorBrush x:Key="Brush.Rail" Color="#EEF1F7" />
+    <SolidColorBrush x:Key="Brush.Line" Color="#EEF1F7" />
+    <SolidColorBrush x:Key="Brush.EmgInk" Color="#7A1212" />
+    <SolidColorBrush x:Key="Brush.EmgEdge" Color="#F5B5B0" />
+    <SolidColorBrush x:Key="Brush.Peril" Color="#F59E0B" />
+    <SolidColorBrush x:Key="Brush.PerilEdge" Color="#D98A06" />
+    <SolidColorBrush x:Key="Brush.OnPeril" Color="#161A2B" />
+    <SolidColorBrush x:Key="Brush.RingBanner" Color="#FDEBC6" />
+    <SolidColorBrush x:Key="Brush.RingEdge" Color="#F5C77A" />
+    <SolidColorBrush x:Key="Brush.RingInk" Color="#92400E" />
+    <SolidColorBrush x:Key="Brush.MonEdge" Color="#E9DDFF" />
+    <SolidColorBrush x:Key="Brush.TalkInk" Color="#15803D" />
+    <SolidColorBrush x:Key="Brush.OnEmgInk" Color="#FFFFFF" />
+    <SolidColorBrush x:Key="Brush.OnMon" Color="#FFFFFF" />
 </ResourceDictionary>

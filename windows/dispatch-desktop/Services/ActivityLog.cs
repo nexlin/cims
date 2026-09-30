@@ -1,4 +1,4 @@
-// 내역 링 버퍼 — 패널(②④)당 200 행·하루, CSV 내보내기 (§4.2·§4.4).
+// 내역 링 버퍼 — 종류(PTT → «이벤트», 통화 → «기록»)당 200 행·하루, CSV 내보내기 (§4.4).
 using System.Collections.ObjectModel;
 using System.Globalization;
 using System.Text;

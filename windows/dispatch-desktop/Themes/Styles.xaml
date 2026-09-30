@@ -20,6 +20,10 @@
     <c:RouteIconConverter x:Key="RouteIcon" />
     <c:RatioToLengthConverter x:Key="RatioLen" />
     <c:ScaleToLengthConverter x:Key="ScaleLen" />
+    <c:HalfRadiusConverter x:Key="HalfRadius" />
+    <c:InitialConverter x:Key="Initial" />
+    <c:PickConverter x:Key="Pick" />
+    <c:SameRefConverter x:Key="SameRef" />
     <BooleanToVisibilityConverter x:Key="B2V" />
 
     <FontFamily x:Key="Font.Ui">Noto Sans KR, Pretendard, Malgun Gothic, Segoe UI, sans-serif</FontFamily>
@@ -481,31 +485,416 @@
         <Setter Property="Foreground" Value="{DynamicResource Brush.Muted}" />
         <Setter Property="Margin" Value="2,6,0,4" />
     </Style>
-    <!-- 채널 카드 상태 점(§4 공통) — 대기 빈 원 · 진행 녹색 · 개별 통화 청록 · 긴급 빨강. 카드 DataTemplate 트리거가 Fill 을 바꾼다 -->
-    <Style TargetType="Ellipse" x:Key="StateDot">
-        <Setter Property="Width" Value="10" />
-        <Setter Property="Height" Value="10" />
-        <Setter Property="Fill" Value="Transparent" />
-        <Setter Property="Stroke" Value="{DynamicResource Brush.Wire}" />
-        <Setter Property="StrokeThickness" Value="1.5" />
+    <!-- ══ 시안 «모드마다 한 화면»(§3.2 시각 언어) — 먹(Ink) 채움·외곽선 알약, 각진 필터 칩, 19px 라벨, 둥근 발언 대상 ✓ ══ -->
+    <Style TargetType="TextBlock" x:Key="Title16">
+        <Setter Property="FontSize" Value="16" />
+        <Setter Property="FontWeight" Value="Bold" />
         <Setter Property="VerticalAlignment" Value="Center" />
-        <Setter Property="Margin" Value="0,0,6,0" />
     </Style>
-    <!-- 채널 카드(①②) — 2줄 58px, 포커스 3줄. 얇은 패딩 -->
-    <Style TargetType="Border" x:Key="ChannelCard" BasedOn="{StaticResource Card}">
-        <Setter Property="Padding" Value="8,6" />
-        <Setter Property="Margin" Value="0,0,0,6" />
+    <Style TargetType="TextBlock" x:Key="Soft">
+        <Setter Property="Foreground" Value="{DynamicResource Brush.TextSoft}" />
+    </Style>
+
+    <!-- 알약 버튼 — 기본 = 흰 바탕 + 먹 외곽선 1.5. 모서리 = 높이/2 -->
+    <Style TargetType="Button" x:Key="Pill.Line">
+        <Setter Property="Height" Value="32" />
+        <Setter Property="Padding" Value="12,0" />
+        <Setter Property="FontSize" Value="12.5" />
+        <Setter Property="FontWeight" Value="Bold" />
+        <Setter Property="Foreground" Value="{DynamicResource Brush.Ink}" />
+        <Setter Property="Background" Value="{DynamicResource Brush.Surface}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource Brush.Ink}" />
+        <Setter Property="BorderThickness" Value="1.5" />
         <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="SnapsToDevicePixels" Value="True" />
+        <Setter Property="ToolTipService.ShowOnDisabled" Value="True" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="Bd" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}"
+                            CornerRadius="{Binding ActualHeight, RelativeSource={RelativeSource Self}, Converter={StaticResource HalfRadius}}" Padding="{TemplateBinding Padding}">
+                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" RecognizesAccessKey="True" />
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Bd" Property="Opacity" Value="0.88" /></Trigger>
+                        <Trigger Property="IsPressed" Value="True"><Setter TargetName="Bd" Property="Opacity" Value="0.75" /></Trigger>
+                        <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.4" /></Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
     </Style>
-    <!-- 발언 바 PTT 버튼(40px) — 대기 녹색 외곽 · 요청 주황 · 발언 녹색 채움 · 거부 빨강 -->
-    <Style TargetType="Button" x:Key="Btn.Ptt" BasedOn="{StaticResource Btn}">
-        <Setter Property="Height" Value="40" />
-        <Setter Property="MinWidth" Value="120" />
+    <Style TargetType="Button" x:Key="Pill.Ink" BasedOn="{StaticResource Pill.Line}">
+        <Setter Property="Background" Value="{DynamicResource Brush.Ink}" />
+        <Setter Property="Foreground" Value="{DynamicResource Brush.OnInk}" />
+        <Setter Property="BorderThickness" Value="0" />
+    </Style>
+    <Style TargetType="Button" x:Key="Pill.Soft" BasedOn="{StaticResource Pill.Line}">
+        <Setter Property="BorderBrush" Value="{DynamicResource Brush.BorderStrong}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="FontWeight" Value="Normal" />
+    </Style>
+    <Style TargetType="Button" x:Key="Pill.Red" BasedOn="{StaticResource Pill.Line}">
+        <Setter Property="BorderBrush" Value="{DynamicResource Brush.Emg}" />
+        <Setter Property="Foreground" Value="{DynamicResource Brush.Emg}" />
+    </Style>
+    <Style TargetType="Button" x:Key="Pill.RedFill" BasedOn="{StaticResource Pill.Line}">
+        <Setter Property="Background" Value="{DynamicResource Brush.Emg}" />
+        <Setter Property="Foreground" Value="{DynamicResource Brush.OnAccent}" />
+        <Setter Property="BorderThickness" Value="0" />
+    </Style>
+    <Style TargetType="Button" x:Key="Pill.On" BasedOn="{StaticResource Pill.Line}">
+        <Setter Property="Background" Value="{DynamicResource Brush.Primary}" />
+        <Setter Property="Foreground" Value="{DynamicResource Brush.OnAccent}" />
+        <Setter Property="BorderThickness" Value="0" />
+    </Style>
+    <Style TargetType="Button" x:Key="Pill.Talk" BasedOn="{StaticResource Pill.Line}">
+        <Setter Property="BorderBrush" Value="{DynamicResource Brush.TalkInk}" />
+        <Setter Property="Foreground" Value="{DynamicResource Brush.TalkInk}" />
+    </Style>
+    <!-- 알약 크기 — 조작 행 30 / 패널 행동 36(기본 32) / 바닥 행동 44 -->
+    <Style TargetType="Button" x:Key="Pill.Ink.Sm" BasedOn="{StaticResource Pill.Ink}"><Setter Property="Height" Value="30" /><Setter Property="FontSize" Value="12" /></Style>
+    <Style TargetType="Button" x:Key="Pill.Line.Sm" BasedOn="{StaticResource Pill.Line}"><Setter Property="Height" Value="30" /><Setter Property="FontSize" Value="12" /></Style>
+    <Style TargetType="Button" x:Key="Pill.Soft.Sm" BasedOn="{StaticResource Pill.Soft}"><Setter Property="Height" Value="30" /><Setter Property="FontSize" Value="12" /><Setter Property="Padding" Value="10,0" /></Style>
+    <Style TargetType="Button" x:Key="Pill.Red.Sm" BasedOn="{StaticResource Pill.Red}"><Setter Property="Height" Value="30" /><Setter Property="FontSize" Value="12" /><Setter Property="Padding" Value="10,0" /></Style>
+    <Style TargetType="Button" x:Key="Pill.Ink.Lg" BasedOn="{StaticResource Pill.Ink}"><Setter Property="Height" Value="44" /><Setter Property="FontSize" Value="13.5" /><Setter Property="Padding" Value="20,0" /></Style>
+    <Style TargetType="Button" x:Key="Pill.Line.Lg" BasedOn="{StaticResource Pill.Line}"><Setter Property="Height" Value="44" /><Setter Property="FontSize" Value="13.5" /><Setter Property="Padding" Value="20,0" /></Style>
+    <Style TargetType="Button" x:Key="Pill.Soft.Lg" BasedOn="{StaticResource Pill.Soft}"><Setter Property="Height" Value="44" /><Setter Property="FontSize" Value="13" /><Setter Property="Padding" Value="20,0" /></Style>
+
+    <!-- 네모 버튼(모서리 8) — [발신]·[응답]·통화 카드 조작 -->
+    <Style TargetType="Button" x:Key="Rect.Soft">
+        <Setter Property="Height" Value="34" />
+        <Setter Property="Padding" Value="14,0" />
+        <Setter Property="FontSize" Value="13" />
+        <Setter Property="Foreground" Value="{DynamicResource Brush.Ink}" />
+        <Setter Property="Background" Value="{DynamicResource Brush.Surface}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource Brush.BorderStrong}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="SnapsToDevicePixels" Value="True" />
+        <Setter Property="ToolTipService.ShowOnDisabled" Value="True" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="Bd" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}"
+                            CornerRadius="8" Padding="{TemplateBinding Padding}">
+                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" RecognizesAccessKey="True" />
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Bd" Property="Opacity" Value="0.88" /></Trigger>
+                        <Trigger Property="IsPressed" Value="True"><Setter TargetName="Bd" Property="Opacity" Value="0.75" /></Trigger>
+                        <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.4" /></Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+    <Style TargetType="Button" x:Key="Rect.Line" BasedOn="{StaticResource Rect.Soft}">
+        <Setter Property="BorderBrush" Value="{DynamicResource Brush.Ink}" />
+        <Setter Property="BorderThickness" Value="1.5" />
+        <Setter Property="FontWeight" Value="Bold" />
+    </Style>
+    <Style TargetType="Button" x:Key="Rect.Ink" BasedOn="{StaticResource Rect.Soft}">
+        <Setter Property="Background" Value="{DynamicResource Brush.Ink}" />
+        <Setter Property="Foreground" Value="{DynamicResource Brush.OnInk}" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="FontWeight" Value="Bold" />
+    </Style>
+    <Style TargetType="Button" x:Key="Rect.Red" BasedOn="{StaticResource Rect.Soft}">
+        <Setter Property="Background" Value="{DynamicResource Brush.Emg}" />
+        <Setter Property="Foreground" Value="{DynamicResource Brush.OnAccent}" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="FontWeight" Value="Bold" />
+    </Style>
+    <Style TargetType="ToggleButton" x:Key="Rect.Toggle">
+        <Setter Property="Height" Value="34" />
+        <Setter Property="Padding" Value="12,0" />
+        <Setter Property="FontSize" Value="13" />
+        <Setter Property="FontWeight" Value="Bold" />
+        <Setter Property="Foreground" Value="{DynamicResource Brush.Ink}" />
+        <Setter Property="Background" Value="{DynamicResource Brush.Surface}" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ToggleButton">
+                    <Border x:Name="Bd" Background="{TemplateBinding Background}" BorderBrush="{DynamicResource Brush.Ink}" BorderThickness="1.5" CornerRadius="8" Padding="{TemplateBinding Padding}">
+                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsChecked" Value="True">
+                            <Setter TargetName="Bd" Property="Background" Value="{DynamicResource Brush.Ink}" />
+                            <Setter Property="Foreground" Value="{DynamicResource Brush.OnInk}" />
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.4" /></Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- 필터 칩(모서리 6, 28px) — 켜짐 = 먹 바탕 + 흰 굵은 글자. RadioButton·CheckBox·ToggleButton 공용 -->
+    <Style TargetType="ToggleButton" x:Key="FilterChip">
+        <Setter Property="Height" Value="28" />
+        <Setter Property="Padding" Value="10,0" />
+        <Setter Property="Margin" Value="0,0,5,0" />
+        <Setter Property="FontSize" Value="12" />
+        <Setter Property="Foreground" Value="{DynamicResource Brush.TextSoft}" />
+        <Setter Property="Background" Value="{DynamicResource Brush.Surface}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource Brush.BorderStrong}" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="Focusable" Value="False" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ToggleButton">
+                    <Border x:Name="Bd" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1" CornerRadius="6" Padding="{TemplateBinding Padding}" SnapsToDevicePixels="True">
+                        <ContentPresenter VerticalAlignment="Center" />
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Bd" Property="Background" Value="{DynamicResource Brush.Hover}" /></Trigger>
+                        <Trigger Property="IsChecked" Value="True">
+                            <Setter TargetName="Bd" Property="Background" Value="{DynamicResource Brush.Ink}" />
+                            <Setter TargetName="Bd" Property="BorderBrush" Value="{DynamicResource Brush.Ink}" />
+                            <Setter Property="Foreground" Value="{DynamicResource Brush.OnInk}" />
+                            <Setter Property="FontWeight" Value="Bold" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- 19px 라벨(모서리 4) — 외곽선(개별·애드혹) · 먹(일제) · 빨강(긴급) · 주황(임박) -->
+    <Style TargetType="Border" x:Key="Tag">
+        <Setter Property="Height" Value="19" />
+        <Setter Property="CornerRadius" Value="4" />
+        <Setter Property="Padding" Value="5,0" />
+        <Setter Property="Margin" Value="0,0,4,0" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="BorderBrush" Value="{DynamicResource Brush.Faint}" />
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="TextElement.Foreground" Value="{DynamicResource Brush.TextSoft}" />
+        <Setter Property="TextElement.FontSize" Value="11" />
+        <Setter Property="TextElement.FontWeight" Value="Bold" />
+        <Setter Property="SnapsToDevicePixels" Value="True" />
+    </Style>
+    <Style TargetType="Border" x:Key="Tag.Ink" BasedOn="{StaticResource Tag}">
+        <Setter Property="Background" Value="{DynamicResource Brush.Ink}" /><Setter Property="BorderBrush" Value="{DynamicResource Brush.Ink}" />
+        <Setter Property="TextElement.Foreground" Value="{DynamicResource Brush.OnInk}" />
+    </Style>
+    <Style TargetType="Border" x:Key="Tag.Emg" BasedOn="{StaticResource Tag}">
+        <Setter Property="Background" Value="{DynamicResource Brush.Emg}" /><Setter Property="BorderBrush" Value="{DynamicResource Brush.Emg}" />
+        <Setter Property="TextElement.Foreground" Value="{DynamicResource Brush.OnAccent}" />
+    </Style>
+    <Style TargetType="Border" x:Key="Tag.Peril" BasedOn="{StaticResource Tag}">
+        <Setter Property="Background" Value="{DynamicResource Brush.Peril}" /><Setter Property="BorderBrush" Value="{DynamicResource Brush.Peril}" />
+        <Setter Property="TextElement.Foreground" Value="{DynamicResource Brush.OnPeril}" />
+    </Style>
+    <Style TargetType="Border" x:Key="Tag.Red" BasedOn="{StaticResource Tag}">
+        <Setter Property="BorderBrush" Value="{DynamicResource Brush.Emg}" /><Setter Property="TextElement.Foreground" Value="{DynamicResource Brush.Emg}" />
+    </Style>
+    <Style TargetType="Border" x:Key="Tag.Mon" BasedOn="{StaticResource Tag}">
+        <Setter Property="BorderBrush" Value="{DynamicResource Brush.Mon}" /><Setter Property="TextElement.Foreground" Value="{DynamicResource Brush.Mon}" />
+    </Style>
+    <Style TargetType="Border" x:Key="Tag.Pilot" BasedOn="{StaticResource Tag}">
+        <Setter Property="BorderBrush" Value="{DynamicResource Brush.Peril}" /><Setter Property="TextElement.Foreground" Value="{DynamicResource Brush.RingInk}" />
+    </Style>
+    <Style TargetType="Border" x:Key="Tag.Listen" BasedOn="{StaticResource Tag}">
+        <Setter Property="BorderBrush" Value="{DynamicResource Brush.Listen}" /><Setter Property="TextElement.Foreground" Value="{DynamicResource Brush.Listen}" />
+        <Setter Property="CornerRadius" Value="10" /><Setter Property="Padding" Value="8,0" />
+    </Style>
+    <!-- 수 배지(먹 둥근 8) — 미읽음·세그먼트 수 -->
+    <Style TargetType="Border" x:Key="Count">
+        <Setter Property="CornerRadius" Value="8" />
+        <Setter Property="Padding" Value="6,0" />
+        <Setter Property="MinHeight" Value="17" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+        <Setter Property="Background" Value="{DynamicResource Brush.Ink}" />
+        <Setter Property="TextElement.Foreground" Value="{DynamicResource Brush.OnInk}" />
+        <Setter Property="TextElement.FontSize" Value="11" />
+        <Setter Property="TextElement.FontWeight" Value="Bold" />
+    </Style>
+    <!-- 아바타(원 34 · 그룹은 쓰는 곳이 모서리 8) -->
+    <Style TargetType="Border" x:Key="Avatar">
+        <Setter Property="Width" Value="34" />
+        <Setter Property="Height" Value="34" />
+        <Setter Property="CornerRadius" Value="17" />
+        <Setter Property="Background" Value="{DynamicResource Brush.Border}" />
+        <Setter Property="TextElement.FontSize" Value="13" />
+        <Setter Property="TextElement.FontWeight" Value="Bold" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+
+    <!-- 발언 대상 ✓(원 34) — 빔 = 흰 바탕 + 흐린 ✓ · 켬 = 남색 채움 + 흰 ✓ · 비활성(일제 수신) = 점선 -->
+    <Style TargetType="ToggleButton" x:Key="TargetCheck">
+        <Setter Property="Width" Value="34" />
+        <Setter Property="Height" Value="34" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="Focusable" Value="False" />
+        <Setter Property="ToolTipService.ShowOnDisabled" Value="True" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ToggleButton">
+                    <Grid Background="Transparent">
+                        <Ellipse x:Name="E" Fill="{DynamicResource Brush.Surface}" Stroke="{DynamicResource Brush.BorderStrong}" StrokeThickness="1.5" />
+                        <Path x:Name="Ck" Data="M5,12 L10,17 L20,7" Width="16" Height="16" Stretch="Uniform" Stroke="{DynamicResource Brush.Faint}" StrokeThickness="3"
+                              StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    </Grid>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="E" Property="Stroke" Value="{DynamicResource Brush.Primary}" /></Trigger>
+                        <Trigger Property="IsChecked" Value="True">
+                            <Setter TargetName="E" Property="Fill" Value="{DynamicResource Brush.Primary}" />
+                            <Setter TargetName="E" Property="StrokeThickness" Value="0" />
+                            <Setter TargetName="Ck" Property="Stroke" Value="{DynamicResource Brush.OnAccent}" />
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter TargetName="E" Property="StrokeDashArray" Value="2 2" />
+                            <Setter TargetName="Ck" Property="Stroke" Value="{DynamicResource Brush.Border}" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+    <!-- 원형 아이콘 버튼(34) — 음소거·바로 걸기·사람 메뉴. .Red = 음소거 중(빨강 채움) -->
+    <Style TargetType="Button" x:Key="RoundBtn">
+        <Setter Property="Width" Value="34" />
+        <Setter Property="Height" Value="34" />
+        <Setter Property="Foreground" Value="{DynamicResource Brush.TextSoft}" />
+        <Setter Property="Background" Value="{DynamicResource Brush.Surface}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource Brush.BorderStrong}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="Focusable" Value="False" />
+        <Setter Property="ToolTipService.ShowOnDisabled" Value="True" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="Bd" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}"
+                            CornerRadius="{Binding ActualHeight, RelativeSource={RelativeSource Self}, Converter={StaticResource HalfRadius}}">
+                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Bd" Property="Opacity" Value="0.85" /></Trigger>
+                        <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.4" /></Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+    <Style TargetType="Button" x:Key="RoundBtn.Red" BasedOn="{StaticResource RoundBtn}">
+        <Setter Property="Background" Value="{DynamicResource Brush.Emg}" />
+        <Setter Property="BorderThickness" Value="0" />
+        <Setter Property="Foreground" Value="{DynamicResource Brush.OnAccent}" />
+    </Style>
+
+    <!-- 왼쪽 레일 항목(§3.4) — 알약 56×32 안 아이콘 + 아래 글자(Tag). 선택 = 알약 채움 + 굵은 글자 -->
+    <Style TargetType="ToggleButton" x:Key="RailItem">
+        <Setter Property="Width" Value="72" />
+        <Setter Property="Foreground" Value="{DynamicResource Brush.Ink}" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="Focusable" Value="False" />
+        <Setter Property="Margin" Value="0,0,0,12" />
+        <Setter Property="ToolTipService.ShowOnDisabled" Value="True" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ToggleButton">
+                    <StackPanel Background="Transparent">
+                        <Border x:Name="Pill" Width="56" Height="32" CornerRadius="16" Background="Transparent" HorizontalAlignment="Center">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        </Border>
+                        <TextBlock x:Name="Lbl" Text="{TemplateBinding Tag}" FontSize="12" HorizontalAlignment="Center" Margin="0,4,0,0" />
+                    </StackPanel>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Pill" Property="Background" Value="{DynamicResource Brush.Border}" /></Trigger>
+                        <Trigger Property="IsChecked" Value="True">
+                            <Setter TargetName="Pill" Property="Background" Value="{DynamicResource Brush.BorderStrong}" />
+                            <Setter TargetName="Lbl" Property="FontWeight" Value="Bold" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+    <!-- 탭 줄 모드 세그먼트 [무전|통화] — 먹 외곽선 한 겹 안의 칸, 선택 = 먹 채움 -->
+    <Style TargetType="RadioButton" x:Key="ModeSeg">
+        <Setter Property="Width" Value="104" />
+        <Setter Property="Foreground" Value="{DynamicResource Brush.Ink}" />
+        <Setter Property="Background" Value="{DynamicResource Brush.Surface}" />
+        <Setter Property="BorderThickness" Value="0" />
         <Setter Property="FontSize" Value="14" />
         <Setter Property="FontWeight" Value="Bold" />
-        <Setter Property="BorderThickness" Value="2" />
-        <Setter Property="BorderBrush" Value="{DynamicResource Brush.Talk}" />
-        <Setter Property="Foreground" Value="{DynamicResource Brush.Talk}" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="Focusable" Value="False" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="RadioButton">
+                    <Border x:Name="Bd" Background="{TemplateBinding Background}" BorderBrush="{DynamicResource Brush.Ink}" BorderThickness="{TemplateBinding BorderThickness}">
+                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsChecked" Value="True">
+                            <Setter Property="Background" Value="{DynamicResource Brush.Ink}" />
+                            <Setter Property="Foreground" Value="{DynamicResource Brush.OnInk}" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+    <!-- 탭 줄 오른쪽 끝 목록 버튼([사용자]/[주소록]) — 열린 동안 먹 채움 -->
+    <Style TargetType="ToggleButton" x:Key="ListToggle">
+        <Setter Property="Height" Value="36" />
+        <Setter Property="Padding" Value="16,0" />
+        <Setter Property="FontSize" Value="13.5" />
+        <Setter Property="FontWeight" Value="Bold" />
+        <Setter Property="Foreground" Value="{DynamicResource Brush.Ink}" />
         <Setter Property="Background" Value="{DynamicResource Brush.Surface}" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="Focusable" Value="False" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ToggleButton">
+                    <Border x:Name="Bd" Background="{TemplateBinding Background}" BorderBrush="{DynamicResource Brush.Ink}" BorderThickness="1.5" CornerRadius="18" Padding="{TemplateBinding Padding}">
+                        <ContentPresenter VerticalAlignment="Center" />
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsChecked" Value="True">
+                            <Setter TargetName="Bd" Property="Background" Value="{DynamicResource Brush.Ink}" />
+                            <Setter Property="Foreground" Value="{DynamicResource Brush.OnInk}" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+    <!-- 목록 행 버튼(스레드·기록·사용자·주소록·이벤트 행) — 크롬 없음, 호버 = 연한 바탕. 선택 표시는 쓰는 곳 트리거 -->
+    <Style TargetType="Button" x:Key="RowBtn" BasedOn="{StaticResource Btn.Flat}">
+        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="Bd" Background="{TemplateBinding Background}" Padding="{TemplateBinding Padding}">
+                        <ContentPresenter HorizontalAlignment="Stretch" VerticalAlignment="Center" />
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Bd" Property="Background" Value="{DynamicResource Brush.Hover}" /></Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+    <!-- 칸 경계 끌기(§3.3) — 1px 선 위에 겹친 투명 손잡이 -->
+    <Style TargetType="GridSplitter" x:Key="Seam">
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="Focusable" Value="False" />
+        <Setter Property="ShowsPreview" Value="False" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="GridSplitter">
+                    <Border Background="Transparent" />
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
     </Style>
 </ResourceDictionary>

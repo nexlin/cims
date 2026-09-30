@@ -107,7 +107,7 @@
                             <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
                                 <Button Style="{StaticResource Btn.Danger}" Content="삭제" Command="{Binding DeleteGroupCommand}" Margin="0,0,6,0"
                                         Visibility="{Binding Selected.CanManage, Converter={StaticResource BoolToVis}}" />
-                                <Button Style="{StaticResource Btn}" Content="채널로" Command="{Binding GoToChannelCommand}" ToolTip="관제 캔버스의 채널 카드로 — 멤버 그룹은 ① 내 채널, 청취 범위 그룹은 ② 범위 채널(합류하지 않는다)" />
+                                <Button Style="{StaticResource Btn}" Content="채널로" Command="{Binding GoToChannelCommand}" ToolTip="관제 [무전] 의 채널 상세로 — 멤버 그룹은 내 채널, 청취 범위 그룹은 타 채널(합류하지 않는다)" />
                             </StackPanel>
                             <TextBlock Style="{StaticResource Hint}" Text="{Binding Hint}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
                         </DockPanel>

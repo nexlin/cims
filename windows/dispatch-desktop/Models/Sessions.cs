@@ -10,17 +10,17 @@ public enum AccountKind { Volte, Ptt }
 /// <summary>화면 배치 기준의 세션 종류 — isMcptt/listenOnly/privateCall/adhoc-/joinedDialog 로 판정(§11).</summary>
 public enum SessionKind
 {
-    /// <summary>③ 내 통화 — VoLTE 1:1(외부망 포함).</summary>
+    /// <summary>[통화] «내 통화» — VoLTE 1:1(외부망 포함).</summary>
     VolteCall,
-    /// <summary>감청 창 — INVITE-Join 청취 leg.</summary>
+    /// <summary>VoLTE 감청 — INVITE-Join 청취 leg(«진행 중» 행 확장, [창으로]).</summary>
     VolteMonitor,
-    /// <summary>① 멤버 채널 카드 — 그룹콜.</summary>
+    /// <summary>[무전] 내 채널 카드 — 멤버 그룹콜.</summary>
     PttChannel,
-    /// <summary>① 개별 통화 카드(TS 24.379 private call).</summary>
+    /// <summary>내 채널 개별 통화 카드(TS 24.379 private call).</summary>
     PttPrivate,
-    /// <summary>① 애드혹 그룹 통화 카드(ad hoc group call).</summary>
+    /// <summary>내 채널 애드혹 그룹 통화 카드(ad hoc group call).</summary>
     PttAdhoc,
-    /// <summary>청취 창 — 그룹콜 recvonly.</summary>
+    /// <summary>타 채널 청취 — 그룹콜 recvonly(행 [청취 중], [창으로]).</summary>
     PttListen,
 }
 
@@ -41,7 +41,8 @@ public static class SessionKinds
         return SessionKind.VolteCall;
     }
 
-    public static bool IsWindow(SessionKind k) => k is SessionKind.VolteMonitor or SessionKind.PttListen;
+    /// <summary>듣기만 하는 leg — VoLTE 감청·PTT 청취. 기본 표면은 인라인(«진행 중» 행 확장·타 채널 행)이고 감청 창은 [창으로] 를 눌렀을 때만(§5).</summary>
+    public static bool IsListenLeg(SessionKind k) => k is SessionKind.VolteMonitor or SessionKind.PttListen;
     public static bool IsPttCard(SessionKind k) => k is SessionKind.PttChannel or SessionKind.PttPrivate or SessionKind.PttAdhoc;
 }
 
@@ -74,7 +75,7 @@ public sealed partial class SessionItem : ObservableObject
     [ObservableProperty] private SessionItem? _consultFor;
     /// <summary>전달 진행 표시("전달 중 → 1003").</summary>
     [ObservableProperty] private string _transferNote = "";
-    /// <summary>P-Answer-State Unconfirmed 를 ⑤ 에 적었다(한 번만).</summary>
+    /// <summary>P-Answer-State Unconfirmed 를 «이벤트» 에 적었다(한 번만).</summary>
     public bool AnswerStateNoted { get; set; }
     /// <summary>애드혹 멤버 칩(응답 상태는 로스터).</summary>
     public IReadOnlyList<string> AdhocMembers { get; set; } = Array.Empty<string>();
@@ -88,7 +89,7 @@ public sealed partial class SessionItem : ObservableObject
     }
 
     public SessionKind Kind => SessionKinds.Of(Info);
-    public bool IsWindow => SessionKinds.IsWindow(Kind);
+    public bool IsListenLeg => SessionKinds.IsListenLeg(Kind);
     public bool IsPttCard => SessionKinds.IsPttCard(Kind);
     public bool IsVolteCall => Kind == SessionKind.VolteCall;
     public string PeerNumber => UserPartConverter.UserPart(Info.RemoteUri);
@@ -134,7 +135,7 @@ public sealed partial class SessionItem : ObservableObject
 
     partial void OnInfoChanged(CallInfo value)
     {
-        OnPropertyChanged(nameof(Kind)); OnPropertyChanged(nameof(IsWindow)); OnPropertyChanged(nameof(IsPttCard));
+        OnPropertyChanged(nameof(Kind)); OnPropertyChanged(nameof(IsListenLeg)); OnPropertyChanged(nameof(IsPttCard));
         OnPropertyChanged(nameof(IsVolteCall)); OnPropertyChanged(nameof(PeerNumber)); OnPropertyChanged(nameof(CalledParty));
         OnPropertyChanged(nameof(IsIncoming)); OnPropertyChanged(nameof(IsActive)); OnPropertyChanged(nameof(IsHeld));
         OnPropertyChanged(nameof(IsOutgoing)); OnPropertyChanged(nameof(IsLive)); OnPropertyChanged(nameof(IsEmergency));
@@ -182,7 +183,7 @@ public sealed partial class GroupInfo : ObservableObject
     [ObservableProperty] private string _sessionType = "";
     [ObservableProperty] private IReadOnlyList<RosterEntry> _roster = Array.Empty<RosterEntry>();
     [ObservableProperty] private DateTime? _rosterAt;
-    /// <summary>로스터에 접속 참가자가 생긴 시각(세션 관측 시작) — 없으면 null. ② 진행 중 행의 경과.</summary>
+    /// <summary>로스터에 접속 참가자가 생긴 시각(세션 관측 시작) — 없으면 null. 타 채널 행의 경과.</summary>
     [ObservableProperty] private DateTime? _sessionSince;
 
     public GroupInfo(string id, string uri, string name, int memberCount)
@@ -194,7 +195,7 @@ public sealed partial class GroupInfo : ObservableObject
     partial void OnSessionTypeChanged(string value) => OnPropertyChanged(nameof(IsChat));
 
     public int ConnectedCount => Roster.Count(r => r.Status == "connected");
-    /// <summary>진행 중 세션이 있는가(로스터에 접속 참가자) — ② 진행 중 행.</summary>
+    /// <summary>진행 중 세션이 있는가(로스터에 접속 참가자) — 타 채널 행·카드 «세션 진행 중».</summary>
     public bool HasSession => ConnectedCount > 0;
 
     partial void OnRosterChanged(IReadOnlyList<RosterEntry> value)

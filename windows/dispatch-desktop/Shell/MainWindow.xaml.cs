@@ -1,11 +1,9 @@
-// 주 창 — 도킹 배치 잠금·프리셋(AvalonDock 직렬화, 3×2 패널 6개)·감청 창 관리(§5)·앱 포커스 핫키(§8: Ctrl+n·Ctrl+Shift+n·Ctrl+K·Ctrl+M·Esc·화면 전환 F1~F4)·
-// 화면 별창 관리(§3.4)·통합 검색 팝업 키 처리·트레이 최소화·종료 확인(§6).
+// 주 창 — 고정 배치(모드마다 한 화면, §3.3 — 도킹·프리셋 없음, 창 위치와 칸 경계만 기억)·감청 창 관리(§5, [창으로] 로만)·
+// 앱 포커스 핫키(§8: Ctrl+n·Ctrl+Shift+n·Ctrl+K·Ctrl+M·Esc·화면 전환 F1~F4)·화면 별창 관리(§3.4)·통합 검색 키 처리·[더보기] 메뉴·트레이 최소화·종료 확인(§6).
 using System.ComponentModel;
-using System.IO;
 using System.Windows;
+using System.Windows.Controls.Primitives;
 using System.Windows.Input;
-using AvalonDock.Layout;
-using AvalonDock.Layout.Serialization;
 using DispatchDesktop.Models;
 using DispatchDesktop.Services;
 using DispatchDesktop.ViewModels;
@@ -26,12 +24,8 @@ public partial class MainWindow : Window
         _vm = vm; _layout = layout;
         DataContext = vm;
 
-        vm.MonitorWindowRequested += (_, s) => OpenMonitor(s);
         vm.MonitorWindowActivateRequested += (_, s) => { if (_monitors.TryGetValue(s.CallId, out var w)) { if (w.WindowState == WindowState.Minimized) w.WindowState = WindowState.Normal; w.Activate(); } else OpenMonitor(s); };
         vm.MonitorWindowCloseRequested += (_, s) => { if (_monitors.TryGetValue(s.CallId, out var w)) w.CloseFromSession(); };
-        vm.Desk.PropertyChanged += (_, e) => { if (e.PropertyName == nameof(DeskViewModel.LayoutLocked)) ApplyLock(vm.Desk.LayoutLocked); };
-        vm.Desk.PresetApplyRequested += (_, name) => ApplyPreset(name);
-        vm.Desk.PresetSaveRequested += (_, name) => SavePreset(name);
         vm.Desk.SettingsRequested += (_, _) => OpenSettings();
         vm.ScreenPopOutRequested += (_, s) => OpenScreenWindow(s);
         vm.DispatchActivateRequested += (_, _) => { if (!IsActive) Activate(); };
@@ -40,119 +34,44 @@ public partial class MainWindow : Window
         vm.Desk.LogoutRequested += (_, _) => { if (ConfirmLeave("로그아웃")) { _exitConfirmed = true; ((App)Application.Current).Logout(); } };
         vm.Desk.ExitRequested += (_, _) => { if (ConfirmLeave("종료")) { _exitConfirmed = true; ((App)Application.Current).ExitApp(); } };
 
-        ApplyDockTheme(vm.Session.Settings.Current.Theme);
-        Loaded += (_, _) => { ApplyPreset(_layout.File.Current, restoreWindow: true); ApplyLock(vm.Desk.LayoutLocked); _vm.RestoreFromSnapshot(); };
+        Loaded += (_, _) => { RestoreWindow(); _vm.RestoreFromSnapshot(); };
         Closing += OnClosing;
         PreviewKeyDown += OnKeyDown;
         PreviewKeyUp += OnKeyUp;
     }
 
-    // ── 도킹 배치 (§3.3) ──
-    private IEnumerable<LayoutAnchorable> Anchorables => Dock.Layout.Descendents().OfType<LayoutAnchorable>();
-
-    private void ApplyLock(bool locked)
+    // ── 창 위치(layout.json) ──
+    private void RestoreWindow()
     {
-        foreach (var a in Anchorables) { a.CanFloat = !locked; a.CanMove = !locked; a.CanDockAsTabbedDocument = false; a.CanClose = false; a.CanHide = false; }
+        var b = _layout.File.Window;
+        if (b.Left is double wl && b.Top is double wt) { Left = wl; Top = wt; Width = b.Width; Height = b.Height; }
+        WindowState = b.Maximized ? WindowState.Maximized : WindowState.Normal;
     }
 
-    private string SerializeDock()
-    {
-        using var sw = new StringWriter();
-        new XmlLayoutSerializer(Dock).Serialize(sw);
-        return sw.ToString();
-    }
-
-    private void DeserializeDock(string xml)
-    {
-        if (xml.Length == 0) return;
-        var contents = Anchorables.ToDictionary(a => a.ContentId, a => a.Content);
-        var ser = new XmlLayoutSerializer(Dock);
-        ser.LayoutSerializationCallback += (_, e) => { if (e.Model.ContentId is { } id && contents.TryGetValue(id, out var c)) e.Content = c; else e.Cancel = true; };
-        using var sr = new StringReader(xml);
-        try { ser.Deserialize(sr); }
-        catch (Exception ex) { _vm.Session.Log.Warn("layout deserialize: " + ex.Message); }
-        // 저장 XML 에 없던 패널은 사라지지 않도록 확인 — 없으면 루트 끝에 붙인다(구 프리셋은 LayoutStore 버전 불일치로 이미 버려져 여기 오지 않는다)
-        var present = Anchorables.Select(a => a.ContentId).ToHashSet();
-        var titles = new Dictionary<string, string> { ["mych"] = "⋮⋮ ① 내 채널", ["scoped"] = "⋮⋮ ② 범위 채널", ["call"] = "⋮⋮ ③ 일반통화", ["pttmsg"] = "⋮⋮ ④ PTT 메시지", ["pttlog"] = "⋮⋮ ⑤ PTT 이벤트", ["calllog"] = "⋮⋮ ⑥ 일반통화 내역" };
-        foreach (var (id, content) in contents)
-            if (!present.Contains(id)) Dock.Layout.RootPanel.Children.Add(new LayoutAnchorablePane(new LayoutAnchorable { ContentId = id, Title = titles.GetValueOrDefault(id, id), Content = content, CanClose = false, CanHide = false }));
-    }
-
-    private void ApplyPreset(string name, bool restoreWindow = false)
-    {
-        var p = _layout.Get(name);
-        if (p is null) return;
-        _defaultXml ??= SerializeDock();                       // 기본 배치 = XAML 초기 상태 — 프리셋을 적용하기 전에 찍어 둔다
-        if (name == LayoutStore.DefaultName) DeserializeDock(_defaultXml);
-        else DeserializeDock(p.DockXml);
-        if (restoreWindow && p.Window.Left is double wl && p.Window.Top is double wt)
-        {
-            Left = wl; Top = wt; Width = p.Window.Width; Height = p.Window.Height;
-            WindowState = p.Window.Maximized ? WindowState.Maximized : WindowState.Normal;
-        }
-        _layout.SetCurrent(name);
-        _vm.Desk.LayoutLocked = p.Locked;
-        _vm.Desk.RefreshPresets();
-        ApplyLock(p.Locked);
-    }
-    private string? _defaultXml;
-
-    private WindowBounds CurrentBounds()
-    {
-        var r = RestoreBounds.IsEmpty || double.IsInfinity(RestoreBounds.Left) ? new Rect(Left, Top, Width, Height) : RestoreBounds;
-        return new WindowBounds { Left = r.Left, Top = r.Top, Width = r.Width, Height = r.Height, Maximized = WindowState == WindowState.Maximized };
-    }
-
-    private void SavePreset(string name)
-    {
-        _layout.SaveAs(name, SerializeDock(), _vm.Desk.LayoutLocked, CurrentBounds());
-        _vm.Desk.RefreshPresets();
-    }
-
-    /// <summary>드롭다운 팝업 항목 클릭 → 팝업 닫기(Command 는 그대로 실행된다).</summary>
-    private void DropItem_Click(object sender, RoutedEventArgs e)
-    {
-        MonDrop.IsChecked = false; PresetDrop.IsChecked = false; GearDrop.IsChecked = false;
-    }
-
-    /// <summary>도킹 크롬(패널 제목줄·탭·스플리터)을 앱 테마에 맞춘다 — AvalonDock VS2013 테마.</summary>
-    public void ApplyDockTheme(string theme)
-    {
-        Dock.Theme = new Themes.DockTheme(dark: theme == "dark");
-    }
-
-    private void SavePreset_Click(object sender, RoutedEventArgs e)
-    {
-        DropItem_Click(sender, e);
-        var dlg = new PromptWindow("배치 프리셋 저장", "프리셋 이름", _layout.File.Current == LayoutStore.DefaultName ? "" : _layout.File.Current) { Owner = this };
-        if (dlg.ShowDialog() == true && dlg.Value.Trim().Length > 0) SavePreset(dlg.Value.Trim());
-    }
-
-    private void DeletePreset_Click(object sender, RoutedEventArgs e)
-    {
-        DropItem_Click(sender, e);
-        string cur = _layout.File.Current;
-        if (cur == LayoutStore.DefaultName) return;
-        if (MessageBox.Show(this, $"프리셋 '{cur}' 을 삭제할까요?", "프리셋 삭제", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
-        _layout.Delete(cur);
-        ApplyPreset(LayoutStore.DefaultName);
-    }
-
-    /// <summary>현재 프리셋에 창 위치·잠금만 갱신(배치 XML 은 명시 저장 때만).</summary>
     private void PersistWindow()
     {
-        var p = _layout.Current;
-        p.Window = CurrentBounds();
-        p.Locked = _vm.Desk.LayoutLocked;
+        var r = RestoreBounds.IsEmpty || double.IsInfinity(RestoreBounds.Left) ? new Rect(Left, Top, Width, Height) : RestoreBounds;
+        _layout.File.Window = new WindowBounds { Left = r.Left, Top = r.Top, Width = r.Width, Height = r.Height, Maximized = WindowState == WindowState.Maximized };
         _layout.Save();
     }
 
-    // ── 감청 창 (§5) ──
+    /// <summary>드롭다운 항목 클릭 → 드롭다운 닫기(Command 는 그대로 실행된다).</summary>
+    private void DropItem_Click(object sender, RoutedEventArgs e) { MonDrop.IsChecked = false; SessionDrop.IsChecked = false; }
+
+    // ── [더보기] — PTT 그룹 F3 · 관리 F4 · 설정. 메뉴를 여는 누름은 화면을 바꾸지 않으므로 켜짐 표시는 지금 화면(IsMore)으로 되돌린다 ──
+    private void MoreBtn_Click(object sender, RoutedEventArgs e)
+    {
+        MoreBtn.SetCurrentValue(ToggleButton.IsCheckedProperty, _vm.IsMore);
+        MorePop.IsOpen = !MorePop.IsOpen;
+    }
+    private void MoreItem_Click(object sender, RoutedEventArgs e) => MorePop.IsOpen = false;
+
+    // ── 감청 창(§5) — [창으로] 를 눌렀을 때만 ──
     private void OpenMonitor(SessionItem s)
     {
         if (_monitors.ContainsKey(s.CallId)) return;
         var w = new MonitorWindow(new MonitorWindowViewModel(_vm.Session, s), _vm.Session, _layout) { Owner = null };
-        w.Closed += (_, _) => { _monitors.Remove(s.CallId); _vm.Desk.SyncMonitors(_vm.Session.Sessions); };
+        w.Closed += (_, _) => _monitors.Remove(s.CallId);
         _monitors[s.CallId] = w;
         w.Show();                                     // 포커스를 훔치지 않는다(ShowActivated=false)
     }
@@ -167,13 +86,13 @@ public partial class MainWindow : Window
         // 입력란에 포커스가 있으면 "글자를 넣는 키"만 양보한다 — 관리 화면은 입력 폼투성이라 여기서 다 버리면 폴백 PTT·화면 전환이 죽는다
         if (Keyboard.FocusedElement is System.Windows.Controls.Primitives.TextBoxBase or System.Windows.Controls.PasswordBox && IsTypingKey(e)) return;
         var map = _vm.Session.Settings.Current.HotKeys;
-        // Ctrl+Shift+n = 발언 대상 토글(다중) · Ctrl+n = 포커스 + 단일 발언 대상
+        // Ctrl+Shift+n = 발언 대상 토글(다중) · Ctrl+n = 발언 대상을 그 채널 하나로(+ 메시지 따라가기)
         if (Keyboard.Modifiers == (ModifierKeys.Control | ModifierKeys.Shift) && e.Key >= Key.D1 && e.Key <= Key.D9) { _vm.ToggleChannel(e.Key - Key.D0); e.Handled = true; return; }
         if (Keyboard.Modifiers == ModifierKeys.Control && e.Key >= Key.D1 && e.Key <= Key.D9) { _vm.SelectChannel(e.Key - Key.D0); e.Handled = true; return; }
-        // Ctrl+K 통합 검색 · Ctrl+M 문자 팝오버
+        // Ctrl+K 통합 검색 · Ctrl+M [통화] (기록 — 문자)
         if (Keyboard.Modifiers == ModifierKeys.Control && e.Key == Key.K && !e.IsRepeat) { _vm.People.SearchOpen = !_vm.People.SearchOpen; if (_vm.People.SearchOpen && !IsActive) Activate(); e.Handled = true; return; }
-        if (Keyboard.Modifiers == ModifierKeys.Control && e.Key == Key.M && !e.IsRepeat) { _vm.SmsOpen = !_vm.SmsOpen; if (_vm.SmsOpen) _vm.Screen = AppScreen.Dispatch; e.Handled = true; return; }
-        // Esc = 팝오버·메뉴 닫기(애드혹 구성 중인 발신 팝오버는 [취소]로만)
+        if (Keyboard.Modifiers == ModifierKeys.Control && e.Key == Key.M && !e.IsRepeat) { _vm.SetModeCommand.Execute("call"); e.Handled = true; return; }
+        // Esc = 메뉴·키패드·(고정하지 않은) 패널 닫기
         if (Keyboard.Modifiers == ModifierKeys.None && e.Key == Key.Escape && CloseTransients()) { e.Handled = true; return; }
         foreach (var name in HotKeyMap.LocalNames)
             if (map.TryGetValue(name, out var t) && CimsUe.Platform.HotKey.TryParse(t, out var hk) && Matches(hk, e)) { _vm.OnHotKey(name, true); e.Handled = true; return; }
@@ -199,16 +118,14 @@ public partial class MainWindow : Window
         return k is < Key.F1 or > Key.F24;
     }
 
-    /// <summary>열린 팝오버·메뉴를 닫는다 — 하나라도 닫았으면 true.</summary>
+    /// <summary>열린 메뉴·키패드·패널을 닫는다(안쪽 것부터 하나) — 닫았으면 true.</summary>
     private bool CloseTransients()
     {
-        bool any = false;
-        if (_vm.People.MenuOpen) { _vm.People.MenuOpen = false; any = true; }
-        if (_vm.People.SearchOpen) { _vm.People.SearchOpen = false; any = true; }
-        if (_vm.SmsOpen) { _vm.SmsOpen = false; any = true; }
-        if (_vm.CallOriginateOpen) { _vm.CallOriginateOpen = false; any = true; }
-        if (_vm.PttOriginateOpen && !_vm.PttOriginate.IsComposingAdhoc) { _vm.PttOriginateOpen = false; any = true; }
-        return any;
+        if (_vm.People.MenuOpen) { _vm.People.MenuOpen = false; return true; }
+        if (_vm.People.SearchOpen) { _vm.People.SearchOpen = false; return true; }
+        if (_vm.KeypadOpen) { _vm.KeypadOpen = false; return true; }
+        if (_vm.Panel.IsOpen && !_vm.Panel.Pinned && !_vm.Panel.IsGroup) { _vm.Panel.View = PanelView.None; return true; }
+        return false;
     }
 
     // ── 통합 검색 팝업(Ctrl+K) — 열리면 입력란 포커스, ↑↓ 이동 · Enter 첫 행동 ──
@@ -276,7 +193,7 @@ public partial class MainWindow : Window
     {
         int live = _vm.Session.Sessions.Count(s => s.IsLive);
         if (live == 0) return true;
-        return MessageBox.Show(this, $"진행 중인 세션·감청 창이 {live}개 있습니다. {what}할까요?", what, MessageBoxButton.YesNo, MessageBoxImage.Warning) == MessageBoxResult.Yes;
+        return MessageBox.Show(this, $"진행 중인 세션·감청이 {live}개 있습니다. {what}할까요?", what, MessageBoxButton.YesNo, MessageBoxImage.Warning) == MessageBoxResult.Yes;
     }
 
     private void OnClosing(object? sender, CancelEventArgs e)

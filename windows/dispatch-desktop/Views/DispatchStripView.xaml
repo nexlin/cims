@@ -4,7 +4,7 @@
              xmlns:vm="clr-namespace:DispatchDesktop.ViewModels"
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008" xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" mc:Ignorable="d"
              d:DataContext="{d:DesignInstance vm:MainViewModel}">
-    <!-- 관제 요약 띠(§3.5) — 관제 밖 화면 상단 32px 상시: 발언 대상(① 체크 집합) + 발언 상태 + PTT · 대표번호 대기열 · 문자 미읽음 · 내 통화 · 감청 창 · 서버 인증서 만료 경고 · [관제로 F1] -->
+    <!-- 관제 요약 띠(§3.5) — 화면 별창 상단 32px 상시: 발언 대상(✓ 집합) + 발언 상태 + PTT · 대표번호 대기열 · 문자 미읽음 · 내 통화 · 감청 창 · 서버 인증서 만료 경고 · [관제로 F1] -->
     <Border Height="32" Background="{DynamicResource Brush.BgSoft}" BorderBrush="{DynamicResource Brush.Border}" BorderThickness="0,0,0,1" Padding="14,0">
         <DockPanel VerticalAlignment="Center" DataContext="{Binding Summary}">
             <Button DockPanel.Dock="Right" Style="{StaticResource Btn.Sm}" Height="24" Command="{Binding DataContext.ReturnToDispatchCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" ToolTip="관제 캔버스로 (F1)">

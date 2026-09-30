@@ -24,7 +24,7 @@ public sealed partial class Toast : ObservableObject
 public enum BannerKind { PilotIncoming, DirectIncoming, PttPrivateIncoming, Emergency, ImminentPeril, Alert, ServerCert, Credential }
 
 /// <summary>착신 배너(세션 1개) · 긴급 배너(그룹 1개) · 서버 인증서 만료 배너(세션당 1개, sip_tls_signaling.md §8.6.2) — 스택(최신 위).
-/// 배너 레이어는 상단 바 아래 공통이라 관제 캔버스를 포함한 어느 화면에서나 보인다(§3.4).</summary>
+/// 배너 층은 상단 바 아래 공통이라 관제를 포함한 어느 화면에서나 보인다(§3.2). 긴급·임박은 꽉 찬 면·닫기 없음, 착신은 옅은 면 [응답][거절].</summary>
 public sealed partial class Banner : ObservableObject
 {
     public BannerKind Kind { get; init; }
@@ -55,6 +55,11 @@ public sealed partial class Banner : ObservableObject
     public bool IsWarning => Kind is BannerKind.ServerCert or BannerKind.Credential;
     /// <summary>경과 시간 표시 — 착신·긴급은 "언제부터" 가 뜻이 있고, 경고 계열은 제목이 이미 상태라 경과를 보이지 않는다.</summary>
     public bool ShowElapsed => !IsWarning;
+    /// <summary>배너 두 줄(§3.2) — 윗줄(작게) = 무엇이 · 누가, 아랫줄(크게) = 채널·번호. 긴급·임박·경보는 제목의 "— 그룹명" 을 아랫줄로 뗀다.</summary>
+    public string Line1 => IsEmergency
+        ? (IsEmg ? "긴급" : IsPeril ? "임박 위험" : "긴급 경보") + (Subtitle.Length > 0 ? $" · 개시 {Subtitle}" : "")
+        : IsIncoming ? Title : Title;
+    public string Line2 => IsEmergency ? (Title.IndexOf(" — ", StringComparison.Ordinal) is int i and >= 0 ? Title[(i + 3)..] : Title) : IsIncoming ? Subtitle : Subtitle;
     public void Tick(DateTime now) => Elapsed = now - Time;
 }
 

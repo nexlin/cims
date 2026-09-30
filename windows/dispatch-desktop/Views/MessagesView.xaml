@@ -3,118 +3,67 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="clr-namespace:DispatchDesktop.ViewModels"
              xmlns:m="clr-namespace:DispatchDesktop.Models"
-             xmlns:v="clr-namespace:DispatchDesktop.Views"
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008" xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" mc:Ignorable="d"
              d:DataContext="{d:DesignInstance vm:MessagesViewModelBase}" x:Name="Root"
              AllowDrop="True" DragOver="Root_DragOver" Drop="Root_Drop">
-    <!-- 메시지 공용 뷰 — 스레드 칩 → 말풍선 → 입력 (④ PTT 메시지 패널 / ③ [문자] 팝오버). HeaderVisible=False 면 호스트가 머리를 그린다.
-         첨부(MCData FD)는 SupportsAttachments 패널만 — 입력 줄 [📎]·끌어 놓기, 첨부 말풍선 = 이름·크기 + [받기]/[열기]·폴더 -->
-    <Border Style="{StaticResource Sub}">
-        <DockPanel>
-            <Border DockPanel.Dock="Top" Style="{StaticResource SubHeader}" Visibility="{Binding HeaderVisible, ElementName=Root, Converter={StaticResource BoolToVis}}">
-                <DockPanel>
-                    <TextBlock Style="{StaticResource SectionHeader}" Text="{Binding Title, ElementName=Root}" />
-                    <TextBlock Style="{StaticResource Muted}" Text="{Binding Subtitle, ElementName=Root}" Margin="8,0,0,0" FontSize="12" VerticalAlignment="Center" />
-                    <Border Style="{StaticResource Badge.Pilot}" HorizontalAlignment="Right" Visibility="{Binding UnreadTotal, Converter={StaticResource CountToVis}}">
-                        <TextBlock Text="{Binding UnreadTotal}" />
-                    </Border>
-                </DockPanel>
-            </Border>
-            <!-- 스레드 칩 -->
-            <ScrollViewer DockPanel.Dock="Top" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled" Margin="8,6,8,0">
-                <ItemsControl ItemsSource="{Binding Threads}">
-                    <ItemsControl.ItemsPanel><ItemsPanelTemplate><StackPanel Orientation="Horizontal" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
-                    <ItemsControl.ItemTemplate>
-                        <DataTemplate DataType="{x:Type m:MessageThread}">
-                            <Button Style="{StaticResource Btn.Flat}" Command="{Binding DataContext.SelectThreadCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}">
-                                <Border x:Name="Chip" Style="{StaticResource Pill}" Margin="0,0,5,0" Padding="9,2">
-                                    <StackPanel Orientation="Horizontal">
-                                        <TextBlock Text="{Binding Title}" />
-                                        <TextBlock Text="{Binding Unread}" Margin="5,0,0,0" FontWeight="Bold" Foreground="{DynamicResource Brush.Ring}" Visibility="{Binding Unread, Converter={StaticResource CountToVis}}" />
-                                    </StackPanel>
-                                </Border>
-                            </Button>
-                            <DataTemplate.Triggers>
-                                <Trigger SourceName="Chip" Property="IsMouseOver" Value="True"><Setter TargetName="Chip" Property="Background" Value="{DynamicResource Brush.Hover}" /></Trigger>
-                                <DataTrigger Value="True">
-                                    <DataTrigger.Binding>
-                                        <MultiBinding Converter="{x:Static v:MessagesView.SameRef}">
-                                            <Binding />
-                                            <Binding Path="DataContext.Selected" RelativeSource="{RelativeSource AncestorType=UserControl}" />
-                                        </MultiBinding>
-                                    </DataTrigger.Binding>
-                                    <Setter TargetName="Chip" Property="Background" Value="{DynamicResource Brush.PrimarySoft}" />
-                                    <Setter TargetName="Chip" Property="TextElement.Foreground" Value="{DynamicResource Brush.Primary}" />
-                                </DataTrigger>
-                            </DataTemplate.Triggers>
-                        </DataTemplate>
-                    </ItemsControl.ItemTemplate>
-                </ItemsControl>
-            </ScrollViewer>
-            <!-- 입력 -->
-            <Border DockPanel.Dock="Bottom" Padding="8,6" BorderBrush="{DynamicResource Brush.Border}" BorderThickness="0,1,0,0">
-                <DockPanel>
-                    <Button DockPanel.Dock="Left" Style="{StaticResource IconBtn}" Command="{Binding AttachCommand}" IsEnabled="{Binding CanAttach}" Margin="0,0,6,0"
-                            ToolTip="파일 보내기 (끌어 놓기도 됩니다)" Visibility="{Binding SupportsAttachments, Converter={StaticResource BoolToVis}}">
-                        <Path Style="{StaticResource Icon}" Data="{StaticResource Icon.Clip}" Width="16" Height="16" />
-                    </Button>
-                    <Button DockPanel.Dock="Right" Style="{StaticResource Btn.Pri}" Content="전송" Command="{Binding SendCommand}" IsEnabled="{Binding CanSend}" Margin="6,0,0,0" />
-                    <TextBlock DockPanel.Dock="Right" Style="{StaticResource Muted}" FontSize="11" VerticalAlignment="Center" Margin="6,0,0,0" Text="{Binding CountText, ElementName=Root}" />
-                    <TextBox x:Name="Input" Style="{StaticResource Field}" Text="{Binding Input, UpdateSourceTrigger=PropertyChanged}" KeyDown="Input_KeyDown"
-                             IsEnabled="{Binding HasSelection}" ToolTip="{Binding InputTip, ElementName=Root}" />
-                </DockPanel>
-            </Border>
-            <!-- 말풍선 -->
-            <ListBox x:Name="List" Style="{StaticResource PlainList}" ItemsSource="{Binding Selected.Messages}" Margin="8,4" ScrollViewer.VerticalScrollBarVisibility="Auto">
-                <ListBox.ItemTemplate>
-                    <DataTemplate DataType="{x:Type m:Message}">
-                        <Grid Margin="0,2">
-                            <Border x:Name="Bubble" CornerRadius="10" Padding="10,6" MaxWidth="320" HorizontalAlignment="Left" Background="{DynamicResource Brush.Surface2}">
-                                <StackPanel>
-                                    <TextBlock x:Name="From" Style="{StaticResource Muted}" FontSize="11" Text="{Binding PeerName}" Visibility="{Binding IsOut, Converter={StaticResource NotToVis}}" />
-                                    <TextBlock Text="{Binding Text}" TextWrapping="Wrap" Visibility="{Binding Text, Converter={StaticResource StrToVis}}" />
-                                    <!-- 첨부 — 이름(클릭 = 열기, 안 받았으면 받기)·크기·진행, [받기] / 폴더 -->
-                                    <DockPanel Visibility="{Binding IsAttachment, Converter={StaticResource BoolToVis}}" MinWidth="180">
-                                        <Button DockPanel.Dock="Right" Style="{StaticResource IconBtn}" Width="22" Height="22" ToolTip="폴더에서 보기"
-                                                Command="{Binding DataContext.ShowFileCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}"
-                                                Visibility="{Binding HasLocalFile, Converter={StaticResource BoolToVis}}">
-                                            <Path Style="{StaticResource Icon}" Data="{StaticResource Icon.Folder}" Width="13" Height="13" />
-                                        </Button>
-                                        <Button DockPanel.Dock="Right" Style="{StaticResource IconBtn}" Width="22" Height="22" ToolTip="받기"
-                                                Command="{Binding DataContext.DownloadFileCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}"
-                                                Visibility="{Binding CanDownload, Converter={StaticResource BoolToVis}}">
-                                            <Path Style="{StaticResource Icon}" Data="{StaticResource Icon.Download}" Width="13" Height="13" />
-                                        </Button>
-                                        <Path DockPanel.Dock="Left" Style="{StaticResource Icon}" Data="{StaticResource Icon.Clip}" Width="13" Height="13" Margin="0,1,5,0"
-                                              VerticalAlignment="Top" TextElement.Foreground="{DynamicResource Brush.Primary}" />
-                                        <StackPanel>
-                                            <Button Style="{StaticResource Btn.Link}" HorizontalAlignment="Left" ToolTip="{Binding FileName}"
-                                                    Command="{Binding DataContext.OpenFileCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}">
-                                                <TextBlock Text="{Binding FileName}" TextTrimming="CharacterEllipsis" MaxWidth="220" />
-                                            </Button>
-                                            <TextBlock Style="{StaticResource Muted}" FontSize="10.5">
-                                                <Run Text="{Binding FileSizeText, Mode=OneWay}" /><Run Text="  " /><Run Text="{Binding TransferNote, Mode=OneWay}" Foreground="{DynamicResource Brush.Primary}" />
-                                            </TextBlock>
-                                        </StackPanel>
-                                    </DockPanel>
-                                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-                                        <TextBlock Style="{StaticResource Muted}" FontSize="10.5" Text="{Binding Time, StringFormat=HH:mm}" />
-                                        <Button Style="{StaticResource Btn.Link}" Content="{Binding StateMark}" FontSize="10.5" Margin="6,0,0,0"
-                                                Command="{Binding DataContext.ResendCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}"
-                                                Visibility="{Binding IsOut, Converter={StaticResource BoolToVis}}" />
-                                    </StackPanel>
+    <!-- 대화 말풍선(§4.4) — [무전] «메시지» 오른쪽. 받은 말 = 회색(그룹이면 보낸 사람), 보낸 말 = 남색 + 상태(✓ · ✓✓ · 실패 [재전송]), 파일 = 이름·크기 + [받기]/열기·폴더.
+         파일은 끌어 놓아도 보낸다(MCData FD) -->
+    <Grid>
+        <TextBlock Style="{StaticResource Hint}" Text="왼쪽에서 대화를 고르세요" HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="{Binding HasSelection, Converter={StaticResource NotToVis}}" />
+        <ListBox x:Name="List" Style="{StaticResource PlainList}" ItemsSource="{Binding Selected.Messages}" Padding="18,10" ScrollViewer.VerticalScrollBarVisibility="Auto">
+            <ListBox.ItemTemplate>
+                <DataTemplate DataType="{x:Type m:Message}">
+                    <StackPanel x:Name="Wrap" Margin="0,0,0,8" HorizontalAlignment="Left" MaxWidth="480">
+                        <TextBlock x:Name="From" FontSize="12" FontWeight="Bold" Foreground="{DynamicResource Brush.TextSoft}" Text="{Binding PeerName}" Margin="0,0,0,2"
+                                   Visibility="{Binding DataContext.Selected.IsGroup, ElementName=Root, Converter={StaticResource BoolToVis}}" />
+                        <Border x:Name="Bubble" CornerRadius="10" Padding="12,8" Background="{DynamicResource Brush.Surface2}" HorizontalAlignment="Left">
+                            <StackPanel>
+                                <TextBlock x:Name="Body" Text="{Binding Text}" TextWrapping="Wrap" FontSize="14" LineHeight="21" Visibility="{Binding Text, Converter={StaticResource StrToVis}}" />
+                                <!-- 파일 — 이름(누르면 열기, 안 받았으면 받기) · 크기 · 진행 · [받기] / 폴더 -->
+                                <StackPanel Orientation="Horizontal" Visibility="{Binding IsAttachment, Converter={StaticResource BoolToVis}}">
+                                    <Path x:Name="Clip" Style="{StaticResource Icon}" Data="{StaticResource Icon.Clip}" Width="16" Height="16" Margin="0,0,10,0" StrokeThickness="2" TextElement.Foreground="{DynamicResource Brush.TextSoft}" />
+                                    <Button Style="{StaticResource Btn.Flat}" Foreground="{Binding (TextElement.Foreground), ElementName=Body}" ToolTip="{Binding FileName}"
+                                            Command="{Binding DataContext.OpenFileCommand, ElementName=Root}" CommandParameter="{Binding}">
+                                        <TextBlock Text="{Binding FileName}" FontSize="14" TextTrimming="CharacterEllipsis" MaxWidth="240" />
+                                    </Button>
+                                    <TextBlock x:Name="Size" FontSize="12" Foreground="{DynamicResource Brush.Muted}" Margin="10,0,0,0" VerticalAlignment="Center">
+                                        <Run Text="{Binding FileSizeText, Mode=OneWay}" /><Run Text=" " /><Run Text="{Binding TransferNote, Mode=OneWay}" />
+                                    </TextBlock>
+                                    <Button Style="{StaticResource Pill.Line}" Height="26" Padding="10,0" FontSize="12" FontWeight="Normal" BorderThickness="1" Content="받기" Margin="10,0,0,0"
+                                            Command="{Binding DataContext.DownloadFileCommand, ElementName=Root}" CommandParameter="{Binding}" Visibility="{Binding CanDownload, Converter={StaticResource BoolToVis}}" />
+                                    <Button Style="{StaticResource IconBtn}" Width="24" Height="24" Margin="6,0,0,0" ToolTip="폴더에서 보기"
+                                            Command="{Binding DataContext.ShowFileCommand, ElementName=Root}" CommandParameter="{Binding}" Visibility="{Binding HasLocalFile, Converter={StaticResource BoolToVis}}">
+                                        <Path Style="{StaticResource Icon}" Data="{StaticResource Icon.Folder}" Width="13" Height="13" />
+                                    </Button>
                                 </StackPanel>
-                            </Border>
-                        </Grid>
-                        <DataTemplate.Triggers>
-                            <DataTrigger Binding="{Binding IsOut}" Value="True">
-                                <Setter TargetName="Bubble" Property="HorizontalAlignment" Value="Right" />
-                                <Setter TargetName="Bubble" Property="Background" Value="{DynamicResource Brush.PrimarySoft}" />
-                            </DataTrigger>
-                        </DataTemplate.Triggers>
-                    </DataTemplate>
-                </ListBox.ItemTemplate>
-            </ListBox>
-        </DockPanel>
-    </Border>
+                            </StackPanel>
+                        </Border>
+                        <StackPanel x:Name="Meta" Orientation="Horizontal" Margin="0,2,0,0" HorizontalAlignment="Left">
+                            <TextBlock Style="{StaticResource Muted}" FontSize="11" Text="{Binding Time, StringFormat=HH:mm}" />
+                            <TextBlock x:Name="State" Style="{StaticResource Muted}" FontSize="11" Margin="4,0,0,0" Text="{Binding StateMark}" Visibility="{Binding IsOut, Converter={StaticResource BoolToVis}}" />
+                            <Button x:Name="Resend" Style="{StaticResource Pill.Red}" Height="22" Padding="9,0" FontSize="11" BorderThickness="1" Content="재전송" Margin="6,0,0,0" Visibility="Collapsed"
+                                    Command="{Binding DataContext.ResendCommand, ElementName=Root}" CommandParameter="{Binding}" />
+                        </StackPanel>
+                    </StackPanel>
+                    <DataTemplate.Triggers>
+                        <DataTrigger Binding="{Binding IsOut}" Value="True">
+                            <Setter TargetName="Wrap" Property="HorizontalAlignment" Value="Right" />
+                            <Setter TargetName="Bubble" Property="HorizontalAlignment" Value="Right" />
+                            <Setter TargetName="Meta" Property="HorizontalAlignment" Value="Right" />
+                            <Setter TargetName="Bubble" Property="Background" Value="{DynamicResource Brush.Primary}" />
+                            <Setter TargetName="Body" Property="Foreground" Value="{DynamicResource Brush.OnAccent}" />
+                            <Setter TargetName="Clip" Property="TextElement.Foreground" Value="{DynamicResource Brush.OnAccent}" />
+                            <Setter TargetName="Size" Property="Foreground" Value="{DynamicResource Brush.OnAccent}" />
+                            <Setter TargetName="From" Property="Visibility" Value="Collapsed" />
+                        </DataTrigger>
+                        <DataTrigger Binding="{Binding State}" Value="Failed">
+                            <Setter TargetName="State" Property="Text" Value="· 실패" />
+                            <Setter TargetName="State" Property="Foreground" Value="{DynamicResource Brush.Emg}" />
+                            <Setter TargetName="Resend" Property="Visibility" Value="Visible" />
+                        </DataTrigger>
+                    </DataTemplate.Triggers>
+                </DataTemplate>
+            </ListBox.ItemTemplate>
+        </ListBox>
+    </Grid>
 </UserControl>

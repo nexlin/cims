@@ -1,5 +1,5 @@
-// ③ 오른쪽 위 — 일반통화 발신: 번호 필드·[발신]·[픽업 **] + 세그먼트 [다이얼패드|주소록|최근] 중 하나 (§4.3). 다이얼패드는 통화 중 DTMF 겸용.
-// 주소록 = 서버 회사 전화번호부(조직 범위 선택 + 조직별 섹션, Android 연락처 탭과 같은 동선) + CSV 외부망 번호.
+// [통화] 발신(§4.3) — «통화» 머리의 번호칸(입력 제안)·[발신]·[키패드](누를 때만 뜨는 팝오버 — 통화 중·번호칸이 비면 DTMF)·[픽업] +
+// 오른쪽 [주소록] 패널(서버 회사 전화번호부 — 조직 칩 거르기 + 검색, 줄 = 사람 메뉴 · [바로 걸기]) + CSV 외부망 번호.
 using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -32,6 +32,8 @@ public sealed partial class BookRow : ObservableObject
 public sealed record OrgChoice(string Code, string Label, int Count)
 {
     public string Text => Code.Length == 0 ? Label : $"{Label} ({Count})";
+    /// <summary>칩 글자 — 들여쓰기 없는 이름("전체 조직" 은 "전체").</summary>
+    public string ChipText => Code.Length == 0 ? "전체" : Label.Trim();
 }
 
 public sealed partial class CallOriginateViewModel : ObservableObject
@@ -40,13 +42,12 @@ public sealed partial class CallOriginateViewModel : ObservableObject
     private readonly List<BookRow> _all = new();
 
     [ObservableProperty] private string _number = "";
-    /// <summary>pad | book | recent</summary>
-    [ObservableProperty] private string _mode = "book";
     [ObservableProperty] private string _search = "";
     [ObservableProperty] private OrgChoice? _orgScope;
     public ObservableCollection<OrgChoice> OrgChoices { get; } = new();
+    /// <summary>[주소록] 조직 칩 — 전체 + 위 두 단(깊은 조직은 검색으로).</summary>
+    public ObservableCollection<OrgChoice> OrgChips { get; } = new();
     public ObservableCollection<BookRow> Book { get; } = new();
-    public ObservableCollection<ActivityRow> Recent { get; } = new();
     /// <summary>번호 필드 입력과 일치하는 주소록 항목(이름·번호·로컬 표기 부분 일치, 최대 8).</summary>
     public ObservableCollection<BookRow> Suggestions { get; } = new();
     public bool HasSuggestions => Suggestions.Count > 0;
@@ -56,26 +57,23 @@ public sealed partial class CallOriginateViewModel : ObservableObject
     public CallOriginateViewModel(DispatchSession s)
     {
         _s = s;
-        _mode = s.Settings.Current.OriginateMode;
         s.Directory.Changed += (_, _) => Reload();
-        s.Activity.Call.CollectionChanged += (_, _) => ReloadRecent();
         s.DialogChanged += (_, _) => RefreshStatus();
         s.DialogEnded += (_, _) => RefreshStatus();
         Reload();
     }
 
-    public bool IsPad => Mode == "pad";
-    public bool IsBook => Mode == "book";
-    public bool IsRecent => Mode == "recent";
     public string PickupCode => _s.Settings.Current.PickupFeatureCode;
     /// <summary>활성 통화가 있고 필드가 비어 있으면 패드는 DTMF.</summary>
     public bool PadIsDtmf => Number.Length == 0 && _s.ActiveVolteCall is not null;
-    public string PadHint => PadIsDtmf ? "통화 중 — DTMF 로 전송" : "번호를 입력";
+    public string PadHint => PadIsDtmf ? "통화 중이면 DTMF 로 보낸다 · Esc 로 닫기" : "통화 중이면 DTMF 로 보낸다 · Esc 로 닫기";
+    /// <summary>키패드 팝오버 화면 — 번호칸이 비고 통화 중이면 보낸 DTMF, 아니면 번호.</summary>
+    public string PadDisplay => PadIsDtmf ? _dtmfSent : Number;
+    private string _dtmfSent = "";
     public string BookCount => $"{Book.Count}명";
     public string SyncText => _s.Directory.ServerSyncedAt is DateTime t ? $"동기화 {t:HH:mm}" : "서버 전화번호부 미동기화";
 
-    partial void OnModeChanged(string value) { OnPropertyChanged(nameof(IsPad)); OnPropertyChanged(nameof(IsBook)); OnPropertyChanged(nameof(IsRecent)); _s.Settings.Update(x => x.OriginateMode = value); }
-    partial void OnNumberChanged(string value) { OnPropertyChanged(nameof(PadIsDtmf)); OnPropertyChanged(nameof(PadHint)); UpdateSuggestions(); }
+    partial void OnNumberChanged(string value) { OnPropertyChanged(nameof(PadIsDtmf)); OnPropertyChanged(nameof(PadHint)); OnPropertyChanged(nameof(PadDisplay)); UpdateSuggestions(); }
 
     private void UpdateSuggestions()
     {
@@ -94,7 +92,7 @@ public sealed partial class CallOriginateViewModel : ObservableObject
     partial void OnSearchChanged(string value) => Filter();
     partial void OnOrgScopeChanged(OrgChoice? value) => Filter();
 
-    public void RefreshPad() { OnPropertyChanged(nameof(PadIsDtmf)); OnPropertyChanged(nameof(PadHint)); }
+    public void RefreshPad() { if (_s.ActiveVolteCall is null) _dtmfSent = ""; OnPropertyChanged(nameof(PadIsDtmf)); OnPropertyChanged(nameof(PadHint)); OnPropertyChanged(nameof(PadDisplay)); }
 
     private void Reload()
     {
@@ -107,8 +105,10 @@ public sealed partial class CallOriginateViewModel : ObservableObject
         OrgChoices.Add(new OrgChoice("", "전체 조직", _all.Count));
         foreach (var (code, label, count) in d.OrgTree(ContactKind.Extension)) OrgChoices.Add(new OrgChoice(code, label, count));
         OrgScope = OrgChoices.FirstOrDefault(o => o.Code == keep) ?? OrgChoices[0];
+        OrgChips.Clear();
+        OrgChips.Add(OrgChoices[0]);
+        foreach (var o in OrgChoices.Skip(1)) if (o.Count > 0 && d.OrgDepth(o.Code) <= 1) OrgChips.Add(o);
         Filter();
-        ReloadRecent();
         RefreshStatus();
         OnPropertyChanged(nameof(SyncText));
     }
@@ -128,12 +128,6 @@ public sealed partial class CallOriginateViewModel : ObservableObject
         OnPropertyChanged(nameof(BookCount));
     }
 
-    private void ReloadRecent()
-    {
-        Recent.Clear();
-        foreach (var r in _s.Activity.Call.Where(r => r.CanRedial).Take(50)) Recent.Add(r);
-    }
-
     private void RefreshStatus()
     {
         foreach (var r in _all)
@@ -143,13 +137,19 @@ public sealed partial class CallOriginateViewModel : ObservableObject
         }
     }
 
-    [RelayCommand] private void SetMode(string m) => Mode = m;
+    /// <summary>[주소록] 조직 칩 — 그 조직과 하위만(전체 = 빈 코드).</summary>
+    [RelayCommand] private void SetOrg(OrgChoice o) => OrgScope = o;
     [RelayCommand] private void Dial() { string n = Number.Trim(); if (n.Length == 0) return; if (Resolve(n) is { } t && _s.Dial(t).Ok) Number = ""; }
     [RelayCommand] private void Pickup() => _s.Pickup();
     [RelayCommand]
     private void Pad(string key)
     {
-        if (PadIsDtmf) { var c = _s.ActiveVolteCall; if (c is not null) _s.Dtmf(c, key); return; }
+        if (PadIsDtmf)
+        {
+            var c = _s.ActiveVolteCall;
+            if (c is not null && _s.Dtmf(c, key).Ok) { _dtmfSent = (_dtmfSent + key).Length > 16 ? key : _dtmfSent + key; OnPropertyChanged(nameof(PadDisplay)); }
+            return;
+        }
         Number += key;
     }
     [RelayCommand] private void Backspace() { if (Number.Length > 0) Number = Number[..^1]; }
@@ -160,8 +160,6 @@ public sealed partial class CallOriginateViewModel : ObservableObject
     [RelayCommand] private void Pick(BookRow r) { Number = r.DisplayNumber; Suggestions.Clear(); OnPropertyChanged(nameof(HasSuggestions)); }
     [RelayCommand] private void CallSuggestion(BookRow r) { if (_s.Dial(r.Number).Ok) Number = ""; }
     [RelayCommand] private void Sms(BookRow r) { if (r.CanSms) SmsRequested?.Invoke(this, r.Number); }
-    [RelayCommand] private void Redial(ActivityRow r) { if (r.Number.Length > 0) _s.Dial(r.Number); }
-    [RelayCommand] private void SmsRecent(ActivityRow r) { if (r.Number.Length > 0 && (_s.SmsGateway || !_s.Directory.IsExternal(r.Number))) SmsRequested?.Invoke(this, r.Number); }
     [RelayCommand] private async Task SyncAsync() { await _s.SyncDirectoryAsync(); OnPropertyChanged(nameof(SyncText)); }
     public void Fill(string number) => Number = number;
 

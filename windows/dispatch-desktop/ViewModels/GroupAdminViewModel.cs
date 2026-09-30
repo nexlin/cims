@@ -45,9 +45,9 @@ public sealed partial class GroupAdminViewModel : ObservableObject
 {
     private readonly DispatchSession _s;
     private IReadOnlyList<ManagedGroup> _all = Array.Empty<ManagedGroup>();
-    /// <summary>범위 안 그룹 전부(필터 전) — ② 범위 채널의 관리 범위 섹션 소스.</summary>
+    /// <summary>범위 안 그룹 전부(필터 전) — 타 채널 편집 판정([편집]·[삭제])의 소스.</summary>
     public IReadOnlyList<ManagedGroup> All => _all;
-    /// <summary>목록을 (재)적재했다 — ② 가 재구성한다.</summary>
+    /// <summary>목록을 (재)적재했다 — 타 채널이 재구성한다.</summary>
     public event EventHandler? Loaded;
 
     public GroupAdminViewModel(DispatchSession s)
@@ -114,11 +114,11 @@ public sealed partial class GroupAdminViewModel : ObservableObject
     [RelayCommand] private void SetFilter(string f) => ListFilter = f;
     [RelayCommand] private void GoToChannel() { if (Selected is not null) ChannelRequested?.Invoke(this, Selected.Id); }
 
-    /// <summary>목록이 오기 전에 들어온 선택 요청(① 3줄 [로스터 전체]) — <see cref="Filter"/> 가 소비한다.</summary>
+    /// <summary>목록이 오기 전에 들어온 선택 요청(밖에서 그룹 id 로 연 상세) — <see cref="Filter"/> 가 소비한다.</summary>
     private string _pendingSelect = "";
 
     /// <summary>
-    /// ① 채널 카드 3줄 [로스터 전체] — 밖에서 그룹 id 로 상세를 연다(§4.1 → §4.7 상세의 멤버 표).
+    /// 밖에서 그룹 id 로 상세를 연다(§4.1 → §4.7 상세의 멤버 표).
     ///
     /// 필터·검색을 [전체]로 되돌린다: 지금 필터가 그 그룹을 걸러 내면 <see cref="Filter"/> 의 폴백이
     /// 첫 행을 고르므로 **엉뚱한 그룹이 열린다**. 목록이 아직 없으면(첫 진입의 지연 적재 —
@@ -248,7 +248,7 @@ public sealed partial class GroupAdminViewModel : ObservableObject
         Open(new GroupEditViewModel(_s, row.ToGroupInfo()));
     }
 
-    /// <summary>다른 화면(①의 PTT 주소록 [그룹] 탭)에서 온 편집 요청 — 그 그룹 행을 고르고 폼을 연다(목록이 아직 없으면 폼만).</summary>
+    /// <summary>다른 화면(관제 채널 상세 ⋮ [편집])에서 온 편집 요청 — 그 그룹 행을 고르고 폼을 연다(목록이 아직 없으면 폼만).</summary>
     public void EditExternal(GroupInfo g)
     {
         if (IsEditing) return;
@@ -257,8 +257,15 @@ public sealed partial class GroupAdminViewModel : ObservableObject
         Open(new GroupEditViewModel(_s, row?.ToGroupInfo() ?? g));
     }
 
-    /// <summary>② [+ 새 채널] — 드로어에 새 그룹 폼.</summary>
-    public void NewExternal() { if (CanCreate && !IsEditing) Open(new GroupEditViewModel(_s, null)); }
+    /// <summary>[사용자] 패널 [그룹으로 저장 ›] — 고른 사람을 멤버로 한 새 그룹 폼(관제 오른쪽 패널이 호스팅, [고급 설정] 은 이 화면에서).</summary>
+    public GroupEditViewModel? NewExternal(IEnumerable<(string Number, string Name)> members)
+    {
+        if (!CanCreate || IsEditing) return null;
+        var vm = new GroupEditViewModel(_s, null);
+        vm.AddMembers(members);
+        Open(vm);
+        return vm;
+    }
 
     private void Open(GroupEditViewModel vm)
     {

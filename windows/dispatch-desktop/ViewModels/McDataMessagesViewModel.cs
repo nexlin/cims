@@ -1,4 +1,4 @@
-// ④ PTT 메시지 — MCData SDS·FD. 그룹 = groupUri 스레드, 1:1 = 상대 번호 스레드(양방향). disposition 요청은 delivered 자동 회신, 통지 수신 → ✓✓.
+// [무전] 메시지 — MCData SDS·FD. 대화 목록(300) : 대화(머리 = 그룹 전원 라벨·접속 수·[채널 정보 ›], 빠른 답, 📎·끌어 놓기). 그룹 = groupUri 스레드, 1:1 = 상대 번호 스레드(양방향). disposition 요청은 delivered 자동 회신, 통지 수신 → ✓✓.
 // 파일(FD) = 📎·끌어 놓기 → CSC 콘텐츠 서버 업로드 → FD 알림 MESSAGE, 받은 파일은 [받기]로 다운로드\CIMS 에 저장(mcdata_messaging.md §4.5).
 // 발신 결과 상관: SendGroupSds 가 (msgId, token) 을 주고 최종 응답은 RequestCompleted(MESSAGE, token) 으로 오므로 token 으로 짝을 맞춘다
 // (SMS 와 같은 규칙 — disposition 통지 발신의 완료 이벤트는 어느 메시지에도 맞지 않아 무시된다).
@@ -9,7 +9,7 @@ using DispatchDesktop.Services;
 
 namespace DispatchDesktop.ViewModels;
 
-public sealed class McDataMessagesViewModel : MessagesViewModelBase
+public sealed partial class McDataMessagesViewModel : MessagesViewModelBase
 {
     public McDataMessagesViewModel(DispatchSession s) : base(s, MessageKind.McData)
     {
@@ -150,14 +150,25 @@ public sealed class McDataMessagesViewModel : MessagesViewModelBase
         if (!ok) S.Notify.Error(ResponseText.Describe(ResponseText.Area.Sds, r.Code, r.Reason), $"{r.Code} {r.Reason}");
     }
 
-    /// <summary>채널 카드 선택 → 그 그룹 스레드(설정 FollowChannelThread).</summary>
-    public void FollowGroup(GroupInfo g) { FocusGroup = g; if (FollowChannel) SelectKey(g.Uri, g.Name, true); }
-    /// <summary>포커스 카드의 그룹 — 머리 "[● <채널> 따라가기]" 문구.</summary>
-    private GroupInfo? _focusGroup;
-    public GroupInfo? FocusGroup { get => _focusGroup; set { _focusGroup = value; OnPropertyChanged(nameof(FollowText)); } }
-    public string FollowText => FocusGroup is null ? "따라가기" : $"{FocusGroup.Name} 따라가기";
-    public void ClearFocus() => FocusGroup = null;
+    /// <summary>채널 카드를 눌렀다 → 그 그룹 대화로(설정 FollowChannelThread — 머리 [따라가기]).</summary>
+    public void FollowGroup(GroupInfo g) { if (FollowChannel) SelectKey(g.Uri, g.Name, true); }
     public void OpenGroup(GroupInfo g) => SelectKey(g.Uri, g.Name, true);
+
+    // ── 대화 머리(§4.4) — 그룹 = «그룹 전원 · 편성 n» 라벨 + «접속 n» + [채널 정보 ›], 1:1 = «1:1» ──
+    public GroupInfo? SelectedGroup => Selected is { IsGroup: true } t
+        ? S.Groups.FirstOrDefault(g => string.Equals(g.Uri, t.Key, StringComparison.OrdinalIgnoreCase) || g.Id == UserPartConverter.UserPart(t.Key)) : null;
+    public bool IsGroupConv => Selected?.IsGroup == true;
+    public string ConvLabel => IsGroupConv ? $"그룹 전원 · 편성 {SelectedGroup?.MemberCount ?? 0}" : "1:1";
+    public string ConvSub => IsGroupConv ? (SelectedGroup is { } g ? $"접속 {g.ConnectedCount}" : "") : Selected is null ? "" : "PTT " + S.Directory.DisplayNumber(Selected.Key);
+    public string InputHint => Selected is null ? "대화를 고르세요" : IsGroupConv ? $"그룹 전원에게 ({Selected.Title} · {SelectedGroup?.MemberCount ?? 0}명)" : $"이 사람에게 ({Selected.Title})";
+    /// <summary>[채널 정보 ›] → 오른쪽 채널 상세.</summary>
+    public event EventHandler<GroupInfo>? ChannelInfoRequested;
+    /// <summary>[＋ 새 대화] → 오른쪽 [사용자] 목록(사람 메뉴 [무전 메시지]).</summary>
+    public event EventHandler? NewConversationRequested;
+    [CommunityToolkit.Mvvm.Input.RelayCommand] private void OpenChannelInfo() { if (SelectedGroup is { } g) ChannelInfoRequested?.Invoke(this, g); }
+    [CommunityToolkit.Mvvm.Input.RelayCommand] private void NewConversation() => NewConversationRequested?.Invoke(this, EventArgs.Empty);
+    protected override void OnSelectionChanged() => RefreshHeader();
+    public void RefreshHeader() { foreach (var p in new[] { nameof(SelectedGroup), nameof(IsGroupConv), nameof(ConvLabel), nameof(ConvSub), nameof(InputHint) }) OnPropertyChanged(p); }
 
     /// <summary>--ui-preview-canvas 표본 — 저장하지 않는 말풍선(글 · 받은 파일 · 올리는 중인 파일).</summary>
     public void SeedPreview(GroupInfo g)

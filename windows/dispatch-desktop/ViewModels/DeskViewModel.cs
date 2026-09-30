@@ -1,4 +1,4 @@
-// 상단 바(§3.2) — 데스크 신원·등록 점등·감청 중 N 칩·배치 잠금/프리셋·오디오 요약·핫키·시각·설정.
+// 상단 바(§3.2) — 데스크 신원(이름 · 소속 · 대표번호)·등록 점등·감청 중 N 칩·세션 메뉴(오디오 요약·설정·로그아웃·종료).
 using System.Collections.ObjectModel;
 using CimsUe;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -12,25 +12,18 @@ namespace DispatchDesktop.ViewModels;
 public sealed partial class DeskViewModel : ObservableObject
 {
     private readonly DispatchSession _s;
-    private readonly LayoutStore _layout;
 
-    [ObservableProperty] private string _clock = DateTime.Now.ToString("HH:mm");
-    [ObservableProperty] private bool _layoutLocked = true;
-    [ObservableProperty] private string _currentPreset = LayoutStore.DefaultName;
-    public ObservableCollection<string> Presets { get; } = new();
-    /// <summary>열린 감청·청취 창의 세션(칩 목록).</summary>
+    /// <summary>진행 중인 감청·청취 세션(칩 목록 — 인라인·창 모두).</summary>
     public ObservableCollection<SessionItem> Monitors { get; } = new();
 
     public event EventHandler? SettingsRequested;
     public event EventHandler? LogoutRequested;
     public event EventHandler? ExitRequested;
-    public event EventHandler<string>? PresetApplyRequested;
-    public event EventHandler<string>? PresetSaveRequested;
     public event EventHandler<SessionItem>? MonitorActivateRequested;
 
-    public DeskViewModel(DispatchSession s, LayoutStore layout)
+    public DeskViewModel(DispatchSession s)
     {
-        _s = s; _layout = layout;
+        _s = s;
         s.PropertyChanged += (_, e) =>
         {
             if (e.PropertyName is nameof(DispatchSession.VolteReg) or nameof(DispatchSession.PttReg))
@@ -40,13 +33,13 @@ public sealed partial class DeskViewModel : ObservableObject
             { OnPropertyChanged(nameof(AudioSummary)); OnPropertyChanged(nameof(AudioTip)); }
         };
         s.Settings.Changed += (_, _) => OnPropertyChanged(nameof(PttHotKey));
-        RefreshPresets();
     }
 
     public void RefreshIdentity()
     {
         OnPropertyChanged(nameof(DisplayName)); OnPropertyChanged(nameof(Extension)); OnPropertyChanged(nameof(PttNumber)); OnPropertyChanged(nameof(PttNumberFull));
         OnPropertyChanged(nameof(GroupName)); OnPropertyChanged(nameof(Pilot)); OnPropertyChanged(nameof(HasDesk)); OnPropertyChanged(nameof(HasPtt)); OnPropertyChanged(nameof(HasVolte));
+        OnPropertyChanged(nameof(DeskLine));
     }
 
     public string DisplayName => _s.DisplayName;
@@ -56,6 +49,8 @@ public sealed partial class DeskViewModel : ObservableObject
     public string GroupName => _s.GroupName;
     public string Pilot => _s.PilotId.Length > 0 ? "대표 " + UserPartConverter.UserPart(_s.PilotId) : "";
     public bool HasDesk => _s.HasDesk;
+    /// <summary>상단 바 이름 옆 한 줄 — "관제1과 · 대표 7000"(관제 데스크가 없으면 PTT 번호).</summary>
+    public string DeskLine => string.Join(" · ", new[] { GroupName, Pilot }.Where(x => x.Length > 0)) is { Length: > 0 } d ? d : PttNumber;
     public bool HasPtt => _s.PttService is not null;
     public bool HasVolte => _s.VolteService is not null;
 
@@ -76,23 +71,10 @@ public sealed partial class DeskViewModel : ObservableObject
     public void SyncMonitors(IEnumerable<SessionItem> sessions)
     {
         Monitors.Clear();
-        foreach (var s in sessions.Where(x => x.IsWindow)) Monitors.Add(s);
+        foreach (var s in sessions.Where(x => x.IsListenLeg)) Monitors.Add(s);
         OnPropertyChanged(nameof(MonitorCount)); OnPropertyChanged(nameof(HasMonitors));
     }
 
-    public void Tick(DateTime now) => Clock = now.ToString("HH:mm");
-
-    public void RefreshPresets()
-    {
-        Presets.Clear();
-        foreach (var n in _layout.Names) Presets.Add(n);
-        CurrentPreset = _layout.File.Current;
-        LayoutLocked = _layout.Current.Locked;
-    }
-
-    [RelayCommand] private void ToggleLock() => LayoutLocked = !LayoutLocked;
-    [RelayCommand] private void ApplyPreset(string name) => PresetApplyRequested?.Invoke(this, name);
-    [RelayCommand] private void SavePreset(string name) => PresetSaveRequested?.Invoke(this, name);
     [RelayCommand] private void OpenSettings() => SettingsRequested?.Invoke(this, EventArgs.Empty);
     [RelayCommand] private void Logout() => LogoutRequested?.Invoke(this, EventArgs.Empty);
     [RelayCommand] private void Exit() => ExitRequested?.Invoke(this, EventArgs.Empty);

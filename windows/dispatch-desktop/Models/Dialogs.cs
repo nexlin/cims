@@ -1,4 +1,4 @@
-// dialog 이벤트(RFC 4235) 행 — 그룹원 띠(BLF)·대기열·④ 진행 중 행의 소스(§4.3·§4.4).
+// dialog 이벤트(RFC 4235) 행 — 관제 그룹원(BLF)·대표번호 대기열·«진행 중» 행의 소스(§4.3).
 using CimsUe;
 using CommunityToolkit.Mvvm.ComponentModel;
 using DispatchDesktop.Converters;

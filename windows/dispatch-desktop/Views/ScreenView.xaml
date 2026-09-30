@@ -23,7 +23,7 @@
                 <!-- 화면별 힌트 -->
                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Visibility="{Binding Screen, ElementName=Root, Converter={StaticResource EqToVis}, ConverterParameter=History}">
                     <TextBlock Style="{StaticResource Hint}">
-                        <Run Text="끝난 세션 · 관제 그룹 " /><Run Text="{Binding Desk.GroupName, Mode=OneWay}" FontWeight="SemiBold" /><Run Text=" 범위(서버 게이트) · 진행 중·오늘은 관제 ②④ 가 정본 · 하루 단위 조회" />
+                        <Run Text="끝난 세션 · 관제 그룹 " /><Run Text="{Binding Desk.GroupName, Mode=OneWay}" FontWeight="SemiBold" /><Run Text=" 범위(서버 게이트) · 진행 중·오늘은 관제 [무전]·[통화] 가 정본 · 하루 단위 조회" />
                     </TextBlock>
                 </StackPanel>
                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Visibility="{Binding Screen, ElementName=Root, Converter={StaticResource EqToVis}, ConverterParameter=PttGroups}">

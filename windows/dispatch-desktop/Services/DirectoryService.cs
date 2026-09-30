@@ -214,7 +214,7 @@ public sealed class DirectoryService
     }
 
     private readonly List<Contact> _serverMembers = new();        // 감시(dialog watch) 대상 전원 — 서버가 monitorScope 를 해석한 목록
-    private readonly List<Contact> _serverDeskMembers = new();    // 그중 자기 관제 그룹원(groupId == dispatch.groupId) — ③ 띠
+    private readonly List<Contact> _serverDeskMembers = new();    // 그중 자기 관제 그룹원(groupId == dispatch.groupId) — «관제 그룹원»
     /// <summary>프로비저닝 `dispatch.members[]`(정본, android_ue_provisioning.md §3) → 감시 대상 전원 + 자기 그룹원. 비면 CSV member 태그 폴백.
     /// 번호는 망 주소(volteAor)로 두고 내선 라벨(extension)은 이름에 병기한다 — dialog watch·발신이 곧바로 다이얼되게.</summary>
     public void SetMembers(IEnumerable<CimsUe.DispatchMember> members, string deskGroupId)
@@ -245,7 +245,7 @@ public sealed class DirectoryService
     public bool HasServerMembers => _serverMembers.Count > 0;
 
     // ── 조회 ──
-    /// <summary>관제 그룹원(③ 띠) — 프로비저닝 members[] 중 자기 관제 그룹(groupId == dispatch.groupId), 이름은 전화번호부로 보강. 없으면 CSV member 태그.</summary>
+    /// <summary>관제 그룹원(«관제 그룹원» 칸) — 프로비저닝 members[] 중 자기 관제 그룹(groupId == dispatch.groupId), 이름은 전화번호부로 보강. 없으면 CSV member 태그.</summary>
     public IReadOnlyList<Contact> Members => _serverMembers.Count > 0
         ? _serverDeskMembers.Select(m => m.Name.Length > 0 ? m : m with { Name = NameOf(m.Number) }).ToList()
         : _merged.Where(c => c.Kind == ContactKind.Extension && c.IsMember).ToList();

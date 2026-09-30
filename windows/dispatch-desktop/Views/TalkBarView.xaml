@@ -1,0 +1,102 @@
+<UserControl x:Class="DispatchDesktop.Views.TalkBarView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="clr-namespace:DispatchDesktop.ViewModels"
+             xmlns:v="clr-namespace:DispatchDesktop.Views"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008" xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" mc:Ignorable="d"
+             d:DataContext="{d:DesignInstance vm:TalkBarViewModel}">
+    <!-- 발언 바 80(§3.2) — 모든 화면 하단 상시: PTT(누르는 동안 발언 대상 전부에 floor 요청 · 떼면 해제, 잠금 발언이면 클릭 토글) + 대상 칩(상태 · ×) + [모두 해제].
+         대상이 없으면 "발언 대상 없음 — 채널 카드의 ✓". 칩을 누르면 그 채널 상세 -->
+    <Border Height="80" Padding="16,8" Background="{DynamicResource Brush.Panel}" BorderBrush="{DynamicResource Brush.Border}" BorderThickness="0,1,0,0">
+        <DockPanel>
+            <v:HoldButton DockPanel.Dock="Left" Width="150" Height="64" Cursor="Hand" Focusable="False" IsEnabled="{Binding CanPtt}"
+                          DownCommand="{Binding PttDownCommand}" UpCommand="{Binding PttUpCommand}" ToolTip="누르는 동안 발언 대상 전부에 발언권 요청 — 떼면 해제" ToolTipService.ShowOnDisabled="True">
+                <v:HoldButton.Style>
+                    <Style TargetType="v:HoldButton">
+                        <Setter Property="Background" Value="{DynamicResource Brush.Ink}" />
+                        <Setter Property="Foreground" Value="{DynamicResource Brush.OnInk}" />
+                        <Setter Property="BorderBrush" Value="Transparent" />
+                        <Setter Property="BorderThickness" Value="0" />
+                        <Setter Property="Template">
+                            <Setter.Value>
+                                <ControlTemplate TargetType="v:HoldButton">
+                                    <Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="12">
+                                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                    </Border>
+                                </ControlTemplate>
+                            </Setter.Value>
+                        </Setter>
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding HasTargets}" Value="False">
+                                <Setter Property="Background" Value="{DynamicResource Brush.Panel}" /><Setter Property="Foreground" Value="{DynamicResource Brush.Faint}" />
+                                <Setter Property="BorderBrush" Value="{DynamicResource Brush.BorderStrong}" /><Setter Property="BorderThickness" Value="1" />
+                            </DataTrigger>
+                            <DataTrigger Binding="{Binding IsRequesting}" Value="True"><Setter Property="Background" Value="{DynamicResource Brush.Peril}" /><Setter Property="Foreground" Value="{DynamicResource Brush.OnPeril}" /></DataTrigger>
+                            <DataTrigger Binding="{Binding IsSpeaking}" Value="True"><Setter Property="Background" Value="{DynamicResource Brush.TalkInk}" /><Setter Property="Foreground" Value="{DynamicResource Brush.OnAccent}" /></DataTrigger>
+                            <DataTrigger Binding="{Binding AllDeniedFlash}" Value="True"><Setter Property="Background" Value="{DynamicResource Brush.Emg}" /><Setter Property="Foreground" Value="{DynamicResource Brush.OnAccent}" /></DataTrigger>
+                            <DataTrigger Binding="{Binding IsLocked}" Value="True"><Setter Property="BorderBrush" Value="{DynamicResource Brush.Held}" /><Setter Property="BorderThickness" Value="3" /></DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </v:HoldButton.Style>
+                <StackPanel Orientation="Horizontal">
+                    <Path Style="{StaticResource Icon}" Data="{StaticResource Icon.Mic}" Width="22" Height="22" StrokeThickness="2" Margin="0,0,10,0" />
+                    <StackPanel VerticalAlignment="Center">
+                        <TextBlock Text="{Binding PttText}" FontSize="19" FontWeight="Bold" LineHeight="22" />
+                        <TextBlock Text="{Binding PttHint}" FontSize="12" Opacity="0.9" />
+                    </StackPanel>
+                </StackPanel>
+            </v:HoldButton>
+            <!-- 오른쪽: 남은 발언 · [모두 해제] -->
+            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center" Visibility="{Binding HasTargets, Converter={StaticResource BoolToVis}}">
+                <StackPanel Orientation="Horizontal" Visibility="{Binding IsSpeaking, Converter={StaticResource BoolToVis}}" Margin="0,0,14,0" VerticalAlignment="Center">
+                    <TextBlock Style="{StaticResource Hint}" Text="남은 발언" VerticalAlignment="Center" Margin="0,0,6,0" />
+                    <ProgressBar Width="80" Height="6" Value="{Binding MinGauge, Mode=OneWay}" VerticalAlignment="Center">
+                        <ProgressBar.Style>
+                            <Style TargetType="ProgressBar" BasedOn="{StaticResource Meter}">
+                                <Style.Triggers><DataTrigger Binding="{Binding TalkLimitNear}" Value="True"><Setter Property="Foreground" Value="{DynamicResource Brush.Emg}" /></DataTrigger></Style.Triggers>
+                            </Style>
+                        </ProgressBar.Style>
+                    </ProgressBar>
+                    <TextBlock Style="{StaticResource MonoMuted}" Text="{Binding SpeakerElapsed, Converter={StaticResource Elapsed}}" FontSize="12" VerticalAlignment="Center" Margin="6,0,0,0" />
+                </StackPanel>
+                <Button Style="{StaticResource Btn.Flat}" Content="모두 해제" FontSize="13.5" FontWeight="Bold" Padding="12,8" Command="{Binding ClearAllCommand}" ToolTip="발언 대상 ✓ 전부 해제" />
+            </StackPanel>
+            <!-- 대상 없음 -->
+            <StackPanel Margin="14,0,0,0" VerticalAlignment="Center" Visibility="{Binding HasTargets, Converter={StaticResource NotToVis}}">
+                <TextBlock Text="발언 대상 없음" FontSize="14" FontWeight="Bold" />
+                <TextBlock Style="{StaticResource Muted}" Text="{Binding Hint}" FontSize="12.5" />
+            </StackPanel>
+            <!-- 대상 칩 -->
+            <ItemsControl ItemsSource="{Binding Targets}" Margin="12,0,0,0" VerticalAlignment="Center" Visibility="{Binding HasTargets, Converter={StaticResource BoolToVis}}">
+                <ItemsControl.ItemsPanel><ItemsPanelTemplate><StackPanel Orientation="Horizontal" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate DataType="{x:Type vm:TalkTargetChip}">
+                        <Border x:Name="Chip" Height="36" CornerRadius="8" Padding="12,0,6,0" Margin="0,0,8,0" BorderThickness="1" BorderBrush="{DynamicResource Brush.Ink}" Background="{DynamicResource Brush.Surface}"
+                                TextElement.Foreground="{DynamicResource Brush.Ink}">
+                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                <Button Style="{StaticResource Btn.Flat}" Command="{Binding DataContext.FocusCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}" CommandParameter="{Binding}"
+                                        Foreground="{Binding (TextElement.Foreground), ElementName=Chip}" ToolTip="채널 상세 열기">
+                                    <TextBlock Text="{Binding ChipText}" FontSize="13" FontWeight="Bold" />
+                                </Button>
+                                <Button Style="{StaticResource Btn.Flat}" Width="22" Height="22" Margin="4,0,0,0" Command="{Binding DataContext.RemoveCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}" CommandParameter="{Binding}"
+                                        Foreground="{Binding (TextElement.Foreground), ElementName=Chip}" ToolTip="발언 대상에서 빼기">
+                                    <Path Style="{StaticResource Icon}" Data="{StaticResource Icon.X}" Width="13" Height="13" StrokeThickness="2.2" />
+                                </Button>
+                            </StackPanel>
+                        </Border>
+                        <DataTemplate.Triggers>
+                            <DataTrigger Binding="{Binding IsGranted}" Value="True">
+                                <Setter TargetName="Chip" Property="Background" Value="{DynamicResource Brush.TalkInk}" /><Setter TargetName="Chip" Property="BorderBrush" Value="{DynamicResource Brush.TalkInk}" />
+                                <Setter TargetName="Chip" Property="TextElement.Foreground" Value="{DynamicResource Brush.OnAccent}" />
+                            </DataTrigger>
+                            <DataTrigger Binding="{Binding IsRequesting}" Value="True"><Setter TargetName="Chip" Property="BorderBrush" Value="{DynamicResource Brush.Peril}" /></DataTrigger>
+                            <DataTrigger Binding="{Binding IsQueued}" Value="True"><Setter TargetName="Chip" Property="BorderBrush" Value="{DynamicResource Brush.Peril}" /></DataTrigger>
+                            <DataTrigger Binding="{Binding IsDenied}" Value="True"><Setter TargetName="Chip" Property="BorderBrush" Value="{DynamicResource Brush.Emg}" /><Setter TargetName="Chip" Property="TextElement.Foreground" Value="{DynamicResource Brush.Emg}" /></DataTrigger>
+                            <DataTrigger Binding="{Binding IsEmergency}" Value="True"><Setter TargetName="Chip" Property="BorderThickness" Value="2" /><Setter TargetName="Chip" Property="BorderBrush" Value="{DynamicResource Brush.Emg}" /></DataTrigger>
+                        </DataTemplate.Triggers>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+        </DockPanel>
+    </Border>
+</UserControl>

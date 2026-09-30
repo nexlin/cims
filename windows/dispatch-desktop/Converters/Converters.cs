@@ -168,3 +168,37 @@ public sealed class RouteIconConverter : IValueConverter
         => Application.Current?.TryFindResource(value is true ? "Icon.Speaker" : "Icon.Headphones") ?? System.Windows.Media.Geometry.Empty;
     public object ConvertBack(object? v, Type t, object? p, CultureInfo c) => throw new NotSupportedException();
 }
+
+/// <summary>높이 → 알약 모서리(높이/2). WPF CornerRadius 를 큰 값(999)으로 두면 넓은 Border 가 타원이 되므로 실제 높이의 절반을 쓴다.</summary>
+public sealed class HalfRadiusConverter : IValueConverter
+{
+    public object Convert(object? value, Type t, object? p, CultureInfo c) => new CornerRadius(value is double h && h > 0 ? h / 2 : 0);
+    public object ConvertBack(object? v, Type t, object? p, CultureInfo c) => throw new NotSupportedException();
+}
+
+/// <summary>첫 글자(아바타 원) — 빈 값이면 "?".</summary>
+public sealed class InitialConverter : IValueConverter
+{
+    public object Convert(object? value, Type t, object? p, CultureInfo c) => value is string s && s.Trim().Length > 0 ? s.Trim()[..1] : "?";
+    public object ConvertBack(object? v, Type t, object? p, CultureInfo c) => throw new NotSupportedException();
+}
+
+/// <summary>bool → parameter "참일 때|거짓일 때" 중 하나를 대상 형식으로(열 수·폭·GridLength·가시성 등). 오른쪽 패널이 열리면 오른쪽 칸을 좁히는 데 쓴다(§3.6).</summary>
+public sealed class PickConverter : IValueConverter
+{
+    public object? Convert(object? value, Type t, object? p, CultureInfo c)
+    {
+        var parts = (p as string ?? "").Split('|');
+        string raw = value is true ? parts[0] : parts.Length > 1 ? parts[1] : "";
+        if (t == typeof(object) || t == typeof(string)) return raw;
+        return System.ComponentModel.TypeDescriptor.GetConverter(t).ConvertFromInvariantString(raw);
+    }
+    public object ConvertBack(object? v, Type t, object? p, CultureInfo c) => throw new NotSupportedException();
+}
+
+/// <summary>두 값이 같은 참조인가 — 목록에서 고른 줄 강조(대화 목록·기록 목록).</summary>
+public sealed class SameRefConverter : IMultiValueConverter
+{
+    public object Convert(object[] values, Type t, object? p, CultureInfo c) => values.Length == 2 && values[0] is not null && ReferenceEquals(values[0], values[1]);
+    public object[] ConvertBack(object v, Type[] t, object? p, CultureInfo c) => throw new NotSupportedException();
+}

@@ -168,7 +168,7 @@ OkHttp/WinHTTP 구현을 주입한다고 쓴다. 코어 안에 그 추상(`http:
 | `std::vector<GroupSummary>` | `csc.h` `listGroups` | `%template(GroupSummaryVector)` |
 | `std::map<std::string,std::string>` | `engine.h` `sendRequest(headers)` | `%include "std_map.i"` + `%template(StringMap)` |
 
-`onRoster` 는 ① 채널 카드 3줄(로스터 미리보기)과 ② 범위 채널 참가자 수의 유일한 소스라, 불투명하면
+`onRoster` 는 ① 채널 카드 접속자 줄(로스터 미리보기)과 ② 범위 채널 참가자 수의 유일한 소스라, 불투명하면
 로스터 기능 전체가 성립하지 않는다.
 
 ### 3.5 출력 인자를 코어 반환형으로 없앤다
@@ -529,7 +529,7 @@ UeForegroundService  ─ 프로세스 상주. 알림·wakelock. 여기서 CimsUe
   `displayLabel(uri)` 는 "1003 이순경" 병기(§3.2 신원 표시).
 - **표시와 동작을 가른다**([identifier_model.md](../identifier_model.md)) — ⑥ 내역 행은 표시용 `peer`(이름)와
   다시 걸 때 쓰는 `number` 를 따로 든다. 이름으로 다이얼하면 걸리지 않는다.
-- **⑥ 은 두 부분이다 — 진행 중 행 + 최근 행**(dispatch_desktop_ui.md §4.4). 최근 행만 두면
+- **⑥ 은 두 부분이다 — 진행 중 행 + 최근 행**(데스크톱 = [통화] «진행 중 · 관제 그룹» + «기록», dispatch_desktop_ui.md §4.3·§4.4). 최근 행만 두면
   **감청 진입점이 ③ 그룹원 띠 하나뿐**이 되고, ③ 은 내 전화 그룹(`groupId == dispatch.groupId`)만
   보여 주므로 **관제 범위의 나머지 감시 대상은 `watchAll()` 이 dialog 를 구독해 놓고도 화면에 나올
   자리가 없다** — 보이지도, 감청되지도 않는다.
@@ -564,7 +564,7 @@ UeForegroundService  ─ 프로세스 상주. 알림·wakelock. 여기서 CimsUe
   [▦▾] 팝오버 셋(§4.3)을 접되 열고 닫는 팝오버로 만들지 않았다: 관제석에서 번호를 누르는 일은 상시다. «최근» 은 «통화내역» 면이
   이미 담고 있어 따로 두지 않는다(행 롱프레스 = 사람 메뉴). 주소록은 조직 거르기(«전체» 다음 트리 순서, 하위 포함)·이름/번호 검색이고, 행의 [발신] 은
   곧바로 걸고(패널은 남는다) [문자] 는 «메시지» 면의 그 사람 스레드를 연다. 행 탭은 사람 메뉴다.
-- **치는 동안 주소록이 제안한다**(데스크톱 ③ 번호 필드의 제안 팝업) — 입력란 아래에 겹쳐 최대 8명: 이름에 들었거나 친
+- **치는 동안 주소록이 제안한다**(데스크톱 «통화» 머리 번호칸의 제안 팝업) — 입력란 아래에 겹쳐 최대 8명: 이름에 들었거나 친
   숫자가 번호의 어느 표기(저장된 그대로·E.164·국내 로컬)에든 들었으면(`DirectoryBook.suggest` — 치다 만 `010333` 은
   정규형으로 올릴 수 없어 표기마다 본다). 행을 누르면 채우고 [발신] 은 곧바로 건다. 입력란의 포커스를 뺏지 않고(계속 칠 수
   있게), 입력이 주소록 번호와 정확히 맞으면(이름이 이미 입력란 아래에 선다) 접는다. URI(`:`)를 치는 중에는 제안하지 않는다.
@@ -678,7 +678,7 @@ UeForegroundService  ─ 프로세스 상주. 알림·wakelock. 여기서 CimsUe
 시각·채널·종류·내용 · **앞뒤 이벤트**(같은 채널의 앞 둘·뒤 둘 — `aroundOf`, 지금 보는 것 강조) · [답장](SDS 행 — 그 스레드로) · [채널 열기]
 (열 수 있는 채널일 때 — 편성 그룹·살아 있는 세션. 1:1 SDS 행의 키는 사람 번호라 채널이 아니다) · [이력에서 세션 보기 ›].
 
-**⑥ 머리 필터** `[전체|대표번호|부재]` — 데스크톱과 같다(§4.4). 오늘 데스크 칩과 **같은 상태**를 쓴다 —
+**⑥ 머리 필터** `[전체|대표번호|부재]` — 데스크톱 «기록» 거르기(`전체|통화|문자|부재|대표번호`, dispatch_desktop_ui.md §4.4)의 통화 쪽 셋이다. 오늘 데스크 칩과 **같은 상태**를 쓴다 —
 둘로 나누면 «칩으로 건 필터» 와 «머리로 건 필터» 가 서로를 덮는다.
 
 «대표번호» 는 종류와 **직교한 조회 축**이다(대표번호로 온 부재도 있다). 그래서 집계 칩에는 없고 머리에만
@@ -693,8 +693,7 @@ AoR 이 대표번호인지로 본다. 둘을 가르는 이유는 책임이 다�
 
 ### 6.3b 채널 카드의 접속자 줄 — 로스터 미리보기
 
-데스크톱은 «채널 카드 2줄, **포커스 카드만 3줄**» 이고 3줄이 로스터 칩이다
-([dispatch_desktop_ui.md](dispatch_desktop_ui.md) §4.1 «공통 — 채널 카드»). 태블릿은 포커스를 카드가 아니라 사이드
+데스크톱과 같은 네 줄 카드다([dispatch_desktop_ui.md](dispatch_desktop_ui.md) §4.1). 포커스는 카드가 아니라 사이드
 패널이 받으므로(§6.3a) **내 채널 카드 전부**가 접속자 줄 한 줄을 갖는다 — 카드 높이 120 안에서 이름·마지막 발언·접속자·
 참가/상태 네 줄이 고정이라 카드 수가 늘어도 격자가 흔들리지 않는다. 접속자 줄은 칩이 아니라 글자 한 줄(`이름 · 이름(나) · 이름 +n`)이다.
 
@@ -807,9 +806,9 @@ SDS)가 같이 뜬다 — 합치면 어느 번호로 나갔는지 알 수 없고
 | **경과는 1초 틱이 갱신한다** | `Models/Sessions.cs` `Tick(now)` → `Elapsed = now - (ConnectedAt ?? StartedAt)`, `MainViewModel.Tick` 이 1초마다 부른다 | 세션의 `tick` Flow(살아 있는 세션·dialog 가 있을 때만) 를 목록 Flow 에 물린다 — 계산 속성만으로는 Compose 가 재구성하지 않는다 |
 | **응답하면 기존 통화를 자동 보류** | `Services/DispatchSession.cs` — 호가 Active 가 되면 다른 활성 VolteCall 을 `Hold()`. 설정 `AutoHoldOnAnswer` 기본 **true**(`SettingsStore.cs`) | 같은 규칙·같은 기본값. 끄면 두 통화가 동시에 들려 어느 쪽에 말하는지 알 수 없다 |
 | **거절은 486** | `Reject(486)` | 같다. 603 은 서버가 포크 집합을 통째로 접어 다른 관제석까지 멈춘다(TS 24.239) |
-| **울리는 카드는 [응답]·[거절]** | `CallDeskPanel.xaml` — `CanAnswer` 면 [응답]·[거절 486], [종료] 는 `CanAnswer` 가 아닐 때만 | 같다 — 착신 배너와 같은 두 동작이 카드에도 선다. 울리는 호에는 끊을 통화가 아직 없어 [종료] 를 두지 않는다 |
+| **울리는 카드는 [응답]·[거절]** | `Views/CallModeView.xaml` — `CanAnswer` 면 [응답]·[거절 486], [종료] 는 `CanAnswer` 가 아닐 때만 | 같다 — 착신 배너와 같은 두 동작이 카드에도 선다. 울리는 호에는 끊을 통화가 아직 없어 [종료] 를 두지 않는다 |
 | **대기열 행의 [응답]·[당겨받기]** | `QueueItem` — `RingsMe` 면 [응답](이 발신자의 **내** 착신 leg 만), 링잉이면 [당겨받기] = `Pickup(Pilot)` | 같다(`myLegOf`·`QueueItem.pilot`). [응답] 은 직접 착신이 동시에 울려도 그 호를 받지 않는다. [당겨받기] 는 지정 픽업 `<code><대표번호>` 로 이 대표번호의 포크를 고른다([dispatch_center.md](dispatch_center.md) §4.4) — 그룹 픽업은 그룹의 다른 링잉 호를 집을 수 있다 |
-| **오늘 데스크 칩은 ⑥ 의 필터다** | `CallDeskPanel.xaml` 의 `DeskFilterCommand` → `CallActivityViewModel.Filter`(`all\|missed\|outgoing\|transfer\|monitor`) | 같은 값·같은 규칙(`keepInDesk`). **«응대» 칩은 `all`** 이다 — 데스크톱 툴팁도 "⑥ 전체" 다. 응대는 목록 대부분이라 거를 이유가 없고 칩 다섯 중 하나는 해제 자리여야 한다. 태블릿은 해제 수단이 칩뿐이라 **같은 칩 재클릭도 해제**로 둔다. 감청은 데스크톱의 `ListenStart`/`ListenEnd` 둘이 태블릿에서 `MONITOR` 하나라 그 한 종류로 판정한다 |
+| **오늘 데스크 칩은 ⑥ 의 필터다** | 데스크톱은 오늘 집계(`CallDeskViewModel.Today*`)를 «기록» 머리에 수로 두고, 거르기는 상대 목록 칩(`CallRecordsViewModel` — `all\|call\|sms\|missed\|pilot`)이 맡는다 | 칩 값 `all\|missed\|outgoing\|transfer\|monitor`, 규칙 `keepInDesk`. **«응대» 칩은 `all`** 이다. 응대는 목록 대부분이라 거를 이유가 없고 칩 다섯 중 하나는 해제 자리여야 한다. 태블릿은 해제 수단이 칩뿐이라 **같은 칩 재클릭도 해제**로 둔다. 감청은 데스크톱의 `ListenStart`/`ListenEnd` 둘이 태블릿에서 `MONITOR` 하나라 그 한 종류로 판정한다 |
 
 **구독보다 모델을 먼저 게시한다 — 두 곳 다.** 서버는 구독을 받아들이는 즉시 현재 상태를 NOTIFY 로
 보낸다. 구독을 먼저 걸면 그 NOTIFY 가 «아직 목록에 없는 대상» 으로 도착해 조용히 버려진다 —
@@ -956,7 +955,7 @@ call / 그룹 추가 = 편성, TS 24.481 — §6.12). **고르기가 먼저**고
 
 ### 6.3 화면 구조 — 모바일 앱으로 짠다
 
-**데스크톱 격자를 줄여 넣지 않는다.** 데스크톱은 1920×1080 한 장에 6패널을 동시에 편다(dispatch_desktop_ui.md §3.1). 태블릿(가로
+**데스크톱 격자를 줄여 넣지 않는다.** 데스크톱은 1920×1080 에 모드마다 한 화면([무전] 2×2 · [통화] 통화|기록)을 편다(dispatch_desktop_ui.md §3.1). 태블릿(가로
 1280×800)은 그 절반도 안 돼, 같은 격자를 접어 넣으면 채널 카드 세 장·메시지 여섯 줄이 겨우 보여 어느 칸도 제 몫을 못 한다.
 
 **원칙 넷**
@@ -1167,10 +1166,9 @@ call / 그룹 추가 = 편성, TS 24.481 — §6.12). **고르기가 먼저**고
 
 | 기능 | 태블릿 | 이유 |
 |---|---|---|
-| AvalonDock 도킹·크기 조정 | **없음** — 고정 배치 | 마우스 어포던스. 태블릿은 배치가 하나다 |
-| 배치 프리셋(`layout.json`) | **없음** | 도킹이 없으면 저장할 배치가 없다 |
+| 칸 경계 끌기(`layout.json` `Seams`) | **없음** — 고정 배치 | 마우스 어포던스. 태블릿은 배치가 하나다 |
 | 화면 별창(`ScreenWindow`) | **없음** — 레이어 전환 | Android 에 별창 개념이 없다 |
-| 감청 별창 N 개 | **통화 행의 인라인 확장** (§6.5) | 창이 여럿일 수 없고, 통화와 감청은 한 몸이다 |
+| 감청 창 [창으로 ↗](인라인 확장 옆의 선택) | **없음 — 통화 행의 인라인 확장만** (§6.5) | 창이 여럿일 수 없고, 통화와 감청은 한 몸이다 |
 | 트레이 최소화 | **없음** — Foreground Service 알림 | 같은 목적을 알림이 맡는다 |
 | 전역 핫키 | **없음** — 하드 키보드를 전제하지 않는다. 모든 조작이 화면에 있다(PTT 는 측면 키) | §7 |
 
@@ -1234,17 +1232,17 @@ RFC 5576 `a=ssrc … label`, [dispatch_center.md](dispatch_center.md) §5.4) 줄
 
 패널 경계가 곧 상태 소유 경계다. Windows 판의 분해를 그대로 따르되, **어느 화면에 놓이는지만** 다르다(§6.3).
 
-| 패널(데스크톱) | 태블릿의 자리 | 소유 상태 | 소스 |
+| 상태 단위(이 문서의 ①~⑥ — 데스크톱의 자리) | 태블릿의 자리 | 소유 상태 | 소스 |
 |---|---|---|---|
 | 발언 바 | 모든 화면 하단(상시) | 발언 대상 집합, 대상별 승인/대기/거부, 최소 잔여. 칩 = 그 채널 포커스, 칩의 × = 그 대상 하나만 빼기(요청해 둔 floor 도 푼다 — 데스크톱 칩과 같다) | `onFloor` |
-| ① 내 채널 | [무전] › «채널» | 채널 카드 집합, 포커스 | `calls()` + `onGroupCall`·`onRoster` |
-| ② 범위 채널 | [무전] › «채널» | 청취·관리 범위 카드, 필터·검색, 청취 수 | `Profile.dispatch.pttTargets[]` + conference 구독 |
-| ③ 일반통화 | [통화] 고정 칸 + «통화» | 대표번호 대기열·진행 중·내 통화·그룹원 띠(고정 칸) · 다이얼패드(«통화» 면) | `onDialogInfo`(BLF) + 로컬 호 |
-| ④ PTT 메시지 | [무전] › «메시지» | 스레드·말풍선·disposition | `onSds` + 발신 token 상관 |
-| ④′ 문자 | [통화] › «메시지» | 스레드·말풍선(SMS/LMS) | `onMessage`(SIP MESSAGE) + 발신 token 상관 |
-| ⑤ PTT 이벤트 | [무전] › «이벤트» | 이벤트 링 버퍼(진행 중 행 없음 — 진행 중 긴급·임박 고정 행만) | `onFloor`·`onGroupCall` + 이력 폴링 |
-| ⑥ 통화 내역 | [통화] › «통화내역» | 끝난 호 + 오늘 데스크 | dialog 쌍 결합 + 이력 폴링 |
-| 감청 별창 | [통화] 고정 칸 «진행 중» 의 행 안 | 없음 — 세션 목록을 그대로 투영 | `PHONE_MONITOR` 세션 + `MediaSource` |
+| ① 내 채널([무전] 위 왼쪽) | [무전] › «채널» | 채널 카드 집합, 포커스 | `calls()` + `onGroupCall`·`onRoster` |
+| ② 범위 채널(타 채널 — [무전] 위 오른쪽) | [무전] › «채널» | 청취·관리 범위 카드, 필터·검색, 청취 수 | `Profile.dispatch.pttTargets[]` + conference 구독 |
+| ③ 일반통화([통화] 왼쪽 «통화») | [통화] 고정 칸 + «통화» | 대표번호 대기열·진행 중·내 통화·그룹원 띠(고정 칸) · 다이얼패드(«통화» 면) | `onDialogInfo`(BLF) + 로컬 호 |
+| ④ PTT 메시지([무전] 아래 왼쪽) | [무전] › «메시지» | 스레드·말풍선·disposition | `onSds` + 발신 token 상관 |
+| ④′ 문자([통화] «기록» 의 문자 줄기) | [통화] › «메시지» | 스레드·말풍선(SMS/LMS) | `onMessage`(SIP MESSAGE) + 발신 token 상관 |
+| ⑤ PTT 이벤트([무전] 아래 오른쪽) | [무전] › «이벤트» | 이벤트 링 버퍼(진행 중 행 없음 — 진행 중 긴급·임박 고정 행만) | `onFloor`·`onGroupCall` + 이력 폴링 |
+| ⑥ 통화 내역([통화] «진행 중» + «기록») | [통화] › «통화내역» | 끝난 호 + 오늘 데스크 | dialog 쌍 결합 + 이력 폴링 |
+| 감청(«진행 중» 행 확장 + 선택 감청 창) | [통화] 고정 칸 «진행 중» 의 행 안 | 없음 — 세션 목록을 그대로 투영 | `PHONE_MONITOR` 세션 + `MediaSource` |
 
 **UI 는 코어 상태의 투영이다.** 진행 중 상태는 구독(dialog/conference)이 정본이고, 끝난 것만 서버 통합 이력
 (`GET /provisioning/history`, 2.5초 커서 폴링)이 채운다 — **폴링이 live 를 대체하지 않는다**.
@@ -1262,7 +1260,7 @@ RFC 5576 `a=ssrc … label`, [dispatch_center.md](dispatch_center.md) §5.4) 줄
 | `CallDeskViewModel` | 그대로 | 2열 배치(§6.3) |
 | `McDataMessagesViewModel` | `PttMessagesViewModel`(SDS) — [무전] › «메시지» | 채널 상세 패널에는 두지 않는다(두 곳에 있으면 «이 채널 것인가» 가 흐려진다, §6.3a) |
 | `SmsMessagesViewModel` | `SmsMessagesViewModel`(SMS) — [통화] › «메시지» | 같은 모양·다른 망. 스레드·보관을 갈라 둔다(§6.2e) |
-| — | `RecipientPicker` **신규** | 데스크톱은 [문자] 팝오버가 받는 사람을 함께 받는다. 태블릿은 면이라 «새 대화» 가 따로 필요하고, SDS·SMS 가 같이 쓴다(§6.9a) |
+| — | `RecipientPicker` **신규** | 데스크톱은 «기록» 상대 줄이나 번호칸에서 받는 사람이 정해진다. 태블릿은 면이라 «새 대화» 가 따로 필요하고, SDS·SMS 가 같이 쓴다(§6.9a) |
 | `PttActivityViewModel` | 그대로 | `CallActivityViewModel` 은 `CallDeskViewModel.callLog` 로 |
 | `SessionHistoryViewModel` | `HistoryViewModel` + `SegmentPlayer` | `MediaElement` → `MediaPlayer`(미디어 스트림) |
 | `GroupAdminViewModel`+`GroupEditViewModel` | **합침** → `PttGroupsViewModel`(+`EditForm`) | 편집이 같은 자리의 인라인 폼이라 수명이 하나다(§6.12) |
@@ -1270,9 +1268,9 @@ RFC 5576 `a=ssrc … label`, [dispatch_center.md](dispatch_center.md) §5.4) 줄
 | `MonitorWindowViewModel` | **없음** — 감청은 «진행 중» 행의 인라인 확장(`TapDetail`) | 창당 상태가 없고, 축을 세우면 같은 통화가 두 곳에 나온다(§6.5) |
 | `DispatchSummaryViewModel` | **없음** — 요약 띠 자체를 두지 않는다 | 발언 바와 레일·탭 배지가 같은 것을 말한다(§6.10) |
 | `PersonActionsViewModel` | `PersonMenu`·`SearchSheet` + `MainViewModel.runPersonAction` | VM 을 두지 않았다 — 사람 목록은 ③ VM(`CallDeskViewModel.people`)이 이미 묶고, 메뉴·검색은 자기 상태가 없다(§6.2f) |
-| `DeskViewModel` | **없음** — 상단 바가 직접 그린다 | 데스크톱에서는 상단 바 VM(§3.2 — 신원·등록 점등·오디오 요약·시계·배치 프리셋)이다. 태블릿은 배치 프리셋이 없고 나머지는 상태를 가진 쪽(`MainViewModel`·`SettingsStore`)이 그대로 그려 VM 이 따로 필요 없다 |
+| `DeskViewModel` | **없음** — 상단 바가 직접 그린다 | 데스크톱에서는 상단 바 VM(§3.2 — 신원·등록 점등·오디오 요약·감청 중 N)이다. 태블릿은 상태를 가진 쪽(`MainViewModel`·`SettingsStore`)이 그대로 그려 VM 이 따로 필요 없다 |
 | `LoginViewModel`·`SettingsViewModel` | `MainViewModel`·`SettingsStore` | 로그인 화면은 상태가 셋뿐이라 합쳤다 |
-| — | `LayoutStore` **없음** | 도킹 없음 |
+| — | `LayoutStore` **없음** | 창 위치·칸 경계가 없다 |
 
 ### 6.9 저장
 
@@ -1295,8 +1293,8 @@ RFC 5576 `a=ssrc … label`, [dispatch_center.md](dispatch_center.md) §5.4) 줄
 
 ### 6.10 관제 요약 띠 — 두지 않는다
 
-데스크톱은 관제 밖 화면 상단에 요약 띠를 둔다(dispatch_desktop_ui.md §3.5 — 발언 대상·발언 상태·[PTT]·
-대기열·문자 미읽음·내 통화·감청 수·[관제로]). 태블릿에는 **없다.**
+데스크톱도 주 창에는 요약 띠가 없고 화면 별창에만 붙인다(dispatch_desktop_ui.md §3.5 — 발언 대상·발언 상태·[PTT]·
+대기열·문자 미읽음·내 통화·감청 수·[관제로]). 별창이 없는 태블릿에는 **없다.**
 
 근거는 그 자리가 이미 채워졌다는 것이다 — 발언 바가 모든 화면 하단에 상시로 있고(§6.3), 나머지 수는 레일·탭의
 배지가 말한다: 레일 [관제] = 아래 셋의 합 · 관제 탭 줄의 [통화] 칸 = 응답 대기(울리는 착신 + 대표번호 대기열) · [무전] › «메시지»
@@ -1539,7 +1537,7 @@ Compose `@Preview`(Android Studio 설계 보기)는 설계 중 참고용일 뿐 
 
 ## 10a. 밀도 — 글자·라벨의 단일 계약
 
-[dispatch_desktop_ui.md §12](dispatch_desktop_ui.md) 가 «상세는 구현 시 확장한다» 고 남긴 자리다.
+[dispatch_desktop_ui.md §12](dispatch_desktop_ui.md) 의 두 앱 대응표가 가리키는 글자·라벨 밀도의 정본이다.
 
 이 앱은 데스크톱(1920×1080·마우스)의 화면 의미론을 태블릿(1280×800·터치)으로 옮긴 것이라, 옮기는 동안
 **데스크톱 밀도가 그대로 따라왔다.** 한때 `fontSize` 가 281곳에 9~26sp 열세 가지로 흩어져 있었고, 같은 모양의

@@ -1,39 +1,15 @@
-// 메시지 공용 뷰 — 제목·부제·글자 수 표시(SMS 는 "n/70 SMS")·Enter 전송·새 메시지 자동 스크롤.
+// 대화 말풍선 — 새 메시지·대화 전환 때 맨 아래로, 파일 끌어 놓기(MCData FD — 📎 와 같은 경로).
 using System.Collections.Specialized;
-using System.Globalization;
 using System.Windows;
 using System.Windows.Controls;
-using System.Windows.Data;
-using System.Windows.Input;
 using DispatchDesktop.ViewModels;
 
 namespace DispatchDesktop.Views;
 
 public partial class MessagesView : UserControl
 {
-    public static readonly DependencyProperty TitleProperty = DependencyProperty.Register(nameof(Title), typeof(string), typeof(MessagesView), new PropertyMetadata(""));
-    public static readonly DependencyProperty SubtitleProperty = DependencyProperty.Register(nameof(Subtitle), typeof(string), typeof(MessagesView), new PropertyMetadata(""));
-    public static readonly DependencyProperty CountTextProperty = DependencyProperty.Register(nameof(CountText), typeof(string), typeof(MessagesView), new PropertyMetadata(""));
-    public static readonly DependencyProperty InputTipProperty = DependencyProperty.Register(nameof(InputTip), typeof(string), typeof(MessagesView), new PropertyMetadata("메시지…"));
-    public static readonly DependencyProperty HeaderVisibleProperty = DependencyProperty.Register(nameof(HeaderVisible), typeof(bool), typeof(MessagesView), new PropertyMetadata(true));
-    /// <summary>자체 머리(제목·부제·미읽음) 표시 — 패널/팝오버가 머리를 따로 그리면 끈다.</summary>
-    public bool HeaderVisible { get => (bool)GetValue(HeaderVisibleProperty); set => SetValue(HeaderVisibleProperty, value); }
-
-    public string Title { get => (string)GetValue(TitleProperty); set => SetValue(TitleProperty, value); }
-    public string Subtitle { get => (string)GetValue(SubtitleProperty); set => SetValue(SubtitleProperty, value); }
-    public string CountText { get => (string)GetValue(CountTextProperty); set => SetValue(CountTextProperty, value); }
-    public string InputTip { get => (string)GetValue(InputTipProperty); set => SetValue(InputTipProperty, value); }
-
-    /// <summary>두 값이 같은 참조인가 — 선택 스레드 칩 강조.</summary>
-    public static IMultiValueConverter SameRef { get; } = new SameRefConverter();
-
-    private sealed class SameRefConverter : IMultiValueConverter
-    {
-        public object Convert(object[] values, Type t, object p, CultureInfo c) => values.Length == 2 && values[0] is not null && ReferenceEquals(values[0], values[1]);
-        public object[] ConvertBack(object v, Type[] t, object p, CultureInfo c) => throw new NotSupportedException();
-    }
-
     private INotifyCollectionChanged? _watched;
+    private MessagesViewModelBase? _vm;
 
     public MessagesView()
     {
@@ -43,14 +19,16 @@ public partial class MessagesView : UserControl
 
     private void Hook()
     {
-        if (DataContext is not MessagesViewModelBase vm) return;
-        vm.PropertyChanged += (_, e) =>
-        {
-            if (e.PropertyName == nameof(MessagesViewModelBase.Selected)) { Watch(vm.Selected?.Messages); ScrollToEnd(); }
-            if (vm is SmsMessagesViewModel sms && e.PropertyName is nameof(SmsMessagesViewModel.CountText) or nameof(MessagesViewModelBase.Input)) CountText = sms.CountText;
-        };
-        if (vm is SmsMessagesViewModel s0) CountText = s0.CountText;
-        Watch(vm.Selected?.Messages);
+        if (_vm is not null) _vm.PropertyChanged -= OnVm;
+        _vm = DataContext as MessagesViewModelBase;
+        if (_vm is null) return;
+        _vm.PropertyChanged += OnVm;
+        Watch(_vm.Selected?.Messages);
+    }
+
+    private void OnVm(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(MessagesViewModelBase.Selected)) { Watch(_vm?.Selected?.Messages); ScrollToEnd(); }
     }
 
     private void Watch(INotifyCollectionChanged? c)
@@ -64,20 +42,11 @@ public partial class MessagesView : UserControl
 
     private void ScrollToEnd()
     {
-        // 항목 수는 지연 실행 시점에 다시 본다 — 채널 따라가기로 빈 스레드로 바뀐 뒤 실행되면 Items[-1] 이 된다.
+        // 항목 수는 지연 실행 시점에 다시 본다 — 채널 따라가기로 빈 대화로 바뀐 뒤 실행되면 Items[-1] 이 된다.
         Dispatcher.BeginInvoke(() => { int n = List.Items.Count; if (n > 0) List.ScrollIntoView(List.Items[n - 1]); });
     }
 
-    private void Input_KeyDown(object sender, KeyEventArgs e)
-    {
-        if (e.Key == Key.Enter && Keyboard.Modifiers != ModifierKeys.Shift && DataContext is MessagesViewModelBase vm && vm.SendCommand.CanExecute(null))
-        {
-            vm.SendCommand.Execute(null);
-            e.Handled = true;
-        }
-    }
-
-    // 파일 끌어 놓기 — 📎 와 같은 경로(MCData FD). 첨부를 쓰지 않는 패널(SMS)·스레드 미선택이면 받지 않는다.
+    // 파일 끌어 놓기 — 📎 와 같은 경로(MCData FD). 첨부를 쓰지 않는 대화(SMS)·대화 미선택이면 받지 않는다.
     private void Root_DragOver(object sender, DragEventArgs e)
     {
         bool ok = DataContext is McDataMessagesViewModel { CanAttach: true } && e.Data.GetDataPresent(DataFormats.FileDrop);

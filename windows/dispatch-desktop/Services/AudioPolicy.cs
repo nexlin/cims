@@ -18,5 +18,6 @@ public sealed class AudioPolicy
         _ => 0,
     };
 
-    public static string RouteLabel(int route) => route == 0 ? "🎧" : "🔊";
+    /// <summary>출력 라우트 이름 — 아이콘은 RouteIconConverter(글리프를 쓰지 않는다, §3.2).</summary>
+    public static string RouteLabel(int route) => route == 0 ? "헤드셋" : "스피커";
 }

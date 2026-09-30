@@ -456,7 +456,7 @@ UE-M ◄════ RTP (A ingress 복사 SSRC_A + B ingress 복사 SSRC_B, tap
   성립하려면 불가피한 관측 가능 변화다.
 
 **conference 이벤트 구독 인가 — TS 24.379 §10.1.3.4.1(규격형)**: 관제 앱의 PTT 세션 목록("진행 중·참가자 수",
-[dispatch_desktop_ui.md](dispatch_desktop_ui.md) §4.2 ② 범위 채널)은 그룹 AoR 의 RFC 4575 conference 구독으로 안다. CSP(controlling
+[dispatch_desktop_ui.md](dispatch_desktop_ui.md) §4.2 타 채널)은 그룹 AoR 의 RFC 4575 conference 구독으로 안다. CSP(controlling
 function, `CscfModule` SUBSCRIBE 초기 구독)는 구독자를 그룹 문서(TS 24.481)의 **`<on-network-allow-conference-state>`**
 로 판정하고, 불허 시 **403 + `Warning: 399 <PTT 도메인> "138 subscription of conference events not allowed"`**(TS 24.379 §4.4 형식), 브로드캐스트 그룹은
 **480 + Warning 105** 로 거절한다(`CGroupCallService::CheckConferenceSubscribe`). CIMS 해석:
@@ -477,7 +477,7 @@ TS 24.379 **ambient listening**(`session-type=ambient-listening`, remote-init �
 
 ### 5.6a PTT 세션 가시성 — 타인 간 사설콜·애드혹 (dialog 이벤트, RFC 4235)
 
-관제 앱 ② 범위 채널의 "타인 세션"([dispatch_desktop_ui.md §4.2](dispatch_desktop_ui.md))은 **관제 범위 안 사람들이
+관제 앱 타 채널의 "타인 세션"([dispatch_desktop_ui.md §4.2](dispatch_desktop_ui.md))은 **관제 범위 안 사람들이
 지금 어떤 PTT 세션에 참가 중인가**다. 사설콜(`priv-<발신>-<착신>`)·애드혹(`adhoc-…`)은 PTT 그룹이 아니라 **사람 사이의
 세션**이라 그룹 AoR 구독(§5.6)으로는 알 수 없다. 규격에 제3자 관측 절차가 없으므로 VoLTE 통화 감시와 **같은 패키지·
 같은 인가**로 푼다: 관제 앱이 범위 안 사람의 **PTT 회선 AoR 에 `Event: dialog` 를 구독**한다(대상 = `/provisioning/me`
@@ -500,8 +500,8 @@ TS 24.379 **ambient listening**(`session-type=ambient-listening`, remote-init �
   (`OnCallStarted`/`OnCallTerminated`/`ClearUserCall`/`TerminateGroupLocal`/pending 취소 전부). **청취 leg(recvonly)는
   내지 않는다** — 참가가 아니고, 은닉 정책과 무관하게 일관되게 뺀다. TAS 의 `NotifyDialogState` 는 PTT 세션 leg
   (`GetGroupCallSession`)를 만나면 여기로 위임한다(종전에는 VoLTE 도메인·remote 없는 반쪽 dialog 가 나갔다).
-- 그룹 세션(멤버 그룹)도 같은 규칙으로 나간다 — 앱은 remote 가 멤버/청취 범위 그룹이면 ①/② 카드의 참가 정보로 흡수하고,
-  `priv-`/`adhoc-` 이면 타인 세션 카드로 그린다. `members[]` 에는 역할 `monitor_call=all` 일 때 **PTT 전용 가입자**(VoLTE 회선
+- 그룹 세션(멤버 그룹)도 같은 규칙으로 나간다 — 앱은 remote 가 멤버/청취 범위 그룹이면 내 채널 카드·타 채널 행의 참가 정보로 흡수하고,
+  `priv-`/`adhoc-` 이면 타인 세션 줄로 그린다. `members[]` 에는 역할 `monitor_call=all` 일 때 **PTT 전용 가입자**(VoLTE 회선
   없음, `volteAor=""`)도 실린다 — 현장 PTT 단말 간 사설콜이 보이려면 그 회선을 구독해야 한다.
 
 **즉석 세션의 참가자 명단·청취** — 세션 URI 를 알게 된 관제사가 `Event: conference` 구독(로스터)·`a=recvonly` 합류(청취)를
@@ -532,9 +532,9 @@ TS 24.379 **ambient listening**(`session-type=ambient-listening`, remote-init �
 제한**하고(감청 수행 권한 `monitor_call` 과 분리), 보존 기간은 조직 정책을 따르되 감청 감사는 일반 이벤트보다 길게
 둔다. 감청 leg 개설 실패(403/481/488)도 시도로 남긴다(무단 시도 추적).
 
-### 5.7a 통합 이력 조회 · 메시지 모니터링 (관제 데스크 ②④ 패널)
+### 5.7a 통합 이력 조회 · 메시지 모니터링 (관제 앱 «이벤트»·«기록»)
 
-관제 앱의 내역 패널(② PTT 내역 · ④ 통화 내역)과 **메시지 모니터링**은 하나의 계약으로 지난 이력을 받는다:
+관제 앱의 내역(PTT «이벤트» · 통화 «기록»)과 **메시지 모니터링**은 하나의 계약으로 지난 이력을 받는다:
 `GET /provisioning/history?kind=call|ptt|message&since=&limit=`(CSC 4430, PKCE, 계약 정본
 [android_ue_provisioning.md §3-2](android_ue_provisioning.md)). 구조는 **하이브리드**다 — 진행 중(live)
 상태(링잉·floor·참가자 수)는 표준 구독(RFC 4235 dialog · RFC 4575 conference)이 그대로 담당하고

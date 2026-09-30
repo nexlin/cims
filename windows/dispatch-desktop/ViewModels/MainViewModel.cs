@@ -1,7 +1,6 @@
-// 메인 — 패널 ViewModel 조립(3×2: ① 내 채널·② 범위 채널·③ 일반통화 / ④ PTT 메시지·⑤ PTT 이벤트·⑥ 일반통화 내역)·패널 간 연동(발신 필드 채움·스레드/이벤트 따라가기·
-// [채널로] 포커스·팝오버 닫힘)·핫키(§8)·감청 창 관리(§5)·채널 편집 드로어(§4.2)·사람 메뉴/Ctrl+K(§4.1)·
-// 최상위 메뉴 화면 전환(§3.4: 관제·이력·PTT 그룹·관리 — 화면 VM 은 앱 수명 동안 하나, 전환은 가시성만)·자동 복귀 규칙.
-using System.Collections.ObjectModel;
+// 메인 — «모드마다 한 화면»(§3): VM 조립 · [무전|통화] 모드 · 오른쪽 패널(채널 상세·사용자·새 그룹·이벤트 상세·주소록) 규칙 · 칸 사이 연동
+// (카드 → 메시지 따라가기, 사람 메뉴 → 기록·개별 통화·무전 메시지) · 핫키(§8) · 감청 창(§5, [창으로] 로만) · 레일 화면 전환(§3.4: 관제·이력·더보기 —
+// 화면 VM 은 앱 수명 동안 하나, 전환은 가시성만) · 자동 복귀(세션을 만든 조작은 그 호의 모드로 한 번).
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using DispatchDesktop.Models;
@@ -13,144 +12,145 @@ public sealed partial class MainViewModel : ObservableObject
 {
     public DispatchSession Session { get; }
     public Notifications Notify => Session.Notify;
+    public LayoutStore Layout { get; }
     public DeskViewModel Desk { get; }
-    // ① 내 채널
+    // [무전]
     public PttChannelsViewModel PttChannels { get; }
-    public TalkBarViewModel TalkBar { get; }
-    public PttOriginateViewModel PttOriginate { get; }
-    // ② 범위 채널
     public ScopedChannelsViewModel Scoped { get; }
-    // ③ 일반통화
-    public CallDeskViewModel CallDesk { get; }
-    public CallOriginateViewModel CallOriginate { get; }
-    public SmsMessagesViewModel Sms { get; }
-    // ④⑤⑥
     public McDataMessagesViewModel McData { get; }
     public PttActivityViewModel PttActivity { get; }
+    public PttUsersViewModel Users { get; }
+    public TalkBarViewModel TalkBar { get; }
+    // [통화]
+    public CallDeskViewModel CallDesk { get; }
+    public CallOriginateViewModel CallOriginate { get; }
     public CallActivityViewModel CallActivity { get; }
-    // 사람 메뉴 · Ctrl+K
+    public SmsMessagesViewModel Sms { get; }
+    public CallRecordsViewModel Records { get; }
+    // 공통
+    public SidePanelViewModel Panel { get; } = new();
     public PersonActionsViewModel People { get; }
     public HotKeyMap HotKeys { get; }
 
-    // ── 팝오버 상태(§4.4 공통 규칙: 비모달, Esc·바깥 클릭 닫힘, 세션이 성립하면 자동 닫힘) ──
-    /// <summary>① [개별 ▾]/[애드혹 ▾] 팝오버(PttOriginateView).</summary>
-    [ObservableProperty] private bool _pttOriginateOpen;
-    /// <summary>③ [▦ ▾] 팝오버(CallOriginateView — 다이얼패드|주소록|최근).</summary>
-    [ObservableProperty] private bool _callOriginateOpen;
-    /// <summary>③ [문자 n] 팝오버(SMS·LMS).</summary>
-    [ObservableProperty] private bool _smsOpen;
-    /// <summary>채널 편집 드로어(§4.2) — GroupsScreen.Editor 가 있을 때 관제 캔버스 오른쪽에서 밀려 나온다.</summary>
-    public bool DrawerOpen => GroupsScreen.IsEditing && _drawerRequested;
-    private bool _drawerRequested;
+    /// <summary>ptt | call — 탭 줄 [무전|통화] 세그먼트(§3.1). 모드를 바꾸면 고정하지 않은 패널은 닫힌다.</summary>
+    [ObservableProperty] private string _mode = "ptt";
+    /// <summary>[통화] «통화» 머리 [키패드] 팝오버 — 누를 때만 뜬다.</summary>
+    [ObservableProperty] private bool _keypadOpen;
 
-    // ── 최상위 메뉴 화면(§3.4) — 관제 외 셋은 로그인당 1회 적재, 폼 상태는 전환해도 유지 ──
+    // ── 레일 화면(§3.4) — 관제 외 셋은 로그인당 1회 적재, 폼 상태는 전환해도 유지 ──
     public SessionHistoryViewModel HistoryScreen { get; }
     public GroupAdminViewModel GroupsScreen { get; }
     public DirectoryAdminViewModel AdminScreen { get; }
-    /// <summary>관제 요약 띠(§3.5) — 관제 밖 화면 상단.</summary>
+    /// <summary>관제 요약 띠(§3.5) — 화면 별창(ScreenWindow)에만. 주 창은 발언 바가 모든 화면에 있어 띠를 두지 않는다.</summary>
     public DispatchSummaryViewModel Summary { get; }
     [ObservableProperty] private AppScreen _screen = AppScreen.Dispatch;
     /// <summary>별창으로 떼어낸 화면 — 주 창 쪽은 자리표시자만 보인다(§3.4).</summary>
-    public ObservableCollection<AppScreen> PoppedOut { get; } = new();
-    /// <summary>[별창으로] — 창 관리는 MainWindow.</summary>
+    public System.Collections.ObjectModel.ObservableCollection<AppScreen> PoppedOut { get; } = new();
     public event EventHandler<AppScreen>? ScreenPopOutRequested;
-    /// <summary>[관제로 F1] — 별창에서 눌렀으면 주 창을 앞으로 가져와야 관제 캔버스가 보인다. 창 활성화는 MainWindow.</summary>
+    /// <summary>[관제로] — 별창에서 눌렀으면 주 창을 앞으로 가져와야 관제가 보인다. 창 활성화는 MainWindow.</summary>
     public event EventHandler? DispatchActivateRequested;
     private bool _screensLoaded;
 
-    /// <summary>감청 창 열기/활성화 요청 — 창 관리는 MainWindow.</summary>
-    public event EventHandler<SessionItem>? MonitorWindowRequested;
+    /// <summary>감청 창 열기/활성화·닫기 요청 — 창 관리는 MainWindow. 감청 창은 [창으로] 를 눌렀을 때만 뜬다(기본 표면은 인라인, §5).</summary>
     public event EventHandler<SessionItem>? MonitorWindowActivateRequested;
     public event EventHandler<SessionItem>? MonitorWindowCloseRequested;
     /// <summary>PTT 그룹 삭제 확인 요청 — 대화상자는 MainWindow.</summary>
     public event EventHandler<GroupInfo>? GroupDeleteRequested;
+    /// <summary>새 그룹 폼을 [PTT 그룹] 화면으로 넘긴다([고급 설정]) — 패널을 닫아도 폼을 취소하지 않는다.</summary>
+    private bool _groupToScreen;
+    /// <summary>세션을 만든 조작의 자동 복귀를 한 번만(호마다) — 통화 중에 모드를 바꿔도 다음 상태 변화가 되돌리지 않게.</summary>
+    private readonly HashSet<int> _autoShown = new();
 
     public MainViewModel(DispatchSession session, LayoutStore layout, HotKeyMap hotKeys)
     {
         Session = session;
+        Layout = layout;
         HotKeys = hotKeys;
-        Desk = new DeskViewModel(session, layout);
+        Desk = new DeskViewModel(session);
         PttChannels = new PttChannelsViewModel(session);
         TalkBar = new TalkBarViewModel(session, PttChannels);
-        PttOriginate = new PttOriginateViewModel(session);
+        Users = new PttUsersViewModel(session);
         McData = new McDataMessagesViewModel(session);
         PttActivity = new PttActivityViewModel(session);
         CallDesk = new CallDeskViewModel(session);
         CallOriginate = new CallOriginateViewModel(session);
         Sms = new SmsMessagesViewModel(session);
+        Records = new CallRecordsViewModel(session, Sms, CallDesk);
         CallActivity = new CallActivityViewModel(session);
         HistoryScreen = new SessionHistoryViewModel(session);
         GroupsScreen = new GroupAdminViewModel(session);
         AdminScreen = new DirectoryAdminViewModel(session);
         Scoped = new ScopedChannelsViewModel(session, GroupsScreen);
-        // 그룹 종류(prearranged|chat)는 GMS 목록에 없다 — 관리 목록이 적재될 때 멤버 그룹에 옮긴다(① [일제 통화]는 편성 그룹만)
-        GroupsScreen.Loaded += (_, _) => session.NoteGroupTypes(GroupsScreen.All.Select(m => (m.Id, m.SessionType)));
         People = new PersonActionsViewModel(session);
         Summary = new DispatchSummaryViewModel(session, PttChannels, TalkBar, CallDesk, Desk, Sms);
+
+        // 그룹 종류(prearranged|chat)는 GMS 목록에 없다 — 관리 목록이 적재될 때 멤버 그룹에 옮긴다([일제 통화]는 편성 그룹만)
+        GroupsScreen.Loaded += (_, _) => session.NoteGroupTypes(GroupsScreen.All.Select(m => (m.Id, m.SessionType)));
+        GroupsScreen.ChannelRequested += (_, id) => FocusChannel(id);   // [채널로] — 채널 상세로(합류하지 않는다)
+        GroupsScreen.PropertyChanged += (_, e) => { if (e.PropertyName == nameof(GroupAdminViewModel.IsEditing) && !GroupsScreen.IsEditing) OnGroupFormClosed(); };
         AdminScreen.PropertyChanged += (_, e) => { if (e.PropertyName is nameof(DirectoryAdminViewModel.IsDirty)) OnPropertyChanged(nameof(AdminEditing)); };
-        GroupsScreen.ChannelRequested += (_, id) => { Screen = AppScreen.Dispatch; FocusChannel(id); };   // [채널로] — ① 또는 ② 카드로(합류하지 않는다)
-        GroupsScreen.PropertyChanged += (_, e) => { if (e.PropertyName == nameof(GroupAdminViewModel.IsEditing)) { if (!GroupsScreen.IsEditing) _drawerRequested = false; OnPropertyChanged(nameof(DrawerOpen)); } };
         PttActivity.HistoryRequested += (_, _) => ShowHistory("ptt");
-        CallActivity.HistoryRequested += (_, _) => ShowHistory("call");
+        Records.HistoryRequested += (_, _) => ShowHistory("call");
         session.ProfileApplied += (_, _) => { _screensLoaded = false; OnPropertyChanged(nameof(CanManage)); OnPropertyChanged(nameof(ManageHint)); _ = LoadGroupsForScopedAsync(); };
 
-        // ── ① 내 채널 ↔ ④⑤ 따라가기 · 발언 바 · 발신 팝오버 ──
-        PttChannels.SelectionChanged += (_, c) =>
-        {
-            if (c?.Group is not null) McData.FollowGroup(c.Group); else McData.ClearFocus();
-            PttActivity.FocusTitle = c?.Group?.Name ?? c?.Title ?? "";
-        };
-        PttChannels.ThreadRequested += (_, g) => McData.OpenGroup(g);
+        // ── [무전] 칸 사이 ──
+        PttChannels.SelectionChanged += (_, c) => { if (c?.Group is not null) McData.FollowGroup(c.Group); };
+        PttChannels.IndexPicked += (_, c) => { if (c.Group is not null) McData.FollowGroup(c.Group); };
         PttChannels.PersonMenuRequested += (_, uri) => People.OpenMenu(uri);
-        PttChannels.EditRequested += (_, g) => OpenDrawerEdit(g);
-        PttOriginate.CloseRequested += (_, _) => PttOriginateOpen = false;
-        TalkBar.FocusRequested += (_, c) => PttChannels.Select(c, collapseSame: false);
-        McData.UnreadChanged += (_, _) => PttChannels.SetUnread(g => McData.UnreadOf(g.Uri));
-        PttOriginate.MessageGroupRequested += (_, g) => McData.OpenGroup(g);
-        PttOriginate.MessageUserRequested += (_, n) => McData.OpenUser(n);
-        PttOriginate.ChannelRequested += (_, g) => { FocusChannel(g.Id); PttOriginateOpen = false; };
-        // 주소록 [그룹] 탭의 [새 그룹]/[편집] — 채널 편집 드로어(§4.2, [PTT 그룹] 화면과 같은 VM)
-        PttOriginate.NewGroupRequested += (_, _) => OpenDrawerNew();
-        PttOriginate.EditGroupRequested += (_, g) => OpenDrawerEdit(g);
-        PttOriginate.DeleteGroupRequested += (_, g) => GroupDeleteRequested?.Invoke(this, g);
+        PttChannels.Cards.CollectionChanged += (_, _) => OnCardsChanged();
+        TalkBar.FocusRequested += (_, c) => { ShowDispatch("ptt"); OpenChannel(c, toggle: false); };
+        McData.UnreadChanged += (_, _) => { PttChannels.SetUnread(g => McData.UnreadOf(g.Uri)); RaiseBadges(); };
+        McData.ChannelInfoRequested += (_, g) => FocusChannel(g.Id);
+        McData.NewConversationRequested += (_, _) => OpenUsers();
         PttActivity.ChannelRequested += (_, id) => FocusChannel(id);
-        PttActivity.ReplyRequested += (_, id) => { if (Session.Groups.FirstOrDefault(g => g.Id == id) is { } g) McData.OpenGroup(g); };
-
-        // ── ② 범위 채널 ──
+        PttActivity.RowRequested += (_, r) => OpenEvent(r);
         Scoped.WindowRequested += (_, s) => MonitorWindowActivateRequested?.Invoke(this, s);
-        Scoped.EditRequested += (_, g) => OpenDrawerEdit(g);
-        Scoped.DeleteRequested += (_, g) => GroupDeleteRequested?.Invoke(this, g);
-        Scoped.NewChannelRequested += (_, _) => OpenDrawerNew();
+        Users.MenuRequested += (_, n) => People.OpenMenu(n);
+        Users.SaveAsGroupRequested += (_, rows) => OpenGroupForm(rows);
+        Users.Started += (_, _) => { if (!Panel.Pinned && Panel.IsUsers) Panel.View = PanelView.None; };
 
-        // ── ③ 일반통화 ──
-        CallDesk.FillRequested += (_, n) => { CallOriginate.Fill(n); };
+        // ── [통화] 칸 사이 ──
+        CallDesk.FillRequested += (_, n) => CallOriginate.Fill(n);
         CallDesk.MenuRequested += (_, n) => People.OpenMenu(n);
-        CallDesk.DeskFilterRequested += (_, f) => CallActivity.Filter = f;
-        CallOriginate.SmsRequested += (_, n) => OpenSms(n);
-        CallActivity.SmsRequested += (_, n) => OpenSms(n);
-        CallActivity.MenuRequested += (_, n) => People.OpenMenu(n);
+        CallDesk.Queue.CollectionChanged += (_, _) => RaiseBadges();
+        CallOriginate.SmsRequested += (_, n) => OpenRecord(n);
         CallActivity.WindowRequested += (_, s) => MonitorWindowActivateRequested?.Invoke(this, s);
+        Records.MenuRequested += (_, n) => People.OpenMenu(n);
+        Sms.UnreadChanged += (_, _) => RaiseBadges();
         Desk.MonitorActivateRequested += (_, s) => MonitorWindowActivateRequested?.Invoke(this, s);
 
-        // ── 사람 메뉴 · Ctrl+K 행동 ──
-        People.PrivateCallRequested += (_, n) => { PttOriginate.PrivateCallTo(n); ReturnToDispatchSilently(); };
-        People.AdhocAddRequested += (_, n) => { PttOriginate.AddAdhoc(n); PttOriginateOpen = true; ReturnToDispatchSilently(); };
-        People.SdsRequested += (_, n) => McData.OpenUser(n);
-        People.CallRequested += (_, n) => { Session.Dial(n); };
-        People.SmsRequested += (_, n) => OpenSms(n);
-        People.ChannelRequested += (_, id) => { ReturnToDispatchSilently(); FocusChannel(id); };
-        People.AddMemberRequested += (_, g) => OpenDrawerEdit(g);
+        // ── 오른쪽 패널 ──
+        Panel.PropertyChanged += (_, e) => { if (e.PropertyName == nameof(SidePanelViewModel.View)) OnPanelViewChanged(); };
+        Panel.BackRequested += (_, _) => { if (Panel.IsGroup) Panel.Group?.CancelCommand.Execute(null); };
 
-        session.SessionAdded += (_, s) => { if (s.IsWindow) MonitorWindowRequested?.Invoke(this, s); Desk.SyncMonitors(session.Sessions); CallOriginate.RefreshPad(); ReturnIfSessionStarted(s); ClosePopoversFor(s); };
-        session.SessionEnded += (_, s) => { if (s.IsWindow) MonitorWindowCloseRequested?.Invoke(this, s); Desk.SyncMonitors(session.Sessions); CallOriginate.RefreshPad(); };
-        session.SessionChanged += (_, s) => { CallOriginate.RefreshPad(); ReturnIfSessionStarted(s); };
+        // ── 사람 메뉴 · Ctrl+K 행동 ──
+        People.PrivateCallRequested += (_, n) => { Users.PrivateCallTo(n); };
+        People.AdhocAddRequested += (_, n) => { Users.AddAdhoc(n); ShowDispatch("ptt"); OpenUsers(toggle: false); };
+        People.SdsRequested += (_, n) => { ShowDispatch("ptt"); McData.OpenUser(n); };
+        People.CallRequested += (_, n) => Session.Dial(n);
+        People.SmsRequested += (_, n) => OpenRecord(n);
+        People.RecordRequested += (_, n) => OpenRecord(n);
+        People.ChannelRequested += (_, id) => FocusChannel(id);
+        People.AddMemberRequested += (_, g) => EditGroup(g);
+
+        session.SessionAdded += (_, s) => { Desk.SyncMonitors(session.Sessions); CallOriginate.RefreshPad(); AutoShow(s); RaiseBadges(); };
+        session.SessionEnded += (_, s) =>
+        {
+            if (s.IsListenLeg) MonitorWindowCloseRequested?.Invoke(this, s);
+            _autoShown.Remove(s.CallId);
+            Desk.SyncMonitors(session.Sessions); CallOriginate.RefreshPad(); RaiseBadges();
+            if (Panel.Channel?.Card?.Session == s && Panel.Channel.Card.Group is null && !Panel.Pinned) Panel.View = PanelView.None;   // 끝난 개별·애드혹 카드는 사라진다
+        };
+        session.SessionChanged += (_, s) => { CallOriginate.RefreshPad(); AutoShow(s); };
+        session.RosterChanged += (_, _) => Panel.Channel?.Refresh();
+        session.Floor += (_, _) => Panel.Channel?.Refresh();
 
         // 전역 핫키
         hotKeys.Pressed += (_, e) => OnHotKey(e.Name, down: true);
         hotKeys.Released += (_, e) => OnHotKey(e.Name, down: false);
     }
 
-    /// <summary>재기동·재접속 후 화면 재구성 = 스냅샷 재조회(§11). 열린 감청 창도 listenOnly 호에서 복원. 화면은 관제로.</summary>
+    /// <summary>재기동·재접속 후 화면 재구성 = 스냅샷 재조회(§11). 감청·청취는 인라인으로 보인다(창은 다시 띄우지 않는다). 화면은 관제 [무전].</summary>
     public void RestoreFromSnapshot()
     {
         PttChannels.Rebuild();
@@ -158,32 +158,180 @@ public sealed partial class MainViewModel : ObservableObject
         PttActivity.Rebuild();
         CallActivity.Rebuild();
         CallDesk.Rebuild();
-        foreach (var s in Session.Sessions.Where(x => x.IsWindow)) MonitorWindowRequested?.Invoke(this, s);
+        Records.Rebuild();
         Desk.SyncMonitors(Session.Sessions);
+        Panel.Pinned = false; Panel.View = PanelView.None;
         Screen = AppScreen.Dispatch;
+        Mode = "ptt";
         OnPropertyChanged(nameof(CanManage)); OnPropertyChanged(nameof(ManageHint));
         Summary.Refresh();
+        RaiseBadges();
     }
 
-    /// <summary>② 관리 범위 섹션은 [PTT 그룹] 화면과 같은 목록을 쓴다 — 로그인 직후 한 번 적재(화면을 열지 않아도).</summary>
+    /// <summary>타 채널의 편집 판정([편집]·[삭제])은 [PTT 그룹] 화면과 같은 관리 목록을 쓴다 — 로그인 직후 한 번 적재(화면을 열지 않아도).</summary>
     private async Task LoadGroupsForScopedAsync()
     {
         if (Session.Management is null) return;
         try { await GroupsScreen.LoadAsync(); } catch (Exception ex) { Session.Log.Warn("scoped groups load: " + ex.Message); }
     }
 
-    // ── 최상위 메뉴(§3.4) ──
+    // ── 모드 · 탭 줄(§3.1) ──
+    public bool IsPtt => Mode == "ptt";
+    public bool IsCall => Mode == "call";
+    public string ModeHint => IsPtt ? "내 채널 · 타 채널 · 메시지 · 이벤트" : "통화 · 기록(통화 + 문자)";
+    /// <summary>세그먼트 수 — 무전 = 안 읽은 무전 메시지, 통화 = 대표번호 대기열 + 안 읽은 문자. 0 이면 숨김.</summary>
+    public int PttBadge => McData.UnreadTotal;
+    public int CallBadge => CallDesk.QueueCount + Sms.UnreadTotal;
+    /// <summary>레일 [관제] 수 — 관제 밖 화면에서 둘을 합쳐 보인다.</summary>
+    public int DispatchBadge => PttBadge + CallBadge;
+    public string ListText => IsPtt ? "사용자" : "주소록";
+    /// <summary>탭 줄 목록 버튼 켜짐 — 무전 = 사용자(·새 그룹), 통화 = 주소록.</summary>
+    public bool ListOpen => IsPtt ? Panel.IsUsers || Panel.IsGroup : Panel.IsDirectory;
+    private void RaiseBadges() { OnPropertyChanged(nameof(PttBadge)); OnPropertyChanged(nameof(CallBadge)); OnPropertyChanged(nameof(DispatchBadge)); }
+
+    partial void OnModeChanged(string value)
+    {
+        foreach (var p in new[] { nameof(IsPtt), nameof(IsCall), nameof(ModeHint), nameof(ListText), nameof(ListOpen) }) OnPropertyChanged(p);
+        if (!Panel.Pinned) Panel.View = PanelView.None;
+        KeypadOpen = false;
+    }
+    [RelayCommand] private void SetMode(string m) { if (m is "ptt" or "call") { if (Screen != AppScreen.Dispatch) Screen = AppScreen.Dispatch; Mode = m; } }
+
+    /// <summary>관제 화면의 그 모드로(레일·모드 둘 다) — 세션을 만든 조작·[채널로]·배너 [응답] 이 쓴다.</summary>
+    private void ShowDispatch(string mode) { if (Screen != AppScreen.Dispatch) Screen = AppScreen.Dispatch; if (Mode != mode) Mode = mode; }
+
+    [RelayCommand] private void ToggleList() { if (IsPtt) OpenUsers(); else OpenDirectory(); }
+    [RelayCommand] private void ToggleKeypad() => KeypadOpen = !KeypadOpen;
+
+    // ── 오른쪽 패널(§3.6) ──
+    /// <summary>[사용자] — 같은 목록이면 닫는다(toggle). 새 그룹 폼에서 누르면 폼을 버리고 닫는다.</summary>
+    public void OpenUsers(bool toggle = true)
+    {
+        if (toggle && (Panel.IsUsers || Panel.IsGroup)) { Panel.View = PanelView.None; return; }
+        Panel.UsersCount = Users.TotalCount;
+        Panel.Show(PanelView.Users);
+    }
+    private void OpenDirectory()
+    {
+        if (Panel.IsDirectory) { Panel.View = PanelView.None; return; }
+        Panel.DirectoryCount = CallOriginate.Book.Count;
+        Panel.Show(PanelView.Directory);
+    }
+    [RelayCommand] private void OpenUsersTile() => OpenUsers(toggle: false);
+
+    /// <summary>내 채널 카드 → 채널 상세 + «메시지» 가 그 채널 대화로(따라가기 켬). 같은 카드면 닫는다.</summary>
+    public void OpenChannel(ChannelCard c, bool toggle = true)
+    {
+        if (toggle && Panel.IsChannel && Panel.Channel?.Card == c) { Panel.View = PanelView.None; return; }
+        var d = new ChannelDetailViewModel(Session, c);
+        Wire(d);
+        Panel.Channel = d;
+        Panel.Show(PanelView.Channel);
+        Scoped.Mark(null);
+        PttChannels.Select(c, collapseSame: false);
+    }
+    /// <summary>타 채널 행 → 채널 상세. 같은 행이면 닫는다.</summary>
+    public void OpenOther(ScopedCard o, bool toggle = true)
+    {
+        if (toggle && Panel.IsChannel && Panel.Channel?.Other?.Id == o.Id) { Panel.View = PanelView.None; return; }
+        var d = new ChannelDetailViewModel(Session, o);
+        Wire(d);
+        Panel.Channel = d;
+        Panel.Show(PanelView.Channel);
+        PttChannels.Select(null, collapseSame: false);
+        Scoped.Mark(o.Id);
+    }
+    [RelayCommand] private void OpenCard(ChannelCard c) => OpenChannel(c);
+    [RelayCommand] private void OpenScoped(ScopedCard o) => OpenOther(o);
+
+    private void Wire(ChannelDetailViewModel d)
+    {
+        d.MessageRequested += (_, g) => McData.OpenGroup(g);
+        d.EditRequested += (_, g) => EditGroup(g);
+        d.DeleteRequested += (_, g) => GroupDeleteRequested?.Invoke(this, g);
+        d.PersonMenuRequested += (_, uri) => People.OpenMenu(uri);
+        d.PrivateCallRequested += (_, n) => Users.PrivateCallTo(n);
+        d.SdsRequested += (_, n) => McData.OpenUser(n);
+    }
+
+    /// <summary>이벤트 행 → 이벤트 상세. 같은 행이면 닫는다.</summary>
+    private void OpenEvent(EventRow r)
+    {
+        if (Panel.IsEvent && Panel.Event is { } cur && ReferenceEquals(cur.Row.Row, r.Row)) { Panel.View = PanelView.None; return; }
+        Panel.Event = new EventDetail(r, PttActivity.Around(r));
+        Panel.Show(PanelView.Event);
+        PttActivity.Mark(r);
+    }
+    [RelayCommand] private void EventReply() { if (Panel.Event?.Row.Group is { } g) McData.OpenGroup(g); }
+    [RelayCommand] private void EventChannel() { if (Panel.Event?.Row.Group is { } g) FocusChannel(g.Id); }
+    [RelayCommand] private void EventHistory() => ShowHistory("ptt");
+
+    /// <summary>[그룹으로 저장 ›] — 고른 사람을 멤버로 한 새 그룹 폼을 패널에(← = 사용자 목록).</summary>
+    private void OpenGroupForm(IReadOnlyList<PttUserRow> rows)
+    {
+        if (GroupsScreen.IsEditing) { Notify.Warn("편집 중인 그룹 폼이 있습니다", "[PTT 그룹] 화면에서 저장하거나 취소한 뒤 다시 시도하세요"); return; }
+        var vm = GroupsScreen.NewExternal(rows.Select(r => (r.Number, r.Name)));
+        if (vm is null) { Notify.Warn("그룹을 만들 수 없습니다", "PTT 그룹 생성 자격(ptt.allowCreateGroup)이 없습니다"); return; }
+        vm.Saved += (_, _) => { Users.ClearPickedCommand.Execute(null); Notify.Info($"PTT 그룹 «{vm.Name.Trim()}» 을 만들었습니다"); };
+        Panel.Group = vm;
+        Panel.Show(PanelView.Group, fromUsers: true);
+    }
+    /// <summary>새 그룹 폼 [▸ 고급 설정] — 같은 폼을 [PTT 그룹] 화면에서 이어 쓴다(능력·우선순위·확인 통화·멤버 역할).</summary>
+    [RelayCommand] private void GroupAdvanced() { _groupToScreen = true; Panel.View = PanelView.None; ShowScreen(AppScreen.PttGroups); }
+    /// <summary>폼이 닫혔다(저장·취소) — 패널에서 열었던 폼이면 사용자 목록으로 돌아간다.</summary>
+    private void OnGroupFormClosed()
+    {
+        _groupToScreen = false;
+        if (Panel.IsGroup) { Panel.Group = null; Panel.Show(PanelView.Users); }
+    }
+    /// <summary>채널 상세 ⋮ [편집]·Ctrl+K [멤버 추가] — 편집 폼은 [PTT 그룹] 화면(§4.7).</summary>
+    private void EditGroup(GroupInfo g)
+    {
+        if (GroupsScreen.IsEditing) { Notify.Warn("편집 중인 그룹 폼이 있습니다", "저장하거나 취소한 뒤 다시 시도하세요"); return; }
+        GroupsScreen.EditExternal(g);
+        ShowScreen(AppScreen.PttGroups);
+    }
+
+    private void OnPanelViewChanged()
+    {
+        if (!Panel.IsChannel) { Panel.Channel = null; PttChannels.Select(null, collapseSame: false); Scoped.Mark(null); }
+        if (!Panel.IsEvent) { Panel.Event = null; PttActivity.Mark(null); }
+        if (!Panel.IsGroup && Panel.Group is { } g) { Panel.Group = null; if (!_groupToScreen && GroupsScreen.Editor == g) g.CancelCommand.Execute(null); }
+        OnPropertyChanged(nameof(ListOpen));
+        OnPropertyChanged(nameof(IsPanelOpen));
+    }
+    /// <summary>패널이 열려 오른쪽 칸이 좁다 — 타 채널 1열·이벤트 채널 열 접기·기록 목록만(§3.6).</summary>
+    public bool IsPanelOpen => Panel.IsOpen;
+
+    /// <summary>내 채널 카드가 바뀌었다(개별·애드혹 종료) — 보던 카드가 사라졌으면 채널 상세를 닫는다.</summary>
+    private void OnCardsChanged()
+    {
+        if (Panel.Channel?.Card is { } c && !PttChannels.Cards.Contains(c))
+        {
+            var again = c.Group is null ? null : PttChannels.Cards.FirstOrDefault(x => x.Id == c.Id);
+            if (again is not null) OpenChannel(again, toggle: false);          // Rebuild — 같은 그룹의 새 카드로
+            else if (!Panel.Pinned) Panel.View = PanelView.None;
+        }
+    }
+
+    /// <summary>[통화] «기록» 에서 그 상대의 통화·문자 한 줄기(사람 메뉴 [문자]·[기록 보기]).</summary>
+    public void OpenRecord(string number) { ShowDispatch("call"); Records.Open(number); }
+
+    // ── 레일(§3.4) ──
     public bool CanManage => Session.CanManageDirectory;
-    public string ManageHint => CanManage ? "" : "조직/구성원·번호 관리는 관제 그룹의 관리 범위(콘솔 구성 > 관제 그룹 > 관리 범위)가 있어야 합니다. PTT 그룹은 내 소유 그룹만 편집합니다.";
-    /// <summary>[관리] 메뉴 점 배지 — 저장하지 않은 변경이 있다(전환을 막지 않는다).</summary>
+    public string ManageHint => CanManage ? "" : "조직/구성원·번호 관리는 관제 역할의 관리 범위(콘솔 관리 > 역할)가 있어야 합니다. PTT 그룹은 내 소유 그룹만 편집합니다.";
+    /// <summary>[더보기] 점 배지 — 저장하지 않은 관리 폼이 있다(전환을 막지 않는다).</summary>
     public bool AdminEditing => AdminScreen.IsDirty;
     public bool IsDispatch => Screen == AppScreen.Dispatch;
+    public bool IsHistory => Screen == AppScreen.History;
+    public bool IsMore => Screen is AppScreen.PttGroups or AppScreen.Admin;
     public string ScreenTitle => AppScreens.Title(Screen);
 
     partial void OnScreenChanged(AppScreen value)
     {
-        OnPropertyChanged(nameof(IsDispatch)); OnPropertyChanged(nameof(ScreenTitle));
-        if (value != AppScreen.Dispatch) { Summary.Refresh(); _ = LoadScreensAsync(); PttOriginateOpen = CallOriginateOpen = SmsOpen = false; }
+        foreach (var p in new[] { nameof(IsDispatch), nameof(IsHistory), nameof(IsMore), nameof(ScreenTitle) }) OnPropertyChanged(p);
+        if (!Panel.Pinned && !(value == AppScreen.PttGroups && _groupToScreen)) Panel.View = PanelView.None;
+        if (value != AppScreen.Dispatch) { KeypadOpen = false; _ = LoadScreensAsync(); }
     }
 
     /// <summary>관제 외 화면의 서버 자료는 로그인 뒤 처음 그 화면을 열 때 한 번 받는다(이후는 화면 안 [새로고침]·저장 후 재조회).</summary>
@@ -203,9 +351,8 @@ public sealed partial class MainViewModel : ObservableObject
         Screen = s;
     }
     [RelayCommand] private void ReturnToDispatch() { Screen = AppScreen.Dispatch; DispatchActivateRequested?.Invoke(this, EventArgs.Empty); }
-    private void ReturnToDispatchSilently() { if (Screen != AppScreen.Dispatch) Screen = AppScreen.Dispatch; }
 
-    /// <summary>⑤⑥ 머리의 [이력에서 보기] — 종류를 맞춰 [이력] 로.</summary>
+    /// <summary>«이벤트»·«기록» 의 [이력에서 보기] — 종류를 맞춰 [이력] 로.</summary>
     public void ShowHistory(string kind)
     {
         int idx = kind == "ptt" ? 1 : 0;
@@ -225,44 +372,24 @@ public sealed partial class MainViewModel : ObservableObject
     /// <summary>별창이 닫혔다 — 주 창 화면으로 되돌아온다.</summary>
     public void OnScreenWindowClosed(AppScreen s) => PoppedOut.Remove(s);
 
-    /// <summary>자동 복귀 규칙(§3.4): 세션을 만드는 조작(응답·당겨받기·발신·개별 통화·애드혹 그룹 통화)은 관제로 돌아온다 — 보류·전달·종료 버튼이 거기 있다.
-    /// 착신(링잉)·멤버 채널 합류·감청 창은 배너/칩만 띄우고 화면을 바꾸지 않는다.</summary>
-    private void ReturnIfSessionStarted(SessionItem s)
+    /// <summary>자동 복귀(§3.4): 세션을 만드는 조작(발신·응답·당겨받기·개별·애드혹 그룹 통화)은 그 호의 모드로 **호마다 한 번** 돌아온다 — 보류·전달·종료 버튼이
+    /// 거기 있다. 착신(링잉)·멤버 채널 합류·감청/청취는 배너·행만 바꾸고 화면을 옮기지 않는다.</summary>
+    private void AutoShow(SessionItem s)
     {
-        if (Screen == AppScreen.Dispatch || s.IsWindow || s.Kind == SessionKind.PttChannel) return;
-        if (s.IsActive || s.IsOutgoing) Screen = AppScreen.Dispatch;
+        if (s.IsListenLeg || s.Kind == SessionKind.PttChannel || _autoShown.Contains(s.CallId)) return;
+        bool placed = s.Info.Dir == CimsUe.CallDir.Outgoing && (s.IsOutgoing || s.IsActive);   // 발신·당겨받기·개별·애드혹
+        bool answered = s.Info.Dir == CimsUe.CallDir.Incoming && s.IsActive;                  // 이 자리에서 받은 착신
+        if (!placed && !answered) return;
+        _autoShown.Add(s.CallId);
+        ShowDispatch(s.IsVolteCall ? "call" : "ptt");
     }
-
-    /// <summary>팝오버 공통 규칙 — 세션이 성립하면 자동 닫힘(발신·개별 통화·애드혹 그룹 통화).</summary>
-    private void ClosePopoversFor(SessionItem s)
-    {
-        if (s.Info.Dir != CimsUe.CallDir.Outgoing) return;
-        if (s.Kind is SessionKind.PttPrivate or SessionKind.PttAdhoc && !PttOriginate.IsBroadcastHeld) PttOriginateOpen = false;   // 일제 통화 한 버튼은 놓을 때 닫는다
-        if (s.Kind == SessionKind.VolteCall) CallOriginateOpen = false;
-    }
-
-    // ── 팝오버·드로어 ──
-    /// <summary>① [개별 ▾]/[애드혹 ▾] — 같은 모드로 다시 누르면 닫힌다, 다른 모드면 바꿔 연다.</summary>
-    [RelayCommand] private void OpenPttOriginate(string mode)
-    {
-        if (PttOriginateOpen && PttOriginate.Mode == mode) { PttOriginateOpen = false; return; }
-        PttOriginate.Mode = mode; PttOriginateOpen = true;
-    }
-    [RelayCommand] private void ToggleCallOriginate() => CallOriginateOpen = !CallOriginateOpen;
-    [RelayCommand] private void ToggleSms() => SmsOpen = !SmsOpen;
-    /// <summary>[문자] 팝오버를 받는 사람으로 연다(사람 메뉴·그룹원 칩·주소록·⑥ 행).</summary>
-    public void OpenSms(string number) { Sms.OpenNumber(number); SmsOpen = true; ReturnToDispatchSilently(); }
-    [RelayCommand] private void ToggleSearch() => People.SearchOpen = !People.SearchOpen;
-
-    private void OpenDrawerNew() { if (!GroupsScreen.IsEditing) { GroupsScreen.NewExternal(); _drawerRequested = GroupsScreen.IsEditing; OnPropertyChanged(nameof(DrawerOpen)); ReturnToDispatchSilently(); } else Notify.Warn("편집 중인 폼이 있습니다", "저장하거나 취소한 뒤 다시 시도하세요"); }
-    private void OpenDrawerEdit(GroupInfo g) { if (!GroupsScreen.IsEditing) { GroupsScreen.EditExternal(g); _drawerRequested = GroupsScreen.IsEditing; OnPropertyChanged(nameof(DrawerOpen)); ReturnToDispatchSilently(); } else Notify.Warn("편집 중인 폼이 있습니다", "저장하거나 취소한 뒤 다시 시도하세요"); }
 
     public void OnHotKey(string name, bool down)
     {
         switch (name)
         {
             case "ptt": if (down) TalkBar.PttDown(); else TalkBar.PttUp(); break;
-            case "answer": if (down && Notify.TopIncoming?.Session is { } inc) { Session.Answer(inc); Screen = AppScreen.Dispatch; } break;
+            case "answer": if (down && Notify.TopIncoming?.Session is { } inc) { Session.Answer(inc); ShowDispatch(inc.IsVolteCall ? "call" : "ptt"); } break;
             case "hangup": if (down && Session.ActiveVolteCall is { } act) Session.Hangup(act); break;
             case "pickup": if (down) Session.Pickup(); break;
             case "hold":
@@ -278,107 +405,36 @@ public sealed partial class MainViewModel : ObservableObject
         }
     }
 
-    /// <summary>Ctrl+n — 카드 n 포커스 + 발언 대상을 그 채널 하나로.</summary>
+    /// <summary>Ctrl+n — 발언 대상을 카드 n 하나로 + «메시지» 따라가기(채널 상세는 열지 않는다).</summary>
     public void SelectChannel(int n) => PttChannels.SelectIndex(n);
     /// <summary>Ctrl+Shift+n — 카드 n 발언 대상 토글.</summary>
     public void ToggleChannel(int n) => PttChannels.ToggleIndex(n);
 
-    [RelayCommand] private void AnswerBanner(Banner b) { if (b.Session is not null) { Session.Answer(b.Session); Screen = AppScreen.Dispatch; } }
+    [RelayCommand] private void AnswerBanner(Banner b) { if (b.Session is not null) { Session.Answer(b.Session); ShowDispatch(b.Session.IsVolteCall ? "call" : "ptt"); } }
     [RelayCommand] private void RejectBanner(Banner b) { if (b.Session is not null) Session.Reject(b.Session); }
-    [RelayCommand] private void GoToChannel(Banner b) { Screen = AppScreen.Dispatch; if (b.GroupId.Length > 0) FocusChannel(b.GroupId); }
+    [RelayCommand] private void GoToChannel(Banner b) { if (b.GroupId.Length > 0) FocusChannel(b.GroupId); else ShowDispatch("ptt"); }
     /// <summary>배너 [긴급 해제]/[경보 해제] — 세션 조건 하향 또는 경보 취소(§3.2).</summary>
     [RelayCommand] private void CancelBanner(Banner b) => Session.CancelBanner(b);
     /// <summary>경보 배너 [닫기] — 로컬 표시만(취소 신호 유실 대비).</summary>
     [RelayCommand] private void DismissBanner(Banner b) => Session.DismissAlert(b);
 
-    /// <summary>[채널로] 공통 — ① 카드가 있으면 거기, 없으면 ② 범위 채널 카드(청취 범위 그룹). 어느 쪽도 합류시키지 않는다 — 청취 범위 그룹에
-    /// sendrecv 로 합류하면 비멤버라 서버가 403 으로 거절한다(TS 24.379 §10.1.1, dispatch_center.md §5.6). 청취는 ② 카드의 토글이다.</summary>
+    /// <summary>[채널로] 공통 — 관제 [무전] 으로 와서 그 채널의 채널 상세를 연다(내 채널 카드, 없으면 타 채널 행). 어느 쪽도 합류시키지 않는다 — 청취 범위 그룹에
+    /// sendrecv 로 합류하면 비멤버라 서버가 403 으로 거절한다(TS 24.379 §10.1.1, dispatch_center.md §5.6). 청취는 타 채널의 [청취] 다.</summary>
     public void FocusChannel(string groupId)
     {
-        if (PttChannels.FocusGroup(groupId)) return;
-        if (Scoped.Focus(groupId)) return;
-        Notify.Info("채널 카드가 없습니다", $"{groupId} — 멤버 그룹도 청취 범위 그룹도 아닙니다");
+        ShowDispatch("ptt");
+        if (PttChannels.Cards.FirstOrDefault(c => c.Id == groupId) is { } card) { OpenChannel(card, toggle: false); return; }
+        if (Scoped.Mark(groupId) is { } other) { OpenOther(other, toggle: false); return; }
+        Notify.Info("채널이 없습니다", $"{groupId} — 멤버 그룹도 청취 범위 그룹도 아닙니다");
     }
 
-    /// <summary>
-    /// ① 채널 카드 3줄 [로스터 전체] — 그 그룹의 [PTT 그룹] 화면 상세를 연다(§4.1 툴팁이 가리키는 곳).
-    ///
-    /// 카드 안에서 펼치지 않는다 — 3×2 격자는 카드 높이가 고정이라야 서고, 큰 그룹 하나가 격자를 먹으면
-    /// «화면 한 장»(§1)이 깨진다. 화면을 먼저 바꾸는 이유는 첫 진입이면 그때 목록 적재가 시작되기
-    /// 때문이다(<see cref="LoadScreensAsync"/>) — 선택은 적재가 끝난 뒤에 적용된다.
-    /// </summary>
-    [RelayCommand] private void ShowRoster(string groupId) { Screen = AppScreen.PttGroups; GroupsScreen.SelectById(groupId); }
     [RelayCommand] private void DismissToast(Toast t) => Notify.Dismiss(t);
     [RelayCommand] private void ToggleToastDetail(Toast t) => t.ShowDetail = !t.ShowDetail;
-
-    /// <summary>--ui-preview-canvas: 서버 없이 관제 캔버스에 표본(멤버 그룹 4·청취 범위 2·진행 중 그룹콜·개별 통화·애드혹 그룹 통화·VoLTE 통화)을 심어 카드 2/3줄·발언 바·② 섹션을 그려 본다.
-    /// 코어 세션이 아니라 스냅샷 모델만 채우므로 조작 버튼은 동작하지 않는다.</summary>
-    public void SeedCanvasPreview()
-    {
-        var s = Session;
-        CimsUe.CallInfo Ci(int id, CimsUe.CallState st, string remote, bool mcptt, string group, bool priv = false, bool half = true, bool emg = false, bool listen = false,
-                           CimsUe.CallDir dir = CimsUe.CallDir.Outgoing, bool bcast = false, string caller = "tel:1001") =>
-            new(id, 1, dir, st, remote, "", false, true, false, true, 0, 0, "", Array.Empty<CimsUe.MediaSource>(), mcptt, group,
-                new CimsUe.McpttInfo(mcptt, priv ? "private" : "prearranged", "", caller, group, emg, false, priv, !half, bcast), half, listen, "",
-                1f, new CimsUe.McpttCondition(emg, false, false, false, 0));
-        GroupInfo G(string id, string name, int members, bool member, params (string, string)[] roster)
-        {
-            var g = new GroupInfo(id, "tel:" + id, name, members) { IsMember = member, IsOwner = id == "g-ops" };
-            g.Roster = roster.Select(r => new CimsUe.RosterEntry(r.Item1, r.Item2)).ToList();
-            return g;
-        }
-        // PTT 전화번호부(service=ptt) 표본 — 카드·로스터 칩 이름과 ① [개별 ▾]/[애드혹 ▾] 팝오버 주소록 행(--ui-preview-popover)
-        s.Directory.SeedPreview("ptt", """
-            {"orgs":[{"code":"p1","name":"순찰대"},{"code":"hq","name":"상황실"}],
-             "entries":[{"msisdn":"1001","name":"최순경","org":"p1"},{"msisdn":"1003","name":"이순경","org":"p1"},{"msisdn":"1004","name":"정경장","org":"p1"},
-                        {"msisdn":"1005","name":"김순경","org":"p1"},{"msisdn":"1008","name":"윤순경","org":"hq"},{"msisdn":"1009","name":"임순경","org":"hq"}]}
-            """);
-        s.Groups.Add(G("g-patrol1", "순찰1", 12, true, ("tel:1001", "connected"), ("tel:1002", "connected"), ("tel:1003", "connected"), ("tel:1004", "connected"), ("tel:1005", "connected"), ("tel:1006", "connected")));
-        s.Groups.Add(G("g-ops", "상황실", 8, true, ("tel:1001", "connected"), ("tel:1007", "connected")));
-        s.Groups.Add(G("g-traffic", "교통1", 6, true));
-        s.Groups.Add(G("g-patrol2", "순찰2", 9, true));
-        s.Groups.Add(G("g-night", "야간", 15, false, ("tel:1010", "connected"), ("tel:1011", "connected"), ("tel:1012", "connected")));
-        s.Groups.Add(G("g-support", "지원", 7, false, ("tel:1013", "connected"), ("tel:1014", "connected")));
-        s.Groups.Add(G("g-guard", "경비", 5, false));
-        var now = DateTime.Now;
-        var patrol = new SessionItem(Ci(11, CimsUe.CallState.Active, "sip:g-patrol1@ptt", true, "g-patrol1"), AccountKind.Ptt, Operation.PttJoin) { Title = "순찰1", Speaker = "김순경", SpeakerSince = now.AddSeconds(-8), ConnectedAt = now.AddMinutes(-2) };
-        var ops = new SessionItem(Ci(12, CimsUe.CallState.Active, "sip:g-ops@ptt", true, "g-ops"), AccountKind.Ptt, Operation.PttJoin) { Title = "상황실", ConnectedAt = now.AddMinutes(-14) };
-        var adhoc = new SessionItem(Ci(13, CimsUe.CallState.Active, "sip:adhoc-1002-1@ptt", true, "adhoc-1002-1"), AccountKind.Ptt, Operation.PttAdhoc) { Title = "애드혹", AdhocMembers = new[] { "tel:1003", "tel:1008", "tel:1009" }, Speaker = "최순경", SpeakerSince = now.AddSeconds(-3), ConnectedAt = now.AddSeconds(-25) };
-        var priv = new SessionItem(Ci(14, CimsUe.CallState.Active, "tel:1008", true, "", priv: true, half: false), AccountKind.Ptt, Operation.PttPrivate) { Title = "윤순경", ConnectedAt = now.AddMinutes(-1) };
-        var night = new SessionItem(Ci(15, CimsUe.CallState.Active, "sip:g-night@ptt", true, "g-night", emg: true, listen: true), AccountKind.Ptt, Operation.PttListen) { Title = "야간", Speaker = "박경장", SpeakerSince = now.AddSeconds(-14), ConnectedAt = now.AddMinutes(-18) };
-        var volte = new SessionItem(Ci(16, CimsUe.CallState.Active, "tel:+82233334444", false, "", dir: CimsUe.CallDir.Incoming), AccountKind.Volte, Operation.Incoming) { Title = "02-333-4444", ConnectedAt = now.AddMinutes(-2) };
-        var held = new SessionItem(Ci(17, CimsUe.CallState.Held, "tel:1006", false, "", dir: CimsUe.CallDir.Incoming), AccountKind.Volte, Operation.Incoming) { Title = "1006 박경장", ConnectedAt = now.AddMinutes(-5) };
-        // 일제 통화(§4.1) — 교통1 = 내가 연 일제 통화(발언 전 Idle·B-bit), 순찰2 = 관제2석이 연 일제 통화 수신(Taken·B-bit·Permission 0)
-        var bcOut = new SessionItem(Ci(18, CimsUe.CallState.Active, "sip:g-traffic@ptt", true, "g-traffic", bcast: true), AccountKind.Ptt, Operation.Broadcast) { Title = "교통1", ConnectedAt = now.AddSeconds(-4) };
-        bcOut.Floor = new CimsUe.FloorInfo(CimsUe.FloorState.Idle, Array.Empty<CimsUe.Talker>(), true, CimsUe.FloorIndicator.BroadcastGroup, -1, 0, "", 0, 0, 0, 0);
-        var bcIn = new SessionItem(Ci(19, CimsUe.CallState.Active, "sip:g-patrol2@ptt", true, "g-patrol2", dir: CimsUe.CallDir.Incoming, bcast: true, caller: "tel:1002"), AccountKind.Ptt, Operation.Incoming)
-                   { Title = "순찰2", Speaker = "관제2석", SpeakerSince = now.AddSeconds(-6), ConnectedAt = now.AddSeconds(-7) };
-        bcIn.Floor = new CimsUe.FloorInfo(CimsUe.FloorState.Listening, new[] { new CimsUe.Talker("tel:1002", 0, false) }, false, CimsUe.FloorIndicator.BroadcastGroup, -1, 0, "", 0, 0, 1, 0);
-        foreach (var x in new[] { patrol, ops, adhoc, priv, night, volte, held, bcOut, bcIn }) { x.Tick(now); s.Sessions.Add(x); }
-        s.Activity.Add(ActivityPanel.Ptt, ActivityKind.SessionStart, "순찰2 일제 통화", "관제2석");
-        s.Activity.Add(ActivityPanel.Ptt, ActivityKind.Talk, "순찰1 김순경 발언 12초");
-        s.Activity.Add(ActivityPanel.Ptt, ActivityKind.Sds, "순찰1 SDS 박경장", "\"교대 인원 2명…\"");
-        s.Activity.Add(ActivityPanel.Ptt, ActivityKind.Member, "순찰1 정경장 합류", "12명");
-        s.Activity.Add(ActivityPanel.Ptt, ActivityKind.Emergency, "야간 긴급 개시", "박경장", emergency: true);
-        s.Activity.Add(ActivityPanel.Call, ActivityKind.Incoming, "착신 7000 ← 010-2222-3333", "응답 1004 · 03:12", number: "+821022223333", pilot: true);
-        s.Activity.Add(ActivityPanel.Call, ActivityKind.Missed, "부재 7000 ← 010-7777-8888", "→ 넘김 7100", missed: true, number: "+821077778888", pilot: true);
-        // 서버 인증서 만료 경고 배너(§8.6.2) 표본 — 경고 구간(≤30일) 연한 빨강. 위험(≤7일)은 DaysLeft 를 7 이하로 바꿔 본다
-        s.ShowServerCertBanner(new CimsUe.TlsPeerExpiry(true, DateTimeOffset.Now.AddDays(12), DateTimeOffset.Now, 12, "CN=csc.site1.cims.example.kr, O=CIMS Site1", "10.20.1.5:4430"));
-        // 긴급 경보 배너(TS 24.379 §12.1.1.3) 표본 — 자주, [경보 해제]·[채널로 이동]·[닫기]
-        s.Notify.ShowBanner(new Banner { Kind = BannerKind.Alert, GroupId = "g-support", AlertUser = "1013", Title = "긴급 경보 — 지원", Subtitle = "1013", CanCancel = true });
-        RestoreFromSnapshot();
-        PttChannels.Select(PttChannels.Cards.FirstOrDefault(), collapseSame: false);
-        if (PttChannels.Cards.FirstOrDefault() is { } first) PttChannels.SetSingleTarget(first);
-        patrol.Floor = new CimsUe.FloorInfo(CimsUe.FloorState.Speaking, Array.Empty<CimsUe.Talker>(), true, 0, -1, 0, "", 0, 1, 0, 0);
-        patrol.Speaker = "나"; patrol.TalkGauge = 0.6;
-        PttChannels.Tick(); TalkBar.Refresh(); Scoped.Rebuild();
-        McData.SeedPreview(s.Groups[0]);
-    }
+    [RelayCommand] private void ToggleSearch() => People.SearchOpen = !People.SearchOpen;
 
     public void Tick(DateTime now)
     {
         Session.Tick(now);
-        Desk.Tick(now);
         PttChannels.Tick();
         TalkBar.Refresh();
         Scoped.Tick();
@@ -386,6 +442,9 @@ public sealed partial class MainViewModel : ObservableObject
         PttActivity.Tick();
         CallActivity.Tick();
         CallDesk.Refresh();
-        if (Screen != AppScreen.Dispatch || PoppedOut.Count > 0) Summary.Refresh();
+        Records.Tick();
+        McData.RefreshHeader();
+        Panel.Channel?.Tick();
+        if (PoppedOut.Count > 0) Summary.Refresh();
     }
 }
