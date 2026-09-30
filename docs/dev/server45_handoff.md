@@ -719,3 +719,32 @@ S1-UNIT-PSIP [M] 으로 확인했다. 알아 둘 것 하나 — 갱신 answer �
 - `McVideoCallService` 는 `m_mutex`(재귀) 아래서 CMP 요청을 동기 대기한다 — CMP 응답(RecvLoop)과 이벤트(EventDispatchLoop)는 다른 스레드라 교착 없음. 이 구조를 바꿀 때 유지.
 - CMP 로스터는 **붙는 멤버만** 싣는다(`PTT_GROUP_ADD members` = 그 멤버 하나, CMP `updateRoster` 는 병합) — 그룹 전원을 실으면 참가하지 않는 멤버의 포트 유닛까지 잡힌다.
 - 공유 DB(.45:3306/cims)는 .45·.48·.135 가 같이 쓴다 — 마이그레이션·시험 데이터는 D1·D2 결정 범위 안에서만.
+
+### 12.5 M2 결과 · 사용자 결정 반영 (.45)
+
+**결정(사용자)** — D1 M2 열기: .48 배포 · 공유 DB 마이그레이션 · `Setup.Roles.MCVIDEO` 켜기. D2 이용 자격 = 시험 전원(마이그레이션 기본 — PTT 회선 43개 전부
+`mcvideo_user_profile`). D3 = 콘솔 도안 제시(아래). D4 녹취 = **같은 폴더**(`recordings/ptt/{id}` 공용, 메타 `type: mcvideo` 로 구분 — CMP 기록기가 이미 그 레이아웃).
+D5·D6 = .45 추천안으로 진행(아래).
+
+**배포 상태(.48)** — csp 0.2.182(dep 6, `Setup.Roles.MCVIDEO=true`) · cmp 0.2.106(dep 4, 멤버 풀 39/40 — 59042 한 칸은 .48 에서 쓰는 포트라 제외) ·
+csc 0.2.139(dep 3, `UeInitConfig.ServiceDetails.McVideo.Enable=true`). 공유 DB: 표 3개 · MCVideo 속성 3그룹(현행 영상 그룹) · 자격 43회선 · `ptt_affiliations` 무변화.
+시험 그룹 gmv1(chat·송출 상한 1)·gmv2(prearranged·T1 10 s), 멤버 test023·024·025.
+
+**M2 결과** — `tests/mcvideo_m2_signalling.py --confirm` **15/15 PASS**(T1~T9·T7b, 결과 JSON = dev_share `att/20261001-0803_45_m2-results/`). 음성 RTP = 송출자는 허가
+동안만(T3 A 250 패킷 = 5 s), 수신자는 [받기] 뒤(손실 0, MOS-LQ 4.3). 팬아웃 INVITE `Session-Expires` refresher 없음 · 멤버 200 `refresher=uas`·`Require: timer`.
+실측이 드러내 고친 것: CSP 팬아웃 INVITE PAI 둘(→ 제어 기능 PSI 하나, 9d6c63c8) · SDK 착신 200 `Require: timer` 중복(9d6c63c8) · cimsue-cli 종료 때 늦은 해제 PUBLISH
+응답 abort(eece42b4 — 엔진 가드는 사용자 결정 그대로). 관찰(결함 아님): 제어 기능 Contact 의 세션 식별자 사용자부가 그룹이 아니라 `mcvideo_psi`(골든 04 는 `g101@`) —
+재합류는 `gr` 로 가르므로 동작은 같다. cli PTT 계정 REGISTER 에 MCPTT 태그가 없다(TS 24.379 §7.2.1 대조 과제 — 앱은 싣는다).
+
+**D3 콘솔 도안** — 두 장(Artifact «MCVideo 콘솔 도안»): ① PTT 그룹 편집 «서비스» 절 = MCPTT 음성(항상 켬 — 기존 속성) · MCVideo 영상(체크 = 서비스 켬/끔 →
+`mcvideo` 객체/null, 호 방식 chat/prearranged 세그먼트 · 동시 송출 상한 · TNG3 · T5 · 시작 최소 응답 · 그룹 우선순위 · 선호 코덱 · 참가자 정보 구독 · E2E 보호는 사유 병기
+비활성), 기존 «영상» 체크박스 = «PTT 영상(현행)» + V7 에서 없어진다는 안내 · 목록에 서비스 칩 ② 가입자 PTT 회선 «MCVideo 이용 자격» = Switch(즉시 PUT/DELETE) + 동시 수신
+영상(C9)·동시 영상 호(N6) + [상한 저장]. 구현(R5)은 도안 확인 뒤.
+
+**D5 추천(통계 서비스 축)** — `mcvideo` 를 `ptt` 와 나란한 서비스 값으로 둔다(판정 = 요청의 MCVideo ICSI — 접속서비스 kind 는 둘 다 `ptt` 라 kind 로는 못 가른다).
+CSP 시도 장부·세션 색인(sip_statistics §3 attempt/session/leg)에 `service: mcvideo` 를 싣고 oam-svc 롤업 `by_service` 가 그대로 받는다 — 새 축을 만들지 않는다(체계성).
+**D6 추천(MCPTT 착신 refresher)** — 규격대로 `uas`(TS 24.379 §6.2.3.1.1 5)·§6.2.3.1.2). 함께: SDK 다이얼로그 안 MCPTT offer 에서 개시 전용 fmtp 제거(TS 24.380 §14 —
+MCVideo 와 같은 송신 보정) · CSP MCPTT re-INVITE answer fmtp 를 re-offer 로 다시 짓기(TS 24.380 §14.3.1 — MCVideo 7cba0610 과 같은 방식). CSP 전제는 확인됨(psip [M]).
+
+**다음 세션(.45)** — ① D6 구현(SDK·CSP, 라이브 PTT 단말 동작이 바뀌므로 .48 에서 먼저 실측) ② R3 녹취 CSP 몫(D4 같은 폴더) ③ A12 통계(D5) ④ R7 1차 잔여 소항목 · R6
+xcap-diff ⑤ R5 콘솔(도안 확인 뒤) ⑥ cli PTT REGISTER MCPTT 태그. 남은 사용자 결정 = Linux 엔진 영상(openh264) · pjsua `on_send_request` 가드.
