@@ -20,6 +20,9 @@
                                    옛 형식(resource-lists 없음) 구분
   · tests/csp_mcvideo_info_test.cpp MCVideo 호 제어 경계(csp/McVideoInfo.h — mcvideo.md §1.4·§5.2): K3 골든을 직접 읽어 mcvideo-info 해석·
                                    ICSI·특성 태그 판별·제어 채널 fmtp 해석·answer/offer fmtp 조립(TS 24.581 §14.3)·Warning 117/118
+  · tests/csp_mcvideo_sdp_test.cpp  MCVideo SDP·헤더 읽기(csp/McVideoSdp.h — mcvideo.md §5.2.1): 골든 SDP 의 제어 채널·fmtp·PT ·
+                                   a=ssrc · 키프레임 요청(nack pli·ccm fir — `*`·일반 nack 제외) · AMR-WB+ 구분 · 거절된 채널 ·
+                                   Session-Expires refresher 제거(TS 24.281 §6.3.3.1.2 6))
   · tests/csp_rule_field_test.cpp  Rule field `<원천>.<부분>`(csp/CspRuleField.cpp — sip_service_model.md §2-5, RFC 3261 §7.3 ·
                                    §19.1.4 · §20.10, RFC 3325): 헤더 이름 대소문자·compact form · 여러 값 · host 대소문자 ·
                                    user %xx · 믿지 않는 원천의 PAI 무시 · 옛 이름 종전 값
@@ -56,8 +59,10 @@ _TESTS = {
     "tests/csp_mcdata_codec_test.cpp": (["csp/McDataCodec.cpp"], ["libSipPlatform.a"]),
     # MCVideo 호 제어 경계(McVideoInfo.h — 헤더 전용) — 계약 골든 tests/fixtures/mcvideo/sip/ 를 레포 루트 기준으로 읽는다
     "tests/csp_mcvideo_info_test.cpp": ([], []),
+    # MCVideo SDP·헤더 읽기(McVideoSdp.h — 헤더 전용) — 골든 SDP 를 psip SDP 파서로 읽는다
+    "tests/csp_mcvideo_sdp_test.cpp": ([], ["libSdpParser.a", "libSipParser.a", "libSipPlatform.a"]),
 }
-_INCS = ["csp", "include", "ext/psip/SipParser", "ext/psip/SipPlatform"]
+_INCS = ["csp", "include", "ext/psip/SipParser", "ext/psip/SipPlatform", "ext/psip/SdpParser"]
 
 
 def _run(cmd: list, cwd: str, timeout: int):

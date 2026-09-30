@@ -385,7 +385,8 @@ INVITE to group@domain
 
 ### 3.4a CMcVideoAsModule / CMcVideoCallService (MCVideo 그룹 호)
 
-**파일:** `McVideoAsModule.h/.cpp`(모듈·서비스 판별), `McVideoCallService.h/.cpp`(그룹 호), `CmpClientMcvideo.cpp`(CMP 명령) — 설계 정본
+**파일:** `McVideoAsModule.h/.cpp`(모듈·서비스 판별), `McVideoCallService.h/.cpp`(그룹 호), `McVideoSdp.h`(SDP·헤더 읽기 부품 — 제어 채널·PT·
+`a=ssrc`·키프레임 요청·refresher 제거, S1-UNIT-CSP `csp_mcvideo_sdp_test`), `CmpClientMcvideo.cpp`(CMP 명령) — 설계 정본
 [mcvideo.md](../features/mcvideo.md) §5.2·§5.2.1.
 
 MCPTT `CGroupCallService` 와 따로 선 서비스다 — 세션 캐시(그룹 id → 세션: sesid·세션 식별자 `gr`·종류·개시자·leg 표)·CMP 명령(`PTT_* service:mcvideo`,

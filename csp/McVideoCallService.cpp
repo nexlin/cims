@@ -1,6 +1,5 @@
 // MCVideo 그룹 호 — 참여·제어 기능 겸임 (TS 24.281 §9.2.1 prearranged · §9.2.2 chat). 설계 정본 mcvideo.md §5.2.1.
-//
-// 규격을 읽은 방식(mcvideo.md §5.2.1·§9 에 같이 적는다):
+//   규격을 읽은 방식(mcvideo.md §5.2.1·§9 에 같이 적는다):
 //  - prearranged 새 세션의 개시자 200 OK 는 첫 초대 멤버의 200 OK(또는 첫 합류) 뒤에 보낸다(§9.2.1.4.2 — 미디어
 //    버퍼링이 없는 MCVideo 는 확인 없는 200 을 먼저 주지 않는다). 그 뒤 개시자 JOIN ② 에서 다른 참가자가 있으므로
 //    암묵 송출 요청이 곧바로 허가된다(TS 24.581 §6.3.2.2).
@@ -27,6 +26,7 @@
 #include "GroupMap.h"
 #include "Log.h"
 #include "McVideoInfo.h"
+#include "McVideoSdp.h"
 #include "ModuleDispatcher.h"
 #include "RtpMap.h"
 #include "SipCodecTable.h"
@@ -59,73 +59,21 @@ namespace {
         return p ? *p : CSipCodecTable::GetTop();
     }
 
-    // 전송 제어 채널 — m=application <port> udp MCVideo (TS 24.581 §12.1.2). fmtp:MCVideo 는 선택(없으면
-    //   bPresent=false). 채널이 있으면 true, 포트는 m= 줄 값(0 = 거절, RFC 3264 §6).
+    // SDP 읽기 — 부품은 McVideoSdp.h(단위시험 csp_mcvideo_sdp_test), 여기서는 psip 호 정보(CSipCallRtp)에서 목록만
+    //   꺼낸다
     bool McvControlOf( CSipCallRtp *pclsRtp, int &iPort, CMcVideoFmtp &clsFmtp ) {
         iPort = 0;
         clsFmtp = CMcVideoFmtp();
-        if ( !pclsRtp ) return false;
-        for ( const auto &clsMedia : pclsRtp->m_clsMediaList ) {
-            if ( strcasecmp( clsMedia.m_strMedia.c_str(), "application" ) != 0 ) continue;
-            if ( strcasecmp( clsMedia.m_strProtocol.c_str(), "udp" ) != 0 ) continue;
-            bool bMcv = false;
-            for ( const auto &strFmt : clsMedia.m_clsFmtList )
-                if ( strcasecmp( strFmt.c_str(), "MCVideo" ) == 0 ) bMcv = true;
-            if ( !bMcv ) continue;
-            iPort = clsMedia.m_iPort;
-            for ( const auto &clsAttr : clsMedia.m_clsAttributeList ) {
-                if ( strcasecmp( clsAttr.m_strName.c_str(), "fmtp" ) != 0 ) continue;
-                if ( strncasecmp( clsAttr.m_strValue.c_str(), "MCVideo", 7 ) != 0 ) continue;
-                clsFmtp = ParseMcVideoFmtp( clsAttr.m_strValue.substr( 7 ) );
-                break;
-            }
-            return true;
-        }
-        return false;
+        return pclsRtp && McvControlChannel( pclsRtp->m_clsMediaList, iPort, clsFmtp );
     }
-
-    // m=<media> 의 a=ssrc 첫 값(RFC 5576) · rtpmap 인코딩의 PT (없으면 0)
     void McvMediaOf( CSipCallRtp *pclsRtp, const char *pszMedia, const char *pszEncoding, unsigned int &uSsrc,
                      int &iPt ) {
         uSsrc = 0;
         iPt = 0;
-        if ( !pclsRtp ) return;
-        for ( const auto &clsMedia : pclsRtp->m_clsMediaList ) {
-            if ( strcasecmp( clsMedia.m_strMedia.c_str(), pszMedia ) != 0 ) continue;
-            for ( const auto &clsAttr : clsMedia.m_clsAttributeList ) {
-                if ( uSsrc == 0 && strcasecmp( clsAttr.m_strName.c_str(), "ssrc" ) == 0 )
-                    uSsrc = (unsigned int)strtoul( clsAttr.m_strValue.c_str(), nullptr, 10 );
-                if ( iPt == 0 && strcasecmp( clsAttr.m_strName.c_str(), "rtpmap" ) == 0 ) {
-                    const std::string &v = clsAttr.m_strValue;
-                    const size_t sp = v.find( ' ' );
-                    if ( sp != std::string::npos &&
-                         strncasecmp( v.c_str() + sp + 1, pszEncoding, strlen( pszEncoding ) ) == 0 )
-                        iPt = atoi( v.c_str() );
-                }
-            }
-            return;
-        }
+        if ( pclsRtp ) McvMediaSsrcPt( pclsRtp->m_clsMediaList, pszMedia, pszEncoding, uSsrc, iPt );
     }
-
-    // m=video 의 a=rtcp-fb 가운데 이 PT(또는 *)에 걸린 키프레임 요청 — 비트 1 = `nack pli`(RFC 4585 §4.2) · 2 = `ccm
-    //   fir` (RFC 5104 §7.1). CMP 는 송출자에게 협상한 것만 보낸다.
     int McvVideoFbOf( CSipCallRtp *pclsRtp, int iVideoPt ) {
-        int fb = 0;
-        if ( !pclsRtp ) return fb;
-        for ( const auto &clsMedia : pclsRtp->m_clsMediaList ) {
-            if ( strcasecmp( clsMedia.m_strMedia.c_str(), "video" ) != 0 ) continue;
-            for ( const auto &clsAttr : clsMedia.m_clsAttributeList ) {
-                if ( strcasecmp( clsAttr.m_strName.c_str(), "rtcp-fb" ) != 0 ) continue;
-                std::istringstream is( clsAttr.m_strValue );
-                std::string strPt, strType, strParam;
-                is >> strPt >> strType >> strParam;
-                if ( strPt != "*" && atoi( strPt.c_str() ) != iVideoPt ) continue;
-                if ( strcasecmp( strType.c_str(), "nack" ) == 0 && strcasecmp( strParam.c_str(), "pli" ) == 0 ) fb |= 1;
-                if ( strcasecmp( strType.c_str(), "ccm" ) == 0 && strcasecmp( strParam.c_str(), "fir" ) == 0 ) fb |= 2;
-            }
-            break;
-        }
-        return fb;
+        return pclsRtp ? McvVideoFeedback( pclsRtp->m_clsMediaList, iVideoPt ) : 0;
     }
 
     // 영상 성분을 뺀 선언 — 서버 SDP 가 m=video 0 이거나 영상 SRTP 협상이 깨졌다(RFC 3264 §6: 그 성분만 거절)
@@ -180,18 +128,6 @@ namespace {
         for ( const auto &h : pclsMessage->m_clsHeaderList )
             if ( strcasecmp( h.m_strName.c_str(), pszName ) == 0 ) s += h.m_strValue + ",";
         return s;
-    }
-
-    // 요청의 Session-Expires 에서 refresher 파라미터를 뺀다 — 스택은 로컬 정책대로 refresher 를 제안하므로(RFC 4028
-    //   §7.1) 규격이 생략을 정한 요청(TS 24.281 §6.3.3.1.2 6))은 만든 뒤 지운다.
-    void StripSessionRefresher( CSipMessage *pclsRequest ) {
-        for ( auto &h : pclsRequest->m_clsHeaderList ) {
-            if ( strcasecmp( h.m_strName.c_str(), "Session-Expires" ) != 0 ) continue;
-            const size_t k = h.m_strValue.find( ";refresher=" );
-            if ( k == std::string::npos ) continue;
-            const size_t e = h.m_strValue.find( ';', k + 1 );
-            h.m_strValue.erase( k, e == std::string::npos ? std::string::npos : e - k );
-        }
     }
 
 }  // namespace
@@ -476,7 +412,7 @@ bool CMcVideoCallService::_InviteMember( Session &clsSes, const CspPttGroup &cls
         "Accept-Contact",
         ( std::string( "*;+g.3gpp.icsi-ref=\"" ) + kMcVideoIcsiEnc + "\";require;explicit" ).c_str() );
     pclsInvite->AddHeader( "P-Asserted-Service", kMcVideoIcsi );
-    StripSessionRefresher( pclsInvite );
+    McvStripSessionRefresher( pclsInvite->m_clsHeaderList );
     gclsUserAgent.SetContactParams( strCallId.c_str(), kMcVideoFocusContactParams );
     gclsUserAgent.SetContactUriParams( strCallId.c_str(), ( "gr=" + clsSes.strGr ).c_str() );
     {
