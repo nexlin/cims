@@ -322,9 +322,6 @@ TS 24.484(docx k00). 이 절은 두 호스트가 MCVideo 계약을 주고받는 
 6. **R2(SSRC 재작성)** — 계획의 권고(허가 때 CMP 가 준 Audio·Video SSRC 를 Granted·Media Transmission Notification 에 싣고 그대로 전달)와 K5 는 맞는다 —
    Granted·Notification·Receive Media Request/Response·End 계열이 모두 두 SSRC 필드를 가진다.
 
-**다음 (.45)** — B2: CMP `cmp/PTransmissionCodec.{h,cpp}`(.45 소유, CMP 빌드 등록은 B3 때 .48 과 함께) + SDK 코덱, 서로의 출력을 읽는 교차 시험(`cimsue_test`
-에 floor `FloorXCheck` 방식). C2 는 K2 fixture(`tests/fixtures/mcvideo/*.xml`), C3·C4 는 K3·K4 가 선 뒤.
-
 **.48 리뷰 결과 (K5·K7·V0 SDK) — 09-30**
 
 - **K5 정의 테이블 = 원문 일치.** TS 24.581 V18.8.0 과 대조 — subtype 세 표(Table 9.2.2.1-1~3)·field ID 24개(Table 9.2.3.1-1)·필드 모양(§9.2.3.2~§9.2.3.23 —
@@ -368,3 +365,20 @@ TS 24.484(docx k00). 이 절은 두 호스트가 MCVideo 계약을 주고받는 
 | K3 SIP (+ K4 골든 SDP) | `tests/fixtures/mcvideo/sip/` — 10개(REGISTER · affiliation PUBLISH · chat 합류 INVITE/200 · prearranged 개시 INVITE/200(암묵 송출 요청 수락·`mc_audio_ssrc`·`mc_video_ssrc`) · 멤버 초대 · 재합류(R-URI = 세션 식별자) · 404 117/118). 전송 바이트 그대로(CRLF·Content-Length — 정본 `build_goldens.py`, `--check`), README = 메시지별 규격 절·요지. S1-MCVIDEO-CONTRACT 가 본문 XSD + K3·K4 규칙(ICSI 헤더·Accept-Contact 둘·m 순서·`udp MCVideo`·`i=`·fmtp `;`·answer 파라미터) 을 본다 | **C3·C4 입력** — 01·02·03·05·08 은 SDK 가 만드는 모양, 04·06·07·09·10 은 SDK 가 읽는 모양. prearranged 시험용 그룹 `tel:g103` 은 K3 에서만 쓴다 |
 
 **다음 (.48)** — A2(마이그레이션 적용·CSP 적재) → A7~A10(CSP MCVideo 모듈·등록·affiliation·그룹 호) · B3(CMP 그룹 종류 `(service, group_id)` 키·멤버 control 포트).
+
+**B2 — 양 끝 전송 제어 코덱 (.45 → .48)**
+
+| 항목 | 내용 |
+|---|---|
+| CMP 코덱 | `cmp/PTransmissionCodec.{h,cpp}` — `BuildTransmissionMessage(buf, size, app, subtype, ssrc, fields)`(그 메시지 표 밖 필드·모양이 틀린 고정 필드·모르는 메시지면 **0** — 상태 머신 잘못이 시험에서 드러난다) · `ParseTransmissionMessage`(MCV0~2 아님·모르는 subtype = false(§9.1.4 1), 표 밖·모양 틀린 필드는 버림(§9.1.4 2·3), 헤더 length 끝까지만(§9.1.1)) · `ParsedTransmission`(`op()`·`ackRequired()`·`u8/u16/ssrcOf/str`·`cause()/causePhrase()`·`queuePosition()`·`messageName()`) · 값 빌더 `McvU8/U16/QueueInfo/Ssrc/Name/Cause`. 의존 = 생성 헤더 `PTransmissionDefs.h` 뿐(`PMcpttGroup.h`·pasf 없음). **CMP `CMakeLists.txt` 등록은 B3 때 .48 이**(이 호스트는 cmp 빌드 파일을 건드리지 않았다) |
+| SDK 코덱 | `sdk/core/src/mcvideo/tc_codec.{h,cpp}` — 같은 규칙 + 참여자 빌더(Transmission Request·End Request/Response·Queue Position Request·Receive Media Request·Media Reception End Request/Response·Ack(Source 0 + **Message Name 늘** + Message Type 첫 비트 0)) |
+| 교차 시험 | `cimsue_test` `McvCodec` 9(골든 바이트·정렬·수신 검사) + `McvXCheck` 5(두 생성 표 전수 대조 · 코어 → CMP · CMP 서버 메시지 → 코어 · 같은 메시지 = 같은 바이트 · 거절 규칙 일치) — CMP 패딩을 일부러 빼면 2건이 FAIL(돌연변이 확인). `cimsue_test` 112/112. CMP 코덱은 Windows 시험 빌드에도 들어간다 |
+| K5 변경 | MCV2 Transmission End Request/Response·Media Reception End Response 에 Transmission Indicator 허용 — 필드 표(§9.2.20·§9.2.21·§9.2.27)엔 없지만 참여자 절차가 싣고 읽는다(§6.2.4.5.3 1·§6.2.4.6.4 3·§6.2.5.6.4 3). 생성 헤더에 `McvKnownMessage`/`knownMessage` 추가 |
+
+7. **송출 SSRC(K6 §7.9 SSRC 규칙 보강 제안)** — 규격상 송출자는 Granted 의 Audio·Video SSRC 를 자기 RTP 에 쓴다(§6.2.4.4.6 2). pjmedia 는 스트림 SSRC 를 호 중에
+   바꾸지 못하지만 offer 의 m-line 마다 `a=ssrc` 를 광고한다. §7.9 의 «CMP 가 내보낼 때 할당 SSRC 를 찍는다» 로 분배는 맞으니, **할당할 때 멤버 offer 의
+   `a=ssrc`(JOIN 에 `user_audio_ssrc`·`user_video_ssrc` 로)를 그룹 안에서 겹치지 않으면 그대로 쓰는 것**을 제안한다(§12.1.2.2 «equal to provided values …
+   or different if the collision is detected»). 그러면 CIMS 단말도 규격 문언 그대로가 되고, 찍기는 충돌·타사 단말에서만 값을 바꾼다.
+
+**다음 (.45)** — C5(참여자 송출·수신 상태 머신, K5·B2 위) → C2(K2 fixture 해석) → C3·C4(K3·K4 골든). 송출 SSRC 는 제안 7 이 채택되면 SDK 가 규격
+문언 그대로이고, 아니면 ue_sdk.md 편차 표에 적는다(.48 리뷰 요청).

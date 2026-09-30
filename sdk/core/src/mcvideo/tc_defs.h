@@ -112,6 +112,27 @@ inline const char* msgName(AppName app, uint8_t subtype) {
     }
     return "UNKNOWN";
 }
+/** 이 판본이 정한 메시지인가 — 모르는 subtype 이면 메시지 전체를 버린다(§9.1.4 1). */
+inline bool knownMessage(AppName app, uint8_t subtype) {
+    switch (app) {
+        case AppName::MCV0:
+            switch (subtype & kSubtypeMask) {
+                case 0x00: case 0x02: case 0x03: case 0x04: case 0x07: case 0x08: return true;
+                default: return false;
+            }
+        case AppName::MCV1:
+            switch (subtype & kSubtypeMask) {
+                case 0x00: case 0x01: case 0x02: case 0x03: case 0x04: case 0x05: case 0x06: case 0x07: case 0x08: case 0x0A: case 0x0B: case 0x0C: case 0x0D: case 0x0E: case 0x0F: return true;
+                default: return false;
+            }
+        case AppName::MCV2:
+            switch (subtype & kSubtypeMask) {
+                case 0x00: case 0x01: case 0x02: case 0x03: case 0x04: return true;
+                default: return false;
+            }
+    }
+    return false;
+}
 /** 메시지가 실을 수 있는 필드 집합 — 비트 i = field ID i(§9.2.4~§9.2.31 의 표). 모르는 메시지 = 0. */
 inline uint32_t allowedFields(AppName app, uint8_t subtype) {
     switch (app) {
@@ -146,10 +167,10 @@ inline uint32_t allowedFields(AppName app, uint8_t subtype) {
             }
         case AppName::MCV2:
             switch (subtype & kSubtypeMask) {
-                case 0x00: return 0x00804814u;  // TRANSMISSION_END_REQUEST
-                case 0x01: return 0x00804810u;  // TRANSMISSION_END_RESPONSE
+                case 0x00: return 0x00806814u;  // TRANSMISSION_END_REQUEST
+                case 0x01: return 0x00806810u;  // TRANSMISSION_END_RESPONSE
                 case 0x02: return 0x00806810u;  // MEDIA_RECEPTION_END_REQUEST
-                case 0x03: return 0x00804810u;  // MEDIA_RECEPTION_END_RESPONSE
+                case 0x03: return 0x00806810u;  // MEDIA_RECEPTION_END_RESPONSE
                 case 0x04: return 0x00011C00u;  // TRANSMISSION_CONTROL_ACK
                 default: return 0;
             }

@@ -93,6 +93,27 @@ inline const char* McvMessageName(int app, int subtype) {
     }
     return "UNKNOWN";
 }
+// 이 판본이 정한 메시지인가 — 모르는 subtype 이면 메시지 전체를 버린다(§9.1.4 1).
+inline bool McvKnownMessage(int app, int subtype) {
+    switch (app) {
+    case MCV_APP_0:
+        switch (MCV_SUBTYPE(subtype)) {
+        case MCV0_TRANSMISSION_REQUEST: case MCV0_TRANSMISSION_RELEASE: case MCV0_QUEUE_POSITION_REQUEST: case MCV0_RECEIVE_MEDIA_REQUEST: case MCV0_REMOTE_TRANSMISSION_REQUEST: case MCV0_REMOTE_TRANSMISSION_CANCEL_REQUEST: return true;
+        default: return false;
+        }
+    case MCV_APP_1:
+        switch (MCV_SUBTYPE(subtype)) {
+        case MCV1_TRANSMISSION_GRANTED: case MCV1_TRANSMISSION_REJECTED: case MCV1_TRANSMISSION_ARBITRATION_TAKEN: case MCV1_TRANSMISSION_ARBITRATION_RELEASE: case MCV1_TRANSMISSION_REVOKED: case MCV1_QUEUE_POSITION_INFO: case MCV1_MEDIA_TRANSMISSION_NOTIFICATION: case MCV1_RECEIVE_MEDIA_RESPONSE: case MCV1_MEDIA_RECEPTION_NOTIFICATION: case MCV1_TRANSMISSION_CANCEL_REQUEST_NOTIFY: case MCV1_REMOTE_TRANSMISSION_RESPONSE: case MCV1_REMOTE_TRANSMISSION_CANCEL_RESPONSE: case MCV1_MEDIA_RECEPTION_OVERRIDE_NOTIFICATION: case MCV1_TRANSMISSION_END_NOTIFY: case MCV1_TRANSMISSION_IDLE: return true;
+        default: return false;
+        }
+    case MCV_APP_2:
+        switch (MCV_SUBTYPE(subtype)) {
+        case MCV2_TRANSMISSION_END_REQUEST: case MCV2_TRANSMISSION_END_RESPONSE: case MCV2_MEDIA_RECEPTION_END_REQUEST: case MCV2_MEDIA_RECEPTION_END_RESPONSE: case MCV2_TRANSMISSION_CONTROL_ACK: return true;
+        default: return false;
+        }
+    }
+    return false;
+}
 // 메시지가 실을 수 있는 필드 집합 — 비트 i = field ID i. 모르는 메시지 = 0.
 inline unsigned McvAllowedFields(int app, int subtype) {
     switch (app) {
@@ -127,10 +148,10 @@ inline unsigned McvAllowedFields(int app, int subtype) {
         }
     case MCV_APP_2:
         switch (MCV_SUBTYPE(subtype)) {
-        case MCV2_TRANSMISSION_END_REQUEST: return 0x00804814u;
-        case MCV2_TRANSMISSION_END_RESPONSE: return 0x00804810u;
+        case MCV2_TRANSMISSION_END_REQUEST: return 0x00806814u;
+        case MCV2_TRANSMISSION_END_RESPONSE: return 0x00806810u;
         case MCV2_MEDIA_RECEPTION_END_REQUEST: return 0x00806810u;
-        case MCV2_MEDIA_RECEPTION_END_RESPONSE: return 0x00804810u;
+        case MCV2_MEDIA_RECEPTION_END_RESPONSE: return 0x00806810u;
         case MCV2_TRANSMISSION_CONTROL_ACK: return 0x00011C00u;
         default: return 0;
         }

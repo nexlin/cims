@@ -84,6 +84,7 @@ add_library(cimsue_objs OBJECT
     src/types.cpp
     src/floor/floor_codec.cpp
     src/floor/floor_participant.cpp
+    src/mcvideo/tc_codec.cpp
     src/mcptt/mcptt_xml.cpp
     src/mcdata/sds_codec.cpp
     src/mcdata/msrp.cpp
@@ -171,8 +172,12 @@ if(DEFINED GTEST_DIR)
         test/drive_test.cpp
         test/affiliation_publish_test.cpp
         test/mcptt_condition_test.cpp
-        test/msrp_test.cpp)
-    target_include_directories(cimsue_test PRIVATE ${GTEST_INC} ${CMAKE_CURRENT_SOURCE_DIR}/src)
+        test/msrp_test.cpp
+        test/mcvideo_tc_codec_test.cpp
+        # MCVideo 전송 제어 — CMP 코덱과 교차 검증. PTransmissionCodec.cpp 는 생성 헤더만 필요해 Windows 에서도 링크된다
+        test/mcvideo_xcheck_test.cpp
+        ${CIMS_ROOT}/cmp/PTransmissionCodec.cpp)
+    target_include_directories(cimsue_test PRIVATE ${GTEST_INC} ${CMAKE_CURRENT_SOURCE_DIR}/src ${CIMS_ROOT}/cmp)
     target_link_directories(cimsue_test PRIVATE ${GTEST_LIB_PATH} ${GTEST_DIR}/lib)   # 설치 산출물은 lib/ (루트 변수 lib64 는 구 경로)
     if(WIN32)
         # DLL 은 공개 표면만 export 한다 — 내부 심볼(detail::·floor::Message·mcptt::)을 시험하므로 오브젝트를 직접 링크한다.

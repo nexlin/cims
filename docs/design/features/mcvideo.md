@@ -6,7 +6,8 @@
 > 이 문서는 규격 모델, 현행 «PTT 영상»(MCPTT 세션의 `m=video` — 비규격)과의 차이, 규격형으로 옮기는 개발 항목·결정 사항을 정한다 —
 > **설계 정본.** 구현된 것 — 계약(전송 제어 정의 테이블 [mcvideo_tc_defs.yaml](mcvideo_tc_defs.yaml)(생성 헤더 양 끝, §5.3·§5.4) · DB 표(§5.1) ·
 > 설정 문서 골든 `tests/fixtures/mcvideo/` · SDP 프로파일(§1.4) · CSP↔CMP 제어 API([cmp_media_api.md](../../api/cmp_media_api.md) §7.9) · 단말 SDK 공개
-> 표면 선언([ue_sdk.md](ue_sdk.md) §4.6 — 구현 전이라 실패를 돌려준다)), V0 전부, CSC 설정 평면(§5.1 — 관리 API·콘솔 제외). 호 제어·미디어 제어는 미구현.
+> 표면 선언([ue_sdk.md](ue_sdk.md) §4.6 — 구현 전이라 실패를 돌려준다)), 양 끝 전송 제어 코덱(CMP `PTransmissionCodec` · SDK `mcvideo/tc_codec`, 교차 시험),
+> V0 전부, CSC 설정 평면(§5.1 — 관리 API·콘솔 제외). 호 제어·전송 제어 상태 머신·미디어 결선은 미구현.
 >
 > 규격 판본: TS 24.281 V18.14.0 · TS 24.581 V18.8.0 · TS 23.281 V18.12.0 · TS 24.481 V19.3.0 · TS 24.484 V20.0.0 · TS 23.280 V20.4.0 ·
 > TS 33.180 V20.0.0. 관계 문서: 로드맵 표 [mcptt_standard_conformance.md](mcptt_standard_conformance.md) R3·R6, 현행 PTT 영상 협상
@@ -267,6 +268,7 @@ psip 합성 SDP 프로파일(`CSipCallRtp::m_eMcMediaProfile = E_MC_MEDIA_MCVIDE
 - **수신 제어** — 수신자별 Active SSRC List: 허가된 송출의 audio·video 만 그 수신자에게 보낸다. manual/automatic 모드, 수신자 동시 스트림 상한.
 - **코덱** — RTCP APP `MCV0`·`MCV1`·`MCV2` 부호화·해석(`PFloorCodec` 과 나란한 `PTransmissionCodec`, 필드 표 §9.2.3), 제어 SRTCP 는 `PFloorCrypto` 재사용.
   상수는 생성 헤더 `cmp/PTransmissionDefs.h`(정본 [mcvideo_tc_defs.yaml](mcvideo_tc_defs.yaml) — 단말 코어와 같은 테이블, §1.5).
+  코덱 `cmp/PTransmissionCodec.{h,cpp}` 는 있다(단말 코덱과 교차 시험 — [ue_sdk.md](ue_sdk.md) §4.6). CMP 빌드 등록·서버 상태 머신은 V3.
 - **녹취** — 송출마다 슬롯 트랙(audio·video) — `PSyncRtpRecorder` 재사용, 색인 서비스 축 `mcvideo`([recording.md](recording.md)).
 
 ### 5.4 단말 SDK (`libcimsue`)
@@ -279,7 +281,11 @@ psip 합성 SDP 프로파일(`CSipCallRtp::m_eMcMediaProfile = E_MC_MEDIA_MCVIDE
 - **수신 제어** — `acceptReception(callId, transmitterId)`·`endReception`(§6.2.5, T103·T104), 스트림별 렌더 창(현행 «호별 수신 창» 과제와 합친다 — ue_sdk.md §11).
 - **바인딩** — C API·.NET·Kotlin 같은 이름(현행 그룹 영상 옵션 누락도 이때 메운다). `cimsue-cli video-call <g> [--transmit-at S] [--accept]`.
 - 위 공개 표면(`McService`·`VideoGroupCallOptions`·`TransmissionEvent`·`ReceptionEvent`·`TransmissionInfo`)은 C++ 공개 헤더에 선언돼 있고 구현 전이라
-  실패를 돌려준다([ue_sdk.md](ue_sdk.md) §4.6). 전송 제어 상수는 생성 헤더 `mcvideo/tc_defs.h`.
+  실패를 돌려준다([ue_sdk.md](ue_sdk.md) §4.6). 전송 제어 상수는 생성 헤더 `mcvideo/tc_defs.h`, 코덱·참여자 빌더는 `mcvideo/tc_codec`.
+- **송출 SSRC** — 규격상 송출자는 Transmission Granted 의 Audio·Video SSRC 를 자기 RTP 에 쓴다(TS 24.581 §6.2.4.4.6 2). pjmedia 스트림 SSRC 는 스트림을
+  만들 때 정해지고(호 중 바꾸는 API 가 없다) pjsua 는 offer 의 m-line 마다 `a=ssrc`(RFC 5576)를 광고한다. CMP 는 송출자를 멤버 전용 포트로 판별해
+  내보낼 때 할당 SSRC 를 찍으므로([cmp_media_api.md](../../api/cmp_media_api.md) §7.9 SSRC 규칙) 단말이 SSRC 를 바꾸지 않아도 분배·수신자 구분은 맞다.
+  할당값이 offer 의 `a=ssrc` 와 같으면(충돌이 없을 때 — §12.1.2.2) 단말 쪽도 규격 문언 그대로다.
 
 ### 5.5 앱
 
@@ -349,6 +355,9 @@ psip 합성 SDP 프로파일(`CSipCallRtp::m_eMcMediaProfile = E_MC_MEDIA_MCVIDE
   1차 범위 밖).
 - TS 24.581 Transmission Revoked(§9.2.10)·Transmission End Request(§9.2.20) 표의 «Reject Cause value» vs 본문 Reject Cause field(→ 필드). Queue Position Info
   의 Transmission Indicator 참조 절 9.2.3.15(→ 9.2.3.11). Transmission control ack subtype `00100`(x 자리 없음 — 값 4).
+- TS 24.581 Transmission End Request/Response·Media Reception End Response 의 필드 표(§9.2.20·§9.2.21·§9.2.27)에 Transmission Indicator 가 없는데 참여자
+  절차가 싣고 읽는다(§6.2.4.5.3 1·§6.2.4.6.4 3·§6.2.5.6.4 3)(→ 절차 — 세 메시지에 Indicator 를 허용). Ack 을 보내는 절차 대부분이 Message Type·Source 만
+  말하지만 subtype 값이 MCV1·MCV2 사이에서 겹친다(→ Message Name 을 늘 싣는다 — §6.2.5.5.5 1c·§9.2.31 표).
 - TS 24.581 원인 #4 가 가리키는 T9(Retry-after)가 §11 서버 타이머 표에 없다(→ 1차 범위에서 쓰지 않는다). 단말 T100~T104 와 서버 T2 는 규격 기본값이
   없다 — TS 24.484 는 T100~T104 를 초 단위 unsignedByte 로 둔다(→ CIMS 1 s, [mcvideo_tc_defs.yaml](mcvideo_tc_defs.yaml) `origin: cims`).
 - TS 24.581 §14.2.7·§14.3.9 는 `mc_transmission_ssrc` 를 «다중화를 지원하면» 싣게 하지만 TS 24.281 §6.3.3.1.1 4)·§6.3.3.2.1 2)b)(제어 기능 offer·answer)는

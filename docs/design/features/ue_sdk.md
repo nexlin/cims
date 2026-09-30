@@ -106,7 +106,8 @@ sdk/core/
     floor/              floor_defs.h(생성) · floor_codec(TS 24.380 §8 RTCP-APP TLV, CMP 코덱과 바이트 호환) ·
                         floor_participant(§6.2.4 상태머신 + UDP 소켓 + Ack keepalive·Revoke Release 재전송·MSN 폐기·
                         요청 시한·Granted Duration 자체 종료·청취 전용) — 원천 android FloorClient.kt
-    mcvideo/            tc_defs.h(생성 — MCVideo 전송 제어 TS 24.581 §9.2·§11·§12.1.2 정의, §4.6)
+    mcvideo/            tc_defs.h(생성 — MCVideo 전송 제어 TS 24.581 §9.2·§11·§12.1.2 정의, §4.6) · tc_codec(§9 RTCP APP
+                        MCV0/1/2 TLV — CMP PTransmissionCodec 과 바이트 호환, §9.1.4 수신 검사, 참여자 빌더 §6.2.4·§6.2.5)
     mcptt/              mcptt_xml — mcptt-info·resource-lists·affiliation-command·긴급 경보(alert-ind, §F.1 요소 순서) 빌더,
                         mcptt-info/conference-info/경보 파서, 지시자 삼중값(`indicator` — true/false/없음)
     mcdata/             sds_codec — TS 24.282 SDS SIGNALLING/DATA PAYLOAD/NOTIFICATION·FD SIGNALLING TLV + multipart(base64) 빌드·파싱
@@ -355,7 +356,11 @@ MCVideo 전송 제어(TS 24.581 — RTCP APP `MCV0`·`MCV1`·`MCV2`)도 같은 �
 reception mode·원인 문구·§11 타이머·카운터 기본값·§12.1.2 fmtp 이름)에서 `scripts/gen_mcvideo_tc_defs.py` 가 **양 끝 헤더를 모두 생성**한다 —
 코어 `sdk/core/src/mcvideo/tc_defs.h`(CMake 가 테이블 변경 시 재생성)와 CMP `cmp/PTransmissionDefs.h`. floor 와 달리 CMP 도 생성물이라
 `--check` 는 두 생성물의 최신성과 테이블 자체 정합(필드 이름·ID 중복·subtype 범위)을 본다(S1 `S1-UE-MCVIDEO-TC-DEFS`,
-[mcvideo.md](mcvideo.md) §5.3·§5.4).
+[mcvideo.md](mcvideo.md) §5.3·§5.4). 코덱도 양 끝 한 벌씩이다 — 코어 `mcvideo/tc_codec`·CMP `cmp/PTransmissionCodec`. 둘 다 그 메시지 표
+밖 필드·모양이 틀린 고정 필드는 싣지 않고(빌드 실패) 받은 메시지에서는 버리며, 모르는 subtype 은 메시지째 버린다(§9.1.4). 헤더 length 가
+가리키는 끝까지만 읽는다(한 IP 패킷에 여러 메시지, §9.1.1). `cimsue_test` 의 `McvCodec`(골든 바이트·4옥텟 정렬·수신 검사·참여자 빌더)와
+`McvXCheck`(두 생성 표 전수 대조 · 코어 빌더 → CMP 해석 · CMP 서버 메시지 → 코어 해석 · 같은 메시지 = 같은 바이트)가 드리프트를 잡는다 —
+CMP 코덱은 pasf 에 기대지 않아 Windows 시험 빌드에도 들어간다.
 
 **MCVideo 공개 표면**(계약 K7 — [../../dev/mcvideo_dev_plan.md](../../dev/mcvideo_dev_plan.md) §3) — `McService`(Mcptt·McVideo)·
 `AccountConfig.mcvideoEnabled`·`mcvideoServerUri`, `affiliate(…, service)`, `joinVideoGroupCall`(`VideoGroupCallOptions` — chat/prearranged·
@@ -633,7 +638,7 @@ NDK/MSVC 빌드는 개발 서버 밖(WSL2·Windows 머신)에서 수행하고, �
 | stage | 항목 | 내용 |
 |---|---|---|
 | S1 | `S1-UE-FLOOR-CODEC` | `scripts/gen_floor_defs.py --check`(정의 테이블 ↔ 생성물·CMP·Kotlin·.NET·probe 상수) + `cimsue_test` 의 `FloorXCheck`(코어 빌더 ↔ CMP `ParseFloorMessage`, CMP `BuildFloorMessage` ↔ 코어 decode) |
-| S1 | `S1-UE-MCVIDEO-TC-DEFS` | `scripts/gen_mcvideo_tc_defs.py --check`(MCVideo 전송 제어 정의 테이블 정합 + 생성물 `mcvideo/tc_defs.h`·`cmp/PTransmissionDefs.h` 최신성) |
+| S1 | `S1-UE-MCVIDEO-TC-DEFS` | `scripts/gen_mcvideo_tc_defs.py --check`(MCVideo 전송 제어 정의 테이블 정합 + 생성물 `mcvideo/tc_defs.h`·`cmp/PTransmissionDefs.h` 최신성) + `cimsue_test` 의 `McvCodec`·`McvXCheck`(코어 ↔ CMP `PTransmissionCodec` 교차) |
 | S1 | `S1-UE-UNIT` | `build/bin/cimsue_test`(googletest) — config→pjsua2 매핑(IMPI·realm `*`·H(A1)/AKA 우선·TLS 게이트 SRTP·sec-agree 헤더·proxies lr)·대상 정규화·헤더 파싱·재생 라우트 수명(null 장치 엔진 기동 → 라우트 추가/제거 → 종료 순서). 확장: SDP 협상·floor 상태머신·SDS TLV·MSRP·PKCE |
 | S3 | `S3-UE-CLI-*` | `cimsue-cli` 로 등록(UDP/TLS/AKA)·1:1(평문·TLS+SRTP)·그룹콜(affiliation PUBLISH ETag·multipart INVITE·로스터 NOTIFY·floor Request→Granted/Taken·발언 RTP 수신·Idle)·SDS 송수신·관제(dialog 구독 early→confirmed→terminated, Join 200 + 감청 RTP + caller/callee SSRC 라벨, 그룹 픽업 `**`, REFER blind 전달 후 전달 대상 RTP)·PTT 청취 — 기존 `S3-SCN-*` 의 cspsim 축과 같은 판정(누적 RTP delta·403/489). 수동 절차는 VERIFICATION_MANUAL 부록, cims-verify 항목 등록은 후속 |
 | S1 | `S1-UE-UNIT`(보강) | `AffiliationPublish`(루프백 가짜 ESC — 412 뒤 ETag 폐기·초기 PUBLISH 1회·앱에는 affiliate token 으로 최종 결과 하나) · `EngineCapture`(캡처 게이트 상태·재기동 전이중) · floor 시험의 pjlib 수명 짝(`test/pj_scope.h` — 한 프로세스 전체 실행) |
