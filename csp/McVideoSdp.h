@@ -104,4 +104,16 @@ inline void McvStripSessionRefresher( SIP_HEADER_LIST &clsHeaders ) {
     }
 }
 
+/** 같은 이름의 헤더를 값 하나로 — 스택이 먼저 넣은 것(예: From 으로 만든 P-Asserted-Identity)을 지우고 끝에 하나를
+ * 둔다. RFC 3325 §9.1 의 P-Asserted-Identity 는 SIP URI 하나(+ tel URI 하나)만 허용하므로 규격이 정한 신원(TS 24.281
+ * §9.2.1.4.1.1 3) 제어 기능 PSI)으로 바꿀 때 쓴다. 이름은 대소문자를 가리지 않는다. */
+inline void McvReplaceHeader( SIP_HEADER_LIST &clsHeaders, const char *pszName, const std::string &strValue ) {
+    clsHeaders.remove_if(
+        [pszName]( const CSipHeader &h ) { return strcasecmp( h.m_strName.c_str(), pszName ) == 0; } );
+    CSipHeader clsHeader;
+    clsHeader.m_strName = pszName;
+    clsHeader.m_strValue = strValue;
+    clsHeaders.push_back( clsHeader );
+}
+
 #endif

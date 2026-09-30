@@ -183,6 +183,24 @@ int main() {
     ++it;
     CK("뒤 파라미터는 남긴다(이름 대소문자 무시)", it->m_strValue == "900;x=1");
   }
+  // ── P-Asserted-Identity 하나로 (TS 24.281 §9.2.1.4.1.1 3) · RFC 3325 §9.1) ──
+  {
+    SIP_HEADER_LIST clsHeaders;
+    CSipHeader a, b;
+    a.m_strName = "P-Asserted-Identity";
+    a.m_strValue = "<sip:gmv2@ptt.cims.example.kr>";
+    b.m_strName = "Accept-Contact";
+    b.m_strValue = "*;+g.3gpp.mcvideo;require;explicit";
+    clsHeaders.push_back(a);
+    clsHeaders.push_back(b);
+    McvReplaceHeader(clsHeaders, "P-Asserted-Identity", "<sip:mcvideo_psi@ptt.cims.example.kr>");
+    int pai = 0;
+    std::string v;
+    for (const auto& h : clsHeaders)
+      if (strcasecmp(h.m_strName.c_str(), "P-Asserted-Identity") == 0) { ++pai; v = h.m_strValue; }
+    CK("PAI 하나 = 제어 기능 PSI", pai == 1 && v == "<sip:mcvideo_psi@ptt.cims.example.kr>");
+    CK("다른 헤더는 그대로", clsHeaders.size() == 2 && clsHeaders.front().m_strName == "Accept-Contact");
+  }
   printf("csp_mcvideo_sdp_test: %s (%d failure%s)\n", g_fail ? "FAIL" : "PASS",
          g_fail, g_fail == 1 ? "" : "s");
   return g_fail ? 1 : 0;

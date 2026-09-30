@@ -226,11 +226,18 @@ void requireTimer(pjsip_tx_data* tdata) {
     auto* cseq = static_cast<pjsip_cseq_hdr*>(pjsip_msg_find_hdr(msg, PJSIP_H_CSEQ, nullptr));
     if (!cseq || cseq->method.id != PJSIP_INVITE_METHOD) return;
     static const pj_str_t timer = {const_cast<char*>("timer"), 5};
-    for (void* h = pjsip_msg_find_hdr(msg, PJSIP_H_REQUIRE, nullptr); h;
-         h = pjsip_msg_find_hdr(msg, PJSIP_H_REQUIRE, static_cast<pjsip_hdr*>(h)->next)) {
-        auto* r = static_cast<pjsip_require_hdr*>(h);
-        for (unsigned i = 0; i < r->count; ++i)
-            if (pj_stricmp(&r->values[i], &timer) == 0) return;
+    // 형식화된 Require 와 일반 헤더 둘 다 본다 — 180 에 txOption 으로 넣은 `Require: timer` 는 일반 헤더이고, pjsip 은 같은 응답 객체를
+    //   200 으로 바꿔 쓰므로(pjsip_inv_answer 가 last_answer 재사용) 그대로 남아 있다
+    for (pjsip_hdr* h = msg->hdr.next; h != &msg->hdr; h = h->next) {
+        if (pj_stricmp2(&h->name, "Require") != 0) continue;
+        if (h->type == PJSIP_H_REQUIRE) {
+            auto* r = reinterpret_cast<pjsip_require_hdr*>(h);
+            for (unsigned i = 0; i < r->count; ++i)
+                if (pj_stricmp(&r->values[i], &timer) == 0) return;
+        } else {
+            auto* g = reinterpret_cast<pjsip_generic_string_hdr*>(h);
+            if (pj_strstr(&g->hvalue, &timer)) return;
+        }
     }
     pjsip_require_hdr* r = pjsip_require_hdr_create(tdata->pool);
     r->count = 1;

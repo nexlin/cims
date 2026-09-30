@@ -413,9 +413,10 @@ bool CMcVideoCallService::_InviteMember( Session &clsSes, const CspPttGroup &cls
         "Accept-Contact",
         ( std::string( "*;+g.3gpp.icsi-ref=\"" ) + kMcVideoIcsiEnc + "\";require;explicit" ).c_str() );
     pclsInvite->AddHeader( "P-Asserted-Service", kMcVideoIcsi );
-    // P-Asserted-Identity = 제어 기능 PSI (TS 24.281 §9.2.1.4.1.1 3) — 개시자 200 OK 의 PAI 와 같은 신원, 골든 07)
-    pclsInvite->AddHeader( "P-Asserted-Identity",
-                           ( std::string( "<sip:" ) + kMcVideoPsiUser + "@" + strDomain + ">" ).c_str() );
+    // P-Asserted-Identity = 제어 기능 PSI (TS 24.281 §9.2.1.4.1.1 3) — 개시자 200 OK 의 PAI 와 같은 신원, 골든 07).
+    //   스택이 From(그룹)으로 먼저 넣은 PAI 는 지운다(RFC 3325 §9.1 — SIP URI 하나)
+    McvReplaceHeader( pclsInvite->m_clsHeaderList, "P-Asserted-Identity",
+                      std::string( "<sip:" ) + kMcVideoPsiUser + "@" + strDomain + ">" );
     McvStripSessionRefresher( pclsInvite->m_clsHeaderList );
     gclsUserAgent.SetContactParams( strCallId.c_str(), kMcVideoFocusContactParams );
     gclsUserAgent.SetContactUriParams( strCallId.c_str(), ( "gr=" + clsSes.strGr ).c_str() );

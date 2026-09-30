@@ -831,6 +831,7 @@ TEST(McvCall, MemberInvitationAutoAnswer) {
     EXPECT_EQ(headerOf(inv, "Session-Expires"), "1800");
     EXPECT_EQ(headerOf(okr, "Session-Expires"), "1800;refresher=uas");
     EXPECT_NE(headerOf(okr, "Require").find("timer"), std::string::npos);
+    EXPECT_EQ(headersOf(okr, "Require").size(), 1u) << okr;           // 180 의 Require 가 200 에 남아도 한 줄
     ASSERT_TRUE(r.l.wait([&] { return !r.l.incoming.empty(); }));
     CallInfo in;
     { std::lock_guard<std::mutex> lk(r.l.m); in = r.l.incoming[0]; }
