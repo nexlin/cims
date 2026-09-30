@@ -524,6 +524,10 @@ Indicator, automatic 수신; 1차 CSP 는 normal) · JOIN 응답 `audio_ssrc`·`
 - TS 24.581 §14.3.1 «answer 의 fmtp 는 offer 에 없던 파라미터를 싣지 않는다» vs §12.1.2.2·§14.3.7·§14.3.8·§14.4 의 `mc_audio_ssrc`·`mc_video_ssrc`(offer 에 없어도
   암묵 요청을 받아들인 answer 가 싣고 offerer 가 쓴다)(→ 두 값은 answer 전용 예외).
 - TS 24.281 §6.3.3.1.2 3) «P-Asserted-Service-Id header field»(→ RFC 6050 의 헤더 이름 `P-Asserted-Service` — MCPTT 쪽 구현과 같다).
+- 세션 갱신 주체 — 제어 기능의 멤버 INVITE 는 refresher 를 «shall be omitted»(TS 24.281 §6.3.3.1.2 6)), 단말의 그 200 OK 는 `refresher=uas`
+  (§6.2.3.1.1 5)), 제어 기능의 200 OK(단말 개시·합류)는 `uac`(§6.3.3.2.3.2 2)) — 어느 쪽이든 단말이 갱신한다. MCPTT(TS 24.379 §6.3.3.1.2)는 «생략 권고,
+  싣는다면 uac» 라 CIMS 가 `uac` 를 싣는다(mcptt_standard_conformance.md C4a) — MCVideo 는 규격대로 생략하고, psip 가 로컬 정책으로 싣는 값을 지운다
+  (`McvStripSessionRefresher`). pjsip UAS 기본(요청에 refresher 가 없으면 uac)은 SDK 가 uas 로 고친다(.45 e027c0b5).
 - TS 24.484 MCVideo service configuration — XSD 요소 `C7-reception-accpeted` vs 본문 `C7-reception-accepted`(§9.4.2.1·§9.4.2.7), 본문 구조의
   `T103-receive-media-requset` vs XSD `T103-receive-media-request`(→ XSD 표기 — 스키마 검증·XSD 기반 단말과 맞는다), MIME 이름 «vnd.3gpp.mcvideo-service-config+xml»
   (§9.4.2.5 — `application/` 누락, → `application/vnd.3gpp.mcvideo-service-config+xml`).
