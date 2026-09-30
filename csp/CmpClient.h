@@ -188,8 +188,8 @@ public:
         m_fnPlayDone = fn;
     }
 
-    // ── MCVideo 그룹 호 (cmp_media_api.md §7.9) — 세션·끝점 캐시 키 = McvKey(group) (MCPTT 의 같은 그룹 id 와 겹치지
-    // 않게) ──
+    // ── MCVideo 그룹 호 (cmp_media_api.md §7.9) ──
+    //   세션·끝점 캐시 키 = McvKey(group) — MCPTT 의 같은 그룹 id 와 겹치지 않게
     static std::string McvKey( const std::string &strGroupId ) {
         return "mcvideo|" + strGroupId;
     }

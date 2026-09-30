@@ -346,8 +346,8 @@ int ServiceMain() {
         gclsAnnouncement.OnPlayDone( strSessionId, iPeerIdx, strPlayId, strReason, iPlayedMs );
     } );
     gclsAnnouncement.Init();
-    // MCVideo 그룹 호(mcvideo.md §5.2.1) — CMP 의 service:mcvideo
-    // 이벤트(PTT_GROUP_ABORTED·TRANSMITTERS·TRANSMISSION_INACTIVITY)
+    // MCVideo 그룹 호(mcvideo.md §5.2.1) — CMP 의 service:mcvideo 이벤트
+    //   (PTT_GROUP_ABORTED · TRANSMITTERS · TRANSMISSION_INACTIVITY)
     gclsCmpClient.SetMcvEventCallback( []( const std::string &strCmd, const std::string &strGroupId,
                                            const std::string &strSesId, const SimpleJson::JsonNode &payload ) {
         gclsMcVideoCallService.OnCmpEvent( strCmd, strGroupId, strSesId, payload );

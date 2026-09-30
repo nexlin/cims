@@ -2,9 +2,8 @@
 //
 // 규격을 읽은 방식(mcvideo.md §5.2.1·§9 에 같이 적는다):
 //  - prearranged 새 세션의 개시자 200 OK 는 첫 초대 멤버의 200 OK(또는 첫 합류) 뒤에 보낸다(§9.2.1.4.2 — 미디어
-//  버퍼링이
-//    없는 MCVideo 는 확인 없는 200 을 먼저 주지 않는다). 그 뒤 개시자 JOIN ② 에서 다른 참가자가 있으므로 암묵 송출
-//    요청이 곧바로 허가된다(TS 24.581 §6.3.2.2).
+//    버퍼링이 없는 MCVideo 는 확인 없는 200 을 먼저 주지 않는다). 그 뒤 개시자 JOIN ② 에서 다른 참가자가 있으므로
+//    암묵 송출 요청이 곧바로 허가된다(TS 24.581 §6.3.2.2).
 //  - 참가자 수 해제(§6.3.8.1 2) «only one or no participants»)는 prearranged 에만 건다 — chat 은 참가자가 모이기를
 //    기다리는 세션이라 마지막 참가자가 나가면(0 명) 해제한다.
 //  - 재합류 대상 = Request-URI 의 gr(MCVideo 세션 식별자, TS 24.281 §4.5·§9.2.1.4.5.1) — 진행 중 세션이 아니면
@@ -12,8 +11,7 @@
 //  - 팬아웃 INVITE 의 Session-Expires 는 refresher 를 싣지 않는다(§6.3.3.1.2 6) «The refresher parameter shall be
 //    omitted») — 단말이 200 OK 에서 refresher=uas 로 정한다(§6.2.3.1.1 5)).
 //  - CMP 로스터는 붙는 멤버만 싣는다(PTT_GROUP_ADD members = 그 멤버 하나) — CMP 가 로스터 멤버마다 포트 유닛을
-//  잡으므로
-//    그룹 전원을 실으면 참가하지 않는 멤버의 유닛까지 점유된다. CMP updateRoster 는 병합이라 누적된다.
+//    잡으므로 그룹 전원을 실으면 참가하지 않는 멤버의 유닛까지 점유된다. CMP updateRoster 는 병합이라 누적된다.
 #include "McVideoCallService.h"
 
 #include <strings.h>
@@ -62,8 +60,7 @@ namespace {
     }
 
     // 전송 제어 채널 — m=application <port> udp MCVideo (TS 24.581 §12.1.2). fmtp:MCVideo 는 선택(없으면
-    // bPresent=false).
-    //   채널이 있으면 true, 포트는 m= 줄 값(0 = 거절, RFC 3264 §6).
+    //   bPresent=false). 채널이 있으면 true, 포트는 m= 줄 값(0 = 거절, RFC 3264 §6).
     bool McvControlOf( CSipCallRtp *pclsRtp, int &iPort, CMcVideoFmtp &clsFmtp ) {
         iPort = 0;
         clsFmtp = CMcVideoFmtp();
@@ -111,8 +108,7 @@ namespace {
     }
 
     // m=video 의 a=rtcp-fb 가운데 이 PT(또는 *)에 걸린 키프레임 요청 — 비트 1 = `nack pli`(RFC 4585 §4.2) · 2 = `ccm
-    // fir`
-    //   (RFC 5104 §7.1). CMP 는 송출자에게 협상한 것만 보낸다.
+    //   fir` (RFC 5104 §7.1). CMP 는 송출자에게 협상한 것만 보낸다.
     int McvVideoFbOf( CSipCallRtp *pclsRtp, int iVideoPt ) {
         int fb = 0;
         if ( !pclsRtp ) return fb;
@@ -187,8 +183,7 @@ namespace {
     }
 
     // 요청의 Session-Expires 에서 refresher 파라미터를 뺀다 — 스택은 로컬 정책대로 refresher 를 제안하므로(RFC 4028
-    // §7.1)
-    //   규격이 생략을 정한 요청(TS 24.281 §6.3.3.1.2 6))은 만든 뒤 지운다.
+    //   §7.1) 규격이 생략을 정한 요청(TS 24.281 §6.3.3.1.2 6))은 만든 뒤 지운다.
     void StripSessionRefresher( CSipMessage *pclsRequest ) {
         for ( auto &h : pclsRequest->m_clsHeaderList ) {
             if ( strcasecmp( h.m_strName.c_str(), "Session-Expires" ) != 0 ) continue;
@@ -247,8 +242,7 @@ bool CMcVideoCallService::_CmpAddMember( Session &clsSes, const CspPttGroup &cls
     spec.bReceptionAutomatic = false;  // 1차 = 일반 호 manual 수신 (TS 24.581 §6.3.6.3.3)
     spec.strCallType = "normal";
     // T1 = 그룹 hang timer(TS 24.581 §11.1.3 — MCPTT on-network-hang-timer 와 같은 요소, 0 = 미사용), T5 = reception
-    // hang
-    //   timer
+    //   hang timer
     if ( clsGroup._hangTimerSec >= 0 ) spec.iT1Ms = clsGroup._hangTimerSec * 1000;
     if ( clsGroup._mcvideoAttrs.iReceptionHangTimerSec >= 0 )
         spec.iT5Ms = clsGroup._mcvideoAttrs.iReceptionHangTimerSec * 1000;
@@ -282,8 +276,7 @@ void CMcVideoCallService::_FillDecl( CmpMcvMemberDecl &d, const std::string &str
     d.uVideoSsrc = d.iVideoPort > 0 ? uV : 0;
     d.iPt = iAPt;
     // CMP ingress 분류 PT = 단말이 보내는 PT — 서버 offer leg 면 서버 offer 의 PT, 단말 offer leg 면 서버 answer 가
-    // echo 한
-    //   offer PT(psip AddSdp 규칙) = user_pt (GroupCallService::GetLegPt 와 같은 규칙)
+    //   echo 한 offer PT(psip AddSdp 규칙) = user_pt (GroupCallService::GetLegPt 와 같은 규칙)
     d.iSrcPt = bServerOffered ? McvAudioCodec().m_iPt : iAPt;
     d.iVideoPt = d.iVideoPort > 0 ? iVPt : 0;
     if ( d.iVideoPort > 0 ) d.iVideoFb = McvVideoFbOf( pclsRtp, iVPt );
@@ -359,9 +352,9 @@ bool CMcVideoCallService::_AcceptLeg( Session &clsSes, const std::string &strCal
     McvApplyLocalCrypto( clsAns, leg.clsSdes, clsAns.m_iVideoPort > 0 );
     leg.bVideo = clsAns.m_iVideoPort > 0;
 
-    // 제어 기능의 200 OK (TS 24.281 §6.3.3.2.3.2) — Contact = 세션 식별자 + 포커스 태그, 세션 갱신은
-    // 단말(refresher=uac),
-    //   PAI = 참여 MCVideo 기능 PSI(골든 04), Supported: tdialog. Require: timer 는 스택이 세션 타이머 협상으로 싣는다.
+    // 제어 기능의 200 OK (TS 24.281 §6.3.3.2.3.2) — Contact = 세션 식별자 + 포커스 태그,
+    //   세션 갱신은 단말(refresher=uac), PAI = 참여 MCVideo 기능 PSI(골든 04), Supported: tdialog.
+    //   Require: timer 는 스택이 세션 타이머 협상으로 싣는다.
     const std::string strDomain = PttDomain();
     if ( !strDomain.empty() ) gclsUserAgent.SetCallDomain( strCallId.c_str(), strDomain.c_str() );
     gclsUserAgent.SetContactParams( strCallId.c_str(), kMcVideoFocusContactParams );
@@ -439,8 +432,8 @@ bool CMcVideoCallService::_InviteMember( Session &clsSes, const CspPttGroup &cls
     clsOffer.m_iApplicationPort = r1.clsPorts.iControlPort;
     clsOffer.m_strApplicationFmtp = BuildMcVideoInviteFmtp( iPrio, r1.uTcSsrc );
     // 미디어 SRTP offer (media_security.md §4 표·§4.1) — required = SAVP, optional = 이 바인딩이 등록 때
-    // mediasec(sdes-srtp)
-    //   능력을 선언했을 때만. audio·video 는 m= 라인마다 키를 따로 만든다(RFC 4568 §6.1). MCPTT 멤버 초대와 같은 규칙.
+    //   mediasec(sdes-srtp) 능력을 선언했을 때만. audio·video 는 m= 라인마다 키를 따로 만든다(RFC 4568 §6.1). MCPTT
+    //   멤버 초대와 같은 규칙.
     RelaySdesLeg clsSdes;
     {
         const ServiceInfo clsSvc = gclsServiceMap.GetForUser( strMember, "ptt" );
@@ -624,8 +617,8 @@ void CMcVideoCallService::OnIncomingInvite( const char *pszCallId, const char *p
         return _Reject( pszCallId, SIP_NOT_ACCEPTABLE_HERE, 0, NULL );
     }
     // 미디어 SRTP (SDES — media_security.md §4·§5): 접속서비스 정책 × offer crypto, m= 라인마다. 음성은 필수 성분이라
-    // 협상이 깨지면
-    //   488, 영상은 그 성분만 거절한다(answer m=video 0 — RFC 3264 §6). 서버 키는 m= 라인마다 따로(RFC 4568 §6.1).
+    //   협상이 깨지면 488, 영상은 그 성분만 거절한다(answer m=video 0 — RFC 3264 §6). 서버 키는 m= 라인마다 따로(RFC
+    //   4568 §6.1).
     RelaySdesLeg clsSdes;
     bool bVideoOk = true;
     {
@@ -644,7 +637,7 @@ void CMcVideoCallService::OnIncomingInvite( const char *pszCallId, const char *p
             bVideoOk = false;
         }
         // 음성이 SRTP 인데 영상이 평문이면 psip 가 영상을 거절한다(평문 영상을 SRTP leg 에 섞지 않는다) — 같은 판단을
-        // 여기서 둔다
+        //   여기서 둔다
         if ( clsSdes.clsAudio.bSrtp && !clsSdes.clsVideo.bSrtp ) bVideoOk = false;
     }
 
@@ -764,8 +757,7 @@ bool CMcVideoCallService::OnCallStarted( const std::string &strCallId, CSipCallR
         _FillDecl( d, leg.strMember, pclsRtp, iPrio, true );
         d.strRole = strRole.empty() ? "participant" : strRole;
         // 미디어 SRTP answer — 서버 offer 가 SAVP 였던 m= 라인은 같은 suite 의 유효 crypto 가 있어야 한다(평문 폴백
-        // 금지).
-        //   음성이 깨지면 참가시키지 않고(BYE), 영상은 그 성분만 뺀다.
+        //   금지). 음성이 깨지면 참가시키지 않고(BYE), 영상은 그 성분만 뺀다.
         bool bSrtpOk =
             MediaSdes::EvalRelayAnswerSdes( pclsRtp->m_clsMediaList, "audio", leg.clsSdes.clsAudio, d.clsAudioCrypto );
         if ( d.iVideoPort > 0 && !MediaSdes::EvalRelayAnswerSdes( pclsRtp->m_clsMediaList, "video",
@@ -831,10 +823,10 @@ bool CMcVideoCallService::OnReInvite( const std::string &strCallId, CSipCallRtp 
     auto itL = clsSes.mapLegs.find( strCallId );
     if ( itL == clsSes.mapLegs.end() || !itL->second.bJoined ) return true;
     Leg &leg = itL->second;
-    // answer 는 스택이 직전 로컬 선언(멤버 CMP 포트·MCVideo 제어 채널·SRTP 서버 키)으로 낸다 — 여기서는 CMP 주소 등록만
-    // 바꾼다.
-    //   단말 offer 라 단말 송신 PT = 서버 answer 가 echo 한 offer PT(bServerOffered=false). SRTP leg 는 단말 재키잉만
-    //   반영하고 서버 키는 유지한다(media_security.md §5.2 — 직전 answer 의 서버 키가 그대로 나간다).
+    // answer 는 스택이 직전 로컬 선언(멤버 CMP 포트·MCVideo 제어 채널·SRTP 서버 키)으로 낸다 — 여기서는 CMP 주소
+    //   등록만 바꾼다. 단말 offer 라 단말 송신 PT = 서버 answer 가 echo 한 offer PT(bServerOffered=false). SRTP leg
+    //   는 단말 재키잉만 반영하고 서버 키는 유지한다(media_security.md §5.2 — 직전 answer 의 서버 키가 그대로
+    //   나간다).
     CspPttGroup clsGroup;
     int iPrio = 0;
     std::string strRole;

@@ -7,8 +7,8 @@
 
 namespace {
 
-    // 멤버 SRTP 키 {alg, rx{key,salt}, tx{key,salt}} (cmp_media_api.md §7.9 — rx = UE 상향, tx = CMP 하향). 비활성이면
-    // 생략.
+    // 멤버 SRTP 키 {alg, rx{key,salt}, tx{key,salt}} (cmp_media_api.md §7.9 — rx = UE 상향, tx = CMP 하향).
+    //   비활성이면 생략.
     void McvSetMediaCrypto( SimpleJson::JsonNode &req, const char *pszField, const CmpMediaCrypto &c ) {
         if ( !c.bEnabled ) return;
         SimpleJson::JsonNode mc, rx, tx;
