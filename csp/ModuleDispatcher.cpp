@@ -875,11 +875,36 @@ void CModuleDispatcher::EventIncomingCall( const char *pszCallId, const char *ps
     int iMcpttCond = 0;
     bool bMcpttBroadcast = false;  // <broadcast-ind> — 일제 통화 개시 (TS 24.379 §6.2.8.2)
     std::string strMcpttSessionType;
+    std::string strMcpttRequestUri;
     if ( pclsMessage ) {
         CMcpttInfo clsMi = ParseMcpttInfo( pclsMessage->m_strBody );
         iMcpttCond = clsMi.Condition();
         bMcpttBroadcast = clsMi.bBroadcast;
         strMcpttSessionType = clsMi.strSessionType;
+        strMcpttRequestUri = clsMi.strRequestUri;
+    }
+
+    // 참여 기능 PSI 로 온 개시 INVITE — 규격형은 Request-URI 가 원발 참여 MCPTT 기능의 PSI 이고 대상(그룹·개별 통화
+    //   상대)은 mcptt-info <mcptt-request-uri> 다(TS 24.379 §10.1.1.2.1.1 1)·2), §11.1.1.2.1.1). Request-URI 가 그룹도
+    //   가입자도 아니면 PSI 로 보고 대상을 mcptt-request-uri 로 잡는다 — PSI 이름(mcptt_psi·단말 설정값)을 따로
+    //   대조하지 않는다. Request-URI 에 대상을 직접 싣는 구형 단말은 두 값이 같거나 mcptt-request-uri 가 없어 이 분기를
+    //   타지 않는다.
+    std::string strPsiTarget;  // pszTo 가 가리키므로 함수 끝까지 산다
+    if ( m_clsPttAs.IsEnabled() && !strMcpttRequestUri.empty() ) {
+        const std::string strCandidate = McpttPsiTarget( pszTo, strMcpttRequestUri );
+        if ( !strCandidate.empty() ) {
+            CspUser clsRuriUser;
+            const bool bRuriKnown = gclsGroupMap.Contains( pszTo ) || gclsCspUserMap.Select( pszTo, clsRuriUser );
+            if ( !bRuriKnown ) {
+                strPsiTarget = strCandidate;
+                CLog::Print( LOG_INFO,
+                             "EventIncomingCall: Request-URI %s = 참여 기능 PSI → 대상 %s (mcptt-request-uri, "
+                             "session-type=%s) [PTT-AS]",
+                             pszTo, strPsiTarget.c_str(),
+                             strMcpttSessionType.empty() ? "-" : strMcpttSessionType.c_str() );
+                pszTo = strPsiTarget.c_str();
+            }
+        }
     }
 
     // 1. PTT-AS: 그룹콜 (MCPTT 규격 on-demand) — UE 발신 그룹 INVITE 를 받아 fan-out.

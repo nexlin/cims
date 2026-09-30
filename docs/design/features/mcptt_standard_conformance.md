@@ -34,6 +34,7 @@
 | C4b~C4e | 멤버 leg INVITE·개시자 응답(Contact·PAI·Warning 전달)·확인 통화 설정(TNG1·최소 인원·미응답 멤버 INFO)·세션 식별자 GRUU·Warning 형식 | CSP | TS 24.379 §4.4·§4.5·§6.3.3.1.2·§6.3.3.2.3.2·§6.3.3.3 | ✅ 정합 (Supported norefersub/explicitsub 미광고 — §C4g 남은 편차) |
 | C4f | 멤버 확인 전 수락 `P-Answer-State: Unconfirmed` + 미디어 버퍼링(CMP) · 멤버 183 Unconfirmed · 신뢰성 18x PRACK | CSP/CMP | TS 24.379 §10.1.1.4.2·§11.1.1.4.2 / RFC 4964·3262 | ✅ 정합 |
 | C4g | 개시·합류·재합류 affiliation 검사 403 `120` · 긴급/임박·chat 암묵적 affiliation | CSP | TS 24.379 §10.1.1.4.2 14)a)·§10.1.1.4.5.1 8)·§9.2.2.3.7 | ✅ 정합 (`require_affiliation` 그룹) |
+| C4h | 개시 INVITE 대상 — Request-URI = 참여 기능 PSI + mcptt-info `<mcptt-request-uri>`(그룹콜·개별 통화), Request-URI 에 대상을 직접 싣는 구형 단말 양립 | CSP | TS 24.379 §10.1.1.2.1.1 1)·2) · §11.1.1.2.1.1 | ✅ 정합 |
 | C6 | conference 이벤트 구독 인가 — 그룹 문서 `<on-network-allow-conference-state>` 판정, 불허 403 `Warning: 138` / 일제 통화 480 `Warning: 105` (비멤버 관제사 청취 범위는 CIMS 해석, [dispatch_center.md §5.6](dispatch_center.md)) | CSP/CSC | TS 24.379 §10.1.3.4.1 / TS 24.481 §7.2.4.2 | ✅ 정합 |
 | C7 | broadcast group call 발언권 — 개시자 외 Floor Request Deny #5(긴급 포함)·Floor Taken Permission 0·Floor Indicator B-bit | CMP | TS 24.380 §6.3.5.3.4·§6.3.5.4.4·§8.2.3.15 | ✅ 정합 |
 | C8 | broadcast group call 호 모델 — 호 단위 `<broadcast-ind>` 개시, 개시자 고정, 그룹 문서 그룹 종류(`on-network-invite-members`), 해제 정책(T4·참가자 1명 이하·TNG3) | CSP/CSC | TS 24.379 §4.12·§6.2.8.2·§6.3.8.1 / TS 24.481 §7.2.8 | ✅ 정합(서버) — 개시 단말의 발언 종료 후 호 해제(TS 24.380 §6.2.4.6.4)·B-bit Floor Request 는 단말 몫(미구현). 정본 [mcptt_broadcast_group_call.md](mcptt_broadcast_group_call.md) |
@@ -506,6 +507,19 @@ DB 단절이면 fan-out 과 같이 검사를 건너뛴다(affiliation 원천 = `
 - 개시 전 affiliation 인원 검사(§10.1.1.4.2 14)g)i) — `<on-network-minimum-number-of-affiliated-members>`·`<on-network-affiliation-to-group-required>`
   미달 시 480 + 112)는 그룹 문서 요소가 없어 하지 않는다.
 - 멤버별 응답 방식(poc-settings Answer-Mode, §6.3.2.2.5·§6.3.2.2.6)을 받지 않는다 — 모든 멤버를 자동 응답으로 본다(C4f).
+
+### C4h. 개시 INVITE 대상 — 참여 기능 PSI + `<mcptt-request-uri>` (TS 24.379 §10.1.1.2.1.1 · §11.1.1.2.1.1)
+
+- 규격형 개시 INVITE 는 **Request-URI = 원발 참여 MCPTT 기능의 PSI**, 대상은 mcptt-info `<mcptt-request-uri>`
+  (prearranged·chat 그룹콜 = MCPTT group ID `tel:g006`, 개별 통화 = 상대 MCPTT ID `tel:+8250…`)다.
+- `ModuleDispatcher::EventIncomingCall` 이 mcptt-info 해석 직후 대상을 정한다 — `<mcptt-request-uri>` 의 식별자
+  (`McpttPsiTarget`, `McpttInfo.h`)가 Request-URI user 와 다르고 **Request-URI 가 그룹도 가입자도 아니면** PSI 로 보고
+  대상을 그 식별자로 바꾼다. 이후 경로(그룹 lazy-load·개별 통화·그룹콜 fan-out·affiliation 검사 C4g)는 같다.
+- PSI 이름은 대조하지 않는다 — CSC ue-init-config 가 알리는 `sip:mcptt_psi@<PTT 도메인>` 도, 단말 설정 PSI(예
+  `mcptt1_opf_psi`)도 같은 규칙으로 받는다.
+- 구형 단말(Request-URI = `sip:<그룹>@<PTT 도메인>` 또는 상대 번호)은 두 값이 같거나 `<mcptt-request-uri>` 가 없어
+  종전 경로 그대로다. mcptt-info 가 없는 VoLTE 호는 판정 자체를 하지 않는다(가입자 조회 없음).
+- 검증: `tests/csp_mcptt_info_test.cpp`(`McpttPsiTarget` — HM-TRCP 실측 본문 포함, S1-UNIT-CSP).
 
 ### C5. 등록/구독 SIP 메시지 — 실망(상용 IMS) 패킷 형태 정합
 

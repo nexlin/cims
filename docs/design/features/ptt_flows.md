@@ -327,8 +327,10 @@ ptt_groups WHERE mcptt_group_id=..` 은 그룹을 못 찾으면 **에러 없이 
 ```
 발신 UE(개시자)          CSP                          CMP
   │                      │                            │
-  │ ── INVITE ─────────► │  Req-URI: sip:{group}@domain (키업)
-  │  (그룹 URI, SDP)     │ [EventIncomingCall]
+  │ ── INVITE ─────────► │  Req-URI: 참여 기능 PSI + mcptt-info <mcptt-request-uri>=tel:{group} (규격형, 키업)
+  │  (SDP, mcptt-info)   │           또는 sip:{group}@domain (구형 — Req-URI 에 그룹 직접)
+  │                      │ [EventIncomingCall] Req-URI 가 그룹·가입자가 아니면 대상 = mcptt-request-uri
+  │                      │   (TS 24.379 §10.1.1.2.1.1 — mcptt_standard_conformance.md C4h)
   │                      │  그룹 캐시 미스면 LoadFromDb() (lazy-load 안전망)
   │                      │ [ProcessGroupCall]
   │                      │  세션 속성 확정(개시 INVITE 만): 개시자, broadcast-ind → 일제 통화

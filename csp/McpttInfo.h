@@ -362,6 +362,16 @@ inline std::string McpttGroupUri( const std::string &strGroupId ) {
     return bDigits ? "tel:+" + strGroupId : "tel:" + strGroupId;
 }
 
+/** 참여 기능 PSI 로 온 개시 요청의 대상 후보 — 규격형 개시 INVITE 는 Request-URI = 원발 참여 MCPTT 기능의 PSI,
+ *  대상 = mcptt-info <mcptt-request-uri>(그룹콜 TS 24.379 §10.1.1.2.1.1 1)·2), 개별 통화 §11.1.1.2.1.1).
+ *  mcptt-request-uri 의 식별자가 Request-URI user 와 다르면 그것을 돌려준다(없거나 같으면 빈 값 — Request-URI 에
+ *  대상을 직접 싣는 구형 단말). Request-URI 가 그룹·가입자로 알려진 식별자인지는 호출자가 판정한다. */
+inline std::string McpttPsiTarget( const std::string &strRuriUser, const std::string &strRequestUri ) {
+    if ( strRequestUri.empty() ) return "";
+    const std::string t = McpttBareId( strRequestUri );
+    return ( t.empty() || t == strRuriUser ) ? std::string() : t;
+}
+
 // ── 제휴 상태 NOTIFY 본문 — per-user affiliation information (TS 24.379 §9.3.1.2 첫 목록, §9.2.2.2.5 3)) ──
 //
 //  <presence xmlns="urn:ietf:params:xml:ns:pidf" xmlns:mcpttPI10="urn:3gpp:ns:mcpttPresInfo:1.0" entity="<MCPTT ID>">
