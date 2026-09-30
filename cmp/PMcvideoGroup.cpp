@@ -54,6 +54,11 @@ PMcvideoGroup::PMcvideoGroup(const std::string& groupId) : _groupId(groupId) {
         if (_onTransmitters) _onTransmitters(_groupId, v, _sesid, _svc);
     };
     h.log = [this](const std::string& line) { LOG_INFO("PMcvideoGroup", "[%s] tc: %s", _groupId.c_str(), line.c_str()); };
+    // 새 수신자는 다음 키프레임부터 영상을 풀 수 있다 — 송출자에게 곧바로 요청한다(PLI, 송출자 간격 제한 안에서 하나로 모인다)
+    h.receptionStarted = [this](const std::string& receiver, const std::string& sender) {
+        auto it = _members.find(sender);
+        if (it != _members.end()) _requestKeyframe(it->second, false, ("reception start " + receiver).c_str());
+    };
     _ctl.setHooks(h);
     ++_activeGroups;
     LOG_INFO("PMcvideoGroup", "[%s] created", _groupId.c_str());
@@ -328,6 +333,10 @@ void PMcvideoGroup::close() {
     _ctl.close();   // 호 해제 — 메시지 없이 타이머·송출 SSRC 를 푼다(§6.3.4.6.2 · §6.3.4.7.2)
     for (auto& kv : _members) _releasePeer(kv.second);
     _members.clear();
+    if (_fbSsrc) {
+        PMcvControl::FreeSsrc(_fbSsrc);
+        _fbSsrc = 0;
+    }
 }
 
 void PMcvideoGroup::tick() {
@@ -438,6 +447,12 @@ void PMcvideoGroup::onMemberPacket(const std::string& memberId, McvChannel ch, c
                 _cryptoDropLog(ch == MCV_CH_AUDIO ? "audio SRTP" : "video SRTP", peer);
                 break;
             }
+            // 영상 원래 SSRC — 송출자에게 보내는 키프레임 요청의 media source (분배는 할당값으로 찍는다)
+            if (ch == MCV_CH_VIDEO && len >= 12) {
+                uint32_t s;
+                memcpy(&s, buf + 8, 4);
+                peer.rxVideoSsrc = ntohl(s);
+            }
             // 허가된 송출만 분배한다(수신자별 Active SSRC List — TS 24.581 §6.3.7). 헤더만인 keepalive 는 판정 밖 — 버린다.
             if (!_rtpHasPayload(buf, len)) break;
             unsigned int audioSsrc = 0, videoSsrc = 0;
@@ -449,8 +464,127 @@ void PMcvideoGroup::onMemberPacket(const std::string& memberId, McvChannel ch, c
         }
         case MCV_CH_VIDEO_RTCP:
             // 수신자 PLI·FIR 는 media SSRC 가 가리키는 송출자에게 넘긴다(RFC 4585·5104) — 송출이 없으면 받을 곳이 없다.
+            _onVideoRtcp(peer, buf, len);
             break;
     }
+}
+
+namespace {
+uint32_t Be32(const unsigned char* p) {
+    return ((uint32_t)p[0] << 24) | ((uint32_t)p[1] << 16) | ((uint32_t)p[2] << 8) | p[3];
+}
+void PutBe32(unsigned char* p, uint32_t v) {
+    p[0] = (unsigned char)(v >> 24);
+    p[1] = (unsigned char)(v >> 16);
+    p[2] = (unsigned char)(v >> 8);
+    p[3] = (unsigned char)v;
+}
+const unsigned char kRtcpPtRr = 201, kRtcpPtSdes = 202, kRtcpPtPsfb = 206;   // RFC 3550 §12.1 · RFC 4585 §6.1
+const int kPsfbPli = 1, kPsfbFir = 4;                                          // RFC 4585 §6.3.1 · RFC 5104 §4.3.1
+const char kCname[] = "cims-cmp";                                              // SDES CNAME (RFC 3550 §6.5.1)
+}  // namespace
+
+void PMcvideoGroup::_onVideoRtcp(Peer& peer, char* buf, int len) {
+    // SRTCP leg — 보낸 멤버의 상향 영상 키로 푼다(RFC 3711 §3.4 — datagram 전체가 SRTCP 패킷 하나)
+    PMediaCrypto* sec = peer.mediaCryptoVideo.get();
+    if (sec && sec->enabled() && !sec->unprotectRtcp(buf, len)) {
+        _cryptoDropLog("video SRTCP", peer);
+        return;
+    }
+    // compound 를 헤더 length 로 나눈다 — 형식이 어긋나면 그 뒤는 버린다(RFC 3550 §6.1 유효성 검사)
+    const unsigned char* p = (const unsigned char*)buf;
+    int off = 0;
+    while (off + 4 <= len) {
+        const unsigned char* h = p + off;
+        if ((h[0] >> 6) != 2) break;
+        int plen = ((((int)h[2] << 8) | h[3]) + 1) * 4;
+        if (off + plen > len) break;
+        if (h[1] == kRtcpPtPsfb && plen >= 12) {
+            int fmt = h[0] & 0x1F;
+            if (fmt == kPsfbPli) {
+                _forwardKeyframeRequest(peer, Be32(h + 8), false);          // media source SSRC = 할당 video SSRC
+            } else if (fmt == kPsfbFir) {
+                for (int f = 12; f + 8 <= plen; f += 8) _forwardKeyframeRequest(peer, Be32(h + f), true);   // FCI SSRC
+            }
+        }
+        off += plen;
+    }
+}
+
+void PMcvideoGroup::_forwardKeyframeRequest(const Peer& requester, unsigned int allocatedSsrc, bool fir) {
+    if (allocatedSsrc == 0) return;
+    for (const auto& t : _ctl.transmitters()) {
+        if (t.videoSsrc != allocatedSsrc || t.memberId == requester.id) continue;
+        if (!_ctl.receives(requester.id, t.memberId)) return;   // 받지 않는 송출 — 요청할 자격이 없다
+        auto it = _members.find(t.memberId);
+        if (it != _members.end()) _requestKeyframe(it->second, fir, ("feedback from " + requester.id).c_str());
+        return;
+    }
+}
+
+void PMcvideoGroup::_requestKeyframe(Peer& s, bool fir, const char* why) {
+    if (!s.addressed || !s.unit || s.dstPort[MCV_CH_VIDEO_RTCP] <= 0) return;
+    // media source = 송출자 영상의 원래 SSRC — 아직 영상을 받지 않았으면 offer a=ssrc, 그것도 없으면 가리킬 스트림이 없다
+    const unsigned int target = s.rxVideoSsrc ? s.rxVideoSsrc : s.decl.userVideoSsrc;
+    if (target == 0) return;
+    const int64_t now = _nowMs();
+    if (s.keyReqMs && now - s.keyReqMs < kKeyReqMinMs) return;   // 방금 요청했다 — 송출자의 다음 키프레임이 모두에게 간다
+    s.keyReqMs = now;
+    if (!_fbSsrc) _fbSsrc = PMcvControl::AllocSsrc();
+
+    unsigned char pkt[64 + PMediaCrypto::kMaxOverhead];
+    int n = 0;
+    // RR — 보고 블록 없음(복합 패킷의 첫 패킷, RFC 3550 §6.1 · RFC 4585 §3.1)
+    pkt[n++] = 0x80;
+    pkt[n++] = kRtcpPtRr;
+    pkt[n++] = 0;
+    pkt[n++] = 1;
+    PutBe32(pkt + n, _fbSsrc);
+    n += 4;
+    // SDES CNAME — chunk = SSRC + (type 1, len, text) + END, 32비트 경계까지 0 (RFC 3550 §6.5)
+    const int cnameLen = (int)sizeof(kCname) - 1;
+    const int chunk = (4 + 2 + cnameLen + 1 + 3) & ~3;
+    const int sdesStart = n;
+    memset(pkt + n, 0, 4 + chunk);
+    pkt[n] = 0x81;
+    pkt[n + 1] = kRtcpPtSdes;
+    pkt[n + 3] = (unsigned char)((4 + chunk) / 4 - 1);
+    PutBe32(pkt + n + 4, _fbSsrc);
+    pkt[n + 8] = 1;
+    pkt[n + 9] = (unsigned char)cnameLen;
+    memcpy(pkt + n + 10, kCname, cnameLen);
+    n = sdesStart + 4 + chunk;
+    if (!fir) {
+        // PLI (RFC 4585 §6.3.1) — packet sender = CMP, media source = 송출자 영상 SSRC, FCI 없음
+        pkt[n++] = 0x80 | kPsfbPli;
+        pkt[n++] = kRtcpPtPsfb;
+        pkt[n++] = 0;
+        pkt[n++] = 2;
+        PutBe32(pkt + n, _fbSsrc);
+        PutBe32(pkt + n + 4, target);
+        n += 8;
+    } else {
+        // FIR (RFC 5104 §4.3.1) — media source 0, FCI = 대상 SSRC + Seq nr(CMP 가 이 송출자에게 낸 요청마다 +1) + 예약 0
+        pkt[n++] = 0x80 | kPsfbFir;
+        pkt[n++] = kRtcpPtPsfb;
+        pkt[n++] = 0;
+        pkt[n++] = 4;
+        PutBe32(pkt + n, _fbSsrc);
+        PutBe32(pkt + n + 4, 0);
+        PutBe32(pkt + n + 8, target);
+        pkt[n + 12] = ++s.firSeq;
+        pkt[n + 13] = pkt[n + 14] = pkt[n + 15] = 0;
+        n += 16;
+    }
+    PMediaCrypto* sec = s.mediaCryptoVideo.get();
+    if (sec && sec->enabled() && !sec->protectRtcp((char*)pkt, n, (int)sizeof(pkt))) {
+        LOG_ERROR("PMcvideoGroup", "[%s] member=%s keyframe request SRTCP protect failed", _groupId.c_str(), s.id.c_str());
+        return;
+    }
+    s.unit->sendTo(MCV_CH_VIDEO_RTCP, s.dstIp[MCV_CH_VIDEO_RTCP], s.dstPort[MCV_CH_VIDEO_RTCP], (const char*)pkt, n);
+    ++_keyReq;
+    LOG_DEBUG("PMcvideoGroup", "[%s] %s → member=%s ssrc=%08x (%s)", _groupId.c_str(), fir ? "FIR" : "PLI", s.id.c_str(),
+              target, why);
 }
 
 // 전송 제어 채널 수신 (TS 24.581 §9.1). 한 datagram 에 RTCP 패킷이 여럿(compound) 올 수 있어 헤더 length 로 나눠 APP 만 푼다.
@@ -597,6 +731,11 @@ long PMcvideoGroup::getControlRx() {
 long PMcvideoGroup::getCryptoDrop() {
     PAutoLock lock(_mutex);
     return _cryptoDrop;
+}
+
+long PMcvideoGroup::getKeyframeRequests() {
+    PAutoLock lock(_mutex);
+    return _keyReq;
 }
 
 int PMcvideoGroup::getTransmitterCount() {

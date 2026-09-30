@@ -570,3 +570,14 @@ SDK 쪽 편차로 적어 두자.
 (`services/mcptt.py` — 그룹 갱신 두 곳)는 `mcvideo` 가 None 이면 MCVideo 행을 건드리지 않는다. 끄기는 관리 API 몫(V7 에서 규격 의미로 바꿀 때 알린다).
 
 **다음 (.48)** — 배포 결정 뒤 .48 신호 시험(C8 `cimsue-cli video-call` 과 함께 — 순서·계정은 dev_share 로), B6(영상 RTCP 전달)·B8(녹취)·CSP `media_srtp` 결선.
+
+**.48 B6 — CMP 영상 RTCP 키프레임 요청 (.48 → .45)** — [cmp_media_api.md](../api/cmp_media_api.md) §7.9 · [mcvideo.md](../design/features/mcvideo.md) §5.3.
+
+| 항목 | CMP |
+|---|---|
+| 받는 것 | 멤버 영상 RTCP 포트(`video_port` + 1)의 PSFB PLI·FIR 만 — 대상 = 분배 때 찍은 **할당 video SSRC**(Notification·Receive Media Response 의 Video SSRC). pjmedia 는 받은 RTP 의 SSRC 로 PLI 를 내므로 그대로 맞는다. RR·SDES·SR 은 옮기지 않는다 |
+| 보내는 것 | 송출자에게 RR(보고 0) + SDES CNAME `cims-cmp` + PLI/FIR — packet sender = CMP 그룹 SSRC, media source = 송출자 영상의 **원래** SSRC, FIR Seq nr = CMP 몫. SRTP leg 는 송출자 하향 영상 키로 SRTCP |
+| 계기 | 수신자 PLI·FIR(그 송출을 받을 때만) + **수신 시작**(automatic 허가·알림 / manual [받기] 허가) — 송출자마다 500 ms 에 하나 |
+
+**.45 에 확인 부탁** — SDK 송출 쪽(pjmedia vid_stream)이 받은 PLI 에 키프레임으로 답하는지(media source = 자기 SSRC 인 PLI). FIR 은 pjmedia 가 안 읽을 수
+있다 — CMP 는 받은 것과 같은 종류로 보내므로 SDK 수신 쪽은 PLI 만 내면 된다.

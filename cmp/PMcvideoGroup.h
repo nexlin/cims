@@ -131,6 +131,7 @@ public:
     long getNoGrantDrop();
     long getControlRx();
     long getCryptoDrop();      // SRTP·SRTCP 인증 실패/재전송으로 버린 패킷
+    long getKeyframeRequests();   // 송출자에게 보낸 키프레임 요청(PLI·FIR — 수신자 피드백 전달 + 수신 시작)
     int getTransmitterCount();
     int getReceptionCount();
     void collectNatLatched(std::vector<std::tuple<std::string, std::string, int>>& out);
@@ -152,7 +153,13 @@ private:
         std::shared_ptr<PMediaCrypto> mediaCrypto;       // audio SRTP (null = 평문 leg)
         std::shared_ptr<PMediaCrypto> mediaCryptoVideo;  // video SRTP
         int64_t followLogUsec = 0;       // dest follow 로그 rate-limit
+        unsigned int rxVideoSsrc = 0;    // 멤버가 보낸 영상 RTP 의 원래 SSRC — 키프레임 요청의 media source(분배 때 찍는 할당값이 아님)
+        int64_t keyReqMs = 0;            // 이 멤버(송출자)에게 마지막으로 키프레임을 요청한 시각 (kKeyReqMinMs)
+        unsigned char firSeq = 0;        // CMP → 이 멤버 FIR 의 Seq nr (RFC 5104 §4.3.1.1 — 새 요청마다 +1)
     };
+
+    // 송출자 한 명에게 보내는 키프레임 요청의 최소 간격(ms) — 수신자 여럿의 PLI·FIR 를 하나로 모은다(CIMS 값, RFC 4585 는 정하지 않는다).
+    static const int kKeyReqMinMs = 500;
 
     static int _declPort(const McvMemberDecl& d, McvChannel ch);
     bool _natFormatOk(const Peer& peer, McvChannel ch, const std::string& ip, const char* buf, int len) const;
@@ -164,6 +171,13 @@ private:
     void _onControlMessage(Peer& peer, const char* buf, int len);
     PFloorCrypto* _tcCryptoFor(Peer& peer);   // 멤버 키(CSK) > 그룹 키 > 평문(null)
     void _cryptoDropLog(const char* what, const Peer& peer);
+    // 영상 RTCP 수신 (호출자가 _mutex 보유) — 수신자의 PSFB PLI·FIR(RFC 4585 §6.3.1 · RFC 5104 §4.3.1)만 가리키는 송출자에게 넘긴다.
+    //   RR·SDES·SR 등 나머지는 해석하지 않고 버린다(보고는 CMP 가 끝낸다 — 송출자에게 수신자별 보고를 옮기지 않는다).
+    void _onVideoRtcp(Peer& peer, char* buf, int len);
+    // 할당 video SSRC 가 가리키는 송출에 키프레임 요청 — 요청자가 그 송출을 받고 있을 때만
+    void _forwardKeyframeRequest(const Peer& requester, unsigned int allocatedSsrc, bool fir);
+    // 송출자에게 CMP 가 보내는 키프레임 요청 — RR + SDES CNAME + PSFB(PLI 또는 FIR) 복합 패킷(RFC 4585 §3.1), 송출자 영상 SRTCP 키로 보호
+    void _requestKeyframe(Peer& sender, bool fir, const char* why);
     // 허가된 송출의 미디어를 Active SSRC List 대로 분배한다 (호출자가 _mutex 보유)
     void _distribute(const Peer& sender, McvChannel ch, unsigned int ssrc, const char* buf, int len);
     // PMcvControl → 멤버 제어 채널 (호출자가 _mutex 보유)
@@ -202,6 +216,8 @@ private:
     long _noGrantDrop = 0;   // 송출 허가 없는 미디어 드롭 누적 (payload 있는 RTP)
     long _controlRx = 0;     // 수신한 전송 제어 메시지 누적
     long _cryptoDrop = 0;    // SRTP·SRTCP 해제 실패 누적
+    long _keyReq = 0;        // 송출자에게 보낸 키프레임 요청 누적
+    unsigned int _fbSsrc = 0;   // CMP 가 영상 RTP 세션에서 쓰는 자기 SSRC(RR·PLI·FIR 의 packet sender — 첫 요청 때 할당, close 에 반환)
     PFloorCrypto _tcCrypto;          // 전송 제어 SRTCP 그룹 키 (tc_crypto)
     std::string _tcCryptoSig;
     time_t _lastDropWarn = 0;

@@ -9,6 +9,8 @@
 #   Notification·TRANSMITTERS 이벤트 → manual 수신 전 영상 미분배 → Receive Media Request → Response(ack 비트)·Ack → 영상·음성 분배(SSRC =
 #   송출 할당값 · PT = 수신 leg 값) · 받지 않는 멤버 미분배 → 헤더만 RTP 무시 · 무허가 미디어 Revoked #3 → 상한 Rejected #1 → STATS
 #   transmitters·receptions → End Request → End Response·End Notify·Idle·TRANSMITTERS [] → T1 만료 TRANSMISSION_INACTIVITY 이벤트
+#   → 키프레임 요청(B6): 수신 시작 → 송출자에게 PLI(RR + SDES CNAME + PSFB, media source = 송출자 원래 영상 SSRC) · 수신자 PLI(할당
+#   SSRC)·FIR 전달(SSRC 되돌림 · FIR Seq nr = CMP 몫 · 간격 제한 하나로) · 받지 않는 멤버·없는 송출의 PLI 는 버림 · STATS keyframe_requests
 #   → 보호(B7): tc_crypto 형식 거절 · floor_crypto 거절 → 그룹 키·멤버 CSK SRTCP(Idle·Granted 를 받는 쪽 키로 풀고, 평문·다른 키 요청은
 #   crypto_drop) · 멤버 SRTP(상향 = 멤버 rx 키로 풀고 하향 = 받는 멤버 tx 키로 보호 — SSRC·PT 찍기 뒤) · 틀린 키 영상 버림 —
 #   SRTP/SRTCP 는 이 파일의 파이썬 구현(RFC 3711, cryptography)으로 CMP 와 교차 확인
@@ -109,6 +111,41 @@ def udp():
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     s.bind((IP, 0))
     return s
+
+
+def udp_pair():
+    """영상 RTP·RTCP 소켓 쌍 — RTCP = RTP + 1 (a=rtcp 없음, RFC 3550 §11)"""
+    for _ in range(200):
+        a = udp()
+        b = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            b.bind((IP, a.getsockname()[1] + 1))
+            return a, b
+        except OSError:
+            a.close()
+            b.close()
+    raise SystemExit("no consecutive UDP port pair")
+
+
+def parse_rtcp(d):
+    """compound RTCP → [{pt, fmt, ssrc(packet sender), media, fci(bytes)}]"""
+    out, off = [], 0
+    while off + 4 <= len(d) and d[off] >> 6 == 2:
+        plen = (struct.unpack("!H", d[off + 2:off + 4])[0] + 1) * 4
+        pk = d[off:off + plen]
+        e = {"pt": pk[1], "fmt": pk[0] & 0x1F, "ssrc": struct.unpack("!I", pk[4:8])[0] if plen >= 8 else 0}
+        if pk[1] in (205, 206) and plen >= 12:
+            e["media"] = struct.unpack("!I", pk[8:12])[0]
+            e["fci"] = pk[12:]
+        if pk[1] == 202 and plen >= 12:
+            e["cname"] = pk[10:10 + pk[9]].decode(errors="replace") if pk[8] == 1 else ""
+        out.append(e)
+        off += plen
+    return out
+
+
+def psfb(ps, fmt):
+    return [e for e in ps if e["pt"] == 206 and e["fmt"] == fmt]
 
 
 def rtp(pt=96, ssrc=0x11110001, seq=1):
@@ -425,7 +462,10 @@ try:
     r = req("PTT_GROUP_ADD", {"group_id": "g-bad", "members": f"{X}:5", "max_transmitters": 1, "call_type": "broadcast"},
             sesid="mcv-smoke::9")
     check("ADD call_type broadcast → BAD_REQUEST", st(r) == ("ERROR", "BAD_REQUEST"), r["hdr"].get("reason"))
-    sk = {n: (udp(), udp(), udp()) for n in (X, Y, Z)}   # audio · video · control
+    sk, vr = {}, {}   # audio · video · control / 영상 RTCP (video + 1)
+    for n in (X, Y, Z):
+        v, vrt = udp_pair()
+        sk[n], vr[n] = (udp(), v, udp()), vrt
     tcu = {X: 0x0C000001, Y: 0x0C000002, Z: 0x0C000003}
     tcs = {}
     for n, uri, pt, vpt in ((X, UX, 96, 98), (Y, UY, 97, 100), (Z, UZ, 96, 98)):
@@ -467,6 +507,14 @@ try:
     ry = has(msgs(sk[Y][2]), "MCV1", 0x7)
     check("Receive Media Response granted (ack bit — T6)", ry and u16_f(ry[0], 15) == 1 and ry[0]["ack"]
           and ssrc_f(ry[0], 23) == gv, f"{ry[:1]}")
+    # 수신 시작 → 송출자에게 키프레임 요청 (B6 — RFC 4585 §6.3.1, 복합 = RR + SDES CNAME + PLI)
+    kx = [parse_rtcp(d) for d in drain(vr[X], 0.3)]
+    kp = psfb(kx[0], 1) if kx else []
+    fb_ssrc = kx[0][0]["ssrc"] if kx else 0
+    check("reception start → PLI to transmitter X (RR first · SDES CNAME · media source = X's original video SSRC)",
+          len(kx) == 1 and kx[0][0]["pt"] == 201 and any(e["pt"] == 202 and e.get("cname") for e in kx[0])
+          and kp and kp[0]["media"] == 0x77770001 and kp[0]["ssrc"] == fb_ssrc and fb_ssrc not in (0, gv),
+          f"{kx}")
     sk[Y][2].sendto(app(b"MCV2", 4, tcs[Y], tlv(12, bytes([7, 0])) + tlv(10, struct.pack("!H", 0)) + tlv(16, b"MCV1\0\0")),
                     (IP, mp5[Y]["control_port"]))
     # 분배 — SSRC = 할당값, PT = 수신 leg 값
@@ -479,6 +527,33 @@ try:
     check("audio to Y — SSRC = granted audio SSRC, PT = Y user_pt",
           ay and struct.unpack("!I", ay[0][8:12])[0] == ga and (ay[0][1] & 0x7F) == 97, f"{[d[:12].hex() for d in ay]}")
     check("Z (not receiving) gets no media", not drain(sk[Z][1], 0.2) and not drain(sk[Z][0], 0.1))
+
+    # 수신자 피드백 → 송출자 (B6): SSRC 를 송출자 원래 값으로 되돌려 CMP 가 다시 보낸다, 송출자마다 500 ms 에 하나
+    rr_y = struct.pack("!BBHI", 0x80, 201, 1, 0x0B0B0B0B)
+    pli = lambda snd, media: struct.pack("!BBHII", 0x81, 206, 2, snd, media)
+    fir = lambda snd, target, seq: struct.pack("!BBHIIIB3x", 0x84, 206, 4, snd, 0, target, seq)
+    yrt, zrt = (IP, mp5[Y]["video_port"] + 1), (IP, mp5[Z]["video_port"] + 1)
+    time.sleep(0.3)   # 수신 시작 PLI 로부터 간격 제한(500 ms)이 지나게
+    vr[Y].sendto(rr_y + pli(0x0B0B0B0B, gv), yrt)
+    vr[Y].sendto(rr_y + pli(0x0B0B0B0B, gv), yrt)   # 곧바로 두 번째 — 하나로 모인다
+    f1 = [parse_rtcp(d) for d in drain(vr[X], 0.3)]
+    p1 = psfb(f1[0], 1) if f1 else []
+    check("receiver PLI (media = allocated SSRC) → one PLI to X, media = X's original SSRC (second throttled)",
+          len(f1) == 1 and p1 and p1[0]["media"] == 0x77770001 and p1[0]["ssrc"] == fb_ssrc, f"{f1}")
+    time.sleep(0.3)
+    vr[Y].sendto(rr_y + fir(0x0B0B0B0B, gv, 7), yrt)
+    f2 = [parse_rtcp(d) for d in drain(vr[X], 0.3)]
+    p2 = psfb(f2[0], 4) if f2 else []
+    fci = p2[0]["fci"] if p2 else b""
+    check("receiver FIR → FIR to X (media source 0 · FCI SSRC = X's original · Seq nr = CMP's own 1)",
+          p2 and p2[0]["media"] == 0 and len(fci) == 8 and struct.unpack("!I", fci[:4])[0] == 0x77770001 and fci[4] == 1,
+          f"{f2}")
+    time.sleep(0.6)
+    vr[Z].sendto(struct.pack("!BBHI", 0x80, 201, 1, 0x0C0C0C0C) + pli(0x0C0C0C0C, gv), zrt)   # Z 는 받지 않는다
+    vr[Y].sendto(pli(0x0B0B0B0B, 0x12345678), yrt)                                            # 없는 송출 (단독 PSFB)
+    check("PLI from non-receiver Z / unknown SSRC not forwarded", not drain(vr[X], 0.4))
+    check("STATS keyframe_requests 3 (reception start · PLI · FIR)",
+          (mcv_group("g105") or {}).get("keyframe_requests") == 3, f"{mcv_group('g105')}")
     check("no Ack retransmission of the response after Ack", not has(msgs(sk[Y][2], 1.3), "MCV1", 0x7))
 
     # 헤더만 RTP = keepalive (판정 밖) · payload 있으면 Revoked #3
@@ -551,7 +626,10 @@ try:
     r = req("PTT_JOIN", {"group_id": "g107", "session_id": Z, "user_ip": IP, "user_port": udp().getsockname()[1],
                          "floor_crypto": tcg}, sesid="mcv-smoke::7")
     check("JOIN floor_crypto → BAD_REQUEST", st(r) == ("ERROR", "BAD_REQUEST"), r["hdr"].get("reason"))
-    sk7 = {n: (udp(), udp(), udp()) for n in (X, Y, Z)}
+    sk7, vr7 = {}, {}
+    for n in (X, Y, Z):
+        v, vrt = udp_pair()
+        sk7[n], vr7[n] = (udp(), v, udp()), vrt
     ukey = {X: 0x0D000001, Y: 0x0D000002, Z: 0x0D000003}
     tc7 = {}
 
@@ -609,6 +687,18 @@ try:
     before = (mcv_group("g107") or {}).get("crypto_drop", 0)
     sk7[X][1].sendto(Srtp(YVU, YVUS).protect_rtp(rtp(pt=98, ssrc=0x78780001, seq=201)), (IP, mp7[X]["video_port"]))
     check("wrong-key video dropped", not drain(sk7[Y][1], 0.3)
+          and (mcv_group("g107") or {}).get("crypto_drop", 0) - before == 1)
+    # 영상 SRTCP 키프레임 요청 (B6) — Y 상향 영상 키로 보호한 PLI 를 CMP 가 풀고, X 하향 영상 키로 다시 보호해 X 에게
+    drain(vr7[X], 0.1)
+    fb7 = struct.pack("!BBHI", 0x80, 201, 1, 0x0B0B0B0C) + struct.pack("!BBHII", 0x81, 206, 2, 0x0B0B0B0C, gv7)
+    vr7[Y].sendto(Srtp(YVU, YVUS).protect_rtcp(fb7), (IP, mp7[Y]["video_port"] + 1))
+    kx7 = drain(vr7[X], 0.3)
+    pk7 = parse_rtcp(Srtp(XVD, XVDS).unprotect_rtcp(kx7[0]) or b"") if kx7 else []
+    check("video SRTCP PLI: Y uplink key → X downlink key, media = X's original SSRC",
+          psfb(pk7, 1) and psfb(pk7, 1)[0]["media"] == 0x78780001, f"{pk7} {[d[:8].hex() for d in kx7]}")
+    before = (mcv_group("g107") or {}).get("crypto_drop", 0)
+    vr7[Y].sendto(fb7, (IP, mp7[Y]["video_port"] + 1))   # 평문 — SRTCP leg 라 인증 실패로 버린다
+    check("plaintext RTCP on SRTCP leg dropped (crypto_drop +1)", not drain(vr7[X], 0.3)
           and (mcv_group("g107") or {}).get("crypto_drop", 0) - before == 1)
     r = req("PTT_JOIN", {"group_id": "g107", "session_id": X, "user_ip": IP, "user_port": sk7[X][0].getsockname()[1],
                          "user_video_port": sk7[X][1].getsockname()[1], "user_control_port": sk7[X][2].getsockname()[1],

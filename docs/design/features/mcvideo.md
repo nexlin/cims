@@ -8,9 +8,9 @@
 > 설정 문서 골든 `tests/fixtures/mcvideo/` · SDP 프로파일(§1.4) · CSP↔CMP 제어 API([cmp_media_api.md](../../api/cmp_media_api.md) §7.9) · 단말 SDK 공개
 > 표면([ue_sdk.md](ue_sdk.md) §4.6)), 양 끝 전송 제어 코덱(CMP `PTransmissionCodec` · SDK `mcvideo/tc_codec`, 교차 시험), 단말 전송 제어 참여자 상태 머신
 > (SDK `mcvideo/tc_participant`), V0 전부, CSC 설정 평면(§5.1 — 관리 API·콘솔 제외)과 그 문서들의 SDK 해석(§5.4), CSP 호 제어 부품·모듈·서비스 판별·
-> 등록 능력·서비스별 affiliation(§5.2), CMP 그룹 종류·멤버 포트·제어 명령·송출·수신 제어 상태 머신·미디어 분배·보호(SRTP·전송 제어 SRTCP)(§5.3·§5.3.1),
+> 등록 능력·서비스별 affiliation(§5.2), CMP 그룹 종류·멤버 포트·제어 명령·송출·수신 제어 상태 머신·미디어 분배·보호(SRTP·전송 제어 SRTCP)·영상 RTCP 키프레임 요청(§5.3·§5.3.1),
 > 단말 SDK 등록 태그·affiliation·그룹 호(개시·재합류·멤버 초대 수락)·전송 제어 결선·송출 게이트(§5.4 — 루프백 시험, 실서버 미연동), CSP 그룹 호
-> (§5.2.1 — chat·prearranged 개시·합류·재합류·해제, 실측 전). 영상 RTCP 전달·녹취, 단말 영상 송출·송출별 렌더(C6)는 미구현(바인딩 C7 은 구현 —
+> (§5.2.1 — chat·prearranged 개시·합류·재합류·해제, 실측 전). 녹취, 단말 영상 송출·송출별 렌더(C6)는 미구현(바인딩 C7 은 구현 —
 > .NET 빌드·시험은 Windows).
 >
 > 규격 판본: TS 24.281 V18.14.0 · TS 24.581 V18.8.0 · TS 23.281 V18.12.0 · TS 24.481 V19.3.0 · TS 24.484 V20.0.0 · TS 23.280 V20.4.0 ·
@@ -333,11 +333,16 @@ mcvideo 인 `PTT_GROUP_ABORTED`·`TRANSMITTERS`·`TRANSMISSION_INACTIVITY` 를 M
   상태, T1~T6·T11. `cmp/PMcvControl.{h,cpp}` — 단위시험 `tests/cmp_mcvideo_control_test.cpp`(S1-UNIT-CMP), 스모크 `tests/cmp_smoke_mcvideo_ports.py`.
 - **수신 제어** (구현) — 수신자별 Active SSRC List: 허가된 송출의 audio·video 만 그 수신자에게, SSRC = 송출 할당값 · PT = 수신 leg 값으로 찍어
   보낸다. manual/automatic 모드, 수신자 동시 스트림 상한(C9 — #7).
+- **영상 RTCP** (구현 — B6) — 수신자의 PLI(RFC 4585 §6.3.1)·FIR(RFC 5104 §4.3.1)을 가리키는 송출자에게: 대상 = 할당 video SSRC → 송출자 원래 SSRC 로
+  되돌려 CMP 가 복합 패킷(RR + SDES CNAME + PLI/FIR)으로 다시 보낸다(요청자가 그 송출을 받을 때만, 송출자마다 500 ms 에 하나, SRTCP leg 는 풀고 다시
+  보호). 수신이 시작될 때(Active SSRC List 추가) CMP 가 스스로 PLI — manual [받기] 뒤 영상이 다음 주기 키프레임까지 멈추지 않게. 송출자 SR 은
+  옮기지 않는다. [cmp_media_api.md](../../api/cmp_media_api.md) §7.9.
 
 #### 5.3.1 송출·수신 제어 상태 머신 (B4·B5)
 
 **구조** — 호 하나에 `PMcvControl`(`cmp/PMcvControl.{h,cpp}`) 하나. 소켓·락 없는 순수 로직이다 — 입력 = 참가자 추가/제거·해석된 메시지
-(`ParsedTransmission`)·미디어 도착 표시·시각(ms) 틱, 출력 = 훅(`send(member, app, subtype, fields)` · `inactivity("T1"|"T5")` · `transmittersChanged()`).
+(`ParsedTransmission`)·미디어 도착 표시·시각(ms) 틱, 출력 = 훅(`send(member, app, subtype, fields)` · `inactivity("T1"|"T5")` · `transmittersChanged()` ·
+`receptionStarted(receiver, sender)` — 영상 키프레임 요청 계기, B6).
 `PMcvideoGroup` 이 그룹 락 아래 부르고, `send` 를 `BuildTransmissionMessage` → 멤버 유닛 `sendTo(MCV_CH_CONTROL)` 로 잇는다(헤더 SSRC = 멤버
 `user_tc_ssrc`, 없으면 `tc_ssrc`). 단위시험 `tests/cmp_mcvideo_control_test.cpp`(S1-UNIT-CMP — `PMcvControl.cpp` + `PTransmissionCodec.cpp` 만 링크).
 SSRC 할당기(`AllocSsrc`·`FreeSsrc`)는 `PMcvControl` 로 옮겨 그룹·시험이 같이 쓴다. 틱 = 100 ms(`mediaBufferLoop` 20 ms 클록에서 MCVideo 그룹이 있을 때만,

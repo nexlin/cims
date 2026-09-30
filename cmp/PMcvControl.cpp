@@ -755,6 +755,7 @@ void PMcvControl::_sendRxResponse(const std::string& to, const Tx* t, const Pars
 
 // Active SSRC List 에 넣는다 — C9+1 · C11+1(T11 정지) · C7+1(T5 정지). manual 허가면 T6/C6.
 void PMcvControl::_addReception(Part& r, Tx& t, bool manual, int64_t now) {
+    const bool added = r.active.count(t.member) == 0;
     RxGrant& g = r.active[t.member];
     if (manual) {
         g.t6At = now + _timers.t6Ms;
@@ -762,6 +763,7 @@ void PMcvControl::_addReception(Part& r, Tx& t, bool manual, int64_t now) {
     }
     t.t11At = 0;
     _t5At = 0;
+    if (added && _hooks.receptionStarted) _hooks.receptionStarted(r.id, t.member);
 }
 
 // Active SSRC List 에서 뺀다 — C9−1 · C11−1(0 이면 manual 에서 T11) · C7−1(0 이면 Gr: Reception Idle — T5)(§6.3.6.4.4 · §6.3.7.4.9).

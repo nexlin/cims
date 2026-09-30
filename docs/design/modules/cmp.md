@@ -675,13 +675,18 @@ MCVideo 그룹 호(TS 24.281·24.581)의 미디어 평면. `PMcpttGroup` 과 따
 - **이벤트** — 송출자 집합이 바뀌면 `TRANSMITTERS{group_id, transmitters[{user, audio_ssrc, video_ssrc}]}`, T1·T5 만료면
   `TRANSMISSION_INACTIVITY{group_id, timer}`(해제는 CSP 정책) — [cmp_media_api.md](../../api/cmp_media_api.md) §8.
 - **관측** — HEARTBEAT `resource.mcvideo{groups, joined, member_total, member_used}`(키 존재가 기능 광고 — `McVideoMemberPoolSize=0` 이면 없음),
-  STATS `detail.mcvideo_groups[]`(group_type·members·reserved·max_transmitters·transmitters·receptions·control_rx·no_grant_drop·crypto_drop)·`nat` 에
+  STATS `detail.mcvideo_groups[]`(group_type·members·reserved·max_transmitters·transmitters·receptions·control_rx·no_grant_drop·crypto_drop·
+  keyframe_requests)·`nat` 에
   `mcvideo|<gid>:<sid>` 항목.
 - **보호** — 멤버 SRTP(`media_crypto`·`media_crypto_video` → `Peer` 의 audio·video `PMediaCrypto`): 상향 = 보낸 멤버 키로 unprotect 뒤 판정·분배,
   하향 = SSRC·PT 찍기 뒤 받는 멤버 키로 protect. 전송 제어 SRTCP(`tc_crypto` — 멤버 CSK `Peer.tcCrypto` > 그룹 키 > 평문, `PFloorCrypto`): 수신
   datagram 전체를 먼저 풀고(compound 포함) 송신은 부호화 뒤 보호. 키는 JOIN 이 참가 등록 전에 건다(첫 Idle 부터 보호), 같은 구성 재선언은
   컨텍스트(SRTCP index·재전송 창)를 유지. 풀리지 않는 패킷은 `crypto_drop`.
-- **아직 없는 것** — 영상 RTCP 전달(PLI·FIR, B6), 녹취(`record_dir` 는 보관만, B8).
+- **영상 RTCP** — 멤버 +3 포트의 PSFB PLI·FIR 만 읽어(SRTCP leg 는 먼저 푼다) 가리키는 할당 video SSRC 의 송출자에게 CMP 가 새 복합 패킷
+  (RR + SDES CNAME + PLI/FIR, packet sender = 그룹 `_fbSsrc`, 대상 = 송출자 원래 SSRC `Peer.rxVideoSsrc`, FIR Seq nr = `Peer.firSeq`)으로 보낸다 —
+  요청자가 그 송출을 받을 때만, 송출자마다 500 ms(`kKeyReqMinMs`)에 하나. 수신 시작(`PMcvControl` 훅 `receptionStarted`)에도 PLI 를 보낸다.
+  [cmp_media_api.md](../../api/cmp_media_api.md) §7.9.
+- **아직 없는 것** — 녹취(`record_dir` 는 보관만, B8), 송출자 SR 을 수신자에게 옮기기(립싱크 — 음성 RTCP 포트는 예약만).
 
 단위시험: `tests/cmp_mcvideo_control_test.cpp`(S1-UNIT-CMP — 상태 머신, 보낸 메시지를 코덱으로 왕복). 스모크: `tests/cmp_smoke_mcvideo_ports.py` —
 시험용 CMP 를 빈 포트 창에 직접 띄워 ADD/JOIN/LEAVE/REMOVE·거절·동시 MCPTT 그룹·수신 판정과 전송 제어 흐름(Idle·허가·Notification·수신 전후

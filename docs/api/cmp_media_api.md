@@ -809,8 +809,13 @@ audio RTP(`port`, RTCP = +1)·video RTP(`video_port`, RTCP = +1 — 수신자 PL
   subtype 은 버린다(§9.1.4 1). APP 이 아닌 RTCP(단말의 빈 RR keepalive — RFC 3550 §6.4.2, 헤더 SSRC = `mc_transmission_ssrc`)는 해석하지 않고
   버리되 드롭으로 세지 않는다. `user_nat` 멤버의 제어 목적지는 그 소켓의 형식 검사(v2 · RTCP PT 192~223 · `user_sig_ip` guard)를 통과한 패킷으로
   latch 한다 — 단말은 호 성립 때 빈 RR 로 하향 경로를 연다([ue_nat_traversal.md](../design/features/ue_nat_traversal.md) §7.1).
-- **영상 RTCP**(B6) — 수신자의 PLI(RFC 4585)·FIR(RFC 5104)는 media SSRC 가 가리키는 송출자에게 넘긴다(SSRC 는 송출자 쪽 값으로 되돌린다).
-  송출 시작 때 CMP 가 송출자에게 PLI 를 한 번 보내 첫 키프레임을 받는다.
+- **영상 RTCP**(B6) — 멤버 영상 RTCP 포트(`user_video_port` + 1)로 온 datagram 에서 PSFB PLI(RFC 4585 §6.3.1)·FIR(RFC 5104 §4.3.1)만 읽는다
+  (SRTP leg 이면 먼저 그 멤버 상향 영상 키로 SRTCP 를 푼다). 가리키는 송출 = PLI 의 media source SSRC · FIR 의 FCI SSRC = CMP 가 분배 때 찍은
+  **할당 video SSRC** — 요청자가 그 송출을 받고 있을 때만(Active SSRC List) 송출자에게 CMP 가 새로 보낸다: 복합 패킷 RR(보고 블록 0) + SDES
+  CNAME + PLI 또는 FIR(RFC 4585 §3.1), packet sender = CMP 가 그룹마다 할당한 SSRC, 대상 SSRC = 송출자 영상의 **원래** SSRC(받은 RTP 헤더, 아직
+  없으면 `user_video_ssrc`), FIR Seq nr = CMP 가 그 송출자에게 낸 요청마다 +1, 송출자 하향 영상 키로 SRTCP 보호. 수신자가 송출을 **받기 시작할
+  때**(Active SSRC List 에 들어갈 때 — automatic 은 허가·알림, manual 은 Receive Media Request 허가) CMP 가 스스로 PLI 를 보낸다(다음 키프레임부터
+  풀리므로). 송출자 한 명에게는 500 ms 에 하나로 모은다(여러 수신자의 요청이 같은 키프레임을 받는다). RR·SR·SDES 등 나머지는 옮기지 않는다.
 
 **PTT_LEAVE / PTT_GROUP_REMOVE** — §7.5·§7.3 과 같다(`service:"mcvideo"`). 떠나는 멤버의 송출·수신 상태를 정리하고(§6.3.3 두 단계),
 송출 중이었으면 남은 멤버에게 Transmission End Notify 를 보낸다. 없는 그룹·멤버도 OK(자연 멱등).
@@ -818,8 +823,8 @@ audio RTP(`port`, RTCP = +1)·video RTP(`video_port`, RTCP = +1 — 수신자 PL
 **그 밖** — `PTT_FLOOR_TIER` 등 floor 명령에 `service:"mcvideo"` 면 `BAD_REQUEST`. `resource.mcvideo` 를 광고하지 않는 CMP(멤버 풀 0)는
 `service:"mcvideo"` 명령에 `NO_RESOURCE`. sweeper 가 주소 등록 멤버 0 + 무활동 `SessionTimeout` 인 MCVideo 그룹을 회수하면
 `PTT_GROUP_ABORTED`(hdr.service `"mcvideo"`)를 보낸다(§8). 관측 — STATS `detail.mcvideo_groups[]{group_id, group_type, members, reserved,
-max_transmitters, transmitters, receptions, control_rx, no_grant_drop, crypto_drop}`(transmitters = Cx, receptions = C7 — Active SSRC List
-항목 합, crypto_drop = SRTP·SRTCP 해제 실패)·
+max_transmitters, transmitters, receptions, control_rx, no_grant_drop, crypto_drop, keyframe_requests}`(transmitters = Cx, receptions = C7 —
+Active SSRC List 항목 합, crypto_drop = SRTP·SRTCP 해제 실패, keyframe_requests = 송출자에게 보낸 PLI·FIR)·
 `mcvideo_groups_total`.
 
 ## 8. 이벤트 (type: "event")

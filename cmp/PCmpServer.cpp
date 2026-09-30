@@ -905,6 +905,7 @@ void PCmpServer::processStats(const SimpleJson::JsonNode& payload, const std::st
             g.Set("control_rx", (long long)group->getControlRx());
             g.Set("no_grant_drop", (long long)group->getNoGrantDrop());
             g.Set("crypto_drop", (long long)group->getCryptoDrop());
+            g.Set("keyframe_requests", (long long)group->getKeyframeRequests());
             mcvArr.Add(g);
         }
         detail.Set("mcvideo_groups", mcvArr);

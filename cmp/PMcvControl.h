@@ -89,6 +89,9 @@ public:
         std::function<void(const char* timer)> inactivity;
         // 송출 집합이 바뀌었다(허가·종료·회수·이탈) — TRANSMITTERS 이벤트.
         std::function<void(const std::vector<McvTransmitter>& transmitters)> transmittersChanged;
+        // 수신자가 송출 하나를 받기 시작했다(Active SSRC List 에 들어갔다 — 허가·알림·[받기] 어느 경로든). 영상은 다음 키프레임부터
+        //   풀리므로 미디어 평면이 송출자에게 키프레임을 요청한다(RFC 4585 PLI — mcvideo.md §5.3 B6). 소유자는 _ctl 을 다시 부르지 않는다.
+        std::function<void(const std::string& receiverId, const std::string& senderId)> receptionStarted;
         std::function<void(const std::string& line)> log;
     };
 

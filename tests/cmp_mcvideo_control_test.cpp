@@ -33,6 +33,7 @@ struct Harness {
     std::vector<Sent> out;
     std::vector<std::string> inactivity;
     std::vector<std::vector<McvTransmitter>> txEvents;
+    std::vector<std::pair<std::string, std::string>> rxStarts;   // receptionStarted (수신자, 송출자)
     int buildFail = 0;
     int64_t now = 1000;
 
@@ -56,6 +57,7 @@ struct Harness {
         };
         h.inactivity = [this](const char* timer) { inactivity.push_back(timer); };
         h.transmittersChanged = [this](const std::vector<McvTransmitter>& v) { txEvents.push_back(v); };
+        h.receptionStarted = [this](const std::string& r, const std::string& s) { rxStarts.emplace_back(r, s); };
         ctl.setHooks(h);
         ctl.configure(maxTx, automatic, ct, t);
     }
@@ -362,6 +364,38 @@ static void testAutomaticEmergency() {
     CHECK(h.buildFail == 0, "all messages encode");
 }
 
+// 수신 시작 훅 — 미디어 평면이 송출자에게 키프레임을 요청하는 계기(mcvideo.md §5.3 B6). Active SSRC List 에 새로 들어갈 때 한 번.
+static void testReceptionStartedHook() {
+    printf("[reception started hook — keyframe request trigger]\n");
+    {
+        Harness h;   // manual
+        h.join("A");
+        h.join("B");
+        h.join("C");
+        h.request("A");
+        CHECK(h.rxStarts.empty(), "manual — grant alone starts no reception");
+        h.receive("B", "sip:A@mcv");
+        CHECK(h.rxStarts.size() == 1 && h.rxStarts[0] == std::make_pair(std::string("B"), std::string("A")),
+              "manual — [receive] B → (B, A)");
+        h.receive("B", "sip:A@mcv");   // 이미 받는 중 — 재요청은 새 수신이 아니다
+        h.advance(3000);               // T6 재송신도 새 수신이 아니다
+        CHECK(h.rxStarts.size() == 1, "repeat request · T6 retransmission do not fire again");
+        h.rx("B", MCV_APP_2, MCV2_MEDIA_RECEPTION_END_REQUEST, { McvTlv(TF_TRANSMITTING_USER_ID, "sip:A@mcv") });
+        h.receive("B", "sip:A@mcv");
+        CHECK(h.rxStarts.size() == 2, "after reception end, receiving again fires again");
+    }
+    {
+        Harness h(1, true);   // automatic
+        h.join("A");
+        h.join("B");
+        h.request("A");
+        CHECK(h.rxStarts.size() == 1 && h.rxStarts[0].first == "B" && h.rxStarts[0].second == "A",
+              "automatic — grant starts B's reception");
+        h.join("C");
+        CHECK(h.rxStarts.size() == 2 && h.rxStarts[1].first == "C", "automatic — late joiner starts reception");
+    }
+}
+
 static void testTimers() {
     printf("[T1 · T5 · T11 #8 · T3 give-up]\n");
     McvTimers t;
@@ -497,6 +531,7 @@ int main() {
     testLimitQueuePreempt();
     testMultiTransmitAndC9();
     testAutomaticEmergency();
+    testReceptionStartedHook();
     testTimers();
     testUnauthorizedMedia();
     testImplicitAndRecvOnly();
