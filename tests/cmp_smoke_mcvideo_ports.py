@@ -474,7 +474,8 @@ try:
                 "user_video_port": v.getsockname()[1], "user_control_port": c.getsockname()[1], "user_uri": uri,
                 "user_tc_ssrc": tcu[n], "user_pt": pt, "user_video_pt": vpt}
         if n == X:
-            body.update({"user_audio_ssrc": 0x5A000001, "user_video_ssrc": 0x5A000002})
+            body.update({"user_audio_ssrc": 0x5A000001, "user_video_ssrc": 0x5A000002, "user_video_fb": ["pli", "fir"]})
+            jx = dict(body)
         r = req("PTT_JOIN", body, sesid="mcv-smoke::5")
         tcs[n] = pl(r).get("tc_ssrc", 0)
     first = {n: msgs(sk[n][2]) for n in (X, Y, Z)}
@@ -548,12 +549,27 @@ try:
     check("receiver FIR → FIR to X (media source 0 · FCI SSRC = X's original · Seq nr = CMP's own 1)",
           p2 and p2[0]["media"] == 0 and len(fci) == 8 and struct.unpack("!I", fci[:4])[0] == 0x77770001 and fci[4] == 1,
           f"{f2}")
+    # 협상한 피드백만 (RFC 4585 §4.2) — 송출자가 `nack pli` 만 협상했으면 FIR 을 PLI 로, 아무것도 없으면 보내지 않는다
+    r = req("PTT_JOIN", dict(jx, user_video_fb="pli"), sesid="mcv-smoke::5")
+    check("JOIN user_video_fb not an array → BAD_REQUEST", st(r) == ("ERROR", "BAD_REQUEST"), r["hdr"].get("reason"))
+    req("PTT_JOIN", dict(jx, user_video_fb=["pli"]), sesid="mcv-smoke::5")
+    time.sleep(0.6)
+    vr[Y].sendto(rr_y + fir(0x0B0B0B0B, gv, 8), yrt)
+    f3 = [parse_rtcp(d) for d in drain(vr[X], 0.3)]
+    check("transmitter negotiated PLI only → receiver FIR goes as PLI", f3 and psfb(f3[0], 1) and not psfb(f3[0], 4)
+          and psfb(f3[0], 1)[0]["media"] == 0x77770001, f"{f3}")
+    req("PTT_JOIN", dict(jx, user_video_fb=[]), sesid="mcv-smoke::5")
+    time.sleep(0.6)
+    vr[Y].sendto(rr_y + pli(0x0B0B0B0B, gv), yrt)
+    check("transmitter negotiated no keyframe feedback → nothing sent", not drain(vr[X], 0.3))
+    req("PTT_JOIN", jx, sesid="mcv-smoke::5")
+    time.sleep(0.6)
     time.sleep(0.6)
     vr[Z].sendto(struct.pack("!BBHI", 0x80, 201, 1, 0x0C0C0C0C) + pli(0x0C0C0C0C, gv), zrt)   # Z 는 받지 않는다
     vr[Y].sendto(pli(0x0B0B0B0B, 0x12345678), yrt)                                            # 없는 송출 (단독 PSFB)
     check("PLI from non-receiver Z / unknown SSRC not forwarded", not drain(vr[X], 0.4))
-    check("STATS keyframe_requests 3 (reception start · PLI · FIR)",
-          (mcv_group("g105") or {}).get("keyframe_requests") == 3, f"{mcv_group('g105')}")
+    check("STATS keyframe_requests 4 (reception start · PLI · FIR · FIR as PLI)",
+          (mcv_group("g105") or {}).get("keyframe_requests") == 4, f"{mcv_group('g105')}")
     check("no Ack retransmission of the response after Ack", not has(msgs(sk[Y][2], 1.3), "MCV1", 0x7))
 
     # 헤더만 RTP = keepalive (판정 밖) · payload 있으면 Revoked #3

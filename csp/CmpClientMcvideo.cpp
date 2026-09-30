@@ -104,6 +104,14 @@ bool CCmpClient::McvJoin( const std::string &strGroupId, const std::string &strS
         if ( d.iMaxRxStreams > 0 ) req.Set( "max_rx_streams", d.iMaxRxStreams );
         if ( d.bImplicit ) req.Set( "implicit_request", 1 );
         if ( d.bRecvOnly ) req.Set( "recv_only", 1 );
+        // 협상한 영상 피드백(RFC 4585 §4.2) — CMP 는 이 멤버(송출자)에게 이것만 보낸다
+        if ( d.iVideoPort > 0 && d.iVideoFb >= 0 ) {
+            SimpleJson::JsonNode fb;
+            fb.type = SimpleJson::JSON_ARRAY;
+            if ( d.iVideoFb & 1 ) fb.Add( SimpleJson::JsonNode( "pli" ) );
+            if ( d.iVideoFb & 2 ) fb.Add( SimpleJson::JsonNode( "fir" ) );
+            req.Set( "user_video_fb", fb );
+        }
     }
 
     std::string strResp;

@@ -110,6 +110,28 @@ namespace {
         }
     }
 
+    // m=video 의 a=rtcp-fb 가운데 이 PT(또는 *)에 걸린 키프레임 요청 — 비트 1 = `nack pli`(RFC 4585 §4.2) · 2 = `ccm
+    // fir`
+    //   (RFC 5104 §7.1). CMP 는 송출자에게 협상한 것만 보낸다.
+    int McvVideoFbOf( CSipCallRtp *pclsRtp, int iVideoPt ) {
+        int fb = 0;
+        if ( !pclsRtp ) return fb;
+        for ( const auto &clsMedia : pclsRtp->m_clsMediaList ) {
+            if ( strcasecmp( clsMedia.m_strMedia.c_str(), "video" ) != 0 ) continue;
+            for ( const auto &clsAttr : clsMedia.m_clsAttributeList ) {
+                if ( strcasecmp( clsAttr.m_strName.c_str(), "rtcp-fb" ) != 0 ) continue;
+                std::istringstream is( clsAttr.m_strValue );
+                std::string strPt, strType, strParam;
+                is >> strPt >> strType >> strParam;
+                if ( strPt != "*" && atoi( strPt.c_str() ) != iVideoPt ) continue;
+                if ( strcasecmp( strType.c_str(), "nack" ) == 0 && strcasecmp( strParam.c_str(), "pli" ) == 0 ) fb |= 1;
+                if ( strcasecmp( strType.c_str(), "ccm" ) == 0 && strcasecmp( strParam.c_str(), "fir" ) == 0 ) fb |= 2;
+            }
+            break;
+        }
+        return fb;
+    }
+
     bool IsMember( const CspPttGroup &clsGroup, const std::string &strUser, int *piPrio = nullptr,
                    std::string *pstrRole = nullptr ) {
         for ( const auto &p : clsGroup._pusers ) {
@@ -229,6 +251,7 @@ void CMcVideoCallService::_FillDecl( CmpMcvMemberDecl &d, const std::string &str
     //   offer PT(psip AddSdp 규칙) = user_pt (GroupCallService::GetLegPt 와 같은 규칙)
     d.iSrcPt = bServerOffered ? McvAudioCodec().m_iPt : iAPt;
     d.iVideoPt = d.iVideoPort > 0 ? iVPt : 0;
+    if ( d.iVideoPort > 0 ) d.iVideoFb = McvVideoFbOf( pclsRtp, iVPt );
     d.strCodec = kMcVideoAudioCodec;
     d.strUri = McpttIdUri( strMember );
     if ( clsFmtp.bHasTcSsrc ) d.uTcSsrc = clsFmtp.uTcSsrc;

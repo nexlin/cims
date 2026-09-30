@@ -38,7 +38,11 @@ struct McvMemberDecl {
     int maxPriority = -1;    // 협상 송출 우선순위 상한 (-1 = members 의 prio)
     int maxRxPriority = -1;  // 협상 수신 우선순위 상한 (§14.3.6)
     int maxRxStreams = MCV_C9;  // C9 — 동시 수신 스트림 상한 (user profile MaxSimultaneousVideoStreams)
+    int videoFb = -1;        // user_video_fb — 멤버 영상 SDP 가 협상한 키프레임 요청(MCV_FB_* 비트, -1 = 선언 없음 → PLI)
 };
+
+// 영상 키프레임 요청 종류 (RFC 4585 §4.2 `a=rtcp-fb … nack pli` · RFC 5104 §7.1 `ccm fir`) — 협상한 것만 보낸다.
+enum { MCV_FB_PLI = 1, MCV_FB_FIR = 2 };
 
 /**
  * MCVideo 그룹 호의 미디어 평면 (TS 24.581 — cmp_media_api.md §7.9, cmp.md §3.6).

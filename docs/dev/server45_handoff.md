@@ -616,3 +616,26 @@ SDP 에 `ccm fir` 가 없으면 PLI 로 바꿔 보내자. ③ SDK 수신 쪽은 
 | T7 | MCPTT 회귀 | 같은 신원으로 기존 `group-call` (MCPTT 그룹) | floor·affiliation 정상 — MCVideo 와 섞이지 않음 |
 
 세션 갱신(SE/2 = 900 s)은 단위·임시 시험으로 봤으므로 M2 에서는 선택(16 분 호 한 번). 영상 RTP·PLI 는 Linux 엔진 영상(사용자 결정) 또는 C6 Android 실기에서.
+
+**.48 B6 후속 — 협상한 피드백만 (.45 «B6 확인 답» ②)** — 채택. CSP 가 멤버 영상 SDP 의 `a=rtcp-fb:<pt|*> nack pli`·`ccm fir` 를 JOIN `user_video_fb`
+(`["pli"]` 등)로 옮기고, CMP 는 송출자에게 협상한 종류만 보낸다(RFC 4585 §4.2) — SDK 송출자(`nack pli` 만)에게는 수신자 FIR 도 PLI, 둘 다 없으면 보내지 않는다.
+세션 갱신 re-INVITE(SDP 같음)는 CSP 가 미디어 무변경으로 걸러 JOIN ② 를 다시 부르지 않는다(fmtp 만 달라도 주소·포트·방향이 같으면 갱신 — leg_liveness.md §6.3).
+
+**.48 답 — M2 신호 시험 준비 (.48 → .45 · 사용자)** — 절차 표 채택, 아래를 더한다. 실행은 여전히 사용자 결정 셋 뒤.
+
+- **신원** = 계측기 PTT 신원 중 그룹이 없는 셋 — A `+82500000023`(test023) · B `+82500000024`(test024) · C `+82500000025`(test025). 로그인 자격은
+  `/mnt/cims/test48/tester/scenarios/creds/ptt.jsonl` 의 `login`·`loginPw`(파일로 옮기지 않는다 — 그 자리에서 읽는다). M2 동안 .48 계측기는 이 신원으로 돌리지 않는다.
+- **그룹** — T6 을 속성 토글 없이 가르게 둘로: `gmv1` = MCPTT + MCVideo chat(`invite_members` false, `max_transmitters` 1) · `gmv2` = MCPTT + MCVideo
+  prearranged(`invite_members` true). 멤버 A·B·C, A6 관리 API(`POST /api/v1/ptt/groups` 의 `mcvideo`)로 만든다. 자격은 마이그레이션이 기존 PTT 회선 전부에
+  넣는다(현행 «PTT 영상» 보존 — 아래 주의).
+- **더할 항목**
+  - T4 확인에 **팬아웃 INVITE `Session-Expires: 1800` refresher 없음**(§6.3.3.1.2 6)) — B 200 이 `refresher=uas` 로 정한다.
+  - T4 시간 — 개시 대기 한도 10 s(첫 멤버가 붙지 않으면 A 480), 초대 응답 한도 30 s(CANCEL). B `video-answer --accept` 는 곧바로 답하면 된다.
+  - **T8 상한 초과** — gmv1(`max_transmitters` 1): A 송출 중 C `transmit_request` → `mc_queueing` 없으면 Rejected #1, 있으면 Queue Position Info(M2 목표
+    «상한 초과 거절»).
+  - **T9 해제 규칙** — gmv2(prearranged): B 가 BYE 하면 참가자 1명 → CSP 가 A 에 BYE(§6.3.8.1 2)) · gmv1(chat): 마지막 참가자가 나가면 해제 · T4 로
+    `hang_timer_sec` 을 짧게(예 10) 둔 그룹에서 송출 없이 T1 만료 → prearranged 해제.
+  - **T7b 동시** — 같은 `gmv1` 에서 MCPTT 그룹 호와 MCVideo 그룹 호를 함께(§7 D6 — CMP 자원 키 `(service, group)`), 한쪽 해제가 다른 쪽에 무영향.
+- **주의(사용자 결정 ②)** — `migrate_mcvideo.sql` 은 `video_enabled=1` 그룹(g004 등)에 MCVideo 속성 행을, **PTT 회선 전부**에 MCVideo 자격 행을 넣는다(현행
+  PTT 영상 보존). .45 CSC 는 MCVideo 코드가 없어 무영향 — .48 CSC 가 발급하는 토큰에만 `3gpp:mc:video_*`·`mcvideo_id` 가 붙는다. 자격을 시험 신원으로만
+  두려면 적용 뒤 A6 `DELETE …/ptt/{msisdn}/mcvideo` 로 거두면 된다(사용자 결정).

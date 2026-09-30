@@ -310,6 +310,17 @@ void PCmpServer::processMcvJoin(const SimpleJson::JsonNode& payload, const std::
         d.userVideoSsrc = (unsigned int)payload.GetInt("user_video_ssrc", 0);
         d.queueing = payload.GetInt("queueing", 0) != 0;
         d.recvOnly = payload.GetInt("recv_only", 0) != 0;
+        // 협상한 영상 피드백 — ["pli","fir"] 의 부분집합(모르는 값은 무시). 키가 없으면 선언 없음(-1 → PLI).
+        if (payload.Has("user_video_fb")) {
+            SimpleJson::JsonNode fb = payload.Get("user_video_fb");
+            if (fb.type != SimpleJson::JSON_ARRAY) return reject("BAD_REQUEST", "user_video_fb must be an array");
+            d.videoFb = 0;
+            for (const auto& e : fb.array) {
+                if (e.type != SimpleJson::JSON_STRING) continue;
+                if (e.strValue == "pli") d.videoFb |= MCV_FB_PLI;
+                else if (e.strValue == "fir") d.videoFb |= MCV_FB_FIR;
+            }
+        }
         if (!McvIntField(payload, "max_priority", 0, 255, d.maxPriority, err) ||
             !McvIntField(payload, "max_reception_priority", 0, 255, d.maxRxPriority, err) ||
             !McvIntField(payload, "max_rx_streams", 1, 16, d.maxRxStreams, err))

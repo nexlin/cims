@@ -522,8 +522,13 @@ void PMcvideoGroup::_forwardKeyframeRequest(const Peer& requester, unsigned int 
     }
 }
 
-void PMcvideoGroup::_requestKeyframe(Peer& s, bool fir, const char* why) {
+void PMcvideoGroup::_requestKeyframe(Peer& s, bool wantFir, const char* why) {
     if (!s.addressed || !s.unit || s.dstPort[MCV_CH_VIDEO_RTCP] <= 0) return;
+    // 협상한 피드백만 보낸다(RFC 4585 §4.2) — 요청 종류가 협상되지 않았으면 다른 쪽으로 바꾸고, 둘 다 없으면 보내지 않는다.
+    //   선언이 없으면(videoFb -1) PLI — CSP 가 SDP 를 옮기지 않은 경우의 호환 기본값.
+    const int fb = s.decl.videoFb < 0 ? MCV_FB_PLI : s.decl.videoFb;
+    const bool fir = wantFir ? (fb & MCV_FB_FIR) != 0 : (fb & MCV_FB_PLI) == 0 && (fb & MCV_FB_FIR) != 0;
+    if (!fir && !(fb & MCV_FB_PLI)) return;
     // media source = 송출자 영상의 원래 SSRC — 아직 영상을 받지 않았으면 offer a=ssrc, 그것도 없으면 가리킬 스트림이 없다
     const unsigned int target = s.rxVideoSsrc ? s.rxVideoSsrc : s.decl.userVideoSsrc;
     if (target == 0) return;

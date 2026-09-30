@@ -338,7 +338,8 @@ mcvideo 인 `PTT_GROUP_ABORTED`·`TRANSMITTERS`·`TRANSMISSION_INACTIVITY` 를 M
   보낸다. manual/automatic 모드, 수신자 동시 스트림 상한(C9 — #7).
 - **영상 RTCP** (구현 — B6) — 수신자의 PLI(RFC 4585 §6.3.1)·FIR(RFC 5104 §4.3.1)을 가리키는 송출자에게: 대상 = 할당 video SSRC → 송출자 원래 SSRC 로
   되돌려 CMP 가 복합 패킷(RR + SDES CNAME + PLI/FIR)으로 다시 보낸다(요청자가 그 송출을 받을 때만, 송출자마다 500 ms 에 하나, SRTCP leg 는 풀고 다시
-  보호). 수신이 시작될 때(Active SSRC List 추가) CMP 가 스스로 PLI — manual [받기] 뒤 영상이 다음 주기 키프레임까지 멈추지 않게. 송출자 SR 은
+  보호). 종류는 송출자가 협상한 것만(RFC 4585 §4.2 — CSP 가 멤버 영상 SDP 의 `a=rtcp-fb` 를 JOIN `user_video_fb` 로 옮긴다. pjmedia 단말은 `nack pli`
+  만이라 FIR 도 PLI 로). 수신이 시작될 때(Active SSRC List 추가) CMP 가 스스로 PLI — manual [받기] 뒤 영상이 다음 주기 키프레임까지 멈추지 않게. 송출자 SR 은
   옮기지 않는다. [cmp_media_api.md](../../api/cmp_media_api.md) §7.9.
 
 #### 5.3.1 송출·수신 제어 상태 머신 (B4·B5)

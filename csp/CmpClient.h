@@ -81,6 +81,7 @@ struct CmpMcvMemberDecl {
     int iMaxRxStreams = 0;  // C9 (0 = CMP 기본)
     bool bImplicit = false;
     bool bRecvOnly = false;
+    int iVideoFb = -1;  // 영상 SDP 가 협상한 키프레임 요청 — 비트 1 = PLI(nack pli) · 2 = FIR(ccm fir), -1 = 싣지 않음
 };
 // PTT_JOIN 응답
 struct CmpMcvJoinResult {

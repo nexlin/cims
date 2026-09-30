@@ -776,6 +776,7 @@ audio RTP(`port`, RTCP = +1)·video RTP(`video_port`, RTCP = +1 — 수신자 PL
 | `user_control_port` | - | 멤버의 전송 제어 채널 RTCP 포트(멤버 SDP 의 `m=application … udp MCVideo`) |
 | `user_tc_ssrc` | - | 멤버가 SDP 에 광고한 `mc_transmission_ssrc` — CMP 가 **이 멤버에게 보내는 전송 제어 메시지 RTCP 헤더 SSRC** 로 쓴다(TS 24.581 §4.3.3.1 — 받는 쪽이 기대하는 값, 다중화의 열쇠). 없으면 CMP 가 정한 값 |
 | `user_audio_ssrc` / `user_video_ssrc` | - | 멤버 offer 의 audio·video `a=ssrc`(RFC 5576) — 이 멤버의 송출을 허가할 때 할당 SSRC 의 선호값(아래 SSRC 규칙) |
+| `user_video_fb` | - | 멤버 영상 SDP 가 협상한 키프레임 요청 — `["pli","fir"]` 의 부분집합(`a=rtcp-fb:<pt\|*> nack pli` → `pli` · `ccm fir` → `fir`, RFC 4585 §4.2 · RFC 5104 §7.1). CMP 는 이 멤버(송출자)에게 협상한 것만 보낸다 — 요청 종류가 없으면 다른 쪽으로 바꾸고, 빈 배열이면 보내지 않는다. 키가 없으면 PLI. 배열이 아니면 `BAD_REQUEST` |
 | `queueing` | - | `1` = SDP `mc_queueing` 협상(§14.2.2) — 동시 송출 상한에서 요청을 대기열에 넣고 Queue Position Info 로 위치를 알린다(같은 유효 우선순위의 대기 바로 뒤, §6.3.5.4.4). 미협상이면 거절 #1. 선점 요청은 협상과 무관하게 대기열 맨 앞(§6.3.4.4.7) |
 | `recv_only` | - | `1` = 그룹 문서 `<on-network-recvonly>`(TS 24.481) — 이 멤버의 Transmission Request 는 Rejected **#5**(Receive only, §6.3.4.3.3 1b) |
 | `max_priority` | - | 협상한 송출 우선순위 상한(answer `mc_priority`, §14.3.3). 없으면 `members` 의 prio |
@@ -813,7 +814,8 @@ audio RTP(`port`, RTCP = +1)·video RTP(`video_port`, RTCP = +1 — 수신자 PL
   (SRTP leg 이면 먼저 그 멤버 상향 영상 키로 SRTCP 를 푼다). 가리키는 송출 = PLI 의 media source SSRC · FIR 의 FCI SSRC = CMP 가 분배 때 찍은
   **할당 video SSRC** — 요청자가 그 송출을 받고 있을 때만(Active SSRC List) 송출자에게 CMP 가 새로 보낸다: 복합 패킷 RR(보고 블록 0) + SDES
   CNAME + PLI 또는 FIR(RFC 4585 §3.1), packet sender = CMP 가 그룹마다 할당한 SSRC, 대상 SSRC = 송출자 영상의 **원래** SSRC(받은 RTP 헤더, 아직
-  없으면 `user_video_ssrc`), FIR Seq nr = CMP 가 그 송출자에게 낸 요청마다 +1, 송출자 하향 영상 키로 SRTCP 보호. 수신자가 송출을 **받기 시작할
+  없으면 `user_video_ssrc`), FIR Seq nr = CMP 가 그 송출자에게 낸 요청마다 +1, 송출자 하향 영상 키로 SRTCP 보호. 종류 = 송출자 `user_video_fb` 가
+  협상한 것(FIR 을 협상하지 않은 송출자 — pjmedia 단말 — 에게는 FIR 도 PLI 로). 수신자가 송출을 **받기 시작할
   때**(Active SSRC List 에 들어갈 때 — automatic 은 허가·알림, manual 은 Receive Media Request 허가) CMP 가 스스로 PLI 를 보낸다(다음 키프레임부터
   풀리므로). 송출자 한 명에게는 500 ms 에 하나로 모은다(여러 수신자의 요청이 같은 키프레임을 받는다). RR·SR·SDES 등 나머지는 옮기지 않는다.
 

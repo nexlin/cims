@@ -684,7 +684,7 @@ MCVideo 그룹 호(TS 24.281·24.581)의 미디어 평면. `PMcpttGroup` 과 따
   컨텍스트(SRTCP index·재전송 창)를 유지. 풀리지 않는 패킷은 `crypto_drop`.
 - **영상 RTCP** — 멤버 +3 포트의 PSFB PLI·FIR 만 읽어(SRTCP leg 는 먼저 푼다) 가리키는 할당 video SSRC 의 송출자에게 CMP 가 새 복합 패킷
   (RR + SDES CNAME + PLI/FIR, packet sender = 그룹 `_fbSsrc`, 대상 = 송출자 원래 SSRC `Peer.rxVideoSsrc`, FIR Seq nr = `Peer.firSeq`)으로 보낸다 —
-  요청자가 그 송출을 받을 때만, 송출자마다 500 ms(`kKeyReqMinMs`)에 하나. 수신 시작(`PMcvControl` 훅 `receptionStarted`)에도 PLI 를 보낸다.
+  요청자가 그 송출을 받을 때만, 송출자마다 500 ms(`kKeyReqMinMs`)에 하나, 종류 = 송출자 JOIN `user_video_fb`(`McvMemberDecl.videoFb`)가 협상한 것. 수신 시작(`PMcvControl` 훅 `receptionStarted`)에도 PLI 를 보낸다.
   [cmp_media_api.md](../../api/cmp_media_api.md) §7.9.
 - **아직 없는 것** — 녹취(`record_dir` 는 보관만, B8), 송출자 SR 을 수신자에게 옮기기(립싱크 — 음성 RTCP 포트는 예약만).
 
