@@ -18,7 +18,8 @@
                                   A StopCall(503, Reason) 응답에 Reason · B BYE Reason → EventCallEnd(200, reason) ·
                                   C CANCEL Reason → 487 · D 피어 503 Reason → EventCallEnd(503, reason) ·
                                   E answer m=video 수락(PT/fmtp echo, 순서) · F port 0 거절 · G offer 에 없으면 answer 에도 없음 ·
-                                  H offer 의 m=video 97 H264
+                                  H offer 의 m=video 97 H264 · I MCVideo answer(i=·rtcp-fb 되돌림·udp MCVideo — 계약 K4) ·
+                                  J MCVideo offer(rtcp-fb PLI·FIR 광고·udp MCVideo)
 
 빌드 산출물(build/csp/psip_build/*.a)이 없으면 SKIP — S2 빌드 뒤 pre-package 프리셋에서 의미가 있다.
 """

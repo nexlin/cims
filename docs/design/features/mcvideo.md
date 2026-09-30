@@ -242,6 +242,13 @@ service configuration 에서 `<confidentiality-protection>`·`<integrity-protect
 
 ### 5.2 CSP (호 제어)
 
+구현된 부품 — 호 제어 경계 코덱 `csp/McVideoInfo.h`(mcvideo-info 해석·생성 · ICSI·특성 태그 판별 `McVideoIcsiIn`·`McVideoFeatureIn`·
+`McVideoContactCapable` · 제어 채널 fmtp 해석 `ParseMcVideoFmtp`·answer/offer 조립 `BuildMcVideoAnswerFmtp`·`BuildMcVideoInviteFmtp`(§1.4 K4
+규칙) · Warning 문구 — 단위시험 `tests/csp_mcvideo_info_test.cpp` 가 K3 골든을 직접 읽는다), 서비스 축 `csp/McService.h`(`EMcService`, affiliation 표
+선택), DB 계층(`CspPttGroup::_mcvideo`·`_mcvideoAttrs` 적재 · `SelectMcVideoProfile` · affiliation 함수의 서비스 인자 · dereg 때 두 표 정리),
+psip 합성 SDP 프로파일(`CSipCallRtp::m_eMcMediaProfile = E_MC_MEDIA_MCVIDEO` — `i=` 성분 표시·video rtcp-fb 광고/되돌림·
+`m=application … udp MCVideo` + `a=fmtp:MCVideo`, re-INVITE 에도 유지 — `S1-UNIT-PSIP` I·J). 아래 모듈·호 처리는 진행 중.
+
 - **모듈** — `CMcVideoAsModule`(`IModule`, `Setup.Roles.MCVIDEO`) — 참여·제어 기능 겸임(PTT-AS·MCDATA-AS 와 같은 구성). `ModuleDispatcher::EventIncomingCall`
   에서 그룹 호 분기 앞에 **ICSI mcvideo(Accept-Contact / P-Preferred-Service) 또는 mcvideo-info 본문**으로 가른다 — 현행은 들어오는 INVITE 의 ICSI 를 보지 않는다.
 - **등록** — Contact 의 `+g.3gpp.mcvideo` 를 바인딩 능력으로 기록(`UserMap` 능력 검사 확장), mcvideo-info 토큰·poc-settings PUBLISH 로 MCVideo 서비스 인가(§1.2).

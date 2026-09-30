@@ -49,6 +49,24 @@ public:
     }
 };
 
+/** MCVideo 서비스 속성 — mcvideo_group_attrs 행(sql/migrate_mcvideo.sql). 값 = TS 24.481 §7.2.2 MCVideo <list-service>
+ * 요소 (docs/design/features/mcvideo.md §5.1). 송출 제어 T1 은 MCPTT 의 _hangTimerSec 를 쓴다(TS 24.581 §11.1.3). */
+struct CspMcVideoGroupAttrs {
+    bool bInviteMembers = false;  // mcvideo-on-network-invite-members — true = prearranged, false = chat (§7 D5)
+    int iMaxDurationSec = 3600;   // mcvideo-on-network-maximum-duration — TNG3 (0 = 무제한)
+    int iMaxTransmitters = 2;     // mcvideo-maximum-simultaneous-mcvideo-transmitting-group-members
+    std::string strAudioEncodings = "AMR-WB";  // 쉼표 구분 선호순 (rtpmap encoding name)
+    std::string strVideoEncodings = "H264";
+    int iReceptionHangTimerSec = 30;  // on-network-reception-hang-timer — T5 (0 = 미사용)
+    int iMinNumberToStart = 0;        // mcvideo-on-network-minimum-number-to-start
+    int iGroupPriority = -1;          // mcvideo-on-network-group-priority 0..255 (-1 = 없음)
+    bool bAllowConferenceState = true;
+    /** 그룹 종류 문자열 — mcvideo-info session-type 과 비교한다(TS 24.281 §6.3.5.2 5)c)·d)) */
+    const char *SessionType() const {
+        return bInviteMembers ? "prearranged" : "chat";
+    }
+};
+
 class CspPttGroup {
 public:
     CspPttGroup();
@@ -158,6 +176,11 @@ public:
 
     /** 그룹 생성 시각 (DB created_at, ISO8601; 비면 미지정) */
     std::string _createdAt;
+
+    // ── MCVideo (한 그룹 = 서비스 집합, TS 23.280 §3) ──
+    /** MCVideo 그룹인가 — mcvideo_group_attrs 행이 있다(TS 24.481 §7.2.8 MCVideo <service>) */
+    bool _mcvideo = false;
+    CspMcVideoGroupAttrs _mcvideoAttrs;
 
     /** Parsing method */
     bool load( std::string groupId );

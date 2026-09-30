@@ -30,11 +30,21 @@
 
 typedef std::list< int > CODEC_LIST;
 
+// 합성 SDP 의 MC 서비스 미디어 프로파일 — 제어 채널(m=application)·성분 표시가 서비스마다 다르다.
+//   MCPTT  : m=application <port> UDP MCPTT + a=floorid + a=fmtp:MCPTT (TS 24.379 · TS 24.380 §12)
+//   MCVideo: m=audio·m=video 에 i= 성분 표시(TS 24.281 §6.2.1 2)c)·3)d)), video 의 a=rtcp-fb(PLI·FIR) 광고/되돌림,
+//            m=application <RTCP port> udp MCVideo + a=fmtp:MCVideo (TS 24.581 §4.3.3.1·§12.1.2 — floorid 없음)
+enum EMcMediaProfile
+{
+	E_MC_MEDIA_MCPTT = 0,
+	E_MC_MEDIA_MCVIDEO
+};
+
 // RTP 정보 저장 클래스
 class CSipCallRtp
 {
 public:
-	CSipCallRtp() : m_iPort(-1), m_iCodec(-1), m_eDirection( E_RTP_SEND_RECV ), m_iApplicationPort(-1), m_strApplicationFmtp( "mc_queueing" ), m_iVideoPort(-1)
+	CSipCallRtp() : m_iPort(-1), m_iCodec(-1), m_eDirection( E_RTP_SEND_RECV ), m_iApplicationPort(-1), m_strApplicationFmtp( "mc_queueing" ), m_iVideoPort(-1), m_eMcMediaProfile( E_MC_MEDIA_MCPTT )
 	{}
 
 	void SetIpPort( const char * pszIp, int iPort, int iSocketCountPerMedia );
@@ -60,6 +70,9 @@ public:
 	// 합성 SDP(미디어 리스트 없는 경로)에 실을 local video 포트. >0 이면 AddSdp 가 m=video 를 광고/수락하고
 	//   GetVideoPort 가 이 값을 반환한다. -1 이면 상대가 낸 m=video 는 port 0 으로 거절된다(RFC 3264 §6).
 	int					m_iVideoPort;
+
+	// 합성 SDP 의 MC 미디어 프로파일(기본 MCPTT). MCVideo 면 m_strApplicationFmtp 는 a=fmtp:MCVideo 파라미터다.
+	EMcMediaProfile	m_eMcMediaProfile;
 
 	// 선택된 코덱 번호
 	int					m_iCodec;

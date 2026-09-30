@@ -61,6 +61,13 @@ struct CspUserProfile {
     bool m_bAllowNonAckUsersInfo = false;
 };
 
+/** MCVideo 이용 자격 — mcvideo_user_profile 행(TS 24.484 §9.3, docs/design/features/mcvideo.md §5.1). 행이 없으면
+ * 자격이 없다 — MCVideo 서비스 인가 실패(TS 24.281 §7.3.2, Warning 101). MCVideo ID = MCPTT ID(§7 D1). */
+struct CspMcVideoProfile {
+    int m_iMaxVideoStreams = 1;  ///< <MaxSimultaneousVideoStreams> = 서버 카운터 C9 (CMP PTT_JOIN max_rx_streams)
+    int m_iMaxCallsN6 = 1;       ///< MCVideo 그룹 호 동시 상한 N6 (TS 24.281 §9.2.2.3.1.1 5) — 486 Warning 103)
+};
+
 /**
  * @ingroup CspServer
  * @brief SIP 사용자 정보 저장 클래스

@@ -15,8 +15,11 @@
 #include <thread>
 #include <vector>
 
+#include "McService.h"
+
 class CspUser;
 struct CspUserProfile;
+struct CspMcVideoProfile;
 class CspUserMap;
 class CspPttGroup;
 class CGroupMap;
@@ -60,6 +63,15 @@ public:
      *  @return 1=행 로드, 0=행 없음(clsProfile 은 기본값), -1=DB 오류/테이블 부재(fail-open 판정용) */
     int SelectUserProfile( const std::string &strUserId, CspUserProfile &clsProfile );
 
+    /** MCVideo 이용 자격(mcvideo_user_profile — TS 24.484 §9.3) 조회. strPttId = ptt_subscriptions.id.
+     *  @return 1=자격 있음(clsProfile 채움), 0=행 없음(자격 없음), -1=DB 오류·표 부재(마이그레이션 전) */
+    int SelectMcVideoProfile( const std::string &strPttId, CspMcVideoProfile &clsProfile );
+
+    /** MCVideo 표(mcvideo_group_attrs·mcvideo_user_profile·mcvideo_affiliations — sql/migrate_mcvideo.sql) 존재 여부 */
+    bool HasMcVideoTables() const {
+        return m_bHasMcVideoTables;
+    }
+
     /** 등록 시간을 갱신한다 */
     bool UpdateRegisterTime( const std::string &strUserId );
 
@@ -85,21 +97,24 @@ public:
 
     /** affiliation 등록(또는 갱신). iExpiresSec<=0 이면 만료 NULL */
     bool InsertAffiliation( const std::string &strGroupId, const std::string &strUserId, const std::string &strClientId,
-                            int iExpiresSec );
+                            int iExpiresSec, EMcService eService = EMcService::Mcptt );
 
     /** affiliation 해제 (clientId 가 비면 해당 user 전체) */
-    bool RemoveAffiliation( const std::string &strGroupId, const std::string &strUserId,
-                            const std::string &strClientId );
+    bool RemoveAffiliation( const std::string &strGroupId, const std::string &strUserId, const std::string &strClientId,
+                            EMcService eService = EMcService::Mcptt );
 
     /** 해당 그룹에 user 가 active affiliation(미만료) 을 1개라도 가지는지 */
-    bool IsAffiliated( const std::string &strGroupId, const std::string &strUserId );
+    bool IsAffiliated( const std::string &strGroupId, const std::string &strUserId,
+                       EMcService eService = EMcService::Mcptt );
 
     /** 그룹의 affiliate 된 멤버 user_id 목록 */
-    bool SelectAffiliatedMembers( const std::string &strGroupId, std::vector<std::string> &vecUserIds );
+    bool SelectAffiliatedMembers( const std::string &strGroupId, std::vector<std::string> &vecUserIds,
+                                  EMcService eService = EMcService::Mcptt );
 
     /** 가입자가 affiliate 한 그룹(mcptt_group_id) 목록 — de-register 로 한꺼번에 빠질 때
      *  어느 그룹이 영향받는지 **지우기 전에** 알아내는 용도 (감사 E-AUD-009). */
-    bool SelectAffiliatedGroupsByUser( const std::string &strUserId, std::vector<std::string> &vecGroupIds );
+    bool SelectAffiliatedGroupsByUser( const std::string &strUserId, std::vector<std::string> &vecGroupIds,
+                                       EMcService eService = EMcService::Mcptt );
 
     /** 가입자의 유효 affiliation 행(미만료·affiliated) — 제휴 상태 NOTIFY(TS 24.379 §9.2.2.2.5) 본문 원천.
      *  llExpiresEpoch = 만료 시각(UNIX 초), 0 = 만료 없음(dereg 시까지). client_id 순으로 정렬. */
@@ -108,10 +123,11 @@ public:
         std::string strClientId;
         long long llExpiresEpoch = 0;
     };
-    bool SelectActiveAffiliationsByUser( const std::string &strUserId, std::vector<CAffiliationRow> &vecRows );
+    bool SelectActiveAffiliationsByUser( const std::string &strUserId, std::vector<CAffiliationRow> &vecRows,
+                                         EMcService eService = EMcService::Mcptt );
 
     /** 가입자 de-register/logout 시 전 affiliation 제거 */
-    bool RemoveAffiliationsByUser( const std::string &strUserId );
+    bool RemoveAffiliationsByUser( const std::string &strUserId, EMcService eService = EMcService::Mcptt );
 
     /** 전체 가입자를 DB에서 읽어 맵에 로드한다 */
     /** 가입자 전량 적재(맵에 병합 — 등록 상태 보존). @param pbUnavailable (선택) true = 조회 불능.
@@ -248,6 +264,12 @@ private:
     /** 해제 인가 컬럼 3종(allow_cancel_group_emergency·allow_cancel_imminent_peril·allow_cancel_emergency_alert —
      *  migrate_ptt_user_profile_cancel_authz.sql) 존재 여부 */
     bool m_bHasCancelAuthzColumns = false;
+    /** MCVideo 표 3종(sql/migrate_mcvideo.sql) 존재 여부 — 없으면 MCVideo 그룹·자격·affiliation 이 없다 */
+    bool m_bHasMcVideoTables = false;
+    /** eService 의 affiliation 표를 쓸 수 있는가 — MCVideo 는 표가 있어야 한다 */
+    bool AffiliationUsable( EMcService eService ) const {
+        return eService == EMcService::Mcptt || m_bHasMcVideoTables;
+    }
     void ProbeSchema();
     /** 컬럼이 있으면 COALESCE(식,'') 아니면 '' — SELECT 열 위치를 고정한 채 값만 비운다 */
     std::string Ha1Col( const char *pszAlias ) const;

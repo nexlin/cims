@@ -86,6 +86,7 @@ bool CSipUserAgent::RecvInviteRequest( int iThreadId, CSipMessage * pclsMessage 
 			clsLocalRtp.m_iApplicationPort = itMap->second.m_iLocalApplicationPort;
 			clsLocalRtp.m_strApplicationFmtp = itMap->second.m_strLocalApplicationFmtp;
 			clsLocalRtp.m_iVideoPort = itMap->second.m_iLocalVideoPort;
+			clsLocalRtp.m_eMcMediaProfile = itMap->second.m_eLocalMcMediaProfile;   // MCVideo 제어 채널·성분 표시 유지
 			clsLocalRtp.m_clsCodecList = itMap->second.m_clsCodecList;
 		}
 	}

@@ -13,6 +13,8 @@
 //   F. UAS answer: 같은 offer, local video 無                              → m=video 0 RTP/AVP 96
 //   G. UAS answer: offer 에 video 없음                                     → answer 에 m=video 없음
 //   H. UAC offer: local video 포트 설정                                    → INVITE 에 m=video <port> RTP/AVP 97 + a=rtpmap:97 H264/90000
+//   I. UAS answer, MC 미디어 프로파일 MCVideo(계약 K4)                     → i= 성분 표시 · 선택 PT rtcp-fb 되돌림 · m=application udp MCVideo
+//   J. UAC offer, 프로파일 MCVideo(제어 기능 멤버 초대)                     → i= · rtcp-fb PLI·FIR 광고 · udp MCVideo + fmtp
 //
 //   빌드/실행은 verify S1-UNIT-PSIP (verify/lib/items/stage1/unit_psip.py) 가 한다 — 명령은 psip_leg_dest_test.cpp 서두와 같다.
 //     build/psip_reason_video_test [--port 27080] [--verbose]
@@ -57,6 +59,8 @@ public:
 	bool m_bIgnoreIncoming = false;			// true 면 착신에 아무것도 하지 않는다(벨 울림 유지 — CANCEL 시험)
 	int m_iLocalVideoPort = -1;				// AcceptCall 의 m_iVideoPort
 	int m_iLocalAppPort = -1;				// AcceptCall 의 m_iApplicationPort
+	bool m_bMcVideo = false;				// AcceptCall 의 m_eMcMediaProfile = MCVideo
+	std::string m_strAppFmtp = "mc_queueing";	// AcceptCall 의 m_strApplicationFmtp
 
 	// 관측
 	std::atomic<int> m_iEnded{ 0 };
@@ -83,6 +87,8 @@ public:
 		clsLocal.m_iCodec = 0;
 		clsLocal.m_iVideoPort = m_iLocalVideoPort;
 		clsLocal.m_iApplicationPort = m_iLocalAppPort;
+		clsLocal.m_strApplicationFmtp = m_strAppFmtp;
+		if( m_bMcVideo ) clsLocal.m_eMcMediaProfile = E_MC_MEDIA_MCVIDEO;
 		m_pclsUa->AcceptCall( pszCallId, &clsLocal );
 	}
 	void EventCallRing( const char *, int, CSipCallRtp * ) override {}
@@ -173,6 +179,15 @@ static const char * SDP_AUDIO_VIDEO_APP =
 	"m=audio 40002 RTP/AVP 0 101\r\na=rtpmap:0 PCMU/8000\r\na=rtpmap:101 telephone-event/8000\r\n"
 	"m=video 40004 RTP/AVP 96\r\na=rtpmap:96 H264/90000\r\na=fmtp:96 profile-level-id=42e01f;packetization-mode=1\r\n"
 	"m=application 40006 UDP MCPTT\r\na=fmtp:MCPTT mc_queueing\r\n";
+
+// MCVideo offer (계약 K4 — mcvideo.md §1.4: i= 성분 표시 · video rtcp-fb · m=application udp MCVideo + fmtp:MCVideo)
+static const char * SDP_MCVIDEO =
+	"v=0\r\no=ue 1 1 IN IP4 127.0.0.1\r\ns=-\r\nc=IN IP4 127.0.0.1\r\nt=0 0\r\n"
+	"m=audio 40002 RTP/AVP 0 101\r\ni=audio component of MCVideo\r\na=rtpmap:0 PCMU/8000\r\na=rtpmap:101 telephone-event/8000\r\n"
+	"m=video 40004 RTP/AVP 97\r\ni=video component of MCVideo\r\na=rtpmap:97 H264/90000\r\n"
+	"a=fmtp:97 profile-level-id=42e01f;packetization-mode=1\r\na=rtcp-fb:97 nack pli\r\na=rtcp-fb:97 ccm fir\r\n"
+	"a=rtcp-fb:96 nack\r\n"
+	"m=application 40006 udp MCVideo\r\na=fmtp:MCVideo mc_queueing;mc_priority=5;mc_transmission_ssrc=305419896\r\n";
 
 static std::string BuildInvite( int iUePort, const std::string & strCallId, const char * pszSdp )
 {
@@ -452,6 +467,64 @@ int main( int argc, char * argv[] )
 		CHECK( MediaOrder( strBody ) == "audio,video", ( "offer m= = audio,video (" + MediaOrder( strBody ) + ")" ).c_str() );
 		CHECK( strBody.find( "m=video 40022 RTP/AVP 97\r\n" ) != std::string::npos, "m=video 로컬 포트, PT 97" );
 		CHECK( strBody.find( "a=rtpmap:97 H264/90000\r\n" ) != std::string::npos, "a=rtpmap:97 H264/90000" );
+		clsUa.StopCall( strCallId.c_str() );
+		UdpRecvUntil( fdUe, "CANCEL", 1000 );
+	}
+
+	// ── I. MCVideo answer (계약 K4) — i= 성분 표시 · 그 PT 의 rtcp-fb 되돌림 · udp MCVideo + fmtp:MCVideo(floorid 없음) ──
+	printf( "[I] MCVideo offer, 프로파일 MCVideo → i=·rtcp-fb·udp MCVideo answer\n" );
+	{
+		clsCb.Reset();
+		clsCb.m_iLocalVideoPort = 40034;
+		clsCb.m_iLocalAppPort = 40036;
+		clsCb.m_bMcVideo = true;
+		clsCb.m_strAppFmtp = "mc_priority=5;mc_transmission_ssrc=2863311530";
+		std::string strInvite;
+		std::string strFinal = UeInvite( fdUe, iUePort, "rv-i@test.local", SDP_MCVIDEO, strInvite );
+		std::string strBody = BodyOf( strFinal );
+		CHECK( strFinal.compare( 0, 11, "SIP/2.0 200" ) == 0, "200 OK" );
+		CHECK( MediaOrder( strBody ) == "audio,video,application", ( "m= 순서 = offer (" + MediaOrder( strBody ) + ")" ).c_str() );
+		size_t pa = strBody.find( "m=audio " );
+		CHECK( pa != std::string::npos && strBody.find( "\r\ni=audio component of MCVideo\r\n", pa ) == strBody.find( "\r\n", pa ),
+		       "m=audio 바로 다음 줄 i=audio component of MCVideo" );
+		CHECK( strBody.find( "m=video 40034 RTP/AVP 97\r\ni=video component of MCVideo\r\na=rtpmap:97 H264/90000\r\n" ) != std::string::npos,
+		       "m=video → i= → rtpmap" );
+		CHECK( strBody.find( "a=rtcp-fb:97 nack pli\r\n" ) != std::string::npos && strBody.find( "a=rtcp-fb:97 ccm fir\r\n" ) != std::string::npos,
+		       "선택 PT 97 의 rtcp-fb 되돌림" );
+		CHECK( strBody.find( "a=rtcp-fb:96" ) == std::string::npos, "다른 PT 의 rtcp-fb 는 되돌리지 않는다" );
+		CHECK( strBody.find( "m=application 40036 udp MCVideo\r\na=fmtp:MCVideo mc_priority=5;mc_transmission_ssrc=2863311530\r\n" ) != std::string::npos,
+		       "m=application udp MCVideo + fmtp:MCVideo" );
+		CHECK( strBody.find( "floorid" ) == std::string::npos && strBody.find( "MCPTT" ) == std::string::npos, "MCPTT 요소 없음" );
+		UdpSendTo( fdUe, BuildInDialog( "BYE", strInvite, strFinal, 2, NULL ) );
+		UdpRecvUntil( fdUe, "SIP/2.0 200", 1000 );
+		clsCb.m_bMcVideo = false;
+		clsCb.m_strAppFmtp = "mc_queueing";
+	}
+
+	// ── J. MCVideo offer (제어 기능의 멤버 초대 — TS 24.281 §6.3.3.1.1) — rtcp-fb 광고 · udp MCVideo ──
+	printf( "[J] 발신 offer, 프로파일 MCVideo → i=·rtcp-fb 광고·udp MCVideo\n" );
+	{
+		clsCb.Reset();
+		CSipCallRtp clsRtp;
+		clsRtp.m_strIp = UA_IP; clsRtp.m_iPort = 40040; clsRtp.m_iCodec = 0;
+		clsRtp.m_clsCodecList.push_back( 0 );
+		clsRtp.m_iVideoPort = 40042;
+		clsRtp.m_iApplicationPort = 40044;
+		clsRtp.m_eMcMediaProfile = E_MC_MEDIA_MCVIDEO;
+		clsRtp.m_strApplicationFmtp = "mc_priority=5;mc_transmission_ssrc=7";
+		CSipCallRoute clsRoute;
+		clsRoute.m_strDestIp = UA_IP; clsRoute.m_iDestPort = iUePort; clsRoute.m_eTransport = E_SIP_UDP;
+		std::string strCallId;
+		UdpDrain( fdUe );
+		CHECK( clsUa.StartCall( "svc", "peer", &clsRtp, &clsRoute, strCallId ), "StartCall" );
+		std::string strInv = UdpRecvUntil( fdUe, "INVITE", 2000 );
+		std::string strBody = BodyOf( strInv );
+		CHECK( MediaOrder( strBody ) == "audio,video,application", ( "offer m= (" + MediaOrder( strBody ) + ")" ).c_str() );
+		CHECK( strBody.find( "i=audio component of MCVideo\r\n" ) != std::string::npos, "audio i=" );
+		CHECK( strBody.find( "m=video 40042 RTP/AVP 97\r\ni=video component of MCVideo\r\n" ) != std::string::npos, "video i=" );
+		CHECK( strBody.find( "a=rtcp-fb:97 nack pli\r\na=rtcp-fb:97 ccm fir\r\n" ) != std::string::npos, "rtcp-fb PLI·FIR 광고" );
+		CHECK( strBody.find( "m=application 40044 udp MCVideo\r\na=fmtp:MCVideo mc_priority=5;mc_transmission_ssrc=7\r\n" ) != std::string::npos,
+		       "udp MCVideo + fmtp" );
 		clsUa.StopCall( strCallId.c_str() );
 		UdpRecvUntil( fdUe, "CANCEL", 1000 );
 	}

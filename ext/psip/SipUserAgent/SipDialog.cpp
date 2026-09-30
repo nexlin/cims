@@ -27,7 +27,7 @@
 // 생성자
 CSipDialog::CSipDialog( CSipStack * pclsSipStack ) : m_iSeq(0), m_iNextSeq(0), m_iInviteSeq(0), m_iContactPort(-1), m_eTransport(E_SIP_UDP), m_iContactTransport(-1)
 	, m_iOutboundLocalPort(-1)
-	, m_iLocalRtpPort(-1), m_iLocalApplicationPort(-1), m_strLocalApplicationFmtp("mc_queueing"), m_iLocalVideoPort(-1), m_eLocalDirection(E_RTP_SEND_RECV), m_iRemoteRtpPort(-1), m_eRemoteDirection(E_RTP_SEND_RECV), m_iCodec(-1), m_iRSeq(-1), m_b100rel(false)
+	, m_iLocalRtpPort(-1), m_iLocalApplicationPort(-1), m_strLocalApplicationFmtp("mc_queueing"), m_iLocalVideoPort(-1), m_eLocalMcMediaProfile(E_MC_MEDIA_MCPTT), m_eLocalDirection(E_RTP_SEND_RECV), m_iRemoteRtpPort(-1), m_eRemoteDirection(E_RTP_SEND_RECV), m_iCodec(-1), m_iRSeq(-1), m_b100rel(false)
 	, m_pclsInvite(NULL), m_pclsSipStack( pclsSipStack )
 	, m_iSessionVersion(0)
 	, m_bSendCall(true)
@@ -262,6 +262,7 @@ bool CSipDialog::AddSdp( CSipMessage * pclsMessage, bool bKeepSdpVersion )
 		//   협상이 깨져 미디어 스트림 생성 시 크래시한다. offer 에 해당 rtpmap 이 없으면(-1,
 		//   예: 발신 offer 생성 시 remote 미수신) 테이블 PT 로 광고한다.
 		const CSipCodecEntry & clsTe = CSipCodecTable::GetTelephoneEvent();
+		const bool bMcVideo = ( m_eLocalMcMediaProfile == E_MC_MEDIA_MCVIDEO );
 		int iTePt = FindRemotePayloadType( clsTe.GetMatchPrefix().c_str() );
 		if( iTePt < 0 ) iTePt = clsTe.m_iPt;
 
@@ -299,6 +300,7 @@ bool CSipDialog::AddSdp( CSipMessage * pclsMessage, bool bKeepSdpVersion )
 			}
 
 			iLen += snprintf( szSdp + iLen, sizeof(szSdp)-iLen, " %d\r\n", iTePt );
+			if( bMcVideo ) iLen += snprintf( szSdp + iLen, sizeof(szSdp)-iLen, "i=audio component of MCVideo\r\n" );
 
 			for( itList = m_clsCodecList.begin(); itList != m_clsCodecList.end(); ++itList )
 			{
@@ -326,6 +328,7 @@ bool CSipDialog::AddSdp( CSipMessage * pclsMessage, bool bKeepSdpVersion )
 			if( iPt < 0 ) iPt = pclsCodec->m_iPt;
 
 			iLen += snprintf( szSdp + iLen, sizeof(szSdp)-iLen, "m=audio %d %s %d %d\r\n", m_iLocalRtpPort, pszRtpProto, iPt, iTePt );
+			if( bMcVideo ) iLen += snprintf( szSdp + iLen, sizeof(szSdp)-iLen, "i=audio component of MCVideo\r\n" );
 			iLen += AddCodecAttribute( szSdp + iLen, (int)sizeof(szSdp) - iLen, *pclsCodec, iPt );
 		}
 
@@ -370,12 +373,36 @@ bool CSipDialog::AddSdp( CSipMessage * pclsMessage, bool bKeepSdpVersion )
 			}
 			else if( m_iLocalVideoPort > 0 && bLocalSrtp == false )
 			{
+				const bool bMcVideo = ( m_eLocalMcMediaProfile == E_MC_MEDIA_MCVIDEO );
 				if( iVideoPt < 0 ) iVideoPt = clsVideo.m_iPt;
 				std::string strFmtp = bAnswer ? FindRemoteFmtp( pclsRemoteVideo, iVideoPt ) : clsVideo.m_strFmtp;
-				iLen += snprintf( szSdp + iLen, sizeof(szSdp)-iLen, "m=video %d RTP/AVP %d\r\na=rtpmap:%d %s\r\n",
-					m_iLocalVideoPort, iVideoPt, iVideoPt, clsVideo.GetRtpmap().c_str() );
+				iLen += snprintf( szSdp + iLen, sizeof(szSdp)-iLen, "m=video %d RTP/AVP %d\r\n", m_iLocalVideoPort, iVideoPt );
+				if( bMcVideo ) iLen += snprintf( szSdp + iLen, sizeof(szSdp)-iLen, "i=video component of MCVideo\r\n" );
+				iLen += snprintf( szSdp + iLen, sizeof(szSdp)-iLen, "a=rtpmap:%d %s\r\n", iVideoPt, clsVideo.GetRtpmap().c_str() );
 				if( strFmtp.empty() == false )
 					iLen += snprintf( szSdp + iLen, sizeof(szSdp)-iLen, "a=fmtp:%d %s\r\n", iVideoPt, strFmtp.c_str() );
+				// MCVideo — 수신자 키프레임 요청(PLI RFC 4585 · FIR RFC 5104)을 서버가 송출자에게 넘긴다(cmp_media_api.md §7.9).
+				//   answer 는 offer 의 그 PT(또는 *) rtcp-fb 를 되돌리고, offer 는 둘을 광고한다.
+				if( bMcVideo )
+				{
+					if( bAnswer && pclsRemoteVideo )
+					{
+						char szPt[16];
+						snprintf( szPt, sizeof(szPt), "%d ", iVideoPt );
+						SDP_ATTRIBUTE_LIST::const_iterator itAttr;
+						for( itAttr = pclsRemoteVideo->m_clsAttributeList.begin(); itAttr != pclsRemoteVideo->m_clsAttributeList.end(); ++itAttr )
+						{
+							if( strcasecmp( itAttr->m_strName.c_str(), "rtcp-fb" ) ) continue;
+							const std::string & v = itAttr->m_strValue;
+							if( v.compare( 0, strlen( szPt ), szPt ) && v.compare( 0, 2, "* " ) ) continue;
+							iLen += snprintf( szSdp + iLen, sizeof(szSdp)-iLen, "a=rtcp-fb:%s\r\n", v.c_str() );
+						}
+					}
+					else
+					{
+						iLen += snprintf( szSdp + iLen, sizeof(szSdp)-iLen, "a=rtcp-fb:%d nack pli\r\na=rtcp-fb:%d ccm fir\r\n", iVideoPt, iVideoPt );
+					}
+				}
 				iLen += snprintf( szSdp + iLen, sizeof(szSdp)-iLen, "a=%s\r\n", GetRtpDirectionString( m_eLocalDirection ) );
 			}
 		}
@@ -385,7 +412,15 @@ bool CSipDialog::AddSdp( CSipMessage * pclsMessage, bool bKeepSdpVersion )
 	// MCPTT floor control 미디어 (3GPP TS 24.379/24.380) — local application(floor) 포트가
 	//   설정된 경우에만 m=application 라인 추가. PTT 그룹콜 개시자 200 OK 등에서 floor 포트를
 	//   광고해 UE 가 floor dest 를 학습하게 한다. (미설정(-1)이면 VoLTE/일반 호 SDP 무변경.)
-	if( m_iLocalApplicationPort > 0 )
+	if( m_iLocalApplicationPort > 0 && m_eLocalMcMediaProfile == E_MC_MEDIA_MCVIDEO )
+	{
+		// MCVideo 전송 제어 채널 (TS 24.581 §4.3.3.1 표 4.3.3.1-1 — proto "udp", fmt "MCVideo", 포트 = RTCP 포트) + fmtp(§12.1.2).
+		//   파라미터(mc_priority·mc_transmission_ssrc …)는 호출자가 정한다(answer = offer 에 있던 것만 — §14.3.1).
+		iLen += snprintf( szSdp + iLen, sizeof(szSdp)-iLen, "m=application %d udp MCVideo\r\n", m_iLocalApplicationPort );
+		if( !m_strLocalApplicationFmtp.empty() )
+			iLen += snprintf( szSdp + iLen, sizeof(szSdp)-iLen, "a=fmtp:MCVideo %s\r\n", m_strLocalApplicationFmtp.c_str() );
+	}
+	else if( m_iLocalApplicationPort > 0 )
 	{
 		// fmtp: floor 협상 파라미터 (TS 24.380 §12.1.2.3) — 기본 mc_queueing 광고(미협상 멤버의 비선점 요청은 서버가
 		//   Deny #1). answer 는 offer 에 있던 파라미터만(§14.3.1)·암묵 요청 수락이면 mc_implicit_request(§14.3.5) —
@@ -394,6 +429,10 @@ bool CSipDialog::AddSdp( CSipMessage * pclsMessage, bool bKeepSdpVersion )
 			"m=application %d UDP MCPTT\r\na=floorid:0 mstrm:audio\r\n", m_iLocalApplicationPort );
 		if( !m_strLocalApplicationFmtp.empty() )
 			iLen += snprintf( szSdp + iLen, sizeof(szSdp)-iLen, "a=fmtp:MCPTT %s\r\n", m_strLocalApplicationFmtp.c_str() );
+	}
+	else if( strstr( szSdp, "m=application" ) == NULL && HasRemoteApplicationMedia() && m_eLocalMcMediaProfile == E_MC_MEDIA_MCVIDEO )
+	{
+		iLen += snprintf( szSdp + iLen, sizeof(szSdp)-iLen, "m=application 0 udp MCVideo\r\n" );
 	}
 	else if( strstr( szSdp, "m=application" ) == NULL && HasRemoteApplicationMedia() )
 	{
@@ -425,6 +464,7 @@ bool CSipDialog::SetLocalRtp( CSipCallRtp * pclsRtp )
 	m_iLocalApplicationPort = pclsRtp->GetApplicationPort();  // MCPTT floor 포트 (없으면 -1)
 	m_strLocalApplicationFmtp = pclsRtp->m_strApplicationFmtp;   // a=fmtp:MCPTT 파라미터 (기본 mc_queueing)
 	m_iLocalVideoPort = pclsRtp->m_iVideoPort;                 // 합성 SDP video 포트 (명시값만 — 리스트 경로는 m= 그대로)
+	m_eLocalMcMediaProfile = pclsRtp->m_eMcMediaProfile;       // MCPTT / MCVideo 제어 채널·성분 표시
 	// 미디어 SRTP — local a=crypto (AddSdp 가 방출). 빈 값 설정 = SRTP 미사용으로 해제.
 	m_strLocalCryptoTag = pclsRtp->m_strLocalCryptoTag;
 	m_strLocalCryptoSuite = pclsRtp->m_strLocalCryptoSuite;
@@ -502,6 +542,7 @@ bool CSipDialog::SelectLocalRtp( CSipCallRtp * pclsRtp )
 	pclsRtp->m_iPort = m_iLocalRtpPort;
 	pclsRtp->m_iCodec = m_iCodec;
 	pclsRtp->m_eDirection = m_eLocalDirection;
+	pclsRtp->m_eMcMediaProfile = m_eLocalMcMediaProfile;
 	pclsRtp->m_strLocalCryptoTag = m_strLocalCryptoTag;
 	pclsRtp->m_strLocalCryptoSuite = m_strLocalCryptoSuite;
 	pclsRtp->m_strLocalCryptoKey = m_strLocalCryptoKey;

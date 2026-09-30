@@ -171,5 +171,7 @@ void CspPttGroup::Clear() {
     _authorizedUserId = 0;
     _authorizedUser.clear();
     _createdAt.clear();
+    _mcvideo = false;
+    _mcvideoAttrs = CspMcVideoGroupAttrs();
     _pusers.clear();
 }

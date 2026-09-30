@@ -177,6 +177,15 @@ void CDbManager::ProbeSchema() {
         CLog::Print( LOG_INFO,
                      "[DB] ptt_user_profile.allow_cancel_* columns absent — migrate_ptt_user_profile_cancel_authz.sql "
                      "미적용. 긴급 해제는 개시자만, 경보 취소는 발령 인가로 판정" );
+    // MCVideo 서비스 표 (mcvideo_group_attrs·mcvideo_user_profile·mcvideo_affiliations —
+    // docs/design/features/mcvideo.md §5.1).
+    //   세 표는 한 마이그레이션(sql/migrate_mcvideo.sql)이 함께 만든다 — 대표 표 하나로 판정한다.
+    pRes = ExecuteSelect( "SHOW TABLES LIKE 'mcvideo_affiliations'" );
+    m_bHasMcVideoTables = pRes && mysql_num_rows( pRes ) > 0;
+    if ( pRes ) mysql_free_result( pRes );
+    if ( !m_bHasMcVideoTables )
+        CLog::Print( LOG_INFO,
+                     "[DB] mcvideo_* tables absent — migrate_mcvideo.sql 미적용. MCVideo 그룹·자격·affiliation 없음" );
 }
 
 std::string CDbManager::Ha1Col( const char *pszAlias ) const {
@@ -493,6 +502,25 @@ int CDbManager::SelectUserProfile( const std::string &strUserId, CspUserProfile 
     return 1;
 }
 
+int CDbManager::SelectMcVideoProfile( const std::string &strPttId, CspMcVideoProfile &clsProfile ) {
+    std::lock_guard<std::recursive_mutex> lock( m_mutex );
+    clsProfile = CspMcVideoProfile();
+    if ( !m_bHasMcVideoTables ) return -1;
+    if ( !m_pMysql && !Reconnect() ) return -1;
+    MYSQL_RES *pRes = ExecuteSelect( "SELECT max_video_streams, max_calls_n6 FROM mcvideo_user_profile WHERE ptt_id='" +
+                                     Escape( strPttId ) + "'" );
+    if ( !pRes ) return -1;
+    MYSQL_ROW row = mysql_fetch_row( pRes );
+    if ( !row ) {
+        mysql_free_result( pRes );
+        return 0;
+    }
+    clsProfile.m_iMaxVideoStreams = row[0] ? std::max( 1, atoi( row[0] ) ) : 1;
+    clsProfile.m_iMaxCallsN6 = row[1] ? std::max( 1, atoi( row[1] ) ) : 1;
+    mysql_free_result( pRes );
+    return 1;
+}
+
 bool CDbManager::UpdateRegisterTime( const std::string &strUserId ) {
     std::lock_guard<std::recursive_mutex> lock( m_mutex );
     if ( !m_pMysql && !Reconnect() ) return false;
@@ -519,6 +547,14 @@ bool CDbManager::UpdateLogoutTime( const std::string &strUserId ) {
         if ( ullRows > 0 ) {
             CLog::Print( LOG_INFO, "[Affiliation] de-register 회수 user=%s rows=%llu", strUserId.c_str(), ullRows );
         }
+    }
+    // MCVideo affiliation 도 등록에 묶인다(TS 24.281 §8 — 서비스별 표, 같은 규칙).
+    if ( m_bHasMcVideoTables &&
+         ExecuteQuery( "DELETE FROM mcvideo_affiliations WHERE user_id='" + Escape( strUserId ) + "'" ) ) {
+        const unsigned long long ullRows = mysql_affected_rows( m_pMysql );
+        if ( ullRows > 0 )
+            CLog::Print( LOG_INFO, "[Affiliation] de-register 회수 user=%s rows=%llu service=mcvideo",
+                         strUserId.c_str(), ullRows );
     }
     return true;
 }
@@ -617,8 +653,33 @@ bool CDbManager::SelectGroup( const std::string &strGroupId, CspPttGroup &clsGro
         mysql_free_result( pRes );
     }
 
-    CLog::Print( LOG_INFO, "[DB] SelectGroup(%s) dbId=%lld %d members", strGroupId.c_str(), clsGroup._dbId,
-                 (int)clsGroup._pusers.size() );
+    // MCVideo 서비스 속성 — 행이 있으면 이 그룹은 MCPTT 그룹이자 MCVideo 그룹이다(TS 23.280 §3, mcvideo.md §5.1)
+    if ( m_bHasMcVideoTables ) {
+        pRes = ExecuteSelect(
+            "SELECT invite_members, max_duration_sec, max_transmitters, audio_encodings, video_encodings, "
+            "reception_hang_timer_sec, min_number_to_start, COALESCE(group_priority,-1), allow_conference_state "
+            "FROM mcvideo_group_attrs WHERE group_id=" +
+            std::string( szDbId ) );
+        if ( pRes ) {
+            if ( ( row = mysql_fetch_row( pRes ) ) != nullptr ) {
+                CspMcVideoGroupAttrs &a = clsGroup._mcvideoAttrs;
+                clsGroup._mcvideo = true;
+                a.bInviteMembers = row[0] && atoi( row[0] ) != 0;
+                a.iMaxDurationSec = row[1] ? atoi( row[1] ) : 3600;
+                a.iMaxTransmitters = row[2] ? std::max( 1, atoi( row[2] ) ) : 2;
+                if ( row[3] && row[3][0] ) a.strAudioEncodings = row[3];
+                if ( row[4] && row[4][0] ) a.strVideoEncodings = row[4];
+                a.iReceptionHangTimerSec = row[5] ? atoi( row[5] ) : 30;
+                a.iMinNumberToStart = row[6] ? atoi( row[6] ) : 0;
+                a.iGroupPriority = row[7] ? atoi( row[7] ) : -1;
+                a.bAllowConferenceState = !row[8] || atoi( row[8] ) != 0;
+            }
+            mysql_free_result( pRes );
+        }
+    }
+
+    CLog::Print( LOG_INFO, "[DB] SelectGroup(%s) dbId=%lld %d members%s", strGroupId.c_str(), clsGroup._dbId,
+                 (int)clsGroup._pusers.size(), clsGroup._mcvideo ? " +mcvideo" : "" );
     return true;
 }
 
@@ -897,8 +958,9 @@ bool CDbManager::SelectGroupsByUser( const std::string &strUserId, std::vector<s
 // ─────────────────────────────────────────────
 
 bool CDbManager::InsertAffiliation( const std::string &strGroupId, const std::string &strUserId,
-                                    const std::string &strClientId, int iExpiresSec ) {
+                                    const std::string &strClientId, int iExpiresSec, EMcService eService ) {
     std::lock_guard<std::recursive_mutex> lock( m_mutex );
+    if ( !AffiliationUsable( eService ) ) return false;
     if ( !m_pMysql && !Reconnect() ) return false;
 
     // mcptt_group_id → surrogate id 를 **먼저 확정**한다.
@@ -924,37 +986,39 @@ bool CDbManager::InsertAffiliation( const std::string &strGroupId, const std::st
         ( iExpiresSec > 0 ) ? ( "DATE_ADD(NOW(), INTERVAL " + std::to_string( iExpiresSec ) + " SECOND)" ) : "NULL";
 
     // UPSERT (status 재활성). group_id 는 자기 테이블 BIGINT 조회값이므로 숫자다.
-    std::string strSql = "INSERT INTO ptt_affiliations (group_id, user_id, client_id, expires_at, status) VALUES (" +
-                         strGroupPk + ", '" + Escape( strUserId ) + "', '" + Escape( strClientId ) + "', " +
-                         strExpires +
+    std::string strSql = std::string( "INSERT INTO " ) + McAffiliationTable( eService ) +
+                         " (group_id, user_id, client_id, expires_at, status) VALUES (" + strGroupPk + ", '" +
+                         Escape( strUserId ) + "', '" + Escape( strClientId ) + "', " + strExpires +
                          ", 'affiliated') ON DUPLICATE KEY UPDATE affiliated_at=NOW(), expires_at=" + strExpires +
                          ", status='affiliated'";
     return ExecuteQuery( strSql );
 }
 
 bool CDbManager::RemoveAffiliation( const std::string &strGroupId, const std::string &strUserId,
-                                    const std::string &strClientId ) {
+                                    const std::string &strClientId, EMcService eService ) {
     std::lock_guard<std::recursive_mutex> lock( m_mutex );
+    if ( !AffiliationUsable( eService ) ) return false;
     if ( !m_pMysql && !Reconnect() ) return false;
 
-    std::string strSql =
-        "DELETE a FROM ptt_affiliations a JOIN ptt_groups g ON a.group_id=g.id "
-        "WHERE g.mcptt_group_id='" +
-        Escape( strGroupId ) + "' AND a.user_id='" + Escape( strUserId ) + "'";
+    std::string strSql = std::string( "DELETE a FROM " ) + McAffiliationTable( eService ) +
+                         " a JOIN ptt_groups g ON a.group_id=g.id "
+                         "WHERE g.mcptt_group_id='" +
+                         Escape( strGroupId ) + "' AND a.user_id='" + Escape( strUserId ) + "'";
     if ( !strClientId.empty() ) strSql += " AND a.client_id='" + Escape( strClientId ) + "'";
     return ExecuteQuery( strSql );
 }
 
-bool CDbManager::IsAffiliated( const std::string &strGroupId, const std::string &strUserId ) {
+bool CDbManager::IsAffiliated( const std::string &strGroupId, const std::string &strUserId, EMcService eService ) {
     std::lock_guard<std::recursive_mutex> lock( m_mutex );
+    if ( !AffiliationUsable( eService ) ) return false;
     if ( !m_pMysql && !Reconnect() ) return false;
 
-    std::string strSql =
-        "SELECT 1 FROM ptt_affiliations a JOIN ptt_groups g ON a.group_id=g.id "
-        "WHERE g.mcptt_group_id='" +
-        Escape( strGroupId ) + "' AND a.user_id='" + Escape( strUserId ) +
-        "' AND a.status='affiliated' "
-        "AND (a.expires_at IS NULL OR a.expires_at > NOW()) LIMIT 1";
+    std::string strSql = std::string( "SELECT 1 FROM " ) + McAffiliationTable( eService ) +
+                         " a JOIN ptt_groups g ON a.group_id=g.id "
+                         "WHERE g.mcptt_group_id='" +
+                         Escape( strGroupId ) + "' AND a.user_id='" + Escape( strUserId ) +
+                         "' AND a.status='affiliated' "
+                         "AND (a.expires_at IS NULL OR a.expires_at > NOW()) LIMIT 1";
     MYSQL_RES *pRes = ExecuteSelect( strSql );
     if ( !pRes ) return false;
     bool bFound = ( mysql_fetch_row( pRes ) != nullptr );
@@ -962,16 +1026,18 @@ bool CDbManager::IsAffiliated( const std::string &strGroupId, const std::string 
     return bFound;
 }
 
-bool CDbManager::SelectAffiliatedMembers( const std::string &strGroupId, std::vector<std::string> &vecUserIds ) {
+bool CDbManager::SelectAffiliatedMembers( const std::string &strGroupId, std::vector<std::string> &vecUserIds,
+                                          EMcService eService ) {
     std::lock_guard<std::recursive_mutex> lock( m_mutex );
+    if ( !AffiliationUsable( eService ) ) return false;
     if ( !m_pMysql && !Reconnect() ) return false;
 
-    std::string strSql =
-        "SELECT DISTINCT a.user_id FROM ptt_affiliations a JOIN ptt_groups g ON a.group_id=g.id "
-        "WHERE g.mcptt_group_id='" +
-        Escape( strGroupId ) +
-        "' AND a.status='affiliated' "
-        "AND (a.expires_at IS NULL OR a.expires_at > NOW())";
+    std::string strSql = std::string( "SELECT DISTINCT a.user_id FROM " ) + McAffiliationTable( eService ) +
+                         " a JOIN ptt_groups g ON a.group_id=g.id "
+                         "WHERE g.mcptt_group_id='" +
+                         Escape( strGroupId ) +
+                         "' AND a.status='affiliated' "
+                         "AND (a.expires_at IS NULL OR a.expires_at > NOW())";
     MYSQL_RES *pRes = ExecuteSelect( strSql );
     if ( !pRes ) return false;
     MYSQL_ROW row;
@@ -982,16 +1048,18 @@ bool CDbManager::SelectAffiliatedMembers( const std::string &strGroupId, std::ve
     return true;
 }
 
-bool CDbManager::SelectAffiliatedGroupsByUser( const std::string &strUserId, std::vector<std::string> &vecGroupIds ) {
+bool CDbManager::SelectAffiliatedGroupsByUser( const std::string &strUserId, std::vector<std::string> &vecGroupIds,
+                                               EMcService eService ) {
     std::lock_guard<std::recursive_mutex> lock( m_mutex );
+    if ( !AffiliationUsable( eService ) ) return false;
     if ( !m_pMysql && !Reconnect() ) return false;
 
     // 만료·status 로 거르지 않는다 — RemoveAffiliationsByUser 가 행 전량을 지우므로,
     //   지워질 행이 가리키는 그룹 전부가 감사 대상이다.
-    std::string strSql =
-        "SELECT DISTINCT g.mcptt_group_id FROM ptt_affiliations a JOIN ptt_groups g ON a.group_id=g.id "
-        "WHERE a.user_id='" +
-        Escape( strUserId ) + "'";
+    std::string strSql = std::string( "SELECT DISTINCT g.mcptt_group_id FROM " ) + McAffiliationTable( eService ) +
+                         " a JOIN ptt_groups g ON a.group_id=g.id "
+                         "WHERE a.user_id='" +
+                         Escape( strUserId ) + "'";
     MYSQL_RES *pRes = ExecuteSelect( strSql );
     if ( !pRes ) return false;
     MYSQL_ROW row;
@@ -1002,15 +1070,19 @@ bool CDbManager::SelectAffiliatedGroupsByUser( const std::string &strUserId, std
     return true;
 }
 
-bool CDbManager::SelectActiveAffiliationsByUser( const std::string &strUserId, std::vector<CAffiliationRow> &vecRows ) {
+bool CDbManager::SelectActiveAffiliationsByUser( const std::string &strUserId, std::vector<CAffiliationRow> &vecRows,
+                                                 EMcService eService ) {
     std::lock_guard<std::recursive_mutex> lock( m_mutex );
+    if ( !AffiliationUsable( eService ) ) return false;
     if ( !m_pMysql && !Reconnect() ) return false;
 
     // 만료 시각은 UNIX 초로 받는다 — DATETIME 은 세션 시간대 기준이라 문자열로 받으면 xs:dateTime 의 시간대를
     //   붙일 근거가 없다. UNIX_TIMESTAMP 는 같은 세션 시간대로 해석하므로 UTC 로 바로 옮길 수 있다.
     std::string strSql =
         "SELECT g.mcptt_group_id, a.client_id, IFNULL(UNIX_TIMESTAMP(a.expires_at),0) "
-        "FROM ptt_affiliations a JOIN ptt_groups g ON a.group_id=g.id "
+        "FROM " +
+        std::string( McAffiliationTable( eService ) ) +
+        " a JOIN ptt_groups g ON a.group_id=g.id "
         "WHERE a.user_id='" +
         Escape( strUserId ) +
         "' AND a.status='affiliated' "
@@ -1030,11 +1102,13 @@ bool CDbManager::SelectActiveAffiliationsByUser( const std::string &strUserId, s
     return true;
 }
 
-bool CDbManager::RemoveAffiliationsByUser( const std::string &strUserId ) {
+bool CDbManager::RemoveAffiliationsByUser( const std::string &strUserId, EMcService eService ) {
     std::lock_guard<std::recursive_mutex> lock( m_mutex );
+    if ( !AffiliationUsable( eService ) ) return false;
     if ( !m_pMysql && !Reconnect() ) return false;
 
-    return ExecuteQuery( "DELETE FROM ptt_affiliations WHERE user_id='" + Escape( strUserId ) + "'" );
+    return ExecuteQuery( std::string( "DELETE FROM " ) + McAffiliationTable( eService ) + " WHERE user_id='" +
+                         Escape( strUserId ) + "'" );
 }
 
 bool CDbManager::LoadAllGroups( CGroupMap &clsMap ) {

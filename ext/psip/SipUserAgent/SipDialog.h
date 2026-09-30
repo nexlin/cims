@@ -112,6 +112,9 @@ public:
 	// 합성 SDP 의 local video 포트. -1 이면 offer 에 m=video 를 싣지 않고, 상대 offer 의 m=video 는 port 0 거절.
 	int					m_iLocalVideoPort;
 
+	// 합성 SDP 의 MC 미디어 프로파일(MCPTT / MCVideo — 제어 채널 m-line·i=·rtcp-fb) — CSipCallRtp 에서
+	EMcMediaProfile	m_eLocalMcMediaProfile;
+
 	// ── 미디어 SRTP (SDES — media_security.md §5.1). local suite 설정 시 AddSdp 가
 	//    m=audio 를 RTP/SAVP + a=crypto 로 방출한다. key = base64(key||salt) 원문. ──
 	std::string	m_strLocalCryptoTag;
