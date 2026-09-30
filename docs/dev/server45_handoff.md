@@ -471,8 +471,8 @@ C5 가 이미 Ack·End Response·End Request 로 답한다. ③ 제안 7 채택 
 
 **엔진 결함 하나(.45, MCVideo 와 무관)** — `cimsue_test` 가 간헐적으로 abort(전체 실행 7회 중 1~2회): 계정을 지운 뒤 그 계정으로 보낸 요청(sendRequest)의 응답이 오면
 pjsua2 `Endpoint::on_acc_send_request` → `Account::lookup` 이 무효 계정 id 로 `pjsua_acc_get_user_data` 를 불러 assert(`pjsua_acc.c` `on_send_request` 에 계정 유효 검사가
-없다 — pjproject 2.16 원본부터). 재현 = MCVideo 시험을 빼도 `Msrp.EngineSendsLargeGroupSdsOverMediaPlane` 에서. 단말에서도 로그아웃 직후 늦은 MESSAGE·PUBLISH
-응답이면 같은 경로라 따로 고친다(ext/pjproject 한 줄 가드).
+없다 — pjproject 2.16 원본부터). 시험 쪽은 `Msrp.EngineSendsLargeGroupSdsOverMediaPlane` 이 마지막 MESSAGE 결과를 받은 뒤 끝나게 고쳐 게이트가 흔들리지 않는다.
+단말에서도 로그아웃 직후 늦은 MESSAGE·PUBLISH 응답이면 같은 경로라 엔진 쪽 수정(ext/pjproject 한 줄 가드)은 사용자 결정으로 남긴다.
 
 **C3·C4 — 단말 등록·affiliation·그룹 호 + 전송 제어 결선 (.45 → .48)** — [ue_sdk.md](../design/features/ue_sdk.md) §4.6 · [mcvideo.md](../design/features/mcvideo.md) §5.4.
 K3 골든을 SDK 가 **만든 메시지**(01·02·03·05·08 모양)와 대조하고 **읽는 메시지**(04·06·07·09)로 답하는 루프백 시험 `McvCall` 5 + 경계 코덱 `McvSip` 4(mcvideo-info·pidf 는

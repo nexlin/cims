@@ -2329,7 +2329,9 @@ static int startMcVideo(Engine::Impl* o, int accountId, const std::string& group
         ip.clientId = cfg.effectiveMcpttClientId();                       // 단일 MC 서비스 신원(mcvideo.md §7 D1)
         p1.body = mcvideo::info(ip);
         prm.txOption.multipartParts.push_back(p1);
-        call->makeCall(target, prm);
+        // name-addr 로 넘긴다 — addr-spec 이면 pjsip 이 To 를 꺾쇠 없이 찍어 세션 식별자의 `;gr=` 가 To 헤더 파라미터로 읽힌다
+        //   (RFC 3261 §20 — URI 에 `;`·`,`·`?` 가 있으면 `<>` 로 감싼다). R-URI 는 그대로 URI 다.
+        call->makeCall(target.front() == '<' ? target : "<" + target + ">", prm);
         // makeCall 이 개시 offer 를 동기적으로 만들었다 — 이어지는 offer(re-INVITE)는 mc_granted·mc_implicit_request 없이(§14.5)
         f.granted = false;
         f.implicitRequest = false;

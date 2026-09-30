@@ -627,7 +627,7 @@ TEST(McvCall, ChatJoinTransmitAndRelease) {
     dump("03_chat_join_invite", inv);
     const std::string g03 = sipFixture("03_chat_join_invite.txt");
     EXPECT_EQ(inv.substr(0, inv.find("\r\n")), std::string("INVITE ") + kPsi + " SIP/2.0");   // R-URI = 참여 MCVideo 기능 PSI
-    EXPECT_NE(headerOf(inv, "To").find(kPsi), std::string::npos);
+    EXPECT_EQ(headerOf(inv, "To"), std::string("<") + kPsi + ">");     // 골든 03 모양(name-addr)
     EXPECT_EQ(headersOf(inv, "Accept-Contact"), headersOf(g03, "Accept-Contact"));
     EXPECT_EQ(headerOf(inv, "P-Preferred-Service"), headerOf(g03, "P-Preferred-Service"));
     const std::string c = headerOf(inv, "Contact");
@@ -753,10 +753,9 @@ TEST(McvCall, RejoinAndWrongGroupType) {
     dump("08_prearranged_rejoin_invite", replaceAll(inv, "127.0.0.1:" + std::to_string(r.csp.port) + ";transport=udp",
                                                     "csp.ptt.cims.example.kr:5061;transport=tls"));
     EXPECT_EQ(inv.substr(0, inv.find("\r\n")), "INVITE " + session + " SIP/2.0");
-    // To = 세션 식별자 — port·transport 는 To 에 둘 수 없어(RFC 3261 §19.1.1 표 1) pjsip 이 뺀다. 세션은 사용자부·gr 로 가른다
-    const std::string to = headerOf(inv, "To");
-    EXPECT_NE(to.find("sip:g103@127.0.0.1"), std::string::npos) << to;
-    EXPECT_NE(to.find("gr=1790775900654321-1"), std::string::npos) << to;
+    // To = 세션 식별자(골든 08 모양) — port·transport 는 To 에 둘 수 없어(RFC 3261 §19.1.1 표 1) pjsip 이 빼고, gr 은 URI 파라미터라
+    //   꺾쇠 안에 남는다(RFC 3261 §20 — 꺾쇠가 없으면 To 헤더 파라미터로 읽힌다). 세션은 사용자부·gr 로 가른다
+    EXPECT_EQ(headerOf(inv, "To"), "<sip:g103@127.0.0.1;gr=1790775900654321-1>");
     EXPECT_EQ(partOf(inv, mcvideo::kCtInfo), partOf(sipFixture("08_prearranged_rejoin_invite.txt"), mcvideo::kCtInfo));
     std::vector<std::string> fm = sdpLines(partOf(inv, "application/sdp"), "a=fmtp:MCVideo ");
     ASSERT_EQ(fm.size(), 1u);

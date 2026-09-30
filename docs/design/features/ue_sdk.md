@@ -406,7 +406,7 @@ MCVideo PSI. 동작(구현 — 시험 `McvSip`·`McvCall`, 계약 K3 골든과 �
   multipart = mcvideo-info(`<mcvideo-request-uri>` = 자기 MCVideo ID) + pidf(entity = MCVideo ID, tuple id = MC client ID(`effectiveMcpttClientId`),
   `mcvideoPI10:affiliation group` 들, 게시마다 유일한 `p-id`). ETag 조건부 갱신·412 초기 재발행은 MCPTT affiliation 과 같은 경로(키 = 계정의 MCVideo 게시 하나).
 - **그룹 호**(§9.2.1 prearranged · §9.2.2 chat) — `joinVideoGroupCall` INVITE: Request-URI = `mcvideoServerUri`(재합류는 `sessionUri`, §9.2.1.2.4),
-  Accept-Contact 둘(`+g.3gpp.mcvideo`·icsi-ref, require;explicit)·`P-Preferred-Service`, Contact = 계정 Contact URI + MCVideo 태그만, multipart =
+  To = 같은 URI 의 name-addr(`<sip:g103@…;gr=…>` — 꺾쇠가 없으면 `;gr=` 가 To 헤더 파라미터로 읽힌다, RFC 3261 §20), Accept-Contact 둘(`+g.3gpp.mcvideo`·icsi-ref, require;explicit)·`P-Preferred-Service`, Contact = 계정 Contact URI + MCVideo 태그만, multipart =
   mcvideo-info(session-type·request-uri = 그룹·client-id) + SDP(m=audio → m=video → `m=application <port> udp MCVideo` + fmtp `;` 구분 —
   `mc_queueing`·`mc_priority`·`mc_reception_priority`·암묵 요청이면 `mc_granted;mc_implicit_request`·`mc_transmission_ssrc` = 이 호에서 고른 값).
   미디어 `i=`(audio/video component of MCVideo — §6.2.1 2)c)·3)d))는 pjmedia SDP 가 담지 못해 송신 직전 pjsip 모듈(`mod-cimsue-txfix`, 인쇄 모듈 바로

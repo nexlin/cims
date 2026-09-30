@@ -295,6 +295,9 @@ TEST(Msrp, EngineSendsLargeGroupSdsOverMediaPlane) {
         ASSERT_TRUE(mcdata::parse(headerOf(msg, "Content-Type"), sipBodyOf(msg), parsed));
         EXPECT_EQ(parsed.msgId, small.msgId);
         sip.reply(msg, 200, "OK");
+        // 그 200 을 엔진이 처리한 뒤에 끝낸다 — 먼저 stop 이 계정을 지우면 늦은 응답이 무효 계정으로 올라와 pjsua2 on_acc_send_request 의
+        //   pjsua_acc_get_user_data 가 assert 한다(pjsua 에 계정 유효 검사가 없다 — server45_handoff §11 «엔진 결함 하나»)
+        ASSERT_TRUE(l.wait([&] { for (auto& r : l.results) if (r.token == small.token) return true; return false; }));
         EXPECT_FALSE(eng.sendGroupSds(acc, "g005", "hi", true, "not-hex").ok);
     }
     eng.stop();
