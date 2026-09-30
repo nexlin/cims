@@ -16,8 +16,9 @@
 //              [--transmit-at S --transmit-len S] [--accept] [--duration S]
 //              (MCVideo 그룹 호 — TS 24.281 §9.2.1 prearranged · §9.2.2 chat, 전송 제어 TS 24.581. --transmit-at = 그 시각에 [영상 보내기]
 //               (Transmission Request) → --transmit-len 뒤 [보내기 끝], --accept = 알림 온 송출마다 [받기](Receive Media Request),
-//               --implicit = 개시 INVITE 가 암묵적 송출 요청. 계정 옵션 --mcvideo · --mcvideo-psi 필요. affiliation 은 싣지 않는다 — chat 합류가 곧
-//               affiliation(§8.1)이고 명시 affiliation PUBLISH 는 CSP A9 배포 뒤)
+//               --implicit = 개시 INVITE 가 암묵적 송출 요청. 계정 옵션 --mcvideo · --mcvideo-psi 필요. chat 합류는 곧 affiliation(§8.1)이고,
+//               prearranged 팬아웃을 받을 멤버는 계정 옵션 --affiliate-mcvideo G 로 명시 affiliation(§8.2 PUBLISH — MCVideo 제휴를 가르는
+//               CSP(A9) 가 배포된 서버에만))
 //   cimsue-cli [계정 옵션] video-answer [--transmit-at S --transmit-len S] [--accept] [--duration S]
 //              (제어 기능의 MCVideo 멤버 초대(§9.2.1.3)를 기다린다 — 코어가 자동 수락(autoAnswerMcvideo), 뒤는 video-call 과 같다)
 //   cimsue-cli [계정 옵션] alert <groupId> [--cancel] [--originated-by ID] [--cancel-group-emergency]   (긴급 경보 MESSAGE, §12.1.1.1·§12.1.1.2)
@@ -48,7 +49,7 @@
 //           [--mcptt-psi URI] [--mcdata-psi URI] (참여 기능 PSI — --from-profile 이면 ue-init-config(TS 24.484 §7.2)에서 채우고 명시값이 덮는다)
 //           [--instance-id URN] (+sip.instance · ue-init-config 의 MCS UE ID)
 //           [--mcvideo] (REGISTER 에 MCVideo 태그 — TS 24.281 §7.2.1AA) [--mcvideo-psi URI] (참여 MCVideo 기능 PSI — --from-profile ptt 면
-//           ue-init-config 의 MCVideo-Service-Details 에서 채운다)
+//           ue-init-config 의 MCVideo-Service-Details 에서 채운다) [--affiliate-mcvideo G[,G2]] (MCVideo affiliation — TS 24.281 §8.2)
 // 종료 코드: 0 성공 / 2 인자 / 3 등록·로그인 실패 / 4 호 실패·시한 / 5 미디어 없음 / 6 floor·송출 미획득 / 7 SDS 실패 / 8 관제 실패
 #include <chrono>
 #include <csignal>
@@ -95,6 +96,7 @@ struct Opts {
     std::string target;
     std::string text;
     std::vector<std::string> affiliate;
+    std::vector<std::string> affiliateMcvideo;                          // --affiliate-mcvideo — MCVideo 서비스 affiliation(TS 24.281 §8.2)
     int durationSec = 8;
     int holdSec = 0;
     bool video = false;
@@ -143,6 +145,7 @@ void usage() {
         "        [--instance-id URN] (+sip.instance · ue-init-config 의 MCS UE ID. --from-profile ptt 면 ue-init-config 로 PSI 를 채운다)\n"
         "        [--mcptt-video]   (착신 그룹콜의 m=video 를 영상까지 수락)\n"
         "        [--mcvideo] [--mcvideo-psi URI]   (MCVideo 등록 태그 · 참여 MCVideo 기능 PSI — TS 24.281 §7.2.1AA·§9.2.1.2.1.1)\n"
+        "        [--affiliate-mcvideo G,..]   (MCVideo affiliation — 관심 그룹 전부를 한 PUBLISH 로, TS 24.281 §8.2.1.2)\n"
         "        또는 --csc-host H [--csc-port N] --user U --pw P [--csc-ca FILE] --from-profile volte|ptt\n"
         "  register [--hold S] | call TARGET [--duration S] [--video] | answer [--duration S] [--transfer-to X]\n"
         "  group-call GROUP [--duration S] [--ptt-at S --ptt-len S] [--listen-only] [--emergency] [--broadcast] [--implicit] [--video]\n"
@@ -183,6 +186,7 @@ bool parse(int argc, char** argv, Opts& o) {
             if (opt("--display-name", [&](const std::string& v) { o.acc.displayName = v; })) continue;
             if (opt("--mcptt-id", [&](const std::string& v) { o.acc.mcpttId = v; })) continue;
             if (opt("--affiliate", [&](const std::string& v) { std::stringstream ss(v); std::string g; while (std::getline(ss, g, ',')) if (!g.empty()) o.affiliate.push_back(g); })) continue;
+            if (opt("--affiliate-mcvideo", [&](const std::string& v) { std::stringstream ss(v); std::string g; while (std::getline(ss, g, ',')) if (!g.empty()) o.affiliateMcvideo.push_back(g); })) continue;
             if (opt("--srtp", [&](const std::string& v) { o.acc.mediaSecurity = v == "required" ? MediaSecurity::Required : v == "optional" ? MediaSecurity::Optional : MediaSecurity::Off; })) continue;
             if (opt("--sec", [&](const std::string& v) { std::stringstream ss(v); std::string m; while (std::getline(ss, m, ',')) if (!m.empty()) o.acc.secMechanisms.push_back(m); })) continue;
             if (opt("--tls-ca", [&](const std::string& v) { o.tlsCaFile = v; })) continue;
@@ -781,12 +785,17 @@ int main(int argc, char** argv) {
     }
     s.code = ls.reg.code; s.reason = ls.reg.reason;
 
-    for (auto& g : o.affiliate) {
-        int64_t tok = eng.affiliate(acc, g, true);
-        bool got = ls.waitFor([&] { return ls.results.count(tok) > 0; }, 10);
-        if (!got || ls.results[tok].code / 100 != 2)
-            std::fprintf(stderr, "[cimsue-cli] affiliate %s failed (code=%d)\n", g.c_str(), got ? ls.results[tok].code : 0);
-    }
+    // affiliation — MCPTT(--affiliate) · MCVideo(--affiliate-mcvideo, 관심 그룹 전부를 한 PUBLISH 로 — TS 24.281 §8.2.1.2)
+    auto affiliateAll = [&](const std::vector<std::string>& groups, McService svc, const char* name) {
+        for (auto& g : groups) {
+            int64_t tok = eng.affiliate(acc, g, true, svc);
+            bool got = ls.waitFor([&] { return ls.results.count(tok) > 0; }, 10);
+            if (!got || ls.results[tok].code / 100 != 2)
+                std::fprintf(stderr, "[cimsue-cli] affiliate(%s) %s failed (code=%d)\n", name, g.c_str(), got ? ls.results[tok].code : 0);
+        }
+    };
+    affiliateAll(o.affiliate, McService::Mcptt, "mcptt");
+    affiliateAll(o.affiliateMcvideo, McService::McVideo, "mcvideo");
 
     int rc = 0;
     auto disconnected = [&](int callId) { auto it = ls.calls.find(callId); return it != ls.calls.end() && it->second.state == CallState::Disconnected; };
@@ -802,6 +811,7 @@ int main(int argc, char** argv) {
             }
         }
         for (auto& g : o.affiliate) eng.affiliate(acc, g, false);
+        for (auto& g : o.affiliateMcvideo) eng.affiliate(acc, g, false, McService::McVideo);
         eng.unregisterAccount(acc);
         ls.waitFor([&] { return ls.reg.state == RegState::Unregistered || ls.reg.state == RegState::Failed; }, 5);
         eng.stop();

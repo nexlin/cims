@@ -453,8 +453,8 @@ cimsue-cli [계정] video-call <groupId> [--prearranged] [--queueing] [--priorit
                   # MCVideo 그룹 호(TS 24.281 §9.2.1·§9.2.2) — transmit-at 에 Transmission Request → transmit-len 뒤 End Request,
                   #   --accept = 알림 온 송출마다 Receive Media Request. outcome tx_granted·tx_rejected·tx_revoked·tx_ended·rx_notified·rx_granted·
                   #   rx_rejected·session_uri·tc_local_port·tc_remote, 송출 미허가 = 종료코드 6. 계정 --mcvideo(REGISTER 태그)·--mcvideo-psi URI
-                  #   (--from-profile ptt 면 ue-init-config MCVideo-Service-Details). affiliation PUBLISH 는 싣지 않는다(chat 합류 = affiliation §8.1 —
-                  #   명시 affiliation 은 CSP A9 뒤)
+                  #   (--from-profile ptt 면 ue-init-config MCVideo-Service-Details). chat 합류 = affiliation(§8.1), prearranged 팬아웃을 받을 멤버는
+                  #   계정 --affiliate-mcvideo G[,G2](등록 뒤 PUBLISH — 관심 그룹 전부 · 끝나면 해제, Expires 0 — §8.2.1.2)
 cimsue-cli [계정] video-answer [--transmit-at S --transmit-len S] [--accept] [--duration S]   # 제어 기능 멤버 초대 대기(코어 자동 수락) → video-call 과 같다
 cimsue-cli [계정] alert <groupId> [--cancel] [--originated-by ID] [--cancel-group-emergency]   # 긴급 경보 MESSAGE
 cimsue-cli [계정] sds <groupId> <text>           # 최종 응답까지 — [계정] --cplane-max N 을 넘으면 MSRP(outcome plane=media)
