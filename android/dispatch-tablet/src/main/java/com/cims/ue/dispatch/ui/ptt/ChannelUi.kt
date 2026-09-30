@@ -17,7 +17,7 @@ package com.cims.ue.dispatch.ui.ptt
  */
 data class ChannelRowUi(
     val id: String,
-    /** 1줄 왼쪽. 내 채널은 핀 번호가 붙는다("1. 순찰1"). */
+    /** 1줄 왼쪽 — 채널 이름. */
     val title: String,
     /** 2줄 — 발언자·사유 등 «지금 무슨 일이 있는가». 비면 2줄을 그리지 않는다. */
     val subtitle: String = "",
@@ -36,12 +36,19 @@ data class ChannelRowUi(
     val targeted: Boolean = false,
     /** 청취 토글 — 범위 채널만. null = 내 채널(토글 없음). */
     val listening: Boolean? = null,
+    /**
+     * 음소거 토글 — 참여 중인 전이중 개별 통화만. null = 토글 없음(반이중은 floor 가 마이크를 연다).
+     * [canTarget] 과 한 행에 같이 서지 않는다 — 전이중은 발언 대상이 될 수 없어 그 자리를 음소거가 쓴다.
+     */
+    val muted: Boolean? = null,
+    /** 임박 위험 — 긴급이 아닐 때만 선다(서열 긴급 › 임박, 한 행에 둘을 같이 그리지 않는다). */
+    val imminentPeril: Boolean = false,
 )
 
-/** 내 채널 카드 → 행. 핀 번호는 `Ctrl+n` 의 근육 기억이라 제목에 붙여 늘 보이게 한다(§6.3). */
+/** 내 채널 카드 → 행. */
 internal fun ChannelCard.toRowUi(targeted: Boolean): ChannelRowUi = ChannelRowUi(
     id = id,
-    title = "$index. $title",
+    title = title,
     subtitle = line2,
     state = stateText,
     participants = participants,
@@ -52,7 +59,9 @@ internal fun ChannelCard.toRowUi(targeted: Boolean): ChannelRowUi = ChannelRowUi
     broadcast = isBroadcast,
     canTarget = canCheck,
     targeted = targeted,
-    listening = null)
+    listening = null,
+    muted = muted.takeIf { canMute },
+    imminentPeril = imminentPeril && !emergency)
 
 /** 범위 채널 카드 → 행. 발언 대상이 될 수 없다 — 청취는 관측이지 참여가 아니다(§5.6). */
 internal fun ScopedCard.toRowUi(): ChannelRowUi = ChannelRowUi(
@@ -67,4 +76,6 @@ internal fun ScopedCard.toRowUi(): ChannelRowUi = ChannelRowUi(
     emergency = emergency,
     canTarget = false,
     targeted = false,
-    listening = listening)
+    listening = listening,
+    muted = null,
+    imminentPeril = imminentPeril && !emergency)

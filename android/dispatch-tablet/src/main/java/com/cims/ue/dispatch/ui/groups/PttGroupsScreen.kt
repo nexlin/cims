@@ -27,7 +27,7 @@ import com.cims.ue.dispatch.session.DirectoryBook
 import com.cims.ue.dispatch.session.ManagedGroup
 
 @Composable
-fun PttGroupsScreen(vm: PttGroupsViewModel, onGoDispatch: () -> Unit, modifier: Modifier = Modifier) {
+fun PttGroupsScreen(vm: PttGroupsViewModel, onOpenChannel: (String) -> Unit, modifier: Modifier = Modifier) {
     val rows by vm.rows.collectAsStateWithLifecycle()
     val sel by vm.selected.collectAsStateWithLifecycle()
     val form by vm.form.collectAsStateWithLifecycle()
@@ -48,7 +48,7 @@ fun PttGroupsScreen(vm: PttGroupsViewModel, onGoDispatch: () -> Unit, modifier: 
         act = GroupsActions(
             reload = vm::load, newGroup = vm::newGroup, setFilter = vm::setFilter, search = vm::search,
             select = vm::select, edit = vm::edit, delete = vm::delete,
-            openChannel = { g -> vm.openChannel(g, onGoDispatch) }),
+            openChannel = { g -> vm.openChannel(g, onOpenChannel) }),
         // 편집 폼은 입력 상태가 VM 에 있어 통째로 넘긴다 — 판정 대상이 밀도가 아니라 폼 동작이다.
         editPane = { form?.let { EditPane(vm, it) } },
         modifier = modifier)
@@ -250,7 +250,8 @@ private fun DetailPane(ui: GroupsUi, act: GroupsActions, g: ManagedGroup) {
                 Text("삭제", color = MaterialTheme.colorScheme.error)
             }
             Spacer(Modifier.weight(1f))
-            Button(onClick = { act.openChannel(g) }) {
+            // 채널이 있는 그룹만 — 멤버(① 카드)·청취 범위(② 행). 관리 범위만 있으면 태블릿에 갈 채널이 없다.
+            if (g.hasChannel) Button(onClick = { act.openChannel(g) }) {
                 Text(if (g.isMember) "채널로 (합류)" else "채널로")
             }
         }
@@ -258,7 +259,7 @@ private fun DetailPane(ui: GroupsUi, act: GroupsActions, g: ManagedGroup) {
 
     if (confirmDelete) AlertDialog(
         onDismissRequest = { confirmDelete = false },
-        title = { Text("그룹 삭제") },
+        title = { com.cims.ue.dispatch.ui.ForwardPttKeys(); Text("그룹 삭제") },
         text = { Text("«${g.name.ifBlank { g.id }}» 을(를) 지웁니다. 되돌릴 수 없습니다.") },
         confirmButton = {
             TextButton(onClick = { confirmDelete = false; act.delete(g) }) {
@@ -349,11 +350,17 @@ private fun EditPane(vm: PttGroupsViewModel, f: EditForm) {
                     }
                 }
                 HorizontalDivider()
-                OutlinedTextField(value = f.search, onValueChange = { v -> vm.update { it.copy(search = v) } },
-                    placeholder = { Text("PTT 주소록 검색", fontSize = Type.body) }, singleLine = true,
-                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                    textStyle = MaterialTheme.typography.bodySmall)
                 val cands by vm.candidates.collectAsStateWithLifecycle()
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedTextField(value = f.search, onValueChange = { v -> vm.update { it.copy(search = v) } },
+                        placeholder = { Text("PTT 주소록 검색", fontSize = Type.body) }, singleLine = true,
+                        modifier = Modifier.weight(1f).padding(vertical = 4.dp),
+                        textStyle = MaterialTheme.typography.bodySmall)
+                    // 검색으로 좁힌 뒤 한 번에 — 보이는 후보만 넣는다(데스크톱 [표시된 전원 추가]).
+                    TextButton(onClick = vm::addAllShown, enabled = cands.isNotEmpty()) {
+                        Text("표시된 ${cands.size}명 추가", fontSize = Type.meta)
+                    }
+                }
                 LazyColumn(Modifier.weight(1f)) {
                     items(cands, key = { it.msisdn }) { c ->
                         Row(Modifier.fillMaxWidth().clickable { vm.addMember(c.msisdn, c.name) }

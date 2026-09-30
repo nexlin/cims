@@ -59,7 +59,7 @@ fun SmsPane(vm: SmsMessagesViewModel, modifier: Modifier = Modifier) {
     SmsPaneContent(
         threads = threads, thread = thread, peer = peer, title = title,
         available = vm.available, external = external,
-        onPick = vm::pick, onSend = vm::send, onNew = { picking = true }, modifier = modifier)
+        onPick = vm::pick, onSend = vm::send, onResend = vm::resend, onNew = { picking = true }, modifier = modifier)
 }
 
 /** 본문 — **순수 컴포저블**. */
@@ -73,6 +73,8 @@ fun SmsPaneContent(
     external: Boolean = false,
     onPick: (String) -> Unit = {},
     onSend: (String) -> Unit = {},
+    /** 실패한 발신 말풍선의 [재전송]. */
+    onResend: (Message) -> Unit = {},
     onNew: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
@@ -140,6 +142,8 @@ fun SmsPaneContent(
                                 Text(m.text, fontSize = Type.strong)
                                 Text(hhmm.format(Date(m.atMs)) + sendMark(m.state),
                                     fontSize = Type.micro)
+                                if (m.outgoing && m.state == com.cims.ue.dispatch.session.SendState.FAILED)
+                                    com.cims.ue.dispatch.ui.ptt.ResendButton { onResend(m) }
                             }
                         }
                     }

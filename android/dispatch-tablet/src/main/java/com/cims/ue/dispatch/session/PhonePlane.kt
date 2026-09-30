@@ -7,6 +7,8 @@ package com.cims.ue.dispatch.session
 
 import com.cims.ue.sdk.CimsResult
 import com.cims.ue.sdk.DialogInfo
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 /** dialog 한 줄 — 그룹원 띠·대표번호 대기열·⑥ 내역의 소스. */
 data class DialogRow(
@@ -99,6 +101,43 @@ data class CallLogRow(
         peer.isBlank() || peer == number -> number
         else -> "$peer $number"
     }
+
+    /**
+     * 행에서 곧바로 다시 걸고 문자를 보낼 수 있는가 — 상대가 있는 1:1 통화(착신·부재·발신·전달)만. 당겨받기는 남의 호를
+     * 가져온 것이고 감청은 통화 당사자가 아니다(데스크톱 `ActivityRow.CanRedial` 과 같은 종류).
+     */
+    val canRedial: Boolean get() = number.isNotBlank() &&
+        kind in setOf(CallLogKind.ANSWERED, CallLogKind.MISSED, CallLogKind.OUTGOING, CallLogKind.TRANSFER)
+}
+
+/**
+ * ⑥ 통화내역 CSV — 화면 표와 같은 열(시작·상대·번호·종류·응답·종료·통화·울림 + 대표번호 경유·감시 대상·비고), 시간순.
+ * 엑셀이 한글을 깨지 않게 UTF-8 BOM 은 쓰는 쪽이 붙인다(데스크톱 `ActivityLog.ExportCsv` 와 같은 규약).
+ */
+internal fun callLogCsv(rows: List<CallLogRow>, zone: java.util.TimeZone = java.util.TimeZone.getDefault()): String {
+    val t = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.ROOT).apply { timeZone = zone }
+    fun q(s: String) = "\"" + s.replace("\"", "\"\"") + "\""
+    val sb = StringBuilder("start,peer,number,kind,answer,end,talk_sec,ring_sec,via_pilot,others,note\r\n")
+    rows.sortedBy { it.startedAtMs }.forEach { r ->
+        sb.append(t.format(java.util.Date(r.startedAtMs))).append(',')
+            .append(q(r.peer)).append(',').append(q(r.number)).append(',').append(q(callLogKindText(r.kind))).append(',')
+            .append(r.answeredAtMs?.let { t.format(java.util.Date(it)) }.orEmpty()).append(',')
+            .append(t.format(java.util.Date(r.endedAtMs))).append(',')
+            .append(r.durationSec).append(',').append(r.ringSec).append(',')
+            .append(if (r.viaPilot) 1 else 0).append(',').append(if (r.others) 1 else 0).append(',')
+            .append(q(r.text)).append("\r\n")
+    }
+    return sb.toString()
+}
+
+/** 종류 낱말 — ⑥ 표와 CSV 가 같은 말을 쓴다. */
+internal fun callLogKindText(k: CallLogKind): String = when (k) {
+    CallLogKind.ANSWERED -> "착신 응답"
+    CallLogKind.MISSED -> "부재"
+    CallLogKind.OUTGOING -> "발신"
+    CallLogKind.PICKUP -> "당겨받기"
+    CallLogKind.TRANSFER -> "전달"
+    CallLogKind.MONITOR -> "감청"
 }
 
 enum class CallLogKind { ANSWERED, MISSED, OUTGOING, PICKUP, TRANSFER, MONITOR }
@@ -113,10 +152,10 @@ data class DeskTally(
 
 /** 발신 — 번호 또는 SIP URI. 전화 계정으로 건다. */
 suspend fun DispatchSession.dial(target: String): CimsResult<Unit> {
-    val a = phoneAccount ?: return CimsResult.fail(-1, "전화 계정 없음")
+    val a = phoneAccount ?: return report(TextArea.CALL, CimsResult.fail(-1, "전화 계정 없음"))
     val r = a.dial(target.trim())
     if (r.ok) noteOperation(r.value!!.id, Operation.DIAL)
-    return if (r.ok) CimsResult.ok(Unit) else CimsResult.fail(r.code, r.reason)
+    return report(TextArea.CALL, if (r.ok) CimsResult.ok(Unit) else CimsResult.fail(r.code, r.reason))
 }
 
 /**
@@ -124,39 +163,128 @@ suspend fun DispatchSession.dial(target: String): CimsResult<Unit> {
  * 응답은 호 상태로 온다(200 성공 / 403 권한 / 404 대상 없음 / 489 이미 응답됨).
  */
 suspend fun DispatchSession.pickup(number: String = ""): CimsResult<Unit> {
-    val a = phoneAccount ?: return CimsResult.fail(-1, "전화 계정 없음")
+    val a = phoneAccount ?: return report(TextArea.PICKUP, CimsResult.fail(-1, "전화 계정 없음"))
     val code = settingsSnapshot().pickupFeatureCode
     val r = a.pickup(code, number)
     if (r.ok) noteOperation(r.value!!.id, Operation.PICKUP)
-    return if (r.ok) CimsResult.ok(Unit) else CimsResult.fail(r.code, r.reason)
+    return report(TextArea.PICKUP, if (r.ok) CimsResult.ok(Unit) else CimsResult.fail(r.code, r.reason))
 }
 
 /** 착신 응답. */
 suspend fun DispatchSession.answer(callId: Int): CimsResult<Unit> =
-    engineOrNull()?.call(callId)?.answer() ?: CimsResult.fail(-1, "엔진 없음")
+    report(TextArea.CALL, engineOrNull()?.call(callId)?.answer() ?: CimsResult.fail(-1, "엔진 없음"))
 
 suspend fun DispatchSession.hangup(callId: Int): CimsResult<Unit> =
-    engineOrNull()?.call(callId)?.hangup() ?: CimsResult.fail(-1, "엔진 없음")
+    report(TextArea.CALL, engineOrNull()?.call(callId)?.hangup() ?: CimsResult.fail(-1, "엔진 없음"))
 
 suspend fun DispatchSession.hold(callId: Int, on: Boolean): CimsResult<Unit> {
-    val c = engineOrNull()?.call(callId) ?: return CimsResult.fail(-1, "엔진 없음")
-    return if (on) c.hold() else c.resume()
+    val c = engineOrNull()?.call(callId) ?: return report(TextArea.CALL, CimsResult.fail(-1, "엔진 없음"))
+    return report(TextArea.CALL, if (on) c.hold() else c.resume())
+}
+
+/**
+ * 호 하나의 수신 음량(1.0 = 원음, 0~2) — 감청·청취 행의 음량 막대(데스크톱 감청 창 `Volume` → `SetRxLevel`). 끌어 가는
+ * 동안 계속 오므로 토스트를 띄우지 않는다(데스크톱도 결과를 보지 않는다) — 미디어가 아직 없으면 코어가 거절하고 값만 남는다.
+ */
+suspend fun DispatchSession.setRxLevel(callId: Int, level: Float): CimsResult<Unit> {
+    val v = level.coerceIn(0f, 2f)
+    noteRxLevel(callId, v)
+    return engineOrNull()?.call(callId)?.setRxLevel(v) ?: CimsResult.fail(-1, "엔진 없음")
 }
 
 suspend fun DispatchSession.setMuted(callId: Int, muted: Boolean): CimsResult<Unit> =
-    engineOrNull()?.call(callId)?.setMuted(muted) ?: CimsResult.fail(-1, "엔진 없음")
+    report(TextArea.CALL, engineOrNull()?.call(callId)?.setMuted(muted) ?: CimsResult.fail(-1, "엔진 없음"))
+
+/**
+ * 음소거 토글 — **뒤집을 값을 명령 직전의 코어 스냅샷에서 읽고, 토글끼리 줄을 세운다.**
+ *
+ * 화면이 들고 있는 값(`CallInfo.muted` 사본)으로 뒤집으면, 스냅샷이 다시 오기 전에 두 번 누른 것이 같은 값
+ * 두 번으로 합쳐져 **두 번 눌렀는데 한 번 누른 상태**로 남는다. 줄을 세우면 뒤 누름은 앞 명령이 끝난 뒤의 코어
+ * 값을 읽는다. 명령 뒤에는 스냅샷을 다시 당긴다 — 코어가 `onCallMedia` 로도 알리지만 구형 엔진과 섞여도 화면이
+ * 멎지 않게. ③ 통화 카드와 ① 전이중 개별 통화 카드가 이 한 경로를 쓴다.
+ */
+suspend fun DispatchSession.toggleMuted(callId: Int): CimsResult<Unit> {
+    val ue = engineOrNull() ?: return CimsResult.fail(-1, "엔진 없음")
+    return muteToggle.toggle(
+        read = { ue.callInfo(callId)?.muted },
+        write = { setMuted(callId, it).also { refreshSessions() } })
+}
+
+/**
+ * 뒤집기 명령의 줄 — 읽기와 쓰기 사이에 다른 뒤집기가 끼어들지 못하게 한다.
+ *
+ * 읽기·쓰기를 주입받는 것은 시험 때문이다 — 엔진 없이 «연타가 합쳐지지 않는다» 를 고정한다.
+ */
+internal class SerialToggle {
+    private val lock = Mutex()
+
+    /** [read] 가 null 이면(호가 없다) 쓰지 않는다. */
+    suspend fun toggle(read: () -> Boolean?, write: suspend (Boolean) -> CimsResult<Unit>): CimsResult<Unit> =
+        lock.withLock {
+            val cur = read() ?: return@withLock CimsResult.fail(-1, "호 없음")
+            write(!cur)
+        }
+}
 
 suspend fun DispatchSession.sendDtmf(callId: Int, digits: String): CimsResult<Unit> =
-    engineOrNull()?.call(callId)?.sendDtmf(digits) ?: CimsResult.fail(-1, "엔진 없음")
+    report(TextArea.CALL, engineOrNull()?.call(callId)?.sendDtmf(digits) ?: CimsResult.fail(-1, "엔진 없음"))
 
-/** 호 전달 blind — REFER(RFC 3515). 서버가 수락하면 우리 leg 은 BYE 로 끝난다. */
-suspend fun DispatchSession.transfer(callId: Int, target: String): CimsResult<Unit> =
-    engineOrNull()?.call(callId)?.transfer(target.trim()) ?: CimsResult.fail(-1, "엔진 없음")
+/**
+ * 호 전달 blind — REFER(RFC 3515). 서버가 수락하면 우리 leg 은 BYE 로 끝난다. 받아들여지면 카드에 «전달 중 → …» 를
+ * 적고 ⑥ 에 전달로 남긴다(데스크톱 `TransferBlind`).
+ */
+suspend fun DispatchSession.transfer(callId: Int, target: String): CimsResult<Unit> {
+    val t = target.trim()
+    val r = report(TextArea.TRANSFER,
+        engineOrNull()?.call(callId)?.transfer(t) ?: CimsResult.fail(-1, "엔진 없음"))
+    if (r.ok) {
+        noteTransfer(callId, "전달 중 → ${displayLabel(t)}")
+        addCallLog(CallLogRow(atMs = System.currentTimeMillis(), peer = displayName(t), text = "전달 (blind)",
+            kind = CallLogKind.TRANSFER, number = userPart(t)))
+    }
+    return r
+}
+
+/**
+ * 상담 전달 시작 — 원 통화를 보류하고 대상에게 상담 호를 건다(데스크톱 `StartConsult`). 상담 호 카드가 «상담» 으로 서고,
+ * 연결되면 [전달 완결] 로 원 통화를 넘긴다(Replaces — RFC 3891, [completeConsult]).
+ */
+suspend fun DispatchSession.startConsult(originalCallId: Int, target: String): CimsResult<Unit> {
+    val a = phoneAccount ?: return report(TextArea.TRANSFER, CimsResult.fail(-1, "전화 계정 없음"))
+    val t = target.trim()
+    if (t.isEmpty()) return report(TextArea.TRANSFER, CimsResult.fail(-1, "전달 대상을 입력하세요"))
+    if (sessionOf(originalCallId)?.isActive == true) hold(originalCallId, true)
+    val r = a.dial(t)
+    if (r.ok) {
+        val id = r.value!!.id
+        noteOperation(id, Operation.TRANSFER)
+        noteConsult(id, originalCallId)
+    }
+    return report(TextArea.TRANSFER, if (r.ok) CimsResult.ok(Unit) else CimsResult.fail(r.code, r.reason))
+}
+
+/** [전달 완결] — 상담 호의 dialog 로 원 통화를 넘긴다(REFER + Replaces, 데스크톱 `CompleteConsult`). */
+suspend fun DispatchSession.completeConsult(consultCallId: Int): CimsResult<Unit> {
+    val consult = sessionOf(consultCallId)
+    val original = consult?.consultFor
+        ?: return report(TextArea.TRANSFER, CimsResult.fail(-1, "상담 호가 아닙니다"))
+    val r = transferAttended(original, consultCallId)
+    if (r.ok) noteTransfer(original, "전달 중 → ${consult.title.ifEmpty { userPart(consult.info.remoteUri) }}")
+    return r
+}
+
+/** 상담 취소 — 상담 호를 끊고 원 통화의 보류를 푼다(데스크톱 `CancelConsult`). */
+suspend fun DispatchSession.cancelConsult(consultCallId: Int): CimsResult<Unit> {
+    val original = sessionOf(consultCallId)?.consultFor
+    val r = hangup(consultCallId)
+    if (original != null && sessionOf(original)?.info?.state == com.cims.ue.sdk.CallState.HELD) hold(original, false)
+    return r
+}
 
 /** 호 전달 attended — 상담 호의 dialog 를 Replaces 로 넘긴다. */
 suspend fun DispatchSession.transferAttended(callId: Int, consultCallId: Int): CimsResult<Unit> {
-    val ue = engineOrNull() ?: return CimsResult.fail(-1, "엔진 없음")
-    return ue.call(callId).transferAttended(ue.call(consultCallId))
+    val ue = engineOrNull() ?: return report(TextArea.TRANSFER, CimsResult.fail(-1, "엔진 없음"))
+    return report(TextArea.TRANSFER, ue.call(callId).transferAttended(ue.call(consultCallId)))
 }
 
 /**
@@ -166,13 +294,14 @@ suspend fun DispatchSession.transferAttended(callId: Int, consultCallId: Int): C
  * 200 OK 의 `a=ssrc … label`(RFC 5576)로 두 화자가 구분돼 `MediaSources` 로 온다.
  */
 suspend fun DispatchSession.joinMonitor(row: DialogRow): CimsResult<Unit> {
-    val a = phoneAccount ?: return CimsResult.fail(-1, "전화 계정 없음")
+    val a = phoneAccount ?: return report(TextArea.JOIN, CimsResult.fail(-1, "전화 계정 없음"))
     // 상한은 앱에서 먼저 본다 — 데스크톱도 같은 자리에서 막는다(`DispatchSession.JoinMonitor`).
-    if (listenLimitReached()) return CimsResult.fail(-1, "동시 청취 상한 ${settingsSnapshot().maxListen}")
+    if (listenLimitReached())
+        return report(TextArea.JOIN, CimsResult.fail(-1, "동시 청취 상한 ${settingsSnapshot().maxListen}"))
     // dialog NOTIFY 의 `entity` 는 `tel:` 일 수 있다 — 그대로 넘기면 Join INVITE 가 라우팅되지 않는다.
     val r = a.join(routableTarget(row.watched), row.info)
     if (r.ok) noteOperation(r.value!!.id, Operation.JOIN)
-    return if (r.ok) CimsResult.ok(Unit) else CimsResult.fail(r.code, r.reason)
+    return report(TextArea.JOIN, if (r.ok) CimsResult.ok(Unit) else CimsResult.fail(r.code, r.reason))
 }
 
 /**
@@ -265,11 +394,11 @@ internal fun DispatchSession.applyDialog(d: DialogInfo) {
 private const val TERMINATED_KEEP_MS = 3_000L
 
 /**
- * 착신 거절 — 배너의 [거절].
+ * 착신 거절 — 배너·카드의 [거절].
  *
  * 기본 486(Busy Here)이다. 603(Decline)은 «이 단말이 아니라 사용자가 거절했다» 는 뜻이라 서버가
  * 포크 집합을 통째로 접을 수 있어, 대표번호 병렬 호출(TS 24.239)에서는 486 이 맞다 — 다른 관제석은
  * 계속 울려야 한다.
  */
 suspend fun DispatchSession.reject(callId: Int, code: Int = 486): CimsResult<Unit> =
-    engineOrNull()?.call(callId)?.reject(code) ?: CimsResult.fail(-1, "엔진 없음")
+    report(TextArea.CALL, engineOrNull()?.call(callId)?.reject(code) ?: CimsResult.fail(-1, "엔진 없음"))

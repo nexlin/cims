@@ -316,6 +316,7 @@ CSP fan-out (하이브리드):
 | 성공 응답 | 참여기능 202/200 | 200 OK | psip `RecvMessageRequest` 는 `EventMessage` 가 **반환한 상태코드**로 응답한다 — 응용이 도달 가능성을 아는 유일한 주체이므로 코드 선택도 응용이 한다. 0 을 반환하면 콜백이 직접 응답했다는 뜻이라 psip 는 보내지 않는다(최종 응답 중복 방지) |
 | E2E 보안 (TS 33.180) | Protected Payload | 미적용 (TLS + 서버측 RBAC) | 서버 보관·관리자 모니터링 요구와 상충 |
 | READ 통지·InReplyTo | 지원 | 미사용 (DELIVERED 만; 파서는 IE skip 지원) | 최소 프로파일 |
+| disposition 통지 경로 | 대상 MCData ID 의 `resource-lists` + 그룹 통지면 mcdata-info `<mcdata-calling-group-id>` 를 싣고 participating 경유 (TS 24.282 V18.13.0 §12.2.1.1, 집계는 controlling §12.2.3) | Request-URI=원 발신자 AoR 직행, 본문은 SDS NOTIFICATION 한 파트(`resource-lists`·mcdata-info 없음) — 코어 `sendSdsNotification`/`buildNotification`. CSP 는 1:1 SDS 와 같이 등록 바인딩으로 전달, 집계 없음 | 1:1 SDS 와 같은 통합 배치 단순화. 표준 controlling function 과 interop 하려면 코어 통지 API 가 수신 SDS 의 그룹·발신자 문맥을 받고 CSP 통지 처리(상관·인가)가 함께 바뀌어야 한다 |
 | media plane SDS 의 SDP | `m=message` 단독 | **더미 `m=audio` 라인 동반** — 서버는 포트≠0(9) + `a=inactive` 로 응답/오퍼 (CMP 할당·RTP 없음). 서버발 오퍼의 더미 오디오는 **PCMU+PCMA(0 8)** 병기 | pjsua2 는 알려진 미디어가 포트≠0 으로 협상돼야 콜 유지 (`got_media` 규칙). 앱 코덱 정책이 PCMU 를 비활성(PCMA 안전망만 유지)하므로 PCMU 단독 오퍼는 자동 488 — 실기기 확인 | 
 | media plane 수신 배포 | 전 수신자 INVITE+MSRP | **하이브리드** — MSRP 광고 단말만 INVITE+MSRP, 그 외는 FD FILEURL MESSAGE 폴백 (§4.5 HTTP 다운로드) | 전환기 호환 (현재 앱은 MSRP 미지원). 폴백 수신자에겐 장문이 첨부(`sds_*.txt`)로 보임 |
 | 단말 a=path 포트 | 단말이 해당 포트 리슨 가능 | 광고용 (단말은 항상 out-connect, 서버 상시 `a=setup:passive`) | NAT 관통 — RTP relay 와 동일한 방향성 |

@@ -108,32 +108,34 @@ suspend fun DispatchSession.releaseBroadcast(callId: Int) {
 
 /** 그룹콜 참여 — ① 카드의 [참여]. 이미 세션이 있으면 코어가 그 호를 돌려준다. */
 suspend fun DispatchSession.joinGroup(groupId: String, emergency: Boolean = false): CimsResult<Unit> {
-    val ptt = pttAccount ?: return CimsResult.fail(-1, "PTT 계정 없음")
+    val area = if (emergency) TextArea.EMERGENCY else TextArea.PTT_JOIN
+    val ptt = pttAccount ?: return report(area, CimsResult.fail(-1, "PTT 계정 없음"))
     val r = ptt.joinGroupCall(groupId, GroupCallOptions(emergency = emergency))
     if (r.ok) noteOperation(r.value!!.id, if (emergency) Operation.EMERGENCY else Operation.PTT_JOIN)
-    return if (r.ok) CimsResult.ok(Unit) else CimsResult.fail(r.code, r.reason)
+    return report(area, if (r.ok) CimsResult.ok(Unit) else CimsResult.fail(r.code, r.reason))
 }
 
 /** 청취 합류 — ② 카드의 [청취]. `a=recvonly` 라 발언 버튼이 비활성된다. */
 suspend fun DispatchSession.listenGroup(groupId: String): CimsResult<Unit> {
-    val ptt = pttAccount ?: return CimsResult.fail(-1, "PTT 계정 없음")
+    val ptt = pttAccount ?: return report(TextArea.PTT_LISTEN, CimsResult.fail(-1, "PTT 계정 없음"))
     // 상한은 앱에서 먼저 본다 — 넘겨 보내면 서버가 486 으로 거절하고 관제사는 이유를 모른다(§6.5).
-    if (listenLimitReached()) return CimsResult.fail(-1, "동시 청취 상한 ${settingsSnapshot().maxListen}")
+    if (listenLimitReached())
+        return report(TextArea.PTT_LISTEN, CimsResult.fail(-1, "동시 청취 상한 ${settingsSnapshot().maxListen}"))
     val r = ptt.joinGroupCall(groupId, GroupCallOptions(listenOnly = true))
     if (r.ok) noteOperation(r.value!!.id, Operation.PTT_LISTEN)
-    return if (r.ok) CimsResult.ok(Unit) else CimsResult.fail(r.code, r.reason)
+    return report(TextArea.PTT_LISTEN, if (r.ok) CimsResult.ok(Unit) else CimsResult.fail(r.code, r.reason))
 }
 
 /** 세션 이탈 — 카드의 [나가기]·[청취 끄기]. */
 suspend fun DispatchSession.leave(callId: Int): CimsResult<Unit> {
-    val ue = engineOrNull() ?: return CimsResult.fail(-1, "엔진 없음")
-    return ue.call(callId).leaveGroupCall()
+    val ue = engineOrNull() ?: return report(TextArea.PTT_JOIN, CimsResult.fail(-1, "엔진 없음"))
+    return report(TextArea.PTT_JOIN, ue.call(callId).leaveGroupCall())
 }
 
 /** PTT 누름 — 그 세션의 floor 를 요청한다. */
 suspend fun DispatchSession.floorRequest(callId: Int): CimsResult<Unit> {
-    val ue = engineOrNull() ?: return CimsResult.fail(-1, "엔진 없음")
-    return ue.call(callId).floorRequest()
+    val ue = engineOrNull() ?: return report(TextArea.PTT_JOIN, CimsResult.fail(-1, "엔진 없음"))
+    return report(TextArea.PTT_JOIN, ue.call(callId).floorRequest())
 }
 
 /** PTT 뗌 — 대기 중이면 코어가 Queued Cancel 을 먼저 보낸다. */
@@ -144,10 +146,10 @@ suspend fun DispatchSession.floorRelease(callId: Int): CimsResult<Unit> {
 
 /** 그룹 SDS 발신 — 최종 응답은 token 으로 `requestResult` 에서 맞춘다. */
 suspend fun DispatchSession.sendGroupSds(groupId: String, text: String): CimsResult<Unit> {
-    val ptt = pttAccount ?: return CimsResult.fail(-1, "PTT 계정 없음")
-    val r = ptt.sendGroupSds(groupId, text)
-    if (!r.ok) return CimsResult.fail(r.code, r.reason)
-    addOutgoingMessage(groupId, text, r.value!!.msgId, r.value!!.token)
+    val ptt = pttAccount ?: return report(TextArea.SDS, CimsResult.fail(-1, "PTT 계정 없음"))
+    val (r, early) = sendTracked({ it.token }) { ptt.sendGroupSds(groupId, text) }
+    if (!r.ok) return report(TextArea.SDS, CimsResult.fail(r.code, r.reason))
+    addOutgoingMessage(groupId, text, r.value!!.msgId, r.value!!.token, early)
     return CimsResult.ok(Unit)
 }
 
@@ -160,12 +162,12 @@ suspend fun DispatchSession.sendGroupSds(groupId: String, text: String): CimsRes
  * 보낸 말풍선과 받은 말풍선이 한 대화에 선다.
  */
 suspend fun DispatchSession.sendSds(peer: String, text: String): CimsResult<Unit> {
-    val ptt = pttAccount ?: return CimsResult.fail(-1, "PTT 계정 없음")
+    val ptt = pttAccount ?: return report(TextArea.SDS, CimsResult.fail(-1, "PTT 계정 없음"))
     val to = userPart(peer)
-    if (to.isEmpty() || text.isBlank()) return CimsResult.fail(-1, "받는 사람·내용 없음")
-    val r = ptt.sendSds(to, text)
-    if (!r.ok) return CimsResult.fail(r.code, r.reason)
-    addOutgoingMessage(to, text, r.value!!.msgId, r.value!!.token)
+    if (to.isEmpty() || text.isBlank()) return report(TextArea.SDS, CimsResult.fail(-1, "받는 사람·내용 없음"))
+    val (r, early) = sendTracked({ it.token }) { ptt.sendSds(to, text) }
+    if (!r.ok) return report(TextArea.SDS, CimsResult.fail(r.code, r.reason))
+    addOutgoingMessage(to, text, r.value!!.msgId, r.value!!.token, early)
     return CimsResult.ok(Unit)
 }
 
@@ -177,6 +179,22 @@ suspend fun DispatchSession.sendSds(peer: String, text: String): CimsResult<Unit
  */
 suspend fun DispatchSession.sendSdsTo(key: String, text: String): CimsResult<Unit> =
     if (isPttGroup(key)) sendGroupSds(key, text) else sendSds(key, text)
+
+/**
+ * 실패한 SDS 재전송 — 같은 스레드 규칙(그룹이면 그룹 SDS, 아니면 1:1)으로 다시 보내고 **같은 말풍선**을 갱신한다.
+ * 새 msgId 로 나가므로 전달 확인 통지도 새 msgId 로 맞물린다(데스크톱 `McDataMessagesViewModel.ResendCore`).
+ */
+suspend fun DispatchSession.resendSds(m: Message): CimsResult<Unit> {
+    if (m.kind != MessageKind.SDS) return CimsResult.ok(Unit)
+    val ptt = pttAccount ?: return report(TextArea.SDS, CimsResult.fail(-1, "PTT 계정 없음"))
+    if (!beginResend(m)) return CimsResult.ok(Unit)                 // 이미 다시 보내는 중이거나 실패가 아니다
+    val group = isPttGroup(m.groupId)
+    val (r, early) = sendTracked({ it.token }) {
+        if (group) ptt.sendGroupSds(m.groupId, m.text) else ptt.sendSds(m.groupId, m.text)
+    }
+    markResent(m, r.value?.msgId.orEmpty(), r.value?.token ?: 0L, failed = !r.ok, early = early)
+    return report(TextArea.SDS, if (r.ok) CimsResult.ok(Unit) else CimsResult.fail(r.code, r.reason))
+}
 
 /** 이 키가 편성 그룹인가 — 그룹 목록에 있으면 그룹, 없으면 사람. */
 fun DispatchSession.isPttGroup(key: String): Boolean =
@@ -255,18 +273,54 @@ internal fun DispatchSession.applyRoster(u: RosterUpdate) {
         addActivity(after.id, after.name, "세션 종료", ActivityKind.LEAVE)
 }
 
-/** SDS 수신 → ④ 스레드 + ⑤ 줄. disposition 요청이 있으면 통지를 되돌린다. */
+/** SDS 수신 → ④ 스레드 + ⑤ 줄. 전달 확인을 요청했으면 DELIVERED 를 되돌린다([deliveryReplyTo]). */
 internal fun DispatchSession.applySds(msg: SdsMessage) {
     if (msg.notification) return updateSendState(msg.msgId, msg.notifType)
     val groupId = userPart(msg.groupUri).ifEmpty { userPart(msg.fromUri) }
     addIncomingMessage(groupId, msg)
     addActivity(groupId, groupNameOf(groupId), "메시지 · ${displayName(msg.fromUri)}", ActivityKind.SDS)
+    deliveryReplyTo(msg)?.let { peer ->
+        val ptt = pttAccount ?: return@let
+        scopeLaunch {
+            // 이 발신에는 말풍선이 없다 — 실패를 남기지 않으면 상대가 «보냄» 에 멈춘 이유를 어디서도 못 찾는다.
+            //   즉시 실패는 여기서, 최종 거절(480 등)은 token 으로 `applyRequestResult` 가 남긴다.
+            val (r, early) = sendTracked({ it.token }) {
+                ptt.sendSdsNotification(peer, msg.convId, msg.msgId, SDS_NOTIF_DELIVERED)
+            }
+            val sent = r.value
+            val what = "→ $peer msg=${msg.msgId}"
+            if (r.ok && sent != null) {
+                // 최종 응답이 명령보다 먼저 와 있었으면 곧바로 맞추고, 아니면 token 을 걸어 둔다(`TokenLedger`).
+                if (early != null) logNotificationResult(what, early) else notificationTokens[sent.token] = what
+            } else android.util.Log.w(SDS_TAG, "전달 확인 회신 실패 $what: ${r.code} ${r.reason}")
+        }
+    }
+}
+
+internal const val SDS_TAG = "DispatchSds"
+
+/** SDS NOTIFICATION 종류 «전달됨»(TS 24.282 §15 — 1 미전달·2 전달·3 읽음·4 전달+읽음). */
+internal const val SDS_NOTIF_DELIVERED = 2
+
+/**
+ * 전달 확인을 되돌릴 상대 — 없으면 null.
+ *
+ * 발신자가 delivery 를 요청했으면(disposition 1 delivery·3 both) **받은 즉시** DELIVERED 를 원 발신자에게 1:1 로
+ * 되돌린다 — 발신 말풍선의 ✓ 가 이것으로 선다(mcdata_messaging.md §3). 보내지 않으면 상대 화면은 영영 «보냄» 에
+ * 멈춘다. 읽음(read) 통지는 보내지 않는다 — 최소 프로파일이 DELIVERED 만 쓴다(같은 문서 §7 편차 표). 데스크톱
+ * `McDataMessagesViewModel.OnSds` 와 같은 규칙이다.
+ */
+internal fun deliveryReplyTo(msg: SdsMessage): String? {
+    if (msg.notification || (msg.dispositionReq != 1 && msg.dispositionReq != 3)) return null
+    if (msg.msgId.isEmpty()) return null
+    return userPart(msg.fromUri).ifEmpty { null }
 }
 
 /** 호 상태 변화 → 세션 목록. 종료된 호는 ⑤ 에 남기고 목록에서 뺀다. */
 internal fun DispatchSession.applyCallState(c: CallInfo) {
     if (c.state == CallState.DISCONNECTED) {
         sessionOf(c.callId)?.let { s ->
+            noteFailedAttempt(s, c)
             if (s.kind.isPttCard || s.kind == SessionKind.PTT_LISTEN)
                 addActivity(s.info.groupId, groupNameOf(s.info.groupId),
                     if (c.lastCode >= 300) "세션 실패 ${c.lastCode}" else "세션 종료", ActivityKind.LEAVE, s.isEmergency)
@@ -283,6 +337,21 @@ internal fun DispatchSession.applyCallState(c: CallInfo) {
         settingsSnapshot().autoHoldOnAnswer) {
         holdOtherCalls(c.callId)
     }
+}
+
+/**
+ * 연결되지 못하고 끝난 **내 발신**의 사유 → 토스트(데스크톱 `End` 의 «실패한 발신 동작의 사유»).
+ *
+ * 발신·당겨받기·감청·합류·개별 통화는 명령이 받아들여진 뒤 SIP 응답으로 실패한다 — 명령 결과로는 알 수 없고, 호가 끝날
+ * 때 `lastCode` 로만 안다. 착신과 연결됐다 끝난 호(BYE)는 실패가 아니다. 영역은 그 호를 만든 동작으로 고르고, 동작을
+ * 모르는 MCPTT 발신은 개별 통화/그룹 참여로 본다.
+ */
+private fun DispatchSession.noteFailedAttempt(s: SessionItem, c: CallInfo) {
+    if (s.connectedAtMs != null || c.dir != com.cims.ue.sdk.CallDir.OUTGOING || c.lastCode < 300) return
+    val area = if (s.operation == Operation.DIAL && c.isMcptt)
+        (if (s.kind == SessionKind.PTT_PRIVATE) TextArea.PTT_PRIVATE else TextArea.PTT_JOIN)
+    else ResponseText.areaOf(s.operation)
+    notify(NoticeLevel.ERROR, ResponseText.sip(area, c.lastCode, c.lastReason), "${c.lastCode} ${c.lastReason}".trim())
 }
 
 /** [exceptCallId] 를 뺀 활성 전화 통화를 전부 보류한다. */
@@ -314,6 +383,7 @@ private fun DispatchSession.noteMyCall(s: SessionItem, c: CallInfo) {
     }
     val text = when {
         s.kind == SessionKind.PHONE_MONITOR -> "감청 종료"
+        s.consultFor != null && answered -> "상담 전달"     // 데스크톱 «전달 … attended» — 원 통화는 제 내역이 따로 남는다
         kind == CallLogKind.MISSED && c.lastCode >= 300 -> "부재 ${c.lastCode}"
         kind == CallLogKind.MISSED -> "부재"
         answered -> "통화 종료"
@@ -417,7 +487,9 @@ suspend fun DispatchSession.startPrivateCall(peer: String, fullDuplex: Boolean =
     val target = userPart(peer).ifEmpty { return CimsResult.fail(-1, "대상을 고르세요") }
     val r = ptt.startPrivateCall(target, GroupCallOptions(fullDuplex = fullDuplex, emergency = emergency))
     if (r.ok) noteOperation(r.value!!.id, if (emergency) Operation.EMERGENCY else Operation.PTT_PRIVATE)
-    return if (r.ok) CimsResult.ok(Unit) else CimsResult.fail(r.code, r.reason)
+    // 곧바로 실패하면 발신 시트가 그 자리에 적는다 — 토스트를 겹치지 않고 사유만 사전 문장으로 바꿔 준다.
+    val area = if (emergency) TextArea.EMERGENCY else TextArea.PTT_PRIVATE
+    return if (r.ok) CimsResult.ok(Unit) else CimsResult.fail(r.code, ResponseText.sip(area, r.code, r.reason))
 }
 
 /**
@@ -452,7 +524,9 @@ private suspend fun DispatchSession.joinAdhoc(members: List<String>, opts: Group
     if (tels.isEmpty()) return CimsResult.fail(-1, "대상을 고르세요")
     val id = adhocIdOf(myPttId)
     val r = ptt.joinGroupCall(id, opts.copy(members = tels))
-    if (!r.ok) return CimsResult.fail(r.code, r.reason)
+    // 곧바로 실패하면 발신 시트가 그 자리에 적는다(개별 통화와 같다).
+    if (!r.ok) return CimsResult.fail(r.code,
+        ResponseText.sip(if (op == Operation.EMERGENCY) TextArea.EMERGENCY else TextArea.PTT_ADHOC, r.code, r.reason))
     val callId = r.value!!.id
     noteOperation(callId, op)
     rememberAdhocMembers(callId, tels)

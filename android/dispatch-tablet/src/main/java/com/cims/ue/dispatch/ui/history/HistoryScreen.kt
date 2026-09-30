@@ -196,7 +196,7 @@ private fun Toolbar(ui: HistoryUi, act: HistoryActions) {
                 }) { Text("확인") }
             },
             dismissButton = { TextButton(onClick = { pick = false }) { Text("취소") } }
-        ) { DatePicker(state = state) }
+        ) { com.cims.ue.dispatch.ui.ForwardPttKeys(); DatePicker(state = state) }
     }
 }
 
@@ -418,7 +418,28 @@ internal fun barPos(widthDp: Int, valueMs: Int, totalMs: Int): Int {
     return v.coerceIn(0L, widthDp.toLong()).toInt()
 }
 
-/** 발언 막대 — 세션 시간축 위 화자 레인. 막대를 누르면 그 턴을 재생한다(§4.6). */
+/** 타임라인 배율 상한 — 데스크톱 `TalkZoomMax` 와 같다(1시간 세션에서 한 턴의 1초가 막대로 보이는 정도). */
+internal const val TIMELINE_ZOOM_MAX = 64f
+/** 한 번 누를 때의 배율 — 데스크톱 휠 한 칸과 같다. */
+internal const val TIMELINE_ZOOM_STEP = 1.25f
+
+/**
+ * 눈금 간격(초) — 배율에 따라 대여섯 개가 보이게 1·2·5·10·15·30초·1·2·5·10·15·30분·1시간 중에서 고른다(데스크톱
+ * `RebuildAxisTicks` 와 같은 규칙). 순수 함수(시험 대상).
+ */
+internal fun axisStepSec(spanMs: Int, zoom: Float): Int {
+    val target = spanMs / (6.0 * zoom.coerceAtLeast(1f))
+    val steps = intArrayOf(1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600)
+    return steps.firstOrNull { it * 1000.0 >= target } ?: steps.last()
+}
+
+/**
+ * 발언 막대 — 세션 시간축 위 화자 레인. 막대를 누르면 그 턴을 재생한다(§4.6).
+ *
+ * **배율은 버튼으로** 바꾼다(×1.25, 최대 ×64, 데스크톱 Ctrl+휠·[＋][－] 와 같은 범위). 핀치를 쓰지 않는 것은 막대 누름(턴
+ * 재생)·가로 스크롤과 제스처가 겹치기 때문이다. 배율을 바꿔도 **보던 가운데가 그대로** 있게 스크롤을 옮긴다. 세션을 바꾸면
+ * ×1 로 돌아간다(데스크톱과 같다).
+ */
 @Composable
 private fun TurnTimeline(turns: List<TurnBar>, rec: RecordingInfo?, onPlay: (TurnBar) -> Unit) {
     if (turns.isEmpty()) {
@@ -427,8 +448,44 @@ private fun TurnTimeline(turns: List<TurnBar>, rec: RecordingInfo?, onPlay: (Tur
     }
     val total = (turns.maxOf { it.offsetMs + it.durMs }).coerceAtLeast(1)
     val lanes = turns.map { it.speaker }.distinct()
-    val widthDp = 640
-    Column(Modifier.horizontalScroll(rememberScrollState())) {
+    var zoom by remember(turns) { mutableFloatStateOf(1f) }
+    val scroll = rememberScrollState()
+    var pendingScroll by remember { mutableStateOf<Int?>(null) }
+    val widthDp = (640 * zoom).toInt()
+    // 새 폭이 그려진 뒤에 옮긴다 — 먼저 옮기면 옛 폭의 끝에서 잘린다.
+    LaunchedEffect(zoom) {
+        val target = pendingScroll ?: return@LaunchedEffect
+        withFrameNanos { }
+        scroll.scrollTo(target)
+        pendingScroll = null
+    }
+    fun zoomTo(next: Float) {
+        val z = next.coerceIn(1f, TIMELINE_ZOOM_MAX)
+        if (z == zoom) return
+        val half = scroll.viewportSize / 2
+        pendingScroll = (((scroll.value + half) * (z / zoom)) - half).toInt().coerceAtLeast(0)
+        zoom = z
+    }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        TextButton(onClick = { zoomTo(zoom / TIMELINE_ZOOM_STEP) }, enabled = zoom > 1f) { Text("－", fontSize = Type.title) }
+        TextButton(onClick = { zoomTo(zoom * TIMELINE_ZOOM_STEP) }, enabled = zoom < TIMELINE_ZOOM_MAX) { Text("＋", fontSize = Type.title) }
+        if (zoom > 1.001f) {
+            Text("×${"%.1f".format(zoom)}", fontSize = Type.meta)
+            TextButton(onClick = { zoomTo(1f) }) { Text("맞춤", fontSize = Type.meta) }
+        }
+    }
+    Column(Modifier.horizontalScroll(scroll)) {
+        // 눈금 — 배율에 맞춘 간격, 세션 시작부터의 경과로 적는다.
+        val step = axisStepSec(total, zoom) * 1000
+        Box(Modifier.padding(start = 110.dp).width(widthDp.dp).height(14.dp)) {
+            var t = step
+            var n = 0
+            while (t < total && n++ < 400) {                // 상한은 데스크톱과 같다 — 긴 세션에서 수천 개를 그리지 않게
+                Text(elapsedLabel(t), Modifier.padding(start = barPos(widthDp, t, total).dp),
+                    fontSize = Type.micro, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                t += step
+            }
+        }
         lanes.forEach { who ->
             Row(Modifier.padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(short(who), Modifier.width(110.dp), fontSize = Type.meta, maxLines = 1)
@@ -451,6 +508,12 @@ private fun TurnTimeline(turns: List<TurnBar>, rec: RecordingInfo?, onPlay: (Tur
         Text("0 ~ ${total / 1000}초" + (rec?.let { " · 세그먼트 ${it.segments.size}" } ?: ""),
             fontSize = Type.micro, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
+}
+
+/** 세션 시작부터의 경과 — `m:ss`, 한 시간 넘으면 `h:mm:ss`. */
+private fun elapsedLabel(ms: Int): String {
+    val t = ms / 1000
+    return if (t >= 3600) "%d:%02d:%02d".format(t / 3600, (t % 3600) / 60, t % 60) else "%d:%02d".format(t / 60, t % 60)
 }
 
 @Composable

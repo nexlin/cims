@@ -29,8 +29,10 @@ import com.cims.ue.sdk.ServiceProfile
 import com.cims.ue.sdk.TokenSet
 import com.cims.ue.sdk.TrustAnchors
 import com.cims.ue.sdk.platform.AudioRouter
+import com.cims.ue.sdk.platform.HwPtt
 import com.cims.ue.sdk.platform.SecureStore
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.delay
 import com.cims.ue.sdk.CallState
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -69,6 +71,31 @@ class DispatchSession(
     /** 갱신은 한 번에 하나만 — 여러 화면이 동시에 만료를 만나도 refresh 가 한 번만 나간다. */
     private val tokenMutex = kotlinx.coroutines.sync.Mutex()
 
+    /** 음소거 토글의 줄 — 연타가 같은 값 둘로 합쳐지지 않게(`toggleMuted`). */
+    internal val muteToggle = SerialToggle()
+
+    /**
+     * SDS 전달 확인 회신의 token → 무엇을 보냈나. 최종 응답이 오면 지운다 — 거절만 로그로 남긴다(`applySds`).
+     * 메인 스레드 전용(세션·화면 VM 의 스코프가 모두 `Dispatchers.Main.immediate`). 로그아웃 때 비운다.
+     */
+    internal val notificationTokens = HashMap<Long, String>()
+
+    /** token 보다 먼저 온 최종 응답 — 발신 명령이 돌아와 token 을 알게 되면 꺼내 간다(`TokenLedger`, `sendTracked`). 메인 스레드 전용. */
+    internal val earlyResults = TokenLedger<com.cims.ue.sdk.RequestResult>()
+
+    /**
+     * 발신 명령을 [earlyResults] 의 창 안에서 보낸다 — 명령이 도는 동안 온 최종 응답을 놓치지 않는다.
+     * @return 명령 결과와, 명령이 돌아오기 전에 이미 와 있던 그 발신의 최종 응답(없으면 null)
+     */
+    internal suspend fun <T> sendTracked(
+        tokenOf: (T) -> Long,
+        send: suspend () -> CimsResult<T>,
+    ): Pair<CimsResult<T>, com.cims.ue.sdk.RequestResult?> {
+        earlyResults.begin()
+        val r = try { send() } catch (t: Throwable) { earlyResults.end(0); throw t }
+        return r to earlyResults.end(r.value?.let(tokenOf) ?: 0L)
+    }
+
     /**
      * **자격 갱신이 실패하고 있다** — 연속 실패 횟수와 마지막 사유.
      *
@@ -79,6 +106,31 @@ class DispatchSession(
     private val _credentialWarning = MutableStateFlow<String?>(null)
     val credentialWarning: StateFlow<String?> = _credentialWarning.asStateFlow()
     private var refreshFailures = 0
+
+    private val _serverCert = MutableStateFlow<com.cims.ue.sdk.TlsPeerExpiry?>(null)
+    /**
+     * 서버 인증서 만료 관측 — SIP TLS(엔진)·HTTPS(CSC) 중 먼저 만료되는 것(`ServerCert.worst`). 관측 전(평문·미접속)엔
+     * null. 만료 배너(§6.2a-3)와 설정 «서버 인증서» 행의 입력이다.
+     */
+    val serverCert: StateFlow<com.cims.ue.sdk.TlsPeerExpiry?> = _serverCert.asStateFlow()
+
+    /**
+     * 관측을 다시 읽는다 — 로그인(HTTPS)·TLS 등록 성공(핸드셰이크 = 관측 갱신 시점)과 1분마다. 잔여 일수는 하루에 한 번
+     * 바뀌므로 더 자주 볼 까닭이 없다(데스크톱 `UpdateServerCertBanner` 와 같은 시점). 경고 구간에 드는 순간을 로그에 남긴다.
+     */
+    private fun refreshServerCert() {
+        // 로그인 전·로그아웃 뒤에는 보지 않는다 — 엔진은 로그아웃 뒤에도 살아 있어 앞 접속의 관측을 들고 있다.
+        if (_state.value == SessionState.LOGGED_OUT || _state.value == SessionState.FAILED) {
+            _serverCert.value = null; return
+        }
+        val next = ServerCert.worst(ue?.tlsPeerExpiry(), csc?.tlsPeerExpiry())
+        val now = System.currentTimeMillis() / 1000L
+        val was = _serverCert.value?.let { ServerCert.level(it, now) } ?: CertLevel.OK
+        val lvl = next?.let { ServerCert.level(it, now) } ?: CertLevel.OK
+        if (lvl != was && lvl != CertLevel.OK) android.util.Log.w("DispatchSession",
+            "server cert $lvl: ${next?.remote} subject=\"${next?.subject}\" not_after=${next?.let(ServerCert::day)}")
+        _serverCert.value = next
+    }
 
     private fun noteTokens(t: TokenSet?) {
         tokens = t
@@ -157,10 +209,24 @@ class DispatchSession(
      */
     private val messageStore = MessageStore(context)
 
+    /**
+     * DB 쓰기는 **한 줄로** 보낸다 — 보낸 순서대로 실행된다. 쓰기마다 따로 IO 로 띄우면 «말풍선 INSERT» 보다
+     * «상태 UPDATE» 가 먼저 돌 수 있고, 그러면 UPDATE 는 대상이 없어 사라지고 뒤늦은 INSERT 가 옛 상태를 남긴다.
+     */
+    private val storeDispatcher = Dispatchers.IO.limitedParallelism(1)
+
     private fun storeAsync(block: MessageStore.() -> Unit) {
-        scope.launch(Dispatchers.IO) { runCatching { messageStore.block() } }
+        scope.launch(storeDispatcher) { runCatching { messageStore.block() } }
     }
     val audio = AudioRouter(context)
+
+    /**
+     * 측면 하드키(§7) — 누름·뗌이 발언 바와 같은 일을 한다(데스크톱 전역 핫키 `ptt`). 키는 앱 창(시트·대화상자 포함)의
+     * 키 이벤트로만 받는다 — 화면이 꺼진 상태는 고려하지 않는다(관제 전용 기기). 세션이 드는 것은 창이 여럿이고 학습 매핑이
+     * 로그인과 무관하게 남아야 해서다. 무엇을 할지(발언 대상 전부에 floor 요청)는 발언 바를 가진 ① VM 이
+     * [HwPtt.pressed] 를 보고 정한다.
+     */
+    val hwPtt = HwPtt(context)
 
     // ── 상태 ──────────────────────────────────────────────────────────────────
     private val _state = MutableStateFlow(SessionState.LOGGED_OUT)
@@ -171,6 +237,33 @@ class DispatchSession(
 
     private val _error = MutableStateFlow<String?>(null)
     val error: StateFlow<String?> = _error.asStateFlow()
+
+    // ── 토스트 — 명령 실패의 사유(§6.2a-2, dispatch_desktop_ui.md §3.2·§9) ─────────────────
+    private val _notices = MutableStateFlow<List<Notice>>(emptyList())
+    /** 최신 위. 오류는 닫을 때까지, 정보·경고는 6초. */
+    val notices: StateFlow<List<Notice>> = _notices.asStateFlow()
+    private var noticeSeq = 0L
+
+    internal fun notify(level: NoticeLevel, text: String, detail: String = "") {
+        val n = Notice(++noticeSeq, level, text, detail)
+        _notices.value = NoticeBoard.push(_notices.value, n)
+        if (n.autoClose) scope.launch { delay(NoticeBoard.AUTO_CLOSE_MS); dismissNotice(n.id) }
+    }
+
+    fun dismissNotice(id: Long) { _notices.value = NoticeBoard.dismiss(_notices.value, id) }
+
+    /**
+     * 명령 결과를 토스트로 — 실패면 사전 문장(§9) + 원문 코드 ▸상세. 결과는 그대로 돌려준다(호출자가 이어서 쓴다).
+     *
+     * 앱이 먼저 막은 실패(코드 없음 — 상한·계정 없음 등)는 **경고**다(데스크톱 `Fail(why)` = `Notify.Warn`). 서버나 엔진이
+     * 거절한 것은 **오류**다.
+     */
+    internal fun <T> report(area: TextArea, r: CimsResult<T>): CimsResult<T> {
+        if (r.ok) return r
+        if (r.code < 0) notify(NoticeLevel.WARN, r.reason.ifBlank { "실패" })
+        else notify(NoticeLevel.ERROR, ResponseText.sip(area, r.code, r.reason), "${r.code} ${r.reason}".trim())
+        return r
+    }
 
     private val _accounts = MutableStateFlow<Map<AccountKind, Account>>(emptyMap())
     val accounts: StateFlow<Map<AccountKind, Account>> = _accounts.asStateFlow()
@@ -213,6 +306,14 @@ class DispatchSession(
     private val _callLog = MutableStateFlow<List<CallLogRow>>(emptyList())
     /** ⑥ 통화 내역 — 최신이 앞. */
     val callLog: StateFlow<List<CallLogRow>> = _callLog.asStateFlow()
+
+    /**
+     * 긴급·임박 스택 — **채널마다 하나**, 최신 위(데스크톱 배너 레이어 `BannerOfGroup`, dispatch_desktop_ui.md §3.2).
+     *
+     * 닫기가 없다. 조건이 풀리거나(코어 스냅샷의 `emergency`/`imminentPeril` 이 내려감) 세션이 끝나면 스스로 빠진다.
+     */
+    val alerts: StateFlow<List<SessionItem>> =
+        _sessions.map(::alertStack).stateIn(scope, SharingStarted.Eagerly, emptyList())
 
     /**
      * **착신 스택** — 울리고 있는 전화. 최신이 위다(dispatch_desktop_ui.md §3.2 착신 배너).
@@ -337,7 +438,38 @@ class DispatchSession(
         val before = settings.current
         settings.update(f)
         val after = settings.current
-        if (after.audioRoute != before.audioRoute) runCatching { applyAudio() }
+        if (after.audioRoute != before.audioRoute || after.preferredHeadset != before.preferredHeadset)
+            runCatching { applyAudio() }
+    }
+
+    /** 이어폰 하나를 고른다 — 선호 이어폰으로 남기고 경로를 그 종류(유선·무선)로 옮긴다(설정 «오디오»). */
+    fun selectHeadset(h: com.cims.ue.sdk.platform.Headset) {
+        updateSettings { it.copy(preferredHeadset = h.name,
+            audioRoute = if (h.wireless) com.cims.ue.sdk.platform.Route.BLUETOOTH else com.cims.ue.sdk.platform.Route.HEADSET) }
+    }
+
+    /** 지금 붙어 있는 이어폰 이름 — 새로 붙은 것을 가려 자동 복귀를 건다. null = 아직 첫 값 전(첫 값은 «새로 붙음» 이 아니다). */
+    private var headsetNames: Set<String>? = null
+
+    /**
+     * 이어폰이 붙거나 빠졌다 — **선호 이어폰이 다시 붙었고** 경로 의도가 헤드셋·블루투스면 그리로 되돌린다(데스크톱
+     * `OnEndpointsChanged` 의 «다시 붙으면 복귀(설정 이름 기준)»). 사람이 스피커를 고른 뒤에는 되돌리지 않는다 — 의도가 이긴다.
+     * 빠질 때는 할 일이 없다: 플랫폼이 기본 장치로 돌아간다.
+     */
+    private fun onHeadsetsChanged(list: List<com.cims.ue.sdk.platform.Headset>) {
+        val names = list.map { it.name }.toSet()
+        val before = headsetNames
+        headsetNames = names
+        if (before == null) return
+        val s = settings.current
+        if (!returnToPreferred(s, names - before)) return
+        runCatching { applyAudio() }
+        notify(NoticeLevel.INFO, "선호 이어폰으로 돌아왔습니다", s.preferredHeadset)
+    }
+
+    init {
+        // 이어폰 붙음·빠짐 — 선호 이어폰 자동 복귀(§8). [headsetNames] 선언 뒤에 둔다(초기화 순서).
+        scope.launch { audio.headsets.collect(::onHeadsetsChanged) }
     }
 
     /** 저장된 자격이 있는가 — 부팅 재등록·자동 로그인의 조건. */
@@ -389,6 +521,7 @@ class DispatchSession(
         _profile.value = p.value
         _state.value = SessionState.PROFILE_READY
         _error.value = null
+        refreshServerCert()                     // 로그인 = HTTPS 핸드셰이크 — CSC 인증서가 막 관측됐다
         return CimsResult.ok(Unit)
     }
 
@@ -485,7 +618,8 @@ class DispatchSession(
             .filter { it.state != CallState.DISCONNECTED && it.state != CallState.NULL }
         val prev = _sessions.value.associateBy { it.callId }
         _sessions.value = live.map { ci ->
-            prev[ci.callId]?.copy(info = ci) ?: newSession(ci)
+            val was = prev[ci.callId]
+            withAlert(was, was?.copy(info = ci) ?: newSession(ci))
         }
         // floor 는 스냅샷 조회가 제어 스레드를 타므로 따로 당긴다(§F3) — 화면 복귀 때 발언 표시가 살아난다.
         live.filter { it.isMcptt }.forEach { pullFloor(it.callId) }
@@ -498,7 +632,8 @@ class DispatchSession(
             ?: if (ci.dir == com.cims.ue.sdk.CallDir.INCOMING) Operation.INCOMING else Operation.DIAL,
         info = ci,
         connectedAtMs = if (ci.state == com.cims.ue.sdk.CallState.ACTIVE) System.currentTimeMillis() else null,
-        title = titleOf(ci))
+        title = titleOf(ci),
+        consultFor = consultOf.remove(ci.callId))
 
     private fun titleOf(ci: CallInfo): String = when {
         ci.isMcptt && ci.groupId.isNotEmpty() -> groupNameOf(ci.groupId)
@@ -626,21 +761,64 @@ class DispatchSession(
         val cur = _sessions.value
         _sessions.value =
             if (cur.any { it.callId == ci.callId })
-                cur.map { if (it.callId == ci.callId) it.copy(
+                cur.map { if (it.callId == ci.callId) withAlert(it, it.copy(
                     info = ci,
                     connectedAtMs = it.connectedAtMs
                         ?: if (ci.state == com.cims.ue.sdk.CallState.ACTIVE) System.currentTimeMillis() else null,
-                    title = it.title.ifEmpty { titleOf(ci) }) else it }
-            else cur + newSession(ci)
+                    title = it.title.ifEmpty { titleOf(ci) })) else it }
+            else cur + withAlert(null, newSession(ci))
+    }
+
+    /**
+     * 긴급 상태를 이어 붙인다 — «언제부터» 를 넘겨주고 개시·해제를 ⑤ 에 남긴다(데스크톱 `UpdateEmergencyBanner`).
+     *
+     * 세션을 새로 쓰는 길(`upsertSession`·`refreshSessions`)이 전부 여기를 지난다 — 한 곳이라도 빠지면 배너 경과가
+     * 처음부터 다시 세어지거나 «개시» 가 두 번 남는다. 규칙 자체는 순수 함수 `alertTransition` 이 갖는다.
+     */
+    private fun withAlert(prev: SessionItem?, next: SessionItem): SessionItem {
+        val (since, change) = alertTransition(prev, next, System.currentTimeMillis())
+        val gid = next.info.groupId
+        when (change) {
+            is AlertChange.Started -> addActivity(gid, groupNameOf(gid),
+                "${change.kind.label} 개시" + next.info.mcptt.callingUserId
+                    .takeIf { it.isNotBlank() }?.let { " · " + displayName(it) }.orEmpty(),
+                ActivityKind.EMERGENCY, emergency = true)
+            is AlertChange.Cleared -> addActivity(gid, groupNameOf(gid), "${change.kind.label} 해제",
+                ActivityKind.EMERGENCY, emergency = true)
+            AlertChange.None -> Unit
+        }
+        return if (next.alertSinceMs == since) next else next.copy(alertSinceMs = since)
     }
 
     internal fun removeSession(callId: Int) {
         _sessions.value = _sessions.value.filterNot { it.callId == callId }
         adhocMembers.remove(callId)
         broadcastPending.remove(callId)
+        if (callId in _rxLevels.value) _rxLevels.value = _rxLevels.value - callId
     }
 
+    private val _rxLevels = MutableStateFlow<Map<Int, Float>>(emptyMap())
+    /**
+     * 호별 수신 음량(1.0 = 원음) — 감청·청취 행의 음량 막대가 읽는다. 바꾼 적 없는 호는 없다(= 1.0). 호가 끝나면 빠진다
+     * (pjsua 가 callId 를 되쓰므로 남기면 다음 호가 앞 호의 음량으로 선다).
+     */
+    val rxLevels: StateFlow<Map<Int, Float>> = _rxLevels.asStateFlow()
+
+    internal fun noteRxLevel(callId: Int, level: Float) { _rxLevels.value = _rxLevels.value + (callId to level) }
+
     internal fun noteOperation(callId: Int, op: Operation) { operations[callId] = op }
+
+    /** 상담 호 → 원 통화 — 세션이 설 때(`newSession`) 붙인다. 이미 서 있으면(이벤트가 먼저 왔다) 곧바로 붙인다. */
+    private val consultOf = mutableMapOf<Int, Int>()
+
+    internal fun noteConsult(callId: Int, originalCallId: Int) {
+        if (sessionOf(callId) != null) {
+            updateSession(callId) { it.copy(consultFor = originalCallId, operation = Operation.TRANSFER) }
+            operations.remove(callId)
+        } else consultOf[callId] = originalCallId
+    }
+
+    internal fun noteTransfer(callId: Int, note: String) = updateSession(callId) { it.copy(transferNote = note) }
 
     /**
      * 일제 통화로 연 내 호 — 첫 서버 floor 메시지가 B-bit 를 싣는지 본다(`applyFloor`). 없으면 서버가 일반 통화로 연 것이다
@@ -703,8 +881,12 @@ class DispatchSession(
         _activity.value = (listOf(row) + _activity.value).take(ACTIVITY_LIMIT)
     }
 
+    /**
+     * 그룹 id → 표시 이름. 애드혹은 편성이 없는 임시 그룹이라 이름이 없다 — id(`adhoc-<번호>-<초>`)를 그대로
+     * 보이지 않고 «애드혹» 으로 적는다(데스크톱 `TitleOf` 와 같다). 표시 전용이다 — 키로 쓰지 않는다.
+     */
     internal fun groupNameOf(groupId: String): String =
-        _groups.value.firstOrNull { it.id == groupId }?.name ?: groupId
+        _groups.value.firstOrNull { it.id == groupId }?.name ?: if (isAdhocId(groupId)) "애드혹" else groupId
 
     /** URI → 표시명. 전화번호부에 있으면 이름, 없으면 번호부(user part)를 그대로 쓴다. */
     internal fun displayName(uri: String): String {
@@ -728,12 +910,59 @@ class DispatchSession(
      */
     suspend fun refreshDirectory() {
         val m = management() ?: return
+        // 로그인 뒤 첫 적재 — 캐시·CSV 로 먼저 그린다(켜자마자 이름이 서게). 서버에는 그 ETag 로 묻는다.
+        if (serverBooks.isEmpty()) {
+            val (cache, csv) = withContext(Dispatchers.IO) { dirFiles.loadCache() to dirFiles.loadCsv() }
+            serverBooks.putAll(cache)
+            _csvContacts.value = csv
+            publishBooks()
+        }
         // **전화 가족 축은 `volte` 다** — 서버가 `service=volte` 에 이동(volte)과 유선(voip)을 합산해 준다
         // (csc `handle_provisioning_directory`). 내 회선이 유선이라고 `service=voip` 로 물으면 유선 가입자만
         // 와서 전화번호부가 거의 빈다. 관제 그룹원 `volteAor` 와도 같은 어휘다.
-        m.directory("volte").let { r -> if (r.ok) r.value?.let { _phoneBook.value = it } }
-        m.directory("ptt").let { r -> if (r.ok) r.value?.let { _pttBook.value = it } }
+        var changed = false
+        for (svc in listOf(DIR_PHONE, DIR_PTT)) {
+            val r = m.directory(svc, serverBooks[svc]?.etag.orEmpty())
+            r.value?.takeIf { r.ok }?.let { serverBooks[svc] = it; changed = true }   // null = 304(그대로)
+        }
+        publishBooks()
+        if (changed) serverBooks.toMap().let { snap -> withContext(Dispatchers.IO) { dirFiles.saveCache(snap) } }
+    }
+
+    /** 서버 전화번호부(캐시의 원천) — 서비스(`volte`·`ptt`)별 서버가 준 그대로. CSV 를 섞기 전이다. */
+    private val serverBooks = HashMap<String, DirectoryBook>()
+    private val dirFiles = DirectoryFiles(context.filesDir)
+
+    private val _csvContacts = MutableStateFlow<List<CsvContact>>(emptyList())
+    /** 가져온 로컬 CSV 줄 — 설정 «주소록» 이 수를 보인다. */
+    val csvContacts: StateFlow<List<CsvContact>> = _csvContacts.asStateFlow()
+
+    /** 서버 + CSV → 두 주소록. 전화는 ext·external 줄, PTT 는 ptt 줄을 섞는다(§6.2b). */
+    private fun publishBooks() {
+        val cc = countryCode()
+        val csv = _csvContacts.value
+        _phoneBook.value = mergeBook(serverBooks[DIR_PHONE] ?: DirectoryBook(), csv, setOf(CsvKind.EXT, CsvKind.EXTERNAL), cc)
+        _pttBook.value = mergeBook(serverBooks[DIR_PTT] ?: DirectoryBook(), csv, setOf(CsvKind.PTT), cc)
         reindexNames()
+    }
+
+    /**
+     * 로컬 CSV 가져오기 — 내용을 앱 저장소에 복사해 두고(원본 파일의 접근 권한에 기대지 않는다) 곧바로 섞는다. 반환 = 읽은 줄 수.
+     * 한 줄도 못 읽었으면 저장하지 않는다 — 엉뚱한 파일로 앞의 CSV 를 지우지 않게.
+     */
+    suspend fun importDirectoryCsv(text: String): Int {
+        val rows = DirectoryCsv.parse(text)
+        if (rows.isEmpty()) return 0
+        withContext(Dispatchers.IO) { dirFiles.saveCsv(text) }
+        _csvContacts.value = rows
+        publishBooks()
+        return rows.size
+    }
+
+    suspend fun clearDirectoryCsv() {
+        withContext(Dispatchers.IO) { dirFiles.deleteCsv() }
+        _csvContacts.value = emptyList()
+        publishBooks()
     }
 
     /**
@@ -762,7 +991,7 @@ class DispatchSession(
         val loaded = withContext(Dispatchers.IO) {
             runCatching {
                 messageStore.failPending()
-                messageStore.prune()
+                messageStore.prune(settings.current.messageRetentionDays)   // 설정한 보관 일수(기본 30)
                 messageStore.load(MessageKind.SDS)
             }.getOrElse { emptyMap() }
         }
@@ -779,15 +1008,48 @@ class DispatchSession(
         }
     }
 
-    internal fun addOutgoingMessage(groupId: String, text: String, msgId: String, token: Long) {
+    /** 발신 말풍선. 최종 응답이 명령보다 먼저 와 있었으면([early]) 그 상태로 선다 — 처음 저장부터 최종 상태다. */
+    internal fun addOutgoingMessage(groupId: String, text: String, msgId: String, token: Long,
+                                    early: com.cims.ue.sdk.RequestResult? = null) {
         val m = Message(
             id = "out-" + System.nanoTime(), groupId = groupId,
             fromUri = myPttId, fromName = "나", text = text,
             atMs = System.currentTimeMillis(), outgoing = true,
-            msgId = msgId, token = token, state = SendState.PENDING)
+            msgId = msgId, token = token, state = early.sendState() ?: SendState.PENDING)
         _messages.value = _messages.value + (groupId to ((_messages.value[groupId] ?: emptyList()) + m))
         storeAsync { insert(m) }
+        if (m.state == SendState.FAILED && early != null) noteSendFailure(MessageKind.SDS, early.code, early.reason)
     }
+
+    /**
+     * 재전송을 시작해도 되는가 — 화면이 넘긴 사본이 아니라 **지금의 말풍선**이 실패일 때만 참이고, 그 자리에서 «보내는 중»
+     * 으로 바꿔 둔다. 발신 명령이 도는 동안 [재전송] 을 한 번 더 눌러도 두 번 나가지 않는다(메인 스레드 전용 — 첫 대기 전에 끝난다).
+     */
+    internal fun beginResend(m: Message): Boolean {
+        if (!Resend.allowed(threadsOf(m.kind).value, m)) return false
+        threadsOf(m.kind).value = Resend.patch(threadsOf(m.kind).value, m.id) { it.copy(state = SendState.PENDING) }
+        return true
+    }
+
+    /**
+     * 재전송한 말풍선 — **같은 말풍선**(행 id)이 새 msgId·token 을 받고 다시 «보내는 중»(응답이 먼저 와 있었으면 그 상태)이
+     * 된다. 새 말풍선을 세우지 않는다 — 같은 말이 두 번 보이면 두 번 보낸 줄 안다(데스크톱 `ResendCore`).
+     */
+    internal fun markResent(m: Message, msgId: String, token: Long, failed: Boolean,
+                            early: com.cims.ue.sdk.RequestResult?) {
+        val st = if (failed) SendState.FAILED else early.sendState() ?: SendState.PENDING
+        threadsOf(m.kind).value = Resend.patch(threadsOf(m.kind).value, m.id) {
+            it.copy(msgId = msgId.ifEmpty { it.msgId }, token = token, state = st)
+        }
+        storeAsync { updateResend(m.id, msgId.ifEmpty { m.msgId }, token, st) }
+        if (!failed && st == SendState.FAILED && early != null) noteSendFailure(m.kind, early.code, early.reason)
+    }
+
+    /** 종류별 스레드 지도 — SDS 는 PTT 채널, SMS 는 전화 축(섞지 않는다 — [MessageKind]). */
+    private fun threadsOf(kind: MessageKind) = if (kind == MessageKind.SMS) _sms else _messages
+
+    private fun com.cims.ue.sdk.RequestResult?.sendState(): SendState? =
+        this?.let { if (it.code in 200..299) SendState.SENT else SendState.FAILED }
 
     internal fun addIncomingMessage(groupId: String, msg: com.cims.ue.sdk.SdsMessage) {
         val m = Message(
@@ -816,17 +1078,35 @@ class DispatchSession(
      * 거절된 것과 통화가 없는 것을 구분할 수 없다(감시 대상 통화가 «안 보이는» 가장 흔한 원인).
      */
     internal fun applyRequestResult(r: com.cims.ue.sdk.RequestResult) {
+        // SDS 전달 확인 회신 — 말풍선이 없는 발신이라 최종 거절은 로그로만 남는다(`applySds`).
+        notificationTokens.remove(r.token)?.let { what -> logNotificationResult(what, r); return }
         if (r.method.equals("SUBSCRIBE", ignoreCase = true) && r.code !in 200..299) {
             _subscribeError.value = "구독 실패 ${r.code}${if (r.reason.isNotBlank()) " ${r.reason}" else ""}"
             return
         }
-        applyRequestResult(r.token, r.code)
+        // 짝이 아직 token 을 모르면(발신 명령이 아직 안 돌아왔다) 들고 있는다 — 말풍선·회신이 설 때 꺼내 간다.
+        if (!applyRequestResult(r.token, r.code, r.reason)) earlyResults.park(r.token, r)
     }
 
-    /** 발신 최종 응답(token 상관) → 보냄/실패. */
-    internal fun applyRequestResult(token: Long, code: Int) {
-        if (token <= 0) return
+    /** 보낸 문자가 거절됐다 — 말풍선의 ⚠ 만으로는 이유를 모른다(데스크톱 `OnRequestResult` 의 토스트). */
+    private fun noteSendFailure(kind: MessageKind, code: Int, reason: String) {
+        val area = if (kind == MessageKind.SMS) TextArea.SMS else TextArea.SDS
+        notify(NoticeLevel.ERROR, ResponseText.sip(area, code, reason), "$code $reason".trim())
+    }
+
+    internal fun logNotificationResult(what: String, r: com.cims.ue.sdk.RequestResult) {
+        if (r.code !in 200..299) android.util.Log.w(SDS_TAG, "전달 확인 회신 거절 $what: ${r.code} ${r.reason}")
+    }
+
+    /** 발신 최종 응답(token 상관) → 보냄/실패. 기다리던 말풍선이 있었으면 true. 실패면 토스트도 띄운다. */
+    internal fun applyRequestResult(token: Long, code: Int, reason: String = ""): Boolean {
+        if (token <= 0) return false
+        fun waiting(m: Map<String, List<Message>>) =
+            m.values.any { list -> list.any { it.token == token && it.outgoing && it.state == SendState.PENDING } }
+        val sds = waiting(_messages.value)
+        if (!sds && !waiting(_sms.value)) return false
         val st = if (code in 200..299) SendState.SENT else SendState.FAILED
+        if (st == SendState.FAILED) noteSendFailure(if (sds) MessageKind.SDS else MessageKind.SMS, code, reason)
         fun patch(m: Map<String, List<Message>>) = m.mapValues { (_, list) ->
             list.map {
                 if (it.token == token && it.outgoing && it.state == SendState.PENDING) it.copy(state = st)
@@ -836,6 +1116,7 @@ class DispatchSession(
         _messages.value = patch(_messages.value)
         _sms.value = patch(_sms.value)          // 문자도 같은 token 으로 온다
         storeAsync { setStateByToken(token, st) }
+        return true
     }
 
     // ── 전화 축 문자(SMS/LMS) ──────────────────────────────────────────────
@@ -851,14 +1132,21 @@ class DispatchSession(
         }
     }
 
-    internal fun addOutgoingSms(peer: String, text: String, token: Long) {
+    /**
+     * 문자 발신 말풍선. 명령이 곧바로 실패했으면([failed]) 처음부터 실패로 선다 — 응답이 오지 않을 발신이라
+     * «보내는 중» 으로 세우면 재기동 때까지 그대로 멈춘다. 최종 응답이 먼저 와 있었으면([early]) 그 상태로 선다.
+     */
+    internal fun addOutgoingSms(peer: String, text: String, token: Long, failed: Boolean = false,
+                                early: com.cims.ue.sdk.RequestResult? = null) {
+        val st = if (failed) SendState.FAILED else early.sendState() ?: SendState.PENDING
         val m = Message(
             id = "sms-out-" + System.nanoTime(), groupId = peer,
             fromUri = "", fromName = "나", text = text,
             atMs = System.currentTimeMillis(), outgoing = true,
-            token = token, state = SendState.PENDING, kind = MessageKind.SMS)
+            token = token, state = st, kind = MessageKind.SMS)
         _sms.value = _sms.value + (peer to ((_sms.value[peer] ?: emptyList()) + m))
         storeAsync { insert(m) }
+        if (!failed && st == SendState.FAILED && early != null) noteSendFailure(MessageKind.SMS, early.code, early.reason)
     }
 
     internal fun addIncomingSms(peer: String, fromUri: String, text: String) {
@@ -918,7 +1206,16 @@ class DispatchSession(
         observing = true
         startTicker()
         val engine = ue ?: return
-        scope.launch { engine.registrations.collect { _registrations.value = it } }
+        scope.launch {
+            engine.registrations.collect { regs ->
+                noteRegistrationFailures(_registrations.value, regs)
+                _registrations.value = regs
+                if (regs.values.any { it.registered }) refreshServerCert()   // TLS 등록 = 새 핸드셰이크
+            }
+        }
+        scope.launch {                          // 잔여 일수는 시간이 가며 줄어든다 — 관측이 그대로여도 다시 판정
+            while (true) { kotlinx.coroutines.delay(60_000); refreshServerCert() }
+        }
         scope.launch { engine.callState.collect { applyCallState(it) } }
         scope.launch { engine.incomingCall.collect { upsertSession(it) } }
         scope.launch { engine.callMedia.collect { upsertSession(it) } }
@@ -940,7 +1237,10 @@ class DispatchSession(
      */
     fun applyAudio() {
         audio.setInCall(true)
-        audio.setRoute(settings.current.audioRoute)
+        val s = settings.current
+        // 헤드셋·블루투스면 **선호 이어폰**을 먼저 고른다 — 여럿이 붙어 있을 때 첫 것으로 가지 않게(§8).
+        val h = pickHeadset(s.audioRoute, audio.headsets.value, s.preferredHeadset)
+        if (h != null) audio.selectHeadset(h.id) else audio.setRoute(s.audioRoute)
         audio.ensureRxVolume()
     }
 
@@ -979,6 +1279,7 @@ class DispatchSession(
         _callLog.value = emptyList()
         _phoneBook.value = DirectoryBook()
         _pttBook.value = DirectoryBook()
+        serverBooks.clear()                     // 다음 로그인은 캐시부터 다시 그린다(파일은 남는다)
         nameIndex = emptyMap()
         _tally.value = DeskTally()
         watched = emptySet()
@@ -989,8 +1290,15 @@ class DispatchSession(
         _subscribeError.value = ""
         _registrations.value = emptyMap()
         operations.clear()
+        consultOf.clear()
         adhocMembers.clear()
         broadcastPending.clear()
+        notificationTokens.clear()              // 끝난 계정의 회신은 더 맞출 곳이 없다
+        earlyResults.clear()
+        _notices.value = emptyList()
+        hwPtt.releaseStuck()                    // 누른 채 나간 키 — 다음 사람의 발언이 되지 않게
+        _serverCert.value = null
+        _rxLevels.value = emptyMap()
         _error.value = null
         _state.value = SessionState.LOGGED_OUT
     }
@@ -1032,9 +1340,43 @@ class DispatchSession(
         return CimsResult.fail(code, reason)
     }
 
+    /**
+     * 등록 실패 → 토스트(데스크톱 `OnReg` 의 «등록 실패 — …»). **실패로 바뀔 때만** 띄운다 — 계정의 자동 재시도
+     * (`regConfig.retryIntervalSec`, 30초)가 실패할 때마다 오류 토스트가 쌓이면 다른 실패를 가린다. 데스크톱의 앱 쪽
+     * 재등록 백오프는 두지 않는다 — 코어 계정이 이미 재시도한다(두 겹이면 REGISTER 가 두 배로 나간다).
+     */
+    private fun noteRegistrationFailures(before: Map<Int, RegInfo>, after: Map<Int, RegInfo>) {
+        after.forEach { (id, ri) ->
+            if (ri.state != RegState.FAILED || before[id]?.state == RegState.FAILED) return@forEach
+            val name = when (_accounts.value.entries.firstOrNull { it.value.id == id }?.key) {
+                AccountKind.PTT -> "PTT"
+                AccountKind.PHONE -> "전화"
+                null -> "계정"
+            }
+            notify(NoticeLevel.ERROR, "$name 등록 실패 — ${ResponseText.sip(TextArea.REGISTER, ri.code, ri.reason)}",
+                "${ri.code} ${ri.reason}".trim())
+        }
+    }
+
     /** 등록이 하나라도 살아 있는가 — 상단 바 점등. */
     fun anyRegistered(): Boolean =
         _registrations.value.values.any { it.state == RegState.REGISTERED }
+
+    /**
+     * 망이 돌아왔거나 바뀌었다 — 코어에 알린다. **등록 복구는 코어가 한다**(`Engine::handleNetworkChange` — 옛 TCP/TLS
+     * 연결을 닫고 등록을 켠 계정마다 다시 등록하며, 앞 등록이 걸려 있으면 끝난 뒤 한 번 더). 판정(«복귀·전환인가»)은
+     * `DispatchService` 의 망 콜백이 한다(`NetworkReturn`). 엔진이 없으면(로그인 전) 할 일이 없다.
+     *
+     * 계정마다 REGISTER 만 다시 거는 것(`refreshRegistration`)으로는 모자라다 — 옛 망의 연결을 재사용하고, 진행 중 등록이
+     * 있으면 `PJSIP_EBUSY` 로 거절돼 요청이 사라진다.
+     */
+    fun handleNetworkChange() {
+        val engine = ue ?: return
+        scope.launch {
+            val r = engine.handleNetworkChange()
+            if (!r.ok) android.util.Log.w("DispatchSession", "망 변경 처리 실패: ${r.code} ${r.reason}")
+        }
+    }
 
     private companion object {
         const val USER_AGENT = "CIMS-Dispatch-Tablet/0.1"
@@ -1042,5 +1384,8 @@ class DispatchSession(
         const val ACTIVITY_LIMIT = 500
         /** ⑥ 통화 내역 보관 — 그 이전은 서버 통합 이력이 가진다. */
         const val CALL_LOG_LIMIT = 300
+        /** 전화번호부 서비스 키 — 전화 가족은 `volte`(서버가 volte∪voip 를 합산), PTT 는 `ptt`. 캐시 파일의 키이기도 하다. */
+        const val DIR_PHONE = "volte"
+        const val DIR_PTT = "ptt"
     }
 }

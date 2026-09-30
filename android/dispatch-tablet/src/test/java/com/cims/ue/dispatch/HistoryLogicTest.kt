@@ -121,4 +121,15 @@ class TimelinePosTest {
     @Test fun `값이 전체를 넘어도 폭 안으로 가둔다`() {
         assertEquals(W, com.cims.ue.dispatch.ui.history.barPos(W, 5000, 1000))
     }
+
+    // ── 타임라인 배율 — 눈금 간격(데스크톱 `RebuildAxisTicks` 와 같은 규칙) ──
+    @Test fun `배율을 올리면 눈금이 촘촘해진다 — 대여섯 개가 보이게`() {
+        val hour = 3_600_000
+        assertEquals(600, com.cims.ue.dispatch.ui.history.axisStepSec(hour, 1f))     // 1시간 ÷ 6 = 10분
+        assertEquals(10, com.cims.ue.dispatch.ui.history.axisStepSec(hour, 64f))     // ×64 → 9.4초 → 10초
+        assertEquals(1, com.cims.ue.dispatch.ui.history.axisStepSec(3_000, 1f))      // 짧은 세션은 1초
+        assertEquals(3600, com.cims.ue.dispatch.ui.history.axisStepSec(100 * hour, 1f))  // 가장 큰 간격에서 멈춘다
+        assertEquals("×1 아래로는 내려가지 않는다",
+            com.cims.ue.dispatch.ui.history.axisStepSec(hour, 1f), com.cims.ue.dispatch.ui.history.axisStepSec(hour, 0.5f))
+    }
 }

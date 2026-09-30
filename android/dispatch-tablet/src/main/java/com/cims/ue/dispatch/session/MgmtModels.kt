@@ -112,8 +112,11 @@ data class AdminView(
 
 // ── 회사 전화번호부(§4.7 멤버 후보) ─────────────────────────────────────────
 
-/** 전화번호부 한 줄 — `GET /provisioning/directory?service=volte|ptt` 의 `entries[]`. */
-data class DirectoryEntry(val org: String, val name: String, val msisdn: String)
+/**
+ * 전화번호부 한 줄 — `GET /provisioning/directory?service=volte|ptt` 의 `entries[]`, 또는 로컬 CSV 줄(§6.2b).
+ * [external] = CSV 의 외부망 번호(서버 가입자가 아니다) — 문자·전달의 외부망 판정이 이것을 본다.
+ */
+data class DirectoryEntry(val org: String, val name: String, val msisdn: String, val external: Boolean = false)
 
 /** 전화번호부 한 벌. ETag 로 버전을 맞춘다(304 면 내용 유지). */
 data class DirectoryBook(
@@ -141,7 +144,32 @@ data class DirectoryBook(
         return entries.firstOrNull { normalize(it.msisdn) == key }?.name.orEmpty()
     }
 
+    /**
+     * 번호를 치는 동안의 제안 — 이름에 들었거나(대소문자 무시) 친 숫자가 번호의 **어느 표기에든** 들었으면 앞에서부터
+     * [limit] 개. 표기는 셋이다: 저장된 그대로 · E.164(`+8210…`) · 국내 로컬(`010…`) — 치다 만 `010333` 이 `+821033334444`
+     * 로 저장된 사람에게 걸려야 한다(부분 입력은 정규형으로 올릴 수 없다). URI 를 치는 중이면(`:`) 제안하지 않는다 —
+     * 주소록 번호가 아니다(데스크톱 `CallOriginateViewModel.UpdateSuggestions` 와 같은 규칙).
+     */
+    fun suggest(query: String, limit: Int = 8, countryCode: String = "82"): List<DirectoryEntry> {
+        val q = query.trim()
+        if (q.isEmpty() || ':' in q) return emptyList()
+        val qd = q.filter { it.isDigit() || it == '+' }
+        return entries.asSequence().filter { e ->
+            e.name.contains(q, ignoreCase = true) ||
+                qd.isNotEmpty() && numberForms(e.msisdn, countryCode).any { it.contains(qd) }
+        }.take(limit).toList()
+    }
+
     companion object {
+        /** 한 번호의 표기 셋 — 저장된 그대로(숫자·`+`) · E.164 · 국내 로컬(`+<cc>…` → `0…`). */
+        internal fun numberForms(msisdn: String, countryCode: String = "82"): Set<String> {
+            val raw = msisdn.filter { it.isDigit() || it == '+' }
+            val e164 = normalize(msisdn, countryCode)
+            val local = if (e164.startsWith("+$countryCode") && e164.length > countryCode.length + 2)
+                "0" + e164.drop(countryCode.length + 1) else raw
+            return setOf(raw, e164, local).filterTo(LinkedHashSet()) { it.isNotEmpty() }
+        }
+
         /**
          * 비교 정규형 — 숫자·`+` 만 남기고 국내 로컬 표기(`010…`)는 E.164 로 올린다.
          *
@@ -180,6 +208,9 @@ data class ManagedGroup(
     val inListenScope: Boolean = false,
     val isMember: Boolean = false,
 ) {
+    /** 태블릿에 채널이 있는가 — 멤버(① 카드)·청취 범위(② 행). 관리 범위만 있는 그룹에는 [채널로] 가 없다. */
+    val hasChannel: Boolean get() = isMember || inListenScope
+
     /** 관계 배지 — 멤버 › 청취 범위 › 소유 › 범위 순으로 하나만 고른다(§4.7). */
     val relation: String get() = when {
         isMember -> "멤버"

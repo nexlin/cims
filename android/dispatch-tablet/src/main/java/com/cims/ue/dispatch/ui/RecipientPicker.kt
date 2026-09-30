@@ -59,6 +59,7 @@ fun RecipientPicker(
     val people = hits.filterNot { it.group }
 
     Dialog(onDismissRequest = onDismiss) {
+        ForwardPttKeys()                    // 대화상자가 떠 있어도 측면 키는 발언이다(§7)
         Surface(shape = MaterialTheme.shapes.large, tonalElevation = 4.dp,
             modifier = Modifier.width(520.dp).heightIn(max = 560.dp)) {
             Column(Modifier.padding(16.dp)) {

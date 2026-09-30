@@ -6,28 +6,138 @@ package com.cims.ue.dispatch.session
 
 import org.json.JSONObject
 
-/** 문구 영역 — 같은 상태코드라도 화면에 따라 다르게 읽힌다. */
-enum class TextArea { MANAGEMENT, RECORDING, GROUP }
+/**
+ * 문구 영역 — 같은 상태코드라도 화면에 따라 다르게 읽힌다.
+ *
+ * 앞 셋은 HTTP 관리 API(본문 `error` 로 세분, [of]), 나머지는 SIP 응답(상태코드로, [sip]) — 데스크톱
+ * `ResponseText.Area` 와 같은 축이다.
+ */
+enum class TextArea {
+    MANAGEMENT, RECORDING, GROUP,
+    PICKUP, TRANSFER, JOIN, PTT_LISTEN, PTT_JOIN, PTT_PRIVATE, PTT_ADHOC, EMERGENCY, SDS, SMS, REGISTER, CALL,
+}
 
 object ResponseText {
 
-    /** 상태코드 → 문구. 영역별 사전에 없으면 null. */
-    fun forStatus(area: TextArea, code: Int): String? = when (area to code) {
-        TextArea.MANAGEMENT to 401, TextArea.RECORDING to 401, TextArea.GROUP to 401 ->
-            "로그인이 만료됐습니다 — 다시 로그인하세요"
-        TextArea.MANAGEMENT to 403 -> "관리 권한이 없습니다 (관제 그룹 관리 범위)"
-        TextArea.MANAGEMENT to 404 -> "대상이 없습니다 — 목록을 새로 고칩니다"
-        TextArea.MANAGEMENT to 409 -> "충돌 — 이미 있거나 비어 있지 않습니다"
-        TextArea.RECORDING to 403 -> "청취 범위 밖의 녹취입니다"
-        TextArea.RECORDING to 404 -> "녹취가 없습니다"
-        TextArea.RECORDING to 500 -> "녹취 변환에 실패했습니다 — [다시 변환]"
-        TextArea.RECORDING to 502 -> "녹취 서버(OAM)에 닿지 않습니다"
-        TextArea.GROUP to 403 -> "그룹을 만들거나 바꿀 권한이 없습니다 (자격 또는 본인 소유 그룹만)"
-        TextArea.GROUP to 404 -> "그룹이 없습니다 — 목록을 새로 고칩니다"
-        TextArea.GROUP to 409 -> "같은 id 의 그룹을 다른 사용자가 소유하고 있습니다"
-        TextArea.GROUP to 412 -> "다른 곳에서 먼저 바뀐 그룹입니다 — 다시 열어 편집하세요"
-        TextArea.GROUP to 400 -> "그룹 문서 형식 오류"
-        else -> null
+    /** 상태코드 → 문구. 영역별 사전에 없으면 null. SIP 영역은 dispatch_desktop_ui.md §9 표와 같은 문장이다. */
+    fun forStatus(area: TextArea, code: Int): String? = when (area) {
+        TextArea.MANAGEMENT -> when (code) {
+            401 -> LOGIN_EXPIRED
+            403 -> "관리 권한이 없습니다 (관제 그룹 관리 범위)"
+            404 -> "대상이 없습니다 — 목록을 새로 고칩니다"
+            409 -> "충돌 — 이미 있거나 비어 있지 않습니다"
+            else -> null
+        }
+        TextArea.RECORDING -> when (code) {
+            401 -> LOGIN_EXPIRED
+            403 -> "청취 범위 밖의 녹취입니다"
+            404 -> "녹취가 없습니다"
+            500 -> "녹취 변환에 실패했습니다 — [다시 변환]"
+            502 -> "녹취 서버(OAM)에 닿지 않습니다"
+            else -> null
+        }
+        TextArea.GROUP -> when (code) {
+            401 -> LOGIN_EXPIRED
+            403 -> "그룹을 만들거나 바꿀 권한이 없습니다 (자격 또는 본인 소유 그룹만)"
+            404 -> "그룹이 없습니다 — 목록을 새로 고칩니다"
+            409 -> "같은 id 의 그룹을 다른 사용자가 소유하고 있습니다"
+            412 -> "다른 곳에서 먼저 바뀐 그룹입니다 — 다시 열어 편집하세요"
+            400 -> "그룹 문서 형식 오류"
+            else -> null
+        }
+        TextArea.PICKUP -> when (code) {
+            404 -> "당겨받을 호가 없습니다"
+            403 -> "다른 그룹의 호입니다"
+            489 -> "구독 이벤트 미지원(서버)"
+            else -> null
+        }
+        TextArea.TRANSFER -> when (code) {
+            403 -> "이 서비스는 호 전달이 허용되지 않습니다"
+            in 400..499 -> "전달 대상이 응답하지 않아 원 통화를 유지합니다"
+            else -> null
+        }
+        TextArea.JOIN -> when (code) {
+            403 -> "청취 권한이 없는 대상입니다"
+            481 -> "통화가 이미 종료되었거나 아직 연결 전입니다"
+            488 -> "미디어 조건 불일치(코덱/SRTP) — 관리자 문의"
+            486 -> "이 통화의 청취 인원이 찼습니다"
+            else -> null
+        }
+        TextArea.PTT_LISTEN -> when (code) {
+            403 -> "청취 자격이 없거나 범위 밖 그룹입니다"
+            480 -> "진행 중인 그룹 통화가 없습니다"
+            else -> null
+        }
+        TextArea.PTT_JOIN -> when (code) {
+            403 -> "그룹 멤버가 아닙니다"
+            else -> null
+        }
+        TextArea.PTT_PRIVATE -> when (code) {
+            403 -> "개별 통화 자격이 없거나 상대가 허용하지 않습니다"
+            404 -> "상대를 찾을 수 없음"
+            480 -> "응답 없음"
+            486 -> "통화 중"
+            else -> null
+        }
+        TextArea.PTT_ADHOC -> when (code) {
+            403 -> "애드혹 그룹통화 자격이 없거나 시스템에서 꺼져 있습니다"
+            else -> null
+        }
+        TextArea.EMERGENCY -> when (code) {
+            403 -> "긴급 호출 자격이 없습니다"
+            else -> null
+        }
+        TextArea.SDS -> when (code) {
+            403 -> "그룹 문자 권한 없음"
+            413 -> "너무 긺(서버 한도)"
+            404, 408, 503 -> "전송 실패 — 재전송"
+            else -> null
+        }
+        TextArea.SMS -> when (code) {
+            404 -> "상대가 등록되어 있지 않습니다"
+            480 -> "응답 없음"
+            413 -> "문자가 너무 깁니다(서버 한도)"
+            else -> null
+        }
+        TextArea.REGISTER -> when (code) {
+            401, 403 -> "인증 실패 — 다시 로그인"
+            408, 503 -> "서버 응답 없음 — 재시도 중"
+            else -> null
+        }
+        TextArea.CALL -> when (code) {
+            486 -> "통화 중"
+            480 -> "응답 없음"
+            404 -> "없는 번호입니다"
+            403 -> "발신이 허용되지 않습니다"
+            487 -> "취소됨"
+            603 -> "거절됨"
+            else -> null
+        }
+    }
+
+    private const val LOGIN_EXPIRED = "로그인이 만료됐습니다 — 다시 로그인하세요"
+
+    /**
+     * SIP 응답 한 건을 문장으로(데스크톱 `ResponseText.Describe` 의 SIP 갈래). 사전에 없으면 원문을 괄호로 붙인다 —
+     * 조용히 삼키면 원인을 못 찾는다. 코드가 없는 실패(앱이 먼저 막은 것·엔진 오류)는 사유를 그대로 쓴다.
+     */
+    fun sip(area: TextArea, code: Int, reason: String): String {
+        forStatus(area, code)?.let { return it }
+        if (code >= 100) return if (reason.isBlank()) "실패 ($code)" else "실패 ($code $reason)"
+        return reason.ifBlank { "실패" }
+    }
+
+    /** 세션을 만든 동작 → 문구 영역(데스크톱 `ResponseText.AreaOf`). */
+    fun areaOf(op: Operation): TextArea = when (op) {
+        Operation.PICKUP -> TextArea.PICKUP
+        Operation.TRANSFER -> TextArea.TRANSFER
+        Operation.JOIN -> TextArea.JOIN
+        Operation.PTT_LISTEN -> TextArea.PTT_LISTEN
+        Operation.PTT_JOIN -> TextArea.PTT_JOIN
+        Operation.PTT_PRIVATE -> TextArea.PTT_PRIVATE
+        Operation.PTT_ADHOC -> TextArea.PTT_ADHOC
+        Operation.EMERGENCY -> TextArea.EMERGENCY
+        Operation.INCOMING, Operation.DIAL -> TextArea.CALL
     }
 
     /**
@@ -107,7 +217,8 @@ object ResponseText {
         val (error, detail, where) = parse(body)
         val fine = when (area) {
             TextArea.GROUP -> forGroupError(error, detail)
-            else -> forManagementError(error, detail, where)
+            TextArea.MANAGEMENT, TextArea.RECORDING -> forManagementError(error, detail, where)
+            else -> null                                       // SIP 영역은 본문이 없다 — [sip]
         }
         if (fine != null) return fine
         forStatus(area, code)?.let { return it }

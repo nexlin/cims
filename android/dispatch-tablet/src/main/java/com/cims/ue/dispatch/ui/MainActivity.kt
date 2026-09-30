@@ -61,7 +61,12 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         // 세션(엔진)은 서비스가 든다 — Activity 보다 오래 산다.
         DispatchService.start(this)
-        setContent { MaterialTheme(colorScheme = darkColorScheme()) { Root(vm, ::shutdown) } }
+        setContent {
+            // 테마는 설정을 따른다(바꾸면 곧바로) — 세션이 서기 전에는 기본(어둡게)으로 선다.
+            val session by vm.sessionFlow.collectAsStateWithLifecycle()
+            val dark = session?.settingsFlow?.collectAsStateWithLifecycle()?.value?.dark ?: true
+            MaterialTheme(colorScheme = if (dark) darkColorScheme() else lightColorScheme()) { Root(vm, ::shutdown) }
+        }
     }
 
     override fun onResume() {
@@ -69,14 +74,14 @@ class MainActivity : ComponentActivity() {
         vm.refresh()          // 재생성·복귀 후 화면은 코어 스냅샷에서 다시 그린다
     }
 
-    /** 하드 키보드가 붙어 있으면 F1~F4 로 화면을, Ctrl+1~9 로 채널을 고른다(§7). */
-    override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
-        AppScreen.ofFunctionKey(keyCode)?.let { vm.show(it); return true }
-        if (event?.isCtrlPressed == true && keyCode in KeyEvent.KEYCODE_1..KeyEvent.KEYCODE_9) {
-            vm.focusChannel(keyCode - KeyEvent.KEYCODE_1 + 1)
-            return true
-        }
-        return super.onKeyDown(keyCode, event)
+    /**
+     * 측면 PTT 하드키(§7) — **창의 어느 것보다 먼저** 받는다. 입력란에 포커스가 있어도 발언은 걸려야 하고, 설정의
+     * 버튼 학습도 여기로 들어온다. 시트·대화상자는 제 창이라 여기로 오지 않는다 — 그쪽은 [ForwardPttKeys] 가 넘긴다.
+     * 키보드 단축키는 두지 않는다 — 관제 태블릿은 하드 키보드를 전제하지 않는다(§7).
+     */
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (DispatchService.session?.hwPtt?.onKeyEvent(event) == true) return true
+        return super.dispatchKeyEvent(event)
     }
 }
 
@@ -168,11 +173,18 @@ private fun Shell(vm: MainViewModel, onShutdown: () -> Unit) {
         onSearch = { searchOpen = true },
         menu = { SessionMenu(vm, onShutdown) },
         talkBar = { vm.ptt?.let { TalkBar(it, lockEnabled = vm.lockTalk) } },
+        // 토스트 — 방금 누른 것이 왜 안 됐나(§6.2a-2). 본문 위 우하단.
+        notices = { m -> if (session != null) Notices(session, m) },
         banners = {
+            // 긴급·임박 배너 — 어느 화면에 있든 채널의 긴급을 알린다(§6.2a-1). 닫기 없음, [채널로 이동] 하나.
+            //   착신 배너보다 위다 — 착신은 받으면 사라지지만 긴급은 풀릴 때까지 남는 상태다.
+            if (session != null) EmergencyBanners(session, onOpen = vm::openChannel)
             // 착신 배너 — **화면과 무관하게** 상단 바 아래에 뜬다(§6.2a). 유일한 전역 착신 표면이다.
             if (session != null) IncomingBanners(session, onAnswered = vm::goToCalls)
             // 자격 갱신이 흔들리는 동안 미리 알린다 — 조회를 누른 그 순간에야 튕기지 않게(§6.1b).
             if (session != null) CredentialBanner(session)
+            // 서버 인증서 만료 — 서버 자동 갱신이 죽었다는 신호. 닫기 없음, 서버가 갱신되면 내린다(§6.2a-3).
+            if (session != null) ServerCertBanner(session)
         },
         pttPane = pttPane,
         callPane = callPane,
@@ -200,12 +212,25 @@ private fun Shell(vm: MainViewModel, onShutdown: () -> Unit) {
                 else Box(Modifier.weight(1f)) {
                     when (page.pttPane ?: PttPane.CHANNELS) {
                         PttPane.CHANNELS ->
-                            if (channel != null) ChannelScreen(
-                                id = channel!!, channels = ptt, scoped = scoped,
-                                onBack = vm::closeChannel, onShowRoster = vm::showRoster)
-                            else PttScreen(ptt, scoped, onOpen = vm::openChannel)
+                            if (channel != null) {
+                                // [편집]·[삭제] 자격 — 내 소유이거나 관리 범위(서버 `canManage`). 관리 목록이 아직 없으면 받는다.
+                                LaunchedEffect(channel) { vm.ensureManaged() }
+                                val managed = vm.pttGroups?.groups?.collectAsStateWithLifecycle()?.value.orEmpty()
+                                ChannelScreen(
+                                    id = channel!!, channels = ptt, scoped = scoped,
+                                    onBack = vm::closeChannel, onShowRoster = vm::showRoster,
+                                    onPerson = vm::runPersonAction,
+                                    canEdit = vm.canManageGroup(channel!!, managed),
+                                    onMessages = vm::openThread, onEdit = vm::editGroup, onDelete = vm::deleteGroup)
+                            }
+                            else PttScreen(ptt, scoped, onOpen = vm::openChannel,
+                                onMessage = { n -> vm.runPersonAction(PersonAction.SDS, n) },
+                                canCreate = vm.canCreateGroups, onNewChannel = vm::newGroup)
                         PttPane.MESSAGES -> Box(Modifier.fillMaxSize().padding(8.dp)) { Messages(msg) }
-                        PttPane.EVENTS -> Box(Modifier.fillMaxSize().padding(8.dp)) { Activity(act) }
+                        PttPane.EVENTS -> Box(Modifier.fillMaxSize().padding(8.dp)) {
+                            Activity(act, onOpenChannel = vm::openChannel, onReply = vm::openThread,
+                                onHistory = { vm.show(AppScreen.HISTORY) })
+                        }
                     }
                 }
             }
@@ -216,12 +241,13 @@ private fun Shell(vm: MainViewModel, onShutdown: () -> Unit) {
                     bookPane = { ContactsPane(it, vm::runPersonAction) },
                     smsPane = { vm.sms?.let { m -> SmsPane(m) } ?: Waiting() },
                     showTabs = false,
+                    onHistory = { vm.show(AppScreen.HISTORY) },
                     modifier = Modifier.weight(1f))
             } ?: Waiting()
 
             AppScreen.MORE -> when (more) {
                 MoreItem.PTT_GROUPS -> vm.pttGroups?.let {
-                    PttGroupsScreen(it, onGoDispatch = { vm.show(AppScreen.PTT) }, Modifier.weight(1f))
+                    PttGroupsScreen(it, onOpenChannel = vm::openChannel, Modifier.weight(1f))
                 } ?: Waiting()
                 MoreItem.ADMIN -> vm.admin?.let { AdminScreen(it, Modifier.weight(1f)) } ?: Waiting()
                 null -> MoreScreen(onOpen = vm::openMore, onSettings = { settingsOpen = true },
@@ -288,7 +314,7 @@ private fun SessionMenu(vm: MainViewModel, onShutdown: () -> Unit) {
         val logout = what == "logout"
         AlertDialog(
             onDismissRequest = { confirm = null },
-            title = { Text(if (logout) "로그아웃" else "앱 종료") },
+            title = { ForwardPttKeys(); Text(if (logout) "로그아웃" else "앱 종료") },
             text = {
                 Text(if (logout) "등록을 풀고 로그인 화면으로 돌아갑니다. 진행 중인 통화·무전이 끊깁니다."
                      else "등록을 풀고 앱을 완전히 끝냅니다. 종료 뒤에는 착신·무전을 받지 않습니다.")

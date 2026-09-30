@@ -20,11 +20,17 @@ import com.cims.ue.dispatch.session.SessionKind
 import com.cims.ue.dispatch.session.answer
 import com.cims.ue.dispatch.session.dial
 import com.cims.ue.dispatch.session.hangup
+import com.cims.ue.dispatch.session.setRxLevel
+import com.cims.ue.dispatch.session.callLogCsv
+import com.cims.ue.dispatch.session.reject
 import com.cims.ue.dispatch.session.hold
 import com.cims.ue.dispatch.session.joinMonitor
 import com.cims.ue.dispatch.session.pickup
 import com.cims.ue.dispatch.session.sendDtmf
-import com.cims.ue.dispatch.session.setMuted
+import com.cims.ue.dispatch.session.toggleMuted
+import com.cims.ue.dispatch.session.cancelConsult
+import com.cims.ue.dispatch.session.completeConsult
+import com.cims.ue.dispatch.session.startConsult
 import com.cims.ue.dispatch.session.transfer
 import com.cims.ue.dispatch.ui.PersonEntry
 import com.cims.ue.dispatch.ui.mergePeople
@@ -69,7 +75,11 @@ data class QueueItem(
     val ringingAt: List<String> = emptyList(),
     /** 응답한 그룹원(있으면). */
     val answeredBy: String = "",
+    /** 이 발신자의 **내** 착신 leg(울리는 중) — 있으면 [응답] 이 그것만 받는다(데스크톱 `QueueItem.RingsMe`). */
+    val myLeg: Int? = null,
 ) {
+    /** 대표번호(user part) — [당겨받기] 가 지정 픽업 `<code><대표번호>` 로 이 호를 고른다(dispatch_center.md §4.4). */
+    val pilot: String get() = userPart(dialog.watched)
     val ringing: Boolean get() = dialog.isEarly
     val answered: Boolean get() = dialog.isConfirmed
     val elapsedMs: Long get() = dialog.elapsedMs
@@ -93,6 +103,14 @@ data class CallCard(
     val stateText: String get() = when {
         incoming -> "착신"; held -> "보류"; active -> "통화"; else -> "연결 중"
     }
+    /** 상담 전달의 **상담 호** — «상담» 배지, [전달 완결]·[취소](데스크톱 `IsConsult`). */
+    val consult: Boolean get() = session.consultFor != null
+    /** 전달할 수 있는가 — 통화·보류 중이고 상담 호가 아니다(데스크톱 `CanTransfer`). */
+    val canTransfer: Boolean get() = (active || held) && !consult
+    /** 상담 호가 연결됐다 — 원 통화를 넘길 수 있다(데스크톱 `CanComplete`). */
+    val canComplete: Boolean get() = consult && active
+    /** «전달 중 → 이순경» — 전달을 걸었고 이 leg 이 끝나기를 기다린다. */
+    val transferNote: String get() = session.transferNote
 }
 
 /** ⑥ 필터의 «해제» 값 — 데스크톱과 같은 문자열을 쓴다(`CallActivityViewModel.Filter`). */
@@ -268,23 +286,22 @@ class CallDeskViewModel(private val s: DispatchSession) : ScreenViewModel() {
      * 포크된 그룹원 leg 들은 «누가 울리는지» 로만 쓴다(TS 24.239 병렬 호출).
      */
     val queue: StateFlow<List<QueueItem>> =
-        s.dialogs.let { f ->
-            combine(f, f) { dialogs, _ ->
-                dialogs.filter { s.isPilot(it.watched) && !it.isTerminated }
-                    .map { pilot ->
-                        val caller = userPart(pilot.info.remoteIdentity)
-                        val peers = dialogs.filter {
-                            it !== pilot && !s.isPilot(it.watched) &&
-                                userPart(it.info.remoteIdentity) == caller
-                        }
-                        QueueItem(
-                            dialog = pilot,
-                            caller = caller,
-                            ringingAt = peers.filter { it.isEarly }.map { userPart(it.watched) },
-                            answeredBy = peers.firstOrNull { it.isConfirmed }
-                                ?.let { userPart(it.watched) }.orEmpty())
+        combine(s.dialogs, s.sessions) { dialogs, sessions ->
+            dialogs.filter { s.isPilot(it.watched) && !it.isTerminated }
+                .map { pilot ->
+                    val caller = userPart(pilot.info.remoteIdentity)
+                    val peers = dialogs.filter {
+                        it !== pilot && !s.isPilot(it.watched) &&
+                            userPart(it.info.remoteIdentity) == caller
                     }
-            }
+                    QueueItem(
+                        dialog = pilot,
+                        caller = caller,
+                        ringingAt = peers.filter { it.isEarly }.map { userPart(it.watched) },
+                        answeredBy = peers.firstOrNull { it.isConfirmed }
+                            ?.let { userPart(it.watched) }.orEmpty(),
+                        myLeg = myLegOf(sessions, caller))
+                }
         }.stateIn(scope, SharingStarted.Eagerly, emptyList())
 
     /**
@@ -472,21 +489,25 @@ class CallDeskViewModel(private val s: DispatchSession) : ScreenViewModel() {
     /** 그룹 픽업(번호 없음) 또는 지정 픽업. */
     fun pickup(number: String = "") { scope.launch { s.pickup(number) } }
 
+    /** 호별 수신 음량 — 감청 상세의 음량 막대. */
+    val rxLevels: StateFlow<Map<Int, Float>> = s.rxLevels
+    fun setRxLevel(callId: Int, level: Float) { scope.launch { s.setRxLevel(callId, level) } }
+
+    /** ⑥ CSV — 화면 필터와 무관하게 세션이 든 내역 전부. */
+    fun logCsv(): String = callLogCsv(s.callLog.value)
+
+    /** 대기열 [응답] — 이 발신자의 내 착신 leg 만 받는다(직접 착신과 동시에 울릴 때 다른 호를 받지 않게). */
+    fun answerQueue(q: QueueItem) { q.myLeg?.let { id -> scope.launch { s.answer(id) } } }
+
     fun answer(c: CallCard) { scope.launch { s.answer(c.callId) } }
+    fun reject(c: CallCard) { scope.launch { s.reject(c.callId) } }
     fun hangup(c: CallCard) { scope.launch { s.hangup(c.callId) } }
     fun toggleHold(c: CallCard) { scope.launch { s.hold(c.callId, !c.held); s.refreshSessions() } }
     /**
-     * 음소거 토글 — **명령 뒤 스냅샷을 다시 읽는다**.
-     *
-     * 코어가 `onCallMedia` 로 알려 주지만(엔진 수정), 구형 엔진과 섞여도 화면이 멎지 않게 앱에서도
-     * 한 번 당긴다. 값의 권위는 언제나 코어 스냅샷이고 앱은 «눌렀으니 켜졌겠지» 로 추측하지 않는다.
+     * 음소거 토글 — 뒤집을 값은 카드 사본이 아니라 **명령 직전의 코어 스냅샷**에서 읽고, 명령 뒤 스냅샷을
+     * 다시 당긴다(`toggleMuted`). 값의 권위는 언제나 코어이고 앱은 «눌렀으니 켜졌겠지» 로 추측하지 않는다.
      */
-    fun toggleMute(c: CallCard) {
-        scope.launch {
-            s.setMuted(c.callId, !c.muted)
-            s.refreshSessions()
-        }
-    }
+    fun toggleMute(c: CallCard) { scope.launch { s.toggleMuted(c.callId) } }
 
     /** 감청 합류 — 인가는 서버가 한다(범위 밖이면 403). */
     fun monitor(m: MemberChip) {
@@ -502,13 +523,36 @@ class CallDeskViewModel(private val s: DispatchSession) : ScreenViewModel() {
         scope.launch { s.sendDtmf(c.callId, digit) }
     }
 
-    // 전달 — blind. attended 는 상담 호가 필요해 후속(§11).
+    // 전달 — blind(REFER) 와 상담(원 통화 보류 + 상담 호 → [전달 완결], Replaces). 데스크톱 CallDeskViewModel 과 같다.
     fun openTransfer(c: CallCard) { _transferFor.value = c.callId; _transferTarget.value = "" }
     fun closeTransfer() { _transferFor.value = null; _transferTarget.value = "" }
     fun setTransferTarget(v: String) { _transferTarget.value = v }
+    /** 그룹원 칩 — 대상 칸을 그 번호로 채운다(데스크톱 `PickMember`). */
+    fun pickTransferTarget(number: String) { _transferTarget.value = number }
+
+    /** blind 전달 — 받아들여지면 칸을 닫는다(실패면 토스트가 이유를 말하고 칸은 남는다). */
     fun transfer(c: CallCard) {
         val t = _transferTarget.value.trim()
         if (t.isEmpty()) return
-        scope.launch { s.transfer(c.callId, t); closeTransfer() }
+        scope.launch { if (s.transfer(c.callId, t).ok) closeTransfer() }
     }
+
+    /** 상담 전달 — 원 통화를 보류하고 대상에게 상담 호를 건다. */
+    fun consult(c: CallCard) {
+        val t = _transferTarget.value.trim()
+        if (t.isEmpty()) return
+        scope.launch { if (s.startConsult(c.callId, t).ok) closeTransfer() }
+    }
+
+    fun completeConsult(c: CallCard) { scope.launch { s.completeConsult(c.callId) } }
+    fun cancelConsult(c: CallCard) { scope.launch { s.cancelConsult(c.callId) } }
 }
+
+/**
+ * 이 발신자에게서 **내게** 울리는 착신 leg — 대표번호 포크가 이 관제석에도 닿았으면 있다. 대기열 [응답] 이 이것만 받는다.
+ * 번호로 맞춘다(데스크톱 `RingsMe` 와 같다 — dialog 의 발신자와 내 호의 상대가 같은 사람).
+ */
+internal fun myLegOf(sessions: List<SessionItem>, caller: String): Int? =
+    sessions.firstOrNull {
+        it.kind == SessionKind.PHONE_CALL && it.info.state == CallState.INCOMING && userPart(it.info.remoteUri) == caller
+    }?.callId

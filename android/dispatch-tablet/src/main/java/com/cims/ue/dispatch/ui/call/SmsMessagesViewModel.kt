@@ -11,6 +11,7 @@ import com.cims.ue.dispatch.session.Message
 import com.cims.ue.dispatch.session.canSms
 import com.cims.ue.dispatch.session.isExternalNumber
 import com.cims.ue.dispatch.session.sendSms
+import com.cims.ue.dispatch.session.resendSms
 import com.cims.ue.dispatch.session.userPart
 import com.cims.ue.dispatch.ui.RecipientOption
 import com.cims.ue.dispatch.ui.ScreenViewModel
@@ -81,6 +82,9 @@ class SmsMessagesViewModel(private val s: DispatchSession) : ScreenViewModel() {
 
     /** 사람 메뉴 «문자» — 대화가 없으면 빈 스레드로 연다. */
     fun openTo(number: String) = pick(number)
+
+    /** 실패한 말풍선 다시 보내기 — 같은 말풍선이 갱신된다(`resendSms`). */
+    fun resend(m: Message) { scope.launch { s.resendSms(m) } }
 
     fun send(text: String) {
         val p = _peer.value ?: return

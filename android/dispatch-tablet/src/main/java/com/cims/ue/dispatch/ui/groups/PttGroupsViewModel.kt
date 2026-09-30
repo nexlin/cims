@@ -140,6 +140,11 @@ data class EditForm(
 class PttGroupsViewModel(private val s: DispatchSession) : ScreenViewModel() {
 
     private val _groups = MutableStateFlow<List<ManagedGroup>>(emptyList())
+    /**
+     * 관리 목록 전부(필터 전) — 서버가 행마다 `canManage` 를 준다. [채널] 화면 머리의 [편집]·[삭제] 자격이 이 값을 본다
+     * (데스크톱 범위 채널 `CanEdit = IsManageScope || IsOwner` — 소유만 보면 관리 범위의 그룹을 못 고친다).
+     */
+    val groups: StateFlow<List<ManagedGroup>> = _groups.asStateFlow()
 
     private val _rows = MutableStateFlow<List<ManagedGroup>>(emptyList())
     val rows: StateFlow<List<ManagedGroup>> = _rows.asStateFlow()
@@ -180,6 +185,8 @@ class PttGroupsViewModel(private val s: DispatchSession) : ScreenViewModel() {
 
     /** 목록이 오기 전에 들어온 선택 요청(① 3줄 [로스터 전체]). */
     private var pendingSelect: String = ""
+    /** 목록이 오기 전에 들어온 편집 요청([채널] 머리 [편집]) — 선택이 서면 그 그룹의 폼을 연다. */
+    private var pendingEdit: String = ""
 
     private var loadJob: Job? = null
     private var formJob: Job? = null
@@ -234,6 +241,8 @@ class PttGroupsViewModel(private val s: DispatchSession) : ScreenViewModel() {
         _selected.value?.let { sel -> if (_rows.value.none { it.id == sel.id }) _selected.value = null }
         if (pendingSelect.isNotBlank())
             _groups.value.firstOrNull { it.id == pendingSelect }?.let { pendingSelect = ""; select(it) }
+        if (pendingEdit.isNotBlank())
+            _groups.value.firstOrNull { it.id == pendingEdit }?.let { pendingEdit = ""; if (it.canManage) edit(it) }
     }
 
     fun select(g: ManagedGroup) {
@@ -261,6 +270,30 @@ class PttGroupsViewModel(private val s: DispatchSession) : ScreenViewModel() {
         load()
     }
 
+    /**
+     * 관리 목록이 아직 없으면 받는다 — [채널] 화면이 [편집] 자격을 물을 때(이 화면을 열기 전이면 목록이 비어 있다).
+     * 이미 받는 중이면 겹치지 않는다.
+     */
+    fun ensureLoaded() {
+        if (_groups.value.isEmpty() && loadJob?.isActive != true) load()
+    }
+
+    /**
+     * 화면 밖에서 그룹 id 로 **편집 폼**을 연다([채널] 머리 [편집] — 데스크톱 `OpenDrawerEdit`). 선택을 옮기고, 관리할 수
+     * 있는 행이면 폼을 연다. 편집 중인 폼이 있으면 그 폼을 지킨다 — 말없이 덮어쓰면 고치던 것이 사라진다.
+     */
+    fun editById(groupId: String) {
+        if (groupId.isBlank() || locked) return
+        selectById(groupId)
+        val hit = _groups.value.firstOrNull { it.id == groupId }
+        if (hit != null) { if (hit.canManage) edit(hit) } else pendingEdit = groupId
+    }
+
+    /** 화면 밖에서 그룹 id 로 삭제한다(확인은 부른 화면이 받았다). 목록에 없거나 관리할 수 없으면 하지 않는다. */
+    fun deleteById(groupId: String) {
+        _groups.value.firstOrNull { it.id == groupId && it.canManage }?.let(::delete)
+    }
+
     /** 상세 멤버 — GMS 문서를 받아 둔다. [edit] 과 달리 **폼을 열지 않는다**(보기 전용 행도 본다). */
     private fun loadDetail(g: ManagedGroup) {
         detailJob?.cancel()
@@ -285,10 +318,16 @@ class PttGroupsViewModel(private val s: DispatchSession) : ScreenViewModel() {
             myPttId = s.myPttId, nameOf = { _book.value.nameOf(it) })
     }
 
-    /** 상세 [채널로] — 관제 캔버스로 돌아가고, 멤버 그룹이면 합류한다(§4.7). */
-    fun openChannel(g: ManagedGroup, onGoDispatch: () -> Unit) {
+    /**
+     * 상세 [채널로] — 그 그룹의 **채널 화면**을 열고, 멤버 그룹이면 합류한다(데스크톱 §4.7 `GoToChannel`).
+     *
+     * 여는 길은 목록 행·긴급 배너와 같은 [onOpen](`MainViewModel.openChannel` — «채널» 면으로)이다. 채널이 있는 그룹만
+     * 부른다(`hasChannel`) — 관리 범위만 있는 그룹은 태블릿에 채널이 없어 열면 «사라졌습니다» 가 된다.
+     */
+    fun openChannel(g: ManagedGroup, onOpen: (String) -> Unit) {
+        if (!g.hasChannel) return
         if (g.isMember) scope.launch { s.joinGroup(g.id) }
-        onGoDispatch()
+        onOpen(g.id)
     }
 
     // ── 편집 ──────────────────────────────────────────────────────────────────
@@ -351,11 +390,17 @@ class PttGroupsViewModel(private val s: DispatchSession) : ScreenViewModel() {
     /** 후보 → 멤버. 같은 번호가 이미 있으면 무시한다(정규형 비교). */
     fun addMember(number: String, name: String) {
         val f = _form.value ?: return
-        val key = DirectoryBook.normalize(number)
-        if (f.members.any { DirectoryBook.normalize(it.number) == key }) return
-        val uri = telUri(number)
-        _form.value = f.copy(members = f.members + MemberRow(uri, name.ifBlank { _book.value.nameOf(number) },
-            userPart(uri), isMe = DirectoryBook.normalize(userPart(s.myPttId)) == key))
+        _form.value = withEntries(f, listOf(com.cims.ue.dispatch.session.DirectoryEntry("", name, number)),
+            userPart(s.myPttId), _book.value::nameOf)
+    }
+
+    /**
+     * [표시된 전원 추가] — 지금 보이는 후보 전부를 한 번에(데스크톱 `AddAllShown`). 검색으로 좁힌 다음 누르는 조작이라
+     * **보이는 것만** 넣는다(후보 상한 200 안) — 주소록 전부가 아니다.
+     */
+    fun addAllShown() {
+        val f = _form.value ?: return
+        _form.value = withEntries(f, candidates.value, userPart(s.myPttId), _book.value::nameOf)
     }
 
     fun removeMember(uri: String) {
@@ -431,6 +476,22 @@ class PttGroupsViewModel(private val s: DispatchSession) : ScreenViewModel() {
          *  호 속성이라(TS 24.379 §4.12 — 편성 그룹에서 통화마다 broadcast-ind) 없다. 일제 통화용 그룹은 그룹 이름으로 알린다
          *  (mcptt_broadcast_group_call.md §5). */
         val SESSION_TYPES = listOf("prearranged", "chat")
+
+        /**
+         * 폼에 멤버를 더한다 — 이미 있는 번호·같은 묶음 안의 중복은 건너뛴다(정규형 비교). 의장이 아니라 참가자로 든다.
+         * 순수 함수(시험 대상).
+         */
+        internal fun withEntries(f: EditForm, entries: List<com.cims.ue.dispatch.session.DirectoryEntry>,
+                                 myPttNumber: String, nameOf: (String) -> String): EditForm {
+            val taken = f.members.map { DirectoryBook.normalize(it.number) }.toHashSet()
+            val me = DirectoryBook.normalize(myPttNumber)
+            val add = entries.filter { taken.add(DirectoryBook.normalize(it.msisdn)) }.map { e ->
+                val uri = telUri(e.msisdn)
+                MemberRow(uri, e.name.ifBlank { nameOf(e.msisdn) }, userPart(uri),
+                    isMe = DirectoryBook.normalize(e.msisdn) == me)
+            }
+            return if (add.isEmpty()) f else f.copy(members = f.members + add)
+        }
 
         /** 후보 계산 — 순수 함수(시험 대상). */
         internal fun candidatesOf(book: DirectoryBook, f: EditForm?):

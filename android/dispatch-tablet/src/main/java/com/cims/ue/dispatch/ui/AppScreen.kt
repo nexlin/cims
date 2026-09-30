@@ -26,11 +26,11 @@ package com.cims.ue.dispatch.ui
  * 감청은 통화 leg, 청취는 무전 leg 이고, SDS 는 무전 채널의 대화다. 축을 따로 세우면 같은 것을 두 군데서
  * 찾게 된다(§6.3).
  */
-enum class AppScreen(val label: String, val hotkey: String) {
-    HISTORY("이력", "F1"),
-    PTT("무전", "F2"),
-    CALLS("통화", "F3"),
-    MORE("더보기", "F4");
+enum class AppScreen(val label: String) {
+    HISTORY("이력"),
+    PTT("무전"),
+    CALLS("통화"),
+    MORE("더보기");
 
     /** 이 메뉴가 가진 면의 수 — 평평한 차례([APP_PAGES])를 세우는 데 쓴다. */
     val paneCount: Int
@@ -41,16 +41,6 @@ enum class AppScreen(val label: String, val hotkey: String) {
             MORE -> 1
         }
 
-    companion object {
-        /** 하드 키보드가 있으면 F1~F4 도 받는다(§7). */
-        fun ofFunctionKey(keyCode: Int): AppScreen? = when (keyCode) {
-            android.view.KeyEvent.KEYCODE_F1 -> HISTORY
-            android.view.KeyEvent.KEYCODE_F2 -> PTT
-            android.view.KeyEvent.KEYCODE_F3 -> CALLS
-            android.view.KeyEvent.KEYCODE_F4 -> MORE
-            else -> null
-        }
-    }
 }
 
 /**
@@ -164,6 +154,15 @@ fun NavState.onNav(target: AppScreen): NavState = when {
     target == AppScreen.MORE -> copy(more = null)
     else -> this
 }
+
+/**
+ * 채널을 연다 — 어디서 불렀든(목록 행·긴급 배너·검색·[PTT 그룹]) **[무전] 의 «채널» 면**에 그 채널 화면이 선다.
+ *
+ * 채널 화면은 «채널» 면에만 그려진다(§6.3a). 면을 같이 옮기지 않으면 «메시지»·«이벤트» 를 보고 있었거나 마지막으로
+ * 그 면을 봤을 때 연 채널이 **보이지 않는다** — 누른 것이 아무 일도 안 한 것처럼 된다.
+ */
+fun NavState.openChannel(id: String): NavState =
+    copy(screen = AppScreen.PTT, channel = id, pttPane = PttPane.CHANNELS)
 
 /**
  * 뒤로가기 한 겹 — 되돌릴 것이 없으면 null(그때는 가로채지 않는다).

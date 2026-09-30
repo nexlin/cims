@@ -95,6 +95,7 @@ fun SearchSheet(
     val hits = searchDirectory(people, groups, query)
 
     ModalBottomSheet(onDismissRequest = onDismiss) {
+        ForwardPttKeys()                    // 시트가 떠 있어도 측면 키는 발언이다(§7)
         Column(Modifier.fillMaxWidth().heightIn(min = 360.dp, max = 560.dp)
             .padding(horizontal = 16.dp)) {
             OutlinedTextField(

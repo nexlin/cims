@@ -145,7 +145,7 @@ fun AdminScreenContent(
     discard?.let { target ->
         AlertDialog(
             onDismissRequest = { discard = null },
-            title = { Text("변경 버림") },
+            title = { com.cims.ue.dispatch.ui.ForwardPttKeys(); Text("변경 버림") },
             text = { Text("저장하지 않은 변경이 있습니다. 버리고 «${target.name}» 을(를) 열까요?") },
             confirmButton = { TextButton(onClick = { discard = null; act.open(target) }) { Text("버리고 열기") } },
             dismissButton = { TextButton(onClick = { discard = null }) { Text("취소") } })
@@ -286,7 +286,7 @@ private fun OrgDialog(vm: AdminViewModel, view: AdminView) {
     val node = o ?: return
     AlertDialog(
         onDismissRequest = { vm.closeOrgForm() },
-        title = { Text(if (isNew) "새 조직" else "조직 편집") },
+        title = { com.cims.ue.dispatch.ui.ForwardPttKeys(); Text(if (isNew) "새 조직" else "조직 편집") },
         text = {
             Column {
                 OutlinedTextField(value = node.code, enabled = isNew,
@@ -441,7 +441,7 @@ private fun MemberForm(vm: AdminViewModel, view: AdminView, f: MemberForm) {
     if (confirmDelete) f.orig?.let { m ->
         AlertDialog(
             onDismissRequest = { confirmDelete = false },
-            title = { Text("구성원 삭제") },
+            title = { com.cims.ue.dispatch.ui.ForwardPttKeys(); Text("구성원 삭제") },
             text = { Text("«${m.name}» 과(와) 그 회선을 지웁니다. 되돌릴 수 없습니다.") },
             confirmButton = {
                 TextButton(onClick = { confirmDelete = false; vm.deleteMember(m) }) {

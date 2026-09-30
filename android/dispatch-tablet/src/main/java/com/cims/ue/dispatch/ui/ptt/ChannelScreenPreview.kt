@@ -40,8 +40,25 @@ private fun PreviewChannelNotJoined() = PreviewFrame {
 @Composable
 private fun PreviewChannelEmergency() = PreviewFrame {
     ChannelScreenContent(
-        head = MINE_HEAD.copy(emergency = true, subtitle = "긴급 · 참가 9 · 발언 박현장 00:03"),
+        head = MINE_HEAD.copy(emergency = true, subtitle = "참가 9 · 발언 박현장 00:03"),
         roster = roster("1001", "1002", "1003"), speaker = "1003", me = "1002")
+}
+
+@Preview(name = "채널 — 임박 위험", device = PreviewBody, showBackground = true)
+@Composable
+private fun PreviewChannelPeril() = PreviewFrame(dark = true) {
+    ChannelScreenContent(
+        head = MINE_HEAD.copy(imminentPeril = true, subtitle = "참가 4 · 발언 없음 · 01:35"),
+        roster = roster("1001", "1002", "1021"), me = "1002")
+}
+
+/** 전이중 개별 통화 — 발언 대상 칩 대신 음소거. 편성이 없어 [편성 전원]·로스터가 없다(카드 그대로). */
+@Preview(name = "채널 — 전이중 개별 통화(음소거 중)", device = PreviewBody, showBackground = true)
+@Composable
+private fun PreviewChannelFullDuplex() = PreviewFrame {
+    ChannelScreenContent(
+        head = ChannelHeadUi(id = "p3", title = "최주임", badge = "개별",
+            subtitle = "발언 없음 · 00:21", joined = true, muted = true))
 }
 
 @Preview(name = "채널 — 범위(청취 중)", device = PreviewBody, showBackground = true)

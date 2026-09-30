@@ -11,6 +11,7 @@ import com.cims.ue.dispatch.ui.NavState
 import com.cims.ue.dispatch.ui.PttPane
 import com.cims.ue.dispatch.ui.onBack
 import com.cims.ue.dispatch.ui.onNav
+import com.cims.ue.dispatch.ui.openChannel
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
@@ -87,6 +88,25 @@ class NavigationTest {
             }
             assertEquals("끝까지 되돌리면 첫 화면이어야 한다", AppScreen.HISTORY, s.screen)
             assertNull("첫 화면에서는 가로채지 않는다", s.onBack())
+        }
+    }
+
+    /**
+     * 채널 열기는 **어디서든 «채널» 면**으로 간다 — 채널 화면은 그 면에만 그려진다.
+     * «메시지» 면에 있었거나(또는 다른 메뉴에서 [무전] 이 «이벤트» 면을 기억하고 있을 때) 긴급 배너를 눌러도 채널이 보여야 한다.
+     */
+    @Test fun 채널_열기는_어디서든_채널_면으로() {
+        listOf(
+            NavState(AppScreen.PTT, pttPane = PttPane.MESSAGES),
+            NavState(AppScreen.CALLS, pttPane = PttPane.EVENTS, callPane = CallPane.LOG),
+            NavState(AppScreen.MORE, more = MoreItem.entries.first()),
+        ).forEach { start ->
+            val s = start.openChannel("g1")
+            assertEquals(AppScreen.PTT, s.screen)
+            assertEquals(PttPane.CHANNELS, s.pttPane)
+            assertEquals("g1", s.channel)
+            assertEquals("다른 메뉴가 기억한 자리는 건드리지 않는다", start.callPane, s.callPane)
+            assertEquals(start.more, s.more)
         }
     }
 

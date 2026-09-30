@@ -16,6 +16,9 @@ import com.cims.ue.dispatch.ui.PersonAction
 import com.cims.ue.dispatch.ui.PersonMenu
 import com.cims.ue.dispatch.ui.RecipientPicker
 import com.cims.ue.dispatch.ui.Tag
+import com.cims.ue.dispatch.ui.AlertBannerUi
+import com.cims.ue.dispatch.ui.PerilAmber
+import com.cims.ue.dispatch.session.AlertKind
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -70,7 +73,7 @@ internal fun Messages(vm: PttMessagesViewModel) {
     MessagesContent(
         thread = thread, title = title, follow = follow, groupId = groupId, threads = threads,
         isGroup = isGroup, onToggleFollow = vm::toggleFollow, onPickThread = vm::pickThread,
-        onSend = vm::send, onNew = { picking = true })
+        onSend = vm::send, onResend = vm::resend, onNew = { picking = true })
 }
 
 /**
@@ -93,6 +96,8 @@ fun MessagesContent(
     onToggleFollow: () -> Unit = {},
     onPickThread: (String) -> Unit = {},
     onSend: (String) -> Unit = {},
+    /** 실패한 발신 말풍선의 [재전송]. */
+    onResend: (Message) -> Unit = {},
     onNew: () -> Unit = {},
 ) {
     Row(Modifier.fillMaxSize()) {
@@ -174,6 +179,9 @@ fun MessagesContent(
                                     fontWeight = FontWeight.Bold)
                                 Text(m.text, fontSize = Type.strong)
                                 Text(hhmm.format(Date(m.atMs)) + sendMark(m.state), fontSize = Type.micro)
+                                // 실패는 누르면 다시 보낸다 — 같은 말풍선이 갱신된다(데스크톱 ⚠ 링크).
+                                if (m.outgoing && m.state == com.cims.ue.dispatch.session.SendState.FAILED)
+                                    ResendButton { onResend(m) }
                             }
                         }
                     }
@@ -196,6 +204,15 @@ fun MessagesContent(
     }
 }
 
+/** 실패한 발신 말풍선의 [재전송] — ④ 와 문자 면이 같이 쓴다. */
+@Composable
+internal fun ResendButton(onClick: () -> Unit) {
+    TextButton(onClick = onClick, contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp),
+        modifier = Modifier.heightIn(min = 28.dp)) {
+        Text("재전송", fontSize = Type.meta, color = MaterialTheme.colorScheme.error)
+    }
+}
+
 private fun sendMark(s: com.cims.ue.dispatch.session.SendState): String = when (s) {
     com.cims.ue.dispatch.session.SendState.PENDING -> " ⏳"
     com.cims.ue.dispatch.session.SendState.SENT -> " ✓"
@@ -207,11 +224,23 @@ private fun sendMark(s: com.cims.ue.dispatch.session.SendState): String = when (
 
 // ── ⑤ 이벤트 ─────────────────────────────────────────────────────────────────
 @Composable
-internal fun Activity(vm: PttActivityViewModel) {
+internal fun Activity(
+    vm: PttActivityViewModel,
+    onOpenChannel: (String) -> Unit = {},
+    /** SDS 행 [답장] — 그 스레드로. */
+    onReply: (String) -> Unit = {},
+    /** 머리 [이력에서 보기] — 끝난 세션의 날짜별 조회는 [이력]. */
+    onHistory: () -> Unit = {},
+) {
     val rows by vm.rows.collectAsStateWithLifecycle()
     val filter by vm.filter.collectAsStateWithLifecycle()
     val follow by vm.followFocus.collectAsStateWithLifecycle()
-    ActivityContent(rows, filter, follow, vm::setFilter, vm::toggleFollowFocus)
+    val pinned by vm.pinned.collectAsStateWithLifecycle()
+    val channels by vm.channelIds.collectAsStateWithLifecycle()
+    val export = com.cims.ue.dispatch.ui.rememberCsvExport()
+    ActivityContent(rows, filter, follow, pinned, vm::setFilter, vm::toggleFollowFocus, onOpenChannel,
+        channelIds = channels, onReply = onReply, onHistory = onHistory,
+        onExport = { export("ptt-activity-" + SimpleDateFormat("yyyyMMdd-HHmm", Locale.ROOT).format(Date()) + ".csv", vm::csv) })
 }
 
 /** ⑤ 본문 — **순수 컴포저블**. */
@@ -220,8 +249,18 @@ fun ActivityContent(
     rows: List<ActivityRow>,
     filter: ActivityFilter,
     follow: Boolean,
+    /** 목록 위 고정 행 — 진행 중인 긴급·임박(필터와 무관). */
+    pinned: List<AlertBannerUi> = emptyList(),
     onFilter: (ActivityFilter) -> Unit = {},
     onToggleFollow: () -> Unit = {},
+    /** 고정 행 [채널로]·행 탭 — 그 채널 화면(«채널» 면)으로. */
+    onOpenChannel: (String) -> Unit = {},
+    /** 행 탭으로 열 수 있는 채널 — 여기 없는 키(1:1 SDS 의 사람 번호·끝난 세션)는 누르지 않는다. */
+    channelIds: Set<String> = emptySet(),
+    /** SDS 행 [답장] — 그 채널(스레드 키)의 메시지로. */
+    onReply: (String) -> Unit = {},
+    onHistory: () -> Unit = {},
+    onExport: () -> Unit = {},
 ) {
     Column {
         Row(verticalAlignment = Alignment.CenterVertically,
@@ -234,22 +273,63 @@ fun ActivityContent(
             TextButton(onClick = onToggleFollow) {
                 Text(if (follow) "포커스만" else "전체", fontSize = Type.body)
             }
+            // 끝난 세션의 날짜별 조회·녹취는 [이력] 이다 — 여기는 관제사의 작업 메모리(데스크톱 ⑤ 머리와 같다).
+            TextButton(onClick = onHistory) { Text("이력에서 보기", fontSize = Type.body) }
+            TextButton(onClick = onExport) { Text("CSV", fontSize = Type.body) }
         }
+        pinned.forEach { PinnedAlertRow(it) { onOpenChannel(it.channelId) } }
         if (rows.isEmpty()) { Empty("이벤트 없음"); return }
         LazyColumn(verticalArrangement = Arrangement.spacedBy(2.dp)) {
             items(rows, key = { it.atMs.toString() + it.text }) { r ->
-                Row(Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
+                // 행 탭 = 그 채널로(데스크톱 ⑤ 행 클릭 = 그 채널 카드 포커스). SDS 행은 [답장] 도 단다.
+                Row(Modifier.fillMaxWidth()
+                        .clickable(enabled = r.groupId in channelIds) { onOpenChannel(r.groupId) }
+                        .padding(vertical = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically) {
                     Text(hhmmss.format(Date(r.atMs)), fontSize = Type.meta,
                          modifier = Modifier.width(64.dp))
                     Text(r.groupName, fontSize = Type.meta, fontWeight = FontWeight.Bold,
                          modifier = Modifier.width(80.dp))
-                    Text(r.text, fontSize = Type.meta,
+                    Text(r.text, fontSize = Type.meta, modifier = Modifier.weight(1f),
                          color = if (r.emergency || r.kind == ActivityKind.ERROR)
                                      MaterialTheme.colorScheme.error else Color.Unspecified)
+                    if (r.kind == ActivityKind.SDS && r.groupId.isNotBlank())
+                        TextButton(onClick = { onReply(r.groupId) }, contentPadding = PaddingValues(horizontal = 6.dp),
+                            modifier = Modifier.heightIn(min = 32.dp)) { Text("답장", fontSize = Type.meta) }
                 }
             }
         }
     }
+}
+
+/**
+ * 고정 행 한 줄 — 경과 · 종류 · «<채널> 진행 중» · [채널로]. 채널 행과 같은 면·낱말(긴급 = 빨강 면 «긴급», 임박 = 옅은 주황
+ * «임박» — §6.2a-1)이라 목록의 그 채널과 한눈에 이어진다. 경과는 배너와 같은 값(조건이 선 때부터)을 1초마다 다시 그린다.
+ */
+@Composable
+private fun PinnedAlertRow(b: AlertBannerUi, onOpen: () -> Unit) {
+    var tick by remember { mutableIntStateOf(0) }
+    LaunchedEffect(b.channelId, b.sinceMs) {
+        while (true) { kotlinx.coroutines.delay(1000); tick++ }
+    }
+    val emergency = b.kind == AlertKind.EMERGENCY
+    Row(Modifier.fillMaxWidth()
+            .background(if (emergency) MaterialTheme.colorScheme.errorContainer else PerilAmber.copy(alpha = 0.16f))
+            .padding(start = 4.dp, top = 2.dp, bottom = 2.dp),
+        verticalAlignment = Alignment.CenterVertically) {
+        @Suppress("UNUSED_EXPRESSION") tick     // 1초 틱을 이 조합에 묶는다
+        Text(fmtElapsed((System.currentTimeMillis() - b.sinceMs).coerceAtLeast(0)), fontSize = Type.meta,
+            modifier = Modifier.width(64.dp))
+        if (emergency) Tag("긴급", MaterialTheme.colorScheme.error, leading = 0) else Tag("임박", PerilAmber, leading = 0)
+        Text("${b.title} 진행 중", fontSize = Type.meta, fontWeight = FontWeight.Bold, maxLines = 1,
+            color = if (emergency) MaterialTheme.colorScheme.error else Color.Unspecified,
+            modifier = Modifier.weight(1f).padding(start = 8.dp))
+        TextButton(onClick = onOpen, modifier = Modifier.heightIn(min = 40.dp)) {
+            Text("채널로", fontSize = Type.body, fontWeight = FontWeight.Bold,
+                color = if (emergency) MaterialTheme.colorScheme.error else Color.Unspecified)
+        }
+    }
+    HorizontalDivider()
 }
 
 // ── 공용 ─────────────────────────────────────────────────────────────────────

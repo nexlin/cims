@@ -5,8 +5,8 @@
 // 열 몇 장이 보이고, 둘의 구분은 섹션 머리로 충분하다(소속이 다를 뿐 같은 종류의 것이다).
 //
 // **행은 얇다.** 조작 버튼([참여][긴급][나가기])을 행에서 뺐기 때문이다 — 그것들은 채널을 «고른 뒤» 하는
-// 일이라 채널 화면 머리에 있다. 행에 남는 조작은 «고르지 않고도 하는» 둘뿐이다: 발언 대상 지정(무전),
-// 청취 토글(범위). 행을 누르면 채널 화면으로 간다.
+// 일이라 채널 화면 머리에 있다. 행에 남는 조작은 «고르지 않고도 하는» 둘뿐이다: 발언 대상 지정(무전 —
+// 전이중 개별 통화는 그 자리가 음소거), 청취 토글(범위). 행을 누르면 채널 화면으로 간다.
 @file:OptIn(ExperimentalFoundationApi::class)
 
 package com.cims.ue.dispatch.ui.ptt
@@ -21,6 +21,8 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -31,6 +33,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.cims.ue.dispatch.ui.PerilAmber
 import com.cims.ue.dispatch.ui.Tag
 import com.cims.ue.dispatch.ui.Type
 
@@ -47,6 +50,11 @@ fun PttScreen(
     channels: PttChannelsViewModel,
     scoped: ScopedChannelsViewModel,
     onOpen: (String) -> Unit,
+    /** 발신 시트 사람 행의 [문자] — 1:1 SDS 스레드로. */
+    onMessage: (String) -> Unit = {},
+    /** [새 채널] — 그룹 생성 자격이 있을 때만 선다. */
+    canCreate: Boolean = false,
+    onNewChannel: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val mine by channels.cards.collectAsStateWithLifecycle()
@@ -60,7 +68,7 @@ fun PttScreen(
     // 사람 메뉴의 «애드혹에 추가» 가 심어 둔 씨앗이 있으면 시트를 연다(§6.2f). 씨앗은 시트가 소비한다.
     val seed by channels.adhocSeed.collectAsStateWithLifecycle()
     LaunchedEffect(seed) { if (seed.isNotBlank()) sheet = true }
-    if (sheet) OriginateSheet(channels) { sheet = false }
+    if (sheet) OriginateSheet(channels, onDismiss = { sheet = false }, onMessage = onMessage)
 
     PttScreenContent(
         mine = mine.map { it.toRowUi(targeted = it.id in targets) },
@@ -71,10 +79,13 @@ fun PttScreen(
         listenFull = scoped.listenFull,
         onOpen = onOpen,
         onToggleTarget = channels::toggleTarget,
+        onToggleMute = channels::toggleMute,
         onToggleListen = { id -> scopedCards.firstOrNull { it.id == id }?.let(scoped::toggleListen) },
         onFilter = scoped::setFilter,
         onQuery = scoped::setQuery,
         onOriginate = { sheet = true },
+        canCreate = canCreate,
+        onNewChannel = onNewChannel,
         modifier = modifier)
 }
 
@@ -93,10 +104,13 @@ fun PttScreenContent(
     listenFull: Boolean,
     onOpen: (String) -> Unit = {},
     onToggleTarget: (String) -> Unit = {},
+    onToggleMute: (String) -> Unit = {},
     onToggleListen: (String) -> Unit = {},
     onFilter: (ScopeFilter) -> Unit = {},
     onQuery: (String) -> Unit = {},
     onOriginate: () -> Unit = {},
+    canCreate: Boolean = false,
+    onNewChannel: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     var searching by remember { mutableStateOf(false) }
@@ -104,6 +118,8 @@ fun PttScreenContent(
     LazyColumn(modifier.fillMaxSize()) {
         item(key = "h-mine") {
             SectionHeader("내 채널 ${mine.size}") {
+                // 새 편성 그룹 — 만든 사람이 의장으로 들어가 곧 이 목록의 채널이 된다([PTT 그룹] 의 새 그룹 폼, §6.12).
+                if (canCreate) TextButton(onClick = onNewChannel) { Text("새 채널", fontSize = Type.meta) }
                 TextButton(onClick = onOriginate) { Text("개별·애드혹", fontSize = Type.meta) }
             }
         }
@@ -113,6 +129,7 @@ fun PttScreenContent(
                 // 발언 대상은 **채널을 열지 않고** 지정한다 — 여러 채널을 잡아 두고 말하는 조작이라
                 //   목록에 있어야 한다(포커스 ≠ 발언 대상, §6.3).
                 if (r.canTarget) TargetToggle(on = r.targeted) { onToggleTarget(r.id) }
+                r.muted?.let { m -> MuteToggle(muted = m) { onToggleMute(r.id) } }
             }
         }
 
@@ -174,8 +191,11 @@ private fun SectionHeader(title: String, actions: @Composable RowScope.() -> Uni
 /**
  * 채널 한 줄 — 두 줄 56dp.
  *
- * 1줄 = 상태 점 · 이름 · (오른쪽) 미읽음·참가·상태 · 조작 하나
+ * 1줄 = 상태 점 · 이름 · [긴급|임박] · (오른쪽) 미읽음·참가·상태 · 조작 하나
  * 2줄 = 발언자·사유 등 «지금 무슨 일이 있는가»
+ *
+ * 긴급·임박은 **색만으로 두지 않고 낱말을 붙인다** — 전역 배너(§6.2a-1)와 같은 말이라 배너에서 본 채널을 목록에서
+ * 바로 찾는다(데스크톱 카드 배지 «긴급»·«임박» 과 같다).
  */
 @Composable
 private fun ChannelRow(
@@ -184,14 +204,22 @@ private fun ChannelRow(
     trailing: @Composable () -> Unit,
 ) {
     Column(Modifier.fillMaxWidth()
-        .background(if (r.emergency) MaterialTheme.colorScheme.errorContainer else Color.Transparent)
+        .background(when {
+            r.emergency -> MaterialTheme.colorScheme.errorContainer
+            r.imminentPeril -> PerilAmber.copy(alpha = 0.16f)
+            else -> Color.Transparent
+        })
         .clickable(onClick = onClick)
         .padding(start = 12.dp, end = 4.dp, top = 6.dp, bottom = 6.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             StateDot(active = r.active, speaking = r.speaking, emergency = r.emergency)
             Spacer(Modifier.width(8.dp))
-            Text(r.title, fontSize = Type.strong, fontWeight = FontWeight.Bold,
-                maxLines = 1, modifier = Modifier.weight(1f))
+            Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+                Text(r.title, fontSize = Type.strong, fontWeight = FontWeight.Bold,
+                    maxLines = 1, modifier = Modifier.weight(1f, fill = false))
+                if (r.emergency) Tag("긴급", MaterialTheme.colorScheme.error)
+                else if (r.imminentPeril) Tag("임박", PerilAmber)
+            }
             if (r.broadcast) { Tag("일제"); Spacer(Modifier.width(6.dp)) }
             if (r.unread > 0) { Badge { Text("${r.unread}") }; Spacer(Modifier.width(6.dp)) }
             if (r.participants > 0) {
@@ -215,6 +243,22 @@ private fun TargetToggle(on: Boolean, onToggle: () -> Unit) {
     FilledIconToggleButton(checked = on, onCheckedChange = { onToggle() },
         modifier = Modifier.size(36.dp)) {
         Icon(Icons.Filled.Check, contentDescription = if (on) "발언 대상 해제" else "발언 대상")
+    }
+}
+
+/**
+ * 음소거 토글 — 전이중 개별 통화의 마이크. **아이콘이 곧 상태다**(마이크 ↔ 마이크 꺼짐): 글자만 바꾸면
+ * 켜졌는지 모른다. 켜져 있으면 경고색으로 채운다 — «말하고 있다고 믿는데 안 나가는» 상태를 놓치지 않게.
+ */
+@Composable
+private fun MuteToggle(muted: Boolean, onToggle: () -> Unit) {
+    FilledIconToggleButton(checked = muted, onCheckedChange = { onToggle() },
+        modifier = Modifier.size(36.dp),
+        colors = IconButtonDefaults.filledIconToggleButtonColors(
+            checkedContainerColor = MaterialTheme.colorScheme.error,
+            checkedContentColor = MaterialTheme.colorScheme.onError)) {
+        Icon(if (muted) Icons.Filled.MicOff else Icons.Filled.Mic,
+            contentDescription = if (muted) "음소거 해제" else "음소거")
     }
 }
 

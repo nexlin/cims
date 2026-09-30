@@ -8,9 +8,20 @@ import com.cims.ue.dispatch.session.userPart
 import com.cims.ue.dispatch.session.CallLogKind
 import com.cims.ue.dispatch.session.CallLogRow
 import com.cims.ue.dispatch.session.DialogRow
+import com.cims.ue.dispatch.session.callLogCsv
 import com.cims.ue.dispatch.ui.call.DESK_ALL
 import com.cims.ue.dispatch.ui.call.MemberChip
 import com.cims.ue.dispatch.ui.call.keepInDesk
+import com.cims.ue.dispatch.ui.call.QueueItem
+import com.cims.ue.dispatch.ui.call.myLegOf
+import com.cims.ue.dispatch.session.AccountKind
+import com.cims.ue.dispatch.session.Operation
+import com.cims.ue.dispatch.session.SessionItem
+import com.cims.ue.sdk.CallDir
+import com.cims.ue.sdk.CallInfo
+import com.cims.ue.sdk.CallState
+import com.cims.ue.sdk.McpttInfo
+import org.junit.Assert.assertNull
 import com.cims.ue.sdk.DialogInfo
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -23,6 +34,50 @@ class CallDeskTest {
         watched: String = "sip:1001@d", state: String = "confirmed",
         direction: String = "recipient", remote: String = "sip:02123@d", id: String = "d1",
     ) = DialogRow(watched, id, DialogInfo(0, watched, id, "c1", "lt", "rt", direction, state, remote, true))
+
+    // ── 대기열 [응답]·[당겨받기] — 받는 것은 그 발신자의 내 leg, 당기는 것은 그 대표번호 ──
+    private fun myCall(id: Int, remote: String, state: CallState) = SessionItem(
+        id, AccountKind.PHONE, Operation.INCOMING,
+        CallInfo(callId = id, accountId = 0, dir = CallDir.INCOMING, state = state, remoteUri = remote,
+            calledParty = "", video = false, mediaActive = false, muted = false, listen = false, playbackRoute = 0,
+            lastCode = 0, lastReason = "", sources = emptyList(), isMcptt = false, groupId = "",
+            mcptt = McpttInfo(false, "", "", "", "", false, false, false, false),
+            halfDuplex = false, listenOnly = false, joinedDialog = ""))
+
+    @Test fun `대기열 응답은 그 발신자의 내 착신 leg 만 받는다`() {
+        val direct = myCall(3, "sip:0101111@d", CallState.INCOMING)     // 직접 착신이 동시에 울린다
+        val fork = myCall(4, "sip:02123@d", CallState.INCOMING)         // 대표번호 포크가 내게도 닿았다
+        assertEquals(4, myLegOf(listOf(direct, fork), "02123"))
+        assertNull("받은 뒤에는 대기열 [응답] 이 없다", myLegOf(listOf(myCall(4, "sip:02123@d", CallState.ACTIVE)), "02123"))
+        assertNull("포크가 내게 안 닿았으면 당겨받기만", myLegOf(listOf(direct), "02123"))
+    }
+
+    @Test fun `당겨받기는 그 대표번호를 지정한다`() {
+        val q = QueueItem(dialog = dlg(watched = "sip:7000@d", state = "early"), caller = "02123")
+        assertEquals("7000", q.pilot)                                     // 피처코드 + 대표번호(dispatch_center.md §4.4)
+    }
+
+    // ── ⑥ 행 바로가기·CSV ──
+    @Test fun `재발신·문자는 상대가 있는 1대1 통화에만`() {
+        fun row(k: CallLogKind, n: String = "1003") = CallLogRow(atMs = 1, peer = "이순경", text = "", kind = k, number = n)
+        listOf(CallLogKind.ANSWERED, CallLogKind.MISSED, CallLogKind.OUTGOING, CallLogKind.TRANSFER)
+            .forEach { assertTrue(it.name, row(it).canRedial) }
+        assertFalse("당겨받기는 남의 호를 가져온 것", row(CallLogKind.PICKUP).canRedial)
+        assertFalse("감청은 통화 당사자가 아니다", row(CallLogKind.MONITOR).canRedial)
+        assertFalse("번호가 없으면 걸 수 없다", row(CallLogKind.MISSED, n = "").canRedial)
+    }
+
+    @Test fun `CSV 는 화면 표와 같은 열, 시간순, 따옴표 이스케이프`() {
+        val utc = java.util.TimeZone.getTimeZone("UTC")
+        val late = CallLogRow(atMs = 120_000, peer = "박\"현장\"", text = "메모, 쉼표", kind = CallLogKind.MISSED,
+            number = "1004", startedAtMs = 100_000)
+        val early = CallLogRow(atMs = 70_000, peer = "이순경", text = "", kind = CallLogKind.ANSWERED,
+            number = "1003", startedAtMs = 10_000, answeredAtMs = 20_000, viaPilot = true)
+        val lines = callLogCsv(listOf(late, early), utc).trimEnd().split("\r\n")
+        assertEquals("start,peer,number,kind,answer,end,talk_sec,ring_sec,via_pilot,others,note", lines[0])
+        assertEquals("1970-01-01 00:00:10,\"이순경\",\"1003\",\"착신 응답\",1970-01-01 00:00:20,1970-01-01 00:01:10,50,10,1,0,\"\"", lines[1])
+        assertEquals("1970-01-01 00:01:40,\"박\"\"현장\"\"\",\"1004\",\"부재\",,1970-01-01 00:02:00,0,20,0,0,\"메모, 쉼표\"", lines[2])
+    }
 
     // ── dialog 상태 판정 (RFC 4235) ──
     @Test fun `early 계열이 링잉이다`() {

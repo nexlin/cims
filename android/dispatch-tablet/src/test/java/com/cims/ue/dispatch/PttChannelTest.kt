@@ -110,6 +110,19 @@ class PttChannelTest {
         assertTrue(opened.isBroadcastInitiator)
     }
 
+    @Test fun `음소거는 참여 중인 전이중에만 선다 — 발언 대상과 정확히 갈린다`() {
+        // 반이중은 floor 가 마이크를 연다. 둘이 한 카드에 같이 서면 «대상인데 음소거» 라는 모순이 생긴다.
+        val full = card(CardKind.PRIVATE, session(call(privateCall = true, noFloorCtrl = true)))
+        assertTrue(full.canMute)
+        assertFalse(full.canCheck)
+        val half = card(CardKind.PRIVATE, session(call(privateCall = true)))
+        assertFalse(half.canMute)
+        assertTrue(half.canCheck)
+        val ended = card(CardKind.PRIVATE,
+            session(call(privateCall = true, noFloorCtrl = true, state = CallState.DISCONNECTED)))
+        assertFalse(ended.canMute)
+    }
+
     @Test fun `참여 중 반이중이면 발언 대상이 된다`() {
         assertTrue(card(s = session(call())).canCheck)
     }

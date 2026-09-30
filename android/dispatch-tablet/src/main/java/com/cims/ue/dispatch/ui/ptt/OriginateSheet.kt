@@ -35,7 +35,12 @@ private enum class OriginTab(val label: String) { PRIVATE("개별"), ADHOC("애�
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun OriginateSheet(vm: PttChannelsViewModel, onDismiss: () -> Unit) {
+fun OriginateSheet(
+    vm: PttChannelsViewModel,
+    onDismiss: () -> Unit,
+    /** 사람 행의 [문자] — 그 사람과의 1:1 SDS 스레드(데스크톱 팝오버 사용자 행의 [문자]). */
+    onMessage: (String) -> Unit = {},
+) {
     var tab by remember { mutableStateOf(OriginTab.PRIVATE) }
     var picked by remember { mutableStateOf<List<DirectoryEntry>>(emptyList()) }
     var emergency by remember { mutableStateOf(false) }
@@ -75,6 +80,7 @@ fun OriginateSheet(vm: PttChannelsViewModel, onDismiss: () -> Unit) {
         onDismissRequest = { if (!composing) close() },
         properties = ModalBottomSheetDefaults.properties(shouldDismissOnBackPress = !composing),
     ) {
+        com.cims.ue.dispatch.ui.ForwardPttKeys()   // 애드혹을 짜는 동안에도 측면 키는 발언이다(§7)
         Column(Modifier.fillMaxWidth().heightIn(min = 360.dp, max = 560.dp)
             .padding(horizontal = 16.dp)) {
 
@@ -87,7 +93,7 @@ fun OriginateSheet(vm: PttChannelsViewModel, onDismiss: () -> Unit) {
             }
 
             Text(
-                if (tab == OriginTab.PRIVATE) "PTT 사용자 한 명과 개별 통화(1:1)를 엽니다"
+                if (tab == OriginTab.PRIVATE) "PTT 사용자 한 명과 개별 통화(1:1)를 엽니다 — 목록에서 고르거나 번호를 직접 입력합니다"
                 else "고른 사람들로 애드혹 그룹 통화를 엽니다 — 서버에 편성되지 않습니다. [일제 통화] 는 누르는 동안 나만 말합니다",
                 fontSize = Type.meta, color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(vertical = 6.dp))
@@ -142,6 +148,10 @@ fun OriginateSheet(vm: PttChannelsViewModel, onDismiss: () -> Unit) {
                                 Text(e.msisdn, fontSize = Type.meta,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
+                            // 세션을 열지 않고 글로 — 시트를 닫고 [무전] › «메시지» 의 그 사람 스레드로 간다.
+                            if (tab == OriginTab.PRIVATE && !composing) TextButton(onClick = { close(); onMessage(e.msisdn) }) {
+                                Text("문자", fontSize = Type.body)
+                            }
                             Text(if (tab == OriginTab.PRIVATE) "걸기" else "추가",
                                 fontSize = Type.strong, color = MaterialTheme.colorScheme.primary)
                         }
@@ -151,11 +161,17 @@ fun OriginateSheet(vm: PttChannelsViewModel, onDismiss: () -> Unit) {
             }
 
             HorizontalDivider()
+            // 개별 통화 대상 — 고른 사람, 없으면 입력한 이름·번호(데스크톱 `Start` 와 같은 풀이, [privateTargetOf]).
+            val target = if (tab == OriginTab.PRIVATE) privateTargetOf(book, query, picked) else null
             Row(Modifier.fillMaxWidth().padding(vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    if (tab == OriginTab.PRIVATE) picked.firstOrNull()?.let { "대상 ${it.name.ifBlank { it.msisdn }}" } ?: "대상을 고르세요"
-                    else "대상 ${picked.size}명",
+                    when {
+                        tab == OriginTab.ADHOC -> "대상 ${picked.size}명"
+                        target != null -> "대상 ${book.nameOf(target).ifBlank { target }}"
+                        query.isNotBlank() -> "주소록에 없는 이름입니다 — 번호로 입력하세요"
+                        else -> "대상을 고르거나 번호를 입력하세요"
+                    },
                     Modifier.weight(1f), fontSize = Type.body)
                 TextButton(onClick = close, enabled = !holding) { Text("취소") }
                 if (tab == OriginTab.ADHOC) {
@@ -184,16 +200,32 @@ fun OriginateSheet(vm: PttChannelsViewModel, onDismiss: () -> Unit) {
                 }
                 Button(
                     onClick = {
-                        if (tab == OriginTab.PRIVATE)
-                            vm.startPrivate(picked.first().msisdn, fullDuplex, emergency, close)
+                        if (tab == OriginTab.PRIVATE) target?.let { vm.startPrivate(it, fullDuplex, emergency, close) }
                         else vm.startAdhoc(picked.map { it.msisdn }, emergency, close)
                     },
-                    enabled = picked.isNotEmpty() && !holding,
+                    enabled = !holding && (if (tab == OriginTab.PRIVATE) target != null else picked.isNotEmpty()),
                 ) { Text(if (tab == OriginTab.PRIVATE) "개별 통화" else "애드혹 그룹 통화") }
             }
             Spacer(Modifier.height(8.dp))
         }
     }
+}
+
+/**
+ * 개별 통화 대상 — 고른 사람이 있으면 그 사람, 없으면 **입력한 이름·번호**(데스크톱 `PttOriginateViewModel.Start` 와 같은
+ * 풀이). 이름은 주소록에 정확히 있을 때만 그 번호로 푼다. 주소록에 없어도 **번호 모양이면 그 번호**로 건다 — 주소록을 못
+ * 받았거나 막 개설한 회선도 걸 수 있어야 한다. 모르는 이름은 null(서버 404 로 돌아올 요청을 보내지 않는다).
+ * 순수 함수(시험 대상).
+ */
+internal fun privateTargetOf(book: DirectoryBook, query: String, picked: List<DirectoryEntry>): String? {
+    picked.firstOrNull()?.let { return it.msisdn }
+    val q = query.trim()
+    if (q.isEmpty()) return null
+    book.entries.firstOrNull { it.name.isNotBlank() && it.name.equals(q, ignoreCase = true) }?.let { return it.msisdn }
+    val qn = DirectoryBook.normalize(q)
+    book.entries.firstOrNull { DirectoryBook.normalize(it.msisdn) == qn }?.let { return it.msisdn }
+    val numberLike = q.any { it.isDigit() } && q.all { it.isDigit() || it in "+-() " }
+    return if (numberLike) q.filter { it.isDigit() || it == '+' } else null
 }
 
 /** 후보 — 이미 고른 사람은 뺀다. 이름·번호 검색(정규형). 순수 함수(시험 대상). */

@@ -65,6 +65,8 @@ fun CallsScreen(
     smsPane: @Composable () -> Unit = {},
     /** false = 탭줄은 껍데기가 고정으로 놓는다(앱 경로). */
     showTabs: Boolean = true,
+    /** ⑥ [이력에서 보기] — 최상위 [이력] 으로. */
+    onHistory: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val ui = CallsUi(
@@ -82,14 +84,19 @@ fun CallsScreen(
         watchDiag = vm.watchDiag.collectAsStateWithLifecycle().value,
         listenHidden = vm.listenHidden,
         personFilter = vm.personFilter.collectAsStateWithLifecycle().value
-            .takeIf { it.isNotBlank() }?.let { vm.personFilterLabel().ifBlank { it } }.orEmpty())
+            .takeIf { it.isNotBlank() }?.let { vm.personFilterLabel().ifBlank { it } }.orEmpty(),
+        rxLevels = vm.rxLevels.collectAsStateWithLifecycle().value)
     val act = CallsActions(
-        setDialNumber = vm::setDialNumber, dial = vm::dial, pickup = vm::pickup,
+        setDialNumber = vm::setDialNumber, dial = vm::dial, dialTo = vm::dialTo, pickup = vm::pickup,
+        setRxLevel = vm::setRxLevel,
+        openHistory = onHistory, logCsv = vm::logCsv,
         setDeskFilter = vm::setDeskFilter, personAt = vm::personAt, monitorMember = vm::monitor,
-        answer = vm::answer, hangup = vm::hangup, toggleHold = vm::toggleHold, toggleMute = vm::toggleMute,
+        answer = vm::answer, answerQueue = vm::answerQueue, reject = vm::reject, hangup = vm::hangup, toggleHold = vm::toggleHold, toggleMute = vm::toggleMute,
         openDtmf = vm::openDtmf, closeDtmf = vm::closeDtmf, sendDtmf = vm::sendDtmf,
         openTransfer = vm::openTransfer, closeTransfer = vm::closeTransfer,
-        setTransferTarget = vm::setTransferTarget, transfer = vm::transfer,
+        setTransferTarget = vm::setTransferTarget, pickTransferTarget = vm::pickTransferTarget,
+        transfer = vm::transfer, consult = vm::consult,
+        completeConsult = vm::completeConsult, cancelConsult = vm::cancelConsult,
         monitorLive = vm::monitorLive, stopMonitorLive = vm::stopMonitorLive,
         clearPersonFilter = { vm.setPersonFilter(vm.personFilter.value) })
 
@@ -180,20 +187,49 @@ private fun Keypad(ui: CallsUi, act: CallsActions) {
     Column(Modifier.fillMaxWidth().padding(12.dp),
         horizontalAlignment = Alignment.CenterHorizontally) {
         // 입력란과 키패드는 **같은 번호**를 본다 — 키보드로 쳐도, 눌러도 한 값이다.
-        OutlinedTextField(
-            value = number, onValueChange = act.setDialNumber,
-            placeholder = { Text("번호·내선", fontSize = Type.body) },
-            singleLine = true, modifier = Modifier.fillMaxWidth(),
-            textStyle = LocalTextStyle.current.copy(fontSize = Type.head,
-                fontWeight = FontWeight.Bold, textAlign = TextAlign.Center),
-            // 입력한 번호의 주인을 바로 보여 준다 — 잘못 건 전화를 줄인다.
-            supportingText = {
-                val who = if (number.isBlank()) "" else book.nameOf(number)
-                if (who.isNotBlank()) Text(who, fontSize = Type.body,
-                    color = MaterialTheme.colorScheme.primary, textAlign = TextAlign.Center,
-                    modifier = Modifier.fillMaxWidth())
-            },
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone, imeAction = ImeAction.Go))
+        // 치는 동안 주소록 제안이 입력란 아래에 겹쳐 뜬다(데스크톱 ③ 번호 필드의 제안 팝업). 행을 누르면 채우고,
+        //   [발신] 은 곧바로 건다. 제안은 입력란의 포커스를 뺏지 않는다 — 계속 칠 수 있어야 한다.
+        val suggestions = remember(number, book) { book.suggest(number) }
+        var hidden by remember { mutableStateOf("") }          // 닫은 입력값 — 값이 바뀌면 다시 뜬다
+        Box {
+            OutlinedTextField(
+                value = number, onValueChange = act.setDialNumber,
+                placeholder = { Text("번호·내선", fontSize = Type.body) },
+                singleLine = true, modifier = Modifier.fillMaxWidth(),
+                textStyle = LocalTextStyle.current.copy(fontSize = Type.head,
+                    fontWeight = FontWeight.Bold, textAlign = TextAlign.Center),
+                // 입력한 번호의 주인을 바로 보여 준다 — 잘못 건 전화를 줄인다.
+                supportingText = {
+                    val who = if (number.isBlank()) "" else book.nameOf(number)
+                    if (who.isNotBlank()) Text(who, fontSize = Type.body,
+                        color = MaterialTheme.colorScheme.primary, textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth())
+                },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone, imeAction = ImeAction.Go))
+            DropdownMenu(
+                expanded = suggestions.isNotEmpty() && hidden != number && book.nameOf(number).isBlank(),
+                onDismissRequest = { hidden = number },
+                properties = androidx.compose.ui.window.PopupProperties(focusable = false),
+                modifier = Modifier.heightIn(max = 300.dp)) {
+                suggestions.forEach { e ->
+                    DropdownMenuItem(
+                        text = {
+                            Column {
+                                Text("${e.name}  ${e.msisdn}", fontSize = Type.body, fontWeight = FontWeight.Medium, maxLines = 1)
+                                val path = book.orgPath(e.org)
+                                if (path.isNotEmpty()) Text(path, fontSize = Type.micro,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+                            }
+                        },
+                        onClick = { act.setDialNumber(e.msisdn) },
+                        trailingIcon = {
+                            Button(onClick = { act.dialTo(e.msisdn) }, contentPadding = PaddingValues(horizontal = 10.dp)) {
+                                Text("발신", fontSize = Type.meta)
+                            }
+                        })
+                }
+            }
+        }
         Spacer(Modifier.height(8.dp))
         listOf("123", "456", "789", "*0#").forEach { row ->
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -280,7 +316,9 @@ private fun Queue(ui: CallsUi, act: CallsActions) {
                              fontWeight = FontWeight.Bold, fontSize = Type.strong,
                              modifier = Modifier.weight(1f))
                         Text(fmt(q.elapsedMs), fontSize = Type.body)
-                        if (q.ringing) TextButton(onClick = { act.pickup("") }) { Text("당겨받기", fontSize = Type.meta) }
+                        // 포크가 내게도 닿았으면 [응답] — 내 leg 만 받는다. 아니면(다른 그룹원이 울린다) 지정 픽업으로 이 호를.
+                        if (q.myLeg != null) Button(onClick = { act.answerQueue(q) }) { Text("응답", fontSize = Type.meta) }
+                        if (q.ringing) TextButton(onClick = { act.pickup(q.pilot) }) { Text("당겨받기", fontSize = Type.meta) }
                     }
                     Text(
                         when {
@@ -340,6 +378,7 @@ private fun MyCalls(ui: CallsUi, act: CallsActions, onPerson: (PersonAction, Str
                         Text(c.peer, fontWeight = FontWeight.Bold, fontSize = Type.title,
                              modifier = Modifier.weight(1f))
                         if (c.viaPilot) Text("대표 ", fontSize = Type.meta)
+                        if (c.consult) Tag("상담")
                         // 음소거는 **상태 배지로도** 보여야 한다 — 버튼 글자만 바뀌면 켜졌는지 모른다.
                         if (c.muted) Text("음소거", fontSize = Type.micro,
                             color = MaterialTheme.colorScheme.error,
@@ -348,19 +387,28 @@ private fun MyCalls(ui: CallsUi, act: CallsActions, onPerson: (PersonAction, Str
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(4.dp),
                         verticalAlignment = Alignment.CenterVertically) {
+                        // 울리는 호는 [응답]·[거절] 둘 — 끊을 통화가 아직 없다(데스크톱 카드와 같다, 거절 = 486).
                         if (c.incoming) {
                             Button(onClick = { act.answer(c) }) { Text("응답") }
+                            OutlinedButton(onClick = { act.reject(c) }) {
+                                Text("거절", color = MaterialTheme.colorScheme.error)
+                            }
                         } else {
                             TextButton(onClick = { act.toggleHold(c) }) { Text(if (c.held) "보류 해제" else "보류", fontSize = Type.meta) }
                             TextButton(onClick = { act.toggleMute(c) }) { Text(if (c.muted) "음소거 해제" else "음소거", fontSize = Type.meta) }
                             TextButton(onClick = { if (c.dtmfOpen) act.closeDtmf() else act.openDtmf(c) }) { Text("DTMF", fontSize = Type.meta) }
-                            TextButton(onClick = { if (c.transferOpen) act.closeTransfer() else act.openTransfer(c) }) { Text("전달", fontSize = Type.meta) }
+                            if (c.canTransfer) TextButton(onClick = { if (c.transferOpen) act.closeTransfer() else act.openTransfer(c) }) { Text("전달", fontSize = Type.meta) }
+                            // 상담 호 — 연결되면 원 통화를 넘기고(Replaces), 아니면 끊고 원 통화로 돌아간다.
+                            if (c.canComplete) Button(onClick = { act.completeConsult(c) }) { Text("전달 완결", fontSize = Type.meta) }
+                            if (c.consult) TextButton(onClick = { act.cancelConsult(c) }) { Text("취소", fontSize = Type.meta) }
                         }
                         Spacer(Modifier.weight(1f))
-                        TextButton(onClick = { act.hangup(c) }) { Text("종료", fontSize = Type.meta) }
+                        if (!c.incoming) TextButton(onClick = { act.hangup(c) }) { Text("종료", fontSize = Type.meta) }
                     }
+                    if (c.transferNote.isNotEmpty()) Text(c.transferNote, fontSize = Type.meta,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
                     if (c.dtmfOpen) Dtmf(act, c)
-                    if (c.transferOpen) Transfer(act, c, xferTarget)
+                    if (c.transferOpen) Transfer(act, c, xferTarget, ui.members.filter { !it.isMe })
                 }
             }
         }
@@ -386,17 +434,32 @@ private fun Dtmf(act: CallsActions, c: CallCard) {
     }
 }
 
-/** 호 전달 blind — REFER(RFC 3515). attended 는 상담 호가 필요해 후속(§11). */
+/**
+ * 전달 칸 — 대상(내선·번호) · 그룹원 칩 · [상담 전달] · [전달](데스크톱 전달 팝오버와 같다).
+ *
+ * [전달] 은 blind(REFER — 받아들여지면 이 leg 은 끝난다), [상담 전달] 은 원 통화를 보류하고 대상에게 먼저 건다 — 상대가
+ * 받으면 상담 호 카드의 [전달 완결] 로 넘긴다. 그룹원 칩은 대상 칸을 채울 뿐이다(누가 받을지 고르는 것은 관제사).
+ */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun Transfer(act: CallsActions, c: CallCard, target: String) {
-    Row(Modifier.padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+private fun Transfer(act: CallsActions, c: CallCard, target: String, members: List<MemberChip>) {
+    Column(Modifier.padding(top = 6.dp)) {
         OutlinedTextField(
             value = target, onValueChange = act.setTransferTarget,
-            placeholder = { Text("전달 대상", fontSize = Type.body) },
-            singleLine = true, modifier = Modifier.weight(1f),
+            placeholder = { Text("전달 대상 — 내선·번호 · 그룹원", fontSize = Type.body) },
+            singleLine = true, modifier = Modifier.fillMaxWidth(),
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone, imeAction = ImeAction.Go))
-        Button(onClick = { act.transfer(c) }, enabled = target.isNotBlank()) { Text("전달") }
+        if (members.isNotEmpty()) FlowRow(Modifier.padding(top = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            members.forEach { m ->
+                AssistChip(onClick = { act.pickTransferTarget(m.number) },
+                    label = { Text(m.name.ifBlank { m.number }, fontSize = Type.meta) })
+            }
+        }
+        Row(Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(4.dp, Alignment.End)) {
+            OutlinedButton(onClick = { act.consult(c) }, enabled = target.isNotBlank()) { Text("상담 전달") }
+            Button(onClick = { act.transfer(c) }, enabled = target.isNotBlank()) { Text("전달") }
+        }
     }
 }
 
@@ -414,7 +477,7 @@ private fun Transfer(act: CallsActions, c: CallCard, target: String) {
 private fun LiveCalls(ui: CallsUi, act: CallsActions) {
     val live = ui.live
     if (live.isNotEmpty()) {
-        live.forEach { r -> LiveRow(act, r, ui.listenHidden) }
+        live.forEach { r -> LiveRow(act, r, ui.listenHidden, ui.rxLevels) }
         return
     }
     // 비었으면 **왜** 비었는지 쓴다 — 조용히 비면 «앱 고장» 과 «편성 미비» 를 못 가른다.
@@ -452,6 +515,13 @@ private fun CallLog(ui: CallsUi, act: CallsActions, onPerson: (PersonAction, Str
             selected = true, onClick = act.clearPersonFilter,
             label = { Text("${ui.personFilter} 기록", fontSize = Type.meta) },
             trailingIcon = { Text("✕", fontSize = Type.meta) })
+        Spacer(Modifier.weight(1f))
+        // 끝난 통화의 날짜별 조회·녹취는 [이력] 이다 — 여기는 오늘 데스크의 작업 메모리(데스크톱 ⑥ 머리와 같다).
+        TextButton(onClick = act.openHistory) { Text("이력에서 보기", fontSize = Type.meta) }
+        val export = com.cims.ue.dispatch.ui.rememberCsvExport()
+        TextButton(onClick = {
+            export("call-activity-" + SimpleDateFormat("yyyyMMdd-HHmm", Locale.ROOT).format(Date()) + ".csv", act.logCsv)
+        }) { Text("CSV", fontSize = Type.meta) }
     }
 
     if (log.isEmpty()) return
@@ -469,7 +539,9 @@ private fun CallLog(ui: CallsUi, act: CallsActions, onPerson: (PersonAction, Str
     LazyColumn(verticalArrangement = Arrangement.spacedBy(1.dp)) {
         items(log, key = { it.atMs.toString() + it.number + it.peer }) { r ->
             val key = r.atMs.toString() + r.number
-            CallLogRowView(r, onLongPress = { if (r.number.isNotBlank()) menuFor = key })
+            CallLogRowView(r, onLongPress = { if (r.number.isNotBlank()) menuFor = key },
+                onRedial = { onPerson(PersonAction.CALL, r.number) },
+                onSms = { onPerson(PersonAction.SMS, r.number) })
             if (menuFor == key) PersonMenu(
                 person = act.personAt(r.number), expanded = true,
                 onDismiss = { menuFor = null }, onPick = onPerson)
@@ -478,7 +550,8 @@ private fun CallLog(ui: CallsUi, act: CallsActions, onPerson: (PersonAction, Str
 }
 
 @Composable
-private fun CallLogRowView(r: CallLogRow, onLongPress: () -> Unit = {}) {
+private fun CallLogRowView(r: CallLogRow, onLongPress: () -> Unit = {},
+                            onRedial: () -> Unit = {}, onSms: () -> Unit = {}) {
     val missed = r.kind == CallLogKind.MISSED
     Row(Modifier.fillMaxWidth().padding(vertical = 3.dp)
             .combinedClickable(onClick = {}, onLongClick = onLongPress),
@@ -503,6 +576,15 @@ private fun CallLogRowView(r: CallLogRow, onLongPress: () -> Unit = {}) {
         Text(r.text, Modifier.weight(1f), fontSize = Type.micro,
             color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
         if (r.others) Text("감시", fontSize = Type.micro, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        // 행에서 곧바로 — 사람 메뉴(롱프레스)를 거치지 않는다(데스크톱 ⑥ 행의 [재발신]·[문자]).
+        if (r.canRedial) {
+            TextButton(onClick = onRedial, contentPadding = PaddingValues(horizontal = 6.dp)) {
+                Text("재발신", fontSize = Type.meta)
+            }
+            TextButton(onClick = onSms, contentPadding = PaddingValues(horizontal = 6.dp)) {
+                Text("문자", fontSize = Type.meta)
+            }
+        }
     }
 }
 
@@ -552,7 +634,7 @@ private fun WatchDiag(ui: CallsUi) {
  * 최신인지 흐려지기 때문이다 — 켜는 자리·보는 자리·끄는 자리가 하나다(§6.5).
  */
 @Composable
-private fun LiveRow(act: CallsActions, r: LiveCallRow, hidden: Boolean = true) {
+private fun LiveRow(act: CallsActions, r: LiveCallRow, hidden: Boolean = true, levels: Map<Int, Float> = emptyMap()) {
     Card(colors = CardDefaults.cardColors(
         containerColor = if (r.ringing) MaterialTheme.colorScheme.tertiaryContainer
                          else MaterialTheme.colorScheme.surfaceVariant),
@@ -577,7 +659,7 @@ private fun LiveRow(act: CallsActions, r: LiveCallRow, hidden: Boolean = true) {
             } else if (r.canMonitor) TextButton(onClick = { act.monitorLive(r) },
                 contentPadding = PaddingValues(horizontal = 8.dp)) { Text("청취", fontSize = Type.meta) }
         }
-        r.tap?.let { TapDetail(it, hidden) }
+        r.tap?.let { TapDetail(it, hidden, levels[it.callId] ?: 1f) { v -> act.setRxLevel(it.callId, v) } }
     }
 }
 
@@ -589,7 +671,7 @@ private fun LiveRow(act: CallsActions, r: LiveCallRow, hidden: Boolean = true) {
  * 사라져 귀속이 깨진다. 소스가 갈라져 오지 않는 서버에서는 한 줄로 그 사실을 적는다(지어내지 않는다).
  */
 @Composable
-private fun TapDetail(tap: SessionItem, hidden: Boolean) {
+private fun TapDetail(tap: SessionItem, hidden: Boolean, level: Float = 1f, onLevel: (Float) -> Unit = {}) {
     Column(Modifier.fillMaxWidth()
         .padding(start = 22.dp, end = 8.dp, bottom = 6.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically,
@@ -604,6 +686,22 @@ private fun TapDetail(tap: SessionItem, hidden: Boolean) {
         if (sources.isEmpty()) Text("수신 중 — 소스 라벨이 아직 없습니다", fontSize = Type.meta,
             color = MaterialTheme.colorScheme.onSurfaceVariant)
         else sources.forEach { src -> SourceRow(src) }
+        RxLevelRow(level, onLevel)
+    }
+}
+
+/**
+ * 이 leg 의 수신 음량 — 0~2(1.0 = 원음, 데스크톱 감청 창의 [음량] 과 같은 범위). 여러 leg 을 같이 들을 때 하나만 줄이거나
+ * 키운다. 막대는 끄는 대로 반영하고 값은 호가 끝날 때까지 세션이 든다(`rxLevels`).
+ */
+@Composable
+internal fun RxLevelRow(level: Float, onLevel: (Float) -> Unit) {
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Text("음량", fontSize = Type.meta, color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.width(40.dp))
+        Slider(value = level, onValueChange = onLevel, valueRange = 0f..2f, modifier = Modifier.weight(1f))
+        Text("${(level * 100).toInt()}%", fontSize = Type.meta, modifier = Modifier.width(48.dp),
+            textAlign = TextAlign.End)
     }
 }
 
@@ -648,14 +746,7 @@ fun CallTabRow(pane: CallPane, onPane: (CallPane) -> Unit) {
 }
 
 /** 종류 문구 — 데스크톱 ⑥ 최근 행의 어휘(§4.4). */
-private fun kindText(k: CallLogKind): String = when (k) {
-    CallLogKind.ANSWERED -> "착신 응답"
-    CallLogKind.MISSED -> "부재"
-    CallLogKind.OUTGOING -> "발신"
-    CallLogKind.PICKUP -> "당겨받기"
-    CallLogKind.TRANSFER -> "전달"
-    CallLogKind.MONITOR -> "감청"
-}
+private fun kindText(k: CallLogKind): String = com.cims.ue.dispatch.session.callLogKindText(k)
 
 /** `m:ss` — 0 이면 대시. */
 internal fun durText(sec: Int): String =

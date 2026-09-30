@@ -9,6 +9,7 @@
 package com.cims.ue.dispatch.ui
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
@@ -33,6 +34,10 @@ import androidx.compose.foundation.pager.PagerState
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -89,6 +94,11 @@ fun AppShellContent(
      * 면을 밀 때 이 줄이 같이 미끄러지면 메뉴가 통째로 바뀐 것처럼 보인다(§6.3).
      */
     tabs: @Composable (AppPage) -> Unit = {},
+    /**
+     * 토스트 자리 — 본문 **위에 겹쳐** 우하단에 선다(§6.2a-2, 데스크톱 §3.2). 본문을 밀지 않는다 — 실패를 알릴 때마다
+     * 목록이 들썩이면 보던 자리를 잃는다. 넘겨받은 Modifier 가 자리(정렬·여백)다.
+     */
+    notices: @Composable (Modifier) -> Unit = {},
     /** 한 장의 본문. 스와이프로 미리 그려 두므로 **선택된 것만이 아니라 요청받은 장**을 그린다. */
     content: @Composable ColumnScope.(AppPage) -> Unit,
 ) {
@@ -143,7 +153,8 @@ fun AppShellContent(
             }
         }
     ) { pad ->
-        Column(Modifier.fillMaxSize().padding(pad)) {
+      Box(Modifier.fillMaxSize().padding(pad)) {
+        Column(Modifier.fillMaxSize()) {
             banners()
             // ── 이동은 **겹친 pager 둘** ────────────────────────────────────────────────
             //
@@ -177,6 +188,8 @@ fun AppShellContent(
                     onPage = onPage, tabs = tabs, content = content)
             }
         }
+        notices(Modifier.align(Alignment.BottomEnd).padding(12.dp))
+      }
     }
 }
 
@@ -206,25 +219,31 @@ private fun MenuPage(
     content: @Composable ColumnScope.(AppPage) -> Unit,
 ) {
     val initial = if (menu == screen) wantPane else entryPane(menu, from = screen)
-    val inner = rememberPagerState(initialPage = initial) { menu.paneCount }
+    // **저장·복원하지 않는다**(`rememberPagerState` 가 아니라 `remember`). 이 장은 화면 밖으로 나가면 버려지는데,
+    //   pager 의 저장 상태가 되살아나면 위 진입 규칙(`initial`)이 무시되고 **떠날 때의 면**에 선다. 그러면 면을 정해서
+    //   부른 이동([채널로 이동] — «채널» 면)이, 정착하자마자 아래 알림이 그 옛 면을 VM 에 되돌려 써 덮인다.
+    //   면의 기억은 VM(`pttPane`·`callPane`)이 갖는다 — 여기가 한 벌 더 가질 이유가 없다.
+    val inner = remember { PagerState(currentPage = initial) { menu.paneCount } }
 
-    // **자리가 잡힌 장의, 자리가 잡힌 면만** 좌표를 알린다.
+    // 탭·내비·사람 메뉴·[채널로 이동] 이 면을 **바꿨을 때만** 따라간다 — 규칙은 [PaneRequest] 가 갖는다.
+    //   정착을 기다려 따라가고, 닿든·손가락이 끊든·새 요청이 대신하든 **그 요청을 내려놓는다**(`finally`) — 끊긴 채
+    //   남으면 아래 알림이 영영 막혀 면을 넘겨도 VM 좌표가 멈춘다.
+    val request = remember { PaneRequest() }
+    LaunchedEffect(wantPane) { request.onWant(wantPane) }
+    LaunchedEffect(request.pending, settled) {
+        val want = request.pending ?: return@LaunchedEffect
+        if (!settled) return@LaunchedEffect
+        try { inner.goTo(want) } finally { request.finish(want) }
+    }
+
+    // **자리가 잡힌 장의, 자리가 잡힌 면만** 좌표를 알린다 — 요청을 든 동안은 알리지 않는다(위).
     //
     //   · 바깥이 아직 가는 중이면(`settled` 거짓) 미리 그려 둔 옆 장이 보지도 않은 면으로 상태를 끈다.
-    //   · 안쪽이 가는 중이면 지나가는 면이 곧 `wantPane` 이 되어 아래 효과가 다시 시작되고, 가던
+    //   · 안쪽이 가는 중이면 지나가는 면이 곧 `wantPane` 이 되어 위 효과가 다시 시작되고, 가던
     //     애니메이션이 취소돼 중간에 선다 — 탭을 두 칸 이상 건너뛸 때의 그 증상이다.
     val innerSettled = inner.currentPage == inner.targetPage
-    LaunchedEffect(settled, innerSettled, inner.currentPage) {
-        if (settled && innerSettled) onPage(AppPage(menu, inner.currentPage))
-    }
-    // 탭·내비·사람 메뉴가 면을 **바꿨을 때만** 따라간다.
-    //
-    // `settled` 를 열쇠에 넣으면 안 된다 — 밀어서 이 메뉴에 막 들어온 순간 `settled` 가 참이 되면서
-    //   이 효과와 위의 알림이 **동시에** 깨어난다. 알림은 «가장자리 면에 섰다» 고 말하는데 이 효과는
-    //   아직 옛 기억값(`wantPane`)으로 되돌려 버린다. 밀어서 들어간 면이 곧바로 튕겨 나오던 이유다.
-    //   밀어서 바뀐 것은 알림이 정본이고, 눌러서 바뀐 것만 여기가 따라간다.
-    LaunchedEffect(wantPane) {
-        if (settled) inner.goTo(wantPane)
+    LaunchedEffect(settled, innerSettled, inner.currentPage, request.pending) {
+        if (settled && innerSettled && request.canReport) onPage(AppPage(menu, inner.currentPage))
     }
 
     Column(Modifier.fillMaxSize()) {
@@ -247,6 +266,38 @@ private fun MenuPage(
             }
         }
     }
+}
+
+/**
+ * 면 이동 요청의 수명 — VM 이 바꾼 면(요청)을 **닿거나, 손가락이 끊거나, 새 요청이 대신할 때까지** 든다.
+ *
+ *   · 이 장이 선 뒤의 **첫 값은 요청이 아니다** — 그때의 면은 진입 규칙이 정했다. 요청으로 보면 밀어서 막 들어온 장이
+ *     옛 기억값으로 튕겨 나간다(밀어서 바뀐 것은 좌표 알림이 정본이다).
+ *   · 요청을 든 동안은 좌표를 알리지 않는다([canReport]) — 바깥이 가는 중에 온 요청이, 정착하는 순간 옛 면의 알림에
+ *     덮이지 않게.
+ *   · 이동이 끝나면(닿음·손가락이 끊음) 그 요청을 내려놓는다([finish]). 끊긴 뒤에는 **손가락이 멈춘 면**을 따른다.
+ *     새 요청이 이미 대신했으면 옛 끝맺음은 새 요청을 건드리지 않는다.
+ *
+ * Compose 효과 밖의 값으로 떼어 둔 것은 시험 때문이다 — 끊는 순서를 기기 없이 고정한다.
+ */
+internal class PaneRequest {
+    /** 지금 가야 할 면. 없으면 null. Compose 가 읽는 상태다(효과의 열쇠). */
+    var pending by mutableStateOf<Int?>(null)
+        private set
+    private var seenFirst = false
+
+    /** VM 의 면이 바뀌었다. */
+    fun onWant(pane: Int) {
+        if (seenFirst) pending = pane else seenFirst = true
+    }
+
+    /** [pane] 으로 가던 이동이 끝났다 — 닿았든 끊겼든. 그 요청이 아직 지금의 요청일 때만 내려놓는다. */
+    fun finish(pane: Int) {
+        if (pending == pane) pending = null
+    }
+
+    /** 좌표를 알려도 되는가 — 요청을 들고 있지 않을 때만. */
+    val canReport: Boolean get() = pending == null
 }
 
 /**

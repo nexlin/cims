@@ -16,10 +16,12 @@ package com.cims.ue.dispatch.ui.ptt
 
 import com.cims.ue.dispatch.ui.Type
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material3.*
@@ -55,6 +57,7 @@ fun TalkBar(
         onDown = { vm.pttDown(lockEnabled) },
         onUp = { vm.pttUp(lockEnabled) },
         onFocus = vm::focus,
+        onRemove = vm::toggleTarget,
         onClear = vm::clearTargets,
         modifier = modifier)
 }
@@ -68,6 +71,8 @@ fun TalkBarContent(
     onDown: () -> Unit = {},
     onUp: () -> Unit = {},
     onFocus: (String) -> Unit = {},
+    /** 칩의 × — 그 대상 하나만 뺀다(요청해 둔 floor 도 푼다 — `applyTargets`). */
+    onRemove: (String) -> Unit = {},
     onClear: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
@@ -115,12 +120,18 @@ fun TalkBarContent(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.weight(1f)
                 ) {
+                    // 칩 = 그 채널로 포커스, × = 그 대상 하나만 빼기(데스크톱 칩 «클릭 = 포커스 · × = 체크 해제»). 여럿을 잡아 둔
+                    //   채 하나만 빼려고 목록으로 돌아갈 필요가 없다.
                     targets.forEach { t ->
                         AssistChip(
                             onClick = { onFocus(t.card.id) },
                             label = {
                                 Text(t.name + (if (t.stateText.isNotEmpty()) " · ${t.stateText}" else ""),
                                      fontSize = Type.body)
+                            },
+                            trailingIcon = {
+                                Icon(Icons.Filled.Close, contentDescription = "${t.name} 발언 대상에서 빼기",
+                                    modifier = Modifier.size(20.dp).clickable { onRemove(t.card.id) })
                             })
                     }
                 }

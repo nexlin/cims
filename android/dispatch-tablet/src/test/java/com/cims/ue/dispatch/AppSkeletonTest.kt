@@ -4,7 +4,6 @@
 // 화면이 통째로 틀어지는 계약들이다 — 화면 배열, 계정 선택 규칙, 자격 폴백.
 package com.cims.ue.dispatch
 
-import android.view.KeyEvent
 import com.cims.ue.dispatch.ui.AppScreen
 import com.cims.ue.dispatch.ui.CallPane
 import com.cims.ue.dispatch.ui.MoreItem
@@ -17,7 +16,6 @@ import com.cims.ue.sdk.ServiceProfile
 import com.cims.ue.sdk.Transport
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -26,21 +24,11 @@ class AppSkeletonTest {
     // ── 화면 배열 — 하단 내비는 «하는 일» 넷이다(§6.3) ──
     @Test fun `하단 내비는 이력·무전·통화·더보기 순이다`() {
         assertEquals(listOf("이력", "무전", "통화", "더보기"), AppScreen.entries.map { it.label })
-        assertEquals(listOf("F1", "F2", "F3", "F4"), AppScreen.entries.map { it.hotkey })
     }
 
     @Test fun `첫 화면은 이력이다`() {
         // 관제에서 «무슨 일이 있었나» 를 보는 일이 가장 잦다(§6.3). 무전은 발언 바가 어디서나 받는다.
         assertEquals(AppScreen.HISTORY, AppScreen.entries.first())
-    }
-
-    @Test fun `F1~F4 가 같은 화면에 대응한다`() {
-        assertEquals(AppScreen.HISTORY, AppScreen.ofFunctionKey(KeyEvent.KEYCODE_F1))
-        assertEquals(AppScreen.PTT, AppScreen.ofFunctionKey(KeyEvent.KEYCODE_F2))
-        assertEquals(AppScreen.CALLS, AppScreen.ofFunctionKey(KeyEvent.KEYCODE_F3))
-        assertEquals(AppScreen.MORE, AppScreen.ofFunctionKey(KeyEvent.KEYCODE_F4))
-        assertNull(AppScreen.ofFunctionKey(KeyEvent.KEYCODE_F5))
-        assertNull(AppScreen.ofFunctionKey(KeyEvent.KEYCODE_A))
     }
 
     @Test fun `감청·청취·메시지는 최상위 축이 아니다`() {

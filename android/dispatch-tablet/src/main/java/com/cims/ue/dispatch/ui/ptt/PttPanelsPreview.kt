@@ -93,6 +93,20 @@ private fun PreviewActivity() = PreviewFrame {
     }
 }
 
+@Preview(name = "⑤ 이벤트 — 긴급·임박 고정 행", device = PreviewBody, showBackground = true)
+@Composable
+private fun PreviewActivityPinned() = PreviewFrame {
+    val now = System.currentTimeMillis()
+    Box(Modifier.fillMaxSize().padding(8.dp)) {
+        ActivityContent(rows = EVENTS.filter { it.kind == ActivityKind.TALK }, filter = ActivityFilter.TALK, follow = false,
+            pinned = listOf(
+                com.cims.ue.dispatch.ui.AlertBannerUi("g-sit", com.cims.ue.dispatch.session.AlertKind.EMERGENCY,
+                    "상황실", "1003 이순경", now - 95_000),
+                com.cims.ue.dispatch.ui.AlertBannerUi("g-p2", com.cims.ue.dispatch.session.AlertKind.IMMINENT_PERIL,
+                    "순찰2", "", now - 12_000)))
+    }
+}
+
 @Preview(name = "⑤ 이벤트 — 없음", device = PreviewBody, showBackground = true)
 @Composable
 private fun PreviewActivityEmpty() = PreviewFrame {

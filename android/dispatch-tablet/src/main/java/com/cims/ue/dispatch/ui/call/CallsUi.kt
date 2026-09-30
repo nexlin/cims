@@ -38,6 +38,8 @@ data class CallsUi(
      * (사람 메뉴의 «통화 기록» 이 건다, §6.2f).
      */
     val personFilter: String = "",
+    /** 호별 수신 음량 — 감청 상세의 음량 막대. 없으면 1.0. */
+    val rxLevels: Map<Int, Float> = emptyMap(),
 )
 
 /**
@@ -48,11 +50,23 @@ data class CallsUi(
 data class CallsActions(
     val setDialNumber: (String) -> Unit = {},
     val dial: () -> Unit = {},
+    /** ⑥ 머리 [이력에서 보기] — 끝난 통화의 날짜별 조회·녹취는 [이력] 화면(§6.11). */
+    val openHistory: () -> Unit = {},
+    /** ⑥ 머리 [CSV] 의 내용 — 필터와 무관하게 오늘 내역 전부(데스크톱과 같다). */
+    val logCsv: () -> String = { "" },
+    /** 입력칸을 거치지 않고 그 번호로 — 제안 행의 [발신]. */
+    val dialTo: (String) -> Unit = {},
+    /** 감청 leg 의 수신 음량(0~2). */
+    val setRxLevel: (Int, Float) -> Unit = { _, _ -> },
     val pickup: (String) -> Unit = {},
     val setDeskFilter: (String) -> Unit = {},
     val personAt: (String) -> PersonEntry? = { null },
     val monitorMember: (MemberChip) -> Unit = {},
     val answer: (CallCard) -> Unit = {},
+    /** 대기열 [응답] — 그 발신자의 내 착신 leg. */
+    val answerQueue: (QueueItem) -> Unit = {},
+    /** 착신 거절 — 486 Busy Here(착신 배너 [거절] 과 같다). */
+    val reject: (CallCard) -> Unit = {},
     val hangup: (CallCard) -> Unit = {},
     val toggleHold: (CallCard) -> Unit = {},
     val toggleMute: (CallCard) -> Unit = {},
@@ -62,7 +76,11 @@ data class CallsActions(
     val openTransfer: (CallCard) -> Unit = {},
     val closeTransfer: () -> Unit = {},
     val setTransferTarget: (String) -> Unit = {},
+    val pickTransferTarget: (String) -> Unit = {},
     val transfer: (CallCard) -> Unit = {},
+    val consult: (CallCard) -> Unit = {},
+    val completeConsult: (CallCard) -> Unit = {},
+    val cancelConsult: (CallCard) -> Unit = {},
     val monitorLive: (LiveCallRow) -> Unit = {},
     val stopMonitorLive: (LiveCallRow) -> Unit = {},
     val clearPersonFilter: () -> Unit = {},

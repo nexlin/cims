@@ -25,6 +25,27 @@ class ContactsTest {
             DirectoryEntry("H", "박경위", "1003"),
             DirectoryEntry("", "무소속", "01055556666")))
 
+    // ── 번호를 치는 동안의 제안(데스크톱 ③ 번호 필드) ──
+    @Test fun `치는 번호가 로컬 표기든 E164 든 같은 사람에 걸린다`() {
+        assertEquals(listOf("이순경"), book.suggest("010333").map { it.name })     // 저장은 +8210…
+        assertEquals(listOf("김순경"), book.suggest("+8210111").map { it.name })   // 저장은 010…
+        assertEquals(listOf("박경위"), book.suggest("100").map { it.name })        // 내선은 그대로
+    }
+
+    @Test fun `이름으로도 제안한다`() {
+        assertEquals(listOf("김순경", "이순경"), book.suggest("순경").map { it.name })
+    }
+
+    @Test fun `URI 를 치는 중이거나 비었으면 제안하지 않는다`() {
+        assertTrue(book.suggest("sip:1003@d").isEmpty())
+        assertTrue(book.suggest("  ").isEmpty())
+    }
+
+    @Test fun `제안은 여덟까지`() {
+        val many = DirectoryBook(entries = (1..20).map { DirectoryEntry("", "사람$it", "0101000%04d".format(it)) })
+        assertEquals(8, many.suggest("010").size)
+    }
+
     @Test fun `이름으로 찾는다`() {
         assertEquals(listOf("김순경"), filter(book, "김순", "").map { it.name })
     }
@@ -124,6 +145,21 @@ class DerivedPureTest {
             members = listOf(com.cims.ue.dispatch.ui.groups.MemberRow("tel:1001", "김순경", "1001")))
         val c = com.cims.ue.dispatch.ui.groups.PttGroupsViewModel.candidatesOf(book, form)
         assertEquals(listOf("1002"), c.map { it.msisdn })
+    }
+
+    @Test fun `표시된 전원 추가 — 이미 멤버·같은 묶음의 중복은 건너뛰고 참가자로 든다`() {
+        val form = com.cims.ue.dispatch.ui.groups.EditForm(
+            members = listOf(com.cims.ue.dispatch.ui.groups.MemberRow("tel:1001", "김순경", "1001", isChair = true)))
+        val shown = listOf(
+            DirectoryEntry("T", "김순경", "1001"),        // 이미 멤버
+            DirectoryEntry("T", "", "01022223333"),        // 이름 없음 — 주소록 이름으로
+            DirectoryEntry("T", "중복", "+821022223333"),  // 위와 같은 사람(정규형)
+            DirectoryEntry("T", "나", "1009"))
+        val out = com.cims.ue.dispatch.ui.groups.PttGroupsViewModel.withEntries(form, shown, "1009") { "이순경" }
+        assertEquals(listOf("1001", "01022223333", "1009"), out.members.map { it.number })
+        assertEquals("이순경", out.members[1].name)
+        assertTrue("나는 나로 표시", out.members[2].isMe)
+        assertTrue("더한 사람은 참가자", out.members.drop(1).none { it.isChair })
     }
 
     @Test fun `그룹 멤버 후보 — 폼이 없으면 빈 목록`() {

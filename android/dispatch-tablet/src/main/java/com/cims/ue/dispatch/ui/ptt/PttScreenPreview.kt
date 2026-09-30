@@ -14,14 +14,14 @@ import com.cims.ue.dispatch.ui.PreviewFrame
 
 /** 흔한 상태 — 내 채널 다섯(하나 발언 중·하나 미읽음), 범위 채널 넷(하나 청취 중). */
 private val MINE = listOf(
-    ChannelRowUi("g1", "1. 순찰1", subtitle = "발언 김관제 00:14", state = "12:31",
+    ChannelRowUi("g1", "순찰1", subtitle = "발언 김관제 00:14", state = "12:31",
         participants = 7, unread = 3, active = true, speaking = true, canTarget = true, targeted = true),
-    ChannelRowUi("g2", "2. 상황실", subtitle = "발언 없음", state = "05:02",
+    ChannelRowUi("g2", "상황실", subtitle = "발언 없음", state = "05:02",
         participants = 3, active = true, canTarget = true),
-    ChannelRowUi("g3", "3. 교통1", subtitle = "멤버 12", state = "대기"),
-    ChannelRowUi("p1", "4. 김반장", subtitle = "발언 없음", state = "02:14",
+    ChannelRowUi("g3", "교통1", subtitle = "멤버 12", state = "대기"),
+    ChannelRowUi("p1", "김반장", subtitle = "발언 없음", state = "02:14",
         active = true, canTarget = true),
-    ChannelRowUi("a1", "5. 애드혹 3인", subtitle = "발언 없음", state = "00:48",
+    ChannelRowUi("a1", "애드혹 3인", subtitle = "발언 없음", state = "00:48",
         participants = 3, active = true, canTarget = true),
 )
 
@@ -49,14 +49,29 @@ private fun PreviewPttDark() = PreviewFrame(dark = true) {
         listenText = "동시 청취 1/4", listenFull = false)
 }
 
-/** 긴급 — 행 배경이 바뀌어도 줄이 밀리지 않아야 한다. */
+/** 긴급·임박 — 행 배경과 낱말 태그가 붙어도 줄이 밀리지 않아야 한다. */
 @Preview(name = "무전 — 긴급", device = PreviewBody, showBackground = true)
 @Composable
 private fun PreviewPttEmergency() = PreviewFrame {
     PttScreenContent(
-        mine = listOf(MINE[0].copy(emergency = true, subtitle = "긴급 · 발언 김관제 00:03")) + MINE.drop(1),
+        mine = listOf(MINE[0].copy(emergency = true, subtitle = "발언 김관제 00:03"),
+                      MINE[1].copy(imminentPeril = true)) + MINE.drop(2),
         scoped = SCOPED, filter = ScopeFilter.EMERGENCY, query = "",
         listenText = "동시 청취 4/4", listenFull = true)
+}
+
+/** 전이중 개별 통화 — 발언 대상 체크 자리에 음소거가 선다(둘은 한 행에 같이 서지 않는다). 켜진 쪽은 경고색. */
+@Preview(name = "무전 — 전이중 개별 통화", device = PreviewBody, showBackground = true)
+@Composable
+private fun PreviewPttFullDuplex() = PreviewFrame {
+    PttScreenContent(
+        mine = MINE.take(3) + listOf(
+            ChannelRowUi("p2", "개별 · 박팀장", subtitle = "발언 없음", state = "03:40",
+                active = true, muted = false),
+            ChannelRowUi("p3", "개별 · 최주임", subtitle = "발언 없음", state = "00:21",
+                active = true, muted = true)),
+        scoped = SCOPED, filter = ScopeFilter.ALL, query = "",
+        listenText = "동시 청취 1/4", listenFull = false)
 }
 
 /** 채널이 많을 때 — 스크롤 없이 몇 장이 보이는지 확인하는 자리(§6.3 «10~11장» 주장의 근거). */

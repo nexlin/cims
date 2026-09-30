@@ -176,16 +176,15 @@ class MainViewModel : ViewModel() {
     }
 
     /**
-     * [무전] 목록 → 채널 화면. `groupId` 는 채널 카드의 id(그룹 id 또는 세션 id)다.
+     * 채널 화면을 연다 — 목록 행·긴급 배너·검색·[PTT 그룹] 이 다 여기로 온다. `id` 는 채널 카드의 id(그룹 id 또는
+     * 세션 id)다.
      *
-     * 포커스도 같이 옮긴다 — ④⑤(메시지·이벤트)가 포커스를 따라간다는 불변(§6.3)은 배치가 바뀌어도
-     * 그대로다. 채널 화면의 세 면이 곧 그 포커스의 상세다.
+     * 포커스도 같이 옮긴다 — ④⑤(메시지·이벤트 면)가 포커스를 따라간다는 불변(§6.3)은 배치가 바뀌어도 그대로다.
      */
     fun openChannel(id: String) {
         if (id.isBlank()) return
         ptt?.setFocus(id)
-        _channel.value = id
-        _screen.value = AppScreen.PTT
+        applyNav(nav().openChannel(id))       // 면도 «채널» 로 — 규칙은 [NavState.openChannel]
     }
 
     fun closeChannel() { _channel.value = null }
@@ -220,6 +219,7 @@ class MainViewModel : ViewModel() {
      */
     fun goToCalls() {
         _channel.value = null
+        _callPane.value = CallPane.CALLS        // 카드가 선 면 — «주소록»·«통화내역» 에 남으면 방금 건·받은 호가 안 보인다
         _screen.value = AppScreen.CALLS
     }
 
@@ -289,6 +289,66 @@ class MainViewModel : ViewModel() {
         _screen.value = AppScreen.MORE
     }
 
+    /**
+     * 채널의 메시지 — 그 그룹의 SDS 스레드를 [무전] › «메시지» 에 연다(데스크톱 ① 카드 `OpenThread` → ④). 채널 화면에
+     * 메시지를 두지 않는 대신의 한 걸음이다(§6.3a — 두 곳에 두면 «이 채널 것인가» 가 흐려진다).
+     */
+    fun openThread(key: String) {
+        if (key.isBlank()) return
+        messages?.openThread(key)
+        _channel.value = null
+        _pttPane.value = PttPane.MESSAGES
+        _screen.value = AppScreen.PTT
+    }
+
+    /** 채널 머리 [편집] — [더보기] › [PTT 그룹] 의 그 그룹 편집 폼으로(데스크톱 채널 편집 드로어, §6.12). */
+    fun editGroup(groupId: String) {
+        if (groupId.isBlank()) return
+        val g = pttGroups ?: return
+        // 고치던 폼을 말없이 덮지 않는다 — 그 폼으로 데려가고 이유를 적는다(데스크톱 `OpenDrawerEdit` 와 같다).
+        if (g.locked) session?.notify(com.cims.ue.dispatch.session.NoticeLevel.WARN,
+            "편집 중인 폼이 있습니다", "저장하거나 취소한 뒤 다시 시도하세요")
+        else g.editById(groupId)
+        _more.value = MoreItem.PTT_GROUPS
+        _screen.value = AppScreen.MORE
+    }
+
+    /** 채널 머리 [삭제] — 확인은 채널 화면이 받았다. 지운 채널은 «사라졌습니다» 대신 목록으로 돌아간다. */
+    fun deleteGroup(groupId: String) {
+        pttGroups?.deleteById(groupId)
+        _channel.value = null
+    }
+
+    /** 채널 목록 [새 채널] — [PTT 그룹] 의 새 그룹 폼으로(데스크톱 범위 채널 머리 `NewChannel`). */
+    fun newGroup() {
+        val g = pttGroups ?: return
+        if (g.locked) { session?.notify(com.cims.ue.dispatch.session.NoticeLevel.WARN,
+            "편집 중인 폼이 있습니다", "저장하거나 취소한 뒤 다시 시도하세요"); return }
+        g.newGroup()
+        _more.value = MoreItem.PTT_GROUPS
+        _screen.value = AppScreen.MORE
+    }
+
+    /**
+     * 그룹을 고칠 수 있는가 — 내 소유(GMS `is_owner`)이거나 서버가 관리 범위로 준 행(`canManage`). 관리 목록은
+     * [PTT 그룹] 화면을 열기 전이면 비어 있어 [ensureManaged] 가 받아 둔다.
+     */
+    fun canManageGroup(groupId: String, managed: List<com.cims.ue.dispatch.session.ManagedGroup>): Boolean {
+        if (groupId.isBlank()) return false
+        val g = session?.groups?.value?.firstOrNull { it.id == groupId }
+        return g?.isOwner == true || managed.any { it.id == groupId && it.canManage }
+    }
+
+    fun ensureManaged() { pttGroups?.ensureLoaded() }
+
+    /**
+     * [새 채널] 을 둘 것인가 — 그룹 생성 자격(`ptt.allowCreateGroup`)이나 관리 범위가 있고 PTT 회선이 섰을 때(데스크톱
+     * `CanCreateGroups` 와 같은 판정). 최종 판정은 서버(GMS)다 — 여기서는 누를 수 없는 버튼을 세우지 않을 뿐이다.
+     */
+    val canCreateGroups: Boolean get() = session?.let { s ->
+        (s.profile.value?.allowGroupCreation == true || s.dispatch.canAdminDirectory) && s.pttAccount != null
+    } == true
+
     /** 채널을 고르면 «메시지»·«이벤트» 면이 그 채널을 따라간다 — 데스크톱 ④⑤ 의 불변(§6.3). */
     fun focusPane(id: String) {
         messages?.onFocusChanged(id)
@@ -306,9 +366,6 @@ class MainViewModel : ViewModel() {
         val s = session ?: return
         viewModelScope.launch { s.refreshGroups() }
     }
-
-    /** 하드 키보드 Ctrl+n — n 번째 채널로 포커스. */
-    fun focusChannel(n: Int) { ptt?.focusIndex(n) }
 
     fun login(host: String, port: Int, id: String, pw: String, onDone: (String?) -> Unit) {
         val s = session ?: return onDone("세션이 아직 준비되지 않았습니다")

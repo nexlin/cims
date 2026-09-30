@@ -86,6 +86,13 @@ class MessageStore(context: Context) :
             arrayOf<Any>(state.ordinal, msgId))
     }
 
+    /** 재전송 — 같은 말풍선(행 id)이 새 msgId·token·상태를 받는다(데스크톱 `UpdateResend`). */
+    fun updateResend(id: String, msgId: String, token: Long, state: SendState) = runCatching {
+        writableDatabase.execSQL(
+            "UPDATE messages SET msg_id=?, token=?, state=? WHERE id=? AND outgoing=1",
+            arrayOf<Any>(msgId, token, state.ordinal, id))
+    }
+
     fun setStateByToken(token: Long, state: SendState) = runCatching {
         if (token <= 0) return@runCatching
         writableDatabase.execSQL(

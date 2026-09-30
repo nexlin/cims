@@ -28,7 +28,8 @@ fun DispatchSession.isExternalNumber(number: String): Boolean =
 internal fun isExternalNumber(book: DirectoryBook, number: String): Boolean {
     val n = DirectoryBook.normalize(userPart(number))
     if (n.isEmpty()) return true
-    if (book.entries.any { DirectoryBook.normalize(it.msisdn) == n }) return false
+    // 주소록에 있으면 그 줄이 답한다 — 서버 가입자는 사이트 안, CSV 의 external 줄은 외부망(데스크톱 `IsExternal`).
+    book.entries.firstOrNull { DirectoryBook.normalize(it.msisdn) == n }?.let { return it.external }
     // 내선(6자리 이하)은 사이트 안이다 — 주소록을 아직 못 받았을 때의 폴백.
     return userPart(number).length > 6
 }
@@ -46,9 +47,20 @@ suspend fun DispatchSession.sendSms(target: String, text: String): CimsResult<Lo
     if (isExternalNumber(peer)) return CimsResult.fail(-1, "외부망 번호 — 게이트웨이가 없습니다")
 
     val uri = if (target.contains(':')) target else "sip:$peer@${phoneDomain()}"
-    val r = a.sendRequest("MESSAGE", uri, "text/plain", text)
-    addOutgoingSms(peer, text, if (r.ok) r.value ?: 0L else 0L)
-    return r
+    val (r, early) = sendTracked({ it }) { a.sendRequest("MESSAGE", uri, "text/plain", text) }
+    addOutgoingSms(peer, text, r.value ?: 0L, failed = !r.ok, early = early)   // 곧바로 실패했으면 처음부터 실패 말풍선
+    return report(TextArea.SMS, r)
+}
+
+/** 실패한 문자 재전송 — **같은 말풍선**이 새 token 을 받는다(데스크톱 `SmsMessagesViewModel.ResendCore`). */
+suspend fun DispatchSession.resendSms(m: Message): CimsResult<Unit> {
+    if (m.kind != MessageKind.SMS) return CimsResult.ok(Unit)
+    val a = phoneAccount ?: return report(TextArea.SMS, CimsResult.fail(-1, "전화 계정 없음"))
+    if (!beginResend(m)) return CimsResult.ok(Unit)                 // 이미 다시 보내는 중이거나 실패가 아니다
+    val uri = "sip:${m.groupId}@${phoneDomain()}"
+    val (r, early) = sendTracked({ it }) { a.sendRequest("MESSAGE", uri, "text/plain", m.text) }
+    markResent(m, "", r.value ?: 0L, failed = !r.ok, early = early)
+    return report(TextArea.SMS, if (r.ok) CimsResult.ok(Unit) else CimsResult.fail(r.code, r.reason))
 }
 
 /** 수신 — `text/plain` 만 문자로 본다. 그 밖(SDS·XML 통지)은 제 경로가 따로 있다. */

@@ -7,6 +7,7 @@ package com.cims.ue.dispatch.ui.ptt
 import kotlinx.coroutines.flow.map
 import com.cims.ue.dispatch.ui.ScreenViewModel
 import com.cims.ue.dispatch.session.DispatchSession
+import com.cims.ue.dispatch.session.setRxLevel
 import com.cims.ue.dispatch.session.GroupInfo
 import com.cims.ue.dispatch.session.SessionItem
 import com.cims.ue.dispatch.session.SessionKind
@@ -37,6 +38,7 @@ data class ScopedCard(
     val hasSession: Boolean get() = group.hasSession
     val participants: Int get() = group.connectedCount
     val emergency: Boolean get() = listenSession?.isEmergency == true
+    val imminentPeril: Boolean get() = listenSession?.isImminentPeril == true
     val speaker: String get() = listenSession?.speaker.orEmpty()
 
     val stateText: String get() = when {
@@ -56,6 +58,10 @@ data class ScopedCard(
 
 class ScopedChannelsViewModel(private val s: DispatchSession) : ScreenViewModel() {
 
+    /** 호별 수신 음량 — 청취 중인 채널 머리의 음량 막대. */
+    val rxLevels: StateFlow<Map<Int, Float>> = s.rxLevels
+    fun setRxLevel(callId: Int, level: Float) { scope.launch { s.setRxLevel(callId, level) } }
+
     /** "동시 청취 2/4" — ② 머리. 상한에 닿았을 때 이유를 누르기 전에 보이는 자리다. */
     val listenText: StateFlow<String> =
         s.sessions.map { list ->
@@ -71,9 +77,14 @@ class ScopedChannelsViewModel(private val s: DispatchSession) : ScreenViewModel(
     private val _query = MutableStateFlow("")
     val query: StateFlow<String> = _query.asStateFlow()
 
-    /** 청취 범위 카드 — 긴급 › 진행 › 대기 순. 데스크톱과 같은 정렬이다. */
-    val cards: StateFlow<List<ScopedCard>> =
-        combine(s.groups, s.sessions, _filter, _query) { groups, sessions, filter, q ->
+    /**
+     * 범위 채널 **전부** — 필터·검색 전. [채널] 화면은 이것으로 찾는다.
+     *
+     * 목록의 필터·검색은 «무엇을 훑어볼까» 일 뿐이다. 그것으로 상세를 찾으면 검색어가 가린 채널을 배너·검색에서
+     * 열었을 때 살아 있는 채널이 «사라졌습니다» 로 보이고 청취 중지 조작도 없어진다.
+     */
+    val allCards: StateFlow<List<ScopedCard>> =
+        combine(s.groups, s.sessions) { groups, sessions ->
             groups.filter { !it.isMember }
                 .map { g ->
                     ScopedCard(
@@ -82,23 +93,30 @@ class ScopedChannelsViewModel(private val s: DispatchSession) : ScreenViewModel(
                             it.kind == SessionKind.PTT_LISTEN && it.info.groupId == g.id
                         })
                 }
+        }.stateIn(scope, SharingStarted.Eagerly, emptyList())
+
+    /** 청취 범위 목록 — 필터·검색을 건 [allCards]. 긴급(임박 포함) › 진행 › 대기 순. 데스크톱과 같은 정렬이다. */
+    val cards: StateFlow<List<ScopedCard>> =
+        combine(allCards, _filter, _query) { all, filter, q ->
+            all
                 .filter { c ->
                     (q.isBlank() || c.title.contains(q, ignoreCase = true) || c.id.contains(q, ignoreCase = true)) &&
                         when (filter) {
                             ScopeFilter.ALL -> true
                             ScopeFilter.ACTIVE -> c.hasSession
-                            ScopeFilter.EMERGENCY -> c.emergency
+                            // 임박도 긴급 축이다 — 데스크톱 필터 `emergency` 와 같다.
+                            ScopeFilter.EMERGENCY -> c.emergency || c.imminentPeril
                             ScopeFilter.LISTENING -> c.listening
                         }
                 }
-                .sortedWith(compareByDescending<ScopedCard> { it.emergency }
+                .sortedWith(compareByDescending<ScopedCard> { it.emergency || it.imminentPeril }
                     .thenByDescending { it.hasSession }
                     .thenBy { it.title })
         }.stateIn(scope, SharingStarted.Eagerly, emptyList())
 
     /** 동시 청취 수 — 화면 머리의 "청취 n". */
     val listeningCount: StateFlow<Int> =
-        cards.let { f -> combine(f, f) { a, _ -> a.count { it.listening } } }
+        allCards.let { f -> combine(f, f) { a, _ -> a.count { it.listening } } }
             .stateIn(scope, SharingStarted.Eagerly, 0)
 
     fun setFilter(f: ScopeFilter) { _filter.value = f }

@@ -8,6 +8,7 @@ import com.cims.ue.dispatch.ui.ScreenViewModel
 import com.cims.ue.dispatch.session.DispatchSession
 import com.cims.ue.dispatch.session.Message
 import com.cims.ue.dispatch.session.sendSdsTo
+import com.cims.ue.dispatch.session.resendSds
 import com.cims.ue.dispatch.ui.RecipientOption
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -41,7 +42,9 @@ internal fun threadChips(
 
 class PttMessagesViewModel(private val s: DispatchSession) : ScreenViewModel() {
 
-    private val _follow = MutableStateFlow(true)
+    // 저장된 값에서 시작한다(데스크톱 `FollowChannelThread`, 기본 켬). 스레드를 직접 열 때 잠시 끄는 것([openThread])은
+    //   저장하지 않는다 — 사람이 [따라가기] 를 누른 것만 남긴다(데스크톱 `ToggleFollow` 와 같다).
+    private val _follow = MutableStateFlow(s.settingsSnapshot().followChannelThread)
     /** 포커스 채널 따라가기. 끄면 [pinnedGroupId] 에 고정된다. */
     val follow: StateFlow<Boolean> = _follow.asStateFlow()
 
@@ -101,6 +104,8 @@ class PttMessagesViewModel(private val s: DispatchSession) : ScreenViewModel() {
     fun toggleFollow() {
         _follow.value = !_follow.value
         if (!_follow.value) _pinned.value = groupId.value
+        val v = _follow.value
+        s.updateSettings { it.copy(followChannelThread = v) }
     }
 
     /** 칩을 눌러 그 스레드로 — 따라가기를 끄고 고정한다(`openThread` 와 같다). */
@@ -138,6 +143,9 @@ class PttMessagesViewModel(private val s: DispatchSession) : ScreenViewModel() {
      * request-type 이 `group-sds` 인 채로 나가 서버가 그룹 게이트를 거치고 받는 쪽 스레드 귀속도
      * 틀어졌다(mcdata_messaging.md §4).
      */
+    /** 실패한 말풍선 다시 보내기 — 같은 말풍선이 갱신된다(`resendSds`). */
+    fun resend(m: Message) { scope.launch { s.resendSds(m) } }
+
     fun send(text: String) {
         val g = groupId.value ?: return
         if (text.isBlank()) return

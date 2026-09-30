@@ -90,12 +90,12 @@ private fun TalkingBar() = TalkBarContent(
 private fun IdleBar() = TalkBarContent(targets = emptyList(), anyJoined = true)
 
 private val MINE = listOf(
-    ChannelRowUi("g1", "1. 순찰1", "발언 김관제 00:14", "12:31", 7, 3,
+    ChannelRowUi("g1", "순찰1", "발언 김관제 00:14", "12:31", 7, 3,
         active = true, speaking = true, canTarget = true, targeted = true),
-    ChannelRowUi("g2", "2. 상황실", "발언 없음", "05:02", 3, active = true, canTarget = true),
-    ChannelRowUi("g3", "3. 교통1", "멤버 12", "대기"),
-    ChannelRowUi("p1", "4. 김반장", "발언 없음", "02:14", active = true, canTarget = true),
-    ChannelRowUi("a1", "5. 애드혹 3인", "발언 없음", "00:48", 3, active = true, canTarget = true),
+    ChannelRowUi("g2", "상황실", "발언 없음", "05:02", 3, active = true, canTarget = true),
+    ChannelRowUi("g3", "교통1", "멤버 12", "대기"),
+    ChannelRowUi("p1", "김반장", "발언 없음", "02:14", active = true, canTarget = true),
+    ChannelRowUi("a1", "애드혹 3인", "발언 없음", "00:48", 3, active = true, canTarget = true),
 )
 
 private val SCOPED = listOf(

@@ -27,11 +27,13 @@ import com.cims.ue.dispatch.session.floorRelease
 import com.cims.ue.dispatch.session.floorRequest
 import com.cims.ue.dispatch.session.joinGroup
 import com.cims.ue.dispatch.session.leave
+import com.cims.ue.dispatch.session.toggleMuted
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -53,8 +55,6 @@ data class ChannelCard(
     val session: SessionItem? = null,
     /** 미읽음 SDS — 1줄 ✉ 배지. */
     val unread: Int = 0,
-    /** 핀 번호(Ctrl+n). 카드가 빠지면 다시 매겨진다. */
-    val index: Int = 0,
 ) {
     val badge: String get() = when (kind) {
         CardKind.MEMBER -> "멤버"; CardKind.PRIVATE -> "개별"; CardKind.ADHOC -> "애드혹"
@@ -75,7 +75,7 @@ data class ChannelCard(
 
     /**
      * 발언 대상이 될 수 있는가 — **참여 중 + 반이중 + 발언 요청 가능**.
-     * 전이중 개별 통화는 마이크가 늘 열려 있어 floor 가 없다(음소거로 다룬다). 남이 연 일제 통화의 수신 멤버는
+     * 전이중 개별 통화는 마이크가 늘 열려 있어 floor 가 없다(음소거로 다룬다 — [canMute]). 남이 연 일제 통화의 수신 멤버는
      * Floor Taken 의 Permission 0 이라 요청할 수 없다(TS 24.380 §6.3.4.4.2 3d).
      */
     val canCheck: Boolean get() = joined && session?.isFullDuplex != true && session?.canRequestFloor != false
@@ -90,6 +90,15 @@ data class ChannelCard(
      */
     val canBroadcast: Boolean get() =
         kind == CardKind.MEMBER && !joined && group?.hasSession != true && group?.sessionType != "chat"
+
+    /**
+     * 음소거를 다는가 — **참여 중 + 전이중**. [canCheck] 와 정확히 갈린다: 반이중은 floor 가 마이크를 열고
+     * 닫으므로 음소거가 없고, 전이중은 floor 가 없어 음소거가 송출을 멈추는 유일한 수단이다.
+     */
+    val canMute: Boolean get() = joined && session?.isFullDuplex == true
+
+    /** 음소거 상태 — 코어 스냅샷(`CallInfo.muted`)이 권위다. 앱은 «눌렀으니 켜졌겠지» 로 추측하지 않는다. */
+    val muted: Boolean get() = session?.info?.muted == true
 
     /** 1줄 오른쪽 — 진행 중이면 경과, 아니면 상태. */
     val stateText: String get() = when {
@@ -163,7 +172,7 @@ class PttChannelsViewModel(private val s: DispatchSession) : ScreenViewModel() {
     /**
      * **지금 floor 를 요청해 둔 호**. 발언 대상([_targetIds])과 따로 든다.
      *
-     * 해제를 «현재 대상» 으로 하면, 누른 채 대상이 바뀌었을 때(Ctrl+n·자동 승격·세션 종료) 원래 요청한
+     * 해제를 «현재 대상» 으로 하면, 누른 채 대상이 바뀌었을 때(자동 승격·세션 종료) 원래 요청한
      * 호에 `floorRelease` 가 가지 않아 **마이크가 열린 채 남는다**. 실제 마이크 차단은 코어의 floor
      * participant 가 release 로 수행하므로 앱이 놓치면 송출이 계속된다 — «요청한 것만 해제한다» 를 불변으로 둔다.
      */
@@ -206,12 +215,12 @@ class PttChannelsViewModel(private val s: DispatchSession) : ScreenViewModel() {
                 .sortedBy { it.startedAtMs }
                 .map { se ->
                     ChannelCard(
-                        id = se.info.groupId.ifEmpty { "call-${se.callId}" },
+                        id = se.channelId,
                         kind = if (se.kind == SessionKind.PTT_PRIVATE) CardKind.PRIVATE else CardKind.ADHOC,
                         title = se.title.ifEmpty { se.info.groupId },
                         session = se)
                 }
-            (memberCards + adhocCards).mapIndexed { i, c -> c.copy(index = i + 1) }
+            memberCards + adhocCards
         }.onEach { list ->
             // 참여가 성립하면(세션이 붙어 canCheck) 대기 중이던 채널을 발언 대상으로 올린다.
             pendingTargetId?.let { id ->
@@ -245,6 +254,17 @@ class PttChannelsViewModel(private val s: DispatchSession) : ScreenViewModel() {
         combine(cards, _selectedId) { list, id -> list.firstOrNull { it.id == id } }
             .stateIn(scope, SharingStarted.Eagerly, null)
 
+    init {
+        // 측면 하드키(§7) — 발언 바를 누른 것과 같다(잠금 발언 설정도 같이 따른다). 처음 값은 지금 상태라 건너뛴다 —
+        //   화면이 다시 설 때 눌림으로 읽으면 누르지 않은 발언이 나간다.
+        scope.launch {
+            s.hwPtt.pressed.drop(1).collect { down ->
+                val lock = s.settingsSnapshot().lockTalk
+                if (down) pttDown(lock) else pttUp(lock)
+            }
+        }
+    }
+
     // ── 포커스 조작 ──
     /** 카드 탭 — 같은 카드를 다시 누르면 접힌다. **발언 대상은 건드리지 않는다.** */
     fun focus(id: String) {
@@ -262,14 +282,6 @@ class PttChannelsViewModel(private val s: DispatchSession) : ScreenViewModel() {
         if (id.isBlank()) return
         _selectedId.value = id
         s.markRead(id)
-    }
-
-    /** Ctrl+n — n 번째 카드로 포커스 + 단일 발언 대상(데스크톱과 같다). */
-    fun focusIndex(n: Int) {
-        val c = cards.value.firstOrNull { it.index == n } ?: return
-        _selectedId.value = c.id
-        s.markRead(c.id)
-        if (c.canCheck) setSingleTarget(c.id)
     }
 
     // ── 발언 대상 조작 ──
@@ -524,6 +536,19 @@ class PttChannelsViewModel(private val s: DispatchSession) : ScreenViewModel() {
     fun leave(card: ChannelCard) {
         pendingTargetId = null
         card.session?.let { se -> scope.launch { s.leave(se.callId) } }
+    }
+
+    /**
+     * 전이중 개별 통화 음소거 토글 — 데스크톱 카드 [음소거](`ToggleMute`)와 같다.
+     *
+     * 카드는 **자격만** 본다(반이중은 floor 가 마이크를 다루므로 무시한다). 뒤집을 값은 카드 사본이 아니라
+     * 명령 직전의 코어 스냅샷에서 읽는다 — ③ 통화 카드와 같은 경로(`toggleMuted`)라 연타가 합쳐지지 않는다.
+     */
+    fun toggleMute(id: String) {
+        val card = cards.value.firstOrNull { it.id == id } ?: return
+        if (!card.canMute) return
+        val callId = card.session?.callId ?: return
+        scope.launch { s.toggleMuted(callId) }
     }
 
     companion object {
