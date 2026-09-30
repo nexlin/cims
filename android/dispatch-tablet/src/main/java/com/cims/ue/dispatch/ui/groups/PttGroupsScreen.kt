@@ -128,7 +128,7 @@ private fun GroupList(ui: GroupsUi, act: GroupsActions, modifier: Modifier = Mod
             Spacer(Modifier.weight(1f))
             TextButton(onClick = { act.reload() }, enabled = !locked,
                 contentPadding = PaddingValues(horizontal = 8.dp)) { Text("↻") }
-            // 새 그룹은 여기서 만들지 않는다 — [관제] › [무전] › [사용자] 에서 사람을 골라 [그룹으로 저장](§6.12).
+            // 새 그룹은 여기서 만들지 않는다 — [관제] › [무전] «채널» 의 [채널 추가하기] 에서 사람을 골라 [그룹 추가](§6.12).
         }
         Row(Modifier.padding(horizontal = 10.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             GroupFilter.entries.forEach { f ->

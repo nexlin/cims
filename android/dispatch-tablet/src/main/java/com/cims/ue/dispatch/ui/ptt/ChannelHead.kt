@@ -111,7 +111,14 @@ internal fun channelHead(
  * 진행 중 통화가 있으면 비활성(진행 중 호는 일제 통화로 바꿀 수 없다 — TS 24.379 §10.1.1.3.1.1 15)).
  */
 @Composable
-internal fun BroadcastHoldButton(enabled: Boolean, held: Boolean, onDown: () -> Unit, onUp: () -> Unit) {
+internal fun BroadcastHoldButton(
+    enabled: Boolean,
+    held: Boolean,
+    onDown: () -> Unit,
+    onUp: () -> Unit,
+    modifier: Modifier = Modifier,
+    height: androidx.compose.ui.unit.Dp = 36.dp,
+) {
     val p = com.cims.ue.dispatch.ui.Tokens.palette
     // 제스처(pointerInput)는 한 번 걸리므로 재구성 뒤의 최신 콜백을 읽는다 — 옛 카드로 개시하지 않게.
     val down by rememberUpdatedState(onDown)
@@ -119,9 +126,9 @@ internal fun BroadcastHoldButton(enabled: Boolean, held: Boolean, onDown: () -> 
     Surface(
         color = when { !enabled -> p.bar; held -> p.ink; else -> p.paper },
         contentColor = when { !enabled -> p.faint; held -> p.onInk; else -> p.ink },
-        shape = RoundedCornerShape(18.dp),
+        shape = RoundedCornerShape(height / 2),
         border = if (held) null else BorderStroke(1.5.dp, if (enabled) p.ink else p.line),
-        modifier = Modifier.height(36.dp).then(
+        modifier = modifier.height(height).then(
             if (!enabled) Modifier
             else Modifier.pointerInput(Unit) {
                 detectTapGestures(onPress = {

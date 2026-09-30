@@ -88,7 +88,7 @@ class NavigationTest {
         val open = home.togglePanel(ch)
         assertEquals(ch, open.panel)
         assertNull(open.togglePanel(ch).panel)
-        assertEquals(SidePanel.Users, open.togglePanel(SidePanel.Users).panel)
+        assertEquals(SidePanel.AddChannel, open.togglePanel(SidePanel.AddChannel).panel)
     }
 
     @Test fun `패널이 닫히면 고정도 풀린다`() {
@@ -127,8 +127,8 @@ class NavigationTest {
     // ── 뒤로가기 ───────────────────────────────────────────────────────────
 
     @Test fun `패널 안의 한 겹부터 되돌린다`() {
-        var s = home.togglePanel(SidePanel.Users).showPanel(SidePanel.NewGroup)
-        s = s.onBack()!!; assertEquals(SidePanel.Users, s.panel)
+        var s = home.togglePanel(SidePanel.AddChannel).showPanel(SidePanel.NewGroup)
+        s = s.onBack()!!; assertEquals(SidePanel.AddChannel, s.panel)
         s = s.onBack()!!; assertNull(s.panel)
         assertNull(s.onBack())
     }
@@ -150,7 +150,7 @@ class NavigationTest {
             home.togglePanel(ch).togglePin().onNav(AppScreen.HISTORY),
             NavState(AppScreen.MORE, more = MoreItem.ADMIN, panel = ch, pinned = true),
             home.toPage(pageOf(CallPane.MESSAGES)).togglePanel(SidePanel.Event(3)).togglePin(),
-            home.togglePanel(SidePanel.Users).showPanel(SidePanel.NewGroup),
+            home.togglePanel(SidePanel.AddChannel).showPanel(SidePanel.NewGroup),
             NavState(AppScreen.HISTORY, callPane = CallPane.LOG, pttPane = PttPane.EVENTS))
         starts.forEach { start ->
             var s = start

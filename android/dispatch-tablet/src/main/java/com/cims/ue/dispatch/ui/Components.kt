@@ -45,8 +45,7 @@ fun CountPill(n: Int, modifier: Modifier = Modifier, inverted: Boolean = false) 
     val p = Tokens.palette
     Box(modifier.clip(RoundedCornerShape(8.dp)).background(if (inverted) p.onInk else p.ink)
             .padding(horizontal = 6.dp), contentAlignment = Alignment.Center) {
-        Text(if (n > 99) "99+" else "$n", fontSize = Type.micro, fontWeight = FontWeight.Bold,
-            color = if (inverted) p.ink else p.onInk)
+        Text(if (n > 99) "99+" else "$n", fontSize = Type.micro, color = if (inverted) p.ink else p.onInk)
     }
 }
 
@@ -167,14 +166,19 @@ fun FilterPill(text: String, selected: Boolean, onClick: () -> Unit, modifier: M
     }
 }
 
-/** 구역 머리 — 높이 48, 제목 15 굵게 + 뒤에 붙는 것들(개수·라벨·버튼). */
+/**
+ * 구역 머리 — 높이 48, 제목 15 굵게 + 뒤에 붙는 것들(개수·라벨·버튼).
+ *
+ * @param end 오른쪽 여백 — 끝에 아이콘 단추(40)가 서면 8(시안 «타 채널»), 글자로 끝나면 16(시안 «내 채널»).
+ */
 @Composable
 fun SectionHead(
     title: String,
     modifier: Modifier = Modifier,
+    end: Dp = 8.dp,
     trailing: @Composable RowScope.() -> Unit = {},
 ) {
-    Row(modifier.fillMaxWidth().height(48.dp).padding(start = 16.dp, end = 8.dp),
+    Row(modifier.fillMaxWidth().height(48.dp).padding(start = 16.dp, end = end),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(title, fontSize = Type.title, fontWeight = FontWeight.Bold, maxLines = 1)
         trailing()

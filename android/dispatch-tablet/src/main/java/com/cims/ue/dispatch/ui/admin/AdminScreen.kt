@@ -31,6 +31,7 @@ import com.cims.ue.dispatch.session.AdminView
 import com.cims.ue.dispatch.session.LineKind
 import com.cims.ue.dispatch.session.MemberInfo
 import com.cims.ue.dispatch.session.OrgNode
+import com.cims.ue.dispatch.session.flattenOrgs
 import com.cims.ue.dispatch.session.SIP_TRANSPORTS
 
 @Composable
@@ -172,7 +173,7 @@ private fun OrgTree(ui: AdminUi, act: AdminActions, modifier: Modifier) {
         }
         HorizontalDivider()
         LazyColumn(Modifier.weight(1f)) {
-            items(flatten(view.orgs), key = { it.first.code }) { (o, depth) ->
+            items(flattenOrgs(view.orgs), key = { it.first.code }) { (o, depth) ->
                 val on = sel == o.code
                 Row(Modifier.fillMaxWidth()
                         .background(if (on) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent)
@@ -198,21 +199,6 @@ private fun OrgTree(ui: AdminUi, act: AdminActions, modifier: Modifier) {
     }
 }
 
-/** 조직 트리를 깊이 순으로 평탄화 — 고리가 있으면 남은 것을 뿌리로 올려 잃지 않는다. */
-internal fun flatten(orgs: List<OrgNode>): List<Pair<OrgNode, Int>> {
-    val byParent = orgs.groupBy { it.parent }
-    val out = ArrayList<Pair<OrgNode, Int>>()
-    val seen = HashSet<String>()
-    fun walk(parent: String, depth: Int) {
-        byParent[parent].orEmpty().sortedWith(compareBy({ it.sort }, { it.name })).forEach {
-            if (seen.add(it.code)) { out.add(it to depth); walk(it.code, depth + 1) }
-        }
-    }
-    walk("", 0)
-    orgs.forEach { if (seen.add(it.code)) out.add(it to 0) }
-    return out
-}
-
 /**
  * 조직 고르기 목록 — 평탄화에서 **고를 수 없는 것을 뺀 것**(순수 함수, 시험 대상).
  *
@@ -221,7 +207,7 @@ internal fun flatten(orgs: List<OrgNode>): List<Pair<OrgNode, Int>> {
  *   그 자체가 결함이다). 구성원 «소속» 처럼 뺄 것이 없으면 null.
  */
 internal fun orgChoices(orgs: List<OrgNode>, excludeSubtreeOf: String? = null): List<Pair<OrgNode, Int>> {
-    val all = flatten(orgs)
+    val all = flattenOrgs(orgs)
     if (excludeSubtreeOf.isNullOrBlank()) return all
     val byParent = orgs.groupBy { it.parent }
     val banned = HashSet<String>()

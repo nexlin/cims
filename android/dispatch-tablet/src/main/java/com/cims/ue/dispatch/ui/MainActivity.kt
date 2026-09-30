@@ -34,14 +34,16 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.material.icons.automirrored.filled.Message
 import com.cims.ue.dispatch.ui.ptt.ChannelPanel
 import com.cims.ue.dispatch.ui.ptt.ChannelsPane
-import com.cims.ue.dispatch.ui.ptt.UsersPanel
+import com.cims.ue.dispatch.ui.ptt.AddChannelPanel
 import com.cims.ue.dispatch.ui.groups.NewGroupPanel
 import com.cims.ue.dispatch.ui.ptt.Messages
 import com.cims.ue.dispatch.ui.ptt.Activity
 import com.cims.ue.dispatch.ui.ptt.EventPanel
 import com.cims.ue.dispatch.ui.ptt.TalkBar
 import com.cims.ue.dispatch.ui.call.CallsScreen
-import com.cims.ue.dispatch.ui.call.ContactsPane
+import com.cims.ue.dispatch.ui.call.BookPanel
+import com.cims.ue.dispatch.ui.call.CallStatus
+import com.cims.ue.dispatch.ui.call.CallStatusWidth
 import com.cims.ue.dispatch.ui.call.SmsPane
 import com.cims.ue.dispatch.ui.admin.AdminScreen
 import com.cims.ue.dispatch.ui.groups.PttGroupsScreen
@@ -192,10 +194,10 @@ private fun Shell(vm: MainViewModel, onShutdown: () -> Unit) {
         },
         tabs = {
             DispatchTabs(nav.page, onMode = vm::setMode, onPage = vm::showPage, badges = badges) {
-                // [사용자] — 여럿 골라 애드혹을 열거나 그룹으로 저장한다(오른쪽 패널, §6.3a). 무전의 일이라 무전에만 선다.
-                if (nav.mode == DispatchMode.PTT) PillButton("사용자", { vm.togglePanel(SidePanel.Users) },
-                    strongBorder = true, filled = nav.panel == SidePanel.Users || nav.panel == SidePanel.NewGroup,
-                    leading = Icons.Filled.Groups)
+                // [주소록] — 어느 통화 면에서든 오른쪽에 펴서 곧바로 걸고 문자를 보낸다(§6.2b). 통화의 일이라 통화에만 선다.
+                //   무전의 사람 고르기는 «채널» 면의 [채널 추가하기] 가 받는다(탭 줄에 두지 않는다).
+                if (nav.mode == DispatchMode.CALL) PillButton("주소록", { vm.togglePanel(SidePanel.Book) },
+                    strongBorder = true, filled = nav.panel == SidePanel.Book, leading = Icons.Filled.Contacts)
             }
         },
     ) {
@@ -203,6 +205,17 @@ private fun Shell(vm: MainViewModel, onShutdown: () -> Unit) {
             AppScreen.DISPATCH -> DispatchBody(
                 page = nav.page, onPage = vm::showPage,
                 panel = nav.panel?.let { p -> { SidePanelFor(vm, p, nav.pinned) } },
+                // [통화] 의 왼쪽 고정 칸 — 통화 면 셋 위에 한 벌만(면을 옮겨도 제자리, §6.3).
+                fixed = vm.calls?.let { calls ->
+                    FixedColumn(DispatchMode.CALL, CallStatusWidth + 1.dp) {
+                        Row(Modifier.fillMaxSize()) {
+                            CallStatus(calls, onPerson = vm::runPersonAction,
+                                onFillDial = { n -> calls.setDialNumber(n); vm.setCallPane(CallPane.CALLS) },
+                                modifier = Modifier.weight(1f))
+                            VDivider()
+                        }
+                    }
+                },
             ) { page -> DispatchPane(vm, page, nav.panel) }
 
             AppScreen.HISTORY -> vm.history?.let { HistoryScreen(it, Modifier.fillMaxSize()) } ?: Waiting()
@@ -243,7 +256,8 @@ private fun DispatchPane(vm: MainViewModel, page: DispatchPage, panel: SidePanel
             PttPane.CHANNELS -> ChannelsPane(ptt, scoped,
                 selectedId = (panel as? SidePanel.Channel)?.id,
                 onOpen = vm::toggleChannel,
-                onMessage = { n -> vm.runPersonAction(PersonAction.SDS, n) })
+                addOpen = panel == SidePanel.AddChannel || panel == SidePanel.NewGroup,
+                onAdd = { vm.togglePanel(SidePanel.AddChannel) })
             PttPane.MESSAGES -> Messages(msg, onChannelInfo = vm::channelInfo)
             PttPane.EVENTS -> Activity(act,
                 selectedId = (panel as? SidePanel.Event)?.id,
@@ -255,13 +269,16 @@ private fun DispatchPane(vm: MainViewModel, page: DispatchPage, panel: SidePanel
     }
     val pane = page.callPane ?: return
     vm.calls?.let {
-        CallsScreen(it, pane = pane, onPane = vm::setCallPane,
-            onPerson = vm::runPersonAction,
-            bookPane = { ContactsPane(it, vm::runPersonAction) },
-            smsPane = { vm.sms?.let { m -> SmsPane(m) } ?: Waiting() },
-            showTabs = false,
-            onHistory = { vm.show(AppScreen.HISTORY) },
-            modifier = Modifier.fillMaxSize())
+        // 왼쪽은 고정 칸 자리로 비운다 — 칸은 셸이 면 위에 한 벌만 얹는다([FixedColumn]).
+        Row(Modifier.fillMaxSize()) {
+            Spacer(Modifier.width(CallStatusWidth + 1.dp))
+            CallsScreen(it, pane = pane, onPane = vm::setCallPane,
+                onPerson = vm::runPersonAction,
+                smsPane = { vm.sms?.let { m -> SmsPane(m) } ?: Waiting() },
+                showTabs = false,
+                onHistory = { vm.show(AppScreen.HISTORY) },
+                modifier = Modifier.weight(1f).fillMaxHeight())
+        }
     } ?: Waiting()
 }
 
@@ -283,7 +300,7 @@ private fun SidePanelFor(vm: MainViewModel, panel: SidePanel, pinned: Boolean) {
                 onMessages = vm::openThread, onEdit = vm::editGroup, onDelete = vm::deleteGroup,
                 onPerson = vm::runPersonAction)
         }
-        SidePanel.Users -> {
+        SidePanel.AddChannel -> {
             val groups by session.groups.collectAsStateWithLifecycle()
             val picked by vm.picked.collectAsStateWithLifecycle()
             // 상태 칸의 근거 — 로스터에 접속으로 잡힌 번호(정규형). 주소록엔 등록 여부가 없다.
@@ -292,12 +309,15 @@ private fun SidePanelFor(vm: MainViewModel, panel: SidePanel, pinned: Boolean) {
                     .map { com.cims.ue.dispatch.session.DirectoryBook.normalize(com.cims.ue.dispatch.session.userPart(it.uri)) }
                     .toSet()
             }
-            UsersPanel(
+            AddChannelPanel(
                 channels = ptt, present = present, picked = picked,
                 onToggle = vm::togglePick, onClear = vm::clearPicked,
                 canCreate = vm.canCreateGroups,
                 pinned = pinned, onPin = vm::togglePin, onClose = vm::closePanel,
-                onSaveGroup = vm::startNewGroup, onPerson = vm::runPersonAction)
+                onGroup = vm::startNewGroup, onPerson = vm::runPersonAction)
+        }
+        SidePanel.Book -> vm.calls?.let { c ->
+            BookPanel(c, pinned = pinned, onPin = vm::togglePin, onClose = vm::closePanel, onPerson = vm::runPersonAction)
         }
         SidePanel.NewGroup -> vm.pttGroups?.let { g ->
             NewGroupPanel(g, onBack = vm::panelBack, onClose = vm::closePanel,

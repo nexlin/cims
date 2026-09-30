@@ -1,6 +1,6 @@
-// 새 PTT 그룹 — 사용자 목록에서 한 겹 들어온 사이드 패널 (android_dispatch_tablet.md §6.12)
+// 새 PTT 그룹 — 채널 추가에서 한 겹 들어온 사이드 패널 (android_dispatch_tablet.md §6.12)
 //
-// [사용자] 에서 고른 사람이 멤버로 들어와 있다(나 = 의장). 그룹 문서(TS 24.481)를 GMS 에 PUT 한다 — 폼·저장은 [PTT 그룹] 화면과
+// [채널 추가] 에서 고른 사람이 멤버로 들어와 있다(나 = 의장). 그룹 문서(TS 24.481)를 GMS 에 PUT 한다 — 폼·저장은 [PTT 그룹] 화면과
 // **같은 VM**([PttGroupsViewModel])이다. 폼을 두 벌 두면 검증·기본값이 갈린다.
 //
 // **세션 종류는 둘뿐이다** — prearranged(편성)·chat(TS 24.481 `<on-network-invite-members>`). 일제 통화는 그룹 종류가 아니라
@@ -112,7 +112,7 @@ fun NewGroupPanelContent(
                     }
                 }
             }
-            FieldLabel("멤버 ${form.members.size} (나 포함) — 사용자 목록에서 고른 사람") {
+            FieldLabel("멤버 ${form.members.size} (나 포함) — 채널 추가에서 고른 사람") {
                 @OptIn(ExperimentalLayoutApi::class)
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     form.members.forEach { m ->

@@ -95,7 +95,7 @@ private fun Banner(
                     },
                     fontSize = Type.body, color = color, fontWeight = FontWeight.Bold)
                 Text(session.displayLabel(call.info.remoteUri),
-                    fontSize = Type.head, fontWeight = FontWeight.Bold)
+                    fontSize = Type.display, fontWeight = FontWeight.Bold)
             }
             @Suppress("UNUSED_EXPRESSION") tick     // 1초 틱을 이 조합에 묶는다
             Text(fmtElapsed(call.elapsedMs), fontSize = Type.title)

@@ -352,49 +352,8 @@ class DispatchSession(
     /** 오늘 데스크 — ③ 상단 칩. */
     val tally: StateFlow<DeskTally> = _tally.asStateFlow()
 
-    /** 지금 dialog 를 구독 중인 AoR 집합. */
-    /**
-     * dialog 를 구독 중인 AoR — 대표번호 + 관제 범위의 감시 대상(`dispatch.members[]`).
-     *
-     * **관측 가능해야 한다.** 이 집합이 비면 ⑥ 진행 중 행이 영원히 비는데, 화면에 아무 말이 없으면
-     * «앱이 고장났다» 와 «편성이 안 됐다» 를 구분할 수 없다.
-     */
-    private val _watched = MutableStateFlow<Set<String>>(emptySet())
-    val watchedAors: StateFlow<Set<String>> = _watched.asStateFlow()
-
-    /**
-     * dialog NOTIFY 를 **실제로 받은** AoR(번호부 기준).
-     *
-     * `dialogWatch` 는 SUBSCRIBE 를 **보낸 것**만 성공으로 돌려준다(코어 `Engine::dialogWatch` — 최종
-     * 응답은 `onRequestResult` 로 따로 온다). 그래서 «구독을 걸었다» 는 «구독이 성립했다» 가 아니다.
-     * RFC 6665 상 구독이 성립하면 즉시 NOTIFY 가 오므로, **NOTIFY 를 받은 수**가 성립한 구독 수다.
-     */
-    private val _notified = MutableStateFlow<Set<String>>(emptySet())
-    val notifiedAors: StateFlow<Set<String>> = _notified.asStateFlow()
-
-    /** 마지막 SUBSCRIBE 실패 — 조용히 삼키면 «구독했는데 아무것도 안 온다» 의 원인을 못 찾는다. */
-    private val _subscribeError = MutableStateFlow("")
-    val subscribeError: StateFlow<String> = _subscribeError.asStateFlow()
-
-    /**
-     * **dialog 를 실제로 실어 온** NOTIFY 를 받은 AoR.
-     *
-     * 구독 성립([notifiedAors])과 갈라 둔다. 구독은 섰는데 이쪽이 계속 비면 서버가 **초기 NOTIFY 만
-     * 보내고 상태 변화를 안 보내는** 것이다 — 인가 거절과 전혀 다른 문제라 섞으면 못 가린다.
-     */
-    private val _dialogSeen = MutableStateFlow<Set<String>>(emptySet())
-    val dialogSeenAors: StateFlow<Set<String>> = _dialogSeen.asStateFlow()
-
-    internal fun noteDialogNotify(watchedAor: String, carriedDialog: Boolean) {
-        val id = userPart(watchedAor)
-        if (id.isEmpty()) return
-        if (id !in _notified.value) _notified.value = _notified.value + id
-        if (carriedDialog && id !in _dialogSeen.value) _dialogSeen.value = _dialogSeen.value + id
-    }
-
-    private var watched: Set<String>
-        get() = _watched.value
-        set(v) { _watched.value = v }
+    /** dialog 를 구독 중인 AoR — 대표번호 + 관제 범위의 감시 대상(`dispatch.members[]`). */
+    private var watched: Set<String> = emptySet()
 
     /** 세션을 만든 관제 동작 — 종료 문구 선택에 쓴다. */
     private val operations = mutableMapOf<Int, Operation>()
@@ -859,12 +818,7 @@ class DispatchSession(
 
     // ── PhonePlane 이 쓰는 접근자 ────────────────────────────────────────────
     internal fun setDialogs(next: List<DialogRow>) { _dialogs.value = next }
-    internal fun setWatched(next: Set<String>) {
-        watched = next
-        _notified.value = emptySet()      // 다시 걸면 성립도 다시 센다
-        _dialogSeen.value = emptySet()
-        _subscribeError.value = ""
-    }
+    internal fun setWatched(next: Set<String>) { watched = next }
 
     /** 내 회선인가 — 내가 당사자면 데스크 집계에 넣고, 감시 대상이면 뺀다. */
     internal fun isMine(aor: String): Boolean {
@@ -1093,14 +1047,14 @@ class DispatchSession(
     /**
      * SIP 요청의 최종 응답.
      *
-     * 메시지 발신은 token 으로 상관하고, **SUBSCRIBE 실패는 드러낸다** — 조용히 삼키면 구독이
+     * 메시지 발신은 token 으로 상관하고, **SUBSCRIBE 실패는 로그로 남긴다** — 조용히 삼키면 구독이
      * 거절된 것과 통화가 없는 것을 구분할 수 없다(감시 대상 통화가 «안 보이는» 가장 흔한 원인).
      */
     internal fun applyRequestResult(r: com.cims.ue.sdk.RequestResult) {
         // SDS 전달 확인 회신 — 말풍선이 없는 발신이라 최종 거절은 로그로만 남는다(`applySds`).
         notificationTokens.remove(r.token)?.let { what -> logNotificationResult(what, r); return }
         if (r.method.equals("SUBSCRIBE", ignoreCase = true) && r.code !in 200..299) {
-            _subscribeError.value = "구독 실패 ${r.code}${if (r.reason.isNotBlank()) " ${r.reason}" else ""}"
+            android.util.Log.w("DispatchSession", "dialog 구독 실패 ${r.code} ${r.reason}")
             return
         }
         // 짝이 아직 token 을 모르면(발신 명령이 아직 안 돌아왔다) 들고 있는다 — 말풍선·회신이 설 때 꺼내 간다.
@@ -1305,9 +1259,6 @@ class DispatchSession(
         watched = emptySet()
         refreshFailures = 0
         _credentialWarning.value = null
-        _notified.value = emptySet()
-        _dialogSeen.value = emptySet()
-        _subscribeError.value = ""
         _registrations.value = emptyMap()
         operations.clear()
         consultOf.clear()

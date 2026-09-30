@@ -236,13 +236,4 @@ class AdhocIdTest {
         assertTrue(id.startsWith(com.cims.ue.dispatch.session.SessionKind.ADHOC_PREFIX))
         assertFalse(com.cims.ue.dispatch.session.isAdhocId("g001"))
     }
-
-    @Test fun `후보는 이미 고른 사람을 뺀다`() {
-        val book = com.cims.ue.dispatch.session.DirectoryBook(entries = listOf(
-            com.cims.ue.dispatch.session.DirectoryEntry("T", "김순경", "5001"),
-            com.cims.ue.dispatch.session.DirectoryEntry("T", "이순경", "5002")))
-        val picked = listOf(com.cims.ue.dispatch.session.DirectoryEntry("T", "김순경", "5001"))
-        assertEquals(listOf("5002"),
-            com.cims.ue.dispatch.ui.ptt.pttCandidates(book, "", picked).map { it.msisdn })
-    }
 }

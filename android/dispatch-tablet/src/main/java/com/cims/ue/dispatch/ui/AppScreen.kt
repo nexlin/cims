@@ -9,9 +9,12 @@
 // [무전|통화] 세그먼트와 하위 탭 한 줄로 나눈다. 탭을 두 줄로 쌓으면 세로(가로 전용 화면에서 가장 모자란 자원)를 한 줄
 // 더 쓰므로, 메뉴는 아래가 아니라 **왼쪽 세로 레일**(폭 80)에 둔다 — 그 80dp 가 본문 높이로 간다.
 //
-// **가로 스와이프는 관제의 면 일곱 장을 한 줄로 꿴다**([DISPATCH_PAGES]) — 무전(채널·메시지·이벤트) 다음에 통화(통화·
-// 주소록·메시지·통화내역). 끝 면에서 더 밀면 다른 모드로 넘어간다. 메뉴(레일)는 밀어서 바꾸지 않는다 — 세로 레일을
+// **가로 스와이프는 관제의 면 여섯 장을 한 줄로 꿴다**([DISPATCH_PAGES]) — 무전(채널·메시지·이벤트) 다음에 통화(통화·
+// 메시지·통화내역). 끝 면에서 더 밀면 다른 모드로 넘어간다. 메뉴(레일)는 밀어서 바꾸지 않는다 — 세로 레일을
 // 가로 손짓으로 넘기는 것은 예측할 수 없는 동작이다. 패널은 가장자리 스와이프로 열지 않는다(면 넘기기와 겹친다).
+//
+// [통화] 는 왼쪽에 **고정 칸**(대표번호 대기열·진행 중·내 통화·관제 그룹원)을 둔다 — 면이 아니다. 통화 면을 오가도 제자리에
+// 남아 지금 벌어지는 통화를 놓치지 않는다. 주소록도 면이 아니라 탭 줄 [주소록] 이 여는 오른쪽 패널이다.
 package com.cims.ue.dispatch.ui
 
 /** 왼쪽 레일의 메뉴. 순서가 곧 레일의 배열이다. 첫 화면은 [관제] — 관제사가 가장 오래 머무는 곳이다. */
@@ -24,8 +27,8 @@ enum class AppScreen(val label: String) {
 /**
  * [더보기] 안에서 여는 화면 — 레일 항목이 **아니라** 그 안의 이동이다(뒤로가기로 목록에 돌아온다).
  *
- * 그룹 **만들기**는 여기 없다 — [관제] › [무전] 의 [사용자] 패널에서 고른 사람으로 만든다(§6.12). 여기는 이미 있는
- * 그룹을 고치고 지우는 곳이다.
+ * 그룹 **만들기**는 여기 없다 — [관제] › [무전] «채널» 의 [채널 추가하기] 패널에서 고른 사람으로 만든다(§6.12). 여기는
+ * 이미 있는 그룹을 고치고 지우는 곳이다.
  */
 enum class MoreItem(val label: String, val hint: String) {
     PTT_GROUPS("PTT 그룹", "범위 안 그룹 보기·편집·삭제"),
@@ -44,11 +47,13 @@ enum class PttPane(val label: String) {
 }
 
 /**
- * [통화] 의 면. «감청» 자리는 없다 — 감청은 통화에 붙는 leg 이므로 **그 통화 행에서** 켜고 끈다. «진행 중» 은 «통화» 면에
- * 있고, «통화내역» 은 끝난 것만 담는다(날짜로 보는 과거 조회·녹취는 최상위 [이력] 이다).
+ * [통화] 의 면 — «통화»(다이얼패드)·«메시지»(문자)·«통화내역». 대표번호 대기열·진행 중·내 통화·관제 그룹원은 면이 아니라 모든
+ * 통화 면의 **왼쪽 고정 칸**이고, 주소록은 탭 줄 [주소록] 이 여는 오른쪽 패널이다([SidePanel.Book]). «감청» 자리는 없다 —
+ * 감청은 통화에 붙는 leg 이므로 고정 칸의 **그 통화 행에서** 켜고 끈다. «통화내역» 은 끝난 것만 담는다(날짜로 보는 과거
+ * 조회·녹취는 최상위 [이력] 이다).
  */
 enum class CallPane(val label: String) {
-    CALLS("통화"), BOOK("주소록"), MESSAGES("메시지"), LOG("통화내역"),
+    CALLS("통화"), MESSAGES("메시지"), LOG("통화내역"),
 }
 
 /**
@@ -62,7 +67,7 @@ data class DispatchPage(val mode: DispatchMode, val pane: Int = 0) {
     val index: Int get() = DISPATCH_PAGES.indexOf(this)
 }
 
-/** **닿는 차례** — 무전(채널·메시지·이벤트) · 통화(통화·주소록·메시지·통화내역). 순서는 두 enum 의 순서를 그대로 잇는다. */
+/** **닿는 차례** — 무전(채널·메시지·이벤트) · 통화(통화·메시지·통화내역). 순서는 두 enum 의 순서를 그대로 잇는다. */
 val DISPATCH_PAGES: List<DispatchPage> =
     PttPane.entries.map { DispatchPage(DispatchMode.PTT, it.ordinal) } +
         CallPane.entries.map { DispatchPage(DispatchMode.CALL, it.ordinal) }
@@ -77,15 +82,20 @@ fun pageOf(p: CallPane) = DispatchPage(DispatchMode.CALL, p.ordinal)
 sealed interface SidePanel {
     /** 채널 상세 — 채널 카드·타 채널 행·메시지 [채널 정보]·배너 [채널로 이동]·검색. id 는 채널 카드 id. */
     data class Channel(val id: String) : SidePanel
-    /** 사용자 목록 — 탭 줄 [사용자]. 여럿 골라 애드혹을 열거나 그룹으로 저장한다. */
-    data object Users : SidePanel
-    /** 새 PTT 그룹 — 사용자 목록에서 한 겹 들어온 것(← 가 사용자 목록으로 돌아간다). */
+    /**
+     * 채널 추가 — «채널» 면의 [채널 추가하기] 타일. 사람을 골라 **개별 통화**(1명)·**애드혹 통화**(여럿)를 걸거나 **그룹을
+     * 추가**한다(그룹 추가는 한 겹 들어간 [NewGroup]). 셋 다 내 채널에 카드 한 장을 더하는 일이라 한 자리에서 한다.
+     */
+    data object AddChannel : SidePanel
+    /** 새 PTT 그룹 — 채널 추가에서 한 겹 들어온 것(← 가 채널 추가로 돌아간다). */
     data object NewGroup : SidePanel
+    /** 주소록 — [통화] 탭 줄의 [주소록]. 어느 통화 면에서든 열어 바로 걸거나 문자를 보낸다. */
+    data object Book : SidePanel
     /** 이벤트 상세 — «이벤트» 면의 행. id 는 이벤트 행 id. */
     data class Event(val id: Long) : SidePanel
 
     /** 패널 안에서 한 겹 들어온 것이면 돌아갈 곳, 아니면 null. */
-    val parent: SidePanel? get() = if (this == NewGroup) Users else null
+    val parent: SidePanel? get() = if (this == NewGroup) AddChannel else null
 }
 
 // ── 이동 규칙 ────────────────────────────────────────────────────────────────

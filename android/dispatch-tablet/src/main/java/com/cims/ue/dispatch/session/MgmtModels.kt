@@ -36,6 +36,28 @@ data class ServiceRef(val kind: String, val name: String, val domain: String = "
 /** 조직 노드 — 코드/이름/상위/정렬. */
 data class OrgNode(val code: String, val name: String, val parent: String = "", val sort: Int = 0)
 
+/**
+ * 조직 트리를 **깊이 우선**으로 평탄화 — 부모 다음에 그 자식들, 형제는 `sort`·이름 순(순수 함수, 시험 대상). 관리 화면의 조직
+ * 트리와 주소록 거르기 칩이 같은 순서를 본다(§6.2b·§6.13).
+ *
+ * 부모가 목록에 없으면(범위로 잘린 트리 — 주소록은 내가 볼 수 있는 조직만 온다) 그 노드를 뿌리로 세운다. 상위 고리가 있으면 남은
+ * 것을 뿌리로 올려 잃지 않는다. 짝의 두 번째 값은 깊이(뿌리 = 0)다.
+ */
+fun flattenOrgs(orgs: List<OrgNode>): List<Pair<OrgNode, Int>> {
+    val codes = orgs.mapTo(HashSet()) { it.code }
+    val byParent = orgs.groupBy { if (it.parent in codes) it.parent else "" }
+    val out = ArrayList<Pair<OrgNode, Int>>()
+    val seen = HashSet<String>()
+    fun walk(parent: String, depth: Int) {
+        byParent[parent].orEmpty().sortedWith(compareBy({ it.sort }, { it.name })).forEach {
+            if (seen.add(it.code)) { out.add(it to depth); walk(it.code, depth + 1) }
+        }
+    }
+    walk("", 0)
+    orgs.forEach { if (seen.add(it.code)) out.add(it to 0) }
+    return out
+}
+
 /** 회선 한 개(종류당 첫 회선). `pickupGroup` 은 읽기 전용 — 콘솔 전화 그룹에서 서버가 파생한다. */
 data class NumberInfo(
     val msisdn: String = "",

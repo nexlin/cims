@@ -25,8 +25,6 @@ data class CallsUi(
     val transferTarget: String = "",
     val log: List<CallLogRow> = emptyList(),
     val live: List<LiveCallRow> = emptyList(),
-    val liveHint: String = "",
-    val watchDiag: List<CallDeskViewModel.WatchRow> = emptyList(),
     /**
      * 감청이 상대에게 **숨겨지는가** — 서버가 준 역할 속성(`listen_visibility`)이지 화면의 선택이 아니다
      * ([dispatch_center.md](../../../../../../../../../docs/design/features/dispatch_center.md) §5.6).

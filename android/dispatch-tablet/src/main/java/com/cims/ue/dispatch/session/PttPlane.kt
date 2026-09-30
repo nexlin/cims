@@ -497,7 +497,7 @@ suspend fun DispatchSession.startPrivateCall(peer: String, fullDuplex: Boolean =
     val target = userPart(peer).ifEmpty { return CimsResult.fail(-1, "대상을 고르세요") }
     val r = ptt.startPrivateCall(target, GroupCallOptions(fullDuplex = fullDuplex, emergency = emergency))
     if (r.ok) noteOperation(r.value!!.id, if (emergency) Operation.EMERGENCY else Operation.PTT_PRIVATE)
-    // 곧바로 실패하면 발신 시트가 그 자리에 적는다 — 토스트를 겹치지 않고 사유만 사전 문장으로 바꿔 준다.
+    // 곧바로 실패하면 [채널 추가] 패널이 그 자리에 적는다 — 토스트를 겹치지 않고 사유만 사전 문장으로 바꿔 준다.
     val area = if (emergency) TextArea.EMERGENCY else TextArea.PTT_PRIVATE
     return if (r.ok) CimsResult.ok(Unit) else CimsResult.fail(r.code, ResponseText.sip(area, r.code, r.reason))
 }
@@ -534,7 +534,7 @@ private suspend fun DispatchSession.joinAdhoc(members: List<String>, opts: Group
     if (tels.isEmpty()) return CimsResult.fail(-1, "대상을 고르세요")
     val id = adhocIdOf(myPttId)
     val r = ptt.joinGroupCall(id, opts.copy(members = tels))
-    // 곧바로 실패하면 발신 시트가 그 자리에 적는다(개별 통화와 같다).
+    // 곧바로 실패하면 [채널 추가] 패널이 그 자리에 적는다(개별 통화와 같다).
     if (!r.ok) return CimsResult.fail(r.code,
         ResponseText.sip(if (op == Operation.EMERGENCY) TextArea.EMERGENCY else TextArea.PTT_ADHOC, r.code, r.reason))
     val callId = r.value!!.id

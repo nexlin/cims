@@ -81,27 +81,35 @@ private val LOG = listOf(
 private val UI = CallsUi(
     dialNumber = "1002", members = MEMBERS, queue = QUEUE,
     tally = DeskTally(answered = 12, missed = 3, outgoing = 8, transfer = 2, monitor = 1),
-    calls = CALLS, log = LOG, liveHint = "감시 대상 5회선 · 구독 성립 5")
+    calls = CALLS, log = LOG)
 
-@Preview(name = "통화 — 1면 통화(키패드·진행 중)", device = PreviewBody, showBackground = true)
+@Preview(name = "통화 — 1면 통화(다이얼패드)", device = PreviewBody, showBackground = true)
 @Composable
 private fun PreviewCalls() = PreviewFrame { CallsScreenContent(ui = UI, pane = CallPane.CALLS) }
 
-@Preview(name = "통화 — 2면 주소록", device = PreviewBody, showBackground = true)
+/** 왼쪽 고정 칸 — 통화 면 셋 어디서나 같은 자리(§6.3). */
+@Preview(name = "통화 — 고정 칸(대기열·진행 중·내 통화·그룹원)", widthDp = 470, heightDp = 608, showBackground = true)
+@Composable
+private fun PreviewCallStatus() = PreviewFrame { CallStatusContent(ui = UI) }
+
+@Preview(name = "통화 — 주소록 패널", widthDp = 400, heightDp = 608, showBackground = true)
 @Composable
 private fun PreviewCallsBook() = PreviewFrame {
-    CallsScreenContent(ui = UI, pane = CallPane.BOOK,
-        bookPane = { })   // 주소록 본문은 VM 을 쓰므로 Preview 에서는 비운다
+    BookPanelContent(book = com.cims.ue.dispatch.session.DirectoryBook(entries = listOf(
+        com.cims.ue.dispatch.session.DirectoryEntry("OPS", "김관제", "1001"),
+        com.cims.ue.dispatch.session.DirectoryEntry("OPS", "이당직", "1002"),
+        com.cims.ue.dispatch.session.DirectoryEntry("FLD", "박현장", "1003"),
+        com.cims.ue.dispatch.session.DirectoryEntry("", "김민원", "01055551111", external = true))))
 }
 
-@Preview(name = "통화 — 3면 메시지(준비 중)", device = PreviewBody, showBackground = true)
+@Preview(name = "통화 — 2면 메시지", device = PreviewBody, showBackground = true)
 @Composable
 private fun PreviewCallsSms() = PreviewFrame {
     CallsScreenContent(ui = UI, pane = CallPane.MESSAGES,
         smsPane = { SmsPaneContent(threads = SMS_THREADS, thread = SMS_THREAD, peer = "1002", title = "이당직") })
 }
 
-@Preview(name = "통화 — 4면 통화내역", device = PreviewBody, showBackground = true)
+@Preview(name = "통화 — 3면 통화내역", device = PreviewBody, showBackground = true)
 @Composable
 private fun PreviewCallsLog() = PreviewFrame { CallsScreenContent(ui = UI, pane = CallPane.LOG) }
 

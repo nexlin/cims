@@ -333,50 +333,6 @@ class CallDeskViewModel(private val s: DispatchSession) : ScreenViewModel() {
         }.stateIn(scope, SharingStarted.Eagerly, emptyList())
 
     /**
-     * ⑥ 진행 중 행이 비었을 때 **왜 비었는지**. 화면이 조용히 비면 원인을 못 찾는다.
-     *
-     * 관제 편성은 서버가 정한다(`/provisioning/me` 의 `dispatch.members[]`) — 앱은 받은 목록만
-     * 구독한다. 그래서 «감시 대상 0» 은 앱 결함이 아니라 편성 문제다.
-     */
-    val liveHint: StateFlow<String> =
-        combine(s.watchedAors, s.notifiedAors, s.dialogSeenAors, s.subscribeError) { aors, notified, seen, err ->
-            val d = s.dispatch
-            val members = d.members.size
-            // 편성은 됐는데 **망 주소가 비어** 구독을 못 건 구성원 — 서버 프로비저닝 문제다.
-            val addressable = d.members.count { it.volteAor.isNotEmpty() }
-            when {
-                !d.present ->
-                    "관제 역할 미배정 — 다른 구성원의 통화를 볼 수 없습니다 (콘솔 «관리 > 역할»)"
-                members == 0 ->
-                    "감시 대상 없음 — 관제 그룹에 구성원이 편성되지 않았습니다 (콘솔 «구성 > 전화 그룹»)"
-                addressable == 0 ->
-                    "구성원 ${members}명이 편성됐지만 전화 주소가 비어 있어 감시할 수 없습니다 (서버 프로비저닝)"
-                // 보낸 SUBSCRIBE 수와 NOTIFY 를 받은 수가 다르면 서버가 구독을 거절한 것이다.
-                notified.size < aors.size ->
-                    "감시 대상 ${aors.size} · 구독 성립 ${notified.size} — " +
-                        "${aors.size - notified.size}건이 NOTIFY 를 못 받았습니다" +
-                        (if (err.isNotBlank()) " ($err)" else " (서버가 구독을 거절했을 수 있습니다)")
-                seen.isEmpty() ->
-                    "감시 대상 ${aors.size} 전부 구독 성립 — 다만 서버가 통화 변화 NOTIFY 를 " +
-                        "한 번도 보내지 않았습니다 (CSP dialog 이벤트)"
-                else ->
-                    "감시 대상 ${aors.size} 전부 구독 성립 · 통화 관측 ${seen.size} · 진행 중 통화 없음"
-            }
-        }.stateIn(scope, SharingStarted.Eagerly, "")
-
-    /** 감시 대상 한 줄 — 번호 · 이름 · 구독 성립 여부. 어느 번호가 안 잡히는지 눈으로 본다. */
-    data class WatchRow(val number: String, val name: String, val established: Boolean,
-                        val sawDialog: Boolean, val pilot: Boolean)
-
-    val watchDiag: StateFlow<List<WatchRow>> =
-        combine(s.watchedAors, s.notifiedAors, s.dialogSeenAors) { aors, notified, seen ->
-            aors.map { aor ->
-                val n = userPart(aor)
-                WatchRow(n, s.phoneBook.value.nameOf(n), n in notified, n in seen, s.isPilot(aor))
-            }.sortedWith(compareBy({ it.established }, { it.number }))   // 안 잡힌 것이 위로
-        }.stateIn(scope, SharingStarted.Eagerly, emptyList())
-
-    /**
      * 감청이 상대에게 숨겨지는가 — 서버가 준 역할 속성이다(`listen_visibility`, dispatch_center.md §5.6).
      * 화면이 정하지 않으므로 흐름이 아니라 값 하나로 든다.
      */

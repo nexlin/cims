@@ -10,7 +10,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
-import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -45,7 +44,7 @@ fun LoginScreen(vm: MainViewModel, onShutdown: () -> Unit = {}) {
                         contentAlignment = Alignment.Center) {
                         Text("CIMS", fontSize = Type.micro, fontWeight = FontWeight.Bold, color = p.onInk)
                     }
-                    Text("관제 로그인", fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                    Text("관제 로그인", fontSize = Type.display, fontWeight = FontWeight.Bold)
                 }
 
                 // 주소·계정은 **글자 그대로** 받는다 — 자동 수정이 계정 이름을 사전 낱말로 바꿔 넣으면 로그인이 엉뚱하게 실패한다.

@@ -111,12 +111,12 @@ class MainViewModel : ViewModel() {
     fun showPanel(p: SidePanel) = update { it.showPanel(p) }
     fun closePanel() = update { it.closePanel() }
     fun togglePin() = update { it.togglePin() }
-    /** 패널 안의 ← — 한 겹 들어온 것(새 그룹)에서 사용자 목록으로. */
+    /** 패널 안의 ← — 한 겹 들어온 것(새 그룹)에서 채널 추가로. */
     fun panelBack() = update { n -> n.panel?.parent?.let { n.copy(panel = it) } ?: n }
 
     /**
-     * [사용자] 패널에서 고른 사람(PTT 번호) — 애드혹 열기·그룹으로 저장이 쓴다. 패널을 닫아도 남는다: «그룹으로 저장» 한 겹을
-     * 들어갔다 나와도 고른 것이 그대로여야 한다. 쓰고 나면 비운다.
+     * [채널 추가] 패널에서 고른 사람(PTT 번호) — 개별 통화·애드혹 통화·그룹 추가가 쓴다. 패널을 닫아도 남는다: «그룹 추가» 한
+     * 겹을 들어갔다 나와도 고른 것이 그대로여야 한다. 쓰고 나면 비운다.
      */
     private val _picked = MutableStateFlow<List<String>>(emptyList())
     val picked: StateFlow<List<String>> = _picked.asStateFlow()
@@ -125,6 +125,12 @@ class MainViewModel : ViewModel() {
         _picked.value = if (number in cur) cur - number else cur + number
     }
     fun clearPicked() { _picked.value = emptyList() }
+    /** 고름에 **더한다**(토글하지 않는다) — 사람 메뉴 [애드혹에 추가] 가 이미 고른 사람을 빼 버리면 안 된다. */
+    fun addPick(number: String) {
+        if (number.isBlank()) return
+        val key = com.cims.ue.dispatch.session.DirectoryBook.normalize(number)
+        if (_picked.value.none { com.cims.ue.dispatch.session.DirectoryBook.normalize(it) == key }) _picked.value = _picked.value + number
+    }
 
     private val _busy = MutableStateFlow(false)
     val busy: StateFlow<Boolean> = _busy.asStateFlow()
@@ -210,7 +216,7 @@ class MainViewModel : ViewModel() {
      * 배너에서 전화를 받으면 관제 > 일반통화 로 돌아간다 — 보류·전달·DTMF·종료가 거기 있다.
      * 받자마자 [이력] 화면에 남아 있으면 끊을 방법이 없다.
      */
-    fun goToCalls() = showPage(pageOf(CallPane.CALLS))   // 카드가 선 면 — «주소록»·«통화내역» 에 남으면 방금 건·받은 호가 안 보인다
+    fun goToCalls() = update { it.toMode(DispatchMode.CALL) }   // 내 통화 카드는 [통화] 의 고정 칸이라 어느 통화 면이든 보인다
 
     /**
      * 사람 메뉴가 고른 행동을 잇는다 — 데스크톱 `MainViewModel` 이 `PersonActionsViewModel` 의 이벤트를 잇는
@@ -235,9 +241,10 @@ class MainViewModel : ViewModel() {
                 showPage(pageOf(PttPane.CHANNELS))
             }
             PersonAction.ADHOC_ADD -> {
-                // 시트는 [무전] 화면이 소유하는 상태라 여기서 직접 못 연다 — 씨앗만 심고 화면을 옮긴다.
-                ptt?.seedAdhoc(number)
-                showPage(pageOf(PttPane.CHANNELS))
+                // 고름은 이 VM 이 든다 — 그 사람을 더하고 «채널» 면에 [채널 추가] 패널을 세운다(한 번에 — 면을 옮기며 닫힌
+                //   패널이 한 프레임 비치지 않게).
+                addPick(number)
+                update { it.toPage(pageOf(PttPane.CHANNELS)).showPanel(SidePanel.AddChannel) }
             }
             PersonAction.SDS -> {
                 messages?.openThread(number)
@@ -287,7 +294,7 @@ class MainViewModel : ViewModel() {
     }
 
     /**
-     * [사용자] › [그룹으로 저장 ›] — 고른 사람으로 새 그룹 폼을 채워 패널 안 한 겹으로 연다(§6.12). 그룹 만들기는 [더보기] 가
+     * [채널 추가] › [그룹 추가 ›] — 고른 사람으로 새 그룹 폼을 채워 패널 안 한 겹으로 연다(§6.12). 그룹 만들기는 [더보기] 가
      * 아니라 여기다 — 사람을 고르는 자리에서 곧바로 묶는다. 고치던 폼이 있으면 덮지 않는다.
      */
     fun startNewGroup() {

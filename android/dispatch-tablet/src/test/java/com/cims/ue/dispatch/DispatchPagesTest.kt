@@ -1,6 +1,6 @@
-// 관제의 면 일곱 장 — 한 줄의 차례 (android_dispatch_tablet.md §6.3)
+// 관제의 면 여섯 장 — 한 줄의 차례 (android_dispatch_tablet.md §6.3)
 //
-// 면은 [무전] 셋(채널·메시지·이벤트) 다음에 [통화] 넷(통화·주소록·메시지·통화내역)을 한 줄로 꿴다(`DISPATCH_PAGES`). 좌우로 밀면
+// 면은 [무전] 셋(채널·메시지·이벤트) 다음에 [통화] 셋(통화·메시지·통화내역)을 한 줄로 꿴다(`DISPATCH_PAGES`). 좌우로 밀면
 // 옆 장이 오고, 무전의 끝 면에서 더 밀면 통화의 첫 면이다 — 그 이음매와 모드 전환을 VM 규칙(`toPage`)으로 걸어 본다.
 package com.cims.ue.dispatch
 
@@ -17,9 +17,9 @@ import org.junit.Test
 
 class DispatchPagesTest {
 
-    @Test fun `일곱 장이 한 줄이다 — 무전 셋 다음 통화 넷`() {
-        assertEquals(7, DISPATCH_PAGES.size)
-        assertEquals(List(3) { DispatchMode.PTT } + List(4) { DispatchMode.CALL }, DISPATCH_PAGES.map { it.mode })
+    @Test fun `여섯 장이 한 줄이다 — 무전 셋 다음 통화 셋`() {
+        assertEquals(6, DISPATCH_PAGES.size)
+        assertEquals(List(3) { DispatchMode.PTT } + List(3) { DispatchMode.CALL }, DISPATCH_PAGES.map { it.mode })
     }
 
     /** 모드 안의 면 순서는 탭 순서와 같다 — 두 곳에 적으면 한쪽만 고치게 된다. */
@@ -45,7 +45,7 @@ class DispatchPagesTest {
         assertEquals(DispatchPage(DispatchMode.PTT, PttPane.EVENTS.ordinal), back.page)
     }
 
-    /** 끝까지 밀어 가면 일곱 장을 차례대로 지난다. */
+    /** 끝까지 밀어 가면 여섯 장을 차례대로 지난다. */
     @Test fun `계속 밀면 차례대로 지난다`() {
         var s = NavState()
         val walked = mutableListOf(s.page)

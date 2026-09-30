@@ -13,6 +13,9 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.width
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.unit.dp
@@ -45,6 +48,9 @@ import com.cims.ue.dispatch.session.DialogRow
 import com.cims.ue.dispatch.ui.call.LiveCallRow
 import com.cims.ue.sdk.DialogInfo
 import com.cims.ue.dispatch.session.HistoryKind
+import com.cims.ue.dispatch.ui.call.BookPanelContent
+import com.cims.ue.dispatch.ui.call.CallStatusContent
+import com.cims.ue.dispatch.ui.call.CallStatusWidth
 import com.cims.ue.dispatch.ui.call.CallsScreenContent
 import com.cims.ue.dispatch.session.MessageKind
 import com.cims.ue.dispatch.session.SendState
@@ -60,7 +66,7 @@ import com.cims.ue.dispatch.ui.ptt.MineCardUi
 import com.cims.ue.dispatch.ui.ptt.CardControl
 import com.cims.ue.dispatch.ui.ptt.PersonRowUi
 import com.cims.ue.dispatch.ui.ptt.UserRowUi
-import com.cims.ue.dispatch.ui.ptt.UsersPanelContent
+import com.cims.ue.dispatch.ui.ptt.AddChannelPanelContent
 import com.cims.ue.dispatch.ui.groups.NewGroupPanelContent
 import com.cims.ue.dispatch.ui.groups.EditForm
 import com.cims.ue.dispatch.ui.groups.MemberRow
@@ -71,7 +77,7 @@ import com.cims.ue.dispatch.ui.ptt.CardKind
 import com.cims.ue.dispatch.ui.ptt.ChannelCard
 import com.cims.ue.sdk.FloorState
 import androidx.compose.ui.Modifier
-import androidx.compose.material.icons.filled.Groups
+import androidx.compose.material.icons.filled.Contacts
 
 private val TOP = TopBarUi(
     displayName = "김관제",
@@ -107,6 +113,7 @@ private val SCOPED = listOf(
 
 /**
  * 미리보기 한 장 — 껍데기 + 본문. [관제] 면이면 [page] 가 탭 줄의 강조와 pager 의 자리를, [panel] 이 오른쪽 사이드 패널을 정한다.
+ * [통화] 면이면 왼쪽 고정 칸([CallStatusContent])을 셸이 얹는다 — 앱과 같은 방식(면은 그 폭을 비운다).
  */
 @Composable
 private fun Screen(
@@ -120,11 +127,20 @@ private fun Screen(
     AppShellContent(screen = screen, top = TOP, badges = BADGES, talkBar = bar,
         tabs = {
             DispatchTabs(page, onMode = {}, onPage = {}, badges = BADGES) {
-                if (page.mode == DispatchMode.PTT) PillButton("사용자", {}, strongBorder = true,
-                    leading = androidx.compose.material.icons.Icons.Filled.Groups)
+                if (page.mode == DispatchMode.CALL) PillButton("주소록", {}, strongBorder = true,
+                    leading = androidx.compose.material.icons.Icons.Filled.Contacts)
             }
         }) {
-        if (screen == AppScreen.DISPATCH) DispatchBody(page, onPage = {}, panel = panel) { p -> if (p == page) body() }
+        val fixed = FixedColumn(DispatchMode.CALL, CallStatusWidth + 1.dp) {
+            Row(Modifier.fillMaxSize()) { CallStatusContent(ui = CUI, modifier = Modifier.weight(1f)); VDivider() }
+        }
+        if (screen == AppScreen.DISPATCH) DispatchBody(page, onPage = {}, panel = panel, fixed = fixed) { p ->
+            if (p == page) {
+                if (p.mode == DispatchMode.CALL) Row(Modifier.fillMaxSize()) {
+                    Spacer(Modifier.width(CallStatusWidth + 1.dp)); Box(Modifier.weight(1f)) { body() }
+                } else body()
+            }
+        }
         else body()
     }
 }
@@ -245,7 +261,7 @@ private val CUI = CallsUi(
             answeredAtMs = if (i % 3 == 0) null else T0 - i * 600_000L - 40_000,
             viaPilot = i % 4 == 0)
     },
-    liveHint = "감시 대상 5회선 · 구독 성립 5")
+    )
 
 // ── PTT 그룹 · 관리 ──
 private val GROUPS = listOf(
@@ -284,14 +300,14 @@ private val AVIEW = AdminView(
 //   기기에서 실제로 볼 수 있는 화면을 **빠짐없이** 같은 크기로 늘어놓는다(시안 «관제 메뉴 재구성» E1~E6 과 같은 차례).
 
 private val MINE_CARDS = listOf(
-    MineCardUi("g1", "순찰1", sub = "발언 김관제 00:14", roster = "김관제 · 이당직 · 박현장 +4", meta = "참가 7 · 12:31",
+    MineCardUi("g1", "1. 순찰1", "순찰1", sub = "발언 김관제 00:14", roster = "김관제 · 이당직 · 박현장 +4", meta = "참가 7 · 12:31",
         speaking = true, active = true, control = CardControl.TARGET, on = true),
-    MineCardUi("g2", "상황실", sub = "발언 없음", roster = "이당직 · 서상황", meta = "참가 3 · 05:02", unread = 3,
+    MineCardUi("g2", "2. 상황실", "상황실", sub = "발언 없음", roster = "이당직 · 서상황", meta = "참가 3 · 05:02", unread = 3,
         active = true, control = CardControl.TARGET),
-    MineCardUi("g3", "교통1", sub = "멤버 12", roster = "미참여", control = CardControl.JOIN),
-    MineCardUi("p1", "김반장", kind = "개별", sub = "발언 없음", roster = "김반장", meta = "02:14", active = true,
+    MineCardUi("g3", "3. 교통1", "교통1", sub = "대기 · 멤버 12", roster = "미참여", control = CardControl.JOIN),
+    MineCardUi("p1", "4. 개별 · 김반장", "김반장", sub = "발언 없음", roster = "김반장", meta = "02:14", active = true,
         control = CardControl.TARGET),
-    MineCardUi("a1", "애드혹 3인", kind = "애드혹", sub = "발언 없음", roster = "박현장 · 최순찰", meta = "참가 3 · 00:48",
+    MineCardUi("a1", "5. 애드혹 3인", "애드혹 3인", sub = "발언 없음", roster = "박현장 · 최순찰", meta = "참가 3 · 00:48",
         active = true, control = CardControl.TARGET),
 )
 
@@ -337,12 +353,12 @@ private fun DeviceChannelPanel() = Screen(panel = {
         other = SCOPED, selectedId = "g1", listenText = "동시 청취 1/4")
 }
 
-@Preview(name = "1 관제 — 사용자 패널", device = PreviewFull, showBackground = true)
+@Preview(name = "1 관제 — 채널 추가 패널", device = PreviewFull, showBackground = true)
 @Composable
-private fun DeviceUsersPanel() = Screen(panel = {
-    UsersPanelContent(rows = USERS, picked = listOf("5002", "5003", "5004"))
+private fun DeviceAddChannelPanel() = Screen(panel = {
+    AddChannelPanelContent(rows = USERS, picked = listOf("5002", "5003", "5004"))
 }) {
-    ChannelsPaneContent(mine = MINE_CARDS, other = SCOPED, listenText = "동시 청취 1/4")
+    ChannelsPaneContent(mine = MINE_CARDS, other = SCOPED, listenText = "동시 청취 1/4", addOpen = true)
 }
 
 @Preview(name = "1 관제 — 새 그룹 패널", device = PreviewFull, showBackground = true)
@@ -377,8 +393,8 @@ private fun DeviceEventPanel() = Screen(page = pageOf(PttPane.EVENTS), panel = {
 @Composable
 private fun DeviceAlerts() = Screen {
     ChannelsPaneContent(
-        mine = listOf(MINE_CARDS[0].copy(emergency = true, sub = "발언 박현장 00:03"),
-            MINE_CARDS[1].copy(peril = true)) + MINE_CARDS.drop(2),
+        mine = listOf(MINE_CARDS[0].copy(emergency = true, sub = "긴급 · 발언 박현장 00:03"),
+            MINE_CARDS[1].copy(peril = true, sub = "임박 · 발언 없음")) + MINE_CARDS.drop(2),
         other = SCOPED.mapIndexed { i, r -> if (i == 0) r.copy(emergency = true) else r },
         listenText = "동시 청취 1/4")
 }
@@ -393,12 +409,12 @@ private fun DeviceCalls() = Screen(page = pageOf(CallPane.CALLS), bar = { IdleBa
     CallsScreenContent(ui = CUI, pane = CallPane.CALLS, showTabs = false, modifier = Modifier.fillMaxSize())
 }
 
-@Preview(name = "1 관제 — 통화 › 주소록", device = PreviewFull, showBackground = true)
+/** 주소록 — 어느 통화 면에서든 오른쪽에 편다. 행 오른쪽 [발신]·[문자], 행 탭 = 사람 메뉴(§6.2b). */
+@Preview(name = "1 관제 — 통화 › 주소록 패널", device = PreviewFull, showBackground = true)
 @Composable
-private fun DeviceCallsBook() = Screen(page = pageOf(CallPane.BOOK), bar = { IdleBar() }) {
-    CallsScreenContent(ui = CUI, pane = CallPane.BOOK, showTabs = false,
-        bookPane = { Pane("주소록 — 조직 범위·검색·이름 목록 (행 탭 = 사람 메뉴, 오른쪽 📞 = 바로 발신)") },
-        modifier = Modifier.fillMaxSize())
+private fun DeviceCallsBook() = Screen(page = pageOf(CallPane.CALLS), bar = { IdleBar() },
+    panel = { BookPanelContent(book = CUI.book) }) {
+    CallsScreenContent(ui = CUI, pane = CallPane.CALLS, showTabs = false, modifier = Modifier.fillMaxSize())
 }
 
 /** 문자(SMS) — 왼쪽 상대 목록, 오른쪽 대화. 휴대폰 문자와 같은 구성(§6.2e). */

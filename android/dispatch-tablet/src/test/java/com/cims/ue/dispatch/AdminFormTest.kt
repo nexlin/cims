@@ -14,7 +14,7 @@ import com.cims.ue.dispatch.ui.admin.orgChoices
 import com.cims.ue.dispatch.ui.admin.LineAction
 import com.cims.ue.dispatch.ui.admin.LineForm
 import com.cims.ue.dispatch.ui.admin.MemberForm
-import com.cims.ue.dispatch.ui.admin.flatten
+import com.cims.ue.dispatch.session.flattenOrgs
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -88,7 +88,7 @@ class AdminFormTest {
     }
 
     @Test fun `조직 트리 평탄화 — 깊이 순서와 고아 보존`() {
-        val flat = flatten(listOf(
+        val flat = flattenOrgs(listOf(
             OrgNode("T", "팀01", "H", 1),
             OrgNode("H", "본부", "C", 1),
             OrgNode("C", "CIMS", "", 1),
@@ -97,8 +97,18 @@ class AdminFormTest {
     }
 
     @Test fun `조직 트리 평탄화 — 상위 고리가 있어도 잃지 않는다`() {
-        val flat = flatten(listOf(OrgNode("A", "a", "B"), OrgNode("B", "b", "A")))
+        val flat = flattenOrgs(listOf(OrgNode("A", "a", "B"), OrgNode("B", "b", "A")))
         assertEquals(setOf("A", "B"), flat.map { it.first.code }.toSet())
+    }
+
+    @Test fun `조직 트리 평탄화 — 부모가 목록에 없으면 그 노드가 뿌리다(범위로 잘린 트리)`() {
+        // 주소록은 볼 수 있는 조직만 온다 — «CIMS» 없이 «본부» 부터 올 수 있다. 끝으로 밀려나지 않고 부모가 자식 앞에 선다.
+        val flat = flattenOrgs(listOf(
+            OrgNode("T2", "팀02", "H", 2),
+            OrgNode("T1", "팀01", "H", 1),
+            OrgNode("H", "본부", "C", 1),
+            OrgNode("K", "관제그룹", "C", 0)))
+        assertEquals(listOf("K" to 0, "H" to 0, "T1" to 1, "T2" to 1), flat.map { it.first.code to it.second })
     }
 
     // ── 조직 선택 목록 (상위 조직 콤보) ──

@@ -352,8 +352,6 @@ internal fun DispatchSession.applyDialog(d: DialogInfo) {
     // (`engine.cpp` "초기 full 스냅샷에 dialog 없음"). 이것을 행으로 만들면 상태 전이가 영영 오지 않아
     // ⑥ 에 «연결 중» 이 무한히 남는다(대표번호 AoR 이 그렇게 보였다). 행이 아니라 **그 AoR 에 통화가
     // 없다는 사실**이므로, 남아 있던 행을 치우고 끝낸다.
-    // NOTIFY 가 왔다 = 그 AoR 의 구독이 성립했다(RFC 6665). dialog 를 실었는지는 따로 센다.
-    noteDialogNotify(d.watched, carriedDialog = d.state.isNotBlank())
     // 판정은 **state** 로만 한다. `id` 는 RFC 4235 상 필수지만 서버가 빠뜨려도 진짜 dialog 는
     // `<state>` 를 싣는다 — id 까지 조건에 넣으면 멀쩡한 통화를 지운다.
     if (d.state.isBlank()) {

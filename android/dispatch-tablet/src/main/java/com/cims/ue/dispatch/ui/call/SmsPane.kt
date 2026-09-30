@@ -21,6 +21,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.*
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -65,7 +67,10 @@ fun SmsPane(vm: SmsMessagesViewModel, modifier: Modifier = Modifier) {
         onPick = vm::pick, onSend = vm::send, onResend = vm::resend, onNew = { picking = true }, modifier = modifier)
 }
 
-/** 본문 — **순수 컴포저블**. */
+/**
+ * 본문 — **순수 컴포저블**. 넓으면 **왼쪽 대화 목록 : 오른쪽 대화**, 좁으면(주소록 패널이 열려 면이 줄었을 때) 한 번에 하나 —
+ * 목록에서 고르면 대화, 대화 머리 [‹] 로 목록.
+ */
 @Composable
 fun SmsPaneContent(
     threads: List<ThreadChip>,
@@ -81,52 +86,90 @@ fun SmsPaneContent(
     onNew: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
-    val p = com.cims.ue.dispatch.ui.Tokens.palette
-    Row(modifier.fillMaxSize()) {
-        // ── 왼쪽: 대화 목록(무전 «메시지» 와 같은 모양 — 문자는 모두 1:1 이라 종류 라벨이 없다) ──
-        Column(Modifier.width(340.dp).fillMaxHeight()) {
-            com.cims.ue.dispatch.ui.SectionHead("문자 ${threads.size}") {
-                Spacer(Modifier.weight(1f))
-                com.cims.ue.dispatch.ui.PillButton("＋ 새 대화", onNew, height = 32.dp, strongBorder = true)
-            }
-            if (threads.isEmpty()) Text(
-                "주고받은 문자가 없습니다 — [＋ 새 대화] 로 시작합니다",
-                Modifier.padding(16.dp), fontSize = Type.meta, color = p.muted)
-            LazyColumn(Modifier.weight(1f)) {
-                items(threads, key = { it.key }) { t ->
-                    com.cims.ue.dispatch.ui.ptt.ThreadRow(t, selected = t.key == peer, showKind = false) { onPick(t.key) }
-                }
-            }
+    BoxWithConstraints(modifier.fillMaxSize()) {
+        val compact = maxWidth < 600.dp
+        var showList by remember { mutableStateOf(peer == null) }
+        LaunchedEffect(peer) { if (peer != null) showList = false }
+        if (compact) {
+            if (showList || peer == null) ThreadList(threads, peer, onPick = { k -> onPick(k); showList = false }, onNew,
+                Modifier.fillMaxSize())
+            else Conversation(thread, peer, title, available, external, onSend, onResend, onNew,
+                onBack = { showList = true }, modifier = Modifier.fillMaxSize())
+        } else Row(Modifier.fillMaxSize()) {
+            ThreadList(threads, peer, onPick, onNew, Modifier.width(340.dp).fillMaxHeight())
+            com.cims.ue.dispatch.ui.VDivider()
+            Conversation(thread, peer, title, available, external, onSend, onResend, onNew, onBack = null,
+                modifier = Modifier.weight(1f).fillMaxHeight())
         }
-        com.cims.ue.dispatch.ui.VDivider()
+    }
+}
 
-        // ── 오른쪽: 고른 대화 ──
-        Column(Modifier.weight(1f).fillMaxHeight()) {
-            if (peer == null) {
-                Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.Center,
-                    horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("대화를 고르세요", fontSize = Type.body, color = p.muted)
-                    Spacer(Modifier.height(8.dp))
-                    com.cims.ue.dispatch.ui.PillButton("＋ 새 대화", onNew, strongBorder = true)
-                }
-                return@Column
-            }
-            Row(Modifier.fillMaxWidth().height(56.dp).padding(start = 20.dp, end = 12.dp),
-                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text(title, fontSize = Type.head, fontWeight = FontWeight.Bold, maxLines = 1)
-                com.cims.ue.dispatch.ui.Label("문자", com.cims.ue.dispatch.ui.LabelStyle.OUTLINE, round = true)
-                if (external) com.cims.ue.dispatch.ui.Label("외부망", com.cims.ue.dispatch.ui.LabelStyle.OUTLINE,
-                    round = true, color = p.emergency)
-            }
-            com.cims.ue.dispatch.ui.HDivider()
-            LazyColumn(Modifier.weight(1f).padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(8.dp),
-                contentPadding = PaddingValues(vertical = 14.dp)) {
-                items(thread, key = { it.id }) { m ->
-                    com.cims.ue.dispatch.ui.ptt.Bubble(m, showName = false, onResend = { onResend(m) })
-                }
-            }
-            SmsInput(available = available, external = external, onSend = onSend, peer = peer)
+/** 대화 목록 — 무전 «메시지» 와 같은 모양(문자는 모두 1:1 이라 종류 라벨이 없다). */
+@Composable
+private fun ThreadList(threads: List<ThreadChip>, peer: String?, onPick: (String) -> Unit, onNew: () -> Unit,
+                       modifier: Modifier) {
+    val p = com.cims.ue.dispatch.ui.Tokens.palette
+    Column(modifier) {
+        com.cims.ue.dispatch.ui.SectionHead("문자 ${threads.size}") {
+            Spacer(Modifier.weight(1f))
+            com.cims.ue.dispatch.ui.PillButton("＋ 새 대화", onNew, height = 32.dp, strongBorder = true)
         }
+        if (threads.isEmpty()) Text(
+            "주고받은 문자가 없습니다 — [＋ 새 대화] 로 시작합니다",
+            Modifier.padding(16.dp), fontSize = Type.meta, color = p.muted)
+        LazyColumn(Modifier.weight(1f)) {
+            items(threads, key = { it.key }) { t ->
+                com.cims.ue.dispatch.ui.ptt.ThreadRow(t, selected = t.key == peer, showKind = false) { onPick(t.key) }
+            }
+        }
+    }
+}
+
+/** 고른 대화. [onBack] 이 있으면(좁을 때) 머리 왼쪽에 [‹] — 목록으로. */
+@Composable
+private fun Conversation(
+    thread: List<Message>,
+    peer: String?,
+    title: String,
+    available: Boolean,
+    external: Boolean,
+    onSend: (String) -> Unit,
+    onResend: (Message) -> Unit,
+    onNew: () -> Unit,
+    onBack: (() -> Unit)?,
+    modifier: Modifier,
+) {
+    val p = com.cims.ue.dispatch.ui.Tokens.palette
+    Column(modifier) {
+        if (peer == null) {
+            Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.Center,
+                horizontalAlignment = Alignment.CenterHorizontally) {
+                Text("대화를 고르세요", fontSize = Type.body, color = p.muted)
+                Spacer(Modifier.height(8.dp))
+                com.cims.ue.dispatch.ui.PillButton("＋ 새 대화", onNew, strongBorder = true)
+            }
+            return@Column
+        }
+        Row(Modifier.fillMaxWidth().height(56.dp).padding(start = if (onBack != null) 4.dp else 20.dp, end = 12.dp),
+            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            if (onBack != null) IconButton(onClick = onBack, modifier = Modifier.size(44.dp)) {
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "대화 목록",
+                    modifier = Modifier.size(20.dp))
+            }
+            Text(title, fontSize = Type.head, fontWeight = FontWeight.Bold, maxLines = 1,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+            com.cims.ue.dispatch.ui.Label("문자", com.cims.ue.dispatch.ui.LabelStyle.OUTLINE, round = true)
+            if (external) com.cims.ue.dispatch.ui.Label("외부망", com.cims.ue.dispatch.ui.LabelStyle.OUTLINE,
+                round = true, color = p.emergency)
+        }
+        com.cims.ue.dispatch.ui.HDivider()
+        LazyColumn(Modifier.weight(1f).padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(8.dp),
+            contentPadding = PaddingValues(vertical = 14.dp)) {
+            items(thread, key = { it.id }) { m ->
+                com.cims.ue.dispatch.ui.ptt.Bubble(m, showName = false, onResend = { onResend(m) })
+            }
+        }
+        SmsInput(available = available, external = external, onSend = onSend, peer = peer)
     }
 }
 

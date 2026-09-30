@@ -41,16 +41,17 @@ class AppSkeletonTest {
         assertTrue(AppScreen.entries.none { it.label in setOf("감청", "청취", "메시지", "무전", "통화") })
     }
 
-    @Test fun `그룹원은 면이 아니라 띠다`() {
-        // 그룹원은 «거는 상대» 이자 «상태를 곁눈질하는 대상» 이라 «통화» 면의 띠로 족하다(§6.3).
-        // 거는 일은 «주소록» 면이 받는다.
+    @Test fun `그룹원·주소록은 면이 아니다 — 고정 칸과 패널이다`() {
+        // 그룹원은 «상태를 곁눈질하는 대상» 이라 [통화] 의 왼쪽 고정 칸 띠로 족하다. 주소록은 어느 통화 면에서든 여는
+        //   오른쪽 패널이다 — 면이면 다이얼패드·문자를 보면서 옆에 펴 둘 수 없다(§6.3).
         assertTrue(CallPane.entries.none { it.label == "그룹원" })
-        assertTrue(CallPane.entries.any { it.label == "주소록" })
+        assertTrue(CallPane.entries.none { it.label == "주소록" })
+        assertEquals(null, com.cims.ue.dispatch.ui.SidePanel.Book.parent)
     }
 
     @Test fun `청취·감청은 면으로도 두지 않는다 — 목록에 드러낸다`() {
         // 청취 중인 채널은 «채널» 면의 범위 채널 목록에 «청취 중» 으로 나오고 거기서 끈다.
-        // 감청은 «통화» 면의 한 구역으로 나오고 «내역» 면의 진행 중 행에서 켜고 끈다(§6.3).
+        // 감청은 고정 칸 «진행 중» 행에서 켜고 끈다(§6.3).
         assertTrue(PttPane.entries.none { it.label == "청취" })
         assertTrue(CallPane.entries.none { it.label == "감청" })
     }
@@ -60,7 +61,7 @@ class AppSkeletonTest {
     }
 
     @Test fun `통화 면은 통화가 먼저다`() {
-        assertEquals(listOf("통화", "주소록", "메시지", "통화내역"), CallPane.entries.map { it.label })
+        assertEquals(listOf("통화", "메시지", "통화내역"), CallPane.entries.map { it.label })
     }
 
     @Test fun `더보기에는 편성·관리만 남는다`() {

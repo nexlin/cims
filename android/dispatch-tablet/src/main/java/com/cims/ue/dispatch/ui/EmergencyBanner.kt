@@ -137,7 +137,7 @@ private fun AlertBanner(b: AlertBannerUi, onOpen: () -> Unit) {
                 Text(
                     b.kind.bannerTitle + if (b.initiator.isNotEmpty()) " · 개시 ${b.initiator}" else "",
                     fontSize = Type.body, fontWeight = FontWeight.Bold, maxLines = 1)
-                Text(b.title, fontSize = Type.head, fontWeight = FontWeight.Bold, maxLines = 1)
+                Text(b.title, fontSize = Type.display, fontWeight = FontWeight.Bold, maxLines = 1)
             }
             @Suppress("UNUSED_EXPRESSION") tick     // 1초 틱을 이 조합에 묶는다
             Text(fmtElapsed((System.currentTimeMillis() - b.sinceMs).coerceAtLeast(0)), fontSize = Type.title)

@@ -1,4 +1,4 @@
-// 관제 태블릿 시각 토큰 — 색·모양 (android_dispatch_tablet.md §6.3c)
+// 관제 태블릿 시각 토큰 — 색·모양·글자 (android_dispatch_tablet.md §6.3c)
 //
 // 정본은 «관제 메뉴 재구성» 시안(회색조 와이어프레임)이다. 화면 코드는 **이 이름만** 쓰고 16진수를 직접 쓰지 않는다 —
 // 한 곳에서 바꾸면 전 화면이 같이 바뀌어야 한다. Material3 색 체계에 그대로 싣는 것이 요점이다: 기존 컴포넌트(버튼·칩·
@@ -12,6 +12,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Shapes
+import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
@@ -20,7 +21,10 @@ import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.em
+import androidx.compose.ui.unit.sp
 
 /**
  * 회색조 단계 — 진한 것에서 옅은 것 순서. 이름은 **역할**이다(밝기가 아니라) — 어두운 테마에서는 같은 역할이
@@ -112,6 +116,22 @@ private val CimsShapes = Shapes(
     extraLarge = RoundedCornerShape(16.dp),
 )
 
+/**
+ * 글자 모양 — 시안(브라우저 기본 줄 간격·자간 0)에 맞춘다. Material3 기본은 본문에 줄 간격 24sp·자간 0.5sp 를 얹어,
+ * 크기만 바꾼 `Text` 도 그 줄 간격을 그대로 가진다 — 카드(120) 한 장에 네 줄이 들지 않고 글자가 시안보다 넓어진다.
+ * 그래서 모든 단계의 **자간을 0**, **줄 간격을 글자 크기의 1.35배**(`em`, 크기를 바꿔도 따라간다)로 둔다. 크기는 [Type] 이다.
+ */
+private val CimsTypography = Typography().run {
+    fun TextStyle.plain() = copy(letterSpacing = 0.sp, lineHeight = 1.35.em)
+    Typography(
+        displayLarge = displayLarge.plain(), displayMedium = displayMedium.plain(), displaySmall = displaySmall.plain(),
+        headlineLarge = headlineLarge.plain(), headlineMedium = headlineMedium.plain(), headlineSmall = headlineSmall.plain(),
+        titleLarge = titleLarge.plain(), titleMedium = titleMedium.plain(), titleSmall = titleSmall.plain(),
+        bodyLarge = bodyLarge.plain(), bodyMedium = bodyMedium.plain(), bodySmall = bodySmall.plain(),
+        labelLarge = labelLarge.plain(), labelMedium = labelMedium.plain(), labelSmall = labelSmall.plain(),
+    )
+}
+
 private val LocalPalette = staticCompositionLocalOf { LightPalette }
 
 /** 지금 테마의 회색조 단계 — `MaterialTheme.colorScheme` 에 없는 역할(bar·fill·faint·canvas)을 여기서 읽는다. */
@@ -125,6 +145,6 @@ object Tokens {
 fun CimsTheme(dark: Boolean = false, content: @Composable () -> Unit) {
     val p = if (dark) DarkPalette else LightPalette
     CompositionLocalProvider(LocalPalette provides p) {
-        MaterialTheme(colorScheme = p.scheme(dark), shapes = CimsShapes, content = content)
+        MaterialTheme(colorScheme = p.scheme(dark), shapes = CimsShapes, typography = CimsTypography, content = content)
     }
 }

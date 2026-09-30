@@ -11,6 +11,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
@@ -51,11 +52,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlin.math.abs
@@ -185,7 +189,7 @@ private fun TopBar(top: TopBarUi, onSearch: () -> Unit, menu: @Composable () -> 
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Text(top.displayName.ifBlank { "관제" }, fontSize = 20.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+        Text(top.displayName.ifBlank { "관제" }, fontSize = Type.display, fontWeight = FontWeight.Bold, maxLines = 1)
         if (top.deskLine.isNotBlank()) Text(top.deskLine, fontSize = Type.body, color = p.muted, maxLines = 1,
             overflow = TextOverflow.Ellipsis)
         // 등록 점등 — 계정마다 하나(●등록·○미등록).
@@ -201,7 +205,7 @@ private fun TopBar(top: TopBarUi, onSearch: () -> Unit, menu: @Composable () -> 
 }
 
 /**
- * 관제 탭 줄(48) — [무전|통화] 세그먼트 · 그 모드의 하위 탭 · 뒤에 붙는 동작([사용자]).
+ * 관제 탭 줄(48) — [무전|통화] 세그먼트 · 그 모드의 하위 탭 · 뒤에 붙는 동작([통화] 의 [주소록]).
  *
  * 탭 줄은 **면 pager 위에 고정**으로 놓인다 — 면을 밀 때 줄은 제자리에 남고 본문만 미끄러진다. 강조는 **정착할 면**을
  * 가리킨다(밀기가 끝나기 전에도 도착할 탭이 켜진다).
@@ -268,18 +272,42 @@ private fun SubTab(label: String, selected: Boolean, badge: Int, onClick: () -> 
 }
 
 /**
+ * 한 모드의 면들 위에 **한 벌만** 얹는 왼쪽 고정 칸 — [통화] 의 대기열·진행 중·내 통화·그룹원(§6.3).
+ *
+ * 면마다 그리면 면을 밀 때 같이 미끄러지고, 펼친 감청·열린 전달 칸 같은 칸 안의 상태도 면마다 따로 논다. 그래서 pager 밖에
+ * 한 벌을 두고 면은 그 폭만큼 왼쪽을 비운다. 그 모드의 면끼리 오갈 때는 제자리, 다른 모드로 넘어갈 때만 그 모드의 첫·끝 면과
+ * 함께 미끄러져 들고 난다([fixedShift]).
+ *
+ * @param width 칸 폭(오른쪽 나눔선 포함) — 그 모드의 면은 이만큼 왼쪽을 비워 둔다.
+ */
+class FixedColumn(val mode: DispatchMode, val width: Dp, val content: @Composable () -> Unit)
+
+/**
+ * 고정 칸의 가로 밀림(면 폭 단위) — pager 위치 [pos](현재 면 + 밀린 비율)에서. 그 모드의 면([first]..[last]) 안이면 0(제자리),
+ * 앞 모드에서 넘어오는 중이면 0~1(오른쪽에서 들어온다), 뒤로 나가는 중이면 0~-1. 한 면 넘게 떨어지면 ±1(화면 밖)에서 멈춘다.
+ * 순수 함수(시험 대상).
+ */
+internal fun fixedShift(pos: Float, first: Int, last: Int): Float = when {
+    pos < first -> (first - pos).coerceAtMost(1f)
+    pos > last -> -(pos - last).coerceAtMost(1f)
+    else -> 0f
+}
+
+/**
  * [관제] 본문 — 면 pager + 오른쪽 사이드 패널(밀어내기).
  *
- * 패널은 **덮지 않고 민다** — 면의 폭이 그만큼 줄고 면이 스스로 다시 배치한다(타 채널 2열 → 1열). 내 채널처럼 폭이 정해진
- * 칸은 움직이지 않는다. 가장자리 스와이프로 열지 않는다 — 면 넘기기와 겹친다.
+ * 패널은 **덮지 않고 민다** — 면의 폭이 그만큼 줄고 면이 스스로 다시 배치한다(타 채널 2열 → 1열). 내 채널·통화 고정 칸처럼
+ * 폭이 정해진 칸은 움직이지 않는다. 가장자리 스와이프로 열지 않는다 — 면 넘기기와 겹친다.
  *
  * @param panel 열린 패널 — null 이면 닫힘. 폭은 [PanelWidth] 로 이 함수가 준다.
+ * @param fixed 한 모드의 면들 위에 얹는 고정 칸([FixedColumn]) — 없으면 null.
  */
 @Composable
 fun DispatchBody(
     page: DispatchPage,
     onPage: (DispatchPage) -> Unit,
     panel: (@Composable () -> Unit)?,
+    fixed: FixedColumn? = null,
     content: @Composable (DispatchPage) -> Unit,
 ) {
     Row(Modifier.fillMaxSize()) {
@@ -301,8 +329,19 @@ fun DispatchBody(
                 if (now != page) onPage(now)
             }
         }
-        HorizontalPager(state = pager, modifier = Modifier.weight(1f).fillMaxHeight()) { i ->
-            Box(Modifier.fillMaxSize()) { content(DISPATCH_PAGES[i]) }
+        BoxWithConstraints(Modifier.weight(1f).fillMaxHeight().clipToBounds()) {
+            HorizontalPager(state = pager, modifier = Modifier.fillMaxSize()) { i ->
+                Box(Modifier.fillMaxSize()) { content(DISPATCH_PAGES[i]) }
+            }
+            if (fixed != null) {
+                val first = DISPATCH_PAGES.indexOfFirst { it.mode == fixed.mode }
+                val last = DISPATCH_PAGES.indexOfLast { it.mode == fixed.mode }
+                val pageWidth = constraints.maxWidth.toFloat()
+                // 위치는 그리기 단계에서만 읽는다 — 미는 동안 칸을 다시 구성하지 않는다.
+                Box(Modifier.width(fixed.width).fillMaxHeight().graphicsLayer {
+                    translationX = fixedShift(pager.currentPage + pager.currentPageOffsetFraction, first, last) * pageWidth
+                }) { fixed.content() }
+            }
         }
         if (panel != null) panel()
     }
