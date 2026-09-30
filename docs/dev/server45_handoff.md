@@ -424,3 +424,16 @@ Audio/Video SSRC · 성립 전 메시지 보관)은 B4·B5 가 그대로 받는�
 
 **다음 (.48)** — B4·B5(송출·수신 제어 상태 머신 — B2 코덱 위, 제안 7 할당 규칙 포함) · B7(영상 SRTP·제어 SRTCP) · A7~A10(CSP MCVideo 모듈·등록·affiliation·
 그룹 호). 공유 DB 마이그레이션(`migrate_mcvideo.sql`, 표 추가만)은 CSP 실측 때 적용.
+
+**B4·B5 설계 확정 — mcvideo.md §5.3.1 (C5 가 볼 서버 동작)** — 구현 전이지만 단말 쪽이 맞춰야 할 것:
+
+- **Receive Media Response(Granted) 는 ack 비트를 세워 보낸다** — Ack 이 올 때까지 T6 간격으로 C6 회 재송신. C5 가 ack 비트 메시지에 늘 Ack(Message Name 포함)
+  하므로 그대로 맞는다.
+- **암묵적 송출 요청 · 개시자 혼자** — 새 prearranged 세션에서 다른 참가자가 아직 없으면 CMP 는 SSRC 쌍만 예약하고(answer `mc_implicit_request` +
+  `mc_audio_ssrc`·`mc_video_ssrc`, **`mc_granted` 없음**) 첫 초대 참가자가 수락할 때 **Transmission Granted 를 따로 보낸다**(§6.3.2.2, 미디어 버퍼링 없음). C5 ② 는
+  «answer 에 `mc_implicit_request` 가 없으면 곧바로 명시 요청» 인데, 있고 `mc_granted` 만 없는 경우는 Granted 를 기다려야 한다 — 이 경우 T100 만료로 명시 요청을 다시
+  보내도 서버는 같은 SSRC 로 Granted 를 준다(§6.3.4.4.8 재요청 = 재송신). 문제 있으면 여기 적어 달라.
+- **T11(10 s) — manual 수신에서 아무도 [받기] 하지 않은 송출** 은 서버가 Transmission End Request #8(No receiving participant)로 끝낸다(§6.3.4.4.13) → 단말은 End
+  Response(C5 이미 있음).
+- **허가 없는 미디어**(payload 있는 RTP — 헤더만 있는 keepalive 는 아님)는 Revoked #3 → 단말은 End Request(C5 이미 있음).
+- 유효 우선순위 = MCPTT floor 와 같은 서열(tier(CSP 지시) → chair → 수치). 요청의 Transmission Indicator 는 판정에 쓰지 않는다.
