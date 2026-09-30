@@ -723,13 +723,13 @@ SIP SUBSCRIBE/NOTIFY 다이얼로그 상태 관리.
 | 이벤트 | 규격 | 용도 | 본문 형식 |
 |--------|------|------|-----------|
 | reg | RFC 3680 | 자기 등록 상태(생성/갱신/해제/만료) | reginfo XML |
-| affiliation | RFC 3856 (presence) | 제휴 상태 변경 | mcptt-affiliation-info XML |
+| affiliation | RFC 3856 (presence) · TS 24.379 §9.2.2.2.5 | 제휴 상태 변경 | pidf XML(per-user affiliation information §9.3.1 — group = MCPTT group ID `tel:g001`) |
 | conference | RFC 4575 | 그룹 참가자 로스터 | conference-info XML |
 | gms | RFC 5875 (xcap-diff) | 그룹 멤버십 변경 알림 | xcap-diff XML |
 | cms | RFC 5875 (xcap-diff) | 사용자 설정 변경 알림 | xcap-diff XML |
 
 타입 판별은 `CscfModule` 의 `Event` 헤더 우선 순서를 따른다: `reg` → `affiliation`(Event:presence
-또는 Accept 에 mcptt-affiliation-info) → `conference`(Event:conference **또는** Request-URI 가 알려진
+또는 옛 단말의 Accept 에 mcptt-affiliation-info) → `conference`(Event:conference **또는** Request-URI 가 알려진
 그룹 — Event 헤더 없는 구현 호환) → Request-URI 의 gms/cms → 기본값 gms.
 
 ⚠️ **갱신(in-dialog refresh) SUBSCRIBE 는 이 판별을 타면 안 된다.** 갱신 요청의 Request-URI 는

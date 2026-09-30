@@ -101,6 +101,15 @@ public:
      *  어느 그룹이 영향받는지 **지우기 전에** 알아내는 용도 (감사 E-AUD-009). */
     bool SelectAffiliatedGroupsByUser( const std::string &strUserId, std::vector<std::string> &vecGroupIds );
 
+    /** 가입자의 유효 affiliation 행(미만료·affiliated) — 제휴 상태 NOTIFY(TS 24.379 §9.2.2.2.5) 본문 원천.
+     *  llExpiresEpoch = 만료 시각(UNIX 초), 0 = 만료 없음(dereg 시까지). client_id 순으로 정렬. */
+    struct CAffiliationRow {
+        std::string strGroupId;  // mcptt_group_id
+        std::string strClientId;
+        long long llExpiresEpoch = 0;
+    };
+    bool SelectActiveAffiliationsByUser( const std::string &strUserId, std::vector<CAffiliationRow> &vecRows );
+
     /** 가입자 de-register/logout 시 전 affiliation 제거 */
     bool RemoveAffiliationsByUser( const std::string &strUserId );
 

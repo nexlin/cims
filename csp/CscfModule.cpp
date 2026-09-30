@@ -55,7 +55,7 @@ static const int SUBSCRIBE_DEFAULT_EXPIRES_SEC = SUBSCRIBE_MAX_EXPIRES_SEC;
 extern CSipUserAgent gclsUserAgent;
 extern void SendInitialNotify( const SubscriptionInfo &sub );
 extern void SendTerminatedNotify( const SubscriptionInfo &sub, const char *pszReason = "timeout" );
-extern void SendAffiliationNotify( const std::string &strUserId );  // C2
+extern void SendAffiliationNotify( const std::string &strUserId, const std::string &strPid );  // C2
 extern void SendRegEventNotify( const std::string &strUserId, const char *pszEvent,
                                 const CUserInfo *pclsInfo );  // RFC 3680 partial
 
@@ -1649,8 +1649,8 @@ bool CCscfModule::RecvRequestPublish( int iThreadId, CSipMessage *pclsMessage ) 
                              strFromId.c_str(), strReqUriUser.c_str(), iAffExpires );
             }
         }
-        // C2: 제휴상태 변경 → 해당 가입자의 affiliation-info(presence) 구독자에게 NOTIFY.
-        SendAffiliationNotify( strFromId );
+        // C2: 제휴상태 변경 → 해당 가입자의 제휴 상태(presence) 구독자에게 NOTIFY. 구형 PUBLISH 는 p-id 가 없다.
+        SendAffiliationNotify( strFromId, "" );
     }
 
     // de-affiliate: ETag 저장소에서 제거 후 200 반환
@@ -1717,7 +1717,7 @@ bool CCscfModule::RecvPublishAffiliationPidf( CSipMessage *pclsMessage, const st
         if ( gclsDbManager.IsConnected() ) {
             gclsDbManager.RemoveAffiliationsByUser( strFromId );
             EmitAffiliationChanged( "", "de-affiliate", strFromId );
-            SendAffiliationNotify( strFromId );
+            SendAffiliationNotify( strFromId, clsPidf.strPid );
         }
         CLog::Print( LOG_INFO, "[Affiliation/PUBLISH:pidf] de-affiliate ALL user=%s", strFromId.c_str() );
         std::string strEtagKey = strFromId + ":#pidf";
@@ -1763,12 +1763,20 @@ bool CCscfModule::RecvPublishAffiliationPidf( CSipMessage *pclsMessage, const st
         }
     } );
 
+    // 클라이언트 식별 = tuple@id(MCPTT client ID, §9.2.2.2.3 10)) — 제휴 상태 NOTIFY 의 tuple id 로 그대로 되돌아간다.
+    //   tuple@id 가 없으면 Contact URI 로 대신한다(구형 PUBLISH 와 같은 키).
+    const std::string strClient = clsPidf.strClientId.empty() ? strContactUri : clsPidf.strClientId;
     int iAff = 0, iDeaff = 0;
     if ( gclsDbManager.IsConnected() ) {
         for ( const auto &strGroup : vecMemberOf ) {
+            // 같은 단말이 Contact URI 키로 남긴 행 정리 — 이 경로가 client_id 로 Contact URI 를 쓰던 때의 행이
+            //   만료까지 두 번째 tuple 로 보이지 않게 한다(한 단말 = tuple 하나).
+            //   (빈 client 는 RemoveAffiliation 에서 "사용자 전체" 라 걸러낸다.)
+            if ( !strContactUri.empty() && strClient != strContactUri )
+                gclsDbManager.RemoveAffiliation( strGroup, strFromId, strContactUri );
             const bool bWanted = ( std::find( vecWant.begin(), vecWant.end(), strGroup ) != vecWant.end() );
             if ( bWanted ) {
-                if ( gclsDbManager.InsertAffiliation( strGroup, strFromId, strContactUri, iExpires ) ) {
+                if ( gclsDbManager.InsertAffiliation( strGroup, strFromId, strClient, iExpires ) ) {
                     EmitAffiliationChanged( strGroup, "affiliate", strFromId );
                     iAff++;
                 } else {
@@ -1776,12 +1784,12 @@ bool CCscfModule::RecvPublishAffiliationPidf( CSipMessage *pclsMessage, const st
                                  strFromId.c_str(), strGroup.c_str() );
                 }
             } else if ( gclsDbManager.IsAffiliated( strGroup, strFromId ) ) {
-                gclsDbManager.RemoveAffiliation( strGroup, strFromId, strContactUri );
+                gclsDbManager.RemoveAffiliation( strGroup, strFromId, strClient );
                 EmitAffiliationChanged( strGroup, "de-affiliate", strFromId );
                 iDeaff++;
             }
         }
-        SendAffiliationNotify( strFromId );
+        SendAffiliationNotify( strFromId, clsPidf.strPid );
     }
 
     // 멤버가 아닌 그룹을 요청했으면 남긴다 — 요청 전체를 거절하지는 않는다(나머지는 정상 처리).

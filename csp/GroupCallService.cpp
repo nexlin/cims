@@ -57,7 +57,7 @@ extern int SendConferenceNotifyToSubscribers( const std::string &strGroupId, con
 // CscfModule.cpp — 제휴 변경 감사(E-AUD-009)·affiliation-info 구독자 NOTIFY (TS 24.379 §9.2.2.3.5)
 extern void EmitAffiliationChanged( const std::string &strGroupId, const char *pszAction,
                                     const std::string &strUserId );
-extern void SendAffiliationNotify( const std::string &strUserId );
+extern void SendAffiliationNotify( const std::string &strUserId, const std::string &strPid );
 
 // External global objects
 extern CSipUserAgent gclsUserAgent;
@@ -893,7 +893,8 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
                 gclsUserMap.Select( pszCallerInfo, clsAffUser ) ? clsAffUser.m_strContactUri : std::string();
             if ( gclsDbManager.InsertAffiliation( pszGroupId, pszCallerInfo, strClientId, kImplicitAffiliationSec ) ) {
                 EmitAffiliationChanged( pszGroupId, "affiliate", pszCallerInfo );
-                SendAffiliationNotify( pszCallerInfo );  // §9.2.2.3.7 5) → §9.2.2.3.5
+                // §9.2.2.3.7 5) → §9.2.2.3.5 — 암묵적 제휴라 되돌릴 PUBLISH p-id 가 없다.
+                SendAffiliationNotify( pszCallerInfo, "" );
                 CLog::Print( LOG_INFO, "ProcessGroupCall: Group(%s) Caller(%s) implicit affiliation (%s)", pszGroupId,
                              pszCallerInfo, iCond >= 1 ? "emergency/imminent peril" : "chat" );
             } else {
@@ -2638,11 +2639,11 @@ void CGroupCallService::OnCallStarted( const std::string &strCallId, const std::
                          "OnCallStarted: Group(%s) NOT_FOUND → AddGroup re-established (floor=%d), retry JoinGroup",
                          strGroupId.c_str(), iReAddFloor );
             PurgePendingLeave( strGroupId, strSessionId );
-            bJoined = gclsCmpClient.JoinGroup( strGroupId, strSessionId, strRemoteIp, iRemotePort, iFloorPort,
-                                               iVideoPort, GetOrIssueGroupSesId( strGroupId ), strRole, NULL, NULL,
-                                               iMemberNat, strMemberGuardIp, iMemberPt, iMemberSrcPt, iMemberTePt,
-                                               iMemberSrcTePt, strMemberCodec, clsMemberFmtp, pclsMemberCrypto, 0, 0,
-                                               iMemberVideoPt );
+            bJoined =
+                gclsCmpClient.JoinGroup( strGroupId, strSessionId, strRemoteIp, iRemotePort, iFloorPort, iVideoPort,
+                                         GetOrIssueGroupSesId( strGroupId ), strRole, NULL, NULL, iMemberNat,
+                                         strMemberGuardIp, iMemberPt, iMemberSrcPt, iMemberTePt, iMemberSrcTePt,
+                                         strMemberCodec, clsMemberFmtp, pclsMemberCrypto, 0, 0, iMemberVideoPt );
         }
     }
     if ( bJoined ) {

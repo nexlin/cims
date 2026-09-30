@@ -239,6 +239,7 @@ struct CMcpttPidfAffiliation {
     bool bValid = false;                 // <presence> 루트를 찾음
     std::string strEntity;               // <presence entity="...">  = MCPTT ID
     std::string strClientId;             // <tuple id="...">         = MCPTT client ID
+    std::string strPid;                  // <presence><p-id>…</p-id> = 이 PUBLISH 의 식별자(선택, §9.3.1.2 4))
     std::vector<std::string> vecGroups;  // <affiliation group="..."> 전체 (원하는 제휴 집합)
 };
 
@@ -301,6 +302,17 @@ inline CMcpttPidfAffiliation ParsePidfAffiliation( const std::string &body ) {
     out.strEntity = _McpttTagAttr( body, pres, "entity" );
     const size_t tup = _McpttFindStartTag( body, pres, "tuple" );
     if ( tup != std::string::npos ) out.strClientId = _McpttTagAttr( body, tup, "id" );
+    const size_t pid = _McpttFindStartTag( body, pres, "p-id" );
+    if ( pid != std::string::npos ) {
+        const size_t gt = body.find( '>', pid );
+        const size_t lt = ( gt == std::string::npos ) ? std::string::npos : body.find( '<', gt + 1 );
+        if ( lt != std::string::npos && body[gt - 1] != '/' ) {
+            std::string v = body.substr( gt + 1, lt - gt - 1 );
+            const size_t a = v.find_first_not_of( " \t\r\n" );
+            const size_t z = v.find_last_not_of( " \t\r\n" );
+            out.strPid = ( a == std::string::npos ) ? std::string() : v.substr( a, z - a + 1 );
+        }
+    }
     size_t p = pres;
     while ( ( p = _McpttFindStartTag( body, p, "affiliation" ) ) != std::string::npos ) {
         const std::string g = _McpttTagAttr( body, p, "group" );
@@ -326,6 +338,72 @@ inline std::string McpttBareId( const std::string &uri ) {
     if ( at != std::string::npos ) s = s.substr( 0, at );
     const size_t sc = s.find( ';' );
     if ( sc != std::string::npos ) s = s.substr( 0, sc );
+    return s;
+}
+
+/** MCPTT ID(사용자) URI — 가입 번호 "+8250…" → "tel:+8250…". 이미 URI 면 그대로.
+ *  CSC 토큰·user-profile 의 mcptt_id 와 같은 표기(tel:+msisdn)다. */
+inline std::string McpttIdUri( const std::string &strUserId ) {
+    if ( strUserId.compare( 0, 4, "tel:" ) == 0 || strUserId.compare( 0, 4, "sip:" ) == 0 ||
+         strUserId.compare( 0, 5, "sips:" ) == 0 )
+        return strUserId;
+    return "tel:" + strUserId;
+}
+
+/** MCPTT group ID URI — CSC GMS/user-profile 의 그룹 URI 와 같은 규칙(csc services/mcptt.py `_group_uri`):
+ *  '+' 로 시작하면 "tel:" 만, 숫자뿐이면 "tel:+", 그 외(g001 등)는 "tel:". 이미 URI 면 그대로. */
+inline std::string McpttGroupUri( const std::string &strGroupId ) {
+    if ( strGroupId.compare( 0, 4, "tel:" ) == 0 || strGroupId.compare( 0, 4, "sip:" ) == 0 ||
+         strGroupId.compare( 0, 5, "sips:" ) == 0 )
+        return strGroupId;
+    if ( !strGroupId.empty() && strGroupId[0] == '+' ) return "tel:" + strGroupId;
+    const bool bDigits = !strGroupId.empty() && std::all_of( strGroupId.begin(), strGroupId.end(),
+                                                             []( unsigned char c ) { return std::isdigit( c ); } );
+    return bDigits ? "tel:+" + strGroupId : "tel:" + strGroupId;
+}
+
+// ── 제휴 상태 NOTIFY 본문 — per-user affiliation information (TS 24.379 §9.3.1.2 첫 목록, §9.2.2.2.5 3)) ──
+//
+//  <presence xmlns="urn:ietf:params:xml:ns:pidf" xmlns:mcpttPI10="urn:3gpp:ns:mcpttPresInfo:1.0" entity="<MCPTT ID>">
+//    <tuple id="<MCPTT client ID>">                       ← 클라이언트마다 하나
+//      <status>
+//        <mcpttPI10:affiliation group="<MCPTT group ID>" status="affiliated" expires="<xs:dateTime>"/>
+//      </status>
+//    </tuple>
+//    <mcpttPI10:p-id>…</mcpttPI10:p-id>                   ← 이 NOTIFY 를 부른 PUBLISH 의 p-id (있을 때만)
+//  </presence>
+//
+//  p-id 는 pidf 확장 요소라 RFC 3863 스키마상 tuple·note 뒤(##other)에 둔다. 제휴 그룹이 없는 클라이언트는
+//  tuple 을 싣지 않는다(§9.2.2.2.5 3) a)·b) — 만료·deaffiliated 항목 제외).
+struct CMcpttAffGroup {
+    std::string strGroupUri;  // MCPTT group ID (McpttGroupUri)
+    std::string strExpires;   // xs:dateTime (예 2026-09-30T05:00:00Z). 비면 속성 생략(만료 없음)
+};
+struct CMcpttAffClient {
+    std::string strClientId;  // MCPTT client ID (규격형 PUBLISH 의 tuple@id, 구형 PUBLISH 는 Contact URI)
+    std::vector<CMcpttAffGroup> vecGroups;
+};
+
+inline std::string BuildPidfAffiliationInfo( const std::string &strEntity,
+                                             const std::vector<CMcpttAffClient> &vecClients,
+                                             const std::string &strPid ) {
+    std::string s = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n";
+    s += "<presence xmlns=\"urn:ietf:params:xml:ns:pidf\" xmlns:mcpttPI10=\"urn:3gpp:ns:mcpttPresInfo:1.0\" entity=\"" +
+         McpttXmlEsc( strEntity ) + "\">\r\n";
+    for ( const auto &c : vecClients ) {
+        if ( c.vecGroups.empty() ) continue;
+        s += "  <tuple id=\"" + McpttXmlEsc( c.strClientId ) + "\">\r\n";
+        s += "    <status>\r\n";
+        for ( const auto &g : c.vecGroups ) {
+            s += "      <mcpttPI10:affiliation group=\"" + McpttXmlEsc( g.strGroupUri ) + "\" status=\"affiliated\"";
+            if ( !g.strExpires.empty() ) s += " expires=\"" + McpttXmlEsc( g.strExpires ) + "\"";
+            s += "/>\r\n";
+        }
+        s += "    </status>\r\n";
+        s += "  </tuple>\r\n";
+    }
+    if ( !strPid.empty() ) s += "  <mcpttPI10:p-id>" + McpttXmlEsc( strPid ) + "</mcpttPI10:p-id>\r\n";
+    s += "</presence>\r\n";
     return s;
 }
 

@@ -28,7 +28,7 @@
 | F5 | 멤버 프로파일(MCPTT ID·mc_queueing·초기 발언권)·Unicast Media Flow Control·Queued Floor Requests | CMP | TS 24.380 §6.3.5, §8.2.15~8.2.16 | ✅ 정합 |
 | F6 | floor SRTCP — 유니캐스트 leg 별 클라이언트 키(CSK) | CMP | TS 33.180 §9.4 / TS 24.380 §13.3.2 | ✅ 정합 (키 배포는 CSC KMS 연동 대기) |
 | C1 | affiliation PUBLISH — 규격형(Event: presence + pidf 집합 교체) + 구형(Event: mcptt + affiliation-command) 양립 | CSP | TS 24.379 §9.2.2.2.3, §9.3.1.2 | ✅ 정합 (구형은 전환기 한시) |
-| C2 | affiliation-info SUBSCRIBE/NOTIFY (presence) | CSP | TS 24.379 §9.3 | ✅ 정합 |
+| C2 | 제휴 상태 SUBSCRIBE/NOTIFY (presence, pidf) | CSP | TS 24.379 §9.2.2.2.4·§9.2.2.2.5·§9.3.1 | ✅ 정합 (편차 C2 참조) |
 | C3 | Resource-Priority namespace 정규화(단일값) | CSP | RFC 4412 | ✅ 정합 |
 | C4 | floor SDP `m=application` + `mcptt-floor-request-uri` | CSP | TS 24.380 §12 | ✅ 정합 |
 | C4b~C4e | 멤버 leg INVITE·개시자 응답(Contact·PAI·Warning 전달)·확인 통화 설정(TNG1·최소 인원·미응답 멤버 INFO)·세션 식별자 GRUU·Warning 형식 | CSP | TS 24.379 §4.4·§4.5·§6.3.3.1.2·§6.3.3.2.3.2·§6.3.3.3 | ✅ 정합 (Supported norefersub/explicitsub 미광고 — §C4g 남은 편차) |
@@ -350,13 +350,44 @@ affiliation-command 를 보낸다) → ③구형 제거.
 - 보존: 멤버십 게이트(비멤버 affiliate 거절 — 규격형은 건너뛰고 로그, 구형은 403), REGISTER Expires:0 시 affiliation 정리.
 - 검증: `tests/csp_pidf_affiliation_test.cpp`(S1-UNIT-CSP).
 
-### C2. affiliation-info SUBSCRIBE/NOTIFY (presence)
+### C2. 제휴 상태 SUBSCRIBE/NOTIFY (presence — TS 24.379 §9.2.1.3·§9.2.2.2.4·§9.2.2.2.5)
 
-- SUBSCRIBE 의 `Event: presence` 또는 `Accept: application/vnd.3gpp.mcptt-affiliation-info+xml` →
-  이벤트 타입 `affiliation` 으로 분류(`CscfModule.cpp` RecvRequestSubscribe).
-- NOTIFY: `Event: presence` + `application/vnd.3gpp.mcptt-affiliation-info+xml` 본문(가입자의 affiliated
-  그룹 목록, `CspServer.cpp` `BuildAffiliationInfoBody`). 초기 NOTIFY(`SendInitialNotify`) + 상태변경 시
-  PUBLISH 경로에서 `SendAffiliationNotify` 로 푸시.
+- SUBSCRIBE: 단말은 R-URI = 참여 기능 PSI, `Event: presence`, `Accept: application/pidf+xml`, mcptt-info
+  `<mcptt-request-uri>` = 대상 MCPTT ID 로 보낸다(§9.2.1.3). CSP 는 `Event: presence`(또는 옛 단말의
+  `Accept: …mcptt-affiliation-info…`)를 이벤트 타입 `affiliation` 으로 분류한다(`CscfModule.cpp` RecvRequestSubscribe).
+- NOTIFY 본문 = **`application/pidf+xml` per-user affiliation information**(§9.3.1.2 첫 목록, §9.2.2.2.5 3)) —
+  `CspServer.cpp` `BuildAffiliationInfoBody` → `McpttInfo.h` `BuildPidfAffiliationInfo`:
+
+  ```xml
+  <presence xmlns="urn:ietf:params:xml:ns:pidf" xmlns:mcpttPI10="urn:3gpp:ns:mcpttPresInfo:1.0" entity="tel:+82500000006">
+    <tuple id="RoT_MCX_2c08e90a-…">                         <!-- MCPTT client ID — 클라이언트마다 하나 -->
+      <status>
+        <mcpttPI10:affiliation group="tel:g001" status="affiliated" expires="2026-09-30T05:00:00Z"/>
+      </status>
+    </tuple>
+    <mcpttPI10:p-id>…</mcpttPI10:p-id>                      <!-- 부른 PUBLISH 의 p-id (있을 때만) -->
+  </presence>
+  ```
+
+  - `entity` = 가입자의 MCPTT ID(`tel:+msisdn` — 토큰·user-profile 과 같은 표기, `McpttIdUri`).
+  - `group` = **MCPTT group ID**(`tel:g001` — user-profile·GMS 그룹 문서·그룹 INVITE `mcptt-calling-group-id` 와 같은 표기,
+    CSC `_group_uri` 와 같은 규칙의 `McpttGroupUri`). 그룹 세션 URI(`sip:g001@<PTT 도메인>`)와 다르다.
+  - `tuple id` = `ptt_affiliations.client_id` — 규격형 PUBLISH 는 pidf `tuple@id`(MCPTT client ID, §9.2.2.2.3 10))를,
+    구형 PUBLISH(`Event: mcptt`)는 Contact URI 를 저장한다. 규격형 PUBLISH 는 같은 단말이 Contact URI 키로 남긴 행을 지워
+    한 단말이 tuple 하나로 보이게 한다.
+  - `expires` = 제휴 만료(`expires_at`, UTC xs:dateTime). 만료 없는 제휴는 속성 생략. 만료·해제된 제휴는 싣지 않는다(§9.2.2.2.5 3) a)·b)).
+  - `p-id` = 규격형 PUBLISH 가 `<p-id>` 를 실었으면 그 PUBLISH 가 부른 NOTIFY 에 되돌린다(§9.2.2.2.5 3) d)). pidf 확장 요소라
+    RFC 3863 스키마 순서대로 tuple 뒤에 둔다.
+  - DB 미연결이면 제휴 정본을 읽을 수 없으므로 tuple 없는 문서를 낸다(fan-out 판정 `IsAffiliated` 도 그때는 거짓).
+- 초기 NOTIFY(`SendInitialNotify`) + 제휴 변경 시 PUBLISH 경로에서 `SendAffiliationNotify(user, p-id)` 로 푸시(구독자 모두 같은 문서).
+- **규격 대비 편차**
+
+  | 항목 | 규격 | CIMS |
+  |---|---|---|
+  | 통지 대상 MCPTT ID | `<mcptt-request-uri>` 의 MCPTT ID, 남의 ID 면 권한 없을 때 403(§9.2.2.2.4 1)~4)) | 구독자 자신(From)만 — 타인 제휴 구독 미구현 |
+  | 클라이언트별 제한 | `application/simple-filter+xml` 로 한 클라이언트만(§9.2.2.2.5 3) c), §9.3.2) | 필터 미적용 — 모든 클라이언트 tuple |
+  | `status` 값 | affiliating·affiliated·deaffiliating | `affiliated` 만 — 서버가 PUBLISH 를 즉시 확정해 중간 상태가 없다 |
+  | NOTIFY From URI | 대화 local URI = SUBSCRIBE 의 To URI(RFC 3261 §12.1.1) | `sip:mcptt_psi@<CSP IP:port>` — 대화 식별은 태그로 된다 |
 
 ### C3. Resource-Priority namespace 정규화
 

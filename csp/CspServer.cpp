@@ -67,6 +67,7 @@ CCallDir gclsCallDir;
 #include "IpsecSaSet.h"
 #include "Log.h"
 #include "McDataMediaService.h"
+#include "McpttInfo.h"
 #include "MemoryDebug.h"
 #include "ModuleDispatcher.h"
 #include "Monitor.h"
@@ -774,33 +775,39 @@ static std::string BuildRegInfoBody( const SubscriptionInfo &sub, const CUserInf
 }
 
 /**
- * @brief C2: affiliation-info NOTIFY 본문 (application/vnd.3gpp.mcptt-affiliation-info+xml, TS 24.379 §9.3/F.4)
- *   가입자가 active affiliation 을 가진 그룹들을 <affiliation
- * group="sip:g@domain"><status>affiliated</status></affiliation> 로 나열한다. DB 미연결 시 멤버십(그룹 소속) 기준으로
- * fallback.
+ * @brief 제휴 상태 NOTIFY 본문 — application/pidf+xml per-user affiliation information (TS 24.379 §9.2.2.2.5 3),
+ *   §9.3.1.2). entity = 가입자의 MCPTT ID, 클라이언트(ptt_affiliations.client_id)마다 tuple 하나, 그룹마다
+ *   <affiliation group="<MCPTT group ID>" status="affiliated" expires="…">. 만료·해제된 제휴는 싣지 않는다.
+ *   그룹 ID 표기는 user-profile·GMS 와 같은 MCPTT group ID(tel:g001)다 — 그룹 세션 URI(sip:g001@도메인)가 아니다.
+ *   DB 미연결이면 제휴 정본을 읽을 수 없으므로 tuple 없는 문서를 낸다(판정 경로 IsAffiliated 도 그때는 거짓이다).
+ * @param strPid 이 NOTIFY 를 부른 PUBLISH 의 p-id — 있으면 <p-id> 로 되돌린다(§9.2.2.2.5 3) d)).
  */
-static std::string BuildAffiliationInfoBody( const std::string &strUserId ) {
-    std::string strDomain = gclsServiceMap.GetDomainByKind( "ptt" );
-    std::string strBody = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n";
-    strBody += "<mcptt-affiliation-info xmlns=\"urn:3gpp:ns:mcpttAffiliation:1.0\">\r\n";
-    bool bDb = gclsDbManager.IsConnected();
-    gclsGroupMap.IterateInternal( [&]( const CspPttGroup &clsGroup ) {
-        bool bMember = false;
-        for ( const auto &pUser : clsGroup._pusers ) {
-            if ( pUser && ( pUser->_id == strUserId || pUser->_mcpttId == strUserId ) ) {
-                bMember = true;
-                break;
+static std::string BuildAffiliationInfoBody( const std::string &strUserId, const std::string &strPid ) {
+    std::vector<CMcpttAffClient> vecClients;
+    std::vector<CDbManager::CAffiliationRow> vecRows;
+    if ( gclsDbManager.IsConnected() && gclsDbManager.SelectActiveAffiliationsByUser( strUserId, vecRows ) ) {
+        for ( const auto &r : vecRows ) {  // client_id 순 정렬 — 같은 클라이언트는 연속한다
+            if ( vecClients.empty() || vecClients.back().strClientId != r.strClientId ) {
+                vecClients.emplace_back();
+                vecClients.back().strClientId = r.strClientId;
             }
+            CMcpttAffGroup g;
+            g.strGroupUri = McpttGroupUri( r.strGroupId );
+            if ( r.llExpiresEpoch > 0 ) {
+                const time_t t = (time_t)r.llExpiresEpoch;
+                struct tm tmUtc;
+                char szTime[32];
+                gmtime_r( &t, &tmUtc );
+                strftime( szTime, sizeof( szTime ), "%Y-%m-%dT%H:%M:%SZ", &tmUtc );
+                g.strExpires = szTime;
+            }
+            vecClients.back().vecGroups.push_back( g );
         }
-        if ( !bMember ) return;
-        bool bAff = bDb ? gclsDbManager.IsAffiliated( clsGroup._id, strUserId ) : true;
-        if ( !bAff ) return;
-        strBody += "  <affiliation group=\"sip:" + clsGroup._id + "@" + strDomain + "\">\r\n";
-        strBody += "    <status>affiliated</status>\r\n";
-        strBody += "  </affiliation>\r\n";
-    } );
-    strBody += "</mcptt-affiliation-info>\r\n";
-    return strBody;
+    } else {
+        CLog::Print( LOG_ERROR, "[Affiliation/NOTIFY] user=%s 제휴 조회 불가(DB) — tuple 없는 문서",
+                     strUserId.c_str() );
+    }
+    return BuildPidfAffiliationInfo( McpttIdUri( strUserId ), vecClients, strPid );
 }
 
 /**
@@ -991,9 +998,10 @@ static void SendNotifyToSubscriber( const SubscriptionInfo &sub, const std::stri
         strBody = BuildRegInfoBody( sub, clsUserInfo, bRegistered, iSeq - 2, pszRegEvent );
         pMsg->m_clsContentType.Set( "application", "reginfo+xml" );
     } else if ( sub.strEventType == "affiliation" ) {
+        // 제휴 상태(TS 24.379 §9.2.2.2.5) — 본문은 pidf(§9.3.1). PUBLISH 가 부른 통지는 p-id 를 담은 prebuilt 본문.
         pMsg->AddHeader( "Event", "presence" );
-        strBody = BuildAffiliationInfoBody( sub.strUserId );
-        pMsg->m_clsContentType.Set( "application", "vnd.3gpp.mcptt-affiliation-info+xml" );
+        strBody = ( pstrPrebuiltBody != NULL ) ? *pstrPrebuiltBody : BuildAffiliationInfoBody( sub.strUserId, "" );
+        pMsg->m_clsContentType.Set( "application", "pidf+xml" );
     } else if ( sub.strEventType == "conference" ) {
         // 참가자 정보 (RFC 4575) — 본문은 호출자(GroupCallService)가 만든 로스터 스냅샷
         pMsg->AddHeader( "Event", "conference" );
@@ -1383,14 +1391,18 @@ void SendServiceConfigNotify( const std::string &etag ) {
 
 /**
  * @brief C2: 가입자의 affiliation 상태 변경 시 그 가입자의 "affiliation"(presence) 구독자에게
- *   affiliation-info NOTIFY 를 푸시한다. RecvRequestPublish(affiliate/de-affiliate) 에서 호출.
+ *   제휴 상태 NOTIFY(pidf, TS 24.379 §9.2.2.2.5)를 푸시한다. RecvRequestPublish(affiliate/de-affiliate) 에서 호출.
+ * @param strPid 부른 PUBLISH 의 p-id(규격형 PUBLISH 만 가짐) — 비면 <p-id> 없이 낸다.
  */
-void SendAffiliationNotify( const std::string &strUserId ) {
+void SendAffiliationNotify( const std::string &strUserId, const std::string &strPid ) {
     std::list<SubscriptionInfo> subList;
     gclsSubscriptionManager.GetSubscriptionsByUser( strUserId, "affiliation", subList );
-    CLog::Print( LOG_INFO, "SendAffiliationNotify: User=%s subs=%d", strUserId.c_str(), (int)subList.size() );
+    CLog::Print( LOG_INFO, "SendAffiliationNotify: User=%s subs=%d p-id=%s", strUserId.c_str(), (int)subList.size(),
+                 strPid.empty() ? "-" : strPid.c_str() );
+    if ( subList.empty() ) return;
+    const std::string strBody = BuildAffiliationInfoBody( strUserId, strPid );  // 구독자 모두 같은 문서
     for ( auto &sub : subList ) {
-        SendNotifyToSubscriber( sub, "aff", "" );
+        SendNotifyToSubscriber( sub, "aff", "", NULL, NULL, &strBody );
     }
 }
 

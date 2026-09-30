@@ -984,6 +984,34 @@ bool CDbManager::SelectAffiliatedGroupsByUser( const std::string &strUserId, std
     return true;
 }
 
+bool CDbManager::SelectActiveAffiliationsByUser( const std::string &strUserId, std::vector<CAffiliationRow> &vecRows ) {
+    std::lock_guard<std::recursive_mutex> lock( m_mutex );
+    if ( !m_pMysql && !Reconnect() ) return false;
+
+    // 만료 시각은 UNIX 초로 받는다 — DATETIME 은 세션 시간대 기준이라 문자열로 받으면 xs:dateTime 의 시간대를
+    //   붙일 근거가 없다. UNIX_TIMESTAMP 는 같은 세션 시간대로 해석하므로 UTC 로 바로 옮길 수 있다.
+    std::string strSql =
+        "SELECT g.mcptt_group_id, a.client_id, IFNULL(UNIX_TIMESTAMP(a.expires_at),0) "
+        "FROM ptt_affiliations a JOIN ptt_groups g ON a.group_id=g.id "
+        "WHERE a.user_id='" +
+        Escape( strUserId ) +
+        "' AND a.status='affiliated' "
+        "AND (a.expires_at IS NULL OR a.expires_at > NOW()) ORDER BY a.client_id, g.mcptt_group_id";
+    MYSQL_RES *pRes = ExecuteSelect( strSql );
+    if ( !pRes ) return false;
+    MYSQL_ROW row;
+    while ( ( row = mysql_fetch_row( pRes ) ) != nullptr ) {
+        if ( !row[0] ) continue;
+        CAffiliationRow r;
+        r.strGroupId = row[0];
+        r.strClientId = row[1] ? row[1] : "";
+        r.llExpiresEpoch = row[2] ? atoll( row[2] ) : 0;
+        vecRows.push_back( r );
+    }
+    mysql_free_result( pRes );
+    return true;
+}
+
 bool CDbManager::RemoveAffiliationsByUser( const std::string &strUserId ) {
     std::lock_guard<std::recursive_mutex> lock( m_mutex );
     if ( !m_pMysql && !Reconnect() ) return false;
