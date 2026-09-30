@@ -12,6 +12,14 @@
 //              (--broadcast = 일제 통화 개시 — 발언을 놓은 뒤 서버 Floor Idle(B-bit)이면 코어가 호를 해제, outcome 에 broadcast_released)
 //              (--implicit = 개시 INVITE 가 암묵적 발언 요청 — mc_implicit_request+mc_granted, TS 24.380 §14.2.4·§14.2.5. --ptt-at 0 과 함께)
 //              [--upgrade-at S] [--cancel-at S]  (진행 중 긴급 상향·하향 re-INVITE, TS 24.379 §10.1.1.2.1.3·§10.1.1.2.1.4 — outcome 에 conditions)
+//   cimsue-cli [계정 옵션] video-call <groupId> [--prearranged] [--queueing] [--priority N] [--implicit] [--rejoin SESSION_URI]
+//              [--transmit-at S --transmit-len S] [--accept] [--duration S]
+//              (MCVideo 그룹 호 — TS 24.281 §9.2.1 prearranged · §9.2.2 chat, 전송 제어 TS 24.581. --transmit-at = 그 시각에 [영상 보내기]
+//               (Transmission Request) → --transmit-len 뒤 [보내기 끝], --accept = 알림 온 송출마다 [받기](Receive Media Request),
+//               --implicit = 개시 INVITE 가 암묵적 송출 요청. 계정 옵션 --mcvideo · --mcvideo-psi 필요. affiliation 은 싣지 않는다 — chat 합류가 곧
+//               affiliation(§8.1)이고 명시 affiliation PUBLISH 는 CSP A9 배포 뒤)
+//   cimsue-cli [계정 옵션] video-answer [--transmit-at S --transmit-len S] [--accept] [--duration S]
+//              (제어 기능의 MCVideo 멤버 초대(§9.2.1.3)를 기다린다 — 코어가 자동 수락(autoAnswerMcvideo), 뒤는 video-call 과 같다)
 //   cimsue-cli [계정 옵션] alert <groupId> [--cancel] [--originated-by ID] [--cancel-group-emergency]   (긴급 경보 MESSAGE, §12.1.1.1·§12.1.1.2)
 //   cimsue-cli [계정 옵션] sds <groupId> <text> [--wait-disposition S]   (MESSAGE 최종 응답까지 대기 — --cplane-max N 을 넘으면 MSRP, 결과
 //              plane=media. --wait-disposition = 그 메시지의 전달 확인 통지(TS 24.282 §12.2.1.2)를 S 초까지 기다린다)
@@ -39,7 +47,9 @@
 //           [--cplane-max N] (그룹 SDS 시그널링 평면 상한 — 넘으면 MSRP, TS 24.282 §9.2.3) [--msrp] (서버발 MSRP 배포 수신 광고)
 //           [--mcptt-psi URI] [--mcdata-psi URI] (참여 기능 PSI — --from-profile 이면 ue-init-config(TS 24.484 §7.2)에서 채우고 명시값이 덮는다)
 //           [--instance-id URN] (+sip.instance · ue-init-config 의 MCS UE ID)
-// 종료 코드: 0 성공 / 2 인자 / 3 등록·로그인 실패 / 4 호 실패·시한 / 5 미디어 없음 / 6 floor 미획득 / 7 SDS 실패 / 8 관제 실패
+//           [--mcvideo] (REGISTER 에 MCVideo 태그 — TS 24.281 §7.2.1AA) [--mcvideo-psi URI] (참여 MCVideo 기능 PSI — --from-profile ptt 면
+//           ue-init-config 의 MCVideo-Service-Details 에서 채운다)
+// 종료 코드: 0 성공 / 2 인자 / 3 등록·로그인 실패 / 4 호 실패·시한 / 5 미디어 없음 / 6 floor·송출 미획득 / 7 SDS 실패 / 8 관제 실패
 #include <chrono>
 #include <csignal>
 #include <condition_variable>
@@ -93,7 +103,12 @@ struct Opts {
     bool listenOnly = false;
     bool emergency = false;
     bool broadcast = false;           // 일제 통화 개시(TS 24.379 §4.12)
-    bool implicit = false;            // 암묵적 발언 요청(TS 24.380 §14.2.5)
+    bool implicit = false;            // 암묵적 발언 요청(TS 24.380 §14.2.5) · MCVideo 암묵적 송출 요청(TS 24.581 §14.2.5)
+    // MCVideo 그룹 호(video-call · video-answer)
+    bool prearranged = false, queueing = false, accept = false;
+    int priority = -1;
+    int transmitAt = -1, transmitLen = 3;
+    std::string rejoinUri;            // 재합류 — 앞 호의 세션 식별자(TS 24.281 §9.2.1.2.4)
     int upgradeAt = -1, cancelAt = -1;  // 진행 중 긴급 상향·하향 시각(TS 24.379 §10.1.1.2.1.3·§10.1.1.2.1.4)
     bool alertCancel = false, cancelGroupEmergency = false;
     bool notifyDelivered = false;     // sds-recv — 전달 확인 요청에 DELIVERED 통지(TS 24.282 §12.2.1.1)
@@ -127,10 +142,14 @@ void usage() {
         "        [--mcdata-psi URI]  (참여 MCData 기능 PSI — disposition 통지 Request-URI, TS 24.282 §12.2.1.1)\n"
         "        [--instance-id URN] (+sip.instance · ue-init-config 의 MCS UE ID. --from-profile ptt 면 ue-init-config 로 PSI 를 채운다)\n"
         "        [--mcptt-video]   (착신 그룹콜의 m=video 를 영상까지 수락)\n"
+        "        [--mcvideo] [--mcvideo-psi URI]   (MCVideo 등록 태그 · 참여 MCVideo 기능 PSI — TS 24.281 §7.2.1AA·§9.2.1.2.1.1)\n"
         "        또는 --csc-host H [--csc-port N] --user U --pw P [--csc-ca FILE] --from-profile volte|ptt\n"
         "  register [--hold S] | call TARGET [--duration S] [--video] | answer [--duration S] [--transfer-to X]\n"
         "  group-call GROUP [--duration S] [--ptt-at S --ptt-len S] [--listen-only] [--emergency] [--broadcast] [--implicit] [--video]\n"
         "             [--upgrade-at S] [--cancel-at S]\n"
+        "  video-call GROUP [--prearranged] [--queueing] [--priority N] [--implicit] [--rejoin URI] [--transmit-at S --transmit-len S]\n"
+        "             [--accept] [--duration S]   (MCVideo 그룹 호 — 계정 --mcvideo --mcvideo-psi URI)\n"
+        "  video-answer [--transmit-at S --transmit-len S] [--accept] [--duration S]   (MCVideo 멤버 초대 대기 — 코어가 자동 수락)\n"
         "  alert GROUP [--cancel] [--originated-by ID] [--cancel-group-emergency]\n"
         "  sds GROUP TEXT [--wait-disposition S] | sds-recv [--duration S] [--notify-delivered] | login\n"
         "  dialog-watch AOR [--duration S] | join AOR [--duration S] | pickup [NUMBER] --code CODE | transfer PEER --to X\n"
@@ -198,6 +217,11 @@ bool parse(int argc, char** argv, Opts& o) {
             if (opt("--wait-disposition", [&](const std::string& v) { o.waitDispositionSec = std::stoi(v); })) continue;
             if (opt("--cancel-at", [&](const std::string& v) { o.cancelAt = std::stoi(v); })) continue;
             if (opt("--originated-by", [&](const std::string& v) { o.originatedBy = v; })) continue;
+            if (opt("--mcvideo-psi", [&](const std::string& v) { o.acc.mcvideoServerUri = v; o.acc.mcvideoEnabled = true; })) continue;
+            if (opt("--priority", [&](const std::string& v) { o.priority = std::stoi(v); })) continue;
+            if (opt("--transmit-at", [&](const std::string& v) { o.transmitAt = std::stoi(v); })) continue;
+            if (opt("--transmit-len", [&](const std::string& v) { o.transmitLen = std::stoi(v); })) continue;
+            if (opt("--rejoin", [&](const std::string& v) { o.rejoinUri = v; })) continue;
             if (opt("--members", [&](const std::string& v) { std::stringstream ss(v); std::string m; while (std::getline(ss, m, ',')) if (!m.empty()) o.groupMembers.push_back(m); })) continue;
         } catch (std::exception& e) { std::fprintf(stderr, "%s\n", e.what()); return false; }
         if (a == "--no-tls-verify") o.tlsVerify = false;
@@ -212,20 +236,25 @@ bool parse(int argc, char** argv, Opts& o) {
         else if (a == "--notify-delivered") o.notifyDelivered = true;
         else if (a == "--mcptt-video") o.acc.mcpttVideo = true;
         else if (a == "--cancel-group-emergency") o.cancelGroupEmergency = true;
+        else if (a == "--mcvideo") o.acc.mcvideoEnabled = true;
+        else if (a == "--prearranged") o.prearranged = true;
+        else if (a == "--queueing") o.queueing = true;
+        else if (a == "--accept") o.accept = true;
         else if (a == "-h" || a == "--help") return false;
         else if (a.rfind("--", 0) == 0) { std::fprintf(stderr, "unknown arg: %s\n", a.c_str()); return false; }
         else pos.push_back(a);
     }
     if (pos.empty()) return false;
     o.cmd = pos[0];
-    static const char* needTarget[] = {"call", "group-call", "alert", "dialog-watch", "join", "transfer", "group-get", "group-put", "group-delete", "link"};
+    static const char* needTarget[] = {"call", "group-call", "video-call", "alert", "dialog-watch", "join", "transfer", "group-get", "group-put",
+                                       "group-delete", "link"};
     for (auto n : needTarget) if (o.cmd == n) { if (pos.size() < 2) return false; o.target = pos[1]; }
     if (o.cmd == "sds") { if (pos.size() < 3) return false; o.target = pos[1]; for (size_t i = 2; i < pos.size(); ++i) o.text += (i > 2 ? " " : "") + pos[i]; }
     if (o.cmd == "pickup") { if (pos.size() >= 2) o.target = pos[1]; if (o.code.empty()) return false; }
     if (o.cmd == "drive" || o.cmd == "link") o.json = true;   // 구동·링크 모드는 언제나 JSON 이벤트
     if (o.cmd == "transfer" && o.transferTo.empty()) return false;
-    static const char* known[] = {"register", "call", "answer", "group-call", "alert", "sds", "sds-recv", "login", "dialog-watch", "join", "pickup", "transfer",
-                                  "groups", "group-get", "group-put", "group-delete", "drive", "link"};
+    static const char* known[] = {"register", "call", "answer", "group-call", "video-call", "video-answer", "alert", "sds", "sds-recv", "login",
+                                  "dialog-watch", "join", "pickup", "transfer", "groups", "group-get", "group-put", "group-delete", "drive", "link"};
     bool ok = false;
     for (auto k : known) if (o.cmd == k) ok = true;
     return ok;
@@ -244,8 +273,8 @@ public:
         set([&] { reg = r; });
     }
     void onIncomingCall(const CallInfo& c) override {
-        std::fprintf(stderr, "[cimsue-cli] incoming call=%d from=%s called=%s video=%d mcptt=%d group=%s\n", c.callId,
-                     c.remoteUri.c_str(), c.calledParty.c_str(), c.video, c.isMcptt, c.groupId.c_str());
+        std::fprintf(stderr, "[cimsue-cli] incoming call=%d from=%s called=%s video=%d mcptt=%d service=%s group=%s\n", c.callId,
+                     c.remoteUri.c_str(), c.calledParty.c_str(), c.video, c.isMcptt, toString(c.service), c.groupId.c_str());
         set([&] { incoming = c; haveIncoming = true; calls[c.callId] = c; });
     }
     void onCallState(const CallInfo& c) override {
@@ -271,6 +300,24 @@ public:
             if (ev.kind == FloorEvent::Kind::Taken) taken++;
             if (ev.kind == FloorEvent::Kind::Denied) denied++;
         });
+    }
+    void onTransmission(const TransmissionEvent& ev) override {
+        std::fprintf(stderr, "[cimsue-cli] transmission call=%d %s state=%s cause=%d(%s) dur=%d prio=%d queue=%d audio_ssrc=%u video_ssrc=%u\n",
+                     ev.callId, toString(ev.kind), toString(ev.state), ev.cause, ev.causeText.c_str(), ev.durationSec, ev.priority,
+                     ev.queuePosition, ev.audioSsrc, ev.videoSsrc);
+        if (json_)
+            std::printf("{\"event\":\"transmission\",\"call_id\":%d,\"kind\":\"%s\",\"state\":\"%s\",\"cause\":%d}\n", ev.callId,
+                        toString(ev.kind), toString(ev.state), ev.cause);
+        set([&] { transmissions.push_back(ev); });
+    }
+    void onReception(const ReceptionEvent& ev) override {
+        std::fprintf(stderr, "[cimsue-cli] reception call=%d %s from=%s state=%s auto=%d cause=%d(%s) audio_ssrc=%u video_ssrc=%u\n", ev.callId,
+                     toString(ev.kind), ev.transmitter.userId.c_str(), toString(ev.transmitter.state), ev.transmitter.automatic, ev.cause,
+                     ev.causeText.c_str(), ev.transmitter.audioSsrc, ev.transmitter.videoSsrc);
+        if (json_)
+            std::printf("{\"event\":\"reception\",\"call_id\":%d,\"kind\":\"%s\",\"from\":\"%s\",\"state\":\"%s\",\"cause\":%d}\n",
+                        ev.callId, toString(ev.kind), ev.transmitter.userId.c_str(), toString(ev.transmitter.state), ev.cause);
+        set([&] { receptions.push_back(ev); });
     }
     void onRoster(int, const std::string& g, const std::vector<RosterEntry>& users, bool full) override {
         std::string s;
@@ -346,6 +393,8 @@ public:
     std::map<int64_t, RequestResult> results;
     std::vector<std::pair<CallInfo, ConditionCause>> conditions;
     std::vector<EmergencyAlert> alerts;
+    std::vector<TransmissionEvent> transmissions;
+    std::vector<ReceptionEvent> receptions;
 
 private:
     template <typename F> void set(F f) { { std::lock_guard<std::mutex> lk(m_); f(); } cv_.notify_all(); }
@@ -673,13 +722,16 @@ int main(int argc, char** argv) {
             UeInitConfigDoc ui;
             // MCS UE ID = instance ID. 없으면 Nil UUID(RFC 4122 §4.1.7) — 이 CMS 는 모든 UE 에 같은 문서를 준다.
             Result ur = csc.fetchUeInitConfig(a.instanceId.empty() ? "urn:uuid:00000000-0000-0000-0000-000000000000" : a.instanceId, "", ui);
-            if (ur.ok) { a.mcpttServerUri = ui.mcpttServerUri; a.mcdataServerUri = ui.mcdataServerUri; }
+            if (ur.ok) { a.mcpttServerUri = ui.mcpttServerUri; a.mcdataServerUri = ui.mcdataServerUri; a.mcvideoServerUri = ui.mcvideoServerUri; }
             else std::fprintf(stderr, "[cimsue-cli] ue-init-config: %s\n", ur.reason.c_str());
         }
         if (!o.acc.mcpttServerUri.empty()) a.mcpttServerUri = o.acc.mcpttServerUri;
         if (!o.acc.mcdataServerUri.empty()) a.mcdataServerUri = o.acc.mcdataServerUri;
-        if (!a.mcpttServerUri.empty() || !a.mcdataServerUri.empty())
-            std::fprintf(stderr, "[cimsue-cli] psi mcptt=%s mcdata=%s\n", a.mcpttServerUri.c_str(), a.mcdataServerUri.c_str());
+        if (!o.acc.mcvideoServerUri.empty()) a.mcvideoServerUri = o.acc.mcvideoServerUri;
+        a.mcvideoEnabled = o.acc.mcvideoEnabled;                          // MCVideo 등록은 명시할 때만(--mcvideo)
+        if (!a.mcpttServerUri.empty() || !a.mcdataServerUri.empty() || !a.mcvideoServerUri.empty())
+            std::fprintf(stderr, "[cimsue-cli] psi mcptt=%s mcdata=%s mcvideo=%s\n", a.mcpttServerUri.c_str(), a.mcdataServerUri.c_str(),
+                         a.mcvideoServerUri.c_str());
         o.acc = a;
         std::fprintf(stderr, "[cimsue-cli] provisioned %s: %s via %s:%d/%s ha1=%d dispatch=%s\n", sp->kind.c_str(), a.aor().c_str(),
                      a.serverHost.c_str(), a.serverPort, toString(a.transport), !a.ha1.empty(), prof.dispatch.groupId.c_str());
@@ -882,6 +934,84 @@ int main(int argc, char** argv) {
         if (o.pttAt >= 0 && ls.granted == 0) { s.outcome = "floor_not_granted"; rc = 6; }
         // 일제 통화 개시자: 발언을 놓은 뒤 코어가 호를 해제했으면(TS 24.380 §6.2.4.6.4) 시한 전에 끝난 것이 정상이다.
         else if (o.broadcast && gone && o.pttAt >= 0) s.extra += ",\"broadcast_released\":true";
+        return finish(s.callId);
+    }
+
+    if (o.cmd == "video-call" || o.cmd == "video-answer") {
+        if (o.cmd == "video-call") {
+            VideoGroupCallOptions vo;
+            vo.prearranged = o.prearranged;
+            vo.queueing = o.queueing;
+            vo.maxPriority = o.priority;
+            vo.implicitTransmissionRequest = o.implicit;
+            vo.sessionUri = o.rejoinUri;
+            s.callId = eng.joinVideoGroupCall(acc, o.target, vo);
+            if (s.callId < 0) { s.outcome = "invite_failed"; rc = 4; return finish(-1); }
+        } else {
+            bool got = ls.waitFor([&] { return ls.haveIncoming && ls.incoming.service == McService::McVideo; }, o.durationSec);
+            if (!got) { s.outcome = "no_invitation"; rc = 4; return finish(-1); }
+            s.callId = ls.incoming.callId;                                   // 코어가 자동 수락한다(autoAnswerMcvideo)
+        }
+        bool up = waitActive(ls, s.callId, o.timeoutSec);
+        CallInfo ci = ls.calls.count(s.callId) ? ls.calls[s.callId] : CallInfo{};
+        if (!up || ci.state != CallState::Active) { s.outcome = up ? "call_failed" : "call_timeout"; rc = 4; return finish(s.callId); }
+        auto t0 = std::chrono::steady_clock::now();
+        auto elapsed = [&] { return (int)std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - t0).count(); };
+        auto txSeen = [&](std::initializer_list<TransmissionEvent::Kind> kinds, size_t from) {
+            for (size_t k = from; k < ls.transmissions.size(); ++k)
+                for (auto kd : kinds) if (ls.transmissions[k].callId == s.callId && ls.transmissions[k].kind == kd) return true;
+            return false;
+        };
+        bool txDone = o.transmitAt < 0, gone = false;
+        size_t accepted = 0;                                             // 이미 [받기] 한 알림 수(receptions 색인)
+        std::set<std::string> acceptedIds;
+        while (elapsed() < o.durationSec && !gone) {
+            if (!txDone && elapsed() >= o.transmitAt) {
+                txDone = true;
+                size_t before = ls.transmissions.size();
+                Result tr = eng.requestTransmission(s.callId, o.priority);
+                if (!tr.ok) std::fprintf(stderr, "[cimsue-cli] requestTransmission: %s\n", tr.reason.c_str());
+                using K = TransmissionEvent::Kind;
+                ls.waitFor([&] { return txSeen({K::Granted, K::Rejected, K::RequestTimeout, K::QueuePosition}, before); }, 5);
+                ls.waitFor([&] { return disconnected(s.callId); }, o.transmitLen);
+                before = ls.transmissions.size();
+                Result rr = eng.releaseTransmission(s.callId);
+                if (rr.ok) ls.waitFor([&] { return txSeen({K::Ended, K::RequestTimeout}, before); }, 5);
+            }
+            if (o.accept) {
+                std::vector<std::string> todo;
+                ls.waitFor([&] {
+                    for (; accepted < ls.receptions.size(); ++accepted) {
+                        const ReceptionEvent& e = ls.receptions[accepted];
+                        if (e.callId == s.callId && e.kind == ReceptionEvent::Kind::Notified && !e.transmitter.automatic &&
+                            !acceptedIds.count(e.transmitter.userId))
+                            todo.push_back(e.transmitter.userId);
+                    }
+                    return !todo.empty();
+                }, 0);
+                for (auto& id : todo) {                                      // 엔진 명령은 main 에서(리스너 스레드가 엔진을 다시 부르지 않게)
+                    acceptedIds.insert(id);
+                    Result ar = eng.acceptReception(s.callId, id);
+                    std::fprintf(stderr, "[cimsue-cli] acceptReception %s: %s\n", id.c_str(), ar.ok ? "sent" : ar.reason.c_str());
+                }
+            }
+            gone = ls.waitFor([&] { return disconnected(s.callId); }, 1);
+        }
+        TransmissionInfo ti = eng.transmissionInfo(s.callId);
+        ci = eng.callInfo(s.callId);
+        auto count = [&](auto& v, auto kind) { int n = 0; for (auto& e : v) if (e.callId == s.callId && e.kind == kind) ++n; return n; };
+        using K = TransmissionEvent::Kind;
+        using R = ReceptionEvent::Kind;
+        const int granted = count(ls.transmissions, K::Granted);
+        s.extra = ",\"session_uri\":\"" + jsonEsc(ci.sessionUri) + "\",\"tc_local_port\":" + std::to_string(ti.localPort) +
+                  ",\"tc_remote\":\"" + ti.remoteIp + ":" + std::to_string(ti.remotePort) + "\",\"tx_granted\":" + std::to_string(granted) +
+                  ",\"tx_rejected\":" + std::to_string(count(ls.transmissions, K::Rejected)) +
+                  ",\"tx_revoked\":" + std::to_string(count(ls.transmissions, K::Revoked)) +
+                  ",\"tx_ended\":" + std::to_string(count(ls.transmissions, K::Ended)) +
+                  ",\"rx_notified\":" + std::to_string(count(ls.receptions, R::Notified)) +
+                  ",\"rx_granted\":" + std::to_string(count(ls.receptions, R::Granted)) +
+                  ",\"rx_rejected\":" + std::to_string(count(ls.receptions, R::Rejected));
+        if (o.transmitAt >= 0 && granted == 0) { s.outcome = "transmission_not_granted"; rc = 6; }
         return finish(s.callId);
     }
 

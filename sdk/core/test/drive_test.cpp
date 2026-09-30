@@ -101,3 +101,21 @@ TEST(Drive, LinkRejectsBadConfig) {
     EXPECT_EQ(link.state(), LinkState::Idle);
     link.stop();
 }
+
+// MCVideo 명령(TS 24.281 호 · TS 24.581 전송 제어) — 엔진이 없으면 거절하되 명령마다 결과 줄 하나, 알려진 명령으로 해석된다
+TEST(Drive, McVideoCommands) {
+    Engine eng;
+    VecSink sink;
+    DriveSession ds(eng, sink, twoLines(false));
+    ds.start(false);
+    for (const char* cmd : {"video_call g101 prearranged queueing implicit", "transmit_request 0 5", "transmit_release 0",
+                            "reception_accept 0 tel:+82510002001", "reception_end 0 tel:+82510002001"}) {
+        size_t before = sink.lines.size();
+        ds.handleLine(cmd);
+        ASSERT_EQ(sink.lines.size(), before + 1) << cmd;
+        std::string op(cmd, std::string(cmd).find(' '));
+        EXPECT_NE(sink.last().find("\"op\":\"" + op + "\",\"ok\":false"), std::string::npos) << sink.last();
+        EXPECT_EQ(sink.last().find("unknown command"), std::string::npos) << sink.last();
+    }
+    ds.stop();
+}

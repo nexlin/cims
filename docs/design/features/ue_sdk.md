@@ -435,6 +435,14 @@ cimsue-cli [계정] call <번호|sip:URI> [--duration S] [--video]
 cimsue-cli [계정] answer [--duration S]          # 착신 대기 → 200 → 상대 BYE 또는 duration (MCPTT 착신은 자동 수락)
 cimsue-cli [계정] group-call <groupId> [--duration S] [--ptt-at S --ptt-len S] [--listen-only] [--emergency] [--broadcast] [--implicit]
                   [--upgrade-at S] [--cancel-at S]   # 진행 중 긴급 상향·하향 re-INVITE — outcome conditions[{cause,emergency,code}]
+cimsue-cli [계정] video-call <groupId> [--prearranged] [--queueing] [--priority N] [--implicit] [--rejoin URI]
+                  [--transmit-at S --transmit-len S] [--accept] [--duration S]
+                  # MCVideo 그룹 호(TS 24.281 §9.2.1·§9.2.2) — transmit-at 에 Transmission Request → transmit-len 뒤 End Request,
+                  #   --accept = 알림 온 송출마다 Receive Media Request. outcome tx_granted·tx_rejected·tx_revoked·tx_ended·rx_notified·rx_granted·
+                  #   rx_rejected·session_uri·tc_local_port·tc_remote, 송출 미허가 = 종료코드 6. 계정 --mcvideo(REGISTER 태그)·--mcvideo-psi URI
+                  #   (--from-profile ptt 면 ue-init-config MCVideo-Service-Details). affiliation PUBLISH 는 싣지 않는다(chat 합류 = affiliation §8.1 —
+                  #   명시 affiliation 은 CSP A9 뒤)
+cimsue-cli [계정] video-answer [--transmit-at S --transmit-len S] [--accept] [--duration S]   # 제어 기능 멤버 초대 대기(코어 자동 수락) → video-call 과 같다
 cimsue-cli [계정] alert <groupId> [--cancel] [--originated-by ID] [--cancel-group-emergency]   # 긴급 경보 MESSAGE
 cimsue-cli [계정] sds <groupId> <text>           # 최종 응답까지 — [계정] --cplane-max N 을 넘으면 MSRP(outcome plane=media)
                                                  #   ([계정] --msrp = 서버발 MSRP 배포 수신 광고 — sds-recv 가 plane=media 로 받는다)
@@ -446,7 +454,7 @@ cimsue-cli [계정] sds-recv [--duration S]        # 수신 SDS 를 JSON 줄로 
 ```
 
 결과는 stdout 에 JSON 한 줄(`outcome`·`rx_pkts`·`tx_pkts`·`granted`·`taken`·`denied`·`code`), 종료코드 0/2/3/4/5/6/7
-(성공/인자/등록/호/미디어 없음/floor 미획득/SDS 실패). `--affiliate` 는 시작 시 PUBLISH(Event: mcptt), 종료 시 de-affiliate.
+(성공/인자/등록/호/미디어 없음/floor·송출 미획득/SDS 실패). `--affiliate` 는 시작 시 PUBLISH(Event: mcptt), 종료 시 de-affiliate.
 ```
 cimsue-cli [계정] dialog-watch <aor> [--duration S]   # RFC 4235 구독 → dialog-info 를 JSON 줄로
 cimsue-cli [계정] join <aor> [--duration S]           # 감시 → confirmed dialog 에 INVITE-Join(recvonly) → 수신 RTP·SSRC 라벨
@@ -471,8 +479,11 @@ cimsue-cli [계정] drive [--sample-file WAV] [--service volte|voip|ptt]
   명령: register | unregister | use <service> | dial <번호|URI> [video] | answer <call> [video] | reject <call> [code] | hangup <call> | hold <call>
         resume <call> | dtmf <call> <digits> | transfer <call> <대상> | group_call <group> [listen] [emergency] [broadcast] [implicit] | floor_request <call>
         floor_release <call> | affiliate <group> on|off | pickup <code> [number] | media mic|sample [<wav>] | stats [call] | quality <call> | quit
-  이벤트: ready{version,aor} · reg{service,state,code,reason,expires,rrd_ms} · incoming{call,from,called,video,mcptt,group}
-        · call{call,dir,state outgoing|incoming|active|held|disconnected,code,reason,media,mcptt,video,by_us,group,srd_ms|sdd_ms,(disconnected: 통계 + 품질)}
+        video_call <group> [prearranged] [queueing] [implicit] | transmit_request <call> [priority] | transmit_release <call>
+        reception_accept <call> <userId> | reception_end <call> <userId>   (MCVideo — affiliate 는 MCPTT 만)
+  이벤트: ready{version,aor} · reg{service,state,code,reason,expires,rrd_ms} · incoming{call,from,called,video,mcptt,service,group}
+        · call{call,dir,state outgoing|incoming|active|held|disconnected,code,reason,media,mcptt,service mcptt|mcvideo,video,by_us,group,srd_ms|sdd_ms,
+          (disconnected: 통계 + 품질)} · transmission{call,kind,state,cause,t_us} · reception{call,kind,from,state,auto,cause,t_us}
         · floor{call,kind,subtype(TS 24.380 §8.2),t_us,cause,queue_position,duration} · request{method,op,on,code,reason,ms,token}(affiliate PUBLISH)
         · stats{call,통계 + 품질}(활성 호마다 1 초) · quality{call,kind:callTerm|snapshot,품질} · roster · dialog · sds · engine_stopped · exit
   통계 = rx_pkts·tx_pkts·rx_loss·rx_bytes·jitter_us·stats_valid

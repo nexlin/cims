@@ -108,7 +108,8 @@ struct DriveSession::Impl : public Listener {
     void onIncomingCall(const CallInfo& c) override {
         { std::lock_guard<std::mutex> lk(m); active.insert(c.callId); }
         emit("{\"event\":\"incoming\",\"call\":" + std::to_string(c.callId) + ",\"from\":\"" + drive::jsonEscape(c.remoteUri) + "\",\"called\":\"" +
-             drive::jsonEscape(c.calledParty) + "\",\"video\":" + b(c.video) + ",\"mcptt\":" + b(c.isMcptt) + ",\"group\":\"" + drive::jsonEscape(c.groupId) + "\"}");
+             drive::jsonEscape(c.calledParty) + "\",\"video\":" + b(c.video) + ",\"mcptt\":" + b(c.isMcptt) + ",\"service\":\"" + toString(c.service) +
+             "\",\"group\":\"" + drive::jsonEscape(c.groupId) + "\"}");
     }
     void onCallState(const CallInfo& c) override {
         const char* st = c.state == CallState::Outgoing ? "outgoing" : c.state == CallState::Incoming ? "incoming" : c.state == CallState::Active ? "active"
@@ -135,7 +136,8 @@ struct DriveSession::Impl : public Listener {
         }
         emit("{\"event\":\"call\",\"call\":" + std::to_string(c.callId) + ",\"dir\":\"" + (c.dir == CallDir::Outgoing ? "out" : "in") + "\",\"state\":\"" + st +
              "\",\"code\":" + std::to_string(c.lastCode) + ",\"reason\":\"" + drive::jsonEscape(c.lastReason) + "\",\"media\":" + b(c.mediaActive) +
-             ",\"mcptt\":" + b(c.isMcptt) + ",\"video\":" + b(c.video) + ",\"by_us\":" + b(byUs) + ",\"group\":\"" + drive::jsonEscape(c.groupId) + "\"" + extra + "}");
+             ",\"mcptt\":" + b(c.isMcptt) + ",\"service\":\"" + toString(c.service) + "\",\"video\":" + b(c.video) + ",\"by_us\":" + b(byUs) +
+             ",\"group\":\"" + drive::jsonEscape(c.groupId) + "\"" + extra + "}");
         if (!q.empty()) emit(q);
     }
     void onFloor(const FloorEvent& ev) override {
@@ -157,6 +159,15 @@ struct DriveSession::Impl : public Listener {
         emit("{\"event\":\"floor\",\"call\":" + std::to_string(ev.callId) + ",\"kind\":\"" + k + "\",\"subtype\":" + std::to_string(sub) + ",\"t_us\":" +
              std::to_string(nowUs()) + ",\"cause\":" + std::to_string(ev.cause) + ",\"queue_position\":" + std::to_string(ev.queuePosition) + ",\"duration\":" +
              std::to_string(ev.durationSec) + "}");
+    }
+    void onTransmission(const TransmissionEvent& ev) override {
+        emit("{\"event\":\"transmission\",\"call\":" + std::to_string(ev.callId) + ",\"kind\":\"" + toString(ev.kind) + "\",\"state\":\"" +
+             toString(ev.state) + "\",\"cause\":" + std::to_string(ev.cause) + ",\"t_us\":" + std::to_string(nowUs()) + "}");
+    }
+    void onReception(const ReceptionEvent& ev) override {
+        emit("{\"event\":\"reception\",\"call\":" + std::to_string(ev.callId) + ",\"kind\":\"" + toString(ev.kind) + "\",\"from\":\"" +
+             drive::jsonEscape(ev.transmitter.userId) + "\",\"state\":\"" + toString(ev.transmitter.state) + "\",\"auto\":" + b(ev.transmitter.automatic) +
+             ",\"cause\":" + std::to_string(ev.cause) + ",\"t_us\":" + std::to_string(nowUs()) + "}");
     }
     void onRoster(int, const std::string& g, const std::vector<RosterEntry>& users, bool full) override {
         emit("{\"event\":\"roster\",\"group\":\"" + drive::jsonEscape(g) + "\",\"full\":" + b(full) + ",\"users\":" + std::to_string(users.size()) + "}");
@@ -239,7 +250,18 @@ struct DriveSession::Impl : public Listener {
             int id = eng.joinGroupCall(acc, arg(1), go);
             if (id >= 0) markDial(id);
             result(op, id >= 0, id, 0, id >= 0 ? "" : "group call refused");
-        } else if (op == "floor_request") { res(op, eng.floorRequest(argi(1, -1)), argi(1, -1)); }
+        } else if (op == "video_call") {
+            // MCVideo 그룹 호(TS 24.281 §9.2.1·§9.2.2) — chat 합류가 곧 affiliation(§8.1). 명시 affiliation 은 싣지 않는다(CSP A9 전)
+            VideoGroupCallOptions vo; vo.prearranged = has("prearranged"); vo.queueing = has("queueing");
+            vo.implicitTransmissionRequest = has("implicit");
+            int id = eng.joinVideoGroupCall(acc, arg(1), vo);
+            if (id >= 0) markDial(id);
+            result(op, id >= 0, id, 0, id >= 0 ? "" : "video call refused");
+        } else if (op == "transmit_request") { res(op, eng.requestTransmission(argi(1, -1), argi(2, -1)), argi(1, -1)); }
+        else if (op == "transmit_release") { res(op, eng.releaseTransmission(argi(1, -1)), argi(1, -1)); }
+        else if (op == "reception_accept") { res(op, eng.acceptReception(argi(1, -1), arg(2)), argi(1, -1)); }
+        else if (op == "reception_end") { res(op, eng.endReception(argi(1, -1), arg(2)), argi(1, -1)); }
+        else if (op == "floor_request") { res(op, eng.floorRequest(argi(1, -1)), argi(1, -1)); }
         else if (op == "floor_release") { res(op, eng.floorRelease(argi(1, -1)), argi(1, -1)); }
         else if (op == "affiliate") {
             bool on = arg(2) != "off";

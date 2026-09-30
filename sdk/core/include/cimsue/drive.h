@@ -8,9 +8,12 @@
 //   명령: register | unregister | use <service> | dial <번호|URI> [video] | answer <call> [video] | reject <call> [code] | hangup <call>
 //         hold <call> | resume <call> | dtmf <call> <digits> | transfer <call> <대상> | group_call <group> [listen] [emergency] [broadcast] [implicit] [video]
 //         floor_request <call> | floor_release <call> | affiliate <group> on|off | pickup <code> [number] | media mic|sample [<wav>]
+//         video_call <group> [prearranged] [queueing] [implicit] | transmit_request <call> [priority] | transmit_release <call>
+//         reception_accept <call> <userId> | reception_end <call> <userId>   (MCVideo 그룹 호·전송 제어 — TS 24.281 · TS 24.581)
 //         stats [call] | quality <call> | quit
-//   이벤트: ready{version,aor} · reg{service,state,code,reason,expires,rrd_ms} · incoming{call,from,called,video,mcptt,group}
-//         · call{call,dir,state,code,reason,media,mcptt,video,by_us,group,srd_ms|sdd_ms,(disconnected: 통계 + 품질)} · floor{call,kind,subtype,t_us,...}
+//   이벤트: ready{version,aor} · reg{service,state,code,reason,expires,rrd_ms} · incoming{call,from,called,video,mcptt,service,group}
+//         · call{call,dir,state,code,reason,media,mcptt,service,video,by_us,group,srd_ms|sdd_ms,(disconnected: 통계 + 품질)} · floor{call,kind,subtype,t_us,...}
+//         · transmission{call,kind,state,cause,t_us} · reception{call,kind,from,state,auto,cause,t_us}   (MCVideo — service = mcvideo 인 호)
 //         · request{method,op,on,code,reason,ms,token} · stats{call,통계 + 품질}(활성 호마다 1 초) · quality{call,kind:callTerm|snapshot,품질}
 //         · roster · dialog · sds · result{op,ok,call,code,reason}(명령마다 하나) · engine_stopped · exit
 //   통계 = rx_pkts,tx_pkts,rx_loss,rx_bytes,jitter_us,stats_valid
