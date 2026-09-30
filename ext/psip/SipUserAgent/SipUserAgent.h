@@ -66,6 +66,9 @@ public:
 	bool StopCall( const char * pszCallId, int iSipCode = 0 );
 	/** 통화 종료/거절에 Reason 헤더(RFC 3326 — 예: "Q.850;cause=16")를 싣는다. pszReason 이 NULL 이면 StopCall(pszCallId, iSipCode) 과 같다. */
 	bool StopCall( const char * pszCallId, int iSipCode, const char * pszReason );
+	/** 위와 같되 최종 응답·BYE·CANCEL 에 부가 헤더를 싣는다 (예: TS 24.379 §4.4 Warning). */
+	bool StopCall( const char * pszCallId, int iSipCode, const char * pszReason,
+		const std::vector< std::pair<std::string, std::string> > & clsExtraHeaders );
 	bool StopCall( const char * pszCallId, const char * pszForward );
 	bool RingCall( const char * pszCallId, CSipCallRtp * pclsRtp );
 	bool RingCall( const char * pszCallId, int iSipStatus, CSipCallRtp * pclsRtp );
@@ -149,6 +152,8 @@ public:
 	/** 다이얼로그의 응답·in-dialog 요청 Contact 에 싣을 헤더 파라미터(특성 태그, `;` 구분 원문 — 예
 	 *  `+g.3gpp.mcptt;+g.3gpp.icsi-ref="urn%3A…";isfocus`). 주소는 스택이 정한다. */
 	bool SetContactParams( const char * pszCallId, const char * pszParams );
+	/** 같은 다이얼로그의 Contact **URI** 파라미터(`;` 구분 원문 — 예 `gr=…`, RFC 5627 GRUU). */
+	bool SetContactUriParams( const char * pszCallId, const char * pszParams );
 	/** 다이얼로그의 세션 타이머 refresher 정책(E_SESSION_REFRESHER_*) — 수신 INVITE 가 refresher 를 지정하지 않았을
 	 *  때 2xx 에서 누가 갱신할지. AcceptCall 전에 부른다. */
 	bool SetSessionRefresher( const char * pszCallId, int iRefresher );

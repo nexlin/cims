@@ -465,6 +465,7 @@ internal unsafe struct cimsue_group_member_t
     public byte* display_name;
     public byte* role;
     public int priority;
+    public int required;   // 헤더와 같은 순서 — 끝에 덧붙였다(64비트 크기 불변)
 }
 
 [StructLayout(LayoutKind.Sequential)]
@@ -498,6 +499,12 @@ internal unsafe struct cimsue_group_doc_t
     public int max_sds_size;
     public int has_max_auto_recv;
     public int max_auto_recv;
+    // 확인 통화 설정(TS 24.481 §7.2.2 s)t)u)) — 끝에 덧붙였다
+    public int has_min_number_to_start;
+    public int min_number_to_start;
+    public int has_ack_timeout;
+    public int ack_timeout_sec;
+    public byte* ack_action;
 }
 
 /// <summary>cimsue_struct_id_t — ABI 자기검사용 구조체 id (헤더와 같은 순서).</summary>

@@ -383,7 +383,7 @@ affiliation-command 를 보낸다) → ③구형 제거.
 | 요소 | 규격 | 동작 |
 |---|---|---|
 | 본문 | §6.3.3.1.2 — mcptt-info + SDP | multipart = mcptt-info + SDP. **멤버 명단(`resource-lists`)은 싣지 않는다** — 명단은 conference 이벤트 패키지(§10.1.3)·GMS 그룹 문서. 본문이 멤버 수와 무관해 UDP 경로 MTU(RFC 3261 §18.1.1) 안에 든다(g001 = 2.2 KB) |
-| Contact | §6.3.3.1.2 1) — 세션 식별자 + `g.3gpp.mcptt`·`g.3gpp.icsi-ref`·`isfocus` | `<sip:<그룹>@<CSP>>;+g.3gpp.mcptt;+g.3gpp.icsi-ref="urn%3Aurn-7%3A3gpp-service.ims.icsi.mcptt";isfocus` (RFC 3840 §9 — 확장 태그 `+`) |
+| Contact | §6.3.3.1.2 1) — 세션 식별자 + `g.3gpp.mcptt`·`g.3gpp.icsi-ref`·`isfocus` | `<sip:<그룹>@<CSP>;gr=<세션 토큰>>;+g.3gpp.mcptt;+g.3gpp.icsi-ref="urn%3Aurn-7%3A3gpp-service.ims.icsi.mcptt";isfocus` (RFC 3840 §9 — 확장 태그 `+`). 세션 식별자 = C4d |
 | 서비스 식별 | §6.3.3.1.2 3) — P-Asserted-Service(RFC 6050) | `P-Asserted-Service: urn:urn-7:3gpp-service.ims.icsi.mcptt` (본문의 "P-Asserted-Service-Id" 는 표기 — 와이어 헤더 이름은 RFC 6050 §4.1, 부록 예시도 같다. 경보 팬아웃 MESSAGE 도 같은 이름) |
 | Accept-Contact | §6.3.3.1.2 2)·4) | `*;+g.3gpp.icsi-ref=…;+g.3gpp.mcptt;require;explicit` |
 | 세션 타이머 | §6.3.3.1.2 — Session-Expires 권고, `refresher` 생략 권고(싣는다면 `uac`) | **편차(권고)** — `refresher=uac` 를 싣는다. 생략하면 단말(UAS)이 갱신자를 고르는데(부록 A.1.3-24 예 = `uas`), CIMS 는 서버가 갱신자를 맡아 단말 구현과 무관하게 사라진 leg 을 회수한다([leg_liveness.md](leg_liveness.md) §5.3). 규격이 허용하는 값이다 |
@@ -396,10 +396,46 @@ affiliation-command 를 보낸다) → ③구형 제거.
 | 세션 타이머 | 2) refresher = `uac` · 3) `Require: timer` | 개시자가 refresher 를 지정하지 않았으면 `uac`(단말 갱신, CSP 만료 감시) + `Require: timer`. 개시자가 지정했거나 timer 미지원이면 RFC 4028 §9 Table 2(미지원 = `uas`) — [leg_liveness.md](leg_liveness.md) §5.3 |
 | P-Asserted-Identity | 4) 제어 기능 PSI | 그룹 URI(`<sip:<그룹>@<PTT 도메인>>`) — 멤버 leg INVITE 의 PAI 와 같은 신원 |
 | Supported | 8) `tdialog`(RFC 4538) | `Supported: tdialog` |
-| Warning | 7) 받은 응답의 Warning 을 옮긴다 | 해당 없음 — 개시자 200 OK 를 멤버 응답을 기다리지 않고 보낸다(자동 응답, 아래 편차) |
+| Warning | 7) 받은 응답의 Warning 을 옮긴다 · 확인 통화 설정의 111 (C4c) | 확인 통화 설정이 필수 멤버 없이 진행하면 `Warning: 399 <agent> "111 group call proceeded without all required group members"` |
+| 응답 시점 | §10.1.1.4.2 · §6.3.3.3 · §11.1.1.4.2 | 새 세션 개시의 200 OK 는 **개시자 응답 게이트** 뒤다 — C4c. 진행 중 세션 합류·청취·chat 은 곧바로 |
 
-남은 편차 — Contact 의 세션 식별자는 세션마다 새로 만들지 않고 그룹 id 를 쓴다(`sip:<그룹>@<CSP>`). 개시자 200 OK 는 멤버 응답을 기다리지 않는다
-(acknowledged call setup·`<on-network-minimum-number-to-start>` 미구현 — 멤버 응답의 Warning 을 옮길 자리가 없다). 18x 는 보내지 않는다(§6.3.3.2.3.1 은 보낼 때의 규칙).
+### C4c. 확인 통화 설정 (acknowledged call setup) — TS 24.379 §6.3.3.3·§10.1.1.4.2·§11.1.1.4.2
+
+그룹 문서의 값(TS 24.481 §7.2.2 s)t)u)·§7.2.4.2)으로 제어 기능이 개시자 200 OK 를 멤버 응답에 맞춘다. 값은 CSC DB
+(`ptt_groups.min_number_to_start`·`ack_timeout_sec`·`ack_action`, `ptt_group_members.on_network_required`) → GMS 그룹 문서 · CSP 그룹 캐시가 같은 값을 쓴다.
+
+| 요소 | 그룹 문서 | 동작 |
+|---|---|---|
+| 필수 멤버 | `<entry>` 의 `<on-network-required>` — 필수 멤버에만 싣는다 | affiliated·초대 대상인 필수 멤버가 있으면 **초대 전에 TNG1** 을 켜고, 그 멤버 전원의 200 과 누계 ≥ 최소 인원에 수락한다(TNG1 정지) |
+| 시작 최소 인원 | `<on-network-minimum-number-to-start>` (xs:unsignedShort, 기본 0) | 멤버 200 누계(§10.1.1.4.1.1 3))가 이 값에 닿으면 수락. 0 = 기다리지 않는다(개시 즉시) |
+| TNG1 | `<on-network-timeout-for-acknowledgement-of-required-members>` (xs:duration, 기본 5 s, 1~300) | 부록 B.2.1 — 만료 때 누계가 최소 인원 미만이면 닿을 때까지 기다린 뒤 만료 동작 |
+| 만료 동작 | `<on-network-action-upon-expiration-of-timeout-for-acknowledgement-of-required-members>` proceed \| abandon (정의 밖 값 = abandon) | proceed = 200 + `Warning: 399 <agent> "111 …"`. abandon = 480 + `"112 group call abandoned due to required group members not part of the group session"`, 확립 leg BYE·미확립 CANCEL |
+| 필수 멤버 거절 | — | TNG1 중 필수 멤버의 4xx~6xx: abandon 이면 그 코드를 `"112 … required group member …"` 와 함께 개시자에게, proceed 면 나머지 전원이 200 일 때 200 + 111 (그 전엔 TNG1 계속) |
+| 전원 거절 | — | 수락 전에 초대한 멤버 전원이 최종 응답했으면 캐시한 최종 응답(6xx 우선)을 개시자에게 (§10.1.1.4.2 1)) |
+| 사설 호 | — | 최소 1(착신자) — 착신자 180 을 개시자에게 옮기고 착신자 200 뒤에 수락한다(§11.1.1.4.2) |
+| 개시자 CANCEL | — | 게이트를 거두고 초대 leg·세션을 해제한다 |
+
+정원(`on-network-max-participant-count`)은 필수 멤버 수보다 작을 수 없다 — 관리 API 가 저장 단계에서 막는다(§6.3.5.5 NOTE 4). 시도 장부 cause = `no_member_answered`·
+`ack_timeout_abandoned`·`ack_required_rejected`·`initiator_canceled`([sip_statistics.md](sip_statistics.md) §2.3). 구현 = CSP `CGroupCallService::AckGate*`.
+
+### C4d. MCPTT 세션 식별자 — TS 24.379 §4.5 (GRUU)
+
+세션을 가리키는 URI = `sip:<그룹>@<CSP>;gr=<세션 토큰>`(RFC 5627 GRUU 형 — 토큰 = 세션 sesid 의 시각·순번, 세션마다 새로 나고 세션이 끝나면 사라진다).
+멤버 leg INVITE·개시자 응답·이후 in-dialog 요청과 응답의 Contact 에 싣는다(psip `SetContactUriParams`). 재합류 INVITE 의 Request-URI 가
+세션 식별자면 그 세션이 진행 중이어야 한다 — 아니면 404(§10.1.1.4.5.1 2)).
+
+### C4e. Warning 헤더 형식 — TS 24.379 §4.4 · TS 24.282 §4.4
+
+`Warning: 399 <agent> "<mcptt-warn-code> <text>"` — RFC 3261 §20.43 warning-value(warn-code 399 = 기타, warn-agent = PTT 도메인) 안의 warn-text 가
+MCPTT/MCData 경고 코드와 문구다(`McpttWarning`). conference 구독 거절 105·138, 확인 통화 설정 111·112, MCData 203 이 같은 형식이다. 받는 쪽
+(libcsim)은 따옴표 안 앞 세 자리를 경고 코드로 읽는다.
+
+남은 편차
+- 개시자 200 OK 에 멤버 응답의 Warning 을 옮기지 않는다(§6.3.3.2.3.2 7)).
+- 확인 통화 설정 뒤의 선택 동작은 하지 않는다 — 응답 없는 멤버를 알리는 INFO `<non-acknowledged-user>`(§6.3.3.3 "may", user profile
+  `<allow-to-receive-non-acknowledged-users-information>` 미지원)·in-dialog MESSAGE 안내.
+- 183 `P-Answer-State: Unconfirmed` 와 media buffering 경로(§10.1.1.4.2)는 없다 — 멤버 단말이 183 Unconfirmed 를 보내지 않는다.
+- 개시·합류·재합류 INVITE 의 affiliation 검사(§10.1.1.4.2 14)a)·§10.1.1.4.5.1 8) — 403 Warning 120)를 하지 않는다.
 
 ### C5. 등록/구독 SIP 메시지 — 실망(상용 IMS) 패킷 형태 정합
 

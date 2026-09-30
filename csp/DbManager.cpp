@@ -518,7 +518,8 @@ bool CDbManager::SelectGroup( const std::string &strGroupId, CspPttGroup &clsGro
         "COALESCE(ps.id,''), "
         "g.emergency_alert, "
         "g.allow_sds, g.allow_fd, g.max_sds_size, "
-        "g.floor_policy, g.max_talkers, g.allow_conference_state, g.hang_timer_sec, g.max_duration_sec "
+        "g.floor_policy, g.max_talkers, g.allow_conference_state, g.hang_timer_sec, g.max_duration_sec, "
+        "g.min_number_to_start, g.ack_timeout_sec, g.ack_action "
         "FROM ptt_groups g "
         "LEFT JOIN ptt_subscriptions ps ON ps.user_id = g.authorized_user_id "
         "WHERE g.mcptt_group_id='" +
@@ -562,13 +563,16 @@ bool CDbManager::SelectGroup( const std::string &strGroupId, CspPttGroup &clsGro
     clsGroup._allowConferenceState = row[25] ? ( atoi( row[25] ) != 0 ) : true;
     clsGroup._hangTimerSec = row[26] ? atoi( row[26] ) : 30;
     clsGroup._maxDurationSec = row[27] ? atoi( row[27] ) : 3600;
+    clsGroup._minNumberToStart = row[28] ? atoi( row[28] ) : 0;
+    clsGroup._ackTimeoutSec = row[29] ? atoi( row[29] ) : 5;
+    clsGroup._ackAction = ( row[30] && strcmp( row[30], "proceed" ) == 0 ) ? "proceed" : "abandon";  // §7.2.2 u)
     mysql_free_result( pRes );
 
     // 멤버 목록 — group_id 는 surrogate ptt_groups.id 참조
     char szDbId[32];
     snprintf( szDbId, sizeof( szDbId ), "%lld", clsGroup._dbId );
     strSql =
-        "SELECT user_id, priority, role, COALESCE(mcptt_id,'') FROM ptt_group_members "
+        "SELECT user_id, priority, role, COALESCE(mcptt_id,''), on_network_required FROM ptt_group_members "
         "WHERE group_id=" +
         std::string( szDbId ) + " ORDER BY priority";
 
@@ -581,6 +585,7 @@ bool CDbManager::SelectGroup( const std::string &strGroupId, CspPttGroup &clsGro
             std::string role = row[2] ? row[2] : "participant";
             std::string mcpttId = row[3] ? row[3] : "";
             auto pUser = std::make_shared<CspPttUser>( uid, prio, role, mcpttId );
+            pUser->_onNetworkRequired = row[4] && atoi( row[4] ) != 0;
             pUser->_groups.push_back( clsGroup._id );
             clsGroup._pusers.push_back( pUser );
         }

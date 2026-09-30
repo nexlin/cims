@@ -2269,7 +2269,15 @@ bool SimSession::RecvResponse(int /*iThreadId*/, CSipMessage* pclsMessage) {
         else if (strCallId == m_strConfSubCallId) {
             m_iConfSubStatus = iStatus;
             m_strConfSubWarning = pWarn ? pWarn->m_strValue : "";
-            m_iConfSubWarningCode = pWarn ? atoi(pWarn->m_strValue.c_str()) : 0;   // RFC 3261 §20.43 warn-code(3자리) — TS 24.379 인가 거절 138
+            // TS 24.379 §4.4 — warning-value = 399 SP agent SP "<mcptt-warn-code> <text>" (RFC 3261 §20.43). MCPTT 코드는
+            //   warn-text 따옴표 안 앞 세 자리다. 따옴표가 없으면 앞 warn-code 를 쓴다(옛 서버 형식).
+            if (pWarn) {
+                const std::string& w = pWarn->m_strValue;
+                const size_t q = w.find('"');
+                m_iConfSubWarningCode = atoi(w.c_str() + (q == std::string::npos ? 0 : q + 1));
+            } else {
+                m_iConfSubWarningCode = 0;
+            }
             if (m_pObserver) m_pObserver->OnSubscribeResponse(this, "conference", m_strConfSubGroup, iStatus);
         }
         printf("[%d] SUBSCRIBE %d error (CallId=%s)%s%s\n",

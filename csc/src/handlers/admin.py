@@ -32,7 +32,9 @@ from services.mcptt import (notify_csp, refresh_group_members, refresh_login_acc
                             update_user_profile_cache, SERVICE_CONFIG_DEFAULTS,
                             get_service_config, update_service_config_cache,
                             get_service_config_xml, GROUP_TYPES, GROUP_HANG_TIMER_DEFAULT,
-                            GROUP_HANG_TIMER_MAX, GROUP_MAX_DURATION_DEFAULT, GROUP_MAX_DURATION_MAX)
+                            GROUP_HANG_TIMER_MAX, GROUP_MAX_DURATION_DEFAULT, GROUP_MAX_DURATION_MAX,
+                            GROUP_MIN_TO_START_MAX, GROUP_ACK_TIMEOUT_DEFAULT, GROUP_ACK_TIMEOUT_MAX,
+                            GROUP_ACK_ACTIONS, norm_ack_action)
 from handlers import dispatch as _dispatch  # 전화 그룹 파생(pickup_group 409 게이트)
 from services import admin_auth
 from services.auc import auc as _auc
@@ -1412,8 +1414,10 @@ _GROUP_COLS = (
     "allow_sds, allow_fd, max_sds_size, max_auto_recv, "
     "org_code, session_start, session_end, group_type, on_network, max_members, "
     "require_affiliation, alias, authorized_user_id, floor_policy, max_talkers, "
-    "hang_timer_sec, max_duration_sec, created_at"
+    "hang_timer_sec, max_duration_sec, min_number_to_start, ack_timeout_sec, ack_action, created_at"
 )
+# 멤버 조회 열 — on_network_required = <on-network-required>(필수 멤버, TS 24.481 §7.2.4.2)
+_MEMBER_COLS = "user_id, priority, role, mcptt_id, on_network_required"
 
 # floor 동시 발언 정책 (mcptt_csp_cmp_roadmap_contract.md §B.1) — CSP 가 CMP 로 발행한다.
 _FLOOR_POLICIES = ('single', 'dual', 'multi')
@@ -1450,6 +1454,41 @@ def _norm_group_timer(body: dict, field: str, default: int, hi: int):
     return n, None
 
 
+def _norm_ack_setup(body: dict, cur: dict = None):
+    """확인 통화 설정(TS 24.481 §7.2.2 s)t)u)) 검증 → ({열: 값}, 오류). 준 필드만 돌려준다(cur = 생성 기본값).
+    min_number_to_start = xs:unsignedShort · ack_timeout_sec = TNG1 1..GROUP_ACK_TIMEOUT_MAX · ack_action = proceed|abandon."""
+    out = dict(cur or {})
+    if 'min_number_to_start' in body:
+        try:
+            n = int(body['min_number_to_start'])
+        except (TypeError, ValueError):
+            return None, 'min_number_to_start must be an integer'
+        if not (0 <= n <= GROUP_MIN_TO_START_MAX):
+            return None, f'min_number_to_start must be 0..{GROUP_MIN_TO_START_MAX}'
+        out['min_number_to_start'] = n
+    if 'ack_timeout_sec' in body:
+        try:
+            n = int(body['ack_timeout_sec'])
+        except (TypeError, ValueError):
+            return None, 'ack_timeout_sec must be an integer'
+        if not (1 <= n <= GROUP_ACK_TIMEOUT_MAX):
+            return None, f'ack_timeout_sec must be 1..{GROUP_ACK_TIMEOUT_MAX}'
+        out['ack_timeout_sec'] = n
+    if 'ack_action' in body:
+        if body['ack_action'] not in GROUP_ACK_ACTIONS:
+            return None, f"ack_action must be one of {'|'.join(GROUP_ACK_ACTIONS)}"
+        out['ack_action'] = body['ack_action']
+    return out, None
+
+
+def _check_required_members(members, max_members):
+    """정원(on-network-max-participant-count)은 필수 멤버 수보다 작을 수 없다 — GMS 검증 몫(TS 24.379 §6.3.5.5 NOTE 4)."""
+    n_req = sum(1 for m in (members or []) if m.get('required'))
+    if max_members and n_req > int(max_members):
+        return f'required members ({n_req}) exceed max_members ({max_members})'
+    return None
+
+
 def _norm_group_type(val):
     """그룹 종류 검증 → (값, 오류). broadcast 는 그룹 종류가 아니다(일제 통화 = 호 속성, TS 24.379 §4.12)."""
     if val not in GROUP_TYPES:
@@ -1480,6 +1519,11 @@ def _shape_group(g: dict, members: list, owner: dict = None):
     g['max_talkers'] = int(g.get('max_talkers', 2) or 2)
     g['hang_timer_sec'] = int(g.get('hang_timer_sec', GROUP_HANG_TIMER_DEFAULT))
     g['max_duration_sec'] = int(g.get('max_duration_sec', GROUP_MAX_DURATION_DEFAULT))
+    g['min_number_to_start'] = int(g.get('min_number_to_start') or 0)
+    g['ack_timeout_sec'] = int(g.get('ack_timeout_sec', GROUP_ACK_TIMEOUT_DEFAULT))
+    g['ack_action'] = norm_ack_action(g.get('ack_action'))
+    for m in members:
+        m['required'] = bool(m.pop('on_network_required', 0))
     if g.get('session_start'): g['session_start'] = g['session_start'].isoformat()
     if g.get('session_end'): g['session_end'] = g['session_end'].isoformat()
     if g.get('created_at'): g['created_at'] = g['created_at'].isoformat()
@@ -1549,7 +1593,7 @@ async def _list_groups(config):
                 return HandlerResult(status=200, body={'groups': []})
             # 1 query for all members (group_id=surrogate grouping)
             cur.execute(
-                "SELECT group_id, user_id, priority, role, mcptt_id FROM ptt_group_members "
+                f"SELECT group_id, {_MEMBER_COLS} FROM ptt_group_members "
                 "ORDER BY group_id, priority"
             )
             members_by_group: dict = {}
@@ -1576,7 +1620,7 @@ async def _get_group(group_id: str, config):
             if group is None:
                 return HandlerResult(status=404, body={'error': 'Group not found'})
             cur.execute(
-                "SELECT user_id, priority, role, mcptt_id FROM ptt_group_members "
+                f"SELECT {_MEMBER_COLS} FROM ptt_group_members "
                 "WHERE group_id=%s ORDER BY priority",
                 (group['id'],)
             )
@@ -1602,10 +1646,11 @@ def _insert_member(cur, gpk, m):
     if role not in ('chair', 'participant'):
         role = 'participant'
     mcptt_id = m.get('mcptt_id') or None
+    required = 1 if m.get('required') else 0
     cur.execute(
         "INSERT IGNORE INTO ptt_group_members "
-        "(group_id, user_id, priority, role, mcptt_id) VALUES (%s, %s, %s, %s, %s)",
-        (gpk, uid, prio, role, mcptt_id)
+        "(group_id, user_id, priority, role, mcptt_id, on_network_required) VALUES (%s, %s, %s, %s, %s, %s)",
+        (gpk, uid, prio, role, mcptt_id, required)
     )
 
 
@@ -1658,6 +1703,13 @@ async def _create_group(body, config, payload=None):
     floor_policy, max_talkers, floor_err = _norm_floor(body.get('floor_policy'), body.get('max_talkers'))
     if floor_err:
         return HandlerResult(status=400, body={'error': floor_err})
+    ack, err = _norm_ack_setup(body, {'min_number_to_start': 0, 'ack_timeout_sec': GROUP_ACK_TIMEOUT_DEFAULT,
+                                      'ack_action': 'abandon'})
+    if err:
+        return HandlerResult(status=400, body={'error': err})
+    err = _check_required_members(members, max_members)
+    if err:
+        return HandlerResult(status=400, body={'error': err})
 
     # 그룹 소유 (authorized user) — 명시 없으면 생성자(payload sub) 기본.
     # 단 OAM builtin 관리자(CimsAuth, sub<0)는 users 행이 아니다 — 소유자로
@@ -1691,14 +1743,17 @@ async def _create_group(body, config, payload=None):
                 "allow_sds, allow_fd, max_sds_size, max_auto_recv, "
                 "org_code, session_start, session_end, group_type, on_network, "
                 "max_members, require_affiliation, alias, authorized_user_id, "
-                "floor_policy, max_talkers, hang_timer_sec, max_duration_sec) "
-                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                "floor_policy, max_talkers, hang_timer_sec, max_duration_sec, "
+                "min_number_to_start, ack_timeout_sec, ack_action) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, "
+                "%s, %s, %s)",
                 (group_id, name, video_enabled, priority, encryption,
                  emergency_call, emergency_alert, allow_conference_state,
                  allow_sds, allow_fd, max_sds_size, max_auto_recv,
                  org_code, session_start, session_end, group_type,
                  on_network, max_members, require_affiliation, alias, authorized_user_id,
-                 floor_policy, max_talkers, hang_timer_sec, max_duration_sec)
+                 floor_policy, max_talkers, hang_timer_sec, max_duration_sec,
+                 ack['min_number_to_start'], ack['ack_timeout_sec'], ack['ack_action'])
             )
             gpk = cur.lastrowid
             for m in members:
@@ -1764,6 +1819,23 @@ async def _update_group(group_id: str, body, config, payload=None):
                         return HandlerResult(status=400, body={'error': err})
                     update_fields.append(f'{fld}=%s')
                     update_vals.append(n)
+            ack, err = _norm_ack_setup(body)
+            if err:
+                return HandlerResult(status=400, body={'error': err})
+            for fld, val in ack.items():
+                update_fields.append(f'{fld}=%s')
+                update_vals.append(val)
+            if 'members' in body or 'max_members' in body:
+                cur.execute("SELECT max_members FROM ptt_groups WHERE id=%s", (gpk,))
+                mm = int(body['max_members']) if 'max_members' in body else int((cur.fetchone() or {}).get('max_members') or 0)
+                if 'members' in body:
+                    mem = body['members']
+                else:
+                    cur.execute("SELECT on_network_required AS required FROM ptt_group_members WHERE group_id=%s", (gpk,))
+                    mem = cur.fetchall()
+                err = _check_required_members(mem, mm)
+                if err:
+                    return HandlerResult(status=400, body={'error': err})
             # floor 동시 발언 정책 — 한 축만 보내도 나머지는 현재 값을 기준으로 검증한다.
             if 'floor_policy' in body or 'max_talkers' in body:
                 cur.execute("SELECT floor_policy, max_talkers FROM ptt_groups WHERE id=%s", (gpk,))
@@ -1817,11 +1889,13 @@ async def _list_members(group_id: str, config):
             if gpk is None:
                 return HandlerResult(status=404, body={'error': 'Group not found'})
             cur.execute(
-                "SELECT user_id, priority, role, mcptt_id FROM ptt_group_members "
+                f"SELECT {_MEMBER_COLS} FROM ptt_group_members "
                 "WHERE group_id=%s ORDER BY priority",
                 (gpk,)
             )
             members = cur.fetchall()
+    for m in members:
+        m['required'] = bool(m.pop('on_network_required', 0))
     return HandlerResult(status=200, body={'group_id': group_id, 'members': members})
 
 
@@ -1836,17 +1910,28 @@ async def _add_member(group_id: str, body, config):
     if role not in ('chair', 'participant'):
         role = 'participant'
     mcptt_id = body.get('mcptt_id') or None
+    required = 1 if body.get('required') else 0
 
     with _get_db(config) as conn:
         with conn.cursor() as cur:
             gpk = _resolve_group_pk(cur, group_id)
             if gpk is None:
                 return HandlerResult(status=404, body={'error': 'Group not found'})
+            if required:
+                cur.execute("SELECT max_members FROM ptt_groups WHERE id=%s", (gpk,))
+                mm = int((cur.fetchone() or {}).get('max_members') or 0)
+                cur.execute("SELECT user_id, on_network_required AS required FROM ptt_group_members "
+                            "WHERE group_id=%s", (gpk,))
+                mem = [m for m in cur.fetchall() if m['user_id'] != user_id] + [{'required': True}]
+                err = _check_required_members(mem, mm)
+                if err:
+                    return HandlerResult(status=400, body={'error': err})
             cur.execute(
-                "INSERT INTO ptt_group_members (group_id, user_id, priority, role, mcptt_id) "
-                "VALUES (%s, %s, %s, %s, %s) "
-                "ON DUPLICATE KEY UPDATE priority=VALUES(priority), role=VALUES(role), mcptt_id=VALUES(mcptt_id)",
-                (gpk, user_id, priority, role, mcptt_id)
+                "INSERT INTO ptt_group_members (group_id, user_id, priority, role, mcptt_id, on_network_required) "
+                "VALUES (%s, %s, %s, %s, %s, %s) "
+                "ON DUPLICATE KEY UPDATE priority=VALUES(priority), role=VALUES(role), mcptt_id=VALUES(mcptt_id), "
+                "on_network_required=VALUES(on_network_required)",
+                (gpk, user_id, priority, role, mcptt_id, required)
             )
     refresh_group_members(group_id)
     notify_csp("GROUP_CHANGED", f"tel:{group_id}", "PUT")
@@ -1972,6 +2057,14 @@ _GROUP_FIELDS = [
      'desc': 'on-network-hang-timer — 그룹 호 T4 Inactivity (발언 없는 채로 이 시간이 지나면 세션 해제, 0=미사용, 0~3600, 기본 30)'},
     {'name': 'max_duration_sec', 'type': 'integer', 'unit': '초',
      'desc': 'on-network-maximum-duration — 그룹 호 최대 시간 TNG3 (0=무제한, 0~86400, 기본 3600)'},
+    {'name': 'min_number_to_start', 'type': 'integer', 'unit': '명',
+     'desc': 'on-network-minimum-number-to-start — 개시자 200 OK 전에 받아야 할 멤버 200 수 (TS 24.379 §10.1.1.4.2, 0=기다리지 않음, 0~65535, 기본 0)'},
+    {'name': 'ack_timeout_sec', 'type': 'integer', 'unit': '초',
+     'desc': 'on-network-timeout-for-acknowledgement-of-required-members — TNG1: 필수 멤버(members[].required) 응답 대기 (TS 24.379 §6.3.3.3, 1~300, 기본 5)'},
+    {'name': 'ack_action', 'type': 'string', 'enum': ['proceed', 'abandon'],
+     'desc': 'on-network-action-upon-expiration-of-timeout-for-acknowledgement-of-required-members — TNG1 만료·필수 멤버 거절 때 proceed(200 + Warning 111) / abandon(480 + Warning 112, 기본)'},
+    {'name': 'members[].required', 'type': 'boolean',
+     'desc': '<on-network-required> 필수 멤버 — 개시자 응답 전에 이 멤버의 200 을 기다린다 (정원 max_members 보다 많을 수 없다)'},
     {'name': 'session_start', 'type': 'string', 'desc': '세션 허용 시작 시각'},
     {'name': 'session_end', 'type': 'string', 'desc': '세션 허용 종료 시각'},
     {'name': 'created_at', 'type': 'string', 'desc': 'ISO8601 생성'},
@@ -1984,6 +2077,7 @@ _GROUP_EXAMPLE = {
     'max_sds_size': 4096, 'max_auto_recv': 1048576, 'on_network': True, 'max_members': 50,
     'require_affiliation': False, 'authorized_user_id': '01000000003',
     'floor_policy': 'single', 'max_talkers': 0, 'hang_timer_sec': 30, 'max_duration_sec': 3600,
+    'min_number_to_start': 0, 'ack_timeout_sec': 5, 'ack_action': 'abandon',
     'session_start': None, 'session_end': None, 'created_at': '2026-05-10T09:00:00',
 }
 

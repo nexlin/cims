@@ -81,6 +81,8 @@ public sealed class GroupMember
     public string Name { get; set; } = "";
     public string Role { get; set; } = "participant";
     public int Priority { get; set; } = 5;
+    /// <summary>필수 멤버 &lt;on-network-required&gt;(TS 24.481 §7.2.4.2) — 읽은 값을 되돌려야 콘솔 설정이 남는다.</summary>
+    public bool Required { get; set; }
 }
 
 /// <summary>GMS 그룹 문서(OMA list-service + TS 24.481 mcpttgi) — GET 산출·PUT 입력 공용 모델(cimsue/csc.h GroupDoc 1:1). 편집 폼이 그대로 쓰도록 가변.</summary>
@@ -120,6 +122,12 @@ public sealed class GroupDoc
     public int? MaxSdsSize { get; set; }
     /// <summary>mcdata-on-network-max-data-size-auto-recv (octet) — 0 = 무제한. null = 미기재.</summary>
     public int? MaxAutoRecv { get; set; }
+    /// <summary>on-network-minimum-number-to-start — 개시자 200 OK 전 멤버 200 수(0 = 기다리지 않음). null = 미기재.</summary>
+    public int? MinNumberToStart { get; set; }
+    /// <summary>on-network-timeout-for-acknowledgement-of-required-members (TNG1, 초). null = 미기재.</summary>
+    public int? AckTimeoutSec { get; set; }
+    /// <summary>TNG1 만료 동작 proceed | abandon. null = 미기재.</summary>
+    public string? AckAction { get; set; }
 
     /// <summary>문서 → XML(PUT 본문) — 직렬화 규칙은 코어.</summary>
     public string ToXml() => CscClient.GroupDocToXml(this);
@@ -456,12 +464,16 @@ public sealed unsafe class CscClient : IDisposable
             AllowConferenceState = d->has_conference_state != 0 ? d->allow_conference_state != 0 : null,
             MaxSdsSize = d->has_max_sds_size != 0 ? d->max_sds_size : null,
             MaxAutoRecv = d->has_max_auto_recv != 0 ? d->max_auto_recv : null,
+            MinNumberToStart = d->has_min_number_to_start != 0 ? d->min_number_to_start : null,
+            AckTimeoutSec = d->has_ack_timeout != 0 ? d->ack_timeout_sec : null,
+            AckAction = Utf8.Str(d->ack_action) is { Length: > 0 } act ? act : null,
         };
         for (int i = 0; i < d->member_count; ++i)
             g.Members.Add(new GroupMember
             {
                 Uri = Utf8.Str(d->members[i].uri), Name = Utf8.Str(d->members[i].display_name),
                 Role = Utf8.Str(d->members[i].role) is { Length: > 0 } r ? r : "participant", Priority = d->members[i].priority,
+                Required = d->members[i].required != 0,
             });
         return g;
     }
@@ -479,6 +491,7 @@ public sealed unsafe class CscClient : IDisposable
                 var m = g.Members[i];
                 n.members[i].uri = s.Add(m.Uri); n.members[i].display_name = s.Add(m.Name);
                 n.members[i].role = s.Add(m.Role); n.members[i].priority = m.Priority;
+                n.members[i].required = Engine.B(m.Required);
             }
         }
         n.session_type = s.Add(g.SessionType);
@@ -493,6 +506,9 @@ public sealed unsafe class CscClient : IDisposable
         if (g.AllowConferenceState is bool conf) { n.has_conference_state = 1; n.allow_conference_state = Engine.B(conf); }
         if (g.MaxSdsSize is int sds && sds >= 0) { n.has_max_sds_size = 1; n.max_sds_size = sds; }
         if (g.MaxAutoRecv is int auto && auto >= 0) { n.has_max_auto_recv = 1; n.max_auto_recv = auto; }
+        if (g.MinNumberToStart is int min && min >= 0) { n.has_min_number_to_start = 1; n.min_number_to_start = min; }
+        if (g.AckTimeoutSec is int tng1 && tng1 >= 0) { n.has_ack_timeout = 1; n.ack_timeout_sec = tng1; }
+        if (!string.IsNullOrEmpty(g.AckAction)) n.ack_action = s.Add(g.AckAction);
         return n;
     }
 

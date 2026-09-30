@@ -74,7 +74,7 @@ std::string GroupDoc::toXml() const {
     for (const auto& m : members) {
         x += "      <entry uri=\"" + esc(m.uri) + "\">\n";
         if (!m.name.empty()) x += "        <rl:display-name>" + esc(m.name) + "</rl:display-name>\n";
-        x += "        <mcpttgi:on-network-required/>\n";
+        if (m.required) x += "        <mcpttgi:on-network-required/>\n";   // 필수 멤버만(TS 24.481 §7.2.4.2)
         x += "        <mcpttgi:participant-type>" + esc(m.role.empty() ? "participant" : m.role) + "</mcpttgi:participant-type>\n";
         x += "        <mcpttgi:user-priority>" + std::to_string(m.priority) + "</mcpttgi:user-priority>\n";
         x += "      </entry>\n";
@@ -96,6 +96,16 @@ std::string GroupDoc::toXml() const {
     if (hangTimerSec >= 0) x += "    <mcpttgi:on-network-hang-timer>" + xsDuration(hangTimerSec) + "</mcpttgi:on-network-hang-timer>\n";
     if (maxDurationSec >= 0) x += "    <mcpttgi:on-network-maximum-duration>" + xsDuration(maxDurationSec) +
                                   "</mcpttgi:on-network-maximum-duration>\n";
+    // 확인 통화 설정(§7.2.2 s)t)u)) — 미기재면 싣지 않는다
+    if (minNumberToStart >= 0) x += "    <mcpttgi:on-network-minimum-number-to-start>" + std::to_string(minNumberToStart) +
+                                    "</mcpttgi:on-network-minimum-number-to-start>\n";
+    if (ackTimeoutSec >= 0) x += "    <mcpttgi:on-network-timeout-for-acknowledgement-of-required-members>" +
+                                 xsDuration(ackTimeoutSec) +
+                                 "</mcpttgi:on-network-timeout-for-acknowledgement-of-required-members>\n";
+    if (!ackAction.empty())
+        x += "    <mcpttgi:on-network-action-upon-expiration-of-timeout-for-acknowledgement-of-required-members>" +
+             esc(ackAction == "proceed" ? "proceed" : "abandon") +
+             "</mcpttgi:on-network-action-upon-expiration-of-timeout-for-acknowledgement-of-required-members>\n";
     x += "    <mcpttgi:on-network-group-priority>" + std::to_string(priority) + "</mcpttgi:on-network-group-priority>\n";
     x += std::string("    <mcpttgi:on-network-encryption>") + bs(encryption) + "</mcpttgi:on-network-encryption>\n";
     x += "    <cp:ruleset>\n      <cp:rule id=\"a7c\">\n         <cp:actions>\n";
@@ -146,6 +156,7 @@ bool GroupDoc::parse(const std::string& xml, GroupDoc& out, std::string* err) {
         if (!role.empty()) m.role = role;
         std::string pr = elemText(e, "user-priority");
         if (!pr.empty()) m.priority = std::atoi(pr.c_str());
+        m.required = findOpen(e, "on-network-required") != std::string::npos;
         if (!m.uri.empty()) d.members.push_back(m);
         p = eend;
     }
@@ -175,6 +186,11 @@ bool GroupDoc::parse(const std::string& xml, GroupDoc& out, std::string* err) {
     v = elemText(xml, "on-network-allow-conference-state", &f, after); if (f) d.allowConferenceState = isTrue(v) ? 1 : 0;
     v = elemText(xml, "mcdata-on-network-max-data-size-for-SDS", &f, after); if (f) d.maxSdsSize = std::atoi(v.c_str());
     v = elemText(xml, "mcdata-on-network-max-data-size-auto-recv", &f, after); if (f) d.maxAutoRecv = std::atoi(v.c_str());
+    v = elemText(xml, "on-network-minimum-number-to-start", &f, after); if (f) d.minNumberToStart = std::atoi(v.c_str());
+    v = elemText(xml, "on-network-timeout-for-acknowledgement-of-required-members", &f, after);
+    if (f) d.ackTimeoutSec = parseXsDuration(v);
+    v = elemText(xml, "on-network-action-upon-expiration-of-timeout-for-acknowledgement-of-required-members", &f, after);
+    if (f) d.ackAction = v == "proceed" ? "proceed" : "abandon";   // 정의 밖 값 = abandon (§7.2.2 u))
     d.orgCode = elemText(xml, "org-code", nullptr, after);
     d.authorizedUser = elemText(xml, "authorized-user", nullptr, after);
     d.etag = out.etag;                                     // 호출자가 헤더에서 채운 값 유지

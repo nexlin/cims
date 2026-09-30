@@ -848,6 +848,10 @@ Content-Type: application/json
 | `group_type` | string | N | 그룹 종류 `prearranged`(기본)/`chat` — 그룹 문서 `<on-network-invite-members>`(true/false, TS 24.481 §7.2.2). 그 밖의 값은 400 — 일제 통화는 그룹 종류가 아니라 호 속성이다([mcptt_broadcast_group_call.md](../design/features/mcptt_broadcast_group_call.md)) |
 | `hang_timer_sec` | integer | N | 그룹 호 T4(Inactivity) 초 — 그룹 문서 `<on-network-hang-timer>`(TS 24.481 §7.2.2 o). 발언 없이 이 시간이 지나면 CSP 가 세션을 해제한다(TS 24.380 §6.3.4.3.5). 0~3600, 0=미사용, 기본 30 |
 | `max_duration_sec` | integer | N | 그룹 호 최대 시간(TNG3) 초 — `<on-network-maximum-duration>`(TS 24.481 §7.2.7). 0~86400, 0=무제한, 기본 3600 |
+| `min_number_to_start` | integer | N | 확인 통화 설정 — 개시자 200 OK 전에 받아야 할 멤버 200 수, 그룹 문서 `<on-network-minimum-number-to-start>`(TS 24.481 §7.2.2 s), TS 24.379 §10.1.1.4.2). 0~65535, 0=기다리지 않음, 기본 0 |
+| `ack_timeout_sec` | integer | N | TNG1 — 필수 멤버 응답 대기 초, `<on-network-timeout-for-acknowledgement-of-required-members>`(§7.2.2 t), TS 24.379 §6.3.3.3). 1~300, 기본 5 |
+| `ack_action` | string | N | TNG1 만료·필수 멤버 거절 때 `proceed`(200 + Warning 111)/`abandon`(480 + Warning 112, 기본) — `<on-network-action-upon-expiration-of-timeout-for-acknowledgement-of-required-members>`(§7.2.2 u)) |
+| `members[].required` | boolean | N | 필수 멤버 `<on-network-required>`(§7.2.4.2) — 개시자 응답 전에 이 멤버의 200 을 기다린다. 필수 멤버 수가 `max_members`(0 이 아닐 때)보다 많으면 400(TS 24.379 §6.3.5.5 NOTE 4). 멤버 추가·수정(`POST …/members`)도 같은 필드 |
 | `floor_policy` | string | N | 동시 발언 정책 `single`(기본)/`dual`/`multi` |
 | `max_talkers` | integer | N | `multi` 의 동시 발언자 수 (2~8, CMP 슬롯 상한). `single`/`dual` 은 미해석 — 2 로 정규화 |
 | `members` | array | N | 초기 멤버 목록 |

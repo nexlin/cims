@@ -1019,6 +1019,17 @@ void CModuleDispatcher::EventIncomingCall( const char *pszCallId, const char *ps
     }
 
     if ( m_clsPttAs.IsEnabled() && gclsGroupMap.Contains( pszTo ) ) {
+        // 재합류 — Request-URI 가 MCPTT 세션 식별자(GRUU `gr`)면 그 세션이 지금 진행 중이어야 한다
+        //   (TS 24.379 §10.1.1.4.5.1 2) — 없으면 404). 지난 세션의 식별자로 새 세션을 열지 않는다.
+        if ( pclsMessage ) {
+            const char *pszGr = SearchSipParameter( pclsMessage->m_clsReqUri.m_clsUriParamList, "gr" );
+            const std::string strGr = pszGr ? pszGr : "";
+            if ( pszGr && !gclsGroupCallService.IsSessionIdentityActive( pszTo, strGr ) ) {
+                CLog::Print( LOG_INFO, "EventIncomingCall: group(%s) session identity gr=%s 진행 중 아님 → 404", pszTo,
+                             strGr.c_str() );
+                return StopCall( pszCallId, SIP_NOT_FOUND );
+            }
+        }
         SetCallOwner( pszCallId, &m_clsPttAs );
         CSipCallRoute clsGroupRoute;
         clsUserInfo.GetCallRoute( clsGroupRoute );
@@ -1671,6 +1682,8 @@ void CModuleDispatcher::EventCallRing( const char *pszCallId, int iSipStatus, CS
     // TAS — 대표번호 포크 대기 leg 18x(소비: 첫 180 만 A 에 전달) / dialog-event 링잉(early) 통지(BLF §6.2,
     //   CallMap leg — 통과) / blind transfer 진행 NOTIFY (trans leg — 소비)
     if ( m_clsTas.IsEnabled() && m_clsTas.OnCallRing( pszCallId, iSipStatus, pclsRtp ) ) return;
+    // PTT 개시자 응답 게이트의 초대 leg — 사설 호의 180 은 개시자에게 옮긴다(TS 24.379 §11.1.1.4.2), 그 밖은 소비
+    if ( gclsGroupCallService.OnAckGateRinging( pszCallId, iSipStatus ) ) return;
 
     if ( gclsCallMap.Select( pszCallId, clsCallInfo ) ) {
         // B-leg 가 울렸다 — 이 뒤의 480/408 은 CFNR(무응답), 울리기 전이면 CFNRc(도달 불가) (§6A.4)
@@ -2163,6 +2176,10 @@ void CModuleDispatcher::EventCallEnd( const char *pszCallId, int iSipStatus, con
 
     // MCData media plane 레그 — cmdp 세션 정리 (UE 발 BYE·실패 응답 포함)
     if ( gclsMcDataMediaService.OnCallTerminated( pszCallId ) ) return;
+
+    // PTT 개시자 응답 게이트 — 개시자 CANCEL(개시 중단)·멤버 초대의 최종 거절 (TS 24.379 §6.3.3.3·§10.1.1.4.2).
+    //   leg 정리는 아래 경로가 그대로 한다(게이트는 판정만 — 중단이면 세션 해제까지).
+    gclsGroupCallService.OnAckGateLegEnd( pszCallId, iSipStatus );
 
     // 안내 재생 회수 — 이 leg 가 듣던 early 안내(CANCEL 등)·이 leg 가 관여한 보류 음악 (announcements.md §5.1)
     gclsAnnouncement.OnCallEnd( pszCallId );

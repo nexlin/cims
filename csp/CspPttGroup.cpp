@@ -28,6 +28,9 @@ CspPttGroup::CspPttGroup()
       _groupType( "prearranged" ),
       _hangTimerSec( 30 ),
       _maxDurationSec( 3600 ),
+      _minNumberToStart( 0 ),
+      _ackTimeoutSec( 5 ),
+      _ackAction( "abandon" ),
       _onNetwork( true ),
       _maxMembers( 0 ),
       _requireAffiliation( true ),
@@ -88,6 +91,9 @@ bool CspPttGroup::load( std::string groupId ) {
     if ( _groupType == "broadcast" ) _groupType = "prearranged";  // 일제 통화는 호 속성 — 옛 파일 값 흡수
     if ( root.Has( "hang_timer_sec" ) ) _hangTimerSec = root.GetInt( "hang_timer_sec" );
     if ( root.Has( "max_duration_sec" ) ) _maxDurationSec = root.GetInt( "max_duration_sec" );
+    if ( root.Has( "min_number_to_start" ) ) _minNumberToStart = root.GetInt( "min_number_to_start" );
+    if ( root.Has( "ack_timeout_sec" ) ) _ackTimeoutSec = root.GetInt( "ack_timeout_sec" );
+    if ( root.Has( "ack_action" ) ) _ackAction = root.GetString( "ack_action" ) == "proceed" ? "proceed" : "abandon";
     if ( root.Has( "on_network" ) ) _onNetwork = ( root.GetInt( "on_network" ) != 0 );
     if ( root.Has( "max_members" ) ) _maxMembers = root.GetInt( "max_members" );
     if ( root.Has( "require_affiliation" ) ) _requireAffiliation = ( root.GetInt( "require_affiliation" ) != 0 );
@@ -116,6 +122,8 @@ bool CspPttGroup::load( std::string groupId ) {
 
                 if ( !uid.empty() ) {
                     auto pUser = std::make_shared<CspPttUser>( uid, prio, role, mcpttId );
+                    pUser->_onNetworkRequired =
+                        userNode.Has( "on_network_required" ) && userNode.GetInt( "on_network_required" ) != 0;
                     pUser->_groups.push_back( _id );  // Add self group
                     _pusers.push_back( pUser );
                 }
@@ -148,6 +156,9 @@ void CspPttGroup::Clear() {
     _groupType = "prearranged";
     _hangTimerSec = 30;
     _maxDurationSec = 3600;
+    _minNumberToStart = 0;
+    _ackTimeoutSec = 5;
+    _ackAction = "abandon";
     _onNetwork = true;
     _maxMembers = 0;
     _requireAffiliation = true;

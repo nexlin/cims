@@ -63,6 +63,13 @@ bool CSipUserAgent::StopCall( const char * pszCallId, int iSipCode )
 // 통화 종료/거절 — pszReason 이 있으면 BYE/최종 응답/CANCEL 에 Reason 헤더(RFC 3326)를 싣는다.
 bool CSipUserAgent::StopCall( const char * pszCallId, int iSipCode, const char * pszReason )
 {
+	static const std::vector< std::pair<std::string, std::string> > clsNoHeaders;
+	return StopCall( pszCallId, iSipCode, pszReason, clsNoHeaders );
+}
+
+bool CSipUserAgent::StopCall( const char * pszCallId, int iSipCode, const char * pszReason,
+	const std::vector< std::pair<std::string, std::string> > & clsExtraHeaders )
+{
 	SIP_DIALOG_MAP::iterator		itMap;
 	bool	bRes = false;
 	CSipMessage * pclsMessage = NULL;
@@ -112,6 +119,10 @@ bool CSipUserAgent::StopCall( const char * pszCallId, int iSipCode, const char *
 	if( pclsMessage )
 	{
 		if( pszReason && pszReason[0] ) pclsMessage->AddHeader( "Reason", pszReason );
+		for( std::vector< std::pair<std::string, std::string> >::const_iterator itH = clsExtraHeaders.begin(); itH != clsExtraHeaders.end(); ++itH )
+		{
+			pclsMessage->AddHeader( itH->first.c_str(), itH->second.c_str() );
+		}
 		m_clsSipStack.SendSipMessage( pclsMessage );
 	}
 

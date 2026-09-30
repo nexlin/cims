@@ -7,8 +7,10 @@
 
 #include <chrono>
 #include <ctime>
+#include <functional>
 #include <map>
 #include <mutex>
+#include <set>
 #include <string>
 #include <thread>
 #include <utility>
@@ -50,6 +52,11 @@ public:
      *        INVITE 에서만 세션 속성이 된다. 진행 중 세션에 합류하는 INVITE 에서는 무시한다(§4.12, R7).
      * @return true if group call initiated, false if group not found or error
      */
+    /** MCPTT 세션 식별자(TS 24.379 §4.5 — GRUU) 의 `gr` 토큰. bIssue=false 면 세션이 없을 때 빈 값. */
+    std::string SessionIdentityToken( const std::string &strGroupId, bool bIssue = true );
+    /** 재합류 Request-URI 의 세션 식별자가 지금 진행 중인 이 그룹 세션인가 (§10.1.1.4.5.1 2) — 아니면 404). */
+    bool IsSessionIdentityActive( const std::string &strGroupId, const std::string &strToken );
+
     bool ProcessGroupCall( const char *pszGroupId, const char *pszCallerInfo, const char *pszCallId,
                            CSipCallRtp *pclsRtp, CSipCallRoute *pclsRoute, int iCondition = 0,
                            bool bBroadcastInd = false );
@@ -102,6 +109,12 @@ public:
     void StopMonitor();
     void OnCmpStatusChanged( bool bConnected );
     bool OnCallTerminated( const std::string &strCallId );
+    /** 개시자 응답 게이트의 leg 종료 — 개시자 CANCEL(세션 개시 중단) 또는 멤버 초대의 최종 실패 응답
+     *  (TS 24.379 §6.3.3.3·§10.1.1.4.2). ModuleDispatcher::EventCallEnd 가 OnCallTerminated 전에 부른다. */
+    void OnAckGateLegEnd( const std::string &strCallId, int iSipStatus );
+    /** 게이트 중인 초대 leg 의 18x — 사설 호면 첫 180 을 개시자에게 옮긴다(TS 24.379 §11.1.1.4.2). 게이트 leg 이면
+     * true. */
+    bool OnAckGateRinging( const std::string &strCallId, int iSipStatus );
 
     /** 미디어 노드(CMP) 다운으로 relay 가 소실된 그룹의 활성 멤버 호를 능동 종료(BYE)하고 로컬 상태를
      *  정리한다. dead node 이므로 CmpClient(LeaveGroup/RemoveGroup, blocking)는 호출하지 않는다.
@@ -319,6 +332,42 @@ private:
     /** 개시 선점 유효 시간 — INVITE 트랜잭션 시한(64*T1)을 넘긴 선점은 버려진 것으로 본다. */
     static constexpr time_t kPendingSessionSec = 32;
     std::map<std::string, GroupSession> m_mapGroupSession;
+
+    /** 개시자 응답 게이트 — 새 세션 개시의 200 OK 를 멤버 응답 뒤로 미룬다.
+     *  편성 그룹 = 확인 통화 설정(TS 24.379 §6.3.3.3 TNG1·§10.1.1.4.2): 필수 멤버(<on-network-required>, 초대 대상)가
+     * 있으면 TNG1 을 초대 전에 켜고 그 멤버 전원의 200 과 멤버 200 누계 ≥ <on-network-minimum-number-to-start> 에
+     * 응답한다. TNG1 만료·필수 멤버 거절은 <on-network-action-upon-expiration-…> 대로 proceed(200 + Warning 111) 또는
+     * abandon(480·받은 최종 응답 + Warning 112). 필수 멤버가 없으면 누계가 최소 인원에 닿을 때(0 = 기다리지 않음 —
+     * 게이트 없음). 사설 호 = 착신자의 200 뒤 (§11.1.1.4.2 — 최소 1). 초대한 멤버 전원이 거절하면 캐시한 최종 응답을
+     * 개시자에게 준다. */
+    struct AckGate {
+        std::string strCallId;                     ///< 개시자 leg
+        std::string strInitiator;                  ///< 개시자
+        std::set<std::string> setPending;          ///< 초대했고 최종 응답 전인 멤버
+        std::set<std::string> setRequiredPending;  ///< 그 가운데 필수 멤버
+        int iOkCount = 0;                          ///< 멤버 200 누계 (§10.1.1.4.1.1 3))
+        int iMinToStart = 0;                       ///< <on-network-minimum-number-to-start>
+        bool bTng1 = false;                        ///< TNG1 동작 중
+        bool bTng1Expired = false;                 ///< TNG1 만료됨 — 최소 인원을 기다리는 중일 수 있다
+        std::chrono::steady_clock::time_point tTng1End;
+        bool bProceed = false;         ///< 만료 동작 = proceed (아니면 abandon)
+        bool bRequiredMissed = false;  ///< 필수 멤버 하나 이상 없이 진행 — 200 에 Warning 111
+        int iBestFinal = 0;            ///< 캐시한 최종 거절 코드 (전원 거절 시 개시자에게)
+        bool bPrivate = false;         ///< 사설 호 — 착신자의 180 을 개시자에게 옮긴다(§11.1.1.4.2)
+        bool bRingSent = false;        ///< 개시자에게 180 을 보냈다
+        std::function<int( const std::string & )> fnAnswer;  ///< 개시자 수락(Warning 값) — 0 계속·1 청취·-1 실패
+    };
+    std::map<std::string, AckGate> m_mapAckGate;  ///< 그룹 → 게이트 (m_mutex)
+    /** 멤버 초대 결과(200 또는 최종 거절 코드)를 게이트에 반영하고 판정한다. */
+    void AckGateMemberResult( const std::string &strGroupId, const std::string &strMemberId, int iSipStatus );
+    /** 게이트 판정 — 응답·중단·대기. m_mutex 밖에서 부른다. */
+    void AckGateEvaluate( const std::string &strGroupId );
+    /** TNG1 만료 검사 — MonitorLoop 1초 주기. */
+    void CheckAckGates();
+    /** 개시 중단 — 개시자에게 최종 응답(iSipStatus>0, Warning)을 주고(CANCEL 이면 0) 초대 leg 을 걷고 세션을 해제한다.
+     */
+    void AbortAckGate( const std::string &strGroupId, const AckGate &clsGate, int iSipStatus,
+                       const std::string &strWarning, const char *pszReason );
     /** 개시 선점을 푼다(개시자 leg 확립) 또는 지운다(개시 실패). 이 호출자가 선점한 것일 때만. */
     void SettlePendingSession( const std::string &strGroupId, const std::string &strInitiator, bool bEstablished );
     /** 일제 통화가 진행 중인가 — 확정된(개시자 leg 확립) 세션만. m_mutex 를 잡는다. */

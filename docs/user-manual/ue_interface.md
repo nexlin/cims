@@ -703,7 +703,6 @@ Authorization: Bearer <access_token>
     <list>
       <entry uri="tel:+82571900001">
         <rl:display-name>테스트001</rl:display-name>
-        <mcpttgi:on-network-required/>
         <mcpttgi:user-priority>0</mcpttgi:user-priority>
         <cims:user-title>팀장</cims:user-title>
       </entry>

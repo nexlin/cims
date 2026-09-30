@@ -197,6 +197,9 @@ CREATE TABLE IF NOT EXISTS ptt_groups (
     max_talkers         INT          NOT NULL DEFAULT 2 COMMENT 'floor_policy=multi 일 때 동시 발언 상한 (CMP 계약 범위 2..8)',
     hang_timer_sec      INT          NOT NULL DEFAULT 30 COMMENT 'on-network-hang-timer (TS 24.481 §7.2.2 o) — 그룹 호 T4 Inactivity 초 (TS 24.380 §6.3.4.3.5, 0=미사용)',
     max_duration_sec    INT          NOT NULL DEFAULT 3600 COMMENT 'on-network-maximum-duration (TS 24.481 §7.2.7) — 그룹 호 최대 시간 TNG3 초 (0=무제한)',
+    min_number_to_start INT          NOT NULL DEFAULT 0 COMMENT 'on-network-minimum-number-to-start (TS 24.481 §7.2.2 s) — 개시자 200 OK 전 멤버 200 수 (TS 24.379 §10.1.1.4.2)',
+    ack_timeout_sec     INT          NOT NULL DEFAULT 5 COMMENT 'on-network-timeout-for-acknowledgement-of-required-members (TS 24.481 §7.2.2 t) — TNG1 초 (TS 24.379 §6.3.3.3)',
+    ack_action          ENUM('proceed','abandon') NOT NULL DEFAULT 'abandon' COMMENT 'on-network-action-upon-expiration-of-timeout-for-acknowledgement-of-required-members (TS 24.481 §7.2.2 u)',
     PRIMARY KEY (id),
     UNIQUE KEY uk_mcptt_group_id (mcptt_group_id),
     KEY idx_authorized_user (authorized_user_id),
@@ -212,6 +215,7 @@ CREATE TABLE IF NOT EXISTS ptt_group_members (
     priority INT         NOT NULL DEFAULT 0 COMMENT '발언권 우선순위 (낮을수록 높음)',
     role     ENUM('chair','participant') NOT NULL DEFAULT 'participant' COMMENT 'TS 24.380 participant type — chair 는 floor 우선 선점',
     mcptt_id VARCHAR(255)         DEFAULT NULL COMMENT '멤버 MCPTT ID URI (NULL=user_id 사용)',
+    on_network_required TINYINT(1) NOT NULL DEFAULT 0 COMMENT '<on-network-required> (TS 24.481 §7.2.4.2) — 필수 멤버: 개시자 200 OK 전 응답을 기다린다(TNG1)',
     PRIMARY KEY (group_id, user_id),
     KEY idx_user (user_id),
     CONSTRAINT fk_gm_group FOREIGN KEY (group_id) REFERENCES ptt_groups (id) ON DELETE CASCADE

@@ -36,7 +36,9 @@ enum class GroupFilter(val label: String) { ALL("전체"), MEMBER("멤버"), MIN
 
 /** 편집 폼의 멤버 한 줄. */
 data class MemberRow(val uri: String, val name: String, val number: String,
-                     val isChair: Boolean = false, val isMe: Boolean = false) {
+                     val isChair: Boolean = false, val isMe: Boolean = false,
+                     /** 필수 멤버 `<on-network-required>` — 폼은 편집하지 않고 읽은 값을 그대로 되돌린다(콘솔 설정 보존). */
+                     val required: Boolean = false) {
     val label: String get() = name.ifBlank { number }
 }
 
@@ -378,7 +380,7 @@ class PttGroupsViewModel(private val s: DispatchSession) : ScreenViewModel() {
         members = d.members.map { m ->
             val num = userPart(m.uri)
             MemberRow(m.uri, m.name.ifBlank { _book.value.nameOf(num) }, num,
-                isChair = m.role == "chair", isMe = num == userPart(s.myPttId))
+                isChair = m.role == "chair", isMe = num == userPart(s.myPttId), required = m.required)
         },
         ifMatch = d.etag.ifBlank { g.etag },
         loaded = true)
@@ -449,7 +451,8 @@ class PttGroupsViewModel(private val s: DispatchSession) : ScreenViewModel() {
         uri = if (f.isNew) telUri(f.groupId.trim()) else f.uri,
         displayName = f.name.trim(),
         members = f.members.map {
-            GroupMember(it.uri, it.name, if (it.isChair) "chair" else "participant", if (it.isChair) 7 else 5)
+            GroupMember(it.uri, it.name, if (it.isChair) "chair" else "participant", if (it.isChair) 7 else 5,
+                required = it.required)
         },
         sessionType = f.sessionType,
         videoEnabled = f.videoEnabled, encryption = f.encryption,

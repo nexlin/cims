@@ -632,3 +632,33 @@ TEST(Csc, FetchCmsDocsParseAndNotModified) {
     ASSERT_TRUE(c.fetchServiceConfig("tok", "tel:+82500000002", "", sc).ok);
     EXPECT_EQ(sc.rpEmergency, "mcpttp.14");
 }
+
+// 확인 통화 설정(TS 24.481 §7.2.2 s)t)u)·§7.2.4.2) — 필수 멤버만 <on-network-required>, 세 요소는 미기재면 싣지 않는다
+TEST(GroupDoc, AckCallSetupRoundTrip) {
+    GroupDoc d;
+    d.uri = "sip:g@d";
+    GroupMember a; a.uri = "tel:+1"; a.required = true;
+    GroupMember b; b.uri = "tel:+2";
+    d.members = {a, b};
+    std::string x = d.toXml();
+    size_t n = 0;
+    for (size_t p = x.find("on-network-required"); p != std::string::npos; p = x.find("on-network-required", p + 1)) ++n;
+    EXPECT_EQ(n, 1u);
+    EXPECT_EQ(x.find("on-network-minimum-number-to-start"), std::string::npos);   // 미기재 — 서버 값 유지
+    EXPECT_EQ(x.find("on-network-action-upon-expiration"), std::string::npos);
+    d.minNumberToStart = 2; d.ackTimeoutSec = 7; d.ackAction = "proceed";
+    GroupDoc r;
+    ASSERT_TRUE(GroupDoc::parse(d.toXml(), r));
+    ASSERT_EQ(r.members.size(), 2u);
+    EXPECT_TRUE(r.members[0].required);
+    EXPECT_FALSE(r.members[1].required);
+    EXPECT_EQ(r.minNumberToStart, 2);
+    EXPECT_EQ(r.ackTimeoutSec, 7);
+    EXPECT_EQ(r.ackAction, "proceed");
+    GroupDoc u;
+    ASSERT_TRUE(GroupDoc::parse("<group><list-service uri=\"sip:g@d\"><list></list><mcpttgi:on-network-action-upon-expiration-"
+                                "of-timeout-for-acknowledgement-of-required-members>later</mcpttgi:on-network-action-upon-"
+                                "expiration-of-timeout-for-acknowledgement-of-required-members></list-service></group>", u));
+    EXPECT_EQ(u.ackAction, "abandon");                                           // 정의 밖 값 = abandon (§7.2.2 u))
+    EXPECT_EQ(u.minNumberToStart, GroupDoc::kUnset);
+}

@@ -428,6 +428,10 @@ VoLTE 표에는 `rejected`(거절)·`no_answer`(무응답) 두 열이 없어, �
 | `codec_mismatch` | offer 에 서비스 코덱이 없음 | `error` | 488 |
 | `srtp_failed` | SRTP 협상 실패 | `error` | 488 |
 | `accept_failed` | 발신자 leg 확립(`AcceptCall`) 실패 | `error` | — |
+| `no_member_answered` | 확인 통화 설정 — 초대한 멤버 전원이 최소 인원 전에 최종 거절(캐시한 거절을 개시자에게, TS 24.379 §10.1.1.4.2) | `no_answer` | 멤버 거절 코드 |
+| `ack_timeout_abandoned` | 확인 통화 설정 — TNG1 만료, 만료 동작 abandon (§6.3.3.3) | `no_answer` | 480 |
+| `ack_required_rejected` | 확인 통화 설정 — 필수 멤버 거절, 만료 동작 abandon (§6.3.3.3) | `no_answer` | 멤버 거절 코드 |
+| `initiator_canceled` | 확인 통화 설정 대기 중 개시자 CANCEL | `canceled` | — |
 
 집계는 이것을 `causes: {슬러그: 건수}` 축으로 접는다. **`cause` 가 없는 줄은 담지 않는다** —
 `unknown` 으로 채우면 "원인 불명" 과 "구 판본이 안 남긴 것" 이 한 칸에 섞인다.

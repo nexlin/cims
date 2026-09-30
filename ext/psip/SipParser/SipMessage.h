@@ -147,6 +147,8 @@ public:
 	 *  주소는 스택이 수신 listener 로 정하고 응용은 파라미터만 정한다. CSipDialog::m_clsContactParams 가
 	 *  m_iContactTransport 와 같은 경로(응답·in-dialog 요청)로 전파한다. */
 	CSipParameterList		m_clsContactParams;
+	/** 같은 경로로 전파되는 Contact **URI** 파라미터(`<sip:…;gr=…>` — RFC 5627 GRUU 등). */
+	CSipParameterList		m_clsContactUriParams;
 
 	// SIP 메시지를 전송한 클라이언트의 IP 주소
 	std::string			m_strClientIp;

@@ -636,6 +636,7 @@ typedef struct {
     const char* display_name;
     const char* role;
     int32_t     priority;
+    int32_t     required;      /* 필수 멤버 <on-network-required>(TS 24.481 §7.2.4.2) — 끝에 덧붙였다(64비트 크기 불변) */
 } cimsue_group_member_t;
 
 /** GMS 그룹 문서(csc.h GroupDoc) — GET 산출·PUT 입력 공용. 입력 시 문자열 NULL 은 빈 값, members NULL 은 멤버 없음. */
@@ -671,6 +672,12 @@ typedef struct {
     int32_t                      max_sds_size;          /* mcdata-on-network-max-data-size-for-SDS — 0 = 무제한 */
     int32_t                      has_max_auto_recv;
     int32_t                      max_auto_recv;         /* mcdata-on-network-max-data-size-auto-recv — 0 = 무제한 */
+    /* 확인 통화 설정(TS 24.481 §7.2.2 s)t)u)) — 같은 미기재 규약. ack_action NULL·빈 값 = 미기재. 끝에 덧붙였다. */
+    int32_t                      has_min_number_to_start;
+    int32_t                      min_number_to_start;   /* on-network-minimum-number-to-start — 0 = 기다리지 않음 */
+    int32_t                      has_ack_timeout;
+    int32_t                      ack_timeout_sec;       /* on-network-timeout-for-acknowledgement-of-required-members (TNG1) */
+    const char*                  ack_action;            /* proceed | abandon */
 } cimsue_group_doc_t;
 
 CIMSUE_API void CIMSUE_CALL cimsue_csc_endpoint_default(cimsue_csc_endpoint_t* ep);

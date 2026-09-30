@@ -52,7 +52,11 @@ XCAP(RFC 4825) 리소스 기반 — TS 24.481 Ut. 인증 = `Authorization: Beare
   없을 때만 `<mcpttgi:session-type>`(규격 밖 전환기 요소 — 구 단말)을 읽고, `broadcast` 는 400(일제 통화는 호 속성 —
   [mcptt_broadcast_group_call.md](../design/features/mcptt_broadcast_group_call.md)). 그룹 호 타이머 =
   `<mcpttgi:on-network-hang-timer>`(T4 Inactivity, 0~3600초) · `<mcpttgi:on-network-maximum-duration>`(TNG3, 0~86400초) —
-  xs:duration(`PT30S`), 범위 밖·형식 오류는 400. GET 은 `<session-type>`(prearranged/chat)을 단말이 invite-members 로
+  xs:duration(`PT30S`), 범위 밖·형식 오류는 400. 확인 통화 설정(TS 24.481 §7.2.2 s)t)u), TS 24.379 §6.3.3.3) =
+  `<mcpttgi:on-network-minimum-number-to-start>`(0~65535, 기본 0) · `<mcpttgi:on-network-timeout-for-acknowledgement-of-required-members>`
+  (TNG1, xs:duration 1~300초, 기본 5초) · `<mcpttgi:on-network-action-upon-expiration-of-timeout-for-acknowledgement-of-required-members>`
+  (`proceed`·`abandon`, 정의 밖 값 = abandon, 기본 abandon) — GET 은 셋을 늘 싣는다. 필수 멤버 = entry 의 `<mcpttgi:on-network-required/>`
+  (§7.2.4.2 — **필수 멤버에만** 싣고, PUT 의 `<list>` 교체도 이 표시를 그대로 읽는다. 정원보다 많으면 400). GET 은 `<session-type>`(prearranged/chat)을 단말이 invite-members 로
   그룹 종류를 읽게 될 때까지 함께 싣는다.
   `<mcpttgi:authorized-user>` 는 서버가 정한다(본문의 값 무시). floor 정책(`floor_policy`/`max_talkers`)은 관리 API 전용.
   entry 의 `<mcpttgi:participant-type>` 를 생략하면 **`participant` 로 저장**된다 — 그룹 소유(chair 권한)는 member role 이
@@ -71,6 +75,7 @@ XCAP(RFC 4825) 리소스 기반 — TS 24.481 Ut. 인증 = `Authorization: Beare
     <list>
       <entry uri="tel:+82510001001">
         <rl:display-name>관제1석</rl:display-name>
+        <mcpttgi:on-network-required/>
         <mcpttgi:participant-type>chair</mcpttgi:participant-type>
         <mcpttgi:user-priority>1</mcpttgi:user-priority>
       </entry>
@@ -89,6 +94,9 @@ XCAP(RFC 4825) 리소스 기반 — TS 24.481 Ut. 인증 = `Authorization: Beare
     <mcpttgi:on-network-require-affiliation>true</mcpttgi:on-network-require-affiliation>
     <mcpttgi:on-network-hang-timer>PT30S</mcpttgi:on-network-hang-timer>
     <mcpttgi:on-network-maximum-duration>PT3600S</mcpttgi:on-network-maximum-duration>
+    <mcpttgi:on-network-minimum-number-to-start>0</mcpttgi:on-network-minimum-number-to-start>
+    <mcpttgi:on-network-timeout-for-acknowledgement-of-required-members>PT5S</mcpttgi:on-network-timeout-for-acknowledgement-of-required-members>
+    <mcpttgi:on-network-action-upon-expiration-of-timeout-for-acknowledgement-of-required-members>abandon</mcpttgi:on-network-action-upon-expiration-of-timeout-for-acknowledgement-of-required-members>
     <mcpttgi:on-network-group-priority>5</mcpttgi:on-network-group-priority>
     <mcpttgi:on-network-encryption>false</mcpttgi:on-network-encryption>
     <cp:ruleset><cp:rule id="a7c"><cp:actions>

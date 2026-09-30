@@ -117,6 +117,7 @@ bool CSipUserAgent::RecvInviteRequest( int iThreadId, CSipMessage * pclsMessage 
 			{
 				pclsResponse->m_iContactTransport = itMap->second.m_iContactTransport;
 				pclsResponse->m_clsContactParams = itMap->second.m_clsContactParams;
+				pclsResponse->m_clsContactUriParams = itMap->second.m_clsContactUriParams;
 			}
 			// 상대 offer 가 무변경(세션 갱신)이면 answer 도 "변경 없음"으로 표시해야 한다 —
 			//   SDP origin(o=) 세션 버전을 유지한다 (RFC 4028 §7.4).

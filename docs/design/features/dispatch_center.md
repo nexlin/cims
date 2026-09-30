@@ -458,7 +458,7 @@ UE-M ◄════ RTP (A ingress 복사 SSRC_A + B ingress 복사 SSRC_B, tap
 **conference 이벤트 구독 인가 — TS 24.379 §10.1.3.4.1(규격형)**: 관제 앱의 PTT 세션 목록("진행 중·참가자 수",
 [dispatch_desktop_ui.md](dispatch_desktop_ui.md) §4.2 ② 범위 채널)은 그룹 AoR 의 RFC 4575 conference 구독으로 안다. CSP(controlling
 function, `CscfModule` SUBSCRIBE 초기 구독)는 구독자를 그룹 문서(TS 24.481)의 **`<on-network-allow-conference-state>`**
-로 판정하고, 불허 시 **403 + `Warning: 138 CIMS "subscription of conference events not allowed"`**, 브로드캐스트 그룹은
+로 판정하고, 불허 시 **403 + `Warning: 399 <PTT 도메인> "138 subscription of conference events not allowed"`**(TS 24.379 §4.4 형식), 브로드캐스트 그룹은
 **480 + Warning 105** 로 거절한다(`CGroupCallService::CheckConferenceSubscribe`). CIMS 해석:
 - **멤버** = 그룹 속성 `ptt_groups.allow_conference_state`(기본 1 — GMS 문서 `<cp:actions>` 요소로 노출, 관리 API·GMS PUT·콘솔
   편집). 0 이면 멤버도 403.

@@ -78,6 +78,8 @@ public:
 	int					m_iContactTransport;
 	/** 응답·in-dialog 요청의 자동 Contact 에 덧붙일 헤더 파라미터(특성 태그) — CSipMessage::m_clsContactParams 로 전파 */
 	CSipParameterList	m_clsContactParams;
+	/** 같은 경로의 Contact URI 파라미터(GRUU `gr` 등) — CSipMessage::m_clsContactUriParams 로 전파 */
+	CSipParameterList	m_clsContactUriParams;
 
 	/** Per-dialog override domain for From/To/Request-URI.
 	 *  Empty → 전역 CSipStackSetup::m_strDomain fallback.

@@ -185,7 +185,20 @@ P3(ptt-client SDK 전환) 실측에서 더 드러난 것 — .48 반영·배포(
   결함 = 수신 re-INVITE 가 remote target 을 갱신하지 않던 것(§12.2.2 target refresh). 실측: 002(A) 멤버 호 중 002(B) 등록 → 90 s 갱신 re-INVITE 가 A 로
   (`LegDest … 이 다이얼로그 상대가 아니다 — 다이얼로그 주소 유지`), floor 8/8, B 는 수신 없음 · 같은 단말 승격 TCP→UDP 교정 유지 · 계측기 PTT·VoLTE 전달/픽업/BLF/hold/TLS
   pass · psip 단위시험 G. 새 호·통지는 여전히 마지막 등록 단말로 간다 — 다중 단말은 범위 밖([registration_binding_set.md](../design/features/registration_binding_set.md) §8).
-- 남은 편차 — Contact 세션 식별자 = 그룹 id · 개시자 200 OK 가 멤버 응답을 기다리지 않음(acknowledged call setup 미구현) — §C4a·§C4b.
+- **남은 편차 보완 — 반영(csp 0.2.173 · csc 0.2.135 · oam 0.2.179 · worker 0.1.35, DB `sql/migrate_ptt_groups_ack_call_setup.sql` 공유 DB 적용 완료)**
+  - **확인 통화 설정**(TS 24.379 §6.3.3.3·§10.1.1.4.2) — 새 세션 개시의 200 OK 를 멤버 응답 뒤로(개시자 응답 게이트). 그룹 속성
+    `min_number_to_start`·`ack_timeout_sec`(TNG1)·`ack_action`(proceed/abandon), 멤버 `required`(`<on-network-required>`) — DB·CSC 그룹 문서·관리 API·
+    콘솔 그룹 편집·CSP. **기본값(필수 없음·최소 0) = 종전 동작**. CSC 그룹 문서가 모든 멤버에 싣던 `<on-network-required/>` 는 필수 멤버에만.
+    사설 호는 착신자 180 전달·착신자 200 뒤 수락(§11.1.1.4.2). 실측(g005): 최소 1 → 멤버 200 뒤 수락 · 필수 014 정지 + abandon → 5 s 뒤 480 +
+    Warning 112·세션 회수 · proceed → 200 + Warning 111 · 필수 응답 → TNG1 정지·경고 없음 · 사설 호 180→200. g005 는 원복.
+  - **세션 식별자 GRUU**(§4.5) — Contact `…;gr=<세션 토큰>`, 재합류 R-URI 가 끝난 세션이면 404(§10.1.1.4.5.1 2)) — 실측 404·진행 중 식별자는 합류 200.
+  - **Warning 형식**(§4.4) — `399 <PTT 도메인> "<코드> <문구>"`(종전 `105 CIMS "…"` 은 RFC 3261 warn-code 자리에 MCPTT 코드를 넣은 비규격). 105·138·111·112·MCData 203.
+    libcsim 은 따옴표 안 코드를 읽는다 — `PTT-GROUP-LISTEN-CONF-DENIED` pass.
+  - **.45 몫** — ① **CSC 를 0.2.135 이상으로 올린 뒤** 관제 앱으로 그룹을 저장해야 한다: 옛 SDK·앱은 모든 멤버에 `<on-network-required/>` 를 실어 보내고 새 CSC 는
+    그 표시를 읽는다 → 저장한 그룹의 멤버 전원이 필수가 된다. 새 SDK(C++·C API·.NET·Kotlin `required`)와 관제 앱 두 벌(행 모델이 `required` 보존)은 읽은 값만
+    되돌린다 — Windows·Android 재빌드가 선행이다. ② CSP 0.2.173 과 CSC 0.2.135 를 같은 창에(CSP 는 새 열을 SELECT 한다 — 마이그레이션은 적용됨).
+  - 남은 편차(§C4c·§C4e) — 멤버 응답의 Warning 을 개시자 200 에 옮기지 않음 · INFO `<non-acknowledged-user>`·MESSAGE 안내(선택) 없음 · 183 Unconfirmed/media
+    buffering 경로 없음 · 개시·합류·재합류 INVITE 의 affiliation 검사(403 Warning 120) 없음.
 - **cimsue-cli 관찰** — `--from-profile ptt` 로 띄우면 `--mcptt-psi` 가 먹지 않는다(경보 R-URI = 그룹, 전환기로 200). 명시 계정(`--server …`)으로는 PSI.
 
 - 참고(관찰): 두 단말이 같은 사내 NAT 뒤에서 영상 통화할 때 CMP 가 한 peer 자리의 RTCP 목적지를 두 포트 사이에서 몇 초마다 다시 latch 하고, 다른 peer 의

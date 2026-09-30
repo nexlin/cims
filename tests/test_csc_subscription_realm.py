@@ -55,7 +55,10 @@ def _load_admin():
           get_service_config=lambda *a, **k: {}, update_service_config_cache=lambda *a, **k: None,
           get_service_config_xml=lambda *a, **k: "", logger=_Log(),
           GROUP_TYPES=("prearranged", "chat"), GROUP_HANG_TIMER_DEFAULT=30, GROUP_HANG_TIMER_MAX=3600,
-          GROUP_MAX_DURATION_DEFAULT=3600, GROUP_MAX_DURATION_MAX=86400)
+          GROUP_MAX_DURATION_DEFAULT=3600, GROUP_MAX_DURATION_MAX=86400,
+          GROUP_MIN_TO_START_MAX=65535, GROUP_ACK_TIMEOUT_DEFAULT=5, GROUP_ACK_TIMEOUT_MAX=300,
+          GROUP_ACK_ACTIONS=("proceed", "abandon"),
+          norm_ack_action=lambda v: "proceed" if v == "proceed" else "abandon")
     _stub("services.auc", auc=types.SimpleNamespace())
     _stub("handlers.dispatch", phone_group_of_user=lambda *a, **k: None,
           effective_phone_group=lambda *a, **k: None, phone_group_of_person=lambda *a, **k: None)

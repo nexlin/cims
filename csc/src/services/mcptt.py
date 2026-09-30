@@ -628,6 +628,20 @@ GROUP_HANG_TIMER_MAX = 3600
 GROUP_MAX_DURATION_DEFAULT = 3600
 GROUP_MAX_DURATION_MAX = 86400
 GROUP_TYPES = ('prearranged', 'chat')   # 일제 통화는 그룹 종류가 아니라 호 속성(<broadcast-ind>)
+# 확인 통화 설정(acknowledged call setup) — TS 24.481 §7.2.2 s)t)u) · TS 24.379 §6.3.3.3(TNG1)·§10.1.1.4.2.
+#   <on-network-minimum-number-to-start>(xs:unsignedShort — 개시자 200 OK 전 멤버 200 수, 0 = 기다리지 않음),
+#   <on-network-timeout-for-acknowledgement-of-required-members>(xs:duration = TNG1),
+#   <on-network-action-upon-expiration-of-timeout-for-acknowledgement-of-required-members>(proceed|abandon —
+#   그 밖의 값은 abandon 으로 해석, §7.2.2 u)). 필수 멤버 = <entry> 의 <on-network-required>(§7.2.4.2).
+GROUP_MIN_TO_START_MAX = 65535
+GROUP_ACK_TIMEOUT_DEFAULT = 5
+GROUP_ACK_TIMEOUT_MAX = 300
+GROUP_ACK_ACTIONS = ('proceed', 'abandon')
+
+
+def norm_ack_action(value) -> str:
+    """만료 동작 값 — proceed 가 아니면 abandon (TS 24.481 §7.2.2 u) 의 해석 규칙)."""
+    return 'proceed' if str(value or '').strip() == 'proceed' else 'abandon'
 
 
 def xs_duration(sec: int) -> str:
@@ -656,6 +670,7 @@ _GROUP_SELECT = (
     "org_code, session_start, session_end, "
     "group_type, on_network, max_members, require_affiliation, alias, "
     "hang_timer_sec, max_duration_sec, "
+    "min_number_to_start, ack_timeout_sec, ack_action, "
     "authorized_user_id, "
     "(SELECT id FROM ptt_subscriptions WHERE user_id=ptt_groups.authorized_user_id "
     " ORDER BY id LIMIT 1) AS authorized_user_msisdn "
@@ -668,6 +683,7 @@ def _member_select_sql(cur) -> str:
     title_col = ", u.title AS user_title" if _users_has_title(cur) else ""
     return (
         "SELECT g.mcptt_group_id AS mcptt_group_id, gm.user_id, gm.priority, gm.role, gm.mcptt_id, "
+        "       gm.on_network_required, "
         f"       u.name AS user_name{title_col} "
         "FROM ptt_group_members gm "
         "JOIN ptt_groups g ON g.id = gm.group_id "
@@ -697,6 +713,9 @@ def _group_row_to_dict(row: dict) -> dict:
         "require_affiliation": bool(row.get('require_affiliation', 1)),
         "hang_timer_sec": int(row.get('hang_timer_sec', GROUP_HANG_TIMER_DEFAULT)),
         "max_duration_sec": int(row.get('max_duration_sec', GROUP_MAX_DURATION_DEFAULT)),
+        "min_number_to_start": int(row.get('min_number_to_start') or 0),
+        "ack_timeout_sec": int(row.get('ack_timeout_sec', GROUP_ACK_TIMEOUT_DEFAULT)),
+        "ack_action": norm_ack_action(row.get('ack_action')),
         "alias": row.get('alias', ''),
         "session_start": row['session_start'].isoformat() if row.get('session_start') else None,
         "session_end": row['session_end'].isoformat() if row.get('session_end') else None,
@@ -717,7 +736,8 @@ def _member_row_to_dict(row: dict) -> dict:
         "uri": m_uri, "name": row.get('user_name') or m_uri,
         "role": row.get('role') or "participant",
         "priority": row['priority'], "joined_at": "",
-        "title": row.get('user_title') or ""
+        "title": row.get('user_title') or "",
+        "required": bool(row.get('on_network_required') or 0),
     }
 
 
@@ -1301,8 +1321,13 @@ def get_group_xml(group_uri):
     for member in group['members']:
         xml += f"""
       <entry uri="{member['uri']}">
-        <rl:display-name>{member['name']}</rl:display-name>
-        <mcpttgi:on-network-required/>
+        <rl:display-name>{member['name']}</rl:display-name>"""
+        # 필수 멤버만 <on-network-required> — 있으면 제어 기능이 개시자 응답 전에 그 멤버의 200 을 기다린다(TNG1,
+        #   TS 24.379 §6.3.3.3). 없으면 필수 멤버가 아니다(TS 24.481 §7.2.4.2).
+        if member.get('required'):
+            xml += """
+        <mcpttgi:on-network-required/>"""
+        xml += f"""
         <mcpttgi:participant-type>{member.get('role', 'participant')}</mcpttgi:participant-type>
         <mcpttgi:user-priority>{member.get('priority', 5)}</mcpttgi:user-priority>"""
         # 직함 — 3GPP 미정의 필드라 CIMS 전용 네임스페이스 확장으로 전달
@@ -1337,6 +1362,9 @@ def get_group_xml(group_uri):
     invite_members = 'true' if group_type != 'chat' else 'false'
     hang_timer = int(group.get('hang_timer_sec', GROUP_HANG_TIMER_DEFAULT))
     max_duration = int(group.get('max_duration_sec', GROUP_MAX_DURATION_DEFAULT))
+    min_to_start = int(group.get('min_number_to_start') or 0)
+    ack_timeout = int(group.get('ack_timeout_sec', GROUP_ACK_TIMEOUT_DEFAULT))
+    ack_action = norm_ack_action(group.get('ack_action'))
     xml += f"""
     </list>
     <mcpttgi:mcdata-allow-short-data-service>{sds_val}</mcpttgi:mcdata-allow-short-data-service>
@@ -1355,6 +1383,9 @@ def get_group_xml(group_uri):
     <mcpttgi:on-network-require-affiliation>{affil_required}</mcpttgi:on-network-require-affiliation>
     <mcpttgi:on-network-hang-timer>{xs_duration(hang_timer)}</mcpttgi:on-network-hang-timer>
     <mcpttgi:on-network-maximum-duration>{xs_duration(max_duration)}</mcpttgi:on-network-maximum-duration>
+    <mcpttgi:on-network-minimum-number-to-start>{min_to_start}</mcpttgi:on-network-minimum-number-to-start>
+    <mcpttgi:on-network-timeout-for-acknowledgement-of-required-members>{xs_duration(ack_timeout)}</mcpttgi:on-network-timeout-for-acknowledgement-of-required-members>
+    <mcpttgi:on-network-action-upon-expiration-of-timeout-for-acknowledgement-of-required-members>{ack_action}</mcpttgi:on-network-action-upon-expiration-of-timeout-for-acknowledgement-of-required-members>
     <mcpttgi:on-network-require-talker-id>false</mcpttgi:on-network-require-talker-id>
     <mcpttgi:on-network-group-priority>{grp_priority}</mcpttgi:on-network-group-priority>
     <mcpttgi:on-network-encryption>{encryption_val}</mcpttgi:on-network-encryption>
@@ -2391,6 +2422,10 @@ def parse_group_document_xml(xml_text: str) -> dict:
         'group_type': None,
         'hang_timer_sec': parse_xs_duration(_xtext(ls, 'gi:on-network-hang-timer')),
         'max_duration_sec': parse_xs_duration(_xtext(ls, 'gi:on-network-maximum-duration')),
+        'min_number_to_start': _xint(ls, 'gi:on-network-minimum-number-to-start'),
+        'ack_timeout_sec': parse_xs_duration(
+            _xtext(ls, 'gi:on-network-timeout-for-acknowledgement-of-required-members')),
+        'ack_action': None,
         'allow_sds': _xbool(ls, 'gi:mcdata-allow-short-data-service'),
         'allow_fd': _xbool(ls, 'gi:mcdata-allow-file-distribution'),
         'max_sds_size': _xint(ls, 'gi:mcdata-on-network-max-data-size-for-SDS'),
@@ -2411,12 +2446,20 @@ def parse_group_document_xml(xml_text: str) -> dict:
     inv = _xbool(ls, 'gi:on-network-invite-members')
     if inv is not None:
         out['group_type'] = 'prearranged' if inv else 'chat'
-    for k, hi in (('hang_timer_sec', GROUP_HANG_TIMER_MAX), ('max_duration_sec', GROUP_MAX_DURATION_MAX)):
-        tag = 'on-network-hang-timer' if k == 'hang_timer_sec' else 'on-network-maximum-duration'
+    for k, tag, lo, hi in (('hang_timer_sec', 'on-network-hang-timer', 0, GROUP_HANG_TIMER_MAX),
+                           ('max_duration_sec', 'on-network-maximum-duration', 0, GROUP_MAX_DURATION_MAX),
+                           ('ack_timeout_sec', 'on-network-timeout-for-acknowledgement-of-required-members',
+                            1, GROUP_ACK_TIMEOUT_MAX)):
         if _xtext(ls, f'gi:{tag}') is not None and out[k] is None:
             raise ValueError(f'{tag} is not an xs:duration')
-        if out[k] is not None and not (0 <= out[k] <= hi):
-            raise ValueError(f'{tag} out of range (0..{hi} s)')
+        if out[k] is not None and not (lo <= out[k] <= hi):
+            raise ValueError(f'{tag} out of range ({lo}..{hi} s)')
+    if _xtext(ls, 'gi:on-network-minimum-number-to-start') is not None and not (
+            out['min_number_to_start'] is not None and 0 <= out['min_number_to_start'] <= GROUP_MIN_TO_START_MAX):
+        raise ValueError('on-network-minimum-number-to-start is not an xs:unsignedShort')
+    act = _xtext(ls, 'gi:on-network-action-upon-expiration-of-timeout-for-acknowledgement-of-required-members')
+    if act is not None:
+        out['ack_action'] = norm_ack_action(act)   # 정의 밖 값 = abandon (§7.2.2 u))
     lst = ls.find('poc:list', _NS)
     if lst is not None:
         members = []
@@ -2432,7 +2475,8 @@ def parse_group_document_xml(xml_text: str) -> dict:
                 raise ValueError(f"participant-type '{role}' not one of chair/participant")
             prio = _xint(e, 'gi:user-priority')
             members.append({'user_id': uid, 'mcptt_id': uri if uri.lower().startswith(('tel:', 'sip:')) else None,
-                            'role': role, 'priority': prio if prio is not None else 0})
+                            'role': role, 'priority': prio if prio is not None else 0,
+                            'required': e.find('gi:on-network-required', _NS) is not None})
         out['members'] = members
     return out
 
@@ -2443,12 +2487,14 @@ _GMS_CREATE_DEFAULTS = {
     'max_sds_size': 10000, 'max_auto_recv': 1048576, 'org_code': None, 'group_type': 'prearranged',
     'max_members': 0, 'require_affiliation': True,
     'hang_timer_sec': GROUP_HANG_TIMER_DEFAULT, 'max_duration_sec': GROUP_MAX_DURATION_DEFAULT,
+    'min_number_to_start': 0, 'ack_timeout_sec': GROUP_ACK_TIMEOUT_DEFAULT, 'ack_action': 'abandon',
 }
 _GMS_BOOL_COLS = ('video_enabled', 'encryption', 'emergency_call', 'emergency_alert', 'allow_conference_state',
                   'allow_sds', 'allow_fd', 'require_affiliation')
 _GMS_ATTR_COLS = ('video_enabled', 'priority', 'encryption', 'emergency_call', 'emergency_alert',
                   'allow_conference_state', 'allow_sds', 'allow_fd', 'max_sds_size', 'max_auto_recv', 'org_code',
-                  'group_type', 'max_members', 'require_affiliation', 'hang_timer_sec', 'max_duration_sec')
+                  'group_type', 'max_members', 'require_affiliation', 'hang_timer_sec', 'max_duration_sec',
+                  'min_number_to_start', 'ack_timeout_sec', 'ack_action')
 
 
 def _gms_unknown_members(cur, members: list) -> list:
@@ -2500,10 +2546,11 @@ def gms_write_group(gid: str, doc: dict, owner_user_id: Optional[int], create: b
                 if doc.get('members') is not None:
                     cur.execute("DELETE FROM ptt_group_members WHERE group_id=%s", (gpk,))
                     for m in doc['members']:
-                        cur.execute("INSERT IGNORE INTO ptt_group_members (group_id, user_id, priority, role, mcptt_id) "
-                                    "VALUES (%s, %s, %s, %s, %s)",
+                        cur.execute("INSERT IGNORE INTO ptt_group_members "
+                                    "(group_id, user_id, priority, role, mcptt_id, on_network_required) "
+                                    "VALUES (%s, %s, %s, %s, %s, %s)",
                                     (gpk, m['user_id'], int(m.get('priority') or 0), m.get('role') or 'participant',
-                                     m.get('mcptt_id')))
+                                     m.get('mcptt_id'), 1 if m.get('required') else 0))
             conn.commit()
     except Exception as e:
         logger.log_error(f"gms_write_group({gid}, create={create}) failed: {e}")

@@ -31,6 +31,9 @@ const MAX_TALKERS_LIMIT = 8
 /** 그룹 호 타이머 상한 — CSC 관리 API 검증(TS 24.481 on-network-hang-timer / maximum-duration)과 같은 값. */
 const HANG_TIMER_MAX = 3600
 const MAX_DURATION_MAX = 86400
+/** 확인 통화 설정 상한 — CSC 관리 API 검증(on-network-minimum-number-to-start = unsignedShort, TNG1 1~300초)과 같은 값. */
+const MIN_TO_START_MAX = 65535
+const ACK_TIMEOUT_MAX = 300
 
 function Caret({ open }: { open: boolean }) {
   return <span className="text-muted-foreground inline-flex">
@@ -208,8 +211,8 @@ function GroupDrawer(p: GroupDrawerProps) {
   const [tab, setTab] = useState<'config' | 'activity'>('config')
 
   const [form, setForm] = useState<Partial<GroupExt>>(() => existing
-    ? { name: existing.name, priority: existing.priority ?? 5, encryption: existing.encryption, emergency_call: existing.emergency_call, emergency_alert: existing.emergency_alert ?? true, allow_conference_state: existing.allow_conference_state ?? true, allow_sds: existing.allow_sds ?? true, allow_fd: existing.allow_fd ?? false, max_sds_size: existing.max_sds_size ?? 10000, max_auto_recv: existing.max_auto_recv ?? 1048576, video_enabled: existing.video_enabled, org_code: existing.org_code || '', authorized_user_id: existing.authorized_user_id ?? null, group_type: existing.group_type, floor_policy: existing.floor_policy || 'single', max_talkers: existing.max_talkers ?? 2, hang_timer_sec: existing.hang_timer_sec ?? 30, max_duration_sec: existing.max_duration_sec ?? 3600 }
-    : { id: '', name: '', priority: 5, encryption: false, emergency_call: false, emergency_alert: true, allow_conference_state: true, allow_sds: true, allow_fd: false, max_sds_size: 10000, max_auto_recv: 1048576, video_enabled: false, org_code: '', group_type: 'prearranged', authorized_user_id: null, floor_policy: 'single', max_talkers: 2, hang_timer_sec: 30, max_duration_sec: 3600 })
+    ? { name: existing.name, priority: existing.priority ?? 5, encryption: existing.encryption, emergency_call: existing.emergency_call, emergency_alert: existing.emergency_alert ?? true, allow_conference_state: existing.allow_conference_state ?? true, allow_sds: existing.allow_sds ?? true, allow_fd: existing.allow_fd ?? false, max_sds_size: existing.max_sds_size ?? 10000, max_auto_recv: existing.max_auto_recv ?? 1048576, video_enabled: existing.video_enabled, org_code: existing.org_code || '', authorized_user_id: existing.authorized_user_id ?? null, group_type: existing.group_type, floor_policy: existing.floor_policy || 'single', max_talkers: existing.max_talkers ?? 2, hang_timer_sec: existing.hang_timer_sec ?? 30, max_duration_sec: existing.max_duration_sec ?? 3600, min_number_to_start: existing.min_number_to_start ?? 0, ack_timeout_sec: existing.ack_timeout_sec ?? 5, ack_action: existing.ack_action || 'abandon' }
+    : { id: '', name: '', priority: 5, encryption: false, emergency_call: false, emergency_alert: true, allow_conference_state: true, allow_sds: true, allow_fd: false, max_sds_size: 10000, max_auto_recv: 1048576, video_enabled: false, org_code: '', group_type: 'prearranged', authorized_user_id: null, floor_policy: 'single', max_talkers: 2, hang_timer_sec: 30, max_duration_sec: 3600, min_number_to_start: 0, ack_timeout_sec: 5, ack_action: 'abandon' })
   // 소유자 표시명 (피커 선택 결과 보존)
   const [ownerName, setOwnerName] = useState<string>(existing?.authorized_user_name || '')
 
@@ -258,10 +261,10 @@ function GroupDrawer(p: GroupDrawerProps) {
     show(`${ids.length}명 제거`, 'ok')
     reloadMembers(); p.reload()
   }
-  // priority/role 변경 = addMember upsert (백엔드 ON DUPLICATE KEY UPDATE)
-  async function saveMember(uid: string, priority: number, role: 'chair' | 'participant') {
+  // priority/role/필수 변경 = addMember upsert (백엔드 ON DUPLICATE KEY UPDATE)
+  async function saveMember(uid: string, priority: number, role: 'chair' | 'participant', required: boolean) {
     if (!existing) return
-    try { await groupsApi.addMember(existing.id, { user_id: uid, priority, role }); show('수정', 'ok'); reloadMembers(); p.reload() }
+    try { await groupsApi.addMember(existing.id, { user_id: uid, priority, role, required }); show('수정', 'ok'); reloadMembers(); p.reload() }
     catch (e: unknown) { show(String(e), 'err') }
   }
 
@@ -355,6 +358,27 @@ function GroupDrawer(p: GroupDrawerProps) {
               value={form.max_duration_sec ?? 3600}
               onChange={e => setForm({ ...form, max_duration_sec: Number(e.target.value) })} />
           </Field>
+          <Field label="시작 최소 응답(명)" w={120}>
+            <Input  type="number" min={0} max={MIN_TO_START_MAX}
+              title="on-network-minimum-number-to-start — 개시자에게 응답하기 전에 받아야 할 멤버 응답 수 (0=기다리지 않음, 편성 그룹만)"
+              value={form.min_number_to_start ?? 0}
+              onChange={e => setForm({ ...form, min_number_to_start: Number(e.target.value) })} />
+          </Field>
+          <Field label="필수 멤버 대기(TNG1, 초)" w={140}>
+            <Input  type="number" min={1} max={ACK_TIMEOUT_MAX}
+              title="on-network-timeout-for-acknowledgement-of-required-members — 필수 멤버의 응답을 기다리는 시간 (필수 멤버가 있을 때만)"
+              value={form.ack_timeout_sec ?? 5}
+              onChange={e => setForm({ ...form, ack_timeout_sec: Number(e.target.value) })} />
+          </Field>
+          <Field label="대기 만료 시" w={130}>
+            <Select value={form.ack_action || 'abandon'} onValueChange={(v: string) => setForm({ ...form, ack_action: v as 'proceed' | 'abandon' })}>
+              <SelectTrigger title="on-network-action-upon-expiration-of-timeout-for-acknowledgement-of-required-members — 필수 멤버가 응답하지 않거나 거절하면"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="abandon">통화 포기</SelectItem>
+                <SelectItem value="proceed">없이 진행</SelectItem>
+              </SelectContent>
+            </Select>
+          </Field>
           {allowOwner && <Field label="소유자 (가입자 검색)" w={230}>
             {form.authorized_user_id != null
               ? <div className="flex items-center gap-1.5">
@@ -398,6 +422,7 @@ function GroupDrawer(p: GroupDrawerProps) {
           <span className="text-sm text-muted-foreground">타입 {existing.group_type || 'prearranged'}</span>
           <span className="text-sm text-muted-foreground">우선순위 {existing.priority ?? 5}</span>
           <span className="text-sm text-muted-foreground">유지 시간 {existing.hang_timer_sec ?? 30}초</span>
+          {(existing.min_number_to_start ?? 0) > 0 && <span className="text-sm text-muted-foreground">시작 최소 응답 {existing.min_number_to_start}명</span>}
           <span className="text-sm text-muted-foreground">동시발언 {(existing.floor_policy || 'single') === 'single' ? '단일(한 명씩)'
             : (existing.floor_policy === 'dual' ? '듀얼(긴급 끼어들기)' : `멀티(${existing.max_talkers ?? 2}명 동시)`)}</span>
           <span className="text-sm text-muted-foreground">소유자 {existing.authorized_user_name || existing.authorized_user || '—'}</span>
@@ -427,12 +452,13 @@ function PriChip({ n }: { n: number }) {
 function MemberRow({ m, name, selected, canManage, onToggle, onSave, onRemove }: {
   m: Member; name?: string; selected: boolean; canManage: boolean
   onToggle: (uid: string) => void
-  onSave: (uid: string, priority: number, role: 'chair' | 'participant') => void
+  onSave: (uid: string, priority: number, role: 'chair' | 'participant', required: boolean) => void
   onRemove: (uid: string) => void
 }) {
   const [editing, setEditing] = useState(false)
   const [pri, setPri] = useState(m.priority)
   const [role, setRole] = useState<'chair' | 'participant'>(m.role === 'chair' ? 'chair' : 'participant')
+  const [req, setReq] = useState(!!m.required)
 
   return (
     <div style={{
@@ -458,14 +484,16 @@ function MemberRow({ m, name, selected, canManage, onToggle, onSave, onRemove }:
               <SelectItem value="chair">chair (의장)</SelectItem>
             </SelectContent>
           </Select>
-          <IconBtn title="저장" tone="primary" onClick={() => { onSave(m.user_id, pri, role); setEditing(false) }}><Check size={ICON} /></IconBtn>
-          <IconBtn title="취소" onClick={() => { setPri(m.priority); setRole(m.role === 'chair' ? 'chair' : 'participant'); setEditing(false) }}><X size={ICON} /></IconBtn>
+          <label className="flex items-center gap-1 whitespace-nowrap" title="on-network-required — 필수 멤버: 개시자 응답 전에 이 멤버의 응답을 기다린다(TNG1)"><Checkbox checked={req} onCheckedChange={(c) => setReq(c === true)} />필수</label>
+          <IconBtn title="저장" tone="primary" onClick={() => { onSave(m.user_id, pri, role, req); setEditing(false) }}><Check size={ICON} /></IconBtn>
+          <IconBtn title="취소" onClick={() => { setPri(m.priority); setRole(m.role === 'chair' ? 'chair' : 'participant'); setReq(!!m.required); setEditing(false) }}><X size={ICON} /></IconBtn>
         </>
       ) : (
         <>
+          {m.required && <span className="text-xs font-semibold text-muted-foreground bg-muted border border-border rounded-full py-px px-[7px]" title="on-network-required — 필수 멤버">필수</span>}
           <PriChip n={m.priority} />
           {canManage && <>
-            <IconBtn title="우선순위·역할 편집" onClick={() => setEditing(true)}><Pencil size={ICON} /></IconBtn>
+            <IconBtn title="우선순위·역할·필수 편집" onClick={() => setEditing(true)}><Pencil size={ICON} /></IconBtn>
             <IconBtn title="제거" tone="danger" onClick={() => onRemove(m.user_id)}><ArrowRight size={ICON} /></IconBtn>
           </>}
         </>
@@ -487,7 +515,7 @@ function MemberTransfer({ members, memberIds, pttIndex, pttName, canManage, orgS
   orgPathOf: (code: string) => string
   onAdd: (ids: string[], priority: number, role: 'chair' | 'participant') => Promise<void>
   onRemove: (ids: string[]) => Promise<void>
-  onSaveMember: (uid: string, priority: number, role: 'chair' | 'participant') => void
+  onSaveMember: (uid: string, priority: number, role: 'chair' | 'participant', required: boolean) => void
 }) {
   // 좌측 선택(제거 대상)
   const [selMembers, setSelMembers] = useState<Set<string>>(new Set())

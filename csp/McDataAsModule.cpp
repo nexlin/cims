@@ -4,11 +4,13 @@
 #include <string.h>
 
 #include "CallDir.h"
+#include "CspServiceMap.h"
 #include "DbManager.h"
 #include "GroupMap.h"
 #include "Log.h"
 #include "McDataCodec.h"
 #include "McDataGates.h"
+#include "McpttInfo.h"
 #include "ModuleDispatcher.h"
 #include "SipServerSetup.h"
 #include "SipStatusCode.h"
@@ -50,8 +52,11 @@ bool CMcDataAsModule::OnMessage( const char *pszFrom, const char *pszTo, CSipMes
                      gclsSetup.m_iMaxSdsCplaneBytes, pszFrom );
         CSipMessage *pclsResponse = pclsMessage->CreateResponseWithToTag( SIP_FORBIDDEN );
         if ( pclsResponse ) {
+            // TS 24.282 §4.4 — 399 <agent> "203 …" (RFC 3261 §20.43 warning-value)
             pclsResponse->AddHeader( "Warning",
-                                     "203 CIMS \"message too large to send over signalling control plane\"" );
+                                     McpttWarning( 203, "message too large to send over signalling control plane",
+                                                   gclsServiceMap.GetDomainByKind( "ptt" ) )
+                                         .c_str() );
             gclsUserAgent.m_clsSipStack.SendSipMessage( pclsResponse );
         }
         iStatus = 0;  // Warning 헤더가 붙어야 해서 여기서 직접 보냈다.

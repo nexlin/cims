@@ -5,6 +5,7 @@ export interface Member {
   priority: number
   role?: 'chair' | 'participant'
   mcptt_id?: string | null
+  required?: boolean           // <on-network-required> 필수 멤버 — 개시자 응답 전에 이 멤버의 응답을 기다린다(TNG1)
 }
 
 export interface Group {
@@ -32,6 +33,10 @@ export interface Group {
   group_type?: 'prearranged' | 'chat'          // on-network-invite-members (일제 통화는 그룹 종류가 아니라 호 속성)
   hang_timer_sec?: number                      // on-network-hang-timer — 그룹 호 T4, 발언 없이 이 시간이 지나면 해제 (0=미사용)
   max_duration_sec?: number                    // on-network-maximum-duration — 그룹 호 최대 시간 TNG3 (0=무제한)
+  // 확인 통화 설정 (TS 24.481 §7.2.2 s)t)u), TS 24.379 §6.3.3.3·§10.1.1.4.2)
+  min_number_to_start?: number                 // on-network-minimum-number-to-start — 개시자 응답 전 멤버 응답 수 (0=기다리지 않음)
+  ack_timeout_sec?: number                     // on-network-timeout-for-acknowledgement-of-required-members — TNG1
+  ack_action?: 'proceed' | 'abandon'           // TNG1 만료·필수 멤버 거절 때 진행(Warning 111) / 포기(480 + Warning 112)
   on_network?: boolean
   max_members?: number
   require_affiliation?: boolean

@@ -336,7 +336,7 @@ struct GroupDocHolder {
 
     void build() {
         mem.clear();
-        for (const auto& m : cxx.members) mem.push_back({C(m.uri), C(m.name), C(m.role), m.priority});
+        for (const auto& m : cxx.members) mem.push_back({C(m.uri), C(m.name), C(m.role), m.priority, B(m.required)});
         out = cimsue_group_doc_t{};
         out.uri = C(cxx.uri); out.display_name = C(cxx.displayName); out.etag = C(cxx.etag);
         out.members = mem.empty() ? nullptr : mem.data();
@@ -354,6 +354,10 @@ struct GroupDocHolder {
         out.allow_conference_state = cxx.allowConferenceState > 0;
         out.has_max_sds_size = cxx.maxSdsSize >= 0;             out.max_sds_size = cxx.maxSdsSize >= 0 ? cxx.maxSdsSize : 0;
         out.has_max_auto_recv = cxx.maxAutoRecv >= 0;           out.max_auto_recv = cxx.maxAutoRecv >= 0 ? cxx.maxAutoRecv : 0;
+        out.has_min_number_to_start = cxx.minNumberToStart >= 0;
+        out.min_number_to_start = cxx.minNumberToStart >= 0 ? cxx.minNumberToStart : 0;
+        out.has_ack_timeout = cxx.ackTimeoutSec >= 0;           out.ack_timeout_sec = cxx.ackTimeoutSec >= 0 ? cxx.ackTimeoutSec : 0;
+        out.ack_action = cxx.ackAction.empty() ? nullptr : C(cxx.ackAction);
     }
 };
 
@@ -366,6 +370,7 @@ GroupDoc toCxx(const cimsue_group_doc_t* d) {
         m.uri = S(d->members[i].uri); m.name = S(d->members[i].display_name);
         if (d->members[i].role && *d->members[i].role) m.role = d->members[i].role;
         m.priority = d->members[i].priority;
+        m.required = d->members[i].required != 0;
         g.members.push_back(m);
     }
     if (d->session_type && *d->session_type) g.sessionType = d->session_type;
@@ -382,6 +387,9 @@ GroupDoc toCxx(const cimsue_group_doc_t* d) {
     g.allowConferenceState = d->has_conference_state ? (d->allow_conference_state != 0 ? 1 : 0) : GroupDoc::kUnset;
     g.maxSdsSize = opt(d->has_max_sds_size, d->max_sds_size);
     g.maxAutoRecv = opt(d->has_max_auto_recv, d->max_auto_recv);
+    g.minNumberToStart = opt(d->has_min_number_to_start, d->min_number_to_start);
+    g.ackTimeoutSec = opt(d->has_ack_timeout, d->ack_timeout_sec);
+    if (d->ack_action && *d->ack_action) g.ackAction = std::string(d->ack_action) == "proceed" ? "proceed" : "abandon";
     return g;
 }
 

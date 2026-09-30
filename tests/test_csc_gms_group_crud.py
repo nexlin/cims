@@ -131,6 +131,41 @@ class ParseTests(unittest.TestCase):
         self.assertEqual([(x["user_id"], x["role"], x["priority"]) for x in d["members"]],
                          [("+82510001001", "chair", 1), ("+82500000001", "participant", 5)])
 
+    def test_ack_call_setup_elements(self):
+        """확인 통화 설정 (TS 24.481 §7.2.2 s)t)u)·§7.2.4.2) — 필수 멤버만 <on-network-required>, list-service 3 요소 왕복."""
+        m.GROUPS["tel:g-0000ack1"] = {
+            "display_name": "필수", "etag": "e", "group_type": "prearranged",
+            "min_number_to_start": 2, "ack_timeout_sec": 7, "ack_action": "proceed",
+            "members": [{"uri": "tel:+82500000001", "name": "a", "role": "participant", "priority": 1, "required": True},
+                        {"uri": "tel:+82500000002", "name": "b", "role": "participant", "priority": 2}],
+        }
+        try:
+            xml, _ = m.get_group_xml("tel:g-0000ack1")
+            d = m.parse_group_document_xml(xml)
+        finally:
+            m.GROUPS.pop("tel:g-0000ack1", None)
+        self.assertEqual(xml.count("<mcpttgi:on-network-required/>"), 1)   # 필수 아닌 멤버엔 싣지 않는다
+        self.assertIn("<mcpttgi:on-network-minimum-number-to-start>2</mcpttgi:on-network-minimum-number-to-start>", xml)
+        self.assertIn("<mcpttgi:on-network-timeout-for-acknowledgement-of-required-members>PT7S"
+                      "</mcpttgi:on-network-timeout-for-acknowledgement-of-required-members>", xml)
+        self.assertIn("<mcpttgi:on-network-action-upon-expiration-of-timeout-for-acknowledgement-of-required-members>"
+                      "proceed</mcpttgi:on-network-action-upon-expiration-of-timeout-for-acknowledgement-of-required-members>",
+                      xml)
+        self.assertEqual((d["min_number_to_start"], d["ack_timeout_sec"], d["ack_action"]), (2, 7, "proceed"))
+        self.assertEqual([x["required"] for x in d["members"]], [True, False])
+        # 정의 밖 동작 값 = abandon (§7.2.2 u)), 범위 밖 TNG1·unsignedShort 아님은 거절
+        tag = ("<mcpttgi:on-network-action-upon-expiration-of-timeout-for-acknowledgement-of-required-members>{}"
+               "</mcpttgi:on-network-action-upon-expiration-of-timeout-for-acknowledgement-of-required-members>")
+        self.assertEqual(m.parse_group_document_xml(_doc("tel:g-00000001", "n", [], extra=tag.format("later")))
+                         ["ack_action"], "abandon")
+        with self.assertRaises(ValueError):
+            m.parse_group_document_xml(_doc("tel:g-00000001", "n", [], extra=(
+                "<mcpttgi:on-network-timeout-for-acknowledgement-of-required-members>PT0S"
+                "</mcpttgi:on-network-timeout-for-acknowledgement-of-required-members>")))
+        with self.assertRaises(ValueError):
+            m.parse_group_document_xml(_doc("tel:g-00000001", "n", [], extra=(
+                "<mcpttgi:on-network-minimum-number-to-start>-1</mcpttgi:on-network-minimum-number-to-start>")))
+
     def test_group_type_from_invite_members_only(self):
         d = m.parse_group_document_xml(_doc("tel:g-00000001", "n", []))
         self.assertEqual(d["group_type"], "prearranged")

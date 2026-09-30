@@ -123,7 +123,9 @@ data class GroupSummary(val uri: String, val displayName: String, val etag: Stri
 data class GroupMember(val uri: String, val name: String = "",
                        val role: String = "participant", val priority: Int = 5,
                        /** 직함 `<cims:user-title>`(사이트 확장) — 읽기 전용, PUT 에 싣지 않는다. */
-                       val title: String = "")
+                       val title: String = "",
+                       /** 필수 멤버 `<on-network-required>`(TS 24.481 §7.2.4.2) — 읽은 값을 되돌려야 콘솔 설정이 남는다. */
+                       val required: Boolean = false)
 
 /**
  * GMS 그룹 문서(OMA list-service + TS 24.481 mcpttgi) — GET 응답·PUT 본문의 단일 모델.
@@ -152,11 +154,17 @@ data class GroupDoc(
     val maxSdsSize: Int? = null,
     /** mcdata-on-network-max-data-size-auto-recv (octet) — 0 = 무제한. */
     val maxAutoRecv: Int? = null,
+    /** on-network-minimum-number-to-start — 개시자 200 OK 전 멤버 200 수(0 = 기다리지 않음). */
+    val minNumberToStart: Int? = null,
+    /** on-network-timeout-for-acknowledgement-of-required-members (TNG1, 초). */
+    val ackTimeoutSec: Int? = null,
+    /** TNG1 만료 동작 proceed | abandon. */
+    val ackAction: String? = null,
 ) {
     internal fun toJni(): JniGroupDoc = JniGroupDoc().also { d ->
         d.uri = uri; d.displayName = displayName; d.etag = etag
         d.members = GroupMemberVector().apply {
-            members.forEach { m -> add(JniGroupMember().also { it.uri = m.uri; it.name = m.name; it.role = m.role; it.priority = m.priority }) }
+            members.forEach { m -> add(JniGroupMember().also { it.uri = m.uri; it.name = m.name; it.role = m.role; it.priority = m.priority; it.required = m.required }) }
         }
         d.sessionType = sessionType; d.videoEnabled = videoEnabled; d.encryption = encryption
         d.emergencyCall = emergencyCall; d.emergencyAlert = emergencyAlert
@@ -167,6 +175,8 @@ data class GroupDoc(
         d.hangTimerSec = hangTimerSec.orUnset(); d.maxDurationSec = maxDurationSec.orUnset()
         d.allowConferenceState = when (allowConferenceState) { null -> UNSET; true -> 1; false -> 0 }
         d.maxSdsSize = maxSdsSize.orUnset(); d.maxAutoRecv = maxAutoRecv.orUnset()
+        d.minNumberToStart = minNumberToStart.orUnset(); d.ackTimeoutSec = ackTimeoutSec.orUnset()
+        d.ackAction = ackAction ?: ""
     }
     internal companion object {
         /** 코어 `GroupDoc::kUnset`. */
@@ -175,13 +185,15 @@ data class GroupDoc(
         private fun Int.orNull(): Int? = if (this < 0) null else this
 
         fun of(d: JniGroupDoc) = GroupDoc(d.uri, d.displayName, d.etag,
-            d.members.let { v -> List(v.size) { i -> v[i].let { GroupMember(it.uri, it.name, it.role, it.priority, it.title) } } },
+            d.members.let { v -> List(v.size) { i -> v[i].let { GroupMember(it.uri, it.name, it.role, it.priority, it.title, it.required) } } },
             d.sessionType, d.videoEnabled, d.encryption, d.emergencyCall, d.emergencyAlert,
             d.allowSds, d.allowFd, d.requireAffiliation, d.priority, d.maxParticipants,
             d.orgCode, d.authorizedUser,
             hangTimerSec = d.hangTimerSec.orNull(), maxDurationSec = d.maxDurationSec.orNull(),
             allowConferenceState = d.allowConferenceState.let { if (it < 0) null else it != 0 },
-            maxSdsSize = d.maxSdsSize.orNull(), maxAutoRecv = d.maxAutoRecv.orNull())
+            maxSdsSize = d.maxSdsSize.orNull(), maxAutoRecv = d.maxAutoRecv.orNull(),
+            minNumberToStart = d.minNumberToStart.orNull(), ackTimeoutSec = d.ackTimeoutSec.orNull(),
+            ackAction = d.ackAction.ifEmpty { null })
     }
 }
 

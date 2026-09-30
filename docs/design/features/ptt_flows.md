@@ -21,7 +21,8 @@
 >
 > **3GPP 정합 세부**
 > - 그룹 식별: `ptt_groups.id`=surrogate(키), `mcptt_group_id`=식별자. 멤버 `role`(chair/participant)·`mcptt_id`.
-> - 멤버 leg INVITE: `mcptt-info+xml` + SDP — 멤버 명단(`resource-lists+xml`)은 싣지 않는다(TS 24.379 §6.3.3.1.2, 부록 A.1.3-7). 명단은 conference 이벤트 패키지(§10.1.3)·GMS 그룹 문서로 받는다. Contact = `+g.3gpp.mcptt`·`+g.3gpp.icsi-ref`·`isfocus`, `P-Asserted-Service` = ICSI mcptt.
+> - 멤버 leg INVITE: `mcptt-info+xml` + SDP — 멤버 명단(`resource-lists+xml`)은 싣지 않는다(TS 24.379 §6.3.3.1.2, 부록 A.1.3-7). 명단은 conference 이벤트 패키지(§10.1.3)·GMS 그룹 문서로 받는다. Contact = 세션 식별자(`sip:<그룹>@<CSP>;gr=<토큰>`, §4.5 GRUU) + `+g.3gpp.mcptt`·`+g.3gpp.icsi-ref`·`isfocus`, `P-Asserted-Service` = ICSI mcptt.
+> - **개시자 200 OK 시점** = 확인 통화 설정(§6.3.3.3·§10.1.1.4.2) — 그룹 문서의 필수 멤버(`<on-network-required>`)·`<on-network-minimum-number-to-start>`·TNG1·만료 동작(proceed = Warning 111 / abandon = 480 + Warning 112). 기본값(필수 없음·최소 0)은 곧바로 수락. 사설 호는 착신자 200 뒤(§11.1.1.4.2). [mcptt_standard_conformance.md](mcptt_standard_conformance.md) §C4c
 > - **chair** = participant floor 항상 선점(TS 24.380). 200 OK 의 `m=application` floor 포트 파싱.
 > - **로그/녹취 디렉터리**: `ptt/{id}/{YYYY}/{MM}/{DD}/{HH}/`(시간버킷) + `seg/{NNN}`(100세그 shard) + `floor.jsonl`/`group.json`. [recording.md](recording.md)
 > - 그룹 권한/소유(authorized user)·콘솔 RBAC 는 [mcptt_authorization.md](mcptt_authorization.md).

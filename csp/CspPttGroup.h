@@ -33,6 +33,10 @@ public:
     /** 멤버 MCPTT ID URI (비면 _id 사용) */
     std::string _mcpttId;
 
+    /** 필수 멤버 — 그룹 문서 <entry> 의 <on-network-required>(TS 24.481 §7.2.4.2). 개시자 200 OK 전에 이 멤버의 200 을
+     *  기다린다(TNG1, TS 24.379 §6.3.3.3) */
+    bool _onNetworkRequired = false;
+
     std::vector<std::string> _groups;
 
     bool IsChair() const {
@@ -106,6 +110,15 @@ public:
 
     /** 그룹 호 최대 시간 TNG3 초 (on-network-maximum-duration, TS 24.481 §7.2.7 — 0=무제한) */
     int _maxDurationSec;
+
+    /** 확인 통화 설정(acknowledged call setup, TS 24.379 §6.3.3.3·§10.1.1.4.2) — TS 24.481 §7.2.2 s)t)u).
+     *  _minNumberToStart = <on-network-minimum-number-to-start>(개시자 200 OK 전 멤버 200 수, 0 = 기다리지 않음),
+     *  _ackTimeoutSec = <on-network-timeout-for-acknowledgement-of-required-members>(TNG1 초),
+     *  _ackAction = <on-network-action-upon-expiration-of-timeout-for-acknowledgement-of-required-members>
+     *  ("proceed" | "abandon" — 그 밖의 값은 abandon, §7.2.2 u)) */
+    int _minNumberToStart;
+    int _ackTimeoutSec;
+    std::string _ackAction;
 
     /** on-network 그룹 여부 */
     bool _onNetwork;

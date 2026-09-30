@@ -331,20 +331,25 @@ INVITE to group@domain
   ├─ 그룹 존재/세션 시간 유효성 확인
   ├─ CMP addGroup → 공유 RTP 포트 + Floor 포트 할당
   │   (record_dir 전달)
-  ├─ 발신자에게 200 OK (공유 RTP 주소 · Contact 특성 태그+isfocus · Session-Expires refresher=uac +
-  │   Require: timer · PAI = 그룹 URI · Supported: tdialog — TS 24.379 §6.3.3.2.3.2)
+  ├─ 새 세션 개시 + 개시자 응답 게이트가 필요하면(필수 멤버·시작 최소 인원·사설 호 — mcptt_standard_conformance.md §C4c)
+  │   AckGate 등록(필수 멤버가 있으면 TNG1 시작) → 멤버 초대 → 멤버 200/거절·TNG1 만료로 판정 → 아래 200 OK 또는 480·거절 코드
+  │   + Warning 111/112. 게이트 없으면 곧바로:
+  ├─ 발신자에게 200 OK (공유 RTP 주소 · Contact = 세션 식별자 `…;gr=<토큰>` + 특성 태그+isfocus · Session-Expires
+  │   refresher=uac + Require: timer · PAI = 그룹 URI · Supported: tdialog — TS 24.379 §6.3.3.2.3.2)
   ├─ 매핑: callerId → groupId (m_mapUserCall)
   │
-  └─ 각 그룹 멤버에 대해:
+  └─ 각 그룹 멤버에 대해 (게이트면 수락보다 먼저):
       ├─ (affiliation 게이트: require_affiliation 시 affiliate 된 멤버만)
       ├─ InviteMember() → Multipart INVITE
       │   ├─ Content-Type: multipart/mixed
       │   ├─ Part 1: application/vnd.3gpp.mcptt-info+xml
       │   └─ Part 2: SDP (공유 RTP + m=application floor)
       │      (멤버 명단 resource-lists 는 싣지 않는다 — TS 24.379 §6.3.3.1.2, 명단은 conference 이벤트·GMS)
-      ├─ 멤버 200 OK 수신 → m=application floor 파싱 → CMP PTT_JOIN(role 포함)
+      ├─ 멤버 200 OK 수신 → m=application floor 파싱 → CMP PTT_JOIN(role 포함) → 게이트 누계
       └─ 매핑: memberCallId → {groupId, memberId, sessionId}
 ```
+
+재합류 INVITE 의 Request-URI 가 세션 식별자(`gr`)면 진행 중인 그 세션이어야 한다 — 아니면 404(§10.1.1.4.5.1 2)).
 
 **MCPTT INVITE 헤더 주입 (3GPP 규격 준수):**
 

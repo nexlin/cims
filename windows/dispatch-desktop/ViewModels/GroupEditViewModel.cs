@@ -18,9 +18,11 @@ public sealed partial class GroupMemberRow : ObservableObject
     public string DisplayNumber { get; }
     public bool IsMe { get; }
     [ObservableProperty] private bool _isChair;
-    public GroupMemberRow(string uri, string name, string displayNumber, bool isMe, bool isChair)
+    /// <summary>필수 멤버 &lt;on-network-required&gt; — 폼은 편집하지 않고 읽은 값을 그대로 되돌린다(콘솔 설정 보존).</summary>
+    public bool Required { get; }
+    public GroupMemberRow(string uri, string name, string displayNumber, bool isMe, bool isChair, bool required = false)
     {
-        Uri = uri; Name = name; DisplayNumber = displayNumber; IsMe = isMe; _isChair = isChair;
+        Uri = uri; Name = name; DisplayNumber = displayNumber; IsMe = isMe; _isChair = isChair; Required = required;
     }
     public string Label => Name.Length > 0 ? Name : DisplayNumber;
     public string RoleText => IsChair ? "의장" : "참가자";
@@ -117,17 +119,17 @@ public sealed partial class GroupEditViewModel : ObservableObject
         VideoEnabled = d.VideoEnabled; AllowSds = d.AllowSds; AllowFd = d.AllowFd; EmergencyCall = d.EmergencyCall; EmergencyAlert = d.EmergencyAlert;
         RequireAffiliation = d.RequireAffiliation; Encryption = d.Encryption; Priority = d.Priority; MaxParticipants = d.MaxParticipants;
         Members.Clear();
-        foreach (var m in d.Members) AddMember(m.Uri, m.Name, m.Role == "chair");
+        foreach (var m in d.Members) AddMember(m.Uri, m.Name, m.Role == "chair", m.Required);
         Loaded = true;
         Filter();
     }
 
-    private void AddMember(string uri, string name, bool chair)
+    private void AddMember(string uri, string name, bool chair, bool required = false)
     {
         string number = UserPartConverter.UserPart(uri);
         if (Members.Any(m => DirectoryService.Normalize(UserPartConverter.UserPart(m.Uri)) == DirectoryService.Normalize(number))) return;
         string n = name.Length > 0 ? name : _s.Directory.NameOf(number);
-        Members.Add(new GroupMemberRow(uri, n, _s.Directory.DisplayNumber(number), _s.IsMe(uri), chair));
+        Members.Add(new GroupMemberRow(uri, n, _s.Directory.DisplayNumber(number), _s.IsMe(uri), chair, required));
         OnPropertyChanged(nameof(MemberCountText)); OnPropertyChanged(nameof(CanSave));
     }
 
@@ -167,7 +169,8 @@ public sealed partial class GroupEditViewModel : ObservableObject
             Priority = Math.Clamp(Priority, 0, 15), MaxParticipants = Math.Max(0, MaxParticipants), OrgCode = _orgCode,
         };
         foreach (var m in Members)
-            doc.Members.Add(new GroupMember { Uri = m.Uri, Name = m.Name, Role = m.IsChair ? "chair" : "participant", Priority = m.IsChair ? 7 : 5 });
+            doc.Members.Add(new GroupMember { Uri = m.Uri, Name = m.Name, Role = m.IsChair ? "chair" : "participant", Priority = m.IsChair ? 7 : 5,
+                                              Required = m.Required });
         Busy = true;
         var r = await _s.SaveGroupAsync(doc, IsNew ? null : _ifMatch);       // 409 uri_taken 재시도는 세션이 처리
         Busy = false;

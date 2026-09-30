@@ -97,6 +97,8 @@ struct GroupMember {
     std::string role = "participant";
     int priority = 5;
     std::string title;                         // 직함 <cims:user-title>(사이트 확장) — 읽기 전용, PUT 에 싣지 않는다(서버가 읽지 않는다)
+    bool required = false;                     // 필수 멤버 <mcpttgi:on-network-required>(TS 24.481 §7.2.4.2) — 개시자 응답 전에 이 멤버의
+                                               //   200 을 기다린다(TNG1, TS 24.379 §6.3.3.3). 읽은 값을 그대로 되돌려야 콘솔 설정이 남는다
 };
 
 /** GMS 그룹 문서(OMA list-service + TS 24.481 mcpttgi 확장) — GET 응답·PUT 본문의 단일 모델.
@@ -126,6 +128,11 @@ struct GroupDoc {
     int allowConferenceState = kUnset;         // on-network-allow-conference-state — 0 불허 / 1 허용 (§7.2.4.2)
     int maxSdsSize = kUnset;                   // mcdata-on-network-max-data-size-for-SDS (octet) — 0 = 무제한
     int maxAutoRecv = kUnset;                  // mcdata-on-network-max-data-size-auto-recv (octet) — 0 = 무제한
+    // 확인 통화 설정(TS 24.481 §7.2.2 s)t)u), TS 24.379 §6.3.3.3·§10.1.1.4.2) — 같은 미기재 규약.
+    int minNumberToStart = kUnset;             // on-network-minimum-number-to-start — 개시자 200 OK 전 멤버 200 수(0 = 기다리지 않음)
+    int ackTimeoutSec = kUnset;                // on-network-timeout-for-acknowledgement-of-required-members (TNG1, 초)
+    std::string ackAction;                     // on-network-action-upon-expiration-of-timeout-for-acknowledgement-of-required-members
+                                               //   proceed | abandon (빈 값 = 미기재)
     /** 문서 → XML(PUT 본문). */
     CIMSUE_API std::string toXml() const;
     /** XML → 문서. 실패면 false(err 에 사유). */
