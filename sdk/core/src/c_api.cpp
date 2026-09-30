@@ -211,8 +211,8 @@ void fill(cimsue_mcptt_info_t& o, const McpttInfo& m) {
     o.broadcast = B(m.broadcast);
 }
 
-/** sources 배열은 호출자가 준 벡터에 담는다(그 벡터가 소유자). */
-void fill(cimsue_call_info_t& o, const CallInfo& c, std::vector<cimsue_media_source_t>& srcBuf) {
+/** sources·non_ack_users 배열은 호출자가 준 벡터에 담는다(그 벡터가 소유자). */
+void fill(cimsue_call_info_t& o, const CallInfo& c, std::vector<cimsue_media_source_t>& srcBuf, std::vector<const char*>& ackBuf) {
     o.call_id = c.callId; o.account_id = c.accountId;
     o.dir = (cimsue_call_dir_t)c.dir;
     o.state = (cimsue_call_state_t)c.state;
@@ -238,6 +238,11 @@ void fill(cimsue_call_info_t& o, const CallInfo& c, std::vector<cimsue_media_sou
     o.condition.mine = B(c.condition.mine);
     o.condition.pending = B(c.condition.pending);
     o.condition.last_code = c.condition.lastCode;
+    o.answer_state = C(c.answerState);
+    ackBuf.clear();
+    for (const auto& u : c.nonAcknowledgedUsers) ackBuf.push_back(C(u));
+    o.non_ack_users = ackBuf.empty() ? nullptr : ackBuf.data();
+    o.non_ack_user_count = (int32_t)ackBuf.size();
 }
 
 void fill(cimsue_emergency_alert_t& o, const EmergencyAlert& a) {
@@ -564,6 +569,7 @@ struct Scratch {
     CallInfo                                call;
     cimsue_call_info_t                      callC{};
     std::vector<cimsue_media_source_t>      callSrc;
+    std::vector<const char*>                callAck;
     FloorInfo                               floor;
     cimsue_floor_info_t                     floorC{};
     std::vector<cimsue_talker_t>            floorTalkers;
@@ -637,9 +643,10 @@ public:
     }
     void onMcpttCondition(const CallInfo& info, ConditionCause cause) override {
         if (!cb.on_mcptt_condition) return;
-        cimsue_call_info_t o{}; std::vector<cimsue_media_source_t> src; fill(o, info, src);
+        cimsue_call_info_t o{}; std::vector<cimsue_media_source_t> src; std::vector<const char*> ack; fill(o, info, src, ack);
         cb.on_mcptt_condition(cb.user, &o, (cimsue_condition_cause_t)cause);
     }
+    void onNonAcknowledgedUsers(const CallInfo& info) override { call(cb.on_non_acknowledged_users, info); }
     void onEmergencyAlert(const EmergencyAlert& alert) override {
         if (!cb.on_emergency_alert) return;
         cimsue_emergency_alert_t o{}; fill(o, alert);
@@ -650,7 +657,7 @@ private:
     using CallCb = void(CIMSUE_CALL*)(void*, const cimsue_call_info_t*);
     void call(CallCb fn, const CallInfo& info) {
         if (!fn) return;
-        cimsue_call_info_t o{}; std::vector<cimsue_media_source_t> src; fill(o, info, src);
+        cimsue_call_info_t o{}; std::vector<cimsue_media_source_t> src; std::vector<const char*> ack; fill(o, info, src, ack);
         fn(cb.user, &o);
     }
 };
@@ -854,7 +861,7 @@ cimsue_status_t CIMSUE_CALL cimsue_engine_send_dtmf(cimsue_engine_t* e, int32_t 
 void CIMSUE_CALL cimsue_engine_call_info(const cimsue_engine_t* e, int32_t call_id, cimsue_call_info_t* out) {
     if (!out) return;
     g_s.call = e ? e->eng.callInfo(call_id) : CallInfo();
-    fill(g_s.callC, g_s.call, g_s.callSrc);
+    fill(g_s.callC, g_s.call, g_s.callSrc, g_s.callAck);
     *out = g_s.callC;
 }
 

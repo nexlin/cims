@@ -214,13 +214,15 @@ public sealed record MediaSource(uint Ssrc, string Label, bool Active, float Lev
 
 /// <summary>호 스냅샷. CalledParty = 착신 INVITE 의 P-Called-Party-ID(RFC 3455, 대표번호 착신 식별). PlaybackRoute = 0 기본 재생 장치,
 /// 그 외 <see cref="Engine.AddPlaybackRoute"/> 가 준 id. JoinedDialog = INVITE-Join 으로 합류한 대상 dialog 의 Call-ID.
-/// Mcptt = 개시·착신 INVITE 의 mcptt-info(호 종류 — 이후 불변), Condition = 긴급·임박의 현재값(판정은 이것으로). RxLevel = 이 호에서 듣는 크기.</summary>
+/// Mcptt = 개시·착신 INVITE 의 mcptt-info(호 종류 — 이후 불변), Condition = 긴급·임박의 현재값(판정은 이것으로). RxLevel = 이 호에서 듣는 크기.
+/// AnswerState = 개시 200 OK 의 P-Answer-State(RFC 4964 — "Unconfirmed" = 서버가 멤버 확인 전에 받았다, TS 24.379 §10.1.1.2.1.1 2A)),
+/// NonAcknowledgedUsers = 서버가 알린 미응답 멤버 MCPTT ID(bare, §6.3.3.3 — 알릴 때 <see cref="Engine.NonAcknowledgedUsersReceived"/>).</summary>
 public sealed record CallInfo(
     int CallId, int AccountId, CallDir Dir, CallState State, string RemoteUri, string CalledParty,
     bool Video, bool MediaActive, bool Muted, bool Listen, int PlaybackRoute,
     int LastCode, string LastReason, IReadOnlyList<MediaSource> Sources,
     bool IsMcptt, string GroupId, McpttInfo Mcptt, bool HalfDuplex, bool ListenOnly, string JoinedDialog,
-    float RxLevel = 1f, McpttCondition Condition = default)
+    float RxLevel = 1f, McpttCondition Condition = default, string AnswerState = "", IReadOnlyList<string>? NonAcknowledgedUsers = null)
 {
     public static CallInfo Empty { get; } = new(-1, -1, CallDir.Outgoing, CallState.Null, "", "", false, false, false, true, 0, 0, "",
                                                 Array.Empty<MediaSource>(), false, "", McpttInfo.None, false, false, "");

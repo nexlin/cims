@@ -94,6 +94,7 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
         Engine.FloorChanged += (_, f) => OnFloor(f);
         Engine.McpttConditionChanged += (_, c) => OnCondition(c);
         Engine.EmergencyAlertReceived += (_, a) => OnEmergencyAlert(a);
+        Engine.NonAcknowledgedUsersReceived += (_, c) => OnNonAcknowledged(c);
         Engine.RosterChanged += (_, r) => OnRoster(r);
         Engine.DialogInfoReceived += (_, d) => OnDialog(d);
         Engine.SdsReceived += (_, m) => SdsReceived?.Invoke(this, m);
@@ -968,7 +969,7 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
             Operation op = _pendingOps.Remove(ci.CallId, out var o) ? o : ci.Dir == CallDir.Incoming ? Operation.Incoming : Operation.Dial;
             s = Create(ci, op);
         }
-        else s.Info = ci;
+        else { s.Info = ci; NoteAnswerState(s); }
         if (ci.State != CallState.Incoming && Notify.BannerOf(s) is { } b) Notify.RemoveBanner(b);
         if (ci.State == CallState.Active && s.Kind == SessionKind.VolteCall && Settings.Current.AutoHoldOnAnswer)
             foreach (var other in VolteCalls.Where(o => o != s && o.IsActive).ToList()) Engine.GetCall(other.CallId).Hold();
@@ -983,6 +984,20 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
         s.Info = ci;
         UpdateEmergencyBanner(s);
         SessionChanged?.Invoke(this, s);
+    }
+
+    /// <summary>내가 연 그룹 통화에 필수 멤버가 응답하지 않은 채 진행됐다(TS 24.379 §6.3.3.3 — 서버 INFO `<non-acknowledged-user>`, 개시자 프로파일
+    /// allow-to-receive-non-acknowledged-users-information 일 때만 온다). ⑤ 이벤트 + 토스트 — 누가 듣지 못하는지 관제사가 알아야 한다.</summary>
+    private void OnNonAcknowledged(CallInfo ci)
+    {
+        var s = Find(ci.CallId);
+        var users = ci.NonAcknowledgedUsers ?? Array.Empty<string>();
+        if (s is null || users.Count == 0) return;
+        s.Info = ci;
+        string names = string.Join(", ", users.Select(u => NameOfPtt(u)));
+        Log.Info($"non-acknowledged #{ci.CallId} {string.Join(",", users)}");
+        Activity.Add(ActivityPanel.Ptt, ActivityKind.Member, $"{s.Title} 미응답 멤버 {users.Count}명", names);
+        Notify.Warn($"{s.Title} — 필수 멤버 {users.Count}명이 응답하지 않은 채 통화가 열렸습니다", names);
     }
 
     /// <summary>세션 조건 변화(코어 onMcpttCondition — 호 상태와 다른 흐름). 조건만 옮기고, 늦게 닿은 끝난 호의 것은 그 호를 되살리지 않는다.
@@ -1019,8 +1034,18 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
             case SessionKind.PttChannel when op == Operation.Broadcast: Activity.Add(ActivityPanel.Ptt, ActivityKind.SessionStart, $"{s.Title} 일제 통화 개시"); break;
             case SessionKind.PttChannel when s.IsBroadcast: Activity.Add(ActivityPanel.Ptt, ActivityKind.SessionStart, $"{s.Title} 일제 통화", Directory.Label(ci.Mcptt.CallingUserId)); break;
         }
+        NoteAnswerState(s);
         SessionAdded?.Invoke(this, s);
         return s;
+    }
+
+    /// <summary>개시 200 OK 의 P-Answer-State: Unconfirmed(RFC 4964) — 서버가 멤버 확인 전에 받았다(첫 멤버가 붙기 전의 말은 서버가 담았다 재생한다,
+    /// TS 24.379 §10.1.1.2.1.1 2A) "may indicate to the MCPTT user"). ⑤ 에 한 번 적는다.</summary>
+    private void NoteAnswerState(SessionItem s)
+    {
+        if (s.AnswerStateNoted || !s.IsActive || s.Info.Dir != CallDir.Outgoing || !string.Equals(s.Info.AnswerState, "Unconfirmed", StringComparison.OrdinalIgnoreCase)) return;
+        s.AnswerStateNoted = true;
+        Activity.Add(ActivityPanel.Ptt, ActivityKind.Note, $"{s.Title} 멤버 확인 전 연결", "첫 멤버가 붙을 때까지 서버가 음성을 담았다 전한다");
     }
 
     private string TitleOf(CallInfo ci)

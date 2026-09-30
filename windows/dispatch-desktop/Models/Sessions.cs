@@ -74,6 +74,8 @@ public sealed partial class SessionItem : ObservableObject
     [ObservableProperty] private SessionItem? _consultFor;
     /// <summary>전달 진행 표시("전달 중 → 1003").</summary>
     [ObservableProperty] private string _transferNote = "";
+    /// <summary>P-Answer-State Unconfirmed 를 ⑤ 에 적었다(한 번만).</summary>
+    public bool AnswerStateNoted { get; set; }
     /// <summary>애드혹 멤버 칩(응답 상태는 로스터).</summary>
     public IReadOnlyList<string> AdhocMembers { get; set; } = Array.Empty<string>();
 

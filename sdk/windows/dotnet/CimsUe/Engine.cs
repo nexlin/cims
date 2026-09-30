@@ -53,6 +53,8 @@ public sealed unsafe class Engine : IDisposable
     public event EventHandler<McpttConditionChange>? McpttConditionChanged;
     /// <summary>긴급 경보·취소·긴급 통지 수신(TS 24.379 §12.1.1.3). 200 OK 는 코어가 이미 보냈다.</summary>
     public event EventHandler<EmergencyAlert>? EmergencyAlertReceived;
+    /// <summary>개시 호의 미응답 멤버 알림(TS 24.379 §6.3.3.3 — INFO g.3gpp.mcptt-info) — Info.NonAcknowledgedUsers. 200 OK 는 코어가 이미 보냈다.</summary>
+    public event EventHandler<CallInfo>? NonAcknowledgedUsersReceived;
     /// <summary>그룹 로스터(RFC 4575) — 구독 NOTIFY 또는 in-dialog NOTIFY.</summary>
     public event EventHandler<RosterUpdate>? RosterChanged;
     /// <summary>감시 대상 dialog 상태(RFC 4235 NOTIFY) — dialog 하나당 1회.</summary>
@@ -430,7 +432,15 @@ public sealed unsafe class Engine : IDisposable
                             c->playback_route, c->last_code, Utf8.Str(c->last_reason), src, c->is_mcptt != 0, Utf8.Str(c->group_id),
                             ToManaged(c->mcptt), c->half_duplex != 0, c->listen_only != 0, Utf8.Str(c->joined_dialog),
                             c->rx_level, new McpttCondition(c->condition.emergency != 0, c->condition.imminent_peril != 0, c->condition.mine != 0,
-                                                            c->condition.pending != 0, c->condition.last_code));
+                                                            c->condition.pending != 0, c->condition.last_code),
+                            Utf8.Str(c->answer_state), NonAck(c));
+    }
+
+    private static string[] NonAck(cimsue_call_info_t* c)
+    {
+        var a = new string[Math.Max(0, c->non_ack_user_count)];
+        for (int i = 0; i < a.Length; ++i) a[i] = Utf8.Str(c->non_ack_users[i]);
+        return a;
     }
 
     internal static EmergencyAlert ToManaged(cimsue_emergency_alert_t* a) =>
@@ -483,6 +493,7 @@ public sealed unsafe class Engine : IDisposable
         on_engine_stopped = &Cb.OnEngineStopped,
         on_mcptt_condition = &Cb.OnMcpttCondition,
         on_emergency_alert = &Cb.OnEmergencyAlert,
+        on_non_acknowledged_users = &Cb.OnNonAcknowledgedUsers,
     };
 
     /// <summary>앱 스레드로 넘긴다. 컨텍스트가 없으면 이벤트 스레드에서 직접 — 예외는 네이티브 경계 밖으로 새지 않게 잡는다.</summary>
@@ -612,6 +623,13 @@ public sealed unsafe class Engine : IDisposable
         {
             var e = Of(user); if (e is null) return;
             try { var a = ToManaged(alert); e.Dispatch(() => e.EmergencyAlertReceived?.Invoke(e, a)); } catch { }
+        }
+
+        [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
+        public static void OnNonAcknowledgedUsers(void* user, cimsue_call_info_t* info)
+        {
+            var e = Of(user); if (e is null) return;
+            try { var c = ToManaged(info); e.Dispatch(() => e.NonAcknowledgedUsersReceived?.Invoke(e, c)); } catch { }
         }
 
         [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]

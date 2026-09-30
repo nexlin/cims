@@ -202,8 +202,8 @@ P3(ptt-client SDK 전환) 실측에서 더 드러난 것 — .48 반영·배포(
     콘솔 가입자 PTT 회선 «그룹 통화»·관리 API·관제 앱 디렉터리 `allowNonAckUsersInfo`)면 ACK 뒤 INFO `Info-Package: g.3gpp.mcptt-info` +
     `<anyExt><non-acknowledged-user>`. psip `SendInfoWithBody`. 실측(g005 014 필수·proceed 임시, 원복): 200+111 → 1 s 뒤 INFO `tel:+82500000014`.
   - **SDK** — INFO g.3gpp.mcptt-info 200(종전 pjsua 500)·`CallInfo.nonAcknowledgedUsers`/`onNonAcknowledgedUsers`·`CallInfo.answerState`, 모르는 패키지 469.
-  - **.45 몫** — ① SDK(C++ 코어) 재빌드면 INFO 가 200 이 된다 — 옛 SDK 는 500 을 답하지만 호에는 영향이 없다. C API·.NET·Kotlin 노출(`onNonAcknowledgedUsers`·
-    `answerState`)과 앱 표시는 Windows·Android 몫. ② CMP 0.2.104 이상이면 개시 200 이 멤버 확인 전에 나가고 `P-Answer-State: Unconfirmed` 가 붙는다 —
+  - **.45 몫** — ① SDK(C++ 코어) 재빌드면 INFO 가 200 이 된다 — 옛 SDK 는 500 을 답하지만 호에는 영향이 없다. C API·.NET 노출과 Windows 관제 앱 표시(⑤ «미응답 멤버 n명»
+    + 토스트, «멤버 확인 전 연결»)는 반영, Kotlin 노출·Android 표시는 Android 몫. ② CMP 0.2.104 이상이면 개시 200 이 멤버 확인 전에 나가고 `P-Answer-State: Unconfirmed` 가 붙는다 —
     CMP 를 `PttMediaBufferMs=0` 으로 두면 첫 멤버 200 뒤 수락(홀로 개시한 호는 480). ③ `require_affiliation` 그룹은 affiliate 하지 않은 단말의 일반
     개시·합류가 403 120 이 된다 — 단말 앱이 그룹 선택 시 affiliate 하는지 확인. ④ CSP 는 새 컬럼을 기동 때 확인한다(마이그레이션 뒤 CSP 재기동).
   - 남은 편차 — Supported `norefersub`/`explicitsub`/`nosub` 미광고(그룹 세션 REFER 미지원) · 진행 MESSAGE 안내(선택) · 개시 전 affiliation 인원 검사

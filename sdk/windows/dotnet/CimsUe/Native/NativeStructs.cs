@@ -172,6 +172,9 @@ internal unsafe struct cimsue_call_info_t
     // 끝에 덧붙였다
     public float rx_level;
     public cimsue_mcptt_condition_t condition;
+    public byte* answer_state;
+    public byte** non_ack_users;
+    public int non_ack_user_count;
 }
 
 [StructLayout(LayoutKind.Sequential)]
@@ -353,6 +356,7 @@ internal unsafe struct cimsue_listener_t
     // 끝에 덧붙였다
     public delegate* unmanaged[Cdecl]<void*, cimsue_call_info_t*, int, void> on_mcptt_condition;
     public delegate* unmanaged[Cdecl]<void*, cimsue_emergency_alert_t*, void> on_emergency_alert;
+    public delegate* unmanaged[Cdecl]<void*, cimsue_call_info_t*, void> on_non_acknowledged_users;
 }
 
 // ── CSC 설정 평면 (csc.h) ──

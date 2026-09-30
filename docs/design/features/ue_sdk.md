@@ -196,7 +196,8 @@ C++ 공개 표면은 `cimsue/engine.h` 의 `Engine` 하나이며 계정·호를 
   개시 200 OK 의 `P-Answer-State`(RFC 4964)를 `CallInfo.answerState` 에 둔다 — `Unconfirmed` = 서버가 멤버 확인 전에 받았다(미디어 버퍼링).
   in-dialog INFO 는 Info Package(RFC 6086)로 가린다: `g.3gpp.mcptt-info` 는 코어가 200 으로 받고 `<non-acknowledged-user>` 를
   `CallInfo.nonAcknowledgedUsers`(bare id)에 담아 `onNonAcknowledgedUsers` 를 낸다, 모르는 패키지는 469(§4.2.2), 패키지 없는 INFO 는 스택 기본.
-  C API·.NET·Kotlin 파사드 노출은 후속(Kotlin 은 SWIG 재생성으로 필드·콜백이 생긴다), `cimsue-cli` 는 `answer-state=`·`non-acknowledged` 줄로 보인다.
+  C API(`cimsue_call_info_t.answer_state`·`non_ack_users`·리스너 `on_non_acknowledged_users`)·.NET(`CallInfo.AnswerState`·`NonAcknowledgedUsers`·
+  `Engine.NonAcknowledgedUsersReceived`) 반영, Kotlin 파사드는 후속(SWIG 재생성으로 필드·콜백이 생긴다), `cimsue-cli` 는 `answer-state=`·`non-acknowledged` 줄로 보인다.
 - **media plane SDS**(TS 24.282 §9.2.3, [mcdata_messaging.md](mcdata_messaging.md) §4.7). `AccountConfig.maxSdsCplaneBytes`(프로비저닝
   `mcdata.maxPayloadSdsCplaneBytes` — `ServiceProfile::toAccount` 가 채운다)를 넘는 **그룹** SDS 는 `sendGroupSds` 가 MSRP 로 보낸다(INVITE
   더미 audio + m=message sendonly actpass → 200 의 cmdp a=path → SEND 2건) — 반환·상관은 C-plane 과 같고 최종 결과가 `onRequestResult`

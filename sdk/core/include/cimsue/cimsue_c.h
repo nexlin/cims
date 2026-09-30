@@ -225,6 +225,9 @@ typedef struct {
     /* 끝에 덧붙였다 */
     float                        rx_level;          /* 이 호에서 듣는 크기(set_rx_level — 코어가 기억해 재결선마다 적용) */
     cimsue_mcptt_condition_t     condition;         /* 세션 조건 현재값 — mcptt 는 개시·착신 INVITE 의 값(불변) */
+    const char*                  answer_state;      /* 개시 200 OK 의 P-Answer-State(RFC 4964) — "Unconfirmed" = 멤버 확인 전 수락 */
+    const char* const*           non_ack_users;     /* 서버가 알린 미응답 멤버 MCPTT ID(bare, TS 24.379 §6.3.3.3) (ptr, count) */
+    int32_t                      non_ack_user_count;
 } cimsue_call_info_t;
 
 typedef struct {
@@ -396,6 +399,8 @@ typedef struct {
     void (CIMSUE_CALL* on_mcptt_condition)(void* user, const cimsue_call_info_t* info, cimsue_condition_cause_t cause);
     /** 긴급 경보·취소·긴급 통지 수신 — 200 OK 는 코어가 이미 보냈다(Listener::onEmergencyAlert). */
     void (CIMSUE_CALL* on_emergency_alert)(void* user, const cimsue_emergency_alert_t* alert);
+    /** 개시 호의 미응답 멤버 알림(INFO g.3gpp.mcptt-info, TS 24.379 §6.3.3.3) — info->non_ack_users(Listener::onNonAcknowledgedUsers). */
+    void (CIMSUE_CALL* on_non_acknowledged_users)(void* user, const cimsue_call_info_t* info);
 } cimsue_listener_t;
 
 /* ── 엔진 (engine.h 1:1) ── */
