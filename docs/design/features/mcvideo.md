@@ -272,6 +272,39 @@ psip 합성 SDP 프로파일(`CSipCallRtp::m_eMcMediaProfile = E_MC_MEDIA_MCVIDE
   JOIN 응답 `tc_ssrc` 를 answer 의 `mc_transmission_ssrc` 로, 영상 SRTP(`media_crypto_video`) 를 처음부터 싣는다. CMP 가 `resource.mcvideo` 를
   광고하지 않으면(멤버 풀 0) MCVideo 그룹 호를 받지 않는다.
 
+#### 5.2.1 그룹 호 설계 (A10 `McVideoCallService` · A11 `CmpClient` MCVideo 명령)
+
+**구조** — `csp/McVideoCallService.{h,cpp}` 전역 하나(`gclsMcVideoCallService`). MCPTT `CGroupCallService` 와 **따로** 선다 — 세션 캐시·호 소유·CMP
+명령이 모두 서비스 키 `(mcvideo, group_id)` 라 같은 그룹 id 의 MCPTT 그룹 호와 동시에 선다(§7 D6). 공유하는 것은 부품뿐이다: leg 별 PT(`CGroupCallService::
+GetLegPt`·`GetLegVideoPt` — static), 그룹·사용자 맵, psip 호 API, `McVideoInfo.h` 코덱. 호 소유 = `CMcVideoAsModule`(`SetCallOwner`) — `EventCallStart`·
+`EventCallEnd` 가 소유 모듈의 `OnCallStart`·`OnCallEnd` 를 부르고 모듈이 서비스로 넘긴다.
+
+**세션** — 그룹마다 하나: `sesid`(CMP·로그 상관) · MCVideo 세션 식별자 토큰 `gr`(TS 24.281 §4.5 — 포커스 Contact 의 GRUU, 재합류 Request-URI) · 종류
+chat|prearranged(그룹 속성 `invite_members`) · 개시자 · 시작 시각(TNG3 = `max_duration_sec`) · leg 표(Call-ID → 멤버·역할 initiator|joiner|invited·상태
+invited|established·CMP 주소 등록 여부). 세션이 서면 CMP `PTT_GROUP_ADD service:mcvideo`(roster = 그룹 멤버 `id:prio:role`, `group_type`·`max_transmitters`·
+`reception_mode manual`·`call_type normal`·`tc_timers{t1_ms = 그룹 hang timer, t5_ms = reception hang timer}`), 끝나면 `PTT_GROUP_REMOVE`.
+
+| 입력 | 처리 (근거 절) |
+|---|---|
+| INVITE — 검사 | Accept-Contact 에 `g.3gpp.mcvideo`·MCVideo icsi-ref 가 없거나 Contact 에 isfocus → 403(§9.2.2.4.1.1 2)). 대상 = Request-URI 의 `gr` 이 진행 중 세션이면 그 세션(재합류 — 없는 세션이면 404, §9.2.1.4.5.1), 아니면 mcvideo-info `<mcvideo-request-uri>`. 그룹 없음·MCVideo 그룹 아님 → 404 Warning 113 · 멤버 아님 → 403 116 · session-type 불일치 → 404 117/118(§6.3.5.2 5)) · 이용 자격(`mcvideo_user_profile`) 없음 → 403 · N6(동시 MCVideo 호) 초과 → 486 103(§9.2.2.3.1.1 5)) · 제휴 안 됨 → 멤버면 암묵적 affiliation(§8.2.2.3.6·§8.2.2.3.7 — `mcvideo_affiliations` + NOTIFY), 아니면 403 120 · SDP 에 `m=application … udp MCVideo` 없음 또는 음성·영상 코덱(AMR-WB·H.264) 없음 → 488 |
+| INVITE — chat | 세션이 없으면 만든다(CMP ADD). 개시자·합류자 모두 같은 절차: CMP JOIN ①(포트·`tc_ssrc`) → JOIN ②(offer 주소·`user_control_port`·`user_tc_ssrc` = offer `mc_transmission_ssrc`·`user_audio/video_ssrc` = offer `a=ssrc`·PT·`queueing`·`max_priority` = min(offer `mc_priority`, `<user-priority>`)) → 200 OK. **팬아웃 없음**(chat — §7 D5) |
+| INVITE — prearranged 새 세션 | CMP ADD → 개시자 JOIN ① → **affiliated 멤버 팬아웃**(MCVideo 등록 바인딩 `m_bMcVideo` 가 있는 멤버만). 개시자 200 OK 는 **첫 초대 멤버의 200 OK 뒤**(§9.2.1.4.2 — 미디어 버퍼링 없음 → 확인 없는 200 을 먼저 주지 않는다): 첫 멤버 JOIN ② 다음에 개시자 JOIN ②(암묵 요청이면 `implicit_request` → 곧바로 허가·SSRC 쌍) → 개시자 200 OK(answer `mc_implicit_request`·`mc_granted`·`mc_audio/video_ssrc`). 모든 초대가 실패하거나 개시 대기 한도(10 s — CIMS 값, 규격은 확인 통화의 TNG1 만 정한다) 안에 아무도 받지 않으면 개시자에 480 |
+| INVITE — prearranged 진행 중 세션 | 합류(재합류 `gr` 포함): chat 합류와 같은 절차, 암묵 요청은 받지 않는다(TS 24.581 §14.3.5) |
+| 멤버 팬아웃 INVITE (골든 07) | From = 그룹 URI, Contact = 포커스(`g.3gpp.mcvideo`·icsi-ref·isfocus + `gr`), Accept-Contact 두 줄, `P-Asserted-Service` MCVideo ICSI, `Session-Expires: 1800;refresher=uas`(RFC 4028 §7.2 — 단말이 갱신, .45 C3·C4 4), multipart = SDP(offer: 멤버 CMP 포트 audio·video·control, `mc_priority` = `<user-priority>`, `mc_transmission_ssrc` = 이 멤버 `tc_ssrc`) + mcvideo-info(session-type prearranged · request-uri = 멤버 · calling-user-id = 개시자 · calling-group-id = 그룹) |
+| 200 OK answer (골든 04·06) | 멤버 CMP 포트로 audio·video(offer 가 `m=video 0` 이면 port 0 — RFC 3264 §6, JOIN 에 video 포트 없음)·`m=application <control_port> udp MCVideo` + `a=fmtp:MCVideo` = `BuildMcVideoAnswerFmtp`(offer 에 있던 것 + `mc_transmission_ssrc` = JOIN 응답 `tc_ssrc` · 암묵 요청이면 `mc_implicit_request`·(허가) `mc_granted`·`mc_audio/video_ssrc`). 헤더 = Contact 포커스 + `gr` · `Require: timer` · `Supported: tdialog` · `P-Asserted-Identity` = MCVideo PSI(§6.3.3.2.3.2) |
+| 멤버 200 OK | JOIN ②(answer 주소·포트·`a=ssrc`) → prearranged 개시자 대기면 개시자 수락. 4xx~6xx → leg 정리 |
+| BYE / 이탈 | CMP LEAVE, leg 제거. **참가자 1명 이하** → 세션 해제(§6.3.8.1 2)) — 남은 leg 에 BYE, CMP REMOVE |
+| CMP `TRANSMISSION_INACTIVITY{T1}` | prearranged 면 해제(§6.3.8.1 1)), chat 은 로그만(세션은 참가자가 끝낸다). `T5` 는 로그만 |
+| TNG3 (`max_duration_sec`) | 해제(§6.3.8.1 5)) |
+| CMP `PTT_GROUP_ABORTED` · `TRANSMITTERS` (service mcvideo) | 캐시 정리 / 로그·세션 송출 축(A12) — **MCPTT 서비스의 같은 그룹 id 를 건드리지 않는다**(A11 에서 서비스로 가른다) |
+
+**CmpClient (A11)** — `McvAddGroup`·`McvJoin`·`McvLeave`·`McvRemove`(payload `service:"mcvideo"` → hdr.service). 세션·끝점 캐시 키 = `mcvideo|<group>`(MCPTT 키와
+겹치지 않게). JOIN 응답에서 `port`·`video_port`·`control_port`·`tc_ssrc`·`granted`·`audio_ssrc`·`video_ssrc` 를 읽는다. `HandleEvent` 는 hdr.service 가
+mcvideo 인 `PTT_GROUP_ABORTED`·`TRANSMITTERS`·`TRANSMISSION_INACTIVITY` 를 MCVideo 서비스로 보낸다.
+
+**1차 범위 밖** — 긴급·임박·방송·ad hoc·private(V8), 확인 통화(required 멤버·TNG1 확인·min-number-to-start), conference 이벤트 NOTIFY, 녹취(B8), 영상 SRTP
+키 생성(B7 CMP 는 준비됨 — CSP `media_srtp` 결선은 A10 다음), 참가자 수 상한(`on-network-max-participant-count` 속성 없음).
+
 ### 5.3 CMP (미디어 · 전송 제어)
 
 - **그룹 종류** (구현) — `PMcvideoGroup` — `PMcpttGroup` 과 따로 선 그룹 종류(floor 없음). 서버 자원 키 = (service, group_id) — 같은 그룹 id 의 MCPTT
