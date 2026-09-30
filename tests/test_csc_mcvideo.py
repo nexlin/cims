@@ -5,7 +5,8 @@ CSC 가 아래 FIXTURE_SCENARIO 로 내는 문서와 **같아야** 한다(정규
 검사: 그룹 문서 V0(MCPTT enabler = MCPTT ICSI·규칙 is-list-member/allow-initiate-conference/join-handling) + MCVideo 몫(<service>·
 mcvideo-* 속성·entry <mcvideo-mcvideo-id>·보호 false 명시), MCPTT 전용 그룹엔 MCVideo 요소 없음, XCAP PUT 해석(MCVideo <service> 있음 →
 켬·속성 / 없음 → 기존 상태 유지 전환기 규칙 / 보호 true·범위 밖 400), DB 쓰기 SQL 조립, MCVideo user profile(자격 행·MCVideo 그룹만)·
-service config(설정 반영·보호 false)·ue-init-config MCVideo-Service-Details, CMS 핸들러 인가(scope·본인·자격 404), 토큰 mcvideo_id claim.
+service config(설정 반영·보호 false)·ue-init-config MCVideo-Service-Details, CMS 핸들러 인가(scope·본인·자격 404), 토큰 mcvideo_id claim,
+관리 API(A6 — 그룹 `mcvideo` 키 없음/null/객체 · 쓰기 전 검사 · 마이그레이션 전 400 · PTT 회선 MCVideo 자격 GET/PUT/DELETE·캐시·통지).
 
   python3 -m unittest tests.test_csc_mcvideo
   python3 tests/test_csc_mcvideo.py --write-fixtures     # 골든 재기록(계약 변경 때만 — 커밋 전에 .45 와 합의)
@@ -215,6 +216,199 @@ class GroupDocumentTest(unittest.TestCase):
         cur2 = Cur()
         mv.write_group_attrs(cur2, 42, None)
         self.assertEqual(cur2.q[-1], ("DELETE FROM mcvideo_group_attrs WHERE group_id=%s", (42,)))
+
+
+class _AdminCur:
+    """관리 API 가 내는 SQL 만 흉내 내는 DictCursor — 실행한 SQL 을 기록한다."""
+
+    def __init__(self, tables=True, attrs_row=None, profile_row=None, owns_line=True):
+        self.tables, self.attrs_row, self.profile_row, self.owns_line = tables, attrs_row, profile_row, owns_line
+        self.q = []
+        self._rows = []
+        self.rowcount = 0
+        self.lastrowid = 77
+
+    def execute(self, sql, args=()):
+        s = " ".join(sql.split())
+        self.q.append((s, args))
+        self._rows, self.rowcount = [], 0
+        if s == "SELECT id FROM ptt_groups WHERE mcptt_group_id=%s":
+            self._rows = [{"id": 42}]
+        elif s == "SHOW TABLES LIKE 'mcvideo_group_attrs'":
+            self._rows = [{"t": "mcvideo_group_attrs"}] if self.tables else []
+        elif s == "SELECT * FROM mcvideo_group_attrs WHERE group_id=%s":
+            self._rows = [self.attrs_row] if self.attrs_row else []
+        elif s == "SELECT 1 FROM ptt_subscriptions WHERE id=%s AND user_id=%s":
+            self._rows = [{"1": 1}] if self.owns_line else []
+        elif s.startswith("SELECT max_video_streams, max_calls_n6 FROM mcvideo_user_profile WHERE ptt_id=%s"):
+            self._rows = [self.profile_row] if self.profile_row else []
+        elif s.startswith("DELETE FROM mcvideo_user_profile"):
+            self.rowcount = 1 if self.profile_row else 0
+        elif s.startswith(("INSERT INTO", "UPDATE ptt_groups", "DELETE FROM mcvideo_group_attrs")):
+            self.rowcount = 1
+        else:
+            raise AssertionError(f"unexpected SQL: {s}")
+
+    def fetchone(self):
+        return self._rows[0] if self._rows else None
+
+    def fetchall(self):
+        return list(self._rows)
+
+    def sql(self, prefix):
+        return [(s, a) for s, a in self.q if s.startswith(prefix)]
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+
+class _AdminConn:
+    def __init__(self, cur):
+        self.cur = cur
+
+    def cursor(self):
+        return self.cur
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+
+class AdminApiTest(unittest.TestCase):
+    """A6 관리 API — 그룹 `mcvideo`(키 없음 = 그대로 · null = 끔 · 객체 = 켬/갱신)·PTT 회선 MCVideo 자격 (mcvideo.md §5.1)."""
+
+    @classmethod
+    def setUpClass(cls):
+        import handlers.admin as adm
+        cls.adm = adm
+
+    def setUp(self):
+        self._keep = (self.adm._get_db, self.adm.notify_csp, self.adm.sync_group_from_db, dict(mv.MCVIDEO_PROFILES))
+        self.notified = []
+        self.adm.notify_csp = lambda *a, **k: self.notified.append(a)
+        self.adm.sync_group_from_db = lambda gid: None
+        self.cur = None
+
+    def tearDown(self):
+        self.adm._get_db, self.adm.notify_csp, self.adm.sync_group_from_db, profs = self._keep
+        mv.MCVIDEO_PROFILES.clear(); mv.MCVIDEO_PROFILES.update(profs)
+
+    def _db(self, **kw):
+        self.cur = _AdminCur(**kw)
+        self.adm._get_db = lambda config: _AdminConn(self.cur)
+        return self.cur
+
+    def test_api_group_attrs_validation(self):
+        self.assertEqual(mv.api_group_attrs(None), (None, None))
+        a, err = mv.api_group_attrs({"invite_members": True, "video_encodings": "H264, VP8", "video_resolutions": " "})
+        self.assertIsNone(err)
+        self.assertEqual(a["video_encodings"], ["H264", "VP8"], "쉼표 문자열도 목록으로")
+        self.assertIsNone(a["video_resolutions"], "빈 문자열 = 요소 생략(None)")
+        for bad in ("on", [], {"max_transmitters": 17}, {"max_transmitters": 0}, {"invite_members": "yes"},
+                    {"protect_media": True}, {"protect_transmission_control": True}, {"bogus": 1},
+                    {"audio_encodings": []}, {"group_priority": 256}, {"video_frame_rate": 30}):
+            with self.subTest(bad=bad):
+                self.assertIsNotNone(mv.api_group_attrs(bad)[1])
+
+    def test_update_without_mcvideo_key_leaves_mcvideo(self):
+        cur = self._db()
+        r = _run(self.adm._update_group("g101", {"name": "새 이름"}, {}))
+        self.assertEqual(r.status, 200, r.body)
+        self.assertFalse([s for s, _ in cur.q if "mcvideo" in s], "키가 없으면 MCVideo 표를 보지도 않는다")
+        self.assertIn(("GROUP_CHANGED", "tel:g101", "PUT"), self.notified)
+
+    def test_update_null_turns_off_object_turns_on(self):
+        cur = self._db()
+        r = _run(self.adm._update_group("g101", {"mcvideo": None}, {}))
+        self.assertEqual(r.status, 200, r.body)
+        self.assertEqual(cur.sql("DELETE FROM mcvideo_group_attrs"), [("DELETE FROM mcvideo_group_attrs WHERE group_id=%s", (42,))])
+        cur = self._db(attrs_row={"invite_members": 1, "max_duration_sec": 600, "max_transmitters": 2})
+        r = _run(self.adm._update_group("g101", {"mcvideo": {"max_transmitters": 3}}, {}))
+        self.assertEqual(r.status, 200, r.body)
+        (sql, args), = cur.sql("INSERT INTO mcvideo_group_attrs")
+        self.assertEqual((args[0], args[1], args[2], args[3]), (42, 1, 600, 3), "준 키만 바꾸고 나머지는 기존 행 값")
+
+    def test_update_invalid_mcvideo_is_400_before_any_write(self):
+        cur = self._db()
+        r = _run(self.adm._update_group("g101", {"name": "x", "mcvideo": {"max_transmitters": 99}}, {}))
+        self.assertEqual(r.status, 400)
+        self.assertIn("max_transmitters", r.body["error"])
+        self.assertEqual(cur.q, [], "검사는 DB 쓰기 전에 — autocommit 이라 부분 반영이 남는다")
+        self.assertEqual(self.notified, [])
+
+    def test_update_pre_migration(self):
+        cur = self._db(tables=False)
+        r = _run(self.adm._update_group("g101", {"name": "x", "mcvideo": {"invite_members": True}}, {}))
+        self.assertEqual((r.status, r.body), (400, mv.SCHEMA_ERROR))
+        self.assertFalse(cur.sql("UPDATE ptt_groups"), "표가 없으면 다른 필드도 쓰지 않는다")
+        cur = self._db(tables=False)
+        r = _run(self.adm._update_group("g101", {"mcvideo": None}, {}))
+        self.assertEqual(r.status, 200, "표가 없으면 끄기는 할 일이 없다(MCVideo 그룹이 없다)")
+        self.assertFalse(cur.sql("DELETE FROM mcvideo_group_attrs"))
+
+    def test_create_with_mcvideo_writes_attrs_for_new_group(self):
+        cur = self._db()
+        r = _run(self.adm._create_group({"id": "g201", "group_type": "chat", "mcvideo": {"invite_members": False}}, {}))
+        self.assertEqual(r.status, 201, r.body)
+        (sql, args), = cur.sql("INSERT INTO mcvideo_group_attrs")
+        self.assertEqual(args[0], 77, "새 그룹의 surrogate id(lastrowid)")
+        self.assertEqual(args[3], mv.GROUP_ATTR_DEFAULTS["max_transmitters"], "빠진 키는 기본값")
+        cur = self._db(tables=False)
+        r = _run(self.adm._create_group({"id": "g202", "mcvideo": {}}, {}))
+        self.assertEqual((r.status, r.body), (400, mv.SCHEMA_ERROR))
+        self.assertFalse(cur.sql("INSERT INTO ptt_groups"))
+        cur = self._db()
+        r = _run(self.adm._create_group({"id": "g203"}, {}))
+        self.assertEqual(r.status, 201)
+        self.assertFalse(cur.sql("INSERT INTO mcvideo_group_attrs"), "mcvideo 없음 = MCVideo 그룹 아님")
+
+    def test_ptt_line_entitlement_put_get_delete(self):
+        line = "+82510002001"
+        cur = self._db()
+        r = _run(self.adm._put_ptt_mcvideo("7", line, {"max_video_streams": 2}, {}))
+        self.assertEqual(r.status, 200, r.body)
+        self.assertEqual(r.body, {"id": line, "max_video_streams": 2, "max_calls_n6": 1})
+        (sql, args), = cur.sql("INSERT INTO mcvideo_user_profile")
+        self.assertEqual(args, (line, 2, 1))
+        self.assertEqual(mv.profile_of(line), {"max_video_streams": 2, "max_calls_n6": 1}, "캐시 = 문서·scope 가 곧바로 따른다")
+        self.assertIn(("USER_CHANGED", f"tel:{line}", "PUT"), self.notified)
+        cur = self._db(profile_row={"max_video_streams": 2, "max_calls_n6": 1})
+        r = _run(self.adm._put_ptt_mcvideo("7", line, {"max_calls_n6": 3}, {}))
+        self.assertEqual(r.body["max_video_streams"], 2, "준 키만 바꾼다")
+        self.assertEqual(r.body["max_calls_n6"], 3)
+        r = _run(self.adm._get_ptt_mcvideo("7", line, {}))
+        self.assertEqual((r.status, r.body["max_video_streams"]), (200, 2))
+        r = _run(self.adm._delete_ptt_mcvideo("7", line, {}))
+        self.assertEqual(r.status, 200)
+        self.assertIsNone(mv.profile_of(line))
+        self.assertIn(("USER_CHANGED", f"tel:{line}", "DELETE"), self.notified)
+
+    def test_ptt_line_entitlement_errors(self):
+        line = "+82510002001"
+        self._db()
+        self.assertEqual(_run(self.adm._get_ptt_mcvideo("7", line, {})).body["error"], "not_entitled")
+        self.assertEqual(_run(self.adm._delete_ptt_mcvideo("7", line, {})).status, 404)
+        for bad in ({"max_video_streams": 0}, {"max_video_streams": 17}, {"max_calls_n6": True},
+                    {"max_calls_n6": "2"}, {"bogus": 1}):
+            with self.subTest(bad=bad):
+                cur = self._db()
+                self.assertEqual(_run(self.adm._put_ptt_mcvideo("7", line, bad, {})).status, 400)
+                self.assertFalse(cur.sql("INSERT INTO mcvideo_user_profile"))
+        self._db(owns_line=False)
+        r = _run(self.adm._put_ptt_mcvideo("7", line, {"max_video_streams": 1}, {}))
+        self.assertEqual((r.status, r.body["error"]), (404, "Subscription not found"))
+        self._db(tables=False)
+        r = _run(self.adm._put_ptt_mcvideo("7", line, {}, {}))
+        self.assertEqual((r.status, r.body), (400, mv.SCHEMA_ERROR))
+
+    def test_api_docs_declare_endpoints(self):
+        ids = {d["id"] for d in self.adm.CIMS_ADMIN_API_DOCS}
+        self.assertTrue({"csc.users.ptt.mcvideo.get", "csc.users.ptt.mcvideo.put", "csc.users.ptt.mcvideo.delete"} <= ids)
 
 
 class CmsDocumentTest(unittest.TestCase):

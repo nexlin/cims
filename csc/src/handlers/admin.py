@@ -39,6 +39,7 @@ from handlers import dispatch as _dispatch  # 전화 그룹 파생(pickup_group 
 from services import admin_auth
 from services.auc import auc as _auc
 from services import subscriptions as _subs   # 가입 테이블 레지스트리 — kind ↔ 테이블·API 세그먼트·응답 키
+from services import mcvideo as _mcvideo      # MCVideo 서비스 경계 — 그룹 속성·user profile (mcvideo.md §5.1)
 from services.mcptt import logger as _logger
 
 # ──────────────────────────────────────────────────────────────
@@ -179,6 +180,16 @@ async def handle_users(handler_args: HandlerArgs, kwargs: dict) -> HandlerResult
                 return await _update_user(person_id, handler_args.body, config, payload)
             elif method == 'DELETE':
                 return await _delete_user(person_id, config)
+            return HandlerResult(status=405, body={'error': 'Method Not Allowed'})
+
+        # PTT 회선의 MCVideo 이용 자격 (MCVideo user profile — TS 24.484 §9.3) — /users/:pid/ptt/:msisdn/mcvideo
+        if sub == 'ptt' and sub_id is not None and len(parts) > 3 and parts[3] == 'mcvideo':
+            if method == 'GET':
+                return await _get_ptt_mcvideo(person_id, sub_id, config)
+            elif method == 'PUT':
+                return await _put_ptt_mcvideo(person_id, sub_id, handler_args.body, config)
+            elif method == 'DELETE':
+                return await _delete_ptt_mcvideo(person_id, sub_id, config)
             return HandlerResult(status=405, body={'error': 'Method Not Allowed'})
 
         # 사용자 MCPTT 프로파일 (SOS 대상 결정·개시 인가) — /users/:pid/ptt/:msisdn/profile
@@ -360,8 +371,21 @@ async def _get_user(person_id: str, config):
                         }
                 except pymysql.Error:
                     pass
+            # MCVideo 이용 자격 (mcvideo_user_profile — 행 = 자격. 부재·마이그레이션 전 = None)
+            mv_profiles = {}
+            if ptt_subs:
+                try:
+                    ph = ','.join(['%s'] * len(ptt_subs))
+                    cur.execute(f"SELECT ptt_id, max_video_streams, max_calls_n6 FROM mcvideo_user_profile "
+                                f"WHERE ptt_id IN ({ph})", [s['id'] for s in ptt_subs])
+                    for p in cur.fetchall():
+                        mv_profiles[p['ptt_id']] = {'max_video_streams': int(p['max_video_streams']),
+                                                    'max_calls_n6': int(p['max_calls_n6'])}
+                except pymysql.Error:
+                    pass
             for s in ptt_subs:
                 s['mcptt_profile'] = profiles.get(s['id'])
+                s['mcvideo_profile'] = mv_profiles.get(s['id'])
             row['ptt_subscriptions'] = ptt_subs
 
     return HandlerResult(status=200, body=row)
@@ -1263,6 +1287,62 @@ async def _put_ptt_profile(person_id: str, msisdn: str, body, config):
 
 
 # ──────────────────────────────────────────────────────────────
+#  PTT 회선의 MCVideo 이용 자격 (mcvideo_user_profile — TS 24.484 §9.3, mcvideo.md §5.1)
+#   행 = 자격(MCVideo user profile 문서·scope 3gpp:mc:video_*·mcvideo_id claim), 없으면 자격 없음(문서 404).
+#   GET 404 = 자격 없음 · PUT = 켬/갱신(준 키만) · DELETE = 끔.
+# ──────────────────────────────────────────────────────────────
+
+def _ptt_line_of(cur, person_id: str, msisdn: str) -> bool:
+    cur.execute("SELECT 1 FROM ptt_subscriptions WHERE id=%s AND user_id=%s", (msisdn, person_id))
+    return cur.fetchone() is not None
+
+
+async def _get_ptt_mcvideo(person_id: str, msisdn: str, config):
+    with _get_db(config) as conn:
+        with conn.cursor() as cur:
+            if not _ptt_line_of(cur, person_id, msisdn):
+                return HandlerResult(status=404, body={'error': 'Subscription not found'})
+            if not _mcvideo.tables_present(cur):
+                return HandlerResult(status=400, body=_mcvideo.SCHEMA_ERROR)
+            prof = _mcvideo.read_user_profile(cur, msisdn)
+    if prof is None:
+        return HandlerResult(status=404, body={'error': 'not_entitled', 'id': msisdn})
+    return HandlerResult(status=200, body=dict(prof, id=msisdn))
+
+
+async def _put_ptt_mcvideo(person_id: str, msisdn: str, body, config):
+    if not isinstance(body, dict):
+        return HandlerResult(status=400, body={'error': 'JSON body required'})
+    with _get_db(config) as conn:
+        with conn.cursor() as cur:
+            if not _ptt_line_of(cur, person_id, msisdn):
+                return HandlerResult(status=404, body={'error': 'Subscription not found'})
+            if not _mcvideo.tables_present(cur):
+                return HandlerResult(status=400, body=_mcvideo.SCHEMA_ERROR)
+            prof, err = _mcvideo.api_profile(body, _mcvideo.read_user_profile(cur, msisdn))
+            if err:
+                return HandlerResult(status=400, body={'error': err})
+            _mcvideo.write_user_profile(cur, msisdn, prof)
+    _mcvideo.set_profile_cache(msisdn, prof)
+    notify_csp("USER_CHANGED", f"tel:{msisdn}", "PUT")
+    return HandlerResult(status=200, body=dict(prof, id=msisdn))
+
+
+async def _delete_ptt_mcvideo(person_id: str, msisdn: str, config):
+    with _get_db(config) as conn:
+        with conn.cursor() as cur:
+            if not _ptt_line_of(cur, person_id, msisdn):
+                return HandlerResult(status=404, body={'error': 'Subscription not found'})
+            if not _mcvideo.tables_present(cur):
+                return HandlerResult(status=400, body=_mcvideo.SCHEMA_ERROR)
+            if not _mcvideo.delete_user_profile(cur, msisdn):
+                return HandlerResult(status=404, body={'error': 'not_entitled', 'id': msisdn})
+    _mcvideo.set_profile_cache(msisdn, None)
+    notify_csp("USER_CHANGED", f"tel:{msisdn}", "DELETE")
+    return HandlerResult(status=200, body={'id': msisdn})
+
+
+# ──────────────────────────────────────────────────────────────
 #  MCPTT 시스템 서비스 설정 (mcptt_service_config — TS 24.484 service-config)
 # ──────────────────────────────────────────────────────────────
 
@@ -1627,11 +1707,14 @@ async def _list_groups(config):
                 gid = m.pop('group_id')
                 members_by_group.setdefault(gid, []).append(m)
             owners = _owner_map(cur, [g.get('authorized_user_id') for g in groups])
+            mv = _mcvideo.load_group_attrs(cur) or {}   # 마이그레이션 전 = 전부 null
             groups = [
                 _shape_group(g, members_by_group.get(g['id'], []),
                              owners.get(g.get('authorized_user_id')))
                 for g in groups
             ]
+            for g in groups:
+                g['mcvideo'] = mv.get(g['id'])
     return HandlerResult(status=200, body={'groups': groups})
 
 
@@ -1653,6 +1736,7 @@ async def _get_group(group_id: str, config):
             members = cur.fetchall()
             owners = _owner_map(cur, [group.get('authorized_user_id')])
             group = _shape_group(group, members, owners.get(group.get('authorized_user_id')))
+            group['mcvideo'] = (_mcvideo.load_group_attrs(cur, group_id) or {}).get(group_id)
     return HandlerResult(status=200, body=group)
 
 
@@ -1747,6 +1831,10 @@ async def _create_group(body, config, payload=None):
     err = _check_required_members(members, max_members)
     if err:
         return HandlerResult(status=400, body={'error': err})
+    # MCVideo 서비스 — 없거나 null = MCVideo 그룹 아님, 객체 = MCVideo 그룹(속성, 빠진 키는 기본값) (mcvideo.md §5.1)
+    mcvideo_attrs, err = _mcvideo.api_group_attrs(body.get('mcvideo'))
+    if err:
+        return HandlerResult(status=400, body={'error': err})
 
     # 그룹 소유 (authorized user) — 명시 없으면 생성자(payload sub) 기본.
     # 단 OAM builtin 관리자(CimsAuth, sub<0)는 users 행이 아니다 — 소유자로
@@ -1774,6 +1862,8 @@ async def _create_group(body, config, payload=None):
                     and not _is_ptt_subscriber(cur, authorized_user_id):
                 return HandlerResult(status=400,
                                      body={'error': 'authorized user 는 PTT 가입자여야 합니다'})
+            if mcvideo_attrs is not None and not _mcvideo.tables_present(cur):
+                return HandlerResult(status=400, body=_mcvideo.SCHEMA_ERROR)
             cur.execute(
                 "INSERT INTO ptt_groups (mcptt_group_id, name, video_enabled, priority, encryption, "
                 "emergency_call, emergency_alert, allow_conference_state, "
@@ -1795,6 +1885,8 @@ async def _create_group(body, config, payload=None):
             gpk = cur.lastrowid
             for m in members:
                 _insert_member(cur, gpk, m)
+            if mcvideo_attrs is not None:
+                _mcvideo.write_group_attrs(cur, gpk, mcvideo_attrs)
     sync_group_from_db(group_id)   # in-memory GROUPS — GMS 목록·문서에 즉시 반영(재기동 불필요)
     notify_csp("GROUP_CHANGED", f"tel:{group_id}", "POST")
     return HandlerResult(status=201, body={'id': group_id})
@@ -1807,12 +1899,20 @@ async def _update_group(group_id: str, body, config, payload=None):
     # 소유자(authorized_user_id) 재지정은 manager+ 만 (operator 는 소유 이전 불가).
     can_reassign_owner = payload is None or \
         admin_auth.role_rank(payload.get('role')) >= admin_auth.role_rank('manager')
+    # MCVideo 서비스 — 키 없음 = 그대로 · null = 끔(속성 행 삭제) · 객체 = 켬/갱신(준 키만). 쓰기 전에 검사한다(autocommit — 부분 반영 방지).
+    mcvideo_given = 'mcvideo' in body
+    mcvideo_attrs, err = _mcvideo.api_group_attrs(body.get('mcvideo')) if mcvideo_given else (None, None)
+    if err:
+        return HandlerResult(status=400, body={'error': err})
 
     with _get_db(config) as conn:
         with conn.cursor() as cur:
             gpk = _resolve_group_pk(cur, group_id)
             if gpk is None:
                 return HandlerResult(status=404, body={'error': 'Group not found'})
+            mcvideo_tables = _mcvideo.tables_present(cur) if mcvideo_given else False
+            if mcvideo_given and mcvideo_attrs is not None and not mcvideo_tables:
+                return HandlerResult(status=400, body=_mcvideo.SCHEMA_ERROR)
             if 'authorized_user_id' in body and can_reassign_owner:
                 new_owner = body.get('authorized_user_id')
                 if new_owner is not None:
@@ -1903,6 +2003,8 @@ async def _update_group(group_id: str, body, config, payload=None):
                 cur.execute("DELETE FROM ptt_group_members WHERE group_id=%s", (gpk,))
                 for m in body['members']:
                     _insert_member(cur, gpk, m, keep)
+            if mcvideo_given and mcvideo_tables:   # 표가 없으면 끄기(null)는 할 일이 없다 — MCVideo 그룹이 없다
+                _mcvideo.write_group_attrs(cur, gpk, mcvideo_attrs)
     sync_group_from_db(group_id)   # 속성+멤버 — 종전 refresh_group_members 는 멤버만 갱신했다
     notify_csp("GROUP_CHANGED", f"tel:{group_id}", "PUT")
     return HandlerResult(status=200, body={'id': group_id})
@@ -2111,6 +2213,12 @@ _GROUP_FIELDS = [
     {'name': 'session_start', 'type': 'string', 'desc': '세션 허용 시작 시각'},
     {'name': 'session_end', 'type': 'string', 'desc': '세션 허용 종료 시각'},
     {'name': 'created_at', 'type': 'string', 'desc': 'ISO8601 생성'},
+    {'name': 'mcvideo', 'type': 'object',
+     'desc': 'MCVideo 서비스 (TS 24.481 §7.2.2 — 한 그룹 = 서비스 집합). null = MCVideo 그룹 아님. 쓰기: 키 없음 = 그대로 · null = 끔 · '
+             '객체 = 켬/갱신(준 키만). 필드 = invite_members(true=prearranged) · max_duration_sec(TNG3 0~86400) · '
+             'max_transmitters(1~16) · audio_encodings/video_encodings(목록) · video_resolutions/video_frame_rate(문자열|null) · '
+             'reception_hang_timer_sec(T5 0~3600) · min_number_to_start · group_priority(0~255|null) · allow_conference_state · '
+             'protect_media/protect_transmission_control(false 만 — E2E 미지원)'},
 ]
 
 _GROUP_EXAMPLE = {
@@ -2335,6 +2443,61 @@ CIMS_ADMIN_API_DOCS = [
      'notes': ['그룹 구성원으로 참여 중인 PTT 번호를 지우면 그룹 멤버십도 정리된다.'],
      'auth': dict(_AUTH_MANAGER)},
 
+    {'id': 'csc.users.ptt.mcvideo.get', 'module': 'csc', 'method': 'GET',
+     'path': '/api/v1/users/{person_id}/ptt/{msisdn}/mcvideo',
+     'summary': 'PTT 회선의 MCVideo 이용 자격 조회 (MCVideo user profile — TS 24.484 §9.3)',
+     'params': [
+         {'name': 'person_id', 'in': 'path', 'type': 'integer', 'required': True, 'desc': '가입자 id'},
+         {'name': 'msisdn', 'in': 'path', 'type': 'string', 'required': True, 'desc': 'PTT 번호'},
+     ],
+     'response': '{id, max_video_streams, max_calls_n6}',
+     'response_fields': [
+         {'name': 'max_video_streams', 'type': 'integer', 'desc': 'MaxSimultaneousVideoStreams — 동시 수신 영상 상한 C9 (1~16)'},
+         {'name': 'max_calls_n6', 'type': 'integer', 'desc': 'MaxSimultaneousCallsN6 — 동시 MCVideo 그룹 호 상한 (1~16)'},
+     ],
+     'example': {'id': '+82510002001', 'max_video_streams': 1, 'max_calls_n6': 1},
+     'errors': _ERR_COMMON + [
+         {'status': 400, 'when': 'MCVideo 표 없음', 'body': _mcvideo.SCHEMA_ERROR},
+         {'status': 404, 'when': '없는 가입자/번호', 'body': {'error': 'Subscription not found'}},
+         {'status': 404, 'when': '자격 없음', 'body': {'error': 'not_entitled', 'id': '+82510002001'}},
+     ],
+     'notes': ['가입자 조회(GET /api/v1/users/{person_id})의 ptt_subscriptions[].mcvideo_profile 에도 같은 값(자격 없음 = null)이 실린다.'],
+     'auth': dict(_AUTH_MONITOR)},
+
+    {'id': 'csc.users.ptt.mcvideo.put', 'module': 'csc', 'method': 'PUT',
+     'path': '/api/v1/users/{person_id}/ptt/{msisdn}/mcvideo',
+     'summary': 'PTT 회선에 MCVideo 이용 자격 부여·상한 변경',
+     'params': [
+         {'name': 'person_id', 'in': 'path', 'type': 'integer', 'required': True, 'desc': '가입자 id'},
+         {'name': 'msisdn', 'in': 'path', 'type': 'string', 'required': True, 'desc': 'PTT 번호'},
+         {'name': 'body', 'in': 'body', 'type': 'object', 'required': True,
+          'desc': '{max_video_streams?, max_calls_n6?} — 준 키만 바꾼다(새 자격의 빠진 키 = 1)'},
+     ],
+     'response': '{id, max_video_streams, max_calls_n6}',
+     'example': {'id': '+82510002001', 'max_video_streams': 2, 'max_calls_n6': 1},
+     'errors': _ERR_COMMON + [
+         {'status': 400, 'when': '범위 밖·정수 아님·모르는 키 / MCVideo 표 없음'},
+         {'status': 404, 'when': '없는 가입자/번호', 'body': {'error': 'Subscription not found'}},
+     ],
+     'notes': ['자격이 생기면 MCVideo user profile 문서·IdMS scope 3gpp:mc:video_*·토큰 mcvideo_id claim 이 따른다(다음 토큰 발급부터).'],
+     'auth': dict(_AUTH_MANAGER)},
+
+    {'id': 'csc.users.ptt.mcvideo.delete', 'module': 'csc', 'method': 'DELETE',
+     'path': '/api/v1/users/{person_id}/ptt/{msisdn}/mcvideo',
+     'summary': 'PTT 회선의 MCVideo 이용 자격 회수',
+     'params': [
+         {'name': 'person_id', 'in': 'path', 'type': 'integer', 'required': True, 'desc': '가입자 id'},
+         {'name': 'msisdn', 'in': 'path', 'type': 'string', 'required': True, 'desc': 'PTT 번호'},
+     ],
+     'response': '{id}',
+     'example': {'id': '+82510002001'},
+     'errors': _ERR_COMMON + [
+         {'status': 400, 'when': 'MCVideo 표 없음', 'body': _mcvideo.SCHEMA_ERROR},
+         {'status': 404, 'when': '없는 가입자/번호 · 자격 없음'},
+     ],
+     'notes': ['진행 중인 MCVideo 호는 끊지 않는다 — 다음 개시·합류부터 403(Warning 108/109).'],
+     'auth': dict(_AUTH_MANAGER)},
+
     # ── PTT 그룹 ────────────────────────────────────────────────────────────
     {'id': 'csc.ptt-groups.list', 'module': 'csc', 'method': 'GET', 'path': '/api/v1/ptt/groups',
      'summary': 'PTT 그룹 목록 (id = mcptt_group_id)',
@@ -2373,6 +2536,7 @@ CIMS_ADMIN_API_DOCS = [
          {'status': 400, 'when': 'floor 정책/정원 조합 무효 (multi 는 2~8)'},
          {'status': 400, 'when': 'group_type 이 prearranged|chat 가 아님 / hang_timer_sec·max_duration_sec 범위 밖'},
          {'status': 400, 'when': 'authorized_user_id 가 PTT 가입자가 아님'},
+         {'status': 400, 'when': 'mcvideo 형식·범위 오류 / 보호 true / MCVideo 표 없음(schema_not_migrated)'},
      ],
      'errors_note': '',
      'notes': ['성공 시 **201** 이다.',
@@ -2391,11 +2555,13 @@ CIMS_ADMIN_API_DOCS = [
      'response_fields': [{'name': 'id', 'type': 'string', 'desc': '수정된 그룹 ID'}],
      'example': {'id': 'g-ops-1'},
      'errors': _ERR_COMMON + [
-         {'status': 400, 'when': 'JSON 본문 없음 / floor 조합 무효 / group_type·그룹 호 타이머 무효 / authorized_user 부적격'},
+         {'status': 400, 'when': 'JSON 본문 없음 / floor 조합 무효 / group_type·그룹 호 타이머 무효 / authorized_user 부적격 / '
+                                 'mcvideo 형식·범위 오류·보호 true·MCVideo 표 없음'},
          {'status': 403, 'when': 'operator 가 남의 소유 그룹을 수정 시도'},
          {'status': 404, 'when': '없는 그룹', 'body': {'error': 'Group not found'}},
      ],
-     'notes': ['floor_policy·max_talkers·hang_timer_sec 변경은 CSP→CMP 로 전파된다.'],
+     'notes': ['floor_policy·max_talkers·hang_timer_sec 변경은 CSP→CMP 로 전파된다.',
+               'mcvideo: 키 없음 = MCVideo 설정 그대로 · null = MCVideo 서비스 끔 · 객체 = 켬/갱신(준 키만). 진행 중 MCVideo 호는 다음 개시부터 반영.'],
      'auth': {'scheme': 'bearer', 'role': 'operator', 'token_from': 'POST /api/v1/auth/login',
               'note': '기존 그룹 변경은 소유자 검사 — manager+ 는 전체 허용'}},
 

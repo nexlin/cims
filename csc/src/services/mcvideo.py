@@ -254,6 +254,103 @@ def validate_attrs(attrs: dict) -> Optional[str]:
     return None
 
 
+# ── 관리 API (docs/api/admin_api.md — 그룹 `mcvideo` · PTT 회선 MCVideo 자격) ─────────────────────────────────
+
+SCHEMA_ERROR = {'error': 'schema_not_migrated', 'detail': 'mcvideo tables absent — sql/migrate_mcvideo.sql not applied'}
+# user profile 수치 범위 — C9(MaxSimultaneousVideoStreams)는 CMP 가 받는 max_rx_streams 범위(1..16, cmp_media_api.md §7.9),
+#   N6(MaxSimultaneousCallsN6)은 규격이 상한을 두지 않아(TS 24.484 §9.3.2.1 xs:unsignedByte) 운영상 무의미한 값만 거른다.
+PROFILE_LIMITS = {"max_video_streams": (1, 16), "max_calls_n6": (1, 16)}
+_API_BOOL_ATTRS = ("invite_members", "protect_media", "protect_transmission_control", "allow_conference_state")
+_API_TEXT_ATTRS = ("video_resolutions", "video_frame_rate")
+
+
+def tables_present(cur) -> bool:
+    """MCVideo 표가 있는가(마이그레이션 적용). 캐시하지 않는다 — 운영 중에 적용해도 곧바로 쓴다."""
+    cur.execute("SHOW TABLES LIKE 'mcvideo_group_attrs'")
+    return cur.fetchone() is not None
+
+
+def api_group_attrs(value):
+    """관리 API 그룹 본문의 `mcvideo` → (attrs, 오류). None = MCVideo 서비스 끔 · dict = 켬(준 키만 반영 — 나머지는 기존값, 새 그룹은
+    기본값). 키 = GROUP_ATTR_DEFAULTS, 코덱 목록은 배열 또는 쉼표 문자열. 보호 true 는 XCAP PUT 과 같은 이유로 받지 않는다(§7 D7)."""
+    if value is None:
+        return None, None
+    if not isinstance(value, dict):
+        return None, "mcvideo must be an object or null"
+    unknown = sorted(set(value) - set(GROUP_ATTR_DEFAULTS))
+    if unknown:
+        return None, f"mcvideo: unknown field(s) {', '.join(unknown)}"
+    attrs = dict(value)
+    for k in _API_BOOL_ATTRS:
+        if k in attrs and not isinstance(attrs[k], bool):
+            return None, f"mcvideo.{k} must be a boolean"
+    for k in _API_TEXT_ATTRS:
+        if k in attrs and attrs[k] is not None:
+            if not isinstance(attrs[k], str):
+                return None, f"mcvideo.{k} must be a string or null"
+            attrs[k] = attrs[k].strip() or None
+    for k in ("audio_encodings", "video_encodings"):
+        if k in attrs and attrs[k] is not None:
+            attrs[k] = _split_list(attrs[k])
+    for k in ('protect_media', 'protect_transmission_control'):
+        if attrs.get(k):
+            return None, f"mcvideo.{k} true needs end-to-end keys (not supported)"
+    err = validate_attrs(attrs)
+    if err:
+        return None, f"mcvideo.{err}"
+    return attrs, None
+
+
+def api_profile(body: dict, current: Optional[dict] = None):
+    """관리 API PUT `/users/{pid}/ptt/{msisdn}/mcvideo` 본문 → (자격 dict, 오류). 준 키만 바꾸고 나머지는 current(없으면 기본값)."""
+    if not isinstance(body, dict):
+        return None, "JSON body required"
+    unknown = sorted(set(body) - set(PROFILE_LIMITS))
+    if unknown:
+        return None, f"unknown field(s) {', '.join(unknown)}"
+    out = dict(PROFILE_DEFAULTS, **(current or {}))
+    for k, (lo, hi) in PROFILE_LIMITS.items():
+        if k not in body:
+            continue
+        v = body[k]
+        if isinstance(v, bool) or not isinstance(v, int):
+            return None, f"{k} must be an integer"
+        if not lo <= v <= hi:
+            return None, f"{k} out of range ({lo}..{hi})"
+        out[k] = v
+    return out, None
+
+
+def read_user_profile(cur, ptt_id: str) -> Optional[dict]:
+    cur.execute("SELECT max_video_streams, max_calls_n6 FROM mcvideo_user_profile WHERE ptt_id=%s", (ptt_id,))
+    r = cur.fetchone()
+    if not r:
+        return None
+    return {"max_video_streams": int(r.get('max_video_streams') or PROFILE_DEFAULTS['max_video_streams']),
+            "max_calls_n6": int(r.get('max_calls_n6') or PROFILE_DEFAULTS['max_calls_n6'])}
+
+
+def write_user_profile(cur, ptt_id: str, prof: dict) -> None:
+    cur.execute(
+        "INSERT INTO mcvideo_user_profile (ptt_id, max_video_streams, max_calls_n6, update_time) "
+        "VALUES (%s, %s, %s, NOW()) ON DUPLICATE KEY UPDATE max_video_streams=VALUES(max_video_streams), "
+        "max_calls_n6=VALUES(max_calls_n6), update_time=NOW()",
+        (ptt_id, int(prof['max_video_streams']), int(prof['max_calls_n6'])))
+
+
+def delete_user_profile(cur, ptt_id: str) -> bool:
+    cur.execute("DELETE FROM mcvideo_user_profile WHERE ptt_id=%s", (ptt_id,))
+    return cur.rowcount > 0
+
+
+def set_profile_cache(ptt_id: str, prof: Optional[dict]) -> None:
+    """MCVIDEO_PROFILES 갱신 — user profile 문서(404/내용)·IdMS scope·mcvideo_id claim 이 곧바로 따른다."""
+    for k in (ptt_id, ptt_id.lstrip('+'), '+' + ptt_id.lstrip('+')):
+        MCVIDEO_PROFILES.pop(k, None)
+    if prof is not None:
+        MCVIDEO_PROFILES[ptt_id] = dict(prof)
+
+
 # ── 그룹 문서 조각 (TS 24.481 §7.2.2) ─────────────────────────────────────────────────────────────────────
 
 def list_service_xml(attrs: dict) -> str:

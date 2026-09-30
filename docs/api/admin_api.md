@@ -772,6 +772,26 @@ Authorization: Bearer <admin_token>
 
 > 삭제 시 해당 번호가 소속된 PTT 그룹의 멤버에서도 제거됩니다.
 
+### 5.4 PTT 번호의 MCVideo 이용 자격 (`/api/v1/users/{pid}/ptt/{msisdn}/mcvideo`)
+
+MCVideo user profile(TS 24.484 §9.3) — 행이 곧 이용 자격이다([mcvideo.md](../design/features/mcvideo.md) §5.1). MCVideo ID = MCPTT ID.
+
+| 메서드 | 동작 | 응답 |
+|---|---|---|
+| `GET` | 조회 (monitor+) | 200 `{id, max_video_streams, max_calls_n6}` · 자격 없음 404 `{"error": "not_entitled"}` |
+| `PUT` | 자격 부여·상한 변경 (manager+) — 준 키만 바꾼다(새 자격의 빠진 키 = 1) | 200 `{id, max_video_streams, max_calls_n6}` |
+| `DELETE` | 자격 회수 (manager+) | 200 `{id}` · 자격 없음 404 |
+
+| 필드 | 타입 | 범위 | 설명 |
+|------|------|------|------|
+| `max_video_streams` | integer | 1~16 | `<MaxSimultaneousVideoStreams>`(§9.3.2.1) — 동시 수신 영상 상한, 서버 카운터 C9(TS 24.581 §11.2.3). 범위 = CMP `max_rx_streams` |
+| `max_calls_n6` | integer | 1~16 | `<MaxSimultaneousCallsN6>` — 동시 MCVideo 그룹 호 상한(TS 24.281 §9.2.2.3.1.1 5), 넘으면 486 Warning 103) |
+
+- 자격이 바뀌면 CSC 가 MCVideo user profile 문서(없으면 404)·IdMS scope `3gpp:mc:video_*`·토큰 `mcvideo_id` claim 을 곧바로 따르게 하고(다음 토큰
+  발급부터) CSP 에 `USER_CHANGED` 를 보낸다. 진행 중인 MCVideo 호는 끊지 않는다 — 다음 개시·합류부터 판정(403 Warning 108/109).
+- 번호가 이 가입자의 PTT 번호가 아니면 404 `Subscription not found`. MCVideo 표가 없으면(마이그레이션 전) 400 `schema_not_migrated`
+  (`sql/migrate_mcvideo.sql`). 가입자 조회(`GET /api/v1/users/{pid}`)의 `ptt_subscriptions[].mcvideo_profile` 에도 같은 값이 실린다(자격 없음 = null).
+
 ---
 
 ## 6. PTT 그룹 관리 (`/api/v1/ptt/groups`)
@@ -858,6 +878,25 @@ Content-Type: application/json
 | `members` | array | N | 초기 멤버 목록 |
 | `members[].user_id` | string | Y | PTT 구독 MSISDN |
 | `members[].priority` | integer | Y | 우선순위 (0=최고, 숫자가 클수록 낮음) |
+| `mcvideo` | object\|null | N | MCVideo 서비스(TS 24.481 §7.2.2 — 한 그룹 = 서비스 집합, [mcvideo.md](../design/features/mcvideo.md) §5.1). 없거나 null = MCVideo 그룹 아님, 객체 = MCVideo 그룹(빠진 키는 기본값). 아래 표 |
+
+**`mcvideo` 필드** (그룹 문서 MCVideo `<list-service>` 요소 — TS 24.481 §7.2.2·§7.2.8):
+
+| 필드 | 타입 | 범위·기본 | 그룹 문서 요소 |
+|------|------|------|------|
+| `invite_members` | boolean | false | `<mcvideo-on-network-invite-members>` — true = prearranged(멤버 초대), false = chat |
+| `max_duration_sec` | integer | 0~86400, 3600 | `<mcvideo-on-network-maximum-duration>`(TNG3, 0 = 무제한) |
+| `max_transmitters` | integer | 1~16, 2 | `<mcvideo-maximum-simultaneous-mcvideo-transmitting-group-members>` — 동시 송출 상한 |
+| `audio_encodings` / `video_encodings` | array\|string | `["AMR-WB"]` / `["H264"]` | `<mcvideo-preferred-audio-encodings>`·`<mcvideo-preferred-video-encodings>` — rtpmap 인코딩 이름 선호순(쉼표 문자열도 받는다), 비울 수 없다 |
+| `video_resolutions` / `video_frame_rate` | string\|null | null | `<mcvideo-preferred-video-resolutions>`·`<mcvideo-preferred-video-frame-rate>` — null = 요소 생략 |
+| `reception_hang_timer_sec` | integer | 0~3600, 30 | `<on-network-reception-hang-timer>`(T5, TS 24.581 §11.1.3) |
+| `min_number_to_start` | integer | 0~65535, 0 | `<mcvideo-on-network-minimum-number-to-start>` |
+| `group_priority` | integer\|null | 0~255, null | `<mcvideo-on-network-group-priority>` — null = 생략(가장 낮음) |
+| `allow_conference_state` | boolean | true | `<mcvideo-on-network-allow-conference-state>` |
+| `protect_media` / `protect_transmission_control` | boolean | false 만 | `<mcvideo-protect-media>`·`<mcvideo-protect-transmission-control>` — true 는 E2E(GMK) 전까지 400 |
+
+> 조회(`GET`)는 그룹마다 `mcvideo`(속성 객체, MCVideo 그룹 아님·마이그레이션 전 = null)를 싣는다. 모르는 키·타입 오류·범위 밖은 400(쓰기 전에 검사 —
+> 다른 필드도 반영하지 않는다). MCVideo 표가 없는데 객체를 보내면 400 `schema_not_migrated`.
 
 > `floor_policy`/`max_talkers` 는 CSP 가 `PTT_GROUP_ADD`/`_MODIFY` 로 CMP 에 발행한다
 > ([mcptt_csp_cmp_roadmap_contract.md](../design/features/mcptt_csp_cmp_roadmap_contract.md) §B.1).
@@ -919,6 +958,9 @@ Content-Type: application/json
   "video_enabled": true
 }
 ```
+
+`mcvideo` — 키 없음 = MCVideo 설정 그대로 · `null` = MCVideo 서비스 끔(속성 행 삭제) · 객체 = 켬/갱신(준 키만, 나머지는 기존 값). 예: `{"mcvideo": {"max_transmitters": 3}}`.
+진행 중 MCVideo 호는 다음 개시부터 반영된다.
 
 **성공 응답 (200):**
 ```json

@@ -7,7 +7,7 @@
 > **설계 정본.** 구현된 것 — 계약(전송 제어 정의 테이블 [mcvideo_tc_defs.yaml](mcvideo_tc_defs.yaml)(생성 헤더 양 끝, §5.3·§5.4) · DB 표(§5.1) ·
 > 설정 문서 골든 `tests/fixtures/mcvideo/` · SDP 프로파일(§1.4) · CSP↔CMP 제어 API([cmp_media_api.md](../../api/cmp_media_api.md) §7.9) · 단말 SDK 공개
 > 표면([ue_sdk.md](ue_sdk.md) §4.6)), 양 끝 전송 제어 코덱(CMP `PTransmissionCodec` · SDK `mcvideo/tc_codec`, 교차 시험), 단말 전송 제어 참여자 상태 머신
-> (SDK `mcvideo/tc_participant`), V0 전부, CSC 설정 평면(§5.1 — 관리 API·콘솔 제외)과 그 문서들의 SDK 해석(§5.4), CSP 호 제어 부품·모듈·서비스 판별·
+> (SDK `mcvideo/tc_participant`), V0 전부, CSC 설정 평면·관리 API(§5.1 — 콘솔 제외)과 그 문서들의 SDK 해석(§5.4), CSP 호 제어 부품·모듈·서비스 판별·
 > 등록 능력·서비스별 affiliation(§5.2), CMP 그룹 종류·멤버 포트·제어 명령·송출·수신 제어 상태 머신·미디어 분배·보호(SRTP·전송 제어 SRTCP)·영상 RTCP 키프레임 요청(§5.3·§5.3.1),
 > 단말 SDK 등록 태그·affiliation·그룹 호(개시·재합류·멤버 초대 수락)·전송 제어 결선·송출 게이트(§5.4 — 루프백 시험, 실서버 미연동), CSP 그룹 호
 > (§5.2.1 — chat·prearranged 개시·합류·재합류·해제, 실측 전). 녹취, 단말 영상 송출·송출별 렌더(C6)는 미구현(바인딩 C7 은 구현 —
@@ -242,8 +242,11 @@ service configuration 에서 `<confidentiality-protection>`·`<integrity-protect
 - **IdMS** — `SCOPE_CATALOG` 에 `3gpp:mc:video_*` 넷. **사용자 단위 인가** — MCVideo 넷은 자격 행이 있는 사용자에게만 준다(`grant_scope(…, mcptt_id)`).
   자격이 있으면 ID·access 토큰에 `mcvideo_id`(= MCPTT ID, TS 33.180 B.2.1.3·B.2.2.3). 리소스 서버 = GMS(ptt·video·data GMS 중 하나)·MCVideo CMS 문서
   (video CMS)·KMS(ptt·video·data KMS 중 하나).
-- **관리 API·콘솔** — 그룹 편집 «서비스» 절(MCPTT·MCVideo 켜기, MCVideo 속성), 가입자 PTT 회선 카드 옆 «MCVideo» 자격·상한. CSC 가 CSP 에 `GROUP_CHANGED`·
-  사용자 변경을 통지하는 경로는 그대로.
+- **관리 API** (구현 — A6, [admin_api.md](../../api/admin_api.md) §5.4·§6) — 그룹 `mcvideo`(조회 = 속성 객체 또는 null · 쓰기 = 키 없음 그대로 / null 끔 /
+  객체 켬·갱신(준 키만), 검사 `services/mcvideo.api_group_attrs` = XCAP PUT 과 같은 범위·보호 true 400, 쓰기 전에 검사) · PTT 회선 MCVideo 자격
+  `GET/PUT/DELETE /api/v1/users/{pid}/ptt/{msisdn}/mcvideo`(행 = 자격, 상한 C9·N6 1~16, 캐시 `MCVIDEO_PROFILES` 즉시 갱신 → 문서·scope·claim). 표가 없으면
+  400 `schema_not_migrated`. 변경 통지는 기존 경로(`GROUP_CHANGED`·`USER_CHANGED`). 시험 `tests/test_csc_mcvideo.py` AdminApiTest.
+- **콘솔** — 그룹 편집 «서비스» 절(MCPTT·MCVideo 켜기, MCVideo 속성), 가입자 PTT 회선 카드 옆 «MCVideo» 자격·상한 — 미구현(위 API 를 쓴다).
 
 ### 5.2 CSP (호 제어)
 
