@@ -495,7 +495,7 @@ cimsue-cli [계정] drive [--sample-file WAV] [--service volte|voip|ptt]
         resume <call> | dtmf <call> <digits> | transfer <call> <대상> | group_call <group> [listen] [emergency] [broadcast] [implicit] | floor_request <call>
         floor_release <call> | affiliate <group> on|off [mcvideo] | pickup <code> [number] | media mic|sample [<wav>] | stats [call] | quality <call> | quit
         video_call <group> [prearranged] [queueing] [implicit] | transmit_request <call> [priority] | transmit_release <call>
-        reception_accept <call> <userId> | reception_end <call> <userId>   (MCVideo — affiliate 는 MCPTT 만)
+        reception_accept <call> <userId> | reception_end <call> <userId>   (MCVideo 호·전송 제어 — MCVideo affiliation = `affiliate <group> on mcvideo`)
   이벤트: ready{version,aor} · reg{service,state,code,reason,expires,rrd_ms} · incoming{call,from,called,video,mcptt,service,group}
         · call{call,dir,state outgoing|incoming|active|held|disconnected,code,reason,media,mcptt,service mcptt|mcvideo,video,by_us,group,srd_ms|sdd_ms,
           (disconnected: 통계 + 품질)} · transmission{call,kind,state,cause,t_us} · reception{call,kind,from,state,auto,cause,t_us}
