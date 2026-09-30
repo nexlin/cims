@@ -181,11 +181,23 @@ C++ 공개 표면은 `cimsue/engine.h` 의 `Engine` 하나이며 계정·호를 
   허용**)·`ServiceConfigDoc`(§8.4 — `service-configuration-info` 루트, domain·broadcast-group 계층 수·on-network Resource-Priority
   r-value `mcpttp.15` 형식 — 받으면 앱이 `AccountConfig.rp*` 에 넣는다. 인가 요소는 없다) → `Capabilities::of(up, sc)`(nullptr = 미수신).
   규칙은 코어 한 곳이다 — 긴급 사설콜 = allow-private-call ∧ allow-emergency-private-call(둘 다 user profile). ad hoc 인가는 규격
-  `<anyExt><allow-adhoc-group-call>` 과 옛 서버 확장 `<cims:allow-adhoc-group-call>` 을 로컬 이름으로 함께 읽는다.
+  `<anyExt><allow-adhoc-group-call>` 과 옛 서버 확장 `<cims:allow-adhoc-group-call>` 을 로컬 이름으로 함께 읽는다. 해제 인가 =
+  `cancelGroupEmergency`(allow-cancel-group-emergency, TS 24.484 §8.3.2.1 11)xiv))·`cancelImminentPeril`(allow-cancel-imminent-peril, xvii))·
+  `cancelEmergencyAlert` — 그룹 긴급 해제는 단말 쪽이 local policy(TS 24.379 §6.2.8.1.7)이고 서버 판정이 개시자 ∨ allow-cancel-group-emergency
+  (§6.3.3.1.13.4)라, 앱은 `cancelGroupEmergency` ∨ `McpttCondition.mine` 으로 [긴급 해제] 를 연다. 임박 해제는 개시자 예외가 없다(§6.2.8.1.10).
+  C API(`cimsue_capabilities_t.cancel_group_emergency`·`cancel_imminent_peril`)·.NET(`Capabilities.CancelGroupEmergency`·`CancelImminentPeril`)·Kotlin 같은 이름.
+- **UE initial configuration**(TS 24.484 §7.2) — `CscClient::fetchUeInitConfig(mcsUeId)` = 로그인 전 문서(토큰 없음), XCAP URI
+  `/org.3gpp.mcptt.ue-init-config/users/sip:<MCS UE ID>/<MCS UE ID>`(§7.2.1.1, MCS UE ID = `AccountConfig.instanceId`) → `UeInitConfigDoc` 의
+  참여 기능 PSI 둘(`<on-network><anyExt>` 의 `MCPTT-Service-Details`·`MCData-Service-Details` `Server-URI`, §7.2.2.1 10)·14)) → 앱이
+  `AccountConfig.mcpttServerUri`·`mcdataServerUri` 에 넣고 계정을 만든다. 광고하지 않은 서비스는 빈 값(해당 PSI 없이 — 아래 전환기 경로).
+  `cimsue-cli --from-profile ptt` 가 같은 순서로 채운다(명시 `--mcptt-psi`·`--mcdata-psi` 가 덮는다).
 - **긴급·임박 세션 조건**(TS 24.379 §10.1.1.2.1.3~6, [mcptt_emergency_modes.md](mcptt_emergency_modes.md) §4.2·§4.3). `CallInfo.condition` 이
   그룹의 진행 중 긴급·임박을 이 호에서 본 현재값이다(`mcptt` 는 개시·착신 INVITE 의 값으로 불변). `setCallCondition` = in-dialog
   re-INVITE(multipart mcptt-info 에 **바뀐 지시자만** true/false 명시 + `Resource-Priority` — `AccountConfig.rp*`, 값 정본 = service-config
-  OnNetwork *-resource-priority §6.2.8.1.15, 기본 = CSP 의 mcpttp 서열), 보내면서 반영(`Local`) → 2xx `Confirmed` / 4xx~6xx 이전 값 복원
+  OnNetwork *-resource-priority §6.2.8.1.15, 기본 = CSP 의 mcpttp 서열), 지시자 조합은 §6.3.3.1.17 대로 — 긴급(개시 INVITE·상향 re-INVITE)은
+  `emergency-ind` true + `alert-ind` false(경보를 요청하지 않음, §6.2.8.1.1 4))이고 임박 지시자를 싣지 않는다(임박 → 긴급이면 제어 기능이
+  임박을 내린다, §6.3.3.1.6 3)d)), 임박은 긴급·경보 지시자 없이(§6.2.8.1.9), 긴급 중 임박 상향은 실패(긴급 해제가 먼저 — §6.2.8.1.9 1)).
+  요소 순서 = mcptt-ParamsType(emergency-ind · alert-ind · imminentperil-ind). 보내면서 반영(`Local`) → 2xx `Confirmed` / 4xx~6xx 이전 값 복원
   `Denied`(§6.2.8.1.5 — 미인가 상향 403, 재-INVITE 거절은 호를 끊지 않는다). 서버 재광고(수신 re-INVITE·조인 200 OK 의 mcptt-info) =
   `Advertised` — emergency-ind true 는 임박을 내린다(§10.1.1.2.1.6 1)d)). Floor Request 의 긴급 비트는 현재값을 따른다. 대상 선택·403 뒤
   normal 재발신·경보 정합은 앱 정책이다. 경보 = `sendEmergencyAlert`(MESSAGE mcptt-info `alert-ind`·`mcptt-client-id`(`AccountConfig.mcpttClientId`,
@@ -198,6 +210,15 @@ C++ 공개 표면은 `cimsue/engine.h` 의 `Engine` 하나이며 계정·호를 
   `CallInfo.nonAcknowledgedUsers`(bare id)에 담아 `onNonAcknowledgedUsers` 를 낸다, 모르는 패키지는 469(§4.2.2), 패키지 없는 INFO 는 스택 기본.
   C API(`cimsue_call_info_t.answer_state`·`non_ack_users`·리스너 `on_non_acknowledged_users`)·.NET(`CallInfo.AnswerState`·`NonAcknowledgedUsers`·
   `Engine.NonAcknowledgedUsersReceived`) 반영, Kotlin 파사드는 후속(SWIG 재생성으로 필드·콜백이 생긴다), `cimsue-cli` 는 `answer-state=`·`non-acknowledged` 줄로 보인다.
+- **SDS disposition 통지**(TS 24.282 §12.2.1.1, [mcdata_messaging.md](mcdata_messaging.md) §4.4). 받은 SDS 의 `SdsMessage.fromUri` =
+  `<mcdata-calling-user-id>`(없으면 From), `groupUri` = `<mcdata-calling-group-id>`(없으면 그룹 request-type 의 request-uri — 중계된 통지는
+  calling-group-id 만)이고, 앱은 이 둘을 `sendSdsNotification(peer, conv, msg, type, groupId)` 에 그대로 넘긴다. `AccountConfig.mcdataServerUri`
+  (ue-init-config `MCData-Service-Details/Server-URI`)가 있으면 규격형 — Request-URI = 그 PSI(§6.2.4.1 4)), Accept-Contact
+  `+g.3gpp.mcdata.sds`·ICSI mcdata.sds(require;explicit, 한 헤더 쉼표 목록)·P-Preferred-Service(§6.2.4.1 1)), 본문 = [mcdata-info
+  `<mcdata-calling-group-id>` — 그룹일 때(5))] + SDS NOTIFICATION(6)) + `application/resource-lists+xml` entry 하나(3), RFC 5366 recipient-list).
+  PSI 가 없으면 SDS NOTIFICATION 한 파트를 원 발신자 AoR 로 곧장 보낸다(전환기 — CSP 0.2.180 전 서버는 PSI 통지를 상관하지 못한다).
+  C API `cimsue_engine_send_sds_notification(…, group_id, …)`·.NET `Account.SendSdsNotification(…, groupUri)`·Kotlin 같은 인자.
+  `cimsue-cli sds-recv --notify-delivered` / `sds … --wait-disposition S` 가 왕복을 확인한다.
 - **media plane SDS**(TS 24.282 §9.2.3, [mcdata_messaging.md](mcdata_messaging.md) §4.7). `AccountConfig.maxSdsCplaneBytes`(프로비저닝
   `mcdata.maxPayloadSdsCplaneBytes` — `ServiceProfile::toAccount` 가 채운다)를 넘는 **그룹** SDS 는 `sendGroupSds` 가 MSRP 로 보낸다(INVITE
   더미 audio + m=message sendonly actpass → 200 의 cmdp a=path → SEND 2건) — 반환·상관은 C-plane 과 같고 최종 결과가 `onRequestResult`
@@ -343,7 +364,8 @@ cimsue-cli [계정] group-call <groupId> [--duration S] [--ptt-at S --ptt-len S]
 cimsue-cli [계정] alert <groupId> [--cancel] [--originated-by ID] [--cancel-group-emergency]   # 긴급 경보 MESSAGE
 cimsue-cli [계정] sds <groupId> <text>           # 최종 응답까지 — [계정] --cplane-max N 을 넘으면 MSRP(outcome plane=media)
                                                  #   ([계정] --msrp = 서버발 MSRP 배포 수신 광고 — sds-recv 가 plane=media 로 받는다)
-cimsue-cli [계정] sds-recv [--duration S]        # 수신 SDS 를 JSON 줄로
+                                                 #   [--wait-disposition S] = 그 메시지의 전달 확인 통지 대기(outcome disposition)
+cimsue-cli [계정] sds-recv [--duration S]        # 수신 SDS 를 JSON 줄로 — [--notify-delivered] = 전달 확인 요청에 DELIVERED 통지
 계정: --server IP --port N --transport udp|tcp|tls --domain D --msisdn M (--imsi I|--auth-id IMPI)
       (--ha1 HEX32|--password P) [--mcptt-id tel:..] [--affiliate G,..] [--srtp off|optional|required] [--sec tls]
       [--tls-ca PEM] [--json]
@@ -358,6 +380,8 @@ cimsue-cli [계정] pickup [번호] --code <피처코드>      # 그룹/지정 �
 cimsue-cli [계정] transfer <peer> --to <target>       # peer 와 통화 후 REFER blind (answer --transfer-to 는 착신측 전달)
 cimsue-cli --csc-host H --user U --pw P [--no-tls-verify] login          # PKCE 로그인 + /provisioning/me 요약(dispatch members/ptt_targets 포함 — 서버 P2 반영 확인용)
 cimsue-cli --csc-host H --user U --pw P --from-profile volte|ptt [--server IP --port N] <command>   # 프로파일로 계정 채움
+                                                 #   ptt 면 ue-init-config(TS 24.484 §7.2)로 참여 기능 PSI 도 — [--instance-id URN]
+                                                 #   = MCS UE ID, 명시 [--mcptt-psi URI]·[--mcdata-psi URI] 가 덮는다
 ```
 
 오디오 장치는 null(헤드리스) — 브리지는 돌고 RTP 는 흐른다. 통계는 스트림 소멸 시점(`onStreamDestroyed`)에
@@ -661,12 +685,6 @@ NDK/MSVC 빌드는 개발 서버 밖(WSL2·Windows 머신)에서 수행하고, �
   §6.3.3.1.6 2)). 코어는 조건만 읽어(§4.2 «긴급·임박 세션 조건») `McpttCondition` 에 개시자가 없다 — 관제 앱 긴급 배너는 진행 중에 걸린
   조건의 개시자를 비운다(`CallInfo.mcptt.callingUserId` 는 호를 세운 INVITE 의 값이다). 청취 leg 도 서버가 같은 재광고를 보낸다
   ([mcptt_emergency_modes.md](mcptt_emergency_modes.md) §4.2 — 성립 SDP 그대로, 코어는 recvonly 로 답한다).
-- **해제 인가 요소** — user profile ruleset 의 `allow-cancel-group-emergency`·`allow-cancel-imminent-peril`(TS 24.484 §8.3.2.1 11) xiv)·xvii))을
-  코어가 읽지 않는다. 서버는 긴급 해제를 개시자 ∨ `allow-cancel-group-emergency`, 임박 해제를 `allow-cancel-imminent-peril` 로 판정한다(TS 24.379
-  §6.3.3.1.13.4·§6.3.3.1.13.6, 단말 쪽 판정 §6.2.8.1.7·§6.2.8.1.10) — 관제 앱의 [긴급 해제] 자격이 이 값을 기다린다. `allow-cancel-emergency-alert` 와
-  같은 자리에 C API·.NET·Kotlin 으로 낸다.
-- **조건 조합(§6.3.3.1.17)** — `setCallCondition` 이 임박 → 긴급 상향에 `emergency-ind` true 와 `imminentperil-ind` false 를 함께 싣는다. 규격 조합은
-  `emergency-ind` true 면 `imminentperil-ind` 를 싣지 않는다(제어 기능이 임박을 내린다, §6.3.3.1.6 3)d)) — 서버는 지금 조합을 검증하지 않는다(편차 표).
 - **MCPTT 착신 수락의 호 종류별 분리** — `AccountConfig.autoAnswerMcptt` 하나가 그룹콜·사설콜을 함께 자동 수락한다. 규격은 수락 방식을 호 종류별로
   둔다(TS 24.379 §6.2.3 commencement mode — 사설콜·그룹콜 각각 자동/수동). 관제석은 그룹콜 자동 + 사설콜 수동이 맞다 — 둘로 나누면 C API·.NET·Kotlin 에
   같이 낸다. 긴급 사설콜의 전역 표시는 이 분리 뒤에 두 관제 앱이 정한다([dispatch_desktop_ui.md](dispatch_desktop_ui.md) §13,
@@ -675,11 +693,6 @@ NDK/MSVC 빌드는 개발 서버 밖(WSL2·Windows 머신)에서 수행하고, �
   `tel:` 은 호스트가 없어 라우팅할 수 없는 Request-URI 라 요청이 나가지 못해, 두 관제 앱은 넘기기 전에 벗긴다(태블릿 `routableTarget`, 데스크톱 `UserPart`).
   코어가 `tel:` 을 도메인 붙은 `sip:` 로 바꿀지(발신·합류·픽업·전달·구독 — 세 바인딩의 요청 경로 전부가 바뀐다), 호출자가 라우팅 가능한 형태로 준다는
   계약으로 적을지는 CSP 의 `tel:` Request-URI 처리를 확인한 뒤 정한다.
-- **SDS disposition 통지의 규격 경로** — `sendSdsNotification` 은 원 발신자 AoR 로 SDS NOTIFICATION 한 파트만 보낸다. TS 24.282
-  V18.13.0 §12.2.1.1 은 Request-URI = MCData 참여 기능 PSI(ue-init-config `MCData-Service-Details/Server-URI`), 대상 MCData ID 의
-  `resource-lists`(entry 하나), 그룹 통지의 `<mcdata-calling-group-id>`, ICSI mcdata.sds Accept-Contact·P-Preferred-Service(§6.2.4.1)를 요구한다 —
-  통지 API 가 수신 SDS 의 그룹·발신자 문맥을 받아 이 본문을 만든다. CSP 는 규격형을 이미 받아 상관·중계하고(옛 형식도 받는다 —
-  [mcdata_messaging.md](mcdata_messaging.md) §4.4), 서버 검증 대역은 `tests/sds_disposition_spec.py` 다.
 - **망 전환 중의 호 유지** — `handleNetworkChange` 는 등록만 되살리고 진행 중 호는 그대로 둔다 — 로컬 주소가 바뀌면 그 호의 RTP 가
   끊길 수 있다. 호를 옮기려면 호마다 re-INVITE(미디어 재초기화·Contact/Via 갱신)를 보내야 하고, MCPTT 호의 floor `m=application` 은
   re-INVITE SDP 에도 다시 실린다(`pendingAppSdp`). 넣기 전에 CSP 가 단말발 re-INVITE(VoLTE relay·MCPTT 세션)를 어떻게 다루는지

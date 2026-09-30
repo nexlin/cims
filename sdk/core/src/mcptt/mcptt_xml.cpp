@@ -35,7 +35,7 @@ static std::string infoBool(const char* tag, bool v) {
 
 std::string mcpttInfo(const std::string& sessionType, const std::string& requestUri,
                       const std::string& callingUserId, const std::string& callingGroupId,
-                      int emergency, int imminentPeril, bool broadcast) {
+                      int emergency, int imminentPeril, bool broadcast, int alert) {
     std::string s = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n";
     s += std::string("<mcpttinfo xmlns=\"") + kNsMcpttInfo + "\">\n  <mcptt-Params>\n";
     // 요소 순서 = mcptt-ParamsType sequence(Annex F.1).
@@ -44,6 +44,7 @@ std::string mcpttInfo(const std::string& sessionType, const std::string& request
     s += infoUri("mcptt-calling-user-id", callingUserId);
     s += infoUri("mcptt-calling-group-id", callingGroupId);
     if (emergency) s += infoBool("emergency-ind", emergency > 0);
+    if (alert) s += infoBool("alert-ind", alert > 0);
     if (imminentPeril) s += infoBool("imminentperil-ind", imminentPeril > 0);
     if (broadcast) s += "    <broadcast-ind>true</broadcast-ind>\n";
     s += "  </mcptt-Params>\n</mcpttinfo>\n";

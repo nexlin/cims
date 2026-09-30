@@ -98,7 +98,8 @@ public sealed record UserProfileDoc(
     string ETag, bool NotModified, string UserUri, CmsEntry EmergencyGroup, CmsEntry ImminentPerilGroup, CmsEntry EmergencyAlertGroup,
     CmsEntry EmergencyPrivateRecipient, IReadOnlyList<string> Groups, IReadOnlyList<string> ImplicitAffiliations, int MaxAffiliationsN2,
     bool AllowPrivateCall, bool AllowEmergencyGroupCall, bool AllowImminentPerilCall, bool AllowActivateEmergencyAlert,
-    bool AllowCancelEmergencyAlert, bool AllowEmergencyPrivateCall, bool AllowAdhocGroupCall)
+    bool AllowCancelEmergencyAlert, bool AllowEmergencyPrivateCall, bool AllowAdhocGroupCall,
+    bool AllowCancelGroupEmergency = true, bool AllowCancelImminentPeril = true)
 {
     /// <summary>XML → 문서(코어 파서). 루트가 mcptt-user-profile 이 아니면 실패.</summary>
     public static Result<UserProfileDoc> Parse(string xml) => CscClient.ParseUserProfile(xml);
@@ -112,11 +113,21 @@ public sealed record ServiceConfigDoc(string ETag, bool NotModified, string Doma
     public static Result<ServiceConfigDoc> Parse(string xml) => CscClient.ParseServiceConfig(xml);
 }
 
+/// <summary>MCS UE initial configuration(TS 24.484 §7.2, csc.h UeInitConfigDoc) — 참여 기능 PSI(`&lt;anyExt&gt;` 의 *-Service-Details/Server-URI).
+/// 광고하지 않은 서비스는 빈 값 — 계정의 해당 PSI 도 비워 둔다(<see cref="AccountConfig.McpttServerUri"/>·<see cref="AccountConfig.McdataServerUri"/>).</summary>
+public sealed record UeInitConfigDoc(string ETag, bool NotModified, string Domain, string McpttServerUri, string McdataServerUri)
+{
+    public static Result<UeInitConfigDoc> Parse(string xml) => CscClient.ParseUeInitConfig(xml);
+}
+
 /// <summary>정책 게이트 스냅샷(csc.h Capabilities — ue_sdk.md §4.2) — user profile ruleset 인가. 받지 못한 문서는 허용(게이트 없음).
 /// UX 선차단(버튼 비활성·안내)용이고 최종 판정은 서버다. MaxAffiliationsN2 0 = 미지정.</summary>
 public sealed record Capabilities(bool UserProfileKnown, bool ServiceConfigKnown, bool PrivateCall, bool EmergencyGroupCall, bool ImminentPerilCall,
-                                  bool EmergencyPrivateCall, bool EmergencyAlert, bool CancelEmergencyAlert, bool AdhocGroupCall, int MaxAffiliationsN2)
+                                  bool EmergencyPrivateCall, bool EmergencyAlert, bool CancelEmergencyAlert, bool AdhocGroupCall, int MaxAffiliationsN2,
+                                  bool CancelGroupEmergency = true, bool CancelImminentPeril = true)
 {
+    // CancelGroupEmergency = allow-cancel-group-emergency — 그룹 긴급 해제는 local policy(TS 24.379 §6.2.8.1.7), 서버 판정 = 개시자 ∨ 이 값
+    //   (§6.3.3.1.13.4) → 앱은 «내가 올린 조건(McpttCondition.Mine)» 과 OR 해서 [긴급 해제] 를 연다. CancelImminentPeril 은 개시자 예외 없음(§6.2.8.1.10).
     /// <summary>규칙은 코어 한 곳(Capabilities::of). null = 그 문서를 아직 못 받음.</summary>
     public static Capabilities Of(UserProfileDoc? userProfile, ServiceConfigDoc? serviceConfig) => CscClient.CapabilitiesOf(userProfile, serviceConfig);
 }
@@ -436,10 +447,30 @@ public sealed unsafe class CscClient : IDisposable
             return st == 0 ? Result<ServiceConfigDoc>.Success(ToManaged(&d)) : Result<ServiceConfigDoc>.Fail(st, Engine.LastError());
         }
     }
+    /// <summary>UE initial configuration GET + 해석(TS 24.484 §7.2.1.1) — mcsUeId = 단말 instance ID(urn:uuid:…). 로그인 전 문서라 토큰 없이.
+    /// NotModified·해석 실패 규약은 FetchUserProfile 과 같다.</summary>
+    public Result<UeInitConfigDoc> FetchUeInitConfig(string mcsUeId, string? etag = null)
+    {
+        lock (_gate)
+        {
+            cimsue_ue_init_config_doc_t d;
+            int st = cimsue_csc_fetch_ue_init_config(Handle, mcsUeId, etag, &d);
+            return st == 0 ? Result<UeInitConfigDoc>.Success(ToManaged(&d)) : Result<UeInitConfigDoc>.Fail(st, Engine.LastError());
+        }
+    }
+    public Task<Result<UeInitConfigDoc>> FetchUeInitConfigAsync(string mcsUeId, string? etag = null, CancellationToken ct = default) =>
+        Task.Run(() => FetchUeInitConfig(mcsUeId, etag), ct);
     public Task<Result<UserProfileDoc>> FetchUserProfileAsync(string accessToken, string userUri, string? etag = null, CancellationToken ct = default) =>
         Task.Run(() => FetchUserProfile(accessToken, userUri, etag), ct);
     public Task<Result<ServiceConfigDoc>> FetchServiceConfigAsync(string accessToken, string userUri, string? etag = null, CancellationToken ct = default) =>
         Task.Run(() => FetchServiceConfig(accessToken, userUri, etag), ct);
+
+    internal static Result<UeInitConfigDoc> ParseUeInitConfig(string xml)
+    {
+        cimsue_ue_init_config_doc_t d;
+        int st = cimsue_ue_init_config_parse(xml, &d);
+        return st == 0 ? Result<UeInitConfigDoc>.Success(ToManaged(&d)) : Result<UeInitConfigDoc>.Fail(st, Engine.LastError());
+    }
 
     internal static Result<UserProfileDoc> ParseUserProfile(string xml)
     {
@@ -467,6 +498,7 @@ public sealed unsafe class CscClient : IDisposable
             u.allow_imminent_peril_call = Engine.B(up.AllowImminentPerilCall); u.allow_activate_emergency_alert = Engine.B(up.AllowActivateEmergencyAlert);
             u.allow_cancel_emergency_alert = Engine.B(up.AllowCancelEmergencyAlert); u.allow_emergency_private_call = Engine.B(up.AllowEmergencyPrivateCall);
             u.allow_adhoc_group_call = Engine.B(up.AllowAdhocGroupCall);
+            u.allow_cancel_group_emergency = Engine.B(up.AllowCancelGroupEmergency); u.allow_cancel_imminent_peril = Engine.B(up.AllowCancelImminentPeril);
         }
         if (sc is not null)
         {
@@ -477,7 +509,7 @@ public sealed unsafe class CscClient : IDisposable
         cimsue_capabilities_of(up is null ? null : &u, sc is null ? null : &c, &k);
         return new Capabilities(k.user_profile_known != 0, k.service_config_known != 0, k.private_call != 0, k.emergency_group_call != 0,
                                 k.imminent_peril_call != 0, k.emergency_private_call != 0, k.emergency_alert != 0, k.cancel_emergency_alert != 0,
-                                k.adhoc_group_call != 0, k.max_affiliations_n2);
+                                k.adhoc_group_call != 0, k.max_affiliations_n2, k.cancel_group_emergency != 0, k.cancel_imminent_peril != 0);
     }
 
     // 비동기 편의 — 블록 호출을 스레드 풀로.
@@ -533,11 +565,14 @@ public sealed unsafe class CscClient : IDisposable
             StrArray(d->implicit_affiliations, d->implicit_affiliation_count), d->max_affiliations_n2,
             d->allow_private_call != 0, d->allow_emergency_group_call != 0, d->allow_imminent_peril_call != 0,
             d->allow_activate_emergency_alert != 0, d->allow_cancel_emergency_alert != 0, d->allow_emergency_private_call != 0,
-            d->allow_adhoc_group_call != 0);
+            d->allow_adhoc_group_call != 0, d->allow_cancel_group_emergency != 0, d->allow_cancel_imminent_peril != 0);
 
     private static ServiceConfigDoc ToManaged(cimsue_service_config_doc_t* d) =>
         new(Utf8.Str(d->etag), d->not_modified != 0, Utf8.Str(d->domain), d->num_levels_group_hierarchy, d->num_levels_user_hierarchy,
             Utf8.Str(d->rp_emergency), Utf8.Str(d->rp_imminent_peril), Utf8.Str(d->rp_normal));
+
+    private static UeInitConfigDoc ToManaged(cimsue_ue_init_config_doc_t* d) =>
+        new(Utf8.Str(d->etag), d->not_modified != 0, Utf8.Str(d->domain), Utf8.Str(d->mcptt_server_uri), Utf8.Str(d->mcdata_server_uri));
 
     private static ServiceProfile ToManaged(cimsue_service_profile_t* s)
     {

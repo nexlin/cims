@@ -174,6 +174,12 @@ data class AccountConfig(
     val mcdataMsrp: Boolean = false,
     /** MCPTT 그룹 영상 — 자동 수락하는 착신 INVITE 의 m=video(video_enabled 그룹)를 영상까지 받는다. 끄면 음성만. */
     val mcpttVideo: Boolean = false,
+    /** 참여 MCPTT 기능 PSI — 긴급 경보 Request-URI(TS 24.379 §12.1.1.1 8)). 정본 = ue-init-config [UeInitConfigDoc.mcpttServerUri]
+     *  (TS 24.484 §7.2). 비면 그룹 URI(옛 서버 전환기). */
+    val mcpttServerUri: String = "",
+    /** 참여 MCData 기능 PSI — SDS disposition 통지 Request-URI(TS 24.282 §12.2.1.1). 정본 = [UeInitConfigDoc.mcdataServerUri].
+     *  비면 원 발신자 AoR 로 곧장(CSP 0.2.180 전 서버 전환기). */
+    val mcdataServerUri: String = "",
 ) {
     internal fun toJni(): JniAccountConfig = JniAccountConfig().also {
         it.serverHost = serverHost; it.serverPort = serverPort
@@ -191,6 +197,7 @@ data class AccountConfig(
         it.rpEmergency = rpEmergency; it.rpImminentPeril = rpImminentPeril; it.rpNormal = rpNormal
         it.maxSdsCplaneBytes = maxSdsCplaneBytes; it.mcdataMsrp = mcdataMsrp
         it.mcpttVideo = mcpttVideo
+        it.mcpttServerUri = mcpttServerUri; it.mcdataServerUri = mcdataServerUri
     }
 }
 

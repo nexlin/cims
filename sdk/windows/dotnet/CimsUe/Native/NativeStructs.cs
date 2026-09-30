@@ -58,6 +58,7 @@ internal unsafe struct cimsue_account_config_t
     public int max_sds_cplane_bytes;
     public int mcdata_msrp;
     public byte* mcptt_server_uri;
+    public byte* mcdata_server_uri;
 }
 
 [StructLayout(LayoutKind.Sequential)]
@@ -596,6 +597,8 @@ internal unsafe struct cimsue_user_profile_doc_t
     public int allow_cancel_emergency_alert;
     public int allow_emergency_private_call;
     public int allow_adhoc_group_call;
+    public int allow_cancel_group_emergency;
+    public int allow_cancel_imminent_peril;
 }
 
 [StructLayout(LayoutKind.Sequential)]
@@ -612,6 +615,16 @@ internal unsafe struct cimsue_service_config_doc_t
 }
 
 [StructLayout(LayoutKind.Sequential)]
+internal unsafe struct cimsue_ue_init_config_doc_t
+{
+    public byte* etag;
+    public int not_modified;
+    public byte* domain;
+    public byte* mcptt_server_uri;
+    public byte* mcdata_server_uri;
+}
+
+[StructLayout(LayoutKind.Sequential)]
 internal struct cimsue_capabilities_t
 {
     public int user_profile_known;
@@ -624,6 +637,8 @@ internal struct cimsue_capabilities_t
     public int cancel_emergency_alert;
     public int adhoc_group_call;
     public int max_affiliations_n2;
+    public int cancel_group_emergency;
+    public int cancel_imminent_peril;
 }
 
 /// <summary>cimsue_struct_id_t — ABI 자기검사용 구조체 id (헤더와 같은 순서).</summary>
@@ -635,5 +650,6 @@ internal enum cimsue_struct_id_t
     DISPATCH_MEMBER, DISPATCH_TARGET, GROUP_MEMBER, GROUP_DOC, HTTP_RESULT, TLS_PEER_EXPIRY, FD_FILE, FD_UPLOAD,
     QUALITY_DIRECTION, CALL_QUALITY,
     MCPTT_CONDITION, EMERGENCY_ALERT, VIDEO_DEVICE_INFO, CMS_ENTRY, USER_PROFILE_DOC, SERVICE_CONFIG_DOC, CAPABILITIES,
+    UE_INIT_CONFIG_DOC,
     COUNT_,
 }

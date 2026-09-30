@@ -30,6 +30,7 @@ using namespace cimsue;
 %ignore cimsue::GroupDoc::parse(const std::string&, GroupDoc&, std::string*);
 %ignore cimsue::UserProfileDoc::parse(const std::string&, UserProfileDoc&, std::string*);
 %ignore cimsue::ServiceConfigDoc::parse(const std::string&, ServiceConfigDoc&, std::string*);
+%ignore cimsue::UeInitConfigDoc::parse(const std::string&, UeInitConfigDoc&, std::string*);
 %ignore cimsue::CscClient::parseProfile(const std::string&, Profile&, std::string*);
 // 전송 주입(http::ITransport)은 **아직 어느 플랫폼 SDK 에서도 열려 있지 않다** — 인터페이스가 내부 헤더
 // (src/http/https_client.h, "libcimsue 내부")에 있고 C API 에도 진입점이 없다(cimsue_csc_create 는 endpoint

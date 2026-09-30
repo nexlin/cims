@@ -165,7 +165,9 @@ struct UserProfileDoc {
     int maxAffiliationsN2 = -1;                // OnNetwork/MaxAffiliationsN2 (-1 = 미기재)
     bool allowPrivateCall = true;              // allow-private-call (§8.3.2.7 — 1:1 통화 인가)
     bool allowEmergencyGroupCall = true;       // allow-emergency-group-call
+    bool allowCancelGroupEmergency = true;     // allow-cancel-group-emergency (§8.3.2.1 11)xiv) — 그룹의 진행 중 긴급 해제)
     bool allowImminentPerilCall = true;        // allow-imminent-peril-call
+    bool allowCancelImminentPeril = true;      // allow-cancel-imminent-peril (§8.3.2.1 11)xvii) — 진행 중 임박 해제)
     bool allowActivateEmergencyAlert = true;   // allow-activate-emergency-alert
     bool allowCancelEmergencyAlert = true;     // allow-cancel-emergency-alert
     bool allowEmergencyPrivateCall = true;     // allow-emergency-private-call
@@ -191,13 +193,30 @@ struct ServiceConfigDoc {
     CIMSUE_API static bool parse(const std::string& xml, ServiceConfigDoc& out, std::string* err = nullptr);
 };
 
+/** MCS UE initial configuration(TS 24.484 §7.2, `application/vnd.3gpp.mcptt-ue-init-config+xml`) — 로그인 전 부트스트랩 문서.
+ *  코어가 쓰는 것은 참여 기능 PSI 둘이다 — `<on-network><anyExt>` 의 `*-Service-Details/Server-URI`(§7.2.2.1 10)·14)).
+ *  서비스를 광고하지 않으면 그 요소가 없다(빈 값) — 계정의 해당 PSI 도 비워 둔다(AccountConfig.mcpttServerUri·mcdataServerUri). */
+struct UeInitConfigDoc {
+    std::string etag;
+    bool notModified = false;                  // fetchUeInitConfig 이 304 를 받았다
+    std::string domain;                        // mcptt-UE-initial-configuration@domain
+    std::string mcpttServerUri;                // MCPTT-Service-Details/Server-URI — 참여 MCPTT 기능 PSI
+    std::string mcdataServerUri;               // MCData-Service-Details/Server-URI — 참여 MCData 기능 PSI
+    CIMSUE_API static bool parse(const std::string& xml, UeInitConfigDoc& out, std::string* err = nullptr);
+};
+constexpr const char* kCtUeInitConfig = "application/vnd.3gpp.mcptt-ue-init-config+xml";
+
 /** 정책 게이트 스냅샷(ue_sdk.md §4.2) — user profile ruleset 인가. **받지 못한 문서는 허용**으로 둔다(게이트를 걸지 않는다).
  *  UX 선차단(버튼 숨김·안내)용이며 최종 판정은 서버다. service config 는 인가를 담지 않는다(TS 24.484 §8.4) — 받았는지만 기록. */
 struct Capabilities {
     bool userProfileKnown = false, serviceConfigKnown = false;
     bool privateCall = true;                   // up.allow-private-call
     bool emergencyGroupCall = true;            // up.allow-emergency-group-call
+    /** up.allow-cancel-group-emergency — 그룹 긴급 해제의 인가(TS 24.379 §6.2.8.1.7 은 local policy, 서버 판정 = 개시자 ∨ 이 값,
+     *  §6.3.3.1.13.4). 앱은 «내가 올린 조건(McpttCondition.mine)» 과 OR 해서 [긴급 해제] 를 연다. */
+    bool cancelGroupEmergency = true;
     bool imminentPerilCall = true;             // up.allow-imminent-peril-call
+    bool cancelImminentPeril = true;           // up.allow-cancel-imminent-peril (§6.2.8.1.10 — 개시자 예외 없음)
     bool emergencyPrivateCall = true;          // up.allow-private-call ∧ up.allow-emergency-private-call
     bool emergencyAlert = true;                // up.allow-activate-emergency-alert
     bool cancelEmergencyAlert = true;          // up.allow-cancel-emergency-alert
@@ -257,6 +276,13 @@ public:
     /** service-config GET + 해석 — fetchUserProfile 과 같은 규약. */
     Result fetchServiceConfig(const std::string& accessToken, const std::string& userUri, const std::string& etag,
                               ServiceConfigDoc& out);
+    /** UE initial configuration GET + 해석 — XCAP URI = `<XCAP root>/org.3gpp.mcptt.ue-init-config/users/sip:<MCS UE ID>/<MCS UE ID>`
+     *  (TS 24.484 §7.2.1.1). mcsUeId = 단말 instance ID(AccountConfig.instanceId, 예 urn:uuid:…). 로그인 전 문서라 토큰 없이 부른다.
+     *  304·해석 실패 규약은 fetchUserProfile 과 같다. */
+    Result fetchUeInitConfig(const std::string& mcsUeId, const std::string& etag, UeInitConfigDoc& out);
+    static std::string ueInitConfigPath(const std::string& mcsUeId) {
+        return "/org.3gpp.mcptt.ue-init-config/users/" + enc("sip:" + mcsUeId) + "/" + enc(mcsUeId);
+    }
 
     // ── GMS 그룹 관리(TS 24.481 — 그룹 생성·수정·삭제 주체 = authorized user, XCAP PUT/DELETE, PKCE 토큰) ──
     /** 그룹 문서 GET → GroupDoc(etag 포함). userUri 는 자기 XCAP 트리(토큰 mcptt_id). */

@@ -546,9 +546,14 @@ class Account internal constructor(private val ue: CimsUe, val id: Int) {
     suspend fun sendFd(peer: String, file: FdFile): CimsResult<SdsSend> =
         ue.command { SdsSend.of(ue.jni.sendFd(id, peer, file.toJni())) }
 
-    /** SDS disposition 통지(notifType 1~4). */
-    suspend fun sendSdsNotification(peer: String, convId: String, msgId: String, notifType: Int): CimsResult<SdsSend> =
-        ue.command { SdsSend.of(ue.jni.sendSdsNotification(id, peer, convId, msgId, notifType)) }
+    /**
+     * SDS disposition 통지(TS 24.282 §12.2.1.1, notifType 1~4) — peer = 받은 SDS 의 `fromUri`(mcdata-calling-user-id),
+     * groupUri = 받은 SDS 의 `groupUri`(mcdata-calling-group-id, 1:1 이면 빈 값). 계정 `mcdataServerUri` 가 있으면 규격형
+     * (Request-URI = PSI · resource-lists · 그룹 id), 없으면 원 발신자 직행.
+     */
+    suspend fun sendSdsNotification(peer: String, convId: String, msgId: String, notifType: Int,
+                                    groupUri: String = ""): CimsResult<SdsSend> =
+        ue.command { SdsSend.of(ue.jni.sendSdsNotification(id, peer, convId, msgId, notifType, groupUri)) }
 
     override fun toString(): String = "Account#$id"
 }

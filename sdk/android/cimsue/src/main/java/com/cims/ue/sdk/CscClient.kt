@@ -27,6 +27,7 @@ import com.cims.ue.sdk.jni.Profile as JniProfile
 import com.cims.ue.sdk.jni.ServiceConfigDoc as JniServiceConfigDoc
 import com.cims.ue.sdk.jni.StringVector
 import com.cims.ue.sdk.jni.TokenSet as JniTokenSet
+import com.cims.ue.sdk.jni.UeInitConfigDoc as JniUeInitConfigDoc
 import com.cims.ue.sdk.jni.UserProfileDoc as JniUserProfileDoc
 import com.cims.ue.sdk.jni.XcapDoc as JniXcapDoc
 
@@ -226,6 +227,10 @@ data class UserProfileDoc(
     val allowEmergencyPrivateCall: Boolean = true, val allowAdhocGroupCall: Boolean = true,
     /** allow-private-call (§8.3.2.7). */
     val allowPrivateCall: Boolean = true,
+    /** allow-cancel-group-emergency (§8.3.2.1 11)xiv)) — 서버 판정 = 개시자 ∨ 이 값(TS 24.379 §6.3.3.1.13.4). */
+    val allowCancelGroupEmergency: Boolean = true,
+    /** allow-cancel-imminent-peril (11)xvii)) — 개시자 예외 없음(§6.2.8.1.10). */
+    val allowCancelImminentPeril: Boolean = true,
 ) {
     internal fun toJni(): JniUserProfileDoc = JniUserProfileDoc().also { d ->
         d.etag = etag; d.userUri = userUri
@@ -238,6 +243,7 @@ data class UserProfileDoc(
         d.allowActivateEmergencyAlert = allowActivateEmergencyAlert; d.allowCancelEmergencyAlert = allowCancelEmergencyAlert
         d.allowEmergencyPrivateCall = allowEmergencyPrivateCall; d.allowAdhocGroupCall = allowAdhocGroupCall
         d.allowPrivateCall = allowPrivateCall
+        d.allowCancelGroupEmergency = allowCancelGroupEmergency; d.allowCancelImminentPeril = allowCancelImminentPeril
     }
     internal companion object {
         fun of(d: JniUserProfileDoc) = UserProfileDoc(d.etag, d.userUri,
@@ -246,7 +252,21 @@ data class UserProfileDoc(
             d.groups.let { v -> List(v.size) { v[it] } }, d.implicitAffiliations.let { v -> List(v.size) { v[it] } },
             d.maxAffiliationsN2.takeIf { it >= 0 },
             d.allowEmergencyGroupCall, d.allowImminentPerilCall, d.allowActivateEmergencyAlert,
-            d.allowCancelEmergencyAlert, d.allowEmergencyPrivateCall, d.allowAdhocGroupCall, d.allowPrivateCall)
+            d.allowCancelEmergencyAlert, d.allowEmergencyPrivateCall, d.allowAdhocGroupCall, d.allowPrivateCall,
+            d.allowCancelGroupEmergency, d.allowCancelImminentPeril)
+    }
+}
+
+/**
+ * MCS UE initial configuration(TS 24.484 §7.2) — 로그인 전 문서. 코어가 쓰는 것은 참여 기능 PSI(`<anyExt>` 의 *-Service-Details/Server-URI).
+ * 광고하지 않은 서비스는 빈 값 — [AccountConfig.mcpttServerUri]·[AccountConfig.mcdataServerUri] 에 그대로 넣는다.
+ */
+data class UeInitConfigDoc(
+    val etag: String = "", val domain: String = "",
+    val mcpttServerUri: String = "", val mcdataServerUri: String = "",
+) {
+    internal companion object {
+        fun of(d: JniUeInitConfigDoc) = UeInitConfigDoc(d.etag, d.domain, d.mcpttServerUri, d.mcdataServerUri)
     }
 }
 
@@ -285,6 +305,10 @@ data class Capabilities(
     val adhocGroupCall: Boolean = true,
     /** 0 = 미지정. N2 는 경고만 한다(강제하지 않는다). */
     val maxAffiliationsN2: Int = 0,
+    /** up.allow-cancel-group-emergency — 앱은 «내가 올린 조건(McpttCondition.mine)» 과 OR 해서 [긴급 해제] 를 연다. */
+    val cancelGroupEmergency: Boolean = true,
+    /** up.allow-cancel-imminent-peril. */
+    val cancelImminentPeril: Boolean = true,
 ) {
     companion object {
         /** null = 그 문서를 아직 못 받음. */
@@ -293,7 +317,7 @@ data class Capabilities(
             val c = JniCapabilities.of(userProfile?.toJni(), serviceConfig?.toJni())
             return Capabilities(c.userProfileKnown, c.serviceConfigKnown, c.privateCall, c.emergencyGroupCall,
                 c.imminentPerilCall, c.emergencyPrivateCall, c.emergencyAlert, c.cancelEmergencyAlert,
-                c.adhocGroupCall, c.maxAffiliationsN2)
+                c.adhocGroupCall, c.maxAffiliationsN2, c.cancelGroupEmergency, c.cancelImminentPeril)
         }
     }
 }
@@ -433,6 +457,15 @@ class CscClient(
     suspend fun fetchUserProfile(accessToken: String, userUri: String, etag: String = ""): CimsResult<UserProfileDoc?> = call {
         val out = JniUserProfileDoc()
         CimsResult.of(jni.fetchUserProfile(accessToken, userUri, etag, out), if (out.notModified) null else UserProfileDoc.of(out))
+    }
+
+    /**
+     * UE initial configuration 조회 + 해석(TS 24.484 §7.2.1.1) — mcsUeId = 단말 instance ID(`AccountConfig.instanceId`, urn:uuid:…).
+     * 로그인 전 문서라 토큰 없이 부른다. **값 null = 304**. 해석 실패 code -2.
+     */
+    suspend fun fetchUeInitConfig(mcsUeId: String, etag: String = ""): CimsResult<UeInitConfigDoc?> = call {
+        val out = JniUeInitConfigDoc()
+        CimsResult.of(jni.fetchUeInitConfig(mcsUeId, etag, out), if (out.notModified) null else UeInitConfigDoc.of(out))
     }
 
     /** CMS service-config 조회 + 해석 — [fetchUserProfile] 과 같은 규약. */

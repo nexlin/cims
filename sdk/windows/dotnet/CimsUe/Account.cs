@@ -165,11 +165,13 @@ public sealed unsafe class Account
     private static cimsue_fd_file_t ToNative(FdFile f, NativeStrings s) =>
         new() { url = s.Add(f.Url), name = s.Add(f.Name), type = s.Add(f.Type), size = f.Size };
 
-    /// <summary>SDS disposition 통지(1:1 대상 peer bare 번호). notifType 1~4. Value = 요청 token.</summary>
-    public Result<long> SendSdsNotification(string peer, string convId, string msgId, int notifType)
+    /// <summary>SDS disposition 통지(TS 24.282 §12.2.1.1) — peer = 받은 SDS 의 <see cref="SdsMessage.FromUri"/>(mcdata-calling-user-id),
+    /// groupUri = 받은 SDS 의 <see cref="SdsMessage.GroupUri"/>(mcdata-calling-group-id, 1:1 이면 null). notifType 1~4.
+    /// 계정 <see cref="AccountConfig.McdataServerUri"/> 가 있으면 규격형(PSI·resource-lists), 없으면 원 발신자 직행. Value = 요청 token.</summary>
+    public Result<long> SendSdsNotification(string peer, string convId, string msgId, int notifType, string? groupUri = null)
     {
         long token = -1;
-        int st = cimsue_engine_send_sds_notification(Engine.Handle, Id, peer, convId, msgId, notifType, &token);
+        int st = cimsue_engine_send_sds_notification(Engine.Handle, Id, peer, convId, msgId, groupUri, notifType, &token);
         return st != 0 ? Result<long>.Fail(st, Engine.LastError()) : Result<long>.Success(token);
     }
 

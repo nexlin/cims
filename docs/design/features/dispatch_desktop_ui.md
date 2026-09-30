@@ -838,7 +838,7 @@ windows/dispatch-desktop/                 DispatchDesktop.csproj — net10.0-win
   진행 중에 걸린 조건의 배너 개시자는 비어 있다(§3.2, [ue_sdk.md §11](ue_sdk.md)).
 - **[긴급 해제] 자격 = user profile `allow-cancel-group-emergency`(코어·앱)** — 서버는 긴급 해제를 개시자 ∨ 이 값(TS 24.484 ruleset, 관제사에게 켠다)으로
   받고 비인가·다른 긴급 사용자 송출 중이면 403 + `emergency-ind` true 다(TS 24.379 §6.3.3.1.13.4·§10.1.1.4.7 7)·7a), [mcptt_emergency_modes.md §4.2](mcptt_emergency_modes.md)).
-  코어가 user profile 에서 이 요소(와 `allow-cancel-imminent-peril`)를 읽어 내면([ue_sdk.md §11](ue_sdk.md)) `CanCancelCondition` 을 «내 조건 ∨ 이 값» 으로 넓히고,
+  코어는 이 요소(와 `allow-cancel-imminent-peril`)를 `Capabilities.CancelGroupEmergency`(·`CancelImminentPeril`)로 낸다([ue_sdk.md §4.2](ue_sdk.md)) — 앱이 `CanCancelCondition` 을 «내 조건 ∨ 이 값» 으로 넓히고,
   403 은 조건 이벤트 `Denied` 의 해제 거절 문구로 적는다(코어는 이미 이전 값으로 되돌린다). 청취 중인 채널도 서버가 조건 재광고를 청취 leg 에 보내므로
   타 채널 행·배너가 격상·해제를 따라간다(앱 변경 없음). 경보 취소는 서버가 `allow-cancel-emergency-alert` 로 판정한다(비인가 403 + `alert-ind` true) — 앱의
   선차단과 같은 값이다.

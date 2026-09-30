@@ -23,6 +23,7 @@ constexpr int kDispReqDelivery = 0x01;
 constexpr const char* kCtInfo = "application/vnd.3gpp.mcdata-info+xml";
 constexpr const char* kCtSignalling = "application/vnd.3gpp.mcdata-signalling";
 constexpr const char* kCtPayload = "application/vnd.3gpp.mcdata-payload";
+constexpr const char* kCtResourceLists = "application/resource-lists+xml";
 
 /** 그룹 스레드 conversation ID — 그룹당 결정적 UUID(Java UUID.nameUUIDFromBytes("cims-mcdata:<groupId>") 호환). */
 std::string conversationIdOf(const std::string& groupId);
@@ -44,10 +45,14 @@ Body buildGroupFd(const std::string& groupUri, const FdFile& file, const std::st
 /** 1:1 FD 발신 본문(request-type one-to-one-fd). peerUri = 받는 사람. */
 Body buildOneToOneFd(const std::string& peerUri, const FdFile& file, const std::string& convId,
                      const std::string& msgId, int64_t timeSec);
-/** SDS NOTIFICATION(전달/읽음 통지) 본문 — 원 발신자 1:1 대상. */
-Body buildNotification(const std::string& convId, const std::string& msgId, int notifType, int64_t timeSec);
+/** SDS NOTIFICATION(전달/읽음 통지) 본문. targetUri 가 있으면 규격형(TS 24.282 §12.2.1.1 — 참여 기능 PSI 로 보낸다):
+ *  [mcdata-info <mcdata-calling-group-id> — groupUri 가 있을 때] + SDS NOTIFICATION + resource-lists(entry = targetUri).
+ *  targetUri 가 비면 SDS NOTIFICATION 한 파트(원 발신자 AoR 로 곧장 보내는 전환기 형식). */
+Body buildNotification(const std::string& convId, const std::string& msgId, int notifType, int64_t timeSec,
+                       const std::string& targetUri = std::string(), const std::string& groupUri = std::string());
 
-/** multipart/mixed MCData 본문 파싱 — mcdata-signalling 파트가 없으면 false. groupUri 는 그룹 request-type 일 때만 채운다. */
+/** multipart/mixed MCData 본문 파싱 — mcdata-signalling 파트가 없으면 false. groupUri = <mcdata-calling-group-id>, 없으면 그룹
+ *  request-type 의 request-uri. fromUri = <mcdata-calling-user-id>(없으면 빈 값 — 호출자가 From 으로 채운다). */
 bool parse(const std::string& contentType, const std::string& body, SdsMessage& out);
 
 // 유틸(시험용 공개)

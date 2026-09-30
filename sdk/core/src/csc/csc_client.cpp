@@ -290,6 +290,21 @@ Result CscClient::fetchServiceConfig(const std::string& accessToken, const std::
     return Result::success();
 }
 
+Result CscClient::fetchUeInitConfig(const std::string& mcsUeId, const std::string& etag, UeInitConfigDoc& out) {
+    if (mcsUeId.empty()) return Result::fail(-2, "ue-init-config: empty MCS UE ID");
+    // 로그인 전 문서(TS 24.484 §7.2.1.1) — Authorization 없이
+    std::map<std::string, std::string> h{{"Accept", kCtUeInitConfig}};
+    if (!etag.empty()) h["If-None-Match"] = etag;
+    http::Response r = impl_->request("GET", impl_->ep.baseUrl() + ueInitConfigPath(mcsUeId), h, "");
+    if (r.status == 304) { out.notModified = true; return Result::success(); }
+    if (r.status / 100 != 2) return httpFail(r, "ue-init-config");
+    std::string err;
+    UeInitConfigDoc d; d.etag = http::header(r, "etag");
+    if (!UeInitConfigDoc::parse(r.body, d, &err)) return Result::fail(-2, "ue-init-config: " + err);
+    out = d;
+    return Result::success();
+}
+
 Result CscClient::putGroup(const std::string& accessToken, const std::string& userUri, const GroupDoc& doc, const std::string& ifMatch, GroupDoc& out) {
     if (doc.uri.empty()) return Result::fail(-2, "group uri required");
     std::map<std::string, std::string> h{{"Authorization", "Bearer " + accessToken}, {"Content-Type", kCtGroupDoc}, {"Accept", kCtGroupDoc}};

@@ -102,6 +102,10 @@ struct AccountConfig {
     /** 참여 MCPTT 기능의 PSI — ue-init-config `<anyExt><MCPTT-Service-Details><Server-URI>`(TS 24.484 §7.2.2.3).
      *  긴급 경보 MESSAGE 의 Request-URI(TS 24.379 §12.1.1.1 8)). 비면 그룹 URI 로 보낸다(CSP 0.2.166 전 서버와의 전환기). */
     std::string mcpttServerUri;
+    /** 참여 MCData 기능의 PSI — ue-init-config `<anyExt><MCData-Service-Details><Server-URI>`(TS 24.484 §7.2.2.1 14)).
+     *  SDS disposition 통지 MESSAGE 의 Request-URI(TS 24.282 §6.2.4.1 4)·§12.2.1.1). 비면 통지를 원 발신자 AoR 로 곧장 보낸다
+     *  (CSP 0.2.180 전 서버와의 전환기 — 그 서버는 PSI 로 온 통지를 상관하지 못한다). */
+    std::string mcdataServerUri;
     /** MCPTT 그룹 영상(ptt_flows.md 영상 협상) — 자동 수락(autoAnswerMcptt)하는 착신 INVITE 가 m=video 를 제안하면 영상까지
      *  받는다(서버는 video_enabled 그룹에서만 제안한다). false 면 port 0 으로 거절 — 음성만. 개시는 GroupCallOptions.video. */
     bool mcpttVideo = false;
@@ -347,8 +351,11 @@ struct RosterEntry {
 /** MCData SDS (TS 24.282) — 수신 메시지·disposition 통지·FD. */
 struct SdsMessage {
     int accountId = -1;
+    /** 보낸 MCData 사용자 — mcdata-info `<mcdata-calling-user-id>`(TS 24.282 §12.2.1.1 — 통지 대상), 없으면 From. */
     std::string fromUri;
-    std::string groupUri;             // 그룹 SDS·FD 의 mcdata-info request-uri. 1:1(request-type one-to-one-*)은 빈 값 — request-uri 가 받는 사람(나)이다
+    /** 그룹 SDS·FD 의 그룹 — mcdata-info `<mcdata-calling-group-id>`(§12.2.1.1), 없으면 그룹 request-type 의 request-uri.
+     *  1:1(request-type one-to-one-*)은 빈 값 — request-uri 가 받는 사람(나)이다. */
+    std::string groupUri;
     std::string convId, msgId;        // UUID hex32
     int64_t timeSec = 0;
     int dispositionReq = 0;           // 0 없음 / 1 delivery / 2 read / 3 both

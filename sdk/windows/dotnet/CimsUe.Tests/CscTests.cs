@@ -247,7 +247,8 @@ public class CscTests
     {
         var up = UserProfileDoc.Parse("""
             <mcptt-user-profile XUI-URI="tel:+82500000001"><ruleset><actions>
-            <allow-cancel-emergency-alert>false</allow-cancel-emergency-alert></actions></ruleset>
+            <allow-cancel-emergency-alert>false</allow-cancel-emergency-alert>
+            <allow-cancel-group-emergency>false</allow-cancel-group-emergency></actions></ruleset>
             <Common><MCPTT-group-call><EmergencyAlert><entry entry-info="DedicatedGroup"><uri-entry>sip:g002@ptt</uri-entry></entry></EmergencyAlert></MCPTT-group-call></Common>
             <OnNetwork><MCPTTGroupInfo><entry><uri-entry>sip:g1@ptt</uri-entry></entry></MCPTTGroupInfo></OnNetwork></mcptt-user-profile>
             """);
@@ -258,11 +259,15 @@ public class CscTests
         Assert.Equal("DedicatedGroup", up.Value.EmergencyAlertGroup.Mode);
         Assert.False(up.Value.AllowCancelEmergencyAlert);
         Assert.True(up.Value.AllowActivateEmergencyAlert);          // 요소 없음 = 허용
+        Assert.False(up.Value.AllowCancelGroupEmergency);
+        Assert.True(up.Value.AllowCancelImminentPeril);
         var k = Capabilities.Of(up.Value, null);
         Assert.True(k.UserProfileKnown);
         Assert.False(k.ServiceConfigKnown);
         Assert.False(k.CancelEmergencyAlert);
         Assert.True(k.EmergencyAlert);
+        Assert.False(k.CancelGroupEmergency);                       // 앱은 «내가 올린 조건» 과 OR (TS 24.379 §6.3.3.1.13.4)
+        Assert.True(k.CancelImminentPeril);
         var none = Capabilities.Of(null, null);
         Assert.False(none.UserProfileKnown);
         Assert.True(none.CancelEmergencyAlert);                     // 못 받은 문서는 허용
@@ -278,6 +283,17 @@ public class CscTests
         Assert.Equal("mcpttp.14", sc.Value.RpEmergency);
         Assert.Equal("", sc.Value.RpNormal);
         Assert.True(Capabilities.Of(up.Value, sc.Value).ServiceConfigKnown);
+
+        var ui = UeInitConfigDoc.Parse("""
+            <mcptt-UE-initial-configuration domain="ptt.example.org"><on-network><anyExt>
+            <MCPTT-Service-Details><Server-URI>sip:mcptt_psi@ptt.example.org</Server-URI></MCPTT-Service-Details>
+            <MCData-Service-Details><Server-URI>sip:mcdata_psi@ptt.example.org</Server-URI></MCData-Service-Details>
+            </anyExt></on-network></mcptt-UE-initial-configuration>
+            """);
+        Assert.True(ui.Ok, ui.Reason);
+        Assert.Equal("sip:mcptt_psi@ptt.example.org", ui.Value.McpttServerUri);
+        Assert.Equal("sip:mcdata_psi@ptt.example.org", ui.Value.McdataServerUri);
+        Assert.False(UeInitConfigDoc.Parse("<mcptt-user-profile/>").Ok);
         Assert.False(string.IsNullOrEmpty(Engine.ToText(ConditionCause.Denied)));
     }
 }

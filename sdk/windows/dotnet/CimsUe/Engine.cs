@@ -381,6 +381,7 @@ public sealed unsafe class Engine : IDisposable
         n.max_sds_cplane_bytes = a.MaxSdsCplaneBytes;
         n.mcdata_msrp = B(a.McdataMsrp);
         n.mcptt_server_uri = s.Add(a.McpttServerUri);
+        n.mcdata_server_uri = s.Add(a.McdataServerUri);
         return n;
     }
 
@@ -401,7 +402,7 @@ public sealed unsafe class Engine : IDisposable
             McpttId = Opt(n->mcptt_id), AutoAnswerMcptt = n->auto_answer_mcptt != 0, InstanceId = Opt(n->instance_id),
             McpttClientId = Opt(n->mcptt_client_id), RpEmergency = Opt(n->rp_emergency), RpImminentPeril = Opt(n->rp_imminent_peril),
             RpNormal = Opt(n->rp_normal), MaxSdsCplaneBytes = n->max_sds_cplane_bytes, McdataMsrp = n->mcdata_msrp != 0,
-            McpttServerUri = Opt(n->mcptt_server_uri),
+            McpttServerUri = Opt(n->mcptt_server_uri), McdataServerUri = Opt(n->mcdata_server_uri),
         };
     }
 

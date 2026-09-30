@@ -271,7 +271,7 @@ MESSAGE(호 없는 그룹 긴급 상태 해제, §12.1.3.3)도 같은 곳으로 
   | 경보 수신 확인 | 제어 기능이 발신 단말에 `<alert-ind-rcvd>`·`<emergency-ind-rcvd>` MESSAGE(§6.3.3.1.20 — 경보·경보 취소·긴급 상태 해제 수신 확인) | 보내지 않는다(200 OK 만) | 후속 |
   | 그룹 긴급 상태의 수명 | 명시 해제·TNG2 만료까지 유지 — 호가 끝나도 남는다(호 없는 해제 §12.1.3.3·호 없는 TNG2 만료 §6.3.3.1.16 2) 가 전제) | 그룹 세션 수명 — 세션 종료(`RemoveGroupSesId`)가 지운다 | TNG2 가 기본값 없이(0 = 없음) 쓰이는 동안은 남은 상태가 다음 호에 긴급 우선순위를 물려준다. 상태 영속은 TNG2 기본값을 정한 뒤 |
   | 임박 해제 거절 본문 | §10.1.1.4.8 2)b) 원문은 403 에 `<imminentperil-ind>` **false** | **true**(현재 상태) | 단말 절차 §10.1.1.2.1.5(4xx 에 `imminentperil-ind` true 또는 요소 없음 = 상태 유지)와 긴급 해제 거절(§10.1.1.4.7 7)b) true)에 맞춘다 — 원문대로면 단말이 해제된 것으로 볼 수 있다 |
-  | 조건 조합 검증 | §6.3.3.1.17 — 허용되지 않는 지시자 조합은 403 + Warning `150 invalid combinations of data received in MIME body` | 검증하지 않는다(요소별로 판정) | 단말 SDK 코어가 임박→긴급 상향 re-INVITE 에 `emergency-ind` true 와 `imminentperil-ind` false 를 함께 싣는다(§6.3.3.1.17 위반) — SDK 정합 뒤 |
+  | 조건 조합 검증 | §6.3.3.1.17 — 허용되지 않는 지시자 조합은 403 + Warning `150 invalid combinations of data received in MIME body` | 검증하지 않는다(요소별로 판정) | 단말 SDK 코어는 규격 조합으로 보낸다(긴급 = `emergency-ind` true + `alert-ind`, 임박 지시자 없음 — ue_sdk.md §4.2). 옛 SDK 단말(임박→긴급 상향에 `imminentperil-ind` false 동봉)이 남아 있는 동안은 검증을 켜면 그 단말의 상향이 403 150 이 된다 — 단말 전환 뒤 |
   | Resource-Priority 검증 | §10.1.1.4.7 5) — 긴급 값인데 긴급 지시자 없고 상태도 아니면 403 | 받은 Resource-Priority 를 보지 않는다 | 후속 |
   | 개시 INVITE 의 Warning 149 | 개시 INVITE 에 미인가 경보가 실리는 등 받아들이지 않은 부분은 200 + Warning 149 뒤 INFO(§6.3.3.1.18) | re-INVITE 만 한다 — 개시 INVITE 의 `<alert-ind>` 는 보지 않는다(경보는 단말이 별도 MESSAGE 로 먼저 보낸다, SDK·앱 SOS 절차) | 후속 |
 

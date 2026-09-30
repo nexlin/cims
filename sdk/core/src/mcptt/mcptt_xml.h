@@ -20,11 +20,13 @@ constexpr const char* kCtAffiliation = "application/vnd.3gpp.mcptt-affiliation-c
 constexpr const char* kCtConferenceInfo = "application/conference-info+xml";
 constexpr const char* kIcsiMcptt = "urn:urn-7:3gpp-service.ims.icsi.mcptt";
 
-/** mcptt-info (TS 24.379 §F.1). emergency/imminent: 0=미기재, 1=true, -1=false(명시 하향).
- *  broadcast = 일제 통화 개시 `<broadcast-ind>true`(§6.2.8.2) — session-type 은 prearranged 그대로. */
+/** mcptt-info (TS 24.379 §F.1). emergency/imminent/alert: 0=미기재, 1=true, -1=false(명시 하향).
+ *  broadcast = 일제 통화 개시 `<broadcast-ind>true`(§6.2.8.2) — session-type 은 prearranged 그대로.
+ *  지시자 조합(§6.3.3.1.17 — emergency-ind true 면 imminentperil-ind 없이 alert-ind 동반, imminentperil-ind 면 둘 다 없음)은
+ *  호출자가 맞춘다 — 이 함수는 받은 대로 싣는다. */
 std::string mcpttInfo(const std::string& sessionType, const std::string& requestUri,
                       const std::string& callingUserId, const std::string& callingGroupId,
-                      int emergency = 0, int imminentPeril = 0, bool broadcast = false);
+                      int emergency = 0, int imminentPeril = 0, bool broadcast = false, int alert = 0);
 /** resource-lists (애드혹 멤버). uri 는 tel:/sip: URI. */
 std::string resourceLists(const std::vector<std::string>& memberUris);
 /** affiliation-command (TS 24.379 §F.3). */

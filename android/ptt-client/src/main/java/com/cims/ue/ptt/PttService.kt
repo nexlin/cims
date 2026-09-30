@@ -558,7 +558,7 @@ class PttService : Service() {
                 // 발신자 미상(media plane 배포에 mcdata-info 가 없어 발신자 = 그룹)이면 통지 대상이 그룹이 되므로 회신 억제.
                 val notifiable = sender.isNotBlank() && !(m.mediaPlane && sender == gid)
                 if (notifiable && (m.dispositionReq and DISP_REQ_DELIVERY) != 0)
-                    c.sendSdsNotification(sender, m.convId, m.msgId, NOTIF_DELIVERED)
+                    c.sendSdsNotification(sender, m.convId, m.msgId, NOTIF_DELIVERED, m.groupUri)
             }
         }
     }

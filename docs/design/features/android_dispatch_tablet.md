@@ -1598,8 +1598,8 @@ Compose `@Preview`(Android Studio 설계 보기)는 설계 중 참고용일 뿐 
   `onSds(fd)` — 데스크톱 관제 앱이 쓴다). 태블릿 ④ 는 아직 글만 다루고 FD 알림 필드를 버린다. MSRP(media plane
   SDS)는 코어에 없다.
 - **[긴급 해제] 자격** — 서버는 긴급 해제를 개시자 ∨ user profile `allow-cancel-group-emergency` 로 받는다
-  ([mcptt_emergency_modes.md](mcptt_emergency_modes.md) §4.2). 코어가 그 요소를 읽어 내면([ue_sdk.md](ue_sdk.md) §11) 채널 조작 줄의
-  [긴급 해제]를 «내 조건 ∨ 이 값» 으로 넓힌다 — 데스크톱과 같은 과제다([dispatch_desktop_ui.md](dispatch_desktop_ui.md) §13).
+  ([mcptt_emergency_modes.md](mcptt_emergency_modes.md) §4.2). 코어는 그 요소를 `Capabilities.cancelGroupEmergency` 로 낸다([ue_sdk.md](ue_sdk.md) §4.2) —
+  채널 조작 줄의 [긴급 해제]를 «내 조건 ∨ 이 값» 으로 넓히는 것이 남았다(데스크톱과 같은 과제, [dispatch_desktop_ui.md](dispatch_desktop_ui.md) §13).
 - **망 전환 중의 통화 유지** — 등록 복구는 코어가 한다(§6.1). 진행 중 호는 건드리지 않는다 — re-INVITE 로 미디어를 새
   주소로 옮기는 호 유지는 서버 처리(VoLTE relay·MCPTT 세션)를 확인한 뒤 정한다([ue_sdk.md](ue_sdk.md) §11). 통화 중
   Wi-Fi ↔ LTE 전환에서 호가 이어지는지는 실기 미확인이다.

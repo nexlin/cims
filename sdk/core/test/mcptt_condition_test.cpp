@@ -14,6 +14,7 @@
 #include <cstdlib>
 #include <mutex>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "../src/mcptt/mcptt_xml.h"
@@ -163,6 +164,7 @@ TEST(McpttCondition, UpgradeDeniedConfirmedAndAdvertised) {
         ac.serverHost = "127.0.0.1"; ac.serverPort = srv.port; ac.transport = Transport::UDP;
         ac.domain = "ptt.test"; ac.msisdn = "+82500000001"; ac.authId = "450000000000001@ptt.test"; ac.password = "x";
         ac.instanceId = "urn:uuid:00000000-0000-4000-8000-000000000001";
+        ac.mcdataServerUri = "sip:mcdata_psi@ptt.test";                     // ue-init-config MCData-Service-Details/Server-URI
         int acc = eng.addAccount(ac);
         ASSERT_GE(acc, 0);
 
@@ -225,6 +227,44 @@ TEST(McpttCondition, UpgradeDeniedConfirmedAndAdvertised) {
         EXPECT_FALSE(l.conds[4].first.condition.mine);
         EXPECT_FALSE(eng.callInfo(callId).condition.emergency);
 
+        // ③b 임박 상향 → 임박 → 긴급 상향 — 지시자 조합(TS 24.379 §6.3.3.1.17): 임박은 긴급·경보 지시자 없이, 긴급은 alert-ind 를
+        //   동반하고 imminentperil-ind 는 싣지 않는다(§6.2.8.1.1 4) — 임박은 제어 기능이 내린다, §6.3.3.1.6 3)d))
+        std::this_thread::sleep_for(std::chrono::milliseconds(300));       // ③ 의 ACK 처리 전엔 pjsua 가 새 re-INVITE 를 거절한다
+        ASSERT_TRUE(eng.setCallCondition(callId, false, true).ok);
+        std::string ip = srv.recv("INVITE ");
+        ASSERT_FALSE(ip.empty());
+        EXPECT_NE(ip.find("<imminentperil-ind type=\"Normal\"><mcpttBoolean>true</mcpttBoolean></imminentperil-ind>"), std::string::npos);
+        EXPECT_EQ(ip.find("emergency-ind"), std::string::npos);
+        EXPECT_EQ(ip.find("alert-ind"), std::string::npos);
+        EXPECT_EQ(headerOf(ip, "Resource-Priority"), "mcpttp.8");
+        srv.reply(ip, 200, "OK", "application/sdp", sdp(4));
+        ASSERT_TRUE(l.wait([&] { return l.conds.size() >= 7; }));
+        EXPECT_EQ(l.conds[6].second, ConditionCause::Confirmed);
+        EXPECT_TRUE(l.conds[6].first.condition.imminentPeril);
+        ASSERT_TRUE(eng.setCallCondition(callId, true, false).ok);
+        std::string ie = srv.recv("INVITE ");
+        ASSERT_FALSE(ie.empty());
+        EXPECT_NE(ie.find("<emergency-ind type=\"Normal\"><mcpttBoolean>true</mcpttBoolean></emergency-ind>"), std::string::npos);
+        EXPECT_NE(ie.find("<alert-ind type=\"Normal\"><mcpttBoolean>false</mcpttBoolean></alert-ind>"), std::string::npos);
+        EXPECT_EQ(ie.find("imminentperil-ind"), std::string::npos);
+        EXPECT_EQ(headerOf(ie, "Resource-Priority"), "mcpttp.15");
+        srv.reply(ie, 200, "OK", "application/sdp", sdp(5));
+        ASSERT_TRUE(l.wait([&] { return l.conds.size() >= 9; }));
+        EXPECT_EQ(l.conds[8].second, ConditionCause::Confirmed);
+        EXPECT_TRUE(l.conds[8].first.condition.emergency);
+        EXPECT_FALSE(l.conds[8].first.condition.imminentPeril);
+        EXPECT_FALSE(eng.setCallCondition(callId, false, true).ok);         // 긴급 중 임박 상향 불가(§6.2.8.1.9 1))
+        // 긴급 해제 — emergency-ind false 만
+        ASSERT_TRUE(eng.setCallCondition(callId, false, false).ok);
+        std::string ce = srv.recv("INVITE ");
+        ASSERT_FALSE(ce.empty());
+        EXPECT_NE(ce.find("<emergency-ind type=\"Normal\"><mcpttBoolean>false</mcpttBoolean></emergency-ind>"), std::string::npos);
+        EXPECT_EQ(ce.find("imminentperil-ind"), std::string::npos);
+        EXPECT_EQ(headerOf(ce, "Resource-Priority"), "mcpttp.0");
+        srv.reply(ce, 200, "OK", "application/sdp", sdp(6));
+        ASSERT_TRUE(l.wait([&] { return l.conds.size() >= 11; }));
+        EXPECT_FALSE(l.conds[10].first.condition.emergency);
+
         // ④ 경보 발신 — ICSI 헤더·mcptt-client-id(instanceId 가 urn:uuid:)·Request-URI = 그룹
         int64_t tok = eng.sendEmergencyAlert(acc, "g001", true);
         ASSERT_GE(tok, 0);
@@ -257,6 +297,20 @@ TEST(McpttCondition, UpgradeDeniedConfirmedAndAdvertised) {
         EXPECT_EQ(l.alerts[0].userId, "+82500000014");
         EXPECT_EQ(l.alerts[0].alertInd, 1);
         EXPECT_FALSE(l.alerts[0].self);
+
+        // ⑥ SDS disposition 통지 규격형(TS 24.282 §12.2.1.1·§6.2.4.1) — Request-URI = 참여 MCData 기능 PSI
+        SdsSend dn = eng.sendSdsNotification(acc, "tel:+82500000014", std::string(32, 'a'), std::string(32, 'b'), 2, "tel:g001");
+        ASSERT_TRUE(dn.ok) << dn.reason;
+        std::string nm = srv.recv("MESSAGE ");
+        ASSERT_FALSE(nm.empty());
+        EXPECT_EQ(nm.rfind("MESSAGE sip:mcdata_psi@ptt.test ", 0), 0u);
+        const std::string ac2 = headerOf(nm, "Accept-Contact");
+        EXPECT_NE(ac2.find("+g.3gpp.mcdata.sds;require;explicit"), std::string::npos);
+        EXPECT_NE(ac2.find("3gpp-service.ims.icsi.mcdata.sds\";require;explicit"), std::string::npos);
+        EXPECT_EQ(headerOf(nm, "P-Preferred-Service"), "urn:urn-7:3gpp-service.ims.icsi.mcdata.sds");
+        EXPECT_NE(nm.find("<entry uri=\"tel:+82500000014\"/>"), std::string::npos);
+        EXPECT_NE(nm.find("<mcdataURI>tel:g001</mcdataURI></mcdata-calling-group-id>"), std::string::npos);
+        srv.reply(nm, 200, "OK");
 
         eng.hangup(callId);
         std::string bye = srv.recv("BYE ");

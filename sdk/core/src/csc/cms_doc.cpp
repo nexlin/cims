@@ -90,7 +90,9 @@ bool UserProfileDoc::parse(const std::string& xml, UserProfileDoc& out, std::str
     const std::string& r = rs.found ? rs.inner : std::string();
     d.allowPrivateCall = allowFlag(r, "allow-private-call");
     d.allowEmergencyGroupCall = allowFlag(r, "allow-emergency-group-call");
+    d.allowCancelGroupEmergency = allowFlag(r, "allow-cancel-group-emergency");
     d.allowImminentPerilCall = allowFlag(r, "allow-imminent-peril-call");
+    d.allowCancelImminentPeril = allowFlag(r, "allow-cancel-imminent-peril");
     d.allowActivateEmergencyAlert = allowFlag(r, "allow-activate-emergency-alert");
     d.allowCancelEmergencyAlert = allowFlag(r, "allow-cancel-emergency-alert");
     d.allowEmergencyPrivateCall = allowFlag(r, "allow-emergency-private-call");
@@ -133,6 +135,24 @@ bool ServiceConfigDoc::parse(const std::string& xml, ServiceConfigDoc& out, std:
     return true;
 }
 
+bool UeInitConfigDoc::parse(const std::string& xml, UeInitConfigDoc& out, std::string* err) {
+    Elem root = elem(xml, "mcptt-UE-initial-configuration");
+    if (!root.found) { if (err) *err = "no mcptt-UE-initial-configuration"; return false; }
+    UeInitConfigDoc d;
+    d.etag = out.etag;
+    d.domain = attrOf(root.openTag, "domain");
+    // *-Service-Details 는 <on-network><anyExt> 안(§7.2.2.1 9)~14)) — 요소 이름이 서비스별로 달라 on-network 안에서 바로 찾는다.
+    Elem on = elem(root.inner, "on-network");
+    if (on.found) {
+        Elem mcptt = elem(on.inner, "MCPTT-Service-Details");
+        if (mcptt.found) d.mcpttServerUri = elemText(mcptt.inner, "Server-URI");
+        Elem mcdata = elem(on.inner, "MCData-Service-Details");
+        if (mcdata.found) d.mcdataServerUri = elemText(mcdata.inner, "Server-URI");
+    }
+    out = d;
+    return true;
+}
+
 Capabilities Capabilities::of(const UserProfileDoc* up, const ServiceConfigDoc* sc) {
     Capabilities c;
     c.userProfileKnown = up != nullptr;
@@ -141,7 +161,9 @@ Capabilities Capabilities::of(const UserProfileDoc* up, const ServiceConfigDoc* 
     if (up) u = *up;
     c.privateCall = u.allowPrivateCall;
     c.emergencyGroupCall = u.allowEmergencyGroupCall;
+    c.cancelGroupEmergency = u.allowCancelGroupEmergency;
     c.imminentPerilCall = u.allowImminentPerilCall;
+    c.cancelImminentPeril = u.allowCancelImminentPeril;
     c.emergencyPrivateCall = u.allowPrivateCall && u.allowEmergencyPrivateCall;
     c.emergencyAlert = u.allowActivateEmergencyAlert;
     c.cancelEmergencyAlert = u.allowCancelEmergencyAlert;

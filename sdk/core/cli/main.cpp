@@ -13,8 +13,10 @@
 //              (--implicit = 개시 INVITE 가 암묵적 발언 요청 — mc_implicit_request+mc_granted, TS 24.380 §14.2.4·§14.2.5. --ptt-at 0 과 함께)
 //              [--upgrade-at S] [--cancel-at S]  (진행 중 긴급 상향·하향 re-INVITE, TS 24.379 §10.1.1.2.1.3·§10.1.1.2.1.4 — outcome 에 conditions)
 //   cimsue-cli [계정 옵션] alert <groupId> [--cancel] [--originated-by ID] [--cancel-group-emergency]   (긴급 경보 MESSAGE, §12.1.1.1·§12.1.1.2)
-//   cimsue-cli [계정 옵션] sds <groupId> <text>            (MESSAGE 최종 응답까지 대기 — --cplane-max N 을 넘으면 MSRP, 결과 plane=media)
-//   cimsue-cli [계정 옵션] sds-recv [--duration S]        (수신 SDS 를 JSON 줄로 출력)
+//   cimsue-cli [계정 옵션] sds <groupId> <text> [--wait-disposition S]   (MESSAGE 최종 응답까지 대기 — --cplane-max N 을 넘으면 MSRP, 결과
+//              plane=media. --wait-disposition = 그 메시지의 전달 확인 통지(TS 24.282 §12.2.1.2)를 S 초까지 기다린다)
+//   cimsue-cli [계정 옵션] sds-recv [--duration S] [--notify-delivered]   (수신 SDS 를 JSON 줄로 출력 — --notify-delivered = 전달 확인을
+//              요청한 SDS 에 DELIVERED 통지, §12.2.1.1. 계정에 MCData PSI 가 있으면 규격형)
 //   cimsue-cli [계정 옵션] dialog-watch <aor> [--duration S]      (RFC 4235 NOTIFY 를 JSON 줄로)
 //   cimsue-cli [계정 옵션] join <aor> [--duration S]              (감시 → confirmed dialog 에 INVITE-Join recvonly)
 //   cimsue-cli [계정 옵션] pickup [number] --code <피처코드> [--duration S]
@@ -35,6 +37,8 @@
 //           (--ha1 HEX32 | --password P) [--mcptt-id tel:..] [--affiliate G[,G2]] [--srtp off|optional|required]
 //           [--sec tls] [--tls-ca FILE] [--no-tls-verify] [--display-name NAME] [--log-level N] [--timeout S] [--json]
 //           [--cplane-max N] (그룹 SDS 시그널링 평면 상한 — 넘으면 MSRP, TS 24.282 §9.2.3) [--msrp] (서버발 MSRP 배포 수신 광고)
+//           [--mcptt-psi URI] [--mcdata-psi URI] (참여 기능 PSI — --from-profile 이면 ue-init-config(TS 24.484 §7.2)에서 채우고 명시값이 덮는다)
+//           [--instance-id URN] (+sip.instance · ue-init-config 의 MCS UE ID)
 // 종료 코드: 0 성공 / 2 인자 / 3 등록·로그인 실패 / 4 호 실패·시한 / 5 미디어 없음 / 6 floor 미획득 / 7 SDS 실패 / 8 관제 실패
 #include <chrono>
 #include <csignal>
@@ -92,6 +96,8 @@ struct Opts {
     bool implicit = false;            // 암묵적 발언 요청(TS 24.380 §14.2.5)
     int upgradeAt = -1, cancelAt = -1;  // 진행 중 긴급 상향·하향 시각(TS 24.379 §10.1.1.2.1.3·§10.1.1.2.1.4)
     bool alertCancel = false, cancelGroupEmergency = false;
+    bool notifyDelivered = false;     // sds-recv — 전달 확인 요청에 DELIVERED 통지(TS 24.282 §12.2.1.1)
+    int waitDispositionSec = 0;       // sds — 전달 확인 통지 대기
     std::string originatedBy;
     // 관제
     std::string code;                 // 픽업 피처코드
@@ -118,13 +124,15 @@ void usage() {
         "        [--tls-ca FILE] [--no-tls-verify] [--display-name N] [--log-level N] [--timeout S] [--json]\n"
         "        [--cplane-max N] [--msrp]   (MCData media plane — 큰 그룹 SDS 발신·서버발 배포 수신)\n"
         "        [--mcptt-psi URI]   (참여 기능 PSI — 긴급 경보 Request-URI, TS 24.379 §12.1.1.1 8))\n"
+        "        [--mcdata-psi URI]  (참여 MCData 기능 PSI — disposition 통지 Request-URI, TS 24.282 §12.2.1.1)\n"
+        "        [--instance-id URN] (+sip.instance · ue-init-config 의 MCS UE ID. --from-profile ptt 면 ue-init-config 로 PSI 를 채운다)\n"
         "        [--mcptt-video]   (착신 그룹콜의 m=video 를 영상까지 수락)\n"
         "        또는 --csc-host H [--csc-port N] --user U --pw P [--csc-ca FILE] --from-profile volte|ptt\n"
         "  register [--hold S] | call TARGET [--duration S] [--video] | answer [--duration S] [--transfer-to X]\n"
         "  group-call GROUP [--duration S] [--ptt-at S --ptt-len S] [--listen-only] [--emergency] [--broadcast] [--implicit] [--video]\n"
         "             [--upgrade-at S] [--cancel-at S]\n"
         "  alert GROUP [--cancel] [--originated-by ID] [--cancel-group-emergency]\n"
-        "  sds GROUP TEXT | sds-recv [--duration S] | login\n"
+        "  sds GROUP TEXT [--wait-disposition S] | sds-recv [--duration S] [--notify-delivered] | login\n"
         "  dialog-watch AOR [--duration S] | join AOR [--duration S] | pickup [NUMBER] --code CODE | transfer PEER --to X\n"
         "  drive [--sample-file WAV] [--service volte|voip|ptt]   (구동 모드 — stdin 명령 / stdout JSON 이벤트; cimsue/drive.h 명령표)\n"
         "  link HOST[:PORT] [--pair-key K] [--link-ca PEM | --link-pin FILE] [--sample-file WAV] [--service S] [--duration S]\n"
@@ -185,6 +193,9 @@ bool parse(int argc, char** argv, Opts& o) {
             if (opt("--upgrade-at", [&](const std::string& v) { o.upgradeAt = std::stoi(v); })) continue;
             if (opt("--cplane-max", [&](const std::string& v) { o.acc.maxSdsCplaneBytes = std::stoi(v); })) continue;
             if (opt("--mcptt-psi", [&](const std::string& v) { o.acc.mcpttServerUri = v; })) continue;
+            if (opt("--mcdata-psi", [&](const std::string& v) { o.acc.mcdataServerUri = v; })) continue;
+            if (opt("--instance-id", [&](const std::string& v) { o.acc.instanceId = v; })) continue;
+            if (opt("--wait-disposition", [&](const std::string& v) { o.waitDispositionSec = std::stoi(v); })) continue;
             if (opt("--cancel-at", [&](const std::string& v) { o.cancelAt = std::stoi(v); })) continue;
             if (opt("--originated-by", [&](const std::string& v) { o.originatedBy = v; })) continue;
             if (opt("--members", [&](const std::string& v) { std::stringstream ss(v); std::string m; while (std::getline(ss, m, ',')) if (!m.empty()) o.groupMembers.push_back(m); })) continue;
@@ -198,6 +209,7 @@ bool parse(int argc, char** argv, Opts& o) {
         else if (a == "--implicit") o.implicit = true;
         else if (a == "--cancel") o.alertCancel = true;
         else if (a == "--msrp") o.acc.mcdataMsrp = true;
+        else if (a == "--notify-delivered") o.notifyDelivered = true;
         else if (a == "--mcptt-video") o.acc.mcpttVideo = true;
         else if (a == "--cancel-group-emergency") o.cancelGroupEmergency = true;
         else if (a == "-h" || a == "--help") return false;
@@ -652,6 +664,22 @@ int main(int argc, char** argv) {
         if (o.acc.maxSdsCplaneBytes > 0) a.maxSdsCplaneBytes = o.acc.maxSdsCplaneBytes;
         a.mcdataMsrp = o.acc.mcdataMsrp;
         a.mcpttVideo = o.acc.mcpttVideo;
+        a.instanceId = o.acc.instanceId;
+        // 참여 기능 PSI = UE initial configuration(TS 24.484 §7.2.2.1 10)·14)) — 명시 인자가 문서를 덮는다
+        if (sp->kind == "ptt") {
+            CscEndpoint ep; ep.host = o.cscHost; ep.port = o.cscPort; ep.verifyServer = o.tlsVerify;
+            if (!o.cscCaFile.empty()) ep.caPem = readFile(o.cscCaFile); else if (!o.tlsCaFile.empty()) ep.caPem = readFile(o.tlsCaFile);
+            CscClient csc(ep);
+            UeInitConfigDoc ui;
+            // MCS UE ID = instance ID. 없으면 Nil UUID(RFC 4122 §4.1.7) — 이 CMS 는 모든 UE 에 같은 문서를 준다.
+            Result ur = csc.fetchUeInitConfig(a.instanceId.empty() ? "urn:uuid:00000000-0000-0000-0000-000000000000" : a.instanceId, "", ui);
+            if (ur.ok) { a.mcpttServerUri = ui.mcpttServerUri; a.mcdataServerUri = ui.mcdataServerUri; }
+            else std::fprintf(stderr, "[cimsue-cli] ue-init-config: %s\n", ur.reason.c_str());
+        }
+        if (!o.acc.mcpttServerUri.empty()) a.mcpttServerUri = o.acc.mcpttServerUri;
+        if (!o.acc.mcdataServerUri.empty()) a.mcdataServerUri = o.acc.mcdataServerUri;
+        if (!a.mcpttServerUri.empty() || !a.mcdataServerUri.empty())
+            std::fprintf(stderr, "[cimsue-cli] psi mcptt=%s mcdata=%s\n", a.mcpttServerUri.c_str(), a.mcdataServerUri.c_str());
         o.acc = a;
         std::fprintf(stderr, "[cimsue-cli] provisioned %s: %s via %s:%d/%s ha1=%d dispatch=%s\n", sp->kind.c_str(), a.aor().c_str(),
                      a.serverHost.c_str(), a.serverPort, toString(a.transport), !a.ha1.empty(), prof.dispatch.groupId.c_str());
@@ -879,12 +907,43 @@ int main(int argc, char** argv) {
         s.code = code;
         s.extra = ",\"msg_id\":\"" + sds.msgId + "\",\"plane\":\"" + plane + "\",\"bytes\":" + std::to_string(o.text.size());
         if (!got || code / 100 != 2) { s.outcome = got ? "sds_rejected" : "sds_timeout"; rc = 7; }
+        else if (o.waitDispositionSec > 0) {
+            // 전달 확인 통지(§12.2.1.2) — 같은 message ID 의 SDS NOTIFICATION. 그룹이면 멤버마다 하나씩 온다(집계 없음).
+            int notif = 0;
+            ls.waitFor([&] {
+                for (auto& m : ls.sds) if (m.notification && m.msgId == sds.msgId) { notif = m.notifType; return true; }
+                return false;
+            }, o.waitDispositionSec);
+            s.extra += ",\"disposition\":" + std::to_string(notif);
+            if (!notif) { s.outcome = "no_disposition"; rc = 7; }
+        }
         return finish(-1);
     }
 
     if (o.cmd == "sds-recv") {
-        ls.waitFor([&] { return false; }, o.durationSec);
-        s.extra = ",\"sds_received\":" + std::to_string(ls.sds.size()) + ",\"alerts\":" + std::to_string(ls.alerts.size());
+        // 전달 확인 회신은 main 에서 — 리스너 스레드가 엔진을 다시 부르지 않게
+        size_t handled = 0;
+        int notified = 0;
+        const auto until = std::chrono::steady_clock::now() + std::chrono::seconds(o.durationSec);
+        while (std::chrono::steady_clock::now() < until) {
+            std::vector<SdsMessage> fresh;
+            ls.waitFor([&] {
+                if (ls.sds.size() <= handled) return false;
+                fresh.assign(ls.sds.begin() + (long)handled, ls.sds.end());
+                handled = ls.sds.size();
+                return true;
+            }, 1);
+            if (!o.notifyDelivered) continue;
+            for (auto& m : fresh) {
+                if (m.notification || !(m.dispositionReq & 1)) continue;                 // 1 = delivery 요청(§15.2.3)
+                SdsSend n = eng.sendSdsNotification(acc, m.fromUri, m.convId, m.msgId, 2, m.groupUri);   // 2 = DELIVERED
+                std::fprintf(stderr, "[cimsue-cli] disposition delivered → %s group=%s msg=%s %s\n", m.fromUri.c_str(),
+                             m.groupUri.c_str(), m.msgId.c_str(), n.ok ? "sent" : n.reason.c_str());
+                if (n.ok) notified++;
+            }
+        }
+        s.extra = ",\"sds_received\":" + std::to_string(ls.sds.size()) + ",\"alerts\":" + std::to_string(ls.alerts.size()) +
+                  ",\"notified\":" + std::to_string(notified);
         if (ls.sds.empty() && ls.alerts.empty()) { s.outcome = "no_sds"; rc = 7; }   // 경보만 받은 경우도 수신이다
         return finish(-1);
     }

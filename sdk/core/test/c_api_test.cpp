@@ -400,7 +400,9 @@ TEST(CApi, McpttFieldsAndCmsDocs) {
     cimsue_user_profile_doc_t up{};
     ASSERT_EQ(cimsue_user_profile_parse(
                   "<mcptt-user-profile XUI-URI=\"tel:+82500000001\"><ruleset><actions>"
-                  "<allow-cancel-emergency-alert>false</allow-cancel-emergency-alert></actions></ruleset>"
+                  "<allow-cancel-emergency-alert>false</allow-cancel-emergency-alert>"
+                  "<allow-cancel-group-emergency>true</allow-cancel-group-emergency>"
+                  "<allow-cancel-imminent-peril>false</allow-cancel-imminent-peril></actions></ruleset>"
                   "<OnNetwork><MCPTTGroupInfo><entry><uri-entry>sip:g1@ptt</uri-entry></entry></MCPTTGroupInfo></OnNetwork>"
                   "</mcptt-user-profile>", &up), CIMSUE_OK) << cimsue_last_error();
     EXPECT_STREQ(up.user_uri, "tel:+82500000001");
@@ -408,6 +410,8 @@ TEST(CApi, McpttFieldsAndCmsDocs) {
     EXPECT_STREQ(up.groups[0], "sip:g1@ptt");
     EXPECT_EQ(up.allow_cancel_emergency_alert, 0);
     EXPECT_EQ(up.allow_activate_emergency_alert, 1);
+    EXPECT_EQ(up.allow_cancel_group_emergency, 1);
+    EXPECT_EQ(up.allow_cancel_imminent_peril, 0);
     EXPECT_EQ(up.max_affiliations_n2, -1);
     cimsue_capabilities_t k{};
     cimsue_capabilities_of(&up, nullptr, &k);
@@ -415,9 +419,12 @@ TEST(CApi, McpttFieldsAndCmsDocs) {
     EXPECT_EQ(k.service_config_known, 0);
     EXPECT_EQ(k.cancel_emergency_alert, 0);
     EXPECT_EQ(k.emergency_alert, 1);
+    EXPECT_EQ(k.cancel_group_emergency, 1);
+    EXPECT_EQ(k.cancel_imminent_peril, 0);
     cimsue_capabilities_of(nullptr, nullptr, &k);
     EXPECT_EQ(k.user_profile_known, 0);
     EXPECT_EQ(k.cancel_emergency_alert, 1);                     // 못 받은 문서는 허용
+    EXPECT_EQ(k.cancel_imminent_peril, 1);
     EXPECT_NE(cimsue_user_profile_parse("<group/>", &up), CIMSUE_OK);
 
     cimsue_service_config_doc_t sc{};
@@ -429,6 +436,19 @@ TEST(CApi, McpttFieldsAndCmsDocs) {
     EXPECT_STREQ(sc.domain, "ptt.example.org");
     EXPECT_STREQ(sc.rp_emergency, "mcpttp.14");
     EXPECT_STREQ(sc.rp_normal, "");
+
+    // UE initial configuration(TS 24.484 §7.2) — 참여 기능 PSI → 계정 mcptt_server_uri·mcdata_server_uri
+    cimsue_ue_init_config_doc_t ui{};
+    ASSERT_EQ(cimsue_ue_init_config_parse(
+                  "<mcptt-UE-initial-configuration domain=\"ptt.example.org\"><on-network><anyExt>"
+                  "<MCPTT-Service-Details><Server-URI>sip:mcptt_psi@ptt.example.org</Server-URI></MCPTT-Service-Details>"
+                  "<MCData-Service-Details><Server-URI>sip:mcdata_psi@ptt.example.org</Server-URI></MCData-Service-Details>"
+                  "</anyExt></on-network></mcptt-UE-initial-configuration>", &ui), CIMSUE_OK) << cimsue_last_error();
+    EXPECT_STREQ(ui.domain, "ptt.example.org");
+    EXPECT_STREQ(ui.mcptt_server_uri, "sip:mcptt_psi@ptt.example.org");
+    EXPECT_STREQ(ui.mcdata_server_uri, "sip:mcdata_psi@ptt.example.org");
+    EXPECT_NE(cimsue_ue_init_config_parse("<mcptt-user-profile/>", &ui), CIMSUE_OK);
+    EXPECT_EQ(cimsue_struct_size(CIMSUE_STRUCT_UE_INIT_CONFIG_DOC), (int32_t)sizeof(cimsue_ue_init_config_doc_t));
     EXPECT_STREQ(cimsue_condition_cause_str(CIMSUE_COND_DENIED), toString(ConditionCause::Denied));
     EXPECT_EQ((int)CIMSUE_COND_ADVERTISED, (int)ConditionCause::Advertised);
     EXPECT_EQ((int)CIMSUE_ROUTE_LOUDSPEAKER, (int)AudioRoute::Loudspeaker);

@@ -454,6 +454,7 @@ PTT up(RELEASE): 🎤mic 슬롯 ──disconnect─ 통화 stream  (송신 중�
 |---|---|---|
 | `user-profile` (사용자별) | `PttController.userProfile` | SOS 대상 결정(`entry-info` = DedicatedGroup / UseCurrentlySelectedGroup + `uri-entry` 전용 긴급그룹), `allow-private-call`(1:1 **발신**), `allow-emergency-group-call`, `allow-activate-emergency-alert`, `anyExt/allow-adhoc-group-call`(없으면 `cims:` 별칭), `OnNetwork/MaxAffiliationsN2` |
 | `service-config` (시스템 전역) | `PttController.serviceConfig` | on-network `emergency-/imminent-peril-/normal-resource-priority`(TS 24.379 §6.2.8.1.15) |
+| `ue-init-config` (로그인 전, TS 24.484 §7.2) | 등록 직전 한 번(`PttController.register` — MCS UE ID = instance ID, 토큰 없음) | `MCPTT-Service-Details/Server-URI` → 경보 MESSAGE Request-URI, `MCData-Service-Details/Server-URI` → SDS 전달 확인 통지 Request-URI(`AccountConfig.mcpttServerUri`·`mcdataServerUri`). 못 받거나 광고가 없으면 PSI 없이(경보 = 그룹 URI, 통지 = 원 발신자 직행) |
 
 - 인가 편집(서버): 가입자 화면의 user-profile(사람별)과 PTT 그룹 편집(그룹 능력). 콘솔 **구성 > MCPTT 정책**
   (`PUT /api/v1/mcptt/service-config`)은 N2 기본값·broadcast-group 계층 수만 바꾼다.
@@ -462,6 +463,11 @@ PTT up(RELEASE): 🎤mic 슬롯 ──disconnect─ 통화 stream  (송신 중�
   실패가 기능 정지로 번지지 않게. 발언 요청(floor)은 문서로 막지 않는다 — 규격에 그런 요소가 없고 판정은 floor 제어 서버다.
 - **착신·경보 취소는 막지 않는다** — 서버가 이미 성립시킨 세션을 단말이 거절하면 정책 판정이 두
   곳으로 갈린다. 이미 걸린 경보의 회수도 항상 허용한다.
+- **경보 표시는 서버 판정에 맞춘다** — 경보 배너는 MESSAGE 를 보내면서 먼저 바꾸고, 최종 응답을 token 으로 받아 403 이면 되돌린다
+  (`PttEmergency.onAlertResult`): 발령 403(+ `alert-ind` false, TS 24.379 §12.1.3.1 4)a) — 전파 없음)은 내 배너를 거두고, 취소 403
+  (+ `alert-ind` true, §12.1.3.2 — 경보 유지)은 배너를 되살린다. 전송 실패·시한은 서버 판정을 모르므로 표시를 그대로 둔다.
+- **긴급 해제는 개시자만** — 그룹 긴급 해제는 단말 쪽 local policy(§6.2.8.1.7)라 현장 단말 앱은 내가 올린 긴급만 해제한다. 서버는 개시자 ∨
+  `allow-cancel-group-emergency` 만 받으므로(§6.3.3.1.13.4) 비개시자 해제는 그 자격을 가진 관제 앱의 몫이다(SDK `Capabilities.cancelGroupEmergency`).
 - `N2`(동시 제휴 상한)는 **강제하지 않고 경고 로그만** 남긴다 — 앱이 잘라내면 어느 채널의 fan-out 을
   버릴지 정책 없이 결정하는 셈이다. 상한 집행은 서버 몫.
 

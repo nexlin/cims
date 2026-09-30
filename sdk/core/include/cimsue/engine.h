@@ -102,7 +102,10 @@ public:
      *  `emergency-ind`/`imminentperil-ind` true·false 로 명시) + Resource-Priority(§6.2.8.1.2·§6.2.8.1.12 — AccountConfig.rp*), SDP 는
      *  협상된 그대로(floor 섹션 재주입). 조건은 보내면서 반영하고(onMcpttCondition Local), 2xx = Confirmed, 4xx~6xx = 이전 값으로
      *  되돌려 Denied — 재-INVITE 거절은 호를 끊지 않는다. emergency·imminentPeril 을 함께 true 로 줄 수 없다(긴급이 임박을 대체).
-     *  바뀐 것이 없으면 보내지 않는다. 사설콜·응답 대기 중·성립 전 호는 실패. */
+     *  지시자 조합은 §6.3.3.1.17 대로 — 긴급 상향은 `emergency-ind` true + `alert-ind` false(§6.2.8.1.1 4))만 싣고 임박 지시자는 싣지
+     *  않는다(임박 → 긴급이면 제어 기능이 임박을 내린다, §6.3.3.1.6 3)d)). 긴급 중 임박 상향은 실패(긴급을 먼저 해제 — §6.2.8.1.9 1)).
+     *  바뀐 것이 없으면 보내지 않는다. 사설콜·응답 대기 중·성립 전 호는 실패. 해제 인가(user profile allow-cancel-*)는 앱이
+     *  Capabilities 로 선차단하고 서버가 판정한다(비인가 = 403 → Denied). */
     Result setCallCondition(int callId, bool emergency, bool imminentPeril);
     /** 긴급 경보 발신·취소(TS 24.379 §12.1.1.1·§12.1.1.2) — SIP MESSAGE, mcptt-info `alert-ind`(+ `mcptt-client-id`) + ICSI mcptt
      *  (P-Preferred-Service·Accept-Contact). groupId bare. originatedBy = 다른 사용자의 경보를 취소할 때 그 사용자 MCPTT ID
@@ -147,10 +150,14 @@ public:
      *  반환·상관 규약은 sendGroupSds 와 같다. */
     SdsSend sendSds(int accountId, const std::string& peer, const std::string& text,
                     bool requestDelivery = true, const std::string& msgId = std::string());
-    /** SDS disposition 통지(1:1 대상 peer bare 번호). notifType 1~4. 반환 SdsSend — msgId 는 입력이므로 비어 있고
-     *  token 으로 최종 응답을 상관한다. */
+    /** SDS disposition 통지(TS 24.282 §12.2.1.1) — 받은 SDS 의 fromUri(= `<mcdata-calling-user-id>`)를 peer 로, groupUri(=
+     *  `<mcdata-calling-group-id>`)를 groupId 로 넘긴다(1:1 이면 빈 값, bare·URI 모두 받는다). notifType 1~4.
+     *  AccountConfig.mcdataServerUri 가 있으면 규격형 — Request-URI = 그 PSI, 대상 = resource-lists entry 하나, 그룹이면
+     *  mcdata-info `<mcdata-calling-group-id>`, ICSI mcdata.sds Accept-Contact·P-Preferred-Service(§6.2.4.1). 없으면 SDS NOTIFICATION
+     *  한 파트를 원 발신자 AoR 로 곧장(전환기 — CSP 0.2.180 전 서버). 반환 SdsSend — msgId 는 입력이므로 비어 있고 token 으로 최종
+     *  응답을 상관한다. */
     SdsSend sendSdsNotification(int accountId, const std::string& peer, const std::string& convId,
-                                const std::string& msgId, int notifType);
+                                const std::string& msgId, int notifType, const std::string& groupId = std::string());
 
     // ── MCData FD (TS 24.282 §10.2 — HTTP 콘텐츠 서버 경유, mcdata_messaging.md §4.5) ──
     /** 그룹 FD 알림 발신 — file 은 먼저 CscClient::uploadFd(groupId 지정)로 올린 결과. MESSAGE 본문 = mcdata-info(group-fd)

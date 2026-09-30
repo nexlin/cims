@@ -80,10 +80,11 @@ internal class MessagingPlane(private val c: PttController) {
         return r.getOrNull()?.body ?: run { Log.w(TAG, "FD 다운로드 실패: ${r.code} ${r.reason}"); null }
     }
 
-    /** SDS disposition 통지(TS 24.282 §12.2) — 수신 메시지의 원 발신자에게 1:1 전송. */
-    fun sendSdsNotification(peerId: String, convId: String, msgId: String, notifType: Int) {
+    /** SDS disposition 통지(TS 24.282 §12.2.1.1) — 대상 = 수신 SDS 의 보낸 사용자(mcdata-calling-user-id), 그룹 SDS 면 groupUri
+     *  (mcdata-calling-group-id). 계정에 MCData PSI(ue-init-config)가 있으면 코어가 참여 기능 PSI 로 보낸다. */
+    fun sendSdsNotification(peerId: String, convId: String, msgId: String, notifType: Int, groupUri: String = "") {
         c.cmd("sendSdsNotification") {
-            c.account?.sendSdsNotification(peerId, convId, msgId, notifType) ?: com.cims.ue.sdk.CimsResult.fail<Unit>(-1, "not registered")
+            c.account?.sendSdsNotification(peerId, convId, msgId, notifType, groupUri) ?: com.cims.ue.sdk.CimsResult.fail<Unit>(-1, "not registered")
         }
     }
 }

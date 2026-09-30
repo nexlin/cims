@@ -70,6 +70,69 @@ TEST(SdsCodec, GroupSdsRoundTrip) {
     EXPECT_FALSE(mcdata::parse("text/plain", "hello", none));
 }
 
+// disposition 통지 규격형(TS 24.282 §12.2.1.1) — 대상 = resource-lists entry 하나, 그룹이면 <mcdata-calling-group-id>
+TEST(SdsCodec, NotificationSpecForm) {
+    std::string conv = mcdata::conversationIdOf("g005"), msg = mcdata::newMessageId();
+    mcdata::Body g = mcdata::buildNotification(conv, msg, 2, 1700000002L, "tel:+82500000013", "tel:g005");
+    EXPECT_NE(g.body.find("<mcdata-calling-group-id type=\"Normal\"><mcdataURI>tel:g005</mcdataURI></mcdata-calling-group-id>"),
+              std::string::npos);
+    EXPECT_NE(g.body.find("Content-Type: application/resource-lists+xml\r\nContent-Disposition: recipient-list"), std::string::npos);
+    EXPECT_NE(g.body.find("<entry uri=\"tel:+82500000013\"/>"), std::string::npos);
+    const size_t info = g.body.find("mcdata-info+xml"), sig = g.body.find("mcdata-signalling"), rl = g.body.find("resource-lists+xml");
+    EXPECT_TRUE(info < sig && sig < rl);                        // mcdata-info · SDS NOTIFICATION · resource-lists
+    SdsMessage nt;
+    ASSERT_TRUE(mcdata::parse(g.contentType, g.body, nt));
+    EXPECT_TRUE(nt.notification);
+    EXPECT_EQ(nt.notifType, 2);
+    EXPECT_EQ(nt.msgId, msg);
+    EXPECT_EQ(nt.groupUri, "tel:g005");
+    // 1:1 — mcdata-info 없음
+    mcdata::Body o = mcdata::buildNotification(conv, msg, 2, 1700000002L, "tel:+82500000013");
+    EXPECT_EQ(o.body.find("mcdata-info+xml"), std::string::npos);
+    EXPECT_NE(o.body.find("<entry uri=\"tel:+82500000013\"/>"), std::string::npos);
+    // 전환기 형식(대상 없음) — SDS NOTIFICATION 한 파트
+    mcdata::Body l = mcdata::buildNotification(conv, msg, 2, 1700000002L);
+    EXPECT_EQ(l.body.find("resource-lists"), std::string::npos);
+    EXPECT_EQ(l.body.find("mcdata-info"), std::string::npos);
+}
+
+// 받은 SDS 의 보낸 사용자·그룹 = <mcdata-calling-user-id>·<mcdata-calling-group-id>(§12.2.1.1) — 없으면 From·request-uri
+TEST(SdsCodec, CallingIdentitiesFromMcdataInfo) {
+    std::string conv = mcdata::conversationIdOf("g005"), msg = mcdata::newMessageId();
+    const std::string sig = mcdata::base64Encode(mcdata::sdsSignallingTlv(conv, msg, true, 1700000003L));
+    const std::string info = "<?xml version=\"1.0\"?><mcdatainfo xmlns=\"urn:3gpp:ns:mcdataInfo:1.0\"><mcdata-Params>"
+                             "<request-type>group-sds</request-type>"
+                             "<mcdata-request-uri type=\"Normal\"><mcdataURI>tel:+82500000014</mcdataURI></mcdata-request-uri>"
+                             "<mcdata-calling-user-id type=\"Normal\"><mcdataURI>tel:+82500000013</mcdataURI></mcdata-calling-user-id>"
+                             "<mcdata-calling-group-id type=\"Normal\"><mcdataURI>tel:g005</mcdataURI></mcdata-calling-group-id>"
+                             "</mcdata-Params></mcdatainfo>";
+    std::string body = "--b\r\nContent-Type: application/vnd.3gpp.mcdata-info+xml\r\n\r\n" + info +
+                       "\r\n--b\r\nContent-Type: application/vnd.3gpp.mcdata-signalling\r\nContent-Transfer-Encoding: base64\r\n\r\n" + sig +
+                       "\r\n--b--\r\n";
+    SdsMessage m;
+    ASSERT_TRUE(mcdata::parse("multipart/mixed;boundary=b", body, m));
+    EXPECT_EQ(m.fromUri, "tel:+82500000013");
+    EXPECT_EQ(m.groupUri, "tel:g005");                         // request-uri(수신자)가 아니라 calling-group-id
+    // 요소가 없는 옛 발신자 — fromUri 는 비고(호출자가 From), 그룹은 request-uri
+    mcdata::Body b = mcdata::buildGroupSds("tel:g001", "x", conv, msg, true, 1700000003L);
+    SdsMessage o;
+    ASSERT_TRUE(mcdata::parse(b.contentType, b.body, o));
+    EXPECT_TRUE(o.fromUri.empty());
+    EXPECT_EQ(o.groupUri, "tel:g001");
+    // 중계된 1:1 통지 — request-uri 는 나(통지 대상)라 그룹으로 읽지 않는다(§12.2.3 14))
+    const std::string ntf = mcdata::base64Encode(std::string("\x05\x02", 2) + std::string(5, '\0') + mcdata::hexDecode(conv) + mcdata::hexDecode(msg));
+    std::string relay = "--r\r\nContent-Type: application/vnd.3gpp.mcdata-info+xml\r\n\r\n<mcdatainfo><mcdata-Params>"
+                        "<mcdata-request-uri type=\"Normal\"><mcdataURI>tel:+82500000013</mcdataURI></mcdata-request-uri>"
+                        "<mcdata-calling-user-id type=\"Normal\"><mcdataURI>tel:+82500000014</mcdataURI></mcdata-calling-user-id>"
+                        "</mcdata-Params></mcdatainfo>\r\n--r\r\nContent-Type: application/vnd.3gpp.mcdata-signalling\r\n"
+                        "Content-Transfer-Encoding: base64\r\n\r\n" + ntf + "\r\n--r--\r\n";
+    SdsMessage n;
+    ASSERT_TRUE(mcdata::parse("multipart/mixed;boundary=r", relay, n));
+    EXPECT_TRUE(n.notification);
+    EXPECT_EQ(n.fromUri, "tel:+82500000014");
+    EXPECT_TRUE(n.groupUri.empty());
+}
+
 TEST(SdsCodec, OneToOneConversationIdIsPairSorted) {
     // 쌍을 정렬하므로 **양쪽 단말이 같은 값**을 만든다 — 그러지 않으면 같은 대화가 둘로 갈라진다.
     EXPECT_EQ(mcdata::conversationIdOneToOne("1001", "1002"),
@@ -185,6 +248,20 @@ TEST(McpttXml, InfoBuildParseAndBareId) {
     std::string aff = mcptt::affiliationCommand("tel:g001", false);
     EXPECT_NE(aff.find("<de-affiliate group=\"tel:g001\"/>"), std::string::npos);
     EXPECT_FALSE(mi.broadcast);
+}
+
+// 지시자 순서 = mcptt-ParamsType sequence(Annex F.1): emergency-ind · alert-ind · imminentperil-ind
+TEST(McpttXml, IndicatorOrderAndAlert) {
+    std::string x = mcptt::mcpttInfo("prearranged", "tel:g001", "tel:+82500000001", "tel:g001", 1, 0, false, -1);
+    const size_t e = x.find("<emergency-ind"), a = x.find("<alert-ind type=\"Normal\"><mcpttBoolean>false</mcpttBoolean>");
+    ASSERT_NE(e, std::string::npos);
+    ASSERT_NE(a, std::string::npos);
+    EXPECT_LT(e, a);
+    EXPECT_EQ(x.find("imminentperil-ind"), std::string::npos);  // §6.3.3.1.17 — emergency-ind true 에 임박 지시자 없음
+    std::string i = mcptt::mcpttInfo("prearranged", "tel:g001", "u", "tel:g001", 0, 1);
+    EXPECT_EQ(i.find("alert-ind"), std::string::npos);
+    EXPECT_EQ(i.find("emergency-ind"), std::string::npos);
+    EXPECT_EQ(mcptt::indicator(x, "alert-ind"), -1);
 }
 
 // 일제 통화 = prearranged + <broadcast-ind>true (TS 24.379 §6.2.8.2 · Annex F.1) — session-type 에 broadcast 는 없다

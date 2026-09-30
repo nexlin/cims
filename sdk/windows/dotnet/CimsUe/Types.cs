@@ -146,8 +146,12 @@ public sealed class AccountConfig
     public int MaxSdsCplaneBytes { get; set; }
     /// <summary>서버발 MSRP 배포 수신 — REGISTER Contact 에 ICSI mcdata.sds. false 면 서버가 큰 그룹 SDS 를 FILEURL(FD)로 폴백한다.</summary>
     public bool McdataMsrp { get; set; }
-    /// <summary>참여 MCPTT 기능 PSI — 긴급 경보 Request-URI(TS 24.379 §12.1.1.1 8)). null 이면 그룹 URI(옛 서버 전환기).</summary>
+    /// <summary>참여 MCPTT 기능 PSI — 긴급 경보 Request-URI(TS 24.379 §12.1.1.1 8)). null 이면 그룹 URI(옛 서버 전환기).
+    /// 정본 = ue-init-config <see cref="UeInitConfigDoc.McpttServerUri"/>(TS 24.484 §7.2).</summary>
     public string? McpttServerUri { get; set; }
+    /// <summary>참여 MCData 기능 PSI — SDS disposition 통지 Request-URI(TS 24.282 §12.2.1.1). null 이면 원 발신자 AoR 직행(CSP 0.2.180 전
+    /// 서버 전환기). 정본 = ue-init-config <see cref="UeInitConfigDoc.McdataServerUri"/>.</summary>
+    public string? McdataServerUri { get; set; }
 
     /// <summary>"sip:msisdn@domain".</summary>
     public string Aor() => Engine.AccountConfigString(this, Engine.AccountStringKind.Aor);

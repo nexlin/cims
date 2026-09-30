@@ -1021,7 +1021,8 @@ public:
         if (body.find("mcdata-signalling") != std::string::npos) {
             SdsMessage m;
             if (mcdata::parse(ct, body, m)) {
-                m.accountId = acc; m.fromUri = from;
+                m.accountId = acc;
+                if (m.fromUri.empty()) m.fromUri = from;          // mcdata-calling-user-id 가 없는 발신(옛 단말·1:1 직행)
                 o_->emit([o = o_, m] { o->listener->onSds(m); });
                 return;
             }
@@ -1830,8 +1831,11 @@ static int startMcptt(Engine::Impl* o, int accountId, const std::string& id, boo
         prm.txOption.multipartContentType.subType = "mixed";
         pj::SipMultipartPart p1;
         p1.contentType.type = "application"; p1.contentType.subType = "vnd.3gpp.mcptt-info+xml";
+        // 지시자 조합(TS 24.379 §6.3.3.1.17) — 긴급 개시는 alert-ind 를 함께 싣고(경보를 요청하지 않았으면 false, §6.2.8.1.1 4)),
+        //   임박은 긴급·경보 지시자 없이(§6.2.8.1.9). 둘 다 요청하면 긴급이 임박을 대체한다(위 mcptt->imminentPeril).
         p1.body = mcptt::mcpttInfo(isPrivate ? "private" : "prearranged", "tel:" + id, mcpttId, "tel:" + id,
-                                   opts.emergency ? 1 : 0, opts.imminentPeril ? 1 : 0, call->mcptt->broadcast);
+                                   call->mcptt->emergency ? 1 : 0, call->mcptt->imminentPeril ? 1 : 0, call->mcptt->broadcast,
+                                   call->mcptt->emergency ? -1 : 0);
         prm.txOption.multipartParts.push_back(p1);
         // 우선 그룹콜의 Resource-Priority(TS 24.379 §6.2.8.1.2·§6.2.8.1.12) — 값 = service-config(§6.2.8.1.15, AccountConfig.rp*)
         if (call->mcptt->emergency || call->mcptt->imminentPeril) {
@@ -1916,9 +1920,15 @@ Result Engine::setCallCondition(int callId, bool emergency, bool imminentPeril) 
         if (o->snapshotCall(callId).state != CallState::Active)
             throw pj::Error(PJ_EINVALIDOP, "setCallCondition", "call not active", __FILE__, __LINE__);
         if (m.emergency == emergency && m.imminentPeril == imminentPeril) return;           // 바뀐 것 없음 — 보내지 않는다
-        // 바뀐 지시자만 true/false 로 명시(§6.2.8.1.1·§6.2.8.1.3·§6.2.8.1.9·§6.2.8.1.11)
+        // 긴급 → 임박은 한 요청으로 못 한다 — 임박 상향은 긴급이 없을 때만(§6.2.8.1.9 1)), 지시자 조합도 성립하지 않는다(§6.3.3.1.17)
+        if (m.emergency && imminentPeril)
+            throw pj::Error(PJ_EINVALIDOP, "setCallCondition", "cancel emergency before imminent peril", __FILE__, __LINE__);
+        // 바뀐 지시자만 true/false 로 명시(§6.2.8.1.1·§6.2.8.1.3·§6.2.8.1.9·§6.2.8.1.11). 임박 → 긴급 상향은 emergency-ind true 만
+        //   싣는다 — 임박은 제어 기능이 내린다(§6.3.3.1.6 3)d)), imminentperil-ind 를 함께 싣으면 §6.3.3.1.17 위반(403 150).
+        //   긴급 상향은 alert-ind 를 동반한다 — 경보를 요청하지 않으므로 false(§6.2.8.1.1 4)).
         const int e = m.emergency == emergency ? 0 : (emergency ? 1 : -1);
-        const int i = m.imminentPeril == imminentPeril ? 0 : (imminentPeril ? 1 : -1);
+        const int i = emergency || m.imminentPeril == imminentPeril ? 0 : (imminentPeril ? 1 : -1);
+        const int a = e > 0 ? -1 : 0;
         const AccountConfig& cfg = o->accountCfgs[c.accountId()];
         m.prevEmergency = m.emergency; m.prevImminent = m.imminentPeril; m.prevMine = m.condMine;
         m.emergency = emergency; m.imminentPeril = imminentPeril;
@@ -1935,7 +1945,7 @@ Result Engine::setCallCondition(int callId, bool emergency, bool imminentPeril) 
             prm.txOption.multipartContentType.subType = "mixed";
             pj::SipMultipartPart p1;
             p1.contentType.type = "application"; p1.contentType.subType = "vnd.3gpp.mcptt-info+xml";
-            p1.body = mcptt::mcpttInfo("prearranged", "tel:" + m.groupId, cfg.effectiveMcpttId(), "tel:" + m.groupId, e, i);
+            p1.body = mcptt::mcpttInfo("prearranged", "tel:" + m.groupId, cfg.effectiveMcpttId(), "tel:" + m.groupId, e, i, false, a);
             prm.txOption.multipartParts.push_back(p1);
             pj::SipHeader rp; rp.hName = "Resource-Priority";                           // §6.2.8.1.2 — 하향은 normal 값(§6.2.8.1.15)
             rp.hValue = emergency ? cfg.rpEmergency : imminentPeril ? cfg.rpImminentPeril : cfg.rpNormal;
@@ -2162,8 +2172,8 @@ void Engine::Impl::startMsrpRecv(int callId, int accountId, const MsrpLeg& leg) 
             SdsMessage m;
             if (mcdata::parse(ct, body, m)) {
                 m.accountId = accountId;
-                m.fromUri = from;
-                if (m.groupUri.empty()) m.groupUri = group;       // 본문에 mcdata-info 가 없다 — 배포 INVITE 의 것
+                if (m.fromUri.empty()) m.fromUri = from;          // 본문에 mcdata-info 가 없다 — 배포 INVITE 의 것
+                if (m.groupUri.empty()) m.groupUri = group;
                 m.mediaPlane = true;
                 log(3, "msrp recv call " + std::to_string(callId) + " msg=" + m.msgId + " bytes=" + std::to_string(m.text.size()));
                 emit([this, m] { listener->onSds(m); });
@@ -2323,17 +2333,35 @@ SdsSend Engine::sendFd(int accountId, const std::string& peer, const FdFile& fil
 }
 
 SdsSend Engine::sendSdsNotification(int accountId, const std::string& peer, const std::string& convId,
-                                    const std::string& msgId, int notifType) {
+                                    const std::string& msgId, int notifType, const std::string& groupId) {
     SdsSend out;
     if (!impl_->running) { out.code = -1; out.reason = "not running"; return out; }
+    if (mcptt::bareId(peer).empty()) { out.code = -2; out.reason = "empty peer"; return out; }
     int64_t token = impl_->nextToken++;
     out.token = token;
     Result r = impl_->ctl.runSync([=]() -> Result {
         Impl* o = impl_.get();
         auto ic = o->accountCfgs.find(accountId);
         if (ic == o->accountCfgs.end()) return Result::fail(-2, "no such account");
-        mcdata::Body b = mcdata::buildNotification(convId, msgId, notifType, (int64_t)std::time(nullptr));
-        int64_t rc = o->doSendRequest(accountId, "MESSAGE", "sip:" + mcptt::bareId(peer) + "@" + ic->second.domain, b.contentType, b.body, {}, token);
+        const AccountConfig& cfg = ic->second;
+        const std::string to = mcptt::bareId(peer);
+        const int64_t now = (int64_t)std::time(nullptr);
+        int64_t rc;
+        if (!cfg.mcdataServerUri.empty()) {
+            // TS 24.282 §12.2.1.1 — Request-URI = 참여 MCData 기능 PSI(§6.2.4.1 4)), 대상 = resource-lists, 그룹 통지면
+            //   <mcdata-calling-group-id>. ICSI mcdata.sds(§6.2.4.1 1)a)~c)).
+            auto tel = [](const std::string& id) { return id.find(':') == std::string::npos ? "tel:" + id : id; };
+            const std::string gid = mcptt::bareId(groupId);
+            mcdata::Body b = mcdata::buildNotification(convId, msgId, notifType, now, tel(to), gid.empty() ? std::string() : tel(gid));
+            std::map<std::string, std::string> h;
+            h["Accept-Contact"] = "*;+g.3gpp.mcdata.sds;require;explicit, "
+                                  "*;+g.3gpp.icsi-ref=\"urn%3Aurn-7%3A3gpp-service.ims.icsi.mcdata.sds\";require;explicit";
+            h["P-Preferred-Service"] = msrp::kIcsiMcDataSds;
+            rc = o->doSendRequest(accountId, "MESSAGE", cfg.mcdataServerUri, b.contentType, b.body, h, token);
+        } else {
+            mcdata::Body b = mcdata::buildNotification(convId, msgId, notifType, now);
+            rc = o->doSendRequest(accountId, "MESSAGE", "sip:" + to + "@" + cfg.domain, b.contentType, b.body, {}, token);
+        }
         return rc < 0 ? Result::fail(-3, "send failed") : Result::success();
     });
     out.ok = r.ok; out.code = r.code; out.reason = r.reason;

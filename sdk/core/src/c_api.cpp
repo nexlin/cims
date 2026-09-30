@@ -108,6 +108,7 @@ AccountConfig toCxx(const cimsue_account_config_t* c) {
     a.maxSdsCplaneBytes = c->max_sds_cplane_bytes;
     a.mcdataMsrp = c->mcdata_msrp != 0;
     assignIf(a.mcpttServerUri, c->mcptt_server_uri);
+    assignIf(a.mcdataServerUri, c->mcdata_server_uri);
     return a;
 }
 
@@ -175,6 +176,8 @@ UserProfileDoc toCxx(const cimsue_user_profile_doc_t* c) {
     u.allowCancelEmergencyAlert = c->allow_cancel_emergency_alert != 0;
     u.allowEmergencyPrivateCall = c->allow_emergency_private_call != 0;
     u.allowAdhocGroupCall = c->allow_adhoc_group_call != 0;
+    u.allowCancelGroupEmergency = c->allow_cancel_group_emergency != 0;
+    u.allowCancelImminentPeril = c->allow_cancel_imminent_peril != 0;
     return u;
 }
 
@@ -385,6 +388,7 @@ void fill(cimsue_account_config_t& o, const AccountConfig& a, std::vector<const 
     o.max_sds_cplane_bytes = a.maxSdsCplaneBytes;
     o.mcdata_msrp = B(a.mcdataMsrp);
     o.mcptt_server_uri = C(a.mcpttServerUri);
+    o.mcdata_server_uri = C(a.mcdataServerUri);
 }
 
 /** CMS 문서의 C 스냅샷 — 핸들(fetch)과 스레드 스크래치(parse) 양쪽이 쓴다. */
@@ -416,6 +420,8 @@ struct UserProfileHolder {
         out.allow_cancel_emergency_alert = B(cxx.allowCancelEmergencyAlert);
         out.allow_emergency_private_call = B(cxx.allowEmergencyPrivateCall);
         out.allow_adhoc_group_call = B(cxx.allowAdhocGroupCall);
+        out.allow_cancel_group_emergency = B(cxx.allowCancelGroupEmergency);
+        out.allow_cancel_imminent_peril = B(cxx.allowCancelImminentPeril);
     }
 };
 
@@ -429,6 +435,17 @@ struct ServiceConfigHolder {
         out.num_levels_group_hierarchy = cxx.numLevelsGroupHierarchy;
         out.num_levels_user_hierarchy = cxx.numLevelsUserHierarchy;
         out.rp_emergency = C(cxx.rpEmergency); out.rp_imminent_peril = C(cxx.rpImminentPeril); out.rp_normal = C(cxx.rpNormal);
+    }
+};
+
+struct UeInitConfigHolder {
+    UeInitConfigDoc cxx;
+    cimsue_ue_init_config_doc_t out{};
+
+    void build() {
+        out = cimsue_ue_init_config_doc_t{};
+        out.etag = C(cxx.etag); out.not_modified = B(cxx.notModified); out.domain = C(cxx.domain);
+        out.mcptt_server_uri = C(cxx.mcpttServerUri); out.mcdata_server_uri = C(cxx.mcdataServerUri);
     }
 };
 
@@ -580,6 +597,7 @@ struct Scratch {
     std::vector<cimsue_video_device_info_t> vdevsC;
     UserProfileHolder                       userProfile;
     ServiceConfigHolder                     serviceConfig;
+    UeInitConfigHolder                      ueInitConfig;
     AccountConfig                           acc;
     std::vector<const char*>                accSec;
     ProfileHolder                           profile;
@@ -689,6 +707,7 @@ struct cimsue_csc {
     cimsue_fd_upload_t         fdC{};
     UserProfileHolder          userProfile;
     ServiceConfigHolder        serviceConfig;
+    UeInitConfigHolder         ueInitConfig;
 };
 
 namespace {
@@ -1048,9 +1067,10 @@ cimsue_status_t CIMSUE_CALL cimsue_engine_send_fd(cimsue_engine_t* e, int32_t ac
 
 cimsue_status_t CIMSUE_CALL cimsue_engine_send_sds_notification(cimsue_engine_t* e, int32_t account_id,
                                                                 const char* peer, const char* conv_id,
-                                                                const char* msg_id, int32_t notif_type, int64_t* token_out) {
+                                                                const char* msg_id, const char* group_id, int32_t notif_type,
+                                                                int64_t* token_out) {
     if (!e) return -1;
-    SdsSend r = e->eng.sendSdsNotification(account_id, S(peer), S(conv_id), S(msg_id), notif_type);
+    SdsSend r = e->eng.sendSdsNotification(account_id, S(peer), S(conv_id), S(msg_id), notif_type, S(group_id));
     if (token_out) *token_out = r.token;
     return ret(Result{r.ok, r.code, r.reason});
 }
@@ -1351,6 +1371,16 @@ cimsue_status_t CIMSUE_CALL cimsue_csc_fetch_service_config(cimsue_csc_t* c, con
     return st;
 }
 
+cimsue_status_t CIMSUE_CALL cimsue_csc_fetch_ue_init_config(cimsue_csc_t* c, const char* mcs_ue_id, const char* etag,
+                                                            cimsue_ue_init_config_doc_t* out) {
+    if (!c) return -1;
+    c->ueInitConfig.cxx = UeInitConfigDoc();
+    cimsue_status_t st = ret(c->cli->fetchUeInitConfig(S(mcs_ue_id), S(etag), c->ueInitConfig.cxx));
+    c->ueInitConfig.build();
+    if (out) *out = c->ueInitConfig.out;
+    return st;
+}
+
 cimsue_status_t CIMSUE_CALL cimsue_user_profile_parse(const char* xml, cimsue_user_profile_doc_t* out) {
     g_s.userProfile.cxx = UserProfileDoc();
     std::string err;
@@ -1371,6 +1401,16 @@ cimsue_status_t CIMSUE_CALL cimsue_service_config_parse(const char* xml, cimsue_
     return CIMSUE_OK;
 }
 
+cimsue_status_t CIMSUE_CALL cimsue_ue_init_config_parse(const char* xml, cimsue_ue_init_config_doc_t* out) {
+    g_s.ueInitConfig.cxx = UeInitConfigDoc();
+    std::string err;
+    bool ok = UeInitConfigDoc::parse(S(xml), g_s.ueInitConfig.cxx, &err);
+    g_s.ueInitConfig.build();
+    if (out) *out = g_s.ueInitConfig.out;
+    if (!ok) { g_lastError = err; return -1; }
+    return CIMSUE_OK;
+}
+
 void CIMSUE_CALL cimsue_capabilities_of(const cimsue_user_profile_doc_t* user_profile,
                                         const cimsue_service_config_doc_t* service_config, cimsue_capabilities_t* out) {
     if (!out) return;
@@ -1383,6 +1423,7 @@ void CIMSUE_CALL cimsue_capabilities_of(const cimsue_user_profile_doc_t* user_pr
     out->imminent_peril_call = B(k.imminentPerilCall); out->emergency_private_call = B(k.emergencyPrivateCall);
     out->emergency_alert = B(k.emergencyAlert); out->cancel_emergency_alert = B(k.cancelEmergencyAlert);
     out->adhoc_group_call = B(k.adhocGroupCall); out->max_affiliations_n2 = k.maxAffiliationsN2;
+    out->cancel_group_emergency = B(k.cancelGroupEmergency); out->cancel_imminent_peril = B(k.cancelImminentPeril);
 }
 
 void CIMSUE_CALL cimsue_csc_tls_peer_expiry(cimsue_csc_t* c, cimsue_tls_peer_expiry_t* out) {
@@ -1477,6 +1518,7 @@ int32_t CIMSUE_CALL cimsue_struct_size(cimsue_struct_id_t id) {
     case CIMSUE_STRUCT_USER_PROFILE_DOC:  return (int32_t)sizeof(cimsue_user_profile_doc_t);
     case CIMSUE_STRUCT_SERVICE_CONFIG_DOC: return (int32_t)sizeof(cimsue_service_config_doc_t);
     case CIMSUE_STRUCT_CAPABILITIES:      return (int32_t)sizeof(cimsue_capabilities_t);
+    case CIMSUE_STRUCT_UE_INIT_CONFIG_DOC: return (int32_t)sizeof(cimsue_ue_init_config_doc_t);
     default:                              return -1;
     }
 }

@@ -314,6 +314,7 @@ static const char* kUserProfileXml = R"(<?xml version="1.0" encoding="UTF-8"?>
     <cp:rule id="mcptt-user-authorisation">
       <cp:actions>
         <allow-emergency-group-call>true</allow-emergency-group-call>
+        <allow-cancel-group-emergency>false</allow-cancel-group-emergency>
         <allow-activate-emergency-alert>false</allow-activate-emergency-alert>
         <allow-cancel-emergency-alert>false</allow-cancel-emergency-alert>
         <allow-emergency-private-call>true</allow-emergency-private-call>
@@ -371,6 +372,8 @@ TEST(CmsDoc, ParseUserProfile) {
     EXPECT_EQ(d.maxAffiliationsN2, 8);
     EXPECT_TRUE(d.allowEmergencyGroupCall);
     EXPECT_TRUE(d.allowImminentPerilCall);                     // 요소 없음 = 허용
+    EXPECT_FALSE(d.allowCancelGroupEmergency);                 // CSC 기본값(개시자만 — TS 24.379 §6.3.3.1.13.4)
+    EXPECT_TRUE(d.allowCancelImminentPeril);                   // 요소 없음 = 허용
     EXPECT_FALSE(d.allowActivateEmergencyAlert);
     EXPECT_FALSE(d.allowCancelEmergencyAlert);
     EXPECT_TRUE(d.allowEmergencyPrivateCall);
@@ -421,6 +424,9 @@ TEST(CmsDoc, CapabilitiesFromUserProfile) {
     EXPECT_TRUE(c.imminentPerilCall);
     EXPECT_TRUE(c.privateCall && c.emergencyPrivateCall);      // allow-private-call 요소 없음 = 허용
     EXPECT_FALSE(c.emergencyAlert);                            // 사용자 불허
+    EXPECT_FALSE(c.cancelGroupEmergency);                      // 앱은 «내가 올린 조건» 과 OR 한다
+    EXPECT_TRUE(c.cancelImminentPeril);
+    EXPECT_TRUE(none.cancelGroupEmergency && none.cancelImminentPeril);
     EXPECT_FALSE(c.adhocGroupCall);
     EXPECT_EQ(c.maxAffiliationsN2, 8);                         // user profile MaxAffiliationsN2
     EXPECT_EQ(Capabilities::of(&up, nullptr).maxAffiliationsN2, 8);
@@ -432,6 +438,46 @@ TEST(CmsDoc, CapabilitiesFromUserProfile) {
     Capabilities p = Capabilities::of(&np, nullptr);
     EXPECT_FALSE(p.privateCall);                               // 이름 경계 — -media-protection 을 잡지 않는다
     EXPECT_FALSE(p.emergencyPrivateCall);
+}
+
+// 서버(csc _build_ue_init_config_xml) 산출 모양 — *-Service-Details 는 <on-network><anyExt> 안(TS 24.484 §7.2.2.3)
+TEST(CmsDoc, ParseUeInitConfig) {
+    const char* xml = R"(<?xml version="1.0" encoding="UTF-8"?>
+<mcptt-UE-initial-configuration xmlns="urn:3gpp:mcptt:mcpttUEinitConfig:1.0" domain="ptt.example.org">
+  <name>CIMS</name>
+  <on-network>
+    <Timers><T100>4</T100></Timers>
+    <App-Server-Info><idms-auth-endpoint>https://h/idms</idms-auth-endpoint></App-Server-Info>
+    <anyExt>
+      <MCPTT-Service-Details>
+        <IPv6-Required>false</IPv6-Required>
+        <Server-URI>sip:mcptt_psi@ptt.example.org</Server-URI>
+      </MCPTT-Service-Details>
+      <MCData-Service-Details>
+        <IPv6-Required>false</IPv6-Required>
+        <Server-URI>sip:mcdata_psi@ptt.example.org</Server-URI>
+      </MCData-Service-Details>
+    </anyExt>
+  </on-network>
+</mcptt-UE-initial-configuration>)";
+    UeInitConfigDoc d; d.etag = "\"u1\"";
+    std::string err;
+    ASSERT_TRUE(UeInitConfigDoc::parse(xml, d, &err)) << err;
+    EXPECT_EQ(d.etag, "\"u1\"");
+    EXPECT_EQ(d.domain, "ptt.example.org");
+    EXPECT_EQ(d.mcpttServerUri, "sip:mcptt_psi@ptt.example.org");
+    EXPECT_EQ(d.mcdataServerUri, "sip:mcdata_psi@ptt.example.org");
+    // MCData 를 광고하지 않으면(CSC UeInitConfig.ServiceDetails.McData.Enable=false) 빈 값 — 통지는 전환기 형식
+    UeInitConfigDoc m;
+    ASSERT_TRUE(UeInitConfigDoc::parse("<mcptt-UE-initial-configuration domain=\"d\"><on-network><anyExt><MCPTT-Service-Details>"
+                                       "<Server-URI>sip:p@d</Server-URI></MCPTT-Service-Details></anyExt></on-network>"
+                                       "</mcptt-UE-initial-configuration>", m));
+    EXPECT_EQ(m.mcpttServerUri, "sip:p@d");
+    EXPECT_TRUE(m.mcdataServerUri.empty());
+    EXPECT_FALSE(UeInitConfigDoc::parse("<mcptt-user-profile/>", m, &err));
+    // XCAP URI(§7.2.1.1) — users/sip:<MCS UE ID>/<MCS UE ID>
+    EXPECT_EQ(CscClient::ueInitConfigPath("urn:uuid:1"),
+              "/org.3gpp.mcptt.ue-init-config/users/" + CscClient::enc("sip:urn:uuid:1") + "/" + CscClient::enc("urn:uuid:1"));
 }
 
 TEST(DialogInfo, ParseAndJoinHeader) {

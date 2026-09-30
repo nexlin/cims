@@ -1,5 +1,7 @@
 #include "sds_codec.h"
 
+#include "csc/xml_scan.h"
+
 #include <openssl/evp.h>
 
 #include <cctype>
@@ -213,7 +215,8 @@ Body buildOneToOneFd(const std::string& peerUri, const FdFile& file, const std::
     return buildFd("one-to-one-fd", peerUri, file, convId, msgId, timeSec);
 }
 
-Body buildNotification(const std::string& convId, const std::string& msgId, int notifType, int64_t timeSec) {
+Body buildNotification(const std::string& convId, const std::string& msgId, int notifType, int64_t timeSec,
+                       const std::string& targetUri, const std::string& groupUri) {
     std::string tlv;
     tlv += (char)kMsgSdsNotification;
     tlv += (char)notifType;
@@ -222,7 +225,29 @@ Body buildNotification(const std::string& convId, const std::string& msgId, int 
     tlv += hexDecode(msgId);
     std::string boundary = "mcdata-ntf-" + msgId.substr(0, 12);
     std::string body;
-    appendPart(body, boundary, kCtSignalling, "base64", base64Encode(tlv));
+    // §12.2.1.1 5) 그룹 데이터 요청에 대한 통지면 mcdata-info <mcdata-calling-group-id>
+    if (!targetUri.empty() && !groupUri.empty())
+        appendPart(body, boundary, kCtInfo, nullptr,
+                   "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+                   "<mcdatainfo xmlns=\"urn:3gpp:ns:mcdataInfo:1.0\">\n"
+                   "  <mcdata-Params>\n"
+                   "    <mcdata-calling-group-id type=\"Normal\"><mcdataURI>" + xmlscan::esc(groupUri) +
+                   "</mcdataURI></mcdata-calling-group-id>\n"
+                   "  </mcdata-Params>\n"
+                   "</mcdatainfo>");
+    appendPart(body, boundary, kCtSignalling, "base64", base64Encode(tlv));                          // 6) SDS NOTIFICATION
+    // 3) 통지 대상 MCData ID — resource-lists entry 하나(RFC 5366 recipient-list)
+    if (!targetUri.empty()) {
+        body += "--" + boundary + "\r\n";
+        body += std::string("Content-Type: ") + kCtResourceLists + "\r\n";
+        body += "Content-Disposition: recipient-list\r\n\r\n";
+        body += "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+                "<resource-lists xmlns=\"urn:ietf:params:xml:ns:resource-lists\">\n"
+                "  <list>\n"
+                "    <entry uri=\"" + xmlscan::esc(targetUri) + "\"/>\n"
+                "  </list>\n"
+                "</resource-lists>\r\n";
+    }
     body += "--" + boundary + "--\r\n";
     return Body{"multipart/mixed;boundary=" + boundary, body};
 }
@@ -305,12 +330,17 @@ bool parse(const std::string& contentType, const std::string& body, SdsMessage& 
     }
     if (boundary.empty()) return false;
     bool haveSig = false;
+    std::string callingGroup;
     for (auto& p : splitParts(body, boundary)) {
         std::string raw = p.b64 ? base64Decode(p.content) : p.content;
         if (p.ct == kCtInfo) {
             // 1:1(one-to-one-sds/-fd)의 request-uri 는 받는 사람(나)이다 — 그룹으로 오인하면 내 번호 스레드가 생긴다.
             //   request-type 이 없으면(옛 발신자) request-uri 를 그룹으로 본다.
             if (elemText(raw, "request-type").rfind("one-to-one", 0) != 0) out.groupUri = mcdataUri(raw, "mcdata-request-uri");
+            // 보낸 사용자·그룹의 정본(TS 24.282 §12.2.1.1 — disposition 통지가 이 둘로 대상을 정한다)
+            callingGroup = mcdataUri(raw, "mcdata-calling-group-id");
+            if (!callingGroup.empty()) out.groupUri = callingGroup;
+            out.fromUri = mcdataUri(raw, "mcdata-calling-user-id");                // 없으면 호출자가 From 으로 채운다
         } else if (p.ct == kCtSignalling) {
             if (raw.size() < 38) continue;
             haveSig = true;
@@ -377,6 +407,8 @@ bool parse(const std::string& contentType, const std::string& body, SdsMessage& 
             }
         }
     }
+    // 중계된 disposition 통지의 request-uri 는 통지 대상(나)이다(§12.2.3 14)) — 그룹은 <mcdata-calling-group-id> 뿐이다
+    if (out.notification) out.groupUri = callingGroup;
     return haveSig;
 }
 

@@ -27,6 +27,7 @@ import com.cims.ue.sdk.MediaSecurity
 import com.cims.ue.sdk.RegInfo
 import com.cims.ue.sdk.SdsMessage
 import com.cims.ue.sdk.Transport
+import com.cims.ue.sdk.UeInitConfigDoc
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
@@ -453,7 +454,10 @@ class PttController(
         )
         if (!started.ok) { _reg.value = RegState.Failed("${started.code} ${started.reason}"); return@launch }
         ue.setCaptureEnabled(false)
-        val acc = ue.addAccount(accountConfig()).getOrNull()
+        // 참여 기능 PSI = UE initial configuration(TS 24.484 §7.2.2.1 10)·14)) — 로그인 전 문서(토큰 없음). 못 받으면 PSI 없이
+        //   (경보 = 그룹 URI, disposition 통지 = 원 발신자 직행 — 코어 전환기 경로).
+        val ueInit = instanceId?.takeIf { it.isNotEmpty() }?.let { id -> csc?.fetchUeInitConfig(id)?.getOrNull() }
+        val acc = ue.addAccount(accountConfig(ueInit)).getOrNull()
             ?: run { _reg.value = RegState.Failed("addAccount"); return@launch }
         account = acc
         applyAudioRouteNow()
@@ -465,7 +469,7 @@ class PttController(
     fun unregister() = ctl.launch { account?.unregister() }
 
     /** 기존 설정(SipAccountConfig) → 코어 계정 — 매핑 규칙(Digest·SRTP·sec-agree)은 코어(account_map.cpp)가 한다. */
-    private fun accountConfig(): AccountConfig {
+    private fun accountConfig(ueInit: UeInitConfigDoc? = null): AccountConfig {
         val c = sipConfig
         return AccountConfig(
             serverHost = c.serverHost, serverPort = c.serverPort,
@@ -491,6 +495,8 @@ class PttController(
             instanceId = instanceId.orEmpty(),
             maxSdsCplaneBytes = c.maxPayloadSdsCplaneBytes,        // 넘는 그룹 SDS 는 media plane(TS 24.282 §9.2.3)
             mcdataMsrp = true,                                     // 서버발 MSRP 배포 수신(REGISTER Contact ICSI mcdata.sds)
+            mcpttServerUri = ueInit?.mcpttServerUri.orEmpty(),     // 경보 Request-URI(TS 24.379 §12.1.1.1 8))
+            mcdataServerUri = ueInit?.mcdataServerUri.orEmpty(),   // disposition 통지 Request-URI(TS 24.282 §12.2.1.1)
         )
     }
 
@@ -614,6 +620,7 @@ class PttController(
     private fun onRequestResult(r: com.cims.ue.sdk.RequestResult) {
         if (groupsPlane.onAffiliationResult(r)) return
         if (messaging.onSendResult(r)) return
+        if (emergencyPlane.onAlertResult(r)) return
         earlyResults[r.token] = r
         if (earlyResults.size > 256) earlyResults.keys.take(64).forEach { earlyResults.remove(it) }
     }
@@ -649,8 +656,8 @@ class PttController(
     suspend fun sendAttachment(peer: String, data: ByteArray, fileName: String, mime: String): FdSent? =
         messaging.sendAttachment(peer, data, fileName, mime)
     suspend fun downloadAttachment(url: String): ByteArray? = messaging.downloadAttachment(url)
-    fun sendSdsNotification(peerId: String, convId: String, msgId: String, notifType: Int) =
-        messaging.sendSdsNotification(peerId, convId, msgId, notifType)
+    fun sendSdsNotification(peerId: String, convId: String, msgId: String, notifType: Int, groupUri: String = "") =
+        messaging.sendSdsNotification(peerId, convId, msgId, notifType, groupUri)
 
     fun startEmergency() = emergencyPlane.startEmergency()
     fun cancelEmergency() = emergencyPlane.cancelEmergency()

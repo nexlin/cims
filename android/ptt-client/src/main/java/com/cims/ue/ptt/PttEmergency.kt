@@ -151,7 +151,8 @@ internal class EmergencyPlane(private val c: PttController) {
         c.publish()
     }
 
-    /** 긴급 해제 — 개시자만 유효(서버는 비개시자의 취소 re-INVITE 를 무시, TS 24.379). */
+    /** 긴급 해제 — 이 앱은 개시자만 해제한다(TS 24.379 §6.2.8.1.7 local policy). 서버는 개시자 ∨ allow-cancel-group-emergency 만
+     *  받고 그 밖은 403(§6.3.3.1.13.4) — 비개시자 해제는 그 자격을 가진 관제 앱의 몫이다. */
     fun cancelEmergency() {
         val s = synchronized(c.lock) { c.sessionMap.values.firstOrNull { it.emergency && it.emergencyMine } }
         if (s == null) {
@@ -194,7 +195,10 @@ internal class EmergencyPlane(private val c: PttController) {
         }
         c.ctl.launch {
             val r = c.account?.sendEmergencyAlert(groupId, activate)
-            if (r == null || !r.ok) Log.w(TAG, "긴급경보 ${if (activate) "발신" else "취소"} 실패: ${r?.code} ${r?.reason}")
+            val token = r?.getOrNull()
+            if (token == null) { Log.w(TAG, "긴급경보 ${if (activate) "발신" else "취소"} 실패: ${r?.code} ${r?.reason}"); return@launch }
+            alertPending[token] = groupId to activate
+            c.takeEarly(token)?.let { onAlertResult(it) }
         }
         val me = bareId(c.mcpttId)
         if (activate) {
@@ -204,6 +208,31 @@ internal class EmergencyPlane(private val c: PttController) {
             removeAlert(groupId, me)
             c.emit(PttEventKind.ALERT_END, groupId)
         }
+    }
+
+    /** 경보 MESSAGE token → (그룹, 발령 여부) — 최종 응답으로 로컬 표시를 서버 판정에 맞춘다. */
+    private val alertPending = java.util.concurrent.ConcurrentHashMap<Long, Pair<String, Boolean>>()
+
+    /** 경보 MESSAGE 최종 응답 — 이 평면의 token 이면 true. 서버는 미인가 발령을 403 + alert-ind false(TS 24.379 §12.1.3.1 4)a) —
+     *  전파 없음), 미인가 취소를 403 + alert-ind true(§12.1.3.2 — 경보 유지)로 답한다. 로컬 표시는 보낼 때 먼저 바꿨으므로 되돌린다. */
+    fun onAlertResult(r: com.cims.ue.sdk.RequestResult): Boolean {
+        val (groupId, activate) = alertPending.remove(r.token) ?: return false
+        if (r.code in 200..299) return true
+        Log.w(TAG, "긴급경보 ${if (activate) "발신" else "취소"} 거절: ${r.code} ${r.reason}")
+        if (r.code != 403) return true                      // 전송 실패·시한 — 서버 판정을 모르므로 표시는 그대로
+        val me = bareId(c.mcpttId)
+        if (activate) {
+            removeAlert(groupId, me)
+            c._status.value = "[$groupId] 긴급경보 미인가"
+            c.feedback?.blocked("긴급경보 권한이 없습니다")
+            c.emit(PttEventKind.ALERT_END, groupId)
+        } else {
+            addAlert(ActiveAlert(groupId, me, System.currentTimeMillis(), mine = true))
+            c._status.value = "[$groupId] 긴급경보 해제 권한 없음"
+            c.emit(PttEventKind.ALERT, groupId)
+        }
+        c.publish()
+        return true
     }
 
     private fun addAlert(a: ActiveAlert) {
