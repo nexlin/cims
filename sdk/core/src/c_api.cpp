@@ -492,6 +492,52 @@ struct UserProfileHolder {
     }
 };
 
+struct McVideoUserProfileHolder {
+    McVideoUserProfileDoc cxx;
+    std::vector<const char*> groups, implicit;
+    cimsue_mcvideo_user_profile_doc_t out{};
+
+    void build() {
+        auto entry = [](const CmsEntry& e) { return cimsue_cms_entry_t{C(e.uri), C(e.mode)}; };
+        groups.clear(); implicit.clear();
+        for (const auto& g : cxx.groups) groups.push_back(C(g));
+        for (const auto& g : cxx.implicitAffiliations) implicit.push_back(C(g));
+        out = cimsue_mcvideo_user_profile_doc_t{};
+        out.etag = C(cxx.etag); out.not_modified = B(cxx.notModified); out.user_uri = C(cxx.userUri); out.mcvideo_id = C(cxx.mcvideoId);
+        out.groups = groups.empty() ? nullptr : groups.data();
+        out.group_count = (int32_t)groups.size();
+        out.implicit_affiliations = implicit.empty() ? nullptr : implicit.data();
+        out.implicit_affiliation_count = (int32_t)implicit.size();
+        out.max_affiliations_n2 = cxx.maxAffiliationsN2;
+        out.max_simultaneous_video_streams = cxx.maxSimultaneousVideoStreams;
+        out.max_simultaneous_calls_n6 = cxx.maxSimultaneousCallsN6;
+        out.emergency_group = entry(cxx.emergencyGroup);
+        out.imminent_peril_group = entry(cxx.imminentPerilGroup);
+        out.emergency_alert_group = entry(cxx.emergencyAlertGroup);
+        out.allow_private_call = B(cxx.allowPrivateCall);
+        out.allow_emergency_group_call = B(cxx.allowEmergencyGroupCall);
+        out.allow_emergency_private_call = B(cxx.allowEmergencyPrivateCall);
+        out.allow_imminent_peril_call = B(cxx.allowImminentPerilCall);
+        out.allow_activate_emergency_alert = B(cxx.allowActivateEmergencyAlert);
+        out.allow_revoke_transmit = B(cxx.allowRevokeTransmit);
+        out.allow_remote_ambient_viewing = B(cxx.allowRemoteAmbientViewing);
+        out.allow_local_ambient_viewing = B(cxx.allowLocalAmbientViewing);
+        out.allow_adhoc_group_call = B(cxx.allowAdhocGroupCall);
+    }
+};
+struct McVideoServiceConfigHolder {
+    McVideoServiceConfigDoc cxx;
+    cimsue_mcvideo_service_config_doc_t out{};
+
+    void build() {
+        out = cimsue_mcvideo_service_config_doc_t{};
+        out.etag = C(cxx.etag); out.not_modified = B(cxx.notModified); out.domain = C(cxx.domain);
+        out.rp_emergency = C(cxx.rpEmergency); out.rp_imminent_peril = C(cxx.rpImminentPeril); out.rp_normal = C(cxx.rpNormal);
+        out.confidentiality_protection = B(cxx.confidentialityProtection);
+        out.integrity_protection = B(cxx.integrityProtection);
+        out.t100_sec = cxx.t100Sec; out.t101_sec = cxx.t101Sec; out.t102_sec = cxx.t102Sec; out.t103_sec = cxx.t103Sec; out.t104_sec = cxx.t104Sec;
+    }
+};
 struct ServiceConfigHolder {
     ServiceConfigDoc cxx;
     cimsue_service_config_doc_t out{};
@@ -519,14 +565,65 @@ struct UeInitConfigHolder {
 
 /** Profile 한 벌의 소유자 — C++ 객체와 그것을 가리키는 POD 배열을 함께 들고 있는다. */
 /** GroupDoc 의 C 스냅샷 — 핸들(getter 산출)과 스레드 스크래치(parse) 양쪽이 쓴다. */
+/** MCVideo 몫 기본값(C++ McVideoGroupAttrs 와 같다). */
+void fillDefault(cimsue_mcvideo_group_attrs_t& o) {
+    const McVideoGroupAttrs d;
+    o = cimsue_mcvideo_group_attrs_t{};
+    o.present = B(d.present);
+    o.invite_members = B(d.inviteMembers);
+    o.max_duration_sec = d.maxDurationSec;
+    o.protect_media = B(d.protectMedia);
+    o.protect_transmission_control = B(d.protectTransmissionControl);
+    o.urgent_real_time_video_mode = d.urgentRealTimeVideoMode;
+    o.non_urgent_real_time_video_mode = d.nonUrgentRealTimeVideoMode;
+    o.non_real_time_video_mode = d.nonRealTimeVideoMode;
+    o.max_transmitters = d.maxTransmitters;
+    o.min_number_to_start = d.minNumberToStart;
+    o.group_priority = d.groupPriority;
+    o.reception_hang_timer_sec = d.receptionHangTimerSec;
+    o.allow_conference_state = d.allowConferenceState;
+    o.allow_emergency_call = d.allowEmergencyCall;
+    o.allow_emergency_alert = d.allowEmergencyAlert;
+    o.allow_imminent_peril_call = d.allowImminentPerilCall;
+}
+
+McVideoGroupAttrs toCxx(const cimsue_mcvideo_group_attrs_t& c) {
+    McVideoGroupAttrs a;
+    a.present = c.present != 0;
+    if (!a.present) return a;                         // 전환기 — MCVideo 를 싣지 않는다(나머지는 보지 않는다)
+    a.inviteMembers = c.invite_members != 0;
+    a.maxDurationSec = c.max_duration_sec;
+    a.protectMedia = c.protect_media != 0;
+    a.protectTransmissionControl = c.protect_transmission_control != 0;
+    a.audioEncodings = strList(c.audio_encodings, c.audio_encoding_count);
+    a.videoEncodings = strList(c.video_encodings, c.video_encoding_count);
+    a.videoResolutions = S(c.video_resolutions);
+    a.videoFrameRate = S(c.video_frame_rate);
+    a.urgentRealTimeVideoMode = c.urgent_real_time_video_mode;
+    a.nonUrgentRealTimeVideoMode = c.non_urgent_real_time_video_mode;
+    a.nonRealTimeVideoMode = c.non_real_time_video_mode;
+    a.activeRealTimeVideoMode = S(c.active_real_time_video_mode);
+    a.maxTransmitters = c.max_transmitters;
+    a.minNumberToStart = c.min_number_to_start;
+    a.groupPriority = c.group_priority;
+    a.receptionHangTimerSec = c.reception_hang_timer_sec;
+    a.allowConferenceState = c.allow_conference_state;
+    a.allowEmergencyCall = c.allow_emergency_call;
+    a.allowEmergencyAlert = c.allow_emergency_alert;
+    a.allowImminentPerilCall = c.allow_imminent_peril_call;
+    return a;
+}
+
 struct GroupDocHolder {
     GroupDoc cxx;
     std::vector<cimsue_group_member_t> mem;
+    std::vector<const char*> audioEnc, videoEnc;
     cimsue_group_doc_t out{};
 
     void build() {
         mem.clear();
-        for (const auto& m : cxx.members) mem.push_back({C(m.uri), C(m.name), C(m.role), m.priority, B(m.required), C(m.title)});
+        for (const auto& m : cxx.members)
+            mem.push_back({C(m.uri), C(m.name), C(m.role), m.priority, B(m.required), C(m.title), C(m.mcvideoId)});
         out = cimsue_group_doc_t{};
         out.uri = C(cxx.uri); out.display_name = C(cxx.displayName); out.etag = C(cxx.etag);
         out.members = mem.empty() ? nullptr : mem.data();
@@ -548,6 +645,35 @@ struct GroupDocHolder {
         out.min_number_to_start = cxx.minNumberToStart >= 0 ? cxx.minNumberToStart : 0;
         out.has_ack_timeout = cxx.ackTimeoutSec >= 0;           out.ack_timeout_sec = cxx.ackTimeoutSec >= 0 ? cxx.ackTimeoutSec : 0;
         out.ack_action = cxx.ackAction.empty() ? nullptr : C(cxx.ackAction);
+        const McVideoGroupAttrs& v = cxx.mcvideo;
+        cimsue_mcvideo_group_attrs_t& o = out.mcvideo;
+        fillDefault(o);
+        o.present = B(v.present);
+        o.invite_members = B(v.inviteMembers);
+        o.max_duration_sec = v.maxDurationSec;
+        o.protect_media = B(v.protectMedia);
+        o.protect_transmission_control = B(v.protectTransmissionControl);
+        audioEnc.clear(); videoEnc.clear();
+        for (const auto& e : v.audioEncodings) audioEnc.push_back(C(e));
+        for (const auto& e : v.videoEncodings) videoEnc.push_back(C(e));
+        o.audio_encodings = audioEnc.empty() ? nullptr : audioEnc.data();
+        o.audio_encoding_count = (int32_t)audioEnc.size();
+        o.video_encodings = videoEnc.empty() ? nullptr : videoEnc.data();
+        o.video_encoding_count = (int32_t)videoEnc.size();
+        o.video_resolutions = C(v.videoResolutions);
+        o.video_frame_rate = C(v.videoFrameRate);
+        o.urgent_real_time_video_mode = v.urgentRealTimeVideoMode;
+        o.non_urgent_real_time_video_mode = v.nonUrgentRealTimeVideoMode;
+        o.non_real_time_video_mode = v.nonRealTimeVideoMode;
+        o.active_real_time_video_mode = C(v.activeRealTimeVideoMode);
+        o.max_transmitters = v.maxTransmitters;
+        o.min_number_to_start = v.minNumberToStart;
+        o.group_priority = v.groupPriority;
+        o.reception_hang_timer_sec = v.receptionHangTimerSec;
+        o.allow_conference_state = v.allowConferenceState;
+        o.allow_emergency_call = v.allowEmergencyCall;
+        o.allow_emergency_alert = v.allowEmergencyAlert;
+        o.allow_imminent_peril_call = v.allowImminentPerilCall;
     }
 };
 
@@ -561,6 +687,7 @@ GroupDoc toCxx(const cimsue_group_doc_t* d) {
         if (d->members[i].role && *d->members[i].role) m.role = d->members[i].role;
         m.priority = d->members[i].priority;
         m.required = d->members[i].required != 0;
+        m.mcvideoId = S(d->members[i].mcvideo_id);
         g.members.push_back(m);
     }
     if (d->session_type && *d->session_type) g.sessionType = d->session_type;
@@ -580,6 +707,7 @@ GroupDoc toCxx(const cimsue_group_doc_t* d) {
     g.minNumberToStart = opt(d->has_min_number_to_start, d->min_number_to_start);
     g.ackTimeoutSec = opt(d->has_ack_timeout, d->ack_timeout_sec);
     if (d->ack_action && *d->ack_action) g.ackAction = std::string(d->ack_action) == "proceed" ? "proceed" : "abandon";
+    g.mcvideo = toCxx(d->mcvideo);
     return g;
 }
 
@@ -666,6 +794,8 @@ struct Scratch {
     UserProfileHolder                       userProfile;
     ServiceConfigHolder                     serviceConfig;
     UeInitConfigHolder                      ueInitConfig;
+    McVideoUserProfileHolder                mcvideoUserProfile;
+    McVideoServiceConfigHolder              mcvideoServiceConfig;
     AccountConfig                           acc;
     std::vector<const char*>                accSec;
     ProfileHolder                           profile;
@@ -789,6 +919,8 @@ struct cimsue_csc {
     UserProfileHolder          userProfile;
     ServiceConfigHolder        serviceConfig;
     UeInitConfigHolder         ueInitConfig;
+    McVideoUserProfileHolder   mcvideoUserProfile;
+    McVideoServiceConfigHolder mcvideoServiceConfig;
 };
 
 namespace {
@@ -1543,6 +1675,50 @@ cimsue_status_t CIMSUE_CALL cimsue_ue_init_config_parse(const char* xml, cimsue_
     return CIMSUE_OK;
 }
 
+cimsue_status_t CIMSUE_CALL cimsue_csc_fetch_mcvideo_user_profile(cimsue_csc_t* c, const char* access_token, const char* mcvideo_id,
+                                                                  const char* etag, cimsue_mcvideo_user_profile_doc_t* out) {
+    if (!c) return -1;
+    c->mcvideoUserProfile.cxx = McVideoUserProfileDoc();
+    cimsue_status_t st = ret(c->cli->fetchMcVideoUserProfile(S(access_token), S(mcvideo_id), S(etag), c->mcvideoUserProfile.cxx));
+    c->mcvideoUserProfile.build();
+    if (out) *out = c->mcvideoUserProfile.out;
+    return st;
+}
+
+cimsue_status_t CIMSUE_CALL cimsue_csc_fetch_mcvideo_service_config(cimsue_csc_t* c, const char* access_token, const char* etag,
+                                                                    cimsue_mcvideo_service_config_doc_t* out) {
+    if (!c) return -1;
+    c->mcvideoServiceConfig.cxx = McVideoServiceConfigDoc();
+    cimsue_status_t st = ret(c->cli->fetchMcVideoServiceConfig(S(access_token), S(etag), c->mcvideoServiceConfig.cxx));
+    c->mcvideoServiceConfig.build();
+    if (out) *out = c->mcvideoServiceConfig.out;
+    return st;
+}
+
+cimsue_status_t CIMSUE_CALL cimsue_mcvideo_user_profile_parse(const char* xml, cimsue_mcvideo_user_profile_doc_t* out) {
+    g_s.mcvideoUserProfile.cxx = McVideoUserProfileDoc();
+    std::string err;
+    bool ok = McVideoUserProfileDoc::parse(S(xml), g_s.mcvideoUserProfile.cxx, &err);
+    g_s.mcvideoUserProfile.build();
+    if (out) *out = g_s.mcvideoUserProfile.out;
+    if (!ok) { g_lastError = err; return -1; }
+    return CIMSUE_OK;
+}
+
+cimsue_status_t CIMSUE_CALL cimsue_mcvideo_service_config_parse(const char* xml, cimsue_mcvideo_service_config_doc_t* out) {
+    g_s.mcvideoServiceConfig.cxx = McVideoServiceConfigDoc();
+    std::string err;
+    bool ok = McVideoServiceConfigDoc::parse(S(xml), g_s.mcvideoServiceConfig.cxx, &err);
+    g_s.mcvideoServiceConfig.build();
+    if (out) *out = g_s.mcvideoServiceConfig.out;
+    if (!ok) { g_lastError = err; return -1; }
+    return CIMSUE_OK;
+}
+
+void CIMSUE_CALL cimsue_mcvideo_group_attrs_default(cimsue_mcvideo_group_attrs_t* out) {
+    if (out) fillDefault(*out);
+}
+
 void CIMSUE_CALL cimsue_capabilities_of(const cimsue_user_profile_doc_t* user_profile,
                                         const cimsue_service_config_doc_t* service_config, cimsue_capabilities_t* out) {
     if (!out) return;
@@ -1656,6 +1832,9 @@ int32_t CIMSUE_CALL cimsue_struct_size(cimsue_struct_id_t id) {
     case CIMSUE_STRUCT_TRANSMISSION_EVENT: return (int32_t)sizeof(cimsue_transmission_event_t);
     case CIMSUE_STRUCT_RECEPTION_EVENT:    return (int32_t)sizeof(cimsue_reception_event_t);
     case CIMSUE_STRUCT_TRANSMISSION_INFO:  return (int32_t)sizeof(cimsue_transmission_info_t);
+    case CIMSUE_STRUCT_MCVIDEO_GROUP_ATTRS: return (int32_t)sizeof(cimsue_mcvideo_group_attrs_t);
+    case CIMSUE_STRUCT_MCVIDEO_USER_PROFILE_DOC: return (int32_t)sizeof(cimsue_mcvideo_user_profile_doc_t);
+    case CIMSUE_STRUCT_MCVIDEO_SERVICE_CONFIG_DOC: return (int32_t)sizeof(cimsue_mcvideo_service_config_doc_t);
     default:                              return -1;
     }
 }

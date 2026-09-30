@@ -58,6 +58,9 @@ public unsafe class AbiLayoutTests
         new object[] { cimsue_struct_id_t.TRANSMISSION_EVENT, sizeof(cimsue_transmission_event_t) },
         new object[] { cimsue_struct_id_t.RECEPTION_EVENT, sizeof(cimsue_reception_event_t) },
         new object[] { cimsue_struct_id_t.TRANSMISSION_INFO, sizeof(cimsue_transmission_info_t) },
+        new object[] { cimsue_struct_id_t.MCVIDEO_GROUP_ATTRS, sizeof(cimsue_mcvideo_group_attrs_t) },
+        new object[] { cimsue_struct_id_t.MCVIDEO_USER_PROFILE_DOC, sizeof(cimsue_mcvideo_user_profile_doc_t) },
+        new object[] { cimsue_struct_id_t.MCVIDEO_SERVICE_CONFIG_DOC, sizeof(cimsue_mcvideo_service_config_doc_t) },
     };
 
     [Theory]

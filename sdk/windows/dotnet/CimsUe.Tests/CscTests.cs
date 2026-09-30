@@ -296,4 +296,57 @@ public class CscTests
         Assert.False(UeInitConfigDoc.Parse("<mcptt-user-profile/>").Ok);
         Assert.False(string.IsNullOrEmpty(Engine.ToText(ConditionCause.Denied)));
     }
+
+    // MCVideo 설정 문서(C7) — 그룹 문서 MCVideo 몫 왕복·null = 싣지 않음, user profile·service config 해석(코어 파서).
+    [Fact]
+    public void McVideoDocs()
+    {
+        var doc = new GroupDoc { Uri = "tel:g101", DisplayName = "현장영상 1팀" };
+        doc.Members.Add(new GroupMember { Uri = "tel:+82510002001" });
+        Assert.DoesNotContain("mcvideo", doc.ToXml());               // Mcvideo = null — 싣지 않는다(서버 MCVideo 설정 유지)
+        doc.Mcvideo = new McVideoGroupAttrs
+        {
+            ProtectMedia = false, ProtectTransmissionControl = false, MaxDurationSec = 1800, VideoEncodings = { "H264" },
+            NonUrgentRealTimeVideoMode = true, MaxTransmitters = 2, ReceptionHangTimerSec = 30, AllowEmergencyCall = false,
+        };
+        string xml = doc.ToXml();
+        Assert.Contains("<mcpttgi:mcvideo-mcvideo-id uri=\"tel:+82510002001\"/>", xml);
+        Assert.Contains("<mcpttgi:mcvideo-protect-media>false</mcpttgi:mcvideo-protect-media>", xml);
+        var back = GroupDoc.Parse(xml);
+        Assert.True(back.Ok, back.Reason);
+        var v = back.Value!.Mcvideo;
+        Assert.NotNull(v);
+        Assert.False(v!.InviteMembers);                              // chat
+        Assert.Equal(1800, v.MaxDurationSec);
+        Assert.Equal(new[] { "H264" }, v.VideoEncodings);
+        Assert.True(v.NonUrgentRealTimeVideoMode);
+        Assert.Null(v.UrgentRealTimeVideoMode);                      // 미기재
+        Assert.Equal(2, v.MaxTransmitters);
+        Assert.Equal(30, v.ReceptionHangTimerSec);
+        Assert.False(v.AllowEmergencyCall);
+        Assert.Null(v.AllowEmergencyAlert);
+        Assert.Equal("tel:+82510002001", back.Value.Members[0].McvideoId);
+
+        var up = McVideoUserProfileDoc.Parse("""
+            <mcvideo-user-profile XUI-URI="tel:+82510002001"><Common><MCVideoUserID><uri-entry>tel:+82510002001</uri-entry></MCVideoUserID></Common>
+            <OnNetwork><MCVideoGroupInfo><MCVideo-Group-ID><uri-entry>tel:g101</uri-entry></MCVideo-Group-ID></MCVideoGroupInfo>
+            <MaxSimultaneousVideoStreams>1</MaxSimultaneousVideoStreams></OnNetwork></mcvideo-user-profile>
+            """);
+        Assert.True(up.Ok, up.Reason);
+        Assert.Equal("tel:+82510002001", up.Value!.McvideoId);
+        Assert.Equal(new[] { "tel:g101" }, up.Value.Groups);
+        Assert.Equal(1, up.Value.MaxSimultaneousVideoStreams);
+        Assert.True(up.Value.AllowRevokeTransmit);                  // ruleset 이 없으면 허용
+        Assert.False(McVideoUserProfileDoc.Parse("<mcptt-user-profile/>").Ok);
+
+        var sc = McVideoServiceConfigDoc.Parse("""
+            <service-configuration-info><service-configuration-params domain="d"><on-network><anyExt><tc-timers-counters-R14>
+            <T100-transmission-request>2</T100-transmission-request></tc-timers-counters-R14></anyExt></on-network>
+            </service-configuration-params></service-configuration-info>
+            """);
+        Assert.True(sc.Ok, sc.Reason);
+        Assert.Equal(2, sc.Value!.T100Sec);
+        Assert.Equal(-1, sc.Value.T101Sec);
+        Assert.True(sc.Value.ConfidentialityProtection);            // 없으면 켜진 것
+    }
 }

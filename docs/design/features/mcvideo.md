@@ -10,7 +10,7 @@
 > (SDK `mcvideo/tc_participant`), V0 전부, CSC 설정 평면(§5.1 — 관리 API·콘솔 제외)과 그 문서들의 SDK 해석(§5.4), CSP 호 제어 부품·모듈·서비스 판별·
 > 등록 능력·서비스별 affiliation(§5.2), CMP 그룹 종류·멤버 포트·제어 명령·송출·수신 제어 상태 머신·미디어 분배·보호(SRTP·전송 제어 SRTCP)(§5.3·§5.3.1),
 > 단말 SDK 등록 태그·affiliation·그룹 호(개시·재합류·멤버 초대 수락)·전송 제어 결선·송출 게이트(§5.4 — 루프백 시험, 실서버 미연동). CSP 그룹 호 처리,
-> 영상 RTCP 전달·녹취, 단말 영상 송출·송출별 렌더(C6)·바인딩(C7)은 미구현.
+> 영상 RTCP 전달·녹취, 단말 영상 송출·송출별 렌더(C6)는 미구현(바인딩 C7 은 구현 — .NET 빌드·시험은 Windows).
 >
 > 규격 판본: TS 24.281 V18.14.0 · TS 24.581 V18.8.0 · TS 23.281 V18.12.0 · TS 24.481 V19.3.0 · TS 24.484 V20.0.0 · TS 23.280 V20.4.0 ·
 > TS 33.180 V20.0.0. 관계 문서: 로드맵 표 [mcptt_standard_conformance.md](mcptt_standard_conformance.md) R3·R6, 현행 PTT 영상 협상
@@ -394,8 +394,8 @@ Indicator, automatic 수신; 1차 CSP 는 normal) · JOIN 응답 `audio_ssrc`·`
   회수 #3 — §5.3.1). 빈 RTP keep-alive·RTCP·제어 채널 빈 RR 은 계속 나가 NAT·latch 를 연다.
 - **수신 제어** — `acceptReception(callId, transmitterId)`·`endReception`(§6.2.5, T103·T104)은 결선됐다. 스트림별 렌더 창(현행 «호별 수신 창» 과제와 합친다 —
   ue_sdk.md §11)과 송출 영상 결선은 C6.
-- **바인딩**(구현 — C7) — C API·.NET·Kotlin 같은 이름(현행 그룹 영상 옵션 누락도 메웠다 — [ue_sdk.md](ue_sdk.md) §4.6). MCVideo 설정 문서 해석(C2)의
-  바인딩은 남았다(ue-init-config MCVideo PSI 만 셋 다).
+- **바인딩**(구현 — C7) — C API·.NET·Kotlin 같은 이름(현행 그룹 영상 옵션 누락도 메웠다 — [ue_sdk.md](ue_sdk.md) §4.6). MCVideo 설정 문서 해석(C2)도 셋 다 —
+  그룹 문서 MCVideo 몫(없음 = MCVideo 그룹 아님 · PUT 에 싣지 않아 서버 MCVideo 설정 유지)·user profile·service config·ue-init-config MCVideo PSI.
 - **cimsue-cli**(구현 — C8) — `video-call <g> [--prearranged] [--implicit] [--transmit-at S --transmit-len S] [--accept]` · `video-answer`(멤버 초대 대기) ·
   구동 명령 `video_call`·`transmit_request`·`transmit_release`·`reception_accept`·`reception_end` + 이벤트 `transmission`·`reception`([ue_sdk.md](ue_sdk.md) §4.7).
   명시 affiliation 은 없다(CSP A9 전).

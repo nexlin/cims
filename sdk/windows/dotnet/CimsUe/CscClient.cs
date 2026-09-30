@@ -87,6 +87,38 @@ public sealed class GroupMember
     public bool Required { get; set; }
     /// <summary>직함 &lt;cims:user-title&gt;(사이트 확장) — 읽기 전용(PUT 에 싣지 않는다).</summary>
     public string Title { get; set; } = "";
+    /// <summary>MCVideo entry 의 MCVideo ID &lt;mcvideo-mcvideo-id&gt;(TS 24.481 §7.2.2) — 빈 값 = Uri 와 같다(MCVideo ID = MCPTT ID).</summary>
+    public string McvideoId { get; set; } = "";
+}
+
+/// <summary>그룹 문서의 MCVideo 몫(csc.h McVideoGroupAttrs — TS 24.481 §7.2.2·§7.2.8). <see cref="GroupDoc.Mcvideo"/> 가 null 이면 MCVideo 그룹이
+/// 아니고 PUT 에도 싣지 않는다(서버는 MCVideo &lt;service&gt; 가 없는 PUT 으로 그 그룹의 MCVideo 설정을 바꾸지 않는다). null 속성 = 미기재.</summary>
+public sealed class McVideoGroupAttrs
+{
+    /// <summary>mcvideo-on-network-invite-members — true = prearranged, false = chat(TS 24.281 §6.3.5.2 호 종류 검사).</summary>
+    public bool InviteMembers { get; set; }
+    public int? MaxDurationSec { get; set; }
+    /// <summary>mcvideo-protect-media — 요소가 없으면 true(GMK 보호). CIMS 는 false 를 명시한다.</summary>
+    public bool ProtectMedia { get; set; } = true;
+    public bool ProtectTransmissionControl { get; set; } = true;
+    public List<string> AudioEncodings { get; set; } = new();
+    public List<string> VideoEncodings { get; set; } = new();
+    public string VideoResolutions { get; set; } = "";
+    public string VideoFrameRate { get; set; } = "";
+    public bool? UrgentRealTimeVideoMode { get; set; }
+    public bool? NonUrgentRealTimeVideoMode { get; set; }
+    public bool? NonRealTimeVideoMode { get; set; }
+    public string ActiveRealTimeVideoMode { get; set; } = "";
+    /// <summary>mcvideo-maximum-simultaneous-mcvideo-transmitting-group-members — 동시 송출 상한.</summary>
+    public int? MaxTransmitters { get; set; }
+    public int? MinNumberToStart { get; set; }
+    public int? GroupPriority { get; set; }
+    /// <summary>on-network-reception-hang-timer (T5, TS 24.581 §11.1.3).</summary>
+    public int? ReceptionHangTimerSec { get; set; }
+    public bool? AllowConferenceState { get; set; }
+    public bool? AllowEmergencyCall { get; set; }
+    public bool? AllowEmergencyAlert { get; set; }
+    public bool? AllowImminentPerilCall { get; set; }
 }
 
 /// <summary>CMS 대상 항목(TS 24.484 §8.3.2.7 EntryType) — Mode = entry-info(DedicatedGroup | UseCurrentlySelectedGroup | UsePreConfigured | LocallyDetermined).</summary>
@@ -111,6 +143,27 @@ public sealed record ServiceConfigDoc(string ETag, bool NotModified, string Doma
                                       string RpEmergency, string RpImminentPeril, string RpNormal)
 {
     public static Result<ServiceConfigDoc> Parse(string xml) => CscClient.ParseServiceConfig(xml);
+}
+
+/// <summary>MCVideo user profile(TS 24.484 §9.3, csc.h McVideoUserProfileDoc) — 문서가 있으면 MCVideo 이용 자격이 있다(Fetch 404 = 자격 없음).
+/// Groups = MCVideo 로 affiliate 할 수 있는 그룹. 인가 Allow* 는 요소가 없으면 허용. 정수 -1 = 미기재.</summary>
+public sealed record McVideoUserProfileDoc(
+    string ETag, bool NotModified, string UserUri, string McvideoId, IReadOnlyList<string> Groups, IReadOnlyList<string> ImplicitAffiliations,
+    int MaxAffiliationsN2, int MaxSimultaneousVideoStreams, int MaxSimultaneousCallsN6, CmsEntry EmergencyGroup, CmsEntry ImminentPerilGroup,
+    CmsEntry EmergencyAlertGroup, bool AllowPrivateCall, bool AllowEmergencyGroupCall, bool AllowEmergencyPrivateCall, bool AllowImminentPerilCall,
+    bool AllowActivateEmergencyAlert, bool AllowRevokeTransmit, bool AllowRemoteAmbientViewing, bool AllowLocalAmbientViewing,
+    bool AllowAdhocGroupCall)
+{
+    public static Result<McVideoUserProfileDoc> Parse(string xml) => CscClient.ParseMcVideoUserProfile(xml);
+}
+
+/// <summary>MCVideo service configuration(TS 24.484 §9.4, csc.h McVideoServiceConfigDoc) — 참여자 전송 제어 타이머 T100~T104(초, -1 = 미기재 → 코어 기본값)·
+/// RP·신호 보호(요소가 없으면 켜짐 — TS 24.281 §6.6.2.1).</summary>
+public sealed record McVideoServiceConfigDoc(string ETag, bool NotModified, string Domain, string RpEmergency, string RpImminentPeril, string RpNormal,
+                                             bool ConfidentialityProtection, bool IntegrityProtection,
+                                             int T100Sec, int T101Sec, int T102Sec, int T103Sec, int T104Sec)
+{
+    public static Result<McVideoServiceConfigDoc> Parse(string xml) => CscClient.ParseMcVideoServiceConfig(xml);
 }
 
 /// <summary>MCS UE initial configuration(TS 24.484 §7.2, csc.h UeInitConfigDoc) — 참여 기능 PSI(`&lt;anyExt&gt;` 의 *-Service-Details/Server-URI).
@@ -176,6 +229,8 @@ public sealed class GroupDoc
     public int? AckTimeoutSec { get; set; }
     /// <summary>TNG1 만료 동작 proceed | abandon. null = 미기재.</summary>
     public string? AckAction { get; set; }
+    /// <summary>MCVideo 몫 — null = MCVideo 그룹 아님(PUT 에 싣지 않는다). 서비스 집합 = MCPTT + MCVideo(TS 23.280 §3).</summary>
+    public McVideoGroupAttrs? Mcvideo { get; set; }
 
     /// <summary>문서 → XML(PUT 본문) — 직렬화 규칙은 코어.</summary>
     public string ToXml() => CscClient.GroupDocToXml(this);
@@ -466,6 +521,47 @@ public sealed unsafe class CscClient : IDisposable
     public Task<Result<ServiceConfigDoc>> FetchServiceConfigAsync(string accessToken, string userUri, string? etag = null, CancellationToken ct = default) =>
         Task.Run(() => FetchServiceConfig(accessToken, userUri, etag), ct);
 
+    /// <summary>MCVideo user profile GET + 해석(TS 24.484 §9.3) — mcvideoId = MCPTT ID 와 같은 값. 404 = MCVideo 이용 자격 없음.
+    /// NotModified·해석 실패 규약은 FetchUserProfile 과 같다.</summary>
+    public Result<McVideoUserProfileDoc> FetchMcVideoUserProfile(string accessToken, string mcvideoId, string? etag = null)
+    {
+        lock (_gate)
+        {
+            cimsue_mcvideo_user_profile_doc_t d;
+            int st = cimsue_csc_fetch_mcvideo_user_profile(Handle, accessToken, mcvideoId, etag, &d);
+            return st == 0 ? Result<McVideoUserProfileDoc>.Success(ToManaged(&d)) : Result<McVideoUserProfileDoc>.Fail(st, Engine.LastError());
+        }
+    }
+
+    /// <summary>MCVideo service configuration GET + 해석(TS 24.484 §9.4 — 전역 문서).</summary>
+    public Result<McVideoServiceConfigDoc> FetchMcVideoServiceConfig(string accessToken, string? etag = null)
+    {
+        lock (_gate)
+        {
+            cimsue_mcvideo_service_config_doc_t d;
+            int st = cimsue_csc_fetch_mcvideo_service_config(Handle, accessToken, etag, &d);
+            return st == 0 ? Result<McVideoServiceConfigDoc>.Success(ToManaged(&d)) : Result<McVideoServiceConfigDoc>.Fail(st, Engine.LastError());
+        }
+    }
+    public Task<Result<McVideoUserProfileDoc>> FetchMcVideoUserProfileAsync(string accessToken, string mcvideoId, string? etag = null, CancellationToken ct = default) =>
+        Task.Run(() => FetchMcVideoUserProfile(accessToken, mcvideoId, etag), ct);
+    public Task<Result<McVideoServiceConfigDoc>> FetchMcVideoServiceConfigAsync(string accessToken, string? etag = null, CancellationToken ct = default) =>
+        Task.Run(() => FetchMcVideoServiceConfig(accessToken, etag), ct);
+
+    internal static Result<McVideoUserProfileDoc> ParseMcVideoUserProfile(string xml)
+    {
+        cimsue_mcvideo_user_profile_doc_t d;
+        int st = cimsue_mcvideo_user_profile_parse(xml, &d);
+        return st == 0 ? Result<McVideoUserProfileDoc>.Success(ToManaged(&d)) : Result<McVideoUserProfileDoc>.Fail(st, Engine.LastError());
+    }
+
+    internal static Result<McVideoServiceConfigDoc> ParseMcVideoServiceConfig(string xml)
+    {
+        cimsue_mcvideo_service_config_doc_t d;
+        int st = cimsue_mcvideo_service_config_parse(xml, &d);
+        return st == 0 ? Result<McVideoServiceConfigDoc>.Success(ToManaged(&d)) : Result<McVideoServiceConfigDoc>.Fail(st, Engine.LastError());
+    }
+
     internal static Result<UeInitConfigDoc> ParseUeInitConfig(string xml)
     {
         cimsue_ue_init_config_doc_t d;
@@ -572,6 +668,64 @@ public sealed unsafe class CscClient : IDisposable
         new(Utf8.Str(d->etag), d->not_modified != 0, Utf8.Str(d->domain), d->num_levels_group_hierarchy, d->num_levels_user_hierarchy,
             Utf8.Str(d->rp_emergency), Utf8.Str(d->rp_imminent_peril), Utf8.Str(d->rp_normal));
 
+    private static McVideoUserProfileDoc ToManaged(cimsue_mcvideo_user_profile_doc_t* d) =>
+        new(Utf8.Str(d->etag), d->not_modified != 0, Utf8.Str(d->user_uri), Utf8.Str(d->mcvideo_id), StrArray(d->groups, d->group_count),
+            StrArray(d->implicit_affiliations, d->implicit_affiliation_count), d->max_affiliations_n2, d->max_simultaneous_video_streams,
+            d->max_simultaneous_calls_n6, ToManaged(d->emergency_group), ToManaged(d->imminent_peril_group), ToManaged(d->emergency_alert_group),
+            d->allow_private_call != 0, d->allow_emergency_group_call != 0, d->allow_emergency_private_call != 0, d->allow_imminent_peril_call != 0,
+            d->allow_activate_emergency_alert != 0, d->allow_revoke_transmit != 0, d->allow_remote_ambient_viewing != 0,
+            d->allow_local_ambient_viewing != 0, d->allow_adhoc_group_call != 0);
+
+    private static McVideoServiceConfigDoc ToManaged(cimsue_mcvideo_service_config_doc_t* d) =>
+        new(Utf8.Str(d->etag), d->not_modified != 0, Utf8.Str(d->domain), Utf8.Str(d->rp_emergency), Utf8.Str(d->rp_imminent_peril),
+            Utf8.Str(d->rp_normal), d->confidentiality_protection != 0, d->integrity_protection != 0,
+            d->t100_sec, d->t101_sec, d->t102_sec, d->t103_sec, d->t104_sec);
+
+    // MCVideo 몫 정수·삼중값: 코어 -1 = 미기재 ↔ null
+    private static int? Opt(int v) => v >= 0 ? v : null;
+    private static bool? Tri(int v) => v < 0 ? null : v != 0;
+    private static int FromOpt(int? v) => v is int x && x >= 0 ? x : -1;
+    private static int FromTri(bool? v) => v is bool b ? Engine.B(b) : -1;
+
+    private static McVideoGroupAttrs? ToManaged(in cimsue_mcvideo_group_attrs_t v)
+    {
+        if (v.present == 0) return null;
+        return new McVideoGroupAttrs
+        {
+            InviteMembers = v.invite_members != 0, MaxDurationSec = Opt(v.max_duration_sec),
+            ProtectMedia = v.protect_media != 0, ProtectTransmissionControl = v.protect_transmission_control != 0,
+            AudioEncodings = new List<string>(StrArray(v.audio_encodings, v.audio_encoding_count)),
+            VideoEncodings = new List<string>(StrArray(v.video_encodings, v.video_encoding_count)),
+            VideoResolutions = Utf8.Str(v.video_resolutions), VideoFrameRate = Utf8.Str(v.video_frame_rate),
+            UrgentRealTimeVideoMode = Tri(v.urgent_real_time_video_mode), NonUrgentRealTimeVideoMode = Tri(v.non_urgent_real_time_video_mode),
+            NonRealTimeVideoMode = Tri(v.non_real_time_video_mode), ActiveRealTimeVideoMode = Utf8.Str(v.active_real_time_video_mode),
+            MaxTransmitters = Opt(v.max_transmitters), MinNumberToStart = Opt(v.min_number_to_start), GroupPriority = Opt(v.group_priority),
+            ReceptionHangTimerSec = Opt(v.reception_hang_timer_sec), AllowConferenceState = Tri(v.allow_conference_state),
+            AllowEmergencyCall = Tri(v.allow_emergency_call), AllowEmergencyAlert = Tri(v.allow_emergency_alert),
+            AllowImminentPerilCall = Tri(v.allow_imminent_peril_call),
+        };
+    }
+
+    private static void ToNative(McVideoGroupAttrs? a, NativeStrings s, cimsue_mcvideo_group_attrs_t* n)
+    {
+        cimsue_mcvideo_group_attrs_default(n);
+        if (a is null) return;                                // present = 0 — PUT 에 MCVideo 를 싣지 않는다
+        n->present = 1;
+        n->invite_members = Engine.B(a.InviteMembers); n->max_duration_sec = FromOpt(a.MaxDurationSec);
+        n->protect_media = Engine.B(a.ProtectMedia); n->protect_transmission_control = Engine.B(a.ProtectTransmissionControl);
+        n->audio_encodings = s.AddArray(a.AudioEncodings, out n->audio_encoding_count);
+        n->video_encodings = s.AddArray(a.VideoEncodings, out n->video_encoding_count);
+        n->video_resolutions = s.Add(a.VideoResolutions); n->video_frame_rate = s.Add(a.VideoFrameRate);
+        n->urgent_real_time_video_mode = FromTri(a.UrgentRealTimeVideoMode);
+        n->non_urgent_real_time_video_mode = FromTri(a.NonUrgentRealTimeVideoMode);
+        n->non_real_time_video_mode = FromTri(a.NonRealTimeVideoMode);
+        n->active_real_time_video_mode = s.Add(a.ActiveRealTimeVideoMode);
+        n->max_transmitters = FromOpt(a.MaxTransmitters); n->min_number_to_start = FromOpt(a.MinNumberToStart);
+        n->group_priority = FromOpt(a.GroupPriority); n->reception_hang_timer_sec = FromOpt(a.ReceptionHangTimerSec);
+        n->allow_conference_state = FromTri(a.AllowConferenceState); n->allow_emergency_call = FromTri(a.AllowEmergencyCall);
+        n->allow_emergency_alert = FromTri(a.AllowEmergencyAlert); n->allow_imminent_peril_call = FromTri(a.AllowImminentPerilCall);
+    }
+
     private static UeInitConfigDoc ToManaged(cimsue_ue_init_config_doc_t* d) =>
         new(Utf8.Str(d->etag), d->not_modified != 0, Utf8.Str(d->domain), Utf8.Str(d->mcptt_server_uri), Utf8.Str(d->mcdata_server_uri),
             Utf8.Str(d->mcvideo_server_uri));
@@ -627,6 +781,7 @@ public sealed unsafe class CscClient : IDisposable
             MinNumberToStart = d->has_min_number_to_start != 0 ? d->min_number_to_start : null,
             AckTimeoutSec = d->has_ack_timeout != 0 ? d->ack_timeout_sec : null,
             AckAction = Utf8.Str(d->ack_action) is { Length: > 0 } act ? act : null,
+            Mcvideo = ToManaged(d->mcvideo),
         };
         for (int i = 0; i < d->member_count; ++i)
             g.Members.Add(new GroupMember
@@ -634,6 +789,7 @@ public sealed unsafe class CscClient : IDisposable
                 Uri = Utf8.Str(d->members[i].uri), Name = Utf8.Str(d->members[i].display_name),
                 Role = Utf8.Str(d->members[i].role) is { Length: > 0 } r ? r : "participant", Priority = d->members[i].priority,
                 Required = d->members[i].required != 0, Title = Utf8.Str(d->members[i].title),
+                McvideoId = Utf8.Str(d->members[i].mcvideo_id),
             });
         return g;
     }
@@ -652,6 +808,7 @@ public sealed unsafe class CscClient : IDisposable
                 n.members[i].uri = s.Add(m.Uri); n.members[i].display_name = s.Add(m.Name);
                 n.members[i].role = s.Add(m.Role); n.members[i].priority = m.Priority;
                 n.members[i].required = Engine.B(m.Required);
+                n.members[i].mcvideo_id = string.IsNullOrEmpty(m.McvideoId) ? null : s.Add(m.McvideoId);
             }
         }
         n.session_type = s.Add(g.SessionType);
@@ -669,6 +826,7 @@ public sealed unsafe class CscClient : IDisposable
         if (g.MinNumberToStart is int min && min >= 0) { n.has_min_number_to_start = 1; n.min_number_to_start = min; }
         if (g.AckTimeoutSec is int tng1 && tng1 >= 0) { n.has_ack_timeout = 1; n.ack_timeout_sec = tng1; }
         if (!string.IsNullOrEmpty(g.AckAction)) n.ack_action = s.Add(g.AckAction);
+        ToNative(g.Mcvideo, s, &n.mcvideo);
         return n;
     }
 

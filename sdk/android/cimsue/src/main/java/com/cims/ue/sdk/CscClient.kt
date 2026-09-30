@@ -23,6 +23,9 @@ import com.cims.ue.sdk.jni.GroupMember as JniGroupMember
 import com.cims.ue.sdk.jni.GroupMemberVector
 import com.cims.ue.sdk.jni.GroupSummaryVector
 import com.cims.ue.sdk.jni.HttpResult as JniHttpResult
+import com.cims.ue.sdk.jni.McVideoGroupAttrs as JniMcVideoGroupAttrs
+import com.cims.ue.sdk.jni.McVideoServiceConfigDoc as JniMcVideoServiceConfigDoc
+import com.cims.ue.sdk.jni.McVideoUserProfileDoc as JniMcVideoUserProfileDoc
 import com.cims.ue.sdk.jni.Profile as JniProfile
 import com.cims.ue.sdk.jni.ServiceConfigDoc as JniServiceConfigDoc
 import com.cims.ue.sdk.jni.StringVector
@@ -128,7 +131,66 @@ data class GroupMember(val uri: String, val name: String = "",
                        /** 직함 `<cims:user-title>`(사이트 확장) — 읽기 전용, PUT 에 싣지 않는다. */
                        val title: String = "",
                        /** 필수 멤버 `<on-network-required>`(TS 24.481 §7.2.4.2) — 읽은 값을 되돌려야 콘솔 설정이 남는다. */
-                       val required: Boolean = false)
+                       val required: Boolean = false,
+                       /** MCVideo entry 의 MCVideo ID `<mcvideo-mcvideo-id>`(TS 24.481 §7.2.2) — 빈 값 = uri 와 같다(MCVideo ID = MCPTT ID). */
+                       val mcvideoId: String = "")
+
+/**
+ * 그룹 문서의 MCVideo 몫(csc.h McVideoGroupAttrs — TS 24.481 §7.2.2·§7.2.8). [GroupDoc.mcvideo] 가 null 이면 MCVideo 그룹이 아니고
+ * PUT 에도 싣지 않는다(서버는 MCVideo `<service>` 가 없는 PUT 으로 그 그룹의 MCVideo 설정을 바꾸지 않는다). null 속성 = 미기재.
+ */
+data class McVideoGroupAttrs(
+    /** mcvideo-on-network-invite-members — true = prearranged, false = chat(TS 24.281 §6.3.5.2 호 종류 검사). */
+    val inviteMembers: Boolean = false,
+    val maxDurationSec: Int? = null,
+    /** mcvideo-protect-media — 요소가 없으면 true(GMK 보호). CIMS 는 false 를 명시한다. */
+    val protectMedia: Boolean = true,
+    val protectTransmissionControl: Boolean = true,
+    val audioEncodings: List<String> = emptyList(),
+    val videoEncodings: List<String> = emptyList(),
+    val videoResolutions: String = "", val videoFrameRate: String = "",
+    val urgentRealTimeVideoMode: Boolean? = null, val nonUrgentRealTimeVideoMode: Boolean? = null,
+    val nonRealTimeVideoMode: Boolean? = null,
+    val activeRealTimeVideoMode: String = "",
+    /** mcvideo-maximum-simultaneous-mcvideo-transmitting-group-members — 동시 송출 상한. */
+    val maxTransmitters: Int? = null,
+    val minNumberToStart: Int? = null, val groupPriority: Int? = null,
+    /** on-network-reception-hang-timer (T5, TS 24.581 §11.1.3). */
+    val receptionHangTimerSec: Int? = null,
+    val allowConferenceState: Boolean? = null, val allowEmergencyCall: Boolean? = null,
+    val allowEmergencyAlert: Boolean? = null, val allowImminentPerilCall: Boolean? = null,
+) {
+    internal fun fill(v: JniMcVideoGroupAttrs) {
+        v.present = true
+        v.inviteMembers = inviteMembers; v.maxDurationSec = maxDurationSec.unset()
+        v.protectMedia = protectMedia; v.protectTransmissionControl = protectTransmissionControl
+        v.audioEncodings = StringVector().apply { audioEncodings.forEach { add(it) } }
+        v.videoEncodings = StringVector().apply { videoEncodings.forEach { add(it) } }
+        v.videoResolutions = videoResolutions; v.videoFrameRate = videoFrameRate
+        v.urgentRealTimeVideoMode = urgentRealTimeVideoMode.tri(); v.nonUrgentRealTimeVideoMode = nonUrgentRealTimeVideoMode.tri()
+        v.nonRealTimeVideoMode = nonRealTimeVideoMode.tri(); v.activeRealTimeVideoMode = activeRealTimeVideoMode
+        v.maxTransmitters = maxTransmitters.unset(); v.minNumberToStart = minNumberToStart.unset()
+        v.groupPriority = groupPriority.unset(); v.receptionHangTimerSec = receptionHangTimerSec.unset()
+        v.allowConferenceState = allowConferenceState.tri(); v.allowEmergencyCall = allowEmergencyCall.tri()
+        v.allowEmergencyAlert = allowEmergencyAlert.tri(); v.allowImminentPerilCall = allowImminentPerilCall.tri()
+    }
+    internal companion object {
+        // 코어 -1 = 미기재 ↔ null
+        private fun Int?.unset(): Int = if (this == null || this < 0) -1 else this
+        private fun Boolean?.tri(): Int = when (this) { null -> -1; true -> 1; false -> 0 }
+        private fun Int.opt(): Int? = if (this < 0) null else this
+        private fun Int.triOf(): Boolean? = if (this < 0) null else this != 0
+
+        fun of(v: JniMcVideoGroupAttrs): McVideoGroupAttrs? = if (!v.present) null else McVideoGroupAttrs(
+            v.inviteMembers, v.maxDurationSec.opt(), v.protectMedia, v.protectTransmissionControl,
+            v.audioEncodings.let { e -> List(e.size) { e[it] } }, v.videoEncodings.let { e -> List(e.size) { e[it] } },
+            v.videoResolutions, v.videoFrameRate,
+            v.urgentRealTimeVideoMode.triOf(), v.nonUrgentRealTimeVideoMode.triOf(), v.nonRealTimeVideoMode.triOf(),
+            v.activeRealTimeVideoMode, v.maxTransmitters.opt(), v.minNumberToStart.opt(), v.groupPriority.opt(),
+            v.receptionHangTimerSec.opt(), v.allowConferenceState.triOf(), v.allowEmergencyCall.triOf(),
+            v.allowEmergencyAlert.triOf(), v.allowImminentPerilCall.triOf())
+    }
+}
 
 /**
  * GMS 그룹 문서(OMA list-service + TS 24.481 mcpttgi) — GET 응답·PUT 본문의 단일 모델.
@@ -163,11 +225,13 @@ data class GroupDoc(
     val ackTimeoutSec: Int? = null,
     /** TNG1 만료 동작 proceed | abandon. */
     val ackAction: String? = null,
+    /** MCVideo 몫 — null = MCVideo 그룹 아님(PUT 에 싣지 않는다). 서비스 집합 = MCPTT + MCVideo(TS 23.280 §3). */
+    val mcvideo: McVideoGroupAttrs? = null,
 ) {
     internal fun toJni(): JniGroupDoc = JniGroupDoc().also { d ->
         d.uri = uri; d.displayName = displayName; d.etag = etag
         d.members = GroupMemberVector().apply {
-            members.forEach { m -> add(JniGroupMember().also { it.uri = m.uri; it.name = m.name; it.role = m.role; it.priority = m.priority; it.required = m.required }) }
+            members.forEach { m -> add(JniGroupMember().also { it.uri = m.uri; it.name = m.name; it.role = m.role; it.priority = m.priority; it.required = m.required; it.mcvideoId = m.mcvideoId }) }
         }
         d.sessionType = sessionType; d.videoEnabled = videoEnabled; d.encryption = encryption
         d.emergencyCall = emergencyCall; d.emergencyAlert = emergencyAlert
@@ -180,6 +244,7 @@ data class GroupDoc(
         d.maxSdsSize = maxSdsSize.orUnset(); d.maxAutoRecv = maxAutoRecv.orUnset()
         d.minNumberToStart = minNumberToStart.orUnset(); d.ackTimeoutSec = ackTimeoutSec.orUnset()
         d.ackAction = ackAction ?: ""
+        mcvideo?.fill(d.mcvideo)                           // null — present = false 그대로(싣지 않는다)
     }
     internal companion object {
         /** 코어 `GroupDoc::kUnset`. */
@@ -188,7 +253,7 @@ data class GroupDoc(
         private fun Int.orNull(): Int? = if (this < 0) null else this
 
         fun of(d: JniGroupDoc) = GroupDoc(d.uri, d.displayName, d.etag,
-            d.members.let { v -> List(v.size) { i -> v[i].let { GroupMember(it.uri, it.name, it.role, it.priority, it.title, it.required) } } },
+            d.members.let { v -> List(v.size) { i -> v[i].let { GroupMember(it.uri, it.name, it.role, it.priority, it.title, it.required, it.mcvideoId) } } },
             d.sessionType, d.videoEnabled, d.encryption, d.emergencyCall, d.emergencyAlert,
             d.allowSds, d.allowFd, d.requireAffiliation, d.priority, d.maxParticipants,
             d.orgCode, d.authorizedUser,
@@ -196,7 +261,7 @@ data class GroupDoc(
             allowConferenceState = d.allowConferenceState.let { if (it < 0) null else it != 0 },
             maxSdsSize = d.maxSdsSize.orNull(), maxAutoRecv = d.maxAutoRecv.orNull(),
             minNumberToStart = d.minNumberToStart.orNull(), ackTimeoutSec = d.ackTimeoutSec.orNull(),
-            ackAction = d.ackAction.ifEmpty { null })
+            ackAction = d.ackAction.ifEmpty { null }, mcvideo = McVideoGroupAttrs.of(d.mcvideo))
     }
 }
 
@@ -293,6 +358,57 @@ data class ServiceConfigDoc(
         fun of(d: JniServiceConfigDoc) = ServiceConfigDoc(d.etag, d.domain,
             d.numLevelsGroupHierarchy.takeIf { it >= 0 }, d.numLevelsUserHierarchy.takeIf { it >= 0 },
             d.rpEmergency, d.rpImminentPeril, d.rpNormal)
+    }
+}
+
+/**
+ * MCVideo user profile(TS 24.484 §9.3) — 문서가 있으면 MCVideo 이용 자격이 있다(fetch 404 = 자격 없음). groups = MCVideo 로 affiliate 할 수
+ * 있는 그룹. 인가(allow-*)는 요소가 없으면 허용. null = 미기재.
+ */
+data class McVideoUserProfileDoc(
+    val etag: String = "", val userUri: String = "", val mcvideoId: String = "",
+    val groups: List<String> = emptyList(), val implicitAffiliations: List<String> = emptyList(),
+    val maxAffiliationsN2: Int? = null,
+    /** OnNetwork/MaxSimultaneousVideoStreams — 동시 수신 스트림 상한(TS 24.581 §11.2.3). */
+    val maxSimultaneousVideoStreams: Int? = null,
+    val maxSimultaneousCallsN6: Int? = null,
+    val emergencyGroup: CmsEntry = CmsEntry(), val imminentPerilGroup: CmsEntry = CmsEntry(),
+    val emergencyAlertGroup: CmsEntry = CmsEntry(),
+    val allowPrivateCall: Boolean = true, val allowEmergencyGroupCall: Boolean = true,
+    val allowEmergencyPrivateCall: Boolean = true, val allowImminentPerilCall: Boolean = true,
+    val allowActivateEmergencyAlert: Boolean = true,
+    /** allow-revoke-transmit — 다른 송출 회수(TS 24.581 §4.1.1.2). */
+    val allowRevokeTransmit: Boolean = true,
+    val allowRemoteAmbientViewing: Boolean = true, val allowLocalAmbientViewing: Boolean = true,
+    val allowAdhocGroupCall: Boolean = true,
+) {
+    internal companion object {
+        fun of(d: JniMcVideoUserProfileDoc) = McVideoUserProfileDoc(d.etag, d.userUri, d.mcvideoId,
+            d.groups.let { v -> List(v.size) { v[it] } }, d.implicitAffiliations.let { v -> List(v.size) { v[it] } },
+            d.maxAffiliationsN2.takeIf { it >= 0 }, d.maxSimultaneousVideoStreams.takeIf { it >= 0 },
+            d.maxSimultaneousCallsN6.takeIf { it >= 0 },
+            CmsEntry.of(d.emergencyGroup), CmsEntry.of(d.imminentPerilGroup), CmsEntry.of(d.emergencyAlertGroup),
+            d.allowPrivateCall, d.allowEmergencyGroupCall, d.allowEmergencyPrivateCall, d.allowImminentPerilCall,
+            d.allowActivateEmergencyAlert, d.allowRevokeTransmit, d.allowRemoteAmbientViewing, d.allowLocalAmbientViewing,
+            d.allowAdhocGroupCall)
+    }
+}
+
+/**
+ * MCVideo service configuration(TS 24.484 §9.4) — 시스템 전역 문서. 참여자 전송 제어 타이머 T100~T104(초, null = 미기재 → 코어 기본값)·
+ * RP·신호 보호(요소가 없으면 켜짐 — TS 24.281 §6.6.2.1).
+ */
+data class McVideoServiceConfigDoc(
+    val etag: String = "", val domain: String = "",
+    val rpEmergency: String = "", val rpImminentPeril: String = "", val rpNormal: String = "",
+    val confidentialityProtection: Boolean = true, val integrityProtection: Boolean = true,
+    val t100Sec: Int? = null, val t101Sec: Int? = null, val t102Sec: Int? = null, val t103Sec: Int? = null, val t104Sec: Int? = null,
+) {
+    internal companion object {
+        fun of(d: JniMcVideoServiceConfigDoc) = McVideoServiceConfigDoc(d.etag, d.domain, d.rpEmergency, d.rpImminentPeril, d.rpNormal,
+            d.confidentialityProtection, d.integrityProtection,
+            d.t100Sec.takeIf { it >= 0 }, d.t101Sec.takeIf { it >= 0 }, d.t102Sec.takeIf { it >= 0 },
+            d.t103Sec.takeIf { it >= 0 }, d.t104Sec.takeIf { it >= 0 })
     }
 }
 
@@ -474,6 +590,18 @@ class CscClient(
     suspend fun fetchServiceConfig(accessToken: String, userUri: String, etag: String = ""): CimsResult<ServiceConfigDoc?> = call {
         val out = JniServiceConfigDoc()
         CimsResult.of(jni.fetchServiceConfig(accessToken, userUri, etag, out), if (out.notModified) null else ServiceConfigDoc.of(out))
+    }
+
+    /** MCVideo user profile 조회 + 해석(TS 24.484 §9.3) — mcvideoId = MCPTT ID 와 같은 값. code 404 = MCVideo 이용 자격 없음. **값 null = 304**. */
+    suspend fun fetchMcVideoUserProfile(accessToken: String, mcvideoId: String, etag: String = ""): CimsResult<McVideoUserProfileDoc?> = call {
+        val out = JniMcVideoUserProfileDoc()
+        CimsResult.of(jni.fetchMcVideoUserProfile(accessToken, mcvideoId, etag, out), if (out.notModified) null else McVideoUserProfileDoc.of(out))
+    }
+
+    /** MCVideo service configuration 조회 + 해석(TS 24.484 §9.4 — 전역 문서). **값 null = 304**. */
+    suspend fun fetchMcVideoServiceConfig(accessToken: String, etag: String = ""): CimsResult<McVideoServiceConfigDoc?> = call {
+        val out = JniMcVideoServiceConfigDoc()
+        CimsResult.of(jni.fetchMcVideoServiceConfig(accessToken, etag, out), if (out.notModified) null else McVideoServiceConfigDoc.of(out))
     }
 
     // ── MCData FD 콘텐츠 서버(TS 24.282 §10.2, mcdata_messaging.md §4.5) ──

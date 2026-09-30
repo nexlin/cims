@@ -2,6 +2,8 @@
 // 프로토콜은 시험하지 않는다 — 타입 변환·기본값 규약·수명 규약·콜백 전달이 C++ 표면과 1:1 인지만 본다.
 #include <gtest/gtest.h>
 
+#include <fstream>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -379,6 +381,124 @@ TEST(CApi, GroupDocRoundTripAndAbi) {
     EXPECT_EQ(p.allow_group_creation, 1);
     ASSERT_EQ(p.dispatch.member_count, 1); EXPECT_STREQ(p.dispatch.members[0].extension, "1001");
     ASSERT_EQ(p.dispatch.ptt_target_count, 1); EXPECT_STREQ(p.dispatch.ptt_targets[0].name, "G1");
+}
+
+// ── MCVideo 설정 문서(C7) — 계약 K2 골든을 C 표면으로 읽는다(값 = mcvideo_config_test 와 같다). 그룹 문서 MCVideo 몫은
+// present = 0(0 으로 채운 .NET 기본값)이면 PUT 에 싣지 않는다 — MCVideo 를 모르는 앱이 저장해도 서버의 MCVideo 설정이 남는다(전환기).
+static std::string mcvFixture(const char* name) {
+    std::ifstream f(std::string(CIMS_SOURCE_ROOT) + "/tests/fixtures/mcvideo/" + name, std::ios::binary);
+    std::stringstream ss;
+    ss << f.rdbuf();
+    return ss.str();
+}
+
+TEST(CApi, McVideoGroupDoc) {
+    const std::string xml = mcvFixture("group_g101.xml");
+    ASSERT_FALSE(xml.empty());
+    cimsue_group_doc_t d{};
+    ASSERT_EQ(cimsue_group_doc_parse(xml.c_str(), &d), CIMSUE_OK) << cimsue_last_error();
+    const cimsue_mcvideo_group_attrs_t& v = d.mcvideo;
+    EXPECT_EQ(v.present, 1);
+    EXPECT_EQ(v.invite_members, 0);                            // chat(D5)
+    EXPECT_EQ(v.max_duration_sec, 1800);
+    EXPECT_EQ(v.protect_media, 0);
+    EXPECT_EQ(v.protect_transmission_control, 0);
+    ASSERT_EQ(v.audio_encoding_count, 1); EXPECT_STREQ(v.audio_encodings[0], "AMR-WB");
+    ASSERT_EQ(v.video_encoding_count, 1); EXPECT_STREQ(v.video_encodings[0], "H264");
+    EXPECT_STREQ(v.video_resolutions, "1280x720,640x480");
+    EXPECT_STREQ(v.video_frame_rate, "30,15");
+    EXPECT_EQ(v.non_urgent_real_time_video_mode, 1);
+    EXPECT_EQ(v.urgent_real_time_video_mode, -1);
+    EXPECT_STREQ(v.active_real_time_video_mode, "non-urgent-real-time");
+    EXPECT_EQ(v.max_transmitters, 2);
+    EXPECT_EQ(v.group_priority, 100);
+    EXPECT_EQ(v.reception_hang_timer_sec, 30);
+    EXPECT_EQ(v.allow_conference_state, 1);
+    EXPECT_EQ(v.allow_emergency_call, 0);
+    ASSERT_EQ(d.member_count, 3);
+    for (int i = 0; i < d.member_count; ++i) EXPECT_STREQ(d.members[i].mcvideo_id, d.members[i].uri);
+    EXPECT_EQ(d.max_duration_sec, 3600);                       // MCPTT 몫과 따로 읽힌다
+
+    // C 입력 → XML: MCVideo 몫이 실리고 다시 읽으면 같은 값. 호출자 배열은 산출 버퍼와 따로 둔다(parse 가 산출을 덮는다).
+    std::vector<cimsue_group_member_t> mem(d.members, d.members + d.member_count);
+    std::vector<std::string> keep;
+    for (auto& m : mem) { keep.push_back(m.uri); }
+    for (size_t i = 0; i < mem.size(); ++i) { mem[i].uri = keep[i].c_str(); mem[i].display_name = nullptr; mem[i].role = nullptr;
+                                              mem[i].title = nullptr; mem[i].mcvideo_id = nullptr; }
+    const char* enc[] = {"H264"};
+    cimsue_group_doc_t in{};
+    in.uri = "tel:g101"; in.display_name = "g101"; in.members = mem.data(); in.member_count = (int32_t)mem.size();
+    cimsue_mcvideo_group_attrs_default(&in.mcvideo);
+    EXPECT_EQ(in.mcvideo.present, 0);
+    EXPECT_EQ(in.mcvideo.protect_media, 1);                    // 요소가 없으면 true(TS 24.481 §7.2.8) — 기본값도 같다
+    EXPECT_EQ(in.mcvideo.max_duration_sec, -1);
+    in.mcvideo.present = 1;
+    in.mcvideo.protect_media = 0; in.mcvideo.protect_transmission_control = 0;
+    in.mcvideo.max_duration_sec = 600;
+    in.mcvideo.video_encodings = enc; in.mcvideo.video_encoding_count = 1;
+    in.mcvideo.reception_hang_timer_sec = 20;
+    char buf[16384];
+    ASSERT_GT(cimsue_group_doc_to_xml(&in, buf, sizeof buf), 0);
+    const std::string x = buf;
+    EXPECT_NE(x.find("<mcpttgi:mcvideo-mcvideo-id uri=\"" + keep[0] + "\"/>"), std::string::npos);   // 비우면 entry uri(D1)
+    EXPECT_NE(x.find("<mcpttgi:mcvideo-protect-media>false</mcpttgi:mcvideo-protect-media>"), std::string::npos);
+    EXPECT_NE(x.find("<mcpttgi:encoding name=\"H264\"/>"), std::string::npos);
+    EXPECT_NE(x.find("enabler=\"urn:urn-7:3gpp-service.ims.icsi.mcvideo\""), std::string::npos);
+    cimsue_group_doc_t back{};
+    ASSERT_EQ(cimsue_group_doc_parse(x.c_str(), &back), CIMSUE_OK) << cimsue_last_error();
+    EXPECT_EQ(back.mcvideo.present, 1);
+    EXPECT_EQ(back.mcvideo.max_duration_sec, 600);
+    EXPECT_EQ(back.mcvideo.reception_hang_timer_sec, 20);
+    EXPECT_EQ(back.mcvideo.protect_media, 0);
+
+    // 0 으로 채운 구조체(.NET 기본값) — MCVideo 를 싣지 않는다
+    cimsue_group_doc_t zero{};
+    zero.uri = "tel:g101"; zero.display_name = "g101"; zero.members = mem.data(); zero.member_count = (int32_t)mem.size();
+    ASSERT_GT(cimsue_group_doc_to_xml(&zero, buf, sizeof buf), 0);
+    EXPECT_EQ(std::string(buf).find("mcvideo"), std::string::npos);
+    ASSERT_EQ(cimsue_group_doc_parse(mcvFixture("group_g102_mcptt_only.xml").c_str(), &back), CIMSUE_OK);
+    EXPECT_EQ(back.mcvideo.present, 0);
+    EXPECT_EQ(back.mcvideo.protect_media, 1);                  // 없는 몫은 기본값
+}
+
+TEST(CApi, McVideoProfileAndServiceConfig) {
+    cimsue_mcvideo_user_profile_doc_t up{};
+    ASSERT_EQ(cimsue_mcvideo_user_profile_parse(mcvFixture("mcvideo_user_profile.xml").c_str(), &up), CIMSUE_OK) << cimsue_last_error();
+    EXPECT_STREQ(up.user_uri, "tel:+82510002001");
+    EXPECT_STREQ(up.mcvideo_id, "tel:+82510002001");
+    ASSERT_EQ(up.group_count, 1); EXPECT_STREQ(up.groups[0], "tel:g101");
+    EXPECT_EQ(up.max_simultaneous_video_streams, 1);
+    EXPECT_EQ(up.max_simultaneous_calls_n6, 1);
+    EXPECT_EQ(up.max_affiliations_n2, 10);
+    EXPECT_STREQ(up.emergency_group.uri, "tel:g101");
+    EXPECT_STREQ(up.emergency_group.mode, "UseCurrentlySelectedGroup");
+    EXPECT_EQ(up.allow_revoke_transmit, 0);
+    EXPECT_EQ(up.allow_adhoc_group_call, 0);
+    EXPECT_NE(cimsue_mcvideo_user_profile_parse("<mcptt-user-profile/>", &up), CIMSUE_OK);
+    EXPECT_EQ(up.group_count, 0);
+    ASSERT_EQ(cimsue_mcvideo_user_profile_parse("<mcvideo-user-profile XUI-URI=\"tel:1\"/>", &up), CIMSUE_OK);
+    EXPECT_EQ(up.allow_revoke_transmit, 1);                   // ruleset 이 없으면 허용
+    EXPECT_EQ(up.max_simultaneous_video_streams, -1);
+
+    cimsue_mcvideo_service_config_doc_t sc{};
+    ASSERT_EQ(cimsue_mcvideo_service_config_parse(mcvFixture("mcvideo_service_config.xml").c_str(), &sc), CIMSUE_OK);
+    EXPECT_STREQ(sc.domain, "ptt.cims.example.kr");
+    EXPECT_STREQ(sc.rp_emergency, "mcpttp.15");
+    EXPECT_EQ(sc.confidentiality_protection, 0);
+    EXPECT_EQ(sc.integrity_protection, 0);
+    EXPECT_EQ(sc.t100_sec, 1); EXPECT_EQ(sc.t104_sec, 1);
+    ASSERT_EQ(cimsue_mcvideo_service_config_parse(
+        "<service-configuration-info><service-configuration-params domain=\"d\"><on-network/></service-configuration-params>"
+        "</service-configuration-info>", &sc), CIMSUE_OK);
+    EXPECT_EQ(sc.confidentiality_protection, 1);               // 없으면 켜진 것(TS 24.281 §6.6.2.1)
+    EXPECT_EQ(sc.t100_sec, -1);
+
+    EXPECT_EQ(cimsue_csc_fetch_mcvideo_user_profile(nullptr, "tok", "tel:1", nullptr, &up), -1);
+    EXPECT_EQ(cimsue_csc_fetch_mcvideo_service_config(nullptr, "tok", nullptr, &sc), -1);
+
+    EXPECT_EQ(cimsue_struct_size(CIMSUE_STRUCT_MCVIDEO_GROUP_ATTRS), (int32_t)sizeof(cimsue_mcvideo_group_attrs_t));
+    EXPECT_EQ(cimsue_struct_size(CIMSUE_STRUCT_MCVIDEO_USER_PROFILE_DOC), (int32_t)sizeof(cimsue_mcvideo_user_profile_doc_t));
+    EXPECT_EQ(cimsue_struct_size(CIMSUE_STRUCT_MCVIDEO_SERVICE_CONFIG_DOC), (int32_t)sizeof(cimsue_mcvideo_service_config_doc_t));
 }
 
 // ── 서버 인증서 만료 관측 — 관측 전에는 valid=0·days_left=0, NULL 핸들도 안전. C++ daysLeft 규약과 같다 ──

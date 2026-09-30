@@ -853,7 +853,37 @@ typedef struct {
     int32_t     priority;
     int32_t     required;      /* 필수 멤버 <on-network-required>(TS 24.481 §7.2.4.2) — 끝에 덧붙였다(64비트 크기 불변) */
     const char* title;         /* 직함 <cims:user-title> — 산출 전용(PUT 에 싣지 않는다). 끝에 덧붙였다 */
+    const char* mcvideo_id;    /* <mcvideo-mcvideo-id uri>(TS 24.481 §7.2.2 MCVideo entry) — NULL·빈 값 = uri 와 같다. 끝에 덧붙였다 */
 } cimsue_group_member_t;
+
+/** 그룹 문서의 MCVideo 몫(csc.h McVideoGroupAttrs — TS 24.481 §7.2.2·§7.2.8). present = 0 이면 나머지를 보지 않고 PUT 에 MCVideo 를 싣지 않는다
+ *  (서버는 MCVideo `<service>` 가 없는 PUT 으로 그 그룹의 MCVideo 설정을 바꾸지 않는다 — 전환기). present = 1 로 쓸 때는
+ *  cimsue_mcvideo_group_attrs_default() 로 채운 뒤 바꾼다 — 정수 -1 = 미기재, allow_* 삼중값 -1 = 미기재 / 0 / 1, 보호 둘은 기본 1(요소가 없으면 true). */
+typedef struct {
+    int32_t            present;
+    int32_t            invite_members;                 /* 1 = prearranged, 0 = chat(mcvideo.md §7 D5) */
+    int32_t            max_duration_sec;
+    int32_t            protect_media;
+    int32_t            protect_transmission_control;
+    const char* const* audio_encodings;                /* mcvideo-preferred-audio-encodings (ptr, count) */
+    int32_t            audio_encoding_count;
+    const char* const* video_encodings;
+    int32_t            video_encoding_count;
+    const char*        video_resolutions;
+    const char*        video_frame_rate;
+    int32_t            urgent_real_time_video_mode;
+    int32_t            non_urgent_real_time_video_mode;
+    int32_t            non_real_time_video_mode;
+    const char*        active_real_time_video_mode;
+    int32_t            max_transmitters;               /* 동시 송출 상한 */
+    int32_t            min_number_to_start;
+    int32_t            group_priority;
+    int32_t            reception_hang_timer_sec;       /* on-network-reception-hang-timer (T5) */
+    int32_t            allow_conference_state;
+    int32_t            allow_emergency_call;
+    int32_t            allow_emergency_alert;
+    int32_t            allow_imminent_peril_call;
+} cimsue_mcvideo_group_attrs_t;
 
 /** GMS 그룹 문서(csc.h GroupDoc) — GET 산출·PUT 입력 공용. 입력 시 문자열 NULL 은 빈 값, members NULL 은 멤버 없음. */
 typedef struct {
@@ -894,6 +924,7 @@ typedef struct {
     int32_t                      has_ack_timeout;
     int32_t                      ack_timeout_sec;       /* on-network-timeout-for-acknowledgement-of-required-members (TNG1) */
     const char*                  ack_action;            /* proceed | abandon */
+    cimsue_mcvideo_group_attrs_t mcvideo;               /* MCVideo 몫 — present = 0 이면 PUT 에 싣지 않는다. 끝에 덧붙였다 */
 } cimsue_group_doc_t;
 
 /** CMS 대상 항목(csc.h CmsEntry, TS 24.484 §8.3.2.7 EntryType) — mode = entry-info 속성. */
@@ -938,6 +969,48 @@ typedef struct {
     const char* rp_imminent_peril;
     const char* rp_normal;
 } cimsue_service_config_doc_t;
+
+/** MCVideo user profile(csc.h McVideoUserProfileDoc, TS 24.484 §9.3) — 문서가 있으면 MCVideo 이용 자격이 있다(fetch 404 = 자격 없음).
+ *  인가 allow-* 는 요소가 없으면 허용(1). */
+typedef struct {
+    const char*        etag;
+    int32_t            not_modified;
+    const char*        user_uri;
+    const char*        mcvideo_id;
+    const char* const* groups;                          /* MCVideo 로 affiliate 할 수 있는 그룹 (ptr, count) */
+    int32_t            group_count;
+    const char* const* implicit_affiliations;
+    int32_t            implicit_affiliation_count;
+    int32_t            max_affiliations_n2;             /* -1 = 미기재 */
+    int32_t            max_simultaneous_video_streams;  /* 동시 수신 스트림 상한(서버 C9) */
+    int32_t            max_simultaneous_calls_n6;
+    cimsue_cms_entry_t emergency_group;
+    cimsue_cms_entry_t imminent_peril_group;
+    cimsue_cms_entry_t emergency_alert_group;
+    int32_t            allow_private_call;
+    int32_t            allow_emergency_group_call;
+    int32_t            allow_emergency_private_call;
+    int32_t            allow_imminent_peril_call;
+    int32_t            allow_activate_emergency_alert;
+    int32_t            allow_revoke_transmit;
+    int32_t            allow_remote_ambient_viewing;
+    int32_t            allow_local_ambient_viewing;
+    int32_t            allow_adhoc_group_call;
+} cimsue_mcvideo_user_profile_doc_t;
+
+/** MCVideo service configuration(csc.h McVideoServiceConfigDoc, TS 24.484 §9.4) — 참여자 전송 제어 타이머 T100~T104(초, -1 = 미기재 →
+ *  K5 기본값)·RP·신호 보호(요소가 없으면 켜짐). */
+typedef struct {
+    const char* etag;
+    int32_t     not_modified;
+    const char* domain;
+    const char* rp_emergency;
+    const char* rp_imminent_peril;
+    const char* rp_normal;
+    int32_t     confidentiality_protection;
+    int32_t     integrity_protection;
+    int32_t     t100_sec, t101_sec, t102_sec, t103_sec, t104_sec;
+} cimsue_mcvideo_service_config_doc_t;
 
 /** MCS UE initial configuration(csc.h UeInitConfigDoc, TS 24.484 §7.2) — 참여 기능 PSI. 광고하지 않은 서비스는 빈 값. */
 typedef struct {
@@ -1025,6 +1098,17 @@ CIMSUE_API cimsue_status_t CIMSUE_CALL cimsue_csc_fetch_ue_init_config(cimsue_cs
 CIMSUE_API cimsue_status_t CIMSUE_CALL cimsue_user_profile_parse(const char* xml, cimsue_user_profile_doc_t* out);
 CIMSUE_API cimsue_status_t CIMSUE_CALL cimsue_service_config_parse(const char* xml, cimsue_service_config_doc_t* out);
 CIMSUE_API cimsue_status_t CIMSUE_CALL cimsue_ue_init_config_parse(const char* xml, cimsue_ue_init_config_doc_t* out);
+/** MCVideo 설정 문서(TS 24.484 §9.3·§9.4) — fetch_user_profile 과 같은 규약. user profile 주소 = MCVideo ID(404 = MCVideo 자격 없음),
+ *  service configuration 은 시스템 전역 문서라 사용자 인자가 없다. */
+CIMSUE_API cimsue_status_t CIMSUE_CALL cimsue_csc_fetch_mcvideo_user_profile(cimsue_csc_t* c, const char* access_token,
+                                                                             const char* mcvideo_id, const char* etag,
+                                                                             cimsue_mcvideo_user_profile_doc_t* out);
+CIMSUE_API cimsue_status_t CIMSUE_CALL cimsue_csc_fetch_mcvideo_service_config(cimsue_csc_t* c, const char* access_token, const char* etag,
+                                                                               cimsue_mcvideo_service_config_doc_t* out);
+CIMSUE_API cimsue_status_t CIMSUE_CALL cimsue_mcvideo_user_profile_parse(const char* xml, cimsue_mcvideo_user_profile_doc_t* out);
+CIMSUE_API cimsue_status_t CIMSUE_CALL cimsue_mcvideo_service_config_parse(const char* xml, cimsue_mcvideo_service_config_doc_t* out);
+/** MCVideo 몫 기본값(csc.h McVideoGroupAttrs) — present = 0, 정수 -1, 보호 둘 1. 켤 때 present = 1 로 바꾼다. */
+CIMSUE_API void CIMSUE_CALL cimsue_mcvideo_group_attrs_default(cimsue_mcvideo_group_attrs_t* out);
 /** 정책 게이트(Capabilities::of) — NULL = 그 문서를 아직 못 받음. */
 CIMSUE_API void CIMSUE_CALL cimsue_capabilities_of(const cimsue_user_profile_doc_t* user_profile,
                                                    const cimsue_service_config_doc_t* service_config,
@@ -1077,6 +1161,7 @@ typedef enum {
     CIMSUE_STRUCT_UE_INIT_CONFIG_DOC,
     CIMSUE_STRUCT_VIDEO_GROUP_CALL_OPTIONS, CIMSUE_STRUCT_VIDEO_TRANSMITTER, CIMSUE_STRUCT_TRANSMISSION_EVENT,
     CIMSUE_STRUCT_RECEPTION_EVENT, CIMSUE_STRUCT_TRANSMISSION_INFO,
+    CIMSUE_STRUCT_MCVIDEO_GROUP_ATTRS, CIMSUE_STRUCT_MCVIDEO_USER_PROFILE_DOC, CIMSUE_STRUCT_MCVIDEO_SERVICE_CONFIG_DOC,
     CIMSUE_STRUCT_COUNT_
 } cimsue_struct_id_t;
 /** 구조체의 sizeof(이 DLL 의 컴파일 결과). 모르는 id 는 -1. */

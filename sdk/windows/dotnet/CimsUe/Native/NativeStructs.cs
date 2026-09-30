@@ -598,6 +598,35 @@ internal unsafe struct cimsue_group_member_t
     public int priority;
     public int required;   // 헤더와 같은 순서 — 끝에 덧붙였다(64비트 크기 불변)
     public byte* title;    // 산출 전용(직함) — 끝에 덧붙였다
+    public byte* mcvideo_id; // MCVideo entry ID — NULL = uri 와 같다. 끝에 덧붙였다
+}
+
+[StructLayout(LayoutKind.Sequential)]
+internal unsafe struct cimsue_mcvideo_group_attrs_t
+{
+    public int present;
+    public int invite_members;
+    public int max_duration_sec;
+    public int protect_media;
+    public int protect_transmission_control;
+    public byte** audio_encodings;
+    public int audio_encoding_count;
+    public byte** video_encodings;
+    public int video_encoding_count;
+    public byte* video_resolutions;
+    public byte* video_frame_rate;
+    public int urgent_real_time_video_mode;
+    public int non_urgent_real_time_video_mode;
+    public int non_real_time_video_mode;
+    public byte* active_real_time_video_mode;
+    public int max_transmitters;
+    public int min_number_to_start;
+    public int group_priority;
+    public int reception_hang_timer_sec;
+    public int allow_conference_state;
+    public int allow_emergency_call;
+    public int allow_emergency_alert;
+    public int allow_imminent_peril_call;
 }
 
 [StructLayout(LayoutKind.Sequential)]
@@ -637,6 +666,7 @@ internal unsafe struct cimsue_group_doc_t
     public int has_ack_timeout;
     public int ack_timeout_sec;
     public byte* ack_action;
+    public cimsue_mcvideo_group_attrs_t mcvideo;   // MCVideo 몫 — present = 0(0 초기화)이면 PUT 에 싣지 않는다. 끝에 덧붙였다
 }
 
 [StructLayout(LayoutKind.Sequential)]
@@ -686,6 +716,48 @@ internal unsafe struct cimsue_service_config_doc_t
 }
 
 [StructLayout(LayoutKind.Sequential)]
+internal unsafe struct cimsue_mcvideo_user_profile_doc_t
+{
+    public byte* etag;
+    public int not_modified;
+    public byte* user_uri;
+    public byte* mcvideo_id;
+    public byte** groups;
+    public int group_count;
+    public byte** implicit_affiliations;
+    public int implicit_affiliation_count;
+    public int max_affiliations_n2;
+    public int max_simultaneous_video_streams;
+    public int max_simultaneous_calls_n6;
+    public cimsue_cms_entry_t emergency_group;
+    public cimsue_cms_entry_t imminent_peril_group;
+    public cimsue_cms_entry_t emergency_alert_group;
+    public int allow_private_call;
+    public int allow_emergency_group_call;
+    public int allow_emergency_private_call;
+    public int allow_imminent_peril_call;
+    public int allow_activate_emergency_alert;
+    public int allow_revoke_transmit;
+    public int allow_remote_ambient_viewing;
+    public int allow_local_ambient_viewing;
+    public int allow_adhoc_group_call;
+}
+
+[StructLayout(LayoutKind.Sequential)]
+internal unsafe struct cimsue_mcvideo_service_config_doc_t
+{
+    public byte* etag;
+    public int not_modified;
+    public byte* domain;
+    public byte* rp_emergency;
+    public byte* rp_imminent_peril;
+    public byte* rp_normal;
+    public int confidentiality_protection;
+    public int integrity_protection;
+    public int t100_sec, t101_sec, t102_sec, t103_sec, t104_sec;
+}
+
+[StructLayout(LayoutKind.Sequential)]
 internal unsafe struct cimsue_ue_init_config_doc_t
 {
     public byte* etag;
@@ -724,5 +796,6 @@ internal enum cimsue_struct_id_t
     MCPTT_CONDITION, EMERGENCY_ALERT, VIDEO_DEVICE_INFO, CMS_ENTRY, USER_PROFILE_DOC, SERVICE_CONFIG_DOC, CAPABILITIES,
     UE_INIT_CONFIG_DOC,
     VIDEO_GROUP_CALL_OPTIONS, VIDEO_TRANSMITTER, TRANSMISSION_EVENT, RECEPTION_EVENT, TRANSMISSION_INFO,
+    MCVIDEO_GROUP_ATTRS, MCVIDEO_USER_PROFILE_DOC, MCVIDEO_SERVICE_CONFIG_DOC,
     COUNT_,
 }

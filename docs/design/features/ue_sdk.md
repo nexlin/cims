@@ -391,8 +391,10 @@ chat/prearranged·`mc_queueing`·`mc_priority`·`mc_reception_priority`·암묵�
 흐름 `transmission`·`reception`), C API(`cimsue_engine_join_video_group_call`·`cimsue_engine_affiliate_service`·`cimsue_engine_request_transmission` … ·
 `on_transmission`·`on_reception` — 구조체·필드·콜백은 끝에 덧붙여 ABI 유지, 크기 자기검사 id 추가), .NET(`Account.JoinVideoGroupCall`·`Affiliate(…, McService)`·
 `Call.RequestTransmission` … · 이벤트 `TransmissionChanged`·`ReceptionChanged` — Windows 에서 `CimsUe.Tests` ABI 대조). 그룹 영상 옵션(`GroupCallOptions.video`)·
-`AccountConfig.mcpttVideo` 의 C API·.NET 누락도 같이 메웠다. MCVideo 설정 문서(그룹 문서 MCVideo 몫·user profile·service config)의 C API·.NET·Kotlin 은 아직
-C++ 만이다(ue-init-config 의 MCVideo PSI 는 셋 다 있다). 동작(구현 — 시험 `McvSip`·`McvCall`, 계약 K3 골든과 대조):
+`AccountConfig.mcpttVideo` 의 C API·.NET 누락도 같이 메웠다. MCVideo 설정 문서도 셋 다 — 그룹 문서 MCVideo 몫(`GroupMember.mcvideoId`·`GroupDoc.mcvideo`
+= `McVideoGroupAttrs`, C API `cimsue_mcvideo_group_attrs_t` 는 `present = 0`(0 으로 채운 .NET 기본값)이면 PUT 에 싣지 않고, .NET·Kotlin 은 `null` = MCVideo 그룹
+아님·속성 `null` = 미기재 ↔ 코어 -1), `fetchMcVideoUserProfile`·`fetchMcVideoServiceConfig`(C API `cimsue_csc_fetch_mcvideo_*`·`cimsue_mcvideo_*_parse`), ue-init-config
+MCVideo PSI. 동작(구현 — 시험 `McvSip`·`McvCall`, 계약 K3 골든과 대조):
 
 - **등록**(TS 24.281 §7.2.1AA — 서비스 인가 본문 없는 REGISTER) — `mcvideoEnabled` 면 REGISTER Contact 에 `+g.3gpp.mcvideo` 와 `+g.3gpp.icsi-ref`
   목록의 mcvideo ICSI. **서비스 태그는 REGISTER 에만 모은다**(§7.1 — MC 서비스 등록은 한 REGISTER): icsi-ref 는 한 파라미터의 쉼표 목록(RFC 3840 —
