@@ -20,6 +20,8 @@
 //   M. 서버가 offer 한 MCPTT leg 에 단말의 세션 갱신 re-INVITE(단말 = refresher=uas 로 정한 갱신자)
 //                                                                          → 같은 SDP(floor m=application·o= 버전 유지)·IsSessionRefreshReInvite
 //                                                                            · Session-Expires refresher=uac (TS 24.379/24.281 §6.2.3.1.1 5) 전제)
+//   N. MCVideo leg 의 갱신 re-INVITE — 응용이 EventReInvite 에서 answer fmtp 를 다시 지으면(pclsLocalRtp) 그 값으로 나간다
+//                                                                          (CSP McVideoCallService — TS 24.581 §14.3.1 re-offer 에 있던 것만)
 //
 //   빌드/실행은 verify S1-UNIT-PSIP (verify/lib/items/stage1/unit_psip.py) 가 한다 — 명령은 psip_leg_dest_test.cpp 서두와 같다.
 //     build/psip_reason_video_test [--port 27080] [--verbose]
@@ -72,6 +74,7 @@ public:
 	// 관측
 	std::atomic<int> m_iReInvites{ 0 };
 	bool m_bLastReInviteRefresh = false;	// EventReInvite 시점의 IsSessionRefreshReInvite (CSP ModuleDispatcher 가 보는 값)
+	std::string m_strReInviteFmtp;			// 비어 있지 않으면 EventReInvite 가 answer 의 m_strApplicationFmtp 를 이 값으로 바꾼다
 	std::atomic<int> m_iEnded{ 0 };
 	int m_iEndStatus = 0;
 	std::string m_strEndReason;
@@ -112,9 +115,10 @@ public:
 		}
 		m_pclsUa->AcceptCall( pszCallId, &clsLocal );
 	}
-	void EventReInvite( const char * pszCallId, CSipCallRtp *, CSipCallRtp * ) override
+	void EventReInvite( const char * pszCallId, CSipCallRtp *, CSipCallRtp * pclsLocalRtp ) override
 	{
 		m_bLastReInviteRefresh = m_pclsUa->IsSessionRefreshReInvite( pszCallId );
+		if( !m_strReInviteFmtp.empty() && pclsLocalRtp ) pclsLocalRtp->m_strApplicationFmtp = m_strReInviteFmtp;
 		++m_iReInvites;
 	}
 	void EventCallRing( const char *, int, CSipCallRtp * ) override {}
@@ -707,6 +711,46 @@ int main( int argc, char * argv[] )
 		clsUa.StopCall( strCallId.c_str() );
 		UdpRecvUntil( fdUe, "BYE", 1000 );
 		clsUa.SetSessionTimer( false, 1800, 90, E_SESSION_REFRESHER_LOCAL );
+	}
+
+	// ── N. MCVideo leg 의 단말 갱신 re-INVITE — 개시 answer 의 암묵 요청 fmtp 가 갱신 answer 에 남지 않게 응용이 다시 짓는다 ──
+	printf( "[N] MCVideo leg refresh re-INVITE → answer fmtp = what the application rebuilt in EventReInvite\n" );
+	{
+		clsCb.Reset();
+		clsCb.m_iReInvites = 0;
+		clsCb.m_iLocalVideoPort = 40094;
+		clsCb.m_iLocalAppPort = 40096;
+		clsCb.m_bMcVideo = true;
+		clsCb.m_strAppFmtp = "mc_priority=5;mc_granted;mc_implicit_request;mc_audio_ssrc=1;mc_video_ssrc=2;mc_transmission_ssrc=9";
+		std::string strInvite;
+		std::string strFinal = UeInvite( fdUe, iUePort, "rv-n@test.local", SDP_MCVIDEO, strInvite );
+		CHECK( strFinal.compare( 0, 11, "SIP/2.0 200" ) == 0 && BodyOf( strFinal ).find( "mc_implicit_request" ) != std::string::npos,
+		       "개시 answer 에 암묵 요청 fmtp" );
+		clsCb.m_strReInviteFmtp = "mc_queueing;mc_priority=5;mc_transmission_ssrc=9";
+		const std::string strM = "\r\n" + strInvite, strR = "\r\n" + strFinal;
+		std::string strSrvContact = HeaderOf( strR, "Contact" );
+		const size_t lt = strSrvContact.find( '<' ), gt = strSrvContact.find( '>' );
+		if( lt != std::string::npos && gt != std::string::npos ) strSrvContact = strSrvContact.substr( lt + 1, gt - lt - 1 );
+		char szRe[4096];
+		int iRe = snprintf( szRe, sizeof(szRe),
+			"INVITE %s SIP/2.0\r\nVia: SIP/2.0/UDP %s:%d;rport;branch=z9hG4bK-rv-n-%d\r\nMax-Forwards: 70\r\nFrom: %s\r\nTo: %s\r\n"
+			"Call-ID: %s\r\nCSeq: 2 INVITE\r\nContact: <sip:ue@%s:%d>\r\nContent-Type: application/sdp\r\nContent-Length: %d\r\n\r\n%s",
+			strSrvContact.c_str(), UA_IP, iUePort, ++g_iSeq, HeaderOf( strM, "From" ).c_str(), HeaderOf( strR, "To" ).c_str(),
+			HeaderOf( strM, "Call-ID" ).c_str(), UA_IP, iUePort, (int)strlen( SDP_MCVIDEO ), SDP_MCVIDEO );
+		UdpSendTo( fdUe, std::string( szRe, iRe ) );
+		const std::string strRe200 = UdpRecvUntil( fdUe, "SIP/2.0 200", 2000 );
+		const std::string strAns = BodyOf( strRe200 );
+		CHECK( clsCb.m_iReInvites == 1 && clsCb.m_bLastReInviteRefresh, "같은 SDP = 세션 갱신" );
+		CHECK( strAns.find( "m=application 40096 udp MCVideo\r\na=fmtp:MCVideo mc_queueing;mc_priority=5;mc_transmission_ssrc=9\r\n" ) != std::string::npos,
+		       "갱신 answer fmtp = 응용이 다시 지은 값" );
+		CHECK( strAns.find( "mc_implicit_request" ) == std::string::npos && strAns.find( "mc_granted" ) == std::string::npos,
+		       "개시 전용 파라미터가 갱신 answer 에 남지 않는다" );
+		CHECK( strAns.find( "m=video 40094 RTP/AVP 97" ) != std::string::npos, "영상 포트 유지" );
+		UdpSendTo( fdUe, BuildInDialog( "BYE", strInvite, strFinal, 3, NULL ) );
+		UdpRecvUntil( fdUe, "SIP/2.0 200", 1000 );
+		clsCb.m_bMcVideo = false;
+		clsCb.m_strAppFmtp = "mc_queueing";
+		clsCb.m_strReInviteFmtp.clear();
 	}
 
 	close( fdUe );

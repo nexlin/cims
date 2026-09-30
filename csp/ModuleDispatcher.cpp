@@ -2339,12 +2339,14 @@ void CModuleDispatcher::EventReInvite( const char *pszCallId, CSipCallRtp *pclsR
     // 세션 갱신 re-INVITE (RFC 4028) — 선언 미디어가 직전과 동일하면 미디어 재협상이 아니다.
     //   CMP 재호출·NAT 재평가를 생략한다 (leg_liveness.md §6.3). psip 이 200 OK 를 이미
     //   같은 SDP 로 응답하므로 여기서 할 일이 없다.
-    if ( gclsUserAgent.IsSessionRefreshReInvite( pszCallId ) ) {
+    const bool bRefresh = gclsUserAgent.IsSessionRefreshReInvite( pszCallId );
+    // MCVideo 그룹 호 leg (CallMap 밖) — 세션 갱신이어도 answer 의 fmtp:MCVideo 는 re-offer 로 다시 짓고(TS 24.581
+    //   §14.3.1), 미디어가 바뀌었을 때만 CMP 주소 등록을 갱신한다
+    if ( gclsMcVideoCallService.OnReInvite( pszCallId, pclsRemoteRtp, pclsLocalRtp, bRefresh ) ) return;
+    if ( bRefresh ) {
         CLog::Print( LOG_DEBUG, "EventReInvite: session refresh (media unchanged) — CallId(%s)", pszCallId );
         return;
     }
-    // MCVideo 그룹 호 leg (CallMap 밖) — CMP 주소 등록만 갱신하고, answer 는 스택의 직전 로컬 선언 그대로
-    if ( gclsMcVideoCallService.OnReInvite( pszCallId, pclsRemoteRtp ) ) return;
 
     CCallInfo clsCallInfo;
     if ( gclsCallMap.Select( pszCallId, clsCallInfo ) ) {

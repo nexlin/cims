@@ -39,8 +39,10 @@ public:
     bool OnCallStarted( const std::string &strCallId, CSipCallRtp *pclsRtp );
     /** 호 종료(상대 BYE·CANCEL·최종 실패·타임아웃) — 이 서비스의 leg 면 정리하고 true */
     bool OnCallEnded( const std::string &strCallId, int iSipStatus );
-    /** 미디어가 바뀐 re-INVITE(망 전환·주소 변경) — 이 서비스의 leg 면 CMP 주소를 다시 등록하고 true */
-    bool OnReInvite( const std::string &strCallId, CSipCallRtp *pclsRemoteRtp );
+    /** re-INVITE — 이 서비스의 leg 면 answer 의 fmtp:MCVideo 를 re-offer 로 다시 짓고(pclsLocalRtp — TS 24.581
+     * §14.3.1), 미디어가 바뀌었으면(bRefresh false — 망 전환·주소 변경) CMP 주소를 다시 등록한 뒤 true */
+    bool OnReInvite( const std::string &strCallId, CSipCallRtp *pclsRemoteRtp, CSipCallRtp *pclsLocalRtp,
+                     bool bRefresh );
     /** CMP 이벤트 (hdr.service mcvideo — PTT_GROUP_ABORTED · TRANSMITTERS · TRANSMISSION_INACTIVITY) */
     void OnCmpEvent( const std::string &strCmd, const std::string &strGroupId, const std::string &strSesId,
                      const SimpleJson::JsonNode &payload );
@@ -60,11 +62,13 @@ private:
         ELegRole eRole = E_LEG_JOINER;
         bool bEstablished = false;  // 200 OK 송수신
         bool bJoined = false;       // CMP JOIN ② (주소 등록)
-        bool bVideo =
-            true;  // 협상된 영상 성분이 살아 있다(서버 SDP m=video ≠ 0) — false 면 JOIN 에 video 포트를 싣지 않는다
+        // 협상된 영상 성분이 살아 있다(서버 SDP m=video ≠ 0) — false 면 JOIN 에 video 포트를 싣지 않는다
+        bool bVideo = true;
         time_t tDeadline = 0;  // 초대 leg 응답 한도
-        RelaySdesLeg
-            clsSdes;  // 미디어 SRTP(SDES) 협상 상태 — audio·video 가 m= 라인마다 키가 다르다(media_security.md §5)
+        // 미디어 SRTP(SDES) 협상 상태 — audio·video 가 m= 라인마다 키가 다르다(media_security.md §5)
+        RelaySdesLeg clsSdes;
+        // CMP 가 이 멤버에게 준 tc_ssrc — answer mc_transmission_ssrc (re-INVITE answer 를 다시 지을 때)
+        unsigned int uTcSsrc = 0;
     };
     struct Session {
         std::string strGroupId;

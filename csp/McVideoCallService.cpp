@@ -305,6 +305,7 @@ bool CMcVideoCallService::_AcceptLeg( Session &clsSes, const std::string &strCal
 
     leg.bEstablished = true;
     leg.bJoined = true;
+    leg.uTcSsrc = r1.uTcSsrc;
     CLog::Print( LOG_INFO, "MCVIDEO: accept group(%s) member(%s) call(%s) audio=%d video=%d control=%d tc_ssrc=%u%s",
                  clsSes.strGroupId.c_str(), strMember.c_str(), strCallId.c_str(), r1.clsPorts.iPort,
                  clsAns.m_iVideoPort, r1.clsPorts.iControlPort, r1.uTcSsrc,
@@ -452,6 +453,7 @@ bool CMcVideoCallService::_InviteMember( Session &clsSes, const CspPttGroup &cls
     leg.eRole = E_LEG_INVITED;
     leg.tDeadline = time( NULL ) + kInviteAnswerSec;
     leg.clsSdes = clsSdes;
+    leg.uTcSsrc = r1.uTcSsrc;
     clsSes.mapLegs[strCallId] = leg;
     m_mapCallGroup[strCallId] = clsSes.strGroupId;
     if ( !gclsUserAgent.StartCall( strCallId.c_str(), pclsInvite ) ) {
@@ -761,7 +763,8 @@ bool CMcVideoCallService::OnCallEnded( const std::string &strCallId, int iSipSta
     return true;
 }
 
-bool CMcVideoCallService::OnReInvite( const std::string &strCallId, CSipCallRtp *pclsRemoteRtp ) {
+bool CMcVideoCallService::OnReInvite( const std::string &strCallId, CSipCallRtp *pclsRemoteRtp,
+                                      CSipCallRtp *pclsLocalRtp, bool bRefresh ) {
     std::lock_guard<std::recursive_mutex> lock( m_mutex );
     auto itG = m_mapCallGroup.find( strCallId );
     if ( itG == m_mapCallGroup.end() ) return false;
@@ -772,14 +775,24 @@ bool CMcVideoCallService::OnReInvite( const std::string &strCallId, CSipCallRtp 
     auto itL = clsSes.mapLegs.find( strCallId );
     if ( itL == clsSes.mapLegs.end() || !itL->second.bJoined ) return true;
     Leg &leg = itL->second;
-    // answer 는 스택이 직전 로컬 선언(멤버 CMP 포트·MCVideo 제어 채널·SRTP 서버 키)으로 낸다 — 여기서는 CMP 주소
-    //   등록만 바꾼다. 단말 offer 라 단말 송신 PT = 서버 answer 가 echo 한 offer PT(bServerOffered=false). SRTP leg
-    //   는 단말 재키잉만 반영하고 서버 키는 유지한다(media_security.md §5.2 — 직전 answer 의 서버 키가 그대로
-    //   나간다).
     CspPttGroup clsGroup;
     int iPrio = 0;
     std::string strRole;
     if ( gclsGroupMap.Select( strGroupId.c_str(), clsGroup ) ) IsMember( clsGroup, leg.strMember, &iPrio, &strRole );
+    // answer 는 스택이 직전 로컬 선언(멤버 CMP 포트·제어 채널·SRTP 서버 키)으로 낸다. 단 fmtp:MCVideo 는 이 re-offer
+    //   에 있던 파라미터만 싣는다(TS 24.581 §14.3.1) — 직전 선언을 되풀이하면 개시 answer 의
+    //   mc_implicit_request·mc_granted·mc_*_ssrc 가 갱신 answer 에 남는다(암묵 요청은 새 세션 개시에서만, §14.3.5).
+    //   세션 갱신(미디어 무변경)도 같다.
+    if ( pclsLocalRtp && pclsLocalRtp->m_iApplicationPort > 0 ) {
+        int iCtl = 0;
+        CMcVideoFmtp clsReOffer;
+        McvControlOf( pclsRemoteRtp, iCtl, clsReOffer );
+        pclsLocalRtp->m_strApplicationFmtp = BuildMcVideoAnswerFmtp( clsReOffer, iPrio, leg.uTcSsrc );
+    }
+    if ( bRefresh ) return true;  // 미디어 무변경 — CMP 주소 등록은 그대로(leg_liveness.md §6.3)
+    // 미디어 변경 — CMP 주소 등록을 바꾼다. 단말 offer 라 단말 송신 PT = 서버 answer 가 echo 한 offer
+    //   PT(bServerOffered=false). SRTP leg 는 단말 재키잉만 반영하고 서버 키는 유지한다(media_security.md §5.2 — 직전
+    //   answer 의 서버 키가 그대로 나간다).
     CmpMcvMemberDecl d;
     _FillDecl( d, leg.strMember, pclsRemoteRtp, iPrio, false );
     d.strRole = strRole.empty() ? "participant" : strRole;
