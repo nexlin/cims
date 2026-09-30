@@ -493,7 +493,7 @@ cimsue-cli --csc-host H --user U --pw P --from-profile volte|ptt [--server IP --
 cimsue-cli [계정] drive [--sample-file WAV] [--service volte|voip|ptt]
   명령: register | unregister | use <service> | dial <번호|URI> [video] | answer <call> [video] | reject <call> [code] | hangup <call> | hold <call>
         resume <call> | dtmf <call> <digits> | transfer <call> <대상> | group_call <group> [listen] [emergency] [broadcast] [implicit] | floor_request <call>
-        floor_release <call> | affiliate <group> on|off | pickup <code> [number] | media mic|sample [<wav>] | stats [call] | quality <call> | quit
+        floor_release <call> | affiliate <group> on|off [mcvideo] | pickup <code> [number] | media mic|sample [<wav>] | stats [call] | quality <call> | quit
         video_call <group> [prearranged] [queueing] [implicit] | transmit_request <call> [priority] | transmit_release <call>
         reception_accept <call> <userId> | reception_end <call> <userId>   (MCVideo — affiliate 는 MCPTT 만)
   이벤트: ready{version,aor} · reg{service,state,code,reason,expires,rrd_ms} · incoming{call,from,called,video,mcptt,service,group}

@@ -109,7 +109,7 @@ TEST(Drive, McVideoCommands) {
     DriveSession ds(eng, sink, twoLines(false));
     ds.start(false);
     for (const char* cmd : {"video_call g101 prearranged queueing implicit", "transmit_request 0 5", "transmit_release 0",
-                            "reception_accept 0 tel:+82510002001", "reception_end 0 tel:+82510002001"}) {
+                            "reception_accept 0 tel:+82510002001", "reception_end 0 tel:+82510002001", "affiliate g101 on mcvideo"}) {
         size_t before = sink.lines.size();
         ds.handleLine(cmd);
         ASSERT_EQ(sink.lines.size(), before + 1) << cmd;

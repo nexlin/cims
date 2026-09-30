@@ -251,7 +251,8 @@ struct DriveSession::Impl : public Listener {
             if (id >= 0) markDial(id);
             result(op, id >= 0, id, 0, id >= 0 ? "" : "group call refused");
         } else if (op == "video_call") {
-            // MCVideo 그룹 호(TS 24.281 §9.2.1·§9.2.2) — chat 합류가 곧 affiliation(§8.1). 명시 affiliation 은 싣지 않는다(CSP A9 전)
+            // MCVideo 그룹 호(TS 24.281 §9.2.1·§9.2.2) — chat 합류가 곧 affiliation(§8.1). prearranged 팬아웃을 받으려면 먼저
+            //   `affiliate <group> on mcvideo`(§8.2)
             VideoGroupCallOptions vo; vo.prearranged = has("prearranged"); vo.queueing = has("queueing");
             vo.implicitTransmissionRequest = has("implicit");
             int id = eng.joinVideoGroupCall(acc, arg(1), vo);
@@ -265,7 +266,9 @@ struct DriveSession::Impl : public Listener {
         else if (op == "floor_release") { res(op, eng.floorRelease(argi(1, -1)), argi(1, -1)); }
         else if (op == "affiliate") {
             bool on = arg(2) != "off";
-            int64_t tok = eng.affiliate(acc, arg(1), on);
+            // 서비스 — 기본 MCPTT, `mcvideo` 면 MCVideo affiliation(관심 그룹 전부를 한 PUBLISH 로, TS 24.281 §8.2.1.2)
+            const McService svc = has("mcvideo") ? McService::McVideo : McService::Mcptt;
+            int64_t tok = eng.affiliate(acc, arg(1), on, svc);
             if (tok >= 0) { std::lock_guard<std::mutex> lk(m); tokens[tok] = { op, on, Clock::now() }; }
             result(op, tok >= 0, -1, 0, tok >= 0 ? "" : "affiliate refused");
         } else if (op == "pickup") {
