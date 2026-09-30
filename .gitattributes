@@ -1,2 +1,5 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# Windows(Git Bash)에서 직접 실행하는 셸 스크립트 — core.autocrlf 로 CRLF 가 되면 bash 가 돌지 않는다
+sdk/android/build-native-remote.sh text eol=lf
