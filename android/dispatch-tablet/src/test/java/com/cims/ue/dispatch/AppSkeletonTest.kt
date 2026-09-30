@@ -6,6 +6,7 @@ package com.cims.ue.dispatch
 
 import com.cims.ue.dispatch.ui.AppScreen
 import com.cims.ue.dispatch.ui.CallPane
+import com.cims.ue.dispatch.ui.DispatchMode
 import com.cims.ue.dispatch.ui.MoreItem
 import com.cims.ue.dispatch.ui.PttPane
 import com.cims.ue.sdk.AuthScheme
@@ -21,20 +22,23 @@ import org.junit.Test
 
 class AppSkeletonTest {
 
-    // ── 화면 배열 — 하단 내비는 «하는 일» 넷이다(§6.3) ──
-    @Test fun `하단 내비는 이력·무전·통화·더보기 순이다`() {
-        assertEquals(listOf("이력", "무전", "통화", "더보기"), AppScreen.entries.map { it.label })
+    // ── 화면 배열 — 레일은 «하는 일» 셋이다(§6.3) ──
+    @Test fun `레일은 관제·이력·더보기 순이다`() {
+        assertEquals(listOf("관제", "이력", "더보기"), AppScreen.entries.map { it.label })
     }
 
-    @Test fun `첫 화면은 이력이다`() {
-        // 관제에서 «무슨 일이 있었나» 를 보는 일이 가장 잦다(§6.3). 무전은 발언 바가 어디서나 받는다.
-        assertEquals(AppScreen.HISTORY, AppScreen.entries.first())
+    @Test fun `첫 화면은 관제다`() {
+        // 관제사가 가장 오래 머무는 곳이다 — 무전·통화가 [관제] 한 곳에 모였다(§6.3).
+        assertEquals(AppScreen.DISPATCH, AppScreen.entries.first())
+    }
+
+    @Test fun `관제는 무전·통화 두 모드다`() {
+        assertEquals(listOf("무전", "통화"), DispatchMode.entries.map { it.label })
     }
 
     @Test fun `감청·청취·메시지는 최상위 축이 아니다`() {
-        // 감청은 통화 leg, 청취는 무전 leg, SDS 는 무전 채널의 대화다 — 축을 따로 세우면 한 일을
-        // 두 군데서 찾게 된다(§6.3).
-        assertTrue(AppScreen.entries.none { it.label in setOf("감청", "청취", "메시지") })
+        // 감청은 통화 leg, 청취는 무전 leg, SDS 는 무전 채널의 대화 — 축을 따로 세우면 같은 것을 두 군데서 찾는다.
+        assertTrue(AppScreen.entries.none { it.label in setOf("감청", "청취", "메시지", "무전", "통화") })
     }
 
     @Test fun `그룹원은 면이 아니라 띠다`() {

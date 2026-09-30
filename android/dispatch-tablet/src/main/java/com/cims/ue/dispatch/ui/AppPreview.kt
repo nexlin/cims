@@ -1,10 +1,9 @@
-// **실제 태블릿 한 장** Preview — 상단 바 + 본문 + 발언 바 + 하단 내비 (android_dispatch_tablet.md §6.3)
+// **실제 태블릿 한 장** Preview — 왼쪽 레일 + 상단 바 + 관제 탭 줄 + 본문(면·사이드 패널) + 발언 바 (android_dispatch_tablet.md §6.3)
 //
-// 화면별 Preview(`*ScreenPreview.kt`)는 **본문만** 그린다 — 그 영역의 밀도를 볼 때 쓴다.
-// 이 파일은 그 위아래 껍데기(56 + 80 + 56 = 192dp)까지 붙여 **기기에서 보이는 그대로** 를 보여 준다.
-// 두 벌이 필요한 이유: 본문만 보면 실제보다 넉넉해 보이고, 껍데기까지 보면 본문 안이 작아 잘 안 보인다.
+// 화면별 Preview(`*ScreenPreview.kt`)는 **본문만** 그린다 — 그 영역의 밀도를 볼 때 쓴다. 이 파일은 껍데기(레일 80 · 상단 바 64 ·
+// 탭 줄 48 · 발언 바 80)까지 붙여 **기기에서 보이는 그대로** 를 보여 준다. 본문만 보면 실제보다 넉넉해 보인다.
 //
-// 크기는 가로 1280×800dp — 관제 태블릿 실물(§12).
+// 크기는 가로 1280×800dp — 관제 태블릿 실물(§12). 차례는 시안 «관제 메뉴 재구성»(E1~E6)과 같다.
 package com.cims.ue.dispatch.ui
 
 import androidx.compose.foundation.layout.ColumnScope
@@ -36,7 +35,7 @@ import com.cims.ue.dispatch.ui.groups.DetailMember
 import com.cims.ue.dispatch.ui.groups.GroupsUi
 import com.cims.ue.dispatch.ui.groups.PttGroupsScreenContent
 import com.cims.ue.dispatch.ui.ptt.ActivityContent
-import com.cims.ue.dispatch.ui.ptt.ActivityFilter
+import com.cims.ue.dispatch.ui.ptt.EventPanel
 import com.cims.ue.dispatch.ui.ptt.MessagesContent
 import com.cims.ue.dispatch.ui.ptt.ThreadChip
 import com.cims.ue.sdk.MediaSource
@@ -55,9 +54,16 @@ import com.cims.ue.dispatch.ui.history.HistoryScreenContent
 import com.cims.ue.dispatch.ui.history.HistoryUi
 import com.cims.ue.dispatch.ui.ptt.ChannelHeadUi
 import com.cims.ue.dispatch.ui.ptt.ChannelRowUi
-import com.cims.ue.dispatch.ui.ptt.ChannelScreenContent
-import com.cims.ue.dispatch.ui.ptt.PttScreenContent
-import com.cims.ue.dispatch.ui.ptt.PttTabs
+import com.cims.ue.dispatch.ui.ptt.ChannelPanelContent
+import com.cims.ue.dispatch.ui.ptt.ChannelsPaneContent
+import com.cims.ue.dispatch.ui.ptt.MineCardUi
+import com.cims.ue.dispatch.ui.ptt.CardControl
+import com.cims.ue.dispatch.ui.ptt.PersonRowUi
+import com.cims.ue.dispatch.ui.ptt.UserRowUi
+import com.cims.ue.dispatch.ui.ptt.UsersPanelContent
+import com.cims.ue.dispatch.ui.groups.NewGroupPanelContent
+import com.cims.ue.dispatch.ui.groups.EditForm
+import com.cims.ue.dispatch.ui.groups.MemberRow
 import com.cims.ue.dispatch.ui.ptt.ScopeFilter
 import com.cims.ue.dispatch.ui.ptt.TalkBarContent
 import com.cims.ue.dispatch.ui.ptt.TalkTargetChip
@@ -65,6 +71,7 @@ import com.cims.ue.dispatch.ui.ptt.CardKind
 import com.cims.ue.dispatch.ui.ptt.ChannelCard
 import com.cims.ue.sdk.FloorState
 import androidx.compose.ui.Modifier
+import androidx.compose.material.icons.filled.Groups
 
 private val TOP = TopBarUi(
     displayName = "김관제",
@@ -89,15 +96,6 @@ private fun TalkingBar() = TalkBarContent(
 @Composable
 private fun IdleBar() = TalkBarContent(targets = emptyList(), anyJoined = true)
 
-private val MINE = listOf(
-    ChannelRowUi("g1", "순찰1", "발언 김관제 00:14", "12:31", 7, 3,
-        active = true, speaking = true, canTarget = true, targeted = true),
-    ChannelRowUi("g2", "상황실", "발언 없음", "05:02", 3, active = true, canTarget = true),
-    ChannelRowUi("g3", "교통1", "멤버 12", "대기"),
-    ChannelRowUi("p1", "김반장", "발언 없음", "02:14", active = true, canTarget = true),
-    ChannelRowUi("a1", "애드혹 3인", "발언 없음", "00:48", 3, active = true, canTarget = true),
-)
-
 private val SCOPED = listOf(
     ChannelRowUi("s1", "야간순찰", "청취 중 · 발언 박현장", "03:20", 5,
         active = true, speaking = true, listening = true),
@@ -108,21 +106,27 @@ private val SCOPED = listOf(
 )
 
 /**
- * 미리보기 한 장 — 껍데기 + 본문.
- *
- * 면([pttPane]·[callPane])까지 받는 이유: 껍데기의 쪽 번호가 «메뉴 + 면» 좌표라(§6.3), 면을 안 주면
- * 항상 그 메뉴의 첫 면 자리에 선다. 그러면 스와이프 이음매를 미리보기로 볼 수 없다.
+ * 미리보기 한 장 — 껍데기 + 본문. [관제] 면이면 [page] 가 탭 줄의 강조와 pager 의 자리를, [panel] 이 오른쪽 사이드 패널을 정한다.
  */
 @Composable
 private fun Screen(
-    screen: AppScreen,
+    screen: AppScreen = AppScreen.DISPATCH,
+    page: DispatchPage = pageOf(PttPane.CHANNELS),
     bar: @Composable () -> Unit = { TalkingBar() },
-    pttPane: PttPane = PttPane.CHANNELS,
-    callPane: CallPane = CallPane.CALLS,
-    body: @Composable ColumnScope.() -> Unit,
-) = PreviewFrame {
+    panel: (@Composable () -> Unit)? = null,
+    dark: Boolean = false,
+    body: @Composable () -> Unit,
+) = PreviewFrame(dark = dark) {
     AppShellContent(screen = screen, top = TOP, badges = BADGES, talkBar = bar,
-        pttPane = pttPane, callPane = callPane) { body() }
+        tabs = {
+            DispatchTabs(page, onMode = {}, onPage = {}, badges = BADGES) {
+                if (page.mode == DispatchMode.PTT) PillButton("사용자", {}, strongBorder = true,
+                    leading = androidx.compose.material.icons.Icons.Filled.Groups)
+            }
+        }) {
+        if (screen == AppScreen.DISPATCH) DispatchBody(page, onPage = {}, panel = panel) { p -> if (p == page) body() }
+        else body()
+    }
 }
 
 // ── 다섯 자리를 실제 크기로 ─────────────────────────────────────────────────
@@ -174,17 +178,23 @@ private val THREAD = listOf(
     msg(6, "확인 중", out = true))
 
 private val CHIPS = listOf(
-    ThreadChip("g1", "순찰1", 0, T0), ThreadChip("g2", "상황실", 3, T0),
-    ThreadChip("+821012345678", "박현장", 1, T0), ThreadChip("g3", "교통1", 0, T0))
+    ThreadChip("g1", "순찰1", 0, T0 + 360_000, last = "나: 확인 중", group = true),
+    ThreadChip("g2", "상황실", 3, T0 - 400_000, last = "이당직: 확인 후 보고 드리겠습니다", group = true),
+    ThreadChip("+821012345678", "박현장", 1, T0 - 900_000, last = "교대 인원 2명 부족합니다"),
+    ThreadChip("g3", "교통1", 0, T0 - 3_600_000, last = "최순찰: 교차로 정체 해소", group = true))
 
 private val EVENTS = listOf(
-    ActivityRow(T0 - 30_000, "g1", "순찰1", "발언 김관제", ActivityKind.TALK),
-    ActivityRow(T0 - 60_000, "g1", "순찰1", "입장 박현장", ActivityKind.JOIN),
-    ActivityRow(T0 - 90_000, "g2", "상황실", "긴급 모드 시작", ActivityKind.EMERGENCY, emergency = true),
-    ActivityRow(T0 - 120_000, "g1", "순찰1", "SDS 수신 — 이당직", ActivityKind.SDS),
-    ActivityRow(T0 - 150_000, "g3", "교통1", "퇴장 최순찰", ActivityKind.LEAVE),
-    ActivityRow(T0 - 180_000, "g1", "순찰1", "발언 거부 — 우선순위 낮음", ActivityKind.ERROR),
-    ActivityRow(T0 - 210_000, "s1", "야간순찰", "발언 이당직", ActivityKind.TALK))
+    ActivityRow(T0 - 30_000, "g1", "순찰1", "박현장 발언 종료 · 14초", ActivityKind.TALK, id = 11),
+    ActivityRow(T0 - 44_000, "g1", "순찰1", "박현장 발언 시작", ActivityKind.TALK, id = 10),
+    ActivityRow(T0 - 60_000, "g1", "순찰1", "박현장 입장", ActivityKind.JOIN, id = 9),
+    ActivityRow(T0 - 90_000, "g2", "상황실", "긴급 개시 · 이당직", ActivityKind.EMERGENCY, emergency = true, id = 8),
+    ActivityRow(T0 - 120_000, "g1", "순찰1", "메시지 · 이당직: 순찰 2조 교대 요청합니다", ActivityKind.SDS, id = 7),
+    ActivityRow(T0 - 150_000, "g1", "순찰1", "최순찰 퇴장", ActivityKind.LEAVE, id = 6),
+    ActivityRow(T0 - 180_000, "g1", "순찰1", "발언 거부 — 우선순위 낮음", ActivityKind.ERROR, id = 5),
+    ActivityRow(T0 - 210_000, "s1", "야간순찰", "이당직 발언 · 청취 중", ActivityKind.TALK, id = 4),
+    ActivityRow(T0 - 240_000, "g1", "순찰1", "김관제(나) 발언 · 22초", ActivityKind.TALK, id = 3),
+    ActivityRow(T0 - 270_000, "g2", "상황실", "메시지 · 서상황: 3번 출입구 CCTV 확인 요청", ActivityKind.SDS, id = 2),
+    ActivityRow(T0 - 300_000, "g1", "순찰1", "한지원 입장", ActivityKind.JOIN, id = 1))
 
 // ── 통화 ──
 private fun dlg(id: String, state: String, remote: String, confirmed: Boolean) = DialogRow(
@@ -270,163 +280,203 @@ private val AVIEW = AdminView(
         OrgNode("OPS2", "2팀", "OPS"), OrgNode("FLD", "현장과", "HQ"), OrgNode("MNT", "정비과", "HQ")),
     members = AMEMBERS)
 
-// ── 메뉴 넷 × 그 안의 모든 면 ─────────────────────────────────────────────
-//   기기에서 실제로 볼 수 있는 화면을 **빠짐없이** 같은 크기로 늘어놓는다.
+// ── 메뉴 셋 × 관제의 면 × 사이드 패널 ────────────────────────────────────────
+//   기기에서 실제로 볼 수 있는 화면을 **빠짐없이** 같은 크기로 늘어놓는다(시안 «관제 메뉴 재구성» E1~E6 과 같은 차례).
+
+private val MINE_CARDS = listOf(
+    MineCardUi("g1", "순찰1", sub = "발언 김관제 00:14", roster = "김관제 · 이당직 · 박현장 +4", meta = "참가 7 · 12:31",
+        speaking = true, active = true, control = CardControl.TARGET, on = true),
+    MineCardUi("g2", "상황실", sub = "발언 없음", roster = "이당직 · 서상황", meta = "참가 3 · 05:02", unread = 3,
+        active = true, control = CardControl.TARGET),
+    MineCardUi("g3", "교통1", sub = "멤버 12", roster = "미참여", control = CardControl.JOIN),
+    MineCardUi("p1", "김반장", kind = "개별", sub = "발언 없음", roster = "김반장", meta = "02:14", active = true,
+        control = CardControl.TARGET),
+    MineCardUi("a1", "애드혹 3인", kind = "애드혹", sub = "발언 없음", roster = "박현장 · 최순찰", meta = "참가 3 · 00:48",
+        active = true, control = CardControl.TARGET),
+)
+
+private val PEOPLE = listOf(
+    PersonRowUi("5001", "김관제", "PTT 5001 · 관제과 1팀", isMe = true, speaking = true, chair = true),
+    PersonRowUi("5002", "이당직", "PTT 5002 · 관제과 1팀"),
+    PersonRowUi("5003", "박현장", "PTT 5003 · 현장과"),
+    PersonRowUi("5004", "최순찰", "PTT 5004 · 현장과"),
+    PersonRowUi("5005", "정정비", "PTT 5005 · 정비과"),
+    PersonRowUi("5006", "한지원", "PTT 5006 · 관제과 2팀"))
+
+private val HEAD = ChannelHeadUi(id = "g1", title = "순찰1", badge = "멤버",
+    subtitle = "참가 7 · 발언 김관제 00:14 · 12:31",
+    joined = true, isMemberGroup = true, canTarget = true, targeted = true, unread = 3, groupId = "g1", canEdit = true)
+
+private val USERS = listOf(
+    UserRowUi("5002", "이당직", "관제과 1팀", "PTT 5002 · 관제과 1팀", "접속"),
+    UserRowUi("5003", "박현장", "현장과", "PTT 5003 · 현장과", "접속"),
+    UserRowUi("5004", "최순찰", "현장과", "PTT 5004 · 현장과", "접속"),
+    UserRowUi("5006", "한지원", "관제과 2팀", "PTT 5006 · 관제과 2팀"),
+    UserRowUi("5007", "오경비", "현장과", "PTT 5007 · 현장과"),
+    UserRowUi("5008", "남교통", "현장과", "PTT 5008 · 현장과"),
+    UserRowUi("5009", "서상황", "관제과 2팀", "PTT 5009 · 관제과 2팀", "접속"))
+
+private val FORM = EditForm(isNew = true, uri = "tel:g008", groupId = "g008", name = "3번 게이트 대응",
+    members = listOf(MemberRow("tel:5001", "김관제", "5001", isChair = true, isMe = true),
+        MemberRow("tel:5002", "이당직", "5002"), MemberRow("tel:5003", "박현장", "5003"),
+        MemberRow("tel:5004", "최순찰", "5004")), loaded = true)
+
+@Preview(name = "1 관제 — 무전 › 채널 (패널 닫힘)", device = PreviewFull, showBackground = true)
+@Composable
+private fun DeviceChannels() = Screen {
+    ChannelsPaneContent(mine = MINE_CARDS, other = SCOPED, listenText = "동시 청취 1/4")
+}
+
+@Preview(name = "1 관제 — 채널 상세 패널", device = PreviewFull, showBackground = true)
+@Composable
+private fun DeviceChannelPanel() = Screen(panel = {
+    ChannelPanelContent(head = HEAD, info = "멤버 그룹 · 참가 7 · 12:31 · 편성 12 · 발언 김관제", memberCount = 12,
+        connected = PEOPLE, members = PEOPLE)
+}) {
+    ChannelsPaneContent(mine = MINE_CARDS.map { if (it.id == "g1") it.copy(selected = true) else it },
+        other = SCOPED, selectedId = "g1", listenText = "동시 청취 1/4")
+}
+
+@Preview(name = "1 관제 — 사용자 패널", device = PreviewFull, showBackground = true)
+@Composable
+private fun DeviceUsersPanel() = Screen(panel = {
+    UsersPanelContent(rows = USERS, picked = listOf("5002", "5003", "5004"))
+}) {
+    ChannelsPaneContent(mine = MINE_CARDS, other = SCOPED, listenText = "동시 청취 1/4")
+}
+
+@Preview(name = "1 관제 — 새 그룹 패널", device = PreviewFull, showBackground = true)
+@Composable
+private fun DeviceNewGroupPanel() = Screen(panel = { NewGroupPanelContent(form = FORM) }) {
+    ChannelsPaneContent(mine = MINE_CARDS, other = SCOPED, listenText = "동시 청취 1/4")
+}
+
+@Preview(name = "1 관제 — 무전 › 메시지", device = PreviewFull, showBackground = true)
+@Composable
+private fun DevicePttMessages() = Screen(page = pageOf(PttPane.MESSAGES)) {
+    MessagesContent(thread = THREAD, title = "순찰1", follow = true, groupId = "g1",
+        threads = CHIPS, isGroup = true, members = 12, online = 7)
+}
+
+@Preview(name = "1 관제 — 무전 › 이벤트", device = PreviewFull, showBackground = true)
+@Composable
+private fun DevicePttEvents() = Screen(page = pageOf(PttPane.EVENTS)) {
+    ActivityContent(rows = EVENTS)
+}
+
+@Preview(name = "1 관제 — 이벤트 상세 패널", device = PreviewFull, showBackground = true)
+@Composable
+private fun DeviceEventPanel() = Screen(page = pageOf(PttPane.EVENTS), panel = {
+    EventPanel(row = EVENTS[1], all = EVENTS, onClose = {}, onOpenChannel = {}, onHistory = {}, onReply = {})
+}) {
+    ActivityContent(rows = EVENTS, selectedId = 10)
+}
+
+/** 긴급·임박 — 카드·타 채널 행이 같은 낱말·같은 색(빨강·주황)을 단다(§6.2a-1). 배너는 셸의 몫이라 여기엔 없다. */
+@Preview(name = "1 관제 — 긴급·임박 상태", device = PreviewFull, showBackground = true)
+@Composable
+private fun DeviceAlerts() = Screen {
+    ChannelsPaneContent(
+        mine = listOf(MINE_CARDS[0].copy(emergency = true, sub = "발언 박현장 00:03"),
+            MINE_CARDS[1].copy(peril = true)) + MINE_CARDS.drop(2),
+        other = SCOPED.mapIndexed { i, r -> if (i == 0) r.copy(emergency = true) else r },
+        listenText = "동시 청취 1/4")
+}
+
+/**
+ * «진행 중» 구역이 **감청의 유일한 자리**다 — 행의 [청취] 로 켜고, 켜지면 그 행이 펴져 소스 귀속을 보이고,
+ * [청취 종료] 로 끈다. 별도의 «감청» 면은 두지 않는다(§6.5).
+ */
+@Preview(name = "1 관제 — 통화 › 통화(키패드·진행 중·감청)", device = PreviewFull, showBackground = true)
+@Composable
+private fun DeviceCalls() = Screen(page = pageOf(CallPane.CALLS), bar = { IdleBar() }) {
+    CallsScreenContent(ui = CUI, pane = CallPane.CALLS, showTabs = false, modifier = Modifier.fillMaxSize())
+}
+
+@Preview(name = "1 관제 — 통화 › 주소록", device = PreviewFull, showBackground = true)
+@Composable
+private fun DeviceCallsBook() = Screen(page = pageOf(CallPane.BOOK), bar = { IdleBar() }) {
+    CallsScreenContent(ui = CUI, pane = CallPane.BOOK, showTabs = false,
+        bookPane = { Pane("주소록 — 조직 범위·검색·이름 목록 (행 탭 = 사람 메뉴, 오른쪽 📞 = 바로 발신)") },
+        modifier = Modifier.fillMaxSize())
+}
+
+/** 문자(SMS) — 왼쪽 상대 목록, 오른쪽 대화. 휴대폰 문자와 같은 구성(§6.2e). */
+@Preview(name = "1 관제 — 통화 › 메시지(문자)", device = PreviewFull, showBackground = true)
+@Composable
+private fun DeviceCallsSms() = Screen(page = pageOf(CallPane.MESSAGES), bar = { IdleBar() }) {
+    CallsScreenContent(ui = CUI, pane = CallPane.MESSAGES, showTabs = false,
+        smsPane = {
+            SmsPaneContent(threads = SMS_CHIPS, thread = SMS_THREAD,
+                peer = "1002", title = "이당직 · 1002")
+        },
+        modifier = Modifier.fillMaxSize())
+}
+
+/** 주소록에 없는 외부망 번호 — 그 스레드에서만 보내기가 막힌다(이유를 적어 준다). */
+@Preview(name = "1 관제 — 통화 › 메시지(외부망)", device = PreviewFull, showBackground = true)
+@Composable
+private fun DeviceCallsSmsExternal() = Screen(page = pageOf(CallPane.MESSAGES), bar = { IdleBar() }) {
+    CallsScreenContent(ui = CUI, pane = CallPane.MESSAGES, showTabs = false,
+        smsPane = {
+            SmsPaneContent(threads = SMS_CHIPS, thread = SMS_EXTERNAL,
+                peer = "01055551111", title = "01055551111", external = true)
+        },
+        modifier = Modifier.fillMaxSize())
+}
+
+@Preview(name = "1 관제 — 통화 › 통화내역", device = PreviewFull, showBackground = true)
+@Composable
+private fun DeviceCallsLog() = Screen(page = pageOf(CallPane.LOG), bar = { IdleBar() }) {
+    CallsScreenContent(ui = CUI, pane = CallPane.LOG, showTabs = false, modifier = Modifier.fillMaxSize())
+}
 
 // [이력] — 통화 표 / PTT 세션 두 종류
-@Preview(name = "1 이력 — 통화 표 (첫 화면)", device = PreviewFull, showBackground = true)
+@Preview(name = "2 이력 — 통화 표", device = PreviewFull, showBackground = true)
 @Composable
 private fun DeviceHistoryCalls() = Screen(AppScreen.HISTORY, bar = { IdleBar() }) {
     HistoryScreenContent(HistoryUi(kind = HistoryKind.CALL, rows = HCALLS, band = BAND),
-        modifier = Modifier.weight(1f))
+        modifier = Modifier.fillMaxSize())
 }
 
-@Preview(name = "1 이력 — PTT 세션", device = PreviewFull, showBackground = true)
+@Preview(name = "2 이력 — PTT 세션", device = PreviewFull, showBackground = true)
 @Composable
 private fun DeviceHistoryPtt() = Screen(AppScreen.HISTORY, bar = { IdleBar() }) {
     HistoryScreenContent(
         HistoryUi(kind = HistoryKind.PTT, rows = HPTT, band = BAND, selected = HPTT.first()),
         sessionPane = { Pane("세션 상세 — 참여자·발언 타임라인") },
-        modifier = Modifier.weight(1f))
-}
-
-// [무전] — 채널 / 채널 상세 / 메시지 / 이벤트
-@Preview(name = "2 무전 — 채널", device = PreviewFull, showBackground = true)
-@Composable
-private fun DevicePttChannels() = Screen(AppScreen.PTT) {
-    PttTabs(pane = PttPane.CHANNELS, onPane = {}, unread = 3, modifier = Modifier.weight(1f)) {
-        PttScreenContent(mine = MINE, scoped = SCOPED, filter = ScopeFilter.ALL, query = "",
-            listenText = "동시 청취 1/4", listenFull = false)
-    }
-}
-
-@Preview(name = "2 무전 — 채널 상세", device = PreviewFull, showBackground = true)
-@Composable
-private fun DevicePttChannel() = Screen(AppScreen.PTT) {
-    PttTabs(pane = PttPane.CHANNELS, onPane = {}, unread = 3, modifier = Modifier.weight(1f)) {
-        ChannelScreenContent(
-            head = ChannelHeadUi(id = "g1", title = "순찰1", badge = "멤버",
-                subtitle = "참가 7 · 발언 김관제 00:14 · 12:31",
-                joined = true, isMemberGroup = true, canTarget = true, targeted = true, unread = 3,
-                groupId = "g1"),
-            roster = (1..7).map { RosterEntry("sip:100$it@cims", "connected") },
-            speaker = "1001", me = "1002", nameOf = { if (it == "1001") "김관제" else "" })
-    }
-}
-
-@Preview(name = "2 무전 — 메시지", device = PreviewFull, showBackground = true)
-@Composable
-private fun DevicePttMessages() = Screen(AppScreen.PTT, pttPane = PttPane.MESSAGES) {
-    PttTabs(pane = PttPane.MESSAGES, onPane = {}, unread = 3, modifier = Modifier.weight(1f)) {
-        Box(Modifier.fillMaxSize().padding(8.dp)) {
-            MessagesContent(thread = THREAD, title = "순찰1", follow = true, groupId = "g1",
-                threads = CHIPS, isGroup = true)
-        }
-    }
-}
-
-/** 사람 스레드 — 머리가 «1:1», 입력칸이 «이 사람에게», 말풍선에 보낸 사람 이름이 없다. */
-@Preview(name = "2 무전 — 메시지(1:1)", device = PreviewFull, showBackground = true)
-@Composable
-private fun DevicePttDirectMessage() = Screen(AppScreen.PTT, pttPane = PttPane.MESSAGES) {
-    PttTabs(pane = PttPane.MESSAGES, onPane = {}, unread = 0, modifier = Modifier.weight(1f)) {
-        Box(Modifier.fillMaxSize()) {
-            MessagesContent(thread = DIRECT_THREAD, title = "박현장", follow = false,
-                groupId = "+821012345678", threads = CHIPS, isGroup = false)
-        }
-    }
-}
-
-@Preview(name = "2 무전 — 이벤트", device = PreviewFull, showBackground = true)
-@Composable
-private fun DevicePttEvents() = Screen(AppScreen.PTT, pttPane = PttPane.EVENTS) {
-    PttTabs(pane = PttPane.EVENTS, onPane = {}, unread = 3, modifier = Modifier.weight(1f)) {
-        Box(Modifier.fillMaxSize().padding(8.dp)) {
-            ActivityContent(rows = EVENTS, filter = ActivityFilter.ALL, follow = false)
-        }
-    }
-}
-
-// [통화] — 통화(키패드·진행 중) / 주소록 / 메시지 / 통화내역
-/**
- * «진행 중» 구역이 **감청의 유일한 자리**다 — 행의 [청취] 로 켜고, 켜지면 그 행이 펴져 소스 귀속을
- * 보이고, [청취 종료] 로 끈다. 별도의 «감청» 면은 두지 않는다(§6.5).
- */
-@Preview(name = "3 통화 — 통화(키패드·진행 중·감청)", device = PreviewFull, showBackground = true)
-@Composable
-private fun DeviceCalls() = Screen(AppScreen.CALLS, bar = { IdleBar() }) {
-    CallsScreenContent(ui = CUI, pane = CallPane.CALLS, modifier = Modifier.weight(1f))
-}
-
-@Preview(name = "3 통화 — 주소록", device = PreviewFull, showBackground = true)
-@Composable
-private fun DeviceCallsBook() = Screen(AppScreen.CALLS, bar = { IdleBar() }, callPane = CallPane.BOOK) {
-    CallsScreenContent(ui = CUI, pane = CallPane.BOOK,
-        bookPane = { Pane("주소록 — 조직 범위·검색·이름 목록 (행 탭 = 사람 메뉴, 오른쪽 📞 = 바로 발신)") },
-        modifier = Modifier.weight(1f))
-}
-
-/** 문자(SMS) — 왼쪽 상대 목록, 오른쪽 대화. 휴대폰 문자와 같은 구성(§6.2e). */
-@Preview(name = "3 통화 — 메시지(문자)", device = PreviewFull, showBackground = true)
-@Composable
-private fun DeviceCallsSms() = Screen(AppScreen.CALLS, bar = { IdleBar() }, callPane = CallPane.MESSAGES) {
-    CallsScreenContent(ui = CUI, pane = CallPane.MESSAGES,
-        smsPane = {
-            SmsPaneContent(threads = SMS_CHIPS, thread = SMS_THREAD,
-                peer = "1002", title = "이당직 · 1002")
-        },
-        modifier = Modifier.weight(1f))
-}
-
-/** 주소록에 없는 외부망 번호 — 그 스레드에서만 보내기가 막힌다(이유를 적어 준다). */
-@Preview(name = "3 통화 — 메시지(외부망)", device = PreviewFull, showBackground = true)
-@Composable
-private fun DeviceCallsSmsExternal() = Screen(AppScreen.CALLS, bar = { IdleBar() }, callPane = CallPane.MESSAGES) {
-    CallsScreenContent(ui = CUI, pane = CallPane.MESSAGES,
-        smsPane = {
-            SmsPaneContent(threads = SMS_CHIPS, thread = SMS_EXTERNAL,
-                peer = "01055551111", title = "01055551111", external = true)
-        },
-        modifier = Modifier.weight(1f))
-}
-
-@Preview(name = "3 통화 — 통화내역", device = PreviewFull, showBackground = true)
-@Composable
-private fun DeviceCallsLog() = Screen(AppScreen.CALLS, bar = { IdleBar() }, callPane = CallPane.LOG) {
-    CallsScreenContent(ui = CUI, pane = CallPane.LOG, modifier = Modifier.weight(1f))
+        modifier = Modifier.fillMaxSize())
 }
 
 // [더보기] — 목록 / PTT 그룹 / 관리
-@Preview(name = "4 더보기 — 목록", device = PreviewFull, showBackground = true)
+@Preview(name = "3 더보기 — 목록", device = PreviewFull, showBackground = true)
 @Composable
 private fun DeviceMore() = Screen(AppScreen.MORE, bar = { IdleBar() }) {
-    MoreScreen(onOpen = {}, onSettings = {}, dirty = true, modifier = Modifier.weight(1f))
+    MoreScreen(onOpen = {}, onSettings = {}, dirty = true, modifier = Modifier.fillMaxSize())
 }
 
-@Preview(name = "4 더보기 — PTT 그룹", device = PreviewFull, showBackground = true)
+@Preview(name = "3 더보기 — PTT 그룹", device = PreviewFull, showBackground = true)
 @Composable
 private fun DeviceGroups() = Screen(AppScreen.MORE, bar = { IdleBar() }) {
     PttGroupsScreenContent(GroupsUi(rows = GROUPS, selected = GROUPS[0], detail = GMEMBERS),
-        modifier = Modifier.weight(1f))
+        modifier = Modifier.fillMaxSize())
 }
 
-@Preview(name = "4 더보기 — 관리", device = PreviewFull, showBackground = true)
+@Preview(name = "3 더보기 — 관리", device = PreviewFull, showBackground = true)
 @Composable
 private fun DeviceAdmin() = Screen(AppScreen.MORE, bar = { IdleBar() }) {
     AdminScreenContent(AdminUi(view = AVIEW, members = AMEMBERS, org = "OPS"),
-        modifier = Modifier.weight(1f))
+        modifier = Modifier.fillMaxSize())
 }
 
-@Preview(name = "5 어두운 테마 — 무전", device = PreviewFull, showBackground = true)
+@Preview(name = "4 어두운 테마 — 채널 상세", device = PreviewFull, showBackground = true)
 @Composable
-private fun DeviceDark() = PreviewFrame(dark = true) {
-    AppShellContent(screen = AppScreen.PTT, top = TOP, badges = BADGES, talkBar = { TalkingBar() },
-        pttPane = PttPane.CHANNELS) {
-        PttTabs(pane = PttPane.CHANNELS, onPane = {}, unread = 3, modifier = Modifier.weight(1f)) {
-            PttScreenContent(mine = MINE, scoped = SCOPED, filter = ScopeFilter.ALL, query = "",
-                listenText = "동시 청취 1/4", listenFull = false)
-        }
-    }
+private fun DeviceDark() = Screen(dark = true, panel = {
+    ChannelPanelContent(head = HEAD, info = "멤버 그룹 · 참가 7 · 12:31 · 편성 12 · 발언 김관제", memberCount = 12,
+        connected = PEOPLE, members = PEOPLE)
+}) {
+    ChannelsPaneContent(mine = MINE_CARDS.map { if (it.id == "g1") it.copy(selected = true) else it },
+        other = SCOPED, selectedId = "g1", listenText = "동시 청취 1/4")
 }
 
 // ── 문자(SMS) ──
@@ -452,9 +502,3 @@ private val SMS_EXTERNAL = listOf(
     Message(id = "x1", groupId = "01055551111", fromUri = "sip:01055551111@cims",
         fromName = "01055551111", text = "민원 접수 확인 부탁드립니다",
         atMs = T0 - 3_600_000, outgoing = false, kind = MessageKind.SMS))
-
-/** 1:1 무전 메시지 — 그룹과 달리 상대가 하나라 말풍선에 이름을 적지 않는다. */
-private val DIRECT_THREAD = listOf(
-    msg(1, "3번 게이트 도착했습니다", from = "박현장"),
-    msg(2, "확인", out = true),
-    msg(3, "이상 없습니다", from = "박현장"))

@@ -797,6 +797,9 @@ class DispatchSession(
      */
     internal fun applyCondition(ch: com.cims.ue.sdk.ConditionChange) {
         val next = ch.call.condition
+        // 내가 올린 상향·하향을 서버가 거절했다 — 코어가 이전 값으로 되돌렸다. 배너가 그대로인 이유를 적는다(§6.2a-2).
+        if (ch.cause == com.cims.ue.sdk.ConditionCause.DENIED)
+            notify(NoticeLevel.ERROR, ResponseText.sip(TextArea.EMERGENCY, next.lastCode, ""), "${next.lastCode}".trim())
         _sessions.value = _sessions.value.map { s ->
             if (s.callId != ch.call.callId || s.info.condition == next) s
             else withAlert(s, s.copy(info = s.info.copy(condition = next)))
@@ -888,9 +891,11 @@ class DispatchSession(
         }
     }
 
+    private var activitySeq = 0L
+
     internal fun addActivity(groupId: String, groupName: String, text: String,
                              kind: ActivityKind, emergency: Boolean = false) {
-        val row = ActivityRow(System.currentTimeMillis(), groupId, groupName, text, kind, emergency)
+        val row = ActivityRow(System.currentTimeMillis(), groupId, groupName, text, kind, emergency, ++activitySeq)
         _activity.value = (listOf(row) + _activity.value).take(ACTIVITY_LIMIT)
     }
 

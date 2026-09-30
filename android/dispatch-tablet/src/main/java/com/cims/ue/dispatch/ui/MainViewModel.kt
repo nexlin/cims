@@ -95,29 +95,36 @@ class MainViewModel : ViewModel() {
         super.onCleared()
     }
 
-    private val _screen = MutableStateFlow(AppScreen.HISTORY)
-    val screen: StateFlow<AppScreen> = _screen.asStateFlow()
+    // ── 화면 좌표(§6.3) ───────────────────────────────────────────────────────
+    // 레일(관제·이력·더보기) · 관제의 모드와 면 · 오른쪽 사이드 패널 · 더보기 안쪽 — **한 값**이다. 따로 두면 규칙(뒤로가기·
+    //   패널 닫힘)이 여러 값을 한꺼번에 바꿀 때 중간 상태가 한 프레임 그려진다.
+    private val _nav = MutableStateFlow(NavState())
+    val nav: StateFlow<NavState> = _nav.asStateFlow()
+    private fun update(f: (NavState) -> NavState) { _nav.value = f(_nav.value) }
 
-    // ── 화면 안의 이동(§6.3) ──────────────────────────────────────────────────
-    // 하단 내비가 «어느 일을 하는가» 라면 아래 둘은 «그 안에서 무엇을 보는가» 다. 뒤로가기로 되돌린다.
+    fun setPttPane(p: PttPane) = showPage(pageOf(p))
+    fun setCallPane(p: CallPane) = showPage(pageOf(p))
+    fun setMode(m: DispatchMode) = update { it.toMode(m) }
 
-    /** [무전]에서 연 채널(그룹 id 또는 세션 카드 id). null = 목록. */
-    private val _channel = MutableStateFlow<String?>(null)
-    val channel: StateFlow<String?> = _channel.asStateFlow()
+    // ── 사이드 패널 ──
+    fun togglePanel(p: SidePanel) = update { it.togglePanel(p) }
+    fun showPanel(p: SidePanel) = update { it.showPanel(p) }
+    fun closePanel() = update { it.closePanel() }
+    fun togglePin() = update { it.togglePin() }
+    /** 패널 안의 ← — 한 겹 들어온 것(새 그룹)에서 사용자 목록으로. */
+    fun panelBack() = update { n -> n.panel?.parent?.let { n.copy(panel = it) } ?: n }
 
-    /** [더보기]에서 연 화면. null = 목록. */
-    private val _more = MutableStateFlow<MoreItem?>(null)
-    val more: StateFlow<MoreItem?> = _more.asStateFlow()
-
-    /** [무전] 안의 면 — 메뉴를 오가도 보던 면이 남는다. */
-    private val _pttPane = MutableStateFlow(PttPane.CHANNELS)
-    val pttPane: StateFlow<PttPane> = _pttPane.asStateFlow()
-    fun setPttPane(p: PttPane) { _pttPane.value = p }
-
-    /** [통화] 안의 면. */
-    private val _callPane = MutableStateFlow(CallPane.CALLS)
-    val callPane: StateFlow<CallPane> = _callPane.asStateFlow()
-    fun setCallPane(p: CallPane) { _callPane.value = p }
+    /**
+     * [사용자] 패널에서 고른 사람(PTT 번호) — 애드혹 열기·그룹으로 저장이 쓴다. 패널을 닫아도 남는다: «그룹으로 저장» 한 겹을
+     * 들어갔다 나와도 고른 것이 그대로여야 한다. 쓰고 나면 비운다.
+     */
+    private val _picked = MutableStateFlow<List<String>>(emptyList())
+    val picked: StateFlow<List<String>> = _picked.asStateFlow()
+    fun togglePick(number: String) {
+        val cur = _picked.value
+        _picked.value = if (number in cur) cur - number else cur + number
+    }
+    fun clearPicked() { _picked.value = emptyList() }
 
     private val _busy = MutableStateFlow(false)
     val busy: StateFlow<Boolean> = _busy.asStateFlow()
@@ -157,58 +164,44 @@ class MainViewModel : ViewModel() {
     val state: StateFlow<SessionState>? get() = session?.state
     val error: StateFlow<String?>? get() = session?.error
 
-    /** 하단 내비 — 규칙은 [onNav] 가 갖는다(두 칸 이상 떨어져 있어도 한 번에 간다). */
-    fun show(s: AppScreen) = applyNav(nav().onNav(s))
+    /** 레일 — 규칙은 [onNav] 가 갖는다(같은 항목을 다시 누르면 그 메뉴의 안쪽을 닫는다). */
+    fun show(s: AppScreen) = update { it.onNav(s) }
+
+    /** 탭·스와이프로 관제의 면을 옮겼다 — 모드와 면을 **함께** 옮긴다([DISPATCH_PAGES]). 고정하지 않은 패널은 닫힌다. */
+    fun showPage(page: DispatchPage) = update { it.toPage(page) }
 
     /**
-     * 스와이프가 다른 장으로 넘어갔다 — 메뉴와 면을 **함께** 옮긴다([APP_PAGES], §6.3).
-     *
-     * 하나씩 옮기면 안 된다: 메뉴만 먼저 바꾸면 그 순간의 좌표가 «통화 메뉴 + 이전 면» 이 되어
-     * 쪽 번호가 다시 계산되고 화면이 되튕긴다.
-     *
-     * **기억한 면은 덮어쓴다.** 밀어서 «통화›주소록» 에 닿았으면 그 다음에 하단 내비로 [통화] 를
-     * 눌렀을 때도 주소록이어야 한다 — 본 곳이 곧 그 메뉴의 현재 자리다.
-     */
-    fun showPage(page: AppPage) {
-        page.pttPane?.let { _pttPane.value = it }
-        page.callPane?.let { _callPane.value = it }
-        if (_screen.value != page.screen) _screen.value = page.screen
-    }
-
-    /**
-     * 채널 화면을 연다 — 목록 행·긴급 배너·검색·[PTT 그룹] 이 다 여기로 온다. `id` 는 채널 카드의 id(그룹 id 또는
-     * 세션 id)다.
-     *
-     * 포커스도 같이 옮긴다 — ④⑤(메시지·이벤트 면)가 포커스를 따라간다는 불변(§6.3)은 배치가 바뀌어도 그대로다.
+     * 채널을 **찾아가서** 연다 — 긴급 배너·검색·[PTT 그룹] «채널로». [무전] › «채널» 면에 그 채널 상세 패널이 선다. `id` 는 채널
+     * 카드의 id(그룹 id 또는 세션 id)다. 포커스도 같이 옮긴다 — «메시지»·«이벤트» 면이 포커스를 따라간다(§6.3).
      */
     fun openChannel(id: String) {
         if (id.isBlank()) return
         ptt?.setFocus(id)
-        applyNav(nav().openChannel(id))       // 면도 «채널» 로 — 규칙은 [NavState.openChannel]
+        update { it.openChannel(id) }
     }
 
-    fun closeChannel() { _channel.value = null }
+    /** 채널 카드·타 채널 행을 눌렀다 — 같은 채널이면 패널을 닫고, 다른 채널이면 바꾼다. 면은 그대로다. */
+    fun toggleChannel(id: String) {
+        if (id.isBlank()) return
+        ptt?.setFocus(id)
+        update { it.togglePanel(SidePanel.Channel(id)) }
+    }
 
-    fun openMore(item: MoreItem) { _more.value = item }
+    /** 메시지 [채널 정보] — 보던 대화 옆에 그 채널 상세를 세운다(면을 옮기지 않는다). */
+    fun channelInfo(id: String) {
+        if (id.isBlank()) return
+        update { it.showPanel(SidePanel.Channel(id)) }
+    }
+
+    fun closeChannel() = closePanel()
+
+    fun openMore(item: MoreItem) = update { it.copy(screen = AppScreen.MORE, more = item) }
 
     /** 뒤로가기 한 단계 — 규칙은 [onBack] 이 갖는다(가로채기 판정도 같은 함수를 쓴다). */
     fun back(): Boolean {
-        val next = nav().onBack() ?: return false
-        applyNav(next)
+        val next = _nav.value.onBack() ?: return false
+        _nav.value = next
         return true
-    }
-
-    /** 지금 좌표 — 이동 규칙([onNav]·[onBack])에 넘길 값. */
-    private fun nav() = NavState(
-        screen = _screen.value, channel = _channel.value, more = _more.value,
-        pttPane = _pttPane.value, callPane = _callPane.value)
-
-    private fun applyNav(n: NavState) {
-        _screen.value = n.screen
-        _channel.value = n.channel
-        _more.value = n.more
-        _pttPane.value = n.pttPane
-        _callPane.value = n.callPane
     }
 
     /**
@@ -217,11 +210,7 @@ class MainViewModel : ViewModel() {
      * 배너에서 전화를 받으면 관제 > 일반통화 로 돌아간다 — 보류·전달·DTMF·종료가 거기 있다.
      * 받자마자 [이력] 화면에 남아 있으면 끊을 방법이 없다.
      */
-    fun goToCalls() {
-        _channel.value = null
-        _callPane.value = CallPane.CALLS        // 카드가 선 면 — «주소록»·«통화내역» 에 남으면 방금 건·받은 호가 안 보인다
-        _screen.value = AppScreen.CALLS
-    }
+    fun goToCalls() = showPage(pageOf(CallPane.CALLS))   // 카드가 선 면 — «주소록»·«통화내역» 에 남으면 방금 건·받은 호가 안 보인다
 
     /**
      * 사람 메뉴가 고른 행동을 잇는다 — 데스크톱 `MainViewModel` 이 `PersonActionsViewModel` 의 이벤트를 잇는
@@ -243,65 +232,44 @@ class MainViewModel : ViewModel() {
             }
             PersonAction.PRIVATE_CALL -> {
                 viewModelScope.launch { s.startPrivateCall(number) }
-                _channel.value = null
-                _screen.value = AppScreen.PTT
+                showPage(pageOf(PttPane.CHANNELS))
             }
             PersonAction.ADHOC_ADD -> {
                 // 시트는 [무전] 화면이 소유하는 상태라 여기서 직접 못 연다 — 씨앗만 심고 화면을 옮긴다.
                 ptt?.seedAdhoc(number)
-                _channel.value = null
-                _screen.value = AppScreen.PTT
+                showPage(pageOf(PttPane.CHANNELS))
             }
             PersonAction.SDS -> {
                 messages?.openThread(number)
-                _channel.value = null
-                _pttPane.value = PttPane.MESSAGES
-                _screen.value = AppScreen.PTT
+                showPage(pageOf(PttPane.MESSAGES))
             }
             PersonAction.SMS -> {
                 sms?.openTo(number)
-                _callPane.value = CallPane.MESSAGES
-                _screen.value = AppScreen.CALLS
+                showPage(pageOf(CallPane.MESSAGES))
             }
             // 통화 기록 = «통화내역» 면을 그 사람으로 걸러 연다. 최상위 [이력] 이 아닌 이유는 그쪽이
             //   날짜를 골라 보는 과거 조회라 «이 사람» 축이 없기 때문이다(§6.11).
             PersonAction.HISTORY -> {
                 calls?.setPersonFilter(number)
-                _callPane.value = CallPane.LOG
-                _screen.value = AppScreen.CALLS
+                showPage(pageOf(CallPane.LOG))
             }
         }
     }
 
-    /** 통합 검색의 «채널로» — 그 채널 화면을 연다(데스크톱 `PttChannels.FocusGroup`). */
+    /** 통합 검색의 «채널로» — 그 채널의 상세 패널을 연다(데스크톱 `PttChannels.FocusGroup`). */
     fun focusChannel(groupId: String) = openChannel(groupId)
 
     /**
-     * «편성 전원 보기» — 그 그룹의 [PTT 그룹] 화면 상세를 연다(§6.12).
-     *
-     * 채널 화면의 [로스터] 면은 **지금 접속한 사람**이고, 이쪽은 **편성된 전원 × 지금 상태**다. 둘은 다른
-     * 질문이라 둘 다 둔다. 데스크톱도 같은 자리에서 같은 곳으로 보낸다(`PttChannelsPanel.xaml`).
-     */
-    fun showRoster(groupId: String) {
-        if (groupId.isBlank()) return
-        pttGroups?.selectById(groupId)
-        _more.value = MoreItem.PTT_GROUPS
-        _screen.value = AppScreen.MORE
-    }
-
-    /**
-     * 채널의 메시지 — 그 그룹의 SDS 스레드를 [무전] › «메시지» 에 연다(데스크톱 ① 카드 `OpenThread` → ④). 채널 화면에
+     * 채널의 메시지 — 그 그룹의 SDS 스레드를 [무전] › «메시지» 에 연다(데스크톱 ① 카드 `OpenThread` → ④). 채널 패널에
      * 메시지를 두지 않는 대신의 한 걸음이다(§6.3a — 두 곳에 두면 «이 채널 것인가» 가 흐려진다).
      */
     fun openThread(key: String) {
         if (key.isBlank()) return
         messages?.openThread(key)
-        _channel.value = null
-        _pttPane.value = PttPane.MESSAGES
-        _screen.value = AppScreen.PTT
+        showPage(pageOf(PttPane.MESSAGES))
     }
 
-    /** 채널 머리 [편집] — [더보기] › [PTT 그룹] 의 그 그룹 편집 폼으로(데스크톱 채널 편집 드로어, §6.12). */
+    /** 채널 패널 ⋮ › [편집] — [더보기] › [PTT 그룹] 의 그 그룹 편집 폼으로(데스크톱 채널 편집 드로어, §6.12). */
     fun editGroup(groupId: String) {
         if (groupId.isBlank()) return
         val g = pttGroups ?: return
@@ -309,24 +277,31 @@ class MainViewModel : ViewModel() {
         if (g.locked) session?.notify(com.cims.ue.dispatch.session.NoticeLevel.WARN,
             "편집 중인 폼이 있습니다", "저장하거나 취소한 뒤 다시 시도하세요")
         else g.editById(groupId)
-        _more.value = MoreItem.PTT_GROUPS
-        _screen.value = AppScreen.MORE
+        openMore(MoreItem.PTT_GROUPS)
     }
 
-    /** 채널 머리 [삭제] — 확인은 채널 화면이 받았다. 지운 채널은 «사라졌습니다» 대신 목록으로 돌아간다. */
+    /** 채널 패널 ⋮ › [삭제] — 확인은 패널이 받았다. 지운 채널은 «사라졌습니다» 대신 패널을 닫는다. */
     fun deleteGroup(groupId: String) {
         pttGroups?.deleteById(groupId)
-        _channel.value = null
+        closePanel()
     }
 
-    /** 채널 목록 [새 채널] — [PTT 그룹] 의 새 그룹 폼으로(데스크톱 범위 채널 머리 `NewChannel`). */
-    fun newGroup() {
+    /**
+     * [사용자] › [그룹으로 저장 ›] — 고른 사람으로 새 그룹 폼을 채워 패널 안 한 겹으로 연다(§6.12). 그룹 만들기는 [더보기] 가
+     * 아니라 여기다 — 사람을 고르는 자리에서 곧바로 묶는다. 고치던 폼이 있으면 덮지 않는다.
+     */
+    fun startNewGroup() {
         val g = pttGroups ?: return
-        if (g.locked) { session?.notify(com.cims.ue.dispatch.session.NoticeLevel.WARN,
-            "편집 중인 폼이 있습니다", "저장하거나 취소한 뒤 다시 시도하세요"); return }
-        g.newGroup()
-        _more.value = MoreItem.PTT_GROUPS
-        _screen.value = AppScreen.MORE
+        if (g.locked && _nav.value.panel != SidePanel.NewGroup) {
+            session?.notify(com.cims.ue.dispatch.session.NoticeLevel.WARN,
+                "편집 중인 폼이 있습니다", "[더보기] › [PTT 그룹] 에서 저장하거나 취소한 뒤 다시 시도하세요"); return
+        }
+        if (!g.locked) {
+            g.newGroup()
+            val book = session?.pttBook?.value
+            _picked.value.forEach { n -> g.addMember(n, book?.nameOf(n).orEmpty()) }
+        }
+        showPanel(SidePanel.NewGroup)
     }
 
     /**

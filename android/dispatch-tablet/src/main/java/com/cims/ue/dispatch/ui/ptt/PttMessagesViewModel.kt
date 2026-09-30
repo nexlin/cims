@@ -19,7 +19,16 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 /** ④ 스레드 칩 하나. */
-data class ThreadChip(val key: String, val title: String, val unread: Int, val lastAtMs: Long)
+data class ThreadChip(
+    val key: String,
+    val title: String,
+    val unread: Int,
+    val lastAtMs: Long,
+    /** 마지막 한 통 미리보기 — «나: …»·«이당직: …»(그룹)·«…»(1:1). */
+    val last: String = "",
+    /** 편성 그룹 스레드(아니면 사람 1:1). */
+    val group: Boolean = false,
+)
 
 /**
  * 메시지 보관 → 스레드 칩 (순수 함수, 시험 대상).
@@ -29,15 +38,24 @@ data class ThreadChip(val key: String, val title: String, val unread: Int, val l
  */
 internal fun threadChips(
     all: Map<String, List<Message>>,
+    isGroup: (String) -> Boolean = { false },
     nameOf: (String) -> String,
 ): List<ThreadChip> =
     all.entries.mapNotNull { (key, list) ->
         if (list.isEmpty()) return@mapNotNull null
+        val group = isGroup(key)
+        val lastMsg = list.maxBy { it.atMs }
         ThreadChip(
             key = key,
             title = nameOf(key).ifBlank { key },
             unread = list.count { !it.read && !it.outgoing },
-            lastAtMs = list.maxOf { it.atMs })
+            lastAtMs = lastMsg.atMs,
+            last = when {
+                lastMsg.outgoing -> "나: ${lastMsg.text}"
+                group && lastMsg.fromName.isNotBlank() -> "${lastMsg.fromName}: ${lastMsg.text}"
+                else -> lastMsg.text
+            },
+            group = group)
     }.sortedByDescending { it.lastAtMs }
 
 class PttMessagesViewModel(private val s: DispatchSession) : ScreenViewModel() {
@@ -65,8 +83,15 @@ class PttMessagesViewModel(private val s: DispatchSession) : ScreenViewModel() {
      */
     val threads: StateFlow<List<ThreadChip>> =
         combine(s.messages, s.groups) { all, groups ->
-            threadChips(all) { key -> groups.firstOrNull { it.id == key }?.name ?: s.displayLabel(key) }
+            threadChips(all, isGroup = { key -> groups.any { it.id == key } }) { key ->
+                groups.firstOrNull { it.id == key }?.name ?: s.displayLabel(key)
+            }
         }.stateIn(scope, SharingStarted.Eagerly, emptyList())
+
+    /** 고른 대화가 편성 그룹이면 그 그룹 — 머리의 «그룹 전원 · 편성 12 · 접속 7». */
+    val groupInfo: StateFlow<com.cims.ue.dispatch.session.GroupInfo?> =
+        combine(groupId, s.groups) { g, groups -> groups.firstOrNull { it.id == g } }
+            .stateIn(scope, SharingStarted.Eagerly, null)
 
     val thread: StateFlow<List<Message>> =
         combine(s.messages, groupId) { all, g -> if (g == null) emptyList() else all[g].orEmpty() }

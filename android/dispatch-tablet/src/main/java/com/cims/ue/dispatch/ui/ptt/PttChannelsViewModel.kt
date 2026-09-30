@@ -28,6 +28,7 @@ import com.cims.ue.dispatch.session.floorRelease
 import com.cims.ue.dispatch.session.floorRequest
 import com.cims.ue.dispatch.session.joinGroup
 import com.cims.ue.dispatch.session.leave
+import com.cims.ue.dispatch.session.setEmergency
 import com.cims.ue.dispatch.session.toggleMuted
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -65,6 +66,8 @@ data class ChannelCard(
     /** 참여하지 않아도 로스터로 진행 중임을 안다. */
     val hasSession: Boolean get() = joined || group?.hasSession == true
     val emergency: Boolean get() = session?.isEmergency == true
+    /** 지금의 긴급을 이 단말이 올렸다 — [긴급 해제] 를 세운다(남이 건 긴급의 해제는 인가가 따로다, TS 24.379 §6.3.3.1.13.4). */
+    val emergencyMine: Boolean get() = session?.info?.condition?.mine == true
     val imminentPeril: Boolean get() = session?.isImminentPeril == true
     val speaking: Boolean get() = session?.isSpeaking == true
     val requesting: Boolean get() = session?.isRequesting == true
@@ -274,10 +277,10 @@ class PttChannelsViewModel(private val s: DispatchSession) : ScreenViewModel() {
     }
 
     /**
-     * 채널 화면을 열 때의 포커스 — **토글이 아니다.**
+     * 채널 패널을 열 때의 포커스 — **토글이 아니다.**
      *
      * [focus] 는 카드를 다시 눌러 접는 조작(데스크톱 §4.1)이라 같은 값을 넣으면 포커스가 풀린다.
-     * 화면을 여는 쪽이 그것을 쓰면 «열었는데 아무것도 안 보이는» 상태가 된다.
+     * 패널을 여는 쪽이 그것을 쓰면 «열었는데 아무것도 안 보이는» 상태가 된다.
      */
     fun setFocus(id: String) {
         if (id.isBlank()) return
@@ -537,6 +540,12 @@ class PttChannelsViewModel(private val s: DispatchSession) : ScreenViewModel() {
         pendingTargetId = card.id
         _selectedId.value = card.id
         scope.launch { s.joinGroup(card.id, emergency = true) }
+    }
+
+    /** 진행 중 긴급 상향·하향 — 채널 상세의 [긴급]·[긴급 해제](확인은 패널이 받았다). */
+    fun setEmergency(card: ChannelCard, on: Boolean) {
+        val callId = card.session?.callId ?: return
+        scope.launch { s.setEmergency(callId, on) }
     }
 
     fun leave(card: ChannelCard) {

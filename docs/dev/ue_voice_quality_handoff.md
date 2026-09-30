@@ -108,7 +108,7 @@ void cimsue_device_link_destroy(cimsue_device_link_t*);
 | 링크 소유 | `session/DispatchService.kt`(Foreground Service) — 세션과 같은 수명. 화면이 꺼져도 유지. 앱이 등록을 끝낸 뒤 `DeviceLink.start` |
 | 설정값 | `deviceId` = `core/device/DeviceIdentity.kt` 와 같은 원천(`+sip.instance`) · `pinFile` = `filesDir/device_link.pin` · 기준 음원 = APK asset 을 `filesDir` 로 복사한 경로 |
 | 기준 음원 | `tester/worker/samples/pcm/conv_p59_a.wav`(16 kHz·mono·PCM16 — pjmedia WAV 재생기 조건)를 asset 으로 동봉 |
-| 표시 | 하단 내비 위 띠 + 상시 알림에 "시험 모드"·"계측기 연결됨 · <워커>" 배지. 계측기가 구동한 호는 호 화면에 "계측기" 표지 |
+| 표시 | 상단 바 + 상시 알림에 "시험 모드"·"계측기 연결됨 · <워커>" 배지. 계측기가 구동한 호는 호 화면에 "계측기" 표지 |
 | 화면 | 통화 중 오버레이(`CimsUe.callQuality` 1 초) · 호 종료 요약 · 최근 50 호 이력 · 내보내기(JSON — 공유 시트) · [지문 초기화] 버튼(pinFile 삭제) |
 | 착신 | 링크가 붙어 있어도 착신은 평소처럼 알린다. 계측기가 `answer` 를 보내면 코어가 받는다 — 앱은 그 호를 평소 호처럼 보여 주면 된다 |
 

@@ -12,6 +12,9 @@ package com.cims.ue.dispatch.ui.call
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.border
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -78,75 +81,48 @@ fun SmsPaneContent(
     onNew: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
+    val p = com.cims.ue.dispatch.ui.Tokens.palette
     Row(modifier.fillMaxSize()) {
-        // ── 왼쪽: 대화 목록 ──
-        Column(Modifier.width(280.dp).fillMaxHeight()) {
-            Row(Modifier.fillMaxWidth().padding(start = 10.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
-                verticalAlignment = Alignment.CenterVertically) {
-                Text("문자 ${threads.size}", Modifier.weight(1f),
-                    fontSize = Type.strong, fontWeight = FontWeight.Bold)
-                TextButton(onClick = onNew, contentPadding = PaddingValues(horizontal = 8.dp)) {
-                    Text("＋ 새 대화", fontSize = Type.meta)
-                }
+        // ── 왼쪽: 대화 목록(무전 «메시지» 와 같은 모양 — 문자는 모두 1:1 이라 종류 라벨이 없다) ──
+        Column(Modifier.width(340.dp).fillMaxHeight()) {
+            com.cims.ue.dispatch.ui.SectionHead("문자 ${threads.size}") {
+                Spacer(Modifier.weight(1f))
+                com.cims.ue.dispatch.ui.PillButton("＋ 새 대화", onNew, height = 32.dp, strongBorder = true)
             }
-            HorizontalDivider()
             if (threads.isEmpty()) Text(
                 "주고받은 문자가 없습니다 — [＋ 새 대화] 로 시작합니다",
-                Modifier.padding(12.dp), fontSize = Type.meta,
-                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Modifier.padding(16.dp), fontSize = Type.meta, color = p.muted)
             LazyColumn(Modifier.weight(1f)) {
                 items(threads, key = { it.key }) { t ->
-                    val on = t.key == peer
-                    Row(Modifier.fillMaxWidth()
-                        .background(if (on) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent)
-                        .clickable { onPick(t.key) }
-                        .padding(horizontal = 10.dp, vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically) {
-                        Text(t.title, fontSize = Type.body, maxLines = 1,
-                            fontWeight = if (t.unread > 0) FontWeight.Bold else FontWeight.Normal,
-                            modifier = Modifier.weight(1f))
-                        if (t.lastAtMs > 0) Text(hhmm.format(Date(t.lastAtMs)), fontSize = Type.micro,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        if (t.unread > 0) { Spacer(Modifier.width(4.dp)); Badge { Text("${t.unread}") } }
-                    }
-                    HorizontalDivider()
+                    com.cims.ue.dispatch.ui.ptt.ThreadRow(t, selected = t.key == peer, showKind = false) { onPick(t.key) }
                 }
             }
         }
-        VerticalDivider()
+        com.cims.ue.dispatch.ui.VDivider()
 
         // ── 오른쪽: 고른 대화 ──
-        Column(Modifier.weight(1f).fillMaxHeight().padding(8.dp)) {
+        Column(Modifier.weight(1f).fillMaxHeight()) {
             if (peer == null) {
                 Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.Center,
                     horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("대화를 고르세요", fontSize = Type.body,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    TextButton(onClick = onNew) { Text("＋ 새 대화") }
+                    Text("대화를 고르세요", fontSize = Type.body, color = p.muted)
+                    Spacer(Modifier.height(8.dp))
+                    com.cims.ue.dispatch.ui.PillButton("＋ 새 대화", onNew, strongBorder = true)
                 }
                 return@Column
             }
-            Text(title, fontSize = Type.title, fontWeight = FontWeight.Bold,
-                modifier = Modifier.padding(bottom = 4.dp))
-            HorizontalDivider()
-            LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Row(Modifier.fillMaxWidth().height(56.dp).padding(start = 20.dp, end = 12.dp),
+                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(title, fontSize = Type.head, fontWeight = FontWeight.Bold, maxLines = 1)
+                com.cims.ue.dispatch.ui.Label("문자", com.cims.ue.dispatch.ui.LabelStyle.OUTLINE, round = true)
+                if (external) com.cims.ue.dispatch.ui.Label("외부망", com.cims.ue.dispatch.ui.LabelStyle.OUTLINE,
+                    round = true, color = p.emergency)
+            }
+            com.cims.ue.dispatch.ui.HDivider()
+            LazyColumn(Modifier.weight(1f).padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(8.dp),
+                contentPadding = PaddingValues(vertical = 14.dp)) {
                 items(thread, key = { it.id }) { m ->
-                    Row(Modifier.fillMaxWidth(),
-                        horizontalArrangement = if (m.outgoing) Arrangement.End else Arrangement.Start) {
-                        Surface(
-                            color = if (m.outgoing) MaterialTheme.colorScheme.primaryContainer
-                                    else MaterialTheme.colorScheme.surfaceVariant,
-                            shape = RoundedCornerShape(8.dp)
-                        ) {
-                            Column(Modifier.padding(8.dp).widthIn(max = 420.dp)) {
-                                Text(m.text, fontSize = Type.strong)
-                                Text(hhmm.format(Date(m.atMs)) + sendMark(m.state),
-                                    fontSize = Type.micro)
-                                if (m.outgoing && m.state == com.cims.ue.dispatch.session.SendState.FAILED)
-                                    com.cims.ue.dispatch.ui.ptt.ResendButton { onResend(m) }
-                            }
-                        }
-                    }
+                    com.cims.ue.dispatch.ui.ptt.Bubble(m, showName = false, onResend = { onResend(m) })
                 }
             }
             SmsInput(available = available, external = external, onSend = onSend, peer = peer)
@@ -154,27 +130,40 @@ fun SmsPaneContent(
     }
 }
 
-/** 보내기 줄 — 글자 수와 **못 보내는 이유**를 같이 든다. */
+/** 보내기 줄 — 글자 수와 **못 보내는 이유**를 같이 든다(70자를 넘으면 LMS 로 나간다 — 누르기 전에 알아야 한다). */
 @Composable
 private fun SmsInput(available: Boolean, external: Boolean, peer: String, onSend: (String) -> Unit) {
+    val p = com.cims.ue.dispatch.ui.Tokens.palette
     var draft by remember(peer) { mutableStateOf("") }
     val blocked = !available || external
-    Column {
+    Column(Modifier.fillMaxWidth()
+            .drawBehind { drawLine(p.hair, androidx.compose.ui.geometry.Offset(0f, 0f), androidx.compose.ui.geometry.Offset(size.width, 0f), 1.dp.toPx()) }) {
         if (blocked) Text(
             if (!available) "전화 계정이 없어 문자를 보낼 수 없습니다"
             else "외부망 번호입니다 — 게이트웨이가 없어 보낼 수 없습니다(받는 것은 됩니다)",
-            Modifier.fillMaxWidth().padding(vertical = 4.dp),
-            fontSize = Type.meta, color = MaterialTheme.colorScheme.error, textAlign = TextAlign.Center)
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            OutlinedTextField(
-                value = draft, onValueChange = { draft = it },
-                placeholder = { Text("문자", fontSize = Type.body) },
-                enabled = !blocked, singleLine = true, modifier = Modifier.weight(1f),
-                // 70자를 넘으면 LMS 로 나간다 — 누르기 전에 알아야 한다.
-                supportingText = { Text(smsCountText(draft), fontSize = Type.micro) },
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send))
-            TextButton(onClick = { onSend(draft); draft = "" },
-                enabled = !blocked && draft.isNotBlank()) { Text("보내기") }
+            Modifier.fillMaxWidth().padding(top = 8.dp),
+            fontSize = Type.meta, color = p.emergency, textAlign = TextAlign.Center)
+        Row(Modifier.fillMaxWidth().height(68.dp).padding(horizontal = 20.dp),
+            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            val send = { if (!blocked && draft.isNotBlank()) { onSend(draft); draft = "" } }
+            androidx.compose.foundation.text.BasicTextField(
+                value = draft, onValueChange = { draft = it }, singleLine = true, enabled = !blocked,
+                textStyle = androidx.compose.ui.text.TextStyle(fontSize = Type.strong, color = p.ink),
+                cursorBrush = androidx.compose.ui.graphics.SolidColor(p.ink),
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                keyboardActions = androidx.compose.foundation.text.KeyboardActions(onSend = { send() }),
+                modifier = Modifier.weight(1f).height(44.dp).clip(RoundedCornerShape(22.dp))
+                    .border(1.5.dp, if (blocked) p.line else p.ink, RoundedCornerShape(22.dp))
+                    .background(if (blocked) p.bar else p.paper),
+                decorationBox = { inner ->
+                    Box(Modifier.fillMaxSize().padding(horizontal = 16.dp), contentAlignment = Alignment.CenterStart) {
+                        if (draft.isEmpty()) Text("문자", fontSize = Type.strong, color = p.faint)
+                        inner()
+                    }
+                })
+            Text(smsCountText(draft), fontSize = Type.micro, color = p.muted)
+            com.cims.ue.dispatch.ui.PillButton("보내기", send, height = 44.dp, filled = true,
+                enabled = !blocked && draft.isNotBlank())
         }
     }
 }

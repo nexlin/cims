@@ -1,7 +1,7 @@
-// ① 채널 카드 3줄 — 로스터 미리보기 (android_dispatch_tablet.md §6.3a).
+// 로스터 미리보기 — 내 채널 카드의 접속자 줄과 채널 상세 패널의 «접속» 목록 (android_dispatch_tablet.md §6.3b).
 //
 // 데스크톱은 «포커스 카드만 3줄, 로스터 칩(발언 중 녹색 · 나 점선 · +n)» 이다(dispatch_desktop_ui.md §4.1
-// «공통 — 채널 카드»). 태블릿도 같다 — 카드 전부에 로스터를 펴면 한 화면에 카드 7장이 들어가지 않는다.
+// «공통 — 채널 카드»). 태블릿은 포커스를 사이드 패널이 받아 카드마다 접속자 한 줄(셋까지 + n)을 두고, 패널은 전부 편다.
 package com.cims.ue.dispatch.ui.ptt
 
 import com.cims.ue.dispatch.session.userPart

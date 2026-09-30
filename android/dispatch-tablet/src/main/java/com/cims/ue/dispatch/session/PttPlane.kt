@@ -132,6 +132,15 @@ suspend fun DispatchSession.leave(callId: Int): CimsResult<Unit> {
     return report(TextArea.PTT_JOIN, ue.call(callId).leaveGroupCall())
 }
 
+/**
+ * 진행 중 그룹콜의 긴급 상향·하향(TS 24.379 §10.1.1.2.1.3~5) — 채널 상세의 [긴급]·[긴급 해제]. 결과는 코어의 조건 이벤트로 온다
+ * (확정 = 2xx, 거절 = 이전 값 복원 — 미인가 상향 403, 호는 유지 — `applyCondition`). 곧바로 실패한 것만 여기서 토스트로 남긴다.
+ */
+suspend fun DispatchSession.setEmergency(callId: Int, on: Boolean): CimsResult<Unit> {
+    val ue = engineOrNull() ?: return report(TextArea.EMERGENCY, CimsResult.fail(-1, "엔진 없음"))
+    return report(TextArea.EMERGENCY, ue.call(callId).setCondition(emergency = on))
+}
+
 /** PTT 누름 — 그 세션의 floor 를 요청한다. */
 suspend fun DispatchSession.floorRequest(callId: Int): CimsResult<Unit> {
     val ue = engineOrNull() ?: return report(TextArea.PTT_JOIN, CimsResult.fail(-1, "엔진 없음"))

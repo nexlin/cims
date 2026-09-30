@@ -1,10 +1,12 @@
 @file:OptIn(ExperimentalFoundationApi::class)
-// [일반통화] 탭 화면 — ③ 일반통화 + ⑥ 통화 내역 (android_dispatch_tablet.md §6.3)
+// [관제] › [통화] 의 면 넷 — ③ 일반통화 + ⑥ 통화 내역 (android_dispatch_tablet.md §6.3)
 //
-// 탭 폭이 전부(1280)라 ③ 를 **2열**로 편다 — 좌: 그룹원 띠·대표번호 대기열 / 우: 오늘 데스크·내 통화.
+// 본문 폭(레일을 뺀 1200)을 다 쓰므로 «통화» 면을 **2열**로 편다 — 좌: 키패드 / 우: 대표번호 대기열·진행 중·내 통화·그룹원 띠.
 // 데스크톱은 1열이지만 태블릿은 세로 스크롤을 줄이는 쪽이 낫다.
 // DTMF·전달은 한 통화에 묶인 조작이라 **카드 안에서** 편다(§6.6).
 package com.cims.ue.dispatch.ui.call
+
+import com.cims.ue.dispatch.ui.CimsFilterChip
 
 import com.cims.ue.dispatch.ui.Type
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -63,7 +65,7 @@ fun CallsScreen(
     onPerson: (PersonAction, String) -> Unit = { _, _ -> },
     bookPane: @Composable () -> Unit = {},
     smsPane: @Composable () -> Unit = {},
-    /** false = 탭줄은 껍데기가 고정으로 놓는다(앱 경로). */
+    /** false = 탭 줄은 껍데기(`DispatchTabs`)가 그린다(앱 경로). */
     showTabs: Boolean = true,
     /** ⑥ [이력에서 보기] — 최상위 [이력] 으로. */
     onHistory: () -> Unit = {},
@@ -107,8 +109,8 @@ fun CallsScreen(
 /**
  * [통화] 본문 — 면 넷, **순수 컴포저블**(android_dispatch_tablet.md §6.3).
  *
- * 탭줄은 이 장이 직접 그린다 — 면이 최상위 메뉴와 한 줄로 꿰여 있어(`APP_PAGES`) 밀면 옆 메뉴의
- * 탭줄이 따라 들어와야 «지금 어느 메뉴에 있는가» 가 보인다.
+ * 앱에서는 탭 줄([무전|통화] + 하위 탭)을 껍데기가 그리고(`showTabs = false`), 이 장은 면 하나만 그린다.
+ * `showTabs = true` 는 이 장만 따로 볼 때(미리보기)의 탭 줄이다.
  *
  * 데스크톱은 ③⑥ 을 2열 + 전폭으로 한 화면에 편다. 태블릿에서 그대로 하면 다섯 목록이 한 화면을 나눠 가져
  * 각각 서너 줄이 된다 — 특히 «내 통화» 와 «내역» 은 훑는 목록이라 그러면 쓸모가 없다. 그래서 **하는 일로**
@@ -128,7 +130,7 @@ fun CallsScreenContent(
     onPerson: (PersonAction, String) -> Unit = { _, _ -> },
     bookPane: @Composable () -> Unit = {},
     smsPane: @Composable () -> Unit = {},
-    /** false = 탭줄은 껍데기가 면 pager 위에 고정으로 놓는다(앱 경로). true = 한 벌로 그린다(미리보기). */
+    /** false = 탭 줄은 껍데기(`DispatchTabs`)가 그린다(앱 경로). true = 이 장이 하위 탭을 직접 그린다(미리보기). */
     showTabs: Boolean = true,
     modifier: Modifier = Modifier,
 ) {
@@ -137,14 +139,15 @@ fun CallsScreenContent(
         when (pane) {
             // 각 면은 `weight` 로 남은 높이를 받는다 — `fillMaxSize` 면 TabRow 높이만큼 넘친다.
             //
-            // «통화» 면은 **2열**이다. 가로 1280dp 를 한 열로 쓰면 키패드가 화면을 먹거나 목록이 짧아진다 —
+            // «통화» 면은 **2열**이다. 본문 폭 1200dp 를 한 열로 쓰면 키패드가 화면을 먹거나 목록이 짧아진다 —
             //   왼쪽은 **거는 일**(키패드), 오른쪽은 **벌어지는 일**(진행 중·내 통화·대기열·그룹원).
             CallPane.CALLS -> Row(Modifier.weight(1f)) {
                 Column(Modifier.width(320.dp).fillMaxHeight().verticalScroll(rememberScrollState())) {
                     Keypad(ui, act)
                 }
                 VerticalDivider()
-                Column(Modifier.weight(1f).fillMaxHeight().padding(8.dp)) {
+                // 오른쪽 칸은 **통째로** 스크롤한다 — 감청을 펼치거나 진행 중이 늘어도 내 통화·그룹원이 잘리지 않는다.
+                Column(Modifier.weight(1f).fillMaxHeight().verticalScroll(rememberScrollState()).padding(8.dp)) {
                     SectionTitle("대표번호 대기열")
                     Queue(ui, act)
                     Spacer(Modifier.height(8.dp))
@@ -176,7 +179,19 @@ fun CallsScreenContent(
 
 @Composable
 private fun SectionTitle(t: String) =
-    Text(t, fontWeight = FontWeight.Bold, fontSize = Type.strong, modifier = Modifier.padding(bottom = 4.dp))
+    Text(t, fontWeight = FontWeight.Bold, fontSize = Type.title, modifier = Modifier.padding(top = 4.dp, bottom = 6.dp))
+
+/**
+ * 통화 카드 틀 — 흰 면 + 옅은 테두리. **울리는 호·착신은 굵은 검정 테두리**로 가른다(받을 것이 먼저 보이게). 긴급·임박 색은
+ * 무전의 상태라 여기 쓰지 않는다. 안은 `Card` 처럼 **세로로 쌓는다**(`Surface` 는 겹쳐 쌓는다 — 감청 펼침 줄이 머리 위에 겹친다).
+ */
+@Composable
+private fun CallCardFrame(attention: Boolean, modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
+    val p = com.cims.ue.dispatch.ui.Tokens.palette
+    Surface(color = if (attention) p.bar else p.paper, contentColor = p.ink, shape = RoundedCornerShape(10.dp),
+        border = androidx.compose.foundation.BorderStroke(if (attention) 2.dp else 1.dp, if (attention) p.ink else p.divider),
+        modifier = modifier) { Column(content = content) }
+}
 
 // ── 키패드 — «거는 일» 의 자리 ───────────────────────────────────────────────
 @Composable
@@ -306,9 +321,7 @@ private fun Queue(ui: CallsUi, act: CallsActions) {
 
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         queue.forEach { q ->
-            Card(colors = CardDefaults.cardColors(
-                containerColor = if (q.ringing) MaterialTheme.colorScheme.tertiaryContainer
-                                 else MaterialTheme.colorScheme.surfaceVariant)) {
+            CallCardFrame(attention = q.ringing) {
                 Column(Modifier.padding(8.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(if (q.ringing) "🔔 " else "", fontSize = Type.strong)
@@ -345,7 +358,7 @@ private fun Tally(ui: CallsUi, act: CallsActions) {
         listOf(Triple("응대", t.answered, DESK_ALL), Triple("부재", t.missed, "missed"),
                Triple("발신", t.outgoing, "outgoing"), Triple("전달", t.transfer, "transfer"),
                Triple("감청", t.monitor, "monitor")).forEach { (label, n, key) ->
-            FilterChip(
+            CimsFilterChip(
                 selected = key != DESK_ALL && f == key,
                 onClick = { act.setDeskFilter(key) },
                 label = { Text("$label $n", fontSize = Type.meta) })
@@ -362,11 +375,10 @@ private fun MyCalls(ui: CallsUi, act: CallsActions, onPerson: (PersonAction, Str
     var menuFor by remember { mutableStateOf<Int?>(null) }
     if (calls.isEmpty()) { Hint("진행 중인 통화 없음"); return }
 
-    LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        items(calls, key = { it.callId }) { c ->
-            Card(colors = CardDefaults.cardColors(
-                containerColor = if (c.incoming) MaterialTheme.colorScheme.tertiaryContainer
-                                 else MaterialTheme.colorScheme.surfaceVariant)) {
+    // 게으른 목록이 아니다 — 면 오른쪽 칸이 통째로 스크롤한다(칸 안에 따로 스크롤하는 목록을 두면 아래 구역이 밀려 사라진다).
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        calls.forEach { c -> key(c.callId) {
+            CallCardFrame(attention = c.incoming) {
                 Column(Modifier.padding(10.dp)
                     .combinedClickable(onClick = {}, onLongClick = { menuFor = c.callId })) {
                     if (menuFor == c.callId) PersonMenu(
@@ -411,7 +423,7 @@ private fun MyCalls(ui: CallsUi, act: CallsActions, onPerson: (PersonAction, Str
                     if (c.transferOpen) Transfer(act, c, xferTarget, ui.members.filter { !it.isMe })
                 }
             }
-        }
+        } }
     }
 }
 
@@ -505,7 +517,7 @@ private fun CallLog(ui: CallsUi, act: CallsActions, onPerson: (PersonAction, Str
         horizontalArrangement = Arrangement.spacedBy(4.dp),
         verticalAlignment = Alignment.CenterVertically) {
         listOf("전체" to DESK_ALL, "대표번호" to "pilot", "부재" to "missed").forEach { (label, key) ->
-            FilterChip(selected = if (key == DESK_ALL) f == DESK_ALL else f == key,
+            CimsFilterChip(selected = if (key == DESK_ALL) f == DESK_ALL else f == key,
                 onClick = { act.setDeskFilter(key) },
                 label = { Text(label, fontSize = Type.meta) })
         }
@@ -635,10 +647,7 @@ private fun WatchDiag(ui: CallsUi) {
  */
 @Composable
 private fun LiveRow(act: CallsActions, r: LiveCallRow, hidden: Boolean = true, levels: Map<Int, Float> = emptyMap()) {
-    Card(colors = CardDefaults.cardColors(
-        containerColor = if (r.ringing) MaterialTheme.colorScheme.tertiaryContainer
-                         else MaterialTheme.colorScheme.surfaceVariant),
-        modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
+    CallCardFrame(attention = r.ringing, modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
         Row(Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -730,10 +739,8 @@ private fun SourceRow(src: MediaSource) {
 }
 
 /**
- * [통화] 탭줄 **하나** — 껍데기가 면 pager 위에 고정으로 놓는다(§6.3).
- *
- * 면을 밀 때 이 줄은 제자리에 남는다. 같이 미끄러지면 메뉴가 바뀐 것처럼 보인다 — 메뉴가 실제로
- * 바뀔 때는 **줄과 본문이 한 덩어리로** 옆으로 나간다(그때는 바깥 pager 가 움직인다).
+ * [통화] 하위 탭 — 이 장만 따로 볼 때(`showTabs = true`, 미리보기)의 탭 줄. 앱에서는 껍데기의 `DispatchTabs` 가
+ * [무전|통화] 와 하위 탭을 한 줄로 그리고, 면을 밀어도 그 줄은 제자리에 남는다(§6.3).
  */
 @Composable
 fun CallTabRow(pane: CallPane, onPane: (CallPane) -> Unit) {

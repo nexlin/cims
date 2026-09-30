@@ -63,9 +63,10 @@ class PttActivityViewModel(private val s: DispatchSession) : ScreenViewModel() {
             .stateIn(scope, SharingStarted.Eagerly, emptySet())
 
     /** ⑤ CSV — 필터·따라가기와 무관하게 세션이 든 이벤트 전부(데스크톱 `ExportCsv(ActivityPanel.Ptt)` 와 같다). */
-    fun csv(): String = activityCsv(all.value)
+    fun csv(): String = activityCsv(allRows.value)
 
-    private val all: StateFlow<List<ActivityRow>> = s.activity
+    /** 세션이 든 이벤트 전부(최신 위) — «이벤트» 면의 종류·채널 거르기와 상세 패널이 이것을 쓴다. */
+    val allRows: StateFlow<List<ActivityRow>> = s.activity
 
     fun setFilter(f: ActivityFilter) { _filter.value = f }
     fun toggleFollowFocus() {

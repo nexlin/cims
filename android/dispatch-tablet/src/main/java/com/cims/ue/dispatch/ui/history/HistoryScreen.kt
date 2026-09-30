@@ -4,6 +4,8 @@
 // 좌(세션 카드 1) : 우(세션 패널 3) 로 나눈다. 통화는 상세가 따로 없어 표가 전체 폭이다.
 package com.cims.ue.dispatch.ui.history
 
+import com.cims.ue.dispatch.ui.CimsFilterChip
+
 import com.cims.ue.dispatch.ui.Tag
 import com.cims.ue.dispatch.ui.Type
 import androidx.compose.foundation.background
@@ -155,15 +157,9 @@ private fun Toolbar(ui: HistoryUi, act: HistoryActions) {
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp)) {
 
-        SingleChoiceSegmentedButtonRow {
-            listOf(HistoryKind.CALL, HistoryKind.PTT).forEachIndexed { i, k ->
-                SegmentedButton(
-                    selected = kind == k,
-                    onClick = { act.show(k) },
-                    shape = SegmentedButtonDefaults.itemShape(i, 2),
-                ) { Text(k.label) }
-            }
-        }
+        val kinds = listOf(HistoryKind.CALL, HistoryKind.PTT)
+        com.cims.ue.dispatch.ui.Segmented(options = kinds.map { it.label }, selected = kinds.indexOf(kind).coerceAtLeast(0),
+            onSelect = { act.show(kinds[it]) }, itemWidth = 120.dp)
 
         TextButton(onClick = { act.shiftDay(-1) }) { Text("◀") }
         TextButton(onClick = { pick = true }) { Text(date.toString(), fontWeight = FontWeight.Bold) }
@@ -382,11 +378,11 @@ private fun SessionPane(vm: HistoryViewModel, e: HistoryEntry) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Section("이벤트")
                 Spacer(Modifier.width(8.dp))
-                FilterChip(selected = "floor" in layers,
+                CimsFilterChip(selected = "floor" in layers,
                     onClick = { layers = layers.toggle("floor") },
                     label = { Text("발언권 ${detail?.floor?.size ?: 0}", fontSize = Type.meta) })
                 Spacer(Modifier.width(4.dp))
-                FilterChip(selected = "member" in layers,
+                CimsFilterChip(selected = "member" in layers,
                     onClick = { layers = layers.toggle("member") },
                     label = { Text("멤버 ${detail?.events?.size ?: 0}", fontSize = Type.meta) })
             }

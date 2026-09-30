@@ -46,7 +46,7 @@ fun SettingsSheet(session: DispatchSession, onDismiss: () -> Unit) {
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 listOf(com.cims.ue.dispatch.session.Settings.THEME_DARK to "어둡게",
                        com.cims.ue.dispatch.session.Settings.THEME_LIGHT to "밝게").forEach { (v, label) ->
-                    FilterChip(selected = s.theme == v,
+                    CimsFilterChip(selected = s.theme == v,
                         onClick = { session.updateSettings { it.copy(theme = v) } },
                         label = { Text(label, fontSize = Type.meta) })
                 }
@@ -56,7 +56,7 @@ fun SettingsSheet(session: DispatchSession, onDismiss: () -> Unit) {
             Text("소리를 내보낼 곳", fontSize = Type.body, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 Route.entries.forEach { r ->
-                    FilterChip(selected = s.audioRoute == r,
+                    CimsFilterChip(selected = s.audioRoute == r,
                         onClick = { session.updateSettings { it.copy(audioRoute = r) } },
                         label = { Text(routeLabel(r), fontSize = Type.meta) })
                 }
@@ -68,7 +68,7 @@ fun SettingsSheet(session: DispatchSession, onDismiss: () -> Unit) {
                     modifier = Modifier.padding(top = 6.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     headsets.forEach { h ->
-                        FilterChip(
+                        CimsFilterChip(
                             selected = s.preferredHeadset == h.name &&
                                 (s.audioRoute == Route.HEADSET || s.audioRoute == Route.BLUETOOTH),
                             onClick = { session.selectHeadset(h) },

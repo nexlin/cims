@@ -4,6 +4,8 @@
 // 편집 중에는 목록이 잠긴다 — 저장·취소로만 나온다.
 package com.cims.ue.dispatch.ui.groups
 
+import com.cims.ue.dispatch.ui.CimsFilterChip
+
 import com.cims.ue.dispatch.ui.Tag
 import com.cims.ue.dispatch.ui.Type
 import androidx.compose.foundation.background
@@ -65,7 +67,7 @@ data class GroupsUi(
     val query: String = "",
     val loading: Boolean = false,
     val error: String = "",
-    /** 편집 중 — 목록·[↻]·[+ 새 그룹]이 잠긴다(§4.7). */
+    /** 편집 중 — 목록·[↻]이 잠긴다(§4.7). */
     val locked: Boolean = false,
     val editing: Boolean = false,
 )
@@ -126,12 +128,11 @@ private fun GroupList(ui: GroupsUi, act: GroupsActions, modifier: Modifier = Mod
             Spacer(Modifier.weight(1f))
             TextButton(onClick = { act.reload() }, enabled = !locked,
                 contentPadding = PaddingValues(horizontal = 8.dp)) { Text("↻") }
-            TextButton(onClick = { act.newGroup() }, enabled = !locked,
-                contentPadding = PaddingValues(horizontal = 8.dp)) { Text("+ 새 그룹") }
+            // 새 그룹은 여기서 만들지 않는다 — [관제] › [무전] › [사용자] 에서 사람을 골라 [그룹으로 저장](§6.12).
         }
         Row(Modifier.padding(horizontal = 10.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             GroupFilter.entries.forEach { f ->
-                FilterChip(selected = filter == f, onClick = { act.setFilter(f) },
+                CimsFilterChip(selected = filter == f, onClick = { act.setFilter(f) },
                     enabled = !locked, label = { Text(f.label, fontSize = Type.meta) })
             }
         }
@@ -304,7 +305,7 @@ private fun EditPane(vm: PttGroupsViewModel, f: EditForm) {
                 Text("세션 종류", fontSize = Type.body, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     PttGroupsViewModel.SESSION_TYPES.forEach { t ->
-                        FilterChip(selected = f.sessionType == t,
+                        CimsFilterChip(selected = f.sessionType == t,
                             onClick = { vm.update { it.copy(sessionType = t) } },
                             label = { Text(t, fontSize = Type.meta) })
                     }

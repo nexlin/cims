@@ -246,6 +246,8 @@ data class ActivityRow(
     val text: String,
     val kind: ActivityKind,
     val emergency: Boolean = false,
+    /** 세션 안에서 매긴 차례 — 이벤트 상세 패널이 이 행을 가리키는 열쇠(같은 ms 에 둘이 생겨도 갈린다). */
+    val id: Long = 0L,
 )
 
 enum class ActivityKind { TALK, JOIN, LEAVE, EMERGENCY, SDS, ERROR }

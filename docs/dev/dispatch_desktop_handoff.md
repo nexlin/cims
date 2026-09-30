@@ -112,7 +112,7 @@ Windows 와 같은 변경(개별/애드혹 명칭 포함)을 `android/dispatch-t
 | T1 | 컴파일 — `startBroadcast`·`startAdhocBroadcast`·`releaseBroadcast`·`joinAdhoc`(`GroupCallOptions.copy`)·`BROADCAST_JUDGE_OPS` | `session/PttPlane.kt` |
 | T2 | `SessionItem.isBroadcast/isBroadcastInitiator`·`FLOOR_IND_BROADCAST`·`GroupInfo.sessionType`·`broadcastPending` | `session/Models.kt`·`DispatchSession.kt` |
 | T3 | VM 일제 통화 상태(`_broadcastHeld`·`bcCallId` 는 `cards` 의 Eagerly onEach 가 읽으므로 **그보다 먼저 선언**해 두었다)·`canBroadcast`·`canCheck`(Permission 0 제외) | `ui/ptt/PttChannelsViewModel.kt` |
-| T4 | 한 버튼 제스처(`BroadcastHoldButton` — `rememberUpdatedState`, 개시 뒤 `joined` 가 돼도 뗄 때까지 남는지)·발신 시트 [애드혹] 의 [일제 통화](누르는 동안 시트·탭·대상 잠김, 놓으면 닫힘, 실패면 남음)·씨앗(`LaunchedEffect(seed)`) | `ui/ptt/ChannelScreen.kt`·`OriginateSheet.kt` |
+| T4 | 한 버튼 제스처(`BroadcastHoldButton` — `rememberUpdatedState`, 개시 뒤 `joined` 가 돼도 뗄 때까지 남는지)·발신 시트 [애드혹] 의 [일제 통화](누르는 동안 시트·탭·대상 잠김, 놓으면 닫힘, 실패면 남음)·씨앗(`LaunchedEffect(seed)`) | `ui/ptt/ChannelHead.kt`·`OriginateSheet.kt` |
 | T5 | JVM 시험 `PttChannelTest` — 일제 통화 3건(`canBroadcast` 조건·수신 멤버 발언 대상 제외·B-bit 판정) + 기존 전부 | `src/test/.../PttChannelTest.kt` |
 | T6 | 실기 — 채널 머리 [일제 통화] 누름·뗌(성립 전 CANCEL / 뒤 BYE), 잠금 발언 토글, 진행 중 통화·채팅 그룹 비활성, 수신 단말 «일제»·발언 대상 불가, [애드혹] 일제 통화(서버 과제 P2 전에는 «일제 통화로 열리지 않았습니다» 가 정상) | — |
 

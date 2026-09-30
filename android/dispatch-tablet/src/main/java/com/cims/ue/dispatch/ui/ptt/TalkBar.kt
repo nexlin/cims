@@ -33,6 +33,8 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
 @Composable
@@ -81,9 +83,11 @@ fun TalkBarContent(
     val speaking = granted > 0
     val requesting = !speaking && targets.any { it.requesting || it.queued }
 
-    Surface(tonalElevation = 3.dp, modifier = modifier.fillMaxWidth()) {
+    val p = com.cims.ue.dispatch.ui.Tokens.palette
+    Surface(color = p.bar, contentColor = p.ink, modifier = modifier.fillMaxWidth()
+        .drawBehind { drawLine(p.divider, Offset(0f, 0f), Offset(size.width, 0f), 1.dp.toPx()) }) {
         Row(
-            Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+            Modifier.height(80.dp).padding(horizontal = 12.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
@@ -123,19 +127,24 @@ fun TalkBarContent(
                     // 칩 = 그 채널로 포커스, × = 그 대상 하나만 빼기(데스크톱 칩 «클릭 = 포커스 · × = 체크 해제»). 여럿을 잡아 둔
                     //   채 하나만 빼려고 목록으로 돌아갈 필요가 없다.
                     targets.forEach { t ->
-                        AssistChip(
-                            onClick = { onFocus(t.card.id) },
-                            label = {
+                        // 승인된 대상은 발언 색으로 채운다 — 여럿 중 어디로 나가고 있는지 칩에서 바로 읽힌다.
+                        val on = t.granted
+                        Surface(
+                            color = if (on) p.live else p.paper, contentColor = if (on) p.onInk else p.ink,
+                            shape = RoundedCornerShape(8.dp),
+                            border = if (on) null else BorderStroke(1.dp, p.ink),
+                            modifier = Modifier.height(36.dp).clickable { onFocus(t.card.id) },
+                        ) {
+                            Row(Modifier.padding(start = 12.dp, end = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                                 Text(t.name + (if (t.stateText.isNotEmpty()) " · ${t.stateText}" else ""),
-                                     fontSize = Type.body)
-                            },
-                            trailingIcon = {
+                                     fontSize = Type.body, maxLines = 1)
                                 Icon(Icons.Filled.Close, contentDescription = "${t.name} 발언 대상에서 빼기",
-                                    modifier = Modifier.size(20.dp).clickable { onRemove(t.card.id) })
-                            })
+                                    modifier = Modifier.padding(start = 4.dp).size(20.dp).clickable { onRemove(t.card.id) })
+                            }
+                        }
                     }
                 }
-                TextButton(onClick = onClear) { Text("모두 해제", fontSize = Type.body) }
+                TextButton(onClick = onClear) { Text("모두 해제", fontSize = Type.body, color = p.ink) }
             }
         }
     }
@@ -162,26 +171,25 @@ internal fun PttButton(
 ) {
     var pressed by remember { mutableStateOf(false) }
     val scheme = MaterialTheme.colorScheme
+    val p = com.cims.ue.dispatch.ui.Tokens.palette
 
+    // 대기 = 검정(시안), 누름·요청·대기열 = 진회색, **발언 = 초록**(손끝에서 «지금 나간다» 를 바로 알게), 비활성 = 띠 + 테두리.
     val bg = when {
-        !enabled -> scheme.surfaceVariant
-        speaking -> scheme.primary
-        requesting -> scheme.tertiary
-        pressed || locked -> scheme.primaryContainer
-        else -> scheme.secondaryContainer
+        !enabled -> p.bar
+        speaking -> p.live
+        requesting || pressed || locked -> p.ink2
+        else -> p.ink
     }
     val fg = when {
-        !enabled -> scheme.onSurfaceVariant
-        speaking -> scheme.onPrimary
-        requesting -> scheme.onTertiary
-        else -> scheme.onSecondaryContainer
+        !enabled -> p.faint
+        else -> p.onInk
     }
 
     Surface(
         color = bg,
         contentColor = fg,
         shape = RoundedCornerShape(12.dp),
-        border = if (enabled) null else BorderStroke(1.dp, scheme.outline),
+        border = if (enabled) null else BorderStroke(1.dp, p.line),
         modifier = Modifier
             .width(width)
             .height(height)

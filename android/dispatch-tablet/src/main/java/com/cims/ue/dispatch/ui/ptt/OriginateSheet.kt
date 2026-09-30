@@ -10,6 +10,8 @@
 // [애드혹] 의 [일제 통화] = 고른 사람들에게 애드혹 일제 통화(TS 24.379 §17.2.2.1.1 9)) — 누르는 동안 개시+발언, 놓으면 끝.
 package com.cims.ue.dispatch.ui.ptt
 
+import com.cims.ue.dispatch.ui.CimsFilterChip
+
 import com.cims.ue.dispatch.ui.Type
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.foundation.clickable
@@ -108,12 +110,12 @@ fun OriginateSheet(
             }
 
             Row(verticalAlignment = Alignment.CenterVertically) {
-                FilterChip(selected = emergency, onClick = { emergency = !emergency },
+                CimsFilterChip(selected = emergency, onClick = { emergency = !emergency },
                     label = { Text("긴급", fontSize = Type.meta) })
                 if (tab == OriginTab.PRIVATE) {
                     Spacer(Modifier.width(6.dp))
                     // 전이중은 마이크가 늘 열려 있어 발언 대상이 되지 못한다 — 카드의 [음소거]로 다룬다.
-                    FilterChip(selected = fullDuplex, onClick = { fullDuplex = !fullDuplex },
+                    CimsFilterChip(selected = fullDuplex, onClick = { fullDuplex = !fullDuplex },
                         label = { Text("전이중(마이크 상시)", fontSize = Type.meta) })
                 }
             }

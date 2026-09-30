@@ -7,6 +7,8 @@
 // 아는 사람만 쓰게 되고, 목록을 훑다 잘못 눌러 걸리는 사고도 난다. 바로 걸고 싶으면 행 오른쪽 [📞] 이다.
 package com.cims.ue.dispatch.ui.call
 
+import com.cims.ue.dispatch.ui.CimsFilterChip
+
 import com.cims.ue.dispatch.ui.Type
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
@@ -69,10 +71,10 @@ private fun Contacts(
             modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp))
         if (book.orgs.isNotEmpty()) Row(Modifier.horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-            FilterChip(selected = org.isBlank(), onClick = { org = "" },
+            CimsFilterChip(selected = org.isBlank(), onClick = { org = "" },
                 label = { Text("전체", fontSize = Type.meta) })
             book.orgs.forEach { o ->
-                FilterChip(selected = org == o.code, onClick = { org = if (org == o.code) "" else o.code },
+                CimsFilterChip(selected = org == o.code, onClick = { org = if (org == o.code) "" else o.code },
                     label = { Text(o.name.ifBlank { o.code }, fontSize = Type.meta) })
             }
         }

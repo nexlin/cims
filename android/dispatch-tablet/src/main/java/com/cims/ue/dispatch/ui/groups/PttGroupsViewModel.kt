@@ -321,7 +321,7 @@ class PttGroupsViewModel(private val s: DispatchSession) : ScreenViewModel() {
     }
 
     /**
-     * 상세 [채널로] — 그 그룹의 **채널 화면**을 열고, 멤버 그룹이면 합류한다(데스크톱 §4.7 `GoToChannel`).
+     * 상세 [채널로] — 그 그룹의 **채널 패널**을 열고, 멤버 그룹이면 합류한다(데스크톱 §4.7 `GoToChannel`).
      *
      * 여는 길은 목록 행·긴급 배너와 같은 [onOpen](`MainViewModel.openChannel` — «채널» 면으로)이다. 채널이 있는 그룹만
      * 부른다(`hasChannel`) — 관리 범위만 있는 그룹은 태블릿에 채널이 없어 열면 «사라졌습니다» 가 된다.

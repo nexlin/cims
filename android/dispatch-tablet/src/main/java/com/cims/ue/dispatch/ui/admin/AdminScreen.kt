@@ -4,6 +4,8 @@
 // 화면 머리에 범위 안내를 붙인다. 행 한 번 클릭이 곧 편집이다.
 package com.cims.ue.dispatch.ui.admin
 
+import com.cims.ue.dispatch.ui.CimsFilterChip
+
 import com.cims.ue.dispatch.ui.Tag
 import com.cims.ue.dispatch.ui.Type
 import androidx.compose.foundation.background
@@ -482,7 +484,7 @@ private fun LineCard(vm: AdminViewModel, view: AdminView, f: MemberForm, kind: S
                 Row(Modifier.horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     choices.forEach { sv ->
-                        FilterChip(selected = line.serviceRef == sv.name,
+                        CimsFilterChip(selected = line.serviceRef == sv.name,
                             onClick = { vm.updateLine(kind) { it.copy(serviceRef = sv.name) } },
                             label = { Text(sv.name, fontSize = Type.meta) })
                     }
@@ -493,7 +495,7 @@ private fun LineCard(vm: AdminViewModel, view: AdminView, f: MemberForm, kind: S
             Text("SIP transport", fontSize = Type.meta, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 SIP_TRANSPORTS.forEach { t ->
-                    FilterChip(selected = line.sipTransport.equals(t, ignoreCase = true),
+                    CimsFilterChip(selected = line.sipTransport.equals(t, ignoreCase = true),
                         onClick = { vm.updateLine(kind) { it.copy(sipTransport = t) } },
                         label = { Text(t, fontSize = Type.meta) })
                 }

@@ -50,8 +50,8 @@ private fun PreviewMessages() = PreviewFrame {
     }
 }
 
-/** 채널 화면의 «메시지» 면 크기 — 머리·탭줄을 뺀 높이에서 몇 줄 보이는지. */
-@Preview(name = "④ 메시지 — 채널 면", widthDp = 1280, heightDp = 460, showBackground = true)
+/** 1:1 대화 — 머리에 «그룹 전원» 라벨·[채널 정보] 가 없고 빠른 답장도 같다. */
+@Preview(name = "④ 메시지 — 1:1 대화", device = PreviewBody, showBackground = true)
 @Composable
 private fun PreviewMessagesPane() = PreviewFrame {
     Box(Modifier.fillMaxSize().padding(8.dp)) {
@@ -89,7 +89,7 @@ private val EVENTS = listOf(
 @Composable
 private fun PreviewActivity() = PreviewFrame {
     Box(Modifier.fillMaxSize().padding(8.dp)) {
-        ActivityContent(rows = EVENTS, filter = ActivityFilter.ALL, follow = false)
+        ActivityContent(rows = EVENTS)
     }
 }
 
@@ -98,7 +98,7 @@ private fun PreviewActivity() = PreviewFrame {
 private fun PreviewActivityPinned() = PreviewFrame {
     val now = System.currentTimeMillis()
     Box(Modifier.fillMaxSize().padding(8.dp)) {
-        ActivityContent(rows = EVENTS.filter { it.kind == ActivityKind.TALK }, filter = ActivityFilter.TALK, follow = false,
+        ActivityContent(rows = EVENTS.filter { it.kind == ActivityKind.TALK },
             pinned = listOf(
                 com.cims.ue.dispatch.ui.AlertBannerUi("g-sit", com.cims.ue.dispatch.session.AlertKind.EMERGENCY,
                     "상황실", "1003 이순경", now - 95_000),
@@ -111,6 +111,6 @@ private fun PreviewActivityPinned() = PreviewFrame {
 @Composable
 private fun PreviewActivityEmpty() = PreviewFrame {
     Box(Modifier.fillMaxSize().padding(8.dp)) {
-        ActivityContent(rows = emptyList(), filter = ActivityFilter.TALK, follow = true)
+        ActivityContent(rows = emptyList())
     }
 }
