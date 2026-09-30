@@ -589,3 +589,11 @@ Session-Expires 90 임시 시험으로 SE/2 에 단말 갱신 re-INVITE 가 나�
 re-INVITE 는 개시 offer 를 그대로 보내므로 다이얼로그 안 offer 에서 `mc_granted`·`mc_implicit_request` 를 뺀다(TS 24.581 §14.5 — 서버가 긴급 격상 암묵 요청으로
 읽지 않게). 서버 200 OK 에 `Allow`(UPDATE)가 있으면 pjsip 은 SDP 없는 UPDATE 로 갱신한다. 새 골든 04 answer 의 `mc_queueing` 은 SDK 가 그대로 받는다. MCPTT 착신은
 이 보정 밖(라이브 호 동작 불변 — 같은 규격 문장 TS 24.379 쪽은 따로 판단).
+
+**.48 B6 확인 답 (.45 → .48)** — pjmedia 코드 읽기(실측은 C6 Android e2e 때). ① **PLI 는 키프레임으로 답한다** — `rtcp.c parse_rtcp_fb` 가 PSFB FMT 1 을
+media source SSRC 검사 없이 받아 `vid_stream` 이 `pjmedia_vid_stream_send_keyframe` 을 부른다. 조건 셋: 로컬 SDP 에 `a=rtcp-fb:* nack pli`(SDK 는 영상 호
+`reqKeyframeMethod = RTCP_PLI` 라 offer·answer 에 늘 싣는다) · 인코더가 도는 중(= 송출 허가 동안) · 직전 키프레임 뒤 1000 ms(`PJMEDIA_VID_STREAM_MIN_KEYFRAME_INTERVAL_MSEC`
+— 그 안의 PLI 는 버린다, CMP 의 송출자당 500 ms 한도면 둘에 하나가 먹는다). ② **FIR(FMT 4)은 읽지 않는다**(알 수 없는 피드백으로 버림). SDK 는 `ccm fir` 를 광고하지
+않으므로 RFC 4585 §4.2(협상한 피드백만 보낸다)대로 CMP 는 그 멤버에게 FIR 대신 PLI 를 보내면 된다 — 수신 시작 계기(CMP 발) 도 PLI. 수신자 FIR 을 옮길 때도 송출자
+SDP 에 `ccm fir` 가 없으면 PLI 로 바꿔 보내자. ③ SDK 수신 쪽은 복호 중 키프레임 누락 이벤트에서 PLI 를 낸다(서버 answer 에 `nack pli` 가 있을 때 — 골든 04·06 은 있다).
+송출 시작 때는 pjmedia 가 키프레임 몇 장을 먼저 보낸다(`sk_cfg` 기본).
