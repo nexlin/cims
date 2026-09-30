@@ -72,7 +72,8 @@ class VoltePhone(
     private val _messages = MutableSharedFlow<ImMessage>(extraBufferCapacity = 64, onBufferOverflow = BufferOverflow.DROP_OLDEST)
     val incomingMessage: SharedFlow<ImMessage> = _messages.asSharedFlow()
 
-    /** 발신 전 영상 on/off(M1.3 토글). 착신을 영상으로 받으면 켜진다. */
+    /** 지금 호의 영상 여부 — 발신은 발신 전 토글(M1.3), 착신은 응답 방식(영상/음성)이 정한다.
+     *  근접 센서 화면 꺼짐(SipService)도 이 값을 본다. */
     @Volatile var videoEnabled = false
 
     /** 마지막으로 본 호 — 카메라 전환 대상. */
@@ -133,7 +134,7 @@ class VoltePhone(
 
     /** 착신 응답. [withVideo]=true 면 영상까지(상대가 m=video 를 offer 한 경우). */
     fun answer(callId: Int, withVideo: Boolean = false) = scope.launch {
-        if (withVideo) videoEnabled = true
+        videoEnabled = withVideo   // 음성 응답이면 앞 영상 호의 값을 지운다
         ue.call(callId).answer(CallOptions(video = withVideo))
     }
 

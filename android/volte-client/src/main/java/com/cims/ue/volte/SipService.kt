@@ -553,7 +553,9 @@ class SipService : Service() {
                 // 통화 오디오 세션 소유(MODE_IN_COMMUNICATION) — 미소유 시 일부 단말 완전 무음(setInCallAudio 참조)
                 setInCallAudio(call is CallState.Active || call is CallState.Outgoing)
                 // 발신·통화 중 근접 센서 화면 꺼짐(전화 앱과 같은 동작). 착신 벨 울림 중에는 잡지 않는다 — 받기 조작이 필요하다.
-                if (call is CallState.Active || call is CallState.Outgoing) proximityLock.acquire() else proximityLock.release()
+                // 영상 호도 잡지 않는다 — 화면을 보며 통화하므로 손이 센서를 가리면 영상이 꺼진다(전화 앱도 영상 통화엔 쓰지 않는다).
+                val voiceCall = (call is CallState.Active || call is CallState.Outgoing) && !c.videoEnabled
+                if (voiceCall) proximityLock.acquire() else proximityLock.release()
                 // 착신 — 기본 전화앱처럼 벨소리 + 풀스크린/헤드업 착신 알림(받기/거절).
                 if (call is CallState.Incoming) {
                     showIncomingCallNotification(call)
