@@ -138,6 +138,7 @@ client(CSP) 전제라 마지막 소스를 유지한다(다중 client 격리는 [
                  "member_total": 200, "member_used": 5 },
       "tap":   { "total": 16, "used": 1, "max_per_session": 4 },
       "ann":   { "total": 32, "used": 2, "media": 12 },
+      "mcvideo": { "groups": 1, "joined": 3, "member_total": 40, "member_used": 3 },
       "media_buffer": { "max_ms": 5000 }
     },
     "session_digest": {
@@ -157,6 +158,7 @@ client(CSP) 전제라 마지막 소스를 유지한다(다중 client 격리는 [
 | `ptt.member_total` / `ptt.member_used` | PTT 멤버 포트 유닛 풀 크기 / 사용 중 |
 | `tap.total` / `tap.used` / `tap.max_per_session` | 청취 leg(tap) 풀 크기 / 사용 중 / 세션당 상한 ([§6.5](#65-relay_tap_add--relay_tap_modify--relay_tap_remove--청취-legtap)). **키 존재 = 기능 광고** — 없으면 CSP 가 Join 을 488 로 거절 |
 | `ann.total` / `ann.used` / `ann.media` | 안내 재생기([§6.7](#67-relay_play--relay_play_stop--안내-재생기leg-에-붙는-재생-원천)) 슬롯 크기 / 사용 중 / 적재된 카탈로그 음원 수. **키 존재 = 기능 광고** — 없으면 CSP 는 안내 없이 응답 코드만 |
+| `mcvideo.groups` / `mcvideo.joined` / `mcvideo.member_total` / `mcvideo.member_used` | MCVideo 그룹 호([§7.9](#79-mcvideo--송출수신-제어-service-mcvideo)) — 활성 그룹 수 / 주소 등록 멤버 총수 / 멤버 포트 유닛(6포트 블록) 풀 크기 / 사용 중. **키 존재 = 기능 광고** — 없으면 CSP 는 MCVideo 그룹 호를 받지 않는다 |
 | `media_buffer.max_ms` | PTT 미디어 버퍼링 최대 길이([cmp.md](../design/modules/cmp.md) §3.5 «미디어 버퍼링», TS 24.379 §10.1.1.4.2). **키 존재 = 기능 광고** — 있으면 CSP 가 멤버 확인 전 개시자에게 200 OK(`P-Answer-State: Unconfirmed`), 없으면 멤버 200 뒤에 응답 |
 
 client 는 이 요약으로 부하 기반 CMP 선택, 조기 호 거절(admission control)을 할 수 있다.
@@ -770,6 +772,7 @@ audio RTP(`port`, RTCP = +1)·video RTP(`video_port`, RTCP = +1 — 수신자 PL
 |---|---|---|
 | `user_control_port` | - | 멤버의 전송 제어 채널 RTCP 포트(멤버 SDP 의 `m=application … udp MCVideo`) |
 | `user_tc_ssrc` | - | 멤버가 SDP 에 광고한 `mc_transmission_ssrc` — CMP 가 **이 멤버에게 보내는 전송 제어 메시지 RTCP 헤더 SSRC** 로 쓴다(TS 24.581 §4.3.3.1 — 받는 쪽이 기대하는 값, 다중화의 열쇠). 없으면 CMP 가 정한 값 |
+| `user_audio_ssrc` / `user_video_ssrc` | - | 멤버 offer 의 audio·video `a=ssrc`(RFC 5576) — 이 멤버의 송출을 허가할 때 할당 SSRC 의 선호값(아래 SSRC 규칙) |
 | `queueing` | - | `1` = SDP `mc_queueing` 협상(§14.2.2) — 1차는 대기열을 쓰지 않는다(송출 큐 = V8): 상한이면 거절 #1 |
 | `max_priority` | - | 협상한 송출 우선순위 상한(answer `mc_priority`, §14.3.3). 없으면 `members` 의 prio |
 | `max_reception_priority` | - | 협상한 수신 우선순위 상한(answer `mc_reception_priority`, §14.3.6) |
@@ -783,7 +786,9 @@ audio RTP(`port`, RTCP = +1)·video RTP(`video_port`, RTCP = +1 — 수신자 PL
 
 **SSRC 규칙** (mcvideo_dev_plan.md §7 R2)
 
-- **송출 SSRC** — 송출을 허가할 때 CMP 가 그 송출에 전역 유일한 Audio SSRC·Video SSRC 한 쌍을 할당·보관하고(TS 24.581 §6.3.4.3.3 d),
+- **송출 SSRC** — 송출을 허가할 때 CMP 가 그 송출에 전역 유일한 Audio SSRC·Video SSRC 한 쌍을 할당·보관하고(TS 24.581 §6.3.4.3.3 d) — 멤버가
+  `user_audio_ssrc`·`user_video_ssrc` 를 줬고 그 값이 프로세스 전역에서 쓰이지 않으면 그 값을, 아니면 새 값을 쓴다(§14.3.7·§14.3.8 «value included in
+  the SDP offer or new ssrc value if collision is detected» — 암묵적 송출 요청의 `audio_ssrc`·`video_ssrc` 도 같다),
   Transmission Granted(필드 14·23)·Media Transmission Notification·Receive Media Response·Transmission End Notify·End 계열에 싣는다. 송출이
   끝나면 반환한다. 규격상 송출자는 그 값을 자기 RTP 에 쓴다(§6.2.4) — **CMP 는 송출자를 멤버 전용 포트로 판별하고 내보낼 때 할당 SSRC 를
   찍는다**(단말이 SSRC 를 바꾸지 못해도 분배·수신자 구분이 깨지지 않는다).
@@ -791,11 +796,20 @@ audio RTP(`port`, RTCP = +1)·video RTP(`video_port`, RTCP = +1 — 수신자 PL
   없는 송출의 RTP 는 그 수신자에게 보내지 않는다. 1차 단말 수신 1개(C9 = 1).
 - **제어 채널 SSRC** — 멤버 → CMP 는 `tc_ssrc`, CMP → 멤버는 `user_tc_ssrc`. 멤버 전용 `control_port` 라 1차는 SSRC 로 세션을 가르지 않는다
   (다른 값이 와도 받고 로그만).
+- **제어 채널 수신·NAT** — datagram 의 RTCP 패킷을 헤더 length 로 나눠(compound) APP 만 전송 제어 코덱으로 푼다 — MCV0~2 가 아니거나 모르는
+  subtype 은 버린다(§9.1.4 1). APP 이 아닌 RTCP(단말의 빈 RR keepalive — RFC 3550 §6.4.2, 헤더 SSRC = `mc_transmission_ssrc`)는 해석하지 않고
+  버리되 드롭으로 세지 않는다. `user_nat` 멤버의 제어 목적지는 그 소켓의 형식 검사(v2 · RTCP PT 192~223 · `user_sig_ip` guard)를 통과한 패킷으로
+  latch 한다 — 단말은 호 성립 때 빈 RR 로 하향 경로를 연다([ue_nat_traversal.md](../design/features/ue_nat_traversal.md) §7.1).
 - **영상 RTCP**(B6) — 수신자의 PLI(RFC 4585)·FIR(RFC 5104)는 media SSRC 가 가리키는 송출자에게 넘긴다(SSRC 는 송출자 쪽 값으로 되돌린다).
   송출 시작 때 CMP 가 송출자에게 PLI 를 한 번 보내 첫 키프레임을 받는다.
 
 **PTT_LEAVE / PTT_GROUP_REMOVE** — §7.5·§7.3 과 같다(`service:"mcvideo"`). 떠나는 멤버의 송출·수신 상태를 정리하고(§6.3.3 두 단계),
-송출 중이었으면 남은 멤버에게 Transmission End Notify 를 보낸다.
+송출 중이었으면 남은 멤버에게 Transmission End Notify 를 보낸다. 없는 그룹·멤버도 OK(자연 멱등).
+
+**그 밖** — `PTT_FLOOR_TIER` 등 floor 명령에 `service:"mcvideo"` 면 `BAD_REQUEST`. `resource.mcvideo` 를 광고하지 않는 CMP(멤버 풀 0)는
+`service:"mcvideo"` 명령에 `NO_RESOURCE`. sweeper 가 주소 등록 멤버 0 + 무활동 `SessionTimeout` 인 MCVideo 그룹을 회수하면
+`PTT_GROUP_ABORTED`(hdr.service `"mcvideo"`)를 보낸다(§8). 관측 — STATS `detail.mcvideo_groups[]{group_id, group_type, members, reserved,
+max_transmitters, control_rx, no_grant_drop}`·`mcvideo_groups_total`.
 
 ## 8. 이벤트 (type: "event")
 

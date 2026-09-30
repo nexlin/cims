@@ -7,8 +7,8 @@
 > **설계 정본.** 구현된 것 — 계약(전송 제어 정의 테이블 [mcvideo_tc_defs.yaml](mcvideo_tc_defs.yaml)(생성 헤더 양 끝, §5.3·§5.4) · DB 표(§5.1) ·
 > 설정 문서 골든 `tests/fixtures/mcvideo/` · SDP 프로파일(§1.4) · CSP↔CMP 제어 API([cmp_media_api.md](../../api/cmp_media_api.md) §7.9) · 단말 SDK 공개
 > 표면 선언([ue_sdk.md](ue_sdk.md) §4.6 — 구현 전이라 실패를 돌려준다)), 양 끝 전송 제어 코덱(CMP `PTransmissionCodec` · SDK `mcvideo/tc_codec`, 교차 시험),
-> 단말 전송 제어 참여자 상태 머신(SDK `mcvideo/tc_participant` — 엔진 결선 전), V0 전부, CSC 설정 평면(§5.1 — 관리 API·콘솔 제외). 호 제어·서버 전송 제어
-> 상태 머신·미디어 결선은 미구현.
+> 단말 전송 제어 참여자 상태 머신(SDK `mcvideo/tc_participant` — 엔진 결선 전), V0 전부, CSC 설정 평면(§5.1 — 관리 API·콘솔 제외), CSP 호 제어 부품(§5.2),
+> CMP 그룹 종류·멤버 포트·제어 명령(§5.3). CSP 모듈·그룹 호 처리, CMP 송출·수신 제어 상태 머신, 미디어 결선은 미구현.
 >
 > 규격 판본: TS 24.281 V18.14.0 · TS 24.581 V18.8.0 · TS 23.281 V18.12.0 · TS 24.481 V19.3.0 · TS 24.484 V20.0.0 · TS 23.280 V20.4.0 ·
 > TS 33.180 V20.0.0. 관계 문서: 로드맵 표 [mcptt_standard_conformance.md](mcptt_standard_conformance.md) R3·R6, 현행 PTT 영상 협상
@@ -258,18 +258,26 @@ psip 합성 SDP 프로파일(`CSipCallRtp::m_eMcMediaProfile = E_MC_MEDIA_MCVIDE
 - **그룹 호** — `McVideoCallService`: chat·prearranged 개시·합류·재합류·퇴장·해제(T1·최대 시간), 그룹 종류 검사(§6.3.5.2), 멤버 fan-out(prearranged), mcvideo-info
   부호화·해석(규격 contentType 자식 형식 — mcptt-info 와 같은 코덱 틀), SDP 합성(audio·video·`udp MCVideo` — psip `CSipCallRtp` 에 제어 채널 프로토콜 이름을
   서비스별로), 응답 Warning 코드(117·118 등 — TS 24.281 §4.4). 그룹 세션 캐시·CMP 명령·구독은 `GroupCallService` 의 부품을 공유 헬퍼로 뽑아 쓴다.
-- **CMP 연동** — `MCVIDEO_GROUP_ADD`·`MCVIDEO_JOIN`·`MCVIDEO_LEAVE` 또는 기존 PTT 명령에 `service: mcvideo`(§7 D3), 멤버마다 audio·video·control 포트,
-  영상 SRTP(`media_crypto_video`) 를 처음부터 싣는다.
+- **CMP 연동** — 기존 PTT 명령에 `service: mcvideo`(§7 D3, [cmp_media_api.md](../../api/cmp_media_api.md) §7.9) — 멤버마다 audio·video·control 포트,
+  JOIN 응답 `tc_ssrc` 를 answer 의 `mc_transmission_ssrc` 로, 영상 SRTP(`media_crypto_video`) 를 처음부터 싣는다. CMP 가 `resource.mcvideo` 를
+  광고하지 않으면(멤버 풀 0) MCVideo 그룹 호를 받지 않는다.
 
 ### 5.3 CMP (미디어 · 전송 제어)
 
-- **그룹 종류** — `PMcvideoGroup`(또는 `PMcpttGroup` 과 공통 기반 + 서비스별 제어기): 멤버 단위 = audio·video RTP + 제어(RTCP) — `PPttMemberPort` 풀 재사용,
-  영상 RTCP 도 연다(PLI·FIR 를 송출자에게 — 현행 결함 해소).
+- **그룹 종류** (구현) — `PMcvideoGroup` — `PMcpttGroup` 과 따로 선 그룹 종류(floor 없음). 서버 자원 키 = (service, group_id) — 같은 그룹 id 의 MCPTT
+  그룹 호와 동시에 선다(§7 D6). 멤버 단위 = 전용 유닛 `PMcvMemberPort` — 6포트 블록(audio RTP · video RTP · **video RTCP**(PLI·FIR 를 받는다 — 현행
+  PTT 영상 결함 해소) · 전송 제어), 그룹 공유 포트 없음. 멤버 두 단계(선할당 = 유닛 + 전송 제어 SSRC `tc_ssrc` · 주소 등록), 소스 판정·NAT latch 는 MCPTT
+  멤버와 같은 규칙, 전역 유일 SSRC 할당기(`AllocSsrc` — 송출 SSRC·`tc_ssrc` 공용). 제어 명령 `PTT_GROUP_ADD/MODIFY/REMOVE`·`PTT_JOIN/LEAVE` +
+  `service:"mcvideo"`(`cmp/PCmpServerMcvideo.cpp`), `resource.mcvideo`·STATS `mcvideo_groups`·sweeper 회수(`PTT_GROUP_ABORTED` service mcvideo).
+  보호 키(`tc_crypto`·`media_crypto*`)는 SRTP 단계 전까지 `BAD_REQUEST`. 스모크 `tests/cmp_smoke_mcvideo_ports.py`(시험용 CMP 를 직접 띄운다).
+  허가 전 미디어는 분배하지 않고(`no_grant_drop`) 전송 제어 메시지는 코덱 해석·관측까지 — 처리는 아래 송출·수신 제어가 받는다. 송출 SSRC 할당은
+  멤버 offer 의 `a=ssrc`(JOIN `user_audio_ssrc`·`user_video_ssrc`)가 전역에서 쓰이지 않으면 그 값(§14.3.7·§14.3.8).
 - **전송 제어 서버** — TS 24.581 §6.3.4~§6.3.7: 동시 송출 상한(그룹 속성), 우선순위 revoke, (후속) 큐. 참여자별 상태, T1~T6·T11.
 - **수신 제어** — 수신자별 Active SSRC List: 허가된 송출의 audio·video 만 그 수신자에게 보낸다. manual/automatic 모드, 수신자 동시 스트림 상한.
 - **코덱** — RTCP APP `MCV0`·`MCV1`·`MCV2` 부호화·해석(`PFloorCodec` 과 나란한 `PTransmissionCodec`, 필드 표 §9.2.3), 제어 SRTCP 는 `PFloorCrypto` 재사용.
   상수는 생성 헤더 `cmp/PTransmissionDefs.h`(정본 [mcvideo_tc_defs.yaml](mcvideo_tc_defs.yaml) — 단말 코어와 같은 테이블, §1.5).
-  코덱 `cmp/PTransmissionCodec.{h,cpp}` 는 있다(단말 코덱과 교차 시험 — [ue_sdk.md](ue_sdk.md) §4.6). CMP 빌드 등록·서버 상태 머신은 V3.
+  코덱 `cmp/PTransmissionCodec.{h,cpp}`(단말 코덱과 교차 시험 — [ue_sdk.md](ue_sdk.md) §4.6)는 CMP 빌드에 들어 있고, 멤버 제어 채널이 이것으로 푼다
+  (compound RTCP 를 나눠 APP 만 — 빈 RR keepalive 는 버림). 서버 상태 머신은 미구현.
 - **녹취** — 송출마다 슬롯 트랙(audio·video) — `PSyncRtpRecorder` 재사용, 색인 서비스 축 `mcvideo`([recording.md](recording.md)).
 
 ### 5.4 단말 SDK (`libcimsue`)

@@ -20,6 +20,8 @@
 #include "PAnnTicker.h"
 #include "PRtpMulticast.h"
 #include "PPttMemberPort.h"
+#include "PMcvMemberPort.h"
+#include "PMcvideoGroup.h"
 #include "PMcpttGroup.h"
 #include "ServiceLogWriter.h"
 #include "SimpleJson.h"
@@ -114,6 +116,22 @@ protected:
     PPttMemberPort* ensureMemberUnit(const std::string& groupId, const std::string& sessionId, PMcpttGroup* group);
     void freeMemberUnit(const std::string& groupId, const std::string& sessionId);
     void freeGroupMemberUnits(const std::string& groupId);
+
+    // MCVideo 그룹 호 (cmp_media_api.md §7.9) — PTT_* 명령 + service:"mcvideo". 그룹 자원 키 = (service, group_id):
+    //   _mcvGroups 는 MCPTT _groups 와 따로 두고, 세션 상관 캐시(_sesidMap·_serviceMap·_groupSubId)는 McvKey(gid) 로 둔다.
+    static std::string McvKey(const std::string& groupId) { return "mcvideo|" + groupId; }
+    void processMcvAddGroup(const SimpleJson::JsonNode& payload, const std::string& ip, int port, int transId);
+    void processMcvJoin(const SimpleJson::JsonNode& payload, const std::string& ip, int port, int transId);
+    void processMcvLeave(const SimpleJson::JsonNode& payload, const std::string& ip, int port, int transId);
+    void processMcvRemoveGroup(const SimpleJson::JsonNode& payload, const std::string& ip, int port, int transId);
+    void initMcvMemberPool();
+    // 멤버 전용 포트 유닛 — (groupId, sessionId) 키 멱등 할당. 호출자가 _mutex 보유.
+    PMcvMemberPort* ensureMcvUnit(const std::string& groupId, const std::string& sessionId,
+                                  const std::shared_ptr<PMcvideoGroup>& group);
+    void freeMcvUnit(const std::string& groupId, const std::string& sessionId);
+    void freeMcvGroupUnits(const std::string& groupId);
+    // 그룹 해제 공통 (REMOVE·sweeper·롤백) — 멤버 비움 → 유닛 반환 → 표·캐시 제거. 호출자가 _mutex 보유.
+    void destroyMcvGroup(const std::string& groupId);
 
 private:
     int _udpFd;
@@ -271,6 +289,15 @@ private:
     std::vector<PPttMemberPort*> _pttMemberPool;
     std::vector<PPttMemberPort*> _freePttMembers;
     std::map<std::string, PPttMemberPort*> _memberUnits;  // "groupId|sessionId" → unit
+
+    // MCVideo (cmp_media_api.md §7.9) — 그룹 표 + 멤버 전용 포트 유닛 풀 (6포트 블록, McVideoStartPort + N*6).
+    //   McVideoMemberPoolSize 0 = 기능 비활성(resource.mcvideo 미광고 → service:"mcvideo" 명령은 NO_RESOURCE).
+    int _mcvStartPort = 59000;
+    int _mcvMemberPoolSize = 40;
+    std::map<std::string, std::shared_ptr<PMcvideoGroup>> _mcvGroups;  // groupId → 그룹
+    std::vector<PMcvMemberPort*> _mcvMemberPool;
+    std::vector<PMcvMemberPort*> _freeMcvMembers;
+    std::map<std::string, PMcvMemberPort*> _mcvUnits;  // "groupId|sessionId" → unit
 
     // Worker config
     int _rtpWorkerCount;

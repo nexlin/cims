@@ -18,6 +18,7 @@
 #   PTT 멤버    멤버당 stride 2  (PttMemberPoolSize help — audio/video 각 1)
 #   PTT floor   그룹당 stride 2  (PttRtpPoolSize help)
 #   tap(감청)   tap 당 4 포트    (TapPoolSize help)
+#   MCVideo     멤버당 6 포트    (McVideoStartPort help — audio·video RTP/RTCP·전송 제어)
 #
 # **여는 것은 단말이 실제로 쓰는 포트뿐이다.** 내부 API·제어 채널(csc 4421, csp 9000,
 # cmp 9001, DB 3306)은 열지 않는다 — 여는 목록이 곧 노출면이다. 목록에 없는데 외부
@@ -141,7 +142,8 @@ for start_k, pool_k, stride, label in (
         ('PttRtpStartPort',   'PttMemberPoolSize',  2, 'PTT 멤버 오디오'),
         ('PttVideoStartPort', 'PttMemberPoolSize',  2, 'PTT 멤버 영상'),
         ('PttFloorStartPort', 'PttRtpPoolSize',     2, 'PTT floor 제어'),
-        ('TapStartPort',      'TapPoolSize',        4, '감청 tap')):
+        ('TapStartPort',      'TapPoolSize',        4, '감청 tap'),
+        ('McVideoStartPort',  'McVideoMemberPoolSize', 6, 'MCVideo 멤버')):
     start = get(start_k, 0)
     pool  = get(pool_k, 0)
     if start <= 0 or pool <= 0:

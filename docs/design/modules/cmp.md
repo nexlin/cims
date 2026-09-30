@@ -636,6 +636,37 @@ TS 24.379 §10.1.1.4.2·§11.1.1.4.2 의 "controlling MCPTT function supports me
 같은 NAT 뒤 다중 멤버도 유닛 포트가 구분하므로 모호성이 없다.
 Floor 채널은 별도로 TS 24.380 User ID 기반 주소 latch(`onFloorPacket`)를 유지한다.
 
+### 3.6 PMcvideoGroup + PMcvMemberPort (MCVideo 그룹 호)
+
+**파일:** `PMcvideoGroup.h/.cpp`, `PMcvMemberPort.h/.cpp`, `PCmpServerMcvideo.cpp`(제어 명령) — 설계 정본 [mcvideo.md](../features/mcvideo.md) §5.3,
+제어 API [cmp_media_api.md](../../api/cmp_media_api.md) §7.9.
+
+MCVideo 그룹 호(TS 24.281·24.581)의 미디어 평면. `PMcpttGroup` 과 따로 선 그룹 종류로 floor 가 없고, 송출 제어(§6.3.4·§6.3.5)·수신 제어
+(§6.3.6·§6.3.7)를 가진다. 명령은 같은 `PTT_*` + `hdr.service:"mcvideo"` 이고(`handlePacket` 이 서비스로 가른다) 그룹 자원 키는
+**(service, group_id)** — MCVideo 그룹 표 `_mcvGroups` 가 MCPTT `_groups` 와 따로 서서 같은 그룹 id 의 두 호가 동시에 선다. 세션 상관
+캐시(`_sesidMap`·`_serviceMap`·`_groupSubId`)의 키는 `McvKey(gid)` = `mcvideo|<gid>`.
+
+- **멤버 유닛** `PMcvMemberPort` — 멤버마다 6포트 블록(`McVideoStartPort + N*6`): +0 audio RTP · +1 audio RTCP(예약) · +2 video RTP ·
+  +3 **video RTCP**(수신자 PLI·FIR) · +4 **전송 제어**(RTCP APP MCV0/1/2 — SDP `m=application <port> udp MCVideo`) · +5 예약. 그룹 공유 포트는 없다 —
+  수신 소켓이 곧 멤버 신원, 하향도 그 소켓에서 나간다. 유닛은 그룹을 `shared_ptr` 로 잡아 리액터 콜백 중 그룹 해제에도 객체가 살고, 그룹은
+  해제 때 멤버를 먼저 비워 늦은 패킷을 미등록 멤버로 버린다. 락 순서 = 그룹 → 유닛.
+- **멤버 두 단계** — 선할당(ADD 로스터·JOIN ① — 유닛 + 전송 제어 SSRC `tc_ssrc`, 멱등) → 주소 등록(JOIN ② — `McvMemberDecl`: 주소·NAT·PT·
+  `user_uri`·`user_tc_ssrc`·협상 우선순위·C9 `max_rx_streams`). 재-JOIN 이 선언을 바꾸지 않으면 latch 목적지를 유지한다.
+- **수신 판정** — 채널별 목적지(선언 → NAT 추종). 선언 소스는 늘 수락, 아니면 `user_nat` 멤버만 형식 검사(v2 · guard IP · RTP 는 기대 PT ·
+  RTCP 채널은 PT 192~223) 뒤 latch. 주소 등록 전·미선언 소스는 `rtp_src_drop`. 송출 허가 전 미디어는 분배하지 않는다(`no_grant_drop`).
+  전송 제어는 datagram 의 RTCP 패킷을 헤더 length 로 나눠(compound) APP 만 `PTransmissionCodec`(`ParseTransmissionMessage` — MCV0~2 아님·모르는
+  subtype 은 버림, TS 24.581 §9.1.4)으로 풀어 관측(`control_rx`, 헤더 SSRC ≠ `tc_ssrc` 면 기록만)까지 — APP 이 아닌 RTCP(단말 빈 RR keepalive)는 조용히
+  버리고, 메시지 처리는 송출·수신 제어 상태 머신이 받는다.
+- **SSRC** — `PMcvideoGroup::AllocSsrc(preferred)` 프로세스 전역 유일(0 제외) — 송출마다의 Audio·Video SSRC 쌍(TS 24.581 §6.3.4.3.3 d)과 `tc_ssrc` 가
+  같은 공간. 선호값(멤버 offer `a=ssrc` — JOIN `user_audio_ssrc`·`user_video_ssrc`)이 쓰이지 않으면 그 값(§14.3.7·§14.3.8).
+- **타이머·카운터** — `McvTimers`(T1~T6·T11·C2·C4·C6·C7·C11, 기본값 = 생성 상수 `MCV_*`), ADD `tc_timers` 로 덮는다.
+- **관측** — HEARTBEAT `resource.mcvideo{groups, joined, member_total, member_used}`(키 존재가 기능 광고 — `McVideoMemberPoolSize=0` 이면 없음),
+  STATS `detail.mcvideo_groups[]`(group_type·members·reserved·max_transmitters·control_rx·no_grant_drop)·`nat` 에 `mcvideo|<gid>:<sid>` 항목.
+- **아직 없는 것** — 송출·수신 제어 상태 머신, 영상 RTCP 전달, 보호 키(`tc_crypto`·`media_crypto*` 는
+  `BAD_REQUEST`), 녹취(`record_dir` 는 보관만).
+
+스모크: `tests/cmp_smoke_mcvideo_ports.py` — 시험용 CMP 를 빈 포트 창에 직접 띄워 ADD/JOIN/LEAVE/REMOVE·거절·동시 MCPTT 그룹·수신 판정을 본다.
+
 ---
 
 ## 4. 리소스 풀 관리
@@ -690,6 +721,10 @@ PPttMemberPort* ensureMemberUnit(groupId, sessionId);  // (group, member) 멱등
 void freeMemberUnit(groupId, sessionId);               // PTT_LEAVE / 그룹 해제
 ```
 
+**MCVideo 멤버 풀 (initMcvMemberPool, §3.6):** `McVideoStartPort = 59000`, `McVideoMemberPoolSize = 40` — `PMcvMemberPort[N]` 블록
+`59000 + N*6`(6포트). `ensureMcvUnit(groupId, sessionId, group)` 멱등 할당(유닛 + 그룹 선할당), `freeMcvUnit`·`freeMcvGroupUnits`, 그룹 해제 공통
+`destroyMcvGroup`(멤버 비움 → 유닛 반환 → 표·캐시 제거). 풀 0 = 비활성(`service:"mcvideo"` 명령은 `NO_RESOURCE`).
+
 ### 4.3 포트 대역 정리
 
 ```
@@ -706,6 +741,12 @@ void freeMemberUnit(groupId, sessionId);               // PTT_LEAVE / 그룹 해
 ├─────────────────────────────────────────────────────────────┤
 │ PTT 멤버 Video RTP (PPttMemberPort)                          │
 │ 56000 ──────────── 56078   [VRtp] × 40 유닛 (2포트 간격)     │
+├─────────────────────────────────────────────────────────────┤
+│ 청취 leg (PRtpTap) — tap 당 4포트                            │
+│ 58000 ──────────── 58063   × 16                             │
+├─────────────────────────────────────────────────────────────┤
+│ MCVideo 멤버 (PMcvMemberPort) — 멤버당 6포트                 │
+│ 59000 ──────────── 59239   [A/-/V/Vrtcp/TC/-] × 40 유닛      │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -738,6 +779,10 @@ CallMap(relay descriptor)이 소실되어 relay 가 REMOVE 를 영영 못 받고
 2. 그룹 세션 (PTT):
    getMemberCount() == 0 && now - lastActivity >= _sessionTimeout
    → GROUP_TIMEOUT 로그 → delete group → 삭제
+
+3. MCVideo 그룹 (§3.6):
+   주소 등록 멤버 0 && now - lastActivity(멤버 패킷·주소 등록) >= _sessionTimeout
+   → GROUP_TIMEOUT 로그 → destroyMcvGroup → PTT_GROUP_ABORTED (hdr.service "mcvideo")
 ```
 
 **Activity 갱신:** RTP 패킷 수신 시에만 `touchActivity()` 호출 → `time(&_lastActivityTime); _everReceivedRtp=true`
@@ -883,6 +928,8 @@ CmpServer (PModule)
   "PttRtpPoolSize": 10,          // PTT 2포트 블록 수
   "PttFloorStartPort": 54000,    // PTT Floor Control 시작 포트
   "PttMediaBufferMs": 5000,      // PTT 미디어 버퍼링 최대 길이 (0=끔 → resource.media_buffer 미광고, §3.5 «미디어 버퍼링»)
+  "McVideoStartPort": 59000,     // MCVideo 멤버 6포트 블록 시작 (§3.6)
+  "McVideoMemberPoolSize": 40,   // MCVideo 동시 참가 멤버 수 (0=비활성 → resource.mcvideo 미광고)
   "RtpWorkerCount": 4,           // RTP 처리 Worker 스레드 수
   "RtpIp": "192.168.1.10",       // RTP 미디어 인터페이스 IP
   "ServerIp": "0.0.0.0",         // UDP 제어 리스닝 IP

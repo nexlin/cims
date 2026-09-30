@@ -224,6 +224,34 @@
       "scope": "service"
     },
     {
+      "key": "mcvideo_rtp",
+      "title": "MCVideo 포트 풀",
+      "description": "MCVideo 그룹 호 전용(TS 24.581, cmp_media_api.md §7.9). 그룹 공유 포트 없이 멤버당 6포트 블록 — audio RTP·video RTP/RTCP·전송 제어(m=application … udp MCVideo).",
+      "fields": [
+        {
+          "key": "McVideoStartPort",
+          "label": "MCVideo 멤버 포트 시작",
+          "type": "int",
+          "default": 59000,
+          "min": 1024,
+          "max": 65000,
+          "restart": true,
+          "help": "멤버 N 의 블록 = 시작 + N*6: +0 audio RTP · +2 video RTP · +3 video RTCP · +4 전송 제어 (+1·+5 예약)."
+        },
+        {
+          "key": "McVideoMemberPoolSize",
+          "label": "MCVideo 멤버 포트 유닛 풀 크기",
+          "type": "int",
+          "default": 40,
+          "min": 0,
+          "max": 10000,
+          "restart": true,
+          "help": "동시 참가 가능한 MCVideo 멤버 총수. 0 = MCVideo 비활성(resource.mcvideo 미광고 — CSP 는 MCVideo 그룹 호를 받지 않는다)."
+        }
+      ],
+      "scope": "service"
+    },
+    {
       "key": "rtp_runtime",
       "title": "RTP 런타임",
       "fields": [

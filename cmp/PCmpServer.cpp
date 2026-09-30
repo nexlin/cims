@@ -64,6 +64,7 @@ PCmpServer::PCmpServer(const std::string& name, const std::string& configFile)
     initTapPool();
     initPttResourcePool();
     initPttMemberPool();
+    initMcvMemberPool();
 
     // 이벤트 trans_id 시드 — 부팅 시각(ms) 하위 비트. 재시작 직후 발행 ID 가 구세대와 겹쳐
     //   지연 ack datagram 이 새 이벤트를 오소거하는 창을 제거 (CmdpClient/CmpClient trans_id 와 동일 근거).
@@ -80,6 +81,8 @@ PCmpServer::~PCmpServer() {
         delete group;
     }
     _groups.clear();
+    for (auto const& [gid, group] : _mcvGroups) group->close();
+    _mcvGroups.clear();
 
     for(auto* rtp : _resourcePool) {
         delete rtp;
@@ -99,6 +102,11 @@ PCmpServer::~PCmpServer() {
     _pttMemberPool.clear();
     _freePttMembers.clear();
     _memberUnits.clear();
+
+    for (auto* mu : _mcvMemberPool) delete mu;   // 유닛이 쥔 그룹 참조도 함께 풀린다
+    _mcvMemberPool.clear();
+    _freeMcvMembers.clear();
+    _mcvUnits.clear();
 
     // epoll fd 정리 (스레드는 stopServer 에서 이미 join 됨)
     for (auto& r : _reactors) {
@@ -346,6 +354,15 @@ void PCmpServer::handlePacket(char* buf, int len, const std::string& ip, int por
     else if (cmdUpper == "RELAY_PLAY_STOP") processPlayStop(payload, ip, port, transId);
     else if (cmdUpper == "ANN_RELOAD") processAnnReload(payload, ip, port, transId);
     else if (cmdUpper == "HEARTBEAT") processAlive(payload, ip, port, transId);
+    // MCVideo 그룹 호 — 같은 PTT_* 명령 + service:"mcvideo" (cmp_media_api.md §7.9). floor 명령은 없다.
+    else if (cmdUpper.compare(0, 4, "PTT_") == 0 && payload.GetString("service") == "mcvideo") {
+        if (cmdUpper == "PTT_GROUP_ADD" || cmdUpper == "PTT_GROUP_MODIFY") processMcvAddGroup(payload, ip, port, transId);
+        else if (cmdUpper == "PTT_GROUP_REMOVE") processMcvRemoveGroup(payload, ip, port, transId);
+        else if (cmdUpper == "PTT_JOIN") processMcvJoin(payload, ip, port, transId);
+        else if (cmdUpper == "PTT_LEAVE") processMcvLeave(payload, ip, port, transId);
+        else sendErr(ip, port, transId, cmdUpper, payload.GetString("sesid"), "mcvideo",
+                     "BAD_REQUEST", (cmdUpper + " not applicable to mcvideo").c_str());
+    }
     else if (cmdUpper == "PTT_GROUP_ADD") processAddGroup(payload, ip, port, transId);
     else if (cmdUpper == "PTT_GROUP_MODIFY") processModifyGroup(payload, ip, port, transId);
     else if (cmdUpper == "PTT_GROUP_REMOVE") processRemoveGroup(payload, ip, port, transId);
@@ -542,6 +559,17 @@ SimpleJson::JsonNode PCmpServer::buildResourceSummary() {
         tap.Set("max_per_session", _maxTapsPerSession);
         resource.Set("tap", tap);
     }
+    // MCVideo 그룹 호(cmp_media_api.md §7.9) — 키 존재가 기능 광고. 멤버 유닛 풀 0 이면 광고하지 않는다.
+    if (!_mcvMemberPool.empty()) {
+        int mcvJoined = 0;
+        for (auto const& [gid, group] : _mcvGroups) mcvJoined += group->getMemberCount();
+        SimpleJson::JsonNode mcv;
+        mcv.Set("groups", (int)_mcvGroups.size());
+        mcv.Set("joined", mcvJoined);
+        mcv.Set("member_total", (int)_mcvMemberPool.size());
+        mcv.Set("member_used", (int)(_mcvMemberPool.size() - _freeMcvMembers.size()));
+        resource.Set("mcvideo", mcv);
+    }
     // PTT 미디어 버퍼링(cmp.md §3.5 «미디어 버퍼링») — 키 존재가 기능 광고. 0 이면 광고하지 않는다(CSP 는 멤버 확인 뒤 개시자 응답).
     if (_pttMediaBufferMs > 0) {
         SimpleJson::JsonNode mb;
@@ -721,6 +749,7 @@ void PCmpServer::processStats(const SimpleJson::JsonNode& payload, const std::st
     long long srcDrop = _srcDropTotal;
     for (auto const& [sid, rtp] : _sessions) if (rtp) srcDrop += rtp->getSrcDrop();
     for (auto const& [gid, group] : _groups) if (group) srcDrop += group->getSrcDrop();
+    for (auto const& [gid, group] : _mcvGroups) srcDrop += group->getSrcDrop();
 
     // NAT latch 완료 leg 목록 — 학습된 실주소 노출 (ue_nat_traversal.md §5 관측)
     SimpleJson::JsonNode natArr;
@@ -751,6 +780,21 @@ void PCmpServer::processStats(const SimpleJson::JsonNode& payload, const std::st
             if ((int)natArr.array.size() >= kMaxStatsEntries) continue;
             SimpleJson::JsonNode n;
             n.Set("key", gid + ":" + sid);
+            n.Set("leg", sid);
+            n.Set("learned_ip", learnedIp);
+            n.Set("learned_port", learnedPort);
+            natArr.Add(n);
+        }
+    }
+
+    for (auto const& [gid, group] : _mcvGroups) {
+        std::vector<std::tuple<std::string, std::string, int>> latched;
+        group->collectNatLatched(latched);
+        for (auto const& [sid, learnedIp, learnedPort] : latched) {
+            ++natTotal;
+            if ((int)natArr.array.size() >= kMaxStatsEntries) continue;
+            SimpleJson::JsonNode n;
+            n.Set("key", McvKey(gid) + ":" + sid);
             n.Set("leg", sid);
             n.Set("learned_ip", learnedIp);
             n.Set("learned_port", learnedPort);
@@ -842,6 +886,25 @@ void PCmpServer::processStats(const SimpleJson::JsonNode& payload, const std::st
     }
     detail.Set("groups", groupsArr);
     detail.Set("groups_total", groupsTotal);
+    // MCVideo 그룹 (cmp_media_api.md §7.9) — 멤버·전송 제어 수신·허가 없는 미디어 드롭. 항목이 커서 상한을 절반으로(4KB 계약)
+    if (!_mcvMemberPool.empty()) {
+        SimpleJson::JsonNode mcvArr;
+        mcvArr.type = SimpleJson::JSON_ARRAY;
+        for (auto const& [gid, group] : _mcvGroups) {
+            if ((int)mcvArr.array.size() >= kMaxStatsEntries / 2) break;
+            SimpleJson::JsonNode g;
+            g.Set("group_id", gid);
+            g.Set("group_type", group->prearranged() ? "prearranged" : "chat");
+            g.Set("members", group->getMemberCount());
+            g.Set("reserved", group->getReservedCount());
+            g.Set("max_transmitters", group->maxTransmitters());
+            g.Set("control_rx", (long long)group->getControlRx());
+            g.Set("no_grant_drop", (long long)group->getNoGrantDrop());
+            mcvArr.Add(g);
+        }
+        detail.Set("mcvideo_groups", mcvArr);
+        detail.Set("mcvideo_groups_total", (int)_mcvGroups.size());
+    }
     body.Set("detail", detail);
 
     int txSeq = sendOk(ip, port, transId, "STATS", "", "", &body);
@@ -2462,6 +2525,9 @@ void PCmpServer::loadConfig() {
         if (root.Has("PttFloorStartPort")) _pttFloorStartPort = (int)root.GetInt("PttFloorStartPort");
         if (root.Has("PttVideoStartPort")) _pttVideoStartPort = (int)root.GetInt("PttVideoStartPort");
         if (root.Has("PttMemberPoolSize")) _pttMemberPoolSize = (int)root.GetInt("PttMemberPoolSize");
+        // MCVideo 멤버 유닛 풀 (cmp_media_api.md §7.9) — 멤버당 6포트 블록. 0 = 비활성(resource.mcvideo 미광고)
+        if (root.Has("McVideoStartPort")) _mcvStartPort = (int)root.GetInt("McVideoStartPort");
+        if (root.Has("McVideoMemberPoolSize")) _mcvMemberPoolSize = (int)root.GetInt("McVideoMemberPoolSize");
         
         // Log configuration
         std::string logDir = root.Has("LogDir") ? root.GetString("LogDir") : "";
@@ -2904,6 +2970,23 @@ void PCmpServer::timeoutLoop() {
                 _serviceMap.erase(gid);
                 _groupSubId.erase(gid);
                 abortedGroups.push_back({gid, sesid, svc});
+            }
+        }
+        // MCVideo 그룹 — 주소 등록 멤버 0 + 무활동 SessionTimeout (PTT 그룹과 같은 규칙, 통지 service:"mcvideo")
+        {
+            PAutoLock lock(_mutex);
+            std::vector<std::string> staleMcv;
+            for (auto const& [gid, group] : _mcvGroups)
+                if (group->getMemberCount() == 0 && (now - group->getLastActivityTime()) >= _sessionTimeout)
+                    staleMcv.push_back(gid);
+            for (const auto& gid : staleMcv) {
+                const std::string key = McvKey(gid);
+                std::string sesid = _sesidMap.count(key) ? _sesidMap[key] : issueSesid("");
+                LOG_INFO("PCmpServer", "Group timeout(mcvideo): group=%s (no members, no activity) — auto cleanup",
+                         gid.c_str());
+                logFlow(key, "cmp", "cmp", "INT", "GROUP_TIMEOUT", "", "", "mcvideo", sesid.c_str());
+                destroyMcvGroup(gid);
+                abortedGroups.push_back({gid, sesid, "mcvideo"});
             }
         }
         // PTT_GROUP_ABORTED push — _mutex 를 놓은 뒤.

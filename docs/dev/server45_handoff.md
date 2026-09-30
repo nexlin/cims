@@ -361,10 +361,7 @@ TS 24.484(docx k00). 이 절은 두 호스트가 MCVideo 계약을 주고받는 
 | K6 CSP↔CMP | cmp_media_api.md **§7.9**(`PTT_*` + `service:"mcvideo"`, 멤버 `port`·`video_port`·`control_port`, JOIN `tc_ssrc`·`user_tc_ssrc`·`max_rx_streams`·`implicit_request`, SSRC 규칙) + §8 이벤트 `TRANSMITTERS`·`TRANSMISSION_INACTIVITY` | B2 코덱을 CMP 에 붙일 자리(§7.9) |
 | A1 V0(CSC) | `get_group_xml` MCPTT enabler = MCPTT ICSI + 규칙 `<is-list-member>`·`<allow-initiate-conference>`·`<join-handling>` | 옛 앱·새 SDK 모두 그룹 문서를 그대로 읽는지(C1 시험) |
 | A3·A4·A5 CSC | `csc/src/services/mcvideo.py` — 그룹 문서 MCVideo 몫·XCAP PUT 해석(전환기 규칙 — MCVideo `<service>` 없는 PUT 은 MCVideo 를 건드리지 않는다)·CMS 두 문서·ue-init-config(기본 끔 `UeInitConfig.ServiceDetails.McVideo.Enable`)·scope `3gpp:mc:video_*` 넷(자격 있는 사용자만)·토큰 `mcvideo_id`·`/internal/mcvideo/service-config` | SDK 가 video scope 를 요청하면 자격 없는 사용자는 응답 `scope` 에서 빠진다 |
-
 | K3 SIP (+ K4 골든 SDP) | `tests/fixtures/mcvideo/sip/` — 10개(REGISTER · affiliation PUBLISH · chat 합류 INVITE/200 · prearranged 개시 INVITE/200(암묵 송출 요청 수락·`mc_audio_ssrc`·`mc_video_ssrc`) · 멤버 초대 · 재합류(R-URI = 세션 식별자) · 404 117/118). 전송 바이트 그대로(CRLF·Content-Length — 정본 `build_goldens.py`, `--check`), README = 메시지별 규격 절·요지. S1-MCVIDEO-CONTRACT 가 본문 XSD + K3·K4 규칙(ICSI 헤더·Accept-Contact 둘·m 순서·`udp MCVideo`·`i=`·fmtp `;`·answer 파라미터) 을 본다 | **C3·C4 입력** — 01·02·03·05·08 은 SDK 가 만드는 모양, 04·06·07·09·10 은 SDK 가 읽는 모양. prearranged 시험용 그룹 `tel:g103` 은 K3 에서만 쓴다 |
-
-**다음 (.48)** — A2(마이그레이션 적용·CSP 적재) → A7~A10(CSP MCVideo 모듈·등록·affiliation·그룹 호) · B3(CMP 그룹 종류 `(service, group_id)` 키·멤버 control 포트).
 
 **B2 — 양 끝 전송 제어 코덱 (.45 → .48)**
 
@@ -402,3 +399,28 @@ FAIL 0, 전체 123/123. CMP(B4·B5)가 알면 좋은 단말 동작:
 
 **다음 (.45)** — C2(K2 fixture 해석) → C3·C4(K3·K4 골든, 호 제어 + 참여자 결선). 송출 SSRC 는 제안 7 이 채택되면 SDK 가 규격 문언 그대로이고, 아니면
 ue_sdk.md 편차 표에 적는다(.48 리뷰 요청).
+
+**.48 B3 — CMP MCVideo 그룹 종류 · B2 결선 (.48 → .45)**
+
+| 항목 | 내용 |
+|---|---|
+| 그룹 종류 | `cmp/PMcvideoGroup` — `PMcpttGroup` 과 따로 선 그룹(floor 없음), 자원 키 (service, group_id) — 같은 id 의 MCPTT 그룹과 동시에 선다. 멤버 두 단계(선할당 = 유닛 + `tc_ssrc` · 주소 등록), 전역 유일 SSRC 할당기 |
+| 멤버 유닛 | `cmp/PMcvMemberPort` — 6포트 블록(`McVideoStartPort + N*6`: +0 audio RTP · +2 video RTP · +3 video RTCP · +4 전송 제어), 그룹 공유 포트 없음. 설정 `McVideoStartPort`(59000)·`McVideoMemberPoolSize`(40, 0 = 비활성) |
+| 명령 | `cmp/PCmpServerMcvideo.cpp` — `PTT_GROUP_ADD/MODIFY/REMOVE`·`PTT_JOIN/LEAVE` + `service:"mcvideo"`(K6 필드·검사·응답 `member_ports{port, video_port, control_port}`·JOIN `tc_ssrc`), floor 필드·floor 명령 `BAD_REQUEST`, `resource.mcvideo`, STATS `mcvideo_groups`, sweeper `PTT_GROUP_ABORTED`(service mcvideo) |
+| B2 결선 | `PTransmissionCodec.cpp` 를 CMP 빌드에 넣었다. 멤버 제어 채널 수신 = 선언 소스·NAT latch 판정 → `ParseTransmissionMessage` → (상태 머신 자리) — 해석 실패(MCV0~2 아님·모르는 subtype)는 버린다(§9.1.4 1), APP 이 아닌 RTCP 는 keepalive 로 조용히 버린다(제안 8) |
+| 검증 | 스모크 `tests/cmp_smoke_mcvideo_ports.py`(시험용 CMP 를 빈 포트 창에 직접 띄운다) · MCPTT 스모크 4종(floor·broadcast·video PT·private) 무변화 · S1-UNIT-CMP |
+
+**제안 7·8 판정**
+
+| # | 판정 | 반영 |
+|---|---|---|
+| 7 | 채택 + 보강 | K6 JOIN `user_audio_ssrc`·`user_video_ssrc`(멤버 offer 의 `a=ssrc`, RFC 5576). CMP 는 송출을 허가할 때 그 값이 **프로세스 전역에서** 쓰이지 않으면 그대로, 아니면 새 값을 할당한다 — 충돌 판정을 그룹 안이 아니라 전역으로 둔 것은 §6.3.4.3.3 d «globally unique» 때문(§14.3.7·§14.3.8 «value included in the SDP offer or new ssrc value if collision is detected» 와 함께 만족). 암묵적 송출 요청의 `mc_audio_ssrc`·`mc_video_ssrc` 도 같은 값 |
+| 8 | 채택 | K6 — 제어 채널 NAT latch 는 그 소켓의 형식 검사(v2 · RTCP PT 192~223 · `user_sig_ip` guard)를 통과한 첫 패킷으로 한다(RTP 채널과 같은 `user_nat` 규칙). 단말의 빈 RR(RFC 3550 §6.4.2, 헤더 SSRC = `mc_transmission_ssrc`)은 해석하지 않고 버리며 드롭 카운터에 세지 않는다. 주기(성립 때 1 + 1 s 간격 2 + 15 s)는 단말 몫이라 ue_nat_traversal.md §7.1 MCVideo 행은 .45 가 C5 와 함께 |
+
+**B2·C5 리뷰** — K5 변경(MCV2 End Request/Response·Media Reception End Response 에 Transmission Indicator 허용)은 참여자 절차 원문(§6.2.4.5.3 1·§6.2.4.6.4 3·
+§6.2.5.6.4 3)과 맞다. 단말 동작 목록(헤더 SSRC · Ack 에 Message Name · Revoked 뒤 End Request · 서버 End/MRE End Request 응답 · 송출 지목 = Transmitting User ID +
+Audio/Video SSRC · 성립 전 메시지 보관)은 B4·B5 가 그대로 받는다 — 서버 응답(Receive Media Response·Media Reception End Response·Transmission End Notify)도 두 식별자를
+모두 싣는다.
+
+**다음 (.48)** — B4·B5(송출·수신 제어 상태 머신 — B2 코덱 위, 제안 7 할당 규칙 포함) · B7(영상 SRTP·제어 SRTCP) · A7~A10(CSP MCVideo 모듈·등록·affiliation·
+그룹 호). 공유 DB 마이그레이션(`migrate_mcvideo.sql`, 표 추가만)은 CSP 실측 때 적용.
