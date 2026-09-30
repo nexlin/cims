@@ -117,7 +117,8 @@ std::string GroupDoc::toXml() const {
         x += std::string("          <mcpttgi:on-network-allow-conference-state>") + bs(allowConferenceState != 0) +
              "</mcpttgi:on-network-allow-conference-state>\n";
     x += "        </cp:actions>\n      </cp:rule>\n    </cp:ruleset>\n";
-    x += "    <oxe:supported-services>\n     <oxe:service enabler=\"example.mcptt\">\n      <oxe:group-media>\n       <mcpttgi:mcptt-speech/>\n      </oxe:group-media>\n     </oxe:service>\n";
+    // 서비스마다 <service> 하나 — enabler = 그 서비스의 ICSI(TS 24.481 §7.2.2 — MCPTT 는 TS 24.379 Annex E.2.1, mcvideo.md §6 V0)
+    x += "    <oxe:supported-services>\n     <oxe:service enabler=\"urn:urn-7:3gpp-service.ims.icsi.mcptt\">\n      <oxe:group-media>\n       <mcpttgi:mcptt-speech/>\n      </oxe:group-media>\n     </oxe:service>\n";
     if (allowSds) x += "     <oxe:service enabler=\"urn:urn-7:3gpp-service.ims.icsi.mcdata.sds\"/>\n";
     if (allowFd) x += "     <oxe:service enabler=\"urn:urn-7:3gpp-service.ims.icsi.mcdata.fd\"/>\n";
     x += "    </oxe:supported-services>\n";

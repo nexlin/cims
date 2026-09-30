@@ -4,7 +4,8 @@
 > MCPTT 와 MCVideo 두 서비스용으로 설정하면(TS 23.280 §3 «MC service group … configured for the use with one or more MC services»),
 > 단말은 같은 그룹에서 **음성만 = MCPTT 그룹 호**, **음성+영상 = MCVideo 그룹 호**를 골라 쓰고 둘 사이를 오간다.
 > 이 문서는 규격 모델, 현행 «PTT 영상»(MCPTT 세션의 `m=video` — 비규격)과의 차이, 규격형으로 옮기는 개발 항목·결정 사항을 정한다 —
-> **설계 정본, 미구현.**
+> **설계 정본.** 구현된 것은 계약 둘 — 전송 제어 정의 테이블 [mcvideo_tc_defs.yaml](mcvideo_tc_defs.yaml)(생성 헤더 양 끝, §5.3·§5.4)과
+> 단말 SDK 공개 표면 선언([ue_sdk.md](ue_sdk.md) §4.6 — 구현 전이라 실패를 돌려준다) — 과 V0 의 SDK 몫이다. 호 제어·미디어 제어는 미구현.
 >
 > 규격 판본: TS 24.281 V18.14.0 · TS 24.581 V18.8.0 · TS 23.281 V18.12.0 · TS 24.481 V19.3.0 · TS 24.484 V20.0.0 · TS 23.280 V20.4.0 ·
 > TS 33.180 V20.0.0. 관계 문서: 로드맵 표 [mcptt_standard_conformance.md](mcptt_standard_conformance.md) R3·R6, 현행 PTT 영상 협상
@@ -94,6 +95,9 @@ MCPTT floor 는 «한 사람이 말하면 모두 듣는다». MCVideo 는 **송�
   참여 기능 전달·SSRC 재작성(§6.4.2).
 - **타이머**(§11) — 단말 T100~T104·C100~C104, 서버 T1 비활성(그룹 hang timer 30 s)·T2·T3 revoke 1 s·T4 granted 1 s·T5 수신 비활성
   (`on-network-reception-hang-timer` 30 s)·T6·T11 스트림 수신 유휴 10 s, 카운터 C2·C4·C6·C7·C9·C11. 서버 값 정본 = service configuration `<tc-timers-counters-R14>`.
+- **정의 정본** — 메시지 subtype·메시지별 필드·field id·값 모양·원인·타이머/카운터 기본값·fmtp 이름은 [mcvideo_tc_defs.yaml](mcvideo_tc_defs.yaml) 한 곳이다.
+  `scripts/gen_mcvideo_tc_defs.py` 가 CMP(`cmp/PTransmissionDefs.h`)·SDK(`sdk/core/src/mcvideo/tc_defs.h`) 헤더를 함께 내고 `--check`(S1
+  `S1-UE-MCVIDEO-TC-DEFS`)가 최신성을 본다. 규격에 기본값이 없는 T100~T104·T2 는 CIMS 값(1 s)을 테이블에 `origin: cims` 로 적었다.
 
 ### 1.6 설정 문서 (TS 24.484)
 
@@ -131,7 +135,7 @@ service configuration 에서 `<confidentiality-protection>`·`<integrity-protect
 
 | 구간 | 현행 | 규격(MCVideo) |
 |---|---|---|
-| 그룹 설정 | DB `ptt_groups.video_enabled` 하나. 그룹 문서 `<mcpttgi:mcptt-video>` — **TS 24.481 스키마에 없는 요소를 3GPP 네임스페이스에** 싣는다. MCPTT `<service enabler="example.mcptt">` — **ICSI 가 아닌 자리표시 값**(csc `services/mcptt.py` `get_group_xml`, SDK `csc/group_doc.cpp`) | MCPTT·MCVideo `<service>` 각각 ICSI enabler + `<mcvideo-*>` 속성 |
+| 그룹 설정 | DB `ptt_groups.video_enabled` 하나. 그룹 문서 `<mcpttgi:mcptt-video>` — **TS 24.481 스키마에 없는 요소를 3GPP 네임스페이스에** 싣는다. MCPTT `<service enabler="example.mcptt">` — **ICSI 가 아닌 자리표시 값**(csc `services/mcptt.py` `get_group_xml` — SDK `csc/group_doc.cpp` 생성은 MCPTT ICSI) | MCPTT·MCVideo `<service>` 각각 ICSI enabler + `<mcvideo-*>` 속성 |
 | 영상 유무 | 호 개시 때 한 번 — 앱은 늘 `video=true` 로 제안, 서버가 `video_enabled` 그룹만 받는다. 진행 중 추가·제거 없음 | 음성 = MCPTT 호, 음성+영상 = MCVideo 호(따로 합류·퇴장) |
 | 송출 | floor 보유자만(single/dual/multi-talker 최대 8). 앱은 «내 영상 보내기» 켜기/끄기만(`setVideoSend`, 재협상 없음) | 송출 요청·허가(Transmission Request/Granted), 동시 송출 상한 |
 | 수신 | 영상 그룹 멤버 전원 자동 수신 | 수신자가 스트림을 골라 받는다(manual), 긴급·방송은 자동 |
@@ -223,6 +227,7 @@ service configuration 에서 `<confidentiality-protection>`·`<integrity-protect
 - **전송 제어 서버** — TS 24.581 §6.3.4~§6.3.7: 동시 송출 상한(그룹 속성), 우선순위 revoke, (후속) 큐. 참여자별 상태, T1~T6·T11.
 - **수신 제어** — 수신자별 Active SSRC List: 허가된 송출의 audio·video 만 그 수신자에게 보낸다. manual/automatic 모드, 수신자 동시 스트림 상한.
 - **코덱** — RTCP APP `MCV0`·`MCV1`·`MCV2` 부호화·해석(`PFloorCodec` 과 나란한 `PTransmissionCodec`, 필드 표 §9.2.3), 제어 SRTCP 는 `PFloorCrypto` 재사용.
+  상수는 생성 헤더 `cmp/PTransmissionDefs.h`(정본 [mcvideo_tc_defs.yaml](mcvideo_tc_defs.yaml) — 단말 코어와 같은 테이블, §1.5).
 - **녹취** — 송출마다 슬롯 트랙(audio·video) — `PSyncRtpRecorder` 재사용, 색인 서비스 축 `mcvideo`([recording.md](recording.md)).
 
 ### 5.4 단말 SDK (`libcimsue`)
@@ -234,6 +239,8 @@ service configuration 에서 `<confidentiality-protection>`·`<integrity-protect
   Media Transmission Notification — 송출자·SSRC).
 - **수신 제어** — `acceptReception(callId, transmitterId)`·`endReception`(§6.2.5, T103·T104), 스트림별 렌더 창(현행 «호별 수신 창» 과제와 합친다 — ue_sdk.md §11).
 - **바인딩** — C API·.NET·Kotlin 같은 이름(현행 그룹 영상 옵션 누락도 이때 메운다). `cimsue-cli video-call <g> [--transmit-at S] [--accept]`.
+- 위 공개 표면(`McService`·`VideoGroupCallOptions`·`TransmissionEvent`·`ReceptionEvent`·`TransmissionInfo`)은 C++ 공개 헤더에 선언돼 있고 구현 전이라
+  실패를 돌려준다([ue_sdk.md](ue_sdk.md) §4.6). 전송 제어 상수는 생성 헤더 `mcvideo/tc_defs.h`.
 
 ### 5.5 앱
 
@@ -297,6 +304,14 @@ service configuration 에서 `<confidentiality-protection>`·`<integrity-protect
 - 전송 요청 본문 MIME — F.5.1 `vnd.3gpp.transmission-request+xml` vs IANA 템플릿 `vnd.3gpp.mcvideo-transmission-request+xml`(→ V8, 1차 범위 밖).
 - TS 24.581 §12.1.2 ABNF — `mc_priority` 1*2DIGIT(값 범위 1~255 와 어긋남), `mc_transmission_ssrc` 값 표기 누락(→ 본문 설명과 예시).
 - 동시 송출 카운터 «Cx» 가 §11.2.3 목록에 없다(→ 그룹 속성 `mcvideo-maximum-simultaneous-mcvideo-transmitting-group-members` 가 상한).
+- TS 24.581 §12.1.2.3 ABNF 의 fmtp 파라미터 구분자 `COLON` vs §4.3.3.1 예시 `;`(→ `;` — MCPTT fmtp 와 같다).
+- TS 24.581 Table 9.2.3.1-1 에 field ID 가 없는 필드 — Remote ID(§9.2.22)·SSRC of queued transmission participant(§9.2.5·§9.2.12)·Granted Party's
+  Identity·SSRC of granted transmission participant(§9.2.9)·SSRC of transmission control server(§9.2.9)(→ 부호화하지 않는다. 모두 off-network·원격 송출 —
+  1차 범위 밖).
+- TS 24.581 Transmission Revoked(§9.2.10)·Transmission End Request(§9.2.20) 표의 «Reject Cause value» vs 본문 Reject Cause field(→ 필드). Queue Position Info
+  의 Transmission Indicator 참조 절 9.2.3.15(→ 9.2.3.11). Transmission control ack subtype `00100`(x 자리 없음 — 값 4).
+- TS 24.581 원인 #4 가 가리키는 T9(Retry-after)가 §11 서버 타이머 표에 없다(→ 1차 범위에서 쓰지 않는다). 단말 T100~T104 와 서버 T2 는 규격 기본값이
+  없다 — TS 24.484 는 T100~T104 를 초 단위 unsignedByte 로 둔다(→ CIMS 1 s, [mcvideo_tc_defs.yaml](mcvideo_tc_defs.yaml) `origin: cims`).
 - pre-established session — TS 24.281 §22.2.2.2 Editor's Note «will be defined in the future»(→ V8 까지 on-demand 만).
 - 동시 세션 — TS 23.281 §7.11 만 있고 TS 24.281 §6 Editor's Note(→ 두 서비스의 독립 다이얼로그로 충분, 단일 다이얼로그 다중화는 하지 않는다).
 

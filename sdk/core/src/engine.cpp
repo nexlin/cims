@@ -1909,6 +1909,35 @@ FloorInfo Engine::floorInfo(int callId) const {
     });
 }
 
+// ── MCVideo (mcvideo.md §5.4) — 공개 표면(계약 K7)만 먼저 고정했다. 호·전송 제어는 C4·C5 에서 채운다 ──
+static Result mcvideoNotImplemented(const char* what) {
+    return Result::fail(-3, std::string(what) + ": MCVideo not implemented");
+}
+int Engine::joinVideoGroupCall(int accountId, const std::string& groupId, const VideoGroupCallOptions& opts) {
+    (void)accountId; (void)groupId; (void)opts;
+    return -1;
+}
+Result Engine::requestTransmission(int callId, int priority) {
+    (void)callId; (void)priority;
+    return mcvideoNotImplemented("requestTransmission");
+}
+Result Engine::releaseTransmission(int callId) {
+    (void)callId;
+    return mcvideoNotImplemented("releaseTransmission");
+}
+Result Engine::acceptReception(int callId, const std::string& transmitterId, int priority) {
+    (void)callId; (void)transmitterId; (void)priority;
+    return mcvideoNotImplemented("acceptReception");
+}
+Result Engine::endReception(int callId, const std::string& transmitterId) {
+    (void)callId; (void)transmitterId;
+    return mcvideoNotImplemented("endReception");
+}
+TransmissionInfo Engine::transmissionInfo(int callId) const {
+    (void)callId;
+    return TransmissionInfo();
+}
+
 Result Engine::setCallCondition(int callId, bool emergency, bool imminentPeril) {
     if (emergency && imminentPeril) return Result::fail(-2, "emergency and imminent peril are exclusive");
     Impl* o = impl_.get();
@@ -2015,8 +2044,9 @@ int64_t Engine::Impl::sendAffiliation(int accountId, const std::string& groupId,
     return r < 0 ? -1 : appToken;
 }
 
-int64_t Engine::affiliate(int accountId, const std::string& groupId, bool on) {
+int64_t Engine::affiliate(int accountId, const std::string& groupId, bool on, McService service) {
     if (!impl_->running) return -1;
+    if (service == McService::McVideo) return -1;                       // MCVideo affiliation(TS 24.281 §8.2) — C3 에서 구현
     int64_t token = impl_->nextToken++;
     return impl_->ctl.runSync([=]() -> int64_t { return impl_->sendAffiliation(accountId, groupId, on, token, token, true); });
 }

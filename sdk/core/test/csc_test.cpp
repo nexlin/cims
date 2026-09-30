@@ -202,6 +202,9 @@ TEST(GroupDoc, ParseServerDocumentAndRoundTrip) {
     EXPECT_EQ(back.toXml().find("session-type"), std::string::npos);
     EXPECT_NE(back.toXml().find("<mcpttgi:on-network-invite-members>false</mcpttgi:on-network-invite-members>"), std::string::npos);
     EXPECT_NE(fresh.toXml().find("<mcpttgi:on-network-invite-members>true</mcpttgi:on-network-invite-members>"), std::string::npos);
+    // MCPTT 서비스 enabler = MCPTT ICSI(TS 24.481 §7.2.2, mcvideo.md §6 V0) — 자리표시 값 "example.mcptt" 를 싣지 않는다
+    EXPECT_NE(fresh.toXml().find("<oxe:service enabler=\"urn:urn-7:3gpp-service.ims.icsi.mcptt\">"), std::string::npos);
+    EXPECT_EQ(fresh.toXml().find("example.mcptt"), std::string::npos);
     // invite-members 가 없는 옛 문서만 비규격 session-type 으로 판정(값 broadcast 같은 옛 유형은 prearranged)
     GroupDoc legacy;
     ASSERT_TRUE(GroupDoc::parse("<group><list-service uri=\"sip:g9@d\"><list></list><mcpttgi:session-type>chat</mcpttgi:session-type></list-service></group>", legacy));

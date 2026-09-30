@@ -29,9 +29,10 @@ RDIR="${CIMS_ANDROID_BUILD_DIR:-cims-android-src}"
 SYNC_ONLY=0
 if [ "${1:-}" = "--sync-only" ]; then SYNC_ONLY=1; shift; fi
 
-# 네이티브 빌드가 읽는 경로 전부 — build-native.sh·sdk/android·sdk/core CMake 의 입력(floor 정의 생성기 포함)과 OpenSSL 스크립트.
+# 네이티브 빌드가 읽는 경로 전부 — build-native.sh·sdk/android·sdk/core CMake 의 입력(floor·MCVideo 전송 제어 정의 생성기 포함)과 OpenSSL 스크립트.
 PATHS=(.gitignore ext/pjproject sdk/core sdk/engine sdk/android
-       scripts/gen_floor_defs.py docs/design/features/mcptt_floor_defs.yaml android/docs/scripts)
+       scripts/gen_floor_defs.py docs/design/features/mcptt_floor_defs.yaml
+       scripts/gen_mcvideo_tc_defs.py docs/design/features/mcvideo_tc_defs.yaml android/docs/scripts)
 # 받아 올 생성물 — build-native.sh [5]·[7] 의 배치 위치.
 OUTS=(sdk/android/cimsue-engine/src/main/jniLibs sdk/android/cimsue-engine/src/main/java/org
       sdk/android/cimsue/src/main/jniLibs sdk/android/cimsue/src/swig/java)

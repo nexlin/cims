@@ -288,3 +288,39 @@ SDS 전달 확인 규격 경로)를 .48 에서 반영·배포(**csp 0.2.180 · c
   CSP 기동 Roles 전부 ON · service-config CSC 정본 적재(RP 15/8/0, TNG2 없음) · csc.json 보존 · MF52·W999 새 APK(ea2b617d) 재등록 200.
   CSC MCData 광고(`UeInitConfig.ServiceDetails.McData.Enable`)는 아직 off. 관찰 = 001·002 가 g001 멤버가 아니라 affiliation 403(멤버 구성 변경).
 - **.45 스택에 올릴 때** — CSP 0.2.180·CSC 0.2.138(·oam 0.2.182) 를 한 창에(§10 위). 새 CSP 가 선 뒤에만 .45 CSC 의 `UeInitConfig.ServiceDetails.McData.Enable` 을 켠다 — 켜면 새 SDK 단말이 PSI 로 통지를 보내는데 옛 CSP 는 그것을 상관하지 못한다.
+
+## 11. MCVideo — M0 계약 (.45 몫 K5·K7·V0 SDK) · .48 리뷰 요청
+
+정본 [mcvideo.md](../design/features/mcvideo.md) · 분담 [mcvideo_dev_plan.md](mcvideo_dev_plan.md) §3(계약 K1~K7)·§4. 규격 원문 = TS 24.581 V18.8.0 · TS 24.281 V18.14.0 ·
+TS 24.484(docx k00). 이 절은 두 호스트가 MCVideo 계약을 주고받는 자리다 — 소유 호스트가 계약물을 먼저 고치고 여기에 적는다.
+
+**.45 가 낸 것 (→ .48 리뷰)**
+
+| 계약 | 산출 | 리뷰 요청 |
+|---|---|---|
+| K5 전송 제어 정의 | 정본 `docs/design/features/mcvideo_tc_defs.yaml`(MCV0/1/2 subtype·메시지별 필드·field id·값 모양·indicator·source/permission/result/reception mode·원인 셋·§11 타이머/카운터·§12.1.2 fmtp) → `scripts/gen_mcvideo_tc_defs.py` 가 **CMP `cmp/PTransmissionDefs.h` 와 SDK `sdk/core/src/mcvideo/tc_defs.h` 를 함께 생성**. S1 `S1-UE-MCVIDEO-TC-DEFS`(`--check` — 테이블 정합 + 두 생성물 최신) | CMP 이름(`MCV1_TRANSMISSION_GRANTED`·`TF_AUDIO_SSRC`·`TC_REVOKE_PREEMPTED`·`MCV_T3_MS` …)이 B3~B5 상태 머신에 쓸 만한지. **생성물은 손으로 고치지 않는다** — 바꿀 값은 yaml 에서(이 절에 적고) |
+| K7 SDK 공개 표면 | `McService` · `AccountConfig.mcvideoEnabled`·`mcvideoServerUri` · `affiliate(…, service)` · `joinVideoGroupCall(VideoGroupCallOptions)` · `requestTransmission`·`releaseTransmission`·`acceptReception`·`endReception`·`transmissionInfo` · `Listener::onTransmission`·`onReception` · `CallInfo.service` — 선언 + 실패 반환 스텁([ue_sdk.md](../design/features/ue_sdk.md) §4.6). SWIG Java 확인(불투명 타입 0) | 이름·이벤트 종류(Windows 관제 앱도 — [dispatch_windows_next.md](dispatch_windows_next.md) W3) |
+| V0 SDK 몫(C1) | `GroupDoc::toXml` MCPTT `<service enabler>` = `urn:urn-7:3gpp-service.ims.icsi.mcptt`(TS 24.379 Annex E.2.1). CSC `parse_group_document_xml` 은 enabler 를 보지 않아 옛 CSC 와도 맞는다 | A1(CSC 생성 쪽)은 .48 |
+
+검증: `cimsue_test` 98/98 · `S1-UE-MCVIDEO-TC-DEFS`·`S1-UE-FLOOR-CODEC` PASS · 두 생성 헤더 단독 컴파일(`-Wall -Wextra`).
+
+**K5 를 만들며 원문에서 본 것 — .48 계약(K2·K4·K6)에 넘긴다**
+
+1. **service configuration `<tc-timers-counters-R14>` 는 요소 17개가 전부 필수**다(TS 24.484 XSD — `anyExt` 외 minOccurs 없음, T100~T104·C2·C4·C6·C7·C11 은
+   unsignedByte, 나머지 `xs:duration`). A4 가 이 요소를 내려면 전부 채우거나 통째로 뺀다. 값은 yaml 의 기본값 — 규격에 기본값이 없는 **T100~T104·T2 는 CIMS 1 s**
+   (`origin: cims`, 단말 재전송 총 시간 < 6 s 권고 NOTE 1~4). 다른 값을 쓰려면 yaml 을 먼저 바꾼다.
+2. **T1·T5 는 그룹 문서 값** — T1 = MCPTT `on-network-hang-timer` 재사용(TS 24.581 §11.1.3), T5 = `on-network-reception-hang-timer`(TS 24.481). K6 PTT_GROUP_ADD
+   (`service: mcvideo`)에 둘 다 싣는 것을 제안한다.
+3. **C9 = 멤버별 동시 수신 상한 = user profile `<MaxSimultaneousVideoStreams>`**(없으면 4, 1차 CIMS 1) — CMP 가 멤버마다 알아야 Receive Media Request 를
+   원인 #7(Max no of simultaneous stream)로 거절한다. K6 JOIN 에 멤버 값(예 `max_rx_streams`)을 제안한다. C7(2)·C11(4)은 service configuration 값(서버 전역).
+4. **fmtp** — 구분자 `;`(§4.3.3.1 예시. §12.1.2.3 ABNF 의 COLON 은 따르지 않는다 — mcvideo.md §9), `mc_transmission_ssrc` 는 값을 싣는다. `mc_transmission_ssrc` =
+   **받는 쪽이 기대하는 RTCP 헤더 SSRC**를 서로 광고하고 상대가 그 값을 쓴다(§4.3.3.1 — 한 IP·포트에 여러 세션을 다중화할 때의 열쇠). 1차는 멤버 전용 포트라
+   다중화가 없지만 K4 에서 «SDK 는 offer 에 싣는다 · answer 에 CMP 값» 을 제안한다. `mc_audio_ssrc`·`mc_video_ssrc` 는 **암묵적 송출 요청을 받아들인 answer
+   에만** 온다(§12.1.2.2).
+5. **field ID 가 없는 필드** — Remote ID·SSRC of queued transmission participant·Granted Party's Identity·SSRC of granted transmission participant·SSRC of
+   transmission control server(Table 9.2.3.1-1 밖). 모두 off-network·원격 송출이라 1차 코덱은 부호화하지 않는다.
+6. **R2(SSRC 재작성)** — 계획의 권고(허가 때 CMP 가 준 Audio·Video SSRC 를 Granted·Media Transmission Notification 에 싣고 그대로 전달)와 K5 는 맞는다 —
+   Granted·Notification·Receive Media Request/Response·End 계열이 모두 두 SSRC 필드를 가진다.
+
+**다음 (.45)** — B2: CMP `cmp/PTransmissionCodec.{h,cpp}`(.45 소유, CMP 빌드 등록은 B3 때 .48 과 함께) + SDK 코덱, 서로의 출력을 읽는 교차 시험(`cimsue_test`
+에 floor `FloorXCheck` 방식). C2 는 K2 fixture(`tests/fixtures/mcvideo/*.xml`), C3·C4 는 K3·K4 가 선 뒤.

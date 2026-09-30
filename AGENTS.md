@@ -44,6 +44,7 @@
 | 12. 통합 이력·메시지 모니터링·PTT 상세 | `D/android_ue_provisioning.md` §3-2·§3-2a; `D/dispatch_center.md` §5.7a | `csc/src/services/mcptt.py`; `csc/src/services/dispatch_history.py`; `csc/src/handlers/dispatch_recordings.py` | `K/csc/csc_client.cpp`; `W/Services/HistoryClient.cs`; `W/Services/ManagementClient.cs`; `W/ViewModels/SessionHistoryViewModel.cs` |
 | 13. 녹취 생성·열람·재생 | `D/android_ue_provisioning.md` §3-4; `D/dispatch_center.md` §5.7b; `D/dispatch_desktop_ui.md` §4.6 | `csc/src/handlers/dispatch_recordings.py` → `ems/core/oam/src/handlers/recording.py` → `cmp/PSyncRtpRecorder.cpp` | `K/csc/csc_client.cpp`; `W/Services/ManagementClient.cs`; `W/ViewModels/SessionHistoryViewModel.cs`; `W/Views/HistoryView.xaml` |
 | 14. floor 단일 정의·생성·대조 | `D/ue_sdk.md` §4.6·§9; `D/mcptt_floor_defs.yaml`; `scripts/gen_floor_defs.py` | `cmp/PMcpttGroup.h`; `scripts/mcptt_floor_policy_probe.py` | `K/floor/floor_defs.h`; `android/ptt-client/src/main/java/com/cims/ue/ptt/floor/FloorControl.kt` |
+| 14a. MCVideo 전송 제어 단일 정의·생성 | `D/mcvideo.md` §1.5·§5.3·§5.4·§9; `D/mcvideo_tc_defs.yaml`; `scripts/gen_mcvideo_tc_defs.py` | `cmp/PTransmissionDefs.h` | `K/mcvideo/tc_defs.h` |
 | 15. MCData 메시지(PTT SDS) | `D/mcdata_messaging.md` §1~§5·§7·§8; `D/dispatch_desktop_ui.md` §4.4 | `csp/McDataAsModule.cpp`; `csp/McDataCodec.cpp`; `csp/McDataMediaService.cpp`; `csp/CmdpClient.cpp`; `cmdp/PCmdpServer.cpp`; `cmdp/PMsrpConnection.cpp`; `cmdp/PFdStore.cpp`; `csc/src/services/mcdata_fd.py` | `K/mcdata/sds_codec.cpp`; `K/engine.cpp`; `N/Account.cs`; `W/ViewModels/McDataMessagesViewModel.cs` |
 | 16. SMS·LMS 1:1 | `D/dispatch_desktop_ui.md` §4.3·§13; `D/mcdata_messaging.md` §4·§4.3 | `csp/ModuleDispatcher.cpp` | `K/engine.cpp`; `N/Account.cs`; `W/Services/DispatchSession.cs`; `W/ViewModels/SmsMessagesViewModel.cs` |
 
@@ -80,6 +81,7 @@
 - 문서에 변경 이력·작성일·버전 헤더·Phase 완료 로그를 추가하지 않는다. 최종 상태만 쓰며 미구현·향후 과제는 보존한다. 이력은 git에 둔다.
 - 생성물은 손수정하지 않고 원천 정의와 생성기를 수정·실행한다. floor는 `docs/design/features/mcptt_floor_defs.yaml`을 고치고 `scripts/gen_floor_defs.py`로 `floor_defs.h`를 생성한다.
 - CMP·Kotlin·probe는 생성물이 아니라 대조 대상이다. 정본과 정합시키고 `python scripts/gen_floor_defs.py --check`로 네 곳의 일치를 확인한다.
+- MCVideo 전송 제어는 `docs/design/features/mcvideo_tc_defs.yaml`을 고치고 `scripts/gen_mcvideo_tc_defs.py`로 코어 `mcvideo/tc_defs.h`와 CMP `cmp/PTransmissionDefs.h`를 함께 생성한다(두 끝 모두 생성물). `--check`가 최신성을 확인한다.
 
 ## 7. 이식·검증 원칙
 

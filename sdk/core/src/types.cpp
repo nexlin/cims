@@ -71,4 +71,64 @@ const char* toString(ConditionCause c) {
     return "?";
 }
 
+const char* toString(McService s) {
+    switch (s) {
+        case McService::Mcptt: return "mcptt";
+        case McService::McVideo: return "mcvideo";
+    }
+    return "?";
+}
+
+const char* toString(TransmissionState s) {
+    switch (s) {
+        case TransmissionState::NoPermission: return "no_permission";
+        case TransmissionState::PendingRequest: return "pending_request";
+        case TransmissionState::Permitted: return "permitted";
+        case TransmissionState::PendingEnd: return "pending_end";
+        case TransmissionState::Queued: return "queued";
+    }
+    return "?";
+}
+
+const char* toString(ReceptionState s) {
+    switch (s) {
+        case ReceptionState::Notified: return "notified";
+        case ReceptionState::PendingRequest: return "pending_request";
+        case ReceptionState::Receiving: return "receiving";
+        case ReceptionState::PendingRelease: return "pending_release";
+        case ReceptionState::Ended: return "ended";
+    }
+    return "?";
+}
+
+const char* toString(TransmissionEvent::Kind k) {
+    switch (k) {
+        case TransmissionEvent::Kind::Granted: return "granted";
+        case TransmissionEvent::Kind::Rejected: return "rejected";
+        case TransmissionEvent::Kind::Revoked: return "revoked";
+        case TransmissionEvent::Kind::QueuePosition: return "queue_position";
+        case TransmissionEvent::Kind::EndRequested: return "end_requested";
+        case TransmissionEvent::Kind::Ended: return "ended";
+        case TransmissionEvent::Kind::ReceiverJoined: return "receiver_joined";
+        case TransmissionEvent::Kind::Idle: return "idle";
+        case TransmissionEvent::Kind::RequestTimeout: return "request_timeout";
+        case TransmissionEvent::Kind::Other: return "other";
+    }
+    return "?";
+}
+
+const char* toString(ReceptionEvent::Kind k) {
+    switch (k) {
+        case ReceptionEvent::Kind::Notified: return "notified";
+        case ReceptionEvent::Kind::Granted: return "granted";
+        case ReceptionEvent::Kind::Rejected: return "rejected";
+        case ReceptionEvent::Kind::Ended: return "ended";
+        case ReceptionEvent::Kind::Released: return "released";
+        case ReceptionEvent::Kind::EndRequested: return "end_requested";
+        case ReceptionEvent::Kind::RequestTimeout: return "request_timeout";
+        case ReceptionEvent::Kind::Other: return "other";
+    }
+    return "?";
+}
+
 }  // namespace cimsue

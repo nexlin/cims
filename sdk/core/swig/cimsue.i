@@ -160,3 +160,4 @@ using namespace cimsue;
 %template(GroupMemberVector)    std::vector<cimsue::GroupMember>;
 %template(DriveAccountVector)   std::vector<cimsue::DriveAccount>;
 %template(VideoDeviceVector)    std::vector<cimsue::VideoDeviceInfo>;
+%template(VideoTransmitterVector) std::vector<cimsue::VideoTransmitter>;

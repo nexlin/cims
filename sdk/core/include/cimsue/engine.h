@@ -113,8 +113,10 @@ public:
      *  반환 token(onRequestResult MESSAGE 상관), 실패 -1. 경보 인가는 서버가 판정한다(미인가 = 전파 없음). */
     int64_t sendEmergencyAlert(int accountId, const std::string& groupId, bool activate,
                                const std::string& originatedBy = std::string(), bool cancelGroupEmergency = false);
-    /** affiliation PUBLISH(TS 24.379 §9, Event: mcptt). on=false 면 Expires:0. 반환 token(onRequestResult 상관). */
-    int64_t affiliate(int accountId, const std::string& groupId, bool on);
+    /** affiliation PUBLISH — 서비스마다 따로다(TS 23.280 §5.2.5). Mcptt = TS 24.379 §9(Event: mcptt), McVideo = TS 24.281 §8.2
+     *  (ICSI mcvideo · `urn:3gpp:ns:mcvideoPresInfo:1.0`, Request-URI = AccountConfig.mcvideoServerUri). on=false 면 Expires:0.
+     *  반환 token(onRequestResult 상관), 실패 -1. */
+    int64_t affiliate(int accountId, const std::string& groupId, bool on, McService service = McService::Mcptt);
     /** 그룹 로스터 구독(RFC 4575 conference, 엔진 패치 evsub) — 확인 신호는 onRoster NOTIFY. */
     Result subscribeConference(int accountId, const std::string& groupId, bool on);
     /** 문서 변경 구독(RFC 5875 xcap-diff) — psiUri 예 sip:gms_psi@domain. 본문은 onMessage 로. */
@@ -123,6 +125,26 @@ public:
     int64_t sendRequest(int accountId, const std::string& method, const std::string& targetUri,
                         const std::string& contentType, const std::string& body,
                         const std::map<std::string, std::string>& headers = {});
+
+    // ── MCVideo 그룹 호 (TS 24.281 호 · TS 24.581 전송 제어, mcvideo.md §5.4) — MCPTT 호와 독립 다이얼로그 ──
+    /** MCVideo 그룹 호 개시·합류 — INVITE Request-URI = AccountConfig.mcvideoServerUri(참여 MCVideo 기능 PSI), multipart
+     *  mcvideo-info(session-type chat|prearranged, request-uri = 그룹) + SDP m=audio·m=video·`m=application <RTCP 포트> udp MCVideo`
+     *  (TS 24.281 §6.2.1·§9.2.1.2.1.1, TS 24.581 §4.3.3.1). chat 합류가 곧 affiliation(§8.1). groupId bare. 반환 callId
+     *  (CallInfo.service = McVideo), 실패 -1. 나가기 = hangup(BYE) — MCPTT 호는 그대로. */
+    int joinVideoGroupCall(int accountId, const std::string& groupId,
+                           const VideoGroupCallOptions& opts = VideoGroupCallOptions());
+    /** [영상 보내기] — Transmission Request(MCV0, TS 24.581 §6.2.4.3.2 — T100·C100). 결과는 onTransmission(Granted·Rejected·
+     *  QueuePosition). priority<0 = 미기재(기본 우선순위), 아니면 협상한 mc_priority 이하. */
+    Result requestTransmission(int callId, int priority = -1);
+    /** [보내기 끝] — Transmission End Request(MCV2, §6.2.4.5.3·§6.2.4.4.7·§6.2.4.9.4 — T101·C101). 대기·요청 중이면 요청을 거둔다.
+     *  완료 = onTransmission(Ended). */
+    Result releaseTransmission(int callId);
+    /** [받기] — Receive Media Request(MCV0, §6.2.5.3.3 — T103·C103). transmitterId = onReception(Notified) 의 송출자 MCVideo ID.
+     *  결과는 onReception(Granted·Rejected). priority<0 = 미기재, 아니면 협상한 mc_reception_priority 이하. */
+    Result acceptReception(int callId, const std::string& transmitterId, int priority = -1);
+    /** [그만 보기] — Media Reception End Request(MCV2, §6.2.5.5 — T104·C104). 완료 = onReception(Released). */
+    Result endReception(int callId, const std::string& transmitterId);
+    TransmissionInfo transmissionInfo(int callId) const;
 
     // ── 관제 (dispatch_center.md §5, volte_supplementary_services.md §5·§6) ──
     /** 대상 AoR 의 dialog 이벤트 구독(RFC 4235, 인가 = 관제 그룹 monitor_scope). NOTIFY → onDialogInfo. */

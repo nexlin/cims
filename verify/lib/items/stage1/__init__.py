@@ -24,6 +24,7 @@
 
 - S1-UE-UNIT             : build/bin/cimsue_test (코어 단위시험 — 공개 반환형·C API ABI 포함)
 - S1-UE-FLOOR-CODEC      : scripts/gen_floor_defs.py --check (floor 정의 정본 = mcptt_floor_defs.yaml 일치)
+- S1-UE-MCVIDEO-TC-DEFS  : scripts/gen_mcvideo_tc_defs.py --check (MCVideo 전송 제어 정의 정본 = mcvideo_tc_defs.yaml 과 sdk·cmp 생성 헤더 일치)
 - S1-UE-ANDROID-BIND     : SWIG 생성 Java 에 SWIGTYPE_p_* 부재 + HttpResult.body=byte[] (녹취 MP4 가 NUL 에서 잘리지 않게) + cimsue.i 타입맵 본문 맨 # 지시문 부재(%# — 플랫폼 분기 보존)
 - S1-UE-ENGINE-SINGLE    : 커밋된 엔진 산출물 부재 + org.pjsip.pjsua2 제공처가 :cimsue-engine 하나(카메라 도우미 PjCamera* 는 pj 를 싣는 두 모듈)
 - S1-UE-CSC-XCHECK       : 코어 csc_client.cpp ↔ :core ProvisioningClient.kt IdMS·프로비저닝 경로 대조

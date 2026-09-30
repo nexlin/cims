@@ -1,0 +1,217 @@
+# MCVideo 전송 제어(transmission control) 정의 테이블 — 단일 정본 (계약 K5 — docs/dev/mcvideo_dev_plan.md §3,
+# mcvideo.md §1.5·§5.3·§5.4). 3GPP TS 24.581 V18.8.0 §9.2(메시지·필드·원인)·§11(타이머·카운터)·§12.1.2(fmtp)를 한 곳에 두고
+# scripts/gen_mcvideo_tc_defs.py 가 단말 코어 헤더(sdk/core/src/mcvideo/tc_defs.h)와 CMP 헤더(cmp/PTransmissionDefs.h)를
+# 생성한다. --check = 두 생성물이 이 테이블과 같은지(S1 게이트 `S1-UE-MCVIDEO-TC-DEFS`). 값을 바꿀 때는 이 파일만 고치고
+# 생성기를 돌린다 — 생성물은 손으로 고치지 않는다.
+# 규격 원문끼리 어긋나는 곳은 그 줄 주석에 따른 쪽을 적는다(mcvideo.md §9). 1차 범위(on-network 그룹 호) 밖 메시지도 규격 번호를
+# 고정해 두려고 모두 싣는다 — 쓰는 범위는 코덱·상태 머신이 정한다.
+
+rtcp:
+  pt_app: 204
+  ack_required_bit: 0x10        # subtype 5비트의 첫 비트 x = Acknowledgment is required (§9.2.2.1)
+  subtype_mask: 0x0F            # 메시지 타입 = 아래 4비트 (Transmission control ack 은 x 자리 없이 00100 — 값 4 로 같다)
+  name_participant: "MCV0"      # 참여자(client) → 서버 (Table 9.2.2.1-1)
+  name_server: "MCV1"           # 서버 → 참여자 (Table 9.2.2.1-2)
+  name_both: "MCV2"             # 양방향 (Table 9.2.2.1-3)
+
+# 메시지 — APP name 마다 subtype. fields = 그 메시지가 실을 수 있는 필드(아래 fields 이름, 표 순서). 규격 표에 있으나 field ID 가
+# Table 9.2.3.1-1 에 없는 항목(Remote ID · SSRC of queued transmission participant · Granted Party's Identity · SSRC of granted
+# transmission participant · SSRC of transmission control server)은 뺐다 — ID 가 정해지기 전에는 부호화할 수 없다(mcvideo.md §9).
+
+# Table 9.2.2.1-1 — name MCV0 (참여자 → 서버)
+mcv0:
+  TRANSMISSION_REQUEST:          {value: 0x0, ref: "9.2.4",  name: "Transmission Request", fields: "TRANSMISSION_PRIORITY USER_ID TRANSMISSION_INDICATOR FUNCTIONAL_ALIAS TRACK_INFO"}
+  TRANSMISSION_RELEASE:          {value: 0x2, ref: "9.2.7",  name: "Transmission Release", fields: "USER_ID TRANSMISSION_INDICATOR TRACK_INFO"}
+  QUEUE_POSITION_REQUEST:        {value: 0x3, ref: "9.2.11", name: "Queue Position Request", fields: "USER_ID TRACK_INFO"}
+  RECEIVE_MEDIA_REQUEST:         {value: 0x4, ref: "9.2.14", name: "Receive Media Request", fields: "USER_ID TRANSMITTING_USER_ID AUDIO_SSRC VIDEO_SSRC TRANSMISSION_INDICATOR RECEPTION_PRIORITY TRACK_INFO FUNCTIONAL_ALIAS"}
+  REMOTE_TRANSMISSION_REQUEST:   {value: 0x7, ref: "9.2.22", name: "Remote Transmission Request", fields: "USER_ID TRACK_INFO"}
+  REMOTE_TRANSMISSION_CANCEL_REQUEST: {value: 0x8, ref: "9.2.24", name: "Remote Transmission Cancel Request", fields: "USER_ID TRACK_INFO"}
+
+# Table 9.2.2.1-2 — name MCV1 (서버 → 참여자). 0x9 = void.
+mcv1:
+  TRANSMISSION_GRANTED:          {value: 0x0, ref: "9.2.5",  name: "Transmission Granted", fields: "DURATION AUDIO_SSRC VIDEO_SSRC TRANSMISSION_PRIORITY USER_ID QUEUE_SIZE QUEUED_USER_ID QUEUE_INFO TRANSMISSION_INDICATOR TRACK_INFO"}
+  TRANSMISSION_REJECTED:         {value: 0x1, ref: "9.2.6",  name: "Transmission Rejected", fields: "REJECT_CAUSE USER_ID TRANSMISSION_INDICATOR TRACK_INFO"}
+  TRANSMISSION_ARBITRATION_TAKEN: {value: 0x2, ref: "9.2.8", name: "Transmission Arbitration Taken", fields: "TRANSMITTING_USER_ID PERMISSION USER_ID MSG_SEQ TRANSMISSION_INDICATOR AUDIO_SSRC VIDEO_SSRC"}
+  TRANSMISSION_ARBITRATION_RELEASE: {value: 0x3, ref: "9.2.9", name: "Transmission Arbitration Release", fields: "USER_ID MSG_SEQ TRANSMISSION_INDICATOR"}
+  TRANSMISSION_REVOKED:          {value: 0x4, ref: "9.2.10", name: "Transmission Revoked", fields: "REJECT_CAUSE TRANSMISSION_INDICATOR TRACK_INFO"}
+  QUEUE_POSITION_INFO:           {value: 0x5, ref: "9.2.12", name: "Queue Position Info", fields: "USER_ID QUEUED_USER_ID QUEUE_INFO TRACK_INFO TRANSMISSION_INDICATOR"}
+  MEDIA_TRANSMISSION_NOTIFICATION: {value: 0x6, ref: "9.2.13", name: "Media Transmission Notification", fields: "TRANSMITTING_USER_ID AUDIO_SSRC VIDEO_SSRC PERMISSION TRANSMISSION_INDICATOR TRACK_INFO FUNCTIONAL_ALIAS RECEPTION_MODE"}
+  RECEIVE_MEDIA_RESPONSE:        {value: 0x7, ref: "9.2.15", name: "Receive Media Response", fields: "RESULT REJECT_CAUSE TRANSMITTING_USER_ID AUDIO_SSRC VIDEO_SSRC TRANSMISSION_INDICATOR TRACK_INFO"}
+  MEDIA_RECEPTION_NOTIFICATION:  {value: 0x8, ref: "9.2.16", name: "Media Reception Notification", fields: "USER_ID AUDIO_SSRC VIDEO_SSRC FUNCTIONAL_ALIAS TRACK_INFO"}
+  TRANSMISSION_CANCEL_REQUEST_NOTIFY: {value: 0xA, ref: "9.2.19", name: "Transmission Cancel Request Notify", fields: "TRACK_INFO"}
+  REMOTE_TRANSMISSION_RESPONSE:  {value: 0xB, ref: "9.2.23", name: "Remote Transmission Response", fields: "TRACK_INFO"}
+  REMOTE_TRANSMISSION_CANCEL_RESPONSE: {value: 0xC, ref: "9.2.25", name: "Remote Transmission Cancel Response", fields: "TRACK_INFO"}
+  MEDIA_RECEPTION_OVERRIDE_NOTIFICATION: {value: 0xD, ref: "9.2.28", name: "Media Reception Override Notification", fields: "USER_ID OVERRIDING_ID OVERRIDDEN_ID"}
+  TRANSMISSION_END_NOTIFY:       {value: 0xE, ref: "9.2.29", name: "Transmission End Notify", fields: "TRANSMITTING_USER_ID AUDIO_SSRC VIDEO_SSRC"}
+  TRANSMISSION_IDLE:             {value: 0xF, ref: "9.2.30", name: "Transmission Idle", fields: "MSG_SEQ TRANSMISSION_INDICATOR"}
+
+# Table 9.2.2.1-3 — name MCV2 (양방향). Transmission Revoked 와 Transmission End Request 의 표는 «Reject Cause value» 로 적었지만
+# 본문은 Reject Cause field(§9.2.3.4)로 부호화한다 — 필드로 읽는다.
+mcv2:
+  TRANSMISSION_END_REQUEST:      {value: 0x0, ref: "9.2.20", name: "Transmission End Request", fields: "TRANSMITTING_USER_ID AUDIO_SSRC VIDEO_SSRC REJECT_CAUSE TRACK_INFO"}
+  TRANSMISSION_END_RESPONSE:     {value: 0x1, ref: "9.2.21", name: "Transmission End Response", fields: "TRANSMITTING_USER_ID AUDIO_SSRC VIDEO_SSRC TRACK_INFO"}
+  MEDIA_RECEPTION_END_REQUEST:   {value: 0x2, ref: "9.2.26", name: "Media Reception End Request", fields: "TRANSMITTING_USER_ID AUDIO_SSRC VIDEO_SSRC TRANSMISSION_INDICATOR TRACK_INFO"}
+  MEDIA_RECEPTION_END_RESPONSE:  {value: 0x3, ref: "9.2.27", name: "Media Reception End Response", fields: "TRANSMITTING_USER_ID AUDIO_SSRC VIDEO_SSRC TRACK_INFO"}
+  TRANSMISSION_CONTROL_ACK:      {value: 0x4, ref: "9.2.31", name: "Transmission Control Ack", fields: "SOURCE MESSAGE_NAME MSG_TYPE TRACK_INFO"}
+
+# Table 9.2.3.1-1 — 필드 ID. Length 는 ID < 192 면 1옥텟, 이상이면 2옥텟(§9.1.3) — 이 표의 ID 는 모두 1옥텟 Length 다.
+# kind — 값(Length 가 세는 부분)의 모양:
+#   u8    = 8비트 값 + spare 1옥텟 (Length 2)          u16  = 16비트 값 (Length 2)
+#   pair  = 8비트 둘 (Length 2 — Queue Info)            ssrc = SSRC 4옥텟 + spare 2옥텟 (Length 6)
+#   name  = ASCII 4옥텟 + spare 2옥텟 (Length 6)        uri  = 가변 문자열 — (헤더 2 + 값)을 4옥텟 경계로 0 패딩
+#   cause = 16비트 원인 + 선택 phrase(가변, uri 와 같은 패딩) · track = Track Info(§9.2.3.13 — 가변, uri 와 같은 패딩)
+fields:
+  TRANSMISSION_PRIORITY:  {value: 0,  kind: u8,    ref: "9.2.3.2"}
+  DURATION:               {value: 1,  kind: u16,   ref: "9.2.3.3"}
+  REJECT_CAUSE:           {value: 2,  kind: cause, ref: "9.2.3.4"}
+  QUEUE_INFO:             {value: 3,  kind: pair,  ref: "9.2.3.5"}
+  TRANSMITTING_USER_ID:   {value: 4,  kind: uri,   ref: "9.2.3.6"}
+  PERMISSION:             {value: 5,  kind: u16,   ref: "9.2.3.7"}
+  USER_ID:                {value: 6,  kind: uri,   ref: "9.2.3.8"}
+  QUEUE_SIZE:             {value: 7,  kind: u16,   ref: "9.2.3.15"}
+  MSG_SEQ:                {value: 8,  kind: u16,   ref: "9.2.3.9"}
+  QUEUED_USER_ID:         {value: 9,  kind: uri,   ref: "9.2.3.14"}
+  SOURCE:                 {value: 10, kind: u16,   ref: "9.2.3.12"}
+  TRACK_INFO:             {value: 11, kind: track, ref: "9.2.3.13"}
+  MSG_TYPE:               {value: 12, kind: u8,    ref: "9.2.3.10"}
+  TRANSMISSION_INDICATOR: {value: 13, kind: u16,   ref: "9.2.3.11"}
+  AUDIO_SSRC:             {value: 14, kind: ssrc,  ref: "9.2.3.16"}
+  RESULT:                 {value: 15, kind: u16,   ref: "9.2.3.17"}
+  MESSAGE_NAME:           {value: 16, kind: name,  ref: "9.2.3.18"}
+  OVERRIDING_ID:          {value: 17, kind: uri,   ref: "9.2.3.8"}
+  OVERRIDDEN_ID:          {value: 18, kind: uri,   ref: "9.2.3.8"}
+  RECEPTION_PRIORITY:     {value: 19, kind: u8,    ref: "9.2.3.19"}
+  GROUP_ID:               {value: 20, kind: uri,   ref: "9.2.3.20"}
+  FUNCTIONAL_ALIAS:       {value: 21, kind: uri,   ref: "9.2.3.21"}
+  RECEPTION_MODE:         {value: 22, kind: u16,   ref: "9.2.3.22"}
+  VIDEO_SSRC:             {value: 23, kind: ssrc,  ref: "9.2.3.23"}
+
+# §9.2.3.11 Transmission Indicator 비트(A~E, F~P 예약). C·D·E 는 이 판본에서 알림용(절차 없음 — NOTE 1).
+indicator:
+  NORMAL:          0x8000
+  BROADCAST_GROUP: 0x4000
+  SYSTEM:          0x2000
+  EMERGENCY:       0x1000
+  IMMINENT_PERIL:  0x0800
+
+# §9.2.3.12 Source
+source:
+  PARTICIPANT: 0
+  PARTICIPATING: 1
+  CONTROLLING: 2
+  NON_CONTROLLING: 3
+
+# §9.2.3.7 Permission to Request the Transmission
+permission:
+  DENIED: 0
+  ALLOWED: 1
+
+# §9.2.3.17 Result (Receive Media Response)
+result:
+  REJECTED: 0
+  GRANTED: 1
+
+# §9.2.3.22 Reception Mode — 0 = 자동 수신(긴급·임박·방송·system), 1 = 사용자가 [받기](일반 호 — mcvideo.md §7 D8)
+reception_mode:
+  AUTOMATIC: 0
+  MANUAL: 1
+
+# §9.2.3.5 Queue Position Info 특수값 · §9.2.3.13 Queueing Capability · §9.2.3.2/§9.2.3.19 기본 우선순위
+queue:
+  NOT_QUEUED: 254
+  POSITION_UNKNOWN: 255
+  CAPABILITY_NONE: 0
+  CAPABILITY_QUEUEING: 1
+  DEFAULT_PRIORITY: 0
+
+# §9.2.6.2 Transmission Rejected 의 Reject Cause
+reject_cause:
+  TRANSMISSION_LIMIT:   {value: 1,   text: "Transmission limit reached"}
+  INTERNAL_ERROR:       {value: 2,   text: "Internal transmission control server error"}
+  ONLY_ONE_PARTICIPANT: {value: 3,   text: "Only one participant"}
+  RETRY_AFTER:          {value: 4,   text: "Retry-after timer has not expired"}
+  RECEIVE_ONLY:         {value: 5,   text: "Receive only"}
+  NO_RESOURCES:         {value: 6,   text: "No resources available"}
+  OTHER:                {value: 255, text: "Other reason"}
+
+# §9.2.10.2 Transmission Revoked 의 Reject Cause — Transmission End Request(§9.2.20)도 이 표를 쓴다
+revoke_cause:
+  ONLY_ONE_CLIENT:      {value: 1,   text: "Only one MCVideo client"}
+  MEDIA_BURST_TOO_LONG: {value: 2,   text: "Media burst too long"}
+  NO_PERMISSION:        {value: 3,   text: "No permission to send a Media Burst"}
+  PREEMPTED:            {value: 4,   text: "Media Burst pre-empted"}
+  TERMINATE_STREAM:     {value: 5,   text: "Terminate the RTP stream"}
+  NO_RESOURCES:         {value: 6,   text: "No resources available"}
+  QUEUE_TRANSMISSION:   {value: 7,   text: "Queue the transmission"}
+  NO_RECEIVER:          {value: 8,   text: "No receiving participant"}
+  OTHER:                {value: 255, text: "Other reason"}
+
+# §9.2.15.2 Receive Media Response(rejected)의 Reject Cause
+receive_reject_cause:
+  INTERNAL_ERROR:       {value: 2,   text: "Internal transmission control server error"}
+  RETRY_AFTER:          {value: 4,   text: "Retry-after timer has not expired"}
+  SEND_ONLY:            {value: 5,   text: "Send only"}
+  NO_RESOURCES:         {value: 6,   text: "No resources available"}
+  MAX_STREAMS:          {value: 7,   text: "Max no of simultaneous stream to receive is reached"}
+  OTHER:                {value: 255, text: "Other reason"}
+
+# 타이머·카운터 — 값의 정본은 MCVideo service configuration `<on-network><anyExt><tc-timers-counters-R14>`(TS 24.484 §9.4)와 그룹 문서
+# (TS 24.481). 아래 default 는 문서에 값이 없을 때 쓰는 값이다. origin: spec = TS 24.581 §11 의 기본값 · cims = 규격에 기본값이 없어
+# CIMS 가 정한 값(주석에 근거). element = service configuration(또는 그룹 문서) 요소 이름.
+
+# §11.1.1 참여자(단말). TS 24.484 는 T100~T104 를 초 단위 unsignedByte 로 둔다. 규격 기본값은 없고 NOTE 1~4 가 재전송 총 시간 < 6 s
+# 만 권한다 → CIMS 1 s(× 카운터 3 = 3 s).
+participant_timers:
+  T100: {default_ms: 1000, origin: cims, name: "Transmission Request", element: "T100-transmission-request"}
+  T101: {default_ms: 1000, origin: cims, name: "Transmission End Request", element: "T101-transmission-end-request"}
+  T102: {default_ms: 1000, origin: cims, name: "Transmission Queue Position Request", element: "T102-queue-position-request"}
+  T103: {default_ms: 1000, origin: cims, name: "Receive Media Request", element: "T103-receive-media-request"}
+  T104: {default_ms: 1000, origin: cims, name: "Receive Media Release", element: "T104-receive-media-release"}
+
+# §11.2.1 참여자 카운터 — 한도에 닿으면 그 메시지를 더 되풀이하지 않는다
+participant_counters:
+  C100: {default: 3, timer: T100, name: "Transmission Request"}
+  C101: {default: 3, timer: T101, name: "Transmission End Request"}
+  C102: {default: 3, timer: T102, name: "Transmission Queue Position Request"}
+  C103: {default: 3, timer: T103, name: "Receive Media Request"}
+  C104: {default: 3, timer: T104, name: "Receive Media Release"}
+
+# §11.1.3 전송 제어 서버. T1·T5 는 그룹 호면 그룹 문서 값(TS 24.481 — T1 은 MCPTT hang timer 재사용). T2 는 규격이 «무선망 특성에
+# 따름»이라 기본값이 없다 → CIMS 1 s(T3·T4·T6 과 같은 재전송 간격, × C2 10 = 10 s). T9(Retry-after)는 원인 #4 가 가리키지만 §11 표에
+# 없다 — 1차 범위에서 쓰지 않는다(mcvideo.md §9).
+server_timers:
+  T1:  {default_ms: 30000, origin: spec, name: "Inactivity", element: "on-network-hang-timer"}
+  T2:  {default_ms: 1000,  origin: cims, name: "Transmission Idle", element: "T2-transmission-idle"}
+  T3:  {default_ms: 1000,  origin: spec, name: "Transmission Revoke", element: "T3-transmission-revoke"}
+  T4:  {default_ms: 1000,  origin: spec, name: "Transmission Granted", element: "T4-transmission-granted"}
+  T5:  {default_ms: 30000, origin: spec, name: "Reception Inactivity", element: "on-network-reception-hang-timer"}
+  T6:  {default_ms: 1000,  origin: spec, name: "Reception Granted", element: "T6-reception-granted"}
+  T11: {default_ms: 10000, origin: spec, name: "Stream Reception Idle", element: "T11-stream-reception-idle"}
+
+# §11.2.3 제어 기능 카운터. C9 = 참여자별 동시 수신 스트림 상한 — user profile `<MaxSimultaneousVideoStreams>`(1차 CIMS 값 1,
+# mcvideo_dev_plan.md §1), 없으면 4. C7(Reception Accepted)·C11(스트림당 활성 수신자)은 한도에서 Receive Media Request 를 거절한다.
+server_counters:
+  C2:  {default: 10, timer: T2, name: "Transmission Idle", element: "C2-transmission-idle"}
+  C4:  {default: 3,  timer: T4, name: "Transmission Granted", element: "C4-transmission-granted"}
+  C6:  {default: 3,  timer: T6, name: "Reception Granted", element: "C6-reception-granted"}
+  C7:  {default: 2,  name: "Reception Accepted", element: "C7-reception-accepted"}
+  C9:  {default: 4,  name: "Per-Participant Reception Accepted", element: "MaxSimultaneousVideoStreams"}
+  C11: {default: 4,  name: "Count of active receivers for the stream", element: "C11-media-receivers"}
+
+# §4.3.3.1 · §12.1.2 — 제어 채널 m-line `m=application <RTCP 포트> udp MCVideo` + `a=fmtp:MCVideo <파라미터>`. 파라미터 구분자는 ";"
+# (§4.3.3.1 예시 — §12.1.2.3 ABNF 의 COLON 은 따르지 않는다). mc_transmission_ssrc 는 값을 싣는다(예시 `=12345678` — ABNF 는 값 누락).
+# mc_priority·mc_reception_priority 값 범위는 본문의 1~255(ABNF 1*2DIGIT 는 따르지 않는다).
+sdp:
+  proto: "udp"
+  fmt: "MCVideo"
+  separator: ";"
+
+fmtp:
+  QUEUEING:           "mc_queueing"
+  PRIORITY:           "mc_priority"
+  RECEPTION_PRIORITY: "mc_reception_priority"
+  GRANTED:            "mc_granted"
+  IMPLICIT_REQUEST:   "mc_implicit_request"
+  AUDIO_SSRC:         "mc_audio_ssrc"
+  VIDEO_SSRC:         "mc_video_ssrc"
+  TRANSMISSION_SSRC:  "mc_transmission_ssrc"

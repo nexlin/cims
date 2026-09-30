@@ -59,6 +59,15 @@ add_custom_command(
     COMMAND ${Python3_EXECUTABLE} ${CIMS_ROOT}/scripts/gen_floor_defs.py
     DEPENDS ${FLOOR_DEFS_YAML} ${CIMS_ROOT}/scripts/gen_floor_defs.py
     COMMENT "floor_defs.h ← mcptt_floor_defs.yaml")
+# MCVideo 전송 제어 정의 헤더도 생성물이다 — 정본 = mcvideo_tc_defs.yaml (scripts/gen_mcvideo_tc_defs.py 가 CMP 헤더도 함께 낸다)
+set(MCVIDEO_TC_DEFS_YAML ${CIMS_ROOT}/docs/design/features/mcvideo_tc_defs.yaml)
+set(MCVIDEO_TC_DEFS_H ${CMAKE_CURRENT_SOURCE_DIR}/src/mcvideo/tc_defs.h)
+add_custom_command(
+    OUTPUT ${MCVIDEO_TC_DEFS_H}
+    BYPRODUCTS ${CIMS_ROOT}/cmp/PTransmissionDefs.h
+    COMMAND ${Python3_EXECUTABLE} ${CIMS_ROOT}/scripts/gen_mcvideo_tc_defs.py
+    DEPENDS ${MCVIDEO_TC_DEFS_YAML} ${CIMS_ROOT}/scripts/gen_mcvideo_tc_defs.py ${CIMS_ROOT}/scripts/gen_floor_defs.py
+    COMMENT "mcvideo/tc_defs.h ← mcvideo_tc_defs.yaml")
 
 # Windows SDK 는 DLL(CIMSUE_SHARED — export.h), 그 외는 정적. pj 라이브러리는 DLL 안으로 정적 링크된다.
 option(CIMSUE_SHARED "libcimsue 를 공유 라이브러리(cimsue.dll)로" ${WIN32})
@@ -88,6 +97,7 @@ add_library(cimsue_objs OBJECT
     src/drive/drive_session.cpp
     src/drive/device_link.cpp
     ${FLOOR_DEFS_H}
+    ${MCVIDEO_TC_DEFS_H}
 )
 # 사용 요구(include·매크로·옵션·pj 링크)는 INTERFACE 타깃 하나에 모아 오브젝트·라이브러리·시험이 같은 것을 본다.
 add_library(cimsue_iface INTERFACE)

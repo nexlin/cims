@@ -19,6 +19,9 @@ enum class MediaSecurity { Off, Optional, Required };
 enum class RegState { Unregistered, Registering, Registered, Failed };
 enum class CallState { Null, Outgoing, Incoming, Active, Held, Disconnected };
 enum class CallDir { Outgoing, Incoming };
+/** MC 서비스 — 한 그룹 = 서비스 집합(TS 23.280 §3). 호·affiliation 은 서비스마다 따로다(ICSI·세션·제어 기능, mcvideo.md §1.1).
+ *  MCVideo ID = MCPTT ID(단일 MC service ID — TS 23.280 §10.1.4.1, mcvideo.md §7 D1)라 요청은 ICSI 로 가른다. */
+enum class McService { Mcptt, McVideo };
 
 /** 명령의 즉시 결과 — 인자·상태 오류. 프로토콜 결과는 Listener 이벤트로 온다. */
 struct Result {
@@ -109,6 +112,12 @@ struct AccountConfig {
     /** MCPTT 그룹 영상(ptt_flows.md 영상 협상) — 자동 수락(autoAnswerMcptt)하는 착신 INVITE 가 m=video 를 제안하면 영상까지
      *  받는다(서버는 video_enabled 그룹에서만 제안한다). false 면 port 0 으로 거절 — 음성만. 개시는 GroupCallOptions.video. */
     bool mcpttVideo = false;
+    /** MCVideo 서비스 사용(mcvideo.md §5.4) — REGISTER Contact 에 `+g.3gpp.mcvideo` 와 mcvideo ICSI(`+g.3gpp.icsi-ref`)를 MCPTT 것과 함께
+     *  싣는다(TS 24.281 §7.2.1 — MCVideo 로그오프 = 태그를 뺀 재-REGISTER). MCVideo ID 는 effectiveMcpttId(). */
+    bool mcvideoEnabled = false;
+    /** 참여 MCVideo 기능의 PSI — ue-init-config `<anyExt><MCVideo-Service-Details><Server-URI>`(TS 24.484 §7.2.2.1).
+     *  MCVideo 그룹 호 INVITE·affiliation PUBLISH 의 Request-URI(TS 24.281 §9.2.1.2.1.1·§8.2). 비면 MCVideo 호·affiliation 을 열지 않는다. */
+    std::string mcvideoServerUri;
 
     std::string aor() const { return "sip:" + msisdn + "@" + domain; }
     std::string effectiveMcpttId() const { return mcpttId.empty() ? "tel:" + msisdn : mcpttId; }
@@ -177,6 +186,22 @@ struct GroupCallOptions {
      *  반이중이면 내 영상은 발언권을 가진 동안만 나간다(Granted 에 송출 시작 = 키프레임, 놓으면 정지·카메라 닫힘) — Engine::setVideoSend 가
      *  송출 허용을 끈다. 착신 합류의 영상 수락은 AccountConfig.mcpttVideo. */
     bool video = false;
+};
+
+/** MCVideo 그룹 호 개시·합류 옵션(TS 24.281 §9.2.1 prearranged · §9.2.2 chat, 제어 채널 fmtp = TS 24.581 §14.2). */
+struct VideoGroupCallOptions {
+    /** 호 종류 — mcvideo-info session-type. 그룹 문서 `mcvideo-on-network-invite-members` 와 맞아야 한다(true = prearranged만,
+     *  false = chat 만 — 어긋나면 404 Warning 117·118, TS 24.281 §6.3.5.2). 기본 chat(mcvideo.md §7 D5). */
+    bool prearranged = false;
+    /** 송출 요청 대기열 지원 — fmtp `mc_queueing`(§14.2.2). */
+    bool queueing = false;
+    /** 요청할 최대 송출 우선순위 — fmtp `mc_priority` 1~255(§14.2.3), <0 = 미기재(기본 우선순위 0). */
+    int maxPriority = -1;
+    /** 요청할 최대 수신 우선순위 — fmtp `mc_reception_priority` 1~255(§14.2.6), <0 = 미기재. */
+    int maxReceptionPriority = -1;
+    /** 호 성립과 함께 송출 요청 — fmtp `mc_implicit_request` + 200 OK 허가 수용 `mc_granted`(§14.2.4·§14.2.5). 서버가 받지 않으면
+     *  (chat 합류·진행 중 prearranged 합류 — §14.3.5) 코어가 명시 Transmission Request 로 잇는다. */
+    bool implicitTransmissionRequest = false;
 };
 
 /** 착신 INVITE 의 mcptt-info(TS 24.379 §F.1) 요약. */
@@ -251,6 +276,10 @@ struct CallInfo {
     int lastCode = 0;
     std::string lastReason;
     std::vector<MediaSource> sources;
+    // ── MC 서비스 ──
+    /** MC 호의 서비스 — MCVideo 그룹 호면 McVideo(그때 isMcptt 는 false, 제어는 전송 제어 — onTransmission·onReception),
+     *  그 밖의 호는 Mcptt(MCPTT 세션인지는 isMcptt). 나가기는 둘 다 hangup(두 호는 독립 다이얼로그 — TS 24.281 §7.1). */
+    McService service = McService::Mcptt;
     // ── MCPTT ──
     bool isMcptt = false;             // 그룹콜/사설콜 세션(floor 평면 있음 또는 mc_no_floor_ctrl)
     std::string groupId;              // 그룹 id(bare) 또는 사설콜 상대(bare)
@@ -312,6 +341,93 @@ struct FloorInfo {
     std::string remoteIp;             // CMP floor 목적지(SDP 학습)
     int remotePort = 0;
     unsigned grantedCount = 0, takenCount = 0, denyCount = 0;   // 누계 — 검증용
+};
+
+// ── MCVideo 전송 제어 participant (TS 24.581 §6.2.4 송출 · §6.2.5 수신) ──
+/** 내 송출 상태 — §6.2.4 'U: …' 상태. 호 성립 전·해제 중('Start-stop'·'Call releasing')은 NoPermission 으로 본다. */
+enum class TransmissionState {
+    NoPermission,                     // 'U: has no permission to transmit'
+    PendingRequest,                   // 'U: pending request to transmit' — Transmission Request 응답 대기(T100·C100)
+    Permitted,                        // 'U: has permission to transmit' — 코어가 audio·video 송출을 연다
+    PendingEnd,                       // 'U: pending end of transmission' — Transmission End Request 응답 대기(T101·C101)
+    Queued                            // 'U: queued transmission'
+};
+/** 한 송출의 내 수신 상태 — 송출마다 'basic reception control' 상태 머신 하나(§6.2.5.1). */
+enum class ReceptionState {
+    Notified,                         // Media Transmission Notification 을 받았다 — 아직 받지 않는다(manual 수신, [받기] 대기)
+    PendingRequest,                   // 'U: pending request to receive' — Receive Media Request 응답 대기(T103·C103)
+    Receiving,                        // 'U: has permission to receive' — 이 송출의 audio·video 를 받는다
+    PendingRelease,                   // 'U: pending reception release' — Media Reception End Request 응답 대기(T104·C104)
+    Ended                             // 'U: terminated' — 송출 종료(Transmission End Notify)·수신 종료·거절
+};
+
+/** 한 송출 — 송출자 한 명의 audio·video RTP 흐름 쌍(Media Transmission Notification §9.2.13). 1차 수신 스트림 상한 = 1
+ *  (user profile `MaxSimultaneousVideoStreams`, mcvideo_dev_plan.md §1 — 한 m=video 의 여러 SSRC 분리는 V8). */
+struct VideoTransmitter {
+    std::string userId;               // User Id of the Transmitting User(MCVideo ID, 서버 표기)
+    uint32_t audioSsrc = 0;           // Audio SSRC of the Transmitting User
+    uint32_t videoSsrc = 0;           // Video SSRC of the Transmitting User
+    std::string functionalAlias;      // Functional Alias(있으면)
+    bool automatic = false;           // Reception Mode '0' — 서버가 곧바로 수신을 허가(긴급·임박·방송·system 호 — §6.3.6.3.3)
+    ReceptionState state = ReceptionState::Notified;
+};
+
+/** 송출 제어 이벤트(§6.2.4) — 상태 전이와 함께 온다. 송출(마이크·카메라) 게이트는 코어가 이미 처리했다. */
+struct TransmissionEvent {
+    enum class Kind {
+        Granted,                      // Transmission Granted — 송출 시작(Audio·Video SSRC 는 서버가 준 값)
+        Rejected,                     // Transmission Rejected(cause = §9.2.6.2)
+        Revoked,                      // Transmission Revoked(cause = §9.2.10.2) — 코어가 송출을 닫았다
+        QueuePosition,                // Queue Position Info
+        EndRequested,                 // 서버 Transmission End Request(cause = §9.2.10.2) — 코어가 응답하고 송출을 닫았다
+        Ended,                        // Transmission End Response — 내 [보내기 끝] 완료
+        ReceiverJoined,               // Media Reception Notification — 누군가 내 송출을 받기 시작했다(receiverId)
+        Idle,                         // Transmission Idle — 그룹에 송출이 없다
+        RequestTimeout,               // 요청 응답 없음(T100×C100 · T101×C101) → NoPermission
+        Other
+    };
+    Kind kind = Kind::Other;
+    int callId = -1;
+    TransmissionState state = TransmissionState::NoPermission;
+    int cause = -1;                   // Rejected·Revoked·EndRequested 의 Reject Cause
+    std::string causeText;            // Reject Phrase(있으면), 없으면 원인 표의 문구
+    int durationSec = -1;             // Granted — 허가된 송출 시간(Duration)
+    int priority = -1;                // Granted — 허가된 송출 우선순위
+    int queuePosition = -1;           // QueuePosition — 254 = 대기 아님, 255 = 알 수 없음(§9.2.3.5)
+    int indicator = 0;                // Transmission Indicator 비트(§9.2.3.11)
+    uint32_t audioSsrc = 0, videoSsrc = 0;   // Granted — 내 송출에 서버가 쓴 SSRC
+    std::string receiverId;           // ReceiverJoined — 받기 시작한 사용자
+    int rawType = -1;                 // 원 메시지 subtype(디버그)
+};
+
+/** 수신 제어 이벤트(§6.2.5) — 새 송출 알림·수신 허가·종료. 수신 스트림 결선(렌더)은 코어가 이미 처리했다. */
+struct ReceptionEvent {
+    enum class Kind {
+        Notified,                     // Media Transmission Notification — 새 송출(manual 이면 앱이 [받기] 를 띄운다)
+        Granted,                      // Receive Media Response(granted) — 또는 automatic 수신 시작
+        Rejected,                     // Receive Media Response(rejected, cause = §9.2.15.2)
+        Ended,                        // Transmission End Notify — 송출자가 송출을 끝냈다
+        Released,                     // Media Reception End Response — 내 [그만 보기] 완료
+        EndRequested,                 // 서버 Media Reception End Request — 코어가 응답하고 수신을 닫았다
+        RequestTimeout,               // 요청 응답 없음(T103×C103 · T104×C104)
+        Other
+    };
+    Kind kind = Kind::Other;
+    int callId = -1;
+    VideoTransmitter transmitter;     // 이 이벤트의 송출(state = 전이 뒤)
+    int cause = -1;
+    std::string causeText;
+    int rawType = -1;
+};
+
+/** MCVideo 호의 전송 제어 현재값(동기 조회 — Engine::transmissionInfo). */
+struct TransmissionInfo {
+    TransmissionState state = TransmissionState::NoPermission;
+    std::vector<VideoTransmitter> transmitters;   // 알려진 송출(내 것 제외) — Ended 는 빠진다
+    int queuePosition = -1;
+    int localPort = 0;                // SDP m=application udp MCVideo 에 광고한 RTCP 포트
+    std::string remoteIp;             // 전송 제어 서버 목적지(SDP 학습)
+    int remotePort = 0;
 };
 
 /** 임의 SIP 요청(PUBLISH 등)의 최종 응답. */
@@ -463,5 +579,10 @@ CIMSUE_API const char* toString(Transport t);
 CIMSUE_API const char* toString(FloorState s);
 CIMSUE_API const char* toString(FloorEvent::Kind k);
 CIMSUE_API const char* toString(ConditionCause c);
+CIMSUE_API const char* toString(McService s);
+CIMSUE_API const char* toString(TransmissionState s);
+CIMSUE_API const char* toString(ReceptionState s);
+CIMSUE_API const char* toString(TransmissionEvent::Kind k);
+CIMSUE_API const char* toString(ReceptionEvent::Kind k);
 
 }  // namespace cimsue
