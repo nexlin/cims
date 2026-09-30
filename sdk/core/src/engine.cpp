@@ -1344,6 +1344,8 @@ public:
         try {
             pj::CallOpParam p;
             p.statusCode = PJSIP_SC_RINGING;
+            pj::SipHeader req; req.hName = "Require"; req.hValue = "timer";   // 수동 개시 180(TS 24.281 §6.2.3.2.1 2)) — 자동 개시도 같은 180
+            p.txOption.headers.push_back(req);
             call->answer(p);
         } catch (pj::Error& e) { o_->log(2, std::string("mcvideo 180 failed: ") + e.info(false)); }
         o_->emit([o = o_, snap] { o->listener->onIncomingCall(snap); });
@@ -2080,10 +2082,11 @@ static Result withCall(Engine::Impl* o, int callId, const std::function<void(PjC
 }
 
 Result Engine::answer(int callId, const CallOptions& opts) {
-    return withCall(impl_.get(), callId, [&](pj::Call& c) {
+    return withCall(impl_.get(), callId, [&](PjCall& c) {
         pj::CallOpParam prm(true);
         prm.statusCode = PJSIP_SC_OK;
-        setCallMedia(prm.opt, opts.video);
+        if (c.mcvideo) setMcVideoMedia(prm.opt);                           // MCVideo 호 = audio + video(TS 24.281 §6.2.2 1)) — 수동 수락도 같다
+        else setCallMedia(prm.opt, opts.video);
         c.answer(prm);
     });
 }

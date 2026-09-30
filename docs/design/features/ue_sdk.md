@@ -421,6 +421,8 @@ MCVideo PSI. 동작(구현 — 시험 `McvSip`·`McvCall`, 계약 K3 골든과 �
   (TS 24.581 §6.3.5.3.8) 브리지 결선만이 아니라 **오디오 인코더를 멈춘다**(무음 프레임도 내지 않는다 — `noVad`) — 새 스트림은 브리지 결선 전(onStreamCreated)
   에 멈추고 허가·재협상마다 다시 건다. 빈 RTP keep-alive(PJMEDIA_STREAM_ENABLE_KA)·RTCP 는 그대로라 NAT·CMP latch 는 유지된다. 제어 채널은 호 성립 때
   1회 + 1 s 간격 2회 + 15 s 주기로 빈 RTCP RR(헤더 SSRC = 전송 제어와 같은 값)을 보낸다(ue_nat_traversal.md §7.1).
+- **수동 개시**(`autoAnswerMcvideo` 끔 — TS 24.281 §6.2.3.2) — 180(`Require: timer` + MCVideo Contact 태그)만 보내고 앱의 `answer()` 를 기다린다. MCVideo 호의
+  수락은 `CallOptions.video` 와 무관하게 audio + video + 제어 채널이다(§6.2.2 — 자동 수락과 같은 미디어 구성).
 - **세션 타이머** — 착신(멤버 초대) 200 OK 는 `Session-Expires: …;refresher=uas` + `Require: timer` 이고 단말이 갱신한다(TS 24.281 §6.2.3.1.1 2)·5) —
   그룹 호 §6.2.3.1.2, §9.2.2.2.1.6 10) «요청에 없으면 uas, 있으면 그 값»; 제어 기능 초대는 refresher 를 싣지 않는다 §6.3.3.1.2 6)). pjsip UAS 는 요청에
   refresher 가 없으면 uac 를 고르므로 수신 모듈(`mod-cimsue-rxfix`, 트랜잭션 계층 앞)이 착신 MCVideo 최초 INVITE 의 Session-Expires 에 `uas` 를 넣고 —

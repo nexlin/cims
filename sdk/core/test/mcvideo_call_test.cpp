@@ -432,6 +432,15 @@ std::string ackFor(const std::string& invite, const std::string& ok, int cspPort
            "\r\nCSeq: " + cseq.substr(0, cseq.find(' ')) + " ACK\r\nContent-Length: 0\r\n\r\n";
 }
 
+/** 제어 기능이 보내는 다이얼로그 안 BYE(해제 — prearranged 참가자 ≤1·chat 0명·T1·TNG3, TS 24.281 §9.2.1.4.2). */
+std::string byeFor(const std::string& invite, const std::string& ok, int cspPort) {
+    const std::string contact = headerOf(ok, "Contact");
+    std::string target = contact.substr(contact.find('<') + 1, contact.find('>') - contact.find('<') - 1);
+    return "BYE " + target + " SIP/2.0\r\nVia: SIP/2.0/UDP 127.0.0.1:" + std::to_string(cspPort) + ";branch=z9hG4bK-bye\r\n" +
+           "Max-Forwards: 70\r\nFrom: " + headerOf(ok, "From") + "\r\nTo: " + headerOf(ok, "To") + "\r\nCall-ID: " + headerOf(ok, "Call-ID") +
+           "\r\nCSeq: " + std::to_string(std::atoi(headerOf(invite, "CSeq").c_str()) + 1) + " BYE\r\nContent-Length: 0\r\n\r\n";
+}
+
 }  // namespace
 
 // ── 경계 코덱 ↔ 골든 ─────────────────────────────────────────────────────────────
@@ -832,6 +841,7 @@ TEST(McvCall, MemberInvitationAutoAnswer) {
     for (const std::string* resp : {&ringing, &okr}) {
         const std::string c = headerOf(*resp, "Contact");
         EXPECT_EQ(c.substr(c.find('>') + 1), mcvideo::contactFeatureParams()) << c;   // §6.2.3.1.1 3)·4) · §6.2.3.2.1 3)·4)
+        EXPECT_NE(headerOf(*resp, "Require").find("timer"), std::string::npos);        // §6.2.3.1.1 2) · §6.2.3.2.1 2)
     }
     const std::string sdp = partOf(okr, "application/sdp");
     std::vector<std::string> m = sdpLines(sdp, "m=");
@@ -868,4 +878,64 @@ TEST(McvCall, MemberInvitationAutoAnswer) {
     std::string bye = r.csp.recv("BYE ");
     ASSERT_FALSE(bye.empty());
     r.csp.reply(bye, 200, "OK");
+}
+
+// 수동 개시(TS 24.281 §6.2.3.2.1 — autoAnswerMcvideo 끔): 180 만 보내고 앱의 answer() 를 기다린다. 앱이 영상 옵션 없이 받아도 MCVideo answer
+//   (audio + video + 제어 채널, §6.2.2)다. 이어서 제어 기능의 해제 BYE(§9.2.1.4.2) — 호가 끝나고 제어 채널 RR 이 멈춘다.
+TEST(McvCall, MemberInvitationManualAnswerAndServerRelease) {
+    Rig r;
+    AccountConfig ac = r.account();
+    ac.msisdn = "+82510002002";
+    ac.authId = "450081000002002@ptt.cims.example.kr";
+    ac.autoAnswerMcvideo = false;
+    r.addAccount(ac);
+    ASSERT_TRUE(r.eng.registerAccount(r.acc).ok);
+    std::string reg = r.csp.recv("REGISTER ");
+    ASSERT_FALSE(reg.empty());
+    const std::string ue = headerOf(reg, "Contact");
+    const std::string ueUri = ue.substr(ue.find('<') + 1, ue.find('>') - ue.find('<') - 1);
+    r.csp.reply(reg, 200, "OK", "Contact: " + ue + ";expires=3600\r\n");
+    ASSERT_TRUE(r.l.wait([&] { for (auto& i : r.l.regs) if (i.state == RegState::Registered) return true; return false; }));
+
+    FakeUdp ctrl, audio, video;
+    std::string inv = sipFixture("07_prearranged_member_invite.txt");
+    inv = "INVITE " + ueUri + " SIP/2.0" + inv.substr(inv.find("\r\n"));
+    inv = replaceAll(inv, "Via: SIP/2.0/TLS csp.ptt.cims.example.kr:5061;branch=z9hG4bK-mcv-fan1",
+                     "Via: SIP/2.0/UDP 127.0.0.1:" + std::to_string(r.csp.port) + ";branch=z9hG4bK-mcv-fan1");
+    inv = localize(inv, 52012, audio.port, 56012, video.port, 58012, ctrl.port, r.csp.port);
+    r.csp.send(inv);
+    std::string ringing = r.csp.recv("SIP/2.0 180");
+    ASSERT_FALSE(ringing.empty());
+    EXPECT_NE(headerOf(ringing, "Require").find("timer"), std::string::npos);        // §6.2.3.2.1 2)
+    EXPECT_TRUE(r.csp.recv("SIP/2.0 200", 800).empty());                          // 앱이 받기 전에는 200 이 없다
+    ASSERT_TRUE(r.l.wait([&] { return !r.l.incoming.empty(); }));
+    CallInfo in;
+    { std::lock_guard<std::mutex> lk(r.l.m); in = r.l.incoming[0]; }
+    EXPECT_EQ(in.service, McService::McVideo);
+    ASSERT_TRUE(r.eng.answer(in.callId, CallOptions{}).ok);                       // 영상 옵션 없이
+    std::string okr = r.csp.recv("SIP/2.0 200");
+    ASSERT_FALSE(okr.empty());
+    EXPECT_EQ(headerOf(okr, "Session-Expires"), "1800;refresher=uas");
+    EXPECT_NE(headerOf(okr, "Require").find("timer"), std::string::npos);
+    const std::string sdp = partOf(okr, "application/sdp");
+    std::vector<std::string> m = sdpLines(sdp, "m=");
+    ASSERT_EQ(m.size(), 3u) << sdp;
+    EXPECT_EQ(m[1].rfind("m=video ", 0), 0u);
+    EXPECT_NE(m[2].find(" udp MCVideo"), std::string::npos) << m[2];
+    EXPECT_NE(std::atoi(m[2].c_str() + 14), 0);
+    std::vector<std::string> fm = sdpLines(sdp, "a=fmtp:MCVideo ");
+    ASSERT_EQ(fm.size(), 1u);
+    EXPECT_EQ(fm[0].rfind("a=fmtp:MCVideo mc_priority=5;mc_transmission_ssrc=", 0), 0u) << fm[0];
+    r.csp.send(ackFor(inv, okr, r.csp.port));
+    uint32_t rrSsrc = 0;
+    ASSERT_TRUE(ctrl.expectRr(rrSsrc, 1000));                                     // 참여자 성립 — 제어 채널 유지 RR
+
+    // 제어 기능의 해제 — 200 OK 로 답하고 호가 끝나며, 제어 채널 유지 RR 이 멈춘다(이 호의 참여자 인스턴스가 닫혔다)
+    r.csp.send(byeFor(inv, okr, r.csp.port));
+    std::string byeOk = r.csp.recv("SIP/2.0 200");
+    ASSERT_FALSE(byeOk.empty());
+    EXPECT_NE(headerOf(byeOk, "CSeq").find("BYE"), std::string::npos);
+    ASSERT_TRUE(r.l.wait([&] { return r.l.hasState(in.callId, CallState::Disconnected); }));
+    EXPECT_FALSE(ctrl.expectRr(rrSsrc, 2500));                                    // 1 s 간격 유지 RR 둘이 남아 있었다면 여기서 보인다
+    EXPECT_EQ(r.eng.transmissionInfo(in.callId).localPort, 0);                     // 끝난 호 — 참여자 없음(기본값)
 }
