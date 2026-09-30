@@ -146,6 +146,12 @@ public:
 	/** 다이얼로그가 응답·in-dialog 요청의 Contact 에 광고할 transport — 응용이 EventIncomingCall 에서 발신자의
 	 *  등록 바인딩 transport 를 넣는다(승격 TCP flow 에 다이얼로그를 묶지 않기 위해). */
 	bool SetContactTransport( const char * pszCallId, ESipTransport eTransport );
+	/** 다이얼로그의 응답·in-dialog 요청 Contact 에 싣을 헤더 파라미터(특성 태그, `;` 구분 원문 — 예
+	 *  `+g.3gpp.mcptt;+g.3gpp.icsi-ref="urn%3A…";isfocus`). 주소는 스택이 정한다. */
+	bool SetContactParams( const char * pszCallId, const char * pszParams );
+	/** 다이얼로그의 세션 타이머 refresher 정책(E_SESSION_REFRESHER_*) — 수신 INVITE 가 refresher 를 지정하지 않았을
+	 *  때 2xx 에서 누가 갱신할지. AcceptCall 전에 부른다. */
+	bool SetSessionRefresher( const char * pszCallId, int iRefresher );
 
 	// SipUserAgentSessionTimer.hpp : 세션 타이머 (RFC 4028)
 	void SetSessionTimer( bool bEnable, int iSessionExpires, int iMinSE, int iRefresher );

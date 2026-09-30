@@ -70,6 +70,13 @@ bool CSipUserAgent::RecvInviteRequest( int iThreadId, CSipMessage * pclsMessage 
 
 			itMap->second.SetRemoteRtp( &clsRtp );
 			itMap->second.SelectLocalRtp( &clsLocalRtp );
+			// answer 는 직전 로컬 선언 그대로가 기본이다 — SelectLocalRtp 가 옮기지 않는 합성 SDP 요소(floor
+			//   m=application 포트·fmtp, 명시 video 포트, 코덱 목록)도 싣는다. 빠지면 아래 SetLocalRtp 가 이를 지워
+			//   세션 갱신 answer 가 m=application 0(floor 거절, RFC 3264 §6)으로 나간다. 응용(EventReInvite)이 바꾸면 그 값.
+			clsLocalRtp.m_iApplicationPort = itMap->second.m_iLocalApplicationPort;
+			clsLocalRtp.m_strApplicationFmtp = itMap->second.m_strLocalApplicationFmtp;
+			clsLocalRtp.m_iVideoPort = itMap->second.m_iLocalVideoPort;
+			clsLocalRtp.m_clsCodecList = itMap->second.m_clsCodecList;
 		}
 	}
 	m_clsDialogMutex.release();
@@ -95,6 +102,12 @@ bool CSipUserAgent::RecvInviteRequest( int iThreadId, CSipMessage * pclsMessage 
 		{
 			itMap->second.SetLocalRtp( &clsLocalRtp );
 			pclsResponse = pclsMessage->CreateResponse( SIP_OK );
+			// 응답은 수신 요청에서 만든다 — 다이얼로그가 정한 Contact transport·파라미터(특성 태그)를 옮겨 싣는다.
+			if( pclsResponse )
+			{
+				pclsResponse->m_iContactTransport = itMap->second.m_iContactTransport;
+				pclsResponse->m_clsContactParams = itMap->second.m_clsContactParams;
+			}
 			// 상대 offer 가 무변경(세션 갱신)이면 answer 도 "변경 없음"으로 표시해야 한다 —
 			//   SDP origin(o=) 세션 버전을 유지한다 (RFC 4028 §7.4).
 			itMap->second.AddSdp( pclsResponse, itMap->second.m_bLastReInviteMediaSame );

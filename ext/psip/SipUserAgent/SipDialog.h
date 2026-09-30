@@ -76,6 +76,8 @@ public:
 	 *  INVITE(m_pclsInvite) 의 CreateResponse 계승으로, in-dialog 요청은 CreateMessage 로
 	 *  CSipMessage::m_iContactTransport 에 전파된다. */
 	int					m_iContactTransport;
+	/** 응답·in-dialog 요청의 자동 Contact 에 덧붙일 헤더 파라미터(특성 태그) — CSipMessage::m_clsContactParams 로 전파 */
+	CSipParameterList	m_clsContactParams;
 
 	/** Per-dialog override domain for From/To/Request-URI.
 	 *  Empty → 전역 CSipStackSetup::m_strDomain fallback.
@@ -194,6 +196,9 @@ public:
 	std::string m_strPeerRefresher;
 	/** 상대가 timer 옵션 태그를 광고했는가 */
 	bool m_bPeerSupportsTimer;
+	/** 이 다이얼로그의 refresher 정책(E_SESSION_REFRESHER_*) — -1 = UA 전역 정책. 상대가 refresher 를 지정하지 않은
+	 *  2xx 에서만 쓴다(RFC 4028 §9 Table 2 — 상대 지정·미지원은 규격이 정한다). */
+	int m_iSessionRefresherPolicy;
 	/** 갱신 요청이 408/481 을 받아 세션이 죽은 것으로 확정됐는가 (§10) */
 	bool m_bSessionTimerDead;
 	/** 422(Session Interval Too Small) 재시도를 이미 했는가 (§7.3 — 1회로 제한) */

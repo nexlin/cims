@@ -140,3 +140,43 @@ bool CSipUserAgent::SetContactTransport( const char * pszCallId, ESipTransport e
 
 	return bRes;
 }
+
+bool CSipUserAgent::SetContactParams( const char * pszCallId, const char * pszParams )
+{
+	if( pszCallId == NULL || pszParams == NULL ) return false;
+
+	CSipParameterList clsParams;
+	if( clsParams.HeaderListParamParse( pszParams, (int)strlen( pszParams ) ) == -1 ) return false;
+
+	bool bRes = false;
+
+	m_clsDialogMutex.acquire();
+	SIP_DIALOG_MAP::iterator itMap = m_clsDialogMap.find( pszCallId );
+	if( itMap != m_clsDialogMap.end() )
+	{
+		itMap->second.m_clsContactParams = clsParams;
+		if( itMap->second.m_pclsInvite ) itMap->second.m_pclsInvite->m_clsContactParams = clsParams;
+		bRes = true;
+	}
+	m_clsDialogMutex.release();
+
+	return bRes;
+}
+
+bool CSipUserAgent::SetSessionRefresher( const char * pszCallId, int iRefresher )
+{
+	if( pszCallId == NULL ) return false;
+
+	bool bRes = false;
+
+	m_clsDialogMutex.acquire();
+	SIP_DIALOG_MAP::iterator itMap = m_clsDialogMap.find( pszCallId );
+	if( itMap != m_clsDialogMap.end() )
+	{
+		itMap->second.m_iSessionRefresherPolicy = iRefresher;
+		bRes = true;
+	}
+	m_clsDialogMutex.release();
+
+	return bRes;
+}

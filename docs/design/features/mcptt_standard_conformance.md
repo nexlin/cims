@@ -388,8 +388,18 @@ affiliation-command 를 보낸다) → ③구형 제거.
 | Accept-Contact | §6.3.3.1.2 2)·4) | `*;+g.3gpp.icsi-ref=…;+g.3gpp.mcptt;require;explicit` |
 | 세션 타이머 | §6.3.3.1.2 — Session-Expires 권고, `refresher` 생략 권고(싣는다면 `uac`) | **편차(권고)** — `refresher=uac` 를 싣는다. 생략하면 단말(UAS)이 갱신자를 고르는데(부록 A.1.3-24 예 = `uas`), CIMS 는 서버가 갱신자를 맡아 단말 구현과 무관하게 사라진 leg 을 회수한다([leg_liveness.md](leg_liveness.md) §5.3). 규격이 허용하는 값이다 |
 
-남은 편차 — Contact 의 세션 식별자는 세션마다 새로 만들지 않고 그룹 id 를 쓴다(`sip:<그룹>@<CSP>`). 개시자 200 OK(§6.3.3.2.3.1·§6.3.3.2.3.2)는 아직 규격 모양이 아니다 — Contact 에 `g.3gpp.mcptt`·`g.3gpp.icsi-ref`·`isfocus` 가 없고, `Session-Expires` 의 refresher 가
-psip 로컬 정책(`uas`)이다(§6.3.3.2.3.2 2) = `uac` 로 정한다 — 단말이 갱신자).
+### C4b. 개시자 응답 (제어 기능 → 개시자) — §6.3.3.2.3
+
+| 요소 | 규격 | 동작 |
+|---|---|---|
+| Contact | §6.3.3.2.3.2 5)·6) — 세션 식별자 + `g.3gpp.mcptt`·`g.3gpp.icsi-ref`·`isfocus` | C4a 와 같은 태그. 주소는 psip 이 수신 listener 로 정하고 CSP 는 태그만 준다(`SetContactParams`) — 갱신 re-INVITE 2xx·이후 in-dialog 요청(조건 재광고·BYE)에도 실린다 |
+| 세션 타이머 | 2) refresher = `uac` · 3) `Require: timer` | 개시자가 refresher 를 지정하지 않았으면 `uac`(단말 갱신, CSP 만료 감시) + `Require: timer`. 개시자가 지정했거나 timer 미지원이면 RFC 4028 §9 Table 2(미지원 = `uas`) — [leg_liveness.md](leg_liveness.md) §5.3 |
+| P-Asserted-Identity | 4) 제어 기능 PSI | 그룹 URI(`<sip:<그룹>@<PTT 도메인>>`) — 멤버 leg INVITE 의 PAI 와 같은 신원 |
+| Supported | 8) `tdialog`(RFC 4538) | `Supported: tdialog` |
+| Warning | 7) 받은 응답의 Warning 을 옮긴다 | 해당 없음 — 개시자 200 OK 를 멤버 응답을 기다리지 않고 보낸다(자동 응답, 아래 편차) |
+
+남은 편차 — Contact 의 세션 식별자는 세션마다 새로 만들지 않고 그룹 id 를 쓴다(`sip:<그룹>@<CSP>`). 개시자 200 OK 는 멤버 응답을 기다리지 않는다
+(acknowledged call setup·`<on-network-minimum-number-to-start>` 미구현 — 멤버 응답의 Warning 을 옮길 자리가 없다). 18x 는 보내지 않는다(§6.3.3.2.3.1 은 보낼 때의 규칙).
 
 ### C5. 등록/구독 SIP 메시지 — 실망(상용 IMS) 패킷 형태 정합
 

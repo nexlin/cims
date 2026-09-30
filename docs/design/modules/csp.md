@@ -331,7 +331,8 @@ INVITE to group@domain
   ├─ 그룹 존재/세션 시간 유효성 확인
   ├─ CMP addGroup → 공유 RTP 포트 + Floor 포트 할당
   │   (record_dir 전달)
-  ├─ 발신자에게 200 OK (공유 RTP 주소)
+  ├─ 발신자에게 200 OK (공유 RTP 주소 · Contact 특성 태그+isfocus · Session-Expires refresher=uac +
+  │   Require: timer · PAI = 그룹 URI · Supported: tdialog — TS 24.379 §6.3.3.2.3.2)
   ├─ 매핑: callerId → groupId (m_mapUserCall)
   │
   └─ 각 그룹 멤버에 대해:

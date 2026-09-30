@@ -597,6 +597,13 @@ void CSipStack::CheckSipMessage( CSipMessage * pclsMessage )
 
 		clsContact.m_clsUri.InsertTransport( eTransport );
 
+		// 응용이 정한 헤더 파라미터(특성 태그 — RFC 3840 §9)를 주소 뒤에 싣는다.
+		for( SIP_PARAMETER_LIST::iterator itP = pclsMessage->m_clsContactParams.m_clsParamList.begin();
+		     itP != pclsMessage->m_clsContactParams.m_clsParamList.end(); ++itP )
+		{
+			clsContact.m_clsParamList.push_back( *itP );
+		}
+
 		pclsMessage->m_clsContactList.push_back( clsContact );
 	}
 

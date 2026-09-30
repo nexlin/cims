@@ -143,6 +143,11 @@ public:
 	 *  CSipDialog::m_iContactTransport 가 응답(CreateResponse 계승)·in-dialog 요청(CreateMessage)으로 전파한다. */
 	int							m_iContactTransport;
 
+	/** Contact 자동 생성 시 URI 뒤에 덧붙일 헤더 파라미터(RFC 3840 특성 태그 등 — 예: `+g.3gpp.mcptt`·`isfocus`).
+	 *  주소는 스택이 수신 listener 로 정하고 응용은 파라미터만 정한다. CSipDialog::m_clsContactParams 가
+	 *  m_iContactTransport 와 같은 경로(응답·in-dialog 요청)로 전파한다. */
+	CSipParameterList		m_clsContactParams;
+
 	// SIP 메시지를 전송한 클라이언트의 IP 주소
 	std::string			m_strClientIp;
 

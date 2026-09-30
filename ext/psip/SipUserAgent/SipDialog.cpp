@@ -32,7 +32,7 @@ CSipDialog::CSipDialog( CSipStack * pclsSipStack ) : m_iSeq(0), m_iNextSeq(0), m
 	, m_iSessionVersion(0)
 	, m_bSendCall(true)
 	, m_iSessionExpires(0), m_bLocalRefresher(false), m_iLastRefreshTime(0), m_iRefreshSentTime(0)
-	, m_iPeerMinSE(0), m_iPeerSessionExpires(0), m_bPeerSupportsTimer(false)
+	, m_iPeerMinSE(0), m_iPeerSessionExpires(0), m_bPeerSupportsTimer(false), m_iSessionRefresherPolicy(-1)
 	, m_bSessionTimerDead(false), m_bSessionTimerRetried(false), m_bLastReInviteMediaSame(false)
 {
 	memset( &m_sttInviteTime, 0, sizeof(m_sttInviteTime) );
@@ -652,6 +652,7 @@ CSipMessage * CSipDialog::CreateMessage( const char * pszSipMethod )
 
 	pclsMessage->m_eTransport = m_eTransport;
 	pclsMessage->m_iContactTransport = m_iContactTransport;
+	pclsMessage->m_clsContactParams = m_clsContactParams;
 	pclsMessage->m_strSipMethod = pszSipMethod;
 
 	if( m_strContactUri.empty() == false )

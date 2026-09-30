@@ -144,6 +144,14 @@ RFC 4028 §9 Table 2 는 UAS 의 선택지를 다음으로 제한하므로, 규�
 설정 `Refresher` 로 `server`(기본) / `ue` / `auto` 를 고를 수 있게 하되, 규격상 뒤집을 수 없는
 조합에서는 항상 규격이 우선한다.
 
+**절차 규격이 갱신자를 정한 leg 은 다이얼로그 정책이 전역 정책을 대신한다**(psip `SetSessionRefresher(callId, …)`,
+"요청의 refresher 없음" 줄에만 쓰인다):
+
+| leg | 규격 | 선택 |
+|---|---|---|
+| MCPTT 개시자 → 제어 기능 200 OK | TS 24.379 §6.3.3.2.3.2 2) — refresher = `uac` | **단말이 갱신**, CSP 는 만료 감시(§6.2). timer 미지원 단말은 위 표 첫 줄대로 `uas`(CSP 갱신) |
+| 제어 기능 → 멤버 INVITE | §6.3.3.1.2 — refresher 생략 권고, 싣는다면 `uac` | `uac`(CSP 갱신) — 허용 값, 권고 편차([mcptt_standard_conformance.md](mcptt_standard_conformance.md) §C4a) |
+
 ## 6. 갱신 절차
 
 ### 6.1 서버가 갱신하는 경우 (기본)
@@ -184,6 +192,8 @@ CSP 는 아무것도 보내지 않고 in-dialog re-INVITE(또는 향후 UPDATE) 
 | 수신 갱신 re-INVITE 는 **미디어 재협상으로 처리하지 않는다** | 선언 주소·코덱이 직전과 같으면 CMP `RELAY_MODIFY`/`PTT_JOIN` 재호출과 NAT latch 재평가를 생략한다(`CModuleDispatcher::EventReInvite`). 불필요한 latch 리셋은 NAT 뒤 단말의 하향 경로를 흔든다 |
 | 갱신 수단은 당분간 **re-INVITE** | psip 은 UPDATE 를 구현하지 않는다(`SIP_METHOD_UPDATE` 부재). 다이얼로그 `Allow` 에도 UPDATE 가 없어 규격 준수 단말은 re-INVITE 를 쓴다([§12](#12-호환성리스크)) |
 | 조건 상향 등 다른 목적의 in-dialog re-INVITE 도 **갱신으로 계산**한다 | §7.2 — 중복 갱신을 줄인다 |
+| 수신 갱신의 answer 는 **직전 로컬 선언 그대로**다 — floor `m=application` 포트·fmtp·명시 video 포트·코덱 목록 포함 | 로컬 RTP 를 다시 읽어 쓰는 경로가 합성 SDP 요소를 옮기지 않으면 answer 가 `m=application 0`(floor 거절, RFC 3264 §6)으로 나가 규격 단말은 floor 를 끈다(`RecvInviteRequest`) |
+| 수신 갱신 2xx 의 Contact 도 **다이얼로그가 정한 transport·특성 태그**로 광고한다 | 응답은 수신 요청에서 만들어지므로 다이얼로그 값(`SetContactTransport`·`SetContactParams`)을 옮겨 싣는다 — MCPTT focus 의 `isfocus` 등이 갱신마다 빠지지 않게 |
 
 ## 7. 만료·실패 처리 = 기존 teardown 연쇄
 
@@ -259,6 +269,7 @@ CSP 의 정상 호처리량 대비 무시할 수준이다.
 | psip | `SipUserAgent/SipDialog` | [§4](#4-상태-모델) 상태 필드 + `CreateInvite(bKeepSdpVersion)` / `AddSdp(msg, bKeepSdpVersion)` — 갱신 시 `o=` 세션 버전 유지 |
 | psip | `SipUserAgentInvite.hpp` `RecvInviteRequest` | 초기 INVITE 협상 입력 보관 / re-INVITE = 갱신 인지(+미디어 무변경 판정 — 주소·포트(audio/video/application)·**방향 속성**이 전부 같을 때만. `a=sendonly`/`inactive` 로 바뀐 hold re-INVITE 는 미디어 변경(RFC 3264 §8.4)이라 CSP `EventReInvite` 가 보류 음악을 처리한다) + 자동 200 OK 에 `Session-Expires` echo / SE < 최소치면 422 + `Min-SE` |
 | psip | `SipUserAgentCall.hpp` `AcceptCall`·`CreateCall`, `SipUserAgent.cpp` `SendInvite` | 2xx 에 협상 결과, 송신 INVITE 에 `Supported: timer`·`Session-Expires`·`Min-SE` |
+| psip | `SipUserAgentLegDest.hpp` `SetSessionRefresher` | 다이얼로그 refresher 정책(§5.3 — 절차 규격이 정한 leg). AcceptCall 전에 부른다 |
 | psip | `SipUserAgent.cpp` `SetInviteResponse` | 2xx 수신 시 타이머 확정 / 422 는 `Min-SE` 반영 1회 재시도(§7.3) / 갱신의 408·481 은 세션 사망 표시(§10) |
 | psip | `SipUserAgentSipStack.hpp` `SendTimeout` | 현행 유지 — 갱신 무응답이 곧 `EventCallEnd(SIP_GONE)` |
 | psip | `SipUserAgentCallBack.h` `EventGetLegDest` | 서버 발신 in-dialog 요청의 현재 도달 주소를 응용에 묻는다. 기본 구현은 `false`(기존 동작 유지)라 다른 psip 사용자는 영향 없다. 콜백은 **다이얼로그 락 밖**에서 호출한다(psip 규약 — 응용이 자기 자료구조 락을 잡으므로 락 순서 역전 여지 제거) |

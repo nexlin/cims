@@ -172,8 +172,18 @@ P3(ptt-client SDK 전환) 실측에서 더 드러난 것 — .48 반영·배포(
 | M7 Contact 특성 태그 · refresher | ✅ / 편차 | Contact = `+g.3gpp.mcptt;+g.3gpp.icsi-ref="…mcptt";isfocus` · 서비스 식별 = `P-Asserted-Service`(§6.3.3.1.2 3), RFC 6050 — 경보 팬아웃의 `P-Asserted-Service-Id` 도 헤더 이름을 바로잡음). **refresher 는 `uac` 유지** — 규격은 "생략 권고, 싣는다면 uac" 라 허용 값이고, 생략하면 단말이 갱신자를 골라(부록 A.1.3-24 = uas) 서버측 leg 회수(leg_liveness §5.3)가 단말 구현에 기대게 된다 → 권고 편차로 [mcptt_standard_conformance.md](../design/features/mcptt_standard_conformance.md) §C4a | 와이어 확인 · 경보 fanout=1 수신 |
 | M8 영상 키프레임 INFO 501 | ✅(단말) | 서버는 그대로 — INFO 는 Allow 에 없고 501 은 RFC 3261 §8.2.1 대로다. 키프레임 요청의 규격 경로는 RTCP AVPF PLI/FIR(TS 26.114 §7.3)라 **SDK 가 SIP INFO 를 보내지 않는다**(`reqKeyframeMethod = RTCP_PLI` — 발신·응답·재개) | Linux 빌드는 영상 off(`PJMEDIA_HAS_VIDEO 0`)라 실측 불가 — `cimsue_test` 86 OK·음성 호 회귀. **Android·Windows 는 재빌드 뒤 영상 호에서 INFO 가 없는지 확인(.45)** |
 
-- **남은 것(.48)** — 개시자 200 OK(§6.3.3.2.3.1·§6.3.3.2.3.2)가 아직 규격 모양이 아니다: Contact 에 특성 태그·`isfocus` 없음, `Session-Expires` refresher 가
-  `uas`(규격 = `uac`). Contact 세션 식별자 = 그룹 id(세션마다 새로 만들지 않음). §C4a 편차 표.
+- **개시자 200 OK 규격화(§6.3.3.2.3.2) — 반영(csp 0.2.171)** — Contact 특성 태그+`isfocus`(psip `SetContactParams` — 주소는 스택, 갱신 re-INVITE 2xx·
+  in-dialog 요청에도) · refresher `uac`+`Require: timer`(psip 다이얼로그 정책 `SetSessionRefresher` — **이제 개시 단말이 90 s 마다 갱신**하고 CSP 는 만료 감시,
+  timer 미지원 단말은 RFC 4028 대로 `uas`) · PAI = 그룹 URI · `Supported: tdialog`. 같이 고친 psip 결함 = **세션 갱신 answer 가 `m=application 0`**(floor
+  거절)으로 나가던 것 — 수신 re-INVITE 경로가 floor 포트·fmtp·video 포트·코덱 목록을 잃었다. 규격 단말이면 첫 갱신(90 s)에 floor 가 꺼진다.
+  실측: 013→g005(014) 150 s 호 — 단말 갱신 re-INVITE 200(태그·`m=application 54018`)·CSP→멤버 갱신 200, floor 8/8 승인 · 긴급 상향/하향 200·멤버 재광고 수신 ·
+  계측기 PTT 8종·VoLTE hold/TLS 4종 pass · psip 단위시험 H·I. **.45 확인** — Android·Windows 단말이 개시자 leg 갱신 re-INVITE 를 보내는지(pjsua 기본 timer
+  OPTIONAL 이면 보낸다), 갱신 없이 180 s 에 끊기는 단말이 없는지.
+- **새로 드러난 것 — in-dialog 목적지 재해석이 다이얼로그 상대가 아니라 AoR 대표 바인딩을 고른다** — 같은 AoR 에 단말이 둘이면(다중 단말, 계측기 워커 상시 풀 +
+  cimsue-cli) CSP 의 멤버 leg 갱신 re-INVITE 가 **다른 단말**로 가서 leg 이 끊겼다(`LegDest … :56390 → :54350`). `EventGetLegDest` 가 `UserMap.Select(peer)`
+  한 건만 본다 — 다이얼로그가 묶인 바인딩(Contact·`+sip.instance`)으로 골라야 한다([registration_binding_set.md](../design/features/registration_binding_set.md)·
+  [leg_liveness.md](../design/features/leg_liveness.md) §6.3). 미반영.
+- 남은 편차 — Contact 세션 식별자 = 그룹 id · 개시자 200 OK 가 멤버 응답을 기다리지 않음(acknowledged call setup 미구현) — §C4a·§C4b.
 - **cimsue-cli 관찰** — `--from-profile ptt` 로 띄우면 `--mcptt-psi` 가 먹지 않는다(경보 R-URI = 그룹, 전환기로 200). 명시 계정(`--server …`)으로는 PSI.
 
 - 참고(관찰): 두 단말이 같은 사내 NAT 뒤에서 영상 통화할 때 CMP 가 한 peer 자리의 RTCP 목적지를 두 포트 사이에서 몇 초마다 다시 latch 하고, 다른 peer 의

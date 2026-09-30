@@ -36,6 +36,12 @@
 #include "SipUserAgent.h"
 #include "UserMap.h"
 
+// 제어 기능이 자기 Contact 에 싣는 특성 태그 — MCPTT 세션 식별자 + g.3gpp.mcptt·g.3gpp.icsi-ref·isfocus
+//   (TS 24.379 §6.3.3.1.2 1)·§6.3.3.2.3.1 3)4)·§6.3.3.2.3.2 5)6), RFC 3840 §9 — 확장 태그는 `+`, isfocus 는 기본 태그).
+//   멤버 leg INVITE·개시자 18x/200 OK·이후 in-dialog 요청이 같은 값을 쓴다.
+static const char *kFocusContactParams =
+    "+g.3gpp.mcptt;+g.3gpp.icsi-ref=\"urn%3Aurn-7%3A3gpp-service.ims.icsi.mcptt\";isfocus";
+
 // CspServer.cpp — PTT 세션 참가 leg 의 dialog-event NOTIFY (dispatch_center.md §5.6a)
 extern void SendPttDialogEventNotify( const std::string &strWatchedAor, const std::string &strDlgCallId,
                                       const std::string &strState, bool bInitiator, const std::string &strSessionUri,
@@ -648,6 +654,13 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
             std::string strMcpttDomain = gclsServiceMap.GetDomainByKind( "ptt" );
             if ( !strMcpttDomain.empty() ) gclsUserAgent.SetCallDomain( pszCallId, strMcpttDomain.c_str() );
         }
+        // 제어 기능의 200 OK (TS 24.379 §6.3.3.2.3.2) — Contact 특성 태그(5)·6)), refresher = uac(2)) + Require:
+        // timer(3)).
+        //   refresher 는 개시자가 지정하지 않았을 때만 정한다 — 지정했거나 timer 미지원이면 RFC 4028 §9 Table 2 가
+        //   정한 값이다(미지원 UAC 는 갱신할 수 없어 uas). 단말이 갱신하고 CSP 는 만료를 감시한다(leg_liveness.md
+        //   §5.3).
+        gclsUserAgent.SetContactParams( pszCallId, kFocusContactParams );
+        gclsUserAgent.SetSessionRefresher( pszCallId, E_SESSION_REFRESHER_REMOTE );
         CSipCallRtp clsCallerRtp;
         clsCallerRtp.SetIpPort( strSharedIp.c_str(), iCallerLocalAudio, SOCKET_COUNT_PER_MEDIA );
         // 서비스 코덱 (Setup.Media.Codecs 최우선 — 기본 AMR-WB). answer 의 실 wire PT 는
@@ -674,9 +687,6 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
             clsCallerRtp.m_strLocalCryptoSuite = strCallerSuite;
             clsCallerRtp.m_strLocalCryptoKey = strCallerSrvKey;
         }
-        // 진행 중 조건(긴급/임박) 세션이면 200 OK 에 mcptt-info 로 현재 상태를 동봉 — 조인/재조인
-        //   단말이 개시자의 다음 발언(floor TAKEN)을 기다리지 않고 즉시 세션 긴급 표시를 갖는다
-        //   (TS 24.379, §9-5 멤버 전파). normal 세션은 기존 단일 SDP 200 OK 그대로.
         // 합류 중 자격 회수 재확인 — 아직 200 OK 전이라 403 으로 끝낼 수 있다.
         if ( bListen && CspAuthz::PolicyGeneration() != uListenAuthzGen ) {
             const std::string strLost = ListenDenyReason( clsGroup, pszCallerInfo );
@@ -693,22 +703,31 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
             }
         }
         bool bAccepted;
-        if ( iCondEff > 0 ) {
+        {
             CSipMessage *pclsOk = NULL;
             bAccepted = gclsUserAgent.AcceptCall( pszCallId, &clsCallerRtp, &pclsOk );
             if ( bAccepted ) {
-                std::string strCondActor = pszCallerInfo;
-                {
-                    std::unique_lock<std::recursive_mutex> lock( m_mutex );
-                    auto ita = m_mapGroupCondActor.find( pszGroupId );
-                    if ( ita != m_mapGroupCondActor.end() && !ita->second.empty() ) strCondActor = ita->second;
+                // §6.3.3.2.3.2 4) P-Asserted-Identity = 제어 기능 PSI(그룹 URI — 멤버 leg INVITE 의 PAI 와 같다),
+                //   8) Supported: tdialog (RFC 4538)
+                const std::string strPsi =
+                    "<sip:" + std::string( pszGroupId ) + "@" + gclsServiceMap.GetDomainByKind( "ptt" ) + ">";
+                pclsOk->AddHeader( "P-Asserted-Identity", strPsi.c_str() );
+                pclsOk->AddHeader( "Supported", "tdialog" );
+                // 진행 중 조건(긴급/임박) 세션이면 200 OK 에 mcptt-info 로 현재 상태를 동봉 — 조인/재조인
+                //   단말이 개시자의 다음 발언(floor TAKEN)을 기다리지 않고 즉시 세션 긴급 표시를 갖는다
+                //   (TS 24.379, §9-5 멤버 전파). normal 세션은 단일 SDP 200 OK 그대로.
+                if ( iCondEff > 0 ) {
+                    std::string strCondActor = pszCallerInfo;
+                    {
+                        std::unique_lock<std::recursive_mutex> lock( m_mutex );
+                        auto ita = m_mapGroupCondActor.find( pszGroupId );
+                        if ( ita != m_mapGroupCondActor.end() && !ita->second.empty() ) strCondActor = ita->second;
+                    }
+                    WrapInfoMultipart( pclsOk, BuildGroupInfoXml( clsGroup, pszCallerInfo, strCondActor, iCondEff,
+                                                                  false, SessionOf( pszGroupId ).bBroadcast ) );
                 }
-                WrapInfoMultipart( pclsOk, BuildGroupInfoXml( clsGroup, pszCallerInfo, strCondActor, iCondEff, false,
-                                                              SessionOf( pszGroupId ).bBroadcast ) );
                 bAccepted = gclsUserAgent.m_clsSipStack.SendSipMessage( pclsOk );
             }
-        } else {
-            bAccepted = gclsUserAgent.AcceptCall( pszCallId, &clsCallerRtp );
         }
         if ( !bAccepted ) {
             CLog::Print( LOG_ERROR, "ProcessGroupCall: AcceptCall failed for Caller(%s)", pszCallerInfo );
@@ -1503,8 +1522,9 @@ bool CGroupCallService::InviteMember( const char *pszUserId, const char *pszGrou
             char szPCalledParty[256];
             snprintf( szPCalledParty, sizeof( szPCalledParty ), "<sip:%s@%s>", pszUserId, strMcpttDomain.c_str() );
             pclsInvite->AddHeader( "P-Called-Party-ID", szPCalledParty );
-            // Contact 특성 태그 = g.3gpp.mcptt · g.3gpp.icsi-ref(MCPTT ICSI) · isfocus (TS 24.379 §6.3.3.1.2 1),
-            //   RFC 3840 §9 — 확장 태그는 `+` 접두, isfocus 는 기본 태그).
+            // Contact 특성 태그 = kFocusContactParams (TS 24.379 §6.3.3.1.2 1)) — 이후 in-dialog 요청(조건 재광고
+            //   re-INVITE·BYE)도 같은 태그를 싣도록 다이얼로그에도 둔다.
+            gclsUserAgent.SetContactParams( strCallId.c_str(), kFocusContactParams );
             // INVITE 의 Contact 는 정확히 1개여야 한다(RFC 3261 §8.1.1.8). 스택은 전송 직전
             // m_clsContactList 가 비어 있을 때만 자동 Contact 를 넣으므로(SipStackComm),
             // 라우팅 가능한 자기 주소 Contact 를 구조화 리스트에 직접 1개 채운다.
@@ -1517,9 +1537,7 @@ bool CGroupCallService::InviteMember( const char *pszUserId, const char *pszGrou
                 CspAddressing::FillSelfContact( clsContact, clsRoute.m_eTransport, pszGroupId );
                 if ( !clsRoute.m_strOutboundLocalIp.empty() )
                     clsContact.m_clsUri.m_strHost = clsRoute.m_strOutboundLocalIp;
-                clsContact.InsertParam( "+g.3gpp.mcptt", "" );
-                clsContact.InsertParam( "+g.3gpp.icsi-ref", "\"urn%3Aurn-7%3A3gpp-service.ims.icsi.mcptt\"" );
-                clsContact.InsertParam( "isfocus", "" );
+                clsContact.HeaderListParamParse( kFocusContactParams, (int)strlen( kFocusContactParams ) );
                 pclsInvite->m_clsContactList.clear();
                 pclsInvite->m_clsContactList.push_back( clsContact );
             }

@@ -159,7 +159,9 @@ void CSipUserAgent::SessionTimerAddToResponse( CSipDialog & clsDialog, CSipMessa
 	}
 	else
 	{
-		bLocal = ( m_iSessionTimerRefresher == E_SESSION_REFRESHER_LOCAL );		// 미지정 → 로컬 정책
+		// 미지정 → 다이얼로그 정책(응용이 절차 규격으로 정한 값), 없으면 UA 전역 정책
+		const int iPolicy = ( clsDialog.m_iSessionRefresherPolicy >= 0 ) ? clsDialog.m_iSessionRefresherPolicy : m_iSessionTimerRefresher;
+		bLocal = ( iPolicy == E_SESSION_REFRESHER_LOCAL );
 	}
 
 	char	szValue[64];

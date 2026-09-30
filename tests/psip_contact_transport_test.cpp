@@ -13,6 +13,10 @@
 //   E. 울리는 INVITE 에 다른 연결(다른 sent-by)의 CANCEL → 481, INVITE 는 계속 울림(정리는 UAS StopCall)
 //   F. 대응 INVITE 가 없는 CANCEL → 481
 //   G. 같은 연결이지만 branch 가 다른 CANCEL → 481, 이어서 올바른 CANCEL 은 200 + 487
+//   H. 응용 SetContactParams(특성 태그)·SetSessionRefresher(REMOTE), INVITE 가 timer 지원·refresher 미지정
+//      → 200 OK Contact 에 태그, Session-Expires refresher=uac + Require: timer, 서버 BYE Contact 에도 태그
+//      (MCPTT 제어 기능 200 OK — TS 24.379 §6.3.3.2.3.2, RFC 4028 §9)
+//   I. 같은 정책, INVITE 가 timer 미지원 → refresher=uas (RFC 4028 §9 Table 2 — 갱신할 수 없는 UAC 에 맡기지 않는다)
 //
 //   빌드(csp 빌드 뒤 — psip 정적 라이브러리 사용, 127.0.0.1 포트만 사용해 라이브 서비스와 무관):
 //     g++ -std=c++17 -D__LINUX__ -D_REENTRANT -I ext/psip/SipUserAgent -I ext/psip/SipStack -I ext/psip/SipParser \
@@ -61,6 +65,7 @@ public:
 	CSipUserAgent * m_pclsUa = NULL;
 	bool m_bOverrideUdp = false;		// EventIncomingCall 에서 SetContactTransport(UDP)
 	bool m_bRingOnly = false;			// true = 180 만 보내고 기다림 (CANCEL 시험)
+	bool m_bFocus = false;				// EventIncomingCall 에서 SetContactParams(특성 태그) + SetSessionRefresher(REMOTE)
 	std::atomic<int> m_iAuthCancel{ 0 };	// EventIncomingRequestAuth 가 CANCEL 로 불린 횟수 (0 이어야 한다)
 	std::atomic<int> m_iEnded{ 0 };
 
@@ -68,10 +73,16 @@ public:
 	void EventIncomingCall( const char * pszCallId, const char *, const char *, CSipCallRtp *, CSipMessage * ) override
 	{
 		if( m_bOverrideUdp ) m_pclsUa->SetContactTransport( pszCallId, E_SIP_UDP );
+		if( m_bFocus )
+		{
+			m_pclsUa->SetContactParams( pszCallId, "+g.3gpp.mcptt;+g.3gpp.icsi-ref=\"urn%3Aurn-7%3A3gpp-service.ims.icsi.mcptt\";isfocus" );
+			m_pclsUa->SetSessionRefresher( pszCallId, E_SESSION_REFRESHER_REMOTE );
+		}
 		CSipCallRtp clsLocal;
 		clsLocal.m_strIp = UA_IP;
 		clsLocal.m_iPort = 40000;
 		clsLocal.m_iCodec = 0;
+		if( m_bFocus ) clsLocal.m_iApplicationPort = 40001;		// MCPTT floor m=application (합성 SDP)
 		if( m_bRingOnly ) m_pclsUa->RingCall( pszCallId, 180, &clsLocal );
 		else m_pclsUa->AcceptCall( pszCallId, &clsLocal );
 	}
@@ -151,9 +162,14 @@ static int PortOfContact( const std::string & strContact )
 }
 
 // UDP 등록 단말 흉내: 승격 TCP 연결 c 로 INVITE (Contact = 자기 UDP 바인딩 ;ob). branch 를 돌려준다.
-static std::string SendInvite( CConn & c, const std::string & strCallId, int iUeUdpPort )
+// MCPTT 단말 offer — 음성 + floor(m=application, TS 24.379 §6.2.1)
+static const char * SDP_MCPTT = "v=0\r\no=ue 1 1 IN IP4 127.0.0.1\r\ns=-\r\nc=IN IP4 127.0.0.1\r\nt=0 0\r\n"
+	"m=audio 40002 RTP/AVP 0\r\na=rtpmap:0 PCMU/8000\r\nm=application 40003 udp MCPTT\r\na=fmtp:MCPTT mc_queueing\r\n";
+
+static std::string SendInvite( CConn & c, const std::string & strCallId, int iUeUdpPort, const char * pszExtraHdrs = "",
+                               const char * pszSdpIn = NULL )
 {
-	const char * pszSdp = "v=0\r\no=ue 1 1 IN IP4 127.0.0.1\r\ns=-\r\nc=IN IP4 127.0.0.1\r\nt=0 0\r\n"
+	const char * pszSdp = pszSdpIn ? pszSdpIn : "v=0\r\no=ue 1 1 IN IP4 127.0.0.1\r\ns=-\r\nc=IN IP4 127.0.0.1\r\nt=0 0\r\n"
 		"m=audio 40002 RTP/AVP 0\r\na=rtpmap:0 PCMU/8000\r\n";
 	char szBranch[64]; snprintf( szBranch, sizeof(szBranch), "z9hG4bK-ct-%d", ++g_iSeq );
 	char szInvite[4096];
@@ -166,10 +182,11 @@ static std::string SendInvite( CConn & c, const std::string & strCallId, int iUe
 		"Call-ID: %s\r\n"
 		"CSeq: 1 INVITE\r\n"
 		"Contact: <sip:ue@%s:%d;ob>\r\n"
+		"%s"
 		"Content-Type: application/sdp\r\n"
 		"Content-Length: %d\r\n\r\n%s",
 		UA_IP, g_iTcpPort, UA_IP, c.iLocalPort, szBranch, g_iSeq, strCallId.c_str(), UA_IP, iUeUdpPort,
-		(int)strlen( pszSdp ), pszSdp );
+		pszExtraHdrs, (int)strlen( pszSdp ), pszSdp );
 	ConnSend( c, std::string( szInvite, iLen ) );
 	return szBranch;
 }
@@ -249,9 +266,10 @@ static bool UdpExpect( int fd, const char * pszMethod, int iTimeoutMs, std::stri
 }
 
 // INVITE 를 보내고 200 OK 까지 받아 ACK. 200 OK 의 Contact 를 돌려준다.
-static bool InviteAndAck( CConn & c, const std::string & strCallId, int iUeUdpPort, std::string & strContact200 )
+static bool InviteAndAck( CConn & c, const std::string & strCallId, int iUeUdpPort, std::string & strContact200,
+                          const char * pszExtraHdrs = "", std::string * pstr200 = NULL, const char * pszSdp = NULL )
 {
-	SendInvite( c, strCallId, iUeUdpPort );
+	SendInvite( c, strCallId, iUeUdpPort, pszExtraHdrs, pszSdp );
 	int iFromTag = g_iSeq;
 	std::string strRx;
 	if( ConnRecvUntil( c, "SIP/2.0 200", 3000, strRx ) == false ) { printf( "  (no 200 OK to INVITE)\n" ); return false; }
@@ -259,6 +277,7 @@ static bool InviteAndAck( CConn & c, const std::string & strCallId, int iUeUdpPo
 	for( int i = 0; i < 20 && strRx.find( "\r\n\r\n", p200 ) == std::string::npos; ++i ) ConnRecvUntil( c, "\r\n\r\n", 200, strRx );
 	std::string strTo = HeaderOf( strRx, p200, "To" );
 	strContact200 = HeaderOf( strRx, p200, "Contact" );
+	if( pstr200 ) *pstr200 = strRx.substr( p200 );
 	SendAck( c, strCallId, strTo, iFromTag );
 	usleep( 200 * 1000 );
 	return true;
@@ -395,6 +414,82 @@ int main( int argc, char * argv[] )
 	std::string strRxF;
 	CHECK( ConnRecvUntil( cF, "SIP/2.0 481", 3000, strRxF ), "481 Call/Transaction Does Not Exist" );
 	ConnClose( cF );
+
+	// ── H. 제어 기능 200 OK — Contact 특성 태그 + refresher=uac(상대 갱신) + Require: timer ──
+	printf( "[H] app SetContactParams + SetSessionRefresher(REMOTE), timer-capable INVITE: tags, refresher=uac, Require: timer\n" );
+	clsUa.SetSessionTimer( true, 180, 90, E_SESSION_REFRESHER_LOCAL );		// UA 전역 = 서버 갱신 — 다이얼로그 정책이 이긴다
+	clsCb.m_bRingOnly = false;
+	clsCb.m_bFocus = true;
+	CConn cH;
+	std::string str200;
+	CHECK( ConnOpen( cH ), "TCP connect" );
+	CHECK( InviteAndAck( cH, "ct-H@test", iUePort, strContact, "Supported: timer\r\nSession-Expires: 180\r\n", &str200, SDP_MCPTT ),
+	       "INVITE (Supported: timer, no refresher) → 200 OK → ACK" );
+	printf( "        Contact: %s\n", strContact.c_str() );
+	CHECK( strContact.find( "+g.3gpp.mcptt" ) != std::string::npos && strContact.find( "isfocus" ) != std::string::npos &&
+	       strContact.find( "+g.3gpp.icsi-ref=\"urn%3Aurn-7%3A3gpp-service.ims.icsi.mcptt\"" ) != std::string::npos,
+	       "200 OK Contact carries g.3gpp.mcptt · g.3gpp.icsi-ref · isfocus" );
+	CHECK( strContact.find( '@' ) != std::string::npos && PortOfContact( strContact ) == g_iTcpPort, "Contact address still set by the stack" );
+	std::string strSe = HeaderOf( "\r\n" + str200, 0, "Session-Expires" );
+	printf( "        Session-Expires: %s\n", strSe.c_str() );
+	CHECK( strSe.find( "refresher=uac" ) != std::string::npos, "Session-Expires refresher=uac (dialog policy REMOTE)" );
+	CHECK( HeaderOf( "\r\n" + str200, 0, "Require" ).find( "timer" ) != std::string::npos, "Require: timer" );
+	// 단말의 세션 갱신 re-INVITE(같은 SDP) → 200 OK Contact 에도 태그 (다이얼로그 값을 응답에 옮긴다)
+	{
+		const char * pszSdp = SDP_MCPTT;			// 같은 offer = 순수 세션 갱신
+		std::string strToH = HeaderOf( "\r\n" + str200, 0, "To" );
+		const int iTagH = g_iSeq - 1;			// InviteAndAck 의 INVITE From tag (ACK 가 g_iSeq 를 하나 올렸다)
+		const int iBranchH = ++g_iSeq;
+		char szRe[4096];
+		int iLen = snprintf( szRe, sizeof(szRe),
+			"INVITE sip:svc@%s:%d;transport=tcp SIP/2.0\r\n"
+			"Via: SIP/2.0/TCP %s:%d;rport;branch=z9hG4bK-ct-re-%d\r\n"
+			"Max-Forwards: 70\r\n"
+			"From: <sip:ue@test.local>;tag=ue-%d\r\n"
+			"To: %s\r\n"
+			"Call-ID: ct-H@test\r\n"
+			"CSeq: 2 INVITE\r\n"
+			"Contact: <sip:ue@%s:%d;ob>\r\n"
+			"Supported: timer\r\nSession-Expires: 180;refresher=uac\r\n"
+			"Content-Type: application/sdp\r\n"
+			"Content-Length: %d\r\n\r\n%s",
+			UA_IP, g_iTcpPort, UA_IP, cH.iLocalPort, iBranchH, iTagH, strToH.c_str(), UA_IP, iUePort,
+			(int)strlen( pszSdp ), pszSdp );
+		ConnSend( cH, std::string( szRe, iLen ) );
+		std::string strReRx;
+		bool bRe = ConnRecvUntil( cH, "SIP/2.0 200", 3000, strReRx );
+		size_t pRe = strReRx.find( "SIP/2.0 200" );
+		for( int i = 0; bRe && i < 10 && strReRx.find( "\r\n\r\n", pRe ) == std::string::npos; ++i ) ConnRecvUntil( cH, "\r\n\r\n", 200, strReRx );
+		std::string strReContact = ( bRe && pRe != std::string::npos ) ? HeaderOf( strReRx, pRe, "Contact" ) : "";
+		printf( "        re-INVITE 200 Contact: %s\n", strReContact.c_str() );
+		CHECK( strReContact.find( "isfocus" ) != std::string::npos && strReContact.find( "+g.3gpp.mcptt" ) != std::string::npos,
+		       "session-refresh re-INVITE 200 OK Contact keeps the tags" );
+		CHECK( str200.find( "m=application 40001 " ) != std::string::npos, "initial 200 OK answers floor m=application 40001" );
+		CHECK( bRe && strReRx.find( "m=application 40001 ", pRe ) != std::string::npos,
+		       "session-refresh 200 OK keeps floor m=application 40001 (not port 0)" );
+		SendAck( cH, "ct-H@test", strToH, iTagH );
+		usleep( 200 * 1000 );
+	}
+	clsUa.StopCall( "ct-H@test" );
+	std::string strByeH;
+	bool bByeH = ConnRecvUntil( cH, "BYE sip:", 3000, strByeH ) && ConnRecvUntil( cH, "\r\n\r\n", 1000, strByeH );
+	CHECK( bByeH && HeaderOf( strByeH, strByeH.find( "BYE sip:" ), "Contact" ).find( "isfocus" ) != std::string::npos,
+	       "server BYE (in-dialog) Contact keeps the tags" );
+	ConnClose( cH );
+
+	// ── I. 같은 정책, timer 미지원 UAC → refresher=uas (RFC 4028 §9) ──
+	printf( "[I] same policy, INVITE without timer support: refresher=uas (RFC 4028 §9 Table 2)\n" );
+	CConn cI;
+	CHECK( ConnOpen( cI ), "TCP connect" );
+	CHECK( InviteAndAck( cI, "ct-I@test", iUePort, strContact, "", &str200 ), "INVITE (no timer) → 200 OK → ACK" );
+	strSe = HeaderOf( "\r\n" + str200, 0, "Session-Expires" );
+	printf( "        Session-Expires: %s\n", strSe.c_str() );
+	CHECK( strSe.find( "refresher=uas" ) != std::string::npos, "Session-Expires refresher=uas" );
+	clsUa.StopCall( "ct-I@test" );
+	std::string strByeI;
+	ConnRecvUntil( cI, "BYE sip:", 3000, strByeI );
+	ConnClose( cI );
+	clsCb.m_bFocus = false;
 
 	close( fdUe );
 	clsUa.Stop();
