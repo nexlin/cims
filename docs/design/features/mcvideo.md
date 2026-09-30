@@ -403,8 +403,8 @@ Indicator, automatic 수신; 1차 CSP 는 normal) · JOIN 응답 `audio_ssrc`·`
   같은 순서) · `McVideoUserProfileDoc`·`McVideoServiceConfigDoc`(`CscClient::fetchMcVideoUserProfile`·`fetchMcVideoServiceConfig`) · 토큰 scope 에
   MCVideo 넷. 시험 = K2 골든을 CSC 생성 시험과 같은 파일로 읽는다.
 - **affiliation**(구현) — `affiliate(groupId, on, McVideo)` = 관심 그룹 집합을 바꿔 **전부**를 한 PUBLISH 로(§8.2.1.2 — 골든 02, `Expires` 2^32-1/0,
-  pidf tuple id = MC client ID, 게시마다 유일 `p-id`). ⚠️ 지금의 CSP 는 `Event: presence` PUBLISH 를 서비스로 가르지 않아 MCPTT affiliation 으로 읽는다 —
-  CSP A9(ICSI·mcvideo-info 로 갈라 `mcvideo_affiliations`)가 배포되기 전에는 실서버로 보내지 않는다(앱 C9·cimsue-cli C8 이 부르기 전).
+  pidf tuple id = MC client ID, 게시마다 유일 `p-id`). ⚠️ MCVideo 제휴를 서비스로 가르는 CSP(A9 — ICSI·mcvideo-info 로 갈라 `mcvideo_affiliations`)에만
+  보낸다 — 그 전 CSP 는 `Event: presence` PUBLISH 를 MCPTT affiliation 으로 읽어 `ptt_affiliations` 를 덮는다.
 - **호**(구현) — `joinVideoGroupCall(groupId, {chat|prearranged, …})` → `CallInfo.service = McVideo`·`sessionUri`(제어 기능 Contact 의 세션 식별자), 재합류
   = `VideoGroupCallOptions.sessionUri`(§9.2.1.2.4), 제어 기능 멤버 초대(§9.2.1.3) = mcvideo-info 로 가려 자동 수락(`autoAnswerMcvideo`), 나가기 = `hangup`.
   INVITE·answer 모양은 K3 골든 03·05·08(만드는 모양)과 04·06·07·09(읽는 모양)으로 대조한다 — SDK 산출 메시지는 `tests/mcvideo_fixture_check.py` 도 통과한다.
@@ -418,9 +418,12 @@ Indicator, automatic 수신; 1차 CSP 는 normal) · JOIN 응답 `audio_ssrc`·`
   그룹 문서 MCVideo 몫(없음 = MCVideo 그룹 아님 · PUT 에 싣지 않아 서버 MCVideo 설정 유지)·user profile·service config·ue-init-config MCVideo PSI.
 - **cimsue-cli**(구현 — C8) — `video-call <g> [--prearranged] [--implicit] [--transmit-at S --transmit-len S] [--accept]` · `video-answer`(멤버 초대 대기) ·
   구동 명령 `video_call`·`transmit_request`·`transmit_release`·`reception_accept`·`reception_end` + 이벤트 `transmission`·`reception`([ue_sdk.md](ue_sdk.md) §4.7).
-  명시 affiliation 은 없다(CSP A9 전).
+  명시 affiliation = 계정 옵션 `--affiliate-mcvideo G[,G2]`(prearranged 팬아웃을 받을 멤버).
+- **세션 타이머**(구현) — 착신 200 OK `refresher=uas` + `Require: timer`(§6.2.3.1.1 2)·5) — 단말이 갱신), 발신은 서버 200 OK 의 `refresher=uac` 를 따라 단말이
+  갱신, 갱신 re-INVITE 등 이어지는 offer 에는 `mc_granted`·`mc_implicit_request` 를 싣지 않는다(TS 24.581 §14.5 — [ue_sdk.md](ue_sdk.md) §4.6).
 - **영상 없는 엔진 빌드** — Linux 헤드리스·Windows 1차(config_site `PJMEDIA_HAS_VIDEO 0`)는 offer 의 m=video 를 port 0 자리로 싣는다(RFC 3264 §5.1 — 음성·
-  전송 제어만 협상, ue_sdk.md §4.6 편차 표). M2(cimsue-cli 두 대 영상 e2e)는 Linux 엔진 영상(H.264 인코더·합성 캡처)이 먼저 필요하다.
+  전송 제어만 협상, ue_sdk.md §4.6 편차 표). M2 의 신호·음성·전송 제어는 이 빌드로 되고, 영상 RTP·PLI 확인은 Linux 엔진 영상(H.264 인코더·합성 캡처)
+  이나 Android 실기(C6)가 필요하다.
 - 전송 제어 상수는 생성 헤더 `mcvideo/tc_defs.h`, 코덱·참여자 빌더는 `mcvideo/tc_codec`, 호 제어 경계 코덱은 `mcvideo/mcvideo_sip`.
 - **참여자 구현**(`mcvideo/tc_participant`) — 규격이 비워 둔 곳은 이렇게 읽는다: ① Transmission Revoked 는 원인 #7(Queue the transmission)이면
   Queue Position Request → 'U: queued', 그 밖은 Transmission End Request → 'U: pending end'(§6.2.4.5.5 4 는 #5·#7 만 적었지만 서버는 회수 뒤 End
