@@ -200,7 +200,8 @@ def build():
             "mc_transmission_ssrc=2863311531"))
 
     # 07 — prearranged 멤버 초대 (TS 24.281 §6.3.3.1.2·§9.2.1.4.1.1): Contact = 세션 식별자 + isfocus, Accept-Contact 둘,
-    #   P-Asserted-Service = MCVideo ICSI(RFC 6050 헤더 이름 — 본문의 «P-Asserted-Service-Id» 는 오기, mcvideo.md §9),
+    #   P-Asserted-Service = MCVideo ICSI(RFC 6050 헤더 이름 — 본문의 «P-Asserted-Service-Id» 는 오기, mcvideo.md §9), P-Asserted-Identity = 제어 기능
+    #   PSI(§9.2.1.4.1.1 3) — 04·06 의 200 OK 와 같은 신원),
     #   mcvideo-info = request-uri(초대받는 MCVideo ID)·calling-user-id·calling-group-id, SDP offer = CMP 가 이 멤버에게 준 포트 +
     #   fmtp mc_priority=<user-priority>(TS 24.581 §14.2.3)·mc_transmission_ssrc(§6.3.3.1.1 4)). Session-Expires 는 refresher 를
     #   싣지 않는다(§6.3.3.1.2 6)) — 단말이 200 OK 에서 refresher=uas 로 정한다(§6.2.3.1.1 5)).
@@ -209,7 +210,7 @@ def build():
         [f"Via: SIP/2.0/TLS {CSP}:5061;branch=z9hG4bK-mcv-fan1", "Max-Forwards: 70",
          f"From: <sip:g103@{DOMAIN}>;tag=csp-fan1", f"To: <sip:{UE_B}@{DOMAIN}>",
          "Call-ID: csp-mcv-fan-b1@csp", "CSeq: 1 INVITE", f"Contact: <{SESSION_ID_103}>;{FOCUS}", *ACCEPT,
-         f"P-Asserted-Service: {ICSI}", "Supported: timer", "Session-Expires: 1800"],
+         f"P-Asserted-Service: {ICSI}", f"P-Asserted-Identity: <{PSI}>", "Supported: timer", "Session-Expires: 1800"],
         "multipart/mixed;boundary=mcv-fan-1",
         multipart("mcv-fan-1", [
             ("application/sdp", sdp(IP_CMP, f"o=CSS 4 1 IN IP4 {IP_CMP}", 52012, 56012, 58012,
