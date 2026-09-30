@@ -125,7 +125,7 @@ CIMS 에 **아직 구현되지 않은** 기능을 규격 위치와 함께 나열
 | **E2E 미디어 암호화** (SRTP + MIKEY-SAKKE, PCK/GMK/CSK) | TS 33.180 | ⚠ 구조만 — opensrtp 링크·SRTP 플래그 존재하나 참 ECCSI/SAKKE(RFC 6507/6508) 미구현 (S5 placeholder). **floor control(RTCP) SRTCP 보호는 구현** — 키는 제어평면 inline 전달(`floor_crypto`), 미디어는 투명 relay |
 | **MBMS/멀티캐스트 베어러** 그룹 배포 | TS 23.379 | ✗ (unicast RTP relay 만) |
 | **Off-network (ProSe/PC5 직접통신)** | TS 24.379 off-network | ✗ (서버 기반 on-network 만) |
-| **PTT 비디오** (그룹 세션 `m=video`) | — | ✅ floor 보유자 영상(H.264 — dual/multi-talker 면 화자 슬롯별)을 멤버별 영상 포트로 분배·SRTP·녹취 ([../modules/cmp.md](../modules/cmp.md)), 검증 S6-SCN-PTT-VIDEO. 규격형 영상 서비스(다중 송출·수신 선택)는 MCVideo — R6 |
+| **PTT 비디오** (그룹 세션 `m=video`) | — (비규격 — MCPTT 는 speech 만) | ✅ floor 보유자 영상(H.264 — dual/multi-talker 면 화자 슬롯별)을 멤버별 영상 포트로 분배·녹취 ([../modules/cmp.md](../modules/cmp.md)), 검증 S6-SCN-PTT-VIDEO. 그룹 영상은 평문이다 — CSP 가 PTT_JOIN 에 `media_crypto_video` 를 싣지 않고 SRTP(SAVP) leg 의 video 는 port 0([ptt_flows.md](ptt_flows.md)). 규격형 영상 서비스는 MCVideo — 정본 [mcvideo.md](mcvideo.md)(전환 §8), R6 |
 
 ### R4. 부가 서비스 / 인접 규격
 
@@ -179,7 +179,7 @@ transport 목록/선택 등 규격 문서에 없는 요구 때문). 자체 단�
 
 ### R6. MCVideo (TS 22.281 / 23.281 / 24.281 / 24.581)
 
-MCVideo 는 MCPTT 에 영상을 얹은 것이 아니라 별도 MC 서비스다. 현행 PTT 비디오(R3)는 MCPTT floor
+설계 정본 = [mcvideo.md](mcvideo.md)(규격 모델·개발 항목 V0~V8·결정 사항). MCVideo 는 MCPTT 에 영상을 얹은 것이 아니라 별도 MC 서비스다. 현행 PTT 비디오(R3)는 MCPTT floor
 정책(single/dual/multi-talker, 최대 8인)으로 송출자를 정하고 그룹원 전원이 자동 수신하므로, 여러 현장
 카메라를 관제가 스트림 단위로 골라 보고 제어하는 영상 관제 용도에는 MCVideo 가 필요하다. 재사용 = PMP 멤버별 영상 포트·SRTP·녹취, PSP 그룹 세션 처리, SPS 그룹·설정 관리.
 

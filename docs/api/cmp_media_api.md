@@ -518,7 +518,7 @@ member 키 `(node, session_id)`.
 | `group_id` | O | 그룹 식별자 |
 | `members` | - | `"sid:prio[:role[:tier]],..."` CSV (role=`chair`/`participant`, tier=`emergency`/`imminent`/`normal`) |
 | `subid` | - | 그룹 세션 회차 (flow 로그 subid) |
-| `video_enabled` | - | 1 이면 video 포트 활성 |
+| `video_enabled` | - | CSP 가 영상 그룹이면 1 을 싣지만 **CMP 는 읽지 않는다** — 멤버 영상 분배 여부는 PTT_JOIN `user_video_port` 유무로 정해진다(§7.4) |
 | `group_type` | - | 그룹 종류 `prearranged`/`chat`/`private` — `private` 은 1:1 private call(2인, TS 24.379 §11 — floor 절차는 TS 24.380 §6.3 공통). 전환기(한 릴리스): 구 CSP 의 `broadcast` 값은 `broadcast:1` + `prearranged` 로 해석하고 WARN 로그 |
 | `broadcast` | - | `0`/`1` — **일제 통화 호 속성**(TS 24.379 §4.12, 그룹 종류와 직교). `1` 이면 개시자 floor 독점(TS 24.380 §6.3.5.3.4 — 타 참가자 요청은 긴급이어도 Deny #5, Floor Taken/Idle 의 Permission=0, floor 메시지 Floor Indicator B-bit `0x4000`) |
 | `initiator_id` | - | 세션 개시자 sessionId — broadcast 면 유일 발언자. private 에서는 **초기 발언권을 주지 않는다**(초기 발언권의 정본은 PTT_JOIN `granted`). `initiator_id`·`broadcast` 는 **세션의 개시 ADD 에서만 유효**하다 — 그룹을 만드는 ADD, 또는 남은 그룹 컨텍스트에 **다른 `sesid`** 로 오는 ADD. 같은 세션의 재ADD(멤버 추가·녹취 경로·MODIFY)에 실려 와도 무시한다(늦은 합류가 개시자를 바꾸지 않는다 — [mcptt_broadcast_group_call.md](../design/features/mcptt_broadcast_group_call.md) R7) |

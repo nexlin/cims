@@ -1,5 +1,7 @@
 # 관제 앱(Windows) 이어서 할 일 — 개별/애드혹 발신 분리 · 명칭 · 일제 통화 한 버튼
 
+> **다음 작업은 [dispatch_windows_next.md](dispatch_windows_next.md)** — SDK 변경분(`ea2b617d`) Windows 빌드·시험, 긴급·경보 서버 반영 짝, MCVideo 관제 화면 설계.
+
 사용자 요청(관제 앱 실사용 피드백)과 지금까지 확인한 사실·설계를 모은 인계 문서다. Claude Code 터미널에서 이 문서를 읽고
 §3 순서대로 이어서 한다. **원칙: VoLTE·MCPTT 규격 절을 먼저 확인하고 그대로 따른다(CLAUDE.md 설계 우선순위 1).**
 
