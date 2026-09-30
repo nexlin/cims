@@ -146,7 +146,7 @@ void usage() {
         "        [--mcptt-video]   (착신 그룹콜의 m=video 를 영상까지 수락)\n"
         "        [--mcvideo] [--mcvideo-psi URI]   (MCVideo 등록 태그 · 참여 MCVideo 기능 PSI — TS 24.281 §7.2.1AA·§9.2.1.2.1.1)\n"
         "        [--affiliate-mcvideo G,..]   (MCVideo affiliation — 관심 그룹 전부를 한 PUBLISH 로, TS 24.281 §8.2.1.2)\n"
-        "        또는 --csc-host H [--csc-port N] --user U --pw P [--csc-ca FILE] --from-profile volte|ptt\n"
+        "        또는 --csc-host H [--csc-port N] --user U (--pw P | --pw-env VAR) [--csc-ca FILE] --from-profile volte|ptt\n"
         "  register [--hold S] | call TARGET [--duration S] [--video] | answer [--duration S] [--transfer-to X]\n"
         "  group-call GROUP [--duration S] [--ptt-at S --ptt-len S] [--listen-only] [--emergency] [--broadcast] [--implicit] [--video]\n"
         "             [--upgrade-at S] [--cancel-at S]\n"
@@ -210,6 +210,8 @@ bool parse(int argc, char** argv, Opts& o) {
             if (opt("--csc-port", [&](const std::string& v) { o.cscPort = std::atoi(v.c_str()); })) continue;
             if (opt("--user", [&](const std::string& v) { o.user = v; })) continue;
             if (opt("--pw", [&](const std::string& v) { o.pw = v; })) continue;
+            // 비밀을 명령행(프로세스 목록)에 두지 않는 경로 — 값은 환경변수에서(계측기 비밀 규약 *_env 와 같은 방식)
+            if (opt("--pw-env", [&](const std::string& v) { const char* e = std::getenv(v.c_str()); o.pw = e ? e : ""; })) continue;
             if (opt("--csc-ca", [&](const std::string& v) { o.cscCaFile = v; })) continue;
             if (opt("--from-profile", [&](const std::string& v) { o.fromProfile = v; })) continue;
             if (opt("--name", [&](const std::string& v) { o.groupName = v; })) continue;

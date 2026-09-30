@@ -610,12 +610,13 @@ SDP 에 `ccm fir` 가 없으면 PLI 로 바꿔 보내자. ③ SDK 수신 쪽은 
 | T1 | 등록 태그 | `--mcvideo register --hold 5` | CSP 바인딩 MCVideo 참, 태그 뺀 재등록 = 거짓 |
 | T2 | affiliation | `--mcvideo --affiliate-mcvideo gmv1 register --hold 5` | 200 `Expires: 4294967295`, `mcvideo_affiliations` 행 생김·끝나면 지워짐, **`ptt_affiliations` 무변화**(0159 위험의 회귀) |
 | T3 | chat 합류·송출·수신 | B `video-call gmv1 --accept --duration 20` 뒤 A `video-call gmv1 --transmit-at 2 --transmit-len 5 --duration 15` | A `tx_granted`, B `rx_notified`→`rx_granted`, B 음성 RTP 는 A 허가 동안만 |
-| T4 | prearranged 팬아웃·암묵 요청 | 그룹 invite-members = true · B `--affiliate-mcvideo gmv1 video-answer --accept --duration 20` 뒤 A `video-call gmv1 --prearranged --implicit --transmit-at 1 --transmit-len 5` | B 초대 200 `refresher=uas`, A 200 이 B 뒤·answer `mc_implicit_request;mc_granted` |
-| T5 | 재합류 | T4 도중 A `video-call gmv1 --rejoin <T4 A 의 session_uri>` | R-URI `gr` 로 같은 세션, 암묵 요청 없음 |
-| T6 | 그룹 종류 거절 | chat 호를 prearranged 그룹에 / 반대 | 404 + Warning 117 / 118 |
+| T4 | prearranged 팬아웃·암묵 요청 | 그룹 gmv2(prearranged) · B·C `--affiliate-mcvideo gmv2 video-answer --accept --duration 25` 뒤 A `--affiliate-mcvideo gmv2 video-call gmv2 --prearranged --implicit --transmit-at 1 --transmit-len 5` — **개시자도 먼저 제휴**(§9.2.1.4.2 13)a)) | 팬아웃 INVITE refresher 없음 · B·C 200 `refresher=uas` · A 200 이 첫 멤버 뒤·answer `mc_implicit_request;mc_granted` |
+| T5 | 재합류 | B·C 가 남은 동안 A 가 나갔다가 `--affiliate-mcvideo gmv2 video-call gmv2 --rejoin <A 의 session_uri>` (A 가 나가도 B·C 둘이라 세션 유지) | R-URI `gr` 로 같은 세션, 암묵 요청 없음 |
+| T6 | 그룹 종류 거절 · 미제휴 | chat 호를 prearranged 그룹에 / 반대 · 제휴 없이 prearranged 개시 | 404 + Warning 117 / 118 · 403 + Warning 120 |
 | T7 | MCPTT 회귀 | 같은 신원으로 기존 `group-call` (MCPTT 그룹) | floor·affiliation 정상 — MCVideo 와 섞이지 않음 |
 
-세션 갱신(SE/2 = 900 s)은 단위·임시 시험으로 봤으므로 M2 에서는 선택(16 분 호 한 번). 영상 RTP·PLI 는 Linux 엔진 영상(사용자 결정) 또는 C6 Android 실기에서.
+실행기 = `tests/mcvideo_m2_signalling.py --confirm [--only T1,T3]`(A·B·C 자격은 creds 파일을 그 자리에서 읽어 `--pw-env` 로만 넘긴다, `--confirm` 이 없으면 계획만 찍는다 —
+T1~T9·T7b 판정·결과 JSON·stderr 를 한 디렉터리에). 세션 갱신(SE/2 = 900 s)은 단위·임시 시험으로 봤으므로 M2 에서는 선택(16 분 호 한 번). 영상 RTP·PLI 는 Linux 엔진 영상(사용자 결정) 또는 C6 Android 실기에서.
 
 **.48 B6 후속 — 협상한 피드백만 (.45 «B6 확인 답» ②)** — 채택. CSP 가 멤버 영상 SDP 의 `a=rtcp-fb:<pt|*> nack pli`·`ccm fir` 를 JOIN `user_video_fb`
 (`["pli"]` 등)로 옮기고, CMP 는 송출자에게 협상한 종류만 보낸다(RFC 4585 §4.2) — SDK 송출자(`nack pli` 만)에게는 수신자 FIR 도 PLI, 둘 다 없으면 보내지 않는다.
