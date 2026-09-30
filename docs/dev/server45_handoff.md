@@ -730,7 +730,8 @@ D5·D6 = .45 추천안으로 진행(아래).
 csc 0.2.139(dep 3, `UeInitConfig.ServiceDetails.McVideo.Enable=true`). 공유 DB: 표 3개 · MCVideo 속성 3그룹(현행 영상 그룹) · 자격 43회선 · `ptt_affiliations` 무변화.
 시험 그룹 gmv1(chat·송출 상한 1)·gmv2(prearranged·T1 10 s), 멤버 test023·024·025.
 
-**M2 결과** — `tests/mcvideo_m2_signalling.py --confirm` **15/15 PASS**(T1~T9·T7b, 결과 JSON = dev_share `att/20261001-0803_45_m2-results/`). 음성 RTP = 송출자는 허가
+**M2 결과** — `tests/mcvideo_m2_signalling.py --confirm` T1~T9·T7b: 첫 실행 13/13 PASS(csp 0.2.181) → PAI·Require 수정 뒤(csp 0.2.182) 전체 재실행 14/15
+(T5 의 B 가 종료 때 cli abort) → cli 수정 뒤 T4·T5 재실행 4/4 PASS(결과 JSON = dev_share `att/20261001-0803_45_m2-results/`). 음성 RTP = 송출자는 허가
 동안만(T3 A 250 패킷 = 5 s), 수신자는 [받기] 뒤(손실 0, MOS-LQ 4.3). 팬아웃 INVITE `Session-Expires` refresher 없음 · 멤버 200 `refresher=uas`·`Require: timer`.
 실측이 드러내 고친 것: CSP 팬아웃 INVITE PAI 둘(→ 제어 기능 PSI 하나, 9d6c63c8) · SDK 착신 200 `Require: timer` 중복(9d6c63c8) · cimsue-cli 종료 때 늦은 해제 PUBLISH
 응답 abort(eece42b4 — 엔진 가드는 사용자 결정 그대로). 관찰(결함 아님): 제어 기능 Contact 의 세션 식별자 사용자부가 그룹이 아니라 `mcvideo_psi`(골든 04 는 `g101@`) —
