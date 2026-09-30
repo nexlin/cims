@@ -360,6 +360,8 @@ CIMSUE_API int32_t CIMSUE_CALL cimsue_engine_add_account(cimsue_engine_t* e, con
 CIMSUE_API cimsue_status_t CIMSUE_CALL cimsue_engine_register_account(cimsue_engine_t* e, int32_t account_id);
 CIMSUE_API cimsue_status_t CIMSUE_CALL cimsue_engine_unregister_account(cimsue_engine_t* e, int32_t account_id);
 CIMSUE_API cimsue_status_t CIMSUE_CALL cimsue_engine_refresh_registration(cimsue_engine_t* e, int32_t account_id);
+/** 망 변경 — TCP/TLS 연결을 닫고 등록을 켠 계정마다 재등록(Engine::handleNetworkChange). 앞 등록이 걸려 있으면 끝난 뒤 한 번 더. */
+CIMSUE_API cimsue_status_t CIMSUE_CALL cimsue_engine_handle_network_change(cimsue_engine_t* e);
 CIMSUE_API cimsue_status_t CIMSUE_CALL cimsue_engine_remove_account(cimsue_engine_t* e, int32_t account_id);
 CIMSUE_API void CIMSUE_CALL cimsue_engine_reg_info(const cimsue_engine_t* e, int32_t account_id,
                                                    cimsue_reg_info_t* out);

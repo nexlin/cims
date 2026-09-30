@@ -29,6 +29,7 @@ internal static unsafe class NativeMethods
     [DllImport(Lib, CallingConvention = CC, ExactSpelling = true)] public static extern int cimsue_engine_register_account(IntPtr e, int account_id);
     [DllImport(Lib, CallingConvention = CC, ExactSpelling = true)] public static extern int cimsue_engine_unregister_account(IntPtr e, int account_id);
     [DllImport(Lib, CallingConvention = CC, ExactSpelling = true)] public static extern int cimsue_engine_refresh_registration(IntPtr e, int account_id);
+    [DllImport(Lib, CallingConvention = CC, ExactSpelling = true)] public static extern int cimsue_engine_handle_network_change(IntPtr e);
     [DllImport(Lib, CallingConvention = CC, ExactSpelling = true)] public static extern int cimsue_engine_remove_account(IntPtr e, int account_id);
     [DllImport(Lib, CallingConvention = CC, ExactSpelling = true)] public static extern void cimsue_engine_reg_info(IntPtr e, int account_id, cimsue_reg_info_t* @out);
     [DllImport(Lib, CallingConvention = CC, ExactSpelling = true)] public static extern int cimsue_engine_accounts(IntPtr e, int** @out);

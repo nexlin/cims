@@ -271,6 +271,12 @@ class CimsUe(private val io: CoroutineDispatcher = Dispatchers.IO) : AutoCloseab
 
     suspend fun refreshAudioDevices(): CimsResult<Unit> = command { CimsResult.of(engine.refreshAudioDevices()) }
 
+    /**
+     * 망이 바뀌었다(기본 망 전환·끊겼다 복귀) — 코어가 TCP/TLS 연결을 닫고 등록을 켠 계정마다 다시 등록한다
+     * (`Engine::handleNetworkChange` — 앞 등록이 걸려 있으면 끝난 뒤 한 번 더). 앱은 망 콜백에서 «복귀·전환» 을 판정해 부르기만 한다.
+     */
+    suspend fun handleNetworkChange(): CimsResult<Unit> = command { CimsResult.of(engine.handleNetworkChange()) }
+
     /** 캡처/재생 장치 선택(pjmedia id). -1=기본 캡처, -2=기본 재생. */
     suspend fun setAudioDevices(captureDev: Int, playbackDev: Int): CimsResult<Unit> =
         command { CimsResult.of(engine.setAudioDevices(captureDev, playbackDev)) }

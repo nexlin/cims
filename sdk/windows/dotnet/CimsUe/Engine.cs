@@ -217,6 +217,8 @@ public sealed unsafe class Engine : IDisposable
 
     /// <summary>장치 목록 재열거(핫플러그 뒤 — Platform.AudioEndpoints 통지에서 부른다).</summary>
     public Result RefreshAudioDevices() => Status(cimsue_engine_refresh_audio_devices(Handle));
+    /// <summary>망 변경(기본 망 전환·복귀) — 코어가 TCP/TLS 연결을 닫고 등록을 켠 계정마다 재등록(Engine::handleNetworkChange). 앞 등록이 걸려 있으면 끝난 뒤 한 번 더.</summary>
+    public Result HandleNetworkChange() => Status(cimsue_engine_handle_network_change(Handle));
     /// <summary>캡처/재생 장치 선택(pjmedia 장치 id). -1=기본 캡처, -2=기본 재생.</summary>
     public Result SetAudioDevices(int captureDev, int playbackDev) => Status(cimsue_engine_set_audio_devices(Handle, captureDev, playbackDev));
     /// <summary>추가 재생 라우트 — 두 번째 재생 장치를 재생 전용으로 연다(관제석 헤드셋+스피커). 반환 routeId ≥ 1. 기본 재생 장치 = 라우트 0.</summary>

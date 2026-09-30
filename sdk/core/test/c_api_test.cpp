@@ -172,6 +172,7 @@ TEST(CApi, EngineLifecycleHeadless) {
 
     // 미기동 상태 명령 — C++ 의 Result::fail(-1, "not running") 이 그대로 코드·사유로 온다
     EXPECT_EQ(cimsue_engine_hangup(e, 0), -1);
+    EXPECT_EQ(cimsue_engine_handle_network_change(e), -1);  // 미기동 — 망 변경도 같은 오류 경로
     EXPECT_STREQ(cimsue_last_error(), "not running");
     EXPECT_EQ(cimsue_engine_dial(e, 0, "1000", nullptr), -1);
 
@@ -187,6 +188,9 @@ TEST(CApi, EngineLifecycleHeadless) {
     l = cimsue_listener_t{};                                 // 복사 규약 — 원본을 지워도 콜백은 살아 있어야 한다
     EXPECT_EQ(cimsue_engine_running(e), 1);
     EXPECT_EQ(cimsue_engine_start(e, &cfg, nullptr), -1);   // already running
+    // 망 변경 — 계정이 없어도 전송 재수립은 돈다. 곧바로 한 번 더 부르면(처리 중) 접혀서 역시 성공이다.
+    EXPECT_EQ(cimsue_engine_handle_network_change(e), CIMSUE_OK) << cimsue_last_error();
+    EXPECT_EQ(cimsue_engine_handle_network_change(e), CIMSUE_OK) << cimsue_last_error();
     EXPECT_GT(seen.logs, 0);
 
     // 계정 — 완성되지 않은 설정은 -1, 완성된 설정은 id 발급 + 조회 스냅샷

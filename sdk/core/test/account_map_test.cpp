@@ -44,6 +44,13 @@ TEST(AccountMap, DigestHa1RealmStarProxiesLr) {
     EXPECT_NE(note.find("auth=ha1"), std::string::npos);
 }
 
+// 망 변경(Engine::handleNetworkChange) 뒤 UDP 재등록의 낡은 Via/Contact 는 rport·Contact 재작성이 고친다 — 그 전제.
+TEST(AccountMap, RewriteCoversAddressChange) {
+    pj::AccountConfig ac = buildPjAccountConfig(base());
+    EXPECT_EQ(ac.natConfig.contactRewriteUse, 1);
+    EXPECT_EQ(ac.natConfig.viaRewriteUse, 1);
+}
+
 TEST(AccountMap, PlainPasswordWhenNoHa1AndAkaPrecedence) {
     AccountConfig c = base();
     c.ha1.clear(); c.password = "pw";

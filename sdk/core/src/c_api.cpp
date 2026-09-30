@@ -657,6 +657,9 @@ cimsue_status_t CIMSUE_CALL cimsue_engine_unregister_account(cimsue_engine_t* e,
 cimsue_status_t CIMSUE_CALL cimsue_engine_refresh_registration(cimsue_engine_t* e, int32_t account_id) {
     return e ? ret(e->eng.refreshRegistration(account_id)) : -1;
 }
+cimsue_status_t CIMSUE_CALL cimsue_engine_handle_network_change(cimsue_engine_t* e) {
+    return e ? ret(e->eng.handleNetworkChange()) : -1;
+}
 cimsue_status_t CIMSUE_CALL cimsue_engine_remove_account(cimsue_engine_t* e, int32_t account_id) {
     return e ? ret(e->eng.removeAccount(account_id)) : -1;
 }

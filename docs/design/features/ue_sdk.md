@@ -161,7 +161,7 @@ C++ 공개 표면은 `cimsue/engine.h` 의 `Engine` 하나이며 계정·호를 
 
 | 객체 | 명령 | 상태 | 이벤트 |
 |---|---|---|---|
-| `Engine` | `start(EngineConfig)` · `stop()` · `setAudioDevice(capture, playback)` · `addExtraPlayback(dev)` | 장치 목록 | `onLog` · `onAudioDeviceLost` |
+| `Engine` | `start(EngineConfig)` · `stop()` · `setAudioDevice(capture, playback)` · `addExtraPlayback(dev)` · `handleNetworkChange()` | 장치 목록 | `onLog` · `onAudioDeviceLost` |
 | `Provisioning` | `login(user, pw)` · `setAccessToken` · `fetchProfile()` · `fetchDirectory()` · `logout()` | `Profile{services[], dispatch?}` · `Directory` | `onProfile` · `onAuthFailed` |
 | `Account` (서비스 kind 당 1) | `register()` · `unregister()` · `refresh()` | `RegState{unregistered, registering, registered(code), failed(reason)}` | `onRegState` |
 | `Call` | `dial(uri, {video, emergency})` · `answer({video})` · `reject()` · `hangup()` · `hold/resume` · `mute(on)` · `listen(on)` · `rxLevel(f)` · `sendDtmf` · **`join(targetDialog)`**(RFC 3911, `a=recvonly`) · **`pickup(number?)`**(피처코드·지정 픽업) · **`transfer(target, {attended})`**(REFER) · **`replace(dialog)`**(RFC 3891) | `CallState{outgoing, incoming(remote, calledParty, isPilot), active, held, disconnected(code)}` · `MediaSources[]{ssrc, label, active, level}` · `videoSources[]` | `onCallState` · `onMediaSource` · `onVideoFrame(source, frame)` · `onTransferProgress` |
@@ -205,6 +205,15 @@ C++ 공개 표면은 `cimsue/engine.h` 의 `Engine` 하나이며 계정·호를 
   없으므로 `setMuted` 가 앱의 PTT 로컬 게이트다. 호 수신 음량(`setRxLevel`)은 호에 기억되어(`CallInfo.rxLevel`) 오디오가 없거나 재협상으로
   스트림이 바뀌어도 다음 결선에 다시 걸린다.
 - **에러 모델.** 명령은 즉시 `Result{ok, reason}` 을 돌려주고(인자·상태 오류), 프로토콜 결과는 이벤트로 온다.
+- **망 변경.** 플랫폼은 망 변경(기본 망 전환·끊겼다 복귀)을 `Engine::handleNetworkChange()` 로 **알리기만** 한다. 등록 복구는
+  코어가 한다 — TCP/TLS 연결을 닫아(옛 망의 연결을 재사용하지 않게, 새 REGISTER 가 새 연결을 연다) 등록을 켠 계정마다 다시
+  등록한다. **앞 등록 트랜잭션이 걸려 있으면 겹쳐 보내지 않는다**(RFC 3261 §10.2) — pjsip 가 `PJSIP_EBUSY` 로 거절하면 표시만
+  해 두고, 그 계정의 등록 결과(`onRegState`)가 오면 한 번 더 보낸다(`detail::RegRecovery` — 여러 번 불려도 계정마다 하나).
+  일반 등록 경로라 복구 REGISTER 가 실패해도 계정의 자동 재시도(`regConfig.retryIntervalSec`)가 그대로 돈다. UDP 는 닫지
+  않는다 — 0.0.0.0 에 묶여 있어 그대로 쓰고, 낡은 Via/Contact 는 rport·Contact 재작성(`natConfig`)이 고친다. pjsua 의 IP 변경
+  처리(`Endpoint::handleIpChange`)는 쓰지 않는다 — EBUSY 때 regc 를 부수고 새로 보내 옛 UDP 트랜잭션과 새 REGISTER 가 겹치고,
+  IP 변경 모드의 실패는 자동 재시도에서 빠지며, 수신 소켓 재시작 실패 경로가 전송이 빈 regc 를 역참조한다. 진행 중 호는
+  건드리지 않는다(§11). `refreshRegistration` 은 망은 그대로인데 등록만 잃은 경우(서버 재기동)의 복구다.
 - **ABI.** 공개 헤더는 pjsua2 타입을 include 하지 않는다. 구현체는 pImpl.
 - **affiliation PUBLISH 의 entity-tag**(RFC 3903). 코어가 EPA 다 — 2xx 의 `SIP-ETag` 를 그룹별로 기억해 다음 `affiliate` 에
   `SIP-If-Match` 로 싣는다. 412 를 받으면 그 ETag 를 버리고(§5 MUST) 같은 요청을 다시 보내지 않으며, `SIP-If-Match` 없는 초기 PUBLISH
@@ -614,6 +623,31 @@ NDK/MSVC 빌드는 개발 서버 밖(WSL2·Windows 머신)에서 수행하고, �
   leg(Join·PTT 청취)에서 이를 활성으로 다루지만, 감청 leg 의 SSRC 별 활성/레벨은 아직 SDP 라벨만 있고 실시간 값이 없다
   — pjproject 에 U10 서브스트림 관측 API(SSRC 별 수신 활성·레벨)를 추가해야 `MediaSources.active/level` 이 채워진다.
 - **호 전달 후 누적 통계** — 전달로 미디어 스트림이 재생성되면 마지막 소멸 스트림의 통계만 남는다(스트림별 누적 합산은 후속).
+- **진행 중 MCPTT 조건(긴급·임박) 반영** — `CallInfo.mcptt.emergency/imminentPeril` 은 호를 세울 때만 실린다(발신 =
+  `GroupCallOptions`, 착신 = INVITE mcptt-info `onIncomingCall`). 서버가 진행 중에 조건을 알리는 re-INVITE
+  (`emergency-ind`/`imminentperil-ind` 명시 true/false — TS 24.379 V18.6.0 §6.3.3.1.6 긴급 그룹콜·§6.3.3.1.15 임박 위험 그룹콜·
+  §6.3.3.1.10 진행 중 긴급 취소)와 합류 INVITE 의 200 OK 가 싣는 조건을 `onCallTsxState` 가 읽지 않는다 — 관제 앱(Windows·Android)의
+  긴급 배너가 격상·해제를 못 받고 세션 종료에만 빠지며, floor 요청의 긴급 서열(`floorRequest` 가 스냅샷의 `emergency` 를 읽는다)도
+  격상을 따라가지 못한다. 필요한 것 = in-dialog 요청·2xx 의 mcptt-info 파싱 → 스냅샷 갱신 → `onCallMedia` 통지(명령이 바꾼
+  스냅샷과 같은 축). 청취 leg 는 이것으로 끝나지 않는다 — CSP 가 조건 재광고에서 청취 leg 를 빼므로
+  (`PropagateConditionToMembers`) 서버 계약이 함께 필요하다([android_dispatch_tablet.md](android_dispatch_tablet.md) §11). 옛 Android 코어
+  (`android/core` `CimsCall` — 수신 re-INVITE·내 INVITE 의 200 OK 에서 `emergency-ind` 를 읽어 세션 긴급 상태를 올린다)가 같은 일을 이미 한다(이식 기준).
+- **MCPTT 착신 수락의 호 종류별 분리** — `AccountConfig.autoAnswerMcptt` 하나가 그룹콜·사설콜을 함께 자동 수락한다. 규격은 수락 방식을 호 종류별로
+  둔다(TS 24.379 §6.2.3 commencement mode — 사설콜·그룹콜 각각 자동/수동). 관제석은 그룹콜 자동 + 사설콜 수동이 맞다 — 둘로 나누면 C API·.NET·Kotlin 에
+  같이 낸다. 긴급 사설콜의 전역 표시는 이 분리 뒤에 두 관제 앱이 정한다([dispatch_desktop_ui.md](dispatch_desktop_ui.md) §13,
+  [android_dispatch_tablet.md](android_dispatch_tablet.md) §6.2a-1).
+- **요청 대상의 `tel:`** — `normalizeTarget`(`account_map.cpp`)은 `sip:`·`sips:`·`tel:` 을 통과시키고 스킴 없는 값만 `sip:<번호>@<도메인>` 으로 만든다.
+  `tel:` 은 호스트가 없어 라우팅할 수 없는 Request-URI 라 요청이 나가지 못해, 두 관제 앱은 넘기기 전에 벗긴다(태블릿 `routableTarget`, 데스크톱 `UserPart`).
+  코어가 `tel:` 을 도메인 붙은 `sip:` 로 바꿀지(발신·합류·픽업·전달·구독 — 세 바인딩의 요청 경로 전부가 바뀐다), 호출자가 라우팅 가능한 형태로 준다는
+  계약으로 적을지는 CSP 의 `tel:` Request-URI 처리를 확인한 뒤 정한다.
+- **SDS disposition 통지의 규격 경로** — `sendSdsNotification` 은 원 발신자 AoR 로 SDS NOTIFICATION 한 파트만 보낸다. TS 24.282
+  V18.13.0 §12.2.1.1 은 대상 MCData ID 의 `resource-lists` 와 그룹 통지의 `<mcdata-calling-group-id>` 를 요구한다 — 통지 API 가 수신
+  SDS 의 그룹·발신자 문맥을 받아야 하고 CSP 통지 처리와 함께 바뀐다([mcdata_messaging.md](mcdata_messaging.md) §7 편차 표).
+- **망 전환 중의 호 유지** — `handleNetworkChange` 는 등록만 되살리고 진행 중 호는 그대로 둔다 — 로컬 주소가 바뀌면 그 호의 RTP 가
+  끊길 수 있다. 호를 옮기려면 호마다 re-INVITE(미디어 재초기화·Contact/Via 갱신)를 보내야 하고, MCPTT 호의 floor `m=application` 은
+  re-INVITE SDP 에도 다시 실린다(`pendingAppSdp`). 넣기 전에 CSP 가 단말발 re-INVITE(VoLTE relay·MCPTT 세션)를 어떻게 다루는지
+  확인해야 한다(실기 미확인). 끊긴 호의 서버발 in-dialog 요청은 CSP 가 살아 있는 등록 바인딩으로 다시 찾는다
+  ([leg_liveness.md](leg_liveness.md) §6.3). Windows 관제 앱은 아직 `RefreshRegistrations`(계정별 REGISTER)라 `HandleNetworkChange` 로 옮길 몫.
 - **remote-init ambient listening·barge-in** — 서버 §10 과제와 함께 코어 API 확장.
 - **음성 품질 측정·시험 모드 계측기 링크** — 코어 `quality/`(RTCP-XR·G.107/G.107.1 E-model·`callQuality`)·drive 루프의 코어 이전
   (`drive/` `DriveSession` — stdin/stdout 과 TLS 계측 링크 공용)·`cimsue-cli --link` 는 [ue_voice_quality.md](ue_voice_quality.md) 가 정본(측정 Q1·코어 링크 Q2 구현 반영, Android `DeviceLink` 바인딩 반영 — C API·.NET 바인딩과 앱 시험 모드 Q4 미구현).

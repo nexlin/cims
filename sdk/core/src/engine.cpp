@@ -35,6 +35,7 @@
 #include "mcdata/sds_codec.h"
 #include "mcptt/mcptt_xml.h"
 #include "quality/call_quality.h"
+#include "reg_recovery.h"
 
 #define CIMSUE_VERSION "0.2.0"
 
@@ -230,6 +231,9 @@ struct Engine::Impl {
     int nextRouteId = 1;
     int nextAccountId = 0;
     std::atomic<int64_t> nextToken{1};
+    /** 망 변경 뒤 재등록의 줄(Engine::handleNetworkChange) — ue-ctl 에서만. */
+    detail::RegRecovery regRecovery;
+    void reRegister(int accountId);
 
     // 스냅샷 — 콜백(pjsip 스레드)이 쓰고 조회(임의 스레드)가 읽는다
     std::mutex snapM;
@@ -805,6 +809,8 @@ public:
         else ri.state = RegState::Failed;
         { std::lock_guard<std::mutex> lk(o_->snapM); o_->regInfos[accountId_] = ri; }
         o_->emit([o = o_, ri] { o->listener->onRegState(ri); });
+        // 앞 등록이 끝났다 — 망 변경으로 미뤄 둔 재등록이 있으면 지금 보낸다(Engine::handleNetworkChange).
+        o_->ctl.post([o = o_, id = accountId_] { if (o->running && o->regRecovery.settled(id)) o->reRegister(id); });
     }
 
     void onIncomingCall(pj::OnIncomingCallParam& prm) override {
@@ -1004,6 +1010,27 @@ private:
 }  // namespace
 
 // ── Impl 헬퍼 ──
+
+/**
+ * ue-ctl. 한 계정을 다시 등록한다. 앞 등록 트랜잭션이 걸려 있으면(PJSIP_EBUSY) 그것이 끝난 뒤(onRegState) 다시 —
+ * 겹쳐 보내지 않는다(RFC 3261 §10.2, detail::RegRecovery).
+ */
+void Engine::Impl::reRegister(int id) {
+    auto it = accounts.find(id);
+    if (it == accounts.end()) return;
+    try {
+        it->second->setRegistration(true);
+        std::lock_guard<std::mutex> lk(snapM);
+        regInfos[id].state = RegState::Registering;
+    } catch (pj::Error& e) {
+        if (e.status == PJSIP_EBUSY) {
+            regRecovery.busy(id);
+            log(3, "network change: acc " + std::to_string(id) + " 앞 등록이 끝나면 다시 등록");
+        } else {
+            log(2, "network change: acc " + std::to_string(id) + " 재등록 실패 " + e.info(false));
+        }
+    }
+}
 
 bool Engine::Impl::rxOnlyLeg(PjCall* call) { return call->recvOnly || (call->mcptt && call->mcptt->listenOnly); }
 
@@ -1296,6 +1323,7 @@ Result Engine::start(const EngineConfig& cfg, Listener* listener) {
             o->ep->libStart();
             o->applyCodecPolicy();
             o->captureOn = true;
+            o->regRecovery.clear();
             o->running = true;
             o->log(3, std::string("libcimsue ") + version() + " started");
             return Result::success();
@@ -1385,7 +1413,8 @@ static Result withAccount(Engine::Impl* o, int id, const std::function<void(pj::
 
 Result Engine::registerAccount(int id) {
     if (!impl_->running) return Result::fail(-1, "not running");
-    Result r = withAccount(impl_.get(), id, [](pj::Account& a) { a.setRegistration(true); });
+    Impl* o = impl_.get();
+    Result r = withAccount(o, id, [o, id](pj::Account& a) { a.setRegistration(true); o->regRecovery.want(id); });
     if (r.ok) {
         std::lock_guard<std::mutex> lk(impl_->snapM);
         impl_->regInfos[id].state = RegState::Registering;
@@ -1394,9 +1423,30 @@ Result Engine::registerAccount(int id) {
 }
 Result Engine::unregisterAccount(int id) {
     if (!impl_->running) return Result::fail(-1, "not running");
-    return withAccount(impl_.get(), id, [](pj::Account& a) { a.setRegistration(false); });
+    Impl* o = impl_.get();
+    return withAccount(o, id, [o, id](pj::Account& a) { o->regRecovery.unwant(id); a.setRegistration(false); });
 }
 Result Engine::refreshRegistration(int id) { return registerAccount(id); }
+
+Result Engine::handleNetworkChange() {
+    if (!impl_->running) return Result::fail(-1, "not running");
+    return impl_->ctl.runSync([this]() -> Result {
+        Impl* o = impl_.get();
+        // ① TCP/TLS 연결을 닫는다 — 옛 망의 연결을 재사용하지 않게(새 REGISTER 가 새 연결을 연다). UDP 는 0.0.0.0 에 묶여
+        //    있어 그대로 쓰고, 낡은 Via/Contact 는 rport·Contact 재작성이 고친다(account_map.cpp natConfig).
+        //    수신 소켓 재시작(pjsua IP 변경 처리)은 하지 않는다 — 재시작 실패 경로가 계정 처리로 이어지며 전송이 빈 regc 를
+        //    역참조한다(pjsua_core.c handle_ip_change_on_acc).
+        pjsip_tpmgr_shutdown_param sd;
+        pjsip_tpmgr_shutdown_param_default(&sd);
+        sd.include_udp = PJ_FALSE;
+        pj_status_t st = pjsip_tpmgr_shutdown_all(pjsip_endpt_get_tpmgr(pjsua_get_pjsip_endpt()), &sd);
+        if (st != PJ_SUCCESS) o->log(2, "network change: transport shutdown " + std::to_string(st));
+        // ② 등록을 켠 계정마다 다시 등록 — 걸려 있으면 끝난 뒤 한 번 더(RegRecovery). 일반 등록 경로라 실패하면
+        //    pjsua 자동 재시도(regConfig.retryIntervalSec)가 그대로 산다.
+        for (int id : o->regRecovery.targets()) o->reRegister(id);
+        return Result::success();
+    });
+}
 
 Result Engine::removeAccount(int id) {
     if (!impl_->running) return Result::fail(-1, "not running");
@@ -1404,6 +1454,7 @@ Result Engine::removeAccount(int id) {
         Impl* o = impl_.get();
         if (!o->accounts.erase(id)) return Result::fail(-2, "no such account");
         o->accountCfgs.erase(id);
+        o->regRecovery.unwant(id);
         std::lock_guard<std::mutex> lk(o->snapM);
         o->regInfos.erase(id);
         return Result::success();

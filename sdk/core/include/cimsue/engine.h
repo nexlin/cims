@@ -33,8 +33,18 @@ public:
     int addAccount(const AccountConfig& cfg);
     Result registerAccount(int accountId);
     Result unregisterAccount(int accountId);
-    /** 즉시 재-REGISTER(서버 재기동 등으로 등록을 잃은 경우 복구). */
+    /** 즉시 재-REGISTER(서버 재기동 등으로 등록을 잃은 경우 복구). 망이 바뀐 경우는 `handleNetworkChange()`. */
     Result refreshRegistration(int accountId);
+    /**
+     * 망이 바뀌었다(기본 망 전환·끊겼다 복귀) — 플랫폼이 알리고 **코어가 등록을 되살린다**.
+     *
+     * TCP/TLS 연결을 닫아(옛 망의 연결을 재사용하지 않게) 등록을 켠 계정마다 다시 REGISTER 한다. 앞 등록 트랜잭션이 걸려
+     * 있으면(PJSIP_EBUSY) 겹쳐 보내지 않고 그것이 끝난 뒤 한 번 더 보낸다(RFC 3261 §10.2). 일반 등록 경로라 실패하면 계정의
+     * 자동 재시도가 그대로 돈다. UDP 는 닫지 않는다 — 낡은 Via/Contact 는 rport·Contact 재작성이 고친다. 진행 중 호는
+     * 건드리지 않는다(호 유지 정책은 별도, ue_sdk.md §11). 여러 번 불러도 계정마다 미뤄 둔 재등록은 하나다.
+     * `refreshRegistration()` 은 망은 그대로인데 등록만 잃은 경우(서버 재기동)의 복구다.
+     */
+    Result handleNetworkChange();
     Result removeAccount(int accountId);
     RegInfo regInfo(int accountId) const;
     std::vector<int> accounts() const;

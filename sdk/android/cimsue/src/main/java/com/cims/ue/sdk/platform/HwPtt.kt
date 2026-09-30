@@ -23,8 +23,23 @@ enum class PttKey { NONE, TALK, ALERT }
 /** 러기드 단말 측면 키 실측 keycode(학습값이 없을 때 폴백). */
 private const val KEYCODE_RUGGED_TALK = 309
 private const val KEYCODE_RUGGED_ALERT = 310
-internal val DEFAULT_TALK = intArrayOf(KeyEvent.KEYCODE_F11, KEYCODE_RUGGED_TALK)
-internal val DEFAULT_ALERT = intArrayOf(KeyEvent.KEYCODE_F10, KEYCODE_RUGGED_ALERT)
+
+/**
+ * 측면 키가 기능 키로 오는 단말의 폴백(F11 발언 / F10 경보). **키보드에서 온 것에는 쓰지 않는다** — 문자 키보드의
+ * F10·F11 은 사람이 친 기능 키이지 측면 키가 아니다(붙여 둔 키보드의 F10 을 칠 때마다 경보가 서면 안 된다).
+ */
+private const val KEYCODE_FKEY_TALK = KeyEvent.KEYCODE_F11
+private const val KEYCODE_FKEY_ALERT = KeyEvent.KEYCODE_F10
+
+/**
+ * 학습하지 않는 키 — 뒤로·홈·최근·볼륨·전원. 학습 중에도 이 키로 화면을 조작해 빠져나올 수 있어야 하고,
+ * 이 키가 발언을 걸면 시스템 조작을 잃는다.
+ */
+private val SYSTEM_KEYS = setOf(
+    KeyEvent.KEYCODE_BACK, KeyEvent.KEYCODE_HOME, KeyEvent.KEYCODE_APP_SWITCH,
+    KeyEvent.KEYCODE_VOLUME_UP, KeyEvent.KEYCODE_VOLUME_DOWN, KeyEvent.KEYCODE_VOLUME_MUTE,
+    KeyEvent.KEYCODE_POWER,
+)
 
 /**
  * 러기드 단말(UNIWA W999 등)의 측면 물리 키 입력.
@@ -65,12 +80,18 @@ class HwPtt(context: Context) {
      * 이 우선순위가 어긋나면 하드 키가 조용히 안 먹는다.
      */
     data class KeyMapping(val talk: Int, val alert: Int) {
-        /** 학습값이 내장 기본을 이긴다. 한 종류가 학습돼 있으면 그 종류의 기본값은 더 쓰지 않는다. */
-        fun classify(keyCode: Int): PttKey = when {
+        /**
+         * 학습값이 내장 기본을 이긴다. 한 종류가 학습돼 있으면 그 종류의 기본값은 더 쓰지 않는다.
+         *
+         * [keyboard] = 이 키가 **하드 키보드**(문자 키보드)에서 왔다. 그러면 기능 키 폴백(F11·F10)을 쓰지 않는다 —
+         * 키보드의 기능 키는 측면 키가 아니다. 러기드 실측값·학습값은 어느 장치에서 왔든 그대로다(학습은 사용자가 그
+         * 키를 골랐다는 뜻이다).
+         */
+        fun classify(keyCode: Int, keyboard: Boolean = false): PttKey = when {
             talk > 0 && keyCode == talk -> PttKey.TALK
             alert > 0 && keyCode == alert -> PttKey.ALERT
-            talk <= 0 && keyCode in DEFAULT_TALK -> PttKey.TALK
-            alert <= 0 && keyCode in DEFAULT_ALERT -> PttKey.ALERT
+            talk <= 0 && (keyCode == KEYCODE_RUGGED_TALK || !keyboard && keyCode == KEYCODE_FKEY_TALK) -> PttKey.TALK
+            alert <= 0 && (keyCode == KEYCODE_RUGGED_ALERT || !keyboard && keyCode == KEYCODE_FKEY_ALERT) -> PttKey.ALERT
             else -> PttKey.NONE
         }
 
@@ -84,6 +105,9 @@ class HwPtt(context: Context) {
         companion object {
             /** 미학습 상태. */
             val UNSET = KeyMapping(-1, -1)
+
+            /** 학습할 수 있는 키인가 — 시스템 키·keycode 0 이하(UNKNOWN)는 아니다. */
+            fun learnable(keyCode: Int): Boolean = keyCode > 0 && keyCode !in SYSTEM_KEYS
         }
     }
 
@@ -96,18 +120,43 @@ class HwPtt(context: Context) {
     }
 
     /** keycode 분류 — 판정은 [KeyMapping.classify] 에 있다. */
-    fun classify(keyCode: Int): PttKey = _mapping.value.classify(keyCode)
+    fun classify(keyCode: Int, keyboard: Boolean = false): PttKey = _mapping.value.classify(keyCode, keyboard)
 
     /** 설정 화면에서 학습 시작. 다음 [onKeyDown] 의 keycode 를 이 대상으로 저장한다. */
     fun startLearn(target: PttKey) { if (target != PttKey.NONE) _learning.value = target }
     fun cancelLearn() { _learning.value = null }
 
+    /** 학습값을 지운다 — 내장 기본으로 돌아간다. */
+    fun resetMapping() {
+        _mapping.value = KeyMapping.UNSET
+        prefs.edit().remove(KEY_TALK).remove(KEY_ALERT).apply()
+    }
+
     /**
-     * Activity/Service 의 키 down 을 넘긴다. 소비했으면 true.
-     * 학습 중이면 매핑을 저장하고, 아니면 [pressed] 를 올린다.
+     * Activity 의 키 이벤트를 그대로 넘긴다 — 키보드 여부(문자 키보드면 기능 키 폴백 제외)와 누름·뗌·반복을 여기서
+     * 가른다. 소비했으면 true(앱은 그 키로 다른 일을 하지 않는다).
      */
-    fun onKeyDown(keyCode: Int): Boolean {
+    fun onKeyEvent(event: KeyEvent): Boolean {
+        val keyboard = event.device?.keyboardType == InputDevice.KEYBOARD_TYPE_ALPHABETIC
+        return when {
+            event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0 -> onKeyDown(event.keyCode, keyboard)
+            event.action == KeyEvent.ACTION_DOWN -> onKeyRepeat(event.keyCode, keyboard)
+            event.action == KeyEvent.ACTION_UP -> onKeyUp(event.keyCode, keyboard)
+            else -> false
+        }
+    }
+
+    /** 누르고 있는 동안의 반복 down — 상태는 그대로 두고 소비만 한다(반복이 다른 조작으로 새지 않게). */
+    private fun onKeyRepeat(keyCode: Int, keyboard: Boolean): Boolean =
+        _learning.value == null && classify(keyCode, keyboard) != PttKey.NONE
+
+    /**
+     * 키 down. 소비했으면 true.
+     * 학습 중이면 매핑을 저장하고(시스템 키는 학습하지 않고 흘려보낸다), 아니면 [pressed] 를 올린다.
+     */
+    fun onKeyDown(keyCode: Int, keyboard: Boolean = false): Boolean {
         _learning.value?.let { target ->
+            if (!KeyMapping.learnable(keyCode)) return false
             val next = _mapping.value.learn(target, keyCode)
             _mapping.value = next
             prefs.edit().putInt(KEY_TALK, next.talk).putInt(KEY_ALERT, next.alert)
@@ -116,7 +165,7 @@ class HwPtt(context: Context) {
             _learning.value = null
             return true
         }
-        val kind = classify(keyCode)
+        val kind = classify(keyCode, keyboard)
         if (kind == PttKey.NONE) return false
         markSeen()
         if (kind == PttKey.TALK) _pressed.value = true
@@ -124,8 +173,8 @@ class HwPtt(context: Context) {
     }
 
     /** 키 up. TALK 였으면 [pressed] 를 내린다. 소비했으면 true. */
-    fun onKeyUp(keyCode: Int): Boolean {
-        val kind = classify(keyCode)
+    fun onKeyUp(keyCode: Int, keyboard: Boolean = false): Boolean {
+        val kind = classify(keyCode, keyboard)
         if (kind == PttKey.NONE) return false
         markSeen()
         if (kind == PttKey.TALK) _pressed.value = false
@@ -148,10 +197,12 @@ class HwPtt(context: Context) {
         _present.value = true
     }
 
+    /** 측면 키를 광고하는 입력장치가 있는가 — 문자 키보드의 F11 은 측면 키가 아니다([KeyMapping.classify]). */
     private fun scanInputDevices(): Boolean = runCatching {
         InputDevice.getDeviceIds().any { id ->
             val d = InputDevice.getDevice(id) ?: return@any false
-            d.hasKeys(*DEFAULT_TALK).any { it }
+            !d.isVirtual && d.keyboardType != InputDevice.KEYBOARD_TYPE_ALPHABETIC &&
+                d.hasKeys(KEYCODE_FKEY_TALK, KEYCODE_RUGGED_TALK).any { it }
         }
     }.getOrDefault(false)
 

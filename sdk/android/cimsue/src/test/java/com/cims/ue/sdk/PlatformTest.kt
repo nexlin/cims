@@ -69,6 +69,33 @@ class PlatformTest {
         assertEquals(PttKey.TALK, m.classify(309))   // 기본값으로 폴백
     }
 
+    // ── 키보드 — 문자 키보드의 기능 키는 측면 키가 아니다 ──
+    @Test fun `키보드의 F10·F11 은 측면 키로 읽지 않는다`() {
+        // 붙여 둔 키보드의 F10·F11 을 칠 때마다 경보·발언이 서면 안 된다.
+        assertEquals(PttKey.NONE, unset.classify(KeyEvent.KEYCODE_F11, keyboard = true))
+        assertEquals(PttKey.NONE, unset.classify(KeyEvent.KEYCODE_F10, keyboard = true))
+        // 러기드 실측값은 장치와 무관하다
+        assertEquals(PttKey.TALK, unset.classify(309, keyboard = true))
+        assertEquals(PttKey.ALERT, unset.classify(310, keyboard = true))
+    }
+
+    @Test fun `학습한 키는 키보드에서 와도 그 키다`() {
+        // 학습은 사용자가 그 키를 골랐다는 뜻이다 — 장치로 다시 가리지 않는다.
+        val m = unset.learn(PttKey.TALK, KeyEvent.KEYCODE_F11)
+        assertEquals(PttKey.TALK, m.classify(KeyEvent.KEYCODE_F11, keyboard = true))
+    }
+
+    @Test fun `시스템 키는 학습하지 않는다`() {
+        // 학습 중 뒤로가기를 누르면 학습을 빠져나가야지, 뒤로가기가 발언 키가 되면 안 된다.
+        listOf(KeyEvent.KEYCODE_BACK, KeyEvent.KEYCODE_HOME, KeyEvent.KEYCODE_APP_SWITCH,
+               KeyEvent.KEYCODE_VOLUME_UP, KeyEvent.KEYCODE_VOLUME_DOWN, KeyEvent.KEYCODE_VOLUME_MUTE,
+               KeyEvent.KEYCODE_POWER, 0).forEach {
+            assertEquals("keycode $it", false, HwPtt.KeyMapping.learnable(it))
+        }
+        assertEquals(true, HwPtt.KeyMapping.learnable(309))
+        assertEquals(true, HwPtt.KeyMapping.learnable(KeyEvent.KEYCODE_F11))
+    }
+
     // ── 라우트 어휘 — 코어(ue_sdk.md §4.5)와 같아야 한다 ──
     @Test fun `라우트 어휘가 코어와 같다`() {
         assertEquals(listOf("EARPIECE", "SPEAKER", "HEADSET", "BLUETOOTH"), Route.entries.map { it.name })
