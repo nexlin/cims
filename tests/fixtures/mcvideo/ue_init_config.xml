@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mcptt-UE-initial-configuration xmlns="urn:3gpp:mcptt:mcpttUEinitConfig:1.0" domain="ptt.cims.example.kr">
+  <name>CIMS</name>
+  <on-network>
+    <Timers>
+      <T100>4</T100>
+      <T101>4</T101>
+      <T103>4</T103>
+      <T104>4</T104>
+      <T132>6</T132>
+    </Timers>
+    <HPLMN PLMN="00101">
+      <service>
+        <MCPTT-to-con-ref>internet</MCPTT-to-con-ref>
+        <MC-common-core-to-con-ref>internet</MC-common-core-to-con-ref>
+        <MC-ID-to-con-ref>internet</MC-ID-to-con-ref>
+      </service>
+    </HPLMN>
+    <App-Server-Info>
+      <idms-auth-endpoint>https://csc.ptt.cims.example.kr:4430/idms/authreq</idms-auth-endpoint>
+      <idms-token-endpoint>https://csc.ptt.cims.example.kr:4430/idms/tokenreq</idms-token-endpoint>
+      <http-proxy></http-proxy>
+      <gms>https://csc.ptt.cims.example.kr:4430</gms>
+      <cms>https://csc.ptt.cims.example.kr:4430</cms>
+      <kms>https://csc.ptt.cims.example.kr:4430/keymanagement/identity/v1</kms>
+      <tls-tunnel-auth-method>
+        <mutual-authentication>false</mutual-authentication>
+      </tls-tunnel-auth-method>
+    </App-Server-Info>
+    <GMS-URI>sip:gms_psi@ptt.cims.example.kr</GMS-URI>
+    <group-creation-XUI>https://csc.ptt.cims.example.kr:4430</group-creation-XUI>
+    <GMS-XCAP-root-URI>https://csc.ptt.cims.example.kr:4430</GMS-XCAP-root-URI>
+    <CMS-XCAP-root-URI>https://csc.ptt.cims.example.kr:4430</CMS-XCAP-root-URI>
+    <integrity-protection-enabled>false</integrity-protection-enabled>
+    <confidentiality-protection-enabled>false</confidentiality-protection-enabled>
+    <anyExt>
+      <MCPTT-Service-Details>
+        <IPv6-Required>false</IPv6-Required>
+        <Server-URI>sip:mcptt_psi@ptt.cims.example.kr</Server-URI>
+      </MCPTT-Service-Details>
+      <MCVideo-Service-Details>
+        <IPv6-Required>false</IPv6-Required>
+        <Server-URI>sip:mcvideo_psi@ptt.cims.example.kr</Server-URI>
+      </MCVideo-Service-Details>
+      <MCData-Service-Details>
+        <IPv6-Required>false</IPv6-Required>
+        <Server-URI>sip:mcdata_psi@ptt.cims.example.kr</Server-URI>
+      </MCData-Service-Details>
+    </anyExt>
+  </on-network>
+</mcptt-UE-initial-configuration>

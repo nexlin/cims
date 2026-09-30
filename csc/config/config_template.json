@@ -825,6 +825,24 @@
           "help": "비우면 sip:mcptt_psi@<PTT 도메인> (CSP 의 MCPTT 서버 PSI)."
         },
         {
+          "key": "UeInitConfig.ServiceDetails.McVideo.Enable",
+          "label": "MCVideo-Service-Details 포함",
+          "type": "bool",
+          "default": false,
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드.",
+          "help": "MCVideo 를 단말에 광고할 때 켠다(TS 24.484 §7.2.2.1 b) — CSP Setup.Roles.MCVIDEO 를 켠 사이트만. Server-URI = participating MCVideo function PSI (TS 24.281 §4.2)."
+        },
+        {
+          "key": "UeInitConfig.ServiceDetails.McVideo.ServerUri",
+          "label": "MCVideo Server-URI (PSI)",
+          "type": "string",
+          "default": "",
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드.",
+          "help": "비우면 sip:mcvideo_psi@<PTT 도메인> (CSP MCVideo 모듈의 PSI)."
+        },
+        {
           "key": "UeInitConfig.ServiceDetails.McData.Enable",
           "label": "MCData-Service-Details 포함",
           "type": "bool",
@@ -1074,6 +1092,234 @@
         },
         {
           "key": "ServiceConfig.ResourcePriority.Normal",
+          "label": "Resource-Priority 서열 — 일반(하향)",
+          "type": "string",
+          "default": "0",
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드."
+        }
+      ],
+      "scope": "service"
+    },
+    {
+      "key": "mcvideo_service_config",
+      "title": "MCVideo 서비스 설정 문서 (service-config) — on-network 파라미터",
+      "description": "TS 24.484 §9.4 MCVideo service configuration 문서(전역 1건, CMSXCAPROOT/org.3gpp.mcvideo.service-config/global/mcvideo-service-config.xml)의 on-network 규격 파라미터 — 송출·수신 제어 타이머·카운터(<anyExt><tc-timers-counters-R14>, TS 24.581 §11)·Resource-Priority. 서버 값은 송출·수신 제어 서버(CMP)의 정본이다(CSP 가 문서를 받아 CMP 로 전달). 그룹 호의 T1·T5 는 그룹 문서(on-network-hang-timer·on-network-reception-hang-timer)가 정본이다. <signalling-protection> 은 늘 false 로 싣는다(docs/design/features/mcvideo.md §7 D7).",
+      "fields": [
+        {
+          "key": "McVideoServiceConfig.TcTimersCounters.T100-transmission-request",
+          "label": "T100 — 송출 요청 재전송 (s, 단말)",
+          "type": "int",
+          "default": 1,
+          "min": 1,
+          "max": 255,
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드 — 다음 GET 부터 새 문서·ETag.",
+          "help": "단말 타이머(초, xs:unsignedByte) — TS 24.581 §11.1.1. C100(3회) 재전송 총합이 6 s 를 넘지 않게(표 NOTE 1)."
+        },
+        {
+          "key": "McVideoServiceConfig.TcTimersCounters.T101-transmission-end-request",
+          "label": "T101 — 송출 종료 요청 재전송 (s, 단말)",
+          "type": "int",
+          "default": 1,
+          "min": 1,
+          "max": 255,
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드 — 다음 GET 부터 새 문서·ETag.",
+          "help": "TS 24.581 §11.1.1 단말 타이머(초)."
+        },
+        {
+          "key": "McVideoServiceConfig.TcTimersCounters.T102-queue-position-request",
+          "label": "T102 — 대기 순번 요청 재전송 (s, 단말)",
+          "type": "int",
+          "default": 1,
+          "min": 1,
+          "max": 255,
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드 — 다음 GET 부터 새 문서·ETag.",
+          "help": "TS 24.581 §11.1.1 단말 타이머(초)."
+        },
+        {
+          "key": "McVideoServiceConfig.TcTimersCounters.T103-receive-media-request",
+          "label": "T103 — 수신 요청 재전송 (s, 단말)",
+          "type": "int",
+          "default": 1,
+          "min": 1,
+          "max": 255,
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드 — 다음 GET 부터 새 문서·ETag.",
+          "help": "TS 24.581 §11.1.1 단말 타이머(초)."
+        },
+        {
+          "key": "McVideoServiceConfig.TcTimersCounters.T104-receive-media-release",
+          "label": "T104 — 수신 종료 요청 재전송 (s, 단말)",
+          "type": "int",
+          "default": 1,
+          "min": 1,
+          "max": 255,
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드 — 다음 GET 부터 새 문서·ETag.",
+          "help": "TS 24.581 §11.1.1 단말 타이머(초)."
+        },
+        {
+          "key": "McVideoServiceConfig.TcTimersCounters.private-call-hang-timer",
+          "label": "1:1 호 비활성 T1 (ms)",
+          "type": "int",
+          "default": 30000,
+          "min": 0,
+          "max": 86400000,
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드 — 다음 GET 부터 새 문서·ETag.",
+          "help": "TS 24.581 §11.1.3 T1(1:1 호) — 그룹 호의 T1 은 그룹 on-network-hang-timer 를 쓴다. 1:1 영상 호는 후속(V8)."
+        },
+        {
+          "key": "McVideoServiceConfig.TcTimersCounters.T2-transmission-idle",
+          "label": "T2 — Transmission Idle 재전송 간격 (ms)",
+          "type": "int",
+          "default": 1000,
+          "min": 0,
+          "max": 600000,
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드 — 다음 GET 부터 새 문서·ETag.",
+          "help": "TS 24.581 §11.1.3 — 규격 기본값 없음(무선망에 맞춘다). 재전송 횟수 = C2."
+        },
+        {
+          "key": "McVideoServiceConfig.TcTimersCounters.T3-transmission-revoke",
+          "label": "T3 — Transmission Revoke 재전송 (ms)",
+          "type": "int",
+          "default": 1000,
+          "min": 0,
+          "max": 600000,
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드 — 다음 GET 부터 새 문서·ETag.",
+          "help": "TS 24.581 §11.1.3 기본 1 s."
+        },
+        {
+          "key": "McVideoServiceConfig.TcTimersCounters.T4-transmission-granted",
+          "label": "T4 — Transmission Granted 재전송 (ms)",
+          "type": "int",
+          "default": 1000,
+          "min": 0,
+          "max": 600000,
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드 — 다음 GET 부터 새 문서·ETag.",
+          "help": "TS 24.581 §11.1.3 기본 1 s(대기열에서 허가된 참여자). 횟수 = C4."
+        },
+        {
+          "key": "McVideoServiceConfig.TcTimersCounters.reception-hang-time",
+          "label": "1:1 호 수신 비활성 T5 (ms)",
+          "type": "int",
+          "default": 30000,
+          "min": 0,
+          "max": 86400000,
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드 — 다음 GET 부터 새 문서·ETag.",
+          "help": "TS 24.581 §11.1.3 T5(1:1 호) — 그룹 호의 T5 는 그룹 on-network-reception-hang-timer."
+        },
+        {
+          "key": "McVideoServiceConfig.TcTimersCounters.T6-reception-granted",
+          "label": "T6 — Reception Granted 재전송 (ms)",
+          "type": "int",
+          "default": 1000,
+          "min": 0,
+          "max": 600000,
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드 — 다음 GET 부터 새 문서·ETag.",
+          "help": "TS 24.581 §11.1.3 기본 1 s. 횟수 = C6."
+        },
+        {
+          "key": "McVideoServiceConfig.TcTimersCounters.T11-stream-reception-idle",
+          "label": "T11 — 스트림 수신 유휴 (ms)",
+          "type": "int",
+          "default": 10000,
+          "min": 0,
+          "max": 600000,
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드 — 다음 GET 부터 새 문서·ETag.",
+          "help": "TS 24.581 §11.1.3 기본 10 s — 만료 시 그 송출 스트림을 끊는다."
+        },
+        {
+          "key": "McVideoServiceConfig.TcTimersCounters.C2-transmission-idle",
+          "label": "C2 — Transmission Idle 재전송 횟수",
+          "type": "int",
+          "default": 10,
+          "min": 0,
+          "max": 255,
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드 — 다음 GET 부터 새 문서·ETag.",
+          "help": "TS 24.581 §11.2.3 기본 10."
+        },
+        {
+          "key": "McVideoServiceConfig.TcTimersCounters.C4-transmission-granted",
+          "label": "C4 — Transmission Granted 재전송 횟수",
+          "type": "int",
+          "default": 3,
+          "min": 0,
+          "max": 255,
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드 — 다음 GET 부터 새 문서·ETag.",
+          "help": "TS 24.581 §11.2.3 기본 3."
+        },
+        {
+          "key": "McVideoServiceConfig.TcTimersCounters.C6-reception-granted",
+          "label": "C6 — Reception Granted 재전송 횟수",
+          "type": "int",
+          "default": 3,
+          "min": 0,
+          "max": 255,
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드 — 다음 GET 부터 새 문서·ETag.",
+          "help": "TS 24.581 §11.2.3 기본 3."
+        },
+        {
+          "key": "McVideoServiceConfig.TcTimersCounters.C7-reception-accpeted",
+          "label": "C7 — 수신 수락 상한",
+          "type": "int",
+          "default": 2,
+          "min": 0,
+          "max": 255,
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드 — 다음 GET 부터 새 문서·ETag.",
+          "help": "TS 24.581 §11.2.3 기본 2. 요소 이름은 TS 24.484 XSD 표기(accpeted) 그대로다(본문 accepted — mcvideo.md §9)."
+        },
+        {
+          "key": "McVideoServiceConfig.TcTimersCounters.C11-media-receivers",
+          "label": "C11 — 스트림당 수신자 상한",
+          "type": "int",
+          "default": 4,
+          "min": 0,
+          "max": 255,
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드 — 다음 GET 부터 새 문서·ETag.",
+          "help": "TS 24.581 §11.2.3 기본 4 — 한 송출 스트림을 동시에 받는 수신자 수."
+        },
+        {
+          "key": "McVideoServiceConfig.ResourcePriority.Namespace",
+          "label": "Resource-Priority 네임스페이스",
+          "type": "string",
+          "default": "mcpttp",
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드.",
+          "help": "TS 24.281 §6.2.8.1.16 — MCVideo 는 MCPTT 네임스페이스(RFC 8101 mcpttp)를 재사용한다."
+        },
+        {
+          "key": "McVideoServiceConfig.ResourcePriority.Emergency",
+          "label": "Resource-Priority 서열 — 긴급",
+          "type": "string",
+          "default": "15",
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드."
+        },
+        {
+          "key": "McVideoServiceConfig.ResourcePriority.ImminentPeril",
+          "label": "Resource-Priority 서열 — 임박 위험",
+          "type": "string",
+          "default": "8",
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드."
+        },
+        {
+          "key": "McVideoServiceConfig.ResourcePriority.Normal",
           "label": "Resource-Priority 서열 — 일반(하향)",
           "type": "string",
           "default": "0",

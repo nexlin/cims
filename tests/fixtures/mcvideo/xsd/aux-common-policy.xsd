@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- 보조 스키마 — RFC 4745 §13 common-policy (ruleset/rule/conditions/actions/transformations). -->
+<xs:schema targetNamespace="urn:ietf:params:xml:ns:common-policy" xmlns:cp="urn:ietf:params:xml:ns:common-policy"
+  xmlns:xs="http://www.w3.org/2001/XMLSchema" elementFormDefault="qualified" attributeFormDefault="unqualified">
+  <xs:element name="ruleset">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element name="rule" type="cp:ruleType" minOccurs="0" maxOccurs="unbounded"/>
+      </xs:sequence>
+    </xs:complexType>
+  </xs:element>
+  <xs:complexType name="ruleType">
+    <xs:sequence>
+      <xs:element name="conditions" type="cp:conditionsType" minOccurs="0"/>
+      <xs:element name="actions" type="cp:extensibleType" minOccurs="0"/>
+      <xs:element name="transformations" type="cp:extensibleType" minOccurs="0"/>
+    </xs:sequence>
+    <xs:attribute name="id" type="xs:ID" use="required"/>
+  </xs:complexType>
+  <xs:complexType name="conditionsType">
+    <xs:choice minOccurs="0" maxOccurs="unbounded">
+      <xs:element name="identity" type="cp:extensibleType"/>
+      <xs:element name="sphere" type="cp:extensibleType"/>
+      <xs:element name="validity" type="cp:extensibleType"/>
+      <xs:any namespace="##other" processContents="strict"/>
+    </xs:choice>
+  </xs:complexType>
+  <xs:complexType name="extensibleType">
+    <xs:sequence>
+      <xs:any namespace="##other" processContents="strict" minOccurs="0" maxOccurs="unbounded"/>
+    </xs:sequence>
+    <xs:anyAttribute namespace="##any" processContents="lax"/>
+  </xs:complexType>
+</xs:schema>

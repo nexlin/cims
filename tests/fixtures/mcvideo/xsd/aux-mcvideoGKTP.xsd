@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- 보조 스키마 — mcvideoGKTP 자리표시(MKFC-GKTPs 는 E2E 전용 — 1차 범위 밖). -->
+<xs:schema targetNamespace="urn:3gpp:ns:mcvideoGKTP:1.0" xmlns:xs="http://www.w3.org/2001/XMLSchema"
+  elementFormDefault="qualified">
+  <xs:complexType name="singleTypeGKTPsType">
+    <xs:sequence>
+      <xs:any namespace="##any" processContents="lax" minOccurs="0" maxOccurs="unbounded"/>
+    </xs:sequence>
+  </xs:complexType>
+</xs:schema>

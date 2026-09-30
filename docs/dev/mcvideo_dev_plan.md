@@ -37,7 +37,7 @@
 
 | # | 계약 | 소유 · 리뷰 | 형태 | 쓰는 쪽 |
 |---|---|---|---|---|
-| K1 | DB 스키마 — `mcvideo_group_attrs`·`mcvideo_user_profile` (추가 표만 — 공유 DB 에서 옛 코드 무영향) | .48 · .45 | `sql/migrate_mcvideo.sql` 초안 + `docs/design/db_schema.md` | CSC·CSP |
+| K1 | DB 스키마 — `mcvideo_group_attrs`·`mcvideo_user_profile`·`mcvideo_affiliations` (추가 표만 — 공유 DB 에서 옛 코드 무영향) | .48 · .45 | `sql/migrate_mcvideo.sql` 초안 + `docs/design/db_schema.md` | CSC·CSP |
 | K2 | 설정 문서 골든 샘플 — MCPTT+MCVideo 그룹 문서, MCVideo user profile, service config, ue-init-config `MCVideo-Service-Details` | .48 · .45 | `tests/fixtures/mcvideo/*.xml` (TS 24.481·24.484 스키마 검증) | CSC 생성 시험 · SDK 해석 시험 |
 | K3 | SIP 계약 — REGISTER Contact 태그, chat 개시·합류·재합류 INVITE·200 의 헤더(Accept-Contact·P-Preferred-Service·Request-URI = PSI)와 mcvideo-info 본문, 거절 응답(404 + Warning 117·118 등) | .48 · .45 | `tests/fixtures/mcvideo/sip/*.txt` 골든 메시지 | CSP 해석·생성 · SDK 생성·해석 |
 | K4 | SDP 프로파일 — offer/answer 전체 예(`m=audio`·`m=video`·`m=application … udp MCVideo` + fmtp), 포트·PT 규칙 | .48 · .45 | mcvideo.md §1.4 보강 + 골든 SDP | CSP(psip) · CMP 포트 · SDK |

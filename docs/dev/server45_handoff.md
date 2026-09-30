@@ -324,3 +324,46 @@ TS 24.484(docx k00). 이 절은 두 호스트가 MCVideo 계약을 주고받는 
 
 **다음 (.45)** — B2: CMP `cmp/PTransmissionCodec.{h,cpp}`(.45 소유, CMP 빌드 등록은 B3 때 .48 과 함께) + SDK 코덱, 서로의 출력을 읽는 교차 시험(`cimsue_test`
 에 floor `FloorXCheck` 방식). C2 는 K2 fixture(`tests/fixtures/mcvideo/*.xml`), C3·C4 는 K3·K4 가 선 뒤.
+
+**.48 리뷰 결과 (K5·K7·V0 SDK) — 09-30**
+
+- **K5 정의 테이블 = 원문 일치.** TS 24.581 V18.8.0 과 대조 — subtype 세 표(Table 9.2.2.1-1~3)·field ID 24개(Table 9.2.3.1-1)·필드 모양(§9.2.3.2~§9.2.3.23 —
+  Length 2/6·가변 패딩·Reception Mode 0 = 자동·1 = 수동)·메시지별 필드(§9.2.4~§9.2.31 — `User Id of the Transmitting User` 가 있는 Taken·Notification·
+  Receive Media Request/Response·End 계열 포함)·원인 셋(§9.2.6.2·§9.2.10.2·§9.2.15.2)·지시자·Source·Permission·Result·Queue 특수값 모두 맞다.
+- **CMP 이름은 B3~B5 에 그대로 쓴다** — `MCV0_/MCV1_/MCV2_*` subtype · `TF_*`·`TFK_*` 필드 · `TI_*` · `TC_SRC_/TC_PERM_/TC_RESULT_/TC_RECEPTION_*` ·
+  `TC_REJECT_/TC_REVOKE_/TC_RECV_REJECT_*` + `Mcv*CauseText` · `MCV_T*_MS`·`MCV_C*`. 기존 CMP 식별자(floor `FLOOR_*`·`FF_*`)와 겹치는 이름이 없다.
+  참여 기능 타이머(§11.1.4·§11.2.4)는 MBMS 전용이라 빠진 것이 맞다. 동시 송출 상한 «Cx» 는 그룹 속성이라 K6 `max_transmitters` 로 받는다.
+- **yaml 을 고쳤다(.48 — 생성기 재실행, 두 생성 헤더 내용은 그대로, `--check` PASS)**:
+  1. `server_counters.C7.element` = XSD 표기 **`C7-reception-accpeted`**(본문 §9.4.2.1·§9.4.2.7 은 accepted — XSD 를 따르지 않으면 service configuration 이 스키마
+     검증에 실패한다, mcvideo.md §9).
+  2. `server_timers.T1`·`T5` 에 **`element_private`**(`private-call-hang-timer`·`reception-hang-time`) — `<tc-timers-counters-R14>` 필수 17요소를 yaml 이 전부 덮게
+     (그룹 호의 T1·T5 는 그룹 문서 값, 1:1 호는 이 두 요소).
+- **K7** — 서버 계약(K6)과 맞다. 알림 하나: 규격은 송출자가 Granted 의 Audio·Video SSRC 를 자기 RTP 에 쓰게 한다(TS 24.581 §6.2.4 «use them in the RTP media
+  packets»). CMP 는 송출자를 멤버 전용 포트로 가리고 내보낼 때 할당 SSRC 를 찍으므로(K6), SDK 가 1차에 pjmedia 스트림 SSRC 를 바꾸지 못해도 서버 분배는
+  깨지지 않는다 — 그렇게 가면 ue_sdk.md 편차로 적어 달라.
+- **V0 SDK 몫** — 확인. CSC 생성 쪽(A1)도 이번 .48 커밋에 들어 있다(아래) — 두 끝 모두 MCPTT ICSI enabler.
+
+**제안 1~6 판정 (→ .48 계약에 반영)**
+
+| # | 판정 | 반영 |
+|---|---|---|
+| 1 | 채택 | K2 — CSC 가 `<tc-timers-counters-R14>` 17요소를 **전부** 싣는다(값 = yaml 기본값). CSC 기본값 = yaml 인지 `tests/test_csc_mcvideo.py` `TcDefsAgreementTest` 가 대조한다 — 값을 바꿀 땐 yaml 먼저 |
+| 2 | 채택 | K6 `PTT_GROUP_ADD`(`service:"mcvideo"`) `tc_timers{t1_ms, t2_ms, t3_ms, t4_ms, t5_ms, t6_ms, t11_ms, c2, c4, c6, c7, c11}` — **t1_ms = 그룹 `on-network-hang-timer`**, **t5_ms = 그룹 `on-network-reception-hang-timer`**, 나머지 = MCVideo service configuration(CSP 가 CSC `/internal/mcvideo/service-config` 로 받는다). 미지정 = K5 기본값 |
+| 3 | 채택 | K6 `PTT_JOIN.max_rx_streams`(C9 = user profile `MaxSimultaneousVideoStreams`, 초과 → Receive Media Response #7). C7·C11 = ADD `tc_timers` |
+| 4 | 채택 + 보강 | K4(mcvideo.md §1.4) — 구분자 `;` · 단말 offer 에 `mc_transmission_ssrc` 값. **서버 answer·fan-out offer 는 늘 `mc_transmission_ssrc` 를 싣는다**(TS 24.281 §6.3.3.1.1 4)·§6.3.3.2.1 2)b) «shall» — TS 24.581 §14 의 «다중화 지원 시» 보다 이쪽, mcvideo.md §9) = CMP 가 JOIN 응답으로 준 `tc_ssrc`. CMP 는 단말 offer 값(`user_tc_ssrc`)을 자기가 보내는 전송 제어 RTCP 헤더 SSRC 로 쓴다. 1차 answer 에 `mc_queueing` 없음(송출 큐 = V8). `mc_audio_ssrc`·`mc_video_ssrc` 는 새 prearranged 세션의 암묵 요청을 받아들일 때만(JOIN `implicit_request` → 응답 `granted`·`audio_ssrc`·`video_ssrc`) |
+| 5 | 채택 | 1차 코덱은 ID 없는 필드를 부호화하지 않는다(on-network 그룹 호에 쓰이지 않는다) |
+| 6 | 채택 | K6 SSRC 규칙 — 송출 허가 때 CMP 가 송출마다 **전역 유일 Audio·Video SSRC 쌍을 할당·보관**(TS 24.581 §6.3.4.3.3 d)해 Granted·Media Transmission Notification·Receive Media Response·End 계열에 싣고, egress 에 그 값을 찍는다. 수신자별 **Active SSRC List**(§6.3.7)로 분배 |
+
+**.48 이 낸 것 (→ .45 리뷰)** — 이번 커밋. CSC 코드는 미배포, DB 마이그레이션은 공유 DB 에 아직 적용하지 않았다(A2 에서 — 표 추가만이라 옛 코드 무영향).
+
+| 계약·작업 | 산출 | .45 가 볼 것 |
+|---|---|---|
+| K1 DB | `sql/migrate_mcvideo.sql`(+ `cims_schema.sql`·db_schema.md) — `mcvideo_group_attrs`(행 = MCVideo 그룹) · `mcvideo_user_profile`(행 = 자격, `max_video_streams`·`max_calls_n6`) · **`mcvideo_affiliations`**(서비스별 affiliation — 공유 DB 의 옛 CSP 가 dereg 때 `ptt_affiliations` 를 사용자 단위로 지우고 옛 OAM 이 그 표를 MCPTT 로 세므로 열 추가가 아니라 표를 따로 뒀다) | 없음(서버 몫) |
+| K2 설정 문서 | `tests/fixtures/mcvideo/*.xml` + **README(해석 쪽이 확인할 값)** + `xsd/`(원문 XSD + 보조) + `tests/mcvideo_fixture_check.py`(S1 `S1-MCVIDEO-CONTRACT`, xmlschema 없으면 SKIP) | **C2 입력** — 그룹 문서 MCVideo `<service>`·`mcvideo-*`·entry `mcvideo-mcvideo-id` · MCVideo user profile · service configuration(전역 문서 `…/org.3gpp.mcvideo.service-config/global/mcvideo-service-config.xml`, MIME `application/vnd.3gpp.mcvideo-service-config+xml`) · ue-init-config `MCVideo-Service-Details`(MCPTT → MCVideo → MCData). user profile 주소 = `…/org.3gpp.mcvideo.user-profile/users/<MCVideo ID>/mcvideo-user-profile-1.xml` |
+| K4 SDP | mcvideo.md §1.4 «CIMS SDP 프로파일» — 골든 SDP 는 K3 메시지 안에 | C4 offer 모양(m 순서 audio → video → application, `i=`, `udp MCVideo`, rtcp-fb pli·fir) |
+| K6 CSP↔CMP | cmp_media_api.md **§7.9**(`PTT_*` + `service:"mcvideo"`, 멤버 `port`·`video_port`·`control_port`, JOIN `tc_ssrc`·`user_tc_ssrc`·`max_rx_streams`·`implicit_request`, SSRC 규칙) + §8 이벤트 `TRANSMITTERS`·`TRANSMISSION_INACTIVITY` | B2 코덱을 CMP 에 붙일 자리(§7.9) |
+| A1 V0(CSC) | `get_group_xml` MCPTT enabler = MCPTT ICSI + 규칙 `<is-list-member>`·`<allow-initiate-conference>`·`<join-handling>` | 옛 앱·새 SDK 모두 그룹 문서를 그대로 읽는지(C1 시험) |
+| A3·A4·A5 CSC | `csc/src/services/mcvideo.py` — 그룹 문서 MCVideo 몫·XCAP PUT 해석(전환기 규칙 — MCVideo `<service>` 없는 PUT 은 MCVideo 를 건드리지 않는다)·CMS 두 문서·ue-init-config(기본 끔 `UeInitConfig.ServiceDetails.McVideo.Enable`)·scope `3gpp:mc:video_*` 넷(자격 있는 사용자만)·토큰 `mcvideo_id`·`/internal/mcvideo/service-config` | SDK 가 video scope 를 요청하면 자격 없는 사용자는 응답 `scope` 에서 빠진다 |
+
+**다음 (.48)** — K3 SIP 골든(`tests/fixtures/mcvideo/sip/` — REGISTER·affiliation PUBLISH·chat 개시/합류 INVITE·200·404 117/118·재합류, K4 SDP 포함) →
+A2(마이그레이션 적용·CSP 적재) → A7~A10(CSP MCVideo 모듈·등록·affiliation·그룹 호) · B3(CMP 그룹 종류 `(service, group_id)` 키·멤버 control 포트).

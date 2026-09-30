@@ -13,9 +13,12 @@
 --    - 가입 테이블 = 접속환경 kind (sip_service_model.md §2-9): volte_subscriptions(이동 VoLTE) /
 --      voip_subscriptions(유선 VoIP — 데스크폰·소프트폰·관제 앱) / ptt_subscriptions(MCPTT). 세 테이블은 컬럼이
 --      같고 행의 service_ref 는 자기 kind 의 access_services 레코드만 가리킨다(CSC 쓰기 게이트).
---  최종 테이블: 9개 (organizations, users, volte_subscriptions,
+--  최종 테이블: 20개 (organizations, users, volte_subscriptions,
 --    voip_subscriptions, ptt_subscriptions, icb_identities, ptt_groups,
---    ptt_group_members, ptt_affiliations).
+--    ptt_group_members, ptt_user_profile, phone_groups, phone_group_members,
+--    roles, role_assignments, role_monitor_targets, role_ptt_targets,
+--    mcptt_service_config, ptt_affiliations, mcvideo_group_attrs,
+--    mcvideo_user_profile, mcvideo_affiliations).
 -- ============================================================
 
 CREATE DATABASE IF NOT EXISTS cims
@@ -381,3 +384,67 @@ CREATE TABLE IF NOT EXISTS ptt_affiliations (
     KEY idx_aff_group_status (group_id, status),
     CONSTRAINT fk_aff_group FOREIGN KEY (group_id) REFERENCES ptt_groups (id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='MCPTT affiliation 상태 (TS 24.379 §9)';
+
+-- ─────────────────────────────────────────────
+--  MCVideo 서비스 (TS 24.281 · TS 24.581) — 서비스별 표 (docs/design/features/mcvideo.md §5.1)
+--  mcvideo_group_attrs 행 = MCVideo 그룹 · mcvideo_user_profile 행 = MCVideo 이용 자격 · mcvideo_affiliations = 서비스별 affiliation
+-- ─────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS mcvideo_group_attrs (
+    group_id                     BIGINT       NOT NULL COMMENT 'ptt_groups.id (surrogate) — 행 = 이 그룹이 MCVideo 그룹 (TS 24.481 §7.2.2)',
+    invite_members               TINYINT(1)   NOT NULL DEFAULT 0
+        COMMENT 'mcvideo-on-network-invite-members — 1=prearranged, 0=chat (TS 24.481 §7.2.8, 없음=chat). 기본 chat (mcvideo.md §7 D5)',
+    max_duration_sec             INT          NOT NULL DEFAULT 3600
+        COMMENT 'mcvideo-on-network-maximum-duration — 그룹 호 최대 시간 TNG3 초 (TS 24.281 §6.3.3.5, 0=무제한 → 요소 생략)',
+    max_transmitters             INT          NOT NULL DEFAULT 2
+        COMMENT 'mcvideo-maximum-simultaneous-mcvideo-transmitting-group-members — 동시 송출 상한 (TS 24.581 §4.1.1.1·§6.3.4)',
+    audio_encodings              VARCHAR(128) NOT NULL DEFAULT 'AMR-WB'
+        COMMENT 'mcvideo-preferred-audio-encodings — rtpmap encoding name, 쉼표 구분 선호순 (TS 24.481 §7.2.2 e)',
+    video_encodings              VARCHAR(128) NOT NULL DEFAULT 'H264'
+        COMMENT 'mcvideo-preferred-video-encodings — rtpmap encoding name, 쉼표 구분 선호순 (TS 24.481 §7.2.2 f)',
+    video_resolutions            VARCHAR(128)          DEFAULT NULL
+        COMMENT 'mcvideo-preferred-video-resolutions — 가로x세로 선호순 문자열 (예 1280x720,640x480). NULL=요소 생략',
+    video_frame_rate             VARCHAR(64)           DEFAULT NULL
+        COMMENT 'mcvideo-preferred-video-frame-rate — 초당 프레임 선호순 문자열 (예 30,15). NULL=요소 생략',
+    reception_hang_timer_sec     INT          NOT NULL DEFAULT 30
+        COMMENT 'on-network-reception-hang-timer — 수신 비활성 T5 초 (TS 24.581 §11.1.3, 0=요소 생략)',
+    min_number_to_start          INT          NOT NULL DEFAULT 0
+        COMMENT 'mcvideo-on-network-minimum-number-to-start (TS 24.481 §7.2.2 n)',
+    group_priority               SMALLINT              DEFAULT NULL
+        COMMENT 'mcvideo-on-network-group-priority 0..255 — 높을수록 높다 (TS 24.481 §7.2.8). NULL=요소 생략(가장 낮음)',
+    protect_media                TINYINT(1)   NOT NULL DEFAULT 0
+        COMMENT 'mcvideo-protect-media — 요소가 없으면 true(GMK 보호) 로 읽혀 늘 명시한다. E2E 전까지 0 (mcvideo.md §7 D7)',
+    protect_transmission_control TINYINT(1)   NOT NULL DEFAULT 0
+        COMMENT 'mcvideo-protect-transmission-control — 없으면 true 로 읽혀 늘 명시. E2E 전까지 0 (mcvideo.md §7 D7)',
+    allow_conference_state       TINYINT(1)   NOT NULL DEFAULT 1
+        COMMENT 'mcvideo-on-network-allow-conference-state — conference 이벤트 구독 허용 (TS 24.481 §7.2.8, 없음=false)',
+    update_time                  DATETIME              DEFAULT NULL,
+    PRIMARY KEY (group_id),
+    CONSTRAINT fk_mvga_group FOREIGN KEY (group_id) REFERENCES ptt_groups (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  COMMENT='MCVideo 그룹 속성 — 행 = 그 그룹이 MCVideo 서비스용 (TS 24.481 §7.2.2)';
+
+CREATE TABLE IF NOT EXISTS mcvideo_user_profile (
+    ptt_id            VARCHAR(64) NOT NULL COMMENT 'ptt_subscriptions.id — 행 = 이 회선의 MCVideo 이용 자격. MCVideo ID = MCPTT ID (mcvideo.md §7 D1)',
+    max_video_streams TINYINT     NOT NULL DEFAULT 1
+        COMMENT '<OnNetwork><MaxSimultaneousVideoStreams> (TS 24.484 §9.3.2.1 9e) — 수신 동시 스트림 상한, 서버 카운터 C9 (TS 24.581 §11.2.3). 1차 단말 = 1',
+    max_calls_n6      TINYINT     NOT NULL DEFAULT 1
+        COMMENT '<Common><MCVideo-group-call><MaxSimultaneousCallsN6> (TS 24.484 §9.3.2.1 8e i) — 동시 MCVideo 그룹 호 상한 (TS 24.281 §9.2.2.3.1.1 5)',
+    update_time       DATETIME             DEFAULT NULL,
+    PRIMARY KEY (ptt_id),
+    CONSTRAINT fk_mvup_ptt_sub FOREIGN KEY (ptt_id) REFERENCES ptt_subscriptions (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  COMMENT='MCVideo user profile — 행 = MCVideo 이용 자격 (TS 24.484 §9.3)';
+
+CREATE TABLE IF NOT EXISTS mcvideo_affiliations (
+    group_id      BIGINT       NOT NULL COMMENT 'ptt_groups.id (surrogate) — MCVideo 그룹',
+    user_id       VARCHAR(64)  NOT NULL COMMENT 'ptt_group_members.user_id',
+    client_id     VARCHAR(128) NOT NULL DEFAULT '' COMMENT 'SIP instance (Contact +sip.instance)',
+    affiliated_at DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'affiliation 시각',
+    expires_at    DATETIME              DEFAULT NULL COMMENT 'affiliation 만료 (NULL=dereg 시까지)',
+    status        ENUM('affiliated','deaffiliated') NOT NULL DEFAULT 'affiliated' COMMENT '상태',
+    PRIMARY KEY (group_id, user_id, client_id),
+    KEY idx_mvaff_user (user_id),
+    KEY idx_mvaff_group_status (group_id, status),
+    CONSTRAINT fk_mvaff_group FOREIGN KEY (group_id) REFERENCES ptt_groups (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  COMMENT='MCVideo affiliation 상태 (TS 24.281 §8 — MCPTT 와 따로, TS 23.280 §5.2.5)';

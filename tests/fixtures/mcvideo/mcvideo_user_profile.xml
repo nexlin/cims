@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mcvideo-user-profile xmlns="urn:3gpp:ns:mcvideo:user-profile:1.0"
+  xmlns:cp="urn:ietf:params:xml:ns:common-policy"
+  XUI-URI="tel:+82510002001" user-profile-index="1">
+  <Name xml:lang="en">영상요원1</Name>
+  <Status>true</Status>
+  <Common index="1"><UserAlias><alias-entry index="1" xml:lang="en">영상요원1</alias-entry></UserAlias><MCVideoUserID><uri-entry>tel:+82510002001</uri-entry></MCVideoUserID><PrivateCall><PrivateCallList/><EmergencyCall><MCVideoPrivateRecipient><entry entry-info="LocallyDetermined"><uri-entry>tel:+82510002001</uri-entry></entry><ProSeUserID-entry><User-Info-ID>000000000000</User-Info-ID></ProSeUserID-entry></MCVideoPrivateRecipient></EmergencyCall></PrivateCall><MCVideo-group-call><MaxSimultaneousCallsN6>1</MaxSimultaneousCallsN6><EmergencyCall><MCVideoGroupInitiation><entry entry-info="UseCurrentlySelectedGroup"><uri-entry>tel:g101</uri-entry><display-name>현장영상 1팀</display-name></entry></MCVideoGroupInitiation></EmergencyCall><ImminentPerilCall><MCVideoGroupInitiation><entry entry-info="UseCurrentlySelectedGroup"><uri-entry>tel:g101</uri-entry><display-name>현장영상 1팀</display-name></entry></MCVideoGroupInitiation></ImminentPerilCall><EmergencyAlert><entry entry-info="UseCurrentlySelectedGroup"><uri-entry>tel:g101</uri-entry><display-name>현장영상 1팀</display-name></entry></EmergencyAlert><Priority>0</Priority></MCVideo-group-call><ParticipantType>user</ParticipantType><MissionCriticalOrganization>CIMS</MissionCriticalOrganization></Common>
+  <OnNetwork index="1"><MCVideoGroupInfo><MCVideo-Group-ID><uri-entry>tel:g101</uri-entry><display-name>현장영상 1팀</display-name></MCVideo-Group-ID></MCVideoGroupInfo><MaxAffiliationsN2>10</MaxAffiliationsN2><MaxSimultaneousVideoStreams>1</MaxSimultaneousVideoStreams><PrivateEmergencyAlert><entry entry-info="LocallyDetermined"><uri-entry>tel:+82510002001</uri-entry></entry></PrivateEmergencyAlert><RemoteGroupSelectionURIList/></OnNetwork>
+  <cp:ruleset>
+    <cp:rule id="mcvideo-user-authorisation">
+      <cp:actions>
+        <allow-private-call>false</allow-private-call>
+        <allow-emergency-group-call>false</allow-emergency-group-call>
+        <allow-emergency-private-call>false</allow-emergency-private-call>
+        <allow-imminent-peril-call>false</allow-imminent-peril-call>
+        <allow-activate-emergency-alert>false</allow-activate-emergency-alert>
+        <allow-revoke-transmit>false</allow-revoke-transmit>
+        <anyExt>
+          <allow-request-remote-initiated-ambient-viewing>false</allow-request-remote-initiated-ambient-viewing>
+          <allow-request-locally-initiated-ambient-viewing>false</allow-request-locally-initiated-ambient-viewing>
+          <allow-adhoc-group-call>false</allow-adhoc-group-call>
+        </anyExt>
+      </cp:actions>
+    </cp:rule>
+  </cp:ruleset>
+</mcvideo-user-profile>

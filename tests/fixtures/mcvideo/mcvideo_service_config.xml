@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<service-configuration-info xmlns="urn:3gpp:ns:mcvideoServiceConfig:1.0">
+  <service-configuration-params domain="ptt.cims.example.kr">
+    <on-network>
+      <signalling-protection>
+        <confidentiality-protection>false</confidentiality-protection>
+        <integrity-protection>false</integrity-protection>
+      </signalling-protection>
+      <emergency-resource-priority>
+        <resource-priority-namespace>mcpttp</resource-priority-namespace>
+        <resource-priority-priority>15</resource-priority-priority>
+      </emergency-resource-priority>
+      <imminent-peril-resource-priority>
+        <resource-priority-namespace>mcpttp</resource-priority-namespace>
+        <resource-priority-priority>8</resource-priority-priority>
+      </imminent-peril-resource-priority>
+      <normal-resource-priority>
+        <resource-priority-namespace>mcpttp</resource-priority-namespace>
+        <resource-priority-priority>0</resource-priority-priority>
+      </normal-resource-priority>
+      <anyExt>
+        <tc-timers-counters-R14>
+          <T100-transmission-request>1</T100-transmission-request>
+          <T101-transmission-end-request>1</T101-transmission-end-request>
+          <T102-queue-position-request>1</T102-queue-position-request>
+          <T103-receive-media-request>1</T103-receive-media-request>
+          <T104-receive-media-release>1</T104-receive-media-release>
+          <private-call-hang-timer>PT30S</private-call-hang-timer>
+          <T2-transmission-idle>PT1S</T2-transmission-idle>
+          <T3-transmission-revoke>PT1S</T3-transmission-revoke>
+          <T4-transmission-granted>PT1S</T4-transmission-granted>
+          <reception-hang-time>PT30S</reception-hang-time>
+          <T6-reception-granted>PT1S</T6-reception-granted>
+          <T11-stream-reception-idle>PT10S</T11-stream-reception-idle>
+          <C2-transmission-idle>10</C2-transmission-idle>
+          <C4-transmission-granted>3</C4-transmission-granted>
+          <C6-reception-granted>3</C6-reception-granted>
+          <C7-reception-accpeted>2</C7-reception-accpeted>
+          <C11-media-receivers>4</C11-media-receivers>
+        </tc-timers-counters-R14>
+      </anyExt>
+    </on-network>
+  </service-configuration-params>
+</service-configuration-info>

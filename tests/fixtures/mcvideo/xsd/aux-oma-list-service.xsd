@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- 보조 스키마(규격 원문 아님) — OMA-TS-XDM_Group-V1_1_1 의 group/list-service 틀. 검사기가 3GPP 확장 요소(mcpttgi·cp·oxe)를
+     엄격(strict)하게 검증하도록 자식 자리를 ##other strict 로 둔다. OMA 원 스키마는 반입되지 않아 틀만 옮겼다. -->
+<xs:schema targetNamespace="urn:oma:xml:poc:list-service" xmlns="urn:oma:xml:poc:list-service"
+  xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:rl="urn:ietf:params:xml:ns:resource-lists"
+  elementFormDefault="qualified" attributeFormDefault="unqualified">
+  <xs:import namespace="http://www.w3.org/XML/1998/namespace"/>
+  <xs:import namespace="urn:ietf:params:xml:ns:resource-lists"/>
+  <xs:element name="group">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element name="list-service" type="listServiceType" maxOccurs="unbounded"/>
+        <xs:any namespace="##other" processContents="strict" minOccurs="0" maxOccurs="unbounded"/>
+      </xs:sequence>
+      <xs:anyAttribute namespace="##any" processContents="lax"/>
+    </xs:complexType>
+  </xs:element>
+  <xs:complexType name="listServiceType">
+    <xs:choice minOccurs="0" maxOccurs="unbounded">
+      <xs:element name="display-name" type="displayNameType"/>
+      <xs:element name="list" type="listType"/>
+      <xs:element name="invite-members" type="xs:boolean"/>
+      <xs:element name="max-participant-count" type="xs:positiveInteger"/>
+      <xs:any namespace="##other" processContents="strict"/>
+    </xs:choice>
+    <xs:attribute name="uri" type="xs:anyURI" use="required"/>
+    <xs:anyAttribute namespace="##any" processContents="lax"/>
+  </xs:complexType>
+  <xs:complexType name="displayNameType">
+    <xs:simpleContent>
+      <xs:extension base="xs:string">
+        <xs:anyAttribute namespace="##any" processContents="lax"/>
+      </xs:extension>
+    </xs:simpleContent>
+  </xs:complexType>
+  <xs:complexType name="listType">
+    <xs:sequence>
+      <xs:element name="entry" minOccurs="0" maxOccurs="unbounded">
+        <xs:complexType>
+          <xs:sequence>
+            <!-- rl:display-name 과 3GPP 확장 요소 — 모두 ##other 이며 전역 선언으로 엄격 검증된다 -->
+            <xs:any namespace="##other" processContents="strict" minOccurs="0" maxOccurs="unbounded"/>
+          </xs:sequence>
+          <xs:attribute name="uri" type="xs:anyURI" use="required"/>
+          <xs:anyAttribute namespace="##any" processContents="lax"/>
+        </xs:complexType>
+      </xs:element>
+    </xs:sequence>
+  </xs:complexType>
+  <!-- <cp:actions> 안의 OMA 요소 (TS 24.481 §7.2.2 MCPTT actions a·b) · <cp:conditions> 안의 is-list-member -->
+  <xs:element name="allow-initiate-conference" type="xs:boolean"/>
+  <xs:element name="join-handling" type="xs:boolean"/>
+  <xs:element name="is-list-member"><xs:complexType/></xs:element>
+</xs:schema>

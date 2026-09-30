@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<group xmlns="urn:oma:xml:poc:list-service"
+  xmlns:rl="urn:ietf:params:xml:ns:resource-lists"
+  xmlns:cp="urn:ietf:params:xml:ns:common-policy"
+  xmlns:ocp="urn:oma:xml:xdm:common-policy"
+  xmlns:oxe="urn:oma:xml:xdm:extensions"
+  xmlns:mcpttgi="urn:3gpp:ns:mcpttGroupInfo:1.0"
+  xmlns:cims="urn:cims:groupinfo:1.0">
+  <list-service uri="tel:g102">
+    <display-name xml:lang="en-us">음성 전용</display-name>
+    <list>
+      <entry uri="tel:+82510002001">
+        <rl:display-name>영상요원1</rl:display-name>
+        <mcpttgi:participant-type>participant</mcpttgi:participant-type>
+        <mcpttgi:user-priority>5</mcpttgi:user-priority>
+        <mcpttgi:mcdata-mcdata-id uri="tel:+82510002001"/>
+      </entry>
+      <entry uri="tel:+82510002002">
+        <rl:display-name>영상요원2</rl:display-name>
+        <mcpttgi:participant-type>participant</mcpttgi:participant-type>
+        <mcpttgi:user-priority>5</mcpttgi:user-priority>
+        <mcpttgi:mcdata-mcdata-id uri="tel:+82510002002"/>
+      </entry>
+      <entry uri="tel:+82510002003">
+        <rl:display-name>관제1</rl:display-name>
+        <mcpttgi:participant-type>chair</mcpttgi:participant-type>
+        <mcpttgi:user-priority>1</mcpttgi:user-priority>
+        <mcpttgi:mcdata-mcdata-id uri="tel:+82510002003"/>
+      </entry>
+    </list>
+    <mcpttgi:mcdata-allow-short-data-service>true</mcpttgi:mcdata-allow-short-data-service>
+    <mcpttgi:mcdata-allow-file-distribution>false</mcpttgi:mcdata-allow-file-distribution>
+    <mcpttgi:mcdata-on-network-max-data-size-for-SDS>10000</mcpttgi:mcdata-on-network-max-data-size-for-SDS>
+    <mcpttgi:mcdata-on-network-max-data-size-auto-recv>1048576</mcpttgi:mcdata-on-network-max-data-size-auto-recv>
+    <mcpttgi:mcptt-video>false</mcpttgi:mcptt-video>
+    <mcpttgi:on-network-invite-members>true</mcpttgi:on-network-invite-members>
+    <mcpttgi:on-network-max-participant-count>10</mcpttgi:on-network-max-participant-count>
+    <mcpttgi:on-network-require-affiliation>true</mcpttgi:on-network-require-affiliation>
+    <mcpttgi:on-network-hang-timer>PT30S</mcpttgi:on-network-hang-timer>
+    <mcpttgi:on-network-maximum-duration>PT3600S</mcpttgi:on-network-maximum-duration>
+    <mcpttgi:on-network-minimum-number-to-start>0</mcpttgi:on-network-minimum-number-to-start>
+    <mcpttgi:on-network-timeout-for-acknowledgement-of-required-members>PT5S</mcpttgi:on-network-timeout-for-acknowledgement-of-required-members>
+    <mcpttgi:on-network-action-upon-expiration-of-timeout-for-acknowledgement-of-required-members>abandon</mcpttgi:on-network-action-upon-expiration-of-timeout-for-acknowledgement-of-required-members>
+    <mcpttgi:on-network-require-talker-id>false</mcpttgi:on-network-require-talker-id>
+    <mcpttgi:on-network-group-priority>5</mcpttgi:on-network-group-priority>
+    <mcpttgi:on-network-encryption>false</mcpttgi:on-network-encryption>
+    <cp:ruleset>
+      <cp:rule id="a7c">
+        <cp:conditions>
+          <is-list-member/>
+        </cp:conditions>
+        <cp:actions>
+          <allow-initiate-conference>true</allow-initiate-conference>
+          <join-handling>true</join-handling>
+          <mcpttgi:allow-MCPTT-emergency-call>true</mcpttgi:allow-MCPTT-emergency-call>
+          <mcpttgi:allow-imminent-peril-call>true</mcpttgi:allow-imminent-peril-call>
+          <mcpttgi:allow-MCPTT-emergency-alert>true</mcpttgi:allow-MCPTT-emergency-alert>
+          <mcpttgi:on-network-allow-conference-state>true</mcpttgi:on-network-allow-conference-state>
+        </cp:actions>
+      </cp:rule>
+    </cp:ruleset>
+    <oxe:supported-services>
+     <oxe:service enabler="urn:urn-7:3gpp-service.ims.icsi.mcptt">
+      <oxe:group-media>
+       <mcpttgi:mcptt-speech/>
+      </oxe:group-media>
+     </oxe:service>
+     <oxe:service enabler="urn:urn-7:3gpp-service.ims.icsi.mcdata.sds"/>
+    </oxe:supported-services>
+  </list-service>
+</group>

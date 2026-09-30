@@ -186,6 +186,7 @@ if __name__ == '__main__':
             ("/idms/",                                 "mcptt"),
             ("/org.openmobilealliance.groups",         "mcptt"),
             ("/org.3gpp.mcptt",                        "mcptt"),
+            ("/org.3gpp.mcvideo",                      "mcvideo"),   # MCVideo CMS 문서 — 서비스 축 mcvideo (mcvideo.md §3 3)
             ("/keymanagement/",                        "mcptt"),
             ("/api/v1/",                               "console"),
         ]
@@ -238,7 +239,7 @@ if __name__ == '__main__':
                 sub = ""
                 if path.startswith("/idms/"):                    sub = "IdMS"
                 elif path.startswith("/org.openmobilealliance"): sub = "GMS"
-                elif path.startswith("/org.3gpp.mcptt"):         sub = "CMS"
+                elif path.startswith(("/org.3gpp.mcptt", "/org.3gpp.mcvideo")):  sub = "CMS"
                 elif path.startswith("/keymanagement"):          sub = "KMS"
 
                 mname = f"{handler_args.method} {path}" if not sub else f"{sub}/{handler_args.method} {path}"

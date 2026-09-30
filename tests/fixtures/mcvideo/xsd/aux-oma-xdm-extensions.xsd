@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- 보조 스키마 — OMA XDM extensions(oxe) 중 그룹 문서가 쓰는 supported-services/service/group-media·extensionType. -->
+<xs:schema targetNamespace="urn:oma:xml:xdm:extensions" xmlns="urn:oma:xml:xdm:extensions"
+  xmlns:xs="http://www.w3.org/2001/XMLSchema" elementFormDefault="qualified" attributeFormDefault="unqualified">
+  <xs:complexType name="extensionType">
+    <xs:sequence>
+      <xs:any namespace="##any" processContents="lax" minOccurs="0" maxOccurs="unbounded"/>
+    </xs:sequence>
+    <xs:anyAttribute namespace="##any" processContents="lax"/>
+  </xs:complexType>
+  <xs:element name="supported-services">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element name="service" maxOccurs="unbounded">
+          <xs:complexType>
+            <xs:sequence>
+              <xs:element name="group-media" minOccurs="0">
+                <xs:complexType>
+                  <xs:sequence>
+                    <xs:any namespace="##other" processContents="strict" maxOccurs="unbounded"/>
+                  </xs:sequence>
+                </xs:complexType>
+              </xs:element>
+            </xs:sequence>
+            <xs:attribute name="enabler" type="xs:string" use="required"/>
+          </xs:complexType>
+        </xs:element>
+      </xs:sequence>
+    </xs:complexType>
+  </xs:element>
+</xs:schema>

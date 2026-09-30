@@ -18,7 +18,10 @@
                                         합성·드리프트 경고·미러 부재 폴백(services/access_services)
   · tests/test_csc_dispatch_management.py 관제 앱 관리 평면 — 역할 directory_write 범위(admin_scope/in_scope)·
                                           /provisioning/directory 게이트·이력 until/recordingId·녹취 프록시 게이트·
-                                          GMS 관리 범위 확장(dispatch_center.md §3.4·§5.7b)"""
+                                          GMS 관리 범위 확장(dispatch_center.md §3.4·§5.7b)
+  · tests/test_csc_mcvideo.py             MCVideo 설정 평면(mcvideo.md §5.1) — 생성 = 계약 골든(tests/fixtures/mcvideo, K2)·
+                                          그룹 문서 V0(MCPTT ICSI enabler·규칙)·MCVideo <service>·XCAP PUT 전환기 규칙·
+                                          MCVideo user profile·service config·ue-init-config·CMS 인가·mcvideo_id claim"""
 from __future__ import annotations
 
 import os
@@ -28,14 +31,14 @@ from ...registry import verify_item, ItemResult, ItemStatus
 from ...context import VerifyContext
 
 _ID = "S1-UNIT-CSC"
-_NAME = ("CSC unit test — 전화 그룹·역할 RBAC·가입 realm·GMS 그룹 CRUD·프로비저닝 발견·이력·관리 평면·IdMS scope·user-profile·가입 테이블 레지스트리(kind 게이트) "
+_NAME = ("CSC unit test — 전화 그룹·역할 RBAC·가입 realm·GMS 그룹 CRUD·프로비저닝 발견·이력·관리 평면·IdMS scope·user-profile·가입 테이블 레지스트리(kind 게이트)·MCVideo 설정 평면 "
          "(python3 -m unittest tests.test_csc_dispatch_rbac tests.test_csc_subscription_realm "
          "tests.test_csc_gms_group_crud tests.test_csc_provisioning_dispatch)")
 _MODULES = ["tests.test_csc_dispatch_rbac", "tests.test_csc_subscription_realm",
             "tests.test_csc_gms_group_crud", "tests.test_csc_provisioning_dispatch",
             "tests.test_csc_provisioning_history", "tests.test_csc_idms_scope", "tests.test_csc_user_profile",
             "tests.test_csc_dispatch_management", "tests.test_csc_access_services",
-            "tests.test_csc_subscriptions"]
+            "tests.test_csc_subscriptions", "tests.test_csc_mcvideo"]
 
 
 @verify_item(

@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema
+  targetNamespace="urn:3gpp:ns:mcvideoPresInfo:1.0"
+  xmlns:xs="http://www.w3.org/2001/XMLSchema"
+  xmlns:mcvideoPI10="urn:3gpp:ns:mcvideoPresInfo:1.0"
+  elementFormDefault="qualified" attributeFormDefault="unqualified">
+
+  <!-- MCVideo specific child elements of presence element -->
+  <xs:element name="p-id" type="xs:string"/>
+  <xs:element name="groupStatus" type="mcvideoPI10:groupStatusType"/>
+  <xs:element name="additionalData" type="mcvideoPI10:additionalDataType"/>
+
+  <!-- MCVideo specific child elements of tuple element -->
+  <xs:element name="affiliation" type="mcvideoPI10:affiliationType"/>
+  <xs:complexType name="affiliationType">
+    <xs:sequence>
+      <xs:any namespace="##any" processContents="lax" minOccurs="0" maxOccurs="unbounded"/>
+    </xs:sequence>
+    <xs:attribute name="group" type="xs:anyURI" use="optional"/>
+    <xs:attribute name="client" type="xs:anyURI" use="optional"/>
+    <xs:attribute name="status" type="mcvideoPI10:statusType" use="optional"/>
+    <xs:attribute name="expires" type="xs:dateTime" use="optional"/>
+    <xs:anyAttribute namespace="##any" processContents="lax"/>
+  </xs:complexType>
+
+  <xs:simpleType name="statusType">
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="affiliating"/>
+      <xs:enumeration value="affiliated"/>
+      <xs:enumeration value="deaffiliating"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:complexType name="groupStatusType">
+    <xs:simpleContent>
+      <xs:extension base="xs:string">
+        <xs:attribute name="ModifiedBy" type="xs:anyURI" use="optional"/>
+        <xs:anyAttribute namespace="##any" processContents="lax"/>
+      </xs:extension>
+    </xs:simpleContent>
+  </xs:complexType>
+
+  <!-- MCVideo specific child elements of status element -->
+    <xs:element name="functionalAlias" type="mcvideoPI10:functionalAliasType"/>
+  <xs:complexType name="functionalAliasType">
+    <xs:sequence>
+      <xs:any namespace="##any" processContents="lax" minOccurs="0" maxOccurs="unbounded"/>
+    </xs:sequence>
+    <xs:attribute name="functionalAliasID" type="xs:anyURI" use="optional"/>
+    <xs:attribute name="expires" type="xs:dateTime" use="optional"/>
+    <xs:anyAttribute namespace="##any" processContents="lax"/>
+  </xs:complexType>
+
+  <xs:complexType name="emptyType"/>
+  <xs:complexType name="additionalDataType">
+    <xs:complexContent>
+      <xs:extension base="mcvideoPI10:emptyType">
+        <xs:attribute name="groupBroadcastAlias" type="xs:anyURI" use="optional"/>
+        <xs:attribute name="groupRegroupAlias" type="xs:anyURI" use="optional"/>
+        <xs:attribute name="groupCallOngoing" type="xs:boolean" use="optional"/>        <xs:anyAttribute namespace="##any" processContents="lax"/>
+      </xs:extension>
+    </xs:complexContent>
+  </xs:complexType>
+  </xs:schema>

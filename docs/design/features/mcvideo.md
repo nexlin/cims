@@ -4,8 +4,9 @@
 > MCPTT 와 MCVideo 두 서비스용으로 설정하면(TS 23.280 §3 «MC service group … configured for the use with one or more MC services»),
 > 단말은 같은 그룹에서 **음성만 = MCPTT 그룹 호**, **음성+영상 = MCVideo 그룹 호**를 골라 쓰고 둘 사이를 오간다.
 > 이 문서는 규격 모델, 현행 «PTT 영상»(MCPTT 세션의 `m=video` — 비규격)과의 차이, 규격형으로 옮기는 개발 항목·결정 사항을 정한다 —
-> **설계 정본.** 구현된 것은 계약 둘 — 전송 제어 정의 테이블 [mcvideo_tc_defs.yaml](mcvideo_tc_defs.yaml)(생성 헤더 양 끝, §5.3·§5.4)과
-> 단말 SDK 공개 표면 선언([ue_sdk.md](ue_sdk.md) §4.6 — 구현 전이라 실패를 돌려준다) — 과 V0 의 SDK 몫이다. 호 제어·미디어 제어는 미구현.
+> **설계 정본.** 구현된 것 — 계약(전송 제어 정의 테이블 [mcvideo_tc_defs.yaml](mcvideo_tc_defs.yaml)(생성 헤더 양 끝, §5.3·§5.4) · DB 표(§5.1) ·
+> 설정 문서 골든 `tests/fixtures/mcvideo/` · SDP 프로파일(§1.4) · CSP↔CMP 제어 API([cmp_media_api.md](../../api/cmp_media_api.md) §7.9) · 단말 SDK 공개
+> 표면 선언([ue_sdk.md](ue_sdk.md) §4.6 — 구현 전이라 실패를 돌려준다)), V0 전부, CSC 설정 평면(§5.1 — 관리 API·콘솔 제외). 호 제어·미디어 제어는 미구현.
 >
 > 규격 판본: TS 24.281 V18.14.0 · TS 24.581 V18.8.0 · TS 23.281 V18.12.0 · TS 24.481 V19.3.0 · TS 24.484 V20.0.0 · TS 23.280 V20.4.0 ·
 > TS 33.180 V20.0.0. 관계 문서: 로드맵 표 [mcptt_standard_conformance.md](mcptt_standard_conformance.md) R3·R6, 현행 PTT 영상 협상
@@ -76,6 +77,20 @@ REGISTER 를 공유하는 독립 다이얼로그이고(TS 24.281 §7.1 «shares 
 - **fmtp**(TS 24.581 §12.1.2·§14): `mc_queueing` · `mc_priority`(1~255) · `mc_reception_priority` · `mc_granted` · `mc_implicit_request` · `mc_audio_ssrc` ·
   `mc_video_ssrc` · `mc_transmission_ssrc`. answer 는 파라미터를 더하지 않는다(§14.3.1), 제어 기능 `mc_priority` = min(offer, `<user-priority>`, 계층 수)
   (§14.3.3), 암묵적 요청은 chat 합류·진행 중 prearranged 합류에서 받지 않는다(§14.3.5).
+- **CIMS SDP 프로파일(계약 K4)** — 골든 = `tests/fixtures/mcvideo/sip/`(K3 메시지 안의 SDP).
+  - **단말 offer**(개시·합류·재합류): m-line 순서 audio → video → application. audio = `i=audio component of MCVideo` · AMR-WB(그룹 선호 코덱) ·
+    telephone-event. video = `i=video component of MCVideo` · H.264(`packetization-mode=1`) · `a=rtcp-fb:<pt> nack pli`·`a=rtcp-fb:<pt> ccm fir`.
+    제어 채널 = `m=application <RTCP 포트> udp MCVideo`(proto 소문자 `udp`, TS 24.581 표 4.3.3.1-1) + `a=fmtp:MCVideo …` — 구분자 `;`(§9),
+    **`mc_transmission_ssrc` 를 값과 함께 싣는다**(서버가 이 단말에게 보내는 전송 제어 RTCP 헤더 SSRC). 암묵적 송출 요청이면 `mc_implicit_request`·
+    `mc_granted`, 선택으로 `a=ssrc`(RFC 5576).
+  - **서버 answer**: m-line 수·순서 = offer(RFC 3264 §6), 주소 = CMP 멤버 포트(`port`·`video_port`·`control_port` — cmp_media_api.md §7.9), PT·코덱 fmtp·
+    `i=` echo. fmtp 는 offer 에 있던 것만(§14.3.1): `mc_priority` = min(offer, `<user-priority>`)(§14.3.3 — 계층 수 요소는 off-network 전용이라 쓰지
+    않는다), **`mc_transmission_ssrc` = CMP `tc_ssrc` 를 늘 싣는다**(TS 24.281 §6.3.3.2.1 2)b) "shall" — §9), `mc_queueing` 은 싣지 않는다(1차 송출
+    큐 없음 — §14.3.2 "지원할 때"), 암묵적 요청을 받아들인 새 prearranged 세션에만 `mc_implicit_request` + `mc_audio_ssrc`·`mc_video_ssrc`(+ 허가 시 `mc_granted`).
+  - **서버 fan-out offer**(prearranged 초대, TS 24.281 §6.3.3.1.1): 같은 세 m-line·`i=`, fmtp = `mc_priority=<user-priority>`(§14.2.3) ·
+    `mc_transmission_ssrc=<tc_ssrc>`(§6.3.3.1.1 4)). `mc_granted`·`mc_implicit_request` 는 싣지 않는다.
+  - **SRTP**: TLS 접속 + 접속서비스 `media_srtp` 면 audio·video 둘 다 `RTP/SAVP` + m-line 별 `a=crypto`(RFC 4568 — 영상 SRTP 를 처음부터, B7). 제어 채널
+    보호(SRTCP)는 CSK·GMK 기반이라(TS 33.180) 1차는 평문 RTCP다(`mcvideo-protect-transmission-control` false — §7 D7).
 
 ### 1.5 전송 제어 · 수신 제어 (TS 24.581)
 
@@ -135,11 +150,11 @@ service configuration 에서 `<confidentiality-protection>`·`<integrity-protect
 
 | 구간 | 현행 | 규격(MCVideo) |
 |---|---|---|
-| 그룹 설정 | DB `ptt_groups.video_enabled` 하나. 그룹 문서 `<mcpttgi:mcptt-video>` — **TS 24.481 스키마에 없는 요소를 3GPP 네임스페이스에** 싣는다. MCPTT `<service enabler="example.mcptt">` — **ICSI 가 아닌 자리표시 값**(csc `services/mcptt.py` `get_group_xml` — SDK `csc/group_doc.cpp` 생성은 MCPTT ICSI) | MCPTT·MCVideo `<service>` 각각 ICSI enabler + `<mcvideo-*>` 속성 |
+| 그룹 설정 | DB `ptt_groups.video_enabled` 하나가 «PTT 영상»을 켠다. 그룹 문서 `<mcpttgi:mcptt-video>` — **TS 24.481 스키마에 없는 요소를 3GPP 네임스페이스에** 싣는다(V7 까지 전환기 요소). MCVideo 설정 평면(§5.1)은 그와 따로 선다 | MCPTT·MCVideo `<service>` 각각 ICSI enabler + `<mcvideo-*>` 속성 |
 | 영상 유무 | 호 개시 때 한 번 — 앱은 늘 `video=true` 로 제안, 서버가 `video_enabled` 그룹만 받는다. 진행 중 추가·제거 없음 | 음성 = MCPTT 호, 음성+영상 = MCVideo 호(따로 합류·퇴장) |
 | 송출 | floor 보유자만(single/dual/multi-talker 최대 8). 앱은 «내 영상 보내기» 켜기/끄기만(`setVideoSend`, 재협상 없음) | 송출 요청·허가(Transmission Request/Granted), 동시 송출 상한 |
 | 수신 | 영상 그룹 멤버 전원 자동 수신 | 수신자가 스트림을 골라 받는다(manual), 긴급·방송은 자동 |
-| 서비스 신원 | ICSI·특성 태그·scope·user profile·service config·ue-init-config 에 MCVideo 없음(`SCOPE_CATALOG` 는 mcvideo 요청을 버린다) | §1.2·§1.6 |
+| 서비스 신원 | CSC 설정 평면(scope·user profile·service config·ue-init-config)은 있다(§5.1). CSP 가 REGISTER·요청의 MCVideo ICSI·특성 태그를 아직 보지 않는다 | §1.2·§1.6 |
 
 **현행 PTT 영상의 알려진 결함**(코드 조사 — 전환 기간에도 남는다):
 
@@ -195,16 +210,33 @@ service configuration 에서 `<confidentiality-protection>`·`<integrity-protect
 
 ### 5.1 CSC (설정 평면)
 
-- **DB** — 서비스별 표: `mcvideo_group_attrs`(그룹 id 외래키 — 행이 있으면 그 그룹이 MCVideo 를 지원한다. 열 = invite_members·max_duration·
-  max_transmitters·preferred_audio/video_encodings·resolutions·frame_rate·reception_hang_timer·min_number_to_start·group_priority·protect_media(0)·
-  protect_tc(0)), `mcvideo_user_profile`(사람 — 행이 MCVideo 이용 자격. 열 = max_simultaneous_video_streams·N2·N6·ruleset allow-*).
-  멤버 entry 의 `mcvideo-mcvideo-id` 는 MCPTT ID 와 같은 값이라 열을 두지 않는다(§7 D1).
-- **그룹 문서(GMS)** — `get_group_xml`: MCPTT `<service enabler="urn:urn-7:3gpp-service.ims.icsi.mcptt">`(자리표시 값 교체) · MCVideo 지원 그룹이면
-  MCVideo `<service>`(ICSI enabler, `<mcvideo-video-media>`) + `<mcvideo-*>` + entry `<mcvideo-mcvideo-id>`. XCAP PUT 해석도 같은 요소를 읽는다
-  (`parse_group_document_xml`). SDK `GroupDoc` 도 같은 요소.
-- **CMS** — `org.3gpp.mcvideo.user-profile`·`org.3gpp.mcvideo.service-config` 라우트와 문서 생성(기존 MCPTT 문서 생성기와 같은 틀), xcap-diff 통지 축에 두 문서.
-- **ue-init-config** — `<anyExt><MCVideo-Service-Details>`(설정 `UeInitConfig.ServiceDetails.McVideo.{Enable,ServerUri}`, 기본 PSI `sip:mcvideo_psi@<PTT 도메인>`).
-- **IdMS** — `SCOPE_CATALOG` 에 `3gpp:mc:video_*` 넷, 리소스 서버 `require_scope`(GMS·CMS 의 MCVideo 문서), 토큰 claim 은 [mcx_identity_scope.md](mcx_identity_scope.md) 규약.
+구현 = `csc/src/services/mcvideo.py`(서비스 경계 — 그룹 문서 조각·user profile·service config·속성 적재/해석/쓰기) + `services/mcptt.py`(문서 틀·
+적재·XCAP·CMS 라우트·IdMS). 골든·시험 = `tests/fixtures/mcvideo/*.xml`(계약 K2 — `tests/test_csc_mcvideo.py` 가 «생성 = 골든», `tests/mcvideo_fixture_check.py`
+가 TS 24.481·24.484 XSD 엄격 검증).
+
+- **DB**(계약 K1, `sql/migrate_mcvideo.sql` — 표 추가만) — `mcvideo_group_attrs`(행 = 그 그룹이 MCVideo 그룹. 열 = invite_members·max_duration_sec·
+  max_transmitters·audio/video_encodings·video_resolutions·video_frame_rate·reception_hang_timer_sec·min_number_to_start·group_priority·protect_media(0)·
+  protect_transmission_control(0)·allow_conference_state), `mcvideo_user_profile`(PTT 회선 — 행 = MCVideo 이용 자격. 열 = max_video_streams(C9)·
+  max_calls_n6), `mcvideo_affiliations`(서비스별 affiliation — `ptt_affiliations` 와 같은 모양. 따로 둔 이유 = 공유 DB 의 옛 CSP 가 dereg 때
+  `ptt_affiliations` 를 사용자 단위로 지우고 옛 OAM 이 그 표를 MCPTT 로 센다). 멤버 entry 의 `mcvideo-mcvideo-id` 는 MCPTT ID 와 같은 값이라
+  열을 두지 않는다(§7 D1). N2·우선순위·조직명은 MCPTT 와 같은 service config·설정. 마이그레이션이 `video_enabled=1` 그룹과 기존 PTT 회선 전부에 행을 만든다(§8).
+- **그룹 문서(GMS)** — `get_group_xml`: MCPTT `<service enabler>` = MCPTT ICSI, 규칙 = `<is-list-member>` 조건에 `<allow-initiate-conference>`·`<join-handling>`
+  true(제어 기능의 개시·합류 인가 근거 — TS 24.281·24.379 §6.3.5.3·§6.3.5.4). MCVideo 그룹이면 MCVideo `<service>`(ICSI enabler, `<mcvideo-video-media>`) +
+  `<list-service>` MCVideo 속성(TS 24.481 §7.2.2 목록 순, 보호 둘 false 명시, 실시간 모드 = 비긴급 실시간 고정) + 규칙 action `mcvideo-*`(긴급·임박·경보
+  false — V8) + entry `<mcvideo-mcvideo-id uri>`. MCData 서비스가 있으면 entry `<mcdata-mcdata-id uri>`(§7.2.2 MCData entry c)). XCAP PUT 해석
+  (`parse_group_document_xml`) = MCVideo `<service>` 가 있으면 켜고 속성 반영(보호 true·범위 밖 400). **전환기 규칙** — MCVideo `<service>` 가 없는 PUT 은
+  MCVideo 상태를 건드리지 않는다(MCVideo 를 모르는 옛 단말의 PUT 이 서비스를 지우지 않게. 끄기는 관리 API, V7 에서 «부재 = 끔» 으로 바꾼다).
+- **CMS** — `CMSXCAPROOT/org.3gpp.mcvideo.user-profile/users/<MCVideo ID>/mcvideo-user-profile-<n>.xml`(본인만·scope `video_config_management_service`·
+  자격 행 없으면 404) · `CMSXCAPROOT/org.3gpp.mcvideo.service-config/global/mcvideo-service-config.xml`(전역 문서, TS 24.484 §9.4.2.9). user profile 의
+  그룹 목록 = 이 사용자가 멤버인 MCVideo 그룹(`<MCVideoGroupInfo>` 하나에 하나), 상한 = `MaxSimultaneousVideoStreams`·N6·N2. service config =
+  `<signalling-protection>` false 명시 · Resource-Priority(MCPTT 네임스페이스 재사용, TS 24.281 §6.2.8.1.16) · `<tc-timers-counters-R14>` 17요소 전부
+  (설정 `McVideoServiceConfig.*`, 기본값 정본 = [mcvideo_tc_defs.yaml](mcvideo_tc_defs.yaml)). CSP 는 같은 문서를 `/internal/mcvideo/service-config` 로 받는다.
+  xcap-diff 통지 축에 두 문서를 싣는 것은 CSP 몫(§5.2).
+- **ue-init-config** — `<anyExt><MCVideo-Service-Details>`(MCPTT → MCVideo → MCData 순, 설정 `UeInitConfig.ServiceDetails.McVideo.{Enable,ServerUri}` —
+  기본 끔(CSP `Roles.MCVIDEO` 를 켠 사이트만), 기본 PSI `sip:mcvideo_psi@<PTT 도메인>`).
+- **IdMS** — `SCOPE_CATALOG` 에 `3gpp:mc:video_*` 넷. **사용자 단위 인가** — MCVideo 넷은 자격 행이 있는 사용자에게만 준다(`grant_scope(…, mcptt_id)`).
+  자격이 있으면 ID·access 토큰에 `mcvideo_id`(= MCPTT ID, TS 33.180 B.2.1.3·B.2.2.3). 리소스 서버 = GMS(ptt·video·data GMS 중 하나)·MCVideo CMS 문서
+  (video CMS)·KMS(ptt·video·data KMS 중 하나).
 - **관리 API·콘솔** — 그룹 편집 «서비스» 절(MCPTT·MCVideo 켜기, MCVideo 속성), 가입자 PTT 회선 카드 옆 «MCVideo» 자격·상한. CSC 가 CSP 에 `GROUP_CHANGED`·
   사용자 변경을 통지하는 경로는 그대로.
 
@@ -213,7 +245,7 @@ service configuration 에서 `<confidentiality-protection>`·`<integrity-protect
 - **모듈** — `CMcVideoAsModule`(`IModule`, `Setup.Roles.MCVIDEO`) — 참여·제어 기능 겸임(PTT-AS·MCDATA-AS 와 같은 구성). `ModuleDispatcher::EventIncomingCall`
   에서 그룹 호 분기 앞에 **ICSI mcvideo(Accept-Contact / P-Preferred-Service) 또는 mcvideo-info 본문**으로 가른다 — 현행은 들어오는 INVITE 의 ICSI 를 보지 않는다.
 - **등록** — Contact 의 `+g.3gpp.mcvideo` 를 바인딩 능력으로 기록(`UserMap` 능력 검사 확장), mcvideo-info 토큰·poc-settings PUBLISH 로 MCVideo 서비스 인가(§1.2).
-- **affiliation** — 서비스 축을 가진 affiliation 기록(현행 MCPTT affiliation 저장에 service 열), `mcvideoPresInfo` NOTIFY, 암묵적 affiliation(chat 합류).
+- **affiliation** — 서비스별 affiliation 기록(표 `mcvideo_affiliations`, §5.1), `mcvideoPresInfo` NOTIFY, 암묵적 affiliation(chat 합류).
 - **그룹 호** — `McVideoCallService`: chat·prearranged 개시·합류·재합류·퇴장·해제(T1·최대 시간), 그룹 종류 검사(§6.3.5.2), 멤버 fan-out(prearranged), mcvideo-info
   부호화·해석(규격 contentType 자식 형식 — mcptt-info 와 같은 코덱 틀), SDP 합성(audio·video·`udp MCVideo` — psip `CSipCallRtp` 에 제어 채널 프로토콜 이름을
   서비스별로), 응답 Warning 코드(117·118 등 — TS 24.281 §4.4). 그룹 세션 캐시·CMP 명령·구독은 `GroupCallService` 의 부품을 공유 헬퍼로 뽑아 쓴다.
@@ -278,7 +310,7 @@ service configuration 에서 `<confidentiality-protection>`·`<integrity-protect
 | D1 | MCVideo ID | **MCPTT ID 와 같은 값**(TS 23.280 §10.1.4.1 단일 MC service ID) — `mcdata_id = mcptt_id` 와 같은 규약, 요청은 ICSI 로 가른다 |
 | D2 | 제어 기능의 자리 | CSP 안 새 모듈 `CMcVideoAsModule`(참여·제어 겸임). 그룹 세션 부품은 PTT-AS 와 공유하되 MCVideo 규칙(ICSI·본문·SDP·Warning)은 모듈 안에 |
 | D3 | CMP 명령 | 서비스를 명시한 명령 — 새 명령(`MCVIDEO_*`) 또는 기존 PTT 명령의 `service` 필드. 권고 = **기존 명령 + `service` 필드**(포트·SRTP·녹취 필드를 한 번만 정의), 제어 차이는 CMP 그룹 종류가 가진다 |
-| D4 | 그룹 모델 | 한 그룹 id 에 서비스 집합. DB = 서비스별 표(`mcvideo_group_attrs` 행 = 지원) — 가입 표의 kind 별 분리(`ptt_subscriptions` 등)와 같은 구조. `video_enabled` 는 V7 까지 전환기로만 |
+| D4 | 그룹 모델 | 한 그룹 id 에 서비스 집합. DB = 서비스별 표(`mcvideo_group_attrs` 행 = 지원 · `mcvideo_user_profile` 행 = 자격 · `mcvideo_affiliations`) — 가입 표의 kind 별 분리(`ptt_subscriptions` 등)와 같은 구조. `video_enabled` 는 V7 까지 전환기로만 |
 | D5 | 기본 호 종류 | **확정 — chat**(`mcvideo-on-network-invite-members` false). 원하는 사람만 영상에 들어오고, 합류가 곧 affiliation. prearranged(전원 초대)는 그룹 속성으로 고른다 |
 | D6 | 음성 호와 영상 호의 공존 | **확정 — 둘 다 유지.** 규격 미정(§1.1)이라 단말 정책: 영상 참여 중에도 MCPTT 호에 남아 [PTT](하드웨어 PTT 키 포함)는 음성 호, [영상 보내기]는 영상 호. 두 호의 소리가 겹치면 **영상 호 송출 음성 우선**(무전 음성은 줄이거나 끈다). «영상만 쓰기»는 사용자가 MCPTT 호를 나가는 선택 |
 | D7 | 보호 요소 | E2E 가 설 때까지 `mcvideo-protect-media`·`mcvideo-protect-transmission-control`·service config 보호 요소 **false 명시**(없으면 true 로 읽힌다). 구간 보호는 SRTP/SRTCP(media_security.md) |
@@ -312,6 +344,13 @@ service configuration 에서 `<confidentiality-protection>`·`<integrity-protect
   의 Transmission Indicator 참조 절 9.2.3.15(→ 9.2.3.11). Transmission control ack subtype `00100`(x 자리 없음 — 값 4).
 - TS 24.581 원인 #4 가 가리키는 T9(Retry-after)가 §11 서버 타이머 표에 없다(→ 1차 범위에서 쓰지 않는다). 단말 T100~T104 와 서버 T2 는 규격 기본값이
   없다 — TS 24.484 는 T100~T104 를 초 단위 unsignedByte 로 둔다(→ CIMS 1 s, [mcvideo_tc_defs.yaml](mcvideo_tc_defs.yaml) `origin: cims`).
+- TS 24.581 §14.2.7·§14.3.9 는 `mc_transmission_ssrc` 를 «다중화를 지원하면» 싣게 하지만 TS 24.281 §6.3.3.1.1 4)·§6.3.3.2.1 2)b)(제어 기능 offer·answer)는
+  «shall include»(→ 서버는 늘 싣는다 — 다중화 여부와 무관하게 해가 없다).
+- TS 24.484 MCVideo service configuration — XSD 요소 `C7-reception-accpeted` vs 본문 `C7-reception-accepted`(§9.4.2.1·§9.4.2.7), 본문 구조의
+  `T103-receive-media-requset` vs XSD `T103-receive-media-request`(→ XSD 표기 — 스키마 검증·XSD 기반 단말과 맞는다), MIME 이름 «vnd.3gpp.mcvideo-service-config+xml»
+  (§9.4.2.5 — `application/` 누락, → `application/vnd.3gpp.mcvideo-service-config+xml`).
+- TS 24.484 MCVideo user profile — 문서 이름 §9.3.2.6 «mcvideouserprofile<index>.xml» vs 같은 절 phrase·§9.3.1A «mcvideo-user-profile-<index>.xml»
+  (→ 후자, CSC 는 이름을 가리지 않는다) · `<RemoteGroupSelectionURIList>` 본문 «one or more entry» vs XSD entry 0 개 허용(→ 원격 선택 권한이 없으면 빈 목록).
 - pre-established session — TS 24.281 §22.2.2.2 Editor's Note «will be defined in the future»(→ V8 까지 on-demand 만).
 - 동시 세션 — TS 23.281 §7.11 만 있고 TS 24.281 §6 Editor's Note(→ 두 서비스의 독립 다이얼로그로 충분, 단일 다이얼로그 다중화는 하지 않는다).
 

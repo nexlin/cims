@@ -14,7 +14,7 @@
 | MC ID (IdMS 로그인 신원) | `users.login_id` (예 `test003`) → 토큰 `sub` | TS 33.180 B.2.1.2 |
 | MCPTT ID | `tel:+E.164` (PTT 가입 번호) → `mcptt_id` | TS 23.379 |
 | MCData ID | **MCPTT ID 와 같은 값** → `mcdata_id` | TS 23.280 §10.1.4.1 "사업자가 단일 MC service ID 를 요구하면 값이 같다" |
-| MCVideo ID | 없음 (미지원) | — |
+| MCVideo ID | **MCPTT ID 와 같은 값** → `mcvideo_id` — MCVideo 이용 자격(`mcvideo_user_profile` 행)이 있는 사용자만 | TS 23.280 §10.1.4.1 · [mcvideo.md](mcvideo.md) §7 D1 |
 
 CIMS 는 사업자 하나·서버 한 벌(CSC+CSP)·가입 테이블 하나(`ptt_subscriptions`)·그룹 문서 하나(`allow_sds`/`allow_fd`
 공용)인 단일 서비스 도메인이라 서비스별 ID 를 나누지 않는다. 단일 ID 구성이 규격에 지우는 의무 하나는 "통신 중 어느
@@ -28,10 +28,10 @@ claim(`mcptt_id`/`mcdata_id`)과 scope 로 충족한다.
 | 토큰 | claim | 값 | 규격 |
 |---|---|---|---|
 | ID token | `iss` `sub` `aud` `exp` `iat` | issuer(§7) / login_id / 요청 `client_id` / 만료 / 발급 | OIDC Core, B.2.1.2 |
-| ID token | `mcptt_id` `mcdata_id` | MC service ID (같은 값) | B.2.1.3 |
+| ID token | `mcptt_id` `mcdata_id` (+ `mcvideo_id`) | MC service ID (같은 값). `mcvideo_id` 는 MCVideo 자격이 있을 때만(B.2.1.3 "REQUIRED for MCVideo") | B.2.1.3 |
 | ID token | `nonce` | 요청에 있을 때 반영 | OIDC Core §3.1.2.1 |
 | access token | `exp` `scope` `client_id` | 만료 / **공백 구분 문자열** / 요청 `client_id` | B.2.2.2 (RFC 7662) |
-| access token | `mcptt_id` `mcdata_id` | MC service ID | B.2.2.3 |
+| access token | `mcptt_id` `mcdata_id` (+ `mcvideo_id`) | MC service ID — `mcvideo_id` 는 ID token 과 같은 규칙 | B.2.2.3 |
 | access token | `iss` `sub` `aud`(`mcptt_client`) `iat` | RFC 7519 추가 claim — 검증은 서명+`aud` | — |
 
 토큰 응답(RFC 6749 §5.1)은 `access_token`·`id_token`·`refresh_token`·`token_type`·`expires_in`(=TTL)·**`scope`(실제 허가분)**
@@ -52,14 +52,20 @@ TS 33.180 B.4.2.2 의 MC 서비스 scope 중 CIMS 가 제공하는 서비스 분
 | `3gpp:mc:data_config_management_service` | (MCData 문서 서빙 시 — §10) | — |
 | `3gpp:mc:ptt_key_management_service` / `3gpp:mc:data_key_management_service` | KMS | `/keymanagement/*` (둘 중 하나) |
 
-MCVideo 계열(`3gpp:mc:video_*`)은 카탈로그 밖이다. discovery `scopes_supported` 는 카탈로그 전체와 §5 별칭을 광고한다.
+| `3gpp:mc:video_service` | MCVideo 서비스 사용자 자격 | (CSP REGISTER — §10) |
+| `3gpp:mc:video_group_management_service` | GMS XCAP 그룹 문서(MCVideo 몫 포함 — 한 문서) | `/org.openmobilealliance.groups` (ptt·video·data 중 하나) |
+| `3gpp:mc:video_config_management_service` | CMS MCVideo user profile · service config | `/org.3gpp.mcvideo.*` |
+| `3gpp:mc:video_key_management_service` | KMS | `/keymanagement/*` (ptt·video·data 중 하나) |
+
+discovery `scopes_supported` 는 카탈로그 전체와 §5 별칭을 광고한다.
 
 ## 4. 발급 규칙
 
 - **허가 = 요청 ∩ 카탈로그** (`grant_scope`). 모르는 값은 조용히 제외하고(RFC 6749 §3.3 허용 동작) 응답 `scope` 로
   실제 허가분을 알린다. 요청 자체는 거절하지 않는다(`invalid_scope` 없음).
 - `openid` 부재를 거절하지 않는다 — 규격 SDK 중 `openid` 를 빼고 요청하는 구현이 있어(실측) ID token 은 항상 발급한다.
-- **사용자 단위 인가**: PTT 가입자는 MCPTT·MCData 8종 전부를 받을 수 있다(MCData 만 막는 가입자 플래그 없음 — §10).
+- **사용자 단위 인가**: PTT 가입자는 MCPTT·MCData 8종 전부를 받을 수 있다(MCData 만 막는 가입자 플래그 없음 — §10). MCVideo 4종은
+  MCVideo 이용 자격(`mcvideo_user_profile` 행)이 있을 때만 준다(`grant_scope(requested, mcptt_id)` — 없으면 제외하고 응답 `scope` 로 알린다).
 - **refresh 축소**: refresh 요청에 `scope` 가 있으면 `expand(요청) ∩ expand(원 grant)` 로 좁혀 access 를 발급하고,
   회전된 refresh 는 원 grant(broad)를 그대로 보존한다. 교집합이 비면 원 grant 로 발급한다. CIMS 앱의 AccountManager 가
   용도별(provisioning / MC 서비스) 토큰을 이 경로로 따로 받는다.
@@ -71,8 +77,8 @@ MCVideo 계열(`3gpp:mc:video_*`)은 카탈로그 밖이다. discovery `scopes_s
 구 단일 scope(TS 33.179 표기)를 요청하는 클라이언트(구 Android/SDK 빌드·협력업체 단말·외부 SDK)가 이행 뒤에도 그대로
 동작하도록 다음 넷을 지킨다.
 
-1. **확장 범위 = MC 서비스 scope 8종 전체.** 종전에 그 하나가 GMS·CMS·KMS·FD 를 모두 열어 주던 의미와 같다. 일부만
-   대응하면 구 클라이언트가 퇴행한다.
+1. **확장 범위 = MCPTT·MCData scope 8종 전체.** 종전에 그 하나가 GMS·CMS·KMS·FD 를 모두 열어 주던 의미와 같다. 일부만
+   대응하면 구 클라이언트가 퇴행한다. MCVideo 넷은 별칭에 들지 않는다 — 별칭이 열던 범위에 없던 서비스이고, 구 클라이언트는 MCVideo 를 쓰지 않는다.
 2. **구 문자열 병기.** 토큰·응답 `scope` 에 확장분과 함께 `3gpp:mcptt:ptt_server` 를 남긴다(요청 scope 를 문자열 대조하는
    클라이언트 호환).
 3. **적용 지점 셋.** 발급(`grant_scope`)·refresh 축소(양쪽 확장 후 교집합)·리소스 서버 검사(`token_scopes` 가 검사 시점에도

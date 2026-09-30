@@ -176,25 +176,27 @@ participant_counters:
   C103: {default: 3, timer: T103, name: "Receive Media Request"}
   C104: {default: 3, timer: T104, name: "Receive Media Release"}
 
-# §11.1.3 전송 제어 서버. T1·T5 는 그룹 호면 그룹 문서 값(TS 24.481 — T1 은 MCPTT hang timer 재사용). T2 는 규격이 «무선망 특성에
+# §11.1.3 전송 제어 서버. T1·T5 는 그룹 호면 그룹 문서 값(TS 24.481 — T1 은 MCPTT hang timer 재사용), 1:1 호면 service configuration
+# 값(element_private — <tc-timers-counters-R14> 의 필수 요소라 문서는 늘 싣는다, TS 24.484 §9.4.2.3). T2 는 규격이 «무선망 특성에
 # 따름»이라 기본값이 없다 → CIMS 1 s(T3·T4·T6 과 같은 재전송 간격, × C2 10 = 10 s). T9(Retry-after)는 원인 #4 가 가리키지만 §11 표에
 # 없다 — 1차 범위에서 쓰지 않는다(mcvideo.md §9).
 server_timers:
-  T1:  {default_ms: 30000, origin: spec, name: "Inactivity", element: "on-network-hang-timer"}
+  T1:  {default_ms: 30000, origin: spec, name: "Inactivity", element: "on-network-hang-timer", element_private: "private-call-hang-timer"}
   T2:  {default_ms: 1000,  origin: cims, name: "Transmission Idle", element: "T2-transmission-idle"}
   T3:  {default_ms: 1000,  origin: spec, name: "Transmission Revoke", element: "T3-transmission-revoke"}
   T4:  {default_ms: 1000,  origin: spec, name: "Transmission Granted", element: "T4-transmission-granted"}
-  T5:  {default_ms: 30000, origin: spec, name: "Reception Inactivity", element: "on-network-reception-hang-timer"}
+  T5:  {default_ms: 30000, origin: spec, name: "Reception Inactivity", element: "on-network-reception-hang-timer", element_private: "reception-hang-time"}
   T6:  {default_ms: 1000,  origin: spec, name: "Reception Granted", element: "T6-reception-granted"}
   T11: {default_ms: 10000, origin: spec, name: "Stream Reception Idle", element: "T11-stream-reception-idle"}
 
 # §11.2.3 제어 기능 카운터. C9 = 참여자별 동시 수신 스트림 상한 — user profile `<MaxSimultaneousVideoStreams>`(1차 CIMS 값 1,
 # mcvideo_dev_plan.md §1), 없으면 4. C7(Reception Accepted)·C11(스트림당 활성 수신자)은 한도에서 Receive Media Request 를 거절한다.
+# element 는 TS 24.484 XSD 표기를 따른다 — C7 은 XSD 가 «C7-reception-accpeted»(본문 §9.4.2.1·§9.4.2.7 은 accepted — mcvideo.md §9).
 server_counters:
   C2:  {default: 10, timer: T2, name: "Transmission Idle", element: "C2-transmission-idle"}
   C4:  {default: 3,  timer: T4, name: "Transmission Granted", element: "C4-transmission-granted"}
   C6:  {default: 3,  timer: T6, name: "Reception Granted", element: "C6-reception-granted"}
-  C7:  {default: 2,  name: "Reception Accepted", element: "C7-reception-accepted"}
+  C7:  {default: 2,  name: "Reception Accepted", element: "C7-reception-accpeted"}
   C9:  {default: 4,  name: "Per-Participant Reception Accepted", element: "MaxSimultaneousVideoStreams"}
   C11: {default: 4,  name: "Count of active receivers for the stream", element: "C11-media-receivers"}
 

@@ -738,6 +738,65 @@ MCPTT E2E 보안에서 **미디어 RTP 는 CMP 가 복호하지 않는다**(UE�
 - `floor_control:"off"` 와 함께 오면 `BAD_REQUEST`(보호할 floor 가 없다). 키 길이·alg 오류도
   같은 코드로 거절한다.
 
+### 7.9 MCVideo — 송출·수신 제어 (`service: "mcvideo"`)
+
+MCVideo 그룹 호(TS 24.281 §9.2)의 미디어·전송 제어(TS 24.581). **명령은 §7.1~§7.5 와 같은 `PTT_*` 에 `hdr.service:"mcvideo"`** 를 싣는다
+(명령을 새로 만들지 않는다 — 포트·녹취·SRTP 필드를 한 번만 정의, [mcvideo.md](../design/features/mcvideo.md) §7 D3). 그룹 자원 키는
+`(service, group_id)` 라 같은 그룹 id 에 MCPTT 그룹 호와 MCVideo 그룹 호가 **동시에** 선다(두 호는 독립 다이얼로그 — §7 D6). 제어 차이는 그룹
+종류가 가진다 — floor(§7.7) 대신 **송출 제어**(TS 24.581 §6.3.4·§6.3.5)와 **수신 제어**(§6.3.6·§6.3.7). 메시지·필드·원인·타이머 이름은 전송
+제어 정의 정본 [mcvideo_tc_defs.yaml](../design/features/mcvideo_tc_defs.yaml)(계약 K5)의 생성 헤더 `cmp/PTransmissionDefs.h` 를 쓴다.
+
+**PTT_GROUP_ADD / PTT_GROUP_MODIFY** (`service:"mcvideo"`) — §7.1 의 `group_id`·`members`·`subid`·`record_dir`·`session_dir` 는 뜻이 같다
+(`members` 의 prio = 그룹 문서 `<user-priority>` — 송출 우선순위 상한 min(offer `mc_priority`, 이 값), TS 24.581 §14.3.3). 그 밖의 필드:
+
+| payload 필드 | 필수 | 설명 |
+|---|---|---|
+| `group_type` | - | `chat`(기본 — mcvideo.md §7 D5) / `prearranged` |
+| `max_transmitters` | O | 동시 송출 상한 1..16 — 그룹 `mcvideo-maximum-simultaneous-mcvideo-transmitting-group-members`(TS 24.581 §4.1.1.1·§6.3.4). 상한에서 새 요청은 거절(#1)하거나, 더 높은 우선순위면 가장 낮은 송출을 Revoke(#4, §4.1.1.2) |
+| `reception_mode` | - | `manual`(기본 — 일반 호, 수신자가 Receive Media Request) / `automatic`(긴급·임박·방송·system 호 — Reception Mode '0', §6.3.6.3.3, V8) |
+| `tc_timers` | - | 서버 타이머(ms)·카운터 `{t1_ms, t2_ms, t3_ms, t4_ms, t5_ms, t6_ms, t11_ms, c2, c4, c6, c7, c11}` — **T1 = 그룹 `on-network-hang-timer`**(MCPTT hang timer 재사용, §11.1.3), **T5 = 그룹 `on-network-reception-hang-timer`**, 나머지 = MCVideo service configuration `<tc-timers-counters-R14>`(CSC `/internal/mcvideo/service-config`). 미지정 필드 = K5 기본값(`MCV_T*_MS`·`MCV_C*`). t1_ms·t5_ms 0 = 그 타이머 미사용 |
+| `tc_crypto` | - | 전송 제어 SRTCP 그룹 키 `{alg,key,salt[,mki]}` — §7.8 `floor_crypto` 와 같은 형식·규칙(B7) |
+
+§7.1 의 floor 필드(`floor_control`·`floor_policy`·`max_talkers`·`floor_timers`·`floor_crypto`·`broadcast`·`initiator_id`)가 오면 `BAD_REQUEST`
+— MCVideo 에 floor 는 없다. 응답 payload: `ip`, `member_ports`(멤버별 `{port, video_port, control_port}`) — **그룹 공유 포트가 없다**. 멤버마다
+audio RTP(`port`, RTCP = +1)·video RTP(`video_port`, RTCP = +1 — 수신자 PLI·FIR 를 받는다, B6)·**전송 제어 채널 `control_port`**(SDP
+`m=application <port> udp MCVideo` — RTP 가 아니라 RTCP 포트, TS 24.581 §4.3.3.1)를 준다.
+
+**PTT_JOIN** (`service:"mcvideo"`) — §7.4 의 `group_id`·`session_id`·`user_ip`·`user_port`·`user_video_port`·`user_nat`·`user_sig_ip`·`user_pt`·
+`user_video_pt`·`user_src_pt`·`user_codec`·`role`·`user_uri`(MCVideo ID — User ID 필드 값)·`media_crypto`·`media_crypto_video` 는 뜻이 같다.
+2단 멱등(§7.4)도 같다. 그 밖의 필드:
+
+| payload 필드 | 필수 | 설명 |
+|---|---|---|
+| `user_control_port` | - | 멤버의 전송 제어 채널 RTCP 포트(멤버 SDP 의 `m=application … udp MCVideo`) |
+| `user_tc_ssrc` | - | 멤버가 SDP 에 광고한 `mc_transmission_ssrc` — CMP 가 **이 멤버에게 보내는 전송 제어 메시지 RTCP 헤더 SSRC** 로 쓴다(TS 24.581 §4.3.3.1 — 받는 쪽이 기대하는 값, 다중화의 열쇠). 없으면 CMP 가 정한 값 |
+| `queueing` | - | `1` = SDP `mc_queueing` 협상(§14.2.2) — 1차는 대기열을 쓰지 않는다(송출 큐 = V8): 상한이면 거절 #1 |
+| `max_priority` | - | 협상한 송출 우선순위 상한(answer `mc_priority`, §14.3.3). 없으면 `members` 의 prio |
+| `max_reception_priority` | - | 협상한 수신 우선순위 상한(answer `mc_reception_priority`, §14.3.6) |
+| `max_rx_streams` | - | **C9** — 이 멤버의 동시 수신 스트림 상한 = user profile `<MaxSimultaneousVideoStreams>`(TS 24.581 §11.2.3, 1차 1). 넘는 Receive Media Request 는 Receive Media Response rejected **#7**(Max no of simultaneous stream). 없으면 K5 기본값 4 |
+| `implicit_request` | - | `1` = CSP 가 offer `mc_implicit_request` 를 받아들였다 — **새 prearranged 세션 개시만**(chat 합류·진행 중 합류는 받지 않는다, §14.3.5). CMP 는 참가 시점에 Transmission Request 로 처리한다(§6.3.5.2.2 1) |
+| `tc_crypto` | - | 이 멤버의 전송 제어 SRTCP 키(CSK) — 없으면 그룹 키(B7) |
+
+응답 payload: `ip`, `port`, `video_port`, `control_port`, **`tc_ssrc`**(CMP 가 이 멤버에게서 기대하는 RTCP 헤더 SSRC — CSP 가 answer 의
+`mc_transmission_ssrc` 로 싣는다), `implicit_request` 를 받았으면 `granted`(0/1)·`audio_ssrc`·`video_ssrc`(CSP 가 answer 에 `mc_implicit_request` +
+`mc_audio_ssrc`·`mc_video_ssrc`, 허가됐고 offer 에 `mc_granted` 가 있었으면 `mc_granted` — §14.3.4·§14.3.7·§14.3.8).
+
+**SSRC 규칙** (mcvideo_dev_plan.md §7 R2)
+
+- **송출 SSRC** — 송출을 허가할 때 CMP 가 그 송출에 전역 유일한 Audio SSRC·Video SSRC 한 쌍을 할당·보관하고(TS 24.581 §6.3.4.3.3 d),
+  Transmission Granted(필드 14·23)·Media Transmission Notification·Receive Media Response·Transmission End Notify·End 계열에 싣는다. 송출이
+  끝나면 반환한다. 규격상 송출자는 그 값을 자기 RTP 에 쓴다(§6.2.4) — **CMP 는 송출자를 멤버 전용 포트로 판별하고 내보낼 때 할당 SSRC 를
+  찍는다**(단말이 SSRC 를 바꾸지 못해도 분배·수신자 구분이 깨지지 않는다).
+- **수신 분배** — 수신자마다 **Active SSRC List**(§6.3.7): manual 이면 Receive Media Request 로 허가된 송출만, automatic 이면 알림과 함께. 목록에
+  없는 송출의 RTP 는 그 수신자에게 보내지 않는다. 1차 단말 수신 1개(C9 = 1).
+- **제어 채널 SSRC** — 멤버 → CMP 는 `tc_ssrc`, CMP → 멤버는 `user_tc_ssrc`. 멤버 전용 `control_port` 라 1차는 SSRC 로 세션을 가르지 않는다
+  (다른 값이 와도 받고 로그만).
+- **영상 RTCP**(B6) — 수신자의 PLI(RFC 4585)·FIR(RFC 5104)는 media SSRC 가 가리키는 송출자에게 넘긴다(SSRC 는 송출자 쪽 값으로 되돌린다).
+  송출 시작 때 CMP 가 송출자에게 PLI 를 한 번 보내 첫 키프레임을 받는다.
+
+**PTT_LEAVE / PTT_GROUP_REMOVE** — §7.5·§7.3 과 같다(`service:"mcvideo"`). 떠나는 멤버의 송출·수신 상태를 정리하고(§6.3.3 두 단계),
+송출 중이었으면 남은 멤버에게 Transmission End Notify 를 보낸다.
+
 ## 8. 이벤트 (type: "event")
 
 CMP → client 비동기 push. `trans_id` 는 CMP 가 발행하고, 수신 client 는 동일 trans_id 로
@@ -775,6 +834,13 @@ CSP 는 `CCspAnnouncementService::OnPlayDone` 이 대기 중 최종 응답(486/4
 |---|---|---|
 | `FLOOR_TALKERS` | 참여 node | `group_id`, `policy`(`single`/`dual`/`multi`/`private`/`off`), `talkers`(현재 발언자 배열 — 비면 무발언) |
 | `PTT_FLOOR_INACTIVITY` | 참여 node | `group_id` — T4(Inactivity) 만료([§7.7](#77-floor-정책--동시-발언과-private-call) 타이머 표). hdr `sesid` = 그룹 세션. `t4_inactivity` 를 준 그룹만 발행 |
+
+**송출자 집합 통지 (MCVideo)** — 송출 허가·종료·회수·이탈로 송출자 집합이 바뀔 때, 그리고 서버 타이머가 호 해제를 요구할 때(§7.9):
+
+| cmd | 라우팅 | payload |
+|---|---|---|
+| `TRANSMITTERS` | 참여 node | `group_id`, `transmitters`(현재 송출 배열 `{user, audio_ssrc, video_ssrc}` — 비면 무송출). hdr `service:"mcvideo"`. CSP 는 로그·CDR·녹취 색인·세션 이력의 송출 축으로 쓴다(A12·B8) |
+| `TRANSMISSION_INACTIVITY` | 참여 node | `group_id`, `timer`(`T1` 송출 비활성 / `T5` 수신 비활성) — 만료 1회 후 재무장. 호를 해제할지는 CSP 정책(TS 24.281 §6.3.3.5·TS 24.581 §6.3.4.3.5). `t1_ms`·`t5_ms` 를 준 그룹만 |
 
 ```json
 {

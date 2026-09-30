@@ -19,6 +19,7 @@ from util.log_util import Logger
 from services.idms_storage import IdmsStorage
 from services import logger as _logger
 from services import subscriptions as _subs      # 가입 테이블 레지스트리(volte/voip/ptt — sip_service_model.md §2-9)
+from services import mcvideo as _mcvideo        # MCVideo 설정 평면(그룹 문서 조각·user profile·service config — mcvideo.md §5.1)
 
 # --- Configuration & Data ---
 # JWT 서명 시크릿. 구 하드코딩 default("mcptt_jwt_secret_change_me") 제거 — 알려진 기본값은
@@ -33,8 +34,8 @@ KMS_MASTER_SECRET = _secrets.token_bytes(32)
 # ── IdMS scope 카탈로그 (TS 33.180 Annex B.4.2.2 — MC 서비스별 authorization scope) ──
 #   토큰 scope = 요청 ∩ 카탈로그 (RFC 6749 §3.3: 모르는 값은 제외하고 토큰 응답 `scope` 로 허가분을 알림).
 #   리소스 서버는 자기 scope 를 검사한다(B.10 — `require_scope`, IdMs.ScopeEnforcement).
-#   MCVideo 는 미지원이라 카탈로그 밖(요청되면 제외). CIMS 앱은 로그인 시 전부 grant 받고 AccountManager 가
-#   refresh 로 용도별(provisioning / MC 서비스) 토큰을 좁혀 발급받는다.
+#   MCVideo 4종은 MCVideo 이용 자격(mcvideo_user_profile 행)이 있는 사용자에게만 준다(grant_scope 의 mcptt_id 인자).
+#   CIMS 앱은 로그인 시 전부 grant 받고 AccountManager 가 refresh 로 용도별(provisioning / MC 서비스) 토큰을 좁혀 발급받는다.
 SCOPE_OPENID       = "openid"
 SCOPE_PROVISIONING = "cims:provisioning"      # 자체 — 디바이스 부트스트랩(/provisioning/*)
 SCOPE_PTT_SERVICE  = "3gpp:mc:ptt_service"
@@ -45,9 +46,14 @@ SCOPE_PTT_KMS      = "3gpp:mc:ptt_key_management_service"
 SCOPE_DATA_GMS     = "3gpp:mc:data_group_management_service"
 SCOPE_DATA_CMS     = "3gpp:mc:data_config_management_service"
 SCOPE_DATA_KMS     = "3gpp:mc:data_key_management_service"
+SCOPE_VIDEO_SERVICE = "3gpp:mc:video_service"
+SCOPE_VIDEO_GMS    = "3gpp:mc:video_group_management_service"
+SCOPE_VIDEO_CMS    = "3gpp:mc:video_config_management_service"
+SCOPE_VIDEO_KMS    = "3gpp:mc:video_key_management_service"
 SCOPE_MC_SERVICES  = (SCOPE_PTT_SERVICE, SCOPE_PTT_GMS, SCOPE_PTT_CMS, SCOPE_PTT_KMS,
                       SCOPE_DATA_SERVICE, SCOPE_DATA_GMS, SCOPE_DATA_CMS, SCOPE_DATA_KMS)
-SCOPE_CATALOG      = frozenset((SCOPE_OPENID, SCOPE_PROVISIONING) + SCOPE_MC_SERVICES)
+SCOPE_VIDEO_SERVICES = (SCOPE_VIDEO_SERVICE, SCOPE_VIDEO_GMS, SCOPE_VIDEO_CMS, SCOPE_VIDEO_KMS)
+SCOPE_CATALOG      = frozenset((SCOPE_OPENID, SCOPE_PROVISIONING) + SCOPE_MC_SERVICES + SCOPE_VIDEO_SERVICES)
 # 전환기 별칭 — 구 단일 scope(TS 33.179 표기)는 MC 서비스 scope 8개 전체로 확장한다(종전에 그 하나가 열어 주던
 #   범위와 동일). 토큰에는 확장분과 함께 구 문자열도 실린다(요청 scope 를 문자열 대조하는 단말 호환).
 #   별칭 제거 = 우리 앱·협력업체가 신 이름으로 옮긴 뒤 별도 결정 (mcx_identity_scope.md §5).
@@ -196,6 +202,7 @@ _UE_INIT_DEFAULTS = {
     "ConfidentialityProtection": False,
     "GroupCreationXui": "",
     "ServiceDetails": {"Mcptt": {"Enable": True, "ServerUri": ""},
+                       "McVideo": {"Enable": False, "ServerUri": ""},
                        "McData": {"Enable": False, "ServerUri": ""}},
 }
 _UE_INIT_LAST_GOOD = {}      # base_url → (xml, etag): 설정값이 문서를 깨뜨렸을 때 유지할 마지막 정상 문서
@@ -347,6 +354,13 @@ def apply_config(config):
         _sc_now = get_service_config_xml(None)[1]
         if _sc_now != _sc_prev:
             notify_csp("SERVICE_CONFIG_CHANGED", "", "PUT", etag=(_sc_now or "").strip('"'))
+    # MCVideo service-config 규격 파라미터값(McVideoServiceConfig.*) — 같은 규칙. 바뀌면 같은 통지로 CSP 가 다시 받는다.
+    _mv_prev = _mcvideo.get_service_config_xml()[1] if _sc_prev is not None else None
+    _mcvideo.apply_config(config)
+    if _mv_prev is not None:
+        _mv_now = _mcvideo.get_service_config_xml()[1]
+        if _mv_now != _mv_prev:
+            notify_csp("SERVICE_CONFIG_CHANGED", "mcvideo", "PUT", etag=(_mv_now or "").strip('"'))
     # user-profile 규격 파라미터값 — 같은 규칙(ETag 내용 파생, SIGUSR1 리로드)
     global USER_PROFILE_CONFIG
     USER_PROFILE_CONFIG = config.get('UserProfile') or {}
@@ -488,6 +502,9 @@ def load_shared_data(config):
                     except Exception as pe:
                         logger.log_info(f"ptt_user_profile load skipped (pre-migration?): {pe}")
 
+                    # MCVideo 이용 자격 (mcvideo_user_profile — 행 = 자격, TS 24.484 §9.3). 표 부재는 자격 0건.
+                    _mcvideo.load_user_profiles(cur)
+
                     # MCPTT 시스템 서비스 설정 (TS 24.484 service-config) — 단일 행(id=1).
                     #   행/테이블 부재는 기본값 유지.
                     try:
@@ -559,6 +576,11 @@ def load_shared_data(config):
                         g_uri = _group_uri(row['mcptt_group_id'])
                         if g_uri in GROUPS:
                             GROUPS[g_uri]['members'].append(_member_row_to_dict(row))
+                    # MCVideo 서비스 속성 (mcvideo_group_attrs — 표 부재 = 마이그레이션 전, MCVideo 그룹 없음)
+                    for gid, attrs in (_mcvideo.load_group_attrs(cur) or {}).items():
+                        g_uri = _group_uri(gid)
+                        if g_uri in GROUPS:
+                            GROUPS[g_uri]['mcvideo'] = attrs
                     for uri in GROUPS:
                         logger.log_info(f"Loaded DB Group: {uri} ({len(GROUPS[uri]['members'])} members)")
             db_groups_loaded = True
@@ -761,6 +783,8 @@ def _group_row_to_dict(row: dict) -> dict:
         "authorized_user": (f"tel:{row['authorized_user_msisdn']}"
                             if row.get('authorized_user_msisdn') else ""),
         "authorized_user_id": row.get('authorized_user_id'),
+        # MCVideo 서비스 — mcvideo_group_attrs 행이 있으면 속성 dict, 없으면 None(MCPTT 전용 그룹). 적재 경로가 채운다.
+        "mcvideo": None,
         "members": []
     }
 
@@ -817,6 +841,8 @@ def sync_group_from_db(group_id: str) -> bool:
                 cur.execute(_member_select_sql(cur) + " WHERE g.mcptt_group_id=%s ORDER BY gm.priority",
                             (group_id,))
                 grp['members'] = [_member_row_to_dict(r) for r in cur.fetchall()]
+                mv = _mcvideo.load_group_attrs(cur, group_id)
+                grp['mcvideo'] = (mv or {}).get(group_id)
         GROUPS[uri] = grp
         logger.log_info(f"sync_group_from_db({group_id}): {len(grp['members'])} members")
         return True
@@ -1167,16 +1193,20 @@ def create_tokens(subject, scope, client_id="mcptt_client", nonce=None, refresh_
 
     claim 은 TS 33.180 Annex B: ID token = iss/sub/aud/exp/iat + mcptt_id/mcdata_id(+nonce),
     access token = exp/scope(공백 구분 문자열)/client_id + mcptt_id/mcdata_id (iss/sub/aud/iat 는 RFC 7519 추가분).
-    단일 MC service ID 구성(TS 23.280 §10.1.4.1)이라 mcdata_id = mcptt_id 값."""
+    단일 MC service ID 구성(TS 23.280 §10.1.4.1)이라 mcdata_id = mcptt_id 값. MCVideo 이용 자격이 있는 사용자는
+    mcvideo_id(같은 값, B.2.1.3·B.2.2.3 "REQUIRED for MCVideo")도 싣는다 — 자격이 없으면 MCVideo ID 가 없다."""
     now = int(time.time())
     # sub = CIMS 로그인 ID(인증 신원). mcptt_id = 규격 MCPTT 서비스 신원(분리). 미지정 시 subject 로 폴백.
     sub = subject
     mcptt = mcptt_id or subject
     scope = " ".join(scope.split()) if isinstance(scope, str) else " ".join(scope or [])
 
+    mcvideo_claim = {"mcvideo_id": mcptt} if _mcvideo.has_profile(_ptt_msisdn_of(mcptt)) else {}
+
     # ID Token (OIDC) — nonce 가 있으면 반영(S2b: CSRF/replay 방지, OIDC Core §3.1.2.1)
     id_token_payload = {
         "mcptt_id": mcptt,
+        **mcvideo_claim,
         "mcdata_id": mcptt,
         "iss": IDMS_ISSUER,
         "sub": sub,
@@ -1191,6 +1221,7 @@ def create_tokens(subject, scope, client_id="mcptt_client", nonce=None, refresh_
     # Access Token — sub=login_id, mcptt_id/mcdata_id=MC 서비스 신원, client_id=요청 클라이언트(B.2.2.2).
     access_token_payload = {
         "mcptt_id": mcptt,
+        **mcvideo_claim,
         "mcdata_id": mcptt,
         "iss": IDMS_ISSUER,
         "sub": sub,
@@ -1240,13 +1271,19 @@ def expand_scopes(scope) -> list:
     return out
 
 
-def grant_scope(requested):
+def grant_scope(requested, mcptt_id=None):
     """허가 scope 계산 — 요청 ∩ (카탈로그 ∪ 별칭). 반환 (허가 공백 구분 문자열, 제외된 요청 항목 목록).
-    별칭은 확장 집합과 원문을 함께 허가한다. 모르는 값(MCVideo 등)은 제외 — 토큰 응답 `scope` 로 알린다."""
+    별칭은 확장 집합과 원문을 함께 허가한다. 모르는 값은 제외 — 토큰 응답 `scope` 로 알린다.
+    mcptt_id 를 주면 사용자 단위 인가를 더한다 — MCVideo 4종은 MCVideo 이용 자격(mcvideo_user_profile 행)이 있을 때만
+    (TS 33.180 B.4.2.2 — scope 는 사용자가 인가된 MC 서비스만)."""
     items = requested.split() if isinstance(requested, str) else list(requested or [])
+    video_ok = mcptt_id is None or _mcvideo.has_profile(_ptt_msisdn_of(mcptt_id))
     granted: list = []
     dropped: list = []
     for s in items:
+        if s in SCOPE_VIDEO_SERVICES and not video_ok:
+            dropped.append(s)
+            continue
         if s in SCOPE_CATALOG or s in SCOPE_ALIASES:
             for v in expand_scopes([s]):
                 if v not in granted:
@@ -1254,6 +1291,15 @@ def grant_scope(requested):
         else:
             dropped.append(s)
     return " ".join(granted), dropped
+
+
+def _ptt_msisdn_of(mcptt_id) -> str:
+    """MCPTT ID(tel:+E.164 / sip:user@dom) → ptt_subscriptions.id 표기(USERS 의 msisdn). 모르면 사용자부 그대로."""
+    for key in (mcptt_id, f"tel:{_norm_mcptt_uri(mcptt_id)}"):
+        u = USERS.get(key or '')
+        if u:
+            return u.get('msisdn', '')
+    return _norm_mcptt_uri(mcptt_id)
 
 
 def token_scopes(payload: dict) -> set:
@@ -1343,6 +1389,10 @@ def get_group_xml(group_uri):
     if not group:
         return None, None
 
+    # 그룹 = 서비스 집합(TS 23.280 §3) — MCVideo 속성(mcvideo_group_attrs 행)이 있으면 MCPTT 그룹이자 MCVideo 그룹이다.
+    mcvideo_attrs = group.get('mcvideo')
+    has_mcdata = bool(group.get('allow_sds', True) or group.get('allow_fd', False))
+
     xml = f"""<?xml version="1.0" encoding="UTF-8"?>
 <group xmlns="urn:oma:xml:poc:list-service"
   xmlns:rl="urn:ietf:params:xml:ns:resource-lists"
@@ -1367,6 +1417,13 @@ def get_group_xml(group_uri):
         xml += f"""
         <mcpttgi:participant-type>{member.get('role', 'participant')}</mcpttgi:participant-type>
         <mcpttgi:user-priority>{member.get('priority', 5)}</mcpttgi:user-priority>"""
+        # 서비스별 신원 — MCVideo·MCData 그룹 문서의 entry 는 <mcvideo-mcvideo-id>·<mcdata-mcdata-id> 를 **반드시** 싣는다
+        #   (TS 24.481 §7.2.2). 단일 MC service ID 라 값 = entry uri(MCPTT ID, TS 23.280 §10.1.4.1 — mcvideo.md §7 D1).
+        if mcvideo_attrs is not None:
+            xml += _mcvideo.entry_xml(member['uri'])
+        if has_mcdata:
+            xml += f"""
+        <mcpttgi:mcdata-mcdata-id uri="{member['uri']}"/>"""
         # 직함 — 3GPP 미정의 필드라 CIMS 전용 네임스페이스 확장으로 전달
         # (<entry> 는 ##other lax 확장 허용, 표준 단말은 무시 — TS 24.481 정합)
         if member.get('title'):
@@ -1413,6 +1470,8 @@ def get_group_xml(group_uri):
     if max_auto > 0:
         xml += f"""
     <mcpttgi:mcdata-on-network-max-data-size-auto-recv>{max_auto}</mcpttgi:mcdata-on-network-max-data-size-auto-recv>"""
+    # <mcpttgi:mcptt-video> 는 TS 24.481 스키마에 없는 요소다(현행 «PTT 영상» 전환기 요소 — mcvideo.md §6 V0 ②·편차 표).
+    #   옛 앱이 이 값으로 PTT 영상을 켜므로 V7(현행 PTT 영상 제거)까지 싣고, 그 창에서 걷는다. 규격형 영상 = MCVideo <service>.
     xml += f"""
     <mcpttgi:mcptt-video>{video_val}</mcpttgi:mcptt-video>
     <mcpttgi:on-network-invite-members>{invite_members}</mcpttgi:on-network-invite-members>
@@ -1425,24 +1484,40 @@ def get_group_xml(group_uri):
     <mcpttgi:on-network-action-upon-expiration-of-timeout-for-acknowledgement-of-required-members>{ack_action}</mcpttgi:on-network-action-upon-expiration-of-timeout-for-acknowledgement-of-required-members>
     <mcpttgi:on-network-require-talker-id>false</mcpttgi:on-network-require-talker-id>
     <mcpttgi:on-network-group-priority>{grp_priority}</mcpttgi:on-network-group-priority>
-    <mcpttgi:on-network-encryption>{encryption_val}</mcpttgi:on-network-encryption>
+    <mcpttgi:on-network-encryption>{encryption_val}</mcpttgi:on-network-encryption>"""
+    if mcvideo_attrs is not None:
+        xml += _mcvideo.list_service_xml(mcvideo_attrs)
+    # 규칙 — 멤버(<is-list-member>)에게 그룹 호 개시(<allow-initiate-conference>)·진행 중 세션 합류(<join-handling>)를 허용한다.
+    #   제어 기능이 개시·합류를 인가하는 근거 요소다(TS 24.379 §6.3.5.3·§6.3.5.4, TS 24.281 §6.3.5.3·§6.3.5.4). 요소 이름공간은
+    #   OMA list-service(기본 이름공간, TS 24.481 Annex A.2.2 예시).
+    xml += f"""
     <cp:ruleset>
       <cp:rule id="a7c">
-         <cp:actions>
+        <cp:conditions>
+          <is-list-member/>
+        </cp:conditions>
+        <cp:actions>
+          <allow-initiate-conference>true</allow-initiate-conference>
+          <join-handling>true</join-handling>
           <mcpttgi:allow-MCPTT-emergency-call>{emergency_val}</mcpttgi:allow-MCPTT-emergency-call>
           <mcpttgi:allow-imminent-peril-call>{imminent_val}</mcpttgi:allow-imminent-peril-call>
           <mcpttgi:allow-MCPTT-emergency-alert>{alert_val}</mcpttgi:allow-MCPTT-emergency-alert>
-          <mcpttgi:on-network-allow-conference-state>{conf_state_val}</mcpttgi:on-network-allow-conference-state>
+          <mcpttgi:on-network-allow-conference-state>{conf_state_val}</mcpttgi:on-network-allow-conference-state>"""
+    if mcvideo_attrs is not None:
+        xml += _mcvideo.actions_xml(mcvideo_attrs)
+    # MCPTT <service> — enabler = MCPTT ICSI (TS 24.481 §7.2.2, ICSI 는 TS 24.379). MCVideo 그룹이면 MCVideo <service> 를 더한다.
+    xml += f"""
         </cp:actions>
       </cp:rule>
-    </cp:ruleset>"""
-    xml += """
+    </cp:ruleset>
     <oxe:supported-services>
-     <oxe:service enabler="example.mcptt">
+     <oxe:service enabler="{_mcvideo.ICSI_MCPTT}">
       <oxe:group-media>
        <mcpttgi:mcptt-speech/>
       </oxe:group-media>
      </oxe:service>"""
+    if mcvideo_attrs is not None:
+        xml += _mcvideo.service_xml()
     # MCData 서비스 enabler (TS 24.481 §7.2.2 — ICSI 값은 TS 24.282 §6.2.1.1)
     if group.get('allow_sds', True):
         xml += """
@@ -1834,7 +1909,10 @@ def _build_ue_init_config_xml(base_url: str) -> str:
     #   Server-URI = participating function 의 PSI. 비우면 sip:{svc}_psi@도메인 (mcptt_psi 는 CSP 의
     #   affiliation notifier PSI 그대로, mcdata_psi 는 명목값).
     ext = ''
+    #   MCVideo-Service-Details = MCVideo participating function PSI(TS 24.484 §7.2.2.1 b, TS 24.281 §4.2 1)). 순서 = §7.2.2.1
+    #   목록(MCPTT → MCVideo → MCData). mcvideo_psi 는 CSP MCVideo 모듈(Roles.MCVIDEO)이 받는 PSI 다.
     for elem, key, psi in (('MCPTT-Service-Details', 'Mcptt', 'mcptt_psi'),
+                           ('MCVideo-Service-Details', 'McVideo', 'mcvideo_psi'),
                            ('MCData-Service-Details', 'McData', 'mcdata_psi')):
         if _xml_bool(_ue_init_cfg('ServiceDetails', key, 'Enable')) != 'true':
             continue
@@ -2268,9 +2346,10 @@ async def handle_token_req(args: HandlerArgs, kwargs: dict) -> HandlerResult:
         mcptt_id = auth_data.get("mcptt_id", login_id)
         nonce = auth_data.get("nonce", "")
         # 허가 scope = 요청 ∩ 카탈로그(별칭 확장). 제외분은 로그 + 응답 `scope` 로 실제 허가분을 알린다(RFC 6749 §5.1).
-        scope, dropped = grant_scope(auth_data.get("scope", ""))
+        scope, dropped = grant_scope(auth_data.get("scope", ""), mcptt_id=mcptt_id)
         if dropped:
-            logger.log_info(f"[IdMS] scope not granted (unknown): {' '.join(dropped)} login_id={login_id}")
+            logger.log_info(f"[IdMS] scope not granted (unknown or not authorised): {' '.join(dropped)} "
+                            f"login_id={login_id}")
 
         id_token, access_token, refresh_token = create_tokens(
             login_id, scope, client_id, nonce=nonce, mcptt_id=mcptt_id)
@@ -2506,7 +2585,13 @@ def parse_group_document_xml(xml_text: str) -> dict:
         'allow_conference_state': _xbool(ls, './/cp:actions/gi:on-network-allow-conference-state'),
         'org_code': _xtext(ls, 'gi:org-code'),
         'members': None,
+        # MCVideo 서비스 — None = 문서가 MCVideo 를 말하지 않음(기존 상태 유지), dict = MCVideo <service> 가 있어 켜고 속성 반영
+        #   (services.mcvideo.parse_group_attrs — 전환기 규칙은 그 함수 설명).
+        'mcvideo': None,
     }
+    _mv_on, _mv_attrs = _mcvideo.parse_group_attrs(ls, _NS)
+    if _mv_on:
+        out['mcvideo'] = _mv_attrs
     # 그룹 종류 = <on-network-invite-members> (TS 24.481 §7.2.2 a). 없으면 그대로 둔다.
     #   broadcast 는 그룹 종류가 아니다(일제 통화 = 호 속성, TS 24.379 §4.12).
     inv = _xbool(ls, 'gi:on-network-invite-members')
@@ -2609,6 +2694,8 @@ def gms_write_group(gid: str, doc: dict, owner_user_id: Optional[int], create: b
                             sets.append(f"{k}=%s"); args.append((1 if doc[k] else 0) if k in _GMS_BOOL_COLS else doc[k])
                     if sets:
                         cur.execute("UPDATE ptt_groups SET " + ", ".join(sets) + " WHERE id=%s", args + [gpk])
+                if doc.get('mcvideo') is not None:
+                    _mcvideo.write_group_attrs(cur, gpk, doc['mcvideo'])
                 if doc.get('members') is not None:
                     # 암시적 제휴(user profile 설정 — TS 24.484)는 그룹 문서(TS 24.481)에 없는 요소라 문서 교체가
                     #   지우지 않게 교체 전 값을 잇는다.
@@ -2693,8 +2780,8 @@ async def handle_group_management(args: HandlerArgs, kwargs: dict) -> HandlerRes
     token_payload = extract_token(args.headers.get('authorization'))
     if not token_payload:
         return unauthorized(args)
-    # GMS scope — 그룹 문서가 MCPTT/MCData 공용이라 둘 중 하나면 통과 (TS 33.180 B.4.2.2).
-    deny = require_scope(args, token_payload, 'GMS', SCOPE_PTT_GMS, SCOPE_DATA_GMS)
+    # GMS scope — 그룹 문서가 MCPTT/MCVideo/MCData 공용(한 그룹 = 서비스 집합)이라 셋 중 하나면 통과 (TS 33.180 B.4.2.2).
+    deny = require_scope(args, token_payload, 'GMS', SCOPE_PTT_GMS, SCOPE_VIDEO_GMS, SCOPE_DATA_GMS)
     if deny:
         return deny
 
@@ -2792,6 +2879,10 @@ async def handle_group_management(args: HandlerArgs, kwargs: dict) -> HandlerRes
                 if doc.get('members') is not None:
                     grp["members"] = [{"uri": m.get('mcptt_id') or f"tel:{m['user_id']}", "name": m['user_id'],
                                        "role": m['role'], "priority": m['priority'], "joined_at": ""} for m in doc['members']]
+                if doc.get('mcvideo') is not None:
+                    mv = dict(_mcvideo.GROUP_ATTR_DEFAULTS, **(grp.get('mcvideo') or {}))
+                    mv.update({k: v for k, v in doc['mcvideo'].items() if v is not None})
+                    grp["mcvideo"] = mv
                 GROUPS[uri_key] = grp
                 save_group_to_file(uri_key, grp)
             else:
@@ -2927,12 +3018,60 @@ async def handle_service_config(args: HandlerArgs, kwargs: dict) -> HandlerResul
     else:
         return HandlerResult(status=404)
 
+# CMS: MCVideo user profile (TS 24.484 §9.3) — CMSXCAPROOT/org.3gpp.mcvideo.user-profile/users/{MCVideo ID}/{문서 이름}
+#   문서 이름 = mcvideo-user-profile-<index>.xml(§9.3.1A). 1건만 두므로 이름은 가리지 않는다.
+async def handle_mcvideo_user_profile(args: HandlerArgs, kwargs: dict) -> HandlerResult:
+    if args.method != 'GET':
+        return HandlerResult(status=405)
+    token_payload = extract_token(args.headers.get('authorization'))
+    if not token_payload:
+        return unauthorized(args)
+    deny = require_scope(args, token_payload, 'CMS', SCOPE_VIDEO_CMS)
+    if deny:
+        return deny
+    path = args.full_path
+    start = path.find('/users/')
+    if start < 0:
+        return HandlerResult(status=400)
+    xui = path[start + 7:].split('/', 1)[0]
+    from urllib.parse import unquote as _unq
+    if not _uri_eq(token_payload.get('mcptt_id'), _unq(xui)):
+        logger.log_error(f"[CMS] Forbidden: token '{token_payload.get('mcptt_id')}' != mcvideo user-profile '{xui}'")
+        return HandlerResult(status=403, body="Forbidden: cannot access another user's profile")
+    # 문서 생성은 토큰의 정본 신원으로(MCPTT user profile 과 같은 이유 — 경로 XUI 는 표기 변형일 수 있다).
+    xml, etag = _mcvideo.get_user_profile_xml(token_payload.get('mcptt_id'))
+    if not xml:
+        return HandlerResult(status=404)     # MCVideo 이용 자격 없음(mcvideo_user_profile 행 없음)
+    inm = args.headers.get('if-none-match', '')
+    if inm and inm == etag:
+        return HandlerResult(status=304)
+    return HandlerResult(status=200, body=xml, media_type=_mcvideo.MIME_USER_PROFILE, headers={'Etag': etag})
+
+
+# CMS: MCVideo service configuration (TS 24.484 §9.4) — **전역 문서**(§9.4.2.9):
+#   CMSXCAPROOT/org.3gpp.mcvideo.service-config/global/mcvideo-service-config.xml. 모든 사용자 읽기 전용.
+async def handle_mcvideo_service_config(args: HandlerArgs, kwargs: dict) -> HandlerResult:
+    if args.method != 'GET':
+        return HandlerResult(status=405)
+    token_payload = extract_token(args.headers.get('authorization'))
+    if not token_payload:
+        return unauthorized(args)
+    deny = require_scope(args, token_payload, 'CMS', SCOPE_VIDEO_CMS)
+    if deny:
+        return deny
+    xml, etag = _mcvideo.get_service_config_xml()
+    inm = args.headers.get('if-none-match', '')
+    if inm and inm == etag:
+        return HandlerResult(status=304)
+    return HandlerResult(status=200, body=xml, media_type=_mcvideo.MIME_SERVICE_CONFIG, headers={'Etag': etag})
+
+
 # KMS: Init & KeyProv
 async def handle_kms_init(args: HandlerArgs, kwargs: dict) -> HandlerResult:
     token_payload = extract_token(args.headers.get('authorization'))
     if not token_payload:
         return unauthorized(args)
-    deny = require_scope(args, token_payload, 'KMS', SCOPE_PTT_KMS, SCOPE_DATA_KMS)
+    deny = require_scope(args, token_payload, 'KMS', SCOPE_PTT_KMS, SCOPE_VIDEO_KMS, SCOPE_DATA_KMS)
     if deny:
         return deny
         
@@ -2946,7 +3085,7 @@ async def handle_kms_keyprov(args: HandlerArgs, kwargs: dict) -> HandlerResult:
     token_payload = extract_token(args.headers.get('authorization'))
     if not token_payload:
         return unauthorized(args)
-    deny = require_scope(args, token_payload, 'KMS', SCOPE_PTT_KMS, SCOPE_DATA_KMS)
+    deny = require_scope(args, token_payload, 'KMS', SCOPE_PTT_KMS, SCOPE_VIDEO_KMS, SCOPE_DATA_KMS)
     if deny:
         return deny
         
@@ -3008,11 +3147,12 @@ async def handle_openid_config(args: HandlerArgs, kwargs: dict) -> HandlerResult
         "response_types_supported": ["code"],
         "code_challenge_methods_supported": ["S256"],
         # 신 이름(TS 33.180 B.4.2.2) + 전환기 별칭(구 단말). MCVideo 미지원.
-        "scopes_supported": [SCOPE_OPENID, SCOPE_PROVISIONING, *SCOPE_MC_SERVICES, SCOPE_LEGACY_MCPTT],
+        "scopes_supported": [SCOPE_OPENID, SCOPE_PROVISIONING, *SCOPE_MC_SERVICES, *SCOPE_VIDEO_SERVICES,
+                             SCOPE_LEGACY_MCPTT],
         "subject_types_supported": ["public"],
         "id_token_signing_alg_values_supported": ["HS256"],
         "claims_supported": ["sub", "iss", "iat", "exp", "aud", "nonce", "scope", "client_id",
-                             "mcptt_id", "mcdata_id"],
+                             "mcptt_id", "mcvideo_id", "mcdata_id"],
     }
     return HandlerResult(status=200, body=doc, media_type="application/json")
 
@@ -3698,6 +3838,8 @@ CSC_HANDLER_LIST = [
     ("/org.3gpp.mcptt.ue-init-config/users", handle_ue_init_config, {}),  # 로그인 전 — 익명
     ("/org.3gpp.mcptt.user-profile/users",   handle_user_profile,   {}),
     ("/org.3gpp.mcptt.service-config/users", handle_service_config,  {}),
+    ("/org.3gpp.mcvideo.user-profile/users",    handle_mcvideo_user_profile,   {}),   # MCVideo (TS 24.484 §9.3)
+    ("/org.3gpp.mcvideo.service-config/global", handle_mcvideo_service_config, {}),   # 전역 문서 (§9.4.2.9)
     # KMS (3GPP TS 33.180 / MIKEY-SAKKE)
     ("/keymanagement/identity/v1/init",    handle_kms_init,    {}),
     ("/keymanagement/identity/v1/keyprov", handle_kms_keyprov, {}),

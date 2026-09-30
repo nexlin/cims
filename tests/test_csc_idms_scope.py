@@ -39,9 +39,31 @@ def _args(method="GET", auth="Bearer x"):
 
 class GrantScopeTest(unittest.TestCase):
     def test_new_names_pass_unknown_dropped(self):
-        granted, dropped = m.grant_scope("openid 3gpp:mc:ptt_service 3gpp:mc:video_service cims:provisioning bogus")
+        granted, dropped = m.grant_scope("openid 3gpp:mc:ptt_service cims:provisioning bogus")
         self.assertEqual(granted.split(), ["openid", "3gpp:mc:ptt_service", "cims:provisioning"])
-        self.assertEqual(dropped, ["3gpp:mc:video_service", "bogus"])
+        self.assertEqual(dropped, ["bogus"])
+
+    def test_video_scopes_need_mcvideo_profile(self):
+        """MCVideo 4종은 카탈로그 안이지만 사용자 단위 인가 — mcvideo_user_profile 행이 있을 때만 준다(mcvideo.md §5.1)."""
+        import services.mcvideo as mv
+        keep = (dict(m.USERS), dict(mv.MCVIDEO_PROFILES))
+        try:
+            m.USERS["tel:+82510009001"] = {"msisdn": "+82510009001", "name": "a"}
+            m.USERS["tel:+82510009002"] = {"msisdn": "+82510009002", "name": "b"}
+            mv.MCVIDEO_PROFILES.clear()
+            mv.MCVIDEO_PROFILES["+82510009001"] = {"max_video_streams": 1, "max_calls_n6": 1}
+            req = "openid 3gpp:mc:ptt_service 3gpp:mc:video_service 3gpp:mc:video_config_management_service"
+            g_ok, d_ok = m.grant_scope(req, mcptt_id="tel:+82510009001")
+            self.assertEqual(g_ok.split(), req.split())
+            self.assertEqual(d_ok, [])
+            g_no, d_no = m.grant_scope(req, mcptt_id="sip:+82510009002@ptt.example")
+            self.assertEqual(g_no.split(), ["openid", "3gpp:mc:ptt_service"])
+            self.assertEqual(d_no, ["3gpp:mc:video_service", "3gpp:mc:video_config_management_service"])
+            # 신원 없이 부르면 카탈로그만 본다(발급 경로는 늘 신원을 넘긴다)
+            self.assertIn("3gpp:mc:video_service", m.grant_scope(req)[0].split())
+        finally:
+            m.USERS.clear(); m.USERS.update(keep[0])
+            mv.MCVIDEO_PROFILES.clear(); mv.MCVIDEO_PROFILES.update(keep[1])
 
     def test_legacy_alias_expands_to_all_mc_and_keeps_literal(self):
         granted, dropped = m.grant_scope(f"openid {LEGACY}")

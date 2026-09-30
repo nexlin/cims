@@ -1,0 +1,190 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema
+  xmlns:xs="http://www.w3.org/2001/XMLSchema"
+  targetNamespace="urn:3gpp:ns:mcvideoInfo:1.0"
+  xmlns:mcvideoinfo="urn:3gpp:ns:mcvideoInfo:1.0"
+  elementFormDefault="qualified"
+  attributeFormDefault="unqualified"
+  xmlns:xenc="http://www.w3.org/2001/04/xmlenc#"
+  xmlns:mvgktp="urn:3gpp:ns:mcvideoGKTP:1.0">
+
+  <xs:import namespace="http://www.w3.org/2001/04/xmlenc#"/>
+  <xs:import namespace="urn:3gpp:ns:mcvideoGKTP:1.0"/>
+
+  <!-- root XML element -->
+  <xs:element name="mcvideoinfo" type="mcvideoinfo:mcvideoinfo-Type" id="info"/>
+
+  <xs:complexType name="mcvideoinfo-Type">
+    <xs:sequence>
+      <xs:element name="mcvideo-Params" type="mcvideoinfo:mcvideo-ParamsType"/>
+      <xs:any namespace="##other" processContents="lax" minOccurs="0" maxOccurs="unbounded"/>
+      <xs:element name="anyExt" type="mcvideoinfo:anyExtType" minOccurs="0"/>
+    </xs:sequence>
+    <xs:anyAttribute namespace="##any" processContents="lax"/>
+  </xs:complexType>
+
+
+  <xs:complexType name="mcvideo-ParamsType">
+    <xs:sequence>
+      <xs:element name="mcvideo-access-token" type="mcvideoinfo:contentType" minOccurs="0"/>
+      <xs:element name="session-type" type="xs:string" minOccurs="0"/>
+      <xs:element name="mcvideo-request-uri" type="mcvideoinfo:contentType" minOccurs="0"/>
+      <xs:element name="mcvideo-calling-user-id" type="mcvideoinfo:contentType" minOccurs="0"/>
+      <xs:element name="mcvideo-called-party-id" type="mcvideoinfo:contentType" minOccurs="0"/>
+      <xs:element name="mcvideo-calling-group-id" type="mcvideoinfo:contentType" minOccurs="0"/>
+      <xs:element name="required" type="mcvideoinfo:contentType" minOccurs="0"/>
+      <xs:element name="emergency-ind" type="mcvideoinfo:contentType" minOccurs="0"/>
+      <xs:element name="alert-ind" type="mcvideoinfo:contentType" minOccurs="0"/>
+      <xs:element name="imminentperil-ind" type="mcvideoinfo:contentType" minOccurs="0"/>
+      <xs:element name="broadcast-ind" type="xs:boolean" minOccurs="0"/>
+      <xs:element name="mc-org" type="xs:string" minOccurs="0"/>
+      <xs:element name="associated-group-id" type="xs:string" minOccurs="0"/>
+      <xs:element name="originated-by" type="mcvideoinfo:contentType" minOccurs="0"/>
+      <xs:element name="MKFC-GKTPs" type="mvgktp:singleTypeGKTPsType" minOccurs="0"/>
+      <xs:element name="mcvideo-client-id" type="mcvideoinfo:contentType" minOccurs="0"/>
+      <xs:element name="alert-ind-rcvd" type="mcvideoinfo:contentType" minOccurs="0"/>
+      <xs:element name="multiple-devices-ind" type="mcvideoinfo:contentType" minOccurs="0"/>
+      <xs:element name="video-pull-url" type="mcvideoinfo:contentType" minOccurs="0"/>
+      <xs:element name="gw-mcvideo-usage" type="xs:boolean" minOccurs="0"/>
+      <xs:any namespace="##other" processContents="lax" minOccurs="0" maxOccurs="unbounded"/>
+      <xs:element name="anyExt" type="mcvideoinfo:anyExtType" minOccurs="0"/>
+    </xs:sequence>
+    <xs:anyAttribute namespace="##any" processContents="lax"/>
+  </xs:complexType>
+
+  <!--    anyExt elements for MCVideo-Params-->
+  <xs:element name="release-reason" type="mcvideoinfo:releaseReasonType"/>
+  <xs:simpleType name="releaseReasonType">
+    <xs:restriction base="xs:string">
+       <xs:enumeration value="private-call-expiry"/>
+       <xs:enumeration value="administrator-action"/>
+       <xs:enumeration value="not selected for call"/>
+       <xs:enumeration value="call-request-for-viewed-to-client"/>
+       <xs:enumeration value="call-request-initiated-by-viewed-to-client"/>
+       <xs:enumeration value="authentication of the MIKEY-SAKE I_MESSAGE failed"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:element name="request-type" type="mcvideoinfo:requestTypeType"/>
+  <xs:simpleType name="requestTypeType">
+    <xs:restriction base="xs:string">
+       <xs:enumeration value="group-selection-change-request"/>
+       <xs:enumeration value="fa-group-binding-req"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <!-- The request-type and response-type elements uses the enumeration as values, which cant be extended for new values to be added. Hence the new req-type and resp-type elements are defined and going forward all the new values are added to these element -->
+  <xs:element name="req-type" type="mcvideoinfo:contentType"/>
+  <xs:element name="resp-type" type="mcvideoinfo:contentType"/>
+
+  <xs:element name="response-type" type="mcvideoinfo:responseTypeType"/>
+  <xs:simpleType name="responseTypeType">
+    <xs:restriction base="xs:string">
+       <xs:enumeration value="group-selection-change-response"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:element name="selected-group-change-outcome" type="mcvideoinfo:selectedGroupChangeOutcomeType"/>
+  <xs:simpleType name="selectedGroupChangeOutcomeType">
+    <xs:restriction base="xs:string">
+       <xs:enumeration value="success"/>
+       <xs:enumeration value="fail"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:element name="affiliation-required" type="xs:boolean"/>
+
+  <xs:element name="ambient-viewing-type" type="mcvideoinfo:ambientViewingType"/>
+  <xs:simpleType name="ambientViewingType">
+    <xs:restriction base="xs:string">
+       <xs:enumeration value="remote-init"/>
+       <xs:enumeration value="local-init"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:element name="video-push-url" type="xs:anyURI"/>
+
+  <xs:element name="functional-alias-URI" type="mcvideoinfo:contentType"/>
+
+  <xs:element name="user-requested-priority" type="xs:nonNegativeInteger"/>
+
+
+  <xs:element name="emergency-alert-area-ind" type="xs:boolean"/>
+
+  <xs:element name="call-to-functional-alias-ind" type="xs:boolean"/>
+
+  <xs:element name="group-geo-area-ind" type="xs:boolean"/>
+  <xs:element name="binding-ind" type="xs:boolean"/>
+  <xs:element name="binding-fa-uri" type="xs:anyURI"/>
+  <xs:element name="unbinding-fa-uri" type="xs:anyURI"/>
+  <xs:element name="adhoc-grp-emg-alert-grp-ind" type="xs:boolean"/>
+  <xs:element name="adhoc-emergency-ind" type="xs:boolean"/>
+  <xs:element name="adhoc-additional-information" type="xs:string"/>
+  <xs:element name="adhoc-alert-ind" type="xs:boolean"/>
+  <xs:element name="adhoc-alert-ind-rcvd" type="xs:boolean"/>
+  <xs:element name="adhoc-alert-participant-list" type="mcvideoinfo:mcvideoIdListType"/>
+  <xs:element name="adhoc-alert-participant-not-ack-list" type="mcvideoinfo:mcvideoIdListType"/>
+
+  <xs:element name="partner-mcvideo-id" type="mcvideoinfo:contentType"/>
+  <xs:element name="migration-auth-result" type="mcvideoinfo:contentType"/>
+  <xs:element name="selected-user-profile-index" type="mcvideoinfo:selected-user-profile-indexType"/>
+  <xs:element name="primary-mcvideo-id" type="mcvideoinfo:contentType"/>
+
+<xs:element name="end-to-end-security" type="xs:boolean"/>
+<xs:element name="call-participants-criteria" type="xs:string"/>
+<xs:element name="preconfigured-group-id" type="xs:anyURI"/>
+
+<xs:simpleType name="protectionType">
+    <xs:restriction base="xs:string">
+       <xs:enumeration value="Normal"/>
+       <xs:enumeration value="Encrypted"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:complexType name="mcvideoIdListType">
+    <xs:choice minOccurs="0" maxOccurs="unbounded">
+      <xs:element name="entry" type="mcvideoinfo:EntryType"/>
+      <xs:element name="anyExt" type="mcvideoinfo:anyExtType" minOccurs="0"/>
+      <xs:any namespace="##other" processContents="lax" minOccurs="0" maxOccurs="unbounded"/>
+    </xs:choice>
+    <xs:anyAttribute namespace="##any" processContents="lax"/>
+  </xs:complexType>
+
+  <xs:complexType name="EntryType">
+    <xs:sequence>
+      <xs:element name="uri-entry" type="xs:anyURI"/>
+      <xs:element name="display-name" type="xs:string" minOccurs="0"/>
+      <xs:element name="anyExt" type="mcvideoinfo:anyExtType" minOccurs="0"/>
+      <xs:any namespace="##other" processContents="lax" minOccurs="0" maxOccurs="unbounded"/>
+    </xs:sequence>
+    <xs:anyAttribute namespace="##any" processContents="lax"/>
+  </xs:complexType>
+
+  <xs:complexType name="contentType">
+    <xs:choice>
+      <xs:element name="mcvideoURI" type="xs:anyURI"/>
+      <xs:element name="mcvideoString" type="xs:string"/>
+      <xs:element name="mcvideoBoolean" type="xs:boolean"/>
+      <xs:any namespace="##other" processContents="lax"/>
+      <xs:element name="anyExt" type="mcvideoinfo:anyExtType" minOccurs="0"/>
+    </xs:choice>
+    <xs:attribute name="type" type="mcvideoinfo:protectionType"/>
+    <xs:anyAttribute namespace="##any" processContents="lax"/>
+  </xs:complexType>
+
+  <xs:complexType name="selected-user-profile-indexType">
+    <xs:sequence>
+      <xs:element name="user-profile-index" type="xs:nonNegativeInteger"/>
+      <xs:any namespace="##any" processContents="lax" minOccurs="0" maxOccurs="unbounded"/>
+    </xs:sequence>
+    <xs:anyAttribute namespace="##any" processContents="lax"/>
+  </xs:complexType>
+
+  <xs:complexType name="anyExtType">
+    <xs:sequence>
+      <xs:any namespace="##any" processContents="lax" minOccurs="0" maxOccurs="unbounded"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:element name="location-of-functional-alias-URI" type="mcvideoinfo:contentType"/>
+
+</xs:schema>

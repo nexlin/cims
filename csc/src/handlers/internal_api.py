@@ -11,6 +11,13 @@ CSP 는 이 값을 xcap-diff NOTIFY 의 `xcap-root` 와 MCData FD 다운로드 U
     Authorization: Bearer <InternalApi.Token>   [If-None-Match: <ETag>]
   200 application/vnd.3gpp.mcptt-service-config+xml (ETag) · 304 · 401 · 503
 
+  GET /internal/mcvideo/service-config
+    Authorization: Bearer <InternalApi.Token>   [If-None-Match: <ETag>]
+  200 application/vnd.3gpp.mcvideo-service-config+xml (ETag) · 304 · 401 · 503
+
+MCVideo 서버(CSP MCVideo 모듈)가 MCVideo service configuration 문서(TS 24.484 §9.4)를 받는 같은 경로 — 송출·수신 제어
+타이머·카운터(tc-timers-counters-R14)를 CMP 로 전달한다. 변경 통지는 SERVICE_CONFIG_CHANGED(uri "mcvideo")다.
+
 MCPTT 서버(CSP)가 service configuration 문서(TS 24.484 §8.4)를 받는 경로 — Annex A.2.3(MCPTT 서버가 CMS 에서
 service-config 을 받고 변경을 통지받는다)의 서버 간 취득. 단말이 받는 문서와 같은 XML 이다. 변경 통지는
 SERVICE_CONFIG_CHANGED(UDP)로 가고 CSP 가 다시 받는다. CSP 는 floor 타이머·카운터를 CMP 로 전달한다.
@@ -29,6 +36,7 @@ from services.mcptt import logger as _logger
 
 ENDPOINT_PATH = "/internal/mcptt/endpoint"
 SERVICE_CONFIG_PATH = "/internal/mcptt/service-config"
+MCVIDEO_SERVICE_CONFIG_PATH = "/internal/mcvideo/service-config"
 
 
 def _bearer(headers: dict) -> str:
@@ -84,7 +92,23 @@ async def handle_mcptt_service_config(handler_args: HandlerArgs, kwargs: dict) -
                          headers={"Etag": etag})
 
 
+async def handle_mcvideo_service_config(handler_args: HandlerArgs, kwargs: dict) -> HandlerResult:
+    deny = _authorize(handler_args)
+    if deny:
+        return deny
+    from services import mcvideo as _mcvideo
+    xml, etag = _mcvideo.get_service_config_xml()
+    inm = ""
+    for k, v in (handler_args.headers or {}).items():
+        if str(k).lower() == "if-none-match":
+            inm = str(v or "")
+    if inm and inm == etag:
+        return HandlerResult(status=304)
+    return HandlerResult(status=200, body=xml, media_type=_mcvideo.MIME_SERVICE_CONFIG, headers={"Etag": etag})
+
+
 CSC_INTERNAL_HANDLER_LIST = [
     (ENDPOINT_PATH, handle_mcptt_endpoint, {}),
     (SERVICE_CONFIG_PATH, handle_mcptt_service_config, {}),
+    (MCVIDEO_SERVICE_CONFIG_PATH, handle_mcvideo_service_config, {}),
 ]

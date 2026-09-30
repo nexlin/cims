@@ -27,7 +27,7 @@ CSC는 CIMS 시스템의 관리/MCPTT 서비스 서버로, REST API 기반 가�
 
 | 서버 | 포트 | 용도 |
 |------|------|------|
-| Admin API Server | 4421 (HTTPS) | 관리 콘솔 REST API + CSP 내부 API(`/internal/aka/av` AV 발급, `/internal/mcptt/endpoint` 단말용 XCAP root, `/internal/mcptt/service-config` MCPTT 서버용 service-config 문서(TS 24.484 Annex A.2.3) — `/api/v1` 밖, 게이트웨이 미프록시) |
+| Admin API Server | 4421 (HTTPS) | 관리 콘솔 REST API + CSP 내부 API(`/internal/aka/av` AV 발급, `/internal/mcptt/endpoint` 단말용 XCAP root, `/internal/mcptt/service-config` MCPTT 서버용 service-config 문서(TS 24.484 Annex A.2.3), `/internal/mcvideo/service-config` MCVideo 서버용 service-config 문서(§9.4) — `/api/v1` 밖, 게이트웨이 미프록시) |
 | MCPTT Service Server | 4430 (HTTPS) | 단말용 IdMS/GMS/CMS/KMS |
 
 **단말이 도달하는 공개 주소의 정본** = `McpttServer.PublicUrl`. 단말에 주소를 알려주는 모든
@@ -567,6 +567,8 @@ XCAP 기반 사용자 프로파일/서비스 설정 관리.
 |--------|------|------|
 | GET | `/org.3gpp.mcptt.user-profile/users/{mcptt_id}/...` | 사용자 프로파일 |
 | GET | `/org.3gpp.mcptt.service-config/users/{mcptt_id}/...` | 서비스 설정 |
+| GET | `/org.3gpp.mcvideo.user-profile/users/{MCVideo ID}/mcvideo-user-profile-<n>.xml` | MCVideo 사용자 프로파일(TS 24.484 §9.3 — 자격 행 없으면 404, scope `video_config_management_service`) |
+| GET | `/org.3gpp.mcvideo.service-config/global/mcvideo-service-config.xml` | MCVideo 서비스 설정(전역 문서 §9.4.2.9 — 설정 `McVideoServiceConfig.*`) |
 
 사용자 프로파일의 인가 `<cp:ruleset>` 은 `ptt_user_profile`(in-memory `PTT_PROFILES`, admin PUT 이 캐시 갱신) 에서 만든다 —
 긴급 계열·`allow_ambient_listening` 은 규격 요소(§8.3.2.1 11) 목록 순 — 긴급 그룹콜·긴급 사설콜 개시 → 해제 인가 `allow_cancel_group_emergency`
@@ -580,7 +582,7 @@ XCAP 기반 사용자 프로파일/서비스 설정 관리.
 `allow_cancel_emergency_alert` = `allow_emergency_alert`). 서비스 설정 문서의 on-network 값은 CSC 설정 `ServiceConfig.*` 와
 DB `mcptt_service_config` 에서 만든다 — `EmergencyCall.GroupTimeLimit`(ms, 기본 0) 이 0 보다 크면 첫 자식
 `<emergency-call><group-time-limit>`(CSP TNG2, TS 24.379 §6.3.3.1.16)을 싣고, 0 이면 요소째 뺀다.
-문서 구성 = [mcptt_api.md §3](../../api/mcptt_api.md).
+문서 구성 = [mcptt_api.md §3](../../api/mcptt_api.md). MCVideo 문서(`services/mcvideo.py`)의 원천·규칙은 [mcvideo.md](../features/mcvideo.md) §5.1.
 
 ### 4.4 KMS (Key Management Service)
 
@@ -661,6 +663,7 @@ DynamicRouteProc.set_request_hooks(pre=_pre_hook, post=_post_hook)
 | `/api/v1/*` | `console` |
 | `/idms/*` | `mcptt` |
 | `/org.openmobilealliance*`, `/org.3gpp.mcptt*` | `mcptt` |
+| `/org.3gpp.mcvideo*` | `mcvideo` |
 | `/keymanagement/*` | `mcptt` |
 
 개별 핸들러는 별도의 `log_msg` 호출 없이도 자동으로 Flow/Msg 로그에 기록된다.

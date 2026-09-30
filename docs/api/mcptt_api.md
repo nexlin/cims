@@ -45,6 +45,9 @@ XCAP(RFC 4825) 리소스 기반 — TS 24.481 Ut. 인증 = `Authorization: Beare
 - 처리 = DB(`ptt_groups`·`ptt_group_members`, 소유자 = 토큰 가입자 `users.id`) → in-memory GROUPS 동기화 →
   CSP `GROUP_CHANGED` 통지(CSP 가 xcap-diff NOTIFY 로 단말에 전파). 관리 API(4421, 콘솔 토큰)의 그룹 CRUD 와
   같은 정본·같은 동기화를 쓴다.
+- **MCVideo** — MCVideo 그룹이면 같은 문서에 MCVideo `<service>`(enabler = MCVideo ICSI)·`<mcvideo-*>` 속성·entry `<mcvideo-mcvideo-id>` 가
+  실린다(TS 24.481 §7.2.2, [mcvideo.md](../design/features/mcvideo.md) §5.1). PUT 에 MCVideo `<service>` 가 있으면 MCVideo 를 켜고 속성을 반영하며
+  (`mcvideo-protect-*` true·범위 밖은 400), 없으면 MCVideo 상태를 그대로 둔다(전환기 규칙).
 - PUT 본문 = **GET 이 돌려주는 문서와 같은 포맷**(아래). 없는 요소는 갱신 시 기존값 유지, 생성 시 기본값
   (prearranged, priority 5, SDS 허용, FD 불허, 긴급통화 불허, 긴급경보 허용, hang-timer 30초, maximum-duration 3600초). `<list>` 가 있으면
   멤버 전체 교체(없으면 유지) — entry uri 는 PTT 가입 번호(`tel:+E.164`, `sip:` 형 가능), 미가입 번호는 400.
@@ -124,6 +127,8 @@ MCPTT 설정 문서 (TS 24.484). ue-init-config 만 **익명 GET**(로그인 전
 | GET  | `/org.3gpp.mcptt.ue-init-config/users/{instance}/{doc}` | 없음 (익명) |
 | GET  | `/org.3gpp.mcptt.user-profile/users/{user}/user-profile` | Bearer + 본인 + scope `ptt_config_management_service`. TS 24.484 §8.3.2 문서 — `<OnNetwork><MCPTTGroupInfo>` = 소속 그룹 목록(규격 단말의 그룹 소스), `<PrivateCallList>` = 동료 연락처, 긴급 대상·`cp:ruleset` 인가. ETag 내용 파생 |
 | GET  | `/org.3gpp.mcptt.service-config/users/{user}/service-config` | Bearer + 본인 |
+| GET  | `/org.3gpp.mcvideo.user-profile/users/{user}/mcvideo-user-profile-<n>.xml` | Bearer + 본인 + scope `video_config_management_service`. TS 24.484 §9.3 MCVideo user profile — MCVideo 이용 자격(`mcvideo_user_profile` 행)이 없으면 404. `<MCVideoGroupInfo>` = 멤버인 MCVideo 그룹, `<MaxSimultaneousVideoStreams>` = 수신 상한([mcvideo.md](../design/features/mcvideo.md) §5.1) |
+| GET  | `/org.3gpp.mcvideo.service-config/global/mcvideo-service-config.xml` | Bearer + scope `video_config_management_service`. **전역 문서**(TS 24.484 §9.4.2.9) — `<signalling-protection>` false · Resource-Priority · `<tc-timers-counters-R14>`(CSC 설정 `McVideoServiceConfig.*`) |
 
 user-profile 의 인가 `<cp:ruleset><cp:rule id="mcptt-user-authorisation"><cp:actions>` 값은 `ptt_user_profile`(admin API
 `…/users/{pid}/ptt/{msisdn}/profile`, [admin_api.md §6.8](admin_api.md))이다 — 규격 요소를 TS 24.484 §8.3.2.1 11) 목록 순으로 싣고
@@ -160,12 +165,13 @@ ue-init-config 의 주소류(IdMS/CMS/GMS/KMS/XCAP 루트)의 base 는 CSC 설�
 | Method | Path | 인증 | 응답 |
 |---|---|---|---|
 | GET | `/internal/mcptt/endpoint` (admin 4421) | `Bearer {InternalApi.Token}` | `{"xcap_root","mcptt_port","public_url_configured"}` |
+| GET | `/internal/mcvideo/service-config` (admin 4421) | `Bearer {InternalApi.Token}` · `If-None-Match` | 단말이 받는 MCVideo service-config 문서와 같은 XML — MCVideo 서버(CSP)가 전송 제어 타이머를 CMP 로 전달한다(변경 통지 = `SERVICE_CONFIG_CHANGED` uri `mcvideo`) |
 
 `/api/v1` 밖이라 OAM 게이트웨이가 프록시하지 않는다(CSP 직접 호출 전용, `/internal/aka/av` 와 동일).
 
 나머지 주소류(domain·PLMN·GMS-URI)는 토폴로지에서 유도되고,
 규격 파라미터값(Timers·con-ref·http-proxy·보호 플래그·group-creation-XUI·name)과 확장 요소
-(`MCPTT/MCData-Service-Details`) 는 csc 설정 `UeInitConfig.*` 로 사용자지정한다 — 값이 바뀌면 ETag 도
+(`MCPTT/MCVideo/MCData-Service-Details` — MCVideo 는 기본 끔) 는 csc 설정 `UeInitConfig.*` 로 사용자지정한다 — 값이 바뀌면 ETag 도
 바뀐다([mcptt_standard_conformance.md §R4-1](../design/features/mcptt_standard_conformance.md)).
 
 ---
