@@ -435,6 +435,14 @@
           "default": true,
           "restart": true,
           "help": "MCData 그룹 SDS/FD 메시징 (TS 24.282). 끄면 그룹 MESSAGE/MSRP INVITE 를 처리하지 않는다."
+        },
+        {
+          "key": "Setup.Roles.MCVIDEO",
+          "label": "MCVIDEO-AS (MCVideo 그룹 영상)",
+          "type": "bool",
+          "default": false,
+          "restart": true,
+          "help": "MCVideo 참여·제어 기능 (TS 24.281·24.581). 공유 DB 에 MCVideo 표(sql/migrate_mcvideo.sql)가 있고 CMP 가 resource.mcvideo 를 광고하는 사이트만 켠다. 꺼져 있으면 MCVideo 요청(ICSI·mcvideo-info)은 404 — MCPTT 로 읽지 않는다."
         }
       ],
       "scope": "service"

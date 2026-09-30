@@ -261,6 +261,7 @@ void PMcvControl::addParticipant(const std::string& id, const McvParticipantDecl
         }
         if (!others) {
             p.implicitPending = true;
+            p.implicitUntil = nowMs + kImplicitWaitMs;
             p.implicitAudio = a;
             p.implicitVideo = v;
             _log("implicit request pending (first invited participant) member=" + id);
@@ -876,9 +877,25 @@ void PMcvControl::tick(int64_t nowMs) {
         _endTransmission(m, nowMs, "revoke timeout");
     }
 
-    // 참가자마다 — 'not permitted but sends media' 의 T3 · 수신 허가 T6
+    // 참가자마다 — 늦은 암묵 허가 한도 · 'not permitted but sends media' 의 T3 · 수신 허가 T6
     for (auto& kv : _parts) {
         Part& p = kv.second;
+        if (p.implicitPending && p.implicitUntil && nowMs >= p.implicitUntil) {
+            // 첫 초대 참가자가 오지 않았다 — 참여자는 이미 요청을 접었다(§6.2.4.4.4). 예약을 풀고 지금 상태(Idle)를 알린다.
+            p.implicitPending = false;
+            p.implicitUntil = 0;
+            FreeSsrc(p.implicitAudio);
+            FreeSsrc(p.implicitVideo);
+            p.implicitAudio = p.implicitVideo = 0;
+            p.state = _tx.empty() ? MCV_U_IDLE : MCV_U_TAKEN;
+            _log("implicit request expired (no invited participant in time) member=" + p.id);
+            if (_tx.empty()) {
+                ++_msgSeq;
+                _sendIdle(p.id);
+            } else {
+                _notifyCurrent(p, nowMs);
+            }
+        }
         if (p.state == MCV_U_SENDS_MEDIA && p.t3At && nowMs >= p.t3At) {
             if (p.t3Count < kT3Retries) {
                 ++p.t3Count;

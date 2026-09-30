@@ -7,10 +7,10 @@
 > **설계 정본.** 구현된 것 — 계약(전송 제어 정의 테이블 [mcvideo_tc_defs.yaml](mcvideo_tc_defs.yaml)(생성 헤더 양 끝, §5.3·§5.4) · DB 표(§5.1) ·
 > 설정 문서 골든 `tests/fixtures/mcvideo/` · SDP 프로파일(§1.4) · CSP↔CMP 제어 API([cmp_media_api.md](../../api/cmp_media_api.md) §7.9) · 단말 SDK 공개
 > 표면([ue_sdk.md](ue_sdk.md) §4.6)), 양 끝 전송 제어 코덱(CMP `PTransmissionCodec` · SDK `mcvideo/tc_codec`, 교차 시험), 단말 전송 제어 참여자 상태 머신
-> (SDK `mcvideo/tc_participant`), V0 전부, CSC 설정 평면(§5.1 — 관리 API·콘솔 제외)과 그 문서들의 SDK 해석(§5.4), CSP 호 제어 부품(§5.2), CMP 그룹 종류·
-> 멤버 포트·제어 명령·송출·수신 제어 상태 머신·미디어 분배·보호(SRTP·전송 제어 SRTCP)(§5.3·§5.3.1), 단말 SDK 등록 태그·affiliation·그룹 호(개시·재합류·
-> 멤버 초대 수락)·전송 제어 결선·송출 게이트(§5.4 — 루프백 시험, 실서버 미연동). CSP 모듈·그룹 호 처리, 영상 RTCP 전달·녹취, 단말 영상 송출·송출별 렌더
-> (C6)·바인딩(C7)은 미구현.
+> (SDK `mcvideo/tc_participant`), V0 전부, CSC 설정 평면(§5.1 — 관리 API·콘솔 제외)과 그 문서들의 SDK 해석(§5.4), CSP 호 제어 부품·모듈·서비스 판별·
+> 등록 능력·서비스별 affiliation(§5.2), CMP 그룹 종류·멤버 포트·제어 명령·송출·수신 제어 상태 머신·미디어 분배·보호(SRTP·전송 제어 SRTCP)(§5.3·§5.3.1),
+> 단말 SDK 등록 태그·affiliation·그룹 호(개시·재합류·멤버 초대 수락)·전송 제어 결선·송출 게이트(§5.4 — 루프백 시험, 실서버 미연동). CSP 그룹 호 처리,
+> 영상 RTCP 전달·녹취, 단말 영상 송출·송출별 렌더(C6)·바인딩(C7)은 미구현.
 >
 > 규격 판본: TS 24.281 V18.14.0 · TS 24.581 V18.8.0 · TS 23.281 V18.12.0 · TS 24.481 V19.3.0 · TS 24.484 V20.0.0 · TS 23.280 V20.4.0 ·
 > TS 33.180 V20.0.0. 관계 문서: 로드맵 표 [mcptt_standard_conformance.md](mcptt_standard_conformance.md) R3·R6, 현행 PTT 영상 협상
@@ -253,10 +253,18 @@ service configuration 에서 `<confidentiality-protection>`·`<integrity-protect
 psip 합성 SDP 프로파일(`CSipCallRtp::m_eMcMediaProfile = E_MC_MEDIA_MCVIDEO` — `i=` 성분 표시·video rtcp-fb 광고/되돌림·
 `m=application … udp MCVideo` + `a=fmtp:MCVideo`, re-INVITE 에도 유지 — `S1-UNIT-PSIP` I·J). 아래 모듈·호 처리는 진행 중.
 
-- **모듈** — `CMcVideoAsModule`(`IModule`, `Setup.Roles.MCVIDEO`) — 참여·제어 기능 겸임(PTT-AS·MCDATA-AS 와 같은 구성). `ModuleDispatcher::EventIncomingCall`
-  에서 그룹 호 분기 앞에 **ICSI mcvideo(Accept-Contact / P-Preferred-Service) 또는 mcvideo-info 본문**으로 가른다 — 현행은 들어오는 INVITE 의 ICSI 를 보지 않는다.
-- **등록** — Contact 의 `+g.3gpp.mcvideo` 를 바인딩 능력으로 기록(`UserMap` 능력 검사 확장), mcvideo-info 토큰·poc-settings PUBLISH 로 MCVideo 서비스 인가(§1.2).
-- **affiliation** — 서비스별 affiliation 기록(표 `mcvideo_affiliations`, §5.1), `mcvideoPresInfo` NOTIFY, 암묵적 affiliation(chat 합류).
+- **모듈** (구현) — `CMcVideoAsModule`(`csp/McVideoAsModule.{h,cpp}`, `IModule`, `Setup.Roles.MCVIDEO` 기본 off) — 참여·제어 기능 겸임(PTT-AS·
+  MCDATA-AS 와 같은 구성). **서비스 판별** `IsMcVideoRequest` = P-Asserted-Service·P-Preferred-Service·Accept-Contact 의 MCVideo ICSI · Accept 의
+  mcvideo 문서 형식 · mcvideo-info 본문 · pidf `mcvideoPresInfo` 네임스페이스(`McVideoRequestIndicated`, 표시가 없으면 MCPTT). `ModuleDispatcher::
+  EventIncomingCall` 이 MCPTT 판정(mcptt-info·PSI·그룹 R-URI)보다 **먼저** 부른다 — 역할 off 면 404(PSI 미할당, TS 24.281 §6.3.7.1), 그룹 호(A10) 전까지는 480.
+- **등록** (구현 — §7.2.1AA 모양) — Contact 의 `+g.3gpp.mcvideo` 와 icsi-ref MCVideo ICSI **둘 다**를 바인딩 능력 `CUserInfo::m_bMcVideo` 로 기록,
+  재-REGISTER 마다 다시 판정(태그를 빼면 MCVideo 로그오프, §7.2.1 NOTE 1). 서비스 인가 본문(mcvideo-info 토큰·client-id, §7.2.1)과 `Event:
+  poc-settings` PUBLISH(§7.2.2)는 읽지 않는다 — CSP 토큰 검증([mcx_identity_scope.md](mcx_identity_scope.md) §10)과 한 짝으로 MCPTT·MCVideo 를 함께 넣는다.
+- **affiliation** (구현 — §8.2.2.2.3~§8.2.2.2.5) — 규격형 PUBLISH·SUBSCRIBE(`Event: presence`)를 서비스로 먼저 갈라 MCVideo 는 표 `mcvideo_affiliations`
+  (§5.1)에 쓴다: served ID = mcvideo-info `<mcvideo-request-uri>`(요청자와 다르면 403 — 남의 제휴를 바꾸는 권한은 두지 않는다), Expires 없음·0 이 아닌데
+  2^32-1 미만 423(Min-Expires 4294967295), 이용 자격(`mcvideo_user_profile` 행) 없음 403, 대상 = MCVideo 서비스를 가진 그룹, 만료 없음(등록 해제가 행을 지운다),
+  200 OK `Expires: 4294967295`, `mcvideo_affiliation` 구독 NOTIFY(`mcvideoPresInfo`), 감사 이벤트 E-AUD-009 `service`. 남은 것 = N2(`<MaxAffiliationsN2>` —
+  `mcvideo_user_profile` 에 열이 없어 한도를 걸지 않는다)·user profile `<ImplicitAffiliations>`(§8.2.2.2.15)·chat 합류 암묵적 affiliation(§8.2.2.3.7 — A10).
 - **그룹 호** — `McVideoCallService`: chat·prearranged 개시·합류·재합류·퇴장·해제(T1·최대 시간), 그룹 종류 검사(§6.3.5.2), 멤버 fan-out(prearranged), mcvideo-info
   부호화·해석(규격 contentType 자식 형식 — mcptt-info 와 같은 코덱 틀), SDP 합성(audio·video·`udp MCVideo` — psip `CSipCallRtp` 에 제어 채널 프로토콜 이름을
   서비스별로), 응답 Warning 코드(117·118 등 — TS 24.281 §4.4). 그룹 세션 캐시·CMP 명령·구독은 `GroupCallService` 의 부품을 공유 헬퍼로 뽑아 쓴다.
@@ -298,7 +306,7 @@ Idle / Reception accepted, C7 = 송출별 C11 의 합) · 참가자 수신(U —
 | 입력 | 처리 (근거 절) |
 |---|---|
 | 참가자 추가(JOIN ② — 주소 등록) | 진행 중 송출이 없으면 Transmission Idle 1회(§6.3.5.2.2 2a·4b, Message Sequence Number +1), 있으면 'not permitted and Transmit Taken' + 송출마다 Media Transmission Notification(§6.3.7.2.2 2b) |
-| JOIN `implicit_request`(새 prearranged 세션) | SSRC 쌍을 JOIN 때 예약(응답 `audio_ssrc`·`video_ssrc` — §14.3.7·§14.3.8 «irrespective of mc_granted»). 주소 등록된 다른 참가자가 있으면 곧바로 허가(응답 `granted` 1 — CSP 가 offer 의 `mc_granted` 가 있었으면 answer 에 싣는다), 없으면 첫 초대 참가자가 등록될 때 허가하고 Transmission Granted 를 보낸다(§6.3.2.2 «granted … when the first invited MCVideo client accepts» — 미디어 버퍼링 없음). 기다린 요청이라 T4/C4 로 첫 미디어까지 재송신하고, 기다리는 동안 온 명시 요청(단말 T100 재요청)은 같은 요청으로 본다 |
+| JOIN `implicit_request`(새 prearranged 세션) | SSRC 쌍을 JOIN 때 예약(응답 `audio_ssrc`·`video_ssrc` — §14.3.7·§14.3.8 «irrespective of mc_granted»). 주소 등록된 다른 참가자가 있으면 곧바로 허가(응답 `granted` 1 — CSP 가 offer 의 `mc_granted` 가 있었으면 answer 에 싣는다), 없으면 첫 초대 참가자가 등록될 때 허가하고 Transmission Granted 를 보낸다(§6.3.2.2 «granted … when the first invited MCVideo client accepts» — 미디어 버퍼링 없음). 기다린 요청이라 T4/C4 로 첫 미디어까지 재송신하고, 기다리는 동안 온 명시 요청(단말 T100 재요청)은 같은 요청으로 본다. 기다림은 참여자 T100×C100(기본 3 s — 참여자는 그 뒤 'U: has no permission' 이라 늦은 Granted 를 버린다, §6.2.4.4.4)까지 — 넘으면 예약을 풀고 Transmission Idle. CSP 는 암묵 요청 개시의 200 OK 를 첫 초대 멤버의 200 OK 뒤에 보내므로(A10) 보통은 JOIN 때 곧바로 허가된다 |
 | Transmission Request (MCV0 0) | 수신 전용(`recv_only` — 그룹 문서 `<on-network-recvonly>`)이면 Rejected #5. G: Idle 에서 참가자 1명이면 #3(§6.3.4.3.3). Cx < 상한이면 허가(§6.3.4.4.7A·§6.3.4.4.2): SSRC 쌍 할당(선호 = offer `a=ssrc`) → 요청자 Granted(Transmission Priority·Audio/Video SSRC) · 다른 참가자 Media Transmission Notification(Transmitting User ID·SSRC 쌍·Message Sequence Number·Permission 1·Reception Mode 0/1). 상한이면 선점 판정 — 선점이면 가장 약한 송출에 Revoked #4 + 요청을 큐 맨 앞(§6.3.4.4.7), 아니면 queueing 협상 시 큐(Queue Position Info), 미협상이면 Rejected #1(§6.3.5.4.4). 이미 허가된 참가자의 재요청 = Granted 재송신(§6.3.4.4.8) |
 | 유효 우선순위(§4.1.1.4 local policy) | MCPTT floor 와 같은 서열(`PMcpttGroup::_preempts`) — ① tier(긴급 > 임박 > 일반, **CSP 지시로만** 바뀐다 — 요청의 Transmission Indicator 는 호 단위 표식이라 판정에 쓰지 않는다) ② chair ③ 수치 우선순위 = `members` prio, 요청의 Transmission Priority 는 `mc_priority` 를 협상했을 때만 min(요청, 협상 상한)(§6.3.5.4.4 1a). 선점 = 요청 서열 > 가장 약한 송출 서열 |
 | Transmission End Request (MCV2 0) | ack 비트면 Ack. permitted/pending revoke → 송출 끝: Transmission End Response · 분배 중지 · SSRC 반환 · 다른 참가자 Transmission End Notify(User ID + SSRC 쌍) · Cx−1 → 0 이면 G: Idle(큐 맨 앞이 있으면 그것을 허가, 없으면 Transmission Idle 전원 · T2/C2 · T1)(§6.3.4.4.6·§6.3.4.5.4). not permitted(큐 대기) → 큐에서 빼고 Idle 또는 Notification(§6.3.5.3.7·§6.3.5.4.5) |

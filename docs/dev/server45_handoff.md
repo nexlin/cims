@@ -452,9 +452,6 @@ Audio/Video SSRC · 성립 전 메시지 보관)은 B4·B5 가 그대로 받는�
   `PFloorCrypto`)와 교차 — 멤버 CSK 로 푼 Idle·Granted, 그룹 키 Notification·Receive Media Response, X 상향 키 영상 → Y 하향 키(SSRC·PT 찍힘), 평문·남의 키
   요청·틀린 키 영상 버림, 같은 키 재-JOIN 뒤 Granted.
 
-**다음 (.48)** — A7~A10(CSP MCVideo 모듈·등록·affiliation·그룹 호). 공유 DB 마이그레이션(`migrate_mcvideo.sql`, 표 추가만)은 CSP 실측 때 적용. B6(영상 RTCP
-PLI·FIR 전달)·B8(녹취)은 CSP 결선 뒤.
-
 **C2 — 단말 설정 문서 해석 (.45 → .48)** — K2 골든을 CSC 생성 시험과 **같은 파일**로 읽는다(`cimsue_test` `McvConfig` 7 — README 의 값 전부, 전체 130/130).
 
 | 문서 | SDK |
@@ -514,3 +511,27 @@ K3 골든을 SDK 가 **만든 메시지**(01·02·03·05·08 모양)와 대조�
 7. **multipart 파트 순서** — pjsua 는 mcvideo-info 파트를 SDP 앞에 둔다(골든은 SDP 먼저). 순서에 기대지 않고 Content-Type 으로 찾으면 된다(`McVideoBodyPart` 는 그렇다).
 
 **다음 (.45)** — C8 `cimsue-cli video-call`(A9 알림 전에는 affiliation 명령 없이) · Linux 엔진 영상 제안(M2) · C6 송출 영상·송출별 렌더 · C7 바인딩.
+
+**.48 A7~A9 — CSP MCVideo 모듈·등록·서비스별 affiliation (.48 → .45)** — [mcvideo.md](../design/features/mcvideo.md) §5.2 · [csp.md](../design/modules/csp.md) §2.3.
+
+| 항목 | CSP |
+|---|---|
+| 모듈·역할 | `CMcVideoAsModule`(`csp/McVideoAsModule.{h,cpp}`), `Setup.Roles.MCVIDEO` **기본 off**. 서비스 판별 `IsMcVideoRequest` = P-Asserted/P-Preferred-Service·Accept-Contact 의 MCVideo ICSI · Accept 의 mcvideo 형식 · mcvideo-info 본문 · pidf `mcvideoPresInfo`. INVITE 는 MCPTT 판정보다 먼저 이 모듈 — 역할 off 404, 그룹 호(A10) 전까지 480 |
+| 등록 | Contact 의 `+g.3gpp.mcvideo` + icsi-ref MCVideo ICSI 둘 다 → 바인딩 `m_bMcVideo`(재-REGISTER 마다 재판정 — 태그를 빼면 로그오프). 본문(토큰·client-id)은 읽지 않는다(§7.2.1AA 로 충분) |
+| affiliation | 규격형 PUBLISH/SUBSCRIBE(`Event: presence`)를 서비스로 먼저 가른다 — MCVideo: multipart 의 pidf 파트 · served ID = `<mcvideo-request-uri>`(≠ 요청자 403) · Expires 없음/0 이 아닌데 2^32-1 미만 **423 + Min-Expires 4294967295** · 이용 자격(`mcvideo_user_profile` 행) 없음 403 · MCVideo 그룹만 · `mcvideo_affiliations` 에 만료 없이(등록 해제가 지운다) · 200 OK `Expires: 4294967295` · `mcvideo_affiliation` 구독자에게 `mcvideoPresInfo` NOTIFY(p-id 되돌림) |
+| 결함 수정 | pidf 해석기 무한 루프(접두사 11자 이상 — `mcvideoPI10:`) — 시작태그의 `>` 뒤로 넘어가며 찾는다. 회귀 = csp_pidf_affiliation_test(긴 접두사)·csp_mcvideo_info_test(골든 02) |
+| 배포 | 아직 없다 — .48 배포·공유 DB `migrate_mcvideo.sql`·역할 켜기는 사용자 결정 뒤. 그 전에는 앞 경고대로 MCVideo 제휴 PUBLISH 를 실서버에 보내지 않는다 |
+
+**.45 C3·C4 «.48 에 넘기는 것» 답**
+
+1. **골든 오디오 fmtp** — 채택. `build_goldens.py` 음성 fmtp = `octet-align=1`(03~08 재생성, Content-Length 바뀜). SDK 의 골든 바이트 대조(McvSip)를 새 파일로 돌려 달라.
+2. **골든 08 To** — 채택. `To: <sip:g103@csp…;gr=…>`(port·transport 제거, `gr` 유지 — RFC 3261 §19.1.1 표 1). A10 은 재합류를 R-URI 의 `gr` 로 가른다.
+3. **영상 없는 빌드** — A10·A11 answer 는 `m=video 0` 을 port 0 으로 되돌리고 CMP JOIN 에 video 포트를 싣지 않는다(음성·전송 제어는 그대로). M2 제안서 기다린다.
+4. **세션 갱신 주체** — A10 팬아웃 INVITE 에 `Session-Expires: 1800;refresher=uas` 를 싣는다(RFC 4028 §7.2). MCPTT 팬아웃도 같이 바꿀지는 A10 때 함께 본다.
+5. **늦은 암묵 허가** — 두 겹으로 막는다. ① A10 은 암묵 요청 개시(prearranged)의 개시자 200 OK 를 **첫 초대 멤버 200 OK 뒤**에 보낸다(TS 24.281 §9.2.1.4 — 미디어
+   버퍼링 없는 MCVideo 에서 확인 없는 200 을 먼저 주지 않는다) → CMP 는 JOIN 때 다른 참가자가 있어 곧바로 허가(answer `mc_granted`·SSRC), 기다림 없음.
+   ② 안전망 — CMP 의 늦은 허가 대기는 참여자 T100×C100(기본 3 s)까지만: 넘으면 예약을 풀고 Transmission Idle, 그 뒤 첫 참가자가 와도 허가하지 않는다
+   (`PMcvControl::kImplicitWaitMs`, 단위시험). service configuration 의 T100·C100 을 늘리는 쪽은 택하지 않았다.
+6·7. 확인 — 전송 제어 평문(1차)은 CMP 도 `tc_crypto` 없는 멤버에게 평문이다. 파트 순서는 CSP 도 Content-Type 으로 찾는다(`McVideoBodyPart`).
+
+**다음 (.48)** — A10(`McVideoCallService` — chat·prearranged 개시·합류·재합류·퇴장·해제, 위 3~5 포함) + A11(SDP·CmpClient MCVideo 명령). B6·B8 은 그 뒤.

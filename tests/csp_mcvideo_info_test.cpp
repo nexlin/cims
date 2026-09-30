@@ -183,6 +183,54 @@ int main() {
             "\"mc_implicit_request\"", "\"mc_audio_ssrc\"", "\"mc_video_ssrc\"", "\"mc_transmission_ssrc\"" } )
         CK( n, yaml.find( n ) != std::string::npos );
 
+    // ── 요청의 서비스 판별 (A9 — PUBLISH·SUBSCRIBE·INVITE 를 MCPTT 로 잘못 읽지 않는다, TS 24.281 §8.2.2.2.3 3)) ──
+    auto services = []( const Msg &m ) {
+        std::string s;
+        for ( const char *h : { "P-Asserted-Service", "P-Preferred-Service", "Accept-Contact" } )
+            for ( const auto &v : hdr( m, h ) ) s += v + ",";
+        return s;
+    };
+    const Msg pub = load( "02_publish_affiliation.txt" );
+    CK( "02 PUBLISH is MCVideo", McVideoRequestIndicated( services( pub ), "", pub.body, ctype( pub ) ) );
+    CK( "02 PUBLISH by body alone (no PPS)", McVideoRequestIndicated( "", "", pub.body, ctype( pub ) ) );
+    const Msg inv3 = load( "03_chat_join_invite.txt" );
+    CK( "03 INVITE is MCVideo", McVideoRequestIndicated( services( inv3 ), "", inv3.body, ctype( inv3 ) ) );
+    CK( "03 INVITE by Accept-Contact alone", McVideoRequestIndicated( services( inv3 ), "", "", "" ) );
+    const std::string mcpttPidf =
+        "<?xml version=\"1.0\"?><presence xmlns=\"urn:ietf:params:xml:ns:pidf\" "
+        "xmlns:mcpttPI10=\"urn:3gpp:ns:mcpttPresInfo:1.0\" entity=\"tel:+8251\"><tuple id=\"c1\"><status>"
+        "<mcpttPI10:affiliation group=\"tel:g001\"/></status></tuple></presence>";
+    CK( "MCPTT pidf PUBLISH is not MCVideo",
+        !McVideoRequestIndicated( "urn:urn-7:3gpp-service.ims.icsi.mcptt,", "", mcpttPidf, "application/pidf+xml" ) );
+    CK( "MCPTT Accept mcptt-affiliation-info is not MCVideo",
+        !McVideoRequestIndicated( "", "application/vnd.3gpp.mcptt-affiliation-info+xml", "", "" ) );
+    // 골든 02 의 pidf 파트 — served ID·client ID·p-id·그룹 (mcvideoPI10 접두사)
+    const CMcpttPidfAffiliation aff = ParsePidfAffiliation( McVideoBodyPart( pub.body, ctype( pub ), "pidf+xml" ) );
+    CK( "02 pidf entity/tuple/p-id", aff.bValid && aff.strEntity == "tel:+82510002001" &&
+                                         aff.strClientId == "urn:uuid:2f6b8c4e-1a2b-4c3d-9e8f-0a1b2c3d4e5f" &&
+                                         aff.strPid == "a1-mcv-aff-0001" );
+    CK( "02 pidf groups", aff.vecGroups.size() == 2 && aff.vecGroups[0] == "tel:g101" && aff.vecGroups[1] == "tel:g103" );
+    CK( "02 served ID (mcvideo-request-uri)",
+        McpttBareId( ParseMcVideoInfo( McVideoBodyPart( pub.body, ctype( pub ), kMcVideoInfoSubtype ) ).strRequestUri ) ==
+            "+82510002001" );
+    // NOTIFY 본문 — MCVideo 는 mcvideoPresInfo 네임스페이스(§8.3.1), MCPTT 는 그대로
+    CMcpttAffClient cl;
+    cl.strClientId = "urn:uuid:c1";
+    CMcpttAffGroup g;
+    g.strGroupUri = "tel:g101";
+    cl.vecGroups.push_back( g );
+    const std::string nv = BuildPidfAffiliationInfo( "tel:+82510002001", { cl }, "p1", true );
+    CK( "NOTIFY mcvideoPresInfo", nv.find( "xmlns:mcvideoPI10=\"urn:3gpp:ns:mcvideoPresInfo:1.0\"" ) != std::string::npos &&
+                                      nv.find( "<mcvideoPI10:affiliation group=\"tel:g101\"" ) != std::string::npos &&
+                                      nv.find( "<mcvideoPI10:p-id>p1</mcvideoPI10:p-id>" ) != std::string::npos &&
+                                      nv.find( "mcpttPI10" ) == std::string::npos );
+    const std::string np = BuildPidfAffiliationInfo( "tel:+82510002001", { cl }, "", false );
+    CK( "NOTIFY mcpttPresInfo unchanged",
+        np.find( "xmlns:mcpttPI10=\"urn:3gpp:ns:mcpttPresInfo:1.0\" entity=\"tel:+82510002001\">" ) != std::string::npos &&
+            np.find( "mcvideo" ) == std::string::npos );
+    // NOTIFY 본문을 다시 읽으면 같은 그룹 (단말 해석과 같은 규칙)
+    CK( "NOTIFY round trip", ParsePidfAffiliation( nv ).vecGroups.size() == 1 && ParsePidfAffiliation( nv ).strPid == "p1" );
+
     printf( "%s (%d fail)\n", fail ? "FAIL" : "PASS", fail );
     return fail ? 1 : 0;
 }

@@ -94,6 +94,11 @@ public:
      *  MSRP(media plane) 배포 가능 단말 표시. fan-out 하이브리드 분기에 사용. */
     bool m_bMcDataMsrp;
 
+    /** REGISTER Contact 가 MCVideo 클라이언트를 싣는다 — +g.3gpp.mcvideo 와 icsi-ref 의 MCVideo ICSI 둘 다(TS 24.281
+     * §7.2.1AA). 태그를 뺀 재-REGISTER 는 MCVideo 로그오프다(§7.2.1 NOTE 1) — 재등록마다 다시 판정한다. MCVideo 그룹 호
+     * 초대 대상 판정에 쓴다. */
+    bool m_bMcVideo;
+
     /** REGISTER Security-Client 에 sdes-srtp(mediasec 파라미터) 선언 — 미디어 SRTP 능력
      *  (TS 33.328 e2ae / TS 24.229, media_security.md §4.1). media_srtp=optional 서비스의
      *  발신 offer 형태(SAVP/AVP)를 이 바인딩 플래그로 결정한다 — per-call 폴백 없음. */

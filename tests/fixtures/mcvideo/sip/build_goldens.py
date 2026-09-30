@@ -50,7 +50,7 @@ def sdp(origin_ip, o_line, audio, video, control, fmtp, video_extra=True):
     """mcvideo.md §1.4 — m 순서 audio → video → application, i= 로 MCVideo 성분 표시(TS 24.281 §6.2.1 2)c)·3)d))."""
     lines = ["v=0", o_line, "s=-", f"c=IN IP4 {origin_ip}", "t=0 0",
              f"m=audio {audio} RTP/AVP 96 101", "i=audio component of MCVideo",
-             "a=rtpmap:96 AMR-WB/16000", "a=fmtp:96 mode-change-capability=2;max-red=0",
+             "a=rtpmap:96 AMR-WB/16000", "a=fmtp:96 octet-align=1",
              "a=rtpmap:101 telephone-event/16000", "a=fmtp:101 0-15", "a=sendrecv",
              f"m=video {video} RTP/AVP 97", "i=video component of MCVideo",
              "a=rtpmap:97 H264/90000", "a=fmtp:97 profile-level-id=42e01f;packetization-mode=1"]
@@ -89,6 +89,8 @@ ACCEPT = [f"Accept-Contact: *;+g.3gpp.mcvideo;require;explicit",
           f'Accept-Contact: *;+g.3gpp.icsi-ref="{ICSI_ENC}";require;explicit']
 SESSION_ID = f"sip:g101@{CSP}:5061;transport=tls;gr=1790775600123456-3"      # chat g101 세션 식별자(§4.5)
 SESSION_ID_103 = f"sip:g103@{CSP}:5061;transport=tls;gr=1790775900654321-1"  # prearranged g103
+# To 에는 port·transport-param 을 두지 않는다(RFC 3261 §19.1.1 표 1) — 세션 식별자의 gr(other-param)은 둔다.
+SESSION_ID_103_TO = f"sip:g103@{CSP};gr=1790775900654321-1"
 
 A_SDP = sdp(IP_A, f"o=- 3900000001 3900000001 IN IP4 {IP_A}", 40000, 40002, 40004,
             "mc_queueing;mc_priority=5;mc_transmission_ssrc=305419896")
@@ -219,7 +221,7 @@ def build():
     msgs["08_prearranged_rejoin_invite.txt"] = message(
         f"INVITE {SESSION_ID_103} SIP/2.0",
         [via(IP_A, 50601, "-mcv-inv3"), "Max-Forwards: 70",
-         f"From: <sip:{UE_A}@{DOMAIN}>;tag=inv-a3", f"To: <{SESSION_ID_103}>",
+         f"From: <sip:{UE_A}@{DOMAIN}>;tag=inv-a3", f"To: <{SESSION_ID_103_TO}>",
          f"Call-ID: mcv-rejoin-a1@{IP_A}", "CSeq: 1 INVITE", ue_contact(UE_A, IP_A, 50601), *ACCEPT,
          f"P-Preferred-Service: {ICSI}", "Supported: timer", "Session-Expires: 1800"],
         "multipart/mixed;boundary=mcv-inv-3",

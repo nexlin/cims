@@ -661,7 +661,8 @@ MCVideo 그룹 호(TS 24.281·24.581)의 미디어 평면. `PMcpttGroup` 과 따
   일반 수신 Gr · 참가자 수신 U)를 그대로 둔다: 동시 송출 상한(`max_transmitters`)·유효 우선순위(tier → chair → 수치 — MCPTT floor 와 같은 서열)
   선점 Revoked #4·큐(`queueing` 협상 시 Queue Position Info)·거절 #1/#3/#5 · 참가 Idle/Notification · 허가 → Granted(송출 SSRC 쌍)·다른 참가자
   Media Transmission Notification · 수신자별 **Active SSRC List**(manual = Receive Media Request 허가, automatic = 긴급·임박 호) · C9 상한 #7 ·
-  종료 → End Response·End Notify·큐 맨 앞 허가 또는 Idle · 무허가 미디어 Revoked #3 · 암묵적 송출 요청(첫 초대 참가자 수락 때 허가) ·
+  종료 → End Response·End Notify·큐 맨 앞 허가 또는 Idle · 무허가 미디어 Revoked #3 · 암묵적 송출 요청(첫 초대 참가자 수락 때 허가 — 참여자
+  T100×C100 안에 오지 않으면 예약을 풀고 Idle) ·
   타이머 T1~T6·T11(C2·C4·C6, T3 는 5회 재송신 뒤 서버에서 종료). 참가자 = 주소가 등록된 멤버(JOIN ②), 이탈 = LEAVE. 보낸 메시지는 그룹이
   `BuildTransmissionMessage` → 멤버 제어 채널(헤더 SSRC = `user_tc_ssrc`, 없으면 `tc_ssrc`)로 낸다. 입력별 처리 표·규격 읽기는 mcvideo.md §5.3.1·§9.
 - **미디어 분배** — payload 있는 RTP 만 판정한다(헤더만 = keepalive 는 버림). 허가된 송출(permitted·pending revoke)이면 그 송출을 받는 멤버

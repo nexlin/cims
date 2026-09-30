@@ -2,7 +2,7 @@ INVITE sip:g103@csp.ptt.cims.example.kr:5061;transport=tls;gr=1790775900654321-1
 Via: SIP/2.0/TLS 10.10.1.21:50601;branch=z9hG4bK-mcv-inv3;rport
 Max-Forwards: 70
 From: <sip:+82510002001@ptt.cims.example.kr>;tag=inv-a3
-To: <sip:g103@csp.ptt.cims.example.kr:5061;transport=tls;gr=1790775900654321-1>
+To: <sip:g103@csp.ptt.cims.example.kr;gr=1790775900654321-1>
 Call-ID: mcv-rejoin-a1@10.10.1.21
 CSeq: 1 INVITE
 Contact: <sip:+82510002001@10.10.1.21:50601;transport=tls>;+g.3gpp.mcvideo;+g.3gpp.icsi-ref="urn%3Aurn-7%3A3gpp-service.ims.icsi.mcvideo"
@@ -12,7 +12,7 @@ P-Preferred-Service: urn:urn-7:3gpp-service.ims.icsi.mcvideo
 Supported: timer
 Session-Expires: 1800
 Content-Type: multipart/mixed;boundary=mcv-inv-3
-Content-Length: 1121
+Content-Length: 1100
 
 --mcv-inv-3
 Content-Type: application/sdp
@@ -25,7 +25,7 @@ t=0 0
 m=audio 40020 RTP/AVP 96 101
 i=audio component of MCVideo
 a=rtpmap:96 AMR-WB/16000
-a=fmtp:96 mode-change-capability=2;max-red=0
+a=fmtp:96 octet-align=1
 a=rtpmap:101 telephone-event/16000
 a=fmtp:101 0-15
 a=sendrecv

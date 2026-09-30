@@ -32,7 +32,9 @@
 #include "GroupMap.h"
 #include "IpsecSaSet.h"
 #include "Log.h"
-#include "McpttInfo.h"  // ParseAffiliationCommand (TS 24.379 §9 affiliation-command)
+#include "McVideoAsModule.h"  // IsMcVideoRequest — 서비스별 affiliation (TS 24.281 §8)
+#include "McVideoInfo.h"      // ParseMcVideoInfo · McVideoBodyPart
+#include "McpttInfo.h"        // ParseAffiliationCommand (TS 24.379 §9 affiliation-command)
 
 // 구독(SUBSCRIBE)·제휴 PUBLISH 에 부여하는 Expires 상한 (RFC 6665 §4.2.1.1 — notifier 는 요청보다 짧게 부여할 수 있고
 //   2xx 의 Expires 가 부여값이다). 단말이 2^32-1 같은 "무한" 을 요청해도 여기서 자른다. REGISTER 의 3600 과 같은 값.
@@ -55,7 +57,8 @@ static const int SUBSCRIBE_DEFAULT_EXPIRES_SEC = SUBSCRIBE_MAX_EXPIRES_SEC;
 extern CSipUserAgent gclsUserAgent;
 extern void SendInitialNotify( const SubscriptionInfo &sub );
 extern void SendTerminatedNotify( const SubscriptionInfo &sub, const char *pszReason = "timeout" );
-extern void SendAffiliationNotify( const std::string &strUserId, const std::string &strPid );  // C2
+extern void SendAffiliationNotify( const std::string &strUserId, const std::string &strPid,
+                                   EMcService eService = EMcService::Mcptt );  // C2
 extern void SendRegEventNotify( const std::string &strUserId, const char *pszEvent,
                                 const CUserInfo *pclsInfo );  // RFC 3680 partial
 
@@ -67,16 +70,25 @@ static std::mutex s_etagMutex;
 //   **사용자 단위가 아니라 그룹 단위 요약 1건**이다: 등록/해제가 몰리면 사용자마다 쏘는 순간
 //   이벤트가 그 수만큼 불어나는데, 운용이 실제로 묻는 것은 "그 그룹에 지금 몇 명 붙어 있나" 다.
 //   count 는 변경이 **반영된 뒤** 다시 센 값이라 그 시점의 사실을 그대로 담는다.
-void EmitAffiliationChanged( const std::string &strGroupId, const char *pszAction, const std::string &strUserId ) {
+//   서비스(MCPTT·MCVideo)마다 제휴가 따로라(TS 23.280 §5.2.5) count 도 그 서비스의 것이고 service 로 가른다.
+void EmitAffiliationChanged( const std::string &strGroupId, const char *pszAction, const std::string &strUserId,
+                             EMcService eService = EMcService::Mcptt ) {
     if ( !gclsFmReporter.IsEnabled() || strGroupId.empty() ) return;
     std::vector<std::string> vecMembers;
-    gclsDbManager.SelectAffiliatedMembers( strGroupId, vecMembers );
+    gclsDbManager.SelectAffiliatedMembers( strGroupId, vecMembers, eService );
     SimpleJson::JsonNode p;
     p.Set( "gid", strGroupId );
     p.Set( "count", (int)vecMembers.size() );
     p.Set( "action", pszAction );
     p.Set( "uri", strUserId );
+    p.Set( "service", McServiceName( eService ) );
     gclsFmReporter.SendEvent( "affiliation_changed", "audit", gclsFmReporter.Node() + "/csp", p );
+}
+
+// 요청의 MC 서비스 — MCPTT 와 MCVideo 는 같은 메서드·Event 를 쓰므로 서비스 표시(ICSI·mcvideo-info·pidf 네임스페이스)로
+//   가른다(TS 24.281 §8.2.2.2.3 3)·§8.2.2.2.4 3)). 표시가 없으면 MCPTT(기존 단말).
+static EMcService _RequestMcService( CSipMessage *pclsMessage ) {
+    return CMcVideoAsModule::IsMcVideoRequest( pclsMessage ) ? EMcService::McVideo : EMcService::Mcptt;
 }
 
 bool CCscfModule::IsEnabled() const {
@@ -1228,7 +1240,29 @@ bool CCscfModule::RecvRequestSubscribe( int iThreadId, CSipMessage *pclsMessage 
         // RFC 3680 reg-event: 실제 UE 는 REGISTER 200 OK 직후 자신의 등록 상태를 구독.
         strEventType = "reg";
     } else if ( bAffInfo ) {
-        strEventType = "affiliation";  // 제휴상태(affiliation-info) 구독 → presence NOTIFY
+        // 제휴상태(affiliation-info) 구독 → presence NOTIFY. 서비스마다 따로다 — MCVideo 표시(ICSI·mcvideo-info)가
+        //   있으면 MCVideo 제휴의 구독(TS 24.281 §8.2.2.2.4): served ID = <mcvideo-request-uri>,
+        //   남의 제휴 구독은 403(4)).
+        strEventType = "affiliation";
+        if ( _RequestMcService( pclsMessage ) == EMcService::McVideo ) {
+            if ( !gclsSetup.m_bRoleMcVideo || !gclsDbManager.HasMcVideoTables() ) {
+                CLog::Print( LOG_INFO, "SUBSCRIBE presence(mcvideo) from %s → 404 (MCVideo 미제공)",
+                             strFromId.c_str() );
+                return SendResponse( pclsMessage, SIP_NOT_FOUND );
+            }
+            const std::string strCt =
+                pclsMessage->m_clsContentType.m_strType + "/" + pclsMessage->m_clsContentType.m_strSubType;
+            const CMcVideoInfo clsMvi =
+                ParseMcVideoInfo( McVideoBodyPart( pclsMessage->m_strBody, strCt, kMcVideoInfoSubtype ) );
+            const std::string strServed =
+                clsMvi.strRequestUri.empty() ? strFromId : McpttBareId( clsMvi.strRequestUri );
+            if ( strServed != strFromId ) {
+                CLog::Print( LOG_INFO, "SUBSCRIBE presence(mcvideo) from %s for %s → 403 (§8.2.2.2.4 4))",
+                             strFromId.c_str(), strServed.c_str() );
+                return SendResponse( pclsMessage, 403 );
+            }
+            strEventType = "mcvideo_affiliation";
+        }
     } else if ( strEventHdr == "conference" || bAffiliation ) {
         // conference(RFC 4575) — Event 헤더가 1차 근거, 그룹 URI 매칭은 헤더 없는 구현 호환용.
         strEventType = "conference";
@@ -1602,7 +1636,10 @@ bool CCscfModule::RecvRequestPublish( int iThreadId, CSipMessage *pclsMessage ) 
     }
 
     // 규격형(Event: presence)은 R-URI 가 그룹이 아니라 참여 기능 PSI 라 아래 그룹 기반 경로를 탈 수 없다.
-    if ( strEvent == "presence" ) return RecvPublishAffiliationPidf( pclsMessage, strFromId, strContactUri );
+    // 서비스(MCPTT·MCVideo)는
+    //   요청의 서비스 표시로 가른다 — 가르지 않으면 MCVideo 제휴 PUBLISH 가 MCPTT 제휴 집합을 덮어쓴다.
+    if ( strEvent == "presence" )
+        return RecvPublishAffiliationPidf( pclsMessage, strFromId, strContactUri, _RequestMcService( pclsMessage ) );
 
     std::string strReqUriUser = pclsMessage->m_clsReqUri.m_strUser;
     bool bAffiliation = !strReqUriUser.empty() && gclsGroupMap.Contains( strReqUriUser.c_str() );
@@ -1754,27 +1791,77 @@ bool CCscfModule::RecvRequestPublish( int iThreadId, CSipMessage *pclsMessage ) 
  *   - N2(MaxAffiliationsN2) 상한은 적용하지 않는다. 우리 인가 축은 그룹 멤버십이다.
  */
 bool CCscfModule::RecvPublishAffiliationPidf( CSipMessage *pclsMessage, const std::string &strFromId,
-                                              const std::string &strContactUri ) {
+                                              const std::string &strContactUri, EMcService eService ) {
+    const bool bMcv = eService == EMcService::McVideo;
+    const char *pszSvc = McServiceName( eService );
     // 부여 Expires — 형식 오류는 400 (RFC 3261 §21.4.1).
     uint32_t uiReqExpires = 0;
     const ESipExpiresResult eReqExpires = pclsMessage->GetExpires( uiReqExpires );
     if ( eReqExpires == E_SIP_EXPIRES_INVALID ) return SendResponse( pclsMessage, SIP_BAD_REQUEST );
     const bool bGiven = ( eReqExpires == E_SIP_EXPIRES_VALID );
-    const int iExpires =
+    int iExpires =
         bGiven ? ( uiReqExpires > (uint32_t)SUBSCRIBE_MAX_EXPIRES_SEC ? SUBSCRIBE_MAX_EXPIRES_SEC : (int)uiReqExpires )
                : SUBSCRIBE_DEFAULT_EXPIRES_SEC;
+    // DB 만료(초) — 0 = 만료 없음(NULL). MCVideo 는 «지울 때까지»(Expires 2^32-1)라 0 이다(등록 해제가 행을 지운다).
+    int iDbExpires = iExpires;
 
-    const CMcpttPidfAffiliation clsPidf = ParsePidfAffiliation( pclsMessage->m_strBody );
+    // pidf 본문 — MCVideo 는 mcvideo-info 와 함께 multipart 로 온다(TS 24.281 §8.2.1.2).
+    const std::string strCtype =
+        pclsMessage->m_clsContentType.m_strType + "/" + pclsMessage->m_clsContentType.m_strSubType;
+    const CMcpttPidfAffiliation clsPidf = ParsePidfAffiliation(
+        bMcv ? McVideoBodyPart( pclsMessage->m_strBody, strCtype, "pidf+xml" ) : pclsMessage->m_strBody );
+
+    if ( bMcv ) {
+        // ── MCVideo 제휴 (TS 24.281 §8.2.2.2.3) — 역할·이용 자격·served ID·Expires 규칙이 MCPTT 경로와 다르다 ──
+        if ( !gclsSetup.m_bRoleMcVideo || !gclsDbManager.HasMcVideoTables() ) {
+            // MCVideo 를 내지 않는 사이트 — 참여 MCVideo 기능 PSI 가 없다(§6.3.7.1 → 404). MCPTT 제휴로 읽지 않는다.
+            CLog::Print( LOG_INFO, "[Affiliation/PUBLISH:mcvideo] 404: MCVideo 미제공(role=%d tables=%d) user=%s",
+                         gclsSetup.m_bRoleMcVideo ? 1 : 0, gclsDbManager.HasMcVideoTables() ? 1 : 0,
+                         strFromId.c_str() );
+            return SendResponse( pclsMessage, SIP_NOT_FOUND );
+        }
+        // 1)~4) served MCVideo ID = mcvideo-info <mcvideo-request-uri>, 원발 = 인증된 요청자.
+        //   남의 제휴를 바꾸는 권한은 두지 않는다.
+        const CMcVideoInfo clsMvi =
+            ParseMcVideoInfo( McVideoBodyPart( pclsMessage->m_strBody, strCtype, kMcVideoInfoSubtype ) );
+        const std::string strServed = clsMvi.strRequestUri.empty() ? strFromId : McpttBareId( clsMvi.strRequestUri );
+        if ( strServed != strFromId ) {
+            CLog::Print( LOG_INFO, "[Affiliation/PUBLISH:mcvideo] 403: served %s ≠ 요청자 %s (§8.2.2.2.3 4))",
+                         strServed.c_str(), strFromId.c_str() );
+            return SendResponse( pclsMessage, 403 );
+        }
+        // 5) Expires 가 없거나 0 이 아닌데 2^32-1 보다 작으면 423 + Min-Expires 4294967295
+        if ( !bGiven || ( uiReqExpires != 0 && uiReqExpires < 4294967295u ) ) {
+            CLog::Print( LOG_INFO, "[Affiliation/PUBLISH:mcvideo] 423: Expires %s user=%s (§8.2.2.2.3 5))",
+                         bGiven ? std::to_string( uiReqExpires ).c_str() : "absent", strFromId.c_str() );
+            CSipMessage *pclsResp = pclsMessage->CreateResponseWithToTag( 423 );
+            if ( pclsResp ) {
+                pclsResp->AddHeader( "Min-Expires", "4294967295" );
+                gclsUserAgent.m_clsSipStack.SendSipMessage( pclsResp );
+            }
+            return true;
+        }
+        // 이용 자격 — MCVideo user profile 행(mcvideo.md §5.1). 없는 사용자는 MCVideo 사용자가 아니다.
+        CspMcVideoProfile clsProf;
+        if ( gclsDbManager.SelectMcVideoProfile( strFromId, clsProf ) != 1 ) {
+            CLog::Print( LOG_INFO, "[Affiliation/PUBLISH:mcvideo] 403: user=%s 는 MCVideo 이용 자격이 없다",
+                         strFromId.c_str() );
+            return SendResponse( pclsMessage, 403 );
+        }
+        iExpires = uiReqExpires == 0 ? 0 : -1;  // -1 = «지울 때까지»(200 OK Expires 4294967295)
+        iDbExpires = 0;
+    }
 
     // Expires:0 = 그 사용자의 제휴 전부 해제 (본문 유무 무관 — RFC 3903 의 remove).
     if ( iExpires == 0 ) {
         if ( gclsDbManager.IsConnected() ) {
-            gclsDbManager.RemoveAffiliationsByUser( strFromId );
-            EmitAffiliationChanged( "", "de-affiliate", strFromId );
-            SendAffiliationNotify( strFromId, clsPidf.strPid );
+            gclsDbManager.RemoveAffiliationsByUser( strFromId, eService );
+            EmitAffiliationChanged( "", "de-affiliate", strFromId, eService );
+            SendAffiliationNotify( strFromId, clsPidf.strPid, eService );
         }
-        CLog::Print( LOG_INFO, "[Affiliation/PUBLISH:pidf] de-affiliate ALL user=%s", strFromId.c_str() );
-        std::string strEtagKey = strFromId + ":#pidf";
+        CLog::Print( LOG_INFO, "[Affiliation/PUBLISH:pidf] de-affiliate ALL user=%s service=%s", strFromId.c_str(),
+                     pszSvc );
+        std::string strEtagKey = strFromId + ( bMcv ? ":#pidf:mcvideo" : ":#pidf" );
         {
             std::unique_lock<std::mutex> lock( s_etagMutex );
             s_mapEtag.erase( strEtagKey );
@@ -1806,9 +1893,11 @@ bool CCscfModule::RecvPublishAffiliationPidf( CSipMessage *pclsMessage, const st
     }
 
     // 이 사용자가 멤버인 그룹 전체를 훑어 집합을 맞춘다 — 목록에 있으면 제휴, 없으면 해제.
-    //   (제휴는 멤버인 그룹에만 가능하므로 멤버 그룹 집합이 곧 해제 후보 집합이다.)
+    //   (제휴는 멤버인 그룹에만 가능하므로 멤버 그룹 집합이 곧 해제 후보 집합이다.) MCVideo 는 MCVideo 서비스를 가진
+    //   그룹만 (그룹 문서의 MCVideo <service>, TS 24.481 §7.2.8 — §8.2.2.3.8 적격 판정).
     std::vector<std::string> vecMemberOf;
     gclsGroupMap.IterateInternal( [&]( const CspPttGroup &clsGroup ) {
+        if ( bMcv && !clsGroup._mcvideo ) return;
         for ( const auto &pUser : clsGroup._pusers ) {
             if ( pUser && ( pUser->_id == strFromId || McpttBareId( pUser->_mcpttId ) == strFromId ) ) {
                 vecMemberOf.push_back( clsGroup._id );
@@ -1827,23 +1916,23 @@ bool CCscfModule::RecvPublishAffiliationPidf( CSipMessage *pclsMessage, const st
             //   만료까지 두 번째 tuple 로 보이지 않게 한다(한 단말 = tuple 하나).
             //   (빈 client 는 RemoveAffiliation 에서 "사용자 전체" 라 걸러낸다.)
             if ( !strContactUri.empty() && strClient != strContactUri )
-                gclsDbManager.RemoveAffiliation( strGroup, strFromId, strContactUri );
+                gclsDbManager.RemoveAffiliation( strGroup, strFromId, strContactUri, eService );
             const bool bWanted = ( std::find( vecWant.begin(), vecWant.end(), strGroup ) != vecWant.end() );
             if ( bWanted ) {
-                if ( gclsDbManager.InsertAffiliation( strGroup, strFromId, strClient, iExpires ) ) {
-                    EmitAffiliationChanged( strGroup, "affiliate", strFromId );
+                if ( gclsDbManager.InsertAffiliation( strGroup, strFromId, strClient, iDbExpires, eService ) ) {
+                    EmitAffiliationChanged( strGroup, "affiliate", strFromId, eService );
                     iAff++;
                 } else {
-                    CLog::Print( LOG_ERROR, "[Affiliation/PUBLISH:pidf] affiliate 미기록 user=%s group=%s",
-                                 strFromId.c_str(), strGroup.c_str() );
+                    CLog::Print( LOG_ERROR, "[Affiliation/PUBLISH:pidf] affiliate 미기록 user=%s group=%s service=%s",
+                                 strFromId.c_str(), strGroup.c_str(), pszSvc );
                 }
-            } else if ( gclsDbManager.IsAffiliated( strGroup, strFromId ) ) {
-                gclsDbManager.RemoveAffiliation( strGroup, strFromId, strClient );
-                EmitAffiliationChanged( strGroup, "de-affiliate", strFromId );
+            } else if ( gclsDbManager.IsAffiliated( strGroup, strFromId, eService ) ) {
+                gclsDbManager.RemoveAffiliation( strGroup, strFromId, strClient, eService );
+                EmitAffiliationChanged( strGroup, "de-affiliate", strFromId, eService );
                 iDeaff++;
             }
         }
-        SendAffiliationNotify( strFromId, clsPidf.strPid );
+        SendAffiliationNotify( strFromId, clsPidf.strPid, eService );
     }
 
     // 멤버가 아닌 그룹을 요청했으면 남긴다 — 요청 전체를 거절하지는 않는다(나머지는 정상 처리).
@@ -1852,8 +1941,9 @@ bool CCscfModule::RecvPublishAffiliationPidf( CSipMessage *pclsMessage, const st
             CLog::Print( LOG_INFO, "[Affiliation/PUBLISH:pidf] skip: user=%s 는 group=%s 의 멤버가 아니다",
                          strFromId.c_str(), strGroup.c_str() );
     }
-    CLog::Print( LOG_INFO, "[Affiliation/PUBLISH:pidf] user=%s client=%s 요청 %d개 → 제휴 %d · 해제 %d (expires=%d)",
-                 strFromId.c_str(), clsPidf.strClientId.c_str(), (int)vecWant.size(), iAff, iDeaff, iExpires );
+    CLog::Print( LOG_INFO,
+                 "[Affiliation/PUBLISH:pidf] service=%s user=%s client=%s 요청 %d개 → 제휴 %d · 해제 %d (expires=%d)",
+                 pszSvc, strFromId.c_str(), clsPidf.strClientId.c_str(), (int)vecWant.size(), iAff, iDeaff, iExpires );
 
     // SIP-ETag — 규격형 publication 은 그룹이 아니라 클라이언트 단위라 키를 따로 쓴다.
     struct timespec ts;
@@ -1864,12 +1954,15 @@ bool CCscfModule::RecvPublishAffiliationPidf( CSipMessage *pclsMessage, const st
               (unsigned)( ts.tv_nsec ^ (uintptr_t)pclsMessage ) );
     {
         std::unique_lock<std::mutex> lock( s_etagMutex );
-        s_mapEtag[strFromId + ":#pidf"] = szEtag;
+        s_mapEtag[strFromId + ( bMcv ? ":#pidf:mcvideo" : ":#pidf" )] = szEtag;
     }
     CSipMessage *pclsResponse = pclsMessage->CreateResponseWithToTag( 200 );
     if ( pclsResponse ) {
         pclsResponse->AddHeader( "SIP-ETag", szEtag );
-        pclsResponse->AddHeader( "Expires", iExpires );
+        if ( iExpires < 0 )
+            pclsResponse->AddHeader( "Expires", "4294967295" );  // MCVideo — 지울 때까지(§8.2.2.2.3 8)a))
+        else
+            pclsResponse->AddHeader( "Expires", iExpires );
         gclsUserAgent.m_clsSipStack.SendSipMessage( pclsResponse );
     }
     return true;

@@ -144,6 +144,10 @@ public:
     // 송출이 끝난 직후의 무허가 미디어 유예(ms) — End Request 와 엇갈려 이미 떠난 RTP 는 회수하지 않고 버린다(구현 선택 — 규격이 막는 것은
     //   허가 뒤에도 «계속» 보내는 참가자다, §6.3.5.3.8·§6.3.5.4.6).
     static const int kEndGraceMs = 500;
+    // 늦은 암묵 허가의 대기 한도(ms) — 참여자는 T100×C100 동안만 Granted 를 기다리고 그 뒤엔 'U: has no permission' 이라 늦은 Granted 를
+    //   버린다(TS 24.581 §6.2.4.4.4). 그 안에 첫 초대 참가자가 오지 않으면 예약을 풀고 Transmission Idle 을 보낸다. 값 = 참여자 타이머
+    //   기본값(K5 — service configuration 이 바꾸면 CSP 가 PTT_GROUP_ADD 로 싣는 몫, 1차는 기본값).
+    static const int kImplicitWaitMs = MCV_T100_MS * MCV_C100;
 
 private:
     // 유효 우선순위(§4.1.1.4) — tier(긴급 > 임박 > 일반, CSP 지시) → chair → 수치.
@@ -180,6 +184,7 @@ private:
         int64_t t3At = 0;               // 'U: not permitted but sends media' 의 T3 (Revoked #3 재송신)
         int t3Count = 0;
         bool implicitPending = false;   // 암묵적 요청을 받았고 첫 초대 참가자를 기다린다(§6.3.2.2)
+        int64_t implicitUntil = 0;      // 기다림 한도 (kImplicitWaitMs)
         unsigned int implicitAudio = 0, implicitVideo = 0;   // 암묵적 요청으로 예약한 SSRC 쌍
         std::map<std::string, RxGrant> active;   // senderMember → Active SSRC List 항목 (C9 = 크기)
     };

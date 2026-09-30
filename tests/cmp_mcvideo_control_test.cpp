@@ -458,6 +458,19 @@ static void testImplicitAndRecvOnly() {
     }
     {
         Harness h;
+        PMcvControl::ImplicitResult res;
+        h.ctl.addParticipant("A", h.decl("sip:A@mcv"), h.now, true, &res);
+        h.advance(PMcvControl::kImplicitWaitMs + 200);
+        CHECK(h.count("A", MCV_APP_1, MCV1_TRANSMISSION_IDLE) == 1,
+              "no invited participant within T100xC100 — reservation released, Idle sent");
+        unsigned int again = PMcvControl::AllocSsrc(res.audioSsrc);
+        CHECK(again == res.audioSsrc, "reserved SSRC freed");
+        PMcvControl::FreeSsrc(again);
+        h.join("B");
+        CHECK(h.count("A", MCV_APP_1, MCV1_TRANSMISSION_GRANTED) == 0, "late joiner does not trigger a stale implicit grant");
+    }
+    {
+        Harness h;
         h.join("B");
         PMcvControl::ImplicitResult res;
         h.ctl.addParticipant("A", h.decl("sip:A@mcv"), h.now, true, &res);

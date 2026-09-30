@@ -67,5 +67,10 @@ int main(){
   CK("escape",en.find("id=\"a&amp;&quot;b\"")!=std::string::npos && en.find("tel:g&lt;1&gt;")!=std::string::npos &&
              en.find("p-id")==std::string::npos);
   CK("no clients",BuildPidfAffiliationInfo("tel:+1",{},"").find("<tuple")==std::string::npos);
+  // 긴 접두사(11자 이상) — 고정 길이로 옮기던 파서는 같은 태그를 다시 찾아 끝나지 않았다(PUBLISH 한 건으로 SIP 스레드 정지)
+  auto lp=ParsePidfAffiliation("<presence entity=\"tel:+1\"><tuple id=\"c\"><status>"
+                               "<mcpttPresInfo10:affiliation group=\"tel:g001\"/><mcpttPresInfo10:affiliation group=\"tel:g002\"/>"
+                               "</status></tuple></presence>");
+  CK("long prefix terminates",lp.bValid && lp.vecGroups.size()==2 && lp.vecGroups[1]=="tel:g002");
   printf("%s (%d fail)\n",fail?"FAIL":"PASS",fail); return fail?1:0;
 }

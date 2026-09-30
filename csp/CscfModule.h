@@ -3,6 +3,7 @@
 
 #include "CspUser.h"
 #include "IModule.h"
+#include "McService.h"
 #include "SipCredential.h"
 
 /**
@@ -76,10 +77,11 @@ private:
     bool RecvRequestRegister( int iThreadId, CSipMessage *pclsMessage );
     bool RecvRequestSubscribe( int iThreadId, CSipMessage *pclsMessage );
     bool RecvRequestPublish( int iThreadId, CSipMessage *pclsMessage );
-    /** 규격형 제휴 PUBLISH (Event: presence + application/pidf+xml, TS 24.379 §9.2.2.2.3).
-     *  pidf 가 그 클라이언트의 제휴 그룹 **집합 전체**를 싣는다 — 목록에 없는 기존 그룹은 해제한다. */
+    /** 규격형 제휴 PUBLISH (Event: presence + application/pidf+xml, TS 24.379 §9.2.2.2.3 · MCVideo TS 24.281
+     * §8.2.2.2.3). pidf 가 그 클라이언트의 제휴 그룹 **집합 전체**를 싣는다 — 목록에 없는 기존 그룹은 해제한다.
+     * eService 마다 제휴 표가 따로다(ptt_affiliations · mcvideo_affiliations). */
     bool RecvPublishAffiliationPidf( CSipMessage *pclsMessage, const std::string &strFromId,
-                                     const std::string &strContactUri );
+                                     const std::string &strContactUri, EMcService eService );
 
     bool SendResponse( CSipMessage *pclsMessage, int iStatusCode );
     static bool SendResponseStatic( CSipMessage *pclsMessage, int iStatusCode );

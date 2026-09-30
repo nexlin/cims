@@ -358,7 +358,12 @@ inline CMcpttPidfAffiliation ParsePidfAffiliation( const std::string &body ) {
         const std::string g = _McpttTagAttr( body, p, "group" );
         if ( !g.empty() && std::find( out.vecGroups.begin(), out.vecGroups.end(), g ) == out.vecGroups.end() )
             out.vecGroups.push_back( g );
-        p += 12;  // strlen("affiliation") + 1 — 같은 태그 재매칭 방지
+        // 이 시작태그 뒤로 — p 는 '<' 위치라 고정 길이만큼 옮기면 접두사가 긴 태그(<mcvideoPI10:affiliation …>)에서
+        // 같은 태그를
+        //   다시 찾아 끝나지 않는다. 태그의 '>' 다음부터 찾는다.
+        const size_t gt = body.find( '>', p );
+        if ( gt == std::string::npos ) break;
+        p = gt + 1;
     }
     return out;
 }
@@ -434,25 +439,28 @@ struct CMcpttAffClient {
     std::vector<CMcpttAffGroup> vecGroups;
 };
 
+// bMcVideo = MCVideo 서비스의 제휴 상태(TS 24.281 §8.2.2.2.5 · §8.3.1) — 같은 모양에 네임스페이스만 mcvideoPresInfo 다.
 inline std::string BuildPidfAffiliationInfo( const std::string &strEntity,
-                                             const std::vector<CMcpttAffClient> &vecClients,
-                                             const std::string &strPid ) {
+                                             const std::vector<CMcpttAffClient> &vecClients, const std::string &strPid,
+                                             bool bMcVideo = false ) {
+    const std::string pfx = bMcVideo ? "mcvideoPI10" : "mcpttPI10";
     std::string s = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n";
-    s += "<presence xmlns=\"urn:ietf:params:xml:ns:pidf\" xmlns:mcpttPI10=\"urn:3gpp:ns:mcpttPresInfo:1.0\" entity=\"" +
+    s += "<presence xmlns=\"urn:ietf:params:xml:ns:pidf\" xmlns:" + pfx +
+         "=\"urn:3gpp:ns:" + ( bMcVideo ? "mcvideoPresInfo" : "mcpttPresInfo" ) + ":1.0\" entity=\"" +
          McpttXmlEsc( strEntity ) + "\">\r\n";
     for ( const auto &c : vecClients ) {
         if ( c.vecGroups.empty() ) continue;
         s += "  <tuple id=\"" + McpttXmlEsc( c.strClientId ) + "\">\r\n";
         s += "    <status>\r\n";
         for ( const auto &g : c.vecGroups ) {
-            s += "      <mcpttPI10:affiliation group=\"" + McpttXmlEsc( g.strGroupUri ) + "\" status=\"affiliated\"";
+            s += "      <" + pfx + ":affiliation group=\"" + McpttXmlEsc( g.strGroupUri ) + "\" status=\"affiliated\"";
             if ( !g.strExpires.empty() ) s += " expires=\"" + McpttXmlEsc( g.strExpires ) + "\"";
             s += "/>\r\n";
         }
         s += "    </status>\r\n";
         s += "  </tuple>\r\n";
     }
-    if ( !strPid.empty() ) s += "  <mcpttPI10:p-id>" + McpttXmlEsc( strPid ) + "</mcpttPI10:p-id>\r\n";
+    if ( !strPid.empty() ) s += "  <" + pfx + ":p-id>" + McpttXmlEsc( strPid ) + "</" + pfx + ":p-id>\r\n";
     s += "</presence>\r\n";
     return s;
 }

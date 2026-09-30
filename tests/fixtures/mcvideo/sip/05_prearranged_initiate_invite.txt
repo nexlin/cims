@@ -12,7 +12,7 @@ P-Preferred-Service: urn:urn-7:3gpp-service.ims.icsi.mcvideo
 Supported: timer
 Session-Expires: 1800
 Content-Type: multipart/mixed;boundary=mcv-inv-2
-Content-Length: 1152
+Content-Length: 1131
 
 --mcv-inv-2
 Content-Type: application/sdp
@@ -25,7 +25,7 @@ t=0 0
 m=audio 40010 RTP/AVP 96 101
 i=audio component of MCVideo
 a=rtpmap:96 AMR-WB/16000
-a=fmtp:96 mode-change-capability=2;max-red=0
+a=fmtp:96 octet-align=1
 a=rtpmap:101 telephone-event/16000
 a=fmtp:101 0-15
 a=sendrecv

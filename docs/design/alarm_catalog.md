@@ -410,7 +410,8 @@ regroup_changed). fm_catalog.json 선언과 구현이 일치한다.
   `SelectAffiliatedGroupsByUser` 로 **지우기 전에** 대상 그룹을 확보한다 — 지운 뒤에는 어느
   그룹에서 빠졌는지 알 길이 없다. 발화 단위는 사용자가 아니라 **그룹 1건 요약**
   (`count` = 변경 후 멤버 수): 등록이 몰릴 때 사용자마다 쏘면 이벤트가 그 수만큼 불어나고,
-  운용이 묻는 것은 그 그룹의 현재 인원이기 때문이다.
+  운용이 묻는 것은 그 그룹의 현재 인원이기 때문이다. `service`(mcptt|mcvideo)로 서비스를 가른다 —
+  제휴는 서비스마다 따로라(TS 23.280 §5.2.5) `count` 도 그 서비스의 인원이다.
 - `E-AUD-010` regroup_changed — 생성은 `ModuleDispatcher` 의 ad-hoc 그룹 `Insert` 직후,
   해제는 `GroupCallService` teardown 2지점의 `GroupMap.Remove` 직후
   (`CGroupCallService::EmitRegroupEvent` 공용). ephemeral 이라 통화가 끝나면 맵에서 사라져

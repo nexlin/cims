@@ -154,6 +154,7 @@ CSipServerSetup::CSipServerSetup()
       m_bRolePttAs( true ),
       m_bRoleIbcf( true ),
       m_bRoleMcData( true ),
+      m_bRoleMcVideo( false ),
       m_bRecordEnable( false ),
       m_iFileSize( 0 ) {
 }
@@ -573,6 +574,7 @@ bool CSipServerSetup::Read( const char *pszFileName ) {
                 if ( roles.Has( "PTT_AS" ) ) m_bRolePttAs = ( roles.GetString( "PTT_AS" ) == "true" );
                 if ( roles.Has( "IBCF" ) ) m_bRoleIbcf = ( roles.GetString( "IBCF" ) == "true" );
                 if ( roles.Has( "MCDATA" ) ) m_bRoleMcData = ( roles.GetString( "MCDATA" ) == "true" );
+                if ( roles.Has( "MCVIDEO" ) ) m_bRoleMcVideo = ( roles.GetString( "MCVIDEO" ) == "true" );
             }
 
             // 사이트 영역 경로 (site_directory_layout.md) — 서비스 로그(log)·녹취(recordings)·상태(state)·

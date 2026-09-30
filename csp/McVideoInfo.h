@@ -148,6 +148,19 @@ inline bool McVideoFeatureIn( const std::string &v ) {
     return false;
 }
 
+/** 요청이 MCVideo 서비스의 것인가 — MCPTT 와 같은 메서드·Event(PUBLISH/SUBSCRIBE Event: presence, INVITE)를 쓰므로
+ * 서비스 표시로 가른다(TS 24.281 §8.2.2.2.3 3)·§8.2.2.2.4 3) — P-Asserted-Service/P-Preferred-Service 의 MCVideo ICSI,
+ * RFC 6050) · mcvideo-info 본문 (§8.2.2.2.3 2)) · pidf 의 mcvideoPresInfo 네임스페이스(§8.3.1) · Accept 의 mcvideo 문서
+ * 형식. 하나라도 있으면 MCVideo. services = P-Asserted-Service 와 P-Preferred-Service 값을 이은 문자열, ctype =
+ * "type/subtype". */
+inline bool McVideoRequestIndicated( const std::string &services, const std::string &accept, const std::string &body,
+                                     const std::string &ctype ) {
+    if ( McVideoIcsiIn( services ) ) return true;
+    if ( accept.find( "mcvideo" ) != std::string::npos ) return true;
+    if ( !McVideoBodyPart( body, ctype, kMcVideoInfoSubtype ).empty() ) return true;
+    return body.find( "urn:3gpp:ns:mcvideoPresInfo" ) != std::string::npos;
+}
+
 /** REGISTER Contact 가 MCVideo 클라이언트를 싣는가 — g.3gpp.mcvideo 와 icsi-ref 의 MCVideo ICSI 가 **둘 다**(TS 24.281
  * §7.2.1 1)·2)). 태그를 뺀 재-REGISTER 는 MCVideo 로그오프다(§7.2.1 NOTE 1). */
 inline bool McVideoContactCapable( const std::string &contactParams ) {

@@ -8,6 +8,7 @@
 #include "IModule.h"
 #include "IbcfModule.h"
 #include "McDataAsModule.h"
+#include "McVideoAsModule.h"
 #include "PttAsModule.h"
 #include "SipMutex.h"
 #include "SipUserAgent.h"
@@ -74,6 +75,9 @@ public:
     CMcDataAsModule *GetMcDataAs() {
         return &m_clsMcDataAs;
     }
+    CMcVideoAsModule *GetMcVideoAs() {
+        return &m_clsMcVideoAs;
+    }
 
     // ISipStackCallBack
     bool RecvRequest( int iThreadId, CSipMessage *pclsMessage ) override;
@@ -128,6 +132,7 @@ private:
     CPttAsModule m_clsPttAs;
     CIbcfModule m_clsIbcf;
     CMcDataAsModule m_clsMcDataAs;
+    CMcVideoAsModule m_clsMcVideoAs;
 
     std::map<std::string, IModule *> m_mapCallOwner;
     CSipMutex m_clsOwnerMutex;

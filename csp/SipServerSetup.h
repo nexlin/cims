@@ -234,6 +234,10 @@ public:
     bool m_bRolePttAs;
     bool m_bRoleIbcf;
     bool m_bRoleMcData;
+    /** MCVideo 참여·제어 기능(TS 24.281 — CMcVideoAsModule). 기본 off — MCVideo 표(sql/migrate_mcvideo.sql)·CMP
+     * resource.mcvideo 가 갖춰진 사이트만 켠다. 꺼져 있으면 MCVideo 요청(ICSI·mcvideo-info)은 PSI 미할당 404(TS 24.281
+     * §6.3.7.1) — MCPTT 로 읽지 않는다. */
+    bool m_bRoleMcVideo;
 
     // ================================================================
     // 로그 기능

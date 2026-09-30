@@ -56,9 +56,10 @@ extern int SendConferenceNotifyToSubscribers( const std::string &strGroupId, con
                                               std::set<std::string> *psetNotifiedUsers );
 
 // CscfModule.cpp — 제휴 변경 감사(E-AUD-009)·affiliation-info 구독자 NOTIFY (TS 24.379 §9.2.2.3.5)
-extern void EmitAffiliationChanged( const std::string &strGroupId, const char *pszAction,
-                                    const std::string &strUserId );
-extern void SendAffiliationNotify( const std::string &strUserId, const std::string &strPid );
+extern void EmitAffiliationChanged( const std::string &strGroupId, const char *pszAction, const std::string &strUserId,
+                                    EMcService eService = EMcService::Mcptt );
+extern void SendAffiliationNotify( const std::string &strUserId, const std::string &strPid,
+                                   EMcService eService = EMcService::Mcptt );
 
 // External global objects
 extern CSipUserAgent gclsUserAgent;

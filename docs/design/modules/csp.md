@@ -66,13 +66,23 @@ SIP 스택에 `[CModuleDispatcher, CSipUserAgent]` 순서로 콜백 등록:
       "CSCF": true,    // 등록/인증/구독
       "TAS": true,     // VoIP 부가서비스
       "PTT_AS": true,  // PTT 그룹콜
-      "IBCF": false    // IP-PBX 트렁크
+      "IBCF": false,   // IP-PBX 트렁크
+      "MCDATA": true,  // MCData 그룹 SDS/FD (TS 24.282)
+      "MCVIDEO": false // MCVideo 그룹 영상 (TS 24.281) — 기본 off
     }
   }
 }
 ```
 
-`Roles` 섹션 미지정 시 전체 역할 활성화 (하위 호환).
+`Roles` 섹션 미지정 시 MCVIDEO 를 뺀 전체 역할 활성화 (하위 호환). **MCVIDEO** 는 MCVideo 표(`sql/migrate_mcvideo.sql`)와 CMP
+`resource.mcvideo` 가 갖춰진 사이트만 켠다. 꺼져 있어도 MCVideo 요청(서비스 표시 — 아래)은 MCPTT 로 읽지 않고 404 로 끝낸다
+(참여 MCVideo 기능 PSI 미할당, TS 24.281 §6.3.7.1).
+
+**서비스 판별 (MCPTT ↔ MCVideo)** — 두 서비스는 같은 메서드(INVITE·PUBLISH·SUBSCRIBE)·같은 Event(`presence`)·같은 그룹 id 를 쓰는
+나란한 MC 서비스다(TS 23.280 §5.2.5). `CMcVideoAsModule::IsMcVideoRequest` 가 P-Asserted-Service·P-Preferred-Service·Accept-Contact 의
+MCVideo ICSI, Accept 의 mcvideo 문서 형식, mcvideo-info 본문, pidf 의 `mcvideoPresInfo` 네임스페이스 중 하나라도 있으면 MCVideo 로
+가른다(`McVideoRequestIndicated`, 표시가 없으면 MCPTT). INVITE 는 `EventIncomingCall` 이 MCPTT 판정(mcptt-info·PSI·그룹 R-URI)보다
+먼저 MCVideo 모듈로 보내고, 제휴 PUBLISH/SUBSCRIBE 는 CSCF 경로가 서비스 인자로 처리한다(아래 §3 CCscfModule).
 
 ---
 
@@ -108,6 +118,7 @@ SIP 스택에 `[CModuleDispatcher, CSipUserAgent]` 순서로 콜백 등록:
 
 ```
 RecvRequest(INVITE)
+  ├─ MCVideo 서비스 표시? ───→ MCVIDEO-AS (CMcVideoAsModule — 역할 off 면 404, 그룹 호(A10) 전까지 480)
   ├─ PTT 그룹 대상? ──────────→ PTT-AS (SetCallOwner → CPttAsModule)
   ├─ 트렁크 prefix 매칭? ──→ IBCF (SetCallOwner → CIbcfModule)
   ├─ 착신 차단(ICB)? ───────→ 603 Decline 응답 (전체 ∨ 지정 번호 — 착신전환보다 우선)
@@ -724,12 +735,14 @@ SIP SUBSCRIBE/NOTIFY 다이얼로그 상태 관리.
 |--------|------|------|-----------|
 | reg | RFC 3680 | 자기 등록 상태(생성/갱신/해제/만료) | reginfo XML |
 | affiliation | RFC 3856 (presence) · TS 24.379 §9.2.2.2.5 | 제휴 상태 변경 | pidf XML(per-user affiliation information §9.3.1 — group = MCPTT group ID `tel:g001`) |
+| mcvideo_affiliation | RFC 3856 (presence) · TS 24.281 §8.2.2.2.5 | MCVideo 제휴 상태 변경 | pidf XML(같은 모양, 네임스페이스 `mcvideoPresInfo`, 표 `mcvideo_affiliations`) |
 | conference | RFC 4575 | 그룹 참가자 로스터 | conference-info XML |
 | gms | RFC 5875 (xcap-diff) | 그룹 멤버십 변경 알림 | xcap-diff XML |
 | cms | RFC 5875 (xcap-diff) | 사용자 설정 변경 알림 | xcap-diff XML |
 
 타입 판별은 `CscfModule` 의 `Event` 헤더 우선 순서를 따른다: `reg` → `affiliation`(Event:presence
-또는 옛 단말의 Accept 에 mcptt-affiliation-info) → `conference`(Event:conference **또는** Request-URI 가 알려진
+또는 옛 단말의 Accept 에 mcptt-affiliation-info — MCVideo 서비스 표시가 있으면 `mcvideo_affiliation`: 역할 off 404, served ID
+= mcvideo-info `<mcvideo-request-uri>` ≠ 요청자 403, TS 24.281 §8.2.2.2.4) → `conference`(Event:conference **또는** Request-URI 가 알려진
 그룹 — Event 헤더 없는 구현 호환) → Request-URI 의 gms/cms → 기본값 gms.
 
 ⚠️ **갱신(in-dialog refresh) SUBSCRIBE 는 이 판별을 타면 안 된다.** 갱신 요청의 Request-URI 는
@@ -783,6 +796,12 @@ struct SubscriptionInfo {
 형식 오류(비숫자·2^32 초과)는 **400 Bad Request**(RFC 3261 §21.4.1). 제휴 PUBLISH 도 같은 규칙(RFC 3903 §4.1).
 
 **제휴 PUBLISH 는 두 형태를 받는다** — 규격형 `Event: presence`(TS 24.379 §9.2.2.2.3: R-URI=참여 기능 PSI, 본문 `application/pidf+xml` 이 제휴 그룹 **집합 전체** → 목록에 없는 그룹은 해제)와 구형 `Event: mcptt`(R-URI=그룹, 본문 affiliation-command+xml — 전환기 한시). 그 외 Event 는 489. 자세한 것은 [mcptt_standard_conformance.md](../features/mcptt_standard_conformance.md) C1.
+규격형 PUBLISH 는 **서비스로 먼저 가른다**(`CMcVideoAsModule::IsMcVideoRequest`) — MCVideo 제휴(TS 24.281 §8.2.2.2.3)는 multipart 의 pidf
+파트를 읽고, 역할 off·MCVideo 표 없음 404 · served ID(mcvideo-info `<mcvideo-request-uri>`) ≠ 요청자 403 · Expires 없음 또는 0 이 아닌데
+2^32-1 미만 423(Min-Expires 4294967295) · MCVideo 이용 자격(`mcvideo_user_profile` 행) 없음 403 · 대상 = MCVideo 서비스를 가진 그룹(`_mcvideo`)만 ·
+`mcvideo_affiliations` 에 만료 없음(NULL — «지울 때까지», 등록 해제가 행을 지운다)으로 쓰고 200 OK `Expires: 4294967295` · 통지는
+`mcvideo_affiliation` 구독자에게 `mcvideoPresInfo` 문서. 제휴 감사 이벤트(E-AUD-009)는 `service` 를 싣는다. pidf 해석은 시작태그의 `>` 뒤로
+넘어가며 찾는다(접두사 길이와 무관).
 REGISTER 는 `GetRegisterExpires` 로 Contact `;expires` 를 Expires 헤더보다 우선해 읽고(§10.2.1.1), 둘 다 없으면
 `REGISTER_DEFAULT_EXPIRES_SEC`=3600(§10.2.4 — 없음은 해제가 아니다), 요청값은 그대로 수락하되 내부 표현(int 초)의
 범위로만 자른다(운영 상한은 별도 정책). 종전의 int + `-1`(미지정) 표지 구조는 `4294967295` 같은 값이 -1 로 넘쳐
@@ -1048,7 +1067,9 @@ relay bookkeeping 의 키는 **session_id**(`csp_{yyyymmddHHMMSSmmm}_{n}`, 재�
       "CSCF": true,
       "TAS": true,
       "PTT_AS": true,
-      "IBCF": false
+      "IBCF": false,
+      "MCDATA": true,
+      "MCVIDEO": false
     },
     "Database": {
       "DbHost": "127.0.0.1",

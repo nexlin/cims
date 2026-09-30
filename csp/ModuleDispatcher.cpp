@@ -77,10 +77,10 @@ CModuleDispatcher::~CModuleDispatcher() {
 // ──────────────────────────────────────────────────────────────
 
 void CModuleDispatcher::InitModules() {
-    CLog::Print( LOG_SYSTEM, "ModuleDispatcher: Roles CSCF=%s TAS=%s PTT-AS=%s IBCF=%s MCDATA-AS=%s",
+    CLog::Print( LOG_SYSTEM, "ModuleDispatcher: Roles CSCF=%s TAS=%s PTT-AS=%s IBCF=%s MCDATA-AS=%s MCVIDEO-AS=%s",
                  m_clsCscf.IsEnabled() ? "ON" : "OFF", m_clsTas.IsEnabled() ? "ON" : "OFF",
                  m_clsPttAs.IsEnabled() ? "ON" : "OFF", m_clsIbcf.IsEnabled() ? "ON" : "OFF",
-                 m_clsMcDataAs.IsEnabled() ? "ON" : "OFF" );
+                 m_clsMcDataAs.IsEnabled() ? "ON" : "OFF", m_clsMcVideoAs.IsEnabled() ? "ON" : "OFF" );
 }
 
 bool CModuleDispatcher::Start( CSipStackSetup &clsSetup ) {
@@ -868,6 +868,14 @@ void CModuleDispatcher::EventIncomingCall( const char *pszCallId, const char *ps
     }
 
     if ( strlen( pszTo ) == 0 ) return StopCall( pszCallId, SIP_DECLINE );
+
+    // MCVideo 호(TS 24.281) — MCPTT 와 같은 INVITE 라 서비스 표시(Accept-Contact·P-Preferred-Service 의 MCVideo ICSI ·
+    // mcvideo-info
+    //   본문)로 먼저 가른다. MCPTT 판정(mcptt-info·PSI·그룹 Request-URI)보다 앞이다 — MCVideo 호가 MCPTT 그룹 호로
+    //   잡히지 않게 (mcvideo.md §5.2 «모듈»). 역할이 꺼져 있어도 모듈이 404 로 끝낸다(MCPTT 로 흘리지 않는다).
+    if ( CMcVideoAsModule::IsMcVideoRequest( pclsMessage ) &&
+         m_clsMcVideoAs.OnIncomingCall( pszCallId, pszFrom, pszTo, pclsRtp, pclsMessage ) == E_ROUTE_HANDLED )
+        return;
 
     // MCPTT condition(emergency/imminent)·session-type 파싱 — INVITE 의 mcptt-info+xml (TS 24.379).
     //   condition 은 session-type 과 직교. ProcessGroupCall 로 전달해 floor tier·fan-out 광고에 반영.

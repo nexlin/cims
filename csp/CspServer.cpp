@@ -781,11 +781,14 @@ static std::string BuildRegInfoBody( const SubscriptionInfo &sub, const CUserInf
  *   그룹 ID 표기는 user-profile·GMS 와 같은 MCPTT group ID(tel:g001)다 — 그룹 세션 URI(sip:g001@도메인)가 아니다.
  *   DB 미연결이면 제휴 정본을 읽을 수 없으므로 tuple 없는 문서를 낸다(판정 경로 IsAffiliated 도 그때는 거짓이다).
  * @param strPid 이 NOTIFY 를 부른 PUBLISH 의 p-id — 있으면 <p-id> 로 되돌린다(§9.2.2.2.5 3) d)).
+ * @param eService MCVideo 면 mcvideo_affiliations · mcvideoPresInfo 문서
+ *   (TS 24.281 §8.2.2.2.5 — 같은 모양, 서비스별 표).
  */
-static std::string BuildAffiliationInfoBody( const std::string &strUserId, const std::string &strPid ) {
+static std::string BuildAffiliationInfoBody( const std::string &strUserId, const std::string &strPid,
+                                             EMcService eService = EMcService::Mcptt ) {
     std::vector<CMcpttAffClient> vecClients;
     std::vector<CDbManager::CAffiliationRow> vecRows;
-    if ( gclsDbManager.IsConnected() && gclsDbManager.SelectActiveAffiliationsByUser( strUserId, vecRows ) ) {
+    if ( gclsDbManager.IsConnected() && gclsDbManager.SelectActiveAffiliationsByUser( strUserId, vecRows, eService ) ) {
         for ( const auto &r : vecRows ) {  // client_id 순 정렬 — 같은 클라이언트는 연속한다
             if ( vecClients.empty() || vecClients.back().strClientId != r.strClientId ) {
                 vecClients.emplace_back();
@@ -807,7 +810,7 @@ static std::string BuildAffiliationInfoBody( const std::string &strUserId, const
         CLog::Print( LOG_ERROR, "[Affiliation/NOTIFY] user=%s 제휴 조회 불가(DB) — tuple 없는 문서",
                      strUserId.c_str() );
     }
-    return BuildPidfAffiliationInfo( McpttIdUri( strUserId ), vecClients, strPid );
+    return BuildPidfAffiliationInfo( McpttIdUri( strUserId ), vecClients, strPid, eService == EMcService::McVideo );
 }
 
 /**
@@ -925,9 +928,10 @@ static void SendNotifyToSubscriber( const SubscriptionInfo &sub, const std::stri
         // dialog-event: notifier = 감시 대상 AoR (RFC 4235, watched resource)
         pMsg->m_clsFrom.m_clsUri.Set( "sip", sub.strResourceId.c_str(), strLocalIp.c_str(), iLocalPort );
     } else {
-        std::string strServerPsi = ( sub.strEventType == "gms" )           ? "gms_psi"
-                                   : ( sub.strEventType == "affiliation" ) ? "mcptt_psi"
-                                                                           : "cms_psi";
+        std::string strServerPsi = ( sub.strEventType == "gms" )                   ? "gms_psi"
+                                   : ( sub.strEventType == "affiliation" )         ? "mcptt_psi"
+                                   : ( sub.strEventType == "mcvideo_affiliation" ) ? "mcvideo_psi"
+                                                                                   : "cms_psi";
         pMsg->m_clsFrom.m_clsUri.Set( "sip", strServerPsi.c_str(), strLocalIp.c_str(), iLocalPort );
     }
     if ( !sub.strToTag.empty() ) {
@@ -997,10 +1001,14 @@ static void SendNotifyToSubscriber( const SubscriptionInfo &sub, const std::stri
         // reginfo version 은 구독 내 0 부터 시작 (RFC 3680) — 첫 NOTIFY 의 iSeq 가 2 이므로 -2
         strBody = BuildRegInfoBody( sub, clsUserInfo, bRegistered, iSeq - 2, pszRegEvent );
         pMsg->m_clsContentType.Set( "application", "reginfo+xml" );
-    } else if ( sub.strEventType == "affiliation" ) {
-        // 제휴 상태(TS 24.379 §9.2.2.2.5) — 본문은 pidf(§9.3.1). PUBLISH 가 부른 통지는 p-id 를 담은 prebuilt 본문.
+    } else if ( sub.strEventType == "affiliation" || sub.strEventType == "mcvideo_affiliation" ) {
+        // 제휴 상태(TS 24.379 §9.2.2.2.5 · TS 24.281 §8.2.2.2.5) — 본문은 pidf(§9.3.1 · §8.3.1).
+        //   PUBLISH 가 부른 통지는 p-id 를 담은 prebuilt 본문. 서비스마다 구독이 따로다
+        //   (MCVideo = mcvideo_affiliation — 요청의 서비스 표시로 갈랐다).
         pMsg->AddHeader( "Event", "presence" );
-        strBody = ( pstrPrebuiltBody != NULL ) ? *pstrPrebuiltBody : BuildAffiliationInfoBody( sub.strUserId, "" );
+        const EMcService eSvc = sub.strEventType == "mcvideo_affiliation" ? EMcService::McVideo : EMcService::Mcptt;
+        strBody =
+            ( pstrPrebuiltBody != NULL ) ? *pstrPrebuiltBody : BuildAffiliationInfoBody( sub.strUserId, "", eSvc );
         pMsg->m_clsContentType.Set( "application", "pidf+xml" );
     } else if ( sub.strEventType == "conference" ) {
         // 참가자 정보 (RFC 4575) — 본문은 호출자(GroupCallService)가 만든 로스터 스냅샷
@@ -1071,9 +1079,10 @@ void SendTerminatedNotify( const SubscriptionInfo &sub, const char *pszReason ) 
         // dialog-event: notifier = 감시 대상 AoR (RFC 4235, watched resource)
         pMsg->m_clsFrom.m_clsUri.Set( "sip", sub.strResourceId.c_str(), strLocalIp.c_str(), iLocalPort );
     } else {
-        std::string strServerPsi = ( sub.strEventType == "gms" )           ? "gms_psi"
-                                   : ( sub.strEventType == "affiliation" ) ? "mcptt_psi"
-                                                                           : "cms_psi";
+        std::string strServerPsi = ( sub.strEventType == "gms" )                   ? "gms_psi"
+                                   : ( sub.strEventType == "affiliation" )         ? "mcptt_psi"
+                                   : ( sub.strEventType == "mcvideo_affiliation" ) ? "mcvideo_psi"
+                                                                                   : "cms_psi";
         pMsg->m_clsFrom.m_clsUri.Set( "sip", strServerPsi.c_str(), strLocalIp.c_str(), iLocalPort );
     }
     if ( !sub.strToTag.empty() ) {
@@ -1116,11 +1125,12 @@ void SendTerminatedNotify( const SubscriptionInfo &sub, const char *pszReason ) 
         pMsg->m_clsContactList.push_back( clsSelfContact );
     }
 
-    pMsg->AddHeader( "Event", sub.strEventType == "reg"           ? "reg"
-                              : sub.strEventType == "affiliation" ? "presence"
-                              : sub.strEventType == "conference"  ? "conference"
-                              : sub.strEventType == "dialog"      ? "dialog"
-                                                                  : "xcap-diff" );
+    pMsg->AddHeader( "Event", sub.strEventType == "reg"                   ? "reg"
+                              : sub.strEventType == "affiliation"         ? "presence"
+                              : sub.strEventType == "mcvideo_affiliation" ? "presence"
+                              : sub.strEventType == "conference"          ? "conference"
+                              : sub.strEventType == "dialog"              ? "dialog"
+                                                                          : "xcap-diff" );
     pMsg->AddHeader(
         "Subscription-State",
         ( std::string( "terminated;reason=" ) + ( pszReason && *pszReason ? pszReason : "timeout" ) ).c_str() );
@@ -1208,8 +1218,8 @@ void SendInitialNotify( const SubscriptionInfo &sub ) {
         SendNotifyToSubscriber( sub, "", "" );
         return;
     }
-    if ( sub.strEventType == "affiliation" ) {
-        // C2: 제휴상태 초기 NOTIFY (현재 affiliated 그룹 목록).
+    if ( sub.strEventType == "affiliation" || sub.strEventType == "mcvideo_affiliation" ) {
+        // C2: 제휴상태 초기 NOTIFY (현재 affiliated 그룹 목록 — 서비스는 구독의 것, TS 24.281 §8.2.2.2.4).
         SendNotifyToSubscriber( sub, "init", "" );
         return;
     }
@@ -1393,14 +1403,16 @@ void SendServiceConfigNotify( const std::string &etag ) {
  * @brief C2: 가입자의 affiliation 상태 변경 시 그 가입자의 "affiliation"(presence) 구독자에게
  *   제휴 상태 NOTIFY(pidf, TS 24.379 §9.2.2.2.5)를 푸시한다. RecvRequestPublish(affiliate/de-affiliate) 에서 호출.
  * @param strPid 부른 PUBLISH 의 p-id(규격형 PUBLISH 만 가짐) — 비면 <p-id> 없이 낸다.
+ * @param eService 제휴 서비스 — 그 서비스의 구독자에게만(MCVideo = "mcvideo_affiliation" 구독, TS 24.281 §8.2.2.2.5).
  */
-void SendAffiliationNotify( const std::string &strUserId, const std::string &strPid ) {
+void SendAffiliationNotify( const std::string &strUserId, const std::string &strPid, EMcService eService ) {
     std::list<SubscriptionInfo> subList;
-    gclsSubscriptionManager.GetSubscriptionsByUser( strUserId, "affiliation", subList );
-    CLog::Print( LOG_INFO, "SendAffiliationNotify: User=%s subs=%d p-id=%s", strUserId.c_str(), (int)subList.size(),
-                 strPid.empty() ? "-" : strPid.c_str() );
+    const bool bMcv = eService == EMcService::McVideo;
+    gclsSubscriptionManager.GetSubscriptionsByUser( strUserId, bMcv ? "mcvideo_affiliation" : "affiliation", subList );
+    CLog::Print( LOG_INFO, "SendAffiliationNotify(%s): User=%s subs=%d p-id=%s", McServiceName( eService ),
+                 strUserId.c_str(), (int)subList.size(), strPid.empty() ? "-" : strPid.c_str() );
     if ( subList.empty() ) return;
-    const std::string strBody = BuildAffiliationInfoBody( strUserId, strPid );  // 구독자 모두 같은 문서
+    const std::string strBody = BuildAffiliationInfoBody( strUserId, strPid, eService );  // 구독자 모두 같은 문서
     for ( auto &sub : subList ) {
         SendNotifyToSubscriber( sub, "aff", "", NULL, NULL, &strBody );
     }

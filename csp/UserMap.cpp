@@ -21,6 +21,7 @@
 #include "CspAddressing.h"
 #include "IpsecSaSet.h"
 #include "Log.h"
+#include "McVideoInfo.h"  // McVideoContactCapable
 #include "MemoryDebug.h"
 #include "SipParserDefine.h"
 #include "SipServer.h"
@@ -39,6 +40,7 @@ CUserInfo::CUserInfo()
       m_iLastSeenTime( 0 ),
       m_bKeepAliveSeen( false ),
       m_bMcDataMsrp( false ),
+      m_bMcVideo( false ),
       m_bMediaSecSdes( false ),
       m_iRegisterCSeq( 0 ),
       m_bIntegrityProtected( false ),
@@ -193,6 +195,12 @@ bool CUserMap::Insert( CSipMessage *pclsMessage, CspUser *pclsXmlUser, bool bInt
             clsInfo.m_bMcDataMsrp = true;
         }
 
+        // MCVideo 클라이언트 — Contact 파라미터 전체(특성 태그 둘)로 판정한다(TS 24.281 §7.2.1AA).
+        std::string strParams;
+        for ( const auto &clsParam : pclsMessage->m_clsContactList.front().m_clsParamList )
+            strParams += ";" + clsParam.m_strName + ( clsParam.m_strValue.empty() ? "" : "=" + clsParam.m_strValue );
+        clsInfo.m_bMcVideo = McVideoContactCapable( strParams );
+
         // as-registered Contact URI·파라미터 보관 (200 OK 에코·reginfo <uri>/<unknown-param> 용)
         char szContactUri[256];
         if ( pclsMessage->m_clsContactList.front().m_clsUri.ToString( szContactUri, sizeof( szContactUri ) ) > 0 ) {
@@ -285,6 +293,7 @@ bool CUserMap::Insert( CSipMessage *pclsMessage, CspUser *pclsXmlUser, bool bInt
             clsBind.m_iLoginTime = clsInfo.m_iLoginTime;
             clsBind.m_iLoginTimeout = clsInfo.m_iLoginTimeout;
             clsBind.m_bMcDataMsrp = clsInfo.m_bMcDataMsrp;
+            clsBind.m_bMcVideo = clsInfo.m_bMcVideo;
             clsBind.m_bMediaSecSdes = clsInfo.m_bMediaSecSdes;
             if ( pclsIpsec ) {
                 // 같은 flow 의 재등록 — 재인증이면 새 SA 셋으로 결부가 바뀐다 (구 셋은 IpsecSaSet 이 retiring)
