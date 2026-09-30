@@ -39,6 +39,12 @@ import com.cims.ue.sdk.jni.CallQuality as JniCallQuality
 import com.cims.ue.sdk.jni.QualityDirection as JniQualityDirection
 import com.cims.ue.sdk.jni.StringVector
 import com.cims.ue.sdk.jni.TlsPeerExpiry as JniTlsPeerExpiry
+import com.cims.ue.sdk.jni.ReceptionEvent as JniReceptionEvent
+import com.cims.ue.sdk.jni.TransmissionEvent as JniTransmissionEvent
+import com.cims.ue.sdk.jni.TransmissionInfo as JniTransmissionInfo
+import com.cims.ue.sdk.jni.VideoGroupCallOptions as JniVideoGroupCallOptions
+import com.cims.ue.sdk.jni.VideoTransmitter as JniVideoTransmitter
+import com.cims.ue.sdk.jni.VideoTransmitterVector
 
 // ── 명령 결과 ────────────────────────────────────────────────────────────────
 /** 명령의 즉시 결과(인자·상태 오류). 프로토콜 결과는 이벤트로 온다.
@@ -97,6 +103,18 @@ object FloorIndicator {
 
 /** 오디오 라우트 — 입력의 EARPIECE = 내장 기본(하단) 마이크 고정, DEFAULT = 정책(고정 해제). 서수 = 코어 AudioRoute. */
 enum class AudioRoute { DEFAULT, EARPIECE, LOUDSPEAKER }
+/** MC 서비스(서수 = 코어 McService) — 호·affiliation 은 서비스마다 따로다(TS 23.280 §5.2.5). */
+enum class McService { MCPTT, MCVIDEO }
+/** MCVideo 내 송출 상태(TS 24.581 §6.2.4 'U: …', 서수 = 코어 TransmissionState). */
+enum class TransmissionState { NO_PERMISSION, PENDING_REQUEST, PERMITTED, PENDING_END, QUEUED }
+/** 한 송출의 내 수신 상태(§6.2.5, 서수 = 코어 ReceptionState). */
+enum class ReceptionState { NOTIFIED, PENDING_REQUEST, RECEIVING, PENDING_RELEASE, ENDED }
+/** 송출 제어 이벤트 종류(서수 = 코어 TransmissionEvent::Kind). */
+enum class TransmissionEventKind {
+    GRANTED, REJECTED, REVOKED, QUEUE_POSITION, END_REQUESTED, ENDED, RECEIVER_JOINED, IDLE, QUEUE_CANCELLED, REQUEST_TIMEOUT, OTHER,
+}
+/** 수신 제어 이벤트 종류(서수 = 코어 ReceptionEvent::Kind). */
+enum class ReceptionEventKind { NOTIFIED, GRANTED, REJECTED, ENDED, RELEASED, END_REQUESTED, REQUEST_TIMEOUT, OTHER }
 /** 계측 링크 상태(cimsue/drive.h) — REFUSED(연결 키 거절·지문 불일치)는 다시 붙지 않는다. */
 enum class LinkState { IDLE, CONNECTING, CONNECTED, DISCONNECTED, REFUSED }
 
@@ -180,6 +198,12 @@ data class AccountConfig(
     /** 참여 MCData 기능 PSI — SDS disposition 통지 Request-URI(TS 24.282 §12.2.1.1). 정본 = [UeInitConfigDoc.mcdataServerUri].
      *  비면 원 발신자 AoR 로 곧장(CSP 0.2.180 전 서버 전환기). */
     val mcdataServerUri: String = "",
+    /** MCVideo 서비스 사용 — REGISTER Contact 에 MCVideo 태그(TS 24.281 §7.2.1AA). 빼고 다시 등록하면 MCVideo 로그오프. */
+    val mcvideoEnabled: Boolean = false,
+    /** 참여 MCVideo 기능 PSI — MCVideo 그룹 호·affiliation Request-URI. 정본 = [UeInitConfigDoc.mcvideoServerUri]. */
+    val mcvideoServerUri: String = "",
+    /** MCVideo 멤버 초대(prearranged) 자동 수락(§6.2.3.1.2) — 수락은 세션 합류일 뿐, 영상 보기는 수신 제어([Call.acceptReception]). */
+    val autoAnswerMcvideo: Boolean = true,
 ) {
     internal fun toJni(): JniAccountConfig = JniAccountConfig().also {
         it.serverHost = serverHost; it.serverPort = serverPort
@@ -198,6 +222,7 @@ data class AccountConfig(
         it.maxSdsCplaneBytes = maxSdsCplaneBytes; it.mcdataMsrp = mcdataMsrp
         it.mcpttVideo = mcpttVideo
         it.mcpttServerUri = mcpttServerUri; it.mcdataServerUri = mcdataServerUri
+        it.mcvideoEnabled = mcvideoEnabled; it.mcvideoServerUri = mcvideoServerUri; it.autoAnswerMcvideo = autoAnswerMcvideo
     }
 }
 
@@ -228,6 +253,28 @@ data class GroupCallOptions(
         it.listenOnly = listenOnly; it.fullDuplex = fullDuplex; it.broadcast = broadcast
         it.implicitFloorRequest = implicitFloorRequest; it.video = video
         it.members = StringVector().apply { members.forEach { m -> add(m) } }
+    }
+}
+
+/** MCVideo 그룹 호 개시·합류 옵션(TS 24.281 §9.2.1 prearranged · §9.2.2 chat, 제어 채널 fmtp TS 24.581 §14.2). */
+data class VideoGroupCallOptions(
+    /** session-type prearranged(false = chat). 그룹 문서 mcvideo-on-network-invite-members 와 맞아야 한다(어긋나면 404 Warning 117·118). */
+    val prearranged: Boolean = false,
+    /** 송출 요청 대기열 지원(mc_queueing). */
+    val queueing: Boolean = false,
+    /** 요청할 최대 송출 우선순위 1~255(mc_priority), <0 = 미기재. */
+    val maxPriority: Int = -1,
+    /** 요청할 최대 수신 우선순위 1~255(mc_reception_priority), <0 = 미기재. */
+    val maxReceptionPriority: Int = -1,
+    /** 호 성립과 함께 송출 요청(mc_implicit_request + mc_granted). 서버가 받지 않으면 코어가 명시 요청으로 잇는다. */
+    val implicitTransmissionRequest: Boolean = false,
+    /** 진행 중 세션 재합류(§9.2.1.2.4) — 앞 호의 [CallInfo.sessionUri]. 빈 값 = 새 합류. */
+    val sessionUri: String = "",
+) {
+    internal fun toJni(): JniVideoGroupCallOptions = JniVideoGroupCallOptions().also {
+        it.prearranged = prearranged; it.queueing = queueing
+        it.maxPriority = maxPriority; it.maxReceptionPriority = maxReceptionPriority
+        it.implicitTransmissionRequest = implicitTransmissionRequest; it.sessionUri = sessionUri
     }
 }
 
@@ -280,6 +327,10 @@ data class CallInfo(
     val rxLevel: Float = 1f,
     /** 내 영상 송출 허용([Call.setVideoSend]) — MCPTT 반이중은 허용이면서 발언권을 가진 동안만 보낸다. [video] 는 협상된 영상 활성. */
     val videoSend: Boolean = true,
+    /** MC 호의 서비스 — MCVideo 그룹 호면 MCVIDEO(그때 [isMcptt] 는 false, 제어는 전송 제어 — `transmission`·`reception` 이벤트). */
+    val service: McService = McService.MCPTT,
+    /** MC 세션 식별자 — 제어 기능 Contact(isfocus)의 세션 URI, 재합류([VideoGroupCallOptions.sessionUri])에 쓴다. */
+    val sessionUri: String = "",
 ) {
     val active: Boolean get() = state == CallState.ACTIVE
     val ended: Boolean get() = state == CallState.DISCONNECTED
@@ -289,7 +340,8 @@ data class CallInfo(
             c.remoteUri, c.calledParty, c.video, c.mediaActive, c.muted, c.listen,
             c.playbackRoute, c.lastCode, c.lastReason, MediaSource.list(c.sources),
             c.isMcptt, c.groupId, McpttInfo.of(c.mcptt), c.halfDuplex, c.listenOnly, c.joinedDialog,
-            McpttCondition.of(c.condition), c.rxLevel, c.videoSend)
+            McpttCondition.of(c.condition), c.rxLevel, c.videoSend,
+            ordinalOf(c.service.swigValue()), c.sessionUri)
     }
 }
 
@@ -302,6 +354,52 @@ data class McpttCondition(
 ) {
     internal companion object {
         fun of(c: JniMcpttCondition) = McpttCondition(c.emergency, c.imminentPeril, c.mine, c.pending, c.lastCode)
+    }
+}
+
+/** MCVideo 한 송출 — 송출자 한 명의 audio·video 흐름 쌍(Media Transmission Notification §9.2.13). userId 가 [Call.acceptReception] 인자. */
+data class VideoTransmitter(
+    val userId: String, val audioSsrc: Long, val videoSsrc: Long, val functionalAlias: String,
+    /** Reception Mode '0' — 서버가 곧바로 수신 허가(긴급·임박·방송·system 호). */
+    val automatic: Boolean, val state: ReceptionState,
+) {
+    internal companion object {
+        fun of(t: JniVideoTransmitter) = VideoTransmitter(t.userId, t.audioSsrc, t.videoSsrc, t.functionalAlias, t.automatic,
+            ordinalOf(t.state.swigValue()))
+        fun list(v: VideoTransmitterVector): List<VideoTransmitter> = List(v.size) { of(v[it]) }
+    }
+}
+
+/** MCVideo 송출 제어 이벤트(TS 24.581 §6.2.4) — 송출(마이크·카메라) 게이트는 코어가 이미 처리했다. */
+data class TransmissionEvent(
+    val kind: TransmissionEventKind, val callId: Int, val state: TransmissionState,
+    val cause: Int, val causeText: String, val durationSec: Int, val priority: Int, val queuePosition: Int, val indicator: Int,
+    val audioSsrc: Long, val videoSsrc: Long, val receiverId: String, val rawType: Int,
+) {
+    internal companion object {
+        fun of(e: JniTransmissionEvent) = TransmissionEvent(ordinalOf(e.kind.swigValue()), e.callId, ordinalOf(e.state.swigValue()),
+            e.cause, e.causeText, e.durationSec, e.priority, e.queuePosition, e.indicator, e.audioSsrc, e.videoSsrc, e.receiverId, e.rawType)
+    }
+}
+
+/** MCVideo 수신 제어 이벤트(§6.2.5) — 새 송출 알림(manual 이면 앱이 [받기])·수신 허가·종료. */
+data class ReceptionEvent(
+    val kind: ReceptionEventKind, val callId: Int, val transmitter: VideoTransmitter, val cause: Int, val causeText: String, val rawType: Int,
+) {
+    internal companion object {
+        fun of(e: JniReceptionEvent) = ReceptionEvent(ordinalOf(e.kind.swigValue()), e.callId, VideoTransmitter.of(e.transmitter),
+            e.cause, e.causeText, e.rawType)
+    }
+}
+
+/** MCVideo 호의 전송 제어 현재값 — transmitters = 알려진 송출(내 것 제외). */
+data class TransmissionInfo(
+    val state: TransmissionState, val transmitters: List<VideoTransmitter>, val queuePosition: Int,
+    val localPort: Int, val remoteIp: String, val remotePort: Int,
+) {
+    internal companion object {
+        fun of(t: JniTransmissionInfo) = TransmissionInfo(ordinalOf(t.state.swigValue()), VideoTransmitter.list(t.transmitters),
+            t.queuePosition, t.localPort, t.remoteIp, t.remotePort)
     }
 }
 

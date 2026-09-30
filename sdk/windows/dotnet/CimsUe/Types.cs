@@ -40,6 +40,19 @@ public enum ConditionCause
 /// <summary>오디오 라우트(types.h AudioRoute) — 모바일 라우트. 데스크톱 장치는 무시할 수 있다.</summary>
 public enum AudioRoute { Default = 0, Earpiece = 1, Loudspeaker = 2 }
 
+/// <summary>MC 서비스 — 호·affiliation 은 서비스마다 따로다(TS 23.280 §5.2.5). MCVideo 그룹 호는 MCPTT 호와 독립 다이얼로그.</summary>
+public enum McService { Mcptt = 0, McVideo = 1 }
+/// <summary>MCVideo 내 송출 상태(TS 24.581 §6.2.4 'U: …').</summary>
+public enum TransmissionState { NoPermission = 0, PendingRequest = 1, Permitted = 2, PendingEnd = 3, Queued = 4 }
+/// <summary>한 송출의 내 수신 상태(§6.2.5).</summary>
+public enum ReceptionState { Notified = 0, PendingRequest = 1, Receiving = 2, PendingRelease = 3, Ended = 4 }
+public enum TransmissionEventKind
+{
+    Granted = 0, Rejected = 1, Revoked = 2, QueuePosition = 3, EndRequested = 4, Ended = 5, ReceiverJoined = 6, Idle = 7,
+    QueueCancelled = 8, RequestTimeout = 9, Other = 10
+}
+public enum ReceptionEventKind { Notified = 0, Granted = 1, Rejected = 2, Ended = 3, Released = 4, EndRequested = 5, RequestTimeout = 6, Other = 7 }
+
 /// <summary>Floor Indicator 비트(TS 24.380 §8.2.3.15) — <see cref="FloorEvent.Indicator"/>·<see cref="FloorInfo.Indicator"/> 해석용.
 /// 정본 = docs/design/features/mcptt_floor_defs.yaml `indicator` — scripts/gen_floor_defs.py --check 가 이 값을 대조한다.</summary>
 public static class FloorIndicator
@@ -152,6 +165,14 @@ public sealed class AccountConfig
     /// <summary>참여 MCData 기능 PSI — SDS disposition 통지 Request-URI(TS 24.282 §12.2.1.1). null 이면 원 발신자 AoR 직행(CSP 0.2.180 전
     /// 서버 전환기). 정본 = ue-init-config <see cref="UeInitConfigDoc.McdataServerUri"/>.</summary>
     public string? McdataServerUri { get; set; }
+    /// <summary>자동 수락하는 MCPTT 착신의 m=video 를 영상까지 받는다(서버는 video_enabled 그룹에서만 제안한다).</summary>
+    public bool McpttVideo { get; set; }
+    /// <summary>MCVideo 서비스 사용 — REGISTER Contact 에 MCVideo 태그(TS 24.281 §7.2.1AA). 빼고 다시 등록하면 MCVideo 로그오프.</summary>
+    public bool McvideoEnabled { get; set; }
+    /// <summary>참여 MCVideo 기능 PSI — MCVideo 그룹 호·affiliation Request-URI. 정본 = ue-init-config <see cref="UeInitConfigDoc.McvideoServerUri"/>.</summary>
+    public string? McvideoServerUri { get; set; }
+    /// <summary>MCVideo 멤버 초대(prearranged) 자동 수락(§6.2.3.1.2). 수락은 세션 합류일 뿐 — 영상 보기는 수신 제어(AcceptReception).</summary>
+    public bool AutoAnswerMcvideo { get; set; } = true;
 
     /// <summary>"sip:msisdn@domain".</summary>
     public string Aor() => Engine.AccountConfigString(this, Engine.AccountStringKind.Aor);
@@ -187,6 +208,25 @@ public sealed class GroupCallOptions
     /// floor 는 호 성립 전부터 Requesting, 200 OK 의 mc_granted 나 Floor Granted 로 Speaking. 승인·성립 전에 FloorRelease 하면
     /// 발언권을 돌려준다. 누르는 동안 개시하고 말하는 한 버튼 발신(일제 통화)용.</summary>
     public bool ImplicitFloorRequest { get; set; }
+    /// <summary>그룹 영상 제안(m=video, H.264) — 반이중이면 내 영상은 발언권을 가진 동안만. 착신 영상 수락은 AccountConfig.McpttVideo.</summary>
+    public bool Video { get; set; }
+}
+
+/// <summary>MCVideo 그룹 호 개시·합류 옵션(TS 24.281 §9.2.1 prearranged · §9.2.2 chat, 제어 채널 fmtp TS 24.581 §14.2).</summary>
+public sealed class VideoGroupCallOptions
+{
+    /// <summary>session-type prearranged(false = chat). 그룹 문서 mcvideo-on-network-invite-members 와 맞아야 한다(어긋나면 404 Warning 117·118).</summary>
+    public bool Prearranged { get; set; }
+    /// <summary>송출 요청 대기열 지원(mc_queueing).</summary>
+    public bool Queueing { get; set; }
+    /// <summary>요청할 최대 송출 우선순위 1~255(mc_priority), &lt;0 = 미기재.</summary>
+    public int MaxPriority { get; set; } = -1;
+    /// <summary>요청할 최대 수신 우선순위 1~255(mc_reception_priority), &lt;0 = 미기재.</summary>
+    public int MaxReceptionPriority { get; set; } = -1;
+    /// <summary>호 성립과 함께 송출 요청(mc_implicit_request + mc_granted). 서버가 받지 않으면 코어가 명시 요청으로 잇는다.</summary>
+    public bool ImplicitTransmissionRequest { get; set; }
+    /// <summary>진행 중 세션 재합류(§9.2.1.2.4) — 앞 호의 <see cref="CallInfo.SessionUri"/>. null = 새 합류.</summary>
+    public string? SessionUri { get; set; }
 }
 
 public sealed record RegInfo(int AccountId, RegState State, int Code, string Reason, int ExpiresSec)
@@ -226,7 +266,8 @@ public sealed record CallInfo(
     bool Video, bool MediaActive, bool Muted, bool Listen, int PlaybackRoute,
     int LastCode, string LastReason, IReadOnlyList<MediaSource> Sources,
     bool IsMcptt, string GroupId, McpttInfo Mcptt, bool HalfDuplex, bool ListenOnly, string JoinedDialog,
-    float RxLevel = 1f, McpttCondition Condition = default, string AnswerState = "", IReadOnlyList<string>? NonAcknowledgedUsers = null)
+    float RxLevel = 1f, McpttCondition Condition = default, string AnswerState = "", IReadOnlyList<string>? NonAcknowledgedUsers = null,
+    McService Service = McService.Mcptt, string SessionUri = "")
 {
     public static CallInfo Empty { get; } = new(-1, -1, CallDir.Outgoing, CallState.Null, "", "", false, false, false, true, 0, 0, "",
                                                 Array.Empty<MediaSource>(), false, "", McpttInfo.None, false, false, "");
@@ -243,6 +284,24 @@ public sealed record FloorInfo(FloorState State, IReadOnlyList<Talker> Talkers, 
                                int LocalPort, string RemoteIp, int RemotePort, uint GrantedCount, uint TakenCount, uint DenyCount)
 {
     public static FloorInfo Empty { get; } = new(FloorState.Idle, Array.Empty<Talker>(), true, 0, -1, 0, "", 0, 0, 0, 0);
+}
+
+/// <summary>MCVideo 한 송출 — 송출자 한 명의 audio·video 흐름 쌍(Media Transmission Notification §9.2.13). UserId 가 AcceptReception·EndReception 인자.</summary>
+public sealed record VideoTransmitter(string UserId, uint AudioSsrc, uint VideoSsrc, string FunctionalAlias, bool Automatic, ReceptionState State);
+
+/// <summary>MCVideo 송출 제어 이벤트(TS 24.581 §6.2.4) — 송출(마이크·카메라) 게이트는 코어가 이미 처리했다.</summary>
+public sealed record TransmissionEvent(TransmissionEventKind Kind, int CallId, TransmissionState State, int Cause, string CauseText,
+                                       int DurationSec, int Priority, int QueuePosition, int Indicator, uint AudioSsrc, uint VideoSsrc,
+                                       string ReceiverId, int RawType);
+
+/// <summary>MCVideo 수신 제어 이벤트(§6.2.5) — 새 송출 알림(manual 이면 앱이 [받기])·수신 허가·종료.</summary>
+public sealed record ReceptionEvent(ReceptionEventKind Kind, int CallId, VideoTransmitter Transmitter, int Cause, string CauseText, int RawType);
+
+/// <summary>MCVideo 호의 전송 제어 현재값. Transmitters = 알려진 송출(내 것 제외).</summary>
+public sealed record TransmissionInfo(TransmissionState State, IReadOnlyList<VideoTransmitter> Transmitters, int QueuePosition,
+                                      int LocalPort, string RemoteIp, int RemotePort)
+{
+    public static TransmissionInfo Empty { get; } = new(TransmissionState.NoPermission, Array.Empty<VideoTransmitter>(), -1, 0, "", 0);
 }
 
 /// <summary>임의 SIP 요청(PUBLISH/MESSAGE 등)의 최종 응답 — token 으로 상관.</summary>

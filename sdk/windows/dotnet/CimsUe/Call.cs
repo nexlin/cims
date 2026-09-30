@@ -51,6 +51,19 @@ public sealed class Call
     public Result SetCondition(bool emergency, bool imminentPeril) =>
         Engine.Status(cimsue_engine_set_call_condition(Engine.Handle, Id, Engine.B(emergency), Engine.B(imminentPeril)));
 
+    // ── MCVideo 전송 제어 (TS 24.581) ──
+    /// <summary>전송 제어 상태 스냅샷(MCVideo 그룹 호).</summary>
+    public TransmissionInfo TransmissionInfo => Engine.TransmissionInfoOf(Id);
+    /// <summary>[영상 보내기] — Transmission Request(§6.2.4.3.2). 결과는 TransmissionChanged(Granted·Rejected·QueuePosition). priority&lt;0 = 미기재.</summary>
+    public Result RequestTransmission(int priority = -1) => Engine.Status(cimsue_engine_request_transmission(Engine.Handle, Id, priority));
+    /// <summary>[보내기 끝] — Transmission End Request(§6.2.4.5.3). 대기·요청 중이면 요청을 거둔다. 완료 = TransmissionChanged(Ended).</summary>
+    public Result ReleaseTransmission() => Engine.Status(cimsue_engine_release_transmission(Engine.Handle, Id));
+    /// <summary>[받기] — Receive Media Request(§6.2.5.3.3). transmitterId = ReceptionChanged(Notified) 의 Transmitter.UserId.</summary>
+    public Result AcceptReception(string transmitterId, int priority = -1) =>
+        Engine.Status(cimsue_engine_accept_reception(Engine.Handle, Id, transmitterId, priority));
+    /// <summary>[그만 보기] — Media Reception End Request(§6.2.5.5). 완료 = ReceptionChanged(Released).</summary>
+    public Result EndReception(string transmitterId) => Engine.Status(cimsue_engine_end_reception(Engine.Handle, Id, transmitterId));
+
     // ── 관제 ──
     /// <summary>호 전달 blind — REFER(RFC 3515). 진행은 CallStateChanged(REFER 수락 후 서버가 BYE).</summary>
     public Result Transfer(string target) => Engine.Status(cimsue_engine_transfer(Engine.Handle, Id, target));

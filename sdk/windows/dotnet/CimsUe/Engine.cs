@@ -55,6 +55,10 @@ public sealed unsafe class Engine : IDisposable
     public event EventHandler<EmergencyAlert>? EmergencyAlertReceived;
     /// <summary>개시 호의 미응답 멤버 알림(TS 24.379 §6.3.3.3 — INFO g.3gpp.mcptt-info) — Info.NonAcknowledgedUsers. 200 OK 는 코어가 이미 보냈다.</summary>
     public event EventHandler<CallInfo>? NonAcknowledgedUsersReceived;
+    /// <summary>MCVideo 송출 제어(TS 24.581 §6.2.4) — 허가·거절·회수·대기·종료.</summary>
+    public event EventHandler<TransmissionEvent>? TransmissionChanged;
+    /// <summary>MCVideo 수신 제어(§6.2.5) — 새 송출 알림(manual 이면 Call.AcceptReception)·수신 허가·종료.</summary>
+    public event EventHandler<ReceptionEvent>? ReceptionChanged;
     /// <summary>그룹 로스터(RFC 4575) — 구독 NOTIFY 또는 in-dialog NOTIFY.</summary>
     public event EventHandler<RosterUpdate>? RosterChanged;
     /// <summary>감시 대상 dialog 상태(RFC 4235 NOTIFY) — dialog 하나당 1회.</summary>
@@ -173,6 +177,13 @@ public sealed unsafe class Engine : IDisposable
         cimsue_floor_info_t f;
         cimsue_engine_floor_info(Handle, callId, &f);
         return ToManaged(&f);
+    }
+
+    internal TransmissionInfo TransmissionInfoOf(int callId)
+    {
+        cimsue_transmission_info_t t;
+        cimsue_engine_transmission_info(Handle, callId, &t);
+        return ToManaged(&t);
     }
 
     internal StreamStats StreamStatsOf(int callId)
@@ -382,6 +393,10 @@ public sealed unsafe class Engine : IDisposable
         n.mcdata_msrp = B(a.McdataMsrp);
         n.mcptt_server_uri = s.Add(a.McpttServerUri);
         n.mcdata_server_uri = s.Add(a.McdataServerUri);
+        n.mcptt_video = B(a.McpttVideo);
+        n.mcvideo_enabled = B(a.McvideoEnabled);
+        n.mcvideo_server_uri = s.Add(a.McvideoServerUri);
+        n.auto_answer_mcvideo = B(a.AutoAnswerMcvideo);
         return n;
     }
 
@@ -403,6 +418,8 @@ public sealed unsafe class Engine : IDisposable
             McpttClientId = Opt(n->mcptt_client_id), RpEmergency = Opt(n->rp_emergency), RpImminentPeril = Opt(n->rp_imminent_peril),
             RpNormal = Opt(n->rp_normal), MaxSdsCplaneBytes = n->max_sds_cplane_bytes, McdataMsrp = n->mcdata_msrp != 0,
             McpttServerUri = Opt(n->mcptt_server_uri), McdataServerUri = Opt(n->mcdata_server_uri),
+            McpttVideo = n->mcptt_video != 0, McvideoEnabled = n->mcvideo_enabled != 0, McvideoServerUri = Opt(n->mcvideo_server_uri),
+            AutoAnswerMcvideo = n->auto_answer_mcvideo != 0,
         };
     }
 
@@ -434,7 +451,7 @@ public sealed unsafe class Engine : IDisposable
                             ToManaged(c->mcptt), c->half_duplex != 0, c->listen_only != 0, Utf8.Str(c->joined_dialog),
                             c->rx_level, new McpttCondition(c->condition.emergency != 0, c->condition.imminent_peril != 0, c->condition.mine != 0,
                                                             c->condition.pending != 0, c->condition.last_code),
-                            Utf8.Str(c->answer_state), NonAck(c));
+                            Utf8.Str(c->answer_state), NonAck(c), (McService)c->service, Utf8.Str(c->session_uri));
     }
 
     private static string[] NonAck(cimsue_call_info_t* c)
@@ -462,6 +479,23 @@ public sealed unsafe class Engine : IDisposable
     internal static FloorInfo ToManaged(cimsue_floor_info_t* f) =>
         new((FloorState)f->state, ToManaged(f->talkers, f->talker_count), f->can_request != 0, f->indicator, f->queue_position,
             f->local_port, Utf8.Str(f->remote_ip), f->remote_port, f->granted_count, f->taken_count, f->deny_count);
+
+    internal static VideoTransmitter ToManaged(in cimsue_video_transmitter_t t) =>
+        new(Utf8.Str(t.user_id), t.audio_ssrc, t.video_ssrc, Utf8.Str(t.functional_alias), t.automatic != 0, (ReceptionState)t.state);
+
+    internal static TransmissionEvent ToManaged(cimsue_transmission_event_t* e) =>
+        new((TransmissionEventKind)e->kind, e->call_id, (TransmissionState)e->state, e->cause, Utf8.Str(e->cause_text), e->duration_sec,
+            e->priority, e->queue_position, e->indicator, e->audio_ssrc, e->video_ssrc, Utf8.Str(e->receiver_id), e->raw_type);
+
+    internal static ReceptionEvent ToManaged(cimsue_reception_event_t* e) =>
+        new((ReceptionEventKind)e->kind, e->call_id, ToManaged(e->transmitter), e->cause, Utf8.Str(e->cause_text), e->raw_type);
+
+    internal static TransmissionInfo ToManaged(cimsue_transmission_info_t* t)
+    {
+        var arr = new VideoTransmitter[Math.Max(0, t->transmitter_count)];
+        for (int i = 0; i < arr.Length; ++i) arr[i] = ToManaged(t->transmitters[i]);
+        return new TransmissionInfo((TransmissionState)t->state, arr, t->queue_position, t->local_port, Utf8.Str(t->remote_ip), t->remote_port);
+    }
 
     internal static RequestResult ToManaged(cimsue_request_result_t* r) =>
         new(r->account_id, r->token, Utf8.Str(r->method), r->code, Utf8.Str(r->reason), Utf8.Str(r->etag));
@@ -495,6 +529,8 @@ public sealed unsafe class Engine : IDisposable
         on_mcptt_condition = &Cb.OnMcpttCondition,
         on_emergency_alert = &Cb.OnEmergencyAlert,
         on_non_acknowledged_users = &Cb.OnNonAcknowledgedUsers,
+        on_transmission = &Cb.OnTransmission,
+        on_reception = &Cb.OnReception,
     };
 
     /// <summary>앱 스레드로 넘긴다. 컨텍스트가 없으면 이벤트 스레드에서 직접 — 예외는 네이티브 경계 밖으로 새지 않게 잡는다.</summary>
@@ -631,6 +667,20 @@ public sealed unsafe class Engine : IDisposable
         {
             var e = Of(user); if (e is null) return;
             try { var c = ToManaged(info); e.Dispatch(() => e.NonAcknowledgedUsersReceived?.Invoke(e, c)); } catch { }
+        }
+
+        [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
+        public static void OnTransmission(void* user, cimsue_transmission_event_t* ev)
+        {
+            var e = Of(user); if (e is null) return;
+            try { var t = ToManaged(ev); e.Dispatch(() => e.TransmissionChanged?.Invoke(e, t)); } catch { }
+        }
+
+        [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
+        public static void OnReception(void* user, cimsue_reception_event_t* ev)
+        {
+            var e = Of(user); if (e is null) return;
+            try { var r = ToManaged(ev); e.Dispatch(() => e.ReceptionChanged?.Invoke(e, r)); } catch { }
         }
 
         [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]

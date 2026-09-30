@@ -43,6 +43,16 @@ TEST(CApi, EnumValuesMatchCxx) {
     EXPECT_STREQ(cimsue_reg_state_str(CIMSUE_REG_REGISTERED), toString(RegState::Registered));
     EXPECT_STREQ(cimsue_floor_kind_str(CIMSUE_FLOOR_EV_GRANTED), toString(FloorEvent::Kind::Granted));
     EXPECT_STREQ(cimsue_version(), Engine::version().c_str());
+    EXPECT_EQ((int)CIMSUE_MC_SERVICE_MCVIDEO, (int)McService::McVideo);
+    EXPECT_EQ((int)CIMSUE_TX_QUEUED, (int)TransmissionState::Queued);
+    EXPECT_EQ((int)CIMSUE_RX_ENDED, (int)ReceptionState::Ended);
+    EXPECT_EQ((int)CIMSUE_TXEV_REQUEST_TIMEOUT, (int)TransmissionEvent::Kind::RequestTimeout);
+    EXPECT_EQ((int)CIMSUE_TXEV_OTHER, (int)TransmissionEvent::Kind::Other);
+    EXPECT_EQ((int)CIMSUE_RXEV_REQUEST_TIMEOUT, (int)ReceptionEvent::Kind::RequestTimeout);
+    EXPECT_EQ((int)CIMSUE_RXEV_OTHER, (int)ReceptionEvent::Kind::Other);
+    EXPECT_STREQ(cimsue_mc_service_str(CIMSUE_MC_SERVICE_MCVIDEO), "mcvideo");
+    EXPECT_STREQ(cimsue_transmission_kind_str(CIMSUE_TXEV_GRANTED), toString(TransmissionEvent::Kind::Granted));
+    EXPECT_STREQ(cimsue_reception_state_str(CIMSUE_RX_RECEIVING), toString(ReceptionState::Receiving));
 }
 
 // ── ABI 자기검사 — 바인딩이 대조할 sizeof 가 실제 구조체와 같고, 등록된 id 는 전부 답하며, 모르는 id 는 -1 ──
@@ -54,6 +64,10 @@ TEST(CApi, StructSizesForBindings) {
     EXPECT_EQ(cimsue_struct_size(CIMSUE_STRUCT_LISTENER), (int32_t)sizeof(cimsue_listener_t));
     EXPECT_EQ(cimsue_struct_size(CIMSUE_STRUCT_PROFILE), (int32_t)sizeof(cimsue_profile_t));
     EXPECT_EQ(cimsue_struct_size(CIMSUE_STRUCT_TLS_PEER_EXPIRY), (int32_t)sizeof(cimsue_tls_peer_expiry_t));
+    EXPECT_EQ(cimsue_struct_size(CIMSUE_STRUCT_VIDEO_GROUP_CALL_OPTIONS), (int32_t)sizeof(cimsue_video_group_call_options_t));
+    EXPECT_EQ(cimsue_struct_size(CIMSUE_STRUCT_TRANSMISSION_EVENT), (int32_t)sizeof(cimsue_transmission_event_t));
+    EXPECT_EQ(cimsue_struct_size(CIMSUE_STRUCT_RECEPTION_EVENT), (int32_t)sizeof(cimsue_reception_event_t));
+    EXPECT_EQ(cimsue_struct_size(CIMSUE_STRUCT_TRANSMISSION_INFO), (int32_t)sizeof(cimsue_transmission_info_t));
     for (int i = 0; i < (int)CIMSUE_STRUCT_COUNT_; ++i) EXPECT_GT(cimsue_struct_size((cimsue_struct_id_t)i), 0) << "id " << i;
     EXPECT_EQ(cimsue_struct_size(CIMSUE_STRUCT_COUNT_), -1);
 }
@@ -68,6 +82,16 @@ TEST(CApi, ConfigDefaultsFollowCxx) {
     EXPECT_EQ(c.expires_sec, d.expiresSec);
     EXPECT_EQ(c.auto_answer_mcptt != 0, d.autoAnswerMcptt);
     EXPECT_EQ(c.aka_amf, nullptr);                          // NULL → C++ 기본 "8000"
+    EXPECT_EQ(c.auto_answer_mcvideo != 0, d.autoAnswerMcvideo);
+    EXPECT_EQ(c.mcvideo_enabled != 0, d.mcvideoEnabled);
+    EXPECT_EQ(c.mcvideo_server_uri, nullptr);
+    cimsue_video_group_call_options_t vo;
+    cimsue_video_group_call_options_default(&vo);
+    const VideoGroupCallOptions vd;
+    EXPECT_EQ(vo.max_priority, vd.maxPriority);
+    EXPECT_EQ(vo.max_reception_priority, vd.maxReceptionPriority);
+    EXPECT_EQ(vo.prearranged != 0, vd.prearranged);
+    EXPECT_EQ(vo.session_uri, nullptr);
 
     // 최소 필드만 채워 헬퍼가 C++ 인라인 멤버와 같은 답을 내는지
     c.server_host = "csp.example.org"; c.domain = "ims.example.org";
@@ -222,6 +246,19 @@ TEST(CApi, EngineLifecycleHeadless) {
     cimsue_floor_info_t fi{};
     cimsue_engine_floor_info(e, 7, &fi);
     EXPECT_EQ(fi.state, CIMSUE_FLOOR_IDLE);
+    // MCVideo — 없는 호는 C++ 결과 코드·사유 그대로, 조회는 기본값(NULL/0 배열)
+    EXPECT_EQ(ci.service, CIMSUE_MC_SERVICE_MCPTT);
+    EXPECT_NE(ci.session_uri, nullptr);
+    EXPECT_EQ(cimsue_engine_request_transmission(e, 7, -1), -2);
+    EXPECT_STREQ(cimsue_last_error(), "no such call");
+    EXPECT_EQ(cimsue_engine_accept_reception(e, 7, "tel:+82510002001", -1), -2);
+    cimsue_transmission_info_t ti{};
+    cimsue_engine_transmission_info(e, 7, &ti);
+    EXPECT_EQ(ti.state, CIMSUE_TX_NO_PERMISSION);
+    EXPECT_EQ(ti.transmitter_count, 0);
+    EXPECT_EQ(ti.transmitters, nullptr);
+    EXPECT_EQ(cimsue_engine_join_video_group_call(e, acc, "g101", nullptr), -1);   // 계정에 MCVideo PSI 가 없다
+    EXPECT_EQ(cimsue_engine_affiliate_service(e, acc, "g101", 1, CIMSUE_MC_SERVICE_MCVIDEO), -1);
     cimsue_stream_stats_t ss{};
     cimsue_engine_stream_stats(e, 7, &ss);
     EXPECT_EQ(ss.valid, 0);

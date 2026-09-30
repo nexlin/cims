@@ -115,7 +115,8 @@ public sealed record ServiceConfigDoc(string ETag, bool NotModified, string Doma
 
 /// <summary>MCS UE initial configuration(TS 24.484 §7.2, csc.h UeInitConfigDoc) — 참여 기능 PSI(`&lt;anyExt&gt;` 의 *-Service-Details/Server-URI).
 /// 광고하지 않은 서비스는 빈 값 — 계정의 해당 PSI 도 비워 둔다(<see cref="AccountConfig.McpttServerUri"/>·<see cref="AccountConfig.McdataServerUri"/>).</summary>
-public sealed record UeInitConfigDoc(string ETag, bool NotModified, string Domain, string McpttServerUri, string McdataServerUri)
+public sealed record UeInitConfigDoc(string ETag, bool NotModified, string Domain, string McpttServerUri, string McdataServerUri,
+                                     string McvideoServerUri = "")
 {
     public static Result<UeInitConfigDoc> Parse(string xml) => CscClient.ParseUeInitConfig(xml);
 }
@@ -572,7 +573,8 @@ public sealed unsafe class CscClient : IDisposable
             Utf8.Str(d->rp_emergency), Utf8.Str(d->rp_imminent_peril), Utf8.Str(d->rp_normal));
 
     private static UeInitConfigDoc ToManaged(cimsue_ue_init_config_doc_t* d) =>
-        new(Utf8.Str(d->etag), d->not_modified != 0, Utf8.Str(d->domain), Utf8.Str(d->mcptt_server_uri), Utf8.Str(d->mcdata_server_uri));
+        new(Utf8.Str(d->etag), d->not_modified != 0, Utf8.Str(d->domain), Utf8.Str(d->mcptt_server_uri), Utf8.Str(d->mcdata_server_uri),
+            Utf8.Str(d->mcvideo_server_uri));
 
     private static ServiceProfile ToManaged(cimsue_service_profile_t* s)
     {

@@ -109,6 +109,10 @@ AccountConfig toCxx(const cimsue_account_config_t* c) {
     a.mcdataMsrp = c->mcdata_msrp != 0;
     assignIf(a.mcpttServerUri, c->mcptt_server_uri);
     assignIf(a.mcdataServerUri, c->mcdata_server_uri);
+    a.mcpttVideo = c->mcptt_video != 0;
+    a.mcvideoEnabled = c->mcvideo_enabled != 0;
+    assignIf(a.mcvideoServerUri, c->mcvideo_server_uri);
+    a.autoAnswerMcvideo = c->auto_answer_mcvideo != 0;
     return a;
 }
 
@@ -130,6 +134,19 @@ GroupCallOptions toCxx(const cimsue_group_call_options_t* c) {
     o.members = strList(c->members, c->member_count);
     o.broadcast = c->broadcast != 0;
     o.implicitFloorRequest = c->implicit_floor_request != 0;
+    o.video = c->video != 0;
+    return o;
+}
+
+VideoGroupCallOptions toCxx(const cimsue_video_group_call_options_t* c) {
+    VideoGroupCallOptions o;
+    if (!c) return o;
+    o.prearranged = c->prearranged != 0;
+    o.queueing = c->queueing != 0;
+    o.maxPriority = c->max_priority;
+    o.maxReceptionPriority = c->max_reception_priority;
+    o.implicitTransmissionRequest = c->implicit_transmission_request != 0;
+    assignIf(o.sessionUri, c->session_uri);
     return o;
 }
 
@@ -246,6 +263,52 @@ void fill(cimsue_call_info_t& o, const CallInfo& c, std::vector<cimsue_media_sou
     for (const auto& u : c.nonAcknowledgedUsers) ackBuf.push_back(C(u));
     o.non_ack_users = ackBuf.empty() ? nullptr : ackBuf.data();
     o.non_ack_user_count = (int32_t)ackBuf.size();
+    o.service = (cimsue_mc_service_t)c.service;
+    o.session_uri = C(c.sessionUri);
+}
+
+void fill(cimsue_video_transmitter_t& o, const VideoTransmitter& t) {
+    o.user_id = C(t.userId);
+    o.audio_ssrc = t.audioSsrc; o.video_ssrc = t.videoSsrc;
+    o.functional_alias = C(t.functionalAlias);
+    o.automatic = B(t.automatic);
+    o.state = (cimsue_reception_state_t)t.state;
+}
+
+void fill(cimsue_transmission_event_t& o, const TransmissionEvent& e) {
+    o.kind = (cimsue_transmission_kind_t)e.kind;
+    o.call_id = e.callId;
+    o.state = (cimsue_transmission_state_t)e.state;
+    o.cause = e.cause;
+    o.cause_text = C(e.causeText);
+    o.duration_sec = e.durationSec;
+    o.priority = e.priority;
+    o.queue_position = e.queuePosition;
+    o.indicator = e.indicator;
+    o.audio_ssrc = e.audioSsrc; o.video_ssrc = e.videoSsrc;
+    o.receiver_id = C(e.receiverId);
+    o.raw_type = e.rawType;
+}
+
+void fill(cimsue_reception_event_t& o, const ReceptionEvent& e) {
+    o.kind = (cimsue_reception_kind_t)e.kind;
+    o.call_id = e.callId;
+    fill(o.transmitter, e.transmitter);
+    o.cause = e.cause;
+    o.cause_text = C(e.causeText);
+    o.raw_type = e.rawType;
+}
+
+void fill(cimsue_transmission_info_t& o, const TransmissionInfo& t, std::vector<cimsue_video_transmitter_t>& buf) {
+    o.state = (cimsue_transmission_state_t)t.state;
+    buf.clear();
+    for (const auto& x : t.transmitters) { cimsue_video_transmitter_t v{}; fill(v, x); buf.push_back(v); }
+    o.transmitters = buf.empty() ? nullptr : buf.data();
+    o.transmitter_count = (int32_t)buf.size();
+    o.queue_position = t.queuePosition;
+    o.local_port = t.localPort;
+    o.remote_ip = C(t.remoteIp);
+    o.remote_port = t.remotePort;
 }
 
 void fill(cimsue_emergency_alert_t& o, const EmergencyAlert& a) {
@@ -389,6 +452,10 @@ void fill(cimsue_account_config_t& o, const AccountConfig& a, std::vector<const 
     o.mcdata_msrp = B(a.mcdataMsrp);
     o.mcptt_server_uri = C(a.mcpttServerUri);
     o.mcdata_server_uri = C(a.mcdataServerUri);
+    o.mcptt_video = B(a.mcpttVideo);
+    o.mcvideo_enabled = B(a.mcvideoEnabled);
+    o.mcvideo_server_uri = C(a.mcvideoServerUri);
+    o.auto_answer_mcvideo = B(a.autoAnswerMcvideo);
 }
 
 /** CMS 문서의 C 스냅샷 — 핸들(fetch)과 스레드 스크래치(parse) 양쪽이 쓴다. */
@@ -446,6 +513,7 @@ struct UeInitConfigHolder {
         out = cimsue_ue_init_config_doc_t{};
         out.etag = C(cxx.etag); out.not_modified = B(cxx.notModified); out.domain = C(cxx.domain);
         out.mcptt_server_uri = C(cxx.mcpttServerUri); out.mcdata_server_uri = C(cxx.mcdataServerUri);
+        out.mcvideo_server_uri = C(cxx.mcvideoServerUri);
     }
 };
 
@@ -605,6 +673,9 @@ struct Scratch {
     TlsPeerExpiry                           tlsPeer;
     cimsue_tls_peer_expiry_t                tlsPeerC{};
     CallQuality                             quality;
+    TransmissionInfo                        tx;
+    cimsue_transmission_info_t              txC{};
+    std::vector<cimsue_video_transmitter_t> txTransmitters;
 };
 thread_local Scratch g_s;
 
@@ -665,6 +736,16 @@ public:
         cb.on_mcptt_condition(cb.user, &o, (cimsue_condition_cause_t)cause);
     }
     void onNonAcknowledgedUsers(const CallInfo& info) override { call(cb.on_non_acknowledged_users, info); }
+    void onTransmission(const TransmissionEvent& ev) override {
+        if (!cb.on_transmission) return;
+        cimsue_transmission_event_t o{}; fill(o, ev);
+        cb.on_transmission(cb.user, &o);
+    }
+    void onReception(const ReceptionEvent& ev) override {
+        if (!cb.on_reception) return;
+        cimsue_reception_event_t o{}; fill(o, ev);
+        cb.on_reception(cb.user, &o);
+    }
     void onEmergencyAlert(const EmergencyAlert& alert) override {
         if (!cb.on_emergency_alert) return;
         cimsue_emergency_alert_t o{}; fill(o, alert);
@@ -797,6 +878,9 @@ void CIMSUE_CALL cimsue_account_config_default(cimsue_account_config_t* cfg) {
     cfg->auto_answer_mcptt = B(d.autoAnswerMcptt);
     cfg->max_sds_cplane_bytes = d.maxSdsCplaneBytes;
     cfg->mcdata_msrp = B(d.mcdataMsrp);
+    cfg->mcptt_video = B(d.mcpttVideo);
+    cfg->mcvideo_enabled = B(d.mcvideoEnabled);
+    cfg->auto_answer_mcvideo = B(d.autoAnswerMcvideo);
 }
 
 int32_t CIMSUE_CALL cimsue_engine_add_account(cimsue_engine_t* e, const cimsue_account_config_t* cfg) {
@@ -920,6 +1004,8 @@ void CIMSUE_CALL cimsue_group_call_options_default(cimsue_group_call_options_t* 
     opts->listen_only = B(d.listenOnly);
     opts->full_duplex = B(d.fullDuplex);
     opts->broadcast = B(d.broadcast);
+    opts->implicit_floor_request = B(d.implicitFloorRequest);
+    opts->video = B(d.video);
 }
 
 int32_t CIMSUE_CALL cimsue_engine_join_group_call(cimsue_engine_t* e, int32_t account_id, const char* group_id,
@@ -967,10 +1053,51 @@ int64_t CIMSUE_CALL cimsue_engine_send_emergency_alert(cimsue_engine_t* e, int32
 }
 
 int64_t CIMSUE_CALL cimsue_engine_affiliate(cimsue_engine_t* e, int32_t account_id, const char* group_id, int32_t on) {
+    return cimsue_engine_affiliate_service(e, account_id, group_id, on, CIMSUE_MC_SERVICE_MCPTT);
+}
+int64_t CIMSUE_CALL cimsue_engine_affiliate_service(cimsue_engine_t* e, int32_t account_id, const char* group_id, int32_t on,
+                                                    cimsue_mc_service_t service) {
     if (!e) { g_lastError = "no engine"; return -1; }
-    int64_t t = e->eng.affiliate(account_id, S(group_id), on != 0);
+    int64_t t = e->eng.affiliate(account_id, S(group_id), on != 0, (McService)service);
     if (t < 0) g_lastError = "affiliate failed";
     return t;
+}
+
+// MCVideo
+
+void CIMSUE_CALL cimsue_video_group_call_options_default(cimsue_video_group_call_options_t* opts) {
+    if (!opts) return;
+    const VideoGroupCallOptions d;
+    *opts = cimsue_video_group_call_options_t{};
+    opts->prearranged = B(d.prearranged);
+    opts->queueing = B(d.queueing);
+    opts->max_priority = d.maxPriority;
+    opts->max_reception_priority = d.maxReceptionPriority;
+    opts->implicit_transmission_request = B(d.implicitTransmissionRequest);
+}
+int32_t CIMSUE_CALL cimsue_engine_join_video_group_call(cimsue_engine_t* e, int32_t account_id, const char* group_id,
+                                                        const cimsue_video_group_call_options_t* opts) {
+    if (!e) return retId(-1, "no engine");
+    return retId(e->eng.joinVideoGroupCall(account_id, S(group_id), toCxx(opts)), "joinVideoGroupCall failed");
+}
+cimsue_status_t CIMSUE_CALL cimsue_engine_request_transmission(cimsue_engine_t* e, int32_t call_id, int32_t priority) {
+    return e ? ret(e->eng.requestTransmission(call_id, priority)) : -1;
+}
+cimsue_status_t CIMSUE_CALL cimsue_engine_release_transmission(cimsue_engine_t* e, int32_t call_id) {
+    return e ? ret(e->eng.releaseTransmission(call_id)) : -1;
+}
+cimsue_status_t CIMSUE_CALL cimsue_engine_accept_reception(cimsue_engine_t* e, int32_t call_id, const char* transmitter_id,
+                                                           int32_t priority) {
+    return e ? ret(e->eng.acceptReception(call_id, S(transmitter_id), priority)) : -1;
+}
+cimsue_status_t CIMSUE_CALL cimsue_engine_end_reception(cimsue_engine_t* e, int32_t call_id, const char* transmitter_id) {
+    return e ? ret(e->eng.endReception(call_id, S(transmitter_id))) : -1;
+}
+void CIMSUE_CALL cimsue_engine_transmission_info(const cimsue_engine_t* e, int32_t call_id, cimsue_transmission_info_t* out) {
+    if (!out) return;
+    g_s.tx = e ? e->eng.transmissionInfo(call_id) : TransmissionInfo();
+    fill(g_s.txC, g_s.tx, g_s.txTransmitters);
+    *out = g_s.txC;
 }
 cimsue_status_t CIMSUE_CALL cimsue_engine_subscribe_conference(cimsue_engine_t* e, int32_t account_id,
                                                                const char* group_id, int32_t on) {
@@ -1144,6 +1271,11 @@ const char* CIMSUE_CALL cimsue_transport_str(cimsue_transport_t t) { return toSt
 const char* CIMSUE_CALL cimsue_floor_state_str(cimsue_floor_state_t s) { return toString((FloorState)s); }
 const char* CIMSUE_CALL cimsue_floor_kind_str(cimsue_floor_kind_t k) { return toString((FloorEvent::Kind)k); }
 const char* CIMSUE_CALL cimsue_condition_cause_str(cimsue_condition_cause_t c) { return toString((ConditionCause)c); }
+const char* CIMSUE_CALL cimsue_mc_service_str(cimsue_mc_service_t s) { return toString((McService)s); }
+const char* CIMSUE_CALL cimsue_transmission_state_str(cimsue_transmission_state_t s) { return toString((TransmissionState)s); }
+const char* CIMSUE_CALL cimsue_reception_state_str(cimsue_reception_state_t s) { return toString((ReceptionState)s); }
+const char* CIMSUE_CALL cimsue_transmission_kind_str(cimsue_transmission_kind_t k) { return toString((TransmissionEvent::Kind)k); }
+const char* CIMSUE_CALL cimsue_reception_kind_str(cimsue_reception_kind_t k) { return toString((ReceptionEvent::Kind)k); }
 
 // 문자열 산출 헬퍼
 
@@ -1519,6 +1651,11 @@ int32_t CIMSUE_CALL cimsue_struct_size(cimsue_struct_id_t id) {
     case CIMSUE_STRUCT_SERVICE_CONFIG_DOC: return (int32_t)sizeof(cimsue_service_config_doc_t);
     case CIMSUE_STRUCT_CAPABILITIES:      return (int32_t)sizeof(cimsue_capabilities_t);
     case CIMSUE_STRUCT_UE_INIT_CONFIG_DOC: return (int32_t)sizeof(cimsue_ue_init_config_doc_t);
+    case CIMSUE_STRUCT_VIDEO_GROUP_CALL_OPTIONS: return (int32_t)sizeof(cimsue_video_group_call_options_t);
+    case CIMSUE_STRUCT_VIDEO_TRANSMITTER:  return (int32_t)sizeof(cimsue_video_transmitter_t);
+    case CIMSUE_STRUCT_TRANSMISSION_EVENT: return (int32_t)sizeof(cimsue_transmission_event_t);
+    case CIMSUE_STRUCT_RECEPTION_EVENT:    return (int32_t)sizeof(cimsue_reception_event_t);
+    case CIMSUE_STRUCT_TRANSMISSION_INFO:  return (int32_t)sizeof(cimsue_transmission_info_t);
     default:                              return -1;
     }
 }

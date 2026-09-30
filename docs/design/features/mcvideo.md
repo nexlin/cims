@@ -394,7 +394,8 @@ Indicator, automatic 수신; 1차 CSP 는 normal) · JOIN 응답 `audio_ssrc`·`
   회수 #3 — §5.3.1). 빈 RTP keep-alive·RTCP·제어 채널 빈 RR 은 계속 나가 NAT·latch 를 연다.
 - **수신 제어** — `acceptReception(callId, transmitterId)`·`endReception`(§6.2.5, T103·T104)은 결선됐다. 스트림별 렌더 창(현행 «호별 수신 창» 과제와 합친다 —
   ue_sdk.md §11)과 송출 영상 결선은 C6.
-- **바인딩** — C API·.NET·Kotlin 같은 이름(현행 그룹 영상 옵션 누락도 이때 메운다 — C7).
+- **바인딩**(구현 — C7) — C API·.NET·Kotlin 같은 이름(현행 그룹 영상 옵션 누락도 메웠다 — [ue_sdk.md](ue_sdk.md) §4.6). MCVideo 설정 문서 해석(C2)의
+  바인딩은 남았다(ue-init-config MCVideo PSI 만 셋 다).
 - **cimsue-cli**(구현 — C8) — `video-call <g> [--prearranged] [--implicit] [--transmit-at S --transmit-len S] [--accept]` · `video-answer`(멤버 초대 대기) ·
   구동 명령 `video_call`·`transmit_request`·`transmit_release`·`reception_accept`·`reception_end` + 이벤트 `transmission`·`reception`([ue_sdk.md](ue_sdk.md) §4.7).
   명시 affiliation 은 없다(CSP A9 전).

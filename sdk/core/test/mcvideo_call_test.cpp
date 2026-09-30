@@ -798,9 +798,6 @@ TEST(McvCall, MemberInvitationAutoAnswer) {
     inv = "INVITE " + ueUri + " SIP/2.0" + inv.substr(inv.find("\r\n"));
     inv = replaceAll(inv, "Via: SIP/2.0/TLS csp.ptt.cims.example.kr:5061;branch=z9hG4bK-mcv-fan1",
                      "Via: SIP/2.0/UDP 127.0.0.1:" + std::to_string(r.csp.port) + ";branch=z9hG4bK-mcv-fan1");
-    // 음성 fmtp — 실제 CSP 팬아웃 offer 는 코덱 테이블(psip SipCodecTable AMR-WB `octet-align=1`)을 싣는다. 골든의
-    //   `mode-change-capability=2;max-red=0`(bandwidth-efficient)이면 pjmedia AMR 매칭이 음성을 거절한다(.45 → .48 제안)
-    inv = replaceAll(inv, "a=fmtp:96 mode-change-capability=2;max-red=0", "a=fmtp:96 octet-align=1");
     inv = localize(inv, 52012, audio.port, 56012, video.port, 58012, ctrl.port, r.csp.port);
     r.csp.send(inv);
     std::string ringing = r.csp.recv("SIP/2.0 180");

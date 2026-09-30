@@ -132,6 +132,8 @@ class CimsUe(private val io: CoroutineDispatcher = Dispatchers.IO) : AutoCloseab
     private val _roster = lossy<RosterUpdate>()
     private val _dialogInfo = lossy<DialogInfo>()
     private val _condition = lossy<ConditionChange>()
+    private val _transmission = lossy<TransmissionEvent>()
+    private val _reception = lossy<ReceptionEvent>()
     private val _stopped = lossy<Unit>()
 
     // ③ 유실 불가 — 무제한 버퍼. 소비는 한 번뿐이라 수집자를 하나만 둔다(Service 의 세션).
@@ -153,6 +155,10 @@ class CimsUe(private val io: CoroutineDispatcher = Dispatchers.IO) : AutoCloseab
     val dialogInfo: SharedFlow<DialogInfo> = _dialogInfo.asSharedFlow()
     /** MCPTT 세션 조건 변화(긴급·임박, TS 24.379 §10.1.1.2.1.3~6) — 권위는 `callInfo().condition` 스냅샷(② 정책). */
     val condition: SharedFlow<ConditionChange> = _condition.asSharedFlow()
+    /** MCVideo 송출 제어(TS 24.581 §6.2.4) — 허가·거절·회수·대기·종료. 송출 게이트는 코어가 이미 처리했다. */
+    val transmission: SharedFlow<TransmissionEvent> = _transmission.asSharedFlow()
+    /** MCVideo 수신 제어(§6.2.5) — 새 송출 알림(manual 이면 [Call.acceptReception])·수신 허가·종료. */
+    val reception: SharedFlow<ReceptionEvent> = _reception.asSharedFlow()
     val stopped: SharedFlow<Unit> = _stopped.asSharedFlow()
 
     /** MCData SDS 수신. **유실되지 않는다** — 수집자가 붙기 전 것도 쌓인다. 수집자는 하나만 둔다. */
@@ -261,6 +267,9 @@ class CimsUe(private val io: CoroutineDispatcher = Dispatchers.IO) : AutoCloseab
 
     /** 제어 스레드를 기다린다 — 메인 스레드에서 부르지 않는다. */
     suspend fun floorInfo(callId: Int): FloorInfo? = withContext(io) { guarded { FloorInfo.of(engine.floorInfo(callId)) } }
+    /** MCVideo 호의 전송 제어 현재값. */
+    suspend fun transmissionInfo(callId: Int): TransmissionInfo? =
+        withContext(io) { guarded { TransmissionInfo.of(engine.transmissionInfo(callId)) } }
     suspend fun streamStats(callId: Int): StreamStats? = withContext(io) { guarded { StreamStats.of(engine.streamStats(callId)) } }
     /** 호 품질(손실·폐기·지터·RTD·E-model MOS — ue_voice_quality.md §3). */
     suspend fun callQuality(callId: Int): CallQuality? = withContext(io) { guarded { CallQuality.of(engine.callQuality(callId)) } }
@@ -396,6 +405,8 @@ class CimsUe(private val io: CoroutineDispatcher = Dispatchers.IO) : AutoCloseab
 
         override fun onCallMedia(info: JniCallInfo) { _callMedia.emitLossy(CallInfo.of(info)) }
         override fun onFloor(ev: JniFloorEvent) { _floor.emitLossy(FloorEvent.of(ev)) }
+        override fun onTransmission(ev: com.cims.ue.sdk.jni.TransmissionEvent) { _transmission.emitLossy(TransmissionEvent.of(ev)) }
+        override fun onReception(ev: com.cims.ue.sdk.jni.ReceptionEvent) { _reception.emitLossy(ReceptionEvent.of(ev)) }
 
         override fun onRoster(accountId: Int, groupId: String, users: RosterVector, full: Boolean) {
             _roster.emitLossy(RosterUpdate.of(accountId, groupId, users, full))
@@ -473,12 +484,18 @@ class Account internal constructor(private val ue: CimsUe, val id: Int) {
     suspend fun startPrivateCall(peer: String, opts: GroupCallOptions = GroupCallOptions()): CimsResult<Call> =
         ue.command { callOrFail(ue.jni.startPrivateCall(id, peer, opts.toJni()), "startPrivateCall") }
 
-    /** affiliation PUBLISH(TS 24.379 §9). 반환 token 으로 `requestResult` 에서 확인한다. */
-    suspend fun affiliate(groupId: String, on: Boolean): CimsResult<Long> = ue.command {
-        ue.jni.affiliate(id, groupId, on).let {
+    /** affiliation PUBLISH — 서비스마다 따로다. MCPTT = TS 24.379 §9, MCVideo = 관심 그룹 전부를 한 PUBLISH 로(TS 24.281 §8.2.1.2).
+     *  반환 token 으로 `requestResult` 에서 확인한다. */
+    suspend fun affiliate(groupId: String, on: Boolean, service: McService = McService.MCPTT): CimsResult<Long> = ue.command {
+        ue.jni.affiliate(id, groupId, on, com.cims.ue.sdk.jni.McService.swigToEnum(service.ordinal)).let {
             if (it < 0) CimsResult.fail(-1, "affiliate failed") else CimsResult.ok(it)
         }
     }
+
+    /** MCVideo 그룹 호 개시·합류(TS 24.281 §9.2.1·§9.2.2) — Request-URI = [AccountConfig.mcvideoServerUri](재합류는 opts.sessionUri).
+     *  나가기 = [Call.hangup](MCPTT 호와 독립). 송출·수신은 [Call.requestTransmission]·[Call.acceptReception]. */
+    suspend fun joinVideoGroupCall(groupId: String, opts: VideoGroupCallOptions = VideoGroupCallOptions()): CimsResult<Call> =
+        ue.command { callOrFail(ue.jni.joinVideoGroupCall(id, groupId, opts.toJni()), "joinVideoGroupCall") }
 
     /** 그룹 로스터 구독(RFC 4575 conference) — 확인 신호는 `roster` NOTIFY. */
     suspend fun subscribeConference(groupId: String, on: Boolean): CimsResult<Unit> =
@@ -598,6 +615,18 @@ class Call internal constructor(private val ue: CimsUe, val id: Int, private val
     /** PTT 뗌 — Floor Release(대기 중이면 Queued Cancel 선행). */
     suspend fun floorRelease(): CimsResult<Unit> = cmd { CimsResult.of(ue.jni.floorRelease(id)) }
     suspend fun floorQueueCancel(): CimsResult<Unit> = cmd { CimsResult.of(ue.jni.floorQueueCancel(id)) }
+
+    // ── MCVideo 전송 제어 (TS 24.581) ──
+    suspend fun transmissionInfo(): TransmissionInfo? = if (isStale) null else ue.transmissionInfo(id)
+    /** [영상 보내기] — Transmission Request(§6.2.4.3.2). 결과는 `transmission` 이벤트. priority<0 = 미기재. */
+    suspend fun requestTransmission(priority: Int = -1): CimsResult<Unit> = cmd { CimsResult.of(ue.jni.requestTransmission(id, priority)) }
+    /** [보내기 끝] — Transmission End Request(§6.2.4.5.3). 대기·요청 중이면 요청을 거둔다. */
+    suspend fun releaseTransmission(): CimsResult<Unit> = cmd { CimsResult.of(ue.jni.releaseTransmission(id)) }
+    /** [받기] — Receive Media Request(§6.2.5.3.3). transmitterId = `reception`(NOTIFIED) 의 transmitter.userId. */
+    suspend fun acceptReception(transmitterId: String, priority: Int = -1): CimsResult<Unit> =
+        cmd { CimsResult.of(ue.jni.acceptReception(id, transmitterId, priority)) }
+    /** [그만 보기] — Media Reception End Request(§6.2.5.5). */
+    suspend fun endReception(transmitterId: String): CimsResult<Unit> = cmd { CimsResult.of(ue.jni.endReception(id, transmitterId)) }
 
     /**
      * 진행 중 그룹콜의 조건 상향·하향(TS 24.379 §10.1.1.2.1.3~5) — re-INVITE(mcptt-info + Resource-Priority). 결과는 `condition`

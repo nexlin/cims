@@ -64,6 +64,15 @@ internal static unsafe class NativeMethods
     [DllImport(Lib, CallingConvention = CC, ExactSpelling = true)] public static extern int cimsue_engine_set_call_condition(IntPtr e, int call_id, int emergency, int imminent_peril);
     [DllImport(Lib, CallingConvention = CC, ExactSpelling = true)] public static extern long cimsue_engine_send_emergency_alert(IntPtr e, int account_id, [MarshalAs(U8)] string group_id, int activate, [MarshalAs(U8)] string? originated_by, int cancel_group_emergency);
     [DllImport(Lib, CallingConvention = CC, ExactSpelling = true)] public static extern long cimsue_engine_affiliate(IntPtr e, int account_id, [MarshalAs(U8)] string group_id, int on);
+    [DllImport(Lib, CallingConvention = CC, ExactSpelling = true)] public static extern long cimsue_engine_affiliate_service(IntPtr e, int account_id, [MarshalAs(U8)] string group_id, int on, int service);
+    // MCVideo 그룹 호 (TS 24.281 · TS 24.581)
+    [DllImport(Lib, CallingConvention = CC, ExactSpelling = true)] public static extern void cimsue_video_group_call_options_default(cimsue_video_group_call_options_t* opts);
+    [DllImport(Lib, CallingConvention = CC, ExactSpelling = true)] public static extern int cimsue_engine_join_video_group_call(IntPtr e, int account_id, [MarshalAs(U8)] string group_id, cimsue_video_group_call_options_t* opts);
+    [DllImport(Lib, CallingConvention = CC, ExactSpelling = true)] public static extern int cimsue_engine_request_transmission(IntPtr e, int call_id, int priority);
+    [DllImport(Lib, CallingConvention = CC, ExactSpelling = true)] public static extern int cimsue_engine_release_transmission(IntPtr e, int call_id);
+    [DllImport(Lib, CallingConvention = CC, ExactSpelling = true)] public static extern int cimsue_engine_accept_reception(IntPtr e, int call_id, [MarshalAs(U8)] string transmitter_id, int priority);
+    [DllImport(Lib, CallingConvention = CC, ExactSpelling = true)] public static extern int cimsue_engine_end_reception(IntPtr e, int call_id, [MarshalAs(U8)] string transmitter_id);
+    [DllImport(Lib, CallingConvention = CC, ExactSpelling = true)] public static extern void cimsue_engine_transmission_info(IntPtr e, int call_id, cimsue_transmission_info_t* @out);
     [DllImport(Lib, CallingConvention = CC, ExactSpelling = true)] public static extern int cimsue_engine_subscribe_conference(IntPtr e, int account_id, [MarshalAs(U8)] string group_id, int on);
     [DllImport(Lib, CallingConvention = CC, ExactSpelling = true)] public static extern int cimsue_engine_subscribe_xcap_diff(IntPtr e, int account_id, [MarshalAs(U8)] string psi_uri, int on);
     [DllImport(Lib, CallingConvention = CC, ExactSpelling = true)] public static extern long cimsue_engine_send_request(IntPtr e, int account_id, [MarshalAs(U8)] string method, [MarshalAs(U8)] string target_uri, [MarshalAs(U8)] string content_type, [MarshalAs(U8)] string body, cimsue_header_t* headers, int header_count);

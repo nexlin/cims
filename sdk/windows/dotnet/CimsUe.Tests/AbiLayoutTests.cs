@@ -53,6 +53,11 @@ public unsafe class AbiLayoutTests
         new object[] { cimsue_struct_id_t.SERVICE_CONFIG_DOC, sizeof(cimsue_service_config_doc_t) },
         new object[] { cimsue_struct_id_t.CAPABILITIES, sizeof(cimsue_capabilities_t) },
         new object[] { cimsue_struct_id_t.UE_INIT_CONFIG_DOC, sizeof(cimsue_ue_init_config_doc_t) },
+        new object[] { cimsue_struct_id_t.VIDEO_GROUP_CALL_OPTIONS, sizeof(cimsue_video_group_call_options_t) },
+        new object[] { cimsue_struct_id_t.VIDEO_TRANSMITTER, sizeof(cimsue_video_transmitter_t) },
+        new object[] { cimsue_struct_id_t.TRANSMISSION_EVENT, sizeof(cimsue_transmission_event_t) },
+        new object[] { cimsue_struct_id_t.RECEPTION_EVENT, sizeof(cimsue_reception_event_t) },
+        new object[] { cimsue_struct_id_t.TRANSMISSION_INFO, sizeof(cimsue_transmission_info_t) },
     };
 
     [Theory]

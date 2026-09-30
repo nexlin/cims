@@ -59,6 +59,10 @@ internal unsafe struct cimsue_account_config_t
     public int mcdata_msrp;
     public byte* mcptt_server_uri;
     public byte* mcdata_server_uri;
+    public int mcptt_video;
+    public int mcvideo_enabled;
+    public byte* mcvideo_server_uri;
+    public int auto_answer_mcvideo;
 }
 
 [StructLayout(LayoutKind.Sequential)]
@@ -79,6 +83,18 @@ internal unsafe struct cimsue_group_call_options_t
     public int member_count;
     public int broadcast;
     public int implicit_floor_request;
+    public int video;
+}
+
+[StructLayout(LayoutKind.Sequential)]
+internal unsafe struct cimsue_video_group_call_options_t
+{
+    public int prearranged;
+    public int queueing;
+    public int max_priority;
+    public int max_reception_priority;
+    public int implicit_transmission_request;
+    public byte* session_uri;
 }
 
 [StructLayout(LayoutKind.Sequential)]
@@ -176,6 +192,8 @@ internal unsafe struct cimsue_call_info_t
     public byte* answer_state;
     public byte** non_ack_users;
     public int non_ack_user_count;
+    public int service;
+    public byte* session_uri;
 }
 
 [StructLayout(LayoutKind.Sequential)]
@@ -339,6 +357,57 @@ internal unsafe struct cimsue_video_device_info_t
 
 /// <summary>Listener 가상함수 1:1 의 함수 포인터 한 벌 + user. 코어 이벤트 스레드에서 호출된다.</summary>
 [StructLayout(LayoutKind.Sequential)]
+internal unsafe struct cimsue_video_transmitter_t
+{
+    public byte* user_id;
+    public uint audio_ssrc;
+    public uint video_ssrc;
+    public byte* functional_alias;
+    public int automatic;
+    public int state;
+}
+
+[StructLayout(LayoutKind.Sequential)]
+internal unsafe struct cimsue_transmission_event_t
+{
+    public int kind;
+    public int call_id;
+    public int state;
+    public int cause;
+    public byte* cause_text;
+    public int duration_sec;
+    public int priority;
+    public int queue_position;
+    public int indicator;
+    public uint audio_ssrc, video_ssrc;
+    public byte* receiver_id;
+    public int raw_type;
+}
+
+[StructLayout(LayoutKind.Sequential)]
+internal unsafe struct cimsue_reception_event_t
+{
+    public int kind;
+    public int call_id;
+    public cimsue_video_transmitter_t transmitter;
+    public int cause;
+    public byte* cause_text;
+    public int raw_type;
+}
+
+[StructLayout(LayoutKind.Sequential)]
+internal unsafe struct cimsue_transmission_info_t
+{
+    public int state;
+    public cimsue_video_transmitter_t* transmitters;
+    public int transmitter_count;
+    public int queue_position;
+    public int local_port;
+    public byte* remote_ip;
+    public int remote_port;
+}
+
+[StructLayout(LayoutKind.Sequential)]
 internal unsafe struct cimsue_listener_t
 {
     public void* user;
@@ -358,6 +427,8 @@ internal unsafe struct cimsue_listener_t
     public delegate* unmanaged[Cdecl]<void*, cimsue_call_info_t*, int, void> on_mcptt_condition;
     public delegate* unmanaged[Cdecl]<void*, cimsue_emergency_alert_t*, void> on_emergency_alert;
     public delegate* unmanaged[Cdecl]<void*, cimsue_call_info_t*, void> on_non_acknowledged_users;
+    public delegate* unmanaged[Cdecl]<void*, cimsue_transmission_event_t*, void> on_transmission;
+    public delegate* unmanaged[Cdecl]<void*, cimsue_reception_event_t*, void> on_reception;
 }
 
 // ── CSC 설정 평면 (csc.h) ──
@@ -622,6 +693,7 @@ internal unsafe struct cimsue_ue_init_config_doc_t
     public byte* domain;
     public byte* mcptt_server_uri;
     public byte* mcdata_server_uri;
+    public byte* mcvideo_server_uri;
 }
 
 [StructLayout(LayoutKind.Sequential)]
@@ -651,5 +723,6 @@ internal enum cimsue_struct_id_t
     QUALITY_DIRECTION, CALL_QUALITY,
     MCPTT_CONDITION, EMERGENCY_ALERT, VIDEO_DEVICE_INFO, CMS_ENTRY, USER_PROFILE_DOC, SERVICE_CONFIG_DOC, CAPABILITIES,
     UE_INIT_CONFIG_DOC,
+    VIDEO_GROUP_CALL_OPTIONS, VIDEO_TRANSMITTER, TRANSMISSION_EVENT, RECEPTION_EVENT, TRANSMISSION_INFO,
     COUNT_,
 }

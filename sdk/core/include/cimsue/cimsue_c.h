@@ -70,6 +70,27 @@ typedef enum {
 typedef enum {
     CIMSUE_COND_LOCAL = 0, CIMSUE_COND_CONFIRMED = 1, CIMSUE_COND_DENIED = 2, CIMSUE_COND_ADVERTISED = 3
 } cimsue_condition_cause_t;
+/** MC 서비스(types.h McService) — 호·affiliation 은 서비스마다 따로다(TS 23.280 §5.2.5). */
+typedef enum { CIMSUE_MC_SERVICE_MCPTT = 0, CIMSUE_MC_SERVICE_MCVIDEO = 1 } cimsue_mc_service_t;
+/** MCVideo 내 송출 상태(types.h TransmissionState — TS 24.581 §6.2.4 'U: …'). */
+typedef enum {
+    CIMSUE_TX_NO_PERMISSION = 0, CIMSUE_TX_PENDING_REQUEST = 1, CIMSUE_TX_PERMITTED = 2, CIMSUE_TX_PENDING_END = 3, CIMSUE_TX_QUEUED = 4
+} cimsue_transmission_state_t;
+/** 한 송출의 내 수신 상태(types.h ReceptionState — §6.2.5). */
+typedef enum {
+    CIMSUE_RX_NOTIFIED = 0, CIMSUE_RX_PENDING_REQUEST = 1, CIMSUE_RX_RECEIVING = 2, CIMSUE_RX_PENDING_RELEASE = 3, CIMSUE_RX_ENDED = 4
+} cimsue_reception_state_t;
+/** on_transmission 의 종류(types.h TransmissionEvent::Kind). */
+typedef enum {
+    CIMSUE_TXEV_GRANTED = 0, CIMSUE_TXEV_REJECTED = 1, CIMSUE_TXEV_REVOKED = 2, CIMSUE_TXEV_QUEUE_POSITION = 3, CIMSUE_TXEV_END_REQUESTED = 4,
+    CIMSUE_TXEV_ENDED = 5, CIMSUE_TXEV_RECEIVER_JOINED = 6, CIMSUE_TXEV_IDLE = 7, CIMSUE_TXEV_QUEUE_CANCELLED = 8, CIMSUE_TXEV_REQUEST_TIMEOUT = 9,
+    CIMSUE_TXEV_OTHER = 10
+} cimsue_transmission_kind_t;
+/** on_reception 의 종류(types.h ReceptionEvent::Kind). */
+typedef enum {
+    CIMSUE_RXEV_NOTIFIED = 0, CIMSUE_RXEV_GRANTED = 1, CIMSUE_RXEV_REJECTED = 2, CIMSUE_RXEV_ENDED = 3, CIMSUE_RXEV_RELEASED = 4,
+    CIMSUE_RXEV_END_REQUESTED = 5, CIMSUE_RXEV_REQUEST_TIMEOUT = 6, CIMSUE_RXEV_OTHER = 7
+} cimsue_reception_kind_t;
 /** 오디오 라우트(types.h AudioRoute) — 입력의 EARPIECE = 내장 기본 마이크 고정, DEFAULT = 정책. */
 typedef enum { CIMSUE_ROUTE_DEFAULT = 0, CIMSUE_ROUTE_EARPIECE = 1, CIMSUE_ROUTE_LOUDSPEAKER = 2 } cimsue_audio_route_t;
 /** 마이크 AGC 기본 목표(types.h kMicAgcTargetDbov) — ITU-T P.56 활성 레벨 -26 dBov. */
@@ -124,6 +145,10 @@ typedef struct {
     int32_t                 mcdata_msrp;        /* 서버발 MSRP 배포 수신(REGISTER Contact ICSI mcdata.sds) */
     const char*             mcptt_server_uri;   /* 참여 MCPTT 기능 PSI — 긴급 경보 Request-URI(TS 24.379 §12.1.1.1 8)) */
     const char*             mcdata_server_uri;  /* 참여 MCData 기능 PSI — SDS disposition 통지 Request-URI(TS 24.282 §12.2.1.1). NULL·빈 값 = 원 발신자 직행 */
+    int32_t                 mcptt_video;        /* 자동 수락하는 MCPTT 착신의 m=video 를 영상까지 받는다(ptt_flows.md 영상 협상) */
+    int32_t                 mcvideo_enabled;    /* REGISTER Contact 에 MCVideo 태그(TS 24.281 §7.2.1AA) — 빼면 MCVideo 로그오프 */
+    const char*             mcvideo_server_uri; /* 참여 MCVideo 기능 PSI — MCVideo 그룹 호·affiliation Request-URI(§9.2.1.2.1.1·§8.2) */
+    int32_t                 auto_answer_mcvideo; /* MCVideo 멤버 초대 자동 수락(§6.2.3.1.2) — 기본 1 */
 } cimsue_account_config_t;
 
 typedef struct {
@@ -140,7 +165,18 @@ typedef struct {
     int32_t            member_count;
     int32_t            broadcast;       /* 일제 통화 개시(<broadcast-ind>true, TS 24.379 §4.12) — join_group_call 전용 */
     int32_t            implicit_floor_request; /* 암묵적 발언 요청(mc_implicit_request+mc_granted, TS 24.380 §14.2.4·§14.2.5) */
+    int32_t            video;           /* 그룹 영상 제안(m=video) — 반이중이면 발언권을 가진 동안만 송출 */
 } cimsue_group_call_options_t;
+
+/** MCVideo 그룹 호 개시·합류 옵션(types.h VideoGroupCallOptions — TS 24.281 §9.2.1·§9.2.2, fmtp TS 24.581 §14.2). */
+typedef struct {
+    int32_t     prearranged;                    /* session-type prearranged(0 = chat) */
+    int32_t     queueing;                       /* mc_queueing */
+    int32_t     max_priority;                   /* mc_priority 1~255, <0 = 미기재 */
+    int32_t     max_reception_priority;         /* mc_reception_priority 1~255, <0 = 미기재 */
+    int32_t     implicit_transmission_request;  /* mc_implicit_request + mc_granted */
+    const char* session_uri;                    /* 재합류(§9.2.1.2.4) — 앞 호의 call_info.session_uri. NULL = 새 합류 */
+} cimsue_video_group_call_options_t;
 
 /** send_request 의 부가 헤더. */
 typedef struct {
@@ -229,6 +265,8 @@ typedef struct {
     const char*                  answer_state;      /* 개시 200 OK 의 P-Answer-State(RFC 4964) — "Unconfirmed" = 멤버 확인 전 수락 */
     const char* const*           non_ack_users;     /* 서버가 알린 미응답 멤버 MCPTT ID(bare, TS 24.379 §6.3.3.3) (ptr, count) */
     int32_t                      non_ack_user_count;
+    cimsue_mc_service_t          service;           /* MCVideo 그룹 호면 MCVIDEO(그때 is_mcptt = 0) */
+    const char*                  session_uri;       /* MC 세션 식별자 — 제어 기능 Contact(isfocus), 재합류에 쓴다 */
 } cimsue_call_info_t;
 
 typedef struct {
@@ -265,6 +303,53 @@ typedef struct {
     int32_t                remote_port;
     uint32_t               granted_count, taken_count, deny_count;
 } cimsue_floor_info_t;
+
+/** 한 송출(types.h VideoTransmitter — Media Transmission Notification §9.2.13). */
+typedef struct {
+    const char*              user_id;          /* 송출자 MCVideo ID(서버 표기) — accept_reception·end_reception 인자 */
+    uint32_t                 audio_ssrc;
+    uint32_t                 video_ssrc;
+    const char*              functional_alias;
+    int32_t                  automatic;        /* Reception Mode 0 — 서버가 곧바로 수신 허가 */
+    cimsue_reception_state_t state;
+} cimsue_video_transmitter_t;
+
+/** 송출 제어 이벤트(types.h TransmissionEvent — TS 24.581 §6.2.4). */
+typedef struct {
+    cimsue_transmission_kind_t  kind;
+    int32_t                     call_id;
+    cimsue_transmission_state_t state;
+    int32_t                     cause;           /* Rejected·Revoked·EndRequested 의 Reject Cause */
+    const char*                 cause_text;
+    int32_t                     duration_sec;
+    int32_t                     priority;
+    int32_t                     queue_position;
+    int32_t                     indicator;
+    uint32_t                    audio_ssrc, video_ssrc;
+    const char*                 receiver_id;     /* ReceiverJoined */
+    int32_t                     raw_type;
+} cimsue_transmission_event_t;
+
+/** 수신 제어 이벤트(types.h ReceptionEvent — §6.2.5). */
+typedef struct {
+    cimsue_reception_kind_t    kind;
+    int32_t                    call_id;
+    cimsue_video_transmitter_t transmitter;
+    int32_t                    cause;
+    const char*                cause_text;
+    int32_t                    raw_type;
+} cimsue_reception_event_t;
+
+/** MCVideo 호의 전송 제어 현재값(types.h TransmissionInfo). */
+typedef struct {
+    cimsue_transmission_state_t       state;
+    const cimsue_video_transmitter_t* transmitters;  /* 알려진 송출(내 것 제외) (ptr, count) */
+    int32_t                           transmitter_count;
+    int32_t                           queue_position;
+    int32_t                           local_port;
+    const char*                       remote_ip;
+    int32_t                           remote_port;
+} cimsue_transmission_info_t;
 
 typedef struct {
     int32_t     account_id;
@@ -402,6 +487,10 @@ typedef struct {
     void (CIMSUE_CALL* on_emergency_alert)(void* user, const cimsue_emergency_alert_t* alert);
     /** 개시 호의 미응답 멤버 알림(INFO g.3gpp.mcptt-info, TS 24.379 §6.3.3.3) — info->non_ack_users(Listener::onNonAcknowledgedUsers). */
     void (CIMSUE_CALL* on_non_acknowledged_users)(void* user, const cimsue_call_info_t* info);
+    /** MCVideo 송출 제어(Listener::onTransmission, TS 24.581 §6.2.4) — 송출(마이크·카메라) 게이트는 코어가 이미 처리했다. */
+    void (CIMSUE_CALL* on_transmission)(void* user, const cimsue_transmission_event_t* ev);
+    /** MCVideo 수신 제어(Listener::onReception, §6.2.5) — 새 송출 알림(manual 이면 앱이 accept_reception)·수신 허가·종료. */
+    void (CIMSUE_CALL* on_reception)(void* user, const cimsue_reception_event_t* ev);
 } cimsue_listener_t;
 
 /* ── 엔진 (engine.h 1:1) ── */
@@ -485,6 +574,25 @@ CIMSUE_API int64_t CIMSUE_CALL cimsue_engine_send_emergency_alert(cimsue_engine_
 
 CIMSUE_API int64_t CIMSUE_CALL cimsue_engine_affiliate(cimsue_engine_t* e, int32_t account_id, const char* group_id,
                                                        int32_t on);
+/** 서비스를 고르는 affiliation(Engine::affiliate(…, service)) — MCPTT = cimsue_engine_affiliate, MCVideo = 관심 그룹 전부를 한 PUBLISH 로
+ *  (TS 24.281 §8.2.1.2). 반환 token(on_request_result 상관), 실패 -1. */
+CIMSUE_API int64_t CIMSUE_CALL cimsue_engine_affiliate_service(cimsue_engine_t* e, int32_t account_id, const char* group_id,
+                                                               int32_t on, cimsue_mc_service_t service);
+
+/* MCVideo 그룹 호 (TS 24.281 호 · TS 24.581 전송 제어) — opts=NULL 이면 기본값. 나가기 = cimsue_engine_hangup */
+CIMSUE_API void CIMSUE_CALL cimsue_video_group_call_options_default(cimsue_video_group_call_options_t* opts);
+CIMSUE_API int32_t CIMSUE_CALL cimsue_engine_join_video_group_call(cimsue_engine_t* e, int32_t account_id, const char* group_id,
+                                                                   const cimsue_video_group_call_options_t* opts);
+/** [영상 보내기] — Transmission Request(§6.2.4.3.2). priority<0 = 미기재. 결과는 on_transmission. */
+CIMSUE_API cimsue_status_t CIMSUE_CALL cimsue_engine_request_transmission(cimsue_engine_t* e, int32_t call_id, int32_t priority);
+/** [보내기 끝] — Transmission End Request(§6.2.4.5.3). */
+CIMSUE_API cimsue_status_t CIMSUE_CALL cimsue_engine_release_transmission(cimsue_engine_t* e, int32_t call_id);
+/** [받기] — Receive Media Request(§6.2.5.3.3). transmitter_id = on_reception(NOTIFIED) 의 transmitter.user_id. */
+CIMSUE_API cimsue_status_t CIMSUE_CALL cimsue_engine_accept_reception(cimsue_engine_t* e, int32_t call_id, const char* transmitter_id,
+                                                                      int32_t priority);
+/** [그만 보기] — Media Reception End Request(§6.2.5.5). */
+CIMSUE_API cimsue_status_t CIMSUE_CALL cimsue_engine_end_reception(cimsue_engine_t* e, int32_t call_id, const char* transmitter_id);
+CIMSUE_API void CIMSUE_CALL cimsue_engine_transmission_info(const cimsue_engine_t* e, int32_t call_id, cimsue_transmission_info_t* out);
 CIMSUE_API cimsue_status_t CIMSUE_CALL cimsue_engine_subscribe_conference(cimsue_engine_t* e, int32_t account_id,
                                                                           const char* group_id, int32_t on);
 CIMSUE_API cimsue_status_t CIMSUE_CALL cimsue_engine_subscribe_xcap_diff(cimsue_engine_t* e, int32_t account_id,
@@ -582,6 +690,11 @@ CIMSUE_API const char* CIMSUE_CALL cimsue_transport_str(cimsue_transport_t t);
 CIMSUE_API const char* CIMSUE_CALL cimsue_floor_state_str(cimsue_floor_state_t s);
 CIMSUE_API const char* CIMSUE_CALL cimsue_floor_kind_str(cimsue_floor_kind_t k);
 CIMSUE_API const char* CIMSUE_CALL cimsue_condition_cause_str(cimsue_condition_cause_t c);
+CIMSUE_API const char* CIMSUE_CALL cimsue_mc_service_str(cimsue_mc_service_t s);
+CIMSUE_API const char* CIMSUE_CALL cimsue_transmission_state_str(cimsue_transmission_state_t s);
+CIMSUE_API const char* CIMSUE_CALL cimsue_reception_state_str(cimsue_reception_state_t s);
+CIMSUE_API const char* CIMSUE_CALL cimsue_transmission_kind_str(cimsue_transmission_kind_t k);
+CIMSUE_API const char* CIMSUE_CALL cimsue_reception_kind_str(cimsue_reception_kind_t k);
 
 /* ── 문자열 산출 헬퍼 (C++ 인라인 멤버·types.h 자유 함수 1:1) ──
  * 공통 규약: out 에 최대 cap 바이트(NUL 포함)를 NUL 종료로 기록하고, NUL 을 제외한 실제 길이를 반환한다.
@@ -833,6 +946,7 @@ typedef struct {
     const char* domain;
     const char* mcptt_server_uri;           /* MCPTT-Service-Details/Server-URI → 계정 mcptt_server_uri */
     const char* mcdata_server_uri;          /* MCData-Service-Details/Server-URI → 계정 mcdata_server_uri */
+    const char* mcvideo_server_uri;         /* MCVideo-Service-Details/Server-URI → 계정 mcvideo_server_uri(끝에 덧붙였다) */
 } cimsue_ue_init_config_doc_t;
 
 /** 정책 게이트 스냅샷(csc.h Capabilities) — 받지 못한 문서는 허용. UX 선차단용, 최종 판정은 서버. */
@@ -961,6 +1075,8 @@ typedef enum {
     CIMSUE_STRUCT_MCPTT_CONDITION, CIMSUE_STRUCT_EMERGENCY_ALERT, CIMSUE_STRUCT_VIDEO_DEVICE_INFO, CIMSUE_STRUCT_CMS_ENTRY,
     CIMSUE_STRUCT_USER_PROFILE_DOC, CIMSUE_STRUCT_SERVICE_CONFIG_DOC, CIMSUE_STRUCT_CAPABILITIES,
     CIMSUE_STRUCT_UE_INIT_CONFIG_DOC,
+    CIMSUE_STRUCT_VIDEO_GROUP_CALL_OPTIONS, CIMSUE_STRUCT_VIDEO_TRANSMITTER, CIMSUE_STRUCT_TRANSMISSION_EVENT,
+    CIMSUE_STRUCT_RECEPTION_EVENT, CIMSUE_STRUCT_TRANSMISSION_INFO,
     CIMSUE_STRUCT_COUNT_
 } cimsue_struct_id_t;
 /** 구조체의 sizeof(이 DLL 의 컴파일 결과). 모르는 id 는 -1. */

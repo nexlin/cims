@@ -386,8 +386,13 @@ configuration 값, 없으면 K5 기본). 규격이 비워 둔 곳의 해석은 [
 `AccountConfig.mcvideoEnabled`·`mcvideoServerUri`·`autoAnswerMcvideo`, `affiliate(…, service)`, `joinVideoGroupCall`(`VideoGroupCallOptions` —
 chat/prearranged·`mc_queueing`·`mc_priority`·`mc_reception_priority`·암묵적 송출 요청·재합류 `sessionUri`), `requestTransmission`·
 `releaseTransmission`·`acceptReception`·`endReception`·`transmissionInfo`, `Listener::onTransmission`·`onReception`(`TransmissionEvent`·
-`ReceptionEvent` — §6.2.4·§6.2.5 상태), `CallInfo.service`·`sessionUri`. SWIG 는 `VideoTransmitterVector` 템플릿으로 Java 를 내고, C API·.NET 은
-C7 에서 같은 이름으로 낸다. 동작(구현 — 시험 `McvSip`·`McvCall`, 계약 K3 골든과 대조):
+`ReceptionEvent` — §6.2.4·§6.2.5 상태), `CallInfo.service`·`sessionUri`. 바인딩(C7) — SWIG Java(`VideoTransmitterVector` 템플릿) 위 Kotlin 파사드
+(`Account.joinVideoGroupCall`·`affiliate(…, service)`·`Call.requestTransmission`·`releaseTransmission`·`acceptReception`·`endReception`·`transmissionInfo`,
+흐름 `transmission`·`reception`), C API(`cimsue_engine_join_video_group_call`·`cimsue_engine_affiliate_service`·`cimsue_engine_request_transmission` … ·
+`on_transmission`·`on_reception` — 구조체·필드·콜백은 끝에 덧붙여 ABI 유지, 크기 자기검사 id 추가), .NET(`Account.JoinVideoGroupCall`·`Affiliate(…, McService)`·
+`Call.RequestTransmission` … · 이벤트 `TransmissionChanged`·`ReceptionChanged` — Windows 에서 `CimsUe.Tests` ABI 대조). 그룹 영상 옵션(`GroupCallOptions.video`)·
+`AccountConfig.mcpttVideo` 의 C API·.NET 누락도 같이 메웠다. MCVideo 설정 문서(그룹 문서 MCVideo 몫·user profile·service config)의 C API·.NET·Kotlin 은 아직
+C++ 만이다(ue-init-config 의 MCVideo PSI 는 셋 다 있다). 동작(구현 — 시험 `McvSip`·`McvCall`, 계약 K3 골든과 대조):
 
 - **등록**(TS 24.281 §7.2.1AA — 서비스 인가 본문 없는 REGISTER) — `mcvideoEnabled` 면 REGISTER Contact 에 `+g.3gpp.mcvideo` 와 `+g.3gpp.icsi-ref`
   목록의 mcvideo ICSI. **서비스 태그는 REGISTER 에만 모은다**(§7.1 — MC 서비스 등록은 한 REGISTER): icsi-ref 는 한 파라미터의 쉼표 목록(RFC 3840 —
@@ -749,6 +754,12 @@ NDK/MSVC 빌드는 개발 서버 밖(WSL2·Windows 머신)에서 수행하고, �
   CIMS 패치로 추가해 `onVideoFrame` 을 채운다(Android 프레임 콜백 선택지와 같은 장치를 공유).
 - **Android 영상 경로 선택** — Surface 직결(현행) vs 프레임 콜백(§4.5). 감청 격자 합성이 필요한 관제 태블릿은
   프레임 콜백이 맞고, 1:1 영상 앱은 Surface 직결이 싸다. 파사드가 둘을 다 제공할지 결정.
+- **Linux 엔진 영상(MCVideo M2 전제)** — Linux 헤드리스 엔진은 `PJMEDIA_HAS_VIDEO 0` 이라 cimsue-cli MCVideo 호가 `m=video 0` 이다(§4.6 편차 표).
+  cimsue-cli 두 대 영상 e2e([mcvideo_dev_plan.md](../../dev/mcvideo_dev_plan.md) M2)와 송출 게이트의 영상 쪽 단위시험에는 ① H.264 코덱 — openh264 를
+  ExternalProject 로 소스 빌드(opencore-amr 와 같은 방식, 시스템 패키지·sudo 불필요, 정적 링크) 후 pjproject `--with-openh264`, ② 캡처 = 내장 합성
+  장치(colorbar, `PJMEDIA_VIDEO_DEV_HAS_CBAR_SRC`), ③ 렌더 = 코어가 등록하는 **null 렌더 장치**(`pjmedia_vid_register_factory` — 프레임을 버리고 수를
+  센다, 시험의 «수신 영상 프레임» 관측점. Windows «창 없는 프레임 콜백» 장치와 같은 틀)가 필요하다. 계측기 워커 패키지가 cimsue-cli 를 동봉하므로
+  (test_instrument.md real-ue) 의존성·패키지 크기·빌드 시간 영향을 함께 정해야 한다 — 사용자 결정 후 착수.
 - **호별 수신 창** — `setVideoWindow` 는 엔진 창 하나라 동시에 참여한 영상 그룹이 둘 이상이면 같은 창에 겹쳐 그린다(§4.5 그룹 영상).
   `setVideoWindow(callId, window)` 로 호마다 창을 두거나, 주채널 호에만 결선하는 정책이 필요하다.
 - **백그라운드 영상 송출** — Android 는 카메라를 전경 앱에만 허용한다. PTT 앱이 화면 밖에서 발언할 때 영상까지 보내려면 서비스의

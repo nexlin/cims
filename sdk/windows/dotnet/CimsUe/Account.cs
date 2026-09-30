@@ -59,11 +59,22 @@ public sealed unsafe class Account
 
     private static string? NullIfEmpty(string? s) => string.IsNullOrEmpty(s) ? null : s;
 
-    /// <summary>affiliation PUBLISH(Event: mcptt). on=false 면 Expires:0. 반환 token — RequestCompleted 로 상관.</summary>
-    public Result<long> Affiliate(string groupId, bool on)
+    /// <summary>affiliation PUBLISH — 서비스마다 따로다. MCPTT = Event: mcptt(on=false 면 Expires:0), MCVideo = 관심 그룹 전부를 한 PUBLISH 로
+    /// (TS 24.281 §8.2.1.2 — Event: presence, 그룹이 없으면 Expires:0). 반환 token — RequestCompleted 로 상관.</summary>
+    public Result<long> Affiliate(string groupId, bool on, McService service = McService.Mcptt)
     {
-        long t = cimsue_engine_affiliate(Engine.Handle, Id, groupId, Engine.B(on));
+        long t = cimsue_engine_affiliate_service(Engine.Handle, Id, groupId, Engine.B(on), (int)service);
         return t < 0 ? Result<long>.Fail(-1, Engine.LastError()) : Result<long>.Success(t);
+    }
+
+    // ── MCVideo 그룹 호 (TS 24.281 · TS 24.581) ──
+    /// <summary>MCVideo 그룹 호 개시·합류 — Request-URI = AccountConfig.McvideoServerUri(재합류는 opts.SessionUri). 나가기 = Call.Hangup
+    /// (MCPTT 호와 독립). 송출·수신은 Call.RequestTransmission·AcceptReception, 진행은 Engine.TransmissionChanged·ReceptionChanged.</summary>
+    public Result<Call> JoinVideoGroupCall(string groupId, VideoGroupCallOptions? opts = null)
+    {
+        using var s = new NativeStrings();
+        cimsue_video_group_call_options_t o = ToNative(opts, s);
+        return Engine.CallResult(cimsue_engine_join_video_group_call(Engine.Handle, Id, groupId, &o));
     }
 
     /// <summary>그룹 로스터 구독(RFC 4575 conference) — 확인 신호는 RosterChanged.</summary>
@@ -198,6 +209,21 @@ public sealed unsafe class Account
         n.members = s.AddArray(o.Members, out n.member_count);
         n.broadcast = Engine.B(o.Broadcast);
         n.implicit_floor_request = Engine.B(o.ImplicitFloorRequest);
+        n.video = Engine.B(o.Video);
+        return n;
+    }
+
+    internal static cimsue_video_group_call_options_t ToNative(VideoGroupCallOptions? o, NativeStrings s)
+    {
+        cimsue_video_group_call_options_t n;
+        cimsue_video_group_call_options_default(&n);
+        if (o is null) return n;
+        n.prearranged = Engine.B(o.Prearranged);
+        n.queueing = Engine.B(o.Queueing);
+        n.max_priority = o.MaxPriority;
+        n.max_reception_priority = o.MaxReceptionPriority;
+        n.implicit_transmission_request = Engine.B(o.ImplicitTransmissionRequest);
+        n.session_uri = s.Add(o.SessionUri);
         return n;
     }
 

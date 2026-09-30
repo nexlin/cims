@@ -264,9 +264,11 @@ data class UserProfileDoc(
 data class UeInitConfigDoc(
     val etag: String = "", val domain: String = "",
     val mcpttServerUri: String = "", val mcdataServerUri: String = "",
+    /** MCVideo-Service-Details/Server-URI → [AccountConfig.mcvideoServerUri]. */
+    val mcvideoServerUri: String = "",
 ) {
     internal companion object {
-        fun of(d: JniUeInitConfigDoc) = UeInitConfigDoc(d.etag, d.domain, d.mcpttServerUri, d.mcdataServerUri)
+        fun of(d: JniUeInitConfigDoc) = UeInitConfigDoc(d.etag, d.domain, d.mcpttServerUri, d.mcdataServerUri, d.mcvideoServerUri)
     }
 }
 
