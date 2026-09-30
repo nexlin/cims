@@ -531,15 +531,14 @@ void CMcVideoCallService::OnIncomingInvite( const char *pszCallId, const char *p
             if ( kv.second.strMember == strFrom ) bInThis = true;
     if ( !bInThis && _ActiveCallsOf( strFrom ) >= clsProf.m_iMaxCallsN6 )
         return _Reject( pszCallId, SIP_BUSY_HERE, 103, kMcVideoWarn103 );
-    // 제휴 — 안 돼 있으면 멤버라 암묵적 affiliation 적격(§8.2.2.3.6·§8.2.2.3.7)
-    if ( !gclsDbManager.IsAffiliated( strGroupId, strFrom, EMcService::McVideo ) ) {
-        const std::string strClient = clsMvi.strClientId.empty() ? strFrom : clsMvi.strClientId;
-        if ( !gclsDbManager.InsertAffiliation( strGroupId, strFrom, strClient, 0, EMcService::McVideo ) )
-            return _Reject( pszCallId, SIP_FORBIDDEN, 120, kMcVideoWarn120 );
-        EmitAffiliationChanged( strGroupId, "affiliate", strFrom, EMcService::McVideo );
-        SendAffiliationNotify( strFrom, "", EMcService::McVideo );
-        CLog::Print( LOG_INFO, "MCVIDEO: implicit affiliation group(%s) user(%s)", strGroupId.c_str(),
-                     strFrom.c_str() );
+    // 제휴 — prearranged 는 제휴된 사용자만 개시·합류한다(§9.2.1.4.2 13)a)·14)a) — 일반 호에 암묵적 affiliation 없음,
+    //   403 120). chat 은 멤버면 암묵적 affiliation 적격(§9.2.2.4.1.1 5) · §8.2.2.3.6) — 제휴는 SDP 검사를 지난 뒤에
+    //   한다(아래, 12)).
+    const bool bAffiliated = gclsDbManager.IsAffiliated( strGroupId, strFrom, EMcService::McVideo );
+    if ( !bAffiliated && bPrearranged ) {
+        CLog::Print( LOG_INFO, "MCVIDEO: INVITE from(%s) group(%s) prearranged — 제휴 안 됨 → 403 120", strFrom.c_str(),
+                     strGroupId.c_str() );
+        return _Reject( pszCallId, SIP_FORBIDDEN, 120, kMcVideoWarn120 );
     }
     // SDP — 제어 채널(m=application udp MCVideo)과 음성 AMR-WB 가 있어야 한다(§9.2.2.4.1.1 9) — 488)
     int iCtl = 0;
@@ -575,6 +574,17 @@ void CMcVideoCallService::OnIncomingInvite( const char *pszCallId, const char *p
         // 음성이 SRTP 인데 영상이 평문이면 psip 가 영상을 거절한다(평문 영상을 SRTP leg 에 섞지 않는다) — 같은 판단을
         //   여기서 둔다
         if ( clsSdes.clsAudio.bSrtp && !clsSdes.clsVideo.bSrtp ) bVideoOk = false;
+    }
+
+    // chat 합류의 암묵적 affiliation (§9.2.2.4.1.1 12) · §8.2.2.3.7) — 실패면 403 120
+    if ( !bAffiliated ) {
+        const std::string strClient = clsMvi.strClientId.empty() ? strFrom : clsMvi.strClientId;
+        if ( !gclsDbManager.InsertAffiliation( strGroupId, strFrom, strClient, 0, EMcService::McVideo ) )
+            return _Reject( pszCallId, SIP_FORBIDDEN, 120, kMcVideoWarn120 );
+        EmitAffiliationChanged( strGroupId, "affiliate", strFrom, EMcService::McVideo );
+        SendAffiliationNotify( strFrom, "", EMcService::McVideo );
+        CLog::Print( LOG_INFO, "MCVIDEO: implicit affiliation group(%s) user(%s)", strGroupId.c_str(),
+                     strFrom.c_str() );
     }
 
     // 세션 — CMP 그룹은 첫 멤버의 로스터 등록(_CmpAddMember)에서 선다

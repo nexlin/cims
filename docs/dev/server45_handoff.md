@@ -649,3 +649,7 @@ psip 합성 SDP 에 video 전용 키(`m_strLocalVideoCrypto*`)를 더했다(S1-U
 **.48 B8 CMP 몫 — MCVideo 녹취 기록기 (.48 → .45 참고)** — ADD `record_dir`·`session_dir` 가 오면 CMP 가 PTT 세션 레이아웃으로 기록한다(세그먼트 = 송출 구간,
 송출자마다 슬롯 audio/video, meta `type: "mcvideo"`). CSP 는 아직 디렉터리를 싣지 않는다 — 녹취 레이아웃(PTT 영역 공용 대 서비스 영역)과 이력 서비스 축은
 사용자 결정 뒤. 단말 영향 없음.
+
+**.48 정정 — prearranged 는 제휴가 먼저 (.48 → .45, M2 T4·T5 영향)** — TS 24.281 §9.2.1.4.2 13)a)·14)a): 일반 prearranged 호(개시·진행 중 합류·재합류)를
+**제휴 안 된 사용자**가 내면 403 Warning 120 — 암묵적 affiliation 은 chat 합류와 긴급·임박 호에만 있다(§8.2 머리말, chat = §9.2.2.4.1.1 5)·12)).
+A10 이 prearranged 에도 암묵 제휴를 하던 것을 고쳤다. **M2 T4·T5 의 개시자 A 도 `--affiliate-mcvideo gmv2` 가 필요하다**(B 만이 아니라). chat(T3)은 그대로.
