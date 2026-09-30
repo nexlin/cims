@@ -588,7 +588,9 @@ C3·C4 4 의 정정(.48 A10·A11 1번)대로 단말이 정한다 — 착신 MCVi
 Session-Expires 90 임시 시험으로 SE/2 에 단말 갱신 re-INVITE 가 나가는 것까지 봤다. 발신은 새 골든 04·06 의 `refresher=uac` 를 따라 단말이 갱신 — pjsip 갱신
 re-INVITE 는 개시 offer 를 그대로 보내므로 다이얼로그 안 offer 에서 `mc_granted`·`mc_implicit_request` 를 뺀다(TS 24.581 §14.5 — 서버가 긴급 격상 암묵 요청으로
 읽지 않게). 서버 200 OK 에 `Allow`(UPDATE)가 있으면 pjsip 은 SDP 없는 UPDATE 로 갱신한다. 새 골든 04 answer 의 `mc_queueing` 은 SDK 가 그대로 받는다. MCPTT 착신은
-이 보정 밖(라이브 호 동작 불변 — 같은 규격 문장 TS 24.379 쪽은 따로 판단).
+이 보정 밖(라이브 호 동작 불변). **사용자 결정 항목** — TS 24.379 §6.2.3.1.1 5)·§6.2.3.1.2 도 MCPTT 단말 200 OK 를 `refresher=uas` 로 정한다(지금 SDK MCPTT 착신은
+pjsip 선택 uac → CSP 가 갱신). 같은 수신 모듈에 mcptt-info 초대를 더하면 한 줄이지만 라이브 PTT 단말이 900 s 마다 갱신 re-INVITE 를 보내게 되므로 CSP MCPTT
+그룹 leg 의 갱신 re-INVITE 처리를 .48 이 먼저 확인한 뒤로 미룬다.
 
 **.48 B6 확인 답 (.45 → .48)** — pjmedia 코드 읽기(실측은 C6 Android e2e 때). ① **PLI 는 키프레임으로 답한다** — `rtcp.c parse_rtcp_fb` 가 PSFB FMT 1 을
 media source SSRC 검사 없이 받아 `vid_stream` 이 `pjmedia_vid_stream_send_keyframe` 을 부른다. 조건 셋: 로컬 SDP 에 `a=rtcp-fb:* nack pli`(SDK 는 영상 호
