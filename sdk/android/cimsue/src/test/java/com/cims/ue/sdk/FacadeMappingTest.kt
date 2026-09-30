@@ -70,6 +70,43 @@ class FacadeMappingTest {
             "Speaking" to com.cims.ue.sdk.jni.FloorState.Speaking.swigValue(),
             "Listening" to com.cims.ue.sdk.jni.FloorState.Listening.swigValue(),
             "Queued" to com.cims.ue.sdk.jni.FloorState.Queued.swigValue()))
+        // MCVideo(TS 24.581 §6.2.4·§6.2.5) — 송출·수신 상태가 뒤바뀌면 [영상 보내기]·[받기] 표시가 반대가 된다
+        check(McService.entries.map { it.name }, listOf(
+            "Mcptt" to com.cims.ue.sdk.jni.McService.Mcptt.swigValue(),
+            "McVideo" to com.cims.ue.sdk.jni.McService.McVideo.swigValue()))
+        check(TransmissionState.entries.map { it.name.replace("_", "") }, listOf(
+            "NoPermission" to com.cims.ue.sdk.jni.TransmissionState.NoPermission.swigValue(),
+            "PendingRequest" to com.cims.ue.sdk.jni.TransmissionState.PendingRequest.swigValue(),
+            "Permitted" to com.cims.ue.sdk.jni.TransmissionState.Permitted.swigValue(),
+            "PendingEnd" to com.cims.ue.sdk.jni.TransmissionState.PendingEnd.swigValue(),
+            "Queued" to com.cims.ue.sdk.jni.TransmissionState.Queued.swigValue()))
+        check(ReceptionState.entries.map { it.name.replace("_", "") }, listOf(
+            "Notified" to com.cims.ue.sdk.jni.ReceptionState.Notified.swigValue(),
+            "PendingRequest" to com.cims.ue.sdk.jni.ReceptionState.PendingRequest.swigValue(),
+            "Receiving" to com.cims.ue.sdk.jni.ReceptionState.Receiving.swigValue(),
+            "PendingRelease" to com.cims.ue.sdk.jni.ReceptionState.PendingRelease.swigValue(),
+            "Ended" to com.cims.ue.sdk.jni.ReceptionState.Ended.swigValue()))
+        check(TransmissionEventKind.entries.map { it.name.replace("_", "") }, listOf(
+            "Granted" to com.cims.ue.sdk.jni.TransmissionEvent.Kind.Granted.swigValue(),
+            "Rejected" to com.cims.ue.sdk.jni.TransmissionEvent.Kind.Rejected.swigValue(),
+            "Revoked" to com.cims.ue.sdk.jni.TransmissionEvent.Kind.Revoked.swigValue(),
+            "QueuePosition" to com.cims.ue.sdk.jni.TransmissionEvent.Kind.QueuePosition.swigValue(),
+            "EndRequested" to com.cims.ue.sdk.jni.TransmissionEvent.Kind.EndRequested.swigValue(),
+            "Ended" to com.cims.ue.sdk.jni.TransmissionEvent.Kind.Ended.swigValue(),
+            "ReceiverJoined" to com.cims.ue.sdk.jni.TransmissionEvent.Kind.ReceiverJoined.swigValue(),
+            "Idle" to com.cims.ue.sdk.jni.TransmissionEvent.Kind.Idle.swigValue(),
+            "QueueCancelled" to com.cims.ue.sdk.jni.TransmissionEvent.Kind.QueueCancelled.swigValue(),
+            "RequestTimeout" to com.cims.ue.sdk.jni.TransmissionEvent.Kind.RequestTimeout.swigValue(),
+            "Other" to com.cims.ue.sdk.jni.TransmissionEvent.Kind.Other.swigValue()))
+        check(ReceptionEventKind.entries.map { it.name.replace("_", "") }, listOf(
+            "Notified" to com.cims.ue.sdk.jni.ReceptionEvent.Kind.Notified.swigValue(),
+            "Granted" to com.cims.ue.sdk.jni.ReceptionEvent.Kind.Granted.swigValue(),
+            "Rejected" to com.cims.ue.sdk.jni.ReceptionEvent.Kind.Rejected.swigValue(),
+            "Ended" to com.cims.ue.sdk.jni.ReceptionEvent.Kind.Ended.swigValue(),
+            "Released" to com.cims.ue.sdk.jni.ReceptionEvent.Kind.Released.swigValue(),
+            "EndRequested" to com.cims.ue.sdk.jni.ReceptionEvent.Kind.EndRequested.swigValue(),
+            "RequestTimeout" to com.cims.ue.sdk.jni.ReceptionEvent.Kind.RequestTimeout.swigValue(),
+            "Other" to com.cims.ue.sdk.jni.ReceptionEvent.Kind.Other.swigValue()))
         // floor 이벤트 종류 — Denied 와 Revoked 가 뒤바뀌면 발언 거절과 회수 표시가 반대가 된다
         check(FloorEventKind.entries.map { it.name.replace("_", "") }, listOf(
             "Granted" to com.cims.ue.sdk.jni.FloorEvent.Kind.Granted.swigValue(),
