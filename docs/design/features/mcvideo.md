@@ -413,6 +413,7 @@ Indicator, automatic 수신; 1차 CSP 는 normal) · JOIN 응답 `audio_ssrc`·`
   INVITE·answer 모양은 K3 골든 03·05·08(만드는 모양)과 04·06·07·09(읽는 모양)으로 대조한다 — SDK 산출 메시지는 `tests/mcvideo_fixture_check.py` 도 통과한다.
 - **전송 제어 참여자**(구현·결선) — `requestTransmission`·`releaseTransmission`(§6.2.4 상태 머신, T100·T101), 이벤트 `onTransmission`(Granted·Rejected·Revoked·Idle·
   Media Transmission Notification — 송출자·SSRC). 호 성립 = 개시 CONFIRMED(협상된 answer) · 착신 200 OK 송신, 성립 뒤에 `Active` 를 알린다.
+  CMP 와 맞붙인 교차 스모크 `tests/mcvideo_cmp_sdk_xcheck.sh`(시험용 CMP + SDK 참여자 둘 — chat 송출·알림·[받기]·상한 거절·End Notify, 대기열, 암묵 요청 즉시·늦은 허가).
 - **송출 게이트**(구현) — 마이크·카메라는 송출 허가에서만. 허가 밖에서는 오디오 인코더를 멈춰 무음 프레임도 내지 않는다(서버는 허가 없는 payload RTP 에
   회수 #3 — §5.3.1). 빈 RTP keep-alive·RTCP·제어 채널 빈 RR 은 계속 나가 NAT·latch 를 연다.
 - **수신 제어** — `acceptReception(callId, transmitterId)`·`endReception`(§6.2.5, T103·T104)은 결선됐다. 스트림별 렌더 창(현행 «호별 수신 창» 과제와 합친다 —
