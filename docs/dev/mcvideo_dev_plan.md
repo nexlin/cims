@@ -81,7 +81,7 @@
 | B7 | 영상 SRTP(`media_crypto_video` JOIN) + 제어 SRTCP(`PFloorCrypto` 재사용) | B3 | S | SAVP leg 영상 암호문 |
 | B8 | 녹취 — 송출마다 슬롯 트랙(audio·video), 색인 서비스 축 `mcvideo` | B4 | M | 녹취 재생에 MCVideo 세션 |
 | B9 | HEARTBEAT 자원·통계 | B3 | S | CSP 가 자원 부족을 안다 |
-| B10 | 계측기 요구서(libcsim MCVideo 단말·시나리오 셋, `PTT-GROUP-CALL-VIDEO`·`S6-SCN-PTT-VIDEO` 대체) — 팀원 트랙에 전달 | B5 | S | 요구서 합의 |
+| B10 | 계측기 요구서(libcsim MCVideo 단말·시나리오 셋, `PTT-GROUP-CALL-VIDEO`·`S6-SCN-PTT-VIDEO` 대체) — 팀원 트랙에 전달 = [mcvideo_tester_requirements.md](mcvideo_tester_requirements.md) | B5 | S | 요구서 합의 |
 | B11 | V7 CMP 몫 — MCPTT 그룹의 PTT 영상 분배 경로 제거 | A13 | S | PTT 회귀 무변화 |
 
 ### .45 — 트랙 C 단말 + 전송 제어 코덱 (K5·B1·B2)
