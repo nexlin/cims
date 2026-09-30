@@ -742,9 +742,33 @@ windows/dispatch-desktop/                 DispatchDesktop.csproj — net10.0-win
   게이트웨이가 필요하다. 능력 키는 있다 — 프로비저닝 `services[kind].capabilities.smsGateway`(csc.json `Provisioning.Services.<kind>.sms_gateway`,
   기본 `false`); 앱은 이 값으로 외부 번호 [문자] 활성/비활성을 결정한다(앱 반영 남음).
 - **U10 관측 API** — `MediaSource.level/active` 실시간 갱신 확정 후 감청 창 레벨 미터 활성.
-- **경보(alert-ind) 파싱** — `onMessage` 의 `mcptt-info` 를 코어가 `McpttInfo` 로 해석해 이벤트로.
-- **CMS user-profile 파싱 API** — `allow_adhoc_call`·`allow_emergency_private_call`·수신자 모드를 구조로.
-- **자동 수락 분리** — `AccountConfig.autoAnswerMcptt` 는 그룹콜·개별 통화 공통. 관제석은 그룹콜 자동 + 개별 통화 수동이 맞아 코어 플래그 분리 필요.
+- **경보(alert-ind) 파싱** — 코어 반영(`sendEmergencyAlert`·`onEmergencyAlert`, [ue_sdk.md §4.2](ue_sdk.md)) — C API·.NET 노출이 남았다([sdk_port_handoff.md §4.1](../../dev/sdk_port_handoff.md)).
+- **CMS user-profile 파싱 API** — 코어 반영(`UserProfileDoc`·`ServiceConfigDoc`·`Capabilities::of`) — C API·.NET 노출이 남았다([sdk_port_handoff.md §4.1](../../dev/sdk_port_handoff.md)).
+- **자동 수락 분리** — `AccountConfig.autoAnswerMcptt` 는 그룹콜·개별 통화 공통. 관제석은 그룹콜 자동 + 개별 통화 수동이 맞아 코어 플래그 분리 필요
+  (규격은 수락 방식을 호 종류별로 둔다 — TS 24.379 §6.2.3 commencement mode, 개별 통화·그룹콜 각각 자동/수동, [ue_sdk.md §11](ue_sdk.md)).
+  **긴급 개별 통화의 전역 표시**도 이것과 함께 정한다 — 긴급 배너는 개별 통화를 빼고(`UpdateEmergencyBanner`, 착신 배너의 몫) 착신 배너는 자동 수락으로
+  잠깐만 서며 긴급 여부도 적지 않아, 다른 화면에 있는 동안 받은 긴급 개별 통화는 ① 카드 빨강이 유일한 표시다.
+- **진행 중 긴급·임박 조건 반영(C API·.NET)** — 코어는 서버가 진행 중에 보내는 조건 re-INVITE(TS 24.379 V18.6.0 §6.3.3.1.6 긴급·
+  §6.3.3.1.10 긴급 취소·§6.3.3.1.15 임박 위험 설정/해제)와 합류 200 OK 의 조건을 읽어 `CallInfo.condition`·`onMcpttCondition` 으로 낸다
+  ([ue_sdk.md §4.2](ue_sdk.md) «긴급·임박 세션 조건»). C API·.NET 에는 아직 없다([sdk_port_handoff.md §4.1](../../dev/sdk_port_handoff.md)) — 노출한 뒤 §3.2 긴급
+  배너의 «취소 re-INVITE 수신 시 해제»·진행 중 격상·«이미 긴급인 그룹에 합류» 를 `condition` 으로 잇는다. 지금은 세션 종료로만 빠진다.
+- **청취 leg 의 조건 변화(서버)** — CSP 가 조건 재광고에서 청취 leg 를 뺀다(`PropagateConditionToMembers` 의 `bListenOnly`). 청취 중인 관제사는
+  코어가 조건을 읽어도 격상·해제를 받지 못한다 — 청취 인가·은닉·sendonly 응답을 지키며 알리는 서버 계약이 필요하다([mcptt_emergency_modes.md §10](mcptt_emergency_modes.md)).
+- **SDS 전달 확인의 규격 경로(코어·서버)** — disposition 자동 회신(`sendSdsNotification`)이 원 발신자 AoR 로 SDS NOTIFICATION 한 파트만 보낸다. TS 24.282
+  V18.13.0 §12.2.1.1 은 대상 MCData ID 의 `resource-lists` 와 그룹 통지의 `<mcdata-calling-group-id>` 를 요구한다([mcdata_messaging.md §7](mcdata_messaging.md) 편차 표).
+- **망 전환** — 앱 몫: 망 복귀 처리를 `RefreshRegistrations`(계정별 REGISTER, `App.xaml.cs` `NetworkAvailabilityChanged`)에서 코어
+  `Engine.HandleNetworkChange`(TCP/TLS 연결 종료·계정별 재등록·앞 등록이 끝난 뒤 한 번 더, [ue_sdk.md §4.2](ue_sdk.md))로 옮긴다 — 계정별 REGISTER 만으로는
+  옛 주소의 TCP/TLS 연결이 남는다. 진행 중 호의 유지는 코어 과제다([ue_sdk.md §11](ue_sdk.md)).
+- **SDS 보관의 사람별 격리 — 이 앱이 먼저** — `messages.db` 가 설치당 하나라 교대로 사람이 바뀌는 자리에서 앞 사람의 스레드가 보인다. 설계 = `messages` 에
+  `owner`(로그인 주체) 열 + 조회·집계 `WHERE owner = ?`, 보존(`Prune`)·재기동 PENDING 마감은 owner 무관. 남은 결정 = 기존 행(빈 owner) —
+  첫 로그인에 1회 귀속(업그레이드 직후 자기 대화 유지) vs 아무에게도 보이지 않되 지우지 않음(격리 엄격). Android 태블릿은 이 구현 뒤 같은 설계로 따른다
+  ([android_dispatch_tablet.md §11](android_dispatch_tablet.md)).
+- **앱 결함** —
+  - ① 전이중 개별 통화 카드의 [음소거] 가 **켜졌는지 보이지 않는다** — 버튼 글자가 고정이고 `ChannelCard.IsMuted` 가 화면에 묶이지 않았다.
+  - 긴급 배너가 **호 상태 이벤트에서만** 갱신된다 — `UpdateEmergencyBanner` 가 `OnCallState` 에서만 불린다. 진행 중 조건은 별도 이벤트(`onMcpttCondition`,
+    위)로 오고 미디어 스냅샷(`OnCallMedia`)도 따로 오므로, 노출한 뒤 그 이벤트들에서도 불러야 변화가 배너에 온다.
+  - 배너 [채널로 이동](`GoToChannel` → `PttChannelsViewModel.FocusGroup`)이 ① 카드가 없는 그룹이면 `JoinChannel` 로 **합류**한다 — 청취 범위 그룹(② 카드)이면
+    비멤버 sendrecv 합류라 서버가 403 으로 거절한다(TS 24.379 §10.1.1, [dispatch_center.md §5.6](dispatch_center.md)). ② 카드로 포커스만 옮겨야 한다.
 - **대표번호 발신 표시** — 서버 확정([dispatch_center.md §4.7](dispatch_center.md)): 발신 INVITE 에 `P-Preferred-Identity: <sip:<pilotId>@…>` 를 실으면
   CSP 가 자기 관제 그룹 대표번호일 때 착신자에게 대표번호로 낸다(그 외는 무시 → 기본 신원). 앱: ③ 빠른 발신 줄 "대표번호로 발신" 토글(`dispatch.pilotId`
   있을 때) + SDK `makeCall` 헤더 옵션(남음).
