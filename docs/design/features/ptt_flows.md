@@ -21,7 +21,7 @@
 >
 > **3GPP 정합 세부**
 > - 그룹 식별: `ptt_groups.id`=surrogate(키), `mcptt_group_id`=식별자. 멤버 `role`(chair/participant)·`mcptt_id`.
-> - INVITE: `mcptt-info+xml` + **`resource-lists+xml`(멤버 로스터)** + SDP. (로스터는 INVITE>8192B 우려 시 생략 → GMS 의존)
+> - 멤버 leg INVITE: `mcptt-info+xml` + SDP — 멤버 명단(`resource-lists+xml`)은 싣지 않는다(TS 24.379 §6.3.3.1.2, 부록 A.1.3-7). 명단은 conference 이벤트 패키지(§10.1.3)·GMS 그룹 문서로 받는다. Contact = `+g.3gpp.mcptt`·`+g.3gpp.icsi-ref`·`isfocus`, `P-Asserted-Service` = ICSI mcptt.
 > - **chair** = participant floor 항상 선점(TS 24.380). 200 OK 의 `m=application` floor 포트 파싱.
 > - **로그/녹취 디렉터리**: `ptt/{id}/{YYYY}/{MM}/{DD}/{HH}/`(시간버킷) + `seg/{NNN}`(100세그 shard) + `floor.jsonl`/`group.json`. [recording.md](recording.md)
 > - 그룹 권한/소유(authorized user)·콘솔 RBAC 는 [mcptt_authorization.md](mcptt_authorization.md).

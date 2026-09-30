@@ -160,17 +160,21 @@ M1~M5 와 딸린 두 과제(floor 파라미터 단일 정의·mcptt-info 규격 
 |---|---|---|---|
 | M1 MSRP 배포 유실(발신 leg 가 통지보다 먼저 끝남) | ✅ | 끝난 수신 leg 의 cmdp 세션을 30 s 기억해 통지를 한 번 받는다 — 배포는 통지 payload 만으로 한다([mcdata_messaging.md](../design/features/mcdata_messaging.md) §4.7) | 013 → g005 2403 B media plane → 014 `plane=media` 수신, 계측기 `MCDATA-SDS-GROUP-MEDIA` ×5 pass. 경합 창(서브 ms) 자체는 재현하지 못했다 |
 | M2 경보 Request-URI = 참여 기능 PSI | ✅ | 대상 그룹 = 본문 `mcptt-request-uri`, Request-URI 그룹은 전환기로 받는다. 경보는 `CPttAsModule::OnEmergencyAlert` | `cimsue-cli --mcptt-psi sip:mcptt_psi@ptt.cims.example.kr alert g005` 200 → CSP `R-URI(mcptt_psi) fanout=3` → 014 수신 · 그룹 R-URI(전환기) 200 |
-| M3 경보 팬아웃 본문 재작성 | ✅ | §6.3.3.1.11·§6.3.3.1.12·§12.1.3.2 — request-uri = 수신자, calling-user-id·calling-group-id, 취소의 originated-by·emergency-ind false, Accept-Contact·P-Asserted-Service-Id, 위치 파트 | 014 수신 `group=g005 user=+82500000013` · 015 제3자 취소 `originated_by=+82500000013 emergency=-1` |
+| M3 경보 팬아웃 본문 재작성 | ✅ | §6.3.3.1.11·§6.3.3.1.12·§12.1.3.2 — request-uri = 수신자, calling-user-id·calling-group-id, 취소의 originated-by·emergency-ind false, Accept-Contact·P-Asserted-Service, 위치 파트 | 014 수신 `group=g005 user=+82500000013` · 015 제3자 취소 `originated_by=+82500000013 emergency=-1` |
 | M4 ad hoc 인가 규격 요소 | ✅ | `<cp:actions><anyExt><allow-adhoc-group-call>`(TS 24.484 **Rel-18** §8.3.2.1 11)xxxviii)R)) + 전환기 별칭 `<cims:allow-adhoc-group-call>`(옛 ptt-client — P3 이식 뒤 뺀다) | `tests/test_csc_user_profile.py` 12 OK |
 | M5 service-config Resource-Priority | ✅ | service-config 문서 **전체를 TS 24.484 §8.4 스키마로 재구성** — `<service-configuration-info>` › `<service-configuration-params domain>` › `<common><broadcast-group>`(계층 수) · `<on-network>`(`<fc-timers-counters>` 17 요소 = CMP floor 기본값 · `<emergency-/imminent-peril-/normal-resource-priority>` = `mcpttp` 15/8/0). 값 = DB 행(N2·계층 수) + CSC 설정 `ServiceConfig.*`(타이머 ms·RP). **시스템 인가 스위치 5종 제거**(1:1·긴급·경보·발언 요청·그룹 생성 — §8.4 에 없는 요소, 인가 = user profile ruleset·그룹 문서) | `tests/test_csc_user_profile.py` 14 OK(스키마 순서·필수 요소·기본값·덮어쓰기) · SDK `CmsDoc.*` |
 
-P3(ptt-client SDK 전환) 실측에서 더 드러난 것 — **미반영**([sdk_port_handoff.md](sdk_port_handoff.md) §5):
+P3(ptt-client SDK 전환) 실측에서 더 드러난 것 — .48 반영·배포(**csp 0.2.168 · worker 0.1.34**(cimsue-cli))·실측([sdk_port_handoff.md](sdk_port_handoff.md) §5):
 
-| # | 영향 | 위치 | 문제 | 규격 | 방향 |
-|---|---|---|---|---|---|
-| M6 | 중 | CSP 그룹콜 착신 INVITE(멤버 leg) | 멤버 leg INVITE 에 그룹 멤버 전원의 `application/resource-lists+xml`(`mcpttgi:participant-type`·`user-priority`)을 싣는다 — 12인 그룹에서 4.5 KB 가 UDP 로 나간다. 멤버 수에 비례해 커져 UDP 조각화·단말 수신 버퍼(pjsip 기본 4000 B — 단말은 65535 로 올렸다)를 넘는다 | TS 24.379 §6.3.3.1.2(제어 기능이 멤버에게 보내는 INVITE — mcptt-info 복사, resource-lists 없음) · RFC 3261 §18.1.1 | 멤버 leg INVITE 에서 resource-lists 제거(명단은 conference 이벤트로) |
-| M7 | 하 | 같은 INVITE | Contact 가 `<sip:gNNN@…>;isfocus` 뿐이다(`g.3gpp.mcptt`·`g.3gpp.icsi-ref` 없음) · `Session-Expires` 에 `refresher=uac` 를 붙인다 | TS 24.379 §6.3.3.1.2 1)·6)(refresher 생략) | Contact 특성 태그 셋 · refresher 생략 |
-| M8 | 하 | CSP in-dialog INFO | VoLTE 영상 호의 키프레임 요청 INFO(pjsua `media_control+xml`)에 501 — 상대에게 전달되지 않는다. 키프레임 요청은 RTCP PLI 로만 간다 | TS 26.114 §7.3(영상 코덱 제어 = RTCP AVPF PLI/FIR) · RFC 6086 | 대화 안 INFO 를 상대 leg 로 중계(또는 단말이 RTCP 만 쓰도록 계정 설정 — .45 결정) |
+| # | 판정 | 반영 | .48 실측 |
+|---|---|---|---|
+| M6 멤버 leg INVITE 의 resource-lists | ✅ | 멤버 leg INVITE = mcptt-info + SDP 만(TS 24.379 §6.3.3.1.2, 부록 A.1.3-7). 명단은 conference 이벤트(§10.1.3)·GMS. `BuildResourceListXml` 삭제 — 수신 쪽(SDK·앱·cspsim)에 이 명단을 읽는 코드가 없었다 | g001 멤버 INVITE **2194 B**(명단 없음) · 계측기 `PTT-GROUP-CALL-BASIC`·`FLOOR-HANDOVER`·`BROADCAST`·`LISTEN-ROSTER`(visible·hidden)·`NONMEMBER-DENIED` pass · cimsue-cli 착신 자동 응답·floor TAKEN |
+| M7 Contact 특성 태그 · refresher | ✅ / 편차 | Contact = `+g.3gpp.mcptt;+g.3gpp.icsi-ref="…mcptt";isfocus` · 서비스 식별 = `P-Asserted-Service`(§6.3.3.1.2 3), RFC 6050 — 경보 팬아웃의 `P-Asserted-Service-Id` 도 헤더 이름을 바로잡음). **refresher 는 `uac` 유지** — 규격은 "생략 권고, 싣는다면 uac" 라 허용 값이고, 생략하면 단말이 갱신자를 골라(부록 A.1.3-24 = uas) 서버측 leg 회수(leg_liveness §5.3)가 단말 구현에 기대게 된다 → 권고 편차로 [mcptt_standard_conformance.md](../design/features/mcptt_standard_conformance.md) §C4a | 와이어 확인 · 경보 fanout=1 수신 |
+| M8 영상 키프레임 INFO 501 | ✅(단말) | 서버는 그대로 — INFO 는 Allow 에 없고 501 은 RFC 3261 §8.2.1 대로다. 키프레임 요청의 규격 경로는 RTCP AVPF PLI/FIR(TS 26.114 §7.3)라 **SDK 가 SIP INFO 를 보내지 않는다**(`reqKeyframeMethod = RTCP_PLI` — 발신·응답·재개) | Linux 빌드는 영상 off(`PJMEDIA_HAS_VIDEO 0`)라 실측 불가 — `cimsue_test` 86 OK·음성 호 회귀. **Android·Windows 는 재빌드 뒤 영상 호에서 INFO 가 없는지 확인(.45)** |
+
+- **남은 것(.48)** — 개시자 200 OK(§6.3.3.2.3.1·§6.3.3.2.3.2)가 아직 규격 모양이 아니다: Contact 에 특성 태그·`isfocus` 없음, `Session-Expires` refresher 가
+  `uas`(규격 = `uac`). Contact 세션 식별자 = 그룹 id(세션마다 새로 만들지 않음). §C4a 편차 표.
+- **cimsue-cli 관찰** — `--from-profile ptt` 로 띄우면 `--mcptt-psi` 가 먹지 않는다(경보 R-URI = 그룹, 전환기로 200). 명시 계정(`--server …`)으로는 PSI.
 
 - 참고(관찰): 두 단말이 같은 사내 NAT 뒤에서 영상 통화할 때 CMP 가 한 peer 자리의 RTCP 목적지를 두 포트 사이에서 몇 초마다 다시 latch 하고, 다른 peer 의
   영상 RTCP 를 "unnegotiated src" 로 한 번 버린다(`PRtpRelay`). 영상·음성 품질에는 영향이 보이지 않았다(손실 0.3 %·RTT 17 ms) — 같은 공인 IP 뒤 두 peer 의

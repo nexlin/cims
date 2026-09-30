@@ -67,7 +67,7 @@ C API·.NET = Windows 개발 환경**.
 - **영상 수신 창의 세 조건** — ① SWIG 타입맵의 플랫폼 분기는 `%#if`(맨 `#if` 면 생성 때 `$1 = NULL` 만 남아 수신 창이 늘 NULL — `S1-UE-ANDROID-BIND`)
   ② 창 결선·해제는 렌더러(`win_in`)가 생긴 뒤에만(무효 id 면 pjsua 단정으로 프로세스 abort) ③ 전체화면 영상의 탭은 `SurfaceView` 가 받아 컨트롤을
   토글한다(AndroidView 는 자기 영역 터치를 소비해 부모 `clickable` 에 닿지 않는다 — 없으면 자동 숨김 뒤 종료 불가).
-  키프레임 요청은 SIP INFO 가 CSP 501 이라 RTCP PLI 로만 간다([server45_handoff.md](server45_handoff.md) §9 M8).
+  키프레임 요청은 RTCP PLI 만 쓴다 — SDK 가 SIP INFO 를 보내지 않는다([server45_handoff.md](server45_handoff.md) §9 M8).
 - **아직(실기 미확인)**: SRTP(이 계정은 미디어 SRTP 정책 off), 통화 중 PTT 마이크 양보(PTT 발언), 망 전환 재등록
   (Wi-Fi 를 끄면 무선 디버깅이 끊긴다), 착신 알림 [받기](화면 꺼짐·잠금). 코덱 정책 차이 = SDK 는 PCMU 도 둔다(기존은 PCMA 만) — AMR-WB 가 먼저라 협상 결과 같음.
 
@@ -152,7 +152,7 @@ C API·.NET = Windows 개발 환경**.
 
 - **실기에서 드러나 고친 것**
   - 엔진 SIP 메시지 상한 `PJSIP_MAX_PKT_LEN` 65535(`sdk/engine/config_site/common.h`) — 4000 이면 12인 그룹 착신 INVITE(4.5 KB, 마지막 파트 SDP)가 UDP
-    수신에서 잘려 호가 미디어 없이 성립한다. 서버 쪽은 [server45_handoff.md](server45_handoff.md) §9 M6.
+    수신에서 잘려 호가 미디어 없이 성립한다. 서버는 멤버 leg INVITE 에서 명단을 뺐다(g001 2.2 KB — [server45_handoff.md](server45_handoff.md) §9 M6). conference NOTIFY 는 여전히 멤버 수에 비례한다.
   - SOS 대상 — 등록 직후 cms NOTIFY 가 토큰보다 먼저 오면 user-profile 조회가 건너뛰어지고 다시 오지 않아, 선택 그룹(g001)으로 폴백해 협력업체 단말에
     경보·그룹콜이 갔다. 토큰이 들어올 때 문서를 한 번도 받지 않았으면 취득하고, SOS 는 프로파일이 없으면 최대 3 s 먼저 취득한 뒤 대상을 정한다
     ([mcptt_emergency_modes.md](../design/features/mcptt_emergency_modes.md) §4.3).

@@ -264,7 +264,9 @@ C++ 공개 표면은 `cimsue/engine.h` 의 `Engine` 하나이며 계정·호를 
 - **SSRC 소스.** U10 디먹스가 만든 서브스트림을 코어가 `MediaSources[]` 로 노출한다. 감청 leg 는 RFC 5576
   `a=ssrc … label` 을 파싱해 각 소스에 발신자/착신자 라벨을 붙인다. 믹싱은 pjmedia 안에서 끝나고(브리지 포트 1개)
   앱은 소스별 활성·레벨 표시만 한다(dispatch_center §5.4).
-- **영상.** 코어는 창을 열지 않는다. Android 는 Surface 를 받아 pjmedia 렌더러가 직접 그린다 — `Engine::setVideoWindow(void*)`
+- **영상.** 키프레임 요청은 RTCP PLI 만 쓴다(호 설정 `reqKeyframeMethod` — TS 26.114 §7.3 영상 코덱 제어 = RTCP AVPF PLI/FIR).
+  pjsua 기본값의 SIP INFO(RFC 5168 `media_control+xml`)는 서버가 INFO 를 Allow 에 두지 않아 501 로 끝나므로 보내지 않는다 —
+  발신·응답·재개(re-INVITE) 설정이 호 설정을 대신하므로 셋 모두에 싣는다. 코어는 창을 열지 않는다. Android 는 Surface 를 받아 pjmedia 렌더러가 직접 그린다 — `Engine::setVideoWindow(void*)`
   (파사드 `CimsUe.setVideoSurface(Surface?)`, SWIG typemap 이 `ANativeWindow_fromSurface` 로 참조 하나를 코어에 넘기고 코어가 결선마다
   렌더러 몫을 따로 잡는다 — 렌더러는 교체·스트림 소멸 때 자기 참조를 푼다). 수신 창은 디코딩 스트림이 렌더러를 만든 뒤에만
   결선·해제한다(`win_in` 무효면 건너뛴다 — pjsua 창 함수가 무효 id 를 단정으로 막아 프로세스가 abort 한다). 영상이 활성되는 호마다 수신 창을 결선하고, 계정

@@ -357,8 +357,8 @@ affiliation-command 를 보낸다) → ③구형 제거.
 
 ### C3. Resource-Priority namespace 정규화
 
-- INVITE 당 단일값: emergency `mcpttp.4` / imminent `mcpttp.2` / normal `mcpttp.6`
-  (`GroupCallService.cpp`, RFC 4412 namespace `mcpttp`).
+- INVITE 당 단일값: emergency `mcpttp.15` / imminent `mcpttp.8` / normal `mcpttp.0`
+  (`GroupCallService.cpp`, RFC 8101 namespace `mcpttp` — `.0` 최저 ~ `.15` 최고, service-config RP 기본값과 같다).
 
 ### C4. floor SDP 토큰
 
@@ -374,7 +374,22 @@ affiliation-command 를 보낸다) → ③구형 제거.
 - **역방향(멤버 SDP → CMP)**: 멤버가 광고한 `a=fmtp:MCPTT` 는 CSP 가 파싱해 `PTT_JOIN` 의
   `queueing`/`max_priority` 로, 개시자 offer 의 암묵적 발언 요청 수락은 `granted` 로 전달한다 (U14 서버 절반 —
   [../modules/csp.md](../modules/csp.md) 「멤버별 floor 협상 전달」).
-- 보존: multipart(mcptt-info+resource-lists+SDP), `urn:3gpp:ns:mcpttInfo:1.0` 등 namespace.
+- 보존: multipart(mcptt-info+SDP), `urn:3gpp:ns:mcpttInfo:1.0` 등 namespace.
+
+### C4a. 멤버 leg INVITE (제어 기능 → 멤버) — §6.3.3.1.2
+
+부록 A.1.3-7 예시와 같은 모양이다.
+
+| 요소 | 규격 | 동작 |
+|---|---|---|
+| 본문 | §6.3.3.1.2 — mcptt-info + SDP | multipart = mcptt-info + SDP. **멤버 명단(`resource-lists`)은 싣지 않는다** — 명단은 conference 이벤트 패키지(§10.1.3)·GMS 그룹 문서. 본문이 멤버 수와 무관해 UDP 경로 MTU(RFC 3261 §18.1.1) 안에 든다(g001 = 2.2 KB) |
+| Contact | §6.3.3.1.2 1) — 세션 식별자 + `g.3gpp.mcptt`·`g.3gpp.icsi-ref`·`isfocus` | `<sip:<그룹>@<CSP>>;+g.3gpp.mcptt;+g.3gpp.icsi-ref="urn%3Aurn-7%3A3gpp-service.ims.icsi.mcptt";isfocus` (RFC 3840 §9 — 확장 태그 `+`) |
+| 서비스 식별 | §6.3.3.1.2 3) — P-Asserted-Service(RFC 6050) | `P-Asserted-Service: urn:urn-7:3gpp-service.ims.icsi.mcptt` (본문의 "P-Asserted-Service-Id" 는 표기 — 와이어 헤더 이름은 RFC 6050 §4.1, 부록 예시도 같다. 경보 팬아웃 MESSAGE 도 같은 이름) |
+| Accept-Contact | §6.3.3.1.2 2)·4) | `*;+g.3gpp.icsi-ref=…;+g.3gpp.mcptt;require;explicit` |
+| 세션 타이머 | §6.3.3.1.2 — Session-Expires 권고, `refresher` 생략 권고(싣는다면 `uac`) | **편차(권고)** — `refresher=uac` 를 싣는다. 생략하면 단말(UAS)이 갱신자를 고르는데(부록 A.1.3-24 예 = `uas`), CIMS 는 서버가 갱신자를 맡아 단말 구현과 무관하게 사라진 leg 을 회수한다([leg_liveness.md](leg_liveness.md) §5.3). 규격이 허용하는 값이다 |
+
+남은 편차 — Contact 의 세션 식별자는 세션마다 새로 만들지 않고 그룹 id 를 쓴다(`sip:<그룹>@<CSP>`). 개시자 200 OK(§6.3.3.2.3.1·§6.3.3.2.3.2)는 아직 규격 모양이 아니다 — Contact 에 `g.3gpp.mcptt`·`g.3gpp.icsi-ref`·`isfocus` 가 없고, `Session-Expires` 의 refresher 가
+psip 로컬 정책(`uas`)이다(§6.3.3.2.3.2 2) = `uac` 로 정한다 — 단말이 갱신자).
 
 ### C5. 등록/구독 SIP 메시지 — 실망(상용 IMS) 패킷 형태 정합
 

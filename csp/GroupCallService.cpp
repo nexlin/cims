@@ -1465,7 +1465,6 @@ bool CGroupCallService::InviteMember( const char *pszUserId, const char *pszGrou
             }
             std::string strGroupXml =
                 BuildGroupInfoXml( clsGroup, pszUserId, strCallerId, iGroupCond, false, clsSes.bBroadcast );
-            std::string strRosterXml = BuildResourceListXml( clsGroup );
             // CMP floor port 사용 (m_mapGroupRtp에서 조회)
             int iFloorPort = iSharedFloorPortIM > 0 ? iSharedFloorPortIM : iMemberAudioPort + 1;  // fallback
             {
@@ -1479,15 +1478,16 @@ bool CGroupCallService::InviteMember( const char *pszUserId, const char *pszGrou
             //   하므로 라인은 유지하되 포트 0(미사용)으로 내린다 (RFC 3264 §6).
             if ( clsGroup._floorControl == "off" ) iFloorPort = 0;
             std::string strGroupUri = "sip:" + std::string( pszGroupId ) + "@" + strMcpttDomain;
-            WrapMultipartBody( pclsInvite, strGroupXml, strRosterXml, strSharedIp, iFloorPort, strGroupUri,
+            WrapMultipartBody( pclsInvite, strGroupXml, strSharedIp, iFloorPort, strGroupUri,
                                clsGroup._floorControl == "off" );
 
             // MCPTT capability required (3GPP TS 24.379 §6.3.1)
             pclsInvite->AddHeader(
                 "Accept-Contact",
                 "*;+g.3gpp.icsi-ref=\"urn%3Aurn-7%3A3gpp-service.ims.icsi.mcptt\";+g.3gpp.mcptt;require;explicit" );
-            // P-Preferred-Service: MCPTT ICSI 선언 (3GPP TS 24.379 §6.3.1, RFC 6050)
-            pclsInvite->AddHeader( "P-Preferred-Service", "urn:urn-7:3gpp-service.ims.icsi.mcptt" );
+            // P-Asserted-Service: MCPTT ICSI — 제어 기능은 신뢰 영역 안이라 단언한다 (TS 24.379 §6.3.3.1.2 3)).
+            //   헤더 이름은 RFC 6050 §4.1 의 P-Asserted-Service — 본문의 "-Id" 는 표기, 부록 A.1.3-7 예시도 이 이름.
+            pclsInvite->AddHeader( "P-Asserted-Service", "urn:urn-7:3gpp-service.ims.icsi.mcptt" );
             // 단말 자동 응답 요구 (3GPP TS 24.379 §6.3.3.1)
             pclsInvite->AddHeader( "Answer-Mode", "Auto" );
             // Resource-Priority (RFC 4412/8101, TS 24.379 §6.3.3.1.19) — namespace당 값 하나 (F-08 수정).
@@ -1503,7 +1503,8 @@ bool CGroupCallService::InviteMember( const char *pszUserId, const char *pszGrou
             char szPCalledParty[256];
             snprintf( szPCalledParty, sizeof( szPCalledParty ), "<sip:%s@%s>", pszUserId, strMcpttDomain.c_str() );
             pclsInvite->AddHeader( "P-Called-Party-ID", szPCalledParty );
-            // isfocus: indicate server is conference focus (TS 24.379).
+            // Contact 특성 태그 = g.3gpp.mcptt · g.3gpp.icsi-ref(MCPTT ICSI) · isfocus (TS 24.379 §6.3.3.1.2 1),
+            //   RFC 3840 §9 — 확장 태그는 `+` 접두, isfocus 는 기본 태그).
             // INVITE 의 Contact 는 정확히 1개여야 한다(RFC 3261 §8.1.1.8). 스택은 전송 직전
             // m_clsContactList 가 비어 있을 때만 자동 Contact 를 넣으므로(SipStackComm),
             // 라우팅 가능한 자기 주소 Contact 를 구조화 리스트에 직접 1개 채운다.
@@ -1516,12 +1517,16 @@ bool CGroupCallService::InviteMember( const char *pszUserId, const char *pszGrou
                 CspAddressing::FillSelfContact( clsContact, clsRoute.m_eTransport, pszGroupId );
                 if ( !clsRoute.m_strOutboundLocalIp.empty() )
                     clsContact.m_clsUri.m_strHost = clsRoute.m_strOutboundLocalIp;
+                clsContact.InsertParam( "+g.3gpp.mcptt", "" );
+                clsContact.InsertParam( "+g.3gpp.icsi-ref", "\"urn%3Aurn-7%3A3gpp-service.ims.icsi.mcptt\"" );
                 clsContact.InsertParam( "isfocus", "" );
                 pclsInvite->m_clsContactList.clear();
                 pclsInvite->m_clsContactList.push_back( clsContact );
             }
             // 세션 타이머(RFC 4028) 헤더는 psip UA 가 협상값으로 싣는다 (leg_liveness.md §5.2) —
             //   여기서 따로 광고하면 갱신을 이행하지 않는 값이 그대로 나가 규격 위반이 된다.
+            //   `refresher=uac` 는 TS 24.379 §6.3.3.1.2 가 허용하는 형태다("권고 = 생략, 싣는다면 uac") —
+            //   서버가 갱신자를 맡아 단말 구현과 무관하게 사라진 leg 을 회수한다(leg_liveness.md §5.3).
             // 비디오 활성화 전달 (cwrtc가 SDP에 H.264 포함 여부 결정)
             if ( bVideoEnabled && iMemberVideoPort > 0 ) {
                 char szVideo[64];
@@ -2867,32 +2872,6 @@ std::string CGroupCallService::BuildGroupInfoXml( const CspPttGroup &clsGroup, c
     return oss.str();
 }
 
-/**
- * @brief Build group member roster per RFC 5366 (resource-lists) with MCPTT group-info
- *        extension for per-member role/priority.
- *        Content-Type: application/resource-lists+xml
- */
-std::string CGroupCallService::BuildResourceListXml( const CspPttGroup &clsGroup ) {
-    std::ostringstream oss;
-
-    oss << "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n"
-        << "<resource-lists xmlns=\"urn:ietf:params:xml:ns:resource-lists\"\r\n"
-        << "  xmlns:mcpttgi=\"urn:3gpp:ns:mcpttGroupInfo:1.0\">\r\n"
-        << "  <list>\r\n";
-    for ( const auto &pUser : clsGroup._pusers ) {
-        if ( !pUser ) continue;
-        const std::string &strUri = pUser->_mcpttId.empty() ? ( "tel:" + pUser->_id ) : pUser->_mcpttId;
-        oss << "    <entry uri=\"" << strUri << "\">\r\n"
-            << "      <mcpttgi:participant-type>" << pUser->_role << "</mcpttgi:participant-type>\r\n"
-            << "      <mcpttgi:user-priority>" << pUser->_priority << "</mcpttgi:user-priority>\r\n"
-            << "    </entry>\r\n";
-    }
-    oss << "  </list>\r\n"
-        << "</resource-lists>\r\n";
-
-    return oss.str();
-}
-
 std::string CGroupCallService::BuildGroupDescriptor( const CspPttGroup &clsGroup, bool bBroadcast ) {
     // 자기완결 디스크립터 (계획서 §5). state/updated_at 은 PttSessionStart 가 주입.
     auto jbool = []( bool b ) -> const char * { return b ? "true" : "false"; };
@@ -2968,10 +2947,13 @@ std::string CGroupCallService::BuildGroupDescriptor( const CspPttGroup &clsGroup
  * @brief Replace INVITE body with multipart/mixed per 3GPP TS 24.379:
  *        Part 1: application/vnd.3gpp.mcptt-info+xml  (XML first)
  *        Part 2: application/sdp  (SDP with MCPTT floor control m= line)
+ *        멤버 명단(resource-lists)은 싣지 않는다 — 제어 기능이 멤버에게 보내는 INVITE 는 mcptt-info·SDP 만
+ *        담고(TS 24.379 §6.3.3.1.2, 부록 A.1.3-7), 명단은 conference 이벤트 패키지(§10.1.3)·GMS 그룹 문서로 준다.
+ *        명단을 실으면 본문이 멤버 수에 비례해 UDP 경로 MTU(RFC 3261 §18.1.1)를 넘는다.
  */
 void CGroupCallService::WrapMultipartBody( CSipMessage *pclsInvite, const std::string &strGroupXml,
-                                           const std::string &strRosterXml, const std::string &strFloorIp,
-                                           int iFloorPort, const std::string &strGroupUri, bool bNoFloorCtrl ) {
+                                           const std::string &strFloorIp, int iFloorPort,
+                                           const std::string &strGroupUri, bool bNoFloorCtrl ) {
     if ( pclsInvite == NULL || pclsInvite->m_strBody.empty() ) return;
 
     // F-16: boundary를 랜덤 hex 문자열로 생성 — body 내 "mcptt" 등장과 충돌 방지 (RFC 2046 §5.1.1)
@@ -2998,18 +2980,6 @@ void CGroupCallService::WrapMultipartBody( CSipMessage *pclsInvite, const std::s
     if ( !strGroupUri.empty() ) sdpFloor << "a=mcptt-floor-request-uri:" << strGroupUri << "\r\n";  // TS 24.379 §C.3
     strSdp += sdpFloor.str();
 
-    // INVITE 가 SIP UDP 패킷 한계(psip SIP_PACKET_MAX_SIZE=8192)를 넘으면 수신측에서
-    // truncate/drop 되어 호가 성립하지 않는다. 대형 그룹의 멤버 로스터를 인라인하면
-    // 본문이 한계를 초과하므로, 본문 추정치가 안전 한계(7000B; 헤더 여유 포함)를 넘으면
-    // 로스터 part 를 생략한다. (대형 그룹 멤버 정보는 GMS 그룹문서 + conference NOTIFY 로 제공)
-    const size_t kSafeBodyLimit = 7000;
-    bool bIncludeRoster =
-        !strRosterXml.empty() && ( strGroupXml.size() + strRosterXml.size() + strSdp.size() + 400 ) < kSafeBodyLimit;
-    if ( !strRosterXml.empty() && !bIncludeRoster ) {
-        CLog::Print( LOG_INFO, "WrapMultipartBody: roster(%zuB) 생략 — INVITE 본문이 UDP 한계 초과 우려 (GMS 로 제공)",
-                     strRosterXml.size() );
-    }
-
     std::ostringstream oss;
     // Part 1: mcptt-info XML (3GPP MCPTT call control)
     oss << "--" << strBoundary << "\r\n"
@@ -3017,15 +2987,7 @@ void CGroupCallService::WrapMultipartBody( CSipMessage *pclsInvite, const std::s
         << "Content-Length: " << strGroupXml.size() << "\r\n"
         << "\r\n"
         << strGroupXml << "\r\n";
-    // Part 2: 멤버 로스터 (resource-lists, RFC 5366) — 크기 안전할 때만
-    if ( bIncludeRoster ) {
-        oss << "--" << strBoundary << "\r\n"
-            << "Content-Type: application/resource-lists+xml\r\n"
-            << "Content-Length: " << strRosterXml.size() << "\r\n"
-            << "\r\n"
-            << strRosterXml << "\r\n";
-    }
-    // Part 3: SDP with floor control
+    // Part 2: SDP with floor control
     oss << "--" << strBoundary << "\r\n"
         << "Content-Type: application/sdp\r\n"
         << "Content-Disposition: render\r\n"

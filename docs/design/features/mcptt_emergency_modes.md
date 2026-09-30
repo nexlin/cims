@@ -172,7 +172,7 @@ mcptt-request-uri, mcptt-calling-user-id, (alert) originated-user-id, location(�
   (§6.3.3.1.11·§6.3.3.1.12): 본문 `<mcptt-request-uri>` = 수신자 MCPTT ID · `<mcptt-calling-user-id>` = 발신자(참여 기능이 서빙
   사용자로 정한 값 — §12.1.2.1 9), 본문 값은 쓰지 않는다) · `<mcptt-calling-group-id>` = 그룹 · `<alert-ind>`, 취소면 받은
   `<originated-by>`(제3자 취소, §12.1.3.2 2)c)iii))와 동봉된 그룹 긴급 해제(`<emergency-ind>false`, §12.1.3.2 2)d)iv)E))를 옮긴다.
-  헤더 = `Accept-Contact`(g.3gpp.mcptt · ICSI mcptt, require;explicit)·`P-Asserted-Service-Id`(ICSI mcptt). 위치 정보 파트
+  헤더 = `Accept-Contact`(g.3gpp.mcptt · ICSI mcptt, require;explicit)·`P-Asserted-Service`(ICSI mcptt — RFC 6050 헤더 이름). 위치 정보 파트
   (`application/vnd.3gpp.mcptt-location-info+xml`)가 있으면 multipart 로 옮긴다(§6.3.3.1.12 4)). 등록(온라인) 멤버에게만
   전달된다 — 저장 후 전달(경보 보류함)은 없다.
 - **mcptt-info 인코딩(Annex F.1)** — contentType 요소는 `type="Normal"` + 자식으로 싣는다: URI 류(`mcptt-request-uri`·

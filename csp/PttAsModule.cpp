@@ -131,11 +131,11 @@ int CPttAsModule::OnEmergencyAlert( const char *pszFrom, const char *pszTo, CSip
         // 위치 정보 파트는 옮긴다(§6.3.3.1.12 4)).
         const std::string strLocation = _MimePart( pclsMessage, "mcptt-location-info" );
 
-        // §6.3.3.1.11 2)·3)·6) — MCPTT feature tag·ICSI Accept-Contact, P-Asserted-Service-Id
+        // §6.3.3.1.11 2)·3)·6) — MCPTT feature tag·ICSI Accept-Contact, P-Asserted-Service(RFC 6050 §4.1 헤더 이름)
         const std::vector<std::pair<std::string, std::string>> vecHeaders = {
             { "Accept-Contact", "*;+g.3gpp.mcptt;require;explicit" },
             { "Accept-Contact", "*;+g.3gpp.icsi-ref=\"urn%3Aurn-7%3A3gpp-service.ims.icsi.mcptt\";require;explicit" },
-            { "P-Asserted-Service-Id", "urn:urn-7:3gpp-service.ims.icsi.mcptt" } };
+            { "P-Asserted-Service", "urn:urn-7:3gpp-service.ims.icsi.mcptt" } };
 
         for ( const auto &pUser : clsGroup._pusers ) {
             if ( !pUser || pUser->_id == strFrom ) continue;

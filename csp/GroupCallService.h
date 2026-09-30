@@ -242,14 +242,6 @@ private:
                                           bool bExplicitCondition = false, bool bBroadcast = false );
 
     /**
-     * @brief Build group member roster (application/resource-lists+xml, RFC 5366 +
-     *        MCPTT group-info 확장으로 멤버별 role/priority 표기)
-     * @param clsGroup PTT group info
-     * @return XML string
-     */
-    static std::string BuildResourceListXml( const class CspPttGroup &clsGroup );
-
-    /**
      * @brief 그룹 자기완결 디스크립터 JSON 생성 (group.json 기록용)
      *        — docs/design/features/mcptt_authorization.md §5.
      *        state/updated_at 은 CCallDir::PttSessionStart 가 주입한다.
@@ -259,16 +251,16 @@ private:
     static std::string BuildGroupDescriptor( const class CspPttGroup &clsGroup, bool bBroadcast = false );
 
     /**
-     * @brief Wrap SDP + MCPTT info XML + roster into multipart/mixed body, update INVITE message
+     * @brief Wrap SDP + MCPTT info XML into multipart/mixed body, update INVITE message
+     *        (멤버 명단은 싣지 않는다 — TS 24.379 §6.3.3.1.2)
      * @param pclsInvite   INVITE message to modify
      * @param strGroupXml  MCPTT call control info XML (mcptt-info)
-     * @param strRosterXml 멤버 로스터 XML (resource-lists); 비면 생략
      * @param strFloorIp   Floor control IP (shared RTP IP)
      * @param iFloorPort   Floor control UDP port
      */
     static void WrapMultipartBody( class CSipMessage *pclsInvite, const std::string &strGroupXml,
-                                   const std::string &strRosterXml, const std::string &strFloorIp, int iFloorPort,
-                                   const std::string &strGroupUri = "", bool bNoFloorCtrl = false );
+                                   const std::string &strFloorIp, int iFloorPort, const std::string &strGroupUri = "",
+                                   bool bNoFloorCtrl = false );
 
     /** 기존 바디(psip AddSdp 산출 SDP)를 유지한 채 mcptt-info part 를 앞세운 multipart/mixed 로
      *  감싼다 — in-call 조건 재광고 re-INVITE·조인 200 OK 동봉용(SDP 는 손대지 않는다). */

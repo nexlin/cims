@@ -1423,6 +1423,17 @@ std::vector<int> Engine::accounts() const {
     return v;
 }
 
+/**
+ * 호 미디어 설정 — 음성 1 + 영상 0/1. 영상 키프레임 요청은 **RTCP PLI 만** 쓴다(TS 26.114 §7.3 — MTSI 영상 코덱
+ * 제어 = RTCP AVPF PLI/FIR, RFC 4585·5104). pjsua 기본값은 SIP INFO(RFC 5168 `media_control+xml`)도 보내는데, 서버는
+ * INFO 를 Allow 에 두지 않아 501 로 끝난다(RFC 3261 §8.2.1) — 요청이 상대에게 가지 않고 신호만 늘린다.
+ */
+static void setCallMedia(pj::CallSetting& opt, bool video) {
+    opt.audioCount = 1;
+    opt.videoCount = video ? 1 : 0;
+    opt.reqKeyframeMethod = PJSUA_VID_REQ_KEYFRAME_RTCP_PLI;
+}
+
 int Engine::dial(int accountId, const std::string& target, const CallOptions& opts) {
     if (!impl_->running) return -1;
     return impl_->ctl.runSync([this, accountId, target, opts]() -> int {
@@ -1433,8 +1444,7 @@ int Engine::dial(int accountId, const std::string& target, const CallOptions& op
         auto call = std::make_unique<PjCall>(o, *it->second, accountId);
         try {
             pj::CallOpParam prm(true);
-            prm.opt.audioCount = 1;
-            prm.opt.videoCount = opts.video ? 1 : 0;
+            setCallMedia(prm.opt, opts.video);
             call->makeCall(dst, prm);
         } catch (pj::Error& e) {
             o->log(1, std::string("dial ") + dst + ": " + e.info(false));
@@ -1465,8 +1475,7 @@ Result Engine::answer(int callId, const CallOptions& opts) {
     return withCall(impl_.get(), callId, [&](pj::Call& c) {
         pj::CallOpParam prm(true);
         prm.statusCode = PJSIP_SC_OK;
-        prm.opt.audioCount = 1;
-        prm.opt.videoCount = opts.video ? 1 : 0;
+        setCallMedia(prm.opt, opts.video);
         c.answer(prm);
     });
 }
@@ -1487,6 +1496,7 @@ Result Engine::resume(int callId) {
     return withCall(impl_.get(), callId, [](pj::Call& c) {
         pj::CallOpParam prm(true);
         prm.opt.flag |= PJSUA_CALL_UNHOLD;
+        prm.opt.reqKeyframeMethod = PJSUA_VID_REQ_KEYFRAME_RTCP_PLI;   // 재초대의 설정이 호 설정을 대신한다(setCallMedia)
         c.reinvite(prm);
     });
 }

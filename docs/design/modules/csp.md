@@ -339,18 +339,21 @@ INVITE to group@domain
       ├─ InviteMember() → Multipart INVITE
       │   ├─ Content-Type: multipart/mixed
       │   ├─ Part 1: application/vnd.3gpp.mcptt-info+xml
-      │   ├─ Part 2: application/resource-lists+xml (멤버 로스터 role/priority; INVITE>8192B 시 생략)
-      │   └─ Part 3: SDP (공유 RTP + m=application floor)
+      │   └─ Part 2: SDP (공유 RTP + m=application floor)
+      │      (멤버 명단 resource-lists 는 싣지 않는다 — TS 24.379 §6.3.3.1.2, 명단은 conference 이벤트·GMS)
       ├─ 멤버 200 OK 수신 → m=application floor 파싱 → CMP PTT_JOIN(role 포함)
       └─ 매핑: memberCallId → {groupId, memberId, sessionId}
 ```
 
 **MCPTT INVITE 헤더 주입 (3GPP 규격 준수):**
 
-그룹 INVITE 에는 MCPTT 서비스 식별을 위한 헤더를 함께 주입한다.
+그룹 INVITE 에는 MCPTT 서비스 식별을 위한 헤더를 함께 주입한다(TS 24.379 §6.3.3.1.2, 부록 A.1.3-7).
 
-- `P-Preferred-Service: urn:urn-7:3gpp-service.ims.icsi.mcptt`
-- `Accept-Contact` (ICSI ref)
+- `Contact: <sip:<그룹>@<CSP>>;+g.3gpp.mcptt;+g.3gpp.icsi-ref="urn%3Aurn-7%3A3gpp-service.ims.icsi.mcptt";isfocus`
+- `P-Asserted-Service: urn:urn-7:3gpp-service.ims.icsi.mcptt` (RFC 6050 — 제어 기능은 신뢰 영역 안이라 단언)
+- `Accept-Contact` (g.3gpp.mcptt · ICSI ref, require;explicit)
+- `Session-Expires: <SE>;refresher=uac` — §6.3.3.1.2 는 refresher 생략을 권고하고 싣는다면 `uac` 로 정한다. CIMS 는 서버가
+  갱신자를 맡도록 `uac` 를 싣는다([leg_liveness.md](../features/leg_liveness.md) §5.3, 편차 표 [mcptt_standard_conformance.md](../features/mcptt_standard_conformance.md))
 - `Answer-Mode: Auto`
 
 **멤버 생명주기:**
