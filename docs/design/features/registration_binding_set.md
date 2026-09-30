@@ -59,6 +59,8 @@ psip 은 소켓맵 조회 API(`CTcpSocketMap::Select`)를 이미 갖고 있고, 
 2. 살아있는 것이 없으면 마지막 바인딩(현 동작과 동일 — 도달 실패하지만 무해)
 
 이 선택은 서버가 **처음 거는** 요청(fan-out INVITE·NOTIFY)뿐 아니라 **확립된 다이얼로그 안에서 서버가 보내는 요청**(BYE·re-INVITE·NOTIFY·REFER·INFO)에도 생성 직전에 적용된다 — psip `RefreshLegDest` → `EventGetLegDest` → `Select`([leg_liveness.md §6.3](leg_liveness.md#63-갱신-re-invite-규율)). 다이얼로그가 기억한 수신 당시 소스는 응용이 바인딩을 모를 때(미등록 peer)의 폴백이다.
+in-dialog 요청은 바인딩 가운데 **등록 Contact 가 그 다이얼로그의 remote target 과 같은 것**만 고른다(`SelectForTarget`) — 같은 AoR 로 다른 단말이 등록해
+바인딩을 차지했으면 그 단말은 다이얼로그의 상대가 아니므로 옮기지 않는다(RFC 3261 §12.2.1.1, [leg_liveness.md §6.3](leg_liveness.md#63-갱신-re-invite-규율)).
 
 멀티 디바이스를 지원하지 않으므로 **한 사람에게 병렬 포크는 하지 않는다**. 사람당 leg 하나가 유지된다.
 이 원칙의 범위는 **한 사람(AoR)의 바인딩 집합**이다 — 전화 그룹 대표번호가 여러 그룹원에게 동시에 포크하는
@@ -75,12 +77,13 @@ bool Select( const char *pszUserId, CUserInfo &clsInfo );   // 26곳이 이것�
 
 **시그니처를 유지하고 내부에서 최적 바인딩을 골라 반환**하면, fan-out INVITE·NOTIFY 2종·
 서버 발신 in-dialog 요청(`EventGetLegDest` — BYE·re-INVITE·NOTIFY·REFER·INFO, 세션 갱신 포함)·MSRP·라우팅 등 소비자 전부가 무변경이다. 구조 교체가
-`UserMap` 안에 갇힌다.
+`UserMap` 안에 갇힌다. 예외 하나 — 서버 발신 in-dialog 요청은 "이 다이얼로그 상대 단말의 바인딩"이 필요해 `SelectForTarget(id, remoteTarget, info)` 를 쓴다.
 
 | API | 변경 |
 |---|---|
 | `Select(id, info)` | 내부에서 살아있는 최적 바인딩 선택 (시그니처 불변) |
 | `Select(id)` | 바인딩이 하나라도 있는가 (의미 불변) |
+| `SelectForTarget(id, remoteTarget, info)` | 등록 Contact 가 remote target 과 같은(user·host·포트) 살아있는 바인딩. 불일치면 실패 + "다른 단말" 표시 — `EventGetLegDest` 전용 |
 | `Insert(msg, user)` | **바인딩 추가/갱신**. 생성은 REGISTER 만, 같은 transport 는 교체 |
 | `SetIpPort(...)` | 그 transport 의 기존 바인딩 주소만 이동(생성하지 않음) |
 | `TouchFlow(...)` | 해당 바인딩의 last-seen 갱신 |
@@ -242,6 +245,9 @@ Android 기기의 호스트명은 관례적으로 `localhost` 이므로 **모든
 ```
 
 따라서 `(AoR, instance-id, reg-id)` 를 바인딩 키로 쓰면 **서로 다른 기기가 하나로 합쳐진다.**
+지금 동작 — 같은 AoR 로 두 번째 단말이 같은 transport 에 등록하면 첫 단말의 바인딩을 대체한다(§4 계기 1). 첫 단말과 이미 맺은
+다이얼로그는 remote target 판정으로 그 단말에 남는다(§2.2) — 새 호·통지는 두 번째 단말로 간다.
+
 멀티 디바이스를 지원하려면 모든 단말이 `rfc5626_instance_id` 를 기기 고유값(ANDROID_ID·설치 UUID
 등)으로 명시하는 것이 **선행 조건**이고(Android PTT·VoLTE 는 반영, libcimsue 앱은 앱 설정 몫), 그 위에 PTT fan-out 정책(기기당 leg 를 만들 것인가 —
 floor 정원·녹취 슬롯·CMP 멤버 포트에 영향)을 정해야 한다. 별도 과제로 둔다.

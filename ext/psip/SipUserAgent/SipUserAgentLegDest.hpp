@@ -71,7 +71,7 @@ bool CSipUserAgent::RefreshLegDest( const char * pszCallId )
 	if( pszCallId == NULL || pszCallId[0] == '\0' || m_pclsCallBack == NULL ) return false;
 
 	SIP_DIALOG_MAP::iterator	itMap;
-	std::string strPeerId;
+	std::string strPeerId, strRemoteTarget;
 
 	// 1) 선별 — 락 안에서는 판정과 상대 ID 복사만 한다.
 	m_clsDialogMutex.acquire();
@@ -95,6 +95,7 @@ bool CSipUserAgent::RefreshLegDest( const char * pszCallId )
 		}
 
 		strPeerId = clsDialog.m_strToId;
+		strRemoteTarget = clsDialog.m_strContactUri;
 	}
 	m_clsDialogMutex.release();
 
@@ -103,7 +104,7 @@ bool CSipUserAgent::RefreshLegDest( const char * pszCallId )
 	int iPort = 0;
 	ESipTransport eTransport = E_SIP_UDP;
 
-	if( m_pclsCallBack->EventGetLegDest( pszCallId, strPeerId.c_str(), strIp, iPort, eTransport ) == false ) return false;
+	if( m_pclsCallBack->EventGetLegDest( pszCallId, strPeerId.c_str(), strRemoteTarget.c_str(), strIp, iPort, eTransport ) == false ) return false;
 	if( strIp.empty() || iPort <= 0 ) return false;
 
 	// 3) 반영 — 다시 락. 그 사이 사라진 다이얼로그는 건너뛴다.

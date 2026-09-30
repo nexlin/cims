@@ -104,8 +104,8 @@ public:
     void EventReInviteResponse( const char *pszCallId, int iSipStatus, CSipCallRtp *pclsRemoteRtp ) override;
     /** 서버 발신 in-dialog 요청(BYE·re-INVITE·NOTIFY·REFER·INFO, 세션 갱신 포함)의 현재 도달 주소 —
      *  등록 바인딩(latch)을 돌려준다. fan-out INVITE·NOTIFY 가 쓰는 것과 같은 (IP, 포트, transport) 한 세트다. */
-    bool EventGetLegDest( const char *pszCallId, const char *pszPeerId, std::string &strIp, int &iPort,
-                          ESipTransport &eTransport ) override;
+    bool EventGetLegDest( const char *pszCallId, const char *pszPeerId, const char *pszRemoteTarget, std::string &strIp,
+                          int &iPort, ESipTransport &eTransport ) override;
     void EventPrack( const char *pszCallId, CSipCallRtp *pclsRtp ) override;
     bool EventTransfer( const char *pszCallId, const char *pszReferToCallId, bool bScreenedTransfer ) override;
     bool EventBlindTransfer( const char *pszCallId, const char *pszReferToId ) override;

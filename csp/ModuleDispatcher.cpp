@@ -2245,15 +2245,23 @@ void CModuleDispatcher::EventCallEnd( const char *pszCallId, int iSipStatus, con
     }
 }
 
-bool CModuleDispatcher::EventGetLegDest( const char *pszCallId, const char *pszPeerId, std::string &strIp, int &iPort,
-                                         ESipTransport &eTransport ) {
-    (void)pszCallId;
+bool CModuleDispatcher::EventGetLegDest( const char *pszCallId, const char *pszPeerId, const char *pszRemoteTarget,
+                                         std::string &strIp, int &iPort, ESipTransport &eTransport ) {
     if ( pszPeerId == NULL || *pszPeerId == '\0' ) return false;
 
-    // 등록 단말이면 latch 된 실제 도달 주소를 준다. 미등록(제휴 노드 등)이면 false —
-    //   psip 이 다이얼로그가 기억한 주소를 그대로 쓴다(기존 동작 보존).
+    // 이 다이얼로그 상대 단말(remote target 과 같은 Contact)의 등록 바인딩이면 latch 된 실제 도달 주소를 준다.
+    //   미등록(제휴 노드 등)이거나 같은 AoR 에 **다른 단말**이 등록해 있으면 false — psip 이 다이얼로그가 기억한
+    //   주소를 그대로 쓴다. 다른 단말로 옮기면 그 단말이 이 다이얼로그를 몰라 481 로 끝나거나 엉뚱한 호가 끊긴다
+    //   (RFC 3261 §12.2.1.1 — in-dialog 요청의 목적지 = remote target; leg_liveness.md §6.3).
     CUserInfo clsUserInfo;
-    if ( !gclsUserMap.Select( pszPeerId, clsUserInfo ) ) return false;
+    bool bOtherDevice = false;
+    if ( !gclsUserMap.SelectForTarget( pszPeerId, pszRemoteTarget, clsUserInfo, &bOtherDevice ) ) {
+        if ( bOtherDevice )
+            CLog::Print( LOG_INFO,
+                         "LegDest(%s): peer(%s) 등록 바인딩이 이 다이얼로그 상대(%s)가 아니다 — 다이얼로그 주소 유지",
+                         pszCallId ? pszCallId : "", pszPeerId, pszRemoteTarget ? pszRemoteTarget : "" );
+        return false;
+    }
     if ( clsUserInfo.m_strIp.empty() || clsUserInfo.m_iPort <= 0 ) return false;
 
     strIp = clsUserInfo.m_strIp;

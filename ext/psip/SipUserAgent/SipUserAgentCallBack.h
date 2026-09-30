@@ -129,6 +129,17 @@ public:
 	virtual bool EventGetLegDest( const char * pszCallId, const char * pszPeerId,
 		std::string & strIp, int & iPort, ESipTransport & eTransport ){ return false; };
 
+	/** 위와 같되 다이얼로그의 **remote target**(상대 Contact URI, RFC 3261 §12.1 — 초기 INVITE/2xx·target refresh 로 갱신)을
+	 *  함께 준다. 응용은 이 값으로 "지금 등록된 바인딩이 이 다이얼로그의 상대 단말인가"를 가린다 — 같은 AoR 에 다른 단말이
+	 *  등록했으면 그 주소로 옮기지 말아야 한다. psip 은 이 형태로 부르고, 기본 구현은 위 형태로 넘긴다.
+	 *  @param pszRemoteTarget 다이얼로그 remote target URI (없으면 빈 문자열) */
+	virtual bool EventGetLegDest( const char * pszCallId, const char * pszPeerId, const char * pszRemoteTarget,
+		std::string & strIp, int & iPort, ESipTransport & eTransport )
+	{
+		(void)pszRemoteTarget;
+		return EventGetLegDest( pszCallId, pszPeerId, strIp, iPort, eTransport );
+	};
+
 	// SIP ReINVITE 수신 이벤트 핸들러
 	virtual void EventReInvite( const char * pszCallId, CSipCallRtp * pclsRemoteRtp, CSipCallRtp * pclsLocalRtp ){};
 

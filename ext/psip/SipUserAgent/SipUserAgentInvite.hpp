@@ -52,6 +52,16 @@ bool CSipUserAgent::RecvInviteRequest( int iThreadId, CSipMessage * pclsMessage 
 
 		if( bSessionTooSmall == false )
 		{
+			// re-INVITE 는 target refresh 요청이다 — 받아들이는 요청의 Contact 로 remote target 을 바꾼다(RFC 3261 §12.2.2).
+			SIP_FROM_LIST::iterator itReContact = pclsMessage->m_clsContactList.begin();
+			if( itReContact != pclsMessage->m_clsContactList.end() )
+			{
+				char szUri[255];
+
+				itReContact->m_clsUri.ToString( szUri, sizeof(szUri) );
+				itMap->second.m_strContactUri = szUri;
+			}
+
 			// 미디어 무변경(순수 세션 갱신) 판정 — 반드시 SetRemoteRtp 로 덮어쓰기 전에 한다.
 			//   방향 속성(a=sendonly/recvonly/inactive/sendrecv)만 바뀐 re-INVITE 도 미디어 변경이다
 			//   (RFC 3264 §8.4 hold/resume) — 주소·포트만 비교하면 보류가 세션 갱신으로 오판된다.

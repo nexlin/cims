@@ -179,10 +179,12 @@ P3(ptt-client SDK 전환) 실측에서 더 드러난 것 — .48 반영·배포(
   실측: 013→g005(014) 150 s 호 — 단말 갱신 re-INVITE 200(태그·`m=application 54018`)·CSP→멤버 갱신 200, floor 8/8 승인 · 긴급 상향/하향 200·멤버 재광고 수신 ·
   계측기 PTT 8종·VoLTE hold/TLS 4종 pass · psip 단위시험 H·I. **.45 확인** — Android·Windows 단말이 개시자 leg 갱신 re-INVITE 를 보내는지(pjsua 기본 timer
   OPTIONAL 이면 보낸다), 갱신 없이 180 s 에 끊기는 단말이 없는지.
-- **새로 드러난 것 — in-dialog 목적지 재해석이 다이얼로그 상대가 아니라 AoR 대표 바인딩을 고른다** — 같은 AoR 에 단말이 둘이면(다중 단말, 계측기 워커 상시 풀 +
-  cimsue-cli) CSP 의 멤버 leg 갱신 re-INVITE 가 **다른 단말**로 가서 leg 이 끊겼다(`LegDest … :56390 → :54350`). `EventGetLegDest` 가 `UserMap.Select(peer)`
-  한 건만 본다 — 다이얼로그가 묶인 바인딩(Contact·`+sip.instance`)으로 골라야 한다([registration_binding_set.md](../design/features/registration_binding_set.md)·
-  [leg_liveness.md](../design/features/leg_liveness.md) §6.3). 미반영.
+- **in-dialog 목적지 재해석이 AoR 대표 바인딩을 고르던 것 — 반영(csp 0.2.172)** — 같은 AoR 에 단말이 둘이면(다중 단말, 계측기 워커 상시 풀 + cimsue-cli)
+  CSP 의 갱신 re-INVITE·BYE 가 **다이얼로그 상대가 아닌 단말**로 가서 leg 이 끊겼다. 이제 psip 이 다이얼로그 remote target(상대 Contact)을 `EventGetLegDest` 에
+  넘기고, CSP 는 등록 Contact 가 그와 같은 바인딩으로만 교정한다(`CUserMap::SelectForTarget`) — 아니면 다이얼로그 주소 유지(RFC 3261 §12.2.1.1). 같이 고친 psip
+  결함 = 수신 re-INVITE 가 remote target 을 갱신하지 않던 것(§12.2.2 target refresh). 실측: 002(A) 멤버 호 중 002(B) 등록 → 90 s 갱신 re-INVITE 가 A 로
+  (`LegDest … 이 다이얼로그 상대가 아니다 — 다이얼로그 주소 유지`), floor 8/8, B 는 수신 없음 · 같은 단말 승격 TCP→UDP 교정 유지 · 계측기 PTT·VoLTE 전달/픽업/BLF/hold/TLS
+  pass · psip 단위시험 G. 새 호·통지는 여전히 마지막 등록 단말로 간다 — 다중 단말은 범위 밖([registration_binding_set.md](../design/features/registration_binding_set.md) §8).
 - 남은 편차 — Contact 세션 식별자 = 그룹 id · 개시자 200 OK 가 멤버 응답을 기다리지 않음(acknowledged call setup 미구현) — §C4a·§C4b.
 - **cimsue-cli 관찰** — `--from-profile ptt` 로 띄우면 `--mcptt-psi` 가 먹지 않는다(경보 R-URI = 그룹, 전환기로 200). 명시 계정(`--server …`)으로는 PSI.
 

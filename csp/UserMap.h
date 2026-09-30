@@ -154,6 +154,14 @@ public:
     bool IsIntegrityProtected( const char *pszUserId );
     bool Select( const char *pszUserId, CUserInfo &clsInfo );
     bool Select( const char *pszUserId );
+
+    /** 이 가입자의 바인딩 가운데 **Contact 가 다이얼로그 remote target 과 같은 것**(같은 단말) — 살아 있을 때만.
+     *  in-dialog 요청 목적지 재해석용(leg_liveness.md §6.3): 같은 단말이면 latch(승격 TCP 가 닫힌 뒤의 등록 flow·NAT
+     *  주소)로 교정하고, 같은 AoR 에 **다른 단말**이 등록했으면(Contact 불일치) 옮기지 않는다 — 그 단말은 이
+     * 다이얼로그의 상대가 아니다(RFC 3261 §12.2.1.1 — in-dialog 요청의 목적지 = remote target).
+     *  @param pszRemoteTarget 다이얼로그 remote target URI. 비어 있으면 Select 와 같다(대상 단말을 가릴 근거가 없다).
+     *  @param pbOtherDevice   바인딩은 있으나 이 단말의 것이 아니면 true */
+    bool SelectForTarget( const char *pszUserId, const char *pszRemoteTarget, CUserInfo &clsInfo, bool *pbOtherDevice );
     bool SelectGroup( const char *pszGroupId, USER_ID_LIST &clsList );
     bool Delete( const char *pszUserId );
 

@@ -186,6 +186,8 @@ CSP 는 아무것도 보내지 않고 in-dialog re-INVITE(또는 향후 UPDATE) 
 |---|---|
 | 단말 발신 다이얼로그의 **응답 Contact 도 등록 바인딩의 transport** 로 광고한다 — 승격 TCP 로 온 INVITE 의 18x/2xx 에 `;transport=tcp` 를 적지 않음(`SetContactTransport`, registration_binding_set.md §4.1b) | 단말의 BYE·PRACK 가 33초 뒤 죽는 승격 flow 를 다시 열지 않고 keepalive 로 유지되는 등록 flow 로 온다 — 아래 서버 발신 규율의 대칭 |
 | 서버 발신 in-dialog 요청은 **등록 바인딩(latch) 주소**로 보낸다 — 갱신 re-INVITE 뿐 아니라 BYE·NOTIFY·REFER·INFO 전부 | 다이얼로그가 기억한 주소는 요청 **수신 당시의 소스**다. 단말은 큰 INVITE(multipart mcptt-info+SDP, VoLTE 도 SDP 크기에 따라)를 TCP 로 승격해 보내는데, 그 연결은 단말 스택 유휴 타이머(pjsip 33초)로 곧 닫히고 NAT 뒤라 서버가 다시 열 수 없다 — 그 주소로 보내면 갱신은 단말이 규격대로 세션을 끊고(§10, `cause=408`), **상대 종료 BYE 는 유실돼 남은 단말이 통화 중으로 남는다**(만료 148초까지). psip 은 서버 발신 in-dialog 요청을 만드는 API 진입부(`StopCall`·`SendReInvite`/`CreateReInvite`·`HoldCall`/`ResumeCall`·`SendNotify`/`SendNotifyWithBody`·`SendDtmf`·`TransferCall*`)에서 `RefreshLegDest` 로, 세션 갱신 주기(`CheckSessionTimer`)에서는 배치로 `EventGetLegDest` 에 현재 도달 주소를 묻고, 응답이 있으면 다이얼로그의 목적지·transport 를 그 값으로 갱신한다(`SipUserAgentLegDest.hpp`). 확립된 다이얼로그만 대상이고, Record-Route 가 있는(프록시 경유) 다이얼로그는 손대지 않는다 |
+| 재해석은 **다이얼로그 상대 단말의 바인딩으로만** 한다 — 바인딩의 등록 Contact 가 다이얼로그 remote target(상대 Contact)과 같을 때(user·host·포트) | in-dialog 요청의 목적지는 remote target 이다(RFC 3261 §12.2.1.1). 같은 AoR 에 **다른 단말**이 등록해 바인딩을 차지했으면(transport 당 바인딩 하나 — [registration_binding_set.md](registration_binding_set.md) §4 계기 1) 그 주소로 옮기지 않고 다이얼로그가 기억한 주소를 쓴다 — 옮기면 그 단말은 이 다이얼로그를 몰라 요청이 실패하고 leg 이 끊긴다. psip 은 remote target 을 콜백에 넘기고(`EventGetLegDest(…, pszRemoteTarget, …)`), CSP 는 `CUserMap::SelectForTarget` 으로 고른다(불일치면 로그 `LegDest(…): peer(…) 등록 바인딩이 이 다이얼로그 상대(…)가 아니다`). 승격 TCP 로 온 INVITE 도 Contact 는 등록 바인딩과 같아 교정은 그대로다 |
+| 수신 re-INVITE 는 **remote target 을 갱신**한다 | target refresh 요청(RFC 3261 §12.2.2) — 받아들이는 re-INVITE 의 Contact 로 바꾼다. 단말이 망을 바꿔 새 Contact 로 재등록·re-INVITE 하면 위 판정이 새 바인딩을 같은 단말로 본다 |
 | SDP offer 는 직전과 **동일한 `o=` 세션 버전**으로 만든다 | RFC 4028 §7.4 의 "변경 없음" 표시. 현재 `CSipDialog::AddSdp()` 는 호출마다 `++m_iSessionVersion` 하므로 갱신 경로에서는 증가를 억제해야 한다 |
 | 갱신 2xx 에는 `Session-Expires` 를 **항상 echo** 한다 | 빠지면 상대가 타이머 해제로 해석한다(§7.2). psip 의 re-INVITE 자동 200 OK 생성 지점(`SipUserAgentInvite.hpp` `RecvInviteRequest`)이 싣는다 |
 | 수신 갱신에 대한 **answer 도 `o=` 를 유지**한다 | §7.4 는 answer 에도 "변경 없음" 표시를 요구한다 — 상대 offer 가 무변경일 때 answer 의 세션 버전도 올리지 않는다 |
@@ -274,7 +276,7 @@ CSP 의 정상 호처리량 대비 무시할 수준이다.
 | psip | `SipUserAgentSipStack.hpp` `SendTimeout` | 현행 유지 — 갱신 무응답이 곧 `EventCallEnd(SIP_GONE)` |
 | psip | `SipUserAgentCallBack.h` `EventGetLegDest` | 서버 발신 in-dialog 요청의 현재 도달 주소를 응용에 묻는다. 기본 구현은 `false`(기존 동작 유지)라 다른 psip 사용자는 영향 없다. 콜백은 **다이얼로그 락 밖**에서 호출한다(psip 규약 — 응용이 자기 자료구조 락을 잡으므로 락 순서 역전 여지 제거) |
 | psip | `SipUserAgent/SipUserAgentLegDest.hpp` `RefreshLegDest`·`ApplyLegDest` | 요청 생성 직전 3단계(선별 → 락 밖 조회 → 반영). 서버 발신 in-dialog 요청 API 전부의 진입부에서 호출, `CheckSessionTimer` 는 같은 `ApplyLegDest` 를 배치로 사용. 교정 로그 `LegDest(callid): ip:port(tp) → ip:port(tp)` |
-| CSP | `ModuleDispatcher::EventGetLegDest` | 등록 단말이면 `UserMap` 의 latch (IP·포트·transport 한 세트)를 돌려준다 — fan-out INVITE·NOTIFY 가 쓰는 것과 동일 출처. 미등록(제휴 노드 등)이면 false |
+| CSP | `ModuleDispatcher::EventGetLegDest` | 다이얼로그 상대 단말(remote target 과 같은 Contact)의 등록 바인딩이면 `UserMap::SelectForTarget` 의 latch (IP·포트·transport 한 세트)를 돌려준다. 미등록(제휴 노드 등)이거나 같은 AoR 의 다른 단말 바인딩뿐이면 false |
 | CSP | `SipServerSetup` | `Setup.Sip.SessionTimer` 설정 파싱([§8](#8-값과-지연)) |
 | CSP | `ModuleDispatcher::Start` | UA 기동 직후 `SetSessionTimer()` 주입 |
 | CSP | `CspServer.cpp` 주기 루프 | 1초 tick 에서 `gclsUserAgent.CheckSessionTimer()` 호출 |

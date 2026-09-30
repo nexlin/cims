@@ -315,6 +315,56 @@ bool CUserMap::Insert( CSipMessage *pclsMessage, CspUser *pclsXmlUser, bool bInt
  * @param clsInfo		사용자 정보를 저장할 변수
  * @returns 사용자 ID 가 존재하면 true 를 리턴하고 그렇지 않으면 false 를 리턴한다.
  */
+/** 두 Contact URI 가 같은 단말 주소인가 — user·host(대소문자 무시)·포트(생략 = 5060)만 본다. 파라미터(;ob·transport)는
+ *  같은 단말도 경로에 따라 달라질 수 있어 비교하지 않는다(RFC 3261 §19.1.4 의 전체 비교보다 느슨하다). */
+static bool _sameContact( const std::string &strA, const std::string &strB ) {
+    CSipUri clsA, clsB;
+    if ( clsA.Parse( strA.c_str(), (int)strA.length() ) == -1 ) return false;
+    if ( clsB.Parse( strB.c_str(), (int)strB.length() ) == -1 ) return false;
+    const int iPortA = clsA.m_iPort > 0 ? clsA.m_iPort : 5060;
+    const int iPortB = clsB.m_iPort > 0 ? clsB.m_iPort : 5060;
+    return clsA.m_strUser == clsB.m_strUser && strcasecmp( clsA.m_strHost.c_str(), clsB.m_strHost.c_str() ) == 0 &&
+           iPortA == iPortB;
+}
+
+bool CUserMap::SelectForTarget( const char *pszUserId, const char *pszRemoteTarget, CUserInfo &clsInfo,
+                                bool *pbOtherDevice ) {
+    if ( pbOtherDevice ) *pbOtherDevice = false;
+    if ( pszRemoteTarget == NULL || pszRemoteTarget[0] == '\0' ) return Select( pszUserId, clsInfo );
+
+    bool bRes = false;
+    time_t iNow;
+    time( &iNow );
+
+    m_clsMutex.acquire();
+    USER_MAP::iterator itMap = m_clsMap.find( pszUserId );
+    if ( itMap != m_clsMap.end() && !itMap->second.empty() ) {
+        const USER_BINDING_LIST &clsList = itMap->second;
+        size_t iBest = NO_BINDING;
+        for ( size_t i = 0; i < clsList.size(); ++i ) {
+            if ( !_sameContact( clsList[i].m_strContactUri, pszRemoteTarget ) ) continue;
+            // 같은 단말의 경로라도 죽음이 확인된 것은 고르지 않는다(_pickBinding 과 같은 판정)
+            if ( !gclsUserAgent.m_clsSipStack.IsFlowAlive( clsList[i].m_strIp.c_str(), clsList[i].m_iPort,
+                                                           clsList[i].m_eTransport ) )
+                continue;
+            if ( _isUdpSilent( clsList[i], iNow ) ) continue;
+            if ( iBest == NO_BINDING || clsList[i].m_iLoginTime > clsList[iBest].m_iLoginTime ) iBest = i;
+        }
+        if ( iBest != NO_BINDING ) {
+            clsInfo = clsList[iBest];
+            bRes = true;
+        } else if ( pbOtherDevice ) {
+            bool bAnyMatch = false;
+            for ( size_t i = 0; i < clsList.size() && !bAnyMatch; ++i )
+                bAnyMatch = _sameContact( clsList[i].m_strContactUri, pszRemoteTarget );
+            *pbOtherDevice = !bAnyMatch;
+        }
+    }
+    m_clsMutex.release();
+
+    return bRes;
+}
+
 bool CUserMap::Select( const char *pszUserId, CUserInfo &clsInfo ) {
     bool bRes = false;
     USER_MAP::iterator itMap;

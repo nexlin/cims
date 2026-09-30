@@ -12,6 +12,8 @@
 //   E. TCP 등록(연결 유지), 응용이 그 TCP 바인딩을 답함     → BYE 가 살아있는 같은 TCP 연결로 도착 (무변경)
 //   F. TLS 등록(연결 유지), 응용이 그 TLS 바인딩을 답함     → BYE 가 살아있는 같은 TLS 연결로 도착 (무변경)
 //      F 는 openssl CLI 로 만든 자가서명 인증서를 쓴다 — 생성 실패 시 SKIP.
+//   G. 콜백은 다이얼로그 remote target(상대 Contact)을 함께 받는다 — 초기 INVITE Contact, 그리고 단말 re-INVITE
+//      (target refresh)의 새 Contact 로 바뀐다(RFC 3261 §12.2.2). 응용은 이 값으로 같은 AoR 의 다른 단말을 가린다
 //
 //   빌드(csp 빌드 뒤 — psip 정적 라이브러리 사용, 라이브 서비스와 무관한 127.0.0.1 포트만 사용):
 //     g++ -std=c++17 -D__LINUX__ -D_REENTRANT -I ext/psip/SipUserAgent -I ext/psip/SipStack -I ext/psip/SipParser \
@@ -69,6 +71,7 @@ public:
 	ESipTransport m_eDestTransport = E_SIP_UDP;
 	std::atomic<int> m_iAsked{ 0 };
 	std::string m_strAskedPeer;
+	std::string m_strAskedTarget;		// psip 이 넘긴 다이얼로그 remote target
 
 	void EventRegister( CSipServerInfo *, int ) override {}
 	void EventIncomingCall( const char * pszCallId, const char *, const char *, CSipCallRtp *, CSipMessage * ) override
@@ -82,13 +85,14 @@ public:
 	void EventCallRing( const char *, int, CSipCallRtp * ) override {}
 	void EventCallStart( const char *, CSipCallRtp * ) override {}
 	void EventCallEnd( const char *, int ) override {}
-	bool EventGetLegDest( const char *, const char * pszPeerId, std::string & strIp, int & iPort,
-		ESipTransport & eTransport ) override
+	bool EventGetLegDest( const char *, const char * pszPeerId, const char * pszRemoteTarget, std::string & strIp,
+		int & iPort, ESipTransport & eTransport ) override
 	{
 		++m_iAsked;
 		{
 			std::lock_guard<std::mutex> lk( m_clsMutex );
 			m_strAskedPeer = pszPeerId ? pszPeerId : "";
+			m_strAskedTarget = pszRemoteTarget ? pszRemoteTarget : "";
 		}
 		if( m_bAnswerDest == false ) return false;
 		strIp = m_strDestIp;
@@ -195,7 +199,8 @@ static std::string Build200( const std::string & strReq, int iContactPort, const
 
 // 단말: 연결 c 로 INVITE(Contact = 자기 바인딩) → 200 OK 대기 → ACK. 연결은 닫지 않는다(호출자가 결정).
 //   UDP 등록 단말은 Contact 를 UDP 바인딩(;ob)으로, TCP/TLS 등록 단말은 자기 연결 포트+transport 로 광고한다.
-static bool UeInvite( CConn & c, const std::string & strCallId, const std::string & strContact, const char * pszRecordRoute )
+static bool UeInvite( CConn & c, const std::string & strCallId, const std::string & strContact, const char * pszRecordRoute,
+                      std::string * pstrTo = NULL, int * piFromTag = NULL )
 {
 	int iUaPort = c.bTls ? g_iUaPort + 1 : g_iUaPort;
 	const char * pszSdp = "v=0\r\no=ue 1 1 IN IP4 127.0.0.1\r\ns=-\r\nc=IN IP4 127.0.0.1\r\nt=0 0\r\n"
@@ -241,6 +246,64 @@ static bool UeInvite( CConn & c, const std::string & strCallId, const std::strin
 		"CSeq: 1 ACK\r\n"
 		"Content-Length: 0\r\n\r\n",
 		UA_IP, iUaPort, c.transport(), c.Transport(), UA_IP, c.iLocalPort, g_iSeq, g_iSeq, strTo.c_str(), strCallId.c_str() );
+	ConnSend( c, szAck, iLen );
+	usleep( 200 * 1000 );
+	if( pstrTo ) *pstrTo = strTo;
+	if( piFromTag ) *piFromTag = g_iSeq;
+	return true;
+}
+
+// 단말: 같은 연결로 re-INVITE(target refresh — 새 Contact) → 200 OK → ACK (CSeq 2)
+static bool UeReInvite( CConn & c, const std::string & strCallId, const std::string & strContact, const std::string & strTo,
+                        int iFromTag )
+{
+	const char * pszSdp = "v=0\r\no=ue 1 1 IN IP4 127.0.0.1\r\ns=-\r\nc=IN IP4 127.0.0.1\r\nt=0 0\r\n"
+		"m=audio 40002 RTP/AVP 0\r\na=rtpmap:0 PCMU/8000\r\n";
+	const int iBranch = ++g_iSeq;
+	char szRe[4096];
+	int iLen = snprintf( szRe, sizeof(szRe),
+		"INVITE sip:svc@%s:%d;transport=%s SIP/2.0\r\n"
+		"Via: SIP/2.0/%s %s:%d;rport;branch=z9hG4bK-legdest-re-%d\r\n"
+		"Max-Forwards: 70\r\n"
+		"From: <sip:ue@test.local>;tag=ue-%d\r\n"
+		"To: %s\r\n"
+		"Call-ID: %s\r\n"
+		"CSeq: 2 INVITE\r\n"
+		"Contact: %s\r\n"
+		"Content-Type: application/sdp\r\n"
+		"Content-Length: %d\r\n\r\n%s",
+		UA_IP, g_iUaPort, c.transport(), c.Transport(), UA_IP, c.iLocalPort, iBranch, iFromTag, strTo.c_str(),
+		strCallId.c_str(), strContact.c_str(), (int)strlen( pszSdp ), pszSdp );
+	ConnSend( c, szRe, iLen );
+	// 200 OK 를 본문(Content-Length)까지 다 읽는다 — 덜 읽으면 뒤따르는 서버 요청이 다음 읽기에서 본문 조각과 섞인다.
+	std::string strRx;
+	if( ConnRecvUntil( c, "SIP/2.0 200", 3000, strRx ) == false ) return false;		// 100 Trying 은 건너뛴다
+	{
+		const size_t iCseq = strRx.find( "SIP/2.0 200" );
+		for( int i = 0; i < 20 && strRx.find( "\r\n\r\n", iCseq ) == std::string::npos; ++i )
+		{
+			std::string more; ConnRecvUntil( c, "\n", 200, more ); strRx += more;
+		}
+		const size_t iStart = iCseq;
+		const size_t iHdrEnd = strRx.find( "\r\n\r\n", iCseq ) + 4;
+		int iBody = atoi( HeaderOf( strRx, iStart == std::string::npos ? 0 : iStart, "Content-Length" ).c_str() );
+		for( int i = 0; i < 20 && strRx.size() < iHdrEnd + (size_t)iBody; ++i )
+		{
+			std::string more; ConnRecvUntil( c, "\n", 200, more ); strRx += more;
+		}
+	}
+	char szAck[1024];
+	iLen = snprintf( szAck, sizeof(szAck),
+		"ACK sip:svc@%s:%d;transport=%s SIP/2.0\r\n"
+		"Via: SIP/2.0/%s %s:%d;rport;branch=z9hG4bK-legdest-reack-%d\r\n"
+		"Max-Forwards: 70\r\n"
+		"From: <sip:ue@test.local>;tag=ue-%d\r\n"
+		"To: %s\r\n"
+		"Call-ID: %s\r\n"
+		"CSeq: 2 ACK\r\n"
+		"Content-Length: 0\r\n\r\n",
+		UA_IP, g_iUaPort, c.transport(), c.Transport(), UA_IP, c.iLocalPort, iBranch, iFromTag, strTo.c_str(),
+		strCallId.c_str() );
 	ConnSend( c, szAck, iLen );
 	usleep( 200 * 1000 );
 	return true;
@@ -381,6 +444,8 @@ int main( int argc, char * argv[] )
 	CHECK( bGot, "BYE arrived on UDP binding" );
 	CHECK( clsCb.m_iAsked > iAsked, "EventGetLegDest was asked" );
 	CHECK( clsCb.m_strAskedPeer == "ue", "peer id = remote user (From) of the dialog" );
+	CHECK( clsCb.m_strAskedTarget.find( std::string( "sip:ue@127.0.0.1" ) + szPort ) == 0,
+		( "remote target = INVITE Contact: " + clsCb.m_strAskedTarget ).c_str() );
 	if( bGot )
 	{
 		std::string strRoute = RouteOf( strReq );
@@ -464,6 +529,31 @@ int main( int argc, char * argv[] )
 			if( bGot ) CHECK( RouteOf( strReq ).find( "transport=tls" ) != std::string::npos, ( "Route keeps TLS: " + RouteOf( strReq ) ).c_str() );
 			CHECK( UdpExpect( fdUe, "BYE", 500, strReq ) == false, "nothing leaked to the UDP socket" );
 		}
+		ConnClose( c );
+	}
+
+	// ── G. remote target 전달 + target refresh(re-INVITE 새 Contact) ──
+	printf( "[G] callback receives the dialog remote target; UE re-INVITE with a new Contact refreshes it (RFC 3261 §12.2.2)\n" );
+	{
+		CConn c;
+		CHECK( ConnOpen( c, g_iUaPort, false ), "TCP connection opened" );
+		char szContact1[128]; snprintf( szContact1, sizeof(szContact1), "<sip:ue@%s:%d;transport=tcp>", UA_IP, c.iLocalPort );
+		std::string strTo; int iFromTag = 0;
+		CHECK( UeInvite( c, "legdest-G@test", szContact1, NULL, &strTo, &iFromTag ), "INVITE established" );
+		clsCb.SetDest( UA_IP, c.iLocalPort, E_SIP_TCP );
+		char szTarget1[128]; snprintf( szTarget1, sizeof(szTarget1), "sip:ue@%s:%d", UA_IP, c.iLocalPort );
+		CSipCallRtp clsRtpG; clsRtpG.m_strIp = UA_IP; clsRtpG.m_iPort = 40000; clsRtpG.m_iCodec = 0;
+		clsUa.SendReInvite( "legdest-G@test", &clsRtpG );
+		CHECK( ConnExpect( c, "INVITE", 3000, strReq ), "server re-INVITE arrived" );
+		usleep( 300 * 1000 );
+		CHECK( clsCb.m_strAskedTarget.find( szTarget1 ) == 0, ( "remote target = initial Contact: " + clsCb.m_strAskedTarget ).c_str() );
+		char szContact2[128]; snprintf( szContact2, sizeof(szContact2), "<sip:ue@%s:%d;transport=tcp>", UA_IP, 45999 );
+		CHECK( UeReInvite( c, "legdest-G@test", szContact2, strTo, iFromTag ), "UE re-INVITE (new Contact) → 200 OK" );
+		clsUa.StopCall( "legdest-G@test" );
+		CHECK( ConnExpect( c, "BYE", 3000, strReq ), "BYE arrived" );
+		char szTarget2[128]; snprintf( szTarget2, sizeof(szTarget2), "sip:ue@%s:45999", UA_IP );
+		CHECK( clsCb.m_strAskedTarget.find( szTarget2 ) == 0, ( "remote target refreshed by re-INVITE: " + clsCb.m_strAskedTarget ).c_str() );
+		CHECK( strReq.find( "BYE sip:ue@127.0.0.1:45999" ) == 0, "BYE Request-URI = refreshed remote target" );
 		ConnClose( c );
 	}
 

@@ -305,7 +305,7 @@ void CSipUserAgent::CheckSessionTimer( )
 	time_t	iNow = time( NULL );
 
 	// 대상 leg — 도달 주소 조회(응용 콜백)는 다이얼로그 락 **밖**에서 한다 (psip 콜백 규약).
-	typedef struct { std::string strCallId, strPeerId; bool bRefresh, bAskDest, bHaveDest;
+	typedef struct { std::string strCallId, strPeerId, strRemoteTarget; bool bRefresh, bAskDest, bHaveDest;
 	                 std::string strIp; int iPort; ESipTransport eTransport; } SESSION_TIMER_LEG;
 	std::list< SESSION_TIMER_LEG >						clsLegList;
 	std::list< SESSION_TIMER_LEG >::iterator	itLeg;
@@ -322,6 +322,7 @@ void CSipUserAgent::CheckSessionTimer( )
 		SESSION_TIMER_LEG clsLeg;
 		clsLeg.strCallId = itMap->first;
 		clsLeg.strPeerId = clsDialog.m_strToId;
+		clsLeg.strRemoteTarget = clsDialog.m_strContactUri;
 		clsLeg.bHaveDest = false;
 		clsLeg.iPort = 0;
 		clsLeg.eTransport = clsDialog.m_eTransport;
@@ -372,7 +373,7 @@ void CSipUserAgent::CheckSessionTimer( )
 	{
 		if( itLeg->bAskDest == false || m_pclsCallBack == NULL ) continue;
 		itLeg->bHaveDest = m_pclsCallBack->EventGetLegDest( itLeg->strCallId.c_str(), itLeg->strPeerId.c_str(),
-			itLeg->strIp, itLeg->iPort, itLeg->eTransport );
+			itLeg->strRemoteTarget.c_str(), itLeg->strIp, itLeg->iPort, itLeg->eTransport );
 		if( itLeg->strIp.empty() || itLeg->iPort <= 0 ) itLeg->bHaveDest = false;
 	}
 
