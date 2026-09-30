@@ -233,6 +233,9 @@ private:
     std::string SubTablesUnion() const;
     /** 원격 청취 자격 컬럼(ptt_user_profile.allow_ambient_listening — migrate_ptt_ambient_listening.sql) 존재 여부 */
     bool m_bHasAmbientColumn = false;
+    /** 미응답 멤버 알림 자격 컬럼(ptt_user_profile.allow_non_ack_users_info — migrate_ptt_non_ack_users_info.sql) 존재
+     * 여부 */
+    bool m_bHasNonAckInfoColumn = false;
     void ProbeSchema();
     /** 컬럼이 있으면 COALESCE(식,'') 아니면 '' — SELECT 열 위치를 고정한 채 값만 비운다 */
     std::string Ha1Col( const char *pszAlias ) const;

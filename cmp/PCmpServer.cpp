@@ -135,6 +135,7 @@ bool PCmpServer::startServer() {
         this->runControlLoop();
     }).detach();
 
+    if (_pttMediaBufferMs > 0) _mediaBufferThread = std::thread([this]() { this->mediaBufferLoop(); });
     // Session timeout 체크 스레드 시작
     if (_sessionTimeout > 0) {
         _timeoutThread = std::thread([this]() { this->timeoutLoop(); });
@@ -227,6 +228,7 @@ void PCmpServer::stopServer() {
         if (r.thread.joinable()) r.thread.join();
     }
     if (_timeoutThread.joinable()) _timeoutThread.join();
+    if (_mediaBufferThread.joinable()) _mediaBufferThread.join();
     if (_fmMonitorThread.joinable()) _fmMonitorThread.join();
     gclsFmReporter.Stop();  // process_stopping pending 재전송 여지 후 종료
     _logWriter.Stop();  // timeout 스레드 정지 후 잔여 로그 flush (저장 경로 무응답 시 스풀 회수)
@@ -539,6 +541,12 @@ SimpleJson::JsonNode PCmpServer::buildResourceSummary() {
         tap.Set("used", (int)(_tapPool.size() - _freeTaps.size()));
         tap.Set("max_per_session", _maxTapsPerSession);
         resource.Set("tap", tap);
+    }
+    // PTT 미디어 버퍼링(cmp.md §3.5 «미디어 버퍼링») — 키 존재가 기능 광고. 0 이면 광고하지 않는다(CSP 는 멤버 확인 뒤 개시자 응답).
+    if (_pttMediaBufferMs > 0) {
+        SimpleJson::JsonNode mb;
+        mb.Set("max_ms", _pttMediaBufferMs);
+        resource.Set("media_buffer", mb);
     }
     return resource;
 }
@@ -1897,6 +1905,7 @@ void PCmpServer::processAddGroup(const SimpleJson::JsonNode& payload, const std:
              group->setBroadcastSession(broadcast, initiator);
              group->setFloorTimers(t1Sec, t2Sec, t3Sec, t8Sec, t7Sec, t20Sec, t4Sec, c7, c20);
              group->setFloorPolicy(floorControl, floorPolicy, maxTalkers, privateCall);
+             group->setMediaBuffer(_pttMediaBufferMs);
 
              // CSP가 전달한 record_dir이 있으면 해당 경로에 녹취
              //   기록 자리 = record_dir/{시간버킷}/{session_dir}/ (session_dir 미전달=레거시 버킷)
@@ -2415,6 +2424,7 @@ void PCmpServer::loadConfig() {
         if (root.Has("AnnPlayers")) _annPlayers = (int)root.GetInt("AnnPlayers");
         if (root.Has("AnnMaxPlayMs")) _annMaxPlayMs = (int)root.GetInt("AnnMaxPlayMs");
         if (root.Has("AnnNatWaitMs")) _annNatWaitMs = (int)root.GetInt("AnnNatWaitMs");
+        if (root.Has("PttMediaBufferMs")) _pttMediaBufferMs = (int)root.GetInt("PttMediaBufferMs");
         // 청취 leg(tap) 풀 — dispatch_center.md §6 (TapPoolSize=0 이면 비활성: resource.tap 미광고 → CSP 가 Join 488)
         if (root.Has("TapStartPort")) _tapStartPort = (int)root.GetInt("TapStartPort");
         if (root.Has("TapPoolSize")) _tapPoolSize = (int)root.GetInt("TapPoolSize");
@@ -2752,6 +2762,18 @@ void PCmpServer::freeGroupMemberUnits(const std::string& groupId) {
         } else {
             ++it;
         }
+    }
+}
+
+// PTT 미디어 버퍼 재생 클록 (cmp.md §3.5 «미디어 버퍼링») — 20 ms. 활성 버퍼가 없으면 그룹 표를 잡지 않는다.
+void PCmpServer::mediaBufferLoop() {
+    while (_running) {
+        msleep(20);
+        if (!_running) break;
+        if (PMcpttGroup::activeMediaBuffers() <= 0) continue;
+        PAutoLock lock(_mutex);
+        for (auto const& [gid, group] : _groups)
+            if (group) group->tickMediaBuffer();
     }
 }
 

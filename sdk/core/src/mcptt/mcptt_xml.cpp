@@ -145,6 +145,39 @@ static std::string localText(const std::string& s, const std::string& local, boo
     return std::string();
 }
 
+std::vector<std::string> nonAcknowledgedUsers(const std::string& xml) {
+    std::vector<std::string> out;
+    size_t p = 0;
+    for (;;) {
+        // 요소마다 localText 로 값(contentType 자식 <mcpttURI> 포함)을 읽고 그 닫는 태그 뒤로 넘어간다
+        bool f = false;
+        const std::string rest = xml.substr(p);
+        std::string v = localText(rest, "non-acknowledged-user", &f);
+        if (!f) break;
+        if (!v.empty()) out.push_back(bareId(v));
+        // 닫는 태그 "</[p:]non-acknowledged-user>" 뒤로 (자기 닫힘 "<… />" 이면 그 태그 뒤로)
+        size_t open = rest.find("non-acknowledged-user");
+        size_t gt = rest.find('>', open);
+        if (gt == std::string::npos) break;
+        size_t next = gt + 1;
+        if (rest[gt - 1] != '/') {
+            size_t c = gt;
+            while ((c = rest.find("</", c)) != std::string::npos) {
+                size_t n = c + 2, e = rest.find('>', n);
+                if (e == std::string::npos) { c = std::string::npos; break; }
+                std::string tag = rest.substr(n, e - n);
+                size_t colon = tag.find(':');
+                if (colon != std::string::npos) tag = tag.substr(colon + 1);
+                if (tag == "non-acknowledged-user") { next = e + 1; break; }
+                c = e;
+            }
+            if (c == std::string::npos) break;
+        }
+        p += next;
+    }
+    return out;
+}
+
 int indicator(const std::string& xml, const std::string& local) {
     bool f = false;
     std::string v = localText(xml, local, &f);

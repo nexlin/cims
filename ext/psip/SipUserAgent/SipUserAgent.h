@@ -111,6 +111,10 @@ public:
 	                         const char * pszContentType, const char * pszContentSubType,
 	                         const std::string & strBody );
 	bool SendDtmf( const char * pszCallId, char cDtmf );
+	/** in-dialog INFO — Info Package(RFC 6086) 본문 1개. Info-Package 헤더 + 본문 Content-Disposition: Info-Package(§4.2.2).
+	 *  예: TS 24.379 §6.3.3.3 g.3gpp.mcptt-info(application/vnd.3gpp.mcptt-info+xml). */
+	bool SendInfoWithBody( const char * pszCallId, const char * pszInfoPackage,
+	                       const char * pszContentType, const char * pszContentSubType, const std::string & strBody );
 	bool SendPrack( const char * pszCallId, CSipCallRtp * pclsRtp );
 
 	// SipUserAgentUtil.hpp

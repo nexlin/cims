@@ -41,6 +41,8 @@ int indicator(const std::string& xml, const std::string& local);
  *  accountId·self 와 userId 폴백(From)은 호출자가 채운다. */
 bool parseEmergencyAlert(const std::string& body, EmergencyAlert& out);
 
+/** mcptt-info 의 `<non-acknowledged-user>` 값 전부(bare id, 출현 순) — TS 24.379 §6.3.3.3, 요소는 `<anyExt>` 안(§F.1). */
+std::vector<std::string> nonAcknowledgedUsers(const std::string& xml);
 /** 수신 SIP 원문(INVITE 등)에서 mcptt-info 요약 추출 — 없으면 present=false. */
 McpttInfo parseMcpttInfo(const std::string& wholeMsg);
 /** RFC 4575 conference-info 파싱 — users(entity, status), full(state="full"). */

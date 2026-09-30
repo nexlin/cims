@@ -353,6 +353,7 @@ async def _get_user(person_id: str, config):
                             'emergency_private_recipient': p['emergency_private_recipient'],
                             'allow_ambient_listening': bool(p['allow_ambient_listening']),
                             'allow_create_group': bool(p['allow_create_group']),
+                            'allow_non_ack_users_info': bool(p['allow_non_ack_users_info']),
                         }
                 except pymysql.Error:
                     pass
@@ -1112,14 +1113,17 @@ async def _delete_subscription(person_id: str, svc: str, msisdn: str, config, pa
 # ──────────────────────────────────────────────────────────────
 
 _PROFILE_BOOL_FIELDS = ('allow_emergency_call', 'allow_emergency_alert', 'allow_adhoc_call',
-                        'allow_emergency_private_call', 'allow_ambient_listening', 'allow_create_group')
+                        'allow_emergency_private_call', 'allow_ambient_listening', 'allow_create_group',
+                        'allow_non_ack_users_info')
 
 # 마이그레이션으로 뒤에 붙은 프로파일 인가 컬럼 — 부재 시 SELECT 는 상수 0(자격 없음), 쓰기 요청은 400.
 #   allow_ambient_listening: migrate_ptt_ambient_listening.sql (dispatch_center.md §5.6)
 #   allow_create_group     : migrate_ptt_allow_create_group.sql (mcptt_authorization.md §3)
+#   allow_non_ack_users_info: migrate_ptt_non_ack_users_info.sql (TS 24.379 §6.3.3.3 — 미응답 멤버 INFO 수신 자격)
 _OPT_PROFILE_COLS = {
     'allow_ambient_listening': 'sql/migrate_ptt_ambient_listening.sql',
     'allow_create_group': 'sql/migrate_ptt_allow_create_group.sql',
+    'allow_non_ack_users_info': 'sql/migrate_ptt_non_ack_users_info.sql',
 }
 _OPT_COL_PRESENT = {}   # 컬럼명 → bool 프로브 캐시
 
@@ -1178,8 +1182,9 @@ async def _put_ptt_profile(person_id: str, msisdn: str, body, config):
     allow_alert = 1 if body.get('allow_emergency_alert', True) else 0
     allow_adhoc = 1 if body.get('allow_adhoc_call', True) else 0
     allow_priv  = 1 if body.get('allow_emergency_private_call', True) else 0
-    # 관제사 자격 두 축 — 기본 0, 부여는 OAM(콘솔·admin API): 원격 청취(TS 24.484 allow-ambient-listening,
-    #   dispatch_center.md §5.6) · GMS 그룹 생성(CIMS 확장 allow-create-group, mcptt_authorization.md §3)
+    # 기본 0 인 자격 셋 — 부여는 OAM(콘솔·admin API): 원격 청취(TS 24.484 allow-ambient-listening,
+    #   dispatch_center.md §5.6) · GMS 그룹 생성(CIMS 확장 allow-create-group, mcptt_authorization.md §3) ·
+    #   미응답 멤버 INFO 수신(TS 24.484 anyExt allow-to-receive-non-acknowledged-users-information, TS 24.379 §6.3.3.3)
     opt_vals = {c: (1 if body.get(c, False) else 0) for c in _OPT_PROFILE_COLS}
 
     with _get_db(config) as conn:
@@ -1232,6 +1237,7 @@ async def _put_ptt_profile(person_id: str, msisdn: str, body, config):
         "emergency_private_recipient": precip,
         "allow_ambient_listening": bool(opt_vals['allow_ambient_listening']) if 'allow_ambient_listening' in present else False,
         "allow_create_group": bool(opt_vals['allow_create_group']) if 'allow_create_group' in present else False,
+        "allow_non_ack_users_info": bool(opt_vals['allow_non_ack_users_info']) if 'allow_non_ack_users_info' in present else False,
     }
     update_user_profile_cache(msisdn, prof)  # user-profile 문서 ETag 는 내용 파생 — 자동 갱신
     notify_csp("USER_CHANGED", f"tel:{msisdn}", "PUT")

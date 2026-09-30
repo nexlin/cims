@@ -176,6 +176,7 @@ public:
     }
     void onDialogInfo(const DialogInfo& d) override { each([&](Listener* l) { l->onDialogInfo(d); }); }
     void onMcpttCondition(const CallInfo& i, ConditionCause c) override { each([&](Listener* l) { l->onMcpttCondition(i, c); }); }
+    void onNonAcknowledgedUsers(const CallInfo& i) override { each([&](Listener* l) { l->onNonAcknowledgedUsers(i); }); }
     void onEmergencyAlert(const EmergencyAlert& a) override { each([&](Listener* l) { l->onEmergencyAlert(a); }); }
     void onSds(const SdsMessage& m) override { each([&](Listener* l) { l->onSds(m); }); }
     void onRequestResult(const RequestResult& r) override { each([&](Listener* l) { l->onRequestResult(r); }); }
@@ -639,6 +640,32 @@ public:
             if (prm.e.body.tsxState.type != PJSIP_EVENT_RX_MSG) return;
             const std::string& msg = prm.e.body.tsxState.src.rdata.wholeMsg;
             if (msg.empty()) return;
+            // in-dialog INFO — Info Package(RFC 6086). 아는 패키지 g.3gpp.mcptt-info 는 200 + 해석(TS 24.379 §6.3.3.3 미응답 멤버),
+            //   모르는 패키지는 469 Bad Info Package(§4.2.2). 패키지 없는 옛 INFO 는 스택 기본 처리에 맡긴다.
+            if (tsx.role == PJSIP_ROLE_UAS && msg.rfind("INFO ", 0) == 0 && tsx.state == PJSIP_TSX_STATE_TRYING) {
+                const std::string pkg = detail::headerValue(msg, "Info-Package");
+                if (!pkg.empty()) {
+                    const bool known = pkg.find("g.3gpp.mcptt-info") != std::string::npos;
+                    auto* rd = static_cast<pjsip_rx_data*>(prm.e.body.tsxState.src.rdata.pjRxData);
+                    auto* t = static_cast<pjsip_transaction*>(tsx.pjTransaction);
+                    pjsip_dialog* dlg = t ? pjsip_tsx_get_dlg(t) : nullptr;
+                    if (rd && dlg) pjsip_dlg_respond(dlg, rd, known ? 200 : 469, nullptr, nullptr, nullptr);
+                    if (known) {
+                        std::vector<std::string> nonAck = mcptt::nonAcknowledgedUsers(sipBody(msg));
+                        if (!nonAck.empty()) {
+                            CallInfo snap;
+                            o_->updateCall(getId(), [&](CallInfo& c) { c.nonAcknowledgedUsers = nonAck; }, &snap);
+                            o_->emit([o = o_, snap] { o->listener->onNonAcknowledgedUsers(snap); });
+                        }
+                    }
+                    return;
+                }
+            }
+            // 개시 200 OK 의 P-Answer-State(RFC 4964 — TS 24.379 §10.1.1.2.1.1 2A) 사용자에게 알릴 수 있게 기록한다
+            if (tsx.role == PJSIP_ROLE_UAC && tsx.method == "INVITE" && msg.rfind("SIP/2.0 200", 0) == 0) {
+                const std::string st = detail::headerValue(msg, "P-Answer-State");
+                if (!st.empty()) o_->updateCall(getId(), [&](CallInfo& c) { c.answerState = st; });
+            }
             if (msrp) {
                 // 발신 200 OK answer 의 cmdp a=path → 입출력 스레드(TS 24.282 §9.2.3)
                 if (msrp->outgoing && !msrp->started && tsx.role == PJSIP_ROLE_UAC && tsx.method == "INVITE" && msg.rfind("SIP/2.0 2", 0) == 0) {

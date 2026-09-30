@@ -185,6 +185,7 @@ PMcpttGroup::~PMcpttGroup() {
     // onRtpPacket/onVideoRtpPacket 의 writePacket 경합이 차단된다. 이후 멤버 정리.
     stopRecording();
     PAutoLock lock(_mutex);
+    _mbufSetActive(false);
     _members.clear();
 }
 
@@ -675,8 +676,8 @@ void PMcpttGroup::onMemberRtpPacket(const std::string& memberId, const std::stri
                     //   (§6.3.4.4.5-1) — 이 값이 최대 발언시간의 기준점이다.
                     if (tk->talkStartUsec == 0) tk->talkStartUsec = tk->lastRtpUsec;
                 }
-                sendAudioToAll(buf, len, senderId, slot);
-                // 녹취: 화자 슬롯 트랙에 기록 (동시 발언이면 화자마다 별도 트랙)
+                if (!_mbufRelay(buf, len, senderId, slot)) sendAudioToAll(buf, len, senderId, slot);
+                // 녹취: 화자 슬롯 트랙에 기록 (실시간 — 버퍼 재생과 무관) (동시 발언이면 화자마다 별도 트랙)
                 if (!_floorControl && (!_recorder || !_recorder->isActive())) {
                     // floor 없는 세션은 발언 경계가 없다 — 첫 미디어에서 세그먼트를 열고
                     //   그룹 해제까지 유지한다(VoIP relay 녹취와 동형).
@@ -1900,6 +1901,95 @@ static inline uint32_t _egressSsrc(unsigned int memberSsrc, int slot, bool video
 
 // 하향 분배는 각 멤버의 전용 유닛 소켓에서 송신한다 — 멤버가 보는 소스 포트 =
 // SDP 에 광고한 포트 (symmetric RTP 정합).
+// ── 미디어 버퍼링 (TS 24.379 §10.1.1.4.2 — cmp.md §3.5 «미디어 버퍼링») ─────────────────────────
+std::atomic<int> PMcpttGroup::s_activeMediaBuffers{0};
+
+void PMcpttGroup::setMediaBuffer(int maxMs) {
+    PAutoLock lock(_mutex);
+    _mbufMaxMs = maxMs > 0 ? maxMs : 0;
+}
+
+void PMcpttGroup::_mbufSetActive(bool on) {
+    if (_mbufActive == on) return;
+    _mbufActive = on;
+    if (on) s_activeMediaBuffers.fetch_add(1);
+    else s_activeMediaBuffers.fetch_sub(1);
+}
+
+bool PMcpttGroup::_hasAudioReceiver(const std::string& excludeSessionId) const {
+    for (const auto& [sid, peer] : _members)
+        if (sid != excludeSessionId && peer.unit && peer.port > 0 && !peer.mediaStopped) return true;
+    return false;
+}
+
+// 화자 음성 1패킷 — 버퍼가 가져갔으면 true (호출자는 실시간 분배를 하지 않는다).
+bool PMcpttGroup::_mbufRelay(const char* buf, int len, const std::string& senderId, int slot) {
+    // floor 제어 세션만 — 전이중(floor off)은 화자가 동시에 여럿이라 한 화자의 발언을 늦춰 재생할 수 없다
+    if (_mbufMaxMs <= 0 || !_floorControl) return false;
+    const int64_t now = _nowUsec();
+    if (!_mbuf.empty()) {
+        if (senderId != _mbufSender) {
+            // 담긴 발언이 다 나가기 전에 다른 화자가 말한다 — 남은 지난 발언을 버리고 새 발언을 실시간으로(겹쳐 듣지 않게)
+            LOG_INFO("PMcpttGroup", "[%s] media buffer: new talker %s — drop %zu buffered packet(s) of %s",
+                     _groupId.c_str(), senderId.c_str(), _mbuf.size(), _mbufSender.c_str());
+            _mbuf.clear();
+            _mbufSetActive(false);
+            return false;
+        }
+    } else {
+        if (!_mbufEligible) return false;
+        if (_hasAudioReceiver(senderId)) {  // 이미 듣는 이가 있다 — 이 세션은 버퍼링하지 않는다
+            _mbufEligible = false;
+            return false;
+        }
+        _mbufSender = senderId;
+        _mbufFirstArrUsec = now;
+        _mbufReplayStartUsec = 0;
+        _mbufSetActive(true);
+        LOG_INFO("PMcpttGroup", "[%s] media buffer: no receiver yet — buffering %s (max %d ms)", _groupId.c_str(),
+                 senderId.c_str(), _mbufMaxMs);
+    }
+    BufferedRtp pkt;
+    pkt.data.assign(buf, len);
+    pkt.slot = slot;
+    pkt.arrUsec = now;
+    _mbuf.push_back(std::move(pkt));
+    // 수신자를 기다리는 동안 최대 길이를 넘으면 오래된 것부터 버린다 — 재생이 시작되면 지연은 그대로 유지된다
+    if (_mbufReplayStartUsec == 0) {
+        while (_mbuf.size() > 1 && now - _mbuf.front().arrUsec > (int64_t)_mbufMaxMs * 1000) _mbuf.pop_front();
+        _mbufFirstArrUsec = _mbuf.front().arrUsec;
+    }
+    _mbufDrain(now);
+    return true;
+}
+
+void PMcpttGroup::_mbufDrain(int64_t nowUsec) {
+    if (_mbuf.empty()) return;
+    if (_mbufReplayStartUsec == 0) {
+        if (!_hasAudioReceiver(_mbufSender)) return;  // 아직 듣는 이가 없다
+        _mbufReplayStartUsec = nowUsec;
+        _mbufEligible = false;
+        LOG_INFO("PMcpttGroup", "[%s] media buffer: receiver joined — replay %zu packet(s), delay %lld ms",
+                 _groupId.c_str(), _mbuf.size(), (long long)((nowUsec - _mbufFirstArrUsec) / 1000));
+    }
+    while (!_mbuf.empty()) {
+        const BufferedRtp& f = _mbuf.front();
+        if (f.arrUsec - _mbufFirstArrUsec > nowUsec - _mbufReplayStartUsec) break;
+        sendAudioToAll(f.data.data(), (int)f.data.size(), _mbufSender, f.slot);
+        _mbuf.pop_front();
+    }
+    if (_mbuf.empty()) {
+        _mbufSetActive(false);
+        LOG_INFO("PMcpttGroup", "[%s] media buffer: replay done — live relay", _groupId.c_str());
+    }
+}
+
+void PMcpttGroup::tickMediaBuffer() {
+    PAutoLock lock(_mutex);
+    if (!_mbufActive) return;
+    _mbufDrain(_nowUsec());
+}
+
 void PMcpttGroup::sendAudioToAll(const char* data, int len, const std::string& excludeSessionId, int slot) {
     if (len < 12) return;
     // leg 별 PT 재작성 분류 — 화자(sender) leg 의 srcTePt 로 이 패킷이 audio/TE 인지 판정.

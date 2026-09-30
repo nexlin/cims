@@ -611,6 +611,22 @@ RTP 패킷 수신 (PT=101, telephone-event)
       └─ handleFloorRelease()
 ```
 
+#### 미디어 버퍼링
+
+TS 24.379 §10.1.1.4.2·§11.1.1.4.2 의 "controlling MCPTT function supports media buffering" 을 CMP 가 맡는다. 새 그룹 세션에서
+**아직 듣는 멤버가 없을 때**(수신 가능 멤버 = 화자가 아니고 주소(`port>0`)가 있으며 Media Flow Control 로 멈추지 않은 멤버) 화자가
+보내는 음성 RTP 를 평문으로 담았다가, 첫 수신자가 생기면 **원래 도착 간격 그대로** 재생한다 — 그 발언 동안 수신 쪽은 버퍼 길이만큼
+늦게 듣고, 발언이 끝나면 남은 것을 같은 간격으로 흘려 보낸 뒤 실시간 중계로 돌아간다.
+
+| 규칙 | 동작 |
+|---|---|
+| 시작 | 세션에 수신자가 한 번도 없었던 동안 floor 를 가진 화자의 첫 음성. 이미 듣는 이가 있으면 그 세션은 버퍼링하지 않는다 |
+| 길이 | `PttMediaBufferMs`(기본 5000). 수신자를 기다리는 동안 넘치면 오래된 것부터 버린다 |
+| 재생 | 수신자 합류 시각을 기준으로 패킷마다 (도착 − 첫 도착) 만큼 뒤에 `sendAudioToAll`(수신자별 SSRC·seq·PT·SRTP 는 실시간과 같은 경로). 재생 클록 = 서버 20 ms 스레드(활성 버퍼가 있을 때만 그룹을 돈다) + 화자 패킷 도착 |
+| 다른 화자 | 담긴 발언이 다 나가기 전에 다른 화자가 말하면 남은 것을 버리고 새 발언을 실시간으로(겹쳐 듣지 않게) |
+| 범위 | floor 제어 세션의 음성만 — 전이중(floor off)·영상은 버퍼링하지 않는다. 녹취는 도착 시각 그대로(실시간) |
+| 광고 | HEARTBEAT `resource.media_buffer{max_ms}` — 키 존재가 기능 광고. `PttMediaBufferMs=0` 이면 광고하지 않고, CSP 는 멤버의 200 OK 를 받은 뒤 개시자에게 응답한다([mcptt_standard_conformance.md](../features/mcptt_standard_conformance.md) C4f) |
+
 #### NAT 멤버의 목적지 latch
 
 멤버 신원은 전용 포트 유닛이 확정하므로 소스 매칭이 없다. `PTT_JOIN` 의 `user_nat=1`
@@ -866,6 +882,7 @@ CmpServer (PModule)
   "PttRtpStartPort": 52000,      // PTT Audio RTP 시작 포트
   "PttRtpPoolSize": 10,          // PTT 2포트 블록 수
   "PttFloorStartPort": 54000,    // PTT Floor Control 시작 포트
+  "PttMediaBufferMs": 5000,      // PTT 미디어 버퍼링 최대 길이 (0=끔 → resource.media_buffer 미광고, §3.5 «미디어 버퍼링»)
   "RtpWorkerCount": 4,           // RTP 처리 Worker 스레드 수
   "RtpIp": "192.168.1.10",       // RTP 미디어 인터페이스 IP
   "ServerIp": "0.0.0.0",         // UDP 제어 리스닝 IP

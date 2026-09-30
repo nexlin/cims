@@ -54,6 +54,11 @@ extern void SendSipNotify( const std::string &uri, const std::string &etag, cons
 extern int SendConferenceNotifyToSubscribers( const std::string &strGroupId, const std::string &strBody,
                                               std::set<std::string> *psetNotifiedUsers );
 
+// CscfModule.cpp — 제휴 변경 감사(E-AUD-009)·affiliation-info 구독자 NOTIFY (TS 24.379 §9.2.2.3.5)
+extern void EmitAffiliationChanged( const std::string &strGroupId, const char *pszAction,
+                                    const std::string &strUserId );
+extern void SendAffiliationNotify( const std::string &strUserId );
+
 // External global objects
 extern CSipUserAgent gclsUserAgent;
 
@@ -250,6 +255,19 @@ static bool _gateBetterFinal( int iNew, int iOld ) {
     return iOld == 0 || ( iNew >= 600 && iOld < 600 );
 }
 
+// 개시자 200 OK 의 Warning 값 — 제어 기능 자신의 경고(111) 뒤에 멤버 응답에서 받은 것(§6.3.3.2.3.2 7)). RFC 3261 §20.43
+// —
+//   warning-value 를 쉼표로 잇는다.
+static std::string _joinWarnings( const std::string &strOwn, const std::vector<std::string> &vecReceived ) {
+    std::string strOut = strOwn;
+    for ( const auto &w : vecReceived ) {
+        if ( w.empty() || w == strOwn ) continue;
+        if ( !strOut.empty() ) strOut += ", ";
+        strOut += w;
+    }
+    return strOut;
+}
+
 void CGroupCallService::AckGateMemberResult( const std::string &strGroupId, const std::string &strMemberId,
                                              int iSipStatus ) {
     bool bAbandon = false;
@@ -264,6 +282,7 @@ void CGroupCallService::AckGateMemberResult( const std::string &strGroupId, cons
         const bool bRequired = g.setRequiredPending.erase( strMemberId ) > 0;
         if ( iSipStatus >= 200 && iSipStatus < 300 ) {
             ++g.iOkCount;  // §10.1.1.4.1.1 3) — 멤버 200 누계
+            g.setAnswered.insert( strMemberId );
         } else {
             const int iCode = _gateFinalCode( iSipStatus );
             if ( _gateBetterFinal( iCode, g.iBestFinal ) ) g.iBestFinal = iCode;
@@ -364,8 +383,11 @@ void CGroupCallService::AckGateEvaluate( const std::string &strGroupId ) {
         CLog::Print( LOG_INFO, "AckGate: group=%s initiator=%s — 수락 (ok=%d min=%d%s)", strGroupId.c_str(),
                      clsTaken.strInitiator.c_str(), clsTaken.iOkCount, clsTaken.iMinToStart,
                      strWarning.empty() ? "" : " Warning 111" );
-        if ( !clsTaken.fnAnswer || clsTaken.fnAnswer( strWarning ) < 0 )
+        if ( !clsTaken.fnAnswer || clsTaken.fnAnswer( _joinWarnings( strWarning, clsTaken.vecWarnings ), false ) < 0 )
             AbortAckGate( strGroupId, clsTaken, SIP_INTERNAL_SERVER_ERROR, "", "accept_failed" );
+        else if ( !strWarning
+                       .empty() )  // 111 — 필수 멤버 없이 진행했다(§6.3.3.3): 자격 있는 개시자에게 미응답 멤버 INFO
+            QueueNonAckInfo( strGroupId, clsTaken );
     } else if ( eAct == ACT_FINAL ) {
         AbortAckGate( strGroupId, clsTaken, iCode, strWarning, pszCause );
     }
@@ -388,6 +410,60 @@ void CGroupCallService::CheckAckGates() {
         }
     }
     for ( const auto &strGroup : vecExpired ) AckGateEvaluate( strGroup );
+    SendDueNonAckInfo();
+}
+
+void CGroupCallService::QueueNonAckInfo( const std::string &strGroupId, const AckGate &clsGate ) {
+    PendingNonAckInfo clsInfo;
+    for ( const auto &strMember : clsGate.setInvited )
+        if ( !clsGate.setAnswered.count( strMember ) ) clsInfo.vecNonAck.push_back( strMember );
+    if ( clsInfo.vecNonAck.empty() ) return;
+    // §6.3.3.3 2) — 개시자 user profile 의 <allow-to-receive-non-acknowledged-users-information> 가 true 일 때만
+    CspUserProfile clsProf;
+    if ( gclsDbManager.SelectUserProfile( clsGate.strInitiator, clsProf ) <= 0 || !clsProf.m_bAllowNonAckUsersInfo )
+        return;
+    clsInfo.strCallId = clsGate.strCallId;
+    clsInfo.strGroupId = strGroupId;
+    clsInfo.tDue = time( NULL ) + 1;  // ACK 뒤에 — "Upon receiving a SIP ACK to the above SIP 200 (OK)"
+    std::unique_lock<std::recursive_mutex> lock( m_mutex );
+    m_vecNonAckInfo.push_back( clsInfo );
+}
+
+void CGroupCallService::SendDueNonAckInfo() {
+    std::vector<PendingNonAckInfo> vecDue;
+    {
+        std::unique_lock<std::recursive_mutex> lock( m_mutex );
+        const time_t tNow = time( NULL );
+        for ( auto it = m_vecNonAckInfo.begin(); it != m_vecNonAckInfo.end(); ) {
+            if ( it->tDue > tNow ) {
+                ++it;
+                continue;
+            }
+            // 개시자 leg 이 그 사이 끝났으면 버린다
+            if ( m_mapCallSession.count( it->strCallId ) ) vecDue.push_back( *it );
+            it = m_vecNonAckInfo.erase( it );
+        }
+    }
+    for ( const auto &clsInfo : vecDue ) {
+        // TS 24.379 §6.3.3.3 3) — mcptt-info(Annex F.1) 의 <non-acknowledged-user> = 200 을 보내지 않은 초대 멤버의
+        // MCPTT ID.
+        //   이 요소는 mcptt-Params 의 <anyExt> 안에 둔다(F.1 스키마 — 전역 요소).
+        std::ostringstream oss;
+        oss << "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n"
+            << "<mcpttinfo xmlns=\"urn:3gpp:ns:mcpttInfo:1.0\""
+            << " xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">\r\n"
+            << "  <mcptt-Params>\r\n"
+            << McpttInfoUri( "mcptt-calling-group-id", "tel:" + clsInfo.strGroupId ) << "    <anyExt>\r\n";
+        for ( const auto &strMember : clsInfo.vecNonAck )
+            oss << "  " << McpttInfoUri( "non-acknowledged-user", "tel:" + strMember );
+        oss << "    </anyExt>\r\n"
+            << "  </mcptt-Params>\r\n"
+            << "</mcpttinfo>\r\n";
+        const bool bSent = gclsUserAgent.SendInfoWithBody( clsInfo.strCallId.c_str(), "g.3gpp.mcptt-info",
+                                                           "application", "vnd.3gpp.mcptt-info+xml", oss.str() );
+        CLog::Print( LOG_INFO, "AckGate: group=%s — 미응답 멤버 INFO %zu명 %s (§6.3.3.3)", clsInfo.strGroupId.c_str(),
+                     clsInfo.vecNonAck.size(), bSent ? "전송" : "실패(다이얼로그 없음)" );
+    }
 }
 
 void CGroupCallService::AbortAckGate( const std::string &strGroupId, const AckGate &clsGate, int iSipStatus,
@@ -446,6 +522,58 @@ bool CGroupCallService::OnAckGateRinging( const std::string &strCallId, int iSip
     }
     if ( !strInitiatorCallId.empty() ) gclsUserAgent.RingCall( strInitiatorCallId.c_str(), SIP_RINGING, NULL );
     return true;
+}
+
+void CGroupCallService::OnMemberInviteResponse( const std::string &strCallId, CSipMessage *pclsResponse ) {
+    if ( !pclsResponse ) return;
+    const int iStatus = pclsResponse->m_iStatusCode;
+    bool bMember = false, bPrack = false, bAnswer = false;
+    std::string strGroupId;
+    AckGate clsTaken;
+    {
+        std::unique_lock<std::recursive_mutex> lock( m_mutex );
+        auto itS = m_mapCallSession.find( strCallId );
+        if ( itS == m_mapCallSession.end() || itS->second.bEstablished || itS->second.bInitiator ) return;
+        bMember = true;
+        strGroupId = itS->second.strGroupId;
+        // RFC 3262 §4 — 신뢰성 임시 응답(Require: 100rel + RSeq)은 UAC 가 PRACK 으로 받는다
+        if ( iStatus > SIP_TRYING && iStatus < SIP_OK ) {
+            CSipHeader *pclsRequire = pclsResponse->GetHeader( "Require" );
+            bPrack = pclsRequire && pclsRequire->m_strValue.find( "100rel" ) != std::string::npos &&
+                     pclsResponse->GetHeader( "RSeq" ) != NULL;
+        }
+        auto itG = m_mapAckGate.find( strGroupId );
+        if ( itG != m_mapAckGate.end() ) {
+            AckGate &g = itG->second;
+            // §6.3.3.2.3.2 7) — 멤버 응답의 Warning 을 개시자 200 OK 에 옮긴다
+            for ( auto &h : pclsResponse->m_clsHeaderList ) {
+                if ( strcasecmp( h.m_strName.c_str(), "Warning" ) != 0 || h.m_strValue.empty() ) continue;
+                if ( std::find( g.vecWarnings.begin(), g.vecWarnings.end(), h.m_strValue ) == g.vecWarnings.end() )
+                    g.vecWarnings.push_back( h.m_strValue );
+            }
+            // §10.1.1.4.2 · §11.1.1.4.2 — 183 + P-Answer-State: Unconfirmed, TNG1 이 돌지 않음(없었거나 필수 멤버 전원
+            // 응답으로
+            //   멈춤), 미디어 버퍼링 지원, 개시자 최종 응답 전 → 개시자에게 200 OK(P-Answer-State: Unconfirmed)
+            if ( iStatus == SIP_SESSION_PROGRESS && !g.bTng1 && !g.bTng1Expired && !g.bRequiredMissed &&
+                 gclsCmpClient.SupportsMediaBuffer() ) {
+                CSipHeader *pclsState = pclsResponse->GetHeader( "P-Answer-State" );
+                if ( pclsState && strncasecmp( pclsState->m_strValue.c_str(), "Unconfirmed", 11 ) == 0 ) {
+                    bAnswer = true;
+                    clsTaken = g;
+                    m_mapAckGate.erase( itG );
+                }
+            }
+        }
+    }
+    if ( !bMember ) return;
+    if ( bPrack ) gclsUserAgent.SendPrack( strCallId.c_str(), NULL );
+    if ( bAnswer ) {
+        CLog::Print( LOG_INFO,
+                     "AckGate: group=%s initiator=%s — 멤버 183 Unconfirmed → 200 OK (P-Answer-State: Unconfirmed)",
+                     strGroupId.c_str(), clsTaken.strInitiator.c_str() );
+        if ( !clsTaken.fnAnswer || clsTaken.fnAnswer( _joinWarnings( "", clsTaken.vecWarnings ), true ) < 0 )
+            AbortAckGate( strGroupId, clsTaken, SIP_INTERNAL_SERVER_ERROR, "", "accept_failed" );
+    }
 }
 
 void CGroupCallService::OnAckGateLegEnd( const std::string &strCallId, int iSipStatus ) {
@@ -743,6 +871,42 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
             return true;  // 403 응답 완료 — 호출측(dispatcher)이 중복 응답하지 않게 한다
         }
     }
+    // affiliation 검사 (TS 24.379 §10.1.1.4.2 14)a)·15)a) 개시·합류, §10.1.1.4.5.1 8) 재합류, §10.1.2.4.1.1 6)·13) chat
+    // —
+    //   §6.3.6). affiliation 을 쓰는 그룹(require_affiliation — fan-out 이 affiliated 멤버만 초대하는 그룹)에서만
+    //   판정한다: 그 밖의 그룹은 멤버 전원을 초대하므로 멤버십이 곧 affiliation 이다. DB 단절이면 fan-out 과 같이
+    //   건너뛴다. 청취 leg(비멤버 관제사 — 2단 인가가 따로)·사설 호는 대상이 아니다. · 긴급·임박 위험(인가된 요청,
+    //   위에서 판정) 또는 chat = 암묵적 affiliation(§9.2.2.3.7) — 자격(§9.2.2.3.6·9.2.2.3.8)은
+    //     그룹 존재 + 멤버십이라 여기까지 온 멤버는 자격이 있다.
+    //   · 그 밖(편성 그룹 호의 일반 개시·합류·재합류) = 403 + Warning "120 user is not affiliated to this group".
+    if ( !bListen && clsGroup._requireAffiliation && clsGroup._groupType != "private" && gclsDbManager.IsConnected() &&
+         !gclsDbManager.IsAffiliated( pszGroupId, pszCallerInfo ) ) {
+        if ( iCond >= 1 || clsGroup._groupType == "chat" ) {
+            CUserInfo clsAffUser;
+            const std::string strClientId =
+                gclsUserMap.Select( pszCallerInfo, clsAffUser ) ? clsAffUser.m_strContactUri : std::string();
+            if ( gclsDbManager.InsertAffiliation( pszGroupId, pszCallerInfo, strClientId, kImplicitAffiliationSec ) ) {
+                EmitAffiliationChanged( pszGroupId, "affiliate", pszCallerInfo );
+                SendAffiliationNotify( pszCallerInfo );  // §9.2.2.3.7 5) → §9.2.2.3.5
+                CLog::Print( LOG_INFO, "ProcessGroupCall: Group(%s) Caller(%s) implicit affiliation (%s)", pszGroupId,
+                             pszCallerInfo, iCond >= 1 ? "emergency/imminent peril" : "chat" );
+            } else {
+                CLog::Print( LOG_ERROR, "ProcessGroupCall: Group(%s) Caller(%s) implicit affiliation 미기록 — 계속",
+                             pszGroupId, pszCallerInfo );
+            }
+        } else {
+            CLog::Print( LOG_INFO, "ProcessGroupCall: Group(%s) Caller(%s) not affiliated → 403 (120)", pszGroupId,
+                         pszCallerInfo );
+            std::vector<std::pair<std::string, std::string>> vecHdr = {
+                { "Warning", McpttWarning( 120, "user is not affiliated to this group",
+                                           gclsServiceMap.GetDomainByKind( "ptt" ) ) } };
+            gclsUserAgent.StopCall( pszCallId, SIP_FORBIDDEN, NULL, vecHdr );
+            if ( gclsCallDir.IsEnabled() )
+                gclsCallDir.PttAttempt( pszGroupId, std::to_string( clsGroup._dbId ), pszCallerInfo, "failed", "denied",
+                                        "not_affiliated", SIP_FORBIDDEN );
+            return true;
+        }
+    }
     int iPrevCond = 0;
     bool bActiveSession = false;
     bool bNewSession = false;
@@ -984,7 +1148,7 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
         CSipCallRtp clsOfferCopy;
         if ( pclsRtp ) clsOfferCopy = *pclsRtp;
         const bool bClaimedAtAnswer = bClaimedSession;
-        auto fnAnswer = [=]( const std::string &strWarning ) mutable -> int {
+        auto fnAnswer = [=]( const std::string &strWarning, bool bUnconfirmed ) mutable -> int {
             const char *pszGroupId = strAnsGroup.c_str();
             const char *pszCallerInfo = strAnsCaller.c_str();
             const char *pszCallId = strAnsCallId.c_str();
@@ -998,6 +1162,10 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
                     // 확인 통화 설정의 경고 (§6.3.3.3 — 111 필수 멤버 없이 진행) — §6.3.3.2.3.2 7) 받은 Warning 도
                     // 여기로
                     if ( !strWarning.empty() ) pclsOk->AddHeader( "Warning", strWarning.c_str() );
+                    // 멤버 확인 전 수락 — 멤버 쪽 참여 기능이 자동 응답(automatic commencement)으로 대신 받았고
+                    // 미디어는
+                    //   CMP 가 첫 수신자까지 버퍼링한다(TS 24.379 §10.1.1.4.2 · §6.3.2.2.5.2 · RFC 4964).
+                    if ( bUnconfirmed ) pclsOk->AddHeader( "P-Answer-State", "Unconfirmed" );
                     // §6.3.3.2.3.2 4) P-Asserted-Identity = 제어 기능 PSI(그룹 URI — 멤버 leg INVITE 의 PAI 와 같다),
                     //   8) Supported: tdialog (RFC 4538)
                     const std::string strPsi =
@@ -1242,13 +1410,21 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
                 if ( pUser->_onNetworkRequired ) setGateRequired.insert( pUser->_id );  // 필수 = affiliated·초대 대상
             }
         }
-        const int iGateMin = bPrivateCall ? 1 : std::max( 0, clsGroup._minNumberToStart );
+        int iGateMin = bPrivateCall ? 1 : std::max( 0, clsGroup._minNumberToStart );
+        // 멤버 확인 전 수락(최소 0) = 멤버 쪽 참여 기능의 자동 응답(183 Unconfirmed, §6.3.2.2.5.2)을 받아 미디어
+        // 버퍼링으로
+        //   개시자에게 200 OK(P-Answer-State: Unconfirmed)를 주는 것이다(§10.1.1.4.2). CMP 가 미디어 버퍼링을 하지
+        //   않으면 (resource.media_buffer 미광고) 첫 멤버의 200 을 기다린다 — 버퍼 없이 먼저 수락하면 첫 발언이
+        //   유실된다.
+        const bool bMediaBuffer = gclsCmpClient.SupportsMediaBuffer();
+        if ( !bMediaBuffer && iGateMin == 0 && !vecGateInvite.empty() ) iGateMin = 1;
         if ( bNewSession && !bListen && clsGroup._groupType != "chat" &&
              ( !setGateRequired.empty() || iGateMin > 0 ) ) {
             AckGate clsGate;
             clsGate.strCallId = pszCallId;
             clsGate.strInitiator = pszCallerInfo;
             clsGate.setPending.insert( vecGateInvite.begin(), vecGateInvite.end() );
+            clsGate.setInvited = clsGate.setPending;
             clsGate.setRequiredPending = setGateRequired;
             clsGate.iMinToStart = iGateMin;
             clsGate.bProceed = clsGroup._ackAction == "proceed";
@@ -1293,7 +1469,8 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
             return true;
         }
 
-        const int iAnswered = fnAnswer( "" );
+        // 새 세션 개시인데 게이트가 없다 = 초대할 멤버가 없거나 최소 0 + 미디어 버퍼링 — 후자는 멤버 확인 전 수락이다
+        const int iAnswered = fnAnswer( "", !vecGateInvite.empty() );
         if ( iAnswered < 0 ) return false;
         bClaimedSession = false;  // 개시자 leg 확립으로 선점을 확정했다(fnAnswer)
         if ( iAnswered > 0 ) return true;

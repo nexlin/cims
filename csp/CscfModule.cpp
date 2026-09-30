@@ -67,8 +67,7 @@ static std::mutex s_etagMutex;
 //   **사용자 단위가 아니라 그룹 단위 요약 1건**이다: 등록/해제가 몰리면 사용자마다 쏘는 순간
 //   이벤트가 그 수만큼 불어나는데, 운용이 실제로 묻는 것은 "그 그룹에 지금 몇 명 붙어 있나" 다.
 //   count 는 변경이 **반영된 뒤** 다시 센 값이라 그 시점의 사실을 그대로 담는다.
-static void _EmitAffiliationChanged( const std::string &strGroupId, const char *pszAction,
-                                     const std::string &strUserId ) {
+void EmitAffiliationChanged( const std::string &strGroupId, const char *pszAction, const std::string &strUserId ) {
     if ( !gclsFmReporter.IsEnabled() || strGroupId.empty() ) return;
     std::vector<std::string> vecMembers;
     gclsDbManager.SelectAffiliatedMembers( strGroupId, vecMembers );
@@ -936,7 +935,7 @@ bool CCscfModule::RecvRequestRegister( int iThreadId, CSipMessage *pclsMessage )
             gclsDbManager.SelectAffiliatedGroupsByUser( strUserId, vecAffGroups );
             gclsDbManager.RemoveAffiliationsByUser( strUserId );
             for ( const std::string &strAffGroup : vecAffGroups ) {
-                _EmitAffiliationChanged( strAffGroup, "de-affiliate", strUserId );
+                EmitAffiliationChanged( strAffGroup, "de-affiliate", strUserId );
             }
         }
         SendResponse( pclsMessage, SIP_OK );
@@ -1286,7 +1285,7 @@ bool CCscfModule::RecvRequestSubscribe( int iThreadId, CSipMessage *pclsMessage 
         // conference 구독 해지는 제휴와 무관하다 — 아래 참조.
         if ( bAffiliation && strEventType == "affiliation" && gclsDbManager.IsConnected() ) {
             gclsDbManager.RemoveAffiliation( strReqUriUser, strFromId, strContactUri );
-            _EmitAffiliationChanged( strReqUriUser, "de-affiliate", strFromId );
+            EmitAffiliationChanged( strReqUriUser, "de-affiliate", strFromId );
             CLog::Print( LOG_INFO, "[Affiliation] de-affiliate user=%s group=%s", strFromId.c_str(),
                          strReqUriUser.c_str() );
         }
@@ -1299,7 +1298,7 @@ bool CCscfModule::RecvRequestSubscribe( int iThreadId, CSipMessage *pclsMessage 
     //   제휴까지 지워 fan-out 이 조용히 끊긴다.
     if ( bAffiliation && strEventType == "affiliation" && gclsDbManager.IsConnected() ) {
         if ( gclsDbManager.InsertAffiliation( strReqUriUser, strFromId, strContactUri, iExpires ) ) {
-            _EmitAffiliationChanged( strReqUriUser, "affiliate", strFromId );
+            EmitAffiliationChanged( strReqUriUser, "affiliate", strFromId );
             CLog::Print( LOG_INFO, "[Affiliation] affiliate user=%s group=%s expires=%d", strFromId.c_str(),
                          strReqUriUser.c_str(), iExpires );
         } else {
@@ -1631,7 +1630,7 @@ bool CCscfModule::RecvRequestPublish( int iThreadId, CSipMessage *pclsMessage ) 
     if ( gclsDbManager.IsConnected() ) {
         if ( bDeaffiliate ) {
             gclsDbManager.RemoveAffiliation( strReqUriUser, strFromId, strContactUri );
-            _EmitAffiliationChanged( strReqUriUser, "de-affiliate", strFromId );
+            EmitAffiliationChanged( strReqUriUser, "de-affiliate", strFromId );
             CLog::Print( LOG_INFO, "[Affiliation/PUBLISH] de-affiliate user=%s group=%s", strFromId.c_str(),
                          strReqUriUser.c_str() );
         } else {
@@ -1640,7 +1639,7 @@ bool CCscfModule::RecvRequestPublish( int iThreadId, CSipMessage *pclsMessage ) 
             //   DB 에 아무것도 안 쓰였는데도 로그만 "affiliate" 로 보이는 침묵 실패가 가능했다
             //   (그룹 미발견 시 INSERT..SELECT 는 에러 없이 0행).
             if ( gclsDbManager.InsertAffiliation( strReqUriUser, strFromId, strContactUri, iAffExpires ) ) {
-                _EmitAffiliationChanged( strReqUriUser, "affiliate", strFromId );
+                EmitAffiliationChanged( strReqUriUser, "affiliate", strFromId );
                 CLog::Print( LOG_INFO, "[Affiliation/PUBLISH] affiliate user=%s group=%s expires=%d", strFromId.c_str(),
                              strReqUriUser.c_str(), iAffExpires );
             } else {
@@ -1717,7 +1716,7 @@ bool CCscfModule::RecvPublishAffiliationPidf( CSipMessage *pclsMessage, const st
     if ( iExpires == 0 ) {
         if ( gclsDbManager.IsConnected() ) {
             gclsDbManager.RemoveAffiliationsByUser( strFromId );
-            _EmitAffiliationChanged( "", "de-affiliate", strFromId );
+            EmitAffiliationChanged( "", "de-affiliate", strFromId );
             SendAffiliationNotify( strFromId );
         }
         CLog::Print( LOG_INFO, "[Affiliation/PUBLISH:pidf] de-affiliate ALL user=%s", strFromId.c_str() );
@@ -1770,7 +1769,7 @@ bool CCscfModule::RecvPublishAffiliationPidf( CSipMessage *pclsMessage, const st
             const bool bWanted = ( std::find( vecWant.begin(), vecWant.end(), strGroup ) != vecWant.end() );
             if ( bWanted ) {
                 if ( gclsDbManager.InsertAffiliation( strGroup, strFromId, strContactUri, iExpires ) ) {
-                    _EmitAffiliationChanged( strGroup, "affiliate", strFromId );
+                    EmitAffiliationChanged( strGroup, "affiliate", strFromId );
                     iAff++;
                 } else {
                     CLog::Print( LOG_ERROR, "[Affiliation/PUBLISH:pidf] affiliate 미기록 user=%s group=%s",
@@ -1778,7 +1777,7 @@ bool CCscfModule::RecvPublishAffiliationPidf( CSipMessage *pclsMessage, const st
                 }
             } else if ( gclsDbManager.IsAffiliated( strGroup, strFromId ) ) {
                 gclsDbManager.RemoveAffiliation( strGroup, strFromId, strContactUri );
-                _EmitAffiliationChanged( strGroup, "de-affiliate", strFromId );
+                EmitAffiliationChanged( strGroup, "de-affiliate", strFromId );
                 iDeaff++;
             }
         }

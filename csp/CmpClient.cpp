@@ -561,6 +561,9 @@ bool CCmpClient::_ProbeAlive( const CmpEndpoint &ep, int &iFreePorts ) {
         m_bTapSupported.store( res.Get( "tap" ).type == SimpleJson::JSON_OBJECT );
         // 안내 재생기 지원 광고 — resource.ann 키 존재 (announcements.md §4.1). 없으면 안내 없이 원코드.
         m_bAnnSupported.store( res.Get( "ann" ).type == SimpleJson::JSON_OBJECT );
+        // PTT 미디어 버퍼링 광고 — resource.media_buffer 키 존재 (cmp.md §3.5 «미디어 버퍼링»). 없으면 개시자 응답은
+        // 멤버 200 뒤.
+        m_bMediaBufferSupported.store( res.Get( "media_buffer" ).type == SimpleJson::JSON_OBJECT );
     }
     return true;
 }

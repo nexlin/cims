@@ -316,3 +316,22 @@ TEST(McpttXml, AlertBuildAndParse) {
     EXPECT_EQ(mcptt::indicator("<a><x:imminentperil-ind>false</x:imminentperil-ind></a>", "imminentperil-ind"), -1);
     EXPECT_EQ(mcptt::indicator("<a/>", "emergency-ind"), 0);
 }
+
+// TS 24.379 §6.3.3.3 — INFO g.3gpp.mcptt-info 의 미응답 멤버(<anyExt> 안, F.1 contentType · 값 직접 기재 · 접두사 · 자기 닫힘)
+TEST(McpttXml, NonAcknowledgedUsers) {
+    const std::string body =
+        "<mcpttinfo xmlns=\"urn:3gpp:ns:mcpttInfo:1.0\"><mcptt-Params>"
+        "<mcptt-calling-group-id type=\"Normal\"><mcpttURI>tel:g005</mcpttURI></mcptt-calling-group-id><anyExt>"
+        "<non-acknowledged-user type=\"Normal\"><mcpttURI>tel:+82500000014</mcpttURI></non-acknowledged-user>"
+        "<non-acknowledged-user type=\"Normal\"><mcpttURI>sip:+82500000015@ptt.example</mcpttURI></non-acknowledged-user>"
+        "<non-acknowledged-user/>"
+        "<non-acknowledged-user>tel:+82500000016</non-acknowledged-user>"
+        "</anyExt></mcptt-Params></mcpttinfo>";
+    std::vector<std::string> u = mcptt::nonAcknowledgedUsers(body);
+    ASSERT_EQ(u.size(), 3u);
+    EXPECT_EQ(u[0], "+82500000014");
+    EXPECT_EQ(u[1], "+82500000015");
+    EXPECT_EQ(u[2], "+82500000016");
+    EXPECT_TRUE(mcptt::nonAcknowledgedUsers("<mcpttinfo><mcptt-Params/></mcpttinfo>").empty());
+    EXPECT_EQ(mcptt::nonAcknowledgedUsers("<m:non-acknowledged-user type=\"Normal\"><m:mcpttURI>tel:9</m:mcpttURI></m:non-acknowledged-user>").size(), 1u);
+}

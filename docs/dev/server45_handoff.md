@@ -197,8 +197,28 @@ P3(ptt-client SDK 전환) 실측에서 더 드러난 것 — .48 반영·배포(
   - **.45 몫** — ① **CSC 를 0.2.135 이상으로 올린 뒤** 관제 앱으로 그룹을 저장해야 한다: 옛 SDK·앱은 모든 멤버에 `<on-network-required/>` 를 실어 보내고 새 CSC 는
     그 표시를 읽는다 → 저장한 그룹의 멤버 전원이 필수가 된다. 새 SDK(C++·C API·.NET·Kotlin `required`)와 관제 앱 두 벌(행 모델이 `required` 보존)은 읽은 값만
     되돌린다 — Windows·Android 재빌드가 선행이다. ② CSP 0.2.173 과 CSC 0.2.135 를 같은 창에(CSP 는 새 열을 SELECT 한다 — 마이그레이션은 적용됨).
-  - 남은 편차(§C4c·§C4e) — 멤버 응답의 Warning 을 개시자 200 에 옮기지 않음 · INFO `<non-acknowledged-user>`·MESSAGE 안내(선택) 없음 · 183 Unconfirmed/media
-    buffering 경로 없음 · 개시·합류·재합류 INVITE 의 affiliation 검사(403 Warning 120) 없음.
+- **남은 편차 보완 2 — 반영(csp 0.2.174 · cmp 0.2.104 · csc 0.2.136 · oam 0.2.180, DB `sql/migrate_ptt_non_ack_users_info.sql` 공유 DB 적용 완료)** —
+  [mcptt_standard_conformance.md](../design/features/mcptt_standard_conformance.md) C4b·C4c·C4f·C4g.
+  - **affiliation 검사**(§10.1.1.4.2 14)a)·15)a)·§10.1.1.4.5.1 8)) — `require_affiliation` 그룹에 affiliate 하지 않은 개시·합류·재합류 = 403
+    `"120 user is not affiliated to this group"`. 인가된 긴급·임박·chat = 암묵적 affiliation(§9.2.2.3.7 — 기록·NOTIFY·감사). 실측: 013 무 affiliation → 403
+    120 · `--emergency` → 암묵 affiliation 뒤 200 · de-register 회수.
+  - **Warning 전달**(§6.3.3.2.3.2 7)) — 게이트 동안 멤버 응답의 Warning 을 개시자 200 에(111 뒤, 쉼표 연결).
+  - **멤버 확인 전 수락 + 미디어 버퍼링**(§10.1.1.4.2·§11.1.1.4.2) — CMP `PttMediaBufferMs`(기본 5000, HEARTBEAT `resource.media_buffer`)가 첫 수신자
+    합류 전 화자 음성을 담았다가 원래 간격으로 재생한다. 버퍼링이 있으면 즉시 수락 200 에 `P-Answer-State: Unconfirmed`, 없으면 첫 멤버 200 뒤 수락.
+    멤버 183 Unconfirmed(게이트 중·TNG1 정지)도 수락 계기, 신뢰성 18x 는 PRACK. psip 새 콜백 `EventInviteResponse`(응답 원문). 실측: 멤버 정지 상태
+    `--implicit` 개시 → `buffering` → 합류 시 12패킷(192 ms) 재생.
+  - **미응답 멤버 INFO**(§6.3.3.3) — 111 로 진행했고 개시자 프로파일 `allow_non_ack_users_info`(TS 24.484 `<allow-to-receive-non-acknowledged-users-information>`,
+    콘솔 가입자 PTT 회선 «그룹 통화»·관리 API·관제 앱 디렉터리 `allowNonAckUsersInfo`)면 ACK 뒤 INFO `Info-Package: g.3gpp.mcptt-info` +
+    `<anyExt><non-acknowledged-user>`. psip `SendInfoWithBody`. 실측(g005 014 필수·proceed 임시, 원복): 200+111 → 1 s 뒤 INFO `tel:+82500000014`.
+  - **SDK** — INFO g.3gpp.mcptt-info 200(종전 pjsua 500)·`CallInfo.nonAcknowledgedUsers`/`onNonAcknowledgedUsers`·`CallInfo.answerState`, 모르는 패키지 469.
+  - **.45 몫** — ① SDK(C++ 코어) 재빌드면 INFO 가 200 이 된다 — 옛 SDK 는 500 을 답하지만 호에는 영향이 없다. C API·.NET·Kotlin 노출(`onNonAcknowledgedUsers`·
+    `answerState`)과 앱 표시는 Windows·Android 몫. ② CMP 0.2.104 이상이면 개시 200 이 멤버 확인 전에 나가고 `P-Answer-State: Unconfirmed` 가 붙는다 —
+    CMP 를 `PttMediaBufferMs=0` 으로 두면 첫 멤버 200 뒤 수락(홀로 개시한 호는 480). ③ `require_affiliation` 그룹은 affiliate 하지 않은 단말의 일반
+    개시·합류가 403 120 이 된다 — 단말 앱이 그룹 선택 시 affiliate 하는지 확인. ④ CSP 는 새 컬럼을 기동 때 확인한다(마이그레이션 뒤 CSP 재기동).
+  - 남은 편차 — Supported `norefersub`/`explicitsub`/`nosub` 미광고(그룹 세션 REFER 미지원) · 진행 MESSAGE 안내(선택) · 개시 전 affiliation 인원 검사
+    (`<on-network-minimum-number-of-affiliated-members>` 등 그룹 문서 요소 없음) · 멤버별 Answer-Mode(전원 자동 응답으로 봄).
+  - 계측기 회귀(tb48): PTT 13종·MCData 4종·VoLTE 7종·TRUNK early media pass. `VOLTE-FA-PARALLEL` 은 대표번호 `70200` 이 다이얼 플랜(volte) 번역 불가
+    484 — 시나리오·설정 과제(이번 변경 무관). `PTT-GROUP-LISTEN-CONF-DENIED` 는 연속 실행 중 1회 합류 집계 시한 초과, 단독 재실행 pass.
 - **cimsue-cli 관찰** — `--from-profile ptt` 로 띄우면 `--mcptt-psi` 가 먹지 않는다(경보 R-URI = 그룹, 전환기로 200). 명시 계정(`--server …`)으로는 PSI.
 
 - 참고(관찰): 두 단말이 같은 사내 NAT 뒤에서 영상 통화할 때 CMP 가 한 peer 자리의 RTCP 목적지를 두 포트 사이에서 몇 초마다 다시 latch 하고, 다른 peer 의

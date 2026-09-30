@@ -11,6 +11,7 @@
 #include <functional>
 #include <atomic>
 #include <memory>
+#include <deque>
 #include "pbase.h"
 #include "PFloorCrypto.h"
 #include "PMediaCrypto.h"
@@ -357,6 +358,15 @@ public:
     //   발언자 집합이 바뀌었으면 true.
     bool tickFloorTimers();
 
+    // 미디어 버퍼링 (TS 24.379 §10.1.1.4.2·§11.1.1.4.2 "supports media buffering", TS 24.380 §6.3 — cmp.md §3.5 «미디어 버퍼링»).
+    //   세션의 첫 수신자가 합류하기 전 화자의 음성 RTP 를 담았다가, 수신자가 생기면 원래 도착 간격으로 재생한다
+    //   (그 발언 동안 수신 쪽은 버퍼 길이만큼 늦게 듣는다). CSP 는 이 능력을 보고 개시자에게 멤버 확인 전
+    //   200 OK(P-Answer-State: Unconfirmed, RFC 4964)를 준다. maxMs = 담는 최대 길이(넘으면 오래된 것부터 버린다), 0 = 끔.
+    void setMediaBuffer(int maxMs);
+    // 버퍼 재생 — PCmpServer 가 20 ms 마다 부른다(활성 버퍼가 있을 때만 — activeMediaBuffers()).
+    void tickMediaBuffer();
+    static int activeMediaBuffers() { return s_activeMediaBuffers.load(); }
+
 private:
     struct Talker;   // 발언자 레코드 (정의는 아래 Floor State 절)
     /** DTMF(RFC2833/4733) 이벤트 Flow 기록 헬퍼.
@@ -563,6 +573,25 @@ private:
     int  _talkerCapacity = 1;       // 동시 발언 정원 (single=1/dual=2/multi=max_talkers)
     bool _privateCall = false;      // group_type=="private" — TS 24.380 §7 절차
     bool _initialGrantDone = false; // 초기 발언권(mc_granted) 부여 완료 여부 — 1회만
+
+    // 미디어 버퍼 (setMediaBuffer) — 호출자가 _mutex 보유
+    struct BufferedRtp {
+        std::string data;
+        int slot = 0;
+        int64_t arrUsec = 0;
+    };
+    int _mbufMaxMs = 0;
+    bool _mbufEligible = true;          // 세션에 수신자가 한 번도 없었다 — 이때만 버퍼링을 시작한다
+    std::string _mbufSender;            // 버퍼에 담긴 화자
+    std::deque<BufferedRtp> _mbuf;
+    int64_t _mbufFirstArrUsec = 0;      // 재생 기준 — 버퍼 맨 앞 패킷 도착 시각
+    int64_t _mbufReplayStartUsec = 0;   // 재생 시작 시각 (0 = 수신자 대기 중)
+    bool _mbufActive = false;
+    static std::atomic<int> s_activeMediaBuffers;
+    bool _hasAudioReceiver(const std::string& excludeSessionId) const;
+    bool _mbufRelay(const char* buf, int len, const std::string& senderId, int slot);
+    void _mbufDrain(int64_t nowUsec);
+    void _mbufSetActive(bool on);
     unsigned int _slotUsedMask = 0; // 현재 녹취 세그먼트에서 이미 쓴 슬롯 (트랙 화자 혼입 방지)
     int  _streamSlotNext = 0;       // floor off 멤버 스트림 슬롯 배정 커서
 

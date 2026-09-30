@@ -125,6 +125,23 @@ MCPTT 설정 문서 (TS 24.484). ue-init-config 만 **익명 GET**(로그인 전
 | GET  | `/org.3gpp.mcptt.user-profile/users/{user}/user-profile` | Bearer + 본인 + scope `ptt_config_management_service`. TS 24.484 §8.3.2 문서 — `<OnNetwork><MCPTTGroupInfo>` = 소속 그룹 목록(규격 단말의 그룹 소스), `<PrivateCallList>` = 동료 연락처, 긴급 대상·`cp:ruleset` 인가. ETag 내용 파생 |
 | GET  | `/org.3gpp.mcptt.service-config/users/{user}/service-config` | Bearer + 본인 |
 
+user-profile 의 인가 `<cp:ruleset><cp:rule id="mcptt-user-authorisation"><cp:actions>` 값은 `ptt_user_profile`(admin API
+`…/users/{pid}/ptt/{msisdn}/profile`, [admin_api.md §6.8](admin_api.md))이다 — 규격 요소 `allow-emergency-group-call`·
+`allow-activate/cancel-emergency-alert`·`allow-emergency-private-call`·`allow-ambient-listening` 뒤에 `<anyExt>`(TS 24.484 §8.3.2.1
+11)xxxviii), 자식은 그 목록 순):
+
+```xml
+<anyExt>
+  <allow-to-receive-non-acknowledged-users-information>false</allow-to-receive-non-acknowledged-users-information>  <!-- L) allow_non_ack_users_info -->
+  <allow-adhoc-group-call>true</allow-adhoc-group-call>                                                              <!-- R) allow_adhoc_call -->
+</anyExt>
+<cims:allow-adhoc-group-call>true</cims:allow-adhoc-group-call>   <!-- 전환기 별칭 -->
+<cims:allow-create-group>false</cims:allow-create-group>          <!-- CIMS 확장 — GMS 그룹 생성 자격 -->
+```
+
+`allow-to-receive-non-acknowledged-users-information`(표 8.3.2.7-49, 부재 = false) 가 true 면 이 사용자가 개시한 그룹 호에서 확인 통화
+설정이 필수 멤버 없이 진행될 때 controlling MCPTT function 이 응답하지 않은 멤버 목록을 SIP INFO 로 보낸다(TS 24.379 §6.3.3.3).
+
 ue-init-config 의 주소류(IdMS/CMS/GMS/KMS/XCAP 루트)의 base 는 CSC 설정 `McpttServer.PublicUrl`
 이 정본이다(비면 요청 Host 유도 — 올인원 전용). CSP 가 xcap-diff NOTIFY 로 광고하는 `xcap-root`
 도 같은 값이며, CSP 는 이를 내부 API 로 취득한다:

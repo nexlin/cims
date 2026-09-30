@@ -83,6 +83,20 @@ public:
 		m_pclsUa->AcceptCall( pszCallId, &clsLocal );
 	}
 	void EventCallRing( const char *, int, CSipCallRtp * ) override {}
+	// 최초 INVITE 응답 원문 (I 케이스)
+	std::atomic<int> m_iInviteRsp{ 0 };
+	std::string m_strRspWarning, m_strRspAnswerState;
+	int m_iRspStatus = 0;
+	void EventInviteResponse( const char *, CSipMessage * pclsResponse ) override
+	{
+		std::lock_guard<std::mutex> lk( m_clsMutex );
+		m_iRspStatus = pclsResponse->m_iStatusCode;
+		CSipHeader * pW = pclsResponse->GetHeader( "Warning" );
+		CSipHeader * pA = pclsResponse->GetHeader( "P-Answer-State" );
+		m_strRspWarning = pW ? pW->m_strValue : "";
+		m_strRspAnswerState = pA ? pA->m_strValue : "";
+		++m_iInviteRsp;
+	}
 	void EventCallStart( const char *, CSipCallRtp * ) override {}
 	void EventCallEnd( const char *, int ) override {}
 	bool EventGetLegDest( const char *, const char * pszPeerId, const char * pszRemoteTarget, std::string & strIp,
@@ -334,7 +348,8 @@ static int UdpOpen( int & iPort )
 }
 
 // UDP 바인딩에 pszMethod 요청이 오기를 기다린다. 다른 요청(re-INVITE 뒤의 ACK 등)은 건너뛴다. 오면 200 OK 로 응답.
-static bool UdpExpect( int fd, const char * pszMethod, int iTimeoutMs, std::string & strReq )
+//   bReply=false 면 응답하지 않는다(시험이 임시 응답을 직접 보낼 때).
+static bool UdpExpect( int fd, const char * pszMethod, int iTimeoutMs, std::string & strReq, bool bReply = true )
 {
 	long lEnd = NowMs() + iTimeoutMs;
 	char buf[8192];
@@ -353,6 +368,7 @@ static bool UdpExpect( int fd, const char * pszMethod, int iTimeoutMs, std::stri
 		if( strReq.compare( 0, strlen( pszMethod ), pszMethod ) == 0 ) break;
 		if( strReq.compare( 0, 3, "ACK" ) != 0 ) printf( "  (skipping UDP message: %.40s)\n", buf );
 	}
+	if( bReply == false ) return true;
 	sockaddr_in me; socklen_t ml = sizeof(me); getsockname( fd, (sockaddr *)&me, &ml );
 	std::string strRsp = Build200( strReq, ntohs( me.sin_port ), "" );
 	sendto( fd, strRsp.data(), strRsp.size(), 0, (sockaddr *)&from, fl );
@@ -555,6 +571,71 @@ int main( int argc, char * argv[] )
 		CHECK( clsCb.m_strAskedTarget.find( szTarget2 ) == 0, ( "remote target refreshed by re-INVITE: " + clsCb.m_strAskedTarget ).c_str() );
 		CHECK( strReq.find( "BYE sip:ue@127.0.0.1:45999" ) == 0, "BYE Request-URI = refreshed remote target" );
 		ConnClose( c );
+	}
+
+	// ── H. in-dialog INFO — Info Package 본문 (RFC 6086 §4.2.2, TS 24.379 §6.3.3.3) ──
+	printf( "[H] SendInfoWithBody → INFO with Info-Package + Content-Disposition + body on the dialog\n" );
+	{
+		CConn c;
+		CHECK( ConnOpen( c, g_iUaPort, false ), "TCP connection opened" );
+		char szContact[128]; snprintf( szContact, sizeof(szContact), "<sip:ue@%s:%d;transport=tcp>", UA_IP, c.iLocalPort );
+		CHECK( UeInvite( c, "legdest-H@test", szContact, NULL ), "INVITE established" );
+		clsCb.SetDest( UA_IP, c.iLocalPort, E_SIP_TCP );
+		const std::string strBody = "<mcpttinfo><mcptt-Params><anyExt><non-acknowledged-user type=\"Normal\"><mcpttURI>tel:014</mcpttURI>"
+			"</non-acknowledged-user></anyExt></mcptt-Params></mcpttinfo>";
+		CHECK( clsUa.SendInfoWithBody( "legdest-H@test", "g.3gpp.mcptt-info", "application", "vnd.3gpp.mcptt-info+xml", strBody ),
+			"SendInfoWithBody returned true" );
+		bGot = ConnExpect( c, "INFO", 3000, strReq );
+		CHECK( bGot, "INFO arrived" );
+		if( bGot )
+		{
+			CHECK( HeaderOf( "\r\n" + strReq, 0, "Info-Package" ) == "g.3gpp.mcptt-info", "Info-Package: g.3gpp.mcptt-info" );
+			CHECK( HeaderOf( "\r\n" + strReq, 0, "Content-Disposition" ) == "Info-Package", "Content-Disposition: Info-Package" );
+			CHECK( HeaderOf( "\r\n" + strReq, 0, "Content-Type" ) == "application/vnd.3gpp.mcptt-info+xml", "Content-Type" );
+			CHECK( atoi( HeaderOf( "\r\n" + strReq, 0, "Content-Length" ).c_str() ) == (int)strBody.size(), "Content-Length = body" );
+		}
+		CHECK( clsUa.SendInfoWithBody( "no-such-dialog@test", "g.3gpp.mcptt-info", "application", "x", "" ) == false,
+			"no dialog → false" );
+		clsUa.StopCall( "legdest-H@test" );
+		ConnExpect( c, "BYE", 3000, strReq );
+		ConnClose( c );
+	}
+
+	// ── I. 발신 INVITE 의 응답 원문 → EventInviteResponse (Warning·P-Answer-State), 신뢰성 183 은 PRACK 가능 ──
+	printf( "[I] outgoing INVITE: 183 (100rel, P-Answer-State: Unconfirmed, Warning) → EventInviteResponse; SendPrack → PRACK\n" );
+	{
+		int iCallee = 0;
+		int fdCallee = UdpOpen( iCallee );
+		CSipCallRtp clsRtpI; clsRtpI.m_strIp = UA_IP; clsRtpI.m_iPort = 40010; clsRtpI.m_iCodec = 0;
+		CSipCallRoute clsRoute; clsRoute.m_strDestIp = UA_IP; clsRoute.m_iDestPort = iCallee; clsRoute.m_eTransport = E_SIP_UDP;
+		std::string strCallId;
+		CHECK( clsUa.StartCall( "srv", "callee", &clsRtpI, &clsRoute, strCallId ), "StartCall" );
+		bGot = UdpExpect( fdCallee, "INVITE", 3000, strReq, false );
+		CHECK( bGot, "INVITE arrived at callee" );
+		if( bGot )
+		{
+			std::string strMsg = "\r\n" + strReq;
+			char szRsp[2048];
+			int iLen = snprintf( szRsp, sizeof(szRsp),
+				"SIP/2.0 183 Session Progress\r\nVia: %s\r\nFrom: %s\r\nTo: %s;tag=callee-1\r\nCall-ID: %s\r\nCSeq: %s\r\n"
+				"Contact: <sip:callee@%s:%d>\r\nRequire: 100rel\r\nRSeq: 7\r\nP-Answer-State: Unconfirmed\r\n"
+				"Warning: 399 pf.test \"999 test warning\"\r\nContent-Length: 0\r\n\r\n",
+				HeaderOf( strMsg, 0, "Via" ).c_str(), HeaderOf( strMsg, 0, "From" ).c_str(), HeaderOf( strMsg, 0, "To" ).c_str(),
+				HeaderOf( strMsg, 0, "Call-ID" ).c_str(), HeaderOf( strMsg, 0, "CSeq" ).c_str(), UA_IP, iCallee );
+			sockaddr_in sa{}; sa.sin_family = AF_INET; sa.sin_port = htons( g_iUaPort ); inet_pton( AF_INET, UA_IP, &sa.sin_addr );
+			sendto( fdCallee, szRsp, iLen, 0, (sockaddr *)&sa, sizeof(sa) );
+			long lEnd = NowMs() + 2000;
+			while( clsCb.m_iInviteRsp == 0 && NowMs() < lEnd ) usleep( 20 * 1000 );
+			CHECK( clsCb.m_iInviteRsp > 0 && clsCb.m_iRspStatus == 183, "EventInviteResponse(183) delivered" );
+			CHECK( clsCb.m_strRspAnswerState == "Unconfirmed", ( "P-Answer-State visible: " + clsCb.m_strRspAnswerState ).c_str() );
+			CHECK( clsCb.m_strRspWarning == "399 pf.test \"999 test warning\"", ( "Warning visible: " + clsCb.m_strRspWarning ).c_str() );
+			clsUa.SendPrack( strCallId.c_str(), NULL );
+			bGot = UdpExpect( fdCallee, "PRACK", 3000, strReq );
+			CHECK( bGot, "PRACK arrived" );
+			if( bGot ) CHECK( HeaderOf( "\r\n" + strReq, 0, "RAck" ).find( "7 " ) == 0, ( "RAck = RSeq 7: " + HeaderOf( "\r\n" + strReq, 0, "RAck" ) ).c_str() );
+		}
+		clsUa.StopCall( strCallId.c_str() );
+		close( fdCallee );
 	}
 
 	usleep( 200 * 1000 );

@@ -196,6 +196,39 @@ bool CSipUserAgent::SendDtmf(const char *pszCallId, char cDtmf) {
 
 /**
  * @ingroup SipUserAgent
+ * @brief in-dialog INFO 로 Info Package 본문을 전송한다 (RFC 6086).
+ * @param pszCallId SIP Call-ID
+ * @param pszInfoPackage Info-Package 헤더 값 (예: g.3gpp.mcptt-info)
+ * @returns 다이얼로그가 있어 전송했으면 true
+ */
+bool CSipUserAgent::SendInfoWithBody(const char *pszCallId, const char *pszInfoPackage,
+                                     const char *pszContentType, const char *pszContentSubType,
+                                     const std::string &strBody) {
+  RefreshLegDest(pszCallId);  // 서버 발신 in-dialog 요청 — 목적지 재해석 (SipUserAgentLegDest.hpp)
+
+  SIP_DIALOG_MAP::iterator itMap;
+  CSipMessage *pclsRequest = NULL;
+
+  m_clsDialogMutex.acquire();
+  itMap = m_clsDialogMap.find(pszCallId);
+  if (itMap != m_clsDialogMap.end()) {
+    pclsRequest = itMap->second.CreateInfo();
+  }
+  m_clsDialogMutex.release();
+
+  if (pclsRequest == NULL) return false;
+  pclsRequest->AddHeader("Info-Package", pszInfoPackage);
+  // RFC 6086 §4.2.2 — Info Package 본문은 Content-Disposition 'Info-Package' 로 표시한다
+  pclsRequest->AddHeader("Content-Disposition", "Info-Package");
+  pclsRequest->m_clsContentType.Set(pszContentType, pszContentSubType);
+  pclsRequest->m_strBody = strBody;
+  pclsRequest->m_iContentLength = (int)strBody.size();
+  m_clsSipStack.SendSipMessage(pclsRequest);
+  return true;
+}
+
+/**
+ * @ingroup SipUserAgent
  * @brief SIP PRACK 메시지를 전송한다.
  * @param pszCallId SIP Call-ID
  * @param pclsRtp		local RTP 정보 저장 객체

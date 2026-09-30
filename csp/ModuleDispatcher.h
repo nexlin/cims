@@ -86,6 +86,8 @@ public:
     bool EventIncomingRequestAuth( CSipMessage *pclsMessage ) override;
     void EventIncomingCall( const char *pszCallId, const char *pszFrom, const char *pszTo, CSipCallRtp *pclsRtp,
                             CSipMessage *pclsMessage = NULL ) override;
+    /** 최초 INVITE 응답 원문 — PTT 멤버 초대 leg 의 PRACK·Warning 수집·183 Unconfirmed(TS 24.379 §10.1.1.4.2). */
+    void EventInviteResponse( const char *pszCallId, CSipMessage *pclsResponse ) override;
     void EventCallRing( const char *pszCallId, int iSipStatus, CSipCallRtp *pclsRtp ) override;
     void EventCallStart( const char *pszCallId, CSipCallRtp *pclsRtp ) override;
     void EventCallEnd( const char *pszCallId, int iSipStatus ) override;

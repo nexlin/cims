@@ -245,6 +245,12 @@ struct CallInfo {
     bool halfDuplex = false;          // floor 로 마이크를 게이트한다(Granted 에서만 송신)
     bool listenOnly = false;          // a=recvonly 청취 leg (PTT 청취·감청 Join)
     std::string joinedDialog;         // INVITE-Join 으로 합류한 대상 dialog 의 Call-ID
+    /** 개시 200 OK 의 P-Answer-State(RFC 4964) — "Unconfirmed" = 멤버 확인 전 수락(서버가 미디어 버퍼링, TS 24.379 §10.1.1.4.2),
+     *  "Confirmed" 또는 빈 값 = 확인. 사용자에게 알릴 수 있다(§10.1.1.2.1.1 2A)). */
+    std::string answerState;
+    /** 확인 통화 설정이 필수 멤버 없이 진행된 개시 호에서 서버가 알린 미응답 멤버 MCPTT ID(bare) — INFO g.3gpp.mcptt-info
+     *  `<non-acknowledged-user>`(TS 24.379 §6.3.3.3). 알리면 onNonAcknowledgedUsers. */
+    std::vector<std::string> nonAcknowledgedUsers;
 };
 
 // ── floor (TS 24.380 participant) ──

@@ -220,6 +220,11 @@ private:
     int _annNatWaitMs = 500;
     PAnnCatalog _annCatalog;
     std::vector<PAnnTicker*> _annTickers;   // 리액터별 20 ms 클록
+    // PTT 미디어 버퍼링(cmp.md §3.5 «미디어 버퍼링») — 첫 수신자 합류 전 화자 음성을 담는 최대 길이(ms). 0 = 끔(resource.media_buffer 미광고
+    //   → CSP 는 멤버 200 을 기다려 개시자에게 응답한다). 재생 클록 = 20 ms 스레드(활성 버퍼가 있을 때만 그룹을 돈다).
+    int _pttMediaBufferMs = 5000;
+    std::thread _mediaBufferThread;
+    void mediaBufferLoop();
     int countAnnPlayers() const;            // 호출자가 _mutex 보유
     std::string annRootPath() const;        // <config dir>/../<AnnouncementDir>
     std::string annOpCatalogPath() const;   // 배포본 <install>/config/announcements.jsonl, 아니면 <config dir>/announcements.jsonl

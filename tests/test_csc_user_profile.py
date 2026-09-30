@@ -5,12 +5,15 @@
 (소유만 한 그룹 제외, 소유 소속 그룹은 cims:authorized-user), ImplicitAffiliations = 소속 전체, 연락처 = 동료 멤버,
 긴급 요소는 항상 존재(§8.3.2.1 shall) — 미지정은 entry-info 폴백 + ruleset 미인가, ProSe User-Info-ID 영값, 루트 Status,
 선택이지만 필수로 읽는 단말용으로 항상 싣는 것(alias-entry index·xml:lang, ParticipantType — xml:lang 은 Name 과 같은 값),
-common-policy ruleset, escape, ETag 내용 파생, 단말 정규식 호환(첫 MCPTTGroupInitiation = EmergencyCall).
+common-policy ruleset, escape, ETag 내용 파생, 단말 정규식 호환(첫 MCPTTGroupInitiation = EmergencyCall),
+ruleset anyExt 의 미응답 멤버 알림 자격(allow-to-receive-non-acknowledged-users-information, TS 24.379 §6.3.3.3) —
+admin API 프로파일 GET/PUT 의 선택 컬럼 규약(부재 = false·입력 400)과 캐시 반영까지.
 
   python3 -m unittest tests.test_csc_user_profile
 """
 from __future__ import annotations
 
+import asyncio
 import os
 import re
 import sys
@@ -189,6 +192,23 @@ class UserProfileDocTest(unittest.TestCase):
         # 단말 정규식(태그명만) 호환
         self.assertRegex(xml, r"<allow-emergency-group-call>\s*false\s*</allow-emergency-group-call>")
 
+    def test_non_ack_users_info_in_anyext(self):
+        # TS 24.484 §8.3.2.1 11)xxxviii)L) / 표 8.3.2.7-49 — 부재 = false 가 규격 기본값, 프로파일 기본도 false
+        _, root, _ = self._doc()
+        ext = root.find("cp:ruleset/cp:rule/cp:actions/up:anyExt", NS)
+        self.assertEqual(ext.find("up:allow-to-receive-non-acknowledged-users-information", NS).text, "false")
+        self.assertEqual([c.tag.split("}")[1] for c in ext],
+                         ["allow-to-receive-non-acknowledged-users-information", "allow-adhoc-group-call"],
+                         "anyExt 자식 순서 = §8.3.2.1 11)xxxviii) 목록 순(L → R)")
+        m.PTT_PROFILES["+82500000001"] = dict(m.DEFAULT_USER_PROFILE, allow_non_ack_users_info=True)
+        _, root, _ = self._doc()
+        self.assertEqual(root.find("cp:ruleset/cp:rule/cp:actions/up:anyExt/"
+                                   "up:allow-to-receive-non-acknowledged-users-information", NS).text, "true")
+        # 옛 캐시 항목(키 없음)도 false
+        m.PTT_PROFILES["+82500000001"] = {k: v for k, v in m.DEFAULT_USER_PROFILE.items() if k != "allow_non_ack_users_info"}
+        _, root, _ = self._doc()
+        self.assertEqual(root.find(".//up:allow-to-receive-non-acknowledged-users-information", NS).text, "false")
+
     def test_user_profile_config_and_etag(self):
         _, root, etag1 = self._doc()
         m.USER_PROFILE_CONFIG.update({"MaxSimultaneousCallsN6": 3, "MissionCriticalOrganization": "포인티 <PS>"})
@@ -202,6 +222,133 @@ class UserProfileDocTest(unittest.TestCase):
 
     def test_unknown_user(self):
         self.assertEqual(m.get_user_profile_xml("tel:+0"), (None, None))
+
+
+class _ProfCur:
+    """admin 프로파일 GET/PUT 이 내는 SQL 만 흉내 내는 DictCursor — cols = 선택 컬럼 중 DB 에 있는 것."""
+
+    def __init__(self, cols, row=None):
+        self.cols = set(cols)
+        self.row = row
+        self.inserted = None
+        self._rows = []
+
+    def execute(self, sql, params=None):
+        s = " ".join(sql.split())
+        self._rows = []
+        if s.startswith("SELECT 1 FROM ptt_subscriptions WHERE id=%s AND user_id=%s"):
+            self._rows = [{"1": 1}]
+        elif s.startswith("SHOW COLUMNS FROM ptt_user_profile LIKE "):
+            col = s.split("LIKE ")[1].strip("'")
+            self._rows = [{"Field": col}] if col in self.cols else []
+        elif s.startswith("SELECT allow_emergency_call") and "FROM ptt_user_profile WHERE ptt_id=%s" in s:
+            if self.row is not None:
+                r = dict(self.row)
+                for c in ("allow_ambient_listening", "allow_create_group", "allow_non_ack_users_info"):
+                    if f"0 AS {c}" in s:
+                        r[c] = 0                     # 부재 컬럼 = 상수 0 별칭
+                self._rows = [r]
+        elif s.startswith("INSERT INTO ptt_user_profile"):
+            head = s.split("(", 1)[1].split(")", 1)[0]
+            self.inserted = dict(zip([c.strip() for c in head.split(",")], params))
+        else:
+            raise AssertionError(f"unexpected SQL: {s}")
+
+    def fetchone(self):
+        return self._rows[0] if self._rows else None
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+
+class _ProfConn:
+    def __init__(self, cur):
+        self.cur = cur
+
+    def cursor(self):
+        return self.cur
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+
+class AdminProfileNonAckTest(unittest.TestCase):
+    """admin API `/users/{pid}/ptt/{msisdn}/profile` 의 allow_non_ack_users_info — 선택 컬럼 규약
+    (부재 = 응답 false·입력 400 schema_not_migrated) + 캐시 반영 → user-profile anyExt."""
+
+    MSISDN = "+82500000001"
+
+    @classmethod
+    def setUpClass(cls):
+        import handlers.admin as adm
+        cls.adm = adm
+
+    def setUp(self):
+        self._keep = (dict(m.USERS), dict(m.PTT_PROFILES), self.adm._get_db, self.adm.notify_csp)
+        self.adm._OPT_COL_PRESENT.clear()
+        self.adm.notify_csp = lambda *a, **k: None
+        m.USERS[ME] = {"msisdn": self.MSISDN, "name": "홍길동", "password": ""}
+
+    def tearDown(self):
+        users, profs, get_db, notify = self._keep
+        m.USERS.clear(); m.USERS.update(users); m.PTT_PROFILES.clear(); m.PTT_PROFILES.update(profs)
+        self.adm._get_db, self.adm.notify_csp = get_db, notify
+        self.adm._OPT_COL_PRESENT.clear()
+
+    def _with(self, cur):
+        self.adm._get_db = lambda config: _ProfConn(cur)
+
+    def test_put_writes_column_and_profile_doc(self):
+        cur = _ProfCur({"allow_ambient_listening", "allow_create_group", "allow_non_ack_users_info"})
+        self._with(cur)
+        r = asyncio.run(self.adm._put_ptt_profile("7", self.MSISDN, {"allow_non_ack_users_info": True}, {}))
+        self.assertEqual(r.status, 200, r.body)
+        self.assertTrue(r.body["allow_non_ack_users_info"])
+        self.assertEqual(cur.inserted.get("allow_non_ack_users_info"), 1)
+        self.assertEqual(cur.inserted.get("allow_create_group"), 0, "요청에 없는 선택 자격은 0(종전 규약)")
+        xml, _ = m.get_user_profile_xml(ME)
+        root = ET.fromstring(xml.encode())
+        self.assertEqual(root.find("cp:ruleset/cp:rule/cp:actions/up:anyExt/"
+                                   "up:allow-to-receive-non-acknowledged-users-information", NS).text, "true")
+
+    def test_put_absent_column_is_400_with_migration_hint(self):
+        self._with(_ProfCur({"allow_ambient_listening", "allow_create_group"}))
+        r = asyncio.run(self.adm._put_ptt_profile("7", self.MSISDN, {"allow_non_ack_users_info": False}, {}))
+        self.assertEqual(r.status, 400)
+        self.assertEqual(r.body["error"], "schema_not_migrated")
+        self.assertIn("migrate_ptt_non_ack_users_info.sql", r.body["detail"])
+
+    def test_put_absent_column_without_key_is_ok(self):
+        cur = _ProfCur({"allow_ambient_listening", "allow_create_group"})
+        self._with(cur)
+        r = asyncio.run(self.adm._put_ptt_profile("7", self.MSISDN, {"allow_create_group": True}, {}))
+        self.assertEqual(r.status, 200, r.body)
+        self.assertNotIn("allow_non_ack_users_info", cur.inserted, "부재 컬럼은 INSERT 에 싣지 않는다")
+        self.assertFalse(r.body["allow_non_ack_users_info"])
+
+    def test_get_absent_column_reads_false(self):
+        row = {"allow_emergency_call": 1, "allow_emergency_alert": 1, "allow_adhoc_call": 1,
+               "allow_emergency_private_call": 1, "emergency_group_mode": "DedicatedGroup", "emergency_group_id": None,
+               "private_emergency_mode": "LocallyDetermined", "emergency_private_recipient": None,
+               "allow_ambient_listening": 0, "allow_create_group": 1, "allow_non_ack_users_info": 1}
+        self._with(_ProfCur({"allow_ambient_listening", "allow_create_group"}, row=row))
+        r = asyncio.run(self.adm._get_ptt_profile("7", self.MSISDN, {}))
+        self.assertEqual(r.status, 200)
+        self.assertIs(r.body["allow_non_ack_users_info"], False)
+        self.assertIs(r.body["allow_create_group"], True)
+        self.adm._OPT_COL_PRESENT.clear()
+        self._with(_ProfCur({"allow_ambient_listening", "allow_create_group", "allow_non_ack_users_info"}, row=row))
+        r = asyncio.run(self.adm._get_ptt_profile("7", self.MSISDN, {}))
+        self.assertIs(r.body["allow_non_ack_users_info"], True)
+
+    def test_default_profile_has_key(self):
+        self.assertIs(m.DEFAULT_USER_PROFILE["allow_non_ack_users_info"], False)
 
 
 SC = {"sc": "urn:3gpp:ns:mcpttServiceConfig:1.0"}

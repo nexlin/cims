@@ -29,6 +29,8 @@ public:
     virtual void onDialogInfo(const DialogInfo& d) { (void)d; }
     /** MCPTT 세션 조건 변화(긴급·임박, TS 24.379 §10.1.1.2.1.3~6) — info.condition 이 새 값, cause 가 계기. */
     virtual void onMcpttCondition(const CallInfo& info, ConditionCause cause) { (void)info; (void)cause; }
+    /** 개시 호의 미응답 멤버 알림(TS 24.379 §6.3.3.3 — INFO g.3gpp.mcptt-info) — info.nonAcknowledgedUsers. 200 OK 는 코어가 이미 보냈다. */
+    virtual void onNonAcknowledgedUsers(const CallInfo& info) { (void)info; }
     /** 긴급 경보·취소·긴급 통지 수신(TS 24.379 §12.1.1.3). 200 OK 는 코어가 이미 보냈다. */
     virtual void onEmergencyAlert(const EmergencyAlert& alert) { (void)alert; }
     /** MCData SDS 수신(메시지·disposition 통지·FD). */

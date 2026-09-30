@@ -422,6 +422,7 @@ VoLTE 표에는 `rejected`(거절)·`no_answer`(무응답) 두 열이 없어, �
 | `adhoc_not_authorised` | 즉석(ad-hoc) 그룹 개시 인가 없음 | `denied` | 403 |
 | `private_callee_offline` | 사설콜 상대가 미등록·꺼짐 — **상대 사정이라 `no_answer`** (NER 면제) | `no_answer` | 480 |
 | `not_member` | 그룹 멤버가 아님 | `denied` | 403 |
+| `not_affiliated` | affiliation 을 쓰는 그룹(`require_affiliation`)에 affiliate 하지 않은 멤버의 일반 개시·합류 — Warning 120 (TS 24.379 §10.1.1.4.2 14)a)·§10.1.1.4.5.1 8)) | `denied` | 403 |
 | `policy_denied` | 권한·조건 거부 (긴급/임박 개시 미인가 등) | `denied` | 403 |
 | `session_not_started` | 세션 시간창 시작 전 | `denied` | — |
 | `session_expired` | 세션 시간창 지남 | `denied` | — |

@@ -20,6 +20,7 @@
 
 class CSipCallRtp;
 class CSipCallRoute;
+class CSipMessage;
 class CspPttGroup;
 
 /** dialog 초기 full 스냅샷용 PTT 세션 참가 leg 1건 (CspServer 가 DialogNotifyState 로 변환 — dispatch_center.md §5.6a).
@@ -115,6 +116,12 @@ public:
     /** 게이트 중인 초대 leg 의 18x — 사설 호면 첫 180 을 개시자에게 옮긴다(TS 24.379 §11.1.1.4.2). 게이트 leg 이면
      * true. */
     bool OnAckGateRinging( const std::string &strCallId, int iSipStatus );
+    /** 멤버 초대 leg 의 INVITE 응답 원문(100 제외, ModuleDispatcher::EventInviteResponse — Ring/Start/End 보다 먼저).
+     *  · 신뢰성 18x(Require: 100rel)는 PRACK 으로 받는다(RFC 3262 — 제어 기능이 UAC).
+     *  · 게이트 중이면 Warning 을 모아 개시자 200 OK 에 옮긴다(TS 24.379 §6.3.3.2.3.2 7)).
+     *  · 게이트 중 183 + P-Answer-State: Unconfirmed(RFC 4964) 이고 TNG1 이 돌지 않으며 CMP 가 미디어 버퍼링을 하면
+     * 개시자에게 200 OK(P-Answer-State: Unconfirmed)를 준다(§10.1.1.4.2 · 사설 호 §11.1.1.4.2). */
+    void OnMemberInviteResponse( const std::string &strCallId, CSipMessage *pclsResponse );
 
     /** 미디어 노드(CMP) 다운으로 relay 가 소실된 그룹의 활성 멤버 호를 능동 종료(BYE)하고 로컬 상태를
      *  정리한다. dead node 이므로 CmpClient(LeaveGroup/RemoveGroup, blocking)는 호출하지 않는다.
@@ -331,6 +338,9 @@ private:
     };
     /** 개시 선점 유효 시간 — INVITE 트랜잭션 시한(64*T1)을 넘긴 선점은 버려진 것으로 본다. */
     static constexpr time_t kPendingSessionSec = 32;
+    /** 암묵적 affiliation 만료 (TS 24.379 §9.2.2.3.7 4)d)ii) — 로컬 정책). 명시 affiliation PUBLISH 의 기본 만료와
+     * 같다. */
+    static constexpr int kImplicitAffiliationSec = 3600;
     std::map<std::string, GroupSession> m_mapGroupSession;
 
     /** 개시자 응답 게이트 — 새 세션 개시의 200 OK 를 멤버 응답 뒤로 미룬다.
@@ -345,6 +355,8 @@ private:
         std::string strInitiator;                  ///< 개시자
         std::set<std::string> setPending;          ///< 초대했고 최종 응답 전인 멤버
         std::set<std::string> setRequiredPending;  ///< 그 가운데 필수 멤버
+        std::set<std::string> setInvited;          ///< 초대한 멤버 전원
+        std::set<std::string> setAnswered;         ///< 200 을 보낸 멤버
         int iOkCount = 0;                          ///< 멤버 200 누계 (§10.1.1.4.1.1 3))
         int iMinToStart = 0;                       ///< <on-network-minimum-number-to-start>
         bool bTng1 = false;                        ///< TNG1 동작 중
@@ -355,9 +367,25 @@ private:
         int iBestFinal = 0;            ///< 캐시한 최종 거절 코드 (전원 거절 시 개시자에게)
         bool bPrivate = false;         ///< 사설 호 — 착신자의 180 을 개시자에게 옮긴다(§11.1.1.4.2)
         bool bRingSent = false;        ///< 개시자에게 180 을 보냈다
-        std::function<int( const std::string & )> fnAnswer;  ///< 개시자 수락(Warning 값) — 0 계속·1 청취·-1 실패
+        std::vector<std::string>
+            vecWarnings;  ///< 멤버 응답에서 받은 Warning 값 — 개시자 200 OK 에 옮긴다(§6.3.3.2.3.2 7))
+        /** 개시자 수락(Warning 값, P-Answer-State: Unconfirmed 여부) — 0 계속·1 청취·-1 실패 */
+        std::function<int( const std::string &, bool )> fnAnswer;
     };
     std::map<std::string, AckGate> m_mapAckGate;  ///< 그룹 → 게이트 (m_mutex)
+    /** 미응답 멤버 알림(TS 24.379 §6.3.3.3) 대기 — 개시자 200 OK(Warning 111) 뒤 ACK 가 닿을 만큼 두고 INFO 로 보낸다
+     *  (psip 은 ACK 를 올리지 않는다 — 1초 주기 CheckAckGates 가 기한이 지난 것을 보낸다). */
+    struct PendingNonAckInfo {
+        std::string strCallId;  ///< 개시자 leg
+        std::string strGroupId;
+        std::vector<std::string> vecNonAck;  ///< 200 을 보내지 않은 초대 멤버
+        time_t tDue = 0;
+    };
+    std::vector<PendingNonAckInfo> m_vecNonAckInfo;  ///< (m_mutex)
+    /** 개시자가 미응답 멤버 알림을 받을 자격이면(user profile allow-to-receive-non-acknowledged-users-information)
+     * 예약한다. */
+    void QueueNonAckInfo( const std::string &strGroupId, const AckGate &clsGate );
+    void SendDueNonAckInfo();
     /** 멤버 초대 결과(200 또는 최종 거절 코드)를 게이트에 반영하고 판정한다. */
     void AckGateMemberResult( const std::string &strGroupId, const std::string &strMemberId, int iSipStatus );
     /** 게이트 판정 — 응답·중단·대기. m_mutex 밖에서 부른다. */

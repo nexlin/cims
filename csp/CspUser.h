@@ -47,6 +47,9 @@ struct CspUserProfile {
     /** allow-ambient-listening (TS 24.484 ruleset) — 원격 청취 수행 자격 (관제사, dispatch_center.md §5.6).
      *  기본 false — 행 부재·컬럼 미적용 DB 에서는 전원 자격 없음(청취 INVITE 403). */
     bool m_bAllowAmbientListening = false;
+    /** allow-to-receive-non-acknowledged-users-information (TS 24.484 anyExt) — 그룹 호 개시자로서 확인 통화 설정이
+     * 필수 멤버 없이 진행됐을 때 응답하지 않은 멤버 목록 INFO 를 받을 자격 (TS 24.379 §6.3.3.3). 기본 false. */
+    bool m_bAllowNonAckUsersInfo = false;
 };
 
 /**

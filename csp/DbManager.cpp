@@ -162,6 +162,11 @@ void CDbManager::ProbeSchema() {
         CLog::Print( LOG_INFO,
                      "[DB] ptt_user_profile.allow_ambient_listening column absent — migrate_ptt_ambient_listening.sql "
                      "미적용. PTT 그룹콜 청취 자격은 전원 없음" );
+    // 미응답 멤버 알림 자격 (ptt_user_profile.allow_non_ack_users_info — TS 24.379 §6.3.3.3). 미적용이면 전원 자격
+    // 없음.
+    pRes = ExecuteSelect( "SHOW COLUMNS FROM ptt_user_profile LIKE 'allow_non_ack_users_info'" );
+    m_bHasNonAckInfoColumn = pRes && mysql_num_rows( pRes ) > 0;
+    if ( pRes ) mysql_free_result( pRes );
 }
 
 std::string CDbManager::Ha1Col( const char *pszAlias ) const {
@@ -446,7 +451,8 @@ int CDbManager::SelectUserProfile( const std::string &strUserId, CspUserProfile 
         "       emergency_group_mode, COALESCE(emergency_group_id,''), "
         "       allow_emergency_private_call, private_emergency_mode, "
         "       COALESCE(emergency_private_recipient,''), " +
-        std::string( m_bHasAmbientColumn ? "COALESCE(allow_ambient_listening,0)" : "0" ) +
+        std::string( m_bHasAmbientColumn ? "COALESCE(allow_ambient_listening,0)" : "0" ) + ", " +
+        std::string( m_bHasNonAckInfoColumn ? "COALESCE(allow_non_ack_users_info,0)" : "0" ) +
         " FROM ptt_user_profile WHERE ptt_id='" + Escape( strUserId ) + "'";
 
     MYSQL_RES *pRes = ExecuteSelect( strSql );
@@ -466,6 +472,7 @@ int CDbManager::SelectUserProfile( const std::string &strUserId, CspUserProfile 
     if ( row[6] && row[6][0] ) clsProfile.m_strPrivateEmergencyMode = row[6];
     clsProfile.m_strEmergencyPrivateRecipient = row[7] ? row[7] : "";
     clsProfile.m_bAllowAmbientListening = row[8] ? ( atoi( row[8] ) != 0 ) : false;
+    clsProfile.m_bAllowNonAckUsersInfo = row[9] ? ( atoi( row[9] ) != 0 ) : false;
     mysql_free_result( pRes );
     return 1;
 }

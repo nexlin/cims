@@ -242,6 +242,8 @@ CREATE TABLE IF NOT EXISTS ptt_user_profile (
         COMMENT 'allow-ambient-listening (TS 24.484 ruleset) — 원격 청취 수행 자격 (관제사, dispatch_center.md §5.6)',
     allow_create_group    TINYINT(1)   NOT NULL DEFAULT 0
         COMMENT 'allow-create-group (CIMS 확장, TS 24.484 ruleset 자리) — GMS XCAP 그룹 생성 자격 (관제사, mcptt_authorization.md §3). 수정·삭제는 소유(authorized_user_id)로 판정',
+    allow_non_ack_users_info TINYINT(1) NOT NULL DEFAULT 0
+        COMMENT 'allow-to-receive-non-acknowledged-users-information (TS 24.484 ruleset anyExt, TS 24.483 AuthorisedReceiveNonAcknowledged) — 그룹 호 개시자로서 확인 통화 설정이 필수 멤버 없이 진행될 때 응답하지 않은 멤버 목록(INFO)을 받을 자격 (TS 24.379 §6.3.3.3)',
     update_time           DATETIME     DEFAULT NULL,
     PRIMARY KEY (ptt_id),
     CONSTRAINT fk_pup_ptt_sub FOREIGN KEY (ptt_id) REFERENCES ptt_subscriptions (id) ON DELETE CASCADE,

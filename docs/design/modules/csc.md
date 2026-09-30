@@ -568,6 +568,13 @@ XCAP 기반 사용자 프로파일/서비스 설정 관리.
 | GET | `/org.3gpp.mcptt.user-profile/users/{mcptt_id}/...` | 사용자 프로파일 |
 | GET | `/org.3gpp.mcptt.service-config/users/{mcptt_id}/...` | 서비스 설정 |
 
+사용자 프로파일의 인가 `<cp:ruleset>` 은 `ptt_user_profile`(in-memory `PTT_PROFILES`, admin PUT 이 캐시 갱신) 에서 만든다 —
+긴급 계열·`allow_ambient_listening` 은 규격 요소, `<anyExt>`(TS 24.484 §8.3.2.1 11)xxxviii)) 에는 `allow_non_ack_users_info` →
+`<allow-to-receive-non-acknowledged-users-information>`(L, 그룹 호 개시자의 확인 통화 미응답 멤버 INFO 수신 자격 — TS 24.379 §6.3.3.3)·
+`allow_adhoc_call` → `<allow-adhoc-group-call>`(R), CIMS 확장 `<cims:allow-create-group>`. 뒤에 붙은 선택 컬럼
+(`allow_ambient_listening`·`allow_create_group`·`allow_non_ack_users_info` — 각 `sql/migrate_ptt_*.sql`) 은 부재 시 false 로 읽는다.
+문서 구성 = [mcptt_api.md §3](../../api/mcptt_api.md).
+
 ### 4.4 KMS (Key Management Service)
 
 MIKEY-SAKKE 기반 키 관리 (SRTP 키 교환).

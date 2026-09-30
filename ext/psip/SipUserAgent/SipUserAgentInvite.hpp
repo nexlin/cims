@@ -261,6 +261,7 @@ bool CSipUserAgent::RecvInviteResponse( int iThreadId, CSipMessage * pclsMessage
 		}
 		else
 		{
+			if( m_pclsCallBack ) m_pclsCallBack->EventInviteResponse( strCallId.c_str(), pclsMessage );
 			if( pclsMessage->m_iStatusCode > SIP_TRYING && pclsMessage->m_iStatusCode < SIP_OK )
 			{
 				if( m_pclsCallBack ) m_pclsCallBack->EventCallRing( strCallId.c_str(), pclsMessage->m_iStatusCode, bRtp ? &clsRtp : NULL );

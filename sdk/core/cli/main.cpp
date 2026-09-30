@@ -234,7 +234,8 @@ public:
         set([&] { incoming = c; haveIncoming = true; calls[c.callId] = c; });
     }
     void onCallState(const CallInfo& c) override {
-        std::fprintf(stderr, "[cimsue-cli] call=%d %s code=%d %s\n", c.callId, toString(c.state), c.lastCode, c.lastReason.c_str());
+        std::fprintf(stderr, "[cimsue-cli] call=%d %s code=%d %s%s%s\n", c.callId, toString(c.state), c.lastCode, c.lastReason.c_str(),
+                     c.answerState.empty() ? "" : " answer-state=", c.answerState.c_str());
         set([&] { calls[c.callId] = c; });
     }
     void onCallMedia(const CallInfo& c) override {
@@ -289,6 +290,13 @@ public:
                         c.callId, toString(cause), c.condition.emergency ? "true" : "false",
                         c.condition.imminentPeril ? "true" : "false", c.condition.lastCode);
         set([&] { conditions.emplace_back(c, cause); calls[c.callId] = c; });
+    }
+    void onNonAcknowledgedUsers(const CallInfo& c) override {
+        std::string u;
+        for (auto& x : c.nonAcknowledgedUsers) u += x + " ";
+        std::fprintf(stderr, "[cimsue-cli] non-acknowledged call=%d users=[%s]\n", c.callId, u.c_str());
+        if (json_) std::printf("{\"event\":\"non_acknowledged\",\"call_id\":%d,\"count\":%zu}\n", c.callId, c.nonAcknowledgedUsers.size());
+        set([&] { calls[c.callId] = c; });
     }
     void onEmergencyAlert(const EmergencyAlert& a) override {
         std::fprintf(stderr, "[cimsue-cli] alert group=%s user=%s alert=%d emergency=%d imminent=%d originated-by=%s self=%d\n",

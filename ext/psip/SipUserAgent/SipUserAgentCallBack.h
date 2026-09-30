@@ -105,6 +105,10 @@ public:
 	// SIP 통화 요청 수신 이벤트 핸들러
 	virtual void EventIncomingCall( const char * pszCallId, const char * pszFrom, const char * pszTo, CSipCallRtp * pclsRtp, CSipMessage * pclsMessage = NULL ) = 0;
 
+	/** 최초 INVITE(re-INVITE 아님)에 대한 응답(100 제외) 원문 — 아래 EventCallRing/Start/End 보다 먼저 부른다.
+	 *  B2BUA 가 응답 헤더(Warning·P-Answer-State 등)를 다른 leg 로 옮기거나 판정에 쓸 때 쓴다. 메시지는 호출 동안만 유효하다. */
+	virtual void EventInviteResponse( const char * pszCallId, CSipMessage * pclsResponse ){};
+
 	// SIP Ring / Session Progress 수신 이벤트 핸들러
 	virtual void EventCallRing( const char * pszCallId, int iSipStatus, CSipCallRtp * pclsRtp ) = 0;
 

@@ -1081,6 +1081,14 @@ CSP 에는 `PHONE_GROUP_CHANGED`(uri=그룹 id) 로 재적재를 알린다. 가�
 > 같은 프로파일의 `allow_create_group`(CIMS 확장 allow-create-group, 기본 false) 은 관제사가 **GMS XCAP 으로 PTT 그룹을
 > 생성**할 자격이다(수정·삭제는 그룹 소유 또는 관리 범위로 판정 — mcptt_authorization.md §4.1). 부여 주체는 `directory_write`
 > (이 API·콘솔 가입자 편집·관제 앱 관리 화면). 컬럼 미적용 DB(`sql/migrate_ptt_allow_create_group.sql`) 에서는 응답이 false 고 입력 시 400.
+>
+> 같은 프로파일의 `allow_non_ack_users_info`(TS 24.484 ruleset `<anyExt>` 의 `<allow-to-receive-non-acknowledged-users-information>`,
+> 표 8.3.2.7-49 · TS 24.483 AuthorisedReceiveNonAcknowledged, 기본 false = 요소 부재의 규격 기본값) 는 이 사용자가 **그룹 호 개시자일 때**
+> 확인 통화 설정(그룹 문서 `<on-network-required>` 필수 멤버)이 충족되지 않은 채 진행된 호에 대해 controlling MCPTT function 이 응답하지
+> 않은 멤버 목록을 SIP INFO(mcptt-info `<non-acknowledged-user>`)로 보낼지를 정한다(TS 24.379 §6.3.3.3). 편집 경로는 이 API·콘솔 가입자
+> 편집(PTT 회선 «그룹 통화» 미응답 멤버 알림 수신)·관제 앱 관리 화면(`allowNonAckUsersInfo`). CSC 는 값을 user-profile 문서(`cp:actions/anyExt`)로,
+> CSP 는 `ptt_user_profile` 에서 직접 읽는다. 컬럼 미적용 DB(`sql/migrate_ptt_non_ack_users_info.sql`) 에서는 응답이 false 고 입력 시 400
+> `schema_not_migrated`.
 
 ---
 

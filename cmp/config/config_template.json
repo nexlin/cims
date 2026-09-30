@@ -353,6 +353,16 @@
           "max": 10,
           "restart": true,
           "help": "TS 24.380 T8(Floor Revoke) — 회수 유예(T3) 중 Floor Release 가 올 때까지 Floor Revoke 를 이 간격으로 재전송한다. 폴백 값 — 정본은 CSC service-config(TS 24.484 §8.4, 설정 ServiceConfig.*)이고 CSP 가 그룹 세션마다 floor_timers 로 실어 이 값을 덮는다. CSP 가 문서를 못 받았을 때만 쓰인다."
+        },
+        {
+          "key": "PttMediaBufferMs",
+          "label": "PTT 미디어 버퍼 (ms)",
+          "type": "int",
+          "default": 5000,
+          "min": 0,
+          "max": 30000,
+          "restart": true,
+          "help": "미디어 버퍼링(TS 24.379 §10.1.1.4.2 — cmp.md §3.5 «미디어 버퍼링»). 그룹 세션의 첫 수신자가 합류하기 전 화자의 음성을 이 길이까지 담았다가 합류하면 원래 간격으로 재생한다. 0 = 끔(HEARTBEAT resource.media_buffer 미광고 → CSP 는 멤버의 200 OK 를 받은 뒤 개시자에게 응답한다). 켜져 있으면 CSP 는 멤버 확인 전에 개시자에게 200 OK(P-Answer-State: Unconfirmed)를 준다."
         }
       ],
       "scope": "service"

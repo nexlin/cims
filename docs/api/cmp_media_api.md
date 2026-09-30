@@ -137,7 +137,8 @@ client(CSP) 전제라 마지막 소스를 유지한다(다중 client 격리는 [
       "ptt":   { "total": 100, "used": 2, "groups": 2, "joined": 5,
                  "member_total": 200, "member_used": 5 },
       "tap":   { "total": 16, "used": 1, "max_per_session": 4 },
-      "ann":   { "total": 32, "used": 2, "media": 12 }
+      "ann":   { "total": 32, "used": 2, "media": 12 },
+      "media_buffer": { "max_ms": 5000 }
     },
     "session_digest": {
       "relay": { "count": 4, "hash": "61799bd4b6b64b3f" },
@@ -156,6 +157,7 @@ client(CSP) 전제라 마지막 소스를 유지한다(다중 client 격리는 [
 | `ptt.member_total` / `ptt.member_used` | PTT 멤버 포트 유닛 풀 크기 / 사용 중 |
 | `tap.total` / `tap.used` / `tap.max_per_session` | 청취 leg(tap) 풀 크기 / 사용 중 / 세션당 상한 ([§6.5](#65-relay_tap_add--relay_tap_modify--relay_tap_remove--청취-legtap)). **키 존재 = 기능 광고** — 없으면 CSP 가 Join 을 488 로 거절 |
 | `ann.total` / `ann.used` / `ann.media` | 안내 재생기([§6.7](#67-relay_play--relay_play_stop--안내-재생기leg-에-붙는-재생-원천)) 슬롯 크기 / 사용 중 / 적재된 카탈로그 음원 수. **키 존재 = 기능 광고** — 없으면 CSP 는 안내 없이 응답 코드만 |
+| `media_buffer.max_ms` | PTT 미디어 버퍼링 최대 길이([cmp.md](../design/modules/cmp.md) §3.5 «미디어 버퍼링», TS 24.379 §10.1.1.4.2). **키 존재 = 기능 광고** — 있으면 CSP 가 멤버 확인 전 개시자에게 200 OK(`P-Answer-State: Unconfirmed`), 없으면 멤버 200 뒤에 응답 |
 
 client 는 이 요약으로 부하 기반 CMP 선택, 조기 호 거절(admission control)을 할 수 있다.
 

@@ -55,7 +55,15 @@ export interface McpttProfile {
   // allow-ambient-listening (TS 24.484) — PTT 그룹콜 청취·원격 청취 수행 자격 (관제사, 기본 false).
   //   범위는 역할 ptt_listen, 값은 역할 배정의 결과로 CSC 가 동기(mcptt_authorization.md §2.4). 컬럼 미적용 DB 는 false.
   allow_ambient_listening?: boolean
+  // allow-create-group (CIMS 확장) — GMS XCAP 그룹 생성 자격 (관제사, 기본 false, mcptt_authorization.md §3). 컬럼 미적용 DB 는 false.
+  allow_create_group?: boolean
+  // allow-to-receive-non-acknowledged-users-information (TS 24.484 ruleset anyExt) — 그룹 호 개시자일 때 확인 통화 설정이
+  //   필수 멤버 없이 진행되면 응답하지 않은 멤버 목록(INFO)을 받는다 (TS 24.379 §6.3.3.3, 기본 false). 컬럼 미적용 DB 는 false.
+  allow_non_ack_users_info?: boolean
 }
+
+// 선택 컬럼(마이그레이션 의존) 자격 — 컬럼 미적용 DB 에 키를 실으면 PUT 이 400 schema_not_migrated, 키가 없으면 서버가 0 으로 쓴다.
+export const MCPTT_PROFILE_OPT_KEYS = ['allow_ambient_listening', 'allow_create_group', 'allow_non_ack_users_info'] as const
 
 // 가입자(person). login_id/passwd = 단말(IdMS) 로그인 자격 — MCPTT ID 와 별개.
 //   (콘솔 admin 계정은 별도 console_accounts. passwd 는 목록 응답에 미포함, 편집 입력만.)

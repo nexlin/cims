@@ -2,7 +2,8 @@
 
 dispatch_center.md §3.4 / mcptt_authorization.md §2.4: 원격 청취 자격은 콘솔(역할)에서 부여하고 관제 앱의
 관리 범위로는 바꿀 수 없다 — 현재값과 다른 값이 실려 오면 400 not_editable, 같은 값은 무시(구 앱 호환),
-다른 자격(allowCreateGroup 등)은 종전대로 반영된다.
+다른 자격(allowCreateGroup 등)은 종전대로 반영된다. 미응답 멤버 알림 자격(allowNonAckUsersInfo — TS 24.484 anyExt
+allow-to-receive-non-acknowledged-users-information, TS 24.379 §6.3.3.3)은 편집 가능한 선택 컬럼 — 실리면 반영, 없으면 현재값 유지.
 """
 import asyncio
 import os
@@ -35,11 +36,11 @@ class _Cur:
         return list(self._rows)
 
 
-def _run(body, current_ambient: bool):
+def _run(body, current_ambient: bool, current_non_ack: bool = False):
     """profile PUT 을 한 번 실행하고 (status, body, _put_ptt_profile 에 넘어간 pb) 를 돌려준다."""
     prof = {'allow_emergency_call': 1, 'allow_emergency_alert': 1, 'allow_adhoc_call': 1,
             'allow_emergency_private_call': 1, 'allow_ambient_listening': 1 if current_ambient else 0,
-            'allow_create_group': 0}
+            'allow_create_group': 0, 'allow_non_ack_users_info': 1 if current_non_ack else 0}
     captured = {}
 
     async def fake_put(user_id, msisdn, pb, config):
@@ -86,6 +87,26 @@ class TestLockedAmbientListening(unittest.TestCase):
         status, _, pb = _run({'allowCreateGroup': True}, current_ambient=True)
         self.assertEqual(status, 200)
         self.assertTrue(pb['allow_ambient_listening'])
+
+
+class TestNonAckUsersInfo(unittest.TestCase):
+    def test_editable_from_dispatch_app(self):
+        status, body, pb = _run({'allowNonAckUsersInfo': True}, current_ambient=False)
+        self.assertEqual(status, 200)
+        self.assertTrue(pb['allow_non_ack_users_info'])
+        self.assertTrue(body['profile']['allowNonAckUsersInfo'])
+
+    def test_revoke(self):
+        status, body, pb = _run({'allowNonAckUsersInfo': False}, current_ambient=False, current_non_ack=True)
+        self.assertEqual(status, 200)
+        self.assertFalse(pb['allow_non_ack_users_info'])
+        self.assertFalse(body['profile']['allowNonAckUsersInfo'])
+
+    def test_omitted_keeps_current(self):
+        _, _, pb = _run({'allowCreateGroup': True}, current_ambient=False, current_non_ack=True)
+        self.assertTrue(pb['allow_non_ack_users_info'], '현재값 1 은 유지된다')
+        _, _, pb = _run({'allowCreateGroup': True}, current_ambient=False, current_non_ack=False)
+        self.assertNotIn('allow_non_ack_users_info', pb, '0 인 선택 컬럼은 싣지 않는다(컬럼 미적용 DB 호환)')
 
 
 if __name__ == '__main__':

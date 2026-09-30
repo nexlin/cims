@@ -138,7 +138,7 @@ chk('0 인 칸에는 상세를 달지 않는다',
 console.log('[4] 원인 기록이 없는 옛 자료 — 응답코드로 대신 낸다')
 const d13 = row('2026-09-13').details ?? {}
 chk('오류 칸 → 488 2건', /488 코덱 불일치 또는 SRTP 협상 실패 2건/.test(d13.r_error ?? ''), d13.r_error)
-chk('거부 칸 → 403 1건', /403 비멤버 또는 권한·조건 거부 1건/.test(d13.r_denied ?? ''), d13.r_denied)
+chk('거부 칸 → 403 1건', /403 비멤버·affiliation 없음 또는 권한·조건 거부 1건/.test(d13.r_denied ?? ''), d13.r_denied)
 chk('열끼리 코드를 섞지 않는다 (오류 칸에 403 없음)', !/403/.test(d13.r_error ?? ''), d13.r_error)
 
 console.log('[4b] 무응답 열 — 상대 단말 사정은 거부·오류와 다른 칸이다')

@@ -1675,6 +1675,13 @@ static bool ApplyRelayAnswerLeg( const char *pszCallId, const CCallInfo &clsCall
     return true;
 }
 
+void CModuleDispatcher::EventInviteResponse( const char *pszCallId, CSipMessage *pclsResponse ) {
+    // PTT 멤버 초대 leg — 신뢰성 18x PRACK, 개시자 응답 게이트의 Warning 수집·183 Unconfirmed (TS 24.379 §6.3.3.2.3.2
+    // 7)·
+    //   §10.1.1.4.2). 그 밖의 leg 은 무동작.
+    if ( m_clsPttAs.IsEnabled() ) gclsGroupCallService.OnMemberInviteResponse( pszCallId, pclsResponse );
+}
+
 void CModuleDispatcher::EventCallRing( const char *pszCallId, int iSipStatus, CSipCallRtp *pclsRtp ) {
     CCallInfo clsCallInfo;
     CLog::Print( LOG_DEBUG, "EventCallRing(%s,%d)", pszCallId, iSipStatus );

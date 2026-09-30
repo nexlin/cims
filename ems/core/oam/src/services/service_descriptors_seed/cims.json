@@ -915,6 +915,7 @@
               "detailLabels": {
                 "group_not_found": "그룹 없음(403)",
                 "not_member": "비멤버(403)",
+                "not_affiliated": "affiliation 없음(403·120)",
                 "policy_denied": "권한·조건 거부(403)",
                 "session_not_started": "세션 시간창 전",
                 "session_expired": "세션 시간창 지남",
@@ -923,7 +924,7 @@
               "statusFrom": "ptt.statuses",
               "statusLabels": {
                 "404": "404 그룹 없음",
-                "403": "403 비멤버 또는 권한·조건 거부"
+                "403": "403 비멤버·affiliation 없음 또는 권한·조건 거부"
               },
               "detailUnknownLabel": "원인 미기록(응답코드 없음)",
               "group": "setup"

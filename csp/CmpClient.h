@@ -133,6 +133,11 @@ public:
     bool SupportsAnn() const {
         return m_bAnnSupported.load();
     }
+    /** CMP 가 PTT 미디어 버퍼링(HEARTBEAT resource.media_buffer)을 광고했는가 — TS 24.379 §10.1.1.4.2 "supports media
+     *  buffering". 있으면 멤버 확인 전 개시자 200 OK(P-Answer-State: Unconfirmed), 없으면 멤버 200 뒤에 응답한다. */
+    bool SupportsMediaBuffer() const {
+        return m_bMediaBufferSupported.load();
+    }
     typedef std::function<void( const std::string &strSessionId, int iPeerIdx, const std::string &strPlayId,
                                 const std::string &strReason, int iPlayedMs )>
         PlayDoneCallback;
@@ -383,6 +388,8 @@ private:
     std::atomic<bool> m_bTapSupported{ false };
     // HEARTBEAT resource.ann 광고 학습 — 안내 재생기 지원 (announcements.md §4.1)
     std::atomic<bool> m_bAnnSupported{ false };
+    // HEARTBEAT resource.media_buffer 광고 학습 — PTT 미디어 버퍼링 (cmp.md §3.5 «미디어 버퍼링»)
+    std::atomic<bool> m_bMediaBufferSupported{ false };
     PlayDoneCallback m_fnPlayDone;  // RELAY_PLAY_DONE → CSP 안내 서비스(EventDispatchLoop 스레드)
 
 public:

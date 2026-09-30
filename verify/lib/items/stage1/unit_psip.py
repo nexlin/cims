@@ -4,7 +4,9 @@
   · tests/psip_leg_dest_test.cpp  서버 발신 in-dialog 요청(BYE·re-INVITE) 목적지 재해석 (leg_liveness.md §6.3) —
                                   A UDP 등록+승격 TCP 닫힘 → UDP 바인딩 도달 · B 콜백 false → 기존 경로 · C Record-Route 제외 ·
                                   D re-INVITE 동일 · E TCP 등록(연결 유지) 무변경 · F TLS 등록(연결 유지) 무변경(자가서명 인증서, openssl CLI) ·
-                                  G 콜백에 다이얼로그 remote target 전달 + 단말 re-INVITE target refresh(RFC 3261 §12.2.2)
+                                  G 콜백에 다이얼로그 remote target 전달 + 단말 re-INVITE target refresh(RFC 3261 §12.2.2) ·
+                                  H in-dialog INFO Info Package(Info-Package·Content-Disposition, RFC 6086 §4.2.2) ·
+                                  I 발신 INVITE 응답 원문 콜백(Warning·P-Answer-State — TS 24.379 §6.3.3.2.3.2 7)·§10.1.1.4.2) + 신뢰성 183 PRACK(RAck)
   · tests/psip_keepalive_test.cpp  UDP keepalive 수신 — 종전에 소켓 계층에서 조용히 버리던 CRLF 를 응용까지 올린다
   · tests/psip_contact_transport_test.cpp  승격 flow 취급 — 응답 Contact transport 를 등록 바인딩으로, CANCEL 무챌린지·같은 트랜잭션 매칭·481 ·
                                   H 다이얼로그 Contact 특성 태그(200 OK·갱신 re-INVITE 200·서버 BYE)·refresher 정책 uac+Require: timer

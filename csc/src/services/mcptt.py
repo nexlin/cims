@@ -79,6 +79,8 @@ DEFAULT_USER_PROFILE = {
     "emergency_private_recipient": None,
     "allow_ambient_listening": False,   # TS 24.484 allow-ambient-listening — 원격 청취 자격 (관제사, 기본 없음)
     "allow_create_group": False,        # CIMS 확장 allow-create-group — GMS XCAP 그룹 생성 자격 (관제사, 기본 없음)
+    "allow_non_ack_users_info": False,  # TS 24.484 anyExt allow-to-receive-non-acknowledged-users-information —
+                                        #   그룹 호 개시자로서 미응답 멤버 INFO 수신 자격 (TS 24.379 §6.3.3.3, 부재 = false)
 }
 # IdMS 로그인 자격 — CIMS 로그인 ID(인증) ↔ MCPTT ID(서비스 신원) 분리.
 #   login_id(예 test001) → {password, user_id, mcptt_id(tel:+msisdn 파생), name}
@@ -422,17 +424,19 @@ def load_shared_data(config):
 
                     # 사용자 MCPTT 프로파일 (SOS 대상 결정·개시 인가) — 마이그레이션 전이면 스킵
                     try:
-                        # allow_ambient_listening / allow_create_group 은 각 migrate_ptt_*.sql 이후에만 —
-                        #   컬럼 부재 시 상수 0 (선행 배포 무해).
+                        # allow_ambient_listening / allow_create_group / allow_non_ack_users_info 는 각 migrate_ptt_*.sql
+                        #   이후에만 — 컬럼 부재 시 상수 0 (선행 배포 무해).
                         cur.execute("SHOW COLUMNS FROM ptt_user_profile LIKE 'allow_ambient_listening'")
                         amb_col = "allow_ambient_listening" if cur.fetchone() else "0 AS allow_ambient_listening"
                         cur.execute("SHOW COLUMNS FROM ptt_user_profile LIKE 'allow_create_group'")
                         acg_col = "allow_create_group" if cur.fetchone() else "0 AS allow_create_group"
+                        cur.execute("SHOW COLUMNS FROM ptt_user_profile LIKE 'allow_non_ack_users_info'")
+                        nak_col = "allow_non_ack_users_info" if cur.fetchone() else "0 AS allow_non_ack_users_info"
                         cur.execute(
                             "SELECT ptt_id, allow_emergency_call, allow_emergency_alert, "
                             "allow_adhoc_call, emergency_group_mode, emergency_group_id, "
                             "allow_emergency_private_call, private_emergency_mode, "
-                            f"emergency_private_recipient, {amb_col}, {acg_col} "
+                            f"emergency_private_recipient, {amb_col}, {acg_col}, {nak_col} "
                             "FROM ptt_user_profile")
                         PTT_PROFILES.clear()
                         for r in cur.fetchall():
@@ -447,6 +451,7 @@ def load_shared_data(config):
                                 "emergency_private_recipient": r['emergency_private_recipient'],
                                 "allow_ambient_listening": bool(r['allow_ambient_listening']),
                                 "allow_create_group": bool(r['allow_create_group']),
+                                "allow_non_ack_users_info": bool(r['allow_non_ack_users_info']),
                             }
                         logger.log_info(f"Loaded {len(PTT_PROFILES)} user MCPTT profiles")
                     except Exception as pe:
@@ -1492,7 +1497,9 @@ def get_user_profile_xml(user_uri, owner_uid=None):
       - 상한 = mcptt_service_config.max_affiliations_n2(MaxAffiliationsN2) + UserProfile.*(N6·N7·Priority·조직명).
       - 인가 = <cp:ruleset>(RFC 4745 common-policy) — actions 자식은 규격 요소 + cims 확장(그룹 생성). ad hoc 인가는
         규격 <anyExt><allow-adhoc-group-call>(TS 24.484 §8.3.2.1 11)xxxviii)R), Rel-18). <cims:allow-adhoc-group-call> 은
-        옛 ptt-client 가 읽는 전환기 별칭 — 단말 SDK 이식(ptt-client P3) 뒤 뺀다.
+        옛 ptt-client 가 읽는 전환기 별칭 — 단말 SDK 이식(ptt-client P3) 뒤 뺀다. 같은 anyExt 에 미응답 멤버 알림 자격
+        <allow-to-receive-non-acknowledged-users-information>(11)xxxviii)L), 표 8.3.2.7-49 — 값 = allow_non_ack_users_info,
+        controlling 기능이 개시자에게 확인 통화 미응답 멤버 INFO 를 보낼지, TS 24.379 §6.3.3.3)를 목록 순서대로 앞에 싣는다.
     루트 <Status>true</Status>(§8.3.2.1 3, 프로파일 활성). **선택이지만 필수로 읽는 단말이 있어 항상 싣는 것** =
     alias-entry 의 index·xml:lang 속성, <ParticipantType>(§8.3.2.1 f, 값 = UserProfile.ParticipantType 설정).
     xml:lang 은 <Name> 과 같은 UserProfile.Language 를 써 한 문서 안에서 어긋나지 않게 한다.
@@ -1623,7 +1630,8 @@ def get_user_profile_xml(user_uri, owner_uid=None):
         <allow-cancel-emergency-alert>{_ba('allow_emergency_alert', group_target_ok)}</allow-cancel-emergency-alert>
         <allow-emergency-private-call>{_ba('allow_emergency_private_call', private_target_ok)}</allow-emergency-private-call>
         <allow-ambient-listening>{_b('allow_ambient_listening', False)}</allow-ambient-listening>
-        <anyExt>  <!-- TS 24.484 §8.3.2.1 11)xxxviii) -->
+        <anyExt>  <!-- TS 24.484 §8.3.2.1 11)xxxviii) — 자식 순서는 그 목록(L → R) 순 -->
+          <allow-to-receive-non-acknowledged-users-information>{_b('allow_non_ack_users_info', False)}</allow-to-receive-non-acknowledged-users-information>
           <allow-adhoc-group-call>{_b('allow_adhoc_call')}</allow-adhoc-group-call>
         </anyExt>
         <cims:allow-adhoc-group-call>{_b('allow_adhoc_call')}</cims:allow-adhoc-group-call>

@@ -31,6 +31,9 @@
 | C2 | affiliation-info SUBSCRIBE/NOTIFY (presence) | CSP | TS 24.379 §9.3 | ✅ 정합 |
 | C3 | Resource-Priority namespace 정규화(단일값) | CSP | RFC 4412 | ✅ 정합 |
 | C4 | floor SDP `m=application` + `mcptt-floor-request-uri` | CSP | TS 24.380 §12 | ✅ 정합 |
+| C4b~C4e | 멤버 leg INVITE·개시자 응답(Contact·PAI·Warning 전달)·확인 통화 설정(TNG1·최소 인원·미응답 멤버 INFO)·세션 식별자 GRUU·Warning 형식 | CSP | TS 24.379 §4.4·§4.5·§6.3.3.1.2·§6.3.3.2.3.2·§6.3.3.3 | ✅ 정합 (Supported norefersub/explicitsub 미광고 — §C4g 남은 편차) |
+| C4f | 멤버 확인 전 수락 `P-Answer-State: Unconfirmed` + 미디어 버퍼링(CMP) · 멤버 183 Unconfirmed · 신뢰성 18x PRACK | CSP/CMP | TS 24.379 §10.1.1.4.2·§11.1.1.4.2 / RFC 4964·3262 | ✅ 정합 |
+| C4g | 개시·합류·재합류 affiliation 검사 403 `120` · 긴급/임박·chat 암묵적 affiliation | CSP | TS 24.379 §10.1.1.4.2 14)a)·§10.1.1.4.5.1 8)·§9.2.2.3.7 | ✅ 정합 (`require_affiliation` 그룹) |
 | C6 | conference 이벤트 구독 인가 — 그룹 문서 `<on-network-allow-conference-state>` 판정, 불허 403 `Warning: 138` / 일제 통화 480 `Warning: 105` (비멤버 관제사 청취 범위는 CIMS 해석, [dispatch_center.md §5.6](dispatch_center.md)) | CSP/CSC | TS 24.379 §10.1.3.4.1 / TS 24.481 §7.2.4.2 | ✅ 정합 |
 | C7 | broadcast group call 발언권 — 개시자 외 Floor Request Deny #5(긴급 포함)·Floor Taken Permission 0·Floor Indicator B-bit | CMP | TS 24.380 §6.3.5.3.4·§6.3.5.4.4·§8.2.3.15 | ✅ 정합 |
 | C8 | broadcast group call 호 모델 — 호 단위 `<broadcast-ind>` 개시, 개시자 고정, 그룹 문서 그룹 종류(`on-network-invite-members`), 해제 정책(T4·참가자 1명 이하·TNG3) | CSP/CSC | TS 24.379 §4.12·§6.2.8.2·§6.3.8.1 / TS 24.481 §7.2.8 | ✅ 정합(서버) — 개시 단말의 발언 종료 후 호 해제(TS 24.380 §6.2.4.6.4)·B-bit Floor Request 는 단말 몫(미구현). 정본 [mcptt_broadcast_group_call.md](mcptt_broadcast_group_call.md) |
@@ -396,8 +399,9 @@ affiliation-command 를 보낸다) → ③구형 제거.
 | 세션 타이머 | 2) refresher = `uac` · 3) `Require: timer` | 개시자가 refresher 를 지정하지 않았으면 `uac`(단말 갱신, CSP 만료 감시) + `Require: timer`. 개시자가 지정했거나 timer 미지원이면 RFC 4028 §9 Table 2(미지원 = `uas`) — [leg_liveness.md](leg_liveness.md) §5.3 |
 | P-Asserted-Identity | 4) 제어 기능 PSI | 그룹 URI(`<sip:<그룹>@<PTT 도메인>>`) — 멤버 leg INVITE 의 PAI 와 같은 신원 |
 | Supported | 8) `tdialog`(RFC 4538) | `Supported: tdialog` |
-| Warning | 7) 받은 응답의 Warning 을 옮긴다 · 확인 통화 설정의 111 (C4c) | 확인 통화 설정이 필수 멤버 없이 진행하면 `Warning: 399 <agent> "111 group call proceeded without all required group members"` |
+| Warning | 7) 받은 응답의 Warning 을 옮긴다 · 확인 통화 설정의 111 (C4c) | 개시자 응답 게이트 동안 멤버 초대 leg 의 응답(18x·최종)에 실린 Warning 값을 모아 200 OK 에 싣는다(중복 제외, 제어 기능 자신의 111 이 앞 — RFC 3261 §20.43 쉼표 연결). 필수 멤버 없이 진행하면 `Warning: 399 <agent> "111 group call proceeded without all required group members"`. 게이트 없이 곧바로 수락한 200 은 받은 응답이 아직 없다 |
 | 응답 시점 | §10.1.1.4.2 · §6.3.3.3 · §11.1.1.4.2 | 새 세션 개시의 200 OK 는 **개시자 응답 게이트** 뒤다 — C4c. 진행 중 세션 합류·청취·chat 은 곧바로 |
+| P-Answer-State | §10.1.1.4.2 · RFC 4964 | 멤버 확인 전 수락이면 `P-Answer-State: Unconfirmed` — C4f |
 
 ### C4c. 확인 통화 설정 (acknowledged call setup) — TS 24.379 §6.3.3.3·§10.1.1.4.2·§11.1.1.4.2
 
@@ -415,6 +419,8 @@ affiliation-command 를 보낸다) → ③구형 제거.
 | 사설 호 | — | 최소 1(착신자) — 착신자 180 을 개시자에게 옮기고 착신자 200 뒤에 수락한다(§11.1.1.4.2) |
 | 개시자 CANCEL | — | 게이트를 거두고 초대 leg·세션을 해제한다 |
 
+| 미응답 멤버 알림 | §6.3.3.3 — 200 OK 에 111 이 실렸고 개시자 user profile `<allow-to-receive-non-acknowledged-users-information>`(TS 24.484 anyExt) 가 true | ACK 뒤(1초 주기 점검) 개시자 다이얼로그에 INFO — `Info-Package: g.3gpp.mcptt-info`, 본문 mcptt-info(F.1) `<mcptt-Params>` 의 `<anyExt>` 안에 200 을 보내지 않은 초대 멤버마다 `<non-acknowledged-user type="Normal"><mcpttURI>tel:<id></mcpttURI>` (RFC 6086 §4.2.2 `Content-Disposition: Info-Package`). 자격 = `ptt_user_profile.allow_non_ack_users_info`(기본 0, 콘솔 가입자 PTT 프로파일) |
+
 정원(`on-network-max-participant-count`)은 필수 멤버 수보다 작을 수 없다 — 관리 API 가 저장 단계에서 막는다(§6.3.5.5 NOTE 4). 시도 장부 cause = `no_member_answered`·
 `ack_timeout_abandoned`·`ack_required_rejected`·`initiator_canceled`([sip_statistics.md](sip_statistics.md) §2.3). 구현 = CSP `CGroupCallService::AckGate*`.
 
@@ -430,12 +436,45 @@ affiliation-command 를 보낸다) → ③구형 제거.
 MCPTT/MCData 경고 코드와 문구다(`McpttWarning`). conference 구독 거절 105·138, 확인 통화 설정 111·112, MCData 203 이 같은 형식이다. 받는 쪽
 (libcsim)은 따옴표 안 앞 세 자리를 경고 코드로 읽는다.
 
+### C4f. 멤버 확인 전 수락 · 미디어 버퍼링 — TS 24.379 §10.1.1.4.2 · §11.1.1.4.2 · RFC 4964
+
+CSP 는 멤버 쪽 참여 기능(participating function)을 겸한다. 멤버 단말은 자동 응답(automatic commencement, §6.3.2.2.5.2)이라
+참여 기능이 멤버를 대신해 183 `P-Answer-State: Unconfirmed` 를 낸 것과 같고, 제어 기능은 **미디어 버퍼링을 할 때만** 그 183 으로
+개시자에게 200 OK 를 줄 수 있다. 버퍼링 = CMP([cmp.md](../modules/cmp.md) §3.5 «미디어 버퍼링» — 첫 수신자 합류 전 화자 음성을 담았다가 원래 간격으로 재생),
+광고 = HEARTBEAT `resource.media_buffer`.
+
+| 경우 | 동작 |
+|---|---|
+| 새 세션 개시, 필수 멤버 없음·최소 인원 0, CMP 버퍼링 광고 | 멤버 초대와 함께 곧바로 200 OK + `P-Answer-State: Unconfirmed`(초대할 멤버가 없으면 헤더 없이) |
+| 위와 같은데 CMP 가 버퍼링을 광고하지 않음 | 최소 인원 1 로 보고 첫 멤버의 200 뒤에 수락(개시자 응답 게이트 — C4c). 초대한 멤버가 모두 거절하면 그 최종 응답 |
+| 게이트 중 멤버 leg 의 183 + `P-Answer-State: Unconfirmed`(외부 참여 기능·단말), TNG1 이 돌지 않음(없었거나 필수 멤버 전원 응답으로 멈춤), 버퍼링 광고 | 개시자에게 200 OK + `P-Answer-State: Unconfirmed`(모은 Warning 동봉). 사설 호도 같다(§11.1.1.4.2) |
+| 멤버 leg 의 신뢰성 18x(`Require: 100rel` + `RSeq`) | 제어 기능(UAC)이 PRACK(RFC 3262) |
+
+psip 은 최초 INVITE 응답 원문을 `EventInviteResponse` 로 응용에 올린다(Ring/Start/End 보다 먼저) — Warning 수집·`P-Answer-State` 판독·PRACK 이
+여기서 난다(`CGroupCallService::OnMemberInviteResponse`).
+
+### C4g. affiliation 검사 — TS 24.379 §10.1.1.4.2 14)a)·15)a) · §10.1.1.4.5.1 8) · §10.1.2.4.1.1 6)·13) · §9.2.2.3.6~8
+
+개시·합류·재합류 INVITE 의 개시자가 그 그룹에 affiliate 했는지(§6.3.6)를 본다. 판정 대상은 **affiliation 을 쓰는 그룹**(`require_affiliation` —
+fan-out 이 affiliated 멤버만 초대하는 그룹)이다. 그 밖의 그룹은 멤버 전원을 초대하므로 멤버십이 곧 affiliation 이다. 순서 = 멤버십 403·코덱 488·SRTP
+488·긴급/임박 인가 403 뒤, 세션 생성 전.
+
+| 요청 | affiliate 안 함 |
+|---|---|
+| 편성 그룹 호 일반 개시·합류·재합류 | 403 + `Warning: 399 <agent> "120 user is not affiliated to this group"` (시도 장부 cause `not_affiliated`) |
+| 인가된 긴급·임박 위험 개시·합류 | 암묵적 affiliation(§9.2.2.3.7) — 자격(§9.2.2.3.6 → §9.2.2.3.8 = 그룹 존재 + 멤버)이 있으면 affiliation 을 기록(client id = 등록 Contact, 만료 3600 s)하고 affiliation-info 구독자 NOTIFY(§9.2.2.3.5)·감사 E-AUD-009 뒤 진행 |
+| chat 그룹 합류 | 암묵적 affiliation(§10.1.2.4.1.1 13)) |
+| 청취 leg(비멤버 관제사)·사설 호 | 대상 아님 — 청취는 2단 인가([dispatch_center.md](dispatch_center.md) §5.6) |
+
+DB 단절이면 fan-out 과 같이 검사를 건너뛴다(affiliation 원천 = `ptt_affiliations`).
+
 남은 편차
-- 개시자 200 OK 에 멤버 응답의 Warning 을 옮기지 않는다(§6.3.3.2.3.2 7)).
-- 확인 통화 설정 뒤의 선택 동작은 하지 않는다 — 응답 없는 멤버를 알리는 INFO `<non-acknowledged-user>`(§6.3.3.3 "may", user profile
-  `<allow-to-receive-non-acknowledged-users-information>` 미지원)·in-dialog MESSAGE 안내.
-- 183 `P-Answer-State: Unconfirmed` 와 media buffering 경로(§10.1.1.4.2)는 없다 — 멤버 단말이 183 Unconfirmed 를 보내지 않는다.
-- 개시·합류·재합류 INVITE 의 affiliation 검사(§10.1.1.4.2 14)a)·§10.1.1.4.5.1 8) — 403 Warning 120)를 하지 않는다.
+- 개시자 200 OK 의 `Supported` 에 `norefersub`(RFC 4488)·`explicitsub`/`nosub`(RFC 7614) 을 싣지 않는다(§6.3.3.2.3.2 9)·10)) — 그룹 세션
+  다이얼로그의 REFER 를 지원하지 않아 광고하지 않는다.
+- 필수 멤버 없이 진행한 뒤의 in-dialog MESSAGE 안내(§6.3.3.3 1)b)·c) "may")는 보내지 않는다.
+- 개시 전 affiliation 인원 검사(§10.1.1.4.2 14)g)i) — `<on-network-minimum-number-of-affiliated-members>`·`<on-network-affiliation-to-group-required>`
+  미달 시 480 + 112)는 그룹 문서 요소가 없어 하지 않는다.
+- 멤버별 응답 방식(poc-settings Answer-Mode, §6.3.2.2.5·§6.3.2.2.6)을 받지 않는다 — 모든 멤버를 자동 응답으로 본다(C4f).
 
 ### C5. 등록/구독 SIP 메시지 — 실망(상용 IMS) 패킷 형태 정합
 
