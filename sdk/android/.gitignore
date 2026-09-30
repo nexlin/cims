@@ -1,0 +1,3 @@
+# Gradle 모듈(:cimsue-engine·:cimsue)의 빌드 캐시 — Gradle 루트는 android/ 지만 모듈 디렉터리는 여기다(android/.gitignore 가 닿지 않는다).
+.gradle/
+build/

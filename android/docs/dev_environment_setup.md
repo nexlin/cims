@@ -1,7 +1,7 @@
 # 안드로이드 개발 환경 구성 (Windows + WSL2 + UNIWA)
 
 CIMS 안드로이드 단말 앱(`android/`) 개발을 위한 환경 셋업 가이드.
-대상 환경: **Windows 11** + **WSL2(Ubuntu)** + **UNIWA 실기기**.
+대상 환경: **Windows 11** + **Linux 빌드 환경**(WSL2 또는 ssh 로 닿는 VM — §4) + **UNIWA 실기기**.
 
 ---
 
@@ -11,11 +11,11 @@ CIMS 안드로이드 단말 앱(`android/`) 개발을 위한 환경 셋업 가�
 |---|---|---|
 | 앱(Kotlin/Compose) 빌드·실행 | Android Studio + SDK + JDK 17 | **Windows** |
 | MediaCodec 스파이크(M0) 실행 | 위 + UNIWA 단말(adb) | **Windows → 단말** |
-| PJSIP `.so` + SWIG Java 빌드 | NDK + SWIG + 빌드도구 | **WSL2(Ubuntu)** |
+| 엔진·코어 `.so` + SWIG Java 빌드 | NDK + SWIG + 빌드도구 | **Linux**(WSL2 또는 ssh 빌드 호스트 — §4) |
 | 단말 배포(adb) | platform-tools | **Windows** (WSL 불필요) |
 
 > 핵심: **MediaCodec 스파이크는 PJSIP·WSL2 없이** Android Studio만으로 바로 실행된다.
-> WSL2는 나중에 PJSIP 네이티브 산출물을 만들 때만 쓰고, 그 `.so`를 Windows 쪽 `core/jniLibs`에 복사한다.
+> Linux 는 네이티브 산출물을 만들 때만 쓰고, 산출물은 `build-native.sh` 가 두 SDK 모듈(`sdk/android/cimsue-engine`·`sdk/android/cimsue`)에 배치한다(§4).
 
 ---
 
@@ -96,23 +96,43 @@ adb shell am start -n com.cims.ue.volte/.MainActivity
 
 ---
 
-## 4. WSL2 — PJSIP 네이티브 빌드 툴체인 (스파이크 통과 후)
+## 4. 네이티브 빌드(Linux) — 엔진·코어 `.so` + SWIG Java
 
-### 4.1 WSL2 설치
+엔진(`ext/pjproject`)·코어(`sdk/core`)의 Android 산출물은 **Linux 에서** `sdk/android/build-native.sh` 가 짓고
+두 AAR 모듈(`sdk/android/cimsue-engine`·`sdk/android/cimsue`)에 배치한다(생성물은 커밋하지 않는다 —
+[android_dispatch_tablet.md](../../docs/design/features/android_dispatch_tablet.md) §2.1·§2.2). APK 는 그 뒤 Windows 에서 Gradle 로 짓는다(§4.3).
+Linux 전제(한 번) = JDK 17·SWIG 4.2·NDK r27+(`scripts/m1_provision.sh` → `~/.m1env`) + Android arm64 정적 OpenSSL
+(`scripts/m1_build_openssl.sh`) + make·gcc·cmake 3.22+·python3·perl·file·git — 절차 정본은 [M1_pjsip_build_ubuntu.md](M1_pjsip_build_ubuntu.md).
+
+### 4.1 WSL2 가 있는 PC
 ```powershell
-wsl --install -d Ubuntu      # 재부팅 후 Ubuntu 초기 설정
+wsl --install -d Ubuntu      # 관리자 + 재부팅
 ```
-### 4.2 빌드 도구 + NDK + SWIG
-상세 절차/`config_site.h`/빌드 명령은 → **[M0_pjsip_build_wsl2.md](M0_pjsip_build_wsl2.md)**.
+WSL 홈(`~/`)에 트리를 두고 `sdk/android/build-native.sh` 를 돌린다. `/mnt/c` 는 느리고, Windows 작업 사본은 `core.autocrlf` 로
+CRLF 라 configure 스크립트가 그대로 돌지 않는다.
 
-### 4.3 파일 위치 (중요)
-- 저장소는 Windows에 있고 WSL에서 `/mnt/c/work/cims`로 접근 가능하나, **빌드는 WSL 홈(`~/`)에서** 하는 게 빠르다(`/mnt/c`는 느림).
-- PJSIP 빌드 산출물만 Windows 쪽으로 복사:
-  ```bash
-  cp libpjsua2.so /mnt/c/work/cims/android/core/src/main/jniLibs/arm64-v8a/
-  cp -r org/pjsip/pjsua2 /mnt/c/work/cims/android/core/src/main/java/org/pjsip/
-  ```
-- **adb/단말 배포는 Windows에서** 한다(WSL2의 USB 패스스루는 불필요).
+### 4.2 WSL 이 없는 PC — ssh 로 닿는 Linux 빌드 호스트(VM)
+Git Bash 에서 `sdk/android/build-native-remote.sh` 하나로 끝난다 — 작업 사본(커밋 안 한 수정·새 파일 포함)을 LF 트리로 만들어
+빌드 호스트의 `~/cims-android-src` 로 push → 거기서 `build-native.sh` → 두 모듈의 생성물을 이 트리로 받아 온다. 빌드 호스트에
+OpenSSL 이 없으면 먼저 짓는다.
+```bash
+# 호스트 = ~/.ssh/config 별칭(키 인증). VMX 를 주면 VMware VM 을 nogui 로 먼저 띄운다.
+export CIMS_ANDROID_BUILD_HOST=nex-ubuntu
+export CIMS_ANDROID_BUILD_VMX='C:\work\vms\Ubuntu 64-bit.vmx'
+sdk/android/build-native-remote.sh               # build-native.sh 인자(--engine-only 등)는 그대로 넘긴다
+sdk/android/build-native-remote.sh --sync-only   # 보내기만
+```
+첫 실행은 OpenSSL·pjproject·코어를 모두 짓는다. 다음부터는 바뀐 파일만 보내고, 빌드는 build-native.sh 규칙대로 다시 한다.
+
+### 4.3 APK (Windows)
+```powershell
+cd C:\work\cims\android
+$env:JAVA_HOME = 'C:\Program Files\Android\Android Studio\jbr'   # Gradle 데몬 = JDK 21 (gradle/gradle-daemon-jvm.properties)
+.\gradlew.bat :dispatch-tablet:assembleDebug        # → dispatch-tablet\build\outputs\apk\debug\dispatch-tablet-debug.apk
+.\gradlew.bat :cimsue:testDebugUnitTest :dispatch-tablet:testDebugUnitTest   # S1-UE-TABLET-UNIT
+.\gradlew.bat :dispatch-tablet:installDebug         # 단말 설치(adb)
+```
+**adb/단말 배포는 Windows 에서** 한다(빌드 호스트에 USB 를 넘길 필요 없음).
 
 ---
 
@@ -137,6 +157,7 @@ wsl --install -d Ubuntu      # 재부팅 후 Ubuntu 초기 설정
 | 증상 | 조치 |
 |---|---|
 | sync 시 AGP/Gradle 버전 오류 | 제안 수락 또는 `libs.versions.toml`/wrapper 버전 정합 |
+| `:cimsue:compileDebugJavaWithJavac` — `JdkImageTransform` … `jlink executable … does not exist` | 다른 IDE(예: VS Code 계열 Java 확장)가 띄운 Gradle 데몬이 jlink 없는 JRE 로 떠 있고 CLI 가 그 데몬을 재사용했다(데몬 조건 = «Java 21, 벤더 무관»). `.\gradlew.bat --stop` 뒤 `JAVA_HOME`=Android Studio JBR 로 다시 빌드 |
 | `adb devices`에 단말 없음 | USB 디버깅·케이블·드라이버(Google USB / MTK) 확인 |
 | `unauthorized` | 단말에서 RSA 지문 수락(이전 수락 취소: 개발자 옵션 → USB 디버깅 승인 취소 후 재연결) |
 | Gradle JDK 오류(CLI) | `JAVA_HOME`을 JBR(17 이상, 21 OK) 경로로 |

@@ -58,6 +58,8 @@ sdk/android/
                          (sdk/core/CMakeLists.txt 가 예고한 크로스 인자. sdk/windows/CMakeLists.txt 와 같은 역할)
   build-native.sh        ① config_site.h 생성 ② configure-android + make(pjproject)
                          ③ sdk/core → libcimsue.so ④ SWIG — pjsua2 와 cimsue 둘 다 ⑤ 산출물 배치
+  build-native-remote.sh WSL 없는 Windows(Git Bash) → ssh 빌드 호스트(VM)에 작업 사본을 LF 트리로 보내 build-native.sh 를
+                         맡기고 두 모듈의 생성물을 받아 온다(android/docs/dev_environment_setup.md §4.2). APK 는 Windows Gradle
   cimsue-engine/         Gradle Android Library → cimsue-engine.aar (arm64-v8a)
     src/main/java/org/pjsip/            SWIG pjsua2(306) + PjCamera*(4) — 생성물, 커밋 안 함
     src/main/jniLibs/arm64-v8a/{libpjsua2,libc++_shared}.so             생성물, 커밋 안 함
