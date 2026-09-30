@@ -663,3 +663,59 @@ A10 이 prearranged 에도 암묵 제휴를 하던 것을 고쳤다. **M2 T4·T5
 §7.4) + `Session-Expires: …;refresher=uac` 로 답하고, CSP `EventReInvite` 는 `IsSessionRefreshReInvite` 로 CMP 를 부르지 않는다(leg_liveness.md §6.3). psip 루프백
 S1-UNIT-PSIP [M] 으로 확인했다. 알아 둘 것 하나 — 갱신 answer 의 fmtp 는 서버의 처음 offer 값(예 `mc_queueing;mc_priority=5`)을 그대로 되풀이한다(단말 re-offer 에
 `mc_priority` 가 없어도) — pjsip 이 이 answer 를 문제 삼지 않는지만 보면 된다. MCVideo leg 도 같은 경로다. 전환 자체는 여전히 사용자 결정.
+
+## 12. MCVideo 서버 트랙 이관 (.48 → .45)
+
+**사용자 지시로 MCVideo 서버 쪽 남은 작업을 .45 가 이어받는다.** 서버 몫(CSC·CSP·CMP·psip)은 모두 main 에 있고 **아직 어디에도 배포하지 않았다**
+(실서버 호 시험 전). 설계·동작 정본 = [mcvideo.md](../design/features/mcvideo.md) §5.1(CSC)·§5.2·§5.2.1(CSP 호 제어 — 입력별 처리 표)·§5.3·§5.3.1(CMP)·
+§9(규격 읽기·편차), 계획 = [mcvideo_dev_plan.md](mcvideo_dev_plan.md). .48 과 주고받은 기록 = 이 문서 §11.
+
+### 12.1 main 에 들어 있는 서버 몫
+
+| 영역 | 내용 | 파일·시험 |
+|---|---|---|
+| CSC 설정 평면 (A1~A5) | 그룹 문서 MCVideo 몫·XCAP PUT 전환기 규칙·CMS user profile·service config·ue-init-config·scope `3gpp:mc:video_*`·`mcvideo_id` claim | `csc/src/services/mcvideo.py` · `tests/test_csc_mcvideo.py` |
+| CSC 관리 API (A6) | 그룹 `mcvideo`(null = 끔·객체 = 켬/갱신) · `GET/PUT/DELETE /api/v1/users/{pid}/ptt/{msisdn}/mcvideo` | `csc/src/handlers/admin.py` · AdminApiTest · [admin_api.md](../api/admin_api.md) §5.4·§6 |
+| CSP 모듈·등록·affiliation (A7~A9) | `CMcVideoAsModule`(`Setup.Roles.MCVIDEO` 기본 off) · 서비스 판별 · 등록 태그 → `m_bMcVideo` · MCVideo PUBLISH/SUBSCRIBE → `mcvideo_affiliations` | `csp/McVideoAsModule.*` · `CscfModule.cpp` · `csp_mcvideo_info_test` |
+| CSP 그룹 호 (A10·A11) | chat·prearranged 개시·합류·재합류(`gr`)·해제 · 멤버 팬아웃(개시자 200 OK 는 첫 멤버가 붙은 뒤) · 검사 응답(Warning 표) · 미디어 SRTP m= 라인마다 · re-INVITE(answer fmtp 재작성 · 미디어 변경이면 JOIN ②) | `csp/McVideoCallService.*` · `csp/McVideoSdp.h`(`csp_mcvideo_sdp_test`) · `csp/CmpClientMcvideo.cpp` |
+| CMP (B3~B8 CMP 몫) | 그룹 종류·멤버 6포트 유닛 · 송출·수신 제어 상태 머신(`PMcvControl`) · 분배 · 멤버 SRTP · 전송 제어 SRTCP · 영상 RTCP 키프레임 요청(협상한 PLI/FIR 만) · 녹취 기록기(type `mcvideo`) | `cmp/PMcvControl.*` · `PMcvideoGroup.*` · `PCmpServerMcvideo.cpp` · `cmp_mcvideo_control_test`(121) · `cmp_rtp_recorder_test`(40) · `tests/cmp_smoke_mcvideo_ports.py`(87) |
+| psip | 합성 SDP `m=video` 전용 SRTP 키(`CSipCallRtp::m_strLocalVideoCrypto*`) · MCVideo 성분 표시·rtcp-fb | `ext/psip/SipUserAgent/SipDialog.cpp` · `psip_reason_video_test` [I]~[N] |
+| 계약·도구 | K1 `sql/migrate_mcvideo.sql` · K2/K3 골든 `tests/fixtures/mcvideo/` · M2 절차 [mcvideo_m2_runbook.md](mcvideo_m2_runbook.md) · 계측기 요구서 [mcvideo_tester_requirements.md](mcvideo_tester_requirements.md) | S1 `S1-MCVIDEO-CONTRACT`(`CIMS_PYLIB` 에 xmlschema) |
+
+### 12.2 남은 작업 (.45 몫 — 위에서부터)
+
+| # | 할 일 | 전제 | 근거·메모 |
+|---|---|---|---|
+| R1 | **M2 서버 단독 신호 시험** — .48 배포 → 공유 DB 마이그레이션 → `Setup.Roles.MCVIDEO` → A6 로 시험 그룹 gmv1(chat, `max_transmitters` 1)·gmv2(prearranged) → `tests/mcvideo_m2_signalling.py --confirm` T1~T9·T7b | **사용자 결정 D1·D2**(12.3) | 순서 = [mcvideo_m2_runbook.md](mcvideo_m2_runbook.md)(.48 배포 id csc 3·cmp 4·csp 6). 패키지는 `make dist` → `./cims.sh pkg csp cmp csc` 산출물을 .48 패키지 저장소(`/mnt/cims/test48/packages` — NAS)에 두고 등록. CMP 기본 `McVideoMemberPoolSize` 40·`McVideoStartPort` 59000(방화벽). 확인 목록 = runbook §2·§4 |
+| R2 | M2 에서 드러나는 CSP·CMP 결함 수정 | R1 | 실측 전 코드다 — 특히 개시 대기(10 s)·초대 응답 한도(30 s)·해제 규칙·SRTP·NAT(latch) 경로. 로그 `MCVIDEO:`·CMP `STATS mcvideo_groups` |
+| R3 | B8 CSP·OAM 몫 — CSP 가 `PTT_GROUP_ADD` 에 `record_dir`·`session_dir` 를 싣고 그룹·세션 디스크립터를 쓰기 · OAM 이력의 서비스 축 `mcvideo` · 콘솔 재생 | **사용자 결정 D4**(녹취 레이아웃) | CMP 기록기는 준비됨(PTT 세션 레이아웃·`type:"mcvideo"` — [recording.md](../design/features/recording.md) §3.3.1). CSP 는 지금 싣지 않아 녹취 없음 |
+| R4 | A12 로그·CDR·통계 서비스 축 `mcvideo` | **사용자 결정 D5** | [sip_statistics.md](../design/features/sip_statistics.md) — CSP `CallDir`(시도 장부·세션 색인) → oam-svc 롤업 |
+| R5 | A6 콘솔 화면 — 그룹 편집 «서비스» 절·가입자 PTT 회선 «MCVideo» 자격 | **사용자 결정 D3** | API 는 준비됨. 기존 «영상» 체크박스(`video_enabled`, 현행 PTT 영상)와 V7 전까지 겹친다. 콘솔 규칙 = `ems/core/console/CLAUDE.md` |
+| R6 | CMS 문서 변경 xcap-diff 에 MCVideo user profile·service config 싣기 | — | 지금 CSP `BuildXcapDiffBody` 는 MCPTT 문서만. SDK 는 본문 없는 SUBSCRIBE — RFC 5875 읽기 먼저 |
+| R7 | 1차 잔여 소항목 | — | N2(`MaxAffiliationsN2`)·user profile `<ImplicitAffiliations>`(§8.2.2.2.15)·`on-network-max-participant-count`(486 122)·비멤버 재합류 403 121(지금 116)·검사 순서(prearranged 는 488 이 Accept-Contact 403 앞 — §9.2.1.4.2 2)·3)) |
+| R8 | V7 — 현행 PTT 영상 제거(A13·B11·C11) | M3 뒤, 한 창 배포 | D9(전환 기간 없음). psip 는 SRTP leg 의 PTT 영상을 여전히 port 0 |
+| R9 | V8 — 긴급·임박·방송·ad hoc·private·확인 통화·conference NOTIFY·E2E | 1차 뒤 | mcvideo.md §5.2.1 «1차 범위 밖» |
+| R10 | 계측기 MCVideo 단말(B10) | 계측기 트랙 | 요구서 = [mcvideo_tester_requirements.md](mcvideo_tester_requirements.md) — real-ue 는 drive 명령으로 바로 됨 |
+
+### 12.3 사용자 결정 대기
+
+| # | 결정 | 영향 |
+|---|---|---|
+| D1 | M2 열기 — .48 배포 · 공유 DB `migrate_mcvideo.sql` · `Setup.Roles.MCVIDEO` | R1 전부. 표 추가만이라 옛 CSP·CSC 무영향. 대상은 .48 그대로(.45 는 라이브 스택 — 계획 §2), .45 에서 `scripts/oam-deploy.py`(`OAM_URL=https://121.161.164.48:4419`, 자격은 사용자에게)로 원격 배포 |
+| D2 | MCVideo 이용 자격 범위 — 마이그레이션은 PTT 회선 **전부**에 넣는다(현행 PTT 영상 보존) | 새 CSC 가 그 회선들에 video scope·`mcvideo_id` 발급. 시험 신원만 두려면 A6 `DELETE` |
+| D3 | A6 콘솔 화면(도안 없음 · «영상» 체크박스와의 관계) | R5 |
+| D4 | 녹취 레이아웃 — `recordings/ptt/{id}` 공용(메타 type 으로 구분) 대 서비스 영역 `recordings/mcvideo/` | R3 · [site_directory_layout.md](../design/features/site_directory_layout.md) |
+| D5 | 통계 서비스 축 방식 | R4 |
+| D6 | MCPTT 착신 200 OK `refresher=uas` 전환 + MCPTT 갱신 re-offer·answer 의 개시 전용 fmtp(§11 8bc92490·2ca91155) | CSP 전제는 확인됨(psip [M]). 라이브 PTT 동작 변화 |
+
+### 12.4 작업 함정 (서버 코드)
+
+- **psip 헤더를 바꾸면 `make csp` 뒤에 S1-UNIT-PSIP** — 시험이 `build/csp/psip_build/*.a` 를 링크하므로 옛 라이브러리면 rc=-11(구조체 배치 어긋남).
+- **clang-format 은 한글을 폭 2 로 세어** 긴 `//` 주석을 짧은 조각으로 자른다(`S1-CPP-FORMAT` 은 통과해도 읽기 어렵다). 한 줄 118 폭 안으로 먼저 감싸 두거나 dev_share
+  `att/reflow_comments.py`(조각 난 주석 run 만 다시 감싸는 도구 — `python3 reflow_comments.py <파일> 118` 뒤 clang-format) 를 쓴다. tests/ 는 80 폭 설정.
+- CMP 스모크는 **시험용 CMP 를 스스로 띄운다**(`--cmp build/bin/cmp`, 멤버 풀 4). 라이브 CMP 에 돌리지 않는다(이벤트 회신처를 가로챈다). 끝나면 `pgrep -af cmp.json` 로 남은 프로세스 확인.
+- S1-MCVIDEO-CONTRACT 는 xmlschema 가 필요 — `CIMS_PYLIB=<xmlschema 설치 경로>`.
+- psip 규약 — `StopCall` 은 `EventCallEnd` 를 부르지 않는다(서비스가 끝낸 leg 은 그 자리에서 정리) · `EventCallStart` 는 나가는 INVITE 의 2xx 에서만.
+- `McVideoCallService` 는 `m_mutex`(재귀) 아래서 CMP 요청을 동기 대기한다 — CMP 응답(RecvLoop)과 이벤트(EventDispatchLoop)는 다른 스레드라 교착 없음. 이 구조를 바꿀 때 유지.
+- CMP 로스터는 **붙는 멤버만** 싣는다(`PTT_GROUP_ADD members` = 그 멤버 하나, CMP `updateRoster` 는 병합) — 그룹 전원을 실으면 참가하지 않는 멤버의 포트 유닛까지 잡힌다.
+- 공유 DB(.45:3306/cims)는 .45·.48·.135 가 같이 쓴다 — 마이그레이션·시험 데이터는 D1·D2 결정 범위 안에서만.
