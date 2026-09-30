@@ -284,4 +284,7 @@ SDS 전달 확인 규격 경로)를 .48 에서 반영·배포(**csp 0.2.180 · c
 | .48 실측(cimsue-cli, CSP 0.2.180) | 013 → g005 SDS(전달 요청) → 014 `--notify-delivered`(PSI `sip:mcdata_psi@ptt.cims.example.kr`) → CSP 상관·중계 → 013 `disposition:2`(from `tel:+82500000014`·group `tel:g005`) · 013 g005 그룹콜 긴급 상향(`emergency-ind` true + `alert-ind` false) 200 Confirmed → 해제 200 · `--from-profile ptt` → ue-init-config `mcptt=sip:mcptt_psi@…`, **MCData 는 미광고**(.48 CSC `UeInitConfig.ServiceDetails.McData.Enable` off — 통지는 옛 형식) |
 
 - **Windows 쪽 몫(관제 앱 두 벌)** — ① [긴급 해제] = `Capabilities.CancelGroupEmergency ∨ condition.mine` ② 받은 SDS 통지에 `GroupUri` 넘기기(데스크톱 `McDataMessagesViewModel`·태블릿 `PttPlane.applySds`) ③ 계정 만들기 전 `FetchUeInitConfig` → `McpttServerUri`·`McdataServerUri`(데스크톱은 지금 둘 다 비어 있다) ④ 데스크톱은 새 DLL·.NET 을 같이 빌드(C API 인자 변경).
+- **.45 배포 완료(2026-09-30 20:22)** — oam 0.2.182·csp 0.2.180·csc 0.2.138(pkg 283~285, `--no-bump` = .48 라벨), oam-svc 0.2.131 재기동.
+  CSP 기동 Roles 전부 ON · service-config CSC 정본 적재(RP 15/8/0, TNG2 없음) · csc.json 보존 · MF52·W999 새 APK(ea2b617d) 재등록 200.
+  CSC MCData 광고(`UeInitConfig.ServiceDetails.McData.Enable`)는 아직 off. 관찰 = 001·002 가 g001 멤버가 아니라 affiliation 403(멤버 구성 변경).
 - **.45 스택에 올릴 때** — CSP 0.2.180·CSC 0.2.138(·oam 0.2.182) 를 한 창에(§10 위). 새 CSP 가 선 뒤에만 .45 CSC 의 `UeInitConfig.ServiceDetails.McData.Enable` 을 켠다 — 켜면 새 SDK 단말이 PSI 로 통지를 보내는데 옛 CSP 는 그것을 상관하지 못한다.
