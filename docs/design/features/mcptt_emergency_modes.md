@@ -145,7 +145,7 @@ mcptt-request-uri, mcptt-calling-user-id, (alert) originated-user-id, location(�
   **403 + mcptt-info(`emergency-ind=false`)** 로 거절(§6.3.3.1.14) — 재-INVITE 거절은 다이얼로그를
   깨지 않아 호는 normal 유지, 단말은 낙관 latch 를 되돌린다. 인가되면 `PTT_FLOOR_TIER`/
   `PTT_GROUP_MODIFY`로 floor 격상 + **확립 멤버 leg 에 re-INVITE 재광고**
-  (`PropagateConditionToMembers`, TS 24.379 §6.3.3.1.15) — mcptt-info 의
+  (`PropagateConditionToMembers`, TS 24.379 §6.3.3.1.6 — 임박 위험은 §6.3.3.1.15) — mcptt-info 의
   `emergency-ind`/`imminentperil-ind` 를 true/false 로 **명시**하고 actor(변경 유발 멤버) leg 는
   제외한다. SDP 는 초기 오퍼와 동일 구성(audio=멤버 전용 포트 + m=application=floor 포트)으로
   재산출되어 미디어 불변 — psip 2단계 API(`CreateReInvite` 생성 → mcptt-info multipart 부가 →
@@ -153,8 +153,8 @@ mcptt-request-uri, mcptt-calling-user-id, (alert) originated-user-id, location(�
   `EventReInviteResponse`(CSP no-op)로 격리된다.
 - **취소**: 권한자(개시자 또는 authorized_user)만 `emergency-ind=false`로 해제 → tier normal 복귀,
   상태 클리어. 비권한자 취소 무시(규격). 하향도 확립 멤버 leg 에 re-INVITE(`emergency-ind=false`)
-  재광고(§6.3.3.1.16) — 수신 단말 세션 긴급 표시의 정본 해제 신호(경보 취소 MESSAGE 정합은
-  보조, §4.3).
+  재광고(§6.3.3.1.10 — 임박 위험 해제는 §6.3.3.1.15 의 false) — 수신 단말 세션 긴급 표시의 정본 해제
+  신호(경보 취소 MESSAGE 정합은 보조, §4.3).
 - **imminent peril**: 동일 경로의 `imminentperil-ind`, tier=IMMINENT. capability 는
   `emergency_call` 공통 게이트를 따른다.
 
@@ -346,11 +346,11 @@ UE(개시자) ──INVITE(mcptt-info: session-type=prearranged, emergency-ind=t
   CSP ──ADD/PTT_GROUP_MODIFY{emergency=1, initiator tier=emergency}──▶ CMP
   CSP ──200 OK(multipart: mcptt-info emergency-ind=true + SDP)──▶ UE(개시자)
   CSP ──fan-out INVITE(mcptt-info: emergency-ind=true)──▶ 미참여 멤버들
-  CSP ──re-INVITE(mcptt-info: emergency-ind=true)──▶ 참여 중(확립) 멤버들   ← §6.3.3.1.15 멤버 전파
+  CSP ──re-INVITE(mcptt-info: emergency-ind=true)──▶ 참여 중(확립) 멤버들   ← §6.3.3.1.6 멤버 전파
   CMP: 개시자 FLOOR_REQUEST → tier=emergency → 기존 발언자 REVOKE(reason=emergency_preempt) → GRANT
   ... 통화 ... (이후 조인/재조인 200 OK 에도 emergency-ind=true 동봉)
 UE(권한자) ──re-INVITE(emergency-ind=false)──▶ CSP → PTT_FLOOR_TIER normal → 상태 해제
-  CSP ──re-INVITE(mcptt-info: emergency-ind=false)──▶ 확립 멤버들 (un-latch)  ← §6.3.3.1.16
+  CSP ──re-INVITE(mcptt-info: emergency-ind=false)──▶ 확립 멤버들 (un-latch)  ← §6.3.3.1.10
 ```
 
 ---
@@ -366,6 +366,13 @@ UE(권한자) ──re-INVITE(emergency-ind=false)──▶ CSP → PTT_FLOOR_TI
 3. **권한자(authorized) 취소 판정**: 개시자 외 authorized_user/관리자 취소 허용 범위.
 4. **ad hoc 콘솔(관제) 개시 입구**: 단말 resource-lists 입구는 구현됨 — 관제사가 콘솔에서
    인원을 골라 서버가 개시하는 dispatcher 입구는 미착수.
+5. **청취 leg 의 조건 재광고**: `PropagateConditionToMembers` 는 청취 leg(`bListenOnly`)를 빼고, 청취 leg 는 합류 200 OK 의
+   조건만 받는다 — 청취 중에 긴급·임박이 걸리거나 풀려도 청취하는 관제사는 모른다(관제 앱 두 곳의 긴급 배너가 기다린다 —
+   [dispatch_desktop_ui.md](dispatch_desktop_ui.md) §13, [android_dispatch_tablet.md](android_dispatch_tablet.md) §11). 청취의
+   인가·은닉·sendonly 응답을 지키면서 알리는 방법(같은 re-INVITE 를 recvonly 그대로 보낼지, 상태 알림 MESSAGE §6.3.3.1.11 로 할지)을 정한다.
+6. **TNG2(진행 중 긴급 그룹콜 타이머) 미구현**: TS 24.379 §6.3.3.1.16 은 TNG2 가 만료되면 긴급 상태를 풀고 참여 멤버에 취소 re-INVITE
+   (§6.3.3.1.10)·affiliate 됐으나 참여하지 않은 멤버에 상태 알림 MESSAGE(§6.3.3.1.11)를 보내게 한다. 지금 긴급 상태는 권한자 취소와 세션
+   종료로만 풀린다.
 
 ---
 

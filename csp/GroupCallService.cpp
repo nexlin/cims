@@ -794,7 +794,7 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
 
         // 활성 세션 조인이 조건을 상향시켰으면(normal 세션에 긴급 조인) 기존 확립 멤버 leg 에
         //   re-INVITE 재광고 — fan-out INVITE 는 미참여 멤버만 커버한다(참여 중 멤버는
-        //   InviteMember 가 조기 반환). (TS 24.379 §6.3.3.1.15, §9-5 멤버 전파)
+        //   InviteMember 가 조기 반환). (TS 24.379 §6.3.3.1.6 긴급·§6.3.3.1.15 임박 위험, §9-5 멤버 전파)
         if ( bActiveSession && iCond > iPrevCond ) PropagateConditionToMembers( pszGroupId, iCond, pszCallerInfo );
 
         // 개시자(caller)를 CMP floor/RTP 멤버로 등록.
@@ -1060,7 +1060,7 @@ void CGroupCallService::ApplyInCallCondition( const std::string &strGroupId, con
         EmitEmergencyModeEvent( "activated", iNewCond, strGroupId, strMemberId, strSesId );
         CLog::Print( LOG_INFO, "ApplyInCallCondition: %s group(%s) by(%s) tier=%d", pszEvt, strGroupId.c_str(),
                      strMemberId.c_str(), iNewCond );
-        // 상향을 확립 멤버 leg 에 재광고 (TS 24.379 §6.3.3.1.15 — §9-5 멤버 전파)
+        // 상향을 확립 멤버 leg 에 재광고 (TS 24.379 §6.3.3.1.6 긴급·§6.3.3.1.15 임박 위험 — §9-5 멤버 전파)
         PropagateConditionToMembers( strGroupId, iNewCond, strMemberId );
     } else {
         // 하향(취소): 개시자(actor)만 가능. 그 외 멤버의 취소 요청은 무시 (TS 24.379 authorized only).
@@ -1088,7 +1088,8 @@ void CGroupCallService::ApplyInCallCondition( const std::string &strGroupId, con
         CLog::Print( LOG_INFO, "ApplyInCallCondition: %s group(%s) by(%s) tier=%d", pszEvt, strGroupId.c_str(),
                      strTgt.c_str(), iNewCond );
         // 하향(취소)도 확립 멤버 leg 에 재광고 — 수신 단말 세션 긴급 표시의 직접 un-latch 신호
-        //   (경보 취소 MESSAGE 정합은 보조로 유지, TS 24.379 §6.3.3.1.16)
+        //   (TS 24.379 §6.3.3.1.10 긴급 취소·§6.3.3.1.15 임박 위험 해제. 경보 취소 MESSAGE
+        //   정합(§12.1.3.2)은 보조로 유지)
         PropagateConditionToMembers( strGroupId, iNewCond, strTgt );
     }
 }
@@ -3060,7 +3061,8 @@ void CGroupCallService::WrapInfoMultipart( CSipMessage *pclsMessage, const std::
 
 /**
  * @brief 진행 중 세션의 condition 변경을 확립 멤버 leg 에 re-INVITE 로 재광고
- *        (TS 24.379 §6.3.3.1.15/16 — in-call 상향/하향·긴급 조인의 멤버 전파).
+ *        (TS 24.379 §6.3.3.1.6 긴급·§6.3.3.1.10 긴급 취소·§6.3.3.1.15 임박 위험 설정/해제 —
+ *        in-call 상향/하향·긴급 조인의 멤버 전파).
  *        SDP 는 초기 오퍼와 동일 구성(audio=멤버 전용 포트 + m=application=그룹 floor 포트)으로
  *        재산출되므로 미디어는 불변 — 단말은 mcptt-info 의 지시자만 반영한다.
  *        수신 단말 pjsua 는 자동 200 OK 로 답하고, psip 은 그 응답을 EventReInviteResponse

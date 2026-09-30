@@ -71,7 +71,7 @@ class SipController(private val config: SipAccountConfig) {
     private val _emergencyDenied = MutableSharedFlow<Int>(extraBufferCapacity = 8)
     val emergencyDenied: SharedFlow<Int> = _emergencyDenied.asSharedFlow()
 
-    /** 세션 긴급 상태 재광고(TS 24.379 §6.3.3.1.15/16) — (callId, active). CSP 가 in-call
+    /** 세션 긴급 상태 재광고(TS 24.379 §6.3.3.1.6·§6.3.3.1.10·§6.3.3.1.15) — (callId, active). CSP 가 in-call
      *  상향/하향 시 멤버 leg 에 보내는 re-INVITE(mcptt-info emergency-ind)와, 조인/재조인
      *  200 OK 에 동봉된 현재 상태를 [CimsCall] 이 관측해 올린다. */
     private val _sessionEmergency = MutableSharedFlow<Pair<Int, Boolean>>(extraBufferCapacity = 8)

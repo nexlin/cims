@@ -233,7 +233,7 @@ private:
      * @return XML string
      */
     /** bExplicitCondition=true 면 emergency-ind/imminentperil-ind 를 true/false 로 항상 명시 —
-     *  in-call 조건 재광고 re-INVITE(하향=false 전파, TS 24.379 §6.3.3.1.15/16)용.
+     *  in-call 조건 재광고 re-INVITE(하향=false 전파, TS 24.379 §6.3.3.1.6·§6.3.3.1.10·§6.3.3.1.15)용.
      *  false(기본)면 활성 지시자만 실어 초기 INVITE 의 기존 형태를 유지한다. */
     /** bBroadcast = 세션이 일제 통화 — `<broadcast-ind>true` 를 싣는다(TS 24.379 §6.3.3.1 — session-type 은 그룹 종류).
      */
@@ -267,7 +267,8 @@ private:
     static void WrapInfoMultipart( class CSipMessage *pclsMessage, const std::string &strInfoXml );
 
     /** 진행 중 세션의 condition 변경(상향/하향·긴급 조인)을 확립 멤버 leg 에 re-INVITE
-     *  (mcptt-info emergency-ind/imminentperil-ind 명시)로 재광고 (TS 24.379 §6.3.3.1.15/16).
+     *  (mcptt-info emergency-ind/imminentperil-ind 명시)로 재광고 (TS 24.379 §6.3.3.1.6 긴급·
+     *  §6.3.3.1.10 긴급 취소·§6.3.3.1.15 임박 위험 설정/해제).
      *  strExcludeMemberId = 변경을 일으킨 멤버(자기 re-INVITE/INVITE 응답으로 이미 인지).
      *  전송한 leg 수를 반환. */
     int PropagateConditionToMembers( const std::string &strGroupId, int iCond, const std::string &strExcludeMemberId );

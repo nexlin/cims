@@ -188,7 +188,7 @@ class CimsCall : Call {
                 Regex("<(?:\\w+:)?emergency-ind(?=[\\s>])[^>]*>\\s*(?:<(?:\\w+:)?mcpttBoolean>\\s*)?false", RegexOption.IGNORE_CASE).containsMatchIn(msg)) {
                 owner.onEmergencyUpgradeDenied(id)
             }
-            // 세션 긴급 상태 재광고 (TS 24.379 §6.3.3.1.15/16) — CSP 가 in-call 상향/하향 시
+            // 세션 긴급 상태 재광고 (TS 24.379 §6.3.3.1.6·§6.3.3.1.10·§6.3.3.1.15) — CSP 가 in-call 상향/하향 시
             //   멤버 leg 에 보내는 re-INVITE(mcptt-info emergency-ind)와, 조인/재조인 200 OK 에
             //   동봉된 현재 상태. rdata 는 수신 원문만이므로 "INVITE " = 수신 re-INVITE(UAS),
             //   "SIP/2.0 200" = 내 INVITE 의 응답(UAC). 403 재광고(위)와 겹치지 않는다.
