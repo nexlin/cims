@@ -17,6 +17,7 @@
 #include <vector>
 
 #include "CmpClient.h"  // CmpGroupSession
+#include "McpttInfo.h"  // McpttIndicators
 
 class CSipCallRtp;
 class CSipCallRoute;
@@ -89,21 +90,68 @@ public:
     /** 감시 대상 PTT 회선 strAor 가 참가 중인 세션 leg 전부 (초기 full 스냅샷, 청취 leg 제외). */
     void CollectPttDialogs( const std::string &strAor, std::vector<PttDialogSnapshot> &vecOut );
 
-    /** 진행 중 호의 condition(emergency/imminent) 변경 적용 (re-INVITE 업그레이드/취소, TS 24.379).
-     *  iNewCond: 2=emergency/1=imminent/0=normal. 상향=멤버가 개시(누구나), 하향=개시자만(권한).
-     *  floor tier(CMP)·m_mapGroupCondition 갱신 + 이벤트 로깅. 미디어 재협상은 기존 UA 경로가 처리. */
-    void ApplyInCallCondition( const std::string &strGroupId, const std::string &strMemberId, int iNewCond );
+    /** in-call 조건 re-INVITE 판정 결과 (TS 24.379 §10.1.1.4.7·§10.1.1.4.8). */
+    struct InCallConditionVerdict {
+        int iStatus = 0;          ///< 0 = 받아들인다(스택이 200 OK), 403 = 거절(다이얼로그는 그대로)
+        std::string strBody;      ///< 403 의 mcptt-info 본문
+        std::string strWarning;   ///< 200 OK 의 Warning 값(149 SIP INFO request pending — §4.4) — 비면 없음
+        std::string strInfoBody;  ///< Warning 149 로 답한 뒤 ACK 에 보낼 INFO 의 mcptt-info (§6.3.3.1.18)
+    };
+    /** 진행 중 그룹 호의 조건 요청(re-INVITE 의 emergency-ind·imminentperil-ind·alert-ind) — 인가·상태 전이·재광고·
+     *  비참여 제휴 멤버 통지까지 한 곳에서 한다(TS 24.379 §10.1.1.4.7 3)·4)·6)~8) · §10.1.1.4.8). 요소가 없는
+     *  re-INVITE(세션 갱신·코덱 재협상)는 조건 요청이 아니다. 결과가 403 이면 호출측이 거절을 보내고, 아니면 흐름을
+     *  잇는다(Warning 이 있으면 스택의 200 OK 에 싣는다). */
+    InCallConditionVerdict OnInCallConditionRequest( const std::string &strCallId, const std::string &strGroupId,
+                                                     const std::string &strMemberId, const CMcpttInfo &clsMi );
+    /** 2xx ACK 수신 — Warning 149 로 답한 re-INVITE 면 같은 다이얼로그에 INFO(Info-Package g.3gpp.mcptt-info)를 보낸다
+     *  (TS 24.379 §10.1.1.4.7 끝 · §6.3.3.1.18). 대기 INFO 가 없으면 무동작. */
+    void OnInDialogAck( const std::string &strCallId );
+
+    /** 긴급 그룹 상태 해제 인가 — local policy(TS 24.379 §6.3.3.1.13.4 — 예시: 관제사·개시자) = 상태를 세운 개시자 ∨
+     *  사용자 프로파일 allow-cancel-group-emergency(TS 24.484). 거부면 strReason. */
+    bool IsEmergencyCancelAuthorized( const std::string &strGroupId, const std::string &strUserId,
+                                      std::string &strReason );
+    /** 임박 위험 해제 인가 (§6.3.3.1.13.6) = 사용자 프로파일 allow-cancel-imminent-peril. */
+    bool IsImminentCancelAuthorized( const std::string &strUserId );
+    /** 긴급 해제를 막는 «다른 긴급 사용자의 송출» (§10.1.1.4.7 7a)) — FLOOR_TALKERS 로 아는 발언자 중 요청자가 아닌
+     *  긴급 상태 사용자가 있으면 그 사용자. 없으면 빈 문자열. */
+    std::string EmergencyTalkerOtherThan( const std::string &strGroupId, const std::string &strUserId );
+
+    /** 그룹의 진행 중 조건 (2=긴급·1=임박·0=없음). */
+    int GroupConditionOf( const std::string &strGroupId );
+    /** 그룹에 진행 중 호(참가 leg)가 있는가 — MESSAGE 경로가 §12.1.3.2(호 진행 중)/§12.1.3.3(호 없음)을 가른다. */
+    bool HasGroupCallInProgress( const std::string &strGroupId );
+    /** 인가된 긴급 그룹 상태 해제 (§10.1.1.4.7 8)·§12.1.3.2 1)b)·2)d)·§12.1.3.3 2)·TNG2 만료 §6.3.3.1.16) — 상태·긴급
+     *  사용자 캐시 정리, floor tier 복귀, TNG2 정지·TNG3 재시작(§6.3.3.5.2), 참여 leg 재광고(§6.3.3.1.6·§6.3.3.1.10),
+     *  비참여 제휴 멤버 통지(§6.3.3.1.11). strCanceller = 해제한 사용자(TNG2 는 빈 값 — PSI 가 알린다), clsAlert =
+     *  재광고·통지에 같이 실을 경보 지시자(iAlert·strOriginatedBy — 없으면 -1). strExclude = 재광고·통지를 받지 않을
+     * 사용자 (요청자 — 자기 요청의 응답으로 안다). 상태가 긴급이 아니면 false. */
+    bool CancelGroupEmergency( const std::string &strGroupId, const std::string &strCanceller,
+                               const McpttIndicators &clsAlert, const std::string &strExclude, const char *pszBy );
+
+    /** 긴급 경보 캐시 (§12.1.3.1 4)b)iii)A)·§12.1.3.2 2)a)·b)) — 호와 무관하게 그룹·발령 사용자 단위로 남는다. */
+    void SetAlertOutstanding( const std::string &strGroupId, const std::string &strUserId, bool bOn );
+    bool HasOutstandingAlert( const std::string &strGroupId, const std::string &strUserId );
+    /** 경보 발령 인가 (§6.3.3.1.13.1) = 그룹 allow-MCPTT-emergency-alert ∧ 사용자 allow-activate-emergency-alert. */
+    bool IsAlertActivateAuthorized( const class CspPttGroup &clsGroup, const std::string &strUserId );
+    /** 경보 취소 인가 (§6.3.3.1.13.3) = 사용자 allow-cancel-emergency-alert. */
+    bool IsAlertCancelAuthorized( const std::string &strUserId );
+
+    /** 조건 상태 통지 MESSAGE (TS 24.379 §6.3.3.1.11) — 그룹의 제휴 멤버(affiliation 요구 그룹은 affiliate 된
+     * 멤버)에게. bNonParticipantsOnly 면 호에 참여하지 않은 멤버만(참여자는 re-INVITE 로 안다). strCallingUser =
+     *  <mcptt-calling-user-id>(비면 싣지 않는다), strExclude = 받지 않을 사용자. 보낸 수. */
+    int NotifyConditionToAffiliated( const std::string &strGroupId, const std::string &strCallingUser,
+                                     const McpttIndicators &clsInd, bool bNonParticipantsOnly,
+                                     const std::string &strExclude );
+
+    /** CMP 발언자 집합(FLOOR_TALKERS, cmp_media_api.md §8) — 7a) 판정용 캐시. */
+    void OnFloorTalkers( const std::string &strGroupId, const std::vector<std::string> &vecTalkers );
 
     /** condition(긴급·임박) 개시 인가 (TS 24.379 §6.3.3.1.13.2) — 3중 판정:
      *  그룹 capability(emergency_call) + 사용자 allow-emergency-group-call +
      *  DedicatedGroup 모드의 대상 일치. DB 불가 시 프로파일 축은 fail-open(그룹 축만 판정).
      *  거부 시 strReason 에 사유. */
     bool IsConditionInitAuthorized( const CspPttGroup &clsGroup, const std::string &strUserId, std::string &strReason );
-
-    /** in-call condition 상향 게이트 — 상향 시도에 IsConditionInitAuthorized 를 적용.
-     *  취소/비상향은 항상 true (하향 권한은 Apply 가 판정).
-     *  false 시 호출측이 재-INVITE 를 403(emergency-ind=false)으로 거절한다 (§6.3.3.1.14). */
-    bool IsInCallUpgradeAllowed( const std::string &strGroupId, const std::string &strMemberId, int iNewCond );
 
     // Recovery & Monitor
     void StartMonitor();
@@ -257,14 +305,13 @@ private:
      * @param clsGroup PTT group info
      * @return XML string
      */
-    /** bExplicitCondition=true 면 emergency-ind/imminentperil-ind 를 true/false 로 항상 명시 —
-     *  in-call 조건 재광고 re-INVITE(하향=false 전파, TS 24.379 §6.3.3.1.6·§6.3.3.1.10·§6.3.3.1.15)용.
-     *  false(기본)면 활성 지시자만 실어 초기 INVITE 의 기존 형태를 유지한다. */
-    /** bBroadcast = 세션이 일제 통화 — `<broadcast-ind>true` 를 싣는다(TS 24.379 §6.3.3.1 — session-type 은 그룹 종류).
+    /** 초기 INVITE·합류 200 OK 는 활성 지시자만(iCondition). pInd 가 있으면 그 지시자를 그대로 싣는다 —
+     *  조건 재광고 re-INVITE(§6.3.3.1.6 긴급·§6.3.3.1.10 긴급 해제·§6.3.3.1.15 임박 위험)는 절이 정한 요소만.
+     *  bBroadcast = 세션이 일제 통화 — `<broadcast-ind>true` 를 싣는다(TS 24.379 §6.3.3.1 — session-type 은 그룹 종류).
      */
     static std::string BuildGroupInfoXml( const class CspPttGroup &clsGroup, const std::string &strUserId,
                                           const std::string &strCallerId, int iCondition = 0,
-                                          bool bExplicitCondition = false, bool bBroadcast = false );
+                                          const McpttIndicators *pInd = NULL, bool bBroadcast = false );
 
     /**
      * @brief 그룹 자기완결 디스크립터 JSON 생성 (group.json 기록용)
@@ -291,12 +338,13 @@ private:
      *  감싼다 — in-call 조건 재광고 re-INVITE·조인 200 OK 동봉용(SDP 는 손대지 않는다). */
     static void WrapInfoMultipart( class CSipMessage *pclsMessage, const std::string &strInfoXml );
 
-    /** 진행 중 세션의 condition 변경(상향/하향·긴급 조인)을 확립 멤버 leg 에 re-INVITE
-     *  (mcptt-info emergency-ind/imminentperil-ind 명시)로 재광고 (TS 24.379 §6.3.3.1.6 긴급·
-     *  §6.3.3.1.10 긴급 취소·§6.3.3.1.15 임박 위험 설정/해제).
-     *  strExcludeMemberId = 변경을 일으킨 멤버(자기 re-INVITE/INVITE 응답으로 이미 인지).
+    /** 진행 중 세션의 condition 변경(상향/하향·긴급 조인·TNG2 만료)을 확립 참여 leg(청취 leg 포함)에 re-INVITE 로
+     *  재광고 (TS 24.379 §6.3.3.1.6 긴급·§6.3.3.1.10 긴급 해제·§6.3.3.1.15 임박 위험). SDP = 그 leg 에 성립한 미디어
+     *  그대로(§6.3.3.1.6 1)·§6.3.3.1.15 2)), mcptt-info = clsInd + mcptt-calling-user-id(상태를 세운 사용자), Resource-
+     *  Priority = iCond 값(§6.3.3.1.19). strExcludeMemberId = 변경을 일으킨 멤버(자기 요청의 응답으로 이미 안다).
      *  전송한 leg 수를 반환. */
-    int PropagateConditionToMembers( const std::string &strGroupId, int iCond, const std::string &strExcludeMemberId );
+    int PropagateConditionToMembers( const std::string &strGroupId, int iCond, const std::string &strExcludeMemberId,
+                                     const McpttIndicators &clsInd );
 
     bool m_bMonitorRunning;
     std::thread m_threadMonitor;
@@ -318,11 +366,21 @@ private:
     bool GetOrAllocMemberPort( const std::string &strGroupId, const std::string &strMemberId, int &iAudioPort,
                                int &iVideoPort );
 
-    /** 그룹 세션의 현재 condition(0=normal/1=imminent/2=emergency). 진행 중 emergency/imminent 상태.
-     *  ProcessGroupCall(개시) 시 설정, fan-out INVITE(mcptt-info emergency-ind 광고)·업그레이드에서 참조. */
-    std::map<std::string, int> m_mapGroupCondition;
-    /** condition 을 마지막으로 올린 멤버(actor) — 취소(하향) 권한 판정용(개시자만 취소). */
-    std::map<std::string, std::string> m_mapGroupCondActor;
+    /** 그룹의 진행 중 조건 (TS 24.379 — in-progress emergency / imminent peril state). 수명 = 그룹 세션
+     *  (RemoveGroupSesId 가 지운다 — 규격은 명시 해제·TNG2 까지 유지, mcptt_emergency_modes.md §4.2 편차 표). */
+    struct GroupCondition {
+        int iCond = 0;                            ///< 2=긴급 · 1=임박 위험 (0 은 맵에 두지 않는다)
+        std::string strInitiator;                 ///< 상태를 세운 사용자 — 재광고 mcptt-calling-user-id(§6.3.3.1.6 2))
+        std::set<std::string> setEmergencyUsers;  ///< 긴급 상태 사용자 캐시(§10.1.1.4.7 6)a)·c)·8)b)) — 7a) 판정·tier
+        time_t tTng2Start = 0;                    ///< TNG2 기점 (§6.3.3.1.16 — 긴급 첫 설정)
+    };
+    std::map<std::string, GroupCondition> m_mapGroupCond;
+    /** 긴급 경보 발령 사용자 (group → MCPTT ID) — 세션과 무관(경보는 호 없이도 선다, §12.1.3.1). */
+    std::map<std::string, std::set<std::string>> m_mapGroupAlerts;
+    /** CMP 발언자 집합 (FLOOR_TALKERS) */
+    std::map<std::string, std::set<std::string>> m_mapGroupTalkers;
+    /** Warning 149 로 답한 re-INVITE 의 ACK 대기 INFO 본문 (callId → mcptt-info, §6.3.3.1.18) */
+    std::map<std::string, std::string> m_mapPendingInfo;
 
     /** 그룹 세션 단위 통일 sesid: PTT_GROUP_ADD ~ JOIN/LEAVE ~ INVITE ~ PTT_GROUP_REMOVE 모두 동일 sesid 사용.
      *  key = group_id, value = sesid (형식: `{group_id}::csp::{us_ts}::{counter}`).
@@ -428,8 +486,14 @@ private:
     /** 그룹 호 해제 (TS 24.379 §6.3.8.1) — 참가 leg(확립·미확립·청취) 전부 BYE/CANCEL 후 마지막 leg 의 teardown 이
      *  CMP REMOVE·세션 정리를 끝낸다. pszReason 은 로그용. */
     void ReleaseGroupSession( const std::string &strGroupId, const char *pszReason );
-    /** TNG3(on-network-maximum-duration) 만료 세션 해제 — MonitorLoop 1초 주기. */
+    /** TNG3(on-network-maximum-duration) 만료 세션 해제 · TNG2(진행 중 긴급 그룹콜 타이머) 만료 긴급 해제 —
+     *  MonitorLoop 1초 주기. 긴급 상태 동안은 TNG3 를 세지 않는다(TS 24.379 §6.3.3.5.2). */
     void CheckSessionLimits();
+    /** OnInCallConditionRequest 의 판정·전이 본체 — Warning 149 의 스택 연결은 호출측(공개 함수)이 한다. */
+    InCallConditionVerdict EvaluateInCallCondition( const std::string &strGroupId, const std::string &strMemberId,
+                                                    const CMcpttInfo &clsMi );
+    /** 조건 설정 공통 — 상태·개시자·긴급 사용자·TNG2 기점(긴급 첫 설정). m_mutex 보유 상태에서 호출. */
+    void SetGroupConditionLocked( const std::string &strGroupId, int iCond, const std::string &strUser );
     /** 그룹 세션 sesid 조회. 없으면 새로 발행하여 저장. */
     std::string GetOrIssueGroupSesId( const std::string &strGroupId );
     /** 그룹 세션 종료 시 캐시 제거 (PTT_GROUP_REMOVE 호출 시점) */

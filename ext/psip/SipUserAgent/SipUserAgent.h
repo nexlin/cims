@@ -162,6 +162,10 @@ public:
 	/** 다이얼로그의 세션 타이머 refresher 정책(E_SESSION_REFRESHER_*) — 수신 INVITE 가 refresher 를 지정하지 않았을
 	 *  때 2xx 에서 누가 갱신할지. AcceptCall 전에 부른다. */
 	bool SetSessionRefresher( const char * pszCallId, int iRefresher );
+	/** 다음에 받는 re-INVITE 의 200 OK(스택이 기존 local SDP 로 만드는 응답)에 **한 번** 실을 헤더. 응용이 re-INVITE 를
+	 *  스택보다 먼저 보는 자리(ISipStackCallBack::RecvRequest)에서 부른다 — 예 MCPTT Warning 149 (TS 24.379
+	 *  §10.1.1.4.7 200 OK 5)·6)·7)). 다이얼로그가 없으면 false. */
+	bool AddReInviteAnswerHeader( const char * pszCallId, const char * pszName, const char * pszValue );
 
 	// SipUserAgentSessionTimer.hpp : 세션 타이머 (RFC 4028)
 	void SetSessionTimer( bool bEnable, int iSessionExpires, int iMinSE, int iRefresher );

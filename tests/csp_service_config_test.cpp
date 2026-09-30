@@ -1,7 +1,10 @@
-// CSP service-config 해석 단위시험 — csp/CspServiceConfig.h `DurationMs` / `Parse`.
+// CSP service-config 해석 단위시험 — csp/CspServiceConfig.h `DurationMs` / `Parse` / `ParsePriority` /
+//   `ParseEmergencyGroupTimeLimitSec`.
 //   TS 24.484 §8.4 문서의 on-network <transmit-time><time-limit>(T2)·<fc-timers-counters> 를 CMP floor_timers 값(초·횟수)으로
 //   옮긴다. xs:duration(PT<h>H<m>M<n>S, 소수 초), on-network 범위 한정(off-network 의 transmit-time 무시), 이름 경계
-//   (<group-time-limit> 은 <time-limit> 이 아니다), 문서에 없는 값 = -1 이 요점이다.
+//   (<group-time-limit> 은 <time-limit> 이 아니다), 문서에 없는 값 = -1 이 요점이다. Resource-Priority 는
+//   <emergency-/imminent-peril-/normal-resource-priority> 의 namespace.priority(TS 24.379 §6.3.3.1.19, 없는 항목 = mcpttp 기본값),
+//   TNG2 는 <emergency-call><group-time-limit>(§6.3.3.1.16, 없으면 -1).
 //   빌드·실행은 S1-UNIT-CSP(verify/lib/items/stage1/unit_csp.py)가 수행한다.
 #include "CspServiceConfig.h"
 #include <cstdio>
@@ -32,5 +35,23 @@ int main(){
   CK("absent = -1",CCspServiceConfig::Parse("<service-configuration-info/>",g) && g.iT1Sec==-1 && g.iT2Sec==-1 && g.iC7==-1);
   CspFloorParams h;
   CK("old root rejected",!CCspServiceConfig::Parse("<mcptt-service-config/>",h));
+  CK("TNG2 group-time-limit",CCspServiceConfig::ParseEmergencyGroupTimeLimitSec(doc)==99);
+  CK("TNG2 absent",CCspServiceConfig::ParseEmergencyGroupTimeLimitSec("<service-configuration-info><on-network/></service-configuration-info>")==-1);
+  const char* rpdoc =
+    "<service-configuration-info><service-configuration-params domain=\"d\"><on-network>"
+    "<emergency-resource-priority>\n <resource-priority-namespace>mcpttp</resource-priority-namespace>\n"
+    " <resource-priority-priority>14</resource-priority-priority></emergency-resource-priority>"
+    "<normal-resource-priority><resource-priority-namespace>mcpttq</resource-priority-namespace>"
+    "<resource-priority-priority>1</resource-priority-priority></normal-resource-priority>"
+    "<imminent-peril-resource-priority><resource-priority-namespace>mcpttp</resource-priority-namespace></imminent-peril-resource-priority>"
+    "</on-network></service-configuration-params></service-configuration-info>";
+  CspPriorityParams rp;
+  CCspServiceConfig::ParsePriority(rpdoc,rp);
+  CK("RP emergency ns.prio",rp.strEmergency=="mcpttp.14");
+  CK("RP normal other ns",rp.strNormal=="mcpttq.1");
+  CK("RP imminent partial = default",rp.strImminentPeril=="mcpttp.8");
+  CspPriorityParams rp0;
+  CCspServiceConfig::ParsePriority("<service-configuration-info/>",rp0);
+  CK("RP absent = default",rp0.strEmergency=="mcpttp.15" && rp0.strImminentPeril=="mcpttp.8" && rp0.strNormal=="mcpttp.0");
   printf("%s (%d fail)\n",fail?"FAIL":"PASS",fail); return fail?1:0;
 }

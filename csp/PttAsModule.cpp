@@ -3,6 +3,7 @@
 #include "CallDir.h"
 #include "CspUser.h"
 #include "DbManager.h"
+#include "GroupCallService.h"
 #include "GroupMap.h"
 #include "Log.h"
 #include "ModuleDispatcher.h"
@@ -34,20 +35,29 @@ namespace {
      *  요소 순서 = mcptt-ParamsType 시퀀스. */
     std::string _BuildAlertNotification( const std::string &strMemberId, const std::string &strCallingUserId,
                                          const std::string &strGroupId, bool bActivate,
-                                         const std::string &strOriginatedBy, bool bEmergencyCancel ) {
+                                         const std::string &strOriginatedBy ) {
+        McpttIndicators clsInd;
+        clsInd.iAlert = bActivate ? 1 : 0;         // §6.3.3.1.12 1) · §12.1.3.2 2)c)iv)
+        clsInd.strOriginatedBy = strOriginatedBy;  // §12.1.3.2 2)c)iii)
         std::string s =
-            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n"
-            "<mcpttinfo xmlns=\"urn:3gpp:ns:mcpttInfo:1.0\">\r\n"
-            "  <mcptt-Params>\r\n";
-        s += McpttInfoUri( "mcptt-request-uri", "tel:" + strMemberId );           // §6.3.3.1.11 7) 대상 사용자 MCPTT ID
+            McpttInfoUri( "mcptt-request-uri", "tel:" + strMemberId );            // §6.3.3.1.11 7) 대상 사용자 MCPTT ID
         s += McpttInfoUri( "mcptt-calling-user-id", "tel:" + strCallingUserId );  // §12.1.3.2 2)c)ii) · §12.1.2.1 9)
         s += McpttInfoUri( "mcptt-calling-group-id", "tel:" + strGroupId );       // §6.3.3.1.11 8)
-        if ( bEmergencyCancel ) s += McpttInfoBool( "emergency-ind", false );     // §12.1.3.2 2)d)iv)E)
-        s += McpttInfoBool( "alert-ind", bActivate );                             // §6.3.3.1.12 1) · §12.1.3.2 2)c)iv)
-        if ( !strOriginatedBy.empty() ) s += McpttInfoUri( "originated-by", strOriginatedBy );  // §12.1.3.2 2)c)iii)
-        s += "  </mcptt-Params>\r\n"
-             "</mcpttinfo>\r\n";
-        return s;
+        s += McpttIndicatorElems( clsInd ) + McpttIndicatorOriginatedBy( clsInd );
+        return McpttInfoDocument( s );
+    }
+
+    /** 거절 응답 + mcptt-info 본문 (§12.1.3.1 4)a)·§12.1.3.2 1)a)·§12.1.3.3 1)a)). psip 은 응답을 보내지 않게 0 을
+     * 돌려준다. */
+    int _RejectWithInfo( CSipMessage *pclsMessage, int iStatus, const McpttIndicators &clsInd ) {
+        CSipMessage *pclsResp = pclsMessage->CreateResponseWithToTag( iStatus );
+        if ( pclsResp ) {
+            pclsResp->m_strBody = McpttInfoDocument( McpttIndicatorElems( clsInd ) );
+            pclsResp->m_iContentLength = (int)pclsResp->m_strBody.size();
+            pclsResp->m_clsContentType.Set( "application", "vnd.3gpp.mcptt-info+xml" );
+            gclsUserAgent.m_clsSipStack.SendSipMessage( pclsResp );
+        }
+        return 0;
     }
 
     /** multipart 본문에서 지정 Content-Type 파트의 원문(헤더 제외)을 꺼낸다. 없으면 빈 문자열. */
@@ -82,7 +92,6 @@ namespace {
 
 int CPttAsModule::OnEmergencyAlert( const char *pszFrom, const char *pszTo, CSipMessage *pclsMessage,
                                     const CMcpttInfo &clsMi ) {
-    const bool bActivate = clsMi.bAlert;  // true=경보, false=경보 취소
     const std::string strFrom = pszFrom ? pszFrom : "";
 
     // 대상 그룹 — 본문 <mcptt-request-uri>(§12.1.1.1 4)a)), Request-URI 가 그룹이면 그 그룹(전환기).
@@ -102,72 +111,139 @@ int CPttAsModule::OnEmergencyAlert( const char *pszFrom, const char *pszTo, CSip
         return SIP_NOT_FOUND;
     }
 
-    // 인가 — 그룹 allow-MCPTT-emergency-alert(TS 24.481) AND 사용자 allow-activate-emergency-alert(TS 24.484,
-    //   §6.3.3.1.13.1). 미인가 경보는 전파하지 않는다. 취소는 사용자 게이트 비대상(잔존 경보 정리 경로 보존).
-    bool bAllowed = clsGroup._emergencyAlert;
-    if ( bAllowed && bActivate ) {
-        CspUserProfile clsProf;
-        if ( gclsDbManager.SelectUserProfile( strFrom, clsProf ) >= 0 && !clsProf.m_bAllowEmergencyAlert ) {
-            bAllowed = false;
-            CLog::Print( LOG_INFO, "PTT-AS: alert by(%s) not authorised (user profile) → drop", strFrom.c_str() );
+    const bool bAlertTrue = clsMi.bHasAlertInd && clsMi.bAlert;
+    const bool bAlertFalse = clsMi.bHasAlertInd && !clsMi.bAlert;
+    const bool bEmgFalse = clsMi.bHasEmergencyInd && !clsMi.bEmergency;
+
+    // ── 경보 발령 (§12.1.3.1 4)) — 인가 = 그룹 allow-MCPTT-emergency-alert(TS 24.481) ∧ 사용자
+    // allow-activate-emergency-
+    //    alert(TS 24.484, §6.3.3.1.13.1). 미인가는 403 + alert-ind false (4)a)). ──
+    if ( bAlertTrue ) {
+        if ( !gclsGroupCallService.IsAlertActivateAuthorized( clsGroup, strFrom ) ) {
+            CLog::Print( LOG_INFO, "PTT-AS: alert by(%s) group(%s) not authorised → 403", strFrom.c_str(),
+                         strGroupId.c_str() );
+            McpttIndicators b;
+            b.iAlert = 0;
+            return _RejectWithInfo( pclsMessage, SIP_FORBIDDEN, b );
         }
+        gclsGroupCallService.SetAlertOutstanding( strGroupId, strFrom, true );  // 4)b)iii)A)
+        const int iFanout = FanoutAlert( strFrom, strGroupId, clsGroup, pclsMessage, true, "" );
+        CLog::Print( LOG_INFO, "PTT-AS: MCPTT emergency alert_sent from(%s) group(%s) R-URI(%s) fanout=%d",
+                     strFrom.c_str(), strGroupId.c_str(), pszTo ? pszTo : "", iFanout );
+        return SIP_OK;  // 4)b)iv)
     }
 
-    const char *pszEvt = bActivate ? "alert_sent" : "alert_cancelled";
-    int iFanout = 0;
-    if ( bAllowed ) {
+    // ── 취소 — 경보 취소(§12.1.3.2)·그룹 긴급 상태 해제(§12.1.3.2 1)b)·2)d)·호 없음 §12.1.3.3) ──
+    //    경보 취소 인가 = allow-cancel-emergency-alert(§6.3.3.1.13.3), 긴급 해제 인가 = local policy(§6.3.3.1.13.4 —
+    //    개시자 ∨ allow-cancel-group-emergency). 그룹 긴급 상태의 수명은 그룹 세션이라(편차 표) 호가 없으면 해제할
+    //    상태도 없다 — 그때 해제 요청은 할 일이 없는 요청으로 200.
+    const bool bStateEmg = gclsGroupCallService.GroupConditionOf( strGroupId ) >= 2;
+    std::string strReason;
+    const bool bEmgCancelOk =
+        bEmgFalse && bStateEmg && gclsGroupCallService.IsEmergencyCancelAuthorized( strGroupId, strFrom, strReason );
+    const std::string strAlertOwner =
+        clsMi.strOriginatedBy.empty() ? strFrom : McpttBareId( clsMi.strOriginatedBy );  // §12.1.3.2 2)a)·b)
+
+    if ( bAlertFalse ) {
+        if ( !gclsGroupCallService.IsAlertCancelAuthorized( strFrom ) ) {
+            if ( !bEmgCancelOk ) {
+                // 1)a) — 403 + alert-ind true, 긴급 해제도 비인가면 emergency-ind true
+                CLog::Print( LOG_INFO, "PTT-AS: alert cancel by(%s) group(%s) not authorised%s → 403", strFrom.c_str(),
+                             strGroupId.c_str(), ( bEmgFalse && bStateEmg ) ? " (emergency cancel too)" : "" );
+                McpttIndicators b;
+                if ( bEmgFalse && bStateEmg ) b.iEmergency = 1;
+                b.iAlert = 1;
+                return _RejectWithInfo( pclsMessage, SIP_FORBIDDEN, b );
+            }
+            // 1)b) — 긴급 상태만 해제한다(경보는 남는다)
+            gclsGroupCallService.CancelGroupEmergency( strGroupId, strFrom, McpttIndicators(), strFrom, "message" );
+            return SIP_OK;
+        }
+        gclsGroupCallService.SetAlertOutstanding( strGroupId, strAlertOwner, false );  // 2)a)·b)
         if ( gclsCallDir.IsEnabled() )
-            gclsCallDir.PttLogEvent( strGroupId, pszEvt,
+            gclsCallDir.PttLogEvent( strGroupId, "alert_cancelled",
                                      std::string( "{\"actor\":\"" ) + CCallDir::JsonEsc( strFrom ) +
                                          "\",\"target\":\"" + CCallDir::JsonEsc( strGroupId ) + "\"}" );
-
-        // 제3자 취소 — <originated-by> 는 그대로 옮긴다(§12.1.3.2 2)c)iii)). 경보 취소에 동봉된 그룹 긴급 해제
-        //   (<emergency-ind>false) 는 제휴 멤버 통지에 emergency-ind=false 로 싣는다(§12.1.3.2 2)d)iv)).
-        const bool bEmergencyCancel = !bActivate && clsMi.bHasEmergencyInd && !clsMi.bEmergency;
-        const std::string strOriginatedBy = bActivate ? std::string() : clsMi.strOriginatedBy;
-        // 발신자 MCPTT ID — 참여 기능이 서빙 사용자로 정한다(§12.1.2.1 9)), 본문 값은 쓰지 않는다.
-        const std::string &strCallingUserId = strFrom;
-
-        // 위치 정보 파트는 옮긴다(§6.3.3.1.12 4)).
-        const std::string strLocation = _MimePart( pclsMessage, "mcptt-location-info" );
-
-        // §6.3.3.1.11 2)·3)·6) — MCPTT feature tag·ICSI Accept-Contact, P-Asserted-Service(RFC 6050 §4.1 헤더 이름)
-        const std::vector<std::pair<std::string, std::string>> vecHeaders = {
-            { "Accept-Contact", "*;+g.3gpp.mcptt;require;explicit" },
-            { "Accept-Contact", "*;+g.3gpp.icsi-ref=\"urn%3Aurn-7%3A3gpp-service.ims.icsi.mcptt\";require;explicit" },
-            { "P-Asserted-Service", "urn:urn-7:3gpp-service.ims.icsi.mcptt" } };
-
-        for ( const auto &pUser : clsGroup._pusers ) {
-            if ( !pUser || pUser->_id == strFrom ) continue;
-            // 제휴 멤버만(§12.1.3.1·§12.1.3.2 2)c) "affiliated members")
-            if ( clsGroup._requireAffiliation && gclsDbManager.IsConnected() &&
-                 !gclsDbManager.IsAffiliated( strGroupId, pUser->_id ) )
-                continue;
-            CUserInfo clsMemInfo;
-            if ( !gclsUserMap.Select( pUser->_id.c_str(), clsMemInfo ) ) continue;
-            CSipCallRoute clsMemRoute;
-            clsMemInfo.GetCallRoute( clsMemRoute );
-
-            const std::string strInfo = _BuildAlertNotification( pUser->_id, strCallingUserId, strGroupId, bActivate,
-                                                                 strOriginatedBy, bEmergencyCancel );
-            std::string strBody, strContentType;
-            if ( strLocation.empty() ) {
-                strBody = strInfo;
-                strContentType = "application/vnd.3gpp.mcptt-info+xml";
-            } else {
-                const std::string strBoundary = "mcptt-alert-boundary";
-                strBody = "--" + strBoundary + "\r\nContent-Type: application/vnd.3gpp.mcptt-info+xml\r\n\r\n" +
-                          strInfo + "\r\n--" + strBoundary +
-                          "\r\nContent-Type: application/vnd.3gpp.mcptt-location-info+xml\r\n\r\n" + strLocation +
-                          "\r\n--" + strBoundary + "--\r\n";
-                strContentType = "multipart/mixed;boundary=" + strBoundary;
-            }
-            if ( gclsUserAgent.SendSms( strFrom.c_str(), pUser->_id.c_str(), strBody.c_str(), &clsMemRoute,
-                                        strContentType.c_str(), &vecHeaders ) )
-                iFanout++;
+        if ( bEmgCancelOk ) {
+            // 2)d) — 긴급 해제와 함께: 참여 멤버 re-INVITE(alert-ind false + originated-by, §6.3.3.1.6 4)b)ii)),
+            //   참여하지 않은 제휴 멤버 MESSAGE(alert-ind false + emergency-ind false, 2)d)iv))
+            McpttIndicators a;
+            a.iAlert = 0;
+            a.strOriginatedBy = clsMi.strOriginatedBy;
+            gclsGroupCallService.CancelGroupEmergency( strGroupId, strFrom, a, strFrom, "message" );
+        } else {
+            // 2)c) — 제휴 멤버 전원에 경보 취소 통지(긴급 해제가 없거나 비인가면 emergency-ind 는 싣지 않는다)
+            const int iFanout = FanoutAlert( strFrom, strGroupId, clsGroup, pclsMessage, false, clsMi.strOriginatedBy );
+            CLog::Print(
+                LOG_INFO, "PTT-AS: MCPTT emergency alert_cancelled from(%s) group(%s) owner(%s) fanout=%d%s",
+                strFrom.c_str(), strGroupId.c_str(), strAlertOwner.c_str(), iFanout,
+                bEmgFalse ? ( bStateEmg ? " (emergency cancel not authorised)" : " (no emergency state)" ) : "" );
         }
+        return SIP_OK;  // 2)e)·f)
     }
-    CLog::Print( LOG_INFO, "PTT-AS: MCPTT emergency %s from(%s) group(%s) R-URI(%s) fanout=%d", pszEvt, strFrom.c_str(),
-                 strGroupId.c_str(), pszTo ? pszTo : "", iFanout );
-    return SIP_OK;  // §12.1.3.1 iii)·§12.1.3.2 2)e) 200 OK
+
+    // 긴급 상태 해제만 (§12.1.3.3 — alert-ind 없음)
+    if ( !bStateEmg ) {
+        CLog::Print( LOG_INFO, "PTT-AS: emergency cancel MESSAGE from(%s) group(%s) — 긴급 상태 없음(무동작)",
+                     strFrom.c_str(), strGroupId.c_str() );
+        return SIP_OK;
+    }
+    if ( !bEmgCancelOk ) {
+        CLog::Print( LOG_INFO, "PTT-AS: emergency cancel MESSAGE from(%s) group(%s) not authorised (%s) → 403",
+                     strFrom.c_str(), strGroupId.c_str(), strReason.c_str() );
+        McpttIndicators b;  // 1)a)i)
+        b.iEmergency = 1;
+        return _RejectWithInfo( pclsMessage, SIP_FORBIDDEN, b );
+    }
+    gclsGroupCallService.CancelGroupEmergency( strGroupId, strFrom, McpttIndicators(), strFrom, "message" );  // 2)
+    return SIP_OK;
+}
+
+int CPttAsModule::FanoutAlert( const std::string &strFrom, const std::string &strGroupId, const CspPttGroup &clsGroup,
+                               CSipMessage *pclsMessage, bool bActivate, const std::string &strOriginatedBy ) {
+    if ( bActivate && gclsCallDir.IsEnabled() )
+        gclsCallDir.PttLogEvent( strGroupId, "alert_sent",
+                                 std::string( "{\"actor\":\"" ) + CCallDir::JsonEsc( strFrom ) + "\",\"target\":\"" +
+                                     CCallDir::JsonEsc( strGroupId ) + "\"}" );
+    // 발신자 MCPTT ID — 참여 기능이 서빙 사용자로 정한다(§12.1.2.1 9)), 본문 값은 쓰지 않는다.
+    const std::string &strCallingUserId = strFrom;
+    // 위치 정보 파트는 옮긴다(§6.3.3.1.12 4)).
+    const std::string strLocation = _MimePart( pclsMessage, "mcptt-location-info" );
+    // §6.3.3.1.11 2)·3)·6) — MCPTT feature tag·ICSI Accept-Contact, P-Asserted-Service(RFC 6050 §4.1 헤더 이름)
+    const std::vector<std::pair<std::string, std::string>> vecHeaders = {
+        { "Accept-Contact", "*;+g.3gpp.mcptt;require;explicit" },
+        { "Accept-Contact", "*;+g.3gpp.icsi-ref=\"urn%3Aurn-7%3A3gpp-service.ims.icsi.mcptt\";require;explicit" },
+        { "P-Asserted-Service", "urn:urn-7:3gpp-service.ims.icsi.mcptt" } };
+
+    int iFanout = 0;
+    for ( const auto &pUser : clsGroup._pusers ) {
+        if ( !pUser || pUser->_id == strFrom ) continue;
+        // 제휴 멤버만(§12.1.3.1·§12.1.3.2 2)c) "affiliated members")
+        if ( clsGroup._requireAffiliation && gclsDbManager.IsConnected() &&
+             !gclsDbManager.IsAffiliated( strGroupId, pUser->_id ) )
+            continue;
+        CUserInfo clsMemInfo;
+        if ( !gclsUserMap.Select( pUser->_id.c_str(), clsMemInfo ) ) continue;
+        CSipCallRoute clsMemRoute;
+        clsMemInfo.GetCallRoute( clsMemRoute );
+
+        const std::string strInfo =
+            _BuildAlertNotification( pUser->_id, strCallingUserId, strGroupId, bActivate, strOriginatedBy );
+        std::string strBody, strContentType;
+        if ( strLocation.empty() ) {
+            strBody = strInfo;
+            strContentType = "application/vnd.3gpp.mcptt-info+xml";
+        } else {
+            const std::string strBoundary = "mcptt-alert-boundary";
+            strBody = "--" + strBoundary + "\r\nContent-Type: application/vnd.3gpp.mcptt-info+xml\r\n\r\n" + strInfo +
+                      "\r\n--" + strBoundary +
+                      "\r\nContent-Type: application/vnd.3gpp.mcptt-location-info+xml\r\n\r\n" + strLocation +
+                      "\r\n--" + strBoundary + "--\r\n";
+            strContentType = "multipart/mixed;boundary=" + strBoundary;
+        }
+        if ( gclsUserAgent.SendSms( strFrom.c_str(), pUser->_id.c_str(), strBody.c_str(), &clsMemRoute,
+                                    strContentType.c_str(), &vecHeaders ) )
+            iFanout++;
+    }
+    return iFanout;
 }

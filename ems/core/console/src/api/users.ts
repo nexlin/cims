@@ -60,10 +60,28 @@ export interface McpttProfile {
   // allow-to-receive-non-acknowledged-users-information (TS 24.484 ruleset anyExt) — 그룹 호 개시자일 때 확인 통화 설정이
   //   필수 멤버 없이 진행되면 응답하지 않은 멤버 목록(INFO)을 받는다 (TS 24.379 §6.3.3.3, 기본 false). 컬럼 미적용 DB 는 false.
   allow_non_ack_users_info?: boolean
+  // 해제 인가 (TS 24.484 ruleset) — 컬럼 미적용 DB 는 부재 시 값(mcpttProfileOptDefault).
+  //   allow-cancel-group-emergency — 그룹의 진행 중 긴급 상태 해제 (개시자는 항상 — TS 24.379 §6.3.3.1.13.4 local policy, 기본 false)
+  allow_cancel_group_emergency?: boolean
+  //   allow-cancel-imminent-peril — 임박 위험 해제 (개시자 예외 없음 — §6.3.3.1.13.6, 기본 true)
+  allow_cancel_imminent_peril?: boolean
+  //   allow-cancel-emergency-alert — 긴급 경보 취소 (남의 경보 포함 — §6.3.3.1.13.3, 기본 = allow_emergency_alert)
+  allow_cancel_emergency_alert?: boolean
 }
 
-// 선택 컬럼(마이그레이션 의존) 자격 — 컬럼 미적용 DB 에 키를 실으면 PUT 이 400 schema_not_migrated, 키가 없으면 서버가 0 으로 쓴다.
-export const MCPTT_PROFILE_OPT_KEYS = ['allow_ambient_listening', 'allow_create_group', 'allow_non_ack_users_info'] as const
+// 선택 컬럼(마이그레이션 의존) 자격 — 컬럼 미적용 DB 에 키를 실으면 PUT 이 400 schema_not_migrated, 키가 없으면 서버가
+//   부재 시 값(mcpttProfileOptDefault)으로 쓴다.
+export const MCPTT_PROFILE_OPT_KEYS = ['allow_ambient_listening', 'allow_create_group', 'allow_non_ack_users_info',
+  'allow_cancel_group_emergency', 'allow_cancel_imminent_peril', 'allow_cancel_emergency_alert'] as const
+export type McpttProfileOptKey = typeof MCPTT_PROFILE_OPT_KEYS[number]
+
+// 선택 컬럼의 부재 시 값 — 서버(CSC services.mcptt.user_profile_opt_default)와 같은 규칙: 대개 false, 임박 위험 해제 true,
+//   경보 취소 = 같은 프로파일의 발령 인가.
+export function mcpttProfileOptDefault(k: McpttProfileOptKey, p: Pick<McpttProfile, 'allow_emergency_alert'>): boolean {
+  if (k === 'allow_cancel_imminent_peril') return true
+  if (k === 'allow_cancel_emergency_alert') return !!p.allow_emergency_alert
+  return false
+}
 
 // 가입자(person). login_id/passwd = 단말(IdMS) 로그인 자격 — MCPTT ID 와 별개.
 //   (콘솔 admin 계정은 별도 console_accounts. passwd 는 목록 응답에 미포함, 편집 입력만.)

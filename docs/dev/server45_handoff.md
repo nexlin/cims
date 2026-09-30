@@ -240,6 +240,32 @@ P3(ptt-client SDK 전환) 실측에서 더 드러난 것 — .48 반영·배포(
 - **설정(.48 → 공유 DB)** — g005 그룹 능력 `emergency_call` 켬 · 계측기 신원 013 의 user profile 긴급 대상 = `DedicatedGroup g005`.
   `cimsue-cli group-call g005 --upgrade-at 3 --cancel-at 7` → 상향 **Confirmed 200** · 하향 Confirmed 200. .45 CSP 는 같은 DB 라도 캐시가 통지로만
   갱신되므로 .45 에서 시험하기 전에 CSP 재적재가 필요할 수 있다.
-- **남은 경보 편차** — `<mc-org>`(§6.3.3.1.12, 값 정본 = CSC 설정)·수신 확인 `<alert-ind-rcvd>`(§6.3.3.1.20)·미인가 취소 403(§12.1.3.2 1)) —
+- **남은 경보 편차** — `<mc-org>`(§6.3.3.1.12, 값 정본 = CSC 설정)·수신 확인 `<alert-ind-rcvd>`(§6.3.3.1.20) —
   [mcptt_emergency_modes.md](../design/features/mcptt_emergency_modes.md) §4.3 편차 표.
 - **보안 관찰** — CSP `CmdpClient` 는 이벤트 datagram 의 출처(cmdp 주소)를 검사하지 않는다. 별도 과제.
+
+## 10. 긴급·경보 관제 경로 — 서버 반영분의 .45 짝
+
+Windows 관제 앱 보완이 서버에 남긴 과제(긴급·임박 해제 인가, 청취 leg 조건 재광고, 경보 취소 인가, Resource-Priority 정본, TNG2·MESSAGE 긴급 해제,
+SDS 전달 확인 규격 경로)를 .48 에서 반영·배포(**csp 0.2.180 · csc 0.2.138 · oam 0.2.182**)·실측했다. 정본 = [mcptt_emergency_modes.md](../design/features/mcptt_emergency_modes.md)
+§4.2·§4.3 · [mcdata_messaging.md](../design/features/mcdata_messaging.md) §4.4.
+
+- **DB** — `sql/migrate_ptt_user_profile_cancel_authz.sql`(`allow_cancel_group_emergency` 0 · `allow_cancel_imminent_peril` 1 ·
+  `allow_cancel_emergency_alert` = 발령 값) **공유 DB 적용 완료**. 컬럼 추가뿐이라 옛 CSP·CSC 는 영향이 없다.
+- **해제 인가(TS 24.484 ruleset)** — 긴급 해제 = 개시자 ∨ `allow-cancel-group-emergency`(local policy §6.3.3.1.13.4), 임박 해제 = `allow-cancel-imminent-peril`
+  (§6.3.3.1.13.6), 경보 취소 = `allow-cancel-emergency-alert`(§6.3.3.1.13.3). 비인가·다른 긴급 사용자 송출 중(7a))은 **403 + 현재 상태 지시자**.
+  CSC user profile 문서가 세 요소를 싣고(규격 목록 순), 콘솔 PTT 회선 카드 «긴급 (SOS)» 에 체크박스가 있다. 관제사에게 긴급 해제를 주려면
+  그 사람의 PTT 회선에 «긴급 해제» 를 켠다.
+- **단말에 보이는 동작 변화** — 미인가 경보 **발령**도 이제 403 + `alert-ind` false(§12.1.3.1 4)a) — 전에는 200 으로 받고 전파만 안 했다).
+  SDK 는 `onRequestResult` MESSAGE 403 으로 받는다. 옛 ptt-client 의 경보 배너 정합은 403 을 실패로 다뤄야 한다(빌드 확인은 .45).
+- **SDK 코어(.45 몫, [ue_sdk.md](../design/features/ue_sdk.md) §11)** — ① user profile 의 `allow-cancel-group-emergency`·`allow-cancel-imminent-peril` 해석 →
+  C API·.NET·Kotlin (관제 앱 [긴급 해제] 자격이 기다린다) ② `sendSdsNotification` 규격 본문(MCData PSI · resource-lists · `mcdata-calling-group-id` ·
+  ICSI Accept-Contact) — CSP 는 규격형·옛 형식 둘 다 받는다(서버 대역 `tests/sds_disposition_spec.py`) ③ `setCallCondition` 의 임박 → 긴급 상향이
+  `imminentperil-ind` false 를 함께 싣는 것(§6.3.3.1.17 조합 위반 — 서버는 지금 검증하지 않는다).
+- **.45 스택에 올릴 때** — CSP·CSC 를 함께(CSC 가 새 프로파일 요소를 내고 CSP 가 같은 값으로 판정한다). 시험 전에 해제 권한이 필요한 관제
+  계정의 «긴급 해제» 를 켠다 — 기본값은 개시자만이다.
+- **.48 실측** — cimsue-cli(013 개시·014/015/016 멤버·010 청취): 비인가 해제 403(`emergency-ind` true, 코어 `denied`) · 인가 해제 200 + 참여 leg
+  재광고(멤버 leg 는 초기 fan-out 구성의 floor `m=application`, 개시자 leg 는 성립 SDP 그대로) · 비참여 제휴 멤버 통지 MESSAGE · 청취 leg 재광고
+  (`sendonly` 오퍼 ↔ `recvonly` 응답, 은닉 청취는 로스터 비노출) · 7a) 개시자 발언 중 해제 403 · 경보 취소 비인가 403(`alert-ind` true) · 제3자 경보
+  취소 전파(`originated-by`) · 미인가 발령 403 · MESSAGE 긴급 해제(경보는 남김, 1)b)) · TNG2 8 s 만료 해제 · RP `mcpttp.14` 반영 ·
+  `tests/sds_disposition_spec.py` 11/11. 계측기 PTT·MCData 회귀 pass. Warning 149(+INFO)·임박 해제는 cimsue-cli 에 해당 동작이 없어 코드 경로만.

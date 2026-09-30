@@ -7,8 +7,10 @@
 긴급 요소는 항상 존재(§8.3.2.1 shall) — 미지정은 entry-info 폴백 + ruleset 미인가, ProSe User-Info-ID 영값, 루트 Status,
 선택이지만 필수로 읽는 단말용으로 항상 싣는 것(alias-entry index·xml:lang, ParticipantType — xml:lang 은 Name 과 같은 값),
 common-policy ruleset, escape, ETag 내용 파생, 단말 정규식 호환(첫 MCPTTGroupInitiation = EmergencyCall),
-ruleset anyExt 의 미응답 멤버 알림 자격(allow-to-receive-non-acknowledged-users-information, TS 24.379 §6.3.3.3) —
-admin API 프로파일 GET/PUT 의 선택 컬럼 규약(부재 = false·입력 400)과 캐시 반영까지.
+ruleset anyExt 의 미응답 멤버 알림 자격(allow-to-receive-non-acknowledged-users-information, TS 24.379 §6.3.3.3),
+ruleset 해제 인가 셋(allow-cancel-group-emergency·allow-cancel-imminent-peril·allow-cancel-emergency-alert — 목록 순서·
+대상 결정과 AND 하지 않음·부재 시 값) — admin API 프로파일 GET/PUT 의 선택 컬럼 규약(부재 = 부재 시 값·입력 400)과 캐시 반영까지,
+service-config 문서의 on-network <emergency-call><group-time-limit>(TNG2 — 0 이면 요소 생략).
 
   python3 -m unittest tests.test_csc_user_profile
 """
@@ -213,6 +215,46 @@ class UserProfileDocTest(unittest.TestCase):
         _, root, _ = self._doc()
         self.assertEqual(root.find(".//up:allow-to-receive-non-acknowledged-users-information", NS).text, "false")
 
+    ACTIONS_ORDER = ["allow-emergency-group-call", "allow-emergency-private-call", "allow-cancel-group-emergency",
+                     "allow-cancel-imminent-peril", "allow-activate-emergency-alert", "allow-cancel-emergency-alert",
+                     "allow-ambient-listening", "anyExt", "allow-adhoc-group-call", "allow-create-group"]
+
+    def _acts(self):
+        _, root, _ = self._doc()
+        return root.find("cp:ruleset/cp:rule/cp:actions", NS)
+
+    def test_cancel_authorisation_order_and_defaults(self):
+        # TS 24.484 §8.3.2.1 11) 목록 순 — 긴급 개시 둘 → 해제 둘 → 경보 발령·취소 → 원격 청취 → anyExt, 그 뒤 cims 확장
+        acts = self._acts()
+        self.assertEqual([c.tag.split("}")[1] for c in acts], self.ACTIONS_ORDER)
+        self.assertEqual([c.tag.split("}")[0][1:] for c in acts][-2:], [NS["cims"], NS["cims"]])
+        # 기본값 — 그룹 긴급 해제 false(개시자만, local policy) · 임박 위험 해제 true · 경보 취소 = 발령 인가(기본 true).
+        #   해제 인가는 대상 결정과 AND 하지 않는다 — 전용 긴급그룹 미지정으로 발령 인가가 false 여도 취소 인가는 true.
+        self.assertEqual(acts.find("up:allow-cancel-group-emergency", NS).text, "false")
+        self.assertEqual(acts.find("up:allow-cancel-imminent-peril", NS).text, "true")
+        self.assertEqual(acts.find("up:allow-activate-emergency-alert", NS).text, "false", "DedicatedGroup 미지정 → 발령 미인가")
+        self.assertEqual(acts.find("up:allow-cancel-emergency-alert", NS).text, "true", "취소 인가는 대상 결정과 무관")
+
+    def test_cancel_authorisation_values(self):
+        m.PTT_PROFILES["+82500000001"] = dict(m.DEFAULT_USER_PROFILE, emergency_group_id="g001",
+                                             allow_cancel_group_emergency=True, allow_cancel_imminent_peril=False,
+                                             allow_emergency_alert=True, allow_cancel_emergency_alert=False)
+        acts = self._acts()
+        self.assertEqual(acts.find("up:allow-cancel-group-emergency", NS).text, "true")
+        self.assertEqual(acts.find("up:allow-cancel-imminent-peril", NS).text, "false")
+        self.assertEqual(acts.find("up:allow-activate-emergency-alert", NS).text, "true")
+        self.assertEqual(acts.find("up:allow-cancel-emergency-alert", NS).text, "false", "발령과 취소는 따로 — 발령만 주는 배정")
+
+    def test_cancel_authorisation_absent_keys(self):
+        # 옛 캐시 항목(키 없음) — 그룹 긴급 해제 false · 임박 위험 해제 true · 경보 취소 = 발령 인가 값(종전 문서와 같은 값)
+        base = {k: v for k, v in m.DEFAULT_USER_PROFILE.items() if not k.startswith("allow_cancel_")}
+        for alert in (True, False):
+            m.PTT_PROFILES["+82500000001"] = dict(base, emergency_group_id="g001", allow_emergency_alert=alert)
+            acts = self._acts()
+            self.assertEqual(acts.find("up:allow-cancel-group-emergency", NS).text, "false")
+            self.assertEqual(acts.find("up:allow-cancel-imminent-peril", NS).text, "true")
+            self.assertEqual(acts.find("up:allow-cancel-emergency-alert", NS).text, "true" if alert else "false")
+
     def test_user_profile_config_and_etag(self):
         _, root, etag1 = self._doc()
         m.USER_PROFILE_CONFIG.update({"MaxSimultaneousCallsN6": 3, "MissionCriticalOrganization": "포인티 <PS>"})
@@ -231,6 +273,8 @@ class UserProfileDocTest(unittest.TestCase):
 class _ProfCur:
     """admin 프로파일 GET/PUT 이 내는 SQL 만 흉내 내는 DictCursor — cols = 선택 컬럼 중 DB 에 있는 것."""
 
+    _CANCEL = ("allow_cancel_group_emergency", "allow_cancel_imminent_peril", "allow_cancel_emergency_alert")
+
     def __init__(self, cols, row=None):
         self.cols = set(cols)
         self.row = row
@@ -248,9 +292,17 @@ class _ProfCur:
         elif s.startswith("SELECT allow_emergency_call") and "FROM ptt_user_profile WHERE ptt_id=%s" in s:
             if self.row is not None:
                 r = dict(self.row)
-                for c in ("allow_ambient_listening", "allow_create_group", "allow_non_ack_users_info"):
+                for c in ("allow_ambient_listening", "allow_create_group", "allow_non_ack_users_info",
+                          "allow_cancel_group_emergency"):
                     if f"0 AS {c}" in s:
                         r[c] = 0                     # 부재 컬럼 = 상수 0 별칭
+                if "1 AS allow_cancel_imminent_peril" in s:
+                    r["allow_cancel_imminent_peril"] = 1                          # 부재 = 1 (규격 기본 허용)
+                if "allow_emergency_alert AS allow_cancel_emergency_alert" in s:
+                    r["allow_cancel_emergency_alert"] = r["allow_emergency_alert"]  # 부재 = 발령 인가 값
+                for c in self._CANCEL:
+                    if c not in r:
+                        raise AssertionError(f"{c} 가 SELECT 에 없다: {s}")
                 self._rows = [r]
         elif s.startswith("INSERT INTO ptt_user_profile"):
             head = s.split("(", 1)[1].split(")", 1)[0]
@@ -282,9 +334,8 @@ class _ProfConn:
         return False
 
 
-class AdminProfileNonAckTest(unittest.TestCase):
-    """admin API `/users/{pid}/ptt/{msisdn}/profile` 의 allow_non_ack_users_info — 선택 컬럼 규약
-    (부재 = 응답 false·입력 400 schema_not_migrated) + 캐시 반영 → user-profile anyExt."""
+class _AdminProfileBase(unittest.TestCase):
+    """admin API `/users/{pid}/ptt/{msisdn}/profile` 시험 공통 — 가짜 DB 연결·캐시 보존."""
 
     MSISDN = "+82500000001"
 
@@ -307,6 +358,11 @@ class AdminProfileNonAckTest(unittest.TestCase):
 
     def _with(self, cur):
         self.adm._get_db = lambda config: _ProfConn(cur)
+
+
+class AdminProfileNonAckTest(_AdminProfileBase):
+    """admin API 프로파일의 allow_non_ack_users_info — 선택 컬럼 규약
+    (부재 = 응답 false·입력 400 schema_not_migrated) + 캐시 반영 → user-profile anyExt."""
 
     def test_put_writes_column_and_profile_doc(self):
         cur = _ProfCur({"allow_ambient_listening", "allow_create_group", "allow_non_ack_users_info"})
@@ -353,6 +409,102 @@ class AdminProfileNonAckTest(unittest.TestCase):
 
     def test_default_profile_has_key(self):
         self.assertIs(m.DEFAULT_USER_PROFILE["allow_non_ack_users_info"], False)
+
+
+_ALL_OPT = {"allow_ambient_listening", "allow_create_group", "allow_non_ack_users_info",
+            "allow_cancel_group_emergency", "allow_cancel_imminent_peril", "allow_cancel_emergency_alert"}
+_PRE_CANCEL = _ALL_OPT - set(_ProfCur._CANCEL)
+
+
+class AdminProfileCancelAuthzTest(_AdminProfileBase):
+    """admin API 프로파일의 해제 인가 셋 — 선택 컬럼 규약(migrate_ptt_user_profile_cancel_authz.sql) + 부재 시 값
+    (그룹 긴급 0 · 임박 위험 1 · 경보 취소 = 발령 인가) + 캐시 반영 → user-profile 문서."""
+
+    def _row(self, **kw):
+        row = {"allow_emergency_call": 1, "allow_emergency_alert": 1, "allow_adhoc_call": 1,
+               "allow_emergency_private_call": 1, "emergency_group_mode": "DedicatedGroup", "emergency_group_id": "g001",
+               "private_emergency_mode": "LocallyDetermined", "emergency_private_recipient": None,
+               "allow_ambient_listening": 0, "allow_create_group": 0, "allow_non_ack_users_info": 0,
+               "allow_cancel_group_emergency": 1, "allow_cancel_imminent_peril": 0, "allow_cancel_emergency_alert": 0}
+        row.update(kw)
+        return row
+
+    def test_put_writes_cancel_columns_and_profile_doc(self):
+        cur = _ProfCur(_ALL_OPT)
+        self._with(cur)
+        body = {"allow_emergency_alert": True, "allow_cancel_group_emergency": True,
+                "allow_cancel_imminent_peril": False, "allow_cancel_emergency_alert": False}
+        r = asyncio.run(self.adm._put_ptt_profile("7", self.MSISDN, body, {}))
+        self.assertEqual(r.status, 200, r.body)
+        self.assertEqual({c: cur.inserted.get(c) for c in _ProfCur._CANCEL},
+                         {"allow_cancel_group_emergency": 1, "allow_cancel_imminent_peril": 0, "allow_cancel_emergency_alert": 0})
+        self.assertEqual((r.body["allow_cancel_group_emergency"], r.body["allow_cancel_imminent_peril"],
+                          r.body["allow_cancel_emergency_alert"]), (True, False, False))
+        xml, _ = m.get_user_profile_xml(ME)
+        acts = ET.fromstring(xml.encode()).find("cp:ruleset/cp:rule/cp:actions", NS)
+        self.assertEqual(acts.find("up:allow-cancel-group-emergency", NS).text, "true")
+        self.assertEqual(acts.find("up:allow-cancel-imminent-peril", NS).text, "false")
+        self.assertEqual(acts.find("up:allow-cancel-emergency-alert", NS).text, "false")
+
+    def test_put_omitted_keys_take_absent_values(self):
+        for alert in (True, False):
+            self.adm._OPT_COL_PRESENT.clear()
+            cur = _ProfCur(_ALL_OPT)
+            self._with(cur)
+            r = asyncio.run(self.adm._put_ptt_profile("7", self.MSISDN, {"allow_emergency_alert": alert}, {}))
+            self.assertEqual(r.status, 200, r.body)
+            self.assertEqual({c: cur.inserted.get(c) for c in _ProfCur._CANCEL},
+                             {"allow_cancel_group_emergency": 0, "allow_cancel_imminent_peril": 1,
+                              "allow_cancel_emergency_alert": 1 if alert else 0}, "경보 취소 = 이 요청의 발령 인가")
+
+    def test_put_absent_columns_is_400_with_migration_hint(self):
+        for c in _ProfCur._CANCEL:
+            self.adm._OPT_COL_PRESENT.clear()
+            self._with(_ProfCur(_PRE_CANCEL))
+            r = asyncio.run(self.adm._put_ptt_profile("7", self.MSISDN, {c: True}, {}))
+            self.assertEqual(r.status, 400, c)
+            self.assertEqual(r.body["error"], "schema_not_migrated")
+            self.assertIn("migrate_ptt_user_profile_cancel_authz.sql", r.body["detail"])
+
+    def test_put_absent_columns_without_key_is_ok(self):
+        cur = _ProfCur(_PRE_CANCEL)
+        self._with(cur)
+        r = asyncio.run(self.adm._put_ptt_profile("7", self.MSISDN, {"allow_emergency_alert": False}, {}))
+        self.assertEqual(r.status, 200, r.body)
+        for c in _ProfCur._CANCEL:
+            self.assertNotIn(c, cur.inserted, "부재 컬럼은 INSERT 에 싣지 않는다")
+        self.assertEqual((r.body["allow_cancel_group_emergency"], r.body["allow_cancel_imminent_peril"],
+                          r.body["allow_cancel_emergency_alert"]), (False, True, False), "응답 = 부재 시 값")
+        self.assertIs(m.PTT_PROFILES[self.MSISDN]["allow_cancel_emergency_alert"], False, "캐시도 같은 값")
+
+    def test_get_absent_columns_read_absent_values(self):
+        row = self._row(allow_emergency_alert=0)
+        self._with(_ProfCur(_PRE_CANCEL, row=row))
+        r = asyncio.run(self.adm._get_ptt_profile("7", self.MSISDN, {}))
+        self.assertEqual(r.status, 200)
+        self.assertEqual((r.body["allow_cancel_group_emergency"], r.body["allow_cancel_imminent_peril"],
+                          r.body["allow_cancel_emergency_alert"]), (False, True, False),
+                         "부재 = 0 · 1 · allow_emergency_alert (SELECT 대체식)")
+        self.adm._OPT_COL_PRESENT.clear()
+        self._with(_ProfCur(_ALL_OPT, row=row))
+        r = asyncio.run(self.adm._get_ptt_profile("7", self.MSISDN, {}))
+        self.assertEqual((r.body["allow_cancel_group_emergency"], r.body["allow_cancel_imminent_peril"],
+                          r.body["allow_cancel_emergency_alert"]), (True, False, False), "컬럼이 있으면 행 값")
+
+    def test_get_without_row_is_default(self):
+        self._with(_ProfCur(_ALL_OPT, row=None))
+        r = asyncio.run(self.adm._get_ptt_profile("7", self.MSISDN, {}))
+        self.assertIs(r.body["exists"], False)
+        self.assertEqual((r.body["allow_cancel_group_emergency"], r.body["allow_cancel_imminent_peril"],
+                          r.body["allow_cancel_emergency_alert"]), (False, True, True))
+
+    def test_default_profile_and_absent_rule(self):
+        d = m.DEFAULT_USER_PROFILE
+        self.assertEqual((d["allow_cancel_group_emergency"], d["allow_cancel_imminent_peril"], d["allow_cancel_emergency_alert"]),
+                         (False, True, True))
+        self.assertIs(m.user_profile_opt_default("allow_cancel_emergency_alert", {"allow_emergency_alert": False}), False)
+        self.assertIs(m.user_profile_opt_default("allow_cancel_imminent_peril", {}), True)
+        self.assertIs(m.user_profile_opt_default("allow_non_ack_users_info", {}), False)
 
 
 SC = {"sc": "urn:3gpp:ns:mcpttServiceConfig:1.0"}
@@ -410,6 +562,26 @@ class ServiceConfigDocTest(unittest.TestCase):
         self.assertEqual(on.find("sc:fc-timers-counters/sc:T3-stop-talking-grace", SC).text, "PT3S", "미지정 = 기본값")
         self.assertEqual(on.find("sc:emergency-resource-priority/sc:resource-priority-priority", SC).text, "14")
         self.assertNotEqual(etag1, etag2, "ETag 는 내용 파생")
+
+    def test_emergency_call_group_time_limit(self):
+        """on-network <emergency-call><group-time-limit> — TNG2(TS 24.379 §6.3.3.1.16). 스키마 순 첫 자식, 0 이면 생략."""
+        _, etag0 = self._doc()
+        for v, want in ((90000, "PT90S"), (1500, "PT1.5S"), ("600000", "PT600S")):
+            m.SERVICE_CONFIG_PARAMS["EmergencyCall"] = {"GroupTimeLimit": v}
+            root, etag = self._doc()
+            on = root.find("sc:service-configuration-params/sc:on-network", SC)
+            self.assertEqual(on[0].tag.split("}")[1], "emergency-call", "on-network 시퀀스의 첫 자식")
+            self.assertEqual([c.tag.split("}")[1] for c in on[0]], ["group-time-limit"])
+            self.assertEqual(on.find("sc:emergency-call/sc:group-time-limit", SC).text, want)
+            self.assertEqual(on[1].tag.split("}")[1], "transmit-time")
+            self.assertNotEqual(etag0, etag)
+        for v in (0, "", None, "abc", -5):
+            m.SERVICE_CONFIG_PARAMS["EmergencyCall"] = {"GroupTimeLimit": v}
+            root, etag = self._doc()
+            self.assertIsNone(root.find(".//sc:emergency-call", SC), f"{v!r} → 요소째 생략(TNG2 미가동)")
+            self.assertEqual(etag, etag0, "생략 = 기본 문서와 같다")
+        m.SERVICE_CONFIG_PARAMS.pop("EmergencyCall")
+        self.assertEqual(m._SERVICE_CONFIG_PARAM_DEFAULTS["EmergencyCall"]["GroupTimeLimit"], 0, "기본 = 없음")
 
 
 if __name__ == "__main__":

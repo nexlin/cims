@@ -108,7 +108,7 @@
 |---|---|
 | 상단 바 | 왼쪽부터 로고 · **최상위 메뉴 [관제 F1] [이력 F2] [PTT 그룹 F3] [관리 F4]**(§3.4 — 선택 = Primary 글자 + 아래 밑줄, 키 칩 병기. [관리]는 관리 범위가 없으면 숨기지 않고 **비활성 + 툴팁**("조직/구성원·번호 관리는 관제 역할의 관리 범위(콘솔 관리 > 역할)가 있어야 합니다"), 편집 폼이 열려 있으면 주황 점 배지) · 데스크 신원은 **이름·내선만**(PTT 번호(`effectiveMcpttId`)·`dispatch.groupName(groupId)`·`pilotId` 는 툴팁) · 계정 등록 점등 2개(PTT/VoLTE — `RegState` 색: 회색 미등록·노랑 등록중·녹색 등록·빨강 실패, 툴팁에 코드·사유). 오른쪽: **감청 중 N 칩**(보라 — 열린 감청 창 목록, 클릭 → 창 복원, §5), **배치 🔒/🔓 + 프리셋 ▾**(§3.3), 오디오 요약(헤드셋/스피커 장치명, 클릭 → 설정), PTT 핫키 표시, 시각, 설정 ⚙(설정·로그아웃·종료) — 56px 한 줄을 유지하고 좌측 세로 레일은 두지 않는다(두 열 951px 예산 보존) |
 | 착신 배너 | 상단 바 아래 슬라이드 — "대표번호 7000 착신 · 010-9876-5432 · [응답 F9] [거절]". 대표번호 착신(`calledParty`=pilot) 주황, 내선 직접 착신 파랑, PTT 개별 통화 착신 청록. 여러 착신은 스택(최신 위). 응답 핫키는 최상단 호 |
-| 긴급 배너 | 빨강(emergency) / 주황(imminent peril) / 자주(alert) 풀폭 — 그룹명·개시자·경과. ①카드·②행 배지와 동기. **긴급·임박**(채널마다 하나) = 세션 조건 `CallInfo.condition`(TS 24.379 §10.1.1.2.1.3~6 — 개시 mcptt-info 로 시작해 상향·하향 re-INVITE·서버 재광고·합류 200 OK 로 바뀐다; `CallInfo.mcptt` 는 호를 세운 INVITE 의 값이라 판정에 쓰지 않는다). 호 상태·미디어 스냅샷·조건 이벤트(`onMcpttCondition`) 셋 모두가 배너를 다시 판정한다 — 진행 중 격상·해제와 «이미 긴급인 그룹에 합류» 가 선다. 개시자는 호를 세운 INVITE 가 그 조건을 실었을 때만 적는다(진행 중에 걸린 조건은 비움). [긴급 해제] = 내가 올린 조건일 때만(CSP 는 개시자 외의 하향을 무시하면서 200 을 돌려준다 — 권한자 확장·비인가 403 은 서버 과제 E1, 반영 뒤 넓힌다), 조건이 내려가면 스스로 빠지고 닫기는 없다. **경보**(그룹·발신자마다 하나) = `onEmergencyAlert`(TS 24.379 §12.1.1.3) — 발신자의 취소(제3자 취소면 `originated-by` 가 가리키는 경보)로 해제, [경보 해제] = 경보 취소 MESSAGE(남의 경보는 제3자 취소 §12.1.1.2 4)e), user profile `allow-cancel-emergency-alert` 이 없으면 숨김), [닫기] = 로컬 표시만(취소 신호 유실 대비). 공통 [채널로 이동] = ① 카드, 없으면 ② 카드로 포커스만 — 합류하지 않는다(청취 범위 그룹에 sendrecv 로 붙으면 비멤버라 403, TS 24.379 §10.1.1) |
+| 긴급 배너 | 빨강(emergency) / 주황(imminent peril) / 자주(alert) 풀폭 — 그룹명·개시자·경과. ①카드·②행 배지와 동기. **긴급·임박**(채널마다 하나) = 세션 조건 `CallInfo.condition`(TS 24.379 §10.1.1.2.1.3~6 — 개시 mcptt-info 로 시작해 상향·하향 re-INVITE·서버 재광고·합류 200 OK 로 바뀐다; `CallInfo.mcptt` 는 호를 세운 INVITE 의 값이라 판정에 쓰지 않는다). 호 상태·미디어 스냅샷·조건 이벤트(`onMcpttCondition`) 셋 모두가 배너를 다시 판정한다 — 진행 중 격상·해제와 «이미 긴급인 그룹에 합류» 가 선다. 개시자는 호를 세운 INVITE 가 그 조건을 실었을 때만 적는다(진행 중에 걸린 조건은 비움). [긴급 해제] = 내가 올린 조건일 때만(서버 인가 = 개시자 ∨ user profile `allow-cancel-group-emergency` — TS 24.379 §6.3.3.1.13.4, 비인가·다른 긴급 사용자 송출 중이면 403 + `emergency-ind` true. 프로파일 값으로 넓히는 것은 §13), 조건이 내려가면 스스로 빠지고 닫기는 없다. **경보**(그룹·발신자마다 하나) = `onEmergencyAlert`(TS 24.379 §12.1.1.3) — 발신자의 취소(제3자 취소면 `originated-by` 가 가리키는 경보)로 해제, [경보 해제] = 경보 취소 MESSAGE(남의 경보는 제3자 취소 §12.1.1.2 4)e), user profile `allow-cancel-emergency-alert` 이 없으면 숨김), [닫기] = 로컬 표시만(취소 신호 유실 대비). 공통 [채널로 이동] = ① 카드, 없으면 ② 카드로 포커스만 — 합류하지 않는다(청취 범위 그룹에 sendrecv 로 붙으면 비멤버라 403, TS 24.379 §10.1.1) |
 | 서버 인증서 배너 | 같은 배너 레이어(관제 캔버스 포함 어느 화면에서나) — SDK 가 마지막 SIP TLS·HTTPS 핸드셰이크에서 관측한 서버 인증서 잔여(`Engine.TlsPeerExpiry`·`CscClient.TlsPeerExpiry` 중 짧은 것)가 **≤ 30일**이면 "서버 인증서 N일 후 만료 · `<host:port>` · `<subject>` · 만료 YYYY-MM-DD · 자동 갱신 실패 신호 — 운영자에게 알리세요 (콘솔 알람 A-PRC-009)". 경고(≤30일) 연한 빨강 + 빨강 글자, 위험(≤7일·만료) 진한 빨강 — 서버 A-PRC-009 warning/critical 과 같은 단계. **닫기 없음**(서버 인증서가 갱신되어 잔여가 임계를 벗어나면 사라진다), 버튼 없음, 경과 표시 없음. 로그인 직후·TLS 등록 성공·1분 주기로 재평가, 로그아웃에 내림. 임계 셋(60 갱신/30 경고/7 위험)의 뜻은 [sip_tls_signaling.md §8.6](sip_tls_signaling.md) |
 | 토스트 | 명령 실패의 사유(§9 사전) — 우하단, 6초, 오류는 수동 닫기. 원문 코드는 ▸상세 |
 | 상태 색상 | 대기 회색 · 링잉 주황(점멸) · 통화/발언 녹색 · 보류 파랑 · 감청 보라 · 청취/개별 통화 청록 · 긴급 빨강. 아이콘·텍스트 병기(색맹 대비) |
@@ -197,7 +197,7 @@
   참여 중이면 그 호의 **조건 상향**(`Call.SetCondition(true,false)` in-dialog re-INVITE, TS 24.379 §10.1.1.2.1.3 — 같은 그룹으로 새 INVITE 를 보내면
   코어가 같은 호를 돌려줘 아무 일도 없다), 아니면 긴급 그룹콜 개시(`GroupCallOptions.emergency`). 자격(user profile `allow-emergency-group-call` —
   `Capabilities`, 못 받았으면 허용)이 없으면 비활성 + 툴팁, 서버 거절(그룹 능력 꺼짐 등)은 조건 이벤트 `Denied` → 403 사전 문구(호는 유지).
-  [긴급 해제] = 내가 올린 조건일 때만(§10.1.1.2.1.4 하향 — CSP 가 지금 개시자의 하향만 받는다, §13 서버 과제 E1).
+  [긴급 해제] = 내가 올린 조건일 때만(§10.1.1.2.1.4 하향 — 서버는 개시자 ∨ `allow-cancel-group-emergency` 를 받는다, 앱이 넓히는 것은 §13).
 - **일제 통화**(TS 24.379 §4.12 — 그룹 종류가 아니라 호 속성, [mcptt_broadcast_group_call.md](mcptt_broadcast_group_call.md) §4.4 U6): 관제사 개시는 3줄 [일제 통화] —
   멤버 편성 그룹에 진행 중 세션이 없을 때만 활성(진행 중이면 서버가 합류로만 받는다 — 그 문서 §3.2. chat 그룹은 서버가 broadcast-ind 를 무시해 비활성 — TS 24.379
   §6.2.8.2 는 broadcast-ind 를 prearranged 그룹 호에 싣는다. 그룹 종류는 관리 목록 `sessionType`, 관리 범위가 없어 모르면 누를 때 GMS 그룹 문서의
@@ -770,14 +770,15 @@ windows/dispatch-desktop/                 DispatchDesktop.csproj — net10.0-win
   잠깐만 서며 긴급 여부도 적지 않아, 다른 화면에 있는 동안 받은 긴급 개별 통화는 ① 카드 빨강이 유일한 표시다.
 - **진행 중 조건의 개시자** — 조건 재광고 re-INVITE 는 조건을 건 사용자를 싣지만(TS 24.379 §6.3.3.1.6 2)) 코어 `McpttCondition` 에 개시자가 없어
   진행 중에 걸린 조건의 배너 개시자는 비어 있다(§3.2, [ue_sdk.md §11](ue_sdk.md)).
-- **긴급 해제 인가(서버)** — CSP 가 개시자 외의 해제 re-INVITE 를 무시하면서 200 을 돌려준다(TS 24.379 §10.1.1.4.7 7) 은 403 + `emergency-ind` true). 그래서 앱의
-  [긴급 해제]는 내가 올린 긴급만 — 서버가 권한자(그룹 authorized user, 관제 역할 여부는 결정 항목)와 403 을 넣으면 `CanCancelCondition` 을 넓힌다
-  ([server_todo_mcptt_emergency_dispatch.md](../../dev/server_todo_mcptt_emergency_dispatch.md) E1).
-- **청취 leg 의 조건 변화(서버)** — CSP 가 조건 재광고에서 청취 leg 를 뺀다(`PropagateConditionToMembers` 의 `bListenOnly`). 청취 중인 관제사는
-  코어가 조건을 읽어도 격상·해제를 받지 못한다(합류 200 OK 의 조건만) — 앱 변경 없이 서버 반영으로 풀린다(같은 문서 E2, [mcptt_emergency_modes.md §10](mcptt_emergency_modes.md)).
-- **경보 취소 인가(서버)** — CSP 는 경보 취소를 인가 없이 통과시킨다(TS 24.379 §12.1.3.2 1)). 앱 [경보 해제]는 user profile 로 선차단만 한다(같은 문서 E3).
-- **SDS 전달 확인의 규격 경로(코어·서버)** — disposition 자동 회신(`sendSdsNotification`)이 원 발신자 AoR 로 SDS NOTIFICATION 한 파트만 보낸다. TS 24.282
-  V18.13.0 §12.2.1.1 은 대상 MCData ID 의 `resource-lists` 와 그룹 통지의 `<mcdata-calling-group-id>` 를 요구한다([mcdata_messaging.md §7](mcdata_messaging.md) 편차 표, 서버 과제 문서 M1).
+- **[긴급 해제] 자격 = user profile `allow-cancel-group-emergency`(코어·앱)** — 서버는 긴급 해제를 개시자 ∨ 이 값(TS 24.484 ruleset, 관제사에게 켠다)으로
+  받고 비인가·다른 긴급 사용자 송출 중이면 403 + `emergency-ind` true 다(TS 24.379 §6.3.3.1.13.4·§10.1.1.4.7 7)·7a), [mcptt_emergency_modes.md §4.2](mcptt_emergency_modes.md)).
+  코어가 user profile 에서 이 요소(와 `allow-cancel-imminent-peril`)를 읽어 내면([ue_sdk.md §11](ue_sdk.md)) `CanCancelCondition` 을 «내 조건 ∨ 이 값» 으로 넓히고,
+  403 은 조건 이벤트 `Denied` 의 해제 거절 문구로 적는다(코어는 이미 이전 값으로 되돌린다). 청취 중인 채널도 서버가 조건 재광고를 청취 leg 에 보내므로
+  ② 카드·배너가 격상·해제를 따라간다(앱 변경 없음). 경보 취소는 서버가 `allow-cancel-emergency-alert` 로 판정한다(비인가 403 + `alert-ind` true) — 앱의
+  선차단과 같은 값이다.
+- **SDS 전달 확인의 규격 경로(코어)** — disposition 자동 회신(`sendSdsNotification`)이 원 발신자 AoR 로 SDS NOTIFICATION 한 파트만 보낸다. TS 24.282
+  V18.13.0 §12.2.1.1 은 MCData PSI 로, 대상 MCData ID 의 `resource-lists` 와 그룹 통지의 `<mcdata-calling-group-id>` 를 실어 보내게 한다 — CSP 는 규격형을
+  이미 받아 상관·중계한다([mcdata_messaging.md §4.4](mcdata_messaging.md)). 코어 통지 API 가 바뀌면 앱은 수신 SDS 의 그룹·발신자를 인자로 넘기기만 한다.
 - **경보 Request-URI(PSI)** — 경보 취소 MESSAGE 의 Request-URI 는 참여 기능 PSI(ue-init-config `MCPTT-Service-Details/Server-URI`, TS 24.379 §12.1.1.1 8))여야
   한다. CSC 는 ue-init-config 에 이미 싣는다(`UeInitConfig.ServiceDetails.Mcptt.Enable`) — SDK 코어에 ue-init-config 해석이 없어 앱이 `AccountConfig.McpttServerUri` 를
   비워 두고, 코어가 그룹 URI 로 보낸다(CSP 가 받는 옛 형식 전환기).

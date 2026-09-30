@@ -794,8 +794,10 @@ standby 는 탐지·로그만 한다([ha_design.md](../design/ha_design.md) §5.
 opt-in 없이 즉시 처리하며, [§5.1](#51-heartbeat) digest-on-HB audit 과 **상보적**이다 — 이벤트는
 회수 즉시 특정 세션을 지목해 수렴 지연을 단축하고, audit 은 이벤트 유실·이중화 절체까지 커버한다.
 
-`FLOOR_TALKERS` 는 CSP 가 ack 만 하고(미소비) 있다 — 로스터·녹취 태깅·콘솔 실시간 반영은
-Call Control 파트의 후속 과제다([mcptt_csp_cmp_roadmap_contract.md](../design/features/mcptt_csp_cmp_roadmap_contract.md) §B.4).
+`FLOOR_TALKERS` 는 CSP 가 그룹별 발언자 캐시(`CGroupCallService::OnFloorTalkers`)로 받아 긴급 해제 판정 «다른 긴급 사용자가
+송출 중»(TS 24.379 §10.1.1.4.7 7a), [mcptt_emergency_modes.md](../design/features/mcptt_emergency_modes.md) §4.2)에 쓴다 — 판정용 캐시라
+standby 도 갱신한다. 로스터·녹취 태깅·콘솔 실시간 반영은 Call Control 파트의 후속 과제다
+([mcptt_csp_cmp_roadmap_contract.md](../design/features/mcptt_csp_cmp_roadmap_contract.md) §B.4).
 콘솔은 그때까지 STATS `detail.groups[].floor_holders` 폴링으로 발언자를 표시한다.
 
 > **RELAY_NAT_LATCHED**(NAT 목적지 latch 통지)는 규격 예약 — 현행은 STATS `detail.nat`/로그로 관측한다.

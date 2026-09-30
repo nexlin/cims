@@ -18,7 +18,8 @@ enum 을 해석해 **범위 안의 조직 코드 집합**으로 게이트하고 
   DELETE /provisioning/directory/members/{userId}
   PUT    /provisioning/directory/members/{userId}/volte|voip|ptt {msisdn,imsi?,serviceRef?,sipTransport?,password?} 개설/변경 (sipTransport ANY=단말 선택)
   DELETE /provisioning/directory/members/{userId}/volte|ptt
-  PUT    /provisioning/directory/members/{userId}/ptt/profile {allowCreateGroup?,allowNonAckUsersInfo?,allowEmergencyCall?,...}
+  PUT    /provisioning/directory/members/{userId}/ptt/profile {allowCreateGroup?,allowNonAckUsersInfo?,allowEmergencyCall?,
+         allowCancelGroupEmergency?,allowCancelImminentPeril?,allowCancelEmergencyAlert?,...} — 없는 키는 현재값 유지
          — allowAmbientListening 은 편집 불가(역할 배정의 결과, mcptt_authorization.md §2.4): 현재값과 다른 값이 실려 오면
            400 not_editable, 같은 값은 무시(구 앱 호환). GET 응답에는 표시용으로 실린다.
   GET    /provisioning/directory/groups                     범위 안 PTT 그룹 목록(관리용 — GMS 멤버 목록과 별개)
@@ -58,6 +59,9 @@ _PROFILE_KEYS = {                               # 와이어 camelCase → ptt_us
     'allowAdhocCall': 'allow_adhoc_call', 'allowEmergencyPrivateCall': 'allow_emergency_private_call',
     'allowAmbientListening': 'allow_ambient_listening', 'allowCreateGroup': 'allow_create_group',
     'allowNonAckUsersInfo': 'allow_non_ack_users_info',
+    # 해제 인가 (TS 24.484 ruleset allow-cancel-group-emergency·allow-cancel-imminent-peril·allow-cancel-emergency-alert)
+    'allowCancelGroupEmergency': 'allow_cancel_group_emergency', 'allowCancelImminentPeril': 'allow_cancel_imminent_peril',
+    'allowCancelEmergencyAlert': 'allow_cancel_emergency_alert',
 }
 # 관제 앱(관리 범위)이 바꿀 수 없는 자격 — 감청·청취 권한은 콘솔 manager 의 승인 사항(dispatch_center.md §5.6,
 #   mcptt_authorization.md §2.4 "청취 자격은 배정의 결과"). 관리 범위가 있는 관제사가 자기(또는 범위 안 구성원)에게 청취
@@ -221,7 +225,8 @@ def _members_in_scope(cur, scope: dict) -> list:
     for p in people:
         if p["ptt"]:
             prof = _m.get_user_profile(p["ptt"]["msisdn"]) or {}
-            p["ptt"]["profile"] = {k: bool(prof.get(col, False)) for k, col in _PROFILE_KEYS.items()}
+            p["ptt"]["profile"] = {k: bool(prof.get(col, _m.user_profile_opt_default(col, prof)))
+                                   for k, col in _PROFILE_KEYS.items()}
     return people
 
 
@@ -476,24 +481,30 @@ async def _member_write(cur, config, scope, method, parts, body, actor, ip, my_u
             if k in body and bool(body[k]) != bool(cur_prof.get(_PROFILE_KEYS[k], False)):
                 return _json(400, {'error': 'not_editable', 'key': k,
                                    'detail': 'ambient listening qualification is granted from the console (role), not from the dispatch app'})
-        # 요청에 없는 자격은 현재값 유지 — 선택 컬럼(allow_ambient_listening/allow_create_group/allow_non_ack_users_info)은
-        #   값이 있을 때만 싣는다(컬럼 미적용 DB 에서 admin PUT 이 400 을 내지 않게).
+        # 요청에 없는 자격은 현재값 유지 — 선택 컬럼(allow_ambient_listening/allow_create_group/allow_non_ack_users_info/
+        #   allow_cancel_*)은 현재값이 부재 시 값(admin PUT 이 키 없을 때 쓰는 값)과 다르고 컬럼이 있을 때만 싣는다(컬럼 미적용
+        #   DB 에서 admin PUT 이 400 을 내지 않게 — 그 DB 의 값은 부재 시 값 그대로다).
         pb = {}
+        opt_keep = []
         for k, col in _PROFILE_KEYS.items():
             if k in body and k not in _LOCKED_PROFILE_KEYS:
                 pb[col] = bool(body[k])
             elif col in _admin._OPT_PROFILE_COLS:
-                if cur_prof.get(col):
-                    pb[col] = True
+                opt_keep.append(col)
             else:
                 pb[col] = bool(cur_prof.get(col, True))
+        for col in opt_keep:   # 부재 시 값은 이 요청의 발령 인가를 본다(allow_cancel_emergency_alert) — 개시 인가가 정해진 뒤
+            v = bool(cur_prof.get(col, _m.user_profile_opt_default(col, cur_prof)))
+            if v != _m.user_profile_opt_default(col, pb) and _admin._opt_col_present(cur, col):
+                pb[col] = v
         for k in ('emergency_group_mode', 'emergency_group_id', 'private_emergency_mode', 'emergency_private_recipient'):
             if cur_prof.get(k) is not None:
                 pb[k] = cur_prof[k]
         r = await _admin._put_ptt_profile(user_id, msisdn, pb, config)
         if r.status == 200:
-            _audit(config, actor, ip, 'ptt_profile', msisdn, 'update', after={k: pb.get(c, False) for k, c in _PROFILE_KEYS.items()})
-            return _json(200, {"msisdn": msisdn, "profile": {k: bool(r.body.get(c, False)) for k, c in _PROFILE_KEYS.items()}})
+            after = {k: bool(r.body.get(c, _m.user_profile_opt_default(c, r.body))) for k, c in _PROFILE_KEYS.items()}
+            _audit(config, actor, ip, 'ptt_profile', msisdn, 'update', after=after)
+            return _json(200, {"msisdn": msisdn, "profile": after})
         return r
 
     if len(parts) != 2:

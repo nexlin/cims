@@ -17,6 +17,12 @@ public:
     bool IsEnabled() const override;
 
     bool OnMessage( const char *pszFrom, const char *pszTo, CSipMessage *pclsMessage, int &iStatus ) override;
+
+private:
+    /** SDS disposition 통지의 규격 경로 (TS 24.282 §12.2.2.1·§12.2.3) — 본문에 resource-lists(대상 MCData ID 하나)와
+     *  SDS NOTIFICATION 이 있으면 참여·제어 기능으로 처리해 원 발신자에게 새 MESSAGE 로 중계하고 true. 대상을
+     *  Request-URI 에 싣는 옛 형식(resource-lists 없음)은 false — 디스패처 1:1 경로가 그대로 전달한다(전환기). */
+    bool OnDispositionNotification( const char *pszFrom, CSipMessage *pclsMessage, int &iStatus );
 };
 
 #endif

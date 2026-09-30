@@ -36,18 +36,37 @@ bool CCspServiceConfig::Refresh() {
                      strUrl.c_str() );
         return false;
     }
+    CspPriorityParams rp;
+    ParsePriority( strBody, rp );
+    const int iTng2 = ParseEmergencyGroupTimeLimitSec( strBody );
     {
         std::lock_guard<std::mutex> lock( m_clsMutex );
         m_clsFloor = f;
+        m_clsPriority = rp;
+        m_iTng2Sec = iTng2;
     }
     CLog::Print( LOG_SYSTEM,
                  "[service-config] floor 값 적재 (CSC 정본) T1=%d T2=%d T3=%d T7=%d T8=%d T20=%d C7=%d C20=%d (s, "
                  "-1=문서에 없음)",
                  f.iT1Sec, f.iT2Sec, f.iT3Sec, f.iT7Sec, f.iT8Sec, f.iT20Sec, f.iC7, f.iC20 );
+    CLog::Print( LOG_SYSTEM, "[service-config] Resource-Priority emergency=%s imminent=%s normal=%s · TNG2=%d s%s",
+                 rp.strEmergency.c_str(), rp.strImminentPeril.c_str(), rp.strNormal.c_str(), iTng2,
+                 iTng2 > 0 ? "" : " (문서에 없음 — TNG2 없음)" );
     return true;
 }
 
 CspFloorParams CCspServiceConfig::GetFloorParams() {
     std::lock_guard<std::mutex> lock( m_clsMutex );
     return m_clsFloor;
+}
+
+std::string CCspServiceConfig::ResourcePriorityOf( int iCond ) {
+    std::lock_guard<std::mutex> lock( m_clsMutex );
+    return iCond >= 2 ? m_clsPriority.strEmergency
+                      : ( iCond == 1 ? m_clsPriority.strImminentPeril : m_clsPriority.strNormal );
+}
+
+int CCspServiceConfig::GetEmergencyGroupTimeLimitSec() {
+    std::lock_guard<std::mutex> lock( m_clsMutex );
+    return m_iTng2Sec;
 }

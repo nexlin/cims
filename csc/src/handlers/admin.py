@@ -28,7 +28,7 @@ import pymysql.cursors
 
 from httpsrv.handler import HandlerArgs, HandlerResult
 from services.mcptt import (notify_csp, refresh_group_members, refresh_login_accounts, sync_group_from_db,
-                            DEFAULT_USER_PROFILE,
+                            DEFAULT_USER_PROFILE, USER_PROFILE_OPT_ABSENT_SQL, user_profile_opt_default,
                             update_user_profile_cache, SERVICE_CONFIG_DEFAULTS,
                             get_service_config, update_service_config_cache,
                             get_service_config_xml, GROUP_TYPES, GROUP_HANG_TIMER_DEFAULT,
@@ -354,6 +354,9 @@ async def _get_user(person_id: str, config):
                             'allow_ambient_listening': bool(p['allow_ambient_listening']),
                             'allow_create_group': bool(p['allow_create_group']),
                             'allow_non_ack_users_info': bool(p['allow_non_ack_users_info']),
+                            'allow_cancel_group_emergency': bool(p['allow_cancel_group_emergency']),
+                            'allow_cancel_imminent_peril': bool(p['allow_cancel_imminent_peril']),
+                            'allow_cancel_emergency_alert': bool(p['allow_cancel_emergency_alert']),
                         }
                 except pymysql.Error:
                     pass
@@ -1114,16 +1117,23 @@ async def _delete_subscription(person_id: str, svc: str, msisdn: str, config, pa
 
 _PROFILE_BOOL_FIELDS = ('allow_emergency_call', 'allow_emergency_alert', 'allow_adhoc_call',
                         'allow_emergency_private_call', 'allow_ambient_listening', 'allow_create_group',
-                        'allow_non_ack_users_info')
+                        'allow_non_ack_users_info', 'allow_cancel_group_emergency', 'allow_cancel_imminent_peril',
+                        'allow_cancel_emergency_alert')
 
-# 마이그레이션으로 뒤에 붙은 프로파일 인가 컬럼 — 부재 시 SELECT 는 상수 0(자격 없음), 쓰기 요청은 400.
+# 마이그레이션으로 뒤에 붙은 프로파일 인가 컬럼 — 부재 시 SELECT 는 부재 시 값(services.mcptt.USER_PROFILE_OPT_ABSENT_SQL,
+#   없으면 상수 0 = 자격 없음), 쓰기 요청은 400.
 #   allow_ambient_listening: migrate_ptt_ambient_listening.sql (dispatch_center.md §5.6)
 #   allow_create_group     : migrate_ptt_allow_create_group.sql (mcptt_authorization.md §3)
 #   allow_non_ack_users_info: migrate_ptt_non_ack_users_info.sql (TS 24.379 §6.3.3.3 — 미응답 멤버 INFO 수신 자격)
+#   allow_cancel_*         : migrate_ptt_user_profile_cancel_authz.sql (TS 24.484 해제 인가 — 그룹 긴급 §6.3.3.1.13.4 기본 0 ·
+#                            임박 위험 §6.3.3.1.13.6 기본 1 · 경보 취소 §6.3.3.1.13.3 기본 = allow_emergency_alert)
 _OPT_PROFILE_COLS = {
     'allow_ambient_listening': 'sql/migrate_ptt_ambient_listening.sql',
     'allow_create_group': 'sql/migrate_ptt_allow_create_group.sql',
     'allow_non_ack_users_info': 'sql/migrate_ptt_non_ack_users_info.sql',
+    'allow_cancel_group_emergency': 'sql/migrate_ptt_user_profile_cancel_authz.sql',
+    'allow_cancel_imminent_peril': 'sql/migrate_ptt_user_profile_cancel_authz.sql',
+    'allow_cancel_emergency_alert': 'sql/migrate_ptt_user_profile_cancel_authz.sql',
 }
 _OPT_COL_PRESENT = {}   # 컬럼명 → bool 프로브 캐시
 
@@ -1136,8 +1146,9 @@ def _opt_col_present(cur, col: str) -> bool:
 
 
 def _opt_profile_select(cur) -> str:
-    """선택 컬럼 SELECT 조각 — 부재 컬럼은 상수 0 별칭으로 채워 호출자 키 집합을 고정한다."""
-    return ", ".join(c if _opt_col_present(cur, c) else f"0 AS {c}" for c in _OPT_PROFILE_COLS)
+    """선택 컬럼 SELECT 조각 — 부재 컬럼은 부재 시 값 별칭(대개 상수 0)으로 채워 호출자 키 집합을 고정한다."""
+    return ", ".join(c if _opt_col_present(cur, c) else f"{USER_PROFILE_OPT_ABSENT_SQL.get(c, '0')} AS {c}"
+                     for c in _OPT_PROFILE_COLS)
 
 
 async def _get_ptt_profile(person_id: str, msisdn: str, config):
@@ -1182,10 +1193,13 @@ async def _put_ptt_profile(person_id: str, msisdn: str, body, config):
     allow_alert = 1 if body.get('allow_emergency_alert', True) else 0
     allow_adhoc = 1 if body.get('allow_adhoc_call', True) else 0
     allow_priv  = 1 if body.get('allow_emergency_private_call', True) else 0
-    # 기본 0 인 자격 셋 — 부여는 OAM(콘솔·admin API): 원격 청취(TS 24.484 allow-ambient-listening,
+    # 선택 컬럼 자격 — 부여는 OAM(콘솔·admin API)·관제 앱 관리 화면: 원격 청취(TS 24.484 allow-ambient-listening,
     #   dispatch_center.md §5.6) · GMS 그룹 생성(CIMS 확장 allow-create-group, mcptt_authorization.md §3) ·
-    #   미응답 멤버 INFO 수신(TS 24.484 anyExt allow-to-receive-non-acknowledged-users-information, TS 24.379 §6.3.3.3)
-    opt_vals = {c: (1 if body.get(c, False) else 0) for c in _OPT_PROFILE_COLS}
+    #   미응답 멤버 INFO 수신(TS 24.484 anyExt allow-to-receive-non-acknowledged-users-information, TS 24.379 §6.3.3.3) ·
+    #   해제 인가 셋(TS 24.484 allow-cancel-group-emergency·allow-cancel-imminent-peril·allow-cancel-emergency-alert).
+    #   본문에 없는 키 = 부재 시 값(user_profile_opt_default — 대개 0, 임박 위험 해제 1, 경보 취소 = 이 요청의 발령 인가).
+    absent_ref = {'allow_emergency_alert': bool(allow_alert)}
+    opt_vals = {c: (1 if body.get(c, user_profile_opt_default(c, absent_ref)) else 0) for c in _OPT_PROFILE_COLS}
 
     with _get_db(config) as conn:
         with conn.cursor() as cur:
@@ -1238,6 +1252,10 @@ async def _put_ptt_profile(person_id: str, msisdn: str, body, config):
         "allow_ambient_listening": bool(opt_vals['allow_ambient_listening']) if 'allow_ambient_listening' in present else False,
         "allow_create_group": bool(opt_vals['allow_create_group']) if 'allow_create_group' in present else False,
         "allow_non_ack_users_info": bool(opt_vals['allow_non_ack_users_info']) if 'allow_non_ack_users_info' in present else False,
+        # 해제 인가 셋 — 컬럼 미적용 DB 면 본문에 키가 없었으므로(있으면 위에서 400) 부재 시 값 = 읽기 경로의 SELECT 대체식과 같다
+        "allow_cancel_group_emergency": bool(opt_vals['allow_cancel_group_emergency']),
+        "allow_cancel_imminent_peril": bool(opt_vals['allow_cancel_imminent_peril']),
+        "allow_cancel_emergency_alert": bool(opt_vals['allow_cancel_emergency_alert']),
     }
     update_user_profile_cache(msisdn, prof)  # user-profile 문서 ETag 는 내용 파생 — 자동 갱신
     notify_csp("USER_CHANGED", f"tel:{msisdn}", "PUT")

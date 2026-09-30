@@ -54,6 +54,7 @@ struct SMimePart {
     std::string strContentType;  // 소문자
     bool bBase64;
     std::string strContent;  // CTE 디코딩 완료 (base64 → binary)
+    std::string strRaw;      // 파트 원문(헤더 + 본문, 전송 인코딩 그대로)
     SMimePart() : bBase64( false ) {
     }
 };
@@ -102,6 +103,10 @@ static bool _splitMultipart( const std::string &strBody, const std::string &strB
         clsPart.bBase64 = hdrs.find( "content-transfer-encoding: base64" ) != std::string::npos ||
                           hdrs.find( "content-transfer-encoding:base64" ) != std::string::npos;
 
+        clsPart.strRaw = part;
+        while ( !clsPart.strRaw.empty() && ( clsPart.strRaw[clsPart.strRaw.size() - 1] == '\n' ||
+                                             clsPart.strRaw[clsPart.strRaw.size() - 1] == '\r' ) )
+            clsPart.strRaw.erase( clsPart.strRaw.size() - 1 );
         std::string content = part.substr( bodyOff );
         // 파트 끝 CRLF (다음 delimiter 소속) 제거
         while ( !content.empty() && ( content[content.size() - 1] == '\n' || content[content.size() - 1] == '\r' ) )
@@ -266,16 +271,48 @@ static void _parseDataPayload( const std::string &bin, CMcDataSdsInfo &clsInfo )
     }
 }
 
-/** mcdata-info+xml 에서 <mcdata-request-uri> 의 <mcdataURI> 추출 */
-static void _parseMcDataInfo( const std::string &xml, CMcDataSdsInfo &clsInfo ) {
-    size_t req = xml.find( "<mcdata-request-uri" );
-    if ( req == std::string::npos ) return;
+/** mcdata-info+xml 요소의 <mcdataURI> 값 (없으면 빈 문자열) */
+static std::string _mcdataUriOf( const std::string &xml, const char *pszTag ) {
+    const std::string strOpen = std::string( "<" ) + pszTag;
+    size_t req = xml.find( strOpen );
+    while ( req != std::string::npos ) {  // 이름 경계 — <mcdata-calling-user-id> 는 <mcdata-calling-user> 가 아니다
+        const char c = req + strOpen.size() < xml.size() ? xml[req + strOpen.size()] : '\0';
+        if ( c == '>' || c == ' ' || c == '/' || c == '\t' || c == '\r' || c == '\n' ) break;
+        req = xml.find( strOpen, req + strOpen.size() );
+    }
+    if ( req == std::string::npos ) return std::string();
+    const size_t close = xml.find( std::string( "</" ) + pszTag, req );
     size_t uriB = xml.find( "<mcdataURI>", req );
-    if ( uriB == std::string::npos ) return;
+    if ( uriB == std::string::npos || ( close != std::string::npos && uriB > close ) ) return std::string();
     uriB += 11;
     size_t uriE = xml.find( "</mcdataURI>", uriB );
-    if ( uriE == std::string::npos ) return;
-    clsInfo.m_strGroupUri = _trim( xml.substr( uriB, uriE - uriB ) );
+    if ( uriE == std::string::npos ) return std::string();
+    return _trim( xml.substr( uriB, uriE - uriB ) );
+}
+
+/** mcdata-info+xml 에서 <mcdata-request-uri>·<mcdata-calling-user-id>·<mcdata-calling-group-id> 추출 */
+static void _parseMcDataInfo( const std::string &xml, CMcDataSdsInfo &clsInfo ) {
+    clsInfo.m_strGroupUri = _mcdataUriOf( xml, "mcdata-request-uri" );
+    clsInfo.m_strCallingUserId = _mcdataUriOf( xml, "mcdata-calling-user-id" );
+    clsInfo.m_strCallingGroupId = _mcdataUriOf( xml, "mcdata-calling-group-id" );
+}
+
+/** resource-lists+xml(RFC 4826/5366) 의 <entry uri="…"> 목록 */
+static void _parseResourceLists( const std::string &xml, CMcDataSdsInfo &clsInfo ) {
+    clsInfo.m_bHasResourceLists = true;
+    size_t p = 0;
+    while ( ( p = xml.find( "<entry", p ) ) != std::string::npos ) {
+        const size_t gt = xml.find( '>', p );
+        if ( gt == std::string::npos ) break;
+        const std::string strTag = xml.substr( p, gt - p );
+        const size_t u = strTag.find( "uri=" );
+        if ( u != std::string::npos && u + 5 < strTag.size() ) {
+            const char q = strTag[u + 4];
+            const size_t e = strTag.find( q, u + 5 );
+            if ( e != std::string::npos ) clsInfo.m_vecListUris.push_back( strTag.substr( u + 5, e - u - 5 ) );
+        }
+        p = gt;
+    }
 }
 
 // ── 공개 API ──────────────────────────────────────────────
@@ -296,11 +333,16 @@ bool McDataParseBody( const std::string &strContentType, const std::string &strB
     for ( size_t i = 0; i < vecParts.size(); ++i ) {
         const std::string &ct = vecParts[i].strContentType;
         if ( ct == "application/vnd.3gpp.mcdata-signalling" ) {
-            bSignalling = _parseSignalling( vecParts[i].strContent, clsInfo ) || bSignalling;
+            if ( _parseSignalling( vecParts[i].strContent, clsInfo ) ) {
+                bSignalling = true;
+                clsInfo.m_strSignallingPart = vecParts[i].strRaw;
+            }
         } else if ( ct == "application/vnd.3gpp.mcdata-payload" ) {
             _parseDataPayload( vecParts[i].strContent, clsInfo );
         } else if ( ct == "application/vnd.3gpp.mcdata-info+xml" ) {
             _parseMcDataInfo( vecParts[i].strContent, clsInfo );
+        } else if ( ct == "application/resource-lists+xml" ) {
+            _parseResourceLists( vecParts[i].strContent, clsInfo );
         }
     }
     return bSignalling;

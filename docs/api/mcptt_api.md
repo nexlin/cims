@@ -126,11 +126,17 @@ MCPTT 설정 문서 (TS 24.484). ue-init-config 만 **익명 GET**(로그인 전
 | GET  | `/org.3gpp.mcptt.service-config/users/{user}/service-config` | Bearer + 본인 |
 
 user-profile 의 인가 `<cp:ruleset><cp:rule id="mcptt-user-authorisation"><cp:actions>` 값은 `ptt_user_profile`(admin API
-`…/users/{pid}/ptt/{msisdn}/profile`, [admin_api.md §6.8](admin_api.md))이다 — 규격 요소 `allow-emergency-group-call`·
-`allow-activate/cancel-emergency-alert`·`allow-emergency-private-call`·`allow-ambient-listening` 뒤에 `<anyExt>`(TS 24.484 §8.3.2.1
-11)xxxviii), 자식은 그 목록 순):
+`…/users/{pid}/ptt/{msisdn}/profile`, [admin_api.md §6.8](admin_api.md))이다 — 규격 요소를 TS 24.484 §8.3.2.1 11) 목록 순으로 싣고
+뒤에 `<anyExt>`(11)xxxviii), 자식은 그 목록 순):
 
 ```xml
+<allow-emergency-group-call>true</allow-emergency-group-call>          <!-- allow_emergency_call ∧ 긴급 대상 결정 가능 -->
+<allow-emergency-private-call>true</allow-emergency-private-call>      <!-- allow_emergency_private_call ∧ 수신자 결정 가능 -->
+<allow-cancel-group-emergency>false</allow-cancel-group-emergency>      <!-- allow_cancel_group_emergency (서버 판정 = 개시자 ∨ 이 값) -->
+<allow-cancel-imminent-peril>true</allow-cancel-imminent-peril>        <!-- allow_cancel_imminent_peril -->
+<allow-activate-emergency-alert>true</allow-activate-emergency-alert>  <!-- allow_emergency_alert ∧ 긴급 대상 결정 가능 -->
+<allow-cancel-emergency-alert>true</allow-cancel-emergency-alert>      <!-- allow_cancel_emergency_alert -->
+<allow-ambient-listening>false</allow-ambient-listening>                <!-- allow_ambient_listening -->
 <anyExt>
   <allow-to-receive-non-acknowledged-users-information>false</allow-to-receive-non-acknowledged-users-information>  <!-- L) allow_non_ack_users_info -->
   <allow-adhoc-group-call>true</allow-adhoc-group-call>                                                              <!-- R) allow_adhoc_call -->
@@ -141,6 +147,11 @@ user-profile 의 인가 `<cp:ruleset><cp:rule id="mcptt-user-authorisation"><cp:
 
 `allow-to-receive-non-acknowledged-users-information`(표 8.3.2.7-49, 부재 = false) 가 true 면 이 사용자가 개시한 그룹 호에서 확인 통화
 설정이 필수 멤버 없이 진행될 때 controlling MCPTT function 이 응답하지 않은 멤버 목록을 SIP INFO 로 보낸다(TS 24.379 §6.3.3.3).
+해제 인가 셋(`allow-cancel-group-emergency`·`allow-cancel-imminent-peril`·`allow-cancel-emergency-alert`)은 개시 인가와 달리 긴급 대상 결정
+가능 여부와 AND 하지 않는다 — 이미 선 긴급 상태·경보를 푸는 자격이다(TS 24.379 §6.3.3.1.13.3·.4·.6).
+
+service-config 의 `<on-network>` 는 선택 요소 `<emergency-call><group-time-limit>` 를 첫 자식으로 싣는다 — 진행 중 긴급 그룹 호 시한으로,
+MCPTT 서버(CSP)가 TNG2 로 쓴다(TS 24.379 §6.3.3.1.16). 값 = CSC 설정 `ServiceConfig.EmergencyCall.GroupTimeLimit`(ms), 0(기본)이면 요소째 뺀다.
 
 ue-init-config 의 주소류(IdMS/CMS/GMS/KMS/XCAP 루트)의 base 는 CSC 설정 `McpttServer.PublicUrl`
 이 정본이다(비면 요청 Host 유도 — 올인원 전용). CSP 가 xcap-diff NOTIFY 로 광고하는 `xcap-root`

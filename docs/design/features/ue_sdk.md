@@ -659,8 +659,14 @@ NDK/MSVC 빌드는 개발 서버 밖(WSL2·Windows 머신)에서 수행하고, �
 - **호 전달 후 누적 통계** — 전달로 미디어 스트림이 재생성되면 마지막 소멸 스트림의 통계만 남는다(스트림별 누적 합산은 후속).
 - **진행 중 조건의 개시자** — 조건 재광고 re-INVITE 는 조건을 건 사용자를 `<mcptt-calling-user-id>` 에 싣는다(TS 24.379 V18.6.0
   §6.3.3.1.6 2)). 코어는 조건만 읽어(§4.2 «긴급·임박 세션 조건») `McpttCondition` 에 개시자가 없다 — 관제 앱 긴급 배너는 진행 중에 걸린
-  조건의 개시자를 비운다(`CallInfo.mcptt.callingUserId` 는 호를 세운 INVITE 의 값이다). 청취 leg 는 코어만으로 끝나지 않는다 — CSP 가
-  조건 재광고에서 청취 leg 를 빼므로(`PropagateConditionToMembers`) 서버 계약이 함께 필요하다([android_dispatch_tablet.md](android_dispatch_tablet.md) §11).
+  조건의 개시자를 비운다(`CallInfo.mcptt.callingUserId` 는 호를 세운 INVITE 의 값이다). 청취 leg 도 서버가 같은 재광고를 보낸다
+  ([mcptt_emergency_modes.md](mcptt_emergency_modes.md) §4.2 — 성립 SDP 그대로, 코어는 recvonly 로 답한다).
+- **해제 인가 요소** — user profile ruleset 의 `allow-cancel-group-emergency`·`allow-cancel-imminent-peril`(TS 24.484 §8.3.2.1 11) xiv)·xvii))을
+  코어가 읽지 않는다. 서버는 긴급 해제를 개시자 ∨ `allow-cancel-group-emergency`, 임박 해제를 `allow-cancel-imminent-peril` 로 판정한다(TS 24.379
+  §6.3.3.1.13.4·§6.3.3.1.13.6, 단말 쪽 판정 §6.2.8.1.7·§6.2.8.1.10) — 관제 앱의 [긴급 해제] 자격이 이 값을 기다린다. `allow-cancel-emergency-alert` 와
+  같은 자리에 C API·.NET·Kotlin 으로 낸다.
+- **조건 조합(§6.3.3.1.17)** — `setCallCondition` 이 임박 → 긴급 상향에 `emergency-ind` true 와 `imminentperil-ind` false 를 함께 싣는다. 규격 조합은
+  `emergency-ind` true 면 `imminentperil-ind` 를 싣지 않는다(제어 기능이 임박을 내린다, §6.3.3.1.6 3)d)) — 서버는 지금 조합을 검증하지 않는다(편차 표).
 - **MCPTT 착신 수락의 호 종류별 분리** — `AccountConfig.autoAnswerMcptt` 하나가 그룹콜·사설콜을 함께 자동 수락한다. 규격은 수락 방식을 호 종류별로
   둔다(TS 24.379 §6.2.3 commencement mode — 사설콜·그룹콜 각각 자동/수동). 관제석은 그룹콜 자동 + 사설콜 수동이 맞다 — 둘로 나누면 C API·.NET·Kotlin 에
   같이 낸다. 긴급 사설콜의 전역 표시는 이 분리 뒤에 두 관제 앱이 정한다([dispatch_desktop_ui.md](dispatch_desktop_ui.md) §13,
@@ -670,8 +676,10 @@ NDK/MSVC 빌드는 개발 서버 밖(WSL2·Windows 머신)에서 수행하고, �
   코어가 `tel:` 을 도메인 붙은 `sip:` 로 바꿀지(발신·합류·픽업·전달·구독 — 세 바인딩의 요청 경로 전부가 바뀐다), 호출자가 라우팅 가능한 형태로 준다는
   계약으로 적을지는 CSP 의 `tel:` Request-URI 처리를 확인한 뒤 정한다.
 - **SDS disposition 통지의 규격 경로** — `sendSdsNotification` 은 원 발신자 AoR 로 SDS NOTIFICATION 한 파트만 보낸다. TS 24.282
-  V18.13.0 §12.2.1.1 은 대상 MCData ID 의 `resource-lists` 와 그룹 통지의 `<mcdata-calling-group-id>` 를 요구한다 — 통지 API 가 수신
-  SDS 의 그룹·발신자 문맥을 받아야 하고 CSP 통지 처리와 함께 바뀐다([mcdata_messaging.md](mcdata_messaging.md) §7 편차 표).
+  V18.13.0 §12.2.1.1 은 Request-URI = MCData 참여 기능 PSI(ue-init-config `MCData-Service-Details/Server-URI`), 대상 MCData ID 의
+  `resource-lists`(entry 하나), 그룹 통지의 `<mcdata-calling-group-id>`, ICSI mcdata.sds Accept-Contact·P-Preferred-Service(§6.2.4.1)를 요구한다 —
+  통지 API 가 수신 SDS 의 그룹·발신자 문맥을 받아 이 본문을 만든다. CSP 는 규격형을 이미 받아 상관·중계하고(옛 형식도 받는다 —
+  [mcdata_messaging.md](mcdata_messaging.md) §4.4), 서버 검증 대역은 `tests/sds_disposition_spec.py` 다.
 - **망 전환 중의 호 유지** — `handleNetworkChange` 는 등록만 되살리고 진행 중 호는 그대로 둔다 — 로컬 주소가 바뀌면 그 호의 RTP 가
   끊길 수 있다. 호를 옮기려면 호마다 re-INVITE(미디어 재초기화·Contact/Via 갱신)를 보내야 하고, MCPTT 호의 floor `m=application` 은
   re-INVITE SDP 에도 다시 실린다(`pendingAppSdp`). 넣기 전에 CSP 가 단말발 re-INVITE(VoLTE relay·MCPTT 세션)를 어떻게 다루는지

@@ -21,6 +21,7 @@ struct CMcpttInfo {
     bool bAlert = false;            // <alert-ind>true</alert-ind>
     bool bHasAlertInd = false;      // <alert-ind> 요소 있음 (경보·경보 취소 판별 — TS 24.379 §12.1)
     bool bHasEmergencyInd = false;  // <emergency-ind> 요소 있음 (경보 취소에 동봉된 그룹 긴급 해제 판별 — §12.1.3.2)
+    bool bHasImminentInd = false;   // <imminentperil-ind> 요소 있음 — 요소 없는 re-INVITE 는 조건 요청이 아니다
     std::string strRequestUri;      // <mcptt-request-uri> — 경보는 대상 그룹 (§12.1.1.1 4)a))
     std::string strCallingUserId;   // <mcptt-calling-user-id>
     std::string strOriginatedBy;    // <originated-by> — 제3자 경보 취소의 원 경보 발신자 (§12.1.3.2 2)a))
@@ -137,6 +138,44 @@ inline std::string McpttInfoValue( const char *tag, const std::string &v ) {
     return std::string( "    <" ) + tag + ">" + McpttXmlEsc( v ) + "</" + tag + ">\r\n";
 }
 
+/** 조건 지시자 묶음 — 제어 기능이 보내는 mcptt-info(재광고 re-INVITE·상태 통지 MESSAGE·403·INFO)의 emergency-ind·
+ *  alert-ind·imminentperil-ind·originated-by. -1 = 싣지 않음, 0 = false, 1 = true. */
+struct McpttIndicators {
+    int iEmergency = -1;
+    int iAlert = -1;
+    int iImminent = -1;
+    std::string strOriginatedBy;  ///< 제3자 경보 취소의 원 경보 발신자 (§6.3.3.1.6 4)b)ii)B)·§12.1.3.2 2)c)iii))
+};
+
+/** 지시자 요소 — 스키마 순서(emergency-ind · alert-ind · imminentperil-ind). originated-by 는
+ * McpttIndicatorOriginatedBy. */
+inline std::string McpttIndicatorElems( const McpttIndicators &ind ) {
+    std::string s;
+    if ( ind.iEmergency >= 0 ) s += McpttInfoBool( "emergency-ind", ind.iEmergency > 0 );
+    if ( ind.iAlert >= 0 ) s += McpttInfoBool( "alert-ind", ind.iAlert > 0 );
+    if ( ind.iImminent >= 0 ) s += McpttInfoBool( "imminentperil-ind", ind.iImminent > 0 );
+    return s;
+}
+
+/** originated-by 요소 — 스키마에서 broadcast-ind·mc-org 뒤. 값이 bare 면 tel: 을 붙인다. */
+inline std::string McpttIndicatorOriginatedBy( const McpttIndicators &ind ) {
+    if ( ind.strOriginatedBy.empty() ) return std::string();
+    const std::string v =
+        ind.strOriginatedBy.find( ':' ) == std::string::npos ? "tel:" + ind.strOriginatedBy : ind.strOriginatedBy;
+    return McpttInfoUri( "originated-by", v );
+}
+
+/** mcptt-info 문서 — <mcptt-Params> 자식 원문을 감싼다. */
+inline std::string McpttInfoDocument( const std::string &strParams ) {
+    return std::string(
+               "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n"
+               "<mcpttinfo xmlns=\"urn:3gpp:ns:mcpttInfo:1.0\">\r\n"
+               "  <mcptt-Params>\r\n" ) +
+           strParams +
+           "  </mcptt-Params>\r\n"
+           "</mcpttinfo>\r\n";
+}
+
 /** MCPTT/MCData Warning 헤더 값 (TS 24.379 §4.4·TS 24.282 §4.4) — RFC 3261 §20.43 warning-value =
  *  warn-code(399 — 기타 경고) SP warn-agent SP warn-text, warn-text = DQUOTE mcptt-warn-code SP mcptt-warn-text DQUOTE.
  *  pszAgent = 경고를 붙이는 서버(hostport 또는 pseudonym). 비면 "cims". */
@@ -161,6 +200,7 @@ inline CMcpttInfo ParseMcpttInfo( const std::string &body ) {
     info.bEmergency = _McpttIndTrue( body, "emergency-ind" );
     info.bHasEmergencyInd = McpttElemValue( body, "emergency-ind", strTmp );
     info.bImminent = _McpttIndTrue( body, "imminentperil-ind" );
+    info.bHasImminentInd = McpttElemValue( body, "imminentperil-ind", strTmp );
     info.bAlert = _McpttIndTrue( body, "alert-ind" );
     info.bHasAlertInd = McpttElemValue( body, "alert-ind", strTmp );
     info.bBroadcast = _McpttIndTrue( body, "broadcast-ind" );

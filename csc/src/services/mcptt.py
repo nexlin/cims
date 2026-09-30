@@ -81,7 +81,30 @@ DEFAULT_USER_PROFILE = {
     "allow_create_group": False,        # CIMS 확장 allow-create-group — GMS XCAP 그룹 생성 자격 (관제사, 기본 없음)
     "allow_non_ack_users_info": False,  # TS 24.484 anyExt allow-to-receive-non-acknowledged-users-information —
                                         #   그룹 호 개시자로서 미응답 멤버 INFO 수신 자격 (TS 24.379 §6.3.3.3, 부재 = false)
+    # 해제 인가 (TS 24.484 ruleset, migrate_ptt_user_profile_cancel_authz.sql) — 부재 시 값은 USER_PROFILE_OPT_ABSENT_SQL
+    "allow_cancel_group_emergency": False,  # allow-cancel-group-emergency — 그룹의 진행 중 긴급 상태 해제
+                                            #   (TS 24.379 §6.3.3.1.13.4 local policy = 개시자 ∨ 이 값)
+    "allow_cancel_imminent_peril": True,    # allow-cancel-imminent-peril — 임박 위험 해제 (§6.3.3.1.13.6, 개시자 예외 없음)
+    "allow_cancel_emergency_alert": True,   # allow-cancel-emergency-alert — 긴급 경보 취소 (§6.3.3.1.13.3)
+                                            #   = 부재 시 allow_emergency_alert 값
 }
+# 마이그레이션으로 뒤에 붙은 프로파일 컬럼(선택 컬럼)의 **부재 시 값** — 컬럼 미적용 DB 의 SELECT 대체식이자 행·키가 없을 때의 값
+#   (user_profile_opt_default). 여기 없는 선택 컬럼은 상수 0(자격 없음). allow_cancel_emergency_alert 은 발령 인가
+#   (allow_emergency_alert)를 잇는다 — 컬럼 도입 전 문서가 발령 값을 <allow-cancel-emergency-alert> 로 냈다.
+USER_PROFILE_OPT_ABSENT_SQL = {
+    "allow_cancel_imminent_peril": "1",
+    "allow_cancel_emergency_alert": "allow_emergency_alert",
+}
+
+
+def user_profile_opt_default(col, prof=None) -> bool:
+    """선택 컬럼 col 의 부재 시 값 — prof = 같은 프로파일의 나머지 값(대체식이 다른 컬럼을 가리키면 그 값)."""
+    expr = USER_PROFILE_OPT_ABSENT_SQL.get(col, "0")
+    if expr in ("0", "1"):
+        return expr == "1"
+    return bool((prof or {}).get(expr, DEFAULT_USER_PROFILE.get(expr, False)))
+
+
 # IdMS 로그인 자격 — CIMS 로그인 ID(인증) ↔ MCPTT ID(서비스 신원) 분리.
 #   login_id(예 test001) → {password, user_id, mcptt_id(tel:+msisdn 파생), name}
 LOGIN_ACCOUNTS = {}
@@ -104,8 +127,8 @@ REFRESH_TOKEN_TTL = 7 * 24 * 3600  # 7일
 #   값의 SoT 두 곳:
 #     · DB `mcptt_service_config` 단일 행(콘솔 편집) — N2(user-profile MaxAffiliationsN2 기본값)·broadcast-group 계층 수.
 #       아래 기본값은 그 행이 없을 때의 폴백. 키는 DB 컬럼·관리 API JSON 과 같은 언더스코어 표기.
-#     · 설정 `ServiceConfig.*`(SERVICE_CONFIG_PARAMS) — on-network fc-timers-counters·Resource-Priority. 기본값 = CMP floor 타이머
-#       기본값·CSP fan-out 의 mcpttp 서열.
+#     · 설정 `ServiceConfig.*`(SERVICE_CONFIG_PARAMS) — on-network emergency-call·transmit-time·fc-timers-counters·Resource-Priority.
+#       기본값 = CMP floor 타이머 기본값·CSP fan-out 의 mcpttp 서열·긴급 그룹 호 시한 없음.
 SERVICE_CONFIG_DEFAULTS = {
     "max_affiliations_n2": 10,
     "num_levels_group_hierarchy": 3,
@@ -117,6 +140,8 @@ SERVICE_CONFIG_DEFAULTS = {
 #   CMP 설정 Floor*Sec 는 문서를 못 받았을 때의 폴백이다. T15·T16·T17·T55·T56·C17·C55·C56 은 CMP 가 쓰지 않는 기능
 #   (MBMS·사전 수립 세션)의 값이라 규격 예시값(§A)을 싣는다.
 #   ResourcePriority 는 RFC 8101 `mcpttp` 네임스페이스 서열(TS 24.379 §6.2.8.1.15) — CSP fan-out 과 같다.
+#   EmergencyCall.GroupTimeLimit 은 controlling MCPTT function(CSP)의 TNG2(진행 중 긴급 그룹 호 타이머, TS 24.379 §6.3.3.1.16·
+#   부속서 F 타이머 표)다 — CSP 가 같은 문서의 <emergency-call><group-time-limit> 을 읽는다. 0(기본) = 요소 생략 = TNG2 미가동.
 _SERVICE_CONFIG_PARAM_DEFAULTS = {
     "FcTimersCounters": {
         "T1-end-of-rtp-media": 4000, "T3-stop-talking-grace": 3000, "T7-floor-idle": 0, "T8-floor-revoke": 1000,
@@ -128,6 +153,8 @@ _SERVICE_CONFIG_PARAM_DEFAULTS = {
     "ResourcePriority": {"Namespace": "mcpttp", "Emergency": "15", "ImminentPeril": "8", "Normal": "0"},
     # transmit-time/time-limit = on-network 그룹 발언 시간 한도(§8.4.2.1 on-network 4)) — floor 제어 서버 T2(TS 24.380 §6.3.4.4)
     "TransmitTime": {"TimeLimit": 30000},
+    # emergency-call/group-time-limit = 진행 중 긴급 그룹 호 시한(§8.4.2.1 on-network) — controlling 기능 TNG2. 0 = 요소 생략
+    "EmergencyCall": {"GroupTimeLimit": 0},
 }
 SERVICE_CONFIG_PARAMS = {}
 _SERVICE_CONFIG_PARAMS_LOADED = False   # 첫 적재 뒤 재적재(SIGUSR1)에서만 변경 통지
@@ -424,19 +451,20 @@ def load_shared_data(config):
 
                     # 사용자 MCPTT 프로파일 (SOS 대상 결정·개시 인가) — 마이그레이션 전이면 스킵
                     try:
-                        # allow_ambient_listening / allow_create_group / allow_non_ack_users_info 는 각 migrate_ptt_*.sql
-                        #   이후에만 — 컬럼 부재 시 상수 0 (선행 배포 무해).
-                        cur.execute("SHOW COLUMNS FROM ptt_user_profile LIKE 'allow_ambient_listening'")
-                        amb_col = "allow_ambient_listening" if cur.fetchone() else "0 AS allow_ambient_listening"
-                        cur.execute("SHOW COLUMNS FROM ptt_user_profile LIKE 'allow_create_group'")
-                        acg_col = "allow_create_group" if cur.fetchone() else "0 AS allow_create_group"
-                        cur.execute("SHOW COLUMNS FROM ptt_user_profile LIKE 'allow_non_ack_users_info'")
-                        nak_col = "allow_non_ack_users_info" if cur.fetchone() else "0 AS allow_non_ack_users_info"
+                        # allow_ambient_listening / allow_create_group / allow_non_ack_users_info / allow_cancel_* 는 각
+                        #   migrate_ptt_*.sql 이후에만 — 컬럼이 없으면 부재 시 값(USER_PROFILE_OPT_ABSENT_SQL, 없으면 상수 0 —
+                        #   선행 배포 무해).
+                        opt_cols = []
+                        for c in ("allow_ambient_listening", "allow_create_group", "allow_non_ack_users_info",
+                                  "allow_cancel_group_emergency", "allow_cancel_imminent_peril",
+                                  "allow_cancel_emergency_alert"):
+                            cur.execute(f"SHOW COLUMNS FROM ptt_user_profile LIKE '{c}'")
+                            opt_cols.append(c if cur.fetchone() else f"{USER_PROFILE_OPT_ABSENT_SQL.get(c, '0')} AS {c}")
                         cur.execute(
                             "SELECT ptt_id, allow_emergency_call, allow_emergency_alert, "
                             "allow_adhoc_call, emergency_group_mode, emergency_group_id, "
                             "allow_emergency_private_call, private_emergency_mode, "
-                            f"emergency_private_recipient, {amb_col}, {acg_col}, {nak_col} "
+                            f"emergency_private_recipient, {', '.join(opt_cols)} "
                             "FROM ptt_user_profile")
                         PTT_PROFILES.clear()
                         for r in cur.fetchall():
@@ -452,6 +480,9 @@ def load_shared_data(config):
                                 "allow_ambient_listening": bool(r['allow_ambient_listening']),
                                 "allow_create_group": bool(r['allow_create_group']),
                                 "allow_non_ack_users_info": bool(r['allow_non_ack_users_info']),
+                                "allow_cancel_group_emergency": bool(r['allow_cancel_group_emergency']),
+                                "allow_cancel_imminent_peril": bool(r['allow_cancel_imminent_peril']),
+                                "allow_cancel_emergency_alert": bool(r['allow_cancel_emergency_alert']),
                             }
                         logger.log_info(f"Loaded {len(PTT_PROFILES)} user MCPTT profiles")
                     except Exception as pe:
@@ -1496,7 +1527,12 @@ def get_user_profile_xml(user_uri, owner_uid=None):
         mcptt_emergency_modes.md). MCPTTPrivateRecipient 는 XSD sequence 상 ProSeUserID-entry(User-Info-ID 6옥텟 hex)가
         필수 자식이라 off-network 미지원인 우리는 영값(000000000000)을 싣는다.
       - 상한 = mcptt_service_config.max_affiliations_n2(MaxAffiliationsN2) + UserProfile.*(N6·N7·Priority·조직명).
-      - 인가 = <cp:ruleset>(RFC 4745 common-policy) — actions 자식은 규격 요소 + cims 확장(그룹 생성). ad hoc 인가는
+      - 인가 = <cp:ruleset>(RFC 4745 common-policy) — actions 자식은 규격 요소(§8.3.2.1 11) 목록 순: 긴급 그룹콜·긴급 사설콜
+        개시 → 그룹 긴급 해제·임박 위험 해제 → 경보 발령·경보 취소 → 원격 청취 → anyExt) + cims 확장(그룹 생성). 해제 인가
+        <allow-cancel-group-emergency>(기본 false — 서버 판정은 local policy 개시자 ∨ 이 값, TS 24.379 §6.3.3.1.13.4)·
+        <allow-cancel-imminent-peril>(기본 true, §6.3.3.1.13.6)·<allow-cancel-emergency-alert>(부재 = 발령 인가 값,
+        §6.3.3.1.13.3)은 ptt_user_profile allow_cancel_* 그대로 — 개시 인가와 달리 대상 결정 가능 여부와 AND 하지 않는다
+        (해제는 이미 선 긴급 상태·경보가 대상이다). ad hoc 인가는
         규격 <anyExt><allow-adhoc-group-call>(TS 24.484 §8.3.2.1 11)xxxviii)R), Rel-18). <cims:allow-adhoc-group-call> 은
         옛 ptt-client 가 읽는 전환기 별칭 — 단말 SDK 이식(ptt-client P3) 뒤 뺀다. 같은 anyExt 에 미응답 멤버 알림 자격
         <allow-to-receive-non-acknowledged-users-information>(11)xxxviii)L), 표 8.3.2.7-49 — 값 = allow_non_ack_users_info,
@@ -1578,6 +1614,10 @@ def get_user_profile_xml(user_uri, owner_uid=None):
     def _ba(k, ok, default=True):
         return "true" if (prof.get(k, default) and ok) else "false"
 
+    # 해제 인가는 대상 결정 가능 여부와 AND 하지 않는다 — 이미 선 긴급 상태·경보를 푸는 자격이다. 경보 취소의 부재 시 값 =
+    #   발령 인가(옛 캐시 항목·컬럼 미적용 DB 가 종전 문서와 같은 값을 낸다).
+    cancel_alert_dflt = user_profile_opt_default('allow_cancel_emergency_alert', prof)
+
     org = str(_user_profile_cfg('MissionCriticalOrganization') or _ue_init_cfg('Name') or _UE_INIT_DEFAULTS['Name'])
     ptype = str(_user_profile_cfg('ParticipantType'))
     lang = str(_user_profile_cfg('Language'))
@@ -1631,9 +1671,11 @@ def get_user_profile_xml(user_uri, owner_uid=None):
     <cp:rule id="mcptt-user-authorisation">
       <cp:actions>
         <allow-emergency-group-call>{_ba('allow_emergency_call', group_target_ok)}</allow-emergency-group-call>
-        <allow-activate-emergency-alert>{_ba('allow_emergency_alert', group_target_ok)}</allow-activate-emergency-alert>
-        <allow-cancel-emergency-alert>{_ba('allow_emergency_alert', group_target_ok)}</allow-cancel-emergency-alert>
         <allow-emergency-private-call>{_ba('allow_emergency_private_call', private_target_ok)}</allow-emergency-private-call>
+        <allow-cancel-group-emergency>{_b('allow_cancel_group_emergency', False)}</allow-cancel-group-emergency>
+        <allow-cancel-imminent-peril>{_b('allow_cancel_imminent_peril', True)}</allow-cancel-imminent-peril>
+        <allow-activate-emergency-alert>{_ba('allow_emergency_alert', group_target_ok)}</allow-activate-emergency-alert>
+        <allow-cancel-emergency-alert>{_b('allow_cancel_emergency_alert', cancel_alert_dflt)}</allow-cancel-emergency-alert>
         <allow-ambient-listening>{_b('allow_ambient_listening', False)}</allow-ambient-listening>
         <anyExt>  <!-- TS 24.484 §8.3.2.1 11)xxxviii) — 자식 순서는 그 목록(L → R) 순 -->
           <allow-to-receive-non-acknowledged-users-information>{_b('allow_non_ack_users_info', False)}</allow-to-receive-non-acknowledged-users-information>
@@ -1670,8 +1712,10 @@ def get_service_config_xml(user_uri):
     """MCPTT service configuration 문서 (TS 24.484 §8.4) — **시스템 전역** 1건을 XML 로 산출한다.
 
     구조 = §8.4.2.1·§8.4.2.3 스키마: <service-configuration-info> › <service-configuration-params domain> ›
-      <common><broadcast-group>(계층 수) · <on-network>(<fc-timers-counters> 필수 · <emergency-/imminent-peril-/normal-
-      resource-priority> 필수 — 각 <resource-priority-namespace>·<resource-priority-priority>).
+      <common><broadcast-group>(계층 수) · <on-network>(스키마 순: <emergency-call><group-time-limit> 선택 — 설정
+      ServiceConfig.EmergencyCall.GroupTimeLimit 이 0·빈 값·잘못된 값이면 요소째 생략(TNG2 미가동, TS 24.379 §6.3.3.1.16) ·
+      <transmit-time><time-limit> · <fc-timers-counters> 필수 · <emergency-/imminent-peril-/normal-resource-priority> 필수 —
+      각 <resource-priority-namespace>·<resource-priority-priority>).
     사용자마다 달라지지 않으므로 user_uri 는 호출자 인가(self-access 검증)에만 쓰인다. ETag 는 내용 파생이라 값이 바뀌면
     자동 갱신되고, 단말은 xcap-diff(cms) NOTIFY 로 재조회한다.
     """
@@ -1704,6 +1748,15 @@ def get_service_config_xml(user_uri):
                 f"        <resource-priority-priority>{esc(_svc_param('ResourcePriority', key))}</resource-priority-priority>\n"
                 f"      </{elem}>")
 
+    # <emergency-call> 은 on-network 시퀀스의 첫 자식(선택) — 값이 없으면 요소째 뺀다(빈 <emergency-call> 을 싣지 않는다)
+    try:
+        eg_limit = int(_svc_param("EmergencyCall", "GroupTimeLimit"))
+    except (TypeError, ValueError):
+        eg_limit = 0
+    emerg = (f"      <emergency-call>\n"
+             f"        <group-time-limit>{_xs_duration(eg_limit)}</group-time-limit>\n"
+             f"      </emergency-call>\n") if eg_limit > 0 else ""
+
     nl = "\n"
     xml = f"""<?xml version="1.0" encoding="UTF-8"?>
 <service-configuration-info xmlns="urn:3gpp:ns:mcpttServiceConfig:1.0"
@@ -1716,7 +1769,7 @@ def get_service_config_xml(user_uri):
       </broadcast-group>
     </common>
     <on-network>
-      <transmit-time>
+{emerg}      <transmit-time>
         <time-limit>{_xs_duration(_svc_param('TransmitTime', 'TimeLimit'))}</time-limit>
       </transmit-time>
       <fc-timers-counters>

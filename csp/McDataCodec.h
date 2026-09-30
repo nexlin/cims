@@ -11,6 +11,7 @@
 #define _MCDATA_CODEC_H_
 
 #include <string>
+#include <vector>
 
 // TS 24.282 §15.2.2 message types
 #define MCDATA_MSG_SDS_SIGNALLING 0x01
@@ -62,6 +63,19 @@ public:
 
     /** mcdata-info <mcdata-request-uri> (그룹 URI) */
     std::string m_strGroupUri;
+
+    /** mcdata-info <mcdata-calling-user-id>·<mcdata-calling-group-id> — disposition 통지의 그룹 문맥
+     *  (TS 24.282 §12.2.1.1 5)·§12.2.3 15)) */
+    std::string m_strCallingUserId;
+    std::string m_strCallingGroupId;
+
+    /** application/resource-lists+xml 파트 유무와 <entry uri> 목록 — disposition 통지 대상 MCData ID(§12.2.1.1 3)) */
+    bool m_bHasResourceLists = false;
+    std::vector<std::string> m_vecListUris;
+
+    /** mcdata-signalling 파트 원문(파트 헤더 포함, 전송 인코딩 그대로) — 통지 중계가 그대로 옮긴다(§12.2.3 15)d)·16))
+     */
+    std::string m_strSignallingPart;
 
     // ── FD SIGNALLING (msg type 0x02) 전용 ──
     /** Payload IE(FILEURL) 의 다운로드 URL */

@@ -2,9 +2,11 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <strings.h>
 
 #include "CallDir.h"
 #include "CspServiceMap.h"
+#include "CspUser.h"
 #include "DbManager.h"
 #include "GroupMap.h"
 #include "Log.h"
@@ -27,6 +29,7 @@ bool CMcDataAsModule::IsEnabled() const {
  */
 bool CMcDataAsModule::OnMessage( const char *pszFrom, const char *pszTo, CSipMessage *pclsMessage, int &iStatus ) {
     if ( pclsMessage == NULL ) return false;
+    if ( OnDispositionNotification( pszFrom, pclsMessage, iStatus ) ) return true;
     if ( gclsGroupMap.Contains( pszTo ) == false ) return false;  // 1:1 → 디스패처 기본 경로
 
     CspPttGroup clsGroup;
@@ -104,5 +107,121 @@ bool CMcDataAsModule::OnMessage( const char *pszFrom, const char *pszTo, CSipMes
     CLog::Print( LOG_INFO, "McDataAs: group SDS from(%s) to(%s) mcdata=%d size=%d fanout=%d conv(%s) msg(%s)", pszFrom,
                  pszTo, bMcData, iPayloadSize, iFanout, clsInfo.m_strConvId.c_str(), clsInfo.m_strMsgId.c_str() );
     iStatus = SIP_OK;
+    return true;
+}
+
+namespace {
+    /** 응답 + Warning (TS 24.282 §4.9 — 399 <agent> "<code> <text>") */
+    void _RejectWithWarning( CSipMessage *pclsMessage, int iStatus, int iWarn, const char *pszText ) {
+        CSipMessage *pclsResponse = pclsMessage->CreateResponseWithToTag( iStatus );
+        if ( !pclsResponse ) return;
+        pclsResponse->AddHeader( "Warning",
+                                 McpttWarning( iWarn, pszText, gclsServiceMap.GetDomainByKind( "ptt" ) ).c_str() );
+        gclsUserAgent.m_clsSipStack.SendSipMessage( pclsResponse );
+    }
+    std::string _TelOf( const std::string &strId ) {
+        return strId.find( ':' ) == std::string::npos ? "tel:" + strId : strId;
+    }
+}  // namespace
+
+bool CMcDataAsModule::OnDispositionNotification( const char *pszFrom, CSipMessage *pclsMessage, int &iStatus ) {
+    char szContentType[512];
+    szContentType[0] = '\0';
+    pclsMessage->m_clsContentType.ToString( szContentType, sizeof( szContentType ) );
+    if ( !McDataIsMultipartMixed( szContentType ) ) return false;
+    CMcDataSdsInfo clsInfo;
+    if ( !McDataParseBody( szContentType, pclsMessage->m_strBody, clsInfo ) ) return false;
+    if ( clsInfo.m_iMsgType != MCDATA_MSG_SDS_NOTIFICATION || !clsInfo.m_bHasResourceLists ) return false;
+
+    const std::string strNotifier = pszFrom ? pszFrom : "";  // 참여 기능이 정한 통지자 MCData ID(§12.2.2.1 2)·10))
+    iStatus = 0;                                             // 아래 거절은 Warning 을 실어 여기서 보낸다
+
+    // §12.2.3 2) — ICSI mcdata.sds Accept-Contact (§6.2.4.1 1)b))
+    bool bIcsi = false;
+    for ( const auto &h : pclsMessage->m_clsHeaderList )
+        if ( strcasecmp( h.m_strName.c_str(), "Accept-Contact" ) == 0 &&
+             h.m_strValue.find( "3gpp-service.ims.icsi.mcdata.sds" ) != std::string::npos )
+            bIcsi = true;
+    if ( !bIcsi ) {
+        CLog::Print( LOG_INFO, "McDataAs: disposition from(%s) — Accept-Contact ICSI mcdata.sds 없음 → 403",
+                     strNotifier.c_str() );
+        iStatus = SIP_FORBIDDEN;
+        return true;
+    }
+    // 3) 대상 MCData ID 는 하나 — 없거나 둘 이상이면 145
+    if ( clsInfo.m_vecListUris.size() != 1 ) {
+        CLog::Print( LOG_INFO, "McDataAs: disposition from(%s) resource-lists entries=%zu → 403 (145)",
+                     strNotifier.c_str(), clsInfo.m_vecListUris.size() );
+        _RejectWithWarning( pclsMessage, SIP_FORBIDDEN, 145, "unable to determine called party" );
+        return true;
+    }
+    const std::string strTarget = McpttBareId( clsInfo.m_vecListUris[0] );
+    // 4)·5) 원 SDS 와 상관 — 대화·메시지 ID 가 이 서버가 전달한 SDS 이고 그 발신자가 통지 대상이어야 한다
+    std::string strOrigSender, strOrigGroup;
+    if ( !McDataCorrelateSds( clsInfo.m_strConvId, clsInfo.m_strMsgId, strOrigSender, strOrigGroup ) ||
+         strOrigSender != strTarget ) {
+        CLog::Print( LOG_INFO, "McDataAs: disposition from(%s) to(%s) conv(%s) msg(%s) — 상관 실패 → 403 (216)",
+                     strNotifier.c_str(), strTarget.c_str(), clsInfo.m_strConvId.c_str(), clsInfo.m_strMsgId.c_str() );
+        _RejectWithWarning( pclsMessage, SIP_FORBIDDEN, 216, "unable to correlate the disposition notification" );
+        return true;
+    }
+    // 15)b) 그룹 통지면 통지자가 그 그룹 멤버여야 한다
+    const std::string strGroup = McpttBareId( clsInfo.m_strCallingGroupId );
+    if ( !strGroup.empty() ) {
+        CspPttGroup clsGroup;
+        bool bMember = false;
+        if ( gclsGroupMap.Select( strGroup.c_str(), clsGroup ) )
+            for ( const auto &pUser : clsGroup._pusers )
+                if ( pUser && pUser->_id == strNotifier ) bMember = true;
+        if ( !bMember ) {
+            CLog::Print( LOG_INFO, "McDataAs: disposition from(%s) group(%s) — 멤버 아님 → 403 (116)",
+                         strNotifier.c_str(), strGroup.c_str() );
+            _RejectWithWarning( pclsMessage, SIP_FORBIDDEN, 116, "user is not part of the MCData group" );
+            return true;
+        }
+    }
+
+    CUserInfo clsTargetInfo;
+    if ( !gclsUserMap.Select( strTarget.c_str(), clsTargetInfo ) ) {  // 1:1 전달과 같은 구분 (mcdata_messaging.md §7)
+        CspUser clsKnown;
+        iStatus = gclsCspUserMap.Select( strTarget.c_str(), clsKnown ) ? SIP_TEMPORARILY_UNAVAILABLE : SIP_NOT_FOUND;
+        return true;
+    }
+    CSipCallRoute clsRoute;
+    clsTargetInfo.GetCallRoute( clsRoute );
+
+    // 7)~17) 중계 MESSAGE — mcdata-info(14) 대상 = mcdata-request-uri, 통지자·그룹) + 받은 signalling 파트 그대로
+    //   (15)d)·16) — 집계(TDC1)는 하지 않는다). 헤더 = Accept-Contact(8)), P-Asserted-Service(11)), P-Asserted-Identity
+    //   = 제어 기능 PSI(13) — 그룹 통지는 그룹 URI, 1:1 은 MCData 서버 PSI).
+    const std::string strDomain = gclsServiceMap.GetDomainByKind( "ptt" );
+    std::string strInfo =
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n"
+        "<mcdatainfo xmlns=\"urn:3gpp:ns:mcdataInfo:1.0\">\r\n"
+        "  <mcdata-Params>\r\n"
+        "    <mcdata-request-uri type=\"Normal\"><mcdataURI>" +
+        _TelOf( strTarget ) +
+        "</mcdataURI></mcdata-request-uri>\r\n"
+        "    <mcdata-calling-user-id type=\"Normal\"><mcdataURI>" +
+        _TelOf( strNotifier ) + "</mcdataURI></mcdata-calling-user-id>\r\n";
+    if ( !strGroup.empty() )
+        strInfo += "    <mcdata-calling-group-id type=\"Normal\"><mcdataURI>" + _TelOf( strGroup ) +
+                   "</mcdataURI></mcdata-calling-group-id>\r\n";
+    strInfo += "  </mcdata-Params>\r\n</mcdatainfo>";
+    const std::string strBoundary = "mcdata-disposition-" + McDataNewMessageId().substr( 0, 12 );
+    const std::string strBody = "--" + strBoundary + "\r\nContent-Type: application/vnd.3gpp.mcdata-info+xml\r\n\r\n" +
+                                strInfo + "\r\n--" + strBoundary + "\r\n" + clsInfo.m_strSignallingPart + "\r\n--" +
+                                strBoundary + "--\r\n";
+    const std::vector<std::pair<std::string, std::string>> vecHeaders = {
+        { "Accept-Contact", "*;+g.3gpp.mcdata.sds;require;explicit" },
+        { "Accept-Contact", "*;+g.3gpp.icsi-ref=\"urn%3Aurn-7%3A3gpp-service.ims.icsi.mcdata.sds\";require;explicit" },
+        { "P-Asserted-Service", "urn:urn-7:3gpp-service.ims.icsi.mcdata.sds" },
+        { "P-Asserted-Identity",
+          "<sip:" + ( strGroup.empty() ? std::string( "mcdata_psi" ) : strGroup ) + "@" + strDomain + ">" } };
+    const bool bSent = gclsUserAgent.SendSms( strNotifier.c_str(), strTarget.c_str(), strBody.c_str(), &clsRoute,
+                                              ( "multipart/mixed;boundary=" + strBoundary ).c_str(), &vecHeaders );
+    CLog::Print( LOG_INFO, "McDataAs: disposition from(%s) → %s notif=%d conv(%s) msg(%s) group(%s) %s",
+                 strNotifier.c_str(), strTarget.c_str(), clsInfo.m_iNotifType, clsInfo.m_strConvId.c_str(),
+                 clsInfo.m_strMsgId.c_str(), strGroup.empty() ? "-" : strGroup.c_str(), bSent ? "relayed" : "FAILED" );
+    iStatus = bSent ? SIP_OK : SIP_INTERNAL_SERVER_ERROR;
     return true;
 }

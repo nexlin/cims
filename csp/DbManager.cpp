@@ -167,6 +167,16 @@ void CDbManager::ProbeSchema() {
     pRes = ExecuteSelect( "SHOW COLUMNS FROM ptt_user_profile LIKE 'allow_non_ack_users_info'" );
     m_bHasNonAckInfoColumn = pRes && mysql_num_rows( pRes ) > 0;
     if ( pRes ) mysql_free_result( pRes );
+    // 해제 인가 (TS 24.484 allow-cancel-group-emergency·allow-cancel-imminent-peril·allow-cancel-emergency-alert —
+    //   mcptt_emergency_modes.md §4.2). 미적용이면 코드 기본값(긴급 해제 = 개시자만, 임박 해제 허용, 경보 취소 = 발령
+    //   인가).
+    pRes = ExecuteSelect( "SHOW COLUMNS FROM ptt_user_profile LIKE 'allow_cancel_group_emergency'" );
+    m_bHasCancelAuthzColumns = pRes && mysql_num_rows( pRes ) > 0;
+    if ( pRes ) mysql_free_result( pRes );
+    if ( !m_bHasCancelAuthzColumns )
+        CLog::Print( LOG_INFO,
+                     "[DB] ptt_user_profile.allow_cancel_* columns absent — migrate_ptt_user_profile_cancel_authz.sql "
+                     "미적용. 긴급 해제는 개시자만, 경보 취소는 발령 인가로 판정" );
 }
 
 std::string CDbManager::Ha1Col( const char *pszAlias ) const {
@@ -452,7 +462,10 @@ int CDbManager::SelectUserProfile( const std::string &strUserId, CspUserProfile 
         "       allow_emergency_private_call, private_emergency_mode, "
         "       COALESCE(emergency_private_recipient,''), " +
         std::string( m_bHasAmbientColumn ? "COALESCE(allow_ambient_listening,0)" : "0" ) + ", " +
-        std::string( m_bHasNonAckInfoColumn ? "COALESCE(allow_non_ack_users_info,0)" : "0" ) +
+        std::string( m_bHasNonAckInfoColumn ? "COALESCE(allow_non_ack_users_info,0)" : "0" ) + ", " +
+        std::string( m_bHasCancelAuthzColumns
+                         ? "allow_cancel_group_emergency, allow_cancel_imminent_peril, allow_cancel_emergency_alert"
+                         : "0, 1, allow_emergency_alert" ) +
         " FROM ptt_user_profile WHERE ptt_id='" + Escape( strUserId ) + "'";
 
     MYSQL_RES *pRes = ExecuteSelect( strSql );
@@ -473,6 +486,9 @@ int CDbManager::SelectUserProfile( const std::string &strUserId, CspUserProfile 
     clsProfile.m_strEmergencyPrivateRecipient = row[7] ? row[7] : "";
     clsProfile.m_bAllowAmbientListening = row[8] ? ( atoi( row[8] ) != 0 ) : false;
     clsProfile.m_bAllowNonAckUsersInfo = row[9] ? ( atoi( row[9] ) != 0 ) : false;
+    clsProfile.m_bAllowCancelGroupEmergency = row[10] ? ( atoi( row[10] ) != 0 ) : false;
+    clsProfile.m_bAllowCancelImminentPeril = row[11] ? ( atoi( row[11] ) != 0 ) : true;
+    clsProfile.m_bAllowCancelEmergencyAlert = row[12] ? ( atoi( row[12] ) != 0 ) : clsProfile.m_bAllowEmergencyAlert;
     mysql_free_result( pRes );
     return 1;
 }

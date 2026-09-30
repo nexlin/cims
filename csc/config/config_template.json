@@ -848,7 +848,7 @@
     {
       "key": "service_config",
       "title": "MCPTT 서비스 설정 문서 (service-config) — on-network 파라미터",
-      "description": "TS 24.484 §8.4 service configuration 문서의 on-network 규격 파라미터 — 발언 시간 한도(<transmit-time>)·floor 타이머·카운터(<fc-timers-counters>)·Resource-Priority. floor 값은 CMP 의 정본이다(CSP 가 문서를 받아 CMP 로 전달, CMP 설정 Floor*Sec 는 문서를 못 받았을 때의 폴백). N2·broadcast-group 계층 수는 콘솔 [MCPTT 정책](DB)에서 편집한다. 값이 바뀌면 문서 ETag 도 바뀐다.",
+      "description": "TS 24.484 §8.4 service configuration 문서의 on-network 규격 파라미터 — 긴급 그룹 호 시한(<emergency-call>, CSP TNG2)·발언 시간 한도(<transmit-time>)·floor 타이머·카운터(<fc-timers-counters>)·Resource-Priority. floor 값은 CMP 의 정본이다(CSP 가 문서를 받아 CMP 로 전달, CMP 설정 Floor*Sec 는 문서를 못 받았을 때의 폴백). N2·broadcast-group 계층 수는 콘솔 [MCPTT 정책](DB)에서 편집한다. 값이 바뀌면 문서 ETag 도 바뀐다.",
       "fields": [
         {
           "key": "ServiceConfig.FcTimersCounters.T1-end-of-rtp-media",
@@ -1035,6 +1035,17 @@
           "restart": false,
           "reload_hint": "SIGUSR1 로 재로드.",
           "help": "TS 24.484 §8.4 on-network <transmit-time><time-limit> — on-network 그룹 발언 시간 한도. CSP 가 floor 제어 서버(CMP) T2 로 전달한다(CMP 설정 FloorStopTalkSec 보다 우선)."
+        },
+        {
+          "key": "ServiceConfig.EmergencyCall.GroupTimeLimit",
+          "label": "TNG2 — 긴급 그룹 호 시한 (0=없음) (ms)",
+          "type": "int",
+          "default": 0,
+          "min": 0,
+          "max": 86400000,
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드 — 다음 GET 부터 새 문서·ETag.",
+          "help": "TS 24.484 §8.4 on-network <emergency-call><group-time-limit> — 진행 중 긴급 그룹 호의 시한. controlling MCPTT function(CSP)이 TNG2 로 쓴다(TS 24.379 §6.3.3.1.16·부속서 F — CSP 는 초 단위, 1 s 미만은 버린다). 0 = 요소를 싣지 않는다(TNG2 미가동 — 긴급 상태는 해제 요청·세션 종료까지 유지)."
         },
         {
           "key": "ServiceConfig.ResourcePriority.Namespace",

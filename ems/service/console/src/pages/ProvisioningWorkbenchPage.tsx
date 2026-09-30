@@ -2,7 +2,7 @@ import { useConfirm } from '@core/components/custom/confirm'
 import { Fragment, useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import IconBtn from '@core/components/IconBtn'
 import { AlertTriangle, ChevronRight, Pencil, Plus, Trash2, Upload, X } from 'lucide-react'
-import { usersApi, MCPTT_PROFILE_OPT_KEYS, type UserSummary, type Subscription, type UserInput, type McpttProfile, type SipTransport, type AuthScheme, type ImportResult, type LineSvc } from '@core/api/users'
+import { usersApi, MCPTT_PROFILE_OPT_KEYS, mcpttProfileOptDefault, type UserSummary, type Subscription, type UserInput, type McpttProfile, type SipTransport, type AuthScheme, type ImportResult, type LineSvc } from '@core/api/users'
 import { groupsApi, type Group } from '@core/api/groups'
 import { phoneGroupsApi, type PhoneGroup } from '@core/api/phoneGroups'
 import { rolesApi, type RoleDef } from '@core/api/roles'
@@ -664,7 +664,10 @@ function LineCard({ user, row, catalog, pttGroups, phoneGroups, canWrite, highli
     if (svc === 'ptt' && prof) setPform({ allow_emergency_call: prof.allow_emergency_call, allow_emergency_alert: prof.allow_emergency_alert, allow_adhoc_call: prof.allow_adhoc_call,
       emergency_group_mode: prof.emergency_group_mode, emergency_group_id: prof.emergency_group_id, allow_emergency_private_call: prof.allow_emergency_private_call,
       private_emergency_mode: prof.private_emergency_mode, emergency_private_recipient: prof.emergency_private_recipient,
-      allow_ambient_listening: !!prof.allow_ambient_listening, allow_create_group: !!prof.allow_create_group, allow_non_ack_users_info: !!prof.allow_non_ack_users_info })
+      allow_ambient_listening: !!prof.allow_ambient_listening, allow_create_group: !!prof.allow_create_group, allow_non_ack_users_info: !!prof.allow_non_ack_users_info,
+      allow_cancel_group_emergency: prof.allow_cancel_group_emergency ?? mcpttProfileOptDefault('allow_cancel_group_emergency', prof),
+      allow_cancel_imminent_peril: prof.allow_cancel_imminent_peril ?? mcpttProfileOptDefault('allow_cancel_imminent_peril', prof),
+      allow_cancel_emergency_alert: prof.allow_cancel_emergency_alert ?? mcpttProfileOptDefault('allow_cancel_emergency_alert', prof) })
     // 링백 음원 후보 — 서비스 음원 라이브러리(announcements.md §7). 못 읽으면 직접 입력만
     if (spec.showIcb && hasRingback && media === null) announcementsApi.list().then(r => setMedia(r.media.map(m => m.id))).catch(() => setMedia([]))
   }, [editing, sub, svc, prof, spec.showIcb, hasRingback, media])
@@ -713,10 +716,11 @@ function LineCard({ user, row, catalog, pttGroups, phoneGroups, canWrite, highli
     try {
       await usersApi.updateSub(user.id, svc, sub.id, d)
       if (svc === 'ptt' && pform) {
-        // 선택 컬럼 자격은 켜져 있거나 켜져 있던 것만 싣는다 — 이 폼이 다루지 않는 자격(청취·그룹 생성)은 현재값을 그대로 돌려주고,
-        //   꺼진 채 그대로인 키는 빼서 컬럼 미적용 DB 에서도 저장된다(빠진 키 = 서버가 0 으로 쓴다 = 현재값과 같다).
+        // 선택 컬럼 자격은 부재 시 값과 다르거나 달랐던 것만 싣는다 — 이 폼이 다루지 않는 자격(청취·그룹 생성)은 현재값을 그대로
+        //   돌려주고, 부재 시 값 그대로인 키는 빼서 컬럼 미적용 DB 에서도 저장된다(빠진 키 = 서버가 부재 시 값으로 쓴다 = 현재값과 같다).
         const body: McpttProfile = { ...pform, emergency_private_recipient: pform.emergency_private_recipient?.trim() || null }
-        for (const k of MCPTT_PROFILE_OPT_KEYS) if (!pform[k] && !prof?.[k]) delete body[k]
+        for (const k of MCPTT_PROFILE_OPT_KEYS)
+          if (!!pform[k] === mcpttProfileOptDefault(k, pform) && (!prof || (prof[k] ?? mcpttProfileOptDefault(k, prof)) === mcpttProfileOptDefault(k, prof))) delete body[k]
         await usersApi.updatePttProfile(user.id, sub.id, body)
       }
       show(`${spec.label} ${sub.id} 저장 — 다음 REGISTER·착신부터 적용`, 'ok'); onDone()
@@ -778,6 +782,10 @@ function LineCard({ user, row, catalog, pttGroups, phoneGroups, canWrite, highli
                         : <Badge variant="neutralSoft">현재 선택 그룹 (단말)</Badge>}
                       <span className="text-xs text-muted-foreground">소속 그룹 중 하나 · 미지정이면 단말이 선택한 그룹</span></span>],
                     ['개시 허용', [prof.allow_emergency_call ? '긴급 그룹콜' : '', prof.allow_emergency_alert ? '긴급 경보' : '', prof.allow_adhoc_call ? '애드혹' : ''].filter(Boolean).join(' · ') || '전부 차단'],
+                    ['해제 허용', <span>{[(prof.allow_cancel_group_emergency ?? mcpttProfileOptDefault('allow_cancel_group_emergency', prof)) ? '긴급 해제' : '',
+                      (prof.allow_cancel_imminent_peril ?? mcpttProfileOptDefault('allow_cancel_imminent_peril', prof)) ? '임박 위험 해제' : '',
+                      (prof.allow_cancel_emergency_alert ?? mcpttProfileOptDefault('allow_cancel_emergency_alert', prof)) ? '경보 취소' : ''].filter(Boolean).join(' · ') || '없음'}
+                      {' '}<span className="text-xs text-muted-foreground">— 긴급 해제는 개시자면 항상 가능</span></span>],
                     ['긴급 사설콜', prof.allow_emergency_private_call
                       ? `${PRIV_LABEL[prof.private_emergency_mode]}${prof.private_emergency_mode === 'UsePreConfigured' ? ` → ${prof.emergency_private_recipient || '(수신자 미지정 — 불발)'}` : ''}`
                       : '차단'],
@@ -906,6 +914,11 @@ function LineCard({ user, row, catalog, pttGroups, phoneGroups, canWrite, highli
                       <label className="flex items-center gap-2 text-sm"><Checkbox checked={pform.allow_emergency_alert} onCheckedChange={c => setPform({ ...pform, allow_emergency_alert: c === true })} /> 긴급 경보 개시</label>
                       <label className="flex items-center gap-2 text-sm"><Checkbox checked={pform.allow_adhoc_call} onCheckedChange={c => setPform({ ...pform, allow_adhoc_call: c === true })} /> 애드혹 개시</label>
                     </div>
+                    <div className="col-span-2 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-sm">
+                      <label className="flex items-center gap-2"><Checkbox checked={!!pform.allow_cancel_group_emergency} onCheckedChange={c => setPform({ ...pform, allow_cancel_group_emergency: c === true })} /> 긴급 해제</label>
+                      <label className="flex items-center gap-2"><Checkbox checked={!!pform.allow_cancel_imminent_peril} onCheckedChange={c => setPform({ ...pform, allow_cancel_imminent_peril: c === true })} /> 임박 위험 해제</label>
+                      <label className="flex items-center gap-2"><Checkbox checked={!!pform.allow_cancel_emergency_alert} onCheckedChange={c => setPform({ ...pform, allow_cancel_emergency_alert: c === true })} /> 경보 취소</label>
+                    </div>
                     <Field label="긴급 사설콜 (1:1)">
                       <Select value={toSel(pform.allow_emergency_private_call ? pform.private_emergency_mode : 'off')}
                         onValueChange={(v: string) => { const m = fromSel(v); setPform(m === 'off' ? { ...pform, allow_emergency_private_call: false } : { ...pform, allow_emergency_private_call: true, private_emergency_mode: m as McpttProfile['private_emergency_mode'] }) }}>
@@ -922,7 +935,7 @@ function LineCard({ user, row, catalog, pttGroups, phoneGroups, canWrite, highli
                     )}
                   </div>
                 )}
-                <div className="text-xs text-muted-foreground">긴급 그룹은 소속 그룹 중에서 고른다(TS 24.484 entry-info). 청취 자격(allow-ambient-listening)은 역할 배정으로 정해지며 여기서 편집하지 않는다.</div>
+                <div className="text-xs text-muted-foreground">긴급 그룹은 소속 그룹 중에서 고른다(TS 24.484 entry-info). 해제 인가(allow-cancel-*): 긴급 해제 = 개시자가 아니어도 그룹의 긴급 상태를 푼다(개시자는 항상), 임박 위험 해제 = 개시자도 이 값을 따른다, 경보 취소 = 남의 경보 포함(TS 24.379 §6.3.3.1.13). 청취 자격(allow-ambient-listening)은 역할 배정으로 정해지며 여기서 편집하지 않는다.</div>
               </Section>
               {pform && (
                 <Section title="그룹 통화">

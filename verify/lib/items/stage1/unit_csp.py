@@ -13,7 +13,11 @@
                                    과 값 직접 기재 두 형식 · 경보 요소(request-uri·calling-user-id·originated-by·client-id) ·
                                    이름 경계(<alert-ind-rcvd>) · 접두사·엔티티
   · tests/csp_service_config_test.cpp  service-config 해석(csp/CspServiceConfig.h — TS 24.484 §8.4): xs:duration · on-network
-                                   transmit-time(T2)·fc-timers-counters → CMP floor_timers 값 · off-network·group-time-limit 배제
+                                   transmit-time(T2)·fc-timers-counters → CMP floor_timers 값 · off-network·group-time-limit 배제 ·
+                                   Resource-Priority namespace.priority(TS 24.379 §6.3.3.1.19) · TNG2 <emergency-call><group-time-limit>
+  · tests/csp_mcdata_codec_test.cpp  MCData 본문 해석(csp/McDataCodec.cpp — TS 24.282 §12.2.1.1·§12.2.3, mcdata_messaging.md §4.4):
+                                   SDS NOTIFICATION · resource-lists entry 목록 · mcdata-calling-group-id · signalling 파트 원문 보존 ·
+                                   옛 형식(resource-lists 없음) 구분
   · tests/csp_rule_field_test.cpp  Rule field `<원천>.<부분>`(csp/CspRuleField.cpp — sip_service_model.md §2-5, RFC 3261 §7.3 ·
                                    §19.1.4 · §20.10, RFC 3325): 헤더 이름 대소문자·compact form · 여러 값 · host 대소문자 ·
                                    user %xx · 믿지 않는 원천의 PAI 무시 · 옛 이름 종전 값
@@ -47,6 +51,7 @@ _TESTS = {
     "tests/csp_mcptt_info_test.cpp": ([], []),
     # service-config 해석(floor 타이머) — 헤더 인라인
     "tests/csp_service_config_test.cpp": ([], []),
+    "tests/csp_mcdata_codec_test.cpp": (["csp/McDataCodec.cpp"], ["libSipPlatform.a"]),
 }
 _INCS = ["csp", "include", "ext/psip/SipParser", "ext/psip/SipPlatform"]
 

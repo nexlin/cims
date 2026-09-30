@@ -60,6 +60,32 @@ void CSipUserAgent::ApplyLegDest( const std::string & strCallId, CSipDialog & cl
 
 /**
  * @ingroup SipUserAgent
+ * @brief 다음 re-INVITE 200 OK 에 한 번 실을 헤더를 다이얼로그에 둔다 (SipUserAgentInvite.hpp 가 응답을 만들 때 비운다).
+ * @param pszCallId SIP Call-ID
+ * @param pszName   헤더 이름
+ * @param pszValue  헤더 값
+ * @returns 다이얼로그가 있으면 true
+ */
+bool CSipUserAgent::AddReInviteAnswerHeader( const char * pszCallId, const char * pszName, const char * pszValue )
+{
+	if( pszCallId == NULL || pszName == NULL || pszValue == NULL ) return false;
+
+	bool bRes = false;
+
+	m_clsDialogMutex.acquire();
+	SIP_DIALOG_MAP::iterator itMap = m_clsDialogMap.find( pszCallId );
+	if( itMap != m_clsDialogMap.end() )
+	{
+		itMap->second.m_vecNextReInviteAnswerHeaders.push_back( std::make_pair( std::string( pszName ), std::string( pszValue ) ) );
+		bRes = true;
+	}
+	m_clsDialogMutex.release();
+
+	return bRes;
+}
+
+/**
+ * @ingroup SipUserAgent
  * @brief 서버 발신 in-dialog 요청을 만들기 직전에 다이얼로그의 목적지를 응용이 아는 현재 도달 주소로
  *        갱신한다. 콜백(EventGetLegDest)은 다이얼로그 락 **밖**에서 호출한다 (psip 콜백 규약 —
  *        응용이 자기 자료구조 락을 잡으므로 락 순서 역전 여지를 없앤다).

@@ -1093,6 +1093,20 @@ CSP 에는 `PHONE_GROUP_CHANGED`(uri=그룹 id) 로 재적재를 알린다. 가�
 > 편집(PTT 회선 «그룹 통화» 미응답 멤버 알림 수신)·관제 앱 관리 화면(`allowNonAckUsersInfo`). CSC 는 값을 user-profile 문서(`cp:actions/anyExt`)로,
 > CSP 는 `ptt_user_profile` 에서 직접 읽는다. 컬럼 미적용 DB(`sql/migrate_ptt_non_ack_users_info.sql`) 에서는 응답이 false 고 입력 시 400
 > `schema_not_migrated`.
+>
+> 같은 프로파일의 **해제 인가** 셋(TS 24.484 ruleset — CSC 는 user-profile 문서 `cp:actions` 의 같은 이름 요소로, CSP 는
+> `ptt_user_profile` 에서 직접 읽는다. 개시 인가와 달리 긴급 대상 결정 가능 여부와 AND 하지 않는다):
+>
+> | 필드 | 규격 요소 | 기본값 | 의미 |
+> |---|---|---|---|
+> | `allow_cancel_group_emergency` | `<allow-cancel-group-emergency>` | false | 그룹의 진행 중 긴급 상태 해제. 서버 판정은 local policy(TS 24.379 §6.3.3.1.13.4) = **개시자 ∨ 이 값** — 개시자는 이 값과 무관하게 푼다(관제사에게 켠다) |
+> | `allow_cancel_imminent_peril` | `<allow-cancel-imminent-peril>` | true | 진행 중 임박 위험 해제(§6.3.3.1.13.6 — 이 값만으로 판정, 개시자 예외 없음) |
+> | `allow_cancel_emergency_alert` | `<allow-cancel-emergency-alert>` | `allow_emergency_alert` 값 | 긴급 경보 취소(§6.3.3.1.13.3 — 남의 경보 포함). 발령 인가와 따로 준다 |
+>
+> PUT 본문에 없는 키는 기본값으로 쓴다(`allow_cancel_emergency_alert` 는 같은 요청의 `allow_emergency_alert`). 편집 경로는 이 API·콘솔 가입자
+> 편집(PTT 회선 «긴급 (SOS)» 긴급 해제·임박 위험 해제·경보 취소)·관제 앱 관리 화면(`allowCancelGroupEmergency`·`allowCancelImminentPeril`·
+> `allowCancelEmergencyAlert`). 컬럼 미적용 DB(`sql/migrate_ptt_user_profile_cancel_authz.sql`) 에서는 응답이 기본값이고 입력 시 400
+> `schema_not_migrated`.
 
 ---
 

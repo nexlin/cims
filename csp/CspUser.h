@@ -35,8 +35,17 @@
  *        행 부재 시 기본값 = 모드 DedicatedGroup + 긴급그룹 미지정(긴급 미인가) + 인가 전부 허용.
  */
 struct CspUserProfile {
-    bool m_bAllowEmergencyCall = true;                       ///< allow-emergency-group-call (긴급 그룹콜 개시 인가)
-    bool m_bAllowEmergencyAlert = true;                      ///< allow-activate-emergency-alert (경보 개시 인가)
+    bool m_bAllowEmergencyCall = true;   ///< allow-emergency-group-call (긴급 그룹콜 개시 인가)
+    bool m_bAllowEmergencyAlert = true;  ///< allow-activate-emergency-alert (경보 개시 인가)
+    /** allow-cancel-group-emergency (TS 24.484 ruleset) — 그룹의 진행 중 긴급 상태 해제 인가. 서버 판정은 local policy
+     *  (TS 24.379 §6.3.3.1.13.4) = 개시자 ∨ 이 값. 기본 false — 개시자만 해제한다(관제사에게 켠다). */
+    bool m_bAllowCancelGroupEmergency = false;
+    /** allow-cancel-imminent-peril (TS 24.484 ruleset) — 임박 위험 해제 인가(§6.3.3.1.13.6 — 이 값만으로 판정). 기본
+     * true. */
+    bool m_bAllowCancelImminentPeril = true;
+    /** allow-cancel-emergency-alert (TS 24.484 ruleset) — 긴급 경보 취소 인가(§6.3.3.1.13.3). 컬럼 미적용 DB 에서는
+     *  발령 인가(allow_emergency_alert) 값 — 그 전 문서가 같은 값을 냈다. */
+    bool m_bAllowCancelEmergencyAlert = true;
     bool m_bAllowAdhocCall = true;                           ///< ad hoc 개시 인가 (Setup.PttAdhocEnabled 와 AND)
     std::string m_strEmergencyGroupMode = "DedicatedGroup";  ///< entry-info: DedicatedGroup|UseCurrentlySelectedGroup
     std::string m_strEmergencyGroupId;                       ///< 전용 긴급그룹 (mcptt_group_id, 빈 값=미지정)

@@ -393,8 +393,9 @@ affiliation-command 를 보낸다) → ③구형 제거.
 
 ### C3. Resource-Priority namespace 정규화
 
-- INVITE 당 단일값: emergency `mcpttp.15` / imminent `mcpttp.8` / normal `mcpttp.0`
-  (`GroupCallService.cpp`, RFC 8101 namespace `mcpttp` — `.0` 최저 ~ `.15` 최고, service-config RP 기본값과 같다).
+- INVITE 당 단일값 — 값은 service-config `<emergency-/imminent-peril-/normal-resource-priority>` 의 namespace·priority(TS 24.379 §6.3.3.1.19 —
+  CSP `CCspServiceConfig::ResourcePriorityOf`, 멤버 fan-out·조건 재광고 공용). 문서에 없으면 emergency `mcpttp.15` / imminent `mcpttp.8` /
+  normal `mcpttp.0`(RFC 8101 namespace `mcpttp` — `.0` 최저 ~ `.15` 최고).
 
 ### C4. floor SDP 토큰
 
@@ -644,13 +645,17 @@ REGISTER/SUBSCRIBE/NOTIFY 의 헤더·본문을 상용 IMS 캡처 기준으로 �
   §8.3.2.1 이 "shall" 로 요구하는 긴급 요소(8d ii·8e ii~iv·10f)는 **대상 미지정에도 항상 싣고**, 미지정은 entry-info 로 표현한다
   (그룹 `UseCurrentlySelectedGroup` + 폴백 uri-entry, 사설 `LocallyDetermined` + 폴백 uri-entry); 개시 인가는 요소 유무가 아니라
   `<cp:ruleset>` allow-* 가 말한다(DedicatedGroup 모드 긴급그룹 미지정 → 그룹 긴급·경보 false, UsePreConfigured 모드 수신자 미지정 →
-  긴급 사설콜 false — CSP 403 판정과 일치). 규격상 **선택**이지만 필수로 읽는 단말이 있어 항상 싣는 것 = alias-entry 의 `index`·`xml:lang`, `<ParticipantType>`(§8.3.2.1 f). 값은 `UserProfile.ParticipantType`·`UserProfile.Language` 설정이고, `xml:lang` 은 `<Name>` 과 같은 값을 써 한 문서 안에서 어긋나지 않는다. 소유-비멤버 그룹과 자체 JSON 목록(`GET …/groups/users/{me}`)은
+  긴급 사설콜 false — CSP 403 판정과 일치). 해제 인가(`allow-cancel-group-emergency`·`allow-cancel-imminent-peril`·
+  `allow-cancel-emergency-alert` — TS 24.379 §6.3.3.1.13.3·.4·.6)는 대상 결정과 AND 하지 않고 `ptt_user_profile.allow_cancel_*` 그대로 싣는다.
+  규격상 **선택**이지만 필수로 읽는 단말이 있어 항상 싣는 것 = alias-entry 의 `index`·`xml:lang`, `<ParticipantType>`(§8.3.2.1 f). 값은 `UserProfile.ParticipantType`·`UserProfile.Language` 설정이고, `xml:lang` 은 `<Name>` 과 같은 값을 써 한 문서 안에서 어긋나지 않는다. 소유-비멤버 그룹과 자체 JSON 목록(`GET …/groups/users/{me}`)은
   전환기 공존 — 클라이언트가 MCPTTGroupInfo 로 옮기면 JSON 목록 제거([mcx_identity_scope.md](mcx_identity_scope.md) 와 같은 방식).
 - **S4 service-config**: 문서 = TS 24.484 §8.4.2.1·§8.4.2.3 스키마 — `<service-configuration-info>` ›
   `<service-configuration-params domain=<PTT 도메인>>` › `<common><broadcast-group>`(계층 수) · `<on-network>`
-  (`<fc-timers-counters>` 17 요소 필수 · `<emergency-/imminent-peril-/normal-resource-priority>` 필수, 각 namespace·priority).
+  (`<emergency-call><group-time-limit>` 선택 — 첫 자식, 진행 중 긴급 그룹 호 시한 = CSP TNG2(TS 24.379 §6.3.3.1.16), 값이 0 이면 생략 ·
+  `<transmit-time><time-limit>` · `<fc-timers-counters>` 17 요소 필수 · `<emergency-/imminent-peril-/normal-resource-priority>` 필수, 각 namespace·priority).
   값의 정본은 두 곳 — DB `mcptt_service_config` **단일 행**(id=1: N2 = user-profile `MaxAffiliationsN2` 기본값·계층 수, 관리 API
-  `GET/PUT /api/v1/mcptt/service-config`·콘솔 **구성 > MCPTT 정책**)과 CSC 설정 `ServiceConfig.*`(`<transmit-time><time-limit>`·
+  `GET/PUT /api/v1/mcptt/service-config`·콘솔 **구성 > MCPTT 정책**)과 CSC 설정 `ServiceConfig.*`(`EmergencyCall.GroupTimeLimit` →
+  `<emergency-call><group-time-limit>`(ms, 기본 0 = 없음) · `<transmit-time><time-limit>`·
   `<fc-timers-counters>` — floor 제어 서버 파라미터, Resource-Priority — RFC 8101 `mcpttp` 15/8/0 = CSP fan-out). `get_service_config_xml`
   이 둘을 산출한다(내용 파생 ETag). **인가 요소는 없다** — 1:1·긴급·경보·그룹 생성 인가는 `user-profile` 의 `ruleset`·그룹 문서가 규격 자리다.
   **floor 파라미터는 이 문서가 정본이다** — MCPTT 서버(CSP)가 문서를 CMS(CSC)에서 받아(Annex A.2.3, 내부 API

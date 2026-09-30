@@ -569,10 +569,17 @@ XCAP 기반 사용자 프로파일/서비스 설정 관리.
 | GET | `/org.3gpp.mcptt.service-config/users/{mcptt_id}/...` | 서비스 설정 |
 
 사용자 프로파일의 인가 `<cp:ruleset>` 은 `ptt_user_profile`(in-memory `PTT_PROFILES`, admin PUT 이 캐시 갱신) 에서 만든다 —
-긴급 계열·`allow_ambient_listening` 은 규격 요소, `<anyExt>`(TS 24.484 §8.3.2.1 11)xxxviii)) 에는 `allow_non_ack_users_info` →
+긴급 계열·`allow_ambient_listening` 은 규격 요소(§8.3.2.1 11) 목록 순 — 긴급 그룹콜·긴급 사설콜 개시 → 해제 인가 `allow_cancel_group_emergency`
+→ `<allow-cancel-group-emergency>`·`allow_cancel_imminent_peril` → `<allow-cancel-imminent-peril>` → 경보 발령·`allow_cancel_emergency_alert`
+→ `<allow-cancel-emergency-alert>` → 원격 청취. 해제 인가는 개시 인가와 달리 긴급 대상 결정 가능 여부와 AND 하지 않는다), `<anyExt>`
+(TS 24.484 §8.3.2.1 11)xxxviii)) 에는 `allow_non_ack_users_info` →
 `<allow-to-receive-non-acknowledged-users-information>`(L, 그룹 호 개시자의 확인 통화 미응답 멤버 INFO 수신 자격 — TS 24.379 §6.3.3.3)·
 `allow_adhoc_call` → `<allow-adhoc-group-call>`(R), CIMS 확장 `<cims:allow-create-group>`. 뒤에 붙은 선택 컬럼
-(`allow_ambient_listening`·`allow_create_group`·`allow_non_ack_users_info` — 각 `sql/migrate_ptt_*.sql`) 은 부재 시 false 로 읽는다.
+(`allow_ambient_listening`·`allow_create_group`·`allow_non_ack_users_info`·`allow_cancel_*` — 각 `sql/migrate_ptt_*.sql`) 은 부재 시
+**부재 시 값**으로 읽는다(`services.mcptt.USER_PROFILE_OPT_ABSENT_SQL` — 대개 false, `allow_cancel_imminent_peril` = true,
+`allow_cancel_emergency_alert` = `allow_emergency_alert`). 서비스 설정 문서의 on-network 값은 CSC 설정 `ServiceConfig.*` 와
+DB `mcptt_service_config` 에서 만든다 — `EmergencyCall.GroupTimeLimit`(ms, 기본 0) 이 0 보다 크면 첫 자식
+`<emergency-call><group-time-limit>`(CSP TNG2, TS 24.379 §6.3.3.1.16)을 싣고, 0 이면 요소째 뺀다.
 문서 구성 = [mcptt_api.md §3](../../api/mcptt_api.md).
 
 ### 4.4 KMS (Key Management Service)

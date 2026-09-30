@@ -13,7 +13,9 @@
                                                           │ ① 게이트: allow-SDS·발신자 멤버십·max-data-size
                                                           │ ② affiliation 정책 필터
                                                           └── 멤버별 MESSAGE fan-out (Content-Type 보존)
-수신 앱 ──(disposition 요청 시) SDS NOTIFICATION(DELIVERED) ──→ CSP 1:1 경로 ──→ 발신 앱 (✓ 표시)
+수신 앱 ──(disposition 요청 시) SDS NOTIFICATION(DELIVERED) ──→ CSP ──→ 발신 앱 (✓ 표시)
+          규격형: R-URI = MCData PSI + resource-lists[발신자] → MCDATA-AS 상관·중계(§4.4)
+          옛 형식: R-URI = 발신자 AoR → 1:1 경로(전환기)
 ```
 
 - **CSP `MCDATA-AS` 모듈** (`csp/McDataAsModule.{h,cpp}`) — 그룹 대상 MESSAGE 의 controlling
@@ -25,7 +27,7 @@
   (§4.7)** — C-plane 게이트(`allow_sds`·멤버십)와 보관은 두 평면이 공용이다.
 - **1:1 SDS** 는 같은 본문 구조에 `request-type=one-to-one-sds`·`mcdata-request-uri=상대 URI` 로
   상대 AoR 에 직행하고, CSP 는 상대의 등록 바인딩으로 본문 그대로 전달한다(§4 ③ — 게이트·보관
-  없음, §8). DELIVERED 통지도 같은 1:1 경로다.
+  없음, §8). DELIVERED 통지는 규격형(§4.4)이 MCDATA-AS 로, 옛 형식(Request-URI = 원 발신자)이 같은 1:1 경로로 간다.
 
 ## 2. 그룹별 게이트 — TS 24.481 그룹문서
 
@@ -71,8 +73,9 @@ SIP MESSAGE 본문 = `multipart/mixed;boundary=…` 3파트:
 ## 4. CSP 처리 흐름
 
 `CModuleDispatcher::EventMessage` 순서: ① 긴급경보(alert-ind, 기존 경로) → ② **MCDATA-AS
-`OnMessage`** (그룹 대상일 때) → ③ 1:1 전달 (Content-Type 보존). 1:1 SDS/FD·SDS NOTIFICATION 은
-③ — 상대의 등록 바인딩으로 본문 그대로 전달하며 게이트·보관은 없다(§8).
+`OnMessage`** (규격형 disposition 통지 §4.4, 그룹 대상 SDS) → ③ 1:1 전달 (Content-Type 보존). 1:1 SDS/FD·옛 형식
+SDS NOTIFICATION 은 ③ — 상대의 등록 바인딩으로 본문 그대로 전달하며 게이트·보관은 없다(§8). 1:1 SDS 는 ③ 에서 disposition
+상관 색인(§4.4)에 오른다.
 
 MCDATA-AS 게이트 (모두 controlling function 검사, TS 24.282 §9.2.2):
 1. `allow_sds`=false → **403 Forbidden**
@@ -110,6 +113,26 @@ MCDATA-AS 게이트 (모두 controlling function 검사, TS 24.282 §9.2.2):
   pkg.json 에 self-register). `q` 는 본문·발신자·파일명 검색.
 - **콘솔**: 서비스 > **그룹 메시지 이력** (`/service/messages`,
   `ems/service/console/src/pages/GroupMessagesPage.tsx`) — 날짜·그룹·검색 필터 테이블.
+
+### 4.4 disposition 통지 — 규격 경로 (TS 24.282 §12.2.1.1·§12.2.2.1·§12.2.3)
+
+단말은 DELIVERED(·READ) 통지를 Request-URI = MCData 참여 기능 PSI(ue-init-config `MCData-Service-Details/Server-URI`, 명목값
+`sip:mcdata_psi@<도메인>`)로, 대상 MCData ID 를 `application/resource-lists+xml` entry 하나로(§12.2.1.1 3)), 그룹 SDS 의 통지면
+mcdata-info `<mcdata-calling-group-id>` 를 실어 보낸다(5)). CSP `CMcDataAsModule::OnDispositionNotification` 이 참여·제어 기능을
+겸해 처리한다 — 본문에 resource-lists 와 SDS NOTIFICATION 이 함께 있을 때만(없으면 옛 형식이라 ③ 1:1 경로):
+
+| 단계 | 검사 | 거절 |
+|---|---|---|
+| §12.2.3 2) | Accept-Contact 에 ICSI `urn:urn-7:3gpp-service.ims.icsi.mcdata.sds` | 403 |
+| 3) | resource-lists entry 가 정확히 하나 | 403 Warning `145 unable to determine called party` |
+| 4)·5) | 대화·메시지 ID 가 이 서버가 전달한 SDS 이고 그 발신자가 통지 대상 — 상관 색인 `McDataCorrelateSds`(그룹 SDS 는 `McDataArchiveMessage`, 1:1 SDS 는 ③ 전달이 올린다. 최근 24 시간·최대 20000 건 인메모리, CSP 재기동 전 발신분은 상관 불가) | 403 Warning `216 unable to correlate the disposition notification` |
+| 15)b) | 그룹 통지면 통지자가 그 그룹 멤버 | 403 Warning `116 user is not part of the MCData group` |
+
+통과하면 원 발신자에게 새 MESSAGE 로 중계한다 — mcdata-info `<mcdata-request-uri>` = 원 발신자(14)), `<mcdata-calling-user-id>` =
+통지자(§12.2.2.1 10)), 그룹이면 `<mcdata-calling-group-id>`, 받은 mcdata-signalling 파트 원문 그대로(15)d)·16) — 집계(TDC1)는
+하지 않는다). 헤더 = `Accept-Contact`(g.3gpp.mcdata.sds · ICSI mcdata.sds, require;explicit — 8))·`P-Asserted-Service`(11))·
+`P-Asserted-Identity` = 제어 기능 PSI(13) — 그룹 통지는 그룹 URI, 1:1 은 `mcdata_psi`). 원 발신자가 등록돼 있지 않으면 480(가입자
+모름 404 — 1:1 전달과 같은 구분). 검증 = `tests/sds_disposition_spec.py`(중계·145·216·ICSI 거절).
 
 ### 4.3 1:1 SDS/SMS 보관 — 관제 데스크 이력
 
@@ -316,7 +339,8 @@ CSP fan-out (하이브리드):
 | 성공 응답 | 참여기능 202/200 | 200 OK | psip `RecvMessageRequest` 는 `EventMessage` 가 **반환한 상태코드**로 응답한다 — 응용이 도달 가능성을 아는 유일한 주체이므로 코드 선택도 응용이 한다. 0 을 반환하면 콜백이 직접 응답했다는 뜻이라 psip 는 보내지 않는다(최종 응답 중복 방지) |
 | E2E 보안 (TS 33.180) | Protected Payload | 미적용 (TLS + 서버측 RBAC) | 서버 보관·관리자 모니터링 요구와 상충 |
 | READ 통지·InReplyTo | 지원 | 미사용 (DELIVERED 만; 파서는 IE skip 지원) | 최소 프로파일 |
-| disposition 통지 경로 | 대상 MCData ID 의 `resource-lists` + 그룹 통지면 mcdata-info `<mcdata-calling-group-id>` 를 싣고 participating 경유 (TS 24.282 V18.13.0 §12.2.1.1, 집계는 controlling §12.2.3) | Request-URI=원 발신자 AoR 직행, 본문은 SDS NOTIFICATION 한 파트(`resource-lists`·mcdata-info 없음) — 코어 `sendSdsNotification`/`buildNotification`. CSP 는 1:1 SDS 와 같이 등록 바인딩으로 전달, 집계 없음 | 1:1 SDS 와 같은 통합 배치 단순화. 표준 controlling function 과 interop 하려면 코어 통지 API 가 수신 SDS 의 그룹·발신자 문맥을 받고 CSP 통지 처리(상관·인가)가 함께 바뀌어야 한다 |
+| disposition 통지 — 단말 | 대상 MCData ID 의 `resource-lists` + 그룹 통지면 mcdata-info `<mcdata-calling-group-id>` 를 싣고 participating PSI 로 (TS 24.282 V18.13.0 §12.2.1.1) | 코어 `sendSdsNotification`/`buildNotification` 은 Request-URI=원 발신자 AoR 직행, SDS NOTIFICATION 한 파트(옛 형식). CSP 는 규격형(§4.4)과 옛 형식(1:1 경로)을 둘 다 받는다 | 코어 통지 API 가 수신 SDS 의 그룹·발신자 문맥을 받아 규격 본문을 만든 뒤(ue_sdk.md §11) 옛 형식 수용을 걷는다 |
+| disposition 집계 | 그룹 통지는 TDC1 동안 모아 한 MESSAGE 로(§12.2.3 15)c)) | 받는 대로 하나씩 중계(15)d)) | 집계는 선택 — 후속 |
 | media plane SDS 의 SDP | `m=message` 단독 | **더미 `m=audio` 라인 동반** — 서버는 포트≠0(9) + `a=inactive` 로 응답/오퍼 (CMP 할당·RTP 없음). 서버발 오퍼의 더미 오디오는 **PCMU+PCMA(0 8)** 병기 | pjsua2 는 알려진 미디어가 포트≠0 으로 협상돼야 콜 유지 (`got_media` 규칙). 앱 코덱 정책이 PCMU 를 비활성(PCMA 안전망만 유지)하므로 PCMU 단독 오퍼는 자동 488 — 실기기 확인 | 
 | media plane 수신 배포 | 전 수신자 INVITE+MSRP | **하이브리드** — MSRP 광고 단말만 INVITE+MSRP, 그 외는 FD FILEURL MESSAGE 폴백 (§4.5 HTTP 다운로드) | 전환기 호환 (현재 앱은 MSRP 미지원). 폴백 수신자에겐 장문이 첨부(`sds_*.txt`)로 보임 |
 | 단말 a=path 포트 | 단말이 해당 포트 리슨 가능 | 광고용 (단말은 항상 out-connect, 서버 상시 `a=setup:passive`) | NAT 관통 — RTP relay 와 동일한 방향성 |

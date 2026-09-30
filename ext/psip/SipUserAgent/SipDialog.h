@@ -80,6 +80,8 @@ public:
 	CSipParameterList	m_clsContactParams;
 	/** 같은 경로의 Contact URI 파라미터(GRUU `gr` 등) — CSipMessage::m_clsContactUriParams 로 전파 */
 	CSipParameterList	m_clsContactUriParams;
+	/** 다음 re-INVITE 200 OK 에만 실을 헤더 (name, value) — 응답을 만들면 비운다 (CSipUserAgent::AddReInviteAnswerHeader) */
+	std::vector< std::pair< std::string, std::string > >	m_vecNextReInviteAnswerHeaders;
 
 	/** Per-dialog override domain for From/To/Request-URI.
 	 *  Empty → 전역 CSipStackSetup::m_strDomain fallback.

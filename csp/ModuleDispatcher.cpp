@@ -41,6 +41,7 @@
 #include "GroupMap.h"
 #include "Log.h"
 #include "McDataCodec.h"
+#include "McDataGates.h"
 #include "McDataMediaService.h"
 #include "McpttInfo.h"
 #include "MemoryDebug.h"
@@ -449,6 +450,10 @@ bool CModuleDispatcher::RecvRequest( int iThreadId, CSipMessage *pclsMessage ) {
         }
     }
 
+    // 2xx ACK — Warning 149 로 답한 PTT re-INVITE 면 INFO 차례다(TS 24.379 §10.1.1.4.7 끝 · §6.3.3.1.18). ACK 처리는
+    //   그대로 스택이 한다.
+    if ( pclsMessage->IsMethod( SIP_METHOD_ACK ) ) gclsGroupCallService.OnInDialogAck( strCallId );
+
     // OPTIONS → 표준 200 OK 자동 응답 (RFC 3261 §11.2).
     //   트렁크 헬스체크(상대 CSP/Kamailio 등)용. 본 프로세스의 capability 를 간소히 알림.
     if ( pclsMessage->IsMethod( SIP_METHOD_OPTIONS ) ) {
@@ -498,36 +503,30 @@ bool CModuleDispatcher::RecvRequest( int iThreadId, CSipMessage *pclsMessage ) {
             if ( !strCallee.empty() ) strTo = strCallee;  // Request-URI 기준 착신(번역 뒤) — To user 는 표시용
         }
 
-        // MCPTT 진행 중 호의 condition 변경(re-INVITE 업그레이드/취소, TS 24.379) 엿보기.
+        // MCPTT 진행 중 호의 조건 요청(re-INVITE 의 긴급·임박·경보 지시자, TS 24.379 §10.1.1.4.7·§10.1.1.4.8) 엿보기.
         //   초기 INVITE 는 아직 세션맵 미등록 → 미발동(초기 긴급은 EventIncomingCall 경로가 처리).
-        //   재-INVITE(in-dialog, 동일 Call-ID)만 활성 그룹콜로 매칭되어 floor tier 갱신. 흐름은 그대로 진행.
-        //   단, capability 불허 그룹으로의 상향은 403 + mcptt-info(emergency-ind=false)로 거절한다
-        //   (TS 24.379 §6.3.3.1.14) — 재-INVITE 거절은 다이얼로그를 깨지 않아 호는 normal 유지.
+        //   재-INVITE(in-dialog, 동일 Call-ID)만 활성 그룹콜로 매칭된다. 인가·전이·재광고·통지는 GroupCallService 가
+        //   하고, 거절(미인가 상향 — §6.3.3.1.14, 미인가 해제·다른 긴급 사용자 송출 중 — 7)·7a))은 403 + mcptt-info 로
+        //   보낸다 — 재-INVITE 거절은 다이얼로그를 깨지 않아 호는 이전 조건 그대로다. 받아들이면 흐름을 이어 스택이
+        //   200 OK 를 만든다(Warning 149 가 있으면 그 응답에 실린다).
         {
             std::string strGid, strMid;
             if ( gclsGroupCallService.GetGroupCallSession( strCallId, strGid, strMid ) ) {
-                CMcpttInfo clsMi = ParseMcpttInfo( pclsMessage->m_strBody );
-                int iCond = clsMi.Condition();
-                if ( !gclsGroupCallService.IsInCallUpgradeAllowed( strGid, strMid, iCond ) ) {
-                    CSipMessage *pclsResp = pclsMessage->CreateResponseWithToTag( SIP_FORBIDDEN );
+                const CMcpttInfo clsMi = ParseMcpttInfo( pclsMessage->m_strBody );
+                const CGroupCallService::InCallConditionVerdict v =
+                    gclsGroupCallService.OnInCallConditionRequest( strCallId, strGid, strMid, clsMi );
+                if ( v.iStatus >= 300 ) {
+                    CSipMessage *pclsResp = pclsMessage->CreateResponseWithToTag( v.iStatus );
                     if ( pclsResp ) {
-                        pclsResp->m_strBody = std::string(
-                                                  "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n"
-                                                  "<mcpttinfo xmlns=\"urn:3gpp:ns:mcpttInfo:1.0\">\r\n"
-                                                  "  <mcptt-Params>\r\n" ) +
-                                              McpttInfoBool( "emergency-ind", false ) +
-                                              McpttInfoBool( "alert-ind", false ) +
-                                              "  </mcptt-Params>\r\n"
-                                              "</mcpttinfo>\r\n";
+                        pclsResp->m_strBody = v.strBody;
                         pclsResp->m_iContentLength = (int)pclsResp->m_strBody.size();
                         pclsResp->m_clsContentType.Set( "application", "vnd.3gpp.mcptt-info+xml" );
                         gclsUserAgent.m_clsSipStack.SendSipMessage( pclsResp );
                     }
-                    CLog::Print( LOG_INFO, "RecvRequest: in-call upgrade denied group(%s) member(%s) cond(%d) → 403",
-                                 strGid.c_str(), strMid.c_str(), iCond );
+                    CLog::Print( LOG_INFO, "RecvRequest: in-call condition request group(%s) member(%s) → %d",
+                                 strGid.c_str(), strMid.c_str(), v.iStatus );
                     return true;
                 }
-                gclsGroupCallService.ApplyInCallCondition( strGid, strMid, iCond );
             }
         }
 
@@ -2541,12 +2540,15 @@ int CModuleDispatcher::EventMessage( const char *pszFrom, const char *pszTo, CSi
             pszTo = strMsgCallee.c_str();
         }
     }
-    // MCPTT emergency alert (TS 24.379 §12.1) — mcptt-info <alert-ind> 판별 → SMS 와 분기.
-    //   단말은 Request-URI = 참여 기능 PSI, 대상 그룹 = 본문 <mcptt-request-uri>(§12.1.1.1 4)a)·8))로 보낸다.
-    //   Request-URI 가 그룹인 형식도 전환기로 받는다(대상 그룹 = Request-URI). 이 CSP 는 참여·제어 기능을 겸한다.
+    // MCPTT emergency alert (TS 24.379 §12.1) — mcptt-info <alert-ind>(경보·경보 취소) 또는 <emergency-ind>false(호
+    // 없는
+    //   그룹 긴급 상태 해제, §12.1.3.3) 판별 → SMS 와 분기. 단말은 Request-URI = 참여 기능 PSI, 대상 그룹 = 본문
+    //   <mcptt-request-uri>(§12.1.1.1 4)a)·8))로 보낸다. Request-URI 가 그룹인 형식도 전환기로 받는다(대상 그룹 =
+    //   Request-URI). 이 CSP 는 참여·제어 기능을 겸한다.
     if ( pclsMessage ) {
         CMcpttInfo clsMi = ParseMcpttInfo( pclsMessage->m_strBody );
-        if ( clsMi.bHasAlertInd ) return m_clsPttAs.OnEmergencyAlert( pszFrom, pszTo, pclsMessage, clsMi );
+        if ( clsMi.bHasAlertInd || ( clsMi.bHasEmergencyInd && !clsMi.bEmergency ) )
+            return m_clsPttAs.OnEmergencyAlert( pszFrom, pszTo, pclsMessage, clsMi );
     }
 
     // MCData 그룹 SDS (TS 24.282) — 그룹 대상 MESSAGE 는 MCDATA-AS 가 게이트+fan-out.
@@ -2572,13 +2574,17 @@ int CModuleDispatcher::EventMessage( const char *pszFrom, const char *pszTo, CSi
     szContentType[0] = '\0';
     pclsMessage->m_clsContentType.ToString( szContentType, sizeof( szContentType ) );
 
+    // 1:1 SDS 는 disposition 통지 상관 색인에 올린다 (TS 24.282 §12.2.3 4) — 규격형 통지는 MCDATA-AS 가 받는다).
+    CMcDataSdsInfo clsInfo;
+    const bool bMc =
+        McDataIsMultipartMixed( szContentType ) && McDataParseBody( szContentType, pclsMessage->m_strBody, clsInfo );
+    if ( bMc && clsInfo.m_iMsgType == MCDATA_MSG_SDS_SIGNALLING && !clsInfo.m_strMsgId.empty() )
+        McDataRememberSds( clsInfo.m_strConvId, clsInfo.m_strMsgId, pszFrom, "" );
+
     // 관제 데스크 통합 이력용 1:1 SDS/SMS 보관 (dispatch_center.md §5.6, mcdata_messaging.md §4.3).
     //   Setup.McData.StoreOneToOneSds 가 켜졌을 때만. 전량 보관 — 열람 범위는 CSC 조회 시점 게이트.
     //   disposition 통지(수신확인)는 이력이 아니므로 제외한다(사람 메시지·파일만).
     if ( gclsSetup.m_bStoreOneToOneSds && gclsCallDir.IsEnabled() ) {
-        CMcDataSdsInfo clsInfo;
-        bool bMc = McDataIsMultipartMixed( szContentType ) &&
-                   McDataParseBody( szContentType, pclsMessage->m_strBody, clsInfo );
         bool bDisposition = bMc && ( clsInfo.m_iMsgType == MCDATA_MSG_SDS_NOTIFICATION );
         if ( !bDisposition ) {
             std::string strText = bMc ? clsInfo.m_strText : pclsMessage->m_strBody;

@@ -245,6 +245,9 @@ private:
     /** 미응답 멤버 알림 자격 컬럼(ptt_user_profile.allow_non_ack_users_info — migrate_ptt_non_ack_users_info.sql) 존재
      * 여부 */
     bool m_bHasNonAckInfoColumn = false;
+    /** 해제 인가 컬럼 3종(allow_cancel_group_emergency·allow_cancel_imminent_peril·allow_cancel_emergency_alert —
+     *  migrate_ptt_user_profile_cancel_authz.sql) 존재 여부 */
+    bool m_bHasCancelAuthzColumns = false;
     void ProbeSchema();
     /** 컬럼이 있으면 COALESCE(식,'') 아니면 '' — SELECT 열 위치를 고정한 채 값만 비운다 */
     std::string Ha1Col( const char *pszAlias ) const;

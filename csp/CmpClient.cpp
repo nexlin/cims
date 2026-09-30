@@ -1393,6 +1393,15 @@ void CCmpClient::HandleEvent( const SimpleJson::JsonNode &event ) {
             return;
         }
         gclsGroupCallService.OnFloorInactivity( strGid, hdr.GetString( "sesid" ) );
+    } else if ( strCmd == "FLOOR_TALKERS" ) {
+        // 발언자 집합(cmp_media_api.md §8) — 긴급 해제 판정 «다른 긴급 사용자가 송출 중»(TS 24.379 §10.1.1.4.7 7a))
+        //   의 미디어 평면 상태. 판정용 캐시라 standby 도 갱신한다(절체 뒤 바로 판정할 수 있게).
+        std::vector<std::string> vecTalkers;
+        SimpleJson::JsonNode arr = payload.Get( "talkers" );
+        if ( arr.type == SimpleJson::JSON_ARRAY )
+            for ( size_t i = 0; i < arr.Size(); ++i )
+                if ( !arr.At( i ).strValue.empty() ) vecTalkers.push_back( arr.At( i ).strValue );
+        gclsGroupCallService.OnFloorTalkers( payload.GetString( "group_id" ), vecTalkers );
     } else if ( strCmd == "RELAY_PLAY_DONE" ) {
         // 안내 재생 완료 (announcements.md §4.1) — 대기 중 최종 응답을 낼 차례. standby 도 상태만 정리하게 전달한다.
         if ( m_fnPlayDone )

@@ -1,6 +1,11 @@
 #include "McDataGates.h"
 
 #include <stdio.h>
+#include <time.h>
+
+#include <deque>
+#include <mutex>
+#include <unordered_map>
 
 #include "CallDir.h"
 #include "DbManager.h"
@@ -71,6 +76,9 @@ void McDataDeliveryTargets( const CspPttGroup &clsGroup, const char *pszFrom, co
 void McDataArchiveMessage( const char *pszGroup, const char *pszFrom, const char *pszMsgType,
                            const CMcDataSdsInfo &clsInfo, int iPayloadSize, int iFanout, const char *pszVia,
                            const char *pszFileUrl, bool bMcData ) {
+    // disposition 통지 상관 색인 — 보관 여부와 무관하게 기록한다(SDS 만 — FD 통지는 미사용)
+    if ( bMcData && clsInfo.m_iMsgType == MCDATA_MSG_SDS_SIGNALLING && !clsInfo.m_strMsgId.empty() )
+        McDataRememberSds( clsInfo.m_strConvId, clsInfo.m_strMsgId, pszFrom ? pszFrom : "", pszGroup ? pszGroup : "" );
     if ( !gclsCallDir.IsEnabled() ) return;
 
     char szEvt[512];
@@ -99,4 +107,46 @@ void McDataArchiveMessage( const char *pszGroup, const char *pszFrom, const char
     }
     strRec += "}";
     gclsCallDir.McDataMessageLog( pszGroup, strRec );
+}
+
+// ── disposition 통지 상관 색인 (TS 24.282 §12.2.3 4)) ──────────────────────────────────────────────
+namespace {
+    struct SdsOrigin {
+        std::string strSender, strGroup;
+        time_t tAt = 0;
+    };
+    std::mutex g_mtxSdsIndex;
+    std::unordered_map<std::string, SdsOrigin> g_mapSdsIndex;
+    std::deque<std::pair<std::string, time_t>> g_dqSdsOrder;  // 삽입 순 — 시한·상한 초과분을 앞에서 버린다
+    constexpr size_t kSdsIndexMax = 20000;
+    constexpr time_t kSdsIndexTtl = 24 * 3600;
+}  // namespace
+
+void McDataRememberSds( const std::string &strConvId, const std::string &strMsgId, const std::string &strSender,
+                        const std::string &strGroup ) {
+    const std::string strKey = strConvId + ":" + strMsgId;
+    const time_t tNow = time( NULL );
+    std::lock_guard<std::mutex> lock( g_mtxSdsIndex );
+    SdsOrigin &o = g_mapSdsIndex[strKey];
+    o.strSender = strSender;
+    o.strGroup = strGroup;
+    o.tAt = tNow;
+    g_dqSdsOrder.push_back( { strKey, tNow } );
+    while ( !g_dqSdsOrder.empty() &&
+            ( g_dqSdsOrder.size() > kSdsIndexMax || tNow - g_dqSdsOrder.front().second > kSdsIndexTtl ) ) {
+        auto it = g_mapSdsIndex.find( g_dqSdsOrder.front().first );
+        // 같은 키가 다시 기록됐으면(재전송) 최신 기록은 남긴다
+        if ( it != g_mapSdsIndex.end() && it->second.tAt == g_dqSdsOrder.front().second ) g_mapSdsIndex.erase( it );
+        g_dqSdsOrder.pop_front();
+    }
+}
+
+bool McDataCorrelateSds( const std::string &strConvId, const std::string &strMsgId, std::string &strSender,
+                         std::string &strGroup ) {
+    std::lock_guard<std::mutex> lock( g_mtxSdsIndex );
+    auto it = g_mapSdsIndex.find( strConvId + ":" + strMsgId );
+    if ( it == g_mapSdsIndex.end() || time( NULL ) - it->second.tAt > kSdsIndexTtl ) return false;
+    strSender = it->second.strSender;
+    strGroup = it->second.strGroup;
+    return true;
 }

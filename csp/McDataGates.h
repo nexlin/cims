@@ -30,4 +30,16 @@ void McDataArchiveMessage( const char *pszGroup, const char *pszFrom, const char
                            const CMcDataSdsInfo &clsInfo, int iPayloadSize, int iFanout, const char *pszVia = "",
                            const char *pszFileUrl = "", bool bMcData = true );
 
+/**
+ * @brief SDS 발신 기록 — disposition 통지 상관(TS 24.282 §12.2.3 4)·5)) 용 인메모리 색인. 대화·메시지 ID →
+ *        원 발신자·그룹(1:1 이면 빈 값). 최근 24 시간·최대 20000 건(오래된 것부터 버린다 — CSP 재기동 전 발신분은 상관
+ * 불가). 그룹 SDS(C-plane·media plane)는 McDataArchiveMessage 가, 1:1 SDS 는 디스패처 전달 경로가 부른다.
+ */
+void McDataRememberSds( const std::string &strConvId, const std::string &strMsgId, const std::string &strSender,
+                        const std::string &strGroup );
+
+/** 상관 조회 — 찾으면 true 와 원 발신자·그룹. */
+bool McDataCorrelateSds( const std::string &strConvId, const std::string &strMsgId, std::string &strSender,
+                         std::string &strGroup );
+
 #endif

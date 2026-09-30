@@ -449,8 +449,7 @@ UeForegroundService  ─ 프로세스 상주. 알림·wakelock. 여기서 CimsUe
   끝난 호의 것은 그 호를 되살리지 않는다). 그래서 진행 중 격상·해제와 «이미 긴급인 그룹에 합류» 가 배너·행·⑤ 에 선다.
   **개시자는 호를 세운 INVITE 가 그 조건을 실었을 때만** 적는다(`SessionItem.alertInitiator`) — 진행 중에 걸린 조건은 재광고가
   개시자를 싣지만(§6.3.3.1.6 2)) 코어 조건에 그 값이 없어 비운다(호 발신자를 개시자로 적지 않는다, [ue_sdk.md](ue_sdk.md) §11).
-  **청취 채널은 코어만으로 안 된다** — 서버가 조건 재광고에서 청취 leg 를 빼고(`PropagateConditionToMembers` 의 `bListenOnly`)
-  합류 200 OK 에만 조건을 싣는다. 과제는 §11.
+  청취 채널도 같다 — 서버가 조건 재광고 re-INVITE 를 청취 leg 에도 보낸다(성립 SDP 그대로, [mcptt_emergency_modes.md](mcptt_emergency_modes.md) §4.2).
 - **긴급 개별 통화에는 전역 표면이 없다** — 이 스택에 들지 않고(착신 배너의 몫), 착신 배너는 코어가 MCPTT 를 자동
   수락해(`autoAnswerMcptt`) 잠깐만 서며 긴급 여부도 적지 않는다. 다른 화면에 있는 동안 받은 긴급 개별 통화는 ① 목록의
   빨강 카드가 유일한 표시다. 데스크톱과 같은 공백이며 자동 수락 분리(§11)와 함께 정한다.
@@ -1096,7 +1095,8 @@ call / 그룹 추가 = 편성, TS 24.481 — §6.12). **고르기가 먼저**고
   (종류 · 참가 · 경과(또는 상태) · 편성 · 발언자) 와 «긴급»/«임박 위험»/«일제 통화» 라벨.
 - **조작 줄** — 그 채널이 지금 받아 줄 수 있는 것만 선다(`ChannelHeadUi` 가 자격을 든다):
   - 참여 전 멤버 그룹: [참여] · [긴급 참여] · [일제 통화]. 참여 중: [나가기] · [긴급](진행 중 긴급 상향 — 확인을 한 번 받는다,
-    그룹 전원에게 긴급이 선다) 또는 [긴급 해제](내가 올린 긴급만 — 남이 건 긴급의 해제는 인가가 따로다, TS 24.379 §6.3.3.1.13.4).
+    그룹 전원에게 긴급이 선다) 또는 [긴급 해제](내가 올린 긴급만 — 남이 건 긴급의 해제는 서버가 user profile `allow-cancel-group-emergency` 로 판정한다, TS 24.379
+    §6.3.3.1.13.4. 그 값으로 넓히는 것은 §11).
     상향·하향은 in-dialog re-INVITE 다(TS 24.379 §10.1.1.2.1.3~5, 코어 `Call.setCondition`) — 서버가 거절하면 코어가 이전 값으로
     되돌리고 토스트가 사유를 적는다(`applyCondition`).
   - [✓ 발언 대상](참여 중 반이중) 또는 [음소거](전이중 개별 통화 — 켜지면 경고색).
@@ -1597,10 +1597,9 @@ Compose `@Preview`(Android Studio 설계 보기)는 설계 중 참고용일 뿐 
 - **MCData FD·MSRP** — FD 는 코어에 있다(`CscClient::uploadFd/downloadFd`·`Engine::sendGroupFd/sendFd`, 수신
   `onSds(fd)` — 데스크톱 관제 앱이 쓴다). 태블릿 ④ 는 아직 글만 다루고 FD 알림 필드를 버린다. MSRP(media plane
   SDS)는 코어에 없다.
-- **청취 채널의 긴급 조건(서버)** — 진행 중 긴급·임박의 격상·해제는 코어가 서버 재광고(re-INVITE·조인 200 OK)로 반영하고
-  (`CallInfo.condition`, [ue_sdk.md](ue_sdk.md) §4.2), 배너가 그 변화로 개시·해제를 잇는다(§6.2a-1). **청취 채널은 서버 계약이
-  더 필요하다** — 조건 재광고가 청취 leg 를 빼므로([mcptt_emergency_modes.md](mcptt_emergency_modes.md) §10 5), 청취의 인가·은닉·
-  sendonly 응답을 지키면서 청취 leg 에 조건 변화를 알리는 방법을 서버와 정해야 한다.
+- **[긴급 해제] 자격** — 서버는 긴급 해제를 개시자 ∨ user profile `allow-cancel-group-emergency` 로 받는다
+  ([mcptt_emergency_modes.md](mcptt_emergency_modes.md) §4.2). 코어가 그 요소를 읽어 내면([ue_sdk.md](ue_sdk.md) §11) 채널 조작 줄의
+  [긴급 해제]를 «내 조건 ∨ 이 값» 으로 넓힌다 — 데스크톱과 같은 과제다([dispatch_desktop_ui.md](dispatch_desktop_ui.md) §13).
 - **망 전환 중의 통화 유지** — 등록 복구는 코어가 한다(§6.1). 진행 중 호는 건드리지 않는다 — re-INVITE 로 미디어를 새
   주소로 옮기는 호 유지는 서버 처리(VoLTE relay·MCPTT 세션)를 확인한 뒤 정한다([ue_sdk.md](ue_sdk.md) §11). 통화 중
   Wi-Fi ↔ LTE 전환에서 호가 이어지는지는 실기 미확인이다.
