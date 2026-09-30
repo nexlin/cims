@@ -85,6 +85,7 @@ add_library(cimsue_objs OBJECT
     src/floor/floor_codec.cpp
     src/floor/floor_participant.cpp
     src/mcvideo/tc_codec.cpp
+    src/mcvideo/tc_participant.cpp
     src/mcptt/mcptt_xml.cpp
     src/mcdata/sds_codec.cpp
     src/mcdata/msrp.cpp
@@ -174,6 +175,7 @@ if(DEFINED GTEST_DIR)
         test/mcptt_condition_test.cpp
         test/msrp_test.cpp
         test/mcvideo_tc_codec_test.cpp
+        test/mcvideo_participant_test.cpp
         # MCVideo 전송 제어 — CMP 코덱과 교차 검증. PTransmissionCodec.cpp 는 생성 헤더만 필요해 Windows 에서도 링크된다
         test/mcvideo_xcheck_test.cpp
         ${CIMS_ROOT}/cmp/PTransmissionCodec.cpp)

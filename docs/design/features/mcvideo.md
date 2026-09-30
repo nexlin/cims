@@ -7,7 +7,8 @@
 > **설계 정본.** 구현된 것 — 계약(전송 제어 정의 테이블 [mcvideo_tc_defs.yaml](mcvideo_tc_defs.yaml)(생성 헤더 양 끝, §5.3·§5.4) · DB 표(§5.1) ·
 > 설정 문서 골든 `tests/fixtures/mcvideo/` · SDP 프로파일(§1.4) · CSP↔CMP 제어 API([cmp_media_api.md](../../api/cmp_media_api.md) §7.9) · 단말 SDK 공개
 > 표면 선언([ue_sdk.md](ue_sdk.md) §4.6 — 구현 전이라 실패를 돌려준다)), 양 끝 전송 제어 코덱(CMP `PTransmissionCodec` · SDK `mcvideo/tc_codec`, 교차 시험),
-> V0 전부, CSC 설정 평면(§5.1 — 관리 API·콘솔 제외). 호 제어·전송 제어 상태 머신·미디어 결선은 미구현.
+> 단말 전송 제어 참여자 상태 머신(SDK `mcvideo/tc_participant` — 엔진 결선 전), V0 전부, CSC 설정 평면(§5.1 — 관리 API·콘솔 제외). 호 제어·서버 전송 제어
+> 상태 머신·미디어 결선은 미구현.
 >
 > 규격 판본: TS 24.281 V18.14.0 · TS 24.581 V18.8.0 · TS 23.281 V18.12.0 · TS 24.481 V19.3.0 · TS 24.484 V20.0.0 · TS 23.280 V20.4.0 ·
 > TS 33.180 V20.0.0. 관계 문서: 로드맵 표 [mcptt_standard_conformance.md](mcptt_standard_conformance.md) R3·R6, 현행 PTT 영상 협상
@@ -282,6 +283,12 @@ psip 합성 SDP 프로파일(`CSipCallRtp::m_eMcMediaProfile = E_MC_MEDIA_MCVIDE
 - **바인딩** — C API·.NET·Kotlin 같은 이름(현행 그룹 영상 옵션 누락도 이때 메운다). `cimsue-cli video-call <g> [--transmit-at S] [--accept]`.
 - 위 공개 표면(`McService`·`VideoGroupCallOptions`·`TransmissionEvent`·`ReceptionEvent`·`TransmissionInfo`)은 C++ 공개 헤더에 선언돼 있고 구현 전이라
   실패를 돌려준다([ue_sdk.md](ue_sdk.md) §4.6). 전송 제어 상수는 생성 헤더 `mcvideo/tc_defs.h`, 코덱·참여자 빌더는 `mcvideo/tc_codec`.
+- **참여자 구현**(`mcvideo/tc_participant`) — 규격이 비워 둔 곳은 이렇게 읽는다: ① Transmission Revoked 는 원인 #7(Queue the transmission)이면
+  Queue Position Request → 'U: queued', 그 밖은 Transmission End Request → 'U: pending end'(§6.2.4.5.5 4 는 #5·#7 만 적었지만 서버는 회수 뒤 End
+  Request 를 기다린다 — §6.3.5.6) ② 암묵적 송출 요청을 서버가 받지 않으면(answer 에 `mc_implicit_request` 없음 — chat 합류·진행 중 합류, §14.3.5)
+  T100 만료를 기다리지 않고 곧바로 명시 Transmission Request ③ Transmission End Notify(§6.2.5.3.4)는 그 송출의 수신 인스턴스도 닫는다 ④ 'basic
+  reception control' 인스턴스가 끝나면('U: terminated' — 거절·[그만 보기]·서버 종료·시한) 송출은 알림 받은 상태로 남아 다시 [받기] 할 수 있다 ⑤ 'U: has
+  permission' 에서 다시 온 Granted(answer `mc_granted` 뒤 서버가 따로 보낸 것)는 확인만 하고 SSRC 가 다르면 새 값으로 송출한다.
 - **송출 SSRC** — 규격상 송출자는 Transmission Granted 의 Audio·Video SSRC 를 자기 RTP 에 쓴다(TS 24.581 §6.2.4.4.6 2). pjmedia 스트림 SSRC 는 스트림을
   만들 때 정해지고(호 중 바꾸는 API 가 없다) pjsua 는 offer 의 m-line 마다 `a=ssrc`(RFC 5576)를 광고한다. CMP 는 송출자를 멤버 전용 포트로 판별해
   내보낼 때 할당 SSRC 를 찍으므로([cmp_media_api.md](../../api/cmp_media_api.md) §7.9 SSRC 규칙) 단말이 SSRC 를 바꾸지 않아도 분배·수신자 구분은 맞다.

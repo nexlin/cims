@@ -107,7 +107,9 @@ sdk/core/
                         floor_participant(§6.2.4 상태머신 + UDP 소켓 + Ack keepalive·Revoke Release 재전송·MSN 폐기·
                         요청 시한·Granted Duration 자체 종료·청취 전용) — 원천 android FloorClient.kt
     mcvideo/            tc_defs.h(생성 — MCVideo 전송 제어 TS 24.581 §9.2·§11·§12.1.2 정의, §4.6) · tc_codec(§9 RTCP APP
-                        MCV0/1/2 TLV — CMP PTransmissionCodec 과 바이트 호환, §9.1.4 수신 검사, 참여자 빌더 §6.2.4·§6.2.5)
+                        MCV0/1/2 TLV — CMP PTransmissionCodec 과 바이트 호환, §9.1.4 수신 검사, 참여자 빌더 §6.2.4·§6.2.5) ·
+                        tc_participant(§6.2.4 송출 + §6.2.5 수신 상태 머신 + 제어 채널 UDP 소켓 · T100~T104·C100~C104 · 호 성립 전
+                        메시지 보관 · 암묵적 송출 요청) — 엔진 결선(C4·C6) 전
     mcptt/              mcptt_xml — mcptt-info·resource-lists·affiliation-command·긴급 경보(alert-ind, §F.1 요소 순서) 빌더,
                         mcptt-info/conference-info/경보 파서, 지시자 삼중값(`indicator` — true/false/없음)
     mcdata/             sds_codec — TS 24.282 SDS SIGNALLING/DATA PAYLOAD/NOTIFICATION·FD SIGNALLING TLV + multipart(base64) 빌드·파싱
@@ -361,6 +363,14 @@ reception mode·원인 문구·§11 타이머·카운터 기본값·§12.1.2 fmt
 가리키는 끝까지만 읽는다(한 IP 패킷에 여러 메시지, §9.1.1). `cimsue_test` 의 `McvCodec`(골든 바이트·4옥텟 정렬·수신 검사·참여자 빌더)와
 `McvXCheck`(두 생성 표 전수 대조 · 코어 빌더 → CMP 해석 · CMP 서버 메시지 → 코어 해석 · 같은 메시지 = 같은 바이트)가 드리프트를 잡는다 —
 CMP 코덱은 pasf 에 기대지 않아 Windows 시험 빌드에도 들어간다.
+
+전송 제어 참여자 `mcvideo/tc_participant`(`mcvideo::Participant`) 는 MCVideo 호 하나에 하나 — 송출 상태 머신('basic transmission control')
+하나와 수신 'general' 하나 + 송출마다 'basic reception control' 을 가진다(TS 24.581 §6.2.5.1). floor participant 와 같은 틀(수신 스레드 1개가
+select ≤100 ms → 해석·전이·타이머, 공개 메서드는 mutex, 콜백은 락 밖)이고, 소유자에게 `onTransmission`·`onReception` 이벤트와 두 결선 신호를
+준다 — `onSend(on, audioSsrc, videoSsrc)`(허가 = 송출 열기, SSRC = Granted·answer 값 — §6.2.4.4.6 2·§14.4) · `onReceive(송출, on)`(수신 허가 =
+그 SSRC 렌더). 헤더 SSRC 는 answer `mc_transmission_ssrc`(§4.3.3.1), offer 에는 `localSsrc` 를 광고한다. 타이머·카운터는 `TcTimers`(service
+configuration 값, 없으면 K5 기본). 규격이 비워 둔 곳의 해석은 [mcvideo.md](mcvideo.md) §5.4. `cimsue_test` `McvParticipant`(루프백 가짜 서버 —
+허가·종료·재전송 시한·거절·회수 #4/#7·서버 종료 요청·manual/automatic 수신·수신 거절·서버 수신 종료·암묵 요청 셋·상태 가드).
 
 **MCVideo 공개 표면**(계약 K7 — [../../dev/mcvideo_dev_plan.md](../../dev/mcvideo_dev_plan.md) §3) — `McService`(Mcptt·McVideo)·
 `AccountConfig.mcvideoEnabled`·`mcvideoServerUri`, `affiliate(…, service)`, `joinVideoGroupCall`(`VideoGroupCallOptions` — chat/prearranged·
@@ -638,7 +648,7 @@ NDK/MSVC 빌드는 개발 서버 밖(WSL2·Windows 머신)에서 수행하고, �
 | stage | 항목 | 내용 |
 |---|---|---|
 | S1 | `S1-UE-FLOOR-CODEC` | `scripts/gen_floor_defs.py --check`(정의 테이블 ↔ 생성물·CMP·Kotlin·.NET·probe 상수) + `cimsue_test` 의 `FloorXCheck`(코어 빌더 ↔ CMP `ParseFloorMessage`, CMP `BuildFloorMessage` ↔ 코어 decode) |
-| S1 | `S1-UE-MCVIDEO-TC-DEFS` | `scripts/gen_mcvideo_tc_defs.py --check`(MCVideo 전송 제어 정의 테이블 정합 + 생성물 `mcvideo/tc_defs.h`·`cmp/PTransmissionDefs.h` 최신성) + `cimsue_test` 의 `McvCodec`·`McvXCheck`(코어 ↔ CMP `PTransmissionCodec` 교차) |
+| S1 | `S1-UE-MCVIDEO-TC-DEFS` | `scripts/gen_mcvideo_tc_defs.py --check`(MCVideo 전송 제어 정의 테이블 정합 + 생성물 `mcvideo/tc_defs.h`·`cmp/PTransmissionDefs.h` 최신성) + `cimsue_test` 의 `McvCodec`·`McvXCheck`(코어 ↔ CMP `PTransmissionCodec` 교차)·`McvParticipant`(참여자 상태 머신) |
 | S1 | `S1-UE-UNIT` | `build/bin/cimsue_test`(googletest) — config→pjsua2 매핑(IMPI·realm `*`·H(A1)/AKA 우선·TLS 게이트 SRTP·sec-agree 헤더·proxies lr)·대상 정규화·헤더 파싱·재생 라우트 수명(null 장치 엔진 기동 → 라우트 추가/제거 → 종료 순서). 확장: SDP 협상·floor 상태머신·SDS TLV·MSRP·PKCE |
 | S3 | `S3-UE-CLI-*` | `cimsue-cli` 로 등록(UDP/TLS/AKA)·1:1(평문·TLS+SRTP)·그룹콜(affiliation PUBLISH ETag·multipart INVITE·로스터 NOTIFY·floor Request→Granted/Taken·발언 RTP 수신·Idle)·SDS 송수신·관제(dialog 구독 early→confirmed→terminated, Join 200 + 감청 RTP + caller/callee SSRC 라벨, 그룹 픽업 `**`, REFER blind 전달 후 전달 대상 RTP)·PTT 청취 — 기존 `S3-SCN-*` 의 cspsim 축과 같은 판정(누적 RTP delta·403/489). 수동 절차는 VERIFICATION_MANUAL 부록, cims-verify 항목 등록은 후속 |
 | S1 | `S1-UE-UNIT`(보강) | `AffiliationPublish`(루프백 가짜 ESC — 412 뒤 ETag 폐기·초기 PUBLISH 1회·앱에는 affiliate token 으로 최종 결과 하나) · `EngineCapture`(캡처 게이트 상태·재기동 전이중) · floor 시험의 pjlib 수명 짝(`test/pj_scope.h` — 한 프로세스 전체 실행) |

@@ -352,13 +352,14 @@ enum class TransmissionState {
     PendingEnd,                       // 'U: pending end of transmission' — Transmission End Request 응답 대기(T101·C101)
     Queued                            // 'U: queued transmission'
 };
-/** 한 송출의 내 수신 상태 — 송출마다 'basic reception control' 상태 머신 하나(§6.2.5.1). */
+/** 한 송출의 내 수신 상태 — 송출마다 'basic reception control' 상태 머신 하나(§6.2.5.1). 인스턴스가 끝나면('U: terminated' — 거절·
+ *  수신 종료·시한) 그 송출은 Notified 로 돌아가 다시 [받기] 할 수 있다. */
 enum class ReceptionState {
     Notified,                         // Media Transmission Notification 을 받았다 — 아직 받지 않는다(manual 수신, [받기] 대기)
     PendingRequest,                   // 'U: pending request to receive' — Receive Media Request 응답 대기(T103·C103)
     Receiving,                        // 'U: has permission to receive' — 이 송출의 audio·video 를 받는다
     PendingRelease,                   // 'U: pending reception release' — Media Reception End Request 응답 대기(T104·C104)
-    Ended                             // 'U: terminated' — 송출 종료(Transmission End Notify)·수신 종료·거절
+    Ended                             // 송출이 끝났다(Transmission End Notify) — 목록에서 빠진다
 };
 
 /** 한 송출 — 송출자 한 명의 audio·video RTP 흐름 쌍(Media Transmission Notification §9.2.13). 1차 수신 스트림 상한 = 1
@@ -383,7 +384,8 @@ struct TransmissionEvent {
         Ended,                        // Transmission End Response — 내 [보내기 끝] 완료
         ReceiverJoined,               // Media Reception Notification — 누군가 내 송출을 받기 시작했다(receiverId)
         Idle,                         // Transmission Idle — 그룹에 송출이 없다
-        RequestTimeout,               // 요청 응답 없음(T100×C100 · T101×C101) → NoPermission
+        QueueCancelled,               // Transmission Cancel Request Notify — 서버가 대기 중 요청을 거뒀다(§6.2.4.9.6) → NoPermission
+        RequestTimeout,               // 요청 응답 없음(T100×C100 · T101×C101 · T102×C102) → NoPermission·PendingEnd
         Other
     };
     Kind kind = Kind::Other;
@@ -405,11 +407,11 @@ struct ReceptionEvent {
     enum class Kind {
         Notified,                     // Media Transmission Notification — 새 송출(manual 이면 앱이 [받기] 를 띄운다)
         Granted,                      // Receive Media Response(granted) — 또는 automatic 수신 시작
-        Rejected,                     // Receive Media Response(rejected, cause = §9.2.15.2)
-        Ended,                        // Transmission End Notify — 송출자가 송출을 끝냈다
-        Released,                     // Media Reception End Response — 내 [그만 보기] 완료
-        EndRequested,                 // 서버 Media Reception End Request — 코어가 응답하고 수신을 닫았다
-        RequestTimeout,               // 요청 응답 없음(T103×C103 · T104×C104)
+        Rejected,                     // Receive Media Response(rejected, cause = §9.2.15.2) → Notified
+        Ended,                        // Transmission End Notify — 송출자가 송출을 끝냈다(수신 중이었으면 닫았다) → Ended
+        Released,                     // Media Reception End Response — 내 [그만 보기] 완료 → Notified
+        EndRequested,                 // 서버 Media Reception End Request — 코어가 응답하고 수신을 닫았다 → Notified
+        RequestTimeout,               // 요청 응답 없음(T103×C103 · T104×C104) → Notified
         Other
     };
     Kind kind = Kind::Other;

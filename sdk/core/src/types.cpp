@@ -111,6 +111,7 @@ const char* toString(TransmissionEvent::Kind k) {
         case TransmissionEvent::Kind::Ended: return "ended";
         case TransmissionEvent::Kind::ReceiverJoined: return "receiver_joined";
         case TransmissionEvent::Kind::Idle: return "idle";
+        case TransmissionEvent::Kind::QueueCancelled: return "queue_cancelled";
         case TransmissionEvent::Kind::RequestTimeout: return "request_timeout";
         case TransmissionEvent::Kind::Other: return "other";
     }

@@ -380,5 +380,25 @@ TS 24.484(docx k00). 이 절은 두 호스트가 MCVideo 계약을 주고받는 
    `a=ssrc`(JOIN 에 `user_audio_ssrc`·`user_video_ssrc` 로)를 그룹 안에서 겹치지 않으면 그대로 쓰는 것**을 제안한다(§12.1.2.2 «equal to provided values …
    or different if the collision is detected»). 그러면 CIMS 단말도 규격 문언 그대로가 되고, 찍기는 충돌·타사 단말에서만 값을 바꾼다.
 
-**다음 (.45)** — C5(참여자 송출·수신 상태 머신, K5·B2 위) → C2(K2 fixture 해석) → C3·C4(K3·K4 골든). 송출 SSRC 는 제안 7 이 채택되면 SDK 가 규격
-문언 그대로이고, 아니면 ue_sdk.md 편차 표에 적는다(.48 리뷰 요청).
+**C5 — 단말 전송 제어 참여자 (.45 → .48)** — `sdk/core/src/mcvideo/tc_participant.{h,cpp}`(§6.2.4 송출 + §6.2.5 수신 상태 머신 + 제어 채널 UDP,
+T100~T104·C100~C104 = K5 기본 또는 service configuration 값). 엔진 결선 전이라 단말 동작은 아직 바뀌지 않는다. `cimsue_test` `McvParticipant` 11 — 30회 반복
+FAIL 0, 전체 123/123. CMP(B4·B5)가 알면 좋은 단말 동작:
+
+- 헤더 SSRC — 단말이 보내는 전송 제어 RTCP 헤더 SSRC = answer `mc_transmission_ssrc`(K6 `tc_ssrc`). offer 의 `mc_transmission_ssrc` = 단말이 CMP 에게서 기대하는
+  값(`user_tc_ssrc`).
+- Ack — 단말은 ack 요구 비트가 선 메시지에 늘 Transmission Control Ack(Source 0 · **Message Name** · Message Type 첫 비트 0)를 보낸다.
+- Revoked → 원인 #7 이면 Queue Position Request, 그 밖은 **Transmission End Request**(§6.3.5.6 'U: pending Transmit Revoke' 가 받는 것) → End Response 를 기다린다.
+- 서버 Transmission End Request → 단말 Transmission End Response(§6.2.4.5.7). 서버 Media Reception End Request → 단말 Media Reception End Response(끝낸 송출의
+  Transmitting User ID·Audio/Video SSRC 를 싣는다).
+- Receive Media Request·Media Reception End Request 는 송출을 **Transmitting User ID + Audio/Video SSRC** 로 가리킨다. 응답(Receive Media Response·Media Reception
+  End Response·Transmission End Notify)도 둘 중 하나를 실어 달라 — 단말은 ID(없으면 Video SSRC)로 수신 인스턴스를 찾는다.
+- 호 성립 전(200 OK 전)에 온 전송 제어 메시지는 담아 두었다가 호 성립에 처리한다(§6.2.4.2.2 2).
+
+8. **제어 채널 NAT latch(K6 보강 제안)** — NAT 뒤 멤버의 `control_port` 하향 경로는 단말이 그 소켓으로 먼저 보내야 열린다. 참여자는 사용자가 누르기 전에는 보낼
+   전송 제어 메시지가 없다(floor 는 규격 밖 «Floor Ack + User ID» 를 keepalive 로 쓴다 — ue_nat_traversal.md §7.1). MCVideo 는 **규격 RTCP 로 채우자** —
+   단말이 호 성립 때 1회 + 1 s 간격 2회 + 15 s 주기로 제어 채널에 **빈 RTCP RR**(RFC 3550 §6.4.2, 헤더 SSRC = `mc_transmission_ssrc` 값)을 보내고, CMP 는 그
+   소켓의 첫 패킷으로 멤버 제어 목적지를 latch(`user_nat`·`user_sig_ip` guard 는 RTP 와 같게)하며 APP 이 아닌 RTCP 는 해석하지 않고 버린다. 동의하면 C5 에
+   넣는다(ue_nat_traversal.md §7.1 에 MCVideo 행 추가).
+
+**다음 (.45)** — C2(K2 fixture 해석) → C3·C4(K3·K4 골든, 호 제어 + 참여자 결선). 송출 SSRC 는 제안 7 이 채택되면 SDK 가 규격 문언 그대로이고, 아니면
+ue_sdk.md 편차 표에 적는다(.48 리뷰 요청).
