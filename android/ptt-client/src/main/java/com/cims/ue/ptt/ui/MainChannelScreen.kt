@@ -55,16 +55,15 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.cims.ue.core.message.MsgDirection
 import com.cims.ue.core.sip.RegState
-import com.cims.ue.core.sip.SipController
+import com.cims.ue.ptt.PttController
 import com.cims.ue.ptt.ChannelRole
 import com.cims.ue.ptt.GroupCallState
 import com.cims.ue.ptt.HwPtt
 import com.cims.ue.ptt.ListenPolicy
-import com.cims.ue.ptt.PttController
 import com.cims.ue.ptt.PttService
 import com.cims.ue.ptt.R
-import com.cims.ue.ptt.floor.FloorIndicator
-import com.cims.ue.ptt.floor.FloorState
+import com.cims.ue.sdk.FloorIndicator
+import com.cims.ue.sdk.FloorState
 import kotlinx.coroutines.delay
 import java.util.Date
 
@@ -250,8 +249,8 @@ private fun AudioRouteSheet(st: PttUiState, onDismiss: () -> Unit) {
             add(RouteChoice(h.name, R.drawable.ic_headset, PttController.AUDIO_ROUTE_HEADSET, h.id,
                 if (h.wireless) "무선" else "유선"))
         }
-        add(RouteChoice("스피커폰", R.drawable.ic_volume_on, SipController.AUDIO_ROUTE_SPEAKER, -1, null))
-        add(RouteChoice("수화기", R.drawable.ic_earpiece, SipController.AUDIO_ROUTE_EARPIECE, -1, null))
+        add(RouteChoice("스피커폰", R.drawable.ic_volume_on, PttController.AUDIO_ROUTE_SPEAKER, -1, null))
+        add(RouteChoice("수화기", R.drawable.ic_earpiece, PttController.AUDIO_ROUTE_EARPIECE, -1, null))
     }
     Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.55f))
         .pointerInput(Unit) { detectTapGestures { onDismiss() } }) {
@@ -394,17 +393,17 @@ private fun VideoPanel(st: PttUiState, onRouteSelect: () -> Unit, modifier: Modi
             //              이어폰 연결(무선 다중 포함): 탭=선택 시트(이어폰/스피커폰/수화기).
             val (routeIcon, routeDesc) = when (st.route) {
                 PttController.AUDIO_ROUTE_HEADSET -> R.drawable.ic_headset to "이어폰"
-                SipController.AUDIO_ROUTE_SPEAKER -> R.drawable.ic_volume_on to "스피커폰"
+                PttController.AUDIO_ROUTE_SPEAKER -> R.drawable.ic_volume_on to "스피커폰"
                 else -> R.drawable.ic_earpiece to "수화기"
             }
             OverlayToggle(
                 icon = routeIcon, desc = routeDesc,
-                active = st.route != SipController.AUDIO_ROUTE_EARPIECE,
+                active = st.route != PttController.AUDIO_ROUTE_EARPIECE,
             ) {
                 if (st.headsets.isEmpty()) {
                     st.ctl?.setAudioRoute(
-                        if (st.route == SipController.AUDIO_ROUTE_SPEAKER) SipController.AUDIO_ROUTE_EARPIECE
-                        else SipController.AUDIO_ROUTE_SPEAKER)
+                        if (st.route == PttController.AUDIO_ROUTE_SPEAKER) PttController.AUDIO_ROUTE_EARPIECE
+                        else PttController.AUDIO_ROUTE_SPEAKER)
                 } else onRouteSelect()
             }
             val all = st.policy == ListenPolicy.ALL

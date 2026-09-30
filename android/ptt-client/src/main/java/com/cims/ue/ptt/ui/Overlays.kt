@@ -68,9 +68,11 @@ fun EmergencyBanner(e: GroupCallState, ctl: PttController?, modifier: Modifier =
 
 /** 수신 긴급경보 배너 — 통화 없는 위험 통지(TS 24.379 emergency alert).
  *  발신자의 취소 MESSAGE 로 자동 해제되고, [닫기] 는 이 단말의 표시만 지운다.
+ *  내 경보([ActiveAlert.mine])면 [해제] — 취소 MESSAGE 를 보낸다(개시자만 유효). 긴급 세션 없이 경보만 남은 경우
+ *  (403 미인가로 긴급콜이 normal 로 바뀐 뒤 등)에 해제할 곳이 여기뿐이다.
  *  세션 긴급 배너(빨강 깜빡임·그룹 표기)와의 시각 구분: 주황 계열·📢·사람 표기. */
 @Composable
-fun AlertBanner(a: ActiveAlert, groupName: String, onDismiss: () -> Unit, modifier: Modifier = Modifier) {
+fun AlertBanner(a: ActiveAlert, groupName: String, onAction: () -> Unit, modifier: Modifier = Modifier) {
     Row(
         modifier.fillMaxWidth().padding(vertical = 4.dp)
             .clip(RoundedCornerShape(12.dp))
@@ -80,12 +82,12 @@ fun AlertBanner(a: ActiveAlert, groupName: String, onDismiss: () -> Unit, modifi
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {
-            Text("📢 긴급경보 — ${a.userId}", color = Ct.Amber,
+            Text(if (a.mine) "📢 내 긴급경보 발령 중" else "📢 긴급경보 — ${a.userId}", color = Ct.Amber,
                 fontSize = 14.sp, fontWeight = FontWeight.Bold)
-            Text(groupName, color = Color.White, fontSize = 11.sp)
+            Text(if (a.mine) "$groupName — 상황 종료 시 해제하세요" else groupName, color = Color.White, fontSize = 11.sp)
         }
-        Text("닫기", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold,
-            modifier = Modifier.plainClickable(onDismiss).padding(8.dp))
+        Text(if (a.mine) "해제" else "닫기", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold,
+            modifier = Modifier.plainClickable(onAction).padding(8.dp))
     }
 }
 

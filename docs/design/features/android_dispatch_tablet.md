@@ -1228,10 +1228,9 @@ SCO 가 죽는다. A2DP 만이 통신 경로 밖이라 혼자 갈라질 수 있�
 |---|---|---|
 | S1 | `S1-UE-FLOOR-CODEC` | `gen_floor_defs.py --check` + `cimsue_test` floor 교차 검증 |
 | S1 | `S1-UE-UNIT` | `build/bin/cimsue_test` — 코어 단위시험 (§3.3 반환형 포함). **1:1 SDS** = `one-to-one-sds` 본문·쌍 정렬 conversation ID 가 cspsim·Kotlin 과 같은 값인지 |
-| S1 | `S1-UE-ANDROID-BIND` | SWIG 생성 Java 에 `SWIGTYPE_p_*` 부재 + `javac` 통과 |
+| S1 | `S1-UE-ANDROID-BIND` | SWIG 생성 Java 에 `SWIGTYPE_p_*` 부재 + `javac` 통과 + `cimsue.i` 타입맵 본문에 맨 `#` 지시문 없음(`%#` — 생성 때 한 갈래만 남아 플랫폼 분기가 사라진다) |
 | S1 | `S1-UE-ENGINE-SINGLE` | 레포에 커밋된 엔진 산출물 부재(`android/core/src/pjsua2` 없음) + `org.pjsip.**` 제공처가 `:cimsue-engine` 하나 |
-| S1 | `S1-UE-SDS-XCHECK` | 코어 `sds_codec` 과 `ptt-client/mcdata/McDataCodec.kt` 의 TLV 상수·인코딩 대조 (공존 기간 드리프트 방어) |
-| S1 | `S1-UE-CSC-XCHECK` | 코어 `csc_client` 와 `ptt-client/csc/CscClient.kt` 의 XCAP 경로·scope·헤더 규약 대조 |
+| S1 | `S1-UE-CSC-XCHECK` | 코어 `csc_client` 와 `:core` `ProvisioningClient.kt` 의 IdMS·프로비저닝 경로 대조 (로그인 앱·SSO 는 코어를 싣지 않는다) |
 | S1 | `S1-UE-TABLET-UNIT` | `./gradlew testDebugUnitTest` — 프로파일 파싱·포커스/발언대상 분리·발언 소유권·관리 와이어 파서(범위·전환기 이름·조직 고리)·회선 저장 판정(§6.13 표)·이력 날짜 창/시간대 밴드/발언 막대·응답 문구 사전·E.164 정규화·**문자 외부망 판정/스레드 정렬/글자 수**(§6.2e)·**새 대화 후보 거르기·사람 축 기록 필터**(§6.9a·§6.2f) (JVM, 기기 불필요) |
 | S3 | `S3-UE-CLI-*` | `cimsue-cli` 로 등록·그룹콜·floor·SDS·Join·픽업·전달·PTT 청취 |
 | 실기기 | 태블릿 | 감청 SSRC 2개 귀속(진행 중 행의 인라인 상세, §6.5) · PTT 청취 중 버튼 비활성 · 대표번호 착신 · 하드키 누름/해제 · 오디오 분리 출력 · 화면 밀도 · **이력 창 조회/녹취 재생** · **그룹 XCAP PUT/DELETE** · **회선 PUT 재결박** · **문자 송수신**(사이트 안 번호) · **1:1 무전 메시지**(사람 스레드 왕복) |

@@ -81,6 +81,20 @@ enum class FloorEventKind {
 /** MCPTT 세션 조건 변화의 계기(서수 = 코어 ConditionCause) — LOCAL = setCondition 을 보내며 반영, CONFIRMED = 그 re-INVITE 2xx,
  *  DENIED = 4xx~6xx(이전 값 복원, 미인가 상향 403), ADVERTISED = 서버 재광고(TS 24.379 §6.3.3.1.15·§6.3.3.1.16). */
 enum class ConditionCause { LOCAL, CONFIRMED, DENIED, ADVERTISED }
+/** Floor Indicator 비트(TS 24.380 §8.2.3.15) — `FloorEvent.indicator`·`FloorInfo.indicator` 판정용. 값의 정본은 floor 정의 테이블
+ *  (docs/design/features/mcptt_floor_defs.yaml)이고 `scripts/gen_floor_defs.py --check` 가 이 블록을 대조한다. */
+object FloorIndicator {
+    const val NORMAL = 0x8000
+    const val BROADCAST_GROUP = 0x4000
+    const val SYSTEM = 0x2000
+    const val EMERGENCY = 0x1000
+    const val IMMINENT_PERIL = 0x0800
+    const val QUEUEING = 0x0400
+    const val DUAL_FLOOR = 0x0200
+    const val TEMPORARY_GROUP = 0x0100
+    const val MULTI_TALKER = 0x0080
+}
+
 /** 오디오 라우트 — 입력의 EARPIECE = 내장 기본(하단) 마이크 고정, DEFAULT = 정책(고정 해제). 서수 = 코어 AudioRoute. */
 enum class AudioRoute { DEFAULT, EARPIECE, LOUDSPEAKER }
 /** 계측 링크 상태(cimsue/drive.h) — REFUSED(연결 키 거절·지문 불일치)는 다시 붙지 않는다. */

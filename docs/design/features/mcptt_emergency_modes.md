@@ -182,14 +182,18 @@ mcptt-request-uri, mcptt-calling-user-id, (alert) originated-user-id, location(�
   개시한다(`McpttXml.alertInfo` + `PttController.sendAlert` — 호 성립과 무관하게 신원·그룹 전파).
   SOS 해제 시 경보 취소도 함께. 수신 측은 mcptt-info MESSAGE 를 파싱해 활성 경보
   상태(`alerts` StateFlow)로 들고, 전 탭 상단 배너(`AlertBanner`)+경고음으로 표시 —
-  발신자 취소로 자동 해제, [닫기]는 로컬 표시만 제거. 이력 이벤트 `ALERT/ALERT_IN/ALERT_END`.
+  발신자 취소로 자동 해제, [닫기]는 로컬 표시만 제거. 내 경보는 같은 배너에 [해제](취소 MESSAGE —
+  `cancelAlert`)로 보인다 — 같은 그룹의 내 긴급 세션 배너가 떠 있으면 그 [해제]가 세션 조건과 경보를 함께
+  거두므로 경보 배너는 숨긴다. 이력 이벤트 `ALERT/ALERT_IN/ALERT_END`.
 - **단말 SOS 대상 결정** (새 긴급콜 — 통화 중이면 항상 현재 주채널 통화 격상): user-profile
   문서의 `MCPTTGroupInitiation` entry-info 를 따른다 — `DedicatedGroup`(기본)이면 프로비저닝된
   전용 긴급그룹(미지정이어도 문서는 TS 24.484 §8.3.2.1 이 "shall" 로 요구하는 EmergencyCall/ImminentPerilCall/EmergencyAlert 를
   항상 싣되 entry-info 를 `UseCurrentlySelectedGroup`(uri-entry = 폴백 그룹)으로 내리고, 개시 인가는 ruleset `allow-emergency-group-call`=false 로 표현 — 단말은 ruleset 으로 차단, 서버도 403), `UseCurrentlySelectedGroup` 이면(uri-entry = 미선택 시 폴백 그룹)
   **선택 그룹 = 마지막 주채널**(`ChannelStore.lastPrimary` 영속 — 참여 전부 이탈 후에도 유지,
-  이력 없으면 그룹 목록 첫 그룹 폴백). 프로파일 미수신이면 선택 그룹으로 현행 유지(서버
-  게이트가 최종 판정). 경보 MESSAGE 도 같은 대상 그룹으로 보낸다(`EmergencyAlert` entry 공통).
+  이력 없으면 그룹 목록 첫 그룹 폴백). 프로파일을 아직 받지 못했으면 SOS 가 먼저 취득한다(최대 3초 —
+  등록 직후 cms NOTIFY 가 토큰보다 먼저 와 조회가 건너뛰어진 경우 등). 취득하고도 없으면(CSC 불통)
+  선택 그룹으로 개시한다 — 긴급은 막지 않는다(서버 게이트가 최종 판정). 대상을 정하는 동안 겹친 SOS 는
+  무시한다. 경보 MESSAGE 도 같은 대상 그룹으로 보낸다(`EmergencyAlert` entry 공통).
 - **단말 403 폴백**: 긴급 개시 INVITE 가 403 이면 같은 그룹으로 normal 재발신(호 자체는 보존),
   in-call 상향 re-INVITE 가 403(`emergency-ind=false` 본문)이면 낙관 latch 를 되돌린다
   (`SipController.emergencyDenied` — tsx 원문 관측, 재-INVITE 거절은 CallState 불변이라 별도 이벤트).
@@ -197,8 +201,8 @@ mcptt-request-uri, mcptt-calling-user-id, (alert) originated-user-id, location(�
   라 콜 403 만으로 경보를 일괄 자동회수하지 않는다. 단말은 403 수신 시 user-profile 을
   재조회(`reconcileAlertAfterDenied` — ETag 캐시라 저비용)해 **경보 인가까지 없다고 판명되면**
   (=서버가 스트립해 아무도 받지 못한 유령 배너) 로컬 표시만 회수한다 — 서버에 활성 경보가
-  없으므로 취소 MESSAGE 는 보내지 않는다. 경보 인가가 확인되면(실전파된 경보) 유지 — 해제는
-  사용자의 SOS 해제로. 재조회 실패 시도 유지(fail-open).
+  없으므로 취소 MESSAGE 는 보내지 않는다. 경보 인가가 확인되면(실전파된 경보) 유지 — 긴급 세션은
+  normal 로 바뀌어 세션 배너가 없으므로, 해제는 경보 배너의 [해제]다. 재조회 실패 시도 유지(fail-open).
 - **미인가 발신자 로컬 배너 정책(확정)**: 프로파일이 명시적으로 미인가면 발신 자체를 선차단
   (`PttFeedback.blocked` 거부음+토스트)하고 로컬 경보 배너를 켜지 않는다 — 전파되지 않을
   경보의 거짓 안심 상태를 만들지 않는다. 프로파일 미수신(null)이면 낙관 발신 유지(서버

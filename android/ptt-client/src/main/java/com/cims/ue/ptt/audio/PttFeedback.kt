@@ -89,7 +89,7 @@ class PttFeedback(context: Context) {
         runCatching { tone?.release() }
     }
 
-    private companion object {
+    companion object {
         const val TONE_VOLUME = 90
         /** TONE_PROP_BEEP2(이중 삑) 실재생 길이 — 이 이후 mic 개방. */
         const val GRANT_TONE_MS = 350L

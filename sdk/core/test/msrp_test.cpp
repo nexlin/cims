@@ -288,12 +288,18 @@ TEST(Msrp, EngineSendsLargeGroupSdsOverMediaPlane) {
         ASSERT_FALSE(bye.empty());
         sip.reply(bye, 200, "OK");
 
-        // 상한 아래는 그대로 시그널링 평면(MESSAGE)
-        SdsSend small = eng.sendGroupSds(acc, "g005", "hi");
+        // 상한 아래는 그대로 시그널링 평면(MESSAGE) — 호출자가 준 message ID(재전송)가 본문에 실린다
+        const std::string given = "0123456789abcdef0123456789ABCDEF";
+        SdsSend small = eng.sendGroupSds(acc, "g005", "hi", true, given);
         ASSERT_TRUE(small.ok);
+        EXPECT_EQ(small.msgId, "0123456789abcdef0123456789abcdef");
         std::string msg = sip.recv("MESSAGE ");
         ASSERT_FALSE(msg.empty());
+        SdsMessage parsed;
+        ASSERT_TRUE(mcdata::parse(headerOf(msg, "Content-Type"), sipBodyOf(msg), parsed));
+        EXPECT_EQ(parsed.msgId, small.msgId);
         sip.reply(msg, 200, "OK");
+        EXPECT_FALSE(eng.sendGroupSds(acc, "g005", "hi", true, "not-hex").ok);
     }
     eng.stop();
 }

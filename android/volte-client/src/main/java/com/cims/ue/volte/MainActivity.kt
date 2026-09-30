@@ -103,6 +103,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -1931,8 +1932,9 @@ private fun VideoCallFullScreen(
                 interactionSource = remember { MutableInteractionSource() },
             ) { controlsVisible = !controlsVisible },
     ) {
-        // 상대 영상(전체화면)
-        VideoRender(onSurface = onSurface)
+        // 상대 영상(전체화면) — AndroidView 는 자기 영역의 터치를 소비해 바깥 Box 의 clickable 에 닿지 않는다.
+        // 탭을 뷰에서 받아 같은 토글로 넘긴다(없으면 자동 숨김 뒤 컨트롤을 다시 띄울 수 없어 종료 불가).
+        VideoRender(onSurface = onSurface, onTap = { controlsVisible = !controlsVisible })
 
         // 전면/후면 카메라 전환 — 우측 상단(항상 표시).
         Box(
@@ -2030,12 +2032,14 @@ private fun ToggleRound(
 }
 
 @Composable
-private fun VideoRender(onSurface: (Any?) -> Unit) {
+private fun VideoRender(onSurface: (Any?) -> Unit, onTap: () -> Unit = {}) {
     // SurfaceView 의 Surface 를 PJSIP 영상 윈도우로 전달. 컴포지션 이탈 시 surfaceDestroyed→null.
+    val tap by rememberUpdatedState(onTap)
     AndroidView(
         modifier = Modifier.fillMaxSize(),
         factory = { ctx ->
             SurfaceView(ctx).apply {
+                setOnClickListener { tap() }
                 holder.addCallback(object : SurfaceHolder.Callback {
                     override fun surfaceCreated(h: SurfaceHolder) = onSurface(h.surface)
                     override fun surfaceChanged(h: SurfaceHolder, f: Int, w: Int, ht: Int) = onSurface(h.surface)

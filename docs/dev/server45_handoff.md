@@ -164,6 +164,18 @@ M1~M5 는 .48 에서 반영·배포(**csp 0.2.166 · csc 0.2.133**)·실측했�
 | M4 ad hoc 인가 규격 요소 | ✅ | `<cp:actions><anyExt><allow-adhoc-group-call>`(TS 24.484 **Rel-18** §8.3.2.1 11)xxxviii)R)) + 전환기 별칭 `<cims:allow-adhoc-group-call>`(옛 ptt-client — P3 이식 뒤 뺀다) | `tests/test_csc_user_profile.py` 12 OK |
 | M5 service-config Resource-Priority | ✅ | service-config 문서 **전체를 TS 24.484 §8.4 스키마로 재구성** — `<service-configuration-info>` › `<service-configuration-params domain>` › `<common><broadcast-group>`(계층 수) · `<on-network>`(`<fc-timers-counters>` 17 요소 = CMP floor 기본값 · `<emergency-/imminent-peril-/normal-resource-priority>` = `mcpttp` 15/8/0). 값 = DB 행(N2·계층 수) + CSC 설정 `ServiceConfig.*`(타이머 ms·RP). **시스템 인가 스위치 5종 제거**(1:1·긴급·경보·발언 요청·그룹 생성 — §8.4 에 없는 요소, 인가 = user profile ruleset·그룹 문서) | `tests/test_csc_user_profile.py` 14 OK(스키마 순서·필수 요소·기본값·덮어쓰기) · SDK `CmsDoc.*` |
 
+P3(ptt-client SDK 전환) 실측에서 더 드러난 것 — **미반영**([sdk_port_handoff.md](sdk_port_handoff.md) §5):
+
+| # | 영향 | 위치 | 문제 | 규격 | 방향 |
+|---|---|---|---|---|---|
+| M6 | 중 | CSP 그룹콜 착신 INVITE(멤버 leg) | 멤버 leg INVITE 에 그룹 멤버 전원의 `application/resource-lists+xml`(`mcpttgi:participant-type`·`user-priority`)을 싣는다 — 12인 그룹에서 4.5 KB 가 UDP 로 나간다. 멤버 수에 비례해 커져 UDP 조각화·단말 수신 버퍼(pjsip 기본 4000 B — 단말은 65535 로 올렸다)를 넘는다 | TS 24.379 §6.3.3.1.2(제어 기능이 멤버에게 보내는 INVITE — mcptt-info 복사, resource-lists 없음) · RFC 3261 §18.1.1 | 멤버 leg INVITE 에서 resource-lists 제거(명단은 conference 이벤트로) |
+| M7 | 하 | 같은 INVITE | Contact 가 `<sip:gNNN@…>;isfocus` 뿐이다(`g.3gpp.mcptt`·`g.3gpp.icsi-ref` 없음) · `Session-Expires` 에 `refresher=uac` 를 붙인다 | TS 24.379 §6.3.3.1.2 1)·6)(refresher 생략) | Contact 특성 태그 셋 · refresher 생략 |
+| M8 | 하 | CSP in-dialog INFO | VoLTE 영상 호의 키프레임 요청 INFO(pjsua `media_control+xml`)에 501 — 상대에게 전달되지 않는다. 키프레임 요청은 RTCP PLI 로만 간다 | TS 26.114 §7.3(영상 코덱 제어 = RTCP AVPF PLI/FIR) · RFC 6086 | 대화 안 INFO 를 상대 leg 로 중계(또는 단말이 RTCP 만 쓰도록 계정 설정 — .45 결정) |
+
+- 참고(관찰): 두 단말이 같은 사내 NAT 뒤에서 영상 통화할 때 CMP 가 한 peer 자리의 RTCP 목적지를 두 포트 사이에서 몇 초마다 다시 latch 하고, 다른 peer 의
+  영상 RTCP 를 "unnegotiated src" 로 한 번 버린다(`PRtpRelay`). 영상·음성 품질에는 영향이 보이지 않았다(손실 0.3 %·RTT 17 ms) — 같은 공인 IP 뒤 두 peer 의
+  latch 판정 확인 필요.
+
 - **M5 에 딸린 변경** — SDK `ServiceConfigDoc`(§8.4 해석: domain·계층 수·`rpEmergency/rpImminentPeril/rpNormal` r-value) ·
   `UserProfileDoc.allowPrivateCall` · `Capabilities`(인가 = user profile 만, `transmitRequest` 제거, N2 = user profile) · Kotlin 파사드 같은 구조
   (SWIG 재생성·빌드는 .45) · 옛 ptt-client(인가 = user profile, 발언 요청 게이트 제거, N2 = user-profile `MaxAffiliationsN2`, RP 해석 —

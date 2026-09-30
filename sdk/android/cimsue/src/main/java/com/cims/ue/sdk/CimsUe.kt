@@ -515,9 +515,11 @@ class Account internal constructor(private val ue: CimsUe, val id: Int) {
     }
 
     // ── MCData SDS (TS 24.282) ──
-    /** 그룹 SDS 발신. 최종 응답은 `requestResult` 에 같은 token 으로 온다. */
-    suspend fun sendGroupSds(groupId: String, text: String, requestDelivery: Boolean = true): CimsResult<SdsSend> =
-        ue.command { SdsSend.of(ue.jni.sendGroupSds(id, groupId, text, requestDelivery)) }
+    /** 그룹 SDS 발신. 최종 응답은 `requestResult` 에 같은 token 으로 온다(상한 초과 = MSRP — method "MSRP").
+     *  msgId = 재전송이면 처음의 message ID(hex32 — 수신 측 대조), 비면 코어가 만든다. 앱이 먼저 저장하고 보낼 때도 그 ID 를 넘긴다. */
+    suspend fun sendGroupSds(groupId: String, text: String, requestDelivery: Boolean = true,
+                             msgId: String = ""): CimsResult<SdsSend> =
+        ue.command { SdsSend.of(ue.jni.sendGroupSds(id, groupId, text, requestDelivery, msgId)) }
 
     /**
      * 1:1 SDS 발신(request-type one-to-one-sds). peer 는 상대 bare 번호.
@@ -525,8 +527,9 @@ class Account internal constructor(private val ue: CimsUe, val id: Int) {
      * 그룹 SDS 와 **갈라 두는 이유**: request-type·Request-URI·conversation ID 가 다르다. 1:1 을 그룹
      * 경로로 보내면 서버가 그룹 게이트를 거쳐 받는 쪽 스레드 귀속도 틀어진다(mcdata_messaging.md §4).
      */
-    suspend fun sendSds(peer: String, text: String, requestDelivery: Boolean = true): CimsResult<SdsSend> =
-        ue.command { SdsSend.of(ue.jni.sendSds(id, peer, text, requestDelivery)) }
+    suspend fun sendSds(peer: String, text: String, requestDelivery: Boolean = true,
+                        msgId: String = ""): CimsResult<SdsSend> =
+        ue.command { SdsSend.of(ue.jni.sendSds(id, peer, text, requestDelivery, msgId)) }
 
     // ── MCData FD (TS 24.282 §10.2 — 파일은 먼저 CscClient.uploadFd 로 올린다) ──
     /** 그룹 FD 알림 — file 은 `uploadFd(groupId 지정)` 결과. 최종 응답은 `requestResult` 에 같은 token 으로 온다. */

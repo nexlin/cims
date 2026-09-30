@@ -2,7 +2,7 @@
 """MCPTT floor 정의 테이블(docs/design/features/mcptt_floor_defs.yaml) → 생성·대조.
 
   gen_floor_defs.py            sdk/core/src/floor/floor_defs.h 생성(정본 테이블에서)
-  gen_floor_defs.py --check    생성물이 최신인지 + cmp/PMcpttGroup.h · android FloorControl.kt · .NET 파사드 Types.cs ·
+  gen_floor_defs.py --check    생성물이 최신인지 + cmp/PMcpttGroup.h · Kotlin 파사드 Types.kt · .NET 파사드 Types.cs ·
                                scripts/mcptt_floor_policy_probe.py 의 상수가 테이블과 같은지 대조 (S1 게이트)
 
 PyYAML 없이 동작한다(테이블은 단순 매핑만 쓰므로 자체 파서). 의도적으로 외부 의존이 없다.
@@ -15,7 +15,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 YAML = os.path.join(ROOT, "docs/design/features/mcptt_floor_defs.yaml")
 OUT_H = os.path.join(ROOT, "sdk/core/src/floor/floor_defs.h")
 CMP_H = os.path.join(ROOT, "cmp/PMcpttGroup.h")
-KT = os.path.join(ROOT, "android/ptt-client/src/main/java/com/cims/ue/ptt/floor/FloorControl.kt")
+KT = os.path.join(ROOT, "sdk/android/cimsue/src/main/java/com/cims/ue/sdk/Types.kt")
 CS = os.path.join(ROOT, "sdk/windows/dotnet/CimsUe/Types.cs")
 PROBE = os.path.join(ROOT, "scripts/mcptt_floor_policy_probe.py")
 
@@ -176,28 +176,14 @@ def check(t):
         if not m or int(m.group(1), 16) != t["rtcp"]["ack_required_bit"]:
             fails.append("cmp/PMcpttGroup.h FLOOR_ACK_REQ_BIT ≠ 테이블")
 
-    # 3) Android Kotlin
-    if os.path.exists(KT):
+    # 3) Android Kotlin 파사드 — 프로토콜은 코어가 갖고(ue_sdk.md §5.3), 앱이 판정에 쓰는 Floor Indicator 비트만 파사드에 있다
+    if not os.path.exists(KT):
+        fails.append(f"{os.path.relpath(KT, ROOT)} 없음")
+    else:
         txt = open(KT, encoding="utf-8").read()
-        k_all = {}
-        blk = re.search(r"object FloorMsgType \{(.*?)\n\}", txt, re.S)     # opcode 는 이 블록 안에서만(필드 MEDIA_FLOW 와 이름 충돌)
-        if blk:
-            k_all = _grep_consts(blk.group(1), r"const val ([A-Z_]+)\s*=\s*(0x[0-9A-Fa-f]+|\d+)")
-        cmp("FloorControl.kt opcodes", ops, k_all, {
-            "REQUEST": "REQUEST", "GRANTED": "GRANTED", "TAKEN": "TAKEN", "DENY": "DENY", "RELEASE": "RELEASE",
-            "IDLE": "IDLE", "REVOKE": "REVOKE", "QUEUE_POS_REQ": "QUEUE_POS_REQUEST", "QUEUE_POS_INFO": "QUEUE_POS_INFO",
-            "ACK": "ACK", "MEDIA_FLOW": "MEDIA_FLOW", "QUEUED_CANCEL": "QUEUED_CANCEL", "RELEASE_MULTI": "RELEASE_MULTI"})
-        # 필드 상수는 object FloorFieldId 블록 안에서만 (MEDIA_FLOW 이름이 opcode 와 겹친다)
-        blk = re.search(r"object FloorFieldId \{(.*?)\n\}", txt, re.S)
-        if blk:
-            k_ff = _grep_consts(blk.group(1), r"const val ([A-Z_]+)\s*=\s*(0x[0-9A-Fa-f]+|\d+)")
-            cmp("FloorControl.kt FloorFieldId", flds, k_ff, {k: k for k in flds})
         blk = re.search(r"object FloorIndicator \{(.*?)\n\}", txt, re.S)
-        if blk:
-            k_fi = _grep_consts(blk.group(1), r"const val ([A-Z_]+)\s*=\s*(0x[0-9A-Fa-f]+|\d+)")
-            cmp("FloorControl.kt FloorIndicator", t["indicator"], k_fi, {k: k for k in t["indicator"]})
-        if k_all.get("ACK_REQUIRED_BIT") != t["rtcp"]["ack_required_bit"]:
-            fails.append("FloorControl.kt ACK_REQUIRED_BIT ≠ 테이블")
+        k_fi = _grep_consts(blk.group(1), r"const val ([A-Z_]+)\s*=\s*(0x[0-9A-Fa-f]+|\d+)") if blk else {}
+        cmp("CimsUe Types.kt FloorIndicator", t["indicator"], k_fi, {k: k for k in t["indicator"]})
 
     # 3b) .NET 파사드 — Windows 관제 앱이 floor B-bit 로 일제 통화를 판정한다(mcptt_broadcast_group_call.md §4.4). 이름은 PascalCase
     if os.path.exists(CS):

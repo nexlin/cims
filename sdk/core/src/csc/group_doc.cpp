@@ -141,6 +141,7 @@ bool GroupDoc::parse(const std::string& xml, GroupDoc& out, std::string* err) {
         GroupMember m;
         m.uri = attrOf(list.substr(p, egt - p), "uri");
         m.name = elemText(e, "display-name");
+        m.title = elemText(e, "user-title");
         std::string role = elemText(e, "participant-type");
         if (!role.empty()) m.role = role;
         std::string pr = elemText(e, "user-priority");

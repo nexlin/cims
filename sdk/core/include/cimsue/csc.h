@@ -92,7 +92,12 @@ struct HttpResult { int status = 0; std::string contentType, etag, body; };
 struct FdUpload { std::string id, url, name; int64_t size = 0; };
 
 /** 그룹 문서 멤버(list/entry). role = chair | participant (mcpttgi:participant-type). */
-struct GroupMember { std::string uri, name; std::string role = "participant"; int priority = 5; };
+struct GroupMember {
+    std::string uri, name;
+    std::string role = "participant";
+    int priority = 5;
+    std::string title;                         // 직함 <cims:user-title>(사이트 확장) — 읽기 전용, PUT 에 싣지 않는다(서버가 읽지 않는다)
+};
 
 /** GMS 그룹 문서(OMA list-service + TS 24.481 mcpttgi 확장) — GET 응답·PUT 본문의 단일 모델.
  *  서버가 내는 문서와 같은 요소만 다룬다(mcptt_api.md §2). 모르는 요소는 파싱에서 무시, 직렬화에는 넣지 않는다. */

@@ -79,7 +79,7 @@ SWIG 을 돌린 뒤 산출물을 배치하는 절차만** 담는다(`android/doc
 | 항목 | 규약 |
 |---|---|
 | **이벤트 구독 슬롯** | `pjsua_pres.c` 의 CIMS 구독 표(conference·xcap-diff·dialog 공용)는 `PJSUA_CIMS_MAX_SUB`(기본 256) 슬롯 — 관제조작반은 대표번호 + 감시 대상 전원(`monitor_scope=all` 이면 조직 전원) dialog 와 채널·청취 범위 conference, GMS PSI xcap-diff 를 동시에 든다. 넘치면 `PJ_ETOOMANY`(앱 로그 `dialogWatch …: -3 subscribe failed`) — 조직 규모가 크면 config_site 에서 올린다 |
-| **config_site.h** | upstream 이 무시하는 파일이므로 `sdk/engine/config_site/{common,android,windows,linux}.h` 로 커밋한다. `common.h` 에 세 플랫폼이 같아야 하는 결정(U10, `PJMEDIA_HAS_SRTP 1`, `PJSIP_HAS_TLS_TRANSPORT 1`, 코덱 표면 축소 — G.711 안전망 유지·AMR-NB/VP8/VP9/Speex 등 off, 이벤트 구독 패치 스위치)을 두고, 플랫폼 파일은 `common.h` 를 include 한 뒤 장치·코덱 백엔드만 정한다(Android=And-Media MediaCodec 코덱·OpenSL/AAudio, Windows=WASAPI·SDL 창 off, Linux=null 장치·영상 off·opencore AMR-WB). 빌드가 `pjlib/include/pj/config_site.h` 에 해당 플랫폼 파일을 `#include` 하는 한 줄을 생성한다 — 플랫폼 파일이 `common.h` 를 상대경로로 include 하므로 복사가 없고 pjproject 트리에는 gitignore 된 한 줄짜리 파일만 생긴다 |
+| **config_site.h** | upstream 이 무시하는 파일이므로 `sdk/engine/config_site/{common,android,windows,linux}.h` 로 커밋한다. `common.h` 에 세 플랫폼이 같아야 하는 결정(U10, `PJMEDIA_HAS_SRTP 1`, `PJSIP_HAS_TLS_TRANSPORT 1`, 코덱 표면 축소 — G.711 안전망 유지·AMR-NB/VP8/VP9/Speex 등 off, 이벤트 구독 패치 스위치, SIP 메시지 상한 `PJSIP_MAX_PKT_LEN 65535` — 서버발 그룹 INVITE·conference NOTIFY 는 멤버 수에 비례해 커지고 UDP 등록 단말에는 TCP 로 바꿔 보낼 수 없으므로 UDP 데이터그램 최대 크기를 받는다)을 두고, 플랫폼 파일은 `common.h` 를 include 한 뒤 장치·코덱 백엔드만 정한다(Android=And-Media MediaCodec 코덱·OpenSL/AAudio, Windows=WASAPI·SDL 창 off, Linux=null 장치·영상 off·opencore AMR-WB). 빌드가 `pjlib/include/pj/config_site.h` 에 해당 플랫폼 파일을 `#include` 하는 한 줄을 생성한다 — 플랫폼 파일이 `common.h` 를 상대경로로 include 하므로 복사가 없고 pjproject 트리에는 gitignore 된 한 줄짜리 파일만 생긴다 |
 | **Linux 빌드** | 루트 `CMakeLists.txt` 의 `ExternalProject_Add(pjproject)` (`option(CIMS_UE_SDK ON)`) — `aconfigure`(`--disable-sound --disable-video`, 서버가 만든 `pkg/opencore-amr`·`pkg/vo-amrwbenc` 링크, `-fPIC`) → `make dep` → `make lib` → `pkg/pjproject` 설치. 코어·`cimsue-cli`·단위시험이 링크한다(`pkg/pjproject/lib/pkgconfig/libpjproject.pc` 의 Libs/Libs.private + opencore·vo-amrwbenc 라이브러리 경로). 코덱은 config_site 로만 끈다 — configure `--disable-speex-codec` 은 third_party/speex 를 빼서 AEC(`echo_common.o`) 링크가 깨진다. pjproject 자체 CMake 는 upstream 이 Linux x86_64 만 시험한 실험 단계라 쓰지 않는다 |
 | **Windows 빌드** | 같은 트리의 `pjproject-vs14.sln`(MSVC) 로 빌드한다. pjproject CMake 채택은 upstream 안정화 후 |
 | **libsrtp 경계** | 서버(CMP)는 `ext/libsrtp` 독립 vendoring, 단말 엔진은 pjproject 동봉 `third_party/srtp`. 같은 CMake 트리에 들어오므로 타겟 이름·include 경로를 분리하고 서로 링크하지 않는다(루트 CMake 의 기존 주석이 규약) |
@@ -266,7 +266,8 @@ C++ 공개 표면은 `cimsue/engine.h` 의 `Engine` 하나이며 계정·호를 
   앱은 소스별 활성·레벨 표시만 한다(dispatch_center §5.4).
 - **영상.** 코어는 창을 열지 않는다. Android 는 Surface 를 받아 pjmedia 렌더러가 직접 그린다 — `Engine::setVideoWindow(void*)`
   (파사드 `CimsUe.setVideoSurface(Surface?)`, SWIG typemap 이 `ANativeWindow_fromSurface` 로 참조 하나를 코어에 넘기고 코어가 결선마다
-  렌더러 몫을 따로 잡는다 — 렌더러는 교체·스트림 소멸 때 자기 참조를 푼다). 영상이 활성되는 호마다 수신 창을 결선하고, 계정
+  렌더러 몫을 따로 잡는다 — 렌더러는 교체·스트림 소멸 때 자기 참조를 푼다). 수신 창은 디코딩 스트림이 렌더러를 만든 뒤에만
+  결선·해제한다(`win_in` 무효면 건너뛴다 — pjsua 창 함수가 무효 id 를 단정으로 막아 프로세스가 abort 한다). 영상이 활성되는 호마다 수신 창을 결선하고, 계정
   `videoAutoTransmit` 면 카메라 송신을 연다(START_TRANSMIT, 송신 방향이 없으면 sendrecv 로). 셀프뷰는 카메라를 두 번 열지 않고 엔진
   캡처가 연 Camera2 세션에 출력 Surface 를 더한다(파사드 `setPreviewSurface` → CIMS 패치 `PjCamera2.SetPreviewSurface`). 카메라 전환
   `switchCamera(callId)`(합성 장치 Colorbar 제외, 기본 = 이름에 front), H.264 최우선·인코딩 480x640·15 fps·400/500 kbit/s. 카메라 열거는
@@ -379,7 +380,8 @@ sdk/android/
   반영해야 하고 커밋본이 조용히 어긋난다. `S1-UE-ENGINE-SINGLE` 이 이를 정적으로 못박는다.
 
 - **바인딩은 SWIG.** pjsua2 가 이미 SWIG 을 쓰므로 코어도 `cimsue.i` 한 파일로 Java 를 생성한다. 이벤트
-  리스너는 director. 손 JNI 는 두지 않는다.
+  리스너는 director. 손 JNI 는 두지 않는다. 타입맵 본문의 플랫폼 분기는 `%#if`/`%#else`/`%#endif` 로 쓴다 — 맨 `#if` 는
+  SWIG 전처리기가 생성 때(호스트) 먼저 평가해 한 갈래만 남긴다(`S1-UE-ANDROID-BIND` 가 잡는다).
 - **파사드가 유일한 공개면.** 앱은 `com.cims.ue.sdk.*` 만 import 한다. `com.cims.ue.sdk.jni.*` 와 `org.pjsip.*`
   는 파사드 내부다.
 - **Android 접점의 책임.** 오디오 포커스·모드·라우팅(무전/통화 분리 출력 포함), 카메라, Foreground Service
@@ -400,7 +402,7 @@ android_ue_client §13 그대로.
 |---|---|
 | `android/core/sip/*` — 자체 pjsua2 래퍼(SipController·CimsCall·CimsAccount·CimsEndpoint·PjLib·CodecConfig) | 없어진다. 앱은 `:cimsue` 파사드(`CimsUe`·`Account`·`Call`)를 쓴다. 이행 기간에는 `:core-sip` 로 떼어 아직 옮기지 않은 앱만 쓴다 |
 | `android/core` 나머지(account·provision·config·contacts·calllog·message·device·net·power·boot·ui·`CimsSuite`) | `:core` 에 남는다 — SIP·엔진 의존 없음. 로그인 앱 `android/cims` 도 이것만 쓴다(`libpjsua2.so` 를 싣지 않는다) |
-| `android/ptt-client/{floor,mcdata,csc,mcptt}` | 없어진다 — 코어 `floor/mcdata/csc/mcptt`. 대조 검사 `S1-UE-SDS-XCHECK`·`S1-UE-CSC-XCHECK`·`S1-UE-FLOOR-CODEC` 의 Kotlin 쪽 대상도 함께 걷는다 |
+| `android/ptt-client/{floor,mcdata,csc,mcptt}` | 없다 — 코어 `floor/mcdata/csc/mcptt`(P3). 화면 모델만 앱에 남는다(`csc/CscModels.kt` — SDK 값의 투영). floor 비트는 파사드 `FloorIndicator`(생성기 `gen_floor_defs.py --check` 가 대조), CSC 대조(`S1-UE-CSC-XCHECK`)는 `:core` 프로비저닝 경로만 본다 |
 | `android/ptt-client/PttController.kt` | 규격 절차는 코어로, 앱 정책(affiliation 목표 집합·재시도·채널 복원·듣기 정책·긴급 대상 선택)은 **앱 세션 층**으로 — 관제 태블릿 `DispatchSession` + 평면 확장(`PttPlane` 등)과 같은 구성, 화면 상태는 ViewModel |
 | `volte-client`·`ptt-client` | `implementation(project(":cimsue"))` |
 | `android/dispatch-tablet` | 관제조작반 태블릿 앱 (§7) — **구현 완료**, 정본 [android_dispatch_tablet.md](android_dispatch_tablet.md) |
@@ -418,7 +420,7 @@ android_ue_client §13 그대로.
 | P1 `:core` 분리 | `:core`(비 SIP) / `:core-sip`(자체 래퍼, 이행용) — 앱 코드 무변경 | APK 빌드·동작 불변, 로그인 앱에서 `libpjsua2.so` 빠짐 |
 | P2 volte-client 전환 | 세션 어댑터 `VoltePhone` 이 기존 래퍼 계약(등록·호 상태 StateFlow·호 명령·영상·캡처 게이트·MESSAGE)을 SDK 로 낸다 — `SipService`(FGS·오디오 모드·라우팅 협조·알림)와 화면은 그대로, 호 상태는 기존과 같은 마지막 호 이벤트 투영, 망 변경은 `NetworkWatcher`. 모듈 `:cimsue` + `:core` | 사내 단말 실기: UDP/TCP/TLS 등록·음성·영상·SRTP·SMS·망 전환·PTT 양보 |
 | P0b 코어 보강(PTT 몫) | MSRP 미디어평면 SDS(TS 24.282, RFC 4975) · 긴급 re-INVITE 상향/하향·긴급 재광고 수신·403 긴급 거부·경보(alert-ind) 빌더/파서(TS 24.379) · 승인 톤 뒤 마이크 · 장치 게인(호 수신 음량 기억 — AGC 목표 환산은 앱, [ue_audio_level.md](ue_audio_level.md) §6) · CMS user-profile/service-config 해석 — 코어·Android 파사드 반영(§4.2 규약), C API·.NET 은 Windows 몫 | 단위시험(`mcptt_condition_test`·`msrp_test`·`csc_test` CmsDoc·`floor_participant_test`) + `cimsue-cli` S3(긴급·MSRP) |
-| P3 ptt-client 전환 | `PttController` → 세션 + 평면(floor·affiliation·로스터·SDS·FD·MSRP·긴급) + ViewModel, Kotlin 프로토콜 사본 제거·대조 검사 정리 | 사내 단말 실기(g002): 그룹콜·발언권 인계·긴급·일제 통화·SDS/FD/MSRP·Doze 착신·HW PTT·VoLTE 양보 |
+| P3 ptt-client 전환 | `PttController` = SDK 세션 + 평면 넷(`PttGroups` 참여·로스터·affiliation·CSC 문서 · `PttFloor` · `PttMessaging` SDS·FD·MSRP · `PttEmergency` SOS·경보·조건), Kotlin 프로토콜 사본(floor·mcdata·msrp·mcptt XML·CSC) 제거·대조 검사 정리(`S1-UE-CSC-XCHECK` = `:core` 프로비저닝만). ViewModel 분리는 후속 | 사내 단말 실기(MF52·W999, 상대 = 계측기 013, g005 · 긴급 = 프로파일 대상 g002): 그룹콜·발언권 인계·HW PTT·화면 꺼짐 착신·긴급 확정/거절·경보·일제 통화·SDS/MSRP 송수신 — FD·깊은 Doze·VoLTE 양보·이어폰 분리는 남음([sdk_port_handoff.md](../../dev/sdk_port_handoff.md) §5) |
 | P4 시험 모드(Q4) | `android/core` 공통 진입·설정·링크 서비스·오버레이 → 앱 3종([ue_voice_quality.md](ue_voice_quality.md) §4) | 계측기 실기기 링크·`VOLTE-CALL-DEVICE-*` |
 | P5 정리 | `:core-sip` 삭제 · `:cimsue-engine` 존치 결정 · 문서 | `S1` 전체 PASS |
 

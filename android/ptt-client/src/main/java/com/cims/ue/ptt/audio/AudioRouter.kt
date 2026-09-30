@@ -6,7 +6,7 @@ import android.media.AudioDeviceCallback
 import android.media.AudioDeviceInfo
 import android.media.AudioManager
 import android.os.Build
-import com.cims.ue.core.sip.SipController
+import com.cims.ue.ptt.PttController
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
@@ -221,7 +221,7 @@ class AudioRoutePrefs(context: Context) {
         .getSharedPreferences("audio_route", Context.MODE_PRIVATE)
 
     var route: Int
-        get() = prefs.getInt("route", SipController.AUDIO_ROUTE_SPEAKER)
+        get() = prefs.getInt("route", PttController.AUDIO_ROUTE_SPEAKER)
         set(v) = prefs.edit().putInt("route", v).apply()
 
     /** 이어폰 라우팅일 때 선택 장치 id — AudioDeviceInfo.id 는 리부팅 간 비보존이라 best-effort. */
@@ -235,7 +235,7 @@ class AudioRoutePrefs(context: Context) {
         set(v) = prefs.edit().putFloat("spk_gain", v).apply()
 
     /** 무전 마이크 크기(×1.0~×3.0) — 배율이 아니라 엔진 AGC 목표 보정(×1.0 = -26 dBov, ×2 = +6 dB).
-     *  [SipController.micAgcTargetDbov]. */
+     *  PttController.applyDeviceLevels(마이크 AGC 목표 환산). */
     var micGain: Float
         get() = migrated().getFloat("mic_gain", DEFAULT_MIC_GAIN)
         set(v) = prefs.edit().putFloat("mic_gain", v).apply()

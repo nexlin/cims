@@ -14,9 +14,7 @@ import androidx.core.app.NotificationCompat
 import com.cims.ue.core.config.ConfigStore
 import com.cims.ue.core.device.DeviceIdentity
 import com.cims.ue.core.power.PartialWakeLock
-import com.cims.ue.core.sip.PjLib
 import com.cims.ue.ptt.csc.CscConfig
-import com.cims.ue.ptt.mcdata.McDataCodec
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
@@ -81,7 +79,7 @@ class PttService : Service() {
     fun sendMessage(peer: String, text: String) {
         val c = controller ?: return
         if (text.isBlank()) return
-        val msgId = McDataCodec.newMessageId()
+        val msgId = PttController.newMessageId()
         messages.add(peer, text, com.cims.ue.core.message.MsgDirection.OUT, msgId = msgId,
             sendState = com.cims.ue.core.message.SendState.PENDING)
         _messageTick.value++
@@ -272,7 +270,7 @@ class PttService : Service() {
             if (Build.VERSION.SDK_INT < 31) return
             val c = controller ?: return
             // 스피커폰 의도일 때만 판정(수화기/이어폰은 기본 라우팅과 구분 모호)
-            if (c.audioRoute.value != com.cims.ue.core.sip.SipController.AUDIO_ROUTE_SPEAKER) return
+            if (c.audioRoute.value != PttController.AUDIO_ROUTE_SPEAKER) return
             val am = getSystemService(android.media.AudioManager::class.java) ?: return
             // 무전 세션 모드 보유 중일 때만 의미(미보유면 통화 경로 아님)
             if (am.mode != android.media.AudioManager.MODE_IN_COMMUNICATION) return
@@ -358,8 +356,8 @@ class PttService : Service() {
 
     fun ensureRegistered() {
         // 컨트롤러 생성이 check-then-act 라 스레드 경합 시 통째로 이중 생성된다 — SSO 자동설정의
-        // IO 코루틴 경로와 Activity/onStartCommand 의 메인 경로가 동시 진입하면 계정·SipController
-        // 가 2벌 뜨고, pjsip 수신(fan-out INVITE·NOTIFY)은 먼저 등록된 계정으로/UI 는 마지막
+        // IO 코루틴 경로와 Activity/onStartCommand 의 메인 경로가 동시 진입하면 계정·엔진
+        // 이 2벌 뜨고, pjsip 수신(fan-out INVITE·NOTIFY)은 먼저 등록된 계정으로/UI 는 마지막
         // 컨트롤러로 갈라져 착신 무반응·로스터 불갱신이 된다(08-11 MF52 실측: 6ms 간격 이중 계정).
         // 메인 스레드로 직렬화해 경합을 제거한다.
         if (android.os.Looper.myLooper() != android.os.Looper.getMainLooper()) {
@@ -381,12 +379,12 @@ class PttService : Service() {
             controller?.let { injectSsoToken(it) }
             return
         }
-        // 설정 변경(포트/비번/전송 프로토콜) — 프로세스 내 PJSIP 재부팅(libDestroy→Endpoint 재생성)은
-        // Endpoint/LogWriter 수명 지뢰라 로그아웃과 동일하게 프로세스 재시작이 정석:
+        // 설정 변경(포트/비번/전송 프로토콜) — 프로세스 안에서 엔진을 다시 띄우기보다 로그아웃과 같이 프로세스
+        // 재시작이 정석이다(참여 채널 자동 복원이 뒤를 잇는다):
         // un-REGISTER 송신 여유(2s) 후 killProcess → 접근성/START_STICKY 재기동 →
         // 새 설정 첫 부팅 + 참여 채널 자동 복원(ChannelStore).
         controller?.let {
-            runCatching { it.sip.unregister() }
+            runCatching { it.unregister() }
             update("CIMS-McPtt", "설정 변경 — 재시작")
             mainHandler.postDelayed(
                 { android.os.Process.killProcess(android.os.Process.myPid()) }, 2000)
@@ -394,11 +392,12 @@ class PttService : Service() {
         }
         // msisdn 은 프로비저닝에 따라 "+8250..."/"8250..." 혼재 — tel: URI 로 정규화(+ 중복 방지)
         val mcpttId = "tel:" + cfg.msisdn.removePrefix("tel:").let { if (it.startsWith("+")) it else "+$it" }
-        val csc = CscConfig(host = cfg.serverHost)               // IdMS/GMS/CMS 4430 (dev: 자체서명)
-        // 단말 속성(mcptt_management_views.md §4.1) — User-Agent 는 PJSIP 부팅 전에만 적용된다.
-        PjLib.userAgent = DeviceIdentity.userAgent(this, "CIMS-PTT")
-        val c = PttController(cfg, mcpttId, csc).also { _controller.value = it; activeConfig = cfg }
-        DeviceIdentity.instanceUrn(this)?.let { c.sip.instanceId = it }
+        val csc = CscConfig(host = cfg.serverHost)               // IdMS/GMS/CMS 4430 (CIMS 사설 CA 검증)
+        // 단말 속성(mcptt_management_views.md §4.1) — User-Agent·+sip.instance 는 엔진 기동·계정 생성 때 싣는다.
+        val c = PttController(this, cfg, mcpttId, csc,
+            userAgent = DeviceIdentity.userAgent(this, "CIMS-PTT"),
+            instanceId = DeviceIdentity.instanceUrn(this),
+        ).also { _controller.value = it; activeConfig = cfg }
         // SSO 토큰 갱신 훅 — CSC 가 토큰을 거절(401)하면 컨트롤러가 이것으로 새 토큰을 받아 1회 재시도한다.
         c.tokenRefresher = { stale ->
             com.cims.ue.core.account.CimsAccounts.renewToken(
@@ -416,13 +415,9 @@ class PttService : Service() {
         c.micHandoff = { talk -> sendMicHandoff(talk) }
         observeHeadsets(c)
         observe(c)
+        // 엔진 기동 → 계정 → REGISTER. 유휴 기본 = 스피커 전용(마이크 미보유, 발언에서만 전이중)과 저장된 라우팅은
+        //   기동 직후 컨트롤러가 건다(첫 장치 개방부터 무전 트랙이 분리 라우팅으로 생성되게).
         c.register()
-        // 유휴 기본 = 스피커 전용(마이크 미보유) — 발언(setTalkCapture)에서만 전이중.
-        // register() 뒤에 두어 PjLib 부팅 이후 적용됨을 보장(onCtl 직렬).
-        c.sip.setCaptureEnabled(false)
-        // 라우팅 재적용 — PjLib 부팅 후 keep 저장을 확보해 첫 snd 오픈부터 무전 트랙이
-        // 분리 라우팅(STREAM_MUSIC+트랙 장치 고정, pjsip 패치)으로 생성되게 한다.
-        c.setAudioRoute(rp.route, rp.headsetId)
         injectSsoToken(c)
     }
 
@@ -470,7 +465,7 @@ class PttService : Service() {
                     cur.none { it.id == c.headsetId.value }
                 ) {
                     if (cur.isNotEmpty()) c.setAudioRoute(PttController.AUDIO_ROUTE_HEADSET, cur.first().id)
-                    else c.setAudioRoute(com.cims.ue.core.sip.SipController.AUDIO_ROUTE_SPEAKER)
+                    else c.setAudioRoute(PttController.AUDIO_ROUTE_SPEAKER)
                     // 라우팅 중이던 장치 소멸 — 재생 트랙에 시스템 뮤트가 고착되는 단말(MF52/A15
                     // 실측)이 있어, 정책 재라우팅이 가라앉은 뒤 장치를 재오픈해 트랙을 재생성한다.
                     delay(500)
@@ -482,7 +477,7 @@ class PttService : Service() {
     }
 
     fun stopSip() {
-        controller?.let { runCatching { it.sip.unregister() } }   // 명시 종료 — 서버 등록도 해제
+        controller?.let { runCatching { it.unregister() } }       // 명시 종료 — 서버 등록도 해제
         controller?.shutdown()
         _controller.value = null
         mainHandler.post { overlay.hide() }
@@ -510,43 +505,14 @@ class PttService : Service() {
                 }
                 mainHandler.post { overlay.update(color, "PTT ${if (reg is com.cims.ue.core.sip.RegState.Registered) "가능" else "연결 안 됨"}") }
             }.launchIn(this)
-            // 수신 문자(SIP MESSAGE) → 인박스 영속.
-            //  - MCData SDS/FD(multipart/mixed): 스레드 키 = 그룹(group-*)이면 mcdata-info 의
-            //    request-uri(그룹 ID), 1:1(one-to-one-*)이면 발신자 — [threadKeyOf].
-            //    disposition 요청 시 DELIVERED 통지 회신, DELIVERED 통지 수신 시 발신 문자에 반영.
-            //  - text/plain(구버전 앱 호환): 발신자 스레드로 저장.
-            c.incomingMessage.onEach { im ->
-                val sender = PttController.bareId(im.fromUri)
-                if (im.contentType.lowercase().startsWith("multipart/mixed")) {
-                    when (val p = McDataCodec.parse(im.contentType, im.body)) {
-                        is McDataCodec.SdsMessage -> onSdsParsed(p, sender)
-                        is McDataCodec.FdMessage -> {
-                            if (p.fileUrl.isNotBlank()) {
-                                val gid = threadKeyOf(p.oneToOne, p.requestUri, sender)
-                                messages.add(gid, "", com.cims.ue.core.message.MsgDirection.IN,
-                                    sender = sender, msgId = p.msgId,
-                                    attName = p.fileName.ifBlank { "file.bin" },
-                                    attUrl = p.fileUrl, attSize = p.fileSize)
-                                _messageTick.value++
-                                // 자동 다운로드 — 그룹문서 auto-recv 임계 이내 (TS 24.481)
-                                val autoRecv = c.groupDocs.value[gid]?.autoRecvBytes ?: DEFAULT_AUTO_RECV
-                                if (p.fileSize in 1..autoRecv.toLong()) {
-                                    downloadAttachment(p.msgId, p.fileUrl, p.fileName)
-                                }
-                            }
-                        }
-                        is McDataCodec.SdsNotification -> {
-                            if (p.type == McDataCodec.NOTIF_DELIVERED ||
-                                p.type == McDataCodec.NOTIF_DELIVERED_READ) {
-                                if (messages.markDelivered(p.msgId)) _messageTick.value++
-                            }
-                        }
-                        null -> {}
-                    }
-                } else if (im.contentType.startsWith("text/")) {
-                    messages.add(sender, im.body, com.cims.ue.core.message.MsgDirection.IN)
-                    _messageTick.value++
-                }
+            // 수신 MCData(시그널링 평면·media plane·FD·disposition 통지 — 코어가 해석) → 인박스 영속.
+            //   스레드 키 = 그룹이면 mcdata-info 의 request-uri(그룹 ID), 1:1 이면 발신자.
+            //   disposition 요청 시 DELIVERED 통지 회신, DELIVERED 통지 수신 시 발신 문자에 반영.
+            c.incomingSds.onEach { m -> onSds(c, m) }.launchIn(this)
+            // text/plain(구버전 앱 호환) — 발신자 스레드로 저장.
+            c.incomingText.onEach { im ->
+                messages.add(PttController.bareId(im.fromUri), im.body, com.cims.ue.core.message.MsgDirection.IN)
+                _messageTick.value++
             }.launchIn(this)
             // 발신 결과(C-plane 최종 응답·MSRP 전송) → 말풍선 상태(SENT/FAILED) 반영 + 진행률 정리
             c.sendResult.onEach { (msgId, ok) ->
@@ -560,38 +526,40 @@ class PttService : Service() {
                 if (p.total > 0) _sendProgress.value =
                     _sendProgress.value + (p.msgId to p.sent.toFloat() / p.total)
             }.launchIn(this)
-            // MSRP 미디어평면 수신 SDS (대용량 — TS 24.282 §9.2.3) → 동일 저장·통지 경로.
-            // 발신자 미상(구서버 — mcdata-info 없는 배포 레그, sender==groupId 폴백)이면
-            // 통지 대상이 그룹이 되므로 회신 억제(notifiable=false).
-            c.incomingSds.onEach { m ->
-                onSdsParsed(m.msg, m.sender, gidOverride = m.groupId,
-                    notifiable = m.sender != m.groupId)
-            }.launchIn(this)
         }
     }
 
-    /** 수신 SDS/FD 의 스레드 키 — 그룹은 mcdata-request-uri(그룹 ID), 1:1 은 발신자.
-     *  1:1 의 request-uri 는 수신자 자신이라 키로 쓰면 자기 번호 스레드에 귀속되고 답장이
-     *  자기에게 간다. request-uri 가 없으면(비표준 본문) 발신자 폴백. */
-    private fun threadKeyOf(oneToOne: Boolean, requestUri: String?, sender: String): String =
-        if (oneToOne) sender
-        else requestUri?.let(PttController::bareId)?.takeUnless { it.isBlank() } ?: sender
-
-    /** 수신 SDS 공통 처리 — C-plane MESSAGE 와 MSRP 미디어평면 공용(저장·tick·DELIVERED 통지). */
-    private fun onSdsParsed(
-        p: McDataCodec.SdsMessage,
-        sender: String,
-        gidOverride: String? = null,
-        notifiable: Boolean = true,
-    ) {
-        val gid = gidOverride ?: threadKeyOf(p.oneToOne, p.requestUri, sender)
-        if (p.text.isNotEmpty()) {
-            messages.add(gid, p.text, com.cims.ue.core.message.MsgDirection.IN,
-                sender = sender, msgId = p.msgId)
-            _messageTick.value++
-        }
-        if (notifiable && p.dispositionReq and McDataCodec.DISP_REQ_DELIVERY != 0) {
-            controller?.sendSdsNotification(sender, p.convId, p.msgId, McDataCodec.NOTIF_DELIVERED)
+    /** 수신 MCData 한 건 — 저장·tick·DELIVERED 통지(TS 24.282 §12.2). 1:1 은 groupUri 가 비어 발신자가 스레드 키다
+     *  (1:1 의 request-uri 는 수신자 자신이라 키로 쓰면 자기 번호 스레드에 귀속되고 답장이 자기에게 간다). */
+    private fun onSds(c: PttController, m: com.cims.ue.sdk.SdsMessage) {
+        val sender = PttController.bareId(m.fromUri)
+        val gid = PttController.bareId(m.groupUri).ifBlank { sender }
+        when {
+            m.notification -> {
+                if (m.notifType == NOTIF_DELIVERED || m.notifType == NOTIF_DELIVERED_READ) {
+                    if (messages.markDelivered(m.msgId)) _messageTick.value++
+                }
+            }
+            m.fd -> if (m.fileUrl.isNotBlank()) {
+                messages.add(gid, "", com.cims.ue.core.message.MsgDirection.IN,
+                    sender = sender, msgId = m.msgId,
+                    attName = m.fileName.ifBlank { "file.bin" },
+                    attUrl = m.fileUrl, attSize = m.fileSize)
+                _messageTick.value++
+                // 자동 다운로드 — 그룹문서 auto-recv 임계 이내 (TS 24.481)
+                val autoRecv = c.groupDocs.value[gid]?.autoRecvBytes ?: DEFAULT_AUTO_RECV
+                if (m.fileSize in 1..autoRecv.toLong()) downloadAttachment(m.msgId, m.fileUrl, m.fileName)
+            }
+            else -> {
+                if (m.text.isNotEmpty()) {
+                    messages.add(gid, m.text, com.cims.ue.core.message.MsgDirection.IN, sender = sender, msgId = m.msgId)
+                    _messageTick.value++
+                }
+                // 발신자 미상(media plane 배포에 mcdata-info 가 없어 발신자 = 그룹)이면 통지 대상이 그룹이 되므로 회신 억제.
+                val notifiable = sender.isNotBlank() && !(m.mediaPlane && sender == gid)
+                if (notifiable && (m.dispositionReq and DISP_REQ_DELIVERY) != 0)
+                    c.sendSdsNotification(sender, m.convId, m.msgId, NOTIF_DELIVERED)
+            }
         }
     }
 
@@ -677,6 +645,10 @@ class PttService : Service() {
         private const val RESUME_VERIFY_MAX_TRIES = 2
         /** 첨부 크기 상한 — CSC McDataFd.MaxBytes 기본값과 동일(50MB). */
         private const val MAX_ATTACH = 52428800L
+        /** SDS disposition 요청 비트·통지 종류(TS 24.282 — 코어 SdsMessage.dispositionReq·notifType). */
+        private const val DISP_REQ_DELIVERY = 0x01
+        private const val NOTIF_DELIVERED = 2
+        private const val NOTIF_DELIVERED_READ = 4
         /** 그룹문서에 auto-recv 미지정 시 자동 다운로드 임계 (1MB). */
         private const val DEFAULT_AUTO_RECV = 1048576
         fun start(ctx: Context) {

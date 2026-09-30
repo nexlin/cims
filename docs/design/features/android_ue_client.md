@@ -273,7 +273,7 @@ subtype 에서 비트를 걷어내 기본 타입으로 다루고(`FloorMessage.t
   - **실패 재시도**: 403(비멤버 — 그룹 편성이 PUBLISH 보다 늦는 레이스 포함)·오류는 지수 백오프(30s→60s→120s→240s, cap 300s) 재시도. 무응답은 40s 후 pending 회수(주기 루프가 재발행). 백오프 대기 중인 그룹은 주기 루프가 발행을 생략한다(두 경로 중복 발사 억제).
   - **403 = 등록 소실 대응**: 서버가 등록을 잃으면(CSP 재기동 등) PUBLISH 는 `not registered` 403 으로 **시간이 지나도 낫지 않는다** → 백오프와 별개로 `SipController.refreshRegistration()`(60s 스로틀)로 **즉시 등록 갱신**을 트리거한다. 미조치 시 단말 자체 갱신 시점(Expires ≈1h)까지 제휴·fan-out 공백(= require_affiliation 그룹에서 무전 불가)이 이어진다. 등록이 서버에서 사라졌다면 **구독도 함께 사라졌다** — `refreshRegistration()` 은 성공 시 pjsua 계정 상태를 Registered 에서 내리지 않아 `regState` 전이 기반 정리가 돌지 않으므로, 이 지점에서 구독 확인 상태(conference/gms)도 함께 비워 다음 `syncRosterSubs()`(60s 주기·조인·그룹목록 적재)가 재발행하게 한다. ⚠️`register()` 는 Account 재생성이라 프로세스 내 PJSIP 재부팅 지뢰 — 등록 갱신에는 쓰지 않는다. 남은 갭: 등록 소실을 PUBLISH 시점(TTL 절반)에야 감지 — 능동 감지(짧은 Expires·OPTIONS·reg-event 구독)는 후속.
   - **주기 갱신**: 60s 루프가 잔여 수명 TTL(Expires 3600) 절반 미만인 그룹을 재-PUBLISH — 만료 방치로 fan-out 이 조용히 죽는 것 방지. de-affiliate(Expires:0)는 명시 호출 시에만.
-- **참여 채널 자동 복원**(`ChannelStore` — `ptt_channels` SharedPreferences): 참여 "의도"(joined 목록+주채널)를 영속화해 프로세스 재시작(강제종료·재설치·리부팅) 후 등록 완료 시 1회 재조인한다(재로그인 경로는 서버 fan-out INVITE 가 먼저 올 수 있어 3s 양보). 서버/네트워크 사정으로 세션이 끊겨도 지우지 않으며, **사용자가 명시적으로 나가면 제거**(재조인 의도 해제) — 로그아웃 시에는 `SuiteLogoutReceiver` 가 `clear`. 🔑복원 1회 플래그는 **스토어 배선 확인 뒤에** 소모하고, 스토어가 늦게 주입되면 setter 가 복원을 재트리거한다 — force-stop 후 접근성(PttKeyService) 리바인드가 프로세스를 **헤드리스**(UI·서비스 미배선)로 먼저 살리면 등록·제휴는 진행되지만 스토어가 없어, 플래그를 먼저 세우면 이후 사용자가 앱을 열어도 복원이 영구 스킵된다.
+- **참여 채널 자동 복원**(`ChannelStore` — `ptt_channels` SharedPreferences): 참여 "의도"(joined 목록+주채널)를 영속화해 프로세스 재시작(강제종료·재설치·리부팅) 후 등록 완료 시 1회 재조인한다(재로그인 경로는 서버 fan-out INVITE 가 먼저 올 수 있어 3s 양보). **재조인은 진행 중 세션에만(late entry)** — prearranged INVITE 는 세션이 없으면 새로 개시해 affiliate 멤버 전원에게 fan-out 하므로(TS 24.379), 그룹 conference 구독의 NOTIFY(확립 leg 만 — [ptt_flows.md](ptt_flows.md))가 참가자를 싣는 채널만 다시 들어간다. 명단이 비었거나 NOTIFY 가 5s 안에 오지 않은 채널은 복원하지 않고 의도만 남긴다(누가 세션을 열면 fan-out 착신으로 자동 합류). 크래시로 BYE 없이 남은 자기 leg 가 명단에 있으면 진행 중으로 보고 다시 들어간다(서버가 옛 leg 를 정리). 참여 목록에는 착신 자동 합류한 채널도 들어간다. 서버/네트워크 사정으로 세션이 끊겨도 지우지 않으며, **사용자가 명시적으로 나가면 제거**(재조인 의도 해제) — 로그아웃 시에는 `SuiteLogoutReceiver` 가 `clear`. 🔑복원 1회 플래그는 **스토어 배선 확인 뒤에** 소모하고, 스토어가 늦게 주입되면 setter 가 복원을 재트리거한다 — force-stop 후 접근성(PttKeyService) 리바인드가 프로세스를 **헤드리스**(UI·서비스 미배선)로 먼저 살리면 등록·제휴는 진행되지만 스토어가 없어, 플래그를 먼저 세우면 이후 사용자가 앱을 열어도 복원이 영구 스킵된다.
 - **참가자 목록 = conference 정식 구독(RFC 4575 / RFC 6665)**: `PttController.subscribeRoster` 가 그룹 AoR 로 `SUBSCRIBE (Event: conference)` 를 보내고, CSP 는 그 구독 dialog 로 로스터 NOTIFY 를 보낸다.
   - **구독 상태는 서버 확인 기반으로 관리한다** — affiliation 의 `affiliated` 와 같은 원칙.
     SUBSCRIBE 를 보냈다는 사실만으로 "구독 중"으로 취급하면, 서버가 구독을 잃고(CSP 재기동 =
@@ -446,7 +446,9 @@ PTT up(RELEASE): 🎤mic 슬롯 ──disconnect─ 통화 stream  (송신 중�
 - 식별자 연계: GMS의 `tel:{group}` → SIP `sip:{group}@domain`(INVITE/PUBLISH Req-URI), 프로파일 MCPTT ID → From/To.
 - **CMS 문서 소비 (TS 24.484)** — 두 문서는 성격이 다르다. 인가는 사용자별 `user-profile` 의 `ruleset`(§8.3.2.7)이
   정본이고, `service-config`(§8.4, 시스템 전역)에는 인가 요소가 없다 — 단말이 쓰는 값은 on-network Resource-Priority 다.
-  취득 계기는 cms 구독 NOTIFY(즉시)와 `loadGroups()`(구독이 없거나 죽었을 때의 폴백) 둘이고, 둘 다 `If-None-Match` 로 304 를 받는다.
+  취득 계기는 cms 구독 NOTIFY(즉시)와 `loadGroups()`(구독이 없거나 죽었을 때, 또는 문서를 아직 한 번도 받지 못했을 때 —
+  등록 직후 NOTIFY 가 토큰보다 먼저 오면 그 조회는 건너뛰어진다) 둘이고, 둘 다 `If-None-Match` 로 304 를 받는다. SOS 는
+  user-profile 이 없으면 개시 전에 한 번 더 취득한다(긴급 대상이 이 문서에 있다 — [mcptt_emergency_modes.md](mcptt_emergency_modes.md) §4.3).
 
 | 문서 | 앱 상태 | 소비하는 값 |
 |---|---|---|

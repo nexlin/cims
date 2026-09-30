@@ -1,7 +1,8 @@
-"""S1-UE-CSC-XCHECK — CSC(XCAP·IdMS) 경로가 코어와 앱에서 같다.
+"""S1-UE-CSC-XCHECK — IdMS·프로비저닝 경로가 코어와 앱 공용 조각(:core)에서 같다.
 
-SDS 와 같은 이유의 공존 방어다(ue_sdk.md §5.3). 경로가 어긋나면 한쪽 단말만 404 를 받는데,
-서버는 정상이고 컴파일도 통과하므로 원인을 찾기 어렵다.
+로그인 앱(`android/cims`)과 SSO 는 코어를 싣지 않는 `:core` 의 Kotlin 프로비저닝 클라이언트를 쓴다(ue_sdk.md §5.3 — 로그인 앱은
+`libpjsua2.so`·코어 없이 뜬다). 코어도 같은 경로를 쓰므로 한쪽만 바뀌면 한쪽 단말만 404 를 받는데, 서버는 정상이고 컴파일도
+통과해 원인을 찾기 어렵다. XCAP(GMS·CMS)는 PTT 앱이 코어로 옮겨져(P3) 코어에만 있다.
 """
 from __future__ import annotations
 
@@ -12,28 +13,24 @@ from ...context import VerifyContext
 from ._ue_common import p, skip, done, block
 
 _ID = "S1-UE-CSC-XCHECK"
-_NAME = "CSC 경로 대조 (코어 ↔ ptt-client)"
+_NAME = "CSC 경로 대조 (코어 ↔ :core 프로비저닝)"
 
 # **경로는 양쪽 모두 여러 파일에 흩어져 있다.** 한 파일만 읽으면 «없다» 가 되어 거짓 FAIL 이 난다 —
-# 코어는 인라인 래퍼가 헤더에 있고(`csc.h`), 앱은 XCAP·IdMS 를 ptt-client 가, 프로비저닝을 :core 가 든다.
+# 코어는 인라인 래퍼가 헤더에 있다(`csc.h`).
 _CORE = [
     ("sdk", "core", "src", "csc", "csc_client.cpp"),
     ("sdk", "core", "include", "cimsue", "csc.h"),
 ]
 _APP = [
-    ("android", "ptt-client", "src", "main", "java", "com", "cims", "ue", "ptt", "csc", "CscClient.kt"),
     ("android", "core", "src", "main", "java", "com", "cims", "ue", "core", "provision",
      "ProvisioningClient.kt"),
 ]
 
-# 양쪽에 그대로 있어야 하는 경로 조각(TS 24.481/24.484·android_ue_provisioning.md §3).
+# 양쪽에 그대로 있어야 하는 경로 조각(TS 33.180 IdMS·android_ue_provisioning.md §3).
 _PATHS = [
     "/idms/authreq",
     "/idms/tokenreq",
     "/provisioning/me",
-    "/org.openmobilealliance.groups/users/",
-    "/org.3gpp.mcptt.user-profile/users/",
-    "/org.3gpp.mcptt.service-config/users/",
 ]
 
 
@@ -63,7 +60,7 @@ def unit_ue_csc_xcheck(ctx: VerifyContext) -> ItemResult:
     if miss_c or miss_a:
         return skip(_ID, _NAME,
                     "대조 대상 없음: " + ", ".join(miss_c + miss_a) +
-                    " — 앱이 파사드로 옮겨져 사본이 걷혔으면 이 항목을 지운다(ue_sdk.md §5.3)")
+                    " — :core 프로비저닝이 코어로 옮겨져 사본이 걷혔으면 이 항목을 지운다(ue_sdk.md §5.3)")
 
     lines, bad = [], []
     for path in _PATHS:

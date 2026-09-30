@@ -25,16 +25,15 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import com.cims.ue.core.power.BatteryExemption
 import com.cims.ue.core.sip.RegState
-import com.cims.ue.core.sip.SipController
+import com.cims.ue.ptt.PttController
 import com.cims.ue.ptt.GroupCallState
 import com.cims.ue.ptt.HwPtt
 import com.cims.ue.ptt.ListenPolicy
-import com.cims.ue.ptt.PttController
 import com.cims.ue.ptt.PttService
 import com.cims.ue.ptt.Speaker
 import com.cims.ue.ptt.csc.GroupDoc
 import com.cims.ue.ptt.csc.GroupSummary
-import com.cims.ue.ptt.floor.FloorState
+import com.cims.ue.sdk.FloorState
 import kotlinx.coroutines.flow.MutableStateFlow
 
 /** 화면 라우트 — 시안 구조(스플래시 → 하단내비 4탭 + 푸시 화면들). */
@@ -96,7 +95,7 @@ fun AppRoot(svc: PttService?, onStopSip: () -> Unit) {
     val fbRosters = remember { MutableStateFlow<Map<String, Map<String, String>>>(emptyMap()) }
     val fbSessions = remember { MutableStateFlow<List<GroupCallState>>(emptyList()) }
     val fbPolicy = remember { MutableStateFlow(ListenPolicy.ALL) }
-    val fbRoute = remember { MutableStateFlow(SipController.AUDIO_ROUTE_SPEAKER) }
+    val fbRoute = remember { MutableStateFlow(PttController.AUDIO_ROUTE_SPEAKER) }
     val fbHeadsetId = remember { MutableStateFlow(-1) }
     val fbHeadsets = remember { MutableStateFlow<List<com.cims.ue.ptt.audio.AudioRouter.Headset>>(emptyList()) }
     val fbSpkGain = remember { MutableStateFlow(com.cims.ue.ptt.audio.AudioRoutePrefs.DEFAULT_SPK_GAIN) }
@@ -265,10 +264,13 @@ private fun HomeScaffold(
         // 세션 긴급 배너 — 경보 배너와 별개 신호라 겹쳐도 둘 다 표시(시각 구분: 빨강 깜빡/주황).
         st.emergencySession
             ?.let { e -> EmergencyBanner(e, st.ctl, Modifier.padding(horizontal = 16.dp)) }
-        // 수신 긴급경보 — 통화 없는 위험 통지(발신자·그룹). 발신측 취소로 자동 해제.
-        st.alerts.filterNot { it.mine }.forEach { a ->
+        // 긴급경보 — 통화 없는 위험 통지(발신자·그룹). 수신 경보는 발신측 취소로 자동 해제([닫기]=표시만),
+        // 내 경보는 [해제] — 같은 그룹의 내 긴급 세션 배너가 이미 [해제]를 주면 그쪽이 경보까지 함께 거둔다.
+        st.alerts.filter { a ->
+            !a.mine || st.emergencySession?.let { e -> e.groupId == a.groupId && e.emergencyMine } != true
+        }.forEach { a ->
             AlertBanner(a, groupName = st.groupName(a.groupId),
-                onDismiss = { st.ctl?.dismissAlert(a.groupId, a.userId) },
+                onAction = { if (a.mine) st.ctl?.cancelAlert(a.groupId) else st.ctl?.dismissAlert(a.groupId, a.userId) },
                 modifier = Modifier.padding(horizontal = 16.dp))
         }
 

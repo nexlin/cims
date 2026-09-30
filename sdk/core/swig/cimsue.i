@@ -116,12 +116,14 @@ using namespace cimsue;
 %typemap(jtype)  void* nativeWindow "Object"
 %typemap(jstype) void* nativeWindow "Object"
 %typemap(javain) void* nativeWindow "$javainput"
+// 분기는 생성 코드에 남겨 컴파일러가 판정한다 — 타입맵 본문의 `#if` 는 SWIG 전처리기가 바인딩 생성 때(호스트, __ANDROID__ 없음)
+// 먼저 평가해 `$1 = NULL` 만 남긴다(수신 영상 창이 언제나 NULL). 지시문을 넘기려면 `%#` 로 쓴다.
 %typemap(in)     void* nativeWindow {
-#if defined(__ANDROID__)
+%#if defined(__ANDROID__)
     $1 = $input ? (void*)ANativeWindow_fromSurface(jenv, $input) : NULL;
-#else
+%#else
     $1 = NULL;
-#endif
+%#endif
 }
 
 %include "cimsue/types.h"

@@ -61,9 +61,14 @@ C API·.NET = Windows 개발 환경**.
   | 문자 수신(013 → MF52 MESSAGE) | 200 · 스레드·미읽음 배지 |
   | 문자 발신(MF52 → 013) | MESSAGE 200(CSP 캡처 = 013 Contact 로 중계·200) · 말풍선 ✓(token 상관) |
   | TLS(설정에서 TLS · 15061 로 바꿔 시험 뒤 UDP 로 원복) | 동봉 CA 로 서버 인증서 검증 · sec-agree(`Security-Client: tls` → 401 `Security-Server` → `Security-Verify`) → 200 · TLS 착신 200·손실 0·MOS-CQ 4.25·BYE(TLS) |
+  | 영상 통화(MF52 ↔ W999, 사내 단말끼리 — 같은 사내 NAT 뒤) | 발신 [영상통화] → 착신 [영상] · H.264 480x640 15 fps 약 400 kbps 양방향 · 영상 손실 0.3 %·음성 손실 0.2 %·RTT 17 ms · 상대 영상 렌더·셀프뷰·카메라 전환 · 전체화면 탭 → 컨트롤 → [종료] · 4분 34초 크래시 0 |
 
   MF52 송신은 `ptime=40`(프레임 2개/패킷 — Android MediaCodec AMR-WB 기본 `frm_per_pkt = 2`, 엔진 공통이라 기존 앱과 같다). 크래시 0.
-- **아직(실기 미확인)**: 영상 통화(상대 영상 단말 필요 — 렌더·송신·셀프뷰·카메라 전환), SRTP(이 계정은 미디어 SRTP 정책 off), 통화 중 PTT 마이크 양보(PTT 발언), 망 전환 재등록
+- **영상 수신 창의 세 조건** — ① SWIG 타입맵의 플랫폼 분기는 `%#if`(맨 `#if` 면 생성 때 `$1 = NULL` 만 남아 수신 창이 늘 NULL — `S1-UE-ANDROID-BIND`)
+  ② 창 결선·해제는 렌더러(`win_in`)가 생긴 뒤에만(무효 id 면 pjsua 단정으로 프로세스 abort) ③ 전체화면 영상의 탭은 `SurfaceView` 가 받아 컨트롤을
+  토글한다(AndroidView 는 자기 영역 터치를 소비해 부모 `clickable` 에 닿지 않는다 — 없으면 자동 숨김 뒤 종료 불가).
+  키프레임 요청은 SIP INFO 가 CSP 501 이라 RTCP PLI 로만 간다([server45_handoff.md](server45_handoff.md) §9 M8).
+- **아직(실기 미확인)**: SRTP(이 계정은 미디어 SRTP 정책 off), 통화 중 PTT 마이크 양보(PTT 발언), 망 전환 재등록
   (Wi-Fi 를 끄면 무선 디버깅이 끊긴다), 착신 알림 [받기](화면 꺼짐·잠금). 코덱 정책 차이 = SDK 는 PCMU 도 둔다(기존은 PCMA 만) — AMR-WB 가 먼저라 협상 결과 같음.
 
 ## 2. Windows 개발 환경에 넘길 것
@@ -75,12 +80,12 @@ C API·.NET = Windows 개발 환경**.
 - **관제 태블릿(Android)** — ① 다음 빌드부터 VAD 꺼짐(파사드 기본값이 코어와 같아짐 — 침묵 중에도 RTP) ② 망 변경 재등록이 없다 → `NetworkWatcher` 로
   계정마다 `refreshRegistration` ③ `FloorEvent.kind` 로 Denied/Revoked·코어 시한 구분(지금 `rawType` 판정 대체 가능) ④ FD 파사드가 생겼다.
 
-## 3. 확인 필요 — 기존 PTT 앱 `bounceSndDev`
+## 3. 확인 필요 — 오디오 장치 재오픈
 
-코드 읽기 결과(실기 미확인): `pjsua_set_snd_dev2` 는 장치·모드가 같으면 장치가 열려 있거나 `NO_IMMEDIATE_OPEN` 일 때 "No changes" 로 돌아간다.
-기존 `bounceSndDev` 는 매번 같은 모드(`NO_IMMEDIATE_OPEN` 포함)를 넘기므로 장치를 다시 열지 않고 장치 단 음량만 다시 걸었을 가능성이 있다.
-BT·이어폰 소멸 뒤 뮤트 고착 복구([android_ue_client.md](../design/features/android_ue_client.md))가 실제로 무엇으로 풀렸는지는 P3 실기에서
-(PTT 수신 중 BT·유선 이어폰 제거) SDK `reopenAudioDevice`(실제 재오픈)와 함께 확인한다.
+`pjsua_set_snd_dev2` 는 장치·모드가 같으면 장치가 열려 있거나 `NO_IMMEDIATE_OPEN` 일 때 "No changes" 로 돌아간다. 기존 PTT 앱의 `bounceSndDev` 는
+매번 같은 모드를 넘겨 장치를 다시 열지 않았을 수 있다(코드 읽기). SDK 판은 `reopenAudioDevice`(모드에서 `NO_IMMEDIATE_OPEN` 을 빼 실제로 닫고 다시 연다)를
+쓴다 — BT·유선 이어폰 소멸 뒤 뮤트 고착 복구([android_ue_client.md](../design/features/android_ue_client.md))는 PTT 수신 중 BT·유선 이어폰 제거 실기로
+확인이 남았다.
 
 ## 4. P0b 코어 보강 — PTT 몫 (.45 반영)
 
@@ -96,14 +101,18 @@ BT·이어폰 소멸 뒤 뮤트 고착 복구([android_ue_client.md](../design/f
 | MSRP | `mcdata/msrp`(프레이밍·청크·발신·수신) · `sendGroupSds` 상한 초과 → MSRP(`onRequestResult` method `MSRP`) · 서버발 배포 수신 → `onSds(mediaPlane)` · `AccountConfig.maxSdsCplaneBytes`(`toAccount` 가 채움)·`mcdataMsrp`(REGISTER Contact ICSI 합치기) · MSRP 호는 앱 호 목록 밖 · Kotlin 필드 | `Msrp.*` 3건(40 KB 3청크 발신·2청크 배포 수신) · .45 실서버 013 `sds g005 <2408 B> --cplane-max 1500` → **media 200**, CSP `SDS via MSRP fanout=2`(014·MF52, 둘 다 `closed ok=1`) → 014 `onSds media=1` 2408 B |
 | cimsue-cli | `group-call --upgrade-at/--cancel-at`(outcome `conditions`) · `alert` · `--cplane-max`·`--msrp` · `sds` outcome `plane` | 위 실측 |
 
-- 검증: `cimsue_test` 85/85 한 프로세스, S1-UE 6항목 PASS(`UNIT`·`FLOOR-CODEC`·`ANDROID-BIND`·`ENGINE-SINGLE`·`SDS-XCHECK`·`CSC-XCHECK`),
-  `build-native.sh` + gradle(`volte-client`·`sdk-probe`·`dispatch-tablet` APK, `:cimsue` 단위 31건) 성공.
+- 검증: `cimsue_test` 86/86 한 프로세스, S1-UE 5항목 PASS(`UNIT`·`FLOOR-CODEC`·`ANDROID-BIND`·`ENGINE-SINGLE`·`CSC-XCHECK`),
+  `build-native.sh` + gradle(APK 5종, `:cimsue` 단위 31건) 성공.
 - **실측 함정** — MSRP 발신 뒤 엔진을 곧바로 내리면 발신 leg BYE 가 cmdp 의 수신 통지보다 먼저 CSP 에 닿아 배포가 버려진다
   (`MSRP_MSG_RECEIVED for unknown session — dup/late, ignore`). 코어는 서버 BYE 를 5 s 기다리고, cli `sds` 는 media 면 6 s 기다린다.
   서버 쪽 보완은 [server45_handoff.md](server45_handoff.md) §9.
 - **긴급 확정 경로 실서버** — g005 그룹 능력 `emergency_call` 을 켜고 013 의 user profile 긴급 대상을 `DedicatedGroup g005` 로 둔 뒤
   .48(csp 0.2.166)에서 `cimsue-cli group-call g005 --upgrade-at 3 --cancel-at 7` → 상향 Confirmed 200 · 하향 Confirmed 200
-  ([server45_handoff.md](server45_handoff.md) §9). 서버 재광고(Advertised)는 루프백 시험으로만 확인했다.
+  ([server45_handoff.md](server45_handoff.md) §9). ptt-client SOS 의 확정·해제는 프로파일 대상 g002 로 실기 확인(§5). 서버 재광고(Advertised)는
+  루프백 시험으로만 확인했다.
+- **조건 판정은 그 re-INVITE 의 트랜잭션만 본다** — 첫 INVITE 트랜잭션의 늦은 상태 이벤트(TERMINATED·DESTROYED, 200)가 상향 re-INVITE 를 보낸 뒤에
+  오면 Confirmed 로 잘못 판정하고 뒤의 403 을 놓친다(`McpttCondition.UpgradeDeniedConfirmedAndAdvertised` 가 간헐 실패하던 원인 — 20회 중 2회).
+  보낼 때(CALLING) 트랜잭션을 붙잡고 401/407 이면 인증 재전송 트랜잭션을 다시 붙잡는다 — 40회 반복 통과.
 
 ### 4.1 Windows 개발 환경에 넘길 것 (P0b)
 
@@ -119,7 +128,52 @@ BT·이어폰 소멸 뒤 뮤트 고착 복구([android_ue_client.md](../design/f
   `onRequestResult` method `MSRP` 로 온다(token 상관은 그대로 — method 로 MESSAGE 를 거르는 앱은 고쳐야 한다) ② `setRxLevel` 이 오디오가 없어도
   성공하고 값을 기억한다(앱의 재적용 루프는 필요 없다) ③ 전이중 사설콜에서 `setMuted` 가 적용된다(예전에는 무시).
 
-## 5. 다음 (.45)
+## 5. P3 `ptt-client` 전환 (.45 반영)
 
-W999 설치·영상 실측(§1.3 미실측 잔여) → P3 `ptt-client`(실기 그룹 = g005 — W999 +82500000001·MF52 +82500000002 추가됨, 상대 = 계측기 013~022).
-- 참고: SDK `cimsue_test` 의 `McpttCondition.UpgradeDeniedConfirmedAndAdvertised` 는 간헐 실패한다(.48 에서 이번 변경 전 코드로도 10회 중 2회) — 루프백 시험의 타이밍 의존으로 보인다.
+- **구조** — `PttController` = SDK 세션(`CimsUe` 하나·계정 하나 — 이벤트 수집, 명령은 `ctl` 한 줄로 직렬화) + 평면 넷: `PttGroups`(참여·애드혹·사설·착신 합류·
+  로스터·xcap-diff·affiliation·CSC 문서), `PttFloor`(PTT 누름/뗌·정책 게이트·floor 이벤트 투영), `PttMessaging`(SDS·FD·disposition),
+  `PttEmergency`(SOS 대상 결정·경보·403 폴백·조건 투영). 공개 멤버는 평면 위임이라 화면 호출부는 그대로다. Kotlin 프로토콜 사본(floor·mcdata·msrp·
+  mcptt XML·CSC 클라이언트)과 그 단위시험·`S1-UE-SDS-XCHECK` 는 없다 — 코어가 정본이고 `csc/CscModels.kt` 는 SDK 값의 화면 투영만 둔다.
+  모듈 `:cimsue` + `:core`, APK 엔진 = `libcimsue.so` 하나.
+- **실기** — MF52(+82500000002)·W999(+82500000001), 상대 = 계측기 013(`cimsue-cli`), 그룹 g005(긴급은 프로파일 대상 g002):
+
+  | 시험 | 결과 |
+  |---|---|
+  | 채널 복원 참여 + HW PTT(벤더 방송) 발언권 인계 | 013 발언 → MF52 RX 200 = 013 송신 200 · MF52 발언 TX 236 = 013 수신 236(손실 0, MOS-CQ 4.27) · CMP floor 기록 순서 일치 · TX 는 grant 뒤 ≈0.38 s(승인 톤) 뒤 시작 |
+  | 착신 그룹콜(화면 꺼짐) | 12인 g005 착신 INVITE 4.5 KB 수신·자동 합류 · RX 200 = 013 송신 200 |
+  | 경보 발령·해제 수신 | MESSAGE 2건 수신 |
+  | SDS 수신 | 시그널링 평면 · media plane(서버 INVITE m=message → a=path 연결 → 2477 B) · 둘 다 저장·DELIVERED 통지 |
+  | SDS 발신 | 18 B 시그널링 평면 · 1618 B(> 1500) MSRP → CSP `fanout=1` → 013 media plane 수신 · 저장 결과 ✓(msgId 일치) |
+  | 일제 통화 수신 | `broadcast-ind` INVITE · MF52 PTT → 서버 DENY · 개시자 놓음 → IDLE → BYE · RX 300 = 013 송신 300 |
+  | 긴급 확정(SOS, 대상 g002) | 경보 200 → 긴급 INVITE 200 · 배너 [해제] → 경보 해제 200 + re-INVITE `emergency-ind false`·`Resource-Priority: mcpttp.0` 200 |
+  | 긴급 거절(통화 중 상향 — 그룹 능력 `emergency_call` 이 꺼진 그룹) | 경보 200 · 상향 re-INVITE 403 → 조건 복원 · 경보만 남은 배너 «내 긴급경보 발령 중 [해제]» → 해제 200 |
+
+- **실기에서 드러나 고친 것**
+  - 엔진 SIP 메시지 상한 `PJSIP_MAX_PKT_LEN` 65535(`sdk/engine/config_site/common.h`) — 4000 이면 12인 그룹 착신 INVITE(4.5 KB, 마지막 파트 SDP)가 UDP
+    수신에서 잘려 호가 미디어 없이 성립한다. 서버 쪽은 [server45_handoff.md](server45_handoff.md) §9 M6.
+  - SOS 대상 — 등록 직후 cms NOTIFY 가 토큰보다 먼저 오면 user-profile 조회가 건너뛰어지고 다시 오지 않아, 선택 그룹(g001)으로 폴백해 협력업체 단말에
+    경보·그룹콜이 갔다. 토큰이 들어올 때 문서를 한 번도 받지 않았으면 취득하고, SOS 는 프로파일이 없으면 최대 3 s 먼저 취득한 뒤 대상을 정한다
+    ([mcptt_emergency_modes.md](../design/features/mcptt_emergency_modes.md) §4.3).
+  - 긴급콜 403 뒤 남은 내 경보를 해제할 곳이 없었다 — 경보 배너가 내 경보면 [해제](`cancelAlert`).
+- **남은 것** — FD 첨부 송수신 · 깊은 Doze 착신 · VoLTE 통화 중 PTT 양보 · BT/유선 이어폰 분리(§3) · MSRP 전송 진행률(코어에 진행 이벤트 없음) ·
+  마이크 AGC 재시도(실기 확인) · ViewModel 분리 · 로스터 NOTIFY 의 dialog 안/구독 구분.
+- **기존 동작 관찰(P3 회귀 아님)** — PTT Contact 의 `+g.3gpp.icsi-ref` 가 mcdata.sds 하나다(mcptt ICSI·`+g.3gpp.mcptt` 없음 — TS 24.379 등록 절차 대조
+  필요) · MSRP 발신 INVITE 200 뒤 pjsua 가 re-INVITE 를 한 번 더 보낸다.
+
+### 5.1 Windows 개발 환경에 넘길 것 (P3)
+
+- **엔진 재빌드** — `common.h` 의 `PJSIP_MAX_PKT_LEN 65535`(세 플랫폼 공통 결정).
+- **C API·.NET 미노출** — `GroupMember.title`(`cims:user-title`, 읽기 전용) · `sendGroupSds`/`sendSds` 의 `msgId`(hex32, 비우면 코어가 만든다).
+- **코어 동작 변화(자동 적용)** — 조건 판정이 그 re-INVITE 의 트랜잭션만 본다(§4) · 영상 창 결선은 렌더러가 없으면 건너뛴다(§1.3).
+
+### 5.2 참여 채널 자동 복원 — 진행 중 세션에만
+
+재시작 뒤 복원은 그룹 conference 구독의 NOTIFY 가 참가자를 싣는 채널에만 prearranged INVITE 를 보낸다(late entry). 명단이 비었거나 NOTIFY 가 5 s 안에
+오지 않으면 건너뛰고 참여 의도는 남긴다 — 참여 목록에는 남이 건 착신에 자동 합류한 채널도 들어가므로, 조건 없이 복원하면 진행 중 세션이 없어도 새
+세션을 열어 멤버 전원(협력업체 단말 포함)에게 fan-out 한다. 정본 = [android_ue_client.md](../design/features/android_ue_client.md) «참여 채널 자동 복원».
+실기: MF52·W999 저장값 g001·g002·g005, 진행 세션 없음 → 셋 다 건너뜀·그룹 INVITE 0 · 013 이 g005 세션 발언 중에 MF52 재기동 → g005 만 INVITE →
+CMP 같은 세션에 `PTT_JOIN`(새 `GROUP_START` 없음)·floor TAKEN 청취.
+
+## 6. 다음 (.45)
+
+P3 남은 실기(§5) · 전환 APK 의 협력업체 배포 승인([ue_sdk.md](../design/features/ue_sdk.md) §5.3) → P4 시험 모드.

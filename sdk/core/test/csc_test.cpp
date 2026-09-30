@@ -275,6 +275,15 @@ TEST(GroupDoc, CallTimersConferenceStateAndSizeLimits) {
 }
 
 // xs:duration — 서버 parse_xs_duration 과 같은 관대함. 모르는 형식은 미기재(0 으로 읽으면 «미사용» 이라는 다른 뜻).
+TEST(GroupDoc, MemberTitleIsReadOnly) {
+    GroupDoc d;
+    ASSERT_TRUE(GroupDoc::parse("<group><list-service uri=\"sip:g@d\"><list><entry uri=\"tel:+1\"><display-name>가</display-name>"
+                                "<cims:user-title>반장</cims:user-title></entry></list></list-service></group>", d));
+    ASSERT_EQ(d.members.size(), 1u);
+    EXPECT_EQ(d.members[0].title, "반장");
+    EXPECT_EQ(d.toXml().find("user-title"), std::string::npos);        // PUT 에는 싣지 않는다
+}
+
 TEST(GroupDoc, HangTimerDurationForms) {
     auto hang = [](const std::string& v) {
         GroupDoc d;

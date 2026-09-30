@@ -128,13 +128,15 @@ public:
     /** 그룹 SDS 발신(MESSAGE multipart). 반환 SdsSend{ok, msgId(UUID hex32), token}.
      *  최종 응답은 onRequestResult(MESSAGE, token) 으로 오므로 앱은 이 token 으로 상관한다(disposition 통지 발신과 구분). */
     SdsSend sendGroupSds(int accountId, const std::string& groupId, const std::string& text,
-                         bool requestDelivery = true);
+                         bool requestDelivery = true, const std::string& msgId = std::string());
+    /** (sendGroupSds·sendSds 공통) msgId = 재전송이면 처음의 message ID(UUID hex32 — SDS SIGNALLING PAYLOAD 의 Message ID 라 수신 측이 같은 메시지로 대조한다),
+     *  비면 새로 만든다. 앱이 저장을 먼저 하고 보낼 때도 그 ID 를 넘긴다. hex32 가 아니면 실패. */
     /** 1:1 SDS 발신(MESSAGE multipart, request-type one-to-one-sds). peer 는 상대 bare 번호.
      *  그룹과 다른 것은 셋 — request-type·request-uri(상대)·conversation ID(쌍 정렬). 서버는 등록
      *  바인딩으로 본문 그대로 전달한다(그룹 게이트 없음, mcdata_messaging.md §4 표).
      *  반환·상관 규약은 sendGroupSds 와 같다. */
     SdsSend sendSds(int accountId, const std::string& peer, const std::string& text,
-                    bool requestDelivery = true);
+                    bool requestDelivery = true, const std::string& msgId = std::string());
     /** SDS disposition 통지(1:1 대상 peer bare 번호). notifType 1~4. 반환 SdsSend — msgId 는 입력이므로 비어 있고
      *  token 으로 최종 응답을 상관한다. */
     SdsSend sendSdsNotification(int accountId, const std::string& peer, const std::string& convId,

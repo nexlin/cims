@@ -13,6 +13,7 @@
 #include <pjsua2.hpp>
 
 #include <algorithm>
+#include <cctype>
 #include <atomic>
 #include <condition_variable>
 #include <ctime>
@@ -386,6 +387,7 @@ struct McpttSession {
     bool emergency = false, imminentPeril = false;   // 세션 조건 현재값 — 개시 옵션·착신 mcptt-info 로 시작(CallInfo.condition 의 원본)
     bool condMine = false;               // 이 단말이 올린 조건
     bool condPending = false;            // 상향·하향 re-INVITE 응답 대기 — 끝나면 prev* 로 되돌리거나(Denied) 확정(Confirmed)
+    void* condTsx = nullptr;             // 그 re-INVITE 의 pjsip 트랜잭션 — 보낼 때(CALLING) 붙잡는다
     bool prevEmergency = false, prevImminent = false, prevMine = false;
     int condLastCode = 0;
     bool broadcast = false;              // 일제 통화 개시(<broadcast-ind>) — 이 단말이 개시자
@@ -613,14 +615,22 @@ public:
             if (prm.e.type != PJSIP_EVENT_TSX_STATE) return;
             const pj::SipTransaction& tsx = prm.e.body.tsxState.tsx;
             // 상향·하향 re-INVITE 의 최종 응답(§10.1.1.2.1.3~5) — 수신 응답·타이머(408) 모두. 2xx = 확정, 그 밖 = 이전 값(§6.2.8.1.5).
-            //   성립 전 호에는 보내지 않으므로(setCallCondition) 대기 중인 UAC INVITE 최종 응답은 그 re-INVITE 의 것이다.
-            if (mcptt && mcptt->condPending && tsx.role == PJSIP_ROLE_UAC && tsx.method == "INVITE" && tsx.statusCode >= 200) {
-                mcptt->condPending = false;
-                mcptt->condLastCode = tsx.statusCode;
-                const bool ok = tsx.statusCode / 100 == 2;
-                if (!ok) { mcptt->emergency = mcptt->prevEmergency; mcptt->imminentPeril = mcptt->prevImminent; mcptt->condMine = mcptt->prevMine; }
-                o_->log(3, "call " + std::to_string(getId()) + " condition re-INVITE → " + std::to_string(tsx.statusCode));
-                publishCondition(ok ? ConditionCause::Confirmed : ConditionCause::Denied);
+            //   그 re-INVITE 의 트랜잭션만 본다 — 첫 INVITE 트랜잭션의 늦은 상태 이벤트(TERMINATED·DESTROYED, 200)가 re-INVITE 를
+            //   보낸 뒤에 올 수 있어 "대기 중의 UAC INVITE 최종 응답" 만으로는 섞인다. 보낼 때(CALLING) 붙잡고, 401/407 이면 스택이
+            //   인증을 실어 새 트랜잭션으로 다시 보내므로 그것을 다시 붙잡는다.
+            if (mcptt && mcptt->condPending && tsx.role == PJSIP_ROLE_UAC && tsx.method == "INVITE") {
+                if (!mcptt->condTsx && tsx.state == PJSIP_TSX_STATE_CALLING) mcptt->condTsx = tsx.pjTransaction;
+                if (tsx.pjTransaction == mcptt->condTsx && tsx.statusCode >= 200) {
+                    mcptt->condTsx = nullptr;
+                    if (tsx.statusCode != 401 && tsx.statusCode != 407) {
+                        mcptt->condPending = false;
+                        mcptt->condLastCode = tsx.statusCode;
+                        const bool ok = tsx.statusCode / 100 == 2;
+                        if (!ok) { mcptt->emergency = mcptt->prevEmergency; mcptt->imminentPeril = mcptt->prevImminent; mcptt->condMine = mcptt->prevMine; }
+                        o_->log(3, "call " + std::to_string(getId()) + " condition re-INVITE → " + std::to_string(tsx.statusCode));
+                        publishCondition(ok ? ConditionCause::Confirmed : ConditionCause::Denied);
+                    }
+                }
             }
             if (prm.e.body.tsxState.type != PJSIP_EVENT_RX_MSG) return;
             const std::string& msg = prm.e.body.tsxState.src.rdata.wholeMsg;
@@ -1117,11 +1127,19 @@ void Engine::Impl::attachVideo(PjCall* call, int accountId) {
     try { ci = call->getInfo(); } catch (...) { return; }
     for (auto& m : ci.media) {
         if (m.type != PJMEDIA_TYPE_VIDEO || m.status != PJSUA_CALL_MEDIA_ACTIVE) continue;
-        if (m.dir & PJMEDIA_DIR_DECODING) {
+        // 수신 창(렌더러)은 디코딩 스트림이 만든다 — 아직 없으면(win_in 무효) 붙일 곳이 없다. pjsua_vid_win_* 는 무효 id 를
+        // PJ_ASSERT_RETURN 으로 막아 디버그 빌드에서 프로세스가 abort 하므로 부르기 전에 거른다.
+        if (!(m.dir & PJMEDIA_DIR_DECODING)) {
+            // 송신 전용 — 그릴 것이 없다
+        } else if (m.videoIncomingWindowId == PJSUA_INVALID_ID) {
+            log(4, "video window: call " + std::to_string(call->getId()) + " has no renderer yet");
+        } else {
             std::lock_guard<std::mutex> lk(videoM);
-            if (videoWindow) {
+            if (!videoWindow) {
+                log(4, "video window: call " + std::to_string(call->getId()) + " renderer waits for a window");
+            } else {
+                pj::VideoWindow vw = m.videoWindow;
                 try {
-                    pj::VideoWindow vw = m.videoWindow;
                     if (vw.getInfo().winHandle.handle.window != videoWindow) {
                         pj::VideoWindowHandle h;
 #if defined(__ANDROID__)
@@ -1130,9 +1148,12 @@ void Engine::Impl::attachVideo(PjCall* call, int accountId) {
                         h.handle.window = videoWindow;
                         windowAcquire(videoWindow);             // 렌더러가 이 참조를 가진다(교체·스트림 소멸 때 푼다)
                         vw.setWindow(h);
+                        log(3, "video window attached: call " + std::to_string(call->getId()) + " wid " +
+                               std::to_string(m.videoIncomingWindowId));
                     }
-                    vw.Show(true);
                 } catch (pj::Error& e) { log(2, std::string("video window: ") + e.info(false)); }
+                // 표시 전환은 렌더러가 지원할 때만 — Android OpenGL 렌더러는 창을 받으면 그리고 SHOW 능력이 없다(INVCAP).
+                try { vw.Show(true); } catch (pj::Error&) {}
             }
         }
         if (autoTx) {
@@ -1725,6 +1746,7 @@ Result Engine::setCallCondition(int callId, bool emergency, bool imminentPeril) 
         m.emergency = emergency; m.imminentPeril = imminentPeril;
         m.condMine = emergency || imminentPeril;
         m.condPending = true;
+        m.condTsx = nullptr;
         m.condLastCode = 0;
         c.publishCondition(ConditionCause::Local);
         try {
@@ -2008,11 +2030,25 @@ bool Engine::Impl::startMsrpInvite(int accountId, const std::string& groupId, in
     return true;
 }
 
-SdsSend Engine::sendGroupSds(int accountId, const std::string& groupId, const std::string& text, bool requestDelivery) {
+/** 호출자가 준 message ID — 비면 새로. hex32(UUID 16 옥텟)가 아니면 빈 문자열(실패). */
+static std::string sdsMessageId(const std::string& given) {
+    if (given.empty()) return mcdata::newMessageId();
+    if (given.size() != 32) return std::string();
+    std::string v = given;
+    for (auto& ch : v) {
+        if (!std::isxdigit((unsigned char)ch)) return std::string();
+        ch = (char)std::tolower((unsigned char)ch);
+    }
+    return v;
+}
+
+SdsSend Engine::sendGroupSds(int accountId, const std::string& groupId, const std::string& text, bool requestDelivery,
+                             const std::string& givenMsgId) {
     SdsSend out;
     if (!impl_->running) { out.code = -1; out.reason = "not running"; return out; }
     if (text.empty())    { out.code = -2; out.reason = "empty text";  return out; }
-    std::string msgId = mcdata::newMessageId();
+    std::string msgId = sdsMessageId(givenMsgId);
+    if (msgId.empty())   { out.code = -2; out.reason = "bad message id"; return out; }
     int64_t token = impl_->nextToken++;
     out.token = token;
     bool ok = impl_->ctl.runSync([=]() -> bool {
@@ -2035,13 +2071,15 @@ SdsSend Engine::sendGroupSds(int accountId, const std::string& groupId, const st
     return out;
 }
 
-SdsSend Engine::sendSds(int accountId, const std::string& peer, const std::string& text, bool requestDelivery) {
+SdsSend Engine::sendSds(int accountId, const std::string& peer, const std::string& text, bool requestDelivery,
+                        const std::string& givenMsgId) {
     SdsSend out;
     if (!impl_->running) { out.code = -1; out.reason = "not running"; return out; }
     if (text.empty())    { out.code = -2; out.reason = "empty text";  return out; }
     std::string to = mcptt::bareId(peer);
     if (to.empty())      { out.code = -2; out.reason = "empty peer";  return out; }
-    std::string msgId = mcdata::newMessageId();
+    std::string msgId = sdsMessageId(givenMsgId);
+    if (msgId.empty())   { out.code = -2; out.reason = "bad message id"; return out; }
     int64_t token = impl_->nextToken++;
     out.token = token;
     bool ok = impl_->ctl.runSync([=]() -> bool {
@@ -2246,6 +2284,7 @@ Result Engine::setVideoWindow(void* nativeWindow) {
             old = o->videoWindow;
             o->videoWindow = nativeWindow;
         }
+        o->log(4, std::string("video window ") + (nativeWindow ? "set" : "cleared") + " (" + std::to_string(o->calls.size()) + " calls)");
         // 활성 영상 호에 곧바로 — 해제(nullptr)면 렌더러에서 창을 뗀다(렌더러가 자기 참조를 푼다).
         for (auto& kv : o->calls) {
             auto* call = static_cast<PjCall*>(kv.second.get());
@@ -2253,6 +2292,7 @@ Result Engine::setVideoWindow(void* nativeWindow) {
             try {
                 for (auto& m : call->getInfo().media) {
                     if (m.type != PJMEDIA_TYPE_VIDEO || m.status != PJSUA_CALL_MEDIA_ACTIVE) continue;
+                    if (m.videoIncomingWindowId == PJSUA_INVALID_ID) continue;   // 렌더러 없음 — 뗄 창도 없다(attachVideo 와 같은 이유)
                     pj::VideoWindow vw = m.videoWindow;
                     pj::VideoWindowHandle h;
                     h.handle.window = nullptr;

@@ -474,7 +474,7 @@ OAM 미도달 502 `oam_unreachable`. 구현 `csc/src/handlers/dispatch_recording
 **ptt-client** 는 수동 설정 화면을 두지 않고 설정 탭에 두 항목만 노출한다 — `통신 설정` 의
 **SIP 전송 프로토콜**(가용 목록에서 선택, 2개 미만이면 행 숨김)과 `기타` 의 **서버 설정 다시 받기**
 (`/provisioning/me` 재취득 — 포트·가용 목록·비번 최신화). 전송 프로토콜을 바꾸면 계정을 다시 만들어야
-하므로 un-REGISTER 후 프로세스가 재시작되고(2초) 참여 채널은 자동 복원된다.
+하므로 un-REGISTER 후 프로세스가 재시작되고(2초) 참여 채널은 자동 복원된다(진행 중 세션이 있는 채널만 — [android_ue_client.md](android_ue_client.md) «참여 채널 자동 복원»).
 
 ## 6. 미해결/후속
 

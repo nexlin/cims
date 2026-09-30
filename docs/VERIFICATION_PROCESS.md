@@ -159,10 +159,9 @@ def my_check(ctx: VerifyContext) -> ItemResult:
 | S1-UNIT-PSIP | psip 루프백 단위시험 — 서버 발신 in-dialog 요청 목적지 재해석 | `g++ tests/psip_leg_dest_test.cpp` ← `build/csp/psip_build/*.a`, 127.0.0.1 실행 (라이브러리 없으면 SKIP) |
 | S1-UE-UNIT | 단말 SDK 코어 단위시험 | `build/bin/cimsue_test` (공개 반환형·C API ABI 포함) |
 | S1-UE-FLOOR-CODEC | floor 정의 정본 일치 | `scripts/gen_floor_defs.py --check` (정본 = `mcptt_floor_defs.yaml`) |
-| S1-UE-ANDROID-BIND | SWIG 바인딩 건전성 | 생성 Java 에 `SWIGTYPE_p_*` 부재 + `HttpResult.body=byte[]` |
+| S1-UE-ANDROID-BIND | SWIG 바인딩 건전성 | 생성 Java 에 `SWIGTYPE_p_*` 부재 + `HttpResult.body=byte[]` + `cimsue.i` 타입맵 본문에 맨 `#` 지시문 없음(`%#` 로 써야 생성 코드에 남는다) |
 | S1-UE-ENGINE-SINGLE | 엔진 단일 제공처 | 커밋된 엔진 산출물 부재 + `org.pjsip` 제공처가 `:cimsue-engine` 하나 |
-| S1-UE-SDS-XCHECK | SDS 코덱 드리프트 | 코어 `sds_codec.h` ↔ `ptt-client/mcdata/McDataCodec.kt` TLV·콘텐츠 타입 |
-| S1-UE-CSC-XCHECK | CSC 경로 드리프트 | 코어 `csc_client.cpp`+`csc.h` ↔ 앱 `CscClient.kt`+`ProvisioningClient.kt` |
+| S1-UE-CSC-XCHECK | CSC 경로 드리프트 | 코어 `csc_client.cpp`+`csc.h` ↔ `:core` `ProvisioningClient.kt`(IdMS·`/provisioning/me` — 로그인 앱·SSO 가 코어 없이 쓴다) |
 | S1-UE-TABLET-UNIT | 관제 태블릿 단위시험 | `android/gradlew testDebugUnitTest` (`:dispatch-tablet`·`:cimsue`, 기기 불필요) |
 
 `S1-UE-*` 는 단말 SDK·관제 앱 축이다(정본 [design/features/ue_sdk.md](design/features/ue_sdk.md),

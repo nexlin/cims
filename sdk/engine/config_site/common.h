@@ -25,9 +25,16 @@
    유지 (ue_nat_traversal.md §7.1). 주기 = PJMEDIA_STREAM_KA_INTERVAL(기본 5s). */
 #define PJMEDIA_STREAM_ENABLE_KA  1
 
+/* SIP 메시지 상한 — 수신 rdata 버퍼·송신 tdata 버퍼·TLS 소켓 버퍼의 크기. 기본 4000B 는 서버발 메시지가
+   넘는다: 12인 그룹의 prearranged INVITE(mcptt-info + resource-lists + SDP 멀티파트)가 4.5KB 라 UDP 수신이
+   4000B 에서 잘리고 마지막 파트인 SDP 가 사라져 호가 미디어 없이 성립했다(TCP/TLS 는 한 메시지가 버퍼를
+   넘으면 연결 오류). 등록 transport 가 UDP 인 단말에는 서버가 TCP 로 바꿔 보낼 수 없으므로(NAT) 단말이
+   UDP 데이터그램 최대 크기를 받는다. 대가는 rdata·tdata 마다 이 크기의 버퍼(단말 한 대에 수십 개). */
+#define PJSIP_MAX_PKT_LEN         65535
+
 /* pjsua2 SdpSession.wholeSdp 인쇄 버퍼 — 기본 1024B 는 SRTP(SDES) 오퍼(RTP m= 라인마다 a=crypto
    전 수트)가 넘친다. 넘치면 wholeSdp="" → 앱 SDP 주입이 조각 SDP 를 만들어 pjmedia_sdp_validate
-   assert (media_security.md §7). SIP 패킷 상한(PJSIP_MAX_PKT_LEN 4000)과 정렬. */
+   assert (media_security.md §7). SDP 한 벌만 담으므로 SIP 메시지 상한과는 별개. */
 #define PJSUA2_MAX_SDP_BUF_LEN    4000
 
 /* 호 품질 측정: RTCP-XR(RFC 3611 VoIP Metrics — 손실/폐기율·버스트/갭·RTT·단말 지연) 생성·수신 통계.

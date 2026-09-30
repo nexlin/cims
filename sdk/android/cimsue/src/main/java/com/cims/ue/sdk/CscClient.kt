@@ -121,7 +121,9 @@ data class GroupSummary(val uri: String, val displayName: String, val etag: Stri
                         val memberCount: Int, val isOwner: Boolean)
 
 data class GroupMember(val uri: String, val name: String = "",
-                       val role: String = "participant", val priority: Int = 5)
+                       val role: String = "participant", val priority: Int = 5,
+                       /** 직함 `<cims:user-title>`(사이트 확장) — 읽기 전용, PUT 에 싣지 않는다. */
+                       val title: String = "")
 
 /**
  * GMS 그룹 문서(OMA list-service + TS 24.481 mcpttgi) — GET 응답·PUT 본문의 단일 모델.
@@ -173,7 +175,7 @@ data class GroupDoc(
         private fun Int.orNull(): Int? = if (this < 0) null else this
 
         fun of(d: JniGroupDoc) = GroupDoc(d.uri, d.displayName, d.etag,
-            d.members.let { v -> List(v.size) { i -> v[i].let { GroupMember(it.uri, it.name, it.role, it.priority) } } },
+            d.members.let { v -> List(v.size) { i -> v[i].let { GroupMember(it.uri, it.name, it.role, it.priority, it.title) } } },
             d.sessionType, d.videoEnabled, d.encryption, d.emergencyCall, d.emergencyAlert,
             d.allowSds, d.allowFd, d.requireAffiliation, d.priority, d.maxParticipants,
             d.orgCode, d.authorizedUser,

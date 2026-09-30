@@ -33,7 +33,8 @@ kotlin {
 }
 
 dependencies {
-    implementation(project(":core-sip"))             // 자체 pjsua2 래퍼(이행용) + :core — SDK 이식 전(ue_sdk.md §5.3)
+    implementation(project(":cimsue"))               // 단말 SDK — 엔진은 이것 하나(ue_sdk.md §5.3 P3, :core-sip 를 같이 쓰지 않는다)
+    implementation(project(":core"))                 // 공용 조각(계정·프로비저닝·설정·메시지·전원·UI)
     implementation(libs.androidx.core.ktx)
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.androidx.lifecycle.runtime.ktx)
@@ -44,7 +45,6 @@ dependencies {
     implementation(libs.androidx.ui.tooling.preview)
     implementation(libs.androidx.material3)
     implementation(libs.androidx.material.icons.extended)   // 통화 컨트롤 벡터 아이콘(CIMS-Phone 과 동일)
-    implementation(libs.okhttp)                       // CSC: IdMS(OAuth2 PKCE)/GMS/CMS HTTPS
 
     debugImplementation(libs.androidx.ui.tooling)
 
