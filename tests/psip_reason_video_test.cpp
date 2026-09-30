@@ -17,6 +17,9 @@
 //   J. UAC offer, 프로파일 MCVideo(제어 기능 멤버 초대)                     → i= · rtcp-fb PLI·FIR 광고 · udp MCVideo + fmtp
 //   K. UAS answer, SRTP MCVideo — m= 라인별 키(RFC 4568 §6.1)                → m=video RTP/SAVP + 자기 a=crypto · video 키 없으면 port 0
 //   L. UAC offer, SRTP MCVideo                                              → m=audio·m=video 둘 다 RTP/SAVP + 서로 다른 a=crypto
+//   M. 서버가 offer 한 MCPTT leg 에 단말의 세션 갱신 re-INVITE(단말 = refresher=uas 로 정한 갱신자)
+//                                                                          → 같은 SDP(floor m=application·o= 버전 유지)·IsSessionRefreshReInvite
+//                                                                            · Session-Expires refresher=uac (TS 24.379/24.281 §6.2.3.1.1 5) 전제)
 //
 //   빌드/실행은 verify S1-UNIT-PSIP (verify/lib/items/stage1/unit_psip.py) 가 한다 — 명령은 psip_leg_dest_test.cpp 서두와 같다.
 //     build/psip_reason_video_test [--port 27080] [--verbose]
@@ -67,6 +70,8 @@ public:
 	std::string m_strVideoKey;				// AcceptCall 의 m_strLocalVideoCryptoKey (비면 평문)
 
 	// 관측
+	std::atomic<int> m_iReInvites{ 0 };
+	bool m_bLastReInviteRefresh = false;	// EventReInvite 시점의 IsSessionRefreshReInvite (CSP ModuleDispatcher 가 보는 값)
 	std::atomic<int> m_iEnded{ 0 };
 	int m_iEndStatus = 0;
 	std::string m_strEndReason;
@@ -106,6 +111,11 @@ public:
 			clsLocal.m_strLocalVideoCryptoKey = m_strVideoKey;
 		}
 		m_pclsUa->AcceptCall( pszCallId, &clsLocal );
+	}
+	void EventReInvite( const char * pszCallId, CSipCallRtp *, CSipCallRtp * ) override
+	{
+		m_bLastReInviteRefresh = m_pclsUa->IsSessionRefreshReInvite( pszCallId );
+		++m_iReInvites;
 	}
 	void EventCallRing( const char *, int, CSipCallRtp * ) override {}
 	void EventCallStart( const char *, CSipCallRtp * ) override {}
@@ -622,6 +632,81 @@ int main( int argc, char * argv[] )
 		       strBody.find( std::string( "inline:" ) + AUD_KEY ) < pv, "audio 키는 m=audio 아래, video 키는 m=video 아래" );
 		clsUa.StopCall( strCallId.c_str() );
 		UdpRecvUntil( fdUe, "CANCEL", 1000 );
+	}
+
+	// ── M. 단말의 세션 갱신 re-INVITE — 서버 offer MCPTT leg(멤버 초대). 단말이 200 OK 에서 refresher=uas 로 갱신자가 되면(TS 24.379
+	//   §6.2.3.1.1 5)) SE/2 마다 re-INVITE 가 온다 — answer 가 직전 로컬 선언(floor m=application 포트·fmtp)을 그대로 내고, 응용(CSP)은
+	//   IsSessionRefreshReInvite 로 CMP 를 부르지 않는다(leg_liveness.md §6.3) ──
+	printf( "[M] UE refresh re-INVITE on a server-offered MCPTT leg → same SDP · floor kept · refresher=uac\n" );
+	{
+		clsUa.SetSessionTimer( true, 1800, 90, E_SESSION_REFRESHER_LOCAL );
+		clsCb.Reset();
+		CSipCallRtp clsRtp;
+		clsRtp.m_strIp = UA_IP; clsRtp.m_iPort = 40080; clsRtp.m_iCodec = 0;
+		clsRtp.m_clsCodecList.push_back( 0 );
+		clsRtp.m_iApplicationPort = 40082;
+		clsRtp.m_strApplicationFmtp = "mc_queueing;mc_priority=5";
+		CSipCallRoute clsRoute;
+		clsRoute.m_strDestIp = UA_IP; clsRoute.m_iDestPort = iUePort; clsRoute.m_eTransport = E_SIP_UDP;
+		std::string strCallId;
+		UdpDrain( fdUe );
+		CHECK( clsUa.StartCall( "svc", "peer", &clsRtp, &clsRoute, strCallId ), "StartCall" );
+		const std::string strInv = UdpRecvUntil( fdUe, "INVITE", 2000 );
+		const std::string strM = "\r\n" + strInv;
+		const std::string strOffer = BodyOf( strInv );
+		CHECK( strOffer.find( "m=application 40082 UDP MCPTT" ) != std::string::npos, "offer 에 floor 채널" );
+		static const char * UE_SDP =
+			"v=0\r\no=- 7 7 IN IP4 127.0.0.1\r\ns=-\r\nc=IN IP4 127.0.0.1\r\nt=0 0\r\n"
+			"m=audio 41000 RTP/AVP 0\r\na=rtpmap:0 PCMU/8000\r\na=sendrecv\r\n"
+			"m=application 41002 UDP MCPTT\r\na=fmtp:MCPTT mc_queueing\r\n";
+		const std::string strUeTo = HeaderOf( strM, "To" ) + ";tag=ue-m";
+		char szOk[4096];
+		int iOk = snprintf( szOk, sizeof(szOk),
+			"SIP/2.0 200 OK\r\nVia: %s\r\nFrom: %s\r\nTo: %s\r\nCall-ID: %s\r\nCSeq: %s\r\nContact: <sip:ue@%s:%d>\r\n"
+			"Supported: timer\r\nRequire: timer\r\nSession-Expires: 1800;refresher=uas\r\n"
+			"Content-Type: application/sdp\r\nContent-Length: %d\r\n\r\n%s",
+			HeaderOf( strM, "Via" ).c_str(), HeaderOf( strM, "From" ).c_str(), strUeTo.c_str(),
+			HeaderOf( strM, "Call-ID" ).c_str(), HeaderOf( strM, "CSeq" ).c_str(), UA_IP, iUePort, (int)strlen( UE_SDP ), UE_SDP );
+		UdpSendTo( fdUe, std::string( szOk, iOk ) );
+		CHECK( !UdpRecvUntil( fdUe, "ACK", 2000 ).empty(), "ACK" );
+		// 단말(UAC)의 갱신 re-INVITE — 다이얼로그의 서버 Contact 로, 같은 SDP, 갱신자는 여전히 단말(이번 요청의 uac)
+		std::string strSrvContact = HeaderOf( strM, "Contact" );
+		const size_t lt = strSrvContact.find( '<' ), gt = strSrvContact.find( '>' );
+		if( lt != std::string::npos && gt != std::string::npos ) strSrvContact = strSrvContact.substr( lt + 1, gt - lt - 1 );
+		char szRe[4096];
+		int iRe = snprintf( szRe, sizeof(szRe),
+			"INVITE %s SIP/2.0\r\nVia: SIP/2.0/UDP %s:%d;rport;branch=z9hG4bK-rv-m-%d\r\nMax-Forwards: 70\r\nFrom: %s\r\nTo: %s\r\n"
+			"Call-ID: %s\r\nCSeq: 1 INVITE\r\nContact: <sip:ue@%s:%d>\r\nSupported: timer\r\nSession-Expires: 1800;refresher=uac\r\n"
+			"Content-Type: application/sdp\r\nContent-Length: %d\r\n\r\n%s",
+			strSrvContact.c_str(), UA_IP, iUePort, ++g_iSeq, strUeTo.c_str(), HeaderOf( strM, "From" ).c_str(),
+			HeaderOf( strM, "Call-ID" ).c_str(), UA_IP, iUePort, (int)strlen( UE_SDP ), UE_SDP );
+		const std::string strReInvite( szRe, iRe );
+		UdpSendTo( fdUe, strReInvite );
+		const std::string strRe200 = UdpRecvUntil( fdUe, "SIP/2.0 200", 2000 );
+		const std::string strAns = BodyOf( strRe200 );
+		CHECK( !strRe200.empty(), "갱신 re-INVITE 200 OK" );
+		CHECK( clsCb.m_iReInvites == 1 && clsCb.m_bLastReInviteRefresh, "EventReInvite 에서 IsSessionRefreshReInvite = true (CSP 가 CMP 를 부르지 않는다)" );
+		CHECK( strAns.find( "m=application 40082 UDP MCPTT\r\na=floorid:0 mstrm:audio\r\na=fmtp:MCPTT mc_queueing;mc_priority=5\r\n" ) != std::string::npos,
+		       "answer = 직전 로컬 선언(floor 포트·fmtp — m=application 0 이 아니다)" );
+		CHECK( strAns.find( "m=audio 40080 " ) != std::string::npos, "audio 포트 유지" );
+		auto oLine = []( const std::string & b ) { size_t p = b.find( "o=" ); return p == std::string::npos ? std::string() : b.substr( p, b.find( "\r\n", p ) - p ); };
+		CHECK( !oLine( strAns ).empty() && oLine( strAns ) == oLine( strOffer ), ( "o= 세션 버전 유지(RFC 4028 §7.4): " + oLine( strAns ) ).c_str() );
+		CHECK( HeaderOf( "\r\n" + strRe200, "Session-Expires" ).find( "refresher=uac" ) != std::string::npos,
+		       ( "Session-Expires refresher=uac (갱신자 = 단말): " + HeaderOf( "\r\n" + strRe200, "Session-Expires" ) ).c_str() );
+		{
+			// re-INVITE 의 ACK
+			std::string strReM = "\r\n" + strReInvite;
+			char szAck[2048];
+			int iAck = snprintf( szAck, sizeof(szAck),
+				"ACK %s SIP/2.0\r\nVia: SIP/2.0/UDP %s:%d;rport;branch=z9hG4bK-rv-m-ack-%d\r\nFrom: %s\r\nTo: %s\r\nCall-ID: %s\r\n"
+				"CSeq: 1 ACK\r\nContent-Length: 0\r\n\r\n",
+				strSrvContact.c_str(), UA_IP, iUePort, ++g_iSeq, strUeTo.c_str(), HeaderOf( "\r\n" + strRe200, "To" ).c_str(),
+				HeaderOf( strM, "Call-ID" ).c_str() );
+			UdpSendTo( fdUe, std::string( szAck, iAck ) );
+		}
+		clsUa.StopCall( strCallId.c_str() );
+		UdpRecvUntil( fdUe, "BYE", 1000 );
+		clsUa.SetSessionTimer( false, 1800, 90, E_SESSION_REFRESHER_LOCAL );
 	}
 
 	close( fdUe );

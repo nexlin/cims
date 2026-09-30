@@ -654,3 +654,9 @@ psip 합성 SDP 에 video 전용 키(`m_strLocalVideoCrypto*`)를 더했다(S1-U
 **.48 정정 — prearranged 는 제휴가 먼저 (.48 → .45, M2 T4·T5 영향)** — TS 24.281 §9.2.1.4.2 13)a)·14)a): 일반 prearranged 호(개시·진행 중 합류·재합류)를
 **제휴 안 된 사용자**가 내면 403 Warning 120 — 암묵적 affiliation 은 chat 합류와 긴급·임박 호에만 있다(§8.2 머리말, chat = §9.2.2.4.1.1 5)·12)).
 A10 이 prearranged 에도 암묵 제휴를 하던 것을 고쳤다. **M2 T4·T5 의 개시자 A 도 `--affiliate-mcvideo gmv2` 가 필요하다**(B 만이 아니라). chat(T3)은 그대로.
+
+**.48 답 — MCPTT 착신 refresher=uas 전환 전 CSP 확인 (.45 8bc92490 «사용자 결정 항목»)** — CSP 쪽은 준비돼 있다. 서버가 offer 한 MCPTT leg(멤버 초대)에
+단말이 SE/2 마다 보내는 갱신 re-INVITE(같은 SDP)는 psip 가 **직전 로컬 선언 그대로**(audio 포트·floor `m=application` 포트·`a=fmtp:MCPTT`·`o=` 버전 유지 — RFC 4028
+§7.4) + `Session-Expires: …;refresher=uac` 로 답하고, CSP `EventReInvite` 는 `IsSessionRefreshReInvite` 로 CMP 를 부르지 않는다(leg_liveness.md §6.3). psip 루프백
+S1-UNIT-PSIP [M] 으로 확인했다. 알아 둘 것 하나 — 갱신 answer 의 fmtp 는 서버의 처음 offer 값(예 `mc_queueing;mc_priority=5`)을 그대로 되풀이한다(단말 re-offer 에
+`mc_priority` 가 없어도) — pjsip 이 이 answer 를 문제 삼지 않는지만 보면 된다. MCVideo leg 도 같은 경로다. 전환 자체는 여전히 사용자 결정.
