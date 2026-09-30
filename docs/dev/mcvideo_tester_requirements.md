@@ -23,12 +23,13 @@
 | 단계 | 뜻 · 인자 | 대응 drive 명령(`cimsue-cli`, .45 C8) |
 |---|---|---|
 | `video_call` | from 이 그룹 호 개시·합류 — `group`, `payload: chat\|prearranged`, `implicit: true`(prearranged 새 세션), `expect.code`(4xx 거절 기대 — 404 113/117/118, 403 116/108/109, 486 103, 488) | `video_call <group> [prearranged] [queueing] [implicit]` |
-| `video_answer` | 역할이 초대(골든 07)를 받아 수락 — 시한 안에 오지 않으면 실패 | `answer` (incoming `service: mcvideo`) |
+| `video_answer` | 역할이 초대(골든 07)를 받아 수락 — 시한 안에 오지 않으면 실패. 단말은 MCVideo 초대를 자동 수락한다(자동 개시 TS 24.281 §6.2.3.1) | (명령 없음 — 시한 안에 `call{service:mcvideo,state:active,dir:incoming}` 을 본다. 코어 `autoAnswerMcvideo` 기본 참) |
 | `transmit_request` | who 가 Transmission Request — `payload` = 기대 결과 `granted`(기본)·`rejected`·`queued`·`any`, `priority`(선택) | `transmit_request <call> [priority]` |
 | `transmit_release` | who 가 Transmission End Request | `transmit_release <call>` |
 | `reception_accept` | who 가 송출 하나를 받기 시작(Receive Media Request — `from` = 송출 역할) | `reception_accept <call> <userId>` |
 | `reception_end` | who 가 받기를 끝냄(Media Reception End Request) | `reception_end <call> <userId>` |
 | `bye` | who 가 떠남 — 해제 규칙 판정은 `expect`(prearranged 1명 이하·chat 0명이면 서버 BYE) | `hangup` |
+| (기동 절차) | MCVideo affiliation — prearranged 는 개시자·멤버 모두 먼저 제휴한다(미제휴 개시·합류 = 403 120, TS 24.281 §9.2.1.4.2 13)a)) | `affiliate <group> on\|off mcvideo` (결과 = `request{method:PUBLISH,op:affiliate}`) |
 
 그룹 세션 규약은 PTT `group_call` 과 같다(인스턴스 하나 = 그룹 하나, 단일 역할에 멤버 하나씩·`multi: true` 역할에 나머지). `real-ue` 풀은 위 drive 명령과
 이벤트(`transmission`·`reception`, `incoming`·`call` 의 `service`)로 가상 단말과 같은 Event 로 풀어 `REAL_UE_STEPS` 에 더한다.
