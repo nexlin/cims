@@ -7,8 +7,8 @@
 > **설계 정본.** 구현된 것 — 계약(전송 제어 정의 테이블 [mcvideo_tc_defs.yaml](mcvideo_tc_defs.yaml)(생성 헤더 양 끝, §5.3·§5.4) · DB 표(§5.1) ·
 > 설정 문서 골든 `tests/fixtures/mcvideo/` · SDP 프로파일(§1.4) · CSP↔CMP 제어 API([cmp_media_api.md](../../api/cmp_media_api.md) §7.9) · 단말 SDK 공개
 > 표면 선언([ue_sdk.md](ue_sdk.md) §4.6 — 구현 전이라 실패를 돌려준다)), 양 끝 전송 제어 코덱(CMP `PTransmissionCodec` · SDK `mcvideo/tc_codec`, 교차 시험),
-> 단말 전송 제어 참여자 상태 머신(SDK `mcvideo/tc_participant` — 엔진 결선 전), V0 전부, CSC 설정 평면(§5.1 — 관리 API·콘솔 제외), CSP 호 제어 부품(§5.2),
-> CMP 그룹 종류·멤버 포트·제어 명령(§5.3). CSP 모듈·그룹 호 처리, CMP 송출·수신 제어 상태 머신, 미디어 결선은 미구현.
+> 단말 전송 제어 참여자 상태 머신(SDK `mcvideo/tc_participant` — 엔진 결선 전), V0 전부, CSC 설정 평면(§5.1 — 관리 API·콘솔 제외)과 그 문서들의 SDK
+> 해석(§5.4), CSP 호 제어 부품(§5.2), CMP 그룹 종류·멤버 포트·제어 명령(§5.3). CSP 모듈·그룹 호 처리, CMP 송출·수신 제어 상태 머신, 미디어 결선은 미구현.
 >
 > 규격 판본: TS 24.281 V18.14.0 · TS 24.581 V18.8.0 · TS 23.281 V18.12.0 · TS 24.481 V19.3.0 · TS 24.484 V20.0.0 · TS 23.280 V20.4.0 ·
 > TS 33.180 V20.0.0. 관계 문서: 로드맵 표 [mcptt_standard_conformance.md](mcptt_standard_conformance.md) R3·R6, 현행 PTT 영상 협상
@@ -325,6 +325,9 @@ Indicator, automatic 수신; 1차 CSP 는 normal) · 이벤트 `TRANSMITTERS` �
 ### 5.4 단말 SDK (`libcimsue`)
 
 - **계정** — `AccountConfig.mcvideoServerUri`(ue-init-config), REGISTER Contact 에 MCVideo 태그(서비스 사용 여부 = `mcvideoEnabled`).
+- **설정 해석**(구현 — [ue_sdk.md](ue_sdk.md) §4.2) — `UeInitConfigDoc.mcvideoServerUri` · 그룹 문서 `GroupDoc.mcvideo`(`McVideoGroupAttrs`, 생성도 골든과
+  같은 순서) · `McVideoUserProfileDoc`·`McVideoServiceConfigDoc`(`CscClient::fetchMcVideoUserProfile`·`fetchMcVideoServiceConfig`) · 토큰 scope 에
+  MCVideo 넷. 시험 = K2 골든을 CSC 생성 시험과 같은 파일로 읽는다.
 - **affiliation** — `affiliate(groupId, on, service)` 서비스 인자.
 - **호** — `joinVideoGroupCall(groupId, {chat|prearranged})` → `CallInfo.service = mcvideo`, 나가기 = 기존 `hangup`.
 - **전송 제어 참여자** — `requestTransmission`·`releaseTransmission`(§6.2.4 상태 머신, T100·T101), 이벤트 `onTransmission`(Granted·Rejected·Revoked·Idle·
@@ -342,7 +345,8 @@ Indicator, automatic 수신; 1차 CSP 는 normal) · 이벤트 `TRANSMITTERS` �
 - **송출 SSRC** — 규격상 송출자는 Transmission Granted 의 Audio·Video SSRC 를 자기 RTP 에 쓴다(TS 24.581 §6.2.4.4.6 2). pjmedia 스트림 SSRC 는 스트림을
   만들 때 정해지고(호 중 바꾸는 API 가 없다) pjsua 는 offer 의 m-line 마다 `a=ssrc`(RFC 5576)를 광고한다. CMP 는 송출자를 멤버 전용 포트로 판별해
   내보낼 때 할당 SSRC 를 찍으므로([cmp_media_api.md](../../api/cmp_media_api.md) §7.9 SSRC 규칙) 단말이 SSRC 를 바꾸지 않아도 분배·수신자 구분은 맞다.
-  할당값이 offer 의 `a=ssrc` 와 같으면(충돌이 없을 때 — §12.1.2.2) 단말 쪽도 규격 문언 그대로다.
+  CMP 는 멤버 offer 의 `a=ssrc`(JOIN `user_audio_ssrc`·`user_video_ssrc`)가 프로세스 전역에서 쓰이지 않으면 그 값을 할당하므로(§12.1.2.2 «equal to provided
+  values … or different if the collision is detected») 충돌이 없는 한 단말 쪽도 규격 문언 그대로다.
 
 ### 5.5 앱
 

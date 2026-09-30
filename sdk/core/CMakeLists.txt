@@ -176,10 +176,13 @@ if(DEFINED GTEST_DIR)
         test/msrp_test.cpp
         test/mcvideo_tc_codec_test.cpp
         test/mcvideo_participant_test.cpp
+        test/mcvideo_config_test.cpp
         # MCVideo 전송 제어 — CMP 코덱과 교차 검증. PTransmissionCodec.cpp 는 생성 헤더만 필요해 Windows 에서도 링크된다
         test/mcvideo_xcheck_test.cpp
         ${CIMS_ROOT}/cmp/PTransmissionCodec.cpp)
     target_include_directories(cimsue_test PRIVATE ${GTEST_INC} ${CMAKE_CURRENT_SOURCE_DIR}/src ${CIMS_ROOT}/cmp)
+    # 계약 골든(tests/fixtures/mcvideo — CSC 생성 시험과 같은 파일)을 읽는 시험용
+    target_compile_definitions(cimsue_test PRIVATE CIMS_SOURCE_ROOT="${CIMS_ROOT}")
     target_link_directories(cimsue_test PRIVATE ${GTEST_LIB_PATH} ${GTEST_DIR}/lib)   # 설치 산출물은 lib/ (루트 변수 lib64 는 구 경로)
     if(WIN32)
         # DLL 은 공개 표면만 export 한다 — 내부 심볼(detail::·floor::Message·mcptt::)을 시험하므로 오브젝트를 직접 링크한다.

@@ -192,9 +192,18 @@ C++ 공개 표면은 `cimsue/engine.h` 의 `Engine` 하나이며 계정·호를 
   C API(`cimsue_capabilities_t.cancel_group_emergency`·`cancel_imminent_peril`)·.NET(`Capabilities.CancelGroupEmergency`·`CancelImminentPeril`)·Kotlin 같은 이름.
 - **UE initial configuration**(TS 24.484 §7.2) — `CscClient::fetchUeInitConfig(mcsUeId)` = 로그인 전 문서(토큰 없음), XCAP URI
   `/org.3gpp.mcptt.ue-init-config/users/sip:<MCS UE ID>/<MCS UE ID>`(§7.2.1.1, MCS UE ID = `AccountConfig.instanceId`) → `UeInitConfigDoc` 의
-  참여 기능 PSI 둘(`<on-network><anyExt>` 의 `MCPTT-Service-Details`·`MCData-Service-Details` `Server-URI`, §7.2.2.1 10)·14)) → 앱이
-  `AccountConfig.mcpttServerUri`·`mcdataServerUri` 에 넣고 계정을 만든다. 광고하지 않은 서비스는 빈 값(해당 PSI 없이 — 아래 전환기 경로).
-  `cimsue-cli --from-profile ptt` 가 같은 순서로 채운다(명시 `--mcptt-psi`·`--mcdata-psi` 가 덮는다).
+  참여 기능 PSI 셋(`<on-network><anyExt>` 의 `MCPTT-Service-Details`·`MCVideo-Service-Details`·`MCData-Service-Details` `Server-URI`,
+  §7.2.2.1 10)·14)) → 앱이 `AccountConfig.mcpttServerUri`·`mcvideoServerUri`·`mcdataServerUri` 에 넣고 계정을 만든다. 광고하지 않은 서비스는 빈 값
+  (해당 PSI 없이 — 아래 전환기 경로). `cimsue-cli --from-profile ptt` 가 같은 순서로 채운다(명시 `--mcptt-psi`·`--mcdata-psi` 가 덮는다).
+- **MCVideo 설정 문서**([mcvideo.md](mcvideo.md) §1.3·§1.6 — 해석 쪽 시험은 계약 K2 골든 `tests/fixtures/mcvideo/` 를 CSC 생성 시험과 같은 파일로
+  읽는다, `McvConfig`) — 그룹 문서의 MCVideo 몫 = `GroupDoc.mcvideo`(`McVideoGroupAttrs` — MCVideo ICSI `<service>` 가 있으면 `present`, `mcvideo-*`
+  속성·규칙, 보호 둘은 **요소가 없으면 true**, entry `GroupMember.mcvideoId`). `present` 면 `toXml` 이 MCVideo `<service>`·속성·규칙·entry
+  `<mcvideo-mcvideo-id>` 를 골든과 같은 순서로 낸다(TS 24.481 XSD 엄격 검증 통과). `present` 가 아니면 싣지 않고, 서버는 MCVideo `<service>` 가 없는
+  PUT 으로 MCVideo 설정을 바꾸지 않는다(전환기). CMS 두 문서 = `fetchMcVideoUserProfile(token, mcvideoId)`(`/org.3gpp.mcvideo.user-profile/users/
+  <MCVideo ID>/mcvideo-user-profile-1.xml`, 404 = 이용 자격 없음) → `McVideoUserProfileDoc`(MCVideo 그룹 목록·`MaxSimultaneousVideoStreams`·N2·N6·
+  긴급 대상·ruleset allow-* — 요소가 없으면 허용) · `fetchMcVideoServiceConfig(token)`(전역 `/org.3gpp.mcvideo.service-config/global/
+  mcvideo-service-config.xml`) → `McVideoServiceConfigDoc`(RP·신호 보호 — 요소가 없으면 켜짐 — ·참여자 T100~T104 초). 토큰은 MCVideo scope 넷을
+  요청한다(`CscEndpoint.scope` 기본값 — 서버는 자격 있는 사용자에게만 준다).
 - **긴급·임박 세션 조건**(TS 24.379 §10.1.1.2.1.3~6, [mcptt_emergency_modes.md](mcptt_emergency_modes.md) §4.2·§4.3). `CallInfo.condition` 이
   그룹의 진행 중 긴급·임박을 이 호에서 본 현재값이다(`mcptt` 는 개시·착신 INVITE 의 값으로 불변). `setCallCondition` = in-dialog
   re-INVITE(multipart mcptt-info 에 **바뀐 지시자만** true/false 명시 + `Resource-Priority` — `AccountConfig.rp*`, 값 정본 = service-config

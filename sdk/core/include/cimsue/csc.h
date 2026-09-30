@@ -20,7 +20,8 @@ struct CscEndpoint {
     std::string clientId = "MCPTT_UE";
     std::string redirectUri = "https://localhost/callback";
     // cims:provisioning=부트스트랩(/provisioning/me), 3gpp:mc:*=MC 서비스 8종(TS 33.180 B.4.2.2 — 서버 카탈로그와 정합)
-    std::string scope = "openid cims:provisioning 3gpp:mc:ptt_service 3gpp:mc:data_service 3gpp:mc:ptt_group_management_service 3gpp:mc:ptt_config_management_service 3gpp:mc:ptt_key_management_service 3gpp:mc:data_group_management_service 3gpp:mc:data_config_management_service 3gpp:mc:data_key_management_service";
+    //   + MCVideo 4종(mcvideo.md §1.2 — 서버는 MCVideo 이용 자격이 있는 사용자에게만 준다, 옛 서버는 모르는 값을 버린다)
+    std::string scope = "openid cims:provisioning 3gpp:mc:ptt_service 3gpp:mc:data_service 3gpp:mc:ptt_group_management_service 3gpp:mc:ptt_config_management_service 3gpp:mc:ptt_key_management_service 3gpp:mc:data_group_management_service 3gpp:mc:data_config_management_service 3gpp:mc:data_key_management_service 3gpp:mc:video_service 3gpp:mc:video_group_management_service 3gpp:mc:video_config_management_service 3gpp:mc:video_key_management_service";
     std::string caPem;                    // 신뢰 앵커(비면 시스템 기본)
     bool verifyServer = true;
     std::string baseUrl() const { return "https://" + host + ":" + std::to_string(port); }
@@ -103,6 +104,37 @@ struct GroupMember {
     std::string title;                         // 직함 <cims:user-title>(사이트 확장) — 읽기 전용, PUT 에 싣지 않는다(서버가 읽지 않는다)
     bool required = false;                     // 필수 멤버 <mcpttgi:on-network-required>(TS 24.481 §7.2.4.2) — 개시자 응답 전에 이 멤버의
                                                //   200 을 기다린다(TNG1, TS 24.379 §6.3.3.3). 읽은 값을 그대로 되돌려야 콘솔 설정이 남는다
+    std::string mcvideoId;                     // <mcpttgi:mcvideo-mcvideo-id uri>(TS 24.481 §7.2.2 MCVideo entry) — MCVideo 그룹의 멤버 MCVideo ID
+                                               //   (= MCPTT ID, mcvideo.md §7 D1). 비면 uri 와 같게 본다
+};
+
+/** GMS 그룹 문서의 MCVideo 몫(TS 24.481 §7.2.2·§7.2.8) — `<supported-services>` 에 MCVideo ICSI `<service>`(`<mcvideo-video-media/>`)가 있으면
+ *  그 그룹은 MCVideo 그룹이다(한 그룹 = 서비스 집합, mcvideo.md §1.3). 정수·시간은 GroupDoc 과 같은 미기재(kUnset = -1) 규약, 삼중값 불리언은
+ *  -1 = 미기재 / 0 / 1. */
+struct McVideoGroupAttrs {
+    bool present = false;                      // MCVideo `<service enabler="urn:urn-7:3gpp-service.ims.icsi.mcvideo">` 가 있다
+    /** mcvideo-on-network-invite-members — true = prearranged, false·없음 = chat(§7.2.8, mcvideo.md §7 D5). 호 종류 검사(TS 24.281 §6.3.5.2). */
+    bool inviteMembers = false;
+    int maxDurationSec = -1;                   // mcvideo-on-network-maximum-duration
+    /** mcvideo-protect-media·mcvideo-protect-transmission-control — **요소가 없으면 true**(GMK 보호, §7.2.8). CIMS 는 false 를 명시한다(D7). */
+    bool protectMedia = true;
+    bool protectTransmissionControl = true;
+    std::vector<std::string> audioEncodings;   // mcvideo-preferred-audio-encodings/encoding@name (예 AMR-WB)
+    std::vector<std::string> videoEncodings;   // mcvideo-preferred-video-encodings/encoding@name (예 H264)
+    std::string videoResolutions;              // mcvideo-preferred-video-resolutions (예 "1280x720,640x480")
+    std::string videoFrameRate;                // mcvideo-preferred-video-frame-rate (예 "30,15")
+    int urgentRealTimeVideoMode = -1;          // mcvideo-urgent-real-time-video-mode
+    int nonUrgentRealTimeVideoMode = -1;       // mcvideo-non-urgent-real-time-video-mode
+    int nonRealTimeVideoMode = -1;             // mcvideo-non-real-time-video-mode
+    std::string activeRealTimeVideoMode;       // mcvideo-active-real-time-video-mode (예 non-urgent-real-time)
+    int maxTransmitters = -1;                  // mcvideo-maximum-simultaneous-mcvideo-transmitting-group-members (동시 송출 상한)
+    int minNumberToStart = -1;                 // mcvideo-on-network-minimum-number-to-start
+    int groupPriority = -1;                    // mcvideo-on-network-group-priority
+    int receptionHangTimerSec = -1;            // on-network-reception-hang-timer (T5, TS 24.581 §11.1.3)
+    int allowConferenceState = -1;             // 규칙 mcvideo-on-network-allow-conference-state
+    int allowEmergencyCall = -1;               // 규칙 mcvideo-allow-emergency-call
+    int allowEmergencyAlert = -1;              // 규칙 mcvideo-allow-emergency-alert
+    int allowImminentPerilCall = -1;           // 규칙 mcvideo-allow-imminent-peril-call
 };
 
 /** GMS 그룹 문서(OMA list-service + TS 24.481 mcpttgi 확장) — GET 응답·PUT 본문의 단일 모델.
@@ -121,6 +153,9 @@ struct GroupDoc {
     int priority = 5;                          // on-network-group-priority
     int maxParticipants = 0;                   // on-network-max-participant-count (0 = 미기재)
     std::string orgCode, authorizedUser;       // authorized-user 는 서버 산출(읽기 전용)
+    /** MCVideo 몫 — present 면 toXml 이 MCVideo `<service>`·속성·규칙·entry `<mcvideo-mcvideo-id>` 를 함께 낸다. present 가 아니면 싣지 않고,
+     *  서버는 MCVideo `<service>` 가 없는 PUT 으로 그 그룹의 MCVideo 설정을 바꾸지 않는다(전환기 — mcvideo.md §5.1). */
+    McVideoGroupAttrs mcvideo;
 
     // ── 그룹 호 타이머 · 참가자 정보 · MCData 크기 한도 (TS 24.481) — **미기재(kUnset)가 기본값**이다.
     //   미기재면 PUT 에 싣지 않고, 서버는 기존값을 유지한다(mcptt_api.md §2 «없는 요소는 갱신 시 기존값 유지»).
@@ -202,8 +237,56 @@ struct UeInitConfigDoc {
     std::string domain;                        // mcptt-UE-initial-configuration@domain
     std::string mcpttServerUri;                // MCPTT-Service-Details/Server-URI — 참여 MCPTT 기능 PSI
     std::string mcdataServerUri;               // MCData-Service-Details/Server-URI — 참여 MCData 기능 PSI
+    std::string mcvideoServerUri;              // MCVideo-Service-Details/Server-URI — 참여 MCVideo 기능 PSI(AccountConfig.mcvideoServerUri)
     CIMSUE_API static bool parse(const std::string& xml, UeInitConfigDoc& out, std::string* err = nullptr);
 };
+
+/** MCVideo user profile(TS 24.484 §9.3, CMS XCAP `application/vnd.3gpp.mcvideo-user-profile+xml`) — 코어가 해석하는 요소만. 문서가 있으면
+ *  MCVideo 이용 자격이 있다(없으면 서버 404 — mcvideo.md §5.1). 인가 규약은 UserProfileDoc 과 같다 — ruleset allow-* 는 **요소가 없으면 허용**
+ *  (서버가 최종 판정하고 앱은 UX 선차단만). */
+struct McVideoUserProfileDoc {
+    std::string etag;
+    bool notModified = false;                  // fetchMcVideoUserProfile 이 304 를 받았다
+    std::string userUri;                       // 루트 XUI-URI
+    std::string mcvideoId;                     // Common/MCVideoUserID/uri-entry
+    std::vector<std::string> groups;           // OnNetwork/MCVideoGroupInfo/MCVideo-Group-ID — MCVideo 로 affiliate 할 수 있는 그룹
+    std::vector<std::string> implicitAffiliations;   // OnNetwork/ImplicitAffiliations
+    int maxAffiliationsN2 = -1;                // OnNetwork/MaxAffiliationsN2
+    /** OnNetwork/MaxSimultaneousVideoStreams — 동시 수신 스트림 상한(서버 C9, TS 24.581 §11.2.3). 1차 CIMS 값 1(한 m=video 의 여러 SSRC 분리 전). */
+    int maxSimultaneousVideoStreams = -1;
+    int maxSimultaneousCallsN6 = -1;           // Common/MCVideo-group-call/MaxSimultaneousCallsN6
+    CmsEntry emergencyGroup;                   // Common/MCVideo-group-call/EmergencyCall/MCVideoGroupInitiation/entry
+    CmsEntry imminentPerilGroup;               // …/ImminentPerilCall/MCVideoGroupInitiation/entry
+    CmsEntry emergencyAlertGroup;              // …/EmergencyAlert/entry
+    bool allowPrivateCall = true;              // allow-private-call
+    bool allowEmergencyGroupCall = true;       // allow-emergency-group-call
+    bool allowEmergencyPrivateCall = true;     // allow-emergency-private-call
+    bool allowImminentPerilCall = true;        // allow-imminent-peril-call
+    bool allowActivateEmergencyAlert = true;   // allow-activate-emergency-alert
+    bool allowRevokeTransmit = true;           // allow-revoke-transmit — 다른 송출 회수(TS 24.581 §4.1.1.2)
+    bool allowRemoteAmbientViewing = true;     // anyExt/allow-request-remote-initiated-ambient-viewing (TS 24.281 §15)
+    bool allowLocalAmbientViewing = true;      // anyExt/allow-request-locally-initiated-ambient-viewing
+    bool allowAdhocGroupCall = true;           // anyExt/allow-adhoc-group-call
+    /** XML → 문서. 루트가 mcvideo-user-profile 이 아니면 false. */
+    CIMSUE_API static bool parse(const std::string& xml, McVideoUserProfileDoc& out, std::string* err = nullptr);
+};
+constexpr const char* kCtMcVideoUserProfile = "application/vnd.3gpp.mcvideo-user-profile+xml";
+
+/** MCVideo service configuration(TS 24.484 §9.4, `application/vnd.3gpp.mcvideo-service-config+xml`) — 시스템 전역 문서(§9.4.2.9).
+ *  코어가 쓰는 것 = 참여자 전송 제어 타이머 T100~T104(`<on-network><anyExt><tc-timers-counters-R14>` — 초, TS 24.581 §11.1.1)·RP·신호 보호.
+ *  서버 타이머·카운터(T1~T11·C2~C11)는 전송 제어 서버 몫이라 읽지 않는다. 요소가 없으면 빈 값/-1(참여자는 K5 기본값을 쓴다). */
+struct McVideoServiceConfigDoc {
+    std::string etag;
+    bool notModified = false;                  // fetchMcVideoServiceConfig 이 304 를 받았다
+    std::string domain;                        // service-configuration-params@domain
+    std::string rpEmergency, rpImminentPeril, rpNormal;   // on-network *-resource-priority("<namespace>.<priority>", 예 mcpttp.15)
+    /** on-network/signalling-protection — **요소가 없으면 켜진 것**(TS 24.281 §6.6.2.1·§6.6.3.1). CIMS 는 false 를 명시한다(mcvideo.md §1.6). */
+    bool confidentialityProtection = true;
+    bool integrityProtection = true;
+    int t100Sec = -1, t101Sec = -1, t102Sec = -1, t103Sec = -1, t104Sec = -1;   // tc-timers-counters-R14 T100~T104 (-1 = 미기재)
+    CIMSUE_API static bool parse(const std::string& xml, McVideoServiceConfigDoc& out, std::string* err = nullptr);
+};
+constexpr const char* kCtMcVideoServiceConfig = "application/vnd.3gpp.mcvideo-service-config+xml";
 constexpr const char* kCtUeInitConfig = "application/vnd.3gpp.mcptt-ue-init-config+xml";
 
 /** 정책 게이트 스냅샷(ue_sdk.md §4.2) — user profile ruleset 인가. **받지 못한 문서는 허용**으로 둔다(게이트를 걸지 않는다).
@@ -276,6 +359,17 @@ public:
     /** service-config GET + 해석 — fetchUserProfile 과 같은 규약. */
     Result fetchServiceConfig(const std::string& accessToken, const std::string& userUri, const std::string& etag,
                               ServiceConfigDoc& out);
+    // ── MCVideo CMS 문서(TS 24.484 §9.3·§9.4 — 토큰 scope 3gpp:mc:video_config_management_service) ──
+    /** MCVideo user profile GET + 해석 — `/org.3gpp.mcvideo.user-profile/users/<MCVideo ID>/mcvideo-user-profile-1.xml`(§9.3.1A 문서 이름).
+     *  mcvideoId = MCPTT ID 와 같은 값(D1). 404 = MCVideo 이용 자격 없음(fail code 404). 304·해석 실패 규약은 fetchUserProfile 과 같다. */
+    Result fetchMcVideoUserProfile(const std::string& accessToken, const std::string& mcvideoId, const std::string& etag,
+                                   McVideoUserProfileDoc& out);
+    /** MCVideo service configuration GET + 해석 — 전역 문서 `/org.3gpp.mcvideo.service-config/global/mcvideo-service-config.xml`(§9.4.2.9). */
+    Result fetchMcVideoServiceConfig(const std::string& accessToken, const std::string& etag, McVideoServiceConfigDoc& out);
+    static std::string mcvideoUserProfilePath(const std::string& mcvideoId) {
+        return "/org.3gpp.mcvideo.user-profile/users/" + enc(mcvideoId) + "/mcvideo-user-profile-1.xml";
+    }
+    static std::string mcvideoServiceConfigPath() { return "/org.3gpp.mcvideo.service-config/global/mcvideo-service-config.xml"; }
     /** UE initial configuration GET + 해석 — XCAP URI = `<XCAP root>/org.3gpp.mcptt.ue-init-config/users/sip:<MCS UE ID>/<MCS UE ID>`
      *  (TS 24.484 §7.2.1.1). mcsUeId = 단말 instance ID(AccountConfig.instanceId, 예 urn:uuid:…). 로그인 전 문서라 토큰 없이 부른다.
      *  304·해석 실패 규약은 fetchUserProfile 과 같다. */

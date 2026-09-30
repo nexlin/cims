@@ -397,9 +397,6 @@ FAIL 0, 전체 123/123. CMP(B4·B5)가 알면 좋은 단말 동작:
    소켓의 첫 패킷으로 멤버 제어 목적지를 latch(`user_nat`·`user_sig_ip` guard 는 RTP 와 같게)하며 APP 이 아닌 RTCP 는 해석하지 않고 버린다. 동의하면 C5 에
    넣는다(ue_nat_traversal.md §7.1 에 MCVideo 행 추가).
 
-**다음 (.45)** — C2(K2 fixture 해석) → C3·C4(K3·K4 골든, 호 제어 + 참여자 결선). 송출 SSRC 는 제안 7 이 채택되면 SDK 가 규격 문언 그대로이고, 아니면
-ue_sdk.md 편차 표에 적는다(.48 리뷰 요청).
-
 **.48 B3 — CMP MCVideo 그룹 종류 · B2 결선 (.48 → .45)**
 
 | 항목 | 내용 |
@@ -437,3 +434,27 @@ Audio/Video SSRC · 성립 전 메시지 보관)은 B4·B5 가 그대로 받는�
   Response(C5 이미 있음).
 - **허가 없는 미디어**(payload 있는 RTP — 헤더만 있는 keepalive 는 아님)는 Revoked #3 → 단말은 End Request(C5 이미 있음).
 - 유효 우선순위 = MCPTT floor 와 같은 서열(tier(CSP 지시) → chair → 수치). 요청의 Transmission Indicator 는 판정에 쓰지 않는다.
+
+**C2 — 단말 설정 문서 해석 (.45 → .48)** — K2 골든을 CSC 생성 시험과 **같은 파일**로 읽는다(`cimsue_test` `McvConfig` 7 — README 의 값 전부, 전체 130/130).
+
+| 문서 | SDK |
+|---|---|
+| 그룹 문서 | `GroupDoc.mcvideo`(`McVideoGroupAttrs` — MCVideo ICSI `<service>` = `present`, `mcvideo-*` 속성·규칙 삼중값, 보호 둘은 없으면 true) · `GroupMember.mcvideoId`. MCPTT 와 접미가 같은 요소(invite-members·maximum-duration·group-priority·allow-conference-state)는 서비스별로 따로 읽힌다(g101 = MCPTT prearranged·3600 s·5 / MCVideo chat·1800 s·100). **`present` 면 `toXml` 이 MCVideo 몫을 골든과 같은 줄·순서로 낸다** — SDK 가 낸 g101 을 `tests/mcvideo_fixture_check.py` 의 `check_xml_text`(XSD 엄격 + TS 24.481 규칙)로 돌려 통과(알려진 편차 3개 제외는 골든과 같다). `present` 가 아니면 싣지 않는다(전환기 규칙과 맞다 — W4 관제 앱 토글이 이 경로를 쓴다) |
+| MCVideo user profile | `CscClient::fetchMcVideoUserProfile(token, mcvideoId)` → `/org.3gpp.mcvideo.user-profile/users/<enc(ID)>/mcvideo-user-profile-1.xml`, Accept `application/vnd.3gpp.mcvideo-user-profile+xml`, **404 = 자격 없음**(fail code 404) → `McVideoUserProfileDoc`(MCVideoGroupInfo 되풀이·`MaxSimultaneousVideoStreams`·N2·N6·긴급 대상·ruleset allow-* — 없으면 허용) |
+| MCVideo service configuration | `fetchMcVideoServiceConfig(token)` → 전역 `/org.3gpp.mcvideo.service-config/global/mcvideo-service-config.xml` → `McVideoServiceConfigDoc`(RP · 신호 보호(없으면 켜짐) · 참여자 T100~T104 초 — **골든 값 × 1000 = K5 기본값**을 시험이 대조, 서버 타이머·카운터는 읽지 않는다) |
+| ue-init-config | `UeInitConfigDoc.mcvideoServerUri` = `MCVideo-Service-Details/Server-URI` |
+| 토큰 | `CscEndpoint.scope` 기본값에 `3gpp:mc:video_*` 넷을 더했다 — 자격 없는 사용자는 응답 scope 에서 빠지고, 옛 CSC(.45 라이브 0.2.138)는 모르는 값을 버린다. Android `:core` 의 scope 상수는 C9(PTT 앱)에서 같게 |
+
+- `S1-MCVIDEO-CONTRACT` 는 이 호스트에서 SKIP(xmlschema 없음) — `pip install --target <dir> xmlschema` 뒤 `CIMS_PYLIB=<dir>` 로 돌리면 15/15 PASS 였다.
+
+**.48 B4·B5 설계에 대한 .45 답** — ① 암묵 요청이 받아들여졌고(answer `mc_implicit_request`) `mc_granted` 가 없으면 C5 는 T100 을 걸고 Granted 를 기다린다 —
+만료 때 명시 Transmission Request 를 다시 보내고(§6.2.4.4.3, C100 한도) 서버가 같은 SSRC 로 Granted 를 주면 그대로 'U: has permission'. «answer 에
+`mc_implicit_request` 가 없을 때만 곧바로 명시 요청» 이라 설계와 맞는다. ② Receive Media Response(Granted, ack 비트)·T11 End Request #8·허가 없는 미디어 Revoked #3 은
+C5 가 이미 Ack·End Response·End Request 로 답한다. ③ 제안 7 채택 → C4 offer 가 m=audio·m=video 마다 `a=ssrc`(pjsua 기본 광고)를 싣는지 골든과 함께 확인한다.
+
+**엔진 결함 하나(.45, MCVideo 와 무관)** — `cimsue_test` 가 간헐적으로 abort(전체 실행 7회 중 1~2회): 계정을 지운 뒤 그 계정으로 보낸 요청(sendRequest)의 응답이 오면
+pjsua2 `Endpoint::on_acc_send_request` → `Account::lookup` 이 무효 계정 id 로 `pjsua_acc_get_user_data` 를 불러 assert(`pjsua_acc.c` `on_send_request` 에 계정 유효 검사가
+없다 — pjproject 2.16 원본부터). 재현 = MCVideo 시험을 빼도 `Msrp.EngineSendsLargeGroupSdsOverMediaPlane` 에서. 단말에서도 로그아웃 직후 늦은 MESSAGE·PUBLISH
+응답이면 같은 경로라 따로 고친다(ext/pjproject 한 줄 가드).
+
+**다음 (.45)** — C3·C4(K3·K4 골든 — REGISTER 태그·affiliation·chat 합류 INVITE·mcvideo-info·SDP 3 m-line, 호 제어 + 참여자 결선).

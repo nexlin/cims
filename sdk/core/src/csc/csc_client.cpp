@@ -290,6 +290,32 @@ Result CscClient::fetchServiceConfig(const std::string& accessToken, const std::
     return Result::success();
 }
 
+Result CscClient::fetchMcVideoUserProfile(const std::string& accessToken, const std::string& mcvideoId, const std::string& etag,
+                                          McVideoUserProfileDoc& out) {
+    if (mcvideoId.empty()) return Result::fail(-2, "mcvideo user-profile: empty MCVideo ID");
+    XcapDoc doc;
+    Result r = xcapGet(accessToken, mcvideoUserProfilePath(mcvideoId), kCtMcVideoUserProfile, etag, doc);
+    if (!r.ok) return r;                                   // 404 = MCVideo 이용 자격 없음
+    if (doc.notModified) { out.notModified = true; return Result::success(); }
+    std::string err;
+    McVideoUserProfileDoc d; d.etag = doc.etag;
+    if (!McVideoUserProfileDoc::parse(doc.body, d, &err)) return Result::fail(-2, "mcvideo user-profile: " + err);
+    out = d;
+    return Result::success();
+}
+
+Result CscClient::fetchMcVideoServiceConfig(const std::string& accessToken, const std::string& etag, McVideoServiceConfigDoc& out) {
+    XcapDoc doc;
+    Result r = xcapGet(accessToken, mcvideoServiceConfigPath(), kCtMcVideoServiceConfig, etag, doc);
+    if (!r.ok) return r;
+    if (doc.notModified) { out.notModified = true; return Result::success(); }
+    std::string err;
+    McVideoServiceConfigDoc d; d.etag = doc.etag;
+    if (!McVideoServiceConfigDoc::parse(doc.body, d, &err)) return Result::fail(-2, "mcvideo service-config: " + err);
+    out = d;
+    return Result::success();
+}
+
 Result CscClient::fetchUeInitConfig(const std::string& mcsUeId, const std::string& etag, UeInitConfigDoc& out) {
     if (mcsUeId.empty()) return Result::fail(-2, "ue-init-config: empty MCS UE ID");
     // 로그인 전 문서(TS 24.484 §7.2.1.1) — Authorization 없이

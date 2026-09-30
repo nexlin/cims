@@ -1,4 +1,5 @@
-// libcimsue — CMS 문서(TS 24.484) 해석 · 정책 게이트 스냅샷 (csc.h UserProfileDoc·ServiceConfigDoc·Capabilities).
+// libcimsue — CMS 문서(TS 24.484) 해석 · 정책 게이트 스냅샷 (csc.h UserProfileDoc·ServiceConfigDoc·Capabilities ·
+// MCVideo McVideoUserProfileDoc·McVideoServiceConfigDoc — 서버 산출 = csc/src/services/mcvideo.py, 골든 = tests/fixtures/mcvideo/).
 // 원천 = android/ptt-client PttController.parseUserProfile/parseServiceConfig/svcAllows. 서버 산출 = csc/src/services/mcptt.py
 // get_user_profile_xml·get_service_config_xml. 스캔 도구 = xml_scan.h(접두사 무관 로컬 이름).
 #include <cstdlib>
@@ -148,6 +149,97 @@ bool UeInitConfigDoc::parse(const std::string& xml, UeInitConfigDoc& out, std::s
         if (mcptt.found) d.mcpttServerUri = elemText(mcptt.inner, "Server-URI");
         Elem mcdata = elem(on.inner, "MCData-Service-Details");
         if (mcdata.found) d.mcdataServerUri = elemText(mcdata.inner, "Server-URI");
+        Elem mcvideo = elem(on.inner, "MCVideo-Service-Details");
+        if (mcvideo.found) d.mcvideoServerUri = elemText(mcvideo.inner, "Server-URI");
+    }
+    out = d;
+    return true;
+}
+
+bool McVideoUserProfileDoc::parse(const std::string& xml, McVideoUserProfileDoc& out, std::string* err) {
+    Elem root = elem(xml, "mcvideo-user-profile");
+    if (!root.found) { if (err) *err = "no mcvideo-user-profile"; return false; }
+    McVideoUserProfileDoc d;
+    d.etag = out.etag;
+    d.userUri = attrOf(root.openTag, "XUI-URI");
+    const std::string& s = root.inner;
+    Elem common = elem(s, "Common");
+    if (common.found) {
+        d.mcvideoId = elemText(elem(common.inner, "MCVideoUserID").inner, "uri-entry");
+        // 긴급 대상 — <PrivateCall><EmergencyCall> 과 <MCVideo-group-call><EmergencyCall> 이 둘 다 있어 부모로 먼저 좁힌다
+        Elem gc = elem(common.inner, "MCVideo-group-call");
+        if (gc.found) {
+            d.maxSimultaneousCallsN6 = intElem(gc.inner, "MaxSimultaneousCallsN6");
+            Elem ec = elem(gc.inner, "EmergencyCall");
+            if (ec.found) d.emergencyGroup = entryOf(elem(ec.inner, "MCVideoGroupInitiation").inner, "entry");
+            Elem ip = elem(gc.inner, "ImminentPerilCall");
+            if (ip.found) d.imminentPerilGroup = entryOf(elem(ip.inner, "MCVideoGroupInitiation").inner, "entry");
+            d.emergencyAlertGroup = entryOf(elem(gc.inner, "EmergencyAlert").inner, "entry");
+        }
+    }
+    Elem on = elem(s, "OnNetwork");
+    if (on.found) {
+        // MCVideoGroupInfo 는 그룹마다 하나씩 되풀이된다(§9.3.2.3 OnNetworkType choice) — 각각의 MCVideo-Group-ID
+        size_t from = 0;
+        for (;;) {
+            Elem gi = elem(on.inner, "MCVideoGroupInfo", from);
+            if (!gi.found) break;
+            std::string u = elemText(elem(gi.inner, "MCVideo-Group-ID").inner, "uri-entry");
+            if (!u.empty()) d.groups.push_back(u);
+            from = gi.end;
+        }
+        d.implicitAffiliations = entryUris(on.inner, "ImplicitAffiliations");
+        d.maxAffiliationsN2 = intElem(on.inner, "MaxAffiliationsN2");
+        d.maxSimultaneousVideoStreams = intElem(on.inner, "MaxSimultaneousVideoStreams");
+    }
+    Elem rs = elem(s, "ruleset");
+    const std::string& r = rs.found ? rs.inner : std::string();
+    d.allowPrivateCall = allowFlag(r, "allow-private-call");
+    d.allowEmergencyGroupCall = allowFlag(r, "allow-emergency-group-call");
+    d.allowEmergencyPrivateCall = allowFlag(r, "allow-emergency-private-call");
+    d.allowImminentPerilCall = allowFlag(r, "allow-imminent-peril-call");
+    d.allowActivateEmergencyAlert = allowFlag(r, "allow-activate-emergency-alert");
+    d.allowRevokeTransmit = allowFlag(r, "allow-revoke-transmit");
+    d.allowRemoteAmbientViewing = allowFlag(r, "allow-request-remote-initiated-ambient-viewing");
+    d.allowLocalAmbientViewing = allowFlag(r, "allow-request-locally-initiated-ambient-viewing");
+    d.allowAdhocGroupCall = allowFlag(r, "allow-adhoc-group-call");
+    out = d;
+    return true;
+}
+
+bool McVideoServiceConfigDoc::parse(const std::string& xml, McVideoServiceConfigDoc& out, std::string* err) {
+    Elem root = elem(xml, "service-configuration-info");
+    if (!root.found) { if (err) *err = "no service-configuration-info"; return false; }
+    McVideoServiceConfigDoc d;
+    d.etag = out.etag;
+    Elem params = elem(root.inner, "service-configuration-params");
+    if (!params.found) { out = d; return true; }
+    d.domain = attrOf(params.openTag, "domain");
+    Elem on = elem(params.inner, "on-network");
+    if (on.found) {
+        auto rp = [&](const char* local) {
+            Elem e = elem(on.inner, local);
+            if (!e.found) return std::string();
+            std::string ns = elemText(e.inner, "resource-priority-namespace");
+            std::string pr = elemText(e.inner, "resource-priority-priority");
+            return ns.empty() || pr.empty() ? std::string() : ns + "." + pr;
+        };
+        d.rpEmergency = rp("emergency-resource-priority");
+        d.rpImminentPeril = rp("imminent-peril-resource-priority");
+        d.rpNormal = rp("normal-resource-priority");
+        Elem sp = elem(on.inner, "signalling-protection");
+        if (sp.found) {                                    // 요소가 없으면 켜진 것으로 읽는다(TS 24.281 §6.6.2.1·§6.6.3.1)
+            d.confidentialityProtection = allowFlag(sp.inner, "confidentiality-protection");
+            d.integrityProtection = allowFlag(sp.inner, "integrity-protection");
+        }
+        Elem tc = elem(on.inner, "tc-timers-counters-R14");   // <anyExt> 안(§9.4.2.1 d)) — 참여자 T100~T104 는 초(unsignedByte)
+        if (tc.found) {
+            d.t100Sec = intElem(tc.inner, "T100-transmission-request");
+            d.t101Sec = intElem(tc.inner, "T101-transmission-end-request");
+            d.t102Sec = intElem(tc.inner, "T102-queue-position-request");
+            d.t103Sec = intElem(tc.inner, "T103-receive-media-request");
+            d.t104Sec = intElem(tc.inner, "T104-receive-media-release");
+        }
     }
     out = d;
     return true;

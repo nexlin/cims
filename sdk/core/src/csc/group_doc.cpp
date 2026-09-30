@@ -16,6 +16,45 @@ using namespace xmlscan;
 
 const char* bs(bool b) { return b ? "true" : "false"; }
 
+// 서비스 ICSI(TS 24.481 §7.2.2 <service enabler>) — MCPTT = TS 24.379 Annex E.2.1, MCVideo = TS 24.281 Annex E.2.1
+constexpr const char* kIcsiMcptt = "urn:urn-7:3gpp-service.ims.icsi.mcptt";
+constexpr const char* kIcsiMcvideo = "urn:urn-7:3gpp-service.ims.icsi.mcvideo";
+
+/** 삼중값 불리언 — 요소 없음 = -1. */
+int triElem(const std::string& xml, const char* local, size_t from) {
+    bool f = false;
+    std::string v = elemText(xml, local, &f, from);
+    return f ? (isTrue(v) ? 1 : 0) : -1;
+}
+int intElemFrom(const std::string& xml, const char* local, size_t from) {
+    bool f = false;
+    std::string v = elemText(xml, local, &f, from);
+    return f && !v.empty() ? std::atoi(v.c_str()) : -1;
+}
+/** encodingsType(§7.2.2) — <encoding name="…"/> 들. */
+std::vector<std::string> encodings(const std::string& xml, const char* local, size_t from) {
+    std::vector<std::string> out;
+    Elem list = elem(xml, local, from);
+    if (!list.found) return out;
+    size_t p = 0;
+    for (;;) {
+        Elem e = elem(list.inner, "encoding", p);
+        if (!e.found) break;
+        std::string n = attrOf(e.openTag, "name");
+        if (!n.empty()) out.push_back(n);
+        p = e.end;
+    }
+    return out;
+}
+std::string encodingsXml(const char* local, const std::vector<std::string>& names) {
+    std::string x = std::string("    <mcpttgi:") + local + ">";
+    for (auto& n : names) x += "<mcpttgi:encoding name=\"" + esc(n) + "\"/>";
+    return x + "</mcpttgi:" + local + ">\n";
+}
+void triXml(std::string& x, const char* indent, const char* local, int v) {
+    if (v >= 0) x += std::string(indent) + "<mcpttgi:" + local + ">" + bs(v != 0) + "</mcpttgi:" + local + ">\n";
+}
+
 /** 초 → xs:duration. 서버(csc `xs_duration`)가 내는 형식과 같다. */
 std::string xsDuration(int sec) { return "PT" + std::to_string(sec) + "S"; }
 
@@ -77,6 +116,8 @@ std::string GroupDoc::toXml() const {
         if (m.required) x += "        <mcpttgi:on-network-required/>\n";   // 필수 멤버만(TS 24.481 §7.2.4.2)
         x += "        <mcpttgi:participant-type>" + esc(m.role.empty() ? "participant" : m.role) + "</mcpttgi:participant-type>\n";
         x += "        <mcpttgi:user-priority>" + std::to_string(m.priority) + "</mcpttgi:user-priority>\n";
+        // MCVideo entry(§7.2.2) — MCVideo ID = MCPTT ID(mcvideo.md §7 D1)
+        if (mcvideo.present) x += "        <mcpttgi:mcvideo-mcvideo-id uri=\"" + esc(m.mcvideoId.empty() ? m.uri : m.mcvideoId) + "\"/>\n";
         x += "      </entry>\n";
     }
     x += "    </list>\n";
@@ -108,6 +149,37 @@ std::string GroupDoc::toXml() const {
              "</mcpttgi:on-network-action-upon-expiration-of-timeout-for-acknowledgement-of-required-members>\n";
     x += "    <mcpttgi:on-network-group-priority>" + std::to_string(priority) + "</mcpttgi:on-network-group-priority>\n";
     x += std::string("    <mcpttgi:on-network-encryption>") + bs(encryption) + "</mcpttgi:on-network-encryption>\n";
+    const McVideoGroupAttrs& v = mcvideo;
+    if (v.present) {
+        // MCVideo 속성(§7.2.2 목록 순) — 보호 둘은 명시한다(없으면 true 로 읽힌다 — §7.2.8, mcvideo.md §7 D7)
+        x += std::string("    <mcpttgi:mcvideo-on-network-invite-members>") + bs(v.inviteMembers) + "</mcpttgi:mcvideo-on-network-invite-members>\n";
+        if (v.maxDurationSec >= 0)
+            x += "    <mcpttgi:mcvideo-on-network-maximum-duration>" + xsDuration(v.maxDurationSec) + "</mcpttgi:mcvideo-on-network-maximum-duration>\n";
+        x += std::string("    <mcpttgi:mcvideo-protect-media>") + bs(v.protectMedia) + "</mcpttgi:mcvideo-protect-media>\n";
+        x += std::string("    <mcpttgi:mcvideo-protect-transmission-control>") + bs(v.protectTransmissionControl) +
+             "</mcpttgi:mcvideo-protect-transmission-control>\n";
+        if (!v.audioEncodings.empty()) x += encodingsXml("mcvideo-preferred-audio-encodings", v.audioEncodings);
+        if (!v.videoEncodings.empty()) x += encodingsXml("mcvideo-preferred-video-encodings", v.videoEncodings);
+        if (!v.videoResolutions.empty())
+            x += "    <mcpttgi:mcvideo-preferred-video-resolutions>" + esc(v.videoResolutions) + "</mcpttgi:mcvideo-preferred-video-resolutions>\n";
+        if (!v.videoFrameRate.empty())
+            x += "    <mcpttgi:mcvideo-preferred-video-frame-rate>" + esc(v.videoFrameRate) + "</mcpttgi:mcvideo-preferred-video-frame-rate>\n";
+        triXml(x, "    ", "mcvideo-urgent-real-time-video-mode", v.urgentRealTimeVideoMode);
+        triXml(x, "    ", "mcvideo-non-urgent-real-time-video-mode", v.nonUrgentRealTimeVideoMode);
+        triXml(x, "    ", "mcvideo-non-real-time-video-mode", v.nonRealTimeVideoMode);
+        if (!v.activeRealTimeVideoMode.empty())
+            x += "    <mcpttgi:mcvideo-active-real-time-video-mode>" + esc(v.activeRealTimeVideoMode) + "</mcpttgi:mcvideo-active-real-time-video-mode>\n";
+        if (v.maxTransmitters >= 0)
+            x += "    <mcpttgi:mcvideo-maximum-simultaneous-mcvideo-transmitting-group-members>" + std::to_string(v.maxTransmitters) +
+                 "</mcpttgi:mcvideo-maximum-simultaneous-mcvideo-transmitting-group-members>\n";
+        if (v.minNumberToStart >= 0)
+            x += "    <mcpttgi:mcvideo-on-network-minimum-number-to-start>" + std::to_string(v.minNumberToStart) +
+                 "</mcpttgi:mcvideo-on-network-minimum-number-to-start>\n";
+        if (v.groupPriority >= 0)
+            x += "    <mcpttgi:mcvideo-on-network-group-priority>" + std::to_string(v.groupPriority) + "</mcpttgi:mcvideo-on-network-group-priority>\n";
+        if (v.receptionHangTimerSec >= 0)
+            x += "    <mcpttgi:on-network-reception-hang-timer>" + xsDuration(v.receptionHangTimerSec) + "</mcpttgi:on-network-reception-hang-timer>\n";
+    }
     x += "    <cp:ruleset>\n      <cp:rule id=\"a7c\">\n         <cp:actions>\n";
     x += std::string("          <mcpttgi:allow-MCPTT-emergency-call>") + bs(emergencyCall) + "</mcpttgi:allow-MCPTT-emergency-call>\n";
     x += std::string("          <mcpttgi:allow-imminent-peril-call>") + bs(emergencyCall) + "</mcpttgi:allow-imminent-peril-call>\n";
@@ -116,9 +188,19 @@ std::string GroupDoc::toXml() const {
     if (allowConferenceState >= 0)
         x += std::string("          <mcpttgi:on-network-allow-conference-state>") + bs(allowConferenceState != 0) +
              "</mcpttgi:on-network-allow-conference-state>\n";
+    if (v.present) {                                       // MCVideo 규칙 action(§7.2.4.2)
+        triXml(x, "          ", "mcvideo-allow-emergency-call", v.allowEmergencyCall);
+        triXml(x, "          ", "mcvideo-allow-emergency-alert", v.allowEmergencyAlert);
+        triXml(x, "          ", "mcvideo-allow-imminent-peril-call", v.allowImminentPerilCall);
+        triXml(x, "          ", "mcvideo-on-network-allow-conference-state", v.allowConferenceState);
+    }
     x += "        </cp:actions>\n      </cp:rule>\n    </cp:ruleset>\n";
     // 서비스마다 <service> 하나 — enabler = 그 서비스의 ICSI(TS 24.481 §7.2.2 — MCPTT 는 TS 24.379 Annex E.2.1, mcvideo.md §6 V0)
-    x += "    <oxe:supported-services>\n     <oxe:service enabler=\"urn:urn-7:3gpp-service.ims.icsi.mcptt\">\n      <oxe:group-media>\n       <mcpttgi:mcptt-speech/>\n      </oxe:group-media>\n     </oxe:service>\n";
+    x += std::string("    <oxe:supported-services>\n     <oxe:service enabler=\"") + kIcsiMcptt +
+         "\">\n      <oxe:group-media>\n       <mcpttgi:mcptt-speech/>\n      </oxe:group-media>\n     </oxe:service>\n";
+    if (v.present)
+        x += std::string("     <oxe:service enabler=\"") + kIcsiMcvideo +
+             "\">\n      <oxe:group-media>\n       <mcpttgi:mcvideo-video-media/>\n      </oxe:group-media>\n     </oxe:service>\n";
     if (allowSds) x += "     <oxe:service enabler=\"urn:urn-7:3gpp-service.ims.icsi.mcdata.sds\"/>\n";
     if (allowFd) x += "     <oxe:service enabler=\"urn:urn-7:3gpp-service.ims.icsi.mcdata.fd\"/>\n";
     x += "    </oxe:supported-services>\n";
@@ -158,6 +240,8 @@ bool GroupDoc::parse(const std::string& xml, GroupDoc& out, std::string* err) {
         std::string pr = elemText(e, "user-priority");
         if (!pr.empty()) m.priority = std::atoi(pr.c_str());
         m.required = findOpen(e, "on-network-required") != std::string::npos;
+        Elem mv = elem(e, "mcvideo-mcvideo-id");
+        if (mv.found) m.mcvideoId = attrOf(mv.openTag, "uri");
         if (!m.uri.empty()) d.members.push_back(m);
         p = eend;
     }
@@ -192,6 +276,36 @@ bool GroupDoc::parse(const std::string& xml, GroupDoc& out, std::string* err) {
     if (f) d.ackTimeoutSec = parseXsDuration(v);
     v = elemText(xml, "on-network-action-upon-expiration-of-timeout-for-acknowledgement-of-required-members", &f, after);
     if (f) d.ackAction = v == "proceed" ? "proceed" : "abandon";   // 정의 밖 값 = abandon (§7.2.2 u))
+    // MCVideo 몫 — MCVideo ICSI <service> 가 있으면 MCVideo 그룹(§7.2.2, mcvideo.md §1.3). 요소 로컬 이름이 MCPTT 것과 겹치지 않는다
+    //   (mcvideo- 접두 — findOpen 은 로컬 이름 전체로 맞춘다).
+    Elem ss = elem(xml, "supported-services", after);
+    for (size_t sp = 0; ss.found;) {
+        Elem svc = elem(ss.inner, "service", sp);
+        if (!svc.found) break;
+        if (attrOf(svc.openTag, "enabler") == kIcsiMcvideo) d.mcvideo.present = true;
+        sp = svc.end;
+    }
+    McVideoGroupAttrs& mv = d.mcvideo;
+    v = elemText(xml, "mcvideo-on-network-invite-members", &f, after); if (f) mv.inviteMembers = isTrue(v);
+    v = elemText(xml, "mcvideo-on-network-maximum-duration", &f, after); if (f) mv.maxDurationSec = parseXsDuration(v);
+    v = elemText(xml, "mcvideo-protect-media", &f, after); if (f) mv.protectMedia = isTrue(v);
+    v = elemText(xml, "mcvideo-protect-transmission-control", &f, after); if (f) mv.protectTransmissionControl = isTrue(v);
+    mv.audioEncodings = encodings(xml, "mcvideo-preferred-audio-encodings", after);
+    mv.videoEncodings = encodings(xml, "mcvideo-preferred-video-encodings", after);
+    mv.videoResolutions = elemText(xml, "mcvideo-preferred-video-resolutions", nullptr, after);
+    mv.videoFrameRate = elemText(xml, "mcvideo-preferred-video-frame-rate", nullptr, after);
+    mv.urgentRealTimeVideoMode = triElem(xml, "mcvideo-urgent-real-time-video-mode", after);
+    mv.nonUrgentRealTimeVideoMode = triElem(xml, "mcvideo-non-urgent-real-time-video-mode", after);
+    mv.nonRealTimeVideoMode = triElem(xml, "mcvideo-non-real-time-video-mode", after);
+    mv.activeRealTimeVideoMode = elemText(xml, "mcvideo-active-real-time-video-mode", nullptr, after);
+    mv.maxTransmitters = intElemFrom(xml, "mcvideo-maximum-simultaneous-mcvideo-transmitting-group-members", after);
+    mv.minNumberToStart = intElemFrom(xml, "mcvideo-on-network-minimum-number-to-start", after);
+    mv.groupPriority = intElemFrom(xml, "mcvideo-on-network-group-priority", after);
+    v = elemText(xml, "on-network-reception-hang-timer", &f, after); if (f) mv.receptionHangTimerSec = parseXsDuration(v);
+    mv.allowConferenceState = triElem(xml, "mcvideo-on-network-allow-conference-state", after);
+    mv.allowEmergencyCall = triElem(xml, "mcvideo-allow-emergency-call", after);
+    mv.allowEmergencyAlert = triElem(xml, "mcvideo-allow-emergency-alert", after);
+    mv.allowImminentPerilCall = triElem(xml, "mcvideo-allow-imminent-peril-call", after);
     d.orgCode = elemText(xml, "org-code", nullptr, after);
     d.authorizedUser = elemText(xml, "authorized-user", nullptr, after);
     d.etag = out.etag;                                     // 호출자가 헤더에서 채운 값 유지
