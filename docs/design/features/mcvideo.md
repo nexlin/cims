@@ -8,8 +8,8 @@
 > 설정 문서 골든 `tests/fixtures/mcvideo/` · SDP 프로파일(§1.4) · CSP↔CMP 제어 API([cmp_media_api.md](../../api/cmp_media_api.md) §7.9) · 단말 SDK 공개
 > 표면 선언([ue_sdk.md](ue_sdk.md) §4.6 — 구현 전이라 실패를 돌려준다)), 양 끝 전송 제어 코덱(CMP `PTransmissionCodec` · SDK `mcvideo/tc_codec`, 교차 시험),
 > 단말 전송 제어 참여자 상태 머신(SDK `mcvideo/tc_participant` — 엔진 결선 전), V0 전부, CSC 설정 평면(§5.1 — 관리 API·콘솔 제외)과 그 문서들의 SDK
-> 해석(§5.4), CSP 호 제어 부품(§5.2), CMP 그룹 종류·멤버 포트·제어 명령·송출·수신 제어 상태 머신·미디어 분배(§5.3·§5.3.1). CSP 모듈·그룹 호 처리,
-> 영상 RTCP 전달·보호·녹취, 단말 엔진 결선은 미구현.
+> 해석(§5.4), CSP 호 제어 부품(§5.2), CMP 그룹 종류·멤버 포트·제어 명령·송출·수신 제어 상태 머신·미디어 분배·보호(SRTP·전송 제어 SRTCP)(§5.3·§5.3.1).
+> CSP 모듈·그룹 호 처리, 영상 RTCP 전달·녹취, 단말 엔진 결선은 미구현.
 >
 > 규격 판본: TS 24.281 V18.14.0 · TS 24.581 V18.8.0 · TS 23.281 V18.12.0 · TS 24.481 V19.3.0 · TS 24.484 V20.0.0 · TS 23.280 V20.4.0 ·
 > TS 33.180 V20.0.0. 관계 문서: 로드맵 표 [mcptt_standard_conformance.md](mcptt_standard_conformance.md) R3·R6, 현행 PTT 영상 협상
@@ -270,7 +270,9 @@ psip 합성 SDP 프로파일(`CSipCallRtp::m_eMcMediaProfile = E_MC_MEDIA_MCVIDE
   PTT 영상 결함 해소) · 전송 제어), 그룹 공유 포트 없음. 멤버 두 단계(선할당 = 유닛 + 전송 제어 SSRC `tc_ssrc` · 주소 등록), 소스 판정·NAT latch 는 MCPTT
   멤버와 같은 규칙, 전역 유일 SSRC 할당기(`AllocSsrc` — 송출 SSRC·`tc_ssrc` 공용). 제어 명령 `PTT_GROUP_ADD/MODIFY/REMOVE`·`PTT_JOIN/LEAVE` +
   `service:"mcvideo"`(`cmp/PCmpServerMcvideo.cpp`), `resource.mcvideo`·STATS `mcvideo_groups`·sweeper 회수(`PTT_GROUP_ABORTED` service mcvideo).
-  보호 키(`tc_crypto`·`media_crypto*`)는 SRTP 단계 전까지 `BAD_REQUEST`. 스모크 `tests/cmp_smoke_mcvideo_ports.py`(시험용 CMP 를 직접 띄운다).
+  보호(구현 — B7) — 멤버 SRTP(`media_crypto`·`media_crypto_video` — 상향 멤버 키로 풀고 하향 받는 멤버 키로 SSRC·PT 찍기 뒤 보호) · 전송 제어 SRTCP
+  (`tc_crypto` — 멤버 CSK > 그룹 키 > 평문, `PFloorCrypto` 재사용, 같은 구성 재선언은 컨텍스트 유지), 키는 참가 등록 전에 걸어 첫 Idle 부터
+  보호. 스모크 `tests/cmp_smoke_mcvideo_ports.py`(시험용 CMP 를 직접 띄운다 — SRTP/SRTCP 는 스모크의 독립 파이썬 구현으로 교차 확인).
   허가 없는 미디어는 분배하지 않는다(`no_grant_drop`). 송출 SSRC 할당은 멤버 offer 의 `a=ssrc`(JOIN `user_audio_ssrc`·`user_video_ssrc`)가
   전역에서 쓰이지 않으면 그 값(§14.3.7·§14.3.8).
 - **전송 제어 서버** (구현 — §5.3.1) — TS 24.581 §6.3.4~§6.3.7: 동시 송출 상한(그룹 속성), 우선순위 선점(Revoked #4), 큐(`mc_queueing`), 참여자별

@@ -26,6 +26,15 @@
 #include "ServiceLogWriter.h"
 #include "SimpleJson.h"
 
+// media_crypto[_video] 파싱+검증 (media_security.md §6.3) — key/salt=base64 를 디코드해 길이(16B/14B)까지 확인한다. 필드 부재 = 평문
+//   leg(have=false, true 반환). 형식 위반은 err 를 채우고 false — 호출자는 명령을 거부한다(fail-fast, 평문 조용 폴백 금지).
+//   relay·MCPTT·MCVideo JOIN 이 같은 규칙을 쓴다(PCmpServer.cpp).
+struct MediaCryptoParam {
+    bool have = false;
+    std::string alg, rxKey, rxSalt, txKey, txSalt;
+};
+bool ParseMediaCrypto(const SimpleJson::JsonNode& payload, const char* field, MediaCryptoParam& out, std::string& err);
+
 class PCmpServer : public PModule {
 public:
     PCmpServer(const std::string& name, const std::string& configFile = "cmp.conf");

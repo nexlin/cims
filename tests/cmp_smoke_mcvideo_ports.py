@@ -9,10 +9,13 @@
 #   Notification·TRANSMITTERS 이벤트 → manual 수신 전 영상 미분배 → Receive Media Request → Response(ack 비트)·Ack → 영상·음성 분배(SSRC =
 #   송출 할당값 · PT = 수신 leg 값) · 받지 않는 멤버 미분배 → 헤더만 RTP 무시 · 무허가 미디어 Revoked #3 → 상한 Rejected #1 → STATS
 #   transmitters·receptions → End Request → End Response·End Notify·Idle·TRANSMITTERS [] → T1 만료 TRANSMISSION_INACTIVITY 이벤트
+#   → 보호(B7): tc_crypto 형식 거절 · floor_crypto 거절 → 그룹 키·멤버 CSK SRTCP(Idle·Granted 를 받는 쪽 키로 풀고, 평문·다른 키 요청은
+#   crypto_drop) · 멤버 SRTP(상향 = 멤버 rx 키로 풀고 하향 = 받는 멤버 tx 키로 보호 — SSRC·PT 찍기 뒤) · 틀린 키 영상 버림 —
+#   SRTP/SRTCP 는 이 파일의 파이썬 구현(RFC 3711, cryptography)으로 CMP 와 교차 확인
 # 사용법: python3 tests/cmp_smoke_mcvideo_ports.py [--cmp build/bin/cmp]     — 시험용 CMP 를 빈 포트 창에 직접 띄우고 끝나면 내린다
 #         python3 tests/cmp_smoke_mcvideo_ports.py --target IP:PORT            — 이미 띄운 시험용 CMP(McVideoMemberPoolSize 4, 같은 호스트)
 #   **라이브 CMP 에 돌리지 않는다** — 이벤트 회신처가 마지막 요청 소켓이라 CSP 의 이벤트를 가로챈다.
-import argparse, json, os, shutil, socket, struct, subprocess, sys, tempfile, time
+import argparse, base64, hashlib, hmac, json, os, shutil, socket, struct, subprocess, sys, tempfile, time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ap = argparse.ArgumentParser()
@@ -170,6 +173,90 @@ def ssrc_f(m, fid):
 def u16_f(m, fid):
     v = m["f"].get(fid, b"")
     return struct.unpack("!H", v[:2])[0] if len(v) >= 2 else -1
+
+
+# ── RFC 3711 SRTP/SRTCP (AES_CM_128_HMAC_SHA1_80, KDR 0) — CMP(libsrtp·PFloorCrypto)와 독립 구현 ──
+def _aes_ctr(key, iv, n):
+    from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+    e = Cipher(algorithms.AES(key), modes.CTR(iv)).encryptor()
+    return e.update(b"\0" * n) + e.finalize()
+
+
+def _kdf(mkey, msalt, label, n):
+    x = bytearray(msalt)
+    x[7] ^= label                      # key_id = label || r(=0), 112비트 오른쪽 정렬(§4.3.1)
+    return _aes_ctr(mkey, bytes(x) + b"\0\0", n)
+
+
+class Srtp:
+    def __init__(self, key, salt):
+        self.ke, self.ka, self.ks = _kdf(key, salt, 0, 16), _kdf(key, salt, 1, 20), _kdf(key, salt, 2, 14)
+        self.ce, self.ca, self.cs = _kdf(key, salt, 3, 16), _kdf(key, salt, 4, 20), _kdf(key, salt, 5, 14)
+        self.tx_idx = 0
+
+    @staticmethod
+    def _iv(salt, ssrc, idx48):
+        iv = bytearray(salt + b"\0\0")
+        for i, b in enumerate(struct.pack("!I", ssrc)):
+            iv[4 + i] ^= b
+        for i, b in enumerate(idx48.to_bytes(6, "big")):
+            iv[8 + i] ^= b
+        return bytes(iv)
+
+    def _xor(self, key, iv, data):
+        ks = _aes_ctr(key, iv, len(data))
+        return bytes(a ^ b for a, b in zip(data, ks))
+
+    def protect_rtp(self, pkt, roc=0):
+        cc = pkt[0] & 0x0F
+        hdr = 12 + 4 * cc
+        seq, ssrc = struct.unpack("!H", pkt[2:4])[0], struct.unpack("!I", pkt[8:12])[0]
+        body = pkt[:hdr] + self._xor(self.ke, self._iv(self.ks, ssrc, (roc << 16) | seq), pkt[hdr:])
+        return body + hmac.new(self.ka, body + struct.pack("!I", roc), hashlib.sha1).digest()[:10]
+
+    def unprotect_rtp(self, pkt, roc=0):
+        body, tag = pkt[:-10], pkt[-10:]
+        if hmac.new(self.ka, body + struct.pack("!I", roc), hashlib.sha1).digest()[:10] != tag:
+            return None
+        cc = body[0] & 0x0F
+        hdr = 12 + 4 * cc
+        seq, ssrc = struct.unpack("!H", body[2:4])[0], struct.unpack("!I", body[8:12])[0]
+        return body[:hdr] + self._xor(self.ke, self._iv(self.ks, ssrc, (roc << 16) | seq), body[hdr:])
+
+    def protect_rtcp(self, pkt):
+        self.tx_idx += 1
+        ssrc = struct.unpack("!I", pkt[4:8])[0]
+        enc = pkt[:8] + self._xor(self.ce, self._iv(self.cs, ssrc, self.tx_idx), pkt[8:])
+        tail = struct.pack("!I", 0x80000000 | self.tx_idx)
+        return enc + tail + hmac.new(self.ca, enc + tail, hashlib.sha1).digest()[:10]
+
+    def unprotect_rtcp(self, pkt):
+        if len(pkt) < 8 + 4 + 10:
+            return None
+        body, tag = pkt[:-10], pkt[-10:]
+        if hmac.new(self.ca, body, hashlib.sha1).digest()[:10] != tag:
+            return None
+        ei = struct.unpack("!I", body[-4:])[0]
+        enc, idx = body[:-4], ei & 0x7FFFFFFF
+        ssrc = struct.unpack("!I", enc[4:8])[0]
+        return enc[:8] + (self._xor(self.ce, self._iv(self.cs, ssrc, idx), enc[8:]) if ei & 0x80000000 else enc[8:])
+
+
+def b64(b):
+    return base64.b64encode(b).decode()
+
+
+def key_pair(tag):
+    return bytes([tag]) * 16, bytes([tag ^ 0x5A]) * 14
+
+
+def smsgs(sock, ctx, t=0.4):
+    """SRTCP 보호 제어 채널 수신 — ctx 로 풀어 해석(풀리지 않으면 None 항목)."""
+    out = []
+    for d in drain(sock, t):
+        pl_ = ctx.unprotect_rtcp(d)
+        out.append(parse_app(pl_) if pl_ else None)
+    return out
 
 
 def stats():
@@ -443,6 +530,98 @@ try:
         req("PTT_GROUP_REMOVE", {"group_id": gid}, sesid=ses)
     res = pl(req("HEARTBEAT", {}, service="system"))["resource"]
     check("all released (after control flow)", res["mcvideo"]["member_used"] == 0 and res["mcvideo"]["groups"] == 0,
+          f"{res['mcvideo']}")
+
+    # ── 보호 (B7 — TS 33.180 제어 SRTCP · media_security.md SRTP) ──
+    KG, SG = key_pair(0x11)                       # 그룹 tc_crypto
+    KX, SX = key_pair(0x22)                       # X 의 CSK
+    XVU, XVUS = key_pair(0x33)                    # X video 상향(UE→CMP)
+    XVD, XVDS = key_pair(0x44)                    # X video 하향
+    YVU, YVUS = key_pair(0x55)
+    YVD, YVDS = key_pair(0x66)
+    tcg = {"alg": "AES_CM_128_HMAC_SHA1_80", "key": b64(KG), "salt": b64(SG)}
+    r = req("PTT_GROUP_ADD", {"group_id": "g107", "members": f"{X}:5,{Y}:3,{Z}:1", "max_transmitters": 1,
+                              "tc_crypto": {"alg": "AES_CM_128_HMAC_SHA1_80", "key": b64(KG[:15]), "salt": b64(SG)}},
+            sesid="mcv-smoke::7")
+    check("ADD tc_crypto key 15 bytes → BAD_REQUEST", st(r) == ("ERROR", "BAD_REQUEST"), r["hdr"].get("reason"))
+    r = req("PTT_GROUP_ADD", {"group_id": "g107", "members": f"{X}:5,{Y}:3,{Z}:1", "max_transmitters": 1,
+                              "tc_crypto": tcg}, sesid="mcv-smoke::7")
+    mp7 = pl(r).get("member_ports", {})
+    check("ADD g107 with tc_crypto (group key)", st(r)[0] == "OK" and len(mp7) == 3, f"{pl(r)}")
+    r = req("PTT_JOIN", {"group_id": "g107", "session_id": Z, "user_ip": IP, "user_port": udp().getsockname()[1],
+                         "floor_crypto": tcg}, sesid="mcv-smoke::7")
+    check("JOIN floor_crypto → BAD_REQUEST", st(r) == ("ERROR", "BAD_REQUEST"), r["hdr"].get("reason"))
+    sk7 = {n: (udp(), udp(), udp()) for n in (X, Y, Z)}
+    ukey = {X: 0x0D000001, Y: 0x0D000002, Z: 0x0D000003}
+    tc7 = {}
+
+    def mc(rx, rxs, tx, txs):
+        return {"alg": "AES_CM_128_HMAC_SHA1_80", "rx": {"key": b64(rx), "salt": b64(rxs)},
+                "tx": {"key": b64(tx), "salt": b64(txs)}}
+
+    for n, uri, extra in ((X, UX, {"tc_crypto": {"alg": "AES_CM_128_HMAC_SHA1_80", "key": b64(KX), "salt": b64(SX)},
+                                   "media_crypto_video": mc(XVU, XVUS, XVD, XVDS)}),
+                          (Y, UY, {"media_crypto_video": mc(YVU, YVUS, YVD, YVDS), "user_video_pt": 100}),
+                          (Z, UZ, {})):
+        a, v, c = sk7[n]
+        body = {"group_id": "g107", "session_id": n, "user_ip": IP, "user_port": a.getsockname()[1],
+                "user_video_port": v.getsockname()[1], "user_control_port": c.getsockname()[1], "user_uri": uri,
+                "user_tc_ssrc": ukey[n]}
+        body.update(extra)
+        r = req("PTT_JOIN", body, sesid="mcv-smoke::7")
+        tc7[n] = pl(r).get("tc_ssrc", 0)
+    cx, cg = Srtp(KX, SX), Srtp(KG, SG)          # 단말 쪽 SRTCP 컨텍스트 — X = CSK, Y·Z = 그룹 키
+    cy, cz = Srtp(KG, SG), Srtp(KG, SG)
+    dx = drain(sk7[X][2])
+    ix = [parse_app(cx.unprotect_rtcp(d) or b"") for d in dx]
+    iy, iz = smsgs(sk7[Y][2], cy), smsgs(sk7[Z][2], cz)
+    check("Idle to X protected with X's CSK", ix and ix[0] and ix[0]["name"] == "MCV1" and ix[0]["subtype"] == 0xF
+          and ix[0]["ssrc"] == ukey[X], f"{ix}")
+    check("Idle to Y·Z protected with group key", iy and iy[0] and iy[0]["subtype"] == 0xF and iz and iz[0]
+          and iz[0]["subtype"] == 0xF, f"{iy} {iz}")
+    check("X's Idle is not readable with the group key (member CSK wins)", dx and cg.unprotect_rtcp(dx[0]) is None
+          and dx[0][8:12] != b"MCV1", f"{[d[:16].hex() for d in dx]}")   # name 은 암호화 범위(헤더 8B 뒤)
+    before = (mcv_group("g107") or {}).get("crypto_drop", 0)
+    sk7[Z][2].sendto(app(b"MCV0", 0, tc7[Z]), (IP, mp7[Z]["control_port"]))            # 평문 — 버림
+    sk7[Z][2].sendto(Srtp(KX, SX).protect_rtcp(app(b"MCV0", 0, tc7[Z])), (IP, mp7[Z]["control_port"]))  # 남의 키 — 버림
+    zr = drain(sk7[Z][2], 0.3)
+    check("plain / wrong-key SRTCP request dropped (no answer)", not zr, f"{len(zr)} packets")
+    check("STATS crypto_drop counts them", (mcv_group("g107") or {}).get("crypto_drop", 0) - before == 2)
+    sk7[X][2].sendto(cx.protect_rtcp(app(b"MCV0", 0, tc7[X])), (IP, mp7[X]["control_port"]))
+    gx = [m for m in smsgs(sk7[X][2], cx) if m]
+    g7 = has(gx, "MCV1", 0x0)
+    gv7 = ssrc_f(g7[0], 23) if g7 else 0
+    check("SRTCP Transmission Request → Granted (X's CSK both ways)", g7 and gv7 > 0, f"{gx}")
+    ny7 = [m for m in smsgs(sk7[Y][2], cy) if m]
+    check("Notification to Y under group key", has(ny7, "MCV1", 0x6), f"{ny7}")
+    sk7[Y][2].sendto(cy.protect_rtcp(app(b"MCV0", 4, tc7[Y], tlv(4, UX.encode()))), (IP, mp7[Y]["control_port"]))
+    ry7 = has([m for m in smsgs(sk7[Y][2], cy) if m], "MCV1", 0x7)
+    check("Receive Media Request/Response under group key", ry7 and u16_f(ry7[0], 15) == 1, f"{ry7}")
+    # 영상 SRTP — X 상향 키로 보호해 보내면 CMP 가 풀고, SSRC·PT 를 찍어 Y 하향 키로 다시 보호한다
+    ux, dy = Srtp(XVU, XVUS), Srtp(YVD, YVDS)
+    sk7[X][1].sendto(ux.protect_rtp(rtp(pt=98, ssrc=0x78780001, seq=200)), (IP, mp7[X]["video_port"]))
+    vy7 = drain(sk7[Y][1], 0.3)
+    plain = dy.unprotect_rtp(vy7[0]) if vy7 else None
+    check("video SRTP: X uplink key → Y downlink key (SSRC·PT stamped under protection)",
+          plain is not None and struct.unpack("!I", plain[8:12])[0] == gv7 and (plain[1] & 0x7F) == 100
+          and plain[12:] == b"\0" * 20, f"{[d[:12].hex() for d in vy7]}")
+    check("Y downlink not readable with X's uplink key", vy7 and Srtp(XVU, XVUS).unprotect_rtp(vy7[0]) is None)
+    before = (mcv_group("g107") or {}).get("crypto_drop", 0)
+    sk7[X][1].sendto(Srtp(YVU, YVUS).protect_rtp(rtp(pt=98, ssrc=0x78780001, seq=201)), (IP, mp7[X]["video_port"]))
+    check("wrong-key video dropped", not drain(sk7[Y][1], 0.3)
+          and (mcv_group("g107") or {}).get("crypto_drop", 0) - before == 1)
+    r = req("PTT_JOIN", {"group_id": "g107", "session_id": X, "user_ip": IP, "user_port": sk7[X][0].getsockname()[1],
+                         "user_video_port": sk7[X][1].getsockname()[1], "user_control_port": sk7[X][2].getsockname()[1],
+                         "user_uri": UX, "user_tc_ssrc": ukey[X],
+                         "tc_crypto": {"alg": "AES_CM_128_HMAC_SHA1_80", "key": b64(KX), "salt": b64(SX)},
+                         "media_crypto_video": mc(XVU, XVUS, XVD, XVDS)}, sesid="mcv-smoke::7")
+    sk7[X][2].sendto(cx.protect_rtcp(app(b"MCV0", 0, tc7[X])), (IP, mp7[X]["control_port"]))
+    rg = [m for m in smsgs(sk7[X][2], cx) if m]
+    check("JOIN ② resend with the same keys keeps SRTCP context (Granted again, index continues)",
+          st(r)[0] == "OK" and has(rg, "MCV1", 0x0), f"{rg}")
+    req("PTT_GROUP_REMOVE", {"group_id": "g107"}, sesid="mcv-smoke::7")
+    res = pl(req("HEARTBEAT", {}, service="system"))["resource"]
+    check("all released (after protection)", res["mcvideo"]["member_used"] == 0 and res["mcvideo"]["groups"] == 0,
           f"{res['mcvideo']}")
 finally:
     if proc:

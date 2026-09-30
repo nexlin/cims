@@ -13,6 +13,8 @@
 #include "PTransmissionDefs.h"
 #include "PMcvControl.h"
 #include "PMcvMemberPort.h"
+#include "PFloorCrypto.h"
+#include "PMediaCrypto.h"
 
 // 멤버 선언 — PTT_JOIN(service:"mcvideo") 의 주소·협상 값 (cmp_media_api.md §7.9).
 struct McvMemberDecl {
@@ -78,6 +80,10 @@ public:
     // 녹취 자리 (record_dir/session_dir — 송출마다 슬롯 트랙은 녹취 단계에서)
     void setRecording(const std::string& recordDir, const std::string& sessionDir);
     std::string recordDir();
+    // 전송 제어 SRTCP 그룹 키 (PTT_GROUP_ADD.tc_crypto — floor_crypto 와 같은 형식, TS 33.180). key/salt/mki = 디코드된 바이트열.
+    //   같은 구성 재선언은 컨텍스트(SRTCP index·재전송 창)를 유지한다. 실패 시 err.
+    bool setTcCrypto(const std::string& alg, const std::string& key, const std::string& salt, const std::string& mki,
+                     std::string& err);
     void setLogCallback(LogFn fn) { _logFn = fn; }
     // 송출자 집합 변경 → TRANSMITTERS 이벤트 · T1/T5 만료 → TRANSMISSION_INACTIVITY 이벤트 (cmp_media_api.md §8).
     //   그룹 _mutex 를 쥔 채 부른다(PMcpttGroup 콜백과 같은 규약 — PCmpServer::_mutex 를 다시 잡지 않는다, sesid/service 는 그룹이 싣는다).
@@ -95,6 +101,14 @@ public:
     //   (새 prearranged 세션 개시의 암묵적 송출 요청) — res 에 허가 여부·SSRC 쌍을 채운다(JOIN 응답 granted·audio_ssrc·video_ssrc).
     bool addMember(const std::string& sessionId, const McvMemberDecl& decl, bool implicitRequest = false,
                    PMcvControl::ImplicitResult* res = nullptr);
+    // 멤버 보호 키 — addMember 보다 먼저 건다(참가 등록이 곧 Idle·Notification 을 보낸다). reserveMember 가 선행해야 한다.
+    //   tc_crypto = 이 멤버의 전송 제어 SRTCP 키(CSK — 없으면 그룹 키, TS 33.180 §9.4) · media_crypto[_video] = 멤버 SRTP
+    //   (media_security.md §6.3 — rx = UE 상향, tx = CMP 하향). 같은 구성 재선언은 세션 유지, 변경은 재생성. 실패 시 err(평문 폴백 없음).
+    bool setMemberTcCrypto(const std::string& sessionId, const std::string& alg, const std::string& key,
+                           const std::string& salt, const std::string& mki, std::string& err);
+    bool setMemberMediaCrypto(const std::string& sessionId, bool video, const std::string& alg, const std::string& rxKey,
+                              const std::string& rxSalt, const std::string& txKey, const std::string& txSalt,
+                              std::string& err);
     void removeMember(const std::string& sessionId);
     // 전 멤버 해제 — 그룹 해제 직전. 이후 늦게 도착한 패킷은 미등록 멤버로 버린다.
     void close();
@@ -116,6 +130,7 @@ public:
     long getSrcDrop();
     long getNoGrantDrop();
     long getControlRx();
+    long getCryptoDrop();      // SRTP·SRTCP 인증 실패/재전송으로 버린 패킷
     int getTransmitterCount();
     int getReceptionCount();
     void collectNatLatched(std::vector<std::tuple<std::string, std::string, int>>& out);
@@ -132,6 +147,10 @@ private:
         int dstPort[4] = {0, 0, 0, 0};
         bool latched[4] = {false, false, false, false};
         unsigned int uaTcSsrc = 0;       // 멤버가 전송 제어 헤더에 실어 보낸 SSRC (관측)
+        std::shared_ptr<PFloorCrypto> tcCrypto;       // 전송 제어 SRTCP (CSK) — 없으면 그룹 키
+        std::string tcCryptoSig;                      // 같은 구성 재선언 판정 (alg·key·salt·mki)
+        std::shared_ptr<PMediaCrypto> mediaCrypto;       // audio SRTP (null = 평문 leg)
+        std::shared_ptr<PMediaCrypto> mediaCryptoVideo;  // video SRTP
         int64_t followLogUsec = 0;       // dest follow 로그 rate-limit
     };
 
@@ -143,6 +162,8 @@ private:
     //   메시지 처리는 송출·수신 제어 상태 머신이 받는다.
     void _onControl(Peer& peer, const char* buf, int len);
     void _onControlMessage(Peer& peer, const char* buf, int len);
+    PFloorCrypto* _tcCryptoFor(Peer& peer);   // 멤버 키(CSK) > 그룹 키 > 평문(null)
+    void _cryptoDropLog(const char* what, const Peer& peer);
     // 허가된 송출의 미디어를 Active SSRC List 대로 분배한다 (호출자가 _mutex 보유)
     void _distribute(const Peer& sender, McvChannel ch, unsigned int ssrc, const char* buf, int len);
     // PMcvControl → 멤버 제어 채널 (호출자가 _mutex 보유)
@@ -180,6 +201,9 @@ private:
     long _srcDrop = 0;       // 미협상 소스·미등록 멤버 드롭 누적
     long _noGrantDrop = 0;   // 송출 허가 없는 미디어 드롭 누적 (payload 있는 RTP)
     long _controlRx = 0;     // 수신한 전송 제어 메시지 누적
+    long _cryptoDrop = 0;    // SRTP·SRTCP 해제 실패 누적
+    PFloorCrypto _tcCrypto;          // 전송 제어 SRTCP 그룹 키 (tc_crypto)
+    std::string _tcCryptoSig;
     time_t _lastDropWarn = 0;
 };
 

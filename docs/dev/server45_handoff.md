@@ -440,8 +440,20 @@ Audio/Video SSRC · 성립 전 메시지 보관)은 B4·B5 가 그대로 받는�
 - 검증 — 단위시험 `tests/cmp_mcvideo_control_test.cpp` 110/110(S1-UNIT-CMP PASS, 보낸 메시지는 전부 코덱 왕복) · 스모크 `tests/cmp_smoke_mcvideo_ports.py` 58/58
   (Idle·허가·Notification·[받기] 전 영상 0 / 뒤 SSRC·PT 찍힌 도달·#1·#3·종료·이벤트) · MCPTT 스모크 4종 무변화.
 
-**다음 (.48)** — B7(영상 SRTP `media_crypto_video` · 제어 SRTCP `tc_crypto` — 지금 `BAD_REQUEST`) → A7~A10(CSP MCVideo 모듈·등록·affiliation·그룹 호). 공유 DB
-마이그레이션(`migrate_mcvideo.sql`, 표 추가만)은 CSP 실측 때 적용.
+**.48 B7 — MCVideo 보호 (.48 → .45)** — C4·C5 가 SRTP·SRTCP 를 켤 때 맞출 것:
+
+| 축 | CMP |
+|---|---|
+| 미디어 SRTP | JOIN `media_crypto`·`media_crypto_video`(SDES — 단말 offer `a=crypto` = `rx`, CSP 생성 = `tx`). 상향은 그 멤버 `rx` 키로 풀고, 하향은 **SSRC(송출 할당값)·PT 를 찍은 뒤** 받는 멤버 `tx` 키로 보호 — 단말은 송출마다 새 SSRC 스트림을 받는다(ROC 0 부터) |
+| 전송 제어 SRTCP | `tc_crypto`(TS 33.180 — `m=application … udp MCVideo` 는 SDES 대상 아님) — 멤버 CSK(JOIN) > 그룹 키(ADD) > 평문. datagram 전체가 SRTCP 한 패킷(compound 포함, RFC 3711 §3.4), 풀리지 않는 패킷(평문·다른 키·재전송)은 버린다 — **빈 RR keepalive 도 보호 채널이면 SRTCP 로** 보내야 한다(평문이면 NAT latch 는 되지만 해석 전에 버려져 `crypto_drop` 에 센다) |
+| 시점 | 키는 참가 등록 **전에** 건다 — 첫 Transmission Idle 부터 보호. 같은 키로 JOIN ② 를 다시 보내도 SRTCP index 를 이어 간다(키스트림 재사용 없음) |
+
+- 검증 — 스모크 `tests/cmp_smoke_mcvideo_ports.py` 74/74: 스모크 안의 독립 파이썬 RFC 3711 구현(cryptography — AES-CM + HMAC-SHA1-80, KDR 0)으로 CMP(libsrtp·
+  `PFloorCrypto`)와 교차 — 멤버 CSK 로 푼 Idle·Granted, 그룹 키 Notification·Receive Media Response, X 상향 키 영상 → Y 하향 키(SSRC·PT 찍힘), 평문·남의 키
+  요청·틀린 키 영상 버림, 같은 키 재-JOIN 뒤 Granted.
+
+**다음 (.48)** — A7~A10(CSP MCVideo 모듈·등록·affiliation·그룹 호). 공유 DB 마이그레이션(`migrate_mcvideo.sql`, 표 추가만)은 CSP 실측 때 적용. B6(영상 RTCP
+PLI·FIR 전달)·B8(녹취)은 CSP 결선 뒤.
 
 **C2 — 단말 설정 문서 해석 (.45 → .48)** — K2 골든을 CSC 생성 시험과 **같은 파일**로 읽는다(`cimsue_test` `McvConfig` 7 — README 의 값 전부, 전체 130/130).
 

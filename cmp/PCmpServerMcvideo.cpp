@@ -31,6 +31,34 @@ bool McvParseTimers(const SimpleJson::JsonNode& tt, McvTimers& t, std::string& e
            McvIntField(tt, "c7", 1, 255, t.c7, err) && McvIntField(tt, "c11", 1, 255, t.c11, err);
 }
 
+// tc_crypto (§7.8 floor_crypto 와 같은 형식 — key/salt = base64, mki = hex, TS 33.180). 없으면 have=false. 그룹·유닛을 잡기 전에
+//   알고리즘·길이까지 검사한다(fail-fast — 평문으로 조용히 떨어뜨리지 않는다).
+struct McvTcCrypto {
+    bool have = false;
+    std::string alg, key, salt, mki;
+};
+bool McvParseTcCrypto(const SimpleJson::JsonNode& payload, McvTcCrypto& out, std::string& err) {
+    SimpleJson::JsonNode c = payload.Get("tc_crypto");
+    if (c.type != SimpleJson::JSON_OBJECT) return true;
+    out.have = true;
+    out.alg = c.GetString("alg");
+    if (!out.alg.empty() && !PMediaCrypto::IsSupportedAlg(out.alg))
+        err = "tc_crypto.alg must be AES_CM_128_HMAC_SHA1_80|_32";
+    else if (!PFloorCrypto::DecodeBase64(c.GetString("key"), out.key))
+        err = "tc_crypto.key must be base64";
+    else if (!PFloorCrypto::DecodeBase64(c.GetString("salt"), out.salt))
+        err = "tc_crypto.salt must be base64";
+    else if (!PFloorCrypto::DecodeHex(c.GetString("mki"), out.mki))
+        err = "tc_crypto.mki must be hex";
+    else if (out.key.size() != 16)
+        err = "tc_crypto.key must decode to 16 bytes (AES-128)";
+    else if (out.salt.size() != 14)
+        err = "tc_crypto.salt must decode to 14 bytes";
+    else if (out.mki.size() > (size_t)PFloorCrypto::kMaxMki)
+        err = "tc_crypto.mki too long";
+    return err.empty();
+}
+
 }  // namespace
 
 // PTT_GROUP_ADD / PTT_GROUP_MODIFY (service:"mcvideo") — cmp_media_api.md §7.9.
@@ -65,7 +93,9 @@ void PCmpServer::processMcvAddGroup(const SimpleJson::JsonNode& payload, const s
                                           "floor_crypto",  "broadcast",    "initiator_id" };
     for (const char* f : kFloorFields)
         if (payload.Has(f)) return reject("BAD_REQUEST", std::string(f) + " not allowed for mcvideo (no floor)");
-    if (payload.Has("tc_crypto")) return reject("BAD_REQUEST", "tc_crypto not supported");
+    McvTcCrypto tc;
+    std::string tcErr;
+    if (!McvParseTcCrypto(payload, tc, tcErr)) return reject("BAD_REQUEST", tcErr);
 
     auto it = _mcvGroups.find(groupId);
     std::shared_ptr<PMcvideoGroup> group = (it != _mcvGroups.end()) ? it->second : nullptr;
@@ -165,6 +195,11 @@ void PCmpServer::processMcvAddGroup(const SimpleJson::JsonNode& payload, const s
     }
     group->setSessionMeta(sesid, svc, subid);
     group->setConfig(prearranged, maxTx, autoRx, callType, timers);
+    // 전송 제어 SRTCP 그룹 키 — 멤버 CSK(JOIN tc_crypto)가 없는 멤버가 쓴다(TS 33.180 §9.4). 멤버를 들이기 전에 건다.
+    if (tc.have && !group->setTcCrypto(tc.alg, tc.key, tc.salt, tc.mki, tcErr)) {
+        if (createdNow) destroyMcvGroup(groupId);
+        return reject("BAD_REQUEST", "tc_crypto: " + tcErr);
+    }
     group->updateRoster(priorities, roles);
     std::string recordDir = payload.GetString("record_dir");
     if (!recordDir.empty()) group->setRecording(recordDir, payload.GetString("session_dir"));
@@ -232,10 +267,16 @@ void PCmpServer::processMcvJoin(const SimpleJson::JsonNode& payload, const std::
     };
 
     if (groupId.empty() || sessionId.empty()) return reject("BAD_REQUEST", "group_id and session_id required");
-    // 보호 키는 평문으로 조용히 떨어뜨리지 않는다(media_security.md — fail-fast).
-    static const char* kCryptoFields[] = { "media_crypto", "media_crypto_video", "tc_crypto", "floor_crypto" };
-    for (const char* f : kCryptoFields)
-        if (payload.Has(f)) return reject("BAD_REQUEST", std::string(f) + " not supported for mcvideo");
+    // floor 보호 키는 MCVideo 에 없다(전송 제어 = tc_crypto). 보호 키 형식 위반은 유닛을 잡기 전에 거절한다(fail-fast).
+    if (payload.Has("floor_crypto")) return reject("BAD_REQUEST", "floor_crypto not allowed for mcvideo (use tc_crypto)");
+    MediaCryptoParam mcAudio, mcVideo;
+    McvTcCrypto tc;
+    {
+        std::string err;
+        if (!ParseMediaCrypto(payload, "media_crypto", mcAudio, err) ||
+            !ParseMediaCrypto(payload, "media_crypto_video", mcVideo, err) || !McvParseTcCrypto(payload, tc, err))
+            return reject("BAD_REQUEST", err);
+    }
 
     auto it = _mcvGroups.find(groupId);
     if (it == _mcvGroups.end()) return reject("NOT_FOUND", "group not found");
@@ -282,6 +323,16 @@ void PCmpServer::processMcvJoin(const SimpleJson::JsonNode& payload, const std::
 
     PMcvMemberPort* mu = ensureMcvUnit(groupId, sessionId, group);
     if (!mu) return reject("NO_RESOURCE", "mcvideo member pool exhausted");
+    // 보호 키 — 참가 등록(Idle·Notification 송신) 전에 건다. 같은 구성 재선언은 세션 유지, 변경은 재생성(media_security.md §5.2).
+    {
+        std::string err;
+        bool ok = (!tc.have || group->setMemberTcCrypto(sessionId, tc.alg, tc.key, tc.salt, tc.mki, err)) &&
+                  (!mcAudio.have || group->setMemberMediaCrypto(sessionId, false, mcAudio.alg, mcAudio.rxKey,
+                                                                mcAudio.rxSalt, mcAudio.txKey, mcAudio.txSalt, err)) &&
+                  (!mcVideo.have || group->setMemberMediaCrypto(sessionId, true, mcVideo.alg, mcVideo.rxKey,
+                                                                mcVideo.rxSalt, mcVideo.txKey, mcVideo.txSalt, err));
+        if (!ok) return reject("BAD_REQUEST", err);
+    }
     PMcvControl::ImplicitResult ires;
     if (addressed) group->addMember(sessionId, d, implicitReq, &ires);
 

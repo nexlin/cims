@@ -154,6 +154,28 @@ std::string PMcvideoGroup::recordDir() {
     return _recordDir;
 }
 
+// 보호 키 구성 서명 — 같은 구성 재선언이면 SRTCP 컨텍스트(index·재전송 창)를 유지한다. 같은 키로 index 를 처음부터 다시 쓰면
+//   키스트림이 재사용된다(RFC 3711 §9.1).
+static std::string _cryptoSig(const std::string& alg, const std::string& key, const std::string& salt,
+                              const std::string& mki) {
+    return (alg.empty() ? std::string("AES_CM_128_HMAC_SHA1_80") : alg) + "|" + key + "|" + salt + "|" + mki;
+}
+
+bool PMcvideoGroup::setTcCrypto(const std::string& alg, const std::string& key, const std::string& salt,
+                                const std::string& mki, std::string& err) {
+    PAutoLock lock(_mutex);
+    std::string sig = _cryptoSig(alg, key, salt, mki);
+    if (_tcCrypto.enabled() && sig == _tcCryptoSig) return true;
+    if (!_tcCrypto.init(alg, key, salt, mki, err)) {
+        LOG_WARN("PMcvideoGroup", "[%s] tc_crypto rejected: %s", _groupId.c_str(), err.c_str());
+        return false;
+    }
+    _tcCryptoSig = sig;
+    LOG_INFO("PMcvideoGroup", "[%s] transmission control SRTCP (group key) alg=%s mki=%s", _groupId.c_str(),
+             _tcCrypto.alg().c_str(), mki.empty() ? "-" : "yes");
+    return true;
+}
+
 // ── 멤버 ──────────────────────────────────────────────────────────────
 
 unsigned int PMcvideoGroup::reserveMember(const std::string& sessionId, PMcvMemberPort* unit) {
@@ -216,8 +238,73 @@ bool PMcvideoGroup::addMember(const std::string& sessionId, const McvMemberDecl&
     return true;
 }
 
+bool PMcvideoGroup::setMemberTcCrypto(const std::string& sessionId, const std::string& alg, const std::string& key,
+                                      const std::string& salt, const std::string& mki, std::string& err) {
+    PAutoLock lock(_mutex);
+    auto it = _members.find(sessionId);
+    if (it == _members.end()) {
+        err = "member not reserved";
+        return false;
+    }
+    Peer& p = it->second;
+    std::string sig = _cryptoSig(alg, key, salt, mki);
+    if (p.tcCrypto && sig == p.tcCryptoSig) return true;
+    auto ctx = std::make_shared<PFloorCrypto>();
+    if (!ctx->init(alg, key, salt, mki, err)) {
+        LOG_WARN("PMcvideoGroup", "[%s] member tc_crypto rejected (%s): %s", _groupId.c_str(), sessionId.c_str(),
+                 err.c_str());
+        return false;
+    }
+    p.tcCrypto = ctx;
+    p.tcCryptoSig = sig;
+    LOG_INFO("PMcvideoGroup", "[%s] member transmission control SRTCP (CSK) session=%s alg=%s", _groupId.c_str(),
+             sessionId.c_str(), ctx->alg().c_str());
+    return true;
+}
+
+bool PMcvideoGroup::setMemberMediaCrypto(const std::string& sessionId, bool video, const std::string& alg,
+                                         const std::string& rxKey, const std::string& rxSalt, const std::string& txKey,
+                                         const std::string& txSalt, std::string& err) {
+    PAutoLock lock(_mutex);
+    auto it = _members.find(sessionId);
+    if (it == _members.end()) {
+        err = "member not reserved";
+        return false;
+    }
+    std::shared_ptr<PMediaCrypto>& sec = video ? it->second.mediaCryptoVideo : it->second.mediaCrypto;
+    if (!sec) sec = std::make_shared<PMediaCrypto>();
+    if (!sec->init(alg, rxKey, rxSalt, txKey, txSalt, err)) {
+        sec.reset();   // 키 오류 leg 를 평문으로 조용히 폴백하지 않는다 — 호출자가 명령을 거부한다
+        LOG_WARN("PMcvideoGroup", "[%s] member media crypto rejected (%s %s): %s", _groupId.c_str(), sessionId.c_str(),
+                 video ? "video" : "audio", err.c_str());
+        return false;
+    }
+    LOG_INFO("PMcvideoGroup", "[%s] member media SRTP %s session=%s alg=%s", _groupId.c_str(), video ? "video" : "audio",
+             sessionId.c_str(), sec->alg().c_str());
+    return true;
+}
+
+PFloorCrypto* PMcvideoGroup::_tcCryptoFor(Peer& peer) {
+    if (peer.tcCrypto) return peer.tcCrypto.get();
+    return _tcCrypto.enabled() ? &_tcCrypto : nullptr;
+}
+
+void PMcvideoGroup::_cryptoDropLog(const char* what, const Peer& peer) {
+    ++_cryptoDrop;
+    time_t now;
+    time(&now);
+    if (now - _lastDropWarn >= 5) {
+        _lastDropWarn = now;
+        LOG_WARN("PMcvideoGroup", "[%s] %s unprotect failed member=%s (total=%ld)", _groupId.c_str(), what,
+                 peer.id.c_str(), _cryptoDrop);
+    }
+}
+
 void PMcvideoGroup::_releasePeer(Peer& peer) {
     PMcvControl::FreeSsrc(peer.tcSsrc);
+    peer.tcCrypto.reset();
+    peer.mediaCrypto.reset();
+    peer.mediaCryptoVideo.reset();
     peer.tcSsrc = 0;
     peer.unit = nullptr;
 }
@@ -345,6 +432,12 @@ void PMcvideoGroup::onMemberPacket(const std::string& memberId, McvChannel ch, c
             break;
         case MCV_CH_AUDIO:
         case MCV_CH_VIDEO: {
+            // SRTP leg — 보낸 멤버의 상향 키로 먼저 푼다(평문으로 분배·판정, 받는 leg 키로 다시 보호 — media_security.md §6)
+            PMediaCrypto* sec = (ch == MCV_CH_AUDIO ? peer.mediaCrypto : peer.mediaCryptoVideo).get();
+            if (sec && sec->enabled() && !sec->unprotectRtp(buf, len)) {
+                _cryptoDropLog(ch == MCV_CH_AUDIO ? "audio SRTP" : "video SRTP", peer);
+                break;
+            }
             // 허가된 송출만 분배한다(수신자별 Active SSRC List — TS 24.581 §6.3.7). 헤더만인 keepalive 는 판정 밖 — 버린다.
             if (!_rtpHasPayload(buf, len)) break;
             unsigned int audioSsrc = 0, videoSsrc = 0;
@@ -363,6 +456,17 @@ void PMcvideoGroup::onMemberPacket(const std::string& memberId, McvChannel ch, c
 // 전송 제어 채널 수신 (TS 24.581 §9.1). 한 datagram 에 RTCP 패킷이 여럿(compound) 올 수 있어 헤더 length 로 나눠 APP 만 푼다.
 //   APP 이 아닌 RTCP — 단말의 빈 RR keepalive(NAT 하향 경로 유지, RFC 3550 §6.4.2) — 는 해석하지 않고 버린다(드롭으로 세지 않는다).
 void PMcvideoGroup::_onControl(Peer& peer, const char* buf, int len) {
+    // 보호 채널 — datagram 전체가 SRTCP 패킷 하나다(compound 포함, RFC 3711 §3.4). 멤버 키(CSK) > 그룹 키로 먼저 푼다.
+    char plain[2048];
+    if (PFloorCrypto* c = _tcCryptoFor(peer)) {
+        int plainLen = 0;
+        if (!c->unprotect(buf, len, plain, sizeof(plain), plainLen)) {
+            _cryptoDropLog("control SRTCP", peer);
+            return;
+        }
+        buf = plain;
+        len = plainLen;
+    }
     int off = 0;
     while (off + 4 <= len) {
         uint16_t words;
@@ -406,19 +510,25 @@ void PMcvideoGroup::_onControlMessage(Peer& peer, const char* buf, int len) {
 // 허가된 송출 하나의 RTP 를 그 송출을 받는 멤버(Active SSRC List)에게 — SSRC = 송출 할당값(§6.3.4.3.3 d, cmp_media_api.md §7.9
 //   SSRC 규칙: 단말이 SSRC 를 바꾸지 못해도 분배·수신자 구분이 맞는다), PT = 수신 leg 의 egress PT(선언 시).
 void PMcvideoGroup::_distribute(const Peer& sender, McvChannel ch, unsigned int ssrc, const char* buf, int len) {
-    char out[2048];
-    if (len > (int)sizeof(out)) return;
-    memcpy(out, buf, len);
+    char base[2048];
+    char pkt[2048 + PMediaCrypto::kMaxOverhead];
+    if (len > (int)sizeof(base)) return;
+    memcpy(base, buf, len);
     uint32_t nssrc = htonl(ssrc);
-    memcpy(out + 8, &nssrc, 4);
+    memcpy(base + 8, &nssrc, 4);
     const unsigned char origPt = (unsigned char)buf[1];
     for (auto& kv : _members) {
         Peer& r = kv.second;
         if (!r.addressed || !r.unit || r.id == sender.id || r.dstPort[ch] <= 0) continue;
         if (!_ctl.receives(r.id, sender.id)) continue;
+        memcpy(pkt, base, len);
+        int n = len;
         int pt = ch == MCV_CH_AUDIO ? r.decl.ptOut : r.decl.videoPtOut;
-        out[1] = pt > 0 ? (char)((origPt & 0x80) | (pt & 0x7F)) : (char)origPt;
-        r.unit->sendTo(ch, r.dstIp[ch], r.dstPort[ch], out, len);
+        pkt[1] = pt > 0 ? (char)((origPt & 0x80) | (pt & 0x7F)) : (char)origPt;
+        // SRTP leg — 받는 멤버의 하향 키로 보호(SSRC 가 할당값이라 송출마다 스트림이 따로 선다 — any_outbound 템플릿)
+        PMediaCrypto* sec = (ch == MCV_CH_AUDIO ? r.mediaCrypto : r.mediaCryptoVideo).get();
+        if (sec && sec->enabled() && !sec->protectRtp(pkt, n, sizeof(pkt))) continue;
+        r.unit->sendTo(ch, r.dstIp[ch], r.dstPort[ch], pkt, n);
     }
 }
 
@@ -441,7 +551,19 @@ void PMcvideoGroup::_sendControl(const std::string& memberId, int app, int subty
         LOG_ERROR("PMcvideoGroup", "[%s] member=%s MCV%d %s encode failed", _groupId.c_str(), memberId.c_str(), app, name);
         return;
     }
-    p.unit->sendTo(MCV_CH_CONTROL, p.dstIp[MCV_CH_CONTROL], p.dstPort[MCV_CH_CONTROL], buf, n);
+    char sec[512 + PFloorCrypto::kMaxOverhead];
+    const char* out = buf;
+    if (PFloorCrypto* c = _tcCryptoFor(p)) {   // 보호 채널 — 멤버 키(CSK) > 그룹 키
+        int secLen = 0;
+        if (!c->protect(buf, n, sec, sizeof(sec), secLen)) {
+            LOG_ERROR("PMcvideoGroup", "[%s] member=%s MCV%d %s SRTCP protect failed", _groupId.c_str(),
+                      memberId.c_str(), app, name);
+            return;
+        }
+        out = sec;
+        n = secLen;
+    }
+    p.unit->sendTo(MCV_CH_CONTROL, p.dstIp[MCV_CH_CONTROL], p.dstPort[MCV_CH_CONTROL], out, n);
     LOG_DEBUG("PMcvideoGroup", "[%s] control tx member=%s MCV%d %s (subtype=0x%02x fields=%lu)", _groupId.c_str(),
               memberId.c_str(), app, name, subtype, fields.size());
     if (_logFn) {
@@ -470,6 +592,11 @@ long PMcvideoGroup::getNoGrantDrop() {
 long PMcvideoGroup::getControlRx() {
     PAutoLock lock(_mutex);
     return _controlRx;
+}
+
+long PMcvideoGroup::getCryptoDrop() {
+    PAutoLock lock(_mutex);
+    return _cryptoDrop;
 }
 
 int PMcvideoGroup::getTransmitterCount() {

@@ -758,7 +758,7 @@ MCVideo 그룹 호(TS 24.281 §9.2)의 미디어·전송 제어(TS 24.581). **�
 | `reception_mode` | - | `manual`(기본 — 일반 호, 수신자가 Receive Media Request) / `automatic`(긴급·임박·방송·system 호 — Reception Mode '0', §6.3.6.3.3, V8) |
 | `call_type` | - | `normal`(기본) / `emergency` / `imminent` — 호 종류. 긴급·임박이면 전송 제어 메시지에 Transmission Indicator(D·E 비트, §9.2.3.11)를 싣고 수신은 automatic(§6.3.6.3.3 1a), 유효 우선순위의 tier 가 된다. 요청의 Transmission Indicator 는 판정에 쓰지 않는다(호 종류는 CSP 가 정한다) |
 | `tc_timers` | - | 서버 타이머(ms)·카운터 `{t1_ms, t2_ms, t3_ms, t4_ms, t5_ms, t6_ms, t11_ms, c2, c4, c6, c7, c11}` — **T1 = 그룹 `on-network-hang-timer`**(MCPTT hang timer 재사용, §11.1.3), **T5 = 그룹 `on-network-reception-hang-timer`**, 나머지 = MCVideo service configuration `<tc-timers-counters-R14>`(CSC `/internal/mcvideo/service-config`). 미지정 필드 = K5 기본값(`MCV_T*_MS`·`MCV_C*`). t1_ms·t5_ms 0 = 그 타이머 미사용 |
-| `tc_crypto` | - | 전송 제어 SRTCP 그룹 키 `{alg,key,salt[,mki]}` — §7.8 `floor_crypto` 와 같은 형식·규칙(B7) |
+| `tc_crypto` | - | 전송 제어 SRTCP 그룹 키 `{alg,key,salt[,mki]}` — §7.8 `floor_crypto` 와 같은 형식(key·salt = base64 16B·14B, mki = hex, alg = `AES_CM_128_HMAC_SHA1_80`(기본)·`_32`). 멤버 CSK(JOIN `tc_crypto`)가 없는 멤버의 전송 제어 메시지를 이 키로 보호·해제한다(TS 33.180 §9.4). 같은 구성 재선언은 컨텍스트(SRTCP index·재전송 창)를 유지. 형식 위반 `BAD_REQUEST` |
 
 §7.1 의 floor 필드(`floor_control`·`floor_policy`·`max_talkers`·`floor_timers`·`floor_crypto`·`broadcast`·`initiator_id`)가 오면 `BAD_REQUEST`
 — MCVideo 에 floor 는 없다. 응답 payload: `ip`, `member_ports`(멤버별 `{port, video_port, control_port}`) — **그룹 공유 포트가 없다**. 멤버마다
@@ -766,7 +766,9 @@ audio RTP(`port`, RTCP = +1)·video RTP(`video_port`, RTCP = +1 — 수신자 PL
 `m=application <port> udp MCVideo` — RTP 가 아니라 RTCP 포트, TS 24.581 §4.3.3.1)를 준다.
 
 **PTT_JOIN** (`service:"mcvideo"`) — §7.4 의 `group_id`·`session_id`·`user_ip`·`user_port`·`user_video_port`·`user_nat`·`user_sig_ip`·`user_pt`·
-`user_video_pt`·`user_src_pt`·`user_codec`·`role`·`user_uri`(MCVideo ID — User ID 필드 값)·`media_crypto`·`media_crypto_video` 는 뜻이 같다.
+`user_video_pt`·`user_src_pt`·`user_codec`·`role`·`user_uri`(MCVideo ID — User ID 필드 값)·`media_crypto`·`media_crypto_video` 는 뜻이 같다
+(SRTP leg — 상향은 그 멤버 `rx` 키로 풀고, 하향은 받는 멤버 `tx` 키로 SSRC·PT 찍기 뒤 보호, media_security.md §6). `floor_crypto` 는 `BAD_REQUEST`
+(전송 제어 보호 = `tc_crypto`).
 2단 멱등(§7.4)도 같다. 그 밖의 필드:
 
 | payload 필드 | 필수 | 설명 |
@@ -780,7 +782,7 @@ audio RTP(`port`, RTCP = +1)·video RTP(`video_port`, RTCP = +1 — 수신자 PL
 | `max_reception_priority` | - | 협상한 수신 우선순위 상한(answer `mc_reception_priority`, §14.3.6) |
 | `max_rx_streams` | - | **C9** — 이 멤버의 동시 수신 스트림 상한 = user profile `<MaxSimultaneousVideoStreams>`(TS 24.581 §11.2.3, 1차 1). 넘는 Receive Media Request 는 Receive Media Response rejected **#7**(Max no of simultaneous stream). 없으면 K5 기본값 4 |
 | `implicit_request` | - | `1` = CSP 가 offer `mc_implicit_request` 를 받아들였다 — **새 prearranged 세션 개시만**(chat 합류·진행 중 합류는 받지 않는다, §14.3.5), 주소 등록(`user_ip`·`user_port`)과 함께만. CMP 는 참가 시점에 Transmission Request 로 처리한다(§6.3.5.2.2 1) — 다른 참가자가 있으면 곧바로 허가, 개시자 혼자면 첫 초대 참가자가 주소 등록될 때 허가하고 Transmission Granted 를 보낸다(§6.3.2.2, 미디어 버퍼링 없음) |
-| `tc_crypto` | - | 이 멤버의 전송 제어 SRTCP 키(CSK) — 없으면 그룹 키(B7) |
+| `tc_crypto` | - | 이 멤버의 전송 제어 SRTCP 키(CSK) — 형식은 ADD `tc_crypto` 와 같다. 있으면 이 멤버와의 전송 제어는 이 키로만, 없으면 그룹 키, 둘 다 없으면 평문. 보호 채널에서 풀리지 않는 패킷(평문·다른 키·재전송)은 버리고 `crypto_drop` 에 센다. `media_crypto`·`media_crypto_video` 와 함께 **참가 등록 전**에 걸린다(첫 Idle 부터 보호) |
 
 응답 payload: `ip`, `port`, `video_port`, `control_port`, **`tc_ssrc`**(CMP 가 이 멤버에게서 기대하는 RTCP 헤더 SSRC — CSP 가 answer 의
 `mc_transmission_ssrc` 로 싣는다), `implicit_request` 를 받았으면 `granted`(0/1)·`audio_ssrc`·`video_ssrc`(CSP 가 answer 에 `mc_implicit_request` +
@@ -816,7 +818,8 @@ audio RTP(`port`, RTCP = +1)·video RTP(`video_port`, RTCP = +1 — 수신자 PL
 **그 밖** — `PTT_FLOOR_TIER` 등 floor 명령에 `service:"mcvideo"` 면 `BAD_REQUEST`. `resource.mcvideo` 를 광고하지 않는 CMP(멤버 풀 0)는
 `service:"mcvideo"` 명령에 `NO_RESOURCE`. sweeper 가 주소 등록 멤버 0 + 무활동 `SessionTimeout` 인 MCVideo 그룹을 회수하면
 `PTT_GROUP_ABORTED`(hdr.service `"mcvideo"`)를 보낸다(§8). 관측 — STATS `detail.mcvideo_groups[]{group_id, group_type, members, reserved,
-max_transmitters, transmitters, receptions, control_rx, no_grant_drop}`(transmitters = Cx, receptions = C7 — Active SSRC List 항목 합)·
+max_transmitters, transmitters, receptions, control_rx, no_grant_drop, crypto_drop}`(transmitters = Cx, receptions = C7 — Active SSRC List
+항목 합, crypto_drop = SRTP·SRTCP 해제 실패)·
 `mcvideo_groups_total`.
 
 ## 8. 이벤트 (type: "event")

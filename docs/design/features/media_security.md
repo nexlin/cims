@@ -182,6 +182,10 @@ CSP 발신 offer 의 형태를 per-call 폴백 없이 결정하기 위해, **단
   `onMemberRtpPacket` unprotect → 평문 분배 로직(현행 무변경) → 하향 `sendAudioToAll` 의
   수신자별 SSRC/seq 재작성 **후** 그 수신자 leg 키로 protect. 그룹 경로는 미디어 RTCP 를
   쓰지 않으므로(floor 가 별도) SRTCP 대상 아님.
+- **`PMcvMemberPort` / `PMcvideoGroup`** (MCVideo 그룹 — [mcvideo.md](mcvideo.md) §5.3): `Peer` 에 audio·video `PMediaCrypto`
+  (JOIN `media_crypto`·`media_crypto_video`, 처음부터 영상 SRTP). 상향 unprotect → 송출 판정·분배 → 수신자별 SSRC(송출 할당값)·PT
+  찍기 **후** 그 수신자 leg 키로 protect — 같은 규칙. 전송 제어 채널(`m=application … udp MCVideo`)은 SDES 가 아니라 TS 33.180
+  SRTCP 축(`tc_crypto` — 멤버 CSK > 그룹 키, §7.4 floor 와 같은 `PFloorCrypto`).
 - **SSRC 와 ROC**: RFC 3711 의 세션 키는 SSRC 무관(키스트림만 SSRC·인덱스 의존)이므로 leg
   키 하나로 하향 다중 SSRC(화자 슬롯 0x10000000+ssrc / 0x40000000+…)를 보호할 수 있다.
   SSRC 별 스트림·ROC·재전송 창은 libsrtp 템플릿 세션이 내부 관리한다(§6.1). 하향은

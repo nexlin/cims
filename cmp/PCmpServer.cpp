@@ -904,6 +904,7 @@ void PCmpServer::processStats(const SimpleJson::JsonNode& payload, const std::st
             g.Set("receptions", group->getReceptionCount());
             g.Set("control_rx", (long long)group->getControlRx());
             g.Set("no_grant_drop", (long long)group->getNoGrantDrop());
+            g.Set("crypto_drop", (long long)group->getCryptoDrop());
             mcvArr.Add(g);
         }
         detail.Set("mcvideo_groups", mcvArr);
@@ -991,15 +992,8 @@ void PCmpServer::processSessionList(const SimpleJson::JsonNode& payload, const s
             txIdStr.c_str(), "system", sesid.c_str(), "", txSeq, "csp");
 }
 
-// media_crypto[_video] 파싱+검증 (media_security.md §6.3) — key/salt=base64 를 디코드해
-//   길이(16B/14B)까지 확인한다. 필드 부재 = 평문 leg(have=false, true 반환). 형식 위반은
-//   err 를 채우고 false — 호출자는 명령을 거부한다(fail-fast, 평문 조용 폴백 금지).
-struct MediaCryptoParam {
-    bool have = false;
-    std::string alg, rxKey, rxSalt, txKey, txSalt;
-};
-static bool _parseMediaCrypto(const SimpleJson::JsonNode& payload, const char* field,
-                              MediaCryptoParam& out, std::string& err) {
+// media_crypto[_video] 파싱+검증 (media_security.md §6.3) — 규약은 PCmpServer.h MediaCryptoParam.
+bool ParseMediaCrypto(const SimpleJson::JsonNode& payload, const char* field, MediaCryptoParam& out, std::string& err) {
     SimpleJson::JsonNode mc = payload.Get(field);
     if (mc.type != SimpleJson::JSON_OBJECT) return true;
     out.have = true;
@@ -1073,8 +1067,8 @@ void PCmpServer::processAdd(const SimpleJson::JsonNode& payload, const std::stri
     MediaCryptoParam mcAudio, mcVideo;
     {
         std::string mcErr;
-        if (!_parseMediaCrypto(payload, "media_crypto", mcAudio, mcErr) ||
-            !_parseMediaCrypto(payload, "media_crypto_video", mcVideo, mcErr) ||
+        if (!ParseMediaCrypto(payload, "media_crypto", mcAudio, mcErr) ||
+            !ParseMediaCrypto(payload, "media_crypto_video", mcVideo, mcErr) ||
             ((mcAudio.have || mcVideo.have) && peerIdx < 0)) {
             if (mcErr.empty()) mcErr = "media_crypto requires peer_index";
             std::string txIdStr = std::to_string(transId);
@@ -1709,8 +1703,8 @@ void PCmpServer::processTapAdd(const SimpleJson::JsonNode& payload, const std::s
     MediaCryptoParam mcAudio, mcVideo;
     {
         std::string mcErr;
-        if (!_parseMediaCrypto(payload, "media_crypto", mcAudio, mcErr) ||
-            !_parseMediaCrypto(payload, "media_crypto_video", mcVideo, mcErr))
+        if (!ParseMediaCrypto(payload, "media_crypto", mcAudio, mcErr) ||
+            !ParseMediaCrypto(payload, "media_crypto_video", mcVideo, mcErr))
             return reject("BAD_REQUEST", mcErr);
     }
 
@@ -2173,8 +2167,8 @@ void PCmpServer::processJoinGroup(const SimpleJson::JsonNode& payload, const std
     MediaCryptoParam mcAudio, mcVideo;
     {
         std::string mcErr;
-        if (!_parseMediaCrypto(payload, "media_crypto", mcAudio, mcErr) ||
-            !_parseMediaCrypto(payload, "media_crypto_video", mcVideo, mcErr)) {
+        if (!ParseMediaCrypto(payload, "media_crypto", mcAudio, mcErr) ||
+            !ParseMediaCrypto(payload, "media_crypto_video", mcVideo, mcErr)) {
             int txSeq = sendErr(ip, port, transId, "PTT_JOIN", sesid, svc, "BAD_REQUEST", mcErr.c_str());
             logFlow(groupId, "cmp", "csp", "JSON", "ERROR", mcErr.c_str(), txIdStr.c_str(),
                     svc.c_str(), sesid.c_str(), "", txSeq, "csp");
