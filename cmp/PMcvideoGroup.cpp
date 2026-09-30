@@ -1,5 +1,6 @@
 #include "PMcvideoGroup.h"
 #include "PLog.h"
+#include "PSyncRtpRecorder.h"
 #include "PTransmissionCodec.h"
 
 #include <chrono>
@@ -51,6 +52,7 @@ PMcvideoGroup::PMcvideoGroup(const std::string& groupId) : _groupId(groupId) {
         std::string who;
         for (const auto& t : v) who += (who.empty() ? "" : ",") + t.memberId;
         LOG_INFO("PMcvideoGroup", "[%s] transmitters [%s]", _groupId.c_str(), who.c_str());
+        _recOnTransmitters(v);
         if (_onTransmitters) _onTransmitters(_groupId, v, _sesid, _svc);
     };
     h.log = [this](const std::string& line) { LOG_INFO("PMcvideoGroup", "[%s] tc: %s", _groupId.c_str(), line.c_str()); };
@@ -330,6 +332,7 @@ void PMcvideoGroup::removeMember(const std::string& sessionId) {
 
 void PMcvideoGroup::close() {
     PAutoLock lock(_mutex);
+    _recStop();     // 진행 중 세그먼트 마감(파일 승격·메타) — 호 해제는 훅을 부르지 않는다
     _ctl.close();   // 호 해제 — 메시지 없이 타이머·송출 SSRC 를 푼다(§6.3.4.6.2 · §6.3.4.7.2)
     for (auto& kv : _members) _releasePeer(kv.second);
     _members.clear();
@@ -456,9 +459,15 @@ void PMcvideoGroup::onMemberPacket(const std::string& memberId, McvChannel ch, c
             // 허가된 송출만 분배한다(수신자별 Active SSRC List — TS 24.581 §6.3.7). 헤더만인 keepalive 는 판정 밖 — 버린다.
             if (!_rtpHasPayload(buf, len)) break;
             unsigned int audioSsrc = 0, videoSsrc = 0;
-            if (_ctl.onMedia(memberId, _nowMs(), audioSsrc, videoSsrc))
+            if (_ctl.onMedia(memberId, _nowMs(), audioSsrc, videoSsrc)) {
+                // 녹취 — 송출자 슬롯 트랙에 받은 그대로(평문, 분배의 SSRC·PT 찍기 전 — 트랙 PT 메타 = 그 leg 의 ingress PT)
+                if (_recorder && _recorder->isActive()) {
+                    auto itSlot = _recSlots.find(memberId);
+                    if (itSlot != _recSlots.end())
+                        _recorder->writePacket(_recTrack(itSlot->second, ch == MCV_CH_VIDEO), buf, len);
+                }
                 _distribute(peer, ch, ch == MCV_CH_AUDIO ? audioSsrc : videoSsrc, buf, len);
-            else
+            } else
                 ++_noGrantDrop;   // 허가 없는 미디어 — 상태 머신이 Revoked #3 을 보낸다(§6.3.5.4.6)
             break;
         }
@@ -467,6 +476,85 @@ void PMcvideoGroup::onMemberPacket(const std::string& memberId, McvChannel ch, c
             _onVideoRtcp(peer, buf, len);
             break;
     }
+}
+
+// ── 녹취 ─────────────────────────────────────────────────────────────
+
+std::string PMcvideoGroup::_recTrack(int slot, bool video) {
+    std::string base = video ? "video" : "audio";
+    return slot <= 0 ? base : base + std::to_string(slot);   // 슬롯 0 = "audio"/"video" (PTT 녹취와 같은 이름)
+}
+
+void PMcvideoGroup::_recOnTransmitters(const std::vector<McvTransmitter>& v) {
+    if (_recordDir.empty()) return;
+    // 끝난 송출 — 슬롯의 화자 구간을 닫고 비운다
+    for (auto it = _recSlots.begin(); it != _recSlots.end();) {
+        bool still = false;
+        for (const auto& t : v) still = still || t.memberId == it->first;
+        if (still) {
+            ++it;
+            continue;
+        }
+        if (_recorder) {
+            _recorder->setTrackSpeaker(_recTrack(it->second, false), "");
+            _recorder->setTrackSpeaker(_recTrack(it->second, true), "");
+        }
+        it = _recSlots.erase(it);
+    }
+    if (v.empty()) {
+        if (_recorder && _recorder->isActive()) _recorder->finishSegment();
+        return;
+    }
+    if (!_recorder) {
+        _recorder = new PSyncRtpRecorder(_recordDir, "mcvideo");
+        _recorder->setSessionSubdir(_recordSesDir);
+        _recTrackSlots = 0;
+        LOG_INFO("PMcvideoGroup", "[%s] recording initialized: dir=%s session=%s", _groupId.c_str(), _recordDir.c_str(),
+                 _recordSesDir.c_str());
+    }
+    // 새 송출 — 가장 낮은 빈 슬롯. 트랙 파일은 세그먼트 시작 때 열리므로 세그먼트 전에 등록한다(도중 추가는 recorder 가 연다).
+    std::vector<std::string> fresh;
+    for (const auto& t : v) {
+        if (_recSlots.count(t.memberId)) continue;
+        int slot = 0;
+        for (;; ++slot) {
+            bool used = false;
+            for (const auto& kv : _recSlots) used = used || kv.second == slot;
+            if (!used) break;
+        }
+        _recSlots[t.memberId] = slot;
+        for (int s = _recTrackSlots; s <= slot; ++s) {
+            _recorder->addTrack(_recTrack(s, false));
+            _recorder->addTrack(_recTrack(s, true));
+        }
+        if (slot + 1 > _recTrackSlots) _recTrackSlots = slot + 1;
+        fresh.push_back(t.memberId);
+    }
+    if (!_recorder->isActive()) {
+        const std::string& first = v.front().memberId;
+        auto itM = _members.find(first);
+        _recorder->startPttSegment(first, -1, false, "", itM != _members.end() ? itM->second.decl.srcPt : 0,
+                                   itM != _members.end() ? itM->second.decl.codec : std::string());
+        fresh.clear();
+        for (const auto& kv : _recSlots) fresh.push_back(kv.first);   // 세그먼트가 새로 열렸다 — 모든 슬롯 귀속
+    }
+    for (const auto& id : fresh) {
+        const int slot = _recSlots[id];
+        _recorder->setTrackSpeaker(_recTrack(slot, false), id);
+        _recorder->setTrackSpeaker(_recTrack(slot, true), id);
+        auto itM = _members.find(id);
+        if (itM != _members.end() && itM->second.decl.srcPt > 0)
+            _recorder->setTrackPtCodec(_recTrack(slot, false), itM->second.decl.srcPt, itM->second.decl.codec);
+    }
+}
+
+void PMcvideoGroup::_recStop() {
+    if (!_recorder) return;
+    if (_recorder->isActive()) _recorder->finishSegment();
+    delete _recorder;
+    _recorder = nullptr;
+    _recSlots.clear();
+    _recTrackSlots = 0;
 }
 
 namespace {

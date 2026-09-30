@@ -645,3 +645,7 @@ SDP 에 `ccm fir` 가 없으면 PLI 로 바꿔 보내자. ③ SDK 수신 쪽은 
 단말 offer 의 음성 협상이 깨지면 488, 영상만 깨지면(또는 음성 SRTP 인데 영상 평문) 영상 성분만 거절(answer `m=video 0`). 멤버 초대는 required 또는
 optional + 등록 mediasec 능력이면 audio·video 각각 서버 키(`RTP/SAVP` + 서로 다른 `a=crypto`) — SDK answer 도 m= 라인마다 자기 키를 실어야 한다.
 psip 합성 SDP 에 video 전용 키(`m_strLocalVideoCrypto*`)를 더했다(S1-UNIT-PSIP K·L). .48 PTT 접속서비스는 `media_srtp` 미설정(평문)이라 M2 는 평문이다.
+
+**.48 B8 CMP 몫 — MCVideo 녹취 기록기 (.48 → .45 참고)** — ADD `record_dir`·`session_dir` 가 오면 CMP 가 PTT 세션 레이아웃으로 기록한다(세그먼트 = 송출 구간,
+송출자마다 슬롯 audio/video, meta `type: "mcvideo"`). CSP 는 아직 디렉터리를 싣지 않는다 — 녹취 레이아웃(PTT 영역 공용 대 서비스 영역)과 이력 서비스 축은
+사용자 결정 뒤. 단말 영향 없음.

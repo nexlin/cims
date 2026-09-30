@@ -11,6 +11,8 @@
 #   transmitters·receptions → End Request → End Response·End Notify·Idle·TRANSMITTERS [] → T1 만료 TRANSMISSION_INACTIVITY 이벤트
 #   → 키프레임 요청(B6): 수신 시작 → 송출자에게 PLI(RR + SDES CNAME + PSFB, media source = 송출자 원래 영상 SSRC) · 수신자 PLI(할당
 #   SSRC)·FIR 전달(SSRC 되돌림 · FIR Seq nr = CMP 몫 · 간격 제한 하나로) · 받지 않는 멤버·없는 송출의 PLI 는 버림 · STATS keyframe_requests
+#   → 녹취(B8 CMP 몫): record_dir·session_dir 그룹에서 송출 한 번 → 세션 디렉터리 segments.jsonl + seg/000/seg_0001_{audio,video}.rtp ·
+#   세그먼트 메타 type mcvideo · tracks[] 슬롯 0 audio/video · speakers = 송출자 · audio_pt = 송출자 ingress PT
 #   → 보호(B7): tc_crypto 형식 거절 · floor_crypto 거절 → 그룹 키·멤버 CSK SRTCP(Idle·Granted 를 받는 쪽 키로 풀고, 평문·다른 키 요청은
 #   crypto_drop) · 멤버 SRTP(상향 = 멤버 rx 키로 풀고 하향 = 받는 멤버 tx 키로 보호 — SSRC·PT 찍기 뒤) · 틀린 키 영상 버림 —
 #   SRTP/SRTCP 는 이 파일의 파이썬 구현(RFC 3711, cryptography)으로 CMP 와 교차 확인
@@ -622,6 +624,46 @@ try:
     res = pl(req("HEARTBEAT", {}, service="system"))["resource"]
     check("all released (after control flow)", res["mcvideo"]["member_used"] == 0 and res["mcvideo"]["groups"] == 0,
           f"{res['mcvideo']}")
+
+    # 녹취 (B8 CMP 몫 — recording.md §3.3 세션 디렉터리·슬롯 트랙). 시험용 CMP 를 이 스크립트가 띄웠을 때만(기록 경로 = 임시 디렉터리).
+    if tmp:
+        rec_base = os.path.join(tmp, "rec", "g108")
+        ses_dir = "S20261001040000123456_1"
+        r = req("PTT_GROUP_ADD", {"group_id": "g108", "members": f"{X}:5:participant,{Y}:3:participant", "max_transmitters": 1,
+                                  "record_dir": rec_base, "session_dir": ses_dir}, sesid="mcv-smoke::8")
+        mp8 = pl(r).get("member_ports", {})
+        sk8 = {n: (udp(), udp(), udp()) for n in (X, Y)}
+        tc8 = {}
+        for n, uri, pt in ((X, UX, 96), (Y, UY, 97)):
+            a, v, c = sk8[n]
+            r = req("PTT_JOIN", {"group_id": "g108", "session_id": n, "user_ip": IP, "user_port": a.getsockname()[1],
+                                 "user_video_port": v.getsockname()[1], "user_control_port": c.getsockname()[1],
+                                 "user_uri": uri, "user_pt": pt, "user_src_pt": pt, "user_video_pt": 98,
+                                 "user_codec": "AMR-WB/16000"}, sesid="mcv-smoke::8")
+            tc8[n] = pl(r).get("tc_ssrc", 0)
+        sk8[X][2].sendto(app(b"MCV0", 0, tc8[X]), (IP, mp8[X]["control_port"]))   # 송출 요청 → 허가 → 세그먼트 시작
+        time.sleep(0.2)
+        for i in range(3):
+            sk8[X][0].sendto(rtp(pt=96, ssrc=0x66660001, seq=100 + i), (IP, mp8[X]["port"]))
+            sk8[X][1].sendto(rtp(pt=98, ssrc=0x66660002, seq=200 + i), (IP, mp8[X]["video_port"]))
+        time.sleep(0.2)
+        sk8[X][2].sendto(app(b"MCV2", 0, tc8[X]), (IP, mp8[X]["control_port"]))   # 송출 끝 → 세그먼트 마감
+        time.sleep(0.8)                                                            # 녹취 worker 가 파일을 승격·메타 기록
+        idx = [os.path.join(dp, f) for dp, _, fs in os.walk(rec_base) for f in fs if f == "segments.jsonl"]
+        seg = json.loads(open(idx[0]).read().splitlines()[-1]) if idx else {}
+        seg_dir = os.path.dirname(idx[0]) if idx else ""
+        files = sorted(f for _, _, fs in os.walk(seg_dir) for f in fs if f.endswith(".rtp")) if seg_dir else []
+        check("recording: segments.jsonl under the session directory", idx and os.path.basename(seg_dir) == ses_dir,
+              f"{idx}")
+        check("recording: slot-0 audio + video tracks (mcvideo type)", files == ["seg_0001_audio.rtp", "seg_0001_video.rtp"]
+              and seg.get("type") == "mcvideo", f"{files} {seg}")
+        trk = {t.get("prefix"): t for t in seg.get("tracks", [])}
+        check("recording: tracks[] audio/video slot 0 · speaker = transmitter · audio PT = ingress PT",
+              set(trk) == {"audio", "video"} and trk["audio"].get("slot") == 0 and trk["audio"].get("pt") == 96
+              and [s.get("id") for s in trk["audio"].get("speakers", [])] == [X] and seg.get("speaker_id") == X,
+              f"{seg}")
+        req("PTT_GROUP_REMOVE", {"group_id": "g108"}, sesid="mcv-smoke::8")
+
 
     # ── 보호 (B7 — TS 33.180 제어 SRTCP · media_security.md SRTP) ──
     KG, SG = key_pair(0x11)                       # 그룹 tc_crypto

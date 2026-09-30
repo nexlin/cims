@@ -37,7 +37,8 @@ class PSyncRtpRecorder {
 public:
     /**
      * @param baseDir    녹취 디렉터리
-     * @param type       "voip" | "ptt" (메타 기록용)
+     * @param type       "voip" | "ptt" | "mcvideo" (메타 기록용). ptt·mcvideo 는 세션 디렉터리·슬롯 트랙 레이아웃(아래 PTT 세그먼트)을
+     *                   같이 쓰고 세그먼트 메타의 "type" 으로 서비스를 가른다(mcvideo.md §5.3 녹취).
      * @param caller     발신자 (VoIP용)
      * @param callee     착신자 (VoIP용)
      */
@@ -119,6 +120,8 @@ private:
     /** 트랙 prefix → 미디어 종류/슬롯(PTT)/leg(VoIP). tracks[] 메타 구성용.
      *  PTT: audio/audio1..N, video/video1..N (슬롯 번호). VoIP: a/b, va/vb (leg). */
     void _trackKind(const std::string& prefix, std::string& kind, int& slot, std::string& side) const;
+    /** 세션 단위 레이아웃(시간버킷 › 세션 디렉터리 › shard, 슬롯 트랙 audio/audioK·video/videoK) — ptt·mcvideo */
+    bool _sessionType() const { return _type == "ptt" || _type == "mcvideo"; }
     /** _baseDir 하위 현재 시각 시간버킷 {YYYY}/{MM}/{DD}/{HH} 경로 (순수 계산) */
     std::string _hourDirNow();
     /** 시간버킷 segments.jsonl 의 최대 seq (없으면 0) — 세션 재시작 시 이어받기용.

@@ -16,6 +16,8 @@
 #include "PFloorCrypto.h"
 #include "PMediaCrypto.h"
 
+class PSyncRtpRecorder;
+
 // 멤버 선언 — PTT_JOIN(service:"mcvideo") 의 주소·협상 값 (cmp_media_api.md §7.9).
 struct McvMemberDecl {
     std::string ip;          // user_ip
@@ -182,6 +184,11 @@ private:
     void _forwardKeyframeRequest(const Peer& requester, unsigned int allocatedSsrc, bool fir);
     // 송출자에게 CMP 가 보내는 키프레임 요청 — RR + SDES CNAME + PSFB(PLI 또는 FIR) 복합 패킷(RFC 4585 §3.1), 송출자 영상 SRTCP 키로 보호
     void _requestKeyframe(Peer& sender, bool fir, const char* why);
+    // 녹취 (recording.md §3.3 — 세션 디렉터리·슬롯 트랙, 호출자가 _mutex 보유). 세그먼트 = 송출이 이어지는 구간(송출자 0 → 1 에서 열고
+    //   다시 0 이면 닫는다), 송출자마다 슬롯 하나(audio/video, audioK/videoK) — 동시 송출은 슬롯이 여럿이다. 송출자 집합 변경(훅)이 계기다.
+    void _recOnTransmitters(const std::vector<McvTransmitter>& v);
+    void _recStop();
+    static std::string _recTrack(int slot, bool video);
     // 허가된 송출의 미디어를 Active SSRC List 대로 분배한다 (호출자가 _mutex 보유)
     void _distribute(const Peer& sender, McvChannel ch, unsigned int ssrc, const char* buf, int len);
     // PMcvControl → 멤버 제어 채널 (호출자가 _mutex 보유)
@@ -211,6 +218,9 @@ private:
     McvCallType _callType = MCV_CALL_NORMAL;   // call_type (긴급·임박 = Transmission Indicator · automatic 수신)
     McvTimers _timers;
     std::string _recordDir, _recordSesDir;
+    PSyncRtpRecorder* _recorder = nullptr;        // record_dir 이 있고 첫 송출이 허가될 때 만든다
+    std::map<std::string, int> _recSlots;         // 송출 멤버 → 녹취 슬롯
+    int _recTrackSlots = 0;                       // 등록한 슬롯 트랙 수
 
     std::map<std::string, Peer> _members;             // sessionId → Peer
     std::map<std::string, int> _priorities;           // sessionId → <user-priority>

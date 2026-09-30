@@ -11,6 +11,8 @@ g++ 로 링크해 실행한다 (라이브 서비스·소켓 무관).
                                    Idle·#3 · 허가·Notification·manual 수신·T6 · End Request·Ack·End Notify·T2 · 상한 #1·큐·선점 #4·T4 ·
                                    동시 송출·C9 #7·이탈 · 긴급 automatic·Indicator · T1·T5·T11 #8·T3 포기 · 무허가 미디어 #3 · 암묵 요청·수신 전용 #5
                                    (보낸 메시지는 전부 PTransmissionCodec 으로 부호화·해석 왕복)
+  · tests/cmp_rtp_recorder_test.cpp  녹취 세그먼트 메타(cmp/PSyncRtpRecorder.cpp — recording.md §3.3.1) — tracks[] 슬롯·화자 구간·PT/코덱 ·
+                                   미디어 없는 트랙 제외 · 슬롯 재사용 구간 분할 · VoIP leg · MCVideo 세션 레이아웃(type mcvideo)
 
 AMR 라이브러리(pkg/opencore-amr, pkg/vo-amrwbenc-0.1.3)가 없으면 SKIP — S2 빌드(ExternalProject) 뒤 pre-package 프리셋에서 의미가 있다.
 """
@@ -24,11 +26,11 @@ from ...registry import verify_item, ItemResult, ItemStatus
 from ...context import VerifyContext
 
 _ID = "S1-UNIT-CMP"
-_NAME = "CMP 미디어 유닛 단위시험 (트랜스코더 · 안내 재생기·믹서 · MCVideo 전송 제어 상태 머신)"
+_NAME = "CMP 미디어 유닛 단위시험 (트랜스코더 · 안내 재생기·믹서 · MCVideo 전송 제어 상태 머신 · 녹취 메타)"
 _TESTS = ["tests/cmp_transcoder_test.cpp", "tests/cmp_ann_player_test.cpp", "tests/cmp_ann_mixer_test.cpp",
-          "tests/cmp_mcvideo_control_test.cpp"]
+          "tests/cmp_mcvideo_control_test.cpp", "tests/cmp_rtp_recorder_test.cpp"]
 _SRCS = ["cmp/PTranscoder.cpp", "cmp/PAnnCatalog.cpp", "cmp/PAnnPlayer.cpp", "cmp/PAnnMixer.cpp", "cmp/PMcvControl.cpp",
-         "cmp/PTransmissionCodec.cpp"]
+         "cmp/PTransmissionCodec.cpp", "cmp/PSyncRtpRecorder.cpp"]
 _INCS = ["cmp", "include", "pkg/opencore-amr/include/opencore-amrwb", "pkg/vo-amrwbenc-0.1.3/include/vo-amrwbenc"]
 _LIBS = ["pkg/opencore-amr/lib/libopencore-amrwb.a", "pkg/vo-amrwbenc-0.1.3/lib/libvo-amrwbenc.a"]
 

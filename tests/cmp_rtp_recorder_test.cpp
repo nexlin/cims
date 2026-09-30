@@ -237,6 +237,40 @@ static void emptyTrackDropped() {
     rmTree(dir);
 }
 
+// MCVideo — PTT 와 같은 세션 레이아웃(세션 디렉터리·슬롯 트랙)에 세그먼트 type 만 mcvideo (mcvideo.md §5.3 녹취)
+static void mcvideoSessionLayout() {
+    printf("mcvideoSessionLayout\n");
+    std::string dir = mkTmpDir("mcvideo");
+    {
+        PSyncRtpRecorder r(dir, "mcvideo");
+        r.setSessionSubdir("S20261001040000000001_1");
+        r.addTrack("audio");
+        r.addTrack("video");
+        r.addTrack("audio1");
+        r.addTrack("video1");
+        r.startPttSegment("+82510003001", -1, false, "", 96, "AMR-WB/16000");
+        r.setTrackSpeaker("audio", "+82510003001");
+        r.setTrackSpeaker("video", "+82510003001");
+        r.setTrackSpeaker("audio1", "+82510003002");
+        r.setTrackSpeaker("video1", "+82510003002");
+        writeMedia(r, "audio");
+        writeMedia(r, "video");
+        writeMedia(r, "video1");
+        r.finishSegment();
+        gclsRecStoreWriter.Flush(3000);
+    }
+    std::string j = lastSegmentLine(dir);
+    CHECK(!j.empty(), "세션 디렉터리의 segments.jsonl 이 기록되어야 한다");
+    CHECK(has(j, "\"type\":\"mcvideo\""), "세그먼트 type = mcvideo");
+    CHECK(has(j, "\"speaker_id\":\"+82510003001\""), "대표 송출자 flat 키");
+    CHECK(has(j, "\"has_video\":true"), "영상 트랙에 미디어 → has_video");
+    std::string v1 = trackObj(j, "video1");
+    CHECK(has(v1, "\"kind\":\"video\"") && has(v1, "\"slot\":1"), "동시 송출 슬롯 1 영상 트랙");
+    CHECK(has(v1, "\"id\":\"+82510003002\""), "슬롯 1 = 두 번째 송출자");
+    CHECK(trackObj(j, "audio1").empty(), "미디어 없는 슬롯 1 음성 트랙은 제외");
+    rmTree(dir);
+}
+
 static void voipTrackSides() {
     printf("voipTrackSides\n");
     std::string dir = mkTmpDir("voip");
@@ -270,6 +304,7 @@ int main() {
     pttMultiTalker();
     slotReuseSplitsSpans();
     emptyTrackDropped();
+    mcvideoSessionLayout();
     voipTrackSides();
     printf("\n결과: pass=%d fail=%d\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;

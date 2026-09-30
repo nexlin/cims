@@ -686,7 +686,9 @@ MCVideo 그룹 호(TS 24.281·24.581)의 미디어 평면. `PMcpttGroup` 과 따
   (RR + SDES CNAME + PLI/FIR, packet sender = 그룹 `_fbSsrc`, 대상 = 송출자 원래 SSRC `Peer.rxVideoSsrc`, FIR Seq nr = `Peer.firSeq`)으로 보낸다 —
   요청자가 그 송출을 받을 때만, 송출자마다 500 ms(`kKeyReqMinMs`)에 하나, 종류 = 송출자 JOIN `user_video_fb`(`McvMemberDecl.videoFb`)가 협상한 것. 수신 시작(`PMcvControl` 훅 `receptionStarted`)에도 PLI 를 보낸다.
   [cmp_media_api.md](../../api/cmp_media_api.md) §7.9.
-- **아직 없는 것** — 녹취(`record_dir` 는 보관만, B8), 송출자 SR 을 수신자에게 옮기기(립싱크 — 음성 RTCP 포트는 예약만).
+- **녹취** — `record_dir`·`session_dir` 가 있으면 `PSyncRtpRecorder`(type `mcvideo` — PTT 세션 레이아웃)로 송출 구간을 세그먼트로, 송출자마다 슬롯
+  트랙(`audio`/`video`·`audioK`/`videoK`)에 받은 그대로 기록한다(`_recOnTransmitters` — 송출자 집합 변경이 계기, `close` 가 마감). mcvideo.md §5.3.
+- **아직 없는 것** — 송출자 SR 을 수신자에게 옮기기(립싱크 — 음성 RTCP 포트는 예약만), 전송 제어 이벤트 기록(PTT `floor.jsonl` 에 해당).
 
 단위시험: `tests/cmp_mcvideo_control_test.cpp`(S1-UNIT-CMP — 상태 머신, 보낸 메시지를 코덱으로 왕복). 스모크: `tests/cmp_smoke_mcvideo_ports.py` —
 시험용 CMP 를 빈 포트 창에 직접 띄워 ADD/JOIN/LEAVE/REMOVE·거절·동시 MCPTT 그룹·수신 판정과 전송 제어 흐름(Idle·허가·Notification·수신 전후

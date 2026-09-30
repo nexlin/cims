@@ -32,7 +32,7 @@ PSyncRtpRecorder::PSyncRtpRecorder(const std::string& baseDir, const std::string
 
 void PSyncRtpRecorder::setSessionSubdir(const std::string& name) {
     _sesSubdir = name;
-    if (_type == "ptt") _enqueueSeed();   // 세션 디렉터리 확정 시점(제어 스레드)에 시딩 예약
+    if (_sessionType()) _enqueueSeed();   // 세션 디렉터리 확정 시점(제어 스레드)에 시딩 예약
 }
 
 // 현재 시간버킷 segments.jsonl 의 마지막 seq 를 worker 가 비동기 계수 — 결과는 _seedSeq.
@@ -91,7 +91,7 @@ void PSyncRtpRecorder::setTrackSpeaker(const std::string& prefix, const std::str
 void PSyncRtpRecorder::_trackKind(const std::string& prefix, std::string& kind, int& slot,
                                   std::string& side) const {
     kind.clear(); slot = -1; side.clear();
-    if (_type == "ptt") {
+    if (_sessionType()) {
         if (prefix.compare(0, 5, "audio") == 0)      { kind = "audio"; slot = atoi(prefix.c_str() + 5); }
         else if (prefix.compare(0, 5, "video") == 0) { kind = "video"; slot = atoi(prefix.c_str() + 5); }
         return;
@@ -365,7 +365,7 @@ void PSyncRtpRecorder::_writeMeta() {
         std::string j;
         appendf(j, "{\"seq\":%d,\"type\":\"%s\"", _currentSeq, _type.c_str());
 
-        if (_type == "ptt") {
+        if (_sessionType()) {
             if (!_speakerId.empty())
                 appendf(j, ",\"speaker_id\":\"%s\"", _jsonEsc(_speakerId).c_str());
             if (_priority >= 0)
@@ -391,7 +391,7 @@ void PSyncRtpRecorder::_writeMeta() {
 
             // 키 결정: VoIP는 audio_file_a/b, video_file_a/b, PTT는 audio_file, video_file
             std::string key;
-            if (_type == "ptt") {
+            if (_sessionType()) {
                 if (prefix == "audio") key = "audio_file";
                 else if (prefix == "video") key = "video_file";
                 else key = prefix + "_file";

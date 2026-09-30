@@ -749,6 +749,7 @@ MCVideo 그룹 호(TS 24.281 §9.2)의 미디어·전송 제어(TS 24.581). **�
 제어 정의 정본 [mcvideo_tc_defs.yaml](../design/features/mcvideo_tc_defs.yaml)(계약 K5)의 생성 헤더 `cmp/PTransmissionDefs.h` 를 쓴다.
 
 **PTT_GROUP_ADD / PTT_GROUP_MODIFY** (`service:"mcvideo"`) — §7.1 의 `group_id`·`members`·`subid`·`record_dir`·`session_dir` 는 뜻이 같다
+(녹취 = 송출 구간마다 세그먼트, 송출자마다 슬롯 트랙 `audio`/`video`·`audioK`/`videoK`, 세그먼트 메타 `type: "mcvideo"` — recording.md §3.3.1 과 같은 형식)
 (`members` 의 prio = 그룹 문서 `<user-priority>` — 송출 우선순위 상한 min(offer `mc_priority`, 이 값), TS 24.581 §14.3.3). 그 밖의 필드:
 
 | payload 필드 | 필수 | 설명 |

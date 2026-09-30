@@ -395,7 +395,12 @@ Indicator, automatic 수신; 1차 CSP 는 normal) · JOIN 응답 `audio_ssrc`·`
   상수는 생성 헤더 `cmp/PTransmissionDefs.h`(정본 [mcvideo_tc_defs.yaml](mcvideo_tc_defs.yaml) — 단말 코어와 같은 테이블, §1.5).
   코덱 `cmp/PTransmissionCodec.{h,cpp}`(단말 코덱과 교차 시험 — [ue_sdk.md](ue_sdk.md) §4.6)는 CMP 빌드에 들어 있고, 멤버 제어 채널이 이것으로 푼다
   (compound RTCP 를 나눠 APP 만 — 빈 RR keepalive 는 버림) 뒤 `PMcvControl` 에 넘긴다.
-- **녹취** — 송출마다 슬롯 트랙(audio·video) — `PSyncRtpRecorder` 재사용, 색인 서비스 축 `mcvideo`([recording.md](recording.md)).
+- **녹취** (CMP 몫 구현 — B8) — ADD `record_dir`·`session_dir` 가 있으면 `PSyncRtpRecorder`(type `mcvideo` — PTT 와 같은 세션 레이아웃:
+  시간버킷 › 세션 디렉터리 › shard, [recording.md](recording.md) §3.3)로 기록한다. 세그먼트 = 송출이 이어지는 구간(송출자 0 → 1 에서 열고 다시 0 이면
+  닫는다), 송출자마다 슬롯 하나(`audio`/`video`, 동시 송출이면 `audioK`/`videoK` — 가장 낮은 빈 슬롯), 트랙 = 받은 그대로(평문, SSRC·PT 찍기 전),
+  화자 구간 = 송출자, 음성 PT/코덱 = 그 leg 의 ingress 값. 계기 = 송출자 집합 변경(`transmittersChanged`). **남은 것** = CSP 가 `record_dir`·
+  `session_dir` 를 싣는 경로(그룹 녹취 디렉터리·세션 디스크립터)·OAM 이력의 서비스 축 `mcvideo` — 녹취 레이아웃(`recordings/ptt/{id}` 공용 대 서비스
+  영역 분리)을 정한 뒤. 그때까지 CSP 는 싣지 않으므로 MCVideo 는 녹취되지 않는다.
 
 ### 5.4 단말 SDK (`libcimsue`)
 
