@@ -353,7 +353,8 @@ bool CSipDialog::AddSdp( CSipMessage * pclsMessage, bool bKeepSdpVersion )
 	// m=video (합성 SDP 경로 — PTT-AS 그룹콜 등). RFC 3264 §6: answer 의 m= 라인 수·순서는 offer 와 같고
 	//   쓰지 않는 스트림은 port 0 으로 거절한다. offer 는 local video 포트가 있을 때만 싣는다.
 	//   코덱은 H.264 하나 — answer 는 offer 의 PT·fmtp 를 echo, offer 는 테이블(GetVideo) 값.
-	//   SRTP(SAVP) leg 의 video 는 별도 키가 필요해 아직 거절한다(port 0).
+	//   SRTP(SAVP) leg 의 video 는 그 m= 라인의 키(m_strLocalVideoCrypto*)가 있을 때만 RTP/SAVP + a=crypto 로 싣고, 없으면
+	//   거절한다(port 0 — 평문 video 를 SRTP leg 에 섞지 않는다).
 	if( m_clsLocalMediaList.empty() )
 	{
 		const CSdpMedia * pclsRemoteVideo = FindRemoteMedia( "video" );
@@ -363,20 +364,25 @@ bool CSipDialog::AddSdp( CSipMessage * pclsMessage, bool bKeepSdpVersion )
 		{
 			const CSipCodecEntry & clsVideo = CSipCodecTable::GetVideo();
 			const bool bLocalSrtp = ( m_strLocalCryptoSuite.empty() == false && m_strLocalCryptoKey.empty() == false );
+			const bool bVideoSrtp = ( m_strLocalVideoCryptoSuite.empty() == false && m_strLocalVideoCryptoKey.empty() == false );
 			int iVideoPt = -1;
 			if( pclsRemoteVideo ) iVideoPt = FindRemotePayloadType( clsVideo.GetMatchPrefix().c_str(), "video" );
 
-			if( pclsRemoteVideo && ( m_iLocalVideoPort <= 0 || iVideoPt < 0 || bLocalSrtp ) )
+			if( pclsRemoteVideo && ( m_iLocalVideoPort <= 0 || iVideoPt < 0 || ( bLocalSrtp && bVideoSrtp == false ) ) )
 			{
 				const char * pszFmt = pclsRemoteVideo->m_clsFmtList.empty() ? "97" : pclsRemoteVideo->m_clsFmtList.front().c_str();
 				iLen += snprintf( szSdp + iLen, sizeof(szSdp)-iLen, "m=video 0 %s %s\r\n", pclsRemoteVideo->m_strProtocol.c_str(), pszFmt );
 			}
-			else if( m_iLocalVideoPort > 0 && bLocalSrtp == false )
+			else if( m_iLocalVideoPort > 0 && ( bLocalSrtp == false || bVideoSrtp ) )
 			{
 				const bool bMcVideo = ( m_eLocalMcMediaProfile == E_MC_MEDIA_MCVIDEO );
 				if( iVideoPt < 0 ) iVideoPt = clsVideo.m_iPt;
 				std::string strFmtp = bAnswer ? FindRemoteFmtp( pclsRemoteVideo, iVideoPt ) : clsVideo.m_strFmtp;
-				iLen += snprintf( szSdp + iLen, sizeof(szSdp)-iLen, "m=video %d RTP/AVP %d\r\n", m_iLocalVideoPort, iVideoPt );
+				// protocol — audio 와 같은 규칙: SRTP 면 RTP/SAVP, answer 는 offer echo(AVP + a=crypto 병기 offer 를 SRTP 로 받았으면 RTP/AVP)
+				const char * pszVideoProto = bVideoSrtp ? "RTP/SAVP" : "RTP/AVP";
+				if( bVideoSrtp && bAnswer && pclsRemoteVideo && strncasecmp( pclsRemoteVideo->m_strProtocol.c_str(), "RTP/SAVP", 8 ) )
+					pszVideoProto = "RTP/AVP";
+				iLen += snprintf( szSdp + iLen, sizeof(szSdp)-iLen, "m=video %d %s %d\r\n", m_iLocalVideoPort, pszVideoProto, iVideoPt );
 				if( bMcVideo ) iLen += snprintf( szSdp + iLen, sizeof(szSdp)-iLen, "i=video component of MCVideo\r\n" );
 				iLen += snprintf( szSdp + iLen, sizeof(szSdp)-iLen, "a=rtpmap:%d %s\r\n", iVideoPt, clsVideo.GetRtpmap().c_str() );
 				if( strFmtp.empty() == false )
@@ -404,6 +410,13 @@ bool CSipDialog::AddSdp( CSipMessage * pclsMessage, bool bKeepSdpVersion )
 					}
 				}
 				iLen += snprintf( szSdp + iLen, sizeof(szSdp)-iLen, "a=%s\r\n", GetRtpDirectionString( m_eLocalDirection ) );
+				// a=crypto (RFC 4568) — 이 m= 라인의 자기 송신 키. answer 는 offer 의 tag/suite 를 응용이 echo 한다.
+				if( bVideoSrtp )
+				{
+					iLen += snprintf( szSdp + iLen, sizeof(szSdp)-iLen, "a=crypto:%s %s inline:%s\r\n",
+						m_strLocalVideoCryptoTag.empty() ? "1" : m_strLocalVideoCryptoTag.c_str(),
+						m_strLocalVideoCryptoSuite.c_str(), m_strLocalVideoCryptoKey.c_str() );
+				}
 			}
 		}
 	}
@@ -469,6 +482,9 @@ bool CSipDialog::SetLocalRtp( CSipCallRtp * pclsRtp )
 	m_strLocalCryptoTag = pclsRtp->m_strLocalCryptoTag;
 	m_strLocalCryptoSuite = pclsRtp->m_strLocalCryptoSuite;
 	m_strLocalCryptoKey = pclsRtp->m_strLocalCryptoKey;
+	m_strLocalVideoCryptoTag = pclsRtp->m_strLocalVideoCryptoTag;
+	m_strLocalVideoCryptoSuite = pclsRtp->m_strLocalVideoCryptoSuite;
+	m_strLocalVideoCryptoKey = pclsRtp->m_strLocalVideoCryptoKey;
 
 	switch( m_eLocalDirection )
 	{
@@ -546,6 +562,9 @@ bool CSipDialog::SelectLocalRtp( CSipCallRtp * pclsRtp )
 	pclsRtp->m_strLocalCryptoTag = m_strLocalCryptoTag;
 	pclsRtp->m_strLocalCryptoSuite = m_strLocalCryptoSuite;
 	pclsRtp->m_strLocalCryptoKey = m_strLocalCryptoKey;
+	pclsRtp->m_strLocalVideoCryptoTag = m_strLocalVideoCryptoTag;
+	pclsRtp->m_strLocalVideoCryptoSuite = m_strLocalVideoCryptoSuite;
+	pclsRtp->m_strLocalVideoCryptoKey = m_strLocalVideoCryptoKey;
 
 #ifdef USE_MEDIA_LIST
 	pclsRtp->m_clsMediaList = m_clsLocalMediaList;

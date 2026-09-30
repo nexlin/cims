@@ -132,6 +132,41 @@ namespace {
         return fb;
     }
 
+    // 영상 성분을 뺀 선언 — 서버 SDP 가 m=video 0 이거나 영상 SRTP 협상이 깨졌다(RFC 3264 §6: 그 성분만 거절)
+    void McvDropVideo( CmpMcvMemberDecl &d ) {
+        d.iVideoPort = 0;
+        d.iVideoPt = 0;
+        d.uVideoSsrc = 0;
+        d.iVideoFb = -1;
+        d.clsVideoCrypto = CmpMediaCrypto();
+    }
+
+    // 서버가 SDP 에 싣는 SRTP 키 한 m= 라인 (psip — audio 는 m_strLocalCrypto*, video 는 m_strLocalVideoCrypto*)
+    void McvApplyLocalCrypto( CSipCallRtp &clsRtp, const RelaySdesLeg &clsSdes, bool bVideo ) {
+        const RelaySdesMedia &a = clsSdes.clsAudio;
+        if ( a.bSrtp ) {
+            clsRtp.m_strLocalCryptoTag = a.strTag.empty() ? "1" : a.strTag;
+            clsRtp.m_strLocalCryptoSuite = a.strSuite;
+            clsRtp.m_strLocalCryptoKey = a.strSrvKey;
+        }
+        const RelaySdesMedia &v = clsSdes.clsVideo;
+        if ( bVideo && v.bSrtp ) {
+            clsRtp.m_strLocalVideoCryptoTag = v.strTag.empty() ? "1" : v.strTag;
+            clsRtp.m_strLocalVideoCryptoSuite = v.strSuite;
+            clsRtp.m_strLocalVideoCryptoKey = v.strSrvKey;
+        }
+    }
+
+    // 서버 offer 의 SRTP 한 m= 라인 — 기본 제안 suite(media_security.md §2), 키는 m= 라인마다 따로
+    bool McvOfferSrtp( RelaySdesMedia &m ) {
+        m.bSrtp = true;
+        m.strTag = "1";
+        m.strSuite = "AES_CM_128_HMAC_SHA1_80";
+        m.strProto = "RTP/SAVP";
+        m.strSrvKey = MediaSdes::GenerateInlineKeyB64();
+        return !m.strSrvKey.empty();
+    }
+
     bool IsMember( const CspPttGroup &clsGroup, const std::string &strUser, int *piPrio = nullptr,
                    std::string *pstrRole = nullptr ) {
         for ( const auto &p : clsGroup._pusers ) {
@@ -288,10 +323,23 @@ bool CMcVideoCallService::_AcceptLeg( Session &clsSes, const std::string &strCal
     int iCtl = 0;
     CMcVideoFmtp clsOffer;
     McvControlOf( pclsOffer, iCtl, clsOffer );
+    auto itLeg = clsSes.mapLegs.find( strCallId );
+    if ( itLeg == clsSes.mapLegs.end() ) return false;
+    Leg &leg = itLeg->second;
     CmpMcvMemberDecl d;
     _FillDecl( d, strMember, pclsOffer, iPrio, false );
     d.strRole = strRole.empty() ? "participant" : strRole;
     d.bImplicit = bImplicit;
+    // 미디어 SRTP — offer 때 평가한 m= 라인별 상태(OnIncomingInvite)로 CMP 키 (rx = 단말 키, tx = 서버 키)
+    if ( !leg.bVideo ) McvDropVideo( d );
+    if ( leg.clsSdes.clsAudio.bSrtp &&
+         !MediaSdes::BuildCmpKeys( leg.clsSdes.clsAudio.strSuite, leg.clsSdes.clsAudio.strUeKey,
+                                   leg.clsSdes.clsAudio.strSrvKey, d.clsAudioCrypto ) )
+        return false;
+    if ( d.iVideoPort > 0 && leg.clsSdes.clsVideo.bSrtp &&
+         !MediaSdes::BuildCmpKeys( leg.clsSdes.clsVideo.strSuite, leg.clsSdes.clsVideo.strUeKey,
+                                   leg.clsSdes.clsVideo.strSrvKey, d.clsVideoCrypto ) )
+        McvDropVideo( d );
     CmpMcvJoinResult r2;
     if ( !gclsCmpClient.McvJoin( clsSes.strGroupId, strMember, &d, clsSes.strSesId, r2 ) ) return false;
 
@@ -308,6 +356,8 @@ bool CMcVideoCallService::_AcceptLeg( Session &clsSes, const std::string &strCal
     clsAns.m_iApplicationPort = r1.clsPorts.iControlPort;
     clsAns.m_strApplicationFmtp =
         BuildMcVideoAnswerFmtp( clsOffer, iPrio, r1.uTcSsrc, bImplicit, r2.bGranted, r2.uAudioSsrc, r2.uVideoSsrc );
+    McvApplyLocalCrypto( clsAns, leg.clsSdes, clsAns.m_iVideoPort > 0 );
+    leg.bVideo = clsAns.m_iVideoPort > 0;
 
     // 제어 기능의 200 OK (TS 24.281 §6.3.3.2.3.2) — Contact = 세션 식별자 + 포커스 태그, 세션 갱신은
     // 단말(refresher=uac),
@@ -324,11 +374,8 @@ bool CMcVideoCallService::_AcceptLeg( Session &clsSes, const std::string &strCal
                        ( std::string( "<sip:" ) + kMcVideoPsiUser + "@" + strDomain + ">" ).c_str() );
     if ( !gclsUserAgent.m_clsSipStack.SendSipMessage( pclsOk ) ) return false;
 
-    auto it = clsSes.mapLegs.find( strCallId );
-    if ( it != clsSes.mapLegs.end() ) {
-        it->second.bEstablished = true;
-        it->second.bJoined = true;
-    }
+    leg.bEstablished = true;
+    leg.bJoined = true;
     CLog::Print( LOG_INFO, "MCVIDEO: accept group(%s) member(%s) call(%s) audio=%d video=%d control=%d tc_ssrc=%u%s",
                  clsSes.strGroupId.c_str(), strMember.c_str(), strCallId.c_str(), r1.clsPorts.iPort,
                  clsAns.m_iVideoPort, r1.clsPorts.iControlPort, r1.uTcSsrc,
@@ -391,6 +438,22 @@ bool CMcVideoCallService::_InviteMember( Session &clsSes, const CspPttGroup &cls
     clsOffer.m_eMcMediaProfile = E_MC_MEDIA_MCVIDEO;
     clsOffer.m_iApplicationPort = r1.clsPorts.iControlPort;
     clsOffer.m_strApplicationFmtp = BuildMcVideoInviteFmtp( iPrio, r1.uTcSsrc );
+    // 미디어 SRTP offer (media_security.md §4 표·§4.1) — required = SAVP, optional = 이 바인딩이 등록 때
+    // mediasec(sdes-srtp)
+    //   능력을 선언했을 때만. audio·video 는 m= 라인마다 키를 따로 만든다(RFC 4568 §6.1). MCPTT 멤버 초대와 같은 규칙.
+    RelaySdesLeg clsSdes;
+    {
+        const ServiceInfo clsSvc = gclsServiceMap.GetForUser( strMember, "ptt" );
+        if ( clsSvc.media_srtp == "required" || ( clsSvc.media_srtp == "optional" && clsInfo.m_bMediaSecSdes ) ) {
+            if ( !McvOfferSrtp( clsSdes.clsAudio ) ||
+                 ( clsOffer.m_iVideoPort > 0 && !McvOfferSrtp( clsSdes.clsVideo ) ) ) {
+                CLog::Print( LOG_ERROR, "MCVIDEO: invite member(%s) SRTP key generation failed", strMember.c_str() );
+                gclsCmpClient.McvLeave( clsSes.strGroupId, strMember, clsSes.strSesId );
+                return false;
+            }
+            McvApplyLocalCrypto( clsOffer, clsSdes, clsOffer.m_iVideoPort > 0 );
+        }
+    }
 
     CSipCallRoute clsRoute;
     clsInfo.GetCallRoute( clsRoute );
@@ -456,6 +519,7 @@ bool CMcVideoCallService::_InviteMember( Session &clsSes, const CspPttGroup &cls
     leg.strMember = strMember;
     leg.eRole = E_LEG_INVITED;
     leg.tDeadline = time( NULL ) + kInviteAnswerSec;
+    leg.clsSdes = clsSdes;
     clsSes.mapLegs[strCallId] = leg;
     m_mapCallGroup[strCallId] = clsSes.strGroupId;
     if ( !gclsUserAgent.StartCall( strCallId.c_str(), pclsInvite ) ) {
@@ -559,6 +623,30 @@ void CMcVideoCallService::OnIncomingInvite( const char *pszCallId, const char *p
         CLog::Print( LOG_INFO, "MCVIDEO: INVITE from(%s) — SDP 에 udp MCVideo/AMR-WB 없음 → 488", strFrom.c_str() );
         return _Reject( pszCallId, SIP_NOT_ACCEPTABLE_HERE, 0, NULL );
     }
+    // 미디어 SRTP (SDES — media_security.md §4·§5): 접속서비스 정책 × offer crypto, m= 라인마다. 음성은 필수 성분이라
+    // 협상이 깨지면
+    //   488, 영상은 그 성분만 거절한다(answer m=video 0 — RFC 3264 §6). 서버 키는 m= 라인마다 따로(RFC 4568 §6.1).
+    RelaySdesLeg clsSdes;
+    bool bVideoOk = true;
+    {
+        const ServiceInfo clsSvc = gclsServiceMap.GetForUser( strFrom, "ptt" );
+        if ( MediaSdes::EvalRelayOfferSdes( clsSvc.media_srtp, pclsRtp->m_clsMediaList, "audio", clsSdes.clsAudio ) <
+             0 ) {
+            CLog::Print( LOG_INFO, "MCVIDEO: INVITE from(%s) — audio SRTP 협상 불가(policy=%s) → 488", strFrom.c_str(),
+                         clsSvc.media_srtp.c_str() );
+            return _Reject( pszCallId, SIP_NOT_ACCEPTABLE_HERE, 0, NULL );
+        }
+        if ( MediaSdes::EvalRelayOfferSdes( clsSvc.media_srtp, pclsRtp->m_clsMediaList, "video", clsSdes.clsVideo ) <
+             0 ) {
+            CLog::Print( LOG_INFO, "MCVIDEO: INVITE from(%s) — video SRTP 협상 불가(policy=%s) → 영상 성분 거절",
+                         strFrom.c_str(), clsSvc.media_srtp.c_str() );
+            clsSdes.clsVideo = RelaySdesMedia();
+            bVideoOk = false;
+        }
+        // 음성이 SRTP 인데 영상이 평문이면 psip 가 영상을 거절한다(평문 영상을 SRTP leg 에 섞지 않는다) — 같은 판단을
+        // 여기서 둔다
+        if ( clsSdes.clsAudio.bSrtp && !clsSdes.clsVideo.bSrtp ) bVideoOk = false;
+    }
 
     // 세션 — CMP 그룹은 첫 멤버의 로스터 등록(_CmpAddMember)에서 선다
     const bool bNew = ( itSes == m_mapSession.end() );
@@ -600,6 +688,8 @@ void CMcVideoCallService::OnIncomingInvite( const char *pszCallId, const char *p
     leg.strCallId = strCallId;
     leg.strMember = strFrom;
     leg.eRole = ( bNew || bReplacePending ) ? E_LEG_INITIATOR : E_LEG_JOINER;
+    leg.clsSdes = clsSdes;
+    leg.bVideo = bVideoOk;
     clsSes.mapLegs[strCallId] = leg;
     m_mapCallGroup[strCallId] = strGroupId;
 
@@ -673,8 +763,20 @@ bool CMcVideoCallService::OnCallStarted( const std::string &strCallId, CSipCallR
         CmpMcvMemberDecl d;
         _FillDecl( d, leg.strMember, pclsRtp, iPrio, true );
         d.strRole = strRole.empty() ? "participant" : strRole;
+        // 미디어 SRTP answer — 서버 offer 가 SAVP 였던 m= 라인은 같은 suite 의 유효 crypto 가 있어야 한다(평문 폴백
+        // 금지).
+        //   음성이 깨지면 참가시키지 않고(BYE), 영상은 그 성분만 뺀다.
+        bool bSrtpOk =
+            MediaSdes::EvalRelayAnswerSdes( pclsRtp->m_clsMediaList, "audio", leg.clsSdes.clsAudio, d.clsAudioCrypto );
+        if ( d.iVideoPort > 0 && !MediaSdes::EvalRelayAnswerSdes( pclsRtp->m_clsMediaList, "video",
+                                                                  leg.clsSdes.clsVideo, d.clsVideoCrypto ) )
+            McvDropVideo( d );
+        if ( !bSrtpOk )
+            CLog::Print( LOG_ERROR, "MCVIDEO: group(%s) member(%s) answer SRTP 불일치", strGroupId.c_str(),
+                         leg.strMember.c_str() );
+        leg.bVideo = d.iVideoPort > 0;
         CmpMcvJoinResult r2;
-        bJoined = gclsCmpClient.McvJoin( strGroupId, leg.strMember, &d, clsSes.strSesId, r2 );
+        bJoined = bSrtpOk && gclsCmpClient.McvJoin( strGroupId, leg.strMember, &d, clsSes.strSesId, r2 );
     }
     if ( !bJoined ) {
         // 미디어 평면에 붙이지 못한 참가자는 둘 수 없다 — BYE 하고 뺀다
@@ -728,9 +830,11 @@ bool CMcVideoCallService::OnReInvite( const std::string &strCallId, CSipCallRtp 
     Session &clsSes = itS->second;
     auto itL = clsSes.mapLegs.find( strCallId );
     if ( itL == clsSes.mapLegs.end() || !itL->second.bJoined ) return true;
-    const Leg &leg = itL->second;
-    // answer 는 스택이 직전 로컬 선언(멤버 CMP 포트·MCVideo 제어 채널)으로 낸다 — 여기서는 CMP 주소 등록만 바꾼다.
-    //   단말 offer 라 단말 송신 PT = 서버 answer 가 echo 한 offer PT(bServerOffered=false).
+    Leg &leg = itL->second;
+    // answer 는 스택이 직전 로컬 선언(멤버 CMP 포트·MCVideo 제어 채널·SRTP 서버 키)으로 낸다 — 여기서는 CMP 주소 등록만
+    // 바꾼다.
+    //   단말 offer 라 단말 송신 PT = 서버 answer 가 echo 한 offer PT(bServerOffered=false). SRTP leg 는 단말 재키잉만
+    //   반영하고 서버 키는 유지한다(media_security.md §5.2 — 직전 answer 의 서버 키가 그대로 나간다).
     CspPttGroup clsGroup;
     int iPrio = 0;
     std::string strRole;
@@ -738,6 +842,12 @@ bool CMcVideoCallService::OnReInvite( const std::string &strCallId, CSipCallRtp 
     CmpMcvMemberDecl d;
     _FillDecl( d, leg.strMember, pclsRemoteRtp, iPrio, false );
     d.strRole = strRole.empty() ? "participant" : strRole;
+    if ( !leg.bVideo )
+        McvDropVideo( d );  // 협상에서 거절한 영상은 re-offer 에 있어도 되살리지 않는다(answer 도 m=video 0)
+    MediaSdes::ReadReinviteSdes( pclsRemoteRtp->m_clsMediaList, "audio", 0, leg.clsSdes.clsAudio, d.clsAudioCrypto );
+    if ( d.iVideoPort > 0 )
+        MediaSdes::ReadReinviteSdes( pclsRemoteRtp->m_clsMediaList, "video", 0, leg.clsSdes.clsVideo,
+                                     d.clsVideoCrypto );
     CmpMcvJoinResult r2;
     if ( !gclsCmpClient.McvJoin( strGroupId, leg.strMember, &d, clsSes.strSesId, r2 ) )
         CLog::Print( LOG_ERROR, "MCVIDEO: group(%s) member(%s) re-INVITE JOIN 갱신 실패 (call %s)", strGroupId.c_str(),

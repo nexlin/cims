@@ -7,6 +7,21 @@
 
 namespace {
 
+    // 멤버 SRTP 키 {alg, rx{key,salt}, tx{key,salt}} (cmp_media_api.md §7.9 — rx = UE 상향, tx = CMP 하향). 비활성이면
+    // 생략.
+    void McvSetMediaCrypto( SimpleJson::JsonNode &req, const char *pszField, const CmpMediaCrypto &c ) {
+        if ( !c.bEnabled ) return;
+        SimpleJson::JsonNode mc, rx, tx;
+        mc.Set( "alg", c.strAlg );
+        rx.Set( "key", c.strRxKey );
+        rx.Set( "salt", c.strRxSalt );
+        tx.Set( "key", c.strTxKey );
+        tx.Set( "salt", c.strTxSalt );
+        mc.Set( "rx", rx );
+        mc.Set( "tx", tx );
+        req.Set( pszField, mc );
+    }
+
     // JOIN·ADD 응답의 부호 없는 32비트 SSRC — JSON 정수(GetInt = long long)에서 읽는다.
     unsigned int McvSsrcField( const SimpleJson::JsonNode &o, const char *key ) {
         return o.Has( key ) ? (unsigned int)( o.GetInt( key ) & 0xFFFFFFFFLL ) : 0u;
@@ -104,6 +119,8 @@ bool CCmpClient::McvJoin( const std::string &strGroupId, const std::string &strS
         if ( d.iMaxRxStreams > 0 ) req.Set( "max_rx_streams", d.iMaxRxStreams );
         if ( d.bImplicit ) req.Set( "implicit_request", 1 );
         if ( d.bRecvOnly ) req.Set( "recv_only", 1 );
+        McvSetMediaCrypto( req, "media_crypto", d.clsAudioCrypto );
+        if ( d.iVideoPort > 0 ) McvSetMediaCrypto( req, "media_crypto_video", d.clsVideoCrypto );
         // 협상한 영상 피드백(RFC 4585 §4.2) — CMP 는 이 멤버(송출자)에게 이것만 보낸다
         if ( d.iVideoPort > 0 && d.iVideoFb >= 0 ) {
             SimpleJson::JsonNode fb;

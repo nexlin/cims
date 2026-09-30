@@ -123,6 +123,10 @@ public:
 	std::string	m_strRemoteCryptoTag;
 	std::string	m_strRemoteCryptoSuite;
 	std::string	m_strRemoteCryptoKey;
+	// 합성 SDP 의 m=video SRTP (SDES — m= 라인마다 키가 다르다). 비면 video 평문(SRTP leg 면 video port 0)
+	std::string	m_strLocalVideoCryptoTag;
+	std::string	m_strLocalVideoCryptoSuite;
+	std::string	m_strLocalVideoCryptoKey;
 
 	/** local RTP direction ( sendrecv, sendonly, recvonly, inactive ) */
 	ERtpDirection	m_eLocalDirection;

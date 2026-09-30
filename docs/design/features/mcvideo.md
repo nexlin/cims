@@ -273,8 +273,9 @@ psip 합성 SDP 프로파일(`CSipCallRtp::m_eMcMediaProfile = E_MC_MEDIA_MCVIDE
   fan-out(prearranged), mcvideo-info, SDP(audio·video·`udp MCVideo` — psip `E_MC_MEDIA_MCVIDEO`), Warning(TS 24.281 §4.4). MCPTT `GroupCallService` 와는
   부품(leg PT·그룹/사용자 맵·psip 호 API·`McVideoInfo.h` 코덱)만 나누고 세션·CMP 키는 따로 둔다.
 - **CMP 연동** (구현 — A11) — 기존 PTT 명령에 `service: mcvideo`(§7 D3, [cmp_media_api.md](../../api/cmp_media_api.md) §7.9) — 멤버마다 audio·video·control 포트,
-  JOIN 응답 `tc_ssrc` 를 answer 의 `mc_transmission_ssrc` 로. 미디어 SRTP(`media_crypto`·`media_crypto_video`)·`tc_crypto` 는 CMP 가 받지만(B7) CSP 의
-  `media_srtp` 결선은 다음 단계다. CMP 가 `resource.mcvideo` 를 광고하지 않으면(멤버 풀 0) MCVideo 그룹 호를 받지 않는다(500).
+  JOIN 응답 `tc_ssrc` 를 answer 의 `mc_transmission_ssrc` 로. 미디어 SRTP 는 접속서비스 `media_srtp` 대로 m= 라인마다 협상해 JOIN
+  `media_crypto`·`media_crypto_video` 로 내린다(§5.2.1 · [media_security.md](media_security.md) §5.2). `tc_crypto`(전송 제어 SRTCP)는 CMP 가
+  받지만 E2E(CSK) 트랙 전까지 CSP 는 싣지 않는다(§7 D7). CMP 가 `resource.mcvideo` 를 광고하지 않으면(멤버 풀 0) MCVideo 그룹 호를 받지 않는다(500).
 
 #### 5.2.1 그룹 호 (A10 `McVideoCallService` · A11 `CmpClient` MCVideo 명령)
 
@@ -304,6 +305,7 @@ chat|prearranged(그룹 속성 `invite_members`) · 개시자 · 시작 시각(T
 | INVITE — prearranged 진행 중 세션 | 합류(재합류 `gr` 포함): chat 합류와 같은 절차, 암묵 요청은 받지 않는다(TS 24.581 §14.3.5). 개시 대기 중이면 합류 뒤 개시자에게 답한다 |
 | 같은 멤버의 새 INVITE (BYE 없는 재합류) | 옛 leg 는 SIP 다이얼로그만 끝낸다(확립 = BYE, 응답 전 초대 = CANCEL) — CMP 멤버 키가 (group, 멤버)라 LEAVE 하지 않는다 |
 | 멤버 팬아웃 INVITE (골든 07) | From = 그룹 URI, Contact = 포커스(`g.3gpp.mcvideo`·icsi-ref·isfocus + `gr`), Accept-Contact 두 줄, `P-Asserted-Service` MCVideo ICSI, `Session-Expires: 1800` — **refresher 생략**(§6.3.3.1.2 6); 스택이 로컬 정책으로 싣는 refresher 를 지운다 — 단말이 200 OK 에서 `refresher=uas` 로 정한다, §6.2.3.1.1 5)), multipart = SDP(offer: 멤버 CMP 포트 audio·video·control, 음성 = 코덱 테이블 AMR-WB, `mc_priority` = `<user-priority>`, `mc_transmission_ssrc` = 이 멤버 `tc_ssrc`) + mcvideo-info(session-type prearranged · request-uri = 멤버 · calling-user-id = 개시자 · calling-group-id = 그룹). 초대 응답 한도 30 s(CIMS 값 — 규격은 정하지 않는다) 안에 200 OK 가 없으면 CANCEL |
+| 미디어 SRTP (SDES — [media_security.md](media_security.md) §5.2) | 접속서비스 `media_srtp` × offer crypto, **m= 라인마다**(SDES 키는 m= 라인마다 다르다 — RFC 4568 §6.1). 단말 offer: 음성 협상이 깨지면 488, 영상이 깨지면(또는 음성 SRTP 인데 영상 평문) 영상 성분만 거절(answer `m=video 0`). 서버 offer(멤버 초대): required 또는 optional + 바인딩 mediasec 능력이면 audio·video 각각 서버 키로 `RTP/SAVP` + `a=crypto`, 멤버 200 OK 의 crypto 가 어긋나면 음성 = BYE·영상 = 영상만 뺀다. 키 = JOIN ② `media_crypto`·`media_crypto_video`(rx = 단말 키, tx = 서버 키), re-INVITE = 단말 재키잉만 |
 | 200 OK answer (골든 04·06) | 멤버 CMP 포트로 audio(코덱 테이블 AMR-WB — offer PT echo)·video(영상 성분이 없으면 port 0 — RFC 3264 §6, JOIN 에 video 포트 없음)·`m=application <control_port> udp MCVideo` + `a=fmtp:MCVideo` = `BuildMcVideoAnswerFmtp`(offer 에 있던 것 + `mc_transmission_ssrc` = JOIN 응답 `tc_ssrc` · 암묵 요청이면 `mc_implicit_request`·(허가) `mc_granted`·`mc_audio/video_ssrc`). 헤더 = Contact 포커스 + `gr` · `Require: timer` · `Session-Expires: …;refresher=uac`(단말 갱신, §6.3.3.2.3.2 2)) · `Supported: tdialog` · `P-Asserted-Identity` = MCVideo PSI(§6.3.3.2.3.2) |
 | 멤버 200 OK | JOIN ②(answer 주소·포트·`a=ssrc`, 단말 송신 PT = 서버 offer PT) → prearranged 개시 대기면 개시자 수락. JOIN ② 실패 → BYE·leg 정리. 4xx~6xx → leg 정리 |
 | re-INVITE (미디어 변경 — 망 전환·주소 변경) | JOIN ② 재선언(새 주소·PT·`a=ssrc` — CMP 는 협상 값만 갱신하고 전송 제어 상태는 둔다). answer 는 스택의 직전 로컬 선언(멤버 CMP 포트·제어 채널) 그대로. 세션 갱신 re-INVITE(미디어 무변경)는 CMP 를 부르지 않는다(leg_liveness.md §6.3) |
@@ -317,8 +319,8 @@ chat|prearranged(그룹 속성 `invite_members`) · 개시자 · 시작 시각(T
 겹치지 않게). JOIN 응답에서 `port`·`video_port`·`control_port`·`tc_ssrc`·`granted`·`audio_ssrc`·`video_ssrc` 를 읽는다. `HandleEvent` 는 hdr.service 가
 mcvideo 인 `PTT_GROUP_ABORTED`·`TRANSMITTERS`·`TRANSMISSION_INACTIVITY` 를 MCVideo 서비스로 보낸다.
 
-**1차 범위 밖** — 긴급·임박·방송·ad hoc·private(V8), 확인 통화(required 멤버·TNG1 확인·min-number-to-start), conference 이벤트 NOTIFY, 녹취(B8), 영상 SRTP
-키 생성(B7 CMP 는 준비됨 — CSP `media_srtp` 결선은 A10 다음), 참가자 수 상한(`on-network-max-participant-count` 속성 없음).
+**1차 범위 밖** — 긴급·임박·방송·ad hoc·private(V8), 확인 통화(required 멤버·TNG1 확인·min-number-to-start), conference 이벤트 NOTIFY, 녹취(B8),
+전송 제어 SRTCP 키(`tc_crypto` — E2E CSK 트랙), 참가자 수 상한(`on-network-max-participant-count` 속성 없음).
 
 ### 5.3 CMP (미디어 · 전송 제어)
 

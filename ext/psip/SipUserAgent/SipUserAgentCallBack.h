@@ -96,6 +96,12 @@ public:
 	std::string	m_strRemoteCryptoSuite;
 	std::string	m_strRemoteCryptoKey;
 	bool				m_bRemoteSavp = false;    // 수신 m=audio protocol 이 RTP/SAVP(F) 였는지
+	// 합성 SDP 의 m=video SRTP — SDES 키는 m= 라인마다 다르다(RFC 4568 §6.1). suite 가 설정되면 AddSdp 의 m=video 가
+	//   RTP/SAVP + a=crypto 가 된다. 비면 video 는 평문 — audio 가 SRTP(local crypto)인데 이것이 비면 video 는 port 0 으로
+	//   거절한다(평문 video 를 SRTP leg 에 섞지 않는다). 수신 쪽 video a=crypto 는 m_clsMediaList 에서 응용이 읽는다.
+	std::string	m_strLocalVideoCryptoTag;
+	std::string	m_strLocalVideoCryptoSuite;
+	std::string	m_strLocalVideoCryptoKey;
 
 #ifdef USE_MEDIA_LIST
 	// 전체 미디어 리스트

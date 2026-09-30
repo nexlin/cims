@@ -639,3 +639,8 @@ SDP 에 `ccm fir` 가 없으면 PLI 로 바꿔 보내자. ③ SDK 수신 쪽은 
 - **주의(사용자 결정 ②)** — `migrate_mcvideo.sql` 은 `video_enabled=1` 그룹(g004 등)에 MCVideo 속성 행을, **PTT 회선 전부**에 MCVideo 자격 행을 넣는다(현행
   PTT 영상 보존). .45 CSC 는 MCVideo 코드가 없어 무영향 — .48 CSC 가 발급하는 토큰에만 `3gpp:mc:video_*`·`mcvideo_id` 가 붙는다. 자격을 시험 신원으로만
   두려면 적용 뒤 A6 `DELETE …/ptt/{msisdn}/mcvideo` 로 거두면 된다(사용자 결정).
+
+**.48 A10 후속 — MCVideo 미디어 SRTP (.48 → .45)** — 접속서비스 `media_srtp` 대로 m= 라인마다 SDES(mcvideo.md §5.2.1 · media_security.md §5.2).
+단말 offer 의 음성 협상이 깨지면 488, 영상만 깨지면(또는 음성 SRTP 인데 영상 평문) 영상 성분만 거절(answer `m=video 0`). 멤버 초대는 required 또는
+optional + 등록 mediasec 능력이면 audio·video 각각 서버 키(`RTP/SAVP` + 서로 다른 `a=crypto`) — SDK answer 도 m= 라인마다 자기 키를 실어야 한다.
+psip 합성 SDP 에 video 전용 키(`m_strLocalVideoCrypto*`)를 더했다(S1-UNIT-PSIP K·L). .48 PTT 접속서비스는 `media_srtp` 미설정(평문)이라 M2 는 평문이다.

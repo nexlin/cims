@@ -15,6 +15,8 @@
 //   H. UAC offer: local video 포트 설정                                    → INVITE 에 m=video <port> RTP/AVP 97 + a=rtpmap:97 H264/90000
 //   I. UAS answer, MC 미디어 프로파일 MCVideo(계약 K4)                     → i= 성분 표시 · 선택 PT rtcp-fb 되돌림 · m=application udp MCVideo
 //   J. UAC offer, 프로파일 MCVideo(제어 기능 멤버 초대)                     → i= · rtcp-fb PLI·FIR 광고 · udp MCVideo + fmtp
+//   K. UAS answer, SRTP MCVideo — m= 라인별 키(RFC 4568 §6.1)                → m=video RTP/SAVP + 자기 a=crypto · video 키 없으면 port 0
+//   L. UAC offer, SRTP MCVideo                                              → m=audio·m=video 둘 다 RTP/SAVP + 서로 다른 a=crypto
 //
 //   빌드/실행은 verify S1-UNIT-PSIP (verify/lib/items/stage1/unit_psip.py) 가 한다 — 명령은 psip_leg_dest_test.cpp 서두와 같다.
 //     build/psip_reason_video_test [--port 27080] [--verbose]
@@ -61,6 +63,8 @@ public:
 	int m_iLocalAppPort = -1;				// AcceptCall 의 m_iApplicationPort
 	bool m_bMcVideo = false;				// AcceptCall 의 m_eMcMediaProfile = MCVideo
 	std::string m_strAppFmtp = "mc_queueing";	// AcceptCall 의 m_strApplicationFmtp
+	std::string m_strAudioKey;				// AcceptCall 의 m_strLocalCryptoKey (비면 평문)
+	std::string m_strVideoKey;				// AcceptCall 의 m_strLocalVideoCryptoKey (비면 평문)
 
 	// 관측
 	std::atomic<int> m_iEnded{ 0 };
@@ -89,6 +93,18 @@ public:
 		clsLocal.m_iApplicationPort = m_iLocalAppPort;
 		clsLocal.m_strApplicationFmtp = m_strAppFmtp;
 		if( m_bMcVideo ) clsLocal.m_eMcMediaProfile = E_MC_MEDIA_MCVIDEO;
+		if( !m_strAudioKey.empty() )
+		{
+			clsLocal.m_strLocalCryptoTag = "1";
+			clsLocal.m_strLocalCryptoSuite = "AES_CM_128_HMAC_SHA1_80";
+			clsLocal.m_strLocalCryptoKey = m_strAudioKey;
+		}
+		if( !m_strVideoKey.empty() )
+		{
+			clsLocal.m_strLocalVideoCryptoTag = "1";
+			clsLocal.m_strLocalVideoCryptoSuite = "AES_CM_128_HMAC_SHA1_80";
+			clsLocal.m_strLocalVideoCryptoKey = m_strVideoKey;
+		}
 		m_pclsUa->AcceptCall( pszCallId, &clsLocal );
 	}
 	void EventCallRing( const char *, int, CSipCallRtp * ) override {}
@@ -188,6 +204,15 @@ static const char * SDP_MCVIDEO =
 	"a=fmtp:97 profile-level-id=42e01f;packetization-mode=1\r\na=rtcp-fb:97 nack pli\r\na=rtcp-fb:97 ccm fir\r\n"
 	"a=rtcp-fb:96 nack\r\n"
 	"m=application 40006 udp MCVideo\r\na=fmtp:MCVideo mc_queueing;mc_priority=5;mc_transmission_ssrc=305419896\r\n";
+
+// SRTP MCVideo offer — audio·video 각각 RTP/SAVP + 자기 a=crypto (media_security.md §5.1 · RFC 4568 §6.1)
+static const char * SDP_MCVIDEO_SAVP =
+	"v=0\r\no=- 1 1 IN IP4 127.0.0.1\r\ns=-\r\nc=IN IP4 127.0.0.1\r\nt=0 0\r\n"
+	"m=audio 40002 RTP/SAVP 0\r\na=rtpmap:0 PCMU/8000\r\n"
+	"a=crypto:1 AES_CM_128_HMAC_SHA1_80 inline:QUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFB\r\n"
+	"m=video 40004 RTP/SAVP 97\r\na=rtpmap:97 H264/90000\r\na=rtcp-fb:97 nack pli\r\n"
+	"a=crypto:1 AES_CM_128_HMAC_SHA1_80 inline:QkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJC\r\n"
+	"m=application 40006 udp MCVideo\r\n";
 
 static std::string BuildInvite( int iUePort, const std::string & strCallId, const char * pszSdp )
 {
@@ -525,6 +550,76 @@ int main( int argc, char * argv[] )
 		CHECK( strBody.find( "a=rtcp-fb:97 nack pli\r\na=rtcp-fb:97 ccm fir\r\n" ) != std::string::npos, "rtcp-fb PLI·FIR 광고" );
 		CHECK( strBody.find( "m=application 40044 udp MCVideo\r\na=fmtp:MCVideo mc_priority=5;mc_transmission_ssrc=7\r\n" ) != std::string::npos,
 		       "udp MCVideo + fmtp" );
+		clsUa.StopCall( strCallId.c_str() );
+		UdpRecvUntil( fdUe, "CANCEL", 1000 );
+	}
+
+	// ── K. SRTP MCVideo answer — m= 라인마다 자기 키(RFC 4568 §6.1), video 키가 없으면 video 는 거절 ──
+	static const char * AUD_KEY = "Q0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0NDQ0ND";
+	static const char * VID_KEY = "RERERERERERERERERERERERERERERERERERERERE";
+	printf( "[K] SRTP MCVideo offer → m=video RTP/SAVP + 자기 a=crypto / video 키 없음 = port 0\n" );
+	for( int iCase = 0; iCase < 2; ++iCase )
+	{
+		clsCb.Reset();
+		clsCb.m_iLocalVideoPort = 40054;
+		clsCb.m_iLocalAppPort = 40056;
+		clsCb.m_bMcVideo = true;
+		clsCb.m_strAppFmtp = "mc_transmission_ssrc=9";
+		clsCb.m_strAudioKey = AUD_KEY;
+		clsCb.m_strVideoKey = iCase == 0 ? VID_KEY : "";
+		std::string strInvite;
+		std::string strFinal = UeInvite( fdUe, iUePort, iCase == 0 ? "rv-k1@test.local" : "rv-k2@test.local", SDP_MCVIDEO_SAVP, strInvite );
+		std::string strBody = BodyOf( strFinal );
+		CHECK( strFinal.compare( 0, 11, "SIP/2.0 200" ) == 0, "200 OK" );
+		CHECK( MediaOrder( strBody ) == "audio,video,application", ( "m= 순서 = offer (" + MediaOrder( strBody ) + ")" ).c_str() );
+		CHECK( strBody.find( "m=audio 40000 RTP/SAVP" ) != std::string::npos &&
+		       strBody.find( std::string( "a=crypto:1 AES_CM_128_HMAC_SHA1_80 inline:" ) + AUD_KEY ) != std::string::npos, "audio SAVP + 자기 키" );
+		if( iCase == 0 )
+		{
+			size_t pv = strBody.find( "m=video 40054 RTP/SAVP 97\r\n" );
+			CHECK( pv != std::string::npos, "m=video RTP/SAVP (video 키 있음)" );
+			CHECK( pv != std::string::npos && strBody.find( std::string( "a=crypto:1 AES_CM_128_HMAC_SHA1_80 inline:" ) + VID_KEY, pv ) != std::string::npos,
+			       "m=video 의 a=crypto = video 키(audio 키와 다름)" );
+			CHECK( strBody.find( std::string( "inline:" ) + VID_KEY ) > strBody.find( "m=video" ), "video 키는 m=video 아래에만" );
+		}
+		else
+		{
+			CHECK( strBody.find( "m=video 0 RTP/SAVP 97\r\n" ) != std::string::npos, "video 키 없음 → m=video 0 (평문 video 를 SRTP leg 에 섞지 않는다)" );
+		}
+		UdpSendTo( fdUe, BuildInDialog( "BYE", strInvite, strFinal, 2, NULL ) );
+		UdpRecvUntil( fdUe, "SIP/2.0 200", 1000 );
+	}
+	clsCb.m_bMcVideo = false;
+	clsCb.m_strAppFmtp = "mc_queueing";
+	clsCb.m_strAudioKey.clear();
+	clsCb.m_strVideoKey.clear();
+
+	// ── L. SRTP MCVideo offer (제어 기능의 멤버 초대 — media_security.md §4.1) ──
+	printf( "[L] 발신 offer, SRTP MCVideo → audio·video RTP/SAVP + 서로 다른 a=crypto\n" );
+	{
+		clsCb.Reset();
+		CSipCallRtp clsRtp;
+		clsRtp.m_strIp = UA_IP; clsRtp.m_iPort = 40060; clsRtp.m_iCodec = 0;
+		clsRtp.m_clsCodecList.push_back( 0 );
+		clsRtp.m_iVideoPort = 40062;
+		clsRtp.m_iApplicationPort = 40064;
+		clsRtp.m_eMcMediaProfile = E_MC_MEDIA_MCVIDEO;
+		clsRtp.m_strApplicationFmtp = "mc_priority=5;mc_transmission_ssrc=7";
+		clsRtp.m_strLocalCryptoTag = "1"; clsRtp.m_strLocalCryptoSuite = "AES_CM_128_HMAC_SHA1_80"; clsRtp.m_strLocalCryptoKey = AUD_KEY;
+		clsRtp.m_strLocalVideoCryptoTag = "1"; clsRtp.m_strLocalVideoCryptoSuite = "AES_CM_128_HMAC_SHA1_80";
+		clsRtp.m_strLocalVideoCryptoKey = VID_KEY;
+		CSipCallRoute clsRoute;
+		clsRoute.m_strDestIp = UA_IP; clsRoute.m_iDestPort = iUePort; clsRoute.m_eTransport = E_SIP_UDP;
+		std::string strCallId;
+		UdpDrain( fdUe );
+		CHECK( clsUa.StartCall( "svc", "peer", &clsRtp, &clsRoute, strCallId ), "StartCall" );
+		std::string strInv = UdpRecvUntil( fdUe, "INVITE", 2000 );
+		std::string strBody = BodyOf( strInv );
+		size_t pv = strBody.find( "m=video 40062 RTP/SAVP 97\r\n" );
+		CHECK( strBody.find( "m=audio 40060 RTP/SAVP" ) != std::string::npos, "offer m=audio RTP/SAVP" );
+		CHECK( pv != std::string::npos, "offer m=video RTP/SAVP" );
+		CHECK( pv != std::string::npos && strBody.find( std::string( "inline:" ) + VID_KEY, pv ) != std::string::npos &&
+		       strBody.find( std::string( "inline:" ) + AUD_KEY ) < pv, "audio 키는 m=audio 아래, video 키는 m=video 아래" );
 		clsUa.StopCall( strCallId.c_str() );
 		UdpRecvUntil( fdUe, "CANCEL", 1000 );
 	}

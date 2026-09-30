@@ -60,7 +60,11 @@ private:
         ELegRole eRole = E_LEG_JOINER;
         bool bEstablished = false;  // 200 OK 송수신
         bool bJoined = false;       // CMP JOIN ② (주소 등록)
-        time_t tDeadline = 0;       // 초대 leg 응답 한도
+        bool bVideo =
+            true;  // 협상된 영상 성분이 살아 있다(서버 SDP m=video ≠ 0) — false 면 JOIN 에 video 포트를 싣지 않는다
+        time_t tDeadline = 0;  // 초대 leg 응답 한도
+        RelaySdesLeg
+            clsSdes;  // 미디어 SRTP(SDES) 협상 상태 — audio·video 가 m= 라인마다 키가 다르다(media_security.md §5)
     };
     struct Session {
         std::string strGroupId;

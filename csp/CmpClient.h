@@ -82,6 +82,8 @@ struct CmpMcvMemberDecl {
     bool bImplicit = false;
     bool bRecvOnly = false;
     int iVideoFb = -1;  // 영상 SDP 가 협상한 키프레임 요청 — 비트 1 = PLI(nack pli) · 2 = FIR(ccm fir), -1 = 싣지 않음
+    CmpMediaCrypto clsAudioCrypto;  // 멤버 SRTP media_crypto (비활성 = 싣지 않음 — 새 멤버 평문 / 재-JOIN 기존 키 유지)
+    CmpMediaCrypto clsVideoCrypto;  // media_crypto_video
 };
 // PTT_JOIN 응답
 struct CmpMcvJoinResult {

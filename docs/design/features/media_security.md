@@ -112,7 +112,9 @@ CSP 발신 offer 의 형태를 per-call 폴백 없이 결정하기 위해, **단
 - **SDP 방출** (`CSipDialog::AddSdp`, `ext/psip/SipUserAgent/SipDialog.cpp`): local crypto 가
   설정된 경우 `m=audio ... RTP/SAVP ...` + `a=crypto:<tag> <suite> inline:<key||salt>` 를
   코덱 테이블 경로와 media-list 경로 양쪽에서 방출한다. answer 는 offer 의 tag/suite 를 echo
-  (RFC 4568 §5.1.2).
+  (RFC 4568 §5.1.2). 합성 SDP 의 `m=video` 는 그 m= 라인의 키(`m_strLocalVideoCrypto*` — SDES 키는 m= 라인마다
+  다르다, RFC 4568 §6.1)가 있을 때만 `RTP/SAVP` + 자기 `a=crypto` 로 싣고, audio 가 SRTP 인데 video 키가 없으면
+  video 를 port 0 으로 거절한다(평문 video 를 SRTP leg 에 섞지 않는다). 쓰는 곳 = MCVideo 그룹 호(아래 §5.2).
 - **SDP 파싱**: 수신 SDP 의 `a=crypto` 를 기존 `CSdpAttributeCrypto`
   (`ext/psip/SdpParser/SdpAttributeCrypto.h` — 파서 기구현)로 해석해 `CSipCallRtp` 에 올린다.
   protocol 이 `RTP/SAVP` 인데 유효한 crypto 가 없으면 협상 실패로 응용에 알린다(응용이 488).
@@ -134,6 +136,11 @@ CSP 발신 offer 의 형태를 per-call 폴백 없이 결정하기 위해, **단
   ×정책, B(착신) leg 는 정책×착신 바인딩 mediasec 능력으로 offer 형태(SAVP/AVP)를 결정하고,
   SAVP offer 에 crypto 없는/불일치 answer 는 호 종료(평문 폴백 금지). 키는 `RELAY_ADD`
   (peer0)·`RELAY_MODIFY`(peer1/재협상) 의 `media_crypto[_video]` 로 CMP 에 내린다.
+- **MCVideo 그룹 호 leg**([mcvideo.md](mcvideo.md) §5.2.1): 판단 규칙은 PTT 와 같고 m= 라인마다 따로 — 단말 offer 는
+  `MediaSdes::EvalRelayOfferSdes` 를 audio·video 에 각각(음성이 깨지면 488, 영상이 깨지면 그 성분만 거절 — answer `m=video 0`),
+  서버 offer(멤버 초대)는 required 또는 optional + 바인딩 mediasec 능력이면 audio·video 각각 서버 키, 멤버 200 OK 는
+  `EvalRelayAnswerSdes`(음성 불일치 = 참가시키지 않고 BYE, 영상 불일치 = 영상만 뺌). 키는 JOIN ② 의 `media_crypto`·
+  `media_crypto_video` 로, re-INVITE 는 단말 재키잉만 반영(`ReadReinviteSdes`, 서버 키 유지).
   **18x 의 SDP(early media)** 도 같은 검증으로 착신 leg 키를 그때 CMP 에 내린다(링백이 SRTP 로
   온다 — [volte_flows.md](volte_flows.md) C1a). 어긋난 18x 는 SDP 를 떼고 전달하고 종료 판정은
   200 에서 하며, 200 의 키가 18x 와 같으면 `media_crypto` 를 다시 싣지 않는다(컨텍스트 유지). 서버가

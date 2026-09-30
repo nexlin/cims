@@ -396,6 +396,7 @@ CMP 로스터는 붙는 멤버만 싣는다(멤버마다 `PTT_GROUP_ADD` members
 | 사건 | 처리 |
 |------|------|
 | MCVideo INVITE | 검사(500 CMP `resource.mcvideo` 없음 · 403 Accept-Contact/isfocus · 404 137 재합류 세션 없음 · 404 113 · 403 116 · 404 117/118 · 403 108/109 자격 · 486 103 N6 · 암묵 affiliation 또는 403 120 · 488) → chat 은 곧바로 수락, prearranged 새 세션은 제휴된 MCVideo 등록 멤버 팬아웃 뒤 첫 멤버가 붙으면(200 OK 또는 스스로 합류) 개시자 수락 |
+| 미디어 SRTP | 접속서비스 `media_srtp` × offer crypto 를 m= 라인마다(`MediaSdes::EvalRelayOfferSdes`/`EvalRelayAnswerSdes`/`ReadReinviteSdes` — VoLTE relay 와 같은 부품), 음성 실패 = 488/BYE · 영상 실패 = 영상 성분만 거절, 키 = JOIN ② `media_crypto[_video]`, psip 합성 SDP 의 video 키 = `CSipCallRtp::m_strLocalVideoCrypto*` |
 | 수락 | 로스터 등록(ADD) → CMP JOIN ①(포트·`tc_ssrc`) → JOIN ②(offer 주소·`a=ssrc`·fmtp — 암묵 요청 결과) → 200 OK(포커스 Contact + `gr`, PAI = `mcvideo_psi`, `Supported: tdialog`, answer fmtp = `BuildMcVideoAnswerFmtp`) |
 | 팬아웃 | `CreateCall` → Request-URI = 등록 Contact · Accept-Contact 둘 · `P-Asserted-Service` · 포커스 Contact · Session-Expires refresher 생략(TS 24.281 §6.3.3.1.2 6)) · multipart(SDP + mcvideo-info) · 응답 한도 30 s 뒤 CANCEL |
 | 멤버 200 OK | JOIN ②(answer) → 대기 중 개시자 수락 (JOIN 실패 = BYE) |
