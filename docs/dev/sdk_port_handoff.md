@@ -101,15 +101,20 @@ BT·이어폰 소멸 뒤 뮤트 고착 복구([android_ue_client.md](../design/f
 - **실측 함정** — MSRP 발신 뒤 엔진을 곧바로 내리면 발신 leg BYE 가 cmdp 의 수신 통지보다 먼저 CSP 에 닿아 배포가 버려진다
   (`MSRP_MSG_RECEIVED for unknown session — dup/late, ignore`). 코어는 서버 BYE 를 5 s 기다리고, cli `sds` 는 media 면 6 s 기다린다.
   서버 쪽 보완은 [server45_handoff.md](server45_handoff.md) §9.
-- **긴급 확정 경로의 실서버 실측은 남았다** — 계측기 그룹 g005 의 그룹 능력 `emergency_call` 이 꺼져 있어 상향이 403 으로 끝난다.
-  Confirmed·서버 재광고(Advertised)는 루프백 시험으로만 확인했다.
+- **긴급 확정 경로 실서버** — g005 그룹 능력 `emergency_call` 을 켜고 013 의 user profile 긴급 대상을 `DedicatedGroup g005` 로 둔 뒤
+  .48(csp 0.2.166)에서 `cimsue-cli group-call g005 --upgrade-at 3 --cancel-at 7` → 상향 Confirmed 200 · 하향 Confirmed 200
+  ([server45_handoff.md](server45_handoff.md) §9). 서버 재광고(Advertised)는 루프백 시험으로만 확인했다.
 
 ### 4.1 Windows 개발 환경에 넘길 것 (P0b)
 
 - **C API·.NET 미노출** — `setCallCondition` · `sendEmergencyAlert` · `onMcpttCondition`/`onEmergencyAlert`(+ `McpttCondition`·`ConditionCause`·
   `EmergencyAlert`) · `CallInfo.condition`·`rxLevel` · `SdsMessage.mediaPlane` · `AccountConfig.mcpttClientId`·`rp*`·`maxSdsCplaneBytes`·`mcdataMsrp` ·
-  `EngineConfig.grantMicDelayMs` · CMS `UserProfileDoc`·`ServiceConfigDoc`·`Capabilities`·`fetchUserProfile/fetchServiceConfig`. 구조체 필드는 끝에
+  `EngineConfig.grantMicDelayMs` · `AccountConfig.mcpttServerUri`(경보 Request-URI = 참여 기능 PSI) · CMS `UserProfileDoc`·`ServiceConfigDoc`·`Capabilities`·`fetchUserProfile/fetchServiceConfig`. 구조체 필드는 끝에
   덧붙이고 `AbiLayoutTests` 로 크기 대조.
+- **CMS 해석 구조 변경(TS 24.484 §8.4 정렬, .48)** — `ServiceConfigDoc` = domain·`numLevelsGroupHierarchy/UserHierarchy`·`rpEmergency/
+  rpImminentPeril/rpNormal`(r-value `mcpttp.15`)만 — 옛 `allowPrivateCall/allowEmergencyCall/allowAlert/allowTransmitRequest/maxAffiliationsN2` 는
+  없다. `UserProfileDoc.allowPrivateCall` 추가. `Capabilities` 는 user profile 만으로 판정하고 `transmitRequest` 가 없다(N2 = user profile).
+  서버(csc 0.2.133 이상)가 새 문서를 낸다 — 옛 코어는 루트를 못 찾아 해석 실패(-2)를 낸다. Kotlin 파사드는 반영, C API·.NET 은 노출할 때 이 구조로.
 - **코어 동작 변화(Windows 앱에도 적용)** — ① `sendGroupSds` 가 `AccountConfig.maxSdsCplaneBytes` 를 넘으면 MSRP 로 가고 최종 결과가
   `onRequestResult` method `MSRP` 로 온다(token 상관은 그대로 — method 로 MESSAGE 를 거르는 앱은 고쳐야 한다) ② `setRxLevel` 이 오디오가 없어도
   성공하고 값을 기억한다(앱의 재적용 루프는 필요 없다) ③ 전이중 사설콜에서 `setMuted` 가 적용된다(예전에는 무시).
@@ -117,3 +122,4 @@ BT·이어폰 소멸 뒤 뮤트 고착 복구([android_ue_client.md](../design/f
 ## 5. 다음 (.45)
 
 W999 설치·영상 실측(§1.3 미실측 잔여) → P3 `ptt-client`(실기 그룹 = g005 — W999 +82500000001·MF52 +82500000002 추가됨, 상대 = 계측기 013~022).
+- 참고: SDK `cimsue_test` 의 `McpttCondition.UpgradeDeniedConfirmedAndAdvertised` 는 간헐 실패한다(.48 에서 이번 변경 전 코드로도 10회 중 2회) — 루프백 시험의 타이밍 의존으로 보인다.

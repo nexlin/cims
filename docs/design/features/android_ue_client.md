@@ -444,23 +444,20 @@ PTT up(RELEASE): 🎤mic 슬롯 ──disconnect─ 통화 stream  (송신 중�
 - 구현: **OkHttp + Kotlin**, PKCE(SHA-256/Base64URL), ETag 캐시. 참고 구현: `cims-phone/src/api/{idms,gms,cms}.ts`.
 - 부팅 순서: **CSC 인증·그룹조회 → SIP REGISTER → SUBSCRIBE → (키업) PUBLISH/INVITE**.
 - 식별자 연계: GMS의 `tel:{group}` → SIP `sip:{group}@domain`(INVITE/PUBLISH Req-URI), 프로파일 MCPTT ID → From/To.
-- **CMS 문서 소비 (TS 24.484)** — 두 문서는 성격이 다르다. 사용자별 인가는 `user-profile` 의
-  `ruleset`, 시스템 전역 정책은 `service-config` 이며, **게이트는 AND** 로 겹친다(시스템 정책이
-  사용자 인가를 넓히지는 못한다는 규격 취지). 취득 계기는 cms 구독 NOTIFY(즉시)와 `loadGroups()`
-  (구독이 없거나 죽었을 때의 폴백) 둘이고, 둘 다 `If-None-Match` 로 304 를 받는다.
+- **CMS 문서 소비 (TS 24.484)** — 두 문서는 성격이 다르다. 인가는 사용자별 `user-profile` 의 `ruleset`(§8.3.2.7)이
+  정본이고, `service-config`(§8.4, 시스템 전역)에는 인가 요소가 없다 — 단말이 쓰는 값은 on-network Resource-Priority 다.
+  취득 계기는 cms 구독 NOTIFY(즉시)와 `loadGroups()`(구독이 없거나 죽었을 때의 폴백) 둘이고, 둘 다 `If-None-Match` 로 304 를 받는다.
 
 | 문서 | 앱 상태 | 소비하는 값 |
 |---|---|---|
-| `user-profile` (사용자별) | `PttController.userProfile` | SOS 대상 결정(`entry-info` = DedicatedGroup / UseCurrentlySelectedGroup + `uri-entry` 전용 긴급그룹), `allow-emergency-group-call`, `allow-activate-emergency-alert`, `cims:allow-adhoc-group-call` |
-| `service-config` (시스템 전역) | `PttController.serviceConfig` | `allow-private-call`(1:1 **발신**), `allow-emergency-call`, `allow-alert`, on-network `allow-transmit-request`(floor 요청), `max-on-network-affiliations-N2` |
+| `user-profile` (사용자별) | `PttController.userProfile` | SOS 대상 결정(`entry-info` = DedicatedGroup / UseCurrentlySelectedGroup + `uri-entry` 전용 긴급그룹), `allow-private-call`(1:1 **발신**), `allow-emergency-group-call`, `allow-activate-emergency-alert`, `anyExt/allow-adhoc-group-call`(없으면 `cims:` 별칭), `OnNetwork/MaxAffiliationsN2` |
+| `service-config` (시스템 전역) | `PttController.serviceConfig` | on-network `emergency-/imminent-peril-/normal-resource-priority`(TS 24.379 §6.2.8.1.15) |
 
-- 정책 편집(서버): DB `mcptt_service_config` 단일 행이 SoT 이고, 콘솔 **구성 > MCPTT 정책**
-  (`PUT /api/v1/mcptt/service-config`, manager+)에서 바꾼다. 사용자별 인가는 가입자 화면의
-  user-profile 이다 — 단말은 두 축을 AND 로 본다.
-- 게이트 지점: `startPrivateCall` · `startEmergency` · `sendAlert(activate=true)` · `pttDown` ·
-  `startAdhocCall`. 전부 **UX 선차단**이고 최종 판정은 서버(403 / Floor Deny)다. 문서를 아직 받지
-  못했으면 게이트를 걸지 않는다(`svcAllows` 가 null 을 허용으로 본다) — 설정 취득 실패가 기능
-  정지로 번지지 않게.
+- 인가 편집(서버): 가입자 화면의 user-profile(사람별)과 PTT 그룹 편집(그룹 능력). 콘솔 **구성 > MCPTT 정책**
+  (`PUT /api/v1/mcptt/service-config`)은 N2 기본값·broadcast-group 계층 수만 바꾼다.
+- 게이트 지점: `startPrivateCall` · `startEmergency` · `sendAlert(activate=true)` · `startAdhocCall`. 전부 **UX 선차단**이고
+  최종 판정은 서버(403 / Floor Deny)다. 문서를 아직 받지 못했으면 게이트를 걸지 않는다(프로파일 null = 허용) — 설정 취득
+  실패가 기능 정지로 번지지 않게. 발언 요청(floor)은 문서로 막지 않는다 — 규격에 그런 요소가 없고 판정은 floor 제어 서버다.
 - **착신·경보 취소는 막지 않는다** — 서버가 이미 성립시킨 세션을 단말이 거절하면 정책 판정이 두
   곳으로 갈린다. 이미 걸린 경보의 회수도 항상 허용한다.
 - `N2`(동시 제휴 상한)는 **강제하지 않고 경고 로그만** 남긴다 — 앱이 잘라내면 어느 채널의 fan-out 을

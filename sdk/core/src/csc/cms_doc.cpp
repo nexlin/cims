@@ -84,10 +84,11 @@ bool UserProfileDoc::parse(const std::string& xml, UserProfileDoc& out, std::str
         d.maxAffiliationsN2 = intElem(on.inner, "MaxAffiliationsN2");
     }
 
-    // 인가 — <cp:ruleset> 의 actions. ad hoc 은 규격 <allow-adhoc-group-call> 과 서버 확장 <cims:allow-adhoc-group-call> 이
-    //   로컬 이름이 같아 한 번에 읽힌다.
+    // 인가 — <cp:ruleset> 의 actions. ad hoc 은 규격 <anyExt><allow-adhoc-group-call>(Rel-18) 과 옛 서버 확장
+    //   <cims:allow-adhoc-group-call> 이 로컬 이름이 같아 한 번에 읽힌다.
     Elem rs = elem(s, "ruleset");
     const std::string& r = rs.found ? rs.inner : std::string();
+    d.allowPrivateCall = allowFlag(r, "allow-private-call");
     d.allowEmergencyGroupCall = allowFlag(r, "allow-emergency-group-call");
     d.allowImminentPerilCall = allowFlag(r, "allow-imminent-peril-call");
     d.allowActivateEmergencyAlert = allowFlag(r, "allow-activate-emergency-alert");
@@ -99,19 +100,35 @@ bool UserProfileDoc::parse(const std::string& xml, UserProfileDoc& out, std::str
 }
 
 bool ServiceConfigDoc::parse(const std::string& xml, ServiceConfigDoc& out, std::string* err) {
-    Elem root = elem(xml, "mcptt-service-config");
-    if (!root.found) { if (err) *err = "no mcptt-service-config"; return false; }
+    Elem root = elem(xml, "service-configuration-info");
+    if (!root.found) { if (err) *err = "no service-configuration-info"; return false; }
     ServiceConfigDoc d;
     d.etag = out.etag;
-    const std::string& s = root.inner;
-    d.allowPrivateCall = allowFlag(s, "allow-private-call");
-    d.allowEmergencyCall = allowFlag(s, "allow-emergency-call");
-    d.allowAlert = allowFlag(s, "allow-alert");
+    Elem params = elem(root.inner, "service-configuration-params");
+    if (!params.found) { out = d; return true; }           // §8.4.2.3 — params 없으면 설정 없음
+    d.domain = attrOf(params.openTag, "domain");
+    const std::string& s = params.inner;
+    Elem common = elem(s, "common");
+    if (common.found) {
+        Elem bg = elem(common.inner, "broadcast-group");
+        if (bg.found) {
+            d.numLevelsGroupHierarchy = intElem(bg.inner, "num-levels-group-hierarchy");
+            d.numLevelsUserHierarchy = intElem(bg.inner, "num-levels-user-hierarchy");
+        }
+    }
     Elem on = elem(s, "on-network");
-    d.allowTransmitRequest = allowFlag(on.found ? on.inner : s, "allow-transmit-request");
-    // on-network 값이 더 구체적이라 우선한다 — 이 단말은 항상 on-network 다.
-    int n2 = on.found ? intElem(on.inner, "max-on-network-affiliations-N2") : -1;
-    d.maxAffiliationsN2 = n2 >= 0 ? n2 : intElem(s, "max-affiliations-N2");
+    if (on.found) {
+        auto rp = [&](const char* local) {
+            Elem e = elem(on.inner, local);
+            if (!e.found) return std::string();
+            std::string ns = elemText(e.inner, "resource-priority-namespace");
+            std::string pr = elemText(e.inner, "resource-priority-priority");
+            return ns.empty() || pr.empty() ? std::string() : ns + "." + pr;
+        };
+        d.rpEmergency = rp("emergency-resource-priority");
+        d.rpImminentPeril = rp("imminent-peril-resource-priority");
+        d.rpNormal = rp("normal-resource-priority");
+    }
     out = d;
     return true;
 }
@@ -121,18 +138,15 @@ Capabilities Capabilities::of(const UserProfileDoc* up, const ServiceConfigDoc* 
     c.userProfileKnown = up != nullptr;
     c.serviceConfigKnown = sc != nullptr;
     UserProfileDoc u;                                      // 기본값 = 전부 허용(미수신)
-    ServiceConfigDoc v;
     if (up) u = *up;
-    if (sc) v = *sc;
-    c.privateCall = v.allowPrivateCall;
-    c.emergencyGroupCall = u.allowEmergencyGroupCall && v.allowEmergencyCall;
-    c.imminentPerilCall = u.allowImminentPerilCall && v.allowEmergencyCall;
-    c.emergencyPrivateCall = v.allowPrivateCall && u.allowEmergencyPrivateCall;
-    c.emergencyAlert = u.allowActivateEmergencyAlert && v.allowAlert;
-    c.cancelEmergencyAlert = u.allowCancelEmergencyAlert && v.allowAlert;
+    c.privateCall = u.allowPrivateCall;
+    c.emergencyGroupCall = u.allowEmergencyGroupCall;
+    c.imminentPerilCall = u.allowImminentPerilCall;
+    c.emergencyPrivateCall = u.allowPrivateCall && u.allowEmergencyPrivateCall;
+    c.emergencyAlert = u.allowActivateEmergencyAlert;
+    c.cancelEmergencyAlert = u.allowCancelEmergencyAlert;
     c.adhocGroupCall = u.allowAdhocGroupCall;
-    c.transmitRequest = v.allowTransmitRequest;
-    c.maxAffiliationsN2 = v.maxAffiliationsN2 > 0 ? v.maxAffiliationsN2 : (u.maxAffiliationsN2 > 0 ? u.maxAffiliationsN2 : 0);
+    c.maxAffiliationsN2 = u.maxAffiliationsN2 > 0 ? u.maxAffiliationsN2 : 0;
     return c;
 }
 

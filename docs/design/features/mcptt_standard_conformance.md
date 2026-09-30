@@ -472,21 +472,22 @@ REGISTER/SUBSCRIBE/NOTIFY 의 헤더·본문을 상용 IMS 캡처 기준으로 �
   `<cp:ruleset>` allow-* 가 말한다(DedicatedGroup 모드 긴급그룹 미지정 → 그룹 긴급·경보 false, UsePreConfigured 모드 수신자 미지정 →
   긴급 사설콜 false — CSP 403 판정과 일치). 규격상 **선택**이지만 필수로 읽는 단말이 있어 항상 싣는 것 = alias-entry 의 `index`·`xml:lang`, `<ParticipantType>`(§8.3.2.1 f). 값은 `UserProfile.ParticipantType`·`UserProfile.Language` 설정이고, `xml:lang` 은 `<Name>` 과 같은 값을 써 한 문서 안에서 어긋나지 않는다. 소유-비멤버 그룹과 자체 JSON 목록(`GET …/groups/users/{me}`)은
   전환기 공존 — 클라이언트가 MCPTTGroupInfo 로 옮기면 JSON 목록 제거([mcx_identity_scope.md](mcx_identity_scope.md) 와 같은 방식).
-- **S4 service-config**: 값의 SoT 는 DB `mcptt_service_config` **단일 행**(id=1)이다. 기동 시
-  `load_shared_data` 가 `SERVICE_CONFIG` 캐시로 읽고, `get_service_config_xml` 이 그 캐시를 XML 로
-  산출한다(내용 파생 ETag — 값이 바뀌면 자동 갱신). 편집은 관리 API
-  `GET/PUT /api/v1/mcptt/service-config`(monitor 조회 / manager 변경)와 콘솔 **구성 > MCPTT 정책**
-  이며, PUT 이 DB UPSERT + 캐시 갱신을 함께 하므로 다음 XCAP GET 이 곧 새 값이다.
-  service-config 은 **시스템 전역 문서 1건**이라 가입자별 오버라이드를 두지 않는다 — 사용자 단위
-  인가는 `user-profile` 의 `ruleset` 이 규격 자리이고, 단말이 두 축을 AND 로 게이트한다.
+- **S4 service-config**: 문서 = TS 24.484 §8.4.2.1·§8.4.2.3 스키마 — `<service-configuration-info>` ›
+  `<service-configuration-params domain=<PTT 도메인>>` › `<common><broadcast-group>`(계층 수) · `<on-network>`
+  (`<fc-timers-counters>` 17 요소 필수 · `<emergency-/imminent-peril-/normal-resource-priority>` 필수, 각 namespace·priority).
+  값의 정본은 두 곳 — DB `mcptt_service_config` **단일 행**(id=1: N2 = user-profile `MaxAffiliationsN2` 기본값·계층 수, 관리 API
+  `GET/PUT /api/v1/mcptt/service-config`·콘솔 **구성 > MCPTT 정책**)과 CSC 설정 `ServiceConfig.*`(floor 타이머·카운터 — CMP
+  `Floor*Sec` 과 같은 값, Resource-Priority — RFC 8101 `mcpttp` 15/8/0 = CSP fan-out). `get_service_config_xml` 이 둘을 산출한다
+  (내용 파생 ETag). **인가 요소는 없다** — 1:1·긴급·경보·그룹 생성 인가는 `user-profile` 의 `ruleset`·그룹 문서가 규격 자리다.
+  floor 타이머의 단일 정의(CSP 가 문서 값을 `PTT_JOIN.floor_timers` 로 CMP 에 전달)는 후속이다 — 지금은 두 설정을 같게 둔다.
   전역 변경은 CSC 가 `SERVICE_CONFIG_CHANGED` 를 발행하고 CSP 가 cms 구독자 **전원**에게
   xcap-diff NOTIFY 를 push 한다(`GetSubscriptionsByEvent("cms")` — 전역 문서라 사용자/자원 키가
   없는 유일한 전체 조회). 구독이 없는 단말은 목록 갱신·재로그인 계기의 재조회로 반영된다.
 - **S3 변경통지**: 가입자(번호) CRUD 시 `notify_csp("USER_CHANGED")` → CSP `SendSipNotify`(user_change)
   → CMS 구독자에 xcap-diff NOTIFY(user-profile/service-config sel).
 - **단말 소비**: PTT 단말은 `sip:cms_psi@<domain>` 으로 cms 축을 구독하고 NOTIFY 의 sel 대로 두 문서를
-  `If-None-Match` 재조회한 뒤, 사용자별 인가(`user-profile` 의 `ruleset`)와 시스템 정책
-  (`service-config`)을 **AND** 로 게이트한다(발신·개시만, 착신은 서버 판정). 소비 지점 표는
+  `If-None-Match` 재조회한 뒤, 사용자별 인가(`user-profile` 의 `ruleset`)로 게이트한다(발신·개시만, 착신은 서버 판정).
+  `service-config` 에서는 Resource-Priority 값을 쓴다. 소비 지점 표는
   [android_ue_client.md §7](android_ue_client.md) "CMS 문서 소비".
 
 ### KMS (TS 33.180 §F)

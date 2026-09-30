@@ -181,6 +181,12 @@ CSP fan-out (하이브리드):
 → 보관(messages.jsonl, via=msrp·file_url 포함) → 발신 레그 BYE
 ```
 
+- **배포는 수신 완료 통지(`MSRP_MSG_RECEIVED`) 하나로 한다** — cmdp 는 저장을 마친 뒤 통지하고 통지 payload 가 배포에 필요한
+  값(file_id·그룹·발신자·크기·TLV 요약)을 다 싣는다. 발신 단말은 Success-Report 를 받은 뒤 곧바로 BYE 할 수 있으므로
+  (RFC 4975 §7.1.2 — 세션 종료는 발신자 재량) 통지보다 BYE 가 먼저 CSP 에 닿아도 배포한다: 끝난 수신 leg 의 cmdp 세션을 30 s
+  동안 기억해(`McDataMediaService::m_mapEndedRecv`) 그 세션의 통지를 한 번 받는다. 배포를 마친 세션은 기억에서 빠지므로
+  cmdp 의 이벤트 재전송(1 s × 5)은 중복으로 걸러진다.
+
 - **cmdp** (`cmdp/`, 별도 프로세스·패키지 0.1.0) — MCData media plane. TS 23.282 media storage
   function 에 해당: MSRP 를 **종단**하고(릴레이 아님) 수신 본문을 CSC FD 스토어
   (`McDataFd.Dir`, §4.5 와 동일 디렉터리·인덱스 스키마)에 기록한다 → FILEURL 폴백 수신자는

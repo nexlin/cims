@@ -2484,58 +2484,12 @@ int CModuleDispatcher::EventMessage( const char *pszFrom, const char *pszTo, CSi
             pszTo = strMsgCallee.c_str();
         }
     }
-    // MCPTT emergency alert (TS 24.379): mcptt-info alert-ind 판별 → SMS 와 분기.
-    //   Phase 3a 탐지/로깅/ack + Phase 3b 그룹 멤버 fan-out(같은 alert MESSAGE 전파, 취소도 동일).
-    if ( pclsMessage && pclsMessage->m_strBody.find( "alert-ind" ) != std::string::npos ) {
+    // MCPTT emergency alert (TS 24.379 §12.1) — mcptt-info <alert-ind> 판별 → SMS 와 분기.
+    //   단말은 Request-URI = 참여 기능 PSI, 대상 그룹 = 본문 <mcptt-request-uri>(§12.1.1.1 4)a)·8))로 보낸다.
+    //   Request-URI 가 그룹인 형식도 전환기로 받는다(대상 그룹 = Request-URI). 이 CSP 는 참여·제어 기능을 겸한다.
+    if ( pclsMessage ) {
         CMcpttInfo clsMi = ParseMcpttInfo( pclsMessage->m_strBody );
-        bool bActivate = clsMi.bAlert;  // true=경보 발신, false=경보 취소
-        bool bGroupTarget = gclsGroupMap.Contains( pszTo );
-        // 능력 게이트 (TS 24.481): 그룹의 allow-MCPTT-emergency-alert 허용 시에만 전파.
-        CspPttGroup clsGroup;
-        bool bHaveGroup = bGroupTarget && gclsGroupMap.Select( pszTo, clsGroup );
-        bool bAllowed = bHaveGroup ? clsGroup._emergencyAlert : true;
-        // 사용자 단위 개시 인가 (TS 24.484 allow-activate-emergency-alert) — 미인가 경보는 전파하지
-        //   않는다 (규격: 콜과 달리 거절이 아닌 스트립). 취소는 항상 통과 — 잔존 경보 정리 경로 보존.
-        if ( bAllowed && bActivate ) {
-            CspUserProfile clsProf;
-            if ( gclsDbManager.SelectUserProfile( pszFrom, clsProf ) >= 0 && !clsProf.m_bAllowEmergencyAlert ) {
-                bAllowed = false;
-                CLog::Print( LOG_INFO, "EventMessage: alert by(%s) not authorised (user profile) → drop", pszFrom );
-            }
-        }
-        const char *pszEvt = bActivate ? "alert_sent" : "alert_cancelled";
-        int iFanout = 0;
-        if ( bAllowed && bHaveGroup ) {
-            if ( gclsCallDir.IsEnabled() )
-                gclsCallDir.PttLogEvent(
-                    pszTo, pszEvt, std::string( "{\"actor\":\"" ) + pszFrom + "\",\"target\":\"" + pszTo + "\"}" );
-            // Phase 3b — 그룹 등록 멤버에게 alert MESSAGE fan-out (발신자 제외). affiliation 요구 그룹은
-            //   affiliate 된 멤버만. 취소(alert-ind=false)도 동일 본문 전파로 멤버에 반영.
-            //   Content-Type 보존 (mcptt-info+xml — text/plain 강등 시 단말이 SMS 로 오인해 경보 분기 미동작).
-            {
-                char szContentType[512];
-                szContentType[0] = '\0';
-                pclsMessage->m_clsContentType.ToString( szContentType, sizeof( szContentType ) );
-                for ( const auto &pUser : clsGroup._pusers ) {
-                    if ( !pUser || pUser->_id == pszFrom ) continue;
-                    if ( clsGroup._requireAffiliation && gclsDbManager.IsConnected() &&
-                         !gclsDbManager.IsAffiliated( pszTo, pUser->_id ) )
-                        continue;
-                    CUserInfo clsMemInfo;
-                    if ( gclsUserMap.Select( pUser->_id.c_str(), clsMemInfo ) ) {
-                        CSipCallRoute clsMemRoute;
-                        clsMemInfo.GetCallRoute( clsMemRoute );
-                        if ( gclsUserAgent.SendSms( pszFrom, pUser->_id.c_str(), pclsMessage->m_strBody.c_str(),
-                                                    &clsMemRoute, szContentType[0] ? szContentType : NULL ) )
-                            iFanout++;
-                    }
-                }
-            }
-        }
-        CLog::Print( LOG_INFO, "EventMessage: MCPTT emergency %s from(%s) to(%s) group=%d fanout=%d", pszEvt, pszFrom,
-                     pszTo, bGroupTarget, iFanout );
-        // 200 OK ack (경보 수신 확인) — 응답은 psip 가 이 반환값으로 보낸다.
-        return SIP_OK;
+        if ( clsMi.bHasAlertInd ) return m_clsPttAs.OnEmergencyAlert( pszFrom, pszTo, pclsMessage, clsMi );
     }
 
     // MCData 그룹 SDS (TS 24.282) — 그룹 대상 MESSAGE 는 MCDATA-AS 가 게이트+fan-out.

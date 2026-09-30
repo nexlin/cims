@@ -96,6 +96,7 @@ public:
 	// SipStackAgentSms.hpp
 	bool SendSms( const char * pszFrom, const char * pszTo, const char * pszText, CSipCallRoute * pclsRoute );
 	bool SendSms( const char * pszFrom, const char * pszTo, const char * pszText, CSipCallRoute * pclsRoute, const char * pszContentType );
+	bool SendSms( const char * pszFrom, const char * pszTo, const char * pszText, CSipCallRoute * pclsRoute, const char * pszContentType, const std::vector< std::pair< std::string, std::string > > * pvecHeaders );
 
 	// SipUserAgentSend.hpp
 	bool SendReInvite( const char * pszCallId, CSipCallRtp * pclsRtp );

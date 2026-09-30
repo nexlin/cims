@@ -1762,8 +1762,8 @@ int64_t Engine::sendEmergencyAlert(int accountId, const std::string& groupId, bo
         if (ic == o->accountCfgs.end()) return -1;
         const AccountConfig& cfg = ic->second;
         const std::string gid = mcptt::bareId(groupId);
-        // ICSI mcptt(§12.1.1.1 1)·2)). Request-URI 는 그룹 — 이 CSP 는 To(그룹)로 경보를 게이트·팬아웃한다
-        //   (규격 = 참여 기능 PSI + 본문 mcptt-request-uri — 편차는 mcptt_emergency_modes.md §4.3).
+        // ICSI mcptt(§12.1.1.1 1)·2)). Request-URI = 참여 기능 PSI(§12.1.1.1 8)), 대상 그룹 = 본문 mcptt-request-uri.
+        //   PSI 를 모르면(mcpttServerUri 비어 있음) 그룹 URI — CSP 0.2.166 전 서버는 Request-URI 그룹으로만 받는다.
         std::map<std::string, std::string> h;
         h["P-Preferred-Service"] = mcptt::kIcsiMcptt;
         h["Accept-Contact"] = std::string("*;+g.3gpp.icsi-ref=\"urn%3Aurn-7%3A3gpp-service.ims.icsi.mcptt\";require;explicit");
@@ -1771,7 +1771,8 @@ int64_t Engine::sendEmergencyAlert(int accountId, const std::string& groupId, bo
                        : (originatedBy.find(':') == std::string::npos ? "tel:" + originatedBy : originatedBy);
         std::string body = mcptt::alertInfo("tel:" + gid, cfg.effectiveMcpttId(), cfg.effectiveMcpttClientId(), activate, ob,
                                             (!activate && cancelGroupEmergency) ? -1 : 0);
-        return o->doSendRequest(accountId, "MESSAGE", "sip:" + gid + "@" + cfg.domain, mcptt::kCtMcpttInfo, body, h, token);
+        const std::string target = cfg.mcpttServerUri.empty() ? "sip:" + gid + "@" + cfg.domain : cfg.mcpttServerUri;
+        return o->doSendRequest(accountId, "MESSAGE", target, mcptt::kCtMcpttInfo, body, h, token);
     });
 }
 

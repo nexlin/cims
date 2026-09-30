@@ -147,42 +147,46 @@ struct UserProfileDoc {
     std::vector<std::string> groups;           // OnNetwork/MCPTTGroupInfo — 제휴 가능 그룹 URI
     std::vector<std::string> implicitAffiliations;   // OnNetwork/ImplicitAffiliations
     int maxAffiliationsN2 = -1;                // OnNetwork/MaxAffiliationsN2 (-1 = 미기재)
+    bool allowPrivateCall = true;              // allow-private-call (§8.3.2.7 — 1:1 통화 인가)
     bool allowEmergencyGroupCall = true;       // allow-emergency-group-call
     bool allowImminentPerilCall = true;        // allow-imminent-peril-call
     bool allowActivateEmergencyAlert = true;   // allow-activate-emergency-alert
     bool allowCancelEmergencyAlert = true;     // allow-cancel-emergency-alert
     bool allowEmergencyPrivateCall = true;     // allow-emergency-private-call
-    bool allowAdhocGroupCall = true;           // cims:allow-adhoc-group-call (사이트 확장)
+    bool allowAdhocGroupCall = true;           // anyExt/allow-adhoc-group-call (§8.3.2.1 11)xxxviii)R), Rel-18 — 옛 서버 cims: 별칭도 같은 이름)
     /** XML → 문서. 루트가 mcptt-user-profile 이 아니면 false. */
     CIMSUE_API static bool parse(const std::string& xml, UserProfileDoc& out, std::string* err = nullptr);
 };
 
-/** MCPTT service configuration(TS 24.484 §8.2, `application/vnd.3gpp.mcptt-service-config+xml`) — 시스템 전역 정책.
- *  사용자 인가(user profile)를 넓히지 못하므로 두 문서는 AND 로 쓴다(Capabilities). 요소가 없으면 허용. */
+/** MCPTT service configuration(TS 24.484 §8.4, `application/vnd.3gpp.mcptt-service-config+xml`) — 시스템 전역 문서.
+ *  구조 = <service-configuration-info> › <service-configuration-params domain> › <common>·<on-network>. 인가 요소는 없다 —
+ *  인가는 user profile ruleset·그룹 문서가 정본이다. 요소가 없으면 빈 값/-1. */
 struct ServiceConfigDoc {
     std::string etag;
     bool notModified = false;                  // fetchServiceConfig 이 304 를 받았다
-    bool allowPrivateCall = true;              // allow-private-call
-    bool allowEmergencyCall = true;            // allow-emergency-call
-    bool allowAlert = true;                    // allow-alert
-    bool allowTransmitRequest = true;          // on-network/allow-transmit-request
-    int maxAffiliationsN2 = -1;                // on-network/max-on-network-affiliations-N2 > max-affiliations-N2 (-1 = 미기재)
+    std::string domain;                        // service-configuration-params@domain
+    int numLevelsGroupHierarchy = -1;          // common/broadcast-group/num-levels-group-hierarchy (-1 = 미기재)
+    int numLevelsUserHierarchy = -1;           // common/broadcast-group/num-levels-user-hierarchy
+    /** on-network *-resource-priority 의 Resource-Priority r-value(RFC 4412 "<namespace>.<priority>", 예 mcpttp.15 —
+     *  TS 24.379 §6.2.8.1.15). 비면 미기재 — AccountConfig.rp* 기본값을 그대로 쓴다. */
+    std::string rpEmergency;
+    std::string rpImminentPeril;
+    std::string rpNormal;
     CIMSUE_API static bool parse(const std::string& xml, ServiceConfigDoc& out, std::string* err = nullptr);
 };
 
-/** 정책 게이트 스냅샷(ue_sdk.md §4.2) — user profile ∧ service config. **받지 못한 문서는 허용**으로 둔다(게이트를 걸지 않는다).
- *  UX 선차단(버튼 숨김·안내)용이며 최종 판정은 서버다. */
+/** 정책 게이트 스냅샷(ue_sdk.md §4.2) — user profile ruleset 인가. **받지 못한 문서는 허용**으로 둔다(게이트를 걸지 않는다).
+ *  UX 선차단(버튼 숨김·안내)용이며 최종 판정은 서버다. service config 는 인가를 담지 않는다(TS 24.484 §8.4) — 받았는지만 기록. */
 struct Capabilities {
     bool userProfileKnown = false, serviceConfigKnown = false;
-    bool privateCall = true;                   // sc.allow-private-call
-    bool emergencyGroupCall = true;            // up.allow-emergency-group-call ∧ sc.allow-emergency-call
-    bool imminentPerilCall = true;             // up.allow-imminent-peril-call ∧ sc.allow-emergency-call
-    bool emergencyPrivateCall = true;          // sc.allow-private-call ∧ up.allow-emergency-private-call
-    bool emergencyAlert = true;                // up.allow-activate-emergency-alert ∧ sc.allow-alert
-    bool cancelEmergencyAlert = true;          // up.allow-cancel-emergency-alert ∧ sc.allow-alert
-    bool adhocGroupCall = true;                // up.cims:allow-adhoc-group-call
-    bool transmitRequest = true;               // sc.allow-transmit-request (on-network)
-    int maxAffiliationsN2 = 0;                 // sc > up, 0 = 미지정(N2 는 앱이 경고만 — 강제하지 않는다)
+    bool privateCall = true;                   // up.allow-private-call
+    bool emergencyGroupCall = true;            // up.allow-emergency-group-call
+    bool imminentPerilCall = true;             // up.allow-imminent-peril-call
+    bool emergencyPrivateCall = true;          // up.allow-private-call ∧ up.allow-emergency-private-call
+    bool emergencyAlert = true;                // up.allow-activate-emergency-alert
+    bool cancelEmergencyAlert = true;          // up.allow-cancel-emergency-alert
+    bool adhocGroupCall = true;                // up.allow-adhoc-group-call
+    int maxAffiliationsN2 = 0;                 // up.MaxAffiliationsN2, 0 = 미지정(N2 는 앱이 경고만 — 강제하지 않는다)
     /** nullptr = 그 문서를 아직 못 받음. */
     CIMSUE_API static Capabilities of(const UserProfileDoc* userProfile, const ServiceConfigDoc* serviceConfig);
 };

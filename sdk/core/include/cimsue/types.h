@@ -99,6 +99,9 @@ struct AccountConfig {
     /** 서버발 MSRP 배포를 받는다 — REGISTER Contact 의 `+g.3gpp.icsi-ref` 에 ICSI mcdata.sds 를 싣는다(코어가 contactParams 의
      *  기존 icsi-ref 목록에 합친다). false 면 서버가 큰 그룹 SDS 를 FILEURL(FD)로 폴백해 보낸다. */
     bool mcdataMsrp = false;
+    /** 참여 MCPTT 기능의 PSI — ue-init-config `<anyExt><MCPTT-Service-Details><Server-URI>`(TS 24.484 §7.2.2.3).
+     *  긴급 경보 MESSAGE 의 Request-URI(TS 24.379 §12.1.1.1 8)). 비면 그룹 URI 로 보낸다(CSP 0.2.166 전 서버와의 전환기). */
+    std::string mcpttServerUri;
 
     std::string aor() const { return "sip:" + msisdn + "@" + domain; }
     std::string effectiveMcpttId() const { return mcpttId.empty() ? "tel:" + msisdn : mcpttId; }

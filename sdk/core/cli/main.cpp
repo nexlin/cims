@@ -116,6 +116,7 @@ void usage() {
         "        (--ha1 HEX | --password P) [--mcptt-id tel:..] [--affiliate G,..] [--srtp off|optional|required] [--sec tls]\n"
         "        [--tls-ca FILE] [--no-tls-verify] [--display-name N] [--log-level N] [--timeout S] [--json]\n"
         "        [--cplane-max N] [--msrp]   (MCData media plane — 큰 그룹 SDS 발신·서버발 배포 수신)\n"
+        "        [--mcptt-psi URI]   (참여 기능 PSI — 긴급 경보 Request-URI, TS 24.379 §12.1.1.1 8))\n"
         "        또는 --csc-host H [--csc-port N] --user U --pw P [--csc-ca FILE] --from-profile volte|ptt\n"
         "  register [--hold S] | call TARGET [--duration S] [--video] | answer [--duration S] [--transfer-to X]\n"
         "  group-call GROUP [--duration S] [--ptt-at S --ptt-len S] [--listen-only] [--emergency] [--broadcast] [--implicit]\n"
@@ -181,6 +182,7 @@ bool parse(int argc, char** argv, Opts& o) {
             if (opt("--name", [&](const std::string& v) { o.groupName = v; })) continue;
             if (opt("--upgrade-at", [&](const std::string& v) { o.upgradeAt = std::stoi(v); })) continue;
             if (opt("--cplane-max", [&](const std::string& v) { o.acc.maxSdsCplaneBytes = std::stoi(v); })) continue;
+            if (opt("--mcptt-psi", [&](const std::string& v) { o.acc.mcpttServerUri = v; })) continue;
             if (opt("--cancel-at", [&](const std::string& v) { o.cancelAt = std::stoi(v); })) continue;
             if (opt("--originated-by", [&](const std::string& v) { o.originatedBy = v; })) continue;
             if (opt("--members", [&](const std::string& v) { std::stringstream ss(v); std::string m; while (std::getline(ss, m, ',')) if (!m.empty()) o.groupMembers.push_back(m); })) continue;

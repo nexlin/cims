@@ -1242,8 +1242,6 @@ async def _put_ptt_profile(person_id: str, msisdn: str, body, config):
 
 _SVC_CFG_BASE = '/api/v1/mcptt/service-config'
 
-_SVC_CFG_BOOLS = ('allow_private_call', 'allow_emergency_call', 'allow_alert',
-                  'allow_transmit_request', 'allow_create_delete_group')
 #  숫자 항목의 수용 범위 — 규격이 상한을 정하지 않으므로 운영상 무의미한 값만 걸러낸다.
 _SVC_CFG_INTS = {'max_affiliations_n2': (1, 1000),
                  'num_levels_group_hierarchy': (1, 10),
@@ -1251,11 +1249,11 @@ _SVC_CFG_INTS = {'max_affiliations_n2': (1, 1000),
 
 
 async def handle_mcptt_service_config(handler_args: HandlerArgs, kwargs: dict) -> HandlerResult:
-    """GET/PUT /api/v1/mcptt/service-config — **시스템 전역** MCPTT 정책 1건(단일 행 id=1).
+    """GET/PUT /api/v1/mcptt/service-config — **시스템 전역** MCPTT 서비스 설정 1건(단일 행 id=1).
 
-    사용자별 인가는 여기가 아니라 /users/:pid/ptt/:msisdn/profile(user-profile) 이다. 여기서 바꾼
-    값은 XCAP service-config 문서로 나가고 단말이 시스템 정책 게이트로 소비한다
-    (docs/design/features/android_ue_client.md §7).
+    값 = N2(user-profile MaxAffiliationsN2 기본값)·broadcast-group 계층 수(TS 24.484 §8.4.2.1). 인가(1:1·긴급·경보·
+    그룹 생성)는 여기가 아니라 /users/:pid/ptt/:msisdn/profile(user-profile ruleset)·그룹 문서다 — service-config
+    문서(§8.4)에는 인가 요소가 없다. floor 타이머·Resource-Priority 는 CSC 설정 ServiceConfig.* 이다.
     """
     config = kwargs.get('config', {})
     method = handler_args.method.upper()
@@ -1277,7 +1275,7 @@ async def handle_mcptt_service_config(handler_args: HandlerArgs, kwargs: dict) -
 
 async def _get_mcptt_service_config(config):
     """현재 값 — DB 행이 없으면(마이그레이션 전) 코드 기본값을 exists=false 로 돌려준다."""
-    cols = list(_SVC_CFG_BOOLS) + list(_SVC_CFG_INTS)
+    cols = list(_SVC_CFG_INTS)
     row = None
     try:
         with _get_db(config) as conn:
@@ -1289,8 +1287,7 @@ async def _get_mcptt_service_config(config):
         logger.log_info(f"[ADMIN] mcptt_service_config 조회 실패(마이그레이션 전?): {e}")
 
     if row:
-        cfg = {k: bool(row[k]) for k in _SVC_CFG_BOOLS}
-        cfg.update({k: int(row[k]) for k in _SVC_CFG_INTS})
+        cfg = {k: int(row[k]) for k in _SVC_CFG_INTS}
         cfg['update_time'] = _dt(row['update_time'])
         cfg['exists'] = True
     else:
@@ -1307,8 +1304,6 @@ async def _put_mcptt_service_config(body, config):
 
     cur_cfg = get_service_config()
     new_cfg = {}
-    for k in _SVC_CFG_BOOLS:
-        new_cfg[k] = bool(body[k]) if k in body else bool(cur_cfg.get(k, True))
     for k, (lo, hi) in _SVC_CFG_INTS.items():
         raw = body.get(k, cur_cfg.get(k, SERVICE_CONFIG_DEFAULTS[k]))
         try:
@@ -1319,8 +1314,8 @@ async def _put_mcptt_service_config(body, config):
             return HandlerResult(status=400, body={'error': f'{k}: {lo}~{hi} 범위를 벗어났습니다'})
         new_cfg[k] = val
 
-    cols = list(_SVC_CFG_BOOLS) + list(_SVC_CFG_INTS)
-    vals = [1 if new_cfg[k] else 0 for k in _SVC_CFG_BOOLS] + [new_cfg[k] for k in _SVC_CFG_INTS]
+    cols = list(_SVC_CFG_INTS)
+    vals = [new_cfg[k] for k in _SVC_CFG_INTS]
     upd = ', '.join(f"{c}=VALUES({c})" for c in cols)
     with _get_db(config) as conn:
         with conn.cursor() as cur:
@@ -1993,21 +1988,14 @@ _GROUP_EXAMPLE = {
 }
 
 _SVC_CFG_FIELDS = [
-    {'name': 'allow_private_call', 'type': 'boolean', 'desc': 'allow-private-call — 1:1 통화 발신 허용'},
-    {'name': 'allow_emergency_call', 'type': 'boolean', 'desc': 'allow-emergency-call — 긴급통화 허용(사용자 인가와 AND)'},
-    {'name': 'allow_alert', 'type': 'boolean', 'desc': 'allow-alert — 긴급경보 허용(사용자 인가와 AND)'},
-    {'name': 'allow_transmit_request', 'type': 'boolean', 'desc': 'on-network allow-transmit-request — 발언권 요청 허용'},
-    {'name': 'allow_create_delete_group', 'type': 'boolean', 'desc': 'allow-create-delete-group — 사용자 그룹 생성/삭제 허용'},
-    {'name': 'max_affiliations_n2', 'type': 'integer', 'desc': 'N2 — 동시 제휴(편성) 채널 상한 (1~1000)'},
-    {'name': 'num_levels_group_hierarchy', 'type': 'integer', 'desc': 'num-levels-group-hierarchy (1~10)'},
-    {'name': 'num_levels_user_hierarchy', 'type': 'integer', 'desc': 'num-levels-user-hierarchy (1~10)'},
+    {'name': 'max_affiliations_n2', 'type': 'integer', 'desc': 'N2 — 동시 제휴(편성) 채널 상한, user-profile MaxAffiliationsN2 의 기본값 (1~1000)'},
+    {'name': 'num_levels_group_hierarchy', 'type': 'integer', 'desc': 'common/broadcast-group/num-levels-group-hierarchy (1~10)'},
+    {'name': 'num_levels_user_hierarchy', 'type': 'integer', 'desc': 'common/broadcast-group/num-levels-user-hierarchy (1~10)'},
     {'name': 'update_time', 'type': 'string', 'desc': '마지막 변경 시각(ISO) — 행 부재면 null'},
     {'name': 'exists', 'type': 'boolean', 'desc': 'DB 행 존재 여부 (false=코드 기본값 응답)'},
 ]
 
 _SVC_CFG_EXAMPLE = {
-    'allow_private_call': True, 'allow_emergency_call': True, 'allow_alert': True,
-    'allow_transmit_request': True, 'allow_create_delete_group': True,
     'max_affiliations_n2': 10, 'num_levels_group_hierarchy': 3, 'num_levels_user_hierarchy': 3,
     'update_time': '2026-08-19T18:00:00', 'exists': True,
 }
@@ -2352,7 +2340,7 @@ CIMS_ADMIN_API_DOCS = [
      'auth': {'scheme': 'bearer', 'role': 'operator', 'token_from': 'POST /api/v1/auth/login',
               'note': '소유자 검사 — manager+ 는 전체 허용'}},
 
-    # ── MCPTT 시스템 정책 (TS 24.484 service-config) ──────────────────────────
+    # ── MCPTT 시스템 서비스 설정 (TS 24.484 §8.4 service-config) ──────────────────
     {'id': 'csc.mcptt.service-config.get', 'module': 'csc', 'method': 'GET',
      'path': '/api/v1/mcptt/service-config',
      'summary': 'MCPTT 시스템 서비스 설정 조회 (전역 1건)',
@@ -2361,7 +2349,8 @@ CIMS_ADMIN_API_DOCS = [
      'response_fields': list(_SVC_CFG_FIELDS),
      'example': dict(_SVC_CFG_EXAMPLE),
      'errors': list(_ERR_COMMON),
-     'notes': ['시스템 전역 1건이다 — 사용자별 인가는 GET /api/v1/users/{person_id}/ptt/{msisdn}/profile.',
+     'notes': ['시스템 전역 1건이다 — 인가(1:1·긴급·경보·그룹 생성)는 user-profile(GET /api/v1/users/{person_id}/ptt/{msisdn}/profile)·그룹 문서.',
+               'floor 타이머(fc-timers-counters)·Resource-Priority 는 CSC 설정 ServiceConfig.* 로 문서에 실린다.',
                'exists=false 는 DB 행 부재(마이그레이션 전)이며 값은 코드 기본값이다.'],
      'auth': dict(_AUTH_MONITOR)},
 
@@ -2377,6 +2366,6 @@ CIMS_ADMIN_API_DOCS = [
                                'body': {'error': 'max_affiliations_n2: 1~1000 범위를 벗어났습니다'}}],
      'notes': ['XCAP service-config 문서로 즉시 반영된다(ETag 는 내용 파생).',
                'CSP 가 cms 구독자 전원에게 xcap-diff NOTIFY 를 push 해(SERVICE_CONFIG_CHANGED) 단말이 곧바로 재조회한다.',
-               '단말은 이 값을 user-profile 의 사용자 인가와 AND 로 게이트한다.'],
+               '보내지 않은 항목은 현재 값을 유지한다. 이 API 에 없는 키는 무시한다.'],
      'auth': dict(_AUTH_MANAGER)},
 ]

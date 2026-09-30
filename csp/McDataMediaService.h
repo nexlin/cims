@@ -17,6 +17,7 @@
 #ifndef _MCDATA_MEDIA_SERVICE_H_
 #define _MCDATA_MEDIA_SERVICE_H_
 
+#include <ctime>
 #include <map>
 #include <mutex>
 #include <string>
@@ -67,6 +68,11 @@ private:
     std::mutex m_mutex;
     std::map<std::string, McDataMediaCall> m_mapCalls;      // callId → 콜 상태
     std::map<std::string, std::string> m_mapSessionToCall;  // cmdp 세션 → callId
+    // 수신 완료 통지(MSRP_MSG_RECEIVED) 전에 끝난 수신 leg 의 cmdp 세션 → 종료 시각.
+    //   발신 단말은 Success-Report 를 받은 뒤 곧바로 BYE 할 수 있다(RFC 4975 §7.1.2 — 세션 종료는 발신자 재량).
+    //   cmdp 는 저장을 마친 뒤 통지하므로 통지만으로 배포할 수 있다 — 끝난 leg 의 통지도 한 번은 받는다.
+    std::map<std::string, time_t> m_mapEndedRecv;
+    static const int kEndedRecvHoldSec = 30;  // cmdp 이벤트 재전송 창(1 s × 5)보다 넉넉히
 
     void HandleMsgReceived( const SimpleJson::JsonNode &clsPayload );
     void HandleSessionClosed( const std::string &strSessionId, bool bOk, const char *pszReason );

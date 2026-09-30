@@ -150,18 +150,20 @@ object McpttXml {
 
     data class McpttInfoDoc(
         val alertInd: Boolean?,        // null=alert-ind 요소 없음
-        val requestUri: String?,       // 대상 그룹 (tel:URI)
+        val requestUri: String?,       // 서버 통지 = 수신자 MCPTT ID, 구 서버 중계 = 대상 그룹
         val callingUserId: String?,    // 발신자 MCPTT ID
+        val callingGroupId: String?,   // 경보 그룹 (TS 24.379 §6.3.3.1.11 8))
     )
 
-    /** `application/vnd.3gpp.mcptt-info+xml` 파싱 — 서버 fan-out 은 원본을 그대로 중계하므로
-     *  그룹·발신자는 헤더가 아닌 이 본문에서 읽는다. 손상 본문은 예외 → 호출측 runCatching. */
+    /** `application/vnd.3gpp.mcptt-info+xml` 파싱 — 그룹·발신자는 헤더가 아닌 이 본문에서 읽는다.
+     *  손상 본문은 예외 → 호출측 runCatching. */
     fun parseMcpttInfo(xml: String): McpttInfoDoc {
         val root = parse(xml).documentElement
         return McpttInfoDoc(
             alertInd = firstAnyNs(root, "alert-ind")?.toBoolean(),
             requestUri = firstAnyNs(root, "mcptt-request-uri"),
             callingUserId = firstAnyNs(root, "mcptt-calling-user-id"),
+            callingGroupId = firstAnyNs(root, "mcptt-calling-group-id"),
         )
     }
 

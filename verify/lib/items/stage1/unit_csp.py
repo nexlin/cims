@@ -9,6 +9,9 @@
                                    영역 키가 비었을 때 단일 루트 규칙(include/SiteLayout.h)
   · tests/csp_pidf_affiliation_test.cpp  규격형 제휴 PUBLISH 의 pidf 본문 파싱(csp/McpttInfo.h — TS 24.379 §9.3.1.2):
       entity·tuple@id·affiliation@group 집합 추출, prefix 무관 매칭, 유사 이름/속성 오매칭 배제.
+  · tests/csp_mcptt_info_test.cpp  mcptt-info 파싱(csp/McpttInfo.h — TS 24.379 Annex F.1): contentType 자식(<mcpttURI>/<mcpttBoolean>)
+                                   과 값 직접 기재 두 형식 · 경보 요소(request-uri·calling-user-id·originated-by·client-id) ·
+                                   이름 경계(<alert-ind-rcvd>) · 접두사·엔티티
   · tests/csp_rule_field_test.cpp  Rule field `<원천>.<부분>`(csp/CspRuleField.cpp — sip_service_model.md §2-5, RFC 3261 §7.3 ·
                                    §19.1.4 · §20.10, RFC 3325): 헤더 이름 대소문자·compact form · 여러 값 · host 대소문자 ·
                                    user %xx · 믿지 않는 원천의 PAI 무시 · 옛 이름 종전 값
@@ -38,6 +41,8 @@ _TESTS = {
     "tests/csp_rule_field_test.cpp": (["csp/CspRuleField.cpp", "csp/CspDialPlan.cpp"], ["libSipParser.a", "libSipPlatform.a"]),
     # 제휴 pidf 파싱 — 헤더 전용(McpttInfo.h inline), 링크 대상 없음
     "tests/csp_pidf_affiliation_test.cpp": ([], []),
+    # mcptt-info 파싱(두 인코딩) — 헤더 전용
+    "tests/csp_mcptt_info_test.cpp": ([], []),
 }
 _INCS = ["csp", "include", "ext/psip/SipParser", "ext/psip/SipPlatform"]
 

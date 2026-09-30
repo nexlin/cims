@@ -174,13 +174,14 @@ C++ 공개 표면은 `cimsue/engine.h` 의 `Engine` 하나이며 계정·호를 
 
 - **식별자.** 호는 `callId`, 그룹은 그룹 URI, 감시 dialog 는 RFC 4235 `dialog id`(call-id·tags). 코어가 준
   id 만 되돌려 쓰고 앱이 URI 문자열을 조립하지 않는다([../identifier_model.md](../identifier_model.md)).
-- **정책 게이트는 UX 선차단.** CMS user-profile ∧ service-config 판정을 코어가 `Capabilities` 스냅샷으로
+- **정책 게이트는 UX 선차단.** CMS user-profile ruleset 인가를 코어가 `Capabilities` 스냅샷으로
   노출하고 앱은 버튼을 숨길 뿐이다. 최종 판정은 서버(403/Floor Deny). 문서를 아직 못 받았으면 게이트를 걸지
   않는다(android_ue_client §7 과 동일). 해석 = `CscClient::fetchUserProfile`·`fetchServiceConfig`(ETag·304 = `notModified`) →
-  `UserProfileDoc`·`ServiceConfigDoc`(TS 24.484 §8.3.2·§8.2 — 긴급 대상 EntryType(`entry-info` 모드 + `uri-entry`)·제휴 그룹·N2·ruleset
-  allow-*, **요소가 없으면 허용**) → `Capabilities::of(up, sc)`(nullptr = 미수신). AND 규칙은 코어 한 곳이다(원천 앱과 같다 —
-  긴급 사설콜 = 시스템 allow-private-call ∧ 사용자 allow-emergency-private-call). ad hoc 인가는 규격 `<allow-adhoc-group-call>` 과
-  서버 확장 `<cims:allow-adhoc-group-call>` 을 로컬 이름으로 함께 읽는다.
+  `UserProfileDoc`(TS 24.484 §8.3.2 — 긴급 대상 EntryType(`entry-info` 모드 + `uri-entry`)·제휴 그룹·N2·ruleset allow-*, **요소가 없으면
+  허용**)·`ServiceConfigDoc`(§8.4 — `service-configuration-info` 루트, domain·broadcast-group 계층 수·on-network Resource-Priority
+  r-value `mcpttp.15` 형식 — 받으면 앱이 `AccountConfig.rp*` 에 넣는다. 인가 요소는 없다) → `Capabilities::of(up, sc)`(nullptr = 미수신).
+  규칙은 코어 한 곳이다 — 긴급 사설콜 = allow-private-call ∧ allow-emergency-private-call(둘 다 user profile). ad hoc 인가는 규격
+  `<anyExt><allow-adhoc-group-call>` 과 옛 서버 확장 `<cims:allow-adhoc-group-call>` 을 로컬 이름으로 함께 읽는다.
 - **긴급·임박 세션 조건**(TS 24.379 §10.1.1.2.1.3~6, [mcptt_emergency_modes.md](mcptt_emergency_modes.md) §4.2·§4.3). `CallInfo.condition` 이
   그룹의 진행 중 긴급·임박을 이 호에서 본 현재값이다(`mcptt` 는 개시·착신 INVITE 의 값으로 불변). `setCallCondition` = in-dialog
   re-INVITE(multipart mcptt-info 에 **바뀐 지시자만** true/false 명시 + `Resource-Priority` — `AccountConfig.rp*`, 값 정본 = service-config
@@ -188,7 +189,8 @@ C++ 공개 표면은 `cimsue/engine.h` 의 `Engine` 하나이며 계정·호를 
   `Denied`(§6.2.8.1.5 — 미인가 상향 403, 재-INVITE 거절은 호를 끊지 않는다). 서버 재광고(수신 re-INVITE·조인 200 OK 의 mcptt-info) =
   `Advertised` — emergency-ind true 는 임박을 내린다(§10.1.1.2.1.6 1)d)). Floor Request 의 긴급 비트는 현재값을 따른다. 대상 선택·403 뒤
   normal 재발신·경보 정합은 앱 정책이다. 경보 = `sendEmergencyAlert`(MESSAGE mcptt-info `alert-ind`·`mcptt-client-id`(`AccountConfig.mcpttClientId`,
-  비면 `urn:uuid:` instanceId)·ICSI 헤더, 제3자 취소 `originated-by`·그룹 긴급 해제 동봉 §12.1.1.2) · 수신 `onEmergencyAlert`(§12.1.1.3 —
+  비면 `urn:uuid:` instanceId)·ICSI 헤더, 제3자 취소 `originated-by`·그룹 긴급 해제 동봉 §12.1.1.2, Request-URI = `AccountConfig.mcpttServerUri` —
+  참여 기능 PSI(ue-init-config `MCPTT-Service-Details/Server-URI`, §12.1.1.1 8)), 비면 그룹 URI(CSP 0.2.166 전 서버)) · 수신 `onEmergencyAlert`(§12.1.1.3 —
   `mcptt-calling-group-id` 없으면 `mcptt-request-uri`, 경보 없는 그룹 긴급 통지도 `alertInd 0` 으로).
 - **media plane SDS**(TS 24.282 §9.2.3, [mcdata_messaging.md](mcdata_messaging.md) §4.7). `AccountConfig.maxSdsCplaneBytes`(프로비저닝
   `mcdata.maxPayloadSdsCplaneBytes` — `ServiceProfile::toAccount` 가 채운다)를 넘는 **그룹** SDS 는 `sendGroupSds` 가 MSRP 로 보낸다(INVITE

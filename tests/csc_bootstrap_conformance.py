@@ -16,7 +16,7 @@ endpoint 시험은 광고 주소가 틀려도 통과하지만, 이 사슬 검증
           (+ 음성: 틀린 비번 → 폼 재표시, code 미발급)
   Step 4  파싱한 CMS 루트로 user-profile GET — XUI 를 **sip:완전형(@도메인)** 으로
           (외부 단말 신원 표기 관용 — _norm_mcptt_uri 도메인 제거 검증)          → 200
-  Step 5  service-config GET + ETag 재요청                                     → 200/304
+  Step 5  service-config GET(§8.4 구조) + ETag 재요청                          → 200/304
   Step 6  파싱한 GMS 루트로 그룹 목록 GET                                      → 200
   Step 7  음성 대조 — 익명 user-profile → 401 / 남의 문서 → 403 (경계 무손상)
 
@@ -388,6 +388,26 @@ def main():
     print("Step 5  service-config + ETag")
     st, body, hdr = http_get(f"{cms_root}/org.3gpp.mcptt.service-config/users/{xui}/service-config", bearer)
     check(st == 200, f"200 (got {st})")
+    # TS 24.484 §8.4.2.1·§8.4.2.3 구조 — 루트·params@domain·on-network 필수 요소(fc-timers-counters, RP 셋)
+    import xml.etree.ElementTree as _ET
+    SC = '{urn:3gpp:ns:mcpttServiceConfig:1.0}'
+    try:
+        sc = _ET.fromstring((body or '').encode())
+    except Exception:
+        sc = None
+    check(sc is not None and sc.tag == f'{SC}service-configuration-info', "루트 <service-configuration-info> (§8.4.2.3)")
+    params = sc.find(f'{SC}service-configuration-params') if sc is not None else None
+    check(params is not None and bool(params.get('domain')), "<service-configuration-params domain> (§8.4.2.1 1))")
+    on = params.find(f'{SC}on-network') if params is not None else None
+    fc = on.find(f'{SC}fc-timers-counters') if on is not None else None
+    check(fc is not None and len(list(fc)) >= 17, f"on-network/fc-timers-counters 17 요소 (got {len(list(fc)) if fc is not None else 0})")
+    rps = [on.find(f'{SC}{e}') if on is not None else None for e in
+           ('emergency-resource-priority', 'imminent-peril-resource-priority', 'normal-resource-priority')]
+    check(all(r is not None and r.find(f'{SC}resource-priority-namespace') is not None
+              and r.find(f'{SC}resource-priority-priority') is not None for r in rps),
+          "on-network emergency-/imminent-peril-/normal-resource-priority (namespace·priority)")
+    check('allow-transmit-request' not in (body or '') and 'allow-private-call' not in (body or ''),
+          "규격 밖 인가 요소 없음(allow-* 는 user-profile ruleset)")
     etag = hdr.get('etag', '')
     st2, _, _ = http_get(f"{cms_root}/org.3gpp.mcptt.service-config/users/{xui}/service-config",
                          dict(bearer, **{'If-None-Match': etag}))

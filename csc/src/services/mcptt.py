@@ -97,22 +97,34 @@ AUTH_CODE_TTL = 60               # 60초
 ACCESS_TOKEN_TTL = 3600          # 1시간
 REFRESH_TOKEN_TTL = 7 * 24 * 3600  # 7일
 
-# S4: service-config (TS 24.484) — 값의 SoT 는 DB `mcptt_service_config` **단일 행**이고, 아래
-#   기본값은 그 행이 없을 때(마이그레이션 전) 쓰는 폴백이다. 키는 DB 컬럼·관리 API JSON 과 같은
-#   언더스코어 표기이며 하이픈 표기는 XML 산출 시점에만 쓴다(get_service_config_xml).
-#   service-config 은 **시스템 전역 문서 1건**이라 가입자별 오버라이드를 두지 않는다 — 사용자 단위
-#   인가는 ptt_user_profile(ruleset)이 정본이고, 단말이 두 축을 AND 로 게이트한다
-#   (docs/design/features/android_ue_client.md §7 "CMS 문서 소비").
+# S4: service-config (TS 24.484 §8.4) — 시스템 전역 문서 1건. 가입자별 오버라이드는 규격 근거가 없어 두지 않는다.
+#   인가(1:1·긴급·경보·그룹 생성)는 이 문서의 요소가 아니다 — user profile ruleset(§8.3.2.7)·그룹 문서(TS 24.481)가 정본.
+#   값의 SoT 두 곳:
+#     · DB `mcptt_service_config` 단일 행(콘솔 편집) — N2(user-profile MaxAffiliationsN2 기본값)·broadcast-group 계층 수.
+#       아래 기본값은 그 행이 없을 때의 폴백. 키는 DB 컬럼·관리 API JSON 과 같은 언더스코어 표기.
+#     · 설정 `ServiceConfig.*`(SERVICE_CONFIG_PARAMS) — on-network fc-timers-counters·Resource-Priority. 기본값 = CMP floor 타이머
+#       기본값·CSP fan-out 의 mcpttp 서열.
 SERVICE_CONFIG_DEFAULTS = {
-    "allow_private_call": True,
-    "allow_emergency_call": True,
-    "allow_alert": True,
-    "allow_transmit_request": True,
-    "allow_create_delete_group": True,
     "max_affiliations_n2": 10,
     "num_levels_group_hierarchy": 3,
     "num_levels_user_hierarchy": 3,
 }
+# on-network 규격 파라미터 (config ServiceConfig.*). 타이머는 밀리초, 카운터는 횟수.
+#   FcTimersCounters 는 TS 24.380 floor 타이머·카운터 — 값은 CMP 설정(FloorIdleSec·FloorRevokeGraceSec·FloorIdleResendSec·
+#   FloorRevokeRetxSec·FloorGrantRetxSec·FloorStopTalkSec)과 같게 둔다. T15·T16·T17·T55·T56·C17·C55·C56 은 CMP 가 쓰지 않는
+#   기능(MBMS·사전 수립 세션)의 값이라 규격 예시값(§A)을 싣는다.
+#   ResourcePriority 는 RFC 8101 `mcpttp` 네임스페이스 서열(TS 24.379 §6.2.8.1.15) — CSP fan-out 과 같다.
+_SERVICE_CONFIG_PARAM_DEFAULTS = {
+    "FcTimersCounters": {
+        "T1-end-of-rtp-media": 4000, "T3-stop-talking-grace": 3000, "T7-floor-idle": 0, "T8-floor-revoke": 1000,
+        "T11-end-of-RTP-dual": 4000, "T12-stop-talking-dual": 30000, "T15-conversation": 30000,
+        "T16-map-group-to-bearer": 500, "T17-unmap-group-to-bearer": 200, "T20-floor-granted": 1000,
+        "T55-connect": 2000, "T56-disconnect": 2000,
+        "C7-floor-idle": 3, "C17-unmap-group-to-bearer": 3, "C20-floor-granted": 3, "C55-connect": 3, "C56-disconnect": 3,
+    },
+    "ResourcePriority": {"Namespace": "mcpttp", "Emergency": "15", "ImminentPeril": "8", "Normal": "0"},
+}
+SERVICE_CONFIG_PARAMS = {}
 # DB 사본 — load_shared_data 가 채우고 admin PUT 이 갱신한다(update_service_config_cache).
 SERVICE_CONFIG = dict(SERVICE_CONFIG_DEFAULTS)
 
@@ -288,6 +300,12 @@ def apply_config(config):
     if not isinstance(UE_INIT_CONFIG, dict):
         logger.log_error("[CMS] UeInitConfig 가 객체가 아님 — 기본값 사용")
         UE_INIT_CONFIG = {}
+    # service-config on-network 규격 파라미터값 — 같은 규칙(ETag 내용 파생, SIGUSR1 리로드)
+    global SERVICE_CONFIG_PARAMS
+    SERVICE_CONFIG_PARAMS = config.get('ServiceConfig') or {}
+    if not isinstance(SERVICE_CONFIG_PARAMS, dict):
+        logger.log_error("[CMS] ServiceConfig 가 객체가 아님 — 기본값 사용")
+        SERVICE_CONFIG_PARAMS = {}
     # user-profile 규격 파라미터값 — 같은 규칙(ETag 내용 파생, SIGUSR1 리로드)
     global USER_PROFILE_CONFIG
     USER_PROFILE_CONFIG = config.get('UserProfile') or {}
@@ -423,21 +441,14 @@ def load_shared_data(config):
                         logger.log_info(f"ptt_user_profile load skipped (pre-migration?): {pe}")
 
                     # MCPTT 시스템 서비스 설정 (TS 24.484 service-config) — 단일 행(id=1).
-                    #   행/테이블 부재는 기본값 유지 = 현행 동작(전부 허용).
+                    #   행/테이블 부재는 기본값 유지.
                     try:
                         cur.execute(
-                            "SELECT allow_private_call, allow_emergency_call, allow_alert, "
-                            "allow_transmit_request, allow_create_delete_group, max_affiliations_n2, "
-                            "num_levels_group_hierarchy, num_levels_user_hierarchy "
+                            "SELECT max_affiliations_n2, num_levels_group_hierarchy, num_levels_user_hierarchy "
                             "FROM mcptt_service_config WHERE id=1")
                         row = cur.fetchone()
                         if row:
                             SERVICE_CONFIG.update({
-                                "allow_private_call": bool(row['allow_private_call']),
-                                "allow_emergency_call": bool(row['allow_emergency_call']),
-                                "allow_alert": bool(row['allow_alert']),
-                                "allow_transmit_request": bool(row['allow_transmit_request']),
-                                "allow_create_delete_group": bool(row['allow_create_delete_group']),
                                 "max_affiliations_n2": int(row['max_affiliations_n2']),
                                 "num_levels_group_hierarchy": int(row['num_levels_group_hierarchy']),
                                 "num_levels_user_hierarchy": int(row['num_levels_user_hierarchy']),
@@ -1436,7 +1447,9 @@ def get_user_profile_xml(user_uri, owner_uid=None):
         mcptt_emergency_modes.md). MCPTTPrivateRecipient 는 XSD sequence 상 ProSeUserID-entry(User-Info-ID 6옥텟 hex)가
         필수 자식이라 off-network 미지원인 우리는 영값(000000000000)을 싣는다.
       - 상한 = mcptt_service_config.max_affiliations_n2(MaxAffiliationsN2) + UserProfile.*(N6·N7·Priority·조직명).
-      - 인가 = <cp:ruleset>(RFC 4745 common-policy) — actions 자식은 규격 요소 + cims 확장(ad hoc·그룹 생성).
+      - 인가 = <cp:ruleset>(RFC 4745 common-policy) — actions 자식은 규격 요소 + cims 확장(그룹 생성). ad hoc 인가는
+        규격 <anyExt><allow-adhoc-group-call>(TS 24.484 §8.3.2.1 11)xxxviii)R), Rel-18). <cims:allow-adhoc-group-call> 은
+        옛 ptt-client 가 읽는 전환기 별칭 — 단말 SDK 이식(ptt-client P3) 뒤 뺀다.
     루트 <Status>true</Status>(§8.3.2.1 3, 프로파일 활성). **선택이지만 필수로 읽는 단말이 있어 항상 싣는 것** =
     alias-entry 의 index·xml:lang 속성, <ParticipantType>(§8.3.2.1 f, 값 = UserProfile.ParticipantType 설정).
     xml:lang 은 <Name> 과 같은 UserProfile.Language 를 써 한 문서 안에서 어긋나지 않게 한다.
@@ -1567,6 +1580,9 @@ def get_user_profile_xml(user_uri, owner_uid=None):
         <allow-cancel-emergency-alert>{_ba('allow_emergency_alert', group_target_ok)}</allow-cancel-emergency-alert>
         <allow-emergency-private-call>{_ba('allow_emergency_private_call', private_target_ok)}</allow-emergency-private-call>
         <allow-ambient-listening>{_b('allow_ambient_listening', False)}</allow-ambient-listening>
+        <anyExt>  <!-- TS 24.484 §8.3.2.1 11)xxxviii) -->
+          <allow-adhoc-group-call>{_b('allow_adhoc_call')}</allow-adhoc-group-call>
+        </anyExt>
         <cims:allow-adhoc-group-call>{_b('allow_adhoc_call')}</cims:allow-adhoc-group-call>
         <cims:allow-create-group>{_b('allow_create_group', False)}</cims:allow-create-group>
       </cp:actions>
@@ -1576,39 +1592,83 @@ def get_user_profile_xml(user_uri, owner_uid=None):
 </mcptt-user-profile>"""
     return xml, _content_etag(xml)
 
+def _svc_param(section, key):
+    """ServiceConfig.<section>.<key> — 설정 → 코드 기본값 순. 빈 문자열은 미지정."""
+    cur = (SERVICE_CONFIG_PARAMS.get(section) or {}) if isinstance(SERVICE_CONFIG_PARAMS.get(section), dict) else {}
+    v = cur.get(key)
+    if v is None or (isinstance(v, str) and not v.strip()):
+        return _SERVICE_CONFIG_PARAM_DEFAULTS[section][key]
+    return v
+
+
+def _xs_duration(ms) -> str:
+    """밀리초 → xs:duration 초 표기 PT<n>S (TS 24.484 §8.4.2.6 — 소수 허용, 예 PT0.5S)."""
+    try:
+        v = max(0, int(ms))
+    except (TypeError, ValueError):
+        v = 0
+    return f"PT{v // 1000}S" if v % 1000 == 0 else f"PT{v / 1000:g}S"
+
+
 def get_service_config_xml(user_uri):
-    """MCPTT service config 문서 (TS 24.484) — **시스템 전역** 설정 1건을 XML 로 산출한다.
+    """MCPTT service configuration 문서 (TS 24.484 §8.4) — **시스템 전역** 1건을 XML 로 산출한다.
 
-    값의 SoT 는 DB `mcptt_service_config`(단일 행)이고 SERVICE_CONFIG 가 그 사본이다. 사용자마다
-    달라지지 않으므로 user_uri 는 호출자 인가(self-access 검증)에만 쓰인다 — 가입자별 오버라이드는
-    규격 근거가 없어 두지 않으며, 사용자 단위 인가는 user-profile 의 ruleset 이 정본이다.
-    ETag 는 내용 파생이라 값이 바뀌면 자동 갱신되고, 단말은 xcap-diff(cms) NOTIFY 로 재조회한다.
+    구조 = §8.4.2.1·§8.4.2.3 스키마: <service-configuration-info> › <service-configuration-params domain> ›
+      <common><broadcast-group>(계층 수) · <on-network>(<fc-timers-counters> 필수 · <emergency-/imminent-peril-/normal-
+      resource-priority> 필수 — 각 <resource-priority-namespace>·<resource-priority-priority>).
+    사용자마다 달라지지 않으므로 user_uri 는 호출자 인가(self-access 검증)에만 쓰인다. ETag 는 내용 파생이라 값이 바뀌면
+    자동 갱신되고, 단말은 xcap-diff(cms) NOTIFY 로 재조회한다.
     """
+    import html as _html
+    esc = lambda v: _html.escape(str(v if v is not None else ''), quote=True)
     cfg = SERVICE_CONFIG
-
-    def _b(k):  # bool → "true"/"false"
-        return "true" if cfg.get(k, SERVICE_CONFIG_DEFAULTS[k]) else "false"
 
     def _i(k):
         return int(cfg.get(k, SERVICE_CONFIG_DEFAULTS[k]))
 
-    # N2 는 전체·on-network 두 자리에 같은 값을 싣는다 — 이 시스템은 항상 on-network 다.
-    n2 = _i('max_affiliations_n2')
+    from services import access_services as _access_services
+    domain = (_access_services.ptt_domain(PROVISIONING) or IDMS_DOMAIN).strip()
+
+    fc = []
+    for k in _SERVICE_CONFIG_PARAM_DEFAULTS["FcTimersCounters"]:
+        v = _svc_param("FcTimersCounters", k)
+        if k.startswith("T"):
+            val = _xs_duration(v)
+        else:
+            try:
+                val = max(0, min(65535, int(v)))            # xs:unsignedShort
+            except (TypeError, ValueError):
+                val = _SERVICE_CONFIG_PARAM_DEFAULTS["FcTimersCounters"][k]
+        fc.append(f"        <{k}>{val}</{k}>")
+    ns = _svc_param("ResourcePriority", "Namespace")
+
+    def _rp(elem, key):
+        return (f"      <{elem}>\n"
+                f"        <resource-priority-namespace>{esc(ns)}</resource-priority-namespace>\n"
+                f"        <resource-priority-priority>{esc(_svc_param('ResourcePriority', key))}</resource-priority-priority>\n"
+                f"      </{elem}>")
+
+    nl = "\n"
     xml = f"""<?xml version="1.0" encoding="UTF-8"?>
-<mcptt-service-config xmlns="urn:3gpp:ns:mcpttServiceConfig:1.0"
+<service-configuration-info xmlns="urn:3gpp:ns:mcpttServiceConfig:1.0"
   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
-  <num-levels-group-hierarchy>{_i('num_levels_group_hierarchy')}</num-levels-group-hierarchy>
-  <num-levels-user-hierarchy>{_i('num_levels_user_hierarchy')}</num-levels-user-hierarchy>
-  <max-affiliations-N2>{n2}</max-affiliations-N2>
-  <allow-create-delete-group>{_b('allow_create_delete_group')}</allow-create-delete-group>
-  <allow-private-call>{_b('allow_private_call')}</allow-private-call>
-  <allow-emergency-call>{_b('allow_emergency_call')}</allow-emergency-call>
-  <allow-alert>{_b('allow_alert')}</allow-alert>
-  <on-network>
-    <allow-transmit-request>{_b('allow_transmit_request')}</allow-transmit-request>
-    <max-on-network-affiliations-N2>{n2}</max-on-network-affiliations-N2>
-  </on-network>
-</mcptt-service-config>"""
+  <service-configuration-params domain="{esc(domain)}">
+    <common>
+      <broadcast-group>
+        <num-levels-group-hierarchy>{_i('num_levels_group_hierarchy')}</num-levels-group-hierarchy>
+        <num-levels-user-hierarchy>{_i('num_levels_user_hierarchy')}</num-levels-user-hierarchy>
+      </broadcast-group>
+    </common>
+    <on-network>
+      <fc-timers-counters>
+{nl.join(fc)}
+      </fc-timers-counters>
+{_rp('emergency-resource-priority', 'Emergency')}
+{_rp('imminent-peril-resource-priority', 'ImminentPeril')}
+{_rp('normal-resource-priority', 'Normal')}
+    </on-network>
+  </service-configuration-params>
+</service-configuration-info>"""
     return xml, _content_etag(xml)
 
 def _ue_init_cfg(*path, default=None):

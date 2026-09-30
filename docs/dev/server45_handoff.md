@@ -153,16 +153,34 @@ SDK 반영은 끝났고(`GroupDoc` 이 TS 24.481 요소 다섯을 더 싣는다)
 
 ## 9. 단말 SDK P0b 실측에서 드러난 서버 과제 (.48 몫)
 
-.45 에서 SDK 코어(긴급·경보·MSRP)를 실서버로 시험하며 본 것이다([sdk_port_handoff.md](sdk_port_handoff.md) §4). 단말은 현 동작에 맞춰 보낸다.
+.45 에서 SDK 코어(긴급·경보·MSRP)를 실서버로 시험하며 본 것이다([sdk_port_handoff.md](sdk_port_handoff.md) §4).
+M1~M5 는 .48 에서 반영·배포(**csp 0.2.166 · csc 0.2.133**)·실측했다. .45 스택에 올릴 때는 이 버전 이상.
 
-| # | 영향 | 위치 | 문제 | 규격 | 방향 |
-|---|---|---|---|---|---|
-| M1 | 중 | CSP `McDataMediaService::OnCmdpEvent` | 발신 leg 가 cmdp 의 `MSRP_MSG_RECEIVED` 보다 먼저 끝나면(단말이 REPORT 뒤 BYE) 수신 통지를 `unknown session — dup/late` 로 버려 **배포가 사라진다**(발신자는 200·REPORT 를 받았다) | RFC 4975 §7.1.2(Success-Report 뒤 세션 종료는 발신자 재량) · TS 24.282 §9.2.3 | 세션 제거를 이벤트 처리 뒤로(또는 file_id 로 배포) |
-| M2 | 하 | CSP 긴급 경보(`ModuleDispatcher.cpp` ~2489) | Request-URI 를 그룹으로 받아 To 로 게이트·팬아웃한다 — 규격은 참여 기능 PSI + 본문 `mcptt-request-uri` | TS 24.379 §12.1.1.1 8) | PSI 수신 + 본문 그룹 해석(그룹 URI 수신은 전환기 병행) |
-| M3 | 하 | 같은 곳 | 팬아웃이 발신 원본 본문 그대로다 — 규격은 제어 기능이 `mcptt-calling-group-id`·`mcptt-calling-user-id` 를 채워 새로 만든다 | TS 24.379 §12.1.3 | 팬아웃 본문 재작성 |
-| M4 | 하 | CSC `get_user_profile_xml` | ad hoc 인가를 `<cims:allow-adhoc-group-call>` 로 낸다 — 규격 요소는 `<allow-adhoc-group-call>` | TS 24.484 §8.3.2.1 | 규격 요소로(단말 코어는 둘 다 읽는다) |
-| M5 | 하 | CSC `get_service_config_xml` | OnNetwork `emergency-resource-priority`·`imminent-peril-resource-priority`·`normal-resource-priority` 가 없다 — 단말이 Resource-Priority 값을 모른다(코어 기본값 = CSP 의 mcpttp.15/.8/.0) | TS 24.379 §6.2.8.1.15 · TS 24.484 | 서비스 설정에 세 요소(값 = CSP fan-out 과 같게) |
+| # | 판정 | 반영 | .48 실측 |
+|---|---|---|---|
+| M1 MSRP 배포 유실(발신 leg 가 통지보다 먼저 끝남) | ✅ | 끝난 수신 leg 의 cmdp 세션을 30 s 기억해 통지를 한 번 받는다 — 배포는 통지 payload 만으로 한다([mcdata_messaging.md](../design/features/mcdata_messaging.md) §4.7) | 013 → g005 2403 B media plane → 014 `plane=media` 수신, 계측기 `MCDATA-SDS-GROUP-MEDIA` ×5 pass. 경합 창(서브 ms) 자체는 재현하지 못했다 |
+| M2 경보 Request-URI = 참여 기능 PSI | ✅ | 대상 그룹 = 본문 `mcptt-request-uri`, Request-URI 그룹은 전환기로 받는다. 경보는 `CPttAsModule::OnEmergencyAlert` | `cimsue-cli --mcptt-psi sip:mcptt_psi@ptt.cims.example.kr alert g005` 200 → CSP `R-URI(mcptt_psi) fanout=3` → 014 수신 · 그룹 R-URI(전환기) 200 |
+| M3 경보 팬아웃 본문 재작성 | ✅ | §6.3.3.1.11·§6.3.3.1.12·§12.1.3.2 — request-uri = 수신자, calling-user-id·calling-group-id, 취소의 originated-by·emergency-ind false, Accept-Contact·P-Asserted-Service-Id, 위치 파트 | 014 수신 `group=g005 user=+82500000013` · 015 제3자 취소 `originated_by=+82500000013 emergency=-1` |
+| M4 ad hoc 인가 규격 요소 | ✅ | `<cp:actions><anyExt><allow-adhoc-group-call>`(TS 24.484 **Rel-18** §8.3.2.1 11)xxxviii)R)) + 전환기 별칭 `<cims:allow-adhoc-group-call>`(옛 ptt-client — P3 이식 뒤 뺀다) | `tests/test_csc_user_profile.py` 12 OK |
+| M5 service-config Resource-Priority | ✅ | service-config 문서 **전체를 TS 24.484 §8.4 스키마로 재구성** — `<service-configuration-info>` › `<service-configuration-params domain>` › `<common><broadcast-group>`(계층 수) · `<on-network>`(`<fc-timers-counters>` 17 요소 = CMP floor 기본값 · `<emergency-/imminent-peril-/normal-resource-priority>` = `mcpttp` 15/8/0). 값 = DB 행(N2·계층 수) + CSC 설정 `ServiceConfig.*`(타이머 ms·RP). **시스템 인가 스위치 5종 제거**(1:1·긴급·경보·발언 요청·그룹 생성 — §8.4 에 없는 요소, 인가 = user profile ruleset·그룹 문서) | `tests/test_csc_user_profile.py` 14 OK(스키마 순서·필수 요소·기본값·덮어쓰기) · SDK `CmsDoc.*` |
 
-- 참고(설정): 계측기 그룹 g005 는 그룹 능력 `emergency_call` 이 꺼져 있어 긴급 상향이 403(`denied (group capability)`)이다 — 긴급 확정 경로 실측에는
-  능력이 켜진 그룹이 필요하다.
-
+- **M5 에 딸린 변경** — SDK `ServiceConfigDoc`(§8.4 해석: domain·계층 수·`rpEmergency/rpImminentPeril/rpNormal` r-value) ·
+  `UserProfileDoc.allowPrivateCall` · `Capabilities`(인가 = user profile 만, `transmitRequest` 제거, N2 = user profile) · Kotlin 파사드 같은 구조
+  (SWIG 재생성·빌드는 .45) · 옛 ptt-client(인가 = user profile, 발언 요청 게이트 제거, N2 = user-profile `MaxAffiliationsN2`, RP 해석 —
+  빌드 확인은 .45) · 콘솔 **구성 > MCPTT 정책** = N2·계층 수만 · 관리 API `GET/PUT /api/v1/mcptt/service-config` 도 그 셋만.
+- **DB 마이그레이션(보류)** — `sql/migrate_service_config_drop_switches.sql`(스위치 컬럼 5개 DROP). 같은 DB 를 쓰는 옛 CSC 는 그 컬럼을
+  SELECT 하므로 **.45·.135 CSC 가 0.2.133 이상이 된 뒤** 적용한다. 새 CSC 는 적용 전에도 정상이다.
+- **남은 것(M5)** — floor 타이머의 단일 정의: 지금은 CSC `ServiceConfig.FcTimersCounters.*` 와 CMP `Floor*Sec` 를 같게 둔다.
+  CSP 가 문서 값을 `PTT_JOIN.floor_timers` 로 CMP 에 넘기면 정본 하나가 된다(CMP 는 이미 받는다).
+- **mcptt-info 인코딩(Annex F.1 contentType)** — `mcptt-request-uri`·`alert-ind` 등은 자식 `<mcpttURI>`/`<mcpttBoolean>` 에 값을 싣는 것이 규격인데
+  CSP·SDK·ptt-client 모두 값을 요소에 바로 적는다. CSP 수신은 이제 두 형식을 다 읽는다(`McpttElemValue`, `tests/csp_mcptt_info_test.cpp`).
+  **SDK `localText` 는 자식 형식을 못 읽는다** — SDK·앱 수신을 먼저 두 형식으로, 그다음 송신 전환(CSP 는 `PttAsModule.cpp` `_InfoElem` 한 곳).
+- **SDK 쪽 반영(.48)** — `AccountConfig.mcpttServerUri`(경보 Request-URI = PSI, 비면 그룹 URI) · `cimsue-cli --mcptt-psi`. 앱은 ue-init-config
+  `MCPTT-Service-Details/Server-URI` 를 넣는다. Kotlin 파사드·C API·.NET 노출은 .45·Windows 몫(sdk_port_handoff §4.1).
+- **옛 ptt-client(.45 빌드 확인 필요)** — ad hoc 인가를 규격 요소 먼저 읽고, 경보 그룹은 `mcptt-calling-group-id` 먼저(`PttController.kt`·`McpttXml.kt`).
+- **설정(.48 → 공유 DB)** — g005 그룹 능력 `emergency_call` 켬 · 계측기 신원 013 의 user profile 긴급 대상 = `DedicatedGroup g005`.
+  `cimsue-cli group-call g005 --upgrade-at 3 --cancel-at 7` → 상향 **Confirmed 200** · 하향 Confirmed 200. .45 CSP 는 같은 DB 라도 캐시가 통지로만
+  갱신되므로 .45 에서 시험하기 전에 CSP 재적재가 필요할 수 있다.
+- **남은 경보 편차** — `<mc-org>`(§6.3.3.1.12, 값 정본 = CSC 설정)·수신 확인 `<alert-ind-rcvd>`(§6.3.3.1.20)·미인가 취소 403(§12.1.3.2 1)) —
+  [mcptt_emergency_modes.md](../design/features/mcptt_emergency_modes.md) §4.3 편차 표.
+- **보안 관찰** — CSP `CmdpClient` 는 이벤트 datagram 의 출처(cmdp 주소)를 검사하지 않는다. 별도 과제.

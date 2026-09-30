@@ -29,6 +29,17 @@ bool CSipUserAgent::SendSms( const char * pszFrom, const char * pszTo, const cha
  */
 bool CSipUserAgent::SendSms( const char * pszFrom, const char * pszTo, const char * pszText, CSipCallRoute * pclsRoute, const char * pszContentType )
 {
+	return SendSms( pszFrom, pszTo, pszText, pclsRoute, pszContentType, NULL );
+}
+
+/**
+ * @ingroup SipUserAgent
+ * @brief SMS message with explicit Content-Type and extra header fields.
+ * @param pvecHeaders (name, value) header fields to add as-is (NULL => none)
+ *        — e.g. MCPTT Accept-Contact / P-Asserted-Service-Id (3GPP TS 24.379 §6.3.3.1.11)
+ */
+bool CSipUserAgent::SendSms( const char * pszFrom, const char * pszTo, const char * pszText, CSipCallRoute * pclsRoute, const char * pszContentType, const std::vector< std::pair< std::string, std::string > > * pvecHeaders )
+{
 	CSipMessage * pclsRequest = new CSipMessage();
 	if( pclsRequest == NULL ) return false;
 
@@ -56,6 +67,13 @@ bool CSipUserAgent::SendSms( const char * pszFrom, const char * pszTo, const cha
 	else
 	{
 		pclsRequest->m_clsContentType.Set( "text", "plain" );
+	}
+	if( pvecHeaders )
+	{
+		for( const auto & clsHeader : *pvecHeaders )
+		{
+			pclsRequest->AddHeader( clsHeader.first.c_str(), clsHeader.second.c_str() );
+		}
 	}
 	pclsRequest->m_strBody = pszText;
 	pclsRequest->m_iContentLength = (int)pclsRequest->m_strBody.length();

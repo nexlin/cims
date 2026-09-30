@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstring>
 #include <string>
 #include <vector>
 
@@ -14,28 +15,87 @@
 struct CMcpttInfo {
     // session-type (TS 24.379 Annex F.1 의미 2) — chat|prearranged|private|first-to-answer|ambient-listening|adhoc
     std::string strSessionType;
-    bool bBroadcast = false;  // <broadcast-ind>true</broadcast-ind> — 일제 통화 (TS 24.379 §6.2.8.2, §4.12)
-    bool bEmergency = false;  // <emergency-ind>true</emergency-ind>
-    bool bImminent = false;   // <imminentperil-ind>true</imminentperil-ind>
-    bool bAlert = false;      // <alert-ind>true</alert-ind>
+    bool bBroadcast = false;        // <broadcast-ind>true</broadcast-ind> — 일제 통화 (TS 24.379 §6.2.8.2, §4.12)
+    bool bEmergency = false;        // <emergency-ind>true</emergency-ind>
+    bool bImminent = false;         // <imminentperil-ind>true</imminentperil-ind>
+    bool bAlert = false;            // <alert-ind>true</alert-ind>
+    bool bHasAlertInd = false;      // <alert-ind> 요소 있음 (경보·경보 취소 판별 — TS 24.379 §12.1)
+    bool bHasEmergencyInd = false;  // <emergency-ind> 요소 있음 (경보 취소에 동봉된 그룹 긴급 해제 판별 — §12.1.3.2)
+    std::string strRequestUri;      // <mcptt-request-uri> — 경보는 대상 그룹 (§12.1.1.1 4)a))
+    std::string strCallingUserId;   // <mcptt-calling-user-id>
+    std::string strOriginatedBy;    // <originated-by> — 제3자 경보 취소의 원 경보 발신자 (§12.1.3.2 2)a))
+    std::string strClientId;        // <mcptt-client-id>
     // FloorTier 정합 condition: 2=emergency, 1=imminent, 0=normal
     int Condition() const {
         return bEmergency ? 2 : ( bImminent ? 1 : 0 );
     }
 };
 
-// <...tag...>VALUE</...> 에서 VALUE 가 true/1 인지. tag 미존재 시 false.
+/**
+ * mcptt-info 요소 값 — 접두사 무관, 태그 이름 경계까지 일치하는 첫 요소.
+ *  TS 24.379 Annex F.1 의 contentType 요소(mcptt-request-uri·alert-ind 등)는 값을 자식 <mcpttURI>/<mcpttString>/
+ *  <mcpttBoolean> 에 싣는다 — 그 형식과, 값을 요소에 바로 적는 형식(현행 단말·CSP 송신) 둘 다 읽는다.
+ * @return 요소가 있으면 true (빈 요소면 out = "")
+ */
+inline bool McpttElemValue( const std::string &body, const char *tag, std::string &out ) {
+    const std::string n = tag;
+    size_t p = 0;
+    while ( ( p = body.find( '<', p ) ) != std::string::npos ) {
+        const size_t q = p + 1;
+        if ( q < body.size() && ( body[q] == '/' || body[q] == '?' || body[q] == '!' ) ) {
+            p = q;
+            continue;
+        }
+        size_t e = q;
+        while ( e < body.size() && body[e] != ' ' && body[e] != '\t' && body[e] != '\r' && body[e] != '\n' &&
+                body[e] != '/' && body[e] != '>' )
+            ++e;
+        std::string name = body.substr( q, e - q );
+        const size_t c = name.find( ':' );
+        if ( c != std::string::npos ) name = name.substr( c + 1 );
+        if ( name != n ) {
+            p = e;
+            continue;
+        }
+        const size_t gt = body.find( '>', e );
+        if ( gt == std::string::npos ) return false;
+        out.clear();
+        if ( body[gt - 1] == '/' ) return true;
+        size_t lt = body.find( '<', gt + 1 );
+        if ( lt == std::string::npos ) return false;
+        std::string val = body.substr( gt + 1, lt - gt - 1 );
+        if ( lt + 1 < body.size() && body[lt + 1] != '/' ) {  // contentType 자식
+            const size_t cgt = body.find( '>', lt );
+            if ( cgt == std::string::npos ) return false;
+            if ( body[cgt - 1] == '/' ) return true;
+            const size_t clt = body.find( '<', cgt + 1 );
+            if ( clt == std::string::npos ) return false;
+            val = body.substr( cgt + 1, clt - cgt - 1 );
+        }
+        const size_t a = val.find_first_not_of( " \t\r\n" );
+        const size_t b = val.find_last_not_of( " \t\r\n" );
+        if ( a == std::string::npos ) return true;
+        val = val.substr( a, b - a + 1 );
+        // XML 기본 엔티티
+        static const char *const kEnt[][2] = {
+            { "&lt;", "<" }, { "&gt;", ">" }, { "&quot;", "\"" }, { "&apos;", "'" }, { "&amp;", "&" } };
+        for ( const auto &ent : kEnt ) {
+            size_t k = 0;
+            while ( ( k = val.find( ent[0], k ) ) != std::string::npos ) {
+                val.replace( k, strlen( ent[0] ), ent[1] );
+                k += strlen( ent[1] );
+            }
+        }
+        out = val;
+        return true;
+    }
+    return false;
+}
+
+// <tag> 값이 true/1 인지. tag 미존재 시 false.
 inline bool _McpttIndTrue( const std::string &body, const char *tag ) {
-    size_t p = body.find( tag );
-    if ( p == std::string::npos ) return false;
-    size_t gt = body.find( '>', p );
-    if ( gt == std::string::npos ) return false;
-    size_t lt = body.find( '<', gt );
-    std::string val = body.substr( gt + 1, ( lt == std::string::npos ? body.size() : lt ) - ( gt + 1 ) );
-    size_t a = val.find_first_not_of( " \t\r\n" );
-    size_t b = val.find_last_not_of( " \t\r\n" );
-    if ( a == std::string::npos ) return false;
-    val = val.substr( a, b - a + 1 );
+    std::string val;
+    if ( !McpttElemValue( body, tag, val ) ) return false;
     std::transform( val.begin(), val.end(), val.begin(), ::tolower );
     return val == "true" || val == "1";
 }
@@ -43,17 +103,18 @@ inline bool _McpttIndTrue( const std::string &body, const char *tag ) {
 inline CMcpttInfo ParseMcpttInfo( const std::string &body ) {
     CMcpttInfo info;
     if ( body.empty() ) return info;
+    std::string strTmp;
     info.bEmergency = _McpttIndTrue( body, "emergency-ind" );
+    info.bHasEmergencyInd = McpttElemValue( body, "emergency-ind", strTmp );
     info.bImminent = _McpttIndTrue( body, "imminentperil-ind" );
     info.bAlert = _McpttIndTrue( body, "alert-ind" );
+    info.bHasAlertInd = McpttElemValue( body, "alert-ind", strTmp );
     info.bBroadcast = _McpttIndTrue( body, "broadcast-ind" );
-    size_t p = body.find( "session-type" );
-    if ( p != std::string::npos ) {
-        size_t gt = body.find( '>', p );
-        size_t lt = ( gt != std::string::npos ) ? body.find( '<', gt ) : std::string::npos;
-        if ( gt != std::string::npos && lt != std::string::npos )
-            info.strSessionType = body.substr( gt + 1, lt - gt - 1 );
-    }
+    McpttElemValue( body, "session-type", info.strSessionType );
+    McpttElemValue( body, "mcptt-request-uri", info.strRequestUri );
+    McpttElemValue( body, "mcptt-calling-user-id", info.strCallingUserId );
+    McpttElemValue( body, "originated-by", info.strOriginatedBy );
+    McpttElemValue( body, "mcptt-client-id", info.strClientId );
     return info;
 }
 

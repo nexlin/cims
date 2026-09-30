@@ -288,6 +288,14 @@ bool CMcDataMediaService::OnCallTerminated( const char *pszCallId ) {
         auto it = m_mapCalls.find( pszCallId );
         if ( it == m_mapCalls.end() ) return false;
         strSessionId = it->second.strSessionId;
+        const time_t tNow = time( NULL );
+        if ( it->second.eDir == DIR_RECV ) m_mapEndedRecv[strSessionId] = tNow;  // 통지가 뒤따를 수 있다
+        for ( auto e = m_mapEndedRecv.begin(); e != m_mapEndedRecv.end(); ) {
+            if ( tNow - e->second > kEndedRecvHoldSec )
+                e = m_mapEndedRecv.erase( e );
+            else
+                ++e;
+        }
         m_mapSessionToCall.erase( strSessionId );
         m_mapCalls.erase( it );
     }
@@ -304,13 +312,20 @@ void CMcDataMediaService::OnCmdpEvent( const SimpleJson::JsonNode &clsEvent ) {
     std::string strSessionId = clsPayload.GetString( "session_id" );
 
     if ( strName == "MSRP_MSG_RECEIVED" ) {
-        // 이벤트 재전송 중복 방어 — 세션이 이미 정리됐으면 무시
+        // 배포는 세션당 한 번 — 활성 수신 leg 이거나, 통지 전에 끝난 수신 leg(발신자가 REPORT 뒤 BYE)만 배포한다.
+        //   배포를 마친 세션은 두 표에서 모두 빠지므로 이벤트 재전송(중복)은 여기서 걸러진다.
         {
             std::lock_guard<std::mutex> lock( m_mutex );
             if ( m_mapSessionToCall.find( strSessionId ) == m_mapSessionToCall.end() ) {
-                CLog::Print( LOG_INFO, "McDataMedia: MSRP_MSG_RECEIVED for unknown session(%s) — dup/late, ignore",
+                auto itEnded = m_mapEndedRecv.find( strSessionId );
+                if ( itEnded == m_mapEndedRecv.end() ) {
+                    CLog::Print( LOG_INFO, "McDataMedia: MSRP_MSG_RECEIVED for unknown session(%s) — dup, ignore",
+                                 strSessionId.c_str() );
+                    return;
+                }
+                m_mapEndedRecv.erase( itEnded );
+                CLog::Print( LOG_INFO, "McDataMedia: MSRP_MSG_RECEIVED after recv leg ended session(%s) — distribute",
                              strSessionId.c_str() );
-                return;
             }
         }
         HandleMsgReceived( clsPayload );
@@ -493,6 +508,7 @@ void CMcDataMediaService::HandleSessionClosed( const std::string &strSessionId, 
     std::string strCallId;
     {
         std::lock_guard<std::mutex> lock( m_mutex );
+        m_mapEndedRecv.erase( strSessionId );  // 끝난 수신 leg 의 중단 통지 — 배포할 것이 없다
         auto it = m_mapSessionToCall.find( strSessionId );
         if ( it == m_mapSessionToCall.end() ) return;  // 이미 정리됨 (중복 이벤트)
         strCallId = it->second;

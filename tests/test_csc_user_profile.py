@@ -183,6 +183,8 @@ class UserProfileDocTest(unittest.TestCase):
         self.assertIsNotNone(acts, "ruleset 은 RFC 4745 common-policy 네임스페이스")
         self.assertEqual(acts.find("up:allow-emergency-group-call", NS).text, "false")
         self.assertEqual(acts.find("up:allow-ambient-listening", NS).text, "true")
+        # ad hoc 인가 = 규격 anyExt 자식(TS 24.484 §8.3.2.1 11)xxxviii)R)) + 전환기 별칭
+        self.assertEqual(acts.find("up:anyExt/up:allow-adhoc-group-call", NS).text, "true")
         self.assertEqual(acts.find("cims:allow-adhoc-group-call", NS).text, "true")
         # 단말 정규식(태그명만) 호환
         self.assertRegex(xml, r"<allow-emergency-group-call>\s*false\s*</allow-emergency-group-call>")
@@ -200,6 +202,62 @@ class UserProfileDocTest(unittest.TestCase):
 
     def test_unknown_user(self):
         self.assertEqual(m.get_user_profile_xml("tel:+0"), (None, None))
+
+
+SC = {"sc": "urn:3gpp:ns:mcpttServiceConfig:1.0"}
+
+
+class ServiceConfigDocTest(unittest.TestCase):
+    """service configuration 문서 — TS 24.484 §8.4.2.1·§8.4.2.3 스키마 구조."""
+
+    def setUp(self):
+        self._keep = (dict(m.SERVICE_CONFIG), dict(m.SERVICE_CONFIG_PARAMS))
+
+    def tearDown(self):
+        sc, params = self._keep
+        m.SERVICE_CONFIG.clear(); m.SERVICE_CONFIG.update(sc)
+        m.SERVICE_CONFIG_PARAMS.clear(); m.SERVICE_CONFIG_PARAMS.update(params)
+
+    def _doc(self):
+        xml, etag = m.get_service_config_xml(None)
+        return ET.fromstring(xml.encode()), etag
+
+    def test_structure(self):
+        m.SERVICE_CONFIG.update({"num_levels_group_hierarchy": 4, "num_levels_user_hierarchy": 5})
+        root, _ = self._doc()
+        self.assertEqual(root.tag, "{%s}service-configuration-info" % SC["sc"])
+        params = root.find("sc:service-configuration-params", SC)
+        self.assertTrue(params.get("domain"), "domain 속성 필수(§8.4.2.1 1))")
+        self.assertEqual(params.find("sc:common/sc:broadcast-group/sc:num-levels-group-hierarchy", SC).text, "4")
+        self.assertEqual(params.find("sc:common/sc:broadcast-group/sc:num-levels-user-hierarchy", SC).text, "5")
+        on = params.find("sc:on-network", SC)
+        fc = on.find("sc:fc-timers-counters", SC)
+        self.assertEqual([c.tag.split("}")[1] for c in fc][:3], ["T1-end-of-rtp-media", "T3-stop-talking-grace", "T7-floor-idle"])
+        self.assertEqual(len(list(fc)), 17, "fc-timers-countersType 시퀀스 17 요소(필수)")
+        self.assertEqual(fc.find("sc:T16-map-group-to-bearer", SC).text, "PT0.5S")
+        # 스키마 시퀀스 — fc-timers-counters 뒤 RP 셋, 그 순서
+        tags = [c.tag.split("}")[1] for c in on]
+        self.assertEqual(tags, ["fc-timers-counters", "emergency-resource-priority",
+                                "imminent-peril-resource-priority", "normal-resource-priority"])
+        e = on.find("sc:emergency-resource-priority", SC)
+        self.assertEqual((e.find("sc:resource-priority-namespace", SC).text, e.find("sc:resource-priority-priority", SC).text),
+                         ("mcpttp", "15"))
+        # 인가 요소는 service-config 에 없다(§8.4)
+        xml, _ = m.get_service_config_xml(None)
+        for gone in ("allow-private-call", "allow-emergency-call", "allow-alert", "allow-transmit-request",
+                     "allow-create-delete-group", "max-affiliations-N2"):
+            self.assertNotIn(gone, xml)
+
+    def test_params_override_and_etag(self):
+        _, etag1 = self._doc()
+        m.SERVICE_CONFIG_PARAMS.update({"FcTimersCounters": {"T1-end-of-rtp-media": 6000},
+                                        "ResourcePriority": {"Emergency": "14"}})
+        root, etag2 = self._doc()
+        on = root.find("sc:service-configuration-params/sc:on-network", SC)
+        self.assertEqual(on.find("sc:fc-timers-counters/sc:T1-end-of-rtp-media", SC).text, "PT6S")
+        self.assertEqual(on.find("sc:fc-timers-counters/sc:T3-stop-talking-grace", SC).text, "PT3S", "미지정 = 기본값")
+        self.assertEqual(on.find("sc:emergency-resource-priority/sc:resource-priority-priority", SC).text, "14")
+        self.assertNotEqual(etag1, etag2, "ETag 는 내용 파생")
 
 
 if __name__ == "__main__":

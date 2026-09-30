@@ -1016,9 +1016,9 @@ class PttController(
         val want = desiredAffiliations()
         // 동시 제휴 상한(TS 24.484 N2)은 **서버가 강제**한다 — 앱이 임의로 잘라내면 어느 채널을
         //   버릴지 정책 없이 fan-out 을 잃는다. 초과는 근거만 남기고 요청은 그대로 보낸다.
-        val n2 = _serviceConfig.value?.maxAffiliations ?: 0
+        val n2 = _userProfile.value?.maxAffiliations ?: 0          // user-profile MaxAffiliationsN2 (TS 24.484 §8.3.2.1)
         if (n2 > 0 && want.size > n2)
-            Log.w(TAG, "편성 채널 ${want.size}개 > 시스템 상한 N2=$n2 — 초과분은 서버가 거절할 수 있다")
+            Log.w(TAG, "편성 채널 ${want.size}개 > 상한 N2=$n2 — 초과분은 서버가 거절할 수 있다")
         want.forEach { ensureAffiliated(it) }
     }
 
@@ -1121,10 +1121,10 @@ class PttController(
     fun startPrivateCall(peer: String, fullDuplex: Boolean = false, emergency: Boolean = false) {
         val target = bareId(peer)
         if (target.isBlank() || target == bareId(mcpttId)) return
-        // 시스템 정책 게이트 (TS 24.484 allow-private-call) — 서버(403)가 최종 판정이나, 발신 전에
+        // 사용자 인가 게이트 (TS 24.484 §8.3.2.7 allow-private-call) — 서버(403)가 최종 판정이나, 발신 전에
         //   알리는 편이 정확하다. 착신은 막지 않는다(서버가 이미 성립시킨 세션은 받는다).
-        if (!svcAllows { it.allowPrivateCall }) {
-            _status.value = "1:1 통화: 시스템 정책으로 비활성"
+        if (_userProfile.value?.allowPrivateCall == false) {
+            _status.value = "1:1 통화: 권한 없음"
             feedback?.blocked("1:1 통화가 허용되지 않습니다")
             return
         }
@@ -1389,6 +1389,8 @@ class PttController(
         val allowEmergencyCall: Boolean,
         val allowEmergencyAlert: Boolean,
         val allowAdhocCall: Boolean,
+        val allowPrivateCall: Boolean,            // allow-private-call (1:1 개시 인가)
+        val maxAffiliations: Int,                 // OnNetwork/MaxAffiliationsN2 (0=미지정)
         val allowEmergencyPrivateCall: Boolean,   // allow-emergency-private-call (긴급 1:1 개시 인가)
         val privateEmergencyMode: String,         // MCPTTPrivateRecipient: LocallyDetermined | UsePreConfigured
         val emergencyPrivateRecipient: String?,   // 사전 지정 긴급 수신자 (bare id, UsePreConfigured 모드 대상)
@@ -1429,29 +1431,31 @@ class PttController(
         val pMode = Regex("entry-info=\"([^\"]+)\"").find(prBlock)?.groupValues?.get(1) ?: "LocallyDetermined"
         val pRecip = Regex("<uri-entry>([^<]+)</uri-entry>").find(prBlock)?.groupValues?.get(1)
             ?.let { bareId(it) }?.takeIf { it.isNotBlank() }
-        fun flag(tag: String) =
-            Regex("<$tag>\\s*(true|false)\\s*</$tag>").find(xml)?.groupValues?.get(1)?.toBoolean() ?: true
+        fun flagOrNull(tag: String) =
+            Regex("<$tag>\\s*(true|false)\\s*</$tag>").find(xml)?.groupValues?.get(1)?.toBoolean()
+        fun flag(tag: String) = flagOrNull(tag) ?: true
         return UserProfile(
             emergencyGroupMode = mode,
             emergencyGroupId = egid,
             allowEmergencyCall = flag("allow-emergency-group-call"),
             allowEmergencyAlert = flag("allow-activate-emergency-alert"),
-            allowAdhocCall = flag("cims:allow-adhoc-group-call"),
+            // TS 24.484 §8.3.2.1 11)xxxviii)R) <anyExt><allow-adhoc-group-call> — 없으면 전환기 별칭 cims: 요소
+            allowAdhocCall = flagOrNull("allow-adhoc-group-call") ?: flag("cims:allow-adhoc-group-call"),
             allowEmergencyPrivateCall = flag("allow-emergency-private-call"),
+            allowPrivateCall = flag("allow-private-call"),
+            maxAffiliations = Regex("<MaxAffiliationsN2>\\s*(\\d+)\\s*</MaxAffiliationsN2>").find(xml)
+                ?.groupValues?.get(1)?.toIntOrNull() ?: 0,
             privateEmergencyMode = pMode,
             emergencyPrivateRecipient = pRecip,
         )
     }
 
-    /** 시스템 서비스 설정 (TS 24.484 service-config) — **시스템 전역** 정책이다. 사용자별 인가는
-     *  [UserProfile] 의 ruleset 이며, 규격상 시스템 정책이 사용자 인가를 넓히지는 못하므로 두 축은
-     *  AND 로 적용한다([svcAllows]). 문서 미수신이면 게이트를 걸지 않는다(서버가 최종 판정). */
+    /** 시스템 서비스 설정 (TS 24.484 §8.4 service-config) — 시스템 전역 문서. 인가 요소는 없다(인가 = [UserProfile]
+     *  ruleset·그룹 문서). 단말이 쓰는 값은 on-network Resource-Priority(TS 24.379 §6.2.8.1.15). */
     data class ServiceConfig(
-        val allowPrivateCall: Boolean,
-        val allowEmergencyCall: Boolean,
-        val allowAlert: Boolean,
-        val allowTransmitRequest: Boolean,
-        val maxAffiliations: Int,          // on-network N2 상한 (0=미지정)
+        val rpEmergency: String?,          // "<namespace>.<priority>" — null = 미기재
+        val rpImminentPeril: String?,
+        val rpNormal: String?,
     )
 
     private val _serviceConfig = MutableStateFlow<ServiceConfig?>(null)
@@ -1470,31 +1474,22 @@ class PttController(
                     val cfg = parseServiceConfig(body)
                     _serviceConfig.value = cfg
                     serviceConfigEtag = doc.etag
-                    Log.i(TAG, "service-config 적재 — 1:1=${cfg.allowPrivateCall} 긴급콜=${cfg.allowEmergencyCall}" +
-                        " 경보=${cfg.allowAlert} 발언요청=${cfg.allowTransmitRequest} N2=${cfg.maxAffiliations}")
+                    Log.i(TAG, "service-config 적재 — RP 긴급=${cfg.rpEmergency} 임박=${cfg.rpImminentPeril} 일반=${cfg.rpNormal}")
                 }
             }
             .onFailure { Log.d(TAG, "service-config 조회 실패(시스템 설정 없이 동작): ${it.message}") }
     }
 
     private fun parseServiceConfig(xml: String): ServiceConfig {
-        fun flag(tag: String) =
-            Regex("<$tag>\\s*(true|false)\\s*</$tag>").find(xml)?.groupValues?.get(1)?.toBoolean() ?: true
-        fun num(tag: String) =
-            Regex("<$tag>\\s*(\\d+)\\s*</$tag>").find(xml)?.groupValues?.get(1)?.toIntOrNull()
-        return ServiceConfig(
-            allowPrivateCall = flag("allow-private-call"),
-            allowEmergencyCall = flag("allow-emergency-call"),
-            allowAlert = flag("allow-alert"),
-            allowTransmitRequest = flag("allow-transmit-request"),
-            // on-network 값이 더 구체적이라 우선한다 — 이 단말은 항상 on-network 다.
-            maxAffiliations = num("max-on-network-affiliations-N2") ?: num("max-affiliations-N2") ?: 0,
-        )
+        fun rp(elem: String): String? {
+            val block = Regex("<$elem>(.*?)</$elem>", RegexOption.DOT_MATCHES_ALL).find(xml)?.groupValues?.get(1) ?: return null
+            val ns = Regex("<resource-priority-namespace>\\s*([^<\\s]+)\\s*<").find(block)?.groupValues?.get(1) ?: return null
+            val pr = Regex("<resource-priority-priority>\\s*([^<\\s]+)\\s*<").find(block)?.groupValues?.get(1) ?: return null
+            return "$ns.$pr"
+        }
+        return ServiceConfig(rp("emergency-resource-priority"), rp("imminent-peril-resource-priority"),
+            rp("normal-resource-priority"))
     }
-
-    /** 시스템 정책 질의 — 문서 미수신(null)이면 **허용**으로 본다(서버 게이트가 최종 판정). */
-    private fun svcAllows(pick: (ServiceConfig) -> Boolean): Boolean =
-        _serviceConfig.value?.let(pick) ?: true
 
     /** 그룹 문서(TS 24.481, GMS XCAP) 조회 — 채널 상세 진입 시 호출. ETag(If-None-Match) 캐시. */
     fun loadGroupDetail(groupId: String) = scope.launch {
@@ -1883,10 +1878,9 @@ class PttController(
      * normal 재발신 폴백(개시)·latch 복원(상향)한다.
      */
     fun startEmergency() {
-        // 개시 인가 — 사용자 인가(ruleset allow-emergency-group-call)와 시스템 정책
-        //   (allow-emergency-call)의 AND. 서버도 미인가를 403 으로 거절하나(normal 폴백),
-        //   개시 전에 알리는 편이 정확하다.
-        if (_userProfile.value?.allowEmergencyCall == false || !svcAllows { it.allowEmergencyCall }) {
+        // 개시 인가 — 사용자 인가(ruleset allow-emergency-group-call). 서버도 미인가를 403 으로 거절하나
+        //   (normal 폴백), 개시 전에 알리는 편이 정확하다.
+        if (_userProfile.value?.allowEmergencyCall == false) {
             _status.value = "긴급: 개시 권한 없음"
             feedback?.blocked("긴급통화 개시 권한이 없습니다")
             return
@@ -1998,9 +1992,9 @@ class PttController(
     /** 긴급경보 MESSAGE 발신/취소 — SOS 개시/해제와 한 쌍 (TS 24.379 emergency alert).
      *  통화(INVITE)와 독립 경로라 호 성립 여부와 무관하게 신원·그룹이 전파된다. */
     private fun sendAlert(groupId: String, activate: Boolean) {
-        // 활성 인가 — 사용자 인가(allow-activate-emergency-alert)와 시스템 정책(allow-alert)의 AND.
+        // 활성 인가 — 사용자 인가(allow-activate-emergency-alert).
         //   취소(activate=false)는 막지 않는다 — 이미 걸린 경보의 회수는 언제나 허용한다.
-        if (activate && (_userProfile.value?.allowEmergencyAlert == false || !svcAllows { it.allowAlert })) {
+        if (activate && _userProfile.value?.allowEmergencyAlert == false) {
             _status.value = "긴급경보: 권한 없음"
             feedback?.blocked("긴급경보 권한이 없습니다")
             return
@@ -2043,11 +2037,12 @@ class PttController(
         publish()
     }
 
-    /** 수신 긴급경보 MESSAGE — 서버 fan-out 은 원본 본문 그대로라 그룹·발신자를 본문에서 읽는다. */
+    /** 수신 긴급경보 MESSAGE — 그룹·발신자는 헤더가 아닌 본문에서 읽는다(TS 24.379 §6.3.3.1.11). */
     private fun onAlertMessage(fromUri: String, body: String) {
         val info = McpttXml.parseMcpttInfo(body)
         val activate = info.alertInd ?: return   // alert-ind 없는 mcptt-info 는 경보가 아니다
-        val gid = info.requestUri?.let { bareId(it) }?.takeIf { it.isNotBlank() } ?: return
+        // 그룹 = <mcptt-calling-group-id>(TS 24.379 §6.3.3.1.11 8)), 없으면 <mcptt-request-uri>(구 서버의 원본 중계)
+        val gid = (info.callingGroupId ?: info.requestUri)?.let { bareId(it) }?.takeIf { it.isNotBlank() } ?: return
         val user = bareId(info.callingUserId ?: fromUri)
         if (user == bareId(mcpttId)) return      // 내 발신 에코(서버는 발신자 제외 — 방어)
         if (activate) {
@@ -2109,11 +2104,6 @@ class PttController(
             }
             publish()
             return
-        }
-        // 시스템 정책이 발언 요청을 막았다면 floor 요청은 어차피 Deny 다 (TS 24.484 on-network
-        //   allow-transmit-request) — 요청을 보내지 않고 거부음으로 알린다.
-        if (!svcAllows { it.allowTransmitRequest }) {
-            feedback?.denyTone(); _status.value = "발언 요청: 시스템 정책으로 비활성"; return
         }
         // Floor Taken 이 Permission=0 을 실어 온 세션(일제 통화·ambient 청취 leg)은
         // 요청해봐야 Deny 뿐이다 — 요청 자체를 막고 이유를 알린다(TS 24.380 §6.3.4.4.2-3d).

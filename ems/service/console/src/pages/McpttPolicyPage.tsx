@@ -6,34 +6,19 @@ import { useAuth } from '@core/contexts/AuthContext'
 import { hasRole } from '@core/utils/permissions'
 import { Button } from '@core/components/ui/button'
 import { Input } from '@core/components/ui/input'
-import { Checkbox } from '@core/components/ui/checkbox'
 
-// ── MCPTT 정책 (TS 24.484 service-config) ────────────────────────────────────
-//  시스템 전역 1건. 단말이 XCAP 으로 이 문서를 받아 **시스템 정책 게이트**로 쓰고, 사용자별 인가
-//  (user-profile — 가입자 화면)와 AND 로 판정한다. 즉 여기서 끈 기능은 프로파일이 허용해도 열리지
-//  않는다. 최종 판정은 서버(403 / Floor Deny)이며 단말 게이트는 UX 선차단이다.
-
-/** 편집 항목 — 규격 태그명을 title 로 노출해 문서(TS 24.484)와 대조 가능하게 한다. */
-const TOGGLES: { key: keyof McpttServiceConfig; label: string; tag: string; desc: string }[] = [
-  { key: 'allow_private_call',       label: '1:1 통화',      tag: 'allow-private-call',
-    desc: '1:1(private call) 발신. 착신은 막지 않는다 — 서버가 성립시킨 세션은 받는다.' },
-  { key: 'allow_emergency_call',     label: '긴급통화',      tag: 'allow-emergency-call',
-    desc: '긴급 그룹통화 개시. 사용자 프로파일의 개시 인가와 AND.' },
-  { key: 'allow_alert',              label: '긴급경보',      tag: 'allow-alert',
-    desc: '긴급경보 발신. 이미 걸린 경보의 취소는 항상 허용된다.' },
-  { key: 'allow_transmit_request',   label: '발언권 요청',   tag: 'on-network/allow-transmit-request',
-    desc: '키업(floor 요청). 끄면 단말이 요청을 보내지 않고 거부음으로 알린다.' },
-  { key: 'allow_create_delete_group', label: '그룹 생성/삭제', tag: 'allow-create-delete-group',
-    desc: '사용자에 의한 그룹 생성·삭제 허용 여부(관리자 편성과 별개).' },
-]
+// ── MCPTT 정책 (TS 24.484 §8.4 service-config) ──────────────────────────────
+//  시스템 전역 서비스 설정 1건. 인가(1:1·긴급·경보·그룹 생성)는 이 문서에 없다 — 가입자 화면의 user-profile(사람별)과
+//  PTT 그룹 편집(그룹 능력)이 정본이다. 여기 값은 N2 기본값과 broadcast-group 계층 수이고, floor 타이머·
+//  Resource-Priority 는 CSC 배포 설정(ServiceConfig.*)이다.
 
 const NUMBERS: { key: keyof McpttServiceConfig; label: string; tag: string; min: number; max: number; desc: string }[] = [
-  { key: 'max_affiliations_n2', label: '동시 제휴 상한 N2', tag: 'max-affiliations-N2', min: 1, max: 1000,
-    desc: '한 사용자가 동시에 제휴(편성)할 수 있는 채널 수. 집행은 서버가 하고, 단말은 초과를 로그로만 남긴다.' },
-  { key: 'num_levels_group_hierarchy', label: '그룹 계층 깊이', tag: 'num-levels-group-hierarchy', min: 1, max: 10,
-    desc: '그룹 계층(regroup) 최대 깊이.' },
-  { key: 'num_levels_user_hierarchy', label: '사용자 계층 깊이', tag: 'num-levels-user-hierarchy', min: 1, max: 10,
-    desc: '사용자 계층 최대 깊이.' },
+  { key: 'max_affiliations_n2', label: '동시 제휴 상한 N2', tag: 'user-profile MaxAffiliationsN2', min: 1, max: 1000,
+    desc: '한 사용자가 동시에 제휴(편성)할 수 있는 채널 수 — 각 가입자 user-profile 에 실린다. 집행은 서버가 하고, 단말은 초과를 로그로만 남긴다.' },
+  { key: 'num_levels_group_hierarchy', label: '그룹 계층 깊이', tag: 'common/broadcast-group/num-levels-group-hierarchy', min: 1, max: 10,
+    desc: '브로드캐스트 그룹 계층 최대 깊이.' },
+  { key: 'num_levels_user_hierarchy', label: '사용자 계층 깊이', tag: 'common/broadcast-group/num-levels-user-hierarchy', min: 1, max: 10,
+    desc: '브로드캐스트 사용자 계층 최대 깊이.' },
 ]
 
 export default function McpttPolicyPage() {
@@ -53,15 +38,13 @@ export default function McpttPolicyPage() {
 
   useEffect(() => { load() }, [load])
 
-  const dirty = !!form && !!cfg && TOGGLES.concat(NUMBERS as never[])
-    .some(f => form[f.key] !== cfg[f.key])
+  const dirty = !!form && !!cfg && NUMBERS.some(f => form[f.key] !== cfg[f.key])
 
   const save = async () => {
     if (!form) return
     setSaving(true)
     try {
       const body: Partial<McpttServiceConfig> = {}
-      for (const f of TOGGLES) (body as Record<string, unknown>)[f.key] = !!form[f.key]
       for (const f of NUMBERS) (body as Record<string, unknown>)[f.key] = Number(form[f.key])
       const r = await mcpttApi.updateServiceConfig(body)
       setCfg(r); setForm(r)
@@ -82,9 +65,9 @@ export default function McpttPolicyPage() {
           MCPTT 정책
           {/* 화면의 뜻은 한 번 읽으면 되는 설명이라 ⓘ 로 접는다 — 상태(아래)는 매번 봐야 하므로 남긴다. */}
           <InfoDot label="MCPTT 정책이란?">
-            시스템 전역 서비스 설정(TS 24.484 <code>service-config</code>)입니다. 단말이 XCAP 으로 받아
-            기능 게이트로 쓰며, <b>사용자별 인가</b>(가입자 &gt; PTT &gt; 프로파일)와 <b>AND</b> 로 판정합니다 —
-            여기서 끈 기능은 프로파일이 허용해도 열리지 않습니다.
+            시스템 전역 서비스 설정(TS 24.484 §8.4 <code>service-config</code>)입니다. 기능 허용(1:1·긴급·경보·그룹 생성)은
+            이 문서가 아니라 <b>사용자별 인가</b>(가입자 &gt; PTT &gt; 프로파일)와 <b>그룹 능력</b>(PTT 그룹 편집)에서 정합니다.
+            floor 타이머·Resource-Priority 는 CSC 배포 설정(<code>ServiceConfig.*</code>)입니다.
           </InfoDot>
         </h2>
         <div className="text-muted-foreground text-md leading-[1.6]">
@@ -92,21 +75,6 @@ export default function McpttPolicyPage() {
           {cfg?.update_time && <span>최근 변경 {new Date(cfg.update_time).toLocaleString()}</span>}
         </div>
       </div>
-
-      <section className="flex flex-col gap-2">
-        {TOGGLES.map(f => (
-          <label className="flex items-start gap-2.5 py-2.5 px-3 border border-border rounded-sm" key={String(f.key)} title={f.tag}>
-            <Checkbox className="mt-[3px]" disabled={!canEdit}
-              checked={!!form[f.key]} onCheckedChange={(c) => setForm({ ...form, [f.key]: (c === true) })} />
-            <span className="flex flex-col gap-0.5 min-w-0">
-              <span className="font-semibold">{f.label}
-                <code className="ml-2 text-xs text-muted-foreground">{f.tag}</code>
-              </span>
-              <span className="text-sm text-muted-foreground">{f.desc}</span>
-            </span>
-          </label>
-        ))}
-      </section>
 
       <section className="flex flex-col gap-2">
         {NUMBERS.map(f => (

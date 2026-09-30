@@ -194,7 +194,7 @@ data class CmsEntry(val uri: String = "", val mode: String = "") {
 
 /**
  * MCPTT user profile(TS 24.484 §8.3.2) — 코어가 해석한 요소. 인가(allow-*)는 요소가 없으면 허용으로 읽는다
- * (서버가 최종 판정 — UX 선차단용, ue_sdk.md §4.2). 판정은 [Capabilities.of] 로 service-config 와 AND 한다.
+ * (서버가 최종 판정 — UX 선차단용, ue_sdk.md §4.2). 판정 스냅샷은 [Capabilities.of].
  */
 data class UserProfileDoc(
     val etag: String = "", val userUri: String = "",
@@ -208,6 +208,8 @@ data class UserProfileDoc(
     val allowEmergencyGroupCall: Boolean = true, val allowImminentPerilCall: Boolean = true,
     val allowActivateEmergencyAlert: Boolean = true, val allowCancelEmergencyAlert: Boolean = true,
     val allowEmergencyPrivateCall: Boolean = true, val allowAdhocGroupCall: Boolean = true,
+    /** allow-private-call (§8.3.2.7). */
+    val allowPrivateCall: Boolean = true,
 ) {
     internal fun toJni(): JniUserProfileDoc = JniUserProfileDoc().also { d ->
         d.etag = etag; d.userUri = userUri
@@ -219,6 +221,7 @@ data class UserProfileDoc(
         d.allowEmergencyGroupCall = allowEmergencyGroupCall; d.allowImminentPerilCall = allowImminentPerilCall
         d.allowActivateEmergencyAlert = allowActivateEmergencyAlert; d.allowCancelEmergencyAlert = allowCancelEmergencyAlert
         d.allowEmergencyPrivateCall = allowEmergencyPrivateCall; d.allowAdhocGroupCall = allowAdhocGroupCall
+        d.allowPrivateCall = allowPrivateCall
     }
     internal companion object {
         fun of(d: JniUserProfileDoc) = UserProfileDoc(d.etag, d.userUri,
@@ -227,37 +230,43 @@ data class UserProfileDoc(
             d.groups.let { v -> List(v.size) { v[it] } }, d.implicitAffiliations.let { v -> List(v.size) { v[it] } },
             d.maxAffiliationsN2.takeIf { it >= 0 },
             d.allowEmergencyGroupCall, d.allowImminentPerilCall, d.allowActivateEmergencyAlert,
-            d.allowCancelEmergencyAlert, d.allowEmergencyPrivateCall, d.allowAdhocGroupCall)
-    }
-}
-
-/** MCPTT service configuration(TS 24.484 §8.2) — 시스템 전역 정책. 요소가 없으면 허용. */
-data class ServiceConfigDoc(
-    val etag: String = "",
-    val allowPrivateCall: Boolean = true, val allowEmergencyCall: Boolean = true,
-    val allowAlert: Boolean = true, val allowTransmitRequest: Boolean = true,
-    /** on-network N2 상한(없으면 max-affiliations-N2) — null = 미기재. */
-    val maxAffiliationsN2: Int? = null,
-) {
-    internal fun toJni(): JniServiceConfigDoc = JniServiceConfigDoc().also { d ->
-        d.etag = etag; d.allowPrivateCall = allowPrivateCall; d.allowEmergencyCall = allowEmergencyCall
-        d.allowAlert = allowAlert; d.allowTransmitRequest = allowTransmitRequest; d.maxAffiliationsN2 = maxAffiliationsN2 ?: -1
-    }
-    internal companion object {
-        fun of(d: JniServiceConfigDoc) = ServiceConfigDoc(d.etag, d.allowPrivateCall, d.allowEmergencyCall,
-            d.allowAlert, d.allowTransmitRequest, d.maxAffiliationsN2.takeIf { it >= 0 })
+            d.allowCancelEmergencyAlert, d.allowEmergencyPrivateCall, d.allowAdhocGroupCall, d.allowPrivateCall)
     }
 }
 
 /**
- * 정책 게이트 스냅샷(ue_sdk.md §4.2) — user profile ∧ service config, **받지 못한 문서는 허용**. UX 선차단(버튼 숨김)용이고
- * 최종 판정은 서버(403·Floor Deny)다. AND 규칙은 코어 한 곳(`Capabilities::of`)이다.
+ * MCPTT service configuration(TS 24.484 §8.4) — 시스템 전역 문서. 인가 요소는 없다(인가 = user profile·그룹 문서).
+ * Resource-Priority r-value(`mcpttp.15` 형식, TS 24.379 §6.2.8.1.15)는 비면 미기재 — 받으면 AccountConfig.rp* 에 넣는다.
+ */
+data class ServiceConfigDoc(
+    val etag: String = "",
+    /** service-configuration-params@domain */
+    val domain: String = "",
+    /** common/broadcast-group 계층 수 — null = 미기재. */
+    val numLevelsGroupHierarchy: Int? = null, val numLevelsUserHierarchy: Int? = null,
+    val rpEmergency: String = "", val rpImminentPeril: String = "", val rpNormal: String = "",
+) {
+    internal fun toJni(): JniServiceConfigDoc = JniServiceConfigDoc().also { d ->
+        d.etag = etag; d.domain = domain
+        d.numLevelsGroupHierarchy = numLevelsGroupHierarchy ?: -1; d.numLevelsUserHierarchy = numLevelsUserHierarchy ?: -1
+        d.rpEmergency = rpEmergency; d.rpImminentPeril = rpImminentPeril; d.rpNormal = rpNormal
+    }
+    internal companion object {
+        fun of(d: JniServiceConfigDoc) = ServiceConfigDoc(d.etag, d.domain,
+            d.numLevelsGroupHierarchy.takeIf { it >= 0 }, d.numLevelsUserHierarchy.takeIf { it >= 0 },
+            d.rpEmergency, d.rpImminentPeril, d.rpNormal)
+    }
+}
+
+/**
+ * 정책 게이트 스냅샷(ue_sdk.md §4.2) — user profile ruleset 인가, **받지 못한 문서는 허용**. UX 선차단(버튼 숨김)용이고
+ * 최종 판정은 서버(403·Floor Deny)다. 규칙은 코어 한 곳(`Capabilities::of`)이다.
  */
 data class Capabilities(
     val userProfileKnown: Boolean = false, val serviceConfigKnown: Boolean = false,
     val privateCall: Boolean = true, val emergencyGroupCall: Boolean = true, val imminentPerilCall: Boolean = true,
     val emergencyPrivateCall: Boolean = true, val emergencyAlert: Boolean = true, val cancelEmergencyAlert: Boolean = true,
-    val adhocGroupCall: Boolean = true, val transmitRequest: Boolean = true,
+    val adhocGroupCall: Boolean = true,
     /** 0 = 미지정. N2 는 경고만 한다(강제하지 않는다). */
     val maxAffiliationsN2: Int = 0,
 ) {
@@ -268,7 +277,7 @@ data class Capabilities(
             val c = JniCapabilities.of(userProfile?.toJni(), serviceConfig?.toJni())
             return Capabilities(c.userProfileKnown, c.serviceConfigKnown, c.privateCall, c.emergencyGroupCall,
                 c.imminentPerilCall, c.emergencyPrivateCall, c.emergencyAlert, c.cancelEmergencyAlert,
-                c.adhocGroupCall, c.transmitRequest, c.maxAffiliationsN2)
+                c.adhocGroupCall, c.maxAffiliationsN2)
         }
     }
 }

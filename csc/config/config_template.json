@@ -846,6 +846,222 @@
       "scope": "service"
     },
     {
+      "key": "service_config",
+      "title": "MCPTT 서비스 설정 문서 (service-config) — on-network 파라미터",
+      "description": "TS 24.484 §8.4 service configuration 문서의 on-network 규격 파라미터 — floor 타이머·카운터(<fc-timers-counters>)와 Resource-Priority(<emergency-/imminent-peril-/normal-resource-priority>). N2·broadcast-group 계층 수는 콘솔 [MCPTT 서비스 설정](DB)에서 편집한다. 값이 바뀌면 문서 ETag 도 바뀐다.",
+      "fields": [
+        {
+          "key": "ServiceConfig.FcTimersCounters.T1-end-of-rtp-media",
+          "label": "T1 — RTP 미디어 종료 판정 (ms)",
+          "type": "int",
+          "default": 4000,
+          "min": 0,
+          "max": 600000,
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드 — 다음 GET 부터 새 문서·ETag.",
+          "help": "TS 24.380 floor 타이머. CMP 설정 FloorIdleSec 과 같은 값으로 둔다(CMP 가 실제로 쓰는 값)."
+        },
+        {
+          "key": "ServiceConfig.FcTimersCounters.T3-stop-talking-grace",
+          "label": "T3 — 발언 중지 유예 (ms)",
+          "type": "int",
+          "default": 3000,
+          "min": 0,
+          "max": 600000,
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드 — 다음 GET 부터 새 문서·ETag.",
+          "help": "TS 24.380 floor 타이머. CMP 설정 FloorRevokeGraceSec 과 같은 값으로 둔다(CMP 가 실제로 쓰는 값)."
+        },
+        {
+          "key": "ServiceConfig.FcTimersCounters.T7-floor-idle",
+          "label": "T7 — Floor Idle 재송신 간격 (0=비활성) (ms)",
+          "type": "int",
+          "default": 0,
+          "min": 0,
+          "max": 600000,
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드 — 다음 GET 부터 새 문서·ETag.",
+          "help": "TS 24.380 floor 타이머. CMP 설정 FloorIdleResendSec 과 같은 값으로 둔다(CMP 가 실제로 쓰는 값)."
+        },
+        {
+          "key": "ServiceConfig.FcTimersCounters.T8-floor-revoke",
+          "label": "T8 — Floor Revoke 재전송 (ms)",
+          "type": "int",
+          "default": 1000,
+          "min": 0,
+          "max": 600000,
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드 — 다음 GET 부터 새 문서·ETag.",
+          "help": "TS 24.380 floor 타이머. CMP 설정 FloorRevokeRetxSec 과 같은 값으로 둔다(CMP 가 실제로 쓰는 값)."
+        },
+        {
+          "key": "ServiceConfig.FcTimersCounters.T11-end-of-RTP-dual",
+          "label": "T11 — 이중 발언 RTP 종료 판정 (ms)",
+          "type": "int",
+          "default": 4000,
+          "min": 0,
+          "max": 600000,
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드 — 다음 GET 부터 새 문서·ETag."
+        },
+        {
+          "key": "ServiceConfig.FcTimersCounters.T12-stop-talking-dual",
+          "label": "T12 — 이중 발언 최대 시간 (ms)",
+          "type": "int",
+          "default": 30000,
+          "min": 0,
+          "max": 600000,
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드 — 다음 GET 부터 새 문서·ETag."
+        },
+        {
+          "key": "ServiceConfig.FcTimersCounters.T15-conversation",
+          "label": "T15 — 대화(conversation) (ms)",
+          "type": "int",
+          "default": 30000,
+          "min": 0,
+          "max": 600000,
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드 — 다음 GET 부터 새 문서·ETag."
+        },
+        {
+          "key": "ServiceConfig.FcTimersCounters.T16-map-group-to-bearer",
+          "label": "T16 — Map Group To Bearer (MBMS) (ms)",
+          "type": "int",
+          "default": 500,
+          "min": 0,
+          "max": 600000,
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드 — 다음 GET 부터 새 문서·ETag."
+        },
+        {
+          "key": "ServiceConfig.FcTimersCounters.T17-unmap-group-to-bearer",
+          "label": "T17 — Unmap Group To Bearer (MBMS) (ms)",
+          "type": "int",
+          "default": 200,
+          "min": 0,
+          "max": 600000,
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드 — 다음 GET 부터 새 문서·ETag."
+        },
+        {
+          "key": "ServiceConfig.FcTimersCounters.T20-floor-granted",
+          "label": "T20 — Floor Granted 재송신 (ms)",
+          "type": "int",
+          "default": 1000,
+          "min": 0,
+          "max": 600000,
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드 — 다음 GET 부터 새 문서·ETag.",
+          "help": "TS 24.380 floor 타이머. CMP 설정 FloorGrantRetxSec 과 같은 값으로 둔다(CMP 가 실제로 쓰는 값)."
+        },
+        {
+          "key": "ServiceConfig.FcTimersCounters.T55-connect",
+          "label": "T55 — Connect (사전 수립 세션) (ms)",
+          "type": "int",
+          "default": 2000,
+          "min": 0,
+          "max": 600000,
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드 — 다음 GET 부터 새 문서·ETag."
+        },
+        {
+          "key": "ServiceConfig.FcTimersCounters.T56-disconnect",
+          "label": "T56 — Disconnect (사전 수립 세션) (ms)",
+          "type": "int",
+          "default": 2000,
+          "min": 0,
+          "max": 600000,
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드 — 다음 GET 부터 새 문서·ETag."
+        },
+        {
+          "key": "ServiceConfig.FcTimersCounters.C7-floor-idle",
+          "label": "C7 — Floor Idle 최대 송신 횟수",
+          "type": "int",
+          "default": 3,
+          "min": 0,
+          "max": 65535,
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드 — 다음 GET 부터 새 문서·ETag."
+        },
+        {
+          "key": "ServiceConfig.FcTimersCounters.C17-unmap-group-to-bearer",
+          "label": "C17 — Unmap Group To Bearer 재전송 횟수",
+          "type": "int",
+          "default": 3,
+          "min": 0,
+          "max": 65535,
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드 — 다음 GET 부터 새 문서·ETag."
+        },
+        {
+          "key": "ServiceConfig.FcTimersCounters.C20-floor-granted",
+          "label": "C20 — Floor Granted 최대 재송신 횟수",
+          "type": "int",
+          "default": 3,
+          "min": 0,
+          "max": 65535,
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드 — 다음 GET 부터 새 문서·ETag."
+        },
+        {
+          "key": "ServiceConfig.FcTimersCounters.C55-connect",
+          "label": "C55 — Connect 재전송 횟수",
+          "type": "int",
+          "default": 3,
+          "min": 0,
+          "max": 65535,
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드 — 다음 GET 부터 새 문서·ETag."
+        },
+        {
+          "key": "ServiceConfig.FcTimersCounters.C56-disconnect",
+          "label": "C56 — Disconnect 재전송 횟수",
+          "type": "int",
+          "default": 3,
+          "min": 0,
+          "max": 65535,
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드 — 다음 GET 부터 새 문서·ETag."
+        },
+        {
+          "key": "ServiceConfig.ResourcePriority.Namespace",
+          "label": "Resource-Priority 네임스페이스",
+          "type": "string",
+          "default": "mcpttp",
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드.",
+          "help": "TS 24.379 §6.2.8.1.15 · RFC 8101 — 긴급·임박·일반 MCPTT 요청의 Resource-Priority. CSP fan-out 과 같은 값(mcpttp)."
+        },
+        {
+          "key": "ServiceConfig.ResourcePriority.Emergency",
+          "label": "Resource-Priority 서열 — 긴급",
+          "type": "string",
+          "default": "15",
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드."
+        },
+        {
+          "key": "ServiceConfig.ResourcePriority.ImminentPeril",
+          "label": "Resource-Priority 서열 — 임박 위험",
+          "type": "string",
+          "default": "8",
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드."
+        },
+        {
+          "key": "ServiceConfig.ResourcePriority.Normal",
+          "label": "Resource-Priority 서열 — 일반(하향)",
+          "type": "string",
+          "default": "0",
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드."
+        }
+      ],
+      "scope": "service"
+    },
+    {
       "key": "user_profile",
       "title": "MCPTT 사용자 프로파일 문서 (user-profile) 규격 파라미터값",
       "description": "TS 24.484 §8.3.2 사용자 프로파일 문서의 상수 요소. 그룹 목록·연락처·긴급 대상·인가는 DB(그룹 멤버십·ptt_user_profile·mcptt_service_config)에서 유도되므로 여기 없다. 값이 바뀌면 문서 ETag 도 바뀌어 단말이 새 문서를 받는다.",

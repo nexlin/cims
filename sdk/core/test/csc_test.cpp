@@ -317,17 +317,31 @@ static const char* kUserProfileXml = R"(<?xml version="1.0" encoding="UTF-8"?>
 </mcptt-user-profile>)";
 
 static const char* kServiceConfigXml = R"(<?xml version="1.0" encoding="UTF-8"?>
-<mcptt-service-config xmlns="urn:3gpp:ns:mcpttServiceConfig:1.0">
-  <num-levels-group-hierarchy>3</num-levels-group-hierarchy>
-  <max-affiliations-N2>16</max-affiliations-N2>
-  <allow-private-call>true</allow-private-call>
-  <allow-emergency-call>false</allow-emergency-call>
-  <allow-alert>true</allow-alert>
-  <on-network>
-    <allow-transmit-request>true</allow-transmit-request>
-    <max-on-network-affiliations-N2>12</max-on-network-affiliations-N2>
-  </on-network>
-</mcptt-service-config>)";
+<service-configuration-info xmlns="urn:3gpp:ns:mcpttServiceConfig:1.0">
+  <service-configuration-params domain="ptt.example.org">
+    <common>
+      <broadcast-group>
+        <num-levels-group-hierarchy>3</num-levels-group-hierarchy>
+        <num-levels-user-hierarchy>4</num-levels-user-hierarchy>
+      </broadcast-group>
+    </common>
+    <on-network>
+      <fc-timers-counters><T1-end-of-rtp-media>PT4S</T1-end-of-rtp-media></fc-timers-counters>
+      <emergency-resource-priority>
+        <resource-priority-namespace>mcpttp</resource-priority-namespace>
+        <resource-priority-priority>14</resource-priority-priority>
+      </emergency-resource-priority>
+      <imminent-peril-resource-priority>
+        <resource-priority-namespace>mcpttp</resource-priority-namespace>
+        <resource-priority-priority>8</resource-priority-priority>
+      </imminent-peril-resource-priority>
+      <normal-resource-priority>
+        <resource-priority-namespace>mcpttp</resource-priority-namespace>
+        <resource-priority-priority>0</resource-priority-priority>
+      </normal-resource-priority>
+    </on-network>
+  </service-configuration-params>
+</service-configuration-info>)";
 
 TEST(CmsDoc, ParseUserProfile) {
     UserProfileDoc d; d.etag = "\"up1\"";
@@ -364,26 +378,29 @@ TEST(CmsDoc, ParseUserProfile) {
 }
 
 TEST(CmsDoc, ParseServiceConfig) {
+    // TS 24.484 §8.4 구조 — 루트 service-configuration-info › service-configuration-params
     ServiceConfigDoc d;
     std::string err;
     ASSERT_TRUE(ServiceConfigDoc::parse(kServiceConfigXml, d, &err)) << err;
-    EXPECT_TRUE(d.allowPrivateCall);
-    EXPECT_FALSE(d.allowEmergencyCall);
-    EXPECT_TRUE(d.allowAlert);
-    EXPECT_TRUE(d.allowTransmitRequest);
-    EXPECT_EQ(d.maxAffiliationsN2, 12);                        // on-network 값 우선
+    EXPECT_EQ(d.domain, "ptt.example.org");
+    EXPECT_EQ(d.numLevelsGroupHierarchy, 3);
+    EXPECT_EQ(d.numLevelsUserHierarchy, 4);
+    EXPECT_EQ(d.rpEmergency, "mcpttp.14");                     // RFC 4412 r-value = namespace.priority
+    EXPECT_EQ(d.rpImminentPeril, "mcpttp.8");
+    EXPECT_EQ(d.rpNormal, "mcpttp.0");
     ServiceConfigDoc m;
-    ASSERT_TRUE(ServiceConfigDoc::parse("<mcptt-service-config><max-affiliations-N2>4</max-affiliations-N2></mcptt-service-config>", m));
-    EXPECT_EQ(m.maxAffiliationsN2, 4);                         // 폴백
-    EXPECT_TRUE(m.allowTransmitRequest);
+    ASSERT_TRUE(ServiceConfigDoc::parse("<service-configuration-info/>", m));   // params 없음 = 설정 없음
+    EXPECT_TRUE(m.rpEmergency.empty());
+    EXPECT_EQ(m.numLevelsGroupHierarchy, -1);
+    EXPECT_FALSE(ServiceConfigDoc::parse("<mcptt-service-config/>", m, &err));  // 옛 비규격 루트
     EXPECT_FALSE(ServiceConfigDoc::parse("<mcptt-user-profile/>", m, &err));
 }
 
-TEST(CmsDoc, CapabilitiesAndGate) {
-    // 둘 다 미수신 — 게이트 없음
+TEST(CmsDoc, CapabilitiesFromUserProfile) {
+    // 미수신 — 게이트 없음
     Capabilities none = Capabilities::of(nullptr, nullptr);
     EXPECT_FALSE(none.userProfileKnown);
-    EXPECT_TRUE(none.emergencyGroupCall && none.emergencyAlert && none.privateCall && none.adhocGroupCall && none.transmitRequest);
+    EXPECT_TRUE(none.emergencyGroupCall && none.emergencyAlert && none.privateCall && none.adhocGroupCall);
     EXPECT_EQ(none.maxAffiliationsN2, 0);
 
     UserProfileDoc up; ServiceConfigDoc sc;
@@ -391,19 +408,21 @@ TEST(CmsDoc, CapabilitiesAndGate) {
     ASSERT_TRUE(ServiceConfigDoc::parse(kServiceConfigXml, sc));
     Capabilities c = Capabilities::of(&up, &sc);
     EXPECT_TRUE(c.userProfileKnown && c.serviceConfigKnown);
-    EXPECT_FALSE(c.emergencyGroupCall);                        // 사용자 허용 ∧ 시스템 불허
-    EXPECT_FALSE(c.imminentPerilCall);
-    EXPECT_TRUE(c.emergencyPrivateCall);                       // 사설 긴급은 allow-private-call ∧ 사용자 인가(원천 앱과 같다)
+    EXPECT_TRUE(c.emergencyGroupCall);                         // 인가는 user profile 만(service config 에 인가 요소 없음)
+    EXPECT_TRUE(c.imminentPerilCall);
+    EXPECT_TRUE(c.privateCall && c.emergencyPrivateCall);      // allow-private-call 요소 없음 = 허용
     EXPECT_FALSE(c.emergencyAlert);                            // 사용자 불허
     EXPECT_FALSE(c.adhocGroupCall);
-    EXPECT_TRUE(c.transmitRequest);
-    EXPECT_EQ(c.maxAffiliationsN2, 12);                        // 시스템 > 사용자
+    EXPECT_EQ(c.maxAffiliationsN2, 8);                         // user profile MaxAffiliationsN2
+    EXPECT_EQ(Capabilities::of(&up, nullptr).maxAffiliationsN2, 8);
 
-    // service-config 만 미수신 — 사용자 축만 게이트
-    Capabilities u = Capabilities::of(&up, nullptr);
-    EXPECT_TRUE(u.emergencyGroupCall);
-    EXPECT_FALSE(u.emergencyAlert);
-    EXPECT_EQ(u.maxAffiliationsN2, 8);
+    UserProfileDoc np;
+    ASSERT_TRUE(UserProfileDoc::parse("<mcptt-user-profile><ruleset><actions><allow-private-call>false</allow-private-call>"
+                                      "<allow-private-call-media-protection>true</allow-private-call-media-protection>"
+                                      "</actions></ruleset></mcptt-user-profile>", np));
+    Capabilities p = Capabilities::of(&np, nullptr);
+    EXPECT_FALSE(p.privateCall);                               // 이름 경계 — -media-protection 을 잡지 않는다
+    EXPECT_FALSE(p.emergencyPrivateCall);
 }
 
 TEST(DialogInfo, ParseAndJoinHeader) {
@@ -602,5 +621,5 @@ TEST(Csc, FetchCmsDocsParseAndNotModified) {
     EXPECT_FALSE(r.ok); EXPECT_EQ(r.code, -2);
     tp->next.body = kServiceConfigXml;
     ASSERT_TRUE(c.fetchServiceConfig("tok", "tel:+82500000002", "", sc).ok);
-    EXPECT_FALSE(sc.allowEmergencyCall);
+    EXPECT_EQ(sc.rpEmergency, "mcpttp.14");
 }

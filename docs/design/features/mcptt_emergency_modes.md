@@ -160,14 +160,23 @@ mcptt-request-uri, mcptt-calling-user-id, (alert) originated-user-id, location(�
 
 ### 4.3 emergency alert (SIP MESSAGE)
 
-`EventMessage`에서 `mcptt-info`(`alert-ind=true`) 판별 → SMS 경로와 분기:
-- alert 게이트 = 그룹 capability(`emergency_alert`) AND 사용자 프로파일
-  (`allow_emergency_alert`, TS 24.484 allow-activate-emergency-alert) — 허용 시에만 그룹 등록
-  멤버에게 같은 MESSAGE 를 fan-out(발신자 제외, affiliation 요구 그룹은 affiliate 된 멤버만,
-  **원본 Content-Type `application/vnd.3gpp.mcptt-info+xml` 보존** — 단말이 content-type 으로
-  경보를 분기한다). 미인가 경보는 **거절이 아니라 스트립**(무전파 — 규격이 콜(403 거절)과
-  다르게 정의). 취소(`alert-ind=false`)는 동일 본문 전파이며 **사용자 게이트 비대상**(잔존
-  경보 정리 경로 보존). 등록(온라인) 멤버에게만 전달된다 — 저장 후 전달(경보 보류함)은 없다.
+`EventMessage` 가 mcptt-info 의 `<alert-ind>` 요소를 보면 SMS 경로와 갈라 `CPttAsModule::OnEmergencyAlert` 로 넘긴다. CSP 는
+참여 기능(§12.1.2.1)과 제어 기능(§12.1.3.1·§12.1.3.2)을 겸한다:
+- **대상 그룹** = 본문 `<mcptt-request-uri>` — 단말은 Request-URI 를 참여 기능 PSI(`sip:mcptt_psi@<PTT 도메인>` — ue-init-config
+  `MCPTT-Service-Details/Server-URI`)로 보낸다(§12.1.1.1 4)a)·8)). Request-URI 가 그룹 URI 면 그 그룹으로 받는다(옛 단말 전환기).
+  어느 쪽으로도 그룹을 찾지 못하면 404.
+- **인가** = 그룹 capability(`emergency_alert`, TS 24.481 allow-MCPTT-emergency-alert) AND 사용자 프로파일
+  (`allow_emergency_alert`, TS 24.484 allow-activate-emergency-alert — §6.3.3.1.13.1). 미인가 경보는 **거절이 아니라 스트립**(무전파 —
+  규격이 콜(403 거절)과 다르게 정의). 취소(`alert-ind=false`)는 **사용자 게이트 비대상**(잔존 경보 정리 경로 보존).
+- **팬아웃** = 제휴 멤버마다(발신자 제외, affiliation 요구 그룹은 affiliate 된 멤버만) 제어 기능이 **새 MESSAGE 를 만든다**
+  (§6.3.3.1.11·§6.3.3.1.12): 본문 `<mcptt-request-uri>` = 수신자 MCPTT ID · `<mcptt-calling-user-id>` = 발신자(참여 기능이 서빙
+  사용자로 정한 값 — §12.1.2.1 9), 본문 값은 쓰지 않는다) · `<mcptt-calling-group-id>` = 그룹 · `<alert-ind>`, 취소면 받은
+  `<originated-by>`(제3자 취소, §12.1.3.2 2)c)iii))와 동봉된 그룹 긴급 해제(`<emergency-ind>false`, §12.1.3.2 2)d)iv)E))를 옮긴다.
+  헤더 = `Accept-Contact`(g.3gpp.mcptt · ICSI mcptt, require;explicit)·`P-Asserted-Service-Id`(ICSI mcptt). 위치 정보 파트
+  (`application/vnd.3gpp.mcptt-location-info+xml`)가 있으면 multipart 로 옮긴다(§6.3.3.1.12 4)). 등록(온라인) 멤버에게만
+  전달된다 — 저장 후 전달(경보 보류함)은 없다.
+- **mcptt-info 해석** = `McpttElemValue`(csp/McpttInfo.h) — Annex F.1 contentType 요소의 자식 형식(`<mcpttURI>`·`<mcpttBoolean>`)과
+  값 직접 기재 형식을 둘 다 읽는다. 요소 이름은 경계까지 맞춘다(`<alert-ind-rcvd>` 는 `<alert-ind>` 가 아니다).
 - `CallDir`에 `alert_sent`/`alert_cancelled` 이벤트 기록(그룹 events.jsonl).
 - **단말(ptt-client)**: SOS 개시가 규격 시퀀스대로 **경보 MESSAGE 를 먼저** 보내고 긴급콜을
   개시한다(`McpttXml.alertInfo` + `PttController.sendAlert` — 호 성립과 무관하게 신원·그룹 전파).
@@ -207,15 +216,16 @@ mcptt-request-uri, mcptt-calling-user-id, (alert) originated-user-id, location(�
 - **단말 SDK 코어**(`libcimsue`, [ue_sdk.md](ue_sdk.md) §4.2 «긴급·임박 세션 조건»): 위 단말 절차 중 **규격 절차**를 코어가 가진다 —
   상향·하향 re-INVITE(`Engine::setCallCondition` — 바뀐 지시자만 true/false 명시 + `Resource-Priority`, 4xx~6xx 면 이전 값 복원),
   서버 재광고 해석(수신 re-INVITE·조인 200 OK, emergency-ind true 는 임박을 내린다 §10.1.1.2.1.6), 경보 MESSAGE 빌드·해석
-  (`sendEmergencyAlert`·`onEmergencyAlert` — `mcptt-client-id`·ICSI mcptt P-Preferred-Service/Accept-Contact, 수신 그룹은
-  `mcptt-calling-group-id` 우선). SOS 대상 결정·403 뒤 normal 재발신·경보 정합(`reconcileAlertAfterDenied`)·배너는 앱 정책으로 남는다.
-- **규격 대비 편차(서버)** — 단말은 현 CSP 에 맞춰 보낸다:
+  (`sendEmergencyAlert`·`onEmergencyAlert` — `mcptt-client-id`·ICSI mcptt P-Preferred-Service/Accept-Contact, Request-URI =
+  `AccountConfig.mcpttServerUri`(참여 기능 PSI — 비면 그룹 URI, CSP 0.2.166 전 서버와의 전환기), 수신 그룹은 `mcptt-calling-group-id` 우선). SOS 대상 결정·403 뒤 normal 재발신·경보 정합(`reconcileAlertAfterDenied`)·배너는 앱 정책으로 남는다.
+- **규격 대비 편차** — 남은 것:
 
-  | 항목 | 규격(TS 24.379) | CSP 현행 | 단말 대응 |
+  | 항목 | 규격(TS 24.379 / 24.484) | 현행 | 해소 방향 |
   |---|---|---|---|
-  | 경보 MESSAGE Request-URI | 참여 기능 PSI, 그룹은 본문 `mcptt-request-uri`(§12.1.1.1 8)) | To(그룹 URI)로 게이트·팬아웃 | 그룹 URI 로 보낸다 |
-  | 경보 팬아웃 본문 | 제어 기능이 `mcptt-calling-group-id`·`mcptt-calling-user-id` 를 채워 새로 만든다(§12.1.3) | 발신 원본 본문 그대로 | 발신 본문에 `mcptt-calling-user-id` 를 싣고, 수신은 calling-group-id 가 없으면 request-uri 를 그룹으로 |
-  | Resource-Priority 값 | service-config OnNetwork `*-resource-priority`(§6.2.8.1.15) | service-config 에 없음 | 코어 기본값 = CSP fan-out 의 mcpttp.15/.8/.0 |
+  | mcptt-info contentType 인코딩 | `mcptt-request-uri`·`alert-ind` 등은 자식 `<mcpttURI>`/`<mcpttString>`/`<mcpttBoolean>` 에 값(Annex F.1 `contentType`) | CSP·SDK·ptt-client 가 값을 요소에 바로 적는다. CSP 수신은 두 형식을 다 읽고, SDK(`localText`)는 직접 기재만 읽는다 | ① SDK·앱 수신 파서가 두 형식을 읽게 → ② 단말 갱신 뒤 송신 전환(CSP 는 `PttAsModule.cpp` `_InfoElem` 한 곳) |
+  | 경보 통지 `<mc-org>` | 제어 기능이 발신자 user profile 의 `<MissionCriticalOrganization>` 을 싣는다(§6.3.3.1.12 2)·3)) | 싣지 않는다 — 값의 정본이 CSC 사이트 설정(`UserProfile.MissionCriticalOrganization`)이라 CSP 에 없다 | CSC→CSP 전달 경로(설정 캐시)를 둔 뒤 |
+  | 경보 수신 확인 | 제어 기능이 발신 단말에 `<alert-ind-rcvd>` MESSAGE(§6.3.3.1.20) | 보내지 않는다(200 OK 만) | 후속 |
+  | 경보 취소 인가 | 미인가 취소는 403 + `<alert-ind>true`(§12.1.3.2 1)) | 취소는 인가 없이 통과 | 후속(allow-cancel-emergency-alert 축 분리와 함께) |
 
 ### 4.4 상태/로깅
 
@@ -234,11 +244,11 @@ mcptt-request-uri, mcptt-calling-user-id, (alert) originated-user-id, location(�
   `entry-info`+`uri-entry`(SOS 대상 결정, TS 24.484)와 `PrivateCall > EmergencyCall >
   MCPTTPrivateRecipient`(긴급 사설콜 대상 결정, §7), `ruleset`(`allow-emergency-group-call`·
   `allow-activate/cancel-emergency-alert`·`allow-emergency-private-call`). ad hoc 인가는 규격
-  요소가 없어 `cims:` 확장 네임스페이스(`cims:allow-adhoc-group-call`)로 노출. ETag 는 내용
-  파생(변경 시 자동 갱신).
-- **시스템 축 게이트**(`mcptt_service_config` — TS 24.484 service-config): `allow-emergency-call`·
-  `allow-alert` 이 위 사용자 인가와 **AND** 로 겹친다(단말 선차단 · 콘솔 `구성 > MCPTT 정책`).
-  그룹 축(`emergency_call`/`emergency_alert`)·사용자 축(ruleset)·시스템 축 셋이 모두 허용해야 열린다.
+  `<anyExt><allow-adhoc-group-call>`(TS 24.484 Rel-18 §8.3.2.1 11)xxxviii)R)) — 옛 ptt-client 용 `cims:allow-adhoc-group-call`
+  별칭을 한 릴리스 함께 싣는다. ETag 는 내용 파생(변경 시 자동 갱신).
+- **인가 축은 둘** — 그룹 축(`emergency_call`/`emergency_alert`, TS 24.481)·사용자 축(ruleset, TS 24.484 §8.3.2.7). 둘 다 허용해야
+  열린다. service-config(§8.4)에는 인가 요소가 없다 — 긴급 요청의 Resource-Priority 값(`on-network` `*-resource-priority`,
+  `mcpttp` 15/8/0)을 싣는다.
 - **admin 프로파일 API**: `GET/PUT /api/v1/users/:pid/ptt/:msisdn/profile` — UPSERT + 캐시 갱신 +
   `USER_CHANGED` notify. `DedicatedGroup` 의 `emergency_group_id` 는 존재 그룹만 수용(400),
   `emergency_private_recipient` 는 존재 가입자만 수용(400).
