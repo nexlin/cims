@@ -30,37 +30,6 @@ bool CPttAsModule::OnCallEnd( const char *pszCallId, int iSipStatus ) {
 
 namespace {
 
-    std::string _XmlEsc( const std::string &s ) {
-        std::string o;
-        o.reserve( s.size() );
-        for ( char c : s ) {
-            switch ( c ) {
-                case '&':
-                    o += "&amp;";
-                    break;
-                case '<':
-                    o += "&lt;";
-                    break;
-                case '>':
-                    o += "&gt;";
-                    break;
-                case '"':
-                    o += "&quot;";
-                    break;
-                default:
-                    o += c;
-            }
-        }
-        return o;
-    }
-
-    /** mcptt-info contentType 요소 한 줄(TS 24.379 Annex F.1). 값은 요소에 바로 싣는다 — 현행 단말 파서가
-     *  <mcpttURI>/<mcpttBoolean> 자식을 읽지 못해서다. 수신 파서가 두 형식을 다 읽게 된 뒤 이 한 곳에서 자식 형식으로
-     * 바꾼다 (mcptt_emergency_modes.md §4.3 편차 표). */
-    std::string _InfoElem( const char *pszTag, const std::string &strValue ) {
-        return std::string( "    <" ) + pszTag + ">" + _XmlEsc( strValue ) + "</" + pszTag + ">\r\n";
-    }
-
     /** 제어 기능이 제휴 멤버에게 보내는 경보 통지 mcptt-info (TS 24.379 §6.3.3.1.11·§6.3.3.1.12·§12.1.3.2 2)c)).
      *  요소 순서 = mcptt-ParamsType 시퀀스. */
     std::string _BuildAlertNotification( const std::string &strMemberId, const std::string &strCallingUserId,
@@ -70,12 +39,12 @@ namespace {
             "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n"
             "<mcpttinfo xmlns=\"urn:3gpp:ns:mcpttInfo:1.0\">\r\n"
             "  <mcptt-Params>\r\n";
-        s += _InfoElem( "mcptt-request-uri", "tel:" + strMemberId );           // §6.3.3.1.11 7) 대상 사용자 MCPTT ID
-        s += _InfoElem( "mcptt-calling-user-id", "tel:" + strCallingUserId );  // §12.1.3.2 2)c)ii) · §12.1.2.1 9)
-        s += _InfoElem( "mcptt-calling-group-id", "tel:" + strGroupId );       // §6.3.3.1.11 8)
-        if ( bEmergencyCancel ) s += _InfoElem( "emergency-ind", "false" );    // §12.1.3.2 2)d)iv)E)
-        s += _InfoElem( "alert-ind", bActivate ? "true" : "false" );           // §6.3.3.1.12 1) · §12.1.3.2 2)c)iv)
-        if ( !strOriginatedBy.empty() ) s += _InfoElem( "originated-by", strOriginatedBy );  // §12.1.3.2 2)c)iii)
+        s += McpttInfoUri( "mcptt-request-uri", "tel:" + strMemberId );           // §6.3.3.1.11 7) 대상 사용자 MCPTT ID
+        s += McpttInfoUri( "mcptt-calling-user-id", "tel:" + strCallingUserId );  // §12.1.3.2 2)c)ii) · §12.1.2.1 9)
+        s += McpttInfoUri( "mcptt-calling-group-id", "tel:" + strGroupId );       // §6.3.3.1.11 8)
+        if ( bEmergencyCancel ) s += McpttInfoBool( "emergency-ind", false );     // §12.1.3.2 2)d)iv)E)
+        s += McpttInfoBool( "alert-ind", bActivate );                             // §6.3.3.1.12 1) · §12.1.3.2 2)c)iv)
+        if ( !strOriginatedBy.empty() ) s += McpttInfoUri( "originated-by", strOriginatedBy );  // §12.1.3.2 2)c)iii)
         s += "  </mcptt-Params>\r\n"
              "</mcpttinfo>\r\n";
         return s;

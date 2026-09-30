@@ -208,7 +208,7 @@ processAdd()로 위임 — 기존 세션의 피어 주소만 갱신한다. 세�
 | floor_policy | - | `single`(기본)/`dual`/`multi` — 그룹 동시 발언 수 |
 | max_talkers | multi 시 O | 동시 발언 상한(2..8) |
 | floor_crypto | - | floor RTCP SRTCP 보호 키 `{alg,key,salt[,mki]}` (TS 33.180) — 그룹 공통 키. 유니캐스트는 멤버별 키(PTT_JOIN)가 정본 |
-| floor_timers | - | floor 타이머 override `{t1_end_rtp,t2_stop_talk,t3_grace,t8_revoke,t7_idle_resend,t20_grant_retx,t4_inactivity}` (초, `t4_inactivity` 0=미사용) |
+| floor_timers | - | floor 타이머·카운터 `{t1_end_rtp,t2_stop_talk,t3_grace,t8_revoke,t7_idle_resend,t20_grant_retx,t4_inactivity,c7_idle,c20_grant}` (초·횟수, `t4_inactivity` 0=미사용) — 정본 = service-config 문서(CSP 가 ADD·MODIFY 마다 실음), 미지정 = CMP 설정값(T*)·현재 값(T4·C7·C20) |
 
 **응답:** `ip`, `floor_port` (그룹 공유 Floor Control — `floor_control:"off"` 면 생략),
 `member_ports` (멤버별 전용 RTP 포트 맵 — sid → `{port, video_port}`)
@@ -532,8 +532,8 @@ handleFloorRequest(sessionId, ssrc, indicatorBits)
 > 멤버 `role`(chair/participant)이 PTT_JOIN/멤버문자열(`id:prio:role`)로 전달되어 선점 판정에 사용.
 > 화자 1명이 빠져도 잔여 화자가 있으면 IDLE 대신 **Floor Release Multi Talker**(0x0F)로 나머지
 > 참가자에게 알린다(마지막 화자가 빠질 때만 IDLE).
-> **타이머**(화자별 독립, 설정 `FloorIdleSec`/`FloorStopTalkSec`/`FloorRevokeGraceSec`/
-> `FloorRevokeRetxSec`, 그룹별 `floor_timers` 로 덮어쓰기): T1(4초) 무RTP=발언 완료 회수(Revoke
+> **타이머**(화자별 독립, 정본 = service-config 문서(TS 24.484 §8.4)를 CSP 가 그룹별 `floor_timers` 로 싣는다 — 설정
+> `FloorIdleSec`/`FloorStopTalkSec`/`FloorRevokeGraceSec`/`FloorRevokeRetxSec` 는 폴백): T1(4초) 무RTP=발언 완료 회수(Revoke
 > 없음) · T2(30초) 최대 발언시간 초과 → Revoke cause#2(긴급 tier 제외) · T3(3초) Revoke 후
 > Release 대기 유예(그 동안 미디어 유지) · T8(1초) 유예 중 Revoke 재전송.
 > 모든 floor 이벤트는 세션 시간버킷 `{record_dir}/{YYYY}/{MM}/{DD}/{HH}/floor.jsonl` 에 기록(GRANT/REVOKE/REJECT/RELEASE/IDLE + prio/preempt).

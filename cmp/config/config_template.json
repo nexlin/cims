@@ -302,7 +302,7 @@
           "min": 0,
           "max": 600,
           "restart": true,
-          "help": "TS 24.380 T1(End of RTP media) — 발언자의 마지막 RTP 후 이 초만큼 무수신이면 발언이 끝난 것으로 보고 floor 를 회수한다(Revoke 를 보내지 않고 잔여 화자에게 0x0F, 아무도 없으면 IDLE). 실발언 중에는 RTP 가 갱신하므로 끊기지 않는다. 규격 권고 기본 4초·최대 6초. 0=비활성."
+          "help": "TS 24.380 T1(End of RTP media) — 발언자의 마지막 RTP 후 이 초만큼 무수신이면 발언이 끝난 것으로 보고 floor 를 회수한다(Revoke 를 보내지 않고 잔여 화자에게 0x0F, 아무도 없으면 IDLE). 실발언 중에는 RTP 가 갱신하므로 끊기지 않는다. 규격 권고 기본 4초·최대 6초. 0=비활성. 폴백 값 — 정본은 CSC service-config(TS 24.484 §8.4, 설정 ServiceConfig.*)이고 CSP 가 그룹 세션마다 floor_timers 로 실어 이 값을 덮는다. CSP 가 문서를 못 받았을 때만 쓰인다."
         },
         {
           "key": "FloorStopTalkSec",
@@ -312,7 +312,7 @@
           "min": 0,
           "max": 600,
           "restart": true,
-          "help": "TS 24.380 T2(Stop talking) — 한 번에 말할 수 있는 최대 시간. Floor Granted 의 Duration 으로 단말에 광고하고, 초과하면 Floor Revoke(cause #2 Media burst too long) 후 회수한다. 긴급/임박 발언자는 제외. 규격 권고 기본 30초. 0=제한 없음."
+          "help": "TS 24.380 T2(Stop talking) — 한 번에 말할 수 있는 최대 시간. Floor Granted 의 Duration 으로 단말에 광고하고, 초과하면 Floor Revoke(cause #2 Media burst too long) 후 회수한다. 긴급/임박 발언자는 제외. 규격 권고 기본 30초. 0=제한 없음. 폴백 값 — 정본은 CSC service-config(TS 24.484 §8.4, 설정 ServiceConfig.*)이고 CSP 가 그룹 세션마다 floor_timers 로 실어 이 값을 덮는다. CSP 가 문서를 못 받았을 때만 쓰인다."
         },
         {
           "key": "FloorRevokeGraceSec",
@@ -322,7 +322,7 @@
           "min": 0,
           "max": 30,
           "restart": true,
-          "help": "TS 24.380 T3(Stop talking grace) — Floor Revoke 를 보낸 뒤 단말의 Floor Release 를 기다리는 유예. 그 동안 그 화자의 미디어는 계속 중계되고, 유예가 끝나면 강제 회수한다. 0=유예 없이 즉시 회수(audio cut-in)."
+          "help": "TS 24.380 T3(Stop talking grace) — Floor Revoke 를 보낸 뒤 단말의 Floor Release 를 기다리는 유예. 그 동안 그 화자의 미디어는 계속 중계되고, 유예가 끝나면 강제 회수한다. 0=유예 없이 즉시 회수(audio cut-in). 폴백 값 — 정본은 CSC service-config(TS 24.484 §8.4, 설정 ServiceConfig.*)이고 CSP 가 그룹 세션마다 floor_timers 로 실어 이 값을 덮는다. CSP 가 문서를 못 받았을 때만 쓰인다."
         },
         {
           "key": "FloorIdleResendSec",
@@ -332,7 +332,7 @@
           "min": 0,
           "max": 60,
           "restart": true,
-          "help": "TS 24.380 T7(Floor Idle) — 발언자가 없는 동안 Floor Idle 을 이 간격으로 최대 3회 재송신해 도달을 보장한다(무선 구간 유실 대비). 0=비활성(1회만 송신)."
+          "help": "TS 24.380 T7(Floor Idle) — 발언자가 없는 동안 Floor Idle 을 이 간격으로 최대 3회 재송신해 도달을 보장한다(무선 구간 유실 대비). 0=비활성(1회만 송신). 폴백 값 — 정본은 CSC service-config(TS 24.484 §8.4, 설정 ServiceConfig.*)이고 CSP 가 그룹 세션마다 floor_timers 로 실어 이 값을 덮는다. CSP 가 문서를 못 받았을 때만 쓰인다."
         },
         {
           "key": "FloorGrantRetxSec",
@@ -342,7 +342,7 @@
           "min": 1,
           "max": 10,
           "restart": true,
-          "help": "TS 24.380 T20(Floor Granted) — 대기열에서 승급한 화자에게 보낸 Floor Granted 가 유실되면 발언 기회가 통째로 사라지므로, 첫 RTP 가 올 때까지 이 간격으로 최대 3회 재송신한다."
+          "help": "TS 24.380 T20(Floor Granted) — 대기열에서 승급한 화자에게 보낸 Floor Granted 가 유실되면 발언 기회가 통째로 사라지므로, 첫 RTP 가 올 때까지 이 간격으로 최대 3회 재송신한다. 폴백 값 — 정본은 CSC service-config(TS 24.484 §8.4, 설정 ServiceConfig.*)이고 CSP 가 그룹 세션마다 floor_timers 로 실어 이 값을 덮는다. CSP 가 문서를 못 받았을 때만 쓰인다."
         },
         {
           "key": "FloorRevokeRetxSec",
@@ -352,7 +352,7 @@
           "min": 1,
           "max": 10,
           "restart": true,
-          "help": "TS 24.380 T8(Floor Revoke) — 회수 유예(T3) 중 Floor Release 가 올 때까지 Floor Revoke 를 이 간격으로 재전송한다."
+          "help": "TS 24.380 T8(Floor Revoke) — 회수 유예(T3) 중 Floor Release 가 올 때까지 Floor Revoke 를 이 간격으로 재전송한다. 폴백 값 — 정본은 CSC service-config(TS 24.484 §8.4, 설정 ServiceConfig.*)이고 CSP 가 그룹 세션마다 floor_timers 로 실어 이 값을 덮는다. CSP 가 문서를 못 받았을 때만 쓰인다."
         }
       ],
       "scope": "service"

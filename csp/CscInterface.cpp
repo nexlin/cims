@@ -12,6 +12,7 @@
 #include "CspPhoneGroup.h"
 #include "CspRole.h"
 #include "CspRouteMap.h"
+#include "CspServiceConfig.h"
 #include "CspServiceMap.h"
 #include "CspUser.h"
 #include "DbManager.h"
@@ -281,6 +282,7 @@ void CCscInterface::ProcessMessage( const std::string &strMsg, const struct sock
 
         // CSC 재기동 = 설정 재로드 계기 — 단말용 MCPTT 서비스 주소(xcap-root) 재취득.
         gclsCscEndpointCache.Refresh();
+        gclsCspServiceConfig.Refresh();  // service-config floor 값
 
         // Resync user map from DB — 사용자 캐시도 판정 근거다(EffectiveGroupOf 의 폴백이 pickup_group).
         //   실패를 흘려보내면 낡은 소속으로 스윕이 돌아 이미 그룹을 옮긴 사람을 «그대로» 로 본다.
@@ -310,8 +312,10 @@ void CCscInterface::ProcessMessage( const std::string &strMsg, const struct sock
         // 이 이벤트는 Phase B 이전의 HTTP pull 경로용으로 더 이상 수신하지 않음.
         CLog::Print( LOG_DEBUG, "CscInterface: ignoring deprecated event %s (use SIGUSR1 path)", strEvent.c_str() );
     } else if ( strEvent == "SERVICE_CONFIG_CHANGED" ) {
-        // 시스템 전역 정책(service-config) 변경 — cms 구독자 전원에게 재조회 통지.
-        //   CSP 는 이 문서를 소비하지 않으므로(서빙은 CSC XCAP) 캐시 갱신 없이 중계만 한다.
+        // service-config(TS 24.484 §8.4) 변경 — CSP 는 floor 제어 서버 파라미터를 다시 받고(다음 PTT_GROUP_ADD/MODIFY
+        // 부터
+        //   CMP 로 전달), cms 구독자 전원에게 재조회를 통지한다.
+        gclsCspServiceConfig.Refresh();
         extern void SendServiceConfigNotify( const std::string &etag );
         SendServiceConfigNotify( strEtag );
     } else if ( strEvent == "PHONE_GROUP_CHANGED" || strEvent == "DISPATCH_GROUP_CHANGED" ) {

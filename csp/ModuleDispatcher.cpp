@@ -511,14 +511,14 @@ bool CModuleDispatcher::RecvRequest( int iThreadId, CSipMessage *pclsMessage ) {
                 if ( !gclsGroupCallService.IsInCallUpgradeAllowed( strGid, strMid, iCond ) ) {
                     CSipMessage *pclsResp = pclsMessage->CreateResponseWithToTag( SIP_FORBIDDEN );
                     if ( pclsResp ) {
-                        pclsResp->m_strBody =
-                            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n"
-                            "<mcpttinfo xmlns=\"urn:3gpp:ns:mcpttInfo:1.0\">\r\n"
-                            "  <mcptt-Params>\r\n"
-                            "    <emergency-ind>false</emergency-ind>\r\n"
-                            "    <alert-ind>false</alert-ind>\r\n"
-                            "  </mcptt-Params>\r\n"
-                            "</mcpttinfo>\r\n";
+                        pclsResp->m_strBody = std::string(
+                                                  "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n"
+                                                  "<mcpttinfo xmlns=\"urn:3gpp:ns:mcpttInfo:1.0\">\r\n"
+                                                  "  <mcptt-Params>\r\n" ) +
+                                              McpttInfoBool( "emergency-ind", false ) +
+                                              McpttInfoBool( "alert-ind", false ) +
+                                              "  </mcptt-Params>\r\n"
+                                              "</mcpttinfo>\r\n";
                         pclsResp->m_iContentLength = (int)pclsResp->m_strBody.size();
                         pclsResp->m_clsContentType.Set( "application", "vnd.3gpp.mcptt-info+xml" );
                         gclsUserAgent.m_clsSipStack.SendSipMessage( pclsResp );

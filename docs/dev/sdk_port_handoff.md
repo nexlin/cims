@@ -124,6 +124,8 @@ C API·.NET = Windows 개발 환경**.
   rpImminentPeril/rpNormal`(r-value `mcpttp.15`)만 — 옛 `allowPrivateCall/allowEmergencyCall/allowAlert/allowTransmitRequest/maxAffiliationsN2` 는
   없다. `UserProfileDoc.allowPrivateCall` 추가. `Capabilities` 는 user profile 만으로 판정하고 `transmitRequest` 가 없다(N2 = user profile).
   서버(csc 0.2.133 이상)가 새 문서를 낸다 — 옛 코어는 루트를 못 찾아 해석 실패(-2)를 낸다. Kotlin 파사드는 반영, C API·.NET 은 노출할 때 이 구조로.
+- **mcptt-info 규격 인코딩(TS 24.379 Annex F.1, .48)** — 코어가 contentType 요소를 `type="Normal"` + `<mcpttURI>`/`<mcpttString>`/`<mcpttBoolean>`
+  자식으로 보내고, 수신은 두 형식을 다 읽는다(`localText`). 앱 코드 변경은 없다 — 서버는 csp 0.2.167 이상이어야 한다(옛 CSP 는 자식 형식을 못 읽는다).
 - **코어 동작 변화(Windows 앱에도 적용)** — ① `sendGroupSds` 가 `AccountConfig.maxSdsCplaneBytes` 를 넘으면 MSRP 로 가고 최종 결과가
   `onRequestResult` method `MSRP` 로 온다(token 상관은 그대로 — method 로 MESSAGE 를 거르는 앱은 고쳐야 한다) ② `setRxLevel` 이 오디오가 없어도
   성공하고 값을 기억한다(앱의 재적용 루프는 필요 없다) ③ 전이중 사설콜에서 `setMuted` 가 적용된다(예전에는 무시).

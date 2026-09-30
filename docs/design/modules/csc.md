@@ -27,7 +27,7 @@ CSC는 CIMS 시스템의 관리/MCPTT 서비스 서버로, REST API 기반 가�
 
 | 서버 | 포트 | 용도 |
 |------|------|------|
-| Admin API Server | 4421 (HTTPS) | 관리 콘솔 REST API + CSP 내부 API(`/internal/aka/av` AV 발급, `/internal/mcptt/endpoint` 단말용 XCAP root — `/api/v1` 밖, 게이트웨이 미프록시) |
+| Admin API Server | 4421 (HTTPS) | 관리 콘솔 REST API + CSP 내부 API(`/internal/aka/av` AV 발급, `/internal/mcptt/endpoint` 단말용 XCAP root, `/internal/mcptt/service-config` MCPTT 서버용 service-config 문서(TS 24.484 Annex A.2.3) — `/api/v1` 밖, 게이트웨이 미프록시) |
 | MCPTT Service Server | 4430 (HTTPS) | 단말용 IdMS/GMS/CMS/KMS |
 
 **단말이 도달하는 공개 주소의 정본** = `McpttServer.PublicUrl`. 단말에 주소를 알려주는 모든

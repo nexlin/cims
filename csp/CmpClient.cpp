@@ -17,6 +17,7 @@
 #include <vector>
 
 #include "CallMap.h"
+#include "CspServiceConfig.h"
 #include "GroupCallService.h"
 #include "Log.h"
 #include "SimpleJson.h"
@@ -33,6 +34,35 @@ static unsigned int SeedTransId() {
     struct timeval tv;
     gettimeofday( &tv, NULL );
     return (unsigned int)( ( (unsigned long long)tv.tv_sec * 1000ULL + tv.tv_usec / 1000 ) & 0x3FFFFFFF ) | 1;
+}
+
+/**
+ * PTT_GROUP_ADD/MODIFY 의 floor_timers (cmp_media_api.md §7.7) — floor 제어 서버 파라미터의 정본은 service-config 문서
+ * (TS 24.484 §8.4 on-network transmit-time·fc-timers-counters, CSC)이고 CSP 가 받아 둔 값을 싣는다. 문서에 없는 값은
+ * 싣지 않아 CMP 설정값을 쓴다. T4 는 그룹 hang-timer(-1 = 미전송). CMP 범위(T8·T20 1~10 s, C7·C20 1~10)는 여기서
+ * 맞춘다.
+ */
+static void AppendFloorTimers( SimpleJson::JsonNode &req, int iT4Sec ) {
+    const CspFloorParams f = gclsCspServiceConfig.GetFloorParams();
+    SimpleJson::JsonNode ft;
+    bool bAny = false;
+    auto put = [&]( const char *pszKey, int v, int lo, int hi ) {
+        if ( v < 0 ) return;
+        ft.Set( pszKey, v < lo ? lo : ( v > hi ? hi : v ) );
+        bAny = true;
+    };
+    if ( f.bValid ) {
+        put( "t1_end_rtp", f.iT1Sec, 0, 600 );
+        put( "t2_stop_talk", f.iT2Sec, 0, 600 );
+        put( "t3_grace", f.iT3Sec, 0, 30 );
+        put( "t7_idle_resend", f.iT7Sec, 0, 60 );
+        put( "t8_revoke", f.iT8Sec, 1, 10 );
+        put( "t20_grant_retx", f.iT20Sec, 1, 10 );
+        put( "c7_idle", f.iC7, 1, 10 );
+        put( "c20_grant", f.iC20, 1, 10 );
+    }
+    put( "t4_inactivity", iT4Sec, 0, 3600 );
+    if ( bAny ) req.Set( "floor_timers", ft );
 }
 
 // floor 정책 필드를 PTT_GROUP_ADD/MODIFY payload 에 싣는다 (docs/api/cmp_media_api.md §7.1/§7.7).
@@ -747,11 +777,7 @@ bool CCmpClient::AddGroup( const std::string &strGroupId, const std::vector<std:
     if ( !strGroupType.empty() ) req.Set( "group_type", strGroupType );
     if ( !clsSession.strInitiator.empty() ) req.Set( "initiator_id", clsSession.strInitiator );
     if ( clsSession.bBroadcast ) req.Set( "broadcast", 1 );
-    if ( clsSession.iT4Sec >= 0 ) {
-        SimpleJson::JsonNode ft;
-        ft.Set( "t4_inactivity", clsSession.iT4Sec );
-        req.Set( "floor_timers", ft );
-    }
+    AppendFloorTimers( req, clsSession.iT4Sec );
     // 동시 발언 정책 — floor 절차는 CMP↔UE in-band 라 세션 생성 시 1회 전달로 끝난다.
     //   private(2인 세션)은 동시성 축을 해석하지 않으므로(계약 §A.1) 미전송.
     if ( strGroupType != "private" ) SetFloorPolicy( req, strGroupId, strFloorPolicy, iMaxTalkers );
@@ -822,12 +848,9 @@ bool CCmpClient::ModifyGroup( const std::string &strGroupId, const std::vector<s
     req.Set( "members", ssMembers.str() );
     // 정책 변경 반영 — 정원이 줄면 CMP 가 초과 화자를 Revoke 해 상태를 정책에 맞춘다.
     SetFloorPolicy( req, strGroupId, strFloorPolicy, iMaxTalkers );
-    // 그룹 hang-timer(T4) 변경 반영 — 미전송이면 CMP 가 현재 값을 유지한다.
-    if ( iT4Sec >= 0 ) {
-        SimpleJson::JsonNode ft;
-        ft.Set( "t4_inactivity", iT4Sec );
-        req.Set( "floor_timers", ft );
-    }
+    // floor 타이머 — service-config 값 + 그룹 hang-timer(T4, 미전송이면 CMP 가 현재 값을 유지). MODIFY 도 ADD 처럼
+    //   미지정 필드를 CMP 설정값으로 되돌리므로 매번 전체를 싣는다.
+    AppendFloorTimers( req, iT4Sec );
 
     std::string strResp;
     if ( !SendRequestAndWait( strGroupId, req, strResp ) ) return false;

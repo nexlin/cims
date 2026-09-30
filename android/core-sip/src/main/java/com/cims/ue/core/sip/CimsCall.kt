@@ -184,7 +184,8 @@ class CimsCall : Call {
             //   403 + mcptt-info(emergency-ind=false)로 거절. 재-INVITE 거절은 통화를 끊지
             //   않으므로(CallState 불변) 이 tsx 원문에서만 관측된다. 초기 INVITE 403 은 본문이
             //   없어 여기 매치되지 않는다(Disconnected 경로가 처리).
-            if (msg.startsWith("SIP/2.0 403") && msg.contains("emergency-ind>false")) {
+            if (msg.startsWith("SIP/2.0 403") &&
+                Regex("<(?:\\w+:)?emergency-ind(?=[\\s>])[^>]*>\\s*(?:<(?:\\w+:)?mcpttBoolean>\\s*)?false", RegexOption.IGNORE_CASE).containsMatchIn(msg)) {
                 owner.onEmergencyUpgradeDenied(id)
             }
             // 세션 긴급 상태 재광고 (TS 24.379 §6.3.3.1.15/16) — CSP 가 in-call 상향/하향 시
@@ -193,9 +194,9 @@ class CimsCall : Call {
             //   "SIP/2.0 200" = 내 INVITE 의 응답(UAC). 403 재광고(위)와 겹치지 않는다.
             if ((msg.startsWith("INVITE ") || msg.startsWith("SIP/2.0 200")) && msg.contains("mcptt-info")) {
                 when {
-                    Regex("<emergency-ind>\\s*true", RegexOption.IGNORE_CASE).containsMatchIn(msg) ->
+                    Regex("<(?:\\w+:)?emergency-ind(?=[\\s>])[^>]*>\\s*(?:<(?:\\w+:)?mcpttBoolean>\\s*)?true", RegexOption.IGNORE_CASE).containsMatchIn(msg) ->
                         owner.onSessionEmergencyAdvertised(id, true)
-                    Regex("<emergency-ind>\\s*false", RegexOption.IGNORE_CASE).containsMatchIn(msg) ->
+                    Regex("<(?:\\w+:)?emergency-ind(?=[\\s>])[^>]*>\\s*(?:<(?:\\w+:)?mcpttBoolean>\\s*)?false", RegexOption.IGNORE_CASE).containsMatchIn(msg) ->
                         owner.onSessionEmergencyAdvertised(id, false)
                 }
             }

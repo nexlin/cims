@@ -175,8 +175,13 @@ mcptt-request-uri, mcptt-calling-user-id, (alert) originated-user-id, location(�
   헤더 = `Accept-Contact`(g.3gpp.mcptt · ICSI mcptt, require;explicit)·`P-Asserted-Service-Id`(ICSI mcptt). 위치 정보 파트
   (`application/vnd.3gpp.mcptt-location-info+xml`)가 있으면 multipart 로 옮긴다(§6.3.3.1.12 4)). 등록(온라인) 멤버에게만
   전달된다 — 저장 후 전달(경보 보류함)은 없다.
-- **mcptt-info 해석** = `McpttElemValue`(csp/McpttInfo.h) — Annex F.1 contentType 요소의 자식 형식(`<mcpttURI>`·`<mcpttBoolean>`)과
-  값 직접 기재 형식을 둘 다 읽는다. 요소 이름은 경계까지 맞춘다(`<alert-ind-rcvd>` 는 `<alert-ind>` 가 아니다).
+- **mcptt-info 인코딩(Annex F.1)** — contentType 요소는 `type="Normal"` + 자식으로 싣는다: URI 류(`mcptt-request-uri`·
+  `mcptt-calling-user-id`·`mcptt-called-party-id`·`mcptt-calling-group-id`·`originated-by`·`associated-group-id`) = `<mcpttURI>`,
+  `mcptt-client-id`·`mcptt-access-token` = `<mcpttString>`, 지시자(`emergency-ind`·`alert-ind`·`imminentperil-ind`·`alert-ind-rcvd`) =
+  `<mcpttBoolean>`. `session-type`·`broadcast-ind`·`mc-org` 는 단순 값. 요소 순서는 mcptt-ParamsType sequence. 생성 = CSP
+  `McpttInfoUri/String/Bool/Value`(csp/McpttInfo.h) · SDK `infoUri/infoString/infoBool`(mcptt_xml.cpp) · 옛 ptt-client `McpttXml` · cspsim.
+  해석 = CSP `McpttElemValue` · SDK `localText` · ptt-client DOM · android core-sip 정규식 · cspsim `ExtractXmlTag` — 모두 자식 형식과 값 직접
+  기재(옛 송신자)를 둘 다 읽고, 요소 이름을 경계까지 맞춘다(`<alert-ind-rcvd>` 는 `<alert-ind>` 가 아니다).
 - `CallDir`에 `alert_sent`/`alert_cancelled` 이벤트 기록(그룹 events.jsonl).
 - **단말(ptt-client)**: SOS 개시가 규격 시퀀스대로 **경보 MESSAGE 를 먼저** 보내고 긴급콜을
   개시한다(`McpttXml.alertInfo` + `PttController.sendAlert` — 호 성립과 무관하게 신원·그룹 전파).
@@ -226,7 +231,6 @@ mcptt-request-uri, mcptt-calling-user-id, (alert) originated-user-id, location(�
 
   | 항목 | 규격(TS 24.379 / 24.484) | 현행 | 해소 방향 |
   |---|---|---|---|
-  | mcptt-info contentType 인코딩 | `mcptt-request-uri`·`alert-ind` 등은 자식 `<mcpttURI>`/`<mcpttString>`/`<mcpttBoolean>` 에 값(Annex F.1 `contentType`) | CSP·SDK·ptt-client 가 값을 요소에 바로 적는다. CSP 수신은 두 형식을 다 읽고, SDK(`localText`)는 직접 기재만 읽는다 | ① SDK·앱 수신 파서가 두 형식을 읽게 → ② 단말 갱신 뒤 송신 전환(CSP 는 `PttAsModule.cpp` `_InfoElem` 한 곳) |
   | 경보 통지 `<mc-org>` | 제어 기능이 발신자 user profile 의 `<MissionCriticalOrganization>` 을 싣는다(§6.3.3.1.12 2)·3)) | 싣지 않는다 — 값의 정본이 CSC 사이트 설정(`UserProfile.MissionCriticalOrganization`)이라 CSP 에 없다 | CSC→CSP 전달 경로(설정 캐시)를 둔 뒤 |
   | 경보 수신 확인 | 제어 기능이 발신 단말에 `<alert-ind-rcvd>` MESSAGE(§6.3.3.1.20) | 보내지 않는다(200 OK 만) | 후속 |
   | 경보 취소 인가 | 미인가 취소는 403 + `<alert-ind>true`(§12.1.3.2 1)) | 취소는 인가 없이 통과 | 후속(allow-cancel-emergency-alert 축 분리와 함께) |

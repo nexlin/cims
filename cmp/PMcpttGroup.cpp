@@ -1123,7 +1123,7 @@ bool PMcpttGroup::setFloorCrypto(const std::string& alg, const std::string& key,
     return ok;
 }
 
-void PMcpttGroup::setFloorTimers(int t1, int t2, int t3, int t8, int t7, int t20, int t4) {
+void PMcpttGroup::setFloorTimers(int t1, int t2, int t3, int t8, int t7, int t20, int t4, int c7, int c20) {
     PAutoLock lock(_mutex);
     _t1EndRtpSec   = t1 >= 0 ? t1 : 0;
     _t2StopTalkSec = t2 >= 0 ? t2 : 0;
@@ -1132,13 +1132,15 @@ void PMcpttGroup::setFloorTimers(int t1, int t2, int t3, int t8, int t7, int t20
     _t7IdleSec     = t7 >= 0 ? t7 : 0;
     _t20GrantSec   = t20 > 0 ? t20 : 1;
     if (t4 >= 0) _t4InactSec = t4;   // 음수 = 미지정 — 현재 값 유지
+    if (c7 > 0) _c7IdleMax = c7;
+    if (c20 > 0) _c20GrantMax = c20;
     // 세션은 'G: Floor Idle' 로 시작한다 — 화자가 없고 아직 무장 전이면 T4 를 건다(§6.3.4.3.2).
     //   멤버 추가 ADD/MODIFY 는 이미 무장된 T4 를 다시 시작하지 않는다.
     if (_t4InactSec == 0) _t4SinceUsec = 0;
     else if (_talkers.empty() && _t4SinceUsec == 0) _t4SinceUsec = _nowUsec();
-    LOG_INFO("PMcpttGroup", "[%s] floor timers: T1=%ds T2=%ds T3=%ds T4=%ds T7=%ds T8=%ds T20=%ds",
+    LOG_INFO("PMcpttGroup", "[%s] floor timers: T1=%ds T2=%ds T3=%ds T4=%ds T7=%ds T8=%ds T20=%ds C7=%d C20=%d",
              _groupId.c_str(), _t1EndRtpSec, _t2StopTalkSec, _t3GraceSec, _t4InactSec,
-             _t7IdleSec, _t8RevokeSec, _t20GrantSec);
+             _t7IdleSec, _t8RevokeSec, _t20GrantSec, _c7IdleMax, _c20GrantMax);
 }
 
 bool PMcpttGroup::setMemberCrypto(const std::string& sessionId, const std::string& alg,
@@ -1268,7 +1270,7 @@ void PMcpttGroup::_grantFloorTo(const std::string& sessionId, unsigned int ssrc,
     // 대기열에서 승급한 화자는 PTT 를 누르고 있지 않을 수 있어 Granted 유실이 곧 발언 기회
     //   상실이다 — 첫 RTP 가 올 때까지 T20 으로 재송신한다(§6.3.4.4.2-2).
     if (fromQueue && _t20GrantSec > 0) {
-        tk.grantRetxLeft = kGrantResendMax;
+        tk.grantRetxLeft = _c20GrantMax;
         tk.grantSentUsec = tk.grantUsec;
     }
     _talkers.push_back(tk);
@@ -1668,7 +1670,7 @@ void PMcpttGroup::_advanceFloorOrIdle() {
         broadcastFloorStatus(FLOOR_IDLE, 0, "");
         // T7(Floor Idle) 무장 — 설정돼 있으면 C7 회까지 재송신해 도달을 보장한다(§6.3.4.3.4).
         _idleSinceUsec = _nowUsec();
-        _idleResendLeft = (_t7IdleSec > 0) ? kIdleResendMax : 0;
+        _idleResendLeft = (_t7IdleSec > 0) ? _c7IdleMax : 0;
         // T4(Inactivity) 무장 — 'G: Floor Idle' 진입 (§6.3.4.3.2).
         _t4SinceUsec = (_t4InactSec > 0) ? _idleSinceUsec : 0;
     }

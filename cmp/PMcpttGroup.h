@@ -350,7 +350,8 @@ public:
     //   t20: Floor Granted     — 큐에서 승급한 화자에게 Granted 재송신 간격(첫 RTP 까지, C20=3회).
     //   t4: Inactivity         — 'G: Floor Idle' 에 머문 시간 한도(0=미사용, 음수=현재 값 유지). 만료 시 inactivity 콜백 1회 후
     //                            재무장한다 — 세션 해제 여부는 CSP 정책(§6.3.4.3.5).
-    void setFloorTimers(int t1, int t2, int t3, int t8, int t7 = 0, int t20 = 1, int t4 = -1);
+    //   c7/c20: Floor Idle / Floor Granted 재송신 상한(§6.3.4.3.4 / §6.3.4.4.9). 음수 = 현재 값 유지.
+    void setFloorTimers(int t1, int t2, int t3, int t8, int t7 = 0, int t20 = 1, int t4 = -1, int c7 = -1, int c20 = -1);
 
     // Floor 타이머 점검 (T1/T2/T3/T8) — PCmpServer::timeoutLoop 가 1초마다 호출한다.
     //   발언자 집합이 바뀌었으면 true.
@@ -461,9 +462,9 @@ private:
     int  _t20GrantSec   = 1;        // T20 Floor Granted 재송신 간격 (큐 승급 화자 한정)
     int  _t4InactSec    = 0;        // T4 Inactivity (0=미사용 — CSP 가 그룹 hang-timer 로 채움)
     int64_t _t4SinceUsec = 0;       // T4 무장 시각 (0=정지 — 화자가 있다)
-    // C7/C20 재송신 상한 (§6.3.4.3.4 / §6.3.4.4.9) — 도달 보장용이라 작게 잡는다.
-    static const int kIdleResendMax  = 3;
-    static const int kGrantResendMax = 3;
+    // C7/C20 재송신 상한 (§6.3.4.3.4 / §6.3.4.4.9) — service-config fc-timers-counters(CSP 전달), 기본 3.
+    int _c7IdleMax  = 3;
+    int _c20GrantMax = 3;
     int64_t _idleSinceUsec = 0;     // 마지막 Floor Idle 송신 시각 (0=Idle 상태 아님)
     int     _idleResendLeft = 0;    // 남은 Floor Idle 재송신 횟수 (C7)
 

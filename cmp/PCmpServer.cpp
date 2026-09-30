@@ -1718,11 +1718,12 @@ void PCmpServer::processAddGroup(const SimpleJson::JsonNode& payload, const std:
     std::string floorCtlStr = payload.GetString("floor_control");
     std::string floorPolStr = payload.GetString("floor_policy");
     int maxTalkers = (int)payload.GetInt("max_talkers", 0);
-    // floor 타이머 (TS 24.380 §11.1.3) — 그룹 문서(CMS)에서 온 값을 CSP 가 실어 보낼 수 있다.
+    // floor 타이머·카운터 (TS 24.380 §11.1.3) — 정본은 service-config 문서(TS 24.484 §8.4, CSC)이고 CSP 가 실어 보낸다.
     //   미지정 필드는 CMP 설정값(FloorIdleSec/FloorStopTalkSec/…)을 쓴다.
     int t1Sec = _floorIdleSec, t2Sec = _floorStopTalkSec;
     int t3Sec = _floorRevokeGraceSec, t8Sec = _floorRevokeRetxSec;
     int t7Sec = _floorIdleResendSec, t20Sec = _floorGrantRetxSec;
+    int c7 = -1, c20 = -1;  // C7(Floor Idle)·C20(Floor Granted) 재송신 상한 — 미지정(-1)이면 그룹의 현재 값 유지(새 그룹 3)
     int t4Sec = -1;  // T4 Inactivity — CMP 기본값 없음. 미지정(-1)이면 그룹의 현재 값 유지(새 그룹은 0=미사용).
                      //   CSP 가 그룹 hang-timer 로 채운다 — MODIFY 가 싣지 않아도 T4 가 꺼지지 않게 한다.
     std::string timerErr;
@@ -1736,6 +1737,8 @@ void PCmpServer::processAddGroup(const SimpleJson::JsonNode& payload, const std:
             t7Sec = (int)ft.GetInt("t7_idle_resend", t7Sec);
             t20Sec = (int)ft.GetInt("t20_grant_retx", t20Sec);
             t4Sec = (int)ft.GetInt("t4_inactivity", t4Sec);
+            c7 = (int)ft.GetInt("c7_idle", c7);
+            c20 = (int)ft.GetInt("c20_grant", c20);
             if (t1Sec < 0 || t1Sec > 600)      timerErr = "floor_timers.t1_end_rtp out of range (0..600)";
             else if (t2Sec < 0 || t2Sec > 600) timerErr = "floor_timers.t2_stop_talk out of range (0..600)";
             else if (t3Sec < 0 || t3Sec > 30)  timerErr = "floor_timers.t3_grace out of range (0..30)";
@@ -1744,6 +1747,10 @@ void PCmpServer::processAddGroup(const SimpleJson::JsonNode& payload, const std:
             else if (t20Sec < 1 || t20Sec > 10) timerErr = "floor_timers.t20_grant_retx out of range (1..10)";
             else if (ft.Has("t4_inactivity") && (t4Sec < 0 || t4Sec > 3600))
                 timerErr = "floor_timers.t4_inactivity out of range (0..3600)";
+            else if (ft.Has("c7_idle") && (c7 < 1 || c7 > 10))
+                timerErr = "floor_timers.c7_idle out of range (1..10)";
+            else if (ft.Has("c20_grant") && (c20 < 1 || c20 > 10))
+                timerErr = "floor_timers.c20_grant out of range (1..10)";
         }
     }
     // 일제 통화(broadcast group call) = 호 속성 `broadcast`(0/1) — 그룹 종류(group_type)와 직교한다
@@ -1888,7 +1895,7 @@ void PCmpServer::processAddGroup(const SimpleJson::JsonNode& payload, const std:
              group->setPttSession(pttSession);
              // floor 정책은 녹취 초기화(슬롯 트랙 수)·멤버 합류보다 먼저 확정한다.
              group->setBroadcastSession(broadcast, initiator);
-             group->setFloorTimers(t1Sec, t2Sec, t3Sec, t8Sec, t7Sec, t20Sec, t4Sec);
+             group->setFloorTimers(t1Sec, t2Sec, t3Sec, t8Sec, t7Sec, t20Sec, t4Sec, c7, c20);
              group->setFloorPolicy(floorControl, floorPolicy, maxTalkers, privateCall);
 
              // CSP가 전달한 record_dir이 있으면 해당 경로에 녹취
@@ -1982,7 +1989,7 @@ void PCmpServer::processAddGroup(const SimpleJson::JsonNode& payload, const std:
             group->updateTiers(tiers);
         }
 
-        group->setFloorTimers(t1Sec, t2Sec, t3Sec, t8Sec, t7Sec, t20Sec, t4Sec);
+        group->setFloorTimers(t1Sec, t2Sec, t3Sec, t8Sec, t7Sec, t20Sec, t4Sec, c7, c20);
         group->setFloorPolicy(floorControl, floorPolicy, maxTalkers, privateCall);
         // floor SRTCP 키 — 재키잉(rekey)도 같은 필드의 MODIFY 로 반영된다.
         if (haveCrypto) {

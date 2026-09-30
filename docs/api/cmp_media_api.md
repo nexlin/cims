@@ -523,7 +523,7 @@ member 키 `(node, session_id)`.
 | `floor_control` | - | `on`(기본)/`off`. `off` = floor 중재 없음(full-duplex) — `floor_port` 미광고, floor RTCP 미처리 |
 | `floor_policy` | - | `single`(기본)/`dual`/`multi` — floor 有 **그룹**의 동시 발언 수([§7.7](#77-floor-정책--동시-발언과-private-call)). `private` 은 해석하지 않는다 |
 | `max_talkers` | `multi` 시 O | 동시 발언 상한(2..8). `multi` 인데 누락/1 이하, 또는 8 초과면 `BAD_REQUEST` |
-| `floor_timers` | - | 그룹별 floor 타이머(초) `{t1_end_rtp, t2_stop_talk, t3_grace, t8_revoke, t7_idle_resend, t20_grant_retx, t4_inactivity}` — 미지정 필드는 CMP 설정값. 범위 밖이면 `BAD_REQUEST` ([§7.7](#77-floor-정책--동시-발언과-private-call)) |
+| `floor_timers` | - | 그룹별 floor 타이머(초)·카운터 `{t1_end_rtp, t2_stop_talk, t3_grace, t8_revoke, t7_idle_resend, t20_grant_retx, t4_inactivity, c7_idle, c20_grant}` — CSP 가 service-config 문서(TS 24.484 §8.4) 값을 ADD·MODIFY 마다 싣는다. 미지정 필드는 CMP 설정값(T*)·그룹의 현재 값(T4·C7·C20). 범위 밖이면 `BAD_REQUEST` ([§7.7](#77-floor-정책--동시-발언과-private-call)) |
 | `floor_crypto` | - | floor RTCP 보호 키 `{alg,key,salt[,mki]}` ([§7.8](#78-floor_crypto--floor-rtcp-보호-ts-33180)) |
 | `record_dir` | - | 녹취 그룹 base 디렉토리 (있으면 녹취 시작) |
 | `session_dir` | - | 세션 디렉터리 이름 `S{yyyymmddHHMMSSuuuuuu}_{n}` — 기록 자리는 `record_dir/{YYYY}/{MM}/{DD}/{HH}/{session_dir}/`. 기록 단위가 세션이라 같은 시간대의 다음 통화가 앞 통화에 섞이지 않는다. 미전달 시 시간버킷 직행(구 동작). 기존 그룹에 **다른** 이름이 오면(CSP 가 REMOVE 없이 재기동해 남은 컨텍스트를 새 세션이 이어 쓰는 경우) 진행 중 세그먼트를 마감하고 기록 자리를 그 세션으로 옮긴다 — 같은 이름(멤버 추가 ADD)은 무동작. 세그먼트 `seq` 는 **세션 단위 단조증가** — 세션이 시간버킷을 넘어가도 리셋하지 않는다 ([recording.md §3.3](../design/features/recording.md)) |
@@ -654,8 +654,10 @@ in-band(RTCP APP "MCPT")로만 진행한다 — CSP 는 floor 루프에 들어�
   (SSRC + User ID), 잔여 화자가 있는 동안 Floor Idle 은 보내지 않는다. 마지막 화자가 빠질 때만
   Floor Idle. 0x0F 는 **서버→단말 통지 전용**이라 단말이 이 subtype 을 보내면 무시한다
   (발언 해제는 Floor Release `0x04`/`0x14`).
-- 타이머는 **화자별로 독립** 판정한다. 값은 CMP 설정이 기본이고 `floor_timers` 로 그룹마다
-  덮어쓴다(TS 24.380 §11.1.3):
+- 타이머는 **화자별로 독립** 판정한다. 값의 정본은 service-config 문서(TS 24.484 §8.4 on-network `<transmit-time><time-limit>`·
+  `<fc-timers-counters>`, CSC 설정 `ServiceConfig.*`)다 — CSP 가 문서를 받아(Annex A.2.3 — `/internal/mcptt/service-config`, 기동·SIGUSR1·
+  CSC_RESTART·SERVICE_CONFIG_CHANGED) `floor_timers` 로 싣는다. CMP 설정은 CSP 가 문서를 못 받았을 때의 폴백이다(TS 24.380 §11.1.3).
+  CMP 는 초 단위다 — 문서의 1 s 미만은 버린다:
 
 | 타이머 | 필드 / 설정 | 기본 | 만료 시 |
 |---|---|---|---|
@@ -663,8 +665,9 @@ in-band(RTCP APP "MCPT")로만 진행한다 — CSP 는 floor 루프에 들어�
 | T2 Stop talking | `t2_stop_talk` / `FloorStopTalkSec` | 30초 | Floor Revoke cause **#2**(Media burst too long). Granted 의 Duration 으로 광고. 긴급/임박 화자는 제외. 0=무제한 |
 | T3 Stop talking grace | `t3_grace` / `FloorRevokeGraceSec` | 3초 | Revoke 후 Release 대기 유예 — 그 동안 미디어 계속 중계, 만료 시 강제 회수. 0=즉시 |
 | T8 Floor Revoke | `t8_revoke` / `FloorRevokeRetxSec` | 1초 | 유예 중 Revoke 재전송 간격 |
-| T7 Floor Idle | `t7_idle_resend` / `FloorIdleResendSec` | 0(비활성) | 발언자 없는 동안 Floor Idle 재송신(최대 3회) |
-| T20 Floor Granted | `t20_grant_retx` / `FloorGrantRetxSec` | 1초 | **큐 승급** 화자에게 첫 RTP 까지 Granted 재송신(최대 3회) |
+| (문서 매핑) | T1 = `T1-end-of-rtp-media` · T2 = `transmit-time/time-limit` · T3 = `T3-stop-talking-grace` · T7 = `T7-floor-idle` · T8 = `T8-floor-revoke` · T20 = `T20-floor-granted` · C7 = `C7-floor-idle` · C20 = `C20-floor-granted` | | |
+| T7 Floor Idle | `t7_idle_resend` / `FloorIdleResendSec` | 0(비활성) | 발언자 없는 동안 Floor Idle 재송신(최대 C7 회 — `c7_idle` 1..10, 기본 3) |
+| T20 Floor Granted | `t20_grant_retx` / `FloorGrantRetxSec` | 1초 | **큐 승급** 화자에게 첫 RTP 까지 Granted 재송신(최대 C20 회 — `c20_grant` 1..10, 기본 3) |
 | T4 Inactivity | `t4_inactivity` / — (0..3600) | 0(미사용) — 미지정 ADD/MODIFY 는 그룹의 현재 값 유지 | 'G: Floor Idle' 에 머문 시간 한도(세션 시작·Floor Idle 진입 시 무장, Granted 시 정지). 만료 = `PTT_FLOOR_INACTIVITY` 이벤트 1회 후 재무장 — 세션을 해제할지는 CSP 정책(TS 24.380 §6.3.4.3.5, TS 24.379 §6.3.8.1). 값은 CSP 가 그룹 문서 `<on-network-hang-timer>` 로 채운다(편성 그룹 호만 — chat·즉석 세션은 0) |
 
 - **선점은 즉시 교체가 아니다**: 최약 화자에게 Revoke → 요청자는 **대기열 맨 앞**에서 대기

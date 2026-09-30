@@ -55,6 +55,7 @@ CCallDir gclsCallDir;
 #include "CspRuleEvaluator.h"
 #include "CspServerDefine.h"
 #include "CspServerVersion.h"
+#include "CspServiceConfig.h"
 #include "CspServiceMap.h"
 #include "CspTrunkRegistrar.h"
 #include "CspUser.h"
@@ -483,6 +484,9 @@ int ServiceMain() {
     // 단말용 MCPTT 서비스 주소(xcap-root) 를 CSC 에서 취득 — 첫 NOTIFY 전에 확보.
     //   실패해도 기동은 계속한다(유도값 사용 + ERROR 로그, 이후 SIGUSR1/CSC_RESTART 에 재시도).
     gclsCscEndpointCache.Refresh();
+    // service-config(TS 24.484 §8.4) — floor 제어 서버 파라미터의 정본을 CSC 에서 받는다(Annex A.2.3). 실패하면 CMP
+    // 설정값.
+    gclsCspServiceConfig.Refresh();
     // IMS AKA+IPsec (P4) — 잔류 SA 회수 + 자기점검. IPSEC 접속점이 없거나 특권이 없으면 ipsec-3gpp 미제시.
     gclsIpsecSaSetMap.Init();
     // identity(Via/Contact) 송신 fallback 포트를 primary 포트로 보정 (스택 m_clsSetup 은 복사본이라
@@ -537,6 +541,7 @@ int ServiceMain() {
             gclsListenerManager.Sync();
             gclsListenerManager.CheckCertExpiry();  // 경로 변경 반영 (A-PRC-009)
             gclsCscEndpointCache.Refresh();         // CSC 주소/PublicUrl 변경 추종
+            gclsCspServiceConfig.Refresh();         // service-config floor 값 재취득
             // R6 (2026-06-08): 무중단 포트 변경 — primary 포트가 바뀌었으면 identity fallback 도 추종.
             {
                 LocalNodeInfo pri = gclsLocalNodeMap.GetPrimary();

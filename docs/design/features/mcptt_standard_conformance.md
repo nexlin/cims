@@ -476,10 +476,13 @@ REGISTER/SUBSCRIBE/NOTIFY 의 헤더·본문을 상용 IMS 캡처 기준으로 �
   `<service-configuration-params domain=<PTT 도메인>>` › `<common><broadcast-group>`(계층 수) · `<on-network>`
   (`<fc-timers-counters>` 17 요소 필수 · `<emergency-/imminent-peril-/normal-resource-priority>` 필수, 각 namespace·priority).
   값의 정본은 두 곳 — DB `mcptt_service_config` **단일 행**(id=1: N2 = user-profile `MaxAffiliationsN2` 기본값·계층 수, 관리 API
-  `GET/PUT /api/v1/mcptt/service-config`·콘솔 **구성 > MCPTT 정책**)과 CSC 설정 `ServiceConfig.*`(floor 타이머·카운터 — CMP
-  `Floor*Sec` 과 같은 값, Resource-Priority — RFC 8101 `mcpttp` 15/8/0 = CSP fan-out). `get_service_config_xml` 이 둘을 산출한다
-  (내용 파생 ETag). **인가 요소는 없다** — 1:1·긴급·경보·그룹 생성 인가는 `user-profile` 의 `ruleset`·그룹 문서가 규격 자리다.
-  floor 타이머의 단일 정의(CSP 가 문서 값을 `PTT_JOIN.floor_timers` 로 CMP 에 전달)는 후속이다 — 지금은 두 설정을 같게 둔다.
+  `GET/PUT /api/v1/mcptt/service-config`·콘솔 **구성 > MCPTT 정책**)과 CSC 설정 `ServiceConfig.*`(`<transmit-time><time-limit>`·
+  `<fc-timers-counters>` — floor 제어 서버 파라미터, Resource-Priority — RFC 8101 `mcpttp` 15/8/0 = CSP fan-out). `get_service_config_xml`
+  이 둘을 산출한다(내용 파생 ETag). **인가 요소는 없다** — 1:1·긴급·경보·그룹 생성 인가는 `user-profile` 의 `ruleset`·그룹 문서가 규격 자리다.
+  **floor 파라미터는 이 문서가 정본이다** — MCPTT 서버(CSP)가 문서를 CMS(CSC)에서 받아(Annex A.2.3, 내부 API
+  `GET /internal/mcptt/service-config` — 기동·SIGUSR1·CSC_RESTART·SERVICE_CONFIG_CHANGED, `CCspServiceConfig`) 그룹 세션의
+  `PTT_GROUP_ADD/MODIFY.floor_timers`(T1·T2·T3·T7·T8·T20·C7·C20)로 CMP 에 싣는다. CMP 설정 `Floor*Sec` 는 문서를 못 받았을 때의 폴백이다.
+  CSC 설정 재적재(SIGUSR1)로 문서가 바뀌어도 `SERVICE_CONFIG_CHANGED` 가 나간다.
   전역 변경은 CSC 가 `SERVICE_CONFIG_CHANGED` 를 발행하고 CSP 가 cms 구독자 **전원**에게
   xcap-diff NOTIFY 를 push 한다(`GetSubscriptionsByEvent("cms")` — 전역 문서라 사용자/자원 키가
   없는 유일한 전체 조회). 구독이 없는 단말은 목록 갱신·재로그인 계기의 재조회로 반영된다.

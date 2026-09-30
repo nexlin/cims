@@ -21,17 +21,30 @@ std::string xmlEscape(const std::string& s) {
     return o;
 }
 
+// mcptt-info contentType 요소(TS 24.379 Annex F.1 의미 2)) — 암호화하지 않으면 type="Normal" + 자식. URI 류 = <mcpttURI>,
+//   mcptt-client-id·mcptt-access-token = <mcpttString>, 지시자 = <mcpttBoolean>. session-type·broadcast-ind 는 단순 값.
+static std::string infoUri(const char* tag, const std::string& v) {
+    return std::string("    <") + tag + " type=\"Normal\"><mcpttURI>" + xmlEscape(v) + "</mcpttURI></" + tag + ">\n";
+}
+static std::string infoString(const char* tag, const std::string& v) {
+    return std::string("    <") + tag + " type=\"Normal\"><mcpttString>" + xmlEscape(v) + "</mcpttString></" + tag + ">\n";
+}
+static std::string infoBool(const char* tag, bool v) {
+    return std::string("    <") + tag + " type=\"Normal\"><mcpttBoolean>" + (v ? "true" : "false") + "</mcpttBoolean></" + tag + ">\n";
+}
+
 std::string mcpttInfo(const std::string& sessionType, const std::string& requestUri,
                       const std::string& callingUserId, const std::string& callingGroupId,
                       int emergency, int imminentPeril, bool broadcast) {
     std::string s = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n";
     s += std::string("<mcpttinfo xmlns=\"") + kNsMcpttInfo + "\">\n  <mcptt-Params>\n";
-    s += "    <session-type>" + sessionType + "</session-type>\n";
-    s += "    <mcptt-request-uri>" + xmlEscape(requestUri) + "</mcptt-request-uri>\n";
-    s += "    <mcptt-calling-user-id>" + xmlEscape(callingUserId) + "</mcptt-calling-user-id>\n";
-    s += "    <mcptt-calling-group-id>" + xmlEscape(callingGroupId) + "</mcptt-calling-group-id>\n";
-    if (emergency) s += std::string("    <emergency-ind>") + (emergency > 0 ? "true" : "false") + "</emergency-ind>\n";
-    if (imminentPeril) s += std::string("    <imminentperil-ind>") + (imminentPeril > 0 ? "true" : "false") + "</imminentperil-ind>\n";
+    // 요소 순서 = mcptt-ParamsType sequence(Annex F.1).
+    s += "    <session-type>" + xmlEscape(sessionType) + "</session-type>\n";
+    s += infoUri("mcptt-request-uri", requestUri);
+    s += infoUri("mcptt-calling-user-id", callingUserId);
+    s += infoUri("mcptt-calling-group-id", callingGroupId);
+    if (emergency) s += infoBool("emergency-ind", emergency > 0);
+    if (imminentPeril) s += infoBool("imminentperil-ind", imminentPeril > 0);
     if (broadcast) s += "    <broadcast-ind>true</broadcast-ind>\n";
     s += "  </mcptt-Params>\n</mcpttinfo>\n";
     return s;
@@ -41,12 +54,12 @@ std::string alertInfo(const std::string& groupUri, const std::string& callingUse
                       bool activate, const std::string& originatedBy, int emergency) {
     std::string s = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n";
     s += std::string("<mcpttinfo xmlns=\"") + kNsMcpttInfo + "\">\n  <mcptt-Params>\n";
-    s += "    <mcptt-request-uri>" + xmlEscape(groupUri) + "</mcptt-request-uri>\n";
-    if (!callingUserId.empty()) s += "    <mcptt-calling-user-id>" + xmlEscape(callingUserId) + "</mcptt-calling-user-id>\n";
-    if (emergency) s += std::string("    <emergency-ind>") + (emergency > 0 ? "true" : "false") + "</emergency-ind>\n";
-    s += std::string("    <alert-ind>") + (activate ? "true" : "false") + "</alert-ind>\n";
-    if (!originatedBy.empty()) s += "    <originated-by>" + xmlEscape(originatedBy) + "</originated-by>\n";
-    if (!clientId.empty()) s += "    <mcptt-client-id>" + xmlEscape(clientId) + "</mcptt-client-id>\n";
+    s += infoUri("mcptt-request-uri", groupUri);
+    if (!callingUserId.empty()) s += infoUri("mcptt-calling-user-id", callingUserId);
+    if (emergency) s += infoBool("emergency-ind", emergency > 0);
+    s += infoBool("alert-ind", activate);
+    if (!originatedBy.empty()) s += infoUri("originated-by", originatedBy);
+    if (!clientId.empty()) s += infoString("mcptt-client-id", clientId);
     s += "  </mcptt-Params>\n</mcpttinfo>\n";
     return s;
 }
@@ -84,6 +97,16 @@ static std::string elemText(const std::string& s, const std::string& name) {
     return b == std::string::npos ? std::string() : v.substr(b, t - b + 1);
 }
 
+static std::string xmlUnescape(std::string v) {
+    static const char* const kEnt[][2] = {{"&lt;", "<"}, {"&gt;", ">"}, {"&quot;", "\""}, {"&apos;", "'"}, {"&amp;", "&"}};
+    for (auto& e : kEnt) {
+        size_t k = 0;
+        const std::string a = e[0], b = e[1];
+        while ((k = v.find(a, k)) != std::string::npos) { v.replace(k, a.size(), b); k += b.size(); }
+    }
+    return v;
+}
+
 static bool textIsTrue(const std::string& v) {
     return v == "true" || v == "1" || v == "TRUE" || v == "True";
 }
@@ -103,11 +126,21 @@ static std::string localText(const std::string& s, const std::string& local, boo
         if (gt == std::string::npos) return std::string();
         *found = true;
         if (s[gt - 1] == '/') return std::string();
-        size_t e = s.find("</", gt);
-        if (e == std::string::npos) return std::string();
-        std::string v = s.substr(gt + 1, e - gt - 1);
+        size_t lt = s.find('<', gt + 1);
+        if (lt == std::string::npos) return std::string();
+        size_t from = gt;
+        // Annex F.1 contentType — 값이 자식 <mcpttURI>/<mcpttString>/<mcpttBoolean> 에 있다(값 직접 기재 형식도 읽는다).
+        if (lt + 1 < s.size() && s[lt + 1] != '/') {
+            size_t cgt = s.find('>', lt);
+            if (cgt == std::string::npos) return std::string();
+            if (s[cgt - 1] == '/') return std::string();
+            from = cgt;
+            lt = s.find('<', cgt + 1);
+            if (lt == std::string::npos) return std::string();
+        }
+        std::string v = s.substr(from + 1, lt - from - 1);
         size_t b = v.find_first_not_of(" \t\r\n"), t = v.find_last_not_of(" \t\r\n");
-        return b == std::string::npos ? std::string() : v.substr(b, t - b + 1);
+        return b == std::string::npos ? std::string() : xmlUnescape(v.substr(b, t - b + 1));
     }
     return std::string();
 }
@@ -142,17 +175,20 @@ bool parseEmergencyAlert(const std::string& body, EmergencyAlert& out) {
 
 McpttInfo parseMcpttInfo(const std::string& whole) {
     McpttInfo mi;
-    size_t p = whole.find("<mcpttinfo");
+    size_t p = whole.find("mcpttinfo");                     // 접두사 무관(<mi:mcpttinfo …>)
     if (p == std::string::npos) return mi;
-    std::string x = whole.substr(p);
+    size_t lt = whole.rfind('<', p);
+    std::string x = whole.substr(lt == std::string::npos ? p : lt);
     mi.present = true;
-    mi.sessionType = elemText(x, "session-type");
-    mi.requestUri = elemText(x, "mcptt-request-uri");
-    mi.callingUserId = elemText(x, "mcptt-calling-user-id");
-    mi.callingGroupId = elemText(x, "mcptt-calling-group-id");
-    mi.emergency = textIsTrue(elemText(x, "emergency-ind"));
-    mi.imminentPeril = textIsTrue(elemText(x, "imminentperil-ind"));
-    mi.broadcast = textIsTrue(elemText(x, "broadcast-ind"));
+    // 접두사 무관·이름 경계 일치·contentType 자식 풀기(localText) — 서버가 두 인코딩 어느 쪽으로 보내도 같다.
+    bool f = false;
+    mi.sessionType = localText(x, "session-type", &f);
+    mi.requestUri = localText(x, "mcptt-request-uri", &f);
+    mi.callingUserId = localText(x, "mcptt-calling-user-id", &f);
+    mi.callingGroupId = localText(x, "mcptt-calling-group-id", &f);
+    mi.emergency = textIsTrue(localText(x, "emergency-ind", &f));
+    mi.imminentPeril = textIsTrue(localText(x, "imminentperil-ind", &f));
+    mi.broadcast = textIsTrue(localText(x, "broadcast-ind", &f));
     mi.privateCall = mi.sessionType == "private";
     mi.noFloorCtrl = whole.find("mc_no_floor_ctrl") != std::string::npos;
     return mi;

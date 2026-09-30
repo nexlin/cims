@@ -28,6 +28,7 @@
 #include "CspPttGroup.h"
 #include "CspRole.h"
 #include "FmReporter.h"
+#include "McpttInfo.h"
 #include "RtpMap.h"
 #include "SipCodecTable.h"
 #include "SipMessage.h"
@@ -2847,22 +2848,20 @@ std::string CGroupCallService::BuildGroupInfoXml( const CspPttGroup &clsGroup, c
     //   아니라 <broadcast-ind> 로 싣는다(§6.3.3.1 — 수신 단말이 수신 전용·호 종료 규칙을 이 표식으로 안다).
     std::string strSessionType = clsGroup._groupType.empty() ? "prearranged" : clsGroup._groupType;
 
+    // 요소 순서 = mcptt-ParamsType sequence, contentType 요소는 type="Normal" + 자식(TS 24.379 Annex F.1).
     oss << "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n"
         << "<mcpttinfo xmlns=\"urn:3gpp:ns:mcpttInfo:1.0\""
         << " xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">\r\n"
         << "  <mcptt-Params>\r\n"
-        << "    <session-type>" << strSessionType << "</session-type>\r\n";
-    if ( bBroadcast ) oss << "    <broadcast-ind>true</broadcast-ind>\r\n";
+        << McpttInfoValue( "session-type", strSessionType ) << McpttInfoUri( "mcptt-request-uri", "tel:" + strUserId )
+        << McpttInfoUri( "mcptt-calling-user-id", "tel:" + strCallerId )
+        << McpttInfoUri( "mcptt-calling-group-id", "tel:" + clsGroup._id );
     // condition 지시자 (TS 24.379) — session-type 과 직교. fan-out 으로 멤버 UE 에 긴급/임박 광고.
     //   재광고(bExplicitCondition)는 false 값도 명시해 수신 단말이 하향을 un-latch 할 수 있게 한다.
-    if ( iCondition >= 2 || bExplicitCondition )
-        oss << "    <emergency-ind>" << ( iCondition >= 2 ? "true" : "false" ) << "</emergency-ind>\r\n";
-    if ( iCondition == 1 || bExplicitCondition )
-        oss << "    <imminentperil-ind>" << ( iCondition == 1 ? "true" : "false" ) << "</imminentperil-ind>\r\n";
-    oss << "    <mcptt-request-uri>tel:" << strUserId << "</mcptt-request-uri>\r\n"
-        << "    <mcptt-calling-user-id>tel:" << strCallerId << "</mcptt-calling-user-id>\r\n"
-        << "    <mcptt-calling-group-id>tel:" << clsGroup._id << "</mcptt-calling-group-id>\r\n"
-        << "  </mcptt-Params>\r\n"
+    if ( iCondition >= 2 || bExplicitCondition ) oss << McpttInfoBool( "emergency-ind", iCondition >= 2 );
+    if ( iCondition == 1 || bExplicitCondition ) oss << McpttInfoBool( "imminentperil-ind", iCondition == 1 );
+    if ( bBroadcast ) oss << McpttInfoValue( "broadcast-ind", "true" );
+    oss << "  </mcptt-Params>\r\n"
         << "</mcpttinfo>\r\n";
 
     return oss.str();

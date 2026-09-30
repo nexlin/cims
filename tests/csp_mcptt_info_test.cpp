@@ -45,5 +45,13 @@ int main(){
   CK("empty",!ParseMcpttInfo("").bHasAlertInd);
   std::string v;
   CK("self-closing",McpttElemValue("<x><alert-ind/></x>","alert-ind",v) && v.empty());
+  // 생성(F.1 contentType) → 해석 왕복
+  std::string body = "<mcpttinfo><mcptt-Params>" + McpttInfoValue("session-type","prearranged") +
+                     McpttInfoUri("mcptt-request-uri","tel:g0&1") + McpttInfoBool("emergency-ind",true) +
+                     McpttInfoString("mcptt-client-id","urn:uuid:9") + "</mcptt-Params></mcpttinfo>";
+  CK("builder uri form",body.find("<mcptt-request-uri type=\"Normal\"><mcpttURI>tel:g0&amp;1</mcpttURI></mcptt-request-uri>")!=std::string::npos);
+  CK("builder bool form",body.find("<emergency-ind type=\"Normal\"><mcpttBoolean>true</mcpttBoolean></emergency-ind>")!=std::string::npos);
+  auto f=ParseMcpttInfo(body);
+  CK("round trip",f.strSessionType=="prearranged" && f.strRequestUri=="tel:g0&1" && f.bEmergency && f.strClientId=="urn:uuid:9");
   printf("%s (%d fail)\n",fail?"FAIL":"PASS",fail); return fail?1:0;
 }

@@ -235,9 +235,10 @@ class ServiceConfigDocTest(unittest.TestCase):
         self.assertEqual([c.tag.split("}")[1] for c in fc][:3], ["T1-end-of-rtp-media", "T3-stop-talking-grace", "T7-floor-idle"])
         self.assertEqual(len(list(fc)), 17, "fc-timers-countersType 시퀀스 17 요소(필수)")
         self.assertEqual(fc.find("sc:T16-map-group-to-bearer", SC).text, "PT0.5S")
+        self.assertEqual(on.find("sc:transmit-time/sc:time-limit", SC).text, "PT30S", "T2 = transmit-time/time-limit")
         # 스키마 시퀀스 — fc-timers-counters 뒤 RP 셋, 그 순서
         tags = [c.tag.split("}")[1] for c in on]
-        self.assertEqual(tags, ["fc-timers-counters", "emergency-resource-priority",
+        self.assertEqual(tags, ["transmit-time", "fc-timers-counters", "emergency-resource-priority",
                                 "imminent-peril-resource-priority", "normal-resource-priority"])
         e = on.find("sc:emergency-resource-priority", SC)
         self.assertEqual((e.find("sc:resource-priority-namespace", SC).text, e.find("sc:resource-priority-priority", SC).text),

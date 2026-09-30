@@ -110,9 +110,10 @@ SERVICE_CONFIG_DEFAULTS = {
     "num_levels_user_hierarchy": 3,
 }
 # on-network 규격 파라미터 (config ServiceConfig.*). 타이머는 밀리초, 카운터는 횟수.
-#   FcTimersCounters 는 TS 24.380 floor 타이머·카운터 — 값은 CMP 설정(FloorIdleSec·FloorRevokeGraceSec·FloorIdleResendSec·
-#   FloorRevokeRetxSec·FloorGrantRetxSec·FloorStopTalkSec)과 같게 둔다. T15·T16·T17·T55·T56·C17·C55·C56 은 CMP 가 쓰지 않는
-#   기능(MBMS·사전 수립 세션)의 값이라 규격 예시값(§A)을 싣는다.
+#   FcTimersCounters·TransmitTime 은 floor 제어 서버(CMP)의 **정본**이다 — CSP 가 이 문서를 받아(TS 24.484 Annex A.2.3, 내부 API
+#   /internal/mcptt/service-config) 그룹 세션 개시 때 PTT_GROUP_ADD floor_timers 로 CMP 에 싣는다(T1·T2·T3·T7·T8·T20·C7·C20).
+#   CMP 설정 Floor*Sec 는 문서를 못 받았을 때의 폴백이다. T15·T16·T17·T55·T56·C17·C55·C56 은 CMP 가 쓰지 않는 기능
+#   (MBMS·사전 수립 세션)의 값이라 규격 예시값(§A)을 싣는다.
 #   ResourcePriority 는 RFC 8101 `mcpttp` 네임스페이스 서열(TS 24.379 §6.2.8.1.15) — CSP fan-out 과 같다.
 _SERVICE_CONFIG_PARAM_DEFAULTS = {
     "FcTimersCounters": {
@@ -123,8 +124,11 @@ _SERVICE_CONFIG_PARAM_DEFAULTS = {
         "C7-floor-idle": 3, "C17-unmap-group-to-bearer": 3, "C20-floor-granted": 3, "C55-connect": 3, "C56-disconnect": 3,
     },
     "ResourcePriority": {"Namespace": "mcpttp", "Emergency": "15", "ImminentPeril": "8", "Normal": "0"},
+    # transmit-time/time-limit = on-network 그룹 발언 시간 한도(§8.4.2.1 on-network 4)) — floor 제어 서버 T2(TS 24.380 §6.3.4.4)
+    "TransmitTime": {"TimeLimit": 30000},
 }
 SERVICE_CONFIG_PARAMS = {}
+_SERVICE_CONFIG_PARAMS_LOADED = False   # 첫 적재 뒤 재적재(SIGUSR1)에서만 변경 통지
 # DB 사본 — load_shared_data 가 채우고 admin PUT 이 갱신한다(update_service_config_cache).
 SERVICE_CONFIG = dict(SERVICE_CONFIG_DEFAULTS)
 
@@ -301,11 +305,19 @@ def apply_config(config):
         logger.log_error("[CMS] UeInitConfig 가 객체가 아님 — 기본값 사용")
         UE_INIT_CONFIG = {}
     # service-config on-network 규격 파라미터값 — 같은 규칙(ETag 내용 파생, SIGUSR1 리로드)
-    global SERVICE_CONFIG_PARAMS
+    global SERVICE_CONFIG_PARAMS, _SERVICE_CONFIG_PARAMS_LOADED
+    _sc_prev = get_service_config_xml(None)[1] if _SERVICE_CONFIG_PARAMS_LOADED else None
+    _SERVICE_CONFIG_PARAMS_LOADED = True
     SERVICE_CONFIG_PARAMS = config.get('ServiceConfig') or {}
     if not isinstance(SERVICE_CONFIG_PARAMS, dict):
         logger.log_error("[CMS] ServiceConfig 가 객체가 아님 — 기본값 사용")
         SERVICE_CONFIG_PARAMS = {}
+    # 재적재(SIGUSR1)로 문서가 바뀌었으면 CSP 에 알린다 — CSP 가 문서를 다시 받아 floor 값을 CMP 로 전달하고,
+    #   cms 구독 단말에 xcap-diff 를 push 한다(admin PUT 과 같은 통지).
+    if _sc_prev is not None:
+        _sc_now = get_service_config_xml(None)[1]
+        if _sc_now != _sc_prev:
+            notify_csp("SERVICE_CONFIG_CHANGED", "", "PUT", etag=(_sc_now or "").strip('"'))
     # user-profile 규격 파라미터값 — 같은 규칙(ETag 내용 파생, SIGUSR1 리로드)
     global USER_PROFILE_CONFIG
     USER_PROFILE_CONFIG = config.get('UserProfile') or {}
@@ -1660,6 +1672,9 @@ def get_service_config_xml(user_uri):
       </broadcast-group>
     </common>
     <on-network>
+      <transmit-time>
+        <time-limit>{_xs_duration(_svc_param('TransmitTime', 'TimeLimit'))}</time-limit>
+      </transmit-time>
       <fc-timers-counters>
 {nl.join(fc)}
       </fc-timers-counters>

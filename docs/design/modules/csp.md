@@ -846,11 +846,11 @@ CSP/PSP/ISP 가 4421 을 공유할 때 destination IP 로 인스턴스 구분). 
 
 ---
 
-### 3.11 CCscAvClient / CCscEndpointCache
+### 3.11 CCscAvClient / CCscEndpointCache / CCspServiceConfig
 
-**파일:** `CscAvClient.h/.cpp`, `CscEndpointCache.h/.cpp`
+**파일:** `CscAvClient.h/.cpp`, `CscEndpointCache.h/.cpp`, `CspServiceConfig.h/.cpp`
 
-CSC admin 서버(HTTPS, 기본 4421)로의 **내부 API 클라이언트** 두 개. 설정은
+CSC admin 서버(HTTPS, 기본 4421)로의 **내부 API 클라이언트** 세 개. 설정은
 `Setup.Csc.{Host,Port,Scheme,InternalToken,TimeoutMs}` 한 세트를 공유하고, 인증은
 `Authorization: Bearer {InternalToken}`(csc.json `InternalApi.Token` 과 같은 값) 이다.
 
@@ -858,6 +858,7 @@ CSC admin 서버(HTTPS, 기본 4421)로의 **내부 API 클라이언트** 두 �
 |---|---|---|---|
 | `CCscAvClient` | `POST /internal/aka/av` | IMS AKA 인증 벡터(RAND/AUTN/XRES) — S-CSCF↔HSS/AuC 상당 | AKA 가입자 REGISTER 챌린지마다 (동기) |
 | `CCscEndpointCache` | `GET /internal/mcptt/endpoint` | **단말용 MCPTT 서비스 주소**(`xcap_root`) | 기동 1회 · SIGUSR1 · `CSC_RESTART` (캐시) |
+| `CCspServiceConfig` | `GET /internal/mcptt/service-config` | **service-config 문서**(TS 24.484 §8.4 — Annex A.2.3 서버 취득) → floor 제어 파라미터(on-network `transmit-time/time-limit`=T2 · `fc-timers-counters` T1·T3·T7·T8·T20·C7·C20). `CmpClient` 가 PTT_GROUP_ADD/MODIFY `floor_timers` 로 싣는다(CMP 범위로 맞춤, 1 s 미만 버림) | 기동 · SIGUSR1 · `CSC_RESTART` · `SERVICE_CONFIG_CHANGED` (실패 = 이전 값, 미취득 = CMP 설정값) |
 
 `CCscEndpointCache` 가 취득한 `xcap_root` 는 xcap-diff NOTIFY 의 `xcap-root` 속성과 MCData FD
 다운로드 URL base(`Setup.McData.FdUrlBase` 미설정 시)로 쓰인다. **CSP 에는 이 주소를 적는 설정이

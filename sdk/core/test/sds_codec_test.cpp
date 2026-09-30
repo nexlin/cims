@@ -166,7 +166,8 @@ TEST(SdsCodec, FdParserSkipsOptionalIesAndOldSenderIsGroup) {
 TEST(McpttXml, InfoBuildParseAndBareId) {
     std::string x = mcptt::mcpttInfo("prearranged", "tel:g001", "tel:+82500000001", "tel:g001", 1, 0);
     EXPECT_NE(x.find("<session-type>prearranged</session-type>"), std::string::npos);
-    EXPECT_NE(x.find("<emergency-ind>true</emergency-ind>"), std::string::npos);
+    EXPECT_NE(x.find("<emergency-ind type=\"Normal\"><mcpttBoolean>true</mcpttBoolean></emergency-ind>"), std::string::npos);   // Annex F.1 contentType
+    EXPECT_NE(x.find("<mcptt-request-uri type=\"Normal\"><mcpttURI>tel:g001</mcpttURI></mcptt-request-uri>"), std::string::npos);
     EXPECT_EQ(x.find("imminentperil"), std::string::npos);
     std::string whole = "INVITE sip:x SIP/2.0\r\nContent-Type: multipart/mixed;boundary=b\r\n\r\n--b\r\nContent-Type: application/vnd.3gpp.mcptt-info+xml\r\n\r\n" + x +
                         "\r\n--b\r\nContent-Type: application/sdp\r\n\r\nm=application 5001 UDP MCPTT\r\na=fmtp:MCPTT mc_queueing;mc_no_floor_ctrl\r\n--b--";

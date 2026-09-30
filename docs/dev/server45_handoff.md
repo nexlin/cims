@@ -154,7 +154,7 @@ SDK 반영은 끝났고(`GroupDoc` 이 TS 24.481 요소 다섯을 더 싣는다)
 ## 9. 단말 SDK P0b 실측에서 드러난 서버 과제 (.48 몫)
 
 .45 에서 SDK 코어(긴급·경보·MSRP)를 실서버로 시험하며 본 것이다([sdk_port_handoff.md](sdk_port_handoff.md) §4).
-M1~M5 는 .48 에서 반영·배포(**csp 0.2.166 · csc 0.2.133**)·실측했다. .45 스택에 올릴 때는 이 버전 이상.
+M1~M5 와 딸린 두 과제(floor 파라미터 단일 정의·mcptt-info 규격 인코딩)는 .48 에서 반영·배포(**csp 0.2.167 · cmp 0.2.103 · csc 0.2.134 · oam 0.2.178 · worker 0.1.33**)·실측했다. .45 스택에 올릴 때는 이 버전 이상.
 
 | # | 판정 | 반영 | .48 실측 |
 |---|---|---|---|
@@ -182,11 +182,17 @@ P3(ptt-client SDK 전환) 실측에서 더 드러난 것 — **미반영**([sdk_
   빌드 확인은 .45) · 콘솔 **구성 > MCPTT 정책** = N2·계층 수만 · 관리 API `GET/PUT /api/v1/mcptt/service-config` 도 그 셋만.
 - **DB 마이그레이션(보류)** — `sql/migrate_service_config_drop_switches.sql`(스위치 컬럼 5개 DROP). 같은 DB 를 쓰는 옛 CSC 는 그 컬럼을
   SELECT 하므로 **.45·.135 CSC 가 0.2.133 이상이 된 뒤** 적용한다. 새 CSC 는 적용 전에도 정상이다.
-- **남은 것(M5)** — floor 타이머의 단일 정의: 지금은 CSC `ServiceConfig.FcTimersCounters.*` 와 CMP `Floor*Sec` 를 같게 둔다.
-  CSP 가 문서 값을 `PTT_JOIN.floor_timers` 로 CMP 에 넘기면 정본 하나가 된다(CMP 는 이미 받는다).
-- **mcptt-info 인코딩(Annex F.1 contentType)** — `mcptt-request-uri`·`alert-ind` 등은 자식 `<mcpttURI>`/`<mcpttBoolean>` 에 값을 싣는 것이 규격인데
-  CSP·SDK·ptt-client 모두 값을 요소에 바로 적는다. CSP 수신은 이제 두 형식을 다 읽는다(`McpttElemValue`, `tests/csp_mcptt_info_test.cpp`).
-  **SDK `localText` 는 자식 형식을 못 읽는다** — SDK·앱 수신을 먼저 두 형식으로, 그다음 송신 전환(CSP 는 `PttAsModule.cpp` `_InfoElem` 한 곳).
+- **floor 파라미터 단일 정의** — 정본 = service-config 문서(CSC 설정 `ServiceConfig.*` — `TransmitTime.TimeLimit`(T2)·`FcTimersCounters.*`).
+  CSP `CCspServiceConfig` 가 CSC 내부 API `GET /internal/mcptt/service-config`(TS 24.484 Annex A.2.3)로 받아(기동·SIGUSR1·CSC_RESTART·
+  SERVICE_CONFIG_CHANGED — CSC 설정 재적재로 문서가 바뀌어도 통지) PTT_GROUP_ADD/MODIFY `floor_timers` 로 CMP 에 싣는다. CMP 는 C7·C20
+  (`c7_idle`·`c20_grant`)도 받는다. CMP 설정 `Floor*Sec` 는 폴백. 실측: CSC T2 30 → 20 s → CSP `[service-config] … T2=20` → g005 그룹콜
+  CMP `floor timers: … T2=20s … C7=3 C20=3` → 30 s 복원.
+- **mcptt-info 규격 인코딩(Annex F.1)** — contentType 요소 = `type="Normal"` + `<mcpttURI>`/`<mcpttString>`/`<mcpttBoolean>` 자식, 요소 순서 =
+  mcptt-ParamsType sequence. 송신 전환 = CSP(그룹 INVITE·긴급 403·경보 통지)·SDK 코어(`mcpttInfo`·`alertInfo`)·옛 ptt-client `McpttXml`·
+  cspsim/libcsim. 수신 = 모두 두 형식(옛 송신자의 값 직접 기재도) — CSP `McpttElemValue`·SDK `localText`·ptt-client DOM·android core-sip 정규식·
+  cspsim `ExtractXmlTag`. 실측: 새 CSP↔새 SDK 로 그룹콜 fan-out 본문 규격형, 긴급 상향 Confirmed·재광고 수신, 경보·취소 200·수신.
+  **올리는 순서(.45)** — 새 SDK·앱은 규격형으로 보내므로 CSP 0.2.167 이상이 먼저(옛 CSP 는 자식 형식 지시자를 못 읽어 긴급·경보를 놓친다).
+  새 CSP 는 규격형으로 보내므로 옛 SDK·옛 앱(값 직접 기재만 읽음)은 함께 다시 빌드한다 — 서버·단말을 같은 창에 올린다.
 - **SDK 쪽 반영(.48)** — `AccountConfig.mcpttServerUri`(경보 Request-URI = PSI, 비면 그룹 URI) · `cimsue-cli --mcptt-psi`. 앱은 ue-init-config
   `MCPTT-Service-Details/Server-URI` 를 넣는다. Kotlin 파사드·C API·.NET 노출은 .45·Windows 몫(sdk_port_handoff §4.1).
 - **옛 ptt-client(.45 빌드 확인 필요)** — ad hoc 인가를 규격 요소 먼저 읽고, 경보 그룹은 `mcptt-calling-group-id` 먼저(`PttController.kt`·`McpttXml.kt`).

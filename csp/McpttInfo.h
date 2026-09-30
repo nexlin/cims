@@ -8,9 +8,9 @@
 #include <vector>
 
 // ── MCPTT call-control info 경량 파서 (application/vnd.3gpp.mcptt-info+xml, TS 24.379) ──
-//  수신 INVITE/MESSAGE 의 multipart 바디에서 condition 지시자만 추출한다.
-//  namespace prefix(mcpttinfo:/mcpttgi: 등) 무관하게 태그 substring 으로 매칭 — 외부 XML 파서 의존 없음.
-//  emergency/imminent·broadcast 는 session-type(그룹 종류)과 직교하는 호 단위 표식이다.
+//  수신 INVITE/MESSAGE 의 multipart 바디에서 지시자·식별자를 추출하고(McpttElemValue — 두 인코딩), 송신 요소를
+//  만든다(McpttInfo*). namespace prefix(mcpttinfo:/mcpttgi: 등) 무관하게 태그 substring 으로 매칭 — 외부 XML 파서 의존
+//  없음. emergency/imminent·broadcast 는 session-type(그룹 종류)과 직교하는 호 단위 표식이다.
 
 struct CMcpttInfo {
     // session-type (TS 24.379 Annex F.1 의미 2) — chat|prearranged|private|first-to-answer|ambient-listening|adhoc
@@ -90,6 +90,51 @@ inline bool McpttElemValue( const std::string &body, const char *tag, std::strin
         return true;
     }
     return false;
+}
+
+// ── mcptt-info 요소 생성 (TS 24.379 Annex F.1) ──
+//  contentType 요소(mcptt-request-uri·mcptt-calling-user-id·mcptt-called-party-id·mcptt-calling-group-id·originated-by·
+//  associated-group-id → <mcpttURI>, mcptt-access-token·mcptt-client-id → <mcpttString>, emergency-ind·alert-ind·
+//  imminentperil-ind·alert-ind-rcvd → <mcpttBoolean>)는 암호화하지 않으면 type="Normal" + 자식 요소로 싣는다(F.1 의미
+//  2)). session-type·broadcast-ind·mc-org 는 단순 값 요소다. mcptt-ParamsType 은 sequence 라 호출자가 스키마 순서로
+//  부른다.
+inline std::string McpttXmlEsc( const std::string &s ) {
+    std::string o;
+    o.reserve( s.size() );
+    for ( char c : s ) {
+        switch ( c ) {
+            case '&':
+                o += "&amp;";
+                break;
+            case '<':
+                o += "&lt;";
+                break;
+            case '>':
+                o += "&gt;";
+                break;
+            case '"':
+                o += "&quot;";
+                break;
+            default:
+                o += c;
+        }
+    }
+    return o;
+}
+inline std::string McpttInfoUri( const char *tag, const std::string &uri ) {
+    return std::string( "    <" ) + tag + " type=\"Normal\"><mcpttURI>" + McpttXmlEsc( uri ) + "</mcpttURI></" + tag +
+           ">\r\n";
+}
+inline std::string McpttInfoString( const char *tag, const std::string &v ) {
+    return std::string( "    <" ) + tag + " type=\"Normal\"><mcpttString>" + McpttXmlEsc( v ) + "</mcpttString></" +
+           tag + ">\r\n";
+}
+inline std::string McpttInfoBool( const char *tag, bool v ) {
+    return std::string( "    <" ) + tag + " type=\"Normal\"><mcpttBoolean>" + ( v ? "true" : "false" ) +
+           "</mcpttBoolean></" + tag + ">\r\n";
+}
+inline std::string McpttInfoValue( const char *tag, const std::string &v ) {
+    return std::string( "    <" ) + tag + ">" + McpttXmlEsc( v ) + "</" + tag + ">\r\n";
 }
 
 // <tag> 값이 true/1 인지. tag 미존재 시 false.

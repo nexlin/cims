@@ -184,7 +184,7 @@ TEST(McpttCondition, UpgradeDeniedConfirmedAndAdvertised) {
         EXPECT_FALSE(eng.setCallCondition(callId, false, false).ok);        // 응답 대기 중
         std::string up1 = srv.recv("INVITE ");
         ASSERT_FALSE(up1.empty());
-        EXPECT_NE(up1.find("<emergency-ind>true</emergency-ind>"), std::string::npos);
+        EXPECT_NE(up1.find("<emergency-ind type=\"Normal\"><mcpttBoolean>true</mcpttBoolean></emergency-ind>"), std::string::npos);   // Annex F.1 contentType
         EXPECT_EQ(headerOf(up1, "Resource-Priority"), "mcpttp.15");
         EXPECT_NE(up1.find("m=application"), std::string::npos);            // floor 섹션 재주입
         srv.reply(up1, 403, "Forbidden", "application/vnd.3gpp.mcptt-info+xml",
@@ -234,8 +234,8 @@ TEST(McpttCondition, UpgradeDeniedConfirmedAndAdvertised) {
         EXPECT_EQ(headerOf(msg, "P-Preferred-Service"), "urn:urn-7:3gpp-service.ims.icsi.mcptt");
         EXPECT_NE(headerOf(msg, "Accept-Contact").find("require;explicit"), std::string::npos);
         EXPECT_NE(headerOf(msg, "Content-Type").find("vnd.3gpp.mcptt-info+xml"), std::string::npos);
-        EXPECT_NE(msg.find("<alert-ind>true</alert-ind>"), std::string::npos);
-        EXPECT_NE(msg.find("<mcptt-client-id>urn:uuid:00000000-0000-4000-8000-000000000001</mcptt-client-id>"), std::string::npos);
+        EXPECT_NE(msg.find("<alert-ind type=\"Normal\"><mcpttBoolean>true</mcpttBoolean></alert-ind>"), std::string::npos);
+        EXPECT_NE(msg.find("<mcptt-client-id type=\"Normal\"><mcpttString>urn:uuid:00000000-0000-4000-8000-000000000001</mcpttString></mcptt-client-id>"), std::string::npos);
         srv.reply(msg, 200, "OK");
         ASSERT_TRUE(l.wait([&] { return !l.results.empty(); }));
         EXPECT_EQ(l.results[0].token, tok);
@@ -268,8 +268,9 @@ TEST(McpttCondition, UpgradeDeniedConfirmedAndAdvertised) {
 TEST(McpttXml, AlertBuildAndParse) {
     std::string b = mcptt::alertInfo("tel:g002", "tel:+82500000002", "urn:uuid:abc", false, "tel:+82500000013", -1);
     // 요소 순서 = TS 24.379 §F.1 mcptt-ParamsType(request-uri → calling-user-id → emergency-ind → alert-ind → originated-by → client-id)
-    size_t ru = b.find("mcptt-request-uri"), cu = b.find("mcptt-calling-user-id"), em = b.find("<emergency-ind>false"),
-           al = b.find("<alert-ind>false"), ob = b.find("<originated-by>tel:+82500000013"), ci = b.find("<mcptt-client-id>urn:uuid:abc");
+    size_t ru = b.find("mcptt-request-uri"), cu = b.find("mcptt-calling-user-id"),
+           em = b.find("<emergency-ind type=\"Normal\"><mcpttBoolean>false</mcpttBoolean></emergency-ind>"), al = b.find("<alert-ind type=\"Normal\"><mcpttBoolean>false</mcpttBoolean></alert-ind>"),
+           ob = b.find("<originated-by type=\"Normal\"><mcpttURI>tel:+82500000013</mcpttURI></originated-by>"), ci = b.find("<mcptt-client-id type=\"Normal\"><mcpttString>urn:uuid:abc</mcpttString></mcptt-client-id>");
     ASSERT_NE(ci, std::string::npos);
     EXPECT_TRUE(ru < cu && cu < em && em < al && al < ob && ob < ci);
     EXPECT_EQ(mcptt::alertInfo("tel:g002", "tel:+1", "", true).find("mcptt-client-id"), std::string::npos);
@@ -297,7 +298,21 @@ TEST(McpttXml, AlertBuildAndParse) {
     EXPECT_FALSE(mcptt::parseEmergencyAlert("<mcpttinfo><mcptt-Params><session-type>prearranged</session-type>"
                                             "</mcptt-Params></mcpttinfo>", n));      // 지시자 없음 = 경보·통지 아님
 
-    EXPECT_EQ(mcptt::indicator("<a><emergency-ind> TRUE </emergency-ind></a>", "emergency-ind"), 1);
+    EXPECT_EQ(mcptt::indicator("<a><emergency-ind> TRUE </emergency-ind></a>", "emergency-ind"), 1);   // 값 직접 기재(옛 서버)
+    EXPECT_EQ(mcptt::indicator("<a><emergency-ind type=\"Normal\"><mcpttBoolean>true</mcpttBoolean></emergency-ind></a>",
+                               "emergency-ind"), 1);                           // Annex F.1 contentType
+    EXPECT_EQ(mcptt::indicator("<a><alert-ind-rcvd>true</alert-ind-rcvd></a>", "alert-ind"), 0);   // 이름 경계
+    // 규격 서버 통지(§6.3.3.1.11) — contentType + &amp; 해제
+    EmergencyAlert w;
+    ASSERT_TRUE(mcptt::parseEmergencyAlert("<mcpttinfo><mcptt-Params>"
+                                           "<mcptt-request-uri type=\"Normal\"><mcpttURI>tel:+82500000014</mcpttURI></mcptt-request-uri>"
+                                           "<mcptt-calling-user-id type=\"Normal\"><mcpttURI>tel:+82500000013</mcpttURI></mcptt-calling-user-id>"
+                                           "<mcptt-calling-group-id type=\"Normal\"><mcpttURI>tel:g&amp;5</mcpttURI></mcptt-calling-group-id>"
+                                           "<alert-ind type=\"Normal\"><mcpttBoolean>true</mcpttBoolean></alert-ind>"
+                                           "</mcptt-Params></mcpttinfo>", w));
+    EXPECT_EQ(w.groupId, "g&5");
+    EXPECT_EQ(w.userId, "+82500000013");
+    EXPECT_EQ(w.alertInd, 1);
     EXPECT_EQ(mcptt::indicator("<a><x:imminentperil-ind>false</x:imminentperil-ind></a>", "imminentperil-ind"), -1);
     EXPECT_EQ(mcptt::indicator("<a/>", "emergency-ind"), 0);
 }

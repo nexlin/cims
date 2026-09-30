@@ -1627,18 +1627,22 @@ void SimSession::StartCall(const std::string& strTarget) {
         CSipMessage* pInvite = NULL;
         if (m_clsUserAgent.CreateCall(m_strUser.c_str(), strDst.c_str(), &clsRtp, &clsRoute,
                                        m_strInviteId, &pInvite, NULL) && pInvite) {
-            // mcptt-info (condition 지시자 포함)
+            // mcptt-info (condition 지시자 포함) — 요소 순서 = mcptt-ParamsType sequence, contentType 요소는
+            //   type="Normal" + <mcpttURI>/<mcpttBoolean> 자식(TS 24.379 Annex F.1).
             std::string xml =
                 "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n"
                 "<mcpttinfo xmlns=\"urn:3gpp:ns:mcpttInfo:1.0\">\r\n"
                 "  <mcptt-Params>\r\n"
-                "    <session-type>prearranged</session-type>\r\n";
-            if (m_iEmergencyCond >= 2) xml += "    <emergency-ind>true</emergency-ind>\r\n";
-            else if (m_iEmergencyCond == 1) xml += "    <imminentperil-ind>true</imminentperil-ind>\r\n";
+                "    <session-type>prearranged</session-type>\r\n"
+                "    <mcptt-request-uri type=\"Normal\"><mcpttURI>tel:" + strDst + "</mcpttURI></mcptt-request-uri>\r\n"
+                "    <mcptt-calling-user-id type=\"Normal\"><mcpttURI>tel:" + m_strUser +
+                "</mcpttURI></mcptt-calling-user-id>\r\n";
+            if (m_iEmergencyCond >= 2)
+                xml += "    <emergency-ind type=\"Normal\"><mcpttBoolean>true</mcpttBoolean></emergency-ind>\r\n";
+            else if (m_iEmergencyCond == 1)
+                xml += "    <imminentperil-ind type=\"Normal\"><mcpttBoolean>true</mcpttBoolean></imminentperil-ind>\r\n";
             if (m_bBroadcast) xml += "    <broadcast-ind>true</broadcast-ind>\r\n";
-            xml += "    <mcptt-request-uri>tel:" + strDst + "</mcptt-request-uri>\r\n"
-                   "    <mcptt-calling-user-id>tel:" + m_strUser + "</mcptt-calling-user-id>\r\n"
-                   "  </mcptt-Params>\r\n"
+            xml += "  </mcptt-Params>\r\n"
                    "</mcpttinfo>\r\n";
             // ad hoc: resource-lists (동적 멤버)
             std::string rl;
@@ -1825,15 +1829,25 @@ void SimSession::SendPttRelease()  { if (m_bPttMode) m_clsRtpThread.SendFloorCon
 // ─────────────────────────────────────────────
 //  mcptt-info+xml 파싱 유틸 (로그용)
 // ─────────────────────────────────────────────
+// 요소 값 — 속성(type="Normal")을 허용하고, Annex F.1 contentType 자식(<mcpttURI>/<mcpttBoolean>)이 있으면 그 값.
 static std::string ExtractXmlTag(const std::string& body, const std::string& tag) {
-    std::string open  = "<" + tag + ">";
-    std::string close = "</" + tag + ">";
-    size_t s = body.find(open);
+    size_t s = body.find("<" + tag);
+    while (s != std::string::npos) {
+        char c = s + 1 + tag.size() < body.size() ? body[s + 1 + tag.size()] : '\0';
+        if (c == '>' || c == ' ' || c == '\t') break;
+        s = body.find("<" + tag, s + 1);
+    }
     if (s == std::string::npos) return "";
-    s += open.size();
-    size_t e = body.find(close, s);
+    size_t gt = body.find('>', s);
+    if (gt == std::string::npos) return "";
+    size_t e = body.find("</" + tag + ">", gt);
     if (e == std::string::npos) return "";
-    return body.substr(s, e - s);
+    std::string v = body.substr(gt + 1, e - gt - 1);
+    if (!v.empty() && v[0] == '<') {
+        size_t cgt = v.find('>'), clt = v.find('<', cgt == std::string::npos ? 0 : cgt);
+        if (cgt != std::string::npos && clt != std::string::npos) v = v.substr(cgt + 1, clt - cgt - 1);
+    }
+    return v;
 }
 
 static void ParseAndLogMcpttInfo(int iId, const std::string& strBody) {

@@ -848,7 +848,7 @@
     {
       "key": "service_config",
       "title": "MCPTT 서비스 설정 문서 (service-config) — on-network 파라미터",
-      "description": "TS 24.484 §8.4 service configuration 문서의 on-network 규격 파라미터 — floor 타이머·카운터(<fc-timers-counters>)와 Resource-Priority(<emergency-/imminent-peril-/normal-resource-priority>). N2·broadcast-group 계층 수는 콘솔 [MCPTT 서비스 설정](DB)에서 편집한다. 값이 바뀌면 문서 ETag 도 바뀐다.",
+      "description": "TS 24.484 §8.4 service configuration 문서의 on-network 규격 파라미터 — 발언 시간 한도(<transmit-time>)·floor 타이머·카운터(<fc-timers-counters>)·Resource-Priority. floor 값은 CMP 의 정본이다(CSP 가 문서를 받아 CMP 로 전달, CMP 설정 Floor*Sec 는 문서를 못 받았을 때의 폴백). N2·broadcast-group 계층 수는 콘솔 [MCPTT 정책](DB)에서 편집한다. 값이 바뀌면 문서 ETag 도 바뀐다.",
       "fields": [
         {
           "key": "ServiceConfig.FcTimersCounters.T1-end-of-rtp-media",
@@ -859,7 +859,7 @@
           "max": 600000,
           "restart": false,
           "reload_hint": "SIGUSR1 로 재로드 — 다음 GET 부터 새 문서·ETag.",
-          "help": "TS 24.380 floor 타이머. CMP 설정 FloorIdleSec 과 같은 값으로 둔다(CMP 가 실제로 쓰는 값)."
+          "help": "TS 24.484 §8.4 on-network <fc-timers-counters> — TS 24.380 floor 타이머(ms, 문서에는 xs:duration 초)·카운터. floor 제어 서버(CMP)의 정본이다 — CSP 가 이 문서를 받아 그룹 세션 개시 때 CMP 로 전달한다."
         },
         {
           "key": "ServiceConfig.FcTimersCounters.T3-stop-talking-grace",
@@ -870,7 +870,7 @@
           "max": 600000,
           "restart": false,
           "reload_hint": "SIGUSR1 로 재로드 — 다음 GET 부터 새 문서·ETag.",
-          "help": "TS 24.380 floor 타이머. CMP 설정 FloorRevokeGraceSec 과 같은 값으로 둔다(CMP 가 실제로 쓰는 값)."
+          "help": "TS 24.380 floor 타이머. CMP 설정 FloorRevokeGraceSec 보다 우선한다 — CSP 가 이 문서 값을 그룹 세션 개시 때 CMP 로 전달한다(CMP 는 초 단위, 1 s 미만은 버린다)."
         },
         {
           "key": "ServiceConfig.FcTimersCounters.T7-floor-idle",
@@ -881,7 +881,7 @@
           "max": 600000,
           "restart": false,
           "reload_hint": "SIGUSR1 로 재로드 — 다음 GET 부터 새 문서·ETag.",
-          "help": "TS 24.380 floor 타이머. CMP 설정 FloorIdleResendSec 과 같은 값으로 둔다(CMP 가 실제로 쓰는 값)."
+          "help": "TS 24.380 floor 타이머. CMP 설정 FloorIdleResendSec 보다 우선한다 — CSP 가 이 문서 값을 그룹 세션 개시 때 CMP 로 전달한다(CMP 는 초 단위, 1 s 미만은 버린다)."
         },
         {
           "key": "ServiceConfig.FcTimersCounters.T8-floor-revoke",
@@ -892,7 +892,7 @@
           "max": 600000,
           "restart": false,
           "reload_hint": "SIGUSR1 로 재로드 — 다음 GET 부터 새 문서·ETag.",
-          "help": "TS 24.380 floor 타이머. CMP 설정 FloorRevokeRetxSec 과 같은 값으로 둔다(CMP 가 실제로 쓰는 값)."
+          "help": "TS 24.380 floor 타이머. CMP 설정 FloorRevokeRetxSec 보다 우선한다 — CSP 가 이 문서 값을 그룹 세션 개시 때 CMP 로 전달한다(CMP 는 초 단위, 1 s 미만은 버린다)."
         },
         {
           "key": "ServiceConfig.FcTimersCounters.T11-end-of-RTP-dual",
@@ -953,7 +953,7 @@
           "max": 600000,
           "restart": false,
           "reload_hint": "SIGUSR1 로 재로드 — 다음 GET 부터 새 문서·ETag.",
-          "help": "TS 24.380 floor 타이머. CMP 설정 FloorGrantRetxSec 과 같은 값으로 둔다(CMP 가 실제로 쓰는 값)."
+          "help": "TS 24.380 floor 타이머. CMP 설정 FloorGrantRetxSec 보다 우선한다 — CSP 가 이 문서 값을 그룹 세션 개시 때 CMP 로 전달한다(CMP 는 초 단위, 1 s 미만은 버린다)."
         },
         {
           "key": "ServiceConfig.FcTimersCounters.T55-connect",
@@ -1024,6 +1024,17 @@
           "max": 65535,
           "restart": false,
           "reload_hint": "SIGUSR1 로 재로드 — 다음 GET 부터 새 문서·ETag."
+        },
+        {
+          "key": "ServiceConfig.TransmitTime.TimeLimit",
+          "label": "T2 — 발언 시간 한도 (ms)",
+          "type": "int",
+          "default": 30000,
+          "min": 0,
+          "max": 600000,
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드.",
+          "help": "TS 24.484 §8.4 on-network <transmit-time><time-limit> — on-network 그룹 발언 시간 한도. CSP 가 floor 제어 서버(CMP) T2 로 전달한다(CMP 설정 FloorStopTalkSec 보다 우선)."
         },
         {
           "key": "ServiceConfig.ResourcePriority.Namespace",
