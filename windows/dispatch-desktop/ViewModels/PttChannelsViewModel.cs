@@ -98,6 +98,13 @@ public sealed partial class ChannelCard : ObservableObject
     public TimeSpan Elapsed => Session?.Elapsed ?? TimeSpan.Zero;
     public bool IsEmergency => Session?.IsEmergency == true;
     public bool IsImminentPeril => Session?.IsImminentPeril == true;
+    /// <summary>[긴급 호출] — 멤버 그룹, 긴급 아님, 자격(user profile allow-emergency-group-call — 못 받았으면 허용). 참여 중이면 진행 중 호의 조건 상향.</summary>
+    public bool CanEmergency => IsMember && !IsEmergency && _s.Capabilities.EmergencyGroupCall;
+    public string EmergencyTip => !_s.Capabilities.EmergencyGroupCall ? "긴급 그룹콜 자격이 없습니다(user profile)"
+                                : IsJoined ? "진행 중인 이 그룹 통화를 긴급으로 올린다(조건 상향 — 그룹 능력이 꺼져 있으면 서버가 거절)"
+                                : "이 그룹에 긴급 그룹콜 개시";
+    /// <summary>[긴급 해제] — 내가 올린 조건만(DispatchSession.CanCancelCondition — 서버 과제 E1 뒤 넓힌다).</summary>
+    public bool CanCancelEmergency => Session is not null && _s.CanCancelCondition(Session);
     public bool IsSpeaking => Session?.IsSpeaking == true;
     public bool IsRequesting => Session?.IsRequesting == true;
     public bool IsQueued => Session?.IsQueued == true;
@@ -141,7 +148,7 @@ public sealed partial class ChannelCard : ObservableObject
                                   nameof(CanToggleRoute), nameof(IsMuted), nameof(Roster), nameof(AdhocChips), nameof(MemberText), nameof(IsFullDuplex), nameof(Duplex),
                                   nameof(Line2), nameof(LastSessionText), nameof(RosterPreview), nameof(RosterMore), nameof(HasRosterMore), nameof(CanEdit),
                                   nameof(CheckTip), nameof(IsBroadcast), nameof(IsBroadcastInitiator), nameof(CanBroadcast), nameof(BroadcastTip),
-                                  nameof(CanPressBroadcast) })
+                                  nameof(CanPressBroadcast), nameof(CanEmergency), nameof(EmergencyTip), nameof(CanCancelEmergency) })
             OnPropertyChanged(p);
         if (HasSpeaker && Speaker != LastSpeaker) { LastSpeaker = Speaker; LastSpeakerAt = DateTime.Now; }
         else if (HasSpeaker) LastSpeakerAt ??= DateTime.Now;
@@ -159,6 +166,7 @@ public sealed partial class ChannelCard : ObservableObject
     [RelayCommand] private void ToggleRoute() { if (Session is not null) _s.ToggleRoute(Session); }
     [RelayCommand] private void ToggleMute() { if (Session is not null) _s.ToggleMute(Session); }
     [RelayCommand] private void Emergency() { if (Group is not null) _s.EmergencyCall(Group); }
+    [RelayCommand] private void CancelEmergency() { if (Session is not null) _s.CancelEmergency(Session); }
     [RelayCommand] private void CancelQueue() { if (Session is not null) _s.FloorQueueCancel(Session); }
 }
 
@@ -208,6 +216,7 @@ public sealed partial class PttChannelsViewModel : ObservableObject
         s.SessionChanged += (_, item) => { OnPropertyChanged(nameof(JoinedCount)); if (Cards.FirstOrDefault(c => c.Session == item) is { } c && c.IsChecked && !c.CanCheck) SetChecked(c, false); };
         s.RosterChanged += (_, g) => OnRoster(g);
         s.Floor += (_, e) => OnFloor(e.Session, e.Event);
+        s.PropertyChanged += (_, e) => { if (e.PropertyName == nameof(DispatchSession.Capabilities)) foreach (var c in Cards) c.Refresh(); };   // 긴급 호출 자격
     }
 
     public void Rebuild()
@@ -416,10 +425,13 @@ public sealed partial class PttChannelsViewModel : ObservableObject
     /// <summary>④ 미읽음 → 카드 배지.</summary>
     public void SetUnread(Func<GroupInfo, int> unreadOf) { foreach (var c in Cards) if (c.Group is not null) c.Unread = unreadOf(c.Group); }
 
-    public void FocusGroup(string groupId)
+    /// <summary>[채널로] — ① 카드(멤버 그룹·내 개별/애드혹)로 포커스만 옮긴다. 합류하지 않는다 — 참여는 카드의 [참여]다.
+    /// ① 에 카드가 없으면(청취 범위 그룹 등) false — 호출자가 ② 카드로 옮긴다(비멤버 sendrecv 합류는 서버가 403, TS 24.379 §10.1.1).</summary>
+    public bool FocusGroup(string groupId)
     {
         var c = Cards.FirstOrDefault(x => x.Id == groupId);
-        if (c is not null) Select(c, collapseSame: false);
-        else if (_s.Groups.FirstOrDefault(g => g.Id == groupId) is { } g) _s.JoinChannel(g);
+        if (c is null) return false;
+        Select(c, collapseSame: false);
+        return true;
     }
 }

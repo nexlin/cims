@@ -233,7 +233,7 @@ mcptt-request-uri, mcptt-calling-user-id, (alert) originated-user-id, location(�
   |---|---|---|---|
   | 경보 통지 `<mc-org>` | 제어 기능이 발신자 user profile 의 `<MissionCriticalOrganization>` 을 싣는다(§6.3.3.1.12 2)·3)) | 싣지 않는다 — 값의 정본이 CSC 사이트 설정(`UserProfile.MissionCriticalOrganization`)이라 CSP 에 없다 | CSC→CSP 전달 경로(설정 캐시)를 둔 뒤 |
   | 경보 수신 확인 | 제어 기능이 발신 단말에 `<alert-ind-rcvd>` MESSAGE(§6.3.3.1.20) | 보내지 않는다(200 OK 만) | 후속 |
-  | 경보 취소 인가 | 미인가 취소는 403 + `<alert-ind>true`(§12.1.3.2 1)) | 취소는 인가 없이 통과 | 후속(allow-cancel-emergency-alert 축 분리와 함께) |
+  | 경보 취소 인가 | 미인가 취소는 403 + `<alert-ind>true`(§12.1.3.2 1)) | 취소는 인가 없이 통과 | 과제 문서 E3(판정은 발령과 같은 열 — 축 분리는 후속) |
 
 ### 4.4 상태/로깅
 
@@ -363,16 +363,18 @@ UE(권한자) ──re-INVITE(emergency-ind=false)──▶ CSP → PTT_FLOOR_TI
    승격에 쓰면 전원이 emergency 로 비겨 선점이 chair/priority 로 퇴화하고 CSP 사용자 인가도
    우회된다(08-10 실측) — 판정에 쓰지 않는다.
 2. **in-progress 상태 DB 미러**: CSP→CSC 역보고 채널이 없으면 관측 정확도 한계. group.json/flow로 관측, DB 미러는 best-effort.
-3. **권한자(authorized) 취소 판정**: 개시자 외 authorized_user/관리자 취소 허용 범위.
+3. **권한자(authorized) 취소 판정**: 개시자 외 authorized_user/관리자 취소 허용 범위 — 지금 CSP 는 개시자만 받고 비권한자 해제를 **무시하면서 200** 을 돌려준다
+   (TS 24.379 §10.1.1.4.7 7) 은 403 + `emergency-ind` true). 과제 = [server_todo_mcptt_emergency_dispatch.md](../../dev/server_todo_mcptt_emergency_dispatch.md) E1.
 4. **ad hoc 콘솔(관제) 개시 입구**: 단말 resource-lists 입구는 구현됨 — 관제사가 콘솔에서
    인원을 골라 서버가 개시하는 dispatcher 입구는 미착수.
 5. **청취 leg 의 조건 재광고**: `PropagateConditionToMembers` 는 청취 leg(`bListenOnly`)를 빼고, 청취 leg 는 합류 200 OK 의
    조건만 받는다 — 청취 중에 긴급·임박이 걸리거나 풀려도 청취하는 관제사는 모른다(관제 앱 두 곳의 긴급 배너가 기다린다 —
    [dispatch_desktop_ui.md](dispatch_desktop_ui.md) §13, [android_dispatch_tablet.md](android_dispatch_tablet.md) §11). 청취의
-   인가·은닉·sendonly 응답을 지키면서 알리는 방법(같은 re-INVITE 를 recvonly 그대로 보낼지, 상태 알림 MESSAGE §6.3.3.1.11 로 할지)을 정한다.
+   인가·은닉·sendonly 응답을 지키면서 알리는 방법(같은 re-INVITE 를 recvonly 그대로 보낼지, 상태 알림 MESSAGE §6.3.3.1.11 로 할지)을 정한다 — 과제 문서 E2 는
+   성립 SDP 그대로의 re-INVITE 를 권고한다(§6.3.3.1.15 2) "*media parameters as currently established*").
 6. **TNG2(진행 중 긴급 그룹콜 타이머) 미구현**: TS 24.379 §6.3.3.1.16 은 TNG2 가 만료되면 긴급 상태를 풀고 참여 멤버에 취소 re-INVITE
    (§6.3.3.1.10)·affiliate 됐으나 참여하지 않은 멤버에 상태 알림 MESSAGE(§6.3.3.1.11)를 보내게 한다. 지금 긴급 상태는 권한자 취소와 세션
-   종료로만 풀린다.
+   종료로만 풀린다(과제 문서 E5 — 호 없는 긴급 상태 해제 MESSAGE §12.1.3.3 와 함께).
 
 ---
 

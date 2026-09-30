@@ -266,7 +266,8 @@ C++ 공개 표면은 `cimsue/engine.h` 의 `Engine` 하나이며 계정·호를 
 (`OpenSslTransport` — pjproject 가 이미 OpenSSL 을 링크하므로 추가 의존이 없다). TLS 트러스트(사설 CA)는
 `EngineConfig.trustAnchors`·`CscEndpoint.caPem` 으로 코어에 넘기고 SIP TLS 와 HTTPS 가 같은 앵커를 쓴다.
 `EngineConfig.udpNoTcpSwitch`(기본 false)는 pjsip 의 UDP→TCP 승격(RFC 3261 §18.1.1)을 끄는 사이트 옵션 — libInit 전에
-`pjsip_cfg()->endpt.disable_tcp_switch` 로 반영한다(sip_tls_signaling.md §3.2a). Kotlin 파사드 `EngineConfig.udpNoTcpSwitch` 동일. C API·.NET 파사드는 미노출(기본값).
+`pjsip_cfg()->endpt.disable_tcp_switch` 로 반영한다(sip_tls_signaling.md §3.2a). Kotlin 파사드 `EngineConfig.udpNoTcpSwitch`·C API `cimsue_engine_config_t.udp_no_tcp_switch`·.NET `EngineConfig.UdpNoTcpSwitch` 동일(관제 데스크톱은
+올리는 서비스 중 하나라도 `sip.udpNoTcpSwitch` 면 켠다).
 
 **주입은 아직 열려 있지 않다.** 인터페이스가 내부 헤더(`sdk/core/src/http/https_client.h`)에 있고 C API 에도
 진입점이 없어(`cimsue_csc_create` 는 endpoint 만 받는다) Windows `.NET`·Android SWIG 어느 쪽도 구현체를
@@ -520,6 +521,14 @@ C API 는 그 헤더를 **손으로 1:1 평탄화**한 것이며(SWIG 는 C# 대
 서버 인증서 만료 관측은 이 규약의 예다 — `Engine::tlsPeerExpiry()`(pjsua2 `onTransportState` 의 remote 인증서)·
 `CscClient::tlsPeerExpiry()`(OpenSSL 전송의 peer 인증서) → `cimsue_engine_tls_peer_expiry`/`cimsue_csc_tls_peer_expiry`
 (`cimsue_tls_peer_expiry_t{valid, not_after_epoch, observed_epoch, days_left, subject, remote}`) → .NET `TlsPeerExpiry`.
+P0a·P0b·P3 코어 보강분(§4.2)도 같은 규칙으로 C API·.NET 에 나 있다 — 세션 조건(`cimsue_engine_set_call_condition`·`on_mcptt_condition`·
+`cimsue_call_info_t.condition`/`rx_level` → .NET `Call.SetCondition`·`Engine.McpttConditionChanged`·`CallInfo.Condition`), 긴급 경보
+(`cimsue_engine_send_emergency_alert`·`on_emergency_alert` → `Account.SendEmergencyAlert`·`Engine.EmergencyAlertReceived`), SDS 재전송 msgId·media plane
+(`send_group_sds`/`send_sds` 의 `msg_id` 입력·`cimsue_sds_message_t.media_plane`, 계정 `max_sds_cplane_bytes`·`mcdata_msrp`·`rp_*`·`mcptt_client_id`·
+`mcptt_server_uri`, 엔진 `grant_mic_delay_ms`), CMS 해석(`cimsue_csc_fetch_user_profile/service_config`·`cimsue_capabilities_of` → .NET
+`UserProfileDoc`·`ServiceConfigDoc`·`Capabilities.Of`), 장치(`set_capture_enabled`·`set_device_audio_levels`·`set_audio_route`·`reopen_audio_device`·
+`set_video_window`·`switch_camera`·`video_devices`), 프로파일(`udp_no_tcp_switch`·`sms_gateway`), 그룹 멤버 `title`. 구조체 필드는 끝에 덧붙이고
+구조체 id 도 `CIMSUE_STRUCT_COUNT_` 앞에 붙여 `AbiLayoutTests` 가 크기를 대조한다.
 Android 앱은 아직 이 코어 위로 이행하지 않아(pjsua2 직접) 같은 규칙을 Kotlin 으로 둔다 — `core` 의 `CimsEndpoint.onTransportState`
 ·`CimsTls` OkHttp 인터셉터 → `TlsPeerObserver`/`TlsPeerExpiry`(임계 30/7·`worst`). 이행 시 이 자리가 `Engine::tlsPeerExpiry()` 바인딩으로 바뀐다.
 관제조작반은 잔여 ≤ 30일이면 요약 띠 경고([sip_tls_signaling.md §8.6.2](sip_tls_signaling.md)).
@@ -605,7 +614,7 @@ NDK/MSVC 빌드는 개발 서버 밖(WSL2·Windows 머신)에서 수행하고, �
 | D. csc + domain + 관제 API | PKCE/XCAP/프로비저닝(dispatch 블록)·`Capabilities`·dialogWatch·join·pickup·transfer·listenGroupCall·`MediaSources` 라벨 | `S3-UE-CLI` Join/픽업/PTT 청취 PASS |
 | E. 관제 태블릿 앱 | `android/dispatch-tablet` — §7 다섯 구획. **구현 완료** — 정본 [android_dispatch_tablet.md](android_dispatch_tablet.md). 하단 내비 넷 + [관제] 탭 둘(6패널), [이력]·[PTT 그룹]·[관리]·감청 시트·관제 요약 띠·착신 배너/알림·주소록·발신 시트. 엔진 단일화(`:cimsue-engine` 하나, 커밋 산출물 폐기)와 SWIG 이진 typemap 이 여기서 들어왔다. 실기 확인 = 로그인·등록·그룹콜 floor·SDS·감청(Join)·착신/발신·통화 내역 | 실기기 실측(§9) — 남은 것: [이력]·[PTT 그룹]·[관리] 세 화면이 서버 응답으로 미검증, 무전/통화 분리 출력, 6시간·부팅 상주 |
 | F1. Windows 엔진·코어 | `sdk/windows` 슈퍼빌드로 pjproject(WMME)·AMR-WB·`cimsue.dll`·`cimsue-cli.exe` MSVC 빌드 — **빌드 확정**(§6.1 엔진 빌드 확정·CRT 행). 남은 것: WMME 장치 열거 실측 | Windows 에서 `cimsue-cli` 등록·1:1(TLS+SRTP)·그룹콜 floor·Join 이 Linux 와 같은 결과 (S3 실측 전) |
-| F2. Windows C API·.NET 파사드·관제 앱 | C API `cimsue_c.h`(§6.4) — **구현·단위시험 반영**(`cimsue.dll` 이 80 함수 export — `cimsue_struct_size` ABI 자기검사 포함, `cimsue_test` 가 슈퍼빌드의 googletest 로 Windows 에서도 돈다) → `sdk/windows/dotnet/CimsUe`(파사드 + 접점: 엔드포인트·핫플러그·핫키·DPAPI·단일 인스턴스 — **구현·단위시험 50건 통과**: ABI 레이아웃 27 구조체 대조·헤드리스 엔진 수명·컨텍스트 마샬링·프로파일 파싱·접점. 네이티브 `cimsue.dll` 은 관리 `CimsUe.dll` 과 이름이 겹치므로 출력·패키지 모두 `runtimes/win-x64/native/` 에 두고 로더가 그곳을 먼저 본다) → `windows/dispatch-desktop`(WPF, §6.1 — **구현·빌드 완료**, [dispatch_desktop_ui.md](dispatch_desktop_ui.md) §11 구조 그대로. 로그인·메인 창 기동 확인, `--ui-preview` 로 로그인 없이 화면 점검) | 파사드로 `cimsue-cli` 와 같은 S3 시나리오 재현, 재생 라우트 이중 출력·핫플러그 실측, 관제 시나리오(BLF→Join→픽업→전달→PTT 청취) 실기 — **앱 실기 시험은 서버(CSC/CSP) 연결 후 일괄** |
+| F2. Windows C API·.NET 파사드·관제 앱 | C API `cimsue_c.h`(§6.4) — **구현·단위시험 반영**(`cimsue.dll` 이 114 함수 export — `cimsue_struct_size` ABI 자기검사 포함, `cimsue_test` 가 슈퍼빌드의 googletest 로 Windows 에서도 돈다) → `sdk/windows/dotnet/CimsUe`(파사드 + 접점: 엔드포인트·핫플러그·핫키·DPAPI·단일 인스턴스 — **구현·단위시험 50건 통과**: ABI 레이아웃 27 구조체 대조·헤드리스 엔진 수명·컨텍스트 마샬링·프로파일 파싱·접점. 네이티브 `cimsue.dll` 은 관리 `CimsUe.dll` 과 이름이 겹치므로 출력·패키지 모두 `runtimes/win-x64/native/` 에 두고 로더가 그곳을 먼저 본다) → `windows/dispatch-desktop`(WPF, §6.1 — **구현·빌드 완료**, [dispatch_desktop_ui.md](dispatch_desktop_ui.md) §11 구조 그대로. 로그인·메인 창 기동 확인, `--ui-preview` 로 로그인 없이 화면 점검) | 파사드로 `cimsue-cli` 와 같은 S3 시나리오 재현, 재생 라우트 이중 출력·핫플러그 실측, 관제 시나리오(BLF→Join→픽업→전달→PTT 청취) 실기 — **앱 실기 시험은 서버(CSC/CSP) 연결 후 일괄** |
 | F3. Windows 영상 | `PJMEDIA_HAS_VIDEO 1` + OpenH264 + DSHOW + CIMS 콜백 렌더 장치 패치 → `onVideoFrame` | 감청 영상 격자 실측 |
 | G. 기존 앱 전환 | `volte-client` → `ptt-client` 를 파사드로 — §5.3 이행 단계 P0a~P5(VoLTE 먼저) | 단계별 완료 조건(§5.3) |
 
@@ -666,7 +675,8 @@ NDK/MSVC 빌드는 개발 서버 밖(WSL2·Windows 머신)에서 수행하고, �
   끊길 수 있다. 호를 옮기려면 호마다 re-INVITE(미디어 재초기화·Contact/Via 갱신)를 보내야 하고, MCPTT 호의 floor `m=application` 은
   re-INVITE SDP 에도 다시 실린다(`pendingAppSdp`). 넣기 전에 CSP 가 단말발 re-INVITE(VoLTE relay·MCPTT 세션)를 어떻게 다루는지
   확인해야 한다(실기 미확인). 끊긴 호의 서버발 in-dialog 요청은 CSP 가 살아 있는 등록 바인딩으로 다시 찾는다
-  ([leg_liveness.md](leg_liveness.md) §6.3). Windows 관제 앱은 아직 `RefreshRegistrations`(계정별 REGISTER)라 `HandleNetworkChange` 로 옮길 몫.
+  ([leg_liveness.md](leg_liveness.md) §6.3). 플랫폼 통지 → `handleNetworkChange` 는 Android `NetworkWatcher`·Windows 관제 앱(`NetworkChange` 통지를
+  2 초 합쳐 유니캐스트 주소 지문이 바뀐 때만, dispatch_desktop_ui.md §6)이 같다.
 - **remote-init ambient listening·barge-in** — 서버 §10 과제와 함께 코어 API 확장.
 - **음성 품질 측정·시험 모드 계측기 링크** — 코어 `quality/`(RTCP-XR·G.107/G.107.1 E-model·`callQuality`)·drive 루프의 코어 이전
   (`drive/` `DriveSession` — stdin/stdout 과 TLS 계측 링크 공용)·`cimsue-cli --link` 는 [ue_voice_quality.md](ue_voice_quality.md) 가 정본(측정 Q1·코어 링크 Q2 구현 반영, Android `DeviceLink` 바인딩 반영 — C API·.NET 바인딩과 앱 시험 모드 Q4 미구현).

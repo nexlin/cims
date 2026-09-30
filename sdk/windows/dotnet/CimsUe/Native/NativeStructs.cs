@@ -19,6 +19,9 @@ internal unsafe struct cimsue_engine_config_t
     public int no_vad;
     public int udp_port, tcp_port, tls_port;
     public uint clock_rate;
+    // 끝에 덧붙였다
+    public int udp_no_tcp_switch;
+    public int grant_mic_delay_ms;
 }
 
 [StructLayout(LayoutKind.Sequential)]
@@ -47,6 +50,14 @@ internal unsafe struct cimsue_account_config_t
     public byte* mcptt_id;
     public int auto_answer_mcptt;
     public byte* instance_id;
+    // 끝에 덧붙였다(MCPTT·MCData)
+    public byte* mcptt_client_id;
+    public byte* rp_emergency;
+    public byte* rp_imminent_peril;
+    public byte* rp_normal;
+    public int max_sds_cplane_bytes;
+    public int mcdata_msrp;
+    public byte* mcptt_server_uri;
 }
 
 [StructLayout(LayoutKind.Sequential)]
@@ -102,6 +113,30 @@ internal unsafe struct cimsue_mcptt_info_t
 }
 
 [StructLayout(LayoutKind.Sequential)]
+internal struct cimsue_mcptt_condition_t
+{
+    public int emergency;
+    public int imminent_peril;
+    public int mine;
+    public int pending;
+    public int last_code;
+}
+
+[StructLayout(LayoutKind.Sequential)]
+internal unsafe struct cimsue_emergency_alert_t
+{
+    public int account_id;
+    public byte* group_id;
+    public byte* user_id;
+    public byte* originated_by;
+    public byte* mc_org;
+    public int alert_ind;
+    public int emergency_ind;
+    public int imminent_peril_ind;
+    public int self;
+}
+
+[StructLayout(LayoutKind.Sequential)]
 internal unsafe struct cimsue_media_source_t
 {
     public uint ssrc;
@@ -134,6 +169,9 @@ internal unsafe struct cimsue_call_info_t
     public int half_duplex;
     public int listen_only;
     public byte* joined_dialog;
+    // 끝에 덧붙였다
+    public float rx_level;
+    public cimsue_mcptt_condition_t condition;
 }
 
 [StructLayout(LayoutKind.Sequential)]
@@ -228,6 +266,7 @@ internal unsafe struct cimsue_sds_message_t
     public byte* file_name;
     public byte* file_type;
     public long file_size;
+    public int media_plane;    // 끝에 덧붙였다
 }
 
 [StructLayout(LayoutKind.Sequential)]
@@ -284,6 +323,16 @@ internal unsafe struct cimsue_audio_device_info_t
     public uint output_count;
 }
 
+[StructLayout(LayoutKind.Sequential)]
+internal unsafe struct cimsue_video_device_info_t
+{
+    public int id;
+    public byte* name;
+    public byte* driver;
+    public int capture;
+    public int render;
+}
+
 /// <summary>Listener 가상함수 1:1 의 함수 포인터 한 벌 + user. 코어 이벤트 스레드에서 호출된다.</summary>
 [StructLayout(LayoutKind.Sequential)]
 internal unsafe struct cimsue_listener_t
@@ -301,6 +350,9 @@ internal unsafe struct cimsue_listener_t
     public delegate* unmanaged[Cdecl]<void*, cimsue_request_result_t*, void> on_request_result;
     public delegate* unmanaged[Cdecl]<void*, int, byte*, byte*, byte*, void> on_message;
     public delegate* unmanaged[Cdecl]<void*, void> on_engine_stopped;
+    // 끝에 덧붙였다
+    public delegate* unmanaged[Cdecl]<void*, cimsue_call_info_t*, int, void> on_mcptt_condition;
+    public delegate* unmanaged[Cdecl]<void*, cimsue_emergency_alert_t*, void> on_emergency_alert;
 }
 
 // ── CSC 설정 평면 (csc.h) ──
@@ -359,6 +411,9 @@ internal unsafe struct cimsue_service_profile_t
     public byte** sec_mechanisms;
     public int sec_mechanism_count;
     public int max_payload_sds_cplane_bytes;
+    // 끝에 덧붙였다
+    public int udp_no_tcp_switch;
+    public int sms_gateway;
 }
 
 [StructLayout(LayoutKind.Sequential)]
@@ -466,6 +521,7 @@ internal unsafe struct cimsue_group_member_t
     public byte* role;
     public int priority;
     public int required;   // 헤더와 같은 순서 — 끝에 덧붙였다(64비트 크기 불변)
+    public byte* title;    // 산출 전용(직함) — 끝에 덧붙였다
 }
 
 [StructLayout(LayoutKind.Sequential)]
@@ -507,6 +563,65 @@ internal unsafe struct cimsue_group_doc_t
     public byte* ack_action;
 }
 
+[StructLayout(LayoutKind.Sequential)]
+internal unsafe struct cimsue_cms_entry_t
+{
+    public byte* uri;
+    public byte* mode;
+}
+
+[StructLayout(LayoutKind.Sequential)]
+internal unsafe struct cimsue_user_profile_doc_t
+{
+    public byte* etag;
+    public int not_modified;
+    public byte* user_uri;
+    public cimsue_cms_entry_t emergency_group;
+    public cimsue_cms_entry_t imminent_peril_group;
+    public cimsue_cms_entry_t emergency_alert_group;
+    public cimsue_cms_entry_t emergency_private_recipient;
+    public byte** groups;
+    public int group_count;
+    public byte** implicit_affiliations;
+    public int implicit_affiliation_count;
+    public int max_affiliations_n2;
+    public int allow_private_call;
+    public int allow_emergency_group_call;
+    public int allow_imminent_peril_call;
+    public int allow_activate_emergency_alert;
+    public int allow_cancel_emergency_alert;
+    public int allow_emergency_private_call;
+    public int allow_adhoc_group_call;
+}
+
+[StructLayout(LayoutKind.Sequential)]
+internal unsafe struct cimsue_service_config_doc_t
+{
+    public byte* etag;
+    public int not_modified;
+    public byte* domain;
+    public int num_levels_group_hierarchy;
+    public int num_levels_user_hierarchy;
+    public byte* rp_emergency;
+    public byte* rp_imminent_peril;
+    public byte* rp_normal;
+}
+
+[StructLayout(LayoutKind.Sequential)]
+internal struct cimsue_capabilities_t
+{
+    public int user_profile_known;
+    public int service_config_known;
+    public int private_call;
+    public int emergency_group_call;
+    public int imminent_peril_call;
+    public int emergency_private_call;
+    public int emergency_alert;
+    public int cancel_emergency_alert;
+    public int adhoc_group_call;
+    public int max_affiliations_n2;
+}
+
 /// <summary>cimsue_struct_id_t — ABI 자기검사용 구조체 id (헤더와 같은 순서).</summary>
 internal enum cimsue_struct_id_t
 {
@@ -515,5 +630,6 @@ internal enum cimsue_struct_id_t
     LISTENER, CSC_ENDPOINT, TOKEN_SET, SERVICE_ENDPOINT, SERVICE_PROFILE, DISPATCH_PROFILE, PROFILE, GROUP_SUMMARY, XCAP_DOC,
     DISPATCH_MEMBER, DISPATCH_TARGET, GROUP_MEMBER, GROUP_DOC, HTTP_RESULT, TLS_PEER_EXPIRY, FD_FILE, FD_UPLOAD,
     QUALITY_DIRECTION, CALL_QUALITY,
+    MCPTT_CONDITION, EMERGENCY_ALERT, VIDEO_DEVICE_INFO, CMS_ENTRY, USER_PROFILE_DOC, SERVICE_CONFIG_DOC, CAPABILITIES,
     COUNT_,
 }

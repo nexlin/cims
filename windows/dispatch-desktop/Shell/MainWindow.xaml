@@ -169,7 +169,11 @@
                                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
                                     <Button Style="{StaticResource Btn.Sm.Pri}" Content="응답 F9" Command="{Binding DataContext.AnswerBannerCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}" Margin="0,0,6,0" Visibility="{Binding IsIncoming, Converter={StaticResource BoolToVis}}" />
                                     <Button Style="{StaticResource Btn.Sm}" Content="거절" Command="{Binding DataContext.RejectBannerCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}" Visibility="{Binding IsIncoming, Converter={StaticResource BoolToVis}}" />
+                                    <Button Style="{StaticResource Btn.Sm}" Content="{Binding CancelText}" Command="{Binding DataContext.CancelBannerCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}" Margin="0,0,6,0"
+                                            Visibility="{Binding CanCancel, Converter={StaticResource BoolToVis}}" ToolTip="긴급·임박 = 조건 해제 요청(내가 올린 긴급) · 경보 = 경보 취소(남의 경보면 제3자 취소)" />
                                     <Button Style="{StaticResource Btn.Sm}" Content="채널로 이동" Command="{Binding DataContext.GoToChannelCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}" Visibility="{Binding IsEmergency, Converter={StaticResource BoolToVis}}" />
+                                    <Button Style="{StaticResource Btn.Sm}" Content="닫기" Command="{Binding DataContext.DismissBannerCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}" Margin="6,0,0,0"
+                                            Visibility="{Binding IsAlert, Converter={StaticResource BoolToVis}}" ToolTip="이 화면의 경보 표시만 내린다 — 서버의 경보는 그대로(취소 신호를 놓쳤을 때)" />
                                 </StackPanel>
                                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                                     <Path x:Name="CertIcon" Style="{StaticResource Icon}" Data="{StaticResource Icon.Warn}" Width="14" Height="14" Margin="0,0,8,0" VerticalAlignment="Center"

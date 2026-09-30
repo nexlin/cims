@@ -11,6 +11,7 @@ using DispatchDesktop.Converters;
 using DispatchDesktop.Models;
 
 using System.IO;
+using System.Net.NetworkInformation;
 
 namespace DispatchDesktop.Services;
 
@@ -50,6 +51,10 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
     [ObservableProperty] private string _headsetName = "";
     [ObservableProperty] private string _speakerName = "";
     [ObservableProperty] private string _captureName = "";
+    /// <summary>정책 게이트(CMS user profile ruleset — ue_sdk.md §4.2). 받지 못한 문서는 허용 — UX 선차단용이고 최종 판정은 서버다.</summary>
+    [ObservableProperty] private Capabilities _capabilities;
+    private UserProfileDoc? _userProfile;
+    private ServiceConfigDoc? _serviceConfig;
 
     public ObservableCollection<SessionItem> Sessions { get; } = new();
     public ObservableCollection<GroupInfo> Groups { get; } = new();
@@ -87,6 +92,8 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
         Engine.CallStateChanged += (_, c) => OnCallState(c);
         Engine.CallMediaChanged += (_, c) => OnCallMedia(c);
         Engine.FloorChanged += (_, f) => OnFloor(f);
+        Engine.McpttConditionChanged += (_, c) => OnCondition(c);
+        Engine.EmergencyAlertReceived += (_, a) => OnEmergencyAlert(a);
         Engine.RosterChanged += (_, r) => OnRoster(r);
         Engine.DialogInfoReceived += (_, d) => OnDialog(d);
         Engine.SdsReceived += (_, m) => SdsReceived?.Invoke(this, m);
@@ -95,6 +102,7 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
         Engine.HandlerFailed += (_, ex) => Log.Error("이벤트 핸들러 예외", ex);
         Engine.Stopped += (_, _) => Log.Info("engine stopped");
         Endpoints.Changed += (_, _) => OnEndpointsChanged();
+        _capabilities = Capabilities.Of(null, null);
     }
 
     // ── 서버 인증서 만료 경고 (sip_tls_signaling.md §8.6.2 — 관제사는 매일 앉아 있는 사람이라 폐쇄망에서 가장 확실한 채널) ──
@@ -167,7 +175,9 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
     public bool CanMonitorCalls => HasDesk && Dispatch.MonitorScope != "none";
     public bool CanListenPtt => HasDesk && Dispatch.PttListen != "none";
     public bool ListenHidden => Dispatch.ListenVisibility != "visible";
-    public bool CanSms => Volte is not null;      // 외부망 게이트웨이 능력 키는 §13 — 지금은 등록 가입자 간만
+    public bool CanSms => Volte is not null;
+    /// <summary>외부망 휴대전화 SMS/LMS 게이트웨이 연결(프로파일 `capabilities.smsGateway`, §4.3) — 외부 번호 [문자] 활성 조건. 등록 가입자 간 문자는 무관.</summary>
+    public bool SmsGateway => VolteService?.SmsGateway == true;
     /// <summary>GMS 그룹 생성 자격(`ptt.allowCreateGroup`) — [새 그룹] 노출. 편집·삭제는 그룹별 IsOwner. 관리 범위(CanManageDirectory)가 있으면 그것으로도 생성.</summary>
     public bool CanCreateGroups => (Profile?.AllowGroupCreation == true || CanManageDirectory) && Ptt is not null;
     /// <summary>관리 범위(`dispatch.directoryAdmin` own|all) — 관리 창(§4.5)의 조직/구성원/번호·PTT 그룹 탭 활성.</summary>
@@ -184,7 +194,7 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
         OnPropertyChanged(nameof(PilotId)); OnPropertyChanged(nameof(GroupName)); OnPropertyChanged(nameof(CanMonitorCalls));
         OnPropertyChanged(nameof(CanListenPtt)); OnPropertyChanged(nameof(ListenHidden)); OnPropertyChanged(nameof(CanCreateGroups));
         OnPropertyChanged(nameof(CanManageDirectory));
-        OnPropertyChanged(nameof(PttDomain));
+        OnPropertyChanged(nameof(PttDomain)); OnPropertyChanged(nameof(SmsGateway));
     }
     partial void OnPttChanged(Account? value) => OnPropertyChanged(nameof(CanCreateGroups));
 
@@ -363,6 +373,8 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
         var p = await _csc.FetchProfileAsync(tk, ct);
         if (!p.Ok) return p.WithoutValue();
         Profile = p.Value;
+        // SDS·SMS 보관 격리 단위 = 로그인 ID(관제석은 자리별 ID — 교대해도 같다). 한 PC 에 다른 자리 ID 로 로그인하면 앞 ID 의 스레드가 보이지 않는다.
+        Messages.SetOwner(p.Value.LoginId.Length > 0 ? p.Value.LoginId : Settings.Current.LoginId);
         Directory.CountryCode = p.Value.CountryCode;
         Directory.SetMembers(p.Value.Dispatch.Members, p.Value.Dispatch.GroupId);   // 서버 감시 대상·그룹원 목록(없으면 CSV member 폴백)
         Log.Info($"profile {p.Value.LoginId} services={string.Join(",", p.Value.Services.Select(s => s.Kind))} desk={p.Value.Dispatch.Present} " +
@@ -399,28 +411,44 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
         var ver = typeof(DispatchSession).Assembly.GetName().Version ?? new Version(0, 0, 0);
         string userAgent = DeviceIdentity.UserAgent("CIMS-Dispatch", $"{ver.Major}.{ver.Minor}.{Math.Max(0, ver.Build)}");
         string? instanceId = DeviceIdentity.InstanceUrn();
-        if (!Engine.IsRunning)
-        {
-            var r = Engine.Start(new EngineConfig
-            {
-                UserAgent = userAgent, LogLevel = s.LogLevel, TlsCaPem = ReadPem(s.TlsCaPemPath), TlsVerifyServer = s.CscVerifyServer,
-            });
-            if (!r.Ok) return r;
-            Log.Info($"device user-agent=\"{userAgent}\" instance={instanceId ?? "(pjsip 기본)"}");
-        }
-        ApplyAudioSettings();
-
         // 계정으로 올리는 서비스 = PTT 전부 + 전화 계열은 SDK 가 고른 하나(Profile.PhoneService — 유선 voip 우선, 없으면 이동 volte).
         //   관제사가 volte·voip 를 둘 다 가졌을 때 둘 다 등록하면 이동 번호까지 관제석에 바인딩되어 착신이 이 앱으로 포크되고,
         //   전화 계정 참조(Volte)·등록 상태(VolteReg)를 마지막 계정이 덮어쓴다 — 전화 계열은 한 계정만 올린다.
         var toRegister = Profile.Services.Where(s => s.Kind == "ptt").ToList();
         if (Profile.PhoneService is { } phone) toRegister.Insert(0, phone);
+        if (!Engine.IsRunning)
+        {
+            var r = Engine.Start(new EngineConfig
+            {
+                UserAgent = userAgent, LogLevel = s.LogLevel, TlsCaPem = ReadPem(s.TlsCaPemPath), TlsVerifyServer = s.CscVerifyServer,
+                // UDP→TCP 승격 비활성(sip.udpNoTcpSwitch)은 엔진 전역 — 올리는 서비스 중 하나라도 사이트 옵션이면 켠다(통제된 망 전용)
+                UdpNoTcpSwitch = toRegister.Any(x => x.UdpNoTcpSwitch),
+            });
+            if (!r.Ok) return r;
+            Log.Info($"device user-agent=\"{userAgent}\" instance={instanceId ?? "(pjsip 기본)"}");
+        }
+        ApplyAudioSettings();
+        // CMS user profile·service config(TS 24.484) — 정책 게이트와 Resource-Priority 값. 못 받아도 기동은 계속한다(게이트 없음 = 허용, RP = 코어 기본값).
+        if (PttService is not null) await RefreshCmsAsync();
+
         foreach (var sp in toRegister)
         {
             var cfg = sp.ToAccountConfig(_loginPw.Length > 0 ? _loginPw : null);
             cfg.DisplayName = Profile.DisplayName;
-            cfg.InstanceId = instanceId;                      // PTT·전화 계정이 같은 기기 값(RFC 5626 — 한 UA 인스턴스)
+            cfg.InstanceId = instanceId;                      // PTT·전화 계정이 같은 기기 값(RFC 5626 — 한 UA 인스턴스). MCPTT client ID 도 이 urn:uuid
             cfg.AutoAnswerMcptt = sp.Kind == "ptt";           // 그룹콜 자동 수락(개별 통화 분리는 §13 코어 과제)
+            if (sp.Kind == "ptt")
+            {
+                // 큰 그룹 SDS 는 media plane(MSRP) — 상한은 프로파일 mcdata(to_account 가 옮긴다), 서버발 MSRP 배포도 받는다(TS 24.282 §9.2.3)
+                cfg.McdataMsrp = true;
+                // Resource-Priority 정본 = service-config on-network *-resource-priority(TS 24.379 §6.2.8.1.15) — 문서에 없으면 코어 기본값
+                if (_serviceConfig is { } sc)
+                {
+                    if (sc.RpEmergency.Length > 0) cfg.RpEmergency = sc.RpEmergency;
+                    if (sc.RpImminentPeril.Length > 0) cfg.RpImminentPeril = sc.RpImminentPeril;
+                    if (sc.RpNormal.Length > 0) cfg.RpNormal = sc.RpNormal;
+                }
+            }
             var a = Engine.AddAccount(cfg);
             if (!a.Ok) { Log.Warn($"addAccount {sp.Kind}: {a}"); Notify.Error($"{sp.Kind.ToUpperInvariant()} 계정 추가 실패", a.ToString()); continue; }
             var kind = sp.Kind == "ptt" ? AccountKind.Ptt : AccountKind.Volte;
@@ -447,11 +475,37 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
             }
         }
         IsReady = true;
+        _netPrint = NetworkFingerprint();                        // 망 전환 판정의 기준(주소 지문)
+        _nextCmsPoll = DateTime.Now.AddSeconds(CmsPollSec);
         _nextServerCertCheck = DateTime.Now.AddSeconds(ServerCertCheckSec);
         UpdateServerCertBanner();                                // 로그인(HTTPS)·등록(TLS) 핸드셰이크 직후 — 배너는 관제 캔버스에서도 보인다
         ProfileApplied?.Invoke(this, EventArgs.Empty);
         _ = StartHistoryAsync();                                 // 서버 통합 이력(P3b) — 없으면 탐침에서 조용히 꺼진다
         return Result.Success;
+    }
+
+    // ── CMS 문서(TS 24.484 user profile·service config) — 정책 게이트(Capabilities)·Resource-Priority. ETag 로 304 면 받지 않는다 ──
+    public const int CmsPollSec = 300;
+    private DateTime _nextCmsPoll = DateTime.MaxValue;
+
+    private async Task RefreshCmsAsync()
+    {
+        if (_csc is null || PttService is null || MyPttId.Length == 0) return;
+        var csc = _csc; if (await AccessTokenAsync() is not { } token) return;
+        var up = await csc.FetchUserProfileAsync(token, MyPttId, _userProfile?.ETag);
+        if (up.Ok) { if (!up.Value.NotModified) _userProfile = up.Value; }
+        else Log.Warn($"cms user-profile: {up}");
+        var sc = await csc.FetchServiceConfigAsync(token, MyPttId, _serviceConfig?.ETag);
+        if (sc.Ok) { if (!sc.Value.NotModified) _serviceConfig = sc.Value; }
+        else Log.Warn($"cms service-config: {sc}");
+        var caps = Capabilities.Of(_userProfile, _serviceConfig);
+        if (caps != Capabilities)
+        {
+            Capabilities = caps;
+            Log.Info($"capabilities up={caps.UserProfileKnown} sc={caps.ServiceConfigKnown} private={caps.PrivateCall} emgGroup={caps.EmergencyGroupCall} " +
+                     $"peril={caps.ImminentPerilCall} alert={caps.EmergencyAlert} alertCancel={caps.CancelEmergencyAlert} adhoc={caps.AdhocGroupCall} n2={caps.MaxAffiliationsN2}");
+            foreach (var b in Notify.Banners.Where(b => b.IsAlert)) b.CanCancel = caps.CancelEmergencyAlert;
+        }
     }
 
     // ── 서버 통합 이력 폴링 (P3b — `/provisioning/history`, dispatch_desktop_ui.md §13) ──
@@ -747,6 +801,8 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
         Volte = null; Ptt = null; Profile = null;
         _accountKinds.Clear(); _watched.Clear(); _pendingOps.Clear(); _pendingConsult.Clear(); _adhocMembers.Clear(); _regRetryAt.Clear(); _regBackoff.Clear();
         _broadcastPending.Clear(); _groupTypes.Clear();
+        _userProfile = null; _serviceConfig = null; Capabilities = Capabilities.Of(null, null); _nextCmsPoll = DateTime.MaxValue; _netPrint = "";
+        foreach (var ab in Notify.Banners.Where(b => b.IsAlert).ToList()) Notify.RemoveBanner(ab);
         Sessions.Clear(); Groups.Clear(); Dialogs.Clear();
         VolteReg = RegInfo.Empty; PttReg = RegInfo.Empty;
         _nextDispatchPoll = DateTime.MaxValue; _profileEtag = "";
@@ -823,10 +879,43 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
         }
     }
 
-    /// <summary>네트워크 복귀 — 즉시 재등록(§6).</summary>
-    public void RefreshRegistrations()
+    // ── 망 전환 (§6 — 코어 Engine.HandleNetworkChange, ue_sdk.md §4.2) ──
+    //   계정별 REGISTER 만으로는 옛 주소의 TCP/TLS 연결이 남아 그 연결로 다시 나간다 — 코어가 연결을 닫고 계정마다 재등록(앞 등록이 걸려 있으면
+    //   끝난 뒤 한 번 더)한다. 통지(NetworkAvailabilityChanged·NetworkAddressChanged)는 가상 어댑터·IPv6 임시 주소로도 잦아 2 초 합친 뒤
+    //   유니캐스트 주소 지문이 바뀌었고 망이 있을 때만 알린다. 진행 중 호의 유지는 코어 과제(ue_sdk.md §11).
+    private string _netPrint = "";
+    private int _netSeq;
+
+    /// <summary>망 변화 통지 — 어느 스레드에서 불러도 된다.</summary>
+    public void NoteNetworkChange() => OnUi(() =>
     {
-        foreach (var a in new[] { Volte, Ptt }) a?.RefreshRegistration();
+        int seq = ++_netSeq;
+        _ = Task.Delay(2000).ContinueWith(_ => { if (seq == _netSeq) ApplyNetworkChange(); }, TaskScheduler.FromCurrentSynchronizationContext());
+    });
+
+    private void ApplyNetworkChange()
+    {
+        string print = NetworkFingerprint();
+        if (!IsReady || !Engine.IsRunning || print == _netPrint) return;
+        _netPrint = print;
+        if (!NetworkInterface.GetIsNetworkAvailable()) { Log.Info("network lost — 복귀를 기다린다"); return; }
+        var r = Engine.HandleNetworkChange();
+        Log.Info($"network changed → re-register {(r.Ok ? "" : r.ToString())} [{print}]");
+    }
+
+    /// <summary>쓸 수 있는 인터페이스의 유니캐스트 주소 지문(루프백·터널·링크 로컬 제외) — 바뀐 망만 가려낸다.</summary>
+    private static string NetworkFingerprint()
+    {
+        try
+        {
+            var addrs = NetworkInterface.GetAllNetworkInterfaces()
+                .Where(n => n.OperationalStatus == OperationalStatus.Up && n.NetworkInterfaceType is not (NetworkInterfaceType.Loopback or NetworkInterfaceType.Tunnel))
+                .SelectMany(n => n.GetIPProperties().UnicastAddresses.Select(a => a.Address))
+                .Where(a => !a.IsIPv6LinkLocal && !System.Net.IPAddress.IsLoopback(a))
+                .Select(a => a.ToString()).OrderBy(a => a, StringComparer.Ordinal);
+            return string.Join(",", addrs);
+        }
+        catch (NetworkInformationException) { return ""; }
     }
 
     private AccountKind KindOf(int accountId) => _accountKinds.TryGetValue(accountId, out var k) ? k : AccountKind.Volte;
@@ -892,6 +981,22 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
         var s = Find(ci.CallId);
         if (s is null) return;
         s.Info = ci;
+        UpdateEmergencyBanner(s);
+        SessionChanged?.Invoke(this, s);
+    }
+
+    /// <summary>세션 조건 변화(코어 onMcpttCondition — 호 상태와 다른 흐름). 조건만 옮기고, 늦게 닿은 끝난 호의 것은 그 호를 되살리지 않는다.
+    /// 진행 중 격상·해제·«이미 긴급인 그룹에 합류»(합류 200 OK 동봉)가 여기로 배너·카드·⑤ 에 선다.</summary>
+    private void OnCondition(McpttConditionChange c)
+    {
+        var s = Find(c.Info.CallId);
+        if (s is null || !c.Info.IsLive) return;
+        var k = c.Info.Condition;
+        Log.Info($"condition #{c.Info.CallId} {c.Cause} emg={k.Emergency} peril={k.ImminentPeril} mine={k.Mine} pending={k.Pending} code={k.LastCode}");
+        s.Info = c.Info;
+        if (c.Cause == ConditionCause.Denied)
+            Notify.Error($"{s.Title} — {ResponseText.Describe(ResponseText.Area.Emergency, k.LastCode, "")}", $"조건 변경 re-INVITE {k.LastCode}");
+        UpdateEmergencyBanner(s);
         SessionChanged?.Invoke(this, s);
     }
 
@@ -992,22 +1097,83 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
     private static string Fail(SessionItem s) => s.Info.LastCode >= 300 ? $"실패 {s.Info.LastCode}" : "";
     public static string Fmt(TimeSpan t) => t.TotalHours >= 1 ? t.ToString(@"h\:mm\:ss") : t.ToString(@"mm\:ss");
 
+    /// <summary>긴급·임박 배너(채널마다 하나) — 판정은 세션 조건(CallInfo.Condition). 호 상태·미디어 스냅샷·조건 이벤트가 모두 여기를 지난다(§3.2).
+    /// 같은 종류면 그대로(경과를 이어 간다), 임박 → 긴급은 새 개시, 조건이 내려가면 해제. 개별 통화는 착신 배너의 몫.</summary>
     private void UpdateEmergencyBanner(SessionItem s)
     {
         if (!s.Info.IsMcptt || s.Kind == SessionKind.PttPrivate) return;
         var existing = Notify.BannerOfGroup(s.Info.GroupId);
         bool emg = s.IsEmergency, peril = s.IsImminentPeril;
-        if (!emg && !peril) { if (existing is not null) { Notify.RemoveBanner(existing); Activity.Add(ActivityPanel.Ptt, ActivityKind.Emergency, $"{s.Title} 긴급 해제", emergency: true); } return; }
-        if (existing is not null && existing.IsEmg == emg) return;
+        if (!emg && !peril)
+        {
+            if (existing is not null && existing.Session == s)
+            {
+                Notify.RemoveBanner(existing);
+                Activity.Add(ActivityPanel.Ptt, ActivityKind.Emergency, $"{s.Title} {(existing.IsEmg ? "긴급" : "임박")} 해제", emergency: true);
+            }
+            return;
+        }
+        if (existing is not null && existing.IsEmg == emg) { existing.CanCancel = CanCancelCondition(s); return; }
         if (existing is not null) Notify.RemoveBanner(existing);
+        string initiator = s.ConditionInitiator.Length > 0 ? Directory.Label(s.ConditionInitiator) : "";
         Notify.ShowBanner(new Banner
         {
             Kind = emg ? BannerKind.Emergency : BannerKind.ImminentPeril, GroupId = s.Info.GroupId, Session = s,
-            Title = emg ? $"긴급 — {s.Title}" : $"임박 위험 — {s.Title}",
-            Subtitle = s.Info.Mcptt.CallingUserId.Length > 0 ? Directory.Label(s.Info.Mcptt.CallingUserId) : "",
+            Title = emg ? $"긴급 — {s.Title}" : $"임박 위험 — {s.Title}", Subtitle = initiator, CanCancel = CanCancelCondition(s),
         });
-        Activity.Add(ActivityPanel.Ptt, ActivityKind.Emergency, $"{s.Title} {(emg ? "긴급" : "임박")} 개시", Directory.Label(s.Info.Mcptt.CallingUserId), emergency: true);
+        Activity.Add(ActivityPanel.Ptt, ActivityKind.Emergency, $"{s.Title} {(emg ? "긴급" : "임박")} 개시", initiator, emergency: true);
     }
+
+    /// <summary>조건 하향을 서버가 받는가 — 지금은 내가 올린 조건만(CSP 가 개시자 외의 하향을 무시하면서 200 을 돌려줘, 다른 사람의 긴급을 풀면 이 화면만 풀린 것처럼
+    /// 보인다). 인가 확장(그룹 authorized user·관제 역할)과 비인가 403(TS 24.379 §10.1.1.4.7 7))은 서버 과제 E1(docs/dev/server_todo_mcptt_emergency_dispatch.md) 뒤에
+    /// 이 판정을 넓힌다. 청취 leg 는 조건을 바꾸지 않는다.</summary>
+    public bool CanCancelCondition(SessionItem s) => s.IsLive && s.IsActive && !s.Info.ListenOnly && (s.IsEmergency || s.IsImminentPeril) && !s.Info.Condition.Pending
+                                                     && s.IsConditionMine;
+
+    // ── 긴급 경보(TS 24.379 §12.1.1.3 — SIP MESSAGE alert-ind) ──
+    //   경보는 세션 조건과 별개 신호다 — 그룹 세션이 없어도 온다. 배너(자주)는 그룹·발신자마다 하나, 발신자 취소(또는 제3자 취소의 originated-by)로 내린다.
+    private void OnEmergencyAlert(EmergencyAlert a)
+    {
+        if (a.Self) return;                                                           // 내 경보의 에코
+        string gname = Groups.FirstOrDefault(g => g.Id == a.GroupId)?.Name ?? a.GroupId;
+        string user = UserPartConverter.UserPart(a.UserId);
+        Log.Info($"alert group={a.GroupId} user={a.UserId} by={a.OriginatedBy} alert={a.AlertInd} emg={a.EmergencyInd} peril={a.ImminentPerilInd}");
+        if (a.AlertInd > 0)
+        {
+            if (Notify.BannerOfAlert(a.GroupId, user) is { } old) Notify.RemoveBanner(old);
+            Notify.ShowBanner(new Banner
+            {
+                Kind = BannerKind.Alert, GroupId = a.GroupId, AlertUser = user, Title = $"긴급 경보 — {gname}",
+                Subtitle = Directory.Label(a.UserId) + (a.McOrg.Length > 0 ? $" ({a.McOrg})" : ""), CanCancel = Capabilities.CancelEmergencyAlert,
+            });
+            Activity.Add(ActivityPanel.Ptt, ActivityKind.Emergency, $"{gname} 긴급 경보", Directory.Label(a.UserId), emergency: true, number: user);
+        }
+        else if (a.AlertInd < 0)
+        {
+            string owner = a.OriginatedBy.Length > 0 ? UserPartConverter.UserPart(a.OriginatedBy) : user;   // 제3자 취소는 원 경보 발신자를 가리킨다
+            if (Notify.BannerOfAlert(a.GroupId, owner) is { } b) Notify.RemoveBanner(b);
+            Activity.Add(ActivityPanel.Ptt, ActivityKind.Emergency, $"{gname} 긴급 경보 해제",
+                         owner == user ? Directory.Label(a.UserId) : $"{Directory.Label(owner)} · 해제 {Directory.Label(a.UserId)}", emergency: true, number: owner);
+        }
+    }
+
+    /// <summary>배너 [해제] — 긴급·임박이면 세션 조건 하향(re-INVITE), 경보면 경보 취소 MESSAGE(남의 경보 = 제3자 취소, TS 24.379 §12.1.1.2 4)e)).</summary>
+    public Result CancelBanner(Banner b)
+    {
+        if (b.IsAlert)
+        {
+            if (Ptt is null) return Fail("PTT 계정 없음");
+            var r = Ptt.SendEmergencyAlert(b.GroupId, activate: false, originatedBy: b.AlertUser);
+            if (!r.Ok) return Show(r.WithoutValue(), ResponseText.Area.Emergency);
+            Notify.RemoveBanner(b);                                                   // 서버는 발신자에게 취소를 되돌려 주지 않는다 — 요청으로 내린다
+            Activity.Add(ActivityPanel.Ptt, ActivityKind.Emergency, $"{b.Title.Replace("긴급 경보 — ", "")} 긴급 경보 해제 요청", Directory.Label(b.AlertUser), emergency: true);
+            return Result.Success;
+        }
+        return b.Session is { } s ? CancelEmergency(s) : Fail("세션이 끝났습니다");
+    }
+
+    /// <summary>경보 배너 [닫기] — 로컬 표시만 내린다(취소 신호 유실 대비 탈출구). 서버의 경보 상태는 그대로다.</summary>
+    public void DismissAlert(Banner b) { if (b.IsAlert) { Notify.RemoveBanner(b); Log.Info($"alert banner dismissed {b.GroupId}/{b.AlertUser}"); } }
 
     // ── floor ──
     private void OnFloor(FloorEvent ev)
@@ -1269,10 +1435,30 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
         return Track(Ptt.JoinGroupCall(g.Id, new GroupCallOptions { ListenOnly = true }), Operation.PttListen);
     }
 
+    /// <summary>[긴급 호출] — 진행 중인 내 세션이 있으면 그 호의 조건 상향(in-dialog re-INVITE, TS 24.379 §10.1.1.2.1.3 — 새 INVITE 를 보내면 코어가
+    /// 같은 호를 돌려줘 아무 일도 없다), 없으면 긴급 그룹콜 개시(§10.1.1.2.1.1). 결과는 조건 이벤트(거절 = 토스트, 호는 유지).</summary>
     public Result EmergencyCall(GroupInfo g)
     {
         if (Ptt is null) return Fail("PTT 계정 없음");
+        if (!Capabilities.EmergencyGroupCall) return Fail("긴급 그룹콜 자격이 없습니다 (user profile allow-emergency-group-call)");
+        if (SessionOfGroup(g.Id) is { } s && s.IsLive)
+        {
+            if (s.IsEmergency) return Fail($"{g.Name} — 이미 긴급 상태입니다");
+            if (!s.IsActive || s.Info.Condition.Pending) return Fail($"{g.Name} — 통화가 성립한 뒤 긴급으로 올릴 수 있습니다");
+            var r = Engine.GetCall(s.CallId).SetCondition(emergency: true, imminentPeril: false);
+            if (r.Ok) Activity.Add(ActivityPanel.Ptt, ActivityKind.Emergency, $"{g.Name} 긴급 격상 요청", emergency: true);
+            return Show(r, ResponseText.Area.Emergency);
+        }
         return Track(Ptt.JoinGroupCall(g.Id, new GroupCallOptions { Emergency = true }), Operation.Emergency);
+    }
+
+    /// <summary>[긴급 해제] — 세션 조건 하향(TS 24.379 §10.1.1.2.1.4·§10.1.1.2.1.5 — emergency-ind/imminentperil-ind false re-INVITE). 지금은 내가 올린 조건만(CanCancelCondition).</summary>
+    public Result CancelEmergency(SessionItem s)
+    {
+        if (!CanCancelCondition(s)) return Fail($"{s.Title} — 긴급을 해제할 수 없습니다(내가 올린 긴급만)");
+        var r = Engine.GetCall(s.CallId).SetCondition(emergency: false, imminentPeril: false);
+        if (r.Ok) Activity.Add(ActivityPanel.Ptt, ActivityKind.Emergency, $"{s.Title} {(s.IsEmergency ? "긴급" : "임박")} 해제 요청", emergency: true);
+        return Show(r, ResponseText.Area.Emergency);
     }
 
     /// <summary>일제 통화 개시(TS 24.379 §4.12, mcptt_broadcast_group_call.md §3) — 편성 그룹에 prearranged + broadcast-ind 로 새 세션을 연다.
@@ -1312,6 +1498,9 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
     public Result StartPrivateCall(string peer, bool fullDuplex, bool emergency)
     {
         if (Ptt is null) return Fail("PTT 계정 없음");
+        // 정책 게이트(user profile ruleset, TS 24.484 §8.3.2.7) — UX 선차단, 최종 판정은 서버(403)
+        if (!Capabilities.PrivateCall) return Fail("개별 통화 자격이 없습니다 (user profile allow-private-call)");
+        if (emergency && !Capabilities.EmergencyPrivateCall) return Fail("긴급 개별 통화 자격이 없습니다 (user profile allow-emergency-private-call)");
         return Track(Ptt.StartPrivateCall(UserPartConverter.UserPart(peer), new GroupCallOptions { FullDuplex = fullDuplex, Emergency = emergency }),
                      emergency ? Operation.Emergency : Operation.PttPrivate);
     }
@@ -1319,6 +1508,8 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
     public Result StartAdhoc(IReadOnlyList<string> members, bool emergency)
     {
         if (Ptt is null) return Fail("PTT 계정 없음");
+        if (!Capabilities.AdhocGroupCall) return Fail("애드혹 그룹 통화 자격이 없습니다 (user profile allow-adhoc-group-call)");
+        if (emergency && !Capabilities.EmergencyGroupCall) return Fail("긴급 그룹콜 자격이 없습니다 (user profile allow-emergency-group-call)");
         if (members.Count == 0) return Fail("대상을 고르세요");
         return Track(JoinAdhoc(members, new GroupCallOptions { Emergency = emergency }), Operation.PttAdhoc);
     }
@@ -1329,6 +1520,7 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
     public int StartAdhocBroadcast(IReadOnlyList<string> members)
     {
         if (Ptt is null) { Fail("PTT 계정 없음"); return -1; }
+        if (!Capabilities.AdhocGroupCall) { Fail("애드혹 그룹 통화 자격이 없습니다 (user profile allow-adhoc-group-call)"); return -1; }
         if (members.Count == 0) { Fail("대상을 고르세요"); return -1; }
         var r = JoinAdhoc(members, new GroupCallOptions { Broadcast = true, ImplicitFloorRequest = true });
         if (r.Ok) _broadcastPending.Add(r.Value.Id);
@@ -1357,19 +1549,21 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
 
     // 메시지
     /// <summary>그룹 SDS 발신 — Value.MsgId(disposition 상관)·Value.Token(RequestCompleted 상관).</summary>
-    public Result<SdsSend> SendGroupSds(string groupId, string text)
+    /// <summary>msgId = 재전송이면 처음의 message ID(받는 쪽이 같은 메시지로 대조한다 — 앞 발신이 일부에게 닿았어도 중복 말풍선이 되지 않게), null = 새로.
+    /// 본문이 PTT 계정의 시그널링 평면 상한을 넘으면 코어가 media plane(MSRP)으로 보낸다(최종 결과 = RequestCompleted method "MSRP").</summary>
+    public Result<SdsSend> SendGroupSds(string groupId, string text, string? msgId = null)
     {
         if (Ptt is null) return Result<SdsSend>.Fail(-1, "PTT 계정 없음");
-        var r = Ptt.SendGroupSds(groupId, text, requestDelivery: true);
+        var r = Ptt.SendGroupSds(groupId, text, requestDelivery: true, msgId);
         if (!r.Ok) Notify.Error(ResponseText.Describe(ResponseText.Area.Sds, r.Code, r.Reason), r.ToString());
         return r;
     }
 
     /// <summary>1:1 SDS 발신(request-type one-to-one-sds) — peer = 상대 번호. 반환 규약은 SendGroupSds 와 같다.</summary>
-    public Result<SdsSend> SendSds(string peer, string text)
+    public Result<SdsSend> SendSds(string peer, string text, string? msgId = null)
     {
         if (Ptt is null) return Result<SdsSend>.Fail(-1, "PTT 계정 없음");
-        var r = Ptt.SendSds(UserPartConverter.UserPart(peer), text, requestDelivery: true);
+        var r = Ptt.SendSds(UserPartConverter.UserPart(peer), text, requestDelivery: true, msgId);
         if (!r.Ok) Notify.Error(ResponseText.Describe(ResponseText.Area.Sds, r.Code, r.Reason), r.ToString());
         return r;
     }
@@ -1474,6 +1668,7 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
         if (now.Date != _lastPrune) { _lastPrune = now.Date; Activity.Prune(now); }   // 날짜가 바뀐 첫 틱 — 정각 틱을 놓쳐도 하루 밀리지 않게
         if (IsReady && HasDesk && now >= _nextDispatchPoll) { _nextDispatchPoll = now.AddSeconds(DispatchPollSec); _ = RefreshDispatchAsync(); }
         if (IsReady && now >= _nextServerCertCheck) { _nextServerCertCheck = now.AddSeconds(ServerCertCheckSec); UpdateServerCertBanner(); }
+        if (IsReady && Ptt is not null && now >= _nextCmsPoll) { _nextCmsPoll = now.AddSeconds(CmsPollSec); _ = RefreshCmsAsync(); }
         // 아무것도 조회하지 않는 관제석도 토큰은 살아 있어야 한다 — 만료가 가까우면 틱이 먼저 갱신한다(§6).
         //   갱신이 실패하는 중이면 다음 틱이 다시 시도하므로 경고 띠가 붙은 채 스스로 회복한다.
         if (_tokens is not null && now >= _nextTokenCheck) { _nextTokenCheck = now.AddSeconds(TokenCheckSec); _ = AccessTokenAsync(); }

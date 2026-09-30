@@ -45,6 +45,13 @@ public unsafe class AbiLayoutTests
         new object[] { cimsue_struct_id_t.FD_UPLOAD, sizeof(cimsue_fd_upload_t) },
         new object[] { cimsue_struct_id_t.QUALITY_DIRECTION, sizeof(cimsue_quality_direction_t) },
         new object[] { cimsue_struct_id_t.CALL_QUALITY, sizeof(cimsue_call_quality_t) },
+        new object[] { cimsue_struct_id_t.MCPTT_CONDITION, sizeof(cimsue_mcptt_condition_t) },
+        new object[] { cimsue_struct_id_t.EMERGENCY_ALERT, sizeof(cimsue_emergency_alert_t) },
+        new object[] { cimsue_struct_id_t.VIDEO_DEVICE_INFO, sizeof(cimsue_video_device_info_t) },
+        new object[] { cimsue_struct_id_t.CMS_ENTRY, sizeof(cimsue_cms_entry_t) },
+        new object[] { cimsue_struct_id_t.USER_PROFILE_DOC, sizeof(cimsue_user_profile_doc_t) },
+        new object[] { cimsue_struct_id_t.SERVICE_CONFIG_DOC, sizeof(cimsue_service_config_doc_t) },
+        new object[] { cimsue_struct_id_t.CAPABILITIES, sizeof(cimsue_capabilities_t) },
     };
 
     [Theory]

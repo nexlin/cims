@@ -73,6 +73,8 @@ EngineConfig toCxx(const cimsue_engine_config_t* c) {
     e.noVad = c->no_vad != 0;
     e.udpPort = c->udp_port; e.tcpPort = c->tcp_port; e.tlsPort = c->tls_port;
     e.clockRate = c->clock_rate;
+    e.udpNoTcpSwitch = c->udp_no_tcp_switch != 0;
+    e.grantMicDelayMs = c->grant_mic_delay_ms;
     return e;
 }
 
@@ -99,6 +101,13 @@ AccountConfig toCxx(const cimsue_account_config_t* c) {
     assignIf(a.mcpttId, c->mcptt_id);
     a.autoAnswerMcptt = c->auto_answer_mcptt != 0;
     assignIf(a.instanceId, c->instance_id);
+    assignIf(a.mcpttClientId, c->mcptt_client_id);
+    assignIf(a.rpEmergency, c->rp_emergency);
+    assignIf(a.rpImminentPeril, c->rp_imminent_peril);
+    assignIf(a.rpNormal, c->rp_normal);
+    a.maxSdsCplaneBytes = c->max_sds_cplane_bytes;
+    a.mcdataMsrp = c->mcdata_msrp != 0;
+    assignIf(a.mcpttServerUri, c->mcptt_server_uri);
     return a;
 }
 
@@ -149,6 +158,33 @@ ServiceProfile toCxx(const cimsue_service_profile_t* c) {
     assignIf(s.akaK, c->aka_k); assignIf(s.akaOpc, c->aka_opc); assignIf(s.akaAmf, c->aka_amf);
     s.secMechanisms = strList(c->sec_mechanisms, c->sec_mechanism_count);
     s.maxPayloadSdsCplaneBytes = c->max_payload_sds_cplane_bytes;
+    s.udpNoTcpSwitch = c->udp_no_tcp_switch != 0;
+    s.smsGateway = c->sms_gateway != 0;
+    return s;
+}
+
+/** CMS 문서 입력(C → C++) — capabilities_of 가 코어 규칙(Capabilities::of)을 그대로 쓰게. 판정에 쓰는 필드만 옮긴다. */
+UserProfileDoc toCxx(const cimsue_user_profile_doc_t* c) {
+    UserProfileDoc u;
+    if (!c) return u;
+    u.maxAffiliationsN2 = c->max_affiliations_n2;
+    u.allowPrivateCall = c->allow_private_call != 0;
+    u.allowEmergencyGroupCall = c->allow_emergency_group_call != 0;
+    u.allowImminentPerilCall = c->allow_imminent_peril_call != 0;
+    u.allowActivateEmergencyAlert = c->allow_activate_emergency_alert != 0;
+    u.allowCancelEmergencyAlert = c->allow_cancel_emergency_alert != 0;
+    u.allowEmergencyPrivateCall = c->allow_emergency_private_call != 0;
+    u.allowAdhocGroupCall = c->allow_adhoc_group_call != 0;
+    return u;
+}
+
+ServiceConfigDoc toCxx(const cimsue_service_config_doc_t* c) {
+    ServiceConfigDoc s;
+    if (!c) return s;
+    s.domain = S(c->domain);
+    s.numLevelsGroupHierarchy = c->num_levels_group_hierarchy;
+    s.numLevelsUserHierarchy = c->num_levels_user_hierarchy;
+    s.rpEmergency = S(c->rp_emergency); s.rpImminentPeril = S(c->rp_imminent_peril); s.rpNormal = S(c->rp_normal);
     return s;
 }
 
@@ -196,6 +232,19 @@ void fill(cimsue_call_info_t& o, const CallInfo& c, std::vector<cimsue_media_sou
     o.half_duplex = B(c.halfDuplex);
     o.listen_only = B(c.listenOnly);
     o.joined_dialog = C(c.joinedDialog);
+    o.rx_level = c.rxLevel;
+    o.condition.emergency = B(c.condition.emergency);
+    o.condition.imminent_peril = B(c.condition.imminentPeril);
+    o.condition.mine = B(c.condition.mine);
+    o.condition.pending = B(c.condition.pending);
+    o.condition.last_code = c.condition.lastCode;
+}
+
+void fill(cimsue_emergency_alert_t& o, const EmergencyAlert& a) {
+    o.account_id = a.accountId;
+    o.group_id = C(a.groupId); o.user_id = C(a.userId); o.originated_by = C(a.originatedBy); o.mc_org = C(a.mcOrg);
+    o.alert_ind = a.alertInd; o.emergency_ind = a.emergencyInd; o.imminent_peril_ind = a.imminentPerilInd;
+    o.self = B(a.self);
 }
 
 void fill(cimsue_tls_peer_expiry_t& o, const TlsPeerExpiry& t) {
@@ -275,6 +324,7 @@ void fill(cimsue_sds_message_t& o, const SdsMessage& m) {
     o.fd = B(m.fd);
     o.file_url = C(m.fileUrl); o.file_name = C(m.fileName); o.file_type = C(m.fileType);
     o.file_size = m.fileSize;
+    o.media_plane = B(m.mediaPlane);
 }
 
 void fill(cimsue_stream_stats_t& o, const StreamStats& s) {
@@ -325,7 +375,57 @@ void fill(cimsue_account_config_t& o, const AccountConfig& a, std::vector<const 
     o.mcptt_id = C(a.mcpttId);
     o.auto_answer_mcptt = B(a.autoAnswerMcptt);
     o.instance_id = C(a.instanceId);
+    o.mcptt_client_id = C(a.mcpttClientId);
+    o.rp_emergency = C(a.rpEmergency); o.rp_imminent_peril = C(a.rpImminentPeril); o.rp_normal = C(a.rpNormal);
+    o.max_sds_cplane_bytes = a.maxSdsCplaneBytes;
+    o.mcdata_msrp = B(a.mcdataMsrp);
+    o.mcptt_server_uri = C(a.mcpttServerUri);
 }
+
+/** CMS 문서의 C 스냅샷 — 핸들(fetch)과 스레드 스크래치(parse) 양쪽이 쓴다. */
+struct UserProfileHolder {
+    UserProfileDoc cxx;
+    std::vector<const char*> groups, implicit;
+    cimsue_user_profile_doc_t out{};
+
+    void build() {
+        auto entry = [](const CmsEntry& e) { return cimsue_cms_entry_t{C(e.uri), C(e.mode)}; };
+        groups.clear(); implicit.clear();
+        for (const auto& g : cxx.groups) groups.push_back(C(g));
+        for (const auto& g : cxx.implicitAffiliations) implicit.push_back(C(g));
+        out = cimsue_user_profile_doc_t{};
+        out.etag = C(cxx.etag); out.not_modified = B(cxx.notModified); out.user_uri = C(cxx.userUri);
+        out.emergency_group = entry(cxx.emergencyGroup);
+        out.imminent_peril_group = entry(cxx.imminentPerilGroup);
+        out.emergency_alert_group = entry(cxx.emergencyAlertGroup);
+        out.emergency_private_recipient = entry(cxx.emergencyPrivateRecipient);
+        out.groups = groups.empty() ? nullptr : groups.data();
+        out.group_count = (int32_t)groups.size();
+        out.implicit_affiliations = implicit.empty() ? nullptr : implicit.data();
+        out.implicit_affiliation_count = (int32_t)implicit.size();
+        out.max_affiliations_n2 = cxx.maxAffiliationsN2;
+        out.allow_private_call = B(cxx.allowPrivateCall);
+        out.allow_emergency_group_call = B(cxx.allowEmergencyGroupCall);
+        out.allow_imminent_peril_call = B(cxx.allowImminentPerilCall);
+        out.allow_activate_emergency_alert = B(cxx.allowActivateEmergencyAlert);
+        out.allow_cancel_emergency_alert = B(cxx.allowCancelEmergencyAlert);
+        out.allow_emergency_private_call = B(cxx.allowEmergencyPrivateCall);
+        out.allow_adhoc_group_call = B(cxx.allowAdhocGroupCall);
+    }
+};
+
+struct ServiceConfigHolder {
+    ServiceConfigDoc cxx;
+    cimsue_service_config_doc_t out{};
+
+    void build() {
+        out = cimsue_service_config_doc_t{};
+        out.etag = C(cxx.etag); out.not_modified = B(cxx.notModified); out.domain = C(cxx.domain);
+        out.num_levels_group_hierarchy = cxx.numLevelsGroupHierarchy;
+        out.num_levels_user_hierarchy = cxx.numLevelsUserHierarchy;
+        out.rp_emergency = C(cxx.rpEmergency); out.rp_imminent_peril = C(cxx.rpImminentPeril); out.rp_normal = C(cxx.rpNormal);
+    }
+};
 
 /** Profile 한 벌의 소유자 — C++ 객체와 그것을 가리키는 POD 배열을 함께 들고 있는다. */
 /** GroupDoc 의 C 스냅샷 — 핸들(getter 산출)과 스레드 스크래치(parse) 양쪽이 쓴다. */
@@ -336,7 +436,7 @@ struct GroupDocHolder {
 
     void build() {
         mem.clear();
-        for (const auto& m : cxx.members) mem.push_back({C(m.uri), C(m.name), C(m.role), m.priority, B(m.required)});
+        for (const auto& m : cxx.members) mem.push_back({C(m.uri), C(m.name), C(m.role), m.priority, B(m.required), C(m.title)});
         out = cimsue_group_doc_t{};
         out.uri = C(cxx.uri); out.display_name = C(cxx.displayName); out.etag = C(cxx.etag);
         out.members = mem.empty() ? nullptr : mem.data();
@@ -426,6 +526,8 @@ struct ProfileHolder {
             o.sec_mechanisms = sec[i].empty() ? nullptr : sec[i].data();
             o.sec_mechanism_count = (int32_t)sec[i].size();
             o.max_payload_sds_cplane_bytes = s.maxPayloadSdsCplaneBytes;
+            o.udp_no_tcp_switch = B(s.udpNoTcpSwitch);
+            o.sms_gateway = B(s.smsGateway);
         }
         out.display_name = C(cxx.displayName);
         out.login_id = C(cxx.loginId);
@@ -468,6 +570,10 @@ struct Scratch {
     std::vector<int32_t>                    ids;
     std::vector<AudioDeviceInfo>            devs;
     std::vector<cimsue_audio_device_info_t> devsC;
+    std::vector<VideoDeviceInfo>            vdevs;
+    std::vector<cimsue_video_device_info_t> vdevsC;
+    UserProfileHolder                       userProfile;
+    ServiceConfigHolder                     serviceConfig;
     AccountConfig                           acc;
     std::vector<const char*>                accSec;
     ProfileHolder                           profile;
@@ -529,6 +635,16 @@ public:
     void onEngineStopped() override {
         if (cb.on_engine_stopped) cb.on_engine_stopped(cb.user);
     }
+    void onMcpttCondition(const CallInfo& info, ConditionCause cause) override {
+        if (!cb.on_mcptt_condition) return;
+        cimsue_call_info_t o{}; std::vector<cimsue_media_source_t> src; fill(o, info, src);
+        cb.on_mcptt_condition(cb.user, &o, (cimsue_condition_cause_t)cause);
+    }
+    void onEmergencyAlert(const EmergencyAlert& alert) override {
+        if (!cb.on_emergency_alert) return;
+        cimsue_emergency_alert_t o{}; fill(o, alert);
+        cb.on_emergency_alert(cb.user, &o);
+    }
 
 private:
     using CallCb = void(CIMSUE_CALL*)(void*, const cimsue_call_info_t*);
@@ -564,6 +680,8 @@ struct cimsue_csc {
     cimsue_tls_peer_expiry_t   tlsPeerC{};
     FdUpload                   fd;
     cimsue_fd_upload_t         fdC{};
+    UserProfileHolder          userProfile;
+    ServiceConfigHolder        serviceConfig;
 };
 
 namespace {
@@ -621,6 +739,8 @@ void CIMSUE_CALL cimsue_engine_config_default(cimsue_engine_config_t* cfg) {
     cfg->no_vad = B(d.noVad);
     cfg->udp_port = d.udpPort; cfg->tcp_port = d.tcpPort; cfg->tls_port = d.tlsPort;
     cfg->clock_rate = d.clockRate;
+    cfg->udp_no_tcp_switch = B(d.udpNoTcpSwitch);
+    cfg->grant_mic_delay_ms = d.grantMicDelayMs;
 }
 
 cimsue_status_t CIMSUE_CALL cimsue_engine_start(cimsue_engine_t* e, const cimsue_engine_config_t* cfg,
@@ -649,6 +769,8 @@ void CIMSUE_CALL cimsue_account_config_default(cimsue_account_config_t* cfg) {
     cfg->expires_sec = d.expiresSec;
     cfg->video_auto_transmit = B(d.videoAutoTransmit);
     cfg->auto_answer_mcptt = B(d.autoAnswerMcptt);
+    cfg->max_sds_cplane_bytes = d.maxSdsCplaneBytes;
+    cfg->mcdata_msrp = B(d.mcdataMsrp);
 }
 
 int32_t CIMSUE_CALL cimsue_engine_add_account(cimsue_engine_t* e, const cimsue_account_config_t* cfg) {
@@ -804,6 +926,20 @@ void CIMSUE_CALL cimsue_engine_floor_info(const cimsue_engine_t* e, int32_t call
     *out = g_s.floorC;
 }
 
+cimsue_status_t CIMSUE_CALL cimsue_engine_set_call_condition(cimsue_engine_t* e, int32_t call_id, int32_t emergency,
+                                                             int32_t imminent_peril) {
+    return e ? ret(e->eng.setCallCondition(call_id, emergency != 0, imminent_peril != 0)) : -1;
+}
+
+int64_t CIMSUE_CALL cimsue_engine_send_emergency_alert(cimsue_engine_t* e, int32_t account_id, const char* group_id,
+                                                       int32_t activate, const char* originated_by,
+                                                       int32_t cancel_group_emergency) {
+    if (!e) { g_lastError = "no engine"; return -1; }
+    int64_t t = e->eng.sendEmergencyAlert(account_id, S(group_id), activate != 0, S(originated_by), cancel_group_emergency != 0);
+    if (t < 0) g_lastError = "sendEmergencyAlert failed";
+    return t;
+}
+
 int64_t CIMSUE_CALL cimsue_engine_affiliate(cimsue_engine_t* e, int32_t account_id, const char* group_id, int32_t on) {
     if (!e) { g_lastError = "no engine"; return -1; }
     int64_t t = e->eng.affiliate(account_id, S(group_id), on != 0);
@@ -860,10 +996,10 @@ cimsue_status_t CIMSUE_CALL cimsue_engine_transfer_attended(cimsue_engine_t* e, 
 // MCData SDS
 
 cimsue_status_t CIMSUE_CALL cimsue_engine_send_group_sds(cimsue_engine_t* e, int32_t account_id, const char* group_id,
-                                                         const char* text, int32_t request_delivery, char* msg_id_out,
-                                                         int32_t msg_id_cap, int64_t* token_out) {
+                                                         const char* text, int32_t request_delivery, const char* msg_id,
+                                                         char* msg_id_out, int32_t msg_id_cap, int64_t* token_out) {
     if (!e) { g_lastError = "no engine"; return -1; }
-    SdsSend r = e->eng.sendGroupSds(account_id, S(group_id), S(text), request_delivery != 0);
+    SdsSend r = e->eng.sendGroupSds(account_id, S(group_id), S(text), request_delivery != 0, S(msg_id));
     if (token_out) *token_out = r.token;
     if (!r.ok) { g_lastError = r.reason.empty() ? "sendGroupSds failed" : r.reason; return -1; }
     copyOut(r.msgId, msg_id_out, msg_id_cap);
@@ -871,10 +1007,10 @@ cimsue_status_t CIMSUE_CALL cimsue_engine_send_group_sds(cimsue_engine_t* e, int
 }
 
 cimsue_status_t CIMSUE_CALL cimsue_engine_send_sds(cimsue_engine_t* e, int32_t account_id, const char* peer,
-                                                    const char* text, int32_t request_delivery, char* msg_id_out,
-                                                    int32_t msg_id_cap, int64_t* token_out) {
+                                                    const char* text, int32_t request_delivery, const char* msg_id,
+                                                    char* msg_id_out, int32_t msg_id_cap, int64_t* token_out) {
     if (!e) { g_lastError = "no engine"; return -1; }
-    SdsSend r = e->eng.sendSds(account_id, S(peer), S(text), request_delivery != 0);
+    SdsSend r = e->eng.sendSds(account_id, S(peer), S(text), request_delivery != 0, S(msg_id));
     if (token_out) *token_out = r.token;
     if (!r.ok) { g_lastError = r.reason.empty() ? "sendSds failed" : r.reason; return -1; }
     copyOut(r.msgId, msg_id_out, msg_id_cap);
@@ -940,6 +1076,33 @@ cimsue_status_t CIMSUE_CALL cimsue_engine_remove_playback_route(cimsue_engine_t*
 cimsue_status_t CIMSUE_CALL cimsue_engine_set_call_route(cimsue_engine_t* e, int32_t call_id, int32_t route_id) {
     return e ? ret(e->eng.setCallRoute(call_id, route_id)) : -1;
 }
+cimsue_status_t CIMSUE_CALL cimsue_engine_set_capture_enabled(cimsue_engine_t* e, int32_t on) {
+    return e ? ret(e->eng.setCaptureEnabled(on != 0)) : -1;
+}
+int32_t CIMSUE_CALL cimsue_engine_capture_enabled(const cimsue_engine_t* e) { return e ? B(e->eng.captureEnabled()) : 0; }
+cimsue_status_t CIMSUE_CALL cimsue_engine_set_device_audio_levels(cimsue_engine_t* e, float speaker, double mic_target_dbov) {
+    return e ? ret(e->eng.setDeviceAudioLevels(speaker, mic_target_dbov)) : -1;
+}
+cimsue_status_t CIMSUE_CALL cimsue_engine_set_audio_route(cimsue_engine_t* e, cimsue_audio_route_t output,
+                                                          cimsue_audio_route_t input) {
+    return e ? ret(e->eng.setAudioRoute((AudioRoute)output, (AudioRoute)input)) : -1;
+}
+cimsue_status_t CIMSUE_CALL cimsue_engine_reopen_audio_device(cimsue_engine_t* e) {
+    return e ? ret(e->eng.reopenAudioDevice()) : -1;
+}
+cimsue_status_t CIMSUE_CALL cimsue_engine_set_video_window(cimsue_engine_t* e, void* native_window) {
+    return e ? ret(e->eng.setVideoWindow(native_window)) : -1;
+}
+cimsue_status_t CIMSUE_CALL cimsue_engine_switch_camera(cimsue_engine_t* e, int32_t call_id) {
+    return e ? ret(e->eng.switchCamera(call_id)) : -1;
+}
+int32_t CIMSUE_CALL cimsue_engine_video_devices(const cimsue_engine_t* e, const cimsue_video_device_info_t** out) {
+    g_s.vdevs = e ? e->eng.videoDevices() : std::vector<VideoDeviceInfo>();
+    g_s.vdevsC.clear();
+    for (const auto& d : g_s.vdevs) g_s.vdevsC.push_back({d.id, C(d.name), C(d.driver), B(d.capture), B(d.render)});
+    if (out) *out = g_s.vdevsC.empty() ? nullptr : g_s.vdevsC.data();
+    return (int32_t)g_s.vdevsC.size();
+}
 
 const char* CIMSUE_CALL cimsue_version(void) {
     static const std::string v = Engine::version();
@@ -953,6 +1116,7 @@ const char* CIMSUE_CALL cimsue_call_state_str(cimsue_call_state_t s) { return to
 const char* CIMSUE_CALL cimsue_transport_str(cimsue_transport_t t) { return toString((Transport)t); }
 const char* CIMSUE_CALL cimsue_floor_state_str(cimsue_floor_state_t s) { return toString((FloorState)s); }
 const char* CIMSUE_CALL cimsue_floor_kind_str(cimsue_floor_kind_t k) { return toString((FloorEvent::Kind)k); }
+const char* CIMSUE_CALL cimsue_condition_cause_str(cimsue_condition_cause_t c) { return toString((ConditionCause)c); }
 
 // 문자열 산출 헬퍼
 
@@ -1160,6 +1324,60 @@ cimsue_status_t CIMSUE_CALL cimsue_csc_get_service_config(cimsue_csc_t* c, const
     return st;
 }
 
+cimsue_status_t CIMSUE_CALL cimsue_csc_fetch_user_profile(cimsue_csc_t* c, const char* access_token, const char* user_uri,
+                                                          const char* etag, cimsue_user_profile_doc_t* out) {
+    if (!c) return -1;
+    c->userProfile.cxx = UserProfileDoc();
+    cimsue_status_t st = ret(c->cli->fetchUserProfile(S(access_token), S(user_uri), S(etag), c->userProfile.cxx));
+    c->userProfile.build();
+    if (out) *out = c->userProfile.out;
+    return st;
+}
+
+cimsue_status_t CIMSUE_CALL cimsue_csc_fetch_service_config(cimsue_csc_t* c, const char* access_token, const char* user_uri,
+                                                            const char* etag, cimsue_service_config_doc_t* out) {
+    if (!c) return -1;
+    c->serviceConfig.cxx = ServiceConfigDoc();
+    cimsue_status_t st = ret(c->cli->fetchServiceConfig(S(access_token), S(user_uri), S(etag), c->serviceConfig.cxx));
+    c->serviceConfig.build();
+    if (out) *out = c->serviceConfig.out;
+    return st;
+}
+
+cimsue_status_t CIMSUE_CALL cimsue_user_profile_parse(const char* xml, cimsue_user_profile_doc_t* out) {
+    g_s.userProfile.cxx = UserProfileDoc();
+    std::string err;
+    bool ok = UserProfileDoc::parse(S(xml), g_s.userProfile.cxx, &err);
+    g_s.userProfile.build();
+    if (out) *out = g_s.userProfile.out;
+    if (!ok) { g_lastError = err; return -1; }
+    return CIMSUE_OK;
+}
+
+cimsue_status_t CIMSUE_CALL cimsue_service_config_parse(const char* xml, cimsue_service_config_doc_t* out) {
+    g_s.serviceConfig.cxx = ServiceConfigDoc();
+    std::string err;
+    bool ok = ServiceConfigDoc::parse(S(xml), g_s.serviceConfig.cxx, &err);
+    g_s.serviceConfig.build();
+    if (out) *out = g_s.serviceConfig.out;
+    if (!ok) { g_lastError = err; return -1; }
+    return CIMSUE_OK;
+}
+
+void CIMSUE_CALL cimsue_capabilities_of(const cimsue_user_profile_doc_t* user_profile,
+                                        const cimsue_service_config_doc_t* service_config, cimsue_capabilities_t* out) {
+    if (!out) return;
+    UserProfileDoc up = toCxx(user_profile);
+    ServiceConfigDoc sc = toCxx(service_config);
+    Capabilities k = Capabilities::of(user_profile ? &up : nullptr, service_config ? &sc : nullptr);
+    *out = cimsue_capabilities_t{};
+    out->user_profile_known = B(k.userProfileKnown); out->service_config_known = B(k.serviceConfigKnown);
+    out->private_call = B(k.privateCall); out->emergency_group_call = B(k.emergencyGroupCall);
+    out->imminent_peril_call = B(k.imminentPerilCall); out->emergency_private_call = B(k.emergencyPrivateCall);
+    out->emergency_alert = B(k.emergencyAlert); out->cancel_emergency_alert = B(k.cancelEmergencyAlert);
+    out->adhoc_group_call = B(k.adhocGroupCall); out->max_affiliations_n2 = k.maxAffiliationsN2;
+}
+
 void CIMSUE_CALL cimsue_csc_tls_peer_expiry(cimsue_csc_t* c, cimsue_tls_peer_expiry_t* out) {
     if (!out) return;
     if (!c) { *out = cimsue_tls_peer_expiry_t{}; return; }
@@ -1245,6 +1463,13 @@ int32_t CIMSUE_CALL cimsue_struct_size(cimsue_struct_id_t id) {
     case CIMSUE_STRUCT_FD_UPLOAD:         return (int32_t)sizeof(cimsue_fd_upload_t);
     case CIMSUE_STRUCT_QUALITY_DIRECTION: return (int32_t)sizeof(cimsue_quality_direction_t);
     case CIMSUE_STRUCT_CALL_QUALITY:      return (int32_t)sizeof(cimsue_call_quality_t);
+    case CIMSUE_STRUCT_MCPTT_CONDITION:   return (int32_t)sizeof(cimsue_mcptt_condition_t);
+    case CIMSUE_STRUCT_EMERGENCY_ALERT:   return (int32_t)sizeof(cimsue_emergency_alert_t);
+    case CIMSUE_STRUCT_VIDEO_DEVICE_INFO: return (int32_t)sizeof(cimsue_video_device_info_t);
+    case CIMSUE_STRUCT_CMS_ENTRY:         return (int32_t)sizeof(cimsue_cms_entry_t);
+    case CIMSUE_STRUCT_USER_PROFILE_DOC:  return (int32_t)sizeof(cimsue_user_profile_doc_t);
+    case CIMSUE_STRUCT_SERVICE_CONFIG_DOC: return (int32_t)sizeof(cimsue_service_config_doc_t);
+    case CIMSUE_STRUCT_CAPABILITIES:      return (int32_t)sizeof(cimsue_capabilities_t);
     default:                              return -1;
     }
 }

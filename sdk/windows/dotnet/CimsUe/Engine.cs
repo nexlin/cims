@@ -49,6 +49,10 @@ public sealed unsafe class Engine : IDisposable
     public event EventHandler<CallInfo>? CallMediaChanged;
     /// <summary>floor participant 상태 전이 (TS 24.380 §6.2.4). 마이크 게이트는 코어가 이미 처리했다.</summary>
     public event EventHandler<FloorEvent>? FloorChanged;
+    /// <summary>MCPTT 세션 조건 변화(긴급·임박, TS 24.379 §10.1.1.2.1.3~6) — Info.Condition 이 새 값, Cause 가 계기. 호 상태 이벤트와 다른 흐름이다.</summary>
+    public event EventHandler<McpttConditionChange>? McpttConditionChanged;
+    /// <summary>긴급 경보·취소·긴급 통지 수신(TS 24.379 §12.1.1.3). 200 OK 는 코어가 이미 보냈다.</summary>
+    public event EventHandler<EmergencyAlert>? EmergencyAlertReceived;
     /// <summary>그룹 로스터(RFC 4575) — 구독 NOTIFY 또는 in-dialog NOTIFY.</summary>
     public event EventHandler<RosterUpdate>? RosterChanged;
     /// <summary>감시 대상 dialog 상태(RFC 4235 NOTIFY) — dialog 하나당 1회.</summary>
@@ -79,6 +83,8 @@ public sealed unsafe class Engine : IDisposable
         n.no_vad = B(cfg.NoVad);
         n.udp_port = cfg.UdpPort; n.tcp_port = cfg.TcpPort; n.tls_port = cfg.TlsPort;
         n.clock_rate = cfg.ClockRate;
+        n.udp_no_tcp_switch = B(cfg.UdpNoTcpSwitch);
+        n.grant_mic_delay_ms = cfg.GrantMicDelayMs;
         cimsue_listener_t l = MakeListener();
         return Status(cimsue_engine_start(Handle, &n, &l));
     }
@@ -229,6 +235,35 @@ public sealed unsafe class Engine : IDisposable
     }
     /// <summary>라우트 닫기. 이 라우트에 붙은 호는 라우트 0 으로 되돌아간다.</summary>
     public Result RemovePlaybackRoute(int routeId) => Status(cimsue_engine_remove_playback_route(Handle, routeId));
+    /// <summary>캡처 게이트 — false = 캡처 스트림을 열지 않는다(재생만). 호 음소거·floor 게이트와 별개인 장치 단위 스위치이고 장치 선택을 넘어 유지된다.</summary>
+    public Result SetCaptureEnabled(bool on) => Status(cimsue_engine_set_capture_enabled(Handle, B(on)));
+    public bool CaptureEnabled => cimsue_engine_capture_enabled(Handle) != 0;
+    /// <summary>장치 단 음량(ue_audio_level.md §2·§6) — speaker = 스피커 배율(1 = 원음), micTargetDbov = 마이크 AGC 목표(-40..-10, 기본
+    /// <see cref="EngineConfig.MicAgcTargetDbov"/>). 코어가 기억해 게이트 전환·장치 재오픈·호 결선 뒤 다시 건다.</summary>
+    public Result SetDeviceAudioLevels(float speaker, double micTargetDbov = EngineConfig.MicAgcTargetDbov) =>
+        Status(cimsue_engine_set_device_audio_levels(Handle, speaker, micTargetDbov));
+    /// <summary>오디오 라우트(모바일 OUTPUT/INPUT_ROUTE) — 라우트가 없는 데스크톱 장치는 무시될 수 있다.</summary>
+    public Result SetAudioRoute(AudioRoute output, AudioRoute input) => Status(cimsue_engine_set_audio_route(Handle, (int)output, (int)input));
+    /// <summary>사운드 장치 재오픈 — 열려 있으면 닫고 곧바로 다시 연다(재생·캡처 트랙 재생성, 브리지 결선·게이트·라우트·음량 유지). 닫혀 있으면 아무것도 하지 않는다.</summary>
+    public Result ReopenAudioDevice() => Status(cimsue_engine_reopen_audio_device(Handle));
+
+    // ── 영상 (§4.5 — 코어는 창을 열지 않는다) ──
+    /// <summary>수신 영상 렌더 대상 — 플랫폼 창 핸들(Windows = HWND, 참조를 세지 않는다). IntPtr.Zero = 해제. 영상 없는 빌드면 실패.</summary>
+    public Result SetVideoWindow(IntPtr nativeWindow) => Status(cimsue_engine_set_video_window(Handle, nativeWindow));
+    /// <summary>캡처 카메라 전환 — 활성 영상 호의 송신 장치를 다음 카메라로.</summary>
+    public Result SwitchCamera(int callId) => Status(cimsue_engine_switch_camera(Handle, callId));
+    public IReadOnlyList<VideoDeviceInfo> VideoDevices
+    {
+        get
+        {
+            cimsue_video_device_info_t* p;
+            int n = cimsue_engine_video_devices(Handle, &p);
+            var list = new VideoDeviceInfo[n];
+            for (int i = 0; i < n; ++i)
+                list[i] = new VideoDeviceInfo(p[i].id, Utf8.Str(p[i].name), Utf8.Str(p[i].driver), p[i].capture != 0, p[i].render != 0);
+            return list;
+        }
+    }
 
     // ── 정적 헬퍼 (types.h 인라인 멤버 1:1 — 규칙은 코어에 하나만 둔다) ──
 
@@ -281,6 +316,7 @@ public sealed unsafe class Engine : IDisposable
     public static string ToText(Transport t) => Utf8.Str(cimsue_transport_str((int)t));
     public static string ToText(FloorState s) => Utf8.Str(cimsue_floor_state_str((int)s));
     public static string ToText(FloorEventKind k) => Utf8.Str(cimsue_floor_kind_str((int)k));
+    public static string ToText(ConditionCause c) => Utf8.Str(cimsue_condition_cause_str((int)c));
 
     /// <summary>REGISTER User-Agent 규약 `&lt;제품&gt;/&lt;앱 버전&gt; (&lt;OS&gt;; &lt;모델&gt;)`(mcptt_management_views.md §4.1) — 코어 userAgentOf
     /// (괄호·역슬래시·제어 문자 정리 포함). Windows 기기 값을 채운 결과는 <see cref="Platform.DeviceIdentity.UserAgent"/>.</summary>
@@ -336,6 +372,13 @@ public sealed unsafe class Engine : IDisposable
         n.mcptt_id = s.Add(a.McpttId);
         n.auto_answer_mcptt = B(a.AutoAnswerMcptt);
         n.instance_id = s.Add(a.InstanceId);
+        n.mcptt_client_id = s.Add(a.McpttClientId);
+        n.rp_emergency = s.Add(a.RpEmergency);
+        n.rp_imminent_peril = s.Add(a.RpImminentPeril);
+        n.rp_normal = s.Add(a.RpNormal);
+        n.max_sds_cplane_bytes = a.MaxSdsCplaneBytes;
+        n.mcdata_msrp = B(a.McdataMsrp);
+        n.mcptt_server_uri = s.Add(a.McpttServerUri);
         return n;
     }
 
@@ -354,6 +397,9 @@ public sealed unsafe class Engine : IDisposable
             SecMechanisms = sec.Length == 0 ? null : sec, MediaSecurity = (MediaSecurity)n->media_security,
             ExpiresSec = n->expires_sec, ContactParams = Opt(n->contact_params), VideoAutoTransmit = n->video_auto_transmit != 0,
             McpttId = Opt(n->mcptt_id), AutoAnswerMcptt = n->auto_answer_mcptt != 0, InstanceId = Opt(n->instance_id),
+            McpttClientId = Opt(n->mcptt_client_id), RpEmergency = Opt(n->rp_emergency), RpImminentPeril = Opt(n->rp_imminent_peril),
+            RpNormal = Opt(n->rp_normal), MaxSdsCplaneBytes = n->max_sds_cplane_bytes, McdataMsrp = n->mcdata_msrp != 0,
+            McpttServerUri = Opt(n->mcptt_server_uri),
         };
     }
 
@@ -382,8 +428,14 @@ public sealed unsafe class Engine : IDisposable
         return new CallInfo(c->call_id, c->account_id, (CallDir)c->dir, (CallState)c->state, Utf8.Str(c->remote_uri),
                             Utf8.Str(c->called_party), c->video != 0, c->media_active != 0, c->muted != 0, c->listen != 0,
                             c->playback_route, c->last_code, Utf8.Str(c->last_reason), src, c->is_mcptt != 0, Utf8.Str(c->group_id),
-                            ToManaged(c->mcptt), c->half_duplex != 0, c->listen_only != 0, Utf8.Str(c->joined_dialog));
+                            ToManaged(c->mcptt), c->half_duplex != 0, c->listen_only != 0, Utf8.Str(c->joined_dialog),
+                            c->rx_level, new McpttCondition(c->condition.emergency != 0, c->condition.imminent_peril != 0, c->condition.mine != 0,
+                                                            c->condition.pending != 0, c->condition.last_code));
     }
+
+    internal static EmergencyAlert ToManaged(cimsue_emergency_alert_t* a) =>
+        new(a->account_id, Utf8.Str(a->group_id), Utf8.Str(a->user_id), Utf8.Str(a->originated_by), Utf8.Str(a->mc_org),
+            a->alert_ind, a->emergency_ind, a->imminent_peril_ind, a->self != 0);
 
     internal static Talker[] ToManaged(cimsue_talker_t* t, int n)
     {
@@ -410,7 +462,7 @@ public sealed unsafe class Engine : IDisposable
     internal static SdsMessage ToManaged(cimsue_sds_message_t* m) =>
         new(m->account_id, Utf8.Str(m->from_uri), Utf8.Str(m->group_uri), Utf8.Str(m->conv_id), Utf8.Str(m->msg_id), m->time_sec,
             m->disposition_req, Utf8.Str(m->text), m->notification != 0, m->notif_type, m->fd != 0, Utf8.Str(m->file_url),
-            Utf8.Str(m->file_name), Utf8.Str(m->file_type), m->file_size);
+            Utf8.Str(m->file_name), Utf8.Str(m->file_type), m->file_size, m->media_plane != 0);
 
     // ── 콜백 → 이벤트 ──
 
@@ -429,6 +481,8 @@ public sealed unsafe class Engine : IDisposable
         on_request_result = &Cb.OnRequestResult,
         on_message = &Cb.OnMessage,
         on_engine_stopped = &Cb.OnEngineStopped,
+        on_mcptt_condition = &Cb.OnMcpttCondition,
+        on_emergency_alert = &Cb.OnEmergencyAlert,
     };
 
     /// <summary>앱 스레드로 넘긴다. 컨텍스트가 없으면 이벤트 스레드에서 직접 — 예외는 네이티브 경계 밖으로 새지 않게 잡는다.</summary>
@@ -544,6 +598,20 @@ public sealed unsafe class Engine : IDisposable
                 e.Dispatch(() => e.MessageReceived?.Invoke(e, m));
             }
             catch { }
+        }
+
+        [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
+        public static void OnMcpttCondition(void* user, cimsue_call_info_t* info, int cause)
+        {
+            var e = Of(user); if (e is null) return;
+            try { var m = new McpttConditionChange(ToManaged(info), (ConditionCause)cause); e.Dispatch(() => e.McpttConditionChanged?.Invoke(e, m)); } catch { }
+        }
+
+        [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
+        public static void OnEmergencyAlert(void* user, cimsue_emergency_alert_t* alert)
+        {
+            var e = Of(user); if (e is null) return;
+            try { var a = ToManaged(alert); e.Dispatch(() => e.EmergencyAlertReceived?.Invoke(e, a)); } catch { }
         }
 
         [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]

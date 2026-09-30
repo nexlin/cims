@@ -48,6 +48,17 @@ public sealed unsafe class Account
         return Engine.CallResult(cimsue_engine_start_private_call(Engine.Handle, Id, peer, &o));
     }
 
+    /// <summary>긴급 경보 발신·취소(TS 24.379 §12.1.1.1·§12.1.1.2) — SIP MESSAGE(mcptt-info alert-ind). groupId bare.
+    /// originatedBy = 다른 사용자의 경보를 취소할 때 그 사용자 MCPTT ID(§12.1.1.2 4)e)), cancelGroupEmergency = 취소와 함께 그룹의 진행 중 긴급도 해제.
+    /// 반환 token — RequestCompleted(MESSAGE) 로 상관. 인가는 서버가 판정한다(앱은 Capabilities 로 선차단).</summary>
+    public Result<long> SendEmergencyAlert(string groupId, bool activate, string? originatedBy = null, bool cancelGroupEmergency = false)
+    {
+        long t = cimsue_engine_send_emergency_alert(Engine.Handle, Id, groupId, Engine.B(activate), NullIfEmpty(originatedBy), Engine.B(cancelGroupEmergency));
+        return t < 0 ? Result<long>.Fail(-1, Engine.LastError()) : Result<long>.Success(t);
+    }
+
+    private static string? NullIfEmpty(string? s) => string.IsNullOrEmpty(s) ? null : s;
+
     /// <summary>affiliation PUBLISH(Event: mcptt). on=false 면 Expires:0. 반환 token — RequestCompleted 로 상관.</summary>
     public Result<long> Affiliate(string groupId, bool on)
     {
@@ -100,12 +111,14 @@ public sealed unsafe class Account
 
     // ── MCData SDS (TS 24.282 §9.2.2 C-plane) ──
     /// <summary>그룹 SDS 발신(MESSAGE multipart). MsgId(UUID hex32) = SdsReceived 의 disposition 통지와 상관,
-    /// Token = 최종 응답 RequestCompleted(MESSAGE, Token) 과 상관(통지 발신의 완료 이벤트와 구분).</summary>
-    public Result<SdsSend> SendGroupSds(string groupId, string text, bool requestDelivery = true)
+    /// Token = 최종 응답 RequestCompleted(MESSAGE, Token) 과 상관(통지 발신의 완료 이벤트와 구분). 본문이 계정의 MaxSdsCplaneBytes 를 넘으면
+    /// media plane(MSRP)으로 가고 최종 결과는 RequestCompleted method "MSRP" 로 온다(Token 상관은 같다).
+    /// msgId = 재전송이면 처음의 message ID(받는 쪽이 같은 메시지로 대조한다), null 이면 새로 만든다.</summary>
+    public Result<SdsSend> SendGroupSds(string groupId, string text, bool requestDelivery = true, string? msgId = null)
     {
         byte* buf = stackalloc byte[64];
         long token = -1;
-        int st = cimsue_engine_send_group_sds(Engine.Handle, Id, groupId, text, Engine.B(requestDelivery), buf, 64, &token);
+        int st = cimsue_engine_send_group_sds(Engine.Handle, Id, groupId, text, Engine.B(requestDelivery), NullIfEmpty(msgId), buf, 64, &token);
         if (st != 0) return Result<SdsSend>.Fail(st, Engine.LastError());
         return Result<SdsSend>.Success(new SdsSend(Utf8.Str(buf), token));
     }
@@ -113,11 +126,11 @@ public sealed unsafe class Account
     /// <summary>1:1 SDS 발신(request-type one-to-one-sds). peer = 상대 bare 번호.
     /// 그룹과 다른 것은 셋 — request-type·Request-URI·conversation ID(쌍 정렬). 1:1 을 그룹 경로로 보내면
     /// 서버가 그룹 게이트를 거치고 받는 쪽 스레드 귀속도 틀어진다(mcdata_messaging.md §4).</summary>
-    public Result<SdsSend> SendSds(string peer, string text, bool requestDelivery = true)
+    public Result<SdsSend> SendSds(string peer, string text, bool requestDelivery = true, string? msgId = null)
     {
         byte* buf = stackalloc byte[64];
         long token = -1;
-        int st = cimsue_engine_send_sds(Engine.Handle, Id, peer, text, Engine.B(requestDelivery), buf, 64, &token);
+        int st = cimsue_engine_send_sds(Engine.Handle, Id, peer, text, Engine.B(requestDelivery), NullIfEmpty(msgId), buf, 64, &token);
         if (st != 0) return Result<SdsSend>.Fail(st, Engine.LastError());
         return Result<SdsSend>.Success(new SdsSend(Utf8.Str(buf), token));
     }

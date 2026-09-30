@@ -214,4 +214,70 @@ public class CscTests
         var u = c.UploadFd("tok", Array.Empty<byte>(), "a.txt", null, null);
         Assert.False(u.Ok); Assert.Equal(-2, u.Code);
     }
+
+    [Fact]
+    public void ProfileCapabilitiesAndMcDataLimitReachAccount()
+    {
+        // 서버 산출 모양 — capabilities.smsGateway · sip.udpNoTcpSwitch · PTT 의 mcdata.maxPayloadSdsCplaneBytes → AccountConfig.MaxSdsCplaneBytes
+        var r = CscClient.ParseProfile("""
+        { "user": { "loginId": "d1" }, "services": [
+          { "kind": "voip", "capabilities": { "smsGateway": true },
+            "sip": { "host": "h", "port": 5061, "transport": "TLS", "domain": "ims.example.org", "udpNoTcpSwitch": true },
+            "account": { "msisdn": "+821310001001", "imsi": "1", "sipHa1": "0123456789abcdef0123456789abcdef" } },
+          { "kind": "ptt", "sip": { "host": "h", "port": 5060, "domain": "ptt.example.org" },
+            "account": { "msisdn": "+82500000001", "imsi": "2", "sipHa1": "0123456789abcdef0123456789abcdef" },
+            "mcdata": { "maxPayloadSdsCplaneBytes": 1500 } } ] }
+        """);
+        Assert.True(r.Ok, r.Reason);
+        var voip = r.Value.Service("voip")!;
+        var ptt = r.Value.Service("ptt")!;
+        Assert.True(voip.SmsGateway);
+        Assert.True(voip.UdpNoTcpSwitch);
+        Assert.False(ptt.SmsGateway);
+        Assert.Equal(1500, ptt.MaxPayloadSdsCplaneBytes);
+        var a = ptt.ToAccountConfig();
+        Assert.Equal(1500, a.MaxSdsCplaneBytes);                  // 넘는 그룹 SDS 는 media plane(MSRP)
+        Assert.Equal("mcpttp.15", a.RpEmergency);                 // 코어 기본값이 to_account 로 온다
+        a.McdataMsrp = true;
+        Assert.True(a.IsComplete());
+    }
+
+    [Fact]
+    public void CmsDocsAndCapabilitiesFollowCore()
+    {
+        var up = UserProfileDoc.Parse("""
+            <mcptt-user-profile XUI-URI="tel:+82500000001"><ruleset><actions>
+            <allow-cancel-emergency-alert>false</allow-cancel-emergency-alert></actions></ruleset>
+            <Common><MCPTT-group-call><EmergencyAlert><entry entry-info="DedicatedGroup"><uri-entry>sip:g002@ptt</uri-entry></entry></EmergencyAlert></MCPTT-group-call></Common>
+            <OnNetwork><MCPTTGroupInfo><entry><uri-entry>sip:g1@ptt</uri-entry></entry></MCPTTGroupInfo></OnNetwork></mcptt-user-profile>
+            """);
+        Assert.True(up.Ok, up.Reason);
+        Assert.Equal("tel:+82500000001", up.Value.UserUri);
+        Assert.Equal(new[] { "sip:g1@ptt" }, up.Value.Groups);
+        Assert.Equal("sip:g002@ptt", up.Value.EmergencyAlertGroup.Uri);
+        Assert.Equal("DedicatedGroup", up.Value.EmergencyAlertGroup.Mode);
+        Assert.False(up.Value.AllowCancelEmergencyAlert);
+        Assert.True(up.Value.AllowActivateEmergencyAlert);          // 요소 없음 = 허용
+        var k = Capabilities.Of(up.Value, null);
+        Assert.True(k.UserProfileKnown);
+        Assert.False(k.ServiceConfigKnown);
+        Assert.False(k.CancelEmergencyAlert);
+        Assert.True(k.EmergencyAlert);
+        var none = Capabilities.Of(null, null);
+        Assert.False(none.UserProfileKnown);
+        Assert.True(none.CancelEmergencyAlert);                     // 못 받은 문서는 허용
+        Assert.False(UserProfileDoc.Parse("<group/>").Ok);
+
+        var sc = ServiceConfigDoc.Parse("""
+            <service-configuration-info><service-configuration-params domain="ptt.example.org"><on-network>
+            <emergency-resource-priority><resource-priority-namespace>mcpttp</resource-priority-namespace><resource-priority-priority>14</resource-priority-priority></emergency-resource-priority>
+            </on-network></service-configuration-params></service-configuration-info>
+            """);
+        Assert.True(sc.Ok, sc.Reason);
+        Assert.Equal("ptt.example.org", sc.Value.Domain);
+        Assert.Equal("mcpttp.14", sc.Value.RpEmergency);
+        Assert.Equal("", sc.Value.RpNormal);
+        Assert.True(Capabilities.Of(up.Value, sc.Value).ServiceConfigKnown);
+        Assert.False(string.IsNullOrEmpty(Engine.ToText(ConditionCause.Denied)));
+    }
 }

@@ -33,7 +33,7 @@
                                 <DockPanel DataContext="{Binding Sms}">
                                     <Border DockPanel.Dock="Top" Style="{StaticResource SubHeader}">
                                         <DockPanel>
-                                            <Border DockPanel.Dock="Right" Style="{StaticResource Badge}" ToolTip="외부망 휴대전화 문자는 서버 게이트웨이(IBCF→SMSC / SMPP)가 없어 미지원"><TextBlock Text="{Binding GatewayText}" /></Border>
+                                            <Border DockPanel.Dock="Right" Style="{StaticResource Badge}" ToolTip="{Binding GatewayTip}"><TextBlock Text="{Binding GatewayText}" /></Border>
                                             <TextBlock Style="{StaticResource SectionHeader}" Text="문자 SMS · LMS" />
                                         </DockPanel>
                                     </Border>
@@ -189,7 +189,17 @@
                                             <Button Style="{StaticResource Btn.Xs.Danger}" Content="거절 486" Command="{Binding RejectCommand}" Margin="0,0,4,4" Visibility="{Binding CanAnswer, Converter={StaticResource BoolToVis}}" />
                                             <Button Content="보류" Command="{Binding HoldCommand}" Visibility="{Binding CanHold, Converter={StaticResource BoolToVis}}" />
                                             <Button Content="재개" Command="{Binding ResumeCommand}" Visibility="{Binding CanResume, Converter={StaticResource BoolToVis}}" />
-                                            <Button Content="음소거" Command="{Binding MuteCommand}" Visibility="{Binding CanHold, Converter={StaticResource BoolToVis}}" />
+                                            <Button Command="{Binding MuteCommand}" Visibility="{Binding CanHold, Converter={StaticResource BoolToVis}}">
+                                                <Button.Style>
+                                                    <Style TargetType="Button" BasedOn="{StaticResource Btn.Xs}">
+                                                        <Setter Property="Margin" Value="0,0,4,4" />
+                                                        <Setter Property="Content" Value="음소거" />
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding Session.Info.Muted}" Value="True"><Setter Property="Content" Value="음소거 중" /><Setter Property="ToolTip" Value="마이크 꺼짐 — 누르면 다시 켠다" /><Setter Property="Background" Value="{DynamicResource Brush.Emg}" /><Setter Property="BorderBrush" Value="{DynamicResource Brush.Emg}" /><Setter Property="Foreground" Value="{DynamicResource Brush.OnAccent}" /></DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </Button.Style>
+                                            </Button>
                                             <!-- [DTMF ▾] 팝오버 — 카드 옆 3×4 패드 -->
                                             <Grid Visibility="{Binding CanHold, Converter={StaticResource BoolToVis}}">
                                                 <ToggleButton x:Name="DtmfBtn" Style="{StaticResource DropButton}" Height="22" Padding="7,0" FontSize="11.5" Margin="0,0,4,4" IsChecked="{Binding DtmfOpen, Mode=TwoWay}"><StackPanel Orientation="Horizontal"><TextBlock Text="DTMF" /><Path Style="{StaticResource Icon}" Data="{StaticResource Icon.ChevronDown}" Width="11" Height="11" Margin="3,0,0,0" /></StackPanel></ToggleButton>

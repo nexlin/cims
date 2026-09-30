@@ -232,7 +232,18 @@
                                                             </Style>
                                                         </Button.Style>
                                                     </Button>
-                                                    <Button Style="{StaticResource Btn.Xs}" Content="음소거" Command="{Binding ToggleMuteCommand}" Margin="0,0,4,0" Visibility="{Binding IsFullDuplex, Converter={StaticResource BoolToVis}}" />
+                                                    <!-- 전이중 개별 통화의 [음소거] — 켜진 상태가 보여야 한다(글자·면, CallInfo.Muted 의 투영) -->
+                                                    <Button Command="{Binding ToggleMuteCommand}" Margin="0,0,4,0" Visibility="{Binding IsFullDuplex, Converter={StaticResource BoolToVis}}">
+                                                        <Button.Style>
+                                                            <Style TargetType="Button" BasedOn="{StaticResource Btn.Xs}">
+                                                                <Setter Property="Content" Value="음소거" />
+                                                                <Setter Property="ToolTip" Value="마이크 끄기(상대에게 내 소리가 가지 않는다)" />
+                                                                <Style.Triggers>
+                                                                    <DataTrigger Binding="{Binding IsMuted}" Value="True"><Setter Property="Content" Value="음소거 중" /><Setter Property="ToolTip" Value="마이크 꺼짐 — 누르면 다시 켠다" /><Setter Property="Background" Value="{DynamicResource Brush.Emg}" /><Setter Property="BorderBrush" Value="{DynamicResource Brush.Emg}" /><Setter Property="Foreground" Value="{DynamicResource Brush.OnAccent}" /></DataTrigger>
+                                                                </Style.Triggers>
+                                                            </Style>
+                                                        </Button.Style>
+                                                    </Button>
                                                     <!-- [일제 통화] = 누르는 동안 개시+발언, 놓으면 끝(잠금 발언이면 클릭으로 켜고 끔) — press/release 는 코드 비하인드(PTT 와 같은 방식) -->
                                                     <Button Content="{Binding BroadcastText}" IsEnabled="{Binding CanPressBroadcast}" Margin="0,0,4,0" Visibility="{Binding IsMember, Converter={StaticResource BoolToVis}}"
                                                             PreviewMouseLeftButtonDown="Broadcast_Down" PreviewMouseLeftButtonUp="Broadcast_Up" LostMouseCapture="Broadcast_LostCapture"
@@ -245,7 +256,10 @@
                                                             </Style>
                                                         </Button.Style>
                                                     </Button>
-                                                    <Button Style="{StaticResource Btn.Xs.Danger}" Content="긴급 호출" Command="{Binding EmergencyCommand}" Margin="0,0,4,0" Visibility="{Binding IsMember, Converter={StaticResource BoolToVis}}" ToolTip="이 그룹에 긴급 그룹콜 개시(자격 필요)" />
+                                                    <Button Style="{StaticResource Btn.Xs.Danger}" Content="긴급 호출" Command="{Binding EmergencyCommand}" Margin="0,0,4,0" IsEnabled="{Binding CanEmergency}"
+                                                            Visibility="{Binding IsMember, Converter={StaticResource BoolToVis}}" ToolTip="{Binding EmergencyTip}" ToolTipService.ShowOnDisabled="True" />
+                                                    <Button Style="{StaticResource Btn.Xs}" Content="긴급 해제" Command="{Binding CancelEmergencyCommand}" Margin="0,0,4,0" Visibility="{Binding CanCancelEmergency, Converter={StaticResource BoolToVis}}"
+                                                            ToolTip="긴급·임박 조건 해제 요청(TS 24.379 §10.1.1.2.1.4) — 내가 올린 긴급만" />
                                                     <Button Style="{StaticResource Btn.Xs}" Content="편집" Margin="0,0,4,0" Visibility="{Binding CanEdit, Converter={StaticResource BoolToVis}}"
                                                             Command="{Binding DataContext.PttChannels.EditGroupCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}" />
                                                     <Button Content="이탈" Command="{Binding LeaveCommand}">

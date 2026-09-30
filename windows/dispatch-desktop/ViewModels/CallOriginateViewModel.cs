@@ -12,7 +12,8 @@ public sealed partial class BookRow : ObservableObject
 {
     public Contact Contact { get; }
     [ObservableProperty] private string _status = "";
-    public BookRow(Contact c, string displayNumber, string orgPath) { Contact = c; DisplayNumber = displayNumber; OrgPath = orgPath; }
+    private readonly bool _smsGateway;
+    public BookRow(Contact c, string displayNumber, string orgPath, bool smsGateway = false) { Contact = c; DisplayNumber = displayNumber; OrgPath = orgPath; _smsGateway = smsGateway; }
     public string Name => Contact.Name.Length > 0 ? Contact.Name : DisplayNumber;
     public string Number => Contact.Number;
     /// <summary>로컬 표기(홈 국가 축약). 원본은 툴팁.</summary>
@@ -23,7 +24,9 @@ public sealed partial class BookRow : ObservableObject
     public bool IsExternal => Contact.IsExternal;
     public bool IsMember => Contact.IsMember;
     public string Initial => Name.Length > 0 ? Name[..1] : "?";
-    public string SmsTip => IsExternal ? "문자 게이트웨이 미구성" : "문자";
+    /// <summary>[문자] 가능 — 가입자 번호, 또는 외부망 번호인데 전화 회선에 SMS 게이트웨이가 있을 때(capabilities.smsGateway).</summary>
+    public bool CanSms => !IsExternal || _smsGateway;
+    public string SmsTip => CanSms ? "문자" : "문자 게이트웨이 미구성";
 }
 
 public sealed record OrgChoice(string Code, string Label, int Count)
@@ -98,7 +101,7 @@ public sealed partial class CallOriginateViewModel : ObservableObject
         var d = _s.Directory;
         _all.Clear();
         foreach (var c in d.CallBook.Where(c => DirectoryService.Normalize(c.Number) != DirectoryService.Normalize(_s.MyExtension)))
-            _all.Add(new BookRow(c, d.DisplayNumber(c.Number), c.IsExternal ? "외부" : d.OrgPath(c.OrgCode)));
+            _all.Add(new BookRow(c, d.DisplayNumber(c.Number), c.IsExternal ? "외부" : d.OrgPath(c.OrgCode), _s.SmsGateway));
         string? keep = OrgScope?.Code;
         OrgChoices.Clear();
         OrgChoices.Add(new OrgChoice("", "전체 조직", _all.Count));
@@ -156,9 +159,9 @@ public sealed partial class CallOriginateViewModel : ObservableObject
     /// <summary>제안 행 클릭 — 필드에 채움(발신은 Resolve 가 원본 번호로).</summary>
     [RelayCommand] private void Pick(BookRow r) { Number = r.DisplayNumber; Suggestions.Clear(); OnPropertyChanged(nameof(HasSuggestions)); }
     [RelayCommand] private void CallSuggestion(BookRow r) { if (_s.Dial(r.Number).Ok) Number = ""; }
-    [RelayCommand] private void Sms(BookRow r) { if (!r.IsExternal) SmsRequested?.Invoke(this, r.Number); }
+    [RelayCommand] private void Sms(BookRow r) { if (r.CanSms) SmsRequested?.Invoke(this, r.Number); }
     [RelayCommand] private void Redial(ActivityRow r) { if (r.Number.Length > 0) _s.Dial(r.Number); }
-    [RelayCommand] private void SmsRecent(ActivityRow r) { if (r.Number.Length > 0 && !_s.Directory.IsExternal(r.Number)) SmsRequested?.Invoke(this, r.Number); }
+    [RelayCommand] private void SmsRecent(ActivityRow r) { if (r.Number.Length > 0 && (_s.SmsGateway || !_s.Directory.IsExternal(r.Number))) SmsRequested?.Invoke(this, r.Number); }
     [RelayCommand] private async Task SyncAsync() { await _s.SyncDirectoryAsync(); OnPropertyChanged(nameof(SyncText)); }
     public void Fill(string number) => Number = number;
 

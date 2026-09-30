@@ -73,10 +73,12 @@ C API·.NET = Windows 개발 환경**.
 
 ## 2. Windows 개발 환경에 넘길 것
 
-- **C API·.NET 미노출 코어 API** — `setCaptureEnabled`/`captureEnabled` · `setDeviceAudioLevels` · `setAudioRoute`(`AudioRoute`) · `reopenAudioDevice` ·
-  `setVideoWindow`/`switchCamera`/`videoDevices`(`VideoDeviceInfo`) · `ServiceProfile.udpNoTcpSwitch` · `kMicAgcTargetDbov`. 구조체 id 는 `CIMSUE_STRUCT_COUNT_`
-  앞 끝에 덧붙인다(`AbiLayoutTests`). `setVideoWindow(void*)` 는 참조 수를 세지 않는 창(HWND)도 받는다 — 참조 처리는 Android 만.
-- **코어 동작 변화(Windows 앱에도 적용)** — affiliation 412 는 코어가 초기 PUBLISH 로 한 번 다시 알린다. 앱이 412 로 재시도하던 코드가 있으면 필요 없다.
+- **C API·.NET — Windows 반영** — `cimsue_engine_set_capture_enabled`/`capture_enabled` · `set_device_audio_levels` · `set_audio_route`(`cimsue_audio_route_t`) ·
+  `reopen_audio_device` · `set_video_window`/`switch_camera`/`video_devices`(`cimsue_video_device_info_t`) · 프로파일 `udp_no_tcp_switch` · `CIMSUE_MIC_AGC_TARGET_DBOV`
+  → .NET `Engine.SetCaptureEnabled`·`SetDeviceAudioLevels`·`SetAudioRoute`·`ReopenAudioDevice`·`SetVideoWindow`(HWND — 참조를 세지 않는다)·`SwitchCamera`·
+  `VideoDevices`·`ServiceProfile.UdpNoTcpSwitch`·`EngineConfig.MicAgcTargetDbov`. 구조체 id 는 `CIMSUE_STRUCT_COUNT_` 앞에 덧붙였다(`AbiLayoutTests`).
+  관제 데스크톱은 장치 음량·라우트를 쓰지 않는다(WASAPI 엔드포인트 선택 — §7 오디오 배치).
+- **코어 동작 변화(Windows 앱에도 적용)** — affiliation 412 는 코어가 초기 PUBLISH 로 한 번 다시 알린다(관제 데스크톱에 412 재시도 코드는 없다).
 - **관제 태블릿(Android)** — ① 다음 빌드부터 VAD 꺼짐(파사드 기본값이 코어와 같아짐 — 침묵 중에도 RTP) ② `FloorEvent.kind` 로 Denied/Revoked·코어 시한
   구분(지금 `rawType` 판정 대체 가능) ③ FD 파사드가 생겼다. 망 변경 재등록은 반영했다(`NetworkWatcher` → `handleNetworkChange`).
 
@@ -116,14 +118,20 @@ C API·.NET = Windows 개발 환경**.
 
 ### 4.1 Windows 개발 환경에 넘길 것 (P0b)
 
-- **C API·.NET 미노출** — `setCallCondition` · `sendEmergencyAlert` · `onMcpttCondition`/`onEmergencyAlert`(+ `McpttCondition`·`ConditionCause`·
-  `EmergencyAlert`) · `CallInfo.condition`·`rxLevel` · `SdsMessage.mediaPlane` · `AccountConfig.mcpttClientId`·`rp*`·`maxSdsCplaneBytes`·`mcdataMsrp` ·
-  `EngineConfig.grantMicDelayMs` · `AccountConfig.mcpttServerUri`(경보 Request-URI = 참여 기능 PSI) · CMS `UserProfileDoc`·`ServiceConfigDoc`·`Capabilities`·`fetchUserProfile/fetchServiceConfig`. 구조체 필드는 끝에
-  덧붙이고 `AbiLayoutTests` 로 크기 대조.
-- **CMS 해석 구조 변경(TS 24.484 §8.4 정렬, .48)** — `ServiceConfigDoc` = domain·`numLevelsGroupHierarchy/UserHierarchy`·`rpEmergency/
-  rpImminentPeril/rpNormal`(r-value `mcpttp.15`)만 — 옛 `allowPrivateCall/allowEmergencyCall/allowAlert/allowTransmitRequest/maxAffiliationsN2` 는
-  없다. `UserProfileDoc.allowPrivateCall` 추가. `Capabilities` 는 user profile 만으로 판정하고 `transmitRequest` 가 없다(N2 = user profile).
-  서버(csc 0.2.133 이상)가 새 문서를 낸다 — 옛 코어는 루트를 못 찾아 해석 실패(-2)를 낸다. Kotlin 파사드는 반영, C API·.NET 은 노출할 때 이 구조로.
+- **C API·.NET — Windows 반영** — `cimsue_engine_set_call_condition` · `send_emergency_alert` · 리스너 `on_mcptt_condition`/`on_emergency_alert`
+  (`cimsue_mcptt_condition_t`·`cimsue_condition_cause_t`·`cimsue_emergency_alert_t`) · `cimsue_call_info_t.condition`·`rx_level` · `cimsue_sds_message_t.media_plane` ·
+  계정 `mcptt_client_id`·`rp_*`·`max_sds_cplane_bytes`·`mcdata_msrp`·`mcptt_server_uri` · 엔진 `grant_mic_delay_ms` · CMS `cimsue_csc_fetch_user_profile/
+  fetch_service_config`·`cimsue_user_profile_parse`/`service_config_parse`·`cimsue_capabilities_of` → .NET `Call.SetCondition`·`Account.SendEmergencyAlert`·
+  `Engine.McpttConditionChanged`/`EmergencyAlertReceived`·`CallInfo.Condition`/`RxLevel`·`SdsMessage.MediaPlane`·`AccountConfig.*`·`UserProfileDoc`·
+  `ServiceConfigDoc`·`Capabilities.Of`. 구조체 필드는 끝에 덧붙이고 `AbiLayoutTests` 로 크기 대조(cimsue_test 88·.NET 75 통과).
+- **CMS 해석 구조(TS 24.484 §8.4 정렬, .48)** — `ServiceConfigDoc` = domain·계층 수·`rpEmergency/rpImminentPeril/rpNormal`(r-value `mcpttp.15`)만,
+  `UserProfileDoc.allowPrivateCall` 포함, `Capabilities` 는 user profile 만으로 판정. C API·.NET 도 이 구조다(csc 0.2.133 이상 전제).
+- **프로파일 파서 정정** — 서버는 `mcdata.maxPayloadSdsCplaneBytes` 를 PTT 서비스의 `mcdata` 블록에 싣는데 코어 파서가 서비스 최상위에서 읽어 늘 0 이었다
+  (큰 그룹 SDS 가 MSRP 로 가지 않고 서버 403). 코어가 `mcdata` 블록을 먼저 읽는다(최상위는 옛 형식 폴백) — ptt-client 는 자기 파서라 무관, 관제 태블릿은
+  다음 빌드부터 `toAccount` 로 상한이 온다. 함께 `ServiceProfile.smsGateway`(`capabilities.smsGateway`)를 코어·C API·.NET·Kotlin 에 더했다.
+- **관제 데스크톱 적용** — 조건 이벤트·미디어 스냅샷으로 긴급 배너 갱신·[긴급 호출] = 참여 중이면 조건 상향·[긴급 해제] · 경보 배너(`onEmergencyAlert`)·[경보 해제]
+  (제3자 취소) · CMS 정책 게이트 + service-config RP · SDS 재전송 처음 msgId·MSRP 결과(method `MSRP`)·`mcdataMsrp` — [dispatch_desktop_ui.md](../design/features/dispatch_desktop_ui.md)
+  §3.2·§4.1·§4.4·§6. `mcpttServerUri` 는 ue-init-config 를 읽지 않아 비어 있다(그룹 URI 전환기 — 같은 문서 §13).
 - **mcptt-info 규격 인코딩(TS 24.379 Annex F.1, .48)** — 코어가 contentType 요소를 `type="Normal"` + `<mcpttURI>`/`<mcpttString>`/`<mcpttBoolean>`
   자식으로 보내고, 수신은 두 형식을 다 읽는다(`localText`). 앱 코드 변경은 없다 — 서버는 csp 0.2.167 이상이어야 한다(옛 CSP 는 자식 형식을 못 읽는다).
 - **코어 동작 변화(Windows 앱에도 적용)** — ① `sendGroupSds` 가 `AccountConfig.maxSdsCplaneBytes` 를 넘으면 MSRP 로 가고 최종 결과가
@@ -164,8 +172,9 @@ C API·.NET = Windows 개발 환경**.
 
 ### 5.1 Windows 개발 환경에 넘길 것 (P3)
 
-- **엔진 재빌드** — `common.h` 의 `PJSIP_MAX_PKT_LEN 65535`(세 플랫폼 공통 결정).
-- **C API·.NET 미노출** — `GroupMember.title`(`cims:user-title`, 읽기 전용) · `sendGroupSds`/`sendSds` 의 `msgId`(hex32, 비우면 코어가 만든다).
+- **엔진 재빌드** — `common.h` 의 `PJSIP_MAX_PKT_LEN 65535` — Windows 슈퍼빌드 반영(pjproject 재빌드).
+- **C API·.NET — Windows 반영** — `cimsue_group_member_t.title`(.NET `GroupMember.Title`, 읽기 전용) · `send_group_sds`/`send_sds` 의 `msg_id` 입력(.NET `msgId`,
+  비우면 코어가 만든다 — 관제 데스크톱 재전송이 처음 msgId 로 보낸다).
 - **코어 동작 변화(자동 적용)** — 조건 판정이 그 re-INVITE 의 트랜잭션만 본다(§4) · 영상 창 결선은 렌더러가 없으면 건너뛴다(§1.3).
 - **PTT 그룹 영상(ue_sdk.md §4.5)** — `GroupCallOptions.video` · `AccountConfig.mcpttVideo` · `CallInfo.videoSend` · `Engine::setVideoSend` 는
   C API·.NET 미노출이다(영상 API `setVideoWindow`·`switchCamera` 와 함께 F3 에서 — 지금 C 구조체에 붙이면 .NET 구조체 1:1 이 깨진다).

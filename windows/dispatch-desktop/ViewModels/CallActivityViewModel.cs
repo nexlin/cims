@@ -112,7 +112,7 @@ public sealed partial class CallActivityViewModel : ObservableObject
     }
 
     [RelayCommand] private void Redial(ActivityRow r) { if (r.Number.Length > 0) _s.Dial(r.Number); }
-    [RelayCommand] private void Sms(ActivityRow r) { if (r.Number.Length > 0 && !_s.Directory.IsExternal(r.Number)) SmsRequested?.Invoke(this, r.Number); }
+    [RelayCommand] private void Sms(ActivityRow r) { if (r.Number.Length > 0 && (_s.SmsGateway || !_s.Directory.IsExternal(r.Number))) SmsRequested?.Invoke(this, r.Number); }
     [RelayCommand]
     private void Export()
     {

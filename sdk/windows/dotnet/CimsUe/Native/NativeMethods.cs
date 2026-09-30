@@ -61,6 +61,8 @@ internal static unsafe class NativeMethods
     [DllImport(Lib, CallingConvention = CC, ExactSpelling = true)] public static extern int cimsue_engine_floor_release(IntPtr e, int call_id);
     [DllImport(Lib, CallingConvention = CC, ExactSpelling = true)] public static extern int cimsue_engine_floor_queue_cancel(IntPtr e, int call_id);
     [DllImport(Lib, CallingConvention = CC, ExactSpelling = true)] public static extern void cimsue_engine_floor_info(IntPtr e, int call_id, cimsue_floor_info_t* @out);
+    [DllImport(Lib, CallingConvention = CC, ExactSpelling = true)] public static extern int cimsue_engine_set_call_condition(IntPtr e, int call_id, int emergency, int imminent_peril);
+    [DllImport(Lib, CallingConvention = CC, ExactSpelling = true)] public static extern long cimsue_engine_send_emergency_alert(IntPtr e, int account_id, [MarshalAs(U8)] string group_id, int activate, [MarshalAs(U8)] string? originated_by, int cancel_group_emergency);
     [DllImport(Lib, CallingConvention = CC, ExactSpelling = true)] public static extern long cimsue_engine_affiliate(IntPtr e, int account_id, [MarshalAs(U8)] string group_id, int on);
     [DllImport(Lib, CallingConvention = CC, ExactSpelling = true)] public static extern int cimsue_engine_subscribe_conference(IntPtr e, int account_id, [MarshalAs(U8)] string group_id, int on);
     [DllImport(Lib, CallingConvention = CC, ExactSpelling = true)] public static extern int cimsue_engine_subscribe_xcap_diff(IntPtr e, int account_id, [MarshalAs(U8)] string psi_uri, int on);
@@ -74,8 +76,8 @@ internal static unsafe class NativeMethods
     [DllImport(Lib, CallingConvention = CC, ExactSpelling = true)] public static extern int cimsue_engine_transfer_attended(IntPtr e, int call_id, int consult_call_id);
 
     // MCData SDS
-    [DllImport(Lib, CallingConvention = CC, ExactSpelling = true)] public static extern int cimsue_engine_send_group_sds(IntPtr e, int account_id, [MarshalAs(U8)] string group_id, [MarshalAs(U8)] string text, int request_delivery, byte* msg_id_out, int msg_id_cap, long* token_out);
-    [DllImport(Lib, CallingConvention = CC, ExactSpelling = true)] public static extern int cimsue_engine_send_sds(IntPtr e, int account_id, [MarshalAs(U8)] string peer, [MarshalAs(U8)] string text, int request_delivery, byte* msg_id_out, int msg_id_cap, long* token_out);
+    [DllImport(Lib, CallingConvention = CC, ExactSpelling = true)] public static extern int cimsue_engine_send_group_sds(IntPtr e, int account_id, [MarshalAs(U8)] string group_id, [MarshalAs(U8)] string text, int request_delivery, [MarshalAs(U8)] string? msg_id, byte* msg_id_out, int msg_id_cap, long* token_out);
+    [DllImport(Lib, CallingConvention = CC, ExactSpelling = true)] public static extern int cimsue_engine_send_sds(IntPtr e, int account_id, [MarshalAs(U8)] string peer, [MarshalAs(U8)] string text, int request_delivery, [MarshalAs(U8)] string? msg_id, byte* msg_id_out, int msg_id_cap, long* token_out);
     [DllImport(Lib, CallingConvention = CC, ExactSpelling = true)] public static extern int cimsue_engine_send_sds_notification(IntPtr e, int account_id, [MarshalAs(U8)] string peer, [MarshalAs(U8)] string conv_id, [MarshalAs(U8)] string msg_id, int notif_type, long* token_out);
     // MCData FD
     [DllImport(Lib, CallingConvention = CC, ExactSpelling = true)] public static extern int cimsue_engine_send_group_fd(IntPtr e, int account_id, [MarshalAs(U8)] string group_id, cimsue_fd_file_t* file, byte* msg_id_out, int msg_id_cap, long* token_out);
@@ -88,6 +90,14 @@ internal static unsafe class NativeMethods
     [DllImport(Lib, CallingConvention = CC, ExactSpelling = true)] public static extern int cimsue_engine_add_playback_route(IntPtr e, int playback_dev);
     [DllImport(Lib, CallingConvention = CC, ExactSpelling = true)] public static extern int cimsue_engine_remove_playback_route(IntPtr e, int route_id);
     [DllImport(Lib, CallingConvention = CC, ExactSpelling = true)] public static extern int cimsue_engine_set_call_route(IntPtr e, int call_id, int route_id);
+    [DllImport(Lib, CallingConvention = CC, ExactSpelling = true)] public static extern int cimsue_engine_set_capture_enabled(IntPtr e, int on);
+    [DllImport(Lib, CallingConvention = CC, ExactSpelling = true)] public static extern int cimsue_engine_capture_enabled(IntPtr e);
+    [DllImport(Lib, CallingConvention = CC, ExactSpelling = true)] public static extern int cimsue_engine_set_device_audio_levels(IntPtr e, float speaker, double mic_target_dbov);
+    [DllImport(Lib, CallingConvention = CC, ExactSpelling = true)] public static extern int cimsue_engine_set_audio_route(IntPtr e, int output, int input);
+    [DllImport(Lib, CallingConvention = CC, ExactSpelling = true)] public static extern int cimsue_engine_reopen_audio_device(IntPtr e);
+    [DllImport(Lib, CallingConvention = CC, ExactSpelling = true)] public static extern int cimsue_engine_set_video_window(IntPtr e, IntPtr native_window);
+    [DllImport(Lib, CallingConvention = CC, ExactSpelling = true)] public static extern int cimsue_engine_switch_camera(IntPtr e, int call_id);
+    [DllImport(Lib, CallingConvention = CC, ExactSpelling = true)] public static extern int cimsue_engine_video_devices(IntPtr e, cimsue_video_device_info_t** @out);
 
     [DllImport(Lib, CallingConvention = CC, ExactSpelling = true)] public static extern byte* cimsue_version();
     [DllImport(Lib, CallingConvention = CC, ExactSpelling = true)] public static extern byte* cimsue_last_error();
@@ -98,6 +108,7 @@ internal static unsafe class NativeMethods
     [DllImport(Lib, CallingConvention = CC, ExactSpelling = true)] public static extern byte* cimsue_transport_str(int t);
     [DllImport(Lib, CallingConvention = CC, ExactSpelling = true)] public static extern byte* cimsue_floor_state_str(int s);
     [DllImport(Lib, CallingConvention = CC, ExactSpelling = true)] public static extern byte* cimsue_floor_kind_str(int k);
+    [DllImport(Lib, CallingConvention = CC, ExactSpelling = true)] public static extern byte* cimsue_condition_cause_str(int c);
 
     // 문자열 산출 헬퍼 — out 에 최대 cap(NUL 포함) 기록, NUL 제외 길이 반환(cap 이상이면 잘림). out=NULL·cap=0 이면 길이만.
     [DllImport(Lib, CallingConvention = CC, ExactSpelling = true)] public static extern int cimsue_account_config_aor(cimsue_account_config_t* cfg, byte* @out, int cap);
@@ -123,6 +134,11 @@ internal static unsafe class NativeMethods
     [DllImport(Lib, CallingConvention = CC, ExactSpelling = true)] public static extern void cimsue_csc_tls_peer_expiry(IntPtr c, cimsue_tls_peer_expiry_t* @out);
     [DllImport(Lib, CallingConvention = CC, ExactSpelling = true)] public static extern int cimsue_csc_get_user_profile(IntPtr c, [MarshalAs(U8)] string access_token, [MarshalAs(U8)] string user_uri, [MarshalAs(U8)] string? etag, cimsue_xcap_doc_t* @out);
     [DllImport(Lib, CallingConvention = CC, ExactSpelling = true)] public static extern int cimsue_csc_get_service_config(IntPtr c, [MarshalAs(U8)] string access_token, [MarshalAs(U8)] string user_uri, [MarshalAs(U8)] string? etag, cimsue_xcap_doc_t* @out);
+    [DllImport(Lib, CallingConvention = CC, ExactSpelling = true)] public static extern int cimsue_csc_fetch_user_profile(IntPtr c, [MarshalAs(U8)] string access_token, [MarshalAs(U8)] string user_uri, [MarshalAs(U8)] string? etag, cimsue_user_profile_doc_t* @out);
+    [DllImport(Lib, CallingConvention = CC, ExactSpelling = true)] public static extern int cimsue_csc_fetch_service_config(IntPtr c, [MarshalAs(U8)] string access_token, [MarshalAs(U8)] string user_uri, [MarshalAs(U8)] string? etag, cimsue_service_config_doc_t* @out);
+    [DllImport(Lib, CallingConvention = CC, ExactSpelling = true)] public static extern int cimsue_user_profile_parse([MarshalAs(U8)] string xml, cimsue_user_profile_doc_t* @out);
+    [DllImport(Lib, CallingConvention = CC, ExactSpelling = true)] public static extern int cimsue_service_config_parse([MarshalAs(U8)] string xml, cimsue_service_config_doc_t* @out);
+    [DllImport(Lib, CallingConvention = CC, ExactSpelling = true)] public static extern void cimsue_capabilities_of(cimsue_user_profile_doc_t* user_profile, cimsue_service_config_doc_t* service_config, cimsue_capabilities_t* @out);
     [DllImport(Lib, CallingConvention = CC, ExactSpelling = true)] public static extern int cimsue_csc_get_group(IntPtr c, [MarshalAs(U8)] string access_token, [MarshalAs(U8)] string user_uri, [MarshalAs(U8)] string group_uri, cimsue_group_doc_t* @out);
     [DllImport(Lib, CallingConvention = CC, ExactSpelling = true)] public static extern int cimsue_csc_put_group(IntPtr c, [MarshalAs(U8)] string access_token, [MarshalAs(U8)] string user_uri, cimsue_group_doc_t* doc, [MarshalAs(U8)] string? if_match, cimsue_group_doc_t* @out);
     [DllImport(Lib, CallingConvention = CC, ExactSpelling = true)] public static extern int cimsue_csc_delete_group(IntPtr c, [MarshalAs(U8)] string access_token, [MarshalAs(U8)] string user_uri, [MarshalAs(U8)] string group_uri);

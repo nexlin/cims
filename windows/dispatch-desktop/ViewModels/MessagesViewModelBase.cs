@@ -32,6 +32,17 @@ public abstract partial class MessagesViewModelBase : ObservableObject
         _followChannel = s.Settings.Current.FollowChannelThread;
         foreach (var m in s.Messages.LoadAll().Where(m => m.Kind == kind)) Put(m, persist: false);
         s.RequestCompleted += (_, r) => OnRequestCompleted(r);
+        s.ProfileApplied += (_, _) => Reload();              // 재로그인 — 보관 주인(로그인 ID)이 바뀌었을 수 있다
+    }
+
+    /// <summary>보관에서 다시 읽는다 — 지금 주인(로그인 ID)의 스레드만(MessageStore.Owner).</summary>
+    private void Reload()
+    {
+        Selected = null;
+        ThreadMap.Clear(); Threads.Clear();
+        foreach (var m in S.Messages.LoadAll().Where(m => m.Kind == Kind)) Put(m, persist: false);
+        OnPropertyChanged(nameof(UnreadTotal));
+        RaiseUnread();
     }
 
     protected abstract bool SendAllowed(MessageThread t);

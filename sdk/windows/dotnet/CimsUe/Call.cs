@@ -30,7 +30,7 @@ public sealed class Call
     public Result Hangup() => Engine.Status(cimsue_engine_hangup(Engine.Handle, Id));
     public Result Hold() => Engine.Status(cimsue_engine_hold(Engine.Handle, Id));
     public Result Resume() => Engine.Status(cimsue_engine_resume(Engine.Handle, Id));
-    /// <summary>마이크 → 호 송신 차단/복구. MCPTT 세션에서는 floor 가 마이크를 게이트하므로 무시된다.</summary>
+    /// <summary>마이크 → 호 송신 차단/복구. 반이중 MCPTT 세션에서는 floor 가 마이크를 게이트하므로 무시되고, 전이중 개별 통화(mc_no_floor_ctrl)에는 적용된다.</summary>
     public Result SetMuted(bool muted) => Engine.Status(cimsue_engine_set_muted(Engine.Handle, Id, Engine.B(muted)));
     /// <summary>호 → 스피커 청취 on/off.</summary>
     public Result SetListen(bool listen) => Engine.Status(cimsue_engine_set_listen(Engine.Handle, Id, Engine.B(listen)));
@@ -46,6 +46,10 @@ public sealed class Call
     /// <summary>PTT up — Floor Release(대기 중이면 Queued Cancel 선행).</summary>
     public Result FloorRelease() => Engine.Status(cimsue_engine_floor_release(Engine.Handle, Id));
     public Result FloorQueueCancel() => Engine.Status(cimsue_engine_floor_queue_cancel(Engine.Handle, Id));
+    /// <summary>진행 중 그룹콜의 조건 상향·하향(TS 24.379 §10.1.1.2.1.3~5) — in-dialog re-INVITE. 결과는 McpttConditionChanged(Local → Confirmed/Denied),
+    /// 거절은 호를 끊지 않는다. emergency·imminentPeril 을 함께 true 로 줄 수 없다. 사설콜·응답 대기 중·성립 전 호는 실패.</summary>
+    public Result SetCondition(bool emergency, bool imminentPeril) =>
+        Engine.Status(cimsue_engine_set_call_condition(Engine.Handle, Id, Engine.B(emergency), Engine.B(imminentPeril)));
 
     // ── 관제 ──
     /// <summary>호 전달 blind — REFER(RFC 3515). 진행은 CallStateChanged(REFER 수락 후 서버가 BYE).</summary>

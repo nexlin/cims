@@ -361,3 +361,76 @@ TEST(CApi, TlsPeerExpiryDefaults) {
     e.notAfterEpoch = 1000 - 86400 * 2;
     EXPECT_EQ(e.daysLeft(1000), -2);                          // 만료 = 음수
 }
+
+// ── P0b 노출분 — 설정 기본값·to_account 가 새 필드를 옮기는지, CMS 해석·게이트가 C++ 과 같은지, 프로파일 능력·MCData 상한 ──
+TEST(CApi, McpttFieldsAndCmsDocs) {
+    const EngineConfig de;
+    cimsue_engine_config_t ec;
+    cimsue_engine_config_default(&ec);
+    EXPECT_EQ(ec.grant_mic_delay_ms, de.grantMicDelayMs);
+    EXPECT_EQ(ec.udp_no_tcp_switch != 0, de.udpNoTcpSwitch);
+    const AccountConfig da;
+    cimsue_account_config_t ac;
+    cimsue_account_config_default(&ac);
+    EXPECT_EQ(ac.max_sds_cplane_bytes, da.maxSdsCplaneBytes);
+    EXPECT_EQ(ac.rp_emergency, nullptr);                        // NULL → C++ 기본(mcpttp.15)
+
+    // 서버 산출 모양 — PTT 서비스의 mcdata 블록 · capabilities.smsGateway
+    const char* prof = R"({"user":{"loginId":"d1"},"services":[
+        {"kind":"voip","capabilities":{"smsGateway":true},"sip":{"host":"h","port":5061,"transport":"TLS","domain":"ims.example.org","udpNoTcpSwitch":true},
+         "account":{"msisdn":"+821310001001","imsi":"1","sipHa1":"0123456789abcdef0123456789abcdef"}},
+        {"kind":"ptt","capabilities":{"smsGateway":false},"sip":{"host":"h","port":5060,"domain":"ptt.example.org"},
+         "account":{"msisdn":"+82500000001","imsi":"2","sipHa1":"0123456789abcdef0123456789abcdef"},
+         "mcdata":{"maxPayloadSdsCplaneBytes":1500}}]})";
+    cimsue_profile_t p{};
+    ASSERT_EQ(cimsue_csc_parse_profile(prof, &p), CIMSUE_OK) << cimsue_last_error();
+    const cimsue_service_profile_t* v = cimsue_profile_service(&p, "voip");
+    const cimsue_service_profile_t* t = cimsue_profile_service(&p, "ptt");
+    ASSERT_NE(v, nullptr); ASSERT_NE(t, nullptr);
+    EXPECT_EQ(v->sms_gateway, 1);
+    EXPECT_EQ(v->udp_no_tcp_switch, 1);
+    EXPECT_EQ(t->sms_gateway, 0);
+    EXPECT_EQ(t->max_payload_sds_cplane_bytes, 1500);
+    cimsue_account_config_t a{};
+    cimsue_service_profile_to_account(t, nullptr, &a);
+    EXPECT_EQ(a.max_sds_cplane_bytes, 1500);                    // toAccount 가 옮긴다 — 넘는 그룹 SDS 는 MSRP
+    EXPECT_STREQ(a.rp_emergency, "mcpttp.15");
+
+    // CMS — 규격 요소 · 요소 없음 = 허용 · 게이트는 Capabilities::of
+    cimsue_user_profile_doc_t up{};
+    ASSERT_EQ(cimsue_user_profile_parse(
+                  "<mcptt-user-profile XUI-URI=\"tel:+82500000001\"><ruleset><actions>"
+                  "<allow-cancel-emergency-alert>false</allow-cancel-emergency-alert></actions></ruleset>"
+                  "<OnNetwork><MCPTTGroupInfo><entry><uri-entry>sip:g1@ptt</uri-entry></entry></MCPTTGroupInfo></OnNetwork>"
+                  "</mcptt-user-profile>", &up), CIMSUE_OK) << cimsue_last_error();
+    EXPECT_STREQ(up.user_uri, "tel:+82500000001");
+    ASSERT_EQ(up.group_count, 1);
+    EXPECT_STREQ(up.groups[0], "sip:g1@ptt");
+    EXPECT_EQ(up.allow_cancel_emergency_alert, 0);
+    EXPECT_EQ(up.allow_activate_emergency_alert, 1);
+    EXPECT_EQ(up.max_affiliations_n2, -1);
+    cimsue_capabilities_t k{};
+    cimsue_capabilities_of(&up, nullptr, &k);
+    EXPECT_EQ(k.user_profile_known, 1);
+    EXPECT_EQ(k.service_config_known, 0);
+    EXPECT_EQ(k.cancel_emergency_alert, 0);
+    EXPECT_EQ(k.emergency_alert, 1);
+    cimsue_capabilities_of(nullptr, nullptr, &k);
+    EXPECT_EQ(k.user_profile_known, 0);
+    EXPECT_EQ(k.cancel_emergency_alert, 1);                     // 못 받은 문서는 허용
+    EXPECT_NE(cimsue_user_profile_parse("<group/>", &up), CIMSUE_OK);
+
+    cimsue_service_config_doc_t sc{};
+    ASSERT_EQ(cimsue_service_config_parse(
+                  "<service-configuration-info><service-configuration-params domain=\"ptt.example.org\"><on-network>"
+                  "<emergency-resource-priority><resource-priority-namespace>mcpttp</resource-priority-namespace>"
+                  "<resource-priority-priority>14</resource-priority-priority></emergency-resource-priority>"
+                  "</on-network></service-configuration-params></service-configuration-info>", &sc), CIMSUE_OK) << cimsue_last_error();
+    EXPECT_STREQ(sc.domain, "ptt.example.org");
+    EXPECT_STREQ(sc.rp_emergency, "mcpttp.14");
+    EXPECT_STREQ(sc.rp_normal, "");
+    EXPECT_STREQ(cimsue_condition_cause_str(CIMSUE_COND_DENIED), toString(ConditionCause::Denied));
+    EXPECT_EQ((int)CIMSUE_COND_ADVERTISED, (int)ConditionCause::Advertised);
+    EXPECT_EQ((int)CIMSUE_ROUTE_LOUDSPEAKER, (int)AudioRoute::Loudspeaker);
+    EXPECT_EQ(CIMSUE_MIC_AGC_TARGET_DBOV, kMicAgcTargetDbov);
+}

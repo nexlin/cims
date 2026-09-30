@@ -88,7 +88,7 @@ public sealed partial class MainViewModel : ObservableObject
         People = new PersonActionsViewModel(session);
         Summary = new DispatchSummaryViewModel(session, PttChannels, TalkBar, CallDesk, Desk, Sms);
         AdminScreen.PropertyChanged += (_, e) => { if (e.PropertyName is nameof(DirectoryAdminViewModel.IsDirty)) OnPropertyChanged(nameof(AdminEditing)); };
-        GroupsScreen.ChannelRequested += (_, id) => { Screen = AppScreen.Dispatch; PttChannels.FocusGroup(id); };   // [채널로] — 채널 카드로(없으면 합류)
+        GroupsScreen.ChannelRequested += (_, id) => { Screen = AppScreen.Dispatch; FocusChannel(id); };   // [채널로] — ① 또는 ② 카드로(합류하지 않는다)
         GroupsScreen.PropertyChanged += (_, e) => { if (e.PropertyName == nameof(GroupAdminViewModel.IsEditing)) { if (!GroupsScreen.IsEditing) _drawerRequested = false; OnPropertyChanged(nameof(DrawerOpen)); } };
         PttActivity.HistoryRequested += (_, _) => ShowHistory("ptt");
         CallActivity.HistoryRequested += (_, _) => ShowHistory("call");
@@ -108,12 +108,12 @@ public sealed partial class MainViewModel : ObservableObject
         McData.UnreadChanged += (_, _) => PttChannels.SetUnread(g => McData.UnreadOf(g.Uri));
         PttOriginate.MessageGroupRequested += (_, g) => McData.OpenGroup(g);
         PttOriginate.MessageUserRequested += (_, n) => McData.OpenUser(n);
-        PttOriginate.ChannelRequested += (_, g) => { PttChannels.FocusGroup(g.Id); PttOriginateOpen = false; };
+        PttOriginate.ChannelRequested += (_, g) => { FocusChannel(g.Id); PttOriginateOpen = false; };
         // 주소록 [그룹] 탭의 [새 그룹]/[편집] — 채널 편집 드로어(§4.2, [PTT 그룹] 화면과 같은 VM)
         PttOriginate.NewGroupRequested += (_, _) => OpenDrawerNew();
         PttOriginate.EditGroupRequested += (_, g) => OpenDrawerEdit(g);
         PttOriginate.DeleteGroupRequested += (_, g) => GroupDeleteRequested?.Invoke(this, g);
-        PttActivity.ChannelRequested += (_, id) => PttChannels.FocusGroup(id);
+        PttActivity.ChannelRequested += (_, id) => FocusChannel(id);
         PttActivity.ReplyRequested += (_, id) => { if (Session.Groups.FirstOrDefault(g => g.Id == id) is { } g) McData.OpenGroup(g); };
 
         // ── ② 범위 채널 ──
@@ -138,7 +138,7 @@ public sealed partial class MainViewModel : ObservableObject
         People.SdsRequested += (_, n) => McData.OpenUser(n);
         People.CallRequested += (_, n) => { Session.Dial(n); };
         People.SmsRequested += (_, n) => OpenSms(n);
-        People.ChannelRequested += (_, id) => { ReturnToDispatchSilently(); PttChannels.FocusGroup(id); };
+        People.ChannelRequested += (_, id) => { ReturnToDispatchSilently(); FocusChannel(id); };
         People.AddMemberRequested += (_, g) => OpenDrawerEdit(g);
 
         session.SessionAdded += (_, s) => { if (s.IsWindow) MonitorWindowRequested?.Invoke(this, s); Desk.SyncMonitors(session.Sessions); CallOriginate.RefreshPad(); ReturnIfSessionStarted(s); ClosePopoversFor(s); };
@@ -285,7 +285,20 @@ public sealed partial class MainViewModel : ObservableObject
 
     [RelayCommand] private void AnswerBanner(Banner b) { if (b.Session is not null) { Session.Answer(b.Session); Screen = AppScreen.Dispatch; } }
     [RelayCommand] private void RejectBanner(Banner b) { if (b.Session is not null) Session.Reject(b.Session); }
-    [RelayCommand] private void GoToChannel(Banner b) { Screen = AppScreen.Dispatch; if (b.GroupId.Length > 0) PttChannels.FocusGroup(b.GroupId); }
+    [RelayCommand] private void GoToChannel(Banner b) { Screen = AppScreen.Dispatch; if (b.GroupId.Length > 0) FocusChannel(b.GroupId); }
+    /// <summary>배너 [긴급 해제]/[경보 해제] — 세션 조건 하향 또는 경보 취소(§3.2).</summary>
+    [RelayCommand] private void CancelBanner(Banner b) => Session.CancelBanner(b);
+    /// <summary>경보 배너 [닫기] — 로컬 표시만(취소 신호 유실 대비).</summary>
+    [RelayCommand] private void DismissBanner(Banner b) => Session.DismissAlert(b);
+
+    /// <summary>[채널로] 공통 — ① 카드가 있으면 거기, 없으면 ② 범위 채널 카드(청취 범위 그룹). 어느 쪽도 합류시키지 않는다 — 청취 범위 그룹에
+    /// sendrecv 로 합류하면 비멤버라 서버가 403 으로 거절한다(TS 24.379 §10.1.1, dispatch_center.md §5.6). 청취는 ② 카드의 토글이다.</summary>
+    public void FocusChannel(string groupId)
+    {
+        if (PttChannels.FocusGroup(groupId)) return;
+        if (Scoped.Focus(groupId)) return;
+        Notify.Info("채널 카드가 없습니다", $"{groupId} — 멤버 그룹도 청취 범위 그룹도 아닙니다");
+    }
 
     /// <summary>
     /// ① 채널 카드 3줄 [로스터 전체] — 그 그룹의 [PTT 그룹] 화면 상세를 연다(§4.1 툴팁이 가리키는 곳).
@@ -306,7 +319,8 @@ public sealed partial class MainViewModel : ObservableObject
         CimsUe.CallInfo Ci(int id, CimsUe.CallState st, string remote, bool mcptt, string group, bool priv = false, bool half = true, bool emg = false, bool listen = false,
                            CimsUe.CallDir dir = CimsUe.CallDir.Outgoing, bool bcast = false, string caller = "tel:1001") =>
             new(id, 1, dir, st, remote, "", false, true, false, true, 0, 0, "", Array.Empty<CimsUe.MediaSource>(), mcptt, group,
-                new CimsUe.McpttInfo(mcptt, priv ? "private" : "prearranged", "", caller, group, emg, false, priv, !half, bcast), half, listen, "");
+                new CimsUe.McpttInfo(mcptt, priv ? "private" : "prearranged", "", caller, group, emg, false, priv, !half, bcast), half, listen, "",
+                1f, new CimsUe.McpttCondition(emg, false, false, false, 0));
         GroupInfo G(string id, string name, int members, bool member, params (string, string)[] roster)
         {
             var g = new GroupInfo(id, "tel:" + id, name, members) { IsMember = member, IsOwner = id == "g-ops" };
@@ -350,6 +364,8 @@ public sealed partial class MainViewModel : ObservableObject
         s.Activity.Add(ActivityPanel.Call, ActivityKind.Missed, "부재 7000 ← 010-7777-8888", "→ 넘김 7100", missed: true, number: "+821077778888", pilot: true);
         // 서버 인증서 만료 경고 배너(§8.6.2) 표본 — 경고 구간(≤30일) 연한 빨강. 위험(≤7일)은 DaysLeft 를 7 이하로 바꿔 본다
         s.ShowServerCertBanner(new CimsUe.TlsPeerExpiry(true, DateTimeOffset.Now.AddDays(12), DateTimeOffset.Now, 12, "CN=csc.site1.cims.example.kr, O=CIMS Site1", "10.20.1.5:4430"));
+        // 긴급 경보 배너(TS 24.379 §12.1.1.3) 표본 — 자주, [경보 해제]·[채널로 이동]·[닫기]
+        s.Notify.ShowBanner(new Banner { Kind = BannerKind.Alert, GroupId = "g-support", AlertUser = "1013", Title = "긴급 경보 — 지원", Subtitle = "1013", CanCancel = true });
         RestoreFromSnapshot();
         PttChannels.Select(PttChannels.Cards.FirstOrDefault(), collapseSame: false);
         if (PttChannels.Cards.FirstOrDefault() is { } first) PttChannels.SetSingleTarget(first);

@@ -1,4 +1,5 @@
 // 메시지 보관 — SQLite(%APPDATA%\CIMS\dispatch-desktop\messages.db), MCData/SMS 공용, 최근 N 일 유지 (§4.1·§4.3).
+// 격리 단위 = 로그인 ID(owner 열 — 관제석은 자리별 ID 라 교대해도 같다). 조회·읽음 표시는 지금 주인의 행만, 보존 정리·재기동 PENDING 마감은 주인 무관.
 using DispatchDesktop.Models;
 using Microsoft.Data.Sqlite;
 
@@ -29,6 +30,19 @@ public sealed class MessageStore : IDisposable
         // FD 첨부 열(mcdata_messaging.md §4.5) — 앞선 판의 DB 에는 없어 없으면 붙인다
         AddColumn("file_type", "TEXT NOT NULL DEFAULT ''");
         AddColumn("local_path", "TEXT NOT NULL DEFAULT ''");
+        // 보관 주인(로그인 ID) — 앞선 판의 행은 '' 로 붙고 첫 로그인이 한 번 가져간다(SetOwner)
+        AddColumn("owner", "TEXT NOT NULL DEFAULT ''");
+        Exec("CREATE INDEX IF NOT EXISTS ix_messages_owner ON messages(owner, kind, thread_key)");
+    }
+
+    /// <summary>지금 보관 주인(로그인 ID). 비면(로그인 전) 조회는 빈 목록이다.</summary>
+    public string Owner { get; private set; } = "";
+
+    /// <summary>로그인 — 주인을 정하고, 주인 없는 옛 행(owner 열 이전 판)을 이 로그인 ID 에 한 번 귀속한다(자리 PC 는 같은 자리 ID 로 로그인한다).</summary>
+    public void SetOwner(string loginId)
+    {
+        Owner = loginId ?? "";
+        if (Owner.Length > 0) Exec("UPDATE messages SET owner=@o WHERE owner=''", ("@o", Owner));
     }
 
     private void AddColumn(string name, string decl)
@@ -52,8 +66,8 @@ public sealed class MessageStore : IDisposable
     {
         using var cmd = _db.CreateCommand();
         cmd.CommandText = """
-            INSERT INTO messages(kind, thread_key, direction, peer, peer_name, group_uri, conv_id, msg_id, token, text, time, state, file_name, file_url, file_size, read, file_type, local_path)
-            VALUES(@kind, @thread, @dir, @peer, @peer_name, @group, @conv, @msg, @token, @text, @time, @state, @fname, @furl, @fsize, @read, @ftype, @local);
+            INSERT INTO messages(kind, thread_key, direction, peer, peer_name, group_uri, conv_id, msg_id, token, text, time, state, file_name, file_url, file_size, read, file_type, local_path, owner)
+            VALUES(@kind, @thread, @dir, @peer, @peer_name, @group, @conv, @msg, @token, @text, @time, @state, @fname, @furl, @fsize, @read, @ftype, @local, @owner);
             SELECT last_insert_rowid();
             """;
         cmd.Parameters.AddWithValue("@kind", (int)m.Kind);
@@ -74,6 +88,7 @@ public sealed class MessageStore : IDisposable
         cmd.Parameters.AddWithValue("@read", m.Read ? 1 : 0);
         cmd.Parameters.AddWithValue("@ftype", m.FileType);
         cmd.Parameters.AddWithValue("@local", m.LocalPath);
+        cmd.Parameters.AddWithValue("@owner", Owner);
         m.Id = (long)cmd.ExecuteScalar()!;
     }
 
@@ -90,13 +105,16 @@ public sealed class MessageStore : IDisposable
     public void UpdateResend(long id, string msgId, long token, SendState state) =>
         Exec("UPDATE messages SET msg_id=@m, token=@t, state=@s WHERE id=@id", ("@m", msgId), ("@t", token), ("@s", (int)state), ("@id", id));
     public void MarkRead(string threadKey, MessageKind kind) =>
-        Exec("UPDATE messages SET read=1 WHERE thread_key=@k AND kind=@kind", ("@k", threadKey), ("@kind", (int)kind));
+        Exec("UPDATE messages SET read=1 WHERE thread_key=@k AND kind=@kind AND owner=@o", ("@k", threadKey), ("@kind", (int)kind), ("@o", Owner));
 
+    /// <summary>지금 주인의 행 전부(시간순). 로그인 전이면 빈 목록.</summary>
     public List<Message> LoadAll()
     {
         var list = new List<Message>();
+        if (Owner.Length == 0) return list;
         using var cmd = _db.CreateCommand();
-        cmd.CommandText = "SELECT id, kind, thread_key, direction, peer, peer_name, group_uri, conv_id, msg_id, token, text, time, state, file_name, file_url, file_size, read, file_type, local_path FROM messages ORDER BY time";
+        cmd.CommandText = "SELECT id, kind, thread_key, direction, peer, peer_name, group_uri, conv_id, msg_id, token, text, time, state, file_name, file_url, file_size, read, file_type, local_path FROM messages WHERE owner=@o ORDER BY time";
+        cmd.Parameters.AddWithValue("@o", Owner);
         using var r = cmd.ExecuteReader();
         while (r.Read())
         {

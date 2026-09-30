@@ -24,6 +24,22 @@ public enum FloorEventKind
     Other = 10,
 }
 
+/// <summary><see cref="Engine.McpttConditionChanged"/> 의 계기(types.h ConditionCause).</summary>
+public enum ConditionCause
+{
+    /// <summary>SetCondition — 보내면서 곧바로 반영(응답 전).</summary>
+    Local = 0,
+    /// <summary>그 re-INVITE 의 2xx.</summary>
+    Confirmed = 1,
+    /// <summary>그 re-INVITE 의 4xx~6xx — 이전 값으로 되돌렸다(미인가 상향 = 403, TS 24.379 §6.3.3.1.14).</summary>
+    Denied = 2,
+    /// <summary>서버 재광고(수신 re-INVITE·합류 200 OK 의 mcptt-info, TS 24.379 §6.3.3.1.6·§6.3.3.1.10·§6.3.3.1.15).</summary>
+    Advertised = 3,
+}
+
+/// <summary>오디오 라우트(types.h AudioRoute) — 모바일 라우트. 데스크톱 장치는 무시할 수 있다.</summary>
+public enum AudioRoute { Default = 0, Earpiece = 1, Loudspeaker = 2 }
+
 /// <summary>Floor Indicator 비트(TS 24.380 §8.2.3.15) — <see cref="FloorEvent.Indicator"/>·<see cref="FloorInfo.Indicator"/> 해석용.
 /// 정본 = docs/design/features/mcptt_floor_defs.yaml `indicator` — scripts/gen_floor_defs.py --check 가 이 값을 대조한다.</summary>
 public static class FloorIndicator
@@ -77,6 +93,12 @@ public sealed class EngineConfig
     public int TlsPort { get; set; }
     /// <summary>미디어 클럭 — pjsua 기본 16kHz(AMR-WB 정합).</summary>
     public uint ClockRate { get; set; } = 16000;
+    /// <summary>RFC 3261 §18.1.1 UDP→TCP 자동 승격 비활성 — 통제된 망 전용 사이트 옵션(프로파일 <see cref="ServiceProfile.UdpNoTcpSwitch"/>). 프로세스 전역.</summary>
+    public bool UdpNoTcpSwitch { get; set; }
+    /// <summary>Floor Granted 뒤 마이크를 여는 지연(ms, 0 = 즉시) — 앱이 승인 톤을 재생하는 길이. 그 사이 발언을 잃으면 열지 않는다.</summary>
+    public int GrantMicDelayMs { get; set; }
+    /// <summary>마이크 AGC 기본 목표 — ITU-T P.56 활성 레벨 -26 dBov(types.h kMicAgcTargetDbov).</summary>
+    public const double MicAgcTargetDbov = -26.0;
 }
 
 /// <summary>계정(접속서비스 kind 당 1개) 설정 — 프로비저닝 프로파일(<see cref="ServiceProfile.ToAccountConfig"/>)에서 채운다.</summary>
@@ -113,6 +135,19 @@ public sealed class AccountConfig
     /// <summary>REGISTER Contact +sip.instance(TS 24.229 §5.1.1.2) — 꺾쇠 없는 URN. IMEI 를 못 얻는 데스크톱은 설치별 고유
     /// "urn:uuid:…"(RFC 4122)를 저장해 두고 쓴다. null 이면 pjsip 기본값(호스트명 해시 — 기기마다 같을 수 있다).</summary>
     public string? InstanceId { get; set; }
+    /// <summary>MCPTT client ID(TS 24.379 §4.10) — 긴급 경보 &lt;mcptt-client-id&gt;. null 이면 InstanceId 가 urn:uuid: 일 때 그것.</summary>
+    public string? McpttClientId { get; set; }
+    /// <summary>Resource-Priority r-value(긴급·임박·일반 그룹콜, TS 24.379 §6.2.8.1) — null = 코어 기본(mcpttp.15/8/0). 정본은 service-config.</summary>
+    public string? RpEmergency { get; set; }
+    public string? RpImminentPeril { get; set; }
+    public string? RpNormal { get; set; }
+    /// <summary>그룹 SDS 시그널링 평면 상한(octet) — 넘으면 media plane(MSRP, TS 24.282 §9.2.3)으로 가고 최종 결과는 RequestCompleted method "MSRP".
+    /// 0 = 제한 없음. 프로파일(<see cref="ServiceProfile.MaxPayloadSdsCplaneBytes"/>)이 채운다.</summary>
+    public int MaxSdsCplaneBytes { get; set; }
+    /// <summary>서버발 MSRP 배포 수신 — REGISTER Contact 에 ICSI mcdata.sds. false 면 서버가 큰 그룹 SDS 를 FILEURL(FD)로 폴백한다.</summary>
+    public bool McdataMsrp { get; set; }
+    /// <summary>참여 MCPTT 기능 PSI — 긴급 경보 Request-URI(TS 24.379 §12.1.1.1 8)). null 이면 그룹 URI(옛 서버 전환기).</summary>
+    public string? McpttServerUri { get; set; }
 
     /// <summary>"sip:msisdn@domain".</summary>
     public string Aor() => Engine.AccountConfigString(this, Engine.AccountStringKind.Aor);
@@ -162,16 +197,30 @@ public sealed record McpttInfo(bool Present, string SessionType, string RequestU
     public static McpttInfo None { get; } = new(false, "", "", "", "", false, false, false, false);
 }
 
+/// <summary>MCPTT 세션 조건(types.h McpttCondition) — 그룹의 긴급·임박 상태를 이 호에서 본 **현재값**. 개시 mcptt-info 로 시작해 SetCondition(상향·하향)과
+/// 서버 재광고로 바뀐다(TS 24.379 §10.1.1.2.1.3~6). 긴급이 임박을 대체한다. Mine = 이 단말이 올린 조건, Pending = 응답 대기.</summary>
+public readonly record struct McpttCondition(bool Emergency, bool ImminentPeril, bool Mine, bool Pending, int LastCode);
+
+/// <summary>긴급 경보·긴급 통지 수신(TS 24.379 §12.1.1.3). 지시자 1 = true, -1 = false, 0 = 요소 없음. GroupId·UserId·OriginatedBy 는 bare.
+/// AlertInd 1 = 경보, -1 = 경보 취소(OriginatedBy 가 있으면 제3자 취소 — 그 사용자의 경보), 0 = 그룹 상태 통지. Self = 내 에코.</summary>
+/// <summary><see cref="Engine.McpttConditionChanged"/> 인자 — Info.Condition 이 새 값.</summary>
+public sealed record McpttConditionChange(CallInfo Info, ConditionCause Cause);
+
+public sealed record EmergencyAlert(int AccountId, string GroupId, string UserId, string OriginatedBy, string McOrg,
+                                    int AlertInd, int EmergencyInd, int ImminentPerilInd, bool Self);
+
 /// <summary>한 호 안의 RTP 소스(SSRC) — U10 디먹스 산출. 감청 leg 는 RFC 5576 label(caller/callee)로 화자 귀속.</summary>
 public sealed record MediaSource(uint Ssrc, string Label, bool Active, float Level);
 
 /// <summary>호 스냅샷. CalledParty = 착신 INVITE 의 P-Called-Party-ID(RFC 3455, 대표번호 착신 식별). PlaybackRoute = 0 기본 재생 장치,
-/// 그 외 <see cref="Engine.AddPlaybackRoute"/> 가 준 id. JoinedDialog = INVITE-Join 으로 합류한 대상 dialog 의 Call-ID.</summary>
+/// 그 외 <see cref="Engine.AddPlaybackRoute"/> 가 준 id. JoinedDialog = INVITE-Join 으로 합류한 대상 dialog 의 Call-ID.
+/// Mcptt = 개시·착신 INVITE 의 mcptt-info(호 종류 — 이후 불변), Condition = 긴급·임박의 현재값(판정은 이것으로). RxLevel = 이 호에서 듣는 크기.</summary>
 public sealed record CallInfo(
     int CallId, int AccountId, CallDir Dir, CallState State, string RemoteUri, string CalledParty,
     bool Video, bool MediaActive, bool Muted, bool Listen, int PlaybackRoute,
     int LastCode, string LastReason, IReadOnlyList<MediaSource> Sources,
-    bool IsMcptt, string GroupId, McpttInfo Mcptt, bool HalfDuplex, bool ListenOnly, string JoinedDialog)
+    bool IsMcptt, string GroupId, McpttInfo Mcptt, bool HalfDuplex, bool ListenOnly, string JoinedDialog,
+    float RxLevel = 1f, McpttCondition Condition = default)
 {
     public static CallInfo Empty { get; } = new(-1, -1, CallDir.Outgoing, CallState.Null, "", "", false, false, false, true, 0, 0, "",
                                                 Array.Empty<MediaSource>(), false, "", McpttInfo.None, false, false, "");
@@ -214,10 +263,10 @@ public sealed record RosterUpdate(int AccountId, string GroupId, IReadOnlyList<R
 public sealed record FdFile(string Url, string Name, string Type, long Size);
 
 /// <summary>MCData SDS (TS 24.282) — 수신 메시지·disposition 통지·FD. GroupUri = 그룹 SDS·FD 의 request-uri(1:1 은 빈 값 — FromUri 가 상대).
-/// DispositionReq: 0 없음/1 delivery/2 read/3 both. NotifType: 1 undelivered/2 delivered/3 read/4 delivered+read.</summary>
+/// DispositionReq: 0 없음/1 delivery/2 read/3 both. NotifType: 1 undelivered/2 delivered/3 read/4 delivered+read. MediaPlane = media plane(MSRP) 배포로 받았다.</summary>
 public sealed record SdsMessage(int AccountId, string FromUri, string GroupUri, string ConvId, string MsgId, long TimeSec,
                                 int DispositionReq, string Text, bool Notification, int NotifType,
-                                bool Fd, string FileUrl, string FileName, string FileType, long FileSize);
+                                bool Fd, string FileUrl, string FileName, string FileType, long FileSize, bool MediaPlane = false);
 
 public sealed record StreamStats(uint RxPackets, uint RxBytes, uint RxLoss, uint RxDiscard, uint TxPackets, uint TxBytes, bool Valid);
 
@@ -241,6 +290,9 @@ public sealed record TlsPeerExpiry(bool Valid, DateTimeOffset NotAfter, DateTime
 }
 
 public sealed record AudioDeviceInfo(int Id, string Name, string Driver, uint InputCount, uint OutputCount);
+
+/// <summary>영상 장치(types.h VideoDeviceInfo) — 캡처(카메라)·렌더.</summary>
+public sealed record VideoDeviceInfo(int Id, string Name, string Driver, bool Capture, bool Render);
 
 /// <summary>MCData 가 아닌 MESSAGE/NOTIFY 본문(text/plain 문자, xcap-diff 등) — 앱이 해석.</summary>
 public sealed record SipMessage(int AccountId, string FromUri, string ContentType, string Body);

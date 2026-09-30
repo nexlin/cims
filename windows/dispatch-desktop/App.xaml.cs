@@ -1,4 +1,4 @@
-// 앱 진입 — 단일 인스턴스(명명 Mutex) · SynchronizationContext 캡처 · 전역 예외 · 테마 · 로그인→메인 · 1초 틱 · 네트워크 복귀 재등록 (§6).
+// 앱 진입 — 단일 인스턴스(명명 Mutex) · SynchronizationContext 캡처 · 전역 예외 · 테마 · 로그인→메인 · 1초 틱 · 망 전환 재등록(코어 handleNetworkChange, §6).
 using System.Net.NetworkInformation;
 using System.Windows;
 using System.Windows.Threading;
@@ -75,7 +75,9 @@ public partial class App : Application
         _layout.Load();
 
         _tick = new DispatcherTimer(DispatcherPriority.Background) { Interval = TimeSpan.FromSeconds(1) };
-        NetworkChange.NetworkAvailabilityChanged += (_, a) => { if (a.IsAvailable) Dispatcher.BeginInvoke(() => _session?.RefreshRegistrations()); };
+        // 망 전환·복귀 — 세션이 합쳐서(2 초) 주소 지문이 바뀐 때만 코어에 알린다(TCP/TLS 연결 종료 + 계정별 재등록)
+        NetworkChange.NetworkAvailabilityChanged += (_, _) => _session?.NoteNetworkChange();
+        NetworkChange.NetworkAddressChanged += (_, _) => _session?.NoteNetworkChange();
 
         _log.Info($"start {CimsUe.Engine.Version}");
         _started = true;

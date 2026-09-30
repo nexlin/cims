@@ -48,7 +48,7 @@
 | 호 전달 blind / attended | 통화 중 | ③ 내 통화 카드 [전달]·[상담 전달] | `transfer` / `dial`+`transferAttended` |
 | 진행 중 통화 청취(감청) | ⑥ 행 / 그룹원 띠 confirmed | [청취] → 감청 창 | `dialogWatch` → `join(dlg)` |
 | 문자(SMS·LMS) | 내선·가입자 | ③ [문자 n] 팝오버(보내기·받은·보낸) — 상시 패널 없음 | `sendRequest(MESSAGE, text/plain)`·`onMessage` |
-| 긴급 상황 인지 | emergency/imminent/alert | 전역 배너 + ①② 카드 빨강 + ⑤ 고정 행 | `CallInfo.mcptt.emergency/imminentPeril`, `onMessage(alert-ind)` |
+| 긴급 상황 인지 | emergency/imminent/alert | 전역 배너 + ①② 카드 빨강 + ⑤ 고정 행 | `CallInfo.condition`·`onMcpttCondition`, `onEmergencyAlert` |
 | 장치·핫키·배치 | 설정 | 상단 바 → 설정 창 / 🔒 프리셋 | `audioDevices`·`setAudioDevices`·`addPlaybackRoute`·`setCallRoute` |
 | 세션 이력 조회·녹취 재생 | 상단 바 [이력] F2 · ⑤⑥ 머리 [이력에서 보기] | §4.6 이력 화면 | `CscClient.request`(앱 `ManagementClient` — `/provisioning/history?until=`·`/provisioning/recordings/*`) |
 | PTT 그룹 관리(범위 안 전부) | 상단 바 [PTT 그룹] F3 · ② 카드 [편집]/[+ 새 채널] → 채널 편집 드로어 | §4.7 PTT 그룹 화면 | `/provisioning/directory/groups` + GMS XCAP(`CscClient.putGroup/deleteGroup`) |
@@ -108,7 +108,7 @@
 |---|---|
 | 상단 바 | 왼쪽부터 로고 · **최상위 메뉴 [관제 F1] [이력 F2] [PTT 그룹 F3] [관리 F4]**(§3.4 — 선택 = Primary 글자 + 아래 밑줄, 키 칩 병기. [관리]는 관리 범위가 없으면 숨기지 않고 **비활성 + 툴팁**("조직/구성원·번호 관리는 관제 역할의 관리 범위(콘솔 관리 > 역할)가 있어야 합니다"), 편집 폼이 열려 있으면 주황 점 배지) · 데스크 신원은 **이름·내선만**(PTT 번호(`effectiveMcpttId`)·`dispatch.groupName(groupId)`·`pilotId` 는 툴팁) · 계정 등록 점등 2개(PTT/VoLTE — `RegState` 색: 회색 미등록·노랑 등록중·녹색 등록·빨강 실패, 툴팁에 코드·사유). 오른쪽: **감청 중 N 칩**(보라 — 열린 감청 창 목록, 클릭 → 창 복원, §5), **배치 🔒/🔓 + 프리셋 ▾**(§3.3), 오디오 요약(헤드셋/스피커 장치명, 클릭 → 설정), PTT 핫키 표시, 시각, 설정 ⚙(설정·로그아웃·종료) — 56px 한 줄을 유지하고 좌측 세로 레일은 두지 않는다(두 열 951px 예산 보존) |
 | 착신 배너 | 상단 바 아래 슬라이드 — "대표번호 7000 착신 · 010-9876-5432 · [응답 F9] [거절]". 대표번호 착신(`calledParty`=pilot) 주황, 내선 직접 착신 파랑, PTT 개별 통화 착신 청록. 여러 착신은 스택(최신 위). 응답 핫키는 최상단 호 |
-| 긴급 배너 | 빨강(emergency) / 주황(imminent peril) / 자주(alert) 풀폭 — 그룹명·개시자·경과, [채널로 이동]. ①카드·②행 배지와 동기. 취소(`emergency-ind=false` re-INVITE / `alert-ind=false`) 수신 시 해제 |
+| 긴급 배너 | 빨강(emergency) / 주황(imminent peril) / 자주(alert) 풀폭 — 그룹명·개시자·경과. ①카드·②행 배지와 동기. **긴급·임박**(채널마다 하나) = 세션 조건 `CallInfo.condition`(TS 24.379 §10.1.1.2.1.3~6 — 개시 mcptt-info 로 시작해 상향·하향 re-INVITE·서버 재광고·합류 200 OK 로 바뀐다; `CallInfo.mcptt` 는 호를 세운 INVITE 의 값이라 판정에 쓰지 않는다). 호 상태·미디어 스냅샷·조건 이벤트(`onMcpttCondition`) 셋 모두가 배너를 다시 판정한다 — 진행 중 격상·해제와 «이미 긴급인 그룹에 합류» 가 선다. 개시자는 호를 세운 INVITE 가 그 조건을 실었을 때만 적는다(진행 중에 걸린 조건은 비움). [긴급 해제] = 내가 올린 조건일 때만(CSP 는 개시자 외의 하향을 무시하면서 200 을 돌려준다 — 권한자 확장·비인가 403 은 서버 과제 E1, 반영 뒤 넓힌다), 조건이 내려가면 스스로 빠지고 닫기는 없다. **경보**(그룹·발신자마다 하나) = `onEmergencyAlert`(TS 24.379 §12.1.1.3) — 발신자의 취소(제3자 취소면 `originated-by` 가 가리키는 경보)로 해제, [경보 해제] = 경보 취소 MESSAGE(남의 경보는 제3자 취소 §12.1.1.2 4)e), user profile `allow-cancel-emergency-alert` 이 없으면 숨김), [닫기] = 로컬 표시만(취소 신호 유실 대비). 공통 [채널로 이동] = ① 카드, 없으면 ② 카드로 포커스만 — 합류하지 않는다(청취 범위 그룹에 sendrecv 로 붙으면 비멤버라 403, TS 24.379 §10.1.1) |
 | 서버 인증서 배너 | 같은 배너 레이어(관제 캔버스 포함 어느 화면에서나) — SDK 가 마지막 SIP TLS·HTTPS 핸드셰이크에서 관측한 서버 인증서 잔여(`Engine.TlsPeerExpiry`·`CscClient.TlsPeerExpiry` 중 짧은 것)가 **≤ 30일**이면 "서버 인증서 N일 후 만료 · `<host:port>` · `<subject>` · 만료 YYYY-MM-DD · 자동 갱신 실패 신호 — 운영자에게 알리세요 (콘솔 알람 A-PRC-009)". 경고(≤30일) 연한 빨강 + 빨강 글자, 위험(≤7일·만료) 진한 빨강 — 서버 A-PRC-009 warning/critical 과 같은 단계. **닫기 없음**(서버 인증서가 갱신되어 잔여가 임계를 벗어나면 사라진다), 버튼 없음, 경과 표시 없음. 로그인 직후·TLS 등록 성공·1분 주기로 재평가, 로그아웃에 내림. 임계 셋(60 갱신/30 경고/7 위험)의 뜻은 [sip_tls_signaling.md §8.6](sip_tls_signaling.md) |
 | 토스트 | 명령 실패의 사유(§9 사전) — 우하단, 6초, 오류는 수동 닫기. 원문 코드는 ▸상세 |
 | 상태 색상 | 대기 회색 · 링잉 주황(점멸) · 통화/발언 녹색 · 보류 파랑 · 감청 보라 · 청취/개별 통화 청록 · 긴급 빨강. 아이콘·텍스트 병기(색맹 대비) |
@@ -143,7 +143,7 @@
 - **화면 VM 은 앱 수명 동안 하나, 서버 자료는 로그인 뒤 처음 관제 밖 화면을 열 때 한 번 적재**(이후는 화면 안 [새로고침]·저장 후 재조회). 착신 응답으로 관제에
   다녀와도 편집 중이던 폼은 그대로다. 저장하지 않은 폼은 [관리] 메뉴의 점 배지와 화면 머리의 "편집 중" 배지로만 알리고 **전환을 막지 않는다**.
 - **자동 복귀 규칙.** 세션을 **만드는** 조작 — 배너 [응답]·당겨받기·발신·개별·애드혹 통화, 전역 핫키 응답 포함 — 은 관제로 돌아온다(보류·전달·종료 버튼이 거기 있다).
-  착신(링잉)·멤버 채널 합류·감청/청취 창은 배너·칩만 띄우고 화면을 바꾸지 않는다. 긴급 배너의 [채널로 이동]은 관제로 복귀 + 해당 카드 포커스. 로그아웃·재로그인은 관제로.
+  착신(링잉)·멤버 채널 합류·감청/청취 창은 배너·칩만 띄우고 화면을 바꾸지 않는다. 긴급 배너의 [채널로 이동]은 관제로 복귀 + 해당 카드 포커스(① 없으면 ② — 합류 없음). 로그아웃·재로그인은 관제로.
 - **↗ 별창으로.** 패널의 ↗ 를 화면에도 확장 — 관제 외 화면을 별창(`ScreenWindow`, 1180×760)으로 떼어 두 번째 모니터에 둔다. 별창에도 관제 요약 띠가 붙는다. 떼어낸 동안
   주 창 쪽은 자리표시자("이 화면은 별창에 열려 있습니다 · [별창 앞으로]")만 보이고(같은 VM 을 두 뷰가 동시에 붙지 않게 — 녹취 재생·비밀번호 상자), 별창을 닫으면 주 창
   화면으로 돌아온다. 로그아웃 시 별창은 닫힌다. **앱 포커스 핫키(§8)는 별창에서도 주 창과 같은 규칙**으로 동작한다(별창이 주 창의 키 처리로 넘긴다) — 별창에서
@@ -193,8 +193,11 @@
 - **정렬**: ① 은 **핀 순서 고정**(`Ctrl+n` 근육 기억 — 진행 중이라고 위로 올리지 않는다; 개별·애드혹 통화는 멤버 그룹 뒤에 생성 순). ② 는 섹션(청취 범위 › 타인 세션 ›
   관리 범위) 안에서 긴급 › 진행 중 › 대기. 긴급은 카드 빨강 + 전역 긴급 배너가 알린다(어느 패널이든).
 - **조작 버튼**은 호버 때 보이고, 세션을 끝내는 것([종료]·[음소거]·[청취 중])만 상시.
-- **긴급**: `mcptt.emergency`/`imminentPeril` 세션은 카드 테두리 빨강/주황 + 전역 배너. 관제사 긴급 개시는 3줄 [긴급 호출](확인) —
-  `GroupCallOptions.emergency`, 자격 없으면 403 사전 문구.
+- **긴급**: 세션 조건(`CallInfo.condition` — 긴급·임박 현재값)이 선 세션은 카드 테두리 빨강/주황 + 전역 배너. 관제사 긴급은 3줄 [긴급 호출] —
+  참여 중이면 그 호의 **조건 상향**(`Call.SetCondition(true,false)` in-dialog re-INVITE, TS 24.379 §10.1.1.2.1.3 — 같은 그룹으로 새 INVITE 를 보내면
+  코어가 같은 호를 돌려줘 아무 일도 없다), 아니면 긴급 그룹콜 개시(`GroupCallOptions.emergency`). 자격(user profile `allow-emergency-group-call` —
+  `Capabilities`, 못 받았으면 허용)이 없으면 비활성 + 툴팁, 서버 거절(그룹 능력 꺼짐 등)은 조건 이벤트 `Denied` → 403 사전 문구(호는 유지).
+  [긴급 해제] = 내가 올린 조건일 때만(§10.1.1.2.1.4 하향 — CSP 가 지금 개시자의 하향만 받는다, §13 서버 과제 E1).
 - **일제 통화**(TS 24.379 §4.12 — 그룹 종류가 아니라 호 속성, [mcptt_broadcast_group_call.md](mcptt_broadcast_group_call.md) §4.4 U6): 관제사 개시는 3줄 [일제 통화] —
   멤버 편성 그룹에 진행 중 세션이 없을 때만 활성(진행 중이면 서버가 합류로만 받는다 — 그 문서 §3.2. chat 그룹은 서버가 broadcast-ind 를 무시해 비활성 — TS 24.379
   §6.2.8.2 는 broadcast-ind 를 prearranged 그룹 호에 싣는다. 그룹 종류는 관리 목록 `sessionType`, 관리 범위가 없어 모르면 누를 때 GMS 그룹 문서의
@@ -294,7 +297,8 @@
 - 받은 문자: `onMessage(from, "text/plain", body)` → 발신자 스레드(발신자·시각·본문, 답장은 같은 스레드 입력). **상시 패널로 감시하지 않는다** — 새 문자는 토스트 + [문자] 배지
   미읽음 수(요약 띠에도), 지난 문자는 ⑥ 최근 행(문자 요약)과 [이력 F2]. 보관은 MCData 와 같은 SQLite(스레드 종류 구분).
 - 외부망 휴대전화 SMS/LMS 는 서버 게이트웨이(IBCF→SMSC TS 24.341 / SMPP)가 있을 때만 — 프로비저닝 `services[kind].capabilities.smsGateway`
-  ([android_ue_provisioning.md §3](android_ue_provisioning.md))가 `false` 면 외부 번호 [문자] 비활성 + 툴팁, 팝오버 머리에 게이트웨이 상태 배지. 게이트웨이 자체는 §13 서버 과제.
+  ([android_ue_provisioning.md §3](android_ue_provisioning.md), 전화 회선 프로파일 — SDK `ServiceProfile.SmsGateway`)가 `false` 면 외부 번호 [문자](주소록·최근·⑥ 행)
+  비활성 + 툴팁 · 보내기 비활성, `true` 면 외부 번호도 같은 `MESSAGE` 로 보낸다. 팝오버 머리 배지 = «외부망 게이트웨이 미구성» / «외부망 문자 가능». 게이트웨이 자체는 §13 서버 과제.
 
 **관제 그룹원 상태 띠** — BLF 의 축소형(2~4명, 최대 10, 넘치면 두 줄 + "+n"):
 - 칩 = 내선 · 이름 · 상태 점(대기/링잉/통화/보류 + 경과). 자기 내선은 "나". 링잉 → [픽업](`pickup(code, ext)`), 통화 중이고 `monitorScope` 안 → [청취](감청 창 §5),
@@ -327,7 +331,10 @@
   "모든 스레드" 고정 칩) → 선택 스레드의 말풍선(발신 상태 🕓→✓→✓✓/⚠ 재전송, 그룹 수신은 발신자 라벨, 첨부 카드) → 입력 + [📎](FD) + [전송].
 - 발신 그룹 `sendGroupSds(acc_ptt, groupId, text, requestDelivery)` / 1:1 `sendSds(acc_ptt, peer, …)` → `(msgId, token)` · 최종 응답 `onRequestCompleted(MESSAGE, token)` 을
   **token 으로** 상관해 2xx=SENT (자동 회신하는 disposition 통지의 완료 이벤트는 어느 메시지에도 맞지 않아 무시) · disposition 요청 수신은 `sendSdsNotification(delivered)` 자동 회신 ·
-  `onSds(notification)` 을 msgId 로 상관 → ✓✓(재전송은 새 msgId·token 을 메시지에 덮어쓴다). 1:1 스레드(개별 통화 상대·사람 메뉴 [SDS]·받은 1:1, 키 = 상대 번호 user part)도
+  `onSds(notification)` 을 msgId 로 상관 → ✓✓. 재전송은 **처음의 msgId** 로 보낸다(`sendGroupSds`/`sendSds` 의 `msgId` — 앞 발신이 일부에게 닿았어도 받는 쪽이
+  같은 메시지로 대조하고 ✓✓ 도 그 ID 로 맞물린다; 즉시 실패로 ID 가 없던 메시지만 새 ID) — token 만 새로 덮어쓴다. 그룹 본문이 프로파일 `mcdata.maxPayloadSdsCplaneBytes`
+  를 넘으면 코어가 media plane(MSRP, TS 24.282 §9.2.3)으로 보내고 최종 결과가 `onRequestCompleted(MSRP, token)` 으로 온다(같은 token 상관). PTT 계정은
+  `mcdataMsrp` 로 서버발 MSRP 배포도 받는다(`SdsMessage.MediaPlane`). 1:1 스레드(개별 통화 상대·사람 메뉴 [SDS]·받은 1:1, 키 = 상대 번호 user part)도
   글·파일을 보낸다 — 받은 1:1 은 코어가 request-type(`one-to-one-*`)을 보고 `groupUri` 를 비워 준다.
 - **파일(FD, [mcdata_messaging.md](mcdata_messaging.md) §4.5)**: [📎](다중 선택)·말풍선 영역에 끌어 놓기 → 말풍선을 먼저 세우고("올리는 중…") 전용 CSC 핸들로
   `uploadFd`(그룹 = `group` 지정 — 서버가 `allow_fd`·멤버십 게이트, 1:1 = 없음) → `sendGroupFd`/`sendFd`(FILEURL·name/size/type) → token 상관은 글과 같다.
@@ -336,6 +343,9 @@
   `다운로드\CIMS\<이름>`(겹치면 "(n)") 저장 후 연결 프로그램으로 열기, 이름 클릭 = 열기(안 받았으면 받기), 폴더 아이콘 = 탐색기에서 보기. 거부 사유는 §9 `Area.File`
   (`allow_fd` 꺼짐·비멤버·413·보관 만료).
 - 보관: 로컬 SQLite(`%APPDATA%\CIMS\dispatch-desktop\messages.db`) 최근 30일(설정). 미읽음은 패널이 접혀 있어도 머리 배지 + ① 카드 `✉ n`.
+  **격리 단위 = 로그인 ID**(`owner` 열 — 관제석은 자리별 로그인 ID 라 교대해도 같다): 조회·읽음 표시·새 행은 지금 로그인 ID 의 것만, 한 PC 에 다른 자리 ID 로
+  로그인하면 앞 ID 의 스레드가 보이지 않는다(재로그인 때 다시 읽음). 보존 정리(`Prune`)·재기동 PENDING 마감은 주인 무관. `owner` 열 이전 판의 행은 그 PC 의
+  첫 로그인 ID 에 한 번 귀속한다(자리 PC 는 같은 자리 ID 로 로그인한다).
 
 **⑤ PTT 이벤트**(하단 가운데) — PTT 세계에서 **방금 일어난 것**의 흐름. 진행 중 상태는 ①② 카드가 맡고 여기는 이벤트만.
 - 머리: `[● <포커스 채널> 따라가기]` 토글(기본 켬 — 포커스 카드의 채널만; 끄면 범위 전체) · `[전체|발언|긴급]` · 검색 · [이력에서 보기 F2] · ↗.
@@ -417,8 +427,8 @@ SIP transport 콤보는 **ANY** 를 포함한 넷(콘솔 라벨과 같다) — A
 검색(그룹명·id); 행 = 관계 배지(멤버 › 청취 범위 › 소유 › 범위) · 그룹명 · 멤버 수 / id · 소속(조직 경로) 두 줄 카드.
 **행 한 번 클릭 = 상세**: 머리(이름 · id · [멤버]·[세션 진행 중] 배지 · [편집](`canManage` 행만)) · 소유자(내 것은 "이름(나)", 나머지는 문서 GET 이 채움) · 소속 · 정책(우선순위·긴급 허용·세션 종류) ·
 청취 노출(은닉/투명) · 능력(SDS·FD·영상·암호화·affiliation) · "멤버 N / affiliation M" 과 멤버 목록(이름·번호·의장, 상태 = 발언 중/참여/미참가, 나) — 로스터·발언은 1초 틱으로 갱신 ·
-바닥 [삭제](`canManage` 행만) [채널로](관제 캔버스의 채널 카드로, 멤버 그룹이면 합류).
-**[편집]·[+ 새 그룹]·행 더블클릭 = 같은 카드 자리의 인라인 편집 폼**(`GroupEditView`, 별창 없음) — 왼쪽 속성(세션 종류 = prearranged/chat — 일제 통화는 호 속성이라 선택지에 없다) · 오른쪽 멤버(PTT 주소록 후보 ↔ 선택, 의장 토글) · 바닥 [취소][저장/그룹 만들기].
+바닥 [삭제](`canManage` 행만) [채널로](관제 캔버스의 채널 카드로 포커스 — 멤버 그룹은 ①, 청취 범위 그룹은 ②, 합류하지 않는다).
+**[편집]·[+ 새 그룹]·행 더블클릭 = 같은 카드 자리의 인라인 편집 폼**(`GroupEditView`, 별창 없음) — 왼쪽 속성(세션 종류 = prearranged/chat — 일제 통화는 호 속성이라 선택지에 없다 · 그룹 호 · 허용·한도, 아래 표) · 오른쪽 멤버(PTT 주소록 후보 ↔ 선택, 필수·의장 토글) · 바닥 [취소][저장/그룹 만들기].
 편집 중엔 목록·[↻]·[+ 새 그룹]이 잠겨 편집 대상이 바뀌지 않는다(저장·취소로만 나온다). 저장 뒤 목록을 재조회하고 그 그룹(새 그룹이면 응답 uri 의 id)을 선택해 상세로 돌아온다.
 관제 캔버스 ② 범위 채널의 [편집]/[+ 새 채널]은 화면을 바꾸지 않고 같은 폼을 **드로어**로 연다(§4.2) — 두 진입이 `GroupEditViewModel` 하나를 공유한다.
 목록 원천 = `GET /provisioning/directory/groups`(**관리 범위 안(org_code) ∪ 내 소유 ∪ 관제 그룹 청취 범위(`ptt_listen`) ∪ 내 멤버 그룹**, 멤버가 아니어도) — 행의 `canManage`(관리 범위 안 또는 내 소유,
@@ -426,26 +436,26 @@ SIP transport 콤보는 **ANY** 를 포함한 넷(콘솔 라벨과 같다) — A
 생성·편집·삭제 = GMS XCAP PUT/DELETE(`CscClient.PutGroup/DeleteGroup` — 관리 범위 안이면 소유자가 아니어도 서버가 허용). 관리 범위가 없으면 GMS 목록의 내 멤버 그룹만 보이고 내 소유만 편집한다.
 ② 카드의 [삭제]는 확인 후 같은 XCAP DELETE(빠른 경로). 서버 계약 [mcptt_api.md §2](../../api/mcptt_api.md).
 
-**편집 폼이 아직 다루지 않는 것 (남은 것)** — 콘솔(서비스 › PTT 그룹)은 고르는데 폼에 없는 TS 24.481 요소 다섯이다.
-서버는 XCAP PUT 으로 이미 받고, SDK `GroupDoc` 도 싣는다([ue_sdk.md](ue_sdk.md) §7).
+**폼의 그룹 호·한도 칸**(TS 24.481 §7.2.2·§7.2.4.2 — 콘솔 서비스 › PTT 그룹과 같은 요소·범위·기본값, SDK `GroupDoc` 이 싣는다 — [ue_sdk.md](ue_sdk.md) §7):
 
-| 필드 | `GroupDoc` | 규격 요소 | 범위·기본값(콘솔과 같다) |
+| 칸 | `GroupDoc` | 규격 요소 | 범위·기본값 |
 |---|---|---|---|
-| 유지 시간 T4 | `HangTimerSec` | on-network-hang-timer | 0~3600초, 기본 30, 0 = 미사용(편성 그룹만) |
+| 유지 시간(T4) | `HangTimerSec` | on-network-hang-timer | 0~3600초, 기본 30, 0 = 미사용(편성 그룹만) |
 | 최대 통화 시간 | `MaxDurationSec` | on-network-maximum-duration | 0~86400초, 기본 3600, 0 = 무제한 |
-| 참가자 정보 구독 | `AllowConferenceState` | on-network-allow-conference-state | 기본 허용 — 끄면 멤버의 conference 구독이 403 |
-| 메시지 최대 크기 | `MaxSdsSize` | mcdata-on-network-max-data-size-for-SDS | octet, 0 = 무제한 |
-| 자동수신 최대 | `MaxAutoRecv` | mcdata-on-network-max-data-size-auto-recv | octet, 0 = 무제한 |
+| 시작 최소 응답 | `MinNumberToStart` | on-network-minimum-number-to-start | 0~65535명, 기본 0 = 기다리지 않음(TS 24.379 §6.3.3.3) |
+| 필수 멤버 대기(TNG1) | `AckTimeoutSec` | on-network-timeout-for-acknowledgement-of-required-members | 1~300초, 기본 5 |
+| 대기 만료 시 | `AckAction` | on-network-action-upon-expiration-of-timeout-for-acknowledgement-of-required-members | 통화 포기(abandon, 기본) / 없이 진행(proceed) |
+| 참가자 정보 구독 허용 | `AllowConferenceState` | on-network-allow-conference-state | 기본 허용 — 끄면 멤버의 conference 구독이 403 |
+| 메시지 최대 | `MaxSdsSize` | mcdata-on-network-max-data-size-for-SDS | octet, 기본 10000, 0 = 무제한 |
+| 자동수신 최대 | `MaxAutoRecv` | mcdata-on-network-max-data-size-auto-recv | octet, 기본 1048576, 0 = 무제한 |
+| 멤버 [필수]/[선택] | `GroupMember.Required` | on-network-required | 개시자 응답 전에 이 멤버의 응답을 기다린다(TNG1) |
 
-- 다섯 다 **`null` = 미기재**라 폼이 다루지 않아도 서버 값을 덮지 않는다. 붙일 때는 **GET 값으로 채우고 그대로 되돌려 보낸다** —
-  폼 값으로 `GroupDoc` 을 새로 지으면서 이 칸을 `null` 로 두면 «바꾸지 않음», 값을 넣으면 그 값으로 바뀐다.
+- 편집을 열면 GET 값으로 채운다. 이 칸들은 `GroupDoc` 에서 **`null` = 미기재**다 — 문서에 없던 칸(`null`)이 기본값 그대로면 저장 때도 미기재로 두어
+  폼을 연 것만으로 서버 값을 명시값으로 굳히지 않는다. 값을 바꾸면 그 값(범위로 자른 값)을 싣는다.
+- **멤버 우선순위(`user-priority`)는 읽은 값을 되돌린다** — XCAP PUT 은 `<list>` 가 있으면 멤버 전체를 교체하므로, 역할(의장/참가자)을 바꾸지 않은 멤버는
+  GET 의 `GroupMember.Priority` 를 그대로 보내고, 역할을 바꾼 멤버와 새로 더한 멤버만 역할 기본값(의장 7 · 참가자 5)을 쓴다.
 - **동시 발언**(`floor_policy`/`max_talkers`)은 폼에 두지 않는다 — 관리 API 전용이다(mcptt_api.md §2). 규격 그룹 문서 요소가 아니라 CMP 화자 슬롯
   (서버 자원, 최대 8)을 잡는 운영 정책이고, 규격판(TS 24.581 Transmission Control)은 미구현이다.
-
-**멤버 우선순위를 덮어쓰는 결함 (남은 것)** — 저장할 때 멤버 우선순위를 **의장 7 · 참가자 5 로 고정**해 보낸다
-(`GroupEditViewModel` 저장 경로 `Priority = m.IsChair ? 7 : 5`). XCAP PUT 은 `<list>` 가 있으면 멤버 전체를 교체하므로, 콘솔에서 준 멤버별
-우선순위(`user-priority`)가 앱에서 **한 번 저장하면 말없이 초기화된다.** 멤버 행이 GET 의 `GroupMember.Priority` 를 들고 있다가 그대로 보내야
-한다(새로 더한 멤버만 기본값). SDK 는 이 값을 왕복 보존한다 — 버리는 곳은 앱이다.
 
 ## 5. 감청 창 (팝업)
 
@@ -477,8 +487,14 @@ VoLTE 감청 하나 = 창 하나, PTT 청취는 ② 카드 토글이 기본이�
 - `phoneGroup` 없음 → ③ 그룹원 띠·대표번호 대기열을 "전화 그룹 미배정" 으로 접는다. `dispatch` 없음 → ②⑥ 의 청취 조작·감청 창·이력·관리를
   "관제 역할 미배정" 으로 접고 PTT·통화·문자·발신은 동작(일반 소프트폰 모드). 콘솔 `구성 > 전화 그룹` / `관리 > 역할` 배정 안내.
   (전환기: 서버가 합성한 `dispatch` 블록 하나만 오면 `present` 하나로 둘 다 판정.)
-- 등록 실패(401/403/타임아웃) → 상단 점등 빨강 + 토스트, 자동 재시도(백오프 5→60초). `refreshRegistration` 은 네트워크 복귀 이벤트(Windows
-  `NetworkChange`)에서 즉시.
+- 등록 실패(401/403/타임아웃) → 상단 점등 빨강 + 토스트, 자동 재시도(백오프 5→60초).
+- **망 전환·복귀** → 코어 `Engine.HandleNetworkChange`(TCP/TLS 연결 종료 + 등록을 켠 계정마다 재등록, 앞 등록이 걸려 있으면 끝난 뒤 한 번 더 — [ue_sdk.md §4.2](ue_sdk.md)).
+  계정별 REGISTER 만으로는 옛 주소의 TCP/TLS 연결로 다시 나간다. 통지(`NetworkChange.NetworkAvailabilityChanged`·`NetworkAddressChanged`)는 가상 어댑터·IPv6 임시
+  주소로도 잦아 `DispatchSession.NoteNetworkChange` 가 2초 합친 뒤 유니캐스트 주소 지문(루프백·터널·링크 로컬 제외)이 바뀌었고 망이 있을 때만 알린다.
+  진행 중 호의 유지는 코어 과제([ue_sdk.md §11](ue_sdk.md)).
+- **CMS 문서**(TS 24.484 user profile·service config — `CscClient.FetchUserProfile/FetchServiceConfig`, ETag 304) = 기동 때(PTT 계정을 올리기 전) + 5분마다.
+  user profile ruleset → `Capabilities`(UX 선차단 — [긴급 호출]·개별·애드혹·[경보 해제], 받지 못한 문서는 허용, 최종 판정은 서버), service config 의
+  `*-resource-priority` → PTT 계정 `Rp*`(없으면 코어 기본값). 엔진 `UdpNoTcpSwitch` = 올리는 서비스 중 하나라도 `sip.udpNoTcpSwitch`.
 - **관제 편성 추적**: 로그인 후 60초마다 `GET /provisioning/me` 를 `If-None-Match` 로 재조회한다 — 304 면 끝, 200 이면 `dispatch.members[]`
   (`groupId == dispatch.groupId` 가 ③ 그룹원 띠, 나머지는 감시 전용)·`pttTargets[]`·범위를 비교해 바뀐 것만 dialog watch 해제/추가·conference 구독
   재적용 후 토스트 한 줄. 그룹원 번호는 망 주소(`volteAor`)이고 내선 라벨은 이름에 병기된다.
@@ -595,7 +611,7 @@ VoLTE 감청 하나 = 창 하나, PTT 청취는 ② 카드 토글이 기본이�
 
 ```
 windows/dispatch-desktop/                 DispatchDesktop.csproj — net10.0-windows, CommunityToolkit.Mvvm · Dirkster.AvalonDock · Microsoft.Data.Sqlite
-  App.xaml(.cs)                 단일 인스턴스·전역 예외·SynchronizationContext 캡처·테마·로그인→메인·1초 틱·네트워크 복귀 재등록. 개발 스위치 `--ui-preview`(로그인 없이 메인,
+  App.xaml(.cs)                 단일 인스턴스·전역 예외·SynchronizationContext 캡처·테마·로그인→메인·1초 틱·망 전환 통지(→ NoteNetworkChange). 개발 스위치 `--ui-preview`(로그인 없이 메인,
                                 별도 인스턴스 이름) · `--ui-preview-canvas`(표본 채널·세션·PTT 주소록) · `--ui-preview-screen=history|groups|admin` · `--ui-preview-shot=<png>` ·
                                 `--ui-preview-popover=private|adhoc`(§3.4)
   Shell/MainWindow.xaml         상단 바(최상위 메뉴 4개 = `NavItem` RadioButton + `NavKey` 키 칩, [검색 Ctrl+K], 드롭다운은 Popup — 시스템 메뉴는 테마 색을 못 입힌다) · 배너 레이어 ·
@@ -739,39 +755,26 @@ windows/dispatch-desktop/                 DispatchDesktop.csproj — net10.0-win
     건너뛰고, 넣는 행은 `IsOthers` 로 표시해 데스크 응대·부재 집계에서 뺀다.
   - 내가 당사자(`from`/`to` 가 내 PTT·VoLTE 번호)인 항목은 로컬 행이 이미 있어 건너뛴다. 이름은 주소록으로, 그룹은 GMS 목록 이름으로 표시.
 - **서버 과제 — 외부망 SMS/LMS 게이트웨이**: 현재 MESSAGE 는 등록 가입자 간 전달만. 외부망 휴대전화 문자는 IBCF→SMSC(TS 24.341 SMS over IMS) 또는 SMPP
-  게이트웨이가 필요하다. 능력 키는 있다 — 프로비저닝 `services[kind].capabilities.smsGateway`(csc.json `Provisioning.Services.<kind>.sms_gateway`,
-  기본 `false`); 앱은 이 값으로 외부 번호 [문자] 활성/비활성을 결정한다(앱 반영 남음).
+  게이트웨이가 필요하다. 앱은 능력 키(프로비저닝 `services[kind].capabilities.smsGateway` — csc.json `Provisioning.Services.<kind>.sms_gateway`, 기본 `false`)로
+  외부 번호 [문자] 를 켜고 끈다(§4.3).
 - **U10 관측 API** — `MediaSource.level/active` 실시간 갱신 확정 후 감청 창 레벨 미터 활성.
-- **경보(alert-ind) 파싱** — 코어 반영(`sendEmergencyAlert`·`onEmergencyAlert`, [ue_sdk.md §4.2](ue_sdk.md)) — C API·.NET 노출이 남았다([sdk_port_handoff.md §4.1](../../dev/sdk_port_handoff.md)).
-- **CMS user-profile 파싱 API** — 코어 반영(`UserProfileDoc`·`ServiceConfigDoc`·`Capabilities::of`) — C API·.NET 노출이 남았다([sdk_port_handoff.md §4.1](../../dev/sdk_port_handoff.md)).
 - **자동 수락 분리** — `AccountConfig.autoAnswerMcptt` 는 그룹콜·개별 통화 공통. 관제석은 그룹콜 자동 + 개별 통화 수동이 맞아 코어 플래그 분리 필요
   (규격은 수락 방식을 호 종류별로 둔다 — TS 24.379 §6.2.3 commencement mode, 개별 통화·그룹콜 각각 자동/수동, [ue_sdk.md §11](ue_sdk.md)).
   **긴급 개별 통화의 전역 표시**도 이것과 함께 정한다 — 긴급 배너는 개별 통화를 빼고(`UpdateEmergencyBanner`, 착신 배너의 몫) 착신 배너는 자동 수락으로
   잠깐만 서며 긴급 여부도 적지 않아, 다른 화면에 있는 동안 받은 긴급 개별 통화는 ① 카드 빨강이 유일한 표시다.
-- **진행 중 긴급·임박 조건 반영(C API·.NET)** — 코어는 서버가 진행 중에 보내는 조건 re-INVITE(TS 24.379 V18.6.0 §6.3.3.1.6 긴급·
-  §6.3.3.1.10 긴급 취소·§6.3.3.1.15 임박 위험 설정/해제)와 합류 200 OK 의 조건을 읽어 `CallInfo.condition`·`onMcpttCondition` 으로 낸다
-  ([ue_sdk.md §4.2](ue_sdk.md) «긴급·임박 세션 조건»). C API·.NET 에는 아직 없다([sdk_port_handoff.md §4.1](../../dev/sdk_port_handoff.md)) — 노출한 뒤 §3.2 긴급
-  배너의 «취소 re-INVITE 수신 시 해제»·진행 중 격상·«이미 긴급인 그룹에 합류» 를 `condition` 으로 잇는다. 지금은 세션 종료로만 빠진다.
+- **진행 중 조건의 개시자** — 조건 재광고 re-INVITE 는 조건을 건 사용자를 싣지만(TS 24.379 §6.3.3.1.6 2)) 코어 `McpttCondition` 에 개시자가 없어
+  진행 중에 걸린 조건의 배너 개시자는 비어 있다(§3.2, [ue_sdk.md §11](ue_sdk.md)).
+- **긴급 해제 인가(서버)** — CSP 가 개시자 외의 해제 re-INVITE 를 무시하면서 200 을 돌려준다(TS 24.379 §10.1.1.4.7 7) 은 403 + `emergency-ind` true). 그래서 앱의
+  [긴급 해제]는 내가 올린 긴급만 — 서버가 권한자(그룹 authorized user, 관제 역할 여부는 결정 항목)와 403 을 넣으면 `CanCancelCondition` 을 넓힌다
+  ([server_todo_mcptt_emergency_dispatch.md](../../dev/server_todo_mcptt_emergency_dispatch.md) E1).
 - **청취 leg 의 조건 변화(서버)** — CSP 가 조건 재광고에서 청취 leg 를 뺀다(`PropagateConditionToMembers` 의 `bListenOnly`). 청취 중인 관제사는
-  코어가 조건을 읽어도 격상·해제를 받지 못한다 — 청취 인가·은닉·sendonly 응답을 지키며 알리는 서버 계약이 필요하다([mcptt_emergency_modes.md §10](mcptt_emergency_modes.md)).
+  코어가 조건을 읽어도 격상·해제를 받지 못한다(합류 200 OK 의 조건만) — 앱 변경 없이 서버 반영으로 풀린다(같은 문서 E2, [mcptt_emergency_modes.md §10](mcptt_emergency_modes.md)).
+- **경보 취소 인가(서버)** — CSP 는 경보 취소를 인가 없이 통과시킨다(TS 24.379 §12.1.3.2 1)). 앱 [경보 해제]는 user profile 로 선차단만 한다(같은 문서 E3).
 - **SDS 전달 확인의 규격 경로(코어·서버)** — disposition 자동 회신(`sendSdsNotification`)이 원 발신자 AoR 로 SDS NOTIFICATION 한 파트만 보낸다. TS 24.282
-  V18.13.0 §12.2.1.1 은 대상 MCData ID 의 `resource-lists` 와 그룹 통지의 `<mcdata-calling-group-id>` 를 요구한다([mcdata_messaging.md §7](mcdata_messaging.md) 편차 표).
-- **SDS 재전송의 msgId(C API·.NET)** — 재전송이 새 msgId 로 나간다(§4.4 ✓✓ 상관). 코어는 처음의 msgId 로 다시 보낼 수 있지만(`sendGroupSds`·`sendSds`
-  의 `msgId` — 앞 발신이 일부에게 닿았어도 받는 쪽이 같은 메시지로 대조한다) C API·.NET 에 없다([sdk_port_handoff.md §5.1](../../dev/sdk_port_handoff.md)) —
-  노출한 뒤 `ResendCore` 가 처음 msgId 를 넘긴다(Android 태블릿 `resendSds` 와 같게).
-- **망 전환** — 앱 몫: 망 복귀 처리를 `RefreshRegistrations`(계정별 REGISTER, `App.xaml.cs` `NetworkAvailabilityChanged`)에서 코어
-  `Engine.HandleNetworkChange`(TCP/TLS 연결 종료·계정별 재등록·앞 등록이 끝난 뒤 한 번 더, [ue_sdk.md §4.2](ue_sdk.md))로 옮긴다 — 계정별 REGISTER 만으로는
-  옛 주소의 TCP/TLS 연결이 남는다. 진행 중 호의 유지는 코어 과제다([ue_sdk.md §11](ue_sdk.md)).
-- **SDS 보관의 사람별 격리 — 이 앱이 먼저** — `messages.db` 가 설치당 하나라 교대로 사람이 바뀌는 자리에서 앞 사람의 스레드가 보인다. 설계 = `messages` 에
-  `owner`(로그인 주체) 열 + 조회·집계 `WHERE owner = ?`, 보존(`Prune`)·재기동 PENDING 마감은 owner 무관. 남은 결정 = 기존 행(빈 owner) —
-  첫 로그인에 1회 귀속(업그레이드 직후 자기 대화 유지) vs 아무에게도 보이지 않되 지우지 않음(격리 엄격). Android 태블릿은 이 구현 뒤 같은 설계로 따른다
-  ([android_dispatch_tablet.md §11](android_dispatch_tablet.md)).
-- **앱 결함** —
-  - ① 전이중 개별 통화 카드의 [음소거] 가 **켜졌는지 보이지 않는다** — 버튼 글자가 고정이고 `ChannelCard.IsMuted` 가 화면에 묶이지 않았다.
-  - 긴급 배너가 **호 상태 이벤트에서만** 갱신된다 — `UpdateEmergencyBanner` 가 `OnCallState` 에서만 불린다. 진행 중 조건은 별도 이벤트(`onMcpttCondition`,
-    위)로 오고 미디어 스냅샷(`OnCallMedia`)도 따로 오므로, 노출한 뒤 그 이벤트들에서도 불러야 변화가 배너에 온다.
-  - 배너 [채널로 이동](`GoToChannel` → `PttChannelsViewModel.FocusGroup`)이 ① 카드가 없는 그룹이면 `JoinChannel` 로 **합류**한다 — 청취 범위 그룹(② 카드)이면
-    비멤버 sendrecv 합류라 서버가 403 으로 거절한다(TS 24.379 §10.1.1, [dispatch_center.md §5.6](dispatch_center.md)). ② 카드로 포커스만 옮겨야 한다.
+  V18.13.0 §12.2.1.1 은 대상 MCData ID 의 `resource-lists` 와 그룹 통지의 `<mcdata-calling-group-id>` 를 요구한다([mcdata_messaging.md §7](mcdata_messaging.md) 편차 표, 서버 과제 문서 M1).
+- **경보 Request-URI(PSI)** — 경보 취소 MESSAGE 의 Request-URI 는 참여 기능 PSI(ue-init-config `MCPTT-Service-Details/Server-URI`, TS 24.379 §12.1.1.1 8))여야
+  한다. CSC 는 ue-init-config 에 이미 싣는다(`UeInitConfig.ServiceDetails.Mcptt.Enable`) — SDK 코어에 ue-init-config 해석이 없어 앱이 `AccountConfig.McpttServerUri` 를
+  비워 두고, 코어가 그룹 URI 로 보낸다(CSP 가 받는 옛 형식 전환기).
 - **대표번호 발신 표시** — 서버 확정([dispatch_center.md §4.7](dispatch_center.md)): 발신 INVITE 에 `P-Preferred-Identity: <sip:<pilotId>@…>` 를 실으면
   CSP 가 자기 관제 그룹 대표번호일 때 착신자에게 대표번호로 낸다(그 외는 무시 → 기본 신원). 앱: ③ 빠른 발신 줄 "대표번호로 발신" 토글(`dispatch.pilotId`
   있을 때) + SDK `makeCall` 헤더 옵션(남음).

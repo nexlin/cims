@@ -131,20 +131,11 @@ IMEI 를 못 얻는 플랫폼(Windows 데스크톱 등)은 지금처럼 UUID URN
   (`require_affiliation` 이 켜진 그룹 기준. DB 단절 시 affiliation 검사를 건너뛴다). 사용자/그룹 방송 그룹(전원·조직 단위 수신 집합)은
   TS 24.379 §4.12 가 현 릴리스에서 따르지 않는다고 적는다.
 
-## 7. PTT 그룹 편집 — 관제 앱 폼 (Windows 몫)
+## 7. PTT 그룹 편집 — 관제 앱 폼 (Windows 반영)
 
-SDK 반영은 끝났고(`GroupDoc` 이 TS 24.481 요소 다섯을 더 싣는다), **폼만 남았다**. 정본 [../design/features/dispatch_desktop_ui.md](../design/features/dispatch_desktop_ui.md) §4.7.
-서버는 XCAP PUT 으로 이미 받는다(바뀐 것 없음). 태블릿은 Windows 반영 뒤 같은 방식으로 옮긴다.
-
-| # | 할 일 | 대상 |
-|---|---|---|
-| G1 | 편집 폼에 다섯 필드 — 유지 시간 T4(`HangTimerSec`) · 최대 통화 시간(`MaxDurationSec`) · 참가자 정보 구독(`AllowConferenceState`) · 메시지 최대 크기(`MaxSdsSize`) · 자동수신 최대(`MaxAutoRecv`). GET 값으로 채우고 그대로 되돌려 보낸다 | `GroupEditViewModel`·`GroupEditView.xaml` |
-| G2 | **멤버 우선순위 보존** — 저장 때 `Priority = m.IsChair ? 7 : 5` 로 고정해 콘솔이 준 멤버별 우선순위를 초기화한다(XCAP `<list>` = 멤버 전체 교체). 멤버 행이 GET 의 `GroupMember.Priority` 를 들고 있다가 보낸다 | `GroupEditViewModel` 저장 경로 |
-
-- **다섯 필드는 `null` = 미기재**다(`int?`·`bool?`). 폼이 아직 다루지 않는 지금도 PUT 에 싣지 않으므로 서버 값을 덮지 않는다 — G1 전이라도 안전하다.
-- 범위·기본값은 콘솔과 같다(T4 0~3600초 기본 30 · 최대 시간 0~86400초 기본 3600 · 참가자 정보 구독 기본 허용 · 크기 0 = 무제한).
-- **동시 발언은 넣지 않는다** — 관리 API 전용(`docs/api/mcptt_api.md` §2).
-- **.NET 은 Windows 에서 빌드해 확인**할 것 — C API `cimsue_group_doc_t` 끝에 `has_*`/값 10개를 덧붙였고(`NativeStructs.cs` 같은 순서), `AbiLayoutTests` 가 크기를 대조한다. 새 시험 `CscTests.GroupDocCallTimersAreOptional`.
+G1(다섯 필드)·G2(멤버 우선순위 보존) 반영 — 확인 통화 설정 세 칸(`MinNumberToStart`·`AckTimeoutSec`·`AckAction`)과 멤버 [필수] 토글도 같은 폼에 두었다.
+정본 [../design/features/dispatch_desktop_ui.md](../design/features/dispatch_desktop_ui.md) §4.7(칸·범위·기본값 = 콘솔과 같다, 문서에 없던 칸은 기본값 그대로면
+미기재 유지, 역할을 바꾸지 않은 멤버는 읽은 우선순위를 되돌림). 서버는 바뀐 것 없음. 동시 발언은 넣지 않는다(관리 API 전용). 태블릿은 같은 방식으로 옮긴다.
 
 ## 8. MCPTT 암묵적 발언 요청 · 애드혹 일제 통화 — 서버 과제 (.48 몫)
 
@@ -243,7 +234,8 @@ P3(ptt-client SDK 전환) 실측에서 더 드러난 것 — .48 반영·배포(
   **올리는 순서(.45)** — 새 SDK·앱은 규격형으로 보내므로 CSP 0.2.167 이상이 먼저(옛 CSP 는 자식 형식 지시자를 못 읽어 긴급·경보를 놓친다).
   새 CSP 는 규격형으로 보내므로 옛 SDK·옛 앱(값 직접 기재만 읽음)은 함께 다시 빌드한다 — 서버·단말을 같은 창에 올린다.
 - **SDK 쪽 반영(.48)** — `AccountConfig.mcpttServerUri`(경보 Request-URI = PSI, 비면 그룹 URI) · `cimsue-cli --mcptt-psi`. 앱은 ue-init-config
-  `MCPTT-Service-Details/Server-URI` 를 넣는다. Kotlin 파사드·C API·.NET 노출은 .45·Windows 몫(sdk_port_handoff §4.1).
+  `MCPTT-Service-Details/Server-URI` 를 넣는다. C API·.NET 노출은 Windows 반영(관제 데스크톱은 ue-init-config 를 읽지 않아 비어 있다 — 그룹 URI 전환기),
+  Kotlin 파사드는 .45 몫(sdk_port_handoff §4.1).
 - **옛 ptt-client(.45 빌드 확인 필요)** — ad hoc 인가를 규격 요소 먼저 읽고, 경보 그룹은 `mcptt-calling-group-id` 먼저(`PttController.kt`·`McpttXml.kt`).
 - **설정(.48 → 공유 DB)** — g005 그룹 능력 `emergency_call` 켬 · 계측기 신원 013 의 user profile 긴급 대상 = `DedicatedGroup g005`.
   `cimsue-cli group-call g005 --upgrade-at 3 --cancel-at 7` → 상향 **Confirmed 200** · 하향 Confirmed 200. .45 CSP 는 같은 DB 라도 캐시가 통지로만

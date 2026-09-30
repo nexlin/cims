@@ -263,7 +263,7 @@ Windows 접점(`sdk/windows/dotnet/CimsUe/Platform/`)의 책임을 옮긴다. �
 | PTT 입력 | `HotKeys.cs`(전역 핫키) | `HwPtt` — 측면 하드키 `KeyEvent`(학습·반복, 문자 키보드의 기능 키는 측면 키로 읽지 않는다). 판정(`KeyMapping.classify`·`learnable`)은 Android 를 타지 않아 기기 없이 시험한다(§7). 화면이 꺼진 동안의 벤더 방송은 받지 않는다(§7) | `ptt-client/HwPtt.kt` |
 | 자격 저장 | `CredentialStore.cs`(DPAPI) | `SecureStore` — Android Keystore 의 AES/GCM 키로 암호화해 SharedPreferences 에 암호문만 둔다(의존을 늘리지 않으려 androidx.security-crypto 를 쓰지 않는다). 복호화 실패는 예외가 아니라 `null` — 앱이 재로그인을 요구한다. 화면 잠금과 묶지 않는다(부팅 뒤 무인 재등록) | `core/account/` |
 | 부팅 재등록 | `AutoStart.cs` | `BootRegister` — `BOOT_COMPLETED` | `core/boot/CimsBootReceiver.kt` |
-| 망 복귀 재등록 | `App.xaml.cs` `NetworkChange.NetworkAvailabilityChanged` → `RefreshRegistrations`(계정별 REGISTER) | SDK 접점 `NetworkWatcher`(기본 망 콜백 + 판정 `NetworkChangeFilter`, §6.1) → `DispatchSession.handleNetworkChange` → 코어 `Engine::handleNetworkChange`(TCP/TLS 연결 종료·계정별 재등록·앞 등록이 끝난 뒤 한 번 더, [ue_sdk.md](ue_sdk.md) §4.2) | — |
+| 망 복귀 재등록 | `App.xaml.cs` `NetworkChange`(가용성·주소 변화) → `DispatchSession.NoteNetworkChange`(2초 합침·주소 지문) → 코어 `Engine.HandleNetworkChange` | SDK 접점 `NetworkWatcher`(기본 망 콜백 + 판정 `NetworkChangeFilter`, §6.1) → `DispatchSession.handleNetworkChange` → 코어 `Engine::handleNetworkChange`(TCP/TLS 연결 종료·계정별 재등록·앞 등록이 끝난 뒤 한 번 더, [ue_sdk.md](ue_sdk.md) §4.2) | — |
 | 등록 유지 | (데스크톱 프로세스 수명) | `UeForegroundService` — 알림·wakelock·**FGS 타입**(§6.1). 대기 중 타입은 **`specialUse`**(subtype 을 매니페스트에 선언), 캡처 중에는 `setMicrophoneActive` 가 **마이크를 더해 다시 승격**한다 — 알림만 다시 그리면 타입은 그대로다. `dataSync` 는 쓰지 않는다: Android 15+ 에서 하루 6시간 누적 제한이 걸리고 `BOOT_COMPLETED` 에서 시작할 수 없어 상주·부팅 재등록이 성립하지 않는다(기존 `ptt-client` 도 `microphone\|specialUse`). 승격 실패는 삼키지 않고 `onForegroundFailed` 로 올린다 | `ptt-client/PttService.kt` |
 | 서버 인증서 만료 | `Engine.TlsPeerExpiry` → 배너 | 같은 코어 API(`CimsUe.tlsPeerExpiry`·`CscClient.tlsPeerExpiry`) → 배너 + 설정 «서버 인증서» 행(§6.2a-3) | `core/net/TlsPeerObserver.kt` |
 | 단일 인스턴스 | `SingleInstance.cs` | 해당 없음 — Android 태스크 모델 | — |
@@ -303,7 +303,7 @@ UeForegroundService  ─ 프로세스 상주. 알림·wakelock. 여기서 CimsUe
 - **망이 돌아오거나 바뀌면 코어에 알린다 — 등록 복구는 코어가 한다**(`Engine::handleNetworkChange` — 옛 TCP/TLS 연결을
   닫고 등록을 켠 계정마다 다시 등록하며, 앞 등록이 걸려 있으면 끝난 뒤 한 번 더, [ue_sdk.md](ue_sdk.md) §4.2). 태블릿은 망이 자주
   바뀐다(Wi-Fi ↔ LTE, 음영) — 등록 주소가 낡으면 갱신 주기(수 분)까지 서버가 옛 주소로 보내 착신이 사라진다. 계정마다
-  REGISTER 만 다시 걸면(데스크톱 `RefreshRegistrations`) 옛 망의 연결을 재사용하고, 진행 중 등록이 있으면 `PJSIP_EBUSY`
+  REGISTER 만 다시 걸면 옛 망의 연결을 재사용하고, 진행 중 등록이 있으면 `PJSIP_EBUSY`
   로 거절돼 요청이 사라진다. 변화 판정은 SDK 접점 `NetworkWatcher`(`NetworkChangeFilter`)가 한다 = 잃었던 뒤 다시 섰거나 기본 망이
   **다른 망으로** 바뀐 것. 콜백을 걸 때 지금의 망을 심어 두어(`seed`), 등록 직후 그 망의 첫 알림·같은 망의 재알림은 거르고
   **망 없이 기동했으면 처음 서는 망**은 변화로 본다. 바뀐 뒤 늦게 오는 옛 망의 소실은 무시한다.
@@ -931,7 +931,7 @@ H(A1) 이라 멀쩡해서 겉보기에는 정상이다. 만료 60초 전을 만�
   영원히 «보내는 중» 으로 두면 갔는지 안 갔는지 알 수 없으므로 실패로 닫아 재전송을 유도한다.
 - DB 작업은 **IO 로 보낸다** — 이벤트 처리는 Main 에서 도는데 거기서 디스크를 만지면 프레임이 밀린다.
 - 로그아웃은 메모리만 비우고 **보관은 남긴다** — 같은 관제석에 다시 로그인하면 스레드가 이어져야 한다.
-  사람이 바뀌는 자리의 격리는 별건이다(§11).
+  로그인 ID 별 격리는 데스크톱에 들어갔고 태블릿은 같은 설계로 따른다(§11).
 
 ### 6.3 화면 구조 — 모바일 앱으로 짠다
 
@@ -1574,18 +1574,13 @@ SCO 가 죽는다. A2DP 만이 통신 경로 밖이라 혼자 갈라질 수 있�
   코어가 라우팅 불가한 `tel:` 을 그대로 내는 것이 결함인지, 아니면 호출자가 라우팅 가능한 형태로
   주는 것이 계약인지 정해야 한다. 코어를 고치면 Android·Windows·CLI 의 모든 요청 경로(dial·join·
   pickup·transfer·subscribe)가 함께 바뀌므로 CSP 의 `tel:` Request-URI 처리를 확인한 뒤 결정한다.
-- **SDS 보관의 사용자 격리 — 방향 확정, Windows 선행 대기.** 지금은 관제석 단위로 한 `messages.db` 를 쓴다.
-  교대로 사람이 바뀌는 자리에서 **앞 사람의 스레드가 보인다.** 좌표·이름이 오가는 통로라 그냥 둘 수 없다.
-  **데스크톱도 같다**(`AppPaths.MessagesDb` — 설치당 하나). 즉 이식이 아니라 **양 플랫폼에 같이 넣을 새
-  정책**이고, 태블릿만 먼저 고치면 두 앱이 갈라진다. 그래서 **Windows 구현을 선행**으로 두고 그 뒤에 같은
-  설계로 태블릿에 넣는다(사용자 결정).
+- **SDS 보관의 로그인 ID 별 격리 — 데스크톱 반영, 태블릿 차례.** 지금 태블릿은 설치당 한 `messages.db` 를 쓴다 — 한 기기에 다른
+  로그인 ID 로 로그인하면 앞 ID 의 스레드가 보인다. 관제석은 **자리별 로그인 ID** 를 쓰므로(교대해도 같은 ID) 격리 단위는 로그인 ID 다.
+  데스크톱 설계를 그대로 따른다([dispatch_desktop_ui.md](dispatch_desktop_ui.md) §4.4 «보관») — `messages` 에 `owner` 열(로그인 ID)을 더하고
+  조회·읽음 표시·새 행은 `owner = ?`, 보존(`prune`)·재기동 시 PENDING 마감은 owner 무관, **owner 열 이전 판의 행은 그 기기의 첫 로그인 ID 에 1회 귀속**
+  (자리 기기는 같은 자리 ID 로 로그인한다), 재로그인 때 다시 읽는다.
 
-  확정한 설계 — `messages` 에 `owner` 열(로그인 주체 `login_id`)을 더하고 조회·집계에 `WHERE owner = ?`.
-  보존(`prune`)·재기동 시 PENDING 마감은 owner 무관. 남은 판단 하나는 **기존 행(빈 owner)** 의 처리다:
-  첫 로그인 때 그 사람에게 1회 귀속(설치당 한 사람만 쓰던 상태이므로) vs 아무에게도 보이지 않되 지우지 않음.
-  전자는 업그레이드 직후 자기 대화가 사라지지 않고, 후자는 격리가 더 엄격하다.
-
-  §10 «자리/사람 분리» 와 같은 뿌리다 — 그쪽이 먼저 서면 `owner` 는 자리가 아니라 **점유한 사람**이 된다.
+  §10 «자리/사람 분리» 와 같은 뿌리다 — 그쪽이 먼저 서면 `owner` 는 자리 ID 가 아니라 **점유한 사람**이 된다.
 - **Ringtone 반복** — `isLooping` 이 API 28+ 라 그 아래에서는 1초 주기로 다시 트는 폴백을 쓴다.
   minSdk 를 28 로 올리면 걷어낼 수 있다.
 - **화면 회귀 자동화** — 데스크톱의 `--ui-preview-shot` 에 해당하는 스크린샷 캡처(Roborazzi 등)는 두지 않는다.

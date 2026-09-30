@@ -66,6 +66,14 @@ typedef enum {
     CIMSUE_FLOOR_EV_QUEUE_POSITION = 6, CIMSUE_FLOOR_EV_QUEUE_CANCELLED = 7,
     CIMSUE_FLOOR_EV_REQUEST_TIMEOUT = 8, CIMSUE_FLOOR_EV_TALK_LIMIT = 9, CIMSUE_FLOOR_EV_OTHER = 10
 } cimsue_floor_kind_t;
+/** on_mcptt_condition 의 계기(types.h ConditionCause). */
+typedef enum {
+    CIMSUE_COND_LOCAL = 0, CIMSUE_COND_CONFIRMED = 1, CIMSUE_COND_DENIED = 2, CIMSUE_COND_ADVERTISED = 3
+} cimsue_condition_cause_t;
+/** 오디오 라우트(types.h AudioRoute) — 입력의 EARPIECE = 내장 기본 마이크 고정, DEFAULT = 정책. */
+typedef enum { CIMSUE_ROUTE_DEFAULT = 0, CIMSUE_ROUTE_EARPIECE = 1, CIMSUE_ROUTE_LOUDSPEAKER = 2 } cimsue_audio_route_t;
+/** 마이크 AGC 기본 목표(types.h kMicAgcTargetDbov) — ITU-T P.56 활성 레벨 -26 dBov. */
+#define CIMSUE_MIC_AGC_TARGET_DBOV (-26.0)
 
 /* ── 설정 구조체 (입력) ── */
 
@@ -78,6 +86,9 @@ typedef struct {
     int32_t     no_vad;
     int32_t     udp_port, tcp_port, tls_port;   /* 0 = 임의 포트 */
     uint32_t    clock_rate;
+    /* 끝에 덧붙였다 */
+    int32_t     udp_no_tcp_switch;      /* RFC 3261 §18.1.1 UDP→TCP 승격 비활성(통제된 망 사이트 옵션 — ServiceProfile.udp_no_tcp_switch) */
+    int32_t     grant_mic_delay_ms;     /* Floor Granted 뒤 마이크를 여는 지연(승인 톤 길이, 0 = 즉시) */
 } cimsue_engine_config_t;
 
 typedef struct {
@@ -104,6 +115,14 @@ typedef struct {
     const char*             mcptt_id;       /* 비면 "tel:"+msisdn */
     int32_t                 auto_answer_mcptt;
     const char*             instance_id;    /* REGISTER +sip.instance URN(꺾쇠 없이) — NULL 이면 pjsip 기본값 */
+    /* 끝에 덧붙였다(types.h AccountConfig 의 MCPTT·MCData 필드) */
+    const char*             mcptt_client_id;    /* TS 24.379 §4.10 — NULL·빈 값이면 instance_id 가 urn:uuid: 일 때 그것 */
+    const char*             rp_emergency;       /* Resource-Priority r-value — NULL = C++ 기본(mcpttp.15) */
+    const char*             rp_imminent_peril;  /* NULL = mcpttp.8 */
+    const char*             rp_normal;          /* NULL = mcpttp.0 */
+    int32_t                 max_sds_cplane_bytes; /* 그룹 SDS 시그널링 평면 상한 — 넘으면 MSRP(TS 24.282 §9.2.3). 0 = 제한 없음 */
+    int32_t                 mcdata_msrp;        /* 서버발 MSRP 배포 수신(REGISTER Contact ICSI mcdata.sds) */
+    const char*             mcptt_server_uri;   /* 참여 MCPTT 기능 PSI — 긴급 경보 Request-URI(TS 24.379 §12.1.1.1 8)) */
 } cimsue_account_config_t;
 
 typedef struct {
@@ -151,6 +170,28 @@ typedef struct {
     int32_t     broadcast;              /* <broadcast-ind> — 일제 통화 */
 } cimsue_mcptt_info_t;
 
+/** MCPTT 세션 조건(types.h McpttCondition) — 긴급·임박의 현재값. 긴급이 임박을 대체한다. */
+typedef struct {
+    int32_t emergency;
+    int32_t imminent_peril;
+    int32_t mine;                       /* 이 단말이 올린 조건 */
+    int32_t pending;                    /* 상향·하향 re-INVITE 응답 대기 */
+    int32_t last_code;                  /* 마지막 상향·하향 re-INVITE 의 최종 응답 */
+} cimsue_mcptt_condition_t;
+
+/** 긴급 경보·긴급 통지 수신(types.h EmergencyAlert, TS 24.379 §12.1.1.3). 지시자 1 = true, -1 = false, 0 = 요소 없음. */
+typedef struct {
+    int32_t     account_id;
+    const char* group_id;               /* bare */
+    const char* user_id;                /* bare 발신자 */
+    const char* originated_by;          /* bare — 제3자 취소가 가리키는 원 경보 발신자 */
+    const char* mc_org;
+    int32_t     alert_ind;              /* 1 경보 · -1 경보 취소 · 0 그룹 상태 통지 */
+    int32_t     emergency_ind;
+    int32_t     imminent_peril_ind;
+    int32_t     self;                   /* 발신자가 이 계정(에코) */
+} cimsue_emergency_alert_t;
+
 /** 한 호 안의 RTP 소스(SSRC) — U10 디먹스 산출. */
 typedef struct {
     uint32_t    ssrc;
@@ -181,6 +222,9 @@ typedef struct {
     int32_t                      half_duplex;
     int32_t                      listen_only;
     const char*                  joined_dialog;     /* INVITE-Join 대상 dialog 의 Call-ID */
+    /* 끝에 덧붙였다 */
+    float                        rx_level;          /* 이 호에서 듣는 크기(set_rx_level — 코어가 기억해 재결선마다 적용) */
+    cimsue_mcptt_condition_t     condition;         /* 세션 조건 현재값 — mcptt 는 개시·착신 INVITE 의 값(불변) */
 } cimsue_call_info_t;
 
 typedef struct {
@@ -262,6 +306,7 @@ typedef struct {
     const char* file_name;
     const char* file_type;
     int64_t     file_size;
+    int32_t     media_plane;            /* media plane(MSRP) 배포로 받았다(TS 24.282 §9.2.3) — 끝에 덧붙였다 */
 } cimsue_sds_message_t;
 
 /** MCData FD 로 알릴 파일(types.h FdFile) — send_group_fd/send_fd 입력. url = csc_upload_fd 결과, 문자열 NULL = 빈 값. */
@@ -309,6 +354,15 @@ typedef struct {
     uint32_t    output_count;
 } cimsue_audio_device_info_t;
 
+/** 영상 장치(types.h VideoDeviceInfo). */
+typedef struct {
+    int32_t     id;
+    const char* name;
+    const char* driver;
+    int32_t     capture;
+    int32_t     render;
+} cimsue_video_device_info_t;
+
 /** 서버 인증서 만료 관측(types.h TlsPeerExpiry) — 마지막 성공 TLS 핸드셰이크의 peer 인증서. valid=0 이면 관측 없음. */
 typedef struct {
     int32_t     valid;
@@ -337,6 +391,11 @@ typedef struct {
     void (CIMSUE_CALL* on_message)(void* user, int32_t account_id, const char* from_uri,
                                    const char* content_type, const char* body);
     void (CIMSUE_CALL* on_engine_stopped)(void* user);
+    /* 끝에 덧붙였다 */
+    /** MCPTT 세션 조건 변화 — info->condition 이 새 값, cause 가 계기(Listener::onMcpttCondition). */
+    void (CIMSUE_CALL* on_mcptt_condition)(void* user, const cimsue_call_info_t* info, cimsue_condition_cause_t cause);
+    /** 긴급 경보·취소·긴급 통지 수신 — 200 OK 는 코어가 이미 보냈다(Listener::onEmergencyAlert). */
+    void (CIMSUE_CALL* on_emergency_alert)(void* user, const cimsue_emergency_alert_t* alert);
 } cimsue_listener_t;
 
 /* ── 엔진 (engine.h 1:1) ── */
@@ -407,6 +466,16 @@ CIMSUE_API cimsue_status_t CIMSUE_CALL cimsue_engine_floor_release(cimsue_engine
 CIMSUE_API cimsue_status_t CIMSUE_CALL cimsue_engine_floor_queue_cancel(cimsue_engine_t* e, int32_t call_id);
 CIMSUE_API void CIMSUE_CALL cimsue_engine_floor_info(const cimsue_engine_t* e, int32_t call_id,
                                                      cimsue_floor_info_t* out);
+/** 진행 중 그룹콜의 조건 상향·하향(Engine::setCallCondition, TS 24.379 §10.1.1.2.1.3~5) — 결과는 on_mcptt_condition
+ *  (LOCAL → CONFIRMED/DENIED). 바뀐 것이 없으면 보내지 않는다. 사설콜·응답 대기 중·성립 전 호는 실패. */
+CIMSUE_API cimsue_status_t CIMSUE_CALL cimsue_engine_set_call_condition(cimsue_engine_t* e, int32_t call_id,
+                                                                        int32_t emergency, int32_t imminent_peril);
+/** 긴급 경보 발신·취소(Engine::sendEmergencyAlert, TS 24.379 §12.1.1.1·§12.1.1.2). originated_by(NULL 가능) = 다른 사용자의
+ *  경보를 취소할 때 그 사용자 MCPTT ID, cancel_group_emergency = 그룹의 진행 중 긴급도 해제. 반환 token(on_request_result
+ *  MESSAGE 상관), 실패 -1. */
+CIMSUE_API int64_t CIMSUE_CALL cimsue_engine_send_emergency_alert(cimsue_engine_t* e, int32_t account_id, const char* group_id,
+                                                                  int32_t activate, const char* originated_by,
+                                                                  int32_t cancel_group_emergency);
 
 CIMSUE_API int64_t CIMSUE_CALL cimsue_engine_affiliate(cimsue_engine_t* e, int32_t account_id, const char* group_id,
                                                        int32_t on);
@@ -433,17 +502,19 @@ CIMSUE_API cimsue_status_t CIMSUE_CALL cimsue_engine_transfer_attended(cimsue_en
                                                                        int32_t consult_call_id);
 
 /* MCData SDS (TS 24.282 §9.2.2 C-plane) */
-/** 그룹 SDS 발신. 성공 시 msg_id_out 에 UUID hex32 를 NUL 종료로 기록한다(33바이트면 충분).
- *  token_out(NULL 가능) = 요청 token — 최종 응답 on_request_completed(MESSAGE, token) 상관용. */
+/** 그룹 SDS 발신. msg_id(NULL·빈 값 = 새로 만든다) = 재전송이면 처음의 message ID(UUID hex32 — 받는 쪽이 같은 메시지로 대조,
+ *  hex32 가 아니면 실패). 성공 시 msg_id_out 에 쓴 ID 를 NUL 종료로 기록한다(33바이트면 충분).
+ *  token_out(NULL 가능) = 요청 token — 최종 응답 on_request_result 상관용. 본문이 계정의 max_sds_cplane_bytes 를 넘으면 media plane
+ *  (MSRP)으로 가고 최종 결과는 method "MSRP" 로 온다(token 상관은 같다). */
 CIMSUE_API cimsue_status_t CIMSUE_CALL cimsue_engine_send_group_sds(cimsue_engine_t* e, int32_t account_id,
                                                                     const char* group_id, const char* text,
-                                                                    int32_t request_delivery, char* msg_id_out,
-                                                                    int32_t msg_id_cap, int64_t* token_out);
-/** 1:1 SDS 발신(request-type one-to-one-sds). peer = 상대 bare 번호. 나머지는 그룹과 같다. */
+                                                                    int32_t request_delivery, const char* msg_id,
+                                                                    char* msg_id_out, int32_t msg_id_cap, int64_t* token_out);
+/** 1:1 SDS 발신(request-type one-to-one-sds). peer = 상대 bare 번호. 나머지는 그룹과 같다(1:1 은 늘 시그널링 평면). */
 CIMSUE_API cimsue_status_t CIMSUE_CALL cimsue_engine_send_sds(cimsue_engine_t* e, int32_t account_id,
                                                               const char* peer, const char* text,
-                                                              int32_t request_delivery, char* msg_id_out,
-                                                              int32_t msg_id_cap, int64_t* token_out);
+                                                              int32_t request_delivery, const char* msg_id,
+                                                              char* msg_id_out, int32_t msg_id_cap, int64_t* token_out);
 /** SDS disposition 통지. token_out(NULL 가능) = 요청 token. */
 CIMSUE_API cimsue_status_t CIMSUE_CALL cimsue_engine_send_sds_notification(cimsue_engine_t* e, int32_t account_id,
                                                                            const char* peer, const char* conv_id,
@@ -471,6 +542,25 @@ CIMSUE_API int32_t CIMSUE_CALL cimsue_engine_add_playback_route(cimsue_engine_t*
 CIMSUE_API cimsue_status_t CIMSUE_CALL cimsue_engine_remove_playback_route(cimsue_engine_t* e, int32_t route_id);
 CIMSUE_API cimsue_status_t CIMSUE_CALL cimsue_engine_set_call_route(cimsue_engine_t* e, int32_t call_id,
                                                                     int32_t route_id);
+/** 캡처 게이트(Engine::setCaptureEnabled) — 0 = 캡처 스트림을 열지 않는다(재생만). 장치 선택을 넘어 유지. */
+CIMSUE_API cimsue_status_t CIMSUE_CALL cimsue_engine_set_capture_enabled(cimsue_engine_t* e, int32_t on);
+CIMSUE_API int32_t CIMSUE_CALL cimsue_engine_capture_enabled(const cimsue_engine_t* e);
+/** 장치 단 음량(Engine::setDeviceAudioLevels) — speaker = 스피커 배율(1 = 원음), mic_target_dbov = 마이크 AGC 목표(-40..-10,
+ *  기본 CIMSUE_MIC_AGC_TARGET_DBOV). 코어가 기억해 게이트 전환·재오픈·호 결선 뒤 다시 건다. */
+CIMSUE_API cimsue_status_t CIMSUE_CALL cimsue_engine_set_device_audio_levels(cimsue_engine_t* e, float speaker,
+                                                                             double mic_target_dbov);
+/** 오디오 라우트(Engine::setAudioRoute) — 모바일 라우트(pjmedia OUTPUT/INPUT_ROUTE). 라우트가 없는 장치(데스크톱)는 무시될 수 있다. */
+CIMSUE_API cimsue_status_t CIMSUE_CALL cimsue_engine_set_audio_route(cimsue_engine_t* e, cimsue_audio_route_t output,
+                                                                     cimsue_audio_route_t input);
+/** 사운드 장치 재오픈(Engine::reopenAudioDevice) — 열려 있으면 닫고 곧바로 다시 연다. 닫혀 있으면 아무것도 하지 않는다. */
+CIMSUE_API cimsue_status_t CIMSUE_CALL cimsue_engine_reopen_audio_device(cimsue_engine_t* e);
+/** 수신 영상 렌더 대상(Engine::setVideoWindow) — 플랫폼 창 핸들(NULL = 해제). 영상 없는 빌드면 실패. */
+CIMSUE_API cimsue_status_t CIMSUE_CALL cimsue_engine_set_video_window(cimsue_engine_t* e, void* native_window);
+/** 캡처 카메라 전환(Engine::switchCamera). */
+CIMSUE_API cimsue_status_t CIMSUE_CALL cimsue_engine_switch_camera(cimsue_engine_t* e, int32_t call_id);
+/** 영상 장치 목록. 반환 개수, *out 은 스냅샷 배열(다음 조회까지 유효). */
+CIMSUE_API int32_t CIMSUE_CALL cimsue_engine_video_devices(const cimsue_engine_t* e,
+                                                           const cimsue_video_device_info_t** out);
 
 /** 라이브러리·엔진 버전(정적 문자열). */
 CIMSUE_API const char* CIMSUE_CALL cimsue_version(void);
@@ -483,6 +573,7 @@ CIMSUE_API const char* CIMSUE_CALL cimsue_call_state_str(cimsue_call_state_t s);
 CIMSUE_API const char* CIMSUE_CALL cimsue_transport_str(cimsue_transport_t t);
 CIMSUE_API const char* CIMSUE_CALL cimsue_floor_state_str(cimsue_floor_state_t s);
 CIMSUE_API const char* CIMSUE_CALL cimsue_floor_kind_str(cimsue_floor_kind_t k);
+CIMSUE_API const char* CIMSUE_CALL cimsue_condition_cause_str(cimsue_condition_cause_t c);
 
 /* ── 문자열 산출 헬퍼 (C++ 인라인 멤버·types.h 자유 함수 1:1) ──
  * 공통 규약: out 에 최대 cap 바이트(NUL 포함)를 NUL 종료로 기록하고, NUL 을 제외한 실제 길이를 반환한다.
@@ -551,6 +642,9 @@ typedef struct {
     const char* const*               sec_mechanisms;
     int32_t                          sec_mechanism_count;
     int32_t                          max_payload_sds_cplane_bytes;
+    /* 끝에 덧붙였다 */
+    int32_t                          udp_no_tcp_switch;   /* sip.udpNoTcpSwitch — 엔진 전역(engine_config.udp_no_tcp_switch)이라 앱이 고른다 */
+    int32_t                          sms_gateway;         /* capabilities.smsGateway — 외부망 SMS/LMS 게이트웨이 연결 */
 } cimsue_service_profile_t;
 
 /** 관제 그룹원(dispatch members[]) — dialog 구독·그룹원 띠 대상. */
@@ -637,6 +731,7 @@ typedef struct {
     const char* role;
     int32_t     priority;
     int32_t     required;      /* 필수 멤버 <on-network-required>(TS 24.481 §7.2.4.2) — 끝에 덧붙였다(64비트 크기 불변) */
+    const char* title;         /* 직함 <cims:user-title> — 산출 전용(PUT 에 싣지 않는다). 끝에 덧붙였다 */
 } cimsue_group_member_t;
 
 /** GMS 그룹 문서(csc.h GroupDoc) — GET 산출·PUT 입력 공용. 입력 시 문자열 NULL 은 빈 값, members NULL 은 멤버 없음. */
@@ -679,6 +774,61 @@ typedef struct {
     int32_t                      ack_timeout_sec;       /* on-network-timeout-for-acknowledgement-of-required-members (TNG1) */
     const char*                  ack_action;            /* proceed | abandon */
 } cimsue_group_doc_t;
+
+/** CMS 대상 항목(csc.h CmsEntry, TS 24.484 §8.3.2.7 EntryType) — mode = entry-info 속성. */
+typedef struct {
+    const char* uri;
+    const char* mode;
+} cimsue_cms_entry_t;
+
+/** MCPTT user profile(csc.h UserProfileDoc, TS 24.484 §8.3.2) — 인가 allow-* 는 요소가 없으면 허용(1). */
+typedef struct {
+    const char*        etag;
+    int32_t            not_modified;        /* fetch 가 304 를 받았다 — 나머지는 비어 있다(호출자 사본 유지) */
+    const char*        user_uri;
+    cimsue_cms_entry_t emergency_group;
+    cimsue_cms_entry_t imminent_peril_group;
+    cimsue_cms_entry_t emergency_alert_group;
+    cimsue_cms_entry_t emergency_private_recipient;
+    const char* const* groups;              /* 제휴 가능 그룹 URI (ptr, count) */
+    int32_t            group_count;
+    const char* const* implicit_affiliations;
+    int32_t            implicit_affiliation_count;
+    int32_t            max_affiliations_n2; /* -1 = 미기재 */
+    int32_t            allow_private_call;
+    int32_t            allow_emergency_group_call;
+    int32_t            allow_imminent_peril_call;
+    int32_t            allow_activate_emergency_alert;
+    int32_t            allow_cancel_emergency_alert;
+    int32_t            allow_emergency_private_call;
+    int32_t            allow_adhoc_group_call;
+} cimsue_user_profile_doc_t;
+
+/** MCPTT service configuration(csc.h ServiceConfigDoc, TS 24.484 §8.4) — 인가 요소 없음. 요소가 없으면 빈 값/-1. */
+typedef struct {
+    const char* etag;
+    int32_t     not_modified;
+    const char* domain;
+    int32_t     num_levels_group_hierarchy;
+    int32_t     num_levels_user_hierarchy;
+    const char* rp_emergency;               /* Resource-Priority r-value — 빈 값 = 미기재(계정 기본값 유지) */
+    const char* rp_imminent_peril;
+    const char* rp_normal;
+} cimsue_service_config_doc_t;
+
+/** 정책 게이트 스냅샷(csc.h Capabilities) — 받지 못한 문서는 허용. UX 선차단용, 최종 판정은 서버. */
+typedef struct {
+    int32_t user_profile_known;
+    int32_t service_config_known;
+    int32_t private_call;
+    int32_t emergency_group_call;
+    int32_t imminent_peril_call;
+    int32_t emergency_private_call;
+    int32_t emergency_alert;
+    int32_t cancel_emergency_alert;
+    int32_t adhoc_group_call;
+    int32_t max_affiliations_n2;            /* 0 = 미지정 */
+} cimsue_capabilities_t;
 
 CIMSUE_API void CIMSUE_CALL cimsue_csc_endpoint_default(cimsue_csc_endpoint_t* ep);
 CIMSUE_API cimsue_csc_t* CIMSUE_CALL cimsue_csc_create(const cimsue_csc_endpoint_t* ep);
@@ -723,6 +873,22 @@ CIMSUE_API cimsue_status_t CIMSUE_CALL cimsue_csc_get_user_profile(cimsue_csc_t*
 CIMSUE_API cimsue_status_t CIMSUE_CALL cimsue_csc_get_service_config(cimsue_csc_t* c, const char* access_token,
                                                                      const char* user_uri, const char* etag,
                                                                      cimsue_xcap_doc_t* out);
+/** user-profile GET + 해석(CscClient::fetchUserProfile) — etag(NULL 가능) = If-None-Match. 304 면 out->not_modified=1.
+ *  해석 실패는 -2. *out 은 핸들 스냅샷. */
+CIMSUE_API cimsue_status_t CIMSUE_CALL cimsue_csc_fetch_user_profile(cimsue_csc_t* c, const char* access_token,
+                                                                     const char* user_uri, const char* etag,
+                                                                     cimsue_user_profile_doc_t* out);
+/** service-config GET + 해석(CscClient::fetchServiceConfig) — fetch_user_profile 과 같은 규약. */
+CIMSUE_API cimsue_status_t CIMSUE_CALL cimsue_csc_fetch_service_config(cimsue_csc_t* c, const char* access_token,
+                                                                       const char* user_uri, const char* etag,
+                                                                       cimsue_service_config_doc_t* out);
+/** XML → 문서(시험·캐시용). 산출은 스레드별 스냅샷. 루트가 다르면 -1(사유 last_error). */
+CIMSUE_API cimsue_status_t CIMSUE_CALL cimsue_user_profile_parse(const char* xml, cimsue_user_profile_doc_t* out);
+CIMSUE_API cimsue_status_t CIMSUE_CALL cimsue_service_config_parse(const char* xml, cimsue_service_config_doc_t* out);
+/** 정책 게이트(Capabilities::of) — NULL = 그 문서를 아직 못 받음. */
+CIMSUE_API void CIMSUE_CALL cimsue_capabilities_of(const cimsue_user_profile_doc_t* user_profile,
+                                                   const cimsue_service_config_doc_t* service_config,
+                                                   cimsue_capabilities_t* out);
 
 /* ── GMS 그룹 관리(TS 24.481 XCAP PUT/DELETE — authorized user = 토큰 주체) ── */
 /** 그룹 문서 GET → *out (핸들 스냅샷). */
@@ -766,6 +932,8 @@ typedef enum {
     CIMSUE_STRUCT_DISPATCH_MEMBER, CIMSUE_STRUCT_DISPATCH_TARGET, CIMSUE_STRUCT_GROUP_MEMBER, CIMSUE_STRUCT_GROUP_DOC,
     CIMSUE_STRUCT_HTTP_RESULT, CIMSUE_STRUCT_TLS_PEER_EXPIRY, CIMSUE_STRUCT_FD_FILE, CIMSUE_STRUCT_FD_UPLOAD,
     CIMSUE_STRUCT_QUALITY_DIRECTION, CIMSUE_STRUCT_CALL_QUALITY,
+    CIMSUE_STRUCT_MCPTT_CONDITION, CIMSUE_STRUCT_EMERGENCY_ALERT, CIMSUE_STRUCT_VIDEO_DEVICE_INFO, CIMSUE_STRUCT_CMS_ENTRY,
+    CIMSUE_STRUCT_USER_PROFILE_DOC, CIMSUE_STRUCT_SERVICE_CONFIG_DOC, CIMSUE_STRUCT_CAPABILITIES,
     CIMSUE_STRUCT_COUNT_
 } cimsue_struct_id_t;
 /** 구조체의 sizeof(이 DLL 의 컴파일 결과). 모르는 id 는 -1. */

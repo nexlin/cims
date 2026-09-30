@@ -95,7 +95,8 @@ MCPTT ID 는 IMS 신원과 **별개 정의**(규격). 따라서 **PTT 서비스 
                    "default": "TLS", "enforced": true, "mediaSecurity": "optional", "udpNoTcpSwitch": false,
                    "domain": "ptt.cims.example.kr" },
       "account": { "msisdn": "+821300000001", "imsi": "450330000000002",
-                   "authId": "", "sipHa1": null, "sipPassword": null, "mcpttId": "tel:+821300000001" }
+                   "authId": "", "sipHa1": null, "sipPassword": null, "mcpttId": "tel:+821300000001" },
+      "mcdata":  { "maxPayloadSdsCplaneBytes": 1500 }       // PTT 만
     }
   ],
   "phoneGroup": {                                        // 전화 그룹 소속일 때만 (없으면 키 자체 생략)
@@ -171,6 +172,10 @@ MCPTT ID 는 IMS 신원과 **별개 정의**(규격). 따라서 **PTT 서비스 
   비활성 + 툴팁으로 두고 팝오버 머리에 게이트웨이 상태 배지를 그린다([dispatch_desktop_ui.md §4.3](dispatch_desktop_ui.md)).
   등록 가입자 간 `MESSAGE` 전달은 이 값과 무관. SoT = csc.json `Provisioning.Services.<kind>.sms_gateway`(기본 `false` —
   CIMS 는 게이트웨이를 내장하지 않으므로 외부 게이트웨이 연동 시 운영자가 켠다). 구 서버 응답에 없으면 전부 `false`.
+- `mcdata.maxPayloadSdsCplaneBytes`: PTT 프로파일에만 — 그룹 SDS 시그널링 평면 상한(TS 24.484 `<max-payload-size-sds-cplane-bytes>`, 0 = 무제한).
+  넘는 본문은 단말이 media plane(MSRP, TS 24.282 §9.2.3)으로 보낸다 — SDK 는 `ServiceProfile.maxPayloadSdsCplaneBytes` → `toAccount` 가
+  `AccountConfig.maxSdsCplaneBytes` 로 옮긴다(서비스 최상위의 같은 키는 옛 형식 폴백). SoT = csc.json `Provisioning.McData.MaxPayloadSdsCplaneBytes`
+  (CSP `Setup.McData.MaxPayloadSizeSdsCplaneBytes` 와 같은 값).
 - `countryCode`: 홈 국가코드(E.164 digits, `+` 없음. 예 `"82"`) — 단말 번호 로컬 표기(§3-1)의 **SoT**.
   접속서비스 다이얼 플랜 `country_code`(CSP 정본 미러 — 서버 번호 번역 [sip_service_model.md §2-10](sip_service_model.md)과 같은 값)
   → CSC 설정 `Provisioning.CountryCode` → 로그인 msisdn 에서 서버가 유도. 판정 불가면

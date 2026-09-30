@@ -32,6 +32,11 @@ public sealed partial class Banner : ObservableObject
     public string Subtitle { get; init; } = "";
     public SessionItem? Session { get; init; }
     public string GroupId { get; init; } = "";
+    /// <summary>긴급 경보 배너의 경보 발신자(bare MCPTT ID) — 같은 그룹·같은 발신자의 취소(TS 24.379 §12.1.1.3)로 내린다.</summary>
+    public string AlertUser { get; init; } = "";
+    /// <summary>배너의 [해제] — 긴급·임박 = 조건 하향(내가 올린 조건·내 소유 그룹, TS 24.379 §10.1.1.2.1.5), 경보 = 경보 취소(allow-cancel-emergency-alert,
+    /// 남의 경보면 제3자 취소 §12.1.1.2 4)e)). 세션 조건·자격이 바뀌면 갱신된다.</summary>
+    [ObservableProperty] private bool _canCancel;
     /// <summary>위험 단계(서버 인증서 잔여 ≤ 7일) — 연한 배경 대신 진한 배경.</summary>
     public bool Critical { get; init; }
     public DateTime Time { get; } = DateTime.Now;
@@ -44,6 +49,7 @@ public sealed partial class Banner : ObservableObject
     public bool IsEmg => Kind == BannerKind.Emergency;
     public bool IsPeril => Kind == BannerKind.ImminentPeril;
     public bool IsAlert => Kind == BannerKind.Alert;
+    public string CancelText => IsAlert ? "경보 해제" : "긴급 해제";
     public bool IsServerCert => Kind == BannerKind.ServerCert;
     /// <summary>경고 계열(서버 인증서 만료·자격 갱신 실패) — 같은 시각 처리(경고 아이콘 + 빨강 계열, 경과 숨김)를 받는다.</summary>
     public bool IsWarning => Kind is BannerKind.ServerCert or BannerKind.Credential;
@@ -74,7 +80,9 @@ public sealed class Notifications
     public void ShowBanner(Banner b) => Banners.Insert(0, b);
     public void RemoveBanner(Banner b) => Banners.Remove(b);
     public Banner? BannerOf(SessionItem s) => Banners.FirstOrDefault(b => b.Session == s);
-    public Banner? BannerOfGroup(string groupId) => Banners.FirstOrDefault(b => b.IsEmergency && b.GroupId == groupId);
+    /// <summary>그룹 세션의 긴급·임박 배너(그룹당 하나) — 경보 배너(발신자별)는 따로 센다(BannerOfAlert).</summary>
+    public Banner? BannerOfGroup(string groupId) => Banners.FirstOrDefault(b => b.Kind is BannerKind.Emergency or BannerKind.ImminentPeril && b.GroupId == groupId);
+    public Banner? BannerOfAlert(string groupId, string user) => Banners.FirstOrDefault(b => b.IsAlert && b.GroupId == groupId && b.AlertUser == user);
     public Banner? BannerOfKind(BannerKind kind) => Banners.FirstOrDefault(b => b.Kind == kind);
     /// <summary>응답 핫키 대상 = 최상단 착신.</summary>
     public Banner? TopIncoming => Banners.FirstOrDefault(b => b.IsIncoming);

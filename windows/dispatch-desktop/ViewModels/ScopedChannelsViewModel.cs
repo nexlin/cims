@@ -125,6 +125,22 @@ public sealed partial class ScopedChannelsViewModel : ObservableObject
     [RelayCommand] private void ToggleManage() => ManageExpanded = !ManageExpanded;
     [RelayCommand] private void NewChannel() => NewChannelRequested?.Invoke(this, EventArgs.Empty);
     [RelayCommand] private void SelectCard(ScopedCard c) { var next = Selected == c ? null : c; foreach (var x in All) x.IsSelected = x == next; Selected = next; }
+
+    /// <summary>[채널로] 의 ② 몫 — 카드로 포커스만 옮긴다(청취는 카드의 토글). 필터·검색이 가리고 있으면 풀어서 찾는다(«사라졌다» 로 보이지 않게),
+    /// 관리 섹션이 접혀 있으면 편다. 없으면 false.</summary>
+    public bool Focus(string id)
+    {
+        if (All.FirstOrDefault(c => c.Id == id) is null && (Filter != "all" || Search.Length > 0))
+        {
+            Filter = "all"; Search = "";                 // 각각 Rebuild
+        }
+        var card = All.FirstOrDefault(c => c.Id == id);
+        if (card is null) return false;
+        if (card.Section == ScopedSection.Manage && !ManageExpanded) ManageExpanded = true;
+        foreach (var x in All) x.IsSelected = x == card;
+        Selected = card;
+        return true;
+    }
     private IEnumerable<ScopedCard> All => Listen.Concat(Others).Concat(Manage);
 
     private void OnRoster(GroupInfo g)

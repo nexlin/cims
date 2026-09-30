@@ -72,8 +72,11 @@ public sealed class McDataMessagesViewModel : MessagesViewModelBase
     {
         if (m.State != SendState.Failed || !m.IsOut) return;
         if (m.IsAttachment) { _ = SendFileCore(m); return; }
-        var r = m.GroupUri.Length > 0 ? S.SendGroupSds(UserPartConverter.UserPart(m.GroupUri), m.Text) : S.SendSds(m.ThreadKey, m.Text);
-        if (r.Ok) { m.MsgId = r.Value.MsgId; m.Token = r.Value.Token; }          // 새 msgId 로 disposition 통지가 맞물린다
+        // 처음의 message ID 로 다시 보낸다(TS 24.282 SDS SIGNALLING PAYLOAD 의 Message ID) — 앞 발신이 일부에게 닿았어도 받는 쪽이 같은 메시지로 대조하고
+        //   ✓✓ disposition 도 같은 ID 로 맞물린다. 앞 발신이 즉시 실패해 ID 가 없으면 새로.
+        string? again = m.MsgId.Length > 0 ? m.MsgId : null;
+        var r = m.GroupUri.Length > 0 ? S.SendGroupSds(UserPartConverter.UserPart(m.GroupUri), m.Text, again) : S.SendSds(m.ThreadKey, m.Text, again);
+        if (r.Ok) { m.MsgId = r.Value.MsgId; m.Token = r.Value.Token; }
         m.State = r.Ok ? SendState.Pending : SendState.Failed;
         S.Messages.UpdateResend(m.Id, m.MsgId, m.Token, m.State);
     }
@@ -137,7 +140,8 @@ public sealed class McDataMessagesViewModel : MessagesViewModelBase
 
     protected override void OnRequestCompleted(RequestResult r)
     {
-        if (r.Method != "MESSAGE" || S.Ptt is null || r.AccountId != S.Ptt.Id) return;
+        // 큰 그룹 SDS 는 코어가 media plane(MSRP, TS 24.282 §9.2.3)으로 보내 최종 결과가 method "MSRP" 로 온다 — token 상관은 같다
+        if (r.Method is not ("MESSAGE" or "MSRP") || S.Ptt is null || r.AccountId != S.Ptt.Id) return;
         var m = ThreadMap.Values.SelectMany(t => t.Messages).FirstOrDefault(x => x.IsOut && x.Token == r.Token && x.State == SendState.Pending);
         if (m is null) return;                                                  // 통지 발신 등 내 메시지가 아닌 MESSAGE 완료
         bool ok = r.Code is >= 200 and < 300;

@@ -53,6 +53,34 @@
                             <TextBox Style="{StaticResource Field}" Text="{Binding MaxParticipants, UpdateSourceTrigger=PropertyChanged}" Margin="0,2,0,0" />
                         </StackPanel>
                     </UniformGrid>
+                    <!-- 그룹 호(TS 24.481 §7.2.2 — 편성 그룹만): T4·TNG3·확인 통화 설정. 범위·기본값은 콘솔 그룹 편집과 같다 -->
+                    <TextBlock Style="{StaticResource SectionHeader}" Text="그룹 호" Margin="0,2,0,4" />
+                    <UniformGrid Columns="2" Margin="0,0,0,8">
+                        <StackPanel Margin="0,0,6,0" ToolTip="on-network-hang-timer — 발언 없이 이 시간이 지나면 그룹 호를 해제한다(0 = 미사용, 최대 3600). 일제 통화에 쓰는 그룹은 짧게 준다">
+                            <TextBlock Text="유지 시간(T4, 초)" Style="{StaticResource Hint}" />
+                            <TextBox Style="{StaticResource Field}" Text="{Binding HangTimerSec, UpdateSourceTrigger=PropertyChanged}" Margin="0,2,0,0" />
+                        </StackPanel>
+                        <StackPanel ToolTip="on-network-maximum-duration — 그룹 호 최대 시간(0 = 무제한, 최대 86400)">
+                            <TextBlock Text="최대 통화 시간(초)" Style="{StaticResource Hint}" />
+                            <TextBox Style="{StaticResource Field}" Text="{Binding MaxDurationSec, UpdateSourceTrigger=PropertyChanged}" Margin="0,2,0,0" />
+                        </StackPanel>
+                    </UniformGrid>
+                    <UniformGrid Columns="2" Margin="0,0,0,8">
+                        <StackPanel Margin="0,0,6,0" ToolTip="on-network-minimum-number-to-start — 개시자에게 응답하기 전에 받아야 할 멤버 응답 수(0 = 기다리지 않음)">
+                            <TextBlock Text="시작 최소 응답(명)" Style="{StaticResource Hint}" />
+                            <TextBox Style="{StaticResource Field}" Text="{Binding MinNumberToStart, UpdateSourceTrigger=PropertyChanged}" Margin="0,2,0,0" />
+                        </StackPanel>
+                        <StackPanel ToolTip="on-network-timeout-for-acknowledgement-of-required-members — 필수 멤버의 응답을 기다리는 시간(1~300, 필수 멤버가 있을 때만)">
+                            <TextBlock Text="필수 멤버 대기(TNG1, 초)" Style="{StaticResource Hint}" />
+                            <TextBox Style="{StaticResource Field}" Text="{Binding AckTimeoutSec, UpdateSourceTrigger=PropertyChanged}" Margin="0,2,0,0" />
+                        </StackPanel>
+                    </UniformGrid>
+                    <TextBlock Text="대기 만료 시" Style="{StaticResource Hint}" />
+                    <ComboBox Style="{StaticResource FieldCombo}" ItemsSource="{Binding AckActions}" DisplayMemberPath="Value" SelectedValuePath="Key" SelectedValue="{Binding AckAction}" Margin="0,2,0,8"
+                              ToolTip="on-network-action-upon-expiration-of-timeout-for-acknowledgement-of-required-members — 필수 멤버가 응답하지 않거나 거절하면" />
+                    <CheckBox Style="{StaticResource Switch}" Content="참가자 정보 구독 허용" IsChecked="{Binding AllowConferenceState}" Margin="0,0,0,10"
+                              ToolTip="on-network-allow-conference-state — 멤버가 그룹 세션의 참가자 정보(conference 이벤트)를 구독할 수 있음. 끄면 서버가 403(관제사 청취 범위는 별도)" />
+                    <TextBlock Style="{StaticResource SectionHeader}" Text="허용 · 한도" Margin="0,2,0,4" />
                     <CheckBox Style="{StaticResource Switch}" Content="긴급 그룹콜 허용" IsChecked="{Binding EmergencyCall}" Margin="0,2,0,6" />
                     <CheckBox Style="{StaticResource Switch}" Content="긴급 경보 허용" IsChecked="{Binding EmergencyAlert}" Margin="0,0,0,6" />
                     <CheckBox Style="{StaticResource Switch}" Content="메시지(SDS) 허용" IsChecked="{Binding AllowSds}" Margin="0,0,0,6" />
@@ -60,6 +88,16 @@
                     <CheckBox Style="{StaticResource Switch}" Content="영상" IsChecked="{Binding VideoEnabled}" Margin="0,0,0,6" />
                     <CheckBox Style="{StaticResource Switch}" Content="참여 전 affiliation 필요" IsChecked="{Binding RequireAffiliation}" Margin="0,0,0,6" />
                     <CheckBox Style="{StaticResource Switch}" Content="미디어 암호화" IsChecked="{Binding Encryption}" Margin="0,0,0,6" />
+                    <UniformGrid Columns="2" Margin="0,4,0,0">
+                        <StackPanel Margin="0,0,6,0" ToolTip="mcdata-on-network-max-data-size-for-SDS — 그룹 메시지 최대 크기(0 = 무제한)">
+                            <TextBlock Text="메시지 최대(byte)" Style="{StaticResource Hint}" />
+                            <TextBox Style="{StaticResource Field}" Text="{Binding MaxSdsSize, UpdateSourceTrigger=PropertyChanged}" Margin="0,2,0,0" />
+                        </StackPanel>
+                        <StackPanel ToolTip="mcdata-on-network-max-data-size-auto-recv — 파일 자동 다운로드 임계(0 = 무제한)">
+                            <TextBlock Text="자동수신 최대(byte)" Style="{StaticResource Hint}" />
+                            <TextBox Style="{StaticResource Field}" Text="{Binding MaxAutoRecv, UpdateSourceTrigger=PropertyChanged}" Margin="0,2,0,0" />
+                        </StackPanel>
+                    </UniformGrid>
                     <TextBlock Style="{StaticResource Hint}" Margin="0,8,0,0" TextWrapping="Wrap"
                                Text="저장하면 GMS 그룹 문서로 서버에 올라가고(XCAP PUT), 멤버 단말에는 문서 변경 통지가 갑니다. 편집·삭제는 내가 만든 그룹(또는 관제 그룹 관리 범위 안 그룹)만 됩니다." />
                 </StackPanel>
@@ -99,13 +137,24 @@
                         <TextBlock Style="{StaticResource SectionHeader}" Text="멤버" VerticalAlignment="Center" />
                         <TextBlock Style="{StaticResource Muted}" Text="{Binding MemberCountText}" FontSize="12" VerticalAlignment="Center" Margin="8,0,0,0" />
                     </DockPanel>
-                    <TextBlock DockPanel.Dock="Top" Style="{StaticResource Hint}" Text="의장(chair) 은 발언 우선순위가 높습니다. 클릭해 역할을 바꿉니다." Margin="0,0,0,4" />
+                    <TextBlock DockPanel.Dock="Top" Style="{StaticResource Hint}" TextWrapping="Wrap" Margin="0,0,0,4"
+                               Text="의장(chair) 은 발언 우선순위가 높습니다. 필수 멤버는 개시자에게 응답하기 전에 응답을 기다립니다(필수 멤버 대기). 클릭해 바꿉니다." />
                     <ListBox Style="{StaticResource PlainList}" ItemsSource="{Binding Members}">
                         <ListBox.ItemTemplate>
                             <DataTemplate DataType="{x:Type vm:GroupMemberRow}">
                                 <Border Style="{StaticResource LogRow}">
                                     <DockPanel>
                                         <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                                            <Button Content="{Binding RequiredText}" Command="{Binding DataContext.ToggleRequiredCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}" Margin="0,0,4,0"
+                                                    ToolTip="필수 멤버(on-network-required) — 개시자 응답 전에 이 멤버의 응답을 기다린다(TNG1)">
+                                                <Button.Style>
+                                                    <Style TargetType="Button" BasedOn="{StaticResource Btn.Xs}">
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding Required}" Value="True"><Setter Property="Background" Value="{DynamicResource Brush.Primary}" /><Setter Property="BorderBrush" Value="{DynamicResource Brush.Primary}" /><Setter Property="Foreground" Value="{DynamicResource Brush.OnAccent}" /></DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </Button.Style>
+                                            </Button>
                                             <Button Style="{StaticResource Btn.Xs}" Content="{Binding RoleText}" Command="{Binding DataContext.ToggleChairCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}" Margin="0,0,4,0" ToolTip="의장/참가자 전환" />
                                             <Button Style="{StaticResource Btn.Xs.Danger}" Content="제거" Command="{Binding DataContext.RemoveCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}" />
                                         </StackPanel>

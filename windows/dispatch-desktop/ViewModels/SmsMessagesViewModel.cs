@@ -1,4 +1,5 @@
-// ③ 오른쪽 아래 — SMS·LMS: SIP MESSAGE text/plain 1:1 (§4.3). 발신 token 으로 최종 응답 상관. 외부망 번호는 게이트웨이 부재로 전송 비활성(§13).
+// ③ 오른쪽 아래 — SMS·LMS: SIP MESSAGE text/plain 1:1 (§4.3). 발신 token 으로 최종 응답 상관. 외부망 번호는 전화 회선 프로파일의
+// capabilities.smsGateway 가 켜져 있을 때만 전송(게이트웨이 = IBCF→SMSC TS 24.341 / SMPP, §13).
 using CimsUe;
 using DispatchDesktop.Converters;
 using DispatchDesktop.Models;
@@ -13,10 +14,16 @@ public sealed class SmsMessagesViewModel : MessagesViewModelBase
     public SmsMessagesViewModel(DispatchSession s) : base(s, MessageKind.Sms)
     {
         s.SipMessageReceived += (_, m) => OnMessage(m);
-        s.PropertyChanged += (_, e) => { if (e.PropertyName == nameof(DispatchSession.CanSms)) OnPropertyChanged(nameof(GatewayText)); };
+        s.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName is nameof(DispatchSession.CanSms) or nameof(DispatchSession.SmsGateway))
+            { OnPropertyChanged(nameof(GatewayText)); OnPropertyChanged(nameof(GatewayTip)); OnPropertyChanged(nameof(CanSend)); OnPropertyChanged(nameof(CanAttach)); }
+        };
     }
 
-    public string GatewayText => "외부망 게이트웨이 미구성";
+    public string GatewayText => S.SmsGateway ? "외부망 문자 가능" : "외부망 게이트웨이 미구성";
+    public string GatewayTip => S.SmsGateway ? "외부망 휴대전화 문자는 서버 게이트웨이(IBCF→SMSC / SMPP)로 나간다"
+                                             : "외부망 휴대전화 문자는 서버 게이트웨이(IBCF→SMSC / SMPP)가 없어 미지원 — 등록 가입자 간 문자만";
     /// <summary>[문자] 팝오버 보내기 줄 — 받는 사람(내선·가입자). 사람 메뉴·그룹원 칩·주소록 [문자] 는 이 칸을 채워 연다.</summary>
     private string _recipient = "";
     public string Recipient { get => _recipient; set { if (SetProperty(ref _recipient, value)) OnPropertyChanged(nameof(CanOpenRecipient)); } }
@@ -34,13 +41,14 @@ public sealed class SmsMessagesViewModel : MessagesViewModelBase
     public string CountText => Input.Length > SmsLimit ? $"{Input.Length}자 LMS" : $"{Input.Length}/{SmsLimit} SMS";
     public bool SelectedIsExternal => Selected?.IsExternal == true;
 
-    protected override bool SendAllowed(MessageThread t) => !t.IsExternal && S.CanSms;
+    protected override bool SendAllowed(MessageThread t) => (!t.IsExternal || S.SmsGateway) && S.CanSms;
 
     protected override void OnPropertyChanged(System.ComponentModel.PropertyChangedEventArgs e)
     {
         base.OnPropertyChanged(e);
         if (e.PropertyName == nameof(Input)) base.OnPropertyChanged(new System.ComponentModel.PropertyChangedEventArgs(nameof(CountText)));
-        if (e.PropertyName == nameof(Selected)) base.OnPropertyChanged(new System.ComponentModel.PropertyChangedEventArgs(nameof(SelectedIsExternal)));
+        if (e.PropertyName == nameof(Selected))
+            base.OnPropertyChanged(new System.ComponentModel.PropertyChangedEventArgs(nameof(SelectedIsExternal)));
     }
 
     private void OnMessage(SipMessage m)

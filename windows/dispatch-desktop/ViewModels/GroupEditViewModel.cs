@@ -18,15 +18,24 @@ public sealed partial class GroupMemberRow : ObservableObject
     public string DisplayNumber { get; }
     public bool IsMe { get; }
     [ObservableProperty] private bool _isChair;
-    /// <summary>필수 멤버 &lt;on-network-required&gt; — 폼은 편집하지 않고 읽은 값을 그대로 되돌린다(콘솔 설정 보존).</summary>
-    public bool Required { get; }
-    public GroupMemberRow(string uri, string name, string displayNumber, bool isMe, bool isChair, bool required = false)
+    /// <summary>필수 멤버 &lt;on-network-required&gt;(TS 24.481 §7.2.4.2) — 개시자 응답 전에 이 멤버의 200 을 기다린다(TNG1, TS 24.379 §6.3.3.3).</summary>
+    [ObservableProperty] private bool _required;
+    private readonly bool _readChair;
+    private readonly int _readPriority;
+    public GroupMemberRow(string uri, string name, string displayNumber, bool isMe, bool isChair, bool required = false, int? priority = null)
     {
-        Uri = uri; Name = name; DisplayNumber = displayNumber; IsMe = isMe; _isChair = isChair; Required = required;
+        Uri = uri; Name = name; DisplayNumber = displayNumber; IsMe = isMe; _isChair = isChair; _required = required;
+        _readChair = isChair; _readPriority = priority ?? DefaultPriority(isChair);
     }
     public string Label => Name.Length > 0 ? Name : DisplayNumber;
     public string RoleText => IsChair ? "의장" : "참가자";
+    public string RequiredText => Required ? "필수" : "선택";
+    /// <summary>저장할 멤버 우선순위(mcpttgi user-priority) — 역할을 바꾸지 않았으면 읽은 값 그대로(콘솔이 준 멤버별 값을 지우지 않는다 —
+    /// PUT 은 멤버 목록 전체 교체), 바꿨으면 역할 기본값(의장 7 · 참가자 5).</summary>
+    public int Priority => IsChair == _readChair ? _readPriority : DefaultPriority(IsChair);
+    private static int DefaultPriority(bool chair) => chair ? 7 : 5;
     partial void OnIsChairChanged(bool value) => OnPropertyChanged(nameof(RoleText));
+    partial void OnRequiredChanged(bool value) => OnPropertyChanged(nameof(RequiredText));
 }
 
 public sealed partial class GroupCandidateRow
@@ -48,6 +57,19 @@ public sealed partial class GroupEditViewModel : ObservableObject
     /// <summary>그룹 종류(TS 24.481 on-network-invite-members) — 일제 통화는 그룹 종류가 아니라 호 속성이라 없다(mcptt_broadcast_group_call.md §3.1).
     /// 인스턴스 프로퍼티 — WPF 바인딩은 static 멤버를 경로로 풀지 못한다.</summary>
     public IReadOnlyList<string> SessionTypes { get; } = new[] { "prearranged", "chat" };
+    /// <summary>TNG1 만료 동작(on-network-action-upon-expiration-of-timeout-for-acknowledgement-of-required-members) — 값, 표시.</summary>
+    public IReadOnlyList<KeyValuePair<string, string>> AckActions { get; } = new[]
+    {
+        new KeyValuePair<string, string>("abandon", "통화 포기"), new KeyValuePair<string, string>("proceed", "없이 진행"),
+    };
+
+    public const int HangTimerDefault = 30, HangTimerMax = 3600;
+    public const int MaxDurationDefault = 3600, MaxDurationMax = 86400;
+    public const int MaxSdsSizeDefault = 10000, MaxAutoRecvDefault = 1048576;
+    public const int MinNumberToStartMax = 65535;
+    public const int AckTimeoutDefault = 5, AckTimeoutMax = 300;
+    /// <summary>열 때 받은 문서(신규 = null) — 미기재 칸 판정.</summary>
+    private GroupDoc? _read;
 
     [ObservableProperty] private string _name = "";
     /// <summary>그룹 id(uri user part) — 신규만 편집 가능.</summary>
@@ -62,6 +84,16 @@ public sealed partial class GroupEditViewModel : ObservableObject
     [ObservableProperty] private bool _encryption;
     [ObservableProperty] private int _priority = 5;
     [ObservableProperty] private int _maxParticipants;
+    // 그룹 호 타이머·참가자 정보·MCData 한도·확인 통화 설정(TS 24.481 §7.2.2·§7.2.4.2) — 기본값·범위는 콘솔 그룹 편집과 같다.
+    //   문서에 없던(미기재) 칸은 기본값 그대로면 저장해도 미기재로 둔다(서버 값·기본값을 덮지 않는다 — WithUnset).
+    [ObservableProperty] private int _hangTimerSec = HangTimerDefault;
+    [ObservableProperty] private int _maxDurationSec = MaxDurationDefault;
+    [ObservableProperty] private bool _allowConferenceState = true;
+    [ObservableProperty] private int _maxSdsSize = MaxSdsSizeDefault;
+    [ObservableProperty] private int _maxAutoRecv = MaxAutoRecvDefault;
+    [ObservableProperty] private int _minNumberToStart;
+    [ObservableProperty] private int _ackTimeoutSec = AckTimeoutDefault;
+    [ObservableProperty] private string _ackAction = "abandon";
     [ObservableProperty] private string _search = "";
     [ObservableProperty] private string _error = "";
     [ObservableProperty] private bool _busy;
@@ -118,18 +150,24 @@ public sealed partial class GroupEditViewModel : ObservableObject
         SessionType = SessionTypes.Contains(d.SessionType) ? d.SessionType : "prearranged";
         VideoEnabled = d.VideoEnabled; AllowSds = d.AllowSds; AllowFd = d.AllowFd; EmergencyCall = d.EmergencyCall; EmergencyAlert = d.EmergencyAlert;
         RequireAffiliation = d.RequireAffiliation; Encryption = d.Encryption; Priority = d.Priority; MaxParticipants = d.MaxParticipants;
+        _read = d;
+        HangTimerSec = d.HangTimerSec ?? HangTimerDefault; MaxDurationSec = d.MaxDurationSec ?? MaxDurationDefault;
+        AllowConferenceState = d.AllowConferenceState ?? true;
+        MaxSdsSize = d.MaxSdsSize ?? MaxSdsSizeDefault; MaxAutoRecv = d.MaxAutoRecv ?? MaxAutoRecvDefault;
+        MinNumberToStart = d.MinNumberToStart ?? 0; AckTimeoutSec = d.AckTimeoutSec ?? AckTimeoutDefault;
+        AckAction = d.AckAction is "proceed" ? "proceed" : "abandon";
         Members.Clear();
-        foreach (var m in d.Members) AddMember(m.Uri, m.Name, m.Role == "chair", m.Required);
+        foreach (var m in d.Members) AddMember(m.Uri, m.Name, m.Role == "chair", m.Required, m.Priority);
         Loaded = true;
         Filter();
     }
 
-    private void AddMember(string uri, string name, bool chair, bool required = false)
+    private void AddMember(string uri, string name, bool chair, bool required = false, int? priority = null)
     {
         string number = UserPartConverter.UserPart(uri);
         if (Members.Any(m => DirectoryService.Normalize(UserPartConverter.UserPart(m.Uri)) == DirectoryService.Normalize(number))) return;
         string n = name.Length > 0 ? name : _s.Directory.NameOf(number);
-        Members.Add(new GroupMemberRow(uri, n, _s.Directory.DisplayNumber(number), _s.IsMe(uri), chair, required));
+        Members.Add(new GroupMemberRow(uri, n, _s.Directory.DisplayNumber(number), _s.IsMe(uri), chair, required, priority));
         OnPropertyChanged(nameof(MemberCountText)); OnPropertyChanged(nameof(CanSave));
     }
 
@@ -155,6 +193,10 @@ public sealed partial class GroupEditViewModel : ObservableObject
     [RelayCommand] private void AddAllShown() { foreach (var c in Candidates.ToList()) AddMember(_s.ToTelUri(c.Contact.Number), c.Contact.Name, chair: false); Filter(); }
     [RelayCommand] private void Remove(GroupMemberRow m) { Members.Remove(m); OnPropertyChanged(nameof(MemberCountText)); OnPropertyChanged(nameof(CanSave)); Filter(); }
     [RelayCommand] private void ToggleChair(GroupMemberRow m) => m.IsChair = !m.IsChair;
+    [RelayCommand] private void ToggleRequired(GroupMemberRow m) => m.Required = !m.Required;
+
+    /// <summary>문서에 없던 칸(read = null)이 기본값 그대로면 미기재(null) — 폼을 연 것만으로 서버 값을 명시값으로 굳히지 않는다.</summary>
+    private static int? WithUnset(int? read, int value, int dflt) => read is null && value == dflt ? null : value;
     [RelayCommand] private void Cancel() => Cancelled?.Invoke(this, EventArgs.Empty);
 
     [RelayCommand]
@@ -167,9 +209,17 @@ public sealed partial class GroupEditViewModel : ObservableObject
             Uri = Uri, DisplayName = Name.Trim(), SessionType = SessionType, VideoEnabled = VideoEnabled, AllowSds = AllowSds, AllowFd = AllowFd,
             EmergencyCall = EmergencyCall, EmergencyAlert = EmergencyAlert, RequireAffiliation = RequireAffiliation, Encryption = Encryption,
             Priority = Math.Clamp(Priority, 0, 15), MaxParticipants = Math.Max(0, MaxParticipants), OrgCode = _orgCode,
+            HangTimerSec = WithUnset(_read?.HangTimerSec, Math.Clamp(HangTimerSec, 0, HangTimerMax), HangTimerDefault),
+            MaxDurationSec = WithUnset(_read?.MaxDurationSec, Math.Clamp(MaxDurationSec, 0, MaxDurationMax), MaxDurationDefault),
+            AllowConferenceState = _read?.AllowConferenceState is null && AllowConferenceState ? null : AllowConferenceState,
+            MaxSdsSize = WithUnset(_read?.MaxSdsSize, Math.Max(0, MaxSdsSize), MaxSdsSizeDefault),
+            MaxAutoRecv = WithUnset(_read?.MaxAutoRecv, Math.Max(0, MaxAutoRecv), MaxAutoRecvDefault),
+            MinNumberToStart = WithUnset(_read?.MinNumberToStart, Math.Clamp(MinNumberToStart, 0, MinNumberToStartMax), 0),
+            AckTimeoutSec = WithUnset(_read?.AckTimeoutSec, Math.Clamp(AckTimeoutSec, 1, AckTimeoutMax), AckTimeoutDefault),
+            AckAction = _read?.AckAction is null && AckAction == "abandon" ? null : AckAction,
         };
         foreach (var m in Members)
-            doc.Members.Add(new GroupMember { Uri = m.Uri, Name = m.Name, Role = m.IsChair ? "chair" : "participant", Priority = m.IsChair ? 7 : 5,
+            doc.Members.Add(new GroupMember { Uri = m.Uri, Name = m.Name, Role = m.IsChair ? "chair" : "participant", Priority = m.Priority,
                                               Required = m.Required });
         Busy = true;
         var r = await _s.SaveGroupAsync(doc, IsNew ? null : _ifMatch);       // 409 uri_taken 재시도는 세션이 처리

@@ -188,7 +188,10 @@ bool CscClient::parseProfile(const std::string& json, Profile& out, std::string*
         sp.authScheme = Json::str(acc, "authScheme", "digest") == "aka" ? AuthScheme::Aka : AuthScheme::Digest;
         const JVal* aka = Json::child(acc, "aka");
         sp.akaK = Json::str(aka, "k"); sp.akaOpc = Json::str(aka, "opc"); sp.akaAmf = Json::str(aka, "amf", "8000");
-        sp.maxPayloadSdsCplaneBytes = Json::num(s, "maxPayloadSdsCplaneBytes", 0);
+        sp.smsGateway = Json::boolean(Json::child(s, "capabilities"), "smsGateway", false);
+        // 서버는 PTT 서비스의 `mcdata` 블록에 싣는다(android_ue_provisioning.md §3) — 서비스 최상위 값은 옛 형식 폴백
+        sp.maxPayloadSdsCplaneBytes = Json::num(Json::child(s, "mcdata"), "maxPayloadSdsCplaneBytes",
+                                                Json::num(s, "maxPayloadSdsCplaneBytes", 0));
         out.services.push_back(sp);
     });
     const JVal* d = Json::child(j.root, "dispatch");

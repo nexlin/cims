@@ -87,7 +87,7 @@
                                 <DockPanel>
                                     <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
                                         <Button Style="{StaticResource Btn.Xs}" Content="통화" Focusable="False" Command="{Binding DataContext.CallCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}" Margin="0,0,4,0" />
-                                        <Button Style="{StaticResource Btn.Xs}" Content="문자" Focusable="False" Command="{Binding DataContext.SmsCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}" IsEnabled="{Binding IsExternal, Converter={StaticResource Not}}" ToolTip="{Binding SmsTip}" />
+                                        <Button Style="{StaticResource Btn.Xs}" Content="문자" Focusable="False" Command="{Binding DataContext.SmsCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}" IsEnabled="{Binding CanSms}" ToolTip="{Binding SmsTip}" />
                                     </StackPanel>
                                     <Border Width="28" Height="28" CornerRadius="14" Background="{DynamicResource Brush.PrimarySoft}" Margin="0,0,8,0" VerticalAlignment="Center">
                                         <TextBlock Text="{Binding Initial}" Foreground="{DynamicResource Brush.Primary}" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="12" />

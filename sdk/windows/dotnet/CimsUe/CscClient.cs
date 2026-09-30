@@ -24,11 +24,13 @@ public sealed record TokenSet(string AccessToken, string TokenType, string Refre
 
 public sealed record ServiceEndpoint(Transport Transport, int Port);
 
-/// <summary>프로비저닝 프로파일의 서비스 1개(kind = volte | ptt).</summary>
+/// <summary>프로비저닝 프로파일의 서비스 1개(kind = volte | voip | ptt). UdpNoTcpSwitch = sip.udpNoTcpSwitch(엔진 전역 — 앱이 고른다),
+/// SmsGateway = capabilities.smsGateway(외부망 SMS/LMS 게이트웨이 연결 — 외부 번호 [문자] 활성 조건). MaxPayloadSdsCplaneBytes = mcdata 블록(TS 24.484).</summary>
 public sealed record ServiceProfile(
     string Kind, string SipHost, int SipPort, Transport Transport, IReadOnlyList<ServiceEndpoint> Transports, bool Enforced,
     MediaSecurity MediaSecurity, string Domain, string Msisdn, string Imsi, string AuthId, string SipHa1, string McpttId,
-    AuthScheme AuthScheme, string AkaK, string AkaOpc, string AkaAmf, IReadOnlyList<string> SecMechanisms, int MaxPayloadSdsCplaneBytes)
+    AuthScheme AuthScheme, string AkaK, string AkaOpc, string AkaAmf, IReadOnlyList<string> SecMechanisms, int MaxPayloadSdsCplaneBytes,
+    bool UdpNoTcpSwitch = false, bool SmsGateway = false)
 {
     /// <summary>이 서비스로 등록할 계정 설정 — 프로파일 값 그대로(loginPw 는 sipHa1 부재 시 평문 폴백). 규칙은 코어(toAccount).</summary>
     public AccountConfig ToAccountConfig(string? loginPw = null) => CscClient.ToAccountConfig(this, loginPw);
@@ -83,6 +85,40 @@ public sealed class GroupMember
     public int Priority { get; set; } = 5;
     /// <summary>필수 멤버 &lt;on-network-required&gt;(TS 24.481 §7.2.4.2) — 읽은 값을 되돌려야 콘솔 설정이 남는다.</summary>
     public bool Required { get; set; }
+    /// <summary>직함 &lt;cims:user-title&gt;(사이트 확장) — 읽기 전용(PUT 에 싣지 않는다).</summary>
+    public string Title { get; set; } = "";
+}
+
+/// <summary>CMS 대상 항목(TS 24.484 §8.3.2.7 EntryType) — Mode = entry-info(DedicatedGroup | UseCurrentlySelectedGroup | UsePreConfigured | LocallyDetermined).</summary>
+public sealed record CmsEntry(string Uri, string Mode);
+
+/// <summary>MCPTT user profile(TS 24.484 §8.3.2, csc.h UserProfileDoc) — 코어가 해석하는 요소만. 인가 Allow* 는 요소가 없으면 허용이다 —
+/// 서버가 최종 판정하므로 앱은 UX 선차단만 한다. NotModified = 304(나머지는 비어 있다 — 가진 사본을 유지). MaxAffiliationsN2 -1 = 미기재.</summary>
+public sealed record UserProfileDoc(
+    string ETag, bool NotModified, string UserUri, CmsEntry EmergencyGroup, CmsEntry ImminentPerilGroup, CmsEntry EmergencyAlertGroup,
+    CmsEntry EmergencyPrivateRecipient, IReadOnlyList<string> Groups, IReadOnlyList<string> ImplicitAffiliations, int MaxAffiliationsN2,
+    bool AllowPrivateCall, bool AllowEmergencyGroupCall, bool AllowImminentPerilCall, bool AllowActivateEmergencyAlert,
+    bool AllowCancelEmergencyAlert, bool AllowEmergencyPrivateCall, bool AllowAdhocGroupCall)
+{
+    /// <summary>XML → 문서(코어 파서). 루트가 mcptt-user-profile 이 아니면 실패.</summary>
+    public static Result<UserProfileDoc> Parse(string xml) => CscClient.ParseUserProfile(xml);
+}
+
+/// <summary>MCPTT service configuration(TS 24.484 §8.4, csc.h ServiceConfigDoc) — 인가 요소는 없다. Rp* = Resource-Priority r-value(빈 값 = 미기재 —
+/// 계정 기본값 유지). 요소가 없으면 빈 값/-1.</summary>
+public sealed record ServiceConfigDoc(string ETag, bool NotModified, string Domain, int NumLevelsGroupHierarchy, int NumLevelsUserHierarchy,
+                                      string RpEmergency, string RpImminentPeril, string RpNormal)
+{
+    public static Result<ServiceConfigDoc> Parse(string xml) => CscClient.ParseServiceConfig(xml);
+}
+
+/// <summary>정책 게이트 스냅샷(csc.h Capabilities — ue_sdk.md §4.2) — user profile ruleset 인가. 받지 못한 문서는 허용(게이트 없음).
+/// UX 선차단(버튼 비활성·안내)용이고 최종 판정은 서버다. MaxAffiliationsN2 0 = 미지정.</summary>
+public sealed record Capabilities(bool UserProfileKnown, bool ServiceConfigKnown, bool PrivateCall, bool EmergencyGroupCall, bool ImminentPerilCall,
+                                  bool EmergencyPrivateCall, bool EmergencyAlert, bool CancelEmergencyAlert, bool AdhocGroupCall, int MaxAffiliationsN2)
+{
+    /// <summary>규칙은 코어 한 곳(Capabilities::of). null = 그 문서를 아직 못 받음.</summary>
+    public static Capabilities Of(UserProfileDoc? userProfile, ServiceConfigDoc? serviceConfig) => CscClient.CapabilitiesOf(userProfile, serviceConfig);
 }
 
 /// <summary>GMS 그룹 문서(OMA list-service + TS 24.481 mcpttgi) — GET 산출·PUT 입력 공용 모델(cimsue/csc.h GroupDoc 1:1). 편집 폼이 그대로 쓰도록 가변.</summary>
@@ -379,6 +415,71 @@ public sealed unsafe class CscClient : IDisposable
         }
     }
 
+    /// <summary>CMS user-profile GET + 해석(If-None-Match = etag). 304 면 NotModified=true(나머지 비어 있음 — 가진 사본 유지). 해석 실패 = -2.</summary>
+    public Result<UserProfileDoc> FetchUserProfile(string accessToken, string userUri, string? etag = null)
+    {
+        lock (_gate)
+        {
+            cimsue_user_profile_doc_t d;
+            int st = cimsue_csc_fetch_user_profile(Handle, accessToken, userUri, etag, &d);
+            return st == 0 ? Result<UserProfileDoc>.Success(ToManaged(&d)) : Result<UserProfileDoc>.Fail(st, Engine.LastError());
+        }
+    }
+
+    /// <summary>CMS service-config GET + 해석 — FetchUserProfile 과 같은 규약.</summary>
+    public Result<ServiceConfigDoc> FetchServiceConfig(string accessToken, string userUri, string? etag = null)
+    {
+        lock (_gate)
+        {
+            cimsue_service_config_doc_t d;
+            int st = cimsue_csc_fetch_service_config(Handle, accessToken, userUri, etag, &d);
+            return st == 0 ? Result<ServiceConfigDoc>.Success(ToManaged(&d)) : Result<ServiceConfigDoc>.Fail(st, Engine.LastError());
+        }
+    }
+    public Task<Result<UserProfileDoc>> FetchUserProfileAsync(string accessToken, string userUri, string? etag = null, CancellationToken ct = default) =>
+        Task.Run(() => FetchUserProfile(accessToken, userUri, etag), ct);
+    public Task<Result<ServiceConfigDoc>> FetchServiceConfigAsync(string accessToken, string userUri, string? etag = null, CancellationToken ct = default) =>
+        Task.Run(() => FetchServiceConfig(accessToken, userUri, etag), ct);
+
+    internal static Result<UserProfileDoc> ParseUserProfile(string xml)
+    {
+        cimsue_user_profile_doc_t d;
+        int st = cimsue_user_profile_parse(xml, &d);
+        return st == 0 ? Result<UserProfileDoc>.Success(ToManaged(&d)) : Result<UserProfileDoc>.Fail(st, Engine.LastError());
+    }
+
+    internal static Result<ServiceConfigDoc> ParseServiceConfig(string xml)
+    {
+        cimsue_service_config_doc_t d;
+        int st = cimsue_service_config_parse(xml, &d);
+        return st == 0 ? Result<ServiceConfigDoc>.Success(ToManaged(&d)) : Result<ServiceConfigDoc>.Fail(st, Engine.LastError());
+    }
+
+    internal static Capabilities CapabilitiesOf(UserProfileDoc? up, ServiceConfigDoc? sc)
+    {
+        using var s = new NativeStrings();
+        cimsue_user_profile_doc_t u = default;
+        cimsue_service_config_doc_t c = default;
+        if (up is not null)
+        {
+            u.max_affiliations_n2 = up.MaxAffiliationsN2;
+            u.allow_private_call = Engine.B(up.AllowPrivateCall); u.allow_emergency_group_call = Engine.B(up.AllowEmergencyGroupCall);
+            u.allow_imminent_peril_call = Engine.B(up.AllowImminentPerilCall); u.allow_activate_emergency_alert = Engine.B(up.AllowActivateEmergencyAlert);
+            u.allow_cancel_emergency_alert = Engine.B(up.AllowCancelEmergencyAlert); u.allow_emergency_private_call = Engine.B(up.AllowEmergencyPrivateCall);
+            u.allow_adhoc_group_call = Engine.B(up.AllowAdhocGroupCall);
+        }
+        if (sc is not null)
+        {
+            c.domain = s.Add(sc.Domain); c.num_levels_group_hierarchy = sc.NumLevelsGroupHierarchy; c.num_levels_user_hierarchy = sc.NumLevelsUserHierarchy;
+            c.rp_emergency = s.Add(sc.RpEmergency); c.rp_imminent_peril = s.Add(sc.RpImminentPeril); c.rp_normal = s.Add(sc.RpNormal);
+        }
+        cimsue_capabilities_t k;
+        cimsue_capabilities_of(up is null ? null : &u, sc is null ? null : &c, &k);
+        return new Capabilities(k.user_profile_known != 0, k.service_config_known != 0, k.private_call != 0, k.emergency_group_call != 0,
+                                k.imminent_peril_call != 0, k.emergency_private_call != 0, k.emergency_alert != 0, k.cancel_emergency_alert != 0,
+                                k.adhoc_group_call != 0, k.max_affiliations_n2);
+    }
+
     // 비동기 편의 — 블록 호출을 스레드 풀로.
     public Task<Result<TokenSet>> LoginAsync(string userName, string password, CancellationToken ct = default) =>
         Task.Run(() => Login(userName, password), ct);
@@ -417,6 +518,27 @@ public sealed unsafe class CscClient : IDisposable
 
     private static XcapDoc ToManaged(cimsue_xcap_doc_t* d) => new(Utf8.Str(d->body), Utf8.Str(d->etag), d->not_modified != 0);
 
+    private static string[] StrArray(byte** v, int n)
+    {
+        var a = new string[Math.Max(0, n)];
+        for (int i = 0; i < a.Length; ++i) a[i] = Utf8.Str(v[i]);
+        return a;
+    }
+
+    private static CmsEntry ToManaged(in cimsue_cms_entry_t e) => new(Utf8.Str(e.uri), Utf8.Str(e.mode));
+
+    private static UserProfileDoc ToManaged(cimsue_user_profile_doc_t* d) =>
+        new(Utf8.Str(d->etag), d->not_modified != 0, Utf8.Str(d->user_uri), ToManaged(d->emergency_group), ToManaged(d->imminent_peril_group),
+            ToManaged(d->emergency_alert_group), ToManaged(d->emergency_private_recipient), StrArray(d->groups, d->group_count),
+            StrArray(d->implicit_affiliations, d->implicit_affiliation_count), d->max_affiliations_n2,
+            d->allow_private_call != 0, d->allow_emergency_group_call != 0, d->allow_imminent_peril_call != 0,
+            d->allow_activate_emergency_alert != 0, d->allow_cancel_emergency_alert != 0, d->allow_emergency_private_call != 0,
+            d->allow_adhoc_group_call != 0);
+
+    private static ServiceConfigDoc ToManaged(cimsue_service_config_doc_t* d) =>
+        new(Utf8.Str(d->etag), d->not_modified != 0, Utf8.Str(d->domain), d->num_levels_group_hierarchy, d->num_levels_user_hierarchy,
+            Utf8.Str(d->rp_emergency), Utf8.Str(d->rp_imminent_peril), Utf8.Str(d->rp_normal));
+
     private static ServiceProfile ToManaged(cimsue_service_profile_t* s)
     {
         var eps = new ServiceEndpoint[Math.Max(0, s->transport_count)];
@@ -426,7 +548,8 @@ public sealed unsafe class CscClient : IDisposable
         return new ServiceProfile(Utf8.Str(s->kind), Utf8.Str(s->sip_host), s->sip_port, (Transport)s->transport, eps, s->enforced != 0,
                                   (MediaSecurity)s->media_security, Utf8.Str(s->domain), Utf8.Str(s->msisdn), Utf8.Str(s->imsi),
                                   Utf8.Str(s->auth_id), Utf8.Str(s->sip_ha1), Utf8.Str(s->mcptt_id), (AuthScheme)s->auth_scheme,
-                                  Utf8.Str(s->aka_k), Utf8.Str(s->aka_opc), Utf8.Str(s->aka_amf), sec, s->max_payload_sds_cplane_bytes);
+                                  Utf8.Str(s->aka_k), Utf8.Str(s->aka_opc), Utf8.Str(s->aka_amf), sec, s->max_payload_sds_cplane_bytes,
+                                  s->udp_no_tcp_switch != 0, s->sms_gateway != 0);
     }
 
     private static Profile ToManaged(cimsue_profile_t* p)
@@ -473,7 +596,7 @@ public sealed unsafe class CscClient : IDisposable
             {
                 Uri = Utf8.Str(d->members[i].uri), Name = Utf8.Str(d->members[i].display_name),
                 Role = Utf8.Str(d->members[i].role) is { Length: > 0 } r ? r : "participant", Priority = d->members[i].priority,
-                Required = d->members[i].required != 0,
+                Required = d->members[i].required != 0, Title = Utf8.Str(d->members[i].title),
             });
         return g;
     }
@@ -537,6 +660,8 @@ public sealed unsafe class CscClient : IDisposable
         n.aka_k = s.Add(sp.AkaK); n.aka_opc = s.Add(sp.AkaOpc); n.aka_amf = s.Add(sp.AkaAmf);
         n.sec_mechanisms = s.AddArray(sp.SecMechanisms, out n.sec_mechanism_count);
         n.max_payload_sds_cplane_bytes = sp.MaxPayloadSdsCplaneBytes;
+        n.udp_no_tcp_switch = Engine.B(sp.UdpNoTcpSwitch);
+        n.sms_gateway = Engine.B(sp.SmsGateway);
         return n;
     }
 }

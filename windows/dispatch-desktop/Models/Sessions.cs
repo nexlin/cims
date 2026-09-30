@@ -96,8 +96,15 @@ public sealed partial class SessionItem : ObservableObject
     public bool IsHeld => Info.State == CallState.Held;
     public bool IsOutgoing => Info.State == CallState.Outgoing;
     public bool IsLive => Info.IsLive;
-    public bool IsEmergency => Info.Mcptt.Emergency;
-    public bool IsImminentPeril => Info.Mcptt.ImminentPeril;
+    /// <summary>긴급·임박 = 코어 세션 조건의 **현재값**(CallInfo.Condition — 개시 mcptt-info 로 시작해 상향·하향 re-INVITE·서버 재광고로 바뀐다,
+    /// TS 24.379 §10.1.1.2.1.3~6). CallInfo.Mcptt 는 호를 세운 INVITE 의 값으로 불변이라 판정에 쓰지 않는다.</summary>
+    public bool IsEmergency => Info.Condition.Emergency;
+    public bool IsImminentPeril => Info.Condition.ImminentPeril && !Info.Condition.Emergency;
+    /// <summary>이 단말이 올린 조건(개시 옵션·상향) — 내가 풀 수 있다.</summary>
+    public bool IsConditionMine => Info.Condition.Mine;
+    /// <summary>조건 개시자 — 호를 세운 INVITE 가 그 조건을 실었을 때만(mcptt-calling-user-id). 진행 중에 걸린 조건은 재광고가 개시자를 싣지만
+    /// 코어 조건에 그 값이 없어 비운다(호 발신자를 개시자로 적지 않는다 — ue_sdk.md §11).</summary>
+    public string ConditionInitiator => (IsEmergency && Info.Mcptt.Emergency) || (IsImminentPeril && Info.Mcptt.ImminentPeril) ? Info.Mcptt.CallingUserId : "";
     /// <summary>일제 통화 개시를 요청한 내 발신 호(mcptt-info broadcast-ind, TS 24.379 §6.2.8.2) — 서버가 받아들였는지는 <see cref="IsBroadcast"/>.</summary>
     public bool IsBroadcastRequest => Info.Dir == CallDir.Outgoing && Info.Mcptt.Broadcast;
     /// <summary>서버가 일제 통화(TS 24.379 §4.12, 호 속성)로 알린 호 — fan-out 착신 INVITE 의 broadcast-ind 또는 floor 메시지의 B-bit
@@ -129,7 +136,8 @@ public sealed partial class SessionItem : ObservableObject
         OnPropertyChanged(nameof(IsVolteCall)); OnPropertyChanged(nameof(PeerNumber)); OnPropertyChanged(nameof(CalledParty));
         OnPropertyChanged(nameof(IsIncoming)); OnPropertyChanged(nameof(IsActive)); OnPropertyChanged(nameof(IsHeld));
         OnPropertyChanged(nameof(IsOutgoing)); OnPropertyChanged(nameof(IsLive)); OnPropertyChanged(nameof(IsEmergency));
-        OnPropertyChanged(nameof(IsImminentPeril)); OnPropertyChanged(nameof(IsFullDuplex)); OnPropertyChanged(nameof(Route));
+        OnPropertyChanged(nameof(IsImminentPeril)); OnPropertyChanged(nameof(IsConditionMine)); OnPropertyChanged(nameof(ConditionInitiator));
+        OnPropertyChanged(nameof(IsFullDuplex)); OnPropertyChanged(nameof(Route));
         OnPropertyChanged(nameof(IsBroadcastRequest)); OnPropertyChanged(nameof(IsBroadcast)); OnPropertyChanged(nameof(IsBroadcastInitiator));
         OnPropertyChanged(nameof(RouteIsSpeaker)); OnPropertyChanged(nameof(StateText)); OnPropertyChanged(nameof(CanRequestFloor));
         if (value.State == CallState.Active && ConnectedAt is null) ConnectedAt = DateTime.Now;

@@ -71,6 +71,8 @@ data class ServiceProfile(
     val secMechanisms: List<String>, val maxPayloadSdsCplaneBytes: Int,
     /** UDP→TCP 승격 비활성(`sip.udpNoTcpSwitch`) — 엔진 전역(`EngineConfig.udpNoTcpSwitch`)이라 앱이 서비스들에서 골라 넣는다. */
     val udpNoTcpSwitch: Boolean = false,
+    /** 외부망 SMS/LMS 게이트웨이 연결(`capabilities.smsGateway`) — 관제 앱의 외부 번호 [문자] 활성 조건. */
+    val smsGateway: Boolean = false,
 ) {
     /** 이 서비스로 등록할 계정 설정 — 프로파일 값 그대로(loginPw 는 sipHa1 부재 시 평문 폴백). */
     fun toAccountConfig(loginPw: String = ""): AccountConfig = AccountConfig(
@@ -513,7 +515,7 @@ class CscClient(
                     akaK = s.akaK, akaOpc = s.akaOpc, akaAmf = s.akaAmf,
                     secMechanisms = s.secMechanisms.let { mv -> List(mv.size) { j -> mv[j] } },
                     maxPayloadSdsCplaneBytes = s.maxPayloadSdsCplaneBytes,
-                    udpNoTcpSwitch = s.udpNoTcpSwitch)
+                    udpNoTcpSwitch = s.udpNoTcpSwitch, smsGateway = s.smsGateway)
             }
             val d = p.dispatch
             val dispatch = DispatchProfile(

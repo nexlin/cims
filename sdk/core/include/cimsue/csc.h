@@ -46,6 +46,10 @@ struct ServiceProfile {
     /** UDP→TCP 승격 비활성(`sip.udpNoTcpSwitch`, RFC 3261 §18.1.1) — 통제된 망 전용 사이트 옵션. 엔진 전역 설정(EngineConfig.udpNoTcpSwitch)이라
      *  여러 서비스에 걸칠 때 무엇을 넣을지는 앱이 정한다. 구 서버 응답이면 false. */
     bool udpNoTcpSwitch = false;
+    /** 외부망 SMS/LMS 게이트웨이 연결(`capabilities.smsGateway` — IBCF→SMSC TS 24.341 또는 SMPP). 관제 앱의 외부 번호 [문자] 활성 조건.
+     *  등록 가입자 간 MESSAGE 는 이 값과 무관하다. 구 서버 응답이면 false. */
+    bool smsGateway = false;
+    /** 그룹 SDS 시그널링 평면 상한(`mcdata.maxPayloadSdsCplaneBytes`, TS 24.484) — toAccount 가 AccountConfig.maxSdsCplaneBytes 로 옮긴다. */
     int maxPayloadSdsCplaneBytes = 0;
     /** 이 서비스로 등록할 AccountConfig — 프로파일 값 그대로(loginPw 는 sipHa1 부재 시 평문 폴백). */
     CIMSUE_API AccountConfig toAccount(const std::string& loginPw = std::string()) const;
