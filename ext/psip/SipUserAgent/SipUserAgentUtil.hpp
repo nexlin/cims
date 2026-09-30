@@ -85,6 +85,33 @@ bool CSipUserAgent::GetRemotePayloadTypes( const char * pszCallId, const char * 
 	return bRes;
 }
 
+/**
+ * @ingroup SipUserAgent
+ * @brief SIP Call-ID 로 통화를 검색한 후, 원격 SDP 의 m=video rtpmap 에서 video 코덱(코덱 테이블 GetVideo,
+ *        H264/90000)의 wire payload type 을 조회한다 — CMP leg 별 영상 PT 재작성 파라미터(user_video_pt) 산출용.
+ * @param pszCallId    SIP Call-ID
+ * @param iPt          [out] video wire PT (-1 = 미발견 — m=video 없음·H.264 미제시)
+ * @returns 다이얼로그를 찾으면 true.
+ */
+bool CSipUserAgent::GetRemoteVideoPayloadType( const char * pszCallId, int & iPt )
+{
+	SIP_DIALOG_MAP::iterator		itMap;
+	bool	bRes = false;
+
+	iPt = -1;
+
+	m_clsDialogMutex.acquire();
+	itMap = m_clsDialogMap.find( pszCallId );
+	if( itMap != m_clsDialogMap.end() )
+	{
+		iPt = itMap->second.FindRemotePayloadType( CSipCodecTable::GetVideo().GetMatchPrefix().c_str(), "video" );
+		bRes = true;
+	}
+	m_clsDialogMutex.release();
+
+	return bRes;
+}
+
 // SIP Call-ID 로 통화를 검색한 후, 검색된 결과로 peer 아이디를 저장한다.
 bool CSipUserAgent::GetToId( const char * pszCallId, std::string & strToId )
 {

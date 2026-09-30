@@ -167,6 +167,11 @@ public:
     static void GetLegPt( const std::string &strCallId, bool bServerOffered, int &iUserPt, int &iUserSrcPt,
                           int &iUserTePt, int &iUserSrcTePt, std::string *pstrCodec = NULL );
 
+    /** leg 별 영상 PT(user_video_pt) — 이 leg 의 원격 SDP(개시자=offer, 수신자=answer)가 m=video 에 선언한
+     *  H.264 wire PT. 동적 PT 는 leg 마다 따로 협상되므로(RFC 3264 §5.1) CMP 가 화자 PT 를 이 값으로 스탬프한다.
+     *  미발견(영상 미협상)이면 0. */
+    static int GetLegVideoPt( const std::string &strCallId );
+
     /** 멤버 SDP(m=application)의 a=fmtp:MCPTT 협상 결과 파싱 (TS 24.380 §12.1.2.3) —
      *  mc_queueing/mc_priority=N/mc_granted → PTT_JOIN 의 queueing/max_priority/granted.
      *  fmtp:MCPTT 부재(레거시 단말·cspsim 구버전)면 clsFmtp 를 미전송 상태로 둔다

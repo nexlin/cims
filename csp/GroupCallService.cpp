@@ -675,6 +675,12 @@ void CGroupCallService::GetLegPt( const std::string &strCallId, bool bServerOffe
     if ( pstrCodec ) *pstrCodec = clsTop.GetMatchPrefix();
 }
 
+int CGroupCallService::GetLegVideoPt( const std::string &strCallId ) {
+    int iPt = -1;
+    gclsUserAgent.GetRemoteVideoPayloadType( strCallId.c_str(), iPt );
+    return iPt > 0 ? iPt : 0;
+}
+
 void CGroupCallService::ParseMcpttFmtp( CSipCallRtp *pclsRtp, McpttFmtp &clsFmtp ) {
     if ( pclsRtp == NULL ) return;
     for ( const auto &clsMedia : pclsRtp->m_clsMediaList ) {
@@ -1320,7 +1326,8 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
                                              iCallerVideo, GetOrIssueGroupSesId( pszGroupId ), strCallerRole, NULL,
                                              NULL, iCallerNat, strCallerGuardIp, iCallerPt, iCallerSrcPt, iCallerTePt,
                                              iCallerSrcTePt, strCallerCodec, clsCallerFmtp,
-                                             clsCallerCrypto.bEnabled ? &clsCallerCrypto : NULL, bListen ? 1 : 0, 0 );
+                                             clsCallerCrypto.bEnabled ? &clsCallerCrypto : NULL, bListen ? 1 : 0, 0,
+                                             GetLegVideoPt( pszCallId ) );
                     CLog::Print( LOG_INFO, "ProcessGroupCall: Caller(%s) joined CMP group audio=%d floor=%d role=%s%s",
                                  pszCallerInfo, iCallerAudio, iCallerFloor, strCallerRole.c_str(),
                                  bListen ? ( bListenHidden ? " [listen hidden]" : " [listen visible]" ) : "" );
@@ -2546,6 +2553,7 @@ void CGroupCallService::OnCallStarted( const std::string &strCallId, const std::
     int iMemberPt = 0, iMemberSrcPt = 0, iMemberTePt = 0, iMemberSrcTePt = 0;
     std::string strMemberCodec;
     GetLegPt( strCallId, true, iMemberPt, iMemberSrcPt, iMemberTePt, iMemberSrcTePt, &strMemberCodec );
+    const int iMemberVideoPt = iVideoPort > 0 ? GetLegVideoPt( strCallId ) : 0;
     // 멤버 answer 의 fmtp:MCPTT 협상 결과 (queueing/max_priority). 초기 발언권은 주지 않는다 — 암묵적 발언 요청은
     // 클라이언트가
     //   낸 SIP 요청(개시 INVITE)만 뜻한다(TS 24.380 §14.2.5). 서버 offer 에 대한 멤버 answer 의 mc_granted 는 요청이
@@ -2582,7 +2590,7 @@ void CGroupCallService::OnCallStarted( const std::string &strCallId, const std::
     bool bJoined = gclsCmpClient.JoinGroup(
         strGroupId, strSessionId, strRemoteIp, iRemotePort, iFloorPort, iVideoPort, GetOrIssueGroupSesId( strGroupId ),
         strRole, &iJoinLocalAudio, &iJoinLocalVideo, iMemberNat, strMemberGuardIp, iMemberPt, iMemberSrcPt, iMemberTePt,
-        iMemberSrcTePt, strMemberCodec, clsMemberFmtp, pclsMemberCrypto );
+        iMemberSrcTePt, strMemberCodec, clsMemberFmtp, pclsMemberCrypto, 0, 0, iMemberVideoPt );
     // 방어: JOIN 응답의 멤버 포트가 offer 에 쓴 캐시와 다르면(유닛 재배정) 캐시를 교정한다.
     //   이 호 자체는 이미 옛 포트로 SDP 를 받아 상향이 성립하지 않으므로 발생 = 버그 신호(ERROR).
     //   정상 경로에서는 LeaveGroup 시 InvalidateMemberPort 로 캐시가 비워져 여기 오지 않는다.
@@ -2633,7 +2641,8 @@ void CGroupCallService::OnCallStarted( const std::string &strCallId, const std::
             bJoined = gclsCmpClient.JoinGroup( strGroupId, strSessionId, strRemoteIp, iRemotePort, iFloorPort,
                                                iVideoPort, GetOrIssueGroupSesId( strGroupId ), strRole, NULL, NULL,
                                                iMemberNat, strMemberGuardIp, iMemberPt, iMemberSrcPt, iMemberTePt,
-                                               iMemberSrcTePt, strMemberCodec, clsMemberFmtp, pclsMemberCrypto );
+                                               iMemberSrcTePt, strMemberCodec, clsMemberFmtp, pclsMemberCrypto, 0, 0,
+                                               iMemberVideoPt );
         }
     }
     if ( bJoined ) {

@@ -7,7 +7,8 @@
 //   cimsue-cli [계정 옵션] register [--hold S]
 //   cimsue-cli [계정 옵션] call <번호|sip:URI> [--duration S] [--video]
 //   cimsue-cli [계정 옵션] answer [--duration S] [--transfer-to X --transfer-after S]
-//   cimsue-cli [계정 옵션] group-call <groupId> [--duration S] [--ptt-at S --ptt-len S] [--listen-only] [--emergency] [--broadcast] [--implicit]
+//   cimsue-cli [계정 옵션] group-call <groupId> [--duration S] [--ptt-at S --ptt-len S] [--listen-only] [--emergency] [--broadcast] [--implicit] [--video]
+//              (--video = 그룹 영상 m=video 제안 — 발언권을 가진 동안만 송출. 착신 그룹 영상 수락은 계정 옵션 --mcptt-video. 영상 없는 빌드면 port 0)
 //              (--broadcast = 일제 통화 개시 — 발언을 놓은 뒤 서버 Floor Idle(B-bit)이면 코어가 호를 해제, outcome 에 broadcast_released)
 //              (--implicit = 개시 INVITE 가 암묵적 발언 요청 — mc_implicit_request+mc_granted, TS 24.380 §14.2.4·§14.2.5. --ptt-at 0 과 함께)
 //              [--upgrade-at S] [--cancel-at S]  (진행 중 긴급 상향·하향 re-INVITE, TS 24.379 §10.1.1.2.1.3·§10.1.1.2.1.4 — outcome 에 conditions)
@@ -117,9 +118,10 @@ void usage() {
         "        [--tls-ca FILE] [--no-tls-verify] [--display-name N] [--log-level N] [--timeout S] [--json]\n"
         "        [--cplane-max N] [--msrp]   (MCData media plane — 큰 그룹 SDS 발신·서버발 배포 수신)\n"
         "        [--mcptt-psi URI]   (참여 기능 PSI — 긴급 경보 Request-URI, TS 24.379 §12.1.1.1 8))\n"
+        "        [--mcptt-video]   (착신 그룹콜의 m=video 를 영상까지 수락)\n"
         "        또는 --csc-host H [--csc-port N] --user U --pw P [--csc-ca FILE] --from-profile volte|ptt\n"
         "  register [--hold S] | call TARGET [--duration S] [--video] | answer [--duration S] [--transfer-to X]\n"
-        "  group-call GROUP [--duration S] [--ptt-at S --ptt-len S] [--listen-only] [--emergency] [--broadcast] [--implicit]\n"
+        "  group-call GROUP [--duration S] [--ptt-at S --ptt-len S] [--listen-only] [--emergency] [--broadcast] [--implicit] [--video]\n"
         "             [--upgrade-at S] [--cancel-at S]\n"
         "  alert GROUP [--cancel] [--originated-by ID] [--cancel-group-emergency]\n"
         "  sds GROUP TEXT | sds-recv [--duration S] | login\n"
@@ -196,6 +198,7 @@ bool parse(int argc, char** argv, Opts& o) {
         else if (a == "--implicit") o.implicit = true;
         else if (a == "--cancel") o.alertCancel = true;
         else if (a == "--msrp") o.acc.mcdataMsrp = true;
+        else if (a == "--mcptt-video") o.acc.mcpttVideo = true;
         else if (a == "--cancel-group-emergency") o.cancelGroupEmergency = true;
         else if (a == "-h" || a == "--help") return false;
         else if (a.rfind("--", 0) == 0) { std::fprintf(stderr, "unknown arg: %s\n", a.c_str()); return false; }
@@ -648,6 +651,7 @@ int main(int argc, char** argv) {
         if (o.acc.mediaSecurity != MediaSecurity::Off) a.mediaSecurity = o.acc.mediaSecurity;
         if (o.acc.maxSdsCplaneBytes > 0) a.maxSdsCplaneBytes = o.acc.maxSdsCplaneBytes;
         a.mcdataMsrp = o.acc.mcdataMsrp;
+        a.mcpttVideo = o.acc.mcpttVideo;
         o.acc = a;
         std::fprintf(stderr, "[cimsue-cli] provisioned %s: %s via %s:%d/%s ha1=%d dispatch=%s\n", sp->kind.c_str(), a.aor().c_str(),
                      a.serverHost.c_str(), a.serverPort, toString(a.transport), !a.ha1.empty(), prof.dispatch.groupId.c_str());
@@ -793,6 +797,7 @@ int main(int argc, char** argv) {
     if (o.cmd == "group-call") {
         GroupCallOptions go; go.listenOnly = o.listenOnly; go.emergency = o.emergency; go.broadcast = o.broadcast;
         go.implicitFloorRequest = o.implicit;             // --ptt-at 의 floorRequest 는 이미 요청 중이라 무시된다
+        go.video = o.video;                               // 그룹 영상 제안 — 송출은 발언권을 따른다
         s.callId = eng.joinGroupCall(acc, o.target, go);
         if (s.callId < 0) { s.outcome = "invite_failed"; rc = 4; return finish(-1); }
         bool up = waitActive(ls, s.callId, o.timeoutSec);

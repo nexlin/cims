@@ -113,8 +113,14 @@ private:
     Clock::time_point micOpenAt_{};               // 승인 뒤 지연 개방 예정(setMicOpenDelay)
     int releaseRetxLeft_ = 0;
     std::string releaseRetxPkt_;
+    int ackStartLeft_ = 0;                        // 시작 Ack 연속 송신 남은 횟수(kAckStartCount)
 
     static constexpr int kAckPeriodSec = 15;      // NAT UDP 매핑 유지 요건 ≤20s
+    // 시작 Ack 연속 — 목적지는 착신 offer(180 전)로 알지만 서버(CMP)는 200 OK 뒤 PTT_JOIN 에서야 멤버를 받고, NAT 멤버의 floor
+    //   목적지를 그 멤버가 보낸 패킷으로 latch 한다. 첫 Ack 가 JOIN 보다 먼저 닿으면 버려져 다음 주기(15 s)까지 Floor Taken·Idle 이
+    //   닿지 않는다(영상 협상으로 200 OK 가 늦어지면 재현) — pjmedia 시작 keep-alive(PJMEDIA_STREAM_START_KA_CNT)와 같은 규칙.
+    static constexpr int kAckStartCount = 2;
+    static constexpr int kAckStartIntervalMs = 1000;
     static constexpr int kRequestTimeoutMs = 3000;
     static constexpr int kReleaseRetxMs = 800;
     static constexpr int kReleaseRetxMax = 2;

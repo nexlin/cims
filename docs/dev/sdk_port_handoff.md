@@ -167,6 +167,10 @@ C API·.NET = Windows 개발 환경**.
 - **엔진 재빌드** — `common.h` 의 `PJSIP_MAX_PKT_LEN 65535`(세 플랫폼 공통 결정).
 - **C API·.NET 미노출** — `GroupMember.title`(`cims:user-title`, 읽기 전용) · `sendGroupSds`/`sendSds` 의 `msgId`(hex32, 비우면 코어가 만든다).
 - **코어 동작 변화(자동 적용)** — 조건 판정이 그 re-INVITE 의 트랜잭션만 본다(§4) · 영상 창 결선은 렌더러가 없으면 건너뛴다(§1.3).
+- **PTT 그룹 영상(ue_sdk.md §4.5)** — `GroupCallOptions.video` · `AccountConfig.mcpttVideo` · `CallInfo.videoSend` · `Engine::setVideoSend` 는
+  C API·.NET 미노출이다(영상 API `setVideoWindow`·`switchCamera` 와 함께 F3 에서 — 지금 C 구조체에 붙이면 .NET 구조체 1:1 이 깨진다).
+  Windows 엔진은 `PJMEDIA_HAS_VIDEO 0` 이라 코어 영상 경로가 컴파일에서 빠진다. `CallInfo.video` 는 미디어 성립 뒤 협상 결과로 바뀐다
+  (착신 대기 중 = offer 의 m=video — 기존 표시 그대로). pjproject 에 CIMS 패치 `PJSUA_CALL_VID_STRM_SEND_KEEPALIVE`(enum 끝)가 더해졌다.
 
 ### 5.2 참여 채널 자동 복원 — 진행 중 세션에만
 

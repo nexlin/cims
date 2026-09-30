@@ -891,7 +891,7 @@ bool CCmpClient::JoinGroup( const std::string &strGroupId, const std::string &st
                             int *piLocalVideoPort, int iUserNat, const std::string &strUserSigIp, int iUserPt,
                             int iUserSrcPt, int iUserTePt, int iUserSrcTePt, const std::string &strUserCodec,
                             const McpttFmtp &clsFmtp, const CmpMediaCrypto *pclsCrypto, int iRecvOnly,
-                            int iFloorSuppress ) {
+                            int iFloorSuppress, int iUserVideoPt ) {
     SimpleJson::JsonNode req;
     req.Set( "cmd", "PTT_JOIN" );
     req.Set( "group_id", strGroupId );
@@ -907,6 +907,8 @@ bool CCmpClient::JoinGroup( const std::string &strGroupId, const std::string &st
         req.Set( "user_port", iUserPort );
         if ( iFloorPort > 0 ) req.Set( "user_floor_port", iFloorPort );
         if ( iVideoPort > 0 ) req.Set( "user_video_port", iVideoPort );
+        // 영상 egress PT — 동적 PT 는 leg 마다 다르다(개시자 = 자기 offer 의 H.264 PT, 멤버 = 서버 offer 97 의 echo).
+        if ( iVideoPort > 0 && iUserVideoPt > 0 ) req.Set( "user_video_pt", iUserVideoPt );
         req.Set( "role", strRole.empty() ? "participant" : strRole );
         if ( iUserNat ) {
             req.Set( "user_nat", 1 );

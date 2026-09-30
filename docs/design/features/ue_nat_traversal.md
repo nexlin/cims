@@ -202,7 +202,7 @@ PTT 단말은 **세 소켓 모두**에 대해 유입 매핑을 열고 유지해�
 | 소켓 | UE 동작 | 주기 | 미이행 시 증상 |
 |---|---|---|---|
 | SIP | 재등록 또는 서버 OPTIONS 응답 | ≤25s (UDP) | 인바운드 INVITE 미도달 |
-| floor (m=application) | **Floor Ack (User ID 포함)** — 참여 직후 1회 + 주기 송신 (`FloorClient` 내장, 15s) | ≤20s | 청취 중 GRANT/TAKEN/IDLE 미수신 (음성은 들리나 발언자 표시·발언권 응답 없음) |
+| floor (m=application) | **Floor Ack (User ID 포함)** — 참여 직후 1회 + 1 s 간격 2회 + 주기 송신 (코어 floor participant, 15s). 착신은 목적지를 offer(180 전)로 알지만 서버는 200 OK 뒤 JOIN 에서야 멤버를 받아 첫 Ack 가 버려질 수 있다(영상 협상으로 200 OK 가 늦으면 재현) | ≤20s | 청취 중 GRANT/TAKEN/IDLE 미수신 (음성은 들리나 발언자 표시·발언권 응답 없음) |
 | audio RTP (멤버 유닛) | **RTP keepalive** (`PJMEDIA_STREAM_ENABLE_KA=1`, empty RTP) | 5s (pjsip 기본) | 청취 전용 상태에서 하향 오디오 전무 |
 
 Floor Ack 를 keepalive 로 쓰는 것은 TS 24.380 이 규정한 절차는 아니다 — 규격은 floor 평면의

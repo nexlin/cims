@@ -2258,6 +2258,31 @@ PJ_DEF(pj_status_t) pjmedia_vid_stream_send_keyframe(
 
 
 /*
+ * CIMS: send keep-alive packet now (receive-only participant NAT refresh).
+ */
+PJ_DEF(pj_status_t) pjmedia_vid_stream_send_keep_alive(
+                                                pjmedia_vid_stream *stream)
+{
+    PJ_ASSERT_RETURN(stream, PJ_EINVAL);
+
+#if defined(PJMEDIA_STREAM_ENABLE_KA) && PJMEDIA_STREAM_ENABLE_KA != 0
+    {
+        pjmedia_stream_common *c_strm = &stream->base;
+
+        if (!c_strm->use_ka)
+            return PJ_ENOTSUP;
+
+        send_keep_alive_packet(c_strm);
+        pj_gettimeofday(&c_strm->last_frm_ts_sent);
+        return PJ_SUCCESS;
+    }
+#else
+    return PJ_ENOTSUP;
+#endif
+}
+
+
+/*
  * Send RTCP SDES.
  */
 PJ_DEF(pj_status_t) pjmedia_vid_stream_send_rtcp_sdes(

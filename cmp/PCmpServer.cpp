@@ -2139,13 +2139,15 @@ void PCmpServer::processJoinGroup(const SimpleJson::JsonNode& payload, const std
             int userSrcPt   = (int)payload.GetInt("user_src_pt", 0);
             int userTePt    = (int)payload.GetInt("user_te_pt", 0);
             int userSrcTePt = (int)payload.GetInt("user_src_te_pt", 0);
+            //   user_video_pt: 이 leg 가 수신 선언한 영상 PT(egress 스탬프) — 영상 ingress 는 PT 로 분류하지 않는다.
+            int userVideoPt = (int)payload.GetInt("user_video_pt", 0);
             std::string userCodec = payload.GetString("user_codec");
             // ambient listening 청취 leg (cmp_media_api.md §7.3) — 상향 미중계/floor 은닉.
             int recvOnly      = (int)payload.GetInt("recv_only", 0);
             int floorSuppress = (int)payload.GetInt("floor_suppress", 0);
             group->addMember(sessionId, userIp, userPort, userFloorPort, userVideoPort, role, mu,
                              userNat != 0, userSigIp, userPt, userSrcPt, userTePt, userSrcTePt, userCodec,
-                             recvOnly != 0, floorSuppress != 0);
+                             recvOnly != 0, floorSuppress != 0, userVideoPt);
             // condition tier(emergency/imminent) 동반 시 반영 (CSP 가 긴급 멤버 join 시 전달)
             std::string tierStr = payload.GetString("tier");
             if (!tierStr.empty()) group->setTier(sessionId, ParseFloorTier(tierStr));

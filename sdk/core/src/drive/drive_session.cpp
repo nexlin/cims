@@ -235,6 +235,7 @@ struct DriveSession::Impl : public Listener {
         else if (op == "group_call") {
             GroupCallOptions go; go.listenOnly = has("listen"); go.emergency = has("emergency"); go.broadcast = has("broadcast");
             go.implicitFloorRequest = has("implicit");                   // 암묵적 발언 요청(TS 24.380 §14.2.5)
+            go.video = has("video");                                     // 그룹 영상 제안(송출은 발언권을 따른다)
             int id = eng.joinGroupCall(acc, arg(1), go);
             if (id >= 0) markDial(id);
             result(op, id >= 0, id, 0, id >= 0 ? "" : "group call refused");

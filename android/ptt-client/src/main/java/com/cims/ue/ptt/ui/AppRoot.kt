@@ -66,6 +66,8 @@ class PttUiState(
     val hasAccount: Boolean,
     /** 활성 긴급경보(수신+내 발신) — 통화와 별개인 위험 통지. */
     val alerts: List<com.cims.ue.ptt.ActiveAlert> = emptyList(),
+    /** 내 영상 보내기(영상 칸 토글) — 영상 그룹에서 발언하는 동안 카메라를 보낸다. */
+    val videoSend: Boolean = true,
 ) {
     val primary: GroupCallState? get() = sessions.firstOrNull { it.role == com.cims.ue.ptt.ChannelRole.PRIMARY }
     val inCall: Boolean get() = sessions.any { it.active || it.callId >= 0 }
@@ -101,6 +103,7 @@ fun AppRoot(svc: PttService?, onStopSip: () -> Unit) {
     val fbSpkGain = remember { MutableStateFlow(com.cims.ue.ptt.audio.AudioRoutePrefs.DEFAULT_SPK_GAIN) }
     val fbMicGain = remember { MutableStateFlow(com.cims.ue.ptt.audio.AudioRoutePrefs.DEFAULT_MIC_GAIN) }
     val fbAlerts = remember { MutableStateFlow<List<com.cims.ue.ptt.ActiveAlert>>(emptyList()) }
+    val fbVideoSend = remember { MutableStateFlow(true) }
 
     val st = PttUiState(
         ctl = ctl,
@@ -121,6 +124,7 @@ fun AppRoot(svc: PttService?, onStopSip: () -> Unit) {
         micGain = (ctl?.micGain ?: fbMicGain).collectAsState().value,
         hasAccount = remember(ctl) { com.cims.ue.core.account.SsoProvisioner.hasAccount(context) },
         alerts = (ctl?.alerts ?: fbAlerts).collectAsState().value,
+        videoSend = (ctl?.videoSend ?: fbVideoSend).collectAsState().value,
     )
 
     // SSO: 컨트롤러 연결 시 CIMS 공유 계정의 MCPTT(TS 33.180) 토큰을 주입(별도 로그인 없음).
@@ -146,10 +150,12 @@ fun AppRoot(svc: PttService?, onStopSip: () -> Unit) {
     var showKeyConfig by remember { mutableStateOf(false) }
 
     LaunchedEffect(nav) {
-        if (nav is Nav.Home && ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO)
-            != PackageManager.PERMISSION_GRANTED) {
+        // 카메라 = 영상 그룹 발언 중 내 영상(영상 칸 토글) — 마이크를 이미 받은 설치본도 카메라가 없으면 묻는다
+        fun missing(p: String) = ContextCompat.checkSelfPermission(context, p) != PackageManager.PERMISSION_GRANTED
+        if (nav is Nav.Home && (missing(Manifest.permission.RECORD_AUDIO) || missing(Manifest.permission.CAMERA))) {
             perm.launch(buildList {
                 add(Manifest.permission.RECORD_AUDIO)
+                add(Manifest.permission.CAMERA)
                 if (Build.VERSION.SDK_INT >= 33) add(Manifest.permission.POST_NOTIFICATIONS)
             }.toTypedArray())
         } else if (nav is Nav.Home) {
@@ -237,6 +243,19 @@ fun AppRoot(svc: PttService?, onStopSip: () -> Unit) {
         // 애드혹(즉석 그룹) 통화 화면 — 임시 그룹 세션이 있는 동안 전면 오버레이
         st.sessions.firstOrNull { com.cims.ue.ptt.PttController.isAdhocId(it.groupId) }
             ?.let { AdhocCallOverlay(st, it) }
+
+        // 영상 전체화면 — 주채널 영상 세션(서버 video_enabled 그룹). 영상은 주채널 탭에서만 본다 — 다른 탭·화면에서는 띄우지 않고,
+        //   주채널 탭으로 오면 뜬다. 세션이 생기면 켜고, [작게 보기]로 끈 호는 다시 켜지 않는다.
+        val videoSession = st.primary?.takeIf {
+            it.video && it.callId >= 0 && !it.privatePeer && !com.cims.ue.ptt.PttController.isAdhocId(it.groupId)
+        }
+        LaunchedEffect(videoSession?.callId) {
+            if (videoSession == null) VideoView.minimizedCall = -1
+            VideoView.full.value = videoSession != null && videoSession.callId != VideoView.minimizedCall
+        }
+        val videoFull by VideoView.full.collectAsState()
+        val onMainTab = (nav as? Nav.Home)?.tab == Tab.MAIN
+        if (videoSession != null && videoFull && onMainTab) VideoCallOverlay(st, videoSession)
 
         // 하드웨어 버튼 설정 오버레이 — 같은 Activity 윈도우(물리 키가 dispatchKeyEvent 로 유입되게)
         if (showKeyConfig) KeyConfigOverlay(onDismiss = { HwPtt.cancelLearn(); showKeyConfig = false })

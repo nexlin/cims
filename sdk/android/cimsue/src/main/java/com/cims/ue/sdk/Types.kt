@@ -172,6 +172,8 @@ data class AccountConfig(
     val maxSdsCplaneBytes: Int = 0,
     /** 서버발 MSRP 배포 수신 — REGISTER Contact 에 ICSI mcdata.sds 를 싣는다(코어가 contactParams 에 합친다). 끄면 서버가 FILEURL 로 폴백. */
     val mcdataMsrp: Boolean = false,
+    /** MCPTT 그룹 영상 — 자동 수락하는 착신 INVITE 의 m=video(video_enabled 그룹)를 영상까지 받는다. 끄면 음성만. */
+    val mcpttVideo: Boolean = false,
 ) {
     internal fun toJni(): JniAccountConfig = JniAccountConfig().also {
         it.serverHost = serverHost; it.serverPort = serverPort
@@ -188,6 +190,7 @@ data class AccountConfig(
         it.mcpttClientId = mcpttClientId
         it.rpEmergency = rpEmergency; it.rpImminentPeril = rpImminentPeril; it.rpNormal = rpNormal
         it.maxSdsCplaneBytes = maxSdsCplaneBytes; it.mcdataMsrp = mcdataMsrp
+        it.mcpttVideo = mcpttVideo
     }
 }
 
@@ -210,11 +213,13 @@ data class GroupCallOptions(
     val broadcast: Boolean = false,
     /** 암묵적 발언 요청(TS 24.380 §14.2.5 mc_implicit_request + §14.2.4 mc_granted) — 개시 INVITE 가 발언 요청을 싣는다. */
     val implicitFloorRequest: Boolean = false,
+    /** 그룹 영상 제안(m=video) — 서버 그룹이 영상이 아니면 거절(port 0). 내 영상은 발언권을 가진 동안만 나간다([Call.setVideoSend]). */
+    val video: Boolean = false,
 ) {
     internal fun toJni(): JniGroupCallOptions = JniGroupCallOptions().also {
         it.emergency = emergency; it.imminentPeril = imminentPeril
         it.listenOnly = listenOnly; it.fullDuplex = fullDuplex; it.broadcast = broadcast
-        it.implicitFloorRequest = implicitFloorRequest
+        it.implicitFloorRequest = implicitFloorRequest; it.video = video
         it.members = StringVector().apply { members.forEach { m -> add(m) } }
     }
 }
@@ -266,6 +271,8 @@ data class CallInfo(
     val condition: McpttCondition = McpttCondition(),
     /** 이 호에서 듣는 크기(setRxLevel) — 코어가 기억해 재결선마다 다시 건다. */
     val rxLevel: Float = 1f,
+    /** 내 영상 송출 허용([Call.setVideoSend]) — MCPTT 반이중은 허용이면서 발언권을 가진 동안만 보낸다. [video] 는 협상된 영상 활성. */
+    val videoSend: Boolean = true,
 ) {
     val active: Boolean get() = state == CallState.ACTIVE
     val ended: Boolean get() = state == CallState.DISCONNECTED
@@ -275,7 +282,7 @@ data class CallInfo(
             c.remoteUri, c.calledParty, c.video, c.mediaActive, c.muted, c.listen,
             c.playbackRoute, c.lastCode, c.lastReason, MediaSource.list(c.sources),
             c.isMcptt, c.groupId, McpttInfo.of(c.mcptt), c.halfDuplex, c.listenOnly, c.joinedDialog,
-            McpttCondition.of(c.condition), c.rxLevel)
+            McpttCondition.of(c.condition), c.rxLevel, c.videoSend)
     }
 }
 

@@ -55,7 +55,9 @@ internal class GroupPlane(private val c: PttController) {
         }
         c.ctl.launch {
             val acc = c.account
-            val r = acc?.joinGroupCall(groupId, GroupCallOptions(emergency = emergency, broadcast = broadcast, members = members))
+            // 영상 제안 — 서버 그룹이 영상(video_enabled)이 아니면 port 0 으로 거절돼 음성만 남는다
+            val r = acc?.joinGroupCall(groupId, GroupCallOptions(emergency = emergency, broadcast = broadcast, members = members,
+                                                                  video = true))
             if (r != null && r.ok) { c.bindCall(groupId, r.value!!.id); return@launch }
             Log.w(TAG, "joinGroupCall $groupId 실패: ${r?.code} ${r?.reason ?: "not registered"}")
             synchronized(c.lock) { if (c.sessionMap[groupId] === s) c.sessionMap.remove(groupId) }

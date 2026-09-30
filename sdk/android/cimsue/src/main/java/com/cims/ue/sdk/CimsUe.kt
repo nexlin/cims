@@ -612,6 +612,10 @@ class Call internal constructor(private val ue: CimsUe, val id: Int, private val
     /** 캡처 카메라 전환(전면↔후면) — 이후 호의 기본 카메라로도 쓴다. */
     suspend fun switchCamera(): CimsResult<Unit> = cmd { CimsResult.of(ue.jni.switchCamera(id)) }
 
+    /** 내 영상 송출 허용 — MCPTT 반이중은 허용이면서 발언권을 가진 동안만 보내고(승인 = 송출 시작·키프레임, 놓음 = 정지·카메라 닫힘),
+     *  그 밖의 호는 곧바로 시작·정지한다. 재협상 없음. */
+    suspend fun setVideoSend(on: Boolean): CimsResult<Unit> = cmd { CimsResult.of(ue.jni.setVideoSend(id, on)) }
+
     /** 수신 음성을 재생할 라우트(0=기본). 활성 호면 즉시 재결선. */
     suspend fun setRoute(routeId: Int): CimsResult<Unit> = cmd { CimsResult.of(ue.jni.setCallRoute(id, routeId)) }
 

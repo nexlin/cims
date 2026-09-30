@@ -36,7 +36,10 @@ void Participant::setRemote(const std::string& ip, int port) {
     std::lock_guard<std::mutex> lk(m_);
     remoteIp_ = ip;
     remotePort_ = port;
-    if (nextAck_ == Clock::time_point{}) nextAck_ = Clock::now();   // 즉시 1회 + 주기
+    if (nextAck_ == Clock::time_point{}) {                          // 즉시 1회 + 시작 연속 + 주기
+        nextAck_ = Clock::now();
+        ackStartLeft_ = kAckStartCount;
+    }
     if (cb_.log) cb_.log(3, "floor remote " + ip + ":" + std::to_string(port) + " (call " + std::to_string(callId_) + ")");
 }
 
@@ -253,7 +256,12 @@ void Participant::tick() {
         auto now = Clock::now();
         if (nextAck_ != Clock::time_point{} && now >= nextAck_ && remotePort_ > 0) {
             send(ack(ssrc_, userId_));                                    // NAT keepalive(≤20s)
-            nextAck_ = now + std::chrono::seconds(kAckPeriodSec);
+            if (ackStartLeft_ > 0) {
+                --ackStartLeft_;
+                nextAck_ = now + std::chrono::milliseconds(kAckStartIntervalMs);
+            } else {
+                nextAck_ = now + std::chrono::seconds(kAckPeriodSec);
+            }
         }
         if (micOpenAt_ != Clock::time_point{} && now >= micOpenAt_) {    // 승인 톤 뒤 마이크 개방
             micOpenAt_ = {};

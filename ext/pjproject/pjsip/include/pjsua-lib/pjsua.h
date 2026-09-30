@@ -5846,7 +5846,17 @@ typedef enum pjsua_call_vid_strm_op
      * generate and send video keyframe as soon as possible. No
      * re-INVITE/UPDATE is to be transmitted to remote with this operation.
      */
-    PJSUA_CALL_VID_STRM_SEND_KEYFRAME
+    PJSUA_CALL_VID_STRM_SEND_KEYFRAME,
+
+    /**
+     * CIMS: send one keep-alive packet (empty RTP, PJMEDIA_STREAM_ENABLE_KA)
+     * on the video stream's transport. The stream's own keep-alive runs in
+     * the encoding path, which does not run while transmission is stopped
+     * (STOP_TRANSMIT, or never started) — a receive-only participant behind
+     * NAT then never refreshes its mapping. Application calls this
+     * periodically for such streams. No re-INVITE/UPDATE is transmitted.
+     */
+    PJSUA_CALL_VID_STRM_SEND_KEEPALIVE
 
 } pjsua_call_vid_strm_op;
 

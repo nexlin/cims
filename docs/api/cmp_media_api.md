@@ -581,6 +581,7 @@ RELAY_REMOVE 와 동일 규칙).
 | `user_nat` | - | 1 이면 NAT 뒤 멤버 — 멤버 전용 포트에 목적지 latch 허용 (생략=0) |
 | `user_sig_ip` | - | 멤버의 SIP 시그널링 실소스 IP — latch IP guard 기준 |
 | `user_pt` / `user_te_pt` | - | 이 멤버가 **수신** 선언한 audio/telephone-event wire PT(멤버 자신의 SDP — 개시자=offer, 수신자=answer) — CMP 가 fan-out 으로 이 멤버에 송신 시 스탬프(leg 별 PT 재작성). 생략=0=재작성 없음(현행 PT-blind: 전 leg 와이어 PT 통일 전제) |
+| `user_video_pt` | - | 이 멤버가 **수신** 선언한 영상(H.264) wire PT(멤버 자신의 SDP m=video — 개시자=offer, 수신자=answer) — CMP 가 영상을 이 멤버에 송신 시 스탬프. `user_video_port` 와 함께만 싣는다. 생략=0=재작성 없음. 영상 ingress 는 PT 로 분류하지 않는다(PT 하나) |
 | `user_src_pt` / `user_src_te_pt` | - | 이 멤버가 **송신**에 쓰는 audio/TE PT(= CSP 가 그 leg 쪽에 낸 SDP 의 PT, RFC 3264) — 화자 ingress 의 audio/TE 분류 기준 + 녹취 세그먼트 메타(`audio_pt`, 화자 leg). `user_src_te_pt` 생략 시 TE 는 관례 PT 101 로 분류(DTMF push/release 판독도 동일 기준) |
 | `user_codec` | - | 이 멤버의 협상 오디오 코덱 문자열(예 `"AMR-WB/16000"`) — 녹취 세그먼트 메타(`audio_codec`)용. CSP 는 코덱 테이블 top 의 rtpmap prefix 를 싣는다 |
 | `role` | - | `chair`/`participant` (기본 participant) |
@@ -614,6 +615,9 @@ audio/TE 로 분류한 뒤, 각 수신 leg 의 `user_pt`/`user_te_pt` 를 스탬
 TE 인데 수신 leg `user_te_pt` 미지정이면 원본 PT 를 유지한다(audio PT 로 뭉개면 DTMF
 파손). 녹취는 화자 원본 PT 로 기록된다(egress 재작성 전 탭). PT 파라미터는 주소 불변
 재-JOIN(재협상)에서도 항상 최신 선언으로 갱신된다.
+영상도 같은 자리에서 수신 leg 의 `user_video_pt` 를 스탬프한다(marker bit = H.264 프레임 끝 표식 보존, RFC 6184 §5.1).
+동적 PT 는 leg 마다 따로 협상되고(RFC 3264 §5.1) 단말 코덱 구현마다 H.264 PT 가 달라(pjmedia OpenH264 97·Android MediaCodec 99)
+개시자 offer echo 와 서버 fan-out offer(97)가 어긋나기 때문이다.
 
 ### 7.5 PTT_LEAVE — 멤버 이탈
 

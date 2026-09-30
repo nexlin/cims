@@ -192,11 +192,11 @@ PMcpttGroup::~PMcpttGroup() {
 void PMcpttGroup::addMember(const std::string& sessionId, const std::string& ip, int port, int floorPort, int videoPort,
                             const std::string& role, PPttMemberPort* unit, bool nat, const std::string& sigIp,
                             int ptOut, int srcPt, int tePtOut, int srcTePt, const std::string& codec,
-                            bool recvOnly, bool floorSuppress) {
-    if (ptOut || srcPt || tePtOut || srcTePt)
-        LOG_INFO("PMcpttGroup", "[%s] addMember session=%s ip=%s rtp=%d floor=%d video=%d role=%s nat=%d pt=%d/%d te=%d/%d",
+                            bool recvOnly, bool floorSuppress, int videoPtOut) {
+    if (ptOut || srcPt || tePtOut || srcTePt || videoPtOut)
+        LOG_INFO("PMcpttGroup", "[%s] addMember session=%s ip=%s rtp=%d floor=%d video=%d role=%s nat=%d pt=%d/%d te=%d/%d vpt=%d",
                  _groupId.c_str(), sessionId.c_str(), ip.c_str(), port, floorPort, videoPort, role.c_str(),
-                 nat ? 1 : 0, ptOut, srcPt, tePtOut, srcTePt);
+                 nat ? 1 : 0, ptOut, srcPt, tePtOut, srcTePt, videoPtOut);
     else
         LOG_INFO("PMcpttGroup", "[%s] addMember session=%s ip=%s rtp=%d floor=%d video=%d role=%s nat=%d", _groupId.c_str(), sessionId.c_str(), ip.c_str(), port, floorPort, videoPort, role.c_str(), nat ? 1 : 0);
     // NAT 멤버인데 guard IP(user_sig_ip)가 비면 latch IP guard(_acceptNatRtp)가 이 멤버에
@@ -220,6 +220,7 @@ void PMcpttGroup::addMember(const std::string& sessionId, const std::string& ip,
         peer.srcPt = srcPt;
         peer.tePtOut = tePtOut;
         peer.srcTePt = srcTePt;
+        peer.videoPtOut = videoPtOut;
         if (!codec.empty()) peer.codec = codec;
         peer.declIp = ip;
         peer.declPort = port;
@@ -262,6 +263,7 @@ void PMcpttGroup::addMember(const std::string& sessionId, const std::string& ip,
     peer.srcPt = srcPt;
     peer.tePtOut = tePtOut;
     peer.srcTePt = srcTePt;
+    peer.videoPtOut = videoPtOut;
     peer.codec = codec;
     // SSRC 배정 공간 분리 — 한 카운터의 근접 오프셋(+1000/+2000)이면 누적 발행 시
     //   멤버 ssrc 와 송출 SSRC 범위가 겹치므로 상위 비트로 격리한다.
@@ -2095,6 +2097,9 @@ void PMcpttGroup::sendVideoToAll(const char* data, int len, const std::string& e
         memcpy(pkt + 2, &netSeq, 2);
         uint32_t netSsrc = htonl(_egressSsrc(peer.ssrc, slot, true));
         memcpy(pkt + 8, &netSsrc, 4);
+        // egress PT 스탬프 (0=재작성 없음). marker bit(0x80) 보존 — H.264 프레임 끝 표식이다(RFC 6184 §5.1).
+        if (peer.videoPtOut > 0)
+            pkt[1] = (char)((pkt[1] & 0x80) | (peer.videoPtOut & 0x7F));
         int sendLen = len;
         if (peer.mediaCryptoVideo && peer.mediaCryptoVideo->enabled() &&
             !peer.mediaCryptoVideo->protectRtp(pkt, sendLen, sizeof(pkt))) {

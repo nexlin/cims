@@ -219,11 +219,14 @@ public:
     // codec: 협상 오디오 코덱 문자열 (user_codec, 예 "AMR-WB/16000") — 녹취 세그먼트 메타용.
     // recvOnly/floorSuppress: ambient listening 청취 leg (cmp_media_api.md §7.3) —
     //   recvOnly=상향 미디어 미중계(+floor 요청 거절), floorSuppress=이 멤버에게 floor 메시지 미송신.
+    // videoPtOut: 이 leg 로 영상 송신 시 스탬프할 PT (user_video_pt, 0=재작성 없음) — 동적 PT 는 leg 마다
+    //   따로 협상되므로(RFC 3264 §5.1, 단말 코덱 구현마다 H.264 PT 가 다르다) 화자 PT 를 수신 leg PT 로 바꾼다.
     void addMember(const std::string& sessionId, const std::string& ip, int port, int floorPort = 0, int videoPort = 0,
                    const std::string& role = "participant", PPttMemberPort* unit = nullptr,
                    bool nat = false, const std::string& sigIp = "",
                    int ptOut = 0, int srcPt = 0, int tePtOut = 0, int srcTePt = 0,
-                   const std::string& codec = "", bool recvOnly = false, bool floorSuppress = false);
+                   const std::string& codec = "", bool recvOnly = false, bool floorSuppress = false,
+                   int videoPtOut = 0);
     void removeMember(const std::string& sessionId);
     bool hasMember(const std::string& sessionId);
 
@@ -513,6 +516,7 @@ private:
         int srcPt = 0;      // ingress audio PT — 이 leg 가 송신에 쓰는 PT (user_src_pt)
         int tePtOut = 0;    // egress telephone-event PT (user_te_pt)
         int srcTePt = 0;    // ingress telephone-event PT (user_src_te_pt, TE 분류 기준)
+        int videoPtOut = 0; // egress video PT — 이 leg 로 송신 시 스탬프 (user_video_pt)
         std::string codec;  // 협상 오디오 코덱 (user_codec) — 녹취 세그먼트 메타용
         std::string mcpttId;  // MCPTT ID(URI) — floor User ID/Granted Party 값 (비면 sessionId)
         bool queueing = true; // SDP mc_queueing 협상 여부 — 미협상이면 비선점 요청은 Deny #1

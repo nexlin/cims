@@ -421,6 +421,22 @@ PJ_DECL(pj_status_t) pjmedia_vid_stream_send_keyframe(
 
 
 /**
+ * CIMS: send one keep-alive packet (PJMEDIA_STREAM_ENABLE_KA — empty RTP)
+ * on the stream transport now. The stream sends keep-alive by itself only
+ * from the encoding path, which does not run while encoding is paused and
+ * no capture is connected (receive-only participant). Call this
+ * periodically to keep the NAT mapping of such a stream.
+ *
+ * @param stream        The video stream.
+ *
+ * @return              PJ_SUCCESS on success, PJ_ENOTSUP when keep-alive is
+ *                      disabled at build time or for this stream.
+ */
+PJ_DECL(pj_status_t) pjmedia_vid_stream_send_keep_alive(
+                                                pjmedia_vid_stream *stream);
+
+
+/**
  * Send RTCP SDES for the video stream.
  *
  * @param stream        The video stream.

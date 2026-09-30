@@ -102,6 +102,9 @@ struct AccountConfig {
     /** 참여 MCPTT 기능의 PSI — ue-init-config `<anyExt><MCPTT-Service-Details><Server-URI>`(TS 24.484 §7.2.2.3).
      *  긴급 경보 MESSAGE 의 Request-URI(TS 24.379 §12.1.1.1 8)). 비면 그룹 URI 로 보낸다(CSP 0.2.166 전 서버와의 전환기). */
     std::string mcpttServerUri;
+    /** MCPTT 그룹 영상(ptt_flows.md 영상 협상) — 자동 수락(autoAnswerMcptt)하는 착신 INVITE 가 m=video 를 제안하면 영상까지
+     *  받는다(서버는 video_enabled 그룹에서만 제안한다). false 면 port 0 으로 거절 — 음성만. 개시는 GroupCallOptions.video. */
+    bool mcpttVideo = false;
 
     std::string aor() const { return "sip:" + msisdn + "@" + domain; }
     std::string effectiveMcpttId() const { return mcpttId.empty() ? "tel:" + msisdn : mcpttId; }
@@ -166,6 +169,10 @@ struct GroupCallOptions {
      *  코어가 명시 Floor Request 로 잇는다. 승인 전·호 성립 전에 floorRelease 하면 발언권을 돌려준다(Release 는 answer 에서).
      *  누르는 동안 개시하고 말하는 한 버튼 발신(일제 통화 등)용. listenOnly·fullDuplex 에는 뜻이 없어 무시한다. */
     bool implicitFloorRequest = false;
+    /** 그룹 영상 제안(m=video, H.264) — 서버 그룹이 video_enabled 가 아니면 port 0 으로 거절된다(ptt_flows.md 영상 협상).
+     *  반이중이면 내 영상은 발언권을 가진 동안만 나간다(Granted 에 송출 시작 = 키프레임, 놓으면 정지·카메라 닫힘) — Engine::setVideoSend 가
+     *  송출 허용을 끈다. 착신 합류의 영상 수락은 AccountConfig.mcpttVideo. */
+    bool video = false;
 };
 
 /** 착신 INVITE 의 mcptt-info(TS 24.379 §F.1) 요약. */
@@ -226,7 +233,10 @@ struct CallInfo {
     std::string remoteUri;
     /** 착신 INVITE 의 P-Called-Party-ID(RFC 3455) — 대표번호 착신 식별(dispatch_center.md §4.3). */
     std::string calledParty;
+    /** 영상 — 착신 대기 중 = offer 에 m=video 가 있다, 발신 = 영상으로 걸었다, 미디어 성립 뒤 = 협상된 영상 미디어가 활성이다. */
     bool video = false;
+    /** 내 영상 송출 허용(Engine::setVideoSend, 기본 true) — MCPTT 반이중은 이 값이 true 이고 발언권을 가진 동안만 실제로 보낸다. */
+    bool videoSend = true;
     bool mediaActive = false;
     bool muted = false;
     bool listen = true;
