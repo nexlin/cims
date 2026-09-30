@@ -756,6 +756,9 @@ windows/dispatch-desktop/                 DispatchDesktop.csproj — net10.0-win
   코어가 조건을 읽어도 격상·해제를 받지 못한다 — 청취 인가·은닉·sendonly 응답을 지키며 알리는 서버 계약이 필요하다([mcptt_emergency_modes.md §10](mcptt_emergency_modes.md)).
 - **SDS 전달 확인의 규격 경로(코어·서버)** — disposition 자동 회신(`sendSdsNotification`)이 원 발신자 AoR 로 SDS NOTIFICATION 한 파트만 보낸다. TS 24.282
   V18.13.0 §12.2.1.1 은 대상 MCData ID 의 `resource-lists` 와 그룹 통지의 `<mcdata-calling-group-id>` 를 요구한다([mcdata_messaging.md §7](mcdata_messaging.md) 편차 표).
+- **SDS 재전송의 msgId(C API·.NET)** — 재전송이 새 msgId 로 나간다(§4.4 ✓✓ 상관). 코어는 처음의 msgId 로 다시 보낼 수 있지만(`sendGroupSds`·`sendSds`
+  의 `msgId` — 앞 발신이 일부에게 닿았어도 받는 쪽이 같은 메시지로 대조한다) C API·.NET 에 없다([sdk_port_handoff.md §5.1](../../dev/sdk_port_handoff.md)) —
+  노출한 뒤 `ResendCore` 가 처음 msgId 를 넘긴다(Android 태블릿 `resendSds` 와 같게).
 - **망 전환** — 앱 몫: 망 복귀 처리를 `RefreshRegistrations`(계정별 REGISTER, `App.xaml.cs` `NetworkAvailabilityChanged`)에서 코어
   `Engine.HandleNetworkChange`(TCP/TLS 연결 종료·계정별 재등록·앞 등록이 끝난 뒤 한 번 더, [ue_sdk.md §4.2](ue_sdk.md))로 옮긴다 — 계정별 REGISTER 만으로는
   옛 주소의 TCP/TLS 연결이 남는다. 진행 중 호의 유지는 코어 과제다([ue_sdk.md §11](ue_sdk.md)).

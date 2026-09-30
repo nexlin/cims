@@ -11,12 +11,9 @@ import android.app.Notification
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
-import android.net.ConnectivityManager
-import android.net.Network
 import android.os.Build
-import android.os.Handler
-import android.os.Looper
 import androidx.core.app.NotificationCompat
+import com.cims.ue.sdk.platform.NetworkWatcher
 import com.cims.ue.sdk.platform.UeForegroundService
 import com.cims.ue.sdk.CallState
 import kotlinx.coroutines.CoroutineScope
@@ -64,7 +61,7 @@ class DispatchService : UeForegroundService() {
         acquireWakeLock()
         observeMicrophone(s)                // 캡처 중에는 FGS 타입에 마이크를 더한다(§F6)
         observeIncoming(s)                  // 착신 알림·벨소리
-        watchNetwork()                      // 망 복귀·전환 → 곧바로 재등록
+        netWatcher.start()                  // 망 복귀·전환 → 곧바로 재등록
         // 저장된 자격이 있으면 화면 없이도 등록까지 되돌린다(부팅·프로세스 복귀).
         if (s.hasSavedLogin) scope.launch {
             if (s.resume().ok) s.start()
@@ -136,29 +133,14 @@ class DispatchService : UeForegroundService() {
      * 망 복귀·전환 → 재등록(데스크톱 `NetworkChange.NetworkAvailabilityChanged` → `RefreshRegistrations`).
      *
      * 태블릿은 데스크톱보다 망이 자주 바뀐다(Wi-Fi ↔ LTE, 음영 구역). 망이 끊겼다 돌아오거나 기본 망이 바뀌면
-     * 등록 주소가 낡아 서버가 옛 주소로 보낸다 — 다음 갱신 주기까지 착신이 사라진다. 기본 망을 지켜보다가
-     * 복귀·전환이면 코어에 알린다(`handleNetworkChange` — 전송 재수립·재등록은 코어 몫). 판정은 [NetworkReturn] 이
-     * 한다(콜백은 등록 직후 **지금의 망**으로 한 번 불리는데, 그것은 복귀가 아니다). 콜백은 메인 스레드로 받는다 —
-     * 판정 상태를 한 스레드에서만 만진다.
+     * 등록 주소가 낡아 서버가 옛 주소로 보낸다 — 다음 갱신 주기까지 착신이 사라진다. 판정은 SDK 접점
+     * `NetworkWatcher` 가 한다(등록 직후 지금 망의 첫 알림은 거르고, 망 없이 기동했으면 처음 서는 망을 변화로 본다) —
+     * 변화면 코어에 알린다(`handleNetworkChange` — 전송 재수립·재등록은 코어 몫).
      */
-    private val netReturn = NetworkReturn<Network>()
-    private val netCallback = object : ConnectivityManager.NetworkCallback() {
-        override fun onAvailable(network: Network) {
-            if (netReturn.onAvailable(network)) session?.handleNetworkChange()
-        }
-        override fun onLost(network: Network) = netReturn.onLost(network)
-    }
-
-    private fun watchNetwork() {
-        val cm = getSystemService(ConnectivityManager::class.java) ?: return
-        // 지금의 망을 먼저 심는다 — 망 없이 기동했으면(부팅 직후·음영) 처음 서는 망이 곧 복귀다.
-        netReturn.start(cm.activeNetwork)
-        runCatching { cm.registerDefaultNetworkCallback(netCallback, Handler(Looper.getMainLooper())) }
-            .onFailure { android.util.Log.w("DispatchService", "망 감시를 걸지 못했다 — 망 복귀 재등록이 갱신 주기를 기다린다", it) }
-    }
+    private val netWatcher by lazy { NetworkWatcher(this) { session?.handleNetworkChange() } }
 
     override fun onDestroy() {
-        runCatching { getSystemService(ConnectivityManager::class.java)?.unregisterNetworkCallback(netCallback) }
+        netWatcher.close()
         alert.clear()
         _sessionFlow.value = null
         session?.close()
@@ -215,39 +197,5 @@ class DispatchService : UeForegroundService() {
                 context.startService(Intent(context, DispatchService::class.java).setAction(ACTION_SHUTDOWN))
             }
         }
-    }
-}
-
-/**
- * 망 복귀 판정 — 기본 망 콜백을 «지금 다시 등록할 때인가» 로 바꾼다.
- *
- * 망 객체(`Network`)를 모르는 순수 논리라 JVM 에서 시험한다. 복귀 = 잃었던 뒤 다시 섰거나, 기본 망이 **다른 망으로**
- * 바뀐 것. 등록 직후 지금의 망으로 오는 첫 알림과, 같은 망의 재알림은 복귀가 아니다. 바뀐 뒤 늦게 오는 **옛 망의
- * 소실**은 지금 망과 상관없으니 무시한다.
- *
- * 콜백만으로는 «등록 직후 지금 망의 첫 알림» 과 «망 없이 있다가 처음 선 망» 을 가를 수 없다 — 그래서 콜백을 걸 때
- * 지금의 망을 [start] 로 심는다. 없었으면 처음 서는 망이 복귀다(그동안 등록이 실패했다).
- */
-internal class NetworkReturn<T : Any> {
-    private var current: T? = null
-    private var lost = false
-
-    /** 콜백을 걸기 직전의 기본 망. null = 망 없이 기동. */
-    fun start(initial: T?) {
-        current = initial
-        lost = initial == null
-    }
-
-    /** 기본 망이 섰다 — 재등록해야 하면 true. */
-    fun onAvailable(network: T): Boolean {
-        val prev = current
-        current = network
-        val back = lost || (prev != null && prev != network)
-        lost = false
-        return back
-    }
-
-    fun onLost(network: T) {
-        if (network == current) { current = null; lost = true }
     }
 }

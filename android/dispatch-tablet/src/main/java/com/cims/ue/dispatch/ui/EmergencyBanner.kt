@@ -39,15 +39,15 @@ data class AlertBannerUi(
     val kind: AlertKind,
     /** 채널 이름 — 카드 제목과 같다. */
     val title: String,
-    /** 개시자 표시(번호 이름 병기). 모르면 빈 값 — 내가 건 긴급은 코어가 개시자를 싣지 않는다. */
+    /** 개시자 표시(번호 이름 병기). 모르면 빈 값 — 내가 건 긴급·진행 중에 걸린 조건은 개시자를 모른다([SessionItem.alertInitiator]). */
     val initiator: String = "",
     val sinceMs: Long = System.currentTimeMillis(),
 )
 
-/** 세션 → 배너. 개시자는 mcptt-info `<mcptt-calling-user-id>` 다. */
+/** 세션 → 배너. 개시자는 mcptt-info `<mcptt-calling-user-id>` 다([SessionItem.alertInitiator]). */
 internal fun SessionItem.toAlertBannerUi(label: (String) -> String): AlertBannerUi? {
     val kind = alertKind ?: return null
-    val caller = info.mcptt.callingUserId
+    val caller = alertInitiator
     return AlertBannerUi(
         channelId = channelId, kind = kind, title = title.ifEmpty { info.groupId },
         initiator = if (caller.isBlank()) "" else label(caller),

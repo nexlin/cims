@@ -86,7 +86,7 @@ class MessageStore(context: Context) :
             arrayOf<Any>(state.ordinal, msgId))
     }
 
-    /** 재전송 — 같은 말풍선(행 id)이 새 msgId·token·상태를 받는다(데스크톱 `UpdateResend`). */
+    /** 재전송 — 같은 말풍선(행 id)이 새 token·상태를 받는다(데스크톱 `UpdateResend`). msgId 는 코어가 돌려준 값 — SDS 는 처음 것 그대로다. */
     fun updateResend(id: String, msgId: String, token: Long, state: SendState) = runCatching {
         writableDatabase.execSQL(
             "UPDATE messages SET msg_id=?, token=?, state=? WHERE id=? AND outgoing=1",

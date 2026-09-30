@@ -120,4 +120,15 @@ class PlatformTest {
         f.reset()
         assertFalse(f.onAvailable("wifi"))        // 다시 시작 — 첫 통지는 변화 아님
     }
+
+    @Test fun `망 변경 판정 — 걸 때의 망을 심는다`() {
+        // 망 없이 걸었으면(부팅 직후·음영) 처음 잡히는 망이 변화다 — 그동안 등록이 실패했다.
+        val none = NetworkChangeFilter<String>().apply { seed(null) }
+        assertTrue(none.onAvailable("wifi"))
+        assertFalse(none.onAvailable("wifi"))     // 한 번 알렸으면 끝
+        // 망이 있었으면 그 망의 첫 통지는 변화가 아니고, 다른 망으로 바뀌면 변화다.
+        val some = NetworkChangeFilter<String>().apply { seed("wifi") }
+        assertFalse(some.onAvailable("wifi"))
+        assertTrue(some.onAvailable("lte"))
+    }
 }

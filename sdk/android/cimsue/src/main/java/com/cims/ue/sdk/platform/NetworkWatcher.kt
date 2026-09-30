@@ -12,6 +12,7 @@ import android.net.Network
 /**
  * 기본 네트워크 변화 감시. [start] 뒤 새 기본 네트워크가 잡힐 때마다 [onChanged] 를 부른다(ConnectivityManager 콜백 스레드 —
  * 블록하지 말고 코루틴으로 넘긴다). 콜백을 등록하면 **지금 망**에 대한 통지가 곧바로 한 번 오는데, 그것은 변화가 아니므로 넘긴다.
+ * 걸 때 망이 없었으면(부팅 직후·음영) 처음 잡히는 망이 변화다 — 그동안의 등록은 실패했으니 갱신 주기를 기다리지 않는다.
  */
 class NetworkWatcher(context: Context, private val onChanged: (Network) -> Unit) : AutoCloseable {
 
@@ -22,6 +23,7 @@ class NetworkWatcher(context: Context, private val onChanged: (Network) -> Unit)
     @Synchronized
     fun start() {
         if (cb != null || cm == null) return
+        filter.seed(runCatching { cm.activeNetwork }.getOrNull())
         val c = object : ConnectivityManager.NetworkCallback() {
             override fun onAvailable(network: Network) { if (filter.onAvailable(network)) onChanged(network) }
             override fun onLost(network: Network) { filter.onLost(network) }
@@ -39,12 +41,17 @@ class NetworkWatcher(context: Context, private val onChanged: (Network) -> Unit)
 
 /**
  * 판정만 — 첫 통지(등록 직후의 지금 망)는 변화가 아니고, 그 뒤 **다른** 망이 잡히거나 끊겼다 다시 잡히면 변화다.
+ * [seed] 로 걸 때의 망을 심으면 «망 없이 걸었다» 를 안다 — 그때는 처음 잡히는 망이 변화다.
  * Android 없이 시험하려고 떼어 둔다(PlatformTest).
  */
 class NetworkChangeFilter<N : Any> {
     private var current: N? = null
     private var seen = false
     private var lost = false
+
+    /** 콜백을 걸기 직전의 기본 망. null = 망 없이 건다 — 처음 잡히는 망이 변화다. */
+    @Synchronized
+    fun seed(initial: N?) { current = initial; seen = true; lost = initial == null }
 
     /** 새 기본 네트워크 — 변화면 true. */
     @Synchronized

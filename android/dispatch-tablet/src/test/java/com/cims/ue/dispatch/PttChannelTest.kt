@@ -18,6 +18,7 @@ import com.cims.ue.sdk.CallInfo
 import com.cims.ue.sdk.CallState
 import com.cims.ue.sdk.FloorInfo
 import com.cims.ue.sdk.FloorState
+import com.cims.ue.sdk.McpttCondition
 import com.cims.ue.sdk.McpttInfo
 import com.cims.ue.sdk.RosterEntry
 import org.junit.Assert.assertEquals
@@ -41,7 +42,8 @@ class PttChannelTest {
         muted = false, listen = true, playbackRoute = 0, lastCode = 0, lastReason = "",
         sources = emptyList(), isMcptt = mcptt, groupId = groupId,
         mcptt = McpttInfo(mcptt, "", "", "", "", emergency, false, privateCall, noFloorCtrl, broadcast),
-        halfDuplex = !noFloorCtrl, listenOnly = listenOnly, joinedDialog = joinedDialog)
+        halfDuplex = !noFloorCtrl, listenOnly = listenOnly, joinedDialog = joinedDialog,
+        condition = McpttCondition(emergency = emergency))
 
     @Test fun `세션 종류가 화면 배치를 정한다`() {
         assertEquals(SessionKind.PTT_CHANNEL, SessionKind.of(call()))

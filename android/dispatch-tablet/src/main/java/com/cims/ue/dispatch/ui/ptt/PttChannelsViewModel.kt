@@ -14,6 +14,7 @@ import com.cims.ue.dispatch.ui.resolvePerson
 import com.cims.ue.dispatch.ui.ScreenViewModel
 import com.cims.ue.dispatch.session.DirectoryBook
 import com.cims.ue.dispatch.session.DispatchSession
+import com.cims.ue.dispatch.session.TextArea
 import com.cims.ue.dispatch.session.releaseBroadcast
 import com.cims.ue.dispatch.session.startAdhoc
 import com.cims.ue.dispatch.session.startAdhocBroadcast
@@ -441,7 +442,12 @@ class PttChannelsViewModel(private val s: DispatchSession) : ScreenViewModel() {
         scope.launch {
             val r = start()
             if (_broadcastHeld.value != key) return@launch
-            if (!r.ok) { _originError.value = r.reason; clearBroadcastHold(); return@launch }
+            if (!r.ok) {
+                // 발신 시트의 [일제 통화] 는 시트가 그 자리에 적는다. 채널 머리의 [일제 통화] 는 시트가 없어 토스트다(§6.2a-2) —
+                //   시트 오류로 두면 보이지 않다가 다음에 시트를 열 때 엉뚱하게 뜬다.
+                if (key == ADHOC_BROADCAST) _originError.value = r.reason else s.report(TextArea.PTT_JOIN, r)
+                clearBroadcastHold(); return@launch
+            }
             bcCallId = r.value!!
             if (bcReleased) finishBroadcast()
         }

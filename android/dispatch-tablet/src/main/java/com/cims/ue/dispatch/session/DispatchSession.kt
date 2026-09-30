@@ -780,7 +780,7 @@ class DispatchSession(
         val gid = next.info.groupId
         when (change) {
             is AlertChange.Started -> addActivity(gid, groupNameOf(gid),
-                "${change.kind.label} 개시" + next.info.mcptt.callingUserId
+                "${change.kind.label} 개시" + next.alertInitiator
                     .takeIf { it.isNotBlank() }?.let { " · " + displayName(it) }.orEmpty(),
                 ActivityKind.EMERGENCY, emergency = true)
             is AlertChange.Cleared -> addActivity(gid, groupNameOf(gid), "${change.kind.label} 해제",
@@ -788,6 +788,19 @@ class DispatchSession(
             AlertChange.None -> Unit
         }
         return if (next.alertSinceMs == since) next else next.copy(alertSinceMs = since)
+    }
+
+    /**
+     * 세션 조건 변화(서버 재광고·내 상향/하향의 확정·거절, `onMcpttCondition`) — **조건만** 옮긴다. 이 이벤트는 호 상태와
+     * 다른 흐름으로 와서 끝난 호의 것이 늦게 닿을 수 있다 — 그 호를 되살리지 않고, 상태·미디어 같은 다른 필드를 이 이벤트의
+     * 스냅샷으로 되돌리지 않는다.
+     */
+    internal fun applyCondition(ch: com.cims.ue.sdk.ConditionChange) {
+        val next = ch.call.condition
+        _sessions.value = _sessions.value.map { s ->
+            if (s.callId != ch.call.callId || s.info.condition == next) s
+            else withAlert(s, s.copy(info = s.info.copy(condition = next)))
+        }
     }
 
     internal fun removeSession(callId: Int) {
@@ -1032,8 +1045,9 @@ class DispatchSession(
     }
 
     /**
-     * 재전송한 말풍선 — **같은 말풍선**(행 id)이 새 msgId·token 을 받고 다시 «보내는 중»(응답이 먼저 와 있었으면 그 상태)이
-     * 된다. 새 말풍선을 세우지 않는다 — 같은 말이 두 번 보이면 두 번 보낸 줄 안다(데스크톱 `ResendCore`).
+     * 재전송한 말풍선 — **같은 말풍선**(행 id)이 새 token 을 받고 다시 «보내는 중»(응답이 먼저 와 있었으면 그 상태)이
+     * 된다. msgId 는 처음 것 그대로다(SDS 는 처음의 msgId 로 다시 보낸다 — [resendSds]; 코어가 다른 값을 돌려주면 그 값).
+     * 새 말풍선을 세우지 않는다 — 같은 말이 두 번 보이면 두 번 보낸 줄 안다(데스크톱 `ResendCore`).
      */
     internal fun markResent(m: Message, msgId: String, token: Long, failed: Boolean,
                             early: com.cims.ue.sdk.RequestResult?) {
@@ -1219,6 +1233,7 @@ class DispatchSession(
         scope.launch { engine.callState.collect { applyCallState(it) } }
         scope.launch { engine.incomingCall.collect { upsertSession(it) } }
         scope.launch { engine.callMedia.collect { upsertSession(it) } }
+        scope.launch { engine.condition.collect { applyCondition(it) } }     // 진행 중 긴급·임박(§6.2a-1)
         scope.launch { engine.floor.collect { applyFloor(it) } }
         scope.launch { engine.roster.collect { applyRoster(it) } }
         scope.launch { engine.sds.collect { applySds(it) } }
@@ -1365,14 +1380,14 @@ class DispatchSession(
     /**
      * 망이 돌아왔거나 바뀌었다 — 코어에 알린다. **등록 복구는 코어가 한다**(`Engine::handleNetworkChange` — 옛 TCP/TLS
      * 연결을 닫고 등록을 켠 계정마다 다시 등록하며, 앞 등록이 걸려 있으면 끝난 뒤 한 번 더). 판정(«복귀·전환인가»)은
-     * `DispatchService` 의 망 콜백이 한다(`NetworkReturn`). 엔진이 없으면(로그인 전) 할 일이 없다.
+     * `DispatchService` 의 SDK 접점 `NetworkWatcher` 가 한다. 엔진이 없으면(로그인 전) 할 일이 없다.
      *
      * 계정마다 REGISTER 만 다시 거는 것(`refreshRegistration`)으로는 모자라다 — 옛 망의 연결을 재사용하고, 진행 중 등록이
-     * 있으면 `PJSIP_EBUSY` 로 거절돼 요청이 사라진다.
+     * 있으면 `PJSIP_EBUSY` 로 거절돼 요청이 사라진다. 망 콜백 스레드에서 불린다 — 엔진은 세션 스코프 안에서 읽는다.
      */
     fun handleNetworkChange() {
-        val engine = ue ?: return
         scope.launch {
+            val engine = ue ?: return@launch
             val r = engine.handleNetworkChange()
             if (!r.ok) android.util.Log.w("DispatchSession", "망 변경 처리 실패: ${r.code} ${r.reason}")
         }

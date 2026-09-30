@@ -16,7 +16,7 @@ C API·.NET = Windows 개발 환경**.
 | 영상 | `setVideoWindow`(Android Surface → `ANativeWindow` 참조를 코어가 소유, 결선마다 렌더러 몫) · `switchCamera` · `videoDevices` · H.264 최우선 480x640·15 fps·400/500 k · 계정 기본 카메라 = 전면 · `videoAutoTransmit` 면 START_TRANSMIT · 파사드 `setVideoSurface`·`setPreviewSurface`(PjCamera2)·`start(cfg, context)`(CameraManager) | MF52 점검 앱 — 카메라 2대 열거·H.264 정책. 수신 렌더·송신은 P2 실기 |
 | 카메라 클래스 탐색 | 코어 제어 스레드는 네이티브 스레드라 `FindClass` 가 APK 의 `org.pjsip.PjCamera2` 를 못 찾는다 → pjlib CIMS 패치 `pj_jni_find_class`(`JNI_OnLoad` 에서 앱 클래스 로더를 기억, FindClass 실패 때 사용) · `android_dev.c` 가 사용. 기존 `libpjsua2` 경로는 FindClass 가 먼저 성공해 동작 불변 | MF52 — `android_dev.c: Android video capture initialized with 2 device(s)` |
 | 카메라 도우미 배치 | `build-native.sh` [7] 이 `PjCamera2.java`·`PjCameraInfo2.java` 를 `:cimsue` swig 소스셋에 복사(커밋 안 함) · `S1-UE-ENGINE-SINGLE` = `org.pjsip.pjsua2` 제공처 하나 + 카메라 도우미는 pj 를 싣는 두 모듈 | S1 PASS·음성 대조(엉뚱한 파일 FAIL) |
-| 망 변경 재등록 | Android 접점 `platform.NetworkWatcher`(기본 네트워크가 바뀌면 앱 동작 — 보통 `refreshRegistration`, 등록 직후 지금 망 통지는 넘김) | `PlatformTest`(판정 `NetworkChangeFilter`) |
+| 망 변경 재등록 | Android 접점 `platform.NetworkWatcher`(기본 네트워크가 바뀌면 앱 동작 — 코어 `Engine.handleNetworkChange()`(연결 종료·계정별 재등록, [ue_sdk.md](../design/features/ue_sdk.md) §4.2), 등록 직후 지금 망 통지는 넘기고 망 없이 걸었으면 처음 잡히는 망은 변화) | `PlatformTest`(판정 `NetworkChangeFilter`) |
 | 기기 점검 앱 | `android/sdk-probe` — 로그인·계정 없이 엔진만(사내 단말에 깔아도 착신을 가로채지 않는다) | MF52 전 항목 PASS |
 
 `cimsue_test` 75(한 프로세스) · `S1-UE-*` 6 + `S1-PY-SYNTAX` PASS · `:cimsue` 31·`:ptt-client` 53 단위시험 · APK 4종(태블릿·PTT·VoLTE·점검) 빌드.
@@ -77,8 +77,8 @@ C API·.NET = Windows 개발 환경**.
   `setVideoWindow`/`switchCamera`/`videoDevices`(`VideoDeviceInfo`) · `ServiceProfile.udpNoTcpSwitch` · `kMicAgcTargetDbov`. 구조체 id 는 `CIMSUE_STRUCT_COUNT_`
   앞 끝에 덧붙인다(`AbiLayoutTests`). `setVideoWindow(void*)` 는 참조 수를 세지 않는 창(HWND)도 받는다 — 참조 처리는 Android 만.
 - **코어 동작 변화(Windows 앱에도 적용)** — affiliation 412 는 코어가 초기 PUBLISH 로 한 번 다시 알린다. 앱이 412 로 재시도하던 코드가 있으면 필요 없다.
-- **관제 태블릿(Android)** — ① 다음 빌드부터 VAD 꺼짐(파사드 기본값이 코어와 같아짐 — 침묵 중에도 RTP) ② 망 변경 재등록이 없다 → `NetworkWatcher` 로
-  계정마다 `refreshRegistration` ③ `FloorEvent.kind` 로 Denied/Revoked·코어 시한 구분(지금 `rawType` 판정 대체 가능) ④ FD 파사드가 생겼다.
+- **관제 태블릿(Android)** — ① 다음 빌드부터 VAD 꺼짐(파사드 기본값이 코어와 같아짐 — 침묵 중에도 RTP) ② `FloorEvent.kind` 로 Denied/Revoked·코어 시한
+  구분(지금 `rawType` 판정 대체 가능) ③ FD 파사드가 생겼다. 망 변경 재등록은 반영했다(`NetworkWatcher` → `handleNetworkChange`).
 
 ## 3. 확인 필요 — 오디오 장치 재오픈
 

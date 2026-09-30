@@ -667,7 +667,7 @@ public:
                     o_->emit([o = o_, snap] { o->listener->onCallMedia(snap); });
                 }
             }
-            // 세션 조건 재광고(TS 24.379 §6.3.3.1.15·§6.3.3.1.16) — 서버가 멤버 leg 에 보내는 re-INVITE, 조인 200 OK 동봉.
+            // 세션 조건 재광고(TS 24.379 §6.3.3.1.6 긴급·§6.3.3.1.10 긴급 취소·§6.3.3.1.15 임박 위험) — 서버가 멤버 leg 에 보내는 re-INVITE, 조인 200 OK 동봉.
             //   rdata 는 수신 원문만이므로 "INVITE " = 수신 (re-)INVITE, "SIP/2.0 200" = 내 INVITE 의 응답. 바뀐 경우만 이벤트.
             if (mcptt && (msg.rfind("INVITE ", 0) == 0 || (msg.rfind("SIP/2.0 200", 0) == 0 && tsx.method == "INVITE")) &&
                 msg.find("mcpttinfo") != std::string::npos) {

@@ -137,18 +137,32 @@ data class SessionItem(
     val kind: SessionKind get() = SessionKind.of(info)
     val isLive: Boolean get() = info.state != CallState.DISCONNECTED && info.state != CallState.NULL
     val isActive: Boolean get() = info.state == CallState.ACTIVE
-    val isEmergency: Boolean get() = info.mcptt.emergency
-    val isImminentPeril: Boolean get() = info.mcptt.imminentPeril
+    /**
+     * 세션 조건 — 코어가 본 **지금의** 긴급·임박(`CallInfo.condition` — 호를 세울 때의 값으로 시작해 서버 재광고·합류 200 OK 로
+     * 바뀐다, ue_sdk.md §4.2). `CallInfo.mcptt` 는 개시·착신 INVITE 의 값으로 불변이라 판정에 쓰지 않는다.
+     */
+    val isEmergency: Boolean get() = info.condition.emergency
+    val isImminentPeril: Boolean get() = info.condition.imminentPeril
     /** 전이중 개별 통화 — floor 가 없어 마이크가 늘 열려 있다(발언 대상이 될 수 없다). */
     val isFullDuplex: Boolean get() = info.mcptt.noFloorCtrl
 
     /** 채널의 긴급 상태 — MCPTT 세션 중 개별 통화가 아닌 것만(개별 통화·전화는 null). 긴급이 임박보다 앞선다. */
     val alertKind: AlertKind? get() = when {
         !info.isMcptt || kind == SessionKind.PTT_PRIVATE -> null
-        info.mcptt.emergency -> AlertKind.EMERGENCY
-        info.mcptt.imminentPeril -> AlertKind.IMMINENT_PERIL
+        isEmergency -> AlertKind.EMERGENCY
+        isImminentPeril -> AlertKind.IMMINENT_PERIL
         else -> null
     }
+
+    /**
+     * 지금 조건의 개시자(mcptt-info `<mcptt-calling-user-id>`) — 호를 세운 INVITE 가 **그 조건을 실었을 때만**. 진행 중에 걸린
+     * 조건은 재광고가 개시자를 싣지만 코어 조건에 그 값이 없어 모른다(ue_sdk.md §11) — 호 발신자를 개시자로 적지 않는다.
+     */
+    val alertInitiator: String get() = when (alertKind) {
+        AlertKind.EMERGENCY -> info.mcptt.callingUserId.takeIf { info.mcptt.emergency }
+        AlertKind.IMMINENT_PERIL -> info.mcptt.callingUserId.takeIf { info.mcptt.imminentPeril && !info.mcptt.emergency }
+        null -> null
+    }.orEmpty()
 
     /** 이 세션이 서는 채널 id — ① 카드·② 행·[채널] 화면이 쓰는 것과 같다(개별 통화·애드혹은 그룹 id 가 없을 수 있다). */
     val channelId: String get() = info.groupId.ifEmpty { "call-$callId" }

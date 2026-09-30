@@ -15,6 +15,7 @@ import com.cims.ue.sdk.CallInfo
 import com.cims.ue.sdk.CallState
 import com.cims.ue.sdk.FloorInfo
 import com.cims.ue.sdk.FloorState
+import com.cims.ue.sdk.McpttCondition
 import com.cims.ue.sdk.McpttInfo
 import com.cims.ue.sdk.MediaSource
 
@@ -50,7 +51,8 @@ fun previewCallInfo(
     playbackRoute = 0, lastCode = 0, lastReason = "",
     sources = sources,
     isMcptt = isMcptt, groupId = groupId, mcptt = mcptt,
-    halfDuplex = isMcptt, listenOnly = listenOnly, joinedDialog = joinedDialog)
+    halfDuplex = isMcptt, listenOnly = listenOnly, joinedDialog = joinedDialog,
+    condition = McpttCondition(emergency = mcptt.emergency, imminentPeril = mcptt.imminentPeril))
 
 fun previewFloor(
     state: FloorState = FloorState.IDLE,

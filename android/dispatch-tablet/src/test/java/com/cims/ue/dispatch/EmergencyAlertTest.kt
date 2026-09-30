@@ -21,6 +21,7 @@ import com.cims.ue.dispatch.ui.toAlertBannerUi
 import com.cims.ue.sdk.CallDir
 import com.cims.ue.sdk.CallInfo
 import com.cims.ue.sdk.CallState
+import com.cims.ue.sdk.McpttCondition
 import com.cims.ue.sdk.McpttInfo
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -30,18 +31,21 @@ import org.junit.Test
 
 class EmergencyAlertTest {
 
+    /** [emergency]·[peril] = 지금의 조건(`CallInfo.condition`), invite* = 호를 세운 INVITE 의 값(기본은 같다). */
     private fun session(
         id: Int = 1, groupId: String = "g1", emergency: Boolean = false, peril: Boolean = false,
         privateCall: Boolean = false, mcptt: Boolean = true, listenOnly: Boolean = false,
         caller: String = "", state: CallState = CallState.ACTIVE, since: Long? = null, started: Long = 1_000L,
+        inviteEmergency: Boolean = emergency, invitePeril: Boolean = peril,
     ): SessionItem {
         val info = CallInfo(
             callId = id, accountId = 0, dir = CallDir.INCOMING, state = state,
             remoteUri = "sip:x@d", calledParty = "", video = false, mediaActive = true,
             muted = false, listen = true, playbackRoute = 0, lastCode = 0, lastReason = "",
             sources = emptyList(), isMcptt = mcptt, groupId = if (mcptt) groupId else "",
-            mcptt = McpttInfo(mcptt, "", "", caller, "", emergency, peril, privateCall, false),
-            halfDuplex = true, listenOnly = listenOnly, joinedDialog = "")
+            mcptt = McpttInfo(mcptt, "", "", caller, "", inviteEmergency, invitePeril, privateCall, false),
+            halfDuplex = true, listenOnly = listenOnly, joinedDialog = "",
+            condition = McpttCondition(emergency = emergency, imminentPeril = peril))
         return SessionItem(id, AccountKind.PTT, Operation.PTT_JOIN, info,
             startedAtMs = started, title = "순찰1", alertSinceMs = since)
     }
@@ -62,6 +66,24 @@ class EmergencyAlertTest {
     @Test fun `청취 세션·애드혹의 긴급도 채널 배너다`() {
         assertEquals(AlertKind.EMERGENCY, session(emergency = true, listenOnly = true).alertKind)
         assertEquals(AlertKind.EMERGENCY, session(emergency = true, groupId = "adhoc-1003-1").alertKind)
+    }
+
+    // ── 진행 중 조건(서버 재광고 — TS 24.379 §6.3.3.1.6·§6.3.3.1.10·§6.3.3.1.15) ──
+    @Test fun `판정은 지금의 조건을 따른다 — 호를 세운 INVITE 의 값이 아니다`() {
+        // 일반으로 선 호에 서버가 긴급을 걸었다 / 긴급으로 선 호가 취소 re-INVITE 로 풀렸다.
+        assertEquals(AlertKind.EMERGENCY, session(emergency = true, inviteEmergency = false).alertKind)
+        assertNull(session(inviteEmergency = true).alertKind)
+        assertEquals(AlertKind.IMMINENT_PERIL, session(peril = true, invitePeril = false).alertKind)
+    }
+
+    @Test fun `진행 중에 걸린 조건은 개시자를 모른다 — 호 발신자를 적지 않는다`() {
+        val mid = session(emergency = true, inviteEmergency = false, caller = "sip:1003@d")
+        assertEquals("", mid.alertInitiator)
+        assertEquals("", mid.toAlertBannerUi { "1003 이순경" }!!.initiator)
+        // INVITE 가 그 조건을 실었으면 그 발신자다.
+        assertEquals("sip:1003@d", session(emergency = true, caller = "sip:1003@d").alertInitiator)
+        // 임박으로 선 호가 긴급으로 올랐다 — 긴급의 개시자는 모른다.
+        assertEquals("", session(emergency = true, inviteEmergency = false, invitePeril = true, caller = "sip:1003@d").alertInitiator)
     }
 
     // ── 전이 ──

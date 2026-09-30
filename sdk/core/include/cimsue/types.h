@@ -194,7 +194,7 @@ enum class ConditionCause {
     Local,                            // setCallCondition — 보내면서 곧바로 반영(응답 전)
     Confirmed,                        // 그 re-INVITE 의 2xx
     Denied,                           // 그 re-INVITE 의 4xx~6xx — 이전 값으로 되돌렸다(§6.2.8.1.5, 미인가 상향 = 403 §6.3.3.1.14)
-    Advertised                        // 서버 재광고(수신 re-INVITE·200 OK 의 mcptt-info, §6.3.3.1.15·§6.3.3.1.16)
+    Advertised                        // 서버 재광고(수신 re-INVITE·200 OK 의 mcptt-info, TS 24.379 §6.3.3.1.6·§6.3.3.1.10·§6.3.3.1.15)
 };
 
 /** 긴급 경보·긴급 통지 수신(TS 24.379 §12.1.1.3 — SIP MESSAGE, mcptt-info). 지시자는 1 = true, -1 = false, 0 = 요소 없음. */

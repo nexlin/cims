@@ -257,7 +257,7 @@ fun ChannelScreenContent(
                         Text(if (head.listening) "청취 중지" else "청취")
                     }
                     // 청취는 `listenOnly` 합류라 서버가 Floor Taken 의 `permissionToRequest=0` 을 준다 —
-                    //   발언 버튼이 안 먹는 이유를 **누르기 전에** 적는다(dispatch_center.md §5.5).
+                    //   발언 버튼이 안 먹는 이유를 **누르기 전에** 적는다(dispatch_center.md §5.6).
                     if (head.listening == true) Tag("청취 전용 — 발언 요청 불가",
                         MaterialTheme.colorScheme.onSurfaceVariant, leading = 0)
                     Spacer(Modifier.weight(1f))

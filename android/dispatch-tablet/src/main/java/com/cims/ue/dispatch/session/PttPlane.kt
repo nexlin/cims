@@ -182,7 +182,8 @@ suspend fun DispatchSession.sendSdsTo(key: String, text: String): CimsResult<Uni
 
 /**
  * 실패한 SDS 재전송 — 같은 스레드 규칙(그룹이면 그룹 SDS, 아니면 1:1)으로 다시 보내고 **같은 말풍선**을 갱신한다.
- * 새 msgId 로 나가므로 전달 확인 통지도 새 msgId 로 맞물린다(데스크톱 `McDataMessagesViewModel.ResendCore`).
+ * **처음의 msgId 로** 보낸다 — 앞 발신이 일부에게 닿았어도 받는 쪽이 같은 메시지로 대조하고, 전달 확인 통지도 그 msgId 로
+ * 맞물린다(SDK `sendSds`·`sendGroupSds` 의 msgId, mcdata_messaging.md §5 «탭=같은 msgId 재전송»). token 만 새로 받는다.
  */
 suspend fun DispatchSession.resendSds(m: Message): CimsResult<Unit> {
     if (m.kind != MessageKind.SDS) return CimsResult.ok(Unit)
@@ -190,7 +191,7 @@ suspend fun DispatchSession.resendSds(m: Message): CimsResult<Unit> {
     if (!beginResend(m)) return CimsResult.ok(Unit)                 // 이미 다시 보내는 중이거나 실패가 아니다
     val group = isPttGroup(m.groupId)
     val (r, early) = sendTracked({ it.token }) {
-        if (group) ptt.sendGroupSds(m.groupId, m.text) else ptt.sendSds(m.groupId, m.text)
+        if (group) ptt.sendGroupSds(m.groupId, m.text, msgId = m.msgId) else ptt.sendSds(m.groupId, m.text, msgId = m.msgId)
     }
     markResent(m, r.value?.msgId.orEmpty(), r.value?.token ?: 0L, failed = !r.ok, early = early)
     return report(TextArea.SDS, if (r.ok) CimsResult.ok(Unit) else CimsResult.fail(r.code, r.reason))

@@ -213,7 +213,9 @@ C++ 공개 표면은 `cimsue/engine.h` 의 `Engine` 하나이며 계정·호를 
   않는다 — 0.0.0.0 에 묶여 있어 그대로 쓰고, 낡은 Via/Contact 는 rport·Contact 재작성(`natConfig`)이 고친다. pjsua 의 IP 변경
   처리(`Endpoint::handleIpChange`)는 쓰지 않는다 — EBUSY 때 regc 를 부수고 새로 보내 옛 UDP 트랜잭션과 새 REGISTER 가 겹치고,
   IP 변경 모드의 실패는 자동 재시도에서 빠지며, 수신 소켓 재시작 실패 경로가 전송이 빈 regc 를 역참조한다. 진행 중 호는
-  건드리지 않는다(§11). `refreshRegistration` 은 망은 그대로인데 등록만 잃은 경우(서버 재기동)의 복구다.
+  건드리지 않는다(§11). `refreshRegistration` 은 망은 그대로인데 등록만 잃은 경우(서버 재기동)의 복구다. Android 는 접점
+  `platform.NetworkWatcher` 가 변화를 판정한다(§5.3 — 걸 때의 망을 심어 등록 직후 그 망의 첫 통지는 넘기고, 망 없이 걸었으면
+  처음 잡히는 망을 변화로 본다).
 - **ABI.** 공개 헤더는 pjsua2 타입을 include 하지 않는다. 구현체는 pImpl.
 - **affiliation PUBLISH 의 entity-tag**(RFC 3903). 코어가 EPA 다 — 2xx 의 `SIP-ETag` 를 그룹별로 기억해 다음 `affiliate` 에
   `SIP-If-Match` 로 싣는다. 412 를 받으면 그 ETag 를 버리고(§5 MUST) 같은 요청을 다시 보내지 않으며, `SIP-If-Match` 없는 초기 PUBLISH
@@ -623,15 +625,10 @@ NDK/MSVC 빌드는 개발 서버 밖(WSL2·Windows 머신)에서 수행하고, �
   leg(Join·PTT 청취)에서 이를 활성으로 다루지만, 감청 leg 의 SSRC 별 활성/레벨은 아직 SDP 라벨만 있고 실시간 값이 없다
   — pjproject 에 U10 서브스트림 관측 API(SSRC 별 수신 활성·레벨)를 추가해야 `MediaSources.active/level` 이 채워진다.
 - **호 전달 후 누적 통계** — 전달로 미디어 스트림이 재생성되면 마지막 소멸 스트림의 통계만 남는다(스트림별 누적 합산은 후속).
-- **진행 중 MCPTT 조건(긴급·임박) 반영** — `CallInfo.mcptt.emergency/imminentPeril` 은 호를 세울 때만 실린다(발신 =
-  `GroupCallOptions`, 착신 = INVITE mcptt-info `onIncomingCall`). 서버가 진행 중에 조건을 알리는 re-INVITE
-  (`emergency-ind`/`imminentperil-ind` 명시 true/false — TS 24.379 V18.6.0 §6.3.3.1.6 긴급 그룹콜·§6.3.3.1.15 임박 위험 그룹콜·
-  §6.3.3.1.10 진행 중 긴급 취소)와 합류 INVITE 의 200 OK 가 싣는 조건을 `onCallTsxState` 가 읽지 않는다 — 관제 앱(Windows·Android)의
-  긴급 배너가 격상·해제를 못 받고 세션 종료에만 빠지며, floor 요청의 긴급 서열(`floorRequest` 가 스냅샷의 `emergency` 를 읽는다)도
-  격상을 따라가지 못한다. 필요한 것 = in-dialog 요청·2xx 의 mcptt-info 파싱 → 스냅샷 갱신 → `onCallMedia` 통지(명령이 바꾼
-  스냅샷과 같은 축). 청취 leg 는 이것으로 끝나지 않는다 — CSP 가 조건 재광고에서 청취 leg 를 빼므로
-  (`PropagateConditionToMembers`) 서버 계약이 함께 필요하다([android_dispatch_tablet.md](android_dispatch_tablet.md) §11). 옛 Android 코어
-  (`android/core` `CimsCall` — 수신 re-INVITE·내 INVITE 의 200 OK 에서 `emergency-ind` 를 읽어 세션 긴급 상태를 올린다)가 같은 일을 이미 한다(이식 기준).
+- **진행 중 조건의 개시자** — 조건 재광고 re-INVITE 는 조건을 건 사용자를 `<mcptt-calling-user-id>` 에 싣는다(TS 24.379 V18.6.0
+  §6.3.3.1.6 2)). 코어는 조건만 읽어(§4.2 «긴급·임박 세션 조건») `McpttCondition` 에 개시자가 없다 — 관제 앱 긴급 배너는 진행 중에 걸린
+  조건의 개시자를 비운다(`CallInfo.mcptt.callingUserId` 는 호를 세운 INVITE 의 값이다). 청취 leg 는 코어만으로 끝나지 않는다 — CSP 가
+  조건 재광고에서 청취 leg 를 빼므로(`PropagateConditionToMembers`) 서버 계약이 함께 필요하다([android_dispatch_tablet.md](android_dispatch_tablet.md) §11).
 - **MCPTT 착신 수락의 호 종류별 분리** — `AccountConfig.autoAnswerMcptt` 하나가 그룹콜·사설콜을 함께 자동 수락한다. 규격은 수락 방식을 호 종류별로
   둔다(TS 24.379 §6.2.3 commencement mode — 사설콜·그룹콜 각각 자동/수동). 관제석은 그룹콜 자동 + 사설콜 수동이 맞다 — 둘로 나누면 C API·.NET·Kotlin 에
   같이 낸다. 긴급 사설콜의 전역 표시는 이 분리 뒤에 두 관제 앱이 정한다([dispatch_desktop_ui.md](dispatch_desktop_ui.md) §13,
