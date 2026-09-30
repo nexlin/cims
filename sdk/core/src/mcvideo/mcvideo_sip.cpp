@@ -214,6 +214,32 @@ std::string withMediaInfo(const std::string& sdp) {
     return out;
 }
 
+std::string forSubsequentOffer(const std::string& sdp) {
+    if (!isMcVideoSdp(sdp)) return sdp;
+    const std::string eol = sdp.find("\r\n") != std::string::npos ? "\r\n" : "\n";
+    const std::string pre = std::string("a=fmtp:") + kSdpFmt + " ";
+    std::vector<std::string> in = lines(sdp);
+    std::string out;
+    for (size_t i = 0; i < in.size(); ++i) {
+        if (in[i].empty() && i + 1 == in.size()) break;      // 끝 줄바꿈이 만든 빈 줄
+        std::string ln = in[i];
+        if (ln.rfind(pre, 0) == 0) {
+            std::string kept;
+            const std::string params = ln.substr(pre.size());
+            for (size_t b = 0; b <= params.size();) {                // 구분자 `;`(K4) — 해석 쪽처럼 `:` 도 받는다
+                size_t e = params.find_first_of(";:", b);
+                if (e == std::string::npos) e = params.size();
+                const std::string p = params.substr(b, e - b);
+                if (!p.empty() && p != fmtp::GRANTED && p != fmtp::IMPLICIT_REQUEST) kept += (kept.empty() ? "" : kFmtpSeparator) + p;
+                b = e + 1;
+            }
+            ln = pre + kept;
+        }
+        out += ln + eol;
+    }
+    return out;
+}
+
 static bool ieqPrefix(const std::string& line, const char* name) {
     size_t n = std::char_traits<char>::length(name);
     if (line.size() < n) return false;

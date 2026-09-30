@@ -474,6 +474,20 @@ TEST(McvSip, FmtpMatchesGolden) {
     EXPECT_EQ(mcvideo::controlSdp(40004, a), "m=application 40004 udp MCVideo\r\na=fmtp:MCVideo mc_queueing;mc_priority=5;mc_transmission_ssrc=305419896");
 }
 
+// 이어지는 offer(세션 갱신 re-INVITE) — 개시 offer(골든 05)의 mc_granted·mc_implicit_request 를 뺀다(TS 24.581 §14.5), 나머지·다른 줄은 그대로
+TEST(McvSip, SubsequentOfferDropsInitialOnlyFmtp) {
+    const std::string sdp = partOf(sipFixture("05_prearranged_initiate_invite.txt"), "application/sdp") + "\r\n";   // 본문은 CRLF 로 끝난다
+    ASSERT_NE(sdp.find("mc_granted;mc_implicit_request"), std::string::npos);
+    const std::string sub = mcvideo::forSubsequentOffer(sdp);
+    std::vector<std::string> fm = sdpLines(sub, "a=fmtp:MCVideo ");
+    ASSERT_EQ(fm.size(), 1u);
+    EXPECT_EQ(fm[0], "a=fmtp:MCVideo mc_priority=5;mc_transmission_ssrc=305419897") << fm[0];
+    EXPECT_EQ(replaceAll(sdp, "mc_granted;mc_implicit_request;", ""), sub);    // 그 둘만 빠진다
+    EXPECT_EQ(mcvideo::forSubsequentOffer(sub), sub);
+    const std::string plain = "v=0\r\nm=audio 4000 RTP/AVP 96\r\na=fmtp:96 mc_granted\r\n";
+    EXPECT_EQ(mcvideo::forSubsequentOffer(plain), plain);                      // MCVideo SDP 가 아니면 그대로
+}
+
 // «읽는 모양» — answer(04·06)·멤버 초대(07)의 제어 채널·fmtp·mcvideo-info
 TEST(McvSip, ParsesGoldenAnswersAndInvitation) {
     std::string ip;
@@ -483,7 +497,7 @@ TEST(McvSip, ParsesGoldenAnswersAndInvitation) {
     EXPECT_EQ(ip, "10.10.0.20");
     EXPECT_EQ(port, 58000);
     EXPECT_TRUE(f.present);
-    EXPECT_FALSE(f.queueing);                                 // 1차 서버는 대기열을 싣지 않는다
+    EXPECT_TRUE(f.queueing);                                  // offer 의 mc_queueing 을 서버가 되돌린다(송출 큐 — TS 24.581 §14.3.2)
     EXPECT_EQ(f.priority, 5);
     EXPECT_TRUE(f.hasTcSsrc);
     EXPECT_EQ(f.tcSsrc, 2863311530u);
@@ -804,6 +818,10 @@ TEST(McvCall, MemberInvitationAutoAnswer) {
     std::string okr = r.csp.recv("SIP/2.0 200");
     ASSERT_FALSE(okr.empty());
     dump("07r_member_answer_200", okr);
+    // 세션 갱신 주체 = 단말(TS 24.281 §6.2.3.1.1 5) — 제어 기능 초대는 refresher 를 싣지 않는다(골든 07, §6.3.3.1.2 6))
+    EXPECT_EQ(headerOf(inv, "Session-Expires"), "1800");
+    EXPECT_EQ(headerOf(okr, "Session-Expires"), "1800;refresher=uas");
+    EXPECT_NE(headerOf(okr, "Require").find("timer"), std::string::npos);
     ASSERT_TRUE(r.l.wait([&] { return !r.l.incoming.empty(); }));
     CallInfo in;
     { std::lock_guard<std::mutex> lk(r.l.m); in = r.l.incoming[0]; }

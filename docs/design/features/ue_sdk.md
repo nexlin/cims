@@ -421,6 +421,13 @@ MCVideo PSI. 동작(구현 — 시험 `McvSip`·`McvCall`, 계약 K3 골든과 �
   (TS 24.581 §6.3.5.3.8) 브리지 결선만이 아니라 **오디오 인코더를 멈춘다**(무음 프레임도 내지 않는다 — `noVad`) — 새 스트림은 브리지 결선 전(onStreamCreated)
   에 멈추고 허가·재협상마다 다시 건다. 빈 RTP keep-alive(PJMEDIA_STREAM_ENABLE_KA)·RTCP 는 그대로라 NAT·CMP latch 는 유지된다. 제어 채널은 호 성립 때
   1회 + 1 s 간격 2회 + 15 s 주기로 빈 RTCP RR(헤더 SSRC = 전송 제어와 같은 값)을 보낸다(ue_nat_traversal.md §7.1).
+- **세션 타이머** — 착신(멤버 초대) 200 OK 는 `Session-Expires: …;refresher=uas` + `Require: timer` 이고 단말이 갱신한다(TS 24.281 §6.2.3.1.1 2)·5) —
+  그룹 호 §6.2.3.1.2, §9.2.2.2.1.6 10) «요청에 없으면 uas, 있으면 그 값»; 제어 기능 초대는 refresher 를 싣지 않는다 §6.3.3.1.2 6)). pjsip UAS 는 요청에
+  refresher 가 없으면 uac 를 고르므로 수신 모듈(`mod-cimsue-rxfix`, 트랜잭션 계층 앞)이 착신 MCVideo 최초 INVITE 의 Session-Expires 에 `uas` 를 넣고 —
+  그러면 pjsip 이 갱신자가 되어 SE/2 에 갱신 re-INVITE(상대 Allow 에 UPDATE 가 있으면 UPDATE)를 보낸다 — pjsip 이 UAS 갱신자일 때 빼는 `Require: timer` 는
+  송신 모듈이 채운다. 발신(개시·재합류)은 서버 200 OK 의 `refresher=uac`(§6.3.3.2.3.2 2))를 따라 단말이 갱신한다. pjsip 갱신 re-INVITE 는 활성 로컬 SDP(개시
+  offer)를 그대로 보내므로 송신 모듈이 다이얼로그 안 offer 의 `mc_granted`·`mc_implicit_request` 를 뺀다(TS 24.581 §14.5 — 이어지는 offer 에 `mc_granted`
+  없음, `mc_implicit_request` 는 긴급 격상 re-INVITE 에서만). MCPTT 호는 이 보정을 받지 않는다.
 
 규격 대비 편차:
 
@@ -428,7 +435,6 @@ MCVideo PSI. 동작(구현 — 시험 `McvSip`·`McvCall`, 계약 K3 골든과 �
 |---|---|---|---|
 | 송출 RTP SSRC | Granted·answer 의 Audio/Video SSRC 를 쓴다(TS 24.581 §6.2.4.4.6 2·§14.4) | pjmedia 스트림 SSRC 그대로(offer 의 `a=ssrc` 광고) | pjmedia 는 호 중 스트림 SSRC 를 바꾸지 못한다. CMP 가 송출자를 멤버 전용 포트로 가려 할당 SSRC 를 찍고, 충돌이 없으면 offer `a=ssrc` 를 그대로 할당해(cmp_media_api.md §7.9) 분배·수신자 구분은 맞다 |
 | 영상 없는 빌드의 m=video | offer 에 m=video(§6.2.1 3)) | Linux 헤드리스·Windows 1차(config_site `PJMEDIA_HAS_VIDEO 0`)는 `m=video 0`(RFC 3264 §5.1 — 제안하되 쓰지 않는 스트림) | pjsua 영상 슬롯이 없다 — text 슬롯 둘 중 첫째를 영상 자리로. m-line 수·순서(K4)는 같고 음성·전송 제어는 그대로 협상된다. Android 는 실제 H.264 영상 |
-| 착신 200 OK 세션 갱신 주체 | `refresher=uas`(TS 24.281 §6.2.3.1.1 5)) | pjsip UAS 가 고른 값(`refresher=uac` — 요청에 refresher 가 없고 UAC 가 timer 를 지원할 때) | pjsip 세션 타이머에 UAS 갱신 선호 설정이 없다. 헤더만 바꾸면 양쪽 모두 갱신하지 않아 세션이 만료된다 — MCPTT 착신과 같은 동작 |
 
 ### 4.7 `cimsue-cli`
 

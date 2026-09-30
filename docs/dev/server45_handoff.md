@@ -581,3 +581,11 @@ SDK 쪽 편차로 적어 두자.
 
 **.45 에 확인 부탁** — SDK 송출 쪽(pjmedia vid_stream)이 받은 PLI 에 키프레임으로 답하는지(media source = 자기 SSRC 인 PLI). FIR 은 pjmedia 가 안 읽을 수
 있다 — CMP 는 받은 것과 같은 종류로 보내므로 SDK 수신 쪽은 PLI 만 내면 된다.
+
+**.45 A10·A11 짝 — 세션 타이머 (.45 → .48)** — [ue_sdk.md](../design/features/ue_sdk.md) §4.6 «세션 타이머».
+C3·C4 4 의 정정(.48 A10·A11 1번)대로 단말이 정한다 — 착신 MCVideo 최초 INVITE 의 Session-Expires 에 refresher 가 없으면 수신 모듈이 `uas` 로 두어 pjsip 이
+갱신자(UAS)가 되고 200 OK = `Session-Expires: …;refresher=uas` + `Require: timer`(§6.2.3.1.1 2)·5) — pjsip 은 UAS 갱신자일 때 Require 를 빼므로 송신 모듈이 채운다).
+Session-Expires 90 임시 시험으로 SE/2 에 단말 갱신 re-INVITE 가 나가는 것까지 봤다. 발신은 새 골든 04·06 의 `refresher=uac` 를 따라 단말이 갱신 — pjsip 갱신
+re-INVITE 는 개시 offer 를 그대로 보내므로 다이얼로그 안 offer 에서 `mc_granted`·`mc_implicit_request` 를 뺀다(TS 24.581 §14.5 — 서버가 긴급 격상 암묵 요청으로
+읽지 않게). 서버 200 OK 에 `Allow`(UPDATE)가 있으면 pjsip 은 SDP 없는 UPDATE 로 갱신한다. 새 골든 04 answer 의 `mc_queueing` 은 SDK 가 그대로 받는다. MCPTT 착신은
+이 보정 밖(라이브 호 동작 불변 — 같은 규격 문장 TS 24.379 쪽은 따로 판단).

@@ -19,6 +19,7 @@
 #include <cctype>
 #include <atomic>
 #include <condition_variable>
+#include <cstring>
 #include <ctime>
 #include <deque>
 #include <functional>
@@ -208,6 +209,8 @@ void setAudioTx(int callId, bool on) {
 
 /**
  * 송신 직전 SDP 보정 모듈 — MCVideo SDP 의 m=audio·m=video 에 `i=` 성분 표시를 넣는다(TS 24.281 §6.2.1 2)c)·3)d)·§6.2.2 3)c)·4)c)).
+ * MCVideo SDP 를 실은 INVITE 2xx 에는 `Require: timer` 도 채우고(requireTimer), 다이얼로그 안 offer 는 개시 전용 fmtp 를 뺀다
+ * (mcvideo::forSubsequentOffer).
  *
  * pjmedia SDP 는 미디어 수준 `i=` 를 담지 못해(파서가 버린다) onCallSdpCreated 로는 넣을 수 없다. 메시지 인쇄 모듈(mod-msg-print,
  * PJSIP_MOD_PRIORITY_TRANSPORT_LAYER) 바로 앞에서 본문 인쇄본(단일 SDP 또는 multipart 텍스트 전체)을 고쳐 같은 Content-Type(boundary
@@ -215,6 +218,27 @@ void setAudioTx(int callId, bool on) {
  * 쓰지 않는다. 재송신·인증 재전송은 이미 고친 본문이라 그대로 지난다. 판별은 본문(제어 채널 `udp MCVideo` m-line)으로 한다 — 호 표를
  * 보지 않으므로 pjsip 워커 스레드에서도 안전하다.
  */
+/** INVITE 2xx 에 `Require: timer`(TS 24.281 §6.2.3.1.1 2)) — pjsip 은 UAS 가 갱신자면(mcvideoRxFix) Require 를 싣지 않는다(RFC 4028 §9 는
+ *  refresher=uac 일 때만 요구). 이미 timer 가 있으면 그대로. */
+void requireTimer(pjsip_tx_data* tdata) {
+    pjsip_msg* msg = tdata->msg;
+    if (msg->type != PJSIP_RESPONSE_MSG || msg->line.status.code / 100 != 2) return;
+    auto* cseq = static_cast<pjsip_cseq_hdr*>(pjsip_msg_find_hdr(msg, PJSIP_H_CSEQ, nullptr));
+    if (!cseq || cseq->method.id != PJSIP_INVITE_METHOD) return;
+    static const pj_str_t timer = {const_cast<char*>("timer"), 5};
+    for (void* h = pjsip_msg_find_hdr(msg, PJSIP_H_REQUIRE, nullptr); h;
+         h = pjsip_msg_find_hdr(msg, PJSIP_H_REQUIRE, static_cast<pjsip_hdr*>(h)->next)) {
+        auto* r = static_cast<pjsip_require_hdr*>(h);
+        for (unsigned i = 0; i < r->count; ++i)
+            if (pj_stricmp(&r->values[i], &timer) == 0) return;
+    }
+    pjsip_require_hdr* r = pjsip_require_hdr_create(tdata->pool);
+    r->count = 1;
+    r->values[0] = timer;
+    pjsip_msg_add_hdr(msg, reinterpret_cast<pjsip_hdr*>(r));
+    pjsip_tx_data_invalidate_msg(tdata);
+}
+
 pj_status_t mcvideoTxFix(pjsip_tx_data* tdata) {
     pjsip_msg_body* body = tdata && tdata->msg ? tdata->msg->body : nullptr;
     if (!body || !body->print_body) return PJ_SUCCESS;
@@ -225,7 +249,16 @@ pj_status_t mcvideoTxFix(pjsip_tx_data* tdata) {
     if (n <= 0) return PJ_SUCCESS;
     const std::string text(buf.data(), (size_t)n);
     if (text.find(" MCVideo") == std::string::npos) return PJ_SUCCESS;
-    const std::string fixed = sdp ? mcvideo::withMediaInfo(text) : mcvideo::withMediaInfoMultipart(text);   // 파트 Content-Length 도
+    requireTimer(tdata);
+    std::string fixed = sdp ? mcvideo::withMediaInfo(text) : mcvideo::withMediaInfoMultipart(text);   // 파트 Content-Length 도
+    // 다이얼로그 안 offer(re-INVITE·UPDATE — pjsip 세션 갱신 포함)는 개시 전용 fmtp 를 뺀다(TS 24.581 §14.5). 이어지는 offer 는 단일 SDP 다.
+    const pjsip_msg* msg = tdata->msg;
+    if (sdp && msg->type == PJSIP_REQUEST_MSG) {
+        const pjsip_method& m = msg->line.req.method;
+        auto* to = static_cast<const pjsip_to_hdr*>(pjsip_msg_find_hdr(msg, PJSIP_H_TO, nullptr));
+        const bool inDialog = to && to->tag.slen > 0;
+        if (inDialog && (m.id == PJSIP_INVITE_METHOD || pj_stricmp2(&m.name, "UPDATE") == 0)) fixed = mcvideo::forSubsequentOffer(fixed);
+    }
     if (fixed == text) return PJ_SUCCESS;
     pj_str_t t;
     pj_strdup2_with_null(tdata->pool, &t, fixed.c_str());
@@ -245,6 +278,39 @@ pjsip_module g_txFixModule = {
     nullptr, nullptr, nullptr, nullptr,                 // load, start, stop, unload
     nullptr, nullptr,                                   // on_rx_request, on_rx_response
     &mcvideoTxFix, &mcvideoTxFix,                       // on_tx_request, on_tx_response
+    nullptr,                                            // on_tsx_state
+};
+
+/**
+ * 수신 보정 모듈 — 착신 MCVideo 최초 INVITE(제어 기능의 멤버 초대)의 Session-Expires 에 refresher 가 없으면 `uas` 로 정한다.
+ *
+ * 단말의 200 OK 는 refresher = uas(TS 24.281 §6.2.3.1.1 5) — 그룹 호 §6.2.3.1.2 가 따른다, §9.2.2.2.1.6 10) «요청에 없으면 uas, 있으면 그
+ * 값»)이고 제어 기능은 멤버 초대에 refresher 를 싣지 않는다(§6.3.3.1.2 6)). pjsip UAS 는 요청에 refresher 가 없고 UAC 가 timer 를 지원하면
+ * uac 를 골라(RFC 4028 §9 의 UAS 선택 — 설정 없음) pjsip 이 요청을 처리하기 전(트랜잭션 계층 앞)에 받은 헤더에 값을 넣는다. 그러면
+ * pjsip 이 갱신자(UAS)가 되어 200 OK 에 uas 를 싣고 갱신 요청을 보낸다. 다이얼로그 안 요청은 협상된 갱신자를 pjsip 이 지킨다.
+ * 판별은 원문의 mcvideo-info 파트 — 호 표를 보지 않으므로 워커 스레드에서도 안전하다. MCPTT 는 건드리지 않는다.
+ */
+pj_bool_t mcvideoRxFix(pjsip_rx_data* rdata) {
+    pjsip_msg* msg = rdata ? rdata->msg_info.msg : nullptr;
+    if (!msg || msg->type != PJSIP_REQUEST_MSG || msg->line.req.method.id != PJSIP_INVITE_METHOD) return PJ_FALSE;
+    if (rdata->msg_info.to && rdata->msg_info.to->tag.slen) return PJ_FALSE;
+    const pj_str_t whole = {rdata->msg_info.msg_buf, (pj_ssize_t)rdata->msg_info.len};
+    const pj_str_t ct = {const_cast<char*>(mcvideo::kCtInfo), (pj_ssize_t)std::strlen(mcvideo::kCtInfo)};
+    if (!rdata->msg_info.msg_buf || !pj_strstr(&whole, &ct)) return PJ_FALSE;
+    static const pj_str_t se = {const_cast<char*>("Session-Expires"), 15}, sx = {const_cast<char*>("x"), 1};
+    auto* h = static_cast<pjsip_sess_expires_hdr*>(pjsip_msg_find_hdr_by_names(msg, &se, &sx, nullptr));
+    if (h && h->refresher.slen == 0) h->refresher = pj_str(const_cast<char*>("uas"));
+    return PJ_FALSE;                                                     // 다음 모듈로 — 요청은 그대로 흐른다
+}
+
+pjsip_module g_rxFixModule = {
+    nullptr, nullptr,                                   // prev, next
+    {const_cast<char*>("mod-cimsue-rxfix"), 16},        // name
+    -1,                                                 // id
+    PJSIP_MOD_PRIORITY_TSX_LAYER - 1,                   // 트랜잭션 계층 앞(수신은 낮은 값 → 높은 값 순)
+    nullptr, nullptr, nullptr, nullptr,                 // load, start, stop, unload
+    &mcvideoRxFix, nullptr,                             // on_rx_request, on_rx_response
+    nullptr, nullptr,                                   // on_tx_request, on_tx_response
     nullptr,                                            // on_tsx_state
 };
 
@@ -1777,6 +1843,9 @@ Result Engine::start(const EngineConfig& cfg, Listener* listener) {
             // 송신 직전 SDP 보정(MCVideo 미디어 i= — mcvideoTxFix). 모듈은 endpoint 가 없어질 때(libDestroy) 함께 풀린다.
             if (pjsip_endpt_register_module(pjsua_get_pjsip_endpt(), &g_txFixModule) != PJ_SUCCESS)
                 o->log(2, "tx fix module registration failed — MCVideo SDP i= lines will be missing");
+            // 착신 MCVideo 초대의 세션 갱신 주체 = uas(mcvideoRxFix)
+            if (pjsip_endpt_register_module(pjsua_get_pjsip_endpt(), &g_rxFixModule) != PJ_SUCCESS)
+                o->log(2, "rx fix module registration failed — MCVideo 200 OK refresher will be uac");
             {
                 pj::TransportConfig tc; tc.port = o->cfg.udpPort;
                 o->ep->transportCreate(PJSIP_TRANSPORT_UDP, tc);

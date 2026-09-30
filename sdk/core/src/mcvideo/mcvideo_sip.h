@@ -85,6 +85,11 @@ bool isMcVideoSdp(const std::string& sdp);
  *  그대로. pjmedia SDP 는 미디어 i= 를 담지 못해(파서가 버린다) 전송 직전에 넣는다. */
 std::string withMediaInfo(const std::string& sdp);
 
+/** 이어지는 offer(re-INVITE·UPDATE — 세션 갱신 포함)의 제어 채널 fmtp — `mc_granted` 는 싣지 않고(TS 24.581 §14.5), `mc_implicit_request`
+ *  는 일반 → 긴급 격상 re-INVITE 에서만 뜻이 있어(§14.5 · §6.3.5.3.9) 뺀다. pjsip 세션 갱신 re-INVITE 는 onCallSdpCreated 를 거치지 않고
+ *  활성 로컬 SDP(개시 offer)를 그대로 보내므로 송신 직전에 적용한다. MCVideo SDP 가 아니면 그대로. */
+std::string forSubsequentOffer(const std::string& sdp);
+
 /** multipart 본문 텍스트(pjsip 인쇄본 — 파트마다 Content-Type·Content-Length)에서 application/sdp 파트에 withMediaInfo 를 적용하고 그 파트의
  *  Content-Length 를 새 길이로 고친다. 구분자는 본문의 첫 `--` 줄. 다른 파트·서문·끝 구분자는 그대로. */
 std::string withMediaInfoMultipart(const std::string& text);
