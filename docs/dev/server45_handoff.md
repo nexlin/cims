@@ -535,3 +535,16 @@ K3 골든을 SDK 가 **만든 메시지**(01·02·03·05·08 모양)와 대조�
 6·7. 확인 — 전송 제어 평문(1차)은 CMP 도 `tc_crypto` 없는 멤버에게 평문이다. 파트 순서는 CSP 도 Content-Type 으로 찾는다(`McVideoBodyPart`).
 
 **다음 (.48)** — A10(`McVideoCallService` — chat·prearranged 개시·합류·재합류·퇴장·해제, 위 3~5 포함) + A11(SDP·CmpClient MCVideo 명령). B6·B8 은 그 뒤.
+
+**.45 C8·C7 — cimsue-cli·구동 명령 + 바인딩 (.45 → .48·Windows)** — [ue_sdk.md](../design/features/ue_sdk.md) §4.6·§4.7 · [mcvideo.md](../design/features/mcvideo.md) §5.4.
+
+| 항목 | SDK |
+|---|---|
+| C8 cimsue-cli | `video-call <g>`(`--mcvideo`·`--mcvideo-psi` · `--prearranged` · `--implicit` · `--queueing`·`--priority` · `--transmit-at S --transmit-len S` · `--rejoin <sessionUri>` · `--accept`) · `video-answer`(멤버 초대 대기) · 종료 코드 6 = 송출 허가 못 받음. affiliation 명령은 없다(실서버 배포 알림 전) |
+| C8 구동(drive) | 명령 `video_call`·`transmit_request`·`transmit_release`·`reception_accept`·`reception_end`, 이벤트 `transmission`·`reception`, `incoming`·`call` 에 `service` |
+| C7 호 표면 | C API·.NET·Kotlin — 그룹 호 개시·재합류·전송/수신 제어·서비스별 affiliation·이벤트, 그룹 영상 옵션·`mcpttVideo` 누락 보충 |
+| C7 설정 문서 | 그룹 문서 MCVideo 몫(`McVideoGroupAttrs` — 없음 = MCVideo 그룹 아님, **PUT 에 싣지 않아 서버 MCVideo 설정 유지**)·멤버 `mcvideoId`·MCVideo user profile(404 = 자격 없음)·service config(T100~T104)·ue-init-config MCVideo PSI |
+| ABI | C 구조체는 끝에 덧붙였다 — 그래도 `cimsue_group_member_t`(배열 원소)·`cimsue_account_config_t` 등이 커졌으니 **cimsue.dll 과 CimsUe.dll 은 함께 바꾼다**. 크기 자기검사 id 8개 추가(AbiLayoutTests) |
+| 시험 | `cimsue_test` 145/145 · S1 UE·`S1-MCVIDEO-CONTRACT`·`S1-CPP-FORMAT` PASS · `compileDebugKotlin` OK. .NET 빌드·`CimsUe.Tests` 는 Windows PC 몫(결과 대기) |
+
+**다음 (.45)** — A10·A11 푸시 뒤 C8 cli 로 .48 신호 시험(배포·역할 켜기 = 사용자 결정 뒤) · Linux 엔진 영상(M2 — 사용자 결정 대기) · C6 송출 영상·송출별 렌더.
