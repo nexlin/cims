@@ -177,7 +177,8 @@ C API·.NET = Windows 개발 환경**.
   비우면 코어가 만든다 — 관제 데스크톱 재전송이 처음 msgId 로 보낸다).
 - **코어 동작 변화(자동 적용)** — 조건 판정이 그 re-INVITE 의 트랜잭션만 본다(§4) · 영상 창 결선은 렌더러가 없으면 건너뛴다(§1.3).
 - **PTT 그룹 영상(ue_sdk.md §4.5)** — `GroupCallOptions.video` · `AccountConfig.mcpttVideo` · `CallInfo.videoSend` · `Engine::setVideoSend` 는
-  C API·.NET 미노출이다(영상 API `setVideoWindow`·`switchCamera` 와 함께 F3 에서 — 지금 C 구조체에 붙이면 .NET 구조체 1:1 이 깨진다).
+  C API·.NET 미노출이다 — Windows 영상(F3)에서 함께 낸다(붙일 때는 C 구조체 끝에 덧붙이고 .NET 구조체·`AbiLayoutTests` 를 같은 변경에서). 영상 창·카메라
+  함수(`cimsue_engine_set_video_window`·`switch_camera`·`video_devices`)는 §2 에서 이미 나 있고, 영상 없는 빌드에서는 실패를 돌려준다.
   Windows 엔진은 `PJMEDIA_HAS_VIDEO 0` 이라 코어 영상 경로가 컴파일에서 빠진다. `CallInfo.video` 는 미디어 성립 뒤 협상 결과로 바뀐다
   (착신 대기 중 = offer 의 m=video — 기존 표시 그대로). pjproject 에 CIMS 패치 `PJSUA_CALL_VID_STRM_SEND_KEEPALIVE`(enum 끝)가 더해졌다.
 
