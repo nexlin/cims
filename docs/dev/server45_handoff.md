@@ -597,3 +597,20 @@ media source SSRC 검사 없이 받아 `vid_stream` 이 `pjmedia_vid_stream_send
 않으므로 RFC 4585 §4.2(협상한 피드백만 보낸다)대로 CMP 는 그 멤버에게 FIR 대신 PLI 를 보내면 된다 — 수신 시작 계기(CMP 발) 도 PLI. 수신자 FIR 을 옮길 때도 송출자
 SDP 에 `ccm fir` 가 없으면 PLI 로 바꿔 보내자. ③ SDK 수신 쪽은 복호 중 키프레임 누락 이벤트에서 PLI 를 낸다(서버 answer 에 `nack pli` 가 있을 때 — 골든 04·06 은 있다).
 송출 시작 때는 pjmedia 가 키프레임 몇 장을 먼저 보낸다(`sk_cfg` 기본).
+
+**M2 신호 시험 절차 제안 (.45 → .48 · 사용자)** — 실행은 **사용자 결정 셋 뒤**: ① .48 에만 CSP(A7~A11)·CMP(B3~B7)·CSC(A1~A6) 배포 ② 공유 DB
+`sql/migrate_mcvideo.sql`(표 추가 — .45 라이브 CSP 는 MCVideo 코드가 없어 영향 없음) ③ .48 `Setup.Roles.MCVIDEO` 켜기. 준비(.48, A6 관리 API) = 라이브 그룹(g001·g002·g005)
+이 아닌 **새 시험 그룹**(예 `gmv1`, chat)에 `mcvideo` 속성 + 라이브 단말(001·002·007)이 아닌 시험 신원 2~3개의 PTT 회선 MCVideo 자격. UE = .45 의 `cimsue-cli`
+(`--from-profile ptt` + `--mcvideo`, 영상 없는 엔진이라 음성·전송 제어만 — `m=video 0`), 대상 = .48 CSP.
+
+| # | 무엇 | UE 명령(요지) | 확인 |
+|---|---|---|---|
+| T1 | 등록 태그 | `--mcvideo register --hold 5` | CSP 바인딩 MCVideo 참, 태그 뺀 재등록 = 거짓 |
+| T2 | affiliation | `--mcvideo --affiliate-mcvideo gmv1 register --hold 5` | 200 `Expires: 4294967295`, `mcvideo_affiliations` 행 생김·끝나면 지워짐, **`ptt_affiliations` 무변화**(0159 위험의 회귀) |
+| T3 | chat 합류·송출·수신 | B `video-call gmv1 --accept --duration 20` 뒤 A `video-call gmv1 --transmit-at 2 --transmit-len 5 --duration 15` | A `tx_granted`, B `rx_notified`→`rx_granted`, B 음성 RTP 는 A 허가 동안만 |
+| T4 | prearranged 팬아웃·암묵 요청 | 그룹 invite-members = true · B `--affiliate-mcvideo gmv1 video-answer --accept --duration 20` 뒤 A `video-call gmv1 --prearranged --implicit --transmit-at 1 --transmit-len 5` | B 초대 200 `refresher=uas`, A 200 이 B 뒤·answer `mc_implicit_request;mc_granted` |
+| T5 | 재합류 | T4 도중 A `video-call gmv1 --rejoin <T4 A 의 session_uri>` | R-URI `gr` 로 같은 세션, 암묵 요청 없음 |
+| T6 | 그룹 종류 거절 | chat 호를 prearranged 그룹에 / 반대 | 404 + Warning 117 / 118 |
+| T7 | MCPTT 회귀 | 같은 신원으로 기존 `group-call` (MCPTT 그룹) | floor·affiliation 정상 — MCVideo 와 섞이지 않음 |
+
+세션 갱신(SE/2 = 900 s)은 단위·임시 시험으로 봤으므로 M2 에서는 선택(16 분 호 한 번). 영상 RTP·PLI 는 Linux 엔진 영상(사용자 결정) 또는 C6 Android 실기에서.
