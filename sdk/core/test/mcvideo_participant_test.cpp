@@ -454,3 +454,68 @@ TEST(McvParticipant, StateGuards) {
     p.close();
     EXPECT_FALSE(p.releaseTransmission().ok);                 // 'Call releasing'
 }
+
+// §6.2.5.4.2 — 서버가 Ack 을 못 받아 Receive Media Response(Granted)를 다시 보내면(T6·C6 — mcvideo.md §5.3.1) 이미 받는 중이어도 Ack 한다
+TEST(McvParticipant, RetransmittedReceiveResponseAcked) {
+    cimsue_test::PjScope pj;
+    FakeServer srv;
+    Rec rec;
+    Participant p(1, 0x11, kMe, rec.cb());
+    wire(p, srv);
+    p.onEstablished();
+    auto note = transmission(kPeer, 0xA3, 0xB3);
+    note.push_back(u16Field(Field::RECEPTION_MODE, (int)ReceptionMode::MANUAL));
+    srv.send(AppName::MCV1, (uint8_t)Mcv1::MEDIA_TRANSMISSION_NOTIFICATION, note);
+    ASSERT_TRUE(waitFor([&] { return rec.hasRx(ReceptionEvent::Kind::Notified); }, 1000));
+    ASSERT_TRUE(p.acceptReception(kPeer).ok);
+    ASSERT_TRUE(srv.expect(AppName::MCV0, (uint8_t)Mcv0::RECEIVE_MEDIA_REQUEST));
+    auto resp = transmission(kPeer, 0xA3, 0xB3);
+    resp.push_back(u16Field(Field::RESULT, (int)ReceiveResult::GRANTED));
+    for (int i = 0; i < 2; ++i) {                              // 첫 전송 + 재송신
+        srv.send(AppName::MCV1, (uint8_t)Mcv1::RECEIVE_MEDIA_RESPONSE, resp, true);
+        Message m;
+        ASSERT_TRUE(srv.expect(AppName::MCV2, (uint8_t)Mcv2::TRANSMISSION_CONTROL_ACK, &m)) << "ack #" << i;
+        EXPECT_EQ(m.messageName(), "MCV1");
+        EXPECT_EQ(m.messageType(), (int)Mcv1::RECEIVE_MEDIA_RESPONSE);
+    }
+    EXPECT_EQ(p.info().transmitters[0].state, ReceptionState::Receiving);
+    EXPECT_EQ(rec.recvCount(), 1u);                           // 재송신은 수신을 다시 결선하지 않는다
+    p.close();
+}
+
+// 제어 채널 NAT 유지(ue_nat_traversal.md §7.1) — 성립 즉시 빈 RTCP RR(PT 201, 헤더 SSRC = 서버가 기대하는 값), 1 s 간격으로 이어진다
+TEST(McvParticipant, KeepaliveReceiverReports) {
+    cimsue_test::PjScope pj;
+    FakeServer srv;
+    Rec rec;
+    Participant p(1, 0x11, kMe, rec.cb());
+    wire(p, srv);
+    auto rr = [&](int ms) -> std::vector<uint8_t> {            // 다음 RR 한 개(8 바이트) — 시한 안에 없으면 빈 값
+        auto end = std::chrono::steady_clock::now() + std::chrono::milliseconds(ms);
+        while (std::chrono::steady_clock::now() < end) {
+            pj_fd_set_t fds;
+            PJ_FD_ZERO(&fds);
+            PJ_FD_SET(srv.s, &fds);
+            pj_time_val tv = {0, 20};
+            if (pj_sock_select((int)srv.s + 1, &fds, nullptr, nullptr, &tv) <= 0) continue;
+            uint8_t buf[64];
+            pj_ssize_t n = sizeof(buf);
+            if (pj_sock_recv(srv.s, buf, &n, 0) == PJ_SUCCESS && n == 8 && buf[1] == 201) return std::vector<uint8_t>(buf, buf + 8);
+        }
+        return {};
+    };
+    EXPECT_TRUE(rr(300).empty());                             // 호 성립 전에는 보내지 않는다
+    p.onEstablished();
+    auto t0 = std::chrono::steady_clock::now();
+    auto a = rr(500);
+    ASSERT_EQ(a.size(), 8u);
+    EXPECT_EQ(a[0], 0x80);                                    // V=2 · P=0 · RC=0
+    EXPECT_EQ(a[3], 1);                                       // length 1(32비트 워드 − 1)
+    EXPECT_EQ(((uint32_t)a[4] << 24) | ((uint32_t)a[5] << 16) | ((uint32_t)a[6] << 8) | a[7], 0x51515151u);
+    auto b = rr(1500);
+    ASSERT_EQ(b.size(), 8u);
+    auto gap = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0).count();
+    EXPECT_GE(gap, 800);
+    EXPECT_LE(gap, 1500);
+    p.close();
+}

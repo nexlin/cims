@@ -209,6 +209,15 @@ Floor Ack 를 keepalive 로 쓰는 것은 TS 24.380 이 규정한 절차는 아�
 NAT traversal 을 (ICE 전제로) 다루지 않으므로, User ID 필드를 이용한 주소 latch 와 그 유지는
 CIMS 의 규격 적합 확장이다. Ack 는 서버 상태를 바꾸지 않아 부작용이 없다.
 
+**MCVideo 그룹 호**(TS 24.281·24.581 — [mcvideo.md](mcvideo.md) §5.4)는 멤버 유닛의 소켓이 넷이다(음성·영상 RTP/RTCP·전송 제어 —
+cmp_media_api.md §7.9). 단말은 사용자가 누르기 전에는 보낼 전송 제어 메시지가 없고, 송출 허가 밖에서는 payload 있는 RTP 를
+보낼 수 없다(서버가 회수 #3). 그래서 규격 메시지 대신 **내용 없는 규격 패킷**으로 매핑을 연다:
+
+| 소켓 | UE 동작 | 주기 | 미이행 시 증상 |
+|---|---|---|---|
+| 전송 제어 (m=application udp MCVideo) | **빈 RTCP RR**(RFC 3550 §6.4.2 — V=2·RC=0·PT 201, 헤더 SSRC = answer `mc_transmission_ssrc`) — 호 성립 때 1회 + 1 s 간격 2회 + 주기 송신(코어 `mcvideo/tc_participant`). 서버는 그 소켓의 형식 검사를 통과한 첫 패킷으로 latch 하고 APP 이 아닌 RTCP 는 해석하지 않고 버린다(드롭 카운터에 세지 않는다). 보호 채널(`tc_crypto`)이면 SRTCP 로 보호해 보낸다 — 평문 RR 도 latch 는 되지만 해석 전에 버려진다 | 15 s | 송출 허가·새 송출 알림·수신 허가 미수신 |
+| audio·video RTP | **빈 RTP keepalive**(`PJMEDIA_STREAM_ENABLE_KA`, 영상은 코어 틱) — 송출 허가 밖에서도 나간다. 허가 밖에서는 오디오 인코더를 멈춰 무음 프레임(payload)은 내지 않는다 | 5 s | [받기] 뒤에도 하향 영상·음성 전무 |
+
 ## 8. 표준 근거
 
 | 규격 | 규정 내용 | 대응 |

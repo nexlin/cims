@@ -75,7 +75,8 @@ struct AccountConfig {
     std::vector<std::string> secMechanisms;
     MediaSecurity mediaSecurity = MediaSecurity::Off;
     int expiresSec = 3600;
-    /** REGISTER Contact 부가 파라미터(feature tag 등). */
+    /** Contact 부가 파라미터 — 모든 요청·응답의 Contact 에 붙는다. 단 `+g.3gpp.icsi-ref` 는 REGISTER Contact 의 서비스 ICSI 목록에
+     *  합쳐지고 다른 요청에는 싣지 않는다(서비스 태그는 REGISTER 에 모으고 서비스 호는 자기 태그를 싣는다 — TS 24.281 §7.1). */
     std::string contactParams;
     /** 영상 발신 시 카메라 자동 송신(Android). 헤드리스는 false. */
     bool videoAutoTransmit = false;
@@ -99,8 +100,8 @@ struct AccountConfig {
      *  본문이 넘으면 sendGroupSds 가 media plane(MSRP, TS 24.282 §9.2.3)으로 보낸다 — 서버는 초과 MESSAGE 를 403 으로 거절한다(§9.2.2 8)).
      *  0 = 제한 없음. 1:1 SDS 는 늘 시그널링 평면이다(서버 media plane 이 그룹만 받는다 — mcdata_messaging.md §4.7). */
     int maxSdsCplaneBytes = 0;
-    /** 서버발 MSRP 배포를 받는다 — REGISTER Contact 의 `+g.3gpp.icsi-ref` 에 ICSI mcdata.sds 를 싣는다(코어가 contactParams 의
-     *  기존 icsi-ref 목록에 합친다). false 면 서버가 큰 그룹 SDS 를 FILEURL(FD)로 폴백해 보낸다. */
+    /** 서버발 MSRP 배포를 받는다 — REGISTER Contact 의 `+g.3gpp.icsi-ref` 목록에 ICSI mcdata.sds 를 싣는다(서비스 ICSI 는 한 목록 —
+     *  RFC 3840). false 면 서버가 큰 그룹 SDS 를 FILEURL(FD)로 폴백해 보낸다. */
     bool mcdataMsrp = false;
     /** 참여 MCPTT 기능의 PSI — ue-init-config `<anyExt><MCPTT-Service-Details><Server-URI>`(TS 24.484 §7.2.2.3).
      *  긴급 경보 MESSAGE 의 Request-URI(TS 24.379 §12.1.1.1 8)). 비면 그룹 URI 로 보낸다(CSP 0.2.166 전 서버와의 전환기). */
@@ -112,12 +113,17 @@ struct AccountConfig {
     /** MCPTT 그룹 영상(ptt_flows.md 영상 협상) — 자동 수락(autoAnswerMcptt)하는 착신 INVITE 가 m=video 를 제안하면 영상까지
      *  받는다(서버는 video_enabled 그룹에서만 제안한다). false 면 port 0 으로 거절 — 음성만. 개시는 GroupCallOptions.video. */
     bool mcpttVideo = false;
-    /** MCVideo 서비스 사용(mcvideo.md §5.4) — REGISTER Contact 에 `+g.3gpp.mcvideo` 와 mcvideo ICSI(`+g.3gpp.icsi-ref`)를 MCPTT 것과 함께
-     *  싣는다(TS 24.281 §7.2.1 — MCVideo 로그오프 = 태그를 뺀 재-REGISTER). MCVideo ID 는 effectiveMcpttId(). */
+    /** MCVideo 서비스 사용(mcvideo.md §5.4) — REGISTER Contact 에 `+g.3gpp.mcvideo` 와 `+g.3gpp.icsi-ref` 목록의 mcvideo ICSI 를
+     *  싣는다(TS 24.281 §7.2.1AA — 서비스 인가 본문 없는 등록. MCVideo 로그오프 = 태그를 뺀 재-REGISTER, §7.2.1 NOTE 1 — 값을 바꾼 뒤
+     *  계정을 다시 만들어 등록한다). MCVideo ID 는 effectiveMcpttId(), MCVideo client ID 는 effectiveMcpttClientId()(단일 MC 서비스
+     *  신원 — mcvideo.md §7 D1). */
     bool mcvideoEnabled = false;
     /** 참여 MCVideo 기능의 PSI — ue-init-config `<anyExt><MCVideo-Service-Details><Server-URI>`(TS 24.484 §7.2.2.1).
      *  MCVideo 그룹 호 INVITE·affiliation PUBLISH 의 Request-URI(TS 24.281 §9.2.1.2.1.1·§8.2). 비면 MCVideo 호·affiliation 을 열지 않는다. */
     std::string mcvideoServerUri;
+    /** MCVideo 그룹 호 초대(제어 기능의 prearranged 멤버 초대 — TS 24.281 §9.2.1.3) 자동 수락 = 자동 개시(§6.2.3.1.2). 수락은 세션
+     *  합류일 뿐이고 영상 보기는 수신 제어(acceptReception — manual 수신)가 따로 정한다. false 면 앱이 answer/reject(수동 개시 §6.2.3.2.2). */
+    bool autoAnswerMcvideo = true;
 
     std::string aor() const { return "sip:" + msisdn + "@" + domain; }
     std::string effectiveMcpttId() const { return mcpttId.empty() ? "tel:" + msisdn : mcpttId; }
@@ -202,6 +208,9 @@ struct VideoGroupCallOptions {
     /** 호 성립과 함께 송출 요청 — fmtp `mc_implicit_request` + 200 OK 허가 수용 `mc_granted`(§14.2.4·§14.2.5). 서버가 받지 않으면
      *  (chat 합류·진행 중 prearranged 합류 — §14.3.5) 코어가 명시 Transmission Request 로 잇는다. */
     bool implicitTransmissionRequest = false;
+    /** 진행 중 세션 재합류(TS 24.281 §9.2.1.2.4) — 앞 호의 CallInfo.sessionUri(제어 기능이 준 MCVideo 세션 식별자). 주면 INVITE
+     *  Request-URI·To = 이 값, session-type prearranged, 암묵적 송출 요청은 싣지 않는다(진행 중 세션 — TS 24.581 §14.3.5). */
+    std::string sessionUri;
 };
 
 /** 착신 INVITE 의 mcptt-info(TS 24.379 §F.1) 요약. */
@@ -280,6 +289,9 @@ struct CallInfo {
     /** MC 호의 서비스 — MCVideo 그룹 호면 McVideo(그때 isMcptt 는 false, 제어는 전송 제어 — onTransmission·onReception),
      *  그 밖의 호는 Mcptt(MCPTT 세션인지는 isMcptt). 나가기는 둘 다 hangup(두 호는 독립 다이얼로그 — TS 24.281 §7.1). */
     McService service = McService::Mcptt;
+    /** MC 세션 식별자 — 제어 기능이 200 OK·멤버 초대 Contact(isfocus)로 준 세션 URI(TS 24.281 §6.3.3.1.2 1)·§9.2.2.4.1.1 19)). 재합류
+     *  (VideoGroupCallOptions.sessionUri)에 쓴다. MCVideo 호에서 채운다. */
+    std::string sessionUri;
     // ── MCPTT ──
     bool isMcptt = false;             // 그룹콜/사설콜 세션(floor 평면 있음 또는 mc_no_floor_ctrl)
     std::string groupId;              // 그룹 id(bare) 또는 사설콜 상대(bare)

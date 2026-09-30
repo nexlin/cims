@@ -109,7 +109,8 @@ sdk/core/
     mcvideo/            tc_defs.h(생성 — MCVideo 전송 제어 TS 24.581 §9.2·§11·§12.1.2 정의, §4.6) · tc_codec(§9 RTCP APP
                         MCV0/1/2 TLV — CMP PTransmissionCodec 과 바이트 호환, §9.1.4 수신 검사, 참여자 빌더 §6.2.4·§6.2.5) ·
                         tc_participant(§6.2.4 송출 + §6.2.5 수신 상태 머신 + 제어 채널 UDP 소켓 · T100~T104·C100~C104 · 호 성립 전
-                        메시지 보관 · 암묵적 송출 요청) — 엔진 결선(C4·C6) 전
+                        메시지 보관 · 암묵적 송출 요청 · 제어 채널 NAT 유지 RR) · mcvideo_sip(TS 24.281 경계 코덱 — mcvideo-info
+                        빌드·해석, affiliation pidf, 제어 채널 SDP·fmtp, Contact·Accept-Contact 태그, 미디어 i= 보정)
     mcptt/              mcptt_xml — mcptt-info·resource-lists·affiliation-command·긴급 경보(alert-ind, §F.1 요소 순서) 빌더,
                         mcptt-info/conference-info/경보 파서, 지시자 삼중값(`indicator` — true/false/없음)
     mcdata/             sds_codec — TS 24.282 SDS SIGNALLING/DATA PAYLOAD/NOTIFICATION·FD SIGNALLING TLV + multipart(base64) 빌드·파싱
@@ -382,12 +383,45 @@ configuration 값, 없으면 K5 기본). 규격이 비워 둔 곳의 해석은 [
 허가·종료·재전송 시한·거절·회수 #4/#7·서버 종료 요청·manual/automatic 수신·수신 거절·서버 수신 종료·암묵 요청 셋·상태 가드).
 
 **MCVideo 공개 표면**(계약 K7 — [../../dev/mcvideo_dev_plan.md](../../dev/mcvideo_dev_plan.md) §3) — `McService`(Mcptt·McVideo)·
-`AccountConfig.mcvideoEnabled`·`mcvideoServerUri`, `affiliate(…, service)`, `joinVideoGroupCall`(`VideoGroupCallOptions` — chat/prearranged·
-`mc_queueing`·`mc_priority`·`mc_reception_priority`·암묵적 송출 요청), `requestTransmission`·`releaseTransmission`·`acceptReception`·`endReception`·
-`transmissionInfo`, `Listener::onTransmission`·`onReception`(`TransmissionEvent`·`ReceptionEvent` — §6.2.4·§6.2.5 상태), `CallInfo.service`.
-선언만 고정했고 구현 전이라 호·전송 제어 명령은 실패(`joinVideoGroupCall` = -1, 나머지 `Result` code -3)를, `affiliate(…, McVideo)` 는 -1 을
-돌려준다 — 호 제어·전송 제어 참여자·결선은 [mcvideo.md](mcvideo.md) §5.4(개발 항목 C3~C6). SWIG 는 선언만으로 Java 를 낸다
-(`VideoTransmitterVector` 템플릿), C API·.NET 은 C7 에서 같은 이름으로 낸다.
+`AccountConfig.mcvideoEnabled`·`mcvideoServerUri`·`autoAnswerMcvideo`, `affiliate(…, service)`, `joinVideoGroupCall`(`VideoGroupCallOptions` —
+chat/prearranged·`mc_queueing`·`mc_priority`·`mc_reception_priority`·암묵적 송출 요청·재합류 `sessionUri`), `requestTransmission`·
+`releaseTransmission`·`acceptReception`·`endReception`·`transmissionInfo`, `Listener::onTransmission`·`onReception`(`TransmissionEvent`·
+`ReceptionEvent` — §6.2.4·§6.2.5 상태), `CallInfo.service`·`sessionUri`. SWIG 는 `VideoTransmitterVector` 템플릿으로 Java 를 내고, C API·.NET 은
+C7 에서 같은 이름으로 낸다. 동작(구현 — 시험 `McvSip`·`McvCall`, 계약 K3 골든과 대조):
+
+- **등록**(TS 24.281 §7.2.1AA — 서비스 인가 본문 없는 REGISTER) — `mcvideoEnabled` 면 REGISTER Contact 에 `+g.3gpp.mcvideo` 와 `+g.3gpp.icsi-ref`
+  목록의 mcvideo ICSI. **서비스 태그는 REGISTER 에만 모은다**(§7.1 — MC 서비스 등록은 한 REGISTER): icsi-ref 는 한 파라미터의 쉼표 목록(RFC 3840 —
+  CSP 는 첫 icsi-ref 하나만 읽는다)으로 mcvideo·mcdata.sds(`mcdataMsrp`)·앱 `contactParams` 의 icsi-ref 를 합치고, 모든 요청에 붙는 계정 Contact
+  파라미터에는 서비스 ICSI 를 두지 않는다 — 서비스 호의 Contact 는 그 호가 자기 태그를 싣는다. 서비스 인가(mcvideo-info 토큰·client ID)는 MCPTT 와
+  함께 CSP 토큰 검증과 한 짝으로 넣는다(mcx_identity_scope.md §10 — CSP 는 지금 REGISTER 본문을 읽지 않는다).
+- **affiliation**(§8.2.1.2) — `affiliate(acc, g, on, McVideo)` 는 계정의 MCVideo 관심 그룹 집합을 바꾸고 **전부**를 한 PUBLISH 로 보낸다:
+  Request-URI = `mcvideoServerUri`, `P-Preferred-Service` MCVideo ICSI, `Event: presence`, `Expires` = 관심 그룹이 있으면 4294967295 · 없으면 0,
+  multipart = mcvideo-info(`<mcvideo-request-uri>` = 자기 MCVideo ID) + pidf(entity = MCVideo ID, tuple id = MC client ID(`effectiveMcpttClientId`),
+  `mcvideoPI10:affiliation group` 들, 게시마다 유일한 `p-id`). ETag 조건부 갱신·412 초기 재발행은 MCPTT affiliation 과 같은 경로(키 = 계정의 MCVideo 게시 하나).
+- **그룹 호**(§9.2.1 prearranged · §9.2.2 chat) — `joinVideoGroupCall` INVITE: Request-URI = `mcvideoServerUri`(재합류는 `sessionUri`, §9.2.1.2.4),
+  Accept-Contact 둘(`+g.3gpp.mcvideo`·icsi-ref, require;explicit)·`P-Preferred-Service`, Contact = 계정 Contact URI + MCVideo 태그만, multipart =
+  mcvideo-info(session-type·request-uri = 그룹·client-id) + SDP(m=audio → m=video → `m=application <port> udp MCVideo` + fmtp `;` 구분 —
+  `mc_queueing`·`mc_priority`·`mc_reception_priority`·암묵 요청이면 `mc_granted;mc_implicit_request`·`mc_transmission_ssrc` = 이 호에서 고른 값).
+  미디어 `i=`(audio/video component of MCVideo — §6.2.1 2)c)·3)d))는 pjmedia SDP 가 담지 못해 송신 직전 pjsip 모듈(`mod-cimsue-txfix`, 인쇄 모듈 바로
+  앞)이 본문 인쇄본을 고친다(multipart 는 SDP 파트만 고치고 그 파트의 Content-Length 를 다시 센다). 200 OK 는 협상이 끝난 CONFIRMED 에서 처리한다(pjsip 은 2xx 에서 CONNECTING 을 SDP 협상보다 먼저 낸다) — answer 의 제어 채널
+  목적지·`mc_transmission_ssrc`(보내는 전송 제어 헤더 SSRC), 제어 기능 Contact(isfocus)의 세션 식별자 → `CallInfo.sessionUri`, 암묵 요청 결과(§14.3.4·§14.3.5·
+  §14.4) → 참여자 성립, 그 뒤에 `Active` 를 알린다(앱이 Active 를 보자마자 `requestTransmission` 할 수 있다). 이어지는 offer 에는 `mc_granted`·`mc_implicit_request`
+  를 싣지 않는다(§14.5). 제어 기능의 멤버 초대(§9.2.1.3)는 mcvideo-info 로 가려 받는다 — 참여자를 180 전에 열고, answer fmtp = offer `mc_priority` 되돌림·
+  offer 에 `mc_queueing` 이 있을 때만 그것·이 단말의 `mc_transmission_ssrc`(§14.3.1~§14.3.3·§14.3.9), 180·200 Contact = MCVideo 태그(§6.2.3.1.1 3)·4)),
+  `autoAnswerMcvideo` 면 곧바로 200(§6.2.3.1.2). 나가기 = `hangup`(MCPTT 호와 독립). 서비스 호 Contact 는 pjsua 에 호별 Contact 파라미터 API 가 없어
+  다이얼로그 로컬 Contact 를 개시 INVITE 전(UAC onCallSdpCreated)·180 전(UAS)에 바꾼다(pjsua 내부 표).
+- **송출 게이트** — 마이크·카메라는 'U: has permission to transmit' 에서만 연다. 허가 밖에서 payload 있는 RTP 는 제어 기능이 버리고 회수 #3 을 되풀이하므로
+  (TS 24.581 §6.3.5.3.8) 브리지 결선만이 아니라 **오디오 인코더를 멈춘다**(무음 프레임도 내지 않는다 — `noVad`) — 새 스트림은 브리지 결선 전(onStreamCreated)
+  에 멈추고 허가·재협상마다 다시 건다. 빈 RTP keep-alive(PJMEDIA_STREAM_ENABLE_KA)·RTCP 는 그대로라 NAT·CMP latch 는 유지된다. 제어 채널은 호 성립 때
+  1회 + 1 s 간격 2회 + 15 s 주기로 빈 RTCP RR(헤더 SSRC = 전송 제어와 같은 값)을 보낸다(ue_nat_traversal.md §7.1).
+
+규격 대비 편차:
+
+| 항목 | 규격 | SDK | 사유 |
+|---|---|---|---|
+| 송출 RTP SSRC | Granted·answer 의 Audio/Video SSRC 를 쓴다(TS 24.581 §6.2.4.4.6 2·§14.4) | pjmedia 스트림 SSRC 그대로(offer 의 `a=ssrc` 광고) | pjmedia 는 호 중 스트림 SSRC 를 바꾸지 못한다. CMP 가 송출자를 멤버 전용 포트로 가려 할당 SSRC 를 찍고, 충돌이 없으면 offer `a=ssrc` 를 그대로 할당해(cmp_media_api.md §7.9) 분배·수신자 구분은 맞다 |
+| 영상 없는 빌드의 m=video | offer 에 m=video(§6.2.1 3)) | Linux 헤드리스·Windows 1차(config_site `PJMEDIA_HAS_VIDEO 0`)는 `m=video 0`(RFC 3264 §5.1 — 제안하되 쓰지 않는 스트림) | pjsua 영상 슬롯이 없다 — text 슬롯 둘 중 첫째를 영상 자리로. m-line 수·순서(K4)는 같고 음성·전송 제어는 그대로 협상된다. Android 는 실제 H.264 영상 |
+| 착신 200 OK 세션 갱신 주체 | `refresher=uas`(TS 24.281 §6.2.3.1.1 5)) | pjsip UAS 가 고른 값(`refresher=uac` — 요청에 refresher 가 없고 UAC 가 timer 를 지원할 때) | pjsip 세션 타이머에 UAS 갱신 선호 설정이 없다. 헤더만 바꾸면 양쪽 모두 갱신하지 않아 세션이 만료된다 — MCPTT 착신과 같은 동작 |
 
 ### 4.7 `cimsue-cli`
 
@@ -657,7 +691,7 @@ NDK/MSVC 빌드는 개발 서버 밖(WSL2·Windows 머신)에서 수행하고, �
 | stage | 항목 | 내용 |
 |---|---|---|
 | S1 | `S1-UE-FLOOR-CODEC` | `scripts/gen_floor_defs.py --check`(정의 테이블 ↔ 생성물·CMP·Kotlin·.NET·probe 상수) + `cimsue_test` 의 `FloorXCheck`(코어 빌더 ↔ CMP `ParseFloorMessage`, CMP `BuildFloorMessage` ↔ 코어 decode) |
-| S1 | `S1-UE-MCVIDEO-TC-DEFS` | `scripts/gen_mcvideo_tc_defs.py --check`(MCVideo 전송 제어 정의 테이블 정합 + 생성물 `mcvideo/tc_defs.h`·`cmp/PTransmissionDefs.h` 최신성) + `cimsue_test` 의 `McvCodec`·`McvXCheck`(코어 ↔ CMP `PTransmissionCodec` 교차)·`McvParticipant`(참여자 상태 머신) |
+| S1 | `S1-UE-MCVIDEO-TC-DEFS` | `scripts/gen_mcvideo_tc_defs.py --check`(MCVideo 전송 제어 정의 테이블 정합 + 생성물 `mcvideo/tc_defs.h`·`cmp/PTransmissionDefs.h` 최신성) + `cimsue_test` 의 `McvCodec`·`McvXCheck`(코어 ↔ CMP `PTransmissionCodec` 교차)·`McvParticipant`(참여자 상태 머신)·`McvSip`(경계 코덱 ↔ K3 골든 본문 바이트 대조)·`McvCall`(루프백 가짜 CSP·CMP — 등록 태그·affiliation·chat/prearranged 개시·재합류·404 117·멤버 초대 자동 수락·NAT 유지 RR·송출 게이트). `CIMS_MCVIDEO_DUMP=<dir>` 로 SDK 산출 메시지를 남겨 `tests/mcvideo_fixture_check.py <dir>/sdk_*.txt`(K3·K4 규칙 + 본문 XSD)로 돌린다 |
 | S1 | `S1-UE-UNIT` | `build/bin/cimsue_test`(googletest) — config→pjsua2 매핑(IMPI·realm `*`·H(A1)/AKA 우선·TLS 게이트 SRTP·sec-agree 헤더·proxies lr)·대상 정규화·헤더 파싱·재생 라우트 수명(null 장치 엔진 기동 → 라우트 추가/제거 → 종료 순서). 확장: SDP 협상·floor 상태머신·SDS TLV·MSRP·PKCE |
 | S3 | `S3-UE-CLI-*` | `cimsue-cli` 로 등록(UDP/TLS/AKA)·1:1(평문·TLS+SRTP)·그룹콜(affiliation PUBLISH ETag·multipart INVITE·로스터 NOTIFY·floor Request→Granted/Taken·발언 RTP 수신·Idle)·SDS 송수신·관제(dialog 구독 early→confirmed→terminated, Join 200 + 감청 RTP + caller/callee SSRC 라벨, 그룹 픽업 `**`, REFER blind 전달 후 전달 대상 RTP)·PTT 청취 — 기존 `S3-SCN-*` 의 cspsim 축과 같은 판정(누적 RTP delta·403/489). 수동 절차는 VERIFICATION_MANUAL 부록, cims-verify 항목 등록은 후속 |
 | S1 | `S1-UE-UNIT`(보강) | `AffiliationPublish`(루프백 가짜 ESC — 412 뒤 ETag 폐기·초기 PUBLISH 1회·앱에는 affiliate token 으로 최종 결과 하나) · `EngineCapture`(캡처 게이트 상태·재기동 전이중) · floor 시험의 pjlib 수명 짝(`test/pj_scope.h` — 한 프로세스 전체 실행) |

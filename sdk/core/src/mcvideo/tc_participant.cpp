@@ -77,6 +77,13 @@ void Participant::ack(const Message& m) {
     if (m.ackRequired) send(ackOf(hdrSsrc(), m.app, m.op));
 }
 
+void Participant::sendKeepalive() {
+    // 빈 RTCP RR(RFC 3550 §6.4.2 — V=2 · RC=0 · PT=201 · length 1) — 헤더 SSRC 는 전송 제어 메시지와 같다(서버가 기대하는 값)
+    const uint32_t ssrc = hdrSsrc();
+    const char rr[8] = {(char)0x80, (char)201, 0, 1, (char)(ssrc >> 24), (char)(ssrc >> 16), (char)(ssrc >> 8), (char)ssrc};
+    send(std::string(rr, sizeof(rr)));
+}
+
 void Participant::flush(Out& out) {
     for (auto& f : out) f();
     out.clear();
@@ -205,6 +212,8 @@ void Participant::onEstablished(bool implicitAccepted, bool granted, uint32_t au
         std::vector<Message> early;
         early.swap(early_);
         for (auto& m : early) handle(m, out);                // 호 성립 전에 받아 둔 메시지(§6.2.4.2.2 2·4c)
+        kaSent_ = 0;                                         // 제어 채널 NAT 유지 — 성립 즉시 1회(tick)
+        kaNext_ = Clock::now();
     }
     flush(out);
 }
@@ -457,9 +466,9 @@ void Participant::handleReception(const Message& m, Out& out) {
         return;
     }
     if (is(m, AppName::MCV1, (uint8_t)Mcv1::RECEIVE_MEDIA_RESPONSE)) {
-        Reception* r = findReception(m.transmittingUserId(), m.videoSsrc());
-        if (!r || r->t.state != ReceptionState::PendingRequest) return;
         ack(m);                                                                                   // §6.2.5.4.2·§6.2.5.4.5
+        Reception* r = findReception(m.transmittingUserId(), m.videoSsrc());
+        if (!r || r->t.state != ReceptionState::PendingRequest) return;          // 재송신(서버 T6·C6 — Ack 을 못 받았다)은 Ack 만
         r->deadline = {};
         if (m.result() == (int)ReceiveResult::GRANTED) {
             setReceiving(out, *r, true);
@@ -516,6 +525,11 @@ void Participant::tick() {
         std::lock_guard<std::mutex> lk(m_);
         if (releasing_) return;
         auto now = Clock::now();
+        if (established_ && kaNext_ != Clock::time_point{} && now >= kaNext_ && remotePort_ > 0) {
+            sendKeepalive();                                                                      // 성립 1 + 1 s 간격 2 + 15 s 주기
+            ++kaSent_;
+            kaNext_ = now + std::chrono::milliseconds(kaSent_ < kKeepaliveBurst ? kKeepaliveBurstGapMs : kKeepaliveIntervalMs);
+        }
         if (deadline_ != Clock::time_point{} && now >= deadline_) {
             deadline_ = {};
             switch (state_) {

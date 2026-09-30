@@ -6,10 +6,11 @@
 > 이 문서는 규격 모델, 현행 «PTT 영상»(MCPTT 세션의 `m=video` — 비규격)과의 차이, 규격형으로 옮기는 개발 항목·결정 사항을 정한다 —
 > **설계 정본.** 구현된 것 — 계약(전송 제어 정의 테이블 [mcvideo_tc_defs.yaml](mcvideo_tc_defs.yaml)(생성 헤더 양 끝, §5.3·§5.4) · DB 표(§5.1) ·
 > 설정 문서 골든 `tests/fixtures/mcvideo/` · SDP 프로파일(§1.4) · CSP↔CMP 제어 API([cmp_media_api.md](../../api/cmp_media_api.md) §7.9) · 단말 SDK 공개
-> 표면 선언([ue_sdk.md](ue_sdk.md) §4.6 — 구현 전이라 실패를 돌려준다)), 양 끝 전송 제어 코덱(CMP `PTransmissionCodec` · SDK `mcvideo/tc_codec`, 교차 시험),
-> 단말 전송 제어 참여자 상태 머신(SDK `mcvideo/tc_participant` — 엔진 결선 전), V0 전부, CSC 설정 평면(§5.1 — 관리 API·콘솔 제외)과 그 문서들의 SDK
-> 해석(§5.4), CSP 호 제어 부품(§5.2), CMP 그룹 종류·멤버 포트·제어 명령·송출·수신 제어 상태 머신·미디어 분배·보호(SRTP·전송 제어 SRTCP)(§5.3·§5.3.1).
-> CSP 모듈·그룹 호 처리, 영상 RTCP 전달·녹취, 단말 엔진 결선은 미구현.
+> 표면([ue_sdk.md](ue_sdk.md) §4.6)), 양 끝 전송 제어 코덱(CMP `PTransmissionCodec` · SDK `mcvideo/tc_codec`, 교차 시험), 단말 전송 제어 참여자 상태 머신
+> (SDK `mcvideo/tc_participant`), V0 전부, CSC 설정 평면(§5.1 — 관리 API·콘솔 제외)과 그 문서들의 SDK 해석(§5.4), CSP 호 제어 부품(§5.2), CMP 그룹 종류·
+> 멤버 포트·제어 명령·송출·수신 제어 상태 머신·미디어 분배·보호(SRTP·전송 제어 SRTCP)(§5.3·§5.3.1), 단말 SDK 등록 태그·affiliation·그룹 호(개시·재합류·
+> 멤버 초대 수락)·전송 제어 결선·송출 게이트(§5.4 — 루프백 시험, 실서버 미연동). CSP 모듈·그룹 호 처리, 영상 RTCP 전달·녹취, 단말 영상 송출·송출별 렌더
+> (C6)·바인딩(C7)은 미구현.
 >
 > 규격 판본: TS 24.281 V18.14.0 · TS 24.581 V18.8.0 · TS 23.281 V18.12.0 · TS 24.481 V19.3.0 · TS 24.484 V20.0.0 · TS 23.280 V20.4.0 ·
 > TS 33.180 V20.0.0. 관계 문서: 로드맵 표 [mcptt_standard_conformance.md](mcptt_standard_conformance.md) R3·R6, 현행 PTT 영상 협상
@@ -334,18 +335,28 @@ Indicator, automatic 수신; 1차 CSP 는 normal) · JOIN 응답 `audio_ssrc`·`
 
 ### 5.4 단말 SDK (`libcimsue`)
 
-- **계정** — `AccountConfig.mcvideoServerUri`(ue-init-config), REGISTER Contact 에 MCVideo 태그(서비스 사용 여부 = `mcvideoEnabled`).
+- **계정·등록**(구현) — `AccountConfig.mcvideoServerUri`(ue-init-config), `mcvideoEnabled` 면 REGISTER Contact 에 `+g.3gpp.mcvideo` + icsi-ref 목록의
+  mcvideo ICSI(TS 24.281 §7.2.1AA — 서비스 인가 본문 없음, CSP 판정 = Contact 태그 + 이용 자격). 서비스 태그는 REGISTER 에만 모으고 icsi-ref 는 한 목록 —
+  서비스 호 Contact 는 호가 자기 태그를 싣는다([ue_sdk.md](ue_sdk.md) §4.6). 서비스 인가 본문(mcptt-info·mcvideo-info 토큰)은 CSP 토큰 검증과 한 짝으로 뒤에.
 - **설정 해석**(구현 — [ue_sdk.md](ue_sdk.md) §4.2) — `UeInitConfigDoc.mcvideoServerUri` · 그룹 문서 `GroupDoc.mcvideo`(`McVideoGroupAttrs`, 생성도 골든과
   같은 순서) · `McVideoUserProfileDoc`·`McVideoServiceConfigDoc`(`CscClient::fetchMcVideoUserProfile`·`fetchMcVideoServiceConfig`) · 토큰 scope 에
   MCVideo 넷. 시험 = K2 골든을 CSC 생성 시험과 같은 파일로 읽는다.
-- **affiliation** — `affiliate(groupId, on, service)` 서비스 인자.
-- **호** — `joinVideoGroupCall(groupId, {chat|prearranged})` → `CallInfo.service = mcvideo`, 나가기 = 기존 `hangup`.
-- **전송 제어 참여자** — `requestTransmission`·`releaseTransmission`(§6.2.4 상태 머신, T100·T101), 이벤트 `onTransmission`(Granted·Rejected·Revoked·Idle·
-  Media Transmission Notification — 송출자·SSRC).
-- **수신 제어** — `acceptReception(callId, transmitterId)`·`endReception`(§6.2.5, T103·T104), 스트림별 렌더 창(현행 «호별 수신 창» 과제와 합친다 — ue_sdk.md §11).
-- **바인딩** — C API·.NET·Kotlin 같은 이름(현행 그룹 영상 옵션 누락도 이때 메운다). `cimsue-cli video-call <g> [--transmit-at S] [--accept]`.
-- 위 공개 표면(`McService`·`VideoGroupCallOptions`·`TransmissionEvent`·`ReceptionEvent`·`TransmissionInfo`)은 C++ 공개 헤더에 선언돼 있고 구현 전이라
-  실패를 돌려준다([ue_sdk.md](ue_sdk.md) §4.6). 전송 제어 상수는 생성 헤더 `mcvideo/tc_defs.h`, 코덱·참여자 빌더는 `mcvideo/tc_codec`.
+- **affiliation**(구현) — `affiliate(groupId, on, McVideo)` = 관심 그룹 집합을 바꿔 **전부**를 한 PUBLISH 로(§8.2.1.2 — 골든 02, `Expires` 2^32-1/0,
+  pidf tuple id = MC client ID, 게시마다 유일 `p-id`). ⚠️ 지금의 CSP 는 `Event: presence` PUBLISH 를 서비스로 가르지 않아 MCPTT affiliation 으로 읽는다 —
+  CSP A9(ICSI·mcvideo-info 로 갈라 `mcvideo_affiliations`)가 배포되기 전에는 실서버로 보내지 않는다(앱 C9·cimsue-cli C8 이 부르기 전).
+- **호**(구현) — `joinVideoGroupCall(groupId, {chat|prearranged, …})` → `CallInfo.service = McVideo`·`sessionUri`(제어 기능 Contact 의 세션 식별자), 재합류
+  = `VideoGroupCallOptions.sessionUri`(§9.2.1.2.4), 제어 기능 멤버 초대(§9.2.1.3) = mcvideo-info 로 가려 자동 수락(`autoAnswerMcvideo`), 나가기 = `hangup`.
+  INVITE·answer 모양은 K3 골든 03·05·08(만드는 모양)과 04·06·07·09(읽는 모양)으로 대조한다 — SDK 산출 메시지는 `tests/mcvideo_fixture_check.py` 도 통과한다.
+- **전송 제어 참여자**(구현·결선) — `requestTransmission`·`releaseTransmission`(§6.2.4 상태 머신, T100·T101), 이벤트 `onTransmission`(Granted·Rejected·Revoked·Idle·
+  Media Transmission Notification — 송출자·SSRC). 호 성립 = 개시 CONFIRMED(협상된 answer) · 착신 200 OK 송신, 성립 뒤에 `Active` 를 알린다.
+- **송출 게이트**(구현) — 마이크·카메라는 송출 허가에서만. 허가 밖에서는 오디오 인코더를 멈춰 무음 프레임도 내지 않는다(서버는 허가 없는 payload RTP 에
+  회수 #3 — §5.3.1). 빈 RTP keep-alive·RTCP·제어 채널 빈 RR 은 계속 나가 NAT·latch 를 연다.
+- **수신 제어** — `acceptReception(callId, transmitterId)`·`endReception`(§6.2.5, T103·T104)은 결선됐다. 스트림별 렌더 창(현행 «호별 수신 창» 과제와 합친다 —
+  ue_sdk.md §11)과 송출 영상 결선은 C6.
+- **바인딩** — C API·.NET·Kotlin 같은 이름(현행 그룹 영상 옵션 누락도 이때 메운다 — C7). `cimsue-cli video-call <g> [--transmit-at S] [--accept]`(C8).
+- **영상 없는 엔진 빌드** — Linux 헤드리스·Windows 1차(config_site `PJMEDIA_HAS_VIDEO 0`)는 offer 의 m=video 를 port 0 자리로 싣는다(RFC 3264 §5.1 — 음성·
+  전송 제어만 협상, ue_sdk.md §4.6 편차 표). M2(cimsue-cli 두 대 영상 e2e)는 Linux 엔진 영상(H.264 인코더·합성 캡처)이 먼저 필요하다.
+- 전송 제어 상수는 생성 헤더 `mcvideo/tc_defs.h`, 코덱·참여자 빌더는 `mcvideo/tc_codec`, 호 제어 경계 코덱은 `mcvideo/mcvideo_sip`.
 - **참여자 구현**(`mcvideo/tc_participant`) — 규격이 비워 둔 곳은 이렇게 읽는다: ① Transmission Revoked 는 원인 #7(Queue the transmission)이면
   Queue Position Request → 'U: queued', 그 밖은 Transmission End Request → 'U: pending end'(§6.2.4.5.5 4 는 #5·#7 만 적었지만 서버는 회수 뒤 End
   Request 를 기다린다 — §6.3.5.6) ② 암묵적 송출 요청을 서버가 받지 않으면(answer 에 `mc_implicit_request` 없음 — chat 합류·진행 중 합류, §14.3.5)
@@ -456,7 +467,10 @@ Indicator, automatic 수신; 1차 CSP 는 normal) · JOIN 응답 `audio_ssrc`·`
 - TS 24.581 Receive Media Response 거절 원인 — §6.3.7.3.4·§6.3.7.4.10 의 cause #0(Insufficient downlink bandwidth)·#1(No permission to receive)이 원인 표
   §9.2.15.2(2·4·5·6·7·255)에 없다(→ 표 — 없는 송출을 가리킨 요청은 #255, C9 상한은 #7).
 - TS 24.581 §6.3.4.3.3 «only one participant» #3 vs 암묵적 송출 요청 — 개시자 혼자인 prearranged 개시에서 문언대로면 늘 거절된다(→ §6.3.2.2 대로 첫 초대 참가자가
-  수락할 때 허가, 미디어 버퍼링 없음 — §5.3.1).
+  수락할 때 허가, 미디어 버퍼링 없음 — §5.3.1). 참여자는 암묵 요청이 받아들여진 뒤 Granted 를 T100×C100(CIMS 3 s) 기다리고 만료되면 'U: has no permission'
+  (§6.2.4.4.4) — 그 뒤 온 Granted 는 규격상 처리 절차가 없어 버린다.
+- RFC 3261 §19.1.1 표 1 — To·From URI 에는 port·transport 파라미터를 둘 수 없다. 재합류 INVITE 의 To 는 세션 식별자에서 둘을 뺀 값이다(pjsip — 골든 08
+  의 To 는 둘을 싣는다) → 제어 기능은 세션을 R-URI(또는 To 의 사용자부·`gr`)로 가른다.
 
 ## 10. 검증 기준
 

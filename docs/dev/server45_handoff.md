@@ -477,4 +477,40 @@ pjsua2 `Endpoint::on_acc_send_request` → `Account::lookup` 이 무효 계정 i
 없다 — pjproject 2.16 원본부터). 재현 = MCVideo 시험을 빼도 `Msrp.EngineSendsLargeGroupSdsOverMediaPlane` 에서. 단말에서도 로그아웃 직후 늦은 MESSAGE·PUBLISH
 응답이면 같은 경로라 따로 고친다(ext/pjproject 한 줄 가드).
 
-**다음 (.45)** — C3·C4(K3·K4 골든 — REGISTER 태그·affiliation·chat 합류 INVITE·mcvideo-info·SDP 3 m-line, 호 제어 + 참여자 결선).
+**C3·C4 — 단말 등록·affiliation·그룹 호 + 전송 제어 결선 (.45 → .48)** — [ue_sdk.md](../design/features/ue_sdk.md) §4.6 · [mcvideo.md](../design/features/mcvideo.md) §5.4.
+K3 골든을 SDK 가 **만든 메시지**(01·02·03·05·08 모양)와 대조하고 **읽는 메시지**(04·06·07·09)로 답하는 루프백 시험 `McvCall` 5 + 경계 코덱 `McvSip` 4(mcvideo-info·pidf 는
+골든 파트와 바이트까지 같다), 전체 `cimsue_test` 142/142. SDK 산출 메시지 6건(`CIMS_MCVIDEO_DUMP`)은 `tests/mcvideo_fixture_check.py`(K3·K4 규칙 + 본문 XSD) 6/6 PASS.
+실서버(.45 라이브·.48)에는 보낸 적 없다.
+
+| 메시지 | SDK |
+|---|---|
+| REGISTER | §7.2.1AA — Contact `+g.3gpp.mcvideo` + icsi-ref **한 목록**(mcvideo·mcdata.sds·앱 icsi), `+sip.instance`, 본문 없음. 서비스 태그는 REGISTER 에만 — 다른 요청의 계정 Contact 에는 서비스 ICSI 가 없다 |
+| affiliation PUBLISH | 골든 02 — R-URI = `mcvideoServerUri`, 관심 그룹 전부 · `Expires` 2^32-1/0 · `p-id` 게시마다 유일 · ETag 조건부 갱신. **A9 전에는 실서버로 보내지 않는다**(0159 경고 — 호출처 없음) |
+| 개시 INVITE | 골든 03·05 — Accept-Contact 둘 · P-Preferred-Service · Contact = URI + MCVideo 태그만 · mcvideo-info(session-type·request-uri·client-id) · SDP audio → video → `udp MCVideo`(fmtp `;`, `mc_transmission_ssrc` 값, 암묵이면 `mc_granted;mc_implicit_request`) · 미디어 `i=` · audio `a=ssrc` |
+| 재합류 INVITE | 골든 08 — R-URI = 앞 호 `CallInfo.sessionUri`, prearranged, 암묵 요청 없음 |
+| 200 OK(개시) 처리 | 협상이 끝난 CONFIRMED 에서 — 제어 채널 목적지·`mc_transmission_ssrc`(보내는 헤더 SSRC)·Contact isfocus 세션 식별자·암묵 요청 결과 → 참여자 성립 → 그 뒤 `Active`. 404 117/118 = 호 끝, lastCode 404 |
+| 멤버 초대(착신) | 골든 07 — mcvideo-info 로 가려 자동 수락. 180·200 Contact = MCVideo 태그, answer fmtp = `mc_priority` 되돌림(+ offer 에 있을 때만 `mc_queueing`) + 이 단말의 `mc_transmission_ssrc` |
+| 송출 게이트 | 허가 밖 = 오디오 인코더 멈춤(무음 payload 도 없음 — B4 회수 #3 대비), 빈 RTP keep-alive·RTCP 유지. 제어 채널 = 성립 1 + 1 s×2 + 15 s 빈 RR(헤더 SSRC = answer `mc_transmission_ssrc`) |
+| C5 보완 | 재송신 Receive Media Response(Granted)에도 Ack(0140 요청 3) · 요청·대기 중 End Request → End Response 대기(0140 요청 1 — 이미 그렇다) |
+
+.48 에 넘기는 것(계약·서버 몫 판단):
+
+1. **골든 오디오 fmtp** — 03~08 의 `a=fmtp:96 mode-change-capability=2;max-red=0`(bandwidth-efficient)은 실제와 다르다. CSP 팬아웃 offer 는 psip 코덱 테이블
+   `AMR-WB … "octet-align=1"`(`SipCodecTable.cpp:84`)을 싣고 SDK 도 `octet-align=1;mode-set=0,1,2` 다. pjmedia AMR 매칭은 octet-align 이 다르면 그 형식을 버려
+   골든 07 그대로면 SDK answer 가 음성을 거절한다(시험은 `octet-align=1` 로 바꿔 돌렸다). `build_goldens.py` 의 음성 fmtp 를 `octet-align=1` 로 맞추자고 제안한다.
+2. **골든 08 To** — `To: <sip:g103@csp…:5061;transport=tls;gr=…>` 의 port·transport 는 RFC 3261 §19.1.1 표 1 이 To 에 두지 않는 파라미터라 pjsip 은
+   `<sip:g103@csp…;gr=…>` 로 보낸다. A10 은 재합류 세션을 R-URI(또는 To 의 사용자부·`gr`)로 가르면 된다 — 골든도 고치는 게 맞다.
+3. **영상 없는 엔진 빌드** — Linux 헤드리스·Windows 1차(`PJMEDIA_HAS_VIDEO 0`)는 offer 에 `m=video 0 RTP/AVP 97`(RFC 3264 §5.1). A10·A11 answer 는 그 줄을 port 0
+   으로 되돌리고(RFC 3264 §6) CMP JOIN 에 video 포트를 넣지 않으면 된다 — 음성·전송 제어는 그대로. **M2(cimsue-cli 영상 e2e)는 Linux 엔진 영상이 먼저 필요**하다
+   (H.264 인코더 + 합성/파일 캡처 — .45 가 C6·C8 과 함께 제안서를 낸다).
+4. **착신 200 OK 세션 갱신 주체** — pjsip UAS 는 요청에 refresher 가 없으면 `refresher=uac` 로 답한다(TS 24.281 §6.2.3.1.1 5) 는 `uas`). 헤더만 바꾸면 양쪽 모두
+   갱신하지 않아 세션이 만료되므로 SDK 는 바꾸지 않는다 — 팬아웃 INVITE 에 `Session-Expires: 1800;refresher=uas` 를 실어 주면(RFC 4028 §7.2 — UAC 가 정할 수 있다)
+   규격대로 단말이 갱신한다. MCPTT 착신도 같은 모양이다.
+5. **늦은 암묵 허가** — 참여자는 암묵 요청이 받아들여진 뒤 Granted 를 T100×C100(1 s × 3) 기다리고, 그 뒤엔 'U: has no permission'(§6.2.4.4.4)이라 3 s 뒤 온 Granted 는
+   처리 절차가 없어 버린다(Ack 도 없다). 첫 초대 참가자 수락이 3 s 를 넘을 수 있으면 서버가 그때 허가 대신 예약을 풀거나(단말은 이미 NoPermission) 참여자 T100·C100
+   (service configuration)을 늘리는 쪽을 고르자.
+6. **전송 제어 보호** — 빈 RR keepalive·전송 제어는 평문이다(1차 `mcvideo-protect-transmission-control` false — D7). SDK 의 CSK SRTCP 는 E2E 보안 트랙(K 시리즈)에서 —
+   그때 RR 도 SRTCP 로 보낸다(B7 표 주의 그대로).
+7. **multipart 파트 순서** — pjsua 는 mcvideo-info 파트를 SDP 앞에 둔다(골든은 SDP 먼저). 순서에 기대지 않고 Content-Type 으로 찾으면 된다(`McVideoBodyPart` 는 그렇다).
+
+**다음 (.45)** — C8 `cimsue-cli video-call`(A9 알림 전에는 affiliation 명령 없이) · Linux 엔진 영상 제안(M2) · C6 송출 영상·송출별 렌더 · C7 바인딩.

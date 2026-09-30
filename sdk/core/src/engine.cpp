@@ -8,9 +8,12 @@
 //    콜백 안에서 자기 객체를 지우지 않는다.
 //  - MCPTT 세션(그룹콜·사설콜)은 호마다 floor participant(별도 UDP 소켓)를 갖고, SDP 의 m=application 을
 //    송신 SDP 에 주입·수신 SDP 에서 학습한다(android SipController/CimsCall 의 규칙 승계).
+//  - MCVideo 그룹 호(TS 24.281)는 MCPTT 세션과 독립 다이얼로그다 — 호마다 전송 제어 participant(mcvideo/tc_participant)와
+//    `m=application <port> udp MCVideo` 제어 채널을 갖는다. 송출(마이크·카메라)은 송출 허가('U: has permission')에서만 연다.
 #include "cimsue/engine.h"
 
 #include <pjsua2.hpp>
+#include <pjsua-lib/pjsua_internal.h>                    // 호 다이얼로그(pjsua_var.calls) — setDialogContactParams, setAudioTx
 
 #include <algorithm>
 #include <cctype>
@@ -23,6 +26,8 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <random>
+#include <set>
 #include <thread>
 
 #if defined(__ANDROID__)
@@ -34,6 +39,8 @@
 #include "mcdata/msrp.h"
 #include "mcdata/sds_codec.h"
 #include "mcptt/mcptt_xml.h"
+#include "mcvideo/mcvideo_sip.h"
+#include "mcvideo/tc_participant.h"
 #include "quality/call_quality.h"
 #include "reg_recovery.h"
 
@@ -149,6 +156,98 @@ std::string sipBody(const std::string& whole) {
     return p == std::string::npos ? std::string() : whole.substr(p + 4);
 }
 
+/**
+ * 다이얼로그 로컬 Contact 의 헤더 파라미터를 바꾼다 — URI 는 pjsua 가 고른 그대로(계정 Contact · NAT 재작성), 파라미터 = params.
+ *
+ * 서비스 호는 Contact 에 자기 서비스 특성 태그를 싣는다(MCVideo 개시 INVITE §9.2.1.2.1.1 · 180/200 §6.2.3.1.1 3)·4)). pjsua 에 호별 Contact
+ * 파라미터 API 가 없어(msg_data.contact_uri 는 URI 만 받는다 — pjsip_parse_uri) 다이얼로그를 직접 고친다. 이 다이얼로그의 모든 요청·
+ * 응답(개시 INVITE·180·200·re-INVITE·BYE)이 이 Contact 를 싣는다. 부르는 곳 = 개시 INVITE 를 만들기 전(UAC onCallSdpCreated —
+ * pjsua_call_make_call 은 다이얼로그를 만든 뒤 offer 를 만들고 그다음 INVITE 를 만든다) · 180 전(UAS onIncomingCall). pjsua 콜백 안이라
+ * 호·다이얼로그 락을 이미 잡고 있다. 공개 API 에 호의 다이얼로그 조회가 없어 pjsua 내부 표(`pjsua_var`)를 읽는다 — ext/pjproject 는
+ * 모든 플랫폼이 같은 트리다(ue_sdk.md §6).
+ */
+bool setDialogContactParams(int callId, const std::string& params) {
+    if (callId < 0 || callId >= (int)PJSUA_MAX_CALLS) return false;
+    pjsua_call* call = &pjsua_var.calls[callId];
+    pjsip_dialog* dlg = call->inv ? call->inv->dlg : call->async_call.dlg;
+    if (!dlg || !dlg->local.contact) return false;
+    char buf[PJSIP_MAX_URL_SIZE + 64];
+    int n = pjsip_hdr_print_on(dlg->local.contact, buf, sizeof(buf) - 1);
+    if (n <= 0) return false;
+    std::string v(buf, (size_t)n);
+    const size_t colon = v.find(':');
+    v = mcvideo::contactUriPart(colon == std::string::npos ? v : v.substr(colon + 1)) + params;
+    pj_str_t name = pj_str(const_cast<char*>("Contact")), text;
+    pj_strdup2_with_null(dlg->pool, &text, v.c_str());
+    auto* h = static_cast<pjsip_contact_hdr*>(pjsip_parse_hdr(dlg->pool, &name, text.ptr, (pj_size_t)text.slen, nullptr));
+    if (!h) return false;
+    dlg->local.contact = h;
+    return true;
+}
+
+/**
+ * 오디오 송신(인코더) 멈춤·재개 — 멈추면 RTP 를 내지 않는다(무음 프레임도 — noVad 면 코덱이 무음을 부호화해 보낸다). 스트림 keep-alive
+ * (빈 RTP, PJMEDIA_STREAM_ENABLE_KA)와 RTCP 는 그대로 나가 NAT 매핑·CMP latch 는 유지된다.
+ *
+ * MCVideo 는 송출 허가 밖에서 payload 있는 미디어를 보내면 제어 기능이 버리고 회수(#3)를 되풀이한다(TS 24.581 §6.3.5.3.8 — mcvideo.md
+ * §5.3.1). 마이크를 브리지에서 떼는 것만으로는 무음 프레임이 나가므로 인코더를 멈춘다. 재협상으로 스트림이 새로 생기면(새 스트림은
+ * 멈춤이 풀려 있다) wireMedia 가 다시 건다. 공개 API 에 스트림 멈춤이 없어 pjsua 내부 표를 pjsua 락 아래서 읽는다.
+ */
+void setAudioTx(int callId, bool on) {
+    if (callId < 0 || callId >= (int)PJSUA_MAX_CALLS) return;
+    PJSUA_LOCK();
+    pjsua_call* call = &pjsua_var.calls[callId];
+    for (unsigned i = 0; i < call->med_cnt; ++i) {
+        pjsua_call_media* m = &call->media[i];
+        if (m->type != PJMEDIA_TYPE_AUDIO || !m->strm.a.stream) continue;
+        if (on) pjmedia_stream_resume(m->strm.a.stream, PJMEDIA_DIR_ENCODING);
+        else pjmedia_stream_pause(m->strm.a.stream, PJMEDIA_DIR_ENCODING);
+    }
+    PJSUA_UNLOCK();
+}
+
+/**
+ * 송신 직전 SDP 보정 모듈 — MCVideo SDP 의 m=audio·m=video 에 `i=` 성분 표시를 넣는다(TS 24.281 §6.2.1 2)c)·3)d)·§6.2.2 3)c)·4)c)).
+ *
+ * pjmedia SDP 는 미디어 수준 `i=` 를 담지 못해(파서가 버린다) onCallSdpCreated 로는 넣을 수 없다. 메시지 인쇄 모듈(mod-msg-print,
+ * PJSIP_MOD_PRIORITY_TRANSPORT_LAYER) 바로 앞에서 본문 인쇄본(단일 SDP 또는 multipart 텍스트 전체)을 고쳐 같은 Content-Type(boundary
+ * 포함)의 텍스트 본문으로 바꾸고 인쇄본을 무효로 한다 — multipart 파트 API 는 pjsip multipart 객체만 받아(텍스트 multipart 는 assert)
+ * 쓰지 않는다. 재송신·인증 재전송은 이미 고친 본문이라 그대로 지난다. 판별은 본문(제어 채널 `udp MCVideo` m-line)으로 한다 — 호 표를
+ * 보지 않으므로 pjsip 워커 스레드에서도 안전하다.
+ */
+pj_status_t mcvideoTxFix(pjsip_tx_data* tdata) {
+    pjsip_msg_body* body = tdata && tdata->msg ? tdata->msg->body : nullptr;
+    if (!body || !body->print_body) return PJ_SUCCESS;
+    const bool sdp = pj_stricmp2(&body->content_type.type, "application") == 0 && pj_stricmp2(&body->content_type.subtype, "sdp") == 0;
+    if (!sdp && pj_stricmp2(&body->content_type.type, "multipart") != 0) return PJ_SUCCESS;
+    std::vector<char> buf(PJSIP_MAX_PKT_LEN);
+    int n = body->print_body(body, buf.data(), buf.size());
+    if (n <= 0) return PJ_SUCCESS;
+    const std::string text(buf.data(), (size_t)n);
+    if (text.find(" MCVideo") == std::string::npos) return PJ_SUCCESS;
+    const std::string fixed = sdp ? mcvideo::withMediaInfo(text) : mcvideo::withMediaInfoMultipart(text);   // 파트 Content-Length 도
+    if (fixed == text) return PJ_SUCCESS;
+    pj_str_t t;
+    pj_strdup2_with_null(tdata->pool, &t, fixed.c_str());
+    pjsip_msg_body* nb = pjsip_msg_body_create(tdata->pool, &body->content_type.type, &body->content_type.subtype, &t);
+    if (!nb) return PJ_SUCCESS;
+    pjsip_media_type_cp(tdata->pool, &nb->content_type, &body->content_type);   // multipart boundary 파라미터
+    tdata->msg->body = nb;
+    pjsip_tx_data_invalidate_msg(tdata);
+    return PJ_SUCCESS;
+}
+
+pjsip_module g_txFixModule = {
+    nullptr, nullptr,                                   // prev, next
+    {const_cast<char*>("mod-cimsue-txfix"), 16},        // name
+    -1,                                                 // id
+    PJSIP_MOD_PRIORITY_TRANSPORT_LAYER + 1,             // 인쇄 모듈 바로 앞(송신은 높은 값 → 낮은 값 순)
+    nullptr, nullptr, nullptr, nullptr,                 // load, start, stop, unload
+    nullptr, nullptr,                                   // on_rx_request, on_rx_response
+    &mcvideoTxFix, &mcvideoTxFix,                       // on_tx_request, on_tx_response
+    nullptr,                                            // on_tsx_state
+};
+
 class PjAccount;
 class PjCall;
 class PjLog;
@@ -178,6 +277,8 @@ public:
     void onMcpttCondition(const CallInfo& i, ConditionCause c) override { each([&](Listener* l) { l->onMcpttCondition(i, c); }); }
     void onNonAcknowledgedUsers(const CallInfo& i) override { each([&](Listener* l) { l->onNonAcknowledgedUsers(i); }); }
     void onEmergencyAlert(const EmergencyAlert& a) override { each([&](Listener* l) { l->onEmergencyAlert(a); }); }
+    void onTransmission(const TransmissionEvent& e) override { each([&](Listener* l) { l->onTransmission(e); }); }
+    void onReception(const ReceptionEvent& e) override { each([&](Listener* l) { l->onReception(e); }); }
     void onSds(const SdsMessage& m) override { each([&](Listener* l) { l->onSds(m); }); }
     void onRequestResult(const RequestResult& r) override { each([&](Listener* l) { l->onRequestResult(r); }); }
     void onMessage(int a, const std::string& f, const std::string& ct, const std::string& b) override {
@@ -247,12 +348,18 @@ struct Engine::Impl {
     /** 응답을 기다리는 affiliation PUBLISH — 내부 token 별. 412 초기 재발행은 새 내부 token 이고 앱에는 appToken 으로 알린다. */
     struct PendingPublish {
         int accountId = -1;
-        std::string groupId;
+        std::string groupId;                               // MCVideo 는 비어 있다 — 게시 하나가 관심 그룹 전부다
         bool on = false;
         bool conditional = false;                          // SIP-If-Match 를 실었다(ETag 조건부 갱신)
         int64_t appToken = -1;                             // affiliate() 가 돌려준 token
+        McService service = McService::Mcptt;
     };
     std::map<int64_t, PendingPublish> publishPending;
+    /** MCVideo 관심 그룹(bare, 계정별) — affiliation PUBLISH 는 늘 전부를 싣는다(TS 24.281 §8.2.1.2 6)a)). ue-ctl 에서만. */
+    std::map<int, std::set<std::string>> mcvideoAffiliations;
+    static std::string publishKey(int accountId, const std::string& groupId, McService service) {
+        return std::to_string(accountId) + ":" + (service == McService::McVideo ? std::string("mcvideo") : groupId);
+    }
     // media plane SDS(MSRP) 입출력 스레드 — 분리 실행, stop() 이 취소하고 모두 끝날 때까지 기다린다.
     std::mutex msrpM;
     std::condition_variable msrpCv;
@@ -367,6 +474,8 @@ struct Engine::Impl {
                        const std::map<std::string, std::string>& headers, int64_t token);
     /** affiliation PUBLISH(TS 24.379 §9) — ue-ctl 에서. allowConditional 이면 저장된 ETag 로 SIP-If-Match(RFC 3903 §4.4). */
     int64_t sendAffiliation(int accountId, const std::string& groupId, bool on, int64_t token, int64_t appToken, bool allowConditional);
+    /** MCVideo affiliation PUBLISH(TS 24.281 §8.2.1.2) — 관심 그룹 전부(mcvideoAffiliations)를 한 게시로. ue-ctl 에서. */
+    int64_t sendMcVideoAffiliation(int accountId, int64_t token, int64_t appToken, bool allowConditional);
     /** 영상 미디어가 활성된 호 — 수신 창 결선 + (계정 videoAutoTransmit 면) 카메라 송신 개시. 영상 없는 빌드면 아무것도 안 한다. */
     void attachVideo(PjCall* call, int accountId);
     /** 내 영상 송출 개폐 — MCPTT 반이중은 허용(videoSend)·발언권(micOpen)이 둘 다일 때만, 그 밖의 호는 허용만 본다(ue_sdk.md §4.5).
@@ -390,6 +499,9 @@ struct Engine::Impl {
     int frontCamera();
 };
 
+static void setCallMedia(pj::CallSetting& opt, bool video);
+static void setMcVideoMedia(pj::CallSetting& opt);
+
 namespace {
 
 /** MCPTT 세션(그룹콜/사설콜) 부속 상태 — PjCall 소유. */
@@ -410,6 +522,21 @@ struct McpttSession {
     std::string pendingAppSdp;           // 송신 SDP 에 주입할 m=application 섹션
     std::unique_ptr<floor::Participant> floor;
     bool remoteLearned = false;
+};
+
+/** MCVideo 그룹 호(TS 24.281 §9.2.1 prearranged · §9.2.2 chat) 부속 상태 — PjCall 소유. MCPTT 세션과 독립 다이얼로그다(§7.1). */
+struct McVideoSession {
+    std::string groupId;                 // bare id
+    bool prearranged = false;
+    bool incoming = false;               // 제어 기능의 멤버 초대(§9.2.1.3·§6.3.3.1) — 착신
+    std::string sessionUri;              // 제어 기능 Contact 의 MCVideo 세션 식별자(재합류 R-URI — §9.2.1.2.4)
+    bool implicitAwaitAnswer = false;    // 개시 INVITE 가 암묵적 송출 요청 — 200 OK answer 의 fmtp 로 판정(TS 24.581 §14.3.4·§14.3.5)
+    std::string pendingAppSdp;           // 송신 SDP 에 주입할 제어 채널 섹션(`m=application <port> udp MCVideo`)
+    std::unique_ptr<mcvideo::Participant> tc;
+    bool remoteLearned = false;
+    bool contactSet = false;             // 다이얼로그 Contact 에 MCVideo 특성 태그를 실었다(setDialogContactParams)
+    bool established = false;            // 전송 제어 호 성립을 처리했다(establishMcVideo)
+    bool sendOn = false;                 // 'U: has permission to transmit' — 마이크·카메라 송출(Participant onSend)
 };
 
 /** media plane SDS(MSRP, TS 24.282 §9.2.3) 호 — 앱 호 목록에 나오지 않는다(CallInfo 없음). 발신 = 큰 그룹 SDS, 수신 = 서버발 배포. */
@@ -470,6 +597,7 @@ public:
         : pj::Call(acc, callId), o_(o), accountId_(accountId) {}
 
     std::unique_ptr<McpttSession> mcptt;
+    std::unique_ptr<McVideoSession> mcvideo;   // MCVideo 그룹 호 — mcptt 와 함께 서지 않는다(독립 다이얼로그)
     std::unique_ptr<MsrpLeg> msrp;       // media plane SDS 호 — 앱에 나오지 않는다
     bool recvOnly = false;               // 감청 Join 등 청취 전용 평문 leg (a=recvonly, 마이크 없음)
     bool videoSend = true;               // 내 영상 송출 허용(Engine::setVideoSend) — CallInfo.videoSend 의 원본
@@ -499,6 +627,119 @@ public:
         c.halfDuplex = !mcptt->fullDuplex; c.listenOnly = mcptt->listenOnly;
         c.condition.emergency = mcptt->emergency; c.condition.imminentPeril = mcptt->imminentPeril;
         c.condition.mine = mcptt->condMine;
+    }
+
+    /** MCVideo 호 신원을 CallInfo 에 투영 — 발신 첫 스냅샷(makeCall 이 동기로 부르는 onCallState(CALLING))부터 서비스가 실려야
+     *  앱이 호 종류를 VoLTE 로 읽지 않는다(projectMcptt 와 같은 이유). */
+    void projectMcVideo(CallInfo& c) const {
+        if (!mcvideo) return;
+        c.service = McService::McVideo;
+        c.groupId = mcvideo->groupId;
+        if (!mcvideo->sessionUri.empty()) c.sessionUri = mcvideo->sessionUri;
+    }
+
+    /** 전송 제어 participant 생성·바인드 + 콜백 배선(openFloor 와 같은 규칙 — callId 는 sealCallId 로 확정). 송출 게이트는 ue-ctl 로
+     *  넘겨 마이크·카메라를 연다/닫는다. localSsrc = offer·answer `mc_transmission_ssrc`(서버가 이 단말에 보내는 RTCP 헤더 SSRC). */
+    bool openTc(const std::string& userId) {
+        mcvideo::Participant::Callbacks cb;
+        Engine::Impl* o = o_;
+        auto idRef = floorCallId_;
+        cb.onTransmission = [o, idRef](const TransmissionEvent& e) {
+            TransmissionEvent ev = e;
+            ev.callId = *idRef;
+            o->emit([o, ev] { o->listener->onTransmission(ev); });
+        };
+        cb.onReception = [o, idRef](const ReceptionEvent& e) {
+            ReceptionEvent ev = e;
+            ev.callId = *idRef;
+            o->emit([o, ev] { o->listener->onReception(ev); });
+        };
+        cb.onSend = [o, idRef](bool on, uint32_t audioSsrc, uint32_t videoSsrc) {
+            int id = *idRef;
+            // 송출 SSRC — 규격은 Granted 의 값을 쓰게 하지만(§6.2.4.4.6 2) pjmedia 는 호 중 스트림 SSRC 를 못 바꾼다. CMP 가 송출자를
+            //   멤버 전용 포트로 가려 할당 SSRC 를 찍으므로 분배는 맞다(ue_sdk.md §4.6 편차, cmp_media_api.md §7.9).
+            o->log(3, "mcvideo call " + std::to_string(id) + " transmit " + (on ? "on" : "off") +
+                          (on ? " (server ssrc audio=" + std::to_string(audioSsrc) + " video=" + std::to_string(videoSsrc) + ")" : ""));
+            o->ctl.post([o, id, on] {
+                PjCall* c = o->findCall(id);
+                if (!c || !c->mcvideo) return;
+                c->mcvideo->sendOn = on;
+                try { o->wireMedia(c, id); } catch (pj::Error& e) { o->log(2, std::string("mcvideo mic: ") + e.info(false)); }
+                o->applyVideoTx(c);
+            });
+        };
+        cb.onReceive = [o, idRef](const VideoTransmitter& t, bool on) {
+            // 수신 결선(송출별 렌더)은 C6 — 1차는 호의 수신 창이 받는 영상을 그대로 그린다(수신 스트림 상한 1)
+            o->log(3, "mcvideo call " + std::to_string(*idRef) + " receive " + t.userId + (on ? " on" : " off"));
+        };
+        cb.log = [o](int level, const std::string& m) { o->log(level, m); };
+        mcvideo->tc.reset(new mcvideo::Participant(-1, mcvideoTcSsrc(), userId, cb));
+        if (!mcvideo->tc->open(0)) { mcvideo->tc.reset(); return false; }
+        return true;
+    }
+
+    /** 상대 SDP 의 제어 채널 — 목적지·헤더 SSRC(`mc_transmission_ssrc`, TS 24.581 §14.3.9). 착신 = 제어 기능 offer, 발신 = 200 OK answer.
+     *  목적지는 처음 한 번 배운다. fmtp 는 늘 돌려준다(answer 판정용). 제어 채널이 없으면 false. */
+    bool learnTcRemote(const std::string& sdp, mcvideo::TcFmtp* fmtpOut = nullptr) {
+        if (!mcvideo || !mcvideo->tc) return false;
+        std::string ip; int port = 0;
+        mcvideo::TcFmtp f;
+        if (!mcvideo::parseControl(sdp, ip, port, f)) return false;
+        if (fmtpOut) *fmtpOut = f;
+        if (!mcvideo->remoteLearned) {
+            mcvideo->remoteLearned = true;
+            mcvideo->tc->setRemote(ip, port, f.hasTcSsrc ? f.tcSsrc : 0);
+        }
+        return true;
+    }
+
+    /**
+     * MCVideo 호 성립(TS 24.581 §6.2.4.2 · §6.2.5.2) — 한 번. 개시 = 200 OK 수신: 협상된 answer 의 제어 채널 목적지·헤더 SSRC, 제어 기능
+     * Contact 의 세션 식별자(isfocus — TS 24.281 §9.2.2.4.1.1 19)), 암묵적 송출 요청의 결과(§14.3.4 mc_granted · §14.3.5
+     * mc_implicit_request · §14.4 mc_audio_ssrc/mc_video_ssrc). 착신 = 200 OK 송신(목적지·세션 식별자는 초대로 이미 배웠다).
+     * pjsua 공개 API 에 협상 SDP·다이얼로그 조회가 없어 pjsua 내부 표를 읽는다(onCallState 안 — 다이얼로그 락 아래).
+     */
+    void establishMcVideo(pjsip_role_e role) {
+        if (!mcvideo || mcvideo->established) return;
+        mcvideo->established = true;
+        if (!mcvideo->tc) return;
+        if (role == PJSIP_ROLE_UAS) { mcvideo->tc->onEstablished(); return; }
+        std::string sdp, contact;
+        const int id = getId();
+        if (id >= 0 && id < (int)PJSUA_MAX_CALLS) {
+            pjsip_inv_session* inv = pjsua_var.calls[id].inv;
+            const pjmedia_sdp_session* rem = nullptr;
+            if (inv && inv->neg && pjmedia_sdp_neg_get_state(inv->neg) == PJMEDIA_SDP_NEG_STATE_DONE &&
+                pjmedia_sdp_neg_get_active_remote(inv->neg, &rem) == PJ_SUCCESS && rem) {
+                std::vector<char> buf(PJSIP_MAX_PKT_LEN);
+                int n = pjmedia_sdp_print(rem, buf.data(), buf.size());
+                if (n > 0) sdp.assign(buf.data(), (size_t)n);
+            }
+            if (inv && inv->dlg && inv->dlg->remote.contact) {
+                char buf[PJSIP_MAX_URL_SIZE + 256];
+                int n = pjsip_hdr_print_on(inv->dlg->remote.contact, buf, sizeof(buf) - 1);
+                if (n > 0) contact.assign(buf, (size_t)n);
+            }
+        }
+        mcvideo::TcFmtp f;
+        if (!learnTcRemote(sdp, &f)) o_->log(2, "mcvideo call " + std::to_string(id) + ": answer has no transmission control channel");
+        const size_t a = contact.find('<'), b = contact.find('>');
+        if (a != std::string::npos && b != std::string::npos && contact.find("isfocus") != std::string::npos)
+            mcvideo->sessionUri = contact.substr(a + 1, b - a - 1);
+        const bool implicitAccepted = mcvideo->implicitAwaitAnswer && f.implicitRequest;
+        mcvideo->implicitAwaitAnswer = false;
+        mcvideo->tc->onEstablished(implicitAccepted, implicitAccepted && f.granted, f.hasAudioSsrc ? f.audioSsrc : 0,
+                                   f.hasVideoSsrc ? f.videoSsrc : 0);
+    }
+
+    /** 이 단말이 고른 `mc_transmission_ssrc` — 호마다 새 값(§14.2.7 «unique» — 0 은 쓰지 않는다). */
+    static uint32_t mcvideoTcSsrc() {
+        static std::mt19937 rng{std::random_device{}()};
+        static std::mutex m;
+        std::lock_guard<std::mutex> lk(m);
+        uint32_t v = 0;
+        while (!v) v = (uint32_t)rng();
+        return v;
     }
 
     /** 세션 조건을 스냅샷에 옮기고 onMcpttCondition 을 낸다. */
@@ -605,6 +846,30 @@ public:
                                                                         : msrp::sdpSection(msrp->localPath, "active", "recvonly"));
                 if (!msrp->outgoing) whole = msrp::audioInactive(whole);
                 prm.sdp.wholeSdp = whole;
+            } catch (...) {}
+            return;
+        }
+        if (mcvideo) {
+            // 제어 채널 섹션 — 발신 offer 는 pjsua 의 m=text 슬롯(audio → video → text 순서라 K4 m 순서가 된다), 수신 answer 는 pjsua 가
+            //   포트 0 으로 만든 m=application 을 교체한다(media_count 불변 — floor 주입과 같다). i= 성분 표시는 송신 직전 모듈이 넣는다.
+            try {
+                std::string whole = prm.sdp.wholeSdp;
+                if (whole.empty()) {
+                    o_->log(1, "onCallSdpCreated: empty wholeSdp (SDP print buffer overflow) — skip mcvideo inject");
+                } else if (!mcvideo->pendingAppSdp.empty()) {
+                    // 영상 없는 빌드 — offer 에 m=video 가 없으면 첫 text 슬롯이 port 0 영상 자리다(setMcVideoMedia)
+                    if (prm.remSdp.wholeSdp.empty() && whole.find("m=video") == std::string::npos && whole.find("m=text") != std::string::npos)
+                        whole = replaceMediaSection(whole, "m=text", mcvideo::kVideoPlaceholderSdp);
+                    const char* slot = whole.find("m=application") != std::string::npos ? "m=application"
+                                     : whole.find("m=text") != std::string::npos ? "m=text" : "\x01";
+                    prm.sdp.wholeSdp = replaceMediaSection(whole, slot, mcvideo->pendingAppSdp);
+                }
+                if (!prm.remSdp.wholeSdp.empty()) learnTcRemote(prm.remSdp.wholeSdp);         // UAS: 제어 기능 offer
+                // 개시 INVITE Contact = MCVideo 특성 태그(§9.2.1.2.1.1) — pjsua 는 이 콜백 뒤에 INVITE 를 만든다
+                if (!mcvideo->contactSet) {
+                    mcvideo->contactSet = setDialogContactParams(getId(), mcvideo::contactFeatureParams());
+                    if (!mcvideo->contactSet) o_->log(2, "mcvideo call " + std::to_string(getId()) + ": Contact feature tags not set");
+                }
             } catch (...) {}
             return;
         }
@@ -745,9 +1010,15 @@ public:
         claimFresh(id);                  // 재사용된 call id 의 낡은 상태를 물려받지 않는다
         CallInfo snap;
         bool changed = false;
+        // MCVideo 호 성립 — 상태를 알리기 전에(앱이 Active 를 보자마자 [영상 보내기] 할 수 있게) 전송 제어를 성립시킨다. 개시 호는
+        //   2xx 에서 CONNECTING 이 SDP 협상보다 먼저라(sip_inv.c) 협상이 끝난 CONFIRMED(ACK 송신)에서, 착신은 200 OK 송신(CONNECTING)에서.
+        const bool mcvUacPending = mcvideo && ci.role == PJSIP_ROLE_UAC && ci.state == PJSIP_INV_STATE_CONNECTING;
+        if (mcvideo && !mcvUacPending && (ci.state == PJSIP_INV_STATE_CONNECTING || ci.state == PJSIP_INV_STATE_CONFIRMED))
+            establishMcVideo(ci.role);
         o_->updateCall(id, [&](CallInfo& c) {
             c.accountId = accountId_;
             projectMcptt(c);
+            projectMcVideo(c);
             c.remoteUri = ci.remoteUri;
             c.lastCode = ci.lastStatusCode;
             c.lastReason = ci.lastReason;
@@ -759,6 +1030,7 @@ public:
                     break;
                 case PJSIP_INV_STATE_CONNECTING:
                 case PJSIP_INV_STATE_CONFIRMED:
+                    if (mcvUacPending) break;                              // MCVideo 개시 — 전송 제어 성립(CONFIRMED) 뒤 Active
                     if (c.state != CallState::Held) ns = CallState::Active;
                     break;
                 case PJSIP_INV_STATE_DISCONNECTED:
@@ -778,6 +1050,13 @@ public:
                 o->pruneFinished();
             });
         }
+    }
+
+    /** 오디오 스트림 생성(pjsua_aud.c — 스트림 시작 뒤·브리지 결선 전). MCVideo 는 송출 허가 전이면 인코더를 멈춘 채로 브리지에
+     *  붙인다 — 브리지가 프레임을 넣기 전이라 무음 프레임 한 개도 나가지 않는다(setAudioTx 와 같은 이유, 이후 전환은 wireMedia). */
+    void onStreamCreated(pj::OnStreamCreatedParam& prm) override {
+        if (mcvideo && !mcvideo->sendOn && prm.stream)
+            pjmedia_stream_pause(static_cast<pjmedia_stream*>(prm.stream), PJMEDIA_DIR_ENCODING);
     }
 
     void onStreamDestroyed(pj::OnStreamDestroyedParam& prm) override {
@@ -891,6 +1170,12 @@ public:
             });
             return;
         }
+        // MCVideo 그룹 호 초대(TS 24.281 §9.2.1.3 prearranged 멤버 초대 — 제어 기능이 보낸다, 골든 07) — mcvideo-info 로 가른다.
+        const mcvideo::InfoRx vi = mcvideo::parseInfo(whole);
+        if (vi.present && mcvideo::isMcVideoSdp(whole)) {
+            onIncomingMcVideo(prm, call, whole, remote, vi);
+            return;
+        }
         McpttInfo mi = mcptt::parseMcpttInfo(whole);
         bool autoAnswer = false;
         if (mi.present) {
@@ -948,6 +1233,68 @@ public:
         }
     }
 
+    /**
+     * MCVideo 그룹 호 초대(TS 24.281 §9.2.1.3 — 제어 기능의 prearranged 멤버 초대, 골든 07).
+     *
+     * 제어 채널 participant 를 **180 전에** 바인드한다 — pjsua 는 180 에서 answer SDP 를 한 번 만들어 200 에 재사용한다(MCPTT floor 와
+     * 같은 이유). answer fmtp(TS 24.581 §14.3) = offer 의 `mc_priority` 를 되돌리고(§14.3.3 끝 문단) `mc_queueing` 은 offer 에 있을 때만
+     * (§14.3.2 — 참여자는 대기열을 지원한다), `mc_transmission_ssrc` = 이 단말이 고른 값(§14.3.9). Contact = MCVideo 특성 태그(§6.2.3.1.1
+     * 3)·4)·§6.2.3.2.1 3)·4)). 자동 수락(AccountConfig.autoAnswerMcvideo)이면 곧바로 200(§6.2.3.1.2), 아니면 앱이 answer/reject.
+     */
+    void onIncomingMcVideo(pj::OnIncomingCallParam& prm, PjCall* call, const std::string& whole, const std::string& remote,
+                           const mcvideo::InfoRx& vi) {
+        const AccountConfig& cfg = o_->accountCfgs[accountId_];
+        call->mcvideo.reset(new McVideoSession);
+        McVideoSession& mv = *call->mcvideo;
+        mv.incoming = true;
+        mv.prearranged = vi.sessionType == "prearranged";
+        mv.groupId = mcptt::bareId(vi.callingGroupId.empty() ? remote : vi.callingGroupId);
+        const std::string fc = detail::headerValue(whole, "Contact");               // 제어 기능 Contact = 세션 식별자(§6.3.3.1.2 1))
+        const size_t a = fc.find('<'), b = fc.find('>');
+        if (a != std::string::npos && b != std::string::npos && fc.find("isfocus") != std::string::npos) mv.sessionUri = fc.substr(a + 1, b - a - 1);
+        if (call->openTc(cfg.effectiveMcpttId())) {
+            mcvideo::TcFmtp offer;
+            call->learnTcRemote(whole, &offer);
+            mcvideo::TcFmtp ans;
+            ans.queueing = offer.queueing;
+            ans.priority = offer.priority;
+            ans.hasTcSsrc = true;
+            ans.tcSsrc = mv.tc->localSsrc();
+            mv.pendingAppSdp = mcvideo::controlSdp(mv.tc->localPort(), ans);
+        } else {
+            o_->log(1, "mcvideo tc socket bind failed — answer without transmission control");
+        }
+        mv.contactSet = setDialogContactParams(prm.callId, mcvideo::contactFeatureParams());
+        CallInfo snap;
+        o_->updateCall(prm.callId, [&](CallInfo& c) {
+            c.accountId = accountId_;
+            c.dir = CallDir::Incoming;
+            c.state = CallState::Incoming;
+            c.remoteUri = remote;
+            c.video = true;                                                   // 초대 offer 에 m=video 가 있다
+            call->projectMcVideo(c);
+        }, &snap);
+        o_->ctl.post([o = o_, call, id = prm.callId] { o->calls[id].reset(call); });
+        try {
+            pj::CallOpParam p;
+            p.statusCode = PJSIP_SC_RINGING;
+            call->answer(p);
+        } catch (pj::Error& e) { o_->log(2, std::string("mcvideo 180 failed: ") + e.info(false)); }
+        o_->emit([o = o_, snap] { o->listener->onIncomingCall(snap); });
+        o_->log(3, "mcvideo invitation " + mv.groupId + " (" + vi.sessionType + ") → call " + std::to_string(prm.callId));
+        if (!cfg.autoAnswerMcvideo) return;
+        o_->ctl.post([o = o_, id = prm.callId] {
+            PjCall* c = o->findCall(id);
+            if (!c) return;
+            try {
+                pj::CallOpParam p(true);
+                p.statusCode = PJSIP_SC_OK;
+                setMcVideoMedia(p.opt);                                               // MCVideo 호 = audio + video(§6.2.2 1))
+                c->answer(p);
+            } catch (pj::Error& e) { o->log(1, std::string("mcvideo auto-answer: ") + e.info(false)); }
+        });
+    }
+
     /** sendRequest 트랜잭션 최종 응답(≥200) — 같은 tsx 가 COMPLETED/TERMINATED 로 두 번 올 수 있다. */
     void onSendRequest(pj::OnSendRequestParam& prm) override {
         try {
@@ -968,7 +1315,7 @@ public:
                 auto it = o_->publishPending.find(r.token);
                 if (it != o_->publishPending.end()) {
                     const Engine::Impl::PendingPublish p = it->second;
-                    const std::string key = std::to_string(p.accountId) + ":" + p.groupId;
+                    const std::string key = Engine::Impl::publishKey(p.accountId, p.groupId, p.service);
                     r.token = p.appToken;                  // 앱은 affiliate() 의 token 으로 상관한다
                     if (r.code == PJSIP_SC_CONDITIONAL_REQUEST_FAILED) {
                         // RFC 3903 §5 — 412 를 낸 entity-tag 는 버리고(MUST) 같은 요청을 다시 보내지 않는다(MUST NOT).
@@ -983,8 +1330,10 @@ public:
             }
             if (retryToken >= 0) {
                 o_->ctl.post([o = o_, retry, retryToken, r] {
-                    if (o->sendAffiliation(retry.accountId, retry.groupId, retry.on, retryToken, retry.appToken, false) < 0)
-                        o->emit([o, r] { o->listener->onRequestResult(r); });   // 재발행을 못 만들면 412 를 그대로
+                    const int64_t t = retry.service == McService::McVideo
+                                          ? o->sendMcVideoAffiliation(retry.accountId, retryToken, retry.appToken, false)
+                                          : o->sendAffiliation(retry.accountId, retry.groupId, retry.on, retryToken, retry.appToken, false);
+                    if (t < 0) o->emit([o, r] { o->listener->onRequestResult(r); });   // 재발행을 못 만들면 412 를 그대로
                 });
                 return;
             }
@@ -1230,7 +1579,7 @@ void Engine::Impl::attachVideo(PjCall* call, int accountId) {
                 try { vw.Show(true); } catch (pj::Error&) {}
             }
         }
-        if (autoTx && !call->mcptt && call->videoSend) {
+        if (autoTx && !call->mcptt && !call->mcvideo && call->videoSend) {
             // 계정 autoTransmitOutgoing 만으로는 협상 방향에 따라 캡처가 열리지 않을 수 있다 — 송신 방향이 없으면 sendrecv 로, 있으면 송신 개시.
             try {
                 pj::CallVidSetStreamParam p;
@@ -1241,8 +1590,8 @@ void Engine::Impl::attachVideo(PjCall* call, int accountId) {
             } catch (pj::Error& e) { log(3, std::string("video transmit: ") + e.info(false)); }
         }
     }
-    // MCPTT — 송출은 계정 autoTransmit 이 아니라 발언권을 따른다. 청취 중에는 keep-alive 로 NAT 를 연다.
-    if (call->mcptt) {
+    // MCPTT·MCVideo — 송출은 계정 autoTransmit 이 아니라 발언권·송출 허가를 따른다. 보내지 않는 동안은 keep-alive 로 NAT 를 연다.
+    if (call->mcptt || call->mcvideo) {
         applyVideoTx(call);
         armVideoTick(1000);
     }
@@ -1255,6 +1604,7 @@ void Engine::Impl::applyVideoTx(PjCall* call) {
 #if PJSUA_HAS_VIDEO
     bool want = call->videoSend && !call->recvOnly;
     if (call->mcptt) want = want && !call->mcptt->listenOnly && (call->mcptt->fullDuplex || call->mcptt->micOpen);
+    if (call->mcvideo) want = want && call->mcvideo->sendOn;                // 송출 허가에서만(TS 24.581 §6.2.4.4.6)
     pj::CallInfo ci;
     try { ci = call->getInfo(); } catch (...) { return; }
     for (auto& m : ci.media) {
@@ -1266,7 +1616,7 @@ void Engine::Impl::applyVideoTx(PjCall* call) {
         p.medIdx = (int)m.index;
         pjsua_call_vid_strm_op op = want ? PJSUA_CALL_VID_STRM_START_TRANSMIT : PJSUA_CALL_VID_STRM_STOP_TRANSMIT;
         if (want && !(m.dir & PJMEDIA_DIR_ENCODING)) {
-            if (call->mcptt) continue;                                    // 그룹 세션 방향은 서버가 정한다 — 재협상하지 않는다
+            if (call->mcptt || call->mcvideo) continue;                   // 그룹 세션 방향은 서버가 정한다 — 재협상하지 않는다
             op = PJSUA_CALL_VID_STRM_CHANGE_DIR; p.dir = PJMEDIA_DIR_ENCODING_DECODING;
         }
         try {
@@ -1286,7 +1636,7 @@ void Engine::Impl::videoTick() {
     bool any = false;
     for (auto& kv : calls) {
         PjCall* c = static_cast<PjCall*>(kv.second.get());
-        if (!c || !c->mcptt) continue;
+        if (!c || (!c->mcptt && !c->mcvideo)) continue;
         pj::CallInfo ci;
         try { ci = c->getInfo(); } catch (...) { continue; }
         for (auto& m : ci.media) {
@@ -1342,8 +1692,10 @@ void Engine::Impl::wireMedia(PjCall* call, int callId) {
     bool micOn;
     // 반이중 = floor 가 게이트(Granted), 전이중(mc_no_floor_ctrl) = 앱의 음소거(setMuted — PTT 로컬 게이트, 원천 앱 동작)
     if (call->mcptt) micOn = !call->mcptt->listenOnly && (call->mcptt->fullDuplex ? !snap.muted : call->mcptt->micOpen);
+    else if (call->mcvideo) micOn = call->mcvideo->sendOn && !snap.muted;   // MCVideo = 송출 허가('U: has permission')에서만
     else micOn = !snap.muted && !call->recvOnly;
     if (micOn) src.startTransmit(*aud); else src.stopTransmit(*aud);
+    if (call->mcvideo) setAudioTx(callId, call->mcvideo->sendOn);            // 허가 밖에서는 무음 프레임도 내지 않는다
     applyDeviceLevels();                                   // 결선으로 장치가 막 열렸을 수 있다 — 장치 단 음량 재적용
 }
 
@@ -1422,6 +1774,9 @@ Result Engine::start(const EngineConfig& cfg, Listener* listener) {
             pjsip_cfg()->endpt.disable_tcp_switch = o->cfg.udpNoTcpSwitch ? PJ_TRUE : PJ_FALSE;
             o->ep->libInit(epc);
             o->logWriter = writer.release();                 // 이제 pjsua2 소유
+            // 송신 직전 SDP 보정(MCVideo 미디어 i= — mcvideoTxFix). 모듈은 endpoint 가 없어질 때(libDestroy) 함께 풀린다.
+            if (pjsip_endpt_register_module(pjsua_get_pjsip_endpt(), &g_txFixModule) != PJ_SUCCESS)
+                o->log(2, "tx fix module registration failed — MCVideo SDP i= lines will be missing");
             {
                 pj::TransportConfig tc; tc.port = o->cfg.udpPort;
                 o->ep->transportCreate(PJSIP_TRANSPORT_UDP, tc);
@@ -1467,6 +1822,7 @@ void Engine::stop() {
         o->txPlayer.reset();                     // ~AudioMediaPlayer → bridge 포트 해제 (libDestroy 전)
         o->routes.clear();                       // ~ExtraAudioDevice → close (libDestroy 전)
         o->accounts.clear();                     // ~Account → shutdown
+        o->mcvideoAffiliations.clear();
         try { o->ep->libDestroy(); } catch (...) {}               // LogWriter 도 여기서 pjsua2 가 delete
         o->logWriter = nullptr;
         o->ep.reset();
@@ -1571,6 +1927,7 @@ Result Engine::removeAccount(int id) {
         Impl* o = impl_.get();
         if (!o->accounts.erase(id)) return Result::fail(-2, "no such account");
         o->accountCfgs.erase(id);
+        o->mcvideoAffiliations.erase(id);
         o->regRecovery.unwant(id);
         std::lock_guard<std::mutex> lk(o->snapM);
         o->regInfos.erase(id);
@@ -1600,6 +1957,20 @@ static void setCallMedia(pj::CallSetting& opt, bool video) {
     opt.audioCount = 1;
     opt.videoCount = video ? 1 : 0;
     opt.reqKeyframeMethod = PJSUA_VID_REQ_KEYFRAME_RTCP_PLI;
+}
+
+/**
+ * MCVideo 호 미디어 — audio + video(TS 24.281 §6.2.1 2)·3)) + 제어 채널 자리(pjsua text 슬롯 — 제어 채널 섹션으로 바뀐다).
+ * 영상 없는 빌드(Linux 헤드리스·Windows 1차 — config_site PJMEDIA_HAS_VIDEO 0)는 pjsua 영상 슬롯이 없어 text 슬롯 둘을 두고 첫째를
+ * port 0 영상 자리(mcvideo::kVideoPlaceholderSdp)로 바꾼다 — m-line 수·순서(K4)는 같고 음성·전송 제어는 그대로 협상된다(ue_sdk.md §4.6).
+ */
+static void setMcVideoMedia(pj::CallSetting& opt) {
+#if PJSUA_HAS_VIDEO
+    setCallMedia(opt, true);
+#else
+    setCallMedia(opt, false);
+    opt.textCount = 2;
+#endif
 }
 
 int Engine::dial(int accountId, const std::string& target, const CallOptions& opts) {
@@ -1909,33 +2280,112 @@ FloorInfo Engine::floorInfo(int callId) const {
     });
 }
 
-// ── MCVideo (mcvideo.md §5.4) — 공개 표면(계약 K7)만 먼저 고정했다. 호·전송 제어는 C4·C5 에서 채운다 ──
-static Result mcvideoNotImplemented(const char* what) {
-    return Result::fail(-3, std::string(what) + ": MCVideo not implemented");
+// ── MCVideo 그룹 호 (TS 24.281 §9.2.1 prearranged · §9.2.2 chat, 전송 제어 TS 24.581 — mcvideo.md §5.4) ──
+
+static int startMcVideo(Engine::Impl* o, int accountId, const std::string& groupId, const VideoGroupCallOptions& opts) {
+    auto it = o->accounts.find(accountId);
+    if (it == o->accounts.end()) { o->log(1, "mcvideo: no such account"); return -1; }
+    const AccountConfig& cfg = o->accountCfgs[accountId];
+    const bool rejoin = !opts.sessionUri.empty();
+    if (!rejoin && cfg.mcvideoServerUri.empty()) { o->log(1, "mcvideo: no MCVideo server URI (ue-init-config)"); return -1; }
+    const std::string gid = mcptt::bareId(groupId);
+    for (auto& kv : o->calls) {                                          // 같은 그룹의 MCVideo 호 중복 방지
+        PjCall* c = static_cast<PjCall*>(kv.second.get());
+        if (c->mcvideo && c->mcvideo->groupId == gid) return kv.first;
+    }
+    auto call = std::make_unique<PjCall>(o, *it->second, accountId);
+    call->mcvideo.reset(new McVideoSession);
+    McVideoSession& mv = *call->mcvideo;
+    mv.groupId = gid;
+    mv.prearranged = opts.prearranged || rejoin;
+    // 제어 채널 소켓은 makeCall 전에 — makeCall 이 동기적으로 onCallSdpCreated 를 부르며 offer 에 포트를 광고한다.
+    if (!call->openTc(cfg.effectiveMcpttId())) { o->log(1, "mcvideo tc socket bind failed"); return -1; }
+    const bool implicitReq = opts.implicitTransmissionRequest && !rejoin;
+    mcvideo::TcFmtp f;                                                   // TS 24.581 §14.2
+    f.queueing = opts.queueing;
+    f.priority = opts.maxPriority;
+    f.receptionPriority = opts.maxReceptionPriority;
+    f.granted = implicitReq;                                             // §14.2.4 — 200 OK 허가 표시를 받을 수 있다
+    f.implicitRequest = implicitReq;                                     // §14.2.5
+    f.hasTcSsrc = true;                                                  // §14.2.7 · TS 24.281 §6.2.1 4)b)
+    f.tcSsrc = mv.tc->localSsrc();
+    if (implicitReq) { mv.tc->armImplicitRequest(); mv.implicitAwaitAnswer = true; }
+    mv.pendingAppSdp = mcvideo::controlSdp(mv.tc->localPort(), f);
+    const std::string target = rejoin ? opts.sessionUri : cfg.mcvideoServerUri;
+    try {
+        pj::CallOpParam prm(true);
+        setMcVideoMedia(prm.opt);                                        // m=audio + m=video(§6.2.1 2)·3)) + 제어 채널 자리
+        auto hdr = [&](const char* n, const std::string& v) { pj::SipHeader h; h.hName = n; h.hValue = v; prm.txOption.headers.push_back(h); };
+        hdr("Accept-Contact", mcvideo::acceptContactFeature());         // §9.2.1.2.1.1 · §9.2.2.2.1.1 — require;explicit 둘
+        hdr("Accept-Contact", mcvideo::acceptContactIcsi());
+        hdr("P-Preferred-Service", mcvideo::kIcsi);
+        prm.txOption.multipartContentType.type = "multipart";
+        prm.txOption.multipartContentType.subType = "mixed";
+        pj::SipMultipartPart p1;
+        p1.contentType.type = "application"; p1.contentType.subType = "vnd.3gpp.mcvideo-info+xml";
+        mcvideo::InfoParams ip;
+        ip.sessionType = mv.prearranged ? "prearranged" : "chat";        // Annex F.1.3 — 그룹 문서 invite-members 와 맞아야 한다(§6.3.5.2)
+        ip.requestUri = "tel:" + gid;
+        ip.clientId = cfg.effectiveMcpttClientId();                       // 단일 MC 서비스 신원(mcvideo.md §7 D1)
+        p1.body = mcvideo::info(ip);
+        prm.txOption.multipartParts.push_back(p1);
+        call->makeCall(target, prm);
+        // makeCall 이 개시 offer 를 동기적으로 만들었다 — 이어지는 offer(re-INVITE)는 mc_granted·mc_implicit_request 없이(§14.5)
+        f.granted = false;
+        f.implicitRequest = false;
+        mv.pendingAppSdp = mcvideo::controlSdp(mv.tc->localPort(), f);
+    } catch (pj::Error& e) {
+        o->log(1, std::string("mcvideo invite ") + gid + ": " + e.info(false));
+        return -1;
+    }
+    const int callId = call->getId();
+    call->sealCallId(callId);
+    o->updateCall(callId, [&](CallInfo& c) {
+        c.accountId = accountId; c.dir = CallDir::Outgoing; c.state = CallState::Outgoing;
+        c.remoteUri = target;
+        c.video = PJSUA_HAS_VIDEO != 0;                                  // 영상 없는 빌드는 port 0 자리만
+        call->projectMcVideo(c);
+    });
+    o->calls[callId] = std::move(call);
+    o->log(3, std::string("mcvideo ") + (rejoin ? "rejoin " : mv.prearranged ? "prearranged group call " : "chat group call ") + gid +
+                  " → call " + std::to_string(callId));
+    return callId;
 }
+
 int Engine::joinVideoGroupCall(int accountId, const std::string& groupId, const VideoGroupCallOptions& opts) {
-    (void)accountId; (void)groupId; (void)opts;
-    return -1;
+    if (!impl_->running) return -1;
+    return impl_->ctl.runSync([this, accountId, groupId, opts] { return startMcVideo(impl_.get(), accountId, groupId, opts); });
 }
+
+/** MCVideo 호의 participant 에 명령 — ue-ctl 에서 호를 찾고 결과를 그대로 돌려준다. */
+static Result withTc(Engine::Impl* o, int callId, const std::function<Result(mcvideo::Participant&)>& f) {
+    if (!o->running) return Result::fail(-1, "not running");
+    return o->ctl.runSync([o, callId, f]() -> Result {
+        PjCall* c = o->findCall(callId);
+        if (!c) return Result::fail(-2, "no such call");
+        if (!c->mcvideo || !c->mcvideo->tc) return Result::fail(-2, "not an MCVideo call");
+        return f(*c->mcvideo->tc);
+    });
+}
+
 Result Engine::requestTransmission(int callId, int priority) {
-    (void)callId; (void)priority;
-    return mcvideoNotImplemented("requestTransmission");
+    return withTc(impl_.get(), callId, [priority](mcvideo::Participant& p) { return p.requestTransmission(priority); });
 }
 Result Engine::releaseTransmission(int callId) {
-    (void)callId;
-    return mcvideoNotImplemented("releaseTransmission");
+    return withTc(impl_.get(), callId, [](mcvideo::Participant& p) { return p.releaseTransmission(); });
 }
 Result Engine::acceptReception(int callId, const std::string& transmitterId, int priority) {
-    (void)callId; (void)transmitterId; (void)priority;
-    return mcvideoNotImplemented("acceptReception");
+    return withTc(impl_.get(), callId, [transmitterId, priority](mcvideo::Participant& p) { return p.acceptReception(transmitterId, priority); });
 }
 Result Engine::endReception(int callId, const std::string& transmitterId) {
-    (void)callId; (void)transmitterId;
-    return mcvideoNotImplemented("endReception");
+    return withTc(impl_.get(), callId, [transmitterId](mcvideo::Participant& p) { return p.endReception(transmitterId); });
 }
 TransmissionInfo Engine::transmissionInfo(int callId) const {
-    (void)callId;
-    return TransmissionInfo();
+    if (!impl_->running) return TransmissionInfo();
+    return impl_->ctl.runSync([this, callId]() -> TransmissionInfo {
+        PjCall* c = impl_->findCall(callId);
+        return c && c->mcvideo && c->mcvideo->tc ? c->mcvideo->tc->info() : TransmissionInfo();
+    });
 }
 
 Result Engine::setCallCondition(int callId, bool emergency, bool imminentPeril) {
@@ -2034,7 +2484,7 @@ int64_t Engine::Impl::sendAffiliation(int accountId, const std::string& groupId,
         std::lock_guard<std::mutex> lk(snapM);
         PendingPublish p;
         p.accountId = accountId; p.groupId = groupId; p.on = on; p.appToken = appToken;
-        auto et = publishEtag.find(std::to_string(accountId) + ":" + groupId);
+        auto et = publishEtag.find(publishKey(accountId, groupId, McService::Mcptt));
         if (allowConditional && et != publishEtag.end()) { h["SIP-If-Match"] = et->second; p.conditional = true; }
         publishPending[token] = p;
     }
@@ -2044,10 +2494,57 @@ int64_t Engine::Impl::sendAffiliation(int accountId, const std::string& groupId,
     return r < 0 ? -1 : appToken;
 }
 
+int64_t Engine::Impl::sendMcVideoAffiliation(int accountId, int64_t token, int64_t appToken, bool allowConditional) {
+    auto ic = accountCfgs.find(accountId);
+    if (ic == accountCfgs.end()) return -1;
+    const AccountConfig& cfg = ic->second;
+    const std::string clientId = cfg.effectiveMcpttClientId();
+    if (cfg.mcvideoServerUri.empty() || clientId.empty()) {
+        log(1, std::string("mcvideo affiliation: ") + (cfg.mcvideoServerUri.empty() ? "no MCVideo server URI" : "no MC client ID"));
+        return -1;
+    }
+    const std::set<std::string>& groups = mcvideoAffiliations[accountId];
+    std::vector<std::string> uris;
+    for (const auto& g : groups) uris.push_back("tel:" + g);
+    // TS 24.281 §8.2.1.2 — R-URI = 참여 MCVideo 기능 PSI(1), mcvideo-info request-uri = 자기 MCVideo ID(2), ICSI(3),
+    //   Expires = 관심 그룹이 있으면 2^32-1 · 없으면 0(4·5), pidf = 관심 그룹 전부 · client ID · 유일 p-id(6), Event presence(RFC 3856).
+    std::map<std::string, std::string> h;
+    h["P-Preferred-Service"] = mcvideo::kIcsi;
+    h["Event"] = "presence";
+    h["Expires"] = groups.empty() ? "0" : mcvideo::kAffiliationExpires;
+    {
+        std::lock_guard<std::mutex> lk(snapM);
+        PendingPublish p;
+        p.accountId = accountId; p.on = !groups.empty(); p.appToken = appToken; p.service = McService::McVideo;
+        auto et = publishEtag.find(publishKey(accountId, std::string(), McService::McVideo));
+        if (allowConditional && et != publishEtag.end()) { h["SIP-If-Match"] = et->second; p.conditional = true; }
+        publishPending[token] = p;
+    }
+    mcvideo::InfoParams ip;
+    ip.requestUri = cfg.effectiveMcpttId();
+    const std::string boundary = "mcv-pub-" + mcdata::newMessageId().substr(0, 12);
+    const std::string body = "--" + boundary + "\r\nContent-Type: " + mcvideo::kCtInfo + "\r\n\r\n" + mcvideo::info(ip) + "\r\n" +
+                             "--" + boundary + "\r\nContent-Type: " + mcvideo::kCtPidf + "\r\n\r\n" +
+                             mcvideo::affiliationPidf(cfg.effectiveMcpttId(), clientId, uris, mcdata::newMessageId()) + "\r\n" +
+                             "--" + boundary + "--\r\n";
+    int64_t r = doSendRequest(accountId, "PUBLISH", cfg.mcvideoServerUri, "multipart/mixed;boundary=" + boundary, body, h, token);
+    if (r < 0) { std::lock_guard<std::mutex> lk(snapM); publishPending.erase(token); }
+    return r < 0 ? -1 : appToken;
+}
+
 int64_t Engine::affiliate(int accountId, const std::string& groupId, bool on, McService service) {
     if (!impl_->running) return -1;
-    if (service == McService::McVideo) return -1;                       // MCVideo affiliation(TS 24.281 §8.2) — C3 에서 구현
     int64_t token = impl_->nextToken++;
+    if (service == McService::McVideo) {
+        return impl_->ctl.runSync([=]() -> int64_t {
+            Impl* o = impl_.get();
+            if (!o->accountCfgs.count(accountId)) return -1;
+            std::set<std::string>& groups = o->mcvideoAffiliations[accountId];
+            const std::string gid = mcptt::bareId(groupId);
+            if (on) groups.insert(gid); else groups.erase(gid);
+            return o->sendMcVideoAffiliation(accountId, token, token, true);
+        });
+    }
     return impl_->ctl.runSync([=]() -> int64_t { return impl_->sendAffiliation(accountId, groupId, on, token, token, true); });
 }
 

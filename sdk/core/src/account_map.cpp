@@ -2,6 +2,9 @@
 
 #include <algorithm>
 #include <cctype>
+#include <vector>
+
+#include "mcvideo/mcvideo_sip.h"
 
 namespace cimsue {
 namespace detail {
@@ -20,19 +23,6 @@ static bool ieq(const std::string& a, const char* b) {
     for (size_t i = 0; i < a.size(); ++i)
         if (std::tolower((unsigned char)a[i]) != std::tolower((unsigned char)lb[i])) return false;
     return true;
-}
-
-/** Contact 파라미터에 ICSI 하나를 더한다 — `+g.3gpp.icsi-ref` 가 이미 있으면 그 목록(쉼표)에 합치고, 없으면 새 파라미터로
- *  (RFC 3840 — 한 feature tag 는 한 번만). 이미 들어 있으면 그대로. icsi 는 퍼센트 인코딩 값. */
-std::string withIcsi(const std::string& params, const std::string& icsi) {
-    const std::string tag = "+g.3gpp.icsi-ref=\"";
-    size_t p = params.find(tag);
-    if (p == std::string::npos) return params + ";" + tag + icsi + "\"";
-    size_t e = params.find('"', p + tag.size());
-    if (e == std::string::npos) return params;
-    std::string list = params.substr(p + tag.size(), e - p - tag.size());
-    if (list.find(icsi) != std::string::npos) return params;
-    return params.substr(0, e) + (list.empty() ? "" : ",") + icsi + params.substr(e);
 }
 
 pj::AccountConfig buildPjAccountConfig(const AccountConfig& c, std::string* note) {
@@ -91,18 +81,36 @@ pj::AccountConfig buildPjAccountConfig(const AccountConfig& c, std::string* note
         ac.regConfig.headers.push_back(h3);
         if (note) *note += "sec-agree ";
     }
-    std::string cp = c.contactParams;
-    if (c.mcdataMsrp) cp = withIcsi(cp, "urn%3Aurn-7%3A3gpp-service.ims.icsi.mcdata.sds");   // TS 24.282 §9.2.3 수신 능력
-    if (!cp.empty()) ac.sipConfig.contactParams = cp;
+    // Contact 의 서비스 태그는 REGISTER 에만 모은다 — MC 서비스 등록은 한 REGISTER 로 결합한다(TS 24.281 §7.1 · TS 24.282 §7.1).
+    //   `+g.3gpp.icsi-ref` 는 **한 파라미터의 목록**(RFC 3840 — 한 태그는 한 번, CSP 는 첫 icsi-ref 하나만 읽는다)이라 앱 contactParams
+    //   의 icsi-ref 도 여기로 합친다. 모든 요청에 붙는 계정 Contact 파라미터(sipConfig)에는 서비스 ICSI 를 두지 않는다 — 서비스 호의
+    //   Contact 는 그 호가 자기 서비스 태그를 싣는다(MCVideo 그룹 호 §9.2.1.2.1.1 · MCData MSRP §9.2.3.2.3 1)).
+    std::vector<std::string> icsis;
+    const std::string shared = mcvideo::withoutIcsiRef(c.contactParams, &icsis);
+    auto addIcsi = [&icsis](const char* v) { if (std::find(icsis.begin(), icsis.end(), v) == icsis.end()) icsis.push_back(v); };
+    if (c.mcvideoEnabled) addIcsi(mcvideo::kIcsiEnc);                                      // TS 24.281 §7.2.1AA 2)
+    if (c.mcdataMsrp) addIcsi("urn%3Aurn-7%3A3gpp-service.ims.icsi.mcdata.sds");          // TS 24.282 §9.2.3 수신 능력
+    if (!shared.empty()) ac.sipConfig.contactParams = shared;
+    std::string reg;
     // 인스턴스 ID(TS 24.229 §5.1.1.2.1 c) — 모든 transport 에서 REGISTER Contact 파라미터로 직접 싣고 pjsua outbound(RFC 5626)는 끈다.
     //   CSP 는 outbound 를 지원하지 않아 REGISTER 200 에 `Require: outbound` 가 없고, 그러면 pjsua 가 OUTBOUND_NA 로 두어
     //   NAT 로 Contact 를 다시 쓸 때(rport 변화 — TCP/TLS 재연결) outbound 경로의 +sip.instance 를 빼 버린다. reg_contact_params 는
     //   재작성에도 항상 붙는다(pjsua_acc.c update_regc_contact). reg-id 는 서버가 쓰지 않는다(registration_binding_set.md §8).
     if (!c.instanceId.empty()) {
         ac.natConfig.sipOutboundUse = 0;
-        ac.regConfig.contactParams = ";+sip.instance=\"<" + c.instanceId + ">\"";
+        reg += ";+sip.instance=\"<" + c.instanceId + ">\"";
         if (note) *note += "instance ";
     }
+    if (c.mcvideoEnabled) {                                                                // TS 24.281 §7.2.1AA 1) — 빼면 MCVideo 로그오프
+        reg += std::string(";") + mcvideo::kFeatureTag;
+        if (note) *note += "mcvideo ";
+    }
+    if (!icsis.empty()) {
+        std::string list;
+        for (const auto& v : icsis) list += (list.empty() ? "" : ",") + v;
+        reg += ";+g.3gpp.icsi-ref=\"" + list + "\"";
+    }
+    if (!reg.empty()) ac.regConfig.contactParams = reg;
     ac.sipConfig.proxies.push_back("sip:" + c.serverHost + ":" + std::to_string(c.serverPort) +
                                    ";transport=" + tp + ";lr");
     ac.videoConfig.autoTransmitOutgoing = c.videoAutoTransmit;

@@ -14,6 +14,9 @@
 //  - 암묵적 송출 요청을 서버가 받지 않으면(answer 에 mc_implicit_request 없음 — chat 합류·진행 중 합류, §14.3.5) 곧바로 명시
 //    Transmission Request 를 보낸다(T100 만료를 기다리지 않는다).
 //  - Transmission End Notify(§6.2.5.3.4)는 그 송출의 수신도 닫는다 — 송출이 끝났으니 수신 인스턴스를 남기지 않는다.
+//  - 제어 채널 NAT 유지(ue_nat_traversal.md §7.1) — 사용자가 누르기 전에는 보낼 전송 제어 메시지가 없어 NAT 뒤 단말의 하향 경로가
+//    열리지 않는다. 호 성립 때 1회 + 1 s 간격 2회 + 15 s 주기로 빈 RTCP RR(RFC 3550 §6.4.2, 헤더 SSRC = 전송 제어와 같은 값)을 보낸다.
+//    서버(CMP)는 그 소켓의 첫 패킷으로 제어 목적지를 latch 하고 APP 이 아닌 RTCP 는 해석하지 않고 버린다(cmp_media_api.md §7.9).
 #pragma once
 
 #include <atomic>
@@ -90,6 +93,12 @@ public:
     /** 누계 — 시험·계측용. */
     unsigned sentCount() const { return sent_.load(); }
 
+    /** 제어 채널 NAT 유지 RR — 성립 뒤 kKeepaliveBurst 회는 kKeepaliveBurstGapMs 간격, 그 뒤 kKeepaliveIntervalMs 주기(CIMS 값 —
+     *  UDP NAT 매핑 유지 15 s 는 SIP keepalive(account_map natConfig)와 같다). */
+    static constexpr int kKeepaliveBurst = 3;
+    static constexpr int kKeepaliveBurstGapMs = 1000;
+    static constexpr int kKeepaliveIntervalMs = 15000;
+
 private:
     using Clock = std::chrono::steady_clock;
     using Out = std::vector<std::function<void()>>;      // 락 밖에서 부를 콜백
@@ -107,6 +116,7 @@ private:
     void handleReception(const Message& m, Out& out);
     void send(const std::string& pkt);                        // m_ 잡은 채
     void ack(const Message& m);
+    void sendKeepalive();                                     // m_ 잡은 채
     uint32_t hdrSsrc() const { return remoteSsrc_ ? remoteSsrc_ : localSsrc_; }
     void emitTx(Out& out, TransmissionEvent::Kind k, const Message* m = nullptr, int cause = -1, const char* causeTable = nullptr);
     void emitRx(Out& out, ReceptionEvent::Kind k, const VideoTransmitter& t, const Message* m = nullptr, int cause = -1);
@@ -149,6 +159,9 @@ private:
     Clock::time_point deadline_{};                        // T100·T101·T102 중 지금 도는 것
     // 수신('general reception control' + 송출별 'basic')
     std::vector<Reception> receptions_;
+    // 제어 채널 NAT 유지(빈 RR)
+    int kaSent_ = 0;
+    Clock::time_point kaNext_{};
 };
 
 }  // namespace mcvideo

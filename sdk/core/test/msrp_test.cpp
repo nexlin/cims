@@ -61,10 +61,6 @@ TEST(Msrp, FramingAndSdpTools) {
     EXPECT_EQ(msrp::mcdataInfoUri("<mcdatainfo><mcdata-Params><mcdata-calling-user-id><mcdataURI>tel:+82500000014</mcdataURI>"
                                   "</mcdata-calling-user-id></mcdata-Params></mcdatainfo>", "mcdata-calling-user-id"), "tel:+82500000014");
 
-    // REGISTER Contact ICSI 합치기(RFC 3840 — 한 태그 한 번)
-    EXPECT_EQ(detail::withIcsi("", "urn%3Ax"), ";+g.3gpp.icsi-ref=\"urn%3Ax\"");
-    EXPECT_EQ(detail::withIcsi(";+g.3gpp.icsi-ref=\"urn%3Aa\";video", "urn%3Ax"), ";+g.3gpp.icsi-ref=\"urn%3Aa,urn%3Ax\";video");
-    EXPECT_EQ(detail::withIcsi(";+g.3gpp.icsi-ref=\"urn%3Ax\"", "urn%3Ax"), ";+g.3gpp.icsi-ref=\"urn%3Ax\"");
 }
 
 namespace {

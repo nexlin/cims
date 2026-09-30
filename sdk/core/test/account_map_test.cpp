@@ -106,6 +106,34 @@ TEST(AccountMap, InstanceIdPerTransport) {
     EXPECT_EQ(ac.natConfig.sipOutboundUse, 0);
 }
 
+// 서비스 태그는 REGISTER 에만, icsi-ref 는 한 파라미터의 목록(TS 24.281 §7.1·§7.2.1AA, RFC 3840 — CSP 는 첫 icsi-ref 하나만 읽는다).
+//   골든 tests/fixtures/mcvideo/sip/01_register.txt 의 Contact 와 같은 MCVideo 태그. 서비스 호 Contact 는 호가 자기 태그를 싣는다.
+TEST(AccountMap, ServiceTagsOnRegisterOnly) {
+    const std::string inst = ";+sip.instance=\"<urn:uuid:2f6b8c4e-1a2b-4c3d-9e8f-0a1b2c3d4e5f>\"";
+    AccountConfig c = base();
+    c.instanceId = "urn:uuid:2f6b8c4e-1a2b-4c3d-9e8f-0a1b2c3d4e5f";
+    c.mcvideoEnabled = true;
+    pj::AccountConfig ac = buildPjAccountConfig(c);
+    EXPECT_EQ(ac.regConfig.contactParams, inst + ";+g.3gpp.mcvideo;+g.3gpp.icsi-ref=\"urn%3Aurn-7%3A3gpp-service.ims.icsi.mcvideo\"");
+    EXPECT_TRUE(ac.sipConfig.contactParams.empty());                    // 모든 요청 Contact 에는 서비스 ICSI 가 없다
+
+    // MSRP 수신 + 앱 contactParams 의 icsi-ref — 하나의 목록으로 합치고, 앱의 나머지 파라미터는 계정 공통으로 남긴다
+    c.mcdataMsrp = true;
+    c.contactParams = ";+g.3gpp.icsi-ref=\"urn%3Aurn-7%3A3gpp-service.ims.icsi.mcptt\";video";
+    ac = buildPjAccountConfig(c);
+    EXPECT_EQ(ac.sipConfig.contactParams, ";video");
+    EXPECT_EQ(ac.regConfig.contactParams,
+              inst + ";+g.3gpp.mcvideo;+g.3gpp.icsi-ref=\"urn%3Aurn-7%3A3gpp-service.ims.icsi.mcptt,"
+                     "urn%3Aurn-7%3A3gpp-service.ims.icsi.mcvideo,urn%3Aurn-7%3A3gpp-service.ims.icsi.mcdata.sds\"");
+
+    // MCVideo 로그오프 = 태그를 뺀 재-REGISTER(§7.2.1 NOTE 1) — mcvideo 특성 태그·ICSI 가 함께 빠진다
+    c.mcvideoEnabled = false;
+    c.contactParams.clear();
+    ac = buildPjAccountConfig(c);
+    EXPECT_EQ(ac.regConfig.contactParams, inst + ";+g.3gpp.icsi-ref=\"urn%3Aurn-7%3A3gpp-service.ims.icsi.mcdata.sds\"");
+    EXPECT_EQ(ac.regConfig.contactParams.find("mcvideo"), std::string::npos);
+}
+
 // RFC 7254 IMEI URN — TAC 8 · SNR 6 · spare. 셋째 칸은 검사 숫자가 아니라 spare 라 항상 0(RFC 7254 §4.2.3 예 90420156-025763-0)
 TEST(Helpers, ImeiUrnAndUserAgent) {
     EXPECT_EQ(imeiUrn("490154203237518"), "urn:gsma:imei:49015420-323751-0");   // 검사 숫자 형식(Luhn 8) → spare 0
