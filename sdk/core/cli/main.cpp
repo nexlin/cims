@@ -812,8 +812,12 @@ int main(int argc, char** argv) {
                 ls.waitFor([&] { return disconnected(callId); }, 5);
             }
         }
-        for (auto& g : o.affiliate) eng.affiliate(acc, g, false);
-        for (auto& g : o.affiliateMcvideo) eng.affiliate(acc, g, false, McService::McVideo);
+        // affiliation 해제는 응답을 받은 뒤 등록을 해제한다 — 응답 전에 계정이 사라지면 늦은 응답이 무효 계정으로 올라온다
+        //   (pjsua2 on_acc_send_request 의 계정 조회 assert)
+        std::vector<int64_t> deaff;
+        for (auto& g : o.affiliate) deaff.push_back(eng.affiliate(acc, g, false));
+        for (auto& g : o.affiliateMcvideo) deaff.push_back(eng.affiliate(acc, g, false, McService::McVideo));
+        ls.waitFor([&] { for (int64_t t : deaff) if (t >= 0 && !ls.results.count(t)) return false; return true; }, 5);
         eng.unregisterAccount(acc);
         ls.waitFor([&] { return ls.reg.state == RegState::Unregistered || ls.reg.state == RegState::Failed; }, 5);
         eng.stop();
