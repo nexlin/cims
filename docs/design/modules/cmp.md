@@ -638,7 +638,8 @@ Floor 채널은 별도로 TS 24.380 User ID 기반 주소 latch(`onFloorPacket`)
 
 ### 3.6 PMcvideoGroup + PMcvMemberPort (MCVideo 그룹 호)
 
-**파일:** `PMcvideoGroup.h/.cpp`, `PMcvMemberPort.h/.cpp`, `PCmpServerMcvideo.cpp`(제어 명령) — 설계 정본 [mcvideo.md](../features/mcvideo.md) §5.3,
+**파일:** `PMcvideoGroup.h/.cpp`, `PMcvMemberPort.h/.cpp`, `PMcvControl.h/.cpp`(송출·수신 제어 상태 머신), `PCmpServerMcvideo.cpp`(제어 명령) —
+설계 정본 [mcvideo.md](../features/mcvideo.md) §5.3·§5.3.1,
 제어 API [cmp_media_api.md](../../api/cmp_media_api.md) §7.9.
 
 MCVideo 그룹 호(TS 24.281·24.581)의 미디어 평면. `PMcpttGroup` 과 따로 선 그룹 종류로 floor 가 없고, 송출 제어(§6.3.4·§6.3.5)·수신 제어
@@ -653,19 +654,33 @@ MCVideo 그룹 호(TS 24.281·24.581)의 미디어 평면. `PMcpttGroup` 과 따
 - **멤버 두 단계** — 선할당(ADD 로스터·JOIN ① — 유닛 + 전송 제어 SSRC `tc_ssrc`, 멱등) → 주소 등록(JOIN ② — `McvMemberDecl`: 주소·NAT·PT·
   `user_uri`·`user_tc_ssrc`·협상 우선순위·C9 `max_rx_streams`). 재-JOIN 이 선언을 바꾸지 않으면 latch 목적지를 유지한다.
 - **수신 판정** — 채널별 목적지(선언 → NAT 추종). 선언 소스는 늘 수락, 아니면 `user_nat` 멤버만 형식 검사(v2 · guard IP · RTP 는 기대 PT ·
-  RTCP 채널은 PT 192~223) 뒤 latch. 주소 등록 전·미선언 소스는 `rtp_src_drop`. 송출 허가 전 미디어는 분배하지 않는다(`no_grant_drop`).
-  전송 제어는 datagram 의 RTCP 패킷을 헤더 length 로 나눠(compound) APP 만 `PTransmissionCodec`(`ParseTransmissionMessage` — MCV0~2 아님·모르는
-  subtype 은 버림, TS 24.581 §9.1.4)으로 풀어 관측(`control_rx`, 헤더 SSRC ≠ `tc_ssrc` 면 기록만)까지 — APP 이 아닌 RTCP(단말 빈 RR keepalive)는 조용히
-  버리고, 메시지 처리는 송출·수신 제어 상태 머신이 받는다.
-- **SSRC** — `PMcvideoGroup::AllocSsrc(preferred)` 프로세스 전역 유일(0 제외) — 송출마다의 Audio·Video SSRC 쌍(TS 24.581 §6.3.4.3.3 d)과 `tc_ssrc` 가
-  같은 공간. 선호값(멤버 offer `a=ssrc` — JOIN `user_audio_ssrc`·`user_video_ssrc`)이 쓰이지 않으면 그 값(§14.3.7·§14.3.8).
-- **타이머·카운터** — `McvTimers`(T1~T6·T11·C2·C4·C6·C7·C11, 기본값 = 생성 상수 `MCV_*`), ADD `tc_timers` 로 덮는다.
+  RTCP 채널은 PT 192~223) 뒤 latch. 주소 등록 전·미선언 소스는 `rtp_src_drop`. 전송 제어는 datagram 의 RTCP 패킷을 헤더 length 로 나눠(compound)
+  APP 만 `PTransmissionCodec`(`ParseTransmissionMessage` — MCV0~2 아님·모르는 subtype 은 버림, TS 24.581 §9.1.4)으로 풀어(`control_rx`, 헤더 SSRC ≠
+  `tc_ssrc` 면 기록만) 상태 머신에 넘긴다 — APP 이 아닌 RTCP(단말 빈 RR keepalive)는 조용히 버린다.
+- **송출·수신 제어** — `PMcvControl`(호 하나에 하나, 소켓·락 없는 순수 로직 — 그룹이 락 아래 부른다). 규격의 네 기계(일반 송출 G · 참가자 송출 U ·
+  일반 수신 Gr · 참가자 수신 U)를 그대로 둔다: 동시 송출 상한(`max_transmitters`)·유효 우선순위(tier → chair → 수치 — MCPTT floor 와 같은 서열)
+  선점 Revoked #4·큐(`queueing` 협상 시 Queue Position Info)·거절 #1/#3/#5 · 참가 Idle/Notification · 허가 → Granted(송출 SSRC 쌍)·다른 참가자
+  Media Transmission Notification · 수신자별 **Active SSRC List**(manual = Receive Media Request 허가, automatic = 긴급·임박 호) · C9 상한 #7 ·
+  종료 → End Response·End Notify·큐 맨 앞 허가 또는 Idle · 무허가 미디어 Revoked #3 · 암묵적 송출 요청(첫 초대 참가자 수락 때 허가) ·
+  타이머 T1~T6·T11(C2·C4·C6, T3 는 5회 재송신 뒤 서버에서 종료). 참가자 = 주소가 등록된 멤버(JOIN ②), 이탈 = LEAVE. 보낸 메시지는 그룹이
+  `BuildTransmissionMessage` → 멤버 제어 채널(헤더 SSRC = `user_tc_ssrc`, 없으면 `tc_ssrc`)로 낸다. 입력별 처리 표·규격 읽기는 mcvideo.md §5.3.1·§9.
+- **미디어 분배** — payload 있는 RTP 만 판정한다(헤더만 = keepalive 는 버림). 허가된 송출(permitted·pending revoke)이면 그 송출을 받는 멤버
+  (Active SSRC List)에게 **SSRC = 송출 할당값 · PT = 수신 leg 의 egress PT**(`user_pt`·`user_video_pt`)로 찍어 보낸다(단말이 SSRC 를 바꾸지 못해도
+  수신자 구분이 맞는다). 허가 없는 미디어는 버리고 `no_grant_drop` 에 센다(송출이 끝난 뒤 500 ms 안의 RTP 는 회수 없이, 그 뒤에도 보내면 Revoked #3).
+- **SSRC** — `PMcvControl::AllocSsrc(preferred)` 프로세스 전역 유일(0 제외) — 송출마다의 Audio·Video SSRC 쌍(TS 24.581 §6.3.4.3.3 d)과 `tc_ssrc` 가
+  같은 공간. 선호값(멤버 offer `a=ssrc` — JOIN `user_audio_ssrc`·`user_video_ssrc`)이 쓰이지 않으면 그 값(§14.3.7·§14.3.8). 송출이 끝나면 반환.
+- **타이머·카운터** — `McvTimers`(T1~T6·T11·C2·C4·C6·C7·C11, 기본값 = 생성 상수 `MCV_*`), ADD `tc_timers` 로 덮는다. 틱 = 100 ms — `mediaBufferLoop`
+  20 ms 클록이 MCVideo 그룹이 있을 때만 5번에 한 번 `tick()`(스레드는 미디어 버퍼 또는 MCVideo 풀이 켜져 있으면 뜬다), 시각은 단조 시계.
+- **이벤트** — 송출자 집합이 바뀌면 `TRANSMITTERS{group_id, transmitters[{user, audio_ssrc, video_ssrc}]}`, T1·T5 만료면
+  `TRANSMISSION_INACTIVITY{group_id, timer}`(해제는 CSP 정책) — [cmp_media_api.md](../../api/cmp_media_api.md) §8.
 - **관측** — HEARTBEAT `resource.mcvideo{groups, joined, member_total, member_used}`(키 존재가 기능 광고 — `McVideoMemberPoolSize=0` 이면 없음),
-  STATS `detail.mcvideo_groups[]`(group_type·members·reserved·max_transmitters·control_rx·no_grant_drop)·`nat` 에 `mcvideo|<gid>:<sid>` 항목.
-- **아직 없는 것** — 송출·수신 제어 상태 머신, 영상 RTCP 전달, 보호 키(`tc_crypto`·`media_crypto*` 는
-  `BAD_REQUEST`), 녹취(`record_dir` 는 보관만).
+  STATS `detail.mcvideo_groups[]`(group_type·members·reserved·max_transmitters·transmitters·receptions·control_rx·no_grant_drop)·`nat` 에
+  `mcvideo|<gid>:<sid>` 항목.
+- **아직 없는 것** — 영상 RTCP 전달(PLI·FIR, B6), 보호 키(`tc_crypto`·`media_crypto*` 는 `BAD_REQUEST`, B7), 녹취(`record_dir` 는 보관만, B8).
 
-스모크: `tests/cmp_smoke_mcvideo_ports.py` — 시험용 CMP 를 빈 포트 창에 직접 띄워 ADD/JOIN/LEAVE/REMOVE·거절·동시 MCPTT 그룹·수신 판정을 본다.
+단위시험: `tests/cmp_mcvideo_control_test.cpp`(S1-UNIT-CMP — 상태 머신, 보낸 메시지를 코덱으로 왕복). 스모크: `tests/cmp_smoke_mcvideo_ports.py` —
+시험용 CMP 를 빈 포트 창에 직접 띄워 ADD/JOIN/LEAVE/REMOVE·거절·동시 MCPTT 그룹·수신 판정과 전송 제어 흐름(Idle·허가·Notification·수신 전후
+분배·#1/#3·종료·TRANSMITTERS/TRANSMISSION_INACTIVITY 이벤트)을 본다.
 
 ---
 

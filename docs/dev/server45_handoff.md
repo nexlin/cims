@@ -419,21 +419,29 @@ FAIL 0, 전체 123/123. CMP(B4·B5)가 알면 좋은 단말 동작:
 Audio/Video SSRC · 성립 전 메시지 보관)은 B4·B5 가 그대로 받는다 — 서버 응답(Receive Media Response·Media Reception End Response·Transmission End Notify)도 두 식별자를
 모두 싣는다.
 
-**다음 (.48)** — B4·B5(송출·수신 제어 상태 머신 — B2 코덱 위, 제안 7 할당 규칙 포함) · B7(영상 SRTP·제어 SRTCP) · A7~A10(CSP MCVideo 모듈·등록·affiliation·
-그룹 호). 공유 DB 마이그레이션(`migrate_mcvideo.sql`, 표 추가만)은 CSP 실측 때 적용.
+**.48 B4·B5 — CMP 송출·수신 제어 상태 머신 (.48 → .45)** — `cmp/PMcvControl.{h,cpp}`(mcvideo.md §5.3.1 입력별 처리 표·§9 규격 읽기 그대로)를
+`PMcvideoGroup` 에 결선했다. C5 가 볼 서버 동작:
 
-**B4·B5 설계 확정 — mcvideo.md §5.3.1 (C5 가 볼 서버 동작)** — 구현 전이지만 단말 쪽이 맞춰야 할 것:
+| 상황 | CMP |
+|---|---|
+| 참가(JOIN ②) | 진행 중 송출 없음 → Transmission Idle 1회(Message Sequence Number) · 있음 → 송출마다 Media Transmission Notification(automatic 이면 곧바로 수신). 헤더 SSRC = `user_tc_ssrc`(offer `mc_transmission_ssrc`) |
+| Transmission Request | 혼자 #3 · 수신 전용 #5 · 자리 있음 → Granted(Priority · Audio/Video SSRC = offer `a=ssrc`, 충돌 시 새 값) + 다른 참가자 Notification(Transmitting User ID · SSRC 쌍 · Permission 1 · Reception Mode) · 상한 → 선점(Revoked #4, 요청은 큐 맨 앞) / `mc_queueing` 이면 Queue Position Info / 아니면 #1 · 이미 허가 → Granted 재송신 |
+| 암묵적 요청 · 개시자 혼자 | SSRC 쌍만 예약(answer `mc_audio_ssrc`·`mc_video_ssrc`, `mc_granted` 없음) → 첫 초대 참가자 등록 때 Granted — **T4/C4 로 첫 미디어까지 재송신**(NAT latch 전 유실 대비). 기다리는 동안 온 명시 요청(T100 재요청)은 같은 요청으로 보고 무시(#3 을 보내지 않는다) |
+| Transmission End Request | 허가 중 → End Response(SSRC 쌍) + 다른 참가자 End Notify → 큐 맨 앞 허가 또는 Idle 전원 · **요청·대기 중(허가 없음) → End Response + Idle 또는 Notification**(참여자가 'pending end' 에서 End Response 를 기다리므로 — mcvideo.md §9) · ack 비트면 Ack(Message Type = 받은 subtype · Source 2 · Message Name) |
+| Receive Media Request | 송출 지목 = Transmitting User ID, 없으면 Video/Audio SSRC · 없는 송출 #255 · C9 상한 #7 · 허가 → Response(Result 1 · 송출 식별자) **ack 비트** + T6/C6 재송신(Ack 에 정지) · 이미 받는 중이면 허가 재송신 |
+| Media Reception End Request | End Response(송출 식별자) · Active SSRC List 에서 뺀다 · 받는 이 0 이면 T11 |
+| 미디어 | payload 있는 RTP 만(헤더만 = keepalive 무시). 허가·회수 중 송출자 → 받는 멤버에게 SSRC = 할당값 · PT = 수신 leg 값. 허가 없는 참가자('Taken' — 또는 'Idle' 에서 직전에 송출을 끝낸 참가자) → 버림 + Revoked #3(T3 재송신). 송출이 끝난 뒤 500 ms 안의 RTP 는 회수 없이 버린다 |
+| 타이머 | T1·T5 = 호 시작부터(만료 = CSP 에 `TRANSMISSION_INACTIVITY`) · T2/C2 Idle 재송신 · T3 회수 재송신 5회 뒤 서버에서 종료 · T11(manual, 받는 이 없음 10 s) → End Request #8 |
 
-- **Receive Media Response(Granted) 는 ack 비트를 세워 보낸다** — Ack 이 올 때까지 T6 간격으로 C6 회 재송신. C5 가 ack 비트 메시지에 늘 Ack(Message Name 포함)
-  하므로 그대로 맞는다.
-- **암묵적 송출 요청 · 개시자 혼자** — 새 prearranged 세션에서 다른 참가자가 아직 없으면 CMP 는 SSRC 쌍만 예약하고(answer `mc_implicit_request` +
-  `mc_audio_ssrc`·`mc_video_ssrc`, **`mc_granted` 없음**) 첫 초대 참가자가 수락할 때 **Transmission Granted 를 따로 보낸다**(§6.3.2.2, 미디어 버퍼링 없음). C5 ② 는
-  «answer 에 `mc_implicit_request` 가 없으면 곧바로 명시 요청» 인데, 있고 `mc_granted` 만 없는 경우는 Granted 를 기다려야 한다 — 이 경우 T100 만료로 명시 요청을 다시
-  보내도 서버는 같은 SSRC 로 Granted 를 준다(§6.3.4.4.8 재요청 = 재송신). 문제 있으면 여기 적어 달라.
-- **T11(10 s) — manual 수신에서 아무도 [받기] 하지 않은 송출** 은 서버가 Transmission End Request #8(No receiving participant)로 끝낸다(§6.3.4.4.13) → 단말은 End
-  Response(C5 이미 있음).
-- **허가 없는 미디어**(payload 있는 RTP — 헤더만 있는 keepalive 는 아님)는 Revoked #3 → 단말은 End Request(C5 이미 있음).
-- 유효 우선순위 = MCPTT floor 와 같은 서열(tier(CSP 지시) → chair → 수치). 요청의 Transmission Indicator 는 판정에 쓰지 않는다.
+- **C5 에 요청 1건** — Receive Media Response(Granted) 재송신에도 Ack 을 보내 달라. 지금 C5 는 `state != PendingRequest` 면 return 해서 재송신에는 Ack 하지 않는다
+  (서버는 C6=3 회 뒤 그만두니 치명적이진 않다).
+- K6 추가 — ADD `call_type`(normal|emergency|imminent — Indicator·automatic 수신), JOIN `recv_only`, JOIN 응답 `audio_ssrc`·`video_ssrc`(암묵 요청 — 허가 전에도),
+  이벤트 `TRANSMITTERS`·`TRANSMISSION_INACTIVITY`, STATS `transmitters`·`receptions`, `queueing` 이 실제 큐를 쓴다(cmp_media_api.md §7.9·§8).
+- 검증 — 단위시험 `tests/cmp_mcvideo_control_test.cpp` 110/110(S1-UNIT-CMP PASS, 보낸 메시지는 전부 코덱 왕복) · 스모크 `tests/cmp_smoke_mcvideo_ports.py` 58/58
+  (Idle·허가·Notification·[받기] 전 영상 0 / 뒤 SSRC·PT 찍힌 도달·#1·#3·종료·이벤트) · MCPTT 스모크 4종 무변화.
+
+**다음 (.48)** — B7(영상 SRTP `media_crypto_video` · 제어 SRTCP `tc_crypto` — 지금 `BAD_REQUEST`) → A7~A10(CSP MCVideo 모듈·등록·affiliation·그룹 호). 공유 DB
+마이그레이션(`migrate_mcvideo.sql`, 표 추가만)은 CSP 실측 때 적용.
 
 **C2 — 단말 설정 문서 해석 (.45 → .48)** — K2 골든을 CSC 생성 시험과 **같은 파일**로 읽는다(`cimsue_test` `McvConfig` 7 — README 의 값 전부, 전체 130/130).
 

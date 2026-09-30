@@ -8,7 +8,8 @@
 > 설정 문서 골든 `tests/fixtures/mcvideo/` · SDP 프로파일(§1.4) · CSP↔CMP 제어 API([cmp_media_api.md](../../api/cmp_media_api.md) §7.9) · 단말 SDK 공개
 > 표면 선언([ue_sdk.md](ue_sdk.md) §4.6 — 구현 전이라 실패를 돌려준다)), 양 끝 전송 제어 코덱(CMP `PTransmissionCodec` · SDK `mcvideo/tc_codec`, 교차 시험),
 > 단말 전송 제어 참여자 상태 머신(SDK `mcvideo/tc_participant` — 엔진 결선 전), V0 전부, CSC 설정 평면(§5.1 — 관리 API·콘솔 제외)과 그 문서들의 SDK
-> 해석(§5.4), CSP 호 제어 부품(§5.2), CMP 그룹 종류·멤버 포트·제어 명령(§5.3). CSP 모듈·그룹 호 처리, CMP 송출·수신 제어 상태 머신, 미디어 결선은 미구현.
+> 해석(§5.4), CSP 호 제어 부품(§5.2), CMP 그룹 종류·멤버 포트·제어 명령·송출·수신 제어 상태 머신·미디어 분배(§5.3·§5.3.1). CSP 모듈·그룹 호 처리,
+> 영상 RTCP 전달·보호·녹취, 단말 엔진 결선은 미구현.
 >
 > 규격 판본: TS 24.281 V18.14.0 · TS 24.581 V18.8.0 · TS 23.281 V18.12.0 · TS 24.481 V19.3.0 · TS 24.484 V20.0.0 · TS 23.280 V20.4.0 ·
 > TS 33.180 V20.0.0. 관계 문서: 로드맵 표 [mcptt_standard_conformance.md](mcptt_standard_conformance.md) R3·R6, 현행 PTT 영상 협상
@@ -270,14 +271,16 @@ psip 합성 SDP 프로파일(`CSipCallRtp::m_eMcMediaProfile = E_MC_MEDIA_MCVIDE
   멤버와 같은 규칙, 전역 유일 SSRC 할당기(`AllocSsrc` — 송출 SSRC·`tc_ssrc` 공용). 제어 명령 `PTT_GROUP_ADD/MODIFY/REMOVE`·`PTT_JOIN/LEAVE` +
   `service:"mcvideo"`(`cmp/PCmpServerMcvideo.cpp`), `resource.mcvideo`·STATS `mcvideo_groups`·sweeper 회수(`PTT_GROUP_ABORTED` service mcvideo).
   보호 키(`tc_crypto`·`media_crypto*`)는 SRTP 단계 전까지 `BAD_REQUEST`. 스모크 `tests/cmp_smoke_mcvideo_ports.py`(시험용 CMP 를 직접 띄운다).
-  허가 전 미디어는 분배하지 않고(`no_grant_drop`) 전송 제어 메시지는 코덱 해석·관측까지 — 처리는 아래 송출·수신 제어가 받는다. 송출 SSRC 할당은
-  멤버 offer 의 `a=ssrc`(JOIN `user_audio_ssrc`·`user_video_ssrc`)가 전역에서 쓰이지 않으면 그 값(§14.3.7·§14.3.8).
-- **전송 제어 서버** — TS 24.581 §6.3.4~§6.3.7: 동시 송출 상한(그룹 속성), 우선순위 revoke, (후속) 큐. 참여자별 상태, T1~T6·T11.
-- **수신 제어** — 수신자별 Active SSRC List: 허가된 송출의 audio·video 만 그 수신자에게 보낸다. manual/automatic 모드, 수신자 동시 스트림 상한.
+  허가 없는 미디어는 분배하지 않는다(`no_grant_drop`). 송출 SSRC 할당은 멤버 offer 의 `a=ssrc`(JOIN `user_audio_ssrc`·`user_video_ssrc`)가
+  전역에서 쓰이지 않으면 그 값(§14.3.7·§14.3.8).
+- **전송 제어 서버** (구현 — §5.3.1) — TS 24.581 §6.3.4~§6.3.7: 동시 송출 상한(그룹 속성), 우선순위 선점(Revoked #4), 큐(`mc_queueing`), 참여자별
+  상태, T1~T6·T11. `cmp/PMcvControl.{h,cpp}` — 단위시험 `tests/cmp_mcvideo_control_test.cpp`(S1-UNIT-CMP), 스모크 `tests/cmp_smoke_mcvideo_ports.py`.
+- **수신 제어** (구현) — 수신자별 Active SSRC List: 허가된 송출의 audio·video 만 그 수신자에게, SSRC = 송출 할당값 · PT = 수신 leg 값으로 찍어
+  보낸다. manual/automatic 모드, 수신자 동시 스트림 상한(C9 — #7).
 
-#### 5.3.1 송출·수신 제어 상태 머신 설계 (B4·B5 — 미구현)
+#### 5.3.1 송출·수신 제어 상태 머신 (B4·B5)
 
-**구조** — 호 하나에 `PMcvControl`(새 파일 `cmp/PMcvControl.{h,cpp}`) 하나. 소켓·락 없는 순수 로직이다 — 입력 = 참가자 추가/제거·해석된 메시지
+**구조** — 호 하나에 `PMcvControl`(`cmp/PMcvControl.{h,cpp}`) 하나. 소켓·락 없는 순수 로직이다 — 입력 = 참가자 추가/제거·해석된 메시지
 (`ParsedTransmission`)·미디어 도착 표시·시각(ms) 틱, 출력 = 훅(`send(member, app, subtype, fields)` · `inactivity("T1"|"T5")` · `transmittersChanged()`).
 `PMcvideoGroup` 이 그룹 락 아래 부르고, `send` 를 `BuildTransmissionMessage` → 멤버 유닛 `sendTo(MCV_CH_CONTROL)` 로 잇는다(헤더 SSRC = 멤버
 `user_tc_ssrc`, 없으면 `tc_ssrc`). 단위시험 `tests/cmp_mcvideo_control_test.cpp`(S1-UNIT-CMP — `PMcvControl.cpp` + `PTransmissionCodec.cpp` 만 링크).
@@ -292,7 +295,7 @@ Idle / Reception accepted, C7 = 송출별 C11 의 합) · 참가자 수신(U —
 | 입력 | 처리 (근거 절) |
 |---|---|
 | 참가자 추가(JOIN ② — 주소 등록) | 진행 중 송출이 없으면 Transmission Idle 1회(§6.3.5.2.2 2a·4b, Message Sequence Number +1), 있으면 'not permitted and Transmit Taken' + 송출마다 Media Transmission Notification(§6.3.7.2.2 2b) |
-| JOIN `implicit_request`(새 prearranged 세션) | SSRC 쌍을 JOIN 때 예약(응답 `audio_ssrc`·`video_ssrc` — §14.3.7·§14.3.8 «irrespective of mc_granted»). 주소 등록된 다른 참가자가 있으면 곧바로 허가(응답 `granted` 1 — CSP 가 offer 의 `mc_granted` 가 있었으면 answer 에 싣는다), 없으면 첫 초대 참가자가 등록될 때 허가하고 Transmission Granted 를 보낸다(§6.3.2.2 «granted … when the first invited MCVideo client accepts» — 미디어 버퍼링 없음) |
+| JOIN `implicit_request`(새 prearranged 세션) | SSRC 쌍을 JOIN 때 예약(응답 `audio_ssrc`·`video_ssrc` — §14.3.7·§14.3.8 «irrespective of mc_granted»). 주소 등록된 다른 참가자가 있으면 곧바로 허가(응답 `granted` 1 — CSP 가 offer 의 `mc_granted` 가 있었으면 answer 에 싣는다), 없으면 첫 초대 참가자가 등록될 때 허가하고 Transmission Granted 를 보낸다(§6.3.2.2 «granted … when the first invited MCVideo client accepts» — 미디어 버퍼링 없음). 기다린 요청이라 T4/C4 로 첫 미디어까지 재송신하고, 기다리는 동안 온 명시 요청(단말 T100 재요청)은 같은 요청으로 본다 |
 | Transmission Request (MCV0 0) | 수신 전용(`recv_only` — 그룹 문서 `<on-network-recvonly>`)이면 Rejected #5. G: Idle 에서 참가자 1명이면 #3(§6.3.4.3.3). Cx < 상한이면 허가(§6.3.4.4.7A·§6.3.4.4.2): SSRC 쌍 할당(선호 = offer `a=ssrc`) → 요청자 Granted(Transmission Priority·Audio/Video SSRC) · 다른 참가자 Media Transmission Notification(Transmitting User ID·SSRC 쌍·Message Sequence Number·Permission 1·Reception Mode 0/1). 상한이면 선점 판정 — 선점이면 가장 약한 송출에 Revoked #4 + 요청을 큐 맨 앞(§6.3.4.4.7), 아니면 queueing 협상 시 큐(Queue Position Info), 미협상이면 Rejected #1(§6.3.5.4.4). 이미 허가된 참가자의 재요청 = Granted 재송신(§6.3.4.4.8) |
 | 유효 우선순위(§4.1.1.4 local policy) | MCPTT floor 와 같은 서열(`PMcpttGroup::_preempts`) — ① tier(긴급 > 임박 > 일반, **CSP 지시로만** 바뀐다 — 요청의 Transmission Indicator 는 호 단위 표식이라 판정에 쓰지 않는다) ② chair ③ 수치 우선순위 = `members` prio, 요청의 Transmission Priority 는 `mc_priority` 를 협상했을 때만 min(요청, 협상 상한)(§6.3.5.4.4 1a). 선점 = 요청 서열 > 가장 약한 송출 서열 |
 | Transmission End Request (MCV2 0) | ack 비트면 Ack. permitted/pending revoke → 송출 끝: Transmission End Response · 분배 중지 · SSRC 반환 · 다른 참가자 Transmission End Notify(User ID + SSRC 쌍) · Cx−1 → 0 이면 G: Idle(큐 맨 앞이 있으면 그것을 허가, 없으면 Transmission Idle 전원 · T2/C2 · T1)(§6.3.4.4.6·§6.3.4.5.4). not permitted(큐 대기) → 큐에서 빼고 Idle 또는 Notification(§6.3.5.3.7·§6.3.5.4.5) |
@@ -306,20 +309,25 @@ Idle / Reception accepted, C7 = 송출별 C11 의 합) · 참가자 수신(U —
 | 참가자 제거(LEAVE) | 송출 중이면 송출 끝(End Notify 전원 · Cx−1 · Idle/큐), 큐에서 빼고, 수신 몫(C11·C7) 정리(§6.3.3 · §6.3.4.4.11 · §6.3.5.8.2) |
 
 **타이머** — T1(Inactivity — G: Idle 동안, 만료 = `TRANSMISSION_INACTIVITY{timer:"T1"}`, 해제는 CSP) · T2/C2(Idle 재송신) · T3(Revoke/서버 End Request 재송신 —
-포기 = 5회 뒤 서버에서 송출을 끝낸다, 규격은 구현 선택·연결 해제 권고) · T4/C4(큐에서 허가한 Granted 재송신 — 첫 미디어에 정지) · T5(Reception Inactivity — Gr: Idle
+포기 = 5회 뒤 서버에서 송출을 끝낸다, 규격은 구현 선택·연결 해제 권고) · T4/C4(큐에서 허가한 Granted·늦게 내린 암묵 허가의 재송신 — 첫 미디어에 정지) · T5(Reception Inactivity — Gr: Idle
 동안, 이벤트 `"T5"`) · T6/C6(Receive Media Response(Granted) 재송신 — ack 비트를 세워 보내고 Ack 에 정지) · T11(Stream Reception Idle — manual 에서 Notification 뒤
 받는 이 없이 지나면 그 송출에 서버 End Request #8, §6.3.4.4.13).
 
 **규격을 읽은 방식(§9 에 같이 적는다)** — T1·T5 는 호 시작(첫 참가자)부터 돈다(§6.3.4.3.2·§6.3.6.3.2 는 'Start-stop' 에서 들어갈 때 시작을 적지 않지만 hang timer
 뜻대로라면 무송출 호도 풀려야 한다). T6 은 허가마다 시작한다(§6.3.6.3.6 에는 없고 §6.3.6.4.3 에만 있다 — 첫 수신자만 재송신이 없는 것은 편집 누락으로 본다).
-MCV2 End Request/Response·Media Reception End Response 에 Transmission Indicator 허용(K5 — .45 B2).
+MCV2 End Request/Response·Media Reception End Response 에 Transmission Indicator 허용(K5 — .45 B2). not permitted 상태(요청·대기 취소)의 End Request 에도
+End Response 를 함께 보낸다 · Ack 의 Message Type 은 받은 subtype · Notification 에 Message Sequence Number 를 싣지 않는다 · 없는 송출의 수신 요청은 #255
+(모두 §9). C7·C11 은 수로만 쓴다 — 두 카운터의 상한으로 거절하는 절차가 규격에 없어 목록 크기로 두고, 수신 허가의 상한은 C9 다(§6.3.7.4.10 1a).
+무허가 미디어는 'Transmit Taken' 에서 늘 Revoked #3, 'Transmit Idle' 에서는 직전에 허가 송출을 끝낸 참가자만(§6.3.5.3.8) — 송출이 끝난 뒤 500 ms
+(`kEndGraceMs`) 안에 온 RTP 는 End Request 와 엇갈려 떠난 것으로 보고 회수 없이 버린다.
 
-**K6 에 더할 것(B4 때)** — JOIN `recv_only`(그룹 문서 `<on-network-recvonly>` → Rejected #5) · ADD `call_type`(normal/emergency/imminent — tier 와 Transmission
-Indicator, automatic 수신; 1차 CSP 는 normal) · 이벤트 `TRANSMITTERS` 는 송출 집합이 바뀔 때마다.
+**K6 키**(구현) — JOIN `recv_only`(그룹 문서 `<on-network-recvonly>` → Rejected #5) · ADD `call_type`(normal/emergency/imminent — tier 와 Transmission
+Indicator, automatic 수신; 1차 CSP 는 normal) · JOIN 응답 `audio_ssrc`·`video_ssrc`(암묵 요청 — 허가 전에도 예약한 쌍) · 이벤트 `TRANSMITTERS`(송출 집합이
+바뀔 때마다)·`TRANSMISSION_INACTIVITY`(T1·T5) · STATS `transmitters`·`receptions` — [cmp_media_api.md](../../api/cmp_media_api.md) §7.9·§8.
 - **코덱** — RTCP APP `MCV0`·`MCV1`·`MCV2` 부호화·해석(`PFloorCodec` 과 나란한 `PTransmissionCodec`, 필드 표 §9.2.3), 제어 SRTCP 는 `PFloorCrypto` 재사용.
   상수는 생성 헤더 `cmp/PTransmissionDefs.h`(정본 [mcvideo_tc_defs.yaml](mcvideo_tc_defs.yaml) — 단말 코어와 같은 테이블, §1.5).
   코덱 `cmp/PTransmissionCodec.{h,cpp}`(단말 코덱과 교차 시험 — [ue_sdk.md](ue_sdk.md) §4.6)는 CMP 빌드에 들어 있고, 멤버 제어 채널이 이것으로 푼다
-  (compound RTCP 를 나눠 APP 만 — 빈 RR keepalive 는 버림). 서버 상태 머신은 미구현.
+  (compound RTCP 를 나눠 APP 만 — 빈 RR keepalive 는 버림) 뒤 `PMcvControl` 에 넘긴다.
 - **녹취** — 송출마다 슬롯 트랙(audio·video) — `PSyncRtpRecorder` 재사용, 색인 서비스 축 `mcvideo`([recording.md](recording.md)).
 
 ### 5.4 단말 SDK (`libcimsue`)
@@ -437,6 +445,14 @@ Indicator, automatic 수신; 1차 CSP 는 normal) · 이벤트 `TRANSMITTERS` �
   돌린다 — 무송출 호도 hang timer 뒤 풀린다, §5.3.1).
 - TS 24.581 T6 — 'Gr: Reception accepted' 의 허가(§6.3.6.4.3 f)에만 있고 'Gr: Reception Idle' 의 첫 허가(§6.3.6.3.6)에는 없다(→ 허가마다 시작, 멈춤 = Transmission
   Control Ack·수신 종료 — 규격은 멈춤 조건을 End Request/Response 만 적는다).
+- TS 24.581 not permitted 상태의 Transmission End Request(요청·대기 취소 — §6.3.5.3.7·§6.3.5.4.5·§6.3.5.7.4)에 서버 절차는 Idle·Notification 만 적지만
+  참여자는 'U: pending end of transmission' 에서 End Response 만 기다린다(§6.2.4.4.7·§6.2.4.9.4·§6.2.4.6.4)(→ End Response 를 함께 보낸다).
+- TS 24.581 Transmission control Ack 절차의 «Message Type field set to '4' (Transmission End Request)»(§6.3.5.3.7 등) vs 부호화 §9.2.3.10 «5 bit message
+  subtype»(End Request = 0)(→ 부호화 절 — 받은 subtype).
+- TS 24.581 Media Transmission Notification 에 Message Sequence Number 를 싣게 하는 절차(§6.3.4.4.2 3c·§6.3.5.4.5 2c) vs 메시지 표 Table 9.2.13-1(그 필드
+  없음)(→ 표 — 코덱이 표 밖 필드를 거절한다. Transmission Idle 에만 싣는다).
+- TS 24.581 Receive Media Response 거절 원인 — §6.3.7.3.4·§6.3.7.4.10 의 cause #0(Insufficient downlink bandwidth)·#1(No permission to receive)이 원인 표
+  §9.2.15.2(2·4·5·6·7·255)에 없다(→ 표 — 없는 송출을 가리킨 요청은 #255, C9 상한은 #7).
 - TS 24.581 §6.3.4.3.3 «only one participant» #3 vs 암묵적 송출 요청 — 개시자 혼자인 prearranged 개시에서 문언대로면 늘 거절된다(→ §6.3.2.2 대로 첫 초대 참가자가
   수락할 때 허가, 미디어 버퍼링 없음 — §5.3.1).
 

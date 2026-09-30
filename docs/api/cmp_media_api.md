@@ -756,6 +756,7 @@ MCVideo 그룹 호(TS 24.281 §9.2)의 미디어·전송 제어(TS 24.581). **�
 | `group_type` | - | `chat`(기본 — mcvideo.md §7 D5) / `prearranged` |
 | `max_transmitters` | O | 동시 송출 상한 1..16 — 그룹 `mcvideo-maximum-simultaneous-mcvideo-transmitting-group-members`(TS 24.581 §4.1.1.1·§6.3.4). 상한에서 새 요청은 거절(#1)하거나, 더 높은 우선순위면 가장 낮은 송출을 Revoke(#4, §4.1.1.2) |
 | `reception_mode` | - | `manual`(기본 — 일반 호, 수신자가 Receive Media Request) / `automatic`(긴급·임박·방송·system 호 — Reception Mode '0', §6.3.6.3.3, V8) |
+| `call_type` | - | `normal`(기본) / `emergency` / `imminent` — 호 종류. 긴급·임박이면 전송 제어 메시지에 Transmission Indicator(D·E 비트, §9.2.3.11)를 싣고 수신은 automatic(§6.3.6.3.3 1a), 유효 우선순위의 tier 가 된다. 요청의 Transmission Indicator 는 판정에 쓰지 않는다(호 종류는 CSP 가 정한다) |
 | `tc_timers` | - | 서버 타이머(ms)·카운터 `{t1_ms, t2_ms, t3_ms, t4_ms, t5_ms, t6_ms, t11_ms, c2, c4, c6, c7, c11}` — **T1 = 그룹 `on-network-hang-timer`**(MCPTT hang timer 재사용, §11.1.3), **T5 = 그룹 `on-network-reception-hang-timer`**, 나머지 = MCVideo service configuration `<tc-timers-counters-R14>`(CSC `/internal/mcvideo/service-config`). 미지정 필드 = K5 기본값(`MCV_T*_MS`·`MCV_C*`). t1_ms·t5_ms 0 = 그 타이머 미사용 |
 | `tc_crypto` | - | 전송 제어 SRTCP 그룹 키 `{alg,key,salt[,mki]}` — §7.8 `floor_crypto` 와 같은 형식·규칙(B7) |
 
@@ -773,16 +774,22 @@ audio RTP(`port`, RTCP = +1)·video RTP(`video_port`, RTCP = +1 — 수신자 PL
 | `user_control_port` | - | 멤버의 전송 제어 채널 RTCP 포트(멤버 SDP 의 `m=application … udp MCVideo`) |
 | `user_tc_ssrc` | - | 멤버가 SDP 에 광고한 `mc_transmission_ssrc` — CMP 가 **이 멤버에게 보내는 전송 제어 메시지 RTCP 헤더 SSRC** 로 쓴다(TS 24.581 §4.3.3.1 — 받는 쪽이 기대하는 값, 다중화의 열쇠). 없으면 CMP 가 정한 값 |
 | `user_audio_ssrc` / `user_video_ssrc` | - | 멤버 offer 의 audio·video `a=ssrc`(RFC 5576) — 이 멤버의 송출을 허가할 때 할당 SSRC 의 선호값(아래 SSRC 규칙) |
-| `queueing` | - | `1` = SDP `mc_queueing` 협상(§14.2.2) — 1차는 대기열을 쓰지 않는다(송출 큐 = V8): 상한이면 거절 #1 |
+| `queueing` | - | `1` = SDP `mc_queueing` 협상(§14.2.2) — 동시 송출 상한에서 요청을 대기열에 넣고 Queue Position Info 로 위치를 알린다(같은 유효 우선순위의 대기 바로 뒤, §6.3.5.4.4). 미협상이면 거절 #1. 선점 요청은 협상과 무관하게 대기열 맨 앞(§6.3.4.4.7) |
+| `recv_only` | - | `1` = 그룹 문서 `<on-network-recvonly>`(TS 24.481) — 이 멤버의 Transmission Request 는 Rejected **#5**(Receive only, §6.3.4.3.3 1b) |
 | `max_priority` | - | 협상한 송출 우선순위 상한(answer `mc_priority`, §14.3.3). 없으면 `members` 의 prio |
 | `max_reception_priority` | - | 협상한 수신 우선순위 상한(answer `mc_reception_priority`, §14.3.6) |
 | `max_rx_streams` | - | **C9** — 이 멤버의 동시 수신 스트림 상한 = user profile `<MaxSimultaneousVideoStreams>`(TS 24.581 §11.2.3, 1차 1). 넘는 Receive Media Request 는 Receive Media Response rejected **#7**(Max no of simultaneous stream). 없으면 K5 기본값 4 |
-| `implicit_request` | - | `1` = CSP 가 offer `mc_implicit_request` 를 받아들였다 — **새 prearranged 세션 개시만**(chat 합류·진행 중 합류는 받지 않는다, §14.3.5). CMP 는 참가 시점에 Transmission Request 로 처리한다(§6.3.5.2.2 1) |
+| `implicit_request` | - | `1` = CSP 가 offer `mc_implicit_request` 를 받아들였다 — **새 prearranged 세션 개시만**(chat 합류·진행 중 합류는 받지 않는다, §14.3.5), 주소 등록(`user_ip`·`user_port`)과 함께만. CMP 는 참가 시점에 Transmission Request 로 처리한다(§6.3.5.2.2 1) — 다른 참가자가 있으면 곧바로 허가, 개시자 혼자면 첫 초대 참가자가 주소 등록될 때 허가하고 Transmission Granted 를 보낸다(§6.3.2.2, 미디어 버퍼링 없음) |
 | `tc_crypto` | - | 이 멤버의 전송 제어 SRTCP 키(CSK) — 없으면 그룹 키(B7) |
 
 응답 payload: `ip`, `port`, `video_port`, `control_port`, **`tc_ssrc`**(CMP 가 이 멤버에게서 기대하는 RTCP 헤더 SSRC — CSP 가 answer 의
 `mc_transmission_ssrc` 로 싣는다), `implicit_request` 를 받았으면 `granted`(0/1)·`audio_ssrc`·`video_ssrc`(CSP 가 answer 에 `mc_implicit_request` +
-`mc_audio_ssrc`·`mc_video_ssrc`, 허가됐고 offer 에 `mc_granted` 가 있었으면 `mc_granted` — §14.3.4·§14.3.7·§14.3.8).
+`mc_audio_ssrc`·`mc_video_ssrc`, 허가됐고 offer 에 `mc_granted` 가 있었으면 `mc_granted` — §14.3.4·§14.3.7·§14.3.8). SSRC 쌍은 허가 여부와 무관하게
+그때 예약해 돌려준다(§14.3.7·§14.3.8 «irrespective of mc_granted») — 나중의 허가도 같은 쌍이다. JOIN ② 재전송은 처음 결과를 그대로 돌려준다.
+
+**전송 제어** — CMP 가 TS 24.581 전송 제어 서버(§6.3.4 일반 송출 · §6.3.5 참가자 송출 · §6.3.6 일반 수신 · §6.3.7 참가자 수신)다. 참가자 = 주소가
+등록된 멤버(JOIN ②), 이탈 = LEAVE(송출 중이면 끝내고 남은 멤버에게 End Notify). 입력별 처리·타이머·규격 읽기의 정본은
+[mcvideo.md](../design/features/mcvideo.md) §5.3.1·§9 다. CMP 가 보내는 메시지의 RTCP 헤더 SSRC 는 `user_tc_ssrc`(없으면 `tc_ssrc`).
 
 **SSRC 규칙** (mcvideo_dev_plan.md §7 R2)
 
@@ -809,7 +816,8 @@ audio RTP(`port`, RTCP = +1)·video RTP(`video_port`, RTCP = +1 — 수신자 PL
 **그 밖** — `PTT_FLOOR_TIER` 등 floor 명령에 `service:"mcvideo"` 면 `BAD_REQUEST`. `resource.mcvideo` 를 광고하지 않는 CMP(멤버 풀 0)는
 `service:"mcvideo"` 명령에 `NO_RESOURCE`. sweeper 가 주소 등록 멤버 0 + 무활동 `SessionTimeout` 인 MCVideo 그룹을 회수하면
 `PTT_GROUP_ABORTED`(hdr.service `"mcvideo"`)를 보낸다(§8). 관측 — STATS `detail.mcvideo_groups[]{group_id, group_type, members, reserved,
-max_transmitters, control_rx, no_grant_drop}`·`mcvideo_groups_total`.
+max_transmitters, transmitters, receptions, control_rx, no_grant_drop}`(transmitters = Cx, receptions = C7 — Active SSRC List 항목 합)·
+`mcvideo_groups_total`.
 
 ## 8. 이벤트 (type: "event")
 

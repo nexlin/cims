@@ -143,7 +143,9 @@ bool PCmpServer::startServer() {
         this->runControlLoop();
     }).detach();
 
-    if (_pttMediaBufferMs > 0) _mediaBufferThread = std::thread([this]() { this->mediaBufferLoop(); });
+    // 20 ms 클록 — PTT 미디어 버퍼 재생 + MCVideo 전송 제어 틱(100 ms)
+    if (_pttMediaBufferMs > 0 || _mcvMemberPoolSize > 0)
+        _mediaBufferThread = std::thread([this]() { this->mediaBufferLoop(); });
     // Session timeout 체크 스레드 시작
     if (_sessionTimeout > 0) {
         _timeoutThread = std::thread([this]() { this->timeoutLoop(); });
@@ -898,6 +900,8 @@ void PCmpServer::processStats(const SimpleJson::JsonNode& payload, const std::st
             g.Set("members", group->getMemberCount());
             g.Set("reserved", group->getReservedCount());
             g.Set("max_transmitters", group->maxTransmitters());
+            g.Set("transmitters", group->getTransmitterCount());
+            g.Set("receptions", group->getReceptionCount());
             g.Set("control_rx", (long long)group->getControlRx());
             g.Set("no_grant_drop", (long long)group->getNoGrantDrop());
             mcvArr.Add(g);
@@ -2833,15 +2837,23 @@ void PCmpServer::freeGroupMemberUnits(const std::string& groupId) {
     }
 }
 
-// PTT 미디어 버퍼 재생 클록 (cmp.md §3.5 «미디어 버퍼링») — 20 ms. 활성 버퍼가 없으면 그룹 표를 잡지 않는다.
+// 20 ms 클록 — PTT 미디어 버퍼 재생(cmp.md §3.5 «미디어 버퍼링») + MCVideo 전송 제어 틱(100 ms 마다 — T2~T6 기본 1 s 의 오차를
+//   줄인다, mcvideo.md §5.3.1). 활성 버퍼·MCVideo 그룹이 없으면 그룹 표를 잡지 않는다.
 void PCmpServer::mediaBufferLoop() {
+    unsigned int n = 0;
     while (_running) {
         msleep(20);
         if (!_running) break;
-        if (PMcpttGroup::activeMediaBuffers() <= 0) continue;
+        bool buffers = PMcpttGroup::activeMediaBuffers() > 0;
+        bool mcv = (++n % 5 == 0) && PMcvideoGroup::activeGroups() > 0;
+        if (!buffers && !mcv) continue;
         PAutoLock lock(_mutex);
-        for (auto const& [gid, group] : _groups)
-            if (group) group->tickMediaBuffer();
+        if (buffers)
+            for (auto const& [gid, group] : _groups)
+                if (group) group->tickMediaBuffer();
+        if (mcv)
+            for (auto const& [gid, group] : _mcvGroups)
+                if (group) group->tick();
     }
 }
 

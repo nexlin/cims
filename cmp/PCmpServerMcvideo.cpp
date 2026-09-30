@@ -76,6 +76,7 @@ void PCmpServer::processMcvAddGroup(const SimpleJson::JsonNode& payload, const s
     bool prearranged = group ? group->prearranged() : false;
     int maxTx = group ? group->maxTransmitters() : 0;
     bool autoRx = group ? group->receptionAutomatic() : false;
+    McvCallType callType = group ? group->callType() : MCV_CALL_NORMAL;
     McvTimers timers = group ? group->timers() : McvTimers();
     std::string gt = payload.GetString("group_type");
     if (gt == "prearranged") prearranged = true;
@@ -85,6 +86,12 @@ void PCmpServer::processMcvAddGroup(const SimpleJson::JsonNode& payload, const s
     if (rm == "automatic") autoRx = true;
     else if (rm == "manual") autoRx = false;
     else if (!rm.empty()) return reject("BAD_REQUEST", "reception_mode must be manual|automatic");
+    // 호 종류 — 긴급·임박이면 전송 제어 메시지에 Transmission Indicator 를 싣고 수신은 automatic(TS 24.581 §6.3.6.3.3 1a)
+    std::string ct = payload.GetString("call_type");
+    if (ct == "normal") callType = MCV_CALL_NORMAL;
+    else if (ct == "emergency") callType = MCV_CALL_EMERGENCY;
+    else if (ct == "imminent") callType = MCV_CALL_IMMINENT;
+    else if (!ct.empty()) return reject("BAD_REQUEST", "call_type must be normal|emergency|imminent");
     std::string err;
     if (!McvIntField(payload, "max_transmitters", 1, 16, maxTx, err)) return reject("BAD_REQUEST", err);
     if (maxTx <= 0) return reject("BAD_REQUEST", "max_transmitters (1..16) required");
@@ -129,11 +136,35 @@ void PCmpServer::processMcvAddGroup(const SimpleJson::JsonNode& payload, const s
             if (!logTc) return;
             logFlow(gkey, from, to, proto, label, body, "", gsvc.c_str(), gsesid.c_str(), gsubid.c_str());
         });
+        // 송출자 집합 변경 → TRANSMITTERS, T1/T5 만료 → TRANSMISSION_INACTIVITY (cmp_media_api.md §8 — 해제는 CSP 정책)
+        group->setTransmittersCallback([this](const std::string& gid, const std::vector<McvTransmitter>& tx,
+                                              const std::string& gsesid, const std::string& gsvc) {
+            SimpleJson::JsonNode arr;
+            arr.type = SimpleJson::JSON_ARRAY;
+            for (const auto& t : tx) {
+                SimpleJson::JsonNode e;
+                e.Set("user", t.memberId);
+                e.Set("audio_ssrc", (long long)t.audioSsrc);
+                e.Set("video_ssrc", (long long)t.videoSsrc);
+                arr.Add(e);
+            }
+            SimpleJson::JsonNode p;
+            p.Set("group_id", gid);
+            p.Set("transmitters", arr);
+            emitEvent("TRANSMITTERS", p, gsesid, gsvc.empty() ? "mcvideo" : gsvc);
+        });
+        group->setInactivityCallback([this](const std::string& gid, const char* timer, const std::string& gsesid,
+                                            const std::string& gsvc) {
+            SimpleJson::JsonNode p;
+            p.Set("group_id", gid);
+            p.Set("timer", timer ? timer : "");
+            emitEvent("TRANSMISSION_INACTIVITY", p, gsesid, gsvc.empty() ? "mcvideo" : gsvc);
+        });
         _mcvGroups[groupId] = group;
         createdNow = true;
     }
     group->setSessionMeta(sesid, svc, subid);
-    group->setConfig(prearranged, maxTx, autoRx, timers);
+    group->setConfig(prearranged, maxTx, autoRx, callType, timers);
     group->updateRoster(priorities, roles);
     std::string recordDir = payload.GetString("record_dir");
     if (!recordDir.empty()) group->setRecording(recordDir, payload.GetString("session_dir"));
@@ -161,8 +192,9 @@ void PCmpServer::processMcvAddGroup(const SimpleJson::JsonNode& payload, const s
     if (createdNow) {
         logFlow(key, "cmp", "cmp", "INT", "GROUP_START", prearranged ? "mcvideo prearranged" : "mcvideo chat", "",
                 svc.c_str(), sesid.c_str(), subid.c_str());
-        LOG_INFO("PCmpServer", "ADD_GROUP(mcvideo) group=%s type=%s max_transmitters=%d reception=%s (new)",
-                 groupId.c_str(), prearranged ? "prearranged" : "chat", maxTx, autoRx ? "automatic" : "manual");
+        LOG_INFO("PCmpServer", "ADD_GROUP(mcvideo) group=%s type=%s max_transmitters=%d reception=%s call=%s (new)",
+                 groupId.c_str(), prearranged ? "prearranged" : "chat", maxTx, autoRx ? "automatic" : "manual",
+                 callType == MCV_CALL_EMERGENCY ? "emergency" : callType == MCV_CALL_IMMINENT ? "imminent" : "normal");
     }
 
     SimpleJson::JsonNode respBody;
@@ -236,6 +268,7 @@ void PCmpServer::processMcvJoin(const SimpleJson::JsonNode& payload, const std::
         d.userAudioSsrc = (unsigned int)payload.GetInt("user_audio_ssrc", 0);
         d.userVideoSsrc = (unsigned int)payload.GetInt("user_video_ssrc", 0);
         d.queueing = payload.GetInt("queueing", 0) != 0;
+        d.recvOnly = payload.GetInt("recv_only", 0) != 0;
         if (!McvIntField(payload, "max_priority", 0, 255, d.maxPriority, err) ||
             !McvIntField(payload, "max_reception_priority", 0, 255, d.maxRxPriority, err) ||
             !McvIntField(payload, "max_rx_streams", 1, 16, d.maxRxStreams, err))
@@ -244,10 +277,13 @@ void PCmpServer::processMcvJoin(const SimpleJson::JsonNode& payload, const std::
     // 암묵적 송출 요청은 새 prearranged 세션 개시에만 온다(TS 24.581 §14.3.5) — chat 합류에 오면 계약 위반.
     if (implicitReq && !group->prearranged())
         return reject("BAD_REQUEST", "implicit_request only for a new prearranged session");
+    // 암묵적 요청은 참가 시점의 송출 요청이라(§6.3.5.2.2 1) 주소 등록(JOIN ②)과 함께만 온다.
+    if (implicitReq && !addressed) return reject("BAD_REQUEST", "implicit_request requires user_ip/user_port");
 
     PMcvMemberPort* mu = ensureMcvUnit(groupId, sessionId, group);
     if (!mu) return reject("NO_RESOURCE", "mcvideo member pool exhausted");
-    if (addressed) group->addMember(sessionId, d);
+    PMcvControl::ImplicitResult ires;
+    if (addressed) group->addMember(sessionId, d, implicitReq, &ires);
 
     SimpleJson::JsonNode respBody;
     respBody.Set("ip", _rtpIp);
@@ -255,8 +291,13 @@ void PCmpServer::processMcvJoin(const SimpleJson::JsonNode& payload, const std::
     respBody.Set("video_port", (int)mu->getVideoPort());
     respBody.Set("control_port", (int)mu->getControlPort());
     respBody.Set("tc_ssrc", (long long)group->tcSsrcOf(sessionId));
-    // 암묵적 송출 요청 — 허가는 송출 제어가 정한다. 허가하지 않았으면 granted 0(SSRC 없음) — CSP 는 answer 에 mc_implicit_request 만 싣는다.
-    if (implicitReq) respBody.Set("granted", 0);
+    // 암묵적 송출 요청 — 허가는 송출 제어가 정한다. SSRC 쌍은 허가 여부와 무관하게 예약·응답한다(§14.3.7·§14.3.8 «irrespective of
+    //   mc_granted»). 허가 전(개시자 혼자)이면 granted 0 — 첫 초대 참가자가 등록될 때 CMP 가 Transmission Granted 를 보낸다(§6.3.2.2).
+    if (implicitReq) {
+        respBody.Set("granted", ires.granted ? 1 : 0);
+        respBody.Set("audio_ssrc", (long long)ires.audioSsrc);
+        respBody.Set("video_ssrc", (long long)ires.videoSsrc);
+    }
     int txSeq = sendOk(ip, port, transId, "PTT_JOIN", sesid, svc, &respBody);
     logFlow(key, "cmp", "csp", "JSON", "OK", "", txIdStr.c_str(), svc.c_str(), sesid.c_str(), "", txSeq, "csp");
     LOG_INFO("PCmpServer", "PTT_JOIN(mcvideo) group=%s session=%s %s:%d local=%d control=%d tc_ssrc=%08x",

@@ -8,27 +8,11 @@
 #include <ctime>
 #include <cstdint>
 #include <functional>
+#include <atomic>
 #include "pbase.h"
 #include "PTransmissionDefs.h"
+#include "PMcvControl.h"
 #include "PMcvMemberPort.h"
-
-// 서버 전송 제어 타이머·카운터 (TS 24.581 §11.1.3·§11.2.3 — 정본 mcvideo_tc_defs.yaml, 생성 상수 MCV_*).
-//   T1 = 그룹 on-network-hang-timer · T5 = 그룹 on-network-reception-hang-timer · 나머지 = MCVideo service configuration
-//   `<tc-timers-counters-R14>`. CSP 가 PTT_GROUP_ADD.tc_timers 로 싣고, 미지정 필드는 K5 기본값이다. t1Ms·t5Ms 0 = 그 타이머 미사용.
-struct McvTimers {
-    int t1Ms = MCV_T1_MS;    // Inactivity
-    int t2Ms = MCV_T2_MS;    // Transmission Idle
-    int t3Ms = MCV_T3_MS;    // Transmission Revoke
-    int t4Ms = MCV_T4_MS;    // Transmission Granted
-    int t5Ms = MCV_T5_MS;    // Reception Inactivity
-    int t6Ms = MCV_T6_MS;    // Reception Granted
-    int t11Ms = MCV_T11_MS;  // Stream Reception Idle
-    int c2 = MCV_C2;         // Transmission Idle
-    int c4 = MCV_C4;         // Transmission Granted
-    int c6 = MCV_C6;         // Reception Granted
-    int c7 = MCV_C7;         // Reception Accepted
-    int c11 = MCV_C11;       // Count of active receivers for the stream
-};
 
 // 멤버 선언 — PTT_JOIN(service:"mcvideo") 의 주소·협상 값 (cmp_media_api.md §7.9).
 struct McvMemberDecl {
@@ -47,7 +31,8 @@ struct McvMemberDecl {
     unsigned int userTcSsrc = 0;  // user_tc_ssrc — CMP → 멤버 전송 제어 RTCP 헤더 SSRC (0 = CMP 가 정한 값)
     unsigned int userAudioSsrc = 0;  // user_audio_ssrc — 멤버 offer 의 audio a=ssrc (송출 SSRC 할당 선호값, 0 = 없음)
     unsigned int userVideoSsrc = 0;  // user_video_ssrc — 멤버 offer 의 video a=ssrc
-    bool queueing = false;   // SDP mc_queueing 협상 (1차는 송출 큐 없음 — 상한이면 거절 #1)
+    bool queueing = false;   // SDP mc_queueing 협상 (§14.2.2) — 상한에서 대기열(Queue Position Info), 미협상이면 거절 #1
+    bool recvOnly = false;   // recv_only — 그룹 문서 <on-network-recvonly> (송출 요청 거절 #5)
     int maxPriority = -1;    // 협상 송출 우선순위 상한 (-1 = members 의 prio)
     int maxRxPriority = -1;  // 협상 수신 우선순위 상한 (§14.3.6)
     int maxRxStreams = MCV_C9;  // C9 — 동시 수신 스트림 상한 (user profile MaxSimultaneousVideoStreams)
@@ -61,7 +46,8 @@ struct McvMemberDecl {
  * 멤버마다 전용 포트 유닛(PMcvMemberPort — audio·video·video RTCP·전송 제어)을 쓰고 그룹 공유 포트는 없다.
  *
  * 멤버는 두 단계다 — reserveMember(유닛 바인딩 + 전송 제어 SSRC 할당, ADD 로스터·JOIN ①) → addMember(SDP 교환 뒤 주소·협상 값,
- * JOIN ②). 송출 허가 전 미디어는 분배하지 않는다(허가된 송출만 수신자의 Active SSRC List 로 나간다 — §6.3.7).
+ * JOIN ②). 주소가 등록되면 전송 제어 참가자가 된다 — 송출·수신 제어 상태 머신은 PMcvControl(순수 로직)이고 그룹이 락 아래 부른다.
+ * 허가된 송출만 수신자의 Active SSRC List 대로 나간다(§6.3.7) — 내보낼 때 SSRC 를 그 송출의 할당값으로, PT 를 수신 leg 값으로 찍는다.
  *
  * 락 순서 = 그룹 → 유닛. 그룹 락을 쥔 채 서버(PCmpServer) 락을 잡지 않는다.
  */
@@ -80,23 +66,35 @@ public:
     // ── 세션 속성 (PTT_GROUP_ADD·MODIFY) ──
     void setSessionMeta(const std::string& sesid, const std::string& svc, const std::string& subid);
     std::string sessionSesid();
-    void setConfig(bool prearranged, int maxTransmitters, bool receptionAutomatic, const McvTimers& timers);
+    void setConfig(bool prearranged, int maxTransmitters, bool receptionAutomatic, McvCallType callType,
+                   const McvTimers& timers);
     // members 로스터 — sessionId → 그룹 문서 <user-priority> · role
     void updateRoster(const std::map<std::string, int>& priorities, const std::map<std::string, std::string>& roles);
     bool prearranged();
     int maxTransmitters();
     bool receptionAutomatic();
+    McvCallType callType();
     McvTimers timers();
     // 녹취 자리 (record_dir/session_dir — 송출마다 슬롯 트랙은 녹취 단계에서)
     void setRecording(const std::string& recordDir, const std::string& sessionDir);
     std::string recordDir();
     void setLogCallback(LogFn fn) { _logFn = fn; }
+    // 송출자 집합 변경 → TRANSMITTERS 이벤트 · T1/T5 만료 → TRANSMISSION_INACTIVITY 이벤트 (cmp_media_api.md §8).
+    //   그룹 _mutex 를 쥔 채 부른다(PMcpttGroup 콜백과 같은 규약 — PCmpServer::_mutex 를 다시 잡지 않는다, sesid/service 는 그룹이 싣는다).
+    using TransmittersFn = std::function<void(const std::string& groupId, const std::vector<McvTransmitter>& transmitters,
+                                              const std::string& sesid, const std::string& svc)>;
+    using InactivityFn = std::function<void(const std::string& groupId, const char* timer, const std::string& sesid,
+                                            const std::string& svc)>;
+    void setTransmittersCallback(TransmittersFn fn) { _onTransmitters = fn; }
+    void setInactivityCallback(InactivityFn fn) { _onInactivity = fn; }
 
     // ── 멤버 ──
     // 선할당 — 유닛 바인딩 + 전송 제어 SSRC(tc_ssrc) 할당. 멱등(같은 sessionId 는 같은 값). 반환 = tc_ssrc.
     unsigned int reserveMember(const std::string& sessionId, PMcvMemberPort* unit);
-    // 주소·협상 값 등록/갱신 — reserveMember 가 선행해야 한다(아니면 false).
-    bool addMember(const std::string& sessionId, const McvMemberDecl& decl);
+    // 주소·협상 값 등록/갱신 — reserveMember 가 선행해야 한다(아니면 false). implicitRequest = JOIN implicit_request
+    //   (새 prearranged 세션 개시의 암묵적 송출 요청) — res 에 허가 여부·SSRC 쌍을 채운다(JOIN 응답 granted·audio_ssrc·video_ssrc).
+    bool addMember(const std::string& sessionId, const McvMemberDecl& decl, bool implicitRequest = false,
+                   PMcvControl::ImplicitResult* res = nullptr);
     void removeMember(const std::string& sessionId);
     // 전 멤버 해제 — 그룹 해제 직전. 이후 늦게 도착한 패킷은 미등록 멤버로 버린다.
     void close();
@@ -107,6 +105,10 @@ public:
 
     // ── 수신 (멤버 유닛 → 리액터 스레드) ──
     void onMemberPacket(const std::string& memberId, McvChannel ch, const std::string& ip, int port, char* buf, int len);
+    // 전송 제어 타이머 틱 (T1~T6·T11 — PCmpServer 의 100 ms 클록)
+    void tick();
+    // 살아 있는 MCVideo 그룹 수 — 틱 클록이 그룹 표를 잡을지 판단한다(락 없음)
+    static int activeGroups() { return _activeGroups.load(); }
 
     // ── 관측 ──
     time_t getCreatedTime() const { return _created; }
@@ -114,12 +116,9 @@ public:
     long getSrcDrop();
     long getNoGrantDrop();
     long getControlRx();
+    int getTransmitterCount();
+    int getReceptionCount();
     void collectNatLatched(std::vector<std::tuple<std::string, std::string, int>>& out);
-
-    // ── SSRC — 프로세스 전역 유일 (TS 24.581 §6.3.4.3.3 d · 전송 제어 채널 tc_ssrc) ──
-    // preferred = 단말이 offer a=ssrc 로 준 값(0 = 없음) — 전역에서 쓰이지 않으면 그 값, 아니면 새 값.
-    static unsigned int AllocSsrc(unsigned int preferred = 0);
-    static void FreeSsrc(unsigned int ssrc);
 
 private:
     struct Peer {
@@ -144,14 +143,25 @@ private:
     //   메시지 처리는 송출·수신 제어 상태 머신이 받는다.
     void _onControl(Peer& peer, const char* buf, int len);
     void _onControlMessage(Peer& peer, const char* buf, int len);
+    // 허가된 송출의 미디어를 Active SSRC List 대로 분배한다 (호출자가 _mutex 보유)
+    void _distribute(const Peer& sender, McvChannel ch, unsigned int ssrc, const char* buf, int len);
+    // PMcvControl → 멤버 제어 채널 (호출자가 _mutex 보유)
+    void _sendControl(const std::string& memberId, int app, int subtype, const std::vector<McvTlv>& fields);
+    McvParticipantDecl _ctlDecl(const std::string& sessionId, const McvMemberDecl& d) const;
     void _releasePeer(Peer& peer);
     static int64_t _nowUsec();
+    static int64_t _nowMs();   // 단조 시계 — 전송 제어 타이머
+
+    static std::atomic<int> _activeGroups;
 
     std::string _groupId;
     PMutex _mutex;
     time_t _created;
     time_t _lastActivity;
     LogFn _logFn;
+    TransmittersFn _onTransmitters;
+    InactivityFn _onInactivity;
+    PMcvControl _ctl;                   // 송출·수신 제어 상태 머신 (TS 24.581 §6.3.4~§6.3.7)
 
     std::string _sesid;
     std::string _svc = "mcvideo";
@@ -159,6 +169,7 @@ private:
     bool _prearranged = false;          // group_type (기본 chat — mcvideo.md §7 D5)
     int _maxTransmitters = 1;           // 동시 송출 상한 (§4.1.1.1)
     bool _receptionAutomatic = false;   // reception_mode (기본 manual — §6.3.6.3.3)
+    McvCallType _callType = MCV_CALL_NORMAL;   // call_type (긴급·임박 = Transmission Indicator · automatic 수신)
     McvTimers _timers;
     std::string _recordDir, _recordSesDir;
 
@@ -167,7 +178,7 @@ private:
     std::map<std::string, std::string> _roles;        // sessionId → role
 
     long _srcDrop = 0;       // 미협상 소스·미등록 멤버 드롭 누적
-    long _noGrantDrop = 0;   // 송출 허가 없는 미디어 드롭 누적
+    long _noGrantDrop = 0;   // 송출 허가 없는 미디어 드롭 누적 (payload 있는 RTP)
     long _controlRx = 0;     // 수신한 전송 제어 메시지 누적
     time_t _lastDropWarn = 0;
 };

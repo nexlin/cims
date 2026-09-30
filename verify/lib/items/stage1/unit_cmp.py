@@ -7,6 +7,10 @@ g++ 로 링크해 실행한다 (라이브 서비스·소켓 무관).
   · tests/cmp_ann_player_test.cpp  안내 재생기(cmp/PAnnCatalog.cpp·PAnnPlayer.cpp — announcements.md §4.2) — 코덱 정규화·G.711/AMR-WB 파일 프레임화·
                                    카탈로그 행 파싱 · 20 ms 페이싱(seq/ts/SSRC/marker·늦은 틱 따라잡기) · 항목 repeat/max_ms·전체 repeat·delay 무음 ·
                                    무한 loop/stop/max · AMR-WB RTP 페이로드(octet-aligned/BE, NO_DATA 무송신) · NAT 게이트 · ok() 검사
+  · tests/cmp_mcvideo_control_test.cpp  MCVideo 전송 제어 서버 상태 머신(cmp/PMcvControl.cpp — TS 24.581 §6.3.4~§6.3.7, mcvideo.md §5.3.1) —
+                                   Idle·#3 · 허가·Notification·manual 수신·T6 · End Request·Ack·End Notify·T2 · 상한 #1·큐·선점 #4·T4 ·
+                                   동시 송출·C9 #7·이탈 · 긴급 automatic·Indicator · T1·T5·T11 #8·T3 포기 · 무허가 미디어 #3 · 암묵 요청·수신 전용 #5
+                                   (보낸 메시지는 전부 PTransmissionCodec 으로 부호화·해석 왕복)
 
 AMR 라이브러리(pkg/opencore-amr, pkg/vo-amrwbenc-0.1.3)가 없으면 SKIP — S2 빌드(ExternalProject) 뒤 pre-package 프리셋에서 의미가 있다.
 """
@@ -20,9 +24,11 @@ from ...registry import verify_item, ItemResult, ItemStatus
 from ...context import VerifyContext
 
 _ID = "S1-UNIT-CMP"
-_NAME = "CMP 미디어 유닛 단위시험 (tests/cmp_transcoder_test.cpp 트랜스코더 · tests/cmp_ann_player_test.cpp 안내 재생기)"
-_TESTS = ["tests/cmp_transcoder_test.cpp", "tests/cmp_ann_player_test.cpp", "tests/cmp_ann_mixer_test.cpp"]
-_SRCS = ["cmp/PTranscoder.cpp", "cmp/PAnnCatalog.cpp", "cmp/PAnnPlayer.cpp", "cmp/PAnnMixer.cpp"]
+_NAME = "CMP 미디어 유닛 단위시험 (트랜스코더 · 안내 재생기·믹서 · MCVideo 전송 제어 상태 머신)"
+_TESTS = ["tests/cmp_transcoder_test.cpp", "tests/cmp_ann_player_test.cpp", "tests/cmp_ann_mixer_test.cpp",
+          "tests/cmp_mcvideo_control_test.cpp"]
+_SRCS = ["cmp/PTranscoder.cpp", "cmp/PAnnCatalog.cpp", "cmp/PAnnPlayer.cpp", "cmp/PAnnMixer.cpp", "cmp/PMcvControl.cpp",
+         "cmp/PTransmissionCodec.cpp"]
 _INCS = ["cmp", "include", "pkg/opencore-amr/include/opencore-amrwb", "pkg/vo-amrwbenc-0.1.3/include/vo-amrwbenc"]
 _LIBS = ["pkg/opencore-amr/lib/libopencore-amrwb.a", "pkg/vo-amrwbenc-0.1.3/lib/libvo-amrwbenc.a"]
 
