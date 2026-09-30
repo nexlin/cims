@@ -3,6 +3,7 @@
 #include <strings.h>
 
 #include "Log.h"
+#include "McVideoCallService.h"
 #include "McVideoInfo.h"
 #include "ModuleDispatcher.h"
 #include "SipServerSetup.h"
@@ -30,8 +31,6 @@ bool CMcVideoAsModule::IsMcVideoRequest( CSipMessage *pclsMessage ) {
 
 EModuleRouteResult CMcVideoAsModule::OnIncomingCall( const char *pszCallId, const char *pszFrom, const char *pszTo,
                                                      CSipCallRtp *pclsRtp, CSipMessage *pclsMessage ) {
-    (void)pclsRtp;
-    (void)pclsMessage;
     if ( !IsEnabled() ) {
         // MCVideo 를 내지 않는 사이트 — 참여 MCVideo 기능 PSI 미할당(TS 24.281 §6.3.7.1)
         CLog::Print( LOG_INFO, "MCVIDEO-AS: INVITE from(%s) to(%s) — MCVideo 미제공(Roles.MCVIDEO off) → 404",
@@ -39,11 +38,7 @@ EModuleRouteResult CMcVideoAsModule::OnIncomingCall( const char *pszCallId, cons
         gclsDispatcher.StopCall( pszCallId, SIP_NOT_FOUND );
         return E_ROUTE_HANDLED;
     }
-    // 그룹 호 처리(McVideoCallService — chat·prearranged 개시·합류·해제, mcvideo_dev_plan.md A10)가 아직 없다. MCPTT
-    // 호로 흘리지 않고
-    //   일시 불가로 끝낸다(RFC 3261 §21.4.18).
-    CLog::Print( LOG_INFO, "MCVIDEO-AS: INVITE from(%s) to(%s) — MCVideo 그룹 호 미구현 → 480", pszFrom ? pszFrom : "",
-                 pszTo ? pszTo : "" );
-    gclsDispatcher.StopCall( pszCallId, SIP_TEMPORARILY_UNAVAILABLE );
+    // 그룹 호 — 검사·세션·answer·팬아웃까지 서비스가 끝낸다(mcvideo.md §5.2.1)
+    gclsMcVideoCallService.OnIncomingInvite( pszCallId, pszFrom, pszTo, pclsRtp, pclsMessage );
     return E_ROUTE_HANDLED;
 }

@@ -548,3 +548,25 @@ K3 골든을 SDK 가 **만든 메시지**(01·02·03·05·08 모양)와 대조�
 | 시험 | `cimsue_test` 145/145 · S1 UE·`S1-MCVIDEO-CONTRACT`·`S1-CPP-FORMAT` PASS · `compileDebugKotlin` OK. .NET 빌드·`CimsUe.Tests` 는 Windows PC 몫(결과 대기) |
 
 **다음 (.45)** — A10·A11 푸시 뒤 C8 cli 로 .48 신호 시험(배포·역할 켜기 = 사용자 결정 뒤) · Linux 엔진 영상(M2 — 사용자 결정 대기) · C6 송출 영상·송출별 렌더.
+
+**.48 A10·A11 — CSP MCVideo 그룹 호 (.48 → .45)** — [mcvideo.md](../design/features/mcvideo.md) §5.2.1 · [csp.md](../design/modules/csp.md) §3.4a. **구현 — 실측 전**
+(배포·공유 DB `migrate_mcvideo.sql`·`Setup.Roles.MCVIDEO` 켜기는 사용자 결정 뒤 — 그 전에는 실서버에 MCVideo INVITE/PUBLISH 를 보내지 않는다).
+
+| 항목 | CSP |
+|---|---|
+| 서비스 | `CMcVideoCallService`(`csp/McVideoCallService.{h,cpp}`) — chat·prearranged 개시·합류·재합류(R-URI `gr`)·이탈·해제(prearranged 참가자 1명 이하·chat 0명·T1·TNG3), 검사 응답 = TS 24.281 §4.4 Warning(113·116·117/118·108/109·103·120·137) |
+| prearranged 개시 | 제휴된 MCVideo 등록 멤버 팬아웃 → 개시자 200 OK 는 **첫 멤버가 붙은 뒤**(암묵 요청은 그때 곧바로 허가 — answer `mc_implicit_request`·`mc_granted`·`mc_audio/video_ssrc`). 초대 전부 실패·10 s 안에 아무도 없음 → 480. 초대 leg 응답 한도 30 s → CANCEL |
+| SDP | 음성 = 코덱 테이블 AMR-WB(offer PT echo) · 영상 = H.264 PT 가 있을 때만(없으면 answer `m=video 0`, JOIN 에 video 포트 없음 — C3·C4 3) · 전송 제어 = `m=application <port> udp MCVideo`(fmtp 선택) · answer fmtp = offer 에 있던 것 + `mc_transmission_ssrc` |
+| 세션 타이머 | 팬아웃 INVITE `Session-Expires: 1800` **refresher 생략**(§6.3.3.1.2 6) «The refresher parameter shall be omitted») · 서버 200 OK `refresher=uac`(§6.3.3.2.3.2 2)) — 골든 04·06·07 반영 |
+| re-INVITE | 미디어 변경이면 CMP JOIN ② 재선언(answer 는 직전 로컬 선언 그대로) |
+| CmpClient (A11) | `McvAddGroup`·`McvJoin`(①/②)·`McvLeave`·`McvRemove` — 캐시 키 `mcvideo|<group>`, 로스터 = 붙는 멤버만, hdr.service mcvideo 이벤트는 MCVideo 서비스로(MCPTT 캐시를 건드리지 않는다) |
+
+**C3·C4 4 정정 (세션 갱신 주체)** — 앞 답(«팬아웃 INVITE 에 `refresher=uas`»)을 거둔다. 제어 기능의 멤버 INVITE 는 refresher 를 **싣지 않아야** 한다(§6.3.3.1.2 6)).
+규격대로면 단말이 200 OK 에서 `refresher=uas` 를 정한다(§6.2.3.1.1 5)) — 이것은 **SDK 몫**이다. 지금 pjsip 이 `refresher=uac` 로 답해도 세션은 끊기지 않는다
+(psip 이 200 OK 의 refresher 를 따라 CSP 가 갱신자가 된다 — RFC 4028 §7.2). SDK 가 pjsip UAS 를 «요청에 refresher 가 없으면 uas» 로 두는 방법을 찾을 때까지
+SDK 쪽 편차로 적어 두자.
+
+**C7 설정 문서 PUT 규칙 확인** — 유지된다: CSC `services/mcvideo.parse_group_attrs` 는 MCVideo `<service>` 가 없으면 `(None, {})` 이고, XCAP PUT 쓰기 경로
+(`services/mcptt.py` — 그룹 갱신 두 곳)는 `mcvideo` 가 None 이면 MCVideo 행을 건드리지 않는다. 끄기는 관리 API 몫(V7 에서 규격 의미로 바꿀 때 알린다).
+
+**다음 (.48)** — 배포 결정 뒤 .48 신호 시험(C8 `cimsue-cli video-call` 과 함께 — 순서·계정은 dev_share 로), B6(영상 RTCP 전달)·B8(녹취)·CSP `media_srtp` 결선.

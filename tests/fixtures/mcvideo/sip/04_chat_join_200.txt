@@ -7,10 +7,10 @@ CSeq: 1 INVITE
 Contact: <sip:g101@csp.ptt.cims.example.kr:5061;transport=tls;gr=1790775600123456-3>;+g.3gpp.mcvideo;+g.3gpp.icsi-ref="urn%3Aurn-7%3A3gpp-service.ims.icsi.mcvideo";isfocus
 Require: timer
 Supported: tdialog
-Session-Expires: 1800
+Session-Expires: 1800;refresher=uac
 P-Asserted-Identity: <sip:mcvideo_psi@ptt.cims.example.kr>
 Content-Type: application/sdp
-Content-Length: 531
+Content-Length: 543
 
 v=0
 o=CSS 4 1 IN IP4 10.10.0.20
@@ -32,4 +32,4 @@ a=rtcp-fb:97 nack pli
 a=rtcp-fb:97 ccm fir
 a=sendrecv
 m=application 58000 udp MCVideo
-a=fmtp:MCVideo mc_priority=5;mc_transmission_ssrc=2863311530
+a=fmtp:MCVideo mc_queueing;mc_priority=5;mc_transmission_ssrc=2863311530

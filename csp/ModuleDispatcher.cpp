@@ -43,6 +43,7 @@
 #include "McDataCodec.h"
 #include "McDataGates.h"
 #include "McDataMediaService.h"
+#include "McVideoCallService.h"
 #include "McpttInfo.h"
 #include "MemoryDebug.h"
 #include "NonceMap.h"
@@ -1721,6 +1722,8 @@ void CModuleDispatcher::EventCallRing( const char *pszCallId, int iSipStatus, CS
     // TAS — 대표번호 포크 대기 leg 18x(소비: 첫 180 만 A 에 전달) / dialog-event 링잉(early) 통지(BLF §6.2,
     //   CallMap leg — 통과) / blind transfer 진행 NOTIFY (trans leg — 소비)
     if ( m_clsTas.IsEnabled() && m_clsTas.OnCallRing( pszCallId, iSipStatus, pclsRtp ) ) return;
+    // MCVideo 초대 leg 의 18x — 소비(개시자는 첫 멤버 200 OK 뒤 200 OK 를 받는다)
+    if ( gclsMcVideoCallService.OnCallRinging( pszCallId ) ) return;
     // PTT 개시자 응답 게이트의 초대 leg — 사설 호의 180 은 개시자에게 옮긴다(TS 24.379 §11.1.1.4.2), 그 밖은 소비
     if ( gclsGroupCallService.OnAckGateRinging( pszCallId, iSipStatus ) ) return;
 
@@ -1803,6 +1806,8 @@ void CModuleDispatcher::EventCallStart( const char *pszCallId, CSipCallRtp *pcls
 
     // MCData media plane 레그 — CallMap 밖에서 자체 수명 관리 (미선점 시 아래 else 가 StopCall)
     if ( gclsMcDataMediaService.OnCallStarted( pszCallId, pclsRtp ) ) return;
+    // MCVideo 그룹 호 leg — 같은 방식(CallMap 밖, mcvideo.md §5.2.1)
+    if ( gclsMcVideoCallService.OnCallStarted( pszCallId, pclsRtp ) ) return;
 
     // 확립(answer) 표시 — sweeper 가 미확립(pending) 호만 빠르게 회수하도록.
     gclsCallMap.SetEstablished( pszCallId );
@@ -2070,6 +2075,8 @@ bool CModuleDispatcher::TryDivertLeg( const char *pszCallId, const CCallInfo &cl
 }
 
 void CModuleDispatcher::Tick() {
+    // MCVideo 그룹 호 — 개시 대기 한도·TNG3 (mcvideo.md §5.2.1)
+    if ( m_clsMcVideoAs.IsEnabled() ) gclsMcVideoCallService.Tick();
     if ( !m_clsTas.IsEnabled() ) return;
     const time_t now = time( NULL );
     std::vector<std::string> vecDue;
@@ -2215,6 +2222,8 @@ void CModuleDispatcher::EventCallEnd( const char *pszCallId, int iSipStatus, con
 
     // MCData media plane 레그 — cmdp 세션 정리 (UE 발 BYE·실패 응답 포함)
     if ( gclsMcDataMediaService.OnCallTerminated( pszCallId ) ) return;
+    // MCVideo 그룹 호 leg — CMP LEAVE·세션 해제 정책(mcvideo.md §5.2.1)
+    if ( gclsMcVideoCallService.OnCallEnded( pszCallId, iSipStatus ) ) return;
 
     // PTT 개시자 응답 게이트 — 개시자 CANCEL(개시 중단)·멤버 초대의 최종 거절 (TS 24.379 §6.3.3.3·§10.1.1.4.2).
     //   leg 정리는 아래 경로가 그대로 한다(게이트는 판정만 — 중단이면 세션 해제까지).
@@ -2334,6 +2343,8 @@ void CModuleDispatcher::EventReInvite( const char *pszCallId, CSipCallRtp *pclsR
         CLog::Print( LOG_DEBUG, "EventReInvite: session refresh (media unchanged) — CallId(%s)", pszCallId );
         return;
     }
+    // MCVideo 그룹 호 leg (CallMap 밖) — CMP 주소 등록만 갱신하고, answer 는 스택의 직전 로컬 선언 그대로
+    if ( gclsMcVideoCallService.OnReInvite( pszCallId, pclsRemoteRtp ) ) return;
 
     CCallInfo clsCallInfo;
     if ( gclsCallMap.Select( pszCallId, clsCallInfo ) ) {

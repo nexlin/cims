@@ -564,6 +564,8 @@ bool CCmpClient::_ProbeAlive( const CmpEndpoint &ep, int &iFreePorts ) {
         // PTT 미디어 버퍼링 광고 — resource.media_buffer 키 존재 (cmp.md §3.5 «미디어 버퍼링»). 없으면 개시자 응답은
         // 멤버 200 뒤.
         m_bMediaBufferSupported.store( res.Get( "media_buffer" ).type == SimpleJson::JSON_OBJECT );
+        // MCVideo 멤버 풀 광고 — resource.mcvideo 키 존재(cmp_media_api.md §7.9, 풀 0 이면 없다)
+        m_bMcVideoSupported.store( res.Get( "mcvideo" ).type == SimpleJson::JSON_OBJECT );
     }
     return true;
 }
@@ -1346,6 +1348,25 @@ void CCmpClient::HandleEvent( const SimpleJson::JsonNode &event ) {
     SimpleJson::JsonNode hdr = event.Get( "hdr" );
     SimpleJson::JsonNode payload = event.Get( "payload" );
     std::string strCmd = hdr.GetString( "cmd" );
+
+    // MCVideo 그룹 호의 이벤트 — 자원 키가 (service, group_id) 라 같은 그룹 id 의 MCPTT 그룹과 섞지
+    // 않는다(cmp_media_api.md §7.9·§8).
+    if ( hdr.GetString( "service" ) == "mcvideo" &&
+         ( strCmd == "PTT_GROUP_ABORTED" || strCmd == "TRANSMITTERS" || strCmd == "TRANSMISSION_INACTIVITY" ) ) {
+        const std::string strGid = payload.GetString( "group_id" );
+        if ( strCmd == "PTT_GROUP_ABORTED" ) {
+            ReleaseEndpointForKey( McvKey( strGid ) );
+            std::lock_guard<std::mutex> lock( m_mutexSesid );
+            m_mapKeyToSesid.erase( McvKey( strGid ) );
+        }
+        if ( !m_bAuditActiveRole && strCmd != "TRANSMITTERS" ) {
+            CLog::Print( LOG_INFO, "%s(mcvideo) observed (standby — no action): group=%s", strCmd.c_str(),
+                         strGid.c_str() );
+            return;
+        }
+        if ( m_fnMcvEvent ) m_fnMcvEvent( strCmd, strGid, hdr.GetString( "sesid" ), payload );
+        return;
+    }
 
     if ( strCmd == "RELAY_ABORTED" ) {
         std::string strSid = payload.GetString( "session_id" );

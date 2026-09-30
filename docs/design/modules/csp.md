@@ -118,7 +118,7 @@ MCVideo ICSI, Accept 의 mcvideo 문서 형식, mcvideo-info 본문, pidf 의 `m
 
 ```
 RecvRequest(INVITE)
-  ├─ MCVideo 서비스 표시? ───→ MCVIDEO-AS (CMcVideoAsModule — 역할 off 면 404, 그룹 호(A10) 전까지 480)
+  ├─ MCVideo 서비스 표시? ───→ MCVIDEO-AS (CMcVideoAsModule — 역할 off 면 404, 켜져 있으면 CMcVideoCallService §3.4a)
   ├─ PTT 그룹 대상? ──────────→ PTT-AS (SetCallOwner → CPttAsModule)
   ├─ 트렁크 prefix 매칭? ──→ IBCF (SetCallOwner → CIbcfModule)
   ├─ 착신 차단(ICB)? ───────→ 603 Decline 응답 (전체 ∨ 지정 번호 — 착신전환보다 우선)
@@ -383,6 +383,26 @@ INVITE to group@domain
 | 그룹 설정 변경 | CheckGroupIntegrity() → 멤버 추가/제거 |
 | CMP 재연결 | OnCmpStatusChanged() → 그룹 재생성 |
 
+### 3.4a CMcVideoAsModule / CMcVideoCallService (MCVideo 그룹 호)
+
+**파일:** `McVideoAsModule.h/.cpp`(모듈·서비스 판별), `McVideoCallService.h/.cpp`(그룹 호), `CmpClientMcvideo.cpp`(CMP 명령) — 설계 정본
+[mcvideo.md](../features/mcvideo.md) §5.2·§5.2.1.
+
+MCPTT `CGroupCallService` 와 따로 선 서비스다 — 세션 캐시(그룹 id → 세션: sesid·세션 식별자 `gr`·종류·개시자·leg 표)·CMP 명령(`PTT_* service:mcvideo`,
+캐시 키 `mcvideo|<group>`)이 서비스 키라 같은 그룹 id 의 MCPTT 호와 동시에 선다. leg 는 CallMap 밖에서 이 서비스가 관리한다(MCData media plane 과
+같은 방식 — `EventCallStart`·`EventCallEnd`·`EventCallRing`·`EventReInvite`(세션 갱신 판정 뒤) 맨 앞 훅, `Tick` = 초대 응답 한도·개시 대기 한도·TNG3).
+CMP 로스터는 붙는 멤버만 싣는다(멤버마다 `PTT_GROUP_ADD` members = 그 멤버 — CMP 가 로스터를 병합한다).
+
+| 사건 | 처리 |
+|------|------|
+| MCVideo INVITE | 검사(500 CMP `resource.mcvideo` 없음 · 403 Accept-Contact/isfocus · 404 137 재합류 세션 없음 · 404 113 · 403 116 · 404 117/118 · 403 108/109 자격 · 486 103 N6 · 암묵 affiliation 또는 403 120 · 488) → chat 은 곧바로 수락, prearranged 새 세션은 제휴된 MCVideo 등록 멤버 팬아웃 뒤 첫 멤버가 붙으면(200 OK 또는 스스로 합류) 개시자 수락 |
+| 수락 | 로스터 등록(ADD) → CMP JOIN ①(포트·`tc_ssrc`) → JOIN ②(offer 주소·`a=ssrc`·fmtp — 암묵 요청 결과) → 200 OK(포커스 Contact + `gr`, PAI = `mcvideo_psi`, `Supported: tdialog`, answer fmtp = `BuildMcVideoAnswerFmtp`) |
+| 팬아웃 | `CreateCall` → Request-URI = 등록 Contact · Accept-Contact 둘 · `P-Asserted-Service` · 포커스 Contact · Session-Expires refresher 생략(TS 24.281 §6.3.3.1.2 6)) · multipart(SDP + mcvideo-info) · 응답 한도 30 s 뒤 CANCEL |
+| 멤버 200 OK | JOIN ②(answer) → 대기 중 개시자 수락 (JOIN 실패 = BYE) |
+| re-INVITE (미디어 변경) | JOIN ② 재선언 — answer 는 스택의 직전 로컬 선언 |
+| BYE·실패 | CMP LEAVE · prearranged 참가자 1명 이하 / chat 0명이면 세션 해제(남은 leg BYE · CMP REMOVE) |
+| CMP 이벤트 | `TRANSMISSION_INACTIVITY` T1 → prearranged 해제 · `TRANSMITTERS` 로그 · `PTT_GROUP_ABORTED` 캐시 정리 |
+
 ### 3.5 CIbcfModule
 
 **파일:** `IbcfModule.h/.cpp`
@@ -596,6 +616,12 @@ SendRequestAndWait(payload)
 
 단발 HEARTBEAT 타임아웃(부하 시 간헐 발생)으로는 끊김 판정하지 않는다 — 연속 3회 실패에서만
 Disconnected 로 전환해 과민 teardown 을 방지한다.
+
+**MCVideo 명령** (`CmpClientMcvideo.cpp`, [cmp_media_api.md](../../api/cmp_media_api.md) §7.9) — `McvAddGroup`·`McvJoin`(① 선할당 / ② 주소 등록 — 응답
+`port`·`video_port`·`control_port`·`tc_ssrc`·`granted`·`audio_ssrc`·`video_ssrc`)·`McvLeave`·`McvRemove` — payload `service:"mcvideo"` 가 hdr.service 로
+가고, 세션·끝점 캐시 키는 `McvKey(group)` = `mcvideo|<group>`(MCPTT 의 같은 그룹 id 와 겹치지 않게). HEARTBEAT `resource.mcvideo` 광고를
+`SupportsMcVideo()` 로 배운다. `HandleEvent` 는 hdr.service 가 mcvideo 인 `PTT_GROUP_ABORTED`·`TRANSMITTERS`·`TRANSMISSION_INACTIVITY` 를 MCVideo 콜백
+(`SetMcvEventCallback` → `CMcVideoCallService::OnCmpEvent`)으로만 보낸다 — MCPTT 그룹 캐시를 건드리지 않는다.
 
 ### 3.7 CCallDir
 

@@ -51,6 +51,46 @@ struct CmpGroupSession {
     int iT4Sec = -1;           // floor_timers.t4_inactivity (초, 0=미사용, -1=미전송)
 };
 
+// ── MCVideo 그룹 호 (cmp_media_api.md §7.9 — PTT_* + service:"mcvideo", mcvideo.md §5.2.1) ──
+// 그룹 속성 — PTT_GROUP_ADD service:mcvideo. members = "id:prio:role" 나열(§7.1 과 같은 형식).
+struct CmpMcvGroupSpec {
+    std::string strGroupType = "chat";   // chat | prearranged
+    int iMaxTransmitters = 1;            // mcvideo-maximum-simultaneous-mcvideo-transmitting-group-members
+    bool bReceptionAutomatic = false;    // reception_mode automatic (긴급·임박 — 1차 manual)
+    std::string strCallType = "normal";  // normal | emergency | imminent
+    int iT1Ms = -1;                      // tc_timers.t1_ms = 그룹 hang timer (-1 = 싣지 않음)
+    int iT5Ms = -1;                      // tc_timers.t5_ms = 그룹 reception hang timer
+    std::string strMembers;
+    std::string strRecordDir, strSessionDir;
+};
+// 멤버 전용 포트 (PTT_GROUP_ADD 응답 member_ports · PTT_JOIN 응답)
+struct CmpMcvPorts {
+    int iPort = 0, iVideoPort = 0, iControlPort = 0;
+};
+// 멤버 선언 — PTT_JOIN ②(주소 등록) service:mcvideo. 값이 0/빈 값이면 싣지 않는다.
+struct CmpMcvMemberDecl {
+    std::string strIp;
+    int iPort = 0, iVideoPort = 0, iControlPort = 0;
+    int iNat = 0;
+    std::string strSigIp;
+    int iPt = 0, iSrcPt = 0, iVideoPt = 0;
+    std::string strCodec, strRole = "participant", strUri;
+    unsigned int uTcSsrc = 0, uAudioSsrc = 0, uVideoSsrc = 0;  // offer mc_transmission_ssrc · a=ssrc
+    int iQueueing = -1;                                        // -1 = 미협상(싣지 않음)
+    int iMaxPriority = -1;
+    int iMaxRxStreams = 0;  // C9 (0 = CMP 기본)
+    bool bImplicit = false;
+    bool bRecvOnly = false;
+};
+// PTT_JOIN 응답
+struct CmpMcvJoinResult {
+    std::string strIp;
+    CmpMcvPorts clsPorts;
+    unsigned int uTcSsrc = 0;
+    bool bGranted = false;
+    unsigned int uAudioSsrc = 0, uVideoSsrc = 0;
+};
+
 // Phase 1.E (HA — CMP All Active) — endpoint descriptor for multi-endpoint dispatch.
 // 단일 endpoint 운영 시에는 m_endpoints 가 1개 element (primary) 만 가짐 → 기존 동작과 동일.
 struct CmpEndpoint {
@@ -143,6 +183,32 @@ public:
         PlayDoneCallback;
     void SetPlayDoneCallback( PlayDoneCallback fn ) {
         m_fnPlayDone = fn;
+    }
+
+    // ── MCVideo 그룹 호 (cmp_media_api.md §7.9) — 세션·끝점 캐시 키 = McvKey(group) (MCPTT 의 같은 그룹 id 와 겹치지
+    // 않게) ──
+    static std::string McvKey( const std::string &strGroupId ) {
+        return "mcvideo|" + strGroupId;
+    }
+    /** CMP 가 MCVideo 멤버 풀을 광고했는가(HEARTBEAT resource.mcvideo) — 없으면 MCVideo 그룹 호를 받지
+     * 않는다(mcvideo.md §5.2). */
+    bool SupportsMcVideo() const {
+        return m_bMcVideoSupported.load();
+    }
+    bool McvAddGroup( const std::string &strGroupId, const CmpMcvGroupSpec &clsSpec, const std::string &strSesId,
+                      std::string &strIp, std::map<std::string, CmpMcvPorts> &mapMemberPorts );
+    /** pclsDecl = NULL 이면 JOIN ①(선할당 — 포트·tc_ssrc), 있으면 JOIN ②(주소·협상 값 — 암묵 요청 결과 포함). */
+    bool McvJoin( const std::string &strGroupId, const std::string &strSessionId, const CmpMcvMemberDecl *pclsDecl,
+                  const std::string &strSesId, CmpMcvJoinResult &clsResult );
+    bool McvLeave( const std::string &strGroupId, const std::string &strSessionId, const std::string &strSesId );
+    bool McvRemove( const std::string &strGroupId, const std::string &strSesId );
+    /** hdr.service 가 mcvideo 인 이벤트(PTT_GROUP_ABORTED · TRANSMITTERS · TRANSMISSION_INACTIVITY) 전달 —
+     * EventDispatchLoop 스레드. */
+    typedef std::function<void( const std::string &strCmd, const std::string &strGroupId, const std::string &strSesId,
+                                const SimpleJson::JsonNode &payload )>
+        McvEventCallback;
+    void SetMcvEventCallback( McvEventCallback fn ) {
+        m_fnMcvEvent = fn;
     }
 
     /** 담당 CMP endpoint 가 청취 leg(HEARTBEAT resource.tap)를 광고했는가 — Join 을 488 로 거절할 근거.
@@ -392,6 +458,9 @@ private:
     // HEARTBEAT resource.media_buffer 광고 학습 — PTT 미디어 버퍼링 (cmp.md §3.5 «미디어 버퍼링»)
     std::atomic<bool> m_bMediaBufferSupported{ false };
     PlayDoneCallback m_fnPlayDone;  // RELAY_PLAY_DONE → CSP 안내 서비스(EventDispatchLoop 스레드)
+    // HEARTBEAT resource.mcvideo 광고 학습 — MCVideo 멤버 풀 (cmp_media_api.md §7.9)
+    std::atomic<bool> m_bMcVideoSupported{ false };
+    McvEventCallback m_fnMcvEvent;  // service:mcvideo 이벤트 → MCVideo 호 서비스(EventDispatchLoop 스레드)
 
 public:
     void SetConnectionCallback( std::function<void( bool )> fnCallback ) {

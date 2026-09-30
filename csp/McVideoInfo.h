@@ -229,7 +229,7 @@ inline CMcVideoFmtp ParseMcVideoFmtp( const std::string &line ) {
  *  - mc_priority = min(offer, <user-priority>)(§14.3.3 — 계층 수 요소는 off-network 전용이라 쓰지 않는다), 멤버
  * 우선순위가 음수면 offer 값.
  *  - mc_reception_priority = offer 값(§14.3.6 — <user-reception-priority> 를 두지 않는다).
- *  - mc_queueing 은 싣지 않는다(1차 송출 큐 없음 — §14.3.2 «지원할 때»).
+ *  - mc_queueing = offer 에 있으면 되돌린다(§14.3.2 — CMP 가 송출 대기열을 쓴다, mcvideo.md §5.3.1).
  *  - 암묵 요청을 받아들였으면(bImplicitAccepted — 새 prearranged 세션 개시만, §14.3.5) mc_implicit_request + 송출 SSRC
  * 쌍, 허가됐고 offer 에 mc_granted 가 있었으면 mc_granted(§14.3.4).
  *  - mc_transmission_ssrc = CMP tc_ssrc 를 늘 싣는다(TS 24.281 §6.3.3.2.1 2)b)). */
@@ -241,6 +241,7 @@ inline std::string BuildMcVideoAnswerFmtp( const CMcVideoFmtp &offer, int iUserP
         if ( !s.empty() ) s += ";";
         s += p;
     };
+    if ( offer.bQueueing ) add( "mc_queueing" );
     if ( offer.iPriority >= 0 ) {
         int prio = offer.iPriority;
         if ( iUserPriority >= 0 && iUserPriority < prio ) prio = iUserPriority;
