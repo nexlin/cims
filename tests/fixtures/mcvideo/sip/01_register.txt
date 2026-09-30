@@ -1,0 +1,35 @@
+REGISTER sip:ptt.cims.example.kr SIP/2.0
+Via: SIP/2.0/TLS 10.10.1.21:50601;branch=z9hG4bK-mcv-reg1;rport
+Max-Forwards: 70
+From: <sip:+82510002001@ptt.cims.example.kr>;tag=reg-a1
+To: <sip:+82510002001@ptt.cims.example.kr>
+Call-ID: mcv-reg-a1@10.10.1.21
+CSeq: 2 REGISTER
+Contact: <sip:+82510002001@10.10.1.21:50601;transport=tls>;+sip.instance="<urn:uuid:2f6b8c4e-1a2b-4c3d-9e8f-0a1b2c3d4e5f>";+g.3gpp.mcptt;+g.3gpp.mcvideo;+g.3gpp.icsi-ref="urn%3Aurn-7%3A3gpp-service.ims.icsi.mcptt,urn%3Aurn-7%3A3gpp-service.ims.icsi.mcvideo";expires=3600
+Authorization: Digest username="450081000002001@ptt.cims.example.kr",realm="ptt.cims.example.kr",nonce="7f3a9c21",uri="sip:ptt.cims.example.kr",response="0d1e2f3a4b5c6d7e8f90a1b2c3d4e5f6",algorithm=MD5
+Supported: path, gruu
+User-Agent: cimsue/1.0
+Content-Type: multipart/mixed;boundary=mcv-reg-1
+Content-Length: 1037
+
+--mcv-reg-1
+Content-Type: application/vnd.3gpp.mcptt-info+xml
+
+<?xml version="1.0" encoding="UTF-8"?>
+<mcpttinfo xmlns="urn:3gpp:ns:mcpttInfo:1.0">
+  <mcptt-Params>
+    <mcptt-access-token type="Normal"><mcpttString>eyJhbGciOiJIUzI1NiJ9.eyJtY3ZpZGVvX2lkIjoidGVsOis4MjUxMDAwMjAwMSJ9.c2lnbmF0dXJl</mcpttString></mcptt-access-token>
+    <mcptt-client-id type="Normal"><mcpttString>urn:uuid:2f6b8c4e-1a2b-4c3d-9e8f-0a1b2c3d4e5f</mcpttString></mcptt-client-id>
+  </mcptt-Params>
+</mcpttinfo>
+--mcv-reg-1
+Content-Type: application/vnd.3gpp.mcvideo-info+xml
+
+<?xml version="1.0" encoding="UTF-8"?>
+<mcvideoinfo xmlns="urn:3gpp:ns:mcvideoInfo:1.0">
+  <mcvideo-Params>
+    <mcvideo-access-token type="Normal"><mcvideoString>eyJhbGciOiJIUzI1NiJ9.eyJtY3ZpZGVvX2lkIjoidGVsOis4MjUxMDAwMjAwMSJ9.c2lnbmF0dXJl</mcvideoString></mcvideo-access-token>
+    <mcvideo-client-id type="Normal"><mcvideoString>urn:uuid:2f6b8c4e-1a2b-4c3d-9e8f-0a1b2c3d4e5f</mcvideoString></mcvideo-client-id>
+  </mcvideo-Params>
+</mcvideoinfo>
+--mcv-reg-1--

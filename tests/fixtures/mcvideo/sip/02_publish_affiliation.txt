@@ -1,0 +1,37 @@
+PUBLISH sip:mcvideo_psi@ptt.cims.example.kr SIP/2.0
+Via: SIP/2.0/TLS 10.10.1.21:50601;branch=z9hG4bK-mcv-pub1;rport
+Max-Forwards: 70
+From: <sip:+82510002001@ptt.cims.example.kr>;tag=pub-a1
+To: <sip:+82510002001@ptt.cims.example.kr>
+Call-ID: mcv-pub-a1@10.10.1.21
+CSeq: 1 PUBLISH
+P-Preferred-Service: urn:urn-7:3gpp-service.ims.icsi.mcvideo
+Event: presence
+Expires: 4294967295
+Content-Type: multipart/mixed;boundary=mcv-pub-1
+Content-Length: 829
+
+--mcv-pub-1
+Content-Type: application/vnd.3gpp.mcvideo-info+xml
+
+<?xml version="1.0" encoding="UTF-8"?>
+<mcvideoinfo xmlns="urn:3gpp:ns:mcvideoInfo:1.0">
+  <mcvideo-Params>
+    <mcvideo-request-uri type="Normal"><mcvideoURI>tel:+82510002001</mcvideoURI></mcvideo-request-uri>
+  </mcvideo-Params>
+</mcvideoinfo>
+--mcv-pub-1
+Content-Type: application/pidf+xml
+
+<?xml version="1.0" encoding="UTF-8"?>
+<presence xmlns="urn:ietf:params:xml:ns:pidf" xmlns:mcvideoPI10="urn:3gpp:ns:mcvideoPresInfo:1.0"
+  entity="tel:+82510002001">
+  <tuple id="urn:uuid:2f6b8c4e-1a2b-4c3d-9e8f-0a1b2c3d4e5f">
+    <status>
+      <mcvideoPI10:affiliation group="tel:g101"/>
+      <mcvideoPI10:affiliation group="tel:g103"/>
+    </status>
+  </tuple>
+  <mcvideoPI10:p-id>a1-mcv-aff-0001</mcvideoPI10:p-id>
+</presence>
+--mcv-pub-1--

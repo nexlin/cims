@@ -3,3 +3,6 @@
 
 # Windows(Git Bash)에서 직접 실행하는 셸 스크립트 — core.autocrlf 로 CRLF 가 되면 bash 가 돌지 않는다
 sdk/android/build-native-remote.sh text eol=lf
+
+# MCVideo SIP 골든(계약 K3) — 전송 바이트 그대로(CRLF·Content-Length). 줄 끝 변환을 막는다(생성 = tests/fixtures/mcvideo/sip/build_goldens.py)
+tests/fixtures/mcvideo/sip/*.txt -text

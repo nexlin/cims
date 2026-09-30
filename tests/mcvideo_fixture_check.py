@@ -129,13 +129,127 @@ def check_xml_text(schemas, text: str, label: str) -> list:
     return errs
 
 
-def _xml_bodies_of_sip(text: str):
-    """SIP 골든 메시지의 XML 본문(multipart 포함)을 (Content-Type, 본문) 로."""
-    for m in re.finditer(r"Content-Type:\s*([^\r\n;]+)[^\r\n]*\r?\n(?:[^\r\n]+\r?\n)*\r?\n(<\?xml.*?)(?=\r?\n--|\Z)",
-                         text, flags=re.S | re.I):
-        ctype, body = m.group(1).strip().lower(), m.group(2).strip()
-        if ctype.endswith("+xml"):
-            yield ctype, body
+ICSI = "urn:urn-7:3gpp-service.ims.icsi.mcvideo"
+ICSI_ENC = "urn%3Aurn-7%3A3gpp-service.ims.icsi.mcvideo"
+
+
+def parse_sip(data: bytes):
+    """전송 바이트 → (시작 줄, [(이름, 값)], [(Content-Type, 본문)]). Content-Length 가 본문 바이트와 맞는지도 본다."""
+    head, _, body = data.partition(b"\r\n\r\n")
+    lines = head.decode("utf-8").split("\r\n")
+    hdrs = [tuple(x.strip() for x in ln.split(":", 1)) for ln in lines[1:]]
+    get = lambda n: [v for k, v in hdrs if k.lower() == n.lower()]
+    errs = []
+    cl = get("Content-Length")
+    if not cl or int(cl[0]) != len(body):
+        errs.append(f"Content-Length {cl} ≠ 본문 {len(body)} 바이트")
+    parts = []
+    ctype = (get("Content-Type") or [""])[0]
+    if ctype.lower().startswith("multipart/"):
+        m = re.search(r'boundary="?([^";]+)"?', ctype)
+        if not m:
+            errs.append("multipart 에 boundary 없음")
+        else:
+            b = ("--" + m.group(1)).encode()
+            for chunk in body.split(b)[1:]:
+                if chunk.startswith(b"--"):
+                    break
+                ph, _, pb = chunk.lstrip(b"\r\n").partition(b"\r\n\r\n")
+                pct = re.search(rb"Content-Type:\s*([^\r\n;]+)", ph, flags=re.I)
+                parts.append(((pct.group(1).decode().strip().lower() if pct else ""), pb.rstrip(b"\r\n").decode("utf-8")))
+    elif ctype:
+        parts.append((ctype.split(";")[0].strip().lower(), body.decode("utf-8")))
+    return lines[0], hdrs, parts, errs
+
+
+def _sdp_media(sdp: str):
+    """SDP → [(media, port, proto, fmt, [속성])]."""
+    out = []
+    for ln in sdp.splitlines():
+        if ln.startswith("m="):
+            f = ln[2:].split()
+            out.append([f[0], int(f[1]), f[2], f[3:], []])
+        elif out:
+            out[-1][4].append(ln)
+    return out
+
+
+def _fmtp_params(media) -> list:
+    for a in media[4]:
+        if a.startswith("a=fmtp:MCVideo "):
+            return [x.split("=", 1)[0] for x in a.split(" ", 1)[1].split(";") if x]
+    return []
+
+
+def sip_rules(name, start, hdrs, parts) -> list:
+    """K3·K4 규칙 — mcvideo.md §1.4 «CIMS SDP 프로파일» · TS 24.281 §9.2.1.2.1.1·§9.2.2.2.1.1·§6.3.3.1.2."""
+    errs = []
+    get = lambda n: [v for k, v in hdrs if k.lower() == n.lower()]
+    method = start.split()[0]
+    is_req = not start.startswith("SIP/2.0")
+    sdps = [b for c, b in parts if c == "application/sdp"]
+    if is_req and method == "INVITE":
+        from_ue = not start.startswith(f"INVITE sip:+")
+        if from_ue:
+            if get("P-Preferred-Service") != [ICSI]:
+                errs.append("P-Preferred-Service ≠ MCVideo ICSI (§9.2.2.2.1.1 5))")
+        else:
+            if get("P-Asserted-Service") != [ICSI]:
+                errs.append("P-Asserted-Service ≠ MCVideo ICSI (§6.3.3.1.2 3))")
+            if "isfocus" not in (get("Contact") or [""])[0]:
+                errs.append("제어 기능 Contact 에 isfocus 없음 (§6.3.3.1.2 1))")
+        ac = " ".join(get("Accept-Contact"))
+        if "+g.3gpp.mcvideo;require;explicit" not in ac or f'+g.3gpp.icsi-ref="{ICSI_ENC}";require;explicit' not in ac:
+            errs.append("Accept-Contact 두 가지(g.3gpp.mcvideo · icsi-ref mcvideo, require;explicit)가 아님")
+        if "+g.3gpp.mcvideo" not in (get("Contact") or [""])[0]:
+            errs.append("Contact 에 +g.3gpp.mcvideo 없음")
+        if not any(c == "application/vnd.3gpp.mcvideo-info+xml" for c, _ in parts):
+            errs.append("mcvideo-info 본문 없음")
+    if method == "REGISTER":
+        c = (get("Contact") or [""])[0]
+        if "+g.3gpp.mcvideo" not in c or ICSI_ENC not in c:
+            errs.append("REGISTER Contact 에 MCVideo 특성 태그·icsi-ref 없음 (§7.2.1)")
+    if method == "PUBLISH":
+        if get("P-Preferred-Service") != [ICSI] or get("Event") != ["presence"]:
+            errs.append("affiliation PUBLISH 헤더(P-Preferred-Service·Event presence)가 아님 (§8.2.1.2)")
+    for body in sdps:
+        media = _sdp_media(body)
+        if [m[0] for m in media] != ["audio", "video", "application"]:
+            errs.append(f"m-line 순서 {[m[0] for m in media]} ≠ audio,video,application (K4)")
+            continue
+        app = media[2]
+        if app[2] != "udp" or app[3] != ["MCVideo"]:
+            errs.append(f"제어 채널 m-line 이 'udp MCVideo' 가 아님 ({app[2]} {app[3]})")
+        if "i=audio component of MCVideo" not in media[0][4] or "i=video component of MCVideo" not in media[1][4]:
+            errs.append("i= 성분 표시 없음 (§6.2.1 2)c)·3)d))")
+        fl = [a for a in app[4] if a.startswith("a=fmtp:MCVideo ")]
+        if not fl or ":" in fl[0].split(" ", 1)[1] or "mc_transmission_ssrc" not in _fmtp_params(app):
+            errs.append("fmtp:MCVideo 가 ';' 구분·mc_transmission_ssrc 포함이 아님 (K4)")
+    return errs
+
+
+def _check_offer_answer(files) -> list:
+    """answer 는 offer 에 없던 fmtp 파라미터를 더하지 않는다(TS 24.581 §14.3.1) · m 수·순서 같음(RFC 3264 §6)."""
+    errs = []
+    for offer_n, answer_n in (("03_chat_join_invite.txt", "04_chat_join_200.txt"),
+                              ("05_prearranged_initiate_invite.txt", "06_prearranged_initiate_200.txt")):
+        po, pa = files.get(offer_n), files.get(answer_n)
+        if not po or not pa:
+            continue
+        so = [b for c, b in po[2] if c == "application/sdp"][0]
+        sa = [b for c, b in pa[2] if c == "application/sdp"][0]
+        mo, ma = _sdp_media(so), _sdp_media(sa)
+        if [m[0] for m in mo] != [m[0] for m in ma]:
+            errs.append(f"{answer_n}: m-line 수·순서가 offer 와 다르다")
+            continue
+        # mc_audio_ssrc·mc_video_ssrc 는 answer 전용 값이다 — offer 에 없어도 암묵 요청을 받아들인 answer 가 싣고 offerer 가 쓴다
+        #   (§12.1.2.2·§14.3.7·§14.3.8·§14.4 — §14.3.1 일반 규칙의 예외, mcvideo.md §9).
+        extra = set(_fmtp_params(ma[2])) - set(_fmtp_params(mo[2])) - {"mc_audio_ssrc", "mc_video_ssrc"}
+        if extra:
+            errs.append(f"{answer_n}: offer 에 없던 fmtp 파라미터 {sorted(extra)} (§14.3.1)")
+        if "mc_implicit_request" in _fmtp_params(ma[2]) and not {"mc_audio_ssrc", "mc_video_ssrc"} <= set(_fmtp_params(ma[2])):
+            errs.append(f"{answer_n}: 암묵 요청 수락 answer 에 mc_audio_ssrc·mc_video_ssrc 없음 (§14.3.7·§14.3.8)")
+    return errs
 
 
 def main(argv) -> int:
@@ -149,23 +263,36 @@ def main(argv) -> int:
         ([os.path.join(FIX, "sip", f) for f in os.listdir(os.path.join(FIX, "sip")) if f.endswith(".txt")]
          if os.path.isdir(os.path.join(FIX, "sip")) else []))
     fails = 0
+    sip_parsed = {}
     for path in files:
         label = os.path.relpath(path, HERE)
-        text = open(path, encoding="utf-8").read()
         errs = []
         if path.endswith(".txt"):
-            for ctype, body in _xml_bodies_of_sip(text):
-                if ctype in ("application/vnd.3gpp.mcvideo-info+xml",):
+            start, hdrs, parts, errs = parse_sip(open(path, "rb").read())
+            sip_parsed[os.path.basename(path)] = (start, hdrs, parts)
+            errs += [f"{label}: {e}" for e in sip_rules(os.path.basename(path), start, hdrs, parts)]
+            for ctype, body in parts:
+                if ctype == "application/vnd.3gpp.mcvideo-info+xml":
                     errs += check_xml_text(schemas, body, f"{label} [{ctype}]")
                 elif ctype == "application/pidf+xml":
                     errs += _check_pidf(schemas, body, f"{label} [pidf]")
         else:
-            errs = check_xml_text(schemas, text, label)
+            errs = check_xml_text(schemas, open(path, encoding="utf-8").read(), label)
         print(("FAIL " if errs else "PASS ") + label)
         for e in errs:
             print("   - " + e)
         fails += bool(errs)
-    print(f"{len(files) - fails}/{len(files)} PASS")
+    oa = _check_offer_answer(sip_parsed)
+    for e in oa:
+        print("FAIL offer/answer — " + e)
+    build = os.path.join(FIX, "sip", "build_goldens.py")
+    if not argv[1:] and os.path.isfile(build):
+        import subprocess
+        r = subprocess.run([sys.executable, build, "--check"], capture_output=True, text=True)
+        print(("PASS " if r.returncode == 0 else "FAIL ") + r.stdout.strip())
+        fails += r.returncode != 0
+    fails += bool(oa)
+    print(f"{len(files) - fails}/{len(files)} PASS" if not fails else f"FAIL {fails}")
     return 1 if fails else 0
 
 

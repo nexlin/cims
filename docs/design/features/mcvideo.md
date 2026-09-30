@@ -346,6 +346,9 @@ service configuration 에서 `<confidentiality-protection>`·`<integrity-protect
   없다 — TS 24.484 는 T100~T104 를 초 단위 unsignedByte 로 둔다(→ CIMS 1 s, [mcvideo_tc_defs.yaml](mcvideo_tc_defs.yaml) `origin: cims`).
 - TS 24.581 §14.2.7·§14.3.9 는 `mc_transmission_ssrc` 를 «다중화를 지원하면» 싣게 하지만 TS 24.281 §6.3.3.1.1 4)·§6.3.3.2.1 2)b)(제어 기능 offer·answer)는
   «shall include»(→ 서버는 늘 싣는다 — 다중화 여부와 무관하게 해가 없다).
+- TS 24.581 §14.3.1 «answer 의 fmtp 는 offer 에 없던 파라미터를 싣지 않는다» vs §12.1.2.2·§14.3.7·§14.3.8·§14.4 의 `mc_audio_ssrc`·`mc_video_ssrc`(offer 에 없어도
+  암묵 요청을 받아들인 answer 가 싣고 offerer 가 쓴다)(→ 두 값은 answer 전용 예외).
+- TS 24.281 §6.3.3.1.2 3) «P-Asserted-Service-Id header field»(→ RFC 6050 의 헤더 이름 `P-Asserted-Service` — MCPTT 쪽 구현과 같다).
 - TS 24.484 MCVideo service configuration — XSD 요소 `C7-reception-accpeted` vs 본문 `C7-reception-accepted`(§9.4.2.1·§9.4.2.7), 본문 구조의
   `T103-receive-media-requset` vs XSD `T103-receive-media-request`(→ XSD 표기 — 스키마 검증·XSD 기반 단말과 맞는다), MIME 이름 «vnd.3gpp.mcvideo-service-config+xml»
   (§9.4.2.5 — `application/` 누락, → `application/vnd.3gpp.mcvideo-service-config+xml`).

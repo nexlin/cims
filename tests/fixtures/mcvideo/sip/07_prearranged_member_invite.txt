@@ -1,0 +1,53 @@
+INVITE sip:+82510002002@10.10.1.22:50602;transport=tls SIP/2.0
+Via: SIP/2.0/TLS csp.ptt.cims.example.kr:5061;branch=z9hG4bK-mcv-fan1
+Max-Forwards: 70
+From: <sip:g103@ptt.cims.example.kr>;tag=csp-fan1
+To: <sip:+82510002002@ptt.cims.example.kr>
+Call-ID: csp-mcv-fan-b1@csp
+CSeq: 1 INVITE
+Contact: <sip:g103@csp.ptt.cims.example.kr:5061;transport=tls;gr=1790775900654321-1>;+g.3gpp.mcvideo;+g.3gpp.icsi-ref="urn%3Aurn-7%3A3gpp-service.ims.icsi.mcvideo";isfocus
+Accept-Contact: *;+g.3gpp.mcvideo;require;explicit
+Accept-Contact: *;+g.3gpp.icsi-ref="urn%3Aurn-7%3A3gpp-service.ims.icsi.mcvideo";require;explicit
+P-Asserted-Service: urn:urn-7:3gpp-service.ims.icsi.mcvideo
+Supported: timer
+Session-Expires: 1800
+Content-Type: multipart/mixed;boundary=mcv-fan-1
+Content-Length: 1197
+
+--mcv-fan-1
+Content-Type: application/sdp
+
+v=0
+o=CSS 4 1 IN IP4 10.10.0.20
+s=-
+c=IN IP4 10.10.0.20
+t=0 0
+m=audio 52012 RTP/AVP 96 101
+i=audio component of MCVideo
+a=rtpmap:96 AMR-WB/16000
+a=fmtp:96 mode-change-capability=2;max-red=0
+a=rtpmap:101 telephone-event/16000
+a=fmtp:101 0-15
+a=sendrecv
+m=video 56012 RTP/AVP 97
+i=video component of MCVideo
+a=rtpmap:97 H264/90000
+a=fmtp:97 profile-level-id=42e01f;packetization-mode=1
+a=rtcp-fb:97 nack pli
+a=rtcp-fb:97 ccm fir
+a=sendrecv
+m=application 58012 udp MCVideo
+a=fmtp:MCVideo mc_priority=5;mc_transmission_ssrc=2863311532
+--mcv-fan-1
+Content-Type: application/vnd.3gpp.mcvideo-info+xml
+
+<?xml version="1.0" encoding="UTF-8"?>
+<mcvideoinfo xmlns="urn:3gpp:ns:mcvideoInfo:1.0">
+  <mcvideo-Params>
+    <session-type>prearranged</session-type>
+    <mcvideo-request-uri type="Normal"><mcvideoURI>tel:+82510002002</mcvideoURI></mcvideo-request-uri>
+    <mcvideo-calling-user-id type="Normal"><mcvideoURI>tel:+82510002001</mcvideoURI></mcvideo-calling-user-id>
+    <mcvideo-calling-group-id type="Normal"><mcvideoURI>tel:g103</mcvideoURI></mcvideo-calling-group-id>
+  </mcvideo-Params>
+</mcvideoinfo>
+--mcv-fan-1--

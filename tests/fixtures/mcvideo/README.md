@@ -1,5 +1,7 @@
 # MCVideo 계약 골든 — K2 설정 문서 (docs/dev/mcvideo_dev_plan.md §3)
 
+K3 SIP 메시지·K4 SDP 골든은 [sip/](sip/README.md).
+
 생성 쪽(CSC)은 «이 파일과 같게», 해석 쪽(단말 SDK C2)은 «이 파일을 읽어 아래 값» 으로 시험한다. 두 쪽이 **같은 파일**을 읽는다.
 
 - 생성 시험: `python3 -m unittest tests.test_csc_mcvideo` (S1-UNIT-CSC) — 아래 시나리오로 CSC 가 낸 문서 = 이 파일(정규화 비교).

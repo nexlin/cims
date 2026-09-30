@@ -365,5 +365,6 @@ TS 24.484(docx k00). 이 절은 두 호스트가 MCVideo 계약을 주고받는 
 | A1 V0(CSC) | `get_group_xml` MCPTT enabler = MCPTT ICSI + 규칙 `<is-list-member>`·`<allow-initiate-conference>`·`<join-handling>` | 옛 앱·새 SDK 모두 그룹 문서를 그대로 읽는지(C1 시험) |
 | A3·A4·A5 CSC | `csc/src/services/mcvideo.py` — 그룹 문서 MCVideo 몫·XCAP PUT 해석(전환기 규칙 — MCVideo `<service>` 없는 PUT 은 MCVideo 를 건드리지 않는다)·CMS 두 문서·ue-init-config(기본 끔 `UeInitConfig.ServiceDetails.McVideo.Enable`)·scope `3gpp:mc:video_*` 넷(자격 있는 사용자만)·토큰 `mcvideo_id`·`/internal/mcvideo/service-config` | SDK 가 video scope 를 요청하면 자격 없는 사용자는 응답 `scope` 에서 빠진다 |
 
-**다음 (.48)** — K3 SIP 골든(`tests/fixtures/mcvideo/sip/` — REGISTER·affiliation PUBLISH·chat 개시/합류 INVITE·200·404 117/118·재합류, K4 SDP 포함) →
-A2(마이그레이션 적용·CSP 적재) → A7~A10(CSP MCVideo 모듈·등록·affiliation·그룹 호) · B3(CMP 그룹 종류 `(service, group_id)` 키·멤버 control 포트).
+| K3 SIP (+ K4 골든 SDP) | `tests/fixtures/mcvideo/sip/` — 10개(REGISTER · affiliation PUBLISH · chat 합류 INVITE/200 · prearranged 개시 INVITE/200(암묵 송출 요청 수락·`mc_audio_ssrc`·`mc_video_ssrc`) · 멤버 초대 · 재합류(R-URI = 세션 식별자) · 404 117/118). 전송 바이트 그대로(CRLF·Content-Length — 정본 `build_goldens.py`, `--check`), README = 메시지별 규격 절·요지. S1-MCVIDEO-CONTRACT 가 본문 XSD + K3·K4 규칙(ICSI 헤더·Accept-Contact 둘·m 순서·`udp MCVideo`·`i=`·fmtp `;`·answer 파라미터) 을 본다 | **C3·C4 입력** — 01·02·03·05·08 은 SDK 가 만드는 모양, 04·06·07·09·10 은 SDK 가 읽는 모양. prearranged 시험용 그룹 `tel:g103` 은 K3 에서만 쓴다 |
+
+**다음 (.48)** — A2(마이그레이션 적용·CSP 적재) → A7~A10(CSP MCVideo 모듈·등록·affiliation·그룹 호) · B3(CMP 그룹 종류 `(service, group_id)` 키·멤버 control 포트).
