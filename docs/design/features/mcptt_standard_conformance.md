@@ -38,6 +38,7 @@
 | C6 | conference 이벤트 구독 인가 — 그룹 문서 `<on-network-allow-conference-state>` 판정, 불허 403 `Warning: 138` / 일제 통화 480 `Warning: 105` (비멤버 관제사 청취 범위는 CIMS 해석, [dispatch_center.md §5.6](dispatch_center.md)) | CSP/CSC | TS 24.379 §10.1.3.4.1 / TS 24.481 §7.2.4.2 | ✅ 정합 |
 | C7 | broadcast group call 발언권 — 개시자 외 Floor Request Deny #5(긴급 포함)·Floor Taken Permission 0·Floor Indicator B-bit | CMP | TS 24.380 §6.3.5.3.4·§6.3.5.4.4·§8.2.3.15 | ✅ 정합 |
 | C8 | broadcast group call 호 모델 — 호 단위 `<broadcast-ind>` 개시, 개시자 고정, 그룹 문서 그룹 종류(`on-network-invite-members`), 해제 정책(T4·참가자 1명 이하·TNG3) | CSP/CSC | TS 24.379 §4.12·§6.2.8.2·§6.3.8.1 / TS 24.481 §7.2.8 | ✅ 정합(서버) — 개시 단말의 발언 종료 후 호 해제(TS 24.380 §6.2.4.6.4)·B-bit Floor Request 는 단말 몫(미구현). 정본 [mcptt_broadcast_group_call.md](mcptt_broadcast_group_call.md) |
+| C9 | 설정 그룹 암시적 제휴 — user profile `<ImplicitAffiliations>` = 멤버별 `implicit_affiliation` 설정, PTT 서비스 인가(REGISTER) 때 참여 기능이 제휴 기록 · ad hoc 초대 = 제휴 | CSP/CSC | TS 24.379 §7.3.2 13) · §9.2.2.2.15 · §17.4.2.2 16) · TS 24.484 §8.3.2 | ✅ 정합 (편차 C9 참조) |
 | S1 | OIDC `/.well-known/openid-configuration` 디스커버리 | CSC | TS 33.180 / OIDC | ✅ 정합 |
 | S2 | access_token 클레임(`sub`/`iss`/`iat`/`client_id`/`scope` 문자열 + `mcptt_id`/`mcdata_id`) + nonce, scope 카탈로그 `3gpp:mc:*`(B.4.2.2) 요청∩카탈로그 발급, 리소스 서버 scope 검사(B.10, `IdMs.ScopeEnforcement`) — 구 `3gpp:mcptt:ptt_server` 전환기 별칭 | CSC | TS 33.180 Annex B | ✅ 정합 — 정본 [mcx_identity_scope.md](mcx_identity_scope.md) |
 | S3 | XCAP-diff SUBSCRIBE/NOTIFY(GMS/CMS 변경통지) | CSC/CSP | TS 24.481/484 §8 | ✅ 정합 |
@@ -521,6 +522,34 @@ DB 단절이면 fan-out 과 같이 검사를 건너뛴다(affiliation 원천 = `
   종전 경로 그대로다. mcptt-info 가 없는 VoLTE 호는 판정 자체를 하지 않는다(가입자 조회 없음).
 - 검증: `tests/csp_mcptt_info_test.cpp`(`McpttPsiTarget` — HM-TRCP 실측 본문 포함, S1-UNIT-CSP).
 
+### C9. 암시적 제휴 — 설정 그룹(TS 24.379 §7.3.2 13) → §9.2.2.2.15) · ad hoc(§17.4.2.2 16))
+
+규격의 암시적 제휴는 셋이다 — ① 관리자가 사용자별로 정한 **설정 그룹**(user profile `<OnNetwork><ImplicitAffiliations>`)을
+서비스 인가 때, ② 제휴 없이 긴급·임박 위험 개시·chat 합류할 때(§9.2.2.2.12 — C4g), ③ ad hoc 그룹콜에 초대될 때. 이 절은 ①·③ 이다.
+
+- **설정** = 멤버 행 `ptt_group_members.implicit_affiliation`(사람×그룹, 기본 0 — `sql/migrate_ptt_group_members_implicit_affiliation.sql`).
+  `<ImplicitAffiliations>` 가 사용자 프로파일 요소라 멤버마다 정한다. 관리 API `members[].implicit_affiliation`·
+  `POST …/members`(보낸 경우에만 변경), 콘솔 그룹 워크벤치 멤버 행 «자동 제휴».
+  멤버를 통째로 다시 쓰는 경로(관리 API 그룹 갱신 `members`·GMS XCAP 그룹 문서 PUT)는 값이 없는 멤버의 설정을 잇는다 —
+  그룹 문서(TS 24.481)에는 이 요소가 없다.
+- **CSC** user profile `<ImplicitAffiliations>` = 그 사용자의 멤버 행에 설정이 켜진 그룹만(없으면 요소 생략).
+- **CSP** `_ApplyImplicitAffiliations`(`CscfModule.cpp`) — PTT REGISTER 200 뒤, 설정이 켜진 멤버 그룹마다 제휴를 기록하고
+  새로 생긴 제휴가 있으면 제휴 상태 NOTIFY(C2). 클라이언트 ID = REGISTER mcptt-info `<mcptt-client-id>`(§9.2.2.2.15 2)) >
+  Contact `+sip.instance` > Contact URI.
+- **규격 대비 편차**
+
+  | 항목 | 규격 | CIMS |
+  |---|---|---|
+  | 만료 | candidate expiration interval(암시적 제휴용 값은 정의되지 않음 — PUBLISH Expires 로만 정의) · 이미 제휴된 그룹은 새로 넣지 않음(§9.2.2.2.15 8) b)) | **등록 수명**(부여 등록 만료)으로 기록하고 재등록마다 갱신 — 등록이 살아 있는 동안 끊기지 않게. 해지 REGISTER 는 제휴 전부 해제(종전 그대로) |
+  | N2 상한 | 초과분을 정책으로 줄임(§9.2.2.2.15 9) c)) | 적용하지 않음 — PUBLISH 경로(C1)와 같다 |
+  | 확정 | "affiliating" → 제어 기능 PUBLISH(§9.2.2.2.6) → affiliated | 참여·제어 기능이 한 서버라 곧바로 affiliated 로 기록 |
+
+- **③ ad hoc** — 제어 기능은 초대한 멤버를 그 ad hoc 그룹에 암시적으로 제휴된 것으로 본다(§17.4.2.2 16), 참여자 변경 §17.4.5.1.1 vi)·
+  §17.4.5.2.1 d)). CSP 는 ad hoc 그룹을 통화 때 만들며 `require_affiliation = false` 로 둬(`ModuleDispatcher.cpp`) 명단 전원을
+  초대하고, 명단 밖 재합류는 멤버십 검사로 막으며, 제휴 멤버 최소 인원 조건(§17.4.3.1.1.1 1))은 쓰지 않는다 — 결과가 같다.
+  ad hoc 그룹은 DB 그룹이 아니라(임시) `ptt_affiliations` 행을 남기지 않는다.
+- 우리 단말 앱은 소속 그룹 전부에 스스로 PUBLISH 한다(C1) — 설정과 무관하게 동작이 같다.
+
 ### C5. 등록/구독 SIP 메시지 — 실망(상용 IMS) 패킷 형태 정합
 
 REGISTER/SUBSCRIBE/NOTIFY 의 헤더·본문을 상용 IMS 캡처 기준으로 맞춘다
@@ -610,7 +639,7 @@ REGISTER/SUBSCRIBE/NOTIFY 의 헤더·본문을 상용 IMS 캡처 기준으로 �
   MCPTTUserID(uri-entry)·PrivateCall(PrivateCallList = 내 그룹 동료 멤버, EmergencyCall = MCPTTPrivateRecipient entry + ProSeUserID-entry User-Info-ID 영값 — ProSe 미지원)·
   MCPTT-group-call(MaxSimultaneousCallsN6·EmergencyCall/ImminentPerilCall/EmergencyAlert·Priority)·MissionCriticalOrganization,
   `<cp:ruleset>`(RFC 4745) 사용자 인가, `<OnNetwork>` = **MCPTTGroupInfo(소속 그룹 = 규격 단말의 그룹 목록 소스, 소유 소속 그룹은
-  anyExt `cims:authorized-user`)**·MaxAffiliationsN2(`mcptt_service_config.max_affiliations_n2`)·ImplicitAffiliations(소속 전체)·
+  anyExt `cims:authorized-user`)**·MaxAffiliationsN2(`mcptt_service_config.max_affiliations_n2`)·ImplicitAffiliations(멤버 `implicit_affiliation` 이 켜진 그룹만 — C9)·
   MaxSimultaneousTransmissionsN7·PrivateEmergencyAlert. 상수는 `UserProfile.*` 설정. 루트 `<Status>true</Status>`(§8.3.2.1 3)·alias-entry `index` 병기.
   §8.3.2.1 이 "shall" 로 요구하는 긴급 요소(8d ii·8e ii~iv·10f)는 **대상 미지정에도 항상 싣고**, 미지정은 entry-info 로 표현한다
   (그룹 `UseCurrentlySelectedGroup` + 폴백 uri-entry, 사설 `LocallyDetermined` + 폴백 uri-entry); 개시 인가는 요소 유무가 아니라

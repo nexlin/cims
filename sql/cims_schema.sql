@@ -216,6 +216,7 @@ CREATE TABLE IF NOT EXISTS ptt_group_members (
     role     ENUM('chair','participant') NOT NULL DEFAULT 'participant' COMMENT 'TS 24.380 participant type — chair 는 floor 우선 선점',
     mcptt_id VARCHAR(255)         DEFAULT NULL COMMENT '멤버 MCPTT ID URI (NULL=user_id 사용)',
     on_network_required TINYINT(1) NOT NULL DEFAULT 0 COMMENT '<on-network-required> (TS 24.481 §7.2.4.2) — 필수 멤버: 개시자 200 OK 전 응답을 기다린다(TNG1)',
+    implicit_affiliation TINYINT(1) NOT NULL DEFAULT 0 COMMENT 'user profile <ImplicitAffiliations> 대상 (TS 24.484 §8.3.2) — PTT 서비스 인가(REGISTER) 때 참여 기능이 이 그룹에 제휴를 기록한다 (TS 24.379 §9.2.2.2.15)',
     PRIMARY KEY (group_id, user_id),
     KEY idx_user (user_id),
     CONSTRAINT fk_gm_group FOREIGN KEY (group_id) REFERENCES ptt_groups (id) ON DELETE CASCADE

@@ -2,7 +2,8 @@
 
 규격 단말은 이 문서에서 그룹 목록(<OnNetwork><MCPTTGroupInfo>)·연락처(<PrivateCallList>)·긴급 대상·인가를 읽는다.
 검사: XSD 요소 집합/순서(OnNetworkType 에 MCPTTUserID 없음, EntryType 은 uri-entry 필수), 그룹 목록 = 소속 그룹
-(소유만 한 그룹 제외, 소유 소속 그룹은 cims:authorized-user), ImplicitAffiliations = 소속 전체, 연락처 = 동료 멤버,
+(소유만 한 그룹 제외, 소유 소속 그룹은 cims:authorized-user), ImplicitAffiliations = 내 멤버 행의 implicit_affiliation 이
+켜진 그룹만(남의 설정은 안 따름, 없으면 요소 생략), 연락처 = 동료 멤버,
 긴급 요소는 항상 존재(§8.3.2.1 shall) — 미지정은 entry-info 폴백 + ruleset 미인가, ProSe User-Info-ID 영값, 루트 Status,
 선택이지만 필수로 읽는 단말용으로 항상 싣는 것(alias-entry index·xml:lang, ParticipantType — xml:lang 은 Name 과 같은 값),
 common-policy ruleset, escape, ETag 내용 파생, 단말 정규식 호환(첫 MCPTTGroupInitiation = EmergencyCall),
@@ -51,6 +52,9 @@ class UserProfileDocTest(unittest.TestCase):
         m.GROUPS["tel:g002"] = _grp("음성그룹2", [(ME, "홍길동"), (PEER, "김철수")])
         m.GROUPS["tel:g-owned"] = _grp("내가만든그룹", [(OUTSIDER, "외부인")], owner_uid=77)   # 소유만, 비멤버
         m.GROUPS["tel:g003"] = _grp("남의그룹", [(OUTSIDER, "외부인")])
+        # 암시적 제휴 — g002 는 나(ME) 에게, g001 은 동료(PEER) 에게만 켜 둔다(내 문서엔 g002 만 나와야 한다)
+        m.GROUPS["tel:g002"]["members"][0]["implicit_affiliation"] = True
+        m.GROUPS["tel:g001"]["members"][1]["implicit_affiliation"] = True
         m.SERVICE_CONFIG["max_affiliations_n2"] = 12
 
     def tearDown(self):
@@ -93,7 +97,7 @@ class UserProfileDocTest(unittest.TestCase):
         self.assertIsNone(on.find("up:MCPTTGroupInfo/up:entry[up:uri-entry='tel:g002']/up:anyExt", NS))
         self.assertEqual(on.find("up:MaxAffiliationsN2", NS).text, "12", "service config max_affiliations_n2")
         impl = [e.find("up:uri-entry", NS).text for e in on.findall("up:ImplicitAffiliations/up:entry", NS)]
-        self.assertEqual(impl, uris, "암묵 제휴 = 소속 전체")
+        self.assertEqual(impl, ["tel:g002"], "암시적 제휴 = 내 멤버 행에 켜진 그룹만(동료 설정은 안 따름)")
         self.assertEqual(on.find("up:MaxSimultaneousTransmissionsN7", NS).text, "1")
         for e in root.iter("{%s}entry" % NS["up"]):
             self.assertIsNotNone(e.find("up:uri-entry", NS), "EntryType 은 uri-entry 필수 — 빈 entry 금지")

@@ -688,7 +688,7 @@ def _member_select_sql(cur) -> str:
     title_col = ", u.title AS user_title" if _users_has_title(cur) else ""
     return (
         "SELECT g.mcptt_group_id AS mcptt_group_id, gm.user_id, gm.priority, gm.role, gm.mcptt_id, "
-        "       gm.on_network_required, "
+        "       gm.on_network_required, gm.implicit_affiliation, "
         f"       u.name AS user_name{title_col} "
         "FROM ptt_group_members gm "
         "JOIN ptt_groups g ON g.id = gm.group_id "
@@ -743,6 +743,7 @@ def _member_row_to_dict(row: dict) -> dict:
         "priority": row['priority'], "joined_at": "",
         "title": row.get('user_title') or "",
         "required": bool(row.get('on_network_required') or 0),
+        "implicit_affiliation": bool(row.get('implicit_affiliation') or 0),
     }
 
 
@@ -1481,7 +1482,7 @@ def get_user_profile_xml(user_uri, owner_uid=None):
 
     규격 단말은 로그인 뒤 이 문서에서 **그룹 목록·연락처·긴급 대상·개시 인가**를 읽는다. 소스는 전부 기존 정본:
       - 그룹 = GROUPS 멤버십(GMS 문서 URI 와 같은 키) → <OnNetwork><MCPTTGroupInfo>(제휴 가능 그룹) ·
-        <ImplicitAffiliations>(= 소속 전체 — 우리 단말의 전 그룹 자동 제휴 동작과 일치). 소유(authorized_user_id ==
+        <ImplicitAffiliations>(= 멤버 implicit_affiliation 이 켜진 그룹만 — 서버가 등록 때 제휴한다). 소유(authorized_user_id ==
         owner_uid)한 소속 그룹은 entry anyExt 에 cims:authorized-user 표시(단말 편집·삭제 노출 근거). 소유만 하고
         멤버가 아닌 그룹은 서비스 목록이 아니라 싣지 않는다(관리 목록 = GMS JSON/관리 API 몫).
       - 연락처 = 내 그룹의 동료 멤버 → <Common><PrivateCall><PrivateCallList>(그룹 문서로 이미 보이는 범위라 추가 노출 없음).
@@ -1532,7 +1533,11 @@ def get_user_profile_xml(user_uri, owner_uid=None):
         et('entry', g_uri, g.get('display_name'),
            ext=owner_ext if (owner_uid is not None and g.get('authorized_user_id') == owner_uid) else '')
         for g_uri, g in my_groups)
-    implicit_entries = ''.join(et('entry', g_uri, g.get('display_name')) for g_uri, g in my_groups)
+    # 암시적 제휴 = 관리자가 이 사용자·그룹에 정한 것만(멤버 implicit_affiliation) — 참여 기능이 서비스 인가 때 이 목록에
+    #   제휴를 기록한다(TS 24.379 §7.3.2 13) → §9.2.2.2.15, CSP _ApplyImplicitAffiliations). 소속 전부가 아니다.
+    implicit_entries = ''.join(
+        et('entry', g_uri, g.get('display_name')) for g_uri, g in my_groups
+        if any(_uri_eq(m.get('uri'), user_uri) and m.get('implicit_affiliation') for m in g.get('members', [])))
 
     # 연락처 = 동료 멤버(본인 제외, 정규화 키로 중복 제거, URI 순 — ETag 안정)
     contacts = {}
@@ -2552,13 +2557,19 @@ def gms_write_group(gid: str, doc: dict, owner_user_id: Optional[int], create: b
                     if sets:
                         cur.execute("UPDATE ptt_groups SET " + ", ".join(sets) + " WHERE id=%s", args + [gpk])
                 if doc.get('members') is not None:
+                    # 암시적 제휴(user profile 설정 — TS 24.484)는 그룹 문서(TS 24.481)에 없는 요소라 문서 교체가
+                    #   지우지 않게 교체 전 값을 잇는다.
+                    cur.execute("SELECT user_id FROM ptt_group_members WHERE group_id=%s AND implicit_affiliation=1",
+                                (gpk,))
+                    keep = {r['user_id'] for r in cur.fetchall()}
                     cur.execute("DELETE FROM ptt_group_members WHERE group_id=%s", (gpk,))
                     for m in doc['members']:
                         cur.execute("INSERT IGNORE INTO ptt_group_members "
-                                    "(group_id, user_id, priority, role, mcptt_id, on_network_required) "
-                                    "VALUES (%s, %s, %s, %s, %s, %s)",
+                                    "(group_id, user_id, priority, role, mcptt_id, on_network_required, "
+                                    "implicit_affiliation) VALUES (%s, %s, %s, %s, %s, %s, %s)",
                                     (gpk, m['user_id'], int(m.get('priority') or 0), m.get('role') or 'participant',
-                                     m.get('mcptt_id'), 1 if m.get('required') else 0))
+                                     m.get('mcptt_id'), 1 if m.get('required') else 0,
+                                     1 if m['user_id'] in keep else 0))
             conn.commit()
     except Exception as e:
         logger.log_error(f"gms_write_group({gid}, create={create}) failed: {e}")

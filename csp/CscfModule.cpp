@@ -730,6 +730,58 @@ static void _NoteDeviceSeen( CSipMessage *pclsMessage, const std::string &strUse
                             gclsFmReporter.Node(), strFeatures );
 }
 
+// 설정 그룹 암시적 제휴 (TS 24.379 §7.3.2 13) → §9.2.2.2.15) — PTT 서비스 인가(REGISTER) 성공 때, 가입자가 멤버이고
+//   관리자가 암시적 제휴로 정한 그룹(user profile <ImplicitAffiliations>, ptt_group_members.implicit_affiliation)에
+//   제휴를 기록한다. 클라이언트 ID = REGISTER mcptt-info <mcptt-client-id>(§9.2.2.2.15 2)) > Contact +sip.instance >
+//   Contact URI. 만료 = 부여한 등록 만료 — 규격은 암시적 제휴의 만료 간격을 정하지 않는다(candidate expiration interval
+//   은 PUBLISH Expires 로만 정의). 그래서 등록 수명에 묶고 재등록마다 갱신한다(해지 REGISTER 는 제휴 전부 해제).
+//   N2 상한은 PUBLISH 경로와 같이 적용하지 않는다(편차 — mcptt_standard_conformance.md C9).
+static void _ApplyImplicitAffiliations( CSipMessage *pclsMessage, const std::string &strUserId, int iExpires ) {
+    if ( iExpires <= 0 || !gclsDbManager.IsConnected() ) return;
+    std::vector<std::string> vecGroups;
+    gclsGroupMap.IterateInternal( [&]( const CspPttGroup &clsGroup ) {
+        for ( const auto &pUser : clsGroup._pusers ) {
+            if ( pUser && pUser->_implicitAffiliation &&
+                 ( pUser->_id == strUserId || McpttBareId( pUser->_mcpttId ) == strUserId ) ) {
+                vecGroups.push_back( clsGroup._id );
+                break;
+            }
+        }
+    } );
+    if ( vecGroups.empty() ) return;
+
+    std::string strClient = ParseMcpttInfo( pclsMessage->m_strBody ).strClientId;
+    if ( strClient.empty() && !pclsMessage->m_clsContactList.empty() ) {
+        CSipFrom &clsContact = pclsMessage->m_clsContactList.front();
+        std::string strInstance;
+        clsContact.SelectParam( "+sip.instance", strInstance );
+        for ( char c : strInstance )
+            if ( c != '"' && c != '<' && c != '>' ) strClient += c;
+        if ( strClient.empty() ) {
+            char szC[256];
+            clsContact.m_clsUri.ToString( szC, sizeof( szC ) );
+            strClient = szC;
+        }
+    }
+
+    int iNew = 0;
+    for ( const auto &strGroup : vecGroups ) {
+        const bool bWas = gclsDbManager.IsAffiliated( strGroup, strUserId );
+        if ( !gclsDbManager.InsertAffiliation( strGroup, strUserId, strClient, iExpires ) ) {
+            CLog::Print( LOG_ERROR, "[Affiliation/implicit] 미기록 user=%s group=%s", strUserId.c_str(),
+                         strGroup.c_str() );
+            continue;
+        }
+        if ( !bWas ) {
+            EmitAffiliationChanged( strGroup, "affiliate", strUserId );
+            iNew++;
+        }
+    }
+    if ( iNew > 0 ) SendAffiliationNotify( strUserId, "" );
+    CLog::Print( LOG_INFO, "[Affiliation/implicit] user=%s client=%s 설정 그룹 %d개 → 새 제휴 %d (expires=%d)",
+                 strUserId.c_str(), strClient.c_str(), (int)vecGroups.size(), iNew, iExpires );
+}
+
 bool CCscfModule::RecvRequestRegister( int iThreadId, CSipMessage *pclsMessage ) {
     // 요청 수명 (RFC 3261 §10.2.1.1: Contact ;expires > Expires 헤더). 형식 오류 → 400 (§21.4.1).
     uint32_t uiReqExpires = 0;
@@ -1053,6 +1105,8 @@ bool CCscfModule::RecvRequestRegister( int iThreadId, CSipMessage *pclsMessage )
 
         gclsCspUserMap.registerUser( clsUser.m_strId, "" );
         _NoteDeviceSeen( pclsMessage, clsUser.m_strId, clsUser.m_strServiceType, iGrantedExpires );
+        if ( clsUser.m_strServiceType == "ptt" )
+            _ApplyImplicitAffiliations( pclsMessage, clsUser.m_strId, iGrantedExpires );
 
         // reg-event 구독자에게 등록 갱신 통지 (partial — RFC 3680).
         //   최초 등록은 구독이 있을 수 없어 통상 no-op, 구독 잔존 상태의 재등록이면 created.

@@ -852,6 +852,7 @@ Content-Type: application/json
 | `ack_timeout_sec` | integer | N | TNG1 — 필수 멤버 응답 대기 초, `<on-network-timeout-for-acknowledgement-of-required-members>`(§7.2.2 t), TS 24.379 §6.3.3.3). 1~300, 기본 5 |
 | `ack_action` | string | N | TNG1 만료·필수 멤버 거절 때 `proceed`(200 + Warning 111)/`abandon`(480 + Warning 112, 기본) — `<on-network-action-upon-expiration-of-timeout-for-acknowledgement-of-required-members>`(§7.2.2 u)) |
 | `members[].required` | boolean | N | 필수 멤버 `<on-network-required>`(§7.2.4.2) — 개시자 응답 전에 이 멤버의 200 을 기다린다. 필수 멤버 수가 `max_members`(0 이 아닐 때)보다 많으면 400(TS 24.379 §6.3.5.5 NOTE 4). 멤버 추가·수정(`POST …/members`)도 같은 필드 |
+| `members[].implicit_affiliation` | boolean | N | 암시적 제휴 — 이 멤버의 user profile `<ImplicitAffiliations>` 에 이 그룹을 싣고, PTT 등록(서비스 인가) 때 서버가 제휴를 기록한다(TS 24.379 §9.2.2.2.15). 기본 false. 그룹 갱신에서 `members` 를 보낼 때 이 필드가 없는 멤버는 기존 값을 잇는다. 멤버 추가·수정(`POST …/members`)은 보낸 경우에만 바꾼다 |
 | `floor_policy` | string | N | 동시 발언 정책 `single`(기본)/`dual`/`multi` |
 | `max_talkers` | integer | N | `multi` 의 동시 발언자 수 (2~8, CMP 슬롯 상한). `single`/`dual` 은 미해석 — 2 로 정규화 |
 | `members` | array | N | 초기 멤버 목록 |
@@ -967,9 +968,12 @@ Content-Type: application/json
 ```json
 {
   "user_id": "+82571900005",
-  "priority": 2
+  "priority": 2,
+  "implicit_affiliation": true
 }
 ```
+
+`required`·`implicit_affiliation` 은 선택이다. 이미 멤버면 upsert 로 갱신하고, `implicit_affiliation` 을 보내지 않으면 기존 값을 둔다.
 
 **curl 예시:**
 ```bash

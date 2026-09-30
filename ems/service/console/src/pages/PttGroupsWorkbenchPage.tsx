@@ -261,10 +261,10 @@ function GroupDrawer(p: GroupDrawerProps) {
     show(`${ids.length}명 제거`, 'ok')
     reloadMembers(); p.reload()
   }
-  // priority/role/필수 변경 = addMember upsert (백엔드 ON DUPLICATE KEY UPDATE)
-  async function saveMember(uid: string, priority: number, role: 'chair' | 'participant', required: boolean) {
+  // priority/role/필수/자동 제휴 변경 = addMember upsert (백엔드 ON DUPLICATE KEY UPDATE)
+  async function saveMember(uid: string, priority: number, role: 'chair' | 'participant', required: boolean, implicit: boolean) {
     if (!existing) return
-    try { await groupsApi.addMember(existing.id, { user_id: uid, priority, role, required }); show('수정', 'ok'); reloadMembers(); p.reload() }
+    try { await groupsApi.addMember(existing.id, { user_id: uid, priority, role, required, implicit_affiliation: implicit }); show('수정', 'ok'); reloadMembers(); p.reload() }
     catch (e: unknown) { show(String(e), 'err') }
   }
 
@@ -452,13 +452,14 @@ function PriChip({ n }: { n: number }) {
 function MemberRow({ m, name, selected, canManage, onToggle, onSave, onRemove }: {
   m: Member; name?: string; selected: boolean; canManage: boolean
   onToggle: (uid: string) => void
-  onSave: (uid: string, priority: number, role: 'chair' | 'participant', required: boolean) => void
+  onSave: (uid: string, priority: number, role: 'chair' | 'participant', required: boolean, implicit: boolean) => void
   onRemove: (uid: string) => void
 }) {
   const [editing, setEditing] = useState(false)
   const [pri, setPri] = useState(m.priority)
   const [role, setRole] = useState<'chair' | 'participant'>(m.role === 'chair' ? 'chair' : 'participant')
   const [req, setReq] = useState(!!m.required)
+  const [imp, setImp] = useState(!!m.implicit_affiliation)
 
   return (
     <div style={{
@@ -485,15 +486,17 @@ function MemberRow({ m, name, selected, canManage, onToggle, onSave, onRemove }:
             </SelectContent>
           </Select>
           <label className="flex items-center gap-1 whitespace-nowrap" title="on-network-required — 필수 멤버: 개시자 응답 전에 이 멤버의 응답을 기다린다(TNG1)"><Checkbox checked={req} onCheckedChange={(c) => setReq(c === true)} />필수</label>
-          <IconBtn title="저장" tone="primary" onClick={() => { onSave(m.user_id, pri, role, req); setEditing(false) }}><Check size={ICON} /></IconBtn>
-          <IconBtn title="취소" onClick={() => { setPri(m.priority); setRole(m.role === 'chair' ? 'chair' : 'participant'); setReq(!!m.required); setEditing(false) }}><X size={ICON} /></IconBtn>
+          <label className="flex items-center gap-1 whitespace-nowrap" title="ImplicitAffiliations — 등록하면 서버가 이 멤버를 이 그룹에 자동 제휴한다(TS 24.379 §9.2.2.2.15)"><Checkbox checked={imp} onCheckedChange={(c) => setImp(c === true)} />자동 제휴</label>
+          <IconBtn title="저장" tone="primary" onClick={() => { onSave(m.user_id, pri, role, req, imp); setEditing(false) }}><Check size={ICON} /></IconBtn>
+          <IconBtn title="취소" onClick={() => { setPri(m.priority); setRole(m.role === 'chair' ? 'chair' : 'participant'); setReq(!!m.required); setImp(!!m.implicit_affiliation); setEditing(false) }}><X size={ICON} /></IconBtn>
         </>
       ) : (
         <>
           {m.required && <span className="text-xs font-semibold text-muted-foreground bg-muted border border-border rounded-full py-px px-[7px]" title="on-network-required — 필수 멤버">필수</span>}
+          {m.implicit_affiliation && <span className="text-xs font-semibold text-muted-foreground bg-muted border border-border rounded-full py-px px-[7px]" title="ImplicitAffiliations — 등록하면 서버가 자동 제휴">자동 제휴</span>}
           <PriChip n={m.priority} />
           {canManage && <>
-            <IconBtn title="우선순위·역할·필수 편집" onClick={() => setEditing(true)}><Pencil size={ICON} /></IconBtn>
+            <IconBtn title="우선순위·역할·필수·자동 제휴 편집" onClick={() => setEditing(true)}><Pencil size={ICON} /></IconBtn>
             <IconBtn title="제거" tone="danger" onClick={() => onRemove(m.user_id)}><ArrowRight size={ICON} /></IconBtn>
           </>}
         </>
@@ -515,7 +518,7 @@ function MemberTransfer({ members, memberIds, pttIndex, pttName, canManage, orgS
   orgPathOf: (code: string) => string
   onAdd: (ids: string[], priority: number, role: 'chair' | 'participant') => Promise<void>
   onRemove: (ids: string[]) => Promise<void>
-  onSaveMember: (uid: string, priority: number, role: 'chair' | 'participant', required: boolean) => void
+  onSaveMember: (uid: string, priority: number, role: 'chair' | 'participant', required: boolean, implicit: boolean) => void
 }) {
   // 좌측 선택(제거 대상)
   const [selMembers, setSelMembers] = useState<Set<string>>(new Set())

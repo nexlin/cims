@@ -124,6 +124,8 @@ bool CspPttGroup::load( std::string groupId ) {
                     auto pUser = std::make_shared<CspPttUser>( uid, prio, role, mcpttId );
                     pUser->_onNetworkRequired =
                         userNode.Has( "on_network_required" ) && userNode.GetInt( "on_network_required" ) != 0;
+                    pUser->_implicitAffiliation =
+                        userNode.Has( "implicit_affiliation" ) && userNode.GetInt( "implicit_affiliation" ) != 0;
                     pUser->_groups.push_back( _id );  // Add self group
                     _pusers.push_back( pUser );
                 }

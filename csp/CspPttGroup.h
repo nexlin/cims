@@ -37,6 +37,11 @@ public:
      *  기다린다(TNG1, TS 24.379 §6.3.3.3) */
     bool _onNetworkRequired = false;
 
+    /** 암시적 제휴 대상 — user profile <OnNetwork><ImplicitAffiliations> 의 이 그룹(TS 24.484 §8.3.2 · TS 24.379 §7.3.2
+     * 13)). 서비스 인가(PTT REGISTER) 성공 때 참여 기능이 이 그룹에 제휴를 기록한다(§9.2.2.2.15). 멤버마다 관리자가
+     * 정한다. */
+    bool _implicitAffiliation = false;
+
     std::vector<std::string> _groups;
 
     bool IsChair() const {

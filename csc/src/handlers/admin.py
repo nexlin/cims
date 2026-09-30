@@ -1422,8 +1422,9 @@ _GROUP_COLS = (
     "require_affiliation, alias, authorized_user_id, floor_policy, max_talkers, "
     "hang_timer_sec, max_duration_sec, min_number_to_start, ack_timeout_sec, ack_action, created_at"
 )
-# 멤버 조회 열 — on_network_required = <on-network-required>(필수 멤버, TS 24.481 §7.2.4.2)
-_MEMBER_COLS = "user_id, priority, role, mcptt_id, on_network_required"
+# 멤버 조회 열 — on_network_required = <on-network-required>(필수 멤버, TS 24.481 §7.2.4.2),
+#   implicit_affiliation = user profile <ImplicitAffiliations> 대상(TS 24.484 §8.3.2 · TS 24.379 §9.2.2.2.15)
+_MEMBER_COLS = "user_id, priority, role, mcptt_id, on_network_required, implicit_affiliation"
 
 # floor 동시 발언 정책 (mcptt_csp_cmp_roadmap_contract.md §B.1) — CSP 가 CMP 로 발행한다.
 _FLOOR_POLICIES = ('single', 'dual', 'multi')
@@ -1530,6 +1531,7 @@ def _shape_group(g: dict, members: list, owner: dict = None):
     g['ack_action'] = norm_ack_action(g.get('ack_action'))
     for m in members:
         m['required'] = bool(m.pop('on_network_required', 0))
+        m['implicit_affiliation'] = bool(m.get('implicit_affiliation', 0))
     if g.get('session_start'): g['session_start'] = g['session_start'].isoformat()
     if g.get('session_end'): g['session_end'] = g['session_end'].isoformat()
     if g.get('created_at'): g['created_at'] = g['created_at'].isoformat()
@@ -1643,7 +1645,15 @@ def _resolve_group_pk(cur, group_id: str):
     return row['id'] if row else None
 
 
-def _insert_member(cur, gpk, m):
+def _implicit_members(cur, gpk) -> set:
+    """그룹의 암시적 제휴 멤버 user_id 집합 — 멤버를 통째로 다시 쓰는 경로가 값을 안 보낸 멤버의 설정을 잇는 근거."""
+    cur.execute("SELECT user_id FROM ptt_group_members WHERE group_id=%s AND implicit_affiliation=1", (gpk,))
+    return {r['user_id'] for r in cur.fetchall()}
+
+
+def _insert_member(cur, gpk, m, keep_implicit=frozenset()):
+    """멤버 1행 기록. implicit_affiliation 이 없으면 keep_implicit(교체 전 값)를 잇는다 — 그룹 문서(TS 24.481)에는 이
+    요소가 없어 문서·폼이 보내지 않은 값을 지우지 않는다."""
     uid  = m.get('user_id', m.get('id', ''))
     if not uid:
         return
@@ -1653,10 +1663,13 @@ def _insert_member(cur, gpk, m):
         role = 'participant'
     mcptt_id = m.get('mcptt_id') or None
     required = 1 if m.get('required') else 0
+    implicit = (1 if m.get('implicit_affiliation') else 0) if 'implicit_affiliation' in m \
+        else (1 if uid in keep_implicit else 0)
     cur.execute(
         "INSERT IGNORE INTO ptt_group_members "
-        "(group_id, user_id, priority, role, mcptt_id, on_network_required) VALUES (%s, %s, %s, %s, %s, %s)",
-        (gpk, uid, prio, role, mcptt_id, required)
+        "(group_id, user_id, priority, role, mcptt_id, on_network_required, implicit_affiliation) "
+        "VALUES (%s, %s, %s, %s, %s, %s, %s)",
+        (gpk, uid, prio, role, mcptt_id, required, implicit)
     )
 
 
@@ -1868,9 +1881,10 @@ async def _update_group(group_id: str, body, config, payload=None):
                     update_vals
                 )
             if 'members' in body:
+                keep = _implicit_members(cur, gpk)
                 cur.execute("DELETE FROM ptt_group_members WHERE group_id=%s", (gpk,))
                 for m in body['members']:
-                    _insert_member(cur, gpk, m)
+                    _insert_member(cur, gpk, m, keep)
     sync_group_from_db(group_id)   # 속성+멤버 — 종전 refresh_group_members 는 멤버만 갱신했다
     notify_csp("GROUP_CHANGED", f"tel:{group_id}", "PUT")
     return HandlerResult(status=200, body={'id': group_id})
@@ -1902,6 +1916,7 @@ async def _list_members(group_id: str, config):
             members = cur.fetchall()
     for m in members:
         m['required'] = bool(m.pop('on_network_required', 0))
+        m['implicit_affiliation'] = bool(m.get('implicit_affiliation', 0))
     return HandlerResult(status=200, body={'group_id': group_id, 'members': members})
 
 
@@ -1917,6 +1932,8 @@ async def _add_member(group_id: str, body, config):
         role = 'participant'
     mcptt_id = body.get('mcptt_id') or None
     required = 1 if body.get('required') else 0
+    # 암시적 제휴 — 보낸 경우에만 바꾼다(기존 멤버 갱신 때 값이 없으면 유지)
+    implicit = (1 if body.get('implicit_affiliation') else 0) if 'implicit_affiliation' in body else None
 
     with _get_db(config) as conn:
         with conn.cursor() as cur:
@@ -1933,11 +1950,13 @@ async def _add_member(group_id: str, body, config):
                 if err:
                     return HandlerResult(status=400, body={'error': err})
             cur.execute(
-                "INSERT INTO ptt_group_members (group_id, user_id, priority, role, mcptt_id, on_network_required) "
-                "VALUES (%s, %s, %s, %s, %s, %s) "
+                "INSERT INTO ptt_group_members "
+                "(group_id, user_id, priority, role, mcptt_id, on_network_required, implicit_affiliation) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s) "
                 "ON DUPLICATE KEY UPDATE priority=VALUES(priority), role=VALUES(role), mcptt_id=VALUES(mcptt_id), "
-                "on_network_required=VALUES(on_network_required)",
-                (gpk, user_id, priority, role, mcptt_id, required)
+                "on_network_required=VALUES(on_network_required)"
+                + (", implicit_affiliation=VALUES(implicit_affiliation)" if implicit is not None else ""),
+                (gpk, user_id, priority, role, mcptt_id, required, implicit or 0)
             )
     refresh_group_members(group_id)
     notify_csp("GROUP_CHANGED", f"tel:{group_id}", "PUT")

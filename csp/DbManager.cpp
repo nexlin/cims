@@ -579,7 +579,8 @@ bool CDbManager::SelectGroup( const std::string &strGroupId, CspPttGroup &clsGro
     char szDbId[32];
     snprintf( szDbId, sizeof( szDbId ), "%lld", clsGroup._dbId );
     strSql =
-        "SELECT user_id, priority, role, COALESCE(mcptt_id,''), on_network_required FROM ptt_group_members "
+        "SELECT user_id, priority, role, COALESCE(mcptt_id,''), on_network_required, implicit_affiliation FROM "
+        "ptt_group_members "
         "WHERE group_id=" +
         std::string( szDbId ) + " ORDER BY priority";
 
@@ -593,6 +594,7 @@ bool CDbManager::SelectGroup( const std::string &strGroupId, CspPttGroup &clsGro
             std::string mcpttId = row[3] ? row[3] : "";
             auto pUser = std::make_shared<CspPttUser>( uid, prio, role, mcpttId );
             pUser->_onNetworkRequired = row[4] && atoi( row[4] ) != 0;
+            pUser->_implicitAffiliation = row[5] && atoi( row[5] ) != 0;  // user profile <ImplicitAffiliations>
             pUser->_groups.push_back( clsGroup._id );
             clsGroup._pusers.push_back( pUser );
         }

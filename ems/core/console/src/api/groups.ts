@@ -6,6 +6,7 @@ export interface Member {
   role?: 'chair' | 'participant'
   mcptt_id?: string | null
   required?: boolean           // <on-network-required> 필수 멤버 — 개시자 응답 전에 이 멤버의 응답을 기다린다(TNG1)
+  implicit_affiliation?: boolean  // user profile <ImplicitAffiliations> — 등록(서비스 인가) 때 서버가 이 그룹에 자동 제휴(TS 24.379 §9.2.2.2.15)
 }
 
 export interface Group {
