@@ -724,6 +724,13 @@ S1-UNIT-PSIP [M] 으로 확인했다. 알아 둘 것 하나 — 갱신 answer �
 - `McVideoCallService` 는 `m_mutex`(재귀) 아래서 CMP 요청을 동기 대기한다 — CMP 응답(RecvLoop)과 이벤트(EventDispatchLoop)는 다른 스레드라 교착 없음. 이 구조를 바꿀 때 유지.
 - CMP 로스터는 **붙는 멤버만** 싣는다(`PTT_GROUP_ADD members` = 그 멤버 하나, CMP `updateRoster` 는 병합) — 그룹 전원을 실으면 참가하지 않는 멤버의 포트 유닛까지 잡힌다.
 - 공유 DB(.45:3306/cims)는 .45·.48·.135 가 같이 쓴다 — 마이그레이션·시험 데이터는 D1·D2 결정 범위 안에서만.
+- **OAM 배포 job 이 `queued` 에 갇힘** — 에이전트별 대기 목록 캐시(`modules/oam/runtime/job_index/<agent>.json`)가 job 생성과 heartbeat 수거의
+  경합으로 `seq` 는 새 job 번호까지 앞서가는데 `queued` 에서 그 job 이 빠진다(`handlers/agents.py` `_job_create` → `_job_index_add` 와
+  `_job_pick_pending` 의 잠금 없는 읽기-쓰기). 그 뒤 OAM 은 캐시만 보고 그 job 을 영영 내주지 않는다(.45 MCVideo 배포에서 2회 — 정지 job 763 ·
+  CSP update_config job 767, 둘 다 job 이 만들어진 같은 초에 캐시가 `seq=<그 번호>`·`queued=[]` 로 저장됨). 확인 = `control/jobs/<id>.json` 의
+  `status` 가 `queued`·`dispatched_at` 없음 + 캐시 `seq` ≥ 그 id. 푸는 법 = 캐시의 `seq` 를 그 id − 1 로 되돌리면 다음 heartbeat 의 구간 흡수가 그
+  job 을 다시 넣는다(캐시는 정본이 아니다 — 정본 = `control/jobs/*`). `oam-deploy.py upgrade` 는 정지 대기 시한 초과로 멈추므로 풀린 뒤 다시 돌린다.
+  근본 수정(인덱스 갱신 직렬화)은 OAM 과제.
 
 ### 12.5 M2 결과 · 사용자 결정 반영 (.45)
 
