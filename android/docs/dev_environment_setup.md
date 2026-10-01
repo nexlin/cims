@@ -71,7 +71,18 @@ adb devices
 #  - unauthorized → 단말에서 RSA 지문 수락
 #  - 목록에 없음 → 케이블/드라이버/USB디버깅 확인
 ```
-> (선택) Android 11+는 **무선 디버깅**(개발자 옵션) 가능. UNIWA가 구버전이면 USB 사용.
+### 2.4 무선 디버깅 (Android 11+)
+USB 없이 같은 Wi-Fi 망에서 붙는다. 단말 **개발자 옵션 → 무선 디버깅 ON**.
+```powershell
+# ① 페어링 — PC 마다 한 번. 단말 [페어링 코드로 기기 페어링] 창이 보여 주는 주소·포트와 6자리 코드
+adb pair <단말 IP>:<페어링 포트> <코드>
+# ② 연결 — 무선 디버깅 화면 위쪽의 «IP 주소 및 포트»(페어링 포트와 다르고, 무선 디버깅을 껐다 켜면 바뀐다)
+adb connect <단말 IP>:<포트>
+adb devices          # <단말 IP>:<포트>  device
+```
+- 페어링 안 된 PC 의 `adb connect` 는 포트가 열려 있어도 `failed to connect` 로 떨어진다.
+- 같은 망의 무선 디버깅 단말과 지금 포트는 `adb mdns services` 가 보여 준다(`_adb-tls-connect._tcp`).
+- UNIWA 가 구버전이면 USB 를 쓴다.
 
 ---
 
@@ -133,6 +144,23 @@ $env:JAVA_HOME = 'C:\Program Files\Android\Android Studio\jbr'   # Gradle 데몬
 .\gradlew.bat :dispatch-tablet:installDebug         # 단말 설치(adb)
 ```
 **adb/단말 배포는 Windows 에서** 한다(빌드 호스트에 USB 를 넘길 필요 없음).
+
+### 4.4 한 번에 — `android/tablet.sh` (Git Bash)
+§4.2·§4.3 과 단말 설치를 묶은 관제 태블릿 앱의 진입점이다.
+```bash
+android/tablet.sh doctor              # 환경 점검 — JDK·SDK·Gradle 데몬·빌드 호스트·네이티브 생성물·APK·단말
+android/tablet.sh up                  # native(필요할 때만) → apk → install
+android/tablet.sh native [--force]    # 네이티브만 (build-native.sh 인자를 주면 그대로 넘긴다)
+android/tablet.sh apk                 # APK 만
+android/tablet.sh install [-s 시리얼] # 설치하고 실행 — 단말이 하나면 -s 생략, 무선이면 시리얼 = <IP>:<포트>
+```
+- **네이티브는 입력이 바뀌었을 때만 짓는다.** `build-native-remote.sh` 가 전체 빌드를 마칠 때 빌드 입력(§4.2 가 보내는 경로들의 작업 사본)의
+  지문을 `sdk/android/cimsue/src/main/jniLibs/native-inputs.sha1` 에 남기고, `tablet.sh` 가 지금 지문(`build-native-remote.sh --inputs-hash`)과
+  대조한다 — Kotlin 만 고친 뒤의 `up` 은 Gradle 과 설치만 돈다. 무조건 다시 지으려면 `native --force`.
+- `JAVA_HOME` 이 없거나 jlink 없는 JRE 면 Android Studio JBR 을 쓰고, jlink 없는 JRE 로 뜬 Gradle 데몬이 있으면 빌드 전에 내린다(§6).
+- 무선 디버깅 단말이 mDNS 자동 연결과 `adb connect` 로 두 번 잡혀도 단말 시리얼이 같으면 하나로 센다(`-s` 없이 설치된다).
+- 설치 전에 단말 ABI(arm64-v8a)를 확인한다. `INSTALL_FAILED_UPDATE_INCOMPATIBLE` = 단말에 다른 PC 의 디버그 키로 서명된 앱이 있다
+  (디버그 키는 PC 마다 다르다) — `adb uninstall com.cims.ue.dispatch` 뒤 다시 설치한다(앱 데이터가 지워진다).
 
 ---
 

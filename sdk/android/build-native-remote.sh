@@ -19,15 +19,21 @@
 # 원격 전제(한 번): build-native.sh 의 전제 그대로 — ~/.m1env(JDK·SWIG·NDK, android/docs/scripts/m1_provision.sh) +
 #   Android arm64 정적 OpenSSL. OpenSSL 이 없으면 여기서 android/docs/scripts/m1_build_openssl.sh 를 먼저 돌린다.
 #
-# 사용: sdk/android/build-native-remote.sh [--sync-only] [build-native.sh 인자...]
-#   --sync-only   보내기만 한다(원격에서 직접 build-native.sh 를 돌릴 때)
+# 사용: sdk/android/build-native-remote.sh [--sync-only | --inputs-hash] [build-native.sh 인자...]
+#   --sync-only     보내기만 한다(원격에서 직접 build-native.sh 를 돌릴 때)
+#   --inputs-hash   지금 작업 사본의 빌드 입력 지문만 찍고 끝낸다(ssh 없음). 인자 없는 전체 빌드가 끝나면 같은 값을
+#                   $STAMP 에 남긴다 — android/tablet.sh 가 둘을 대조해 입력이 그대로면 네이티브 빌드를 건너뛴다.
 set -e -o pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 HOST="${CIMS_ANDROID_BUILD_HOST:-nex-ubuntu}"
 RDIR="${CIMS_ANDROID_BUILD_DIR:-cims-android-src}"
 SYNC_ONLY=0
-if [ "${1:-}" = "--sync-only" ]; then SYNC_ONLY=1; shift; fi
+HASH_ONLY=0
+case "${1:-}" in
+  --sync-only) SYNC_ONLY=1; shift ;;
+  --inputs-hash) HASH_ONLY=1; shift ;;
+esac
 
 # 네이티브 빌드가 읽는 경로 전부 — build-native.sh·sdk/android·sdk/core CMake 의 입력(floor·MCVideo 전송 제어 정의 생성기 포함)과 OpenSSL 스크립트.
 PATHS=(.gitignore ext/pjproject sdk/core sdk/engine sdk/android
@@ -36,6 +42,17 @@ PATHS=(.gitignore ext/pjproject sdk/core sdk/engine sdk/android
 # 받아 올 생성물 — build-native.sh [5]·[7] 의 배치 위치.
 OUTS=(sdk/android/cimsue-engine/src/main/jniLibs sdk/android/cimsue-engine/src/main/java/org
       sdk/android/cimsue/src/main/jniLibs sdk/android/cimsue/src/swig/java)
+# 생성물이 어느 입력에서 나왔는지 — 생성물과 같이 지워지도록 OUTS 안에 둔다(ABI 폴더 밖이라 APK 에 실리지 않는다).
+STAMP=sdk/android/cimsue/src/main/jniLibs/native-inputs.sha1
+
+# 작업 사본의 PATHS 를 임시 인덱스에 올린다(커밋 안 한 수정·새 파일 포함, .gitignore 제외). 입력 지문 = 그 항목들의 모드·blob 목록.
+cd "$ROOT"
+TMP_INDEX="$(git rev-parse --git-path index.android-remote)"
+cp -f "$(git rev-parse --git-path index)" "$TMP_INDEX"       # 기존 모드(실행 비트)를 잇는다 — core.fileMode=false 인 작업 사본
+trap 'rm -f "$TMP_INDEX"' EXIT
+GIT_INDEX_FILE="$TMP_INDEX" git add -A -- "${PATHS[@]}"
+INPUTS=$(GIT_INDEX_FILE="$TMP_INDEX" git ls-files -s -- "${PATHS[@]}" | git hash-object --stdin)
+[ "$HASH_ONLY" = 1 ] && { echo "$INPUTS"; exit 0; }
 
 rsh() { ssh -o BatchMode=yes "$HOST" "$@"; }
 export GIT_SSH_COMMAND="${GIT_SSH_COMMAND:-ssh -o BatchMode=yes}"
@@ -53,11 +70,6 @@ for _ in $(seq 1 30); do rsh -o ConnectTimeout=5 true 2>/dev/null && break; slee
 rsh true || { echo "!! $HOST 에 ssh 로 닿지 않는다"; exit 1; }
 
 echo "=== [1] 작업 사본 → 트리 (임시 인덱스, LF) ==="
-cd "$ROOT"
-TMP_INDEX="$(git rev-parse --git-path index.android-remote)"
-cp -f "$(git rev-parse --git-path index)" "$TMP_INDEX"       # 기존 모드(실행 비트)를 잇는다 — core.fileMode=false 인 작업 사본
-trap 'rm -f "$TMP_INDEX"' EXIT
-GIT_INDEX_FILE="$TMP_INDEX" git add -A -- "${PATHS[@]}"
 TREE=$(GIT_INDEX_FILE="$TMP_INDEX" git write-tree)
 COMMIT=$(git commit-tree "$TREE" -m "android native build snapshot")
 echo "tree $TREE → commit $COMMIT"
@@ -85,4 +97,6 @@ for d in sdk/android/cimsue-engine/src/main/jniLibs/arm64-v8a sdk/android/cimsue
   [ -d "$d" ] && ls -la "$d"
 done
 echo "SWIG Java: engine $(find sdk/android/cimsue-engine/src/main/java/org -name '*.java' 2>/dev/null | wc -l) · cimsue $(find sdk/android/cimsue/src/swig/java -name '*.java' 2>/dev/null | wc -l)"
-echo "=== REMOTE NATIVE BUILD DONE — 다음: cd android && ./gradlew :dispatch-tablet:assembleDebug ==="
+# 인자 없는 전체 빌드만 지문을 남긴다 — --engine-only·--no-install·다른 ABI 는 두 모듈의 생성물 전부를 새로 만들지 않는다.
+[ $# = 0 ] && echo "$INPUTS" > "$STAMP"
+echo "=== REMOTE NATIVE BUILD DONE — 다음: android/tablet.sh apk ==="

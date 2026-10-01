@@ -59,7 +59,9 @@ sdk/android/
   build-native.sh        ① config_site.h 생성 ② configure-android + make(pjproject)
                          ③ sdk/core → libcimsue.so ④ SWIG — pjsua2 와 cimsue 둘 다 ⑤ 산출물 배치
   build-native-remote.sh WSL 없는 Windows(Git Bash) → ssh 빌드 호스트(VM)에 작업 사본을 LF 트리로 보내 build-native.sh 를
-                         맡기고 두 모듈의 생성물을 받아 온다(android/docs/dev_environment_setup.md §4.2). APK 는 Windows Gradle
+                         맡기고 두 모듈의 생성물을 받아 온다(android/docs/dev_environment_setup.md §4.2). APK 는 Windows Gradle.
+                         네이티브 → APK → 단말 설치를 묶은 진입점 = android/tablet.sh(같은 문서 §4.4 — 네이티브는 빌드 입력
+                         지문이 바뀌었을 때만 다시 짓는다)
   cimsue-engine/         Gradle Android Library → cimsue-engine.aar (arm64-v8a)
     src/main/java/org/pjsip/            SWIG pjsua2(306) + PjCamera*(4) — 생성물, 커밋 안 함
     src/main/jniLibs/arm64-v8a/{libpjsua2,libc++_shared}.so             생성물, 커밋 안 함
