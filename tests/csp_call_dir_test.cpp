@@ -156,6 +156,74 @@ static int TestOptionalAxes( const std::string &strRoot ) {
     return 0;
 }
 
+// strDir 아래(재귀)에서 세션 디렉터리 strSesName 의 session.json 경로 — 같은 버킷에 세션이 여럿이라 이름으로 고른다.
+static std::string FindSessionJson( const std::string &strDir, const std::string &strSesName ) {
+    DIR *d = opendir( strDir.c_str() );
+    if ( !d ) return "";
+    std::string strFound;
+    struct dirent *ent;
+    while ( strFound.empty() && ( ent = readdir( d ) ) != nullptr ) {
+        if ( strcmp( ent->d_name, "." ) == 0 || strcmp( ent->d_name, ".." ) == 0 ) continue;
+        std::string strPath = strDir + "/" + ent->d_name;
+        struct stat st;
+        if ( stat( strPath.c_str(), &st ) != 0 || !S_ISDIR( st.st_mode ) ) continue;
+        if ( strSesName == ent->d_name && Exists( strPath + "/session.json" ) )
+            strFound = strPath + "/session.json";
+        else
+            strFound = FindSessionJson( strPath, strSesName );
+    }
+    closedir( d );
+    return strFound;
+}
+
+// 서비스 축 — 같은 그룹의 MCPTT 세션과 MCVideo 세션이 동시에 서면 세션 디렉터리·session.json 이 따로이고, group.json(MCPTT 세션
+//   상태)·가입자 상태 파일은 MCVideo 가 건드리지 않는다(recording.md §3.3 — 같은 폴더, session.json type 으로 가른다).
+static int TestServiceAxis( const std::string &strRoot ) {
+    const std::string strRec = strRoot + "/svc";
+    const std::string strState = strRoot + "/svc_state";
+    const std::string strKey = CCallDir::PttSessionKey( "mcvideo", "g3" );
+    std::string strPttBase, strMcvBase, strPttName, strMcvName;
+    {
+        CCallDir clsDir;
+        clsDir.Init( strRec, strState, "", "csp", 5 );
+        CHECK( CCallDir::PttSessionKey( "ptt", "g3" ) == "g3" && strKey == "mcvideo:g3",
+               "세션 키 — MCPTT 는 그룹 id, MCVideo 는 mcvideo:<그룹>" );
+        strPttBase = clsDir.GetPttSessionDir( "g3", "+821011112222::csp::20261001110000000001::1", "9" );
+        clsDir.PttSessionStart( "g3", "call-a", "+821011112222", "{\"id\":9}" );
+        strPttName = clsDir.GetPttSessionName( "g3" );
+        strMcvBase = clsDir.GetPttSessionDir( strKey, "+821033334444::csp::20261001110000000002::2", "9", "mcvideo" );
+        clsDir.PttSessionStart( strKey, "call-v", "+821033334444",
+                                "{\"id\":9,\"mcvideo\":{\"session_type\":\"chat\"}}" );
+        strMcvName = clsDir.GetPttSessionName( strKey );
+        clsDir.PttMemberJoin( strKey, "+821055556666", "call-w" );
+        clsDir.PttSessionEnd( strKey, "normal" );  // MCVideo 만 끝난다 — MCPTT 는 진행 중
+    }
+    CHECK( strPttBase == strRec + "/ptt/9" && strMcvBase == strPttBase, "같은 녹취 폴더 = <recordings>/ptt/<저장 키>" );
+    CHECK( strPttName == "S20261001110000000001_1" && strMcvName == "S20261001110000000002_2",
+           "세션 디렉터리는 서비스마다 따로(sesid 에서 유도) — 서로 덮지 않는다" );
+    const std::string strPttSess = FindSessionJson( strPttBase, strPttName );
+    const std::string strMcvSess = FindSessionJson( strPttBase, strMcvName );
+    const std::string strPtt = ReadAll( strPttSess ), strMcv = ReadAll( strMcvSess );
+    CHECK( strPtt.find( "\"type\":\"ptt\"" ) != std::string::npos &&
+               strPtt.find( "\"state\":\"active\"" ) != std::string::npos,
+           "MCPTT session.json — type ptt · 진행 중" );
+    CHECK( strMcv.find( "\"type\":\"mcvideo\"" ) != std::string::npos &&
+               strMcv.find( "\"state\":\"ended\"" ) != std::string::npos &&
+               strMcv.find( "\"session_type\":\"chat\"" ) != std::string::npos,
+           "MCVideo session.json — type mcvideo · 디스크립터 · 종료 마킹" );
+    const std::string strGroup = ReadAll( strPttBase + "/group.json" );
+    CHECK( strGroup.find( "\"state\":\"active\"" ) != std::string::npos && strGroup.find( "mcvideo" ) == std::string::npos,
+           "group.json 은 MCPTT 세션 상태 그대로 — MCVideo 시작·종료가 덮지 않는다" );
+    CHECK( Exists( strState + "/ptt/+821011112222.json" ) && !Exists( strState + "/ptt/+821033334444.json" ) &&
+               !Exists( strState + "/ptt/+821055556666.json" ),
+           "가입자 상태 파일 = MCPTT 참여만" );
+    const std::string strMcvEvents =
+        ReadAll( strMcvSess.substr( 0, strMcvSess.rfind( '/' ) ) + "/events.jsonl" );
+    CHECK( strMcvEvents.find( "+821033334444" ) != std::string::npos && strMcvEvents.find( "+821055556666" ) != std::string::npos,
+           "MCVideo 세션 events.jsonl — 개시자·참가자 member_join" );
+    return 0;
+}
+
 int main() {
     char szTmpl[] = "/tmp/csp_call_dir_test_XXXXXX";
     const char *pszRoot = mkdtemp( szTmpl );
@@ -167,6 +235,7 @@ int main() {
     int rc = TestSiteLayout();
     if ( rc == 0 ) rc = TestAreas( strRoot );
     if ( rc == 0 ) rc = TestOptionalAxes( strRoot );
+    if ( rc == 0 ) rc = TestServiceAxis( strRoot );
     std::string strCmd = "rm -rf '" + strRoot + "'";
     if ( system( strCmd.c_str() ) != 0 ) printf( "WARN cleanup failed: %s\n", strRoot.c_str() );
     if ( rc != 0 ) return rc;

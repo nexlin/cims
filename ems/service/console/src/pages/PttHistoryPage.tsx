@@ -543,6 +543,7 @@ function SessionCard({ r, sel, names, onSelect }: {
     }}>
       <div className="flex items-center gap-[5px] flex-wrap">
         <Badge variant={KIND_BADGE[r.kind] || 'neutralSoft'} >{KIND_LABEL[r.kind] || r.kind}</Badge>
+        {r.service === 'mcvideo' && <Badge variant="brandSoft" title="MCVideo 그룹 영상 호 (TS 24.281)">영상</Badge>}
         {duplex && <Badge variant="brandSoft" >전이중</Badge>}
         {/* 상태는 카드마다 명시 — 구역 라벨은 스크롤하면 시야에서 사라진다 */}
         <Badge variant={live ? 'successSoft' : 'neutralSoft'} >{live ? '진행중' : '종료'}</Badge>
@@ -605,11 +606,19 @@ function SessionPane({ r, detail, names, audio, overlay, flowLoading, onFlow, on
           선택 여부와 무관하게 고정하기 위해서다 (좁은 화면에선 카드가 가려지기도 한다). */}
       <div className="flex items-center gap-1.5 py-2 px-3 border-b border-border bg-card">
         <Badge variant={KIND_BADGE[r.kind] || 'neutralSoft'} >{KIND_LABEL[r.kind] || r.kind}</Badge>
+        {r.service === 'mcvideo' && <Badge variant="brandSoft" title="MCVideo 그룹 영상 호 (TS 24.281)">영상</Badge>}
         {duplex && <Badge variant="brandSoft" >전이중</Badge>}
         <Badge variant={live ? 'successSoft' : 'neutralSoft'} >{live ? '진행중' : '종료'}</Badge>
         <span className="font-semibold text-sm min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">
           <Target r={r} names={names} />
         </span>
+        {r.service === 'mcvideo' && r.mcvideo && (
+          <Badge className="flex-none" variant="neutralSoft"
+ title="세션 당시 MCVideo 호 방식·동시 송출 상한 (TS 24.281 · TS 24.581)">
+            {r.mcvideo.session_type === 'prearranged' ? 'prearranged' : 'chat'}
+            {r.mcvideo.max_transmitters ? ` · 동시 송출 ${r.mcvideo.max_transmitters}` : ''}
+          </Badge>
+        )}
         {r.floor_control === 'on' && r.floor_policy && (
           <Badge className="flex-none" variant="neutralSoft"
  title="세션 당시 동시 발언 정책 (TS 24.380)">

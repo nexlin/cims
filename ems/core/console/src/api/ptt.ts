@@ -25,6 +25,10 @@ export interface PttSession {
   floor_control?: string     // 'on' | 'off'(전이중) | ''
   floor_policy?: string      // single | dual | multi
   max_talkers?: number
+  // 서비스 — MCPTT 그룹 호(ptt) · MCVideo 그룹 호(mcvideo, TS 24.281). 같은 녹취 폴더, session.json type 으로 가른다.
+  //   MCVideo 는 floor 가 아니라 송출 제어라 floor_* 가 비어 있다.
+  service?: 'ptt' | 'mcvideo'
+  mcvideo?: { session_type?: string; max_transmitters?: number; reception_mode?: string } | null
 }
 
 // 세션 분류 — 좌측 목록의 섹션. DB 그룹이 아닌 세션(1:1/임시)도 녹취 디렉터리에서 드러난다.

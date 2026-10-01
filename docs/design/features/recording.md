@@ -168,7 +168,11 @@ PTT 녹취는 세션 단위 단일 파일로 기록 (화자 변경과 무관하�
 | 파일 | 위치 | 의미 | 갱신 |
 |---|---|---|---|
 | `group.json` | 그룹 base 루트 1개 | **최신** 편성 스냅샷 — 좌측 목록(요약)의 분류·이름·멤버 근거 | 매 세션 시작 시 전체 재작성, 종료 시 `state:"ended"`+`end_time` 마킹 |
-| `session.json` | 세션 디렉터리(시작 버킷) | **세션 당시** 스냅샷 + 세션 사실(`sesid`/`initiator`/`call_id`/`start_time`) — 세션 이력 행의 정본 | 세션당 1회 기록(두 번째 멤버의 INVITE 가 개시자·시작시각을 덮지 않는다), 종료 시 동일 마킹 |
+| `session.json` | 세션 디렉터리(시작 버킷) | **세션 당시** 스냅샷 + 세션 사실(`type`/`sesid`/`initiator`/`call_id`/`start_time`) — 세션 이력 행의 정본. `type` = 서비스(`ptt` MCPTT 그룹 호 · `mcvideo` MCVideo 그룹 호 — 없으면 `ptt`) | 세션당 1회 기록(두 번째 멤버의 INVITE 가 개시자·시작시각을 덮지 않는다), 종료 시 동일 마킹 |
+
+`group.json` 은 **MCPTT 세션**이 쓴다 — 그 `state` 는 그룹의 MCPTT 세션 상태라, 같은 그룹의 MCVideo 세션은 `session.json` 만 쓴다(MCVideo 가 끝날 때
+진행 중인 MCPTT 세션이 ended 로 보이지 않게). MCVideo `session.json` 의 디스크립터는 편성·멤버 + `mcvideo{session_type,max_transmitters,
+reception_mode}` 이고 floor 축이 없다(송출 제어 — TS 24.581). `group.json` 이 없는 MCVideo 전용 그룹은 이력이 `session.json` 에서 분류·이름을 읽는다.
 
 세션 축을 분리하는 이유: floor 축은 소급되면 안 된다 — private call 의 `floor_control` 은
 세션마다 SDP 협상으로 달라지고, 그룹의 `floor_policy`/`max_talkers` 도 편성 변경 전 세션은
@@ -207,8 +211,9 @@ floor 없는 private call(전이중)은 멤버마다 슬롯이 하나씩이다. 
 | `speakers[]` | 그 트랙을 점유한 화자 **구간** 목록. 선점 회수로 슬롯이 재사용되면 원소가 2개 이상이 된다 — 트랙당 화자를 한 값으로만 두면 뒤 화자만 남아 귀속이 소실된다 |
 
 미디어(payload 있는 RTP)가 없는 트랙은 파일·`tracks[]` 양쪽에서 제외된다(keepalive-only 포함).
-MCVideo 그룹 호([mcvideo.md](mcvideo.md) §5.3)도 같은 세션 레이아웃·`tracks[]` 로 기록한다 — 세그먼트 = 송출 구간, 슬롯 = 동시 송출자,
-`"type": "mcvideo"` 로 서비스를 가른다(CSP 가 디렉터리를 싣는 경로·이력 서비스 축은 남은 과제).
+MCVideo 그룹 호([mcvideo.md](mcvideo.md) §5.3)도 같은 폴더·세션 레이아웃·`tracks[]` 로 기록한다 — 세그먼트 = 송출 구간, 슬롯 = 동시 송출자,
+세그먼트 `"type": "mcvideo"`. 같은 그룹의 MCPTT 세션과 동시에 서도 세션 디렉터리가 따로다(CSP `CCallDir` 세션 키 `mcvideo:<그룹>` — sesid 가 다르다).
+송출 중 무전으로 마이크를 넘긴 구간(mcvideo.md D12)은 오디오 트랙 없이 영상만 있을 수 있다 — 재생 변환은 그 구간을 영상만 MP4 로 만든다.
 
 flat 키(`audio_file`/`audio_pt`/`speaker_id_audioK`)는 기존 녹취와의 호환을 위해 계속 기록되며,
 슬롯 0 과 각 트랙의 **첫 화자**만 담는다. 소비자는 `tracks[]` 가 있으면 그것을 쓰고, 없으면
@@ -545,6 +550,10 @@ PTT 세션 행에는 세션 당시 floor 축(`floor_control`/`floor_policy`/`max
 | `private` | `group_type=private` 또는 키가 `priv-` 로 시작 | 개시자 ↔ 상대 |
 | `adhoc` | `group.json` 은 있으나 surrogate `id` 없음 | 개시자 외 N명 |
 | `unknown` | `group.json` 유실 | 저장 키 그대로 |
+
+**서비스 축** — 같은 목록에 MCPTT 그룹 호와 MCVideo 그룹 호가 함께 있다. 행의 `service`(`ptt`|`mcvideo` — `session.json` `type`, 없으면 세그먼트
+`type`)로 가르고(`/api/v1/ptt/sessions?service=`), MCVideo 행은 «영상» 배지와 호 방식·동시 송출 상한 배지를 달며 floor 배지(반이중·전이중·동시
+발언 정책)를 달지 않는다. 재생은 같은 슬롯 트랙 플레이어(세그먼트 = 송출 구간, 화자 = 송출자). MCPTT 통계·이용 정보는 MCVideo 행을 세지 않는다.
 
 ```
 2026-08-06 ‹ › [오늘]   그룹·번호·세션키 검색        [새로고침]      □ 자동갱신

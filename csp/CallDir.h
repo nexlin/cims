@@ -415,8 +415,9 @@ public:
      *  멱등 경로다. 새 sesid = 새 세션 = 새 sesdir (같은 시간대의 두 번째 통화가 앞 통화에
      *  섞이지 않는 근거). */
     std::string GetPttSessionDir( const std::string &strGroupId, const std::string &strSesId = "",
-                                  const std::string &strStorageId = "" ) {
+                                  const std::string &strStorageId = "", const std::string &strType = "ptt" ) {
         std::lock_guard<std::mutex> lock( m_mtx );
+        m_mapPttSessionType[strGroupId] = strType;
 
         // 저장 경로 키: ptt_groups.id(surrogate) 우선 — mcptt_group_id 변경에도 불변.
         //   storageId 없거나 "0" 이면 groupId(mcptt) fallback.
@@ -436,6 +437,16 @@ public:
             m_mapPttSesName[strGroupId] = _sesDirName( m_mapPttSessionId[strGroupId] );
         }
         return base;
+    }
+
+    /** PTT 세션 상태의 키 — 서비스 축(TS 23.280 §3 — 한 그룹 = 서비스 집합). MCPTT 는 그룹 id 그대로(기존 키),
+     *  다른 서비스는 `<type>:<그룹 id>` 다. 같은 그룹의 MCPTT 그룹 호와 MCVideo 그룹 호는 동시에 서고
+     *  (mcvideo.md §7 D6) 각자 세션 디렉터리·session.json·이벤트를 가지므로, 그룹 id 하나로 키잉하면 세션
+     *  이름·디스크립터가 서로 덮인다. 녹취 폴더는 같다(recordings/ptt/{id} — session.json `type` 으로 가른다,
+     *  recording.md §3.3). 이 키로 GetPttSessionDir·PttSessionStart·PttSessionEnd·PttMemberJoin/Leave·
+     *  PttLogEvent·GetPttSessionName 을 부른다. */
+    static std::string PttSessionKey( const std::string &strType, const std::string &strGroupId ) {
+        return strType.empty() || strType == "ptt" ? strGroupId : strType + ":" + strGroupId;
     }
 
     /** 현재 세션의 디렉터리 이름 (CMP 에 session_dir 로 전달) — 세션 미개시면 빈 문자열. */
@@ -475,6 +486,7 @@ public:
             std::string dir = it->second;  // 그룹 base
 
             std::string sessId = m_mapPttSessionId[strGroupId];
+            const std::string type = _pttSessionTypeLocked( strGroupId );
             char ts[32];
             IsoNow( ts, sizeof( ts ) );
 
@@ -488,10 +500,15 @@ public:
             // group.json (자기완결 그룹 디스크립터) — base 루트에 1개 = 최신 편성 스냅샷.
             //   매 세션 시작마다 재작성한다 — 최초 1회만 기록하면 이후 추가된 필드
             //   (floor_control/floor_policy/max_talkers)·편성 변경이 영영 반영되지 않는다.
-            std::string groupPath = dir + "/group.json";
-            std::string groupContent = desc + body + "}\n";
-            m_worker.Enqueue( [groupPath, groupContent]() { return _writeFileS( groupPath, groupContent ); },
-                              groupContent.size() );
+            //   MCPTT 세션만 쓴다 — group.json 의 state 는 그 그룹의 MCPTT 세션 상태다. 같은 그룹의 MCVideo
+            //   세션이 쓰면 MCVideo 가 끝날 때 진행 중인 MCPTT 세션까지 ended 로 보인다(편성 스냅샷은 같은
+            //   그룹이라 MCPTT 쪽이 이미 쓴다).
+            if ( type == "ptt" ) {
+                std::string groupPath = dir + "/group.json";
+                std::string groupContent = desc + body + "}\n";
+                m_worker.Enqueue( [groupPath, groupContent]() { return _writeFileS( groupPath, groupContent ); },
+                                  groupContent.size() );
+            }
 
             // session.json — 세션 디렉터리(시작 버킷)에 당시 디스크립터 + 세션 사실을 남긴다.
             //   반이중/전이중·동시 발언 정원 표시는 이것이 정본 — 루트 group.json 은 최신
@@ -503,9 +520,9 @@ public:
             //   타므로, 매번 쓰면 개시자·시작시각이 마지막 참가자 값으로 덮인다.
             std::string sesDir = _pttSessionDirLocked( strGroupId, dir );
             if ( m_mapPttSessionDesc.find( strGroupId ) == m_mapPttSessionDesc.end() ) {
-                std::string sessBody = body + ",\"sesid\":\"" + Esc( sessId ) + "\"" + ",\"initiator\":\"" +
-                                       Esc( strInitiator ) + "\"" + ",\"call_id\":\"" + Esc( strCallId ) + "\"" +
-                                       ",\"start_time\":\"" + std::string( ts ) + "\"";
+                std::string sessBody = body + ",\"type\":\"" + Esc( type ) + "\"" + ",\"sesid\":\"" + Esc( sessId ) +
+                                       "\"" + ",\"initiator\":\"" + Esc( strInitiator ) + "\"" + ",\"call_id\":\"" +
+                                       Esc( strCallId ) + "\"" + ",\"start_time\":\"" + std::string( ts ) + "\"";
                 std::string sessPath = sesDir + "/session.json";
                 std::string sessContent = desc + sessBody + "}\n";
                 m_worker.Enqueue( [sessPath, sessContent]() { return _writeFileS( sessPath, sessContent ); },
@@ -513,8 +530,9 @@ public:
                 m_mapPttSessionDesc[strGroupId] = sessPath;
             }
 
-            // 초기 가입자(발신자) 상태 파일 기록 (<state>/ptt/{sub}.json — 버킷과 독립)
-            if ( !strInitiator.empty() && strInitiator != "autojoin" ) {
+            // 초기 가입자(발신자) 상태 파일 기록 (<state>/ptt/{sub}.json — 버킷과 독립). MCPTT 참여 상태라
+            //   MCPTT 세션만 — 가입자 키라 같은 사람의 MCVideo 참여가 쓰면 MCPTT 상태를 덮는다.
+            if ( type == "ptt" && !strInitiator.empty() && strInitiator != "autojoin" ) {
                 _writePttState( strInitiator, strGroupId, sessId, strCallId, "initiator", ts, sesDir );
             }
         }
@@ -657,6 +675,8 @@ public:
         auto it = m_mapPttSession.find( strGroupId );
         if ( it == m_mapPttSession.end() ) return;
         std::string dir = it->second;
+        if ( _pttSessionTypeLocked( strGroupId ) != "ptt" )
+            return;  // 가입자 상태 파일은 MCPTT 참여만(PttSessionStart 주석)
         std::string sessId = m_mapPttSessionId[strGroupId];
         char ts[32];
         IsoNow( ts, sizeof( ts ) );
@@ -669,6 +689,7 @@ public:
         PttLogEvent( strGroupId, "member_leave", "{\"member\":\"" + Esc( strMemberId ) + "\"}" );
 
         std::lock_guard<std::mutex> lock( m_mtx );
+        if ( _pttSessionTypeLocked( strGroupId ) != "ptt" ) return;
         _removePttState( strMemberId );
     }
 
@@ -814,6 +835,8 @@ private:
     std::map<std::string, std::string> m_mapPttSessionId;    // groupId → 현재 세션 sesid
     std::map<std::string, std::string> m_mapPttSesName;      // groupId → 세션 디렉터리 이름 S{ts}_{n}
     std::map<std::string, std::string> m_mapPttSessionDesc;  // groupId → 세션 시작 버킷 session.json 경로
+    std::map<std::string, std::string>
+        m_mapPttSessionType;  // 세션 키 → 서비스 축 "ptt" | "mcvideo" (session.json type)
     std::set<std::string> m_setCallJson;                     // call.json 기록 완료 dir (멱등 가드)
 
     std::string _dir( const std::string &key ) {
@@ -871,6 +894,12 @@ private:
      *  events.jsonl 을 누적할 수 있게 한다. 새 세션 시작 시에는
      *  PttSessionStart 가 두 파일을 재작성하므로 잔존값 걱정이 없다.
      */
+    /** 세션 키의 서비스 축 — 기록이 없으면 MCPTT(기존 키). m_mtx 획득 상태에서. */
+    std::string _pttSessionTypeLocked( const std::string &strGroupId ) const {
+        auto it = m_mapPttSessionType.find( strGroupId );
+        return it == m_mapPttSessionType.end() || it->second.empty() ? std::string( "ptt" ) : it->second;
+    }
+
     void _endSessionLocked( const std::string &strGroupId, const std::string &strReason = "normal" ) {
         auto it = m_mapPttSession.find( strGroupId );
         if ( it == m_mapPttSession.end() ) return;
@@ -878,8 +907,10 @@ private:
         IsoNow( ts, sizeof( ts ) );
         std::string tsStr = ts;
         std::string rsn = strReason.empty() ? std::string( "normal" ) : strReason;
-        std::string groupPath = it->second + "/group.json";
-        m_worker.Enqueue( [groupPath, tsStr, rsn]() { return _finalizeDescriptorS( groupPath, tsStr, rsn ); } );
+        if ( _pttSessionTypeLocked( strGroupId ) == "ptt" ) {  // group.json = MCPTT 세션 상태(PttSessionStart 주석)
+            std::string groupPath = it->second + "/group.json";
+            m_worker.Enqueue( [groupPath, tsStr, rsn]() { return _finalizeDescriptorS( groupPath, tsStr, rsn ); } );
+        }
         auto itDesc = m_mapPttSessionDesc.find( strGroupId );
         if ( itDesc != m_mapPttSessionDesc.end() ) {
             std::string sessPath = itDesc->second;

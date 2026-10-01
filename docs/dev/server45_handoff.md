@@ -790,7 +790,7 @@ D8·D10~D12: 영상 칸은 고른 영상이 있을 때만 · «영상 n» 목록
 
 | # | 할 일 | 몫 | 상태·전제 |
 |---|---|---|---|
-| R3 | 녹취 CSP 몫 — MCVideo `PTT_GROUP_ADD` 에 `record_dir`·`session_dir`·디스크립터(D4 같은 폴더 `recordings/ptt/{id}`, 메타 `type: mcvideo`) · OAM 이력 서비스 축 · 콘솔 재생 | .45 | 미착수 — CMP 기록기·`CmpClientMcvideo` 필드는 준비, `McVideoCallService` 가 싣지 않는다 |
+| R3 | 녹취 CSP 몫 — MCVideo `PTT_GROUP_ADD` 에 `record_dir`·`session_dir`·디스크립터(D4 같은 폴더 `recordings/ptt/{id}`, 메타 `type: mcvideo`) · OAM 이력 서비스 축 · 콘솔 재생 | .45 | **구현**(미배포) — CSP `CCallDir` 세션 키 `mcvideo:<그룹>`·session.json `type`·group.json 은 MCPTT 만 · OAM 인덱스·`/ptt/sessions?service=`·녹취 API `service`·재생 변환(영상만 구간 포함)·MCPTT 통계에서 제외 · 콘솔 «영상» 배지. 남은 것 = 송출 제어 이벤트 기록(`floor.jsonl` 짝)·.48/.45 실측 |
 | R4 | A12 통계 — 서비스 값 `mcvideo`(ICSI 판정) → CSP 시도 장부·세션 색인 → oam-svc 롤업 `by_service`(D5) | .45 | 미착수 |
 | R5 | 콘솔 — 그룹 편집 «서비스» 절 · PTT 회선 «MCVideo 이용 자격»(D3 도안 artifact 9mVfQxdqp39GovpmtjsHoJ) | .45 | 도안 확인 대기 → 구현 |
 | R6 | CMS 문서 변경 xcap-diff 에 MCVideo user profile·service config | .45 | 미착수(RFC 5875 먼저) |

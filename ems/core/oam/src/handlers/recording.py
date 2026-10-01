@@ -477,6 +477,8 @@ def _scan_ptt_sessions(base: str, group_id: str = '', caller: str = '',
         results.append({
             'dir': os.path.relpath(d, base),
             'call_type': 'ptt',
+            # 세션 서비스 — 같은 폴더의 MCPTT(ptt)·MCVideo(mcvideo) 세션을 session.json type(없으면 세그먼트 type)으로 가른다
+            'service': _session_service(d, segs),
             'caller': segs[0].get('speaker_id', '') if segs else '',
             'callee': None,
             'group_id': gid,
@@ -570,7 +572,7 @@ def _seg_tracks(s: dict) -> list:
     def _spans(sid):
         return [{'id': sid, 'offset_ms': 0, 'dur_ms': dur}] if sid else []
 
-    if seg_type == 'ptt':
+    if seg_type in SESSION_SEG_TYPES:
         rep = s.get('speaker_id', '')
         for key, val in s.items():
             if not key.endswith('_file') or not val or not isinstance(val, str):
@@ -676,6 +678,20 @@ def _read_failed_reason(rec_dir: str, seq: int, slot=None) -> str:
         return '변환 실패'
 
 
+# 세션 레이아웃(recordings/ptt/{id}/…/S{ts}_{n}) 세그먼트의 서비스 — MCPTT 그룹 호(`ptt`)와 MCVideo 그룹 호(`mcvideo`, 세그먼트 =
+#   송출 구간·슬롯 = 동시 송출자)는 같은 슬롯 트랙 모델이라 같은 변환 경로를 탄다(recording.md §3.3.1).
+SESSION_SEG_TYPES = ('ptt', 'mcvideo')
+
+
+def _session_service(sess_dir: str, segs: list) -> str:
+    """세션 디렉터리의 서비스(ptt | mcvideo) — session.json type, 없으면(구 녹취·시간 경계 뒤 버킷) 세그먼트 type, 그래도 없으면 ptt."""
+    meta = _read_json(os.path.join(sess_dir, 'session.json')) or {}
+    t = meta.get('type') if isinstance(meta, dict) else None
+    if t in SESSION_SEG_TYPES:
+        return t
+    return next((s.get('type') for s in segs if s.get('type') in SESSION_SEG_TYPES), 'ptt')
+
+
 def _segment_status(rec_dir: str, seg: dict, slot=None) -> str:
     """개별 세그먼트(또는 슬롯 단독본) 상태: recording / raw / transcoding / ready / failed"""
     seq = seg.get('seq', 0)
@@ -701,7 +717,14 @@ def _segment_status(rec_dir: str, seg: dict, slot=None) -> str:
         if os.path.exists(mp4 + '.failed'):
             return 'failed'
 
-    # 오디오 파일 참조 자체가 없음(무데이터 세그먼트) — 변환 대상이 없어 영구 재생불가
+    # 오디오가 없는 송출 구간(MCVideo — 송출 중 무전으로 마이크를 넘긴 동안 등, mcvideo.md D12)은 영상 트랙이 대표 원본이다
+    if not audio_file:
+        for t in seg.get('_tracks', []) or []:
+            if t['kind'] == 'video' and (slot is None or t['slot'] == slot):
+                audio_file = t['file']
+                break
+
+    # 원본 참조 자체가 없음(무데이터 세그먼트) — 변환 대상이 없어 영구 재생불가
     if not audio_file:
         return 'failed'
 
@@ -792,6 +815,34 @@ def _video_grid_filter(n: int, audio_dur: str):
     return ';'.join(parts), w, h
 
 
+def _transcode_video_only(rec_dir: str, seg: dict, slot, h264s: list, out_path: str, tmp_out: str) -> bool:
+    """오디오 트랙이 없는 세션 세그먼트 → 영상만 MP4. 길이 = 세그먼트 duration_ms(H.264 raw 에 타임스탬프가 없다)."""
+    seq = seg.get('seq', 0)
+    dur = f"{max(0.04, (seg.get('duration_ms', 0) or 0) / 1000.0):.3f}"
+    cmd = [_FFMPEG, '-y', '-hide_banner', '-loglevel', 'error']
+    for h in h264s:
+        cmd += ['-f', 'h264', '-r', '15', '-i', h]
+    if len(h264s) == 1:
+        cmd += ['-map', '0:v', '-t', dur, '-c:v', 'copy']
+    else:
+        vf, _w, _h = _video_grid_filter(len(h264s), dur)
+        relabel = ''.join(f'[{i}:v]null[v{i}];' for i in range(len(h264s)))
+        cmd += ['-filter_complex', f'{relabel}{vf}', '-map', '[vout]', '-t', dur,
+                '-c:v', 'libx264', '-preset', 'fast', '-crf', '23']
+    cmd += ['-an', '-movflags', '+faststart', tmp_out]
+    ret = subprocess.run(cmd, capture_output=True, timeout=300)
+    if ret.returncode != 0:
+        logger.warning("ffmpeg video-only seg=%d slot=%s failed: %s", seq, slot,
+                       ret.stderr.decode(errors='replace')[:500])
+    if os.path.exists(tmp_out) and os.path.getsize(tmp_out) > 256:
+        os.replace(tmp_out, out_path)
+        try: os.remove(_failed_marker_path(rec_dir, seq, slot))
+        except OSError: pass
+        return True
+    _write_failed_marker(rec_dir, seq, '변환 실패(ffmpeg 출력 없음)', slot)
+    return False
+
+
 def _transcode_ptt_multi(rec_dir: str, seg: dict, slot, out_path: str, tmp_out: str) -> bool:
     """PTT 세그먼트 변환 — 슬롯 트랙 N개를 다룬다.
 
@@ -830,11 +881,6 @@ def _transcode_ptt_multi(rec_dir: str, seg: dict, slot, out_path: str, tmp_out: 
                 logger.warning("transcode seg %d slot %s: unsupported codec meta '%s' — AMR-WB 로 시도",
                                seq, t['slot'], codec)
 
-        if not amrs:
-            _write_failed_marker(rec_dir, seq, '녹취 음성 데이터 없음(프레임 0)', slot)
-            logger.warning("transcode seg %d slot=%s: no audio frames — failed 확정", seq, slot)
-            return False
-
         # 2) 슬롯별 H.264 추출 (keepalive-only 는 시도 생략)
         h264s = []
         for t in vtracks:
@@ -847,6 +893,14 @@ def _transcode_ptt_multi(rec_dir: str, seg: dict, slot, out_path: str, tmp_out: 
                 tmp_files.append(h)
             if ok:
                 h264s.append(h)
+
+        if not amrs and not h264s:
+            _write_failed_marker(rec_dir, seq, '녹취 음성·영상 데이터 없음(프레임 0)', slot)
+            logger.warning("transcode seg %d slot=%s: no audio/video frames — failed 확정", seq, slot)
+            return False
+        if not amrs:
+            # 영상만 있는 송출 구간(MCVideo — mcvideo.md D12) — 소리 없이 영상만 담는다. 파형 피크는 없다.
+            return _transcode_video_only(rec_dir, seg, slot, h264s, out_path, tmp_out)
 
         audio_dur = _audio_duration(amrs[0])
         pcm_out = tmp_out + '.pcm'
@@ -924,9 +978,9 @@ def _transcode_segment_file(rec_dir: str, seg: dict, slot=None):
     # → 임시 파일(.partial.mp4)에 쓰고 완료 시에만 원자적 rename 하여 "mp4 존재 ⟺ 완성" 을 보장.
     tmp_out = (out_path[:-4] if out_path.endswith('.mp4') else out_path) + '.partial.mp4'
 
-    # ── PTT: 슬롯 트랙 기반 변환 (믹스/단독) ──
+    # ── PTT·MCVideo: 슬롯 트랙 기반 변환 (믹스/단독) ──
     # 슬롯 1개짜리 단일 화자 세그먼트도 같은 경로를 지나며 결과는 종전과 같다.
-    if seg_type == 'ptt':
+    if seg_type in SESSION_SEG_TYPES:
         try:
             _transcode_ptt_multi(rec_dir, seg, slot, out_path, tmp_out)
         except Exception as e:
@@ -1506,6 +1560,7 @@ async def _get_recording(base: str, rel_dir: str) -> HandlerResult:
         rec = {
             'id': rel_dir,
             'call_type': 'ptt',
+            'service': meta.get('type') or '',
             'caller': meta.get('initiator', ''),
             'callee': None,
             'group_id': gid,
@@ -1516,6 +1571,8 @@ async def _get_recording(base: str, rel_dir: str) -> HandlerResult:
         }
 
     segs = _session_segments(d)
+    if rec.get('call_type') == 'ptt' and not rec.get('service'):
+        rec['service'] = next((s.get('type') for s in segs if s.get('type') in SESSION_SEG_TYPES), 'ptt')
     rec['segments'] = [_public_seg(s) for s in segs]
     rec['segment_count'] = len(segs)
     rec['total_speech_ms'] = sum(s['duration_ms'] for s in segs)
@@ -1743,6 +1800,8 @@ CIMS_RECORDING_API_DOCS = [
          {'name': 'recordings[].id', 'type': 'string',
           'desc': '세션 식별자 = 세션 디렉터리 상대경로. **`/` 가 포함되므로 다른 API 의 path 에 넣을 때 URL-encode 필요**'},
          {'name': 'recordings[].call_type', 'type': 'string', 'enum': ['volte', 'ptt'], 'desc': '통화 종류'},
+         {'name': 'recordings[].service', 'type': 'string', 'enum': ['ptt', 'mcvideo'],
+          'desc': 'PTT 세션의 서비스 — MCPTT 그룹 호(ptt) · MCVideo 그룹 호(mcvideo). 같은 폴더, session.json type 으로 가른다'},
          {'name': 'recordings[].caller', 'type': 'string', 'desc': '발신자(PTT 는 세션 개시자)'},
          {'name': 'recordings[].callee', 'type': 'string', 'desc': '착신자 (PTT 는 null)'},
          {'name': 'recordings[].group_id', 'type': 'string', 'desc': 'MCPTT 그룹 ID (VoLTE 는 null)'},
@@ -1773,6 +1832,7 @@ CIMS_RECORDING_API_DOCS = [
      'response_fields': [
          {'name': 'id', 'type': 'string', 'desc': '세션 식별자'},
          {'name': 'call_type', 'type': 'string', 'enum': ['volte', 'ptt'], 'desc': '통화 종류'},
+         {'name': 'service', 'type': 'string', 'enum': ['ptt', 'mcvideo'], 'desc': 'PTT 세션의 서비스(call_type ptt 일 때)'},
          {'name': 'end_reason', 'type': 'string', 'desc': '종료 사유 (VoLTE 만)'},
          {'name': 'segment_count', 'type': 'integer', 'unit': '개', 'desc': '세그먼트(발언 구간) 수'},
          {'name': 'total_speech_ms', 'type': 'integer', 'unit': 'ms', 'desc': '총 발언 길이 합'},

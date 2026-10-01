@@ -1803,6 +1803,8 @@ def _calc_ptt_stats(config, from_dt, to_dt, gran):
 
     rows = ptt_index.range_days(from_dt[:10].replace('-', ''), to_dt[:10].replace('-', ''))
     for r in rows:
+        if (r.get('service') or 'ptt') != 'ptt':
+            continue  # MCPTT 세션만 — MCVideo 그룹 호는 같은 녹취 폴더라 인덱스에 함께 있다(services/stats_rollup 과 같은 규칙)
         ts = (r.get('start') or '').replace('T', ' ', 1)
         if not ts or ts < from_dt or ts > to_dt:
             continue

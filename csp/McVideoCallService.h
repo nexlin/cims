@@ -86,8 +86,19 @@ private:
         time_t tInitiatorDeadline = 0;
         CSipCallRtp *pclsInitiatorOffer = nullptr;  // 소유 — 대기 중 개시자 offer 사본
         bool bInitiatorImplicit = false;            // 개시자 offer 의 mc_implicit_request (TS 24.581 §14.2.5)
+        // 녹취(recording.md §3.3 — 같은 폴더 recordings/ptt/{id}, session.json type mcvideo). 비면 녹취 없음
+        std::string strRecKey;      // CallDir 세션 키 (PttSessionKey("mcvideo", 그룹))
+        std::string strRecordDir;   // 그룹 base — PTT_GROUP_ADD record_dir
+        std::string strSessionDir;  // 세션 디렉터리 이름 S{ts}_{n} — PTT_GROUP_ADD session_dir
     };
 
+    /** 녹취 세션 시작 — CallDir 세션 디렉터리·session.json(그룹 디스크립터 + MCVideo 속성, type mcvideo)을
+     * 세우고 record_dir·session_dir 를 세션에 둔다(CMP 는 PTT_GROUP_ADD 로 받는다). CallDir 가 꺼져 있으면
+     * 아무것도 하지 않는다. */
+    void _RecordSessionStart( Session &clsSes, const CspPttGroup &clsGroup, const std::string &strCallId );
+    /** session.json 의 디스크립터 — PTT 그룹 디스크립터와 같은 편성·멤버 필드 + MCVideo 몫(호 방식·동시 송출
+     * 상한·수신 모드). MCPTT floor 축은 싣지 않는다 */
+    static std::string _RecordDescriptor( const CspPttGroup &clsGroup, bool bPrearranged );
     /** 검사 실패 응답 (Warning 은 비면 싣지 않는다) */
     void _Reject( const char *pszCallId, int iStatus, int iWarnCode, const char *pszWarnText );
     /** 개시자·합류자 수락 — 로스터 등록 → JOIN ①·② → 200 OK(answer). 성공이면 true. 호출자가 m_mutex 보유. */

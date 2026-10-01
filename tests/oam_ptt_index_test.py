@@ -195,6 +195,39 @@ def main():
         check("range_days(단일 일자) == day()", rng == scanned)
         check("빈 날짜는 빈 목록", ptt_index.day("19990101") == [])
 
+        print("\n[6] 서비스 축 — 같은 폴더의 MCVideo 세션(recording.md §3.3, session.json type)")
+        y, m, d = day[0:4], day[4:6], day[6:8]
+        kv = f"S{day}132000000000_2"
+        vseg = {"seq": 1, "type": "mcvideo", "speaker_id": "+82500000002",
+                "start_time": f"{y}-{m}-{d}T13:20:00", "end_time": f"{y}-{m}-{d}T13:20:08", "duration_ms": 8000,
+                "tracks": [{"prefix": "audio", "kind": "audio", "slot": 0, "file": "seg/000/seg_0001_audio.rtp",
+                            "pt": 96, "codec": "AMR-WB/16000",
+                            "speakers": [{"id": "+82500000002", "offset_ms": 0, "dur_ms": 8000}]},
+                           {"prefix": "video", "kind": "video", "slot": 0, "file": "seg/000/seg_0001_video.rtp",
+                            "speakers": [{"id": "+82500000002", "offset_ms": 0, "dur_ms": 8000}]}],
+                "has_video": True}
+        write_session(root, "1", day + "13", kv, [vseg], {
+            "id": 1, "mcptt_group_id": "g001", "name": "음성그룹1", "group_type": "prearranged",
+            "mcvideo": {"session_type": "chat", "max_transmitters": 2, "reception_mode": "manual"},
+            "state": "ended", "type": "mcvideo", "sesid": f"+82500000002::csp::{day}132000000000::2",
+            "initiator": "+82500000002", "call_id": "call-v", "start_time": f"{y}-{m}-{d}T13:20:00",
+            "end_time": f"{y}-{m}-{d}T13:20:30"})
+        rv = ptt_index.summarize("1", kv)
+        check("MCVideo 세션 행 — service mcvideo · 세션 속성", rv.get("service") == "mcvideo" and
+              (rv.get("mcvideo") or {}).get("max_transmitters") == 2, str((rv.get("service"), rv.get("mcvideo"))))
+        check("MCVideo 행은 floor 축을 비운다(그룹 group.json 의 floor_control 이 섞이지 않는다)",
+              rv.get("floor_control") == "" and rv.get("floor_policy") == "" and rv.get("max_talkers") == 0)
+        check("MCVideo 영상 트랙 → video_sent", rv.get("video_sent") is True)
+        check("MCPTT 행 — service ptt (session.json type 이 없는 옛 녹취도 ptt)",
+              ptt_index.summarize("1", k1).get("service") == "ptt")
+        # MCVideo 만 쓴 그룹 — group.json 이 없어도 세션 디스크립터에서 분류·이름
+        write_session(root, "5", day + "13", kv, [dict(vseg)], {
+            "id": 5, "mcptt_group_id": "gmv1", "name": "영상그룹", "group_type": "chat", "member_count": 3,
+            "state": "ended", "type": "mcvideo", "initiator": "+82500000002", "start_time": f"{y}-{m}-{d}T13:20:00"})
+        rg = ptt_index.summarize("5", kv)
+        check("group.json 없는 MCVideo 그룹 — 세션 디스크립터에서 kind·이름", rg.get("kind") == "group" and
+              rg.get("name") == "영상그룹" and rg.get("mcptt_group_id") == "gmv1", str((rg.get("kind"), rg.get("name"))))
+
     finally:
         shutil.rmtree(site, ignore_errors=True)
 

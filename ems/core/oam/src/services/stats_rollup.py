@@ -374,6 +374,10 @@ def _scan_ptt_day(day: str, force_index: bool = False) -> list:
     rows = ptt_index.day(day[0:4] + day[5:7] + day[8:10], force=force_index) or []
     out = []
     for r in rows:
+        # MCPTT 세션만 — 같은 녹취 폴더의 MCVideo 그룹 호(service mcvideo)는 floor 가 아니라 송출 제어라 MCPTT 지표(발언·완료율)에
+        #   섞이지 않는다. MCVideo 축은 따로 센다(sip_statistics.md 서비스 축 — A12).
+        if (r.get('service') or 'ptt') != 'ptt':
+            continue
         mi = _minute(r.get('start', '') or r.get('start_time', ''))
         # 시작일이 이 날짜인 세션만 — 자정을 넘긴 세션은 두 날의 목록에 모두 나타날 수
         # 있고, 그대로 접으면 같은 세션을 두 번 센다.

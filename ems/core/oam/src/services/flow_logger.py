@@ -1698,6 +1698,9 @@ def _index_row_to_session(r: dict) -> dict:
         "sesid": r.get("sesid", ""),
         "initiator": r.get("initiator", ""),
         "call_id": r.get("call_id", ""),
+        # 서비스 — MCPTT 그룹 호(ptt) · MCVideo 그룹 호(mcvideo). 같은 폴더(recording.md §3.3), 옛 인덱스 행은 ptt.
+        "service": r.get("service") or "ptt",
+        "mcvideo": r.get("mcvideo"),
         "floor_control": r.get("floor_control", ""),
         "floor_policy": r.get("floor_policy", ""),
         "max_talkers": r.get("max_talkers", 0),
@@ -1963,7 +1966,7 @@ async def _handle_ptt_history(handler_args: HandlerArgs, kwargs: dict) -> Handle
                 ses_t_end = ":".join(parts_e)
             except: pass
 
-        # 1) flow.jsonl 전체를 1회 로드 (mcptt/ptt 서비스). 시간 필터·method
+        # 1) flow.jsonl 전체를 1회 로드 (mcptt/ptt/mcvideo 서비스). 시간 필터·method
         #    필터는 적용하지 않는다 — CSC 는 raw 데이터를 반환하고 필터링은
         #    호출자(console)가 결정.
         all_ptt_msgs = []
@@ -1977,7 +1980,8 @@ async def _handle_ptt_history(handler_args: HandlerArgs, kwargs: dict) -> Handle
                         try: obj = json.loads(line)
                         except: continue
                         svc = obj.get("service", "")
-                        if svc not in ("mcptt", "ptt", ""): continue
+                        # MCVideo 그룹 호도 같은 세션 이력에 있다 — 세션은 아래 sesid 로 가르므로 섞이지 않는다
+                        if svc not in ("mcptt", "ptt", "mcvideo", ""): continue
                         obj["_src"] = src_id
                         all_ptt_msgs.append(obj)
             except Exception as e:
@@ -2682,6 +2686,7 @@ async def _handle_ptt_sessions(handler_args: HandlerArgs, kwargs: dict) -> Handl
         &from=&to=                  기간 (지정 시 date 무시, 최대 90일)
         &days=N                     최근 N일 (from/to 없을 때)
         &kind=group,private,adhoc   종류 (콤마 다중, 미지정=전체)
+        &service=ptt,mcvideo        서비스 (콤마 다중, 미지정=전체) — MCPTT 그룹 호 · MCVideo 그룹 호
         &group_key=1,3              녹취 저장 키 (콤마 다중) — 그룹 세션만 좁힌다
         &person=+8250…              참여자 부분일치 (발언 안 한 참가자도 포함)
         &state=live|ended           진행중/종료
@@ -2720,6 +2725,7 @@ async def _handle_ptt_sessions(handler_args: HandlerArgs, kwargs: dict) -> Handl
         days = None
     hour = _q("hour")
     kinds = _csv("kind")
+    services = _csv("service")
     group_keys = _csv("group_key")
     person = (_q("person", "") or "").strip()
     state = (_q("state", "") or "").strip().lower()
@@ -2740,6 +2746,8 @@ async def _handle_ptt_sessions(handler_args: HandlerArgs, kwargs: dict) -> Handl
     for r in rows:
         kind = r.get("kind") or "unknown"
         if kinds and kind not in kinds:
+            continue
+        if services and (r.get("service") or "ptt") not in services:
             continue
         if group_keys and r.get("group_key") not in group_keys:
             continue
@@ -3133,6 +3141,8 @@ FLOW_API_DOCS = [
          {'name': 'state', 'in': 'query', 'type': 'string', 'required': False,
           'enum': ['live', 'ended'], 'desc': '진행 상태 (미지정 시 전체)'},
          {'name': 'person', 'in': 'query', 'type': 'string', 'required': False, 'desc': '참여자 번호 부분일치'},
+         {'name': 'service', 'in': 'query', 'type': 'string', 'required': False,
+          'desc': '서비스 (콤마 다중 ptt,mcvideo — 미지정 시 전체)'},
          {'name': 'q', 'in': 'query', 'type': 'string', 'required': False,
           'desc': '검색어 (개시자·그룹명·call_id·sesid 등)'},
          {'name': 'sort', 'in': 'query', 'type': 'string', 'required': False, 'desc': '정렬 키 (기본 start)'},
@@ -3149,6 +3159,10 @@ FLOW_API_DOCS = [
          {'name': 'items[].dir', 'type': 'string', 'desc': '세션 키'},
          {'name': 'items[].kind', 'type': 'string', 'enum': ['group', 'private', 'adhoc', 'unknown'],
           'desc': '세션 종류'},
+         {'name': 'items[].service', 'type': 'string', 'enum': ['ptt', 'mcvideo'],
+          'desc': '서비스 — MCPTT 그룹 호 · MCVideo 그룹 호(같은 녹취 폴더, session.json type)'},
+         {'name': 'items[].mcvideo', 'type': 'object',
+          'desc': 'MCVideo 세션 속성 {session_type, max_transmitters, reception_mode} — service mcvideo 일 때만'},
          {'name': 'items[].group_name', 'type': 'string', 'desc': '그룹명'},
          {'name': 'items[].mcptt_group_id', 'type': 'string', 'desc': 'MCPTT 그룹 ID'},
          {'name': 'items[].initiator', 'type': 'string', 'desc': '개시자'},

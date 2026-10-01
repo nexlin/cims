@@ -51,6 +51,10 @@ _lock = threading.Lock()
 _SES_RE = re.compile(r'^S(\d{14,20})_(\d+)$')
 
 
+
+# 세션 서비스 값 — session.json `type`·세그먼트 `type` (CSP CCallDir · CMP PSyncRtpRecorder). 같은 폴더 recordings/ptt/{id}.
+SERVICES = ("ptt", "mcvideo")
+
 def init(recordings_dir: str, stats_dir: str = "", state_dir: str = "", enabled: bool = True) -> None:
     """영역 경로 주입 — 녹취(정본)·통계(인덱스 `ptt_index/`)·상태(진행 중 `ptt/`)."""
     global _rec_dir, _index_dir, _state_dir, _enabled
@@ -325,12 +329,15 @@ def summarize(group_key: str, key: str, parts: list = None, gd: dict = None) -> 
     st_min = en_max = ""
     active = False
     sj = {}
+    seg_type = ""
     now_window = datetime.now().strftime("%Y%m%d%H")
 
     for d in parts:
         windows.append(window_of(d))
         for s in _read_jsonl(os.path.join(d, "segments.jsonl")):
             seg_count += 1
+            if not seg_type and s.get("type") in SERVICES:
+                seg_type = s["type"]
             total_ms += int(s.get("duration_ms", 0) or 0)
             # 동시 발언·전이중 private call 은 한 세그먼트에 슬롯 트랙이 여럿이다 —
             #   speaker_id(대표 화자)만 세면 화자·발언이 과소 집계된다.
@@ -377,6 +384,15 @@ def summarize(group_key: str, key: str, parts: list = None, gd: dict = None) -> 
             #   이것이 정본(그룹 루트 group.json 은 최신이라 과거 세션에 소급되면 왜곡).
             sj = _read_json(os.path.join(d, "session.json")) or {}
 
+    # 서비스 축 — 같은 폴더의 MCPTT(ptt)·MCVideo(mcvideo) 세션(recording.md §3.3). session.json type 이 정본, 없으면(구 녹취·
+    #   시간 경계 뒤 버킷) 세그먼트 type.
+    service = sj.get("type") if sj.get("type") in SERVICES else (seg_type or "ptt")
+    if service != "ptt" and gd.get("kind") == "unknown" and sj:
+        # MCVideo 만 쓴 그룹은 group.json(MCPTT 세션 상태)이 없다 — 세션 디스크립터에서 분류·이름을 읽는다
+        gd = dict(gd, kind="group" if sj.get("id") else "adhoc", name=sj.get("name", ""),
+                  mcptt_group_id=sj.get("mcptt_group_id", "") or gd.get("mcptt_group_id", ""),
+                  group_type=sj.get("group_type", ""), member_count=sj.get("member_count", 0))
+
     # 참여자: session.json 멤버 ∪ 실제 발언 화자 ∪ 개시자. 발언 없이 참여만 한 멤버도 잡는다.
     people = set(speakers)
     for m in (sj.get("members") or []):
@@ -395,6 +411,7 @@ def summarize(group_key: str, key: str, parts: list = None, gd: dict = None) -> 
     return {
         "key": key,
         "group_key": group_key,
+        "service": service,
         "kind": gd.get("kind", "unknown"),
         "mcptt_group_id": gd.get("mcptt_group_id", ""),
         "name": gd.get("name", ""),
@@ -425,10 +442,12 @@ def summarize(group_key: str, key: str, parts: list = None, gd: dict = None) -> 
         "by_speaker": by_speaker,
         "emergency": emergency,
         "video_sent": video_sent,
-        # floor 축은 세션 스냅샷이 정본, 없으면(구 녹취) 그룹 레벨 폴백
-        "floor_control": sj.get("floor_control", "") or gd.get("floor_control", ""),
-        "floor_policy": sj.get("floor_policy", "") or gd.get("floor_policy", ""),
-        "max_talkers": sj.get("max_talkers", 0) or gd.get("max_talkers", 0) or 0,
+        # floor 축은 세션 스냅샷이 정본, 없으면(구 녹취) 그룹 레벨 폴백. MCVideo 는 floor 가 아니라 송출 제어라 비운다.
+        "floor_control": "" if service != "ptt" else (sj.get("floor_control", "") or gd.get("floor_control", "")),
+        "floor_policy": "" if service != "ptt" else (sj.get("floor_policy", "") or gd.get("floor_policy", "")),
+        "max_talkers": 0 if service != "ptt" else (sj.get("max_talkers", 0) or gd.get("max_talkers", 0) or 0),
+        # MCVideo 세션 속성(호 방식·동시 송출 상한) — session.json mcvideo
+        "mcvideo": sj.get("mcvideo") if service == "mcvideo" and isinstance(sj.get("mcvideo"), dict) else None,
         "legacy": not bool(_SES_RE.match(key)),
     }
 

@@ -10,7 +10,7 @@
 > (SDK `mcvideo/tc_participant`), V0 전부, CSC 설정 평면·관리 API(§5.1 — 콘솔 제외)과 그 문서들의 SDK 해석(§5.4), CSP 호 제어 부품·모듈·서비스 판별·
 > 등록 능력·서비스별 affiliation(§5.2), CMP 그룹 종류·멤버 포트·제어 명령·송출·수신 제어 상태 머신·미디어 분배·보호(SRTP·전송 제어 SRTCP)·영상 RTCP 키프레임 요청(§5.3·§5.3.1),
 > 단말 SDK 등록 태그·affiliation·그룹 호(개시·재합류·멤버 초대 수락)·전송 제어 결선·송출 게이트(§5.4 — 루프백 시험, 실서버 미연동), CSP 그룹 호
-> (§5.2.1 — chat·prearranged 개시·합류·재합류·해제, 실측 전). 녹취, 단말 영상 송출·송출별 렌더(C6)는 미구현(바인딩 C7 은 구현 —
+> (§5.2.1 — chat·prearranged 개시·합류·재합류·해제), 녹취(§5.3 — CSP·OAM·콘솔 몫 포함). 송출자별 렌더(다중 수신)는 V8(바인딩 C7 은 구현 —
 > .NET 빌드·시험은 Windows).
 >
 > 규격 판본: TS 24.281 V18.14.0 · TS 24.581 V18.8.0 · TS 23.281 V18.12.0 · TS 24.481 V19.3.0 · TS 24.484 V20.0.0 · TS 23.280 V20.4.0 ·
@@ -399,9 +399,14 @@ Indicator, automatic 수신; 1차 CSP 는 normal) · JOIN 응답 `audio_ssrc`·`
 - **녹취** (CMP 몫 구현 — B8) — ADD `record_dir`·`session_dir` 가 있으면 `PSyncRtpRecorder`(type `mcvideo` — PTT 와 같은 세션 레이아웃:
   시간버킷 › 세션 디렉터리 › shard, [recording.md](recording.md) §3.3)로 기록한다. 세그먼트 = 송출이 이어지는 구간(송출자 0 → 1 에서 열고 다시 0 이면
   닫는다), 송출자마다 슬롯 하나(`audio`/`video`, 동시 송출이면 `audioK`/`videoK` — 가장 낮은 빈 슬롯), 트랙 = 받은 그대로(평문, SSRC·PT 찍기 전),
-  화자 구간 = 송출자, 음성 PT/코덱 = 그 leg 의 ingress 값. 계기 = 송출자 집합 변경(`transmittersChanged`). **남은 것** = CSP 가 `record_dir`·
-  `session_dir` 를 싣는 경로(그룹 녹취 디렉터리·세션 디스크립터)·OAM 이력의 서비스 축 `mcvideo` — 녹취 레이아웃(`recordings/ptt/{id}` 공용 대 서비스
-  영역 분리)을 정한 뒤. 그때까지 CSP 는 싣지 않으므로 MCVideo 는 녹취되지 않는다.
+  화자 구간 = 송출자, 음성 PT/코덱 = 그 leg 의 ingress 값. 계기 = 송출자 집합 변경(`transmittersChanged`).
+  **CSP 몫**(구현 — §7 D4 같은 폴더) — 세션을 세울 때 `CCallDir` 세션 키 `mcvideo:<그룹>`(`PttSessionKey` — 같은 그룹의 MCPTT 세션과 따로)으로
+  `recordings/ptt/{id}` 아래 세션 디렉터리를 잡고 `session.json`(그룹 편성·멤버 + `mcvideo{session_type,max_transmitters,reception_mode}`, **`type:
+  "mcvideo"`**, MCPTT floor 축 없음)을 쓴 뒤 매 `PTT_GROUP_ADD` 에 `record_dir`·`session_dir` 를 싣는다. 참가·이탈 = 세션 `events.jsonl`
+  `member_join`/`member_leave`, 끝 = 종료 마킹(`end_reason` normal/error). 그룹 루트 `group.json`·가입자 상태 파일(`<state>/ptt/`)은 MCPTT 세션 것이라
+  쓰지 않는다. **OAM·콘솔 몫**(구현) — 세션 이력 인덱스·`/api/v1/ptt/sessions`(`?service=`)·녹취 API 에 서비스 값 `service`(`ptt`|`mcvideo`), 재생
+  변환은 PTT 세션 경로 그대로(오디오 없는 송출 구간 = 영상만 MP4), 콘솔 PTT 세션 이력에 «영상» 배지·호 방식·동시 송출 상한. MCPTT 통계·이용 정보는
+  MCVideo 세션을 세지 않는다(MCVideo 통계 축은 A12). 남은 것 = 송출 제어 이벤트 기록(MCPTT `floor.jsonl` 짝 — 허가·거절·회수·수신 허가).
 
 ### 5.4 단말 SDK (`libcimsue`)
 
@@ -466,7 +471,7 @@ Indicator, automatic 수신; 1차 CSP 는 normal) · JOIN 응답 `audio_ssrc`·`
 
 ### 5.6 콘솔 · OAM · 계측기
 
-- 콘솔 그룹 편집 서비스 절·가입자 MCVideo 자격, 녹취·세션 이력 서비스 축 `mcvideo`, 통계(sip_statistics 의 서비스 축에 `mcvideo`).
+- 콘솔 그룹 편집 서비스 절·가입자 MCVideo 자격, 통계(sip_statistics 의 서비스 축에 `mcvideo`). 녹취·세션 이력 서비스 축 `mcvideo` 는 구현(§5.3 녹취).
 - 계측기 — libcsim MCVideo 단말(REGISTER 태그·affiliation·chat 합류·MCV0/1/2), 시나리오 `MCVIDEO-GROUP-CHAT`·`MCVIDEO-TRANSMIT-RECEIVE`·
   `MCVIDEO-MAX-TRANSMITTERS`, 지표(송출 허가 시간·수신 허가 시간·영상 RTP 도달율). 계측기 코드는 팀원 트랙이라 요구만 넘긴다.
 

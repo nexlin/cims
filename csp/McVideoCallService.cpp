@@ -16,8 +16,10 @@
 #include <strings.h>
 
 #include <algorithm>
+#include <cstring>
 #include <sstream>
 
+#include "CallDir.h"
 #include "CspAddressing.h"
 #include "CspPttGroup.h"
 #include "CspServiceMap.h"
@@ -186,11 +188,64 @@ bool CMcVideoCallService::_CmpAddMember( Session &clsSes, const CspPttGroup &cls
     std::string strRole;
     IsMember( clsGroup, strMember, &iPrio, &strRole );
     spec.strMembers = strMember + ":" + std::to_string( iPrio ) + ":" + ( strRole.empty() ? "participant" : strRole );
+    // 녹취 자리 — 같은 값을 매 ADD 에 싣는다(CMP setRecording 은 멱등). 세그먼트 = 송출 구간,
+    //   type mcvideo(recording.md §3.3.1)
+    spec.strRecordDir = clsSes.strRecordDir;
+    spec.strSessionDir = clsSes.strSessionDir;
     std::map<std::string, CmpMcvPorts> mapPorts;
     std::string strIp;
     if ( !gclsCmpClient.McvAddGroup( clsSes.strGroupId, spec, clsSes.strSesId, strIp, mapPorts ) ) return false;
     if ( !strIp.empty() ) clsSes.strCmpIp = strIp;
     return true;
+}
+
+std::string CMcVideoCallService::_RecordDescriptor( const CspPttGroup &clsGroup, bool bPrearranged ) {
+    // PTT 그룹 디스크립터(CGroupCallService::BuildGroupDescriptor)와 같은 편성·멤버 필드 + MCVideo 몫. MCPTT floor 축
+    //   (floor_control·floor_policy·max_talkers)은 싣지 않는다 — MCVideo 는 송출 제어(TS 24.581)라 이력이
+    //   반이중·무전으로 읽으면 안 된다. 서비스 축은 session.json type(CallDir)이 가른다.
+    std::ostringstream oss;
+    oss << "{\"id\":" << clsGroup._dbId << ",\"mcptt_group_id\":\"" << CCallDir::JsonEsc( clsGroup._id ) << "\""
+        << ",\"name\":\"" << CCallDir::JsonEsc( clsGroup._name ) << "\"";
+    if ( clsGroup._alias.empty() )
+        oss << ",\"alias\":null";
+    else
+        oss << ",\"alias\":\"" << CCallDir::JsonEsc( clsGroup._alias ) << "\"";
+    oss << ",\"group_type\":\"" << CCallDir::JsonEsc( clsGroup._groupType ) << "\""
+        << ",\"priority\":" << clsGroup._priority << ",\"org_code\":\"" << CCallDir::JsonEsc( clsGroup._orgCode )
+        << "\"";
+    oss << ",\"mcvideo\":{\"session_type\":\"" << ( bPrearranged ? "prearranged" : "chat" )
+        << "\",\"max_transmitters\":"
+        << std::max( 1, std::min( kMcvStreamCap, clsGroup._mcvideoAttrs.iMaxTransmitters ) )
+        << ",\"reception_mode\":\"manual\"";
+    if ( clsGroup._mcvideoAttrs.iMaxDurationSec > 0 )
+        oss << ",\"max_duration_sec\":" << clsGroup._mcvideoAttrs.iMaxDurationSec;
+    oss << "}";
+    int iCount = 0;
+    std::ostringstream members;
+    for ( const auto &pUser : clsGroup._pusers ) {
+        if ( !pUser ) continue;
+        members << ( iCount++ ? "," : "" ) << "{\"user_id\":\"" << CCallDir::JsonEsc( pUser->_id ) << "\""
+                << ",\"priority\":" << pUser->_priority << ",\"role\":\"" << CCallDir::JsonEsc( pUser->_role ) << "\"";
+        if ( pUser->_mcpttId.empty() )
+            members << ",\"mcptt_id\":null}";
+        else
+            members << ",\"mcptt_id\":\"" << CCallDir::JsonEsc( pUser->_mcpttId ) << "\"}";
+    }
+    oss << ",\"member_count\":" << iCount << ",\"members\":[" << members.str() << "]}";
+    return oss.str();
+}
+
+void CMcVideoCallService::_RecordSessionStart( Session &clsSes, const CspPttGroup &clsGroup,
+                                               const std::string &strCallId ) {
+    if ( !gclsCallDir.IsEnabled() ) return;
+    // 같은 폴더(D4) — 저장 키 = ptt_groups.id(surrogate). 같은 그룹의 MCPTT 세션과는 세션 디렉터리만
+    //   다르다(sesid 가 다르다)
+    clsSes.strRecKey = CCallDir::PttSessionKey( "mcvideo", clsSes.strGroupId );
+    const std::string strStorage = clsGroup._dbId > 0 ? std::to_string( clsGroup._dbId ) : clsSes.strGroupId;
+    clsSes.strRecordDir = gclsCallDir.GetPttSessionDir( clsSes.strRecKey, clsSes.strSesId, strStorage, "mcvideo" );
+    gclsCallDir.PttSessionStart( clsSes.strRecKey, strCallId, clsSes.strInitiator,
+                                 _RecordDescriptor( clsGroup, clsSes.bPrearranged ) );
+    clsSes.strSessionDir = gclsCallDir.GetPttSessionName( clsSes.strRecKey );
 }
 
 void CMcVideoCallService::_FillDecl( CmpMcvMemberDecl &d, const std::string &strMember, CSipCallRtp *pclsRtp,
@@ -306,6 +361,9 @@ bool CMcVideoCallService::_AcceptLeg( Session &clsSes, const std::string &strCal
     leg.bEstablished = true;
     leg.bJoined = true;
     leg.uTcSsrc = r1.uTcSsrc;
+    // 세션 이력의 참가자 — 개시자는 PttSessionStart 가 남겼다
+    if ( leg.eRole != E_LEG_INITIATOR && !clsSes.strRecKey.empty() )
+        gclsCallDir.PttMemberJoin( clsSes.strRecKey, strMember, strCallId );
     CLog::Print( LOG_INFO, "MCVIDEO: accept group(%s) member(%s) call(%s) audio=%d video=%d control=%d tc_ssrc=%u%s",
                  clsSes.strGroupId.c_str(), strMember.c_str(), strCallId.c_str(), r1.clsPorts.iPort,
                  clsAns.m_iVideoPort, r1.clsPorts.iControlPort, r1.uTcSsrc,
@@ -605,6 +663,7 @@ void CMcVideoCallService::OnIncomingInvite( const char *pszCallId, const char *p
         s.tStart = time( NULL );
         s.iMaxDurationSec = clsGroup._mcvideoAttrs.iMaxDurationSec;
         itSes = m_mapSession.emplace( strGroupId, s ).first;
+        _RecordSessionStart( itSes->second, clsGroup, strCallId );
         CLog::Print( LOG_INFO, "MCVIDEO: session start group(%s) type=%s initiator(%s) sesid=%s gr=%s",
                      strGroupId.c_str(), bPrearranged ? "prearranged" : "chat", strFrom.c_str(), s.strSesId.c_str(),
                      s.strGr.c_str() );
@@ -734,6 +793,7 @@ bool CMcVideoCallService::OnCallStarted( const std::string &strCallId, CSipCallR
     leg.bJoined = true;
     leg.bEstablished = true;
     leg.tDeadline = 0;
+    if ( !clsSes.strRecKey.empty() ) gclsCallDir.PttMemberJoin( clsSes.strRecKey, leg.strMember, strCallId );
     CLog::Print( LOG_INFO, "MCVIDEO: group(%s) member(%s) joined (invited leg %s)", strGroupId.c_str(),
                  leg.strMember.c_str(), strCallId.c_str() );
     // 개시자 대기 중이면 이제 답한다 — 첫 멤버가 붙었으므로 암묵 요청은 JOIN ② 에서 곧바로 허가된다
@@ -827,6 +887,8 @@ void CMcVideoCallService::_DropLeg( const std::string strGroupId, const std::str
     for ( const auto &kv : clsSes.mapLegs )
         if ( kv.second.strMember == leg.strMember ) bOther = true;
     if ( !bOther ) gclsCmpClient.McvLeave( strGroupId, leg.strMember, clsSes.strSesId );
+    if ( !bOther && leg.bJoined && !clsSes.strRecKey.empty() )
+        gclsCallDir.PttMemberLeave( clsSes.strRecKey, leg.strMember );
     CLog::Print( LOG_INFO, "MCVIDEO: group(%s) member(%s) left (%s) — remaining %d", strGroupId.c_str(),
                  leg.strMember.c_str(), pszWhy, _EstablishedCount( clsSes ) );
     // 해제 정책(§6.3.8.1 2)) — prearranged 는 참가자 1명 이하, chat 은 0 명(파일 머리말). 개시 대기 중은 개시 쪽 판정.
@@ -850,6 +912,10 @@ void CMcVideoCallService::_ReleaseSession( const std::string strGroupId, const c
     }
     delete clsSes.pclsInitiatorOffer;
     gclsCmpClient.McvRemove( strGroupId, clsSes.strSesId );
+    // 녹취 세션 끝 — 개시하지 못하고 끝난 세션(초대·수락 실패)은 error 로 남긴다(end_reason)
+    if ( !clsSes.strRecKey.empty() )
+        gclsCallDir.PttSessionEnd( clsSes.strRecKey,
+                                   strstr( pszWhy, "failed" ) || strstr( pszWhy, "no invite" ) ? "error" : "normal" );
     CLog::Print( LOG_INFO, "MCVIDEO: session end group(%s) (%s) legs=%d", strGroupId.c_str(), pszWhy,
                  (int)clsSes.mapLegs.size() );
 }
@@ -883,6 +949,7 @@ void CMcVideoCallService::OnCmpEvent( const std::string &strCmd, const std::stri
                                             : 0 );
             }
             delete clsSes.pclsInitiatorOffer;
+            if ( !clsSes.strRecKey.empty() ) gclsCallDir.PttSessionEnd( clsSes.strRecKey, "error" );
             CLog::Print( LOG_INFO, "MCVIDEO: group(%s) aborted by CMP — session cache cleared", strGroupId.c_str() );
         }
     }
