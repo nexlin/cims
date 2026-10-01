@@ -731,6 +731,10 @@ S1-UNIT-PSIP [M] 으로 확인했다. 알아 둘 것 하나 — 갱신 answer �
   `status` 가 `queued`·`dispatched_at` 없음 + 캐시 `seq` ≥ 그 id. 푸는 법 = 캐시의 `seq` 를 그 id − 1 로 되돌리면 다음 heartbeat 의 구간 흡수가 그
   job 을 다시 넣는다(캐시는 정본이 아니다 — 정본 = `control/jobs/*`). `oam-deploy.py upgrade` 는 정지 대기 시한 초과로 멈추므로 풀린 뒤 다시 돌린다.
   근본 수정(인덱스 갱신 직렬화)은 OAM 과제.
+- **배포 바이너리는 공유 `build/` 에서 만들지 않는다** — 여러 세션이 같은 트리·같은 `build/` 를 쓰므로 `build/bin/csp` 에 다른 세션의 미커밋
+  편집이 섞인다. 커밋 기준 worktree(`git worktree add --detach <경로> <커밋>`)에서 `cmake -DCMAKE_BUILD_TYPE=RelWithDebInfo ..`(비우면 최적화
+  없는 빌드 — 공유 `build/` 와 다르다) → `make csp` → 공유 `build/dist/csp` 를 worktree `build/dist/` 로 복사·바이너리 교체 → **worktree 에서**
+  `./cims.sh pkg csp -v <버전>`(meta `git_sha` 는 pkg 를 돌린 트리의 HEAD 다). 패키지 안 바이너리 md5 를 worktree `build/bin` 과 대조한다.
 
 ### 12.5 M2 결과 · 사용자 결정 반영 (.45)
 
@@ -784,19 +788,21 @@ xcap-diff ⑤ R5 콘솔(구현) ⑥ cli PTT REGISTER MCPTT 태그. 남은 사용
 D8·D10~D12: 영상 칸은 고른 영상이 있을 때만 · «영상 n» 목록 [보기] · «영상 참여» 없음(채널 = 사용자가 고른 주채널, 무전 T4 해제와 무관) · PTT = 음성, [영상 보내기]
 토글 · 송출 중 PTT = 마이크 음성 우선 · 하단 탭 유지, 전체화면 대신 주채널 안 [크게]) · C9·C11 앱 6e9edd3a(cims-7c, 실기 .45 W999·MF52 g002 통과) · 화면 테마·D12
 설정 줄 edca5fce · **.45 MCVideo 서버 ON** 41100484(csp 0.2.183·cmp 0.2.107·csc 0.2.140 — D6 포함, 사용자 지시) · 관제 앱 착수 문서 3c754553·2144b98b·b73cc2a0
-([dispatch_windows_next.md](dispatch_windows_next.md), dev_share 알림 — Windows 응답 전) · UX 캔버스 «MCVideo 단말 UX 검토»(claude.ai artifact VpEmGRtdnGnHdyE1sXVgUy).
+([dispatch_windows_next.md](dispatch_windows_next.md), dev_share 알림 — Windows 응답 전) · UX 캔버스 «MCVideo 단말 UX 검토»(claude.ai artifact VpEmGRtdnGnHdyE1sXVgUy) ·
+**.45 배포 R3·R4·R5·R8**(사용자 지시 — 28ad52a7 기준, R7 제외): csp 0.2.184·cmp 0.2.108·csc 0.2.141·oam 0.2.183(pkg 289~292)·oam-svc 재기동 ·
+ptt-client APK(V7 SDK) W999·MF52. 새 CSP 위 VoLTE 호(001↔002) relay 확인.
 
 **남은 일**
 
 | # | 할 일 | 몫 | 상태·전제 |
 |---|---|---|---|
-| R3 | 녹취 CSP 몫 — MCVideo `PTT_GROUP_ADD` 에 `record_dir`·`session_dir`·디스크립터(D4 같은 폴더 `recordings/ptt/{id}`, 메타 `type: mcvideo`) · OAM 이력 서비스 축 · 콘솔 재생 | .45 | **구현**(미배포) — CSP `CCallDir` 세션 키 `mcvideo:<그룹>`·session.json `type`·group.json 은 MCPTT 만 · OAM 인덱스·`/ptt/sessions?service=`·녹취 API `service`·재생 변환(영상만 구간 포함)·MCPTT 통계에서 제외 · 콘솔 «영상» 배지. 남은 것 = 송출 제어 이벤트 기록(`floor.jsonl` 짝)·.48/.45 실측 |
-| R4 | A12 통계 — 서비스 값 `mcvideo`(ICSI 판정) → CSP 시도 장부·세션 색인 → oam-svc 롤업 `by_service`(D5) | .45 | **구현**(미배포 — csp·oam 패키지) — CSP `McVideoCallService` 개시 시도(진행 중 세션 없는 그룹으로의 INVITE)를 `ptt_attempts` 에 `service: mcvideo`·원인 슬러그 17종(MCVideo 표 sip_statistics §2.3)·성립 = 개시자 200 OK, 성립 못 한 세션 `end_reason: setup_failed` · OAM 롤업 서비스별 레코드(장부 유무 서비스마다)·인덱스 송출 축(`seg_tx_tracks` — 슬롯마다, 영상 우선)·`/stats/calls?svc=mcvideo` · 콘솔 `성능 › MCVideo 통계`(송출률·취소 열). 시험 `tests/test_stats_mcvideo.py`(S1-UNIT-OAM-STATS)·`csp_call_dir_test` 장부 service. 메시지 통계는 접속환경 축 그대로 |
-| R5 | 콘솔 — 그룹 편집 «서비스» 절 · PTT 회선 «MCVideo 이용 자격»(D3 도안 artifact 9mVfQxdqp39GovpmtjsHoJ) | .45 | **구현**(미배포 — oam 패키지) — MCPTT 카드(기존 MCPTT 속성) + MCVideo 카드(켬/끔 = `mcvideo` 객체/null, 속성 7종) · 그룹 목록·MCPTT 그룹 정보 서비스 칩(OAM 응답 `video_enabled` → `mcvideo`) · 회선 «MCVideo 이용 자격» 스위치(즉시 PUT/DELETE)·상한 C9·N6 · «PTT 영상(현행)» 칸은 V7 전 CSC 에서만(V7 CSC 는 키가 없어 자동으로 사라짐). 가짜 API 헤드리스 렌더·저장 본문 확인, S1-UNIT-OAM-STATS(`tests/test_oam_ptt_group_mcvideo.py`) |
+| R3 | 녹취 CSP 몫 — MCVideo `PTT_GROUP_ADD` 에 `record_dir`·`session_dir`·디스크립터(D4 같은 폴더 `recordings/ptt/{id}`, 메타 `type: mcvideo`) · OAM 이력 서비스 축 · 콘솔 재생 | .45 | **.45 배포**(csp 0.2.184·oam 0.2.183) — CSP `CCallDir` 세션 키 `mcvideo:<그룹>`·session.json `type`·group.json 은 MCPTT 만 · OAM 인덱스·`/ptt/sessions?service=`·녹취 API `service`·재생 변환(영상만 구간 포함)·MCPTT 통계에서 제외 · 콘솔 «영상» 배지. 남은 것 = 송출 제어 이벤트 기록(`floor.jsonl` 짝)·.48/.45 실측 |
+| R4 | A12 통계 — 서비스 값 `mcvideo`(ICSI 판정) → CSP 시도 장부·세션 색인 → oam-svc 롤업 `by_service`(D5) | .45 | **.45 배포**(csp 0.2.184·oam 0.2.183) — CSP `McVideoCallService` 개시 시도(진행 중 세션 없는 그룹으로의 INVITE)를 `ptt_attempts` 에 `service: mcvideo`·원인 슬러그 17종(MCVideo 표 sip_statistics §2.3)·성립 = 개시자 200 OK, 성립 못 한 세션 `end_reason: setup_failed` · OAM 롤업 서비스별 레코드(장부 유무 서비스마다)·인덱스 송출 축(`seg_tx_tracks` — 슬롯마다, 영상 우선)·`/stats/calls?svc=mcvideo` · 콘솔 `성능 › MCVideo 통계`(송출률·취소 열). 시험 `tests/test_stats_mcvideo.py`(S1-UNIT-OAM-STATS)·`csp_call_dir_test` 장부 service. 메시지 통계는 접속환경 축 그대로 |
+| R5 | 콘솔 — 그룹 편집 «서비스» 절 · PTT 회선 «MCVideo 이용 자격»(D3 도안 artifact 9mVfQxdqp39GovpmtjsHoJ) | .45 | **.45 배포**(oam 0.2.183) — MCPTT 카드(기존 MCPTT 속성) + MCVideo 카드(켬/끔 = `mcvideo` 객체/null, 속성 7종) · 그룹 목록·MCPTT 그룹 정보 서비스 칩(OAM 응답 `video_enabled` → `mcvideo`) · 회선 «MCVideo 이용 자격» 스위치(즉시 PUT/DELETE)·상한 C9·N6 · «PTT 영상(현행)» 칸은 V7 전 CSC 에서만(V7 CSC 는 키가 없어 자동으로 사라짐). 가짜 API 헤드리스 렌더·저장 본문 확인, S1-UNIT-OAM-STATS(`tests/test_oam_ptt_group_mcvideo.py`) |
 | R6 | CMS 문서 변경 xcap-diff 에 MCVideo user profile·service config | .45 | 미착수(RFC 5875 먼저) |
 | R7 | 1차 잔여 — N2 · `<ImplicitAffiliations>` · 정원 486 122 · 비멤버 재합류 403 121 · prearranged 검사 순서 | .45 | **구현**(미배포·실측 전 — csp·csc 패키지) — 검사 순서 = 참여 기능(500 → 108/109 → 488 → 486 103) 다음 제어 기능(재합류 404 137 → 403 Accept-Contact → 재합류 403 121 / 그룹 문서 113·116·117/118 → 403 120 → 정원 486 122 → chat 암묵적 제휴). 정원 = 그룹 `max_members`(`<on-network-max-participant-count>`, 0 = 없음)·prearranged 초대 정원 − 1 명. 등록 때 MCVideo 설정 그룹 암묵적 제휴(`_ApplyImplicitMcVideoAffiliations`) + CSC user profile `<ImplicitAffiliations>`(XSD 검증). N2 = 한도 없음(MCPTT C1·C9 와 같은 편차 — 사용자 확인 대기) |
 | R7b | D6 에서 찾은 MCPTT 소항목 — 사설 호 수동 개시 180 `Require: timer` · 멤버 초대 `mc_priority` 고정 3(§14.2.3 `<user-priority>`) · SDK answer 의 `mc_priority` 되돌림(§14.3.3) · psip 422 재시도 refresher | .45 | 미착수 |
-| R8 | V7 — 현행 PTT 영상 제거(A13 CSP · B11 CMP · C11 SDK 필드 · 콘솔·관제 «PTT 영상(현행)») | **cims-7c** | **구현**(미배포) — CSP MCPTT `m=video` port 0 거절·`X-Video-Port`·`video_enabled` 읽기 제거 · CMP PTT 영상 분배 제거 · CSC 그룹 문서 `<mcpttgi:mcptt-video>` 제거·관리 API `video_enabled` 무시(경고) · SDK `GroupCallOptions.video`·`mcpttVideo`·`GroupDoc.videoEnabled` 제거(C API·.NET·Kotlin — Windows 재빌드) · S6-SCN-PTT-VIDEO 제거(대체 = C10). 콘솔 «영상» 체크박스는 R5 와 한 커밋. .45 배포 = 협력업체 옛 APK 그룹 영상 중단 — 시점 사용자 확인. DB `video_enabled` DROP 은 §8 3 |
+| R8 | V7 — 현행 PTT 영상 제거(A13 CSP · B11 CMP · C11 SDK 필드 · 콘솔·관제 «PTT 영상(현행)») | **cims-7c** | **.45 배포**(csp 0.2.184·cmp 0.2.108·csc 0.2.141·APK W999·MF52) — CSP MCPTT `m=video` port 0 거절·`X-Video-Port`·`video_enabled` 읽기 제거 · CMP PTT 영상 분배 제거 · CSC 그룹 문서 `<mcpttgi:mcptt-video>` 제거·관리 API `video_enabled` 무시(경고) · SDK `GroupCallOptions.video`·`mcpttVideo`·`GroupDoc.videoEnabled` 제거(C API·.NET·Kotlin — Windows 재빌드) · S6-SCN-PTT-VIDEO 제거(대체 = C10). 콘솔 «영상» 체크박스는 R5 와 한 커밋. 협력업체 옛 APK 의 MCPTT 그룹 영상은 .45 에서 멈췄다(그룹 영상 = MCVideo). DB `video_enabled` DROP 은 §8 3 |
 | R11 | CMP Media Reception Notification(TS 24.581 §9.2.16) — 지금 안 보내 송출자 «보는 사람 n» = 0(앱은 0 이면 숨김). §6.3 에 서버 절차가 없어 위반은 아니고, 보내면 TS 22.280 R-5.20.2-001 을 채운다 | .45 | **사용자 결정 대기** |
 | R12 | OAM 배포 job 인덱스 캐시 경합(`_job_create`/`_job_pick_pending` 잠금 없는 갱신 — §12.4) 근본 수정 | .45 | 미착수 |
 | C10 | verify S3 `S3-SCN-MCVIDEO-CHAT`·`-TRANSMIT`·`-RECEPTION`·`-MAX-TX`(cimsue-cli 두 대) | .45 | 미착수 — M4 전제 |
@@ -809,7 +815,7 @@ D8·D10~D12: 영상 칸은 고른 영상이 있을 때만 · «영상 n» 목록
 
 **사용자 결정 대기** — R11(Media Reception Notification) · Windows 영상 엔진 F3(openh264 디코드·렌더 — 없으면 관제 Windows 는 영상 칸 자리 표시만) · SDK 송출자별 렌더 창
 (관제 다중 스트림 전제) · 관제사 자동 수신(TS 22.281 §5.2.7.1) · D6 «소리 겹침» 설정 항목화(R-8.3-003) · Linux 엔진 영상(openh264 — 영상 RTP·PLI 자동 시험) ·
-pjsua `on_send_request` 무효 계정 가드 · V7 의 .45 배포 시점 · M4(협력업체 APK 전달 포함) 시점.
+pjsua `on_send_request` 무효 계정 가드 · M4(협력업체 APK 전달 포함) 시점.
 
 ## 13. MCVideo — 관제 앱 짝의 서버 과제 (Windows → .45)
 
