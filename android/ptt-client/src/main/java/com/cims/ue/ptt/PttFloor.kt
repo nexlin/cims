@@ -63,6 +63,10 @@ internal class FloorPlane(private val c: PttController) {
             else -> Unit
         }
         if (s.callId < 0) { c._status.value = "그룹콜 연결 중"; return }
+        // 영상 보내는 중 — «영상 우선» 이면 무전 마이크를 쓰지 않는다. 긴급은 설정과 무관하게 음성 우선(mcvideo.md §7 D12)
+        if (c.videoPlane.blocksVoiceTalk(s.emergency)) {
+            c.feedback?.blocked("영상 보내는 중 — 무전 마이크 안 씀(설정: 영상 우선)"); return
+        }
         c.pttHeld = true
         c.setTalkCapture(true)     // 마이크 확보 개시 — volte 양보 + 전이중 전환(floor 요청과 병렬 진행)
         s.floorState = FloorState.REQUESTING

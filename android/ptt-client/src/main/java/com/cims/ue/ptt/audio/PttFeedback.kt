@@ -71,6 +71,12 @@ class PttFeedback(context: Context) {
         vibrate(longArrayOf(0, 150, 100, 150, 100, 300))
     }
 
+    /** 새 영상 송출 알림(MCVideo Media Transmission Notification — manual 수신은 [받기] 를 기다린다) — 짧은 확인음 + 이중 진동. */
+    fun videoNoticeTone() {
+        play(ToneGenerator.TONE_PROP_ACK, 200)
+        vibrate(longArrayOf(0, 40, 60, 40))
+    }
+
     private fun play(toneType: Int, durationMs: Int = -1) {
         val t = tone ?: run { android.util.Log.w("PttFeedback", "ToneGenerator unavailable"); return }
         runCatching {

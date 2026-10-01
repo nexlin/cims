@@ -136,7 +136,7 @@ service configuration 에서 `<confidentiality-protection>`·`<integrity-protect
 
 | 시나리오 | 흐름 요지 | 수신 | 규격 | 단계 |
 |---|---|---|---|---|
-| 현장 영상 공유 — 무전 중 영상을 켠다 | 음성 무전(MCPTT 호) 중 [영상 참여] = 그룹 MCVideo chat 호 합류(암묵적 affiliation) → [영상 보내기] = 송출 요청·허가 → 동료·관제는 «새 영상» 알림에 [받기] → [영상 나가기] 뒤 음성 무전 유지 | manual | TS 24.281 §9.2.2 · TS 23.281 §7.7.1.3.1~.2 | V2~V5 |
+| 현장 영상 공유 — 무전 중 영상을 켠다 | 영상 채널(그룹 문서 MCVideo 몫)을 주채널로 고르면 그룹 MCVideo chat 호에도 함께 합류(암묵적 affiliation, D10) → [영상 보내기] = 송출 요청·허가 → 동료·관제는 «영상 n» 목록에서 [보기] → 채널을 나가면 영상 호도 함께 나간다, 음성 무전과는 독립 | manual | TS 24.281 §9.2.2 · TS 23.281 §7.7.1.3.1~.2 | V2~V5 |
 | 여러 카메라 동시 송출 — 관제가 골라 본다 | 동시 송출 상한(그룹 속성) 안이면 모두 허가, 상한이면 거절 또는 우선순위 revoke. 관제는 볼 스트림만 [받기]·[그만 보기], 수신 상한에서 새 영상이 오면 교체 선택 | manual | TS 24.581 §4.1.1.2 · TS 23.281 §7.7.1.3.2C~D·§7.7.1.3.3 | V3 · V5 |
 | 원격 송출 요청 | 그룹 영상 호 중 관제가 특정 요원에게 송출을 원격 요청·종료 | manual | TS 23.281 §7.7.1.3.7 (MCV0 Remote Transmission request) | V8 |
 | 영상 가져오기(1:1 pull) | 관제가 요원 한 명의 영상을 요청 — 상대만 송출하는 1:1 호, 송출이 끝나면 종료 | — | TS 23.281 §7.3.2.3 · TS 24.281 §12.2 | V8 |
@@ -191,7 +191,7 @@ service configuration 에서 `<confidentiality-protection>`·`<integrity-protect
   │
   │ ── [PTT] = MCPTT 그룹 호 (현행과 같다) ──────────────────────────────────────────
   │
-  │ ── [영상 참여] ───────────────────────────────────────────────────────────────
+  │ ── 영상 채널을 주채널로 고름 = MCVideo 호도 합류(D10) ──────────────────────────────
   │ INVITE sip:<mcvideo PSI>  mcvideo-info session-type=chat, request-uri=tel:g002
   │   SDP: m=audio(AMR-WB) m=video(H.264) m=application udp MCVideo
   │                                             ─ MCVIDEO_GROUP_ADD/JOIN(audio·video·control) ▶
@@ -201,14 +201,15 @@ service configuration 에서 `<confidentiality-protection>`·`<integrity-protect
   │ ◀──────────────────────────────── MCV1 Transmission Granted (Audio SSRC · Video SSRC)
   │ RTP audio + video ───────────────────────────────────────────────────────────▶ 수신 허가된 멤버에게만
   │                                                        다른 멤버 ◀ MCV1 Media Transmission Notification
-  │                                                        다른 멤버 ─ MCV0 Receive Media Request ▶ (manual)
+  │                                                        다른 멤버 ─ MCV0 Receive Media Request ▶ (manual — [보기])
   │                                                        다른 멤버 ◀ MCV1 Receive Media Response → 수신 시작
   │ [보내기 끝] MCV2 Transmission End Request ─▶  ◀ MCV2 Transmission End Response
   │
-  │ ── [영상 나가기] BYE (MCVideo 다이얼로그) → 음성 호는 그대로 ─────────────────────
+  │ ── 채널을 나감 = MCVideo BYE 도(D10) — 음성 호의 T4 해제와는 무관 ─────────────────
 ```
 
-- 음성 호와 영상 호는 **서로 독립**이다 — 영상 참여 중에도 [PTT] 는 MCPTT 호의 floor 를 잡는다(§7 D6 의 기본 정책).
+- 음성 호와 영상 호는 **서로 독립**이다 — 영상 채널에서도 [PTT] 는 MCPTT 호의 floor 를 잡는다(§7 D6 의 기본 정책·D11). 영상을 보내는 중
+  PTT 를 누르면 그동안 마이크는 음성 무전으로 간다(D12).
 - chat 그룹은 원하는 사람만 들어오고, prearranged 는 제어 기능이 MCVideo 로 affiliate 한 멤버를 모두 초대한다(§7 D5).
 
 ## 5. 구성요소별 설계
@@ -421,8 +422,11 @@ Indicator, automatic 수신; 1차 CSP 는 normal) · JOIN 응답 `audio_ssrc`·`
   CMP 와 맞붙인 교차 스모크 `tests/mcvideo_cmp_sdk_xcheck.sh`(시험용 CMP + SDK 참여자 둘 — chat 송출·알림·[받기]·상한 거절·End Notify, 대기열, 암묵 요청 즉시·늦은 허가).
 - **송출 게이트**(구현) — 마이크·카메라는 송출 허가에서만. 허가 밖에서는 오디오 인코더를 멈춰 무음 프레임도 내지 않는다(서버는 허가 없는 payload RTP 에
   회수 #3 — §5.3.1). 빈 RTP keep-alive·RTCP·제어 채널 빈 RR 은 계속 나가 NAT·latch 를 연다.
-- **수신 제어** — `acceptReception(callId, transmitterId)`·`endReception`(§6.2.5, T103·T104)은 결선됐다. 스트림별 렌더 창(현행 «호별 수신 창» 과제와 합친다 —
-  ue_sdk.md §11)과 송출 영상 결선은 C6.
+- **영상 결선**(구현) — 송출 = 허가에서만 카메라를 연다(`applyVideoTx` — Granted 에 START_TRANSMIT 로 첫 프레임 키프레임, 송출 끝에 STOP 으로 카메라를
+  닫는다, 재협상 없음). 송출하지 않는 동안은 영상 keep-alive(PJMEDIA_STREAM_KA_INTERVAL)로 멤버 영상 포트의 NAT·latch 를 연다. 수신 = 호의 수신 창이 받는
+  영상을 그린다 — CMP 가 수신 허가된 송출만 내보내므로([받기] 전 영상 RTP 0) 1차 수신 상한 1 에서는 스트림 분리가 필요 없다. 스트림별 렌더 창(한 m=video
+  의 여러 SSRC — 다중 수신)은 V8 로 «호별 수신 창» 과제(ue_sdk.md §11)와 합친다.
+- **수신 제어**(구현) — `acceptReception(callId, transmitterId)`·`endReception`(§6.2.5, T103·T104).
 - **바인딩**(구현 — C7) — C API·.NET·Kotlin 같은 이름(현행 그룹 영상 옵션 누락도 메웠다 — [ue_sdk.md](ue_sdk.md) §4.6). MCVideo 설정 문서 해석(C2)도 셋 다 —
   그룹 문서 MCVideo 몫(없음 = MCVideo 그룹 아님 · PUT 에 싣지 않아 서버 MCVideo 설정 유지)·user profile·service config·ue-init-config MCVideo PSI.
 - **cimsue-cli**(구현 — C8) — `video-call <g> [--prearranged] [--implicit] [--transmit-at S --transmit-len S] [--accept]` · `video-answer`(멤버 초대 대기) ·
@@ -448,8 +452,16 @@ Indicator, automatic 수신; 1차 CSP 는 normal) · JOIN 응답 `audio_ssrc`·`
 
 ### 5.5 앱
 
-- **PTT 단말(ptt-client)** — 그룹 화면: 그룹이 MCVideo 를 지원하면 [영상 참여]/[영상 나가기], 참여 중 [영상 보내기](전송 요청 — PTT 버튼과 따로),
-  새 송출 알림 → [받기](manual). 영상 오버레이(`VideoCallOverlay`)는 MCVideo 호의 수신 스트림을 그린다. [PTT] 는 MCPTT 호 그대로.
+- **PTT 단말(ptt-client)**(구현 — [android_ue_client.md](android_ue_client.md) 주채널 탭) — 앱 평면 `VideoPlane`(`PttVideo.kt`)·화면 조각
+  `ui/VideoViews.kt`. 서버가 MCVideo PSI 를 내면(ue-init-config) 등록 태그를 싣는다. 영상 채널(그룹 문서 MCVideo 몫)을 주채널로 고르면 MCVideo 호도
+  함께 합류하고(D10 — chat = 합류, prearranged = 그 그룹만 MCVideo affiliation + 멤버 초대 자동 수락), 채널을 나가거나 주채널을 바꾸면 함께 나간다.
+  주채널 화면 = 발언 상태 줄 오른쪽 **[영상 보내기] 토글**(D11 — 켬 = 송출 요청, 끔 = 송출 끝내기, 요청 중·대기 n·보내는 중) · 내 송출 카드(카메라
+  썸네일·경과·보는 사람 n·D12 안내·카메라 전환·대기 중 [대기 취소]) · 누가 보내면 «영상 n» 목록(이름·기능 별칭·경과 + [보기], manual) · [보기] 한
+  영상이 있을 때만 생기는 영상 칸(캡션·[그만 보기]·[크게|작게]·«이름 · 바꿔 보기» — 1차 수신 1개, 바꾸면 보던 것을 그만 본다). 영상 칸이 없으면
+  채팅이 그 자리를 쓰고, [크게] 는 채팅 자리까지 쓰되 하단 탭은 그대로다(전체화면 오버레이 없음). 무전 세션이 T4 로 끝나도 영상 호는 이어지고 주채널
+  화면은 «대기 — 무전 세션 없음» 으로 그 채널을 보여 준다. 영상을 보는 동안 무전 수신을 줄인다(D6). 마이크 경합은 설정 «영상 보내는 중 무전»
+  (D12 — `VideoMicPolicy`). MCPTT 그룹콜은 영상을 제안하지 않는다(D9 — SDK 의 `GroupCallOptions.video`·`AccountConfig.mcpttVideo` 제거는 V7
+  배포 창, C API·.NET 포함). 실기(.45, W999·MF52, g002 chat) 확인 = 자동 합류·송출·[보기]·[크게]·[그만 보기]·D12 음성 우선·T4 뒤 유지.
 - **관제 앱(Windows·태블릿)** — 다중 스트림 수신(스트림 격자·선택 수신), 그룹 편집의 서비스 절 — Windows 쪽 몫.
 
 ### 5.6 콘솔 · OAM · 계측기
@@ -467,7 +479,7 @@ Indicator, automatic 수신; 1차 CSP 는 normal) · JOIN 응답 `audio_ssrc`·`
 | **V2 CSP 호 제어** | CSP·psip | `CMcVideoAsModule`·`Roles.MCVIDEO`, ICSI 분기, 등록 태그·서비스 인가, 서비스별 affiliation·`mcvideoPresInfo`, mcvideo-info 코덱, chat·prearranged 그룹 호(개시·합류·재합류·퇴장·해제), SDP `udp MCVideo`, Warning 코드, CMP 명령 |
 | **V3 CMP 전송·수신 제어** | CMP | MCVideo 그룹 종류, MCV0/1/2 코덱, 서버 상태 머신(§6.3.4~§6.3.7), 동시 송출 상한·우선순위 revoke, Active SSRC List 분배, 영상 RTCP(PLI), 영상 SRTP, 녹취 슬롯, HEARTBEAT 자원 |
 | **V4 단말 SDK** | `libcimsue`·바인딩 | 계정·REGISTER 태그, 서비스별 affiliation, MCVideo 그룹 호, 전송 제어 참여자·수신 제어, 스트림별 렌더, C API·.NET·Kotlin, cimsue-cli |
-| **V5 앱** | ptt-client · (관제 앱 = Windows 쪽) | [영상 참여/나가기]·[영상 보내기]·수신 알림 [받기], 음성 호와의 공존 정책(D6) |
+| **V5 앱** | ptt-client · (관제 앱 = Windows 쪽) | 영상 채널 합류(D10)·[영상 보내기](D11)·«영상 n» [보기], 음성 호와의 공존 정책(D6·D12) |
 | **V6 검증** | cspsim·계측기·verify | 단위(`S1-UNIT-CMP` MCV 코덱·상태 머신, `S1-UE-UNIT` mcvideo-info·전송 제어 참여자), S3 `S3-SCN-MCVIDEO-CHAT`·`-TRANSMIT`·`-RECEPTION`·`-MAX-TX`, 계측기 시나리오 요구(팀원 트랙) |
 | **V7 현행 PTT 영상 제거** | 전 구간 | 1차 배포와 **같은 창**(전환 기간 없음 — §7 D9): CSP 가 MCPTT 세션의 `m=video` 를 port 0 으로 거절(RFC 3264 §6 — MCPTT 는 speech 만), 그룹 문서 `<mcpttgi:mcptt-video>`·`X-Video-Port`·CMP PTT 영상 분배·콘솔 «영상» 토글 제거, PTT 앱은 MCPTT 호에 영상을 제안하지 않는다. DB `video_enabled` 열 DROP 은 공유 DB 를 쓰는 전 사이트가 새 빌드가 된 뒤(§8) |
 | **V8 후속** | — | 긴급·임박·경보(automatic 수신), 1:1(전송 제어 유무), 방송, video pull(단말·저장소)·push, ambient viewing, 송출 큐, ad hoc, conference 이벤트, pre-established(규격 미완 — §9), E2E([mcx_e2e_security.md](mcx_e2e_security.md) — protect true 전환), MBMS·off-network |
@@ -484,10 +496,13 @@ Indicator, automatic 수신; 1차 CSP 는 normal) · JOIN 응답 `audio_ssrc`·`
 | D3 | CMP 명령 | 서비스를 명시한 명령 — 새 명령(`MCVIDEO_*`) 또는 기존 PTT 명령의 `service` 필드. 권고 = **기존 명령 + `service` 필드**(포트·SRTP·녹취 필드를 한 번만 정의), 제어 차이는 CMP 그룹 종류가 가진다 |
 | D4 | 그룹 모델 | 한 그룹 id 에 서비스 집합. DB = 서비스별 표(`mcvideo_group_attrs` 행 = 지원 · `mcvideo_user_profile` 행 = 자격 · `mcvideo_affiliations`) — 가입 표의 kind 별 분리(`ptt_subscriptions` 등)와 같은 구조. `video_enabled` 는 V7 까지 전환기로만 |
 | D5 | 기본 호 종류 | **확정 — chat**(`mcvideo-on-network-invite-members` false). 원하는 사람만 영상에 들어오고, 합류가 곧 affiliation. prearranged(전원 초대)는 그룹 속성으로 고른다 |
-| D6 | 음성 호와 영상 호의 공존 | **확정 — 둘 다 유지.** 규격 미정(§1.1)이라 단말 정책: 영상 참여 중에도 MCPTT 호에 남아 [PTT](하드웨어 PTT 키 포함)는 음성 호, [영상 보내기]는 영상 호. 두 호의 소리가 겹치면 **영상 호 송출 음성 우선**(무전 음성은 줄이거나 끈다). «영상만 쓰기»는 사용자가 MCPTT 호를 나가는 선택 |
+| D6 | 음성 호와 영상 호의 공존 | **확정 — 둘 다 유지.** 규격 미정(§1.1)이라 단말 정책: 영상 채널에서도 MCPTT 호에 남아 [PTT](하드웨어 PTT 키 포함)는 음성 호, [영상 보내기]는 영상 호. 두 호의 소리가 겹치면 **영상 호 송출 음성 우선**(무전 음성은 줄이거나 끈다). «영상만 쓰기»는 사용자가 MCPTT 호를 나가는 선택 |
 | D7 | 보호 요소 | E2E 가 설 때까지 `mcvideo-protect-media`·`mcvideo-protect-transmission-control`·service config 보호 요소 **false 명시**(없으면 true 로 읽힌다). 구간 보호는 SRTP/SRTCP(media_security.md) |
 | D8 | 수신 모드 | 일반 호 **manual**(TS 24.581 §6.3.6.3.3 — 서버가 '1'), 긴급·임박·방송·system 은 automatic. 관제 앱은 스트림 선택 UI 로 manual 을 쓴다 |
 | D9 | 현행 PTT 영상의 전환 기간 | **확정 — 전환 기간 없음.** 검증 뒤 서버와 APK 를 한 번에 배포하고 같은 창에서 현행 PTT 영상을 걷는다(V7). 옛 APK 는 영상만 안 되고 음성 무전은 그대로 |
+| D10 | 영상 채널 진입 | **확정 — «영상 참여» 단계 없음.** MCVideo 그룹(그룹 문서 MCVideo 몫)을 주채널로 고르면 MCVideo 호도 함께 합류한다(chat = 합류, prearranged = MCVideo affiliation + 멤버 초대 자동 수락), 채널을 나가거나 주채널을 바꾸면 함께 나간다 — TS 22.280 R-8.4.2-002(여러 서비스를 한 번의 논리적 제휴로). 1차 = 주채널만(영상 칸·수신 창이 주채널에만 있다). «채널» = 사용자가 고른 주채널이지 MCPTT 세션의 수명이 아니다 — T4·TNG3 해제(TS 24.379 §6.3.8.1)는 호 해제일 뿐 그룹을 떠나는 것이 아니므로 영상 호는 이어지고, 다른 그룹의 팬아웃 착신은 고른 주채널을 바꾸지 않는다(TS 22.179 그룹 스캐닝) |
+| D11 | 영상 송출 조작 | **확정 — [PTT]·측면 PTT 키 = MCPTT 음성만, 영상 = 화면 [영상 보내기] 토글**(MCVideo 송출 요청·해제). TS 22.280 R-8.2.2-001~-004(서비스·발언권 제어 독립) · TS 22.281 §4.2·§4.4 — MCVideo 송출은 오디오+영상(TS 24.281 §6.2.1, TS 24.581 §6.2.5.3.2 Audio·Video SSRC)이라 PTT 로 묶으면 음성이 두 호로 겹친다 |
+| D12 | 마이크 경합 | **확정 — 기본 = 음성 우선:** 영상을 보내는 중 PTT 를 누르면 그동안 마이크는 MCPTT 음성으로 가고 MCVideo 호 오디오 송신은 멈춘다(영상은 계속 — SDK `setMuted` 가 MCVideo 호에서는 음성 송신만 멈춘다). 설정으로 «영상 우선»(영상 보내는 중 PTT 는 무전 발언을 요청하지 않는다)으로 바꿀 수 있다(TS 22.280 R-8.3-003). 긴급은 설정과 무관하게 음성 우선(R-8.3-004) |
 
 ## 8. 전환 — 현행 PTT 영상 → MCVideo (전환 기간 없음)
 
@@ -565,5 +580,5 @@ Indicator, automatic 수신; 1차 CSP 는 normal) · JOIN 응답 `audio_ssrc`·`
   ue-init-config `MCVideo-Service-Details`, scope 요청 ∩ 카탈로그.
 - **V2·V3** — cimsue-cli 두 대: chat 합류 200(`udp MCVideo`) · 송출 요청 Granted(Audio·Video SSRC) · 다른 멤버 Media Transmission Notification →
   Receive Media Request 전에는 영상 RTP 0, 뒤에는 도달 · 동시 송출 상한 초과 Rejected · 퇴장 BYE 뒤 MCPTT 호 영향 없음 · 영상 SRTP · PLI 가 송출자에게 도달.
-- **V5** — 사내 단말(MF52·W999) 실기: 같은 그룹에서 [PTT] 음성과 [영상 참여]·[영상 보내기]·[받기]를 번갈아, 영상 나간 뒤 음성 호 유지.
+- **V5** — 사내 단말(MF52·W999) 실기: 같은 그룹에서 [PTT] 음성과 [영상 보내기]·[보기]를 번갈아, 영상 보내는 중 PTT(D12), 무전 세션 T4 해제 뒤 영상 호 유지, 채널을 나가면 영상 호도 나감.
 - **V7** — MCPTT 세션 `m=video` 오퍼에 port 0 answer, 그룹 문서에 `mcptt-video` 없음, 회귀 = PTT·MCData 계측기 시나리오 전부(`PTT-GROUP-CALL-VIDEO`·`S6-SCN-PTT-VIDEO` 는 MCVideo 시나리오로 대체).

@@ -58,7 +58,8 @@ public:
     Result hold(int callId);
     Result resume(int callId);
     /** 마이크 → 호 송신 차단/복구. 반이중 MCPTT 세션에서는 floor 가 마이크를 게이트하므로 무시되고, 전이중 사설콜
-     *  (mc_no_floor_ctrl)에서는 앱의 PTT 로컬 게이트로 쓴다(누르면 승인 톤 뒤 false, 떼면 true). */
+     *  (mc_no_floor_ctrl)에서는 앱의 PTT 로컬 게이트로 쓴다(누르면 승인 톤 뒤 false, 떼면 true). MCVideo 호는 송출 허가 중
+     *  음성 송신만 멈춘다(오디오 인코더 정지 — 영상은 계속, 마이크 경합 정책 mcvideo.md §7 D12). */
     Result setMuted(int callId, bool muted);
     /** 호 → 스피커 청취 on/off (멀티 채널 듣기 정책). */
     Result setListen(int callId, bool listen);

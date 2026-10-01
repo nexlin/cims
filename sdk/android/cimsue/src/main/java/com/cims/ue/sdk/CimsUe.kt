@@ -602,7 +602,7 @@ class Call internal constructor(private val ue: CimsUe, val id: Int, private val
     suspend fun hold(): CimsResult<Unit> = cmd { CimsResult.of(ue.jni.hold(id)) }
     suspend fun resume(): CimsResult<Unit> = cmd { CimsResult.of(ue.jni.resume(id)) }
     /** 마이크 차단/복구. 반이중 MCPTT 세션에서는 floor 가 게이트하므로 무시되고, 전이중 사설콜(mc_no_floor_ctrl)에서는
-     *  앱의 PTT 로컬 게이트다(누르면 승인 톤 뒤 false, 떼면 true). */
+     *  앱의 PTT 로컬 게이트다(누르면 승인 톤 뒤 false, 떼면 true). MCVideo 호는 송출 허가 중 음성 송신만 멈춘다(영상은 계속). */
     suspend fun setMuted(muted: Boolean): CimsResult<Unit> = cmd { CimsResult.of(ue.jni.setMuted(id, muted)) }
     /** 호 → 스피커 청취 on/off (여러 채널 듣기 정책). */
     suspend fun setListen(listen: Boolean): CimsResult<Unit> = cmd { CimsResult.of(ue.jni.setListen(id, listen)) }

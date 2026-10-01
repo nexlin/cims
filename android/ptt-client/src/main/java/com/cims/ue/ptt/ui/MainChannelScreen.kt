@@ -109,7 +109,11 @@ fun MainChannelScreen(
             )
             Spacer(Modifier.height(10.dp))
 
-            val primary = st.primary
+            // 무전 세션이 없어도(T4 해제 등) 영상 호가 이어지는 영상 채널은 대기 상태로 보인다(mcvideo.md §7 D10)
+            val primary = st.primary ?: st.videoCalls.firstOrNull()?.let { v ->
+                GroupCallState(v.groupId, NO_SESSION_CALL, active = false, role = ChannelRole.PRIMARY, floorState = FloorState.IDLE,
+                    speaker = null, participants = st.channelRosters[v.groupId].orEmpty(), audible = true)
+            }
             if (primary != null) {
                 PrimaryChannelPanel(st, svc, primary, onOpenThread,
                     onSelect = { picker = true }, onRouteSelect = { routeSheet = true },
@@ -136,8 +140,9 @@ fun MainChannelScreen(
     }
 }
 
-/** 주채널 전면 패널(카드 없음) — 채널명/태그/발언 상태/영상(오버레이 컨트롤)/PTT(터치 단말만) + 하단 채팅.
- *  영상 그룹이면 영상 칸이 남는 높이를 채팅과 나눠 쓰고, 채팅을 숨기면(머리줄 탭, 영속) 영상이 그 자리까지 쓴다. */
+/** 주채널 전면 패널(카드 없음) — 채널명/태그(+출력·전체듣기)/발언 상태(+영상 채널이면 [영상 보내기])/영상 조각/PTT(터치 단말만) + 하단 채팅.
+ *  영상 조각(mcvideo.md §5.5) = 내 송출 카드 · «영상 n» 목록 · [보기] 한 영상 칸 — 영상 칸은 볼 영상이 있을 때만 생겨 채팅과 높이를 나누고,
+ *  [크게]·채팅 숨기기(머리줄 탭, 영속)면 채팅 자리까지 쓴다. 하단 탭은 늘 그대로다. */
 @Composable
 private fun PrimaryChannelPanel(
     st: PttUiState,
@@ -171,21 +176,43 @@ private fun PrimaryChannelPanel(
         Spacer(Modifier.height(6.dp))
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-            if (s.video) TagChip("영상", R.drawable.ic_video) else TagChip("음성", R.drawable.ic_voice)
+            if (st.groupDocs[s.groupId]?.mcvideo != null) TagChip("영상", R.drawable.ic_video) else TagChip("음성", R.drawable.ic_voice)
             TagChip("구성원 (${s.participants.size})")
+            AudioToggles(st, onRouteSelect)
             Spacer(Modifier.weight(1f))
             SpeakingIndicator(s)
         }
         Spacer(Modifier.height(10.dp))
-        SpeakerStatusStrip(st, s)
+        // 발언 상태 + [영상 보내기](영상 채널 — 그룹 문서 MCVideo 몫, D11: PTT 와 따로인 토글)
+        val vc = st.videoCall(s.groupId)
+        val videoChannel = st.videoGroup(s.groupId)
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Box(Modifier.weight(1f)) { SpeakerStatusStrip(st, s) }
+            if (videoChannel) VideoSendButton(vc) { on -> st.ctl?.setVideoTransmit(s.groupId, on) }
+        }
         Spacer(Modifier.height(8.dp))
         val ctx = LocalContext.current
         val uiPrefs = remember { ctx.getSharedPreferences("ui_prefs", android.content.Context.MODE_PRIVATE) }
         var chatHidden by remember { mutableStateOf(uiPrefs.getBoolean(PREF_CHAT_HIDDEN, false)) }
         val toggleChat = { chatHidden = !chatHidden; uiPrefs.edit().putBoolean(PREF_CHAT_HIDDEN, chatHidden).apply() }
-        // 영상 칸 높이 — 영상 그룹이면 남는 높이를 채팅과 1.4 : 1 로, 채팅을 숨기면 전부. 영상 아닌 세션은 소형 자리.
-        VideoPanel(st, s, onRouteSelect,
-            if (!s.video) Modifier.height(150.dp) else Modifier.weight(if (chatHidden) 1f else 1.4f))
+        val micPolicy = st.ctl?.videoMicPolicy?.collectAsState()?.value ?: com.cims.ue.ptt.VideoMicPolicy.VOICE_FIRST
+        if (vc != null && vc.sendOn) {
+            MySendCard(st, vc, micPolicy)
+            Spacer(Modifier.height(8.dp))
+        }
+        // 보고 있는 영상 — 칸은 이때만 생긴다. 남는 높이를 채팅과 1.4 : 1 로, [크게]·채팅 숨김이면 전부(하단 탭은 그대로).
+        val rx = vc?.receiving
+        var large by remember(s.groupId) { mutableStateOf(false) }
+        LaunchedEffect(rx?.userId) { if (rx == null) large = false }
+        val viewing = vc != null && rx != null
+        if (viewing) {
+            VideoViewer(st, vc!!, rx!!, large, onLarge = { large = !large },
+                modifier = Modifier.weight(if (large || chatHidden) 1f else 1.4f))
+        } else if (vc != null && vc.transmitters.isNotEmpty()) {
+            VideoListCard(st, vc)                                          // 누가 보내면 골라 보기(manual)
+            Spacer(Modifier.height(8.dp))
+        }
 
         // 화면 PTT 바 — 터치 단말만(하드웨어 PTT 버튼 단말은 표시하지 않음)
         val hwPtt by HwPtt.present.collectAsState()
@@ -199,9 +226,11 @@ private fun PrimaryChannelPanel(
         }
         Spacer(Modifier.height(10.dp))
 
-        if (chatHidden && !s.video) Spacer(Modifier.weight(1f))     // 숨긴 채팅 머리줄은 아래에 붙인다
-        InlineChat(st, svc, s.groupId, onOpenThread, hidden = chatHidden, onToggleHidden = toggleChat,
-            modifier = if (chatHidden) Modifier else Modifier.weight(1f))
+        if (!(viewing && large)) {
+            if (chatHidden && !viewing) Spacer(Modifier.weight(1f))     // 숨긴 채팅 머리줄은 아래에 붙인다
+            InlineChat(st, svc, s.groupId, onOpenThread, hidden = chatHidden, onToggleHidden = toggleChat,
+                modifier = if (chatHidden) Modifier else Modifier.weight(1f))
+        }
     }
 }
 
@@ -382,104 +411,31 @@ internal fun SpeakerStatusStrip(st: PttUiState, s: GroupCallState) {
                 s.queuePosition?.let { "발언 대기 ${it}번째" } ?: "발언 대기 중",
                 color = Ct.Amber, fontSize = 14.sp, fontWeight = FontWeight.Bold)
             s.active -> Text("대기 중", color = Ct.TextFaint, fontSize = 13.sp)
+            s.callId == NO_SESSION_CALL -> Text("대기 — 무전 세션 없음", color = Ct.TextFaint, fontSize = 13.sp)
             else -> Text("연결 중…", color = Ct.TextFaint, fontSize = 13.sp)
         }
     }
 }
 
-/** 영상 영역 — 영상 그룹(서버 video_enabled)이면 발언자 영상, 내가 발언 중이고 [내 영상]이 켜져 있으면 좌상단에 내 미리보기
- *  (ptt_flows.md 영상 협상 — 서버는 발언권을 가진 사람의 영상만 나눠 준다). 코어 수신 창은 하나라 영상 칸은 주채널에만 둔다.
- *  출력(스피커폰/수화기/이어폰)·전체듣기·내 영상은 우하단 오버레이 아이콘으로만 노출. */
+/** 출력·전체듣기 — 태그 줄 오른쪽 작은 아이콘. 출력: 이어폰 미연결이면 탭 = 스피커폰↔수화기(기본 스피커폰), 이어폰 연결(무선 다중
+ *  포함)이면 탭 = 선택 시트(이어폰/스피커폰/수화기). 전체듣기: 참여한 모든 그룹 ↔ 주채널만. */
 @Composable
-private fun VideoPanel(st: PttUiState, s: GroupCallState, onRouteSelect: () -> Unit, modifier: Modifier = Modifier) {
-    val mine = s.floorState == FloorState.SPEAKING
-    val full by VideoView.full.collectAsState()
-    Box(
-        modifier.fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp)).background(Color.Black)
-            .clickable(enabled = s.video) { VideoView.full.value = true },
-    ) {
-        if (s.video && full) {
-            // 전체화면이 떠 있다 — 엔진 수신 창은 하나라 여기서는 표면을 만들지 않는다.
-            Column(
-                Modifier.align(Alignment.Center),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                Icon(painterResource(R.drawable.ic_video), contentDescription = null,
-                    tint = Ct.TextFaint, modifier = Modifier.size(26.dp))
-                Text("전체화면으로 보는 중", color = Ct.TextFaint, fontSize = 11.sp)
-            }
-        } else if (s.video) {
-            // 코어 인코딩 규약 = 480x640 세로(ue_sdk.md §4.5) — 표면을 그 비율로 두어야 가로 칸에서 찌그러지지 않는다. 탭 = 전체화면.
-            RemoteVideo(Modifier.align(Alignment.Center).fillMaxHeight().aspectRatio(VIDEO_ASPECT),
-                onTap = { VideoView.full.value = true }) { st.ctl?.setVideoSurface(it) }
-            // 말하는 사람이 없거나 내가 말하는 동안은 덮는다 — 발언이 끝나면 마지막 프레임을 남기지 않는다
-            if (!rememberRemoteLive(s)) Box(Modifier.matchParentSize().background(Color.Black))
-            if (mine && st.videoSend) {
-                Box(Modifier.align(Alignment.TopStart).padding(8.dp).size(width = 90.dp, height = 120.dp)) {
-                    SelfPreview { st.ctl?.setPreviewSurface(it) }
-                }
-            }
-            val caption = when {
-                mine && st.videoSend -> "내 영상 송출 중"
-                mine -> "내 영상 꺼짐"
-                s.speaker == null -> "발언자 영상 대기"
-                else -> null
-            }
-            caption?.let {
-                Text(it, color = Color.White, fontSize = 10.sp,
-                    modifier = Modifier.align(Alignment.TopEnd).padding(8.dp)
-                        .clip(RoundedCornerShape(6.dp)).background(Color.Black.copy(alpha = 0.45f))
-                        .padding(horizontal = 6.dp, vertical = 2.dp))
-            }
-        } else {
-            Column(
-                Modifier.align(Alignment.Center),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                Icon(painterResource(R.drawable.ic_video), contentDescription = null,
-                    tint = Ct.TextFaint, modifier = Modifier.size(26.dp))
-                Text("영상 없음", color = Ct.TextFaint, fontSize = 11.sp)
-            }
-        }
-        Row(
-            Modifier.align(Alignment.BottomEnd).padding(8.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            // 내 영상 보내기 — 켜져 있으면 발언권을 가진 동안 카메라를 보낸다(끄면 음성만). 영상 그룹에서만 보인다.
-            if (s.video) {
-                OverlayToggle(
-                    icon = R.drawable.ic_video, desc = if (st.videoSend) "내 영상 켜짐" else "내 영상 꺼짐",
-                    active = st.videoSend,
-                ) { st.ctl?.setVideoSend(!st.videoSend) }
-            }
-            // 출력 라우팅 — 이어폰 미연결: 탭=스피커폰↔수화기 토글(기본 스피커폰).
-            //              이어폰 연결(무선 다중 포함): 탭=선택 시트(이어폰/스피커폰/수화기).
-            val (routeIcon, routeDesc) = when (st.route) {
-                PttController.AUDIO_ROUTE_HEADSET -> R.drawable.ic_headset to "이어폰"
-                PttController.AUDIO_ROUTE_SPEAKER -> R.drawable.ic_volume_on to "스피커폰"
-                else -> R.drawable.ic_earpiece to "수화기"
-            }
-            OverlayToggle(
-                icon = routeIcon, desc = routeDesc,
-                active = st.route != PttController.AUDIO_ROUTE_EARPIECE,
-            ) {
-                if (st.headsets.isEmpty()) {
-                    st.ctl?.setAudioRoute(
-                        if (st.route == PttController.AUDIO_ROUTE_SPEAKER) PttController.AUDIO_ROUTE_EARPIECE
-                        else PttController.AUDIO_ROUTE_SPEAKER)
-                } else onRouteSelect()
-            }
-            val all = st.policy == ListenPolicy.ALL
-            OverlayToggle(
-                icon = R.drawable.ic_connected,
-                desc = if (all) "전체듣기" else "주채널만", active = all,
-            ) {
-                st.ctl?.setListenPolicy(if (all) ListenPolicy.CHANNELS_ONLY else ListenPolicy.ALL)
-            }
-        }
+private fun AudioToggles(st: PttUiState, onRouteSelect: () -> Unit) {
+    val (routeIcon, routeDesc) = when (st.route) {
+        PttController.AUDIO_ROUTE_HEADSET -> R.drawable.ic_headset to "이어폰"
+        PttController.AUDIO_ROUTE_SPEAKER -> R.drawable.ic_volume_on to "스피커폰"
+        else -> R.drawable.ic_earpiece to "수화기"
+    }
+    IconToggle(routeIcon, routeDesc, active = st.route != PttController.AUDIO_ROUTE_EARPIECE) {
+        if (st.headsets.isEmpty()) {
+            st.ctl?.setAudioRoute(
+                if (st.route == PttController.AUDIO_ROUTE_SPEAKER) PttController.AUDIO_ROUTE_EARPIECE
+                else PttController.AUDIO_ROUTE_SPEAKER)
+        } else onRouteSelect()
+    }
+    val all = st.policy == ListenPolicy.ALL
+    IconToggle(R.drawable.ic_connected, if (all) "전체듣기" else "주채널만", active = all) {
+        st.ctl?.setListenPolicy(if (all) ListenPolicy.CHANNELS_ONLY else ListenPolicy.ALL)
     }
 }
 
@@ -521,17 +477,17 @@ internal fun SelfPreview(onSurface: (Surface?) -> Unit) {
     )
 }
 
-/** 영상 위 오버레이 토글 — 아이콘만(반투명 원형 스크림, 활성=민트). */
+/** 작은 원형 아이콘 토글 — 활성 = 민트, 아니면 카드 위 면(테마 토큰). */
 @Composable
-private fun OverlayToggle(icon: Int, desc: String, active: Boolean, onClick: () -> Unit) {
+private fun IconToggle(icon: Int, desc: String, active: Boolean, onClick: () -> Unit) {
     Box(
-        Modifier.size(34.dp).clip(CircleShape)
-            .background(if (active) Ct.Mint else Color.Black.copy(alpha = 0.45f))
+        Modifier.size(28.dp).clip(CircleShape)
+            .background(if (active) Ct.Mint else Ct.SurfaceHi)
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
         Icon(painterResource(icon), contentDescription = desc,
-            tint = if (active) Ct.OnMint else Color.White, modifier = Modifier.size(17.dp))
+            tint = if (active) Ct.OnMint else Ct.TextDim, modifier = Modifier.size(15.dp))
     }
 }
 
@@ -724,7 +680,9 @@ private fun InlineChat(st: PttUiState, svc: PttService?, groupId: String,
 private fun chatTime(t: Long): String = DateFormat.format("HH:mm", Date(t)).toString()
 
 /** 수신 영상 표면 비율(가로:세로) — 단말 인코딩 480x640. */
-private const val VIDEO_ASPECT = 3f / 4f
 
 /** 주채널 채팅 숨김 저장 키(ui_prefs). */
 private const val PREF_CHAT_HIDDEN = "main_chat_hidden"
+
+/** 무전 세션 없이 영상 호만 이어지는 영상 채널의 자리 표시 세션(화면 전용 callId). */
+private const val NO_SESSION_CALL = -2

@@ -98,8 +98,6 @@ data class GroupCallState(
     val privatePeer: Boolean = false,
     /** 전이중 1:1(mc_no_floor_ctrl 협상) — floor 없음, PTT 가 로컬 마이크 게이트. PTT 버튼 대신 통화 UI. */
     val fullDuplex: Boolean = false,
-    /** 그룹 영상이 협상됐다(서버 그룹 video_enabled — ptt_flows.md 영상 협상). 발언자 영상이 이 세션으로 온다. */
-    val video: Boolean = false,
 )
 
 /**
@@ -182,8 +180,11 @@ class PttController(
     /** 발언 마이크 핸드오프 훅 — 서비스가 주입(volte 앱에 MIC_YIELD/RESUME 브로드캐스트). */
     var micHandoff: ((Boolean) -> Unit)? = null
 
-    /** 발언 캡처 게이트 현재 상태 — 중복 전환 방지. */
+    /** 발언 캡처 게이트 현재 상태 — 중복 전환 방지. 캡처 = PTT 발언([floorCapture]) 또는 MCVideo 송출([videoCapture]). */
     private var talkCapture = false
+    private var floorCapture = false
+    private var videoCapture = false
+    private val captureLock = Any()
 
     /**
      * 발언 캡처 게이트 — 유휴/청취=스피커 전용(마이크 미보유), 발언 시도~종료=전이중(코어 `setCaptureEnabled`, ue_sdk.md §4.5).
@@ -192,8 +193,21 @@ class PttController(
      * 승인 톤이 끝날 때(코어가 마이크를 여는 시점)면 전환이 끝나 있다.
      */
     internal fun setTalkCapture(on: Boolean) {
-        if (talkCapture == on) return
-        talkCapture = on
+        applyCapture { floorCapture = on }
+        videoPlane.onVoiceTalk(on)          // 무전 발언 동안 영상 호 음성 송신을 멈춘다(mcvideo.md §7 D12)
+    }
+
+    /** MCVideo 송출 캡처 — 송출 요청·대기·허가 동안 마이크를 확보한다(허가 뒤 코어가 연다). PTT 발언 게이트와 합쳐 건다. */
+    internal fun setVideoCapture(on: Boolean) = applyCapture { videoCapture = on }
+
+    private fun applyCapture(change: () -> Unit) {
+        val on = synchronized(captureLock) {
+            change()
+            val want = floorCapture || videoCapture
+            if (talkCapture == want) return
+            talkCapture = want
+            want
+        }
         runCatching { micHandoff?.invoke(on) }
         cmd("setCaptureEnabled($on)") { ue.setCaptureEnabled(on) }
     }
@@ -245,7 +259,6 @@ class PttController(
         var floorIndicator: Int = 0           // 마지막 수신 Floor Indicator (G/I 비트 표시)
         var privatePeer: Boolean = false      // 1:1 private call — groupId=상대 번호
         var fullDuplex: Boolean = false       // 전이중 1:1 — floor 없음, PTT 가 로컬 마이크 게이트(setMuted)
-        var video: Boolean = false            // 그룹 영상 협상됨(코어 CallInfo.video — 미디어 성립 뒤 협상 결과)
 
         /** 이 세션이 동시 발언을 허용하는가 — 서버 Floor Indicator 의 I-bit(multi-talker)/
          *  G-bit(dual floor) 로 판정한다(TS 24.380 §8.2.3.15). multi 정책은 모든 floor 메시지에
@@ -258,7 +271,7 @@ class PttController(
             audible, emergency, emergencyMine, volume, canRequestFloor, speakDeadlineMs,
             // 대기 위치는 QUEUED 상태에서만 의미가 있다 — 상태로 파생해 지난 값이 새지 않게 한다.
             queuePosition.takeIf { floorState == FloorState.QUEUED }, talkers, floorIndicator,
-            privatePeer, fullDuplex, video)
+            privatePeer, fullDuplex)
         fun close() { talkWarn?.cancel() }
     }
 
@@ -299,11 +312,6 @@ class PttController(
     private val _spkGain = MutableStateFlow(com.cims.ue.ptt.audio.AudioRoutePrefs.DEFAULT_SPK_GAIN)
     /** 무전 스피커 출력 게인(장치단 ×1.0~×3.0) — 설정 화면 슬라이더. */
     val spkGain: StateFlow<Float> = _spkGain.asStateFlow()
-
-    private val videoPrefs = context.getSharedPreferences("ptt_video", Context.MODE_PRIVATE)
-    private val _videoSend = MutableStateFlow(videoPrefs.getBoolean(PREF_VIDEO_SEND, true))
-    /** 내 영상 보내기(영상 칸 토글, 기본 켬) — 켜져 있으면 영상 그룹에서 발언권을 가진 동안 카메라를 보낸다(코어가 발언권으로 개폐). */
-    val videoSend: StateFlow<Boolean> = _videoSend.asStateFlow()
 
     private val _micGain = MutableStateFlow(com.cims.ue.ptt.audio.AudioRoutePrefs.DEFAULT_MIC_GAIN)
     /** 무전 마이크 송신 게인(장치단 ×1.0~×3.0). */
@@ -402,6 +410,7 @@ class PttController(
     internal val floorPlane = FloorPlane(this)
     internal val messaging = MessagingPlane(this)
     internal val emergencyPlane = EmergencyPlane(this)
+    internal val videoPlane = VideoPlane(this, context)
 
     init {
         // 번호 로컬 표기(+82→0…)용 홈 국가코드 — 프로비저닝 countryCode 우선, 내 msisdn 유도 폴백
@@ -412,10 +421,11 @@ class PttController(
             scope.launch(start = CoroutineStart.UNDISPATCHED) { flow.collect { runCatching { f(it) }.onFailure { e -> Log.w(TAG, "event", e) } } }
         on(ue.log) { Log.println(pjPriority(it.level), "PJ", it.message.trimEnd()) }
         on(ue.regState) { onReg(it) }
-        on(ue.incomingCall) { groupsPlane.onIncomingCall(it) }
-        on(ue.callState) { onCallState(it) }
-        on(ue.callMedia) { onCallMedia(it) }
+        on(ue.incomingCall) { if (VideoPlane.isVideo(it)) videoPlane.onIncomingCall(it) else groupsPlane.onIncomingCall(it) }
+        on(ue.callState) { if (VideoPlane.isVideo(it)) videoPlane.onCallState(it) else onCallState(it) }
         on(ue.floor) { floorPlane.onFloorEvent(it) }
+        on(ue.transmission) { videoPlane.onTransmission(it) }
+        on(ue.reception) { videoPlane.onReception(it) }
         on(ue.roster) { groupsPlane.onRoster(it) }
         on(ue.condition) { emergencyPlane.onCondition(it) }
         on(ue.emergencyAlert) { emergencyPlane.onAlert(it) }
@@ -457,6 +467,7 @@ class PttController(
         // 참여 기능 PSI = UE initial configuration(TS 24.484 §7.2.2.1 10)·14)) — 로그인 전 문서(토큰 없음). 못 받으면 PSI 없이
         //   (경보 = 그룹 URI, disposition 통지 = 원 발신자 직행 — 코어 전환기 경로).
         val ueInit = instanceId?.takeIf { it.isNotEmpty() }?.let { id -> csc?.fetchUeInitConfig(id)?.getOrNull() }
+        videoPlane.setServer(ueInit?.mcvideoServerUri.orEmpty())
         val acc = ue.addAccount(accountConfig(ueInit)).getOrNull()
             ?: run { _reg.value = RegState.Failed("addAccount"); return@launch }
         account = acc
@@ -491,12 +502,16 @@ class PttController(
             expiresSec = c.expiresSec,
             mcpttId = mcpttId,
             autoAnswerMcptt = true,                                // 그룹콜·사설콜 착신 자동 수락(ptt_ue.md §12.3)
-            mcpttVideo = true,                                     // 영상 그룹(video_enabled)의 착신은 영상까지 받는다
             instanceId = instanceId.orEmpty(),
             maxSdsCplaneBytes = c.maxPayloadSdsCplaneBytes,        // 넘는 그룹 SDS 는 media plane(TS 24.282 §9.2.3)
             mcdataMsrp = true,                                     // 서버발 MSRP 배포 수신(REGISTER Contact ICSI mcdata.sds)
             mcpttServerUri = ueInit?.mcpttServerUri.orEmpty(),     // 경보 Request-URI(TS 24.379 §12.1.1.1 8))
             mcdataServerUri = ueInit?.mcdataServerUri.orEmpty(),   // disposition 통지 Request-URI(TS 24.282 §12.2.1.1)
+            // MCVideo(TS 24.281) — 서버가 PSI 를 내줄 때만 등록 태그를 싣는다(영상 = MCVideo 호, MCPTT 호는 음성만 — mcvideo.md §7 D9).
+            //   멤버 초대(prearranged)는 자동 수락 — 합류일 뿐이고 영상 보기는 [받기](manual 수신)가 따로 정한다.
+            mcvideoEnabled = !ueInit?.mcvideoServerUri.isNullOrEmpty(),
+            mcvideoServerUri = ueInit?.mcvideoServerUri.orEmpty(),
+            autoAnswerMcvideo = true,
         )
     }
 
@@ -573,9 +588,7 @@ class PttController(
             CallState.OUTGOING -> bindCall(c.groupId, c.callId)
             CallState.ACTIVE -> {
                 bindCall(c.groupId, c.callId, active = true)
-                audioRouter?.setInCall(true)                  // VoIP 오디오 모드 — 라우팅·음량 전제
-                applyDeviceLevels(_spkGain.value, _micGain.value)  // 무전 체감 음량 보강
-                applyAudioRoute()                             // 통화별 라우팅 재적용
+                enterCallAudio()
                 applyListenPolicy()
                 applyProximity()                              // 귀에 대면 화면 꺼짐(하드웨어 PTT 단말)
             }
@@ -587,30 +600,10 @@ class PttController(
         }
     }
 
-    /** 미디어 성립·재협상 — 영상 협상 결과를 세션에 싣고, 내 영상 보내기가 꺼져 있으면 새 영상 호에도 송출을 막는다. */
-    private fun onCallMedia(c: CallInfo) {
-        if (!c.isMcptt) return
-        val changed = synchronized(lock) {
-            val s = sessionMap.values.firstOrNull { it.callId == c.callId } ?: return
-            (s.video != c.video).also { s.video = c.video }
-        }
-        val want = _videoSend.value
-        if (c.video && c.videoSend != want) cmd("setVideoSend") { ue.call(c.callId).setVideoSend(want) }
-        if (changed) publish()
-    }
-
-    /** 내 영상 보내기 — 영속 + 영상 세션 전부에 적용(송출은 코어가 발언권으로 개폐한다, ue_sdk.md §4.5). */
-    fun setVideoSend(on: Boolean) {
-        _videoSend.value = on
-        videoPrefs.edit().putBoolean(PREF_VIDEO_SEND, on).apply()
-        val ids = synchronized(lock) { sessionMap.values.filter { it.video && it.callId >= 0 }.map { it.callId } }
-        ids.forEach { id -> cmd("setVideoSend") { ue.call(id).setVideoSend(on) } }
-    }
-
     /** 캡처 카메라 전환(전면↔후면) — 송출 중인 영상 호의 카메라를 바꾸고 이후 송출의 기본 카메라로도 쓴다. */
     fun switchCamera(callId: Int) = cmd("switchCamera") { ue.call(callId).switchCamera() }
 
-    /** 수신 영상을 그릴 Surface(null = 해제) — 주채널 화면의 영상 칸. 코어 창은 하나라 영상 세션 전부가 이 창에 그린다. */
+    /** 수신 영상을 그릴 Surface(null = 해제) — 주채널 화면의 영상 칸. 코어 창은 하나라 영상 호도 하나만 둔다([VideoPlane]). */
     fun setVideoSurface(surface: android.view.Surface?) = cmd("setVideoSurface") { ue.setVideoSurface(surface) }
 
     /** 내 카메라 미리보기 Surface(null = 해제) — 카메라는 코어 캡처가 연 것에 출력만 더한다(카메라 2중 개방 없음). */
@@ -639,7 +632,7 @@ class PttController(
         groupsPlane.startPrivateCall(peer, fullDuplex, emergency)
     fun startEmergencyPrivateCall(peer: String, fullDuplex: Boolean = false) =
         emergencyPlane.startEmergencyPrivateCall(peer, fullDuplex)
-    fun leaveGroup(groupId: String) = groupsPlane.leaveGroup(groupId)
+    fun leaveGroup(groupId: String) { groupsPlane.leaveGroup(groupId); videoPlane.requestSync() }   // 채널을 나가면 영상 호도(D10)
     fun login(userName: String, password: String) = groupsPlane.login(userName, password)
     fun setAccessToken(accessToken: String) = groupsPlane.setAccessToken(accessToken)
     fun loadGroups() = groupsPlane.loadGroups()
@@ -667,6 +660,23 @@ class PttController(
 
     fun pttDown() = floorPlane.pttDown()
     fun pttUp() = floorPlane.pttUp()
+
+    // ── MCVideo(TS 24.281·24.581) — 영상은 그룹의 MCVideo 호, [PTT] 는 MCPTT 호 그대로(mcvideo.md §7 D6) ──
+    /** MCVideo 그룹 호들(한 번에 하나). */
+    val videoCalls: StateFlow<List<VideoCallState>> get() = videoPlane.state
+    /** 서버가 MCVideo 를 낸다(ue-init-config PSI) — 그룹 문서의 MCVideo 몫과 함께 영상 채널을 정한다. 영상 호 합류·나가기는 주채널을
+     *  따라 평면이 한다(D10 — 명령 없음). */
+    val mcvideoAvailable: StateFlow<Boolean> get() = videoPlane.available
+    /** 영상 채널(사용자가 고른 주채널) — 무전 세션이 없을 때도 영상 호가 이어진다(D10). */
+    val videoChannel: String? get() = videoPlane.channelGroup
+    /** [영상 보내기] 토글 — 송출 요청/끝내기. */
+    fun setVideoTransmit(groupId: String, on: Boolean) = videoPlane.setTransmit(groupId, on)
+    /** «새 영상» [받기] / [그만 보기]. */
+    fun acceptVideo(groupId: String, transmitterId: String) = videoPlane.accept(groupId, transmitterId)
+    fun stopVideo(groupId: String, transmitterId: String) = videoPlane.stopViewing(groupId, transmitterId)
+    /** 영상 보내는 중 무전 마이크 정책(D12) — 영속(ptt_video/mic_policy). */
+    val videoMicPolicy: StateFlow<VideoMicPolicy> get() = videoPlane.micPolicy
+    fun setVideoMicPolicy(p: VideoMicPolicy) = videoPlane.setMicPolicy(p)
 
     /** 사용자 MCPTT 프로파일(TS 24.484) 요약 — SOS 대상 결정 모드·전용 긴급그룹·긴급 사설콜·개시 인가(코어 UserProfileDoc 의 투영). */
     data class UserProfile(
@@ -717,20 +727,33 @@ class PttController(
             val s = sessionMap.values.firstOrNull { it.callId == callId } ?: return
             sessionMap.remove(s.groupId)
             s.close()
-            // 주채널이 사라지면 남은 첫 세션을 주채널로 승격
-            if (s.role == ChannelRole.PRIMARY) sessionMap.values.firstOrNull()?.role = ChannelRole.PRIMARY
+            // 주채널이 사라지면 남은 첫 세션을 주채널로 승격 — 사용자가 고른 주채널이 남아 있으면(세션만 T4 등으로 끝났다) 승격하지
+            //   않는다: 다른 그룹 세션은 듣기만 하고 선택 그룹은 그대로다(TS 22.179 그룹 스캐닝, autoJoinGroupCall 과 같은 규칙).
+            //   사용자가 나간 경우는 leaveGroup 이 저장값을 먼저 지운다.
+            if (s.role == ChannelRole.PRIMARY && channelStore?.primary == null)
+                sessionMap.values.firstOrNull()?.role = ChannelRole.PRIMARY
             s.groupId
         }
-        // 활성 통화가 모두 끝나면 VoIP 오디오 모드 해제(MODE_NORMAL 복원) + 장치 음량 원복
-        if (synchronized(lock) { sessionMap.values.none { it.active } }) {
-            audioRouter?.setInCall(false)
-            applyDeviceLevels(1f, 1f)
-        }
+        leaveCallAudioIfIdle()
         applyProximity()
         groupsPlane.onSessionLeft(gid)
         _status.value = "[$gid] 그룹콜 종료"
         emit(PttEventKind.LEAVE, gid)
         publish()
+    }
+
+    /** 통화 오디오 진입 — VoIP 오디오 모드(라우팅·음량 전제) + 무전 체감 음량 보강 + 통화별 라우팅 재적용. MCPTT·MCVideo 호 성립 때. */
+    internal fun enterCallAudio() {
+        audioRouter?.setInCall(true)
+        applyDeviceLevels(_spkGain.value, _micGain.value)
+        applyAudioRoute()
+    }
+
+    /** 활성 통화(무전 세션·영상 호)가 모두 끝나면 VoIP 오디오 모드 해제(MODE_NORMAL 복원) + 장치 음량 원복. */
+    internal fun leaveCallAudioIfIdle() {
+        if (synchronized(lock) { sessionMap.values.any { it.active } } || videoPlane.state.value.any { it.active }) return
+        audioRouter?.setInCall(false)
+        applyDeviceLevels(1f, 1f)
     }
 
     /** 세션 스냅샷 발행 + 주채널 파생 상태(floor/speaker) 갱신. */
@@ -741,6 +764,7 @@ class PttController(
         _floorState.value = primary?.floorState ?: FloorState.IDLE
         _speaker.value = primary?.speaker?.copy(groupId = null)
             ?: list.firstOrNull { it.audible && it.speaker != null }?.let { it.speaker!!.copy(groupId = it.groupId) }
+        videoPlane.requestSync()           // 주채널이 바뀌었을 수 있다 — 영상 호를 맞춘다(D10)
     }
 
     internal fun primarySession(): Session? =
@@ -758,6 +782,7 @@ class PttController(
             s.role = ChannelRole.PRIMARY
         }
         channelStore?.primary = groupId
+        videoPlane.requestSync()            // 고른 주채널 = 영상 채널(mcvideo.md §7 D10)
         _selectedGroup.value = groupId   // 선택 그룹 = 주채널 (SOS UseCurrentlySelectedGroup 대상)
         applyListenPolicy()
     }
@@ -770,6 +795,7 @@ class PttController(
             s.role = ChannelRole.NONE
         }
         channelStore?.let { if (it.primary == groupId) it.primary = null }
+        videoPlane.requestSync()
         applyListenPolicy()
     }
 
@@ -778,9 +804,11 @@ class PttController(
         applyListenPolicy()
     }
 
-    /** 듣기 정책 적용 — 비채널 그룹은 참여 유지하되 수신 음소거. 채널별 수신 음량도 건다(코어가 호에 기억해 재결선마다 다시 건다). */
+    /** 듣기 정책 적용 — 비채널 그룹은 참여 유지하되 수신 음소거. 채널별 수신 음량도 건다(코어가 호에 기억해 재결선마다 다시 건다).
+     *  MCVideo 영상을 받는 동안은 무전 소리를 [VIDEO_DUCK] 배로 줄인다 — 두 호의 소리가 겹치면 영상 호 음성 우선(mcvideo.md §7 D6). */
     internal fun applyListenPolicy() {
         val policy = _listenPolicy.value
+        val duck = if (videoPlane.receivingAny()) VIDEO_DUCK else 1f
         val ops = ArrayList<Triple<Int, Boolean, Float>>()
         synchronized(lock) {
             for (s in sessionMap.values) {
@@ -788,7 +816,7 @@ class PttController(
                 // 정책(CHANNELS_ONLY)의 대상이 아니다. 주채널 비점유(role=NONE)라도 항상 수신.
                 val on = policy == ListenPolicy.ALL || s.role != ChannelRole.NONE || s.privatePeer
                 s.audible = on
-                if (s.callId >= 0) ops.add(Triple(s.callId, on, s.volume))
+                if (s.callId >= 0) ops.add(Triple(s.callId, on, s.volume * duck))
             }
         }
         ops.forEach { (id, on, vol) ->
@@ -806,7 +834,8 @@ class PttController(
             s.volume = level
             s.callId
         }
-        if (id >= 0) cmd("setRxLevel($id)") { ue.call(id).setRxLevel(level) }
+        val duck = if (videoPlane.receivingAny()) VIDEO_DUCK else 1f
+        if (id >= 0) cmd("setRxLevel($id)") { ue.call(id).setRxLevel(level * duck) }
         publish()
     }
 
@@ -887,8 +916,8 @@ class PttController(
         /** Granted Duration(T2) 마감 임박 알림 시점 — 마감 이 시간 전에 톤·진동으로 알린다(자체 종료는 코어). */
         internal const val TALK_WARN_MS = 5000L
 
-        /** 내 영상 보내기 저장 키(ptt_video) — 기본 켬. */
-        private const val PREF_VIDEO_SEND = "send"
+        /** MCVideo 영상을 받는 동안 무전(MCPTT) 수신 배율 — 영상 호 음성 우선(mcvideo.md §7 D6). */
+        internal const val VIDEO_DUCK = 0.3f
 
         /** 오디오 라우팅 — 저장값(AudioRoutePrefs)과 같은 수. 0~2 는 엔진 라우트, 3 = 이어폰(유선/BT 장치 지정). */
         const val AUDIO_ROUTE_DEFAULT = 0   // 자동(이어폰 연결 시 이어폰)

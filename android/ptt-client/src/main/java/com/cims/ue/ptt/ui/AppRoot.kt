@@ -66,8 +66,10 @@ class PttUiState(
     val hasAccount: Boolean,
     /** 활성 긴급경보(수신+내 발신) — 통화와 별개인 위험 통지. */
     val alerts: List<com.cims.ue.ptt.ActiveAlert> = emptyList(),
-    /** 내 영상 보내기(영상 칸 토글) — 영상 그룹에서 발언하는 동안 카메라를 보낸다. */
-    val videoSend: Boolean = true,
+    /** MCVideo 그룹 호(한 번에 하나) — 영상은 MCVideo 호, [PTT] 는 MCPTT 호(mcvideo.md §7 D6). */
+    val videoCalls: List<com.cims.ue.ptt.VideoCallState> = emptyList(),
+    /** 서버가 MCVideo 를 낸다(ue-init-config PSI). */
+    val mcvideoAvailable: Boolean = false,
 ) {
     val primary: GroupCallState? get() = sessions.firstOrNull { it.role == com.cims.ue.ptt.ChannelRole.PRIMARY }
     val inCall: Boolean get() = sessions.any { it.active || it.callId >= 0 }
@@ -79,6 +81,14 @@ class PttUiState(
     fun onlineCount(groupId: String): Int? = channelRosters[groupId]?.size
     fun groupName(groupId: String): String =
         groups.firstOrNull { PttController.bareId(it.uri) == groupId }?.displayName ?: groupId
+    /** 그룹 멤버 표시 이름 — 그룹 문서 이름, 없으면 번호(로컬 표기). */
+    fun memberName(groupId: String, userId: String): String {
+        val id = PttController.bareId(userId)
+        return groupDocs[groupId]?.members?.firstOrNull { PttController.bareId(it.uri) == id }?.name ?: PttController.fmtNumber(id)
+    }
+    fun videoCall(groupId: String): com.cims.ue.ptt.VideoCallState? = videoCalls.firstOrNull { it.groupId == groupId }
+    /** [영상 참여] 를 보일 그룹 — 서버가 MCVideo 를 내고 그룹 문서에 MCVideo 몫이 있다. */
+    fun videoGroup(groupId: String): Boolean = mcvideoAvailable && groupDocs[groupId]?.mcvideo != null
 }
 
 @Composable
@@ -103,7 +113,8 @@ fun AppRoot(svc: PttService?, onStopSip: () -> Unit) {
     val fbSpkGain = remember { MutableStateFlow(com.cims.ue.ptt.audio.AudioRoutePrefs.DEFAULT_SPK_GAIN) }
     val fbMicGain = remember { MutableStateFlow(com.cims.ue.ptt.audio.AudioRoutePrefs.DEFAULT_MIC_GAIN) }
     val fbAlerts = remember { MutableStateFlow<List<com.cims.ue.ptt.ActiveAlert>>(emptyList()) }
-    val fbVideoSend = remember { MutableStateFlow(true) }
+    val fbVideoCalls = remember { MutableStateFlow<List<com.cims.ue.ptt.VideoCallState>>(emptyList()) }
+    val fbMcvideo = remember { MutableStateFlow(false) }
 
     val st = PttUiState(
         ctl = ctl,
@@ -124,7 +135,8 @@ fun AppRoot(svc: PttService?, onStopSip: () -> Unit) {
         micGain = (ctl?.micGain ?: fbMicGain).collectAsState().value,
         hasAccount = remember(ctl) { com.cims.ue.core.account.SsoProvisioner.hasAccount(context) },
         alerts = (ctl?.alerts ?: fbAlerts).collectAsState().value,
-        videoSend = (ctl?.videoSend ?: fbVideoSend).collectAsState().value,
+        videoCalls = (ctl?.videoCalls ?: fbVideoCalls).collectAsState().value,
+        mcvideoAvailable = (ctl?.mcvideoAvailable ?: fbMcvideo).collectAsState().value,
     )
 
     // SSO: 컨트롤러 연결 시 CIMS 공유 계정의 MCPTT(TS 33.180) 토큰을 주입(별도 로그인 없음).
@@ -150,7 +162,7 @@ fun AppRoot(svc: PttService?, onStopSip: () -> Unit) {
     var showKeyConfig by remember { mutableStateOf(false) }
 
     LaunchedEffect(nav) {
-        // 카메라 = 영상 그룹 발언 중 내 영상(영상 칸 토글) — 마이크를 이미 받은 설치본도 카메라가 없으면 묻는다
+        // 카메라 = MCVideo [영상 보내기] — 마이크를 이미 받은 설치본도 카메라가 없으면 묻는다
         fun missing(p: String) = ContextCompat.checkSelfPermission(context, p) != PackageManager.PERMISSION_GRANTED
         if (nav is Nav.Home && (missing(Manifest.permission.RECORD_AUDIO) || missing(Manifest.permission.CAMERA))) {
             perm.launch(buildList {
@@ -244,18 +256,6 @@ fun AppRoot(svc: PttService?, onStopSip: () -> Unit) {
         st.sessions.firstOrNull { com.cims.ue.ptt.PttController.isAdhocId(it.groupId) }
             ?.let { AdhocCallOverlay(st, it) }
 
-        // 영상 전체화면 — 주채널 영상 세션(서버 video_enabled 그룹). 영상은 주채널 탭에서만 본다 — 다른 탭·화면에서는 띄우지 않고,
-        //   주채널 탭으로 오면 뜬다. 세션이 생기면 켜고, [작게 보기]로 끈 호는 다시 켜지 않는다.
-        val videoSession = st.primary?.takeIf {
-            it.video && it.callId >= 0 && !it.privatePeer && !com.cims.ue.ptt.PttController.isAdhocId(it.groupId)
-        }
-        LaunchedEffect(videoSession?.callId) {
-            if (videoSession == null) VideoView.minimizedCall = -1
-            VideoView.full.value = videoSession != null && videoSession.callId != VideoView.minimizedCall
-        }
-        val videoFull by VideoView.full.collectAsState()
-        val onMainTab = (nav as? Nav.Home)?.tab == Tab.MAIN
-        if (videoSession != null && videoFull && onMainTab) VideoCallOverlay(st, videoSession)
 
         // 하드웨어 버튼 설정 오버레이 — 같은 Activity 윈도우(물리 키가 dispatchKeyEvent 로 유입되게)
         if (showKeyConfig) KeyConfigOverlay(onDismiss = { HwPtt.cancelLearn(); showKeyConfig = false })

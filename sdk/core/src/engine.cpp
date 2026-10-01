@@ -749,7 +749,7 @@ public:
             });
         };
         cb.onReceive = [o, idRef](const VideoTransmitter& t, bool on) {
-            // 수신 결선(송출별 렌더)은 C6 — 1차는 호의 수신 창이 받는 영상을 그대로 그린다(수신 스트림 상한 1)
+            // 수신 = 호의 수신 창이 받는 영상을 그린다(CMP 가 수신 허가된 송출만 보낸다 — 1차 수신 상한 1). 송출별 렌더는 다중 수신(V8)
             o->log(3, "mcvideo call " + std::to_string(*idRef) + " receive " + t.userId + (on ? " on" : " off"));
         };
         cb.log = [o](int level, const std::string& m) { o->log(level, m); };
@@ -1777,7 +1777,8 @@ void Engine::Impl::wireMedia(PjCall* call, int callId) {
     else if (call->mcvideo) micOn = call->mcvideo->sendOn && !snap.muted;   // MCVideo = 송출 허가('U: has permission')에서만
     else micOn = !snap.muted && !call->recvOnly;
     if (micOn) src.startTransmit(*aud); else src.stopTransmit(*aud);
-    if (call->mcvideo) setAudioTx(callId, call->mcvideo->sendOn);            // 허가 밖에서는 무음 프레임도 내지 않는다
+    // 허가 밖에서는 무음 프레임도 내지 않는다. 허가 중 음소거(setMuted) = 음성 송신만 멈춘다 — 영상은 계속(mcvideo.md §7 D12)
+    if (call->mcvideo) setAudioTx(callId, call->mcvideo->sendOn && !snap.muted);
     applyDeviceLevels();                                   // 결선으로 장치가 막 열렸을 수 있다 — 장치 단 음량 재적용
 }
 

@@ -89,7 +89,7 @@ fun ChannelDetailScreen(
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                     modifier = Modifier.padding(top = 1.dp),
                 ) {
-                    TagChip(if (doc?.video == true) "영상" else "음성")
+                    TagChip(if (doc?.mcvideo != null) "영상" else "음성")
                     // TS 24.481 on-network-group-priority (클수록 높음)
                     doc?.priority?.let { TagChip("P$it") }
                     if (doc?.sessionType == "chat") TagChip("채팅형")

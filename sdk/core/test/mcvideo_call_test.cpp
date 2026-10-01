@@ -708,12 +708,21 @@ TEST(McvCall, ChatJoinTransmitAndRelease) {
     }
     EXPECT_EQ(r.eng.transmissionInfo(id).state, TransmissionState::Permitted);
     EXPECT_GT(audio.countPayloadRtp(600), 5);                 // 허가 — 오디오 송출
+    // 허가 중 음소거 = 음성 송신만 멈춘다(무음 프레임도 없음 — 영상은 계속, mcvideo.md §7 D12) → 풀면 재개
+    ASSERT_TRUE(r.eng.setMuted(id, true).ok);
+    audio.countPayloadRtp(200);
+    EXPECT_EQ(audio.countPayloadRtp(600), 0);
+    ASSERT_TRUE(r.eng.setMuted(id, false).ok);
+    EXPECT_GT(audio.countPayloadRtp(600), 5);
 
     ASSERT_TRUE(r.eng.releaseTransmission(id).ok);
     ASSERT_TRUE(ctrl.expectTc(mcvideo::AppName::MCV2, (uint8_t)mcvideo::Mcv2::TRANSMISSION_END_REQUEST, nullptr));
     ctrl.sendTc(mcvideo::AppName::MCV2, (uint8_t)mcvideo::Mcv2::TRANSMISSION_END_RESPONSE, {});
     ASSERT_TRUE(r.l.wait([&] { return r.l.hasTx(TransmissionEvent::Kind::Ended); }));
     audio.countPayloadRtp(200);                                // 멈추기 전 이미 보낸 것 흘려보내기
+    EXPECT_EQ(audio.countPayloadRtp(600), 0);
+    ASSERT_TRUE(r.eng.setMuted(id, true).ok);                  // 허가 밖 음소거 해제가 인코더를 다시 열지 않는다(송출 게이트)
+    ASSERT_TRUE(r.eng.setMuted(id, false).ok);
     EXPECT_EQ(audio.countPayloadRtp(600), 0);
 
     ASSERT_TRUE(r.eng.hangup(id).ok);

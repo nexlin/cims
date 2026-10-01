@@ -243,7 +243,8 @@ C++ 공개 표면은 `cimsue/engine.h` 의 `Engine` 하나이며 계정·호를 
   (미디어 수가 늘면 pjsua `med_prov_cnt` assert).
 - **승인 톤 뒤 마이크**(android_ue_client.md «삑 후 말하기»). `EngineConfig.grantMicDelayMs` 만큼 Floor Granted(200 OK 승인 포함) 뒤 마이크
   개방을 미루고, 그 사이 놓거나·회수·시한으로 발언을 잃으면 열지 않는다(톤은 앱이 재생한다). 전이중 사설콜(`mc_no_floor_ctrl`)은 floor 가
-  없으므로 `setMuted` 가 앱의 PTT 로컬 게이트다. 호 수신 음량(`setRxLevel`)은 호에 기억되어(`CallInfo.rxLevel`) 오디오가 없거나 재협상으로
+  없으므로 `setMuted` 가 앱의 PTT 로컬 게이트다. MCVideo 호의 `setMuted(true)` 는 송출 허가 중 음성 송신만 멈춘다(마이크 결선과 오디오
+  인코더를 함께 멈춰 무음 프레임도 내지 않는다, 영상은 계속 — 마이크 경합 정책 [mcvideo.md](mcvideo.md) §7 D12). 호 수신 음량(`setRxLevel`)은 호에 기억되어(`CallInfo.rxLevel`) 오디오가 없거나 재협상으로
   스트림이 바뀌어도 다음 결선에 다시 걸린다.
 - **에러 모델.** 명령은 즉시 `Result{ok, reason}` 을 돌려주고(인자·상태 오류), 프로토콜 결과는 이벤트로 온다.
 - **망 변경.** 플랫폼은 망 변경(기본 망 전환·끊겼다 복귀)을 `Engine::handleNetworkChange()` 로 **알리기만** 한다. 등록 복구는

@@ -55,9 +55,8 @@ internal class GroupPlane(private val c: PttController) {
         }
         c.ctl.launch {
             val acc = c.account
-            // 영상 제안 — 서버 그룹이 영상(video_enabled)이 아니면 port 0 으로 거절돼 음성만 남는다
-            val r = acc?.joinGroupCall(groupId, GroupCallOptions(emergency = emergency, broadcast = broadcast, members = members,
-                                                                  video = true))
+            // 음성만 — 그룹 영상은 MCVideo 호다([VideoPlane], mcvideo.md §7 D9)
+            val r = acc?.joinGroupCall(groupId, GroupCallOptions(emergency = emergency, broadcast = broadcast, members = members))
             if (r != null && r.ok) { c.bindCall(groupId, r.value!!.id); return@launch }
             Log.w(TAG, "joinGroupCall $groupId 실패: ${r?.code} ${r?.reason ?: "not registered"}")
             synchronized(c.lock) { if (c.sessionMap[groupId] === s) c.sessionMap.remove(groupId) }
@@ -207,11 +206,15 @@ internal class GroupPlane(private val c: PttController) {
             return
         }
         val emergency = ci.condition.emergency || ci.mcptt.emergency
+        // 주채널(선택 그룹)은 사용자가 고른다 — 고른 주채널이 있으면 다른 그룹의 팬아웃 착신은 듣기만 하고 주채널 자리를 차지하지
+        //   않는다(TS 22.179 그룹 스캐닝: 여러 그룹을 받되 선택 그룹은 그대로). 고른 주채널이 없을 때만 받은 그룹을 주채널로 삼는다.
+        val chosen = c.channelStore?.primary
         val s = synchronized(c.lock) {
             if (c.sessionMap.containsKey(groupId)) return          // 경합 재확인
             c.Session(groupId).also {
                 it.callId = ci.callId
-                it.role = if (c.sessionMap.values.none { v -> v.role == ChannelRole.PRIMARY }) ChannelRole.PRIMARY
+                it.role = if (c.sessionMap.values.none { v -> v.role == ChannelRole.PRIMARY } && (chosen == null || chosen == groupId))
+                    ChannelRole.PRIMARY
                 else ChannelRole.NONE
                 it.emergency = emergency
                 c.sessionMap[groupId] = it

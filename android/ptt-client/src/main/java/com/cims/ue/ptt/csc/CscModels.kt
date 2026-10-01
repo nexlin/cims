@@ -35,14 +35,14 @@ data class GroupDoc(
     val members: List<GroupMember>,
     /** on-network-group-priority. */
     val priority: Int?,
-    /** mcptt-video — 영상 그룹 여부. */
-    val video: Boolean,
     /** 그룹 종류 prearranged/chat — 문서의 on-network-invite-members(TS 24.481 §7.2.2 a). */
     val sessionType: String?,
     val maxParticipants: Int?,
     /** mcdata-on-network-max-data-size-auto-recv — 파일(FD) 자동 다운로드 임계 octets (TS 24.481). */
     val autoRecvBytes: Int? = null,
     val etag: String?,
+    /** MCVideo 몫(TS 24.481 MCVideo `<service>`) — null 이면 MCVideo 그룹이 아니다(영상 참여 없음, mcvideo.md §7 D4). */
+    val mcvideo: McVideoAttrs? = null,
 ) {
     companion object {
         fun of(d: com.cims.ue.sdk.GroupDoc) = GroupDoc(
@@ -52,14 +52,22 @@ data class GroupDoc(
                 GroupMember(m.uri, m.name.ifBlank { null }, m.role, m.priority, m.title.ifBlank { null })
             },
             priority = d.priority,
-            video = d.videoEnabled,
             sessionType = d.sessionType.ifBlank { null },
             maxParticipants = d.maxParticipants.takeIf { it > 0 },
             autoRecvBytes = d.maxAutoRecv,
             etag = d.etag.ifBlank { null },
+            mcvideo = d.mcvideo?.let { McVideoAttrs(prearranged = it.inviteMembers, maxTransmitters = it.maxTransmitters) },
         )
     }
 }
+
+/** 그룹 문서의 MCVideo 몫 요약 — 호 종류(`mcvideo-on-network-invite-members`, TS 24.281 §6.3.5.2)·동시 송출 상한. */
+data class McVideoAttrs(
+    /** true = prearranged(제어 기능이 affiliate 한 멤버 전원 초대), false = chat(원하는 사람만 — 합류가 affiliation). */
+    val prearranged: Boolean,
+    /** mcvideo-maximum-simultaneous-mcvideo-transmitting-group-members — null = 미기재. */
+    val maxTransmitters: Int?,
+)
 
 /** CSC 접속 설정. */
 data class CscConfig(

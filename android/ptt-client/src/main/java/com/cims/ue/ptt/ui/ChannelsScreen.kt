@@ -130,7 +130,7 @@ private fun ChannelRow(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.padding(top = 2.dp),
             ) {
-                if (doc?.video == true) TagChip("영상", R.drawable.ic_video) else TagChip("음성", R.drawable.ic_voice)
+                if (doc?.mcvideo != null) TagChip("영상", R.drawable.ic_video) else TagChip("음성", R.drawable.ic_voice)
                 // TS 24.481 on-network-group-priority (클수록 높음)
                 doc?.priority?.let { TagChip("P$it") }
                 // 편성 인원(그룹 문서) — 채널의 정원
