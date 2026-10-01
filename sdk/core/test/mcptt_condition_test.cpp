@@ -150,6 +150,82 @@ struct FakeServer {
 
 }  // namespace
 
+/** 제어 기능의 멤버 초대(TS 24.379 §6.3.3.1.2 — mcptt-info + SDP, Session-Expires 는 refresher 생략 6)) — UE 주소로 보낸다. */
+static std::string memberInvite(int srvPort, int uePort, const std::string& callId, const std::string& sessionExpires) {
+    const std::string b = "mb1";
+    const std::string info = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n<mcpttinfo xmlns=\"urn:3gpp:ns:mcpttInfo:1.0\"><mcptt-Params>"
+                             "<session-type>prearranged</session-type><mcptt-calling-user-id>tel:+82500000002</mcptt-calling-user-id>"
+                             "<mcptt-calling-group-id>tel:g001</mcptt-calling-group-id></mcptt-Params></mcpttinfo>";
+    const std::string sdpBody = "v=0\r\no=CSS 4 1 IN IP4 127.0.0.1\r\ns=-\r\nc=IN IP4 127.0.0.1\r\nt=0 0\r\n"
+                                "m=audio 40010 RTP/AVP 0\r\na=rtpmap:0 PCMU/8000\r\na=sendrecv\r\n"
+                                "m=application 40012 UDP MCPTT\r\na=floorid:0 mstrm:audio\r\na=fmtp:MCPTT mc_queueing;mc_priority=3\r\n";
+    const std::string body = "--" + b + "\r\nContent-Type: application/vnd.3gpp.mcptt-info+xml\r\n\r\n" + info + "\r\n--" + b +
+                             "\r\nContent-Type: application/sdp\r\n\r\n" + sdpBody + "--" + b + "--\r\n";
+    const std::string ue = "sip:+82500000001@127.0.0.1:" + std::to_string(uePort);
+    return "INVITE " + ue + " SIP/2.0\r\nVia: SIP/2.0/UDP 127.0.0.1:" + std::to_string(srvPort) + ";branch=z9hG4bK" + callId + "\r\n" +
+           "Max-Forwards: 70\r\nFrom: <sip:g001@ptt.test>;tag=srv-" + callId + "\r\nTo: <" + ue + ">\r\nCall-ID: " + callId + "\r\n" +
+           "CSeq: 1 INVITE\r\nContact: <sip:g001@127.0.0.1:" + std::to_string(srvPort) + ";gr=s1>;+g.3gpp.mcptt;isfocus\r\n" +
+           "Supported: timer\r\nSession-Expires: " + sessionExpires + "\r\nMin-SE: 90\r\n" +
+           "Accept-Contact: *;+g.3gpp.mcptt;require;explicit\r\nP-Asserted-Service: urn:urn-7:3gpp-service.ims.icsi.mcptt\r\n" +
+           "Content-Type: multipart/mixed;boundary=" + b + "\r\nContent-Length: " + std::to_string(body.size()) + "\r\n\r\n" + body;
+}
+
+static int countHeader(const std::string& msg, const std::string& name) {
+    int n = 0;
+    for (size_t p = msg.find("\r\n" + name + ":"); p != std::string::npos; p = msg.find("\r\n" + name + ":", p + 2)) ++n;
+    return n;
+}
+
+// 멤버 초대 자동 수락의 200 OK — 갱신 주체 = 단말(TS 24.379 §6.2.3.1.1 5)·§6.2.3.1.2: 초대가 refresher 를 정하지 않으면 uas) +
+//   Require: timer(2)) 한 줄. 초대가 refresher 를 정했으면(옛 서버의 uac) 그 값을 따른다(RFC 4028 §9 Table 2).
+TEST(McpttInvite, MemberInvitationRefresherUas) {
+    Engine eng;
+    CondListener l;
+    EngineConfig cfg;
+    cfg.logLevel = std::getenv("COND_LOG") ? 5 : 0;
+    cfg.nullAudioDevice = true;
+    {
+        cimsue_test::PjScope pj("inv-port");
+        FakeServer probe;                                                     // 빈 포트 하나를 UE 포트로
+        cfg.udpPort = probe.port;
+    }
+    ASSERT_TRUE(eng.start(cfg, &l).ok);
+    {
+        cimsue_test::PjScope pj("inv-test");
+        FakeServer srv;
+        AccountConfig ac;
+        ac.serverHost = "127.0.0.1"; ac.serverPort = srv.port; ac.transport = Transport::UDP;
+        ac.domain = "ptt.test"; ac.msisdn = "+82500000001"; ac.authId = "450000000000001@ptt.test"; ac.password = "x";
+        ac.instanceId = "urn:uuid:00000000-0000-4000-8000-000000000001";
+        ASSERT_GE(eng.addAccount(ac), 0);
+        struct Case { const char* se; const char* want; };
+        int n = 0;
+        for (const Case& c : {Case{"1800", "1800;refresher=uas"}, Case{"1800;refresher=uac", "1800;refresher=uac"}}) {
+            const std::string cid = "mi-" + std::to_string(++n);
+            const std::string inv = memberInvite(srv.port, cfg.udpPort, cid, c.se);
+            srv.peer = pj_sockaddr_in();
+            pj_str_t ip = pj_str(const_cast<char*>("127.0.0.1"));
+            pj_sockaddr_in_init(&srv.peer, &ip, (pj_uint16_t)cfg.udpPort);
+            srv.send(inv);
+            std::string ok = srv.recv("SIP/2.0 200");
+            ASSERT_FALSE(ok.empty()) << c.se;
+            EXPECT_EQ(headerOf(ok, "Session-Expires"), c.want) << ok;
+            EXPECT_NE(headerOf(ok, "Require").find("timer"), std::string::npos) << ok;
+            EXPECT_EQ(countHeader(ok, "Require"), 1) << ok;
+            srv.callId = cid;
+            srv.ueContact = uriIn(headerOf(ok, "Contact"));
+            srv.cseq = 1;
+            srv.ackFor(ok);
+            std::string bye = "BYE " + srv.ueContact + " SIP/2.0\r\nVia: SIP/2.0/UDP 127.0.0.1:" + std::to_string(srv.port) +
+                              ";branch=z9hG4bKbye" + cid + "\r\nMax-Forwards: 70\r\nFrom: " + headerOf(ok, "From") + "\r\nTo: " +
+                              headerOf(ok, "To") + "\r\nCall-ID: " + cid + "\r\nCSeq: 2 BYE\r\nContent-Length: 0\r\n\r\n";
+            srv.send(bye);
+            ASSERT_FALSE(srv.recv("SIP/2.0 200").empty()) << "BYE " << c.se;
+        }
+    }
+    eng.stop();
+}
+
 TEST(McpttCondition, UpgradeDeniedConfirmedAndAdvertised) {
     Engine eng;
     CondListener l;

@@ -29,6 +29,7 @@
 #include "CspRole.h"
 #include "CspServiceConfig.h"
 #include "FmReporter.h"
+#include "McService.h"
 #include "McpttInfo.h"
 #include "RtpMap.h"
 #include "SipCodecTable.h"
@@ -43,6 +44,11 @@
 //   멤버 leg INVITE·개시자 18x/200 OK·이후 in-dialog 요청이 같은 값을 쓴다.
 static const char *kFocusContactParams =
     "+g.3gpp.mcptt;+g.3gpp.icsi-ref=\"urn%3Aurn-7%3A3gpp-service.ims.icsi.mcptt\";isfocus";
+
+// 제어 기능의 멤버 초대 offer 의 floor fmtp(TS 24.380 §14.2.2 mc_queueing · §14.2.3 mc_priority).
+//   이어지는 offer(조건 재광고·세션 갱신)도 같은 값이다(§14.5 — 처음 offer 규칙, mc_granted 없음).
+//   mc_priority 는 그룹 문서 <user-priority> 가 아니라 고정값이다(mcptt_standard_conformance.md C4a).
+static const char *kMemberFloorOfferFmtp = "mc_queueing;mc_priority=3";
 
 // CspServer.cpp — PTT 세션 참가 leg 의 dialog-event NOTIFY (dispatch_center.md §5.6a)
 extern void SendPttDialogEventNotify( const std::string &strWatchedAor, const std::string &strDlgCallId,
@@ -176,6 +182,52 @@ std::string CGroupCallService::AnswerFloorFmtp( const McpttFmtp &clsOffer, bool 
     if ( clsOffer.iQueueing != 0 ) str = "mc_queueing";  // 1 = offer 가 실었다 · -1 = fmtp 없는 구단말(종전 광고 유지)
     if ( bImplicitAccepted ) str += std::string( str.empty() ? "" : ";" ) + "mc_implicit_request";
     return str;
+}
+void CGroupCallService::StripInitialOnlyFloorFmtp( CSipMessage *pclsOffer ) {
+    if ( pclsOffer == NULL ) return;
+    std::string &strBody = pclsOffer->m_strBody;
+    static const char kPre[] = "a=fmtp:MCPTT";
+    size_t iLine = strBody.find( kPre );
+    if ( iLine == std::string::npos ) return;
+    size_t iEol = strBody.find( "\r\n", iLine );
+    const size_t iNext = iEol == std::string::npos ? strBody.size() : iEol + 2;
+    if ( iEol == std::string::npos ) iEol = strBody.size();
+    std::string strKept;
+    const std::string strParams = strBody.substr( iLine + sizeof( kPre ) - 1, iEol - iLine - ( sizeof( kPre ) - 1 ) );
+    for ( size_t iPos = 0; iPos <= strParams.size(); ) {
+        size_t iEnd = strParams.find( ';', iPos );
+        if ( iEnd == std::string::npos ) iEnd = strParams.size();
+        std::string strTok = strParams.substr( iPos, iEnd - iPos );
+        iPos = iEnd + 1;
+        const size_t iB = strTok.find_first_not_of( " \t" );
+        if ( iB == std::string::npos ) continue;
+        strTok = strTok.substr( iB, strTok.find_last_not_of( " \t" ) - iB + 1 );
+        if ( strcasecmp( strTok.c_str(), "mc_granted" ) == 0 ||
+             strcasecmp( strTok.c_str(), "mc_implicit_request" ) == 0 )
+            continue;
+        strKept += ( strKept.empty() ? "" : ";" ) + strTok;
+    }
+    const std::string strLine = strKept.empty() ? std::string() : std::string( kPre ) + " " + strKept + "\r\n";
+    strBody.replace( iLine, iNext - iLine, strLine );
+    pclsOffer->m_iContentLength = (int)strBody.size();
+}
+
+bool CGroupCallService::RebuildReInviteFloorFmtp( const std::string &strCallId, CSipCallRtp *pclsRemoteRtp,
+                                                  CSipCallRtp *pclsLocalRtp ) {
+    if ( pclsLocalRtp == NULL || pclsLocalRtp->m_iApplicationPort <= 0 ) return false;
+    if ( pclsLocalRtp->m_eMcMediaProfile != E_MC_MEDIA_MCPTT ) return false;
+    {
+        std::unique_lock<std::recursive_mutex> lock( m_mutex );
+        if ( m_mapCallSession.find( strCallId ) == m_mapCallSession.end() ) return false;
+    }
+    McpttFmtp clsReOffer;
+    ParseMcpttFmtp( pclsRemoteRtp, clsReOffer );
+    const std::string strFmtp = AnswerFloorFmtp( clsReOffer, false );
+    if ( strFmtp != pclsLocalRtp->m_strApplicationFmtp )
+        CLog::Print( LOG_DEBUG, "ReInvite(%s): floor answer fmtp '%s' → '%s' (re-offer 기준, TS 24.380 §14.3.1)",
+                     strCallId.c_str(), pclsLocalRtp->m_strApplicationFmtp.c_str(), strFmtp.c_str() );
+    pclsLocalRtp->m_strApplicationFmtp = strFmtp;
+    return true;
 }
 
 CmpGroupSession CGroupCallService::CmpSessionOf( const CspPttGroup &clsGroup ) {
@@ -2461,6 +2513,10 @@ bool CGroupCallService::InviteMember( const char *pszUserId, const char *pszGrou
             std::string strGroupUri = "sip:" + std::string( pszGroupId ) + "@" + strMcpttDomain;
             WrapMultipartBody( pclsInvite, strGroupXml, strSharedIp, iFloorPort, strGroupUri,
                                clsGroup._floorControl == "off" );
+            // floor 줄은 본문에 덧붙인 것이라 다이얼로그 상태에 없다 — 스택이 만드는 세션 갱신 offer·멤버 re-INVITE
+            //   answer 가 floor 를 m=application 0 으로 끄지 않게 같은 선언을 다이얼로그에 둔다(RFC 3264 §8)
+            if ( iFloorPort > 0 )
+                gclsUserAgent.SetLocalApplicationMedia( strCallId.c_str(), iFloorPort, kMemberFloorOfferFmtp );
 
             // MCPTT capability required (3GPP TS 24.379 §6.3.1)
             pclsInvite->AddHeader(
@@ -2502,10 +2558,12 @@ bool CGroupCallService::InviteMember( const char *pszUserId, const char *pszGrou
                 pclsInvite->m_clsContactList.clear();
                 pclsInvite->m_clsContactList.push_back( clsContact );
             }
-            // 세션 타이머(RFC 4028) 헤더는 psip UA 가 협상값으로 싣는다 (leg_liveness.md §5.2) —
-            //   여기서 따로 광고하면 갱신을 이행하지 않는 값이 그대로 나가 규격 위반이 된다.
-            //   `refresher=uac` 는 TS 24.379 §6.3.3.1.2 가 허용하는 형태다("권고 = 생략, 싣는다면 uac") —
-            //   서버가 갱신자를 맡아 단말 구현과 무관하게 사라진 leg 을 회수한다(leg_liveness.md §5.3).
+            // 세션 타이머(RFC 4028) 헤더는 psip UA 가 협상값으로 싣는다 (leg_liveness.md §5.2) — 여기서 따로
+            //   광고하면 갱신을 이행하지 않는 값이 그대로 나간다. refresher 는 생략한다(TS 24.379 §6.3.3.1.2 6)
+            //   «The refresher parameter shall be omitted») — 규격 단말은 200 OK 에서 uas 로 정해 스스로
+            //   갱신하고(§6.2.3.1.1 5)) CSP 는 만료를 감시한다. refresher 를 정하지 않는 단말(pjsip 기본 =
+            //   uac)이면 CSP 가 갱신한다(leg_liveness.md §5.3).
+            McStripSessionRefresher( pclsInvite->m_clsHeaderList );
             // 비디오 활성화 전달 (cwrtc가 SDP에 H.264 포함 여부 결정)
             if ( bVideoEnabled && iMemberVideoPort > 0 ) {
                 char szVideo[64];
@@ -3974,7 +4032,7 @@ void CGroupCallService::WrapMultipartBody( CSipMessage *pclsInvite, const std::s
     if ( bNoFloorCtrl )
         sdpFloor << "a=fmtp:MCPTT mc_queueing;mc_no_floor_ctrl\r\n";
     else
-        sdpFloor << "a=fmtp:MCPTT mc_queueing;mc_priority=3\r\n";
+        sdpFloor << "a=fmtp:MCPTT " << kMemberFloorOfferFmtp << "\r\n";
     if ( !strGroupUri.empty() ) sdpFloor << "a=mcptt-floor-request-uri:" << strGroupUri << "\r\n";  // TS 24.379 §C.3
     strSdp += sdpFloor.str();
 
@@ -4094,6 +4152,7 @@ int CGroupCallService::PropagateConditionToMembers( const std::string &strGroupI
         CSipMessage *pclsReq = NULL;
         if ( leg.bAnswered ) {
             if ( !gclsUserAgent.CreateReInvite( leg.strCallId.c_str(), NULL, &pclsReq ) ) continue;  // 성립 SDP 그대로
+            StripInitialOnlyFloorFmtp( pclsReq );  // 로컬 선언 = 개시 answer — 이어지는 offer 규칙(§14.5)
         } else {
             // 멤버 leg — InviteMember 의 초기 오퍼와 같은 구성
             int iAudioPort = 0, iVideoPort = 0;
@@ -4108,7 +4167,7 @@ int CGroupCallService::PropagateConditionToMembers( const std::string &strGroupI
             //   보존한다. 있으면 초기 오퍼의 fmtp 그대로(WrapMultipartBody).
             if ( clsGroup._floorControl != "off" && iFloorPort > 0 ) {
                 clsRtp.m_iApplicationPort = iFloorPort;
-                clsRtp.m_strApplicationFmtp = "mc_queueing;mc_priority=3";
+                clsRtp.m_strApplicationFmtp = kMemberFloorOfferFmtp;
             }
             CSipCallRtp clsLocalRtp;  // SRTP leg — 기존 키 그대로 (재협상 아님)
             if ( gclsUserAgent.GetLocalCallRtp( leg.strCallId.c_str(), &clsLocalRtp ) &&

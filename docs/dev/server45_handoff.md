@@ -752,5 +752,21 @@ CSP 시도 장부·세션 색인(sip_statistics §3 attempt/session/leg)에 `ser
 **D6 추천(MCPTT 착신 refresher)** — 규격대로 `uas`(TS 24.379 §6.2.3.1.1 5)·§6.2.3.1.2). 함께: SDK 다이얼로그 안 MCPTT offer 에서 개시 전용 fmtp 제거(TS 24.380 §14 —
 MCVideo 와 같은 송신 보정) · CSP MCPTT re-INVITE answer fmtp 를 re-offer 로 다시 짓기(TS 24.380 §14.3.1 — MCVideo 7cba0610 과 같은 방식). CSP 전제는 확인됨(psip [M]).
 
+**D6 구현(10-01, 미배포)** — 규격 대조에서 범위가 하나 늘었다: CSP 멤버 초대가 `refresher=uac` 를 싣고 있었는데 TS 24.379 §6.3.3.1.2 6) 은
+«refresher parameter shall be omitted» 다(옛 주석의 «생략 권고, 싣는다면 uac» 는 참여→제어 기능 구간 §6.3.2.1.3 의 문언). 반영:
+- CSP — 멤버 초대 Session-Expires 의 refresher 를 지운다(`McStripSessionRefresher`, McService.h — MCVideo 와 공용) · MCPTT re-INVITE(세션 갱신 포함)
+  answer 의 `a=fmtp:MCPTT` 를 re-offer 로 다시 짓는다(`RebuildReInviteFloorFmtp` — TS 24.380 §14.3.1) · 조건 재광고 offer 에서 `mc_granted`·
+  `mc_implicit_request` 를 뺀다(§14.5) · 멤버 초대의 floor 선언을 psip 다이얼로그에 둔다(`SetLocalApplicationMedia`).
+- psip — `SetLocalApplicationMedia` · re-INVITE answer 는 floor fmtp 가 바뀌면 `o=` 버전을 올린다(RFC 3264 §8). S1-UNIT-PSIP [O] 신설.
+- SDK — 수신 보정 `mcRxFix` 를 mcptt-info 초대에도(refresher 없으면 uas) · 2xx `Require: timer` 를 MCPTT 에도 · 다이얼로그 안 단일 SDP offer 의
+  MCPTT 개시 전용 fmtp 제거(`mcptt::forSubsequentOffer`). 시험 `McpttInvite.MemberInvitationRefresherUas`(옛 서버의 uac 는 uac 로 따름)·
+  `FloorSdp.SubsequentOfferDropsInitialOnlyFmtp`, cimsue_test 149.
+- **라이브 결함(로그 근거)** — .45 SIP 로그 09-30 14:29~15:43 에 CSP 가 멤버 leg 에 보낸 세션 갱신 re-INVITE 9건이 전부 `m=application 0 UDP MCPTT`
+  (floor 스트림 끔) — 멤버 초대의 floor 줄은 본문에 덧붙일 뿐 다이얼로그 상태에 없어서다(현행 main·0.2.180 도 같은 코드). SDK 는 floor 소켓을 따로 써서
+  체감되지 않았다. 위 `SetLocalApplicationMedia` 가 고친다. (09-30 09:28 개시자 leg 의 같은 증상은 85ebbc30(csp 0.2.171)이 이미 고쳤다.)
+- 남은 것 — .48 실측(멤버 leg 갱신 주체 = 단말, 갱신 answer floor 유지, 옛 APK 는 CSP 갱신) → .45 배포는 사용자 결정 · 사설 호 수동 개시 180 의
+  `Require: timer`(§6.2.3.2.1 2) — pjsip 이 uac 일 때 Require 를 중복으로 넣는 문제를 먼저 풀어야 한다) · 멤버 초대 `mc_priority` 고정값 3(§14.2.3 은
+  `<user-priority>`) · SDK MCPTT answer 가 offer `mc_priority` 를 되돌리지 않음(§14.3.3 끝 문단) · psip 422 재시도 INVITE 가 refresher 를 다시 싣는다.
+
 **다음 세션(.45)** — ① D6 구현(SDK·CSP, 라이브 PTT 단말 동작이 바뀌므로 .48 에서 먼저 실측) ② R3 녹취 CSP 몫(D4 같은 폴더) ③ A12 통계(D5) ④ R7 1차 잔여 소항목 · R6
 xcap-diff ⑤ R5 콘솔(도안 확인 뒤) ⑥ cli PTT REGISTER MCPTT 태그. 남은 사용자 결정 = Linux 엔진 영상(openh264) · pjsua `on_send_request` 가드.

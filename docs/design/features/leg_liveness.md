@@ -150,7 +150,7 @@ RFC 4028 §9 Table 2 는 UAS 의 선택지를 다음으로 제한하므로, 규�
 | leg | 규격 | 선택 |
 |---|---|---|
 | MCPTT 개시자 → 제어 기능 200 OK | TS 24.379 §6.3.3.2.3.2 2) — refresher = `uac` | **단말이 갱신**, CSP 는 만료 감시(§6.2). timer 미지원 단말은 위 표 첫 줄대로 `uas`(CSP 갱신) |
-| 제어 기능 → 멤버 INVITE | §6.3.3.1.2 — refresher 생략 권고, 싣는다면 `uac` | `uac`(CSP 갱신) — 허용 값, 권고 편차([mcptt_standard_conformance.md](mcptt_standard_conformance.md) §C4a) |
+| 제어 기능 → 멤버 INVITE (MCPTT·MCVideo) | TS 24.379·24.281 §6.3.3.1.2 6) — refresher **생략** · 단말 200 OK = `uas`(§6.2.3.1.1 5)) | 생략(`McStripSessionRefresher`) — 규격 단말(libcimsue)은 `uas` 로 답해 **단말이 갱신**, CSP 는 만료 감시(§6.2). refresher 를 정하지 않는 단말(pjsip 기본 = `uac`)이면 CSP 가 갱신한다. 어느 쪽이든 사라진 leg 은 회수된다([mcptt_standard_conformance.md](mcptt_standard_conformance.md) §C4a) |
 
 ## 6. 갱신 절차
 
@@ -190,11 +190,12 @@ CSP 는 아무것도 보내지 않고 in-dialog re-INVITE(또는 향후 UPDATE) 
 | 수신 re-INVITE 는 **remote target 을 갱신**한다 | target refresh 요청(RFC 3261 §12.2.2) — 받아들이는 re-INVITE 의 Contact 로 바꾼다. 단말이 망을 바꿔 새 Contact 로 재등록·re-INVITE 하면 위 판정이 새 바인딩을 같은 단말로 본다 |
 | SDP offer 는 직전과 **동일한 `o=` 세션 버전**으로 만든다 | RFC 4028 §7.4 의 "변경 없음" 표시. 현재 `CSipDialog::AddSdp()` 는 호출마다 `++m_iSessionVersion` 하므로 갱신 경로에서는 증가를 억제해야 한다 |
 | 갱신 2xx 에는 `Session-Expires` 를 **항상 echo** 한다 | 빠지면 상대가 타이머 해제로 해석한다(§7.2). psip 의 re-INVITE 자동 200 OK 생성 지점(`SipUserAgentInvite.hpp` `RecvInviteRequest`)이 싣는다 |
-| 수신 갱신에 대한 **answer 도 `o=` 를 유지**한다 | §7.4 는 answer 에도 "변경 없음" 표시를 요구한다 — 상대 offer 가 무변경일 때 answer 의 세션 버전도 올리지 않는다 |
+| 수신 갱신에 대한 **answer 도 `o=` 를 유지**한다 — 단 응용이 answer 의 floor fmtp 를 다시 지었으면 올린다 | §7.4 는 answer 에도 "변경 없음" 표시를 요구한다 — 상대 offer 가 무변경이고 로컬 선언도 그대로일 때 answer 의 세션 버전을 올리지 않는다. MCPTT·MCVideo answer 의 fmtp 를 re-offer 로 다시 지어(TS 24.380·24.581 §14.3.1) 내용이 바뀌면 SDP 가 바뀐 것이라 버전을 올린다(RFC 3264 §8) |
 | 수신 갱신 re-INVITE 는 **미디어 재협상으로 처리하지 않는다** | 선언 주소·코덱이 직전과 같으면 CMP `RELAY_MODIFY`/`PTT_JOIN` 재호출과 NAT latch 재평가를 생략한다(`CModuleDispatcher::EventReInvite`). 불필요한 latch 리셋은 NAT 뒤 단말의 하향 경로를 흔든다 |
 | 갱신 수단은 당분간 **re-INVITE** | psip 은 UPDATE 를 구현하지 않는다(`SIP_METHOD_UPDATE` 부재). 다이얼로그 `Allow` 에도 UPDATE 가 없어 규격 준수 단말은 re-INVITE 를 쓴다([§12](#12-호환성리스크)) |
 | 조건 상향 등 다른 목적의 in-dialog re-INVITE 도 **갱신으로 계산**한다 | §7.2 — 중복 갱신을 줄인다 |
 | 수신 갱신의 answer 는 **직전 로컬 선언 그대로**다 — floor `m=application` 포트·fmtp·명시 video 포트·코덱 목록 포함 | 로컬 RTP 를 다시 읽어 쓰는 경로가 합성 SDP 요소를 옮기지 않으면 answer 가 `m=application 0`(floor 거절, RFC 3264 §6)으로 나가 규격 단말은 floor 를 끈다(`RecvInviteRequest`) |
+| 본문에 floor 줄을 **덧붙인 offer** 는 같은 선언을 다이얼로그에도 둔다 | 제어 기능의 멤버 초대는 floor `m=application`(`c=`·`a=mcptt-floor-request-uri` 포함)을 SDP 본문에 직접 붙인다(`WrapMultipartBody`). 다이얼로그 상태에 floor 가 없으면 스택이 만드는 서버 갱신 offer·멤버 re-INVITE answer 가 `m=application 0` 으로 floor 를 끈다 — `SetLocalApplicationMedia` 로 포트·fmtp 를 다이얼로그에 둔다 |
 | 수신 갱신 2xx 의 Contact 도 **다이얼로그가 정한 transport·특성 태그**로 광고한다 | 응답은 수신 요청에서 만들어지므로 다이얼로그 값(`SetContactTransport`·`SetContactParams`)을 옮겨 싣는다 — MCPTT focus 의 `isfocus` 등이 갱신마다 빠지지 않게 |
 
 ## 7. 만료·실패 처리 = 기존 teardown 연쇄

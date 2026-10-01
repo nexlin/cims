@@ -322,6 +322,44 @@ std::string floorSdp(int localPort, bool fullDuplex, bool implicitRequest) {
            "a=floorid:0 mstrm:audio\r\n" + fmtp;
 }
 
+bool isMcpttSdp(const std::string& sdp) {
+    for (size_t pos = sdp.find("m=application "); pos != std::string::npos; pos = sdp.find("m=application ", pos + 1)) {
+        const size_t eol = sdp.find_first_of("\r\n", pos);
+        std::string ln = sdp.substr(pos, eol == std::string::npos ? std::string::npos : eol - pos);
+        for (auto& c : ln) c = (char)std::tolower((unsigned char)c);
+        if (ln.size() >= 10 && ln.compare(ln.size() - 10, 10, " udp mcptt") == 0) return true;
+    }
+    return false;
+}
+
+std::string forSubsequentOffer(const std::string& sdp) {
+    if (!isMcpttSdp(sdp)) return sdp;
+    static const std::string pre = "a=fmtp:MCPTT";
+    const size_t at = sdp.find(pre);
+    if (at == std::string::npos) return sdp;
+    size_t eol = sdp.find_first_of("\r\n", at);
+    if (eol == std::string::npos) eol = sdp.size();
+    size_t next = eol;
+    while (next < sdp.size() && (sdp[next] == '\r' || sdp[next] == '\n')) ++next;
+    const std::string params = sdp.substr(at + pre.size(), eol - at - pre.size());
+    std::string kept;
+    for (size_t b = 0; b <= params.size();) {
+        size_t e = params.find(';', b);
+        if (e == std::string::npos) e = params.size();
+        std::string tok = params.substr(b, e - b);
+        b = e + 1;
+        const size_t x = tok.find_first_not_of(" \t");
+        if (x == std::string::npos) continue;
+        tok = tok.substr(x, tok.find_last_not_of(" \t") - x + 1);
+        std::string low = tok;
+        for (auto& c : low) c = (char)std::tolower((unsigned char)c);
+        if (low == "mc_granted" || low == "mc_implicit_request") continue;
+        kept += (kept.empty() ? "" : ";") + tok;
+    }
+    const std::string line = kept.empty() ? std::string() : pre + " " + kept + sdp.substr(eol, next - eol);
+    return sdp.substr(0, at) + line + sdp.substr(next);
+}
+
 FloorFmtp parseFloorFmtp(const std::string& sdp) {
     FloorFmtp f;
     size_t m = sdp.find("m=application ");

@@ -541,6 +541,24 @@ TEST(FloorSdp, ParseAnswerFmtp) {
     EXPECT_FALSE(h.present);                                                  // 다른 m= 섹션의 fmtp 는 floor 협상이 아니다
 }
 
+// §14.5 — 이어지는 offer(pjsip 세션 갱신 re-INVITE = 활성 로컬 SDP 재전송)에서 개시 전용 mc_granted·mc_implicit_request 만 빠진다.
+TEST(FloorSdp, SubsequentOfferDropsInitialOnlyFmtp) {
+    const std::string offer = "v=0\r\nm=audio 4000 RTP/AVP 96\r\na=fmtp:96 mode-set=2\r\n" + mcptt::floorSdp(4002, false, true) + "\r\n";
+    EXPECT_TRUE(mcptt::isMcpttSdp(offer));
+    const std::string sub = mcptt::forSubsequentOffer(offer);
+    EXPECT_NE(sub.find("a=floorid:0 mstrm:audio\r\na=fmtp:MCPTT mc_queueing\r\n"), std::string::npos) << sub;
+    EXPECT_EQ(sub.find("mc_implicit_request"), std::string::npos);
+    EXPECT_EQ(sub.find("mc_granted"), std::string::npos);
+    EXPECT_EQ(mcptt::forSubsequentOffer(sub), sub);                           // 두 번 적용해도 같다
+    // 남는 파라미터가 없으면 fmtp 줄을 지운다(빈 a=fmtp 는 RFC 4566 문법 밖)
+    const std::string only = "v=0\r\nm=application 4002 udp MCPTT\r\na=fmtp:MCPTT mc_granted\r\na=floorid:0 mstrm:audio\r\n";
+    EXPECT_EQ(mcptt::forSubsequentOffer(only), "v=0\r\nm=application 4002 udp MCPTT\r\na=floorid:0 mstrm:audio\r\n");
+    const std::string plain = "v=0\r\nm=audio 4000 RTP/AVP 96\r\na=fmtp:96 mc_granted\r\n";
+    EXPECT_FALSE(mcptt::isMcpttSdp(plain));
+    EXPECT_EQ(mcptt::forSubsequentOffer(plain), plain);                      // MCPTT SDP 가 아니면 그대로
+    EXPECT_FALSE(mcptt::isMcpttSdp("v=0\r\nm=application 4002 udp MCVideo\r\n"));
+}
+
 // ── 범용 요청(request) — 헤더 조립·이진 본문 왕복·상태 매핑(2xx/304 = ok, 4xx = fail + 산출 유지, 전송 실패 = -1) ──
 #include "../src/http/https_client.h"
 

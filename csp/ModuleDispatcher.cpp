@@ -2343,6 +2343,9 @@ void CModuleDispatcher::EventReInvite( const char *pszCallId, CSipCallRtp *pclsR
     // MCVideo 그룹 호 leg (CallMap 밖) — 세션 갱신이어도 answer 의 fmtp:MCVideo 는 re-offer 로 다시 짓고(TS 24.581
     //   §14.3.1), 미디어가 바뀌었을 때만 CMP 주소 등록을 갱신한다
     if ( gclsMcVideoCallService.OnReInvite( pszCallId, pclsRemoteRtp, pclsLocalRtp, bRefresh ) ) return;
+    // MCPTT 그룹 호 leg — answer 의 fmtp:MCPTT 도 re-offer 에 있던 파라미터로(TS 24.380 §14.3.1, 세션 갱신 포함).
+    //   미디어 처리(아래 JOIN ② 재전달)는 그대로 이어진다
+    gclsGroupCallService.RebuildReInviteFloorFmtp( pszCallId, pclsRemoteRtp, pclsLocalRtp );
     if ( bRefresh ) {
         CLog::Print( LOG_DEBUG, "EventReInvite: session refresh (media unchanged) — CallId(%s)", pszCallId );
         return;

@@ -111,6 +111,10 @@ bool CSipUserAgent::RecvInviteRequest( int iThreadId, CSipMessage * pclsMessage 
 		itMap = m_clsDialogMap.find( strCallId );
 		if( itMap != m_clsDialogMap.end() )
 		{
+			// 미디어가 같아도 응용이 answer 의 floor fmtp 를 다시 지었으면(TS 24.380 §14.3.1) SDP 가 바뀐 것이다 —
+			//   o= 세션 버전을 올린다(RFC 3264 §8). 아무것도 바뀌지 않은 세션 갱신만 버전을 유지한다(RFC 4028 §7.4).
+			const bool bKeepSdpVersion = itMap->second.m_bLastReInviteMediaSame &&
+				itMap->second.m_strLocalApplicationFmtp == clsLocalRtp.m_strApplicationFmtp;
 			itMap->second.SetLocalRtp( &clsLocalRtp );
 			pclsResponse = pclsMessage->CreateResponse( SIP_OK );
 			// 응답은 수신 요청에서 만든다 — 다이얼로그가 정한 Contact transport·파라미터(특성 태그)를 옮겨 싣는다.
@@ -125,9 +129,9 @@ bool CSipUserAgent::RecvInviteRequest( int iThreadId, CSipMessage * pclsMessage 
 				}
 			}
 			itMap->second.m_vecNextReInviteAnswerHeaders.clear();
-			// 상대 offer 가 무변경(세션 갱신)이면 answer 도 "변경 없음"으로 표시해야 한다 —
+			// 상대 offer 가 무변경(세션 갱신)이고 로컬 선언도 그대로면 answer 도 "변경 없음"으로 표시한다 —
 			//   SDP origin(o=) 세션 버전을 유지한다 (RFC 4028 §7.4).
-			itMap->second.AddSdp( pclsResponse, itMap->second.m_bLastReInviteMediaSame );
+			itMap->second.AddSdp( pclsResponse, bKeepSdpVersion );
 
 			// 갱신 응답에도 Session-Expires 를 실어야 한다 — 빠지면 상대가 타이머 해제로
 			//   해석한다 (RFC 4028 §7.2).

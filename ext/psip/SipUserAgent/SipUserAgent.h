@@ -166,6 +166,11 @@ public:
 	 *  스택보다 먼저 보는 자리(ISipStackCallBack::RecvRequest)에서 부른다 — 예 MCPTT Warning 149 (TS 24.379
 	 *  §10.1.1.4.7 200 OK 5)·6)·7)). 다이얼로그가 없으면 false. */
 	bool AddReInviteAnswerHeader( const char * pszCallId, const char * pszName, const char * pszValue );
+	/** 다이얼로그의 로컬 MCPTT floor 선언(m=application 포트·`a=fmtp:MCPTT` 파라미터)을 정한다 — 응용이 offer 본문에
+	 *  floor 줄을 직접 덧붙인 호(제어 기능의 멤버 초대)도 스택이 만드는 세션 갱신 offer·re-INVITE answer 가 floor 를
+	 *  그대로 싣게 한다(RFC 3264 §8 — 이어지는 offer 의 m= 는 직전 offer 와 같다. 빠지면 m=application 0 으로 floor
+	 *  스트림을 끈다). StartCall 전에 부른다. 다이얼로그가 없으면 false. */
+	bool SetLocalApplicationMedia( const char * pszCallId, int iPort, const char * pszFmtp );
 
 	// SipUserAgentSessionTimer.hpp : 세션 타이머 (RFC 4028)
 	void SetSessionTimer( bool bEnable, int iSessionExpires, int iMinSE, int iRefresher );

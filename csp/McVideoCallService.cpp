@@ -417,7 +417,7 @@ bool CMcVideoCallService::_InviteMember( Session &clsSes, const CspPttGroup &cls
     //   스택이 From(그룹)으로 먼저 넣은 PAI 는 지운다(RFC 3325 §9.1 — SIP URI 하나)
     McvReplaceHeader( pclsInvite->m_clsHeaderList, "P-Asserted-Identity",
                       std::string( "<sip:" ) + kMcVideoPsiUser + "@" + strDomain + ">" );
-    McvStripSessionRefresher( pclsInvite->m_clsHeaderList );
+    McStripSessionRefresher( pclsInvite->m_clsHeaderList );
     gclsUserAgent.SetContactParams( strCallId.c_str(), kMcVideoFocusContactParams );
     gclsUserAgent.SetContactUriParams( strCallId.c_str(), ( "gr=" + clsSes.strGr ).c_str() );
     {

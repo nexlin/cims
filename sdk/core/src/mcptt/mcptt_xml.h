@@ -70,6 +70,14 @@ struct FloorFmtp {
 };
 FloorFmtp parseFloorFmtp(const std::string& sdp);
 
+/** SDP 가 MCPTT 호 SDP 인가 — floor 제어 채널 `m=application <port> UDP MCPTT`(TS 24.380 §12.1.2)가 있다(proto 대소문자 무시). */
+bool isMcpttSdp(const std::string& sdp);
+/** 이어지는 offer(re-INVITE·UPDATE — pjsip 세션 갱신 포함)의 `a=fmtp:MCPTT` — `mc_granted` 는 싣지 않고(TS 24.380 §14.5),
+ *  `mc_implicit_request` 는 긴급·임박 격상 re-INVITE 에서만 뜻이 있어(§14.5 · TS 24.379 §6.4) 뺀다(격상은 mcptt-info 를 싣는
+ *  multipart 라 이 보정을 거치지 않는다). pjsip 세션 갱신 re-INVITE 는 활성 로컬 SDP(개시 offer)를 그대로 보내므로 송신 직전에
+ *  적용한다. 남는 파라미터가 없으면 fmtp 줄을 지운다. MCPTT SDP 가 아니면 그대로. */
+std::string forSubsequentOffer(const std::string& sdp);
+
 /** URI → bare id ("tel:+82..@d" / "sip:x@d" / "<...>" → "+82.."). */
 std::string bareId(const std::string& uri);
 std::string xmlEscape(const std::string& s);

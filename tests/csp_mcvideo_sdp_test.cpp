@@ -175,7 +175,7 @@ int main() {
     clsHeaders.push_back(a);
     clsHeaders.push_back(b);
     clsHeaders.push_back(c);
-    McvStripSessionRefresher(clsHeaders);
+    McStripSessionRefresher(clsHeaders);
     auto it = clsHeaders.begin();
     CK("Session-Expires: 1800 (refresher 없음)", it->m_strValue == "1800");
     ++it;

@@ -423,13 +423,15 @@ MCVideo PSI. 동작(구현 — 시험 `McvSip`·`McvCall`, 계약 K3 골든과 �
   1회 + 1 s 간격 2회 + 15 s 주기로 빈 RTCP RR(헤더 SSRC = 전송 제어와 같은 값)을 보낸다(ue_nat_traversal.md §7.1).
 - **수동 개시**(`autoAnswerMcvideo` 끔 — TS 24.281 §6.2.3.2) — 180(`Require: timer` + MCVideo Contact 태그)만 보내고 앱의 `answer()` 를 기다린다. MCVideo 호의
   수락은 `CallOptions.video` 와 무관하게 audio + video + 제어 채널이다(§6.2.2 — 자동 수락과 같은 미디어 구성).
-- **세션 타이머** — 착신(멤버 초대) 200 OK 는 `Session-Expires: …;refresher=uas` + `Require: timer` 이고 단말이 갱신한다(TS 24.281 §6.2.3.1.1 2)·5) —
-  그룹 호 §6.2.3.1.2, §9.2.2.2.1.6 10) «요청에 없으면 uas, 있으면 그 값»; 제어 기능 초대는 refresher 를 싣지 않는다 §6.3.3.1.2 6)). pjsip UAS 는 요청에
-  refresher 가 없으면 uac 를 고르므로 수신 모듈(`mod-cimsue-rxfix`, 트랜잭션 계층 앞)이 착신 MCVideo 최초 INVITE 의 Session-Expires 에 `uas` 를 넣고 —
-  그러면 pjsip 이 갱신자가 되어 SE/2 에 갱신 re-INVITE(상대 Allow 에 UPDATE 가 있으면 UPDATE)를 보낸다 — pjsip 이 UAS 갱신자일 때 빼는 `Require: timer` 는
-  송신 모듈이 채운다. 발신(개시·재합류)은 서버 200 OK 의 `refresher=uac`(§6.3.3.2.3.2 2))를 따라 단말이 갱신한다. pjsip 갱신 re-INVITE 는 활성 로컬 SDP(개시
-  offer)를 그대로 보내므로 송신 모듈이 다이얼로그 안 offer 의 `mc_granted`·`mc_implicit_request` 를 뺀다(TS 24.581 §14.5 — 이어지는 offer 에 `mc_granted`
-  없음, `mc_implicit_request` 는 긴급 격상 re-INVITE 에서만). MCPTT 호는 이 보정을 받지 않는다.
+- **세션 타이머**(MCPTT·MCVideo 공통) — 착신(멤버 초대·사설 호) 200 OK 는 `Session-Expires: …;refresher=uas` + `Require: timer` 이고 단말이 갱신한다
+  (TS 24.379·24.281 §6.2.3.1.1 2)·5) — 그룹 호 §6.2.3.1.2, TS 24.281 §9.2.2.2.1.6 10) «요청에 없으면 uas, 있으면 그 값»; 제어·참여 기능 초대는 refresher 를
+  싣지 않는다 — 두 규격 §6.3.3.1.2 6) · TS 24.379 §6.3.4.1.2). pjsip UAS 는 요청에 refresher 가 없으면 uac 를 고르므로 수신 모듈(`mod-cimsue-rxfix`, 트랜잭션
+  계층 앞)이 착신 MCPTT·MCVideo 최초 INVITE(mcptt-info·mcvideo-info 파트로 가른다)의 Session-Expires 에 `uas` 를 넣고 — 그러면 pjsip 이 갱신자가 되어
+  SE/2 에 갱신 re-INVITE(상대 Allow 에 UPDATE 가 있으면 UPDATE)를 보낸다 — pjsip 이 UAS 갱신자일 때 빼는 `Require: timer` 는 송신 모듈이 채운다. 요청이
+  refresher 를 정했으면(옛 CSP 의 `uac`) 그 값을 따른다(RFC 4028 §9 Table 2). 발신(개시·재합류)은 서버 200 OK 의 `refresher=uac`(§6.3.3.2.3.2 2))를 따라
+  단말이 갱신한다. pjsip 갱신 re-INVITE 는 활성 로컬 SDP(개시 offer)를 그대로 보내므로 송신 모듈이 다이얼로그 안 단일 SDP offer 의 `mc_granted`·
+  `mc_implicit_request` 를 뺀다(TS 24.581·24.380 §14.5 — 이어지는 offer 에 `mc_granted` 없음, `mc_implicit_request` 는 긴급·임박 격상 re-INVITE 에서만 —
+  MCPTT 격상은 mcptt-info 를 싣는 multipart 라 이 보정을 거치지 않는다).
 
 규격 대비 편차:
 

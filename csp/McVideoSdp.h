@@ -12,6 +12,7 @@
 #include <sstream>
 #include <string>
 
+#include "McService.h"
 #include "McVideoInfo.h"
 #include "SdpMedia.h"
 #include "SipHeader.h"
@@ -89,19 +90,6 @@ inline int McvVideoFeedback( const SDP_MEDIA_LIST &clsList, int iVideoPt ) {
         break;
     }
     return fb;
-}
-
-/** 요청의 Session-Expires 에서 refresher 파라미터를 뺀다 — 스택은 로컬 정책대로 refresher 를 제안하므로(RFC 4028 §7.1)
- * 규격이 생략을 정한 요청(TS 24.281 §6.3.3.1.2 6) «The refresher parameter shall be omitted»)은 만든 뒤 지운다. 다른
- * 파라미터는 둔다. */
-inline void McvStripSessionRefresher( SIP_HEADER_LIST &clsHeaders ) {
-    for ( auto &h : clsHeaders ) {
-        if ( strcasecmp( h.m_strName.c_str(), "Session-Expires" ) != 0 ) continue;
-        const size_t k = h.m_strValue.find( ";refresher=" );
-        if ( k == std::string::npos ) continue;
-        const size_t e = h.m_strValue.find( ';', k + 1 );
-        h.m_strValue.erase( k, e == std::string::npos ? std::string::npos : e - k );
-    }
 }
 
 /** 같은 이름의 헤더를 값 하나로 — 스택이 먼저 넣은 것(예: From 으로 만든 P-Asserted-Identity)을 지우고 끝에 하나를

@@ -423,7 +423,8 @@ affiliation-command 를 보낸다) → ③구형 제거.
 | Contact | §6.3.3.1.2 1) — 세션 식별자 + `g.3gpp.mcptt`·`g.3gpp.icsi-ref`·`isfocus` | `<sip:<그룹>@<CSP>;gr=<세션 토큰>>;+g.3gpp.mcptt;+g.3gpp.icsi-ref="urn%3Aurn-7%3A3gpp-service.ims.icsi.mcptt";isfocus` (RFC 3840 §9 — 확장 태그 `+`). 세션 식별자 = C4d |
 | 서비스 식별 | §6.3.3.1.2 3) — P-Asserted-Service(RFC 6050) | `P-Asserted-Service: urn:urn-7:3gpp-service.ims.icsi.mcptt` (본문의 "P-Asserted-Service-Id" 는 표기 — 와이어 헤더 이름은 RFC 6050 §4.1, 부록 예시도 같다. 경보 팬아웃 MESSAGE 도 같은 이름) |
 | Accept-Contact | §6.3.3.1.2 2)·4) | `*;+g.3gpp.icsi-ref=…;+g.3gpp.mcptt;require;explicit` |
-| 세션 타이머 | §6.3.3.1.2 — Session-Expires 권고, `refresher` 생략 권고(싣는다면 `uac`) | **편차(권고)** — `refresher=uac` 를 싣는다. 생략하면 단말(UAS)이 갱신자를 고르는데(부록 A.1.3-24 예 = `uas`), CIMS 는 서버가 갱신자를 맡아 단말 구현과 무관하게 사라진 leg 을 회수한다([leg_liveness.md](leg_liveness.md) §5.3). 규격이 허용하는 값이다 |
+| 세션 타이머 | §6.3.3.1.2 6) — Session-Expires 권고, «The refresher parameter shall be omitted» · 단말 200 OK = `refresher=uas`(§6.2.3.1.1 5)) | `Session-Expires` 는 refresher 없이 싣는다(psip 이 붙인 것을 지운다 — `McStripSessionRefresher`). 규격 단말은 `uas` 로 답해 스스로 갱신하고 CSP 는 만료를 감시한다. refresher 를 정하지 않는 단말(pjsip 기본 = `uac`)이면 CSP 가 갱신한다([leg_liveness.md](leg_liveness.md) §5.3) |
+| floor 선언 유지 | RFC 3264 §8 — 이어지는 offer·answer 의 m= 는 처음과 같다(포트 0 = 스트림 끔) | floor `m=application`·`a=fmtp:MCPTT`(`mc_queueing;mc_priority=3`)는 본문에 덧붙이는 줄이라 다이얼로그에도 같은 선언을 둔다(psip `SetLocalApplicationMedia`) — 스택이 만드는 세션 갱신 offer·멤버 re-INVITE answer 가 floor 를 그대로 싣는다 |
 
 ### C4b. 개시자 응답 (제어 기능 → 개시자) — §6.3.3.2.3
 
@@ -431,6 +432,7 @@ affiliation-command 를 보낸다) → ③구형 제거.
 |---|---|---|
 | Contact | §6.3.3.2.3.2 5)·6) — 세션 식별자 + `g.3gpp.mcptt`·`g.3gpp.icsi-ref`·`isfocus` | C4a 와 같은 태그. 주소는 psip 이 수신 listener 로 정하고 CSP 는 태그만 준다(`SetContactParams`) — 갱신 re-INVITE 2xx·이후 in-dialog 요청(조건 재광고·BYE)에도 실린다 |
 | 세션 타이머 | 2) refresher = `uac` · 3) `Require: timer` | 개시자가 refresher 를 지정하지 않았으면 `uac`(단말 갱신, CSP 만료 감시) + `Require: timer`. 개시자가 지정했거나 timer 미지원이면 RFC 4028 §9 Table 2(미지원 = `uas`) — [leg_liveness.md](leg_liveness.md) §5.3 |
+| re-INVITE answer fmtp | TS 24.380 §14.3.1 — answer 의 fmtp 는 offer 에 없던 파라미터를 싣지 않는다 · §14.3.5 암묵 요청은 새 세션 개시에서만 | 개시자·멤버 leg 의 re-INVITE(세션 갱신 포함) answer 는 `a=fmtp:MCPTT` 를 그 re-offer 로 다시 짓는다(`RebuildReInviteFloorFmtp` — 개시 answer 의 `mc_implicit_request`·초대 offer 의 `mc_priority` 를 되풀이하지 않는다). 내용이 바뀌면 `o=` 버전을 올린다(RFC 3264 §8). 제어 기능의 조건 재광고 offer 는 개시 전용 `mc_granted`·`mc_implicit_request` 를 뺀다(§14.5) |
 | P-Asserted-Identity | 4) 제어 기능 PSI | 그룹 URI(`<sip:<그룹>@<PTT 도메인>>`) — 멤버 leg INVITE 의 PAI 와 같은 신원 |
 | Supported | 8) `tdialog`(RFC 4538) | `Supported: tdialog` |
 | Warning | 7) 받은 응답의 Warning 을 옮긴다 · 확인 통화 설정의 111 (C4c) | 개시자 응답 게이트 동안 멤버 초대 leg 의 응답(18x·최종)에 실린 Warning 값을 모아 200 OK 에 싣는다(중복 제외, 제어 기능 자신의 111 이 앞 — RFC 3261 §20.43 쉼표 연결). 필수 멤버 없이 진행하면 `Warning: 399 <agent> "111 group call proceeded without all required group members"`. 게이트 없이 곧바로 수락한 200 은 받은 응답이 아직 없다 |

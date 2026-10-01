@@ -170,6 +170,13 @@ public:
      *  · 게이트 중 183 + P-Answer-State: Unconfirmed(RFC 4964) 이고 TNG1 이 돌지 않으며 CMP 가 미디어 버퍼링을 하면
      * 개시자에게 200 OK(P-Answer-State: Unconfirmed)를 준다(§10.1.1.4.2 · 사설 호 §11.1.1.4.2). */
     void OnMemberInviteResponse( const std::string &strCallId, CSipMessage *pclsResponse );
+    /** MCPTT 그룹 호 leg 이 받은 re-INVITE(세션 갱신 포함, ModuleDispatcher::EventReInvite) — answer 의 `a=fmtp:MCPTT`
+     * 를 이 re-offer 에 있던 파라미터로 다시 짓는다(TS 24.380 §14.3.1). 스택은 직전 로컬 선언을 되풀이하므로 그대로
+     * 두면 개시 answer 의 mc_implicit_request·제어 기능 offer 의 mc_priority 가 offer 에 없어도 남는다. 이어지는 offer
+     * 의 mc_implicit_request 는 긴급·임박 격상에서만 뜻이 있고(§14.5 · TS 24.379 §6.4) 제어 기능은 새 세션 개시에서만
+     * 받는다(§14.3.5) — answer 에 싣지 않는다. 이 서비스의 floor 채널 leg 이면 true. */
+    bool RebuildReInviteFloorFmtp( const std::string &strCallId, CSipCallRtp *pclsRemoteRtp,
+                                   CSipCallRtp *pclsLocalRtp );
 
     /** 미디어 노드(CMP) 다운으로 relay 가 소실된 그룹의 활성 멤버 호를 능동 종료(BYE)하고 로컬 상태를
      *  정리한다. dead node 이므로 CmpClient(LeaveGroup/RemoveGroup, blocking)는 호출하지 않는다.
@@ -483,6 +490,11 @@ private:
      * 때(§14.3.5 — 승인 뜻은 아니다, §12.1.2.2 NOTE 4). 승인은 CMP 의 Floor Granted 로만 알린다(answer mc_granted 는
      * 선택 "may" — §14.3.4). */
     static std::string AnswerFloorFmtp( const struct McpttFmtp &clsOffer, bool bImplicitAccepted );
+    /** 제어 기능이 보내는 이어지는 offer(조건 재광고 re-INVITE)의 `a=fmtp:MCPTT` 에서 개시 전용 파라미터를 뺀다 —
+     * mc_granted 는 이어지는 offer 에 싣지 않고(TS 24.380 §14.5), mc_implicit_request 는 단말의 격상 요청에만 뜻이
+     * 있다(§14.5 · TS 24.379 §6.4). 응답한 leg 의 재광고는 다이얼로그의 로컬 선언(개시 answer)으로 offer 를 만들므로
+     * 본문(단일 SDP)을 고친다. 남는 파라미터가 없으면 fmtp 줄을 지운다(빈 fmtp 는 RFC 4566 문법 밖). */
+    static void StripInitialOnlyFloorFmtp( CSipMessage *pclsOffer );
     /** 그룹 호 해제 (TS 24.379 §6.3.8.1) — 참가 leg(확립·미확립·청취) 전부 BYE/CANCEL 후 마지막 leg 의 teardown 이
      *  CMP REMOVE·세션 정리를 끝낸다. pszReason 은 로그용. */
     void ReleaseGroupSession( const std::string &strGroupId, const char *pszReason );

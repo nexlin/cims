@@ -746,11 +746,103 @@ int main( int argc, char * argv[] )
 		CHECK( strAns.find( "mc_implicit_request" ) == std::string::npos && strAns.find( "mc_granted" ) == std::string::npos,
 		       "개시 전용 파라미터가 갱신 answer 에 남지 않는다" );
 		CHECK( strAns.find( "m=video 40094 RTP/AVP 97" ) != std::string::npos, "영상 포트 유지" );
+		{
+			// fmtp 가 바뀌었으니 SDP 가 바뀐 것이다 — o= 세션 버전이 하나 오른다(RFC 3264 §8)
+			auto oVer = []( const std::string & b ) {
+				size_t p = b.find( "o=" ); if( p == std::string::npos ) return -1L;
+				std::string ln = b.substr( p, b.find( "\r\n", p ) - p );
+				size_t a = ln.find( ' ' ), c = ln.find( ' ', a + 1 ), d = ln.find( ' ', c + 1 );
+				return atol( ln.substr( c + 1, d - c - 1 ).c_str() ); };
+			CHECK( oVer( strAns ) == oVer( BodyOf( strFinal ) ) + 1, "o= 세션 버전 +1 (answer 내용이 바뀌었다)" );
+		}
 		UdpSendTo( fdUe, BuildInDialog( "BYE", strInvite, strFinal, 3, NULL ) );
 		UdpRecvUntil( fdUe, "SIP/2.0 200", 1000 );
 		clsCb.m_bMcVideo = false;
 		clsCb.m_strAppFmtp = "mc_queueing";
 		clsCb.m_strReInviteFmtp.clear();
+	}
+
+	// ── O. 제어 기능의 멤버 초대처럼 floor 줄을 본문에 덧붙인 호 — SetLocalApplicationMedia 로 다이얼로그에 같은 선언을 두면 단말의
+	//   갱신 re-INVITE answer·서버 re-offer 가 floor 를 m=application 0 으로 끄지 않는다(RFC 3264 §8). 응용(CSP)이 answer fmtp 를
+	//   re-offer 기준으로 다시 지으면(TS 24.380 §14.3.1) o= 버전이 오른다 ──
+	printf( "[O] body-appended floor (member invite) + SetLocalApplicationMedia → refresh answer/re-offer keep floor\n" );
+	{
+		clsCb.Reset();
+		clsCb.m_iReInvites = 0;
+		CSipCallRtp clsRtp;
+		clsRtp.m_strIp = UA_IP; clsRtp.m_iPort = 40100; clsRtp.m_iCodec = 0;
+		clsRtp.m_clsCodecList.push_back( 0 );
+		CSipCallRoute clsRoute;
+		clsRoute.m_strDestIp = UA_IP; clsRoute.m_iDestPort = iUePort; clsRoute.m_eTransport = E_SIP_UDP;
+		std::string strCallId;
+		CSipMessage * pclsInvite = NULL;
+		UdpDrain( fdUe );
+		CHECK( clsUa.CreateCall( "svc", "peer", &clsRtp, &clsRoute, strCallId, &pclsInvite ) && pclsInvite, "CreateCall" );
+		if( pclsInvite )
+		{
+			pclsInvite->m_strBody += "m=application 40102 UDP MCPTT\r\na=floorid:0 mstrm:audio\r\na=fmtp:MCPTT mc_queueing;mc_priority=3\r\n";
+			pclsInvite->m_iContentLength = (int)pclsInvite->m_strBody.size();
+			CHECK( clsUa.SetLocalApplicationMedia( strCallId.c_str(), 40102, "mc_queueing;mc_priority=3" ), "SetLocalApplicationMedia" );
+			CHECK( clsUa.StartCall( strCallId.c_str(), pclsInvite ), "StartCall" );
+		}
+		const std::string strInv = UdpRecvUntil( fdUe, "INVITE", 2000 );
+		const std::string strM = "\r\n" + strInv;
+		const std::string strOffer = BodyOf( strInv );
+		static const char * UE_SDP =
+			"v=0\r\no=- 9 9 IN IP4 127.0.0.1\r\ns=-\r\nc=IN IP4 127.0.0.1\r\nt=0 0\r\n"
+			"m=audio 41100 RTP/AVP 0\r\na=rtpmap:0 PCMU/8000\r\na=sendrecv\r\n"
+			"m=application 41102 UDP MCPTT\r\na=fmtp:MCPTT mc_queueing\r\n";
+		const std::string strUeTo = HeaderOf( strM, "To" ) + ";tag=ue-o";
+		char szOk[4096];
+		int iOk = snprintf( szOk, sizeof(szOk),
+			"SIP/2.0 200 OK\r\nVia: %s\r\nFrom: %s\r\nTo: %s\r\nCall-ID: %s\r\nCSeq: %s\r\nContact: <sip:ue@%s:%d>\r\n"
+			"Content-Type: application/sdp\r\nContent-Length: %d\r\n\r\n%s",
+			HeaderOf( strM, "Via" ).c_str(), HeaderOf( strM, "From" ).c_str(), strUeTo.c_str(),
+			HeaderOf( strM, "Call-ID" ).c_str(), HeaderOf( strM, "CSeq" ).c_str(), UA_IP, iUePort, (int)strlen( UE_SDP ), UE_SDP );
+		UdpSendTo( fdUe, std::string( szOk, iOk ) );
+		CHECK( !UdpRecvUntil( fdUe, "ACK", 2000 ).empty(), "ACK" );
+		// 서버 re-offer(다이얼로그 로컬 선언 — 조건 재광고·세션 갱신과 같은 SDP 생성) 에 floor 가 살아 있다
+		{
+			CSipMessage * pclsRe = NULL;
+			CHECK( clsUa.CreateReInvite( strCallId.c_str(), NULL, &pclsRe ) && pclsRe, "CreateReInvite(로컬 선언)" );
+			if( pclsRe )
+			{
+				CHECK( pclsRe->m_strBody.find( "m=application 40102 UDP MCPTT\r\na=floorid:0 mstrm:audio\r\na=fmtp:MCPTT mc_queueing;mc_priority=3\r\n" ) != std::string::npos,
+				       ( "서버 re-offer 의 floor = 처음 offer 선언(m=application 0 아님): " + pclsRe->m_strBody ).c_str() );
+				delete pclsRe;
+			}
+		}
+		std::string strSrvContact = HeaderOf( strM, "Contact" );
+		const size_t lt = strSrvContact.find( '<' ), gt = strSrvContact.find( '>' );
+		if( lt != std::string::npos && gt != std::string::npos ) strSrvContact = strSrvContact.substr( lt + 1, gt - lt - 1 );
+		clsCb.m_strReInviteFmtp = "mc_queueing";                         // 응용(CSP)이 re-offer 기준으로 다시 지은 answer fmtp
+		char szRe[4096];
+		int iRe = snprintf( szRe, sizeof(szRe),
+			"INVITE %s SIP/2.0\r\nVia: SIP/2.0/UDP %s:%d;rport;branch=z9hG4bK-rv-o-%d\r\nMax-Forwards: 70\r\nFrom: %s\r\nTo: %s\r\n"
+			"Call-ID: %s\r\nCSeq: 1 INVITE\r\nContact: <sip:ue@%s:%d>\r\nContent-Type: application/sdp\r\nContent-Length: %d\r\n\r\n%s",
+			strSrvContact.c_str(), UA_IP, iUePort, ++g_iSeq, strUeTo.c_str(), HeaderOf( strM, "From" ).c_str(),
+			HeaderOf( strM, "Call-ID" ).c_str(), UA_IP, iUePort, (int)strlen( UE_SDP ), UE_SDP );
+		const std::string strReInvite( szRe, iRe );
+		UdpSendTo( fdUe, strReInvite );
+		const std::string strRe200 = UdpRecvUntil( fdUe, "SIP/2.0 200", 2000 );
+		const std::string strAns = BodyOf( strRe200 );
+		CHECK( clsCb.m_iReInvites == 1 && clsCb.m_bLastReInviteRefresh, "같은 SDP = 세션 갱신" );
+		CHECK( strAns.find( "m=application 40102 UDP MCPTT\r\na=floorid:0 mstrm:audio\r\na=fmtp:MCPTT mc_queueing\r\n" ) != std::string::npos,
+		       ( "갱신 answer = floor 포트 유지 · fmtp = 응용이 다시 지은 값: " + strAns ).c_str() );
+		CHECK( strAns.find( "m=application 0 " ) == std::string::npos, "floor 를 끄지 않는다" );
+		{
+			// 원문 re-INVITE 의 ACK
+			char szAck[2048];
+			int iAck = snprintf( szAck, sizeof(szAck),
+				"ACK %s SIP/2.0\r\nVia: SIP/2.0/UDP %s:%d;rport;branch=z9hG4bK-rv-o-ack-%d\r\nFrom: %s\r\nTo: %s\r\nCall-ID: %s\r\n"
+				"CSeq: 1 ACK\r\nContent-Length: 0\r\n\r\n",
+				strSrvContact.c_str(), UA_IP, iUePort, ++g_iSeq, strUeTo.c_str(), HeaderOf( "\r\n" + strRe200, "To" ).c_str(),
+				HeaderOf( strM, "Call-ID" ).c_str() );
+			UdpSendTo( fdUe, std::string( szAck, iAck ) );
+		}
+		clsCb.m_strReInviteFmtp.clear();
+		clsUa.StopCall( strCallId.c_str() );
+		UdpRecvUntil( fdUe, "BYE", 1000 );
 	}
 
 	close( fdUe );

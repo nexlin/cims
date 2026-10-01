@@ -86,6 +86,33 @@ bool CSipUserAgent::AddReInviteAnswerHeader( const char * pszCallId, const char 
 
 /**
  * @ingroup SipUserAgent
+ * @brief 다이얼로그의 로컬 MCPTT floor 선언을 정한다 (SipUserAgent.h 선언 주석).
+ * @param pszCallId SIP Call-ID
+ * @param iPort     floor 포트 (m=application)
+ * @param pszFmtp   `a=fmtp:MCPTT` 파라미터 (NULL·빈 값 = fmtp 줄 없음)
+ * @returns 다이얼로그가 있으면 true
+ */
+bool CSipUserAgent::SetLocalApplicationMedia( const char * pszCallId, int iPort, const char * pszFmtp )
+{
+	if( pszCallId == NULL ) return false;
+
+	bool bRes = false;
+
+	m_clsDialogMutex.acquire();
+	SIP_DIALOG_MAP::iterator itMap = m_clsDialogMap.find( pszCallId );
+	if( itMap != m_clsDialogMap.end() )
+	{
+		itMap->second.m_iLocalApplicationPort = iPort;
+		itMap->second.m_strLocalApplicationFmtp = pszFmtp ? pszFmtp : "";
+		bRes = true;
+	}
+	m_clsDialogMutex.release();
+
+	return bRes;
+}
+
+/**
+ * @ingroup SipUserAgent
  * @brief 서버 발신 in-dialog 요청을 만들기 직전에 다이얼로그의 목적지를 응용이 아는 현재 도달 주소로
  *        갱신한다. 콜백(EventGetLegDest)은 다이얼로그 락 **밖**에서 호출한다 (psip 콜백 규약 —
  *        응용이 자기 자료구조 락을 잡으므로 락 순서 역전 여지를 없앤다).
