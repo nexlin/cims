@@ -215,6 +215,12 @@ public sealed record TimelineItem(DateTime Ts, bool IsFloor, string Color, strin
 
 public sealed record MetricItem(string Key, string Value, string Suffix, string Hint);
 
+/// <summary>무전 녹취 재생 바의 발언 막대 — 바 폭 대비 위치·폭(0~1), 화자 색, 줄(겹치면 0/1 두 줄).</summary>
+public sealed record PlayerBlock(double LeftRatio, double WidthRatio, string Color, int Row, string Tip);
+
+/// <summary>재생기에 파일을 열라는 요청 — 파일 안 오프셋(초)에서 시작, Play = 열고 바로 재생(아니면 그 자리에 멈춘 채).</summary>
+public sealed record MediaOpenArgs(string Path, double OffsetSec, bool Play);
+
 /// <summary>발언 타임라인 눈금 — 트랙 폭 대비 위치(0~1)와 시각 표기.</summary>
 public sealed record AxisTick(double Ratio, string Label);
 
@@ -243,7 +249,6 @@ public sealed partial class SessionHistoryViewModel : ObservableObject
     [ObservableProperty] private RecordingSegment? _selectedSegment;
     [ObservableProperty] private string _recordingStatus = "";
     [ObservableProperty] private string _mediaSource = "";
-    [ObservableProperty] private string _playingLabel = "";
     [ObservableProperty] private bool _loadingAudio;
     /// <summary>지금 트는 녹취에 영상이 있다 — 영상 칸(재생기)이 열린다. 영상 통화 녹취·MCVideo 송출 구간.</summary>
     [ObservableProperty] private bool _playingHasVideo;
@@ -272,7 +277,6 @@ public sealed partial class SessionHistoryViewModel : ObservableObject
     private bool _suppressQuery;                                          // 표본 심기 중 종류 전환이 서버 조회를 부르지 않게
     private IReadOnlyDictionary<string, int> _hours = new Dictionary<string, int>();
     private readonly List<TimelineItem> _timelineAll = new();
-    private readonly Queue<RecordingSegment> _playQueue = new();
 
     public ObservableCollection<HistoryRow> Rows { get; } = new();
     public ObservableCollection<HourCell> Hours { get; } = new();
@@ -289,7 +293,7 @@ public sealed partial class SessionHistoryViewModel : ObservableObject
 
     public bool HasError => Error.Length > 0;
     public bool HasRecording => Recording is not null && Segments.Count > 0;
-    public bool CanPlay => SelectedSegment is not null && !LoadingAudio;
+    public bool CanPlay => _segs.Count > 0 && !LoadingAudio;
     public bool IsPlaying => MediaSource.Length > 0;
     public bool IsPtt => KindIndex == 1;
     public bool IsCall => KindIndex != 1;
@@ -322,9 +326,6 @@ public sealed partial class SessionHistoryViewModel : ObservableObject
     /// <summary>고른 행에 녹취가 있는가 — 통화 표 아래 녹취 띠의 표시 조건(세그먼트 로딩 중에도 띠는 보인다).</summary>
     public bool SelectedHasRecording => Selected?.HasRecording == true;
 
-    /// <summary>재생 시작(파일 경로)/정지 — MediaElement 는 창 코드비하인드가 든다.</summary>
-    public event EventHandler<string>? PlayRequested;
-    public event EventHandler? StopRequested;
 
     partial void OnErrorChanged(string value) => OnPropertyChanged(nameof(HasError));
     partial void OnSearchChanged(string value) => Filter();
@@ -499,7 +500,7 @@ public sealed partial class SessionHistoryViewModel : ObservableObject
     private async Task LoadSelectionAsync(HistoryRow? row)
     {
         int seq = ++_detailSeq;
-        Stop(); _playQueue.Clear();
+        ResetPlayer();
         Recording = null; Segments.Clear(); RecordingStatus = "";
         Participants.Clear(); Lanes.Clear(); Timeline.Clear(); Metrics.Clear(); _timelineAll.Clear(); AxisGaps.Clear();
         _paneRow = null; _paneDetail = null;
@@ -518,6 +519,7 @@ public sealed partial class SessionHistoryViewModel : ObservableObject
             }
             else RecordingStatus = row.IsLive ? "진행 중 — 끝나면 녹취가 잡힙니다" : "녹취 없음";
             if (row.E.Kind == HistoryKind.Ptt) BuildPttPane(row, _previewDetail is { } pd && pd.RecordingId == row.E.RecordingId ? pd : null);
+            SetupBar(row);
             return;
         }
         var m = _s.Management; if (m is null) return;
@@ -556,6 +558,7 @@ public sealed partial class SessionHistoryViewModel : ObservableObject
         }
         DetailLoading = false;
         if (row.E.Kind == HistoryKind.Ptt) BuildPttPane(row, detail);
+        SetupBar(row);
     }
 
     /// <summary>발언 턴(세그먼트 슬롯 트랙) · 참여자 · 이벤트 타임라인 · 지표를 만든다. 콘솔 PanelDetail 과 같은 구성.</summary>
@@ -587,6 +590,8 @@ public sealed partial class SessionHistoryViewModel : ObservableObject
             foreach (var t in mine) turns.Add((t.Item1, t.Item2, t.Item3, t.Item4, t.Item5, t.Item6, t.Item7, multi));
         }
         turns.Sort((a, b) => a.Start != b.Start ? a.Start.CompareTo(b.Start) : a.Slot.CompareTo(b.Slot));
+        _turnSpans.Clear();
+        foreach (var t in turns) _turnSpans.Add((t.Start, t.End, t.Spk, t.Seq));
         var order = new List<string>();
         foreach (var t in turns) if (t.Spk.Length > 0 && !order.Contains(t.Spk)) order.Add(t.Spk);
         string colorOf(string id) { int i = order.IndexOf(id); return SpkColors[(i < 0 ? 0 : i) % SpkColors.Length]; }
@@ -609,6 +614,8 @@ public sealed partial class SessionHistoryViewModel : ObservableObject
         BuildAxisMap(turns.Select(t => ((t.Start - t0).TotalMilliseconds, (t.End - t0).TotalMilliseconds)), span);
         TalkZoom = 1.0;                                                    // 눈금은 레인을 다 만든 뒤(아래) 다시 센다
 
+        _turnColors.Clear();
+        foreach (var spk in order) _turnColors[spk] = colorOf(spk);
         // 화자 레인
         foreach (var spk in order)
         {
@@ -724,6 +731,15 @@ public sealed partial class SessionHistoryViewModel : ObservableObject
         return 1;
     }
 
+    /// <summary>트랙 폭 대비 위치(0~1) → 시각 — AxisRatio 의 역(줄인 틈 안이면 그 틈의 실제 구간에 비례).</summary>
+    private DateTime AxisTimeAt(double ratio)
+    {
+        double d = Math.Clamp(ratio, 0, 1) * _axisDispMs;
+        foreach (var m in _axisMap)
+            if (d <= m.D1) return _axisT0.AddMilliseconds(m.R0 + (m.D1 > m.D0 ? (d - m.D0) / (m.D1 - m.D0) * (m.R1 - m.R0) : 0));
+        return _axisT0.AddMilliseconds(_axisSpanMs);
+    }
+
     /// <summary>눈금 — 배율에 따라 6~8 개가 보이도록 간격을 1·2·5·10·15·30초·1·2·5·10·30분 중에서 고른다.
     /// 틈을 줄인 축은 시간에 비례하지 않으므로 고른 간격 대신 발언 덩어리가 시작하는 시각을 적는다(너무 붙은 것은 건너뛴다).</summary>
     private void RebuildAxisTicks()
@@ -777,80 +793,240 @@ public sealed partial class SessionHistoryViewModel : ObservableObject
         OnPropertyChanged(nameof(FloorCount)); OnPropertyChanged(nameof(MemberEventCount)); OnPropertyChanged(nameof(HasRecording));
     }
 
-    // ── 재생 ──
+    // ── 재생 — 녹취 재생 바(§4.6) ──
+    // 막대 하나 = 녹취 전체의 벽시계 구간(통화 = 첫 세그먼트 시작~마지막 끝, 무전 = 세션 시간축 — 발언 레인과 같은 축).
+    // 막대의 한 점(벽시계 시각)을 그 시각을 담은 세그먼트 + 파일 안 오프셋으로 풀어 튼다. 세그먼트 사이(말 없는 구간)는 건너뛰기면 다음
+    // 세그먼트로 뛰고, 아니면 재생 헤드만 시계로 흘려 다음 세그먼트에서 이어 튼다. 파일은 ManagementClient 가 로컬에 캐시한다(옮겨도 다시 받지 않음).
 
-    [RelayCommand] private Task Play() => PlayAsync(retry: false, slot: null);
-    [RelayCommand] private Task RetryTranscode() => PlayAsync(retry: true, slot: null);
+    private readonly List<(RecordingSegment Seg, DateTime Start, DateTime End)> _segs = new();
+    private readonly List<(DateTime Start, DateTime End, string Spk, int Seq)> _turnSpans = new();
+    private readonly Dictionary<string, string> _turnColors = new();
+    private DateTime _barT0 = DateTime.Today;
+    private double _barSpanSec = 1;
+    private RecordingSegment? _curSeg;                     // 지금 재생기에 열린 파일의 세그먼트(null = 말 없는 구간·정지)
+    private DateTime _head;                                // 재생 헤드(벽시계)
+    private int _openSeq;
+    private bool _logged;
 
-    /// <summary>발언 턴 막대 클릭 — 그 세그먼트(동시 발언이면 단독 트랙 slot)를 재생.</summary>
-    [RelayCommand] private Task PlayTurn(TurnBar bar)
+    /// <summary>사용자 의도 = 재생 중(파일 받는 중·말 없는 구간도 포함). 일시정지 = false.</summary>
+    [ObservableProperty] private bool _playing;
+    [ObservableProperty] private double _headRatio;
+    [ObservableProperty] private string _headPosText = "00:00";
+    [ObservableProperty] private string _headWallText = "";
+    [ObservableProperty] private string _barLenText = "00:00";
+    [ObservableProperty] private string _nowSpeakerText = "";
+    [ObservableProperty] private bool _nowSpeaking;
+    [ObservableProperty] private bool _skipGaps = true;
+    [ObservableProperty] private double _hoverRatio = -1;
+    [ObservableProperty] private string _hoverText = "";
+    /// <summary>재생 속도 0 = 1× · 1 = 1.5× · 2 = 2×.</summary>
+    [ObservableProperty] private int _speedIndex;
+    public double Speed => SpeedIndex switch { 1 => 1.5, 2 => 2.0, _ => 1.0 };
+    public ObservableCollection<PlayerBlock> PlayerBlocks { get; } = new();
+    public bool HasPlayer => _segs.Count > 0;
+    public bool HasHover => HoverRatio >= 0;
+    public string PlayLabel => Playing ? "일시정지" : "재생";
+
+    /// <summary>재생기 조작 — MediaElement 는 창 코드비하인드가 든다.</summary>
+    public event EventHandler<MediaOpenArgs>? OpenRequested;
+    public event EventHandler<double>? SeekRequested;
+    /// <summary>true = 일시정지, false = 이어 재생.</summary>
+    public event EventHandler<bool>? PauseRequested;
+    public event EventHandler<double>? SpeedRequested;
+    public event EventHandler? StopRequested;
+
+    partial void OnPlayingChanged(bool value) => OnPropertyChanged(nameof(PlayLabel));
+    partial void OnHoverRatioChanged(double value) => OnPropertyChanged(nameof(HasHover));
+    partial void OnSpeedIndexChanged(int value) { OnPropertyChanged(nameof(Speed)); SpeedRequested?.Invoke(this, Speed); }
+
+    private static string Mmss(double sec) { int t = (int)Math.Round(Math.Max(0, sec)); return $"{t / 60:00}:{t % 60:00}"; }
+
+    private void ResetPlayer()
     {
-        var seg = Segments.FirstOrDefault(x => x.Seq == bar.Seq);
-        if (seg is null || !bar.Playable) return Task.CompletedTask;
-        _playQueue.Clear();
-        SelectedSegment = seg;
-        return PlayAsync(retry: false, slot: bar.Multi ? bar.Slot : null);
+        StopMedia(); _curSeg = null; Playing = false; _segs.Clear(); _turnSpans.Clear(); _turnColors.Clear(); PlayerBlocks.Clear();
+        HoverRatio = -1; _logged = false; OnPropertyChanged(nameof(HasPlayer)); OnPropertyChanged(nameof(CanPlay));
     }
 
-    /// <summary>세션 전체 — 재생 가능한 세그먼트를 순서대로(끝나면 다음).</summary>
-    [RelayCommand] private Task PlayAll()
+    /// <summary>고른 통화·세션의 막대 구간과 세그먼트 배치를 잡는다(세그먼트·발언 레인을 다 만든 뒤).</summary>
+    private void SetupBar(HistoryRow row)
     {
-        _playQueue.Clear();
-        foreach (var s in Segments.Where(x => x.Status != "recording").OrderBy(x => x.Seq)) _playQueue.Enqueue(s);
-        if (_playQueue.Count == 0) return Task.CompletedTask;
-        SelectedSegment = _playQueue.Dequeue();
-        return PlayAsync(retry: false, slot: null);
+        _segs.Clear(); PlayerBlocks.Clear();
+        DateTime cursor = Recording?.Start ?? row.E.AnswerTime ?? row.E.StartTime ?? row.E.Time;
+        foreach (var sg in Segments.OrderBy(x => x.Seq))
+        {
+            var st = sg.Start ?? cursor; var en = st.AddMilliseconds(Math.Max(0, sg.DurationMs));
+            _segs.Add((sg, st, en)); cursor = en;
+        }
+        _segs.Sort((a, b) => a.Start.CompareTo(b.Start));
+        if (row.E.Kind == HistoryKind.Ptt && Lanes.Count > 0) { _barT0 = _axisT0; _barSpanSec = Math.Max(1, _axisSpanMs / 1000); }
+        else if (_segs.Count > 0) { _barT0 = _segs[0].Start; _barSpanSec = Math.Max(1, (_segs.Max(x => x.End) - _barT0).TotalSeconds); }
+        if (row.E.Kind == HistoryKind.Ptt)
+        {
+            // 발언 막대 — 겹치면(동시 발언) 두 번째 줄
+            DateTime lane0End = DateTime.MinValue;
+            foreach (var t in _turnSpans)
+            {
+                int r = t.Start < lane0End ? 1 : 0;
+                if (r == 0) lane0End = t.End;
+                PlayerBlocks.Add(new PlayerBlock((t.Start - _barT0).TotalSeconds / _barSpanSec, Math.Max(0.004, (t.End - t.Start).TotalSeconds / _barSpanSec),
+                    _turnColors.TryGetValue(t.Spk, out var c) ? c : SpkColors[0], r, $"#{t.Seq} {Who(_s, t.Spk)} · {t.Start:HH:mm:ss} · {FmtSpeech((int)(t.End - t.Start).TotalMilliseconds)}"));
+            }
+        }
+        BarLenText = Mmss(_barSpanSec);
+        _head = _segs.Count > 0 ? _segs[0].Start : _barT0;
+        UpdateHead();
+        OnPropertyChanged(nameof(HasPlayer)); OnPropertyChanged(nameof(CanPlay));
     }
 
-    private async Task PlayAsync(bool retry, int? slot)
+    private void UpdateHead()
     {
-        var m = _s.Management; var rec = Recording; var seg = SelectedSegment;
-        if (m is null || rec is null || seg is null) return;
-        StopMedia();
-        _playCts = new CancellationTokenSource();
+        double t = (_head - _barT0).TotalSeconds;
+        HeadRatio = Math.Clamp(t / _barSpanSec, 0, 1);
+        HeadPosText = Mmss(t); HeadWallText = _head.ToString("HH:mm:ss");
+        var now = _turnSpans.Where(x => _head >= x.Start && _head < x.End).ToList();
+        NowSpeaking = now.Count > 0;
+        NowSpeakerText = now.Count > 0 ? $"지금 {string.Join(" + ", now.Select(x => Who(_s, x.Spk)).Distinct())} · 발언 #{now[0].Seq}" : "말 없는 구간";
+    }
+
+    /// <summary>막대의 한 점으로 — 그 시각을 담은 세그먼트를 그 오프셋에서 연다(같은 파일이면 위치만 옮긴다). play = null 이면 지금 상태 유지.</summary>
+    private void SeekTo(DateTime g, bool? play = null)
+    {
+        if (_segs.Count == 0) return;
+        bool want = play ?? Playing;
+        var end = _barT0.AddSeconds(_barSpanSec);
+        if (g < _barT0) g = _barT0; if (g > end) g = end;
+        var hit = _segs.FirstOrDefault(x => g >= x.Start && g < x.End);
+        if (hit.Seg is null && want && SkipGaps && _segs.FirstOrDefault(x => x.Start > g) is { Seg: not null } nx) { g = nx.Start; hit = nx; }
+        _head = g; UpdateHead();
+        if (hit.Seg is null)                                                   // 말 없는 구간·끝 — 파일을 닫고 시계만(Tick)
+        {
+            if (_curSeg is not null) { _curSeg = null; StopMedia(); }
+            Playing = want && _segs.Any(x => x.Start > g);
+            return;
+        }
+        double off = (g - hit.Start).TotalSeconds;
+        if (_curSeg == hit.Seg && MediaSource.Length > 0)
+        {
+            SeekRequested?.Invoke(this, off);
+            if (want != Playing) PauseRequested?.Invoke(this, !want);
+            Playing = want;
+            return;
+        }
+        Playing = want;
+        _ = OpenAsync(hit.Seg, off, want, retry: false);
+    }
+
+    private async Task OpenAsync(RecordingSegment seg, double off, bool play, bool retry)
+    {
+        var m = _s.Management; var rec = Recording;
+        if (m is null || rec is null) { Playing = false; return; }
+        int seq = ++_openSeq;
+        _playCts?.Cancel(); _playCts = new CancellationTokenSource();
         var ct = _playCts.Token;
         bool video = seg.HasVideo || seg.Tracks.Any(t => t.Kind == "video");
         LoadingAudio = true; RecordingStatus = video ? "영상 받는 중…" : "오디오 받는 중…";
         Result<string> r;
-        try { r = await m.FetchSegmentAudioAsync(rec.Id, seg.Seq, slot, retry, st => RecordingStatus = st, ct); }
-        catch (OperationCanceledException) { LoadingAudio = false; return; }
-        catch (Exception ex)                                                     // 임시 파일·전송 오류는 상태 띠로 — 명령 예외로 새면 앱 오류 대화상자가 뜬다
+        try { r = await m.FetchSegmentAudioAsync(rec.Id, seg.Seq, null, retry, st => RecordingStatus = st, ct); }
+        catch (OperationCanceledException) { if (seq == _openSeq) LoadingAudio = false; return; }
+        catch (Exception ex)                                                     // 임시 파일·전송 오류는 상태 줄로 — 명령 예외로 새면 앱 오류 대화상자가 뜬다
         {
             _s.Log.Warn($"recording play {rec.Id} #{seg.Seq}: {ex.Message}");
-            LoadingAudio = false; RecordingStatus = "재생 실패 — " + ex.Message; _playQueue.Clear(); return;
+            if (seq == _openSeq) { LoadingAudio = false; Playing = false; RecordingStatus = "재생 실패 — " + ex.Message; }
+            return;
         }
+        if (seq != _openSeq || ct.IsCancellationRequested) return;
         LoadingAudio = false;
-        if (ct.IsCancellationRequested) return;
-        if (!r.Ok) { RecordingStatus = ResponseText.Describe(ResponseText.Area.Recording, r.Code, r.Reason); _playQueue.Clear(); return; }
-        PlayingHasVideo = video;
-        MediaSource = r.Value;
-        PlayingLabel = $"{Parties()} · {seg.Label}{(slot is { } sl ? $" 슬롯 {sl}" : "")} ({seg.DurationText})";
-        RecordingStatus = _playQueue.Count > 0 ? $"재생 중 · 이어서 {_playQueue.Count}개" : "재생 중";
-        PlayRequested?.Invoke(this, r.Value);
-        _s.Activity.Add(ActivityPanel.Call, ActivityKind.Note, $"녹취 재생 {Parties()} #{seg.Seq}");
+        if (!r.Ok) { RecordingStatus = ResponseText.Describe(ResponseText.Area.Recording, r.Code, r.Reason); Playing = false; return; }
+        _curSeg = seg; SelectedSegment = seg; PlayingHasVideo = video; MediaSource = r.Value;
+        RecordingStatus = $"녹취 {Segments.Count}개 중 #{seg.Seq}";
+        OpenRequested?.Invoke(this, new MediaOpenArgs(r.Value, off, play));
+        if (!_logged) { _logged = true; _s.Activity.Add(ActivityPanel.Call, ActivityKind.Note, $"녹취 재생 {Parties()} #{seg.Seq}"); }
+    }
+
+    /// <summary>창의 200 ms 틱 — 재생기 위치(초, 파일이 열려 있으면)로 헤드를 옮기고, 말 없는 구간이면 시계로 흘려 다음 세그먼트를 연다.</summary>
+    public void Tick(double? mediaPosSec)
+    {
+        if (!Playing || LoadingAudio || _segs.Count == 0) return;
+        if (_curSeg is not null)
+        {
+            if (mediaPosSec is { } p && _segs.FirstOrDefault(x => x.Seg == _curSeg) is { Seg: not null } cur) { _head = cur.Start.AddSeconds(p); UpdateHead(); }
+            return;
+        }
+        _head = _head.AddSeconds(0.2 * Speed);
+        if (_segs.FirstOrDefault(x => _head >= x.Start && _head < x.End) is { Seg: not null }) { SeekTo(_head, true); return; }
+        if (_head >= _barT0.AddSeconds(_barSpanSec)) { _head = _barT0.AddSeconds(_barSpanSec); Playing = false; RecordingStatus = "재생 끝"; }
+        UpdateHead();
+    }
+
+    /// <summary>파일 하나 끝(MediaEnded) — 다음 세그먼트로(건너뛰기면 바로, 아니면 말 없는 구간을 시계로 지나서).</summary>
+    public void OnMediaEnded()
+    {
+        var cur = _segs.FirstOrDefault(x => x.Seg == _curSeg);
+        _curSeg = null; MediaSource = "";
+        if (cur.Seg is null) return;
+        var next = _segs.FirstOrDefault(x => x.Start > cur.Start && x.Seg != cur.Seg);
+        if (next.Seg is null) { _head = cur.End; Playing = false; RecordingStatus = "재생 끝"; UpdateHead(); return; }
+        if (SkipGaps || next.Start <= cur.End) SeekTo(next.Start, true);
+        else { _head = cur.End; UpdateHead(); }                               // 시계가 말 없는 구간을 지나 Tick 이 다음 세그먼트를 연다
+    }
+    public void OnMediaFailed(string reason) { _curSeg = null; MediaSource = ""; PlayingHasVideo = false; Playing = false; RecordingStatus = "재생 실패 — " + reason; }
+
+    // 조작 — 막대(창이 비율을 넘긴다)·버튼
+    public void SeekRatio(double ratio) => SeekTo(_barT0.AddSeconds(Math.Clamp(ratio, 0, 1) * _barSpanSec));
+    public void HoverAt(double ratio)
+    {
+        HoverRatio = Math.Clamp(ratio, 0, 1);
+        var at = _barT0.AddSeconds(HoverRatio * _barSpanSec);
+        string who = IsPtt ? (_turnSpans.Where(x => at >= x.Start && at < x.End).Select(x => Who(_s, x.Spk)).Distinct().ToList() is { Count: > 0 } w ? " · " + string.Join(", ", w) : " · 말 없음") : "";
+        HoverText = $"{Mmss(HoverRatio * _barSpanSec)} · {at:HH:mm:ss}{who}";
+    }
+    public void HoverEnd() => HoverRatio = -1;
+
+    [RelayCommand] private void TogglePlay()
+    {
+        if (_segs.Count == 0) return;
+        if (Playing) { Playing = false; if (MediaSource.Length > 0) PauseRequested?.Invoke(this, true); return; }
+        if (_head >= _barT0.AddSeconds(_barSpanSec - 0.5)) _head = _segs[0].Start;     // 끝에서 누르면 처음부터
+        if (_curSeg is not null && MediaSource.Length > 0) { Playing = true; PauseRequested?.Invoke(this, false); return; }
+        SeekTo(_head, true);
+    }
+    [RelayCommand] private void Back10() => SeekTo(_head.AddSeconds(-10));
+    [RelayCommand] private void Fwd10() => SeekTo(_head.AddSeconds(10));
+    /// <summary>이전·다음 발언 — 무전 발언 막대의 시작으로.</summary>
+    [RelayCommand] private void PrevTurn()
+    {
+        var t = _turnSpans.Select(x => x.Start).Where(x => x < _head.AddSeconds(-1)).DefaultIfEmpty(_barT0).Max();
+        SeekTo(t);
+    }
+    [RelayCommand] private void NextTurn()
+    {
+        if (_turnSpans.Select(x => x.Start).Where(x => x > _head.AddSeconds(0.5)).OrderBy(x => x).FirstOrDefault() is var t && t != default) SeekTo(t);
+    }
+    /// <summary>세션 전체 — 처음 세그먼트부터 끝까지.</summary>
+    [RelayCommand] private void PlayAll() { if (_segs.Count > 0) SeekTo(_segs[0].Start, true); }
+    /// <summary>발언 레인의 턴 막대 클릭 — 그 발언 시작으로 옮겨 재생.</summary>
+    [RelayCommand] private void PlayTurn(TurnBar bar) => SeekTo(AxisTimeAt(bar.LeftRatio), true);
+    /// <summary>다시 변환 — 지금(없으면 헤드 위치의) 세그먼트의 변환 실패 표식을 지우고 다시 받아 그 자리에서 튼다.</summary>
+    [RelayCommand] private Task RetryTranscode()
+    {
+        var hit = _curSeg is not null ? _segs.FirstOrDefault(x => x.Seg == _curSeg) : _segs.FirstOrDefault(x => _head >= x.Start && _head < x.End);
+        if (hit.Seg is null && _segs.Count > 0) hit = _segs[0];
+        if (hit.Seg is null) return Task.CompletedTask;
+        Playing = true;
+        return OpenAsync(hit.Seg, Math.Max(0, (_head - hit.Start).TotalSeconds), true, retry: true);
     }
 
     private string Parties() => Selected?.Parties ?? "";
 
-    /// <summary>정지 — 재생 중인 것과 대기열 모두.</summary>
-    [RelayCommand] public void Stop() { _playQueue.Clear(); StopMedia(); }
+    /// <summary>정지 — 파일을 닫고 헤드는 그 자리.</summary>
+    [RelayCommand] public void Stop() { Playing = false; _curSeg = null; StopMedia(); }
 
     private void StopMedia()
     {
-        _playCts?.Cancel(); _playCts = null;
-        if (MediaSource.Length > 0) { StopRequested?.Invoke(this, EventArgs.Empty); MediaSource = ""; PlayingLabel = ""; if (Recording is not null) RecordingStatus = "정지"; }
+        _playCts?.Cancel(); _playCts = null; _openSeq++;
+        if (MediaSource.Length > 0) { StopRequested?.Invoke(this, EventArgs.Empty); MediaSource = ""; }
         LoadingAudio = false; PlayingHasVideo = false;
     }
-
-    /// <summary>재생 끝(MediaEnded) — 창이 알린다. 전체 재생 대기열이 있으면 다음 세그먼트로.</summary>
-    public void OnMediaEnded()
-    {
-        MediaSource = ""; PlayingLabel = "";
-        if (_playQueue.Count > 0) { SelectedSegment = _playQueue.Dequeue(); _ = PlayAsync(retry: false, slot: null); return; }
-        PlayingHasVideo = false;
-        RecordingStatus = "재생 끝";
-    }
-    public void OnMediaFailed(string reason) { _playQueue.Clear(); MediaSource = ""; PlayingLabel = ""; PlayingHasVideo = false; RecordingStatus = "재생 실패 — " + reason; }
 
     // ── --ui-preview 표본 (서버 없이 화면 배치·바인딩 점검 — App.xaml.cs 개발 스위치 전용) ──
     private PttSessionDetail? _previewDetail;
@@ -957,7 +1133,7 @@ public sealed partial class SessionHistoryViewModel : ObservableObject
         if (video && Selected is { IsMcVideo: true } && SelectedSegment is { } vs)
         {
             PlayingHasVideo = true; MediaSource = "(표본)";
-            PlayingLabel = $"{Selected.Parties} · {vs.Label} ({vs.DurationText})"; RecordingStatus = "재생 중 (표본)";
+            RecordingStatus = $"녹취 {Segments.Count}개 중 #{vs.Seq} (표본)";
         }
     }
 

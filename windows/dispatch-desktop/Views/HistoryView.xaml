@@ -73,6 +73,135 @@
                 </DataTrigger>
             </DataTemplate.Triggers>
         </DataTemplate>
+        <!-- 녹취 재생 바(§4.6) — 통화·무전 공용, DataContext = 화면 VM. 막대 = 녹취 전체(무전은 세션 시간축), 누른 곳부터 재생 · 마우스를 올리면 그 지점 시각.
+             무전은 막대 위에 누가 언제 말했는지 색 막대(겹치면 두 줄) + 이전/다음 발언 · 말 없는 구간 건너뛰기 -->
+        <DataTemplate x:Key="PlayerTpl" DataType="{x:Type vm:SessionHistoryViewModel}">
+            <StackPanel>
+                <DockPanel>
+                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center" Visibility="{Binding HasPlayer, Converter={StaticResource BoolToVis}}">
+                        <CheckBox IsChecked="{Binding SkipGaps}" VerticalAlignment="Center" Margin="0,0,12,0" Visibility="{Binding IsPtt, Converter={StaticResource BoolToVis}}"
+                                  ToolTip="켜면 발언 사이의 말 없는 시간을 건너뛰고 다음 발언으로 바로 넘어갑니다"><TextBlock Text="말 없는 구간 건너뛰기" FontSize="12" /></CheckBox>
+                        <Border Style="{StaticResource SegGroup}" Margin="0,0,8,0" ToolTip="재생 속도">
+                            <StackPanel Orientation="Horizontal">
+                                <RadioButton Style="{StaticResource Seg}" Content="1×" IsChecked="{Binding SpeedIndex, Converter={StaticResource Eq}, ConverterParameter=0}" />
+                                <RadioButton Style="{StaticResource Seg}" Content="1.5×" IsChecked="{Binding SpeedIndex, Converter={StaticResource Eq}, ConverterParameter=1}" />
+                                <RadioButton Style="{StaticResource Seg}" Content="2×" IsChecked="{Binding SpeedIndex, Converter={StaticResource Eq}, ConverterParameter=2}" />
+                            </StackPanel>
+                        </Border>
+                        <Button Style="{StaticResource Btn.Xs}" Content="다시 변환" ToolTip="변환 실패 표식을 지우고 다시 변환 요청" Command="{Binding RetryTranscodeCommand}" IsEnabled="{Binding CanPlay}" />
+                    </StackPanel>
+                    <TextBlock Text="녹취" FontSize="13" FontWeight="Bold" VerticalAlignment="Center" Margin="0,0,8,0" />
+                    <TextBlock Style="{StaticResource Hint}" Text="{Binding RecordingStatus}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                </DockPanel>
+                <StackPanel Visibility="{Binding HasPlayer, Converter={StaticResource BoolToVis}}" Margin="0,10,0,0">
+                    <!-- 통화 막대 -->
+                    <Grid Height="24" Background="Transparent" Cursor="Hand" MouseLeftButtonDown="Bar_MouseDown" MouseMove="Bar_MouseMove" MouseLeave="Bar_MouseLeave"
+                          Visibility="{Binding IsCall, Converter={StaticResource BoolToVis}}">
+                        <Border Height="4" CornerRadius="2" Background="{DynamicResource Brush.MeterTrack}" VerticalAlignment="Center" />
+                        <Canvas ClipToBounds="False">
+                            <Border Height="4" CornerRadius="2" Background="{DynamicResource Brush.Primary}" Canvas.Top="10">
+                                <Border.Width>
+                                    <MultiBinding Converter="{StaticResource RatioLen}"><Binding Path="HeadRatio" /><Binding Path="ActualWidth" RelativeSource="{RelativeSource AncestorType=Grid}" /></MultiBinding>
+                                </Border.Width>
+                            </Border>
+                            <Ellipse Width="16" Height="16" Fill="{DynamicResource Brush.Surface}" Stroke="{DynamicResource Brush.Primary}" StrokeThickness="3" Canvas.Top="4">
+                                <Canvas.Left>
+                                    <MultiBinding Converter="{StaticResource RatioLen}"><Binding Path="HeadRatio" /><Binding Path="ActualWidth" RelativeSource="{RelativeSource AncestorType=Grid}" /></MultiBinding>
+                                </Canvas.Left>
+                                <Ellipse.RenderTransform><TranslateTransform X="-8" /></Ellipse.RenderTransform>
+                            </Ellipse>
+                            <Border Canvas.Top="-26" CornerRadius="5" Background="{DynamicResource Brush.Ink}" Padding="8,3" IsHitTestVisible="False" Visibility="{Binding HasHover, Converter={StaticResource BoolToVis}}">
+                                <Canvas.Left>
+                                    <MultiBinding Converter="{StaticResource RatioLen}"><Binding Path="HoverRatio" /><Binding Path="ActualWidth" RelativeSource="{RelativeSource AncestorType=Grid}" /></MultiBinding>
+                                </Canvas.Left>
+                                <Border.RenderTransform><TranslateTransform X="-50" /></Border.RenderTransform>
+                                <TextBlock Text="{Binding HoverText}" Style="{StaticResource Mono}" FontSize="11.5" Foreground="{DynamicResource Brush.Surface}" />
+                            </Border>
+                        </Canvas>
+                    </Grid>
+                    <!-- 무전 막대 — 발언 막대 + 재생 헤드 -->
+                    <Border Height="46" CornerRadius="6" Background="{DynamicResource Brush.BgSoft}" BorderBrush="{DynamicResource Brush.Line}" BorderThickness="1"
+                            Visibility="{Binding IsPtt, Converter={StaticResource BoolToVis}}">
+                        <Grid Background="Transparent" Cursor="Hand" MouseLeftButtonDown="Bar_MouseDown" MouseMove="Bar_MouseMove" MouseLeave="Bar_MouseLeave">
+                            <ItemsControl ItemsSource="{Binding PlayerBlocks}" IsHitTestVisible="False">
+                                <ItemsControl.ItemsPanel><ItemsPanelTemplate><Canvas /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+                                <ItemsControl.ItemContainerStyle>
+                                    <Style TargetType="ContentPresenter">
+                                        <Setter Property="Canvas.Top" Value="5" />
+                                        <Setter Property="Canvas.Left">
+                                            <Setter.Value>
+                                                <MultiBinding Converter="{StaticResource RatioLen}"><Binding Path="LeftRatio" /><Binding Path="ActualWidth" RelativeSource="{RelativeSource AncestorType=ItemsControl}" /></MultiBinding>
+                                            </Setter.Value>
+                                        </Setter>
+                                        <Style.Triggers><DataTrigger Binding="{Binding Row}" Value="1"><Setter Property="Canvas.Top" Value="24" /></DataTrigger></Style.Triggers>
+                                    </Style>
+                                </ItemsControl.ItemContainerStyle>
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate DataType="{x:Type vm:PlayerBlock}">
+                                        <Border Height="15" MinWidth="3" CornerRadius="3" Background="{Binding Color}" Opacity="0.8">
+                                            <Border.Width>
+                                                <MultiBinding Converter="{StaticResource RatioLen}"><Binding Path="WidthRatio" /><Binding Path="ActualWidth" RelativeSource="{RelativeSource AncestorType=ItemsControl}" /></MultiBinding>
+                                            </Border.Width>
+                                        </Border>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                            <Canvas ClipToBounds="False" IsHitTestVisible="False">
+                                <Rectangle Width="2" Height="52" Canvas.Top="-4" Fill="{DynamicResource Brush.Ink}">
+                                    <Canvas.Left>
+                                        <MultiBinding Converter="{StaticResource RatioLen}"><Binding Path="HeadRatio" /><Binding Path="ActualWidth" RelativeSource="{RelativeSource AncestorType=Grid}" /></MultiBinding>
+                                    </Canvas.Left>
+                                    <Rectangle.RenderTransform><TranslateTransform X="-1" /></Rectangle.RenderTransform>
+                                </Rectangle>
+                                <Border Canvas.Top="-30" CornerRadius="5" Background="{DynamicResource Brush.Ink}" Padding="8,3" Visibility="{Binding HasHover, Converter={StaticResource BoolToVis}}">
+                                    <Canvas.Left>
+                                        <MultiBinding Converter="{StaticResource RatioLen}"><Binding Path="HoverRatio" /><Binding Path="ActualWidth" RelativeSource="{RelativeSource AncestorType=Grid}" /></MultiBinding>
+                                    </Canvas.Left>
+                                    <Border.RenderTransform><TranslateTransform X="-60" /></Border.RenderTransform>
+                                    <TextBlock Text="{Binding HoverText}" FontSize="11.5" Foreground="{DynamicResource Brush.Surface}" />
+                                </Border>
+                            </Canvas>
+                        </Grid>
+                    </Border>
+                    <DockPanel Margin="0,3,0,0" Visibility="{Binding IsPtt, Converter={StaticResource BoolToVis}}">
+                        <TextBlock DockPanel.Dock="Right" Style="{StaticResource MonoMuted}" Text="{Binding AxisEndText}" FontSize="11.5" />
+                        <TextBlock Style="{StaticResource MonoMuted}" Text="{Binding AxisStartText}" FontSize="11.5" />
+                    </DockPanel>
+                    <!-- 조작 줄 -->
+                    <DockPanel Margin="0,8,0,0">
+                        <TextBlock DockPanel.Dock="Right" Style="{StaticResource MonoMuted}" FontSize="12" VerticalAlignment="Center" Visibility="{Binding IsCall, Converter={StaticResource BoolToVis}}">
+                            <Run Text="실제 시각 " FontFamily="{StaticResource Font.Ui}" /><Run Text="{Binding HeadWallText, Mode=OneWay}" />
+                        </TextBlock>
+                        <Border x:Name="Now" DockPanel.Dock="Right" CornerRadius="6" Padding="10,4" Background="{DynamicResource Brush.Surface2}" VerticalAlignment="Center"
+                                Visibility="{Binding IsPtt, Converter={StaticResource BoolToVis}}">
+                            <TextBlock x:Name="NowText" Text="{Binding NowSpeakerText}" FontSize="12.5" FontWeight="Bold" Foreground="{DynamicResource Brush.Muted}" />
+                        </Border>
+                        <StackPanel Orientation="Horizontal">
+                            <Button Style="{StaticResource Btn.Sm}" Content="−10초" Command="{Binding Back10Command}" Margin="0,0,6,0" Visibility="{Binding IsCall, Converter={StaticResource BoolToVis}}" />
+                            <Button Style="{StaticResource Btn.Sm}" Content="이전 발언" Command="{Binding PrevTurnCommand}" Margin="0,0,6,0" Visibility="{Binding IsPtt, Converter={StaticResource BoolToVis}}" />
+                            <Button Style="{StaticResource Btn.Sm.Pri}" Command="{Binding TogglePlayCommand}" MinWidth="96" Margin="0,0,6,0">
+                                <StackPanel Orientation="Horizontal">
+                                    <Path x:Name="PlayIcon" Style="{StaticResource Icon.Filled}" Data="{StaticResource Icon.Play}" Width="11" Height="11" Margin="0,0,6,0" />
+                                    <TextBlock Text="{Binding PlayLabel}" />
+                                </StackPanel>
+                            </Button>
+                            <Button Style="{StaticResource Btn.Sm}" Content="+10초" Command="{Binding Fwd10Command}" Margin="0,0,10,0" Visibility="{Binding IsCall, Converter={StaticResource BoolToVis}}" />
+                            <Button Style="{StaticResource Btn.Sm}" Content="다음 발언" Command="{Binding NextTurnCommand}" Margin="0,0,10,0" Visibility="{Binding IsPtt, Converter={StaticResource BoolToVis}}" />
+                            <TextBlock Style="{StaticResource Mono}" FontSize="13" VerticalAlignment="Center">
+                                <Run Text="{Binding HeadPosText, Mode=OneWay}" FontWeight="SemiBold" /><Run Text=" / " Foreground="{DynamicResource Brush.Faint}" /><Run Text="{Binding BarLenText, Mode=OneWay}" Foreground="{DynamicResource Brush.Faint}" />
+                            </TextBlock>
+                            <TextBlock Style="{StaticResource MonoMuted}" FontSize="12.5" VerticalAlignment="Center" Margin="10,0,0,0" Text="{Binding HeadWallText}" Visibility="{Binding IsPtt, Converter={StaticResource BoolToVis}}" />
+                        </StackPanel>
+                    </DockPanel>
+                </StackPanel>
+            </StackPanel>
+            <DataTemplate.Triggers>
+                <DataTrigger Binding="{Binding Playing}" Value="True"><Setter TargetName="PlayIcon" Property="Data" Value="{StaticResource Icon.Pause}" /></DataTrigger>
+                <DataTrigger Binding="{Binding NowSpeaking}" Value="True">
+                    <Setter TargetName="Now" Property="Background" Value="{DynamicResource Brush.TalkSoft}" /><Setter TargetName="NowText" Property="Foreground" Value="{DynamicResource Brush.TalkInk}" />
+                </DataTrigger>
+            </DataTemplate.Triggers>
+        </DataTemplate>
         <!-- 무전 세션 카드 — 관제 채널 카드(§4 공통)와 같은 모양: 1줄 상태 점 · 이름 · 라벨(영상/개별/애드혹/전이중/진행 중/긴급) · 시각 · 2줄 개시·참여 · 3줄 길이·발언(영상 세션은 송출).
              고른 카드 = 남색 테두리 2.5 + 연한 남색 면, 긴급 = 빨강 테두리 2 + 연한 빨강 면 -->
         <DataTemplate x:Key="PttCardTpl" DataType="{x:Type vm:HistoryRow}">
@@ -210,7 +339,7 @@
                     </ControlTemplate>
                 </GridSplitter.Template>
             </GridSplitter>
-            <!-- 영상 칸 + 재생기 — 통화/PTT 패널의 재생 버튼·턴 막대가 VM 이벤트로 재생기를 튼다. 영상이 있는 녹취(영상 통화 · MCVideo 송출 구간)를
+            <!-- 영상 칸 + 재생기 — 녹취 재생 바·턴 막대가 VM 이벤트로 재생기를 열고·옮기고·멈춘다. 영상이 있는 녹취(영상 통화 · MCVideo 송출 구간)를
                  틀 때만 칸이 열리고(폭 0 ↔ 372, 왼쪽 두 칸이 그만큼 준다) 소리만 있는 녹취는 닫힌 채 소리만 난다. 재생기는 늘 트리에 둔다 -->
             <Border Grid.Column="3" Style="{StaticResource Card}" Padding="0" ClipToBounds="True"
                     Width="{Binding ShowVideo, Converter={StaticResource Pick}, ConverterParameter=372|0}"
@@ -222,13 +351,13 @@
                             <Button DockPanel.Dock="Right" Style="{StaticResource Btn.Xs}" Content="정지" Command="{Binding StopCommand}" ToolTip="재생을 멈추고 영상 칸을 닫는다" />
                             <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                                 <TextBlock Text="녹취 영상" FontWeight="Bold" FontSize="14" VerticalAlignment="Center" Margin="0,0,8,0" />
-                                <Border Style="{StaticResource Tag.Teal}"><TextBlock Text="재생 중" /></Border>
+                                <Border Style="{StaticResource Tag.Teal}" Visibility="{Binding Playing, Converter={StaticResource BoolToVis}}"><TextBlock Text="재생 중" /></Border>
                             </StackPanel>
                         </DockPanel>
                     </Border>
-                    <TextBlock DockPanel.Dock="Bottom" Style="{StaticResource Muted}" Text="{Binding PlayingLabel}" FontSize="12" TextWrapping="Wrap" Margin="14,0,14,12" />
+                    <TextBlock DockPanel.Dock="Bottom" Style="{StaticResource MonoMuted}" FontSize="12" Margin="14,0,14,12"><Run Text="{Binding HeadPosText, Mode=OneWay}" /><Run Text=" / " /><Run Text="{Binding BarLenText, Mode=OneWay}" /><Run Text=" · " /><Run Text="{Binding HeadWallText, Mode=OneWay}" /></TextBlock>
                     <Border Margin="12" CornerRadius="8" Background="{DynamicResource Brush.Ink}" ClipToBounds="True">
-                        <MediaElement x:Name="Player" LoadedBehavior="Manual" UnloadedBehavior="Manual" Stretch="Uniform" MediaEnded="Player_MediaEnded" MediaFailed="Player_MediaFailed" />
+                        <MediaElement x:Name="Player" LoadedBehavior="Manual" UnloadedBehavior="Manual" Stretch="Uniform" MediaOpened="Player_MediaOpened" MediaEnded="Player_MediaEnded" MediaFailed="Player_MediaFailed" />
                     </Border>
                 </DockPanel>
             </Border>
@@ -263,33 +392,9 @@
                                 </StackPanel>
                             </DockPanel>
                         </Border>
-                        <!-- 녹취(아래 고정) -->
-                        <Border DockPanel.Dock="Bottom" BorderBrush="{DynamicResource Brush.Border}" BorderThickness="0,1,0,0" Padding="16,10">
-                            <StackPanel>
-                                <DockPanel>
-                                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Visibility="{Binding SelectedHasRecording, Converter={StaticResource BoolToVis}}">
-                                        <Button Style="{StaticResource Btn.Xs}" Content="다시 변환" ToolTip="변환 실패 표식을 지우고 다시 변환 요청" Command="{Binding RetryTranscodeCommand}" IsEnabled="{Binding CanPlay}" Margin="0,0,4,0" />
-                                        <Button Style="{StaticResource Btn.Xs}" Content="정지" Command="{Binding StopCommand}" IsEnabled="{Binding IsPlaying}" Margin="0,0,4,0" />
-                                        <Button Style="{StaticResource Btn.Xs.Pri}" Command="{Binding PlayCommand}" IsEnabled="{Binding CanPlay}"><StackPanel Orientation="Horizontal"><Path Style="{StaticResource Icon.Filled}" Data="{StaticResource Icon.Play}" Width="10" Height="10" Margin="0,0,4,0" /><TextBlock Text="재생" /></StackPanel></Button>
-                                    </StackPanel>
-                                    <TextBlock Style="{StaticResource SectionHeader}" Text="녹취" FontSize="13" FontWeight="Bold" VerticalAlignment="Center" Margin="0,0,8,0" />
-                                    <TextBlock Style="{StaticResource Hint}" Text="{Binding RecordingStatus}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
-                                </DockPanel>
-                                <TextBlock Style="{StaticResource Muted}" Text="{Binding PlayingLabel}" FontSize="12" TextWrapping="Wrap" Margin="0,4,0,0" Visibility="{Binding PlayingLabel, Converter={StaticResource StrToVis}}" />
-                                <ListBox Style="{StaticResource SelectList}" ItemsSource="{Binding Segments}" SelectedItem="{Binding SelectedSegment}" MouseDoubleClick="Segments_DoubleClick"
-                                         Margin="0,6,0,0" Visibility="{Binding HasRecording, Converter={StaticResource BoolToVis}}">
-                                    <ListBox.ItemsPanel><ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate></ListBox.ItemsPanel>
-                                    <ListBox.ItemTemplate>
-                                        <DataTemplate DataType="{x:Type m:RecordingSegment}">
-                                            <Border Style="{StaticResource Chip}" Margin="0,0,6,0" ToolTip="{Binding Status}">
-                                                <TextBlock FontSize="12">
-                                                    <Run Text="{Binding Label, Mode=OneWay}" FontWeight="Medium" /><Run Text=" " /><Run Text="{Binding Start, Mode=OneWay, StringFormat=HH:mm:ss}" Foreground="{DynamicResource Brush.Muted}" /><Run Text=" " /><Run Text="{Binding DurationText, Mode=OneWay}" Foreground="{DynamicResource Brush.Muted}" /><Run Text="{Binding HasVideo, Mode=OneWay, Converter={StaticResource Pick}, ConverterParameter=' · 영상|'}" Foreground="{DynamicResource Brush.ListenInk}" FontWeight="SemiBold" />
-                                                </TextBlock>
-                                            </Border>
-                                        </DataTemplate>
-                                    </ListBox.ItemTemplate>
-                                </ListBox>
-                            </StackPanel>
+                        <!-- 녹취 재생 바(아래 고정) -->
+                        <Border DockPanel.Dock="Bottom" BorderBrush="{DynamicResource Brush.Border}" BorderThickness="0,1,0,0" Padding="16,10,16,12">
+                            <ContentControl Content="{Binding}" ContentTemplate="{StaticResource PlayerTpl}" Focusable="False" />
                         </Border>
                         <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                             <StackPanel Margin="16,14,16,14" DataContext="{Binding Selected}">
@@ -378,7 +483,7 @@
                                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
                                     <Button Style="{StaticResource Btn.Xs}" ToolTip="재생 가능한 세그먼트를 순서대로 재생"
                                             Command="{Binding DataContext.PlayAllCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
-                                            IsEnabled="{Binding DataContext.HasRecording, RelativeSource={RelativeSource AncestorType=UserControl}}" Margin="0,0,4,0"><StackPanel Orientation="Horizontal"><Path Style="{StaticResource Icon.Filled}" Data="{StaticResource Icon.Play}" Width="10" Height="10" Margin="0,0,4,0" /><TextBlock Text="전체 재생" /></StackPanel></Button>
+                                            IsEnabled="{Binding DataContext.HasPlayer, RelativeSource={RelativeSource AncestorType=UserControl}}" Margin="0,0,4,0"><StackPanel Orientation="Horizontal"><Path Style="{StaticResource Icon.Filled}" Data="{StaticResource Icon.Play}" Width="10" Height="10" Margin="0,0,4,0" /><TextBlock Text="처음부터" /></StackPanel></Button>
                                     <Button Style="{StaticResource Btn.Xs}" Content="정지" Command="{Binding DataContext.StopCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
                                             IsEnabled="{Binding DataContext.IsPlaying, RelativeSource={RelativeSource AncestorType=UserControl}}" />
                                 </StackPanel>
@@ -417,35 +522,9 @@
                                 </ItemsControl>
                             </DockPanel>
                         </Border>
-                        <!-- 녹취(아래 고정) -->
-                        <Border DockPanel.Dock="Bottom" BorderBrush="{DynamicResource Brush.Border}" BorderThickness="0,1,0,0" Padding="12,8">
-                            <StackPanel>
-                                <DockPanel>
-                                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
-                                        <Button Style="{StaticResource Btn.Xs}" Content="다시 변환" ToolTip="변환 실패 표식을 지우고 다시 변환 요청" Command="{Binding RetryTranscodeCommand}" IsEnabled="{Binding CanPlay}" Margin="0,0,4,0" />
-                                        <Button Style="{StaticResource Btn.Xs.Pri}" Command="{Binding PlayCommand}" IsEnabled="{Binding CanPlay}"><StackPanel Orientation="Horizontal"><Path Style="{StaticResource Icon.Filled}" Data="{StaticResource Icon.Play}" Width="10" Height="10" Margin="0,0,4,0" /><TextBlock Text="세그먼트 재생" /></StackPanel></Button>
-                                    </StackPanel>
-                                    <TextBlock Style="{StaticResource SectionHeader}" Text="녹취" VerticalAlignment="Center" Margin="0,0,8,0" />
-                                    <TextBlock Style="{StaticResource Hint}" Text="{Binding RecordingStatus}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
-                                </DockPanel>
-                                <TextBlock Style="{StaticResource Muted}" Text="{Binding PlayingLabel}" FontSize="12" TextWrapping="Wrap" Margin="0,4,0,0" Visibility="{Binding PlayingLabel, Converter={StaticResource StrToVis}}" />
-                                <ListBox Style="{StaticResource SelectList}" ItemsSource="{Binding Segments}" SelectedItem="{Binding SelectedSegment}" MouseDoubleClick="Segments_DoubleClick"
-                                         MaxHeight="96" Margin="0,4,0,0" Visibility="{Binding HasRecording, Converter={StaticResource BoolToVis}}">
-                                    <ListBox.ItemTemplate>
-                                        <DataTemplate DataType="{x:Type m:RecordingSegment}">
-                                            <Border Style="{StaticResource LogRow}" Padding="6,2">
-                                                <DockPanel>
-                                                    <TextBlock DockPanel.Dock="Right" Style="{StaticResource Mono}" Text="{Binding DurationText}" FontSize="11" VerticalAlignment="Center" />
-                                                    <Border DockPanel.Dock="Right" Style="{StaticResource Tag.Teal}" Height="16" Margin="0,0,8,0" Visibility="{Binding HasVideo, Converter={StaticResource BoolToVis}}"><TextBlock Text="영상" FontSize="10.5" /></Border>
-                                                    <TextBlock FontSize="12" TextTrimming="CharacterEllipsis" VerticalAlignment="Center">
-                                                        <Run Text="{Binding Label, Mode=OneWay}" FontWeight="Medium" /><Run Text=" · " Foreground="{DynamicResource Brush.Muted}" /><Run Text="{Binding Start, Mode=OneWay, StringFormat=HH:mm:ss}" Foreground="{DynamicResource Brush.Muted}" /><Run Text=" · " Foreground="{DynamicResource Brush.Muted}" /><Run Text="{Binding Status, Mode=OneWay}" Foreground="{DynamicResource Brush.Muted}" />
-                                                    </TextBlock>
-                                                </DockPanel>
-                                            </Border>
-                                        </DataTemplate>
-                                    </ListBox.ItemTemplate>
-                                </ListBox>
-                            </StackPanel>
+                        <!-- 녹취 재생 바(아래 고정) -->
+                        <Border DockPanel.Dock="Bottom" BorderBrush="{DynamicResource Brush.Border}" BorderThickness="0,1,0,0" Padding="12,10,12,12">
+                            <ContentControl Content="{Binding}" ContentTemplate="{StaticResource PlayerTpl}" Focusable="False" />
                         </Border>
                         <!-- 본문 3구획 — 참여자 / 발언 타임라인 / 이벤트 타임라인. 칸이 낮으면(작은 창·배너 둘) 구획이 0 으로 눌리지 않게 최소 높이를 두고 세로로 넘긴다 -->
                         <ScrollViewer x:Name="DetailScroll" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" SizeChanged="DetailScroll_SizeChanged">

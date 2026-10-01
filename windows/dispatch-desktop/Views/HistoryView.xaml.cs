@@ -1,4 +1,4 @@
-// [이력] 화면 본문(§4.6) 코드비하인드 — 녹취 재생(MediaElement)·더블클릭만. 같은 VM 을 주 창과 별창이 번갈아 붙이므로
+// [이력] 화면 본문(§4.6) 코드비하인드 — 녹취 재생기(MediaElement)·재생 바 마우스·발언 타임라인 확대. 같은 VM 을 주 창과 별창이 번갈아 붙이므로
 // 재생 이벤트는 Loaded~Unloaded 사이에만 구독한다(두 인스턴스가 동시에 재생하지 않게). 언로드되면 재생을 멈춘다.
 using System.Windows;
 using System.Windows.Controls;
@@ -11,25 +11,33 @@ public partial class HistoryView : UserControl
 {
     private SessionHistoryViewModel? Vm => DataContext as SessionHistoryViewModel;
     private SessionHistoryViewModel? _bound;
+    /// <summary>재생 헤드 갱신 — 200 ms 마다 재생기 위치를 VM 에 알린다(말 없는 구간은 VM 이 시계로 흘린다).</summary>
+    private readonly System.Windows.Threading.DispatcherTimer _tick = new() { Interval = TimeSpan.FromMilliseconds(200) };
+    private MediaOpenArgs? _pendingOpen;
 
     public HistoryView()
     {
         InitializeComponent();
+        _tick.Tick += (_, _) => _bound?.Tick(_pendingOpen is null && Player.Source is not null ? Player.Position.TotalSeconds : null);
         Loaded += (_, _) =>
         {
             if (Vm is null || _bound == Vm) return;
             _bound = Vm;
-            _bound.PlayRequested += OnPlay; _bound.StopRequested += OnStop;
+            _bound.OpenRequested += OnOpen; _bound.SeekRequested += OnSeek; _bound.PauseRequested += OnPause;
+            _bound.SpeedRequested += OnSpeed; _bound.StopRequested += OnStop;
             _bound.PropertyChanged += OnVmChanged;
+            _tick.Start();
             ApplyColumnWidths();
         };
         Unloaded += (_, _) =>
         {
             if (_bound is null) return;
             _bound.Stop();
-            _bound.PlayRequested -= OnPlay; _bound.StopRequested -= OnStop;
+            _bound.OpenRequested -= OnOpen; _bound.SeekRequested -= OnSeek; _bound.PauseRequested -= OnPause;
+            _bound.SpeedRequested -= OnSpeed; _bound.StopRequested -= OnStop;
             _bound.PropertyChanged -= OnVmChanged;
             _bound = null;
+            _tick.Stop(); _pendingOpen = null;
             Player.Stop(); Player.Source = null;
             SessionHistoryViewModel.CleanupTemp();
         };
@@ -90,15 +98,38 @@ public partial class HistoryView : UserControl
         _panStart = null; LaneScroll.ReleaseMouseCapture(); LaneScroll.Cursor = null;
     }
 
-    private void OnPlay(object? sender, string path) { Player.Stop(); Player.Source = new Uri(path); Player.Play(); }
-    private void OnStop(object? sender, EventArgs e) { Player.Stop(); Player.Source = null; }
+    // ── 녹취 재생기 — 열기는 MediaOpened 뒤에 위치·속도·재생/멈춤을 건다(열리기 전 Position 은 무시된다) ──
+    private void OnOpen(object? sender, MediaOpenArgs a)
+    {
+        _pendingOpen = a;
+        Player.Stop(); Player.Source = new Uri(a.Path);
+        Player.Play();                                                            // Manual 재생기는 Play 로 연다 — 멈춤이면 MediaOpened 에서 바로 Pause
+    }
+    private void Player_MediaOpened(object sender, RoutedEventArgs e)
+    {
+        if (_pendingOpen is not { } a) return;
+        _pendingOpen = null;
+        Player.SpeedRatio = Vm?.Speed ?? 1.0;
+        Player.Position = TimeSpan.FromSeconds(Math.Max(0, a.OffsetSec));
+        if (!a.Play) Player.Pause();
+    }
+    private void OnSeek(object? sender, double sec) => Player.Position = TimeSpan.FromSeconds(Math.Max(0, sec));
+    private void OnPause(object? sender, bool pause) { if (pause) Player.Pause(); else { Player.SpeedRatio = Vm?.Speed ?? 1.0; Player.Play(); } }
+    private void OnSpeed(object? sender, double ratio) => Player.SpeedRatio = ratio;
+    private void OnStop(object? sender, EventArgs e) { _pendingOpen = null; Player.Stop(); Player.Source = null; }
+
+    // ── 재생 바 — 누른 곳부터 재생, 마우스를 올리면 그 지점 시각 ──
+    private static double RatioIn(object sender, MouseEventArgs e) =>
+        sender is FrameworkElement f && f.ActualWidth > 0 ? e.GetPosition(f).X / f.ActualWidth : 0;
+    private void Bar_MouseDown(object sender, MouseButtonEventArgs e) { Vm?.SeekRatio(RatioIn(sender, e)); e.Handled = true; }
+    private void Bar_MouseMove(object sender, MouseEventArgs e) => Vm?.HoverAt(RatioIn(sender, e));
+    private void Bar_MouseLeave(object sender, MouseEventArgs e) => Vm?.HoverEnd();
 
     /// <summary>본문 3구획의 높이 = 보이는 높이, 단 DetailMinHeight 아래로는 줄이지 않는다(그때는 바깥이 세로로 넘긴다) — ScrollViewer 는 안을 무한 높이로 재므로 * 행이 칸을 채우도록 높이를 직접 준다.</summary>
     private const double DetailMinHeight = 420;
     private void DetailScroll_SizeChanged(object sender, SizeChangedEventArgs e) =>
         DetailBody.Height = Math.Max(DetailMinHeight, e.NewSize.Height - DetailBody.Margin.Top - DetailBody.Margin.Bottom);
 
-    private void Segments_DoubleClick(object sender, MouseButtonEventArgs e) { if (Vm?.CanPlay == true) Vm.PlayCommand.Execute(null); }
     private void Player_MediaEnded(object sender, RoutedEventArgs e) => Vm?.OnMediaEnded();
     private void Player_MediaFailed(object sender, ExceptionRoutedEventArgs e) => Vm?.OnMediaFailed(e.ErrorException.Message);
 }
