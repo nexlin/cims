@@ -34,6 +34,7 @@ CSipDialog::CSipDialog( CSipStack * pclsSipStack ) : m_iSeq(0), m_iNextSeq(0), m
 	, m_iSessionExpires(0), m_bLocalRefresher(false), m_iLastRefreshTime(0), m_iRefreshSentTime(0)
 	, m_iPeerMinSE(0), m_iPeerSessionExpires(0), m_bPeerSupportsTimer(false), m_iSessionRefresherPolicy(-1)
 	, m_bSessionTimerDead(false), m_bSessionTimerRetried(false), m_bLastReInviteMediaSame(false)
+	, m_bLastReInviteStreamsChanged(false), m_pclsReInviteInProgress(NULL), m_pclsHeldReInvite(NULL), m_iHeldReInviteTime(0)
 {
 	memset( &m_sttInviteTime, 0, sizeof(m_sttInviteTime) );
 	memset( &m_sttCancelTime, 0, sizeof(m_sttCancelTime) );

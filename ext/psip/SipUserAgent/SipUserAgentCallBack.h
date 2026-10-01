@@ -48,6 +48,10 @@ public:
 	{}
 
 	void SetIpPort( const char * pszIp, int iPort, int iSocketCountPerMedia );
+	/** relay(미디어 노드가 audio·video 두 스트림만 중계 — audio = iPort, video = iPort + iSocketCountPerMedia) 주소로 바꾼다.
+	 *  포트는 m 줄 순서가 아니라 미디어 종류로 정한다 — 통화 중 더한 영상 줄은 뒤(예 audio·text·video)에 붙는다(RFC 3264 §8.1).
+	 *  그 밖의 스트림(text·message 등)은 중계하지 않으므로 port 0(거절, RFC 3264 §6), 거절·제거된 스트림은 port 0 그대로. */
+	void SetRelayIpPort( const char * pszIp, int iPort, int iSocketCountPerMedia );
 	void SetDirection( ERtpDirection eDirection );
 	int GetMediaCount( );
 	int GetAudioPort( );

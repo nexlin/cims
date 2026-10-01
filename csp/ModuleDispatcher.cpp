@@ -1421,7 +1421,7 @@ void CModuleDispatcher::EventIncomingCall( const char *pszCallId, const char *ps
             strRelayIp = strAllocatedIp;
             strMediaNode = strAllocatedIp;  // CMP 노드 relay IP = 처리 미디어 노드
         }
-        pclsRtp->SetIpPort( strRelayIp.c_str(), iStartPortB, SOCKET_COUNT_PER_MEDIA );
+        pclsRtp->SetRelayIpPort( strRelayIp.c_str(), iStartPortB, SOCKET_COUNT_PER_MEDIA );
     }
 
     clsUserInfo.GetCallRoute( clsRoute );
@@ -1774,9 +1774,10 @@ void CModuleDispatcher::EventCallRing( const char *pszCallId, int iSipStatus, CS
                                                       clsCallInfo.m_clsSdesLeg[clsCallInfo.m_bRecv ? 1 : 0], false );
                 // m= 포트·미디어 레벨 c= 까지 relay 로 — m_iPort/m_strIp 만 바꾸면 미디어 목록이 있는 SDP 는 원래
                 // 포트로 나간다
-                pclsRtp->SetIpPort( clsCallInfo.m_strRelayLocalIp.empty() ? CspAddressing::GetLocalRtpAddress().c_str()
-                                                                          : clsCallInfo.m_strRelayLocalIp.c_str(),
-                                    clsCallInfo.m_iPeerRtpPort, SOCKET_COUNT_PER_MEDIA );
+                pclsRtp->SetRelayIpPort( clsCallInfo.m_strRelayLocalIp.empty()
+                                             ? CspAddressing::GetLocalRtpAddress().c_str()
+                                             : clsCallInfo.m_strRelayLocalIp.c_str(),
+                                         clsCallInfo.m_iPeerRtpPort, SOCKET_COUNT_PER_MEDIA );
             }
         }
         // 서버 링백(announcements.md §3.4 — 프로파일 ringback=media 일 때만): B 의 SDP 없는 첫 18x 에 A 로 183+SDP 를
@@ -1877,7 +1878,7 @@ void CModuleDispatcher::EventCallStart( const char *pszCallId, CSipCallRtp *pcls
 
             std::string strRelayIp = CspAddressing::GetLocalRtpAddress();
             if ( !strAllocatedIp.empty() ) strRelayIp = strAllocatedIp;
-            pclsRtp->SetIpPort( strRelayIp.c_str(), clsCallInfo.m_iPeerRtpPort, SOCKET_COUNT_PER_MEDIA );
+            pclsRtp->SetRelayIpPort( strRelayIp.c_str(), clsCallInfo.m_iPeerRtpPort, SOCKET_COUNT_PER_MEDIA );
         } else if ( clsCallInfo.m_iPeerRtpPort > 0 ) {
             gclsGroupCallService.OnCallStarted( pszCallId, CspAddressing::GetLocalRtpAddress(),
                                                 clsCallInfo.m_iPeerRtpPort );
@@ -2352,6 +2353,16 @@ void CModuleDispatcher::EventReInvite( const char *pszCallId, CSipCallRtp *pclsR
 
     CCallInfo clsCallInfo;
     if ( gclsCallMap.Select( pszCallId, clsCallInfo ) ) {
+        // 스트림 구성을 바꾸는 re-offer(통화 중 영상 추가·제거 — RFC 3264 §8.1·§8.2)는
+        //   상대 단말이 받아들이는지가 결과다 — 스택의 자동 200(기존 로컬 선언)을 미루고,
+        //   상대 leg 의 최종 응답을 relay 주소로 이 leg 에 돌려준다(EventReInviteResponse →
+        //   AnswerHeldReInvite, RFC 3261 §14.2). 보류·해제·주소 변경은 relay 가 미디어를
+        //   고정하므로 자동 200 으로 끝낸다.
+        const bool bHoldAnswer = pclsRemoteRtp && clsCallInfo.m_iPeerRtpPort > 0 &&
+                                 !clsCallInfo.m_strRelaySessionId.empty() &&
+                                 gclsUserAgent.IsStreamSetChangeReInvite( pszCallId ) &&
+                                 gclsUserAgent.IsConnected( clsCallInfo.m_strPeerCallId.c_str() ) &&
+                                 gclsUserAgent.HoldReInviteAnswer( pszCallId );
         // 재협상 leg 의 새 원격 RTP 주소를 CMP 에 MODIFY — 수신(A) leg=peer0, 발신(B) leg=peer1.
         //   미갱신 시 CMP 는 초기 ADD 주소로 계속 송신: no-NAT leg 의 포트 변경은 rtp_src_drop
         //   전량 드롭, NAT leg 의 망 전환(re-INVITE)은 구 sig_ip guard 에 막혀 재-latch 불가였다.
@@ -2425,7 +2436,7 @@ void CModuleDispatcher::EventReInvite( const char *pszCallId, CSipCallRtp *pclsR
             // 재협상 SDP 에도 CMP relay IP 를 광고 (멀티 미디어노드에서 CSP 로컬 주소 오광고 방지)
             std::string strRelayIp = clsCallInfo.m_strRelayLocalIp.empty() ? CspAddressing::GetLocalRtpAddress()
                                                                            : clsCallInfo.m_strRelayLocalIp;
-            pclsRemoteRtp->SetIpPort( strRelayIp.c_str(), clsCallInfo.m_iPeerRtpPort, SOCKET_COUNT_PER_MEDIA );
+            pclsRemoteRtp->SetRelayIpPort( strRelayIp.c_str(), clsCallInfo.m_iPeerRtpPort, SOCKET_COUNT_PER_MEDIA );
             // 보류 음악(TS 24.610 §4.5.2.4, announcements.md §3.3) — offer 방향 sendonly/inactive = hold, sendrecv =
             // resume.
             //   SDP 는 relay 에 고정돼 있어 재협상 없이 CMP 원천만 바꾼다. inactive 는 음악을 들려주기 위해 B 로 가는
@@ -2440,7 +2451,13 @@ void CModuleDispatcher::EventReInvite( const char *pszCallId, CSipCallRtp *pclsR
                 }
             }
         }
-        gclsUserAgent.SendReInvite( clsCallInfo.m_strPeerCallId.c_str(), pclsRemoteRtp );
+        const bool bSent = gclsUserAgent.SendReInvite( clsCallInfo.m_strPeerCallId.c_str(), pclsRemoteRtp );
+        if ( bHoldAnswer ) {
+            CLog::Print( bSent ? LOG_INFO : LOG_ERROR, "EventReInvite: 스트림 구성 변경 — %s (CallId=%s → %s)",
+                         bSent ? "상대 leg 의 답까지 응답을 미룬다" : "상대 leg 전달 실패, 500", pszCallId,
+                         clsCallInfo.m_strPeerCallId.c_str() );
+            if ( !bSent ) gclsUserAgent.AnswerHeldReInvite( pszCallId, SIP_INTERNAL_SERVER_ERROR, NULL );
+        }
     } else if ( pclsRemoteRtp ) {
         // PTT 멤버 leg (CallMap 밖 — CSP 가 종단, 스택이 기존 로컬 SDP 로 자동 200 OK) — 재협상된
         //   멤버 주소를 JOIN ②(멱등)로 CMP 에 재전달 + NAT 재판정. PTT 세션이 아니면 내부에서
@@ -2456,28 +2473,60 @@ void CModuleDispatcher::EventReInvite( const char *pszCallId, CSipCallRtp *pclsR
 }
 
 void CModuleDispatcher::EventReInviteResponse( const char *pszCallId, int iSipStatus, CSipCallRtp *pclsRemoteRtp ) {
-    // 서버가 전달한 re-INVITE 의 재-answer — SRTP leg 의 UE 재키잉만 CMP 에 반영한다 (§5.2).
-    //   키 불변(통상)이면 아무 것도 하지 않는다 — MODIFY 재전송은 NAT 플래그 재평가를 요구하므로
-    //   재키잉이 실제 감지될 때만 주소·NAT 포함 전체 MODIFY 를 낸다.
-    if ( iSipStatus < SIP_OK || iSipStatus >= SIP_MULTIPLE_CHOICES || pclsRemoteRtp == NULL ) return;
+    // 서버가 전달한 re-INVITE 의 최종 응답.
+    //   ① 상대 leg 가 답을 미뤄 둔 re-offer(EventReInvite — 스트림 구성 변경)면 이 응답이 그 결과다 —
+    //      relay 주소로 그 leg 에 돌려주고(거절된 스트림은 port 0 그대로 — RFC 3264 §6),
+    //      이 leg 의 새 미디어(영상 포트)를 CMP 에 MODIFY 한다.
+    //   ② 그 밖에는 SRTP leg 의 UE 재키잉만 CMP 에 반영한다 (§5.2) — 키 불변(통상)이면 아무 것도 하지
+    //      않는다(MODIFY 재전송은 NAT 플래그 재평가를 요구하므로 재키잉이 실제 감지될 때만 주소·NAT 포함
+    //      전체 MODIFY 를 낸다).
+    if ( iSipStatus < SIP_OK ) return;
     CCallInfo clsCallInfo;
     if ( !gclsCallMap.Select( pszCallId, clsCallInfo ) || clsCallInfo.m_strRelaySessionId.empty() ) return;
+    const bool bForward =
+        !clsCallInfo.m_strPeerCallId.empty() && gclsUserAgent.HasHeldReInvite( clsCallInfo.m_strPeerCallId.c_str() );
+    if ( iSipStatus >= SIP_MULTIPLE_CHOICES || pclsRemoteRtp == NULL ) {
+        // 실패는 세션을 바꾸지 않는다(RFC 3261 §14.2) — 같은 코드로 돌려준다
+        //   (491 이면 그 leg 가 §14.1 대기 뒤 다시 보낸다)
+        if ( bForward ) {
+            CLog::Print( LOG_INFO, "EventReInviteResponse: 미룬 re-INVITE 에 %d 전달 (CallId=%s → %s)", iSipStatus,
+                         pszCallId, clsCallInfo.m_strPeerCallId.c_str() );
+            gclsUserAgent.AnswerHeldReInvite(
+                clsCallInfo.m_strPeerCallId.c_str(),
+                iSipStatus >= SIP_MULTIPLE_CHOICES ? iSipStatus : SIP_INTERNAL_SERVER_ERROR, NULL );
+        }
+        return;
+    }
     const int iPeerIdx = clsCallInfo.m_bRecv ? 0 : 1;
     RelaySdesLeg clsSdesLeg = clsCallInfo.m_clsSdesLeg[iPeerIdx];
-    if ( !clsSdesLeg.clsAudio.bSrtp && !clsSdesLeg.clsVideo.bSrtp ) return;
-    const std::string strOldAudioKey = clsSdesLeg.clsAudio.strUeKey;
-    const std::string strOldVideoKey = clsSdesLeg.clsVideo.strUeKey;
     CmpMediaCrypto clsAudioCrypto, clsVideoCrypto;
-    MediaSdes::ReadReinviteSdes( pclsRemoteRtp->m_clsMediaList, "audio", iPeerIdx, clsSdesLeg.clsAudio,
-                                 clsAudioCrypto );
-    MediaSdes::ReadReinviteSdes( pclsRemoteRtp->m_clsMediaList, "video", iPeerIdx, clsSdesLeg.clsVideo,
-                                 clsVideoCrypto );
-    if ( clsSdesLeg.clsAudio.strUeKey == strOldAudioKey && clsSdesLeg.clsVideo.strUeKey == strOldVideoKey ) return;
-    gclsCallMap.SetRelaySdesLeg( pszCallId, iPeerIdx, clsSdesLeg );
+    bool bRekey = false;
+    if ( clsSdesLeg.clsAudio.bSrtp || clsSdesLeg.clsVideo.bSrtp ) {
+        const std::string strOldAudioKey = clsSdesLeg.clsAudio.strUeKey;
+        const std::string strOldVideoKey = clsSdesLeg.clsVideo.strUeKey;
+        MediaSdes::ReadReinviteSdes( pclsRemoteRtp->m_clsMediaList, "audio", iPeerIdx, clsSdesLeg.clsAudio,
+                                     clsAudioCrypto );
+        MediaSdes::ReadReinviteSdes( pclsRemoteRtp->m_clsMediaList, "video", iPeerIdx, clsSdesLeg.clsVideo,
+                                     clsVideoCrypto );
+        bRekey = clsSdesLeg.clsAudio.strUeKey != strOldAudioKey || clsSdesLeg.clsVideo.strUeKey != strOldVideoKey;
+        if ( bRekey ) gclsCallMap.SetRelaySdesLeg( pszCallId, iPeerIdx, clsSdesLeg );
+    }
+    if ( !bRekey && !bForward ) return;
 
     int iAudioPort = pclsRemoteRtp->GetAudioPort();
     if ( iAudioPort <= 0 && pclsRemoteRtp->m_iPort > 0 ) iAudioPort = pclsRemoteRtp->m_iPort;
-    if ( iAudioPort <= 0 ) return;
+    if ( iAudioPort > 0 )
+        ModifyReInviteAnswerLeg( pszCallId, clsCallInfo, iPeerIdx, pclsRemoteRtp, iAudioPort, bForward, clsAudioCrypto,
+                                 clsVideoCrypto );
+    // CMP 가 이 leg 의 새 미디어를 안 뒤에 돌려준다 — 답을 받은 leg 가 곧바로 보내는 영상이
+    //   이 leg 로 이어지게
+    if ( bForward ) ForwardHeldReInviteAnswer( pszCallId, clsCallInfo, iSipStatus, pclsRemoteRtp );
+}
+
+void CModuleDispatcher::ModifyReInviteAnswerLeg( const char *pszCallId, const CCallInfo &clsCallInfo, int iPeerIdx,
+                                                 CSipCallRtp *pclsRemoteRtp, int iAudioPort, bool bForward,
+                                                 const CmpMediaCrypto &clsAudioCrypto,
+                                                 const CmpMediaCrypto &clsVideoCrypto ) {
     int iVideoPort = ( pclsRemoteRtp->GetMediaCount() >= 2 ) ? pclsRemoteRtp->GetVideoPort() : 0;
     const std::string &strUserId = iPeerIdx == 0 ? clsCallInfo.m_strRelayCaller : clsCallInfo.m_strRelayCallee;
     int iLegNat = 0;
@@ -2490,13 +2539,36 @@ void CModuleDispatcher::EventReInviteResponse( const char *pszCallId, int iSipSt
             strSigIp = clsLegUserInfo.m_strIp;
         if ( CCspServiceMap::EvalMediaNat( clsNatSvc, pclsRemoteRtp->m_strIp, strSigIp, strLegGuardIp ) ) iLegNat = 1;
     }
-    CLog::Print( LOG_INFO, "EventReInviteResponse: peer%d SRTP UE rekey — CMP MODIFY (CallId=%s)", iPeerIdx,
-                 pszCallId );
+    CLog::Print( LOG_INFO, "EventReInviteResponse: peer%d %s — CMP MODIFY (CallId=%s)", iPeerIdx,
+                 bForward ? "re-offer answer" : "SRTP UE rekey", pszCallId );
     gclsCmpClient.ModifySession( clsCallInfo.m_strRelaySessionId, pclsRemoteRtp->m_strIp, iAudioPort, iVideoPort,
                                  iPeerIdx, clsCallInfo.m_strRelayCaller, clsCallInfo.m_strRelayCallee,
                                  clsCallInfo.m_strRelaySesId, iLegNat, strLegGuardIp, 0, 0, 0, 0, "",
                                  clsAudioCrypto.bEnabled ? &clsAudioCrypto : NULL,
                                  clsVideoCrypto.bEnabled ? &clsVideoCrypto : NULL );
+}
+
+void CModuleDispatcher::ForwardHeldReInviteAnswer( const char *pszCallId, const CCallInfo &clsCallInfo, int iSipStatus,
+                                                   const CSipCallRtp *pclsRemoteRtp ) {
+    // 답을 기다리는 leg 로 가는 answer — 이 leg 의 키 투과 차단, 그 leg 의 상태로
+    //   (answer = 그 leg offer 의 tag/suite echo, §5.2)
+    CSipCallRtp clsAnswer = *pclsRemoteRtp;
+    const int iTargetIdx = clsCallInfo.m_bRecv ? 1 : 0;
+    MediaSdes::RewriteRelaySdpForLeg( clsAnswer.m_clsMediaList, clsCallInfo.m_clsSdesLeg[iTargetIdx], false );
+    // 변환 호 — 그 leg 의 협상 코덱으로(cmp.md §11.2)
+    const RelayCodec::LegCodecs &clsTgt = clsCallInfo.m_clsCodecLeg[iTargetIdx];
+    if ( clsTgt.transcode && clsTgt.negotiated.Valid() )
+        RelayCodec::RewriteAudio( clsAnswer.m_clsMediaList, clsTgt.negotiated, clsTgt.tePt, clsTgt.teRtpmap,
+                                  clsTgt.teFmtp );
+    // relay 주소 — 이 leg 의 m_iPeerRtpPort 가 상대(답을 기다리는) leg 를 향한 relay 포트다.
+    //   port 0(거절된 스트림)은 그대로
+    std::string strRelayIp =
+        clsCallInfo.m_strRelayLocalIp.empty() ? CspAddressing::GetLocalRtpAddress() : clsCallInfo.m_strRelayLocalIp;
+    clsAnswer.SetRelayIpPort( strRelayIp.c_str(), clsCallInfo.m_iPeerRtpPort, SOCKET_COUNT_PER_MEDIA );
+    const bool bSent = gclsUserAgent.AnswerHeldReInvite( clsCallInfo.m_strPeerCallId.c_str(), iSipStatus, &clsAnswer );
+    CLog::Print( bSent ? LOG_INFO : LOG_ERROR,
+                 "EventReInviteResponse: 미룬 re-INVITE 에 %d answer %s (video=%d, %s → %s)", iSipStatus,
+                 bSent ? "전달" : "실패", clsAnswer.GetVideoPort(), pszCallId, clsCallInfo.m_strPeerCallId.c_str() );
 }
 
 void CModuleDispatcher::EventPrack( const char *pszCallId, CSipCallRtp *pclsRtp ) {
@@ -2511,7 +2583,7 @@ void CModuleDispatcher::EventPrack( const char *pszCallId, CSipCallRtp *pclsRtp 
             }
             std::string strRelayIp = clsCallInfo.m_strRelayLocalIp.empty() ? CspAddressing::GetLocalRtpAddress()
                                                                            : clsCallInfo.m_strRelayLocalIp;
-            pclsRtp->SetIpPort( strRelayIp.c_str(), clsCallInfo.m_iPeerRtpPort, SOCKET_COUNT_PER_MEDIA );
+            pclsRtp->SetRelayIpPort( strRelayIp.c_str(), clsCallInfo.m_iPeerRtpPort, SOCKET_COUNT_PER_MEDIA );
         }
         gclsUserAgent.SendPrack( clsCallInfo.m_strPeerCallId.c_str(), pclsRtp );
     }

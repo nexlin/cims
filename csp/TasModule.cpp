@@ -427,7 +427,7 @@ bool CTasModule::OnCallStart( const char *pszCallId, CSipCallRtp *pclsRtp ) {
         MediaSdes::RewriteRelaySdpForLeg( pclsRtp->m_clsMediaList, clsOldInfo.m_clsSdesLeg[iStayIdx], true );
         std::string strRelayIp =
             clsOldInfo.m_strRelayLocalIp.empty() ? CspAddressing::GetLocalRtpAddress() : clsOldInfo.m_strRelayLocalIp;
-        pclsRtp->SetIpPort( strRelayIp.c_str(), clsOldInfo.m_iPeerRtpPort, SOCKET_COUNT_PER_MEDIA );
+        pclsRtp->SetRelayIpPort( strRelayIp.c_str(), clsOldInfo.m_iPeerRtpPort, SOCKET_COUNT_PER_MEDIA );
     }
     gclsUserAgent.SendReInvite( strStayCallId.c_str(), pclsRtp );
     gclsTransCallMap.Delete( pszCallId, false );
@@ -545,9 +545,9 @@ bool CTasModule::OnTransfer( const char *pszCallId, const char *pszReferToCallId
         // 양 leg 재-offer — 각 수신 leg 의 SDES 상태로 재작성 + relay 주소·기존 leg 포트 재광고
         if ( bRelay ) {
             MediaSdes::RewriteRelaySdpForLeg( clsReferToRtp.m_clsMediaList, clsCallInfo.m_clsSdesLeg[iStayIdx], true );
-            clsReferToRtp.SetIpPort( strRelayIp.c_str(), iStayPort, SOCKET_COUNT_PER_MEDIA );
+            clsReferToRtp.SetRelayIpPort( strRelayIp.c_str(), iStayPort, SOCKET_COUNT_PER_MEDIA );
             MediaSdes::RewriteRelaySdpForLeg( clsRtp.m_clsMediaList, clsJoinLeg, true );
-            clsRtp.SetIpPort( strRelayIp.c_str(), iJoinPort, SOCKET_COUNT_PER_MEDIA );
+            clsRtp.SetRelayIpPort( strRelayIp.c_str(), iJoinPort, SOCKET_COUNT_PER_MEDIA );
         } else {
             // 직결(비 relay) — crypto 투과만 차단 (기존 동작 보존)
             MediaSdes::StripCrypto( clsRtp.m_clsMediaList );
@@ -595,7 +595,7 @@ bool CTasModule::OnTransfer( const char *pszCallId, const char *pszReferToCallId
             gclsUserAgent.StopCall( strStayCallId.c_str() );
             return false;
         }
-        clsRtp.SetIpPort( strRelayIp.c_str(), iJoinPort, SOCKET_COUNT_PER_MEDIA );
+        clsRtp.SetRelayIpPort( strRelayIp.c_str(), iJoinPort, SOCKET_COUNT_PER_MEDIA );
     }
 
     clsUserInfo.GetCallRoute( clsRoute );
@@ -657,7 +657,7 @@ bool CTasModule::OnBlindTransfer( const char *pszCallId, const char *pszReferToI
         }
         std::string strRelayIp =
             clsOldInfo.m_strRelayLocalIp.empty() ? CspAddressing::GetLocalRtpAddress() : clsOldInfo.m_strRelayLocalIp;
-        clsRtp.SetIpPort( strRelayIp.c_str(), iStartPort, SOCKET_COUNT_PER_MEDIA );
+        clsRtp.SetRelayIpPort( strRelayIp.c_str(), iStartPort, SOCKET_COUNT_PER_MEDIA );
     }
 
     clsUserInfo.GetCallRoute( clsRoute );
@@ -867,14 +867,14 @@ int CTasModule::PickUpFork( const char *pszCallId, const char *pszFrom, CSipCall
     // A(발신자)에게 200 answer — 픽업 offer 를 A leg 상태로 재작성 + peer0 포트
     CSipCallRtp clsAnswerRtp = *pclsRtp;
     MediaSdes::RewriteRelaySdpForLeg( clsAnswerRtp.m_clsMediaList, clsSet.clsSdesA, false );
-    clsAnswerRtp.SetIpPort( strRelayIp.c_str(), clsSet.iPortA, SOCKET_COUNT_PER_MEDIA );
+    clsAnswerRtp.SetRelayIpPort( strRelayIp.c_str(), clsSet.iPortA, SOCKET_COUNT_PER_MEDIA );
     if ( gclsUserAgent.AcceptCall( strACallId.c_str(), &clsAnswerRtp ) == false ) {
         gclsUserAgent.StopCall( strACallId.c_str() );
         return SIP_INTERNAL_SERVER_ERROR;
     }
     // 픽업 단말에게 200 answer — 자기 offer echo(신규 leg 상태) + peer1 포트
     MediaSdes::RewriteRelaySdpForLeg( pclsRtp->m_clsMediaList, clsNewLeg, false );
-    pclsRtp->SetIpPort( strRelayIp.c_str(), clsSet.iPortB, SOCKET_COUNT_PER_MEDIA );
+    pclsRtp->SetRelayIpPort( strRelayIp.c_str(), clsSet.iPortB, SOCKET_COUNT_PER_MEDIA );
     gclsUserAgent.AcceptCall( pszCallId, pclsRtp );
     gclsCallMap.SetEstablished( pszCallId );
 
@@ -969,14 +969,14 @@ int CTasModule::PickUpLeg( const char *pszCallId, const char *pszFrom, CSipCallR
         // 발신자에게 200 answer — 신규 offer 를 발신 leg 상태(offer echo)로 재작성 + peer0 포트
         CSipCallRtp clsAnswerRtp = *pclsRtp;
         MediaSdes::RewriteRelaySdpForLeg( clsAnswerRtp.m_clsMediaList, clsOldCallInfo.m_clsSdesLeg[0], false );
-        clsAnswerRtp.SetIpPort( strRelayIp.c_str(), clsOldCallInfo.m_iPeerRtpPort, SOCKET_COUNT_PER_MEDIA );
+        clsAnswerRtp.SetRelayIpPort( strRelayIp.c_str(), clsOldCallInfo.m_iPeerRtpPort, SOCKET_COUNT_PER_MEDIA );
         if ( gclsUserAgent.AcceptCall( clsOldCallInfo.m_strPeerCallId.c_str(), &clsAnswerRtp ) == false ) {
             gclsUserAgent.StopCall( clsOldCallInfo.m_strPeerCallId.c_str() );
             return SIP_INTERNAL_SERVER_ERROR;
         }
         // 신규 단말에게 200 answer — 자기 offer echo(신규 leg 상태) + peer1 포트
         MediaSdes::RewriteRelaySdpForLeg( pclsRtp->m_clsMediaList, clsNewLeg, false );
-        pclsRtp->SetIpPort( strRelayIp.c_str(), clsPeerCallInfo.m_iPeerRtpPort, SOCKET_COUNT_PER_MEDIA );
+        pclsRtp->SetRelayIpPort( strRelayIp.c_str(), clsPeerCallInfo.m_iPeerRtpPort, SOCKET_COUNT_PER_MEDIA );
         gclsUserAgent.AcceptCall( pszCallId, pclsRtp );
         gclsCallMap.SetEstablished( pszCallId );
         return 0;
@@ -1352,7 +1352,7 @@ bool CTasModule::TryDispatchPilot( const char *pszCallId, const char *pszFrom, c
         clsSet.strMediaNode = strAllocatedIp;
         std::string strRelayIp = strAllocatedIp.empty() ? CspAddressing::GetLocalRtpAddress() : strAllocatedIp;
         // 대기 leg 전원에게 같은 peer1 포트 — 승자만 RELAY_MODIFY 로 고정 (§4.1 핵심 계약)
-        clsSet.clsBaseOffer.SetIpPort( strRelayIp.c_str(), iLocalPortB, SOCKET_COUNT_PER_MEDIA );
+        clsSet.clsBaseOffer.SetRelayIpPort( strRelayIp.c_str(), iLocalPortB, SOCKET_COUNT_PER_MEDIA );
     }
 
     int iLegs = 0;
@@ -1829,7 +1829,7 @@ bool CTasModule::HandleIncomingJoin( const char *pszCallId, const char *pszFrom,
     // 200 OK — sendonly + tap 포트 + 서버 키(a=crypto) + a=ssrc 라벨(RFC 5576, 귀속). A/B 무영향(은닉).
     const std::string strRelayIp = strTapLocalIp.empty() ? CspAddressing::GetLocalRtpAddress() : strTapLocalIp;
     MediaSdes::RewriteRelaySdpForLeg( pclsRtp->m_clsMediaList, clsTapLeg, false );
-    pclsRtp->SetIpPort( strRelayIp.c_str(), iTapLocalPort, SOCKET_COUNT_PER_MEDIA );
+    pclsRtp->SetRelayIpPort( strRelayIp.c_str(), iTapLocalPort, SOCKET_COUNT_PER_MEDIA );
     pclsRtp->SetDirection( E_RTP_SEND );  // 서버→감청자 단방향
     // a=ssrc 라벨 — 첫 audio m-line 에 caller/callee SSRC 표기.
     for ( auto &clsMedia : pclsRtp->m_clsMediaList ) {

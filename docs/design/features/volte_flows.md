@@ -36,6 +36,7 @@
 | C8 | RTP 릴레이 통화 | CMP 경유 미디어 중계 |
 | C9 | 실패 안내 | 통화중·무응답·없는 번호 → 183 early media 안내 → 원래 최종 코드 |
 | C10 | 보류 음악 | A 의 hold re-INVITE → 피보류 B 에 CMP 보류 음악, resume 에 정지 |
+| C11 | 통화 중 영상 전환 | A 의 영상 추가 re-INVITE → B 의 수락/거절이 A 의 결과(CSP 는 B 의 답까지 A 의 응답을 미룬다) |
 
 ### Part D. 서비스 중 운용 변경
 
@@ -381,6 +382,32 @@ UE-A (보류)             CSP                          CMP                    UE
 
 SDP 는 relay 에 고정돼 있어 재협상 없이 CMP 원천만 바뀐다. `a=inactive` 는 정책이 있으면 B 로 가는 offer 를 `sendonly` 로 고친다. 전달·픽업으로 leg 가
 교체되면 먼저 정지한다. 프로파일은 피보류자 접속서비스 `hold_profile`.
+
+### C11. 통화 중 영상 전환 (RFC 3264 §8.1 추가 · §8.2 제거)
+
+```
+UE-A                    CSP                          CMP                    UE-B
+  │ ── re-INVITE (m=audio, m=video P) ► │ ── RELAY_MODIFY peer0 (video P) ► │      │
+  │ ◄── 100 Trying ──────│ ── re-INVITE (m=audio, m=video relay) ──────────────► │
+  │                      │ ◄── 100 Trying ─────────────────────────────────────── │  [B 사용자에게 묻는다]
+  │                      │ ◄── 200 (m=video Q = 수락 / m=video 0 = 거절) ──────── │
+  │                      │ ── RELAY_MODIFY peer1 (video Q / 0) ► │              │
+  │ ◄── 200 (m=video relay / m=video 0) │                       │              │
+  │ ── ACK ─────────────►│ ── ACK ─────────────────────────────────────────────► │
+```
+
+- **스트림 구성을 바꾸는 re-offer**(활성 audio·video·application 이 생기거나 없어짐 — psip `IsStreamSetChangeReInvite`)는 상대 단말이 받아들이는지가
+  결과다. CSP 는 스택의 자동 200(기존 로컬 선언)을 미루고(`HoldReInviteAnswer` — 100 만), 상대 leg 로 전달한 re-INVITE 의 최종 응답을 relay 주소로
+  돌려준다(`EventReInviteResponse` → `ForwardHeldReInviteAnswer`, RFC 3261 §14.2). 상대가 거절한 스트림은 port 0 그대로 간다 — relay 치환
+  은 port 0 줄을 relay 포트로 바꾸지 않는다(바꾸면 제거가 추가로 바뀐다, RFC 3264 §8.2). 실패 응답(488·491 등)은 같은 코드로, 전달이 안
+  되면 500. 미룬 동안 A 가 보낸 다음 re-INVITE 는 500 + Retry-After(§14.2), 상대가 끝내 답하지 않으면 40 s 뒤 500(`CheckHeldReInvite` — 전달한
+  re-INVITE 트랜잭션 시한 32 s 뒤).
+- **relay 포트는 미디어 종류로 정한다**(psip `SetRelayIpPort` — CMP `PRtpRelay` 소켓 배치 audio = base, video = base + 2). 통화 중 더한 영상 줄은
+  m 줄 뒤에 붙으므로(예 audio·text·video — pjsua 는 실시간 문자 `m=text` 를 기본으로 제안한다) 순서로 매기면 영상이 relay 에 없는 포트로 간다.
+  relay 가 중계하지 않는 스트림(text·message 등)은 port 0(거절, RFC 3264 §6). VoLTE relay 의 모든 SDP 전달 지점(첫 offer·answer·18x·PRACK·re-INVITE·
+  전달·픽업·감청·안내)이 같다.
+- 보류·해제(방향만)·주소 변경·세션 갱신은 relay 가 미디어를 고정하므로 종전대로 자동 200 으로 끝낸다(C10).
+- 단말의 묻기·답(수락 = 영상을 받는 answer, 거절 = m=video port 0)은 [ue_sdk.md](ue_sdk.md) §4.5 «통화 중 영상 전환».
 
 ---
 

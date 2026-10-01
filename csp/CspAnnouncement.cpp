@@ -362,8 +362,8 @@ bool CCspAnnouncementService::BuildEarlyAnswer( const char *pszACallId, const Re
     iTePt = iOffTePt;
     // 오디오 = 고른 코덱(+telephone-event echo), 그 밖 m= 라인은 port 0(안내는 오디오만 — 영상은 열지 않는다)
     RelayCodec::RewriteAudio( clsAns.m_clsMediaList, clsChosen, iOffTePt, strTeRtpmap, strTeFmtp );
-    // relay 주소(A 전용 포트) — SetIpPort 가 모든 m= 에 포트를 배정하므로 그 뒤 비오디오를 0 으로
-    clsAns.SetIpPort( strRelayIp.c_str(), iRelayPort, SOCKET_COUNT_PER_MEDIA );
+    // relay 주소(A 전용 포트) — SetRelayIpPort 는 video 에도 포트를 주므로 그 뒤 비오디오를 0 으로
+    clsAns.SetRelayIpPort( strRelayIp.c_str(), iRelayPort, SOCKET_COUNT_PER_MEDIA );
     for ( auto &m : clsAns.m_clsMediaList )
         if ( m.m_strMedia != "audio" ) m.m_iPort = 0;
     // SDES — A leg 의 offer tag/suite echo + 서버 키(a=crypto) 재광고 (media_security.md §5.2)

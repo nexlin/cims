@@ -229,6 +229,16 @@ void CSipUserAgent::Delete( SIP_DIALOG_MAP::iterator & itMap )
 		delete itMap->second.m_pclsInvite;
 		itMap->second.m_pclsInvite = NULL;
 	}
+	if( itMap->second.m_pclsReInviteInProgress )
+	{
+		delete itMap->second.m_pclsReInviteInProgress;
+		itMap->second.m_pclsReInviteInProgress = NULL;
+	}
+	if( itMap->second.m_pclsHeldReInvite )
+	{
+		delete itMap->second.m_pclsHeldReInvite;
+		itMap->second.m_pclsHeldReInvite = NULL;
+	}
 
 	m_clsDialogMap.erase( itMap );
 }

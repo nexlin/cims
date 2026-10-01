@@ -16,11 +16,19 @@
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA 
  */
 
+// 활성(port>0) 스트림 종류 — audio 1 · video 2 · application 4. re-INVITE 의 스트림 구성 변화(RFC 3264 §8.1 추가·§8.2 제거) 판정.
+static int ReInviteStreamMask( CSipCallRtp & clsRtp )
+{
+	int iAudio = clsRtp.GetAudioPort();
+	if( iAudio < 0 ) iAudio = clsRtp.m_iPort;
+	return ( iAudio > 0 ? 1 : 0 ) | ( clsRtp.GetVideoPort() > 0 ? 2 : 0 ) | ( clsRtp.GetApplicationPort() > 0 ? 4 : 0 );
+}
+
 // SIP INVITE 요청 메시지 수신 이벤트 핸들러
 bool CSipUserAgent::RecvInviteRequest( int iThreadId, CSipMessage * pclsMessage )
 {
 	std::string	strCallId, strLocalTag;
-	bool	bReINVITE = false;
+	bool	bReINVITE = false, bHeldBusy = false, bHeldRetransmit = false, bCloned = false;
 	CSipCallRtp clsRtp, clsLocalRtp;
 	char	szTag[SIP_TAG_MAX_SIZE];
 	CSipMessage * pclsResponse = NULL;
@@ -50,7 +58,14 @@ bool CSipUserAgent::RecvInviteRequest( int iThreadId, CSipMessage * pclsMessage 
 		bReINVITE = true;
 		strLocalTag = itMap->second.m_strFromTag;
 
-		if( bSessionTooSmall == false )
+		if( itMap->second.m_pclsHeldReInvite )
+		{
+			// 앞서 답을 미룬 re-INVITE 가 아직 답을 기다린다 — 같은 CSeq 면 재전송(트랜잭션 몫), 다른 요청이면 다이얼로그 상태를
+			//   건드리지 않고 거절한다(아래 500).
+			bHeldBusy = true;
+			bHeldRetransmit = itMap->second.m_pclsHeldReInvite->m_clsCSeq.m_iDigit == pclsMessage->m_clsCSeq.m_iDigit;
+		}
+		else if( bSessionTooSmall == false )
 		{
 			// re-INVITE 는 target refresh 요청이다 — 받아들이는 요청의 Contact 로 remote target 을 바꾼다(RFC 3261 §12.2.2).
 			SIP_FROM_LIST::iterator itReContact = pclsMessage->m_clsContactList.begin();
@@ -73,6 +88,7 @@ bool CSipUserAgent::RecvInviteRequest( int iThreadId, CSipMessage * pclsMessage 
 				clsPrevRtp.GetVideoPort() == clsRtp.GetVideoPort() &&
 				clsPrevRtp.GetApplicationPort() == clsRtp.GetApplicationPort() &&
 				clsPrevRtp.m_eDirection == clsRtp.m_eDirection );
+			itMap->second.m_bLastReInviteStreamsChanged = ReInviteStreamMask( clsPrevRtp ) != ReInviteStreamMask( clsRtp );
 
 			// 세션 갱신 (RFC 4028 §7.2) — 목적과 무관하게 in-dialog re-INVITE 는 갱신 효과를 갖는다.
 			SessionTimerOnRequest( itMap->second, pclsMessage );
@@ -94,6 +110,21 @@ bool CSipUserAgent::RecvInviteRequest( int iThreadId, CSipMessage * pclsMessage 
 
 	if( bReINVITE )
 	{
+		if( bHeldBusy )
+		{
+			// RFC 3261 §14.2 — 앞 INVITE 에 최종 응답을 보내기 전에 받은 다음 INVITE 는 500 + Retry-After(0~10 s)
+			if( bHeldRetransmit == false )
+			{
+				pclsResponse = pclsMessage->CreateResponse( SIP_INTERNAL_SERVER_ERROR, strLocalTag.c_str() );
+				if( pclsResponse )
+				{
+					pclsResponse->AddHeader( "Retry-After", rand() % 11 );
+					m_clsSipStack.SendSipMessage( pclsResponse );
+				}
+			}
+			return true;
+		}
+
 		if( bSessionTooSmall )
 		{
 			pclsResponse = pclsMessage->CreateResponse( SIP_SESSION_INTERVAL_TOO_SMALL, strLocalTag.c_str() );
@@ -105,10 +136,32 @@ bool CSipUserAgent::RecvInviteRequest( int iThreadId, CSipMessage * pclsMessage 
 			return true;
 		}
 
+		// 응용이 이 re-INVITE 의 답을 미룰 수 있게(HoldReInviteAnswer — 상대 leg 의 답을 기다리는 B2BUA) 콜백 동안 사본을 둔다
+		m_clsDialogMutex.acquire();
+		itMap = m_clsDialogMap.find( strCallId );
+		if( itMap != m_clsDialogMap.end() && itMap->second.m_pclsReInviteInProgress == NULL )
+		{
+			itMap->second.m_pclsReInviteInProgress = new CSipMessage();
+			*itMap->second.m_pclsReInviteInProgress = *pclsMessage;
+			bCloned = true;
+		}
+		m_clsDialogMutex.release();
+
 		if( m_pclsCallBack ) m_pclsCallBack->EventReInvite( strCallId.c_str(), &clsRtp, &clsLocalRtp );
 
 		m_clsDialogMutex.acquire();
 		itMap = m_clsDialogMap.find( strCallId );
+		if( itMap != m_clsDialogMap.end() && bCloned && itMap->second.m_pclsReInviteInProgress == NULL )
+		{
+			// 응용이 답을 미뤘다 — AnswerHeldReInvite 가 답한다(이미 답했을 수도 있다)
+			m_clsDialogMutex.release();
+			return true;
+		}
+		if( itMap != m_clsDialogMap.end() && bCloned )
+		{
+			delete itMap->second.m_pclsReInviteInProgress;
+			itMap->second.m_pclsReInviteInProgress = NULL;
+		}
 		if( itMap != m_clsDialogMap.end() )
 		{
 			// 미디어가 같아도 응용이 answer 의 floor fmtp 를 다시 지었으면(TS 24.380 §14.3.1) SDP 가 바뀐 것이다 —
@@ -291,4 +344,134 @@ bool CSipUserAgent::RecvInviteResponse( int iThreadId, CSipMessage * pclsMessage
 	}
 
 	return true;
+}
+
+// ── 답을 미룬 re-INVITE (B2BUA — 상대 leg 의 답을 기다린다, RFC 3261 §14.2) ──
+
+bool CSipUserAgent::IsStreamSetChangeReInvite( const char * pszCallId )
+{
+	SIP_DIALOG_MAP::iterator	itMap;
+	bool	bRes = false;
+
+	if( pszCallId == NULL ) return false;
+
+	m_clsDialogMutex.acquire();
+	itMap = m_clsDialogMap.find( pszCallId );
+	if( itMap != m_clsDialogMap.end() ) bRes = itMap->second.m_bLastReInviteStreamsChanged;
+	m_clsDialogMutex.release();
+
+	return bRes;
+}
+
+bool CSipUserAgent::HoldReInviteAnswer( const char * pszCallId )
+{
+	SIP_DIALOG_MAP::iterator	itMap;
+	bool	bRes = false;
+
+	if( pszCallId == NULL ) return false;
+
+	m_clsDialogMutex.acquire();
+	itMap = m_clsDialogMap.find( pszCallId );
+	if( itMap != m_clsDialogMap.end() && itMap->second.m_pclsReInviteInProgress && itMap->second.m_pclsHeldReInvite == NULL )
+	{
+		itMap->second.m_pclsHeldReInvite = itMap->second.m_pclsReInviteInProgress;
+		itMap->second.m_pclsReInviteInProgress = NULL;
+		itMap->second.m_iHeldReInviteTime = time( NULL );
+		bRes = true;
+	}
+	m_clsDialogMutex.release();
+
+	return bRes;
+}
+
+bool CSipUserAgent::HasHeldReInvite( const char * pszCallId )
+{
+	SIP_DIALOG_MAP::iterator	itMap;
+	bool	bRes = false;
+
+	if( pszCallId == NULL ) return false;
+
+	m_clsDialogMutex.acquire();
+	itMap = m_clsDialogMap.find( pszCallId );
+	if( itMap != m_clsDialogMap.end() ) bRes = itMap->second.m_pclsHeldReInvite != NULL;
+	m_clsDialogMutex.release();
+
+	return bRes;
+}
+
+bool CSipUserAgent::AnswerHeldReInvite( const char * pszCallId, int iStatus, CSipCallRtp * pclsLocalRtp )
+{
+	SIP_DIALOG_MAP::iterator	itMap;
+	CSipMessage * pclsRequest = NULL, * pclsResponse = NULL;
+
+	if( pszCallId == NULL ) return false;
+
+	m_clsDialogMutex.acquire();
+	itMap = m_clsDialogMap.find( pszCallId );
+	if( itMap != m_clsDialogMap.end() && itMap->second.m_pclsHeldReInvite )
+	{
+		pclsRequest = itMap->second.m_pclsHeldReInvite;
+		itMap->second.m_pclsHeldReInvite = NULL;
+
+		if( iStatus >= SIP_OK && iStatus < SIP_MULTIPLE_CHOICES && pclsLocalRtp )
+		{
+			itMap->second.SetLocalRtp( pclsLocalRtp );
+			pclsResponse = pclsRequest->CreateResponse( iStatus );
+			if( pclsResponse )
+			{
+				// 자동 200 과 같다 — 다이얼로그 Contact transport·파라미터, 한 번 싣는 헤더, 세션 타이머(RFC 4028 §7.2)
+				pclsResponse->m_iContactTransport = itMap->second.m_iContactTransport;
+				pclsResponse->m_clsContactParams = itMap->second.m_clsContactParams;
+				pclsResponse->m_clsContactUriParams = itMap->second.m_clsContactUriParams;
+				for( const auto & clsHeader : itMap->second.m_vecNextReInviteAnswerHeaders )
+				{
+					pclsResponse->AddHeader( clsHeader.first.c_str(), clsHeader.second.c_str() );
+				}
+				itMap->second.AddSdp( pclsResponse );
+				SessionTimerAddToResponse( itMap->second, pclsResponse );
+			}
+			itMap->second.m_vecNextReInviteAnswerHeaders.clear();
+		}
+		else
+		{
+			// 실패는 세션을 바꾸지 않는다(RFC 3261 §14.2) — 상대 leg 의 최종 응답 코드를 그대로, 코드가 없으면 500
+			pclsResponse = pclsRequest->CreateResponse( iStatus >= SIP_MULTIPLE_CHOICES ? iStatus : SIP_INTERNAL_SERVER_ERROR );
+		}
+	}
+	m_clsDialogMutex.release();
+
+	if( pclsRequest ) delete pclsRequest;
+	if( pclsResponse == NULL ) return false;
+
+	m_clsSipStack.SendSipMessage( pclsResponse );
+	return true;
+}
+
+void CSipUserAgent::CheckHeldReInvite( int iMaxSec )
+{
+	SIP_DIALOG_MAP::iterator	itMap;
+	std::list< CSipMessage * >	clsResponseList;
+	std::list< std::string >		clsCallIdList;
+	time_t	iNow = time( NULL );
+
+	m_clsDialogMutex.acquire();
+	for( itMap = m_clsDialogMap.begin(); itMap != m_clsDialogMap.end(); ++itMap )
+	{
+		CSipDialog & clsDialog = itMap->second;
+
+		if( clsDialog.m_pclsHeldReInvite == NULL || iNow - clsDialog.m_iHeldReInviteTime < iMaxSec ) continue;
+
+		CSipMessage * pclsResponse = clsDialog.m_pclsHeldReInvite->CreateResponse( SIP_INTERNAL_SERVER_ERROR );
+		delete clsDialog.m_pclsHeldReInvite;
+		clsDialog.m_pclsHeldReInvite = NULL;
+		if( pclsResponse ) clsResponseList.push_back( pclsResponse );
+		clsCallIdList.push_back( itMap->first );
+	}
+	m_clsDialogMutex.release();
+
+	for( const auto & strCallId : clsCallIdList )
+	{
+		CLog::Print( LOG_INFO, "held re-INVITE expired: CallId(%s) — 상대 leg 무응답, 500", strCallId.c_str() );
+	}
+	for( auto * pclsResponse : clsResponseList ) m_clsSipStack.SendSipMessage( pclsResponse );
 }

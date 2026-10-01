@@ -566,6 +566,9 @@ int ServiceMain() {
         // 세션 타이머 (RFC 4028) — 갱신 발사 / 만료 leg 회수.
         //   비정상 종료(BYE 유실) leg 을 시한으로 정리한다 (leg_liveness.md).
         gclsUserAgent.CheckSessionTimer();
+        // 답을 미룬 re-INVITE(통화 중 스트림 구성 변경 — 상대 leg 의 답 대기)가 상대 무응답으로
+        //   남지 않게 — 전달한 re-INVITE 의 트랜잭션 시한(64*T1 = 32 s)보다 길게 둔다(그 결과가 먼저 오게)
+        gclsUserAgent.CheckHeldReInvite( 40 );
         // 관제 — 대표번호 포크 집합 무응답 판정 (dispatch_center.md §4.4)
         gclsDispatcher.GetTas()->Tick();
         // 착신전환 — CFNR 무응답 시한 만료 leg CANCEL + 전환 (volte_supplementary_services.md §6A.4)

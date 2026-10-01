@@ -22,6 +22,11 @@
 //                                                                            · Session-Expires refresher=uac (TS 24.379/24.281 §6.2.3.1.1 5) 전제)
 //   N. MCVideo leg 의 갱신 re-INVITE — 응용이 EventReInvite 에서 answer fmtp 를 다시 지으면(pclsLocalRtp) 그 값으로 나간다
 //                                                                          (CSP McVideoCallService — TS 24.581 §14.3.1 re-offer 에 있던 것만)
+//   P. 음성 호에 영상을 더하는 re-INVITE(RFC 3264 §8.1) — 응용이 EventReInvite 에서 답을 미룬다(HoldReInviteAnswer — B2BUA 가 상대
+//      leg 의 답을 기다린다)            → 100 만, IsStreamSetChangeReInvite · 미룬 동안 다음 re-INVITE = 500 + Retry-After(§14.2)
+//                                         · AnswerHeldReInvite(200) = 영상 받은 answer · AnswerHeldReInvite(488) = 488(SDP 없음)
+//   Q. CSipCallRtp::SetIpPort — relay 치환이 거절·제거된 스트림(port 0)을 되살리지 않는다(RFC 3264 §6·§8.2) ·
+//      SetRelayIpPort — 포트를 m 줄 순서가 아니라 종류로(audio·video), 중계하지 않는 스트림은 port 0
 //
 //   빌드/실행은 verify S1-UNIT-PSIP (verify/lib/items/stage1/unit_psip.py) 가 한다 — 명령은 psip_leg_dest_test.cpp 서두와 같다.
 //     build/psip_reason_video_test [--port 27080] [--verbose]
@@ -75,6 +80,9 @@ public:
 	std::atomic<int> m_iReInvites{ 0 };
 	bool m_bLastReInviteRefresh = false;	// EventReInvite 시점의 IsSessionRefreshReInvite (CSP ModuleDispatcher 가 보는 값)
 	std::string m_strReInviteFmtp;			// 비어 있지 않으면 EventReInvite 가 answer 의 m_strApplicationFmtp 를 이 값으로 바꾼다
+	bool m_bHoldReInvite = false;			// true 면 EventReInvite 가 HoldReInviteAnswer 로 답을 미룬다
+	bool m_bLastStreamsChanged = false;		// EventReInvite 시점의 IsStreamSetChangeReInvite
+	bool m_bLastHeld = false;				// HoldReInviteAnswer 결과
 	std::atomic<int> m_iEnded{ 0 };
 	int m_iEndStatus = 0;
 	std::string m_strEndReason;
@@ -118,6 +126,8 @@ public:
 	void EventReInvite( const char * pszCallId, CSipCallRtp *, CSipCallRtp * pclsLocalRtp ) override
 	{
 		m_bLastReInviteRefresh = m_pclsUa->IsSessionRefreshReInvite( pszCallId );
+		m_bLastStreamsChanged = m_pclsUa->IsStreamSetChangeReInvite( pszCallId );
+		m_bLastHeld = m_bHoldReInvite && m_pclsUa->HoldReInviteAnswer( pszCallId );
 		if( !m_strReInviteFmtp.empty() && pclsLocalRtp ) pclsLocalRtp->m_strApplicationFmtp = m_strReInviteFmtp;
 		++m_iReInvites;
 	}
@@ -838,6 +848,111 @@ int main( int argc, char * argv[] )
 		clsCb.m_strReInviteFmtp.clear();
 		clsUa.StopCall( strCallId.c_str() );
 		UdpRecvUntil( fdUe, "BYE", 1000 );
+	}
+
+	// ── P. 통화 중 영상 추가 re-INVITE — 응용(B2BUA)이 답을 미뤘다가 상대 leg 의 결과로 답한다 ──
+	printf( "[P] video-add re-INVITE held by the application → 100 only · 500 to the next re-INVITE · answered later (200 / 488)\n" );
+	{
+		clsCb.Reset();
+		clsCb.m_iReInvites = 0;
+		clsCb.m_iLocalVideoPort = -1;
+		clsCb.m_iLocalAppPort = -1;
+		std::string strInvite;
+		std::string strFinal = UeInvite( fdUe, iUePort, "rv-p@test.local", SDP_AUDIO_ONLY, strInvite );
+		CHECK( strFinal.compare( 0, 11, "SIP/2.0 200" ) == 0 && BodyOf( strFinal ).find( "m=video" ) == std::string::npos, "음성 호 성립" );
+		const std::string strM = "\r\n" + strInvite, strR = "\r\n" + strFinal;
+		std::string strSrvContact = HeaderOf( strR, "Contact" );
+		const size_t lt = strSrvContact.find( '<' ), gt = strSrvContact.find( '>' );
+		if( lt != std::string::npos && gt != std::string::npos ) strSrvContact = strSrvContact.substr( lt + 1, gt - lt - 1 );
+		static const char * SDP_ADD_VIDEO =
+			"v=0\r\no=ue 1 2 IN IP4 127.0.0.1\r\ns=-\r\nc=IN IP4 127.0.0.1\r\nt=0 0\r\n"
+			"m=audio 40002 RTP/AVP 0 101\r\na=rtpmap:0 PCMU/8000\r\na=rtpmap:101 telephone-event/8000\r\n"
+			"m=video 40004 RTP/AVP 96\r\na=rtpmap:96 H264/90000\r\na=fmtp:96 profile-level-id=42e01f;packetization-mode=1\r\n";
+		auto reInvite = [&]( int iCSeq, const char * pszSdp ) {
+			char szRe[4096];
+			int iRe = snprintf( szRe, sizeof(szRe),
+				"INVITE %s SIP/2.0\r\nVia: SIP/2.0/UDP %s:%d;rport;branch=z9hG4bK-rv-p-%d\r\nMax-Forwards: 70\r\nFrom: %s\r\nTo: %s\r\n"
+				"Call-ID: %s\r\nCSeq: %d INVITE\r\nContact: <sip:ue@%s:%d>\r\nContent-Type: application/sdp\r\nContent-Length: %d\r\n\r\n%s",
+				strSrvContact.c_str(), UA_IP, iUePort, ++g_iSeq, HeaderOf( strM, "From" ).c_str(), HeaderOf( strR, "To" ).c_str(),
+				HeaderOf( strM, "Call-ID" ).c_str(), iCSeq, UA_IP, iUePort, (int)strlen( pszSdp ), pszSdp );
+			return std::string( szRe, iRe );
+		};
+		// ① 영상 추가 — 응용이 미룬다: 100 만 오고 200 은 오지 않는다
+		clsCb.m_bHoldReInvite = true;
+		UdpDrain( fdUe );
+		UdpSendTo( fdUe, reInvite( 2, SDP_ADD_VIDEO ) );
+		std::string strHeld200;
+		for( int i = 0; i < 4; ++i )
+		{
+			strHeld200 = UdpRecvUntil( fdUe, "SIP/2.0 200", 800 );
+			if( strHeld200.empty() || HeaderOf( "\r\n" + strHeld200, "Call-ID" ) == "rv-p@test.local" ) break;
+		}
+		CHECK( clsCb.m_iReInvites == 1 && clsCb.m_bLastStreamsChanged && !clsCb.m_bLastReInviteRefresh, "IsStreamSetChangeReInvite = true (영상 추가)" );
+		CHECK( clsCb.m_bLastHeld, "HoldReInviteAnswer" );
+		// 앞 시나리오 호의 200 재전송(ACK 안 한 갱신 re-INVITE)이 섞일 수 있다 — 이 호의 것만 본다
+		CHECK( strHeld200.empty() || HeaderOf( "\r\n" + strHeld200, "Call-ID" ) != "rv-p@test.local",
+		       "답을 미룬다 — 그 요청의 자동 200 없음" );
+		CHECK( clsUa.HasHeldReInvite( "rv-p@test.local" ), "HasHeldReInvite" );
+		// ② 미룬 동안 받은 다음 re-INVITE — 500 + Retry-After, 다이얼로그는 건드리지 않는다
+		UdpSendTo( fdUe, reInvite( 3, SDP_AUDIO_ONLY ) );
+		const std::string str500 = UdpRecvUntil( fdUe, "SIP/2.0 500", 1500 );
+		CHECK( !str500.empty() && !HeaderOf( "\r\n" + str500, "Retry-After" ).empty(), "다음 re-INVITE = 500 + Retry-After (RFC 3261 §14.2)" );
+		CHECK( clsCb.m_iReInvites == 1, "그 요청은 응용에 오지 않는다" );
+		// ③ 상대 leg 가 영상을 받았다 — 미룬 요청에 영상 포함 200
+		CSipCallRtp clsAns;
+		clsAns.m_strIp = UA_IP; clsAns.m_iPort = 40000; clsAns.m_iCodec = 0; clsAns.m_iVideoPort = 40110;
+		CHECK( clsUa.AnswerHeldReInvite( "rv-p@test.local", SIP_OK, &clsAns ), "AnswerHeldReInvite(200)" );
+		std::string strP200;
+		for( int i = 0; i < 4; ++i )
+		{
+			strP200 = UdpRecvUntil( fdUe, "SIP/2.0 200", 1500 );
+			if( strP200.empty() || HeaderOf( "\r\n" + strP200, "Call-ID" ) == "rv-p@test.local" ) break;
+		}
+		CHECK( HeaderOf( "\r\n" + strP200, "CSeq" ).find( "2 INVITE" ) != std::string::npos, "미룬 요청(CSeq 2)의 200" );
+		CHECK( BodyOf( strP200 ).find( "m=video 40110 RTP/AVP 96" ) != std::string::npos, ( "영상 받은 answer: " + BodyOf( strP200 ) ).c_str() );
+		CHECK( !clsUa.HasHeldReInvite( "rv-p@test.local" ) && !clsUa.AnswerHeldReInvite( "rv-p@test.local", SIP_OK, &clsAns ),
+		       "한 번만 답한다" );
+		// ④ 다시 영상 제거 offer 를 미뤘다가 상대 leg 의 실패(488)로 답한다 — SDP 없는 488
+		static const char * SDP_REMOVE_VIDEO =
+			"v=0\r\no=ue 1 3 IN IP4 127.0.0.1\r\ns=-\r\nc=IN IP4 127.0.0.1\r\nt=0 0\r\n"
+			"m=audio 40002 RTP/AVP 0 101\r\na=rtpmap:0 PCMU/8000\r\na=rtpmap:101 telephone-event/8000\r\n"
+			"m=video 0 RTP/AVP 96\r\n";
+		UdpSendTo( fdUe, reInvite( 4, SDP_REMOVE_VIDEO ) );
+		usleep( 300 * 1000 );
+		CHECK( clsCb.m_iReInvites == 2 && clsCb.m_bLastStreamsChanged && clsCb.m_bLastHeld, "영상 제거도 스트림 구성 변경 — 미룬다" );
+		CHECK( clsUa.AnswerHeldReInvite( "rv-p@test.local", SIP_NOT_ACCEPTABLE_HERE, NULL ), "AnswerHeldReInvite(488)" );
+		const std::string str488 = UdpRecvUntil( fdUe, "SIP/2.0 488", 1500 );
+		CHECK( !str488.empty() && BodyOf( str488 ).empty(), "488 (SDP 없음 — 세션 그대로)" );
+		clsCb.m_bHoldReInvite = false;
+		UdpSendTo( fdUe, BuildInDialog( "BYE", strInvite, strFinal, 5, NULL ) );
+		UdpRecvUntil( fdUe, "SIP/2.0 200", 1000 );
+	}
+
+	// ── Q. relay 치환(SetIpPort)은 거절·제거된 스트림(port 0)을 되살리지 않는다 ──
+	printf( "[Q] SetIpPort keeps rejected streams at port 0\n" );
+	{
+		CSipCallRtp clsRtp;
+		clsRtp.m_clsMediaList.push_back( CSdpMedia( "audio", 41000, "RTP/AVP" ) );
+		clsRtp.m_clsMediaList.push_back( CSdpMedia( "video", 0, "RTP/AVP" ) );
+		clsRtp.m_clsMediaList.push_back( CSdpMedia( "text", 41004, "RTP/AVP" ) );
+		clsRtp.SetIpPort( "10.0.0.1", 50000, 2 );
+		auto it = clsRtp.m_clsMediaList.begin();
+		const int a = it->m_iPort; ++it;
+		const int v = it->m_iPort; ++it;
+		const int t = it->m_iPort;
+		CHECK( a == 50000 && v == 0 && t == 50004, "audio 50000 · video 0 그대로 · text 50004(자리는 m 줄 순서)" );
+		// relay(audio·video 만 중계) — 종류로 포트를 정한다: 통화 중 더한 영상이 text 뒤에 와도 video = base + 2, text = 0
+		CSipCallRtp clsRelay;
+		clsRelay.m_clsMediaList.push_back( CSdpMedia( "audio", 4000, "RTP/AVP" ) );
+		clsRelay.m_clsMediaList.push_back( CSdpMedia( "text", 4002, "RTP/AVP" ) );
+		clsRelay.m_clsMediaList.push_back( CSdpMedia( "video", 4004, "RTP/AVP" ) );
+		clsRelay.SetRelayIpPort( "10.0.0.1", 50000, 2 );
+		auto ir = clsRelay.m_clsMediaList.begin();
+		const int ra = ir->m_iPort; ++ir;
+		const int rt = ir->m_iPort; ++ir;
+		const int rv = ir->m_iPort;
+		CHECK( ra == 50000 && rt == 0 && rv == 50002, "SetRelayIpPort: audio 50000 · text 0(중계 안 함) · video 50002" );
+		CHECK( clsRelay.GetVideoPort() == 50002, "GetVideoPort = relay 영상 포트" );
 	}
 
 	close( fdUe );

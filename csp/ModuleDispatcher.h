@@ -26,6 +26,7 @@
  *  → B2BUA 대상 INVITE 는 CSipUserAgent 로 전달 (return false)
  */
 class CCallInfo;
+struct CmpMediaCrypto;
 
 class CModuleDispatcher : public ISipStackCallBack, ISipUserAgentCallBack, ISipStackSecurityCallBack {
 public:
@@ -108,6 +109,15 @@ public:
     /** 서버가 전달한 re-INVITE 의 최종 응답 — relay SRTP leg 의 재-answer 재키잉을 CMP 에 반영
      *  (media_security.md §5.2). 주소/PT 갱신은 기존 EventReInvite→MODIFY 경로가 담당. */
     void EventReInviteResponse( const char *pszCallId, int iSipStatus, CSipCallRtp *pclsRemoteRtp ) override;
+    /** 전달한 re-INVITE 의 answer 를 그 leg 의 relay 에 반영(CMP MODIFY — 주소·포트·NAT·SRTP).
+     *  bForward = 스트림 구성 변경의 결과. */
+    void ModifyReInviteAnswerLeg( const char *pszCallId, const CCallInfo &clsCallInfo, int iPeerIdx,
+                                  CSipCallRtp *pclsRemoteRtp, int iAudioPort, bool bForward,
+                                  const CmpMediaCrypto &clsAudioCrypto, const CmpMediaCrypto &clsVideoCrypto );
+    /** 상대 leg 가 답을 미뤄 둔 re-offer(EventReInvite — 스트림 구성 변경)에
+     *  이 leg 의 answer 를 relay 주소로 돌려준다. */
+    void ForwardHeldReInviteAnswer( const char *pszCallId, const CCallInfo &clsCallInfo, int iSipStatus,
+                                    const CSipCallRtp *pclsRemoteRtp );
     /** 서버 발신 in-dialog 요청(BYE·re-INVITE·NOTIFY·REFER·INFO, 세션 갱신 포함)의 현재 도달 주소 —
      *  등록 바인딩(latch)을 돌려준다. fan-out INVITE·NOTIFY 가 쓰는 것과 같은 (IP, 포트, transport) 한 세트다. */
     bool EventGetLegDest( const char *pszCallId, const char *pszPeerId, const char *pszRemoteTarget, std::string &strIp,

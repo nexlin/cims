@@ -216,6 +216,15 @@ public:
 	bool m_bSessionTimerRetried;
 	/** 직전 수신 re-INVITE 가 미디어 무변경이었는가 (순수 세션 갱신) */
 	bool m_bLastReInviteMediaSame;
+	/** 직전 수신 re-INVITE 가 스트림 구성을 바꿨는가 — audio·video·application 중 활성(port>0) 스트림이 생기거나 없어졌다
+	 *  (RFC 3264 §8.1 추가·§8.2 제거). 보류·해제(방향만)·주소 변경은 아니다. */
+	bool m_bLastReInviteStreamsChanged;
+	/** 처리 중인 수신 re-INVITE 의 사본 — 응용 콜백(EventReInvite) 동안만 있다. HoldReInviteAnswer 가 m_pclsHeldReInvite 로 옮긴다 */
+	CSipMessage * m_pclsReInviteInProgress;
+	/** 응답을 미룬 수신 re-INVITE — 응용이 AnswerHeldReInvite 로 답한다. NULL = 없음 */
+	CSipMessage * m_pclsHeldReInvite;
+	/** m_pclsHeldReInvite 를 미룬 시각 — CheckHeldReInvite 의 시한 */
+	time_t m_iHeldReInviteTime;
 
 	/** bKeepSdpVersion = true 면 SDP origin(o=) 의 세션 버전을 올리지 않는다 —
 	 *  세션 갱신 re-INVITE 의 offer 는 "변경 없음"을 표시해야 한다 (RFC 4028 §7.4). */

@@ -31,13 +31,39 @@ void CSipCallRtp::SetIpPort( const char * pszIp, int iPort, int iSocketCountPerM
 
 	for( itMedia = m_clsMediaList.begin(); itMedia != m_clsMediaList.end(); ++itMedia )
 	{
-		itMedia->m_iPort = m_iPort + iIndex * iSocketCountPerMedia;
+		// 거절·제거된 스트림(port 0)은 그대로 둔다 — relay 포트로 바꾸면 상대에게 스트림 추가 offer 가 된다(RFC 3264 §6·§8.2).
+		//   자리(index)는 그대로 센다 — 포트 배치는 m 줄 순서다.
+		if( itMedia->m_iPort != 0 ) itMedia->m_iPort = m_iPort + iIndex * iSocketCountPerMedia;
 		// 미디어 레벨 c= 는 세션 레벨 c= 를 덮어쓰므로(RFC 4566) relay 치환 시 제거한다.
 		// 남겨두면 상대가 원본 사설 IP 로 RTP 를 보내 relay 에 미디어가 도달하지 않는다.
 		itMedia->m_clsConnection.Clear();
 		itMedia->DeleteAttribute( "rtcp" );
 
 		++iIndex;
+	}
+#endif
+}
+
+// relay 주소·포트로 바꾼다 — 미디어 종류로 포트를 정한다(audio = iPort, video = iPort + iSocketCountPerMedia, 그 밖 = 0).
+void CSipCallRtp::SetRelayIpPort( const char * pszIp, int iPort, int iSocketCountPerMedia )
+{
+	m_strIp = pszIp;
+	m_iPort = iPort;
+
+#ifdef USE_MEDIA_LIST
+	SDP_MEDIA_LIST::iterator itMedia;
+
+	for( itMedia = m_clsMediaList.begin(); itMedia != m_clsMediaList.end(); ++itMedia )
+	{
+		if( itMedia->m_iPort != 0 )
+		{
+			if( itMedia->m_strMedia == "audio" ) itMedia->m_iPort = iPort;
+			else if( itMedia->m_strMedia == "video" ) itMedia->m_iPort = iPort + iSocketCountPerMedia;
+			else itMedia->m_iPort = 0;
+		}
+		// 미디어 레벨 c= 는 세션 레벨 c= 를 덮어쓰므로(RFC 4566) relay 치환 시 제거한다.
+		itMedia->m_clsConnection.Clear();
+		itMedia->DeleteAttribute( "rtcp" );
 	}
 #endif
 }

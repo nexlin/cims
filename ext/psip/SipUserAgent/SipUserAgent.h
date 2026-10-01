@@ -178,6 +178,20 @@ public:
 	 *  호출자가 불필요한 미디어 재협상(미디어 서버 재호출)을 생략하는 데 쓴다. */
 	bool IsSessionRefreshReInvite( const char * pszCallId );
 
+	// SipUserAgentInvite.hpp : 답을 미룬 re-INVITE (B2BUA 가 상대 leg 의 답을 기다린다 — RFC 3261 §14.2)
+	/** 직전에 수신한 re-INVITE 가 스트림 구성을 바꿨는가 — 활성(port>0) audio·video·application 이 생기거나 없어졌다(RFC 3264
+	 *  §8.1·§8.2, 예 통화 중 영상 추가·제거). EventReInvite 안에서 부른다. */
+	bool IsStreamSetChangeReInvite( const char * pszCallId );
+	/** 지금 처리 중인 수신 re-INVITE 의 답을 미룬다 — EventReInvite 안에서만 효과가 있다. 스택은 자동 200 을 보내지 않고(100 만),
+	 *  응용이 AnswerHeldReInvite 로 답한다. 미룬 동안 받은 다음 re-INVITE 는 500 + Retry-After(§14.2). 미룰 요청이 없으면 false. */
+	bool HoldReInviteAnswer( const char * pszCallId );
+	/** 미룬 re-INVITE 에 답한다 — 2xx 는 pclsLocalRtp 를 로컬 선언으로 삼아 SDP answer 를 싣고, 그 밖은 그 코드(300 미만 비-2xx 는
+	 *  500). 미룬 요청이 없으면 false. 콜백 안에서 불러도 된다(다이얼로그 락 밖). */
+	bool AnswerHeldReInvite( const char * pszCallId, int iStatus, CSipCallRtp * pclsLocalRtp );
+	bool HasHeldReInvite( const char * pszCallId );
+	/** iMaxSec 넘게 미룬 re-INVITE 를 500 으로 끝낸다 — 상대 leg 가 끝내 답하지 않을 때. 호출자가 1초 주기로 부른다. */
+	void CheckHeldReInvite( int iMaxSec );
+
 	bool IsRingCall( const char * pszCallId, const char * pszTo );
 	bool Is100rel( const char * pszCallId );
 	bool IsHold( const char * pszCallId );
