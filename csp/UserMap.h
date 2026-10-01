@@ -167,6 +167,10 @@ public:
      *  @param pszRemoteTarget 다이얼로그 remote target URI. 비어 있으면 Select 와 같다(대상 단말을 가릴 근거가 없다).
      *  @param pbOtherDevice   바인딩은 있으나 이 단말의 것이 아니면 true */
     bool SelectForTarget( const char *pszUserId, const char *pszRemoteTarget, CUserInfo &clsInfo, bool *pbOtherDevice );
+    /** 이 가입자의 살아 있는 바인딩 가운데 **다른 단말**(Contact 가 pszExcludeContact 와 다른 것)의 최선 — 자기 번호
+     *  발신에서 발신 단말을 착신 대상에서 뺀다(그 단말은 이 호를 거는 중이다 — volte_supplementary_services.md §6A.5).
+     *  같은 단말의 판정은 SelectForTarget 과 같다(user·host·port). 고를 단말이 없으면 false. */
+    bool SelectOtherDevice( const char *pszUserId, const char *pszExcludeContact, CUserInfo &clsInfo );
     bool SelectGroup( const char *pszGroupId, USER_ID_LIST &clsList );
     bool Delete( const char *pszUserId );
 
@@ -201,7 +205,7 @@ private:
      *  생존 판정은 스트림 transport 만 스택에 묻는다(UDP 는 연결 개념이 없어 항상 살아있는
      *  것으로 취급하고 등록 만료에 맡긴다) — registration_binding_set.md §2.1.
      *  호출 전 m_clsMutex 를 잡고 있어야 한다. */
-    static size_t _pickBinding( const USER_BINDING_LIST &clsList );
+    static size_t _pickBinding( const USER_BINDING_LIST &clsList, const char *pszExcludeContact = NULL );
 
     /** _pickBinding 이 "고를 수 있는 경로가 없다" 를 알리는 값. */
     static const size_t NO_BINDING = (size_t)-1;

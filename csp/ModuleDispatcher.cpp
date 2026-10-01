@@ -1229,7 +1229,23 @@ void CModuleDispatcher::EventIncomingCall( const char *pszCallId, const char *ps
 
     // B2BUA 호 설정
     if ( bRoutePrefix == false ) {
-        if ( gclsUserMap.Select( pszTo, clsUserInfo ) == false ) return RejectVoice( SIP_NOT_FOUND );
+        if ( pszFrom && strcmp( pszFrom, pszTo ) == 0 ) {
+            // 자기 번호 발신 — 발신 단말은 이 호를 거는 중이라 착신 대상이 아니다. 같은 번호의 다른 단말로만 낸다.
+            //   다른 단말이 없으면 통화중(NDUB — TAS 가 꺼져 ResolveDiversion 이 판정하지 않은 경우에도 같은 결과)
+            //   (volte_supplementary_services.md §6A.5).
+            const std::string strCallerContact = CTasModule::ContactUriOf( pclsMessage );
+            if ( !strCallerContact.empty() &&
+                 !gclsUserMap.SelectOtherDevice( pszTo, strCallerContact.c_str(), clsUserInfo ) ) {
+                if ( !gclsUserMap.Select( pszTo ) ) return RejectVoice( SIP_NOT_FOUND );
+                CLog::Print( LOG_INFO, "EventIncomingCall: self call %s — 발신 단말뿐(NDUB) → 486 CallId=%s", pszTo,
+                             pszCallId );
+                return RejectVoice( SIP_BUSY_HERE );
+            }
+            if ( strCallerContact.empty() && gclsUserMap.Select( pszTo, clsUserInfo ) == false )
+                return RejectVoice( SIP_NOT_FOUND );
+        } else if ( gclsUserMap.Select( pszTo, clsUserInfo ) == false ) {
+            return RejectVoice( SIP_NOT_FOUND );
+        }
     }
 
     int iStartPort = -1;

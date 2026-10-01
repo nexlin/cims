@@ -99,7 +99,9 @@ static bool _isUdpSilent( const CUserInfo &clsBind, time_t iNow ) {
     return ( iNow - clsBind.m_iLastSeenTime ) > gclsSetup.m_iUdpFlowSilenceSec;
 }
 
-size_t CUserMap::_pickBinding( const USER_BINDING_LIST &clsList ) {
+static bool _sameContact( const std::string &strA, const std::string &strB );
+
+size_t CUserMap::_pickBinding( const USER_BINDING_LIST &clsList, const char *pszExcludeContact ) {
     size_t iBest = 0;
     bool bFoundAlive = false;
     time_t iNow;
@@ -119,6 +121,8 @@ size_t CUserMap::_pickBinding( const USER_BINDING_LIST &clsList ) {
                                                        clsList[i].m_eTransport ) )
             continue;
         if ( _isUdpSilent( clsList[i], iNow ) ) continue;
+        // 뺄 단말(자기 번호 발신의 발신 단말) — SelectOtherDevice
+        if ( pszExcludeContact && _sameContact( clsList[i].m_strContactUri, pszExcludeContact ) ) continue;
 
         if ( !bFoundAlive || clsList[i].m_iLoginTime > clsList[iBest].m_iLoginTime ) {
             iBest = i;
@@ -371,6 +375,22 @@ bool CUserMap::SelectForTarget( const char *pszUserId, const char *pszRemoteTarg
     }
     m_clsMutex.release();
 
+    return bRes;
+}
+
+bool CUserMap::SelectOtherDevice( const char *pszUserId, const char *pszExcludeContact, CUserInfo &clsInfo ) {
+    if ( pszExcludeContact == NULL || pszExcludeContact[0] == '\0' ) return Select( pszUserId, clsInfo );
+    bool bRes = false;
+    m_clsMutex.acquire();
+    USER_MAP::iterator itMap = m_clsMap.find( pszUserId );
+    if ( itMap != m_clsMap.end() && !itMap->second.empty() ) {
+        const size_t iIdx = _pickBinding( itMap->second, pszExcludeContact );
+        if ( iIdx != NO_BINDING ) {
+            clsInfo = itMap->second[iIdx];
+            bRes = true;
+        }
+    }
+    m_clsMutex.release();
     return bRes;
 }
 

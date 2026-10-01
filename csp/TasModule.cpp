@@ -141,6 +141,24 @@ bool CTasModule::ApplyTerminationServices( const char *pszCallId, const char *ps
 //  착신전환 (TS 24.604 CDIV — 서버측 전환, volte_supplementary_services.md §6A)
 // ──────────────────────────────────────────────────────────────
 
+std::string CTasModule::ContactUriOf( const CSipMessage *pclsMessage ) {
+    if ( pclsMessage == NULL || pclsMessage->m_clsContactList.empty() ) return "";
+    CSipUri clsUri = pclsMessage->m_clsContactList.front().m_clsUri;
+    char szUri[256];
+    if ( clsUri.ToString( szUri, sizeof( szUri ) ) <= 0 ) return "";
+    return szUri;
+}
+
+bool CTasModule::IsSelfCallBusy( const std::string &strFrom, const std::string &strTo,
+                                 const CSipMessage *pclsMessage ) {
+    if ( strFrom.empty() || strFrom != strTo ) return false;
+    const std::string strContact = ContactUriOf( pclsMessage );
+    if ( strContact.empty() ) return false;
+    if ( !gclsUserMap.Select( strTo.c_str() ) ) return false;  // 미등록 — CFNL·404 경로
+    CUserInfo clsOther;
+    return !gclsUserMap.SelectOtherDevice( strTo.c_str(), strContact.c_str(), clsOther );
+}
+
 bool CTasModule::NormalizeForwardTarget( const std::string &strUser, const std::string &strRaw, std::string &strOut ) {
     strOut = strRaw;
     if ( strRaw.empty() ) return false;
@@ -181,6 +199,15 @@ int CTasModule::ResolveDiversion( const char *pszFrom, const char *pszTo, CSipMe
         int iCause = CspDiversion::CAUSE_UNCONDITIONAL;
         if ( clsUser.isCallForward() ) {
             strRaw = clsUser.m_strForward;
+        } else if ( IsSelfCallBusy( strFrom, strCur, pclsMessage ) ) {
+            // 자기 번호 발신 — 착신에 쓸 단말이 발신 단말뿐이다(이 호를 거는 중): 망이 판정한 통화중(NDUB). 상용망처럼
+            //   CFB 가 있으면 그쪽으로(TS 24.604 — CFB 는 UDUB·NDUB 모두), 없으면 통화중(486 + 통화중 안내).
+            if ( clsUser.m_strForwardBusy.empty() ) {
+                CLog::Print( LOG_INFO, "TAS: self call %s — 발신 단말뿐(NDUB) → 486", strCur.c_str() );
+                return -SIP_BUSY_HERE;
+            }
+            strRaw = clsUser.m_strForwardBusy;
+            iCause = CspDiversion::CAUSE_BUSY;
         } else if ( !clsUser.m_strForwardNotLoggedIn.empty() ) {
             // 등록 판정 = 등록 바인딩(CUserMap) — CspUserMap::isAlive 는 REGISTER 시각 + UserTimeout 이라 해제 뒤에도
             // 한동안 참이다

@@ -256,7 +256,7 @@ UE-A ◄── 180(같은 SDP) · 200 ◄────────── 180 · 2
 |---|---|---|---|---|
 | CFU | `forward_id` | 무조건 | 302 | `ResolveDiversion`(INVITE) |
 | CFNL | `forward_not_logged_in_id` | INVITE 시점에 착신 가입자가 **미등록**(`isAlive` 아님, CFU 없을 때) | 404 | `ResolveDiversion`(INVITE) — CFU 와 같은 연쇄·상한·181·History-Info·안내 |
-| CFB | `forward_busy_id` | 가입자 B-leg 최종 486/600 또는 Reason Q.850 cause 17(`Classify` = busy) | 486 | `EventCallEnd` → `TryDivertLeg` |
+| CFB | `forward_busy_id` | 가입자 B-leg 최종 486/600 또는 Reason Q.850 cause 17(`Classify` = busy) · **자기 번호 발신의 통화중**(§6A.5 — B-leg 없이 INVITE 시점에 판정) | 486 | `EventCallEnd` → `TryDivertLeg` · 자기 번호 발신은 `ResolveDiversion`(INVITE) |
 | CFNR | `forward_no_reply_id` (+ `forward_no_reply_sec`, 0 = `Setup.Sip.Cdiv.NoReplySec` 기본 20) | B-leg 첫 18x 뒤 시한 안에 응답 없음(`EventCallRing` 이 시한을 잡고 디스패처 `Tick` 이 CANCEL) · **링잉 뒤** 480/408(`Classify` = no_answer, `CCallInfo::m_bRang`) | 408 | `Tick` / `EventCallEnd` → `TryDivertLeg` |
 | CFNRc | `forward_not_reachable_id` | 망이 도달 불가로 판정 — Reason Q.850 cause 20(subscriber absent) 또는 **링잉 없이** 480/408(무선 이탈·NAT 바인딩 소실 단말은 18x 를 내지 못한다; psip 무응답 시간초과 408 포함). 서비스가 별개라 CFNR 로 폴백하지 않는다 | 503 | `EventCallEnd` → `TryDivertLeg` |
 
@@ -266,6 +266,22 @@ UE-A ◄── 180(같은 SDP) · 200 ◄────────── 180 · 2
 - CSC: `POST/PUT /users/{pid}/{call|voip}/{msisdn}` 의 `forward_busy_id`·`forward_no_reply_id`·`forward_no_reply_sec`(0~120)·`forward_not_logged_in_id`·`forward_not_reachable_id` — 키가 있을 때만 바꾸고(부분 업데이트), 컬럼 없는 DB 는 400 `schema_not_migrated`(판정 컬럼 = 마지막에 더해진 `forward_not_reachable_id` — `migrate_subscription_cdiv.sql` 재실행으로 채운다). 목록·단건 응답에 실린다(컬럼 있을 때).
 - 콘솔: 가입자 화면(`/subscribers/workbench`) 드로어의 VoLTE/VoIP 회선 카드 [편집] › **착신전환 서비스** = **전환 번호 하나 + 조건 선택**(TS 22.082 의 `004` all-conditional 등록과 같은 표현 — 규격은 rule 마다 target 을 허용할 뿐 개별 등록을 요구하지 않는다): `무조건(CFU)` 은 단독 선택(고르면 조건부 비활성, 저장 시 조건부 컬럼을 비운다), `통화중(CFB)`·`무응답(CFNR, 시한)`·`미등록(CFNL)`·`도달불가(CFNRc)` 는 다중 선택 — 고른 조건 컬럼에 같은 번호를 쓴다. 조건별로 번호가 다른 회선(계측기 픽스처 등)은 `조건별 번호 따로` 펼침으로 그대로 편집한다. 번호 형식·시한 0~120 검사, 응답에 컬럼이 없으면 조건부 항목이 숨는다. `착신 차단 — 전체`(§6B) 는 별개 행. 회선 뷰 표의 착신전환 열은 다섯 가지를 요약한다.
 - 계측기: subscriber 픽스처 `forward_busy_to`·`forward_no_reply_to`(+`no_reply_sec`)·`forward_not_logged_in_to`·`forward_not_reachable_to`, 단계 `no_answer`(링잉만 — 망의 CANCEL 이 정상)·`unreachable`(가상 단말이 이후 착신 INVITE 를 18x 없이 480 으로 즉시 거절 — 도달 불가 흉내, `VOLTE-ANN-FORWARD-NOTREACHABLE`), reject 뒤 다른 역할 착신 = 전환으로 인식(`cdiv_after_reject`), prelude `deregister`(register 뒤 곧바로 내려 미등록 착신 역할 — 앞선 run 의 바인딩이 3600 s 남기 때문) → `VOLTE-ANN-FORWARD-BUSY`·`-NOREPLY`·`-NOTLOGGEDIN`. CFNL 의 등록 판정은 등록 바인딩(`CUserMap::Select`) — `CspUserMap::isAlive` 는 REGISTER 시각 + `UserTimeout` 이라 해제 뒤에도 한동안 참이다.
+
+### 6A.5 자기 번호 발신 — 망이 판정한 통화중(NDUB)
+
+자기 번호로 걸면 착신 가입자 = 발신 가입자다. 발신 단말은 바로 그 호를 거는 중이므로 착신 대상이 아니다 — 착신을 내면
+발신 단말이 자기 호를 받아 울린다(실측: 180 → 사용자가 486 으로 거절할 때까지 자기 자신이 착신 화면). 상용망과 같이:
+
+| 같은 번호의 다른 단말 | 동작 |
+|---|---|
+| 있음(다른 바인딩 — 다른 Contact) | 그 단말로만 착신(`CUserMap::SelectOtherDevice` — 발신 단말 Contact 를 뺀 최선 바인딩) |
+| 없음 | **통화중**(Network Determined User Busy — TS 24.604 CFB 는 UDUB·NDUB 모두): CFB(`forward_busy_id`)가 있으면 그쪽으로 전환(cause 486, CFU 와 같은 181·History-Info·전환 안내), 없으면 **486 + 통화중 안내**(announcements.md `busy`) |
+
+- 판정 한 곳 = `CTasModule::IsSelfCallBusy`(발신 = 착신 · 등록됨 · INVITE Contact 를 뺀 살아 있는 바인딩 없음).
+  `ResolveDiversion` 이 CFU 다음 순서로 부른다(CFU 가 있으면 무조건 전환이 먼저). 같은 단말 판정은 `SelectForTarget`
+  과 같다(Contact 의 user·host·port).
+- 디스패처 B2BUA 착신 선택도 자기 번호 발신이면 `SelectOtherDevice` 를 쓴다 — TAS 가 꺼져 판정이 없었어도 발신 단말로
+  착신을 내지 않고 486 으로 끝낸다. 시도 장부에는 486 거절로 남는다(성공률 분모 — F-54).
 
 **후속(범위 밖)** — 피어·미등록 대상으로의 조건부 전환(재라우팅 판정을 B-leg 실패 지점에서 다시 해야 한다 — 원 INVITE 컨텍스트 보존), 전환자 통지(TS 24.604 `comm-div-info` 이벤트 패키지), `Privacy: history`.
 

@@ -141,10 +141,20 @@ public:
     /** 착신전환 판정 — 착신 가입자(등록 여부 무관, DB 폴백)에 forward_id(CFU) 가 있으면 전환 대상을 좇는다(연쇄 허용,
      *  대상의 forward_id 도 따른다). 대상 번호는 그 가입자 접속서비스의 다이얼 플랜으로 +E.164 번역(§2-10).
      *  착신 차단(ICB) 가입자는 전환하지 않는다(603 이 우선). 피어·그룹·대표번호 착신은 가입자가 아니라 0.
-     *  반환 0 = 전환 없음, 1 = 전환(out 채움), <0 = -SIP 코드(전환 상한·루프 → 486, TS 24.604 §4.5.2.6). */
+     *  자기 번호 발신 통화중(IsSelfCallBusy, NDUB)이면 CFB(forward_busy_id) 로 전환하고, CFB 가 없으면 -486(통화중
+     * 안내). 반환 0 = 전환 없음, 1 = 전환(out 채움), <0 = -SIP 코드(전환 상한·루프·통화중 → 486, TS 24.604 §4.5.2.6).
+     */
     int ResolveDiversion( const char *pszFrom, const char *pszTo, CSipMessage *pclsMessage, CdivResult &clsOut );
     /** 전환 대상 번호 → +E.164 (그 가입자 접속서비스 다이얼 플랜). 반환 false = 번역 불가(설정 오류 — ERROR 로그) */
     static bool NormalizeForwardTarget( const std::string &strUser, const std::string &strRaw, std::string &strOut );
+
+    /** 자기 번호 발신 통화중 판정(volte_supplementary_services.md §6A.5) — 발신 = 착신 가입자이고 착신에 쓸 단말이
+     *  발신 단말(INVITE Contact)뿐이면 true. 그 단말은 이 호를 거는 중이라 망이 판정한 통화중(NDUB)이다 — 발신 단말에
+     *  착신을 내지 않는다. 같은 번호의 다른 단말이 있으면 false(그 단말로 착신 — UserMap::SelectOtherDevice).
+     *  미등록·Contact 없음이면 false(판정 근거가 없다 — 종전 경로). */
+    static bool IsSelfCallBusy( const std::string &strFrom, const std::string &strTo, const CSipMessage *pclsMessage );
+    /** 요청의 첫 Contact URI(파라미터 제외) — 없으면 빈 값. */
+    static std::string ContactUriOf( const CSipMessage *pclsMessage );
 
 private:
     /** 당겨받기 (volte_supplementary_services.md §5). pszTarget: 지정 픽업 대상 내선
