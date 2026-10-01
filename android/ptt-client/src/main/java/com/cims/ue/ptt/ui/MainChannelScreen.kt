@@ -190,7 +190,7 @@ private fun PrimaryChannelPanel(
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Box(Modifier.weight(1f)) { SpeakerStatusStrip(st, s) }
-            if (videoChannel) VideoSendButton(vc) { on -> st.ctl?.setVideoTransmit(s.groupId, on) }
+            if (videoChannel) VideoSendButton(vc, canOpen = st.videoOpenable == s.groupId) { on -> st.ctl?.setVideoTransmit(s.groupId, on) }
         }
         Spacer(Modifier.height(8.dp))
         val ctx = LocalContext.current

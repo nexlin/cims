@@ -128,12 +128,14 @@ void CGroupMap::Remove( const char *pszGroupId ) {
     m_clsMutex.unlock();
 }
 
-void CGroupMap::CollectEphemeral( std::vector<CspPttGroup> &vecOut ) {
-    m_clsMutex.lock();
+void CGroupMap::ReplaceDbGroups( std::vector<CspPttGroup> &vecGroups ) {
+    GROUP_MAP clsNew;
+    for ( auto &clsGroup : vecGroups ) clsNew[clsGroup._id] = std::move( clsGroup );
+    std::lock_guard<std::recursive_mutex> lock( m_clsMutex );
     for ( const auto &kv : m_clsMap ) {
-        if ( kv.second._isAdhoc ) vecOut.push_back( kv.second );
+        if ( kv.second._isAdhoc ) clsNew[kv.first] = kv.second;
     }
-    m_clsMutex.unlock();
+    m_clsMap.swap( clsNew );
 }
 
 bool CGroupMap::Select( const char *pszGroupId, CspPttGroup &clsGroup ) {

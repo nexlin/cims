@@ -70,6 +70,8 @@ class PttUiState(
     val videoCalls: List<com.cims.ue.ptt.VideoCallState> = emptyList(),
     /** 서버가 MCVideo 를 낸다(ue-init-config PSI). */
     val mcvideoAvailable: Boolean = false,
+    /** 영상 호가 없어도 [영상 보내기] 로 호를 열 수 있는 prearranged 영상 채널. */
+    val videoOpenable: String? = null,
     /** 사용자가 고른 주채널 — 무전 호가 끝나도(T4 해제) 남는다. 세션이 없으면 주채널 칸은 «무전 통화 없음» 대기, PTT = 새 그룹 호. */
     val chosenPrimary: String? = null,
 ) {
@@ -117,6 +119,7 @@ fun AppRoot(svc: PttService?, onStopSip: () -> Unit) {
     val fbAlerts = remember { MutableStateFlow<List<com.cims.ue.ptt.ActiveAlert>>(emptyList()) }
     val fbVideoCalls = remember { MutableStateFlow<List<com.cims.ue.ptt.VideoCallState>>(emptyList()) }
     val fbMcvideo = remember { MutableStateFlow(false) }
+    val fbVideoOpenable = remember { MutableStateFlow<String?>(null) }
     val fbChosen = remember { MutableStateFlow<String?>(null) }
 
     val st = PttUiState(
@@ -140,6 +143,7 @@ fun AppRoot(svc: PttService?, onStopSip: () -> Unit) {
         alerts = (ctl?.alerts ?: fbAlerts).collectAsState().value,
         videoCalls = (ctl?.videoCalls ?: fbVideoCalls).collectAsState().value,
         mcvideoAvailable = (ctl?.mcvideoAvailable ?: fbMcvideo).collectAsState().value,
+        videoOpenable = (ctl?.videoOpenable ?: fbVideoOpenable).collectAsState().value,
         chosenPrimary = (ctl?.chosenPrimary ?: fbChosen).collectAsState().value,
     )
 

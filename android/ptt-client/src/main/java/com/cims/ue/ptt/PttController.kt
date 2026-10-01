@@ -679,6 +679,8 @@ class PttController(
     val videoChannel: String? get() = videoPlane.channelGroup
     /** [영상 보내기] 토글 — 송출 요청/끝내기. */
     fun setVideoTransmit(groupId: String, on: Boolean) = videoPlane.setTransmit(groupId, on)
+    /** 영상 호가 없어도 [영상 보내기] 로 호를 열 수 있는 prearranged 영상 채널(TS 24.281 §9.2.1.2.1.1). */
+    val videoOpenable: StateFlow<String?> get() = videoPlane.openable
     /** «새 영상» [받기] / [그만 보기]. */
     fun acceptVideo(groupId: String, transmitterId: String) = videoPlane.accept(groupId, transmitterId)
     fun stopVideo(groupId: String, transmitterId: String) = videoPlane.stopViewing(groupId, transmitterId)

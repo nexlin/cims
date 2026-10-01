@@ -7,6 +7,7 @@ import com.cims.ue.core.sip.RegState
 import com.cims.ue.ptt.PttController.Companion.TAG
 import com.cims.ue.ptt.PttController.Companion.bareId
 import com.cims.ue.ptt.PttController.Companion.isAdhocId
+import com.cims.ue.ptt.csc.GroupDoc
 import com.cims.ue.sdk.CallInfo
 import com.cims.ue.sdk.CallState
 import com.cims.ue.sdk.CimsResult
@@ -54,6 +55,8 @@ data class VideoCallState(
     val queuePosition: Int? = null,
     /** 무전 발언 중이라 이 호의 음성 송신을 멈췄다(영상은 계속 — D12). */
     val voiceMuted: Boolean = false,
+    /** 내가 연 prearranged 호가 성립 전 — 제어 기능이 멤버를 초대하는 중(TS 24.281 §9.2.1.4.2). [영상 보내기] 끔 = 개시를 거둔다. */
+    val opening: Boolean = false,
 ) {
     /** [영상 보내기] 켜짐 — 요청·대기·허가 중(끝내기 요청 중은 꺼짐). */
     val sendOn: Boolean get() = transmission != TransmissionState.NO_PERMISSION && transmission != TransmissionState.PENDING_END
@@ -69,11 +72,12 @@ data class VideoCallState(
  * 코어가 하는 것: INVITE(mcvideo-info·제어 채널 SDP)·멤버 초대 자동 수락·송출 허가에 따른 마이크·카메라 개폐(§6.2.4.4.6)·
  * 전송 제어 상태 머신(T100~T104). 여기는 정책과 투영만 든다.
  *  - **합류**(mcvideo.md §7 D10) — 영상 채널(그룹 문서 MCVideo 몫)에 있으면 MCVideo 호에도 함께 있는다. 1차 = 주채널만(영상 칸·수신 창이
- *    주채널에만 있다). chat = 합류(합류가 곧 affiliation), prearranged = MCVideo affiliation + 멤버 초대 자동 수락(개시하지 않는다 — 전원
- *    초대). TS 22.280 R-8.4.2-002(여러 서비스를 한 번의 논리적 제휴로). «채널» = 사용자가 고른 주채널(ChannelStore.primary — 주채널
- *    선택·복원으로 정하고 나가기·주채널 해제로만 지운다, 다른 그룹 팬아웃이 덮지 않는다)이지 무전 세션의 수명이 아니다 — 무전 세션은
- *    T4(hang timer, TS 24.379 §6.3.8.1)로 수시로 끝나지만 그 사이에도 영상 호는 이어진다.
- *  - **송출**(D11) — [영상 보내기] 토글 = 송출 요청·끝내기. [PTT]·하드웨어 PTT 키는 MCPTT 음성만.
+ *    주채널에만 있다). chat = 합류(합류가 곧 affiliation), prearranged = MCVideo affiliation + 멤버 초대 자동 수락(호는 열어 두지 않는다 —
+ *    전원 초대라 보낼 사람이 연다, 아래 송출). TS 22.280 R-8.4.2-002(여러 서비스를 한 번의 논리적 제휴로). «채널» = 사용자가 고른
+ *    주채널(ChannelStore.primary — 주채널 선택·복원으로 정하고 나가기·주채널 해제로만 지운다, 다른 그룹 팬아웃이 덮지 않는다)이지 무전
+ *    세션의 수명이 아니다 — 무전 세션은 T4(hang timer, TS 24.379 §6.3.8.1)로 수시로 끝나지만 그 사이에도 영상 호는 이어진다.
+ *  - **송출**(D11) — [영상 보내기] 토글 = 송출 요청·끝내기. [PTT]·하드웨어 PTT 키는 MCPTT 음성만. prearranged 그룹에 영상 호가 없으면
+ *    [영상 보내기] 가 호를 연다 — 개시 INVITE 에 송출 요청을 싣는다(암묵적 송출 요청, TS 24.281 §9.2.1.2.1.1 16) · TS 24.581 §14.2.4).
  *  - **수신**(D8) — manual: «영상 n» 목록의 [보기] = Receive Media Request, [그만 보기] = Media Reception End Request.
  *  - **마이크 경합**(D12) — [VideoMicPolicy].
  * 엔진 수신 창이 하나라 영상 호는 한 번에 하나다.
@@ -84,6 +88,7 @@ internal class VideoPlane(private val c: PttController, context: Context) {
         var callId = -1
         var active = false
         var leaving = false                                            // hangup 을 보냈다(끝나기를 기다린다)
+        var opening = false                                            // 내가 연 prearranged 호(§9.2.1.2.1.1)
         var tx = TransmissionState.NO_PERMISSION
         var sendingSince = 0L
         val receivers = HashSet<String>()
@@ -91,7 +96,7 @@ internal class VideoPlane(private val c: PttController, context: Context) {
         val transmitters = LinkedHashMap<String, VideoTransmitter>()   // 송출자 MCVideo ID → 송출
         val since = HashMap<String, Long>()
         fun toState(voiceMuted: Boolean) = VideoCallState(groupId, callId, active, tx, transmitters.values.toList(), since.toMap(),
-            sendingSince, receivers.size, queuePosition.takeIf { tx == TransmissionState.QUEUED }, voiceMuted)
+            sendingSince, receivers.size, queuePosition.takeIf { tx == TransmissionState.QUEUED }, voiceMuted, opening && !active)
     }
 
     private val calls = LinkedHashMap<String, Call>()                  // groupId → 호 (c.lock 아래)
@@ -111,6 +116,10 @@ internal class VideoPlane(private val c: PttController, context: Context) {
     val micPolicy: StateFlow<VideoMicPolicy> = _micPolicy.asStateFlow()
     fun setMicPolicy(p: VideoMicPolicy) { _micPolicy.value = p; prefs.edit().putString(PREF_MIC_POLICY, p.name).apply() }
 
+    private val _openable = MutableStateFlow<String?>(null)
+    /** 영상 호가 없어도 [영상 보내기] 를 누를 수 있는 prearranged 영상 채널 — 누르면 호를 연다([open]). */
+    val openable: StateFlow<String?> = _openable.asStateFlow()
+
     /** 영상 채널 = 사용자가 고른 주채널(ChannelStore.primary). */
     private val channel: String? get() = c.channelStore?.primary
 
@@ -118,6 +127,7 @@ internal class VideoPlane(private val c: PttController, context: Context) {
     val channelGroup: String? get() = channel
 
     private var mcvAffiliated: String? = null                          // MCVideo 로 affiliate 한 prearranged 그룹 (c.lock 아래)
+    private var seenDoc: Pair<String, GroupDoc>? = null                // 마지막으로 맞춘 영상 채널과 그 그룹 문서 (c.lock 아래)
     private var wasRegistered = false
     private val retryAt = HashMap<String, Long>()                      // 합류 재시도 가능 시각(elapsedRealtime) (c.lock 아래)
     private val failures = HashMap<String, Int>()
@@ -140,19 +150,36 @@ internal class VideoPlane(private val c: PttController, context: Context) {
      * 영상 채널 = 주채널(활성 MCPTT 그룹 세션 — 1:1·애드혹 제외)이 MCVideo 그룹이면 그 그룹. chat 이면 그 호에 합류해 있고, prearranged 면 그
      * 그룹만 MCVideo affiliation(제어 기능은 MCVideo 로 affiliate 한 멤버만 초대한다 — §6.3.5.5) — affiliation 은 서버가 MCVideo PSI 를 낼
      * 때만(서비스를 가르지 않는 옛 CSP 는 presence PUBLISH 를 MCPTT affiliation 으로 읽는다, mcvideo.md §5.4). 그 밖의 영상 호는 나간다.
+     *
+     * 영상 채널이 바뀌었거나 그 그룹 문서가 바뀌었으면(편성 변경 통지 xcap-diff — 서버가 그룹을 다시 적재한 뒤에 온다) 합류 물러남을
+     * 풀고 prearranged affiliation 도 다시 보낸다: 갓 만든 그룹은 서버가 아직 MCVideo 그룹으로 모를 때 시도가 거절되거나(404 113) affiliation
+     * 이 기록되지 않을 수 있는데(PUBLISH 는 200 — 결과는 NOTIFY 로만 온다, TS 24.281 §8.2.2.2.3), 물러남이 2 분까지 커지면 그동안 영상을 못 쓴다.
      */
     private fun sync() {
         val registered = c.regState.value is RegState.Registered
         val g = channel
-        val mv = g?.let { c._groupDocs.value[it]?.mcvideo }
+        val doc = g?.let { c._groupDocs.value[it] }
+        val mv = doc?.mcvideo
         val want = g.takeIf { registered && serverUri.isNotEmpty() && mv != null }
+        val docChanged = synchronized(c.lock) {
+            val cur = want?.let { it to doc!! }
+            (cur != seenDoc).also { changed ->
+                seenDoc = cur
+                if (changed && want != null) { failures.remove(want); retryAt.remove(want) }
+            }
+        }
         // affiliation — 등록이 새로 서면 서버 affiliation 도 새로 시작한다(등록 해제가 지운다)
         val affWant = want.takeIf { mv?.prearranged == true }
+        _openable.value = affWant
         val (affOn, affOff) = synchronized(c.lock) {
             if (registered != wasRegistered) { wasRegistered = registered; mcvAffiliated = null }
             val cur = mcvAffiliated
-            if (cur == affWant || !registered) null to null
-            else { mcvAffiliated = affWant; affWant to cur }
+            when {
+                !registered -> null to null
+                cur != affWant -> { mcvAffiliated = affWant; affWant to cur }
+                docChanged && affWant != null -> affWant to null            // 같은 그룹의 문서가 바뀌었다 — 다시 알린다
+                else -> null to null
+            }
         }
         affOff?.let { g -> c.cmd("de-affiliate mcvideo $g") { c.account?.affiliate(g, false, McService.MCVIDEO) ?: notRegistered() } }
         affOn?.let { g -> c.cmd("affiliate mcvideo $g") { c.account?.affiliate(g, true, McService.MCVIDEO) ?: notRegistered() } }
@@ -198,13 +225,26 @@ internal class VideoPlane(private val c: PttController, context: Context) {
 
     /** chat 그룹 MCVideo 호 합류(§9.2.2 — 합류가 곧 affiliation). 호 종류는 그룹 문서의 `mcvideo-on-network-invite-members` 와 맞아야
      *  한다(§6.3.5.2 — 어긋나면 404 117·118). */
-    private fun join(groupId: String) {
+    private fun join(groupId: String) = start(groupId, VideoGroupCallOptions(prearranged = false), opening = false)
+
+    /** prearranged 그룹 MCVideo 호 열기(§9.2.1.2.1.1) — 호가 없는데 [영상 보내기] 를 눌렀다. 송출 요청은 개시 INVITE 에 싣는다(16) · §6.4 —
+     *  TS 24.581 §14.2.4 mc_implicit_request). 제어 기능이 MCVideo 로 affiliate 한 멤버를 초대하고 첫 멤버가 붙으면 200 OK, 아무도 붙지 않으면
+     *  480(§9.2.1.4.2). 그사이 진행 중 세션이 생겼으면 서버가 합류로 받는다 — 암묵 요청은 받지 않으므로(§14.3.5) 코어가 명시 요청으로 잇는다.
+     *  마이크는 요청과 함께 확보한다([setTransmit] 과 같은 이유). */
+    private fun open(groupId: String) {
+        c.setVideoCapture(true)
+        start(groupId, VideoGroupCallOptions(prearranged = true, implicitTransmissionRequest = true), opening = true)
+    }
+
+    private fun start(groupId: String, opts: VideoGroupCallOptions, opening: Boolean) {
         synchronized(c.lock) {
             if (calls.containsKey(groupId)) return
-            calls[groupId] = Call(groupId)
+            calls[groupId] = Call(groupId).also {
+                if (opening) { it.opening = true; it.tx = TransmissionState.PENDING_REQUEST }   // 코어도 호 성립까지 'U: pending request'
+            }
         }
         c.ctl.launch {
-            val r = c.account?.joinVideoGroupCall(groupId, VideoGroupCallOptions(prearranged = false))
+            val r = c.account?.joinVideoGroupCall(groupId, opts)
             if (r != null && r.ok) {
                 val id = r.value!!.id
                 val leaveNow = synchronized(c.lock) { calls[groupId]?.let { it.callId = id; it.leaving } ?: true }
@@ -215,7 +255,7 @@ internal class VideoPlane(private val c: PttController, context: Context) {
             }
             Log.w(TAG, "joinVideoGroupCall $groupId 실패: ${r?.code} ${r?.reason ?: "not registered"}")
             synchronized(c.lock) { calls.remove(groupId) }
-            backoff(groupId, failed = true)
+            if (opening) { releaseCaptureIfIdle(); c.feedback?.blocked("영상 호를 열지 못했습니다") } else backoff(groupId, failed = true)
             publish()
         }
         publish()
@@ -232,7 +272,16 @@ internal class VideoPlane(private val c: PttController, context: Context) {
     /** [영상 보내기] 토글 — 켬 = Transmission Request(§6.2.4.3.2), 끔 = Transmission End Request(§6.2.4.5.3 — 대기·요청 중이면 거둔다).
      *  마이크는 요청과 함께 확보해 둔다(허가 뒤 코어가 연다 — PTT 의 발언 캡처와 같은 이유). */
     fun setTransmit(groupId: String, on: Boolean) {
-        val id = synchronized(c.lock) { calls[groupId]?.takeIf { it.active }?.callId } ?: return
+        val call = synchronized(c.lock) { calls[groupId] }
+        if (call == null) {
+            if (on && _openable.value == groupId) open(groupId)
+            return
+        }
+        val id = synchronized(c.lock) { call.callId.takeIf { call.active } }
+        if (id == null) {
+            if (!on && call.opening) leave(groupId)                          // 여는 중 끔 = 개시를 거둔다(CANCEL)
+            return
+        }
         if (on) {
             c.setVideoCapture(true)
             c.cmd("requestTransmission") { c.ue.call(id).requestTransmission() }
@@ -307,9 +356,14 @@ internal class VideoPlane(private val c: PttController, context: Context) {
                 val call = synchronized(c.lock) {
                     calls.values.firstOrNull { it.callId == ci.callId }?.also { calls.remove(it.groupId) }
                 } ?: return
-                if (synchronized(c.lock) { calls.values.none { it.tx != TransmissionState.NO_PERMISSION } }) c.setVideoCapture(false)
-                // 내가 나간 게 아니면 다시 맞춘다 — 성립 전 거절은 물러나서, 성립 뒤 서버 해제는 잠깐 뒤(chat 세션은 다시 연다)
-                if (!call.leaving) backoff(call.groupId, failed = !call.active || ci.lastCode >= 300)
+                releaseCaptureIfIdle()
+                if (call.opening && !call.active) {
+                    // 내가 연 prearranged 호가 성립하지 못했다 — 다시 열지 않는다(사용자가 다시 누른다)
+                    if (!call.leaving) c.feedback?.blocked(openFailText(ci.lastCode, ci.lastReason))
+                } else if (!call.leaving) {
+                    // 내가 나간 게 아니면 다시 맞춘다 — 성립 전 거절은 물러나서, 성립 뒤 서버 해제는 잠깐 뒤(chat 세션은 다시 연다)
+                    backoff(call.groupId, failed = !call.active || ci.lastCode >= 300)
+                }
                 publish()
                 c.leaveCallAudioIfIdle()
             }
@@ -379,6 +433,11 @@ internal class VideoPlane(private val c: PttController, context: Context) {
 
     private fun sendingAny(): Boolean = synchronized(c.lock) { calls.values.any { it.tx == TransmissionState.PERMITTED } }
 
+    /** 송출 요청·대기·허가 중인 호가 없으면 마이크를 놓는다(PTT 발언이 없는 한 스피커 전용). */
+    private fun releaseCaptureIfIdle() {
+        if (synchronized(c.lock) { calls.values.none { it.tx != TransmissionState.NO_PERMISSION } }) c.setVideoCapture(false)
+    }
+
     // ── 문구(원인 표 = mcvideo_tc_defs.yaml §9.2.6.2·§9.2.10.2·§9.2.15.2) ──
 
     private fun rejectText(groupId: String, cause: Int, text: String): String = when (cause) {
@@ -388,6 +447,12 @@ internal class VideoPlane(private val c: PttController, context: Context) {
         5 -> "이 그룹에서는 영상을 받기만 할 수 있습니다"
         6 -> "보내지 못했습니다 — 서버 자원이 없습니다"
         else -> "보내지 못했습니다" + causeSuffix(cause, text)
+    }
+
+    /** 내가 연 prearranged 호의 실패 응답(§9.2.1.4.2) — 480 = 초대가 나가지 못했거나 아무도 붙지 않았다(MCVideo 로 affiliate 한 멤버가 없다). */
+    private fun openFailText(code: Int, reason: String): String = when (code) {
+        480 -> "영상 호를 열지 못했습니다 — 영상을 받을 멤버가 없습니다"
+        else -> "영상 호를 열지 못했습니다" + if (code > 0) " ($code${if (reason.isNotBlank()) " $reason" else ""})" else ""
     }
 
     private fun revokeText(cause: Int, text: String): String = when (cause) {

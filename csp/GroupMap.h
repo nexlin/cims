@@ -38,10 +38,11 @@ public:
     /** Remove a group by ID (ad hoc 임시 그룹 정리용) */
     void Remove( const char *pszGroupId );
 
-    /** ephemeral(_isAdhoc — ad hoc/private 즉석 세션) 그룹 수집 — DB 전체 재로드가 맵을
-     *  재구축할 때 보존·재삽입용 (DB 에 없는 그룹이라 재구축이 지우면 CheckMemberState 가
+    /** DB 전체 재적재 결과로 맵을 한 번에 바꾼다 — 비우고 하나씩 채우면 그사이 조회가 멀쩡한 그룹을 못 찾는다
+     *  (갓 만든 그룹의 MCVideo INVITE 404 Warning 113·affiliation 누락 등). ephemeral(_isAdhoc — ad hoc/private
+     *  즉석 세션) 그룹은 DB 에 없으므로 같은 락 안에서 그대로 둔다 (재구축이 지우면 CheckMemberState 가
      *  "Group removed" 로 진행 중 호를 끊는다). */
-    void CollectEphemeral( std::vector<CspPttGroup> &vecOut );
+    void ReplaceDbGroups( std::vector<CspPttGroup> &vecGroups );
 
     /** Select a group by ID */
     bool Select( const char *pszGroupId, CspPttGroup &clsGroup );

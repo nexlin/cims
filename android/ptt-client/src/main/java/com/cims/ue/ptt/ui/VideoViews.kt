@@ -53,14 +53,15 @@ import kotlinx.coroutines.delay
 // MCVideo 그룹 영상의 주채널 조각(mcvideo.md §5.5 — 영상 칸은 볼 영상이 있을 때만, 하단 탭은 늘 그대로).
 //   [영상 보내기] = 발언 상태 줄 오른쪽 토글(D11) · 내 송출 카드 · «영상 n» 목록(골라 보기, manual) · [보기] 뒤 영상 칸.
 
-/** [영상 보내기] 토글 — 켬 = 송출 요청, 끔 = 송출 끝내기(대기·요청 중이면 거둔다). 영상 호가 성립 전이면 누를 수 없다. */
+/** [영상 보내기] 토글 — 켬 = 송출 요청, 끔 = 송출 끝내기(대기·요청 중이면 거둔다). 영상 호가 성립 전이면 누를 수 없다 — 단 prearranged 그룹은
+ *  호가 없을 때 눌러 호를 연다([canOpen], TS 24.281 §9.2.1.2.1.1)·여는 중에 다시 누르면 거둔다. */
 @Composable
-internal fun VideoSendButton(v: VideoCallState?, onToggle: (Boolean) -> Unit) {
-    val enabled = v?.active == true
+internal fun VideoSendButton(v: VideoCallState?, canOpen: Boolean, onToggle: (Boolean) -> Unit) {
+    val enabled = v?.active == true || v?.opening == true || (v == null && canOpen)
     val on = v?.sendOn == true
     val label = when (v?.transmission) {
         TransmissionState.PERMITTED -> "보내는 중"
-        TransmissionState.PENDING_REQUEST -> "요청 중…"
+        TransmissionState.PENDING_REQUEST -> if (v.opening) "여는 중…" else "요청 중…"
         TransmissionState.QUEUED -> v.queuePosition?.let { "대기 ${it}번째" } ?: "대기 중"
         TransmissionState.PENDING_END -> "멈추는 중…"
         else -> "영상 보내기"
@@ -114,7 +115,8 @@ internal fun MySendCard(st: PttUiState, v: VideoCallState, policy: VideoMicPolic
                     (v.queuePosition?.let { "대기 ${it}번째" } ?: "대기 중") + " — 앞 송출이 끝나면 보냅니다",
                     color = Ct.Amber, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                 TransmissionState.PENDING_END -> Text("영상 보내기를 멈추는 중…", color = Ct.TextDim, fontSize = 13.sp)
-                else -> Text("영상 보내기 요청 중…", color = Ct.TextDim, fontSize = 13.sp)
+                else -> Text(if (v.opening) "영상 호를 여는 중 — 멤버가 받기를 기다립니다" else "영상 보내기 요청 중…",
+                    color = Ct.TextDim, fontSize = 13.sp)
             }
         }
         if (v.sending) {

@@ -42,8 +42,9 @@
 ```
 
 - 재시작·재로그인 없이 반영된다. ④ 는 ② 의 재적재 **뒤** 재적재 전·후 멤버의 합집합에게 간다(PSP
-  `ReloadGroupMap` — 새 그룹·추가 멤버도 통지를 받는다). 통지 유실은 PSP 60초 주기 재적재(같은 전후 비교)가 따라잡는다
-  ([../modules/csc.md](../modules/csc.md) §5.1).
+  `ReloadGroupMap` — 새 그룹·추가 멤버도 통지를 받는다). 통지 유실은 PSP 60초 주기 재적재(같은 전후 비교 — 지문은 멤버·floor·T4,
+  MCVideo 몫은 들지 않는다)가 따라잡는다 ([../modules/csc.md](../modules/csc.md) §5.1). 재적재는 그룹을 다 읽은 뒤 맵을 한 번에 바꾼다
+  (`CGroupMap::ReplaceDbGroups` — 즉석 세션 그룹은 같은 락 안에서 보존) — 재적재 중에도 그룹 조회(INVITE·affiliation)가 비지 않는다.
 - 관제 앱 편집은 관리 범위 안 또는 소유(`authorized_user_id`) 그룹만 서버가 허용한다
   ([mcptt_authorization.md](mcptt_authorization.md)).
 
