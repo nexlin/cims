@@ -109,10 +109,11 @@ fun MainChannelScreen(
             )
             Spacer(Modifier.height(10.dp))
 
-            // 무전 세션이 없어도(T4 해제 등) 영상 호가 이어지는 영상 채널은 대기 상태로 보인다(mcvideo.md §7 D10)
-            val primary = st.primary ?: st.videoCalls.firstOrNull()?.let { v ->
-                GroupCallState(v.groupId, NO_SESSION_CALL, active = false, role = ChannelRole.PRIMARY, floorState = FloorState.IDLE,
-                    speaker = null, participants = st.channelRosters[v.groupId].orEmpty(), audible = true)
+            // 무전 호가 없는 고른 주채널(T4·TNG3 해제 — 호만 끝나고 그룹 선택·affiliation 은 그대로, TS 24.379 §6.3.8.1)은 «무전 통화 없음»
+            //   대기로 보인다 — PTT 가 새 그룹 호를 연다. 영상 호(mcvideo.md §7 D10)는 그대로 이어진다.
+            val primary = st.primary ?: (st.chosenPrimary ?: st.videoCalls.firstOrNull()?.groupId)?.let { g ->
+                GroupCallState(g, NO_SESSION_CALL, active = false, role = ChannelRole.PRIMARY, floorState = FloorState.IDLE,
+                    speaker = null, participants = st.channelRosters[g].orEmpty(), audible = true)
             }
             if (primary != null) {
                 PrimaryChannelPanel(st, svc, primary, onOpenThread,
@@ -220,7 +221,8 @@ private fun PrimaryChannelPanel(
             Spacer(Modifier.height(8.dp))
             // Floor Taken 의 Permission=0(청취 전용 leg — broadcast 그룹·ambient)이면 버튼을 막는다
             // (TS 24.380 §8.2.3.7) — 눌러도 Deny 만 돌아온다.
-            PttBar(floor = st.floor, enabled = st.inCall, listenOnly = !s.canRequestFloor,
+            // 무전 호가 없는 고른 주채널도 누를 수 있다 — PTT 가 새 그룹 호를 연다(PttFloor.startOnChosenPrimary)
+            PttBar(floor = st.floor, enabled = st.inCall || s.callId == NO_SESSION_CALL, listenOnly = !s.canRequestFloor,
                 queuePosition = s.queuePosition, modifier = Modifier.fillMaxWidth(),
                 onDown = { st.ctl?.pttDown() }, onUp = { st.ctl?.pttUp() })
         }
@@ -411,7 +413,7 @@ internal fun SpeakerStatusStrip(st: PttUiState, s: GroupCallState) {
                 s.queuePosition?.let { "발언 대기 ${it}번째" } ?: "발언 대기 중",
                 color = Ct.Amber, fontSize = 14.sp, fontWeight = FontWeight.Bold)
             s.active -> Text("대기 중", color = Ct.TextFaint, fontSize = 13.sp)
-            s.callId == NO_SESSION_CALL -> Text("대기 — 무전 세션 없음", color = Ct.TextFaint, fontSize = 13.sp)
+            s.callId == NO_SESSION_CALL -> Text("무전 통화 없음 — PTT 를 누르면 시작", color = Ct.TextFaint, fontSize = 13.sp)
             else -> Text("연결 중…", color = Ct.TextFaint, fontSize = 13.sp)
         }
     }
@@ -684,5 +686,5 @@ private fun chatTime(t: Long): String = DateFormat.format("HH:mm", Date(t)).toSt
 /** 주채널 채팅 숨김 저장 키(ui_prefs). */
 private const val PREF_CHAT_HIDDEN = "main_chat_hidden"
 
-/** 무전 세션 없이 영상 호만 이어지는 영상 채널의 자리 표시 세션(화면 전용 callId). */
+/** 무전 호가 없는 고른 주채널의 자리 표시 세션(화면 전용 callId) — T4 해제 뒤·영상 호만 이어질 때. */
 private const val NO_SESSION_CALL = -2

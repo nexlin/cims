@@ -296,6 +296,10 @@ class PttController(
     internal val _sessions = MutableStateFlow<List<GroupCallState>>(emptyList())
     /** 참여 중인 그룹 세션들(참여 순). */
     val sessions: StateFlow<List<GroupCallState>> = _sessions.asStateFlow()
+    private val _chosenPrimary = MutableStateFlow<String?>(null)
+    /** 사용자가 고른 주채널(ChannelStore.primary) — 무전 호가 끝나도(T4·TNG3 해제) 남는다. 해제는 호를 끝낼 뿐 그룹 선택·affiliation 을
+     *  바꾸지 않는다(TS 24.379 §6.3.8.1). 화면의 주채널 칸과 세션 없는 PTT 의 대상이다. */
+    val chosenPrimary: StateFlow<String?> = _chosenPrimary.asStateFlow()
 
     private val _listenPolicy = MutableStateFlow(ListenPolicy.ALL)
     /** 듣기 정책 — 주채널만/전체. */
@@ -760,6 +764,7 @@ class PttController(
     internal fun publish() {
         val list = synchronized(lock) { sessionMap.values.map { it.toState() } }
         _sessions.value = list
+        _chosenPrimary.value = channelStore?.primary
         val primary = list.firstOrNull { it.role == ChannelRole.PRIMARY }
         _floorState.value = primary?.floorState ?: FloorState.IDLE
         _speaker.value = primary?.speaker?.copy(groupId = null)
@@ -785,6 +790,7 @@ class PttController(
         videoPlane.requestSync()            // 고른 주채널 = 영상 채널(mcvideo.md §7 D10)
         _selectedGroup.value = groupId   // 선택 그룹 = 주채널 (SOS UseCurrentlySelectedGroup 대상)
         applyListenPolicy()
+        publish()
     }
 
     /** 주채널 해제 — 일반 참여로 강등(다른 채널 자동 승격 없음, 주채널 없는 상태 허용). */
@@ -797,6 +803,7 @@ class PttController(
         channelStore?.let { if (it.primary == groupId) it.primary = null }
         videoPlane.requestSync()
         applyListenPolicy()
+        publish()
     }
 
     fun setListenPolicy(p: ListenPolicy) {

@@ -14,6 +14,7 @@ import com.cims.ue.ptt.PttController.Companion.bareId
 import com.cims.ue.ptt.PttController.Companion.isAdhocId
 import com.cims.ue.ptt.csc.GroupDoc
 import com.cims.ue.ptt.csc.GroupSummary
+import com.cims.ue.sdk.FloorState
 import com.cims.ue.sdk.CallInfo
 import com.cims.ue.sdk.GroupCallOptions
 import com.cims.ue.sdk.RequestResult
@@ -34,9 +35,10 @@ internal class GroupPlane(private val c: PttController) {
     // ── 참여/이탈 ──
 
     /** [takePrimary] = 주채널 세션이 없을 때 이 그룹을 주채널로 삼는다(사용자 참여). 채널 복원은 고른 주채널에만 준다 — 다른 그룹 복원이
-     *  고른 주채널(영상 채널, [VideoPlane])을 덮지 않게. */
+     *  고른 주채널(영상 채널, [VideoPlane])을 덮지 않게. [implicitFloor] = 개시 INVITE 에 암묵적 발언 요청(TS 24.380 §14.2.4 —
+     *  PTT 를 누른 채 호를 여는 경우, 성립과 함께 발언권). */
     fun joinGroupCall(groupId: String, members: List<String> = emptyList(), emergency: Boolean = false,
-                      broadcast: Boolean = false, takePrimary: Boolean = true) {
+                      broadcast: Boolean = false, takePrimary: Boolean = true, implicitFloor: Boolean = false) {
         val s = synchronized(c.lock) {
             if (c.sessionMap.containsKey(groupId)) return
             c.Session(groupId).also {
@@ -44,6 +46,7 @@ internal class GroupPlane(private val c: PttController) {
                 else ChannelRole.NONE
                 it.emergency = emergency
                 it.emergencyMine = emergency
+                if (implicitFloor) it.floorState = FloorState.REQUESTING
                 c.sessionMap[groupId] = it
             }
         }
@@ -58,7 +61,8 @@ internal class GroupPlane(private val c: PttController) {
         c.ctl.launch {
             val acc = c.account
             // 음성만 — 그룹 영상은 MCVideo 호다([VideoPlane], mcvideo.md §7 D9)
-            val r = acc?.joinGroupCall(groupId, GroupCallOptions(emergency = emergency, broadcast = broadcast, members = members))
+            val r = acc?.joinGroupCall(groupId, GroupCallOptions(emergency = emergency, broadcast = broadcast, members = members,
+                implicitFloorRequest = implicitFloor))
             if (r != null && r.ok) { c.bindCall(groupId, r.value!!.id); return@launch }
             Log.w(TAG, "joinGroupCall $groupId 실패: ${r?.code} ${r?.reason ?: "not registered"}")
             synchronized(c.lock) { if (c.sessionMap[groupId] === s) c.sessionMap.remove(groupId) }

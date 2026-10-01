@@ -31,7 +31,7 @@ internal class FloorPlane(private val c: PttController) {
 
     /** PTT down — 발언 대상에 Floor Request. 승인되면 코어가 승인 톤 길이 뒤 마이크를 연다. */
     fun pttDown() {
-        val s = talkSession() ?: run { c._status.value = "그룹콜을 먼저 시작하세요"; return }
+        val s = talkSession() ?: run { startOnChosenPrimary(); return }
         // 전이중 1:1(mc_no_floor_ctrl — floor 절차 없음, TS 24.379): PTT 는 서버 요청 없이 로컬 마이크 게이트(setMuted)로만
         //   동작한다. 양쪽이 같이 누르면 동시 발화(서버는 상시 중계). 그룹 승인 경로와 같은 "삑 후 말하기".
         if (s.fullDuplex) {
@@ -75,6 +75,22 @@ internal class FloorPlane(private val c: PttController) {
         // 긴급 세션의 발언은 Floor Indicator 에 emergency 비트 — 코어가 세션 조건 현재값으로 싣는다(TS 24.380).
         // Floor Priority 는 싣지 않는다 — 유효 우선순위가 요청값으로 깎이지 않게(§6.3.5.4.4-1a).
         c.cmd("floorRequest") { c.ue.call(s.callId).floorRequest(-1) }
+    }
+
+    /**
+     * 고른 주채널에 무전 호가 없다(T4·TNG3 해제 — 해제는 호를 끝낼 뿐 그룹 선택·affiliation 은 그대로, TS 24.379 §6.3.8.1) — PTT 가 그
+     * 그룹의 새 그룹 호를 개시하고 암묵적 발언 요청을 싣는다(TS 24.379 §10.1.1.2.1.1 · TS 24.380 §14.2.4 — 성립과 함께 발언권). 성립 전에
+     * 놓으면 [pttUp] 의 Floor Release 를 코어가 성립 뒤로 넘긴다.
+     */
+    private fun startOnChosenPrimary() {
+        val g = c.channelStore?.primary ?: run { c._status.value = "주채널을 먼저 고르세요"; return }
+        if (c.videoPlane.blocksVoiceTalk(false)) {
+            c.feedback?.blocked("영상 보내는 중 — 무전 마이크 안 씀(설정: 영상 우선)"); return
+        }
+        c.pttHeld = true
+        c.setTalkCapture(true)
+        c.groupsPlane.joinGroupCall(g, implicitFloor = true)
+        c.publish()
     }
 
     /** PTT up — Floor Release(대기 중이면 코어가 Queued Cancel 을 먼저 보낸다). */

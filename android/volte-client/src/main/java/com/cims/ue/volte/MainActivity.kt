@@ -166,12 +166,19 @@ class MainActivity : ComponentActivity() {
             finish(); return
         }
         handleIntent(intent)
+        PhoneThemeState.load(this)              // 화면 테마(설정 «화면 테마») + 단말 다크 모드
         setContent {
-            // 시안 다크 고정 — PTT 앱과 같은 다크·민트 톤(Theme.kt).
+            // PTT 앱과 같은 민트 톤 — 시스템·밝게·어둡게(Theme.kt PhoneThemeState)
             PhoneTheme {
                 Surface(modifier = Modifier.fillMaxSize()) { App(notifAnswer, notifOpenMessages) }
             }
         }
+    }
+
+    // 단말 다크 모드 전환 — 매니페스트가 uiMode 를 직접 받으면(configChanges) 재생성 없이 여기로 온다.
+    override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
+        super.onConfigurationChanged(newConfig)
+        PhoneThemeState.onConfiguration(newConfig)
     }
 
     // launchMode=singleTask — 알림 PendingIntent 가 기존 인스턴스로 들어온다.
@@ -628,6 +635,7 @@ private fun HomeScreen(
                     )
                     Tab.KEYPAD -> KeypadScreen(
                         myNumber = myLine(config),
+                        lastDialed = { callLog.all().firstOrNull { it.type == CallType.OUTGOING }?.number },
                         onVoice = { dial(it, false) },
                         onVideo = { dial(it, true) },
                     )
@@ -710,6 +718,7 @@ private fun rememberDtmfTonePlayer(): (String) -> Unit {
 @Composable
 private fun KeypadScreen(
     myNumber: String,
+    lastDialed: () -> String?,
     onVoice: (String) -> Unit,
     onVideo: (String) -> Unit,
 ) {
@@ -753,10 +762,15 @@ private fun KeypadScreen(
                 Icon(Icons.Filled.Videocam, contentDescription = "영상통화",
                     tint = if (dialed.isNotBlank()) CALL_GREEN else MaterialTheme.colorScheme.onSurfaceVariant)
             }
+            // 번호가 비었으면 [통화] = 최근 발신 번호를 채운다(발신하지 않는다 — 확인 뒤 한 번 더 누르면 발신), 번호가 있으면 발신
+            val recall = dialed.isBlank()
             Box(
                 Modifier.size(72.dp).clip(CircleShape)
-                    .background(if (dialed.isNotBlank()) CALL_GREEN else CALL_GREEN.copy(alpha = 0.4f))
-                    .clickable(enabled = dialed.isNotBlank()) { onVoice(dialed.trim()) },
+                    .background(if (!recall) CALL_GREEN else CALL_GREEN.copy(alpha = 0.4f))
+                    .clickable {
+                        if (!recall) onVoice(dialed.trim())
+                        else lastDialed()?.let { dialed = it }
+                    },
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(Icons.Filled.Call, contentDescription = "음성통화", tint = Color.White,
@@ -1941,7 +1955,7 @@ private fun CallScreen(
         // 영상: 상대 화면(수신 렌더) + 우하단 내 화면(로컬 카메라 프리뷰 PiP)
         if (videoOn && (call is CallState.Active || call is CallState.Outgoing)) {
             Spacer(Modifier.height(16.dp))
-            Box(Modifier.fillMaxWidth().aspectRatio(4f / 3f)) {
+            Box(Modifier.fillMaxWidth(0.6f).aspectRatio(3f / 4f)) {                // 480x640 세로
                 VideoRender(onSurface = onSurface)
                 Box(
                     Modifier.align(Alignment.BottomEnd).padding(8.dp)
@@ -2012,9 +2026,12 @@ private fun VideoCallFullScreen(
                 interactionSource = remember { MutableInteractionSource() },
             ) { controlsVisible = !controlsVisible },
     ) {
-        // 상대 영상(전체화면) — AndroidView 는 자기 영역의 터치를 소비해 바깥 Box 의 clickable 에 닿지 않는다.
-        // 탭을 뷰에서 받아 같은 토글로 넘긴다(없으면 자동 숨김 뒤 컨트롤을 다시 띄울 수 없어 종료 불가).
-        VideoRender(onSurface = onSurface, onTap = { controlsVisible = !controlsVisible })
+        // 상대 영상 — 480x640(세로 3:4, ue_sdk.md §4.5)을 화면 폭에 맞춘 3:4 칸에 그린다(늘이지 않는다). AndroidView 는 자기 영역의
+        // 터치를 소비해 바깥 Box 의 clickable 에 닿지 않는다 — 탭을 뷰에서 받아 같은 토글로 넘긴다(없으면 자동 숨김 뒤 컨트롤을 다시
+        // 띄울 수 없어 종료 불가).
+        Box(Modifier.align(Alignment.Center).fillMaxWidth().aspectRatio(3f / 4f)) {
+            VideoRender(onSurface = onSurface, onTap = { controlsVisible = !controlsVisible })
+        }
 
         // 전면/후면 카메라 전환 — 우측 상단(항상 표시).
         Box(
@@ -2215,6 +2232,31 @@ private const val DTMF_TONE_MS = 120
 
 // ─────────────────────── 설정 화면 (안드로이드 설정 스타일 — 카테고리 + 항목행 + 편집 다이얼로그) ───────────────────────
 
+/** 설정 행 — 화면 테마(시스템 설정 따름 · 밝게 · 어둡게). 고르면 바로 바뀌고 `ui_prefs` 에 남는다([PhoneThemeState] — PTT 앱과 같다). */
+@Composable
+private fun ThemeRow() {
+    val context = LocalContext.current
+    val mode = PhoneThemeState.mode.value
+    Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 10.dp)) {
+        Text("화면 테마", color = Ct.Text, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+        Text("시스템 = 단말의 다크 모드 설정을 따릅니다",
+            color = Ct.TextFaint, fontSize = 11.sp, modifier = Modifier.padding(top = 2.dp))
+        Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            listOf(ThemeMode.SYSTEM to "시스템", ThemeMode.LIGHT to "밝게", ThemeMode.DARK to "어둡게").forEach { (m, text) ->
+                val on = m == mode
+                Box(
+                    Modifier.clip(RoundedCornerShape(8.dp))
+                        .background(if (on) Ct.Mint else Ct.GrayDim)
+                        .clickable(enabled = !on) { PhoneThemeState.set(context, m) }
+                        .padding(horizontal = 14.dp, vertical = 7.dp),
+                ) {
+                    Text(text, color = if (on) Ct.OnMint else Ct.TextDim, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                }
+            }
+        }
+    }
+}
+
 /**
  * 접속/계정 설정. 값의 SoT 는 CIMS 프로비저닝 — SSO 자동 구성 상태에서는 **읽기 전용**으로
  * 보여주고, "수동 설정 모드" 스위치를 켠 경우에만 편집을 허용한다(테스트용, 프로비저닝
@@ -2248,6 +2290,9 @@ private fun SettingsScreen(
                 "설정", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold,
                 modifier = Modifier.padding(start = 20.dp, top = 20.dp, bottom = 4.dp),
             )
+
+            PrefCategory("화면")
+            ThemeRow()
 
             PrefCategory("구성")
             if (hasSso && !standalone) {

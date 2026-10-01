@@ -70,6 +70,8 @@ class PttUiState(
     val videoCalls: List<com.cims.ue.ptt.VideoCallState> = emptyList(),
     /** 서버가 MCVideo 를 낸다(ue-init-config PSI). */
     val mcvideoAvailable: Boolean = false,
+    /** 사용자가 고른 주채널 — 무전 호가 끝나도(T4 해제) 남는다. 세션이 없으면 주채널 칸은 «무전 통화 없음» 대기, PTT = 새 그룹 호. */
+    val chosenPrimary: String? = null,
 ) {
     val primary: GroupCallState? get() = sessions.firstOrNull { it.role == com.cims.ue.ptt.ChannelRole.PRIMARY }
     val inCall: Boolean get() = sessions.any { it.active || it.callId >= 0 }
@@ -115,6 +117,7 @@ fun AppRoot(svc: PttService?, onStopSip: () -> Unit) {
     val fbAlerts = remember { MutableStateFlow<List<com.cims.ue.ptt.ActiveAlert>>(emptyList()) }
     val fbVideoCalls = remember { MutableStateFlow<List<com.cims.ue.ptt.VideoCallState>>(emptyList()) }
     val fbMcvideo = remember { MutableStateFlow(false) }
+    val fbChosen = remember { MutableStateFlow<String?>(null) }
 
     val st = PttUiState(
         ctl = ctl,
@@ -137,6 +140,7 @@ fun AppRoot(svc: PttService?, onStopSip: () -> Unit) {
         alerts = (ctl?.alerts ?: fbAlerts).collectAsState().value,
         videoCalls = (ctl?.videoCalls ?: fbVideoCalls).collectAsState().value,
         mcvideoAvailable = (ctl?.mcvideoAvailable ?: fbMcvideo).collectAsState().value,
+        chosenPrimary = (ctl?.chosenPrimary ?: fbChosen).collectAsState().value,
     )
 
     // SSO: 컨트롤러 연결 시 CIMS 공유 계정의 MCPTT(TS 33.180) 토큰을 주입(별도 로그인 없음).

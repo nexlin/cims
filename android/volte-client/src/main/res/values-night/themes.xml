@@ -1,0 +1,8 @@
+<resources>
+    <!-- 단말 다크 모드 — 콜드 스타트 창 배경(Compose 가 뜨기 전). 앱 안 테마는 설정 «화면 테마»(Theme.kt PhoneThemeState). -->
+    <style name="Theme.CimsUe" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">#0D1211</item>
+        <item name="android:statusBarColor">#0D1211</item>
+        <item name="android:navigationBarColor">#111917</item>
+    </style>
+</resources>
