@@ -227,7 +227,8 @@ MCPTT 그룹 호는 **음성과 floor 만** 싣는다(TS 24.379·24.380 — MCPT
   MCVideo 상태를 건드리지 않는다(MCVideo 를 모르는 옛 단말의 PUT 이 서비스를 지우지 않게. 끄기는 관리 API. «부재 = 끔» 은 관제 앱 그룹 편집이 MCVideo 몫을 보존·편집하게 된 뒤(W4)).
 - **CMS** — `CMSXCAPROOT/org.3gpp.mcvideo.user-profile/users/<MCVideo ID>/mcvideo-user-profile-<n>.xml`(본인만·scope `video_config_management_service`·
   자격 행 없으면 404) · `CMSXCAPROOT/org.3gpp.mcvideo.service-config/global/mcvideo-service-config.xml`(전역 문서, TS 24.484 §9.4.2.9). user profile 의
-  그룹 목록 = 이 사용자가 멤버인 MCVideo 그룹(`<MCVideoGroupInfo>` 하나에 하나), 상한 = `MaxSimultaneousVideoStreams`·N6·N2. service config =
+  그룹 목록 = 이 사용자가 멤버인 MCVideo 그룹(`<MCVideoGroupInfo>` 하나에 하나), `<ImplicitAffiliations>` = 그중 멤버 `implicit_affiliation` 이 켜진 그룹
+  (MCPTT 문서와 같은 표시 — 그룹 = 서비스 집합), 상한 = `MaxSimultaneousVideoStreams`·N6·N2. service config =
   `<signalling-protection>` false 명시 · Resource-Priority(MCPTT 네임스페이스 재사용, TS 24.281 §6.2.8.1.16) · `<tc-timers-counters-R14>` 17요소 전부
   (설정 `McVideoServiceConfig.*`, 기본값 정본 = [mcvideo_tc_defs.yaml](mcvideo_tc_defs.yaml)). CSP 는 같은 문서를 `/internal/mcvideo/service-config` 로 받는다.
   xcap-diff 통지 축에 두 문서를 싣는 것은 CSP 몫(§5.2).
@@ -267,8 +268,11 @@ psip 합성 SDP 프로파일(`CSipCallRtp::m_eMcMediaProfile = E_MC_MEDIA_MCVIDE
 - **affiliation** (구현 — §8.2.2.2.3~§8.2.2.2.5) — 규격형 PUBLISH·SUBSCRIBE(`Event: presence`)를 서비스로 먼저 갈라 MCVideo 는 표 `mcvideo_affiliations`
   (§5.1)에 쓴다: served ID = mcvideo-info `<mcvideo-request-uri>`(요청자와 다르면 403 — 남의 제휴를 바꾸는 권한은 두지 않는다), Expires 없음·0 이 아닌데
   2^32-1 미만 423(Min-Expires 4294967295), 이용 자격(`mcvideo_user_profile` 행) 없음 403, 대상 = MCVideo 서비스를 가진 그룹, 만료 없음(등록 해제가 행을 지운다),
-  200 OK `Expires: 4294967295`, `mcvideo_affiliation` 구독 NOTIFY(`mcvideoPresInfo`), 감사 이벤트 E-AUD-009 `service`. 남은 것 = N2(`<MaxAffiliationsN2>` —
-  `mcvideo_user_profile` 에 열이 없어 한도를 걸지 않는다)·user profile `<ImplicitAffiliations>`(§8.2.2.2.15)·chat 합류 암묵적 affiliation(§8.2.2.3.7 — A10).
+  200 OK `Expires: 4294967295`, `mcvideo_affiliation` 구독 NOTIFY(`mcvideoPresInfo`), 감사 이벤트 E-AUD-009 `service`. **설정 그룹 암묵적 affiliation**
+  (§8.2.2.2.15 — `CscfModule::_ApplyImplicitMcVideoAffiliations`) = REGISTER 성공 때 이 바인딩이 MCVideo 클라이언트(Contact 특성 태그 둘)이고 이용 자격이
+  있으면, 멤버 `implicit_affiliation` 이 켜진 MCVideo 그룹(user profile `<ImplicitAffiliations>` 와 같은 원천)에 MCVideo 제휴를 기록한다(클라이언트 ID =
+  REGISTER mcvideo-info `<mcvideo-client-id>` > `+sip.instance` > Contact URI, 만료 없음 — 등록 해제가 지운다). chat 합류의 암묵적 affiliation(§8.2.2.3.7)은
+  그룹 호(§5.2.1). N2(`<MaxAffiliationsN2>`)는 MCPTT 와 같이 한도를 걸지 않는다(§9 편차).
 - **그룹 호** (구현 — §5.2.1) — `McVideoCallService`: chat·prearranged 개시·합류·재합류·퇴장·해제(참가자 수·T1·TNG3), 그룹 종류 검사(§6.3.5.2), 멤버
   fan-out(prearranged), mcvideo-info, SDP(audio·video·`udp MCVideo` — psip `E_MC_MEDIA_MCVIDEO`), Warning(TS 24.281 §4.4). MCPTT `GroupCallService` 와는
   부품(leg PT·그룹/사용자 맵·psip 호 API·`McVideoInfo.h` 코덱)만 나누고 세션·CMP 키는 따로 둔다.
@@ -299,9 +303,9 @@ chat|prearranged(그룹 속성 `invite_members`) · 개시자 · 시작 시각(T
 
 | 입력 | 처리 (근거 절) |
 |---|---|
-| INVITE — 검사 | 순서대로: CMP 가 `resource.mcvideo` 를 광고하지 않으면 500(§9.2.2.4.1.1 1)) · Accept-Contact 에 `g.3gpp.mcvideo`·MCVideo icsi-ref 가 없거나 Contact 에 isfocus → 403(2)) · 대상 = Request-URI 의 `gr` 이 진행 중 세션이면 그 세션(재합류 — 없는 세션이면 404 Warning 137, §9.2.1.4.5.1), 아니면 mcvideo-info `<mcvideo-request-uri>` · 그룹 없음·MCVideo 그룹 아님 → 404 113 · 멤버 아님 → 403 116 · session-type 불일치 → 404 117/118(§6.3.5.2 5)) · 이용 자격(`mcvideo_user_profile`) 없음 → 403 109/108 · N6(동시 MCVideo 호 — 참가 중이거나 스스로 연 leg 가 있는 세션 수, 응답 전 초대 leg 는 세지 않는다) 초과 → 486 103(§9.2.2.3.1.1 5)) · 제휴 안 됨 → prearranged(개시·합류·재합류)는 403 120(§9.2.1.4.2 13)a)·14)a) — 일반 호에는 암묵적 affiliation 이 없다, §8.2 머리말), chat 은 멤버면 SDP 검사 뒤 암묵적 affiliation(§9.2.2.4.1.1 5)·12) · §8.2.2.3.6·§8.2.2.3.7 — `mcvideo_affiliations` + NOTIFY), 실패면 403 120 · SDP 에 전송 제어 채널(`m=application <port≠0> udp MCVideo` — `a=fmtp:MCVideo` 는 선택) 또는 음성 AMR-WB 가 없으면 488. 영상 성분은 H.264 PT 가 있을 때만 받는다(없으면 answer `m=video 0`) |
+| INVITE — 검사 | CSP 가 참여·제어 기능을 겸하므로 **참여 기능의 검사(§9.2.1.3.1.1 prearranged · §9.2.2.3.1.1 chat — 재합류 §9.2.1.3.5.1 도 같은 단계) 다음에 제어 기능의 검사**(§9.2.1.4.2 · §9.2.2.4.1.1 · 재합류 §9.2.1.4.5.1)를 한다. 대상 = Request-URI 의 `gr` 이 가리키는 진행 중 세션(재합류), 아니면 mcvideo-info `<mcvideo-request-uri>`. 참여 기능 — CMP 가 `resource.mcvideo` 를 광고하지 않으면 500(1)) · 이용 자격(`mcvideo_user_profile`) 없음 → 403 109(prearranged)/108(chat) — 절차는 mcvideo-info `session-type` 으로 고른다(없으면 그룹 호 방식)(3)) · SDP 에 전송 제어 채널(`m=application <port≠0> udp MCVideo` — `a=fmtp:MCVideo` 는 선택) 또는 음성 AMR-WB 가 없으면 488, 음성 SRTP 협상 실패도 488(4)) · N6(동시 MCVideo 호 — 참가 중이거나 스스로 연 leg 가 있는 세션 수, 응답 전 초대 leg 는 세지 않는다, 이미 그 세션에 있는 멤버는 제외) 초과 → 486 103(5)). 제어 기능 — 재합류인데 `gr` 의 세션이 없으면 404 Warning 137(§9.2.1.4.5.1 2)) · Accept-Contact 에 `g.3gpp.mcvideo`·MCVideo icsi-ref 가 없거나 Contact 에 isfocus → 403 · 재합류는 합류 규칙(§6.3.5.3 — 목록 entry·join-handling·MCVideo 서비스)을 못 지키면 403 **121**(6)), 그 밖은 그룹 문서 초기 처리(§6.3.5.2 — 그룹 없음·MCVideo 그룹 아님 404 113 · 멤버 아님 403 116 · session-type 불일치 404 117/118) · 제휴 안 됨 → prearranged(개시·합류·재합류)는 403 120(§9.2.1.4.2 13)a)·14)a) · §9.2.1.4.5.1 8) — 일반 호에는 암묵적 affiliation 이 없다), chat 은 멤버면 정원 검사 뒤 암묵적 affiliation(§9.2.2.4.1.1 5)·12) · §8.2.2.3.6·§8.2.2.3.7 — `mcvideo_affiliations` + NOTIFY), 실패면 403 120 · **정원** — 진행 중 세션의 참가자(확립 leg)가 그룹 문서 `<on-network-max-participant-count>`(TS 24.481 — 그룹 `max_members`, 0 = 상한 없음)에 찼으면 486 **122**(§9.2.1.4.2 14)d) · §9.2.2.4.1.1 11) · §9.2.1.4.5.1 10) — 우선순위로 기존 참가자를 내보내는 선택은 두지 않는다, 이미 그 세션에 있는 멤버의 재합류는 제외). 영상 성분은 H.264 PT 가 있을 때만 받는다(없으면 answer `m=video 0`) |
 | INVITE — chat | 세션이 없으면 만든다. 개시자·합류자 모두 같은 절차: 로스터 등록(ADD) → CMP JOIN ①(포트·`tc_ssrc`) → JOIN ②(offer 주소·`user_control_port`·`user_tc_ssrc` = offer `mc_transmission_ssrc`·`user_audio/video_ssrc` = offer `a=ssrc`·PT·`queueing`·`max_priority` = min(offer `mc_priority`, `<user-priority>`)·`max_rx_streams` = user profile 동시 수신 스트림(1~16)) → 200 OK. **팬아웃 없음**(chat — §7 D5) |
-| INVITE — prearranged 새 세션 | **affiliated 멤버 팬아웃**(MCVideo 등록 바인딩 `m_bMcVideo` 가 있는 멤버만 — 멤버마다 로스터 등록 → JOIN ① → INVITE). 초대가 하나도 나가지 못하면 개시자에 480. 개시자 200 OK 는 **첫 멤버가 붙은 뒤**(초대 멤버의 200 OK 또는 멤버의 스스로 합류 — §9.2.1.4.2, 미디어 버퍼링 없음 → 확인 없는 200 을 먼저 주지 않는다): 그 멤버 JOIN ② 다음에 개시자 로스터 등록·JOIN ①·②(암묵 요청이면 `implicit_request` → 곧바로 허가·SSRC 쌍) → 개시자 200 OK(answer `mc_implicit_request`·`mc_granted`·`mc_audio/video_ssrc`). 초대가 모두 실패하거나 개시 대기 한도(10 s — CIMS 값, 규격은 확인 통화의 TNG1 만 정한다) 안에 아무도 붙지 않으면 개시자에 480. 대기 중 개시자가 CANCEL 하면 세션 해제(초대 leg 는 CANCEL), 새 INVITE 를 보내면(BYE 없는 재시도) 옛 INVITE 에 487 을 주고 대기 leg·offer 를 새것으로 바꾼다 |
+| INVITE — prearranged 새 세션 | **affiliated 멤버 팬아웃**(MCVideo 등록 바인딩 `m_bMcVideo` 가 있는 멤버만 — 멤버마다 로스터 등록 → JOIN ① → INVITE. 정원 `<on-network-max-participant-count>` 가 있으면 개시자를 뺀 정원 − 1 명까지 — §6.3.5.5). 초대가 하나도 나가지 못하면 개시자에 480. 개시자 200 OK 는 **첫 멤버가 붙은 뒤**(초대 멤버의 200 OK 또는 멤버의 스스로 합류 — §9.2.1.4.2, 미디어 버퍼링 없음 → 확인 없는 200 을 먼저 주지 않는다): 그 멤버 JOIN ② 다음에 개시자 로스터 등록·JOIN ①·②(암묵 요청이면 `implicit_request` → 곧바로 허가·SSRC 쌍) → 개시자 200 OK(answer `mc_implicit_request`·`mc_granted`·`mc_audio/video_ssrc`). 초대가 모두 실패하거나 개시 대기 한도(10 s — CIMS 값, 규격은 확인 통화의 TNG1 만 정한다) 안에 아무도 붙지 않으면 개시자에 480. 대기 중 개시자가 CANCEL 하면 세션 해제(초대 leg 는 CANCEL), 새 INVITE 를 보내면(BYE 없는 재시도) 옛 INVITE 에 487 을 주고 대기 leg·offer 를 새것으로 바꾼다 |
 | INVITE — prearranged 진행 중 세션 | 합류(재합류 `gr` 포함): chat 합류와 같은 절차, 암묵 요청은 받지 않는다(TS 24.581 §14.3.5). 개시 대기 중이면 합류 뒤 개시자에게 답한다 |
 | 같은 멤버의 새 INVITE (BYE 없는 재합류) | 옛 leg 는 SIP 다이얼로그만 끝낸다(확립 = BYE, 응답 전 초대 = CANCEL) — CMP 멤버 키가 (group, 멤버)라 LEAVE 하지 않는다 |
 | 멤버 팬아웃 INVITE (골든 07) | From = 그룹 URI, Contact = 포커스(`g.3gpp.mcvideo`·icsi-ref·isfocus + `gr`), Accept-Contact 두 줄, `P-Asserted-Service` MCVideo ICSI, `P-Asserted-Identity` = 제어 기능 PSI(`mcvideo_psi` — §9.2.1.4.1.1 3), 200 OK 와 같은 신원), `Session-Expires: 1800` — **refresher 생략**(§6.3.3.1.2 6); 스택이 로컬 정책으로 싣는 refresher 를 지운다 — 단말이 200 OK 에서 `refresher=uas` 로 정한다, §6.2.3.1.1 5)), multipart = SDP(offer: 멤버 CMP 포트 audio·video·control, 음성 = 코덱 테이블 AMR-WB, `mc_priority` = `<user-priority>`, `mc_transmission_ssrc` = 이 멤버 `tc_ssrc`) + mcvideo-info(session-type prearranged · request-uri = 멤버 · calling-user-id = 개시자 · calling-group-id = 그룹). 초대 응답 한도 30 s(CIMS 값 — 규격은 정하지 않는다) 안에 200 OK 가 없으면 CANCEL |
@@ -319,8 +323,8 @@ chat|prearranged(그룹 속성 `invite_members`) · 개시자 · 시작 시각(T
 겹치지 않게). JOIN 응답에서 `port`·`video_port`·`control_port`·`tc_ssrc`·`granted`·`audio_ssrc`·`video_ssrc` 를 읽는다. `HandleEvent` 는 hdr.service 가
 mcvideo 인 `PTT_GROUP_ABORTED`·`TRANSMITTERS`·`TRANSMISSION_INACTIVITY` 를 MCVideo 서비스로 보낸다.
 
-**1차 범위 밖** — 긴급·임박·방송·ad hoc·private(V8), 확인 통화(required 멤버·TNG1 확인·min-number-to-start), conference 이벤트 NOTIFY, 녹취(B8),
-전송 제어 SRTCP 키(`tc_crypto` — E2E CSK 트랙), 참가자 수 상한(`on-network-max-participant-count` 속성 없음).
+**1차 범위 밖** — 긴급·임박·방송·ad hoc·private(V8), 확인 통화(required 멤버·TNG1 확인·min-number-to-start — 정원 팬아웃의 필수 멤버 우선 포함),
+conference 이벤트 NOTIFY, 전송 제어 SRTCP 키(`tc_crypto` — E2E CSK 트랙), 정원이 찼을 때 우선순위로 기존 참가자를 내보내는 로컬 정책.
 
 ### 5.3 CMP (미디어 · 전송 제어)
 
@@ -558,6 +562,12 @@ Indicator, automatic 수신; 1차 CSP 는 normal) · JOIN 응답 `audio_ssrc`·`
 - §6.3.8.1 2) «only one or no participants» 는 호 종류를 가리지 않지만, chat 은 참가자가 모이기를 기다리는 세션이라 **0명**일 때만 해제한다(편차 — CIMS
   MCPTT chat 과 같은 규칙: on-demand 호만 1명 이하 해제, `GroupCallService::OnCallTerminated`). 3)(개시자 이탈 해제 — 로컬 정책)은 두지 않고, 4)(최소
   제휴 인원)는 확인 통화와 함께 1차 범위 밖.
+- Warning 121 문구 — 표 4.4.2-2 «user is not authorised to join the group call» vs §9.2.1.4.2 14)b) 본문 «user is not allowed to join the group call»(→ 표).
+- 정원 `<on-network-max-participant-count>` 는 TS 24.481 의 MCPTT 그룹 문서 요소다(MCVideo 접두 요소가 없다) — TS 24.281 이 그 요소를 그대로 가리키므로 같은
+  그룹 문서의 값(`max_members`)을 쓴다. CSC 는 0(상한 없음)을 문서에 관례값 10 으로 내지만 CSP 는 DB 값 0 을 상한 없음으로 집행한다(더 너그러운 쪽).
+  §6.3.5.5 «invite only <max> members» 는 개시자를 참가자로 세어 정원 − 1 명을 초대한다(NOTE 2 — 정원 = 세션의 최대 참가자 수).
+- N2(`<MaxAffiliationsN2>`) — 제휴 요청(§8.2.2.2.3 c))·설정 그룹 암묵적 제휴(§8.2.2.2.15 9)c))·chat 개시 암묵적 제휴(§9.2.2.3.1.1 7) — 486 102)의 상한을
+  걸지 않는다. MCPTT 와 같은 편차(mcptt_standard_conformance.md C1·C9 — 관제석은 그룹이 많아 서비스 제공자 정책으로 한도를 두지 않는다).
 - 세션 갱신 주체 — 제어 기능의 멤버 INVITE 는 refresher 를 «shall be omitted»(TS 24.281 §6.3.3.1.2 6)), 단말의 그 200 OK 는 `refresher=uas`
   (§6.2.3.1.1 5)), 제어 기능의 200 OK(단말 개시·합류)는 `uac`(§6.3.3.2.3.2 2)) — 어느 쪽이든 단말이 갱신한다. MCPTT(TS 24.379 §6.3.3.1.2)는 «생략 권고,
   싣는다면 uac» 라 CIMS 가 `uac` 를 싣는다(mcptt_standard_conformance.md C4a) — MCVideo 는 규격대로 생략하고, psip 가 로컬 정책으로 싣는 값을 지운다

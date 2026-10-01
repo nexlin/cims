@@ -430,6 +430,20 @@ class CmsDocumentTest(unittest.TestCase):
         streams_c = ET.fromstring(mv.get_user_profile_xml(C)[0]).find("up:OnNetwork/up:MaxSimultaneousVideoStreams", NS)
         self.assertEqual(streams_c.text, "4")
 
+    def test_user_profile_implicit_affiliations(self):
+        """멤버 implicit_affiliation 이 켜진 MCVideo 그룹만 <ImplicitAffiliations> 에 — CSP 가 등록 때 MCVideo 제휴를 기록한다
+        (TS 24.281 §8.2.2.2.15). 표시가 없으면 요소를 싣지 않는다(골든 그대로)."""
+        self.assertIsNone(ET.fromstring(mv.get_user_profile_xml(A)[0]).find("up:OnNetwork/up:ImplicitAffiliations", NS))
+        for g in m.GROUPS.values():
+            for mb in g.get("members", []):
+                if m._uri_eq(mb.get("uri"), A):
+                    mb["implicit_affiliation"] = True
+        on = ET.fromstring(mv.get_user_profile_xml(A)[0]).find("up:OnNetwork", NS)
+        ids = [e.text for e in on.findall("up:ImplicitAffiliations/up:entry/up:uri-entry", NS)]
+        self.assertEqual(ids, ["tel:g101"])               # 음성 전용 g102 는 MCVideo 그룹이 아니다
+        tags = [c.tag.split("}")[1] for c in on]
+        self.assertEqual(tags.index("ImplicitAffiliations"), tags.index("MaxAffiliationsN2") + 1)
+
     def test_no_profile_row_means_no_document(self):
         del mv.MCVIDEO_PROFILES[B[4:]]
         self.assertEqual(mv.get_user_profile_xml(B), (None, None))

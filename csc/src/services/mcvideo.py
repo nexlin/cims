@@ -515,7 +515,10 @@ def get_user_profile_xml(user_uri: str):
     구조 = §9.3.2.1 의 필수 요소(Name 선택·Status·Common·OnNetwork·ruleset) — MCPTT user profile 생성기(services.mcptt
     .get_user_profile_xml)와 같은 원천·같은 규칙:
       - 그룹 = 이 사용자가 멤버인 **MCVideo 그룹**(GROUPS 의 mcvideo 속성) → <OnNetwork><MCVideoGroupInfo> 하나에 그룹 하나
-        (MCVideoGroupInfoType = MCVideo-Group-ID 시퀀스). 암시적 제휴는 두지 않는다 — chat 합류가 곧 affiliation(§7 D5).
+        (MCVideoGroupInfoType = MCVideo-Group-ID 시퀀스). 암시적 제휴 <ImplicitAffiliations> = 그중 관리자가 이 멤버에게
+        암시적 제휴로 정한 그룹(멤버 implicit_affiliation — MCPTT 문서와 같은 표시, 그룹 = 서비스 집합) — 참여 기능이 서비스
+        인가 때 이 목록에 MCVideo 제휴를 기록한다(TS 24.281 §8.2.2.2.15, CSP _ApplyImplicitMcVideoAffiliations). chat 은
+        합류가 곧 affiliation 이라(§7 D5) 이 목록이 없어도 쓸 수 있다.
       - 상한 = mcvideo_user_profile(MaxSimultaneousVideoStreams·N6) + MCPTT service config N2(공유) + UserProfile.*(Priority·조직명·
         참여자 유형·언어 — MCPTT 문서와 같은 설정).
       - 인가(ruleset) = 1차 범위(그룹 호) 밖의 개시 인가는 false — 1:1·긴급·임박·경보·원격 회수·ambient viewing·ad hoc
@@ -573,6 +576,11 @@ def get_user_profile_xml(user_uri: str):
     on = ''.join(f'<MCVideoGroupInfo>{et("MCVideo-Group-ID", g_uri, g.get("display_name"))}</MCVideoGroupInfo>'
                  for g_uri, g in my_groups)
     on += f'<MaxAffiliationsN2>{n2}</MaxAffiliationsN2>'
+    implicit = ''.join(et('entry', g_uri, g.get('display_name')) for g_uri, g in my_groups
+                       if any(_m._uri_eq(mb.get('uri'), user_uri) and mb.get('implicit_affiliation')
+                              for mb in g.get('members', [])))
+    if implicit:
+        on += f'<ImplicitAffiliations>{implicit}</ImplicitAffiliations>'
     on += f'<MaxSimultaneousVideoStreams>{streams}</MaxSimultaneousVideoStreams>'
     on += f'<PrivateEmergencyAlert>{pr_entry}</PrivateEmergencyAlert>'
     on += '<RemoteGroupSelectionURIList/>'

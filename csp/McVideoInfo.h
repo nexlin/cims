@@ -278,6 +278,8 @@ static const char *const kMcVideoWarn116 = "user is not part of the MCVideo grou
 static const char *const kMcVideoWarn117 = "the group identity indicated in the request is a prearranged group";
 static const char *const kMcVideoWarn118 = "the group identity indicated in the request is a chat group";
 static const char *const kMcVideoWarn120 = "user is not affiliated to this group";
+// 121 — 표 4.4.2-2 문구. §9.2.1.4.2 14)b) 본문은 «not allowed to join» 이라 어긋난다(표를 따른다 — mcvideo.md §9 편차)
+static const char *const kMcVideoWarn121 = "user is not authorised to join the group call";
 static const char *const kMcVideoWarn122 = "too many participants";
 static const char *const kMcVideoWarn137 = "the indicated group call does not exist";
 

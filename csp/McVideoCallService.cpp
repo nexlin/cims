@@ -565,11 +565,15 @@ void CMcVideoCallService::OnIncomingInvite( const char *pszCallId, const char *p
     } else {
         strGroupId = McpttBareId( clsMvi.strRequestUri );
     }
+    auto itSes = strGroupId.empty() ? m_mapSession.end() : m_mapSession.find( strGroupId );
     // 시도 판정 — 진행 중 세션이 없는 그룹으로의 INVITE 가 개시 시도 1건이다(sip_statistics.md §2.1·§2.3). 진행 중
     //   세션에 붙는 합류·재합류(gr)는 시도가 아니다(참여율이 본다). 세션을 열기 전에 거절하면 그 자리에서 장부에
     //   남기고, 세션을 연 뒤의 결말은 _CloseAttempt 가 남긴다.
-    const bool bAttempt = !bRejoin && !strGroupId.empty() && m_mapSession.find( strGroupId ) == m_mapSession.end();
-    std::string strGroupKey;
+    const bool bAttempt = !bRejoin && !strGroupId.empty() && itSes == m_mapSession.end();
+    CspPttGroup clsGroup;
+    const bool bGroup = !strGroupId.empty() && gclsGroupMap.Select( strGroupId.c_str(), clsGroup );
+    const bool bMcvGroup = bGroup && clsGroup._mcvideo;
+    const std::string strGroupKey = bGroup && clsGroup._dbId > 0 ? std::to_string( clsGroup._dbId ) : "";
     auto reject = [&]( int iStatus, int iWarnCode, const char *pszWarnText, const char *pszReason,
                        const char *pszCause ) {
         if ( bAttempt && gclsCallDir.IsEnabled() )
@@ -577,65 +581,26 @@ void CMcVideoCallService::OnIncomingInvite( const char *pszCallId, const char *p
                                     "mcvideo" );
         _Reject( pszCallId, iStatus, iWarnCode, pszWarnText );
     };
+    // 호 방식 — 재합류는 그 세션의 것, 아니면 그룹 속성(mcvideo-on-network-invite-members). 참여 기능은 mcvideo-info
+    //   session-type 으로 절차를 고른다(§9.2.1.3.1.1 prearranged · §9.2.2.3.1.1 chat) — 없으면 그룹 속성.
+    const bool bPrearranged =
+        itSes != m_mapSession.end() ? itSes->second.bPrearranged : bMcvGroup && clsGroup._mcvideoAttrs.bInviteMembers;
+    const bool bPrearrangedAsked =
+        !clsMvi.strSessionType.empty() ? clsMvi.strSessionType == "prearranged" : bPrearranged;
 
-    // 1) 자원 — CMP 가 MCVideo 멤버 풀을 광고하지 않으면 받지 않는다(§9.2.2.4.1.1 1) — 500)
+    // ── 참여 MCVideo 기능 (§9.2.1.3.1.1 · §9.2.2.3.1.1 — 재합류 §9.2.1.3.5.1 도 같은 단계). CSP 가 참여·제어 기능을
+    //    겸하므로 참여 기능의 검사(자원 → 이용 자격 → 미디어 → N6)를 먼저 하고 제어 기능의 검사로 넘어간다.
+    // 1) 자원 — CMP 가 MCVideo 멤버 풀을 광고하지 않으면 받지 않는다 — 500
     if ( !gclsCmpClient.SupportsMcVideo() ) {
         CLog::Print( LOG_INFO, "MCVIDEO: INVITE from(%s) — CMP resource.mcvideo 없음 → 500", strFrom.c_str() );
         return reject( SIP_INTERNAL_SERVER_ERROR, 0, NULL, "error", "media_unavailable" );
     }
-    // 2) Accept-Contact 의 g.3gpp.mcvideo·MCVideo icsi-ref, Contact 에 isfocus 가 없어야 한다(§9.2.2.4.1.1 2))
-    const std::string strAccept = HeaderValues( pclsMessage, "Accept-Contact" );
-    std::string strContactParams;
-    if ( !pclsMessage->m_clsContactList.empty() )
-        for ( const auto &p : pclsMessage->m_clsContactList.front().m_clsParamList )
-            strContactParams += ";" + p.m_strName;
-    if ( !McVideoFeatureIn( strAccept ) || !McVideoIcsiIn( strAccept ) ||
-         strContactParams.find( ";isfocus" ) != std::string::npos ) {
-        CLog::Print( LOG_INFO, "MCVIDEO: INVITE from(%s) — Accept-Contact/isfocus 조건 불일치 → 403", strFrom.c_str() );
-        return reject( SIP_FORBIDDEN, 0, NULL, "denied", "invalid_request" );
-    }
-    if ( bRejoin && strGroupId.empty() ) {
-        CLog::Print( LOG_INFO, "MCVIDEO: rejoin gr=%s from(%s) — 진행 중 세션 없음 → 404 137", pszGr, strFrom.c_str() );
-        return _Reject( pszCallId, SIP_NOT_FOUND, 137, kMcVideoWarn137 );
-    }
-    CspPttGroup clsGroup;
-    if ( strGroupId.empty() || !gclsGroupMap.Select( strGroupId.c_str(), clsGroup ) || !clsGroup._mcvideo ) {
-        CLog::Print( LOG_INFO, "MCVIDEO: INVITE from(%s) group(%s) — MCVideo 그룹 문서 없음 → 404 113", strFrom.c_str(),
-                     strGroupId.c_str() );
-        return reject( SIP_NOT_FOUND, 113, kMcVideoWarn113, "denied", "group_not_found" );
-    }
-    strGroupKey = clsGroup._dbId > 0 ? std::to_string( clsGroup._dbId ) : "";
-    int iPrio = 0;
-    if ( !IsMember( clsGroup, strFrom, &iPrio ) )
-        return reject( SIP_FORBIDDEN, 116, kMcVideoWarn116, "denied", "not_member" );
-    const bool bPrearranged = clsGroup._mcvideoAttrs.bInviteMembers;
-    // §6.3.5.2 5)c)·d) — session-type 이 그룹 종류와 다르면 404 117/118
-    if ( !clsMvi.strSessionType.empty() && clsMvi.strSessionType != clsGroup._mcvideoAttrs.SessionType() ) {
-        return bPrearranged ? reject( SIP_NOT_FOUND, 117, kMcVideoWarn117, "denied", "session_type_mismatch" )
-                            : reject( SIP_NOT_FOUND, 118, kMcVideoWarn118, "denied", "session_type_mismatch" );
-    }
-    // 이용 자격 (MCVideo user profile) · N6
+    // 3) 이용 자격 (MCVideo user profile) — 403 108(chat)·109(prearranged)
     CspMcVideoProfile clsProf;
     if ( gclsDbManager.SelectMcVideoProfile( strFrom, clsProf ) != 1 )
-        return bPrearranged ? reject( SIP_FORBIDDEN, 109, kMcVideoWarn109, "denied", "not_entitled" )
-                            : reject( SIP_FORBIDDEN, 108, kMcVideoWarn108, "denied", "not_entitled" );
-    auto itSes = m_mapSession.find( strGroupId );
-    bool bInThis = false;
-    if ( itSes != m_mapSession.end() )
-        for ( const auto &kv : itSes->second.mapLegs )
-            if ( kv.second.strMember == strFrom ) bInThis = true;
-    if ( !bInThis && _ActiveCallsOf( strFrom ) >= clsProf.m_iMaxCallsN6 )
-        return reject( SIP_BUSY_HERE, 103, kMcVideoWarn103, "denied", "max_calls_exceeded" );
-    // 제휴 — prearranged 는 제휴된 사용자만 개시·합류한다(§9.2.1.4.2 13)a)·14)a) — 일반 호에 암묵적 affiliation 없음,
-    //   403 120). chat 은 멤버면 암묵적 affiliation 적격(§9.2.2.4.1.1 5) · §8.2.2.3.6) — 제휴는 SDP 검사를 지난 뒤에
-    //   한다(아래, 12)).
-    const bool bAffiliated = gclsDbManager.IsAffiliated( strGroupId, strFrom, EMcService::McVideo );
-    if ( !bAffiliated && bPrearranged ) {
-        CLog::Print( LOG_INFO, "MCVIDEO: INVITE from(%s) group(%s) prearranged — 제휴 안 됨 → 403 120", strFrom.c_str(),
-                     strGroupId.c_str() );
-        return reject( SIP_FORBIDDEN, 120, kMcVideoWarn120, "denied", "not_affiliated" );
-    }
-    // SDP — 제어 채널(m=application udp MCVideo)과 음성 AMR-WB 가 있어야 한다(§9.2.2.4.1.1 9) — 488)
+        return bPrearrangedAsked ? reject( SIP_FORBIDDEN, 109, kMcVideoWarn109, "denied", "not_entitled" )
+                                 : reject( SIP_FORBIDDEN, 108, kMcVideoWarn108, "denied", "not_entitled" );
+    // 4) 미디어 — 제어 채널(m=application udp MCVideo)과 음성 AMR-WB 가 있어야 한다 — 488
     int iCtl = 0;
     CMcVideoFmtp clsOffer;
     const bool bCtl = McvControlOf( pclsRtp, iCtl, clsOffer );
@@ -669,6 +634,73 @@ void CMcVideoCallService::OnIncomingInvite( const char *pszCallId, const char *p
         // 음성이 SRTP 인데 영상이 평문이면 psip 가 영상을 거절한다(평문 영상을 SRTP leg 에 섞지 않는다) — 같은 판단을
         //   여기서 둔다
         if ( clsSdes.clsAudio.bSrtp && !clsSdes.clsVideo.bSrtp ) bVideoOk = false;
+    }
+    // 5) N6 — 동시 MCVideo 호 상한 (이 세션에 이미 있는 멤버의 재합류는 새 호가 아니다) — 486 103
+    bool bInThis = false;
+    if ( itSes != m_mapSession.end() )
+        for ( const auto &kv : itSes->second.mapLegs )
+            if ( kv.second.strMember == strFrom ) bInThis = true;
+    if ( !bInThis && _ActiveCallsOf( strFrom ) >= clsProf.m_iMaxCallsN6 )
+        return reject( SIP_BUSY_HERE, 103, kMcVideoWarn103, "denied", "max_calls_exceeded" );
+
+    // ── 제어 MCVideo 기능 (prearranged §9.2.1.4.2 · chat §9.2.2.4.1.1 · 재합류 §9.2.1.4.5.1)
+    // 재합류 2) — gr 이 가리키는 세션이 없으면 404
+    if ( bRejoin && strGroupId.empty() ) {
+        CLog::Print( LOG_INFO, "MCVIDEO: rejoin gr=%s from(%s) — 진행 중 세션 없음 → 404 137", pszGr, strFrom.c_str() );
+        return _Reject( pszCallId, SIP_NOT_FOUND, 137, kMcVideoWarn137 );
+    }
+    // Accept-Contact 의 g.3gpp.mcvideo·MCVideo icsi-ref, Contact 에 isfocus 가 없어야 한다 — 403
+    const std::string strAccept = HeaderValues( pclsMessage, "Accept-Contact" );
+    std::string strContactParams;
+    if ( !pclsMessage->m_clsContactList.empty() )
+        for ( const auto &p : pclsMessage->m_clsContactList.front().m_clsParamList )
+            strContactParams += ";" + p.m_strName;
+    if ( !McVideoFeatureIn( strAccept ) || !McVideoIcsiIn( strAccept ) ||
+         strContactParams.find( ";isfocus" ) != std::string::npos ) {
+        CLog::Print( LOG_INFO, "MCVIDEO: INVITE from(%s) — Accept-Contact/isfocus 조건 불일치 → 403", strFrom.c_str() );
+        return reject( SIP_FORBIDDEN, 0, NULL, "denied", "invalid_request" );
+    }
+    int iPrio = 0;
+    if ( bRejoin ) {
+        // 재합류 6) — 합류 규칙(§6.3.5.3: 목록 entry · join-handling · MCVideo 서비스)을 못 지키면 403 121. 그룹 문서
+        //   초기 처리(§6.3.5.2 — 113·116)는 재합류 절차에 없다
+        if ( !bMcvGroup || !IsMember( clsGroup, strFrom, &iPrio ) ) {
+            CLog::Print( LOG_INFO, "MCVIDEO: rejoin group(%s) from(%s) — 합류 규칙 불충족 → 403 121",
+                         strGroupId.c_str(), strFrom.c_str() );
+            return _Reject( pszCallId, SIP_FORBIDDEN, 121, kMcVideoWarn121 );
+        }
+    } else {
+        // 그룹 문서 초기 처리 (§6.3.5.2) — 없음 404 113 · 비멤버 403 116 · session-type 불일치 404 117/118
+        if ( !bMcvGroup ) {
+            CLog::Print( LOG_INFO, "MCVIDEO: INVITE from(%s) group(%s) — MCVideo 그룹 문서 없음 → 404 113",
+                         strFrom.c_str(), strGroupId.c_str() );
+            return reject( SIP_NOT_FOUND, 113, kMcVideoWarn113, "denied", "group_not_found" );
+        }
+        if ( !IsMember( clsGroup, strFrom, &iPrio ) )
+            return reject( SIP_FORBIDDEN, 116, kMcVideoWarn116, "denied", "not_member" );
+        if ( !clsMvi.strSessionType.empty() && clsMvi.strSessionType != clsGroup._mcvideoAttrs.SessionType() ) {
+            return bPrearranged ? reject( SIP_NOT_FOUND, 117, kMcVideoWarn117, "denied", "session_type_mismatch" )
+                                : reject( SIP_NOT_FOUND, 118, kMcVideoWarn118, "denied", "session_type_mismatch" );
+        }
+    }
+    // 제휴 — prearranged(개시·합류·재합류)는 제휴된 사용자만(§9.2.1.4.2 13)a)·14)a) · §9.2.1.4.5.1 8) — 일반 호에
+    // 암묵적
+    //   affiliation 없음, 403 120). chat 은 멤버면 암묵적 affiliation 적격(§9.2.2.4.1.1 5) · §8.2.2.3.6) — 제휴는 정원
+    //   검사를 지난 뒤에 한다(아래, 12)).
+    const bool bAffiliated = gclsDbManager.IsAffiliated( strGroupId, strFrom, EMcService::McVideo );
+    if ( !bAffiliated && bPrearranged ) {
+        CLog::Print( LOG_INFO, "MCVIDEO: INVITE from(%s) group(%s) prearranged — 제휴 안 됨 → 403 120", strFrom.c_str(),
+                     strGroupId.c_str() );
+        return reject( SIP_FORBIDDEN, 120, kMcVideoWarn120, "denied", "not_affiliated" );
+    }
+    // 정원 — 진행 중 세션이 그룹 문서 <on-network-max-participant-count>(TS 24.481 — 그룹 max_members, 0 = 상한 없음)에
+    //   찼으면 486 122(§9.2.1.4.2 14)d) · §9.2.2.4.1.1 11) · §9.2.1.4.5.1 10)). 우선순위로 기존 참가자를 내보내는 선택
+    //   (로컬 정책)은 두지 않는다. 이미 이 세션에 있는 멤버의 재합류는 자리를 새로 차지하지 않는다
+    if ( itSes != m_mapSession.end() && !bInThis && clsGroup._maxMembers > 0 &&
+         _EstablishedCount( itSes->second ) >= clsGroup._maxMembers ) {
+        CLog::Print( LOG_INFO, "MCVIDEO: INVITE from(%s) group(%s) — 정원 %d 참 → 486 122", strFrom.c_str(),
+                     strGroupId.c_str(), clsGroup._maxMembers );
+        return _Reject( pszCallId, SIP_BUSY_HERE, 122, kMcVideoWarn122 );
     }
 
     // chat 합류의 암묵적 affiliation (§9.2.2.4.1.1 12) · §8.2.2.3.7) — 실패면 403 120
@@ -739,10 +771,14 @@ void CMcVideoCallService::OnIncomingInvite( const char *pszCallId, const char *p
     }
     if ( bNew && bPrearranged ) {
         // 새 prearranged 세션 — 제휴된 MCVideo 등록 멤버를 초대하고, 개시자 200 OK 는 첫 멤버가 붙은 뒤(§9.2.1.4.2).
+        //   정원(<on-network-max-participant-count>)이 있으면 그 수까지만 — 개시자도 참가자라 초대는 정원 − 1 명
+        //   (§6.3.5.5 — 필수 멤버 우선은 MCVideo 확인 통화와 함께 1차 범위 밖)
         std::vector<std::string> vecAff;
         gclsDbManager.SelectAffiliatedMembers( strGroupId, vecAff, EMcService::McVideo );
+        const int iInviteCap = clsGroup._maxMembers > 0 ? std::max( 0, clsGroup._maxMembers - 1 ) : -1;
         int iInvited = 0;
         for ( const auto &strMember : vecAff ) {
+            if ( iInviteCap >= 0 && iInvited >= iInviteCap ) break;
             if ( strMember == strFrom || !IsMember( clsGroup, strMember ) ) continue;
             if ( _InviteMember( clsSes, clsGroup, strMember ) ) ++iInvited;
         }
