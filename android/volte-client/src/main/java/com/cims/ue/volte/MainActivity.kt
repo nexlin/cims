@@ -97,6 +97,8 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableState
@@ -142,6 +144,7 @@ import com.cims.ue.core.message.MessageStore
 import com.cims.ue.core.message.MsgDirection
 import com.cims.ue.core.message.SendState
 import com.cims.ue.core.sip.CallState
+import com.cims.ue.core.sip.toE164
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -619,14 +622,14 @@ private fun HomeScreen(
             // top 여백 = 화면 최상단 전역 상태배지(오버레이)와 겹치지 않게 확보
             Box(Modifier.padding(pad).padding(top = 32.dp).fillMaxSize()) {
                 when (tab) {
-                    Tab.CONTACTS -> ContactsScreen(
+                    Tab.CONTACTS -> CompositionLocalProvider(LocalMyNumber provides config.msisdn) { ContactsScreen(
                         personal = contacts,
                         company = companyDir,
                         favorites = favorites,
                         onCallVoice = { dial(it, false) },
                         onCallVideo = { dial(it, true) },
                         onSendMessage = { number, text -> service?.sendMessage(number, text) },
-                    )
+                    ) }
                     Tab.RECENTS -> RecentsScreen(
                         store = callLog,
                         contacts = contacts,
@@ -958,13 +961,25 @@ private fun UnderlineTab(label: String, selected: Boolean, onClick: () -> Unit) 
     }
 }
 
-/** 공용 연락처 행 — 별표 토글 + 탭(상세에서 발신). [trailing] 으로 추가 버튼(개인=수정). */
+/** 내 번호(설정 MSISDN) — 연락처 탭이 내려 준다. 연락처 행이 자기 자신을 «나» 로 표시하는 근거. */
+private val LocalMyNumber = staticCompositionLocalOf { "" }
+
+/** [number] 가 내 번호인가 — 로컬 표기(0 시작)와 E.164 를 같은 번호로 본다(toE164). */
+private fun isMyNumber(number: String, myNumber: String): Boolean {
+    if (number.isBlank() || myNumber.isBlank()) return false
+    val cc = homeCountryCode.orEmpty()
+    return toE164(extractNumber(number), cc) == toE164(extractNumber(myNumber), cc)
+}
+
+/** 공용 연락처 행 — 별표 토글 + 탭(상세에서 발신). [trailing] 으로 추가 버튼(개인=수정). [number] 가 내 번호면 «나» 표시. */
 @Composable
 private fun ContactListRow(
     name: String, line2: String, depth: Int, isFav: Boolean,
     onTap: () -> Unit, onToggleFav: () -> Unit,
     trailing: (@Composable () -> Unit)? = null,
+    number: String = "",
 ) {
+    val isMe = isMyNumber(number, LocalMyNumber.current)
     Row(
         modifier = Modifier.fillMaxWidth().clickable { onTap() }
             .padding(start = (depth * 16).dp, top = 8.dp, bottom = 8.dp),
@@ -976,7 +991,17 @@ private fun ContactListRow(
         ) { Text(name.take(1).ifBlank { "?" }, color = MaterialTheme.colorScheme.onSurfaceVariant) }
         Spacer(Modifier.size(12.dp))
         Column(Modifier.weight(1f)) {
-            Text(name.ifBlank { line2 }, style = MaterialTheme.typography.bodyLarge)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(name.ifBlank { line2 }, style = MaterialTheme.typography.bodyLarge)
+                if (isMe) {
+                    Spacer(Modifier.width(6.dp))
+                    Text("나", fontSize = 11.sp, fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onPrimary,
+                        modifier = Modifier.clip(RoundedCornerShape(6.dp))
+                            .background(MaterialTheme.colorScheme.primary)
+                            .padding(horizontal = 6.dp, vertical = 1.dp))
+                }
+            }
             Text(line2, style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
@@ -1007,7 +1032,7 @@ private fun FavoritesScreen(
             }
         } else LazyColumn(Modifier.fillMaxSize()) {
             items(list, key = { it.number }) { f ->
-                ContactListRow(f.name, fmtNumber(f.number), depth = 0, isFav = true,
+                ContactListRow(number = f.number, name = f.name, line2 = fmtNumber(f.number), depth = 0, isFav = true,
                     onTap = { onOpen(DetailTarget(f.name, f.number, null)) },
                     onToggleFav = { favorites.toggle(f.name, f.number); onFavChanged() })
                 HorizontalDivider()
@@ -1086,7 +1111,7 @@ private fun CompanyContacts(
             } else LazyColumn(Modifier.fillMaxSize()) {
                 items(hits, key = { "hit:${it.number}" }) { m ->
                     val on = orgName[m.orgCode] ?: m.orgCode
-                    ContactListRow(m.name, "${fmtNumber(m.number)} · $on", depth = 0, isFav = m.number in favSet,
+                    ContactListRow(number = m.number, name = m.name, line2 = "${fmtNumber(m.number)} · $on", depth = 0, isFav = m.number in favSet,
                         onTap = { onOpen(DetailTarget(m.name, m.number, on)) },
                         onToggleFav = { favorites.toggle(m.name, m.number); onFavChanged() })
                     HorizontalDivider()
@@ -1183,7 +1208,7 @@ private fun CompanyContacts(
                 sections.forEach { (label, mems) ->
                     stickyHeader(key = "hdr:$label") { DirSectionHeader(label, mems.size) }
                     items(mems, key = { "m:${it.orgCode}:${it.number}" }) { m ->
-                        ContactListRow(m.name, fmtNumber(m.number), depth = 0, isFav = m.number in favSet,
+                        ContactListRow(number = m.number, name = m.name, line2 = fmtNumber(m.number), depth = 0, isFav = m.number in favSet,
                             onTap = { onOpen(DetailTarget(m.name, m.number, orgName[m.orgCode])) },
                             onToggleFav = { favorites.toggle(m.name, m.number); onFavChanged() })
                         HorizontalDivider()
@@ -1330,7 +1355,7 @@ private fun PersonalContacts(
                     },
                 ) {
                     Box(Modifier.background(MaterialTheme.colorScheme.background)) {
-                        ContactListRow(c.name, fmtNumber(c.number), depth = 0, isFav = c.number in favSet,
+                        ContactListRow(number = c.number, name = c.name, line2 = fmtNumber(c.number), depth = 0, isFav = c.number in favSet,
                             onTap = { onOpen(DetailTarget(c.name, c.number, null)) },
                             onToggleFav = { favorites.toggle(c.name, c.number); onFavChanged() },
                             trailing = { TextButton(onClick = { editing = c }) { Text("수정") } })
