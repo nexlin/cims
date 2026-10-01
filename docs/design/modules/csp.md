@@ -894,7 +894,7 @@ CSP/PSP/ISP 가 4421 을 공유할 때 destination IP 로 인스턴스 구분). 
 |--------|------|
 | `USER_CHANGED` | CspUserMap 캐시 즉시 갱신/삭제 + 그 사용자의 cms 구독에 xcap-diff NOTIFY |
 | `SERVICE_CONFIG_CHANGED` | cms 구독자 **전원**에게 xcap-diff NOTIFY (service-config 은 시스템 전역 문서 — CSP 는 소비하지 않고 중계만) |
-| `GROUP_CHANGED` | 그룹 설정 reload + CMP 동기화 + GMS NOTIFY 발송 |
+| `GROUP_CHANGED` | 그룹 설정 reload → 재적재 전·후 멤버 합집합의 gms 구독에 xcap-diff NOTIFY(`ReloadGroupMap` — 새 그룹·추가·제외 멤버 포함) → CMP 동기화 |
 | `STATS_REQUEST` | CSP 통계 응답 (등록자 수, 활성 호 등) |
 | `CSC_RESTART` | DB 전체 재동기화 + 단말용 XCAP root 재취득 (`CscEndpointCache::Refresh`) |
 

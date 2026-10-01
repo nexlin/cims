@@ -634,7 +634,8 @@ REGISTER/SUBSCRIBE/NOTIFY 의 헤더·본문을 상용 IMS 캡처 기준으로 �
 - 그룹문서 XML(`urn:oma:xml:poc:list-service`+`urn:3gpp:ns:mcpttGroupInfo:1.0`), ETag/If-None-Match 304,
   수평/수직 권한(403).
 - **S3 변경통지**: 그룹 CRUD 시 `notify_csp("GROUP_CHANGED")`(`handlers/admin.py`) → CSP `CscInterface`
-  → `SendSipNotify`(group_change) → GMS 구독자에 **xcap-diff NOTIFY**.
+  → `OnGroupConfigChanged` → `ReloadGroupMap`(그룹 맵 재적재 **뒤**, 재적재 전·후 멤버 합집합) → `SendGroupDocNotify`
+  → GMS 구독자에 **xcap-diff NOTIFY**(RFC 5875). 60초 주기 재적재도 같은 전후 비교로 놓친 변경을 통지한다.
 
 ### CMS (TS 24.484)
 - user-profile XML(ns = 규격 §8.3.2.4 정본 `urn:3gpp:mcptt:user-profile:1.0`), self-access 권한(신원 표기 tel:/sip:/sip:@도메인 관용), ETag.
@@ -667,7 +668,7 @@ REGISTER/SUBSCRIBE/NOTIFY 의 헤더·본문을 상용 IMS 캡처 기준으로 �
   전역 변경은 CSC 가 `SERVICE_CONFIG_CHANGED` 를 발행하고 CSP 가 cms 구독자 **전원**에게
   xcap-diff NOTIFY 를 push 한다(`GetSubscriptionsByEvent("cms")` — 전역 문서라 사용자/자원 키가
   없는 유일한 전체 조회). 구독이 없는 단말은 목록 갱신·재로그인 계기의 재조회로 반영된다.
-- **S3 변경통지**: 가입자(번호) CRUD 시 `notify_csp("USER_CHANGED")` → CSP `SendSipNotify`(user_change)
+- **S3 변경통지**: 가입자(번호) CRUD 시 `notify_csp("USER_CHANGED")` → CSP `SendUserDocNotify`
   → CMS 구독자에 xcap-diff NOTIFY(user-profile/service-config sel).
 - **단말 소비**: PTT 단말은 `sip:cms_psi@<domain>` 으로 cms 축을 구독하고 NOTIFY 의 sel 대로 두 문서를
   `If-None-Match` 재조회한 뒤, 사용자별 인가(`user-profile` 의 `ruleset`)로 게이트한다(발신·개시만, 착신은 서버 판정).

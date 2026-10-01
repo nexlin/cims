@@ -208,19 +208,17 @@ void CCscInterface::ProcessMessage( const std::string &strMsg, const struct sock
     }
 
     if ( strEvent == "GROUP_CHANGED" ) {
-        extern void SendSipNotify( const std::string &uri, const std::string &etag, const std::string &action );
-        SendSipNotify( strUri, strEtag, strAction );
+        // Extract group ID from URI (strip "tel:" prefix if present)
+        std::string strGroupId = strUri;
+        if ( strGroupId.substr( 0, 4 ) == "tel:" ) strGroupId = strGroupId.substr( 4 );
         // Log config_change event to active PTT session history
-        {
-            // Extract group ID from URI (strip "tel:" prefix if present)
-            std::string strGroupId = strUri;
-            if ( strGroupId.substr( 0, 4 ) == "tel:" ) strGroupId = strGroupId.substr( 4 );
-            if ( gclsCallDir.IsEnabled() ) {
-                gclsCallDir.PttLogEvent( strGroupId, "config_change", "{\"action\":\"" + strAction + "\"}" );
-            }
+        if ( gclsCallDir.IsEnabled() ) {
+            gclsCallDir.PttLogEvent( strGroupId, "config_change", "{\"action\":\"" + strAction + "\"}" );
         }
-        // Reload group config and re-sync CMP sessions / re-invite members
-        gclsGroupCallService.OnGroupConfigChanged();
+        // Reload group config, notify the group document change (xcap-diff, RFC 5875) to the members before and
+        //   after the change, then re-sync CMP sessions / re-invite members. 통지는 재적재 **뒤** — 새 그룹은
+        //   재적재 전 맵에 없어 멤버를 모른다(TS 24.481 그룹 생성이 멤버 단말에 닿지 않던 원인).
+        gclsGroupCallService.OnGroupConfigChanged( strGroupId, strEtag );
     } else if ( strEvent == "STATS_REQUEST" ) {
         // stats 요청 → 현재 CSP 상태를 JSON으로 응답
         USER_ID_LIST regList;
@@ -389,8 +387,8 @@ void CCscInterface::ProcessMessage( const std::string &strMsg, const struct sock
             }
         }
     } else if ( strEvent == "USER_CHANGED" ) {
-        extern void SendSipNotify( const std::string &uri, const std::string &etag, const std::string &action );
-        SendSipNotify( strUri, strEtag, strAction );
+        extern void SendUserDocNotify( const std::string &strUri, const std::string &strEtag );
+        SendUserDocNotify( strUri, strEtag );
 
         // 가입자 캐시 즉시 갱신.
         // 가입 테이블(voip·volte·ptt _subscriptions).id 는 E.164 `+` prefix 포함.

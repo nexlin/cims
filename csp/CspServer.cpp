@@ -88,7 +88,9 @@ CCallDir gclsCallDir;
 #include "UserMap.h"
 
 // Forward Declaration for Notify Helpers
-void SendSipNotify( const std::string &uri, const std::string &etag, const std::string &action );
+void SendGroupDocNotify( const std::string &strGroupId, const std::set<std::string> &setUsers,
+                         const std::string &strEtag );
+void SendUserDocNotify( const std::string &strUri, const std::string &strEtag );
 void SendInitialNotify( const SubscriptionInfo &sub );
 void SendRegEventNotify( const std::string &strUserId, const char *pszEvent, const CUserInfo *pclsInfo );
 
@@ -1353,45 +1355,39 @@ void SendPttDialogEventNotify( const std::string &strWatchedAor, const std::stri
 }
 
 /**
- * @brief Send NOTIFY on group_change or user_change event
- *   - group_change: uri = group ID, notify all GMS subscribers that are group members
- *   - user_change:  uri = user ID, notify that user's CMS subscribers
+ * @brief 그룹 문서(GMS, TS 24.481) 변경 xcap-diff NOTIFY(RFC 5875) — setUsers 각자의 gms 구독자에게.
+ *   받는 사람은 호출자가 정한다(재적재 전 멤버 ∪ 후 멤버 — CGroupCallService::ReloadGroupMap). 그룹 맵을 여기서 다시
+ *   찾지 않는다: 새 그룹은 재적재 전 맵에 없고, 삭제된 그룹·빠진 멤버는 재적재 후 맵에 없다.
  */
-void SendSipNotify( const std::string &uri, const std::string &etag, const std::string &action ) {
-    CLog::Print( LOG_INFO, "SendSipNotify: Uri=%s ETag=%s Action=%s", uri.c_str(), etag.c_str(), action.c_str() );
-
-    // Strip uri prefix
-    std::string strId = uri;
-    if ( strId.rfind( "tel:", 0 ) == 0 )
-        strId = strId.substr( 4 );
-    else if ( strId.rfind( "sip:", 0 ) == 0 )
-        strId = strId.substr( 4 );
-
-    // Determine if group or user change
-    CspPttGroup clsGroup;
-    bool bIsGroup = gclsGroupMap.Select( strId.c_str(), clsGroup );
-
-    if ( bIsGroup ) {
-        // GMS: find each group member's GMS subscription and notify
-        CLog::Print( LOG_INFO, "SendSipNotify: group_change Group=%s Members=%d", strId.c_str(),
-                     (int)clsGroup._pusers.size() );
-        for ( const auto &pUser : clsGroup._pusers ) {
-            if ( !pUser ) continue;
-            std::list<SubscriptionInfo> subList;
-            gclsSubscriptionManager.GetSubscriptionsByUser( pUser->_id, "gms", subList );
-            for ( auto &sub : subList ) {
-                SendNotifyToSubscriber( sub, etag, strId );
-            }
-        }
-    } else {
-        // CMS: find this user's CMS subscriptions and notify
-        CLog::Print( LOG_INFO, "SendSipNotify: user_change User=%s", strId.c_str() );
+void SendGroupDocNotify( const std::string &strGroupId, const std::set<std::string> &setUsers,
+                         const std::string &strEtag ) {
+    int nSent = 0;
+    for ( const auto &strUser : setUsers ) {
         std::list<SubscriptionInfo> subList;
-        gclsSubscriptionManager.GetSubscriptionsByUser( strId, "cms", subList );
+        gclsSubscriptionManager.GetSubscriptionsByUser( strUser, "gms", subList );
         for ( auto &sub : subList ) {
-            SendNotifyToSubscriber( sub, etag, strId );
+            SendNotifyToSubscriber( sub, strEtag, strGroupId );
+            ++nSent;
         }
     }
+    CLog::Print( LOG_INFO, "SendGroupDocNotify: Group=%s ETag=%s users=%d notified=%d", strGroupId.c_str(),
+                 strEtag.c_str(), (int)setUsers.size(), nSent );
+}
+
+/**
+ * @brief 사용자 문서(CMS, TS 24.484 user-profile) 변경 xcap-diff NOTIFY — 그 사용자의 cms 구독자에게.
+ *   strUri = USER_CHANGED 의 uri(tel:/sip: 접두는 뗀다).
+ */
+void SendUserDocNotify( const std::string &strUri, const std::string &strEtag ) {
+    std::string strId = strUri;
+    if ( strId.rfind( "tel:", 0 ) == 0 || strId.rfind( "sip:", 0 ) == 0 ) strId = strId.substr( 4 );
+    std::list<SubscriptionInfo> subList;
+    gclsSubscriptionManager.GetSubscriptionsByUser( strId, "cms", subList );
+    for ( auto &sub : subList ) {
+        SendNotifyToSubscriber( sub, strEtag, strId );
+    }
+    CLog::Print( LOG_INFO, "SendUserDocNotify: User=%s ETag=%s notified=%d", strId.c_str(), strEtag.c_str(),
+                 (int)subList.size() );
 }
 
 /**

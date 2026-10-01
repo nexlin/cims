@@ -36,12 +36,13 @@
                                                       │ ② notify_csp GROUP_CHANGED (UDP)
                                                       ▼
                                    PSP GroupMap reload ── ③ PMP 그룹 세션·floor 정책 동기화
-                                                      │ ④ xcap-diff NOTIFY (그룹 멤버 단말)
+                                                      │ ④ xcap-diff NOTIFY (변경 전·후 멤버 단말)
                                                       ▼
                                    단말 ⑤ GMS 문서 재조회 → 그룹 목록 · 멤버 갱신
 ```
 
-- 재시작·재로그인 없이 반영된다. 통지 유실은 PSP `SyncGroupsState`(60초 해시 비교)가 따라잡는다
+- 재시작·재로그인 없이 반영된다. ④ 는 ② 의 재적재 **뒤** 재적재 전·후 멤버의 합집합에게 간다(PSP
+  `ReloadGroupMap` — 새 그룹·추가 멤버도 통지를 받는다). 통지 유실은 PSP 60초 주기 재적재(같은 전후 비교)가 따라잡는다
   ([../modules/csc.md](../modules/csc.md) §5.1).
 - 관제 앱 편집은 관리 범위 안 또는 소유(`authorized_user_id`) 그룹만 서버가 허용한다
   ([mcptt_authorization.md](mcptt_authorization.md)).

@@ -185,8 +185,10 @@ public:
     void OnCallStarted( const std::string &strCallId, const std::string &strRemoteIp, int iRemotePort,
                         int iRemoteFloorPort = 0, class CSipCallRtp *pclsRtp = NULL );
 
-    /** Called by CSC interface when group/user config changes externally */
-    void OnGroupConfigChanged();
+    /** Called by CSC interface when group/user config changes externally.
+     *  strChangedGroupId = CSC 가 알린 그룹(GROUP_CHANGED) — 내용 비교와 무관하게 그 그룹 문서를 통지한다.
+     *  strEtag = 그 그룹 문서의 새 ETag(xcap-diff new-etag). 비면 전체 재동기(CSC_RESTART). */
+    void OnGroupConfigChanged( const std::string &strChangedGroupId = "", const std::string &strEtag = "" );
 
     /** CMP 가 유휴 그룹(멤버·활동 없음)을 자체 회수(PTT_GROUP_ABORTED)했을 때 CSP 캐시를 정리한다.
      *  다음 그룹 사용 시 SyncGroupsState/AddGroup 경로가 깨끗한 sesid 로 재수립한다. CmpClient 이벤트 핸들러가 호출. */
@@ -286,6 +288,10 @@ public:
 
 private:
     void MonitorLoop();
+    /** 그룹 맵 재적재(DB 우선, 파일 폴백) + 바뀐 그룹 문서의 xcap-diff 통지(RFC 5875 · TS 24.481).
+     *  통지 대상 = 재적재 **전 멤버 ∪ 후 멤버** — 새 그룹·새 멤버는 그룹이 생겼음을, 삭제·빠진 멤버는
+     *  사라졌음을 알아야 한다. 그룹 통지는 이 함수 한 곳에서만 낸다(SyncGroupsState 는 CMP 동기만). */
+    void ReloadGroupMap( const std::string &strChangedGroupId, const std::string &strEtag );
     void SyncGroupsState();
     void CheckMemberState();
     void CheckGroupIntegrity();
@@ -299,7 +305,8 @@ private:
     /** 그룹 멤버 구성(id:priority 순서)의 해시. SyncGroupsState 의 "Config Changed" 판정 기준.
      *  그룹 컨텍스트(m_mapGroupRtp)를 만드는 모든 경로(SyncGroupsState/InviteMember/CheckGroupIntegrity)
      *  에서 동일하게 저장해야 한다. 0(미설정)으로 두면 다음 SyncGroupsState 가 실제해시와 불일치로
-     *  착각해 스퓨리어스 ModifyGroup + group_change NOTIFY storm 을 일으켜 멤버 무더기 drop 됨. */
+     *  착각해 스퓨리어스 ModifyGroup storm 을 일으켜 멤버 무더기 drop 됨.
+     *  ReloadGroupMap 의 그룹 문서 변경 판정도 같은 지문을 쓴다. */
     static size_t ComputeGroupConfigHash( const class CspPttGroup &group );
 
     /**

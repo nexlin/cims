@@ -55,8 +55,9 @@ extern void SendPttDialogEventNotify( const std::string &strWatchedAor, const st
                                       const std::string &strState, bool bInitiator, const std::string &strSessionUri,
                                       const std::string &strExtXml );
 
-// Notify subscribers about group changes
-extern void SendSipNotify( const std::string &uri, const std::string &etag, const std::string &action );
+/** 그룹 문서(GMS) 변경 xcap-diff NOTIFY — setUsers 의 gms 구독자에게 (CspServer.cpp). */
+extern void SendGroupDocNotify( const std::string &strGroupId, const std::set<std::string> &setUsers,
+                                const std::string &strEtag );
 /** conference 구독자에게 참가자 NOTIFY 푸시 (CspServer.cpp) — 0 이면 구독자 없음(in-dialog 폴백). */
 extern int SendConferenceNotifyToSubscribers( const std::string &strGroupId, const std::string &strBody,
                                               std::set<std::string> *psetNotifiedUsers );
@@ -2625,29 +2626,90 @@ void CGroupCallService::MonitorLoop() {
             CheckGroupIntegrity();
         }
 
-        // Heavy group config reload every 60s — DB primary, file fallback (matches CspServer.cpp policy)
+        // Heavy group config reload every 60s — DB primary, file fallback (matches CspServer.cpp policy).
+        //   GROUP_CHANGED 통지를 놓친 변경도 여기서 문서 통지까지 따라잡는다.
         if ( iTickSec % 60 == 0 ) {
-            if ( gclsDbManager.IsConnected() ) {
-                gclsGroupMap.LoadFromDb();
-            } else if ( !gclsSetup.m_strGroupDataFolder.empty() ) {
-                gclsGroupMap.Load( gclsSetup.m_strGroupDataFolder.c_str() );
-            }
+            ReloadGroupMap( "", "" );
             SyncGroupsState();
             iTickSec = 0;
         }
     }
 }
 
-void CGroupCallService::OnGroupConfigChanged() {
-    CLog::Print( LOG_INFO, "OnGroupConfigChanged: Reloading group config and re-syncing" );
-    if ( gclsDbManager.IsConnected() ) {
-        gclsGroupMap.LoadFromDb();
-    } else if ( !gclsSetup.m_strGroupDataFolder.empty() ) {
-        gclsGroupMap.Load( gclsSetup.m_strGroupDataFolder.c_str() );
-    }
+void CGroupCallService::OnGroupConfigChanged( const std::string &strChangedGroupId, const std::string &strEtag ) {
+    CLog::Print( LOG_INFO, "OnGroupConfigChanged: Reloading group config and re-syncing (group=%s)",
+                 strChangedGroupId.empty() ? "*" : strChangedGroupId.c_str() );
+    ReloadGroupMap( strChangedGroupId, strEtag );
     SyncGroupsState();
     CheckMemberState();
     CheckGroupIntegrity();
+}
+
+namespace {
+    // 그룹 문서 통지 판정의 근거 — 재적재 전후 한 벌씩. ad hoc·private 즉석 그룹은 GMS 문서가 없어 넣지 않는다.
+    struct GroupDocSnapshot {
+        size_t nHash = 0;
+        std::set<std::string> setMembers;
+    };
+}  // namespace
+
+void CGroupCallService::ReloadGroupMap( const std::string &strChangedGroupId, const std::string &strEtag ) {
+    // CSC 통지 경로와 60초 주기 경로가 겹치면 같은 변경을 두 번 통지한다 — 재적재 전후 비교를 한 번에 하나씩.
+    static std::mutex s_reloadMutex;
+    std::lock_guard<std::mutex> lockReload( s_reloadMutex );
+    auto snapshot = []( std::map<std::string, GroupDocSnapshot> &mapOut ) {
+        gclsGroupMap.IterateInternal( [&mapOut]( const CspPttGroup &group ) {
+            if ( group._isAdhoc ) return;
+            GroupDocSnapshot &clsSnap = mapOut[group._id];
+            clsSnap.nHash = ComputeGroupConfigHash( group );
+            for ( const auto &pUser : group._pusers )
+                if ( pUser ) clsSnap.setMembers.insert( pUser->_id );
+        } );
+    };
+
+    std::map<std::string, GroupDocSnapshot> mapBefore, mapAfter;
+    snapshot( mapBefore );
+    bool bLoaded = false;
+    if ( gclsDbManager.IsConnected() ) {
+        bLoaded = gclsGroupMap.LoadFromDb();
+    } else if ( !gclsSetup.m_strGroupDataFolder.empty() ) {
+        bLoaded = gclsGroupMap.Load( gclsSetup.m_strGroupDataFolder.c_str() );
+    }
+    if ( !bLoaded ) {
+        // 맵이 그대로다 — 비교할 것이 없다. CSC 가 알린 그룹은 다음 주기 재적재가 따라잡는다.
+        CLog::Print( LOG_ERROR, "ReloadGroupMap: group reload failed (changed=%s) — 문서 통지 보류",
+                     strChangedGroupId.empty() ? "-" : strChangedGroupId.c_str() );
+        return;
+    }
+    snapshot( mapAfter );
+
+    // 통지 대상 그룹 = CSC 가 알린 그룹 + 생기거나 사라지거나 구성이 바뀐 그룹. 받는 사람 = 전 멤버 ∪ 후 멤버.
+    std::set<std::string> setIds;
+    for ( const auto &kv : mapBefore ) setIds.insert( kv.first );
+    for ( const auto &kv : mapAfter ) setIds.insert( kv.first );
+    if ( !strChangedGroupId.empty() && !setIds.count( strChangedGroupId ) )
+        // 맵에 없는 그룹(검증 하네스의 전체 재동기 트리거 등) — 받는 사람이 없을 뿐 전체 비교는 그대로 한다.
+        CLog::Print( LOG_INFO, "ReloadGroupMap: group %s not in group map — 전체 재동기만", strChangedGroupId.c_str() );
+    const std::string strNow = std::to_string( time( NULL ) );
+    for ( const auto &strId : setIds ) {
+        auto itBefore = mapBefore.find( strId );
+        auto itAfter = mapAfter.find( strId );
+        const bool bNamed = strId == strChangedGroupId;
+        if ( !bNamed && itBefore != mapBefore.end() && itAfter != mapAfter.end() &&
+             itBefore->second.nHash == itAfter->second.nHash )
+            continue;
+        std::set<std::string> setUsers;
+        if ( itBefore != mapBefore.end() ) setUsers = itBefore->second.setMembers;
+        if ( itAfter != mapAfter.end() )
+            setUsers.insert( itAfter->second.setMembers.begin(), itAfter->second.setMembers.end() );
+        std::string strDocEtag =
+            bNamed && !strEtag.empty() ? strEtag : ( itAfter == mapAfter.end() ? "deleted_" : "change_" ) + strNow;
+        const char *pszWhat = itBefore == mapBefore.end() ? "created" : "changed";
+        if ( itAfter == mapAfter.end() ) pszWhat = "deleted";
+        CLog::Print( LOG_INFO, "ReloadGroupMap: group %s %s — notify %d member(s)", strId.c_str(), pszWhat,
+                     (int)setUsers.size() );
+        SendGroupDocNotify( strId, setUsers, strDocEtag );
+    }
 }
 
 // CMP 에 재전달이 필요한 그룹 설정의 지문 — 값이 바뀌면 SyncGroupsState 가 MODIFY 를 보낸다.
@@ -2724,8 +2786,6 @@ void CGroupCallService::SyncGroupsState() {
                                      group._id.c_str() );
                     }
                 }
-                // Notify GMS subscribers that group config changed
-                SendSipNotify( "tel:" + group._id, "change_" + std::to_string( time( NULL ) ), "PUT" );
             }
         }
     } );
@@ -2744,8 +2804,6 @@ void CGroupCallService::SyncGroupsState() {
 
     for ( const auto &strGroupId : vecToRemove ) {
         CLog::Print( LOG_INFO, "SyncGroupsState: Group(%s) removed from config. Cleaning up.", strGroupId.c_str() );
-        // Notify GMS subscribers about group deletion before removing
-        SendSipNotify( "tel:" + strGroupId, "deleted_" + std::to_string( time( NULL ) ), "DELETE" );
         gclsCmpClient.RemoveGroup( strGroupId, GetOrIssueGroupSesId( strGroupId ) );
 
         std::unique_lock<std::recursive_mutex> lock( m_mutex );

@@ -61,7 +61,6 @@
 
 CModuleDispatcher gclsDispatcher;
 
-extern void SendSipNotify( const std::string &uri, const std::string &etag, const std::string &action );
 extern void SendInitialNotify( const SubscriptionInfo &sub );
 
 // ──────────────────────────────────────────────────────────────
