@@ -48,14 +48,15 @@ public sealed class AppSettings
     public bool FollowEvents { get; set; } = true;
     /// <summary>잠금 발언(§4.1) — PTT 를 클릭으로 누름 유지(풋스위치·긴 공지용). 기본 꺼짐.</summary>
     public bool LockTalk { get; set; } = false;
-    public bool MinimizeToTray { get; set; } = true;
+    /// <summary>창 닫기(×)를 종료가 아니라 최소화로 — 기본 꺼짐(× = 종료, 진행 중인 세션이 있으면 확인). 켜면 종료는 메뉴 [종료] 로만.</summary>
+    public bool MinimizeToTray { get; set; } = false;
     public int MessageRetentionDays { get; set; } = 30;
 
     // 표시
     /// <summary>light | dark — 기본 밝게(«모드마다 한 화면» 시안이 밝은 테마로 그려졌다, §3.2).</summary>
     public string Theme { get; set; } = "light";
     /// <summary>설정 판 — 2 = 모드마다 한 화면(옛 판 0·1 — 도킹 6패널의 설정을 처음 읽을 때 테마를 밝게로 한 번 되돌린다) · 3 = PTT 기본 키 Space
-    /// (옛 기본값 Ctrl+Space 를 그대로 둔 설정을 한 번 Space 로 옮긴다).</summary>
+    /// (옛 기본값 Ctrl+Space 를 그대로 둔 설정을 한 번 Space 로 옮긴다) · 4 = 창 닫기(×) 기본 = 종료(옛 기본값 «최소화» 를 한 번 끈다).</summary>
     public int UiVersion { get; set; } = SettingsStore.CurrentUiVersion;
     /// <summary>주소록 CSV 경로 재지정(비면 %APPDATA% 의 directory.csv, 없으면 앱 옆 directory.sample.csv).</summary>
     public string DirectoryCsv { get; set; } = "";
@@ -69,7 +70,7 @@ public sealed class SettingsStore
         WriteIndented = true, DefaultIgnoreCondition = JsonIgnoreCondition.Never, Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
     };
 
-    public const int CurrentUiVersion = 3;
+    public const int CurrentUiVersion = 4;
     public AppSettings Current { get; private set; } = new();
     public event EventHandler? Changed;
 
@@ -82,13 +83,15 @@ public sealed class SettingsStore
                 string text = File.ReadAllText(AppPaths.Settings);
                 Current = JsonSerializer.Deserialize<AppSettings>(text, Json) ?? new AppSettings();
                 // 옛 판의 저장값을 한 번씩 옮긴다 — 판 2: UiVersion 이 없던 판(도킹 6패널)은 새 화면의 기본 테마(밝게)로(어둡게는 설정에서 다시 고른다) ·
-                //   판 3: PTT 기본 키 Space — 옛 기본값(Ctrl+Space)을 그대로 둔 설정만 옮긴다(직접 고른 다른 키는 그대로)
+                //   판 3: PTT 기본 키 Space — 옛 기본값(Ctrl+Space)을 그대로 둔 설정만 옮긴다(직접 고른 다른 키는 그대로) ·
+                //   판 4: 창 닫기(×) = 종료가 기본 — 옛 기본값(최소화)이 저장돼 있으므로 한 번 끈다(다시 켜는 것은 설정 › 관제)
                 int from = text.Contains("\"UiVersion\"", StringComparison.Ordinal) ? Current.UiVersion : 0;
                 if (from < CurrentUiVersion)
                 {
                     if (from < 2) Current.Theme = "light";
                     if (from < 3 && Current.HotKeys.TryGetValue("ptt", out var ptt) && string.Equals(ptt.Replace(" ", ""), "Ctrl+Space", StringComparison.OrdinalIgnoreCase))
                         Current.HotKeys["ptt"] = "Space";
+                    if (from < 4) Current.MinimizeToTray = false;
                     Current.UiVersion = CurrentUiVersion;
                     Save();
                 }

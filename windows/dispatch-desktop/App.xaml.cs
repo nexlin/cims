@@ -263,7 +263,7 @@ public partial class App : Application
                         }
                     }
                     catch (Exception ex) { _log?.Error("preview shot", ex); }
-                    IsExiting = true;                       // 표본 세션·감청 창의 종료 확인을 띄우지 않는다. ExitApp(Logout)은 저장된 로그인을 지우므로 쓰지 않는다
+                    IsExiting = true;                       // 표본 세션·감청 창의 종료 확인을 띄우지 않는다. 미리보기는 엔진이 없으므로 ExitApp(세션 정리)을 거치지 않는다
                     Shutdown(0);
                 };
                 t.Start();
@@ -344,7 +344,8 @@ public partial class App : Application
     {
         IsExiting = true;
         _tick?.Stop();
-        try { _session?.Logout(); } catch (Exception ex) { _log?.Warn("logout on exit: " + ex.Message); }
+        // 종료는 로그아웃이 아니다 — 저장된 자동 로그인(refresh token)은 남긴다. 지우는 것은 [로그아웃]·자격 만료뿐(Logout())
+        try { _session?.Logout(forgetLogin: false); } catch (Exception ex) { _log?.Warn("logout on exit: " + ex.Message); }
         Shutdown(0);
     }
 

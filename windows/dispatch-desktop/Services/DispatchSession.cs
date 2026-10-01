@@ -252,8 +252,16 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
         var s = Settings.Current;
         var csc = MakeCsc(s.CscHost, s.CscPort);
         var tok = await csc.RefreshAsync(rt, ct);
-        if (!tok.Ok) { Credentials.Delete(RefreshTokenKey); return tok.WithoutValue(); }
+        if (!tok.Ok)
+        {
+            // 되살릴 수 없는 실패(폐기·회전 실패·만료)일 때만 저장된 로그인을 버린다 — 서버에 닿지 않은 것(망 단절·5xx)은 남겨 다음 기동이 다시 이어 간다
+            bool ended = IsSessionEnded(tok.Code, tok.Reason);
+            if (ended) Credentials.Delete(RefreshTokenKey);
+            Log.Warn($"login resume failed: {tok.Code} {tok.Reason}{(ended ? " — saved login discarded" : " — saved login kept")}");
+            return tok.WithoutValue();
+        }
         NoteTokens(tok.Value);
+        Log.Info("login resumed from saved refresh token");
         return await FetchProfileAsync(ct);
     }
 
@@ -842,13 +850,15 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
     }
 
     /// <summary>등록 해제 → 토큰 폐기 → 초기 상태(로그인 창으로).</summary>
-    public void Logout()
+    /// <summary>세션을 내린다 — 호 종료·엔진 정지(등록 해제)·상태 비움. <paramref name="forgetLogin"/> = 저장된 자동 로그인(refresh token)도 지운다:
+    /// [로그아웃]·자격 만료는 지우고(다음 기동은 로그인 창), **앱 종료는 남긴다**(다음 기동이 그 토큰으로 이어 로그인한다 — «자동 로그인»).</summary>
+    public void Logout(bool forgetLogin = true)
     {
         ResetMcVideo();                                          // 영상 채널 — 재합류하지 않게 먼저
         foreach (var s in Sessions.ToList()) Engine.GetCall(s.CallId).Hangup();
         _history?.Dispose(); _history = null;
         Engine.Stop();
-        Credentials.Delete(RefreshTokenKey);
+        if (forgetLogin) Credentials.Delete(RefreshTokenKey);
         _tokens = null; _tokenExpiresAtUtc = DateTime.MinValue; _nextTokenCheck = DateTime.MinValue; _loginPw = ""; _management = null;
         if (Notify.BannerOfKind(BannerKind.Credential) is { } crb) Notify.RemoveBanner(crb);
         CredentialWarning = false;

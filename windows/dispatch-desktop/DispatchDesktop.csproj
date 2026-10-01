@@ -12,6 +12,8 @@
     <RootNamespace>DispatchDesktop</RootNamespace>
     <AssemblyName>CimsDispatch</AssemblyName>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <!-- 앱 아이콘(Assets/gen-icon.ps1 이 그린다) — 실행 파일(CimsDispatch.exe)과 창(Window.Base 의 Icon)이 같이 쓴다 -->
+    <ApplicationIcon>Assets\dispatch.ico</ApplicationIcon>
     <Version>0.1.0</Version>
     <Product>CIMS 관제조작반</Product>
     <Authors>CIMS</Authors>
@@ -30,5 +32,6 @@
 
   <ItemGroup>
     <None Include="directory.sample.csv" CopyToOutputDirectory="PreserveNewest" />
+    <Resource Include="Assets\dispatch.ico" />
   </ItemGroup>
 </Project>

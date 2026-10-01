@@ -53,6 +53,8 @@
     </Style>
 
     <Style TargetType="Window" x:Key="Window.Base">
+        <!-- 창 아이콘 — 제목 표시줄·작업 표시줄·Alt+Tab. 앱은 서명된 dotnet.exe 로 뜨기도 하므로(Smart App Control) 창이 아이콘을 들지 않으면 .NET 아이콘이 보인다 -->
+        <Setter Property="Icon" Value="pack://application:,,,/CimsDispatch;component/Assets/dispatch.ico" />
         <Setter Property="FontFamily" Value="{StaticResource Font.Ui}" />
         <Setter Property="FontSize" Value="13" />
         <Setter Property="Background" Value="{DynamicResource Brush.Bg}" />

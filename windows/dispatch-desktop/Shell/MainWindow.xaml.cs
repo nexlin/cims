@@ -216,6 +216,7 @@ public partial class MainWindow : Window
     {
         PersistWindow();
         if (_exitConfirmed || ((App)Application.Current).IsExiting) return;
+        // 창 닫기(×) = 종료(기본) — 진행 중인 세션·감청이 있으면 확인. 설정 «창 닫기는 최소화» 를 켠 자리만 최소화하고 종료는 메뉴 [종료] 로 한다
         if (_vm.Session.Settings.Current.MinimizeToTray) { e.Cancel = true; WindowState = WindowState.Minimized; ShowInTaskbar = true; return; }
         if (!ConfirmLeave("종료")) { e.Cancel = true; return; }
         _exitConfirmed = true;
