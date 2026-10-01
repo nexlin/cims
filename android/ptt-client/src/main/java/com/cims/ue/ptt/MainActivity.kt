@@ -16,6 +16,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import com.cims.ue.ptt.ui.AppRoot
 import com.cims.ue.ptt.ui.PttTheme
+import com.cims.ue.ptt.ui.PttThemeState
 
 class MainActivity : ComponentActivity() {
     private var svc by mutableStateOf<PttService?>(null)
@@ -34,6 +35,7 @@ class MainActivity : ComponentActivity() {
         // (트랙 단위 분리 라우팅용 pjsip 패치: 통화와 무전을 서로 다른 출력으로)
         volumeControlStream = android.media.AudioManager.STREAM_MUSIC
         HwPtt.init(this)
+        PttThemeState.load(this)                // 화면 테마(설정 «화면 테마») + 단말 다크 모드
         PttService.start(this)
         bindService(Intent(this, PttService::class.java), conn, Context.BIND_AUTO_CREATE)
         setContent {
@@ -43,6 +45,12 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    // 단말 다크 모드 전환 — 매니페스트가 uiMode 를 직접 받으면(configChanges) 재생성 없이 여기로 온다.
+    override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
+        super.onConfigurationChanged(newConfig)
+        PttThemeState.onConfiguration(newConfig)
     }
 
     override fun onDestroy() {

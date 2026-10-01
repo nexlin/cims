@@ -98,8 +98,13 @@ fun SettingsScreen(
             GainRow("마이크 게인", "상대가 듣는 크기 — 자동 레벨 맞춤 기준(×1.0 = 표준) 보정", st.micGain) {
                 st.ctl?.setAudioGain(st.spkGain, it)
             }
+            VideoMicRow(st)
             TransportRow(svc)
         }
+
+        // ── 화면 ──
+        SectionLabel("화면")
+        SectionCard(padding = 4) { ThemeRow() }
 
         // ── 채널 설정: 하드웨어 버튼 ──
         SectionLabel("채널 설정")
@@ -219,6 +224,61 @@ private fun NavRow(title: String, subtitle: String, onClick: () -> Unit) {
         }
         Text("›", color = Ct.TextFaint, fontSize = 18.sp)
         Spacer(Modifier.width(2.dp))
+    }
+}
+
+/**
+ * 설정 행 — 영상을 보내는 중 무전(PTT)할 때의 마이크(mcvideo.md D12, TS 22.280 R-8.3-003 — 경합 자원의 우선은 사용자가 정한다).
+ * 음성 우선(기본) = PTT 를 누르는 동안 영상 호 음성 송신을 멈춘다(영상은 계속) · 영상 우선 = 영상을 보내는 동안 무전 발언을 요청하지 않는다.
+ * 긴급·임박은 설정과 무관하게 음성 우선(R-8.3-004). 영상 그룹이 없어도 보인다 — 정책은 계정 단위다.
+ */
+@Composable
+private fun VideoMicRow(st: PttUiState) {
+    val policy = st.ctl?.videoMicPolicy?.collectAsState()?.value ?: return
+    Divider()
+    Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp)) {
+        Text("영상 보내는 중 무전", color = Ct.Text, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+        Text(if (policy == com.cims.ue.ptt.VideoMicPolicy.VOICE_FIRST) "PTT 를 누르는 동안 영상 소리를 멈추고 음성 무전으로 보냅니다(영상은 계속)"
+             else "영상을 보내는 동안에는 PTT 를 눌러도 무전하지 않습니다(긴급·임박은 예외)",
+            color = Ct.TextFaint, fontSize = 11.sp, modifier = Modifier.padding(top = 2.dp))
+        Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            listOf(com.cims.ue.ptt.VideoMicPolicy.VOICE_FIRST to "음성 우선", com.cims.ue.ptt.VideoMicPolicy.VIDEO_FIRST to "영상 우선").forEach { (p, text) ->
+                val on = p == policy
+                Box(
+                    Modifier.clip(RoundedCornerShape(8.dp))
+                        .background(if (on) Ct.Mint else Ct.GrayDim)
+                        .clickable(enabled = !on) { st.ctl?.setVideoMicPolicy(p) }
+                        .padding(horizontal = 14.dp, vertical = 7.dp),
+                ) {
+                    Text(text, color = if (on) Ct.OnMint else Ct.TextDim, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                }
+            }
+        }
+    }
+}
+
+/** 설정 행 — 화면 테마(시스템 설정 따름 · 밝게 · 어둡게). 고르면 바로 바뀌고 `ui_prefs` 에 남는다([PttThemeState]). */
+@Composable
+private fun ThemeRow() {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val mode = PttThemeState.mode.value
+    Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp)) {
+        Text("화면 테마", color = Ct.Text, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+        Text("시스템 = 단말의 다크 모드 설정을 따릅니다",
+            color = Ct.TextFaint, fontSize = 11.sp, modifier = Modifier.padding(top = 2.dp))
+        Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            listOf(ThemeMode.SYSTEM to "시스템", ThemeMode.LIGHT to "밝게", ThemeMode.DARK to "어둡게").forEach { (m, text) ->
+                val on = m == mode
+                Box(
+                    Modifier.clip(RoundedCornerShape(8.dp))
+                        .background(if (on) Ct.Mint else Ct.GrayDim)
+                        .clickable(enabled = !on) { PttThemeState.set(context, m) }
+                        .padding(horizontal = 14.dp, vertical = 7.dp),
+                ) {
+                    Text(text, color = if (on) Ct.OnMint else Ct.TextDim, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                }
+            }
+        }
     }
 }
 

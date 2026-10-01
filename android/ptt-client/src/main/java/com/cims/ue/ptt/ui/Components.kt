@@ -232,13 +232,13 @@ enum class Tab(val label: String, val icon: Int) {
     SETTINGS("설정", R.drawable.ic_nav_settings),
 }
 
-/** 하단 내비 4탭 — 시안: 다크 바, 활성=민트 아이콘+라벨. [badge]=탭별 뱃지 수(메시지 안읽음). */
+/** 하단 내비 4탭 — 시안: 내비 바(테마 토큰 NavBar), 활성=민트 아이콘+라벨. [badge]=탭별 뱃지 수(메시지 안읽음). */
 @Composable
 fun AppBottomNav(current: Tab, badge: Map<Tab, Int> = emptyMap(), onSelect: (Tab) -> Unit) {
     Row(
         Modifier
             .fillMaxWidth()
-            .background(Color(0xFF111917))
+            .background(Ct.NavBar)
             .navigationBarsPadding()
             .padding(top = 6.dp, bottom = 6.dp),
     ) {
