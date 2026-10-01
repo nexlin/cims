@@ -1,4 +1,4 @@
-# Windows PC — 관제 앱 MCVideo 편성(prearranged) 그룹 영상 열기 · 새 그룹 지연
+# Windows PC — 관제 앱 MCVideo 편성(prearranged) 그룹 영상 열기 · 새 그룹 지연 · 영상 채널 제휴 해제
 
 Claude Code 터미널에서 이 문서를 읽고 §2 부터 순서대로 한다. 원칙은 [dispatch_windows_next.md](dispatch_windows_next.md) 와 같다 — VoLTE·MCPTT·MCVideo
 규격 절을 먼저 확인하고 그대로 따른다(CLAUDE.md 설계 우선순위 1). 빌드·시험 명령은 [dispatch_desktop_handoff.md](dispatch_desktop_handoff.md) §4.
@@ -30,7 +30,13 @@ SDK·C API·.NET 파사드는 바뀌지 않았다 — DLL 다시 빌드 없이 �
 - **실패는 다시 열지 않는다** — 사용자가 다시 누른다. 480 = «영상 호를 열지 못했습니다 — 영상을 받을 멤버가 없습니다», 그 밖은 응답 코드·사유.
   chat 합류의 자동 재시도(물러남)와 섞지 않는다.
 - **그룹 문서가 바뀌면 다시 맞춘다** — 영상 채널이 바뀌었거나 그 그룹 문서가 바뀌었으면(내용 비교 — 같은 문서 재조회로는 풀지 않는다) 그 그룹의
-  합류 물러남(실패 횟수·재시도 시각)을 지우고, 편성 그룹이면 MCVideo affiliation PUBLISH 를 다시 보낸다.
+  합류 물러남(실패 횟수·재시도 시각)을 지우고 MCVideo affiliation PUBLISH 를 다시 보낸다.
+- **MCVideo affiliation = 영상 채널만, 떠나면 푼다** — chat 합류는 서버가 암묵적으로 affiliate 하지만(§9.2.2.4.1.1 12)) 나갈 때 풀어 주는 절차가
+  규격에 없다(해제는 클라이언트 몫 — §8.2.1.2). 그대로 두면 옮겨 다닌 채널이 쌓여 N2(기본 4)를 넘고 새 채널 합류가 **486 Warning 102** 로 막힌다.
+  그래서 단말은 chat·편성 모두 영상 채널을 명시로 affiliate 하고(`affiliate(g, true, MCVIDEO)`), 떠나면 뺀다(`affiliate(old, false, MCVIDEO)`).
+  코어 PUBLISH 는 관심 그룹 **전부**를 싣고(빈 집합 = Expires 0 = CSP 가 그 사용자 MCVideo 제휴를 전부 지운다), CSP 는 목록에 없는 멤버 그룹을
+  해제한다(`CscfModule.cpp` 제휴 PUBLISH). 채널을 바꿀 때는 **새 그룹을 먼저 싣고 옛 그룹을 뺀다** — 반대로 하면 빈 집합(Expires 0)을 한 번 거친다.
+  N2 판정은 요청에 든 그룹만 세므로 N2 = 1 이어도 이 순서로 바뀐다(`McvAffiliationsWithinN2`).
 
 ## 3. 관제 앱 Windows 데스크톱 — 할 일
 
@@ -54,27 +60,41 @@ SDK·C API·.NET 파사드는 바뀌지 않았다 — DLL 다시 빌드 없이 �
 | `_videoRetryAt`·`_videoFailures` | 성립(`:158`)·로그아웃(`:175`)에서만 지운다 | 그 그룹 문서가 바뀌었으면 그 그룹 몫을 지우고 `EnsureVideoChannels()` |
 | `ApplyMcVideoGroups`(`:77-80`) `McVideoAffiliated` | 한 번 보내면 다시 안 보낸다 | 그 그룹 문서가 바뀌었으면 affiliation 을 다시 싣는다(코어가 관심 그룹 집합을 들고 있으므로 `Affiliate(g, true, McVideo)` 재호출이 곧 집합 재PUBLISH — TS 24.281 §8.2.1.2) |
 
-### P3. 문서
+### P3. 영상 채널을 떠나면 MCVideo 제휴를 푼다
 
-같은 변경에서 [dispatch_desktop_ui.md](../design/features/dispatch_desktop_ui.md) §10(편성 = 초대 대기 문구 `:740`·`:753`)과 [mcvideo.md](../design/features/mcvideo.md)
-§5.5 «관제 앱» 줄(«편성 = MCVideo affiliation + 멤버 초대 자동 수락» 뒤에 «영상 호가 없으면 [영상 보내기] 가 연다»)을 현재 동작으로 고친다.
+관제 앱은 내 채널의 영상 채널(user profile `<MCVideoGroupInfo>` ∩ 멤버 그룹)을 모두 affiliate 한다(`ApplyMcVideoGroups`). 자격이 없어진 그룹은
+`:75-80` 이 풀지만, **그룹이 내 채널에서 빠지는 경로**(`DispatchSession.cs:656` — 그룹 삭제·멤버 제외 → `LeaveVideoChannel`)는 영상 호만 끊고
+affiliation 은 그대로라 코어 관심 집합에 남는다(이후 PUBLISH 마다 실린다).
 
-### P4. Android 태블릿
+| 자리 | 바꿀 것 |
+|---|---|
+| `LeaveVideoChannel`(`DispatchSession.McVideo.cs:155`) | `g.McVideoAffiliated` 이면 `ptt.Affiliate(g.Id, false, McService.McVideo)` → `g.McVideoAffiliated = false` (영상 호 BYE 다음에) |
+| 여러 그룹을 한꺼번에 바꿀 때(`ApplyMcVideoGroups`) | 켜는 그룹을 먼저, 끄는 그룹을 뒤에 — 빈 집합(Expires 0 = 그 사용자 MCVideo 제휴 전부 해제)을 거치지 않게 |
+| N2 | affiliate 하는 영상 채널 수가 N2(회선 «동시 제휴 그룹», 기본 4)를 넘으면 CSP 가 PUBLISH 에서 줄이고(빠진 그룹은 제휴 NOTIFY 에 없다) 그 채널 chat 합류는 486 102 — 줄어든 그룹은 `VideoNote` 로 «동시 제휴 그룹 한도(N2)» 를 알린다(N6 문구와 같은 자리). 제휴 NOTIFY(`mcvideoPresInfo`)를 읽어 실제 제휴 그룹을 표시하는 것이 정석(TS 24.281 §8.2.1.3) |
+
+### P4. 문서
+
+같은 변경에서 [dispatch_desktop_ui.md](../design/features/dispatch_desktop_ui.md) §10(편성 = 초대 대기 문구 `:740`·`:753`, 영상 채널 제휴)과
+[mcvideo.md](../design/features/mcvideo.md) §5.5 «관제 앱» 줄(«편성 = MCVideo affiliation + 멤버 초대 자동 수락» 뒤에 «영상 호가 없으면 [영상 보내기] 가
+연다» · «내 채널에서 빠지면 MCVideo 제휴도 푼다»)을 현재 동작으로 고친다.
+
+### P5. Android 태블릿
 
 태블릿은 MCVideo 를 아직 넣지 않았다(Windows 안정화 뒤). 넣을 때 §2 동작을 처음부터 같게 둔다.
 
-## 4. 서버 — CSP 그룹 맵 교체 (이 문서와 같은 커밋)
+## 4. 서버 — 설정 변경 반영 경로 (CSP 몫은 커밋됨, .45 배포는 사용자 지시 뒤)
 
-`CDbManager::LoadAllGroups` 가 그룹을 다 읽은 뒤 `CGroupMap::ReplaceDbGroups` 로 맵을 한 번에 바꾼다(즉석 세션 ephemeral 그룹은 같은 락 안에서 보존 —
-옛 `CollectEphemeral` 대체). 빌드·`S1-UNIT-CSP`·`S1-CPP-FORMAT` 통과. **.45 배포는 사용자 지시 뒤**(CSP 재기동 = 단말 재등록) — 배포 전에는 §1 #2 가
-남아 있으므로 새 그룹 직후 첫 시도가 404 113 을 받을 수 있다(앱 쪽 P2 가 그 뒤 문서 변경 때 다시 맞춘다).
+설정 변경은 **CSC 가 저장 직후 CSP 에 알린다** — 그룹(MCVideo 몫 포함) = 콘솔 그룹 편집 저장 → `admin.py` 가 `mcvideo_group_attrs` 를 쓴 뒤
+`notify_csp("GROUP_CHANGED")`(UDP — CSP·PSP 둘 다) → CSP `ReloadGroupMap` 재적재 → 그 그룹 멤버에게 xcap-diff → 단말·관제 앱이 그룹 문서 재조회.
+관제 앱 XCAP PUT(`mcptt.py`)도 같은 통지. MCVideo 이용 자격은 `USER_CHANGED` 를 보내고, CSP 는 자격을 요청마다 DB 에서 읽는다.
 
-남은 서버 과제(이번에 고치지 않음):
-- `ReloadGroupMap` 의 문서 변경 판정 지문(`ComputeGroupConfigHash` — 멤버·floor·T4)에 MCVideo 몫이 없다 → GROUP_CHANGED 를 놓친 경우 60초 재적재가 MCVideo
-  켜기·호 방식 변경을 xcap-diff 로 알리지 않는다(이름 붙은 GROUP_CHANGED 는 늘 알린다).
-- chat 합류의 암묵적 MCVideo affiliation 은 영상 호를 나가도 남는다(규격에 나갈 때의 암묵적 de-affiliation 이 없다 — 단말이 풀어야 한다, TS 24.281 §8.2.1.2).
-  주채널을 MCVideo chat 그룹 5곳 이상으로 옮겨 다니면 N2(기본 4)에 걸려 486 Warning 102 — 단말·관제 앱이 영상 채널을 떠날 때 MCVideo de-affiliation 을
-  보낼지 결정이 필요하다(사용자 결정 대기).
+이번에 CSP 에서 고친 것:
+- **재적재 중 그룹이 비지 않는다** — `CDbManager::LoadAllGroups` 가 다 읽은 뒤 `CGroupMap::ReplaceDbGroups` 로 맵을 한 번에 바꾼다(즉석 세션 그룹은 같은
+  락 안에서 보존). 전에는 비우고 채우는 동안 MCVideo INVITE 가 404 113, affiliation PUBLISH 가 기록 누락.
+- **통지 유실 때의 따라잡기** — UDP 통지가 유실되면 60초 주기 재적재가 전후 비교로 알리는데, 그 지문이 CMP 지문(멤버·floor·T4)뿐이라 MCVideo 켜기·
+  호 방식 변경은 알리지 않았다 → `ComputeGroupDocHash`(문서에 드러나는 그룹 설정 전부 — 멤버 표시·이름·속성·MCVideo 몫)로 비교한다.
+
+빌드·`S1-UNIT-CSP`·`S1-CPP-FORMAT` 통과. 배포 전 .45 는 옛 동작이라 새 그룹 직후 첫 시도가 404 113 을 받을 수 있다(앱 P2 가 문서 변경 때 다시 맞춘다).
 
 ## 5. 시험 (.45)
 
@@ -86,3 +106,5 @@ SDK·C API·.NET 파사드는 바뀌지 않았다 — DLL 다시 빌드 없이 �
 4. 반대로 W999 가 [영상 보내기] 로 열고 관제 앱이 초대를 자동 수락하는지, «영상 n» 에 W999 가 나오는지.
 5. 다른 멤버가 아무도 그 채널에 없을 때 [영상 보내기] → 약 10 s 뒤 480 문구, 자동 재시도 없음.
 6. 콘솔에서 호 방식을 chat 으로 바꾸고(저장) 로그인 유지한 채 — 관제 앱이 문서 변경 뒤 chat 합류로 바뀌는지(P2).
+7. 콘솔에서 관제 계정을 «영상테스트» 멤버에서 뺀다 — 관제 앱이 영상 호를 끊고 MCVideo 제휴 PUBLISH 에서 그 그룹을 뺐는지(CSP 로그
+   `[Affiliation/PUBLISH:pidf] service=mcvideo … 해제 1`) (P3).

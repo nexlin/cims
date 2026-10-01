@@ -306,8 +306,11 @@ private:
      *  그룹 컨텍스트(m_mapGroupRtp)를 만드는 모든 경로(SyncGroupsState/InviteMember/CheckGroupIntegrity)
      *  에서 동일하게 저장해야 한다. 0(미설정)으로 두면 다음 SyncGroupsState 가 실제해시와 불일치로
      *  착각해 스퓨리어스 ModifyGroup storm 을 일으켜 멤버 무더기 drop 됨.
-     *  ReloadGroupMap 의 그룹 문서 변경 판정도 같은 지문을 쓴다. */
+     *  ReloadGroupMap 의 그룹 문서 변경 판정은 이 지문을 포함하는 ComputeGroupDocHash 를 쓴다. */
     static size_t ComputeGroupConfigHash( const class CspPttGroup &group );
+    /** 그룹 문서(TS 24.481)에 드러나는 그룹 설정의 지문 — ReloadGroupMap 이 재적재 전후를 비교해 xcap-diff 를 보낼지
+     * 정한다 (CMP 지문 + 이름·속성·멤버 표시·MCVideo 몫). */
+    static size_t ComputeGroupDocHash( const class CspPttGroup &group );
 
     /**
      * @brief Build MCPTT call control info XML (application/vnd.3gpp.mcptt-info+xml, TS 24.379)

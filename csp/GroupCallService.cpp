@@ -2661,7 +2661,7 @@ void CGroupCallService::ReloadGroupMap( const std::string &strChangedGroupId, co
         gclsGroupMap.IterateInternal( [&mapOut]( const CspPttGroup &group ) {
             if ( group._isAdhoc ) return;
             GroupDocSnapshot &clsSnap = mapOut[group._id];
-            clsSnap.nHash = ComputeGroupConfigHash( group );
+            clsSnap.nHash = ComputeGroupDocHash( group );
             for ( const auto &pUser : group._pusers )
                 if ( pUser ) clsSnap.setMembers.insert( pUser->_id );
         } );
@@ -2724,6 +2724,34 @@ size_t CGroupCallService::ComputeGroupConfigHash( const CspPttGroup &group ) {
     strHashInput += "|floor=" + group._floorPolicy + ":" + std::to_string( group._maxTalkers );
     strHashInput += "|t4=" + std::to_string( group._hangTimerSec );  // hang-timer 변경도 MODIFY 로 CMP 에 도달
     return std::hash<std::string>{}( strHashInput );
+}
+
+// 그룹 문서 지문 — CMP 지문만 보면 이름·속성·MCVideo 몫만 바뀐 변경을 60초 주기 재적재가 놓친다(CSC 의 GROUP_CHANGED
+//   통지가 유실됐을 때 단말에 xcap-diff 가 가지 않는다). 문서에 드러나는 DB 값을 모두 싣는다.
+size_t CGroupCallService::ComputeGroupDocHash( const CspPttGroup &group ) {
+    std::string s = std::to_string( ComputeGroupConfigHash( group ) );
+    for ( const auto &pUser : group._pusers ) {
+        if ( !pUser ) continue;
+        s += "|m=" + pUser->_id + ":" + pUser->_mcpttId + ":" + pUser->_role + ":" +
+             std::to_string( pUser->_onNetworkRequired ) + std::to_string( pUser->_implicitAffiliation );
+    }
+    s += "|g=" + group._name + "|" + group._alias + "|" + group._orgCode + "|" + group._groupType + "|" +
+         group._floorControl + "|" + group._ackAction;
+    for ( int v : { group._priority, (int)group._encryption, (int)group._emergencyCall, (int)group._emergencyAlert,
+                    (int)group._allowConferenceState, (int)group._allowSds, (int)group._allowFd, group._maxSdsSize,
+                    group._maxDurationSec, group._minNumberToStart, group._ackTimeoutSec, (int)group._onNetwork,
+                    group._maxMembers, (int)group._requireAffiliation, group._authorizedUserId } )
+        s += "," + std::to_string( v );
+    s +=
+        "|t=" + std::to_string( (long long)group._sessionStart ) + "-" + std::to_string( (long long)group._sessionEnd );
+    if ( group._mcvideo ) {
+        const CspMcVideoGroupAttrs &a = group._mcvideoAttrs;
+        s += "|mcv=" + std::to_string( a.bInviteMembers ) + "," + std::to_string( a.iMaxDurationSec ) + "," +
+             std::to_string( a.iMaxTransmitters ) + "," + a.strAudioEncodings + "," + a.strVideoEncodings + "," +
+             std::to_string( a.iReceptionHangTimerSec ) + "," + std::to_string( a.iMinNumberToStart ) + "," +
+             std::to_string( a.iGroupPriority ) + "," + std::to_string( a.bAllowConferenceState );
+    }
+    return std::hash<std::string>{}( s );
 }
 
 void CGroupCallService::SyncGroupsState() {

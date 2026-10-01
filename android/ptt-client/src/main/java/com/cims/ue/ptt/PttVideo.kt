@@ -72,8 +72,9 @@ data class VideoCallState(
  * 코어가 하는 것: INVITE(mcvideo-info·제어 채널 SDP)·멤버 초대 자동 수락·송출 허가에 따른 마이크·카메라 개폐(§6.2.4.4.6)·
  * 전송 제어 상태 머신(T100~T104). 여기는 정책과 투영만 든다.
  *  - **합류**(mcvideo.md §7 D10) — 영상 채널(그룹 문서 MCVideo 몫)에 있으면 MCVideo 호에도 함께 있는다. 1차 = 주채널만(영상 칸·수신 창이
- *    주채널에만 있다). chat = 합류(합류가 곧 affiliation), prearranged = MCVideo affiliation + 멤버 초대 자동 수락(호는 열어 두지 않는다 —
- *    전원 초대라 보낼 사람이 연다, 아래 송출). TS 22.280 R-8.4.2-002(여러 서비스를 한 번의 논리적 제휴로). «채널» = 사용자가 고른
+ *    주채널에만 있다). MCVideo affiliation 은 영상 채널 하나만 — 들어가면 싣고 떠나면 푼다([sync]). chat = 그 호에 합류, prearranged = 멤버
+ *    초대 자동 수락(호는 열어 두지 않는다 — 전원 초대라 보낼 사람이 연다, 아래 송출). TS 22.280 R-8.4.2-002(여러 서비스를 한 번의 논리적
+ *    제휴로). «채널» = 사용자가 고른
  *    주채널(ChannelStore.primary — 주채널 선택·복원으로 정하고 나가기·주채널 해제로만 지운다, 다른 그룹 팬아웃이 덮지 않는다)이지 무전
  *    세션의 수명이 아니다 — 무전 세션은 T4(hang timer, TS 24.379 §6.3.8.1)로 수시로 끝나지만 그 사이에도 영상 호는 이어진다.
  *  - **송출**(D11) — [영상 보내기] 토글 = 송출 요청·끝내기. [PTT]·하드웨어 PTT 키는 MCPTT 음성만. prearranged 그룹에 영상 호가 없으면
@@ -126,7 +127,7 @@ internal class VideoPlane(private val c: PttController, context: Context) {
     /** 무전 세션 없이 영상 호만 이어지는 채널 — 주채널 화면이 대기 상태로 보여 준다. */
     val channelGroup: String? get() = channel
 
-    private var mcvAffiliated: String? = null                          // MCVideo 로 affiliate 한 prearranged 그룹 (c.lock 아래)
+    private var mcvAffiliated: String? = null                          // MCVideo 로 affiliate 한 영상 채널 (c.lock 아래)
     private var seenDoc: Pair<String, GroupDoc>? = null                // 마지막으로 맞춘 영상 채널과 그 그룹 문서 (c.lock 아래)
     private var wasRegistered = false
     private val retryAt = HashMap<String, Long>()                      // 합류 재시도 가능 시각(elapsedRealtime) (c.lock 아래)
@@ -147,13 +148,17 @@ internal class VideoPlane(private val c: PttController, context: Context) {
     fun requestSync() { kick.trySend(Unit) }
 
     /**
-     * 영상 채널 = 주채널(활성 MCPTT 그룹 세션 — 1:1·애드혹 제외)이 MCVideo 그룹이면 그 그룹. chat 이면 그 호에 합류해 있고, prearranged 면 그
-     * 그룹만 MCVideo affiliation(제어 기능은 MCVideo 로 affiliate 한 멤버만 초대한다 — §6.3.5.5) — affiliation 은 서버가 MCVideo PSI 를 낼
-     * 때만(서비스를 가르지 않는 옛 CSP 는 presence PUBLISH 를 MCPTT affiliation 으로 읽는다, mcvideo.md §5.4). 그 밖의 영상 호는 나간다.
+     * 영상 채널 = 주채널(활성 MCPTT 그룹 세션 — 1:1·애드혹 제외)이 MCVideo 그룹이면 그 그룹. MCVideo affiliation 은 영상 채널 하나만
+     * (TS 24.281 §8.2.1.2 — PUBLISH 는 관심 그룹 전부라 빠진 그룹은 서버가 해제한다): chat 이면 그 호에 합류하고, prearranged 면 제어 기능이
+     * MCVideo 로 affiliate 한 멤버만 초대한다(§6.3.5.5). chat 은 합류가 곧 affiliation(§9.2.2.4.1.1 12)) 이지만 나갈 때의 암묵적 해제는 없다
+     * — 단말이 풀지 않으면 옮겨 다닌 채널이 쌓여 N2 를 넘는다(486 102). 그래서 chat 도 명시 affiliation 으로 두고 채널을 떠나면 푼다
+     * (D10 «채널을 나가면 영상도» — TS 22.280 R-8.4.2-002). 채널을 바꿀 때는 새 그룹을 먼저 싣고 옛 그룹을 뺀다(집합이 비는 PUBLISH =
+     * Expires 0 = 그 사용자 제휴 전부 해제를 거치지 않게). affiliation 은 서버가 MCVideo PSI 를 낼 때만(서비스를 가르지 않는 옛 CSP 는
+     * presence PUBLISH 를 MCPTT affiliation 으로 읽는다, mcvideo.md §5.4). 그 밖의 영상 호는 나간다.
      *
      * 영상 채널이 바뀌었거나 그 그룹 문서가 바뀌었으면(편성 변경 통지 xcap-diff — 서버가 그룹을 다시 적재한 뒤에 온다) 합류 물러남을
-     * 풀고 prearranged affiliation 도 다시 보낸다: 갓 만든 그룹은 서버가 아직 MCVideo 그룹으로 모를 때 시도가 거절되거나(404 113) affiliation
-     * 이 기록되지 않을 수 있는데(PUBLISH 는 200 — 결과는 NOTIFY 로만 온다, TS 24.281 §8.2.2.2.3), 물러남이 2 분까지 커지면 그동안 영상을 못 쓴다.
+     * 풀고 affiliation 도 다시 보낸다: 갓 만든 그룹은 서버가 아직 MCVideo 그룹으로 모를 때 시도가 거절되거나(404 113) affiliation 이
+     * 기록되지 않을 수 있는데(PUBLISH 는 200 — 결과는 NOTIFY 로만 온다, TS 24.281 §8.2.2.2.3), 물러남이 2 분까지 커지면 그동안 영상을 못 쓴다.
      */
     private fun sync() {
         val registered = c.regState.value is RegState.Registered
@@ -169,8 +174,8 @@ internal class VideoPlane(private val c: PttController, context: Context) {
             }
         }
         // affiliation — 등록이 새로 서면 서버 affiliation 도 새로 시작한다(등록 해제가 지운다)
-        val affWant = want.takeIf { mv?.prearranged == true }
-        _openable.value = affWant
+        val affWant = want
+        _openable.value = want.takeIf { mv?.prearranged == true }
         val (affOn, affOff) = synchronized(c.lock) {
             if (registered != wasRegistered) { wasRegistered = registered; mcvAffiliated = null }
             val cur = mcvAffiliated
@@ -181,8 +186,8 @@ internal class VideoPlane(private val c: PttController, context: Context) {
                 else -> null to null
             }
         }
-        affOff?.let { g -> c.cmd("de-affiliate mcvideo $g") { c.account?.affiliate(g, false, McService.MCVIDEO) ?: notRegistered() } }
         affOn?.let { g -> c.cmd("affiliate mcvideo $g") { c.account?.affiliate(g, true, McService.MCVIDEO) ?: notRegistered() } }
+        affOff?.let { g -> c.cmd("de-affiliate mcvideo $g") { c.account?.affiliate(g, false, McService.MCVIDEO) ?: notRegistered() } }
         // 호
         val stale = synchronized(c.lock) { calls.values.filter { it.groupId != want && !it.leaving }.map { it.groupId } }
         stale.forEach { leave(it) }
