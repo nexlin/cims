@@ -1,5 +1,5 @@
 // 메인 — «모드마다 한 화면»(§3): VM 조립 · [무전|통화] 모드 · 오른쪽 패널(채널 상세·사용자·새 그룹·이벤트 상세·주소록) 규칙 · 칸 사이 연동
-// (카드 → 메시지 따라가기, 사람 메뉴 → 기록·개별 통화·무전 메시지) · 핫키(§8) · 감청 창(§5, [창으로] 로만) · 레일 화면 전환(§3.4: 관제·이력·더보기 —
+// (카드 → 메시지 따라가기, 사람 메뉴 → 기록·개별 통화·무전 메시지) · 핫키(§8) · 감청 창(§5, [창으로] 로만) · 레일 화면 전환(§3.4: 관제·이력·PTT 그룹·관리 —
 // 화면 VM 은 앱 수명 동안 하나, 전환은 가시성만) · 자동 복귀(세션을 만든 조작은 그 호의 모드로 한 번).
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -91,7 +91,7 @@ public sealed partial class MainViewModel : ObservableObject
         AdminScreen.PropertyChanged += (_, e) => { if (e.PropertyName is nameof(DirectoryAdminViewModel.IsDirty)) OnPropertyChanged(nameof(AdminEditing)); };
         PttActivity.HistoryRequested += (_, _) => ShowHistory("ptt");
         Records.HistoryRequested += (_, _) => ShowHistory("call");
-        session.ProfileApplied += (_, _) => { _screensLoaded = false; OnPropertyChanged(nameof(CanManage)); OnPropertyChanged(nameof(ManageHint)); _ = LoadGroupsForScopedAsync(); };
+        session.ProfileApplied += (_, _) => { _screensLoaded = false; OnPropertyChanged(nameof(CanManage)); OnPropertyChanged(nameof(ManageHint)); OnPropertyChanged(nameof(ManageTip)); _ = LoadGroupsForScopedAsync(); };
 
         // ── [무전] 칸 사이 ──
         PttChannels.SelectionChanged += (_, c) => { if (c?.Group is not null) McData.FollowGroup(c.Group); };
@@ -164,7 +164,7 @@ public sealed partial class MainViewModel : ObservableObject
         Panel.Pinned = false; Panel.View = PanelView.None;
         Screen = AppScreen.Dispatch;
         Mode = "ptt";
-        OnPropertyChanged(nameof(CanManage)); OnPropertyChanged(nameof(ManageHint));
+        OnPropertyChanged(nameof(CanManage)); OnPropertyChanged(nameof(ManageHint)); OnPropertyChanged(nameof(ManageTip));
         Summary.Refresh();
         RaiseBadges();
     }
@@ -318,16 +318,19 @@ public sealed partial class MainViewModel : ObservableObject
     // ── 레일(§3.4) ──
     public bool CanManage => Session.CanManageDirectory;
     public string ManageHint => CanManage ? "" : "조직/구성원·번호 관리는 관제 역할의 관리 범위(콘솔 관리 > 역할)가 있어야 합니다. PTT 그룹은 내 소유 그룹만 편집합니다.";
-    /// <summary>[더보기] 점 배지 — 저장하지 않은 관리 폼이 있다(전환을 막지 않는다).</summary>
+    /// <summary>레일 [관리] 툴팁 — 누를 수 없으면 그 이유.</summary>
+    public string ManageTip => CanManage ? "관리 F4 — 조직 · 구성원 · 번호" : ManageHint;
+    /// <summary>레일 [관리] 점 배지 — 저장하지 않은 관리 폼이 있다(전환을 막지 않는다).</summary>
     public bool AdminEditing => AdminScreen.IsDirty;
     public bool IsDispatch => Screen == AppScreen.Dispatch;
     public bool IsHistory => Screen == AppScreen.History;
-    public bool IsMore => Screen is AppScreen.PttGroups or AppScreen.Admin;
+    public bool IsPttGroups => Screen == AppScreen.PttGroups;
+    public bool IsAdmin => Screen == AppScreen.Admin;
     public string ScreenTitle => AppScreens.Title(Screen);
 
     partial void OnScreenChanged(AppScreen value)
     {
-        foreach (var p in new[] { nameof(IsDispatch), nameof(IsHistory), nameof(IsMore), nameof(ScreenTitle) }) OnPropertyChanged(p);
+        foreach (var p in new[] { nameof(IsDispatch), nameof(IsHistory), nameof(IsPttGroups), nameof(IsAdmin), nameof(ScreenTitle) }) OnPropertyChanged(p);
         if (!Panel.Pinned && !(value == AppScreen.PttGroups && _groupToScreen)) Panel.View = PanelView.None;
         if (value != AppScreen.Dispatch) { KeypadOpen = false; _ = LoadScreensAsync(); }
     }

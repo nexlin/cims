@@ -44,6 +44,8 @@
     <Geometry x:Key="Icon.RotateCw">M21,12 A9,9 0 1 1 12,3 C14.52,3 16.93,4 18.74,5.74 L21,8 M21,3 V8 H16</Geometry>
     <Geometry x:Key="Icon.RotateCcw">M3,12 A9,9 0 1 0 12,3 A9.75,9.75 0 0 0 5.26,5.74 L3,8 M3,3 V8 H8</Geometry>
     <Geometry x:Key="Icon.Device">M7,2 H17 A2,2 0 0 1 19,4 V20 A2,2 0 0 1 17,22 H7 A2,2 0 0 1 5,20 V4 A2,2 0 0 1 7,2 Z M10,5 H14</Geometry>
+    <!-- 조직도(상자 셋을 잇는 선) — 레일 [관리](조직 · 구성원 · 번호) -->
+    <Geometry x:Key="Icon.Org">M9,2 H15 V8 H9 Z M2,16 H8 V22 H2 Z M16,16 H22 V22 H16 Z M5,16 V13 A1,1 0 0 1 6,12 H18 A1,1 0 0 1 19,13 V16 M12,12 V8</Geometry>
     <Geometry x:Key="Icon.Folder">M20,20 A2,2 0 0 0 22,18 V8 A2,2 0 0 0 20,6 H12.1 A2,2 0 0 1 10.4,5.1 L9.6,3.9 A2,2 0 0 0 7.9,3 H4 A2,2 0 0 0 2,5 V18 A2,2 0 0 0 4,20 Z</Geometry>
 
     <!-- 14px 스트로크 아이콘. 크기는 Width/Height 로 덮어쓴다(12·16·18). 색 = 주변 글자색 -->

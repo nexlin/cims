@@ -1,5 +1,5 @@
 // 주 창 — 고정 배치(모드마다 한 화면, §3.3 — 도킹·프리셋 없음, 창 위치와 칸 경계만 기억)·감청 창 관리(§5, [창으로] 로만)·
-// 앱 포커스 핫키(§8: Ctrl+n·Ctrl+Shift+n·Ctrl+K·Ctrl+M·Esc·화면 전환 F1~F4)·화면 별창 관리(§3.4)·통합 검색 키 처리·[더보기] 메뉴·트레이 최소화·종료 확인(§6).
+// 앱 포커스 핫키(§8: Ctrl+n·Ctrl+Shift+n·Ctrl+K·Ctrl+M·Esc·화면 전환 F1~F4)·화면 별창 관리(§3.4)·통합 검색 키 처리·레일 [설정]·트레이 최소화·종료 확인(§6).
 using System.ComponentModel;
 using System.Windows;
 using System.Windows.Controls.Primitives;
@@ -58,13 +58,12 @@ public partial class MainWindow : Window
     /// <summary>드롭다운 항목 클릭 → 드롭다운 닫기(Command 는 그대로 실행된다).</summary>
     private void DropItem_Click(object sender, RoutedEventArgs e) { MonDrop.IsChecked = false; SessionDrop.IsChecked = false; }
 
-    // ── [더보기] — PTT 그룹 F3 · 관리 F4 · 설정. 메뉴를 여는 누름은 화면을 바꾸지 않으므로 켜짐 표시는 지금 화면(IsMore)으로 되돌린다 ──
-    private void MoreBtn_Click(object sender, RoutedEventArgs e)
+    // ── 레일 [설정] — 화면이 아니라 설정 창을 연다. 누름이 남긴 켜짐 표시는 곧바로 내린다 ──
+    private void RailSettings_Click(object sender, RoutedEventArgs e)
     {
-        MoreBtn.SetCurrentValue(ToggleButton.IsCheckedProperty, _vm.IsMore);
-        MorePop.IsOpen = !MorePop.IsOpen;
+        ((ToggleButton)sender).SetCurrentValue(ToggleButton.IsCheckedProperty, false);
+        _vm.Desk.OpenSettingsCommand.Execute(null);
     }
-    private void MoreItem_Click(object sender, RoutedEventArgs e) => MorePop.IsOpen = false;
 
     // ── 감청 창(§5) — [창으로] 를 눌렀을 때만 ──
     private void OpenMonitor(SessionItem s)

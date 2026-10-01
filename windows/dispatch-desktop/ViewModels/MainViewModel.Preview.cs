@@ -178,6 +178,22 @@ public sealed partial class MainViewModel
         Records.Open("7003");
     }
 
+    /// <summary>--ui-preview-screen=groups --ui-preview-groups=detail — [PTT 그룹] 화면의 상세(보기) 카드를 표본 문서·멤버로 그린다(순찰1 — 영상 채널, 세션 진행 중).</summary>
+    public void SeedGroupDetailPreview()
+    {
+        var doc = new GroupDoc
+        {
+            Uri = "tel:g-patrol1", DisplayName = "순찰1", SessionType = "prearranged", Priority = 7, EmergencyCall = true, EmergencyAlert = true, AllowSds = true, AllowFd = true,
+            RequireAffiliation = true, AuthorizedUser = "tel:1001", Mcvideo = new McVideoGroupAttrs { InviteMembers = false, MaxTransmitters = 2 },
+        };
+        // 멤버 = 문서의 편성 멤버 — 참여·발언 상태는 화면이 표본 로스터로 판정한다(1초 틱이 같은 식으로 다시 그린다)
+        foreach (var (num, name, chair) in new[] { ("5001", "김관제", true), ("1003", "이순경", false), ("1001", "최순경", false), ("1006", "박경장", true), ("1008", "윤순경", false),
+                                                   ("1004", "정경장", false), ("1005", "김순경", false), ("1007", "서상황", false), ("1010", "한지원", false), ("1013", "강순경", false),
+                                                   ("1009", "오경비", false), ("0500000001", "", false) })
+            doc.Members.Add(new GroupMember { Uri = "tel:" + num, Name = name, Role = chair ? "chair" : "participant" });
+        GroupsScreen.SeedPreviewDetail("g-patrol1", doc);
+    }
+
     /// <summary>--ui-preview-screen=groups 와 함께 — [PTT 그룹] 화면에 새 그룹 폼(능력·우선순위·확인 통화·멤버 역할 전부)을 세 멤버로 연다.</summary>
     public void SeedGroupFormPreview()
     {

@@ -99,12 +99,19 @@ public partial class App : Application
                 var screen = screenArg.ToLowerInvariant() switch { "history" => Models.AppScreen.History, "groups" => Models.AppScreen.PttGroups, _ => Models.AppScreen.Admin };
                 var vmS = _mainVm;
                 _main!.Dispatcher.BeginInvoke(DispatcherPriority.ContextIdle, () => vmS.Screen = screen);
-                // 관리 화면은 --ui-preview-canvas 와 함께면 표본 조직·구성원을 심는다(화면 전환의 로드 = "로그인 전" 뒤에)
+                // 관리 화면은 --ui-preview-canvas 와 함께면 표본 조직·구성원을 심는다(화면 전환의 로드 = "로그인 전" 뒤에).
+                // 오른쪽 폼 = 구성원 편집(기본) — --ui-preview-admin=org 조직 폼 · =none 자리표시
                 if (screen == Models.AppScreen.Admin && e.Args.Contains("--ui-preview-canvas", StringComparer.OrdinalIgnoreCase))
-                    _main.Dispatcher.BeginInvoke(DispatcherPriority.ApplicationIdle, () => vmS.AdminScreen.SeedPreview());
-                // [PTT 그룹] 화면은 새 그룹 폼(고급 설정 전부)을 연다
+                {
+                    string form = e.Args.FirstOrDefault(a => a.StartsWith("--ui-preview-admin=", StringComparison.OrdinalIgnoreCase))?.Split('=', 2)[1].ToLowerInvariant() ?? "";
+                    _main.Dispatcher.BeginInvoke(DispatcherPriority.ApplicationIdle, () => vmS.AdminScreen.SeedPreview(form));
+                }
+                // [PTT 그룹] 화면은 새 그룹 폼(고급 설정 전부)을 연다 — --ui-preview-groups=detail 이면 상세(보기) 카드를 표본으로 그린다
                 if (screen == Models.AppScreen.PttGroups && e.Args.Contains("--ui-preview-canvas", StringComparer.OrdinalIgnoreCase))
-                    _main.Dispatcher.BeginInvoke(DispatcherPriority.ApplicationIdle, () => vmS.SeedGroupFormPreview());
+                {
+                    bool detail = e.Args.Any(a => a.Equals("--ui-preview-groups=detail", StringComparison.OrdinalIgnoreCase));
+                    _main.Dispatcher.BeginInvoke(DispatcherPriority.ApplicationIdle, () => { if (detail) vmS.SeedGroupDetailPreview(); else vmS.SeedGroupFormPreview(); });
+                }
             }
             // --ui-preview-canvas: 관제 두 화면(§3.1)에 표본 채널·세션·대기열·기록·메시지를 심는다. --ui-preview-banner=alerts|incoming|none 으로 배너 층을 고른다.
             string Arg(string name) => e.Args.FirstOrDefault(a => a.StartsWith(name + "=", StringComparison.OrdinalIgnoreCase))?.Split('=', 2)[1] ?? "";
@@ -170,7 +177,7 @@ public partial class App : Application
                 var vmP = _mainVm;
                 _main!.Dispatcher.BeginInvoke(DispatcherPriority.ApplicationIdle, () => vmP.People.OpenMenu(who));
             }
-            // --ui-preview-open=more|mon|session|dtmf|xfer|chan|suggest|combo: 그 팝업을 열어 둔다 — 더보기 메뉴 · 감청 중 목록 · 세션 목록 · 첫 통화 카드의 DTMF/전달 ·
+            // --ui-preview-open=mon|session|dtmf|xfer|chan|suggest|combo: 그 팝업을 열어 둔다 — 감청 중 목록 · 세션 목록 · 첫 통화 카드의 DTMF/전달 ·
             //   이벤트 채널 거르기 · 번호칸 제안(dtmf·xfer·suggest 는 -mode=call) · 보이는 첫 콤보 목록. -shot 이 팝업을 따로 찍는다.
             if (Arg("--ui-preview-open") is { Length: > 0 } openArg && _mainVm is not null)
             {
@@ -179,7 +186,6 @@ public partial class App : Application
                 {
                     switch (openArg.ToLowerInvariant())
                     {
-                        case "more": mwO.MorePop.IsOpen = true; break;
                         case "mon": mwO.MonDrop.IsChecked = true; break;
                         case "session": mwO.SessionDrop.IsChecked = true; break;
                         case "dtmf": if (vmO.CallDesk.Calls.FirstOrDefault() is { } cd) cd.DtmfOpen = true; break;

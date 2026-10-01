@@ -79,8 +79,18 @@ public sealed partial class GroupAdminViewModel : ObservableObject
     public bool ShowPlaceholder => !HasDetail && !IsEditing;
     public string DetailOwner => DetailDoc is null ? "" : OwnerLabel(DetailDoc.AuthorizedUser);
     public string DetailOrg => Selected is null ? "" : (Selected.OrgPath.Length > 0 ? Selected.OrgPath : "—");
-    public string DetailPolicy => DetailDoc is null ? "" : $"우선순위 {DetailDoc.Priority} · 긴급 {(DetailDoc.EmergencyCall ? "허용" : "불가")} · {(DetailDoc.SessionType == "chat" ? "채팅" : "사전편성")}";
-    public string DetailCapability => DetailDoc is null ? "" : string.Join(" · ", new[] { DetailDoc.AllowSds ? "SDS" : "", DetailDoc.AllowFd ? "FD" : "", McVideoText(DetailDoc.Mcvideo), DetailDoc.Encryption ? "암호화" : "", DetailDoc.RequireAffiliation ? "affiliation 필요" : "" }.Where(x => x.Length > 0));
+    // 정보 칸(§4.7 상세) — 문서를 받기 전에는 «…»
+    public string DetailSessionType => DetailDoc is null ? "…" : DetailDoc.SessionType == "chat" ? "채팅(chat)" : "사전편성(prearranged)";
+    public string DetailPriority => DetailDoc is null ? "…" : DetailDoc.Priority.ToString();
+    public string DetailEmergency => DetailDoc is null ? "…" : string.Join(" · ", new[] { DetailDoc.EmergencyCall ? "긴급 통화" : "", DetailDoc.EmergencyAlert ? "긴급 경보" : "" }.Where(x => x.Length > 0)) is { Length: > 0 } e ? e : "허용 안 함";
+    public string DetailOwnerText => DetailDoc is null ? "…" : DetailOwner;
+    /// <summary>능력 칩 — 음성(늘) · SDS · FD · MCVideo · 암호화 · affiliation 필요.</summary>
+    public IReadOnlyList<string> DetailCapabilities => DetailDoc is null ? Array.Empty<string>()
+        : new[] { "MCPTT 음성", DetailDoc.AllowSds ? "메시지(SDS)" : "", DetailDoc.AllowFd ? "파일(FD)" : "", McVideoText(DetailDoc.Mcvideo), DetailDoc.Encryption ? "암호화" : "", DetailDoc.RequireAffiliation ? "affiliation 필요" : "" }
+            .Where(x => x.Length > 0).ToList();
+    /// <summary>머리 둘째 줄 "g-patrol1 · 경비과 › 순찰대".</summary>
+    public string DetailIdLine => Selected is null ? "" : Selected.OrgPath.Length > 0 ? $"{Selected.Id} · {Selected.OrgPath}" : Selected.Id;
+    public bool HasGroups => Groups.Count > 0;
     public string DetailListenVisibility => _s.ListenHidden ? "은닉" : "투명";
     /// <summary>능력 줄의 MCVideo 몫(§10.6) — "MCVideo chat · 송출 2" / "MCVideo 편성 · 송출 2", MCVideo 그룹이 아니면 빈 값.</summary>
     private static string McVideoText(CimsUe.McVideoGroupAttrs? a) => a is null ? ""
@@ -111,10 +121,11 @@ public sealed partial class GroupAdminViewModel : ObservableObject
     partial void OnErrorChanged(string value) => OnPropertyChanged(nameof(HasError));
     partial void OnSearchChanged(string value) => Filter();
     partial void OnListFilterChanged(string value) => Filter();
-    partial void OnSelectedChanged(GroupAdminRow? value) { OnPropertyChanged(nameof(HasDetail)); OnPropertyChanged(nameof(ShowDetail)); OnPropertyChanged(nameof(ShowPlaceholder)); OnPropertyChanged(nameof(DetailOrg)); _ = LoadDetailAsync(value); }
+    partial void OnSelectedChanged(GroupAdminRow? value) { OnPropertyChanged(nameof(HasDetail)); OnPropertyChanged(nameof(ShowDetail)); OnPropertyChanged(nameof(ShowPlaceholder)); OnPropertyChanged(nameof(DetailOrg)); OnPropertyChanged(nameof(DetailIdLine)); _ = LoadDetailAsync(value); }
     partial void OnDetailDocChanged(CimsUe.GroupDoc? value)
     {
-        foreach (var p in new[] { nameof(DetailOwner), nameof(DetailPolicy), nameof(DetailCapability), nameof(DetailListenVisibility), nameof(DetailHasSession) }) OnPropertyChanged(p);
+        foreach (var p in new[] { nameof(DetailOwner), nameof(DetailOwnerText), nameof(DetailSessionType), nameof(DetailPriority), nameof(DetailEmergency), nameof(DetailCapabilities),
+                                  nameof(DetailListenVisibility), nameof(DetailHasSession) }) OnPropertyChanged(p);
     }
     [RelayCommand] private void SetFilter(string f) => ListFilter = f;
     [RelayCommand] private void GoToChannel() { if (Selected is not null) ChannelRequested?.Invoke(this, Selected.Id); }
@@ -242,7 +253,7 @@ public sealed partial class GroupAdminViewModel : ObservableObject
             Groups.Add(new GroupAdminRow(g, g.OrgCode.Length > 0 ? _s.Directory.OrgPath(g.OrgCode) : "", g.IsOwner ? $"{_s.DisplayName}(나)" : owners.GetValueOrDefault(g.Id, ""))
                        { IsVideo = IsVideoGroup(g.Id) });
         }
-        OnPropertyChanged(nameof(TotalCount));
+        OnPropertyChanged(nameof(TotalCount)); OnPropertyChanged(nameof(HasGroups));
         // 밖에서 지목한 그룹이 먼저다 — 그것이 목록에 있으면 «보던 것 유지» 보다 앞선다.
         if (_pendingSelect.Length > 0 && Groups.FirstOrDefault(x => x.Id == _pendingSelect) is { } want)
         {
@@ -285,6 +296,18 @@ public sealed partial class GroupAdminViewModel : ObservableObject
 
     /// <summary>개발 스위치 --ui-preview-screen=groups 의 표본 폼 — 표본에는 PTT 계정이 없어 생성 자격(CanCreate)이 거짓이므로 판정 없이 연다.</summary>
     public void OpenPreview(GroupEditViewModel vm) => Open(vm);
+
+    /// <summary>개발 스위치 --ui-preview-groups=detail — 서버 없이 상세(보기) 카드를 그려 본다: 표본 그룹 문서·멤버 줄을 직접 채운다.</summary>
+    public void SeedPreviewDetail(string groupId, CimsUe.GroupDoc doc)
+    {
+        Editor = null;
+        if (Groups.FirstOrDefault(x => x.Id == groupId) is { } row) { Selected = row; row.IsVideo = doc.Mcvideo is not null; }
+        ++_detailSeq;                                                   // 선택이 건 문서 조회(로그인 전 오류)가 뒤늦게 덮어쓰지 않게
+        DetailLoading = false; DetailError = "";
+        DetailDoc = doc;
+        foreach (var p in new[] { nameof(HasDetail), nameof(ShowDetail), nameof(ShowPlaceholder), nameof(DetailOrg), nameof(DetailIdLine) }) OnPropertyChanged(p);
+        RefreshDetailMembers();
+    }
 
     private void Open(GroupEditViewModel vm)
     {

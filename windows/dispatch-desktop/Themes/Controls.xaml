@@ -361,6 +361,41 @@
         <Setter Property="VerticalContentAlignment" Value="Center" />
         <Setter Property="FontSize" Value="13" />
     </Style>
+    <!-- 편집 폼 공용([PTT 그룹] 폼 · [관리] 폼) — 절 카드(연한 면 + 제목 한 줄) · 이름표 · 높이 32 입력칸 · 스위치 · 흰 목록 카드 -->
+    <Style TargetType="Border" x:Key="FormCard">
+        <Setter Property="Background" Value="{DynamicResource Brush.BgSoft}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource Brush.Border}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="10" />
+        <Setter Property="Padding" Value="16,13,16,14" />
+        <Setter Property="Margin" Value="0,0,0,12" />
+    </Style>
+    <Style TargetType="TextBlock" x:Key="FormTitle">
+        <Setter Property="FontSize" Value="13.5" />
+        <Setter Property="FontWeight" Value="Bold" />
+        <Setter Property="Margin" Value="0,0,0,10" />
+    </Style>
+    <Style TargetType="TextBlock" x:Key="FormLabel" BasedOn="{StaticResource Hint}">
+        <Setter Property="Foreground" Value="{DynamicResource Brush.TextSoft}" />
+        <Setter Property="TextWrapping" Value="NoWrap" />
+        <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+        <Setter Property="Margin" Value="0,0,0,3" />
+    </Style>
+    <Style TargetType="TextBox" x:Key="Field.Form" BasedOn="{StaticResource Field}"><Setter Property="Height" Value="32" /></Style>
+    <Style TargetType="ComboBox" x:Key="FieldCombo.Form" BasedOn="{StaticResource FieldCombo}"><Setter Property="Height" Value="32" /></Style>
+    <Style TargetType="ComboBox" x:Key="OrgCombo.Form" BasedOn="{StaticResource OrgCombo}"><Setter Property="Height" Value="32" /></Style>
+    <Style TargetType="PasswordBox" x:Key="FieldPw.Form" BasedOn="{StaticResource FieldPw}"><Setter Property="Height" Value="32" /></Style>
+    <Style TargetType="CheckBox" x:Key="Switch.Form" BasedOn="{StaticResource Switch}">
+        <Setter Property="Foreground" Value="{DynamicResource Brush.Text}" />
+        <Setter Property="FontSize" Value="12.5" />
+        <Setter Property="Margin" Value="0,0,0,8" />
+    </Style>
+    <Style TargetType="Border" x:Key="ListCard">
+        <Setter Property="Background" Value="{DynamicResource Brush.Surface}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource Brush.Border}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="10" />
+    </Style>
     <Style TargetType="GridSplitter">
         <Setter Property="Background" Value="Transparent" />
     </Style>

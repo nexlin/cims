@@ -5,15 +5,19 @@
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008" xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" mc:Ignorable="d"
              d:DataContext="{d:DesignInstance vm:GroupEditViewModel}">
     <!-- PTT 그룹 생성·편집 폼 — GMS 그룹 문서(§4.7). [PTT 그룹] 화면 상세 카드 자리에 인라인으로 뜬다(DataContext = GroupAdminViewModel.Editor).
-         왼쪽 속성 · 오른쪽 멤버(후보 ↔ 선택) · 바닥 오류 + [취소][저장] -->
+         왼쪽 = 속성 절 넷(기본 · 그룹 호 · 허용·한도 · 서비스 — 연한 면 카드) · 오른쪽 = 멤버(PTT 주소록 → 멤버, 카드 둘) · 바닥 = 오류 + [취소][저장].
+         절 카드·이름표·입력칸 스타일(FormCard·FormLabel·Field.Form…)은 [관리] 폼과 공용(Themes/Controls.xaml) -->
     <DockPanel>
-        <Border DockPanel.Dock="Bottom" BorderBrush="{DynamicResource Brush.Border}" BorderThickness="0,1,0,0" Padding="12,8">
+        <!-- 바닥: 오류 · 조회 중 + [취소][저장] -->
+        <Border DockPanel.Dock="Bottom" BorderBrush="{DynamicResource Brush.Border}" BorderThickness="0,1,0,0" Padding="20,12,16,12">
             <DockPanel>
                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
-                    <Button Style="{StaticResource Btn}" Content="취소" Command="{Binding CancelCommand}" Margin="0,0,6,0" />
+                    <Button Style="{StaticResource Pill.Line}" Height="36" Padding="18,0" Content="취소" Command="{Binding CancelCommand}" Margin="0,0,8,0" />
                     <Button Command="{Binding SaveCommand}" IsEnabled="{Binding CanSave}">
                         <Button.Style>
-                            <Style TargetType="Button" BasedOn="{StaticResource Btn.Pri}">
+                            <Style TargetType="Button" BasedOn="{StaticResource Pill.Ink}">
+                                <Setter Property="Height" Value="36" />
+                                <Setter Property="Padding" Value="20,0" />
                                 <Setter Property="Content" Value="저장" />
                                 <Style.Triggers>
                                     <DataTrigger Binding="{Binding IsNew}" Value="True"><Setter Property="Content" Value="그룹 만들기" /></DataTrigger>
@@ -23,194 +27,263 @@
                         </Button.Style>
                     </Button>
                 </StackPanel>
-                <TextBlock Style="{StaticResource Hint}" Foreground="{DynamicResource Brush.Emg}" Text="{Binding Error}" VerticalAlignment="Center" TextWrapping="Wrap"
+                <TextBlock FontSize="12.5" Foreground="{DynamicResource Brush.Emg}" Text="{Binding Error}" VerticalAlignment="Center" TextWrapping="Wrap" Margin="0,0,16,0"
                            Visibility="{Binding HasError, Converter={StaticResource BoolToVis}}" />
-                <TextBlock Style="{StaticResource Hint}" Text="문서 조회 중…" VerticalAlignment="Center" Visibility="{Binding Loaded, Converter={StaticResource NotToVis}}" />
+                <TextBlock Style="{StaticResource Hint}" Text="그룹 문서 조회 중…" VerticalAlignment="Center" Visibility="{Binding Loaded, Converter={StaticResource NotToVis}}" />
             </DockPanel>
         </Border>
-        <Grid Margin="12,10" IsEnabled="{Binding Loaded}">
+        <Grid IsEnabled="{Binding Loaded}">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="260" />
+                <ColumnDefinition Width="400" />
                 <ColumnDefinition Width="*" />
             </Grid.ColumnDefinitions>
-            <!-- 속성 -->
-            <ScrollViewer Grid.Column="0" VerticalScrollBarVisibility="Auto" Margin="0,0,14,0">
-                <StackPanel>
-                    <TextBlock Text="그룹 이름" Style="{StaticResource Hint}" />
-                    <TextBox Style="{StaticResource Field}" Text="{Binding Name, UpdateSourceTrigger=PropertyChanged}" Margin="0,2,0,10" />
-                    <TextBlock Text="그룹 id (XCAP 문서 이름)" Style="{StaticResource Hint}" />
-                    <TextBox Style="{StaticResource Field}" Text="{Binding GroupId, UpdateSourceTrigger=PropertyChanged}" IsEnabled="{Binding IsNew}" FontFamily="{StaticResource Font.Mono}" Margin="0,2,0,2" />
-                    <TextBlock Style="{StaticResource MonoMuted}" Text="{Binding Uri}" FontSize="11" TextTrimming="CharacterEllipsis" Margin="0,0,0,10" />
-                    <TextBlock Text="세션 종류" Style="{StaticResource Hint}" />
-                    <ComboBox Style="{StaticResource FieldCombo}" ItemsSource="{Binding SessionTypes}" SelectedItem="{Binding SessionType}" Margin="0,2,0,10" />
-                    <UniformGrid Columns="2" Margin="0,0,0,10">
-                        <StackPanel Margin="0,0,6,0">
-                            <TextBlock Text="그룹 우선순위" Style="{StaticResource Hint}" />
-                            <TextBox Style="{StaticResource Field}" Text="{Binding Priority, UpdateSourceTrigger=PropertyChanged}" Margin="0,2,0,0" />
-                        </StackPanel>
+
+            <!-- ═══ 속성 ═══ -->
+            <ScrollViewer Grid.Column="0" VerticalScrollBarVisibility="Auto">
+                <StackPanel Margin="20,16,8,8">
+                    <!-- 기본 -->
+                    <Border Style="{StaticResource FormCard}">
                         <StackPanel>
-                            <TextBlock Text="최대 참가자(0=무제한)" Style="{StaticResource Hint}" ToolTip="0 = 참가자 수 제한 없음" />
-                            <TextBox Style="{StaticResource Field}" Text="{Binding MaxParticipants, UpdateSourceTrigger=PropertyChanged}" Margin="0,2,0,0" />
+                            <TextBlock Style="{StaticResource FormTitle}" Text="기본" />
+                            <TextBlock Style="{StaticResource FormLabel}" Text="그룹 이름" />
+                            <TextBox Style="{StaticResource Field.Form}" Text="{Binding Name, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,0,10" />
+                            <TextBlock Style="{StaticResource FormLabel}" Text="그룹 id — XCAP 문서 이름(만든 뒤 바꿀 수 없음)" />
+                            <TextBox Style="{StaticResource Field.Form}" Text="{Binding GroupId, UpdateSourceTrigger=PropertyChanged}" IsEnabled="{Binding IsNew}" FontFamily="{StaticResource Font.Mono}" />
+                            <TextBlock Style="{StaticResource MonoMuted}" Text="{Binding Uri}" FontSize="11" TextTrimming="CharacterEllipsis" Margin="0,3,0,10" />
+                            <TextBlock Style="{StaticResource FormLabel}" Text="세션 종류" />
+                            <ComboBox Style="{StaticResource FieldCombo.Form}" ItemsSource="{Binding SessionTypes}" SelectedItem="{Binding SessionType}" Margin="0,0,0,10" />
+                            <UniformGrid Columns="2">
+                                <StackPanel Margin="0,0,6,0">
+                                    <TextBlock Style="{StaticResource FormLabel}" Text="그룹 우선순위" />
+                                    <TextBox Style="{StaticResource Field.Form}" Text="{Binding Priority, UpdateSourceTrigger=PropertyChanged}" />
+                                </StackPanel>
+                                <StackPanel Margin="6,0,0,0" ToolTip="0 = 참가자 수 제한 없음">
+                                    <TextBlock Style="{StaticResource FormLabel}" Text="최대 참가자(0 = 무제한)" />
+                                    <TextBox Style="{StaticResource Field.Form}" Text="{Binding MaxParticipants, UpdateSourceTrigger=PropertyChanged}" />
+                                </StackPanel>
+                            </UniformGrid>
                         </StackPanel>
-                    </UniformGrid>
+                    </Border>
                     <!-- 그룹 호(TS 24.481 §7.2.2 — 편성 그룹만): T4·TNG3·확인 통화 설정. 범위·기본값은 콘솔 그룹 편집과 같다 -->
-                    <TextBlock Style="{StaticResource SectionHeader}" Text="그룹 호" Margin="0,2,0,4" />
-                    <UniformGrid Columns="2" Margin="0,0,0,8">
-                        <StackPanel Margin="0,0,6,0" ToolTip="on-network-hang-timer — 발언 없이 이 시간이 지나면 그룹 호를 해제한다(0 = 미사용, 최대 3600). 일제 통화에 쓰는 그룹은 짧게 준다">
-                            <TextBlock Text="유지 시간(T4, 초)" Style="{StaticResource Hint}" />
-                            <TextBox Style="{StaticResource Field}" Text="{Binding HangTimerSec, UpdateSourceTrigger=PropertyChanged}" Margin="0,2,0,0" />
+                    <Border Style="{StaticResource FormCard}">
+                        <StackPanel>
+                            <TextBlock Style="{StaticResource FormTitle}" Text="그룹 호" />
+                            <UniformGrid Columns="2" Margin="0,0,0,10">
+                                <StackPanel Margin="0,0,6,0" ToolTip="on-network-hang-timer — 발언 없이 이 시간이 지나면 그룹 호를 해제한다(0 = 미사용, 최대 3600). 일제 통화에 쓰는 그룹은 짧게 준다">
+                                    <TextBlock Style="{StaticResource FormLabel}" Text="유지 시간(T4, 초)" />
+                                    <TextBox Style="{StaticResource Field.Form}" Text="{Binding HangTimerSec, UpdateSourceTrigger=PropertyChanged}" />
+                                </StackPanel>
+                                <StackPanel Margin="6,0,0,0" ToolTip="on-network-maximum-duration — 그룹 호 최대 시간(0 = 무제한, 최대 86400)">
+                                    <TextBlock Style="{StaticResource FormLabel}" Text="최대 통화 시간(초)" />
+                                    <TextBox Style="{StaticResource Field.Form}" Text="{Binding MaxDurationSec, UpdateSourceTrigger=PropertyChanged}" />
+                                </StackPanel>
+                            </UniformGrid>
+                            <UniformGrid Columns="2" Margin="0,0,0,10">
+                                <StackPanel Margin="0,0,6,0" ToolTip="on-network-minimum-number-to-start — 개시자에게 응답하기 전에 받아야 할 멤버 응답 수(0 = 기다리지 않음)">
+                                    <TextBlock Style="{StaticResource FormLabel}" Text="시작 최소 응답(명)" />
+                                    <TextBox Style="{StaticResource Field.Form}" Text="{Binding MinNumberToStart, UpdateSourceTrigger=PropertyChanged}" />
+                                </StackPanel>
+                                <StackPanel Margin="6,0,0,0" ToolTip="on-network-timeout-for-acknowledgement-of-required-members — 필수 멤버의 응답을 기다리는 시간(1~300, 필수 멤버가 있을 때만)">
+                                    <TextBlock Style="{StaticResource FormLabel}" Text="필수 멤버 대기(TNG1, 초)" />
+                                    <TextBox Style="{StaticResource Field.Form}" Text="{Binding AckTimeoutSec, UpdateSourceTrigger=PropertyChanged}" />
+                                </StackPanel>
+                            </UniformGrid>
+                            <TextBlock Style="{StaticResource FormLabel}" Text="필수 멤버 대기가 끝나면" />
+                            <ComboBox Style="{StaticResource FieldCombo.Form}" ItemsSource="{Binding AckActions}" DisplayMemberPath="Value" SelectedValuePath="Key" SelectedValue="{Binding AckAction}" Margin="0,0,0,12"
+                                      ToolTip="on-network-action-upon-expiration-of-timeout-for-acknowledgement-of-required-members — 필수 멤버가 응답하지 않거나 거절하면" />
+                            <CheckBox Style="{StaticResource Switch.Form}" Content="참가자 정보 구독 허용" IsChecked="{Binding AllowConferenceState}" Margin="0"
+                                      ToolTip="on-network-allow-conference-state — 멤버가 그룹 세션의 참가자 정보(conference 이벤트)를 구독할 수 있음. 끄면 서버가 403(관제사 청취 범위는 별도)" />
                         </StackPanel>
-                        <StackPanel ToolTip="on-network-maximum-duration — 그룹 호 최대 시간(0 = 무제한, 최대 86400)">
-                            <TextBlock Text="최대 통화 시간(초)" Style="{StaticResource Hint}" />
-                            <TextBox Style="{StaticResource Field}" Text="{Binding MaxDurationSec, UpdateSourceTrigger=PropertyChanged}" Margin="0,2,0,0" />
+                    </Border>
+                    <!-- 허용 · 한도 -->
+                    <Border Style="{StaticResource FormCard}">
+                        <StackPanel>
+                            <TextBlock Style="{StaticResource FormTitle}" Text="허용 · 한도" />
+                            <UniformGrid Columns="2">
+                                <CheckBox Style="{StaticResource Switch.Form}" Content="긴급 그룹콜" IsChecked="{Binding EmergencyCall}" />
+                                <CheckBox Style="{StaticResource Switch.Form}" Content="긴급 경보" IsChecked="{Binding EmergencyAlert}" />
+                                <CheckBox Style="{StaticResource Switch.Form}" Content="메시지(SDS)" IsChecked="{Binding AllowSds}" />
+                                <CheckBox Style="{StaticResource Switch.Form}" Content="파일 전송(FD)" IsChecked="{Binding AllowFd}" />
+                                <CheckBox Style="{StaticResource Switch.Form}" Content="미디어 암호화" IsChecked="{Binding Encryption}" />
+                                <CheckBox Style="{StaticResource Switch.Form}" Content="affiliation 필요" IsChecked="{Binding RequireAffiliation}" ToolTip="참여 전에 affiliation 이 있어야 한다" />
+                            </UniformGrid>
+                            <UniformGrid Columns="2" Margin="0,4,0,0">
+                                <StackPanel Margin="0,0,6,0" ToolTip="mcdata-on-network-max-data-size-for-SDS — 그룹 메시지 최대 크기(0 = 무제한)">
+                                    <TextBlock Style="{StaticResource FormLabel}" Text="메시지 최대(byte)" />
+                                    <TextBox Style="{StaticResource Field.Form}" Text="{Binding MaxSdsSize, UpdateSourceTrigger=PropertyChanged}" />
+                                </StackPanel>
+                                <StackPanel Margin="6,0,0,0" ToolTip="mcdata-on-network-max-data-size-auto-recv — 파일 자동 다운로드 임계(0 = 무제한)">
+                                    <TextBlock Style="{StaticResource FormLabel}" Text="자동 수신 최대(byte)" />
+                                    <TextBox Style="{StaticResource Field.Form}" Text="{Binding MaxAutoRecv, UpdateSourceTrigger=PropertyChanged}" />
+                                </StackPanel>
+                            </UniformGrid>
                         </StackPanel>
-                    </UniformGrid>
-                    <UniformGrid Columns="2" Margin="0,0,0,8">
-                        <StackPanel Margin="0,0,6,0" ToolTip="on-network-minimum-number-to-start — 개시자에게 응답하기 전에 받아야 할 멤버 응답 수(0 = 기다리지 않음)">
-                            <TextBlock Text="시작 최소 응답(명)" Style="{StaticResource Hint}" />
-                            <TextBox Style="{StaticResource Field}" Text="{Binding MinNumberToStart, UpdateSourceTrigger=PropertyChanged}" Margin="0,2,0,0" />
-                        </StackPanel>
-                        <StackPanel ToolTip="on-network-timeout-for-acknowledgement-of-required-members — 필수 멤버의 응답을 기다리는 시간(1~300, 필수 멤버가 있을 때만)">
-                            <TextBlock Text="필수 멤버 대기(TNG1, 초)" Style="{StaticResource Hint}" />
-                            <TextBox Style="{StaticResource Field}" Text="{Binding AckTimeoutSec, UpdateSourceTrigger=PropertyChanged}" Margin="0,2,0,0" />
-                        </StackPanel>
-                    </UniformGrid>
-                    <TextBlock Text="대기 만료 시" Style="{StaticResource Hint}" />
-                    <ComboBox Style="{StaticResource FieldCombo}" ItemsSource="{Binding AckActions}" DisplayMemberPath="Value" SelectedValuePath="Key" SelectedValue="{Binding AckAction}" Margin="0,2,0,8"
-                              ToolTip="on-network-action-upon-expiration-of-timeout-for-acknowledgement-of-required-members — 필수 멤버가 응답하지 않거나 거절하면" />
-                    <CheckBox Style="{StaticResource Switch}" Content="참가자 정보 구독 허용" IsChecked="{Binding AllowConferenceState}" Margin="0,0,0,10"
-                              ToolTip="on-network-allow-conference-state — 멤버가 그룹 세션의 참가자 정보(conference 이벤트)를 구독할 수 있음. 끄면 서버가 403(관제사 청취 범위는 별도)" />
-                    <TextBlock Style="{StaticResource SectionHeader}" Text="허용 · 한도" Margin="0,2,0,4" />
-                    <CheckBox Style="{StaticResource Switch}" Content="긴급 그룹콜 허용" IsChecked="{Binding EmergencyCall}" Margin="0,2,0,6" />
-                    <CheckBox Style="{StaticResource Switch}" Content="긴급 경보 허용" IsChecked="{Binding EmergencyAlert}" Margin="0,0,0,6" />
-                    <CheckBox Style="{StaticResource Switch}" Content="메시지(SDS) 허용" IsChecked="{Binding AllowSds}" Margin="0,0,0,6" />
-                    <CheckBox Style="{StaticResource Switch}" Content="파일 전송(FD) 허용" IsChecked="{Binding AllowFd}" Margin="0,0,0,6" />
-                    <CheckBox Style="{StaticResource Switch}" Content="참여 전 affiliation 필요" IsChecked="{Binding RequireAffiliation}" Margin="0,0,0,6" />
-                    <CheckBox Style="{StaticResource Switch}" Content="미디어 암호화" IsChecked="{Binding Encryption}" Margin="0,0,0,6" />
-                    <UniformGrid Columns="2" Margin="0,4,0,0">
-                        <StackPanel Margin="0,0,6,0" ToolTip="mcdata-on-network-max-data-size-for-SDS — 그룹 메시지 최대 크기(0 = 무제한)">
-                            <TextBlock Text="메시지 최대(byte)" Style="{StaticResource Hint}" />
-                            <TextBox Style="{StaticResource Field}" Text="{Binding MaxSdsSize, UpdateSourceTrigger=PropertyChanged}" Margin="0,2,0,0" />
-                        </StackPanel>
-                        <StackPanel ToolTip="mcdata-on-network-max-data-size-auto-recv — 파일 자동 다운로드 임계(0 = 무제한)">
-                            <TextBlock Text="자동수신 최대(byte)" Style="{StaticResource Hint}" />
-                            <TextBox Style="{StaticResource Field}" Text="{Binding MaxAutoRecv, UpdateSourceTrigger=PropertyChanged}" Margin="0,2,0,0" />
-                        </StackPanel>
-                    </UniformGrid>
-                    <!-- MCVideo 그룹 영상(§10.6, TS 24.481 §7.2.2) — 켜기만(끄기는 콘솔 — 서버 전환기). 범위·기본값은 서버와 같다 -->
-                    <TextBlock Style="{StaticResource SectionHeader}" Text="서비스" Margin="0,12,0,4" ToolTip="한 그룹 = 서비스 집합(TS 23.280 §3) — 서비스마다 자기 속성(TS 24.481 §7.2.2)" />
-                    <CheckBox Style="{StaticResource Switch}" Content="MCPTT 음성 — 늘 켬" IsChecked="True" IsEnabled="False" Margin="0,2,0,6" ToolTipService.ShowOnDisabled="True"
-                              ToolTip="그룹의 기본 서비스(음성 무전) — 위 «그룹 호»·«허용·한도» 가 이 서비스의 속성" />
-                    <CheckBox Style="{StaticResource Switch}" Content="MCVideo 영상" IsChecked="{Binding McVideo}" IsEnabled="{Binding CanToggleMcVideo}" Margin="0,0,0,2"
-                              ToolTip="{Binding McVideoTip}" ToolTipService.ShowOnDisabled="True" />
-                    <TextBlock Style="{StaticResource Hint}" Text="끄기는 운영 콘솔에서" Margin="34,0,0,6" Visibility="{Binding McVideoLocked, Converter={StaticResource BoolToVis}}" />
-                    <StackPanel Visibility="{Binding McVideo, Converter={StaticResource BoolToVis}}">
-                        <TextBlock Text="호 방식" Style="{StaticResource Hint}" />
-                        <ComboBox Style="{StaticResource FieldCombo}" ItemsSource="{Binding McVideoTypes}" DisplayMemberPath="Value" SelectedValuePath="Key" SelectedValue="{Binding McVideoType}" Margin="0,2,0,8"
-                                  ToolTip="mcvideo-on-network-invite-members — chat = 원하는 사람이 들어온다(합류가 곧 affiliation), 편성 = 제어 기능이 MCVideo 로 제휴한 멤버를 초대" />
-                        <UniformGrid Columns="2" Margin="0,0,0,8">
-                            <StackPanel Margin="0,0,6,0" ToolTip="mcvideo-maximum-simultaneous-mcvideo-transmitting-group-members — 동시에 영상을 보낼 수 있는 멤버 수(1~16)">
-                                <TextBlock Text="동시 송출 상한" Style="{StaticResource Hint}" />
-                                <TextBox Style="{StaticResource Field}" Text="{Binding McVideoMaxTransmitters, UpdateSourceTrigger=PropertyChanged}" Margin="0,2,0,0" />
+                    </Border>
+                    <!-- 서비스 — MCVideo 그룹 영상(§10.6, TS 24.481 §7.2.2): 켜기만(끄기는 콘솔 — 서버 전환기). 범위·기본값은 서버와 같다 -->
+                    <Border Style="{StaticResource FormCard}">
+                        <StackPanel>
+                            <TextBlock Style="{StaticResource FormTitle}" Text="서비스" ToolTip="한 그룹 = 서비스 집합(TS 23.280 §3) — 서비스마다 자기 속성(TS 24.481 §7.2.2)" />
+                            <CheckBox Style="{StaticResource Switch.Form}" Content="MCPTT 음성 — 늘 켬" IsChecked="True" IsEnabled="False" ToolTipService.ShowOnDisabled="True"
+                                      ToolTip="그룹의 기본 서비스(음성 무전) — 위 «그룹 호»·«허용·한도» 가 이 서비스의 속성" />
+                            <CheckBox Style="{StaticResource Switch.Form}" Content="MCVideo 영상" IsChecked="{Binding McVideo}" IsEnabled="{Binding CanToggleMcVideo}" Margin="0,0,0,2"
+                                      ToolTip="{Binding McVideoTip}" ToolTipService.ShowOnDisabled="True" />
+                            <TextBlock Style="{StaticResource Hint}" Text="끄기는 운영 콘솔에서" Margin="34,0,0,0" Visibility="{Binding McVideoLocked, Converter={StaticResource BoolToVis}}" />
+                            <StackPanel Margin="0,10,0,0" Visibility="{Binding McVideo, Converter={StaticResource BoolToVis}}">
+                                <TextBlock Style="{StaticResource FormLabel}" Text="호 방식" />
+                                <ComboBox Style="{StaticResource FieldCombo.Form}" ItemsSource="{Binding McVideoTypes}" DisplayMemberPath="Value" SelectedValuePath="Key" SelectedValue="{Binding McVideoType}" Margin="0,0,0,10"
+                                          ToolTip="mcvideo-on-network-invite-members — chat = 원하는 사람이 들어온다(합류가 곧 affiliation), 편성 = 제어 기능이 MCVideo 로 제휴한 멤버를 초대" />
+                                <UniformGrid Columns="2" Margin="0,0,0,10">
+                                    <StackPanel Margin="0,0,6,0" ToolTip="mcvideo-maximum-simultaneous-mcvideo-transmitting-group-members — 동시에 영상을 보낼 수 있는 멤버 수(1~16)">
+                                        <TextBlock Style="{StaticResource FormLabel}" Text="동시 송출 상한" />
+                                        <TextBox Style="{StaticResource Field.Form}" Text="{Binding McVideoMaxTransmitters, UpdateSourceTrigger=PropertyChanged}" />
+                                    </StackPanel>
+                                    <StackPanel Margin="6,0,0,0" ToolTip="mcvideo-on-network-maximum-duration — 영상 호 최대 시간(TNG3, 0 = 무제한, 최대 86400)">
+                                        <TextBlock Style="{StaticResource FormLabel}" Text="최대 통화 시간(초)" />
+                                        <TextBox Style="{StaticResource Field.Form}" Text="{Binding McVideoMaxDurationSec, UpdateSourceTrigger=PropertyChanged}" />
+                                    </StackPanel>
+                                </UniformGrid>
+                                <UniformGrid Columns="2" Margin="0,0,0,10">
+                                    <StackPanel Margin="0,0,6,0" ToolTip="on-network-reception-hang-timer — 받는 사람 없이 이 시간이 지나면 영상 호 수신 유휴(T5, TS 24.581 §11.1.3, 0~3600)">
+                                        <TextBlock Style="{StaticResource FormLabel}" Text="수신 유지 시간(T5, 초)" />
+                                        <TextBox Style="{StaticResource Field.Form}" Text="{Binding McVideoReceptionHangSec, UpdateSourceTrigger=PropertyChanged}" />
+                                    </StackPanel>
+                                    <StackPanel Margin="6,0,0,0" ToolTip="mcvideo-on-network-minimum-number-to-start — 개시자에게 응답하기 전에 받아야 할 멤버 응답 수(0 = 기다리지 않음)">
+                                        <TextBlock Style="{StaticResource FormLabel}" Text="시작 최소 응답(명)" />
+                                        <TextBox Style="{StaticResource Field.Form}" Text="{Binding McVideoMinNumberToStart, UpdateSourceTrigger=PropertyChanged}" />
+                                    </StackPanel>
+                                </UniformGrid>
+                                <StackPanel Margin="0,0,0,12" ToolTip="mcvideo-on-network-group-priority — 0~255, 비우면 미기재(가장 낮음)">
+                                    <TextBlock Style="{StaticResource FormLabel}" Text="그룹 우선순위(0~255)" />
+                                    <TextBox Style="{StaticResource Field.Form}" Text="{Binding McVideoGroupPriority, UpdateSourceTrigger=PropertyChanged}" Tag="비우면 미기재" />
+                                </StackPanel>
+                                <CheckBox Style="{StaticResource Switch.Form}" Content="참가자 정보 구독 허용" IsChecked="{Binding McVideoAllowConferenceState}"
+                                          ToolTip="mcvideo-on-network-allow-conference-state — 멤버가 영상 호의 참가자 정보(conference 이벤트, TS 24.281 §9.2.3)를 구독할 수 있음" />
+                                <CheckBox Style="{StaticResource Switch.Form}" Content="종단간 보호(미디어·전송 제어)" IsChecked="False" IsEnabled="False" Margin="0,0,0,2" ToolTipService.ShowOnDisabled="True"
+                                          ToolTip="mcvideo-protect-media · mcvideo-protect-transmission-control — 꺼짐으로 명시해 싣는다(요소가 없으면 켜짐으로 읽힌다, mcvideo.md D7)" />
+                                <TextBlock Style="{StaticResource Hint}" Margin="34,0,0,0" Text="종단간 보호는 아직 지원하지 않습니다" />
                             </StackPanel>
-                            <StackPanel ToolTip="mcvideo-on-network-maximum-duration — 영상 호 최대 시간(TNG3, 0 = 무제한, 최대 86400)">
-                                <TextBlock Text="최대 통화 시간(초)" Style="{StaticResource Hint}" />
-                                <TextBox Style="{StaticResource Field}" Text="{Binding McVideoMaxDurationSec, UpdateSourceTrigger=PropertyChanged}" Margin="0,2,0,0" />
-                            </StackPanel>
-                        </UniformGrid>
-                        <UniformGrid Columns="2" Margin="0,0,0,8">
-                            <StackPanel Margin="0,0,6,0" ToolTip="on-network-reception-hang-timer — 받는 사람 없이 이 시간이 지나면 영상 호 수신 유휴(T5, TS 24.581 §11.1.3, 0~3600)">
-                                <TextBlock Text="수신 유지 시간(T5, 초)" Style="{StaticResource Hint}" />
-                                <TextBox Style="{StaticResource Field}" Text="{Binding McVideoReceptionHangSec, UpdateSourceTrigger=PropertyChanged}" Margin="0,2,0,0" />
-                            </StackPanel>
-                            <StackPanel ToolTip="mcvideo-on-network-minimum-number-to-start — 개시자에게 응답하기 전에 받아야 할 멤버 응답 수(0 = 기다리지 않음)">
-                                <TextBlock Text="시작 최소 응답(명)" Style="{StaticResource Hint}" />
-                                <TextBox Style="{StaticResource Field}" Text="{Binding McVideoMinNumberToStart, UpdateSourceTrigger=PropertyChanged}" Margin="0,2,0,0" />
-                            </StackPanel>
-                        </UniformGrid>
-                        <StackPanel Margin="0,0,0,8" ToolTip="mcvideo-on-network-group-priority — 0~255, 비우면 미기재(가장 낮음)">
-                            <TextBlock Text="그룹 우선순위(0~255)" Style="{StaticResource Hint}" />
-                            <TextBox Style="{StaticResource Field}" Text="{Binding McVideoGroupPriority, UpdateSourceTrigger=PropertyChanged}" Tag="비우면 미기재" Margin="0,2,0,0" />
                         </StackPanel>
-                        <CheckBox Style="{StaticResource Switch}" Content="참가자 정보 구독 허용" IsChecked="{Binding McVideoAllowConferenceState}" Margin="0,0,0,6"
-                                  ToolTip="mcvideo-on-network-allow-conference-state — 멤버가 영상 호의 참가자 정보(conference 이벤트, TS 24.281 §9.2.3)를 구독할 수 있음" />
-                        <CheckBox Style="{StaticResource Switch}" Content="종단간 보호(미디어·전송 제어)" IsChecked="False" IsEnabled="False" Margin="0,0,0,2" ToolTipService.ShowOnDisabled="True"
-                                  ToolTip="mcvideo-protect-media · mcvideo-protect-transmission-control — 꺼짐으로 명시해 싣는다(요소가 없으면 켜짐으로 읽힌다, mcvideo.md D7)" />
-                        <TextBlock Style="{StaticResource Hint}" TextWrapping="Wrap" Margin="34,0,0,0" Text="종단간 보호는 아직 지원하지 않습니다" />
-                    </StackPanel>
-                    <TextBlock Style="{StaticResource Hint}" Margin="0,8,0,0" TextWrapping="Wrap"
+                    </Border>
+                    <TextBlock Style="{StaticResource Hint}" Margin="2,0,0,8"
                                Text="저장하면 GMS 그룹 문서로 서버에 올라가고(XCAP PUT), 멤버 단말에는 문서 변경 통지가 갑니다. 편집·삭제는 내가 만든 그룹(또는 관제 그룹 관리 범위 안 그룹)만 됩니다." />
                 </StackPanel>
             </ScrollViewer>
-            <!-- 멤버 -->
-            <Grid Grid.Column="1">
+
+            <!-- ═══ 멤버 — PTT 주소록(고르는 곳) → 멤버(고른 것) ═══ -->
+            <Grid Grid.Column="1" Margin="8,16,16,16">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="12" />
                     <ColumnDefinition Width="*" />
                 </Grid.ColumnDefinitions>
-                <DockPanel Grid.Column="0" Margin="0,0,8,0">
-                    <DockPanel DockPanel.Dock="Top" Margin="0,0,0,4">
-                        <Button DockPanel.Dock="Right" Style="{StaticResource Btn.Xs}" Content="표시된 전원 추가" Command="{Binding AddAllShownCommand}" Margin="6,0,0,0" />
-                        <TextBlock Style="{StaticResource SectionHeader}" Text="PTT 주소록" VerticalAlignment="Center" />
-                    </DockPanel>
-                    <TextBox DockPanel.Dock="Top" Style="{StaticResource Field}" Height="26" Text="{Binding Search, UpdateSourceTrigger=PropertyChanged}" Tag="이름·번호 검색" Margin="0,0,0,4" />
-                    <ListBox Style="{StaticResource PlainList}" ItemsSource="{Binding Candidates}">
-                        <ListBox.ItemTemplate>
-                            <DataTemplate DataType="{x:Type vm:GroupCandidateRow}">
-                                <Border Style="{StaticResource LogRow}">
-                                    <DockPanel>
-                                        <Button DockPanel.Dock="Right" Style="{StaticResource Btn.Xs.Pri}" Content="추가" Command="{Binding DataContext.AddCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}" VerticalAlignment="Center" />
-                                        <StackPanel VerticalAlignment="Center">
-                                            <TextBlock Text="{Binding Name}" FontWeight="Medium" />
-                                            <TextBlock Style="{StaticResource MonoMuted}" FontSize="11">
-                                                <Run Text="{Binding DisplayNumber, Mode=OneWay}" /><Run Text="  " /><Run Text="{Binding OrgPath, Mode=OneWay}" />
-                                            </TextBlock>
-                                        </StackPanel>
-                                    </DockPanel>
-                                </Border>
-                            </DataTemplate>
-                        </ListBox.ItemTemplate>
-                    </ListBox>
-                </DockPanel>
-                <DockPanel Grid.Column="1">
-                    <DockPanel DockPanel.Dock="Top" Margin="0,0,0,4" Height="26">
-                        <TextBlock Style="{StaticResource SectionHeader}" Text="멤버" VerticalAlignment="Center" />
-                        <TextBlock Style="{StaticResource Muted}" Text="{Binding MemberCountText}" FontSize="12" VerticalAlignment="Center" Margin="8,0,0,0" />
-                    </DockPanel>
-                    <TextBlock DockPanel.Dock="Top" Style="{StaticResource Hint}" TextWrapping="Wrap" Margin="0,0,0,4"
-                               Text="의장(chair) 은 발언 우선순위가 높습니다. 필수 멤버는 개시자에게 응답하기 전에 응답을 기다립니다(필수 멤버 대기). 클릭해 바꿉니다." />
-                    <ListBox Style="{StaticResource PlainList}" ItemsSource="{Binding Members}">
-                        <ListBox.ItemTemplate>
-                            <DataTemplate DataType="{x:Type vm:GroupMemberRow}">
-                                <Border Style="{StaticResource LogRow}">
-                                    <DockPanel>
-                                        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
-                                            <Button Content="{Binding RequiredText}" Command="{Binding DataContext.ToggleRequiredCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}" Margin="0,0,4,0"
-                                                    ToolTip="필수 멤버(on-network-required) — 개시자 응답 전에 이 멤버의 응답을 기다린다(TNG1)">
-                                                <Button.Style>
-                                                    <Style TargetType="Button" BasedOn="{StaticResource Btn.Xs}">
-                                                        <Style.Triggers>
-                                                            <DataTrigger Binding="{Binding Required}" Value="True"><Setter Property="Background" Value="{DynamicResource Brush.Primary}" /><Setter Property="BorderBrush" Value="{DynamicResource Brush.Primary}" /><Setter Property="Foreground" Value="{DynamicResource Brush.OnAccent}" /></DataTrigger>
-                                                        </Style.Triggers>
-                                                    </Style>
-                                                </Button.Style>
+                <Border Grid.Column="0" Style="{StaticResource ListCard}">
+                    <DockPanel>
+                        <StackPanel DockPanel.Dock="Top" Margin="14,12,12,10">
+                            <DockPanel>
+                                <Button DockPanel.Dock="Right" Style="{StaticResource Pill.Line.Sm}" Height="28" Padding="11,0" Content="표시된 전원 추가" Command="{Binding AddAllShownCommand}" />
+                                <TextBlock Text="PTT 주소록" FontSize="13.5" FontWeight="Bold" VerticalAlignment="Center" />
+                            </DockPanel>
+                            <Grid Margin="0,10,0,0">
+                                <TextBox Style="{StaticResource Field.Form}" Padding="30,0,8,0" Text="{Binding Search, UpdateSourceTrigger=PropertyChanged}" Tag="이름 · 번호 검색" />
+                                <Path Style="{StaticResource Icon}" Data="{StaticResource Icon.Search}" Width="14" Height="14" StrokeThickness="2" HorizontalAlignment="Left" Margin="10,0,0,0"
+                                      TextElement.Foreground="{DynamicResource Brush.Muted}" IsHitTestVisible="False" />
+                            </Grid>
+                        </StackPanel>
+                        <ListBox Style="{StaticResource PlainList}" ItemsSource="{Binding Candidates}">
+                            <ListBox.ItemTemplate>
+                                <DataTemplate DataType="{x:Type vm:GroupCandidateRow}">
+                                    <Border BorderBrush="{DynamicResource Brush.Line}" BorderThickness="0,1,0,0" Padding="14,8,12,8">
+                                        <DockPanel>
+                                            <Border DockPanel.Dock="Left" Style="{StaticResource Avatar}" Width="30" Height="30" CornerRadius="15" Margin="0,0,10,0" Tag="{Binding Name, Converter={StaticResource AvatarHue}}">
+                                                <TextBlock Text="{Binding Name, Converter={StaticResource Initial}}" FontSize="12" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                            </Border>
+                                            <Button DockPanel.Dock="Right" Style="{StaticResource Pill.Soft.Sm}" Height="28" Command="{Binding DataContext.AddCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}" VerticalAlignment="Center"
+                                                    ToolTip="멤버로 추가">
+                                                <StackPanel Orientation="Horizontal">
+                                                    <Path Style="{StaticResource Icon}" Data="{StaticResource Icon.Plus}" Width="11" Height="11" StrokeThickness="2.4" Margin="0,0,4,0" />
+                                                    <TextBlock Text="추가" />
+                                                </StackPanel>
                                             </Button>
-                                            <Button Style="{StaticResource Btn.Xs}" Content="{Binding RoleText}" Command="{Binding DataContext.ToggleChairCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}" Margin="0,0,4,0" ToolTip="의장/참가자 전환" />
-                                            <Button Style="{StaticResource Btn.Xs.Danger}" Content="제거" Command="{Binding DataContext.RemoveCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}" />
-                                        </StackPanel>
-                                        <StackPanel VerticalAlignment="Center">
-                                            <StackPanel Orientation="Horizontal">
-                                                <TextBlock Text="{Binding Label}" FontWeight="Medium" />
-                                                <TextBlock Style="{StaticResource Muted}" Text=" (나)" FontSize="12" Visibility="{Binding IsMe, Converter={StaticResource BoolToVis}}" />
+                                            <StackPanel VerticalAlignment="Center">
+                                                <TextBlock Text="{Binding Name}" FontWeight="SemiBold" FontSize="13" TextTrimming="CharacterEllipsis" />
+                                                <TextBlock Style="{StaticResource MonoMuted}" FontSize="11.5" Margin="0,1,0,0" TextTrimming="CharacterEllipsis">
+                                                    <Run Text="{Binding DisplayNumber, Mode=OneWay}" /><Run Text="  " /><Run Text="{Binding OrgPath, Mode=OneWay}" FontFamily="{StaticResource Font.Ui}" />
+                                                </TextBlock>
                                             </StackPanel>
-                                            <TextBlock Style="{StaticResource MonoMuted}" Text="{Binding DisplayNumber}" FontSize="11" />
-                                        </StackPanel>
-                                    </DockPanel>
-                                </Border>
-                            </DataTemplate>
-                        </ListBox.ItemTemplate>
-                    </ListBox>
-                </DockPanel>
+                                        </DockPanel>
+                                    </Border>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
+                    </DockPanel>
+                </Border>
+                <Border Grid.Column="2" Style="{StaticResource ListCard}">
+                    <DockPanel>
+                        <StackPanel DockPanel.Dock="Top" Margin="14,12,12,10">
+                            <StackPanel Orientation="Horizontal" Height="28">
+                                <TextBlock Text="멤버" FontSize="13.5" FontWeight="Bold" VerticalAlignment="Center" />
+                                <Border Style="{StaticResource Count}" Margin="8,0,0,0"><TextBlock Text="{Binding MemberCountText}" /></Border>
+                            </StackPanel>
+                            <TextBlock Style="{StaticResource Hint}" Margin="0,8,0,0"
+                                       Text="의장은 발언 우선순위가 높습니다. 필수 멤버는 개시자에게 응답하기 전에 그 멤버의 응답을 기다립니다. 눌러서 바꿉니다." />
+                        </StackPanel>
+                        <ListBox Style="{StaticResource PlainList}" ItemsSource="{Binding Members}">
+                            <ListBox.ItemTemplate>
+                                <DataTemplate DataType="{x:Type vm:GroupMemberRow}">
+                                    <Border BorderBrush="{DynamicResource Brush.Line}" BorderThickness="0,1,0,0" Padding="14,8,10,8">
+                                        <DockPanel>
+                                            <Border DockPanel.Dock="Left" Style="{StaticResource Avatar}" Width="30" Height="30" CornerRadius="15" Margin="0,0,10,0" Tag="{Binding Label, Converter={StaticResource AvatarHue}}">
+                                                <TextBlock Text="{Binding Label, Converter={StaticResource Initial}}" FontSize="12" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                            </Border>
+                                            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                                                <!-- 필수 멤버 · 의장 — 켜지면 남색 채움 -->
+                                                <Button Content="{Binding RequiredText}" Command="{Binding DataContext.ToggleRequiredCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}" Margin="0,0,4,0"
+                                                        ToolTip="필수 멤버(on-network-required) — 개시자 응답 전에 이 멤버의 응답을 기다린다(TNG1)">
+                                                    <Button.Style>
+                                                        <Style TargetType="Button" BasedOn="{StaticResource Pill.Soft.Sm}">
+                                                            <Setter Property="Height" Value="28" />
+                                                            <Style.Triggers>
+                                                                <DataTrigger Binding="{Binding Required}" Value="True">
+                                                                    <Setter Property="Background" Value="{DynamicResource Brush.Fill}" /><Setter Property="BorderBrush" Value="{DynamicResource Brush.Fill}" />
+                                                                    <Setter Property="Foreground" Value="{DynamicResource Brush.OnFill}" /><Setter Property="FontWeight" Value="Bold" />
+                                                                </DataTrigger>
+                                                            </Style.Triggers>
+                                                        </Style>
+                                                    </Button.Style>
+                                                </Button>
+                                                <Button Content="{Binding RoleText}" Command="{Binding DataContext.ToggleChairCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}" Margin="0,0,4,0"
+                                                        ToolTip="의장 / 참가자 전환">
+                                                    <Button.Style>
+                                                        <Style TargetType="Button" BasedOn="{StaticResource Pill.Soft.Sm}">
+                                                            <Setter Property="Height" Value="28" />
+                                                            <Style.Triggers>
+                                                                <DataTrigger Binding="{Binding IsChair}" Value="True">
+                                                                    <Setter Property="Background" Value="{DynamicResource Brush.PrimarySoft}" /><Setter Property="BorderBrush" Value="{DynamicResource Brush.Primary}" />
+                                                                    <Setter Property="Foreground" Value="{DynamicResource Brush.PrimaryInk}" /><Setter Property="FontWeight" Value="Bold" />
+                                                                </DataTrigger>
+                                                            </Style.Triggers>
+                                                        </Style>
+                                                    </Button.Style>
+                                                </Button>
+                                                <Button Style="{StaticResource IconBtn}" Width="28" Height="28" Command="{Binding DataContext.RemoveCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}"
+                                                        ToolTip="멤버에서 빼기" AutomationProperties.Name="멤버에서 빼기">
+                                                    <Path Style="{StaticResource Icon}" Data="{StaticResource Icon.X}" Width="13" Height="13" StrokeThickness="2.2" />
+                                                </Button>
+                                            </StackPanel>
+                                            <StackPanel VerticalAlignment="Center">
+                                                <StackPanel Orientation="Horizontal">
+                                                    <TextBlock Text="{Binding Label}" FontWeight="SemiBold" FontSize="13" TextTrimming="CharacterEllipsis" />
+                                                    <TextBlock Text=" (나)" FontSize="12" Foreground="{DynamicResource Brush.TextSoft}" VerticalAlignment="Center" Visibility="{Binding IsMe, Converter={StaticResource BoolToVis}}" />
+                                                </StackPanel>
+                                                <TextBlock Style="{StaticResource MonoMuted}" Text="{Binding DisplayNumber}" FontSize="11.5" Margin="0,1,0,0" />
+                                            </StackPanel>
+                                        </DockPanel>
+                                    </Border>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
+                    </DockPanel>
+                </Border>
             </Grid>
         </Grid>
     </DockPanel>

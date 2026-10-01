@@ -8,14 +8,19 @@
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008" xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" mc:Ignorable="d"
         d:DataContext="{d:DesignInstance vm:MainViewModel}"
         Style="{StaticResource Window.Base}" Title="CIMS 관제조작반" Width="1920" Height="1080" MinWidth="1440" MinHeight="760" WindowStartupLocation="CenterScreen">
-    <!-- 주 창(§3) — «모드마다 한 화면»: 왼쪽 레일 80([관제][이력][더보기]) · 상단 바 56 · 배너 층(긴급·임박 꽉 찬 면 · 착신 옅은 면, 어느 화면에서나) ·
-         탭 줄 48([무전|통화] + 오른쪽 끝 목록 버튼) · 본문(모드 화면 한 장 / 레일 화면) + 오른쪽 패널 440(오른쪽 칸만 민다) · 발언 바 80(모든 화면) · 토스트(우하단) ·
+    <!-- 주 창(§3) — «모드마다 한 화면»: 왼쪽 레일 80([관제][이력][PTT 그룹][관리] · 바닥 [설정] — 전부 한 번에 누른다) · 상단 바 56 · 배너 층(긴급·임박 꽉 찬 면 · 착신 옅은 면, 어느 화면에서나) ·
+         탭 줄 48([무전|통화] + 오른쪽 끝 목록 버튼) · 본문(모드 화면 한 장 / 레일 화면) + 오른쪽 패널 440(본문 위에 겹친다) · 발언 바 80(모든 화면) · 토스트(우하단) ·
          통합 검색 Ctrl+K · 사람 메뉴 -->
     <Grid>
         <DockPanel>
             <!-- ═══ 왼쪽 레일 ═══ -->
             <Border DockPanel.Dock="Left" Width="80" Background="{DynamicResource Brush.Rail}" BorderBrush="{DynamicResource Brush.Border}" BorderThickness="0,0,1,0">
-                <StackPanel Margin="0,12,0,0">
+                <DockPanel Margin="0,12,0,0">
+                    <!-- 바닥 — [설정](화면이 아니라 창을 연다 — 켜짐 표시 없음) -->
+                    <ToggleButton DockPanel.Dock="Bottom" Style="{StaticResource RailItem}" Tag="설정" Click="RailSettings_Click" ToolTip="설정 — 오디오 · 영상 · 핫키 · 관제 · 주소록 · 표시">
+                        <Path Style="{StaticResource Icon}" Data="{StaticResource Icon.Settings}" Width="22" Height="22" StrokeThickness="2" />
+                    </ToggleButton>
+                <StackPanel>
                     <Border Width="48" Height="40" CornerRadius="8" Background="{DynamicResource Brush.Fill}" Margin="0,0,0,20">
                         <TextBlock Text="CIMS" FontSize="11" FontWeight="Bold" Foreground="{DynamicResource Brush.OnFill}" HorizontalAlignment="Center" VerticalAlignment="Center" />
                     </Border>
@@ -33,31 +38,21 @@
                                   ToolTip="이력 F2 — 끝난 통화·PTT 세션의 날짜별 조회·녹취 재생">
                         <Path Style="{StaticResource Icon}" Data="{StaticResource Icon.History}" Width="22" Height="22" StrokeThickness="2" />
                     </RadioButton>
-                    <Grid>
-                        <ToggleButton x:Name="MoreBtn" Style="{StaticResource RailItem}" Tag="더보기" IsChecked="{Binding IsMore, Mode=OneWay}" Click="MoreBtn_Click" ToolTip="PTT 그룹 F3 · 관리 F4 · 설정">
-                            <Grid>
-                                <Path Style="{StaticResource Icon.Filled}" Data="{StaticResource Icon.DotsH}" Width="22" Height="22" />
-                                <Ellipse Width="8" Height="8" Fill="{DynamicResource Brush.Emg}" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-6,-14,0"
-                                         Visibility="{Binding AdminEditing, Converter={StaticResource BoolToVis}}" ToolTip="저장하지 않은 관리 폼이 있습니다" />
-                            </Grid>
-                        </ToggleButton>
-                        <Popup x:Name="MorePop" PlacementTarget="{Binding ElementName=MoreBtn}" Placement="Right" HorizontalOffset="6" StaysOpen="False" AllowsTransparency="True">
-                            <Border Style="{StaticResource DropPanel}" MinWidth="220">
-                                <StackPanel>
-                                    <Button Style="{StaticResource DropItem}" Click="MoreItem_Click" Command="{Binding ShowScreenCommand}" CommandParameter="{x:Static m:AppScreen.PttGroups}">
-                                        <DockPanel Width="190"><TextBlock DockPanel.Dock="Right" Style="{StaticResource MonoMuted}" Text="F3" FontSize="11" /><TextBlock Text="PTT 그룹" /></DockPanel>
-                                    </Button>
-                                    <Button Style="{StaticResource DropItem}" Click="MoreItem_Click" Command="{Binding ShowScreenCommand}" CommandParameter="{x:Static m:AppScreen.Admin}" IsEnabled="{Binding CanManage}"
-                                            ToolTip="{Binding ManageHint}" ToolTipService.ShowOnDisabled="True">
-                                        <DockPanel Width="190"><TextBlock DockPanel.Dock="Right" Style="{StaticResource MonoMuted}" Text="F4" FontSize="11" /><TextBlock Text="관리 — 조직 · 구성원 · 번호" /></DockPanel>
-                                    </Button>
-                                    <Border Height="1" Background="{DynamicResource Brush.Border}" Margin="6,4" />
-                                    <Button Style="{StaticResource DropItem}" Content="설정…" Click="MoreItem_Click" Command="{Binding Desk.OpenSettingsCommand}" />
-                                </StackPanel>
-                            </Border>
-                        </Popup>
-                    </Grid>
+                    <RadioButton Style="{StaticResource RailItem}" Tag="PTT 그룹" IsChecked="{Binding IsPttGroups, Mode=OneWay}" Command="{Binding ShowScreenCommand}" CommandParameter="{x:Static m:AppScreen.PttGroups}"
+                                  ToolTip="PTT 그룹 F3 — 그룹 목록 · 만들기 · 편집 · 삭제">
+                        <Path Style="{StaticResource Icon}" Data="{StaticResource Icon.Users}" Width="22" Height="22" StrokeThickness="2" />
+                    </RadioButton>
+                    <!-- 관리 범위가 없으면 흐리게(누를 수 없음) — 이유는 툴팁 -->
+                    <RadioButton Style="{StaticResource RailItem}" Tag="관리" IsChecked="{Binding IsAdmin, Mode=OneWay}" Command="{Binding ShowScreenCommand}" CommandParameter="{x:Static m:AppScreen.Admin}"
+                                  IsEnabled="{Binding CanManage}" ToolTip="{Binding ManageTip}">
+                        <Grid>
+                            <Path Style="{StaticResource Icon}" Data="{StaticResource Icon.Org}" Width="22" Height="22" StrokeThickness="2" />
+                            <Ellipse Width="8" Height="8" Fill="{DynamicResource Brush.Emg}" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-6,-14,0"
+                                     Visibility="{Binding AdminEditing, Converter={StaticResource BoolToVis}}" ToolTip="저장하지 않은 관리 폼이 있습니다" />
+                        </Grid>
+                    </RadioButton>
                 </StackPanel>
+                </DockPanel>
             </Border>
 
             <DockPanel>
