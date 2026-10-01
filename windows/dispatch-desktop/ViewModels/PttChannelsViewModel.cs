@@ -105,7 +105,7 @@ public sealed partial class ChannelCard : ObservableObject
     public string EmergencyTip => !_s.Capabilities.EmergencyGroupCall ? "긴급 그룹콜 자격이 없습니다(user profile)"
                                 : IsJoined ? "진행 중인 이 그룹 통화를 긴급으로 올린다(조건 상향 — 그룹 능력이 꺼져 있으면 서버가 거절)"
                                 : "이 그룹에 긴급 그룹콜 개시";
-    /// <summary>[긴급 해제] — 내가 올린 조건만(DispatchSession.CanCancelCondition — 서버 과제 E1 뒤 넓힌다).</summary>
+    /// <summary>[긴급 해제] — 긴급 = 내가 올린 조건 ∨ allow-cancel-group-emergency, 임박 = allow-cancel-imminent-peril(DispatchSession.CanCancelCondition).</summary>
     public bool CanCancelEmergency => Session is not null && _s.CanCancelCondition(Session);
     public bool IsSpeaking => Session?.IsSpeaking == true;
     public bool IsRequesting => Session?.IsRequesting == true;

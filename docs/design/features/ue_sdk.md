@@ -526,10 +526,12 @@ sdk/android/
       CscClient.kt         IdMS PKCE · XCAP(GMS/CMS) · 프로비저닝 · 범용 요청(관리·이력·녹취)
       Types.kt             값 컨테이너(CallInfo·FloorInfo·Profile …)
       TrustAnchors.kt      APK 동봉 루트 CA (Android 에는 OpenSSL 기본 인증서 경로가 없다)
-      platform/            Android 접점: AudioRouter(모드·포커스·SCO) · UeForegroundService · SecureStore(Keystore)
+      platform/            Android 접점: AudioRouter(모드·포커스·SCO) · UeForegroundService · SecureStore(Keystore) ·
+                           DeviceIdentity(+sip.instance·MCS UE ID 기기 URN — .NET Platform.DeviceIdentity 와 같은 규칙)
   cimsue-engine/           pjsua2 전용 모듈 — org.pjsip.** + libpjsua2.so 의 **유일한 제공처**
   CMakeLists.txt           ext/pjproject 빌드 변수를 읽어 코어+SWIG 을 NDK 로 빌드
   build-native.sh          위를 실행하고 산출물을 AAR 모듈에 배치(`--no-install` 은 배치 생략 — 빌드 확인용)
+  build-native-remote.sh   WSL 없는 Windows → ssh 빌드 호스트에 build-native.sh 를 맡기고 생성물을 받아 온다
 ```
 
 - **엔진은 한 벌이다.** `org.pjsip.**` 과 `libpjsua2.so` 는 `:cimsue-engine` 만 낸다. 예전에

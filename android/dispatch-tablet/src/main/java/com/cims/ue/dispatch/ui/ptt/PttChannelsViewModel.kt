@@ -66,7 +66,8 @@ data class ChannelCard(
     /** 참여하지 않아도 로스터로 진행 중임을 안다. */
     val hasSession: Boolean get() = joined || group?.hasSession == true
     val emergency: Boolean get() = session?.isEmergency == true
-    /** 지금의 긴급을 이 단말이 올렸다 — [긴급 해제] 를 세운다(남이 건 긴급의 해제는 인가가 따로다, TS 24.379 §6.3.3.1.13.4). */
+    /** 지금의 긴급을 이 단말이 올렸다 — [긴급 해제] 자격의 한쪽(다른 쪽 = user profile allow-cancel-group-emergency, TS 24.379 §6.3.3.1.13.4 —
+     *  [PttChannelsViewModel.capabilities]). */
     val emergencyMine: Boolean get() = session?.info?.condition?.mine == true
     val imminentPeril: Boolean get() = session?.isImminentPeril == true
     val speaking: Boolean get() = session?.isSpeaking == true
@@ -151,6 +152,9 @@ data class TalkTargetChip(val card: ChannelCard) {
 }
 
 class PttChannelsViewModel(private val s: DispatchSession) : ScreenViewModel() {
+
+    /** 정책 게이트(user profile ruleset) — 채널 상세 [긴급 해제] 가 읽는다(내 긴급 ∨ cancelGroupEmergency). */
+    val capabilities: StateFlow<com.cims.ue.sdk.Capabilities> = s.capabilities
 
     /**
      * 한 번에 발언할 수 있는 채널 수.

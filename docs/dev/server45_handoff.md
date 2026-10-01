@@ -283,7 +283,12 @@ SDS 전달 확인 규격 경로)를 .48 에서 반영·배포(**csp 0.2.180 · c
 | 검증 | S1-UE-UNIT(cimsue_test 98 — 새 `CmsDoc.ParseUeInitConfig`·`SdsCodec.NotificationSpecForm`·`SdsCodec.CallingIdentitiesFromMcdataInfo`·`McpttXml.IndicatorOrderAndAlert`, `McpttCondition` 에 임박→긴급 와이어·규격형 통지 MESSAGE)·S1-CPP-FORMAT·S1-UE-ANDROID-BIND·S1-UE-ENGINE-SINGLE·S1-UE-CSC-XCHECK·S1-UE-TABLET-UNIT(381)·S1-PY-SYNTAX PASS, APK 4종(ptt·volte·dispatch-tablet·sdk-probe) 빌드. .NET 은 이 호스트에 dotnet 이 없어 **Windows 쪽 빌드·`CimsUe.Tests`(AbiLayout·CscTests 확장) 필요** |
 | .48 실측(cimsue-cli, CSP 0.2.180) | 013 → g005 SDS(전달 요청) → 014 `--notify-delivered`(PSI `sip:mcdata_psi@ptt.cims.example.kr`) → CSP 상관·중계 → 013 `disposition:2`(from `tel:+82500000014`·group `tel:g005`) · 013 g005 그룹콜 긴급 상향(`emergency-ind` true + `alert-ind` false) 200 Confirmed → 해제 200 · `--from-profile ptt` → ue-init-config `mcptt=sip:mcptt_psi@…`, **MCData 는 미광고**(.48 CSC `UeInitConfig.ServiceDetails.McData.Enable` off — 통지는 옛 형식) |
 
-- **Windows 쪽 몫(관제 앱 두 벌)** — ① [긴급 해제] = `Capabilities.CancelGroupEmergency ∨ condition.mine` ② 받은 SDS 통지에 `GroupUri` 넘기기(데스크톱 `McDataMessagesViewModel`·태블릿 `PttPlane.applySds`) ③ 계정 만들기 전 `FetchUeInitConfig` → `McpttServerUri`·`McdataServerUri`(데스크톱은 지금 둘 다 비어 있다) ④ 데스크톱은 새 DLL·.NET 을 같이 빌드(C API 인자 변경).
+- **Windows 쪽 몫(관제 앱 두 벌) — 반영** — ① [긴급 해제] = 긴급 `Capabilities.CancelGroupEmergency ∨ condition.mine`, 임박 `CancelImminentPeril`
+  (데스크톱 `DispatchSession.CanCancelCondition`·태블릿 채널 상세 — 태블릿은 user profile 을 새로 받는다, `DispatchSession.capabilities`) ② 받은 SDS 통지에
+  `GroupUri`(데스크톱 `McDataMessagesViewModel`·태블릿 `PttPlane.applySds`) ③ 계정 전 `FetchUeInitConfig(<기기 urn>)` → PTT 계정 `McpttServerUri`·`McdataServerUri`
+  (태블릿은 `+sip.instance` 도 새로 싣는다 — SDK 접점 `platform.DeviceIdentity`) ④ 데스크톱 새 DLL·.NET(`cimsue_test` 93·`CimsUe.Tests` 76 PASS) + 앱 보완 —
+  해제 거절 403 문구 분리(상향 거절과 다른 문장, 두 앱 공통), 데스크톱 [경보 해제] 는 MESSAGE 최종 응답 403 이면 배너를 되살린다(ptt-client `onAlertResult` 와
+  같은 규칙). 빌드 = 데스크톱 Debug 오류 0 · 태블릿 APK(nex-ubuntu 네이티브 재빌드) · S1-UE-TABLET-UNIT 381 PASS. 실기 확인은 .45 스택 반영 뒤.
 - **.45 배포 완료(2026-09-30 20:22)** — oam 0.2.182·csp 0.2.180·csc 0.2.138(pkg 283~285, `--no-bump` = .48 라벨), oam-svc 0.2.131 재기동.
   CSP 기동 Roles 전부 ON · service-config CSC 정본 적재(RP 15/8/0, TNG2 없음) · csc.json 보존 · MF52·W999 새 APK(ea2b617d) 재등록 200.
   CSC MCData 광고(`UeInitConfig.ServiceDetails.McData.Enable`)는 아직 off. 관찰 = 001·002 가 g001 멤버가 아니라 affiliation 403(멤버 구성 변경).

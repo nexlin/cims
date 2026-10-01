@@ -137,8 +137,12 @@ suspend fun DispatchSession.leave(callId: Int): CimsResult<Unit> {
  * (확정 = 2xx, 거절 = 이전 값 복원 — 미인가 상향 403, 호는 유지 — `applyCondition`). 곧바로 실패한 것만 여기서 토스트로 남긴다.
  */
 suspend fun DispatchSession.setEmergency(callId: Int, on: Boolean): CimsResult<Unit> {
-    val ue = engineOrNull() ?: return report(TextArea.EMERGENCY, CimsResult.fail(-1, "엔진 없음"))
-    return report(TextArea.EMERGENCY, ue.call(callId).setCondition(emergency = on))
+    val area = if (on) TextArea.EMERGENCY else TextArea.EMERGENCY_CANCEL
+    val ue = engineOrNull() ?: return report(area, CimsResult.fail(-1, "엔진 없음"))
+    if (!on) conditionCancel.add(callId)                 // 해제 거절(403)은 상향 거절과 다른 문구 — applyCondition
+    val r = ue.call(callId).setCondition(emergency = on)
+    if (!r.ok && !on) conditionCancel.remove(callId)
+    return report(area, r)
 }
 
 /** PTT 누름 — 그 세션의 floor 를 요청한다. */
@@ -295,7 +299,8 @@ internal fun DispatchSession.applySds(msg: SdsMessage) {
             // 이 발신에는 말풍선이 없다 — 실패를 남기지 않으면 상대가 «보냄» 에 멈춘 이유를 어디서도 못 찾는다.
             //   즉시 실패는 여기서, 최종 거절(480 등)은 token 으로 `applyRequestResult` 가 남긴다.
             val (r, early) = sendTracked({ it.token }) {
-                ptt.sendSdsNotification(peer, msg.convId, msg.msgId, SDS_NOTIF_DELIVERED)
+                // 규격형 통지(TS 24.282 §12.2.1.1) — 그룹 SDS 면 mcdata-calling-group-id. PSI 는 계정의 mcdataServerUri(ue-init-config)
+                ptt.sendSdsNotification(peer, msg.convId, msg.msgId, SDS_NOTIF_DELIVERED, msg.groupUri)
             }
             val sent = r.value
             val what = "→ $peer msg=${msg.msgId}"

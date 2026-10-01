@@ -15,6 +15,7 @@ import android.content.Context
 import com.cims.ue.sdk.AccountConfig
 import com.cims.ue.sdk.Account
 import com.cims.ue.sdk.CallInfo
+import com.cims.ue.sdk.Capabilities
 import com.cims.ue.sdk.CimsResult
 import com.cims.ue.sdk.CimsUe
 import com.cims.ue.sdk.CscClient
@@ -28,7 +29,10 @@ import com.cims.ue.sdk.RegState
 import com.cims.ue.sdk.ServiceProfile
 import com.cims.ue.sdk.TokenSet
 import com.cims.ue.sdk.TrustAnchors
+import com.cims.ue.sdk.UeInitConfigDoc
+import com.cims.ue.sdk.UserProfileDoc
 import com.cims.ue.sdk.platform.AudioRouter
+import com.cims.ue.sdk.platform.DeviceIdentity
 import com.cims.ue.sdk.platform.HwPtt
 import com.cims.ue.sdk.platform.SecureStore
 import kotlinx.coroutines.CoroutineScope
@@ -267,6 +271,20 @@ class DispatchSession(
 
     private val _accounts = MutableStateFlow<Map<AccountKind, Account>>(emptyMap())
     val accounts: StateFlow<Map<AccountKind, Account>> = _accounts.asStateFlow()
+
+    // ── CMS·UE 초기 설정 문서(TS 24.484) ──────────────────────────────────────
+    private val _capabilities = MutableStateFlow(Capabilities())          // 기본값 = 문서 미수신(전부 허용) — of(null, null) 과 같다
+    /**
+     * 정책 게이트 — user profile ruleset 인가(ue_sdk.md §4.2). 받지 못한 문서는 허용으로 둔다(UX 선차단일 뿐, 최종 판정은 서버).
+     * 지금 읽는 것은 [긴급 해제] 자격 `cancelGroupEmergency` 다(데스크톱 `DispatchSession.Capabilities` 와 같은 규약).
+     */
+    val capabilities: StateFlow<Capabilities> = _capabilities.asStateFlow()
+    private var userProfile: UserProfileDoc? = null
+    /** 참여 기능 PSI(MCPTT = 경보 Request-URI, MCData = disposition 통지 Request-URI — TS 24.484 §7.2.2.1 10)·14)). */
+    private var ueInit: UeInitConfigDoc? = null
+
+    /** 하향(해제)을 보낸 호 — 거절 문구를 상향과 가른다(같은 조건 이벤트 흐름, 데스크톱 `_conditionCancel`). */
+    internal val conditionCancel: MutableSet<Int> = java.util.Collections.synchronizedSet(mutableSetOf())
 
     // 엔진이 서기 전에도 화면이 구독할 수 있어야 하므로 고정 Flow 를 하나 두고 엔진 값을 흘려 넣는다.
     // (접근할 때마다 새 Flow 를 만들면 구독이 끊긴다.)
@@ -508,6 +526,12 @@ class DispatchSession(
             if (!r.ok) return fail(r.code, r.reason)
         }
         applyAudio()
+        // 기기 URN — Contact +sip.instance 이자 UE initial configuration 의 MCS UE ID(TS 24.484 §7.2.1.1). 데스크톱·ptt-client 와 같은 규칙.
+        val instanceId = DeviceIdentity.instanceUrn(context).orEmpty()
+        if (p.services.any { it.kind == "ptt" }) {
+            fetchUeInitConfig(instanceId)
+            refreshUserProfile()
+        }
 
         val toRegister = buildList {
             p.phoneService?.let { add(it to AccountKind.PHONE) }
@@ -521,7 +545,7 @@ class DispatchSession(
         try {
             for ((sp, kind) in toRegister) {
                 if (gen != epoch) return CimsResult.fail(-1, "로그아웃됨")
-                val cfg = accountConfig(sp, p.displayName, kind)
+                val cfg = accountConfig(sp, p.displayName, kind, instanceId)
                 val a = engine.addAccount(cfg)
                 if (!a.ok) { _error.value = "${sp.kind} 계정 추가 실패: ${a.reason}"; continue }
                 added[kind] = a.value!!                        // 등록을 걸기 **전에** 소유로 잡는다
@@ -562,10 +586,38 @@ class DispatchSession(
      * MCPTT 자동 수락은 PTT 계정만 — 관제석은 그룹콜 자동·개별 통화 수동이 맞지만 코어 플래그가 아직
      * 공통이라(§11) 우선 PTT 전체를 자동으로 둔다.
      */
-    private fun accountConfig(sp: ServiceProfile, displayName: String, kind: AccountKind): AccountConfig =
-        sp.toAccountConfig(loginPw = loginPassword).copy(
+    private fun accountConfig(sp: ServiceProfile, displayName: String, kind: AccountKind, instanceId: String): AccountConfig {
+        val base = sp.toAccountConfig(loginPw = loginPassword)
+        val ui = ueInit.takeIf { kind == AccountKind.PTT }
+        return base.copy(
             displayName = displayName,
-            autoAnswerMcptt = kind == AccountKind.PTT)
+            autoAnswerMcptt = kind == AccountKind.PTT,
+            instanceId = instanceId.ifEmpty { base.instanceId },     // PTT·전화 계정이 같은 기기 값(RFC 5626 — 한 UA 인스턴스)
+            // 참여 기능 PSI(ue-init-config) — 광고하지 않은 서비스는 비워 둔다(경보 = 그룹 URI, 통지 = 원 발신자 직행 — 코어 전환기 경로)
+            mcpttServerUri = ui?.mcpttServerUri?.ifEmpty { null } ?: base.mcpttServerUri,
+            mcdataServerUri = ui?.mcdataServerUri?.ifEmpty { null } ?: base.mcdataServerUri)
+    }
+
+    /** UE initial configuration(TS 24.484 §7.2.1.1) — 로그인 전 문서라 토큰 없이. 못 받으면 PSI 없이 올린다. */
+    private suspend fun fetchUeInitConfig(instanceId: String) {
+        val c = csc ?: return
+        if (instanceId.isEmpty()) return
+        val r = c.fetchUeInitConfig(instanceId, ueInit?.etag.orEmpty())
+        if (r.ok) r.value?.let { ueInit = it }                        // null = 304(가진 사본 그대로)
+        else android.util.Log.w("DispatchSession", "ue-init-config: ${r.code} ${r.reason}")
+        android.util.Log.i("DispatchSession", "ue-init-config mcptt=${ueInit?.mcpttServerUri} mcdata=${ueInit?.mcdataServerUri}")
+    }
+
+    /** CMS user profile(TS 24.484 §8.3) → [capabilities]. 못 받으면 게이트 없음(허용) — 서버가 403 으로 판정한다. */
+    private suspend fun refreshUserProfile() {
+        val c = csc ?: return
+        val me = myPttId.ifEmpty { return }
+        val token = accessToken() ?: return
+        val r = c.fetchUserProfile(token, me, userProfile?.etag.orEmpty())
+        if (r.ok) r.value?.let { userProfile = it }
+        else android.util.Log.w("DispatchSession", "cms user-profile: ${r.code} ${r.reason}")
+        _capabilities.value = Capabilities.of(userProfile, null)
+    }
 
     /** 화면 재구성·프로세스 복귀 후 세션을 코어 스냅샷에서 다시 그린다(§6.7). */
     fun refreshSessions() {
@@ -757,8 +809,11 @@ class DispatchSession(
     internal fun applyCondition(ch: com.cims.ue.sdk.ConditionChange) {
         val next = ch.call.condition
         // 내가 올린 상향·하향을 서버가 거절했다 — 코어가 이전 값으로 되돌렸다. 배너가 그대로인 이유를 적는다(§6.2a-2).
+        val callId = ch.call.callId
+        val cancel = if (ch.cause == com.cims.ue.sdk.ConditionCause.LOCAL) callId in conditionCancel else conditionCancel.remove(callId)
         if (ch.cause == com.cims.ue.sdk.ConditionCause.DENIED)
-            notify(NoticeLevel.ERROR, ResponseText.sip(TextArea.EMERGENCY, next.lastCode, ""), "${next.lastCode}".trim())
+            notify(NoticeLevel.ERROR, ResponseText.sip(if (cancel) TextArea.EMERGENCY_CANCEL else TextArea.EMERGENCY, next.lastCode, ""),
+                "${next.lastCode}".trim())
         _sessions.value = _sessions.value.map { s ->
             if (s.callId != ch.call.callId || s.info.condition == next) s
             else withAlert(s, s.copy(info = s.info.copy(condition = next)))
@@ -1243,6 +1298,8 @@ class DispatchSession(
         loginPassword = ""
         _profile.value = null
         _accounts.value = emptyMap()
+        userProfile = null; ueInit = null; conditionCancel.clear()
+        _capabilities.value = Capabilities()
         _sessions.value = emptyList()
         _groups.value = emptyList()
         _activity.value = emptyList()

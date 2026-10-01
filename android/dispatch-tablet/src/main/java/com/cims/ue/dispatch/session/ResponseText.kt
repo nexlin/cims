@@ -14,7 +14,7 @@ import org.json.JSONObject
  */
 enum class TextArea {
     MANAGEMENT, RECORDING, GROUP,
-    PICKUP, TRANSFER, JOIN, PTT_LISTEN, PTT_JOIN, PTT_PRIVATE, PTT_ADHOC, EMERGENCY, SDS, SMS, REGISTER, CALL,
+    PICKUP, TRANSFER, JOIN, PTT_LISTEN, PTT_JOIN, PTT_PRIVATE, PTT_ADHOC, EMERGENCY, EMERGENCY_CANCEL, SDS, SMS, REGISTER, CALL,
 }
 
 object ResponseText {
@@ -85,6 +85,11 @@ object ResponseText {
         }
         TextArea.EMERGENCY -> when (code) {
             403 -> "긴급 호출 자격이 없습니다"
+            else -> null
+        }
+        // 조건 하향 거절(TS 24.379 §10.1.1.4.7 7)·7a)) — 비인가 또는 다른 긴급 사용자가 송출 중. 코어는 이전 값으로 되돌린다
+        TextArea.EMERGENCY_CANCEL -> when (code) {
+            403 -> "해제 권한이 없거나 다른 사용자가 긴급 발언 중입니다 — 긴급은 계속됩니다"
             else -> null
         }
         TextArea.SDS -> when (code) {

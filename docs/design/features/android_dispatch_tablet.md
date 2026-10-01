@@ -299,6 +299,11 @@ UeForegroundService  ─ 프로세스 상주. 알림·wakelock. 여기서 CimsUe
   세션의 준비·교체는 `DispatchService.sessionFlow` 로 **관측 가능하게** 낸다 — 정적 필드만으로는 화면이
   Service 보다 먼저 서면 재구성이 걸리지 않아 대기 화면에 머무른다. 세션이 바뀌면 화면은 패널 VM 을 버리고
   새 세션에 다시 붙는다(옛 세션을 참조한 채 남지 않게).
+- **계정을 올리기 전에 기기 URN·CMS 문서를 받는다.** 기기 URN = SDK 접점 `DeviceIdentity.instanceUrn`(ANDROID_ID 이름 기반 UUID — 데스크톱
+  MachineGuid·ptt-client 와 같은 규칙)을 두 계정의 Contact `+sip.instance` 로 쓰고, 그 값을 MCS UE ID 로 UE initial configuration
+  (TS 24.484 §7.2.1.1, 로그인 전 문서라 토큰 없음)을 받아 참여 기능 PSI 둘을 PTT 계정에 넣는다 — `mcpttServerUri`(경보 Request-URI)·
+  `mcdataServerUri`(disposition 통지 Request-URI). 광고하지 않은 서비스·못 받은 문서는 비워 둔다(코어 전환기 경로). user profile
+  (TS 24.484 §8.3)은 `capabilities` 로 낸다(받지 못한 문서는 허용 — UX 선차단, 최종 판정은 서버). 지금 읽는 자격은 [긴급 해제] 다(§6.3a).
 - **기동은 로그인 세대로 묶는다.** 수동 로그인은 화면 수명에서 돌고 로그아웃은 Service 수명에서 오므로,
   계정 추가 중에 로그아웃하면 뒤늦은 기동이 계정과 READY 를 다시 게시할 수 있다. 로그아웃이 세대를 올리고
   기동은 세대가 바뀌었으면 게시하지 않는다(부분 생성된 계정도 정리한다).
@@ -924,14 +929,14 @@ call / 그룹 추가 = 편성, TS 24.481 — §6.12). **고르기가 먼저**고
   말풍선**으로 판정하고 누르는 순간 «보내는 중» 으로 바꾼다(`Resend`) — 사본은 첫 누름 뒤에도 실패로 남아 있어, 발신 명령이
   도는 동안 한 번 더 누르면 두 번 나간다. 곧바로 실패하면 다시 실패 말풍선이고 사유는 토스트다(§6.2a-2).
 - **SDS 전달 확인은 받는 쪽이 되돌린다** — 발신자가 delivery 를 요청했으면(disposition 1 delivery·3 both) 받은
-  즉시 SDS NOTIFICATION «전달됨»(2)을 원 발신자에게 1:1 로 보낸다(`deliveryReplyTo`,
+  즉시 SDS NOTIFICATION «전달됨»(2)을 되돌린다(`deliveryReplyTo` — 대상 = 받은 SDS 의 보낸 사용자, 그룹 SDS 면 `groupUri` 를 함께 넘긴다,
   [mcdata_messaging.md](mcdata_messaging.md) §3 — 데스크톱 `OnSds` 와 같다). 상대 말풍선의 ✓ 가 이것으로 선다 —
   되돌리지 않으면 상대 화면은 «보냄» 에 멈춘다. 읽음(3) 통지는 보내지 않는다(최소 프로파일, 같은 문서 §7).
   이 발신에는 말풍선이 없어 실패는 로그(`DispatchSds`)로만 남긴다 — 즉시 실패와 token 으로 맞춘 최종 거절 둘 다.
   내 발신 말풍선은 상대가 되돌린 통지로 «전달됨»·«읽음» 이 된다(`updateSendState`).
-  경로는 사내 계약(원 발신자 AoR 로 1:1 직행, 본문은 SDS NOTIFICATION 한 파트)이다 — 규격(TS 24.282 V18.13.0
-  §12.2.1.1)은 대상 MCData ID 를 담은 `resource-lists` 와, 그룹 SDS 면 `<mcdata-calling-group-id>` 를 싣게 한다. 이 편차는
-  코어·서버의 몫이다(mcdata_messaging.md §7, [ue_sdk.md](ue_sdk.md) §11).
+  경로는 코어가 정한다 — PTT 계정에 MCData PSI(ue-init-config, §6.1)가 있으면 규격형(TS 24.282 V18.13.0 §12.2.1.1 — Request-URI = 참여
+  기능 PSI, 대상 MCData ID 의 `resource-lists`, 그룹 SDS 면 `<mcdata-calling-group-id>`), 없으면 원 발신자 AoR 로 1:1 직행(옛 서버 전환기,
+  [ue_sdk.md](ue_sdk.md) §4).
 - **70자까지 SMS, 넘으면 LMS** 로 글자 수를 적는다(데스크톱 `SmsLimit` 과 같은 값). 앱이 쪼개지 않는다 —
   분할·재조립은 망이 하는 일이다.
 - **외부망 번호는 그 스레드에서만** 보내기를 막고 이유를 적는다. 게이트웨이가 아직 서버 과제라 보내면
@@ -1096,8 +1101,9 @@ call / 그룹 추가 = 편성, TS 24.481 — §6.12). **고르기가 먼저**고
   (종류 · 참가 · 경과(또는 상태) · 편성 · 발언자) 와 «긴급»/«임박 위험»/«일제 통화» 라벨.
 - **조작 줄** — 그 채널이 지금 받아 줄 수 있는 것만 선다(`ChannelHeadUi` 가 자격을 든다):
   - 참여 전 멤버 그룹: [참여] · [긴급 참여] · [일제 통화]. 참여 중: [나가기] · [긴급](진행 중 긴급 상향 — 확인을 한 번 받는다,
-    그룹 전원에게 긴급이 선다) 또는 [긴급 해제](내가 올린 긴급만 — 남이 건 긴급의 해제는 서버가 user profile `allow-cancel-group-emergency` 로 판정한다, TS 24.379
-    §6.3.3.1.13.4. 그 값으로 넓히는 것은 §11).
+    그룹 전원에게 긴급이 선다) 또는 [긴급 해제](해제 자격 = 내가 올린 긴급 ∨ user profile `allow-cancel-group-emergency` — 서버 판정과 같은 식,
+    TS 24.379 §6.3.3.1.13.4, `DispatchSession.capabilities`). 비인가·다른 긴급 사용자 송출 중이면 서버가 403 으로 거절하고 토스트는 해제 거절
+    문구다(데스크톱 §9 와 같은 문장).
     상향·하향은 in-dialog re-INVITE 다(TS 24.379 §10.1.1.2.1.3~5, 코어 `Call.setCondition`) — 서버가 거절하면 코어가 이전 값으로
     되돌리고 토스트가 사유를 적는다(`applyCondition`).
   - [✓ 발언 대상](참여 중 반이중) 또는 [음소거](전이중 개별 통화 — 켜지면 경고색).
@@ -1597,9 +1603,8 @@ Compose `@Preview`(Android Studio 설계 보기)는 설계 중 참고용일 뿐 
 - **MCData FD·MSRP** — FD 는 코어에 있다(`CscClient::uploadFd/downloadFd`·`Engine::sendGroupFd/sendFd`, 수신
   `onSds(fd)` — 데스크톱 관제 앱이 쓴다). 태블릿 ④ 는 아직 글만 다루고 FD 알림 필드를 버린다. MSRP(media plane
   SDS)는 코어에 없다.
-- **[긴급 해제] 자격** — 서버는 긴급 해제를 개시자 ∨ user profile `allow-cancel-group-emergency` 로 받는다
-  ([mcptt_emergency_modes.md](mcptt_emergency_modes.md) §4.2). 코어는 그 요소를 `Capabilities.cancelGroupEmergency` 로 낸다([ue_sdk.md](ue_sdk.md) §4.2) —
-  채널 조작 줄의 [긴급 해제]를 «내 조건 ∨ 이 값» 으로 넓히는 것이 남았다(데스크톱과 같은 과제, [dispatch_desktop_ui.md](dispatch_desktop_ui.md) §13).
+- **CMS 문서 주기 재조회** — user profile 은 기동 때 한 번 받는다. 데스크톱처럼 5분 주기(ETag 304)로 다시 받아 자격 변경을 따라가는 것,
+  service config 의 Resource-Priority(`rp*`)를 계정에 넣는 것이 남았다(지금은 코어 기본값).
 - **망 전환 중의 통화 유지** — 등록 복구는 코어가 한다(§6.1). 진행 중 호는 건드리지 않는다 — re-INVITE 로 미디어를 새
   주소로 옮기는 호 유지는 서버 처리(VoLTE relay·MCPTT 세션)를 확인한 뒤 정한다([ue_sdk.md](ue_sdk.md) §11). 통화 중
   Wi-Fi ↔ LTE 전환에서 호가 이어지는지는 실기 미확인이다.

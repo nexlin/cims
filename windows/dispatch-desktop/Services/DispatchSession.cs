@@ -55,6 +55,8 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
     [ObservableProperty] private Capabilities _capabilities;
     private UserProfileDoc? _userProfile;
     private ServiceConfigDoc? _serviceConfig;
+    /// <summary>MCS UE initial configuration(TS 24.484 §7.2) — 참여 기능 PSI(MCPTT = 경보 Request-URI, MCData = disposition 통지 Request-URI).</summary>
+    private UeInitConfigDoc? _ueInit;
 
     public ObservableCollection<SessionItem> Sessions { get; } = new();
     public ObservableCollection<GroupInfo> Groups { get; } = new();
@@ -99,7 +101,7 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
         Engine.DialogInfoReceived += (_, d) => OnDialog(d);
         Engine.SdsReceived += (_, m) => SdsReceived?.Invoke(this, m);
         Engine.MessageReceived += (_, m) => { SipMessageReceived?.Invoke(this, m); OnSipMessage(m); };
-        Engine.RequestCompleted += (_, r) => RequestCompleted?.Invoke(this, r);
+        Engine.RequestCompleted += (_, r) => { OnAlertCancelResult(r); RequestCompleted?.Invoke(this, r); };
         Engine.HandlerFailed += (_, ex) => Log.Error("이벤트 핸들러 예외", ex);
         Engine.Stopped += (_, _) => Log.Info("engine stopped");
         Endpoints.Changed += (_, _) => OnEndpointsChanged();
@@ -431,6 +433,15 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
         ApplyAudioSettings();
         // CMS user profile·service config(TS 24.484) — 정책 게이트와 Resource-Priority 값. 못 받아도 기동은 계속한다(게이트 없음 = 허용, RP = 코어 기본값).
         if (PttService is not null) await RefreshCmsAsync();
+        // 참여 기능 PSI = UE initial configuration(TS 24.484 §7.2.1.1·§7.2.2.1 10)·14)) — 로그인 전 문서라 토큰 없이, MCS UE ID = +sip.instance 와
+        //   같은 기기 urn. 못 받으면 PSI 없이 올린다(경보 = 그룹 URI, disposition 통지 = 원 발신자 직행 — 코어 전환기 경로).
+        if (PttService is not null && _csc is not null && instanceId is not null)
+        {
+            var ui = await _csc.FetchUeInitConfigAsync(instanceId, _ueInit?.ETag);
+            if (ui.Ok) { if (!ui.Value.NotModified) _ueInit = ui.Value; }
+            else Log.Warn($"ue-init-config: {ui}");
+            Log.Info($"ue-init-config mcptt={_ueInit?.McpttServerUri} mcdata={_ueInit?.McdataServerUri}");
+        }
 
         foreach (var sp in toRegister)
         {
@@ -442,6 +453,12 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
             {
                 // 큰 그룹 SDS 는 media plane(MSRP) — 상한은 프로파일 mcdata(to_account 가 옮긴다), 서버발 MSRP 배포도 받는다(TS 24.282 §9.2.3)
                 cfg.McdataMsrp = true;
+                // 참여 기능 PSI(ue-init-config) — 광고하지 않은 서비스는 비워 둔다(코어 전환기 경로)
+                if (_ueInit is { } ui)
+                {
+                    if (ui.McpttServerUri.Length > 0) cfg.McpttServerUri = ui.McpttServerUri;
+                    if (ui.McdataServerUri.Length > 0) cfg.McdataServerUri = ui.McdataServerUri;
+                }
                 // Resource-Priority 정본 = service-config on-network *-resource-priority(TS 24.379 §6.2.8.1.15) — 문서에 없으면 코어 기본값
                 if (_serviceConfig is { } sc)
                 {
@@ -504,8 +521,10 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
         {
             Capabilities = caps;
             Log.Info($"capabilities up={caps.UserProfileKnown} sc={caps.ServiceConfigKnown} private={caps.PrivateCall} emgGroup={caps.EmergencyGroupCall} " +
-                     $"peril={caps.ImminentPerilCall} alert={caps.EmergencyAlert} alertCancel={caps.CancelEmergencyAlert} adhoc={caps.AdhocGroupCall} n2={caps.MaxAffiliationsN2}");
+                     $"peril={caps.ImminentPerilCall} alert={caps.EmergencyAlert} alertCancel={caps.CancelEmergencyAlert} adhoc={caps.AdhocGroupCall} n2={caps.MaxAffiliationsN2} " +
+                     $"emgCancel={caps.CancelGroupEmergency} perilCancel={caps.CancelImminentPeril}");
             foreach (var b in Notify.Banners.Where(b => b.IsAlert)) b.CanCancel = caps.CancelEmergencyAlert;
+            foreach (var b in Notify.Banners.Where(b => b.Session is not null)) b.CanCancel = CanCancelCondition(b.Session!);   // 긴급·임박 해제 자격
         }
     }
 
@@ -802,7 +821,7 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
         Volte = null; Ptt = null; Profile = null;
         _accountKinds.Clear(); _watched.Clear(); _pendingOps.Clear(); _pendingConsult.Clear(); _adhocMembers.Clear(); _regRetryAt.Clear(); _regBackoff.Clear();
         _broadcastPending.Clear(); _groupTypes.Clear();
-        _userProfile = null; _serviceConfig = null; Capabilities = Capabilities.Of(null, null); _nextCmsPoll = DateTime.MaxValue; _netPrint = "";
+        _userProfile = null; _serviceConfig = null; _ueInit = null; Capabilities = Capabilities.Of(null, null); _nextCmsPoll = DateTime.MaxValue; _netPrint = "";
         foreach (var ab in Notify.Banners.Where(b => b.IsAlert).ToList()) Notify.RemoveBanner(ab);
         Sessions.Clear(); Groups.Clear(); Dialogs.Clear();
         VolteReg = RegInfo.Empty; PttReg = RegInfo.Empty;
@@ -1009,8 +1028,10 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
         var k = c.Info.Condition;
         Log.Info($"condition #{c.Info.CallId} {c.Cause} emg={k.Emergency} peril={k.ImminentPeril} mine={k.Mine} pending={k.Pending} code={k.LastCode}");
         s.Info = c.Info;
+        bool cancel = c.Cause is ConditionCause.Local ? _conditionCancel.Contains(c.Info.CallId) : _conditionCancel.Remove(c.Info.CallId);
         if (c.Cause == ConditionCause.Denied)
-            Notify.Error($"{s.Title} — {ResponseText.Describe(ResponseText.Area.Emergency, k.LastCode, "")}", $"조건 변경 re-INVITE {k.LastCode}");
+            Notify.Error($"{s.Title} — {ResponseText.Describe(cancel ? ResponseText.Area.EmergencyCancel : ResponseText.Area.Emergency, k.LastCode, "")}",
+                         $"조건 {(cancel ? "해제" : "변경")} re-INVITE {k.LastCode}");
         UpdateEmergencyBanner(s);
         SessionChanged?.Invoke(this, s);
     }
@@ -1149,11 +1170,15 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
         Activity.Add(ActivityPanel.Ptt, ActivityKind.Emergency, $"{s.Title} {(emg ? "긴급" : "임박")} 개시", initiator, emergency: true);
     }
 
-    /// <summary>조건 하향을 서버가 받는가 — 지금은 내가 올린 조건만(CSP 가 개시자 외의 하향을 무시하면서 200 을 돌려줘, 다른 사람의 긴급을 풀면 이 화면만 풀린 것처럼
-    /// 보인다). 인가 확장(그룹 authorized user·관제 역할)과 비인가 403(TS 24.379 §10.1.1.4.7 7))은 서버 과제 E1(docs/dev/server_todo_mcptt_emergency_dispatch.md) 뒤에
-    /// 이 판정을 넓힌다. 청취 leg 는 조건을 바꾸지 않는다.</summary>
-    public bool CanCancelCondition(SessionItem s) => s.IsLive && s.IsActive && !s.Info.ListenOnly && (s.IsEmergency || s.IsImminentPeril) && !s.Info.Condition.Pending
-                                                     && s.IsConditionMine;
+    /// <summary>조건 하향을 서버가 받는가 — 서버 판정과 같은 식: 긴급 = 내가 올린 조건 ∨ user profile allow-cancel-group-emergency(local policy,
+    /// TS 24.379 §6.2.8.1.7·§6.3.3.1.13.4 — 관제사에게 켠다), 임박 = allow-cancel-imminent-peril(개시자 예외 없음, §6.2.8.1.10·§6.3.3.1.13.6).
+    /// 받지 못한 user profile 은 허용으로 읽는다(Capabilities 규약) — 서버가 비인가·다른 긴급 사용자 송출 중(7a))을 403 으로 거절하면 코어가 이전 값으로
+    /// 되돌리고 OnCondition 이 해제 거절 문구를 낸다. 청취 leg 는 조건을 바꾸지 않는다.</summary>
+    public bool CanCancelCondition(SessionItem s) => s.IsLive && s.IsActive && !s.Info.ListenOnly && !s.Info.Condition.Pending
+                                                     && (s.IsEmergency ? s.IsConditionMine || Capabilities.CancelGroupEmergency
+                                                                       : s.IsImminentPeril && Capabilities.CancelImminentPeril);
+    /// <summary>하향(해제)을 보낸 호 — 거절 문구를 상향과 가른다(같은 조건 이벤트 흐름).</summary>
+    private readonly HashSet<int> _conditionCancel = new();
 
     // ── 긴급 경보(TS 24.379 §12.1.1.3 — SIP MESSAGE alert-ind) ──
     //   경보는 세션 조건과 별개 신호다 — 그룹 세션이 없어도 온다. 배너(자주)는 그룹·발신자마다 하나, 발신자 취소(또는 제3자 취소의 originated-by)로 내린다.
@@ -1189,12 +1214,31 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
         {
             if (Ptt is null) return Fail("PTT 계정 없음");
             var r = Ptt.SendEmergencyAlert(b.GroupId, activate: false, originatedBy: b.AlertUser);
-            if (!r.Ok) return Show(r.WithoutValue(), ResponseText.Area.Emergency);
-            Notify.RemoveBanner(b);                                                   // 서버는 발신자에게 취소를 되돌려 주지 않는다 — 요청으로 내린다
+            if (!r.Ok) return Show(r.WithoutValue(), ResponseText.Area.AlertCancel);
+            Notify.RemoveBanner(b);                                                   // 서버는 발신자에게 취소를 되돌려 주지 않는다 — 요청으로 내리고
+            _alertCancel[r.Value] = b;                                                //   최종 응답이 403(미인가, alert-ind true)이면 되살린다(OnAlertCancelResult)
             Activity.Add(ActivityPanel.Ptt, ActivityKind.Emergency, $"{b.Title.Replace("긴급 경보 — ", "")} 긴급 경보 해제 요청", Directory.Label(b.AlertUser), emergency: true);
             return Result.Success;
         }
         return b.Session is { } s ? CancelEmergency(s) : Fail("세션이 끝났습니다");
+    }
+
+    /// <summary>경보 취소 MESSAGE token → 내린 배너. 최종 응답으로 표시를 서버 판정에 맞춘다.</summary>
+    private readonly Dictionary<long, Banner> _alertCancel = new();
+
+    /// <summary>경보 취소 최종 응답 — 서버는 미인가 취소를 403 + alert-ind true(경보 유지, TS 24.379 §12.1.3.2)로 답한다. 배너는 보낼 때 먼저 내렸으므로
+    /// 되살리고 이유를 알린다. 전송 실패·시한은 서버 판정을 모르므로 표시는 그대로 두고 알리기만 한다(ptt-client EmergencyPlane.onAlertResult 와 같은 규칙).</summary>
+    private void OnAlertCancelResult(RequestResult r)
+    {
+        if (!_alertCancel.Remove(r.Token, out var b) || r.Code is >= 200 and < 300) return;
+        Log.Warn($"alert cancel {b.GroupId}/{b.AlertUser}: {r.Code} {r.Reason}");
+        string gname = b.Title.Replace("긴급 경보 — ", "");
+        if (r.Code == 403)
+        {
+            if (Notify.BannerOfAlert(b.GroupId, b.AlertUser) is null) Notify.ShowBanner(b);
+            Activity.Add(ActivityPanel.Ptt, ActivityKind.Error, $"{gname} 긴급 경보 해제 거절", Directory.Label(b.AlertUser), emergency: true);
+        }
+        Notify.Error($"{gname} — {ResponseText.Describe(ResponseText.Area.AlertCancel, r.Code, r.Reason)}", $"경보 취소 MESSAGE {r.Code} {r.Reason}");
     }
 
     /// <summary>경보 배너 [닫기] — 로컬 표시만 내린다(취소 신호 유실 대비 탈출구). 서버의 경보 상태는 그대로다.</summary>
@@ -1483,13 +1527,17 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
         return Track(Ptt.JoinGroupCall(g.Id, new GroupCallOptions { Emergency = true }), Operation.Emergency);
     }
 
-    /// <summary>[긴급 해제] — 세션 조건 하향(TS 24.379 §10.1.1.2.1.4·§10.1.1.2.1.5 — emergency-ind/imminentperil-ind false re-INVITE). 지금은 내가 올린 조건만(CanCancelCondition).</summary>
+    /// <summary>[긴급 해제] — 세션 조건 하향(TS 24.379 §10.1.1.2.1.4·§10.1.1.2.1.5 — emergency-ind/imminentperil-ind false re-INVITE). 자격 = CanCancelCondition.</summary>
     public Result CancelEmergency(SessionItem s)
     {
-        if (!CanCancelCondition(s)) return Fail($"{s.Title} — 긴급을 해제할 수 없습니다(내가 올린 긴급만)");
+        if (!CanCancelCondition(s))
+            return Fail(s.IsEmergency ? $"{s.Title} — 긴급을 해제할 수 없습니다 (내가 올린 긴급이 아니고 해제 권한 allow-cancel-group-emergency 가 없습니다)"
+                                      : $"{s.Title} — 임박 위험 해제 권한이 없습니다 (user profile allow-cancel-imminent-peril)");
+        _conditionCancel.Add(s.CallId);
         var r = Engine.GetCall(s.CallId).SetCondition(emergency: false, imminentPeril: false);
         if (r.Ok) Activity.Add(ActivityPanel.Ptt, ActivityKind.Emergency, $"{s.Title} {(s.IsEmergency ? "긴급" : "임박")} 해제 요청", emergency: true);
-        return Show(r, ResponseText.Area.Emergency);
+        else _conditionCancel.Remove(s.CallId);
+        return Show(r, ResponseText.Area.EmergencyCancel);
     }
 
     /// <summary>일제 통화 개시(TS 24.379 §4.12, mcptt_broadcast_group_call.md §3) — 편성 그룹에 prearranged + broadcast-ind 로 새 세션을 연다.
@@ -1670,10 +1718,12 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
         return r;
     }
 
-    public Result<long> SendSdsNotification(string peer, string convId, string msgId, int notifType)
+    /// <summary>SDS disposition 통지(TS 24.282 §12.2.1.1) — peer = 받은 SDS 의 FromUri(mcdata-calling-user-id), groupUri = 받은 SDS 의 GroupUri
+    /// (mcdata-calling-group-id, 1:1 이면 빈 값). PTT 계정에 MCData PSI(ue-init-config)가 있으면 코어가 참여 기능 PSI 로 보낸다(없으면 원 발신자 직행).</summary>
+    public Result<long> SendSdsNotification(string peer, string convId, string msgId, int notifType, string groupUri = "")
     {
         if (Ptt is null) return Result<long>.Fail(-1, "PTT 계정 없음");
-        var r = Ptt.SendSdsNotification(UserPartConverter.UserPart(peer), convId, msgId, notifType);
+        var r = Ptt.SendSdsNotification(peer, convId, msgId, notifType, groupUri.Length > 0 ? groupUri : null);
         if (!r.Ok) Log.Warn($"sds notification → {peer}: {r}");
         return r;
     }

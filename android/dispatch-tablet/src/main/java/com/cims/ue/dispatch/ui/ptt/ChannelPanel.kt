@@ -79,6 +79,7 @@ fun ChannelPanel(
     onPerson: (PersonAction, String) -> Unit,
 ) {
     val mineCards by channels.cards.collectAsStateWithLifecycle()
+    val caps by channels.capabilities.collectAsStateWithLifecycle()
     val targets by channels.targetIds.collectAsStateWithLifecycle()
     val bcHeld by channels.broadcastHeld.collectAsStateWithLifecycle()
     // 필터·검색 전 전부에서 찾는다 — 검색어가 가린 채널이 «사라졌습니다» 로 보이지 않게.
@@ -126,7 +127,8 @@ fun ChannelPanel(
         head = head,
         info = info,
         memberCount = mine?.memberCount ?: range?.group?.memberCount ?: 0,
-        emergencyMine = mine?.emergencyMine == true,
+        // 해제 자격 = 내가 올린 긴급 ∨ allow-cancel-group-emergency — 서버 판정(TS 24.379 §6.3.3.1.13.4)과 같은 식, 거절은 403 토스트
+        canCancelEmergency = mine?.let { it.emergencyMine || caps.cancelGroupEmergency } == true,
         connected = connected, members = members,
         pinned = pinned, onPin = onPin, onClose = onClose,
         onJoin = { mine?.let(channels::join) },
@@ -154,7 +156,7 @@ fun ChannelPanelContent(
     /** 한 줄 요약 — «멤버 그룹 · 참가 7 · 12:31 · 편성 12 · 발언 김관제». */
     info: String = "",
     memberCount: Int = 0,
-    emergencyMine: Boolean = false,
+    canCancelEmergency: Boolean = false,
     connected: List<PersonRowUi> = emptyList(),
     members: List<PersonRowUi> = emptyList(),
     pinned: Boolean = false,
@@ -206,9 +208,9 @@ fun ChannelPanelContent(
                     filled = !head.listening, strongBorder = head.listening)
                 head.joined == true && !head.broadcastHeld -> {
                     PillButton("나가기", onLeave)
-                    // 진행 중 긴급 — 올리기는 확인을 받는다(그룹 전원에게 긴급이 선다). 해제는 내가 올린 것만 세운다.
+                    // 진행 중 긴급 — 올리기는 확인을 받는다(그룹 전원에게 긴급이 선다). 해제는 해제 자격이 있을 때만 세운다.
                     if (!head.emergency) PillButton("긴급", { confirmEmergency = true }, color = p.emergency)
-                    else if (emergencyMine) PillButton("긴급 해제", { onEmergency(false) }, color = p.emergency)
+                    else if (canCancelEmergency) PillButton("긴급 해제", { onEmergency(false) }, color = p.emergency)
                 }
                 head.joined == false && head.isMemberGroup -> {
                     PillButton("참여", onJoin, filled = true)

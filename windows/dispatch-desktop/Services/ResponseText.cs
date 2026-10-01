@@ -5,7 +5,7 @@ namespace DispatchDesktop.Services;
 
 public static class ResponseText
 {
-    public enum Area { Pickup, Transfer, Join, PttListen, PttJoin, PttPrivate, PttAdhoc, Emergency, Sds, Sms, Register, Call, Group, Management, Recording, File }
+    public enum Area { Pickup, Transfer, Join, PttListen, PttJoin, PttPrivate, PttAdhoc, Emergency, EmergencyCancel, AlertCancel, Sds, Sms, Register, Call, Group, Management, Recording, File }
 
     public static Area AreaOf(Operation op) => op switch
     {
@@ -42,6 +42,10 @@ public static class ResponseText
         (Area.PttPrivate, 486) => "통화 중",
         (Area.PttAdhoc, 403) => "애드혹 그룹 통화 자격이 없거나 시스템에서 꺼져 있습니다",
         (Area.Emergency, 403) => "긴급 호출 자격이 없습니다",
+        // 조건 하향 거절(TS 24.379 §10.1.1.4.7 7)·7a)) — 비인가 또는 다른 긴급 사용자가 송출 중. 서버는 현재 상태 지시자(true)를 싣고 코어는 이전 값으로 되돌린다
+        (Area.EmergencyCancel, 403) => "해제 권한이 없거나 다른 사용자가 긴급 발언 중입니다 — 긴급은 계속됩니다",
+        // 경보 취소 거절(TS 24.379 §12.1.3.2 — allow-cancel-emergency-alert, 403 + alert-ind true)
+        (Area.AlertCancel, 403) => "경보 해제 권한이 없습니다 — 경보는 계속됩니다",
         (Area.Sds, 403) => "그룹 문자 권한 없음",
         (Area.Sds, 413) => "너무 긺(서버 한도)",
         (Area.Sds, 404 or 408 or 503) => "전송 실패 — 재전송",

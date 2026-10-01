@@ -43,7 +43,7 @@ public sealed partial class McDataMessagesViewModel : MessagesViewModelBase
         Put(msgIn, persist: true);
         string gname = S.Groups.FirstOrDefault(g => g.Uri == m.GroupUri || g.Id == UserPartConverter.UserPart(m.GroupUri))?.Name ?? UserPartConverter.UserPart(m.GroupUri);
         S.Activity.Add(ActivityPanel.Ptt, ActivityKind.Sds, $"{(group ? gname : "1:1")} SDS {S.NameOfPtt(m.FromUri)}", Trim(m.Text.Length > 0 ? m.Text : m.FileName));
-        if (m.DispositionReq is 1 or 3) S.SendSdsNotification(m.FromUri, m.ConvId, m.MsgId, 2);
+        if (m.DispositionReq is 1 or 3) S.SendSdsNotification(m.FromUri, m.ConvId, m.MsgId, 2, m.GroupUri);   // 그룹 SDS 면 mcdata-calling-group-id
     }
 
     private static string Trim(string t) => t.Length > 40 ? "\"" + t[..39] + "…\"" : "\"" + t + "\"";
@@ -178,6 +178,10 @@ public sealed partial class McDataMessagesViewModel : MessagesViewModelBase
                           Text = "교대 인원 2명 추가 배치 바랍니다", Time = now.AddMinutes(-3), Read = true }, persist: false);
         Put(new Message { Kind = MessageKind.McData, ThreadKey = g.Uri, Direction = MessageDirection.In, Peer = "tel:1003", PeerName = "이순경", GroupUri = g.Uri,
                           FileName = "현장사진_01.jpg", FileUrl = "https://csc/mcdata/fd/0", FileSize = 1258291, FileType = "image/jpeg", Time = now.AddMinutes(-2), Read = true }, persist: false);
+        // 긴 글 — 말풍선 줄바꿈·최대 폭 점검용
+        Put(new Message { Kind = MessageKind.McData, ThreadKey = g.Uri, Direction = MessageDirection.In, Peer = "tel:1008", PeerName = "윤순경", GroupUri = g.Uri,
+                          Text = "3번 게이트 앞 차량 정체가 심합니다. 우회로(북문 → 순환도로)로 진입하도록 안내 중이며, 10분 뒤 다시 상황 보고하겠습니다.",
+                          Time = now.AddMinutes(-2), Read = true }, persist: false);
         Put(new Message { Kind = MessageKind.McData, ThreadKey = g.Uri, Direction = MessageDirection.Out, GroupUri = g.Uri, FileName = "순찰 구역 변경.pdf", FileSize = 348160,
                           FileType = "application/pdf", Time = now.AddMinutes(-1), State = SendState.Pending, TransferNote = "올리는 중…", Read = true }, persist: false);
         SelectKey(g.Uri, g.Name, true);
