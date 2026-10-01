@@ -401,7 +401,8 @@ UE-A                    CSP                          CMP                    UE-B
   돌려준다(`EventReInviteResponse` → `ForwardHeldReInviteAnswer`, RFC 3261 §14.2). 상대가 거절한 스트림은 port 0 그대로 간다 — relay 치환
   은 port 0 줄을 relay 포트로 바꾸지 않는다(바꾸면 제거가 추가로 바뀐다, RFC 3264 §8.2). 실패 응답(488·491 등)은 같은 코드로, 전달이 안
   되면 500. 미룬 동안 A 가 보낸 다음 re-INVITE 는 500 + Retry-After(§14.2), 상대가 끝내 답하지 않으면 40 s 뒤 500(`CheckHeldReInvite` — 전달한
-  re-INVITE 트랜잭션 시한 32 s 뒤).
+  re-INVITE 트랜잭션 시한 32 s 뒤). 묻는 동안 그 다이얼로그의 세션 갱신은 미룬다 — 겹치면 단말이 500(Retry-After)으로 거절한다(RFC 3261 §14.1,
+  [leg_liveness.md](leg_liveness.md)).
 - **relay 포트는 미디어 종류로 정한다**(psip `SetRelayIpPort` — CMP `PRtpRelay` 소켓 배치 audio = base, video = base + 2). 통화 중 더한 영상 줄은
   m 줄 뒤에 붙으므로(예 audio·text·video — pjsua 는 실시간 문자 `m=text` 를 기본으로 제안한다) 순서로 매기면 영상이 relay 에 없는 포트로 간다.
   relay 가 중계하지 않는 스트림(text·message 등)은 port 0(거절, RFC 3264 §6). VoLTE relay 의 모든 SDP 전달 지점(첫 offer·answer·18x·PRACK·re-INVITE·

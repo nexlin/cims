@@ -225,6 +225,12 @@ public:
 	CSipMessage * m_pclsHeldReInvite;
 	/** m_pclsHeldReInvite 를 미룬 시각 — CheckHeldReInvite 의 시한 */
 	time_t m_iHeldReInviteTime;
+	/** 응답을 기다리는 보낸 INVITE 의 CSeq(0 = 없음)와 보낸 시각 — 진행 중이면 세션 갱신을 미룬다(RFC 3261 §14.1 — 한 다이얼로그에
+	 *  INVITE 트랜잭션은 한 번에 하나) */
+	int m_iInviteTxSeq;
+	time_t m_iInviteTxTime;
+	/** 세션 갱신 re-INVITE 의 CSeq(0 = 없음) — 그 응답은 스택 몫이라 응용(EventReInviteResponse)에 넘기지 않는다 */
+	int m_iRefreshInviteSeq;
 
 	/** bKeepSdpVersion = true 면 SDP origin(o=) 의 세션 버전을 올리지 않는다 —
 	 *  세션 갱신 re-INVITE 의 offer 는 "변경 없음"을 표시해야 한다 (RFC 4028 §7.4). */

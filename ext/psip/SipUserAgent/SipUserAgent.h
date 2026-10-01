@@ -245,7 +245,8 @@ private:
 	bool SetCallEnd( const char * pszCallId );
 	void Delete( SIP_DIALOG_MAP::iterator & itMap );
 
-	bool SetInviteResponse( std::string & strCallId, CSipMessage * pclsMessage, CSipCallRtp * pclsRtp, bool & bReInvite );
+	bool SetInviteResponse( std::string & strCallId, CSipMessage * pclsMessage, CSipCallRtp * pclsRtp, bool & bReInvite,
+		bool & bRefreshResponse );
 	bool GetSipCallRtp( CSipMessage * pclsMessage, CSipCallRtp & clsRtp );
 
 	// SipUserAgentSessionTimer.hpp : 세션 타이머 내부 절차

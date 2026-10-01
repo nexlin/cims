@@ -35,6 +35,7 @@ CSipDialog::CSipDialog( CSipStack * pclsSipStack ) : m_iSeq(0), m_iNextSeq(0), m
 	, m_iPeerMinSE(0), m_iPeerSessionExpires(0), m_bPeerSupportsTimer(false), m_iSessionRefresherPolicy(-1)
 	, m_bSessionTimerDead(false), m_bSessionTimerRetried(false), m_bLastReInviteMediaSame(false)
 	, m_bLastReInviteStreamsChanged(false), m_pclsReInviteInProgress(NULL), m_pclsHeldReInvite(NULL), m_iHeldReInviteTime(0)
+	, m_iInviteTxSeq(0), m_iInviteTxTime(0), m_iRefreshInviteSeq(0)
 {
 	memset( &m_sttInviteTime, 0, sizeof(m_sttInviteTime) );
 	memset( &m_sttCancelTime, 0, sizeof(m_sttCancelTime) );
@@ -753,7 +754,12 @@ CSipMessage * CSipDialog::CreateMessage( const char * pszSipMethod )
 
 		// INVITE 의 CSeq 를 보관 → ACK/CANCEL 이 재사용 (RFC 3261 §13.2.2.4 / §9.1).
 		// dialog 내 NOTIFY/INFO 등이 m_iSeq 를 올려도 2xx-ACK 가 INVITE 와 같은 CSeq 를 쓰게 함.
-		if( !strcmp( pszSipMethod, SIP_METHOD_INVITE ) ) m_iInviteSeq = m_iSeq;
+		if( !strcmp( pszSipMethod, SIP_METHOD_INVITE ) )
+		{
+			m_iInviteSeq = m_iSeq;
+			m_iInviteTxSeq = m_iSeq;			// 최종 응답까지 진행 중(SetInviteResponse 가 지운다)
+			m_iInviteTxTime = time( NULL );
+		}
 	}
 	else
 	{

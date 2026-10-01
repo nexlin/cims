@@ -244,13 +244,15 @@ void CSipUserAgent::Delete( SIP_DIALOG_MAP::iterator & itMap )
 }
 
 // SIP INVITE 응답 메시지에 포함된 정보를 CSipDialog 에 저장한다.
-bool CSipUserAgent::SetInviteResponse( std::string & strCallId, CSipMessage * pclsMessage, CSipCallRtp * pclsRtp, bool & bReInvite )
+bool CSipUserAgent::SetInviteResponse( std::string & strCallId, CSipMessage * pclsMessage, CSipCallRtp * pclsRtp, bool & bReInvite,
+	bool & bRefreshResponse )
 {
 	SIP_DIALOG_MAP::iterator		itMap;
 	bool	bFound = false, bStopCall = false;
 	CSipMessage *pclsAck = NULL, *pclsInvite = NULL;
 
 	bReInvite = false;
+	bRefreshResponse = false;
 
 	m_clsDialogMutex.acquire();
 	itMap = m_clsDialogMap.find( strCallId );
@@ -274,6 +276,15 @@ bool CSipUserAgent::SetInviteResponse( std::string & strCallId, CSipMessage * pc
 
 		if( pclsMessage->m_iStatusCode >= SIP_OK )
 		{
+			// 그 INVITE 트랜잭션이 끝났다 — 세션 갱신의 응답이면 스택 몫이다(응용에 넘기지 않는다)
+			const int iRspSeq = pclsMessage->m_clsCSeq.m_iDigit;
+			if( itMap->second.m_iInviteTxSeq == iRspSeq ) itMap->second.m_iInviteTxSeq = 0;
+			if( itMap->second.m_iRefreshInviteSeq != 0 && itMap->second.m_iRefreshInviteSeq == iRspSeq )
+			{
+				bRefreshResponse = true;
+				itMap->second.m_iRefreshInviteSeq = 0;
+			}
+
 			if( pclsMessage->m_iStatusCode != SIP_CONNECT_ERROR )
 			{
 				pclsAck = itMap->second.CreateAck( pclsMessage->m_iStatusCode );
@@ -430,12 +441,17 @@ bool CSipUserAgent::SetInviteResponse( std::string & strCallId, CSipMessage * pc
 			}
 		}
 
+		// 세션 갱신을 인증(401/407)·Min-SE(422) 로 다시 보낸다 — 그 새 트랜잭션도 갱신이다
+		if( bRefreshResponse && pclsInvite ) itMap->second.m_iRefreshInviteSeq = pclsInvite->m_clsCSeq.m_iDigit;
+
 		bFound = true;
 	}
 	m_clsDialogMutex.release();
 
 	if( pclsAck )
 	{
+		// ACK 의 CSeq 번호 = 응답받은 INVITE 의 것(RFC 3261 §13.2.2.4 · §17.1.1.3) — 다이얼로그의 마지막 INVITE 가 아니다
+		pclsAck->m_clsCSeq.Set( pclsMessage->m_clsCSeq.m_iDigit, SIP_METHOD_ACK );
 		m_clsSipStack.SendSipMessage( pclsAck );
 	}
 

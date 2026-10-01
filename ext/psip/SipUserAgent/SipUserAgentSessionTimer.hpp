@@ -347,6 +347,11 @@ void CSipUserAgent::CheckSessionTimer( )
 			// 갱신 트랜잭션이 진행 중이면(또는 직전 시도가 실패했으면) 트랜잭션 수명만큼 기다린다.
 			if( clsDialog.m_iRefreshSentTime > 0 && ( iNow - clsDialog.m_iRefreshSentTime ) < SIP_SESSION_TIMER_TX_SEC ) continue;
 			if( ( iNow - clsDialog.m_iLastRefreshTime ) < ( clsDialog.m_iSessionExpires / 2 ) ) continue;
+			// 이 다이얼로그에 INVITE 트랜잭션이 진행 중이면(어느 방향이든 — 보낸 INVITE 의 응답 대기, 응답을 미룬 수신 re-INVITE) 새
+			//   INVITE 를 시작하지 않는다(RFC 3261 §14.1 — 상대는 500/491 로 거절한다). 끝나면 다음 점검(1초)에 보낸다 — SE/2 에서 시작하므로
+			//   만료까지 여유가 있다. 진행 중 판정은 트랜잭션 수명(64*T1) 안에서만 믿는다.
+			if( clsDialog.m_pclsHeldReInvite ) continue;
+			if( clsDialog.m_iInviteTxSeq != 0 && ( iNow - clsDialog.m_iInviteTxTime ) < SIP_SESSION_TIMER_TX_SEC ) continue;
 
 			clsLeg.bRefresh = true;
 			clsLegList.push_back( clsLeg );
@@ -400,6 +405,7 @@ void CSipUserAgent::CheckSessionTimer( )
 		{
 			SessionTimerAddToRequest( clsDialog, pclsInvite, false );
 			clsDialog.m_iRefreshSentTime = iNow;
+			clsDialog.m_iRefreshInviteSeq = pclsInvite->m_clsCSeq.m_iDigit;
 			clsRefreshList.push_back( pclsInvite );
 		}
 	}

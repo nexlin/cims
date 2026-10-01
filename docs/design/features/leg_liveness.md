@@ -194,6 +194,8 @@ CSP 는 아무것도 보내지 않고 in-dialog re-INVITE(또는 향후 UPDATE) 
 | 수신 갱신 re-INVITE 는 **미디어 재협상으로 처리하지 않는다** | 선언 주소·코덱이 직전과 같으면 CMP `RELAY_MODIFY`/`PTT_JOIN` 재호출과 NAT latch 재평가를 생략한다(`CModuleDispatcher::EventReInvite`). 불필요한 latch 리셋은 NAT 뒤 단말의 하향 경로를 흔든다 |
 | 갱신 수단은 당분간 **re-INVITE** | psip 은 UPDATE 를 구현하지 않는다(`SIP_METHOD_UPDATE` 부재). 다이얼로그 `Allow` 에도 UPDATE 가 없어 규격 준수 단말은 re-INVITE 를 쓴다([§12](#12-호환성리스크)) |
 | 조건 상향 등 다른 목적의 in-dialog re-INVITE 도 **갱신으로 계산**한다 | §7.2 — 중복 갱신을 줄인다 |
+| 다이얼로그에 INVITE 트랜잭션이 **진행 중이면 갱신을 미룬다** — 보낸 INVITE 의 응답 대기(`m_iInviteTxSeq`, 64*T1 안), 응답을 미룬 수신 re-INVITE(`m_pclsHeldReInvite`) | RFC 3261 §14.1 — 한 다이얼로그에 INVITE 트랜잭션은 한 번에 하나다. 겹치면 상대가 500(Retry-After)·491 로 거절한다(통화 중 영상 전환에서 사용자가 묻는 동안 갱신 시각이 오면 실측). 끝나면 다음 점검(1초)에 보낸다(SE/2 에서 시작하므로 여유가 있다) |
+| 갱신 re-INVITE 의 응답은 **응용에 넘기지 않는다** — `m_iRefreshInviteSeq`(401/407·422 재전송 포함)와 CSeq 가 같은 최종 응답 | 스택 몫이다 — 응용이 다른 leg 의 미룬 re-INVITE 답으로 읽지 않게([volte_flows.md](volte_flows.md) C11). ACK 의 CSeq 는 응답받은 INVITE 의 것(§13.2.2.4) |
 | 수신 갱신의 answer 는 **직전 로컬 선언 그대로**다 — floor `m=application` 포트·fmtp·명시 video 포트·코덱 목록 포함 | 로컬 RTP 를 다시 읽어 쓰는 경로가 합성 SDP 요소를 옮기지 않으면 answer 가 `m=application 0`(floor 거절, RFC 3264 §6)으로 나가 규격 단말은 floor 를 끈다(`RecvInviteRequest`) |
 | 본문에 floor 줄을 **덧붙인 offer** 는 같은 선언을 다이얼로그에도 둔다 | 제어 기능의 멤버 초대는 floor `m=application`(`c=`·`a=mcptt-floor-request-uri` 포함)을 SDP 본문에 직접 붙인다(`WrapMultipartBody`). 다이얼로그 상태에 floor 가 없으면 스택이 만드는 서버 갱신 offer·멤버 re-INVITE answer 가 `m=application 0` 으로 floor 를 끈다 — `SetLocalApplicationMedia` 로 포트·fmtp 를 다이얼로그에 둔다 |
 | 수신 갱신 2xx 의 Contact 도 **다이얼로그가 정한 transport·특성 태그**로 광고한다 | 응답은 수신 요청에서 만들어지므로 다이얼로그 값(`SetContactTransport`·`SetContactParams`)을 옮겨 싣는다 — MCPTT focus 의 `isfocus` 등이 갱신마다 빠지지 않게 |

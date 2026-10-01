@@ -309,18 +309,20 @@ bool CSipUserAgent::RecvInviteResponse( int iThreadId, CSipMessage * pclsMessage
 	if( pclsMessage->m_iStatusCode == SIP_TRYING ) return true;
 
 	CSipCallRtp clsRtp;
-	bool bRtp = false, bReInvite = false;
+	bool bRtp = false, bReInvite = false, bRefreshResponse = false;
 	std::string	strCallId;
 
 	pclsMessage->GetCallId( strCallId );
 
 	if( GetSipCallRtp( pclsMessage, clsRtp ) ) bRtp = true;
 
-	if( SetInviteResponse( strCallId, pclsMessage, bRtp ? &clsRtp : NULL, bReInvite ) )
+	if( SetInviteResponse( strCallId, pclsMessage, bRtp ? &clsRtp : NULL, bReInvite, bRefreshResponse ) )
 	{
 		if( bReInvite )
 		{
-			if( m_pclsCallBack ) m_pclsCallBack->EventReInviteResponse( strCallId.c_str(), pclsMessage->m_iStatusCode, bRtp ? &clsRtp : NULL );
+			// 세션 갱신(스택이 보낸 re-INVITE)의 응답은 응용의 re-INVITE 결과가 아니다 — 응용이 미뤄 둔 다른 leg 의 답으로 읽지 않게
+			if( m_pclsCallBack && bRefreshResponse == false )
+				m_pclsCallBack->EventReInviteResponse( strCallId.c_str(), pclsMessage->m_iStatusCode, bRtp ? &clsRtp : NULL );
 		}
 		else
 		{
