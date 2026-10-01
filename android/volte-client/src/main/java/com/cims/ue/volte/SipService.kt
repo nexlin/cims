@@ -60,6 +60,12 @@ class SipService : Service() {
         com.cims.ue.sdk.platform.NetworkWatcher(this) { if (controller?.hasAccount() == true) controller?.reregister() }
     }
     private var ringtone: Ringtone? = null
+    // 상시 알림 상태 — 등록 줄·아이콘과 마지막 호(통화 중이면 진행 중 통화 알림이 등록 줄을 대신한다).
+    private var regLine = "대기"
+    private var regIcon = android.R.drawable.presence_away
+    @Volatile private var lastCall: CallState = CallState.Null
+    private var activeCallId = -1
+    private var activeSince = 0L
 
     /** 화면 최상단 전역 상태 아이콘 배지(오버레이, 전화 아이콘=중앙 좌측) — main 스레드에서만 갱신. */
     private val overlay by lazy {
@@ -149,6 +155,11 @@ class SipService : Service() {
         // 착신 알림 "거절" 액션 — UI 없이 서비스에서 바로 거절.
         if (intent?.action == ACTION_REJECT) {
             controller?.reject(intent.getIntExtra(EXTRA_CALL_ID, -1))
+            return START_STICKY
+        }
+        // 통화 중 알림 "통화 종료" 액션 — 통화 화면이 다른 앱에 가려져도 끊을 수 있게.
+        if (intent?.action == ACTION_HANGUP) {
+            controller?.hangup(intent.getIntExtra(EXTRA_CALL_ID, -1))
             return START_STICKY
         }
         // 포그라운드 복귀/네트워크 복귀 등 keepalive 트리거 — 등록만 재시도(계정 있으면 reregister).
@@ -541,7 +552,8 @@ class SipService : Service() {
                     RegState.Unregistered -> "등록 해제됨" to android.R.drawable.presence_invisible
                     is RegState.Failed -> "오프라인 (${reg.reason})" to android.R.drawable.stat_notify_error
                 }
-                updateNotification("CIMS Phone", line, icon)
+                regLine = line; regIcon = icon
+                refreshNotification()
                 val color = when (reg) {
                     is RegState.Registered -> 0xFF00C853.toInt()
                     RegState.Registering, RegState.Idle -> 0xFFF9A825.toInt()
@@ -556,6 +568,7 @@ class SipService : Service() {
                 // 🔑 Incoming(응답 전)은 승격하지 않는다 — 백그라운드 착신 시 microphone 타입 승격은
                 // API 34+ 에서 금지(ForegroundServiceStartNotAllowedException → 앱 크래시).
                 // 사용자가 받으면(Active) 통화 UI 가 포그라운드라 승격 가능. Outgoing 은 사용자 발신=포그라운드.
+                trackCall(call)
                 elevateForCall(call is CallState.Active || call is CallState.Outgoing)
                 // 통화 오디오 세션 소유(MODE_IN_COMMUNICATION) — 미소유 시 일부 단말 완전 무음(setInCallAudio 참조)
                 setInCallAudio(call is CallState.Active || call is CallState.Outgoing)
@@ -571,18 +584,11 @@ class SipService : Service() {
                 if (call is CallState.Disconnected) {
                     applyMicYield(false)                                // 발언 양보 잔존 해제(다음 통화 대비)
                 }
-                val line = when (call) {
-                    is CallState.Incoming -> "수신: ${call.remote}"
-                    is CallState.Outgoing -> "발신: ${call.remote}"
-                    is CallState.Active -> "통화 중: ${call.remote}"
-                    is CallState.Disconnected -> null
-                    CallState.Null -> null
-                }
-                if (line != null) updateNotification("CIMS Phone", line)
+                refreshNotification()
             }.launchIn(this)
 
             // 통화 중 영상 전환 — 영상이 붙거나 빠지면 근접 센서 판정을 다시 한다.
-            c.callVideo.onEach { applyProximity(c) }.launchIn(this)
+            c.callVideo.onEach { applyProximity(c); refreshNotification() }.launchIn(this)
 
             // 문자 MESSAGE 최종 응답(token 상관) → 말풍선 상태 SENT/FAILED. token 당 1회(remove 로 dedupe).
             c.sendReqResults.onEach { r ->
@@ -730,6 +736,13 @@ class SipService : Service() {
         notificationManager().notify(NOTIF_MESSAGE, n)
     }
 
+    /** 상시 알림 누르기 = 앱 열기. 통화 중이면 MainActivity 가 통화 화면을 그린다(singleTask — 기존 인스턴스로). */
+    private fun openAppIntent(): PendingIntent = PendingIntent.getActivity(
+        this, 4,
+        Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+        PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+    )
+
     private fun buildNotification(
         title: String,
         text: String,
@@ -741,10 +754,64 @@ class SipService : Service() {
             .setSmallIcon(icon)
             .setOngoing(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setContentIntent(openAppIntent())
             .build()
 
     private fun updateNotification(title: String, text: String, icon: Int = android.R.drawable.sym_action_call) {
         notificationManager().notify(NOTIF_ID, buildNotification(title, text, icon))
+    }
+
+    /**
+     * 발신·통화 중 상시 알림 = 진행 중 통화 알림(CallStyle.forOngoingCall) — 누르면 통화 화면으로 돌아가고 [통화 종료] 로
+     * 끊는다. 통화 화면이 다른 앱에 가려져도 돌아갈 길이 있어야 한다(기본 전화앱과 같은 표면). 등록 유지 FGS 의 알림 자리를
+     * 그대로 쓴다(CallStyle 은 FGS 알림이어야 한다). 통화 중에는 경과 시간을 띄운다.
+     */
+    private fun buildCallNotification(call: CallState): Notification? {
+        val (id, remote) = when (call) {
+            is CallState.Outgoing -> call.id to call.remote
+            is CallState.Active -> call.id to call.remote
+            else -> return null
+        }
+        val number = extractSipNumber(remote)
+        val hangUp = PendingIntent.getService(
+            this, 5,
+            Intent(this, SipService::class.java).setAction(ACTION_HANGUP).putExtra(EXTRA_CALL_ID, id),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+        val peer = Person.Builder().setName(number.ifBlank { "알 수 없음" }).setImportant(true).build()
+        val b = NotificationCompat.Builder(this, CHANNEL_ID)
+            .setSmallIcon(android.R.drawable.sym_action_call)
+            .setContentTitle(number.ifBlank { "통화" })
+            .setContentText(if (call is CallState.Outgoing) "발신 중" else "통화 중")
+            .setCategory(NotificationCompat.CATEGORY_CALL)
+            .setOngoing(true)
+            .setContentIntent(openAppIntent())
+            .setStyle(NotificationCompat.CallStyle.forOngoingCall(peer, hangUp).setIsVideo(callVideo?.value == true))
+        if (call is CallState.Active && activeSince > 0L) b.setWhen(activeSince).setUsesChronometer(true).setShowWhen(true)
+        return b.build()
+    }
+
+    /** 상시 알림 한 자리(NOTIF_ID)의 현재 내용 — 발신·통화 중이면 진행 중 통화 알림, 아니면 등록 상태(착신 중이면 수신 표시). */
+    private fun currentNotification(): Notification {
+        val call = lastCall
+        buildCallNotification(call)?.let { return it }
+        return if (call is CallState.Incoming) buildNotification("CIMS Phone", "수신: ${extractSipNumber(call.remote)}")
+        else buildNotification("CIMS Phone", regLine, regIcon)
+    }
+
+    private fun refreshNotification() {
+        runCatching { notificationManager().notify(NOTIF_ID, currentNotification()) }
+            .onFailure { android.util.Log.w("SipService", "상시 알림 갱신 실패", it) }
+    }
+
+    /** 통화 연결 시각 — 진행 중 통화 알림의 경과 시간 기준. 호가 바뀌거나 끝나면 지운다. */
+    private fun trackCall(call: CallState) {
+        lastCall = call
+        when (call) {
+            is CallState.Active -> if (activeCallId != call.id) { activeCallId = call.id; activeSince = System.currentTimeMillis() }
+            is CallState.Outgoing, is CallState.Incoming -> Unit
+            else -> { activeCallId = -1; activeSince = 0L }
+        }
     }
 
     /**
@@ -774,7 +841,7 @@ class SipService : Service() {
      *  포그라운드로 오면 while-in-use 마이크 권한으로 통화는 정상 동작한다. */
     private fun elevateForCall(active: Boolean) {
         if (Build.VERSION.SDK_INT >= 34) {
-            val n = buildNotification("CIMS Phone", if (active) "통화 중" else "등록 유지")
+            val n = currentNotification()
             runCatching { startForegroundCompat(n, inCall = active) }
                 .onFailure {
                     android.util.Log.w("SipService", "FGS 승격 거부(inCall=$active) — specialUse 유지", it)
@@ -803,6 +870,7 @@ class SipService : Service() {
         private const val NOTIF_MESSAGE = 1003
 
         private const val ACTION_REJECT = "com.cims.ue.volte.action.REJECT"
+        private const val ACTION_HANGUP = "com.cims.ue.volte.action.HANGUP"
         private const val EXTRA_CALL_ID = "callId"
 
         /** 마이크 양보 워치독 시한 — 서버 최대 발언시간을 여유 있게 초과(RESUME 유실 안전망). */
