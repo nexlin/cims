@@ -1632,4 +1632,7 @@ Compose `@Preview`(Android Studio 설계 보기)는 설계 중 참고용일 뿐 
   minSdk 를 28 로 올리면 걷어낼 수 있다.
 - **화면 회귀 자동화** — 데스크톱의 `--ui-preview-shot` 에 해당하는 스크린샷 캡처(Roborazzi 등)는 두지 않는다.
   화면 판정은 실기기가 맡는다.
-- **영상** — 감청 영상 격자는 Windows F3 과 함께 후속.
+- **영상** — MCVideo 영상 채널(앱이 영상 호에 함께 합류 — D10 · 사이드 패널 «영상» 절 = 볼 때만 영상 칸(기본 세로 480×640(3:4), [↺][↻] 90° 회전 — 보내는 사람마다 기억) · «영상 n» 목록 [보기]/[바꿔 보기]/[그만 보기]·[크게 보기 ↗]·
+  [영상 소리] · «새 영상» 배너 · 카드 «영상 n» · 그룹 편집 «서비스» 절 · D6 무전 음량 줄임)은 데스크톱과 같은 의미론으로 옮긴다([dispatch_desktop_ui.md](dispatch_desktop_ui.md) §10,
+  착수 [dispatch_windows_next.md](../../dev/dispatch_windows_next.md) §3.3 — Windows 안정화 뒤, 코어 `joinVideoGroupCall`·`acceptReception` Kotlin 파사드 그대로). Android 엔진은
+  영상이 있어 렌더 = SDK `setVideoSurface`(엔진 전역 하나)로 칸이 바로 선다. 감청 영상 격자는 Windows F3 과 함께 후속.

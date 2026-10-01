@@ -31,6 +31,8 @@
   이고 `layout.json` 에 기억한다(§3.3).
 - **화면 한 장, 스크롤 없음.** 설계 캔버스 1920×1080, 목록이 넘치면 그 칸 안에서만 스크롤한다. 창이 좁아 오른쪽 칸이 360 보다 작아질 때만 왼쪽 칸을
   줄인다(640 까지).
+- **영상 = MCVideo 영상 채널** — MCPTT 와 나란한 서비스라(TS 23.280 §3) 같은 그룹 카드에서 음성 호와 따로 든다. «영상 참여» 단계가 없다 — 앱이 내 채널의 영상 채널에
+  영상 호도 함께 합류한다(D10). 카드는 «영상 n»(보내는 중 수) 태그만, 골라 보기는 채널 상세 «영상» 절 [보기]/[바꿔 보기]/[그만 보기](한 번에 하나), 새 송출은 «새 영상» 배너(§10).
 - **테마 기본 = 밝게** — 무채 표면 + 브랜드 남색(`#4F46E5` — 채운 주 행동·선택) + 상태색(연한 면·채움). 어둡게는 설정에서 고른다(`UiVersion` 없는 옛 설정을 처음
   읽을 때 한 번 밝게로 되돌린다). 두 테마는 같은 토큰 키를 쓰고 창 제목 표시줄도 테마를 따른다(§3.2 «색»).
 
@@ -43,6 +45,7 @@
 | PTT 애드혹 그룹 통화 발신 | PTT 사용자 N명 | [사용자] 패널 ☐ → [애드혹 열기 · 지금 한 번] · 사람 메뉴 [애드혹에 추가] | `joinGroupCall("adhoc-<나>-<epoch>", {members[]})` |
 | MCData 문자(그룹·1:1·첨부) | SDS · FD | [무전] «메시지»(카드를 누르면 그 채널 대화로) — 빠른 답·[📎]·끌어 놓기 | `sendGroupSds`/`sendSds`·`onSds`·`sendSdsNotification` · FD = `CscClient::uploadFd`→`sendGroupFd`/`sendFd`, 받기 `downloadFd` |
 | PTT 세션 상황 인지·청취 | conference 로스터·floor | 카드 2·3줄(발언자·접속자) · 타 채널 [청취] · 채널 상세 · «이벤트» | `subscribeConference`→`onRoster`, `joinGroupCall(listenOnly)` |
+| 그룹 영상 보기(MCVideo) | 현장 요원의 영상 송출 | 카드 «영상 n» · «새 영상» 배너 [보기] · 채널 상세 «영상» 절 «영상 n» 목록 [보기]/[바꿔 보기]·[그만 보기]·[영상 소리](§10) — 영상 채널 합류는 앱이 한다(D10) | `affiliate(…, McVideo)`·`joinVideoGroupCall`·`acceptReception`/`endReception`·`onTransmission`/`onReception` |
 | 대표번호 착신 응대 | INVITE `P-Called-Party-ID`=pilot | [통화] «통화» 대표번호 대기열 + 착신 배너 | `CallInfo.calledParty` → `answer` |
 | 링 중인 대표번호 호 당겨받기 | 대기열 링잉 | 대기열 [당겨받기] | `pickup(code, pilot)` |
 | 그룹원 링잉 지정 픽업 | 그룹원 링잉 | «관제 그룹원» [당겨받기] · «진행 중» [지정 픽업] | `pickup(code, ext)` |
@@ -126,6 +129,7 @@
 | 발언 바(80, 모든 화면) | **PTT**(150×64 — 대상 없음 흐림 · 준비 먹 채움 "누르고 말하기 · Ctrl+Space" · 요청 중 주황 · **발언 중 녹색**(일부만 승인이면 "발언 n/m") · 전부 거부 빨강 1초 · 잠금 발언 파란 테두리) · **대상 칩**("순찰1 · 승인" 녹색 채움 / "상황실 · 대기" · 요청 · 대기 n번째 · 거부 사유 — 누르면 채널 상세, × = 대상에서 빼기) · 남은 발언 게이지(승인된 대상 중 최소) · [모두 해제]. 대상이 없으면 "발언 대상 없음 — 채널 카드의 ✓ 를 누르세요" |
 | 착신 배너 | 상단 바 아래 64 — 두 줄("대표번호 7000 착신" / 발신자 크게) · 경과 · [응답 F9][거절]. 대표번호 착신(`calledParty`=pilot) 주황 면, 내선 직접 착신 파랑 면, PTT 개별 통화 착신 청록 면. 여러 착신은 스택(최신 위). 응답 핫키는 최상단 호 |
 | 긴급 배너 | 긴급(연한 빨강 면·진한 빨강 글자) / 임박(주황 채움·먹 글자) / 경보(연한 보라) — 두 줄("긴급 · 개시 1006 박경장" / 그룹명 크게) · 경과. 카드·타 채널 행과 동기. **긴급·임박**(채널마다 하나) = 세션 조건 `CallInfo.condition`(TS 24.379 §10.1.1.2.1.3~6 — 개시 mcptt-info 로 시작해 상향·하향 re-INVITE·서버 재광고·합류 200 OK 로 바뀐다; `CallInfo.mcptt` 는 호를 세운 INVITE 의 값이라 판정에 쓰지 않는다). 호 상태·미디어 스냅샷·조건 이벤트(`onMcpttCondition`) 셋 모두가 배너를 다시 판정한다 — 진행 중 격상·해제와 «이미 긴급인 그룹에 합류» 가 선다. 개시자는 호를 세운 INVITE 가 그 조건을 실었을 때만 적는다(진행 중에 걸린 조건은 비움). [긴급 해제] = 해제 자격이 있을 때만 — 긴급 = 내가 올린 조건 ∨ user profile `allow-cancel-group-emergency`, 임박 = `allow-cancel-imminent-peril`(서버 판정과 같은 식 — TS 24.379 §6.3.3.1.13.4·§6.3.3.1.13.6, `DispatchSession.CanCancelCondition`). 비인가·다른 긴급 사용자 송출 중이면 서버가 403 + 현재 상태 지시자로 거절하고 코어가 이전 값으로 되돌린다 — 토스트는 해제 거절 문구(§9). 조건이 내려가면 스스로 빠지고 닫기는 없다. **경보**(그룹·발신자마다 하나) = `onEmergencyAlert`(TS 24.379 §12.1.1.3) — 발신자의 취소(제3자 취소면 `originated-by` 가 가리키는 경보)로 해제, [경보 해제] = 경보 취소 MESSAGE(남의 경보는 제3자 취소 §12.1.1.2 4)e), user profile `allow-cancel-emergency-alert` 이 없으면 숨김) — 보낼 때 배너를 내리고, 최종 응답이 403(미인가, `alert-ind` true — §12.1.3.2)이면 되살려 거절 문구를 띄운다(전송 실패·시한은 판정을 모르므로 표시는 그대로 두고 알리기만), [닫기] = 로컬 표시만(취소 신호 유실 대비). 공통 [채널로 이동] = 관제 [무전] 의 그 채널 상세(내 채널 카드, 없으면 타 채널 행) — 합류하지 않는다(청취 범위 그룹에 sendrecv 로 붙으면 비멤버라 403, TS 24.379 §10.1.1) |
+| «새 영상» 배너 | 착신 배너와 같은 모양의 옅은 청록 면 — "새 영상 · <그룹>" / "<이름>(<기능 별칭>)이 영상을 보냅니다" · 경과 · [보기](채운 청록 — 그 채널 상세를 열고 그 송출을 본다) · [닫기](배너만 — 채널 목록에서 다시 [보기]). 영상 채널의 새 송출마다(채널당 하나 — 가장 최근), 그 송출을 보기 시작하거나 끝나면 스스로 빠진다(§10.3) |
 | 서버 인증서 배너 | 같은 배너 층의 **한 줄**(경고 아이콘 + 제목 · 내용) — SDK 가 마지막 SIP TLS·HTTPS 핸드셰이크에서 관측한 서버 인증서 잔여(`Engine.TlsPeerExpiry`·`CscClient.TlsPeerExpiry` 중 짧은 것)가 **≤ 30일**이면 "서버 인증서 N일 후 만료 · `<host:port>` · `<subject>` · 만료 YYYY-MM-DD · 자동 갱신 실패 신호 — 운영자에게 알리세요 (콘솔 알람 A-PRC-009)". 경고(≤30일) 연한 빨강 + 빨강 글자, 위험(≤7일·만료) 진한 빨강 — 서버 A-PRC-009 warning/critical 과 같은 단계. **닫기 없음**(서버 인증서가 갱신되어 잔여가 임계를 벗어나면 사라진다), 버튼·경과 없음. 로그인 직후·TLS 등록 성공·1분 주기로 재평가, 로그아웃에 내림. 자격 갱신 실패 경고(`BannerKind.Credential`, §6)도 같은 한 줄 모양. 임계 셋(60 갱신/30 경고/7 위험)의 뜻은 [sip_tls_signaling.md §8.6](sip_tls_signaling.md) |
 | 토스트 | 명령 실패의 사유(§9 사전) — 본문 우하단(440), 6초, 오류는 수동 닫기. 오류 연한 빨강 · 경고 연한 주황 · 정보 흰 면. 원문 코드는 ▸상세 |
 | 색 | **축 셋** — 표면(살짝 푸른 무채) · 브랜드 남색 · 상태색. **남색** = 채운 주 행동(`Brush.Fill` — [참여]·[보내기]·[그룹 만들기]·모드 [무전\|통화] 선택 칸·수 배지·로고)과 선택(연한 남색 면 + 남색 외곽선·글자 — 필터 칩·목록 토글·고른 행의 왼쪽 막대·레일 선택·발언 대상 ✓·보낸 말풍선). **상태색** = 발언·통화 녹색(통화 행동 [응답]·[발신]·PTT 발언 중·승인 칩) · 긴급 빨강([종료]·[거절]·긴급 라벨·음소거 중) · 임박·착신·대표번호 주황(대표번호 대기열·착신 카드·요청/대기 칩) · 청취·문자 청록([청취]·청취 중·문자 라벨) · 감청·경보 보라 · 보류·전달 파랑. 상태색마다 **네 값** — 기본(점·외곽선) · Ink(글자 — 흰 면·연한 면 공통) · Soft(연한 면) · Fill(흰 글자를 얹는 채움). 어둡게에서는 기본·Ink 를 밝게, Fill 을 진하게 둔다(한 값으로 겸하면 글자가 흐리거나 채움 위 흰 글자가 뜬다). **대비** = 글자 4.5:1 · 보조 글자·점 3:1(WCAG 2.x AA) — 두 테마의 모든 면에서 맞춘다(밝게의 녹색·주황·남색 기본색은 글자로 쓰면 모자라 Ink 를 쓴다). **외곽선** = `Brush.Edge`(입력칸·강조 경계 — 무채보다 한 단 진함), 호버 = 남색 외곽선, **키보드 포커스** = 남색 2px 고리(`FocusRing`/`FocusRing.Pill` — 입력칸은 테두리 색이 포커스라 고리 없음). **입력칸 안내** = 빈 칸 안의 흐린 글자(검색칸 — 무엇을 치는지, 치면 사라진다. 암시 TextBox 템플릿이 `Tag` 를 그린다), 글·비밀번호·콤보 칸은 같은 면·테두리·글자 들여쓰기. **비활성** = 흐리게(버튼·칩·세그먼트·목록 공통 — 목록은 WPF 기본 틀처럼 흰 판으로 바뀌지 않는다). **아바타** = 이름 해시로 8색 중 하나(`AvatarHue` — 같은 사람은 어느 목록에서나 같은 색, 면·글자 토큰이라 테마를 따른다), 번호뿐인 상대는 전화 아이콘. **창 제목 표시줄** = 표면색(DWM, `Shell/TitleBar`). 아이콘·텍스트 병기(색맹 대비) |
@@ -169,7 +173,7 @@
 - **«이벤트»·«기록» → 이력.** [이력에서 보기]는 종류(PTT/통화)를 맞춰 [이력]으로 넘어간다 — 오늘·진행 중은 관제 두 화면이 정본, 끝난 세션의 날짜 조회는 이력.
 - 개발 스위치: `--ui-preview`(로그인 없이 메인, 실행 중인 관제 앱과 다른 단일 인스턴스 이름) · `--ui-preview-canvas`(두 화면에 표본 — 멤버 그룹 5·청취 범위 8·
   진행 중 그룹콜/개별/애드혹·일제 통화 수신·긴급·VoLTE 통화 2·감청 1·대표번호 대기열·진행 중 dialog·기록·문자·무전 메시지, 조작은 동작 안 함) ·
-  `--ui-preview-banner=alerts|incoming|none` · `--ui-preview-mode=ptt|call` · `--ui-preview-panel=channel|other|users|group|event|dir` · `--ui-preview-keypad` ·
+  `--ui-preview-banner=alerts|incoming|video|none`(video = «새 영상» 배너, 표본 = 순찰1 chat 영상 호 송출 둘) · `--ui-preview-rotate=90|180|270`(보는 영상 회전 — 칸 가로/세로) · `--ui-preview-mode=ptt|call` · `--ui-preview-panel=channel|other|users|group|event|dir` · `--ui-preview-keypad` ·
   `--ui-preview-screen=history|groups|admin`(관리 화면은 범위 검사 생략, `--ui-preview-canvas` 와 함께면 관리 = 표본 조직 5·구성원 5·접속서비스 3 을 심고 한 명의 편집 폼을, PTT 그룹 = 멤버 셋의 새 그룹 폼(능력·한도 전부)을 연다) · `--ui-preview-history=call|ptt` · `--ui-preview-retheme=light|dark`(창이 다 그려진 뒤 테마를 바꾼다 — 그 테마로 바로 연 그림과 비교해 실행 중 전환에 옛 색이 남는 곳을 찾는다. 색은 전부 테마 토큰을 동적으로 참조하고, 값에 따라 색이 바뀌는 점·아바타도 변환기가 아닌 스타일 트리거로 고른다) · `--ui-preview-shot=<png>`(주 창을 WPF 로 렌더해 PNG 저장 후
   종료 — 화면 잠금·원격 세션에서도 XAML 점검. 별 HWND 인 열린 Popup(사람 메뉴·Ctrl+K·DTMF·전달·드롭다운)은 `<png>-pop<n>.png` 로 따로 찍는다) · `--ui-preview-search=<검색어>`(Ctrl+K 검색을 열어 둔다) · `--ui-preview-person=<번호>`(사람 메뉴를 열어 둔다) · `--ui-preview-open=more|mon|session|dtmf|xfer|chan|suggest|combo`(더보기 메뉴·감청 중 목록·세션 목록·첫 통화 카드의 DTMF/전달·이벤트 채널 거르기·번호칸 제안·보이는 첫 콤보 목록을 열어 둔다). 모드·패널·화면 스위치는 창의 첫 스냅샷 재구성 뒤에 적용한다.
 
@@ -200,7 +204,7 @@
 
 | 내용 | 여는 곳 | 구성 |
 |---|---|---|
-| **채널 상세** | 내 채널 카드 · 타 채널 행 · 발언 대상 칩 · 배너 [채널로 이동] · «메시지» [채널 정보 ›] · «이벤트» [채널로]·고정 줄 · `Ctrl+K` [채널로] · [PTT 그룹] 화면 [채널로] | 요약 한 줄("멤버 그룹 · 참가 7 · 02:03 · 편성 12 · 발언 김관제") · 라벨(긴급·임박 위험·일제 통화) · 조작(§4.1·§4.2) · **[접속 n \| 편성 m]** 세그먼트 · 사람 줄(아바타 · 이름(나 굵게, « · 발언 중» 녹색) · "PTT 1001 · 순찰대" · 의장 라벨 · [개별][SDS] — 이름을 누르면 사람 메뉴). [편성]은 처음 누를 때 GMS 그룹 문서(`GetGroupAsync`)를 받아 전 멤버를 접속 여부(미참가 흐림)와 함께 보인다. 개별·애드혹은 세그먼트 없이 나 + 상대 |
+| **채널 상세** | 내 채널 카드 · 타 채널 행 · 발언 대상 칩 · 배너 [채널로 이동] · «메시지» [채널 정보 ›] · «이벤트» [채널로]·고정 줄 · `Ctrl+K` [채널로] · [PTT 그룹] 화면 [채널로] | 요약 한 줄("멤버 그룹 · 참가 7 · 02:03 · 편성 12 · 발언 김관제") · 라벨(긴급·임박 위험·일제 통화) · 조작(§4.1·§4.2) · **«영상» 절**(영상 채널만 — 연결 상태·볼 때만 영상 칸·«영상 n» 목록 [보기]/[바꿔 보기], §10.3) · **[접속 n \| 편성 m]** 세그먼트 · 사람 줄(아바타 · 이름(나 굵게, « · 발언 중» 녹색) · "PTT 1001 · 순찰대" · 의장 라벨 · [개별][SDS] — 이름을 누르면 사람 메뉴). [편성]은 처음 누를 때 GMS 그룹 문서(`GetGroupAsync`)를 받아 전 멤버를 접속 여부(미참가 흐림)와 함께 보인다. 개별·애드혹은 세그먼트 없이 나 + 상대 |
 | **사용자**(무전) | 탭 줄 [사용자] · 내 채널 [+ 개별 · 애드혹 열기] · «메시지» [＋ 새 대화] · 사람 메뉴 [애드혹에 추가] | 검색(이름 · PTT 번호 · 조직) · 조직 칩(전체 + 위 두 단) · 줄 48(☐ · 이름 · "PTT 1001 · 순찰대" · 상태(어느 채널 참여/발언 중) · ⋮ 사람 메뉴) — 줄을 누르면 고르기 · 바닥 = "n명 선택 · 선택 해제" · ☐ 긴급으로 열기 · **[일제 통화]**(한 버튼 — §4.1) · **[애드혹 열기 · 지금 한 번]** · **[그룹으로 저장 ›]** |
 | **새 PTT 그룹** | 사용자 [그룹으로 저장 ›] | 그룹 이름 · 그룹 id(자동 — 만든 뒤 바꿀 수 없음) · 세션 종류 [편성(prearranged)][채팅(chat)] · 멤버 칩(나 = 의장, 고른 사람 ×) · **[▸ 고급 설정]**(SDS·파일·영상·암호화·긴급·우선순위·확인 통화 — [PTT 그룹] 화면으로 넘어가 **같은 폼**을 이어 쓴다) · [취소][그룹 만들기]. 저장·취소 = 사용자 목록으로(←) |
 | **이벤트 상세** | «이벤트» 행 | 시각(초까지) · 채널 · 종류 · 내용 · 같은 채널의 **앞뒤 이벤트**(앞 둘·뒤 둘, 지금 것 굵게) · [답장](SDS 만 — 그 그룹 대화) · [채널 열기] · [이력에서 세션 보기 ›] |
@@ -501,6 +505,8 @@ SIP transport 콤보는 **ANY** 를 포함한 넷(콘솔 라벨과 같다) — A
   폼을 연 것만으로 서버 값을 명시값으로 굳히지 않는다. 값을 바꾸면 그 값(범위로 자른 값)을 싣는다.
 - **멤버 우선순위(`user-priority`)는 읽은 값을 되돌린다** — XCAP PUT 은 `<list>` 가 있으면 멤버 전체를 교체하므로, 역할(의장/참가자)을 바꾸지 않은 멤버는
   GET 의 `GroupMember.Priority` 를 그대로 보내고, 역할을 바꾼 멤버와 새로 더한 멤버만 역할 기본값(의장 7 · 참가자 5)을 쓴다.
+- **«서비스» 절**(폼 끝 — MCPTT 음성 늘 켬 · MCVideo 영상 켜기·호 방식·동시 송출 상한·TNG3·T5·시작 최소 응답·그룹 우선순위·참가자 정보 구독·종단간 보호 비활성). 끄기는
+  운영 콘솔에서(서버 전환기) — §10.6. 기존 «영상» 스위치는 «PTT 영상(현행)»(V7 배포에서 없어진다). 목록 행 서비스 칩 «음성»·«영상», 상세 능력 줄 "MCVideo chat · 송출 n".
 - **동시 발언**(`floor_policy`/`max_talkers`)은 폼에 두지 않는다 — 관리 API 전용이다(mcptt_api.md §2). 규격 그룹 문서 요소가 아니라 CMP 화자 슬롯
   (서버 자원, 최대 8)을 잡는 운영 정책이고, 규격판(TS 24.581 Transmission Control)은 미구현이다.
 
@@ -655,15 +661,147 @@ SIP transport 콤보는 **ANY** 를 포함한 넷(콘솔 라벨과 같다) — A
 | MCData 파일(FD 업·다운로드) | 403 / 404 / 413 / 503 | 본문 `error` 로 세분 — "이 그룹은 파일 전송이 꺼져 있습니다" · "그룹 멤버가 아니라 파일을 보낼 수 없습니다" · "파일이 서버에 없습니다(보관 기간)" · "파일이 너무 큽니다(서버 한도)" · "서버 파일 저장소가 설정되지 않았습니다" | mcdata §4.5 (csc `mcdata_fd.py`) |
 | SMS·LMS | 404 / 480 | "상대가 등록되어 있지 않습니다 / 응답 없음" | MESSAGE 1:1 전달 |
 | SMS·LMS | 413 | "문자가 너무 깁니다(서버 한도)" | `max_sds_size` |
+| 영상 채널 연결(MCVideo, 자동) | 403 | 영상 절 «영상 연결 안 됨 — 영상 그룹 멤버가 아니거나 영상(MCVideo) 이용 자격이 없습니다 · n초 뒤 다시» | TS 24.281 §9.2.2.4.1.1 (Warning 116·108·109·120) |
+| 영상 채널 연결 | 404 / 486 / 480 | "영상 그룹이 아니거나 영상 세션이 끝났습니다 / 동시에 참가할 수 있는 영상 호 수를 넘었습니다 / 영상 호를 열지 못했습니다 — 응답한 멤버가 없습니다" | mcvideo.md §5.2.1 (404 113·117·118·137 · 486 103(N6) · 480 = prearranged 초대 실패) |
+| 영상 채널 연결 | 488 / 500·503 | "영상 호 미디어 조건 불일치 — 관리자 문의 / 영상 서버 자원이 없습니다 — 잠시 후 다시" | 〃 (500 = CMP `resource.mcvideo` 없음) |
+| 영상 보기 | 수신 거절 #7 / #255 / 시한 | "더 볼 수 없습니다 — 동시에 볼 수 있는 영상(1)이 찼습니다 · [바꿔 보기]" / "<이름> 영상을 볼 수 없습니다 — 송출이 이미 끝났습니다" / "<이름> 영상 보기 요청에 응답이 없습니다" | TS 24.581 §9.2.15.2 · §6.2.5.4.2 |
+| 영상 보기 | 서버 수신 종료 · 송출 끝 | "<이름> 영상 보기가 끝났습니다" · "<이름>이 영상 보내기를 멈췄습니다"(보던 송출만) | §6.2.5.5.5 · §6.2.5.3.4 |
 | 등록 | 401/403 | "인증 실패 — 다시 로그인" | sip_access_security |
 | 등록 | 408/503 | "서버 응답 없음 — 재시도 중" | — |
 
-## 10. 영상 (F3 — 예약)
+## 10. 영상 — MCVideo 영상 채널
 
-- VoLTE 감청 창 아래 격자: 양측 영상 SSRC 2개를 2분할(caller | callee), `onVideoFrame` 콜백 렌더(WPF `WriteableBitmap`/D3DImage). 창은 이미
-  별창이라 주 캔버스 예산은 유지.
-- 1:1 영상 통화는 «내 통화» 카드 확장(또는 별창).
-- F3 전까지 감청 창에 "영상 없음(음성 감청)" 고정 문구.
+규격 모델·결정의 정본은 [mcvideo.md](mcvideo.md) §7(D5 기본 chat · D6 음성 호와 영상 호 공존 · D8 일반 호 수신 manual · D10 «영상 참여» 없음 · D11 음성·영상 송출 분리 ·
+D12 마이크 경합)이고 여기는 관제사 화면 규약이다(검토 캔버스 «MCVideo 단말 UX 검토» W1 · 착수 문서 [dispatch_windows_next.md](../../dev/dispatch_windows_next.md)).
+**MCVideo 는 MCPTT 와 나란한 서비스**라(TS 23.280 §3) 같은 그룹 카드에서 음성 = MCPTT 그룹 호, 영상 = MCVideo 그룹 호를 따로 든다(TS 24.281 §7.1 —
+한 등록을 공유하는 독립 다이얼로그). 기존 화면 틀(레일·탭 줄·2×2·오른쪽 패널·발언 바)은 그대로이고 영상은 채널 카드의 태그와 채널 상세 «영상» 절에만 들어간다.
+
+### 10.1 관제사의 일
+
+| 상황 | 관제사가 보는 것 · 하는 것 | 규격 |
+|---|---|---|
+| 영상 채널(내 채널의 MCVideo 그룹) | 따로 할 일이 없다 — 앱이 영상 호에도 함께 합류해 있다(chat = 합류, 편성 = MCVideo affiliation + 멤버 초대 자동 수락) | D10 · TS 22.280 R-8.4.2-002 · TS 24.281 §9.2.1.3·§9.2.2 |
+| 누가 영상을 보내기 시작한다 | «새 영상» 배너 [보기] — 또는 카드 «영상 n» → 채널 상세 «영상 n» 목록 [보기] | TS 24.581 §6.2.5.3.2·§6.2.5.3.3 |
+| 여러 카메라가 동시에 보낸다 | 목록에서 하나를 고른다 — [바꿔 보기] = 보던 송출을 그만 보고 새 송출을 본다(한 번에 하나) | TS 24.581 §6.3.7(Active SSRC List) |
+| 그만 본다 | [그만 보기] — 영상 호는 남는다(다시 [보기]) | TS 24.581 §6.2.5.5 |
+| 말한다 | 발언 바 PTT = 음성 무전(MCPTT floor) 그대로 — 영상 호에는 발언 대상 ✓ 가 없다 | D11 · TS 22.280 R-8.2.2-001~-004 |
+| 무전 세션이 T4·TNG3 로 끝난다 | 영상 호는 그대로 — «채널» 은 관제사가 내 채널에 둔 의도이지 무전 세션의 수명이 아니다 | D10 · TS 24.379 §6.3.8.1 |
+
+### 10.2 쓸 수 있는 조건 · 연결
+
+- **사이트** — UE initial configuration 의 `MCVideo-Service-Details/Server-URI`(TS 24.484 §7.2.2.1)가 있어야 한다. 없으면(서버가 MCVideo 를 켜지 않은 사이트)
+  화면에 영상 요소가 하나도 없다.
+- **자격** — MCVideo user profile(TS 24.484 §9.3, `CscClient.FetchMcVideoUserProfile`)을 받으면 이용 자격이 있다(404 = 없음 → 영상 요소 없음).
+- 둘 다면 PTT 계정에 `McvideoEnabled`(REGISTER Contact 의 `+g.3gpp.mcvideo`·MCVideo ICSI — TS 24.281 §7.2.1AA) · `McvideoServerUri` · `AutoAnswerMcvideo` 를 싣는다.
+  계정 태그는 로그인 때 정한다 — 자격이 로그인 뒤에 생기거나 없어지면 다음 로그인에 반영된다(없어지면 영상 채널은 곧바로 나간다).
+- **영상 채널** — user profile 의 `<MCVideoGroupInfo>` 목록(`McVideoUserProfileDoc.Groups`)에 있는 **멤버 그룹**. 타 채널(청취 범위 그룹)은 영상이 없다 —
+  비멤버의 영상 호 합류는 403 116 이고, 권한자의 무표시 영상 보기(ambient viewing)는 V8 이다.
+- **합류(D10)** — 영상 채널 전부를 MCVideo 로 affiliate 하고(TS 24.281 §8.2.1.2 — 관심 그룹 전부를 한 PUBLISH, 코어가 집합을 든다), chat 이면 PTT 등록 뒤
+  영상 호에 합류한다(`JoinVideoGroupCall(g, {Prearranged=false, Queueing=true})` — 합류가 곧 affiliation, §9.2.2). 편성(prearranged)은 초대를 기다린다(자동 수락 —
+  수락은 세션 합류일 뿐 영상은 [보기] 때만). 호 방식 = 그룹 문서 `mcvideo-on-network-invite-members`(어긋나면 서버가 404 117/118 — §6.3.5.2)를 그룹마다 한 번 받는다.
+- **동시 MCVideo 호 상한 N6** — user profile `<MaxSimultaneousCallsN6>` 만큼 카드 순서대로 합류한다. 넘는 채널은 영상 절에 «동시 영상 호 한도(N6 = n)가 찼습니다 —
+  운영자에게 한도 상향 요청» 이 서고 합류하지 않는다(넘겨 보내면 서버가 486 103). 관제석 회선의 N6 는 영상 채널 수 이상으로 둔다(콘솔 회선 «MCVideo 이용 자격»).
+- **이어 가기** — 관제사가 끝낸 것이 아닌데 영상 호가 끝나면(최대 통화 시간 TNG3·서버 해제·망) chat 채널은 다시 합류한다: 섰다가 끝난 호는 3초 뒤, 서지 못한 합류는
+  10초부터 배로 최대 2분까지 물러난다(현장 앱 `PttVideo` 와 같은 규칙). 영상 채널에서 나가는 것은 그룹이 내 채널에서 빠질 때·자격이 없어질 때·로그아웃뿐이다.
+  채널 상세 [나가기](무전 세션)는 영상 호를 끝내지 않는다.
+
+### 10.3 표면
+
+- **카드**(내 채널) — 1줄 태그 **«영상 n»**(청록 — 보고 듣는 축) = 그 영상 채널에 영상을 보내는 중인 사람 수, 없으면 태그도 없다. 보고 있으면 굵게.
+  카드 조작은 늘리지 않는다(카드 = 조작 하나, §4). 툴팁 = "보내는 중 n(이름…) · 보는 중 <이름>".
+- **채널 상세 «영상» 절**(영상 채널만 — 아니면 절 자체가 없다, 조작 줄 아래·로스터 위) — 머리 «영상» + 연결 상태 한 줄(«채널 참여와 함께 연결됨» · «영상 연결 중…» ·
+  «편성 영상 그룹 — 멤버가 영상 호를 열면 함께 합류합니다» · N6 한도 · «영상 연결 안 됨 — 사유 · n초 뒤 다시»). 상태에 따라 셋:
+  ```
+  ① 보내는 사람 없음      영상  채널 참여와 함께 연결됨
+                          [영상 보내기 — 카메라 없음](비활성)
+                          보내는 사람 없음 — 누가 보내면 여기에 목록이 생깁니다
+  ② 누가 보냄            영상  채널 참여와 함께 연결됨
+                          [영상 보내기 — 카메라 없음]
+                          보내는 중 2 (한 번에 1개)
+                          김현장  현장지휘 · 0:34                [보기]
+                          이요원  0:03                           [보기]
+  ③ [보기] 뒤               ┌─ 세로 3:4 · 270×360 ─┐   ← [↻] 90° = 가로 4:3 · 360×270
+                             │              [↺][↻] │
+                             │  (엔진 영상 — 없으면  │
+                             │   «이 PC 에서는 영상을 │
+                             │   표시할 수 없습니다…») │
+                             │ 김현장 · 현장지휘 · 0:34│
+                             └─────────────────────┘
+                          [그만 보기] [영상 소리] [영상 보내기 — 카메라 없음]
+                          보내는 중 2 · 보는 중 1 (한 번에 1개)
+                          김현장  현장지휘 · 0:34                보는 중
+                          이요원  0:03                           [바꿔 보기]
+  ```
+  영상 칸은 **볼 영상이 있을 때만** 선다(고르기 전에는 영상 RTP 가 오지 않는다 — D8). 송출 줄 = 이름 · 기능 별칭 · 경과(알림을 받은 때부터) + [보기]/[바꿔 보기](요청 중 «요청 중…»)
+  · «보는 중». 영상 칸은 엔진이 영상을 그릴 때(Windows F3 — ue_sdk.md §6 결정표) 같은 자리에 렌더하고 [창으로 ↗](영상 창, §5 의 감청 창과 같은 규칙)를 붙인다 —
+  그 전에는 위 자리 표시이고 [보기]·[그만 보기]·영상 호 소리는 그대로 된다(`CallInfo.Video` 로 판정).
+- **영상 칸 모양·회전** — 단말 영상이 기본 **480×640 세로**(3:4)라 칸도 세로가 기본이다(오른쪽 패널 폭에 맞춰 270×360). 칸 오른쪽 위 **[↺][↻]** = 반시계·시계 방향 **90° 씩**
+  돌린다 — 90°·270° 면 칸이 가로 4:3(360×270)으로 바뀌어 영상이 칸을 채운다(보내는 쪽 단말을 옆으로 들었거나 카메라가 가로로 보낼 때). 회전은 **보내는 사람마다 기억**한다
+  (송출자 번호 키 — [바꿔 보기]로 돌아와도 그 사람의 방향 그대로, 앱이 켜져 있는 동안). 렌더는 영상 그림에 같은 회전(LayoutTransform)을 건다 — 자리 표시는 단말 윤곽이
+  돌아 방향을 보여 준다. 보내는 쪽이 방향을 RTP 로 알리는 수단(MTSI CVO — TS 26.114 §7.4.5 `urn:3gpp:video-orientation`)은 엔진 영상(F3)과 함께 본다 — 알려 오면 그 값이
+  기본이고 수동 회전은 그 위에 더한다.
+- **«새 영상» 배너**(옅은 청록 면 — 착신 배너와 같은 층·모양, §3.2) — 영상 채널에 새 송출 알림(Media Transmission Notification, TS 24.581 §6.2.5.3.2)이 오면
+  "새 영상 · <그룹>" / "<이름>(<기능 별칭>)이 영상을 보냅니다" · 경과 · **[보기]**(그 채널 상세를 열고 그 송출을 본다 — 보던 것이 있으면 바꿔 본다) · **[닫기]**(배너만 —
+  채널 «영상 n» 목록에서 다시 [보기], TS 22.281 R-5.2.6.2.2-009 NOTE 3). 채널마다 하나(가장 최근 송출), 그 송출을 보기 시작하거나 송출이 끝나면 스스로 빠진다.
+  거절·[그만 보기] 뒤 목록으로 돌아온 송출은 다시 알리지 않는다. 송출자는 아무도 보지 않으면 서버가 송출을 끝내는 시한(T11 Stream Reception Idle, 기본 10초 —
+  TS 24.581 §6.3.4.4.13 #8)을 기다리고 있다.
+- **«이벤트»** — 종류 [영상] 칩: "<그룹> · <이름> 영상 보내기 시작/끝" · 영상 보기 · 그만 보기 · 서버 수신 종료 · 보기 실패(«오류»).
+- **[영상 보내기]**(D11 — MCVideo 송출 요청·해제, 발언 바 PTT 와 따로)는 1차 Windows 에서 **비활성 «카메라 없음»** 이다(엔진 `PJMEDIA_HAS_VIDEO 0`). 영상 송출을
+  둘 때 D12(영상을 보내는 중 PTT = 그동안 마이크는 음성 무전, 영상 호 오디오 송신만 멈춤 — SDK `setMuted` 가 MCVideo 호에서는 음성 송신만 멈춘다, 긴급·임박은 늘 우선)를
+  따른다.
+
+### 10.4 수신 규약 (D8 — 일반 호 manual)
+
+- [보기] = `Call.AcceptReception(송출자 MCVideo ID)`(Receive Media Request, TS 24.581 §6.2.5.3.3) · [그만 보기] = `EndReception`(Media Reception End Request, §6.2.5.5) ·
+  [바꿔 보기] = 보던 것 `EndReception` 뒤 `AcceptReception`.
+- **한 번에 하나** — 엔진 렌더 창이 전역 하나라(ue_sdk.md §4.5·§11) 다른 송출(다른 채널 포함)을 보면 보던 것은 그만 본다. user profile `MaxSimultaneousVideoStreams` 가
+  커도 앱은 하나다(영상 벽 별창 W6 은 SDK 송출자별 렌더 창 뒤).
+- 자동으로 보지 않는다 — 관제사 «새 영상 자동으로 보기»(TS 22.281 §5.2.7.1)는 W6 와 함께(사용자 결정). 긴급·방송 영상 호의 automatic 수신(§6.3.6.3.3)은 V8.
+- 송출이 끝나면(Transmission End Notify → 수신 종료) 칸이 비고 남은 송출은 목록에 그대로 있다 — 다음 송출을 저절로 보지 않는다. 보던 송출이면 «<이름>이 영상 보내기를 멈췄습니다».
+- **문구**(단말과 같은 사전 — 캔버스 P6): 수신 거절 #7 «더 볼 수 없습니다 — 동시에 볼 수 있는 영상(1)이 찼습니다 · [바꿔 보기]» · 서버 수신 종료 «<이름> 영상 보기가 끝났습니다»
+  · 송출 끝 «<이름>이 영상 보내기를 멈췄습니다» · 송출 거절 #1·#5·회수 #2·#4(송출을 둘 때 — `ResponseText.VideoTransmissionText`). 주격 조사는 이름의 받침으로 고른다.
+
+### 10.5 소리 (D6 · R-8.3)
+
+- 영상 호 소리는 PTT 그룹과 같은 라우트(스피커 기본, §7).
+- **같은 그룹의 영상을 보는 동안 그 그룹 무전(MCPTT 호)의 수신 음량을 줄인다**(×0.3 — 현장 앱 `VIDEO_DUCK` 과 같은 값, D6 «영상 호 송출 음성 우선»). 보기를 끝내면 되돌린다.
+  다른 그룹 무전은 그대로. «소리 겹침» 정책의 설정 항목화(TS 22.280 R-8.3-003)는 사용자 결정 대기라 두지 않는다.
+- **[영상 소리]** — 보는 동안 영상 호 수신 음량 막대(0~200%, 코어가 호에 기억한다 — TS 22.280 R-8.3-002 동시 오디오 원천의 상대 음량).
+
+### 10.6 그룹 편집 — «서비스» 절 (§4.7 폼)
+
+| 칸 | `GroupDoc.Mcvideo`(`McVideoGroupAttrs`) | 규격 요소(TS 24.481 §7.2.2) | 범위·기본값 |
+|---|---|---|---|
+| MCPTT 음성 | — | MCPTT `<service>` | 늘 켬(체크 잠김 — 그룹 호·허용·한도가 이 서비스의 속성) |
+| MCVideo 영상 | 객체 / null | MCVideo `<service enabler>` + `<mcvideo-video-media>` | 켜기만 — 아래 |
+| 호 방식 | `InviteMembers` | mcvideo-on-network-invite-members | chat(기본, D5) / 편성(prearranged) |
+| 동시 송출 상한 | `MaxTransmitters` | mcvideo-maximum-simultaneous-mcvideo-transmitting-group-members | 1~16, 기본 2(서버 기본값) |
+| 최대 통화 시간(TNG3) | `MaxDurationSec` | mcvideo-on-network-maximum-duration | 0~86400초, 기본 3600 |
+| 수신 유지 시간(T5) | `ReceptionHangTimerSec` | on-network-reception-hang-timer | 0~3600초, 기본 30 |
+| 시작 최소 응답 | `MinNumberToStart` | mcvideo-on-network-minimum-number-to-start | 0~65535명, 기본 0 |
+| 그룹 우선순위 | `GroupPriority` | mcvideo-on-network-group-priority | 0~255, 비우면 미기재 |
+| 참가자 정보 구독 허용 | `AllowConferenceState` | mcvideo-on-network-allow-conference-state | 기본 허용 |
+| 종단간 보호 | `ProtectMedia`·`ProtectTransmissionControl` | mcvideo-protect-media · -transmission-control | **false 명시**, 칸은 비활성 «종단간 보호는 아직 지원하지 않습니다»(mcvideo.md D7) |
+
+- **켜기 = 객체를 싣는다** — 읽은 객체를 고쳐 싣는다(코덱·해상도·실시간 모드·규칙 action 은 폼에 두지 않고 읽은 값을 되돌린다, 새로 켜면 코덱 = 서버 기본값 AMR-WB · H264).
+  미기재 칸은 §4.7 과 같은 규칙(기본값 그대로면 미기재).
+- **끄기는 이 앱에서 하지 않는다** — 서버가 MCVideo `<service>` 없는 PUT 을 «그대로 둠» 으로 읽는다(옛 단말의 PUT 이 영상을 지우지 않게 둔 전환기, mcvideo.md §5.1).
+  켜진 그룹은 스위치가 잠기고 «끄기는 운영 콘솔에서». 이번 편집에서 켠 것은 저장 전까지 되돌릴 수 있다.
+- 기존 «영상» 스위치 = **«PTT 영상(현행)»**(MCPTT 호의 `m=video` — 비규격 `<mcpttgi:mcptt-video>`) + «V7 배포에서 없어집니다» 안내(mcvideo.md D9).
+- [PTT 그룹] 목록 행 = 서비스 칩 **«음성»**(늘) · **«영상»**(MCVideo 그룹으로 알려진 행 — 관리 목록 `/provisioning/directory/groups` 에 서비스가 없어 내 영상 채널·열어 본 그룹
+  문서로만 안다) · 상세의 능력 줄 = "MCVideo chat · 송출 n"(편성이면 "MCVideo 편성 · 송출 n").
+
+### 10.7 서버·엔진에 기대는 것 · 남은 것
+
+- **영상 표시·송출** — Windows 엔진 영상(F3 — OpenH264 + DSHOW + 콜백 렌더 장치, 다음 착수 — [dispatch_windows_next.md](../../dev/dispatch_windows_next.md) §4). 그 전에는 영상 호의 소리·송출 인지·[보기] 까지다. 다중 스트림 영상 벽(W6)은 SDK 송출자별
+  렌더 창 뒤.
+- **관제석 규모** — 영상 채널마다 영상 호 하나(CMP 멤버 유닛 6 포트)를 상시 든다 · N6 를 영상 채널 수 이상으로 · 미참여 상태의 세션 가시성(conference 이벤트)은 D10 합류로
+  대신했다 — [server45_handoff.md](../../dev/server45_handoff.md) §13.
+- **녹취 재생** — 서버 MCVideo 녹취(같은 폴더 `recordings/ptt/{id}`, 메타 `type: mcvideo` — R3)·이력 서비스 축(R4)이 서면 [이력] PTT 세션 카드에 «영상» 칩과 영상 세그먼트 재생(§4.6).
+- 송출하는 사람 쪽 «보는 사람 n» 은 서버 Media Reception Notification(R11 — 사용자 결정 대기) 뒤. 긴급·방송 영상 자동 표시 · 영상 가져오기(pull) · 원격 영상 보기(ambient
+  viewing) · 원격 송출 요청 = V8.
+- **VoLTE 감청 영상**(F3) — 감청 창 아래 격자: 양측 영상 SSRC 2개를 2분할(caller | callee). 창은 별창이라 주 캔버스 예산은 유지. F3 전까지 감청 창은
+  "영상 없음(음성 감청)" 고정 문구. 1:1 영상 통화는 «내 통화» 카드 확장(또는 별창).
 
 ## 11. 구현 구조 (WPF, MVVM)
 
@@ -713,7 +851,10 @@ windows/dispatch-desktop/                 DispatchDesktop.csproj — net10.0-win
     PttUsersViewModel           [사용자] 패널 — PTT 전화번호부 줄(`PttUserRow` — 이름·Meta·상태)·조직 칩·검색 · 고르기(`Picked`) · [애드혹 열기 · 지금 한 번](`StartAdhoc`, 긴급 옵션) ·
                                 [그룹으로 저장 ›](`SaveAsGroupRequested`) · 애드혹 일제 통화 한 버튼(`BroadcastDown/Up`·`IsBroadcastHeld`) · `PrivateCallTo`/`AddAdhoc`(사람 메뉴)
     SidePanelViewModel          오른쪽 패널 — `View`(None/Channel/Users/Group/Event/Directory)·`Pinned`·머리(`Tag`·`Title`·`HasBack`·`HasPin`) · `ChannelDetailViewModel`(요약·라벨·조작
-                                가시성 — 카드 판정 그대로, [접속|편성] 세그먼트 + 편성 멤버 GMS 문서 지연 적재, 사람 줄 `ChannelPersonRow`, 청취 leg 음량 = `MonitorWindowViewModel`) ·
+                                가시성 — 카드 판정 그대로, [접속|편성] 세그먼트 + 편성 멤버 GMS 문서 지연 적재, 사람 줄 `ChannelPersonRow`, 청취 leg 음량 = `MonitorWindowViewModel`,
+                                **«영상» 절**(§10.3 — `ShowVideo`·`VideoSub`(연결 상태)·`ShowNoSender`·`IsVideoReceiving`·`ReceivingCaption`·`VideoSurfaceText`·`VideoVolume`, 송출 줄 `VideoTxRow`
+                                동기화([보기]/[바꿔 보기]/«보는 중»), 칸 모양 `VideoFrameWidth/Height`(세로 3:4 기본 ↔ 가로) · `VideoRotation`, `AcceptVideo`·`EndVideo`·
+                                `ToggleVideoVolume`·`RotateVideo`(cw/ccw 90°))) ·
                                 `EventDetail` · `Group`(새 PTT 그룹 폼 = `GroupAdminViewModel.Editor`)
     CallDeskViewModel           «통화» — QueueItem(대표번호 호 — 발신자 기준 leg 병합, `InfoLine`) · CallCard(`IsCompact` 보류 한 줄 · `DtmfOpen` DTMF 팝오버 3×4 + 보낸 자릿수 · `TransferOpen`
                                 전달 팝오버 blind/attended · 상대 이름 → 사람 메뉴) · MemberChip(«관제 그룹원» 칸 — `ExtText`·`NameText`·`StateLine`·조작 하나 `ActCommand`, 오른쪽 클릭 사람 메뉴) ·
@@ -734,15 +875,20 @@ windows/dispatch-desktop/                 DispatchDesktop.csproj — net10.0-win
                                 호스팅(`NewExternal(members)`)하고 채널 상세 ⋮ [편집]은 `EditExternal`, `All`·`Loaded` 는 타 채널 편집 판정이자 멤버 그룹 종류(`DispatchSession.NoteGroupTypes`)의 소스
     SessionHistoryViewModel     [이력] 화면(§4.6) — 하루 창 조회(`ShiftDate`)·녹취 세그먼트·재생 상태
     LoginViewModel · SettingsViewModel(잠금 발언 설정 포함)
-  Models/  SessionKind: isMcptt&&listenOnly→PTT 청취(타 채널) · isMcptt&&privateCall→개별 통화(내 채널) · groupId adhoc-→애드혹 그룹(내 채널) · isMcptt→멤버 채널(내 채널) ·
+  Models/  SessionKind: service=McVideo→MCVideo 그룹 영상 호(그 그룹 카드의 «영상» 절 — 카드를 만들지 않는다, §10) · isMcptt&&listenOnly→PTT 청취(타 채널) · isMcptt&&privateCall→개별 통화(내 채널) · groupId adhoc-→애드혹 그룹(내 채널) · isMcptt→멤버 채널(내 채널) ·
            listenOnly&&joinedDialog→VoLTE 감청(«진행 중» 행 확장) · 그 외 VoLTE 통화(«내 통화»). `IsListenLeg` = 감청·청취. SessionItem(일제 통화 `IsBroadcast` = 착신 broadcast-ind·
-           floor B-bit)·GroupInfo(그룹 종류 `SessionType` — 관리 목록, 모르면 빈 값 → 일제 통화 개시 때 GMS 문서)·DialogRow·Message/MessageThread(`LastPreview`·`KindText`)·ActivityRow
+           floor B-bit · MCVideo `Transmission`(코어 전송 제어 현재값)·`Receiving`·`Transmitters`·`TransmitterSince`)·GroupInfo(그룹 종류 `SessionType` — 관리 목록, 모르면 빈 값 → 일제 통화 개시 때 GMS 문서 ·
+           MCVideo `McVideo`(user profile 그룹 목록)·`McVideoType`·`McVideoMaxTransmitters`·`McVideoAffiliated`·`VideoSession`)·DialogRow·Message/MessageThread(`LastPreview`·`KindText`)·ActivityRow
            (`ActivityKind.Error` = floor 사유)·Contact
   Services/ DispatchSession(코어 투영 + 관제 동작 진입점 — Engine·CscClient 소유, Sessions/Groups/Dialogs, 등록 백오프, 오디오 적용, 일제 통화 개시 `BroadcastCallAsync`(암묵적 발언 요청)·
                             끝 `ReleaseBroadcast`(성립 전 CANCEL / 뒤 Floor Release), floor 거부·회수·시간 초과 → «이벤트» [오류] 줄.
                             등록 단말 속성 = User-Agent `CIMS-Dispatch/<앱 버전> (<OS>; <모델>)` · Contact `+sip.instance` 기기 고유 `urn:uuid:`(파사드 `DeviceIdentity` — mcptt_management_views.md §4.1)
                             계정 = PTT 서비스 전부 + **전화 계열은 SDK 가 고른 `Profile.PhoneService` 하나**(유선 voip 우선·이동 volte 폴백) — volte·voip 를 둘 다 등록하면 이동 번호까지 관제석에 포크되고 전화 계정 참조를 마지막 계정이 덮어쓴다) ·
-            Notifications(토스트·배너 — `Banner.Line1/Line2` 두 줄 문구) · SettingsStore(json — FollowChannelThread/FollowEvents/LockTalk/Theme/`UiVersion` 등, 옛 판은 한 번 밝게로) ·
+            **DispatchSession.McVideo**(§10 — MCVideo user profile 조회·게이트 `McVideoEnabled`, 영상 채널 표시·MCVideo affiliation `ApplyMcVideoGroups`, D10 합류 `EnsureVideoChannels`
+            (N6 안에서 카드 순서, PTT 등록·그룹 갱신·틱) · 이어 가기 `VideoBackoff`(3 s / 10 s 배수 → 2 분) · 나가기 `LeaveVideoChannel`, `AcceptVideo`(한 번에 하나 — [바꿔 보기])·`EndVideo`·
+            `SetVideoVolume` · 보내는 사람별 회전 `VideoRotationOf`/`RotateVideo`, `OnTransmission`/`OnReception` → 송출 투영·«새 영상» 배너·«이벤트» [영상] 줄·P6 문구, 무전 음량 줄임
+            `UpdateDuck`/`Unduck`(×0.3)) ·
+            Notifications(토스트·배너 — `Banner.Line1/Line2` 두 줄 문구, «새 영상» `BannerKind.Video`) · SettingsStore(json — FollowChannelThread/FollowEvents/LockTalk/Theme/`UiVersion` 등, 옛 판은 한 번 밝게로) ·
             LayoutStore(창·감청 창 위치 + `Seams` 칸 경계, 판 4) · MessageStore(SQLite: mcdata/sms, FD 열 file_type·local_path 는 없으면 붙임) · ActivityLog(링 버퍼·CSV) · HotKeyMap ·
             AudioPolicy(라우트 기본값·이름) · AdhocIdFactory(adhoc-<나>-<epoch>) · DirectoryService(그룹원·PTT 사용자·연락처 CSV, `Canonical` E.164 정규형) ·
             ResponseText(§9 사전 + Area.Management/Recording/File 오류 본문 `error` 사전) · AppLog(%APPDATA% logs, 7일) ·
@@ -858,7 +1004,11 @@ windows/dispatch-desktop/                 DispatchDesktop.csproj — net10.0-win
 - **대표번호 발신 표시** — 서버 확정([dispatch_center.md §4.7](dispatch_center.md)): 발신 INVITE 에 `P-Preferred-Identity: <sip:<pilotId>@…>` 를 실으면
   CSP 가 자기 관제 그룹 대표번호일 때 착신자에게 대표번호로 낸다(그 외는 무시 → 기본 신원). 앱: «통화» 머리 번호칸 옆 "대표번호로 발신" 토글(`dispatch.pilotId`
   있을 때) + SDK `makeCall` 헤더 옵션(남음).
-- **큐/ACD**, **영상 F3**, **ambient listening**, **끼어들기**(CMP 믹서) — 서버 과제.
+- **MCVideo 영상 표시** — 영상 호의 소리·송출 인지·[보기] 까지 된다. 영상을 그리고 보내려면 Windows 엔진 영상(F3 — `PJMEDIA_HAS_VIDEO 1`·OpenH264·DSHOW·콜백 렌더, 다음 착수)이
+  필요하다. 그 뒤 «영상» 절 칸(세로 3:4·회전)의 렌더·[창으로 ↗] 영상 창·[영상 보내기], 다중 스트림 영상 벽(W6)은 SDK 송출자별 렌더 창 뒤(§10.7). Android 태블릿 짝은 Windows 안정화 뒤.
+- **MCVideo 서버 과제**(§10.7 — [server45_handoff.md](../../dev/server45_handoff.md) §13): 관제석 상시 합류의 자원(CMP 멤버 유닛·N6) · 관리 목록의 서비스 표시 ·
+  영상 녹취·이력 서비스 축.
+- **큐/ACD**, **ambient listening**, **끼어들기**(CMP 믹서) — 서버 과제.
 
 ## 14. 실기 시험 환경 — 개발 서버(.45) 등록 계획
 

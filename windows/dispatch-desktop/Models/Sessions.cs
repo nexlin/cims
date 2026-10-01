@@ -22,10 +22,12 @@ public enum SessionKind
     PttAdhoc,
     /// <summary>타 채널 청취 — 그룹콜 recvonly(행 [청취 중], [창으로]).</summary>
     PttListen,
+    /// <summary>MCVideo 그룹 영상 호(TS 24.281) — 카드가 아니라 그 그룹 카드의 «영상» 절(§10). MCPTT 호와 독립된 다이얼로그(isMcptt=false).</summary>
+    McVideo,
 }
 
 /// <summary>세션을 만든 관제 동작 — 종료 코드의 문구 사전(§9) 선택에 쓴다.</summary>
-public enum Operation { Incoming, Dial, Pickup, Join, Transfer, PttJoin, PttListen, PttPrivate, PttAdhoc, Emergency, Broadcast }
+public enum Operation { Incoming, Dial, Pickup, Join, Transfer, PttJoin, PttListen, PttPrivate, PttAdhoc, Emergency, Broadcast, VideoJoin }
 
 public static class SessionKinds
 {
@@ -33,6 +35,7 @@ public static class SessionKinds
 
     public static SessionKind Of(CallInfo c)
     {
+        if (c.Service == McService.McVideo) return SessionKind.McVideo;      // isMcptt 는 false — 먼저 갈라야 VoLTE 로 읽지 않는다
         if (c.IsMcptt && c.ListenOnly) return SessionKind.PttListen;
         if (c.IsMcptt && c.Mcptt.PrivateCall) return SessionKind.PttPrivate;
         if (c.IsMcptt && c.GroupId.StartsWith(AdhocPrefix, StringComparison.Ordinal)) return SessionKind.PttAdhoc;
@@ -79,6 +82,24 @@ public sealed partial class SessionItem : ObservableObject
     public bool AnswerStateNoted { get; set; }
     /// <summary>애드혹 멤버 칩(응답 상태는 로스터).</summary>
     public IReadOnlyList<string> AdhocMembers { get; set; } = Array.Empty<string>();
+    /// <summary>MCVideo 호의 전송 제어 현재값(코어 transmissionInfo — 송출 목록 = 알려진 송출, 내 것 제외). 송출·수신 이벤트마다 다시 읽는다.</summary>
+    [ObservableProperty] private TransmissionInfo _transmission = TransmissionInfo.Empty;
+    /// <summary>«새 영상» 으로 이미 알린 송출(송출자 MCVideo ID) — 거절·그만 보기 뒤 Notified 로 돌아온 것을 새 송출로 다시 알리지 않는다. 송출이 끝나면 뺀다.</summary>
+    public HashSet<string> TransmitterAnnounced { get; } = new(StringComparer.OrdinalIgnoreCase);
+    /// <summary>송출을 처음 안 시각(송출자 MCVideo ID → 시각) — 송출 목록의 경과. 코어 값에는 시각이 없다.</summary>
+    public Dictionary<string, DateTime> TransmitterSince { get; } = new(StringComparer.OrdinalIgnoreCase);
+    public bool IsMcVideo => Kind == SessionKind.McVideo;
+    /// <summary>지금 받고 있는 송출(1차는 하나) — 수신 상태 Receiving·PendingRelease.</summary>
+    public VideoTransmitter? Receiving => Transmission.Transmitters.FirstOrDefault(t => t.State is ReceptionState.Receiving or ReceptionState.PendingRelease);
+    /// <summary>알림 받은(아직 끝나지 않은) 송출 — 목록에 보이는 것.</summary>
+    public IReadOnlyList<VideoTransmitter> Transmitters => Transmission.Transmitters.Where(t => t.State != ReceptionState.Ended).ToList();
+    partial void OnTransmissionChanged(TransmissionInfo value)
+    {
+        foreach (var t in value.Transmitters.Where(t => t.State != ReceptionState.Ended)) TransmitterSince.TryAdd(t.UserId, DateTime.Now);
+        foreach (var gone in TransmitterSince.Keys.Where(k => !value.Transmitters.Any(t => t.State != ReceptionState.Ended && string.Equals(t.UserId, k, StringComparison.OrdinalIgnoreCase))).ToList())
+            TransmitterSince.Remove(gone);
+        OnPropertyChanged(nameof(Receiving)); OnPropertyChanged(nameof(Transmitters));
+    }
 
     public SessionItem(CallInfo info, AccountKind account, Operation op)
     {
@@ -142,7 +163,7 @@ public sealed partial class SessionItem : ObservableObject
         OnPropertyChanged(nameof(IsImminentPeril)); OnPropertyChanged(nameof(IsConditionMine)); OnPropertyChanged(nameof(ConditionInitiator));
         OnPropertyChanged(nameof(IsFullDuplex)); OnPropertyChanged(nameof(Route));
         OnPropertyChanged(nameof(IsBroadcastRequest)); OnPropertyChanged(nameof(IsBroadcast)); OnPropertyChanged(nameof(IsBroadcastInitiator));
-        OnPropertyChanged(nameof(RouteIsSpeaker)); OnPropertyChanged(nameof(StateText)); OnPropertyChanged(nameof(CanRequestFloor));
+        OnPropertyChanged(nameof(RouteIsSpeaker)); OnPropertyChanged(nameof(StateText)); OnPropertyChanged(nameof(CanRequestFloor)); OnPropertyChanged(nameof(IsMcVideo));
         if (value.State == CallState.Active && ConnectedAt is null) ConnectedAt = DateTime.Now;
     }
 
@@ -185,6 +206,18 @@ public sealed partial class GroupInfo : ObservableObject
     [ObservableProperty] private DateTime? _rosterAt;
     /// <summary>로스터에 접속 참가자가 생긴 시각(세션 관측 시작) — 없으면 null. 타 채널 행의 경과.</summary>
     [ObservableProperty] private DateTime? _sessionSince;
+    /// <summary>MCVideo 그룹 — MCVideo user profile 의 &lt;MCVideoGroupInfo&gt;(TS 24.484 §9.3)에 있는 멤버 그룹. 이것만 채널 상세 «영상» 절을 갖는다(§10.2).</summary>
+    [ObservableProperty] private bool _mcVideo;
+    /// <summary>MCVideo 호 방식(TS 24.481 mcvideo-on-network-invite-members) — prearranged | chat, 빈 값 = 아직 문서를 안 받음(합류 때 받는다).</summary>
+    [ObservableProperty] private string _mcVideoType = "";
+    /// <summary>MCVideo 동시 송출 상한(그룹 문서) — 0 = 모름.</summary>
+    [ObservableProperty] private int _mcVideoMaxTransmitters;
+    /// <summary>MCVideo 로 affiliate 했다(TS 24.281 §8.2.1.2 — prearranged 영상 호 초대 대상).</summary>
+    [ObservableProperty] private bool _mcVideoAffiliated;
+    /// <summary>이 그룹의 MCVideo 그룹 영상 호(참가 중일 때) — 카드 «영상 n» 태그·채널 상세 «영상» 절의 원천.</summary>
+    [ObservableProperty] private SessionItem? _videoSession;
+    /// <summary>영상 채널 연결 상태 한 줄(영상 호가 없을 때 — «영상 연결 중…» · 편성 그룹 초대 대기 · 한도·실패·재시도). 빈 값 = 알릴 것 없음.</summary>
+    [ObservableProperty] private string _videoNote = "";
 
     public GroupInfo(string id, string uri, string name, int memberCount)
     {

@@ -1,6 +1,7 @@
 // 개발 스위치(§3.4) — --ui-preview-canvas: 서버 없이 관제 두 화면에 표본(멤버 그룹·청취 범위·진행 중 그룹콜/개별/애드혹·일제 통화·긴급·
 // VoLTE 통화·대표번호 대기열·진행 중 통화·그룹원·기록·무전 메시지)을 심는다. 코어 세션이 아니라 스냅샷 모델만 채우므로 조작 버튼은 동작하지 않는다.
-// --ui-preview-mode=ptt|call · --ui-preview-panel=channel|other|users|group|event|dir · --ui-preview-keypad · --ui-preview-banner=alerts|incoming|none.
+// --ui-preview-mode=ptt|call · --ui-preview-panel=channel|other|users|group|event|dir · --ui-preview-keypad · --ui-preview-banner=alerts|incoming|video|none.
+// MCVideo(§10) — 순찰1 = 영상 채널(영상 호 함께 합류, 송출 둘 — 이순경(현장지휘)을 보는 중·박경장 알림), 상황실 = 영상 채널(보내는 사람 없음).
 using CimsUe;
 using DispatchDesktop.Models;
 using DispatchDesktop.Services;
@@ -68,7 +69,21 @@ public sealed partial class MainViewModel
         var mon = new SessionItem(Ci(21, CallState.Active, "tel:7002", false, "", listen: true, joined: "cd2",
                                      sources: new[] { new MediaSource(1, "caller", true, 0.62f), new MediaSource(2, "callee", false, 0.25f) }), AccountKind.Volte, Operation.Join)
                   { Title = "7002 이당직 ↔ 010-5555-1212", ConnectedAt = now.AddMinutes(-2) };
-        foreach (var x in new[] { ops, patrol, bcIn, priv, adhoc, night, volte, held, mon }) { x.Tick(now); s.Sessions.Add(x); }
+        // MCVideo 그룹 영상 호(§10) — 순찰1 chat 영상 호: 송출 둘(이순경 = 보는 중 · 박경장 = 알림). 엔진 영상 없음(Video=false) → 음성만 안내 줄
+        var video = new SessionItem(Ci(22, CallState.Active, "sip:mcvideo_psi@ptt", false, "g-patrol1") with { Service = McService.McVideo, Video = false },
+                                    AccountKind.Ptt, Operation.VideoJoin) { Title = "순찰1", ConnectedAt = now.AddMinutes(-2).AddSeconds(-13) };
+        video.TransmitterSince["tel:1003"] = now.AddSeconds(-41); video.TransmitterSince["tel:1006"] = now.AddSeconds(-12);
+        video.Transmission = new TransmissionInfo(TransmissionState.NoPermission, new[]
+        {
+            new VideoTransmitter("tel:1003", 0x1003, 0x2003, "현장지휘", false, ReceptionState.Receiving),
+            new VideoTransmitter("tel:1006", 0x1006, 0x2006, "", false, ReceptionState.Notified),
+        }, -1, 0, "", 0);
+        foreach (var gid in new[] { "g-patrol1", "g-ops" }) if (s.Groups.FirstOrDefault(g => g.Id == gid) is { } vg) { vg.McVideo = true; vg.McVideoType = "chat"; vg.McVideoMaxTransmitters = 2; }
+        foreach (var x in new[] { ops, patrol, bcIn, priv, adhoc, night, volte, held, mon, video }) { x.Tick(now); s.Sessions.Add(x); }
+        if (s.Groups.FirstOrDefault(g => g.Id == "g-patrol1") is { } vp) vp.VideoSession = video;
+        s.Activity.Add(ActivityPanel.Ptt, ActivityKind.Video, "순찰1 이순경(현장지휘) 영상 보내기 시작", "");
+        s.Activity.Add(ActivityPanel.Ptt, ActivityKind.Video, "순찰1 이순경(현장지휘) 영상 보기", "");
+        s.Activity.Add(ActivityPanel.Ptt, ActivityKind.Video, "순찰1 박경장 영상 보내기 시작", "");
         // [무전] 이벤트
         s.Activity.Add(ActivityPanel.Ptt, ActivityKind.SessionStart, "경비 세션 시작", "참가 2");
         s.Activity.Add(ActivityPanel.Ptt, ActivityKind.Sds, "순찰1 SDS 이순경", "파일 현장사진_01.jpg");
@@ -107,6 +122,13 @@ public sealed partial class MainViewModel
             s.Notify.ShowBanner(new Banner { Kind = BannerKind.PilotIncoming, Title = "대표번호 7000 착신", Subtitle = "010-2222-3333", Session = ring });
             foreach (var b in s.Notify.Banners.Where(b => b.IsEmergency).ToList()) s.Notify.RemoveBanner(b);
         }
+        else if (banner == "video")
+        {
+            // «새 영상»(§10.3) — 보는 것이 없을 때의 알림. 표본은 보던 송출을 비워 배너 조건을 맞춘다
+            foreach (var b in s.Notify.Banners.ToList()) s.Notify.RemoveBanner(b);
+            video.Transmission = video.Transmission with { Transmitters = video.Transmission.Transmitters.Select(t => t with { State = ReceptionState.Notified }).ToList() };
+            s.Notify.ShowBanner(new Banner { Kind = BannerKind.Video, Title = "새 영상 · 순찰1", Subtitle = "박경장이 영상을 보냅니다", Session = video, GroupId = "g-patrol1", Transmitter = "tel:1006" });
+        }
         else if (banner == "none") foreach (var b in s.Notify.Banners.ToList()) s.Notify.RemoveBanner(b);
         RestoreFromSnapshot();
         patrol.Floor = new FloorInfo(FloorState.Speaking, Array.Empty<Talker>(), true, 0, -1, 0, "", 0, 1, 0, 0);
@@ -123,14 +145,16 @@ public sealed partial class MainViewModel
     /// <summary>--ui-preview-screen=groups 와 함께 — [PTT 그룹] 화면에 새 그룹 폼(능력·우선순위·확인 통화·멤버 역할 전부)을 세 멤버로 연다.</summary>
     public void SeedGroupFormPreview()
     {
-        var form = new GroupEditViewModel(Session, null) { Name = "3번 게이트 대응" };
+        var form = new GroupEditViewModel(Session, null) { Name = "3번 게이트 대응", McVideo = true };
         form.AddMembers(Users.Users.Where(u => u.Name is "이순경" or "윤순경" or "최순경").Select(u => (u.Number, u.Name)));
         GroupsScreen.OpenPreview(form);
     }
 
     /// <summary>표본 위에서 모드·패널·키패드를 골라 그린다(스크린숏 점검).</summary>
-    public void ApplyPreview(string? mode, string? panel, bool keypad)
+    public void ApplyPreview(string? mode, string? panel, bool keypad, int rotate = 0)
     {
+        // 보는 영상 회전(§10.3) — 표본 순찰1 의 이순경 송출을 돌려 둔다(칸이 가로로 바뀌는지)
+        if (rotate % 360 != 0) Session.RotateVideo("tel:1003", rotate);
         if (mode is "call") Mode = "call";
         switch (panel)
         {

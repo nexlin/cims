@@ -111,11 +111,13 @@ public partial class App : Application
             if (e.Args.Contains("--ui-preview-canvas", StringComparer.OrdinalIgnoreCase) && _mainVm is not null)
             {
                 _mainVm.SeedCanvasPreview(Arg("--ui-preview-banner") is { Length: > 0 } banner ? banner : "alerts");
-                // --ui-preview-mode=ptt|call · --ui-preview-panel=channel|other|users|group|event|dir · --ui-preview-keypad — 창이 뜬 뒤(RestoreFromSnapshot 다음) 적용
+                // --ui-preview-mode=ptt|call · --ui-preview-panel=channel|other|users|group|event|dir · --ui-preview-keypad · --ui-preview-rotate=90|180|270(보는 영상 회전)
+                //   — 창이 뜬 뒤(RestoreFromSnapshot 다음) 적용
                 string mode = Arg("--ui-preview-mode"), panel = Arg("--ui-preview-panel");
                 bool keypad = e.Args.Contains("--ui-preview-keypad", StringComparer.OrdinalIgnoreCase);
+                int rotate = int.TryParse(Arg("--ui-preview-rotate"), out int rot) ? rot : 0;
                 var vm0 = _mainVm;
-                _main!.Dispatcher.BeginInvoke(DispatcherPriority.ContextIdle, () => vm0.ApplyPreview(mode, panel, keypad));
+                _main!.Dispatcher.BeginInvoke(DispatcherPriority.ContextIdle, () => vm0.ApplyPreview(mode, panel, keypad, rotate));
             }
             // --ui-preview-history=call|ptt: 이력 화면(§4.6)에 표본 하루를 심어(시간대 밴드·표/카드·선택 세션 패널) 서버 없이 그려 본다.
             if (e.Args.FirstOrDefault(a => a.StartsWith("--ui-preview-history=", StringComparison.OrdinalIgnoreCase))?.Split('=', 2)[1] is { Length: > 0 } histKind && _mainVm is not null)

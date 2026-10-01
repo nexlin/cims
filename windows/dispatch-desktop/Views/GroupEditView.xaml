@@ -85,7 +85,9 @@
                     <CheckBox Style="{StaticResource Switch}" Content="긴급 경보 허용" IsChecked="{Binding EmergencyAlert}" Margin="0,0,0,6" />
                     <CheckBox Style="{StaticResource Switch}" Content="메시지(SDS) 허용" IsChecked="{Binding AllowSds}" Margin="0,0,0,6" />
                     <CheckBox Style="{StaticResource Switch}" Content="파일 전송(FD) 허용" IsChecked="{Binding AllowFd}" Margin="0,0,0,6" />
-                    <CheckBox Style="{StaticResource Switch}" Content="영상" IsChecked="{Binding VideoEnabled}" Margin="0,0,0,6" />
+                    <CheckBox Style="{StaticResource Switch}" Content="PTT 영상(현행)" IsChecked="{Binding VideoEnabled}" Margin="0,0,0,0"
+                              ToolTip="MCPTT 그룹 호에 영상(m=video)을 싣는 옛 방식(비규격 mcptt-video) — 새 영상은 아래 «서비스» 의 MCVideo 로" />
+                    <TextBlock Style="{StaticResource Hint}" Text="V7 배포에서 없어집니다 — 새 영상은 «서비스 › MCVideo 영상»" Margin="34,0,0,6" TextWrapping="Wrap" />
                     <CheckBox Style="{StaticResource Switch}" Content="참여 전 affiliation 필요" IsChecked="{Binding RequireAffiliation}" Margin="0,0,0,6" />
                     <CheckBox Style="{StaticResource Switch}" Content="미디어 암호화" IsChecked="{Binding Encryption}" Margin="0,0,0,6" />
                     <UniformGrid Columns="2" Margin="0,4,0,0">
@@ -98,6 +100,47 @@
                             <TextBox Style="{StaticResource Field}" Text="{Binding MaxAutoRecv, UpdateSourceTrigger=PropertyChanged}" Margin="0,2,0,0" />
                         </StackPanel>
                     </UniformGrid>
+                    <!-- MCVideo 그룹 영상(§10.6, TS 24.481 §7.2.2) — 켜기만(끄기는 콘솔 — 서버 전환기). 범위·기본값은 서버와 같다 -->
+                    <TextBlock Style="{StaticResource SectionHeader}" Text="서비스" Margin="0,12,0,4" ToolTip="한 그룹 = 서비스 집합(TS 23.280 §3) — 서비스마다 자기 속성(TS 24.481 §7.2.2)" />
+                    <CheckBox Style="{StaticResource Switch}" Content="MCPTT 음성 — 늘 켬" IsChecked="True" IsEnabled="False" Margin="0,2,0,6" ToolTipService.ShowOnDisabled="True"
+                              ToolTip="그룹의 기본 서비스(음성 무전) — 위 «그룹 호»·«허용·한도» 가 이 서비스의 속성" />
+                    <CheckBox Style="{StaticResource Switch}" Content="MCVideo 영상" IsChecked="{Binding McVideo}" IsEnabled="{Binding CanToggleMcVideo}" Margin="0,0,0,2"
+                              ToolTip="{Binding McVideoTip}" ToolTipService.ShowOnDisabled="True" />
+                    <TextBlock Style="{StaticResource Hint}" Text="끄기는 운영 콘솔에서" Margin="34,0,0,6" Visibility="{Binding McVideoLocked, Converter={StaticResource BoolToVis}}" />
+                    <StackPanel Visibility="{Binding McVideo, Converter={StaticResource BoolToVis}}">
+                        <TextBlock Text="호 방식" Style="{StaticResource Hint}" />
+                        <ComboBox Style="{StaticResource FieldCombo}" ItemsSource="{Binding McVideoTypes}" DisplayMemberPath="Value" SelectedValuePath="Key" SelectedValue="{Binding McVideoType}" Margin="0,2,0,8"
+                                  ToolTip="mcvideo-on-network-invite-members — chat = 원하는 사람이 들어온다(합류가 곧 affiliation), 편성 = 제어 기능이 MCVideo 로 제휴한 멤버를 초대" />
+                        <UniformGrid Columns="2" Margin="0,0,0,8">
+                            <StackPanel Margin="0,0,6,0" ToolTip="mcvideo-maximum-simultaneous-mcvideo-transmitting-group-members — 동시에 영상을 보낼 수 있는 멤버 수(1~16)">
+                                <TextBlock Text="동시 송출 상한" Style="{StaticResource Hint}" />
+                                <TextBox Style="{StaticResource Field}" Text="{Binding McVideoMaxTransmitters, UpdateSourceTrigger=PropertyChanged}" Margin="0,2,0,0" />
+                            </StackPanel>
+                            <StackPanel ToolTip="mcvideo-on-network-maximum-duration — 영상 호 최대 시간(TNG3, 0 = 무제한, 최대 86400)">
+                                <TextBlock Text="최대 통화 시간(초)" Style="{StaticResource Hint}" />
+                                <TextBox Style="{StaticResource Field}" Text="{Binding McVideoMaxDurationSec, UpdateSourceTrigger=PropertyChanged}" Margin="0,2,0,0" />
+                            </StackPanel>
+                        </UniformGrid>
+                        <UniformGrid Columns="2" Margin="0,0,0,8">
+                            <StackPanel Margin="0,0,6,0" ToolTip="on-network-reception-hang-timer — 받는 사람 없이 이 시간이 지나면 영상 호 수신 유휴(T5, TS 24.581 §11.1.3, 0~3600)">
+                                <TextBlock Text="수신 유지 시간(T5, 초)" Style="{StaticResource Hint}" />
+                                <TextBox Style="{StaticResource Field}" Text="{Binding McVideoReceptionHangSec, UpdateSourceTrigger=PropertyChanged}" Margin="0,2,0,0" />
+                            </StackPanel>
+                            <StackPanel ToolTip="mcvideo-on-network-minimum-number-to-start — 개시자에게 응답하기 전에 받아야 할 멤버 응답 수(0 = 기다리지 않음)">
+                                <TextBlock Text="시작 최소 응답(명)" Style="{StaticResource Hint}" />
+                                <TextBox Style="{StaticResource Field}" Text="{Binding McVideoMinNumberToStart, UpdateSourceTrigger=PropertyChanged}" Margin="0,2,0,0" />
+                            </StackPanel>
+                        </UniformGrid>
+                        <StackPanel Margin="0,0,0,8" ToolTip="mcvideo-on-network-group-priority — 0~255, 비우면 미기재(가장 낮음)">
+                            <TextBlock Text="그룹 우선순위(0~255)" Style="{StaticResource Hint}" />
+                            <TextBox Style="{StaticResource Field}" Text="{Binding McVideoGroupPriority, UpdateSourceTrigger=PropertyChanged}" Tag="비우면 미기재" Margin="0,2,0,0" />
+                        </StackPanel>
+                        <CheckBox Style="{StaticResource Switch}" Content="참가자 정보 구독 허용" IsChecked="{Binding McVideoAllowConferenceState}" Margin="0,0,0,6"
+                                  ToolTip="mcvideo-on-network-allow-conference-state — 멤버가 영상 호의 참가자 정보(conference 이벤트, TS 24.281 §9.2.3)를 구독할 수 있음" />
+                        <CheckBox Style="{StaticResource Switch}" Content="종단간 보호(미디어·전송 제어)" IsChecked="False" IsEnabled="False" Margin="0,0,0,2" ToolTipService.ShowOnDisabled="True"
+                                  ToolTip="mcvideo-protect-media · mcvideo-protect-transmission-control — 꺼짐으로 명시해 싣는다(요소가 없으면 켜짐으로 읽힌다, mcvideo.md D7)" />
+                        <TextBlock Style="{StaticResource Hint}" TextWrapping="Wrap" Margin="34,0,0,0" Text="종단간 보호는 아직 지원하지 않습니다" />
+                    </StackPanel>
                     <TextBlock Style="{StaticResource Hint}" Margin="0,8,0,0" TextWrapping="Wrap"
                                Text="저장하면 GMS 그룹 문서로 서버에 올라가고(XCAP PUT), 멤버 단말에는 문서 변경 통지가 갑니다. 편집·삭제는 내가 만든 그룹(또는 관제 그룹 관리 범위 안 그룹)만 됩니다." />
                 </StackPanel>

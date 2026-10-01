@@ -156,6 +156,10 @@
                                                     Command="{Binding DataContext.AnswerBannerCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}" Visibility="{Binding IsIncoming, Converter={StaticResource BoolToVis}}" />
                                             <Button Style="{StaticResource Pill.Line.Lg}" FontWeight="Normal" FontSize="14" Content="거절"
                                                     Command="{Binding DataContext.RejectBannerCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}" Visibility="{Binding IsIncoming, Converter={StaticResource BoolToVis}}" />
+                                            <!-- «새 영상»(§10.3) — [보기] = 그 채널 상세를 열고 그 송출을 본다 · [닫기] = 배너만 내린다(채널 «영상 n» 목록에서 다시 [보기]) -->
+                                            <Button Style="{StaticResource Pill.Listen}" Height="44" MinWidth="104" FontSize="15" Content="보기" Margin="0,0,8,0" ToolTip="이 영상 보기(Receive Media Request — TS 24.581 §6.2.5.3.3) — 채널 상세가 열린다"
+                                                    Background="{DynamicResource Brush.ListenFill}" Foreground="{DynamicResource Brush.OnAccent}" BorderThickness="0"
+                                                    Command="{Binding DataContext.AcceptVideoBannerCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}" Visibility="{Binding IsVideo, Converter={StaticResource BoolToVis}}" />
                                             <Button x:Name="Cancel" Style="{StaticResource Pill.Line.Lg}" FontSize="14" Content="{Binding CancelText}" Margin="0,0,8,0" BorderBrush="{Binding (TextElement.Foreground), ElementName=Bar}"
                                                     Foreground="{Binding (TextElement.Foreground), ElementName=Bar}" Background="Transparent"
                                                     Command="{Binding DataContext.CancelBannerCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}"
@@ -165,7 +169,7 @@
                                             <Button Style="{StaticResource Pill.Line.Lg}" FontWeight="Normal" FontSize="14" Content="닫기" Margin="8,0,0,0" BorderBrush="{Binding (TextElement.Foreground), ElementName=Bar}"
                                                     Foreground="{Binding (TextElement.Foreground), ElementName=Bar}" Background="Transparent"
                                                     Command="{Binding DataContext.DismissBannerCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}"
-                                                    Visibility="{Binding IsAlert, Converter={StaticResource BoolToVis}}" ToolTip="이 화면의 경보 표시만 내린다 — 서버의 경보는 그대로(취소 신호를 놓쳤을 때)" />
+                                                    Visibility="{Binding ShowDismiss, Converter={StaticResource BoolToVis}}" ToolTip="{Binding DismissTip}" />
                                         </StackPanel>
                                         <Ellipse x:Name="Dot" Width="10" Height="10" Fill="{DynamicResource Brush.Peril}" Margin="0,0,14,0" VerticalAlignment="Center" />
                                         <StackPanel VerticalAlignment="Center">
@@ -205,6 +209,7 @@
                                     <Setter TargetName="Go" Property="Background" Value="{DynamicResource Brush.MonFill}" /><Setter TargetName="Go" Property="Foreground" Value="{DynamicResource Brush.OnMon}" />
                                 </DataTrigger>
                                 <DataTrigger Binding="{Binding IsDirect}" Value="True"><Setter TargetName="Bar" Property="Background" Value="{DynamicResource Brush.HeldSoft}" /><Setter TargetName="L1" Property="Foreground" Value="{DynamicResource Brush.Held}" /><Setter TargetName="Dot" Property="Fill" Value="{DynamicResource Brush.Held}" /><Setter TargetName="Bar" Property="BorderBrush" Value="{DynamicResource Brush.Border}" /></DataTrigger>
+                                <DataTrigger Binding="{Binding IsVideo}" Value="True"><Setter TargetName="Bar" Property="Background" Value="{DynamicResource Brush.ListenSoft}" /><Setter TargetName="L1" Property="Foreground" Value="{DynamicResource Brush.ListenInk}" /><Setter TargetName="Dot" Property="Fill" Value="{DynamicResource Brush.Listen}" /><Setter TargetName="Bar" Property="BorderBrush" Value="{DynamicResource Brush.Border}" /></DataTrigger>
                                 <DataTrigger Binding="{Binding IsPtt}" Value="True"><Setter TargetName="Bar" Property="Background" Value="{DynamicResource Brush.ListenSoft}" /><Setter TargetName="L1" Property="Foreground" Value="{DynamicResource Brush.Listen}" /><Setter TargetName="Dot" Property="Fill" Value="{DynamicResource Brush.Listen}" /><Setter TargetName="Bar" Property="BorderBrush" Value="{DynamicResource Brush.Border}" /></DataTrigger>
                                 <DataTrigger Binding="{Binding Critical}" Value="True">
                                     <Setter TargetName="Warn" Property="Background" Value="{DynamicResource Brush.EmgFill}" /><Setter TargetName="Warn" Property="TextElement.Foreground" Value="{DynamicResource Brush.OnAccent}" />

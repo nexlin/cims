@@ -135,6 +135,20 @@ public sealed partial class ChannelCard : ObservableObject
         .Where(r => r.Status != "listener" || !_s.ListenHidden)
         .Select(r => new RosterRow(_s.NameOfPtt(r.Uri), r.Uri, r.Status, _s.IsMe(r.Uri), Speaker.Length > 0 && _s.NameOfPtt(r.Uri) == Speaker)).ToList();
     public bool CanEdit => Group?.IsOwner == true;
+    // ── MCVideo 영상 채널(§10.3) — 카드는 1줄 태그 «영상 n»(보내는 중 수, 없으면 태그 없음)만. 조작은 채널 상세 «영상» 절 ──
+    /// <summary>영상 채널(user profile 그룹 목록에 있는 멤버 그룹 — 영상 호에 앱이 함께 합류한다, D10).</summary>
+    public bool IsVideoGroup => Group?.McVideo == true;
+    public SessionItem? Video => Group?.VideoSession;
+    public int VideoTransmitterCount => Video is { IsLive: true } v ? v.Transmitters.Count : 0;
+    /// <summary>1줄 «영상 n» — 누가 영상을 보내는 중일 때만.</summary>
+    public bool HasVideoTag => VideoTransmitterCount > 0;
+    public bool IsVideoReceiving => Video?.Receiving is not null;
+    public string VideoLabel => $"영상 {VideoTransmitterCount}";
+    public string VideoTip => Video is not { } v ? "" : string.Join(" · ", new[]
+    {
+        $"보내는 중 {VideoTransmitterCount}({string.Join(", ", v.Transmitters.Select(_s.VideoSenderName))})",
+        v.Receiving is { } r ? $"보는 중 {_s.VideoSenderName(r)}" : "채널 상세에서 [보기]",
+    });
     public IReadOnlyList<string> AdhocChips => Session?.AdhocMembers.Select(_s.NameOfPtt).ToList() ?? new List<string>();
 
     // ── 카드 네 줄(§4.1, 시안 E1) ──
@@ -191,7 +205,8 @@ public sealed partial class ChannelCard : ObservableObject
                                   nameof(CheckTip), nameof(IsBroadcast), nameof(IsBroadcastInitiator), nameof(CanBroadcast), nameof(BroadcastTip),
                                   nameof(CanPressBroadcast), nameof(CanEmergency), nameof(EmergencyTip), nameof(CanCancelEmergency),
                                   nameof(NumberedTitle), nameof(SubLine), nameof(SubIsMe), nameof(SubIsWarn), nameof(RosterLine), nameof(MetaLine), nameof(DetailTip),
-                                  nameof(ShowTarget), nameof(ShowMute), nameof(ShowJoin), nameof(TargetTip), nameof(MuteTip) })
+                                  nameof(ShowTarget), nameof(ShowMute), nameof(ShowJoin), nameof(TargetTip), nameof(MuteTip),
+                                  nameof(IsVideoGroup), nameof(Video), nameof(HasVideoTag), nameof(VideoTransmitterCount), nameof(IsVideoReceiving), nameof(VideoLabel), nameof(VideoTip) })
             OnPropertyChanged(p);
         if (HasSpeaker && Speaker != LastSpeaker) { LastSpeaker = Speaker; LastSpeakerAt = DateTime.Now; }
         else if (HasSpeaker) LastSpeakerAt ??= DateTime.Now;
@@ -255,6 +270,7 @@ public sealed partial class PttChannelsViewModel : ObservableObject
         s.SessionChanged += (_, item) => { OnPropertyChanged(nameof(JoinedCount)); if (Cards.FirstOrDefault(c => c.Session == item) is { } c && c.IsChecked && !c.CanCheck) SetChecked(c, false); };
         s.RosterChanged += (_, g) => OnRoster(g);
         s.Floor += (_, e) => OnFloor(e.Session, e.Event);
+        s.VideoChanged += (_, g) => Cards.FirstOrDefault(c => c.Group == g)?.Refresh();    // 영상 라벨(§10.3)
         s.PropertyChanged += (_, e) => { if (e.PropertyName == nameof(DispatchSession.Capabilities)) foreach (var c in Cards) c.Refresh(); };   // 긴급 호출 자격
     }
 

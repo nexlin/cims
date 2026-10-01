@@ -23,6 +23,31 @@ public sealed record ChannelPersonRow(string Name, string Uri, string Meta, bool
     public string NameText => IsMe ? $"{Name} (나)" : Name;
 }
 
+/// <summary>채널 상세 «영상» 절의 송출 한 줄(§10.3) — 이름 · 기능 별칭 · 경과 + [보기]/[바꿔 보기] · «보는 중». 1초 틱은 경과만 바꾼다(버튼 호버가 끊기지 않게).</summary>
+public sealed partial class VideoTxRow : ObservableObject
+{
+    public string UserId { get; }
+    public string Name { get; }
+    public string Alias { get; }
+    [ObservableProperty] private ReceptionState _state;
+    /// <summary>다른 송출을 보고 있다 — 이 줄의 버튼이 [바꿔 보기](보던 것을 그만 보고 이것을 본다 — 1차 한 번에 하나).</summary>
+    [ObservableProperty] private bool _otherReceiving;
+    [ObservableProperty] private string _elapsedText = "";
+    public VideoTxRow(string userId, string name, string alias) { UserId = userId; Name = name; Alias = alias; }
+    /// <summary>"현장지휘 · 0:34" — 별칭이 없으면 경과만.</summary>
+    public string Meta => string.Join(" · ", new[] { Alias, ElapsedText }.Where(x => x.Length > 0));
+    public bool IsReceiving => State == ReceptionState.Receiving;
+    public bool CanAccept => State == ReceptionState.Notified;
+    public string ActionText => State switch
+    {
+        ReceptionState.PendingRequest => "요청 중…", ReceptionState.PendingRelease => "끝내는 중…",
+        _ => OtherReceiving ? "바꿔 보기" : "보기",
+    };
+    partial void OnStateChanged(ReceptionState value) { OnPropertyChanged(nameof(IsReceiving)); OnPropertyChanged(nameof(CanAccept)); OnPropertyChanged(nameof(ActionText)); }
+    partial void OnOtherReceivingChanged(bool value) => OnPropertyChanged(nameof(ActionText));
+    partial void OnElapsedTextChanged(string value) => OnPropertyChanged(nameof(Meta));
+}
+
 /// <summary>채널 상세 — 내 채널 카드(ChannelCard) 또는 타 채널 행(ScopedCard)의 투영. 조작은 카드의 명령을 그대로 부른다(같은 판정).</summary>
 public sealed partial class ChannelDetailViewModel : ObservableObject
 {
@@ -124,6 +149,76 @@ public sealed partial class ChannelDetailViewModel : ObservableObject
     public string SegAll => $"편성 {MemberCount}";
     public string RosterHead => Group is null ? $"참가 {ConnectedCount}" : "";
 
+    // ── 영상 채널(MCVideo, §10.3) — 멤버 영상 채널만. «영상 참여» 없음(D10 — 앱이 영상 호에 함께 합류), 수신 manual(D8 — 골라 [보기]) ──
+    public bool ShowVideo => Card?.IsVideoGroup == true;
+    public SessionItem? Video => Card?.Video;
+    public bool VideoConnected => Video is { IsLive: true };
+    /// <summary>머리 옆 작은 글 — 연결됨이면 «채널 참여와 함께 연결됨», 아니면 연결 상태(연결 중·편성 초대 대기·한도·실패·재시도).</summary>
+    public string VideoSub => VideoConnected ? "채널 참여와 함께 연결됨"
+        : Group?.VideoNote is { Length: > 0 } n ? n : "영상 연결 중…";
+    public int VideoSenderCount => VideoConnected ? Video!.Transmitters.Count : 0;
+    /// <summary>보내는 사람 없음 = 머리 한 줄 + [영상 보내기]만(영상 칸·목록 없음).</summary>
+    public bool ShowNoSender => VideoConnected && VideoSenderCount == 0;
+    public bool HasVideoRows => VideoRows.Count > 0;
+    /// <summary>"보내는 중 2 · 보는 중 1 (한 번에 1개)".</summary>
+    public string VideoCountText => $"보내는 중 {VideoSenderCount}" + (IsVideoReceiving ? " · 보는 중 1" : "") + " (한 번에 1개)";
+    public bool IsVideoReceiving => Video?.Receiving is not null;
+    /// <summary>영상 칸 캡션 "김현장 · 현장지휘 · 0:34".</summary>
+    public string ReceivingCaption => Video?.Receiving is { } r
+        ? string.Join(" · ", new[] { _s.NameOfPtt(r.UserId), r.FunctionalAlias, ElapsedOf(Video, r.UserId) }.Where(x => x.Length > 0)) : "";
+    /// <summary>엔진이 영상을 그린다(호가 m=video 를 협상) — Windows 1차 엔진(PJMEDIA_HAS_VIDEO 0)은 영상 호 음성·전송 제어만이라 칸에 자리 표시(§10.3).</summary>
+    public bool VideoCanRender => Video?.Info.Video == true;
+    public string VideoSurfaceText => VideoCanRender ? "" : "이 PC 에서는 영상을 표시할 수 없습니다(영상 엔진 준비 중) — 영상 호 소리는 들립니다";
+    /// <summary>영상 회전(°, 시계 방향) — 보고 있는 송출의 것(보내는 사람마다 기억, DispatchSession.RotateVideo).</summary>
+    public int VideoRotation => Video?.Receiving is { } r ? _s.VideoRotationOf(r.UserId) : 0;
+    /// <summary>칸 모양 — 기본 세로 480×640(3:4, 0°·180°), 90°·270° 면 가로 640×480(4:3). 오른쪽 패널 폭에 맞춰 0.5625 배(270×360 / 360×270).</summary>
+    public bool VideoLandscape => VideoRotation % 180 == 90;
+    public double VideoFrameWidth => VideoLandscape ? 360 : 270;
+    public double VideoFrameHeight => VideoLandscape ? 270 : 360;
+    public string VideoRotationTip => $"영상 회전 — 지금 {VideoRotation}° (보내는 쪽 카메라 방향이 다를 때 90° 씩)";
+    public ObservableCollection<VideoTxRow> VideoRows { get; } = new();
+    /// <summary>[영상 소리](TS 22.280 R-8.3-002 — 동시 오디오 원천의 상대 음량) 열림.</summary>
+    [ObservableProperty] private bool _videoVolumeOpen;
+    /// <summary>영상 호 수신 음량 0~2 — 코어가 호에 기억하고(CallInfo.RxLevel) 화면은 끈 값을 든다(스냅샷이 늦게 와도 막대가 되돌아가지 않게). 호가 바뀌면 코어 값에서 다시.</summary>
+    public double VideoVolume
+    {
+        get => _volumeCall == Video?.CallId && _volume is double v ? v : Video?.Info.RxLevel ?? 1f;
+        set { if (Video is { } call) { _volumeCall = call.CallId; _volume = value; _s.SetVideoVolume(call, (float)value); OnPropertyChanged(); } }
+    }
+    private double? _volume;
+    private int _volumeCall = -1;
+
+    private static string ElapsedOf(SessionItem v, string userId) => v.TransmitterSince.TryGetValue(userId, out var at) ? DispatchSession.Fmt(DateTime.Now - at) : "";
+
+    /// <summary>송출 줄 동기화 — 같은 송출자는 줄을 유지하고 상태·경과만 바꾼다(버튼 호버·누름이 끊기지 않게).</summary>
+    private void SyncVideoRows()
+    {
+        var list = Video is { IsLive: true } v ? v.Transmitters : Array.Empty<VideoTransmitter>();
+        bool receiving = Video?.Receiving is not null;
+        foreach (var gone in VideoRows.Where(r => !list.Any(t => string.Equals(t.UserId, r.UserId, StringComparison.OrdinalIgnoreCase))).ToList()) VideoRows.Remove(gone);
+        foreach (var t in list)
+        {
+            var row = VideoRows.FirstOrDefault(r => string.Equals(r.UserId, t.UserId, StringComparison.OrdinalIgnoreCase));
+            if (row is null) { row = new VideoTxRow(t.UserId, _s.NameOfPtt(t.UserId), t.FunctionalAlias); VideoRows.Add(row); }
+            row.State = t.State;
+            row.OtherReceiving = receiving && t.State != ReceptionState.Receiving;
+            row.ElapsedText = ElapsedOf(Video!, t.UserId);
+        }
+        OnPropertyChanged(nameof(HasVideoRows));
+    }
+
+    [RelayCommand] private void AcceptVideo(VideoTxRow r) { if (Video is { } v && r.CanAccept) _s.AcceptVideo(v, r.UserId); }
+    [RelayCommand] private void EndVideo() { if (Video is { Receiving: { } t } v) _s.EndVideo(v, t.UserId); }
+    [RelayCommand] private void ToggleVideoVolume() => VideoVolumeOpen = !VideoVolumeOpen;
+    /// <summary>[↻] cw = 시계 방향 90° · [↺] ccw = 반시계 방향 90°.</summary>
+    [RelayCommand]
+    private void RotateVideo(string dir)
+    {
+        if (Video?.Receiving is not { } r) return;
+        _s.RotateVideo(r.UserId, dir == "ccw" ? -90 : 90);
+        foreach (var p in new[] { nameof(VideoRotation), nameof(VideoLandscape), nameof(VideoFrameWidth), nameof(VideoFrameHeight), nameof(VideoRotationTip) }) OnPropertyChanged(p);
+    }
+
     partial void OnSegmentChanged(string value) { if (value == "all" && Members is null) _ = LoadMembersAsync(); RebuildRows(); }
     partial void OnMembersChanged(IReadOnlyList<GroupMember>? value) { OnPropertyChanged(nameof(MemberCount)); OnPropertyChanged(nameof(SegAll)); OnPropertyChanged(nameof(Summary)); RebuildRows(); }
     [RelayCommand] private void SetSegment(string seg) => Segment = seg;
@@ -203,8 +298,12 @@ public sealed partial class ChannelDetailViewModel : ObservableObject
                                   nameof(ShowCancelEmergency), nameof(ShowTarget), nameof(CanTarget), nameof(IsTarget), nameof(TargetText), nameof(ShowBroadcast), nameof(CanPressBroadcast),
                                   nameof(BroadcastText), nameof(BroadcastTip), nameof(IsBroadcastHeld), nameof(ShowMute), nameof(IsMuted), nameof(ShowMessage), nameof(MessageText),
                                   nameof(ShowRoute), nameof(CanRoute), nameof(RouteIsSpeaker), nameof(RouteText), nameof(ShowMore), nameof(ShowListen), nameof(CanListen), nameof(ListenTip),
-                                  nameof(ShowStopListen), nameof(HasSegment), nameof(SegConnected), nameof(SegAll), nameof(RosterHead) })
+                                  nameof(ShowStopListen), nameof(HasSegment), nameof(SegConnected), nameof(SegAll), nameof(RosterHead),
+                                  nameof(ShowVideo), nameof(Video), nameof(VideoConnected), nameof(VideoSub), nameof(VideoSenderCount), nameof(ShowNoSender), nameof(VideoCountText),
+                                  nameof(IsVideoReceiving), nameof(ReceivingCaption), nameof(VideoCanRender), nameof(VideoSurfaceText), nameof(VideoVolume),
+                                  nameof(VideoRotation), nameof(VideoLandscape), nameof(VideoFrameWidth), nameof(VideoFrameHeight), nameof(VideoRotationTip) })
             OnPropertyChanged(p);
+        SyncVideoRows();
         if (rows) RebuildRows();
     }
 

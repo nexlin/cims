@@ -65,6 +65,10 @@
                                         <TextBlock DockPanel.Dock="Right" Style="{StaticResource Muted}" FontSize="11" VerticalAlignment="Center" Margin="6,0,0,0">
                                             <Run Text="{Binding MemberCount, Mode=OneWay}" FontWeight="SemiBold" Foreground="{DynamicResource Brush.Text}" /><Run Text="명" />
                                         </TextBlock>
+                                        <!-- 서비스 칩(§10.6) — 음성(MCPTT, 늘) · 영상(MCVideo 로 알려진 그룹) -->
+                                        <Border DockPanel.Dock="Right" Style="{StaticResource Tag.Listen}" Height="18" Margin="4,0,0,0" VerticalAlignment="Center" Visibility="{Binding IsVideo, Converter={StaticResource BoolToVis}}"
+                                                ToolTip="MCVideo 그룹 영상 — 같은 그룹에서 음성 무전과 따로 영상 호"><TextBlock Text="영상" FontSize="10" /></Border>
+                                        <Border DockPanel.Dock="Right" Style="{StaticResource Tag}" Height="18" Margin="4,0,0,0" VerticalAlignment="Center" ToolTip="MCPTT 음성 무전"><TextBlock Text="음성" FontSize="10" /></Border>
                                         <TextBlock Text="{Binding Name}" FontWeight="SemiBold" FontSize="13" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
                                     </DockPanel>
                                     <TextBlock Style="{StaticResource MonoMuted}" FontSize="11.5" Margin="0,3,0,0" TextTrimming="CharacterEllipsis">

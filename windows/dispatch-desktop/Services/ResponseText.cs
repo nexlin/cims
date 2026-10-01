@@ -5,7 +5,7 @@ namespace DispatchDesktop.Services;
 
 public static class ResponseText
 {
-    public enum Area { Pickup, Transfer, Join, PttListen, PttJoin, PttPrivate, PttAdhoc, Emergency, EmergencyCancel, AlertCancel, Sds, Sms, Register, Call, Group, Management, Recording, File }
+    public enum Area { Pickup, Transfer, Join, PttListen, PttJoin, PttPrivate, PttAdhoc, Emergency, EmergencyCancel, AlertCancel, Sds, Sms, Register, Call, Group, Management, Recording, File, Video }
 
     public static Area AreaOf(Operation op) => op switch
     {
@@ -18,6 +18,7 @@ public static class ResponseText
         Operation.PttAdhoc => Area.PttAdhoc,
         Operation.Emergency => Area.Emergency,
         Operation.Broadcast => Area.PttJoin,                   // 개시 거절은 일반 그룹 통화와 같다(비멤버 403 — mcptt_broadcast_group_call.md §3.1)
+        Operation.VideoJoin => Area.Video,
         _ => Area.Call,
     };
 
@@ -83,6 +84,13 @@ public static class ResponseText
         (Area.File, 413) => "파일이 너무 큽니다 (서버 한도)",
         (Area.File, 503) => "서버 파일 저장소가 설정되지 않았습니다 (운영자)",
         (Area.File, -2) => "받을 수 없는 파일 주소입니다",
+        // MCVideo 그룹 영상 호(TS 24.281 §9.2.1.4·§9.2.2.4 검사 순서 — mcvideo.md §5.2.1, Warning 은 ▸상세)
+        (Area.Video, 403) => "영상 그룹 멤버가 아니거나 영상(MCVideo) 이용 자격이 없습니다",
+        (Area.Video, 404) => "영상 그룹이 아니거나 영상 세션이 끝났습니다",
+        (Area.Video, 486) => "동시에 참가할 수 있는 영상 호 수를 넘었습니다",
+        (Area.Video, 480) => "영상 호를 열지 못했습니다 — 응답한 멤버가 없습니다",
+        (Area.Video, 488) => "영상 호 미디어 조건 불일치 — 관리자 문의",
+        (Area.Video, 500 or 503) => "영상 서버 자원이 없습니다 — 잠시 후 다시",
         _ => null,
     };
 
@@ -197,5 +205,44 @@ public static class ResponseText
         if (t is not null) return t;
         if (code >= 100) return $"실패 ({code} {reason})";
         return reason.Length > 0 ? reason : "실패";
+    }
+
+    // ── MCVideo 전송 제어 원인(TS 24.581 §9.2.6.2 Transmission Rejected · §9.2.10.2 Revoked · §9.2.15.2 Receive Media Response) → 단말과 같은 문구(§10.4) ──
+
+    /// <summary>수신 거절·시한 — #7 = 동시에 볼 수 있는 영상 상한(C9 — 1차 1개).</summary>
+    public static string VideoReceptionText(CimsUe.ReceptionEventKind kind, int cause, string who) => (kind, cause) switch
+    {
+        (CimsUe.ReceptionEventKind.Rejected, 7) => "더 볼 수 없습니다 — 동시에 볼 수 있는 영상(1)이 찼습니다 · [바꿔 보기]",
+        (CimsUe.ReceptionEventKind.Rejected, 255) => $"{who} 영상을 볼 수 없습니다 — 송출이 이미 끝났습니다",
+        (CimsUe.ReceptionEventKind.RequestTimeout, _) => $"{who} 영상 보기 요청에 응답이 없습니다",
+        _ => $"{who} 영상을 볼 수 없습니다",
+    };
+
+    /// <summary>내 송출 거절·회수 — 1차 관제 앱은 송출하지 않지만(카메라 없음) 서버발 통지는 같은 문구로.</summary>
+    public static string VideoTransmissionText(CimsUe.TransmissionEventKind kind, int cause, int maxTransmitters) => (kind, cause) switch
+    {
+        (CimsUe.TransmissionEventKind.Rejected, 1) => maxTransmitters > 0 ? $"보내지 못했습니다 — 동시에 보낼 수 있는 수({maxTransmitters})가 찼습니다" : "보내지 못했습니다 — 동시에 보낼 수 있는 수가 찼습니다",
+        (CimsUe.TransmissionEventKind.Rejected, 5) => "이 그룹에서는 영상을 받기만 할 수 있습니다",
+        (CimsUe.TransmissionEventKind.Rejected, 3) => "보내지 못했습니다 — 영상 호에 다른 참가자가 없습니다",
+        (CimsUe.TransmissionEventKind.Revoked, 2) => "보내기가 멈췄습니다 — 한 번에 보낼 수 있는 시간을 넘었습니다",
+        (CimsUe.TransmissionEventKind.Revoked, 4) => "보내기가 멈췄습니다 — 우선순위가 높은 송출이 들어왔습니다",
+        (CimsUe.TransmissionEventKind.Revoked, _) => "보내기가 멈췄습니다",
+        _ => "보내지 못했습니다",
+    };
+
+    /// <summary>주격 조사 이/가 — 받침이 있으면 «이»(«김현장이»), 없으면 «가»(«박경수가»). 숫자로 끝나면 읽는 소리로, 그 밖은 «이(가)».</summary>
+    public static string WithIGa(string word)
+    {
+        if (word.Length == 0) return word;
+        char c = word[^1];
+        if (c is ')' && word.LastIndexOf('(') is int i and > 0) c = word[i - 1];      // «김현장(현장지휘)» → 이름의 끝 글자
+        bool? batchim = c switch
+        {
+            >= '가' and <= '힣' => (c - 0xAC00) % 28 != 0,
+            '0' or '1' or '3' or '6' or '7' or '8' => true,                                      // 영·일·삼·육·칠·팔
+            '2' or '4' or '5' or '9' => false,                                                    // 이·사·오·구
+            _ => null,
+        };
+        return word + (batchim switch { true => "이", false => "가", _ => "이(가)" });
     }
 }

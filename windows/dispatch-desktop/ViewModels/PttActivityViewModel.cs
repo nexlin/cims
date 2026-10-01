@@ -23,7 +23,7 @@ public sealed partial class PinnedEmergency : ObservableObject
 }
 
 /// <summary>이벤트 종류 칩 — 발언 · 입퇴장 · 긴급 · SDS · 오류.</summary>
-public enum EventClass { Talk, Presence, Emergency, Sds, Error, Other }
+public enum EventClass { Talk, Presence, Emergency, Sds, Error, Video, Other }
 
 /// <summary>표 한 줄 — 링 버퍼 행(ActivityRow)의 투영. 채널 = 행 제목 앞의 그룹명(DispatchSession 이 "<그룹명> …" 으로 쓴다).</summary>
 public sealed partial class EventRow : ObservableObject
@@ -43,6 +43,7 @@ public sealed partial class EventRow : ObservableObject
             ActivityKind.Emergency => EventClass.Emergency,
             ActivityKind.Sds => EventClass.Sds,
             ActivityKind.Error => EventClass.Error,
+            ActivityKind.Video => EventClass.Video,
             _ => row.IsEmergency ? EventClass.Emergency : EventClass.Other,
         };
     }
@@ -51,7 +52,7 @@ public sealed partial class EventRow : ObservableObject
     public string GroupId => Group?.Id ?? "";
     public string KindText => Class switch
     {
-        EventClass.Talk => "발언", EventClass.Presence => "입퇴장", EventClass.Emergency => "긴급", EventClass.Sds => "SDS", EventClass.Error => "오류", _ => Row.KindText.Length > 0 ? Row.KindText : "기타",
+        EventClass.Talk => "발언", EventClass.Presence => "입퇴장", EventClass.Emergency => "긴급", EventClass.Sds => "SDS", EventClass.Error => "오류", EventClass.Video => "영상", _ => Row.KindText.Length > 0 ? Row.KindText : "기타",
     };
     /// <summary>내용 — 제목에서 채널명을 뗀 나머지 + 상세("박현장 발언 14초 · …").</summary>
     public string Content
@@ -84,7 +85,7 @@ public sealed partial class PttActivityViewModel : ObservableObject
     public IReadOnlyList<EventKindChip> Kinds { get; } = new[]
     {
         new EventKindChip(EventClass.Talk, "발언"), new EventKindChip(EventClass.Presence, "입퇴장"), new EventKindChip(EventClass.Emergency, "긴급"),
-        new EventKindChip(EventClass.Sds, "SDS"), new EventKindChip(EventClass.Error, "오류"),
+        new EventKindChip(EventClass.Sds, "SDS"), new EventKindChip(EventClass.Video, "영상"), new EventKindChip(EventClass.Error, "오류"),
     };
     /// <summary>[채널 · <이름> ▾] — 빈 값 = 전체.</summary>
     [ObservableProperty] private string _channel = "";

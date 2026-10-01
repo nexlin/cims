@@ -810,3 +810,26 @@ D8·D10~D12: 영상 칸은 고른 영상이 있을 때만 · «영상 n» 목록
 **사용자 결정 대기** — R11(Media Reception Notification) · Windows 영상 엔진 F3(openh264 디코드·렌더 — 없으면 관제 Windows 는 영상 칸 자리 표시만) · SDK 송출자별 렌더 창
 (관제 다중 스트림 전제) · 관제사 자동 수신(TS 22.281 §5.2.7.1) · D6 «소리 겹침» 설정 항목화(R-8.3-003) · Linux 엔진 영상(openh264 — 영상 RTP·PLI 자동 시험) ·
 pjsua `on_send_request` 무효 계정 가드 · V7 의 .45 배포 시점 · M4(협력업체 APK 전달 포함) 시점.
+
+## 13. MCVideo — 관제 앱 짝의 서버 과제 (Windows → .45)
+
+Windows PC 가 관제 앱의 MCVideo 몫(W1' SDK 재빌드·시험 · W4 그룹 편집 «서비스» 절 · W5 영상 채널 — D8·D10~D12 확정 규칙)을 넣었다 — 화면 규약 정본
+[dispatch_desktop_ui.md](../design/features/dispatch_desktop_ui.md) §10, 결과 [dispatch_windows_next.md](dispatch_windows_next.md) §7. 관제 앱은 서버 무변경으로 동작한다.
+관제사 동선을 따라가며 서버에 기대는 곳만 넘긴다(규격 절을 먼저 확인할 것 — CLAUDE.md 설계 우선순위 1).
+
+| # | 과제 | 관제사가 겪는 것 | 근거 · 메모 |
+|---|---|---|---|
+| X1 | **관제석 회선의 N6**(동시 MCVideo 호 상한) | D10 으로 관제 앱은 내 채널의 영상 채널(chat) **전부**에 영상 호를 상시 든다. 기본 `max_calls_n6` 1 이면 둘째 채널부터 486 103 이라, 앱은 user profile N6 만큼 카드 순서로만 합류하고 나머지 영상 절에 «동시 영상 호 한도(N6 = 1)가 찼습니다» 를 띄운다 | 관제석 PTT 회선은 N6 ≥ 영상 채널 수(콘솔 A6 «MCVideo 이용 자격» 동시 영상 호 1~16). 16 을 넘는 관제석이 있으면 CSC 상한(`PROFILE_LIMITS`)을 다시 본다. 운영 가이드에 한 줄 |
+| X2 | **관제석 상시 합류의 자원** | 관제석 n 개 × 영상 채널 m 개만큼 영상 호가 상시 선다 — CMP 멤버 유닛(6 포트, .48 풀 40)·CSP 세션. 편성 그룹도 초대 자동 수락으로 같다 | 규모 검토(풀 크기·`McVideoMemberPoolSize`). 수신 RTP 는 [보기] 한 1개뿐이라 대역은 작다 |
+| X3 | **T11 과 수동 수신의 시한** | 송출자가 보내기 시작해 아무도 10초(T11 Stream Reception Idle — service config 기본, TS 24.581 §6.3.4.4.13) 안에 [보기] 하지 않으면 서버가 송출을 끝낸다(#8). 관제 앱은 «새 영상» 배너로 바로 넘긴다 | 사이트 운용값(`McVideoServiceConfig.*` T11)을 정할 때 관제 동선을 본다. 관제사 자동 보기(TS 22.281 §5.2.7.1)는 사용자 결정 대기(W6 와 함께) |
+| X4 | **영상 녹취의 이력 노출**(R3 짝) | [이력] PTT 세션 카드에 영상 세션을 «영상» 칩으로 두고 세그먼트를 영상으로 재생하려면 이력 항목·녹취 메타에 서비스(`mcvideo`)와 영상 트랙이 있어야 한다 | `/provisioning/history?kind=ptt` 항목에 서비스 축(D5 추천 — `service: mcvideo`) · `/provisioning/recordings/*` 세그먼트 트랙 `kind: video`(MP4 영상 트랙). 앱 재생기는 MediaElement 라 영상 MP4 를 그대로 그린다 |
+| X5 | **영상 세션 이벤트의 이력 피드**(R4 짝) | 관제 범위 안 타인의 영상 채널 송출 시작·끝이 «이벤트» 에 오지 않는다(관제사가 든 영상 채널만 로컬 줄) | `/provisioning/history` 의 `event` 이름표에 `mcvideo.session.start/end`·`mcvideo.transmit` 류 — 이름은 서버가 정하고 앱이 사전에 더한다 |
+| X6 | N2 집행(R7) 과 관제석 | affiliation 수 한도가 걸리면 그룹이 많은 관제석의 MCVideo affiliation 일부가 거절된다 | 거절 응답(TS 24.281 §8.2.2.2 — 코드·Warning)을 정하면 앱이 영상 절에 알린다 |
+| X7 | 관리 목록의 서비스 표시 | [PTT 그룹] 목록 행의 «영상» 칩은 관리 목록(`/provisioning/directory/groups`)에 서비스가 없어 내 영상 채널·열어 본 그룹 문서로만 단다 | 목록 항목에 `mcvideo: true`(또는 `services: ["mcptt","mcvideo"]`) 한 필드 |
+| X8 | 관제 관리 화면의 MCVideo 자격 | 관제 앱 [관리](F4, `/provisioning/directory/*`)에서는 구성원 PTT 회선의 MCVideo 자격·N6 을 못 바꾼다(콘솔 A6 만) | 필요하면 directory API 에 `mcvideo` 자격(admin_api §5.4 와 같은 모양). 1차는 콘솔 몫으로 둬도 된다 |
+
+- **엔진(F3 — 사용자 결정 10-01: 다음 Windows 세션에서 착수, 영상 표시·송출)** — 관제 앱의 영상 칸은 Windows 엔진 영상(F3)이 있어야 그린다. 방식 = ue_sdk.md §6
+  «영상» 행(OpenH264 + DSHOW + CIMS 콜백 렌더 장치 → `onVideoFrame`) — C API·.NET 프레임 이벤트 표면은 .45 코어와 맞춘다([dispatch_windows_next.md](dispatch_windows_next.md) §4). 그 전에는 «이 PC 에서는 영상을 표시할 수 없습니다(영상 엔진 준비 중) — 영상 호
+  소리는 들립니다» 자리다(`CallInfo.Video` 로 판정). 영상 벽(W6)은 SDK 송출자별 렌더 창 뒤.
+- **확인(Windows, W1')** — d1685a78 까지(b2a45e36 D6 · 6e9edd3a `setMuted` MCVideo 음성만) Windows 재빌드: `cimsue_test` 144/144 · `CimsUe.Tests` 85/85. 리눅스 149 와의 차 5건 =
+  `FloorXCheck.*`(floor_xcheck_test.cpp — CMP `PFloorCodec` 이 pasf(pthread·semaphore)를 끌어 리눅스 전용, sdk/core/CMakeLists.txt). C API·헤더 변화 없음 → 앱 무변경.

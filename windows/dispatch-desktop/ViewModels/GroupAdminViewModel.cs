@@ -26,6 +26,8 @@ public sealed partial class GroupAdminRow : ObservableObject
     public bool IsMemberRelation => G.IsMember;
     /// <summary>소유자 열 — 목록엔 소유 여부만 있어 내 것은 "이름(나)", 나머지는 상세(문서 GET)가 채운다.</summary>
     [ObservableProperty] private string _ownerText = "";
+    /// <summary>서비스 칩 «영상»(§10.6) — MCVideo 그룹으로 알려진 행. 관리 목록에는 서비스가 없어 내 영상 채널(user profile)·열어 본 그룹 문서로만 안다.</summary>
+    [ObservableProperty] private bool _isVideo;
     /// <summary>그룹 종류 — 모르면(관리 범위 없이 GMS 목록만) 빈 값.</summary>
     public string SessionTypeText => G.SessionType switch { "chat" => "채팅", "" => "", _ => "사전편성" };
     /// <summary>GroupEditViewModel 이 받는 항목 — 목록 ETag 는 편집 폼이 문서 GET 으로 다시 받는다.</summary>
@@ -78,8 +80,11 @@ public sealed partial class GroupAdminViewModel : ObservableObject
     public string DetailOwner => DetailDoc is null ? "" : OwnerLabel(DetailDoc.AuthorizedUser);
     public string DetailOrg => Selected is null ? "" : (Selected.OrgPath.Length > 0 ? Selected.OrgPath : "—");
     public string DetailPolicy => DetailDoc is null ? "" : $"우선순위 {DetailDoc.Priority} · 긴급 {(DetailDoc.EmergencyCall ? "허용" : "불가")} · {(DetailDoc.SessionType == "chat" ? "채팅" : "사전편성")}";
-    public string DetailCapability => DetailDoc is null ? "" : string.Join(" · ", new[] { DetailDoc.AllowSds ? "SDS" : "", DetailDoc.AllowFd ? "FD" : "", DetailDoc.VideoEnabled ? "영상" : "", DetailDoc.Encryption ? "암호화" : "", DetailDoc.RequireAffiliation ? "affiliation 필요" : "" }.Where(x => x.Length > 0));
+    public string DetailCapability => DetailDoc is null ? "" : string.Join(" · ", new[] { DetailDoc.AllowSds ? "SDS" : "", DetailDoc.AllowFd ? "FD" : "", DetailDoc.VideoEnabled ? "PTT 영상(현행)" : "", McVideoText(DetailDoc.Mcvideo), DetailDoc.Encryption ? "암호화" : "", DetailDoc.RequireAffiliation ? "affiliation 필요" : "" }.Where(x => x.Length > 0));
     public string DetailListenVisibility => _s.ListenHidden ? "은닉" : "투명";
+    /// <summary>능력 줄의 MCVideo 몫(§10.6) — "MCVideo chat · 송출 2" / "MCVideo 편성 · 송출 2", MCVideo 그룹이 아니면 빈 값.</summary>
+    private static string McVideoText(CimsUe.McVideoGroupAttrs? a) => a is null ? ""
+        : $"MCVideo {(a.InviteMembers ? "편성" : "chat")}" + (a.MaxTransmitters is int n ? $" · 송출 {n}" : "");
     public bool DetailHasSession => Selected is not null && _s.Groups.FirstOrDefault(g => g.Id == Selected.Id)?.HasSession == true;
     public int DetailAffiliated => DetailMembers.Count(m => !m.IsAbsent);
     public string DetailMemberCount => $"멤버 {DetailMembers.Count}";
@@ -113,6 +118,9 @@ public sealed partial class GroupAdminViewModel : ObservableObject
     }
     [RelayCommand] private void SetFilter(string f) => ListFilter = f;
     [RelayCommand] private void GoToChannel() { if (Selected is not null) ChannelRequested?.Invoke(this, Selected.Id); }
+
+    /// <summary>문서로 확인한 MCVideo 그룹 — 목록을 다시 받아도 «영상» 칩을 잇는다.</summary>
+    private readonly HashSet<string> _videoKnown = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>목록이 오기 전에 들어온 선택 요청(밖에서 그룹 id 로 연 상세) — <see cref="Filter"/> 가 소비한다.</summary>
     private string _pendingSelect = "";
@@ -154,11 +162,18 @@ public sealed partial class GroupAdminViewModel : ObservableObject
         if (!r.Ok) { DetailError = ResponseText.Describe(ResponseText.Area.Group, r.Code, r.Reason); return; }
         DetailDoc = r.Value;
         row.OwnerText = OwnerLabel(r.Value.AuthorizedUser);
+        row.IsVideo = r.Value.Mcvideo is not null;
+        if (row.IsVideo) _videoKnown.Add(row.Id); else _videoKnown.Remove(row.Id);
         RefreshDetailMembers();
     }
 
-    /// <summary>로스터·발언 변화를 상세에 반영 — 1초 틱(MainViewModel.Tick)에서 호출.</summary>
-    public void Tick() { if (Selected is not null && DetailDoc is not null) RefreshDetailMembers(); }
+    /// <summary>로스터·발언 변화를 상세에 반영 — 1초 틱(MainViewModel.Tick)에서 호출. 서비스 칩 «영상» 도 다시 판정한다(영상 채널 목록은 로그인 뒤 user profile 이 정한다).</summary>
+    public void Tick()
+    {
+        if (Selected is not null && DetailDoc is not null) RefreshDetailMembers();
+        foreach (var r in Groups) r.IsVideo = IsVideoGroup(r.Id);
+    }
+    private bool IsVideoGroup(string id) => _s.Groups.Any(x => x.Id == id && x.McVideo) || _videoKnown.Contains(id);
 
     private void RefreshDetailMembers()
     {
@@ -216,15 +231,16 @@ public sealed partial class GroupAdminViewModel : ObservableObject
     private void Filter()
     {
         string keep = Selected?.Id ?? "";
+        var owners = Groups.ToDictionary(x => x.Id, x => x.OwnerText);      // 상세가 채운 소유자 표시는 재필터 뒤에도 유지(지우기 전에 읽는다)
         Groups.Clear();
         string q = Search.Trim();
-        var owners = Groups.ToDictionary(x => x.Id, x => x.OwnerText);      // 상세가 채운 소유자 표시는 재필터 뒤에도 유지
         foreach (var g in _all)
         {
             if (ListFilter == "member" && !g.IsMember) continue;
             if (ListFilter == "mine" && !g.IsOwner) continue;
             if (q.Length > 0 && !g.Name.Contains(q, StringComparison.OrdinalIgnoreCase) && !g.Id.Contains(q, StringComparison.OrdinalIgnoreCase)) continue;
-            Groups.Add(new GroupAdminRow(g, g.OrgCode.Length > 0 ? _s.Directory.OrgPath(g.OrgCode) : "", g.IsOwner ? $"{_s.DisplayName}(나)" : owners.GetValueOrDefault(g.Id, "")));
+            Groups.Add(new GroupAdminRow(g, g.OrgCode.Length > 0 ? _s.Directory.OrgPath(g.OrgCode) : "", g.IsOwner ? $"{_s.DisplayName}(나)" : owners.GetValueOrDefault(g.Id, ""))
+                       { IsVideo = IsVideoGroup(g.Id) });
         }
         OnPropertyChanged(nameof(TotalCount));
         // 밖에서 지목한 그룹이 먼저다 — 그것이 목록에 있으면 «보던 것 유지» 보다 앞선다.

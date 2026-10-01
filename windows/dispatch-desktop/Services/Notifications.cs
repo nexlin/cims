@@ -21,7 +21,7 @@ public sealed partial class Toast : ObservableObject
     public bool IsWarn => Level == ToastLevel.Warn;
 }
 
-public enum BannerKind { PilotIncoming, DirectIncoming, PttPrivateIncoming, Emergency, ImminentPeril, Alert, ServerCert, Credential }
+public enum BannerKind { PilotIncoming, DirectIncoming, PttPrivateIncoming, Emergency, ImminentPeril, Alert, ServerCert, Credential, Video }
 
 /// <summary>착신 배너(세션 1개) · 긴급 배너(그룹 1개) · 서버 인증서 만료 배너(세션당 1개, sip_tls_signaling.md §8.6.2) — 스택(최신 위).
 /// 배너 층은 상단 바 아래 공통이라 관제를 포함한 어느 화면에서나 보인다(§3.2). 긴급·임박은 꽉 찬 면·닫기 없음, 착신은 옅은 면 [응답][거절].</summary>
@@ -34,6 +34,8 @@ public sealed partial class Banner : ObservableObject
     public string GroupId { get; init; } = "";
     /// <summary>긴급 경보 배너의 경보 발신자(bare MCPTT ID) — 같은 그룹·같은 발신자의 취소(TS 24.379 §12.1.1.3)로 내린다.</summary>
     public string AlertUser { get; init; } = "";
+    /// <summary>«새 영상» 배너의 송출자 MCVideo ID(§10.3) — [받기] 의 AcceptReception 인자. 받거나·송출이 끝나거나·다른 송출을 보기 시작하면 내린다.</summary>
+    public string Transmitter { get; init; } = "";
     /// <summary>배너의 [해제] — 긴급·임박 = 조건 하향(내가 올린 조건·내 소유 그룹, TS 24.379 §10.1.1.2.1.5), 경보 = 경보 취소(allow-cancel-emergency-alert,
     /// 남의 경보면 제3자 취소 §12.1.1.2 4)e)). 세션 조건·자격이 바뀌면 갱신된다.</summary>
     [ObservableProperty] private bool _canCancel;
@@ -49,6 +51,12 @@ public sealed partial class Banner : ObservableObject
     public bool IsEmg => Kind == BannerKind.Emergency;
     public bool IsPeril => Kind == BannerKind.ImminentPeril;
     public bool IsAlert => Kind == BannerKind.Alert;
+    /// <summary>MCVideo 새 송출 알림(TS 24.581 §6.2.5.3.2) — 옅은 청록 면 [받기][닫기](§10.3).</summary>
+    public bool IsVideo => Kind == BannerKind.Video;
+    /// <summary>[닫기] — 경보(로컬 표시만 내림)·새 영상(배너만 내림, 송출 목록은 채널 상세에 남는다).</summary>
+    public bool ShowDismiss => IsAlert || IsVideo;
+    public string DismissTip => IsVideo ? "배너만 내린다 — 채널 상세 «영상 n» 목록에서 다시 [보기] 할 수 있다(TS 22.281 R-5.2.6.2.2-009)"
+                              : "이 화면의 경보 표시만 내린다 — 서버의 경보는 그대로(취소 신호를 놓쳤을 때)";
     public string CancelText => IsAlert ? "경보 해제" : "긴급 해제";
     public bool IsServerCert => Kind == BannerKind.ServerCert;
     /// <summary>경고 계열(서버 인증서 만료·자격 갱신 실패) — 같은 시각 처리(경고 아이콘 + 빨강 계열, 경과 숨김)를 받는다.</summary>
@@ -89,6 +97,8 @@ public sealed class Notifications
     public Banner? BannerOfGroup(string groupId) => Banners.FirstOrDefault(b => b.Kind is BannerKind.Emergency or BannerKind.ImminentPeril && b.GroupId == groupId);
     public Banner? BannerOfAlert(string groupId, string user) => Banners.FirstOrDefault(b => b.IsAlert && b.GroupId == groupId && b.AlertUser == user);
     public Banner? BannerOfKind(BannerKind kind) => Banners.FirstOrDefault(b => b.Kind == kind);
+    /// <summary>그룹 영상 호의 «새 영상» 배너(호당 하나).</summary>
+    public Banner? VideoBannerOf(SessionItem s) => Banners.FirstOrDefault(b => b.IsVideo && b.Session == s);
     /// <summary>응답 핫키 대상 = 최상단 착신.</summary>
     public Banner? TopIncoming => Banners.FirstOrDefault(b => b.IsIncoming);
 

@@ -68,6 +68,14 @@ public sealed partial class GroupEditViewModel : ObservableObject
     public const int MaxSdsSizeDefault = 10000, MaxAutoRecvDefault = 1048576;
     public const int MinNumberToStartMax = 65535;
     public const int AckTimeoutDefault = 5, AckTimeoutMax = 300;
+    // MCVideo 속성(TS 24.481 §7.2.2) — 범위·기본값은 서버(csc services/mcvideo.py GROUP_ATTR_DEFAULTS·validate_attrs)와 같다.
+    public const int McvMaxTransmittersDefault = 2, McvMaxTransmittersMax = 16;
+    public const int McvMaxDurationDefault = 3600, McvReceptionHangDefault = 30, McvReceptionHangMax = 3600;
+    /// <summary>MCVideo 호 방식(mcvideo-on-network-invite-members) — 값, 표시. 기본 chat(mcvideo.md D5).</summary>
+    public IReadOnlyList<KeyValuePair<string, string>> McVideoTypes { get; } = new[]
+    {
+        new KeyValuePair<string, string>("chat", "chat — 원하는 사람이 합류"), new KeyValuePair<string, string>("prearranged", "편성 — 제휴 멤버를 초대"),
+    };
     /// <summary>열 때 받은 문서(신규 = null) — 미기재 칸 판정.</summary>
     private GroupDoc? _read;
 
@@ -94,6 +102,25 @@ public sealed partial class GroupEditViewModel : ObservableObject
     [ObservableProperty] private int _minNumberToStart;
     [ObservableProperty] private int _ackTimeoutSec = AckTimeoutDefault;
     [ObservableProperty] private string _ackAction = "abandon";
+    // MCVideo 그룹 영상(§10.6) — 켜기 = GroupDoc.Mcvideo 객체, 끄기는 이 앱에서 못 한다(서버가 MCVideo <service> 없는 PUT 을 «그대로 둠» 으로 읽는 전환기, mcvideo.md §5.1).
+    [ObservableProperty] private bool _mcVideo;
+    /// <summary>읽은 문서에서 이미 켜져 있었다 — 스위치를 잠근다(끄기는 콘솔).</summary>
+    [ObservableProperty] private bool _mcVideoLocked;
+    [ObservableProperty] private string _mcVideoType = "chat";
+    [ObservableProperty] private int _mcVideoMaxTransmitters = McvMaxTransmittersDefault;
+    [ObservableProperty] private int _mcVideoMaxDurationSec = McvMaxDurationDefault;
+    [ObservableProperty] private int _mcVideoReceptionHangSec = McvReceptionHangDefault;
+    [ObservableProperty] private int _mcVideoMinNumberToStart;
+    /// <summary>mcvideo-on-network-group-priority 0~255 — 빈 값 = 미기재(가장 낮음).</summary>
+    [ObservableProperty] private string _mcVideoGroupPriority = "";
+    [ObservableProperty] private bool _mcVideoAllowConferenceState = true;
+    /// <summary>열 때 받은 MCVideo 몫(없으면 null) — 폼에 없는 값(코덱·해상도·실시간 모드·규칙 action)을 되돌린다.</summary>
+    private McVideoGroupAttrs? _readMcVideo;
+    public bool CanToggleMcVideo => !McVideoLocked;
+    public string McVideoTip => McVideoLocked
+        ? "끄기는 운영 콘솔에서 — 이 앱의 저장(XCAP PUT)은 MCVideo 를 끄지 못합니다(서버 전환기 — MCVideo 서비스가 없는 PUT 은 그대로 둔다)"
+        : "켜면 이 그룹이 MCVideo 그룹이 된다(TS 24.481 §7.2.2) — 멤버는 같은 그룹에서 음성 무전과 따로 영상 호를 연다";
+    partial void OnMcVideoLockedChanged(bool value) { OnPropertyChanged(nameof(CanToggleMcVideo)); OnPropertyChanged(nameof(McVideoTip)); }
     [ObservableProperty] private string _search = "";
     [ObservableProperty] private string _error = "";
     [ObservableProperty] private bool _busy;
@@ -156,6 +183,15 @@ public sealed partial class GroupEditViewModel : ObservableObject
         MaxSdsSize = d.MaxSdsSize ?? MaxSdsSizeDefault; MaxAutoRecv = d.MaxAutoRecv ?? MaxAutoRecvDefault;
         MinNumberToStart = d.MinNumberToStart ?? 0; AckTimeoutSec = d.AckTimeoutSec ?? AckTimeoutDefault;
         AckAction = d.AckAction is "proceed" ? "proceed" : "abandon";
+        _readMcVideo = d.Mcvideo;
+        McVideo = McVideoLocked = d.Mcvideo is not null;
+        if (d.Mcvideo is { } mv)
+        {
+            McVideoType = mv.InviteMembers ? "prearranged" : "chat";
+            McVideoMaxTransmitters = mv.MaxTransmitters ?? McvMaxTransmittersDefault; McVideoMaxDurationSec = mv.MaxDurationSec ?? McvMaxDurationDefault;
+            McVideoReceptionHangSec = mv.ReceptionHangTimerSec ?? McvReceptionHangDefault; McVideoMinNumberToStart = mv.MinNumberToStart ?? 0;
+            McVideoGroupPriority = mv.GroupPriority?.ToString() ?? ""; McVideoAllowConferenceState = mv.AllowConferenceState ?? true;
+        }
         Members.Clear();
         foreach (var m in d.Members) AddMember(m.Uri, m.Name, m.Role == "chair", m.Required, m.Priority);
         Loaded = true;
@@ -208,6 +244,23 @@ public sealed partial class GroupEditViewModel : ObservableObject
     [RelayCommand] private void ToggleChair(GroupMemberRow m) => m.IsChair = !m.IsChair;
     [RelayCommand] private void ToggleRequired(GroupMemberRow m) => m.Required = !m.Required;
 
+    /// <summary>MCVideo 몫 — 읽은 것(없으면 새것)에 폼 값을 얹는다. 보호 둘은 false 명시(요소가 없으면 true 로 읽힌다 — TS 24.481 §7.2.8, mcvideo.md D7).
+    /// 새로 켜는 그룹의 코덱은 서버 기본값(AMR-WB · H264)을 싣는다.</summary>
+    private McVideoGroupAttrs BuildMcVideo()
+    {
+        var r = _readMcVideo;
+        var a = r ?? new McVideoGroupAttrs { AudioEncodings = new() { "AMR-WB" }, VideoEncodings = new() { "H264" } };
+        a.ProtectMedia = false; a.ProtectTransmissionControl = false;
+        a.InviteMembers = McVideoType == "prearranged";
+        a.MaxTransmitters = WithUnset(r?.MaxTransmitters, Math.Clamp(McVideoMaxTransmitters, 1, McvMaxTransmittersMax), McvMaxTransmittersDefault);
+        a.MaxDurationSec = WithUnset(r?.MaxDurationSec, Math.Clamp(McVideoMaxDurationSec, 0, MaxDurationMax), McvMaxDurationDefault);
+        a.ReceptionHangTimerSec = WithUnset(r?.ReceptionHangTimerSec, Math.Clamp(McVideoReceptionHangSec, 0, McvReceptionHangMax), McvReceptionHangDefault);
+        a.MinNumberToStart = WithUnset(r?.MinNumberToStart, Math.Clamp(McVideoMinNumberToStart, 0, MinNumberToStartMax), 0);
+        a.GroupPriority = int.TryParse(McVideoGroupPriority.Trim(), out int gp) ? Math.Clamp(gp, 0, 255) : null;
+        a.AllowConferenceState = r?.AllowConferenceState is null && McVideoAllowConferenceState ? null : McVideoAllowConferenceState;
+        return a;
+    }
+
     /// <summary>문서에 없던 칸(read = null)이 기본값 그대로면 미기재(null) — 폼을 연 것만으로 서버 값을 명시값으로 굳히지 않는다.</summary>
     private static int? WithUnset(int? read, int value, int dflt) => read is null && value == dflt ? null : value;
     [RelayCommand] private void Cancel() => Cancelled?.Invoke(this, EventArgs.Empty);
@@ -230,6 +283,7 @@ public sealed partial class GroupEditViewModel : ObservableObject
             MinNumberToStart = WithUnset(_read?.MinNumberToStart, Math.Clamp(MinNumberToStart, 0, MinNumberToStartMax), 0),
             AckTimeoutSec = WithUnset(_read?.AckTimeoutSec, Math.Clamp(AckTimeoutSec, 1, AckTimeoutMax), AckTimeoutDefault),
             AckAction = _read?.AckAction is null && AckAction == "abandon" ? null : AckAction,
+            Mcvideo = McVideo ? BuildMcVideo() : null,
         };
         foreach (var m in Members)
             doc.Members.Add(new GroupMember { Uri = m.Uri, Name = m.Name, Role = m.IsChair ? "chair" : "participant", Priority = m.Priority,

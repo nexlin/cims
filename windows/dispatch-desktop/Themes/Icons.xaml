@@ -40,6 +40,10 @@
     <Geometry x:Key="Icon.DotsV">M12,3.1 A1.9,1.9 0 1 0 12,6.9 A1.9,1.9 0 1 0 12,3.1 Z M12,10.1 A1.9,1.9 0 1 0 12,13.9 A1.9,1.9 0 1 0 12,10.1 Z M12,17.1 A1.9,1.9 0 1 0 12,20.9 A1.9,1.9 0 1 0 12,17.1 Z</Geometry>
     <Geometry x:Key="Icon.DotsH">M5,10.1 A1.9,1.9 0 1 0 5,13.9 A1.9,1.9 0 1 0 5,10.1 Z M12,10.1 A1.9,1.9 0 1 0 12,13.9 A1.9,1.9 0 1 0 12,10.1 Z M19,10.1 A1.9,1.9 0 1 0 19,13.9 A1.9,1.9 0 1 0 19,10.1 Z</Geometry>
     <Geometry x:Key="Icon.Keypad">M6,3.2 A1.8,1.8 0 1 0 6,6.8 A1.8,1.8 0 1 0 6,3.2 Z M12,3.2 A1.8,1.8 0 1 0 12,6.8 A1.8,1.8 0 1 0 12,3.2 Z M18,3.2 A1.8,1.8 0 1 0 18,6.8 A1.8,1.8 0 1 0 18,3.2 Z M6,9.2 A1.8,1.8 0 1 0 6,12.8 A1.8,1.8 0 1 0 6,9.2 Z M12,9.2 A1.8,1.8 0 1 0 12,12.8 A1.8,1.8 0 1 0 12,9.2 Z M18,9.2 A1.8,1.8 0 1 0 18,12.8 A1.8,1.8 0 1 0 18,9.2 Z M6,15.2 A1.8,1.8 0 1 0 6,18.8 A1.8,1.8 0 1 0 6,15.2 Z M12,15.2 A1.8,1.8 0 1 0 12,18.8 A1.8,1.8 0 1 0 12,15.2 Z M18,15.2 A1.8,1.8 0 1 0 18,18.8 A1.8,1.8 0 1 0 18,15.2 Z M12,20.5 A1.5,1.5 0 1 0 12,23.5 A1.5,1.5 0 1 0 12,20.5 Z</Geometry>
+    <!-- 영상 회전(§10.3) — 시계 방향 · 반시계 방향 90° (Lucide rotate-cw / rotate-ccw) · 단말 윤곽(위쪽 막대 = 카메라 쪽) -->
+    <Geometry x:Key="Icon.RotateCw">M21,12 A9,9 0 1 1 12,3 C14.52,3 16.93,4 18.74,5.74 L21,8 M21,3 V8 H16</Geometry>
+    <Geometry x:Key="Icon.RotateCcw">M3,12 A9,9 0 1 0 12,3 A9.75,9.75 0 0 0 5.26,5.74 L3,8 M3,3 V8 H8</Geometry>
+    <Geometry x:Key="Icon.Device">M7,2 H17 A2,2 0 0 1 19,4 V20 A2,2 0 0 1 17,22 H7 A2,2 0 0 1 5,20 V4 A2,2 0 0 1 7,2 Z M10,5 H14</Geometry>
     <Geometry x:Key="Icon.Folder">M20,20 A2,2 0 0 0 22,18 V8 A2,2 0 0 0 20,6 H12.1 A2,2 0 0 1 10.4,5.1 L9.6,3.9 A2,2 0 0 0 7.9,3 H4 A2,2 0 0 0 2,5 V18 A2,2 0 0 0 4,20 Z</Geometry>
 
     <!-- 14px 스트로크 아이콘. 크기는 Width/Height 로 덮어쓴다(12·16·18). 색 = 주변 글자색 -->
@@ -83,6 +87,26 @@
                             <Setter Property="Foreground" Value="{DynamicResource Brush.Text}" />
                         </Trigger>
                         <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.4" /></Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+    <!-- 영상 위 아이콘 버튼(§10.3 회전 등) — 어두운 영상 칸 위라 테마와 무관하게 반투명 검정 면 + 흰 아이콘 -->
+    <Style TargetType="Button" x:Key="VideoOverlayBtn" BasedOn="{StaticResource IconBtn}">
+        <Setter Property="Width" Value="30" />
+        <Setter Property="Height" Value="30" />
+        <Setter Property="Foreground" Value="White" />
+        <Setter Property="Background" Value="#B3101317" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="6" BorderThickness="1" BorderBrush="#665B6570">
+                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Bd" Property="Background" Value="#E6101317" /></Trigger>
+                        <Trigger Property="IsPressed" Value="True"><Setter TargetName="Bd" Property="Background" Value="#FF2A2F35" /></Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
             </Setter.Value>

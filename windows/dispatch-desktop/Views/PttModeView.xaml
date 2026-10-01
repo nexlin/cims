@@ -49,6 +49,14 @@
                                 <Border Style="{StaticResource Tag.Ink}" Visibility="{Binding IsBroadcast, Converter={StaticResource BoolToVis}}" ToolTip="일제 통화 — 개시자만 발언하고 나머지는 듣습니다"><TextBlock Text="일제" /></Border>
                                 <Border Style="{StaticResource Tag.Emg}" Visibility="{Binding IsEmergency, Converter={StaticResource BoolToVis}}"><TextBlock Text="긴급" /></Border>
                                 <Border Style="{StaticResource Tag.Peril}" Visibility="{Binding IsImminentPeril, Converter={StaticResource BoolToVis}}"><TextBlock Text="임박" /></Border>
+                                <!-- 영상 채널에 누가 영상을 보내는 중(§10.3) — «영상 n», 보고 있으면 굵게 -->
+                                <Border Style="{StaticResource Tag.Listen}" Margin="4,0,0,0" ToolTip="{Binding VideoTip}" Visibility="{Binding HasVideoTag, Converter={StaticResource BoolToVis}}">
+                                    <TextBlock Text="{Binding VideoLabel}">
+                                        <TextBlock.Style>
+                                            <Style TargetType="TextBlock"><Style.Triggers><DataTrigger Binding="{Binding IsVideoReceiving}" Value="True"><Setter Property="FontWeight" Value="Bold" /></DataTrigger></Style.Triggers></Style>
+                                        </TextBlock.Style>
+                                    </TextBlock>
+                                </Border>
                             </StackPanel>
                         </DockPanel>
                         <TextBlock x:Name="Sub" Text="{Binding SubLine}" FontSize="13" Margin="16,1,0,0" Foreground="{DynamicResource Brush.TextSoft}" TextTrimming="CharacterEllipsis" />

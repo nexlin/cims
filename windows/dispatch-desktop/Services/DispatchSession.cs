@@ -98,6 +98,8 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
         Engine.EmergencyAlertReceived += (_, a) => OnEmergencyAlert(a);
         Engine.NonAcknowledgedUsersReceived += (_, c) => OnNonAcknowledged(c);
         Engine.RosterChanged += (_, r) => OnRoster(r);
+        Engine.TransmissionChanged += (_, e) => OnTransmission(e);       // MCVideo 송출·수신 제어(§10, TS 24.581 §6.2.4·§6.2.5)
+        Engine.ReceptionChanged += (_, e) => OnReception(e);
         Engine.DialogInfoReceived += (_, d) => OnDialog(d);
         Engine.SdsReceived += (_, m) => SdsReceived?.Invoke(this, m);
         Engine.MessageReceived += (_, m) => { SipMessageReceived?.Invoke(this, m); OnSipMessage(m); };
@@ -440,8 +442,13 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
             var ui = await _csc.FetchUeInitConfigAsync(instanceId, _ueInit?.ETag);
             if (ui.Ok) { if (!ui.Value.NotModified) _ueInit = ui.Value; }
             else Log.Warn($"ue-init-config: {ui}");
-            Log.Info($"ue-init-config mcptt={_ueInit?.McpttServerUri} mcdata={_ueInit?.McdataServerUri}");
+            Log.Info($"ue-init-config mcptt={_ueInit?.McpttServerUri} mcdata={_ueInit?.McdataServerUri} mcvideo={_ueInit?.McvideoServerUri}");
         }
+        // MCVideo(§10.2) — 사이트가 MCVideo PSI 를 광고하고(ue-init-config, TS 24.484 §7.2.2.1) 이용 자격(MCVideo user profile §9.3)이 있을 때만
+        //   PTT 계정에 싣는다. 계정 태그는 로그인 때 한 번 — 자격이 뒤에 바뀌면 다음 로그인에 반영된다.
+        _mcvideoProfile = null;
+        if (PttService is not null && McVideoPsi.Length > 0) await RefreshMcVideoProfileAsync();
+        McVideoEnabled = McVideoPsi.Length > 0 && _mcvideoProfile is not null;
 
         foreach (var sp in toRegister)
         {
@@ -458,6 +465,13 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
                 {
                     if (ui.McpttServerUri.Length > 0) cfg.McpttServerUri = ui.McpttServerUri;
                     if (ui.McdataServerUri.Length > 0) cfg.McdataServerUri = ui.McdataServerUri;
+                }
+                // MCVideo — REGISTER Contact 태그(TS 24.281 §7.2.1AA) · 참여 기능 PSI · prearranged 초대 자동 합류(영상 보기는 따로 [받기])
+                if (McVideoEnabled)
+                {
+                    cfg.McvideoEnabled = true;
+                    cfg.McvideoServerUri = McVideoPsi;
+                    cfg.AutoAnswerMcvideo = true;
                 }
                 // Resource-Priority 정본 = service-config on-network *-resource-priority(TS 24.379 §6.2.8.1.15) — 문서에 없으면 코어 기본값
                 if (_serviceConfig is { } sc)
@@ -516,6 +530,7 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
         var sc = await csc.FetchServiceConfigAsync(token, MyPttId, _serviceConfig?.ETag);
         if (sc.Ok) { if (!sc.Value.NotModified) _serviceConfig = sc.Value; }
         else Log.Warn($"cms service-config: {sc}");
+        if (McVideoEnabled) await RefreshMcVideoProfileAsync();      // 영상 그룹 목록(§10.2) — 같은 5분 주기
         var caps = Capabilities.Of(_userProfile, _serviceConfig);
         if (caps != Capabilities)
         {
@@ -635,6 +650,8 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
         foreach (var gone in Groups.Where(x => x.IsMember && !seen.Contains(x.Id)).ToList())
         {
             ptt.Affiliate(gone.Id, false);
+            if (gone.McVideo) LeaveVideoChannel(gone);                // 내 채널에서 빠졌다 = 영상 채널도 나간다(D10)
+            if (gone.McVideoAffiliated) ptt.Affiliate(gone.Id, false, McService.McVideo);
             ptt.SubscribeConference(gone.Id, false);
             Groups.Remove(gone);
             goneIds.Add(gone.Id);
@@ -661,6 +678,8 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
             Groups.Remove(gone);
             Log.Info($"listen-scope group gone {gone.Id}");
         }
+        foreach (var g in Groups.Where(x => x.IsMember && x.VideoSession is null)) g.VideoSession = VideoOfGroup(g.Id);   // 새 GroupInfo 에 기존 영상 호를 먼저 잇는다(중복 합류 방지)
+        ApplyMcVideoGroups();                                    // 영상 채널 표시·MCVideo affiliation·합류(§10.2)
         Directory.SetGroups(Groups.Where(x => x.IsMember));
         Log.Info($"groups {Groups.Count(x => x.IsMember)} member ({Groups.Count(x => x.IsOwner)} owned), {Groups.Count(x => !x.IsMember)} listen-scope");
         return Result.Success;
@@ -811,6 +830,7 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
     /// <summary>등록 해제 → 토큰 폐기 → 초기 상태(로그인 창으로).</summary>
     public void Logout()
     {
+        ResetMcVideo();                                          // 영상 채널 — 재합류하지 않게 먼저
         foreach (var s in Sessions.ToList()) Engine.GetCall(s.CallId).Hangup();
         _history?.Dispose(); _history = null;
         Engine.Stop();
@@ -887,6 +907,7 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
         {
             _regRetryAt.Remove(r.AccountId); _regBackoff.Remove(r.AccountId);
             if (IsReady) UpdateServerCertBanner();                 // TLS 등록 = 새 핸드셰이크 = 관측 갱신 시점
+            if (kind == AccountKind.Ptt) EnsureVideoChannels();   // 영상 채널 합류(D10 — §10.2)는 PTT 등록 뒤
             return;
         }
         if (r.State == RegState.Failed)
@@ -952,6 +973,8 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
     {
         var s = Find(ci.CallId) ?? Create(ci, Operation.Incoming);
         s.Info = ci;
+        // MCVideo prearranged 초대(TS 24.281 §9.2.1.3)는 코어가 자동 수락한다 — 착신 배너가 아니라 그룹 «영상» 절이 받는다(§10.1)
+        if (s.IsMcVideo) { IncomingCall?.Invoke(this, s); return; }
         if (!ci.IsMcptt || ci.Mcptt.PrivateCall)
         {
             var kind = ci.IsMcptt ? BannerKind.PttPrivateIncoming : IsPilot(ci.CalledParty) ? BannerKind.PilotIncoming : BannerKind.DirectIncoming;
@@ -989,7 +1012,7 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
             s = Create(ci, op);
         }
         else { s.Info = ci; NoteAnswerState(s); }
-        if (ci.State != CallState.Incoming && Notify.BannerOf(s) is { } b) Notify.RemoveBanner(b);
+        if (ci.State != CallState.Incoming && Notify.BannerOf(s) is { IsVideo: false } b) Notify.RemoveBanner(b);   // «새 영상» 은 송출 투영이 내린다
         if (ci.State == CallState.Active && s.Kind == SessionKind.VolteCall && Settings.Current.AutoHoldOnAnswer)
             foreach (var other in VolteCalls.Where(o => o != s && o.IsActive).ToList()) Engine.GetCall(other.CallId).Hold();
         UpdateEmergencyBanner(s);
@@ -1054,7 +1077,9 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
             case SessionKind.VolteMonitor: Activity.Add(ActivityPanel.Call, ActivityKind.ListenStart, $"청취 시작 {s.Title}", number: s.PeerNumber); break;
             case SessionKind.PttChannel when op == Operation.Broadcast: Activity.Add(ActivityPanel.Ptt, ActivityKind.SessionStart, $"{s.Title} 일제 통화 개시"); break;
             case SessionKind.PttChannel when s.IsBroadcast: Activity.Add(ActivityPanel.Ptt, ActivityKind.SessionStart, $"{s.Title} 일제 통화", Directory.Label(ci.Mcptt.CallingUserId)); break;
+            case SessionKind.McVideo: OnVideoSessionAdded(s); break;
         }
+        if (s.Kind == SessionKind.PttChannel) ReapplyDuck(s);
         NoteAnswerState(s);
         SessionAdded?.Invoke(this, s);
         return s;
@@ -1071,7 +1096,7 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
 
     private string TitleOf(CallInfo ci)
     {
-        if (ci.IsMcptt && !ci.Mcptt.PrivateCall)
+        if ((ci.IsMcptt && !ci.Mcptt.PrivateCall) || ci.Service == McService.McVideo)
         {
             if (AdhocIdFactory.IsAdhoc(ci.GroupId)) return "애드혹 그룹";
             return Groups.FirstOrDefault(g => g.Id == ci.GroupId)?.Name ?? ci.GroupId;
@@ -1127,6 +1152,10 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
                 break;
             case SessionKind.PttChannel:
                 Activity.Add(ActivityPanel.Ptt, ActivityKind.SessionEnd, $"{s.Title} 세션 종료", dur.Trim(' ', '·'));
+                _ducked.Remove(s.CallId);
+                break;
+            case SessionKind.McVideo:
+                OnVideoSessionEnded(s, dur.Trim(' ', '·'));
                 break;
         }
         // 실패한 발신 동작의 사유(§9 사전) — 착신·정상 종료(BYE)는 제외
@@ -1744,6 +1773,7 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
         foreach (var s in Sessions) s.Tick(now);
         foreach (var d in Dialogs) d.Tick(now);
         Notify.Tick(now);
+        TickMcVideo(now);
         foreach (var (acc, at) in _regRetryAt.ToList())
             if (now >= at) { _regRetryAt.Remove(acc); Engine.GetAccount(acc).Register(); }
         if (now.Date != _lastPrune) { _lastPrune = now.Date; Activity.Prune(now); }   // 날짜가 바뀐 첫 틱 — 정각 틱을 놓쳐도 하루 밀리지 않게

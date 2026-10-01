@@ -143,6 +143,7 @@ public sealed partial class MainViewModel : ObservableObject
         };
         session.SessionChanged += (_, s) => { CallOriginate.RefreshPad(); AutoShow(s); };
         session.RosterChanged += (_, _) => Panel.Channel?.Refresh();
+        session.VideoChanged += (_, _) => Panel.Channel?.Refresh(rows: false);        // «영상» 절(§10.3) — 로스터 줄은 그대로
         session.Floor += (_, _) => Panel.Channel?.Refresh();
 
         // 전역 핫키
@@ -376,7 +377,7 @@ public sealed partial class MainViewModel : ObservableObject
     /// 거기 있다. 착신(링잉)·멤버 채널 합류·감청/청취는 배너·행만 바꾸고 화면을 옮기지 않는다.</summary>
     private void AutoShow(SessionItem s)
     {
-        if (s.IsListenLeg || s.Kind == SessionKind.PttChannel || _autoShown.Contains(s.CallId)) return;
+        if (s.IsListenLeg || s.Kind is SessionKind.PttChannel or SessionKind.McVideo || _autoShown.Contains(s.CallId)) return;   // 영상 호 = 그룹 «영상» 절(자동 합류 포함)
         bool placed = s.Info.Dir == CimsUe.CallDir.Outgoing && (s.IsOutgoing || s.IsActive);   // 발신·당겨받기·개별·애드혹
         bool answered = s.Info.Dir == CimsUe.CallDir.Incoming && s.IsActive;                  // 이 자리에서 받은 착신
         if (!placed && !answered) return;
@@ -416,7 +417,9 @@ public sealed partial class MainViewModel : ObservableObject
     /// <summary>배너 [긴급 해제]/[경보 해제] — 세션 조건 하향 또는 경보 취소(§3.2).</summary>
     [RelayCommand] private void CancelBanner(Banner b) => Session.CancelBanner(b);
     /// <summary>경보 배너 [닫기] — 로컬 표시만(취소 신호 유실 대비).</summary>
-    [RelayCommand] private void DismissBanner(Banner b) => Session.DismissAlert(b);
+    [RelayCommand] private void DismissBanner(Banner b) { if (b.IsVideo) Session.Notify.RemoveBanner(b); else Session.DismissAlert(b); }
+    /// <summary>«새 영상» 배너 [보기](§10.3) — 그 채널 상세를 열고 그 송출을 본다(보던 것이 있으면 바꿔 본다).</summary>
+    [RelayCommand] private void AcceptVideoBanner(Banner b) { string g = b.GroupId; Session.AcceptVideoBanner(b); if (g.Length > 0) FocusChannel(g); }
 
     /// <summary>[채널로] 공통 — 관제 [무전] 으로 와서 그 채널의 채널 상세를 연다(내 채널 카드, 없으면 타 채널 행). 어느 쪽도 합류시키지 않는다 — 청취 범위 그룹에
     /// sendrecv 로 합류하면 비멤버라 서버가 403 으로 거절한다(TS 24.379 §10.1.1, dispatch_center.md §5.6). 청취는 타 채널의 [청취] 다.</summary>
