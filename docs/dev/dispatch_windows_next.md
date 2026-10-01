@@ -60,6 +60,9 @@ Claude Code 터미널에서 이 문서를 읽고 §1 부터 순서대로 한다.
   코어가 모은다) + chat 이면 `Account.JoinVideoGroupCall(g, new VideoGroupCallOptions { Prearranged = false, Queueing = true })`. prearranged 는 초대를
   기다린다. 채널을 나가면 영상 호 `Hangup` + `Affiliate(g, false, McService.McVideo)`. 관제는 «내 채널» 전부에 합류한다(알림을 받으려면 합류해야 한다 —
   chat). 영상 RTP 는 [보기] 한 1개만 온다.
+- **«채널» = 관제사가 내 채널에 둔 의도이지 무전 세션 수명이 아니다** — MCPTT 그룹 호는 T4(무발언 hang timer)·TNG3(최대 통화 시간)로 서버가 해제한다
+  (TS 24.379 §6.3.8.1). 그것은 호가 끝난 것이지 채널을 떠난 것이 아니므로 영상 호·MCVideo affiliation 은 그대로 둔다. 영상 호를 끝내는 것은 내 채널에서 빼기·로그아웃뿐.
+  (단말 실기에서 드러났다 — 무전 세션 종료를 따라 영상 호까지 나갔다.)
 - **이벤트** — `Engine.TransmissionChanged`(내 송출: 요청·허가·거절·대기·회수·끝) · `Engine.ReceptionChanged`(새 송출 알림·받는 중·수신 거절·서버 종료·송출 끝).
   채널마다 «보내는 중» 목록 = 알림(Notified)으로 더하고 송출 끝(End Notify)으로 뺀다. 스냅샷 `Call.TransmissionInfo`.
 - **조작** — [보기] = `Call.AcceptReception(transmitterId)` · [그만 보기] = `EndReception` · [바꿔 보기] = 보던 것 `EndReception` 뒤 `AcceptReception` ·
