@@ -218,7 +218,7 @@ CSP 발신 offer 의 형태를 per-call 폴백 없이 결정하기 위해, **단
 ```
 
 - audio 는 `media_crypto`(RTP + relay 경로 RTCP), video 는 `media_crypto_video` — SDES 는
-  m= 라인마다 키가 다르다.
+  m= 라인마다 키가 다르다. MCPTT 그룹 `PTT_JOIN` 은 음성만이라 `media_crypto` 하나다(영상 키는 relay·MCVideo JOIN).
 - 생략 시 그 leg 는 평문(신규), 기존 SRTP leg 의 재요청 생략은 **기존 키 유지** —
   optional 혼용 그룹의 표현이 자연스럽다.
 - 재협상 키 교체 = 같은 명령의 재전송(`RELAY_MODIFY` / JOIN ② 재호출). 동일 구성 재선언은
@@ -292,8 +292,8 @@ floor SRTCP(F6, [mcptt_standard_conformance.md](mcptt_standard_conformance.md) �
 (`ReadMediaCrypto` — psip 가 audio 만 필드로 올리므로). 판정 규칙은 오디오와 동일:
 SAVP 오퍼인데 수락 불가 → 488, required 오퍼에 crypto 없는 활성 video answer → 호 종료,
 optional → 평문 비디오, answer 가 video 를 거절/생략 → 비디오 미송신.
-비디오 송신 목적지는 상대 SDP 의 활성 `m=video` 포트(RFC 3264)로 학습하고, PTT 의
-`X-Video-Port` 헤더는 SDP 에 video 가 없을 때의 폴백이다.
+비디오 송신 목적지는 상대 SDP 의 활성 `m=video` 포트(RFC 3264)로 학습한다. MCPTT 그룹 호는 음성만이라
+(CSP 가 `m=video` 를 port 0 으로 거절) PTT 시나리오에는 비디오 송신이 없다.
 
 ### 8.2 RTP 경로
 

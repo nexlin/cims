@@ -7,8 +7,8 @@
 //   cimsue-cli [계정 옵션] register [--hold S]
 //   cimsue-cli [계정 옵션] call <번호|sip:URI> [--duration S] [--video]
 //   cimsue-cli [계정 옵션] answer [--duration S] [--transfer-to X --transfer-after S]
-//   cimsue-cli [계정 옵션] group-call <groupId> [--duration S] [--ptt-at S --ptt-len S] [--listen-only] [--emergency] [--broadcast] [--implicit] [--video]
-//              (--video = 그룹 영상 m=video 제안 — 발언권을 가진 동안만 송출. 착신 그룹 영상 수락은 계정 옵션 --mcptt-video. 영상 없는 빌드면 port 0)
+//   cimsue-cli [계정 옵션] group-call <groupId> [--duration S] [--ptt-at S --ptt-len S] [--listen-only] [--emergency] [--broadcast] [--implicit]
+//              (MCPTT 그룹콜은 음성만 — 그룹 영상은 video-call(MCVideo 호, mcvideo.md §8))
 //              (--broadcast = 일제 통화 개시 — 발언을 놓은 뒤 서버 Floor Idle(B-bit)이면 코어가 호를 해제, outcome 에 broadcast_released)
 //              (--implicit = 개시 INVITE 가 암묵적 발언 요청 — mc_implicit_request+mc_granted, TS 24.380 §14.2.4·§14.2.5. --ptt-at 0 과 함께)
 //              [--upgrade-at S] [--cancel-at S]  (진행 중 긴급 상향·하향 re-INVITE, TS 24.379 §10.1.1.2.1.3·§10.1.1.2.1.4 — outcome 에 conditions)
@@ -143,12 +143,11 @@ void usage() {
         "        [--mcptt-psi URI]   (참여 기능 PSI — 긴급 경보 Request-URI, TS 24.379 §12.1.1.1 8))\n"
         "        [--mcdata-psi URI]  (참여 MCData 기능 PSI — disposition 통지 Request-URI, TS 24.282 §12.2.1.1)\n"
         "        [--instance-id URN] (+sip.instance · ue-init-config 의 MCS UE ID. --from-profile ptt 면 ue-init-config 로 PSI 를 채운다)\n"
-        "        [--mcptt-video]   (착신 그룹콜의 m=video 를 영상까지 수락)\n"
         "        [--mcvideo] [--mcvideo-psi URI]   (MCVideo 등록 태그 · 참여 MCVideo 기능 PSI — TS 24.281 §7.2.1AA·§9.2.1.2.1.1)\n"
         "        [--affiliate-mcvideo G,..]   (MCVideo affiliation — 관심 그룹 전부를 한 PUBLISH 로, TS 24.281 §8.2.1.2)\n"
         "        또는 --csc-host H [--csc-port N] --user U (--pw P | --pw-env VAR) [--csc-ca FILE] --from-profile volte|ptt\n"
         "  register [--hold S] | call TARGET [--duration S] [--video] | answer [--duration S] [--transfer-to X]\n"
-        "  group-call GROUP [--duration S] [--ptt-at S --ptt-len S] [--listen-only] [--emergency] [--broadcast] [--implicit] [--video]\n"
+        "  group-call GROUP [--duration S] [--ptt-at S --ptt-len S] [--listen-only] [--emergency] [--broadcast] [--implicit]\n"
         "             [--upgrade-at S] [--cancel-at S]\n"
         "  video-call GROUP [--prearranged] [--queueing] [--priority N] [--implicit] [--rejoin URI] [--transmit-at S --transmit-len S]\n"
         "             [--accept] [--duration S]   (MCVideo 그룹 호 — 계정 --mcvideo --mcvideo-psi URI)\n"
@@ -240,7 +239,6 @@ bool parse(int argc, char** argv, Opts& o) {
         else if (a == "--cancel") o.alertCancel = true;
         else if (a == "--msrp") o.acc.mcdataMsrp = true;
         else if (a == "--notify-delivered") o.notifyDelivered = true;
-        else if (a == "--mcptt-video") o.acc.mcpttVideo = true;
         else if (a == "--cancel-group-emergency") o.cancelGroupEmergency = true;
         else if (a == "--mcvideo") o.acc.mcvideoEnabled = true;
         else if (a == "--prearranged") o.prearranged = true;
@@ -718,7 +716,6 @@ int main(int argc, char** argv) {
         if (o.acc.mediaSecurity != MediaSecurity::Off) a.mediaSecurity = o.acc.mediaSecurity;
         if (o.acc.maxSdsCplaneBytes > 0) a.maxSdsCplaneBytes = o.acc.maxSdsCplaneBytes;
         a.mcdataMsrp = o.acc.mcdataMsrp;
-        a.mcpttVideo = o.acc.mcpttVideo;
         a.instanceId = o.acc.instanceId;
         // 참여 기능 PSI = UE initial configuration(TS 24.484 §7.2.2.1 10)·14)) — 명시 인자가 문서를 덮는다
         if (sp->kind == "ptt") {
@@ -893,7 +890,6 @@ int main(int argc, char** argv) {
     if (o.cmd == "group-call") {
         GroupCallOptions go; go.listenOnly = o.listenOnly; go.emergency = o.emergency; go.broadcast = o.broadcast;
         go.implicitFloorRequest = o.implicit;             // --ptt-at 의 floorRequest 는 이미 요청 중이라 무시된다
-        go.video = o.video;                               // 그룹 영상 제안 — 송출은 발언권을 따른다
         s.callId = eng.joinGroupCall(acc, o.target, go);
         if (s.callId < 0) { s.outcome = "invite_failed"; rc = 4; return finish(-1); }
         bool up = waitActive(ls, s.callId, o.timeoutSec);

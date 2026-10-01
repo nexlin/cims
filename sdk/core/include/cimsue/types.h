@@ -110,9 +110,6 @@ struct AccountConfig {
      *  SDS disposition 통지 MESSAGE 의 Request-URI(TS 24.282 §6.2.4.1 4)·§12.2.1.1). 비면 통지를 원 발신자 AoR 로 곧장 보낸다
      *  (CSP 0.2.180 전 서버와의 전환기 — 그 서버는 PSI 로 온 통지를 상관하지 못한다). */
     std::string mcdataServerUri;
-    /** MCPTT 그룹 영상(ptt_flows.md 영상 협상) — 자동 수락(autoAnswerMcptt)하는 착신 INVITE 가 m=video 를 제안하면 영상까지
-     *  받는다(서버는 video_enabled 그룹에서만 제안한다). false 면 port 0 으로 거절 — 음성만. 개시는 GroupCallOptions.video. */
-    bool mcpttVideo = false;
     /** MCVideo 서비스 사용(mcvideo.md §5.4) — REGISTER Contact 에 `+g.3gpp.mcvideo` 와 `+g.3gpp.icsi-ref` 목록의 mcvideo ICSI 를
      *  싣는다(TS 24.281 §7.2.1AA — 서비스 인가 본문 없는 등록. MCVideo 로그오프 = 태그를 뺀 재-REGISTER, §7.2.1 NOTE 1 — 값을 바꾼 뒤
      *  계정을 다시 만들어 등록한다). MCVideo ID 는 effectiveMcpttId(), MCVideo client ID 는 effectiveMcpttClientId()(단일 MC 서비스
@@ -188,10 +185,6 @@ struct GroupCallOptions {
      *  코어가 명시 Floor Request 로 잇는다. 승인 전·호 성립 전에 floorRelease 하면 발언권을 돌려준다(Release 는 answer 에서).
      *  누르는 동안 개시하고 말하는 한 버튼 발신(일제 통화 등)용. listenOnly·fullDuplex 에는 뜻이 없어 무시한다. */
     bool implicitFloorRequest = false;
-    /** 그룹 영상 제안(m=video, H.264) — 서버 그룹이 video_enabled 가 아니면 port 0 으로 거절된다(ptt_flows.md 영상 협상).
-     *  반이중이면 내 영상은 발언권을 가진 동안만 나간다(Granted 에 송출 시작 = 키프레임, 놓으면 정지·카메라 닫힘) — Engine::setVideoSend 가
-     *  송출 허용을 끈다. 착신 합류의 영상 수락은 AccountConfig.mcpttVideo. */
-    bool video = false;
 };
 
 /** MCVideo 그룹 호 개시·합류 옵션(TS 24.281 §9.2.1 prearranged · §9.2.2 chat, 제어 채널 fmtp = TS 24.581 §14.2). */

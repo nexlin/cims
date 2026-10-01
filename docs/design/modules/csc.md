@@ -283,7 +283,6 @@ POST /api/v1/ptt/groups
 {
   "id": "group_1000",
   "name": "작전 1팀",
-  "video_enabled": false,
   "priority": 5,
   "encryption": false,
   "emergency_call": true,
@@ -293,6 +292,9 @@ POST /api/v1/ptt/groups
   ]
 }
 ```
+
+그룹 영상은 `mcvideo`(null = 끔, 객체 = MCVideo 그룹 — [admin_api.md §6.2](../../api/admin_api.md))로 켠다. `video_enabled` 를 실어 보내면
+거절하지 않고 무시한다(경고 로그) — MCPTT 그룹 호는 음성만이다([mcvideo.md](../features/mcvideo.md) §8).
 
 **그룹 변경 시 CSP 알림:**
 
@@ -556,6 +558,8 @@ HTTP 계층은 `*+xml`/`application/xml` 본문을 원시 바이트로 핸들러
 3GPP 미정의 필드라 CIMS 전용 네임스페이스(`urn:cims:groupinfo:1.0`) 확장으로 전달한다 —
 `<entry>` 는 `##other` lax 확장을 허용하므로(TS 24.481/RFC 4826 resource-lists) 규격 적합이며,
 표준 단말은 무시한다. 직함이 빈 값이면 요소를 생략한다.
+그룹 영상은 문서의 MCVideo `<service>`(TS 24.481 §7.2.2·§7.2.8 — [mcvideo.md](../features/mcvideo.md) §5.1)로 싣고, MCPTT 몫에는 영상 요소가 없다.
+XCAP PUT 본문에 TS 24.481 스키마 밖 요소 `<mcpttgi:mcptt-video>` 가 있으면 무시한다.
 
 ### 4.3 CMS (Configuration Management Service)
 
@@ -713,7 +717,7 @@ DB 는 가입자(person/VoLTE/PTT) 도메인과 조직 트리 등 **관계형이
 | `voip_subscriptions` | `id VARCHAR PK`(MSISDN) | 유선 VoIP 회선 — 컬럼은 volte 와 동일, `service_ref` 는 kind=voip 서비스 필수(**가입 테이블 = 접속환경 kind**, 레지스트리 `services/subscriptions.py`). `sql/migrate_voip_subscriptions.sql` 로 생성 — 없는 DB 에서는 CSC 가 프로브해 그 테이블만 건너뛴다(`/users/{pid}/voip` 503) |
 | `icb_identities` | (`user_id`, `identity`) PK | person 착신 차단 지정 번호 목록(TS 24.611 ICB `cp:identity` — 그 사람의 모든 전화 회선). `user_id` → users(CASCADE, `fk_icb_user`) |
 | `ptt_subscriptions` | `id VARCHAR PK`(MCPTT ID) | MCPTT 회선: IMPI 인증(착신 차단 컬럼 없음). `user_id` → users(CASCADE). `service_ref` 는 kind=ptt 서비스만 |
-| `ptt_groups` | **`id BIGINT AI PK`**(surrogate) | PTT 그룹. `mcptt_group_id` 는 UNIQUE 식별자(키 아님). group_type(prearranged/chat — on-network-invite-members)/hang_timer_sec·max_duration_sec(그룹 호 T4·TNG3)/priority/emergency/video_enabled/require_affiliation 등 |
+| `ptt_groups` | **`id BIGINT AI PK`**(surrogate) | PTT 그룹. `mcptt_group_id` 는 UNIQUE 식별자(키 아님). group_type(prearranged/chat — on-network-invite-members)/hang_timer_sec·max_duration_sec(그룹 호 T4·TNG3)/priority/emergency/require_affiliation 등. `video_enabled` 열은 읽지도 쓰지도 않는다(전 사이트 새 빌드 뒤 DROP — [db_schema.md](../db_schema.md)) |
 | `ptt_group_members` | `id INT AI PK` | 멤버. `group_id` → **ptt_groups.id(surrogate BIGINT FK)**, role(chair/participant), mcptt_id |
 | `ptt_affiliations` | (group_id, user_id, client_id) | MCPTT affiliation(TS 24.379 §9). `group_id` → ptt_groups.id(CASCADE) |
 | `organizations` | `id INT AI PK` | code/name/parent_id 트리. users.org_id FK 대상 |

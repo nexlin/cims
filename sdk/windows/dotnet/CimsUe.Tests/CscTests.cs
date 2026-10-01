@@ -105,7 +105,7 @@ public class CscTests
     {
         var doc = new GroupDoc
         {
-            Uri = "sip:g-1234abcd@ptt.example.org", DisplayName = "순찰 & 지원", SessionType = "chat", VideoEnabled = true,
+            Uri = "sip:g-1234abcd@ptt.example.org", DisplayName = "순찰 & 지원", SessionType = "chat",
             MaxParticipants = 16, RequireAffiliation = false, EmergencyCall = false, OrgCode = "ORG1",
             Members = { new GroupMember { Uri = "tel:+82510001001", Name = "관제1석", Role = "chair", Priority = 7 },
                         new GroupMember { Uri = "tel:+82510001002" } },
@@ -120,7 +120,7 @@ public class CscTests
         Assert.True(back.Ok, back.Reason);
         var b = back.Value!;
         Assert.Equal(doc.Uri, b.Uri); Assert.Equal("순찰 & 지원", b.DisplayName); Assert.Equal("chat", b.SessionType);
-        Assert.True(b.VideoEnabled); Assert.Equal(16, b.MaxParticipants); Assert.False(b.RequireAffiliation); Assert.False(b.EmergencyCall);
+        Assert.Equal(16, b.MaxParticipants); Assert.False(b.RequireAffiliation); Assert.False(b.EmergencyCall);
         Assert.True(b.EmergencyAlert); Assert.Equal("ORG1", b.OrgCode);
         Assert.Equal(2, b.Members.Count);
         Assert.Equal("chair", b.Members[0].Role); Assert.Equal(7, b.Members[0].Priority); Assert.Equal("관제1석", b.Members[0].Name);

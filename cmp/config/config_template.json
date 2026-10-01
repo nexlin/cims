@@ -170,7 +170,7 @@
     {
       "key": "ptt_rtp",
       "title": "PTT RTP 포트 풀",
-      "description": "PTT 그룹콜 전용. 그룹당 공유 Floor(m=application) 포트 + 멤버당 전용 Audio/Video RTP 포트 (leg 별 포트셋).",
+      "description": "PTT 그룹콜 전용. 그룹당 공유 Floor(m=application) 포트 + 멤버당 전용 Audio RTP 포트 (leg 별 포트셋).",
       "fields": [
         {
           "key": "PttRtpStartPort",
@@ -202,15 +202,6 @@
           "help": "m=application (RTCP APP) 전용 소켓. MCPTT floor control."
         },
         {
-          "key": "PttVideoStartPort",
-          "label": "PTT 멤버 Video RTP 시작 포트",
-          "type": "int",
-          "default": 56000,
-          "min": 1024,
-          "max": 65000,
-          "restart": true
-        },
-        {
           "key": "PttMemberPoolSize",
           "label": "PTT 멤버 포트 유닛 풀 크기",
           "type": "int",
@@ -218,7 +209,7 @@
           "min": 1,
           "max": 10000,
           "restart": true,
-          "help": "동시 참가 가능한 PTT 멤버 총수 (멤버당 Audio/Video RTP 각 1 포트, stride 2)."
+          "help": "동시 참가 가능한 PTT 멤버 총수 (멤버당 Audio RTP 1 포트, stride 2)."
         }
       ],
       "scope": "service"

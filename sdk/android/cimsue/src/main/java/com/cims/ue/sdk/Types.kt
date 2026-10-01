@@ -190,8 +190,6 @@ data class AccountConfig(
     val maxSdsCplaneBytes: Int = 0,
     /** 서버발 MSRP 배포 수신 — REGISTER Contact 에 ICSI mcdata.sds 를 싣는다(코어가 contactParams 에 합친다). 끄면 서버가 FILEURL 로 폴백. */
     val mcdataMsrp: Boolean = false,
-    /** MCPTT 그룹 영상 — 자동 수락하는 착신 INVITE 의 m=video(video_enabled 그룹)를 영상까지 받는다. 끄면 음성만. */
-    val mcpttVideo: Boolean = false,
     /** 참여 MCPTT 기능 PSI — 긴급 경보 Request-URI(TS 24.379 §12.1.1.1 8)). 정본 = ue-init-config [UeInitConfigDoc.mcpttServerUri]
      *  (TS 24.484 §7.2). 비면 그룹 URI(옛 서버 전환기). */
     val mcpttServerUri: String = "",
@@ -220,7 +218,6 @@ data class AccountConfig(
         it.mcpttClientId = mcpttClientId
         it.rpEmergency = rpEmergency; it.rpImminentPeril = rpImminentPeril; it.rpNormal = rpNormal
         it.maxSdsCplaneBytes = maxSdsCplaneBytes; it.mcdataMsrp = mcdataMsrp
-        it.mcpttVideo = mcpttVideo
         it.mcpttServerUri = mcpttServerUri; it.mcdataServerUri = mcdataServerUri
         it.mcvideoEnabled = mcvideoEnabled; it.mcvideoServerUri = mcvideoServerUri; it.autoAnswerMcvideo = autoAnswerMcvideo
     }
@@ -245,13 +242,11 @@ data class GroupCallOptions(
     val broadcast: Boolean = false,
     /** 암묵적 발언 요청(TS 24.380 §14.2.5 mc_implicit_request + §14.2.4 mc_granted) — 개시 INVITE 가 발언 요청을 싣는다. */
     val implicitFloorRequest: Boolean = false,
-    /** 그룹 영상 제안(m=video) — 서버 그룹이 영상이 아니면 거절(port 0). 내 영상은 발언권을 가진 동안만 나간다([Call.setVideoSend]). */
-    val video: Boolean = false,
 ) {
     internal fun toJni(): JniGroupCallOptions = JniGroupCallOptions().also {
         it.emergency = emergency; it.imminentPeril = imminentPeril
         it.listenOnly = listenOnly; it.fullDuplex = fullDuplex; it.broadcast = broadcast
-        it.implicitFloorRequest = implicitFloorRequest; it.video = video
+        it.implicitFloorRequest = implicitFloorRequest
         it.members = StringVector().apply { members.forEach { m -> add(m) } }
     }
 }

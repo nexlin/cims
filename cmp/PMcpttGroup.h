@@ -219,14 +219,11 @@ public:
     // codec: 협상 오디오 코덱 문자열 (user_codec, 예 "AMR-WB/16000") — 녹취 세그먼트 메타용.
     // recvOnly/floorSuppress: ambient listening 청취 leg (cmp_media_api.md §7.3) —
     //   recvOnly=상향 미디어 미중계(+floor 요청 거절), floorSuppress=이 멤버에게 floor 메시지 미송신.
-    // videoPtOut: 이 leg 로 영상 송신 시 스탬프할 PT (user_video_pt, 0=재작성 없음) — 동적 PT 는 leg 마다
-    //   따로 협상되므로(RFC 3264 §5.1, 단말 코덱 구현마다 H.264 PT 가 다르다) 화자 PT 를 수신 leg PT 로 바꾼다.
-    void addMember(const std::string& sessionId, const std::string& ip, int port, int floorPort = 0, int videoPort = 0,
+    void addMember(const std::string& sessionId, const std::string& ip, int port, int floorPort = 0,
                    const std::string& role = "participant", PPttMemberPort* unit = nullptr,
                    bool nat = false, const std::string& sigIp = "",
                    int ptOut = 0, int srcPt = 0, int tePtOut = 0, int srcTePt = 0,
-                   const std::string& codec = "", bool recvOnly = false, bool floorSuppress = false,
-                   int videoPtOut = 0);
+                   const std::string& codec = "", bool recvOnly = false, bool floorSuppress = false);
     void removeMember(const std::string& sessionId);
     bool hasMember(const std::string& sessionId);
 
@@ -271,11 +268,11 @@ public:
     // SRTCP 인증 실패/재전송으로 폐기한 floor 패킷 누적 (STATS floor_crypto_drop)
     long getFloorCryptoDrop() const { return _floorCryptoDrop.load(); }
 
-    // 멤버 미디어 SRTP 컨텍스트 (PTT_JOIN media_crypto[_video] — media_security.md §6.2~6.3).
+    // 멤버 음성 미디어 SRTP 컨텍스트 (PTT_JOIN media_crypto — media_security.md §6.2~6.3).
     //   rx*=UE 상향(UE 의 a=crypto 선언), tx*=CMP 하향(CSP 생성). key/salt 는 디코드된
     //   바이트열(16B/14B). 동일 구성 재선언은 세션 유지, 변경은 세션 재생성(ROC 리셋).
     //   실패 시 err — 호출자가 명령을 거부한다(평문 조용 폴백 금지).
-    bool setMemberMediaCrypto(const std::string& sessionId, bool video, const std::string& alg,
+    bool setMemberMediaCrypto(const std::string& sessionId, const std::string& alg,
                               const std::string& rxKey, const std::string& rxSalt,
                               const std::string& txKey, const std::string& txSalt, std::string& err);
     // 미디어 SRTP unprotect 실패(인증 태그 불일치·재전송 창 밖) 폐기 누적 (STATS srtp_drop)
@@ -286,7 +283,6 @@ public:
 
     // Called by PPttMemberPort — 멤버 전용 포트 수신 (수신 소켓이 곧 멤버 신원)
     void onMemberRtpPacket(const std::string& memberId, const std::string& ip, int port, char* buf, int len);
-    void onMemberVideoRtpPacket(const std::string& memberId, const std::string& ip, int port, char* buf, int len);
 
     void updatePriorities(const std::map<std::string, int>& priorities);
     void updateRoles(const std::map<std::string, std::string>& roles);
@@ -391,7 +387,6 @@ private:
     //   excludeSessionId 는 제외할 멤버 — Floor Taken 은 화자 본인에게 보내지 않는다(§6.3.4.4.2-3).
     void sendFloorToAll(const char* data, int len, const char* roData = nullptr, int roLen = 0,
                         const std::string& excludeSessionId = "");
-    void sendVideoToAll(const char* data, int len, const std::string& excludeSessionId, int slot);
     void sendToMember(const std::string& sessionId, const char* data, int len);
     // 이 멤버의 floor 메시지에 적용할 SRTCP 컨텍스트 (멤버 키 > 그룹 키 > 평문=null).
     PFloorCrypto* _cryptoFor(const std::string& sessionId);
@@ -493,12 +488,10 @@ private:
         //   Floor Granted/Taken 의 SSRC 필드(14)·List of SSRCs(16)에 싣는 값이다 —
         //   규격이 말하는 "SSRC of granted floor participant" 는 단말의 SSRC 다(§8.2.3.16).
         unsigned int uaSsrc = 0;
-        int videoPort;
         std::string role;    // "chair" | "participant" (TS 24.380 floor 선점 판정)
         // 수신자별 하향 스트림 — 동시 발언 슬롯마다 별도 SSRC/seq 를 쓴다. 슬롯 0 은 단일
         //   화자 정책의 유일 스트림(화자가 바뀌어도 연속) — 종전 동작 그대로다.
         uint16_t audioSeqOut[MCPTT_MAX_TALKER_SLOTS] = {0};
-        uint16_t videoSeqOut[MCPTT_MAX_TALKER_SLOTS] = {0};
         int  streamSlot = 0;           // floor off(full-duplex) 시 이 멤버 상향의 고정 슬롯
         bool recvOnly = false;         // ambient 청취 leg — 상향 미디어 미중계 + floor 요청 거절
         bool floorSuppress = false;    // 이 멤버에게 floor 메시지 미송신 (청취 은닉)
@@ -506,7 +499,6 @@ private:
         PPttMemberPort* unit = nullptr;  // 멤버 전용 RTP 포트 유닛 (PCmpServer 소유)
         std::string declIp;   // 마지막 SDP 선언 주소 원본 (latch 와 무관하게 보존 —
         int declPort = 0;     //   재-JOIN 시 선언 불변 여부 비교용, PRtpRelay::Leg.decl* 와 동형)
-        int declVideoPort = 0;
 
         // NAT 목적지 latch (제어평면이 nat 지정한 멤버만 — ue_nat_traversal.md §5)
         bool natEnabled = false;
@@ -516,7 +508,6 @@ private:
         int srcPt = 0;      // ingress audio PT — 이 leg 가 송신에 쓰는 PT (user_src_pt)
         int tePtOut = 0;    // egress telephone-event PT (user_te_pt)
         int srcTePt = 0;    // ingress telephone-event PT (user_src_te_pt, TE 분류 기준)
-        int videoPtOut = 0; // egress video PT — 이 leg 로 송신 시 스탬프 (user_video_pt)
         std::string codec;  // 협상 오디오 코덱 (user_codec) — 녹취 세그먼트 메타용
         std::string mcpttId;  // MCPTT ID(URI) — floor User ID/Granted Party 값 (비면 sessionId)
         bool queueing = true; // SDP mc_queueing 협상 여부 — 미협상이면 비선점 요청은 Deny #1
@@ -527,21 +518,18 @@ private:
         // 이 멤버 전용 floor SRTCP 컨텍스트 (CSK 기반). null 이면 그룹 키를 쓴다.
         //   Peer 는 map 에 복사 대입되므로 shared_ptr 로 들고 있는다(PFloorCrypto 는 mutex 보유).
         std::shared_ptr<PFloorCrypto> crypto;
-        // 미디어 SRTP 컨텍스트 (media_crypto[_video]). null=평문 leg — optional 혼용 그룹의
+        // 미디어 SRTP 컨텍스트 (media_crypto). null=평문 leg — optional 혼용 그룹의
         //   자연스러운 표현. 접근은 그룹 _mutex 아래 — PMediaCrypto.h 스레드 규약 참조.
         std::shared_ptr<PMediaCrypto> mediaCrypto;        // audio RTP
-        std::shared_ptr<PMediaCrypto> mediaCryptoVideo;   // video RTP
         bool natLatched = false;       // audio 소스 추종 학습 완료 (관측용)
-        bool natLatchedVideo = false;
         int64_t followLogUsec = 0;     // dest follow 로그 rate-limit (소스 경합 시 폭주 방지)
     };
 
     // nat 멤버 수신 형식 검사 (RTP v2 + 최소 길이 + guard IP + 기대 ingress PT — 상태 불변).
-    bool _natFormatOk(const Peer& peer, bool isVideo, const std::string& ip, int port,
-                      const char* buf, int len) const;
+    bool _natFormatOk(const Peer& peer, const std::string& ip, int port, const char* buf, int len) const;
     // nat 멤버 목적지 latch 적용 (호출자가 _mutex 보유). SRTP 멤버는 unprotect 성공 후에만
     //   호출된다 — 제3자 주입으로 latch 가 오염되지 않는다 (media_security.md §6.2).
-    void _natLatch(Peer& peer, bool isVideo, const std::string& ip, int port);
+    void _natLatch(Peer& peer, const std::string& ip, int port);
     // 미디어 SRTP unprotect 실패 드롭 (호출자가 _mutex 보유) — 카운터 + rate-limited WARN
     void _dropSrtp(const char* what, const std::string& memberId);
     std::map<std::string, Peer> _members; // SessionID -> Peer
@@ -549,7 +537,7 @@ private:
     std::map<std::string, std::string> _roles; // SessionID (UserId) -> role (chair/participant)
     std::map<std::string, int> _tier;       // SessionID -> FloorTier (없으면 TIER_NORMAL)
     bool isChair(const std::string& sessionId) const; // role==chair 여부
-    PRtpMulticast* _pttSession;      // PTT 전용 세션 (audio RTP + floor + video)
+    PRtpMulticast* _pttSession;      // PTT 전용 세션 (그룹 공유 floor)
 
     // ── Floor State — 발언자 집합 (정원 1 = 단일 화자, 2 = dual, N = multi-talker) ──
     struct Talker {
@@ -558,7 +546,7 @@ private:
         int prio;
         int slot;               // 하향 스트림/녹취 트랙 슬롯 (0..capacity-1)
         int64_t grantUsec;      // GRANT 시각 (T1 판정 기준점 — RTP 무수신 grant 대비)
-        int64_t lastRtpUsec;    // 마지막 RTP(audio/video) 수신 시각 — T1(End of RTP media)
+        int64_t lastRtpUsec;    // 마지막 RTP 수신 시각 — T1(End of RTP media)
         int64_t talkStartUsec = 0;  // 첫 RTP 수신 시각 — T2(Stop talking) 기준(0=미개시)
         // 'G: pending Floor Revoke' (§6.3.4.5) — Revoke 를 보낸 뒤 T3(Stop talking grace)
         //   동안 화자의 미디어를 계속 중계하며 Floor Release 를 기다리는 상태.
@@ -616,13 +604,13 @@ private:
     void _notifyTalkers();
     // 정책 문자열 ("single"/"dual"/"multi"/"private"/"off")
     const char* _policyName() const;
-    // 동시 발언 슬롯의 녹취 트랙명 ("audio"/"audio1".., "video"/"video1"..)
-    static std::string _slotTrack(int slot, bool video);
+    // 동시 발언 슬롯의 녹취 트랙명 ("audio"/"audio1"..)
+    static std::string _slotTrack(int slot);
     // 녹취 세그먼트 시작/재시작 (대표 화자 = 슬롯 0 또는 최초 화자)
     void _recStartSegment(const std::string& speakerId, int prio, bool preempt, const std::string& prevOwner);
     // 슬롯 트랙 등록 (0..slots-1) — 이미 등록된 슬롯은 건너뛴다
     void _recEnsureTracks(int slots);
-    // 슬롯 트랙에 화자 귀속 + 그 화자 leg 의 PT/코덱 부착 (음성·영상 트랙 공통)
+    // 슬롯 트랙에 화자 귀속 + 그 화자 leg 의 PT/코덱 부착
     void _recAttachSlot(int slot, const std::string& sessionId);
     // 슬롯 트랙의 화자 구간 종료 (발언 종료·회수 — 슬롯 재사용 시 귀속이 섞이지 않게)
     void _recDetachSlot(int slot);

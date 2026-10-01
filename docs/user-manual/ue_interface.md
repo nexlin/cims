@@ -380,7 +380,7 @@ UE-A(발신)          CSP                CMP              UE-B(수신)        UE
   │◄══ RTCP FLOOR_GRANT ══════════════│                  │                 │
   │                  │                  │─ FLOOR_TAKEN ───►│                 │
   │                  │                  │─ FLOOR_TAKEN ────────────────────►│
-  │═══ RTP Audio/Video ═══════════════►│                  │                 │
+  │═══ RTP Audio ═════════════════════►│                  │                 │
   │                  │                  │═══ RTP ═════════►│                 │
   │                  │                  │═══ RTP ══════════════════════════►│
 ```
@@ -450,6 +450,8 @@ a=fmtp:MCPTT mc_queueing;mc_priority=3
 ```
 
 > **SDP m=application 라인:** Floor control용 RTCP APP 포트는 Audio RTP 포트 + 1 (위 예시에서 50001)입니다. `a=floorid:0 mstrm:audio`는 Floor가 audio 미디어 스트림에 연결됨을 표시합니다.
+>
+> **영상:** MCPTT 그룹 호는 음성만입니다. 발신자 INVITE 에 `m=video` 가 있으면 200 OK answer 는 그 자리를 port 0 으로 거절합니다(RFC 3264 §6). 그룹 영상은 같은 그룹의 MCVideo 호(TS 24.281 — [mcvideo.md](../design/features/mcvideo.md))로 엽니다.
 
 ### 3.4 Floor Control (발언권 제어)
 
@@ -715,7 +717,6 @@ Authorization: Bearer <access_token>
         <mcpttgi:user-priority>1</mcpttgi:user-priority>
       </entry>
     </list>
-    <mcpttgi:mcptt-video>true</mcpttgi:mcptt-video>
   </list-service>
 </resource-lists>
 ```

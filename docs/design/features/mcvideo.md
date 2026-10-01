@@ -3,7 +3,7 @@
 > **그룹 영상의 정본 설계.** 3GPP 는 영상을 MCPTT 세션에 얹지 않고 별도 MC 서비스 **MCVideo** 로 둔다. 한 그룹을
 > MCPTT 와 MCVideo 두 서비스용으로 설정하면(TS 23.280 §3 «MC service group … configured for the use with one or more MC services»),
 > 단말은 같은 그룹에서 **음성만 = MCPTT 그룹 호**, **음성+영상 = MCVideo 그룹 호**를 골라 쓰고 둘 사이를 오간다.
-> 이 문서는 규격 모델, 현행 «PTT 영상»(MCPTT 세션의 `m=video` — 비규격)과의 차이, 규격형으로 옮기는 개발 항목·결정 사항을 정한다 —
+> 이 문서는 규격 모델, MCPTT 호와의 경계(MCPTT 는 음성만 — 그룹 영상은 MCVideo 호), 개발 항목·결정 사항을 정한다 —
 > **설계 정본.** 구현된 것 — 계약(전송 제어 정의 테이블 [mcvideo_tc_defs.yaml](mcvideo_tc_defs.yaml)(생성 헤더 양 끝, §5.3·§5.4) · DB 표(§5.1) ·
 > 설정 문서 골든 `tests/fixtures/mcvideo/` · SDP 프로파일(§1.4) · CSP↔CMP 제어 API([cmp_media_api.md](../../api/cmp_media_api.md) §7.9) · 단말 SDK 공개
 > 표면([ue_sdk.md](ue_sdk.md) §4.6)), 양 끝 전송 제어 코덱(CMP `PTransmissionCodec` · SDK `mcvideo/tc_codec`, 교차 시험), 단말 전송 제어 참여자 상태 머신
@@ -14,8 +14,8 @@
 > .NET 빌드·시험은 Windows).
 >
 > 규격 판본: TS 24.281 V18.14.0 · TS 24.581 V18.8.0 · TS 23.281 V18.12.0 · TS 24.481 V19.3.0 · TS 24.484 V20.0.0 · TS 23.280 V20.4.0 ·
-> TS 33.180 V20.0.0. 관계 문서: 로드맵 표 [mcptt_standard_conformance.md](mcptt_standard_conformance.md) R3·R6, 현행 PTT 영상 협상
-> [ptt_flows.md](ptt_flows.md), CMP 영상 분배 [../modules/cmp.md](../modules/cmp.md), 단말 영상 [ue_sdk.md](ue_sdk.md) §4.5, 신원·scope
+> TS 33.180 V20.0.0. 관계 문서: 로드맵 표 [mcptt_standard_conformance.md](mcptt_standard_conformance.md) R3·R6, MCPTT 그룹 호
+> [ptt_flows.md](ptt_flows.md), CMP 미디어 [../modules/cmp.md](../modules/cmp.md), 단말 영상 [ue_sdk.md](ue_sdk.md) §4.5, 신원·scope
 > [mcx_identity_scope.md](mcx_identity_scope.md), 종단간 보안 [mcx_e2e_security.md](mcx_e2e_security.md).
 
 ## 1. 규격 모델 요약
@@ -148,26 +148,19 @@ service configuration 에서 `<confidentiality-protection>`·`<integrity-protect
 | 서버에 올리기 · 저장 영상 보기 | 서버가 받은 영상을 파일로 기록(one-to-server push), 저장 파일 스트리밍(one-from-server pull) — CIMS 녹취와 연결 | — | TS 23.281 §7.4.2.4 · §7.3.2.4 | V8 |
 | 망 상태에 맞춘 화질 조정 | 손실·지연 감지 → 코덱·해상도 등 통신 파라미터 변경 요청 | — | TS 23.281 §7.17 | V8 |
 
-## 2. 현재 구현 — «PTT 영상»과 규격의 차이
+## 2. MCPTT 호와 그룹 영상의 경계
 
-현행은 영상을 **MCPTT 그룹 세션 안의 `m=video`** 로 싣는다([ptt_flows.md](ptt_flows.md) «영상 협상»). floor 보유자의 영상을 멤버별 영상 포트로
-나누고 녹취한다. MCVideo 는 전 구간 미구현이다.
+MCPTT 그룹 호는 **음성과 floor 만** 싣는다(TS 24.379·24.380 — MCPTT 미디어 = speech). 단말 offer 에 `m=video` 가 있으면 CSP 의 answer 가
+그 라인을 port 0 으로 거절하고(RFC 3264 §6 — 라인은 남긴다, m= 수·순서 = offer), 제어 기능의 멤버 초대 offer 에는 `m=video` 가 없다. CMP 의 MCPTT
+그룹에는 영상 포트·분배가 없다. 그룹 영상은 같은 그룹 id 의 **MCVideo 호**(§4)로 간다.
 
-| 구간 | 현행 | 규격(MCVideo) |
+| 구간 | MCPTT 그룹 호 | MCVideo 그룹 호 |
 |---|---|---|
-| 그룹 설정 | DB `ptt_groups.video_enabled` 하나가 «PTT 영상»을 켠다. 그룹 문서 `<mcpttgi:mcptt-video>` — **TS 24.481 스키마에 없는 요소를 3GPP 네임스페이스에** 싣는다(V7 까지 전환기 요소). MCVideo 설정 평면(§5.1)은 그와 따로 선다 | MCPTT·MCVideo `<service>` 각각 ICSI enabler + `<mcvideo-*>` 속성 |
-| 영상 유무 | 호 개시 때 한 번 — 앱은 늘 `video=true` 로 제안, 서버가 `video_enabled` 그룹만 받는다. 진행 중 추가·제거 없음 | 음성 = MCPTT 호, 음성+영상 = MCVideo 호(따로 합류·퇴장) |
-| 송출 | floor 보유자만(single/dual/multi-talker 최대 8). 앱은 «내 영상 보내기» 켜기/끄기만(`setVideoSend`, 재협상 없음) | 송출 요청·허가(Transmission Request/Granted), 동시 송출 상한 |
-| 수신 | 영상 그룹 멤버 전원 자동 수신 | 수신자가 스트림을 골라 받는다(manual), 긴급·방송은 자동 |
-| 서비스 신원 | CSC 설정 평면(scope·user profile·service config·ue-init-config)은 있다(§5.1). CSP 가 REGISTER·요청의 MCVideo ICSI·특성 태그를 아직 보지 않는다 | §1.2·§1.6 |
-
-**현행 PTT 영상의 알려진 결함**(코드 조사 — 전환 기간에도 남는다):
-
-- 그룹 영상은 평문이다 — CSP `CmpClient::JoinGroup` 이 PTT_JOIN 에 `media_crypto_video` 를 싣지 않고, psip 합성 SDP 는 SRTP(SAVP) leg 의 video 를
-  port 0 으로 거절한다(`ext/psip/SipDialog.cpp` 350~381). CMP 쪽 영상 SRTP 는 준비돼 있지만 쓰이지 않는다.
-- CMP 가 PTT_GROUP_ADD `video_enabled` 를 읽지 않는다 — 분배 여부는 PTT_JOIN `user_video_port` 유무로만 정해진다([../api/cmp_media_api.md](../api/cmp_media_api.md) §7.1).
-- 그룹 경로에 영상 RTCP 소켓이 없어 수신자의 PLI 가 송출자에게 가지 않는다(cmp.md — 키프레임은 송출 개시 IDR 에만 기댄다).
-- C API·.NET 의 그룹 호 옵션에 영상이 없다(`cimsue_group_call_options_t`·`GroupCallOptions`, `set_video_send` 없음) — Kotlin 만 있다.
+| 그룹 설정 | 그룹 문서 MCPTT `<service>`(영상 요소 없음 — TS 24.481 스키마 그대로) | MCVideo `<service>` + `<mcvideo-*>` 속성(§5.1) — 관리 API 그룹 `mcvideo`(null = 끔) |
+| 미디어 | 음성 + floor(`m=application` MCPTT) | 음성 + 영상 + 전송 제어(`m=application` MCVideo) |
+| 송출 | floor 보유자(single/dual/multi-talker) | 송출 요청·허가(Transmission Request/Granted), 동시 송출 상한 |
+| 수신 | 그룹 멤버 전원 | 수신자가 송출을 골라 받는다(manual), 긴급·방송은 automatic |
+| DB | `ptt_groups` — 옛 «PTT 영상» 열 `video_enabled` 는 코드가 읽지도 쓰지도 않는다(§8 3 에서 DROP) | `mcvideo_group_attrs` · `mcvideo_user_profile` · `mcvideo_affiliations` |
 
 ## 3. 설계 원칙
 
@@ -189,7 +182,7 @@ service configuration 에서 `<confidentiality-protection>`·`<integrity-protect
   │ PUBLISH affiliation g002 (mcptt)           ─────────▶ 200     ← 음성 호를 받는다
   │ PUBLISH affiliation g002 (mcvideo, mcvideoPresInfo) ▶ 200     ← (prearranged 면) 영상 호 초대 대상
   │
-  │ ── [PTT] = MCPTT 그룹 호 (현행과 같다) ──────────────────────────────────────────
+  │ ── [PTT] = MCPTT 그룹 호 (음성 + floor) ─────────────────────────────────────────
   │
   │ ── 영상 채널을 주채널로 고름 = MCVideo 호도 합류(D10) ──────────────────────────────
   │ INVITE sip:<mcvideo PSI>  mcvideo-info session-type=chat, request-uri=tel:g002
@@ -231,7 +224,7 @@ service configuration 에서 `<confidentiality-protection>`·`<integrity-protect
   `<list-service>` MCVideo 속성(TS 24.481 §7.2.2 목록 순, 보호 둘 false 명시, 실시간 모드 = 비긴급 실시간 고정) + 규칙 action `mcvideo-*`(긴급·임박·경보
   false — V8) + entry `<mcvideo-mcvideo-id uri>`. MCData 서비스가 있으면 entry `<mcdata-mcdata-id uri>`(§7.2.2 MCData entry c)). XCAP PUT 해석
   (`parse_group_document_xml`) = MCVideo `<service>` 가 있으면 켜고 속성 반영(보호 true·범위 밖 400). **전환기 규칙** — MCVideo `<service>` 가 없는 PUT 은
-  MCVideo 상태를 건드리지 않는다(MCVideo 를 모르는 옛 단말의 PUT 이 서비스를 지우지 않게. 끄기는 관리 API, V7 에서 «부재 = 끔» 으로 바꾼다).
+  MCVideo 상태를 건드리지 않는다(MCVideo 를 모르는 옛 단말의 PUT 이 서비스를 지우지 않게. 끄기는 관리 API. «부재 = 끔» 은 관제 앱 그룹 편집이 MCVideo 몫을 보존·편집하게 된 뒤(W4)).
 - **CMS** — `CMSXCAPROOT/org.3gpp.mcvideo.user-profile/users/<MCVideo ID>/mcvideo-user-profile-<n>.xml`(본인만·scope `video_config_management_service`·
   자격 행 없으면 404) · `CMSXCAPROOT/org.3gpp.mcvideo.service-config/global/mcvideo-service-config.xml`(전역 문서, TS 24.484 §9.4.2.9). user profile 의
   그룹 목록 = 이 사용자가 멤버인 MCVideo 그룹(`<MCVideoGroupInfo>` 하나에 하나), 상한 = `MaxSimultaneousVideoStreams`·N6·N2. service config =
@@ -326,8 +319,8 @@ mcvideo 인 `PTT_GROUP_ABORTED`·`TRANSMITTERS`·`TRANSMISSION_INACTIVITY` 를 M
 ### 5.3 CMP (미디어 · 전송 제어)
 
 - **그룹 종류** (구현) — `PMcvideoGroup` — `PMcpttGroup` 과 따로 선 그룹 종류(floor 없음). 서버 자원 키 = (service, group_id) — 같은 그룹 id 의 MCPTT
-  그룹 호와 동시에 선다(§7 D6). 멤버 단위 = 전용 유닛 `PMcvMemberPort` — 6포트 블록(audio RTP · video RTP · **video RTCP**(PLI·FIR 를 받는다 — 현행
-  PTT 영상 결함 해소) · 전송 제어), 그룹 공유 포트 없음. 멤버 두 단계(선할당 = 유닛 + 전송 제어 SSRC `tc_ssrc` · 주소 등록), 소스 판정·NAT latch 는 MCPTT
+  그룹 호와 동시에 선다(§7 D6). 멤버 단위 = 전용 유닛 `PMcvMemberPort` — 6포트 블록(audio RTP · video RTP · **video RTCP**(PLI·FIR 를 받는다) ·
+  전송 제어), 그룹 공유 포트 없음. 멤버 두 단계(선할당 = 유닛 + 전송 제어 SSRC `tc_ssrc` · 주소 등록), 소스 판정·NAT latch 는 MCPTT
   멤버와 같은 규칙, 전역 유일 SSRC 할당기(`AllocSsrc` — 송출 SSRC·`tc_ssrc` 공용). 제어 명령 `PTT_GROUP_ADD/MODIFY/REMOVE`·`PTT_JOIN/LEAVE` +
   `service:"mcvideo"`(`cmp/PCmpServerMcvideo.cpp`), `resource.mcvideo`·STATS `mcvideo_groups`·sweeper 회수(`PTT_GROUP_ABORTED` service mcvideo).
   보호(구현 — B7) — 멤버 SRTP(`media_crypto`·`media_crypto_video` — 상향 멤버 키로 풀고 하향 받는 멤버 키로 SSRC·PT 찍기 뒤 보호) · 전송 제어 SRTCP
@@ -432,7 +425,7 @@ Indicator, automatic 수신; 1차 CSP 는 normal) · JOIN 응답 `audio_ssrc`·`
   영상을 그린다 — CMP 가 수신 허가된 송출만 내보내므로([받기] 전 영상 RTP 0) 1차 수신 상한 1 에서는 스트림 분리가 필요 없다. 스트림별 렌더 창(한 m=video
   의 여러 SSRC — 다중 수신)은 V8 로 «호별 수신 창» 과제(ue_sdk.md §11)와 합친다.
 - **수신 제어**(구현) — `acceptReception(callId, transmitterId)`·`endReception`(§6.2.5, T103·T104).
-- **바인딩**(구현 — C7) — C API·.NET·Kotlin 같은 이름(현행 그룹 영상 옵션 누락도 메웠다 — [ue_sdk.md](ue_sdk.md) §4.6). MCVideo 설정 문서 해석(C2)도 셋 다 —
+- **바인딩**(구현 — C7) — C API·.NET·Kotlin 같은 이름([ue_sdk.md](ue_sdk.md) §4.6). MCVideo 설정 문서 해석(C2)도 셋 다 —
   그룹 문서 MCVideo 몫(없음 = MCVideo 그룹 아님 · PUT 에 싣지 않아 서버 MCVideo 설정 유지)·user profile·service config·ue-init-config MCVideo PSI.
 - **cimsue-cli**(구현 — C8) — `video-call <g> [--prearranged] [--implicit] [--transmit-at S --transmit-len S] [--accept]` · `video-answer`(멤버 초대 대기) ·
   구동 명령 `video_call`·`transmit_request`·`transmit_release`·`reception_accept`·`reception_end` + 이벤트 `transmission`·`reception`([ue_sdk.md](ue_sdk.md) §4.7).
@@ -465,8 +458,7 @@ Indicator, automatic 수신; 1차 CSP 는 normal) · JOIN 응답 `audio_ssrc`·`
   영상이 있을 때만 생기는 영상 칸(캡션·[그만 보기]·[크게|작게]·«이름 · 바꿔 보기» — 1차 수신 1개, 바꾸면 보던 것을 그만 본다). 영상 칸이 없으면
   채팅이 그 자리를 쓰고, [크게] 는 채팅 자리까지 쓰되 하단 탭은 그대로다(전체화면 오버레이 없음). 무전 세션이 T4 로 끝나도 영상 호는 이어지고 주채널
   화면은 «대기 — 무전 세션 없음» 으로 그 채널을 보여 준다. 영상을 보는 동안 무전 수신을 줄인다(D6). 마이크 경합은 설정 «영상 보내는 중 무전»
-  (D12 — `VideoMicPolicy`). MCPTT 그룹콜은 영상을 제안하지 않는다(D9 — SDK 의 `GroupCallOptions.video`·`AccountConfig.mcpttVideo` 제거는 V7
-  배포 창, C API·.NET 포함). 실기(.45, W999·MF52, g002 chat) 확인 = 자동 합류·송출·[보기]·[크게]·[그만 보기]·D12 음성 우선·T4 뒤 유지.
+  (D12 — `VideoMicPolicy`). MCPTT 그룹콜은 영상을 제안하지 않는다(SDK 에 MCPTT 영상 옵션이 없다 — 착신 `m=video` 는 port 0 으로 거절). 실기(.45, W999·MF52, g002 chat) 확인 = 자동 합류·송출·[보기]·[크게]·[그만 보기]·D12 음성 우선·T4 뒤 유지.
 - **관제 앱(Windows·태블릿)**(Windows 구현 — 화면 규약 정본 [dispatch_desktop_ui.md](dispatch_desktop_ui.md) §10) — 내 채널의 영상 채널(user profile
   `<MCVideoGroupInfo>` 의 멤버 그룹)은 앱이 영상 호에도 함께 합류한다(D10 — chat = 합류, 편성 = MCVideo affiliation + 멤버 초대 자동 수락, N6 안에서, 무전 T4 와 무관하게
   이어 가고 끝나면 다시 합류). 카드 «영상 n»(보내는 중 수) · 채널 상세 «영상» 절(볼 때만 영상 칸 — 기본 세로 480×640(3:4), [↺][↻] 90° 씩 회전(보내는 사람마다 기억) · «영상 n» 목록 [보기]/[바꿔 보기]/[그만 보기] —
@@ -484,7 +476,7 @@ Indicator, automatic 수신; 1차 CSP 는 normal) · JOIN 응답 `audio_ssrc`·`
 
 | WP | 대상 | 내용 |
 |---|---|---|
-| **V0 규격 정합 즉시분** | CSC·SDK | ① MCPTT `<service enabler>` = MCPTT ICSI(GMS 생성·XCAP PUT 해석·SDK `group_doc.cpp` 생성) ② 비규격 `<mcpttgi:mcptt-video>` 의 지위 정리 — 전환기 요소로 편차 표에 적고 V7 에서 걷는다(3GPP 네임스페이스에 새 비규격 요소를 더하지 않는다) |
+| **V0 규격 정합 즉시분** | CSC·SDK | ① MCPTT `<service enabler>` = MCPTT ICSI(GMS 생성·XCAP PUT 해석·SDK `group_doc.cpp` 생성) ② 3GPP 네임스페이스에 비규격 요소를 싣지 않는다(옛 `<mcpttgi:mcptt-video>` 는 V7 에서 걷었다) |
 | **V1 설정 평면** | CSC·DB·콘솔 | DB `mcvideo_group_attrs`·`mcvideo_user_profile` + 마이그레이션(`video_enabled`=1 그룹 → MCVideo 지원 행, §8) · 그룹 문서 MCVideo `<service>`·`<mcvideo-*>`·`<mcvideo-mcvideo-id>`(보호 false 명시) · CMS user profile·service config · ue-init-config `MCVideo-Service-Details` · scope 넷 · 관리 API·콘솔 서비스 절 · xcap-diff |
 | **V2 CSP 호 제어** | CSP·psip | `CMcVideoAsModule`·`Roles.MCVIDEO`, ICSI 분기, 등록 태그·서비스 인가, 서비스별 affiliation·`mcvideoPresInfo`, mcvideo-info 코덱, chat·prearranged 그룹 호(개시·합류·재합류·퇴장·해제), SDP `udp MCVideo`, Warning 코드, CMP 명령 |
 | **V3 CMP 전송·수신 제어** | CMP | MCVideo 그룹 종류, MCV0/1/2 코덱, 서버 상태 머신(§6.3.4~§6.3.7), 동시 송출 상한·우선순위 revoke, Active SSRC List 분배, 영상 RTCP(PLI), 영상 SRTP, 녹취 슬롯, HEARTBEAT 자원 |
@@ -504,7 +496,7 @@ Indicator, automatic 수신; 1차 CSP 는 normal) · JOIN 응답 `audio_ssrc`·`
 | D1 | MCVideo ID | **MCPTT ID 와 같은 값**(TS 23.280 §10.1.4.1 단일 MC service ID) — `mcdata_id = mcptt_id` 와 같은 규약, 요청은 ICSI 로 가른다 |
 | D2 | 제어 기능의 자리 | CSP 안 새 모듈 `CMcVideoAsModule`(참여·제어 겸임). 그룹 세션 부품은 PTT-AS 와 공유하되 MCVideo 규칙(ICSI·본문·SDP·Warning)은 모듈 안에 |
 | D3 | CMP 명령 | 서비스를 명시한 명령 — 새 명령(`MCVIDEO_*`) 또는 기존 PTT 명령의 `service` 필드. 권고 = **기존 명령 + `service` 필드**(포트·SRTP·녹취 필드를 한 번만 정의), 제어 차이는 CMP 그룹 종류가 가진다 |
-| D4 | 그룹 모델 | 한 그룹 id 에 서비스 집합. DB = 서비스별 표(`mcvideo_group_attrs` 행 = 지원 · `mcvideo_user_profile` 행 = 자격 · `mcvideo_affiliations`) — 가입 표의 kind 별 분리(`ptt_subscriptions` 등)와 같은 구조. `video_enabled` 는 V7 까지 전환기로만 |
+| D4 | 그룹 모델 | 한 그룹 id 에 서비스 집합. DB = 서비스별 표(`mcvideo_group_attrs` 행 = 지원 · `mcvideo_user_profile` 행 = 자격 · `mcvideo_affiliations`) — 가입 표의 kind 별 분리(`ptt_subscriptions` 등)와 같은 구조. 옛 `video_enabled` 열은 코드가 쓰지 않는다(§8 3 에서 DROP) |
 | D5 | 기본 호 종류 | **확정 — chat**(`mcvideo-on-network-invite-members` false). 원하는 사람만 영상에 들어오고, 합류가 곧 affiliation. prearranged(전원 초대)는 그룹 속성으로 고른다 |
 | D6 | 음성 호와 영상 호의 공존 | **확정 — 둘 다 유지.** 규격 미정(§1.1)이라 단말 정책: 영상 채널에서도 MCPTT 호에 남아 [PTT](하드웨어 PTT 키 포함)는 음성 호, [영상 보내기]는 영상 호. 두 호의 소리가 겹치면 **영상 호 송출 음성 우선**(무전 음성은 줄이거나 끈다). «영상만 쓰기»는 사용자가 MCPTT 호를 나가는 선택 |
 | D7 | 보호 요소 | E2E 가 설 때까지 `mcvideo-protect-media`·`mcvideo-protect-transmission-control`·service config 보호 요소 **false 명시**(없으면 true 로 읽힌다). 구간 보호는 SRTP/SRTCP(media_security.md) |

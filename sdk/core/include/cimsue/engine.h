@@ -220,8 +220,8 @@ public:
     Result setVideoWindow(void* nativeWindow);
     /** 캡처 카메라 전환(전면↔후면) — 활성 영상 호의 송신 장치를 다음 카메라로 바꾸고, 이후 호의 기본 장치로도 쓴다. */
     Result switchCamera(int callId);
-    /** 내 영상 송출 허용(CallInfo.videoSend) — MCPTT 반이중은 허용이면서 발언권을 가진 동안만 보내고(Granted = 송출 시작·키프레임,
-     *  놓음 = 정지·카메라 닫힘), 그 밖의 호는 곧바로 송출을 시작·정지한다. 재협상(re-INVITE) 없음. 영상 없는 빌드·호면 실패. */
+    /** 내 영상 송출 허용(CallInfo.videoSend) — 1:1 영상 호는 곧바로 송출을 시작·정지하고, MCVideo 호는 허용이면서 송출 허가를 가진
+     *  동안만 보낸다. 재협상(re-INVITE) 없음. 영상 없는 빌드·호면 실패. 그룹 영상은 MCVideo 호다 — MCPTT 호는 음성만(mcvideo.md §8). */
     Result setVideoSend(int callId, bool on);
     std::vector<VideoDeviceInfo> videoDevices() const;
     /** 추가 재생 라우트 — 두 번째 재생 장치를 재생 전용으로 브리지에 연다(관제석 헤드셋+스피커 분리 출력,

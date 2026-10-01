@@ -393,7 +393,6 @@ public sealed unsafe class Engine : IDisposable
         n.mcdata_msrp = B(a.McdataMsrp);
         n.mcptt_server_uri = s.Add(a.McpttServerUri);
         n.mcdata_server_uri = s.Add(a.McdataServerUri);
-        n.mcptt_video = B(a.McpttVideo);
         n.mcvideo_enabled = B(a.McvideoEnabled);
         n.mcvideo_server_uri = s.Add(a.McvideoServerUri);
         n.auto_answer_mcvideo = B(a.AutoAnswerMcvideo);
@@ -418,7 +417,7 @@ public sealed unsafe class Engine : IDisposable
             McpttClientId = Opt(n->mcptt_client_id), RpEmergency = Opt(n->rp_emergency), RpImminentPeril = Opt(n->rp_imminent_peril),
             RpNormal = Opt(n->rp_normal), MaxSdsCplaneBytes = n->max_sds_cplane_bytes, McdataMsrp = n->mcdata_msrp != 0,
             McpttServerUri = Opt(n->mcptt_server_uri), McdataServerUri = Opt(n->mcdata_server_uri),
-            McpttVideo = n->mcptt_video != 0, McvideoEnabled = n->mcvideo_enabled != 0, McvideoServerUri = Opt(n->mcvideo_server_uri),
+            McvideoEnabled = n->mcvideo_enabled != 0, McvideoServerUri = Opt(n->mcvideo_server_uri),
             AutoAnswerMcvideo = n->auto_answer_mcvideo != 0,
         };
     }

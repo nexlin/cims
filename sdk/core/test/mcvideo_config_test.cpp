@@ -61,7 +61,6 @@ TEST(McvConfig, GroupDocG101) {
     EXPECT_EQ(d.maxDurationSec, 3600);
     EXPECT_EQ(d.priority, 5);
     EXPECT_EQ(d.allowConferenceState, 1);
-    EXPECT_TRUE(d.videoEnabled);                            // 전환기 요소 mcptt-video(V7 까지)
     const McVideoGroupAttrs& v = d.mcvideo;
     EXPECT_TRUE(v.present);
     EXPECT_FALSE(v.inviteMembers);                          // chat(D5)

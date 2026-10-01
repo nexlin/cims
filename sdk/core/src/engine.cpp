@@ -558,11 +558,11 @@ struct Engine::Impl {
     int64_t sendMcVideoAffiliation(int accountId, int64_t token, int64_t appToken, bool allowConditional);
     /** 영상 미디어가 활성된 호 — 수신 창 결선 + (계정 videoAutoTransmit 면) 카메라 송신 개시. 영상 없는 빌드면 아무것도 안 한다. */
     void attachVideo(PjCall* call, int accountId);
-    /** 내 영상 송출 개폐 — MCPTT 반이중은 허용(videoSend)·발언권(micOpen)이 둘 다일 때만, 그 밖의 호는 허용만 본다(ue_sdk.md §4.5).
+    /** 내 영상 송출 개폐 — MCVideo 호는 허용(videoSend)·송출 허가(sendOn)가 둘 다일 때만, 그 밖의 호는 허용만 본다(ue_sdk.md §4.5).
      *  이미 그 상태면 아무것도 안 한다. 송출 시작은 첫 프레임을 키프레임으로 만들고, 정지는 카메라를 닫는다(재협상 없음). */
     void applyVideoTx(PjCall* call);
-    /** 영상 keep-alive 틱(ue-ctl, PJMEDIA_STREAM_KA_INTERVAL 주기) — 송출하지 않는 MCPTT 영상 스트림의 NAT 매핑 유지.
-     *  CMP 는 멤버 영상 포트를 그 멤버가 보낸 패킷으로 latch 한다(cmp.md) — 말하지 않는 청취자도 보내야 받는다. */
+    /** 영상 keep-alive 틱(ue-ctl, PJMEDIA_STREAM_KA_INTERVAL 주기) — 송출하지 않는 MCVideo 영상 스트림의 NAT 매핑 유지.
+     *  CMP 는 멤버 영상 포트를 그 멤버가 보낸 패킷으로 latch 한다(cmp.md) — 보내지 않는 수신자도 보내야 받는다. */
     void videoTick();
     /** 틱 예약 — 첫 예약은 1 s 뒤(스트림 개시 keep-alive 가 서버 JOIN 보다 먼저 닿아 버려질 수 있다), 이후 KA 주기. */
     void armVideoTick(unsigned delayMs = PJMEDIA_STREAM_KA_INTERVAL * 1000);
@@ -876,7 +876,6 @@ public:
                 if (!c || !c->mcptt) return;
                 c->mcptt->micOpen = on;
                 try { o->wireMedia(c, id); } catch (pj::Error& e) { o->log(2, std::string("floor mic: ") + e.info(false)); }
-                o->applyVideoTx(c);                                          // 영상도 발언권을 따른다
             });
         };
         cb.log = [o](int level, const std::string& m) { o->log(level, m); };
@@ -1297,16 +1296,15 @@ public:
         } catch (pj::Error& e) { o_->log(2, std::string("180 failed: ") + e.info(false)); }
         o_->emit([o = o_, snap] { o->listener->onIncomingCall(snap); });
         if (autoAnswer) {
-            // 그룹 영상 — 서버가 m=video 를 제안했고(video_enabled 그룹) 계정이 받기로 했으면 영상까지(ptt_flows.md 영상 협상)
-            const bool withVideo = cfg.mcpttVideo && snap.video;
-            o_->ctl.post([o = o_, id = prm.callId, withVideo] {
+            // MCPTT 호는 음성만 — 서버가 m=video 를 실어도 port 0 으로 거절한다(RFC 3264 §6, 그룹 영상 = MCVideo 호 — mcvideo.md §8)
+            o_->ctl.post([o = o_, id = prm.callId] {
                 PjCall* c = o->findCall(id);
                 if (!c) return;
                 try {
                     pj::CallOpParam p(true);
                     p.statusCode = PJSIP_SC_OK;
                     p.opt.audioCount = 1;
-                    p.opt.videoCount = withVideo ? 1 : 0;
+                    p.opt.videoCount = 0;
                     c->answer(p);
                 } catch (pj::Error& e) { o->log(1, std::string("mcptt auto-answer: ") + e.info(false)); }
             });
@@ -1672,8 +1670,8 @@ void Engine::Impl::attachVideo(PjCall* call, int accountId) {
             } catch (pj::Error& e) { log(3, std::string("video transmit: ") + e.info(false)); }
         }
     }
-    // MCPTT·MCVideo — 송출은 계정 autoTransmit 이 아니라 발언권·송출 허가를 따른다. 보내지 않는 동안은 keep-alive 로 NAT 를 연다.
-    if (call->mcptt || call->mcvideo) {
+    // MCVideo — 송출은 계정 autoTransmit 이 아니라 송출 허가를 따른다. 보내지 않는 동안은 keep-alive 로 NAT 를 연다.
+    if (call->mcvideo) {
         applyVideoTx(call);
         armVideoTick(1000);
     }
@@ -1685,7 +1683,6 @@ void Engine::Impl::attachVideo(PjCall* call, int accountId) {
 void Engine::Impl::applyVideoTx(PjCall* call) {
 #if PJSUA_HAS_VIDEO
     bool want = call->videoSend && !call->recvOnly;
-    if (call->mcptt) want = want && !call->mcptt->listenOnly && (call->mcptt->fullDuplex || call->mcptt->micOpen);
     if (call->mcvideo) want = want && call->mcvideo->sendOn;                // 송출 허가에서만(TS 24.581 §6.2.4.4.6)
     pj::CallInfo ci;
     try { ci = call->getInfo(); } catch (...) { return; }
@@ -1698,7 +1695,7 @@ void Engine::Impl::applyVideoTx(PjCall* call) {
         p.medIdx = (int)m.index;
         pjsua_call_vid_strm_op op = want ? PJSUA_CALL_VID_STRM_START_TRANSMIT : PJSUA_CALL_VID_STRM_STOP_TRANSMIT;
         if (want && !(m.dir & PJMEDIA_DIR_ENCODING)) {
-            if (call->mcptt || call->mcvideo) continue;                   // 그룹 세션 방향은 서버가 정한다 — 재협상하지 않는다
+            if (call->mcvideo) continue;                                  // 그룹 세션 방향은 서버가 정한다 — 재협상하지 않는다
             op = PJSUA_CALL_VID_STRM_CHANGE_DIR; p.dir = PJMEDIA_DIR_ENCODING_DECODING;
         }
         try {
@@ -1718,7 +1715,7 @@ void Engine::Impl::videoTick() {
     bool any = false;
     for (auto& kv : calls) {
         PjCall* c = static_cast<PjCall*>(kv.second.get());
-        if (!c || (!c->mcptt && !c->mcvideo)) continue;
+        if (!c || !c->mcvideo) continue;
         pj::CallInfo ci;
         try { ci = c->getInfo(); } catch (...) { continue; }
         for (auto& m : ci.media) {
@@ -2285,7 +2282,7 @@ static int startMcptt(Engine::Impl* o, int accountId, const std::string& id, boo
     try {
         pj::CallOpParam prm(true);
         prm.opt.audioCount = 1;
-        prm.opt.videoCount = opts.video ? 1 : 0;                         // 그룹 영상 — 서버가 video_enabled 아니면 port 0
+        prm.opt.videoCount = 0;                                          // MCPTT 호는 음성만 — 그룹 영상은 MCVideo 호(mcvideo.md §8)
         prm.txOption.multipartContentType.type = "multipart";
         prm.txOption.multipartContentType.subType = "mixed";
         pj::SipMultipartPart p1;
@@ -2320,7 +2317,6 @@ static int startMcptt(Engine::Impl* o, int accountId, const std::string& id, boo
     o->updateCall(callId, [&](CallInfo& c) {
         c.accountId = accountId; c.dir = CallDir::Outgoing; c.state = CallState::Outgoing;
         c.remoteUri = "sip:" + id + "@" + cfg.domain;
-        c.video = opts.video;
         call->projectMcptt(c);                                            // onCallState(CALLING) 가 먼저 투영했으면 no-op
     });
     const bool broadcast = call->mcptt->broadcast;

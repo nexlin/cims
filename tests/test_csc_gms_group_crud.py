@@ -99,7 +99,7 @@ class _Base(unittest.TestCase):
 class ParseTests(unittest.TestCase):
     def test_roundtrip_with_get_group_xml(self):
         m.GROUPS["tel:g-0000abcd"] = {
-            "display_name": "관제채널", "etag": "e", "video_enabled": True, "priority": 3, "encryption": False,
+            "display_name": "관제채널", "etag": "e", "priority": 3, "encryption": False,
             "emergency_call": True, "emergency_alert": False, "allow_conference_state": False, "allow_sds": True,
             "allow_fd": True, "max_sds_size": 2000, "max_auto_recv": 4096, "org_code": "TEAM01", "group_type": "chat",
             "max_members": 7, "require_affiliation": False, "authorized_user": "tel:+82510001001",
@@ -114,7 +114,7 @@ class ParseTests(unittest.TestCase):
             m.GROUPS.pop("tel:g-0000abcd", None)
         self.assertEqual(d["display_name"], "관제채널")
         self.assertEqual(d["group_type"], "chat")
-        self.assertEqual((d["video_enabled"], d["priority"], d["encryption"]), (True, 3, False))
+        self.assertEqual((d["priority"], d["encryption"]), (3, False))
         self.assertEqual((d["emergency_call"], d["emergency_alert"]), (True, False))
         # on-network-allow-conference-state (TS 24.481 §7.2.4.2) — cp:actions 요소 왕복
         self.assertIs(d["allow_conference_state"], False)

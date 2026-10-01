@@ -211,20 +211,22 @@ cat build/dist/.deployed-manifest.json    # manifest_sha + ts
 # ENTRY-CHECK (6 host:port + immutability) → SEED → 시나리오 → SUMMARY
 ```
 
-**시나리오 (cspsim 4종 + 깊이검증 5종)**:
+**시나리오 (cspsim 3종 + 깊이검증 5종)**:
 
 | # | 시나리오 | 대상 | 합격 |
 |---|---|---|---|
 | 1 | VoLTE 음성 2자 (`-mode volte -count 2 -no_video`) | volte-sip | seg_*.rtp +1 |
 | 2 | VoLTE 영상 2자 (`-mode volte -count 2`) | volte-sip | seg_*.rtp +1 |
 | 3 | PTT 그룹 음성 5인 (`-mode ptt -scenario group_call -count 5 -no_video`) | ptt-sip (127.0.0.3) | seg_*.rtp +1 |
-| 4 | PTT 그룹 영상 5인 (`-mode ptt -scenario group_call -count 5`) | ptt-sip | seg_*.rtp +1 |
-| 5 | L7-NOTIFY (SUBSCRIBE/NOTIFY xcap-diff/resource-lists/conference-info XML well-formed) | csp | NOTIFY body XML namespace 매칭 |
-| 6 | CMP-GROUP-SYNC (그룹콜 세션 중 admin PUT floor_policy → PTT_GROUP_MODIFY 전파) | pmp 9000/udp | 세션 수립(STATS group_details 등장) + 변경값 STATS 반영 (CMP 그룹은 on-demand 세션 자원 — 유휴 시 상시 roster 없음) |
-| 7 | MCPTT-FLOOR-GRANT (cmp_*.flow.jsonl 의 FLOOR_GRANT/TAKEN/IDLE) | pmp | flow.jsonl 매칭 |
-| 8 | DB-SYNC (admin → CSP 의 USER_CHANGED/GROUP_CHANGED notify 로그 매칭) | csp + psp | log glob 매칭 |
-| 9 | CERT-ROTATE (mTLS 토글 시 cert 발급 + agent reload) — `--enable-mtls` 시만 | mgmt csc + agent | cert_issued_at 갱신 또는 agent_mtls.crt mtime 60s 이내 |
+| 4 | L7-NOTIFY (SUBSCRIBE/NOTIFY xcap-diff/resource-lists/conference-info XML well-formed) | csp | NOTIFY body XML namespace 매칭 |
+| 5 | CMP-GROUP-SYNC (그룹콜 세션 중 admin PUT floor_policy → PTT_GROUP_MODIFY 전파) | pmp 9000/udp | 세션 수립(STATS group_details 등장) + 변경값 STATS 반영 (CMP 그룹은 on-demand 세션 자원 — 유휴 시 상시 roster 없음) |
+| 6 | MCPTT-FLOOR-GRANT (cmp_*.flow.jsonl 의 FLOOR_GRANT/TAKEN/IDLE) | pmp | flow.jsonl 매칭 |
+| 7 | DB-SYNC (admin → CSP 의 USER_CHANGED/GROUP_CHANGED notify 로그 매칭) | csp + psp | log glob 매칭 |
+| 8 | CERT-ROTATE (mTLS 토글 시 cert 발급 + agent reload) — `--enable-mtls` 시만 | mgmt csc + agent | cert_issued_at 갱신 또는 agent_mtls.crt mtime 60s 이내 |
 
+> MCPTT 그룹 호는 음성만이라 PTT 시나리오는 음성 하나다. 그룹 영상은 MCVideo 호이고 그 검증은 MCVideo 기준을 따른다
+> ([design/features/mcvideo.md](design/features/mcvideo.md) §10).
+>
 > 각 PTT 시나리오는 `_helpers.target_ip("psp")` 로 PSP 의 LocalIp (127.0.0.3)
 > 를 자동 선택. ENTRY-CHECK 는 `csc_console + 4 service-server` 6 host:port
 > 매트릭스로 LISTEN 검증.

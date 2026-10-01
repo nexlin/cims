@@ -143,7 +143,6 @@ fun NewGroupPanelContent(
             if (advanced) Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 SwitchLine("그룹 문자(SDS)", form.allowSds) { v -> onChange { it.copy(allowSds = v) } }
                 SwitchLine("파일 전송(FD)", form.allowFd) { v -> onChange { it.copy(allowFd = v) } }
-                SwitchLine("영상", form.videoEnabled) { v -> onChange { it.copy(videoEnabled = v) } }
                 SwitchLine("종단간 암호화", form.encryption) { v -> onChange { it.copy(encryption = v) } }
                 SwitchLine("긴급 통화", form.emergencyCall) { v -> onChange { it.copy(emergencyCall = v) } }
                 SwitchLine("긴급 경보", form.emergencyAlert) { v -> onChange { it.copy(emergencyAlert = v) } }

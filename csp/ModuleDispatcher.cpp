@@ -1863,11 +1863,10 @@ void CModuleDispatcher::EventCallStart( const char *pszCallId, CSipCallRtp *pcls
             int iRemoteAudio = pclsRtp->GetAudioPort();
             if ( iRemoteAudio <= 0 && pclsRtp->m_iPort > 0 ) iRemoteAudio = pclsRtp->m_iPort;
             if ( iRemoteAudio > 0 ) {
-                int iRemoteVideo = pclsRtp->GetVideoPort();
                 // SDP m=application floor control 포트 파싱 (≤0 이면 OnCallStarted 내부 fallback)
                 int iRemoteFloor = pclsRtp->GetApplicationPort();
                 gclsGroupCallService.OnCallStarted( pszCallId, pclsRtp->m_strIp, iRemoteAudio,
-                                                    iRemoteFloor > 0 ? iRemoteFloor : 0, iRemoteVideo, pclsRtp );
+                                                    iRemoteFloor > 0 ? iRemoteFloor : 0, pclsRtp );
             }
 
             // 상대 leg 로 나가는 SDP 재작성 — answer leg 키 투과 차단 + 상대 leg 상태로 재광고 (§5.2).
@@ -2449,10 +2448,9 @@ void CModuleDispatcher::EventReInvite( const char *pszCallId, CSipCallRtp *pclsR
         int iAudioPort = pclsRemoteRtp->GetAudioPort();
         if ( iAudioPort <= 0 && pclsRemoteRtp->m_iPort > 0 ) iAudioPort = pclsRemoteRtp->m_iPort;
         if ( iAudioPort > 0 ) {
-            int iRemoteVideo = pclsRemoteRtp->GetVideoPort();
             int iRemoteFloor = pclsRemoteRtp->GetApplicationPort();
             gclsGroupCallService.OnCallStarted( pszCallId, pclsRemoteRtp->m_strIp, iAudioPort,
-                                                iRemoteFloor > 0 ? iRemoteFloor : 0, iRemoteVideo, pclsRemoteRtp );
+                                                iRemoteFloor > 0 ? iRemoteFloor : 0, pclsRemoteRtp );
         }
     }
 }

@@ -183,7 +183,7 @@ public:
      *  종료한 멤버 호 수를 반환. */
     int TerminateGroupLocal( const std::string &strGroupId );
     void OnCallStarted( const std::string &strCallId, const std::string &strRemoteIp, int iRemotePort,
-                        int iRemoteFloorPort = 0, int iRemoteVideoPort = 0, class CSipCallRtp *pclsRtp = NULL );
+                        int iRemoteFloorPort = 0, class CSipCallRtp *pclsRtp = NULL );
 
     /** Called by CSC interface when group/user config changes externally */
     void OnGroupConfigChanged();
@@ -221,11 +221,6 @@ public:
      *  VoLTE relay leg(remote_* 계열)도 동일 규칙으로 사용한다. */
     static void GetLegPt( const std::string &strCallId, bool bServerOffered, int &iUserPt, int &iUserSrcPt,
                           int &iUserTePt, int &iUserSrcTePt, std::string *pstrCodec = NULL );
-
-    /** leg 별 영상 PT(user_video_pt) — 이 leg 의 원격 SDP(개시자=offer, 수신자=answer)가 m=video 에 선언한
-     *  H.264 wire PT. 동적 PT 는 leg 마다 따로 협상되므로(RFC 3264 §5.1) CMP 가 화자 PT 를 이 값으로 스탬프한다.
-     *  미발견(영상 미협상)이면 0. */
-    static int GetLegVideoPt( const std::string &strCallId );
 
     /** 멤버 SDP(m=application)의 a=fmtp:MCPTT 협상 결과 파싱 (TS 24.380 §12.1.2.3) —
      *  mc_queueing/mc_priority=N/mc_granted → PTT_JOIN 의 queueing/max_priority/granted.
@@ -361,17 +356,16 @@ private:
         std::string strIp;
         size_t nConfigHash;  // CMP 재전달이 필요한 설정(로스터·floor 정책)의 지문 — 변경 감지용
         std::string strSessionCallId;
-        bool bVideoEnabled;
         int iConfVersion;  // RFC 4575 conference-info version counter
-        // 멤버별 CMP 전용 RTP 포트 (sid → {audio, video}) — 각 멤버의 SDP 에 이 포트를 광고.
-        std::map<std::string, std::pair<int, int>> memberPorts;
+        // 멤버별 CMP 전용 RTP 포트 (sid → audio) — 각 멤버의 SDP 에 이 포트를 광고. MCPTT 는 음성만(그룹 영상 =
+        // MCVideo).
+        std::map<std::string, int> memberPorts;
     };
     std::map<std::string, GroupRtpInfo> m_mapGroupRtp;
 
     /** 멤버 전용 CMP 포트 조회 — 캐시(memberPorts) 우선, 없으면 PTT_JOIN ①(선할당)으로 확보.
      *  (늦은 참가자/로스터 외 멤버의 SDP offer 생성 전 호출.) 실패 시 false. */
-    bool GetOrAllocMemberPort( const std::string &strGroupId, const std::string &strMemberId, int &iAudioPort,
-                               int &iVideoPort );
+    bool GetOrAllocMemberPort( const std::string &strGroupId, const std::string &strMemberId, int &iAudioPort );
 
     /** 그룹의 진행 중 조건 (TS 24.379 — in-progress emergency / imminent peril state). 수명 = 그룹 세션
      *  (RemoveGroupSesId 가 지운다 — 규격은 명시 해제·TNG2 까지 유지, mcptt_emergency_modes.md §4.2 편차 표). */

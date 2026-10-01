@@ -366,7 +366,8 @@ UE↔CMP 구간 미디어 SRTP(RFC 3711 + SDES RFC 4568, TS 33.328 e2ae —
 [media_security.md](../design/features/media_security.md))의 leg 별 키. CMP 는 leg 마다
 SRTP 를 **종단**한다: ingress unprotect → 평문(믹스·디먹스·녹취·DTMF) → egress protect.
 운반 명령: `RELAY_ADD`/`RELAY_MODIFY`(leg 별 — `peer_index` 필수), `PTT_JOIN`(멤버별,
-주소 동반 ② 호출). `media_crypto`=audio(RTP + relay 경로 RTCP), `media_crypto_video`=video.
+주소 동반 ② 호출). `media_crypto`=audio(RTP + relay 경로 RTCP), `media_crypto_video`=video(RELAY·tap·
+MCVideo `PTT_JOIN` — MCPTT 그룹 호는 음성만이라 `media_crypto` 하나다).
 
 | `media_crypto` 필드 | 필수 | 설명 |
 |---|---|---|
@@ -507,6 +508,10 @@ RELAY_PLAY_STOP: `session_id` + `play_id`(+`peer_index` 선택) — 없거나 �
 group 자원 키 `(service, group_id)` — 같은 service 의 AS 들이 공유한다.
 member 키 `(node, session_id)`.
 
+MCPTT 그룹 호(`service:"mcptt"`)의 미디어는 **음성 + floor control** 이다(MCPTT 미디어 = speech —
+CSP 는 MCPTT 세션의 `m=video` 를 port 0 으로 거절한다, RFC 3264 §6). 그룹 영상은 별도 서비스인
+MCVideo 그룹 호가 같은 `PTT_*` 명령에 `service:"mcvideo"` 를 실어 따로 세운다([§7.9](#79-mcvideo--송출수신-제어-service-mcvideo)).
+
 > **사용 규약 (생성 vs 변경)**: 최초 수립만 `PTT_GROUP_ADD`, **이후 모든 상태 변경(멤버 증감·
 > 우선순위 등)은 `PTT_GROUP_MODIFY`** 로 한다. 둘은 없는 그룹일 때만 다르다 — ADD 는 생성,
 > MODIFY 는 `NOT_FOUND`(재생성 금지: 재할당 포트가 client 가 광고한 SDP 포트와 어긋남).
@@ -520,7 +525,6 @@ member 키 `(node, session_id)`.
 | `group_id` | O | 그룹 식별자 |
 | `members` | - | `"sid:prio[:role[:tier]],..."` CSV (role=`chair`/`participant`, tier=`emergency`/`imminent`/`normal`) |
 | `subid` | - | 그룹 세션 회차 (flow 로그 subid) |
-| `video_enabled` | - | CSP 가 영상 그룹이면 1 을 싣지만 **CMP 는 읽지 않는다** — 멤버 영상 분배 여부는 PTT_JOIN `user_video_port` 유무로 정해진다(§7.4) |
 | `group_type` | - | 그룹 종류 `prearranged`/`chat`/`private` — `private` 은 1:1 private call(2인, TS 24.379 §11 — floor 절차는 TS 24.380 §6.3 공통). 전환기(한 릴리스): 구 CSP 의 `broadcast` 값은 `broadcast:1` + `prearranged` 로 해석하고 WARN 로그 |
 | `broadcast` | - | `0`/`1` — **일제 통화 호 속성**(TS 24.379 §4.12, 그룹 종류와 직교). `1` 이면 개시자 floor 독점(TS 24.380 §6.3.5.3.4 — 타 참가자 요청은 긴급이어도 Deny #5, Floor Taken/Idle 의 Permission=0, floor 메시지 Floor Indicator B-bit `0x4000`) |
 | `initiator_id` | - | 세션 개시자 sessionId — broadcast 면 유일 발언자. private 에서는 **초기 발언권을 주지 않는다**(초기 발언권의 정본은 PTT_JOIN `granted`). `initiator_id`·`broadcast` 는 **세션의 개시 ADD 에서만 유효**하다 — 그룹을 만드는 ADD, 또는 남은 그룹 컨텍스트에 **다른 `sesid`** 로 오는 ADD. 같은 세션의 재ADD(멤버 추가·녹취 경로·MODIFY)에 실려 와도 무시한다(늦은 합류가 개시자를 바꾸지 않는다 — [mcptt_broadcast_group_call.md](../design/features/mcptt_broadcast_group_call.md) R7) |
@@ -533,7 +537,7 @@ member 키 `(node, session_id)`.
 | `session_dir` | - | 세션 디렉터리 이름 `S{yyyymmddHHMMSSuuuuuu}_{n}` — 기록 자리는 `record_dir/{YYYY}/{MM}/{DD}/{HH}/{session_dir}/`. 기록 단위가 세션이라 같은 시간대의 다음 통화가 앞 통화에 섞이지 않는다. 미전달 시 시간버킷 직행(구 동작). 기존 그룹에 **다른** 이름이 오면(CSP 가 REMOVE 없이 재기동해 남은 컨텍스트를 새 세션이 이어 쓰는 경우) 진행 중 세그먼트를 마감하고 기록 자리를 그 세션으로 옮긴다 — 같은 이름(멤버 추가 ADD)은 무동작. 세그먼트 `seq` 는 **세션 단위 단조증가** — 세션이 시간버킷을 넘어가도 리셋하지 않는다 ([recording.md §3.3](../design/features/recording.md)) |
 
 응답 payload: `ip`, `floor_port`(그룹 공유 floor control 포트 — `floor_control:"off"` 면
-**생략**), `member_ports`(멤버별 전용 RTP 포트 맵 — members 로 전달된 초기 로스터에 대해 할당).
+**생략**), `member_ports`(멤버별 전용 audio RTP 포트 맵 `{sid: {port}}` — members 로 전달된 초기 로스터에 대해 할당).
 기존 그룹 재요청 시 재할당 없이 members 만 갱신하고 동일 포트를 응답한다.
 
 정책 필드의 미상 값(`floor_policy:"dual2"` 등)은 기본값으로 대체하지 않고 `BAD_REQUEST` 로
@@ -545,15 +549,15 @@ member 키 `(node, session_id)`.
     "ip": "192.168.10.11",
     "floor_port": 54000,
     "member_ports": {
-      "01011112222": { "port": 52000, "video_port": 56000 },
-      "01033334444": { "port": 52002, "video_port": 56002 }
+      "01011112222": { "port": 52000 },
+      "01033334444": { "port": 52002 }
     }
   }
 }
 ```
 
 audio RTP 는 그룹 공유 포트가 아니라 **멤버별 전용 포트**다 — client 는 각 멤버의 SDP 에
-그 멤버의 `port`/`video_port` 를 광고한다 (floor 는 그룹 공유 `floor_port`).
+그 멤버의 `port` 를 광고한다 (floor 는 그룹 공유 `floor_port`).
 멤버 신원은 수신 포트로 확정되며, floor control 은 TS 24.380 User ID(in-band)로 식별한다.
 
 ### 7.2 PTT_GROUP_MODIFY — 멤버/우선순위 갱신
@@ -579,11 +583,9 @@ RELAY_REMOVE 와 동일 규칙).
 | `group_id` / `session_id` | O | 대상 그룹 / 멤버 세션 ID |
 | `user_ip` / `user_port` | - | 멤버 RTP 주소 (SDP answer 수신 후 전달 — ①단계 선할당 호출은 생략) |
 | `user_floor_port` | - | 멤버 floor control 포트 |
-| `user_video_port` | - | 멤버 Video RTP 포트 |
 | `user_nat` | - | 1 이면 NAT 뒤 멤버 — 멤버 전용 포트에 목적지 latch 허용 (생략=0) |
 | `user_sig_ip` | - | 멤버의 SIP 시그널링 실소스 IP — latch IP guard 기준 |
 | `user_pt` / `user_te_pt` | - | 이 멤버가 **수신** 선언한 audio/telephone-event wire PT(멤버 자신의 SDP — 개시자=offer, 수신자=answer) — CMP 가 fan-out 으로 이 멤버에 송신 시 스탬프(leg 별 PT 재작성). 생략=0=재작성 없음(현행 PT-blind: 전 leg 와이어 PT 통일 전제) |
-| `user_video_pt` | - | 이 멤버가 **수신** 선언한 영상(H.264) wire PT(멤버 자신의 SDP m=video — 개시자=offer, 수신자=answer) — CMP 가 영상을 이 멤버에 송신 시 스탬프. `user_video_port` 와 함께만 싣는다. 생략=0=재작성 없음. 영상 ingress 는 PT 로 분류하지 않는다(PT 하나) |
 | `user_src_pt` / `user_src_te_pt` | - | 이 멤버가 **송신**에 쓰는 audio/TE PT(= CSP 가 그 leg 쪽에 낸 SDP 의 PT, RFC 3264) — 화자 ingress 의 audio/TE 분류 기준 + 녹취 세그먼트 메타(`audio_pt`, 화자 leg). `user_src_te_pt` 생략 시 TE 는 관례 PT 101 로 분류(DTMF push/release 판독도 동일 기준) |
 | `user_codec` | - | 이 멤버의 협상 오디오 코덱 문자열(예 `"AMR-WB/16000"`) — 녹취 세그먼트 메타(`audio_codec`)용. CSP 는 코덱 테이블 top 의 rtpmap prefix 를 싣는다 |
 | `role` | - | `chair`/`participant` (기본 participant) |
@@ -595,9 +597,9 @@ RELAY_REMOVE 와 동일 규칙).
 | `max_priority` | - | SDP `mc_priority=N` 로 협상한 **요청 가능 최대 우선순위**. 이 값이 있을 때만 Floor Request 의 Floor Priority 로 우선순위를 낮출 수 있다(둘 중 낮은 쪽). 없으면(미협상) 요청의 우선순위 필드를 무시하고 `members` 의 기본값을 쓴다(TS 24.380 §6.3.5.4.4-1a) |
 | `granted` | - | `1` = CSP 가 이 멤버의 개시 INVITE 를 **암묵적 발언 요청**(offer `mc_implicit_request`)으로 받아들였다(TS 24.380 §14.3.5 — 새 세션 개시만) — 참가 시점에 발언자가 없으면 이 멤버에게 **초기 발언권**을 준다(§6.3.4.2.2 3)·§6.3.4.4.2 1.). offer 의 `mc_granted` 는 능력 표시라 이 값의 원천이 아니다 |
 | `floor_crypto` | - | 이 멤버의 floor SRTCP 키 `{alg,key,salt[,mki]}` — **유니캐스트 floor 는 클라이언트별 CSK 로 보호**(TS 33.180 §9.4)한다. 생략 시 그룹 키([§7.8](#78-floor_crypto--floor-rtcp-보호-ts-33180)) |
-| `media_crypto` / `media_crypto_video` | - | 이 멤버 leg 의 미디어 SRTP 키 `{alg,rx{key,salt},tx{key,salt}}` ([§6.4](#64-media_crypto--미디어-srtp-종단-relayptt-공통)). 생략 = 평문 leg(신규) / 기존 키 유지(재-JOIN) — optional 혼용 그룹 표현 |
+| `media_crypto` | - | 이 멤버 leg 의 음성 SRTP 키 `{alg,rx{key,salt},tx{key,salt}}` ([§6.4](#64-media_crypto--미디어-srtp-종단-relayptt-공통)). 생략 = 평문 leg(신규) / 기존 키 유지(재-JOIN) — optional 혼용 그룹 표현 |
 
-응답 payload: `ip`, `port`, `video_port` — **멤버 전용 RTP 포트** (client 는 이 포트를
+응답 payload: `ip`, `port` — **멤버 전용 audio RTP 포트** (client 는 이 포트를
 그 멤버의 SDP 에 광고). 같은 `(group, session_id)` 재요청은 재할당 없이 동일 포트 반환.
 
 늦은 참가자(초기 로스터 외 멤버)는 2단으로 호출한다:
@@ -608,7 +610,6 @@ RELAY_REMOVE 와 동일 규칙).
 주소가 갱신된 멤버의 NAT latch 상태는 리셋되어 재-latch 가 허용되며, 선언 주소·NAT
 속성이 직전과 동일한 재요청(재전송, 세션 refresh)은 latch 를 유지한다 (RELAY_MODIFY 와
 동일 규칙). 멤버가 re-INVITE 로 주소를 재협상하면 client 는 ② 를 다시 호출해 전달한다.
-`user_video_port` 는 video 를 협상한 멤버만 싣는다 (비협상 멤버에 유령 포트 광고 금지).
 
 **leg 별 PT 재작성** (`user_pt` 계열): fan-out 시 화자 leg 의 `user_src_te_pt` 로 패킷을
 audio/TE 로 분류한 뒤, 각 수신 leg 의 `user_pt`/`user_te_pt` 를 스탬프한다(marker bit
@@ -617,9 +618,6 @@ audio/TE 로 분류한 뒤, 각 수신 leg 의 `user_pt`/`user_te_pt` 를 스탬
 TE 인데 수신 leg `user_te_pt` 미지정이면 원본 PT 를 유지한다(audio PT 로 뭉개면 DTMF
 파손). 녹취는 화자 원본 PT 로 기록된다(egress 재작성 전 탭). PT 파라미터는 주소 불변
 재-JOIN(재협상)에서도 항상 최신 선언으로 갱신된다.
-영상도 같은 자리에서 수신 leg 의 `user_video_pt` 를 스탬프한다(marker bit = H.264 프레임 끝 표식 보존, RFC 6184 §5.1).
-동적 PT 는 leg 마다 따로 협상되고(RFC 3264 §5.1) 단말 코덱 구현마다 H.264 PT 가 달라(pjmedia OpenH264 97·Android MediaCodec 99)
-개시자 offer echo 와 서버 fan-out offer(97)가 어긋나기 때문이다.
 
 ### 7.5 PTT_LEAVE — 멤버 이탈
 
@@ -695,8 +693,8 @@ in-band(RTCP APP "MCPT")로만 진행한다 — CSP 는 floor 루프에 들어�
 먼저 말하던 화자의 발언이 끊기지 않도록). `off` 로 바꾸면 대기열도 비우고 멤버마다 상향
 스트림 슬롯을 재배정한다. `dual`↔`multi`↔`single` 전환은 이후 요청 판정부터 새 정책을 따른다.
 
-**녹취** — 슬롯 0 은 `audio`/`video` 트랙(파일명 종전과 동일), 동시 발언 슬롯은
-`audioN`/`videoN` 트랙에 기록한다. 세그먼트는 발언자 집합이 비는 시점에 닫힌다.
+**녹취** — 슬롯 0 은 `audio` 트랙, 동시 발언 슬롯은 `audioN` 트랙에 기록한다.
+세그먼트는 발언자 집합이 비는 시점에 닫힌다.
 
 세그먼트가 여러 발언을 담으므로 **한 트랙 안에서 화자가 바뀔 수 있다** — 선점 회수로 비워진
 슬롯을 다른 화자가 이어받는 경우다. 그래서 화자 귀속은 트랙당 한 값이 아니라 **구간 목록**
@@ -766,14 +764,17 @@ MCVideo 그룹 호(TS 24.281 §9.2)의 미디어·전송 제어(TS 24.581). **�
 audio RTP(`port`, RTCP = +1)·video RTP(`video_port`, RTCP = +1 — 수신자 PLI·FIR 를 받는다, B6)·**전송 제어 채널 `control_port`**(SDP
 `m=application <port> udp MCVideo` — RTP 가 아니라 RTCP 포트, TS 24.581 §4.3.3.1)를 준다.
 
-**PTT_JOIN** (`service:"mcvideo"`) — §7.4 의 `group_id`·`session_id`·`user_ip`·`user_port`·`user_video_port`·`user_nat`·`user_sig_ip`·`user_pt`·
-`user_video_pt`·`user_src_pt`·`user_codec`·`role`·`user_uri`(MCVideo ID — User ID 필드 값)·`media_crypto`·`media_crypto_video` 는 뜻이 같다
+**PTT_JOIN** (`service:"mcvideo"`) — §7.4 의 `group_id`·`session_id`·`user_ip`·`user_port`·`user_nat`·`user_sig_ip`·`user_pt`·
+`user_src_pt`·`user_codec`·`role`·`user_uri`(MCVideo ID — User ID 필드 값)·`media_crypto` 는 뜻이 같다
 (SRTP leg — 상향은 그 멤버 `rx` 키로 풀고, 하향은 받는 멤버 `tx` 키로 SSRC·PT 찍기 뒤 보호, media_security.md §6). `floor_crypto` 는 `BAD_REQUEST`
 (전송 제어 보호 = `tc_crypto`).
 2단 멱등(§7.4)도 같다. 그 밖의 필드:
 
 | payload 필드 | 필수 | 설명 |
 |---|---|---|
+| `user_video_port` | - | 멤버 video RTP 포트(RTCP = +1 — 아래 영상 RTCP). video 를 협상한 멤버만 싣는다(비협상 멤버에 유령 포트 광고 금지) |
+| `user_video_pt` | - | 이 멤버가 **수신** 선언한 영상(H.264) wire PT(멤버 자신의 SDP m=video) — CMP 가 영상을 이 멤버에 보낼 때 스탬프한다(marker bit = H.264 프레임 끝 표식 보존, RFC 6184 §5.1). 동적 PT 는 leg 마다 따로 협상되고(RFC 3264 §5.1) 단말 코덱 구현마다 H.264 PT 가 다르기 때문이다. `user_video_port` 와 함께만 싣는다. 생략=0=재작성 없음. 영상 ingress 는 PT 로 분류하지 않는다(PT 하나) |
+| `media_crypto_video` | - | 이 멤버 leg 의 영상 SRTP 키 — 형식은 `media_crypto` 와 같다([§6.4](#64-media_crypto--미디어-srtp-종단-relayptt-공통)). 영상 RTCP(SRTCP)도 이 키로 보호·해제한다 |
 | `user_control_port` | - | 멤버의 전송 제어 채널 RTCP 포트(멤버 SDP 의 `m=application … udp MCVideo`) |
 | `user_tc_ssrc` | - | 멤버가 SDP 에 광고한 `mc_transmission_ssrc` — CMP 가 **이 멤버에게 보내는 전송 제어 메시지 RTCP 헤더 SSRC** 로 쓴다(TS 24.581 §4.3.3.1 — 받는 쪽이 기대하는 값, 다중화의 열쇠). 없으면 CMP 가 정한 값 |
 | `user_audio_ssrc` / `user_video_ssrc` | - | 멤버 offer 의 audio·video `a=ssrc`(RFC 5576) — 이 멤버의 송출을 허가할 때 할당 SSRC 의 선호값(아래 SSRC 규칙) |

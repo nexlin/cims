@@ -313,7 +313,6 @@ private fun EditPane(vm: PttGroupsViewModel, f: EditForm) {
                 Spacer(Modifier.height(6.dp))
                 Toggle("SDS 허용", f.allowSds) { v -> vm.update { it.copy(allowSds = v) } }
                 Toggle("파일 전송(FD)", f.allowFd) { v -> vm.update { it.copy(allowFd = v) } }
-                Toggle("영상", f.videoEnabled) { v -> vm.update { it.copy(videoEnabled = v) } }
                 Toggle("암호화", f.encryption) { v -> vm.update { it.copy(encryption = v) } }
                 Toggle("긴급 호", f.emergencyCall) { v -> vm.update { it.copy(emergencyCall = v) } }
                 Toggle("긴급 알림", f.emergencyAlert) { v -> vm.update { it.copy(emergencyAlert = v) } }

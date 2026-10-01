@@ -32,7 +32,7 @@ PCmpServer::PCmpServer(const std::string& name, const std::string& configFile)
     : PModule(name), _running(false), _udpFd(-1), _configFile(configFile), _sessionTimeout(600), _orphanReclaimSec(120),
       _floorIdleSec(4), _floorStopTalkSec(30), _floorRevokeGraceSec(3), _floorRevokeRetxSec(1),
       _floorIdleResendSec(0), _floorGrantRetxSec(1), _rtpWorkerCount(4),
-      _pttRtpStartPort(52000), _pttRtpPoolSize(10), _pttFloorStartPort(54000), _pttVideoStartPort(56000), _pttMemberPoolSize(40), _segmentIntervalSec(60),
+      _pttRtpStartPort(52000), _pttRtpPoolSize(10), _pttFloorStartPort(54000), _pttMemberPoolSize(40), _segmentIntervalSec(60),
       _msgSeq(-1), _lastRxSeq(0),
       _logFlowFloor(true), _logFlowDtmf(true), _logFlowRtcp(false),
       _leakReclaimTotal(0), _leakReclaimOrphan(0), _leakReclaimHold(0)
@@ -2089,7 +2089,6 @@ void PCmpServer::processAddGroup(const SimpleJson::JsonNode& payload, const std:
             if (!mu) { memberAllocFail = true; break; }
             SimpleJson::JsonNode mp;
             mp.Set("port", (int)mu->getAudioPort());
-            mp.Set("video_port", (int)mu->getVideoPort());
             memberPorts.Set(sid, mp);
         }
         if (memberAllocFail) {
@@ -2135,7 +2134,6 @@ void PCmpServer::processJoinGroup(const SimpleJson::JsonNode& payload, const std
     std::string userIp = payload.GetString("user_ip");
     int userPort = (int)payload.GetInt("user_port");
     int userFloorPort = (int)payload.GetInt("user_floor_port");
-    int userVideoPort = (int)payload.GetInt("user_video_port");
     std::string role = payload.GetString("role");
     if (role.empty()) role = "participant";
 
@@ -2163,13 +2161,12 @@ void PCmpServer::processJoinGroup(const SimpleJson::JsonNode& payload, const std
     std::string txIdStr = std::to_string(transId);
     logFlow(groupId, "csp", "cmp", "JSON", "PTT_JOIN", sessionId.c_str(), txIdStr.c_str(), svc.c_str(), sesid.c_str(), "", _lastRxSeq, "csp");
 
-    // 멤버 미디어 SRTP 키 (media_crypto[_video] — media_security.md §6.3).
+    // 멤버 미디어 SRTP 키 (media_crypto — media_security.md §6.3).
     //   형식 위반 = 멤버 등록 전 명령 거부(fail-fast, 평문 조용 폴백 금지).
-    MediaCryptoParam mcAudio, mcVideo;
+    MediaCryptoParam mcAudio;
     {
         std::string mcErr;
-        if (!ParseMediaCrypto(payload, "media_crypto", mcAudio, mcErr) ||
-            !ParseMediaCrypto(payload, "media_crypto_video", mcVideo, mcErr)) {
+        if (!ParseMediaCrypto(payload, "media_crypto", mcAudio, mcErr)) {
             int txSeq = sendErr(ip, port, transId, "PTT_JOIN", sesid, svc, "BAD_REQUEST", mcErr.c_str());
             logFlow(groupId, "cmp", "csp", "JSON", "ERROR", mcErr.c_str(), txIdStr.c_str(),
                     svc.c_str(), sesid.c_str(), "", txSeq, "csp");
@@ -2201,15 +2198,13 @@ void PCmpServer::processJoinGroup(const SimpleJson::JsonNode& payload, const std
             int userSrcPt   = (int)payload.GetInt("user_src_pt", 0);
             int userTePt    = (int)payload.GetInt("user_te_pt", 0);
             int userSrcTePt = (int)payload.GetInt("user_src_te_pt", 0);
-            //   user_video_pt: 이 leg 가 수신 선언한 영상 PT(egress 스탬프) — 영상 ingress 는 PT 로 분류하지 않는다.
-            int userVideoPt = (int)payload.GetInt("user_video_pt", 0);
             std::string userCodec = payload.GetString("user_codec");
             // ambient listening 청취 leg (cmp_media_api.md §7.3) — 상향 미중계/floor 은닉.
             int recvOnly      = (int)payload.GetInt("recv_only", 0);
             int floorSuppress = (int)payload.GetInt("floor_suppress", 0);
-            group->addMember(sessionId, userIp, userPort, userFloorPort, userVideoPort, role, mu,
+            group->addMember(sessionId, userIp, userPort, userFloorPort, role, mu,
                              userNat != 0, userSigIp, userPt, userSrcPt, userTePt, userSrcTePt, userCodec,
-                             recvOnly != 0, floorSuppress != 0, userVideoPt);
+                             recvOnly != 0, floorSuppress != 0);
             // condition tier(emergency/imminent) 동반 시 반영 (CSP 가 긴급 멤버 join 시 전달)
             std::string tierStr = payload.GetString("tier");
             if (!tierStr.empty()) group->setTier(sessionId, ParseFloorTier(tierStr));
@@ -2234,16 +2229,12 @@ void PCmpServer::processJoinGroup(const SimpleJson::JsonNode& payload, const std
                     return;
                 }
             }
-            // 멤버 미디어 SRTP (media_crypto[_video]) — 키 오류는 명령 거부 (fail-fast).
+            // 멤버 미디어 SRTP (media_crypto) — 키 오류는 명령 거부 (fail-fast).
             //   재-JOIN(재협상) 재키잉도 같은 경로 — 동일 구성은 세션 유지, 변경은 재생성.
-            if (mcAudio.have || mcVideo.have) {
+            if (mcAudio.have) {
                 std::string secErr;
-                bool secOk =
-                    (!mcAudio.have || group->setMemberMediaCrypto(sessionId, false, mcAudio.alg,
-                                          mcAudio.rxKey, mcAudio.rxSalt, mcAudio.txKey, mcAudio.txSalt, secErr)) &&
-                    (!mcVideo.have || group->setMemberMediaCrypto(sessionId, true, mcVideo.alg,
-                                          mcVideo.rxKey, mcVideo.rxSalt, mcVideo.txKey, mcVideo.txSalt, secErr));
-                if (!secOk) {
+                if (!group->setMemberMediaCrypto(sessionId, mcAudio.alg, mcAudio.rxKey, mcAudio.rxSalt,
+                                                 mcAudio.txKey, mcAudio.txSalt, secErr)) {
                     int txSeq = sendErr(ip, port, transId, "PTT_JOIN", sesid, svc, "BAD_REQUEST", secErr.c_str());
                     logFlow(groupId, "cmp", "csp", "JSON", "ERROR", secErr.c_str(), txIdStr.c_str(),
                             svc.c_str(), sesid.c_str(), "", txSeq, "csp");
@@ -2257,7 +2248,6 @@ void PCmpServer::processJoinGroup(const SimpleJson::JsonNode& payload, const std
         SimpleJson::JsonNode respBody;
         respBody.Set("ip", _rtpIp);
         respBody.Set("port", (int)mu->getAudioPort());
-        respBody.Set("video_port", (int)mu->getVideoPort());
 
         int txSeq = sendOk(ip, port, transId, "PTT_JOIN", sesid, svc, &respBody);
         logFlow(groupId, "cmp", "csp", "JSON", "OK", "", txIdStr.c_str(), svc.c_str(), sesid.c_str(), "", txSeq, "csp");
@@ -2522,7 +2512,6 @@ void PCmpServer::loadConfig() {
         if (root.Has("PttRtpStartPort")) _pttRtpStartPort = (int)root.GetInt("PttRtpStartPort");
         if (root.Has("PttRtpPoolSize")) _pttRtpPoolSize = (int)root.GetInt("PttRtpPoolSize");
         if (root.Has("PttFloorStartPort")) _pttFloorStartPort = (int)root.GetInt("PttFloorStartPort");
-        if (root.Has("PttVideoStartPort")) _pttVideoStartPort = (int)root.GetInt("PttVideoStartPort");
         if (root.Has("PttMemberPoolSize")) _pttMemberPoolSize = (int)root.GetInt("PttMemberPoolSize");
         // MCVideo 멤버 유닛 풀 (cmp_media_api.md §7.9) — 멤버당 6포트 블록. 0 = 비활성(resource.mcvideo 미광고)
         if (root.Has("McVideoStartPort")) _mcvStartPort = (int)root.GetInt("McVideoStartPort");
@@ -2617,8 +2606,8 @@ void PCmpServer::loadConfig() {
 
     // 녹취 디렉터리 생성은 녹취 op worker 가 기록 직전에 수행 (저장 경로 무접촉)
 
-    LOG_INFO("PCmpServer", "Config: VoIP(port=%d pool=%d 8/call) PTT(member rtp=%d video=%d pool=%d, group floor=%d pool=%d) Workers=%d RtpIp=%s ServerIp=%s:%d DtmfPtt=%d SessionTimeout=%d floor timers T1=%d T2=%d T3=%d T7=%d T8=%d T20=%d",
-           _rtpStartPort, _rtpPoolSize, _pttRtpStartPort, _pttVideoStartPort, _pttMemberPoolSize,
+    LOG_INFO("PCmpServer", "Config: VoIP(port=%d pool=%d 8/call) PTT(member rtp=%d pool=%d, group floor=%d pool=%d) Workers=%d RtpIp=%s ServerIp=%s:%d DtmfPtt=%d SessionTimeout=%d floor timers T1=%d T2=%d T3=%d T7=%d T8=%d T20=%d",
+           _rtpStartPort, _rtpPoolSize, _pttRtpStartPort, _pttMemberPoolSize,
            _pttFloorStartPort, _pttRtpPoolSize,
            _rtpWorkerCount, _rtpIp.c_str(), _serverIp.c_str(), _serverPort,
            _dtmfPttEnable, _sessionTimeout,
@@ -2695,7 +2684,7 @@ void PCmpServer::initResourcePool() {
 }
 
 void PCmpServer::initPttResourcePool() {
-    // 그룹 자원 = 공유 floor 포트만. audio/video 는 멤버 유닛(initPttMemberPool)이 담당.
+    // 그룹 자원 = 공유 floor 포트만. audio RTP 는 멤버 유닛(initPttMemberPool)이 담당.
     int floorPort = _pttFloorStartPort;
     for (int i = 0; i < _pttRtpPoolSize; ++i) {
         std::string name = formatStr("PttFloor_%d", i);
@@ -2720,12 +2709,11 @@ void PCmpServer::initPttResourcePool() {
 
 void PCmpServer::initPttMemberPool() {
     int audioPort = _pttRtpStartPort;
-    int videoPort = _pttVideoStartPort;
     for (int i = 0; i < _pttMemberPoolSize; ++i) {
         std::string name = formatStr("PttMember_%d", i);
         PPttMemberPort* mu = new PPttMemberPort(name);
 
-        if (mu->init(_rtpIp, audioPort, videoPort)) {
+        if (mu->init(_rtpIp, audioPort)) {
             int widx = i % _rtpWorkerCount;
             mu->setWorkerName(formatStr("RtpWorker_%d", widx));
             std::vector<int> fds; mu->collectFds(fds);
@@ -2733,14 +2721,13 @@ void PCmpServer::initPttMemberPool() {
             _pttMemberPool.push_back(mu);
             _freePttMembers.push_back(mu);
         } else {
-            LOG_ERROR("PCmpServer", "Failed to init PTT member unit audio=%d video=%d", audioPort, videoPort);
+            LOG_ERROR("PCmpServer", "Failed to init PTT member unit audio=%d", audioPort);
             delete mu;
         }
         audioPort += 2;
-        videoPort += 2;
     }
-    LOG_INFO("PCmpServer", "PTT member pool: %lu units (audio %d-%d, video %d-%d)",
-             _pttMemberPool.size(), _pttRtpStartPort, audioPort - 2, _pttVideoStartPort, videoPort - 2);
+    LOG_INFO("PCmpServer", "PTT member pool: %lu units (audio %d-%d)",
+             _pttMemberPool.size(), _pttRtpStartPort, audioPort - 2);
 }
 
 PRtpRelay* PCmpServer::allocResource(std::string& rtpIp, int& rtpPort, int& videoPort) {
@@ -2806,8 +2793,8 @@ PPttMemberPort* PCmpServer::ensureMemberUnit(const std::string& groupId, const s
     _freePttMembers.pop_back();
     mu->bind(group, sessionId);
     _memberUnits[key] = mu;
-    LOG_INFO("PCmpServer", "ensureMemberUnit: group=%s session=%s audio=%d video=%d (remaining %lu)",
-             groupId.c_str(), sessionId.c_str(), mu->getAudioPort(), mu->getVideoPort(), _freePttMembers.size());
+    LOG_INFO("PCmpServer", "ensureMemberUnit: group=%s session=%s audio=%d (remaining %lu)",
+             groupId.c_str(), sessionId.c_str(), mu->getAudioPort(), _freePttMembers.size());
     return mu;
 }
 

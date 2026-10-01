@@ -224,25 +224,26 @@ public:
     // teardown/MODIFY 가 포트가 아닌 이 유일 키로 CMP 세션을 지목한다.
     static std::string IssueSessionId();
 
-    // 응답: strIp/iFloorPort(그룹 공유 floor) + mapMemberPorts(멤버별 전용 RTP 포트 — sid → {audio, video}).
+    // 응답: strIp/iFloorPort(그룹 공유 floor) + mapMemberPorts(멤버별 전용 RTP 포트 — sid → audio). MCPTT 는 음성만이다
+    // —
+    //   그룹 영상은 MCVideo 호(mcvideo.md §8, cmp_media_api.md §7.9).
     //   strFloorPolicy/iMaxTalkers: 동시 발언 정책 (docs/api/cmp_media_api.md §7.7). 비면 미전송(CMP 기본 single).
     //   strFloorControl: ""(미전송=on)/"off" — off=full-duplex, 응답에 floor_port 생략 (private call 전용).
     //   strSessionDir: 세션 디렉터리 이름 S{ts}_{n} — CMP 는 record_dir/{시간버킷}/{이 이름}/ 에
     //     세그먼트·floor 를 기록한다. 세션이 곧 기록 단위라, 같은 시간대의 다음 통화가 앞
     //     통화에 섞이지 않는 근거 (docs/design/features/recording.md §3.1).
     bool AddGroup( const std::string &strGroupId, const std::vector<std::shared_ptr<CspPttUser>> &vecMembers,
-                   std::string &strIp, int &iFloorPort, std::map<std::string, std::pair<int, int>> &mapMemberPorts,
-                   const std::string &strRecordDir = "", bool bVideoEnabled = false, int iSessionSeq = 0,
-                   const std::string &strSesId = "", const std::string &strGroupType = "",
-                   const CmpGroupSession &clsSession = CmpGroupSession(), const std::string &strFloorPolicy = "",
-                   int iMaxTalkers = 0, const std::string &strFloorControl = "",
+                   std::string &strIp, int &iFloorPort, std::map<std::string, int> &mapMemberPorts,
+                   const std::string &strRecordDir = "", int iSessionSeq = 0, const std::string &strSesId = "",
+                   const std::string &strGroupType = "", const CmpGroupSession &clsSession = CmpGroupSession(),
+                   const std::string &strFloorPolicy = "", int iMaxTalkers = 0, const std::string &strFloorControl = "",
                    const std::string &strSessionDir = "" );
     // 정책 변경도 MODIFY 로 전달한다 (생성=ADD 1회, 이후 모든 상태 변경=MODIFY — 계약 §A.0).
     bool ModifyGroup( const std::string &strGroupId, const std::vector<std::shared_ptr<CspPttUser>> &vecMembers,
                       const std::string &strSesId = "", const std::string &strFloorPolicy = "", int iMaxTalkers = 0,
                       int iT4Sec = -1 );
     // 2단 멱등 (docs/api/cmp_media_api.md §7.4): strIp 가 비면 ① 선할당(멤버 포트만 확보),
-    //   주소 동반이면 ② 멤버 등록/주소 갱신. piLocalPort/piLocalVideoPort 에 멤버 전용 포트 응답.
+    //   주소 동반이면 ② 멤버 등록/주소 갱신. piLocalPort 에 멤버 전용 포트 응답.
     //   iUserPt/iUserTePt: 이 leg 가 수신 선언한 audio/TE PT(CMP egress 스탬프),
     //   iUserSrcPt/iUserSrcTePt: 이 leg 가 송신에 쓰는 PT(CMP ingress 분류·녹취 메타). 0=재작성 없음.
     //   strUserCodec: 협상 오디오 코덱("AMR-WB/16000") — 녹취 세그먼트 메타용.
@@ -251,14 +252,12 @@ public:
     //     필드 생략 — 신규 멤버는 평문 leg, 기존 SRTP 멤버의 재-JOIN 은 기존 키 유지.
     //   iRecvOnly: 1 = 청취 leg(ambient listening — 상향 미중계·floor 요청 거절, cmp_media_api.md §7.4 recv_only).
     //   iFloorSuppress: 1 = 이 멤버에게 floor 메시지를 보내지 않음 (floor_suppress).
-    //   iUserVideoPt: 이 leg 가 수신 선언한 영상 PT (user_video_pt — CMP egress 스탬프, 0 = 생략·재작성 없음).
     bool JoinGroup( const std::string &strGroupId, const std::string &strSessionId, const std::string &strIp, int iPort,
-                    int iFloorPort = 0, int iVideoPort = 0, const std::string &strSesId = "",
-                    const std::string &strRole = "participant", int *piLocalPort = NULL, int *piLocalVideoPort = NULL,
-                    int iUserNat = 0, const std::string &strUserSigIp = "", int iUserPt = 0, int iUserSrcPt = 0,
-                    int iUserTePt = 0, int iUserSrcTePt = 0, const std::string &strUserCodec = "",
+                    int iFloorPort = 0, const std::string &strSesId = "", const std::string &strRole = "participant",
+                    int *piLocalPort = NULL, int iUserNat = 0, const std::string &strUserSigIp = "", int iUserPt = 0,
+                    int iUserSrcPt = 0, int iUserTePt = 0, int iUserSrcTePt = 0, const std::string &strUserCodec = "",
                     const McpttFmtp &clsFmtp = McpttFmtp(), const CmpMediaCrypto *pclsCrypto = NULL, int iRecvOnly = 0,
-                    int iFloorSuppress = 0, int iUserVideoPt = 0 );
+                    int iFloorSuppress = 0 );
     bool LeaveGroup( const std::string &strGroupId, const std::string &strSessionId, const std::string &strSesId = "" );
     bool RemoveGroup( const std::string &strGroupId, const std::string &strSesId = "" );
 

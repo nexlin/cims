@@ -751,9 +751,8 @@ bool CCmpClient::RemoveSession( const std::string &strSessionId, const std::stri
 }
 
 bool CCmpClient::AddGroup( const std::string &strGroupId, const std::vector<std::shared_ptr<CspPttUser>> &vecMembers,
-                           std::string &strIp, int &iFloorPort,
-                           std::map<std::string, std::pair<int, int>> &mapMemberPorts, const std::string &strRecordDir,
-                           bool bVideoEnabled, int iSessionSeq, const std::string &strSesId,
+                           std::string &strIp, int &iFloorPort, std::map<std::string, int> &mapMemberPorts,
+                           const std::string &strRecordDir, int iSessionSeq, const std::string &strSesId,
                            const std::string &strGroupType, const CmpGroupSession &clsSession,
                            const std::string &strFloorPolicy, int iMaxTalkers, const std::string &strFloorControl,
                            const std::string &strSessionDir ) {
@@ -775,7 +774,6 @@ bool CCmpClient::AddGroup( const std::string &strGroupId, const std::vector<std:
     if ( !strRecordDir.empty() ) req.Set( "record_dir", strRecordDir );
     // 기록 단위 = 세션. record_dir 하위 {시간버킷}/{session_dir}/ 이 이 세션의 산출물 자리다.
     if ( !strSessionDir.empty() ) req.Set( "session_dir", strSessionDir );
-    if ( bVideoEnabled ) req.Set( "video_enabled", 1 );
     // group_type = 그룹 종류(prearranged/chat/private). 세션 속성(개시자·일제 통화·T4)은 세션 캐시 값 —
     //   CMP 는 세션 개시 ADD 에서만 반영한다(cmp_media_api.md PTT_GROUP_ADD). 일제 통화면 개시자만
     //   floor 를 가지며 타 참가자 요청은 Deny #5(TS 24.380 §6.3.5.3.4).
@@ -812,14 +810,13 @@ bool CCmpClient::AddGroup( const std::string &strGroupId, const std::vector<std:
         if ( respNode.Has( "status" ) && respNode.Get( "status" ).AsString() == "OK" ) {
             strIp = respNode.Get( "ip" ).AsString();
             iFloorPort = respNode.Has( "floor_port" ) ? respNode.Get( "floor_port" ).AsInt() : 0;
-            // member_ports: { "<sid>": { "port": N, "video_port": N }, ... } — 멤버별 전용 포트
+            // member_ports: { "<sid>": { "port": N }, ... } — 멤버별 전용 포트
             mapMemberPorts.clear();
             if ( respNode.Has( "member_ports" ) ) {
                 SimpleJson::JsonNode mp = respNode.Get( "member_ports" );
                 for ( const auto &kv : mp.objects ) {
                     int iAudio = (int)kv.second.GetInt( "port" );
-                    int iVideo = (int)kv.second.GetInt( "video_port" );
-                    if ( iAudio > 0 ) mapMemberPorts[kv.first] = { iAudio, iVideo };
+                    if ( iAudio > 0 ) mapMemberPorts[kv.first] = iAudio;
                 }
             }
             CLog::Print( LOG_INFO, "CmpClient::AddGroup Success: %s floor=%d member_ports=%d Members: %d",
@@ -888,12 +885,11 @@ bool CCmpClient::SetFloorTier( const std::string &strGroupId, const std::string 
 }
 
 bool CCmpClient::JoinGroup( const std::string &strGroupId, const std::string &strSessionId,
-                            const std::string &strUserIp, int iUserPort, int iFloorPort, int iVideoPort,
-                            const std::string &strSesId, const std::string &strRole, int *piLocalPort,
-                            int *piLocalVideoPort, int iUserNat, const std::string &strUserSigIp, int iUserPt,
-                            int iUserSrcPt, int iUserTePt, int iUserSrcTePt, const std::string &strUserCodec,
-                            const McpttFmtp &clsFmtp, const CmpMediaCrypto *pclsCrypto, int iRecvOnly,
-                            int iFloorSuppress, int iUserVideoPt ) {
+                            const std::string &strUserIp, int iUserPort, int iFloorPort, const std::string &strSesId,
+                            const std::string &strRole, int *piLocalPort, int iUserNat, const std::string &strUserSigIp,
+                            int iUserPt, int iUserSrcPt, int iUserTePt, int iUserSrcTePt,
+                            const std::string &strUserCodec, const McpttFmtp &clsFmtp, const CmpMediaCrypto *pclsCrypto,
+                            int iRecvOnly, int iFloorSuppress ) {
     SimpleJson::JsonNode req;
     req.Set( "cmd", "PTT_JOIN" );
     req.Set( "group_id", strGroupId );
@@ -908,9 +904,6 @@ bool CCmpClient::JoinGroup( const std::string &strGroupId, const std::string &st
         req.Set( "user_ip", strUserIp );
         req.Set( "user_port", iUserPort );
         if ( iFloorPort > 0 ) req.Set( "user_floor_port", iFloorPort );
-        if ( iVideoPort > 0 ) req.Set( "user_video_port", iVideoPort );
-        // 영상 egress PT — 동적 PT 는 leg 마다 다르다(개시자 = 자기 offer 의 H.264 PT, 멤버 = 서버 offer 97 의 echo).
-        if ( iVideoPort > 0 && iUserVideoPt > 0 ) req.Set( "user_video_pt", iUserVideoPt );
         req.Set( "role", strRole.empty() ? "participant" : strRole );
         if ( iUserNat ) {
             req.Set( "user_nat", 1 );
@@ -953,7 +946,6 @@ bool CCmpClient::JoinGroup( const std::string &strGroupId, const std::string &st
     if ( respNode.type != SimpleJson::JSON_OBJECT ) return false;
     if ( !respNode.Has( "status" ) || respNode.Get( "status" ).AsString() != "OK" ) return false;
     if ( piLocalPort ) *piLocalPort = respNode.Has( "port" ) ? respNode.Get( "port" ).AsInt() : 0;
-    if ( piLocalVideoPort ) *piLocalVideoPort = respNode.Has( "video_port" ) ? respNode.Get( "video_port" ).AsInt() : 0;
     return true;
 }
 

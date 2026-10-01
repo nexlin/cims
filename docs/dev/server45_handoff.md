@@ -796,14 +796,14 @@ D8·D10~D12: 영상 칸은 고른 영상이 있을 때만 · «영상 n» 목록
 | R6 | CMS 문서 변경 xcap-diff 에 MCVideo user profile·service config | .45 | 미착수(RFC 5875 먼저) |
 | R7 | 1차 잔여 — N2 · `<ImplicitAffiliations>` · 정원 486 122 · 비멤버 재합류 403 121 · prearranged 검사 순서 | .45 | 미착수 |
 | R7b | D6 에서 찾은 MCPTT 소항목 — 사설 호 수동 개시 180 `Require: timer` · 멤버 초대 `mc_priority` 고정 3(§14.2.3 `<user-priority>`) · SDK answer 의 `mc_priority` 되돌림(§14.3.3) · psip 422 재시도 refresher | .45 | 미착수 |
-| R8 | V7 — 현행 PTT 영상 제거(A13 CSP · B11 CMP · C11 SDK 필드 · 콘솔·관제 «PTT 영상(현행)») | **cims-7c** | 이관(사용자 결정). .45 배포 = 협력업체 옛 APK 그룹 영상 중단 — 시점 사용자 확인 |
+| R8 | V7 — 현행 PTT 영상 제거(A13 CSP · B11 CMP · C11 SDK 필드 · 콘솔·관제 «PTT 영상(현행)») | **cims-7c** | **구현**(미배포) — CSP MCPTT `m=video` port 0 거절·`X-Video-Port`·`video_enabled` 읽기 제거 · CMP PTT 영상 분배 제거 · CSC 그룹 문서 `<mcpttgi:mcptt-video>` 제거·관리 API `video_enabled` 무시(경고) · SDK `GroupCallOptions.video`·`mcpttVideo`·`GroupDoc.videoEnabled` 제거(C API·.NET·Kotlin — Windows 재빌드) · S6-SCN-PTT-VIDEO 제거(대체 = C10). 콘솔 «영상» 체크박스는 R5 와 한 커밋. .45 배포 = 협력업체 옛 APK 그룹 영상 중단 — 시점 사용자 확인. DB `video_enabled` DROP 은 §8 3 |
 | R11 | CMP Media Reception Notification(TS 24.581 §9.2.16) — 지금 안 보내 송출자 «보는 사람 n» = 0(앱은 0 이면 숨김). §6.3 에 서버 절차가 없어 위반은 아니고, 보내면 TS 22.280 R-5.20.2-001 을 채운다 | .45 | **사용자 결정 대기** |
 | R12 | OAM 배포 job 인덱스 캐시 경합(`_job_create`/`_job_pick_pending` 잠금 없는 갱신 — §12.4) 근본 수정 | .45 | 미착수 |
 | C10 | verify S3 `S3-SCN-MCVIDEO-CHAT`·`-TRANSMIT`·`-RECEPTION`·`-MAX-TX`(cimsue-cli 두 대) | .45 | 미착수 — M4 전제 |
 | C12 | cimsue-cli PTT 계정 REGISTER 에 MCPTT 태그 없음(TS 24.379 §7.2.1 대조) | .45 | 미착수 |
 | D6 실측 | .48 은 csp 0.2.182(D6 전) — .45 는 0.2.183 로 이미 D6 | .45 | .48 은 따라 올릴 때(관리자 자격 = 사용자) |
 | W1'·W4·W5 | 관제 앱 MCVideo(데스크톱·태블릿) | **Windows** | 착수 문서 전달, 응답 대기 |
-| B10 | 계측기 MCVideo 단말·시나리오 | 팀원 트랙 | 요구서 = [mcvideo_tester_requirements.md](mcvideo_tester_requirements.md), 계측기 코드 미착수 |
+| B10 | 계측기 MCVideo 단말·시나리오 | 팀원 트랙 | 요구서 = [mcvideo_tester_requirements.md](mcvideo_tester_requirements.md), 계측기 코드 미착수. V7 뒤 PTT 영상 시나리오(`ems/tester/oam/scenarios/ptt/group_call_video.yaml`·워커 group_call `media.video`)는 무효 — 서버가 MCPTT `m=video` 를 port 0 으로 거절한다(dev_share «to: 48» 안내) |
 | 관찰 | W999 전면 카메라 영상이 가로 4:3 로 옴(3:4 칸 위아래 띠) · T11 10 s 동안 아무도 [보기] 안 하면 송출 꺼짐(#8 — 정상, 시연 주의) | cims-7c / — | 원인 미확인 |
 | V8 | 긴급·임박·방송·ad hoc·private·확인 통화·conference NOTIFY·E2E·영상 pull/push·원격 송출·관제 다중 스트림(SDK 송출자별 렌더 창) | — | 1차 뒤 |
 

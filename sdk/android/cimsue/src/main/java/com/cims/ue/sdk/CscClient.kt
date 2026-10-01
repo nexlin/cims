@@ -203,7 +203,7 @@ data class GroupDoc(
     val uri: String, val displayName: String = "", val etag: String = "",
     val members: List<GroupMember> = emptyList(),
     val sessionType: String = "prearranged",
-    val videoEnabled: Boolean = false, val encryption: Boolean = false,
+    val encryption: Boolean = false,
     val emergencyCall: Boolean = true, val emergencyAlert: Boolean = true,
     val allowSds: Boolean = true, val allowFd: Boolean = false,
     val requireAffiliation: Boolean = true,
@@ -233,7 +233,7 @@ data class GroupDoc(
         d.members = GroupMemberVector().apply {
             members.forEach { m -> add(JniGroupMember().also { it.uri = m.uri; it.name = m.name; it.role = m.role; it.priority = m.priority; it.required = m.required; it.mcvideoId = m.mcvideoId }) }
         }
-        d.sessionType = sessionType; d.videoEnabled = videoEnabled; d.encryption = encryption
+        d.sessionType = sessionType; d.encryption = encryption
         d.emergencyCall = emergencyCall; d.emergencyAlert = emergencyAlert
         d.allowSds = allowSds; d.allowFd = allowFd; d.requireAffiliation = requireAffiliation
         d.priority = priority; d.maxParticipants = maxParticipants
@@ -254,7 +254,7 @@ data class GroupDoc(
 
         fun of(d: JniGroupDoc) = GroupDoc(d.uri, d.displayName, d.etag,
             d.members.let { v -> List(v.size) { i -> v[i].let { GroupMember(it.uri, it.name, it.role, it.priority, it.title, it.required, it.mcvideoId) } } },
-            d.sessionType, d.videoEnabled, d.encryption, d.emergencyCall, d.emergencyAlert,
+            d.sessionType, d.encryption, d.emergencyCall, d.emergencyAlert,
             d.allowSds, d.allowFd, d.requireAffiliation, d.priority, d.maxParticipants,
             d.orgCode, d.authorizedUser,
             hangTimerSec = d.hangTimerSec.orNull(), maxDurationSec = d.maxDurationSec.orNull(),

@@ -771,7 +771,6 @@ def _build_cmp_json(idx: Index, node_id: str, scn: dict) -> OrderedDict:
         ("PttRtpStartPort",    ovr.get("ptt_rtp_start_port", 52000)),
         ("PttRtpPoolSize",     ovr.get("ptt_rtp_pool_size", 10)),
         ("PttFloorStartPort",  ovr.get("ptt_floor_start_port", 54000)),
-        ("PttVideoStartPort",  ovr.get("ptt_video_start_port", 56000)),
         ("RtpWorkerCount",     ovr.get("rtp_worker_count", 4)),
         ("EnableDtmfPtt",      bool(ovr.get("enable_dtmf_ptt", True))),
         ("DtmfPushDigit",      ovr.get("dtmf_push_digit", "*")),

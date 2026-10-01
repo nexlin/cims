@@ -109,7 +109,6 @@ AccountConfig toCxx(const cimsue_account_config_t* c) {
     a.mcdataMsrp = c->mcdata_msrp != 0;
     assignIf(a.mcpttServerUri, c->mcptt_server_uri);
     assignIf(a.mcdataServerUri, c->mcdata_server_uri);
-    a.mcpttVideo = c->mcptt_video != 0;
     a.mcvideoEnabled = c->mcvideo_enabled != 0;
     assignIf(a.mcvideoServerUri, c->mcvideo_server_uri);
     a.autoAnswerMcvideo = c->auto_answer_mcvideo != 0;
@@ -134,7 +133,6 @@ GroupCallOptions toCxx(const cimsue_group_call_options_t* c) {
     o.members = strList(c->members, c->member_count);
     o.broadcast = c->broadcast != 0;
     o.implicitFloorRequest = c->implicit_floor_request != 0;
-    o.video = c->video != 0;
     return o;
 }
 
@@ -452,7 +450,6 @@ void fill(cimsue_account_config_t& o, const AccountConfig& a, std::vector<const 
     o.mcdata_msrp = B(a.mcdataMsrp);
     o.mcptt_server_uri = C(a.mcpttServerUri);
     o.mcdata_server_uri = C(a.mcdataServerUri);
-    o.mcptt_video = B(a.mcpttVideo);
     o.mcvideo_enabled = B(a.mcvideoEnabled);
     o.mcvideo_server_uri = C(a.mcvideoServerUri);
     o.auto_answer_mcvideo = B(a.autoAnswerMcvideo);
@@ -629,7 +626,7 @@ struct GroupDocHolder {
         out.members = mem.empty() ? nullptr : mem.data();
         out.member_count = (int32_t)mem.size();
         out.session_type = C(cxx.sessionType);
-        out.video_enabled = B(cxx.videoEnabled); out.encryption = B(cxx.encryption);
+        out.encryption = B(cxx.encryption);
         out.emergency_call = B(cxx.emergencyCall); out.emergency_alert = B(cxx.emergencyAlert);
         out.allow_sds = B(cxx.allowSds); out.allow_fd = B(cxx.allowFd); out.require_affiliation = B(cxx.requireAffiliation);
         out.priority = cxx.priority; out.max_participants = cxx.maxParticipants;
@@ -691,7 +688,7 @@ GroupDoc toCxx(const cimsue_group_doc_t* d) {
         g.members.push_back(m);
     }
     if (d->session_type && *d->session_type) g.sessionType = d->session_type;
-    g.videoEnabled = d->video_enabled != 0; g.encryption = d->encryption != 0;
+    g.encryption = d->encryption != 0;
     g.emergencyCall = d->emergency_call != 0; g.emergencyAlert = d->emergency_alert != 0;
     g.allowSds = d->allow_sds != 0; g.allowFd = d->allow_fd != 0; g.requireAffiliation = d->require_affiliation != 0;
     g.priority = d->priority; g.maxParticipants = d->max_participants;
@@ -1010,7 +1007,6 @@ void CIMSUE_CALL cimsue_account_config_default(cimsue_account_config_t* cfg) {
     cfg->auto_answer_mcptt = B(d.autoAnswerMcptt);
     cfg->max_sds_cplane_bytes = d.maxSdsCplaneBytes;
     cfg->mcdata_msrp = B(d.mcdataMsrp);
-    cfg->mcptt_video = B(d.mcpttVideo);
     cfg->mcvideo_enabled = B(d.mcvideoEnabled);
     cfg->auto_answer_mcvideo = B(d.autoAnswerMcvideo);
 }
@@ -1137,7 +1133,6 @@ void CIMSUE_CALL cimsue_group_call_options_default(cimsue_group_call_options_t* 
     opts->full_duplex = B(d.fullDuplex);
     opts->broadcast = B(d.broadcast);
     opts->implicit_floor_request = B(d.implicitFloorRequest);
-    opts->video = B(d.video);
 }
 
 int32_t CIMSUE_CALL cimsue_engine_join_group_call(cimsue_engine_t* e, int32_t account_id, const char* group_id,

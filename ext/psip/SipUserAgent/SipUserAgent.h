@@ -122,7 +122,6 @@ public:
 	bool GetLocalCallRtp( const char * pszCallId, CSipCallRtp * pclsRtp );
 	bool GetRemotePayloadTypes( const char * pszCallId, const char * pszEncoding,
 	                            int & iPt, int & iTePt );
-	bool GetRemoteVideoPayloadType( const char * pszCallId, int & iPt );
 	// CSipDialog 의 From/To 는 "이 UA 가 요청을 보내는 입장" 으로 저장된다 — 수신 INVITE 다이얼로그는
 	//   m_strFromId = INVITE To(로컬), m_strToId = INVITE From(원격). 따라서 GetToId() 는 송·수신 무관하게
 	//   그 다이얼로그의 원격(상대) 사용자이고, GetFromId() 는 로컬 신원(송신 = 발신자 표시, 수신 = 다이얼된 번호)이다.

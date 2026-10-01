@@ -12,7 +12,6 @@
 
 CspPttGroup::CspPttGroup()
     : _dbId( 0 ),
-      _videoEnabled( false ),
       _priority( 5 ),
       _encryption( false ),
       _emergencyCall( false ),
@@ -84,8 +83,6 @@ bool CspPttGroup::load( std::string groupId ) {
 
     if ( root.Has( "name" ) ) _name = root.GetString( "name" );
 
-    if ( root.Has( "video_enabled" ) ) _videoEnabled = ( root.GetInt( "video_enabled" ) != 0 );
-
     // 3GPP MCPTT 그룹 속성 (JSON fallback)
     if ( root.Has( "group_type" ) ) _groupType = root.GetString( "group_type" );
     if ( _groupType == "broadcast" ) _groupType = "prearranged";  // 일제 통화는 호 속성 — 옛 파일 값 흡수
@@ -141,7 +138,6 @@ void CspPttGroup::Clear() {
     _id.clear();
     _dbId = 0;
     _name.clear();
-    _videoEnabled = false;
     _priority = 5;
     _encryption = false;
     _emergencyCall = false;

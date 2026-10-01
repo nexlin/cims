@@ -596,7 +596,7 @@ cims/
 |---|---|---|
 | **M0** 기반·리스크 | PJSIP 안드로이드 빌드(config_site.h+SWIG+Gradle) + **AMR-WB MediaCodec 코덱 팩토리 지연 스파이크(실기기/UNIWA)** + H.264 MediaCodec 가용성 확인 | mouth-to-ear 지연/드랍이 통화 가능 수준인지 정량 판정 |
 | **M1** VoLTE 1:1 (음성+영상) | REGISTER(Digest)→발/착신 INVITE/SDP→**AMR-WB 음성 + H.264 영상** 양방향 RTP, BYE/상태머신 | 실서버와 1:1 음성·영상 통화 성공 |
-| **M2** PTT 그룹콜 | affiliation(PUBLISH)+키업 그룹 INVITE(멀티파트 파싱)+FloorClient(MCPT)+그룹 음성/영상 | 그룹 PTT 발언권+음성, 선점/REJECT 동작 |
+| **M2** PTT 그룹콜 | affiliation(PUBLISH)+키업 그룹 INVITE(멀티파트 파싱)+FloorClient(MCPT)+그룹 음성(그룹 영상은 MCVideo 호 — [mcvideo.md](mcvideo.md)) | 그룹 PTT 발언권+음성, 선점/REJECT 동작 |
 | **M3** CSC 설정 | IdMS OAuth2 PKCE + GMS/CMS XCAP + SUBSCRIBE/NOTIFY(xcap-diff) | 토큰·그룹·프로파일 취득 및 변경 반영 |
 | **M4** 고급·배포 | emergency/imminent-peril, conference 멤버 표시, **하드웨어 PTT 키(UNIWA)**, **TLS 5061**, UX/패키징 | 긴급호·멤버상태·TLS·배포 |
 

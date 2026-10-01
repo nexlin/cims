@@ -14,7 +14,7 @@ class PMcpttGroup;
  * PTT 그룹 floor control 유닛 (PMcpttGroup 연동)
  *
  * 그룹 공유 floor 소켓 1개. floor 메시지(RTCP APP "MCPT")는 TS 24.380 User ID 가
- * in-band 신원이라 그룹 공유 포트로 충분하다. 멤버별 audio/video RTP 는
+ * in-band 신원이라 그룹 공유 포트로 충분하다. 멤버별 audio RTP 는
  * PPttMemberPort(멤버 전용 포트 유닛)가 담당한다 — ue_nat_traversal.md §3.2.
  */
 class PRtpMulticast : public PHandler

@@ -98,7 +98,6 @@ cmp_config:
     ptt_rtp_start_port:    52000
     ptt_rtp_pool_size:     100
     ptt_floor_start_port:  54000
-    ptt_video_start_port:  56000
     rtp_worker_count:      8
     enable_dtmf_ptt:       true
     dtmf_push_digit:       "*"

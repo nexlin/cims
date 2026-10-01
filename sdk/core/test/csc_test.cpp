@@ -143,7 +143,6 @@ TEST(GroupDoc, ParseServerDocumentAndRoundTrip) {
     <mcpttgi:session-type>chat</mcpttgi:session-type>
     <mcpttgi:mcdata-allow-short-data-service>true</mcpttgi:mcdata-allow-short-data-service>
     <mcpttgi:mcdata-allow-file-distribution>false</mcpttgi:mcdata-allow-file-distribution>
-    <mcpttgi:mcptt-video>true</mcpttgi:mcptt-video>
     <mcpttgi:on-network-invite-members>false</mcpttgi:on-network-invite-members>
     <mcpttgi:on-network-max-participant-count>20</mcpttgi:on-network-max-participant-count>
     <mcpttgi:on-network-require-affiliation>false</mcpttgi:on-network-require-affiliation>
@@ -173,7 +172,7 @@ TEST(GroupDoc, ParseServerDocumentAndRoundTrip) {
     EXPECT_EQ(d.members[0].priority, 7);
     EXPECT_EQ(d.members[1].role, "participant");
     EXPECT_EQ(d.sessionType, "chat");
-    EXPECT_TRUE(d.allowSds); EXPECT_FALSE(d.allowFd); EXPECT_TRUE(d.videoEnabled);
+    EXPECT_TRUE(d.allowSds); EXPECT_FALSE(d.allowFd);
     EXPECT_EQ(d.maxParticipants, 20); EXPECT_FALSE(d.requireAffiliation); EXPECT_EQ(d.priority, 3);
     EXPECT_FALSE(d.encryption); EXPECT_FALSE(d.emergencyCall); EXPECT_TRUE(d.emergencyAlert);
     EXPECT_EQ(d.orgCode, "ORG1");
@@ -185,7 +184,7 @@ TEST(GroupDoc, ParseServerDocumentAndRoundTrip) {
     EXPECT_EQ(back.uri, d.uri); EXPECT_EQ(back.displayName, d.displayName);
     ASSERT_EQ(back.members.size(), 2u);
     EXPECT_EQ(back.members[0].role, "chair"); EXPECT_EQ(back.members[0].priority, 7); EXPECT_EQ(back.members[1].name, "관제2석");
-    EXPECT_EQ(back.sessionType, "chat"); EXPECT_TRUE(back.videoEnabled); EXPECT_EQ(back.maxParticipants, 20);
+    EXPECT_EQ(back.sessionType, "chat"); EXPECT_EQ(back.maxParticipants, 20);
     EXPECT_FALSE(back.emergencyCall); EXPECT_TRUE(back.emergencyAlert); EXPECT_EQ(back.orgCode, "ORG1");
     EXPECT_NE(d.toXml().find("<display-name xml:lang=\"en-us\">음성그룹 &amp; 2</display-name>"), std::string::npos);
 

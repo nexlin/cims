@@ -145,7 +145,6 @@ typedef struct {
     int32_t                 mcdata_msrp;        /* 서버발 MSRP 배포 수신(REGISTER Contact ICSI mcdata.sds) */
     const char*             mcptt_server_uri;   /* 참여 MCPTT 기능 PSI — 긴급 경보 Request-URI(TS 24.379 §12.1.1.1 8)) */
     const char*             mcdata_server_uri;  /* 참여 MCData 기능 PSI — SDS disposition 통지 Request-URI(TS 24.282 §12.2.1.1). NULL·빈 값 = 원 발신자 직행 */
-    int32_t                 mcptt_video;        /* 자동 수락하는 MCPTT 착신의 m=video 를 영상까지 받는다(ptt_flows.md 영상 협상) */
     int32_t                 mcvideo_enabled;    /* REGISTER Contact 에 MCVideo 태그(TS 24.281 §7.2.1AA) — 빼면 MCVideo 로그오프 */
     const char*             mcvideo_server_uri; /* 참여 MCVideo 기능 PSI — MCVideo 그룹 호·affiliation Request-URI(§9.2.1.2.1.1·§8.2) */
     int32_t                 auto_answer_mcvideo; /* MCVideo 멤버 초대 자동 수락(§6.2.3.1.2) — 기본 1 */
@@ -165,7 +164,6 @@ typedef struct {
     int32_t            member_count;
     int32_t            broadcast;       /* 일제 통화 개시(<broadcast-ind>true, TS 24.379 §4.12) — join_group_call 전용 */
     int32_t            implicit_floor_request; /* 암묵적 발언 요청(mc_implicit_request+mc_granted, TS 24.380 §14.2.4·§14.2.5) */
-    int32_t            video;           /* 그룹 영상 제안(m=video) — 반이중이면 발언권을 가진 동안만 송출 */
 } cimsue_group_call_options_t;
 
 /** MCVideo 그룹 호 개시·합류 옵션(types.h VideoGroupCallOptions — TS 24.281 §9.2.1·§9.2.2, fmtp TS 24.581 §14.2). */
@@ -893,7 +891,6 @@ typedef struct {
     const cimsue_group_member_t* members;
     int32_t                      member_count;
     const char*                  session_type;          /* 그룹 종류 prearranged | chat (NULL = prearranged) */
-    int32_t                      video_enabled;
     int32_t                      encryption;
     int32_t                      emergency_call;
     int32_t                      emergency_alert;

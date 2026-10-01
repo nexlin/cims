@@ -11,7 +11,7 @@
 
 ## 1. 개요
 
-VoIP 1:1 통화 및 PTT 그룹콜의 음성·영상을 녹취하고, Console UI를 통해 조회·재생할 수 있는 기능.
+VoIP 1:1 통화(음성·영상), PTT 그룹콜(MCPTT — 음성만)과 MCVideo 그룹 호(음성·영상)를 녹취하고, Console UI를 통해 조회·재생할 수 있는 기능.
 
 ### 설계 원칙
 - **CMP는 raw RTP 저장만 담당** — 비동기 파일 I/O로 서비스 부하 최소화
@@ -134,7 +134,7 @@ PTT 녹취는 세션 단위 단일 파일로 기록 (화자 변경과 무관하�
       └── seg/{NNN}/                             # 100 세그먼트 단위 shard (000,001,…) — 디렉터리 엔트리수 상한
           ├── seg_NNNN_audio.rtp                 # 화자 턴 오디오 (동시 발언 슬롯 0)
           ├── seg_NNNN_audioK.rtp                # 동시 발언(dual/multi-talker) 슬롯 K 화자 오디오
-          ├── seg_NNNN_video.rtp                 # 영상그룹 + 실제 영상 있을 때만 (빈 파일 미생성)
+          ├── seg_NNNN_video.rtp                 # MCVideo 세그먼트 + 실제 영상 있을 때만 (빈 파일 미생성)
           ├── seg_NNNN.json                      # 세그먼트 메타 — tracks[] 가 정본 (아래 §3.3.1)
           ├── seg_NNNN.mp4                       # 믹스 변환본 (OAM 캐시 — 화자 전원 합성)
           ├── seg_NNNN_sK.mp4                    # 슬롯 K 화자 단독 변환본 (OAM 캐시)
@@ -205,7 +205,7 @@ floor 없는 private call(전이중)은 멤버마다 슬롯이 하나씩이다. 
 
 | 필드 | 의미 |
 |---|---|
-| `kind`/`slot` | PTT 슬롯 트랙 — `audio`/`audio1`… = 슬롯 0..N, `video`/`videoK` 동일 |
+| `kind`/`slot` | 그룹 슬롯 트랙 — `audio`/`audio1`… = 슬롯 0..N, `video`/`videoK` 동일(MCVideo 세그먼트) |
 | `side` | VoIP leg (`a`/`b`) — PTT 에는 없다 |
 | `pt`/`codec` | **슬롯마다** 다를 수 있다(이종 단말 혼재) — 변환기의 PT 판별 근거 |
 | `speakers[]` | 그 트랙을 점유한 화자 **구간** 목록. 선점 회수로 슬롯이 재사용되면 원소가 2개 이상이 된다 — 트랙당 화자를 한 값으로만 두면 뒤 화자만 남아 귀속이 소실된다 |
@@ -230,8 +230,8 @@ H.264) 로 통일하고 원본 옆에 캐시한다. 실행 주체·큐잉·상�
 | PTT 단일 화자 | `seg_NNNN_audio.rtp` | AMR-WB strip → AAC | `seg_NNNN.mp4` |
 | PTT 동시 발언·전이중 (믹스) | 슬롯 트랙 N개 | AMR-WB strip → `amix` → AAC | `seg_NNNN.mp4` |
 | PTT 슬롯 단독 | 슬롯 K 트랙 | AMR-WB strip → AAC | `seg_NNNN_sK.mp4` |
-| PTT 영상 (슬롯 1개) | 음성 + `seg_NNNN_video.rtp` | H.264 `copy` mux | `seg_NNNN.mp4` |
-| PTT 영상 (슬롯 2개 이상) | 음성 + 영상 트랙 N개 | 2열 격자 합성 + mux | `seg_NNNN.mp4` |
+| MCVideo 영상 (슬롯 1개) | 음성 + `seg_NNNN_video.rtp` | H.264 `copy` mux | `seg_NNNN.mp4` |
+| MCVideo 영상 (슬롯 2개 이상) | 음성 + 영상 트랙 N개 | 2열 격자 합성 + mux | `seg_NNNN.mp4` |
 | VoIP 음성 | `_a.rtp` + `_b.rtp` | AMR-WB strip → `amix` → AAC | `seg_NNNN.mp4` |
 | VoIP 영상 | `_a/_b` + `_va/_vb` | 발신=좌 / 착신=우 배치 + mux | `seg_NNNN.mp4` |
 

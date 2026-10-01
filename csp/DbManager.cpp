@@ -569,7 +569,7 @@ bool CDbManager::SelectGroup( const std::string &strGroupId, CspPttGroup &clsGro
 
     // 그룹 기본 정보 (확장 필드 포함). strGroupId = mcptt_group_id 식별자.
     std::string strSql =
-        "SELECT g.id, g.mcptt_group_id, g.name, g.video_enabled, g.priority, g.encryption, g.emergency_call, "
+        "SELECT g.id, g.mcptt_group_id, g.name, g.priority, g.encryption, g.emergency_call, "
         "g.org_code, UNIX_TIMESTAMP(g.session_start) AS ss, UNIX_TIMESTAMP(g.session_end) AS se, "
         "g.session_seq, g.group_type, g.on_network, g.max_members, g.require_affiliation, COALESCE(g.alias,''), "
         "COALESCE(g.authorized_user_id,0), "
@@ -597,34 +597,33 @@ bool CDbManager::SelectGroup( const std::string &strGroupId, CspPttGroup &clsGro
     clsGroup._dbId = row[0] ? atoll( row[0] ) : 0;
     clsGroup._id = row[1] ? row[1] : "";
     clsGroup._name = row[2] ? row[2] : "";
-    clsGroup._videoEnabled = row[3] ? ( atoi( row[3] ) != 0 ) : false;
-    clsGroup._priority = row[4] ? atoi( row[4] ) : 5;
-    clsGroup._encryption = row[5] ? ( atoi( row[5] ) != 0 ) : false;
-    clsGroup._emergencyCall = row[6] ? ( atoi( row[6] ) != 0 ) : false;
-    clsGroup._orgCode = row[7] ? row[7] : "";
-    clsGroup._sessionStart = row[8] ? (time_t)atoll( row[8] ) : 0;
-    clsGroup._sessionEnd = row[9] ? (time_t)atoll( row[9] ) : 0;
-    clsGroup._sessionSeq = row[10] ? atoi( row[10] ) : 1;
-    clsGroup._groupType = row[11] ? row[11] : "prearranged";
-    clsGroup._onNetwork = row[12] ? ( atoi( row[12] ) != 0 ) : true;
-    clsGroup._maxMembers = row[13] ? atoi( row[13] ) : 0;
-    clsGroup._requireAffiliation = row[14] ? ( atoi( row[14] ) != 0 ) : true;
-    clsGroup._alias = row[15] ? row[15] : "";
-    clsGroup._authorizedUserId = row[16] ? atoi( row[16] ) : 0;
-    clsGroup._createdAt = row[17] ? row[17] : "";
-    clsGroup._authorizedUser = row[18] ? row[18] : "";  // 소유자 PTT MSISDN (파생 MCPTT ID)
-    clsGroup._emergencyAlert = row[19] ? ( atoi( row[19] ) != 0 ) : true;
-    clsGroup._allowSds = row[20] ? ( atoi( row[20] ) != 0 ) : true;
-    clsGroup._allowFd = row[21] ? ( atoi( row[21] ) != 0 ) : false;
-    clsGroup._maxSdsSize = row[22] ? atoi( row[22] ) : 10000;
-    clsGroup._floorPolicy = row[23] ? row[23] : "single";
-    clsGroup._maxTalkers = row[24] ? atoi( row[24] ) : 2;
-    clsGroup._allowConferenceState = row[25] ? ( atoi( row[25] ) != 0 ) : true;
-    clsGroup._hangTimerSec = row[26] ? atoi( row[26] ) : 30;
-    clsGroup._maxDurationSec = row[27] ? atoi( row[27] ) : 3600;
-    clsGroup._minNumberToStart = row[28] ? atoi( row[28] ) : 0;
-    clsGroup._ackTimeoutSec = row[29] ? atoi( row[29] ) : 5;
-    clsGroup._ackAction = ( row[30] && strcmp( row[30], "proceed" ) == 0 ) ? "proceed" : "abandon";  // §7.2.2 u)
+    clsGroup._priority = row[3] ? atoi( row[3] ) : 5;
+    clsGroup._encryption = row[4] ? ( atoi( row[4] ) != 0 ) : false;
+    clsGroup._emergencyCall = row[5] ? ( atoi( row[5] ) != 0 ) : false;
+    clsGroup._orgCode = row[6] ? row[6] : "";
+    clsGroup._sessionStart = row[7] ? (time_t)atoll( row[7] ) : 0;
+    clsGroup._sessionEnd = row[8] ? (time_t)atoll( row[8] ) : 0;
+    clsGroup._sessionSeq = row[9] ? atoi( row[9] ) : 1;
+    clsGroup._groupType = row[10] ? row[10] : "prearranged";
+    clsGroup._onNetwork = row[11] ? ( atoi( row[11] ) != 0 ) : true;
+    clsGroup._maxMembers = row[12] ? atoi( row[12] ) : 0;
+    clsGroup._requireAffiliation = row[13] ? ( atoi( row[13] ) != 0 ) : true;
+    clsGroup._alias = row[14] ? row[14] : "";
+    clsGroup._authorizedUserId = row[15] ? atoi( row[15] ) : 0;
+    clsGroup._createdAt = row[16] ? row[16] : "";
+    clsGroup._authorizedUser = row[17] ? row[17] : "";  // 소유자 PTT MSISDN (파생 MCPTT ID)
+    clsGroup._emergencyAlert = row[18] ? ( atoi( row[18] ) != 0 ) : true;
+    clsGroup._allowSds = row[19] ? ( atoi( row[19] ) != 0 ) : true;
+    clsGroup._allowFd = row[20] ? ( atoi( row[20] ) != 0 ) : false;
+    clsGroup._maxSdsSize = row[21] ? atoi( row[21] ) : 10000;
+    clsGroup._floorPolicy = row[22] ? row[22] : "single";
+    clsGroup._maxTalkers = row[23] ? atoi( row[23] ) : 2;
+    clsGroup._allowConferenceState = row[24] ? ( atoi( row[24] ) != 0 ) : true;
+    clsGroup._hangTimerSec = row[25] ? atoi( row[25] ) : 30;
+    clsGroup._maxDurationSec = row[26] ? atoi( row[26] ) : 3600;
+    clsGroup._minNumberToStart = row[27] ? atoi( row[27] ) : 0;
+    clsGroup._ackTimeoutSec = row[28] ? atoi( row[28] ) : 5;
+    clsGroup._ackAction = ( row[29] && strcmp( row[29], "proceed" ) == 0 ) ? "proceed" : "abandon";  // §7.2.2 u)
     mysql_free_result( pRes );
 
     // 멤버 목록 — group_id 는 surrogate ptt_groups.id 참조

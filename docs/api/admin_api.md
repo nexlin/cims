@@ -815,7 +815,6 @@ curl -k -X GET https://192.168.0.2:4421/api/v1/ptt/groups \
   {
     "id": "+82571910001",
     "name": "Alpha그룹",
-    "video_enabled": true,
     "member_count": 3,
     "members": [
       {"user_id": "+82571900001", "priority": 0},
@@ -826,7 +825,6 @@ curl -k -X GET https://192.168.0.2:4421/api/v1/ptt/groups \
   {
     "id": "+82571910002",
     "name": "Bravo그룹",
-    "video_enabled": false,
     "member_count": 2,
     "members": [
       {"user_id": "+82571900003", "priority": 0},
@@ -849,7 +847,6 @@ Content-Type: application/json
 {
   "id": "+82571910003",
   "name": "Charlie그룹",
-  "video_enabled": false,
   "members": [
     {"user_id": "+82571900001", "priority": 0},
     {"user_id": "+82571900003", "priority": 0},
@@ -863,7 +860,6 @@ Content-Type: application/json
 |------|------|------|------|
 | `id` | string | Y | 그룹 MSISDN (E.164 형식) |
 | `name` | string | Y | 그룹 표시 이름 |
-| `video_enabled` | boolean | N | 영상 지원 여부 (기본: false) |
 | `allow_conference_state` | boolean | N | `on-network-allow-conference-state`(TS 24.481) — 멤버의 conference 이벤트(RFC 4575) 구독 허용 (기본: true). false 면 CSP 가 초기 SUBSCRIBE 를 403 `Warning: 138` 로 거절. 관제사 청취 범위 인가는 별도(역할 `ptt_listen` — [dispatch_center.md §5.6](../design/features/dispatch_center.md)) |
 | `group_type` | string | N | 그룹 종류 `prearranged`(기본)/`chat` — 그룹 문서 `<on-network-invite-members>`(true/false, TS 24.481 §7.2.2). 그 밖의 값은 400 — 일제 통화는 그룹 종류가 아니라 호 속성이다([mcptt_broadcast_group_call.md](../design/features/mcptt_broadcast_group_call.md)) |
 | `hang_timer_sec` | integer | N | 그룹 호 T4(Inactivity) 초 — 그룹 문서 `<on-network-hang-timer>`(TS 24.481 §7.2.2 o). 발언 없이 이 시간이 지나면 CSP 가 세션을 해제한다(TS 24.380 §6.3.4.3.5). 0~3600, 0=미사용, 기본 30 |
@@ -897,6 +893,8 @@ Content-Type: application/json
 
 > 조회(`GET`)는 그룹마다 `mcvideo`(속성 객체, MCVideo 그룹 아님·마이그레이션 전 = null)를 싣는다. 모르는 키·타입 오류·범위 밖은 400(쓰기 전에 검사 —
 > 다른 필드도 반영하지 않는다). MCVideo 표가 없는데 객체를 보내면 400 `schema_not_migrated`.
+> 그룹 영상은 이 `mcvideo` 하나로 켜고 끈다 — MCPTT 그룹 호는 음성만이다([mcvideo.md](../design/features/mcvideo.md) §8). 옛 클라이언트가
+> 생성·수정(`POST`·`PUT`)에 `video_enabled` 를 실어 보내면 거절하지 않고 무시한다(경고 로그만).
 
 > `floor_policy`/`max_talkers` 는 CSP 가 `PTT_GROUP_ADD`/`_MODIFY` 로 CMP 에 발행한다
 > ([mcptt_csp_cmp_roadmap_contract.md](../design/features/mcptt_csp_cmp_roadmap_contract.md) §B.1).
@@ -914,7 +912,6 @@ curl -k -X POST https://192.168.0.2:4421/api/v1/ptt/groups \
   -d '{
     "id": "+82571910003",
     "name": "Charlie그룹",
-    "video_enabled": false,
     "members": [
       {"user_id": "+82571900001", "priority": 0},
       {"user_id": "+82571900003", "priority": 1}
@@ -927,7 +924,6 @@ curl -k -X POST https://192.168.0.2:4421/api/v1/ptt/groups \
 {
   "id": "+82571910003",
   "name": "Charlie그룹",
-  "video_enabled": false,
   "member_count": 2,
   "members": [
     {"user_id": "+82571900001", "priority": 0},
@@ -954,8 +950,7 @@ Content-Type: application/json
 **요청:**
 ```json
 {
-  "name": "Charlie팀 그룹",
-  "video_enabled": true
+  "name": "Charlie팀 그룹"
 }
 ```
 
@@ -967,7 +962,6 @@ Content-Type: application/json
 {
   "id": "+82571910003",
   "name": "Charlie팀 그룹",
-  "video_enabled": true,
   "member_count": 2,
   "members": [
     {"user_id": "+82571900001", "priority": 0},
@@ -1229,7 +1223,7 @@ CSP 에는 `PHONE_GROUP_CHANGED`(uri=그룹 id) 로 재적재를 알린다. 가�
 |------|------|----------|--------|----------|------|
 | id | VARCHAR(32) | N | - | PK | 그룹 MSISDN (E.164) |
 | name | VARCHAR(128) | N | - | - | 그룹 표시 이름 |
-| video_enabled | TINYINT(1) | N | 0 | - | 영상 지원 여부 (0=off, 1=on) |
+| video_enabled | TINYINT(1) | N | 0 | - | 현행 코드가 읽지도 쓰지도 않는 열 — DB 를 공유하는 전 사이트가 새 빌드가 된 뒤 DROP([mcvideo.md](../design/features/mcvideo.md) §8 3). 그룹 영상 = `mcvideo_group_attrs` |
 
 ### ptt_group_members (그룹 멤버)
 

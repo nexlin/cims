@@ -59,7 +59,6 @@ internal unsafe struct cimsue_account_config_t
     public int mcdata_msrp;
     public byte* mcptt_server_uri;
     public byte* mcdata_server_uri;
-    public int mcptt_video;
     public int mcvideo_enabled;
     public byte* mcvideo_server_uri;
     public int auto_answer_mcvideo;
@@ -83,7 +82,6 @@ internal unsafe struct cimsue_group_call_options_t
     public int member_count;
     public int broadcast;
     public int implicit_floor_request;
-    public int video;
 }
 
 [StructLayout(LayoutKind.Sequential)]
@@ -638,7 +636,6 @@ internal unsafe struct cimsue_group_doc_t
     public cimsue_group_member_t* members;
     public int member_count;
     public byte* session_type;
-    public int video_enabled;
     public int encryption;
     public int emergency_call;
     public int emergency_alert;

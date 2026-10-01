@@ -128,7 +128,6 @@ std::string GroupDoc::toXml() const {
                               "</mcpttgi:mcdata-on-network-max-data-size-for-SDS>\n";
     if (maxAutoRecv >= 0) x += "    <mcpttgi:mcdata-on-network-max-data-size-auto-recv>" + std::to_string(maxAutoRecv) +
                                "</mcpttgi:mcdata-on-network-max-data-size-auto-recv>\n";
-    x += std::string("    <mcpttgi:mcptt-video>") + bs(videoEnabled) + "</mcpttgi:mcptt-video>\n";
     // 그룹 종류 = on-network-invite-members(TS 24.481 §7.2.2 a — true=prearranged, false=chat). 그룹 문서에 session-type 요소는 없다.
     x += std::string("    <mcpttgi:on-network-invite-members>") + bs(sessionType != "chat") + "</mcpttgi:on-network-invite-members>\n";
     if (maxParticipants > 0) x += "    <mcpttgi:on-network-max-participant-count>" + std::to_string(maxParticipants) + "</mcpttgi:on-network-max-participant-count>\n";
@@ -256,7 +255,6 @@ bool GroupDoc::parse(const std::string& xml, GroupDoc& out, std::string* err) {
     else { v = elemText(xml, "session-type", &f, after); if (f && !v.empty()) d.sessionType = v == "chat" ? "chat" : "prearranged"; }
     v = elemText(xml, "mcdata-allow-short-data-service", &f, after); if (f) d.allowSds = isTrue(v);
     v = elemText(xml, "mcdata-allow-file-distribution", &f, after); if (f) d.allowFd = isTrue(v);
-    v = elemText(xml, "mcptt-video", &f, after); if (f) d.videoEnabled = isTrue(v);
     v = elemText(xml, "on-network-max-participant-count", &f, after); if (f) d.maxParticipants = std::atoi(v.c_str());
     v = elemText(xml, "on-network-require-affiliation", &f, after); if (f) d.requireAffiliation = isTrue(v);
     v = elemText(xml, "on-network-group-priority", &f, after); if (f) d.priority = std::atoi(v.c_str());

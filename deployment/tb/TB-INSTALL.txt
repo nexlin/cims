@@ -743,9 +743,9 @@
                          bind_port UDP+TCP 와 client_port UDP 까지)
         50000-50159/udp  VoLTE/VoIP 미디어 (RtpStartPort + RtpPoolSize × 8)
         52000-52079/udp  PTT 멤버 오디오   (PttRtpStartPort + PttMemberPoolSize × 2)
-        56000-56079/udp  PTT 멤버 영상
         54000-54019/udp  PTT floor 제어    (PttFloorStartPort + PttRtpPoolSize × 2)
         58000-58063/udp  감청 tap          (TapStartPort + TapPoolSize × 4)
+        59000-59239/udp  MCVideo 멤버      (McVideoStartPort + McVideoMemberPoolSize × 6)
 
       [주의] 내부 채널은 열지 않는다 — csc 내부 API(4421) · csp 제어(9000) ·
              cmp 제어(9001) · DB(3306). 목록에 없는데 외부 주소로 듣고 있는 포트가
@@ -757,7 +757,7 @@
   $ sudo firewall-cmd --list-ports
       로키에서만. [확인] 템플릿 기본값이면 **11개**가 보인다 (Rocky 10.2 실측):
         4419/tcp 4430/tcp 5061/tcp 10022/tcp 25061/tcp 5060/udp
-        50000-50159/udp 52000-52079/udp 54000-54019/udp 56000-56079/udp 58000-58063/udp
+        50000-50159/udp 52000-52079/udp 54000-54019/udp 58000-58063/udp 59000-59239/udp
 
   ★ **바깥 장비에서 반드시 한 번 확인한다.** 서버에서 `--list-ports` 가 맞아도 상위
     네트워크에서 막히면 증상이 똑같다. 다른 장비에서:

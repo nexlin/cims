@@ -449,9 +449,6 @@ int main( int argc, char * argv[] )
 		CHECK( strBody.find( "a=rtpmap:96 H264/90000\r\n" ) != std::string::npos, "rtpmap echo" );
 		CHECK( strBody.find( "a=fmtp:96 profile-level-id=42e01f;packetization-mode=1\r\n" ) != std::string::npos, "fmtp 는 offer 값 echo" );
 		CHECK( strBody.find( "m=application 40016 UDP MCPTT\r\n" ) != std::string::npos, "floor 라인 유지" );
-		int iVpt = 0;
-		CHECK( clsUa.GetRemoteVideoPayloadType( "rv-e@test.local", iVpt ) && iVpt == 96,
-		       "원격 SDP m=video 의 H.264 PT = 96 (CMP user_video_pt)" );
 		UdpSendTo( fdUe, BuildInDialog( "BYE", strInvite, strFinal, 2, NULL ) );
 		UdpRecvUntil( fdUe, "SIP/2.0 200", 1000 );
 	}
@@ -481,8 +478,6 @@ int main( int argc, char * argv[] )
 		std::string strFinal = UeInvite( fdUe, iUePort, "rv-g@test.local", SDP_AUDIO_ONLY, strInvite );
 		std::string strBody = BodyOf( strFinal );
 		CHECK( MediaOrder( strBody ) == "audio", ( "m= 는 audio 만 (" + MediaOrder( strBody ) + ")" ).c_str() );
-		int iVpt = 0;
-		CHECK( clsUa.GetRemoteVideoPayloadType( "rv-g@test.local", iVpt ) && iVpt == -1, "영상 미제시 → video PT -1" );
 		UdpSendTo( fdUe, BuildInDialog( "BYE", strInvite, strFinal, 2, NULL ) );
 		UdpRecvUntil( fdUe, "SIP/2.0 200", 1000 );
 		clsCb.m_iLocalVideoPort = -1;

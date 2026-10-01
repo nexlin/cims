@@ -331,19 +331,17 @@ C++ 공개 표면은 `cimsue/engine.h` 의 `Engine` 하나이며 계정·호를 
   네이티브 스레드라 `FindClass` 가 APK 의 `org.pjsip.PjCamera2` 를 못 찾으므로, pjlib 이 `JNI_OnLoad` 에서 앱 클래스 로더를 기억하고
   영상 장치가 `pj_jni_find_class` 로 찾는다(CIMS 패치). 카메라 도우미 두 파일은 pj 를 싣는 모듈마다 빌드 때 복사한다(S1-UE-ENGINE-SINGLE).
   프레임 콜백(`onVideoFrame`)은 창 없는 렌더 장치 패치가 필요해 후속(§11). 감청 영상 격자 합성은 UI 몫.
-- **그룹 영상(MCPTT, ptt_flows.md 영상 협상).** 개시 `GroupCallOptions.video` = 개시 INVITE 에 m=video(H.264), 착신 `AccountConfig.mcpttVideo`
-  = 자동 수락하는 그룹 INVITE 의 m=video 를 영상까지 받는다 — 서버는 `video_enabled` 그룹에서만 제안·수락하고 아니면 port 0 이다.
-  `CallInfo.video` 는 미디어가 성립하면 협상된 영상 미디어 활성 여부로 갱신된다(그 전 = offer·발신 옵션). **송출은 계정
-  `videoAutoTransmit` 가 아니라 발언권을 따른다** — 서버(CMP)는 floor 보유자 영상만 분배하므로, 반이중 호는 `videoSend`(기본 true,
-  `Engine::setVideoSend(callId, on)`·파사드 `Call.setVideoSend`)이면서 floor Granted(마이크 개방과 같은 계기)일 때 START_TRANSMIT,
-  놓으면 STOP_TRANSMIT 한다(재협상 없음, 방향 변경도 하지 않는다). 송출 개시는 첫 프레임을 IDR 로 강제하고(pjmedia `force_keyframe`),
-  CMP 에 영상 RTCP 가 없어 수신자 PLI 가 화자에게 가지 않으므로 늦은 합류·손실 회복은 인코더 IDR 주기(2 s, And-Media 패치)에 맡긴다.
-  정지는 카메라를 닫는다(셀프뷰도 그 동안 멈춘다). CMP 는 멤버 영상 목적지를 그 멤버가 보낸 패킷으로 latch 하는데, pjmedia 영상
-  keep-alive 는 인코딩 경로에서만 나가 말하지 않는 청취자는 스트림 개시 때 한 번만 보낸다 — 코어가 송출하지 않는 MCPTT 영상 스트림에
-  `PJMEDIA_STREAM_KA_INTERVAL`(5 s)마다 keep-alive 를 보낸다(pjsua2 util timer → ue-ctl, CIMS 패치 `PJSUA_CALL_VID_STRM_SEND_KEEPALIVE`).
-  비반이중 호에서 `setVideoSend` 는 곧바로 송출을 시작·정지한다. 수신 창은 엔진에 하나라 여러 영상 그룹에 동시에 참여하면 모든 영상
-  호가 같은 창에 그린다 — 호별 창은 후속(§11). C API·.NET 에는 영상 API(`setVideoWindow`·`switchCamera`·`setVideoSend`)와 이 필드들을
-  F3(Windows 영상)에서 함께 싣는다.
+- **그룹 영상 = MCVideo 호(§4.6, [mcvideo.md](mcvideo.md)).** MCPTT 그룹 호는 음성만이다 — `joinGroupCall` 개시 INVITE 는 m=audio + m=application(floor)
+  만 제안하고, 자동 수락하는 MCPTT 착신 INVITE 가 m=video 를 실어 오면 port 0 으로 거절한다(RFC 3264 §6). `CallInfo.video` 는 미디어가 성립하면
+  협상된 영상 미디어 활성 여부로 갱신된다(그 전 = offer·발신 옵션). **내 영상 송출 허용** = `CallInfo.videoSend`(기본 true,
+  `Engine::setVideoSend(callId, on)`·파사드 `Call.setVideoSend`) — 1:1 영상 호는 곧바로 송출을 시작·정지하고, MCVideo 호는 계정
+  `videoAutoTransmit` 와 무관하게 허용이면서 송출 허가(TS 24.581 §6.2.4.4.6)를 가진 동안만 START_TRANSMIT, 허가가 끝나면
+  STOP_TRANSMIT 한다(재협상 없음 — 그룹 세션 방향은 서버가 정하므로 방향 변경도 하지 않는다). 송출 개시는 첫 프레임을 IDR 로 강제하고
+  (pjmedia `force_keyframe`), 정지는 카메라를 닫는다(셀프뷰도 그 동안 멈춘다). CMP 는 멤버 영상 목적지를 그 멤버가 보낸 패킷으로 latch 하는데,
+  pjmedia 영상 keep-alive 는 인코딩 경로에서만 나가 보내지 않는 수신자는 스트림 개시 때 한 번만 보낸다 — 코어가 송출하지 않는 MCVideo 영상
+  스트림에 `PJMEDIA_STREAM_KA_INTERVAL`(5 s)마다 keep-alive 를 보낸다(첫 틱은 1 s 뒤, pjsua2 util timer → ue-ctl, CIMS 패치
+  `PJSUA_CALL_VID_STRM_SEND_KEEPALIVE`). 수신 창은 엔진에 하나라 여러 MCVideo 호에 동시에 참여하면 모든 영상 호가 같은 창에 그린다 —
+  호별 창은 후속(§11). C API·.NET 에는 `setVideoSend` 가 아직 없다 — F3(Windows 영상)에서 싣는다.
 - **캡처.** 카메라·마이크 권한과 장치 열기는 플랫폼 SDK 가 하고, 코어는 `setCaptureEnabled` 로 on/off 만 한다 — false = pjsua
   `SPEAKER_ONLY`(캡처 스트림을 열지 않고 재생만, OS 동시 캡처 중재에서 빠진다 — 앱 간 마이크 양보·PTT 유휴), `NO_IMMEDIATE_OPEN`
   동반이라 장치가 닫혀 있으면 모드만 두고, 모드는 장치 선택을 넘어 유지된다. 헤드리스(null 장치)는 상태만 둔다.
@@ -391,8 +389,7 @@ chat/prearranged·`mc_queueing`·`mc_priority`·`mc_reception_priority`·암묵�
 (`Account.joinVideoGroupCall`·`affiliate(…, service)`·`Call.requestTransmission`·`releaseTransmission`·`acceptReception`·`endReception`·`transmissionInfo`,
 흐름 `transmission`·`reception`), C API(`cimsue_engine_join_video_group_call`·`cimsue_engine_affiliate_service`·`cimsue_engine_request_transmission` … ·
 `on_transmission`·`on_reception` — 구조체·필드·콜백은 끝에 덧붙여 ABI 유지, 크기 자기검사 id 추가), .NET(`Account.JoinVideoGroupCall`·`Affiliate(…, McService)`·
-`Call.RequestTransmission` … · 이벤트 `TransmissionChanged`·`ReceptionChanged` — Windows 에서 `CimsUe.Tests` ABI 대조). 그룹 영상 옵션(`GroupCallOptions.video`)·
-`AccountConfig.mcpttVideo` 의 C API·.NET 누락도 같이 메웠다. MCVideo 설정 문서도 셋 다 — 그룹 문서 MCVideo 몫(`GroupMember.mcvideoId`·`GroupDoc.mcvideo`
+`Call.RequestTransmission` … · 이벤트 `TransmissionChanged`·`ReceptionChanged` — Windows 에서 `CimsUe.Tests` ABI 대조). MCVideo 설정 문서도 셋 다 — 그룹 문서 MCVideo 몫(`GroupMember.mcvideoId`·`GroupDoc.mcvideo`
 = `McVideoGroupAttrs`, C API `cimsue_mcvideo_group_attrs_t` 는 `present = 0`(0 으로 채운 .NET 기본값)이면 PUT 에 싣지 않고, .NET·Kotlin 은 `null` = MCVideo 그룹
 아님·속성 `null` = 미기재 ↔ 코어 -1), `fetchMcVideoUserProfile`·`fetchMcVideoServiceConfig`(C API `cimsue_csc_fetch_mcvideo_*`·`cimsue_mcvideo_*_parse`), ue-init-config
 MCVideo PSI. 동작(구현 — 시험 `McvSip`·`McvCall`, 계약 K3 골든과 대조):
@@ -775,10 +772,10 @@ NDK/MSVC 빌드는 개발 서버 밖(WSL2·Windows 머신)에서 수행하고, �
   장치(colorbar, `PJMEDIA_VIDEO_DEV_HAS_CBAR_SRC`), ③ 렌더 = 코어가 등록하는 **null 렌더 장치**(`pjmedia_vid_register_factory` — 프레임을 버리고 수를
   센다, 시험의 «수신 영상 프레임» 관측점. Windows «창 없는 프레임 콜백» 장치와 같은 틀)가 필요하다. 계측기 워커 패키지가 cimsue-cli 를 동봉하므로
   (test_instrument.md real-ue) 의존성·패키지 크기·빌드 시간 영향을 함께 정해야 한다 — 사용자 결정 후 착수.
-- **호별 수신 창** — `setVideoWindow` 는 엔진 창 하나라 동시에 참여한 영상 그룹이 둘 이상이면 같은 창에 겹쳐 그린다(§4.5 그룹 영상).
+- **호별 수신 창** — `setVideoWindow` 는 엔진 창 하나라 동시에 참여한 MCVideo 호가 둘 이상이면 같은 창에 겹쳐 그린다(§4.5 그룹 영상).
   `setVideoWindow(callId, window)` 로 호마다 창을 두거나, 주채널 호에만 결선하는 정책이 필요하다.
-- **백그라운드 영상 송출** — Android 는 카메라를 전경 앱에만 허용한다. PTT 앱이 화면 밖에서 발언할 때 영상까지 보내려면 서비스의
-  전경 형식에 `camera` 를 더하고 발언 동안 승격해야 한다(현행은 앱이 앞에 있을 때만 영상 송출, 음성은 무관).
+- **백그라운드 영상 송출** — Android 는 카메라를 전경 앱에만 허용한다. PTT 앱이 화면 밖에서 MCVideo 영상을 보내려면 서비스의
+  전경 형식에 `camera` 를 더하고 송출 허가 동안 승격해야 한다(현행은 앱이 앞에 있을 때만 영상 송출, 음성은 무관).
 - **HTTP 전송 주입** — §4.4 의 `http::ITransport` 는 코어 내부에만 있고 주입 통로가 없다(세 플랫폼 공통).
   프록시 경유가 필요해지면 인터페이스를 공개 헤더로 올리고 SWIG director·C API·.NET 에 같이 낸다.
 - **C API 생성 자동화** — §6.4 의 C API 는 손 평탄화가 출발점. C++ 헤더가 커지면 SWIG C# 백엔드 또는 헤더 파서 기반

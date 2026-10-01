@@ -143,7 +143,6 @@ struct GroupDoc {
     std::string uri, displayName, etag;
     std::vector<GroupMember> members;
     std::string sessionType = "prearranged";   // 그룹 종류 prearranged | chat — 문서의 on-network-invite-members(TS 24.481 §7.2.2 a)
-    bool videoEnabled = false;
     bool encryption = false;
     bool emergencyCall = true;                 // allow-MCPTT-emergency-call (imminent-peril 은 서버가 미러)
     bool emergencyAlert = true;

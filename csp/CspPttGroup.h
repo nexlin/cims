@@ -84,9 +84,6 @@ public:
     /** Member List (List of Group Members) */
     std::vector<std::shared_ptr<CspPttUser>> _pusers;
 
-    /** Video relay enabled (H.264) */
-    bool _videoEnabled;
-
     /** 그룹 우선순위 (1=최고, 10=최저) */
     int _priority;
 

@@ -85,9 +85,6 @@
                     <CheckBox Style="{StaticResource Switch}" Content="긴급 경보 허용" IsChecked="{Binding EmergencyAlert}" Margin="0,0,0,6" />
                     <CheckBox Style="{StaticResource Switch}" Content="메시지(SDS) 허용" IsChecked="{Binding AllowSds}" Margin="0,0,0,6" />
                     <CheckBox Style="{StaticResource Switch}" Content="파일 전송(FD) 허용" IsChecked="{Binding AllowFd}" Margin="0,0,0,6" />
-                    <CheckBox Style="{StaticResource Switch}" Content="PTT 영상(현행)" IsChecked="{Binding VideoEnabled}" Margin="0,0,0,0"
-                              ToolTip="MCPTT 그룹 호에 영상(m=video)을 싣는 옛 방식(비규격 mcptt-video) — 새 영상은 아래 «서비스» 의 MCVideo 로" />
-                    <TextBlock Style="{StaticResource Hint}" Text="V7 배포에서 없어집니다 — 새 영상은 «서비스 › MCVideo 영상»" Margin="34,0,0,6" TextWrapping="Wrap" />
                     <CheckBox Style="{StaticResource Switch}" Content="참여 전 affiliation 필요" IsChecked="{Binding RequireAffiliation}" Margin="0,0,0,6" />
                     <CheckBox Style="{StaticResource Switch}" Content="미디어 암호화" IsChecked="{Binding Encryption}" Margin="0,0,0,6" />
                     <UniformGrid Columns="2" Margin="0,4,0,0">

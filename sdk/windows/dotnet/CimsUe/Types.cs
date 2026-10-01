@@ -165,8 +165,6 @@ public sealed class AccountConfig
     /// <summary>참여 MCData 기능 PSI — SDS disposition 통지 Request-URI(TS 24.282 §12.2.1.1). null 이면 원 발신자 AoR 직행(CSP 0.2.180 전
     /// 서버 전환기). 정본 = ue-init-config <see cref="UeInitConfigDoc.McdataServerUri"/>.</summary>
     public string? McdataServerUri { get; set; }
-    /// <summary>자동 수락하는 MCPTT 착신의 m=video 를 영상까지 받는다(서버는 video_enabled 그룹에서만 제안한다).</summary>
-    public bool McpttVideo { get; set; }
     /// <summary>MCVideo 서비스 사용 — REGISTER Contact 에 MCVideo 태그(TS 24.281 §7.2.1AA). 빼고 다시 등록하면 MCVideo 로그오프.</summary>
     public bool McvideoEnabled { get; set; }
     /// <summary>참여 MCVideo 기능 PSI — MCVideo 그룹 호·affiliation Request-URI. 정본 = ue-init-config <see cref="UeInitConfigDoc.McvideoServerUri"/>.</summary>
@@ -208,8 +206,6 @@ public sealed class GroupCallOptions
     /// floor 는 호 성립 전부터 Requesting, 200 OK 의 mc_granted 나 Floor Granted 로 Speaking. 승인·성립 전에 FloorRelease 하면
     /// 발언권을 돌려준다. 누르는 동안 개시하고 말하는 한 버튼 발신(일제 통화)용.</summary>
     public bool ImplicitFloorRequest { get; set; }
-    /// <summary>그룹 영상 제안(m=video, H.264) — 반이중이면 내 영상은 발언권을 가진 동안만. 착신 영상 수락은 AccountConfig.McpttVideo.</summary>
-    public bool Video { get; set; }
 }
 
 /// <summary>MCVideo 그룹 호 개시·합류 옵션(TS 24.281 §9.2.1 prearranged · §9.2.2 chat, 제어 채널 fmtp TS 24.581 §14.2).</summary>

@@ -41,7 +41,7 @@ NS = {"poc": "urn:oma:xml:poc:list-service", "gi": mv.NS_GI, "oxe": "urn:oma:xml
 
 
 def _group(name, mcvideo):
-    return {"display_name": name, "video_enabled": mcvideo is not None, "priority": 5, "encryption": False,
+    return {"display_name": name, "priority": 5, "encryption": False,
             "emergency_call": True, "emergency_alert": True, "allow_conference_state": True, "allow_sds": True,
             "allow_fd": False, "max_sds_size": 10000, "max_auto_recv": 1048576, "org_code": "",
             "group_type": "prearranged", "max_members": 0, "require_affiliation": True, "hang_timer_sec": 30,
@@ -172,11 +172,10 @@ class GroupDocumentTest(unittest.TestCase):
         self.assertEqual(mvd["allow_conference_state"], True)
 
     def test_put_without_mcvideo_service_keeps_state(self):
-        """전환기 규칙 — MCVideo 를 모르는 단말(옛 SDK: enabler example.mcptt·mcptt-video)의 PUT 은 MCVideo 를 건드리지 않는다."""
+        """전환기 규칙 — MCVideo 를 모르는 단말(옛 SDK: enabler example.mcptt)의 PUT 은 MCVideo 를 건드리지 않는다."""
         old_sdk_doc = m.get_group_xml("tel:g102")[0].replace(mv.ICSI_MCPTT, "example.mcptt")
         doc = m.parse_group_document_xml(old_sdk_doc)
         self.assertIsNone(doc["mcvideo"])
-        self.assertEqual(doc["video_enabled"], False)
 
     def test_put_rejects_protect_true_and_out_of_range(self):
         base = m.get_group_xml("tel:g101")[0]

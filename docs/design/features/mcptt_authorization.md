@@ -201,7 +201,7 @@ GMC→GMS **XCAP Ut PUT/DELETE** 다. 관제사는 콘솔 계정이 아니라 PT
   "alias": null,
   "group_type": "prearranged",
   "priority": 5, "encryption": false, "emergency_call": false,
-  "video_enabled": false, "on_network": true,
+  "on_network": true,
   "max_members": 0, "require_affiliation": true, "org_code": "",
   "authorized_user_id": 27,
   "authorized_user": "tel:+82500000027",   // 파생 MCPTT ID (규격 administrator)

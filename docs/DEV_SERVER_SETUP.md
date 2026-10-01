@@ -273,7 +273,7 @@ cd ems/core/console && npm run dev -- --port 3000 --host
 | 50000–50039 | UDP | CMP | VoIP RTP |
 | 52000–52009 | UDP | CMP | PTT RTP 오디오 |
 | 54000–54009 | UDP | CMP | PTT Floor 제어 |
-| 56000–56009 | UDP | CMP | PTT 영상 |
+| 59000–59239 | UDP | CMP | MCVideo 그룹 호 (멤버당 6포트 블록 — `McVideoStartPort`·`McVideoMemberPoolSize`) |
 
 ---
 

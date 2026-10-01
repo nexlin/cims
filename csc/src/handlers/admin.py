@@ -1511,9 +1511,16 @@ async def handle_ptt_groups(handler_args: HandlerArgs, kwargs: dict) -> HandlerR
         return HandlerResult(status=500, body={'error': str(e)})
 
 
+def _ignore_video_enabled(body: dict, where: str) -> None:
+    """옛 «PTT 영상» 플래그(video_enabled)는 받아도 쓰지 않는다 — MCPTT 그룹 호는 음성만이고 그룹 영상은 MCVideo 몫(그룹 `mcvideo`,
+    mcvideo.md §8). 그룹 편집 화면이 MCVideo 켜기로 바뀌기 전 콘솔이 보내는 값이라 거절하지 않고 경고만 남긴다."""
+    if 'video_enabled' in body:
+        _logger.log_warning(f"[ADMIN] {where}: video_enabled 무시 — 그룹 영상은 mcvideo(null↔객체)로 켠다(mcvideo.md §8)")
+
+
 # 그룹 조회 컬럼 (id=surrogate, mcptt_group_id=식별자). 응답에서 id 는 mcptt_group_id 로 노출.
 _GROUP_COLS = (
-    "id, mcptt_group_id, name, video_enabled, priority, encryption, emergency_call, "
+    "id, mcptt_group_id, name, priority, encryption, emergency_call, "
     "emergency_alert, allow_conference_state, "
     "allow_sds, allow_fd, max_sds_size, max_auto_recv, "
     "org_code, session_start, session_end, group_type, on_network, max_members, "
@@ -1609,7 +1616,6 @@ def _shape_group(g: dict, members: list, owner: dict = None):
     """
     g['db_id'] = g['id']
     g['id'] = g.get('mcptt_group_id') or str(g['db_id'])
-    g['video_enabled'] = bool(g.get('video_enabled', 0))
     g['encryption'] = bool(g.get('encryption', 0))
     g['emergency_call'] = bool(g.get('emergency_call', 0))
     g['emergency_alert'] = bool(g.get('emergency_alert', 1))
@@ -1793,7 +1799,7 @@ async def _create_group(body, config, payload=None):
         return HandlerResult(status=400,
                              body={'error': "group id 접두사 'adhoc-'/'priv-' 는 즉석 세션용 예약어입니다"})
     name           = body.get('name', group_id)
-    video_enabled  = 1 if body.get('video_enabled', False) else 0
+    _ignore_video_enabled(body, f'POST /ptt/groups {group_id}')
     priority       = int(body.get('priority', 5))
     encryption     = 1 if body.get('encryption', False) else 0
     emergency_call = 1 if body.get('emergency_call', False) else 0
@@ -1865,7 +1871,7 @@ async def _create_group(body, config, payload=None):
             if mcvideo_attrs is not None and not _mcvideo.tables_present(cur):
                 return HandlerResult(status=400, body=_mcvideo.SCHEMA_ERROR)
             cur.execute(
-                "INSERT INTO ptt_groups (mcptt_group_id, name, video_enabled, priority, encryption, "
+                "INSERT INTO ptt_groups (mcptt_group_id, name, priority, encryption, "
                 "emergency_call, emergency_alert, allow_conference_state, "
                 "allow_sds, allow_fd, max_sds_size, max_auto_recv, "
                 "org_code, session_start, session_end, group_type, on_network, "
@@ -1873,8 +1879,8 @@ async def _create_group(body, config, payload=None):
                 "floor_policy, max_talkers, hang_timer_sec, max_duration_sec, "
                 "min_number_to_start, ack_timeout_sec, ack_action) "
                 "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, "
-                "%s, %s, %s)",
-                (group_id, name, video_enabled, priority, encryption,
+                "%s, %s)",
+                (group_id, name, priority, encryption,
                  emergency_call, emergency_alert, allow_conference_state,
                  allow_sds, allow_fd, max_sds_size, max_auto_recv,
                  org_code, session_start, session_end, group_type,
@@ -1929,9 +1935,7 @@ async def _update_group(group_id: str, body, config, payload=None):
             if 'name' in body:
                 update_fields.append('name=%s')
                 update_vals.append(body['name'])
-            if 'video_enabled' in body:
-                update_fields.append('video_enabled=%s')
-                update_vals.append(1 if body['video_enabled'] else 0)
+            _ignore_video_enabled(body, f'PUT /ptt/groups {group_id}')
             for fld in ('priority', 'max_members', 'max_sds_size', 'max_auto_recv'):
                 if fld in body:
                     update_fields.append(f'{fld}=%s')
@@ -2181,7 +2185,6 @@ _GROUP_FIELDS = [
     {'name': 'group_type', 'type': 'string', 'enum': ['prearranged', 'chat'],
      'desc': '그룹 종류 — 그룹 문서 on-network-invite-members (prearranged=true, chat=false). 일제 통화는 그룹 종류가 아니라 호 속성'},
     {'name': 'priority', 'type': 'integer', 'desc': '그룹 우선순위'},
-    {'name': 'video_enabled', 'type': 'boolean', 'desc': '영상 허용'},
     {'name': 'encryption', 'type': 'boolean', 'desc': '암호화 사용'},
     {'name': 'emergency_call', 'type': 'boolean', 'desc': '긴급 통화 허용'},
     {'name': 'emergency_alert', 'type': 'boolean', 'desc': '긴급 알림 허용'},
@@ -2223,7 +2226,7 @@ _GROUP_FIELDS = [
 
 _GROUP_EXAMPLE = {
     'id': 'g-ops-1', 'name': '운영1팀', 'alias': 'OPS1', 'org_code': 'D110',
-    'group_type': 'prearranged', 'priority': 5, 'video_enabled': False, 'encryption': True,
+    'group_type': 'prearranged', 'priority': 5, 'encryption': True,
     'emergency_call': True, 'emergency_alert': True, 'allow_conference_state': True, 'allow_sds': True, 'allow_fd': True,
     'max_sds_size': 4096, 'max_auto_recv': 1048576, 'on_network': True, 'max_members': 50,
     'require_affiliation': False, 'authorized_user_id': '01000000003',

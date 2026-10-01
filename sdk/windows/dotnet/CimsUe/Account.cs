@@ -209,7 +209,6 @@ public sealed unsafe class Account
         n.members = s.AddArray(o.Members, out n.member_count);
         n.broadcast = Engine.B(o.Broadcast);
         n.implicit_floor_request = Engine.B(o.ImplicitFloorRequest);
-        n.video = Engine.B(o.Video);
         return n;
     }
 

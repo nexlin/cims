@@ -235,21 +235,19 @@ CMP에서 할당받은 그룹 미디어 리소스를 추적하는 내부 구조�
 
 ```cpp
 struct GroupRtpInfo {
-    int iPort;              // CMP 할당 Audio RTP 포트 (PPttTrans)
-    int iFloorPort;         // CMP 할당 Floor Control 포트 (PPttTrans)
-    int iVideoPort;         // CMP 할당 Video 포트
+    int iFloorPort;         // 그룹 공유 Floor Control 포트 (>0 = CMP 그룹 유효)
     std::string strIp;      // CMP RTP IP
-    size_t nMemberHash;     // 멤버 구성 해시 (변경 감지용)
+    size_t nConfigHash;     // CMP 재전달이 필요한 설정(로스터·floor 정책) 지문 (변경 감지용)
     std::string strSessionCallId;  // 세션 발신 Call-ID
-    bool bVideoEnabled;     // 영상 활성화 여부
     int iConfVersion;       // RFC 4575 conference-info version
+    std::map<std::string, int> memberPorts;  // 멤버별 CMP 전용 RTP 포트 (sid → audio) — MCPTT 는 음성만
 };
 ```
 
 **Floor 포트 전달 흐름:**
 
 ```
-CMP AddGroup 응답 → {port, floor_port, video_port}
+CMP AddGroup 응답 → {ip, floor_port, member_ports}
     │
     └→ GroupRtpInfo.iFloorPort에 저장
     │
@@ -324,7 +322,6 @@ class CspPttGroup {
     std::string _id;           // 그룹 ID
     std::string _name;         // 표시 이름
     std::vector<CspPttUser> _pusers;  // 멤버 목록
-    bool _videoEnabled;        // H.264 지원
     int _priority;             // 기본 우선순위
     bool _encryption;          // SRTP 활성화
     bool _emergencyCall;       // 긴급호 허용
@@ -347,6 +344,7 @@ INVITE to group@domain
   │   + Warning 111/112. 게이트 없으면 곧바로:
   ├─ 발신자에게 200 OK (공유 RTP 주소 · Contact = 세션 식별자 `…;gr=<토큰>` + 특성 태그+isfocus · Session-Expires
   │   refresher=uac + Require: timer · PAI = 그룹 URI · Supported: tdialog — TS 24.379 §6.3.3.2.3.2)
+  │   (offer 의 m=video 는 같은 자리에 port 0 으로 거절 — RFC 3264 §6. MCPTT 는 음성만, 그룹 영상 = MCVideo 호 §3.4a)
   ├─ 매핑: callerId → groupId (m_mapUserCall)
   │
   └─ 각 그룹 멤버에 대해 (게이트면 수락보다 먼저):
@@ -354,7 +352,7 @@ INVITE to group@domain
       ├─ InviteMember() → Multipart INVITE
       │   ├─ Content-Type: multipart/mixed
       │   ├─ Part 1: application/vnd.3gpp.mcptt-info+xml
-      │   └─ Part 2: SDP (공유 RTP + m=application floor)
+      │   └─ Part 2: SDP (멤버 전용 RTP + m=application floor — m=video 없음)
       │      (멤버 명단 resource-lists 는 싣지 않는다 — TS 24.379 §6.3.3.1.2, 명단은 conference 이벤트·GMS)
       ├─ 멤버 200 OK 수신 → m=application floor 파싱 → CMP PTT_JOIN(role 포함) → 게이트 누계
       └─ 매핑: memberCallId → {groupId, memberId, sessionId}
@@ -493,7 +491,7 @@ audit 수준2 지문으로 stash 한다. 판정에 따라 ring 을 갱신한다:
 | `RELAY_REMOVE` | 세션 해제 | — (hdr.status 만) |
 | `PTT_GROUP_ADD` | PTT 그룹 RTP 생성 (+`floor_policy`/`max_talkers` — 동시 발언 정책) | ip, floor_port, member_ports(멤버별 전용 포트 맵) |
 | `PTT_GROUP_MODIFY` | 그룹 멤버/우선순위·floor 정책 갱신 | 동일 |
-| `PTT_JOIN` | 멤버 그룹 참가 — 2단 멱등: user_ip 없이 선할당 → 주소 갱신 (+`user_nat`/`user_sig_ip`) | ip, port, video_port (멤버 전용) |
+| `PTT_JOIN` | 멤버 그룹 참가 — 2단 멱등: user_ip 없이 선할당 → 주소 갱신 (+`user_nat`/`user_sig_ip`) | ip, port (멤버 전용) |
 | `PTT_LEAVE` | 멤버 그룹 퇴장 | — |
 | `PTT_GROUP_REMOVE` | 그룹 해제 | — |
 | `PTT_FLOOR_TIER` | 멤버 floor tier 런타임 변경 (emergency/imminent/normal) | — |

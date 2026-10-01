@@ -155,9 +155,8 @@ const char* PMcpttGroup::_policyName() const {
          : _floorPolicy == FLOOR_POLICY_DUAL  ? "dual" : "single";
 }
 
-std::string PMcpttGroup::_slotTrack(int slot, bool video) {
-    std::string base = video ? "video" : "audio";
-    return slot <= 0 ? base : base + std::to_string(slot);
+std::string PMcpttGroup::_slotTrack(int slot) {
+    return slot <= 0 ? std::string("audio") : "audio" + std::to_string(slot);
 }
 
 PMcpttGroup::Talker* PMcpttGroup::_talkerOf(const std::string& sessionId) {
@@ -182,23 +181,23 @@ std::string PMcpttGroup::getFloorPolicyName() {
 
 PMcpttGroup::~PMcpttGroup() {
     // 녹취 종료 먼저 — stopRecording() 이 _recorder 포인터를 lock 하에서 swap 하여
-    // onRtpPacket/onVideoRtpPacket 의 writePacket 경합이 차단된다. 이후 멤버 정리.
+    // onMemberRtpPacket 의 writePacket 경합이 차단된다. 이후 멤버 정리.
     stopRecording();
     PAutoLock lock(_mutex);
     _mbufSetActive(false);
     _members.clear();
 }
 
-void PMcpttGroup::addMember(const std::string& sessionId, const std::string& ip, int port, int floorPort, int videoPort,
+void PMcpttGroup::addMember(const std::string& sessionId, const std::string& ip, int port, int floorPort,
                             const std::string& role, PPttMemberPort* unit, bool nat, const std::string& sigIp,
                             int ptOut, int srcPt, int tePtOut, int srcTePt, const std::string& codec,
-                            bool recvOnly, bool floorSuppress, int videoPtOut) {
-    if (ptOut || srcPt || tePtOut || srcTePt || videoPtOut)
-        LOG_INFO("PMcpttGroup", "[%s] addMember session=%s ip=%s rtp=%d floor=%d video=%d role=%s nat=%d pt=%d/%d te=%d/%d vpt=%d",
-                 _groupId.c_str(), sessionId.c_str(), ip.c_str(), port, floorPort, videoPort, role.c_str(),
-                 nat ? 1 : 0, ptOut, srcPt, tePtOut, srcTePt, videoPtOut);
+                            bool recvOnly, bool floorSuppress) {
+    if (ptOut || srcPt || tePtOut || srcTePt)
+        LOG_INFO("PMcpttGroup", "[%s] addMember session=%s ip=%s rtp=%d floor=%d role=%s nat=%d pt=%d/%d te=%d/%d",
+                 _groupId.c_str(), sessionId.c_str(), ip.c_str(), port, floorPort, role.c_str(),
+                 nat ? 1 : 0, ptOut, srcPt, tePtOut, srcTePt);
     else
-        LOG_INFO("PMcpttGroup", "[%s] addMember session=%s ip=%s rtp=%d floor=%d video=%d role=%s nat=%d", _groupId.c_str(), sessionId.c_str(), ip.c_str(), port, floorPort, videoPort, role.c_str(), nat ? 1 : 0);
+        LOG_INFO("PMcpttGroup", "[%s] addMember session=%s ip=%s rtp=%d floor=%d role=%s nat=%d", _groupId.c_str(), sessionId.c_str(), ip.c_str(), port, floorPort, role.c_str(), nat ? 1 : 0);
     // NAT 멤버인데 guard IP(user_sig_ip)가 비면 latch IP guard(_acceptNatRtp)가 이 멤버에
     //   한해 무력화된다(SSRC 핀만 방어) — CSP UserMap 미조회(미등록 등)가 원인. 조용히
     //   약화되지 않도록 드러낸다.
@@ -213,18 +212,15 @@ void PMcpttGroup::addMember(const std::string& sessionId, const std::string& ip,
         // 동일 선언 재수신(주소·nat·guard 불변) — latch/학습 목적지 유지 (JOIN ② 재전송·refresh 가
         //   활성 latch 를 풀지 않도록). 비교는 선언 원본(decl*) 기준 — peer.ip/port 는 latch 시
         //   학습 주소로 덮인다 (PRtpRelay::setRemote 와 동일 규칙).
-        bool sameDecl = (peer.declIp == ip && peer.declPort == port && peer.declVideoPort == videoPort &&
-                         peer.natEnabled == nat && peer.sigIp == sigIp);
+        bool sameDecl = (peer.declIp == ip && peer.declPort == port && peer.natEnabled == nat && peer.sigIp == sigIp);
         // PT 재작성 파라미터는 주소 불변 재-JOIN(재협상)에서도 항상 최신 선언을 따른다.
         peer.ptOut = ptOut;
         peer.srcPt = srcPt;
         peer.tePtOut = tePtOut;
         peer.srcTePt = srcTePt;
-        peer.videoPtOut = videoPtOut;
         if (!codec.empty()) peer.codec = codec;
         peer.declIp = ip;
         peer.declPort = port;
-        peer.declVideoPort = videoPort;
         peer.recvOnly = recvOnly;              // ambient 플래그도 최신 선언을 따른다
         peer.floorSuppress = floorSuppress;
         if (floorPort > 0) peer.floorPort = floorPort;
@@ -239,10 +235,9 @@ void PMcpttGroup::addMember(const std::string& sessionId, const std::string& ip,
         }
         peer.ip = ip;
         peer.port = port;
-        peer.videoPort = videoPort;
         peer.natEnabled = nat;
         peer.sigIp = sigIp;
-        peer.natLatched = peer.natLatchedVideo = false;
+        peer.natLatched = false;
         LOG_INFO("PMcpttGroup", "[%s] Member updated session=%s (total=%lu)", _groupId.c_str(), sessionId.c_str(), _members.size());
         return;
     }
@@ -250,11 +245,9 @@ void PMcpttGroup::addMember(const std::string& sessionId, const std::string& ip,
     peer.id = sessionId;
     peer.declIp = ip;
     peer.declPort = port;
-    peer.declVideoPort = videoPort;
     peer.ip = ip;
     peer.port = port;
     peer.floorPort = floorPort;
-    peer.videoPort = videoPort;
     peer.role = role.empty() ? "participant" : role;
     if (!role.empty()) _roles[sessionId] = role;
     peer.natEnabled = nat;
@@ -263,7 +256,6 @@ void PMcpttGroup::addMember(const std::string& sessionId, const std::string& ip,
     peer.srcPt = srcPt;
     peer.tePtOut = tePtOut;
     peer.srcTePt = srcTePt;
-    peer.videoPtOut = videoPtOut;
     peer.codec = codec;
     // SSRC 배정 공간 분리 — 한 카운터의 근접 오프셋(+1000/+2000)이면 누적 발행 시
     //   멤버 ssrc 와 송출 SSRC 범위가 겹치므로 상위 비트로 격리한다.
@@ -606,7 +598,7 @@ void PMcpttGroup::onMemberRtpPacket(const std::string& memberId, const std::stri
         //   갈리는 멤버에서 다른 미디어의 latch 가 ip 를 덮어써도 협상된 신원은 유지.
         bool srcOk = (sender.ip == ip && sender.port == port) ||
                      (sender.declIp == ip && sender.declPort == port);
-        if (!srcOk && (!sender.natEnabled || !_natFormatOk(sender, false, ip, port, buf, len))) {
+        if (!srcOk && (!sender.natEnabled || !_natFormatOk(sender, ip, port, buf, len))) {
             _dropSrc("rtp", memberId, ip, port);
             return;
         }
@@ -618,7 +610,7 @@ void PMcpttGroup::onMemberRtpPacket(const std::string& memberId, const std::stri
             _dropSrtp("rtp", memberId);
             return;
         }
-        if (!srcOk) _natLatch(sender, false, ip, port);
+        if (!srcOk) _natLatch(sender, ip, port);
         const std::string& senderId = memberId;
         unsigned int senderSsrc = sender.ssrc;
 
@@ -687,7 +679,7 @@ void PMcpttGroup::onMemberRtpPacket(const std::string& memberId, const std::stri
                     _recStartSegment(senderId, 0, false, "");
                 }
                 if (_recordEnable && _recorder && _recorder->isActive()) {
-                    _recorder->writePacket(_slotTrack(slot, false), buf, len);
+                    _recorder->writePacket(_slotTrack(slot), buf, len);
                 }
             }
         }
@@ -700,44 +692,6 @@ void PMcpttGroup::onMemberRtpPacket(const std::string& memberId, const std::stri
     }
 }
 
-void PMcpttGroup::onMemberVideoRtpPacket(const std::string& memberId, const std::string& ip, int port, char* buf, int len) {
-    PAutoLock lock(_mutex);
-
-    auto itM = _members.find(memberId);
-    if (itM == _members.end()) {
-        _dropSrc("video rtp(pre-join)", memberId, ip, port);
-        return;
-    }
-    Peer& sender = itM->second;
-    bool srcOk = (sender.ip == ip && sender.videoPort == port) ||
-                 (sender.declIp == ip && sender.declVideoPort == port);
-    if (!srcOk && (!sender.natEnabled || !_natFormatOk(sender, true, ip, port, buf, len))) {
-        _dropSrc("video rtp", memberId, ip, port);
-        return;
-    }
-    if (sender.mediaCryptoVideo && sender.mediaCryptoVideo->enabled() &&
-        !sender.mediaCryptoVideo->unprotectRtp(buf, len)) {
-        _dropSrtp("video rtp", memberId);
-        return;
-    }
-    if (!srcOk) _natLatch(sender, true, ip, port);
-
-    if (_pttSession) _pttSession->touchActivity();
-
-    // 오디오와 같은 중계 자격 판정 (발언자만 / floor off 는 전원, recv_only 제외)
-    Talker* tk = _floorControl ? _talkerOf(memberId) : nullptr;
-    if (sender.recvOnly || (_floorControl && !tk)) return;
-
-    int slot = _floorControl ? tk->slot : sender.streamSlot;
-    if (tk) tk->lastRtpUsec = _nowUsec();
-    sendVideoToAll(buf, len, memberId, slot);
-
-    // 녹취: 화자 슬롯의 비디오 트랙에 기록
-    if (_recordEnable && _recorder && _recorder->isActive()) {
-        _recorder->writePacket(_slotTrack(slot, true), buf, len);
-    }
-}
-
 // nat 멤버의 RTP 수신 판정 — 유닛 포트가 곧 멤버 신원이므로 latch 는 신원 판정이 아니라
 //   송신 목적지 학습이다. 멤버 전용 포트가 곧 신원(수신 소켓=멤버, 포트는 그 멤버에게만
 //   SDP 로 광고)이므로 형식 검사를 통과한 소스로 목적지를 **연속 추종**한다:
@@ -746,14 +700,13 @@ void PMcpttGroup::onMemberVideoRtpPacket(const std::string& memberId, const std:
 //   차단되는 고착이 더 해악이고, 추종 모델은 선점 소스 소멸 즉시 자가 복구된다.
 //   호출자가 _mutex 보유. SRTP 멤버는 형식 검사와 latch 적용 사이에 unprotect(인증)가
 //   끼므로 둘을 분리한다 (media_security.md §6.2).
-bool PMcpttGroup::_natFormatOk(const Peer& peer, bool isVideo, const std::string& ip, int port,
-                               const char* buf, int len) const {
+bool PMcpttGroup::_natFormatOk(const Peer& peer, const std::string& ip, int port, const char* buf, int len) const {
     (void)port;
     if (len < 12 || (((unsigned char)buf[0]) >> 6) != 2) return false;
     if (!peer.sigIp.empty() && peer.sigIp != ip) return false;
     // 기대 ingress PT 검사 (JOIN user_src_pt 선언 시) — KA(empty RTP)도 협상 PT 를 실어
     //   보내므로 동일 기준으로 통과한다. TE 는 srcTePt(미선언=관례 101)도 허용.
-    if (!isVideo && peer.srcPt > 0) {
+    if (peer.srcPt > 0) {
         unsigned char pt = (unsigned char)(buf[1] & 0x7F);
         unsigned char te = (unsigned char)((peer.srcTePt > 0 ? peer.srcTePt : 101) & 0x7F);
         if (pt != (unsigned char)(peer.srcPt & 0x7F) && pt != te) return false;
@@ -761,21 +714,18 @@ bool PMcpttGroup::_natFormatOk(const Peer& peer, bool isVideo, const std::string
     return true;
 }
 
-void PMcpttGroup::_natLatch(Peer& peer, bool isVideo, const std::string& ip, int port) {
-    bool& latched = isVideo ? peer.natLatchedVideo : peer.natLatched;
-    bool changed = (peer.ip != ip) ||
-                   (isVideo ? peer.videoPort != port : peer.port != port) || !latched;
-    if (isVideo) peer.videoPort = port;
-    else         peer.port = port;
+void PMcpttGroup::_natLatch(Peer& peer, const std::string& ip, int port) {
+    bool changed = (peer.ip != ip) || peer.port != port || !peer.natLatched;
+    peer.port = port;
     peer.ip = ip;
-    latched = true;
+    peer.natLatched = true;
     if (changed) {
         // 소스 경합(두 소스가 번갈아 유입) 시 로그 폭주 방지 — 멤버당 2s 간격 요약.
         int64_t now = _nowUsec();
         if (now - peer.followLogUsec >= 2000000LL) {
             peer.followLogUsec = now;
-            LOG_INFO("PMcpttGroup", "[%s] %s dest follow (NAT) member=%s %s:%d",
-                     _groupId.c_str(), isVideo ? "video RTP" : "RTP", peer.id.c_str(), ip.c_str(), port);
+            LOG_INFO("PMcpttGroup", "[%s] RTP dest follow (NAT) member=%s %s:%d",
+                     _groupId.c_str(), peer.id.c_str(), ip.c_str(), port);
         }
     }
 }
@@ -1164,14 +1114,14 @@ bool PMcpttGroup::setMemberCrypto(const std::string& sessionId, const std::strin
     return true;
 }
 
-bool PMcpttGroup::setMemberMediaCrypto(const std::string& sessionId, bool video, const std::string& alg,
+bool PMcpttGroup::setMemberMediaCrypto(const std::string& sessionId, const std::string& alg,
                                        const std::string& rxKey, const std::string& rxSalt,
                                        const std::string& txKey, const std::string& txSalt,
                                        std::string& err) {
     PAutoLock lock(_mutex);
     auto it = _members.find(sessionId);
     if (it == _members.end()) { err = "member not joined"; return false; }
-    std::shared_ptr<PMediaCrypto>& sec = video ? it->second.mediaCryptoVideo : it->second.mediaCrypto;
+    std::shared_ptr<PMediaCrypto>& sec = it->second.mediaCrypto;
     if (!sec) sec = std::make_shared<PMediaCrypto>();
     if (!sec->init(alg, rxKey, rxSalt, txKey, txSalt, err)) {
         // 키 오류 leg 를 평문으로 조용히 폴백하지 않는다 — 컨텍스트 제거 후 명령 거부
@@ -1180,8 +1130,8 @@ bool PMcpttGroup::setMemberMediaCrypto(const std::string& sessionId, bool video,
                  _groupId.c_str(), sessionId.c_str(), err.c_str());
         return false;
     }
-    LOG_INFO("PMcpttGroup", "[%s] member media SRTP %s enabled: session=%s alg=%s",
-             _groupId.c_str(), video ? "video" : "audio", sessionId.c_str(), sec->alg().c_str());
+    LOG_INFO("PMcpttGroup", "[%s] member media SRTP enabled: session=%s alg=%s",
+             _groupId.c_str(), sessionId.c_str(), sec->alg().c_str());
     return true;
 }
 
@@ -1350,31 +1300,27 @@ void PMcpttGroup::_recStartSegment(const std::string& speakerId, int prio,
     }
 }
 
-// 슬롯 트랙 화자 귀속 — 음성/영상 트랙에 화자 구간을 열고, 음성 트랙에는 그 화자 leg 의
-//   ingress PT/코덱을 붙인다(변환기의 PT 판별 근거는 슬롯마다 다르다 — 이종 단말 혼재).
+// 슬롯 트랙 화자 귀속 — 트랙에 화자 구간을 열고 그 화자 leg 의 ingress PT/코덱을 붙인다
+//   (변환기의 PT 판별 근거는 슬롯마다 다르다 — 이종 단말 혼재).
 void PMcpttGroup::_recAttachSlot(int slot, const std::string& sessionId) {
     if (!_recordEnable || !_recorder) return;
-    _recorder->setTrackSpeaker(_slotTrack(slot, false), sessionId);
-    _recorder->setTrackSpeaker(_slotTrack(slot, true), sessionId);
+    _recorder->setTrackSpeaker(_slotTrack(slot), sessionId);
     auto it = _members.find(sessionId);
     if (it != _members.end() && it->second.srcPt > 0)
-        _recorder->setTrackPtCodec(_slotTrack(slot, false), it->second.srcPt, it->second.codec);
+        _recorder->setTrackPtCodec(_slotTrack(slot), it->second.srcPt, it->second.codec);
 }
 
 void PMcpttGroup::_recDetachSlot(int slot) {
     if (!_recordEnable || !_recorder) return;
-    _recorder->setTrackSpeaker(_slotTrack(slot, false), "");
-    _recorder->setTrackSpeaker(_slotTrack(slot, true), "");
+    _recorder->setTrackSpeaker(_slotTrack(slot), "");
 }
 
 // 슬롯 트랙 등록 (0..slots-1). 트랙 파일은 세그먼트 시작 시 열리므로 세그먼트 전에 부른다.
 void PMcpttGroup::_recEnsureTracks(int slots) {
     if (!_recordEnable || !_recorder) return;
     if (slots > MCPTT_MAX_TALKER_SLOTS) slots = MCPTT_MAX_TALKER_SLOTS;
-    for (int s = _recTrackSlots; s < slots; ++s) {
-        _recorder->addTrack(_slotTrack(s, false));
-        _recorder->addTrack(_slotTrack(s, true));
-    }
+    for (int s = _recTrackSlots; s < slots; ++s)
+        _recorder->addTrack(_slotTrack(s));
     if (slots > _recTrackSlots) _recTrackSlots = slots;
 }
 
@@ -1893,12 +1839,12 @@ void PMcpttGroup::broadcastFloorStatus(unsigned char opcode, unsigned int ssrc, 
         _logFloorLocal("IDLE", speakerId, ssrc, -1);
 }
 
-// 수신자별 하향 스트림 식별 — 슬롯 0 은 종전과 같은 고정 SSRC(단일 화자 정책에서 화자가
-//   바뀌어도 하나의 연속 스트림), 슬롯 1..N 은 동시 발언용 별도 SSRC 공간이다.
-//   audio/video/멤버 SSRC 공간(0x1/0x2)과 겹치지 않도록 상위 비트로 분리한다.
-static inline uint32_t _egressSsrc(unsigned int memberSsrc, int slot, bool video) {
-    if (slot <= 0) return (video ? 0x20000000u : 0x10000000u) + memberSsrc;
-    return (video ? 0x50000000u : 0x40000000u) + ((uint32_t)slot << 24) + memberSsrc;
+// 수신자별 하향 스트림 식별 — 슬롯 0 은 고정 SSRC(단일 화자 정책에서 화자가 바뀌어도
+//   하나의 연속 스트림), 슬롯 1..N 은 동시 발언용 별도 SSRC 공간이다.
+//   슬롯 0(0x1…)·멤버 SSRC 공간과 겹치지 않도록 상위 비트로 분리한다.
+static inline uint32_t _egressSsrc(unsigned int memberSsrc, int slot) {
+    if (slot <= 0) return 0x10000000u + memberSsrc;
+    return 0x40000000u + ((uint32_t)slot << 24) + memberSsrc;
 }
 
 // 하향 분배는 각 멤버의 전용 유닛 소켓에서 송신한다 — 멤버가 보는 소스 포트 =
@@ -2017,7 +1963,7 @@ void PMcpttGroup::sendAudioToAll(const char* data, int len, const std::string& e
         peer.audioSeqOut[slot]++;
         uint16_t netSeq = htons(peer.audioSeqOut[slot]);
         memcpy(pkt + 2, &netSeq, 2);
-        uint32_t netSsrc = htonl(_egressSsrc(peer.ssrc, slot, false));
+        uint32_t netSsrc = htonl(_egressSsrc(peer.ssrc, slot));
         memcpy(pkt + 8, &netSsrc, 4);
         // egress PT 스탬프 (0=재작성 없음 — 현행 PT-blind 통과). marker bit(0x80) 보존.
         //   TE 인데 수신 leg TE PT 미지정이면 원본 유지(오디오 PT 로 뭉개면 DTMF 파손).
@@ -2082,34 +2028,6 @@ void PMcpttGroup::sendFloorToAll(const char* data, int len, const char* roData, 
     }
 }
 
-void PMcpttGroup::sendVideoToAll(const char* data, int len, const std::string& excludeSessionId, int slot) {
-    if (len < 12) return;
-    if (slot < 0 || slot >= MCPTT_MAX_TALKER_SLOTS) slot = 0;
-    for (auto& [sid, peer] : _members) {
-        if (sid == excludeSessionId) continue;
-        if (!peer.unit || peer.videoPort <= 0) continue;
-        if (peer.mediaStopped) continue;   // 하향 미디어 중단 요청 멤버 (0x0B)
-        char pkt[4096];
-        if (len > (int)sizeof(pkt)) continue;
-        memcpy(pkt, data, len);
-        peer.videoSeqOut[slot]++;
-        uint16_t netSeq = htons(peer.videoSeqOut[slot]);
-        memcpy(pkt + 2, &netSeq, 2);
-        uint32_t netSsrc = htonl(_egressSsrc(peer.ssrc, slot, true));
-        memcpy(pkt + 8, &netSsrc, 4);
-        // egress PT 스탬프 (0=재작성 없음). marker bit(0x80) 보존 — H.264 프레임 끝 표식이다(RFC 6184 §5.1).
-        if (peer.videoPtOut > 0)
-            pkt[1] = (char)((pkt[1] & 0x80) | (peer.videoPtOut & 0x7F));
-        int sendLen = len;
-        if (peer.mediaCryptoVideo && peer.mediaCryptoVideo->enabled() &&
-            !peer.mediaCryptoVideo->protectRtp(pkt, sendLen, sizeof(pkt))) {
-            LOG_ERROR("PMcpttGroup", "[%s] video SRTP protect failed member=%s", _groupId.c_str(), sid.c_str());
-            continue;
-        }
-        peer.unit->sendVideoTo(peer.ip, peer.videoPort, pkt, sendLen);
-    }
-}
-
 void PMcpttGroup::sendToMember(const std::string& sessionId, const char* data, int len) {
     if (_members.find(sessionId) == _members.end()) {
         LOG_ERROR("PMcpttGroup", "[%s] sendToMember session=%s not found", _groupId.c_str(), sessionId.c_str());
@@ -2157,7 +2075,7 @@ void PMcpttGroup::startRecording() {
     _recorder = new PSyncRtpRecorder(_recordDir, "ptt");
     _recorder->setSessionSubdir(_recordSesDir);
     _recTrackSlots = 0;
-    // 동시 발언 정원만큼 슬롯 트랙 등록 (슬롯 0 = "audio"/"video" — 종전 파일명 그대로).
+    // 동시 발언 정원만큼 슬롯 트랙 등록 (슬롯 0 = "audio", 슬롯 k = "audioK").
     //   floor 없는 세션은 멤버 슬롯 수만큼 필요하므로 첫 미디어에서 추가 등록한다.
     _recEnsureTracks(_talkerCapacity > 0 ? _talkerCapacity : 1);
 
@@ -2166,7 +2084,7 @@ void PMcpttGroup::startRecording() {
 }
 
 void PMcpttGroup::stopRecording() {
-    // 포인터 swap 은 lock 하에 수행 — onRtpPacket/onVideoRtpPacket/handleFloor* 의
+    // 포인터 swap 은 lock 하에 수행 — onMemberRtpPacket/handleFloor* 의
     // 동시 writePacket/finishSegment 호출과 경합하지 않도록 보호.
     // 실제 finishSegment + delete 는 lock 바깥에서 수행해 파일 I/O 가 RTP 경로를
     // 블로킹하지 않게 한다. finishSegment → _closeTrack 이 fclose + rename 을

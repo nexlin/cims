@@ -272,7 +272,6 @@ private:
     int _pttRtpStartPort;     // 멤버 유닛 audio RTP 대역 시작 (stride 2)
     int _pttRtpPoolSize;      // 그룹(floor) 풀 크기
     int _pttFloorStartPort;   // 그룹 floor 대역 시작 (stride 2)
-    int _pttVideoStartPort;   // 멤버 유닛 video RTP 대역 시작 (stride 2)
     int _pttMemberPoolSize;   // 멤버 유닛 풀 크기 (동시 참가 멤버 수)
 
     // Server Config
@@ -294,7 +293,7 @@ private:
     std::vector<PRtpMulticast*> _pttPool;
     std::vector<PRtpMulticast*> _freePttResources;
 
-    // PTT 멤버 전용 포트 유닛 (PPttMemberPort, audio+video RTP)
+    // PTT 멤버 전용 포트 유닛 (PPttMemberPort, audio RTP)
     std::vector<PPttMemberPort*> _pttMemberPool;
     std::vector<PPttMemberPort*> _freePttMembers;
     std::map<std::string, PPttMemberPort*> _memberUnits;  // "groupId|sessionId" → unit

@@ -47,7 +47,8 @@ XCAP(RFC 4825) 리소스 기반 — TS 24.481 Ut. 인증 = `Authorization: Beare
   같은 정본·같은 동기화를 쓴다.
 - **MCVideo** — MCVideo 그룹이면 같은 문서에 MCVideo `<service>`(enabler = MCVideo ICSI)·`<mcvideo-*>` 속성·entry `<mcvideo-mcvideo-id>` 가
   실린다(TS 24.481 §7.2.2, [mcvideo.md](../design/features/mcvideo.md) §5.1). PUT 에 MCVideo `<service>` 가 있으면 MCVideo 를 켜고 속성을 반영하며
-  (`mcvideo-protect-*` true·범위 밖은 400), 없으면 MCVideo 상태를 그대로 둔다(전환기 규칙).
+  (`mcvideo-protect-*` true·범위 밖은 400), 없으면 MCVideo 상태를 그대로 둔다(전환기 규칙). 그룹 영상은 이 MCVideo 몫이 전부다 — MCPTT 몫에는
+  영상 요소가 없고, PUT 본문에 TS 24.481 스키마 밖 요소 `<mcpttgi:mcptt-video>` 가 있으면 무시한다.
 - PUT 본문 = **GET 이 돌려주는 문서와 같은 포맷**(아래). 없는 요소는 갱신 시 기존값 유지, 생성 시 기본값
   (prearranged, priority 5, SDS 허용, FD 불허, 긴급통화 불허, 긴급경보 허용, hang-timer 30초, maximum-duration 3600초). `<list>` 가 있으면
   멤버 전체 교체(없으면 유지) — entry uri 는 PTT 가입 번호(`tel:+E.164`, `sip:` 형 가능), 미가입 번호는 400.
@@ -91,7 +92,6 @@ XCAP(RFC 4825) 리소스 기반 — TS 24.481 Ut. 인증 = `Authorization: Beare
     <mcpttgi:session-type>prearranged</mcpttgi:session-type>
     <mcpttgi:mcdata-allow-short-data-service>true</mcpttgi:mcdata-allow-short-data-service>
     <mcpttgi:mcdata-allow-file-distribution>false</mcpttgi:mcdata-allow-file-distribution>
-    <mcpttgi:mcptt-video>false</mcpttgi:mcptt-video>
     <mcpttgi:on-network-invite-members>true</mcpttgi:on-network-invite-members>
     <mcpttgi:on-network-max-participant-count>10</mcpttgi:on-network-max-participant-count>
     <mcpttgi:on-network-require-affiliation>true</mcpttgi:on-network-require-affiliation>

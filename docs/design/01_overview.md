@@ -681,21 +681,29 @@ grep "Floor RTCP" /path/to/cmp.log
 - 클라이언트에서 30초 간격 `{"type":"ping"}` 전송 확인
 - 프록시 WebSocket 타임아웃 설정 확인 (60초 이상 권장)
 
-### 6.6 영상이 한쪽만 보임
+### 6.6 그룹 통화에서 영상이 안 보임
 
-**증상:** PTT 그룹 통화에서 화자의 영상이 수신자에게 보이지 않음
-**원인:** Video RTP 포트 할당 안 됨 (그룹의 `video_enabled=false`)
+**증상:** PTT 그룹에서 보낸 영상이 다른 멤버에게 보이지 않음
+**원인:** MCPTT 그룹 호는 음성만이다(개시자가 `m=video` 를 실어도 port 0 으로 거절된다). 그룹 영상은 같은 그룹의 MCVideo 호
+([features/mcvideo.md](./features/mcvideo.md))라 CSP `Setup.Roles.MCVIDEO` 가 꺼져 있거나, 그룹이 MCVideo 그룹이 아니거나(그룹 `mcvideo` = null),
+단말 PTT 회선에 MCVideo 이용 자격이 없으면 영상 호가 서지 않는다.
 **해결:**
 ```bash
-# 그룹 설정 확인
+# 그룹의 MCVideo 설정 확인 (mcvideo = null 이면 MCVideo 그룹 아님)
 curl -k -X GET https://192.168.0.2:4421/api/v1/ptt/groups \
   -H "Authorization: Bearer <token>" | python3 -m json.tool
 
-# video_enabled를 true로 변경
+# MCVideo 서비스 켜기 (객체 = 켬, 빠진 키는 기본값)
 curl -k -X PUT "https://192.168.0.2:4421/api/v1/ptt/groups/%2B82571910001" \
   -H "Authorization: Bearer <token>" \
   -H "Content-Type: application/json" \
-  -d '{"video_enabled":true}'
+  -d '{"mcvideo":{}}'
+
+# PTT 회선의 MCVideo 이용 자격 부여 (admin_api.md §5.4)
+curl -k -X PUT "https://192.168.0.2:4421/api/v1/users/<pid>/ptt/%2B82571900001/mcvideo" \
+  -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{}'
 ```
 
 ---

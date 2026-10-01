@@ -722,7 +722,7 @@ def parse_xs_duration(text: Optional[str]) -> Optional[int]:
 
 
 _GROUP_SELECT = (
-    "SELECT id, mcptt_group_id, name, video_enabled, priority, encryption, "
+    "SELECT id, mcptt_group_id, name, priority, encryption, "
     "emergency_call, emergency_alert, allow_conference_state, "
     "allow_sds, allow_fd, max_sds_size, max_auto_recv, "
     "org_code, session_start, session_end, "
@@ -754,7 +754,6 @@ def _group_row_to_dict(row: dict) -> dict:
     gid = row['mcptt_group_id']
     return {
         "display_name": row['name'],
-        "video_enabled": bool(row.get('video_enabled', 0)),
         "priority": row.get('priority', 5),
         "encryption": bool(row.get('encryption', 0)),
         "emergency_call": bool(row.get('emergency_call', 0)),
@@ -1432,7 +1431,6 @@ def get_group_xml(group_uri):
         xml += """
       </entry>"""
 
-    video_val = 'true' if group.get('video_enabled') else 'false'
     grp_priority = group.get('priority', 5)
     encryption_val = 'true' if group.get('encryption') else 'false'
     emergency_val = 'true' if group.get('emergency_call') else 'false'
@@ -1470,10 +1468,8 @@ def get_group_xml(group_uri):
     if max_auto > 0:
         xml += f"""
     <mcpttgi:mcdata-on-network-max-data-size-auto-recv>{max_auto}</mcpttgi:mcdata-on-network-max-data-size-auto-recv>"""
-    # <mcpttgi:mcptt-video> 는 TS 24.481 스키마에 없는 요소다(현행 «PTT 영상» 전환기 요소 — mcvideo.md §6 V0 ②·편차 표).
-    #   옛 앱이 이 값으로 PTT 영상을 켜므로 V7(현행 PTT 영상 제거)까지 싣고, 그 창에서 걷는다. 규격형 영상 = MCVideo <service>.
+    # 그룹 영상은 MCVideo <service>(TS 24.481 §7.2.8)로 싣는다 — MCPTT 몫에는 영상 요소가 없다(mcvideo.md §8).
     xml += f"""
-    <mcpttgi:mcptt-video>{video_val}</mcpttgi:mcptt-video>
     <mcpttgi:on-network-invite-members>{invite_members}</mcpttgi:on-network-invite-members>
     <mcpttgi:on-network-max-participant-count>{max_count}</mcpttgi:on-network-max-participant-count>
     <mcpttgi:on-network-require-affiliation>{affil_required}</mcpttgi:on-network-require-affiliation>
@@ -2575,7 +2571,6 @@ def parse_group_document_xml(xml_text: str) -> dict:
         'allow_fd': _xbool(ls, 'gi:mcdata-allow-file-distribution'),
         'max_sds_size': _xint(ls, 'gi:mcdata-on-network-max-data-size-for-SDS'),
         'max_auto_recv': _xint(ls, 'gi:mcdata-on-network-max-data-size-auto-recv'),
-        'video_enabled': _xbool(ls, 'gi:mcptt-video'),
         'max_members': _xint(ls, 'gi:on-network-max-participant-count'),
         'require_affiliation': _xbool(ls, 'gi:on-network-require-affiliation'),
         'priority': _xint(ls, 'gi:on-network-group-priority'),
@@ -2633,16 +2628,16 @@ def parse_group_document_xml(xml_text: str) -> dict:
 
 
 _GMS_CREATE_DEFAULTS = {
-    'video_enabled': False, 'priority': 5, 'encryption': False, 'emergency_call': False,
+    'priority': 5, 'encryption': False, 'emergency_call': False,
     'emergency_alert': True, 'allow_conference_state': True, 'allow_sds': True, 'allow_fd': False,
     'max_sds_size': 10000, 'max_auto_recv': 1048576, 'org_code': None, 'group_type': 'prearranged',
     'max_members': 0, 'require_affiliation': True,
     'hang_timer_sec': GROUP_HANG_TIMER_DEFAULT, 'max_duration_sec': GROUP_MAX_DURATION_DEFAULT,
     'min_number_to_start': 0, 'ack_timeout_sec': GROUP_ACK_TIMEOUT_DEFAULT, 'ack_action': 'abandon',
 }
-_GMS_BOOL_COLS = ('video_enabled', 'encryption', 'emergency_call', 'emergency_alert', 'allow_conference_state',
+_GMS_BOOL_COLS = ('encryption', 'emergency_call', 'emergency_alert', 'allow_conference_state',
                   'allow_sds', 'allow_fd', 'require_affiliation')
-_GMS_ATTR_COLS = ('video_enabled', 'priority', 'encryption', 'emergency_call', 'emergency_alert',
+_GMS_ATTR_COLS = ('priority', 'encryption', 'emergency_call', 'emergency_alert',
                   'allow_conference_state', 'allow_sds', 'allow_fd', 'max_sds_size', 'max_auto_recv', 'org_code',
                   'group_type', 'max_members', 'require_affiliation', 'hang_timer_sec', 'max_duration_sec',
                   'min_number_to_start', 'ack_timeout_sec', 'ack_action')

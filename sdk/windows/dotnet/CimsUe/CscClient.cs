@@ -196,7 +196,6 @@ public sealed class GroupDoc
     public List<GroupMember> Members { get; set; } = new();
     /// <summary>그룹 종류 prearranged | chat (문서의 on-network-invite-members)</summary>
     public string SessionType { get; set; } = "prearranged";
-    public bool VideoEnabled { get; set; }
     public bool Encryption { get; set; }
     public bool EmergencyCall { get; set; } = true;
     public bool EmergencyAlert { get; set; } = true;
@@ -768,7 +767,7 @@ public sealed unsafe class CscClient : IDisposable
         {
             Uri = Utf8.Str(d->uri), DisplayName = Utf8.Str(d->display_name), ETag = Utf8.Str(d->etag),
             SessionType = Utf8.Str(d->session_type) is { Length: > 0 } st ? st : "prearranged",
-            VideoEnabled = d->video_enabled != 0, Encryption = d->encryption != 0,
+            Encryption = d->encryption != 0,
             EmergencyCall = d->emergency_call != 0, EmergencyAlert = d->emergency_alert != 0,
             AllowSds = d->allow_sds != 0, AllowFd = d->allow_fd != 0, RequireAffiliation = d->require_affiliation != 0,
             Priority = d->priority, MaxParticipants = d->max_participants,
@@ -812,7 +811,7 @@ public sealed unsafe class CscClient : IDisposable
             }
         }
         n.session_type = s.Add(g.SessionType);
-        n.video_enabled = Engine.B(g.VideoEnabled); n.encryption = Engine.B(g.Encryption);
+        n.encryption = Engine.B(g.Encryption);
         n.emergency_call = Engine.B(g.EmergencyCall); n.emergency_alert = Engine.B(g.EmergencyAlert);
         n.allow_sds = Engine.B(g.AllowSds); n.allow_fd = Engine.B(g.AllowFd); n.require_affiliation = Engine.B(g.RequireAffiliation);
         n.priority = g.Priority; n.max_participants = g.MaxParticipants;

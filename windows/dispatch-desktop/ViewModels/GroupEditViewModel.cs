@@ -83,7 +83,6 @@ public sealed partial class GroupEditViewModel : ObservableObject
     /// <summary>그룹 id(uri user part) — 신규만 편집 가능.</summary>
     [ObservableProperty] private string _groupId = "";
     [ObservableProperty] private string _sessionType = "prearranged";
-    [ObservableProperty] private bool _videoEnabled;
     [ObservableProperty] private bool _allowSds = true;
     [ObservableProperty] private bool _allowFd;
     [ObservableProperty] private bool _emergencyCall = true;
@@ -175,7 +174,7 @@ public sealed partial class GroupEditViewModel : ObservableObject
         _orgCode = d.OrgCode;
         Name = d.DisplayName; GroupId = UserPartConverter.UserPart(d.Uri.Length > 0 ? d.Uri : _existing!.Uri);
         SessionType = SessionTypes.Contains(d.SessionType) ? d.SessionType : "prearranged";
-        VideoEnabled = d.VideoEnabled; AllowSds = d.AllowSds; AllowFd = d.AllowFd; EmergencyCall = d.EmergencyCall; EmergencyAlert = d.EmergencyAlert;
+        AllowSds = d.AllowSds; AllowFd = d.AllowFd; EmergencyCall = d.EmergencyCall; EmergencyAlert = d.EmergencyAlert;
         RequireAffiliation = d.RequireAffiliation; Encryption = d.Encryption; Priority = d.Priority; MaxParticipants = d.MaxParticipants;
         _read = d;
         HangTimerSec = d.HangTimerSec ?? HangTimerDefault; MaxDurationSec = d.MaxDurationSec ?? MaxDurationDefault;
@@ -272,7 +271,7 @@ public sealed partial class GroupEditViewModel : ObservableObject
         Error = "";
         var doc = new GroupDoc
         {
-            Uri = Uri, DisplayName = Name.Trim(), SessionType = SessionType, VideoEnabled = VideoEnabled, AllowSds = AllowSds, AllowFd = AllowFd,
+            Uri = Uri, DisplayName = Name.Trim(), SessionType = SessionType, AllowSds = AllowSds, AllowFd = AllowFd,
             EmergencyCall = EmergencyCall, EmergencyAlert = EmergencyAlert, RequireAffiliation = RequireAffiliation, Encryption = Encryption,
             Priority = Math.Clamp(Priority, 0, 15), MaxParticipants = Math.Max(0, MaxParticipants), OrgCode = _orgCode,
             HangTimerSec = WithUnset(_read?.HangTimerSec, Math.Clamp(HangTimerSec, 0, HangTimerMax), HangTimerDefault),

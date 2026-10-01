@@ -35,7 +35,6 @@
     <mcpttgi:mcdata-allow-file-distribution>false</mcpttgi:mcdata-allow-file-distribution>
     <mcpttgi:mcdata-on-network-max-data-size-for-SDS>10000</mcpttgi:mcdata-on-network-max-data-size-for-SDS>
     <mcpttgi:mcdata-on-network-max-data-size-auto-recv>1048576</mcpttgi:mcdata-on-network-max-data-size-auto-recv>
-    <mcpttgi:mcptt-video>true</mcpttgi:mcptt-video>
     <mcpttgi:on-network-invite-members>true</mcpttgi:on-network-invite-members>
     <mcpttgi:on-network-max-participant-count>10</mcpttgi:on-network-max-participant-count>
     <mcpttgi:on-network-require-affiliation>true</mcpttgi:on-network-require-affiliation>

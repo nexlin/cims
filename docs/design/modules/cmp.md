@@ -61,11 +61,11 @@ VoIP와 PTT는 용도별로 핸들러를 분리한다:
 | 구분 | 핸들러 | 소켓 구성 | 포트 블록 |
 |------|--------|-----------|-----------|
 | VoIP | PRtpRelay | peer 별 Audio RTP/RTCP + Video RTP/RTCP | 8포트 (leg 별 4포트 블록 × 2) |
-| PTT | PRtpMulticast (그룹 공유 Floor) + PPttMemberPort (멤버 Audio/Video RTP) | Floor 그룹당 1 + 멤버당 Audio/Video 각 1 | 독립 대역 |
+| PTT | PRtpMulticast (그룹 공유 Floor) + PPttMemberPort (멤버 Audio RTP) | Floor 그룹당 1 + 멤버당 Audio 1 | 독립 대역 |
 
 **분리 이유:**
 - PTT는 RTCP 불필요 (Floor를 m=application 전용 소켓으로 처리)
-- 비디오는 멤버 포트 단위 — 그룹 세션의 `m=video` 를 floor 보유자(동시 발언이면 화자 슬롯별) 영상만 멤버에게 분배(음성과 같은 floor 게이트). 수신자별로 seq·SSRC 와 함께 PT 를 그 leg 의 `user_video_pt` 로 스탬프한다(cmp_media_api.md §7.4). 영상 RTCP 포트는 열지 않는다 — 수신자의 PLI 가 화자에게 가지 않으므로 키프레임은 단말이 발언 시작(송출 개시 = IDR)과 인코더 주기(2 s)로 낸다. 멤버 영상 목적지는 그 멤버가 보낸 패킷으로 latch 하므로 말하지 않는 청취자도 keep-alive 를 보낸다(ue_sdk.md §4.5)
+- MCPTT 그룹 호는 음성 + floor 만 다룬다(MCPTT 미디어 = speech — CSP 는 MCPTT 세션의 `m=video` 를 port 0 으로 거절, RFC 3264 §6). 그룹 영상은 별도 서비스인 MCVideo 그룹 호(TS 24.281·24.581)가 맡는다 — 자원·명령은 §3.6 `PMcvideoGroup`·`PMcvMemberPort`, [cmp_media_api.md §7.9](../../api/cmp_media_api.md)
 - 포트 대역 분리로 방화벽/NAT 설정 단순화
 - 리소스 풀 독립 관리 (VoIP 고갈이 PTT에 영향 없음)
 
@@ -200,7 +200,6 @@ processAdd()로 위임 — 기존 세션의 피어 주소만 갱신한다. 세�
 | members | - | "sid1:prio1:role,sid2:prio2:role" CSV (role=chair/participant) |
 | subid | - | 그룹 세션 회차 (Flow 로그 subid) |
 | record_dir | - | 녹취 디렉토리 |
-| video_enabled | - | 1 이면 video 포트 활성 |
 | group_type | - | `prearranged`/`chat`/`private` (private=2인 세션). 전환기: 구 CSP 의 `broadcast` 는 `broadcast:1` 로 해석(WARN) |
 | broadcast | - | `0`/`1` — 일제 통화 호 속성(개시자 floor 독점, TS 24.379 §4.12) |
 | initiator_id | - | 세션 개시자 sessionId(=userId) — broadcast floor 독점. private 초기 발언권에는 쓰지 않는다(정본=PTT_JOIN `granted`). `broadcast` 와 함께 **세션 개시 ADD(그룹 생성 또는 다른 sesid)에서만** 반영 — 같은 세션 재ADD 는 무시 |
@@ -211,7 +210,7 @@ processAdd()로 위임 — 기존 세션의 피어 주소만 갱신한다. 세�
 | floor_timers | - | floor 타이머·카운터 `{t1_end_rtp,t2_stop_talk,t3_grace,t8_revoke,t7_idle_resend,t20_grant_retx,t4_inactivity,c7_idle,c20_grant}` (초·횟수, `t4_inactivity` 0=미사용) — 정본 = service-config 문서(CSP 가 ADD·MODIFY 마다 실음), 미지정 = CMP 설정값(T*)·현재 값(T4·C7·C20) |
 
 **응답:** `ip`, `floor_port` (그룹 공유 Floor Control — `floor_control:"off"` 면 생략),
-`member_ports` (멤버별 전용 RTP 포트 맵 — sid → `{port, video_port}`)
+`member_ports` (멤버별 전용 RTP 포트 맵 — sid → `{port}`)
 
 **동작:**
 1. PMcpttGroup 생성
@@ -241,7 +240,6 @@ processAddGroup()으로 위임 — 기존 그룹의 members 를 재할당 없이
 | user_ip | - | 멤버 RTP IP (①선할당 호출은 생략 — 2단 멱등, [api/cmp_media_api.md §7.4](../../api/cmp_media_api.md)) |
 | user_port | - | 멤버 Audio RTP 포트 |
 | user_floor_port | - | 멤버 Floor Control 포트 |
-| user_video_port | - | 멤버 Video RTP 포트 |
 | user_nat | - | 1 이면 멤버 전용 포트에 NAT 목적지 latch 허용 |
 | user_sig_ip | - | 멤버의 SIP 시그널링 실소스 IP — latch IP guard |
 | role | - | `chair`/`participant` (floor 선점 판정용, 기본 participant) |
@@ -253,9 +251,9 @@ processAddGroup()으로 위임 — 기존 그룹의 members 를 재할당 없이
 | max_priority | - | SDP `mc_priority=N` 협상값 — 있을 때만 요청의 Floor Priority 로 우선순위를 낮출 수 있다(미협상이면 요청값 무시) |
 | granted | - | 1 = fmtp `mc_granted` — 참가 시점에 발언자가 없으면 초기 발언권 부여 |
 | floor_crypto | - | 이 멤버 전용 floor SRTCP 키 `{alg,key,salt[,mki]}` (TS 33.180 CSK) |
-| media_crypto / media_crypto_video | - | 이 멤버 leg 의 미디어 SRTP 키 `{alg,rx{key,salt},tx{key,salt}}` — leg 별 종단(ingress unprotect → 평문 분배·녹취 → egress protect). 정본 [cmp_media_api.md §6.4](../../api/cmp_media_api.md), 설계 [media_security.md](../features/media_security.md) |
+| media_crypto | - | 이 멤버 leg 의 음성 SRTP 키 `{alg,rx{key,salt},tx{key,salt}}` — leg 별 종단(ingress unprotect → 평문 분배·녹취 → egress protect). 정본 [cmp_media_api.md §6.4](../../api/cmp_media_api.md), 설계 [media_security.md](../features/media_security.md) |
 
-**응답:** `ip`, `port`, `video_port` — 멤버 전용 RTP 포트 (같은 멤버 재요청 시 동일 포트).
+**응답:** `ip`, `port` — 멤버 전용 audio RTP 포트 (같은 멤버 재요청 시 동일 포트).
 
 **동작:** 멤버 포트 유닛(PPttMemberPort) 확보(멱등) 후, 주소 동반 시
 PMcpttGroup::addMember(). 발언 중인 화자가 있으면 신규 멤버에게 화자마다 FLOOR_TAKEN 통지
@@ -424,11 +422,10 @@ PTT 미디어는 leg 별 포트셋을 따른다 ([ue_nat_traversal.md §3.2](../
 - **PRtpMulticast** — 그룹당 공유 **floor control 소켓 1개** (`PttFloorStartPort + N*2`).
   floor 메시지(RTCP APP "MCPT")는 TS 24.380 User ID 가 in-band 신원이라 공유 포트로 충분.
   proc(): floor 수신 → `PMcpttGroup::onFloorPacket()`.
-- **PPttMemberPort** — 멤버당 전용 **audio RTP**(`PttRtpStartPort + N*2`) +
-  **video RTP**(`PttVideoStartPort + N*2`) 소켓. 유닛의 포트가 그 멤버의 SDP 에 광고되어
-  **수신 소켓이 곧 멤버 신원**이고, 하향 송신도 이 소켓에서 나간다(symmetric RTP 정합).
-  proc(): 수신 → `PMcpttGroup::onMemberRtpPacket(memberId, ...)` /
-  `onMemberVideoRtpPacket(memberId, ...)`.
+- **PPttMemberPort** — 멤버당 전용 **audio RTP**(`PttRtpStartPort + N*2`) 소켓 1개.
+  유닛의 포트가 그 멤버의 SDP 에 광고되어 **수신 소켓이 곧 멤버 신원**이고, 하향 송신도
+  이 소켓에서 나간다(symmetric RTP 정합).
+  proc(): 수신 → `PMcpttGroup::onMemberRtpPacket(memberId, ...)`.
 
 ```
 멤버 유닛 audio 수신 → onMemberRtpPacket(memberId, ip, port, buf, len)
@@ -452,10 +449,8 @@ struct Peer {
     std::string ip;           // 멤버 주소 (SDP 선언 → NAT latch 시 학습 주소)
     int port;                 // Audio RTP 포트
     int floorPort;            // Floor Control 포트 (m=application)
-    int videoPort;            // Video RTP 포트
     unsigned int ssrc;        // CMP 할당 SSRC
     uint16_t audioSeqOut[8];  // 수신자별 오디오 시퀀스 카운터 (동시 발언 슬롯별)
-    uint16_t videoSeqOut[8];  // 수신자별 비디오 시퀀스 카운터 (슬롯별)
     int  streamSlot;          // floor off(full-duplex) 시 이 멤버 상향의 고정 슬롯
     bool recvOnly;            // ambient 청취 leg — 상향 미중계 + 발언 거절
     bool floorSuppress;       // 이 멤버에게 floor 메시지 미송신
@@ -475,7 +470,7 @@ void sendAudioToAll(data, len, excludeSessionId, slot) {
         memcpy(pkt, data, len);
         peer.audioSeqOut[slot]++;
         // RTP 헤더 seq(offset 2-3)  = peer.audioSeqOut[slot]
-        // RTP 헤더 ssrc(offset 8-11) = 슬롯 0 → 0x10000000+peer.ssrc (종전 고정 SSRC),
+        // RTP 헤더 ssrc(offset 8-11) = 슬롯 0 → 0x10000000+peer.ssrc (고정 SSRC),
         //                              슬롯 k → 0x40000000+(k<<24)+peer.ssrc
         peer.unit->sendAudioTo(peer.ip, peer.port, pkt, len);   // 멤버 전용 유닛 소켓에서 송신
     }
@@ -624,7 +619,7 @@ TS 24.379 §10.1.1.4.2·§11.1.1.4.2 의 "controlling MCPTT function supports me
 | 길이 | `PttMediaBufferMs`(기본 5000). 수신자를 기다리는 동안 넘치면 오래된 것부터 버린다 |
 | 재생 | 수신자 합류 시각을 기준으로 패킷마다 (도착 − 첫 도착) 만큼 뒤에 `sendAudioToAll`(수신자별 SSRC·seq·PT·SRTP 는 실시간과 같은 경로). 재생 클록 = 서버 20 ms 스레드(활성 버퍼가 있을 때만 그룹을 돈다) + 화자 패킷 도착 |
 | 다른 화자 | 담긴 발언이 다 나가기 전에 다른 화자가 말하면 남은 것을 버리고 새 발언을 실시간으로(겹쳐 듣지 않게) |
-| 범위 | floor 제어 세션의 음성만 — 전이중(floor off)·영상은 버퍼링하지 않는다. 녹취는 도착 시각 그대로(실시간) |
+| 범위 | floor 제어 세션만 — 전이중(floor off)은 버퍼링하지 않는다. 녹취는 도착 시각 그대로(실시간) |
 | 광고 | HEARTBEAT `resource.media_buffer{max_ms}` — 키 존재가 기능 광고. `PttMediaBufferMs=0` 이면 광고하지 않고, CSP 는 멤버의 200 OK 를 받은 뒤 개시자에게 응답한다([mcptt_standard_conformance.md](../features/mcptt_standard_conformance.md) C4f) |
 
 #### NAT 멤버의 목적지 latch
@@ -731,12 +726,11 @@ void freeResource(PRtpRelay* rtp);                     // _freeResources.push_ba
 
 ```
 PttFloorStartPort = 54000, PttRtpPoolSize = 10          — 그룹(공유 floor) 풀
-PttRtpStartPort = 52000, PttVideoStartPort = 56000,
-PttMemberPoolSize = 40                                  — 멤버 포트 유닛 풀
+PttRtpStartPort = 52000, PttMemberPoolSize = 40         — 멤버 포트 유닛 풀
 
 포트 할당:
   PRtpMulticast[0..9]  : Floor 54000, 54002, ... 54018        (그룹당 1)
-  PPttMemberPort[0..39]: Audio 52000+N*2, Video 56000+N*2     (참가 멤버당 1)
+  PPttMemberPort[0..39]: Audio 52000+N*2                      (참가 멤버당 1)
 
 Worker 배정: RtpWorker_{i % RtpWorkerCount}
 ```
@@ -766,9 +760,6 @@ void freeMemberUnit(groupId, sessionId);               // PTT_LEAVE / 그룹 해
 ├─────────────────────────────────────────────────────────────┤
 │ PTT Floor Control (PRtpMulticast, 그룹 공유)                 │
 │ 54000 ──────────── 54018   [Floor] × 10 그룹 (2포트 간격)    │
-├─────────────────────────────────────────────────────────────┤
-│ PTT 멤버 Video RTP (PPttMemberPort)                          │
-│ 56000 ──────────── 56078   [VRtp] × 40 유닛 (2포트 간격)     │
 ├─────────────────────────────────────────────────────────────┤
 │ 청취 leg (PRtpTap) — tap 당 4포트                            │
 │ 58000 ──────────── 58063   × 16                             │

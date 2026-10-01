@@ -140,7 +140,6 @@ def get(key, default):
 for start_k, pool_k, stride, label in (
         ('RtpStartPort',      'RtpPoolSize',        8, 'VoLTE/VoIP 미디어'),
         ('PttRtpStartPort',   'PttMemberPoolSize',  2, 'PTT 멤버 오디오'),
-        ('PttVideoStartPort', 'PttMemberPoolSize',  2, 'PTT 멤버 영상'),
         ('PttFloorStartPort', 'PttRtpPoolSize',     2, 'PTT floor 제어'),
         ('TapStartPort',      'TapPoolSize',        4, '감청 tap'),
         ('McVideoStartPort',  'McVideoMemberPoolSize', 6, 'MCVideo 멤버')):

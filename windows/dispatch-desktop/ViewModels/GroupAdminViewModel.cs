@@ -80,7 +80,7 @@ public sealed partial class GroupAdminViewModel : ObservableObject
     public string DetailOwner => DetailDoc is null ? "" : OwnerLabel(DetailDoc.AuthorizedUser);
     public string DetailOrg => Selected is null ? "" : (Selected.OrgPath.Length > 0 ? Selected.OrgPath : "—");
     public string DetailPolicy => DetailDoc is null ? "" : $"우선순위 {DetailDoc.Priority} · 긴급 {(DetailDoc.EmergencyCall ? "허용" : "불가")} · {(DetailDoc.SessionType == "chat" ? "채팅" : "사전편성")}";
-    public string DetailCapability => DetailDoc is null ? "" : string.Join(" · ", new[] { DetailDoc.AllowSds ? "SDS" : "", DetailDoc.AllowFd ? "FD" : "", DetailDoc.VideoEnabled ? "PTT 영상(현행)" : "", McVideoText(DetailDoc.Mcvideo), DetailDoc.Encryption ? "암호화" : "", DetailDoc.RequireAffiliation ? "affiliation 필요" : "" }.Where(x => x.Length > 0));
+    public string DetailCapability => DetailDoc is null ? "" : string.Join(" · ", new[] { DetailDoc.AllowSds ? "SDS" : "", DetailDoc.AllowFd ? "FD" : "", McVideoText(DetailDoc.Mcvideo), DetailDoc.Encryption ? "암호화" : "", DetailDoc.RequireAffiliation ? "affiliation 필요" : "" }.Where(x => x.Length > 0));
     public string DetailListenVisibility => _s.ListenHidden ? "은닉" : "투명";
     /// <summary>능력 줄의 MCVideo 몫(§10.6) — "MCVideo chat · 송출 2" / "MCVideo 편성 · 송출 2", MCVideo 그룹이 아니면 빈 값.</summary>
     private static string McVideoText(CimsUe.McVideoGroupAttrs? a) => a is null ? ""
