@@ -100,7 +100,7 @@
 | C6 | 영상 송출·렌더를 MCVideo 호에 결선(허가 = 송출, [받기] = 렌더) — 1차 수신 스트림 1개 | C5 | M | 영상 호 1개 송수신 |
 | C7 | 바인딩 — C API·.NET·Kotlin 코드(현행 그룹 영상 옵션 누락도 메움) — .NET 빌드·시험은 Windows PC | C4 C5 | M | `S1-UE-ANDROID-BIND`, Windows 에서 `CimsUe.Tests` |
 | C8 | cimsue-cli `video-call <g> [--transmit-at S] [--accept]` + drive 명령 | C5 | S | M2 통합 시험 구동 |
-| C9 | PTT 앱 — [영상 참여/나가기]·[영상 보내기]·«새 영상» [받기], [PTT]·하드웨어 PTT 키 = 음성 호(D6), 두 호 소리가 겹치면 영상 호 우선 | C7 | M | 실기 MF52·W999 |
+| C9 | PTT 앱 — 영상 채널 진입 = MCVideo 호 자동 합류(별도 «영상 참여» 없음, mcvideo.md D10) · [영상 보내기] 토글(D11) · «새 영상» [받기](manual, D8) · [PTT]·하드웨어 PTT 키 = 음성 호(D6) · 영상 송출 중 PTT = 마이크는 음성으로(D12) — 화면 = 검토 캔버스 «MCVideo 단말 UX 검토» P1~P5 | C7 | M | 실기 MF52·W999 |
 | C10 | verify S3 — `S3-SCN-MCVIDEO-CHAT`·`-TRANSMIT`·`-RECEPTION`·`-MAX-TX`(cimsue-cli 두 대, 대상 .48) | C8 M2 | M | cims-verify 등록 |
 | C11 | V7 단말 몫 — PTT 앱·SDK 가 MCPTT 호에 영상을 제안하지 않는다(`GroupCallOptions.video` 제거, 현행 PTT 영상 UI 를 MCVideo 호로) | C9 | S | MCPTT 오퍼에 `m=video` 없음 |
 
@@ -110,7 +110,7 @@
 |---|---|---|---|---|
 | W1~W3 | 내일 오전 착수분 — SDK 변경분 Windows 빌드·시험, 긴급·경보 서버 반영 짝, MCVideo 관제 화면 설계 초안 | — | S~M | [dispatch_windows_next.md](dispatch_windows_next.md) |
 | W4 | 그룹 편집 «영상» 토글 → MCVideo 서비스 켜기(데스크톱·태블릿) | A3 C2 | S | V7 과 같은 창 |
-| W5 | 관제 앱 MCVideo — [영상 참여]·[영상 보내기]·[받기] (1차 = 수신 1개) | C7 | M | 실기 |
+| W5 | 관제 앱 MCVideo — 채널 상세 «영상» 절(채널 참여 = MCVideo 자동 합류, D10) · «새 영상» 배너 [받기] · 수신 1칸 [창으로 ↗] · 발언 바 = 음성(D11). 영상 칸은 F3(Windows 영상 엔진) 뒤 — [dispatch_windows_next.md](dispatch_windows_next.md) | C7 | M | 실기 |
 | W6 | 다중 스트림 수신 격자 | R1 | L | V8 |
 
 ## 5. 마일스톤

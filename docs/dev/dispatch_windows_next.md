@@ -1,63 +1,121 @@
-# Windows PC — 관제 앱 이어서 할 일 (긴급·경보 서버 반영 짝 · MCVideo 준비)
+# Windows PC — 관제 앱 MCVideo (W1'·W4·W5 · 뒤에 F3·W6)
 
-Claude Code 터미널에서 이 문서를 읽고 §2 부터 순서대로 한다. **원칙: VoLTE·MCPTT 규격 절을 먼저 확인하고 그대로 따른다(CLAUDE.md 설계 우선순위 1).**
-빌드·시험 명령은 [dispatch_desktop_handoff.md](dispatch_desktop_handoff.md) §4 그대로다. 서버(CSP·CMP·CSC)는 .48 이 소스 서버, 단말 SDK·Android 는 .45 가 맡는다
-([mcvideo_dev_plan.md](mcvideo_dev_plan.md) §2).
+Claude Code 터미널에서 이 문서를 읽고 §1 부터 순서대로 한다. **원칙: VoLTE·MCPTT·MCVideo 규격 절을 먼저 확인하고 그대로 따른다(CLAUDE.md 설계 우선순위 1).**
+빌드·시험 명령은 [dispatch_desktop_handoff.md](dispatch_desktop_handoff.md) §4 그대로다. 서버(CSP·CMP·CSC)·SDK 코어·PTT 단말은 .45, 관제 앱 두 벌(Windows
+데스크톱·Android 태블릿)은 이 PC 가 맡는다([mcvideo_dev_plan.md](mcvideo_dev_plan.md) §2). 설계 정본 = [mcvideo.md](../design/features/mcvideo.md),
+화면 = 검토 캔버스 «MCVideo 단말 UX 검토»(claude.ai 비공개 artifact — 같은 계정이면 열린다. 이 문서만으로 작업할 수 있게 필요한 것은 아래에 옮겼다).
 
-## 1. 먼저
+## 0. 먼저 — 확정된 화면 규칙 (사용자, 10-01)
 
-- `git pull --ff-only` — 커밋 `ea2b617d`(SDK 코어·바인딩: 해제 인가·disposition 통지 규격 본문·ue-init-config PSI·지시자 조합)가 들어 있어야 한다.
-- 이 변경은 **C API 인자가 바뀌어** DLL 과 .NET 을 함께 다시 빌드해야 한다(§2). 옛 DLL 에 새 .NET 을 붙이면 `cimsue_engine_send_sds_notification` 호출이 깨진다.
-
-## 2. W1 — SDK 변경분 Windows 빌드·시험
-
-Linux 는 `cimsue_test` 98건·S1-UE 전 항목 PASS 다. Windows 는 이 PC 에서만 빌드된다.
-
-| 바뀐 것 | C API | .NET |
+| # | 규칙 | 근거 |
 |---|---|---|
-| 해제 인가 요소(TS 24.484 §8.3.2.1 11)xiv)·xvii)) | `cimsue_user_profile_doc_t` 끝에 `allow_cancel_group_emergency`·`allow_cancel_imminent_peril`, `cimsue_capabilities_t` 끝에 `cancel_group_emergency`·`cancel_imminent_peril` | `UserProfileDoc`·`Capabilities` 끝 인자(기본 true) |
-| UE initial configuration(TS 24.484 §7.2) | `cimsue_ue_init_config_doc_t` · `cimsue_csc_fetch_ue_init_config` · `cimsue_ue_init_config_parse` · struct id `UE_INIT_CONFIG_DOC` | `UeInitConfigDoc` · `CscClient.FetchUeInitConfig(mcsUeId)` |
-| MCData PSI | `cimsue_account_config_t` 끝 `mcdata_server_uri` | `AccountConfig.McdataServerUri` |
-| disposition 통지 규격 본문(TS 24.282 §12.2.1.1) | `cimsue_engine_send_sds_notification(…, msg_id, **group_id**, notif_type, …)` | `Account.SendSdsNotification(peer, convId, msgId, notifType, groupUri)` |
+| D10 | **«영상 참여» 단계가 없다.** MCVideo 그룹(그룹 문서에 MCVideo 몫이 있는 그룹)은 채널 화면에 처음부터 영상 자리가 있고, 앱이 채널에 들어갈 때 MCVideo 호도 함께 합류한다(chat = 합류, prearranged = MCVideo affiliation + 멤버 초대 자동 수락). 채널을 나가면 함께 나간다 | TS 22.280 R-8.4.2-002 (여러 서비스를 한 번의 논리적 제휴로) |
+| D8 | **수신 = manual** — «새 영상 · 그룹 · 이름» 알림 → [받기] → [그만 보기]. 받기 전에는 영상 RTP 가 오지 않는다 | TS 24.581 §6.2.5.3.2·§6.2.5.3.3 |
+| D11 | **음성과 영상의 송출은 따로** — 발언 바·PTT = MCPTT 음성만, 영상 = [영상 보내기](MCVideo 송출 요청·해제). MCVideo 송출은 오디오+영상이라 한 버튼으로 묶으면 음성이 두 호로 겹친다 | TS 22.280 R-8.2.2-001~-004 · TS 22.281 §4.2·§4.4 · TS 24.581 §6.2.5.3.2 |
+| D12 | **마이크 경합** — 영상을 보내는 중에 발언하면 그동안 마이크는 음성 무전으로, 영상 호 오디오는 멈춘다(영상은 계속). 설정으로 바꿀 수 있게, 긴급·임박은 늘 우선 | TS 22.280 R-8.3-003·-004 |
+| — | 1차 수신 = 한 번에 1개(엔진 렌더 창이 전역 하나). 다른 송출을 받으면 보던 것은 그만 본다([바꿔 보기]) | ue_sdk.md §11 «호별 수신 창» |
 
-확인:
-1. `cimsue_test.exe` — 새 시험 `CmsDoc.ParseUeInitConfig`·`SdsCodec.NotificationSpecForm`·`SdsCodec.CallingIdentitiesFromMcdataInfo`·`McpttXml.IndicatorOrderAndAlert`, `McpttCondition`(임박→긴급 와이어·규격형 통지 MESSAGE) 포함 전부.
-2. `dotnet test sdk\windows\dotnet\CimsUe.Tests` — `AbiLayoutTests`(`UE_INIT_CONFIG_DOC` 크기 포함)·`CscTests.CmsDocsAndCapabilitiesFollowCore`(해제 인가·ue-init-config) 포함 전부.
-   필드 순서는 Linux 에서 C 헤더와 대조만 했다 — 여기서 처음 실제로 돈다.
-3. 관제 앱 빌드 — `DispatchSession.SendSdsNotification` 은 기본 인자라 그대로 컴파일돼야 한다(§3 ② 에서 고친다).
+`git pull --ff-only` — 아래 커밋이 들어 있어야 한다: `cdc8cd95`·`9d3de02d`(C7 — MCVideo C API·.NET 바인딩) · `09e7a6e4`(수동 수락 영상) · `eece42b4` ·
+`b2a45e36`(D6 — MCPTT 착신 refresher=uas, 세션 갱신 fmtp) 와 이 문서.
 
-## 3. W2 — 긴급·경보 서버 반영의 관제 앱 짝
+## 1. W1' — SDK 다시 빌드·시험 (C7 이후)
 
-서버는 .45 에 csp 0.2.180·csc 0.2.138·oam 0.2.182 로 올라가 있다([server45_handoff.md](server45_handoff.md) §10). 관제 앱에 남은 넷:
+지난 W1(10c62fcb — cimsue_test 93·CimsUe.Tests 76)은 C7 이전 트리일 수 있다. C7 은 **C 구조체가 커졌다**(`cimsue_account_config_t` 끝 `mcvideo_*`,
+`cimsue_group_member_t` 등 — struct_size 자기검사 id 8개 추가) → **cimsue.dll 과 CimsUe.dll 을 함께** 바꾼다. 옛 DLL 에 새 .NET 을 붙이면 계정 생성부터 깨진다.
 
-| # | 할 일 | 위치 | 규격 |
-|---|---|---|---|
-| ① | **[긴급 해제] 자격 = `Capabilities.CancelGroupEmergency` ∨ 내가 올린 조건.** 지금은 `s.IsConditionMine` 만 본다. 임박 해제는 `CancelImminentPeril`(개시자 예외 없음) | `Services/DispatchSession.cs:1155` `CanCancelCondition` · 배너 `CanCancel`(:1141·:1147) | TS 24.379 §6.2.8.1.7·§6.2.8.1.10, 서버 판정 §6.3.3.1.13.4·.6 |
-| ② | **SDS 전달 확인에 그룹을 넘긴다** — `m.GroupUri`(= `<mcdata-calling-group-id>`) | `ViewModels/McDataMessagesViewModel.cs:46` → `DispatchSession.SendSdsNotification`(:1673)에 `groupUri` 인자 추가 | TS 24.282 §12.2.1.1 3)·5) |
-| ③ | **계정 만들기 전 ue-init-config 로 PSI 두 개** — `CscClient.FetchUeInitConfig(instanceId)` → `cfg.McpttServerUri`·`cfg.McdataServerUri`. MCS UE ID = 지금 쓰는 `instanceId`(MachineGuid urn:uuid). 못 받으면 비운 채(경보 = 그룹 URI, 통지 = 원 발신자 직행) | `Services/DispatchSession.cs:437~453` 계정 루프 앞 | TS 24.484 §7.2.1.1·§7.2.2.1 10)·14) |
-| ④ | **경보 취소 403 이면 배너를 되살린다** — 지금은 취소 MESSAGE 를 보내자마자 배너를 내린다. 새 CSP 는 권한 없는 취소에 403 + `alert-ind` true(경보 유지)로 답한다 → `RequestCompleted` 의 token 으로 결과를 받아 403 이면 배너 복원·«경보 해제 권한 없음» | `Services/DispatchSession.cs:1186` `CancelBanner` | TS 24.379 §12.1.3.2 |
+1. `cimsue_test.exe` 전부 — Linux 기준 149건(MCVideo `McvSip`·`McvCall`·`McvParticipant`·`McvCodec`·`McvConfig`, `McpttInvite.MemberInvitationRefresherUas`,
+   `FloorSdp.SubsequentOfferDropsInitialOnlyFmtp` 포함). Windows 에서 빠지는 시험이 있으면 이름과 이유를 결과 표에.
+2. `dotnet test sdk\windows\dotnet\CimsUe.Tests` — `AbiLayoutTests`(새 struct id 포함)가 **여기서 처음 실제로 돈다**(Linux 는 C 헤더 대조·81/85, 플랫폼 4건은
+   Windows 전용).
+3. 관제 앱 빌드 0 경고 0 오류.
 
-실서버 확인(.45):
-- 관제 계정 PTT 회선의 «긴급 해제»(콘솔 가입자 → PTT 회선 카드 «긴급 (SOS)») 끔 → 남이 건 긴급에 [긴급 해제] 없음 / 켬 → 보이고 해제 200.
-- 그룹 SDS 수신 → 전달 확인 발송(.45 CSC 는 MCData 를 광고하지 않아 옛 형식 — 정상).
-- 권한 없는 계정으로 남의 경보 [경보 해제] → 403 → 배너 남음.
+## 2. W4 — 그룹 편집 «서비스» 절 (데스크톱 · 태블릿)
 
-## 4. W3 — MCVideo 준비 (설계만, 코드 없음)
+지금 «영상» 스위치(`Views/GroupEditView.xaml:88` · `ViewModels/GroupEditViewModel.cs:78·151·222`, 태블릿 `ui/groups/NewGroupPanel.kt:146` ·
+`PttGroupsScreen.kt:316` · `PttGroupsViewModel.kt:120·376·458`)는 비규격 `<mcpttgi:mcptt-video>`(현행 PTT 영상)다. 콘솔 D3 도안과 같은 의미로 바꾼다.
 
-MCVideo 는 별도 MC 서비스다(설계 정본 [mcvideo.md](../design/features/mcvideo.md), 분담 [mcvideo_dev_plan.md](mcvideo_dev_plan.md)). 확정 결정: D5 chat · D6 음성 호·영상 호
-둘 다 유지(소리가 겹치면 영상 호 우선) · D9 전환 기간 없음. 관제 앱 구현은 SDK API 선언(K7)과 .NET 바인딩(C7) 뒤라 지금은 설계와 리뷰만 한다.
+| 칸 | 값 | 규격 |
+|---|---|---|
+| 서비스 — MCPTT 음성 | 늘 켬(기존 속성 그대로) | TS 24.481 §7.2.2 |
+| 서비스 — MCVideo 영상 | 켜면 `GroupDoc.Mcvideo = McVideoGroupAttrs`(XCAP PUT 에 MCVideo `<service>`) | TS 24.481 §7.2.2·§7.2.8 |
+| 호 방식 | chat / prearranged → `InviteMembers` false/true | TS 24.281 §6.3.5.2 |
+| 동시 송출 상한 | `MaxTransmitters` | TS 24.481 §7.2.2 |
+| 최대 통화 시간 · 수신 유지(T5) · 시작 최소 응답 · 그룹 우선순위 · 참가자 정보 구독 | `MaxDurationSec` · `ReceptionHangTimerSec` · `MinNumberToStart` · `GroupPriority` · `AllowConferenceState` | TS 24.481 §7.2.2 · TS 24.581 §11.1.3 |
+| 보호(E2E) | `ProtectMedia`·`ProtectTransmissionControl` = **false 명시**, 칸은 비활성 + «종단간 보호는 아직 지원하지 않습니다» | mcvideo.md D7 |
+| PTT 영상(현행) | 지금 «영상» 스위치를 이 이름으로 남기고 «V7 배포에서 없어집니다» 안내 | mcvideo.md D9 |
 
-1. **K7 리뷰 준비** — .45 가 SDK MCVideo API 선언을 올리면 관제 앱 요구로 검토한다: 스트림별 렌더 창(지금 `setVideoWindow` 는 창 하나), 송출·수신 이벤트에 송출자 ID·SSRC,
-   두 호(MCPTT·MCVideo) 동시 참여 시 호 구분(`CallInfo.service`).
-2. **그룹 편집 «영상» 토글 위치 파악(W4)** — `Views/GroupEditView.xaml:88`·`ViewModels/GroupEditViewModel.cs:78·151·222` 는 비규격 `<mcpttgi:mcptt-video>` 를 쓴다.
-   1차 배포 때 MCVideo 서비스 켜기(그룹 문서 MCVideo `<service>` + `<mcvideo-*>` 속성)로 바뀐다 — 지금은 바꾸지 않는다(서버 A3·SDK C2 뒤).
-3. **관제 앱 MCVideo 화면 설계 초안** — [dispatch_desktop_ui.md](../design/features/dispatch_desktop_ui.md) 에 절로 적는다:
-   - 채널 상세에 [영상 참여]/[영상 나가기] — MCPTT 채널 카드와 같은 그룹, 음성 호는 그대로(D6)
-   - [영상 보내기](송출 요청 — 발언 바의 PTT 와 따로), «새 영상» 알림 → [받기]/[그만 보기](수신 manual)
-   - 수신 영상 칸 — 1차는 한 개(R1), 다중 스트림 격자(W6)는 엔진 확장 뒤
-   - 후속(V8) 자리만 표시: 원격 영상 보기(ambient viewing)·영상 가져오기(pull)·원격 송출 요청·긴급 영상 자동 표시
-4. **태블릿** — 같은 의미론을 [android_dispatch_tablet.md](../design/features/android_dispatch_tablet.md) 에 한 줄 기록(코드는 Android 빌드 환경에서).
+- **끄기는 관제 앱에서 하지 않는다.** CSC 전환기 규칙 — MCVideo `<service>` 가 없는 PUT 은 MCVideo 상태를 건드리지 않는다(mcvideo.md §5.1 — 옛 단말 PUT
+  보호). 켜진 그룹은 체크를 잠그고 «끄기는 운영 콘솔에서» 안내.
+- **저장 때 읽은 값을 되싣는다** — 지금 저장은 `GroupDoc.Mcvideo` 를 비운 새 객체를 만든다(null = 서버 값 유지라 해는 없지만, 속성 편집을 넣으면 읽은 객체를
+  고쳐 실어야 한다). 목록 행에 서비스 칩 «음성»·«영상».
 
-## 5. 결과
+## 3. W5 — MCVideo 채널 (데스크톱 · 태블릿)
 
-이 문서 끝에 항목별 결과 표를 붙이고 커밋·푸시한다. .45·.48 은 이 표를 보고 짝을 맞춘다.
+### 3.1 연결 (둘 다)
+
+- **계정** — ue-init-config(W2 ③ 에서 이미 받는다)의 `McvideoServerUri` 가 있고 user profile 자격이 있으면(`CscClient.FetchMcVideoUserProfile` 200)
+  `AccountConfig.McvideoEnabled = true`·`McvideoServerUri`·`AutoAnswerMcvideo = true`(prearranged 멤버 초대 자동 수락 — 자동 개시, 수신은 manual).
+- **채널 진입·이탈(D10)** — «내 채널»에 들어오는 그룹이 MCVideo 그룹이면 `Account.Affiliate(g, true, McService.McVideo)`(관심 그룹 전부를 한 PUBLISH —
+  코어가 모은다) + chat 이면 `Account.JoinVideoGroupCall(g, new VideoGroupCallOptions { Prearranged = false, Queueing = true })`. prearranged 는 초대를
+  기다린다. 채널을 나가면 영상 호 `Hangup` + `Affiliate(g, false, McService.McVideo)`. 관제는 «내 채널» 전부에 합류한다(알림을 받으려면 합류해야 한다 —
+  chat). 영상 RTP 는 [받기] 한 1개만 온다.
+- **이벤트** — `Engine.TransmissionChanged`(내 송출: 요청·허가·거절·대기·회수·끝) · `Engine.ReceptionChanged`(새 송출 알림·받는 중·수신 거절·서버 종료·송출 끝).
+  채널마다 «보내는 중» 목록 = 알림(Notified)으로 더하고 송출 끝(End Notify)으로 뺀다. 스냅샷 `Call.TransmissionInfo`.
+- **조작** — [받기] = `Call.AcceptReception(transmitterId)` · [그만 보기] = `EndReception` · [바꿔 보기] = 보던 것 `EndReception` 뒤 `AcceptReception` ·
+  [영상 보내기] = `RequestTransmission()` / 끄면 `ReleaseTransmission()`.
+- **발언 바·PTT = 음성만**(D11). 영상 송출 중 발언(D12) — 코어 공개 API 가 필요하다(호별 오디오 송신 멈춤, .45 에 요청 — 지금은 엔진 내부 `setAudioTx`).
+  1차 관제 앱은 [영상 보내기]를 비활성으로 두므로(아래) 당장은 필요 없다.
+
+### 3.2 화면 — Windows 데스크톱 (캔버스 W1)
+
+- **배너 층** — «새 영상 · {그룹} — {이름}({기능 별칭})이 영상을 보냅니다 [받기] [닫기]». 토스트(명령 실패 전용 — dispatch_desktop_ui.md)가 아니라 착신 배너와
+  같은 층. [닫기] 해도 채널 «보내는 중» 목록에서 다시 [받기] 할 수 있다(TS 22.281 R-5.2.6.2.2-009 NOTE 3).
+- **채널 카드** — 1줄 태그 «영상 n»(보내는 중 수). 카드의 «조작 하나» 규칙은 그대로.
+- **오른쪽 패널 채널 상세 «영상» 절** — 머리 «영상 · 채널 참여와 함께 연결됨» · 수신 칸 16:9 408×230(캡션 «이름 · 기능 별칭 · 경과», [창으로 ↗]) ·
+  [그만 보기] · [영상 소리](영상 호 음량 — R-8.3-002) · [영상 보내기](1차 비활성 «카메라 없음») · 보내는 중 목록 행(이름 · 기능 별칭 · 경과 + [받기] /
+  «보는 중» / [바꿔 보기]).
+- **영상 칸 = F3 뒤**(§4). 그 전에는 «이 PC 에서는 영상을 표시할 수 없습니다(영상 엔진 준비 중)» 자리 — [받기] 는 그대로 둔다(영상 호 오디오는 들린다).
+- **이벤트 칸** — «{그룹} · {이름} 영상 보내기 시작/끝».
+
+### 3.3 화면 — Android 태블릿 (캔버스 T1)
+
+- 같은 의미론. 사이드 패널 400 의 «영상» 절 — 16:9 칸 372×209 + [그만 보기]·[크게 보기 ↗](본문 자리를 영상 한 장으로)·[영상 소리] · 보내는 중 목록.
+  렌더 = SDK `setVideoSurface`(엔진 전역 하나 — Android 엔진은 영상이 있다).
+- CAMERA 권한은 [영상 보내기]를 둘 때(후속) 추가한다. 전역 배너(MainActivity 184-194)에 «새 영상» 한 종류를 더한다.
+
+### 3.4 문구 (단말과 같은 사전 — 캔버스 P5)
+
+| 상황 | 문구 | 근거 |
+|---|---|---|
+| 수신 거절 #7 | 더 받을 수 없습니다 — 동시에 볼 수 있는 영상(1)이 찼습니다 [바꿔 보기] | TS 24.581 §6.2.5.4.2 |
+| 서버 수신 종료 | {이름} 영상 받기가 끝났습니다 | §6.2.5.5.5 |
+| 송출 끝 | {이름}이 영상 보내기를 멈췄습니다 | §6.2.5.3.4 |
+| 송출 요청 중 / 허가 / 대기 | 영상 보내기 요청 중… / 내 영상 송출 중 · 보는 사람 n / 대기 n번째 [대기 취소] | §6.2.4.3.2 · §6.2.4.4.6 · §6.2.4.5.6 · §6.2.4.4.5 |
+| 송출 거절 #1 · #5 | 보내지 못했습니다 — 동시에 보낼 수 있는 수(n)가 찼습니다 · 이 그룹에서는 영상을 받기만 할 수 있습니다 | §9.2.6.2 |
+| 송출 회수 #2 · #4 | 보내기가 멈췄습니다 — 한 번에 보낼 수 있는 시간을 넘었습니다 · 우선순위가 높은 송출이 들어왔습니다 | §9.2.10.2 |
+
+## 4. F3 — Windows 영상 엔진 (사용자 결정 대기 — 시작하지 않는다)
+
+지금 Windows 엔진은 영상 없이 빌드된다(`sdk/engine/config_site/windows.h` `PJMEDIA_HAS_VIDEO 0`, `sdk/windows/CMakeLists.txt` `PJMEDIA_WITH_VIDEO=OFF`).
+MCVideo 신호·송출 제어·영상 호 오디오는 이 빌드로 되고(offer 의 m=video = port 0 자리), 그림만 없다. F3 = H.264 디코드(openh264)·렌더(WPF 호스트) — 순서·시기는
+사용자 결정(캔버스 Q3). 결정 전에는 §3.2 의 자리 표시까지만 한다.
+
+## 5. W6 — 영상 벽 별창 (후속)
+
+여러 송출을 한 화면에 — 2×2·3×3 격자, 칸마다 [그만 보기], 받지 않은 송출 목록 [받기], 배치는 `layout.json` 에 기억(감청 창처럼 별창). SDK «송출자별 렌더
+창»(ue_sdk.md §11 — 지금 렌더 창은 엔진 전역 하나) 뒤. 관제사 «새 영상 자동으로 받기»(TS 22.281 §5.2.7.1)도 그때.
+
+## 6. 시험 — 대상 .48 (MCVideo 켜짐)
+
+- .48: csp 0.2.182(`Setup.Roles.MCVIDEO=true`) · cmp 0.2.106 · csc 0.2.139(`UeInitConfig.ServiceDetails.McVideo.Enable=true`). 시험 그룹 gmv1(chat · 동시 송출
+  상한 1) · gmv2(prearranged · T1 10 s), 멤버 test023~025(자격 = NAS `test48/tester/scenarios/creds/ptt.jsonl` 자리). 절차·결과 = server45_handoff.md §12.5 ·
+  mcvideo_m2_runbook.md.
+- 관제 계정을 gmv1/gmv2 멤버로 넣는 것은 .48 관리 API(A6)로 — **사용자 확인 뒤**(.45 에 요청).
+- 송출 쪽: Linux cimsue-cli 는 영상 없는 빌드라 영상 호 오디오·송출 제어만 보낸다(`cimsue-cli video-call gmv1 --transmit-at 2 --transmit-len 20`, .45 에
+  요청). 실제 영상은 C9 빌드 PTT 앱(MF52·W999) — .45 와 일정을 맞춘다.
+- 확인: ① 채널 진입만으로 영상 호 합류(INVITE·affiliation PUBLISH, «영상 참여» 버튼 없음) ② 남이 보내면 배너 «새 영상» → [받기] → 수신(태블릿 = 그림, Windows =
+  자리 표시 + 소리) → [그만 보기] ③ 두 사람이 보내면 [바꿔 보기] ④ 발언 바 PTT 는 음성만(MCPTT floor) ⑤ 채널 나가기 = 영상 호도 BYE.
+
+## 7. 결과
+
+이 문서 끝에 항목별 결과 표(W1'·W4·W5 데스크톱·W5 태블릿, 시험 ①~⑤)를 붙이고 커밋·푸시한다. 막히면 dev_share 에 `_win_` 메시지로.
