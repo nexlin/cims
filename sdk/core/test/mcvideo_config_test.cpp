@@ -137,7 +137,7 @@ TEST(McvConfig, UserProfile) {
     EXPECT_EQ(d.groups[0], "tel:g101");                     // g102(MCPTT 만)는 없다
     EXPECT_EQ(d.maxSimultaneousVideoStreams, 1);            // C9 — 1차 수신 스트림 1
     EXPECT_EQ(d.maxSimultaneousCallsN6, 1);
-    EXPECT_EQ(d.maxAffiliationsN2, 10);
+    EXPECT_EQ(d.maxAffiliationsN2, 4); // MCVideo N2 — 회선 값(기본 4)
     EXPECT_EQ(d.emergencyGroup.uri, "tel:g101");
     EXPECT_EQ(d.emergencyGroup.mode, "UseCurrentlySelectedGroup");
     EXPECT_EQ(d.imminentPerilGroup.uri, "tel:g101");

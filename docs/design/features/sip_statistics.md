@@ -449,6 +449,7 @@ VoLTE 표에는 `rejected`(거절)·`no_answer`(무응답) 두 열이 없어, �
 | `session_type_mismatch` | mcvideo-info `session-type` 이 그룹 호 방식과 다름 — Warning 117/118 (§6.3.5.2 5)) | `denied` | 404 |
 | `not_entitled` | MCVideo 이용 자격(user profile) 없음 — Warning 108/109 | `denied` | 403 |
 | `max_calls_exceeded` | 동시 MCVideo 호 상한 N6 — Warning 103 | `denied` | 486 |
+| `max_affiliations_exceeded` | chat 개시의 암묵적 제휴 — 이미 N2 개 그룹에 MCVideo 제휴 — Warning 102 (§9.2.2.3.1.1 7)) | `denied` | 486 |
 | `not_affiliated` | prearranged 에 제휴하지 않은 개시 — Warning 120 (§9.2.1.4.2 13)a)) | `denied` | 403 |
 | `affiliation_failed` | chat 합류의 암묵적 제휴 실패 — Warning 120 (§9.2.2.4.1.1 12)) | `denied` | 403 |
 | `codec_mismatch` | 제어 채널(m=application MCVideo)·AMR-WB 음성이 offer 에 없음 (§9.2.2.4.1.1 9)) | `error` | 488 |

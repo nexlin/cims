@@ -837,8 +837,21 @@ static void _ApplyImplicitMcVideoAffiliations( CSipMessage *pclsMessage, const s
     const std::string strClient = _ImplicitClientId(
         pclsMessage,
         ParseMcVideoInfo( McVideoBodyPart( pclsMessage->m_strBody, strCtype, kMcVideoInfoSubtype ) ).strClientId );
+    // N2 (§8.2.2.2.15 9)) — 이 사용자의 지금 MCVideo 제휴(모든 클라이언트 — 이 등록이 지우지 않는다)와 합쳐 N2 를
+    // 넘으면
+    //   설정 그룹을 그룹 목록 순서대로 줄인다(이미 제휴한 그룹은 자리를 더 쓰지 않는다)
+    std::vector<CDbManager::CAffiliationRow> vecRows;
+    gclsDbManager.SelectActiveAffiliationsByUser( strUserId, vecRows, EMcService::McVideo );
+    std::set<std::string> setHeld;
+    for ( const auto &r : vecRows ) setHeld.insert( r.strGroupId );
+    const std::vector<std::string> vecAllowed =
+        McvAffiliationsWithinN2( vecGroups, {}, setHeld, clsProf.m_iMaxAffiliationsN2 );
+    if ( vecAllowed.size() < vecGroups.size() )
+        CLog::Print( LOG_INFO,
+                     "[Affiliation/implicit] mcvideo user=%s N2=%d — 설정 그룹 %d 개 중 %d 개만 (§8.2.2.2.15 9)c))",
+                     strUserId.c_str(), clsProf.m_iMaxAffiliationsN2, (int)vecGroups.size(), (int)vecAllowed.size() );
     int iNew = 0;
-    for ( const auto &strGroup : vecGroups ) {
+    for ( const auto &strGroup : vecAllowed ) {
         if ( gclsDbManager.IsAffiliated( strGroup, strUserId, EMcService::McVideo ) ) continue;
         if ( !gclsDbManager.InsertAffiliation( strGroup, strUserId, strClient, 0, EMcService::McVideo ) ) {
             CLog::Print( LOG_ERROR, "[Affiliation/implicit] mcvideo 미기록 user=%s group=%s", strUserId.c_str(),
@@ -1865,6 +1878,7 @@ bool CCscfModule::RecvPublishAffiliationPidf( CSipMessage *pclsMessage, const st
                : SUBSCRIBE_DEFAULT_EXPIRES_SEC;
     // DB 만료(초) — 0 = 만료 없음(NULL). MCVideo 는 «지울 때까지»(Expires 2^32-1)라 0 이다(등록 해제가 행을 지운다).
     int iDbExpires = iExpires;
+    int iMcvN2 = 0;  // MCVideo N2 — 이용 자격의 <MaxAffiliationsN2> (0 = 상한 없음 — MCPTT)
 
     // pidf 본문 — MCVideo 는 mcvideo-info 와 함께 multipart 로 온다(TS 24.281 §8.2.1.2).
     const std::string strCtype =
@@ -1911,6 +1925,7 @@ bool CCscfModule::RecvPublishAffiliationPidf( CSipMessage *pclsMessage, const st
         }
         iExpires = uiReqExpires == 0 ? 0 : -1;  // -1 = «지울 때까지»(200 OK Expires 4294967295)
         iDbExpires = 0;
+        iMcvN2 = clsProf.m_iMaxAffiliationsN2;
     }
 
     // Expires:0 = 그 사용자의 제휴 전부 해제 (본문 유무 무관 — RFC 3903 의 remove).
@@ -1970,6 +1985,33 @@ bool CCscfModule::RecvPublishAffiliationPidf( CSipMessage *pclsMessage, const st
     // 클라이언트 식별 = tuple@id(MCPTT client ID, §9.2.2.2.3 10)) — 제휴 상태 NOTIFY 의 tuple id 로 그대로 되돌아간다.
     //   tuple@id 가 없으면 Contact URI 로 대신한다(구형 PUBLISH 와 같은 키).
     const std::string strClient = clsPidf.strClientId.empty() ? strContactUri : clsPidf.strClientId;
+    // MCVideo N2 (TS 24.281 §8.2.2.2.3 14)b)c)) — 같은 사용자의 다른 클라이언트가 제휴한 그룹과 합쳐 N2 를 넘으면
+    // 줄인다
+    //   (이 클라이언트가 이미 제휴한 그룹 먼저, 새 그룹은 요청 순서 — McvAffiliationsWithinN2). 빠진 그룹은 제휴 상태
+    //   NOTIFY 에 없어 단말이 안다. MCPTT 는 N2 를 걸지 않는다(mcptt_standard_conformance.md C1).
+    std::vector<std::string> vecOverN2;  // N2 를 넘어 제휴하지 않는 요청 그룹
+    if ( bMcv && iMcvN2 > 0 && gclsDbManager.IsConnected() ) {
+        std::vector<std::string> vecReq;
+        for ( const auto &g : vecWant )
+            if ( std::find( vecMemberOf.begin(), vecMemberOf.end(), g ) != vecMemberOf.end() ) vecReq.push_back( g );
+        std::vector<CDbManager::CAffiliationRow> vecRows;
+        gclsDbManager.SelectActiveAffiliationsByUser( strFromId, vecRows, eService );
+        std::set<std::string> setMine, setOthers;
+        for ( const auto &r : vecRows )
+            ( r.strClientId == strClient || r.strClientId == strContactUri ? setMine : setOthers )
+                .insert( r.strGroupId );
+        const std::vector<std::string> vecAllowed = McvAffiliationsWithinN2( vecReq, setMine, setOthers, iMcvN2 );
+        std::string strDropped;
+        for ( const auto &g : vecReq ) {
+            if ( std::find( vecAllowed.begin(), vecAllowed.end(), g ) != vecAllowed.end() ) continue;
+            vecOverN2.push_back( g );
+            strDropped += ( strDropped.empty() ? "" : "," ) + g;
+        }
+        if ( !vecOverN2.empty() )
+            CLog::Print( LOG_INFO,
+                         "[Affiliation/PUBLISH:mcvideo] N2=%d 초과 — user=%s client=%s 제외 %s (§8.2.2.2.3 14)c))",
+                         iMcvN2, strFromId.c_str(), strClient.c_str(), strDropped.c_str() );
+    }
     int iAff = 0, iDeaff = 0;
     if ( gclsDbManager.IsConnected() ) {
         for ( const auto &strGroup : vecMemberOf ) {
@@ -1978,7 +2020,8 @@ bool CCscfModule::RecvPublishAffiliationPidf( CSipMessage *pclsMessage, const st
             //   (빈 client 는 RemoveAffiliation 에서 "사용자 전체" 라 걸러낸다.)
             if ( !strContactUri.empty() && strClient != strContactUri )
                 gclsDbManager.RemoveAffiliation( strGroup, strFromId, strContactUri, eService );
-            const bool bWanted = ( std::find( vecWant.begin(), vecWant.end(), strGroup ) != vecWant.end() );
+            const bool bWanted = std::find( vecWant.begin(), vecWant.end(), strGroup ) != vecWant.end() &&
+                                 std::find( vecOverN2.begin(), vecOverN2.end(), strGroup ) == vecOverN2.end();
             if ( bWanted ) {
                 if ( gclsDbManager.InsertAffiliation( strGroup, strFromId, strClient, iDbExpires, eService ) ) {
                     EmitAffiliationChanged( strGroup, "affiliate", strFromId, eService );

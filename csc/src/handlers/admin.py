@@ -376,11 +376,10 @@ async def _get_user(person_id: str, config):
             if ptt_subs:
                 try:
                     ph = ','.join(['%s'] * len(ptt_subs))
-                    cur.execute(f"SELECT ptt_id, max_video_streams, max_calls_n6 FROM mcvideo_user_profile "
+                    cur.execute(f"SELECT ptt_id, {_mcvideo.profile_columns(cur)} FROM mcvideo_user_profile "
                                 f"WHERE ptt_id IN ({ph})", [s['id'] for s in ptt_subs])
                     for p in cur.fetchall():
-                        mv_profiles[p['ptt_id']] = {'max_video_streams': int(p['max_video_streams']),
-                                                    'max_calls_n6': int(p['max_calls_n6'])}
+                        mv_profiles[p['ptt_id']] = _mcvideo.profile_of_row(p)
                 except pymysql.Error:
                     pass
             for s in ptt_subs:
@@ -1319,6 +1318,8 @@ async def _put_ptt_mcvideo(person_id: str, msisdn: str, body, config):
                 return HandlerResult(status=404, body={'error': 'Subscription not found'})
             if not _mcvideo.tables_present(cur):
                 return HandlerResult(status=400, body=_mcvideo.SCHEMA_ERROR)
+            if 'max_affiliations_n2' in body and not _mcvideo.n2_column_present(cur):
+                return HandlerResult(status=400, body=_mcvideo.N2_SCHEMA_ERROR)
             prof, err = _mcvideo.api_profile(body, _mcvideo.read_user_profile(cur, msisdn))
             if err:
                 return HandlerResult(status=400, body={'error': err})
@@ -2453,12 +2454,15 @@ CIMS_ADMIN_API_DOCS = [
          {'name': 'person_id', 'in': 'path', 'type': 'integer', 'required': True, 'desc': '가입자 id'},
          {'name': 'msisdn', 'in': 'path', 'type': 'string', 'required': True, 'desc': 'PTT 번호'},
      ],
-     'response': '{id, max_video_streams, max_calls_n6}',
+     'response': '{id, max_video_streams, max_calls_n6, max_affiliations_n2}',
      'response_fields': [
          {'name': 'max_video_streams', 'type': 'integer', 'desc': 'MaxSimultaneousVideoStreams — 동시 수신 영상 상한 C9 (1~16)'},
          {'name': 'max_calls_n6', 'type': 'integer', 'desc': 'MaxSimultaneousCallsN6 — 동시 MCVideo 그룹 호 상한 (1~16)'},
+         {'name': 'max_affiliations_n2', 'type': 'integer',
+          'desc': 'MaxAffiliationsN2 — 동시 MCVideo 제휴 그룹 상한 (1~1000, 기본 4 — MCPTT N2 와 따로). 넘는 제휴 요청은 줄이고 '
+                  '(TS 24.281 §8.2.2.2.3 14)c)), chat 개시의 암묵적 제휴는 486 Warning 102'},
      ],
-     'example': {'id': '+82510002001', 'max_video_streams': 1, 'max_calls_n6': 1},
+     'example': {'id': '+82510002001', 'max_video_streams': 1, 'max_calls_n6': 1, 'max_affiliations_n2': 4},
      'errors': _ERR_COMMON + [
          {'status': 400, 'when': 'MCVideo 표 없음', 'body': _mcvideo.SCHEMA_ERROR},
          {'status': 404, 'when': '없는 가입자/번호', 'body': {'error': 'Subscription not found'}},
@@ -2474,15 +2478,18 @@ CIMS_ADMIN_API_DOCS = [
          {'name': 'person_id', 'in': 'path', 'type': 'integer', 'required': True, 'desc': '가입자 id'},
          {'name': 'msisdn', 'in': 'path', 'type': 'string', 'required': True, 'desc': 'PTT 번호'},
          {'name': 'body', 'in': 'body', 'type': 'object', 'required': True,
-          'desc': '{max_video_streams?, max_calls_n6?} — 준 키만 바꾼다(새 자격의 빠진 키 = 1)'},
+          'desc': '{max_video_streams?, max_calls_n6?, max_affiliations_n2?} — 준 키만 바꾼다(새 자격의 빠진 키 = 기본값 1·1·4)'},
      ],
-     'response': '{id, max_video_streams, max_calls_n6}',
-     'example': {'id': '+82510002001', 'max_video_streams': 2, 'max_calls_n6': 1},
+     'response': '{id, max_video_streams, max_calls_n6, max_affiliations_n2}',
+     'example': {'id': '+82510002001', 'max_video_streams': 2, 'max_calls_n6': 1, 'max_affiliations_n2': 4},
      'errors': _ERR_COMMON + [
          {'status': 400, 'when': '범위 밖·정수 아님·모르는 키 / MCVideo 표 없음'},
+         {'status': 400, 'when': 'max_affiliations_n2 를 줬는데 N2 열이 없음', 'body': _mcvideo.N2_SCHEMA_ERROR},
          {'status': 404, 'when': '없는 가입자/번호', 'body': {'error': 'Subscription not found'}},
      ],
-     'notes': ['자격이 생기면 MCVideo user profile 문서·IdMS scope 3gpp:mc:video_*·토큰 mcvideo_id claim 이 따른다(다음 토큰 발급부터).'],
+     'notes': ['자격이 생기면 MCVideo user profile 문서·IdMS scope 3gpp:mc:video_*·토큰 mcvideo_id claim 이 따른다(다음 토큰 발급부터).',
+               '상한 변경은 곧바로 반영된다 — CSP 는 제휴·개시 때마다 DB 값을 읽는다. N2 를 낮춰도 이미 있는 제휴는 지우지 않고, '
+               '그 사용자의 다음 제휴 요청부터 줄인다.'],
      'auth': dict(_AUTH_MANAGER)},
 
     {'id': 'csc.users.ptt.mcvideo.delete', 'module': 'csc', 'method': 'DELETE',

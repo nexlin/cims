@@ -220,8 +220,9 @@ class GroupDocumentTest(unittest.TestCase):
 class _AdminCur:
     """관리 API 가 내는 SQL 만 흉내 내는 DictCursor — 실행한 SQL 을 기록한다."""
 
-    def __init__(self, tables=True, attrs_row=None, profile_row=None, owns_line=True):
+    def __init__(self, tables=True, attrs_row=None, profile_row=None, owns_line=True, n2_col=False):
         self.tables, self.attrs_row, self.profile_row, self.owns_line = tables, attrs_row, profile_row, owns_line
+        self.n2_col = n2_col
         self.q = []
         self._rows = []
         self.rowcount = 0
@@ -237,9 +238,11 @@ class _AdminCur:
             self._rows = [{"t": "mcvideo_group_attrs"}] if self.tables else []
         elif s == "SELECT * FROM mcvideo_group_attrs WHERE group_id=%s":
             self._rows = [self.attrs_row] if self.attrs_row else []
+        elif s == "SHOW COLUMNS FROM mcvideo_user_profile LIKE 'max_affiliations_n2'":
+            self._rows = [{"Field": "max_affiliations_n2"}] if self.n2_col else []
         elif s == "SELECT 1 FROM ptt_subscriptions WHERE id=%s AND user_id=%s":
             self._rows = [{"1": 1}] if self.owns_line else []
-        elif s.startswith("SELECT max_video_streams, max_calls_n6 FROM mcvideo_user_profile WHERE ptt_id=%s"):
+        elif s.startswith("SELECT max_video_streams, max_calls_n6") and "FROM mcvideo_user_profile WHERE ptt_id=%s" in s:
             self._rows = [self.profile_row] if self.profile_row else []
         elif s.startswith("DELETE FROM mcvideo_user_profile"):
             self.rowcount = 1 if self.profile_row else 0
@@ -292,6 +295,7 @@ class AdminApiTest(unittest.TestCase):
         self.adm.notify_csp = lambda *a, **k: self.notified.append(a)
         self.adm.sync_group_from_db = lambda gid: None
         self.cur = None
+        mv._N2_COLUMN["present"] = False     # 열 유무 기억은 모듈 전역 — 시험마다 처음 상태로
 
     def tearDown(self):
         self.adm._get_db, self.adm.notify_csp, self.adm.sync_group_from_db, profs = self._keep
@@ -371,10 +375,12 @@ class AdminApiTest(unittest.TestCase):
         cur = self._db()
         r = _run(self.adm._put_ptt_mcvideo("7", line, {"max_video_streams": 2}, {}))
         self.assertEqual(r.status, 200, r.body)
-        self.assertEqual(r.body, {"id": line, "max_video_streams": 2, "max_calls_n6": 1})
+        # N2 열이 없는 DB(마이그레이션 전)도 자격은 쓴다 — N2 는 기본 4 로 집행된다
+        self.assertEqual(r.body, {"id": line, "max_video_streams": 2, "max_calls_n6": 1, "max_affiliations_n2": 4})
         (sql, args), = cur.sql("INSERT INTO mcvideo_user_profile")
         self.assertEqual(args, (line, 2, 1))
-        self.assertEqual(mv.profile_of(line), {"max_video_streams": 2, "max_calls_n6": 1}, "캐시 = 문서·scope 가 곧바로 따른다")
+        self.assertEqual(mv.profile_of(line), {"max_video_streams": 2, "max_calls_n6": 1, "max_affiliations_n2": 4},
+                         "캐시 = 문서·scope 가 곧바로 따른다")
         self.assertIn(("USER_CHANGED", f"tel:{line}", "PUT"), self.notified)
         cur = self._db(profile_row={"max_video_streams": 2, "max_calls_n6": 1})
         r = _run(self.adm._put_ptt_mcvideo("7", line, {"max_calls_n6": 3}, {}))
@@ -386,6 +392,29 @@ class AdminApiTest(unittest.TestCase):
         self.assertEqual(r.status, 200)
         self.assertIsNone(mv.profile_of(line))
         self.assertIn(("USER_CHANGED", f"tel:{line}", "DELETE"), self.notified)
+
+    def test_ptt_line_entitlement_n2(self):
+        """N2(동시 MCVideo 제휴 상한) — 기본 4, 운용 중 회선마다 바꾼다(TS 24.484 §9.3 <MaxAffiliationsN2>)."""
+        line = "+82510002001"
+        mv._N2_COLUMN["present"] = False
+        cur = self._db()
+        r = _run(self.adm._put_ptt_mcvideo("7", line, {"max_affiliations_n2": 6}, {}))
+        self.assertEqual((r.status, r.body), (400, mv.N2_SCHEMA_ERROR), "열이 없으면 N2 는 바꿀 수 없다")
+        self.assertFalse(cur.sql("INSERT INTO mcvideo_user_profile"))
+        cur = self._db(n2_col=True, profile_row={"max_video_streams": 1, "max_calls_n6": 2, "max_affiliations_n2": 4})
+        r = _run(self.adm._put_ptt_mcvideo("7", line, {"max_affiliations_n2": 12}, {}))
+        self.assertEqual(r.status, 200, r.body)
+        self.assertEqual(r.body["max_affiliations_n2"], 12)
+        self.assertEqual(r.body["max_calls_n6"], 2, "준 키만 바꾼다")
+        (sql, args), = cur.sql("INSERT INTO mcvideo_user_profile")
+        self.assertIn("max_affiliations_n2", sql)
+        self.assertEqual(args, (line, 1, 2, 12))
+        for bad in ({"max_affiliations_n2": 0}, {"max_affiliations_n2": 1001}, {"max_affiliations_n2": "4"}):
+            with self.subTest(bad=bad):
+                cur = self._db(n2_col=True)
+                self.assertEqual(_run(self.adm._put_ptt_mcvideo("7", line, bad, {})).status, 400)
+                self.assertFalse(cur.sql("INSERT INTO mcvideo_user_profile"))
+        mv._N2_COLUMN["present"] = False
 
     def test_ptt_line_entitlement_errors(self):
         line = "+82510002001"
@@ -429,6 +458,13 @@ class CmsDocumentTest(unittest.TestCase):
         self.assertEqual(root.get("XUI-URI"), A)
         streams_c = ET.fromstring(mv.get_user_profile_xml(C)[0]).find("up:OnNetwork/up:MaxSimultaneousVideoStreams", NS)
         self.assertEqual(streams_c.text, "4")
+
+    def test_user_profile_n2_is_per_line(self):
+        """<MaxAffiliationsN2> = 그 회선의 MCVideo N2(기본 4) — MCPTT service config N2 와 따로다."""
+        n2 = lambda: ET.fromstring(mv.get_user_profile_xml(A)[0]).find("up:OnNetwork/up:MaxAffiliationsN2", NS).text
+        self.assertEqual(n2(), "4")
+        mv.MCVIDEO_PROFILES[A[4:]]["max_affiliations_n2"] = 7
+        self.assertEqual(n2(), "7")
 
     def test_user_profile_implicit_affiliations(self):
         """멤버 implicit_affiliation 이 켜진 MCVideo 그룹만 <ImplicitAffiliations> 에 — CSP 가 등록 때 MCVideo 제휴를 기록한다

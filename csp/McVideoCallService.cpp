@@ -642,6 +642,21 @@ void CMcVideoCallService::OnIncomingInvite( const char *pszCallId, const char *p
             if ( kv.second.strMember == strFrom ) bInThis = true;
     if ( !bInThis && _ActiveCallsOf( strFrom ) >= clsProf.m_iMaxCallsN6 )
         return reject( SIP_BUSY_HERE, 103, kMcVideoWarn103, "denied", "max_calls_exceeded" );
+    // 6)·7) N2 — chat 은 제휴하지 않은 그룹으로의 개시·합류가 곧 암묵적 제휴다(§9.2.2.3.1.1 6) · §8.2.2.2.12). 이미 N2
+    // 개
+    //   그룹에 MCVideo 제휴해 있으면 486 102. prearranged 는 일반 호에 암묵적 제휴가 없어(아래 403 120) 해당 없다
+    const bool bAffiliated = gclsDbManager.IsAffiliated( strGroupId, strFrom, EMcService::McVideo );
+    if ( !bAffiliated && !bPrearranged ) {
+        std::vector<CDbManager::CAffiliationRow> vecRows;
+        gclsDbManager.SelectActiveAffiliationsByUser( strFrom, vecRows, EMcService::McVideo );
+        std::set<std::string> setHeld;
+        for ( const auto &r : vecRows ) setHeld.insert( r.strGroupId );
+        if ( (int)setHeld.size() >= clsProf.m_iMaxAffiliationsN2 ) {
+            CLog::Print( LOG_INFO, "MCVIDEO: INVITE from(%s) group(%s) — 제휴 %d 개 = N2 → 486 102", strFrom.c_str(),
+                         strGroupId.c_str(), (int)setHeld.size() );
+            return reject( SIP_BUSY_HERE, 102, kMcVideoWarn102, "denied", "max_affiliations_exceeded" );
+        }
+    }
 
     // ── 제어 MCVideo 기능 (prearranged §9.2.1.4.2 · chat §9.2.2.4.1.1 · 재합류 §9.2.1.4.5.1)
     // 재합류 2) — gr 이 가리키는 세션이 없으면 404
@@ -687,7 +702,6 @@ void CMcVideoCallService::OnIncomingInvite( const char *pszCallId, const char *p
     // 암묵적
     //   affiliation 없음, 403 120). chat 은 멤버면 암묵적 affiliation 적격(§9.2.2.4.1.1 5) · §8.2.2.3.6) — 제휴는 정원
     //   검사를 지난 뒤에 한다(아래, 12)).
-    const bool bAffiliated = gclsDbManager.IsAffiliated( strGroupId, strFrom, EMcService::McVideo );
     if ( !bAffiliated && bPrearranged ) {
         CLog::Print( LOG_INFO, "MCVIDEO: INVITE from(%s) group(%s) prearranged — 제휴 안 됨 → 403 120", strFrom.c_str(),
                      strGroupId.c_str() );

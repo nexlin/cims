@@ -48,9 +48,13 @@ export interface Subscription {
 export interface McVideoProfile {
   max_video_streams: number   // MaxSimultaneousVideoStreams — 동시에 받는 영상 수 C9 (1~16, CMP max_rx_streams)
   max_calls_n6: number        // MaxSimultaneousCallsN6 — 동시 MCVideo 호 수 N6 (1~16, 넘으면 486)
+  // MaxAffiliationsN2 — 동시 MCVideo 제휴 그룹 수 N2 (1~1000, 기본 4 — MCPTT N2 와 따로). 넘는 제휴 요청은 줄이고, chat 개시의
+  //   암묵적 제휴는 486 102. 옛 CSC 응답에는 없다
+  max_affiliations_n2?: number
 }
 /** 자격 상한 범위 — CSC services/mcvideo.py PROFILE_LIMITS 와 같은 값. */
 export const MCVIDEO_PROFILE_MAX = 16
+export const MCVIDEO_N2_MAX = 1000
 
 // 사용자 MCPTT 프로파일 (ptt_user_profile — TS 24.484). SOS 대상 결정 + 개시 인가.
 export interface McpttProfile {

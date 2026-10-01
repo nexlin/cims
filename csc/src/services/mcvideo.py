@@ -49,9 +49,11 @@ MAX_DURATION_MAX = 86400
 MAX_TRANSMITTERS_MAX = 16                    # CMP 동시 송출 상한(자원) — K6 계약 범위 1..16
 RECEPTION_HANG_TIMER_MAX = 3600
 
-# user profile 기본값 = DB 열 기본값. 행이 없으면 MCVideo 자격이 없다(문서 404).
-PROFILE_DEFAULTS = {"max_video_streams": 1, "max_calls_n6": 1}
-# ptt_subscriptions.id(MSISDN) → {max_video_streams, max_calls_n6} — load_shared_data 가 채우고 관리 API 가 갱신한다.
+# user profile 기본값 = DB 열 기본값. 행이 없으면 MCVideo 자격이 없다(문서 404). N2(`max_affiliations_n2` — <MaxAffiliationsN2>,
+#   동시 MCVideo 제휴 그룹 상한)는 MCPTT 의 N2 와 따로다(서비스마다 제휴가 따로다 — mcvideo.md §5.1). 열은 migrate_mcvideo_n2.sql.
+PROFILE_DEFAULTS = {"max_video_streams": 1, "max_calls_n6": 1, "max_affiliations_n2": 4}
+# ptt_subscriptions.id(MSISDN) → {max_video_streams, max_calls_n6, max_affiliations_n2} — load_shared_data 가 채우고 관리 API 가
+#   갱신한다.
 MCVIDEO_PROFILES: dict = {}
 
 # service configuration on-network 파라미터 (설정 McVideoServiceConfig.*) — 타이머는 밀리초, 카운터는 횟수.
@@ -176,10 +178,35 @@ def load_group_attrs(cur, mcptt_group_id: Optional[str] = None) -> Optional[dict
         return None
 
 
+# N2 열(migrate_mcvideo_n2.sql)이 있는가 — 한 번 보이면 기억한다(운용 중 마이그레이션을 적용해도 다음 조회가 집는다).
+_N2_COLUMN = {'present': False}
+
+
+def n2_column_present(cur) -> bool:
+    if _N2_COLUMN['present']:
+        return True
+    try:
+        cur.execute("SHOW COLUMNS FROM mcvideo_user_profile LIKE 'max_affiliations_n2'")
+        _N2_COLUMN['present'] = bool(cur.fetchall())
+    except Exception:
+        return False
+    return _N2_COLUMN['present']
+
+
+def profile_columns(cur) -> str:
+    """SELECT 열 목록 — N2 열이 없으면(마이그레이션 전) 빼고 읽는다(그 회선의 N2 는 기본값)."""
+    return "max_video_streams, max_calls_n6" + (", max_affiliations_n2" if n2_column_present(cur) else "")
+
+
+def profile_of_row(r: dict) -> dict:
+    """mcvideo_user_profile 행 → 자격 dict (빠진 열·NULL 은 기본값)."""
+    return {k: int(r.get(k) or PROFILE_DEFAULTS[k]) for k in PROFILE_DEFAULTS}
+
+
 def load_user_profiles(cur) -> bool:
     """mcvideo_user_profile 전부 → MCVIDEO_PROFILES. 표가 없으면 False(자격 0건)."""
     try:
-        cur.execute("SELECT ptt_id, max_video_streams, max_calls_n6 FROM mcvideo_user_profile")
+        cur.execute(f"SELECT ptt_id, {profile_columns(cur)} FROM mcvideo_user_profile")
         rows = cur.fetchall()
     except Exception as e:
         logger.log_info(f"mcvideo_user_profile load skipped (pre-migration?): {e}")
@@ -187,10 +214,7 @@ def load_user_profiles(cur) -> bool:
         return False
     MCVIDEO_PROFILES.clear()
     for r in rows:
-        MCVIDEO_PROFILES[r['ptt_id']] = {
-            "max_video_streams": int(r.get('max_video_streams') or PROFILE_DEFAULTS['max_video_streams']),
-            "max_calls_n6": int(r.get('max_calls_n6') or PROFILE_DEFAULTS['max_calls_n6']),
-        }
+        MCVIDEO_PROFILES[r['ptt_id']] = profile_of_row(r)
     logger.log_info(f"Loaded {len(MCVIDEO_PROFILES)} MCVideo user profiles")
     return True
 
@@ -257,9 +281,12 @@ def validate_attrs(attrs: dict) -> Optional[str]:
 # ── 관리 API (docs/api/admin_api.md — 그룹 `mcvideo` · PTT 회선 MCVideo 자격) ─────────────────────────────────
 
 SCHEMA_ERROR = {'error': 'schema_not_migrated', 'detail': 'mcvideo tables absent — sql/migrate_mcvideo.sql not applied'}
+N2_SCHEMA_ERROR = {'error': 'schema_not_migrated',
+                   'detail': 'mcvideo_user_profile.max_affiliations_n2 absent — sql/migrate_mcvideo_n2.sql not applied'}
 # user profile 수치 범위 — C9(MaxSimultaneousVideoStreams)는 CMP 가 받는 max_rx_streams 범위(1..16, cmp_media_api.md §7.9),
 #   N6(MaxSimultaneousCallsN6)은 규격이 상한을 두지 않아(TS 24.484 §9.3.2.1 xs:unsignedByte) 운영상 무의미한 값만 거른다.
-PROFILE_LIMITS = {"max_video_streams": (1, 16), "max_calls_n6": (1, 16)}
+#   N2 는 규격이 상한을 두지 않아(xs:nonNegativeInteger) MCPTT N2 관리 범위와 같은 1..1000.
+PROFILE_LIMITS = {"max_video_streams": (1, 16), "max_calls_n6": (1, 16), "max_affiliations_n2": (1, 1000)}
 _API_BOOL_ATTRS = ("invite_members", "protect_media", "protect_transmission_control", "allow_conference_state")
 _API_TEXT_ATTRS = ("video_resolutions", "video_frame_rate")
 
@@ -322,15 +349,22 @@ def api_profile(body: dict, current: Optional[dict] = None):
 
 
 def read_user_profile(cur, ptt_id: str) -> Optional[dict]:
-    cur.execute("SELECT max_video_streams, max_calls_n6 FROM mcvideo_user_profile WHERE ptt_id=%s", (ptt_id,))
+    cur.execute(f"SELECT {profile_columns(cur)} FROM mcvideo_user_profile WHERE ptt_id=%s", (ptt_id,))
     r = cur.fetchone()
     if not r:
         return None
-    return {"max_video_streams": int(r.get('max_video_streams') or PROFILE_DEFAULTS['max_video_streams']),
-            "max_calls_n6": int(r.get('max_calls_n6') or PROFILE_DEFAULTS['max_calls_n6'])}
+    return profile_of_row(r)
 
 
 def write_user_profile(cur, ptt_id: str, prof: dict) -> None:
+    """자격 쓰기 — N2 열이 없으면(마이그레이션 전) 그 열을 빼고 쓴다. N2 를 바꾸려는 요청은 호출측이 먼저 400 으로 막는다."""
+    if n2_column_present(cur):
+        cur.execute(
+            "INSERT INTO mcvideo_user_profile (ptt_id, max_video_streams, max_calls_n6, max_affiliations_n2, update_time) "
+            "VALUES (%s, %s, %s, %s, NOW()) ON DUPLICATE KEY UPDATE max_video_streams=VALUES(max_video_streams), "
+            "max_calls_n6=VALUES(max_calls_n6), max_affiliations_n2=VALUES(max_affiliations_n2), update_time=NOW()",
+            (ptt_id, int(prof['max_video_streams']), int(prof['max_calls_n6']), int(prof['max_affiliations_n2'])))
+        return
     cur.execute(
         "INSERT INTO mcvideo_user_profile (ptt_id, max_video_streams, max_calls_n6, update_time) "
         "VALUES (%s, %s, %s, NOW()) ON DUPLICATE KEY UPDATE max_video_streams=VALUES(max_video_streams), "
@@ -519,7 +553,7 @@ def get_user_profile_xml(user_uri: str):
         암시적 제휴로 정한 그룹(멤버 implicit_affiliation — MCPTT 문서와 같은 표시, 그룹 = 서비스 집합) — 참여 기능이 서비스
         인가 때 이 목록에 MCVideo 제휴를 기록한다(TS 24.281 §8.2.2.2.15, CSP _ApplyImplicitMcVideoAffiliations). chat 은
         합류가 곧 affiliation 이라(§7 D5) 이 목록이 없어도 쓸 수 있다.
-      - 상한 = mcvideo_user_profile(MaxSimultaneousVideoStreams·N6) + MCPTT service config N2(공유) + UserProfile.*(Priority·조직명·
+      - 상한 = mcvideo_user_profile(MaxSimultaneousVideoStreams·N6·N2 — N2 는 MCPTT 와 따로, 기본 4) + UserProfile.*(Priority·조직명·
         참여자 유형·언어 — MCPTT 문서와 같은 설정).
       - 인가(ruleset) = 1차 범위(그룹 호) 밖의 개시 인가는 false — 1:1·긴급·임박·경보·원격 회수·ambient viewing·ad hoc
         (mcvideo.md §6 V8). 그룹 호 개시 인가는 user profile 요소가 아니다(TS 24.281 §9.2.1.3.1.1 3)).
@@ -540,7 +574,7 @@ def get_user_profile_xml(user_uri: str):
     org = str(_m._user_profile_cfg('MissionCriticalOrganization') or _m._ue_init_cfg('Name') or 'CIMS')
     ptype = str(_m._user_profile_cfg('ParticipantType'))
     prio = int(_m._user_profile_cfg('Priority'))
-    n2 = int(_m.SERVICE_CONFIG.get('max_affiliations_n2') or 0)
+    n2 = max(1, int(prof.get('max_affiliations_n2') or PROFILE_DEFAULTS['max_affiliations_n2']))
     n6 = max(1, int(prof.get('max_calls_n6') or PROFILE_DEFAULTS['max_calls_n6']))
     streams = max(1, int(prof.get('max_video_streams') or PROFILE_DEFAULTS['max_video_streams']))
 

@@ -66,6 +66,9 @@ struct CspUserProfile {
 struct CspMcVideoProfile {
     int m_iMaxVideoStreams = 1;  ///< <MaxSimultaneousVideoStreams> = 서버 카운터 C9 (CMP PTT_JOIN max_rx_streams)
     int m_iMaxCallsN6 = 1;       ///< MCVideo 그룹 호 동시 상한 N6 (TS 24.281 §9.2.2.3.1.1 5) — 486 Warning 103)
+    /// <MaxAffiliationsN2> — 동시 MCVideo 제휴 그룹 상한 N2(TS 24.281 §8.2.2.2.3 14)c) — 넘는 제휴 요청은 줄인다 ·
+    /// §9.2.2.3.1.1 7) chat 개시의 암묵적 제휴는 486 Warning 102). 열이 없는 DB(migrate_mcvideo_n2.sql 전)는 기본 4
+    int m_iMaxAffiliationsN2 = 4;
 };
 
 /**

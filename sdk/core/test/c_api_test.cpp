@@ -469,7 +469,7 @@ TEST(CApi, McVideoProfileAndServiceConfig) {
     ASSERT_EQ(up.group_count, 1); EXPECT_STREQ(up.groups[0], "tel:g101");
     EXPECT_EQ(up.max_simultaneous_video_streams, 1);
     EXPECT_EQ(up.max_simultaneous_calls_n6, 1);
-    EXPECT_EQ(up.max_affiliations_n2, 10);
+    EXPECT_EQ(up.max_affiliations_n2, 4); // MCVideo N2 — 회선 값(기본 4)
     EXPECT_STREQ(up.emergency_group.uri, "tel:g101");
     EXPECT_STREQ(up.emergency_group.mode, "UseCurrentlySelectedGroup");
     EXPECT_EQ(up.allow_revoke_transmit, 0);

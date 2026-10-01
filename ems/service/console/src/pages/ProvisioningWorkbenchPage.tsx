@@ -2,7 +2,7 @@ import { useConfirm } from '@core/components/custom/confirm'
 import { Fragment, useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import IconBtn from '@core/components/IconBtn'
 import { AlertTriangle, ChevronRight, Pencil, Plus, Trash2, Upload, X } from 'lucide-react'
-import { usersApi, MCPTT_PROFILE_OPT_KEYS, MCVIDEO_PROFILE_MAX, mcpttProfileOptDefault, type McVideoProfile, type UserSummary, type Subscription, type UserInput, type McpttProfile, type SipTransport, type AuthScheme, type ImportResult, type LineSvc } from '@core/api/users'
+import { usersApi, MCPTT_PROFILE_OPT_KEYS, MCVIDEO_N2_MAX, MCVIDEO_PROFILE_MAX, mcpttProfileOptDefault, type McVideoProfile, type UserSummary, type Subscription, type UserInput, type McpttProfile, type SipTransport, type AuthScheme, type ImportResult, type LineSvc } from '@core/api/users'
 import { groupsApi, type Group } from '@core/api/groups'
 import { phoneGroupsApi, type PhoneGroup } from '@core/api/phoneGroups'
 import { rolesApi, type RoleDef } from '@core/api/roles'
@@ -961,15 +961,18 @@ function McVideoEntitlement({ user, sub, canWrite }: { user: UserSummary; sub: S
   const { show } = useToast()
   // undefined = 읽는 중 · null = 자격 없음 · 'unmigrated' = MCVideo 표 없음(마이그레이션 전) · 'unavailable' = 조회 실패(CSC 구버전 등)
   const [ent, setEnt] = useState<McVideoProfile | null | 'unmigrated' | 'unavailable' | undefined>(undefined)
-  const [lim, setLim] = useState({ max_video_streams: '1', max_calls_n6: '1' })
+  const [lim, setLim] = useState({ max_video_streams: '1', max_calls_n6: '1', max_affiliations_n2: '' })
   const [busy, setBusy] = useState(false)
   const apply = useCallback((pr: McVideoProfile | null) => {
     setEnt(pr)
-    if (pr) setLim({ max_video_streams: String(pr.max_video_streams), max_calls_n6: String(pr.max_calls_n6) })
+    if (pr) setLim({ max_video_streams: String(pr.max_video_streams), max_calls_n6: String(pr.max_calls_n6),
+      max_affiliations_n2: pr.max_affiliations_n2 == null ? '' : String(pr.max_affiliations_n2) })
   }, [])
+  const pick = (r: McVideoProfile): McVideoProfile =>
+    ({ max_video_streams: r.max_video_streams, max_calls_n6: r.max_calls_n6, max_affiliations_n2: r.max_affiliations_n2 })
   useEffect(() => {
     usersApi.getPttMcVideo(user.id, sub.id)
-      .then(r => apply({ max_video_streams: r.max_video_streams, max_calls_n6: r.max_calls_n6 }))
+      .then(r => apply(pick(r)))
       .catch((e: unknown) => {
         const code = e instanceof ApiError ? e.data.error : ''
         setEnt(code === 'not_entitled' ? null : code === 'schema_not_migrated' ? 'unmigrated' : 'unavailable')
@@ -982,21 +985,26 @@ function McVideoEntitlement({ user, sub, canWrite }: { user: UserSummary; sub: S
     try {
       if (on) {
         const r = await usersApi.putPttMcVideo(user.id, sub.id, {})
-        apply({ max_video_streams: r.max_video_streams, max_calls_n6: r.max_calls_n6 }); show('MCVideo 이용 자격 부여', 'ok')
+        apply(pick(r)); show('MCVideo 이용 자격 부여', 'ok')
       } else {
         await usersApi.deletePttMcVideo(user.id, sub.id); apply(null); show('MCVideo 이용 자격 회수', 'ok')
       }
     } catch (e: unknown) { show(String(e), 'err') }
     finally { setBusy(false) }
   }
+  // N2 칸은 서버가 값을 줄 때만 둔다(옛 CSC 는 N2 를 모른다) — 바꾼 값만 보낸다(N2 열이 없는 DB 는 400)
+  const hasN2 = granted && (ent as McVideoProfile).max_affiliations_n2 != null
   async function saveLimits() {
-    const v = Number(lim.max_video_streams), n = Number(lim.max_calls_n6)
-    const ok = (x: number) => Number.isInteger(x) && x >= 1 && x <= MCVIDEO_PROFILE_MAX
-    if (!ok(v) || !ok(n)) { show(`상한은 1~${MCVIDEO_PROFILE_MAX} 정수`, 'err'); return }
+    const v = Number(lim.max_video_streams), n = Number(lim.max_calls_n6), a = Number(lim.max_affiliations_n2)
+    const ok = (x: number, hi: number) => Number.isInteger(x) && x >= 1 && x <= hi
+    if (!ok(v, MCVIDEO_PROFILE_MAX) || !ok(n, MCVIDEO_PROFILE_MAX)) { show(`상한은 1~${MCVIDEO_PROFILE_MAX} 정수`, 'err'); return }
+    if (hasN2 && !ok(a, MCVIDEO_N2_MAX)) { show(`동시 제휴 그룹은 1~${MCVIDEO_N2_MAX} 정수`, 'err'); return }
+    const body: Partial<McVideoProfile> = { max_video_streams: v, max_calls_n6: n }
+    if (hasN2 && a !== (ent as McVideoProfile).max_affiliations_n2) body.max_affiliations_n2 = a
     setBusy(true)
     try {
-      const r = await usersApi.putPttMcVideo(user.id, sub.id, { max_video_streams: v, max_calls_n6: n })
-      apply({ max_video_streams: r.max_video_streams, max_calls_n6: r.max_calls_n6 }); show('MCVideo 상한 저장', 'ok')
+      const r = await usersApi.putPttMcVideo(user.id, sub.id, body)
+      apply(pick(r)); show('MCVideo 상한 저장', 'ok')
     } catch (e: unknown) { show(String(e), 'err') }
     finally { setBusy(false) }
   }
@@ -1015,7 +1023,7 @@ function McVideoEntitlement({ user, sub, canWrite }: { user: UserSummary; sub: S
           </label>}
       </div>
       {granted && (<>
-        <div className="grid grid-cols-[repeat(2,minmax(0,220px))] gap-3">
+        <div className="grid grid-cols-[repeat(3,minmax(0,200px))] gap-3">
           <Field label={`동시 수신 영상(1~${MCVIDEO_PROFILE_MAX})`}>
             <Input type="number" min={1} max={MCVIDEO_PROFILE_MAX} disabled={!canWrite} value={lim.max_video_streams}
               onChange={e => setLim({ ...lim, max_video_streams: e.target.value })} />
@@ -1026,6 +1034,13 @@ function McVideoEntitlement({ user, sub, canWrite }: { user: UserSummary; sub: S
               onChange={e => setLim({ ...lim, max_calls_n6: e.target.value })} />
             <span className="text-xs text-muted-foreground">MaxSimultaneousCallsN6 — 넘으면 486</span>
           </Field>
+          {hasN2 && (
+            <Field label={`동시 제휴 그룹(1~${MCVIDEO_N2_MAX})`}>
+              <Input type="number" min={1} max={MCVIDEO_N2_MAX} disabled={!canWrite} value={lim.max_affiliations_n2}
+                onChange={e => setLim({ ...lim, max_affiliations_n2: e.target.value })} />
+              <span className="text-xs text-muted-foreground">MaxAffiliationsN2 — 기본 4</span>
+            </Field>
+          )}
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {canWrite && <Button variant="outline" disabled={busy} onClick={saveLimits}>상한 저장</Button>}

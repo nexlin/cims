@@ -429,6 +429,8 @@ CREATE TABLE IF NOT EXISTS mcvideo_user_profile (
         COMMENT '<OnNetwork><MaxSimultaneousVideoStreams> (TS 24.484 §9.3.2.1 9e) — 수신 동시 스트림 상한, 서버 카운터 C9 (TS 24.581 §11.2.3). 1차 단말 = 1',
     max_calls_n6      TINYINT     NOT NULL DEFAULT 1
         COMMENT '<Common><MCVideo-group-call><MaxSimultaneousCallsN6> (TS 24.484 §9.3.2.1 8e i) — 동시 MCVideo 그룹 호 상한 (TS 24.281 §9.2.2.3.1.1 5)',
+    max_affiliations_n2 SMALLINT  NOT NULL DEFAULT 4
+        COMMENT '<OnNetwork><MaxAffiliationsN2> (TS 24.484 §9.3.2.1) — 동시 MCVideo 제휴 그룹 상한 N2 (TS 24.281 §8.2.2.2.3 14)c)·§9.2.2.3.1.1 7) 486 102). 기존 DB 는 migrate_mcvideo_n2.sql',
     update_time       DATETIME             DEFAULT NULL,
     PRIMARY KEY (ptt_id),
     CONSTRAINT fk_mvup_ptt_sub FOREIGN KEY (ptt_id) REFERENCES ptt_subscriptions (id) ON DELETE CASCADE

@@ -1,8 +1,10 @@
 #ifndef _MCVIDEO_INFO_H_
 #define _MCVIDEO_INFO_H_
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdlib>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -161,6 +163,32 @@ inline bool McVideoRequestIndicated( const std::string &services, const std::str
     return body.find( "urn:3gpp:ns:mcvideoPresInfo" ) != std::string::npos;
 }
 
+/** N2(동시 MCVideo 제휴 그룹 상한 — user profile <MaxAffiliationsN2>) 안으로 줄인 이 클라이언트의 제휴 그룹 — TS 24.281
+ * §8.2.2.2.3 14)b)c)·§8.2.2.2.15 9). 후보 수 = 같은 사용자의 다른 클라이언트가 제휴한 그룹 ∪ 이 클라이언트의 요청
+ * 그룹(서로 다른 그룹 수). 넘으면 서비스 제공자 정책으로 줄인다 — 이 클라이언트가 이미 제휴한 그룹을 먼저 지키고(제휴가
+ * 흔들리지 않게), 새 그룹은 요청 순서대로(§8.2.2.2.3 NOTE «the order it appeared in the PUBLISH request»). 다른
+ * 클라이언트가 이미 제휴한 그룹은 후보 수를 늘리지 않는다. iN2 <= 0 = 상한 없음. 돌려주는 순서 = 요청 순서. */
+inline std::vector<std::string> McvAffiliationsWithinN2( const std::vector<std::string> &vecWant,
+                                                         const std::set<std::string> &setMine,
+                                                         const std::set<std::string> &setOthers, int iN2 ) {
+    if ( iN2 <= 0 ) return vecWant;
+    std::set<std::string> setUsed( setOthers ), setKeep;
+    auto take = [&]( const std::string &g ) {
+        if ( setUsed.count( g ) || (int)setUsed.size() < iN2 ) {
+            setUsed.insert( g );
+            setKeep.insert( g );
+        }
+    };
+    for ( const auto &g : vecWant )
+        if ( setMine.count( g ) ) take( g );
+    for ( const auto &g : vecWant )
+        if ( !setMine.count( g ) ) take( g );
+    std::vector<std::string> vecOut;
+    for ( const auto &g : vecWant )
+        if ( setKeep.count( g ) && std::find( vecOut.begin(), vecOut.end(), g ) == vecOut.end() ) vecOut.push_back( g );
+    return vecOut;
+}
+
 /** REGISTER Contact 가 MCVideo 클라이언트를 싣는가 — g.3gpp.mcvideo 와 icsi-ref 의 MCVideo ICSI 가 **둘 다**(TS 24.281
  * §7.2.1 1)·2)). 태그를 뺀 재-REGISTER 는 MCVideo 로그오프다(§7.2.1 NOTE 1). */
 inline bool McVideoContactCapable( const std::string &contactParams ) {
@@ -270,6 +298,7 @@ inline std::string BuildMcVideoInviteFmtp( int iUserPriority, uint32_t uTcSsrc )
 // ── Warning 문구 (TS 24.281 §4.4.2 표 4.4.2-2 — 형식은 McpttWarning: 399 <PTT 도메인> "NNN text") ──
 static const char *const kMcVideoWarn100 = "function not allowed due to local policy";
 static const char *const kMcVideoWarn101 = "service authorisation failed";
+static const char *const kMcVideoWarn102 = "too many simultaneous affiliations";
 static const char *const kMcVideoWarn103 = "maximum simultaneous MCVideo group calls reached";
 static const char *const kMcVideoWarn108 = "user not authorised to make chat group calls";
 static const char *const kMcVideoWarn109 = "user not authorised to make prearranged group calls";

@@ -507,16 +507,28 @@ int CDbManager::SelectMcVideoProfile( const std::string &strPttId, CspMcVideoPro
     clsProfile = CspMcVideoProfile();
     if ( !m_bHasMcVideoTables ) return -1;
     if ( !m_pMysql && !Reconnect() ) return -1;
-    MYSQL_RES *pRes = ExecuteSelect( "SELECT max_video_streams, max_calls_n6 FROM mcvideo_user_profile WHERE ptt_id='" +
-                                     Escape( strPttId ) + "'" );
+    // 열 이름으로 읽는다 — N2 열(migrate_mcvideo_n2.sql)은 운용 중에 더해질 수 있어 접속 때 한 번 본 열 목록에 기대지
+    // 않는다
+    //   (없으면 기본 4).
+    MYSQL_RES *pRes = ExecuteSelect( "SELECT * FROM mcvideo_user_profile WHERE ptt_id='" + Escape( strPttId ) + "'" );
     if ( !pRes ) return -1;
     MYSQL_ROW row = mysql_fetch_row( pRes );
     if ( !row ) {
         mysql_free_result( pRes );
         return 0;
     }
-    clsProfile.m_iMaxVideoStreams = row[0] ? std::max( 1, atoi( row[0] ) ) : 1;
-    clsProfile.m_iMaxCallsN6 = row[1] ? std::max( 1, atoi( row[1] ) ) : 1;
+    const unsigned int uFields = mysql_num_fields( pRes );
+    MYSQL_FIELD *pFields = mysql_fetch_fields( pRes );
+    for ( unsigned int i = 0; i < uFields; ++i ) {
+        const std::string strName = pFields[i].name ? pFields[i].name : "";
+        if ( !row[i] ) continue;
+        if ( strName == "max_video_streams" )
+            clsProfile.m_iMaxVideoStreams = std::max( 1, atoi( row[i] ) );
+        else if ( strName == "max_calls_n6" )
+            clsProfile.m_iMaxCallsN6 = std::max( 1, atoi( row[i] ) );
+        else if ( strName == "max_affiliations_n2" )
+            clsProfile.m_iMaxAffiliationsN2 = std::max( 1, atoi( row[i] ) );
+    }
     mysql_free_result( pRes );
     return 1;
 }

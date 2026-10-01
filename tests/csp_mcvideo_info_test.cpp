@@ -304,6 +304,34 @@ int main() {
   CK("NOTIFY round trip", ParsePidfAffiliation(nv).vecGroups.size() == 1 &&
                               ParsePidfAffiliation(nv).strPid == "p1");
 
+  // ── N2 — 동시 MCVideo 제휴 그룹 상한 (TS 24.281 §8.2.2.2.3 14)b)c)) ──
+  {
+    using V = std::vector<std::string>;
+    // 다른 클라이언트 없음, 새 요청 5 개, N2 4 → 요청 순서 앞 4 개
+    CK("N2 new in request order",
+       McvAffiliationsWithinN2({"g1", "g2", "g3", "g4", "g5"}, {}, {}, 4) ==
+           V({"g1", "g2", "g3", "g4"}));
+    // 이 클라이언트가 이미 g5 에 제휴 — 기존 제휴를 먼저 지킨다(결과는 요청
+    // 순서)
+    CK("N2 keeps held first",
+       McvAffiliationsWithinN2({"g1", "g2", "g3", "g4", "g5"}, {"g5"}, {}, 4) ==
+           V({"g1", "g2", "g3", "g5"}));
+    // 다른 클라이언트가 g1·g9 를 쥐고 있다 — g1 은 자리를 더 쓰지 않고, g9 는
+    // 자리를 쓴다
+    CK("N2 counts other clients",
+       McvAffiliationsWithinN2({"g1", "g2", "g3", "g4"}, {}, {"g1", "g9"}, 4) ==
+           V({"g1", "g2", "g3"}));
+    // N2 를 낮췄다 — 이 클라이언트의 기존 제휴도 줄인다(다른 클라이언트 몫 2 +
+    // 1 = 3)
+    CK("N2 lowered reduces held",
+       McvAffiliationsWithinN2({"g1", "g2"}, {"g1", "g2"}, {"g8", "g9"}, 3) ==
+           V({"g1"}));
+    CK("N2 <= 0 = no limit",
+       McvAffiliationsWithinN2({"g1", "g2"}, {}, {"g3"}, 0) == V({"g1", "g2"}));
+    CK("N2 dedup", McvAffiliationsWithinN2({"g1", "g1", "g2"}, {}, {}, 4) ==
+                       V({"g1", "g2"}));
+  }
+
   printf("%s (%d fail)\n", fail ? "FAIL" : "PASS", fail);
   return fail ? 1 : 0;
 }

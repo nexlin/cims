@@ -778,17 +778,19 @@ MCVideo user profile(TS 24.484 §9.3) — 행이 곧 이용 자격이다([mcvide
 
 | 메서드 | 동작 | 응답 |
 |---|---|---|
-| `GET` | 조회 (monitor+) | 200 `{id, max_video_streams, max_calls_n6}` · 자격 없음 404 `{"error": "not_entitled"}` |
-| `PUT` | 자격 부여·상한 변경 (manager+) — 준 키만 바꾼다(새 자격의 빠진 키 = 1) | 200 `{id, max_video_streams, max_calls_n6}` |
+| `GET` | 조회 (monitor+) | 200 `{id, max_video_streams, max_calls_n6, max_affiliations_n2}` · 자격 없음 404 `{"error": "not_entitled"}` |
+| `PUT` | 자격 부여·상한 변경 (manager+) — 준 키만 바꾼다(새 자격의 빠진 키 = 기본값 1·1·4) | 200 `{id, max_video_streams, max_calls_n6, max_affiliations_n2}` |
 | `DELETE` | 자격 회수 (manager+) | 200 `{id}` · 자격 없음 404 |
 
 | 필드 | 타입 | 범위 | 설명 |
 |------|------|------|------|
 | `max_video_streams` | integer | 1~16 | `<MaxSimultaneousVideoStreams>`(§9.3.2.1) — 동시 수신 영상 상한, 서버 카운터 C9(TS 24.581 §11.2.3). 범위 = CMP `max_rx_streams` |
 | `max_calls_n6` | integer | 1~16 | `<MaxSimultaneousCallsN6>` — 동시 MCVideo 그룹 호 상한(TS 24.281 §9.2.2.3.1.1 5), 넘으면 486 Warning 103) |
+| `max_affiliations_n2` | integer | 1~1000 | `<MaxAffiliationsN2>` — 동시 MCVideo 제휴 그룹 상한 N2(기본 4, MCPTT N2 와 따로). 넘는 제휴 요청은 줄이고(§8.2.2.2.3 14)c)), chat 개시의 암묵적 제휴는 486 Warning 102(§9.2.2.3.1.1 7)). 열이 없는 DB(`sql/migrate_mcvideo_n2.sql` 전)는 기본 4 로 집행하고, 이 키를 주면 400 `schema_not_migrated` |
 
 - 자격이 바뀌면 CSC 가 MCVideo user profile 문서(없으면 404)·IdMS scope `3gpp:mc:video_*`·토큰 `mcvideo_id` claim 을 곧바로 따르게 하고(다음 토큰
   발급부터) CSP 에 `USER_CHANGED` 를 보낸다. 진행 중인 MCVideo 호는 끊지 않는다 — 다음 개시·합류부터 판정(403 Warning 108/109).
+- 상한은 운용 중 곧바로 반영된다 — CSP 는 제휴·개시 때마다 DB 값을 읽는다. N2 를 낮춰도 이미 있는 제휴는 지우지 않고 그 사용자의 다음 제휴 요청부터 줄인다.
 - 번호가 이 가입자의 PTT 번호가 아니면 404 `Subscription not found`. MCVideo 표가 없으면(마이그레이션 전) 400 `schema_not_migrated`
   (`sql/migrate_mcvideo.sql`). 가입자 조회(`GET /api/v1/users/{pid}`)의 `ptt_subscriptions[].mcvideo_profile` 에도 같은 값이 실린다(자격 없음 = null).
 
