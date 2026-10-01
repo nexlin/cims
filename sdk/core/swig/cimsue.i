@@ -49,6 +49,7 @@ using namespace cimsue;
 // 셀프뷰는 setPreviewSurface 다(ue_sdk.md §4.5). 프레임마다 부르는 director 를 Java 로 내지 않는다.
 %ignore cimsue::VideoFrame;
 %ignore cimsue::Listener::onVideoFrame;
+%feature("nodirector") cimsue::Listener::onVideoFrame;   // 덮어쓰기도 내지 않는다 — %ignore 만이면 director 가 VideoFrame 을 불투명 타입으로 낸다
 %ignore cimsue::Engine::setVideoPreview;
 
 // 구동 세션(drive.h)은 앱이 **DeviceLink 하나와 상태 콜백만** 쓴다 — DriveSession·LineSink 는 링크 안에서

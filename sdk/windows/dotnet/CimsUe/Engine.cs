@@ -277,6 +277,8 @@ public sealed unsafe class Engine : IDisposable
     public Result SetVideoCaptureDevice(int deviceId) => Status(cimsue_engine_set_video_capture_device(Handle, deviceId));
     /// <summary>캡처 카메라 전환 — 활성 영상 호의 송신 장치를 다음 카메라로.</summary>
     public Result SwitchCamera(int callId) => Status(cimsue_engine_switch_camera(Handle, callId));
+    /// <summary>캡처 영상 회전 — 카메라 devId 의 프레임을 시계 방향 degrees(0·90·180·270) 돌려 세운다(인코딩 크기 그대로).</summary>
+    public Result SetCaptureRotation(int devId, int degrees) => Status(cimsue_engine_set_capture_rotation(Handle, devId, degrees));
     /// <summary>통화 중 영상 전환(1:1 호, re-INVITE) — on = 추가 요청(결과는 <see cref="VideoRequestChanged"/>), false = 제거(묻지 않는다).
     /// 성립 전·보류 중·진행 중인 요청이 있으면 실패. 영상 없는 빌드면 실패.</summary>
     public Result SetCallVideo(int callId, bool on) => Status(cimsue_engine_set_call_video(Handle, callId, on ? 1 : 0));

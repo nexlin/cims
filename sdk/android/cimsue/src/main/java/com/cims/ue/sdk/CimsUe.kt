@@ -14,6 +14,7 @@
 package com.cims.ue.sdk
 
 import android.content.Context
+import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraManager
 import android.view.Surface
 import kotlinx.coroutines.CoroutineDispatcher
@@ -195,7 +196,10 @@ class CimsUe(private val io: CoroutineDispatcher = Dispatchers.IO) : AutoCloseab
         context?.let { ctx ->
             (ctx.getSystemService(Context.CAMERA_SERVICE) as? CameraManager)?.let { org.pjsip.PjCameraInfo2.SetCameraManager(it) }
         }
-        CimsResult.of(engine.start(cfg.toJni(), listener)).also { if (it.ok) _running.value = true }
+        CimsResult.of(engine.start(cfg.toJni(), listener)).also {
+            if (it.ok) _running.value = true
+            if (it.ok && context != null) applyCaptureRotation(context, 0)   // 화면 자연 방향(세로 고정 휴대폰 앱)
+        }
     }
 
     suspend fun stop() {
@@ -331,6 +335,35 @@ class CimsUe(private val io: CoroutineDispatcher = Dispatchers.IO) : AutoCloseab
      * (Android 카메라 단일 개방 제약, CIMS PjCamera2 패치). 통화 전에 걸어 두면 캡처 시작 때 붙고, 통화 중이면 세션이 다시 구성된다.
      */
     fun setPreviewSurface(surface: Surface?) { runCatching { org.pjsip.PjCamera2.SetPreviewSurface(surface) } }
+
+    /**
+     * 카메라 프레임을 화면 방향으로 세운다(ue_sdk.md §4.5 — 인코딩은 480x640 세로). Android 카메라 센서는 대개 가로라 걸지 않으면 가로 그림을
+     * 세로 틀에 줄여 넣어 위아래가 검게 간다. 카메라마다 Camera2 `SENSOR_ORIENTATION` 으로 계산한다 — 앞 = (센서 + 화면) mod 360,
+     * 뒤 = (센서 − 화면) mod 360. [displayRotation] = 화면이 자연 방향에서 시계 방향으로 돈 각도(0·90·180·270, `Surface.ROTATION_*`).
+     * [start] 가 0 으로 한 번 건다 — 화면을 돌리는 앱은 회전마다 다시 부른다.
+     */
+    suspend fun setCaptureRotation(context: Context, displayRotation: Int = 0): CimsResult<Unit> =
+        command { applyCaptureRotation(context, displayRotation) }
+
+    private fun applyCaptureRotation(ctx: Context, displayRotation: Int): CimsResult<Unit> {
+        val cm = ctx.getSystemService(Context.CAMERA_SERVICE) as? CameraManager ?: return CimsResult.fail(-1, "no camera service")
+        fun sensorOf(facing: Int): Int? = runCatching {
+            cm.cameraIdList.map { cm.getCameraCharacteristics(it) }
+                .firstOrNull { it.get(CameraCharacteristics.LENS_FACING) == facing }
+                ?.get(CameraCharacteristics.SENSOR_ORIENTATION)
+        }.getOrNull()
+        val disp = ((displayRotation % 360) + 360) % 360
+        var last: CimsResult<Unit> = CimsResult.ok(Unit)
+        for (d in VideoDeviceInfo.list(engine.videoDevices())) {
+            if (!d.capture || d.driver != "Android") continue
+            val front = d.name.contains("Front", ignoreCase = true)          // pjmedia android_dev 이름 "Front camera"/"Back camera"
+            val sensor = sensorOf(if (front) CameraCharacteristics.LENS_FACING_FRONT else CameraCharacteristics.LENS_FACING_BACK)
+                ?: continue
+            val rot = if (front) (sensor + disp) % 360 else (sensor - disp + 360) % 360
+            CimsResult.of(engine.setCaptureRotation(d.id, rot)).let { if (!it.ok) last = it }
+        }
+        return last
+    }
 
     suspend fun videoDevices(): List<VideoDeviceInfo> =
         withContext(io) { guarded { VideoDeviceInfo.list(engine.videoDevices()) } } ?: emptyList()

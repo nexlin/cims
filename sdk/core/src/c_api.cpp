@@ -1405,6 +1405,9 @@ cimsue_status_t CIMSUE_CALL cimsue_engine_set_video_send(cimsue_engine_t* e, int
 cimsue_status_t CIMSUE_CALL cimsue_engine_switch_camera(cimsue_engine_t* e, int32_t call_id) {
     return e ? ret(e->eng.switchCamera(call_id)) : -1;
 }
+cimsue_status_t CIMSUE_CALL cimsue_engine_set_capture_rotation(cimsue_engine_t* e, int32_t dev_id, int32_t degrees) {
+    return e ? ret(e->eng.setCaptureRotation(dev_id, degrees)) : -1;
+}
 cimsue_status_t CIMSUE_CALL cimsue_engine_set_call_video(cimsue_engine_t* e, int32_t call_id, int32_t on) {
     return e ? ret(e->eng.setCallVideo(call_id, on != 0)) : -1;
 }

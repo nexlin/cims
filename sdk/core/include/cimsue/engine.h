@@ -229,6 +229,11 @@ public:
     Result setVideoCaptureDevice(int deviceId);
     /** 캡처 카메라 전환(전면↔후면) — 활성 영상 호의 송신 장치를 다음 카메라로 바꾸고, 이후 호의 기본 장치로도 쓴다. */
     Result switchCamera(int callId);
+    /** 캡처 영상 회전 — 카메라 devId(videoDevices 의 capture)의 프레임을 시계 방향 degrees(0·90·180·270) 돌려 세워 보낸다. 인코딩 크기는
+     *  그대로(480x640 세로). 화면 방향과 카메라 센서 방향이 다른 단말(휴대폰 — 센서는 가로)은 걸지 않으면 가로 그림을 세로 틀에 줄여 넣어
+     *  위아래가 검게 간다. Android 파사드는 기동 때 Camera2 센서 방향으로 카메라마다 계산해 건다(CimsUe.setCaptureRotation). 열린 카메라에
+     *  곧바로, 이후 호에도 쓴다. 영상 없는 빌드면 실패. */
+    Result setCaptureRotation(int devId, int degrees);
     /** 내 영상 송출 허용(CallInfo.videoSend) — 1:1 영상 호는 곧바로 송출을 시작·정지하고, MCVideo 호는 허용이면서 송출 허가를 가진
      *  동안만 보낸다. 재협상(re-INVITE) 없음. 영상 없는 빌드·호면 실패. 그룹 영상은 MCVideo 호다 — MCPTT 호는 음성만(mcvideo.md §8). */
     Result setVideoSend(int callId, bool on);

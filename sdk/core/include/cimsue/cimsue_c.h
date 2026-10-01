@@ -715,6 +715,8 @@ CIMSUE_API cimsue_status_t CIMSUE_CALL cimsue_engine_set_video_capture_device(ci
 CIMSUE_API cimsue_status_t CIMSUE_CALL cimsue_engine_set_video_send(cimsue_engine_t* e, int32_t call_id, int32_t on);
 /** 캡처 카메라 전환(Engine::switchCamera). */
 CIMSUE_API cimsue_status_t CIMSUE_CALL cimsue_engine_switch_camera(cimsue_engine_t* e, int32_t call_id);
+/** 캡처 영상 회전(Engine::setCaptureRotation) — 카메라 dev_id 의 프레임을 시계 방향 degrees(0·90·180·270) 돌려 세운다. */
+CIMSUE_API cimsue_status_t CIMSUE_CALL cimsue_engine_set_capture_rotation(cimsue_engine_t* e, int32_t dev_id, int32_t degrees);
 /** 통화 중 영상 전환(Engine::setCallVideo — 1:1 호, re-INVITE). on = 추가 요청(결과는 on_video_request), 0 = 제거(묻지 않는다). */
 CIMSUE_API cimsue_status_t CIMSUE_CALL cimsue_engine_set_call_video(cimsue_engine_t* e, int32_t call_id, int32_t on);
 /** 상대의 영상 추가 요청에 답한다(Engine::answerVideoRequest) — accept = 영상을 받는 200 OK, 0 = m=video port 0(음성 유지). */

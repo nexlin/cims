@@ -327,7 +327,12 @@ C++ 공개 표면은 `cimsue/engine.h` 의 `Engine` 하나이며 계정·호를 
   결선·해제한다(`win_in` 무효면 건너뛴다 — pjsua 창 함수가 무효 id 를 단정으로 막아 프로세스가 abort 한다). 영상이 활성되는 호마다 수신 창을 결선하고, 계정
   `videoAutoTransmit` 면 카메라 송신을 연다(START_TRANSMIT, 송신 방향이 없으면 sendrecv 로). 셀프뷰는 카메라를 두 번 열지 않고 엔진
   캡처가 연 Camera2 세션에 출력 Surface 를 더한다(파사드 `setPreviewSurface` → CIMS 패치 `PjCamera2.SetPreviewSurface`). 카메라 전환
-  `switchCamera(callId)`(합성 장치 Colorbar 제외, 기본 = 이름에 front), H.264 최우선·인코딩 480x640·15 fps·400/500 kbit/s. 카메라 열거는
+  `switchCamera(callId)`(합성 장치 Colorbar 제외, 기본 = 이름에 front), H.264 최우선·인코딩 480x640(세로)·15 fps·400/500 kbit/s. Android 카메라
+  센서는 대개 가로라 캡처 회전 없이는 가로 그림을 세로 틀에 줄여 넣어 위아래가 검게 간다 — `Engine::setCaptureRotation(devId, degrees)`(C
+  `cimsue_engine_set_capture_rotation`·.NET `Engine.SetCaptureRotation`)가 카메라마다 프레임을 시계 방향으로 돌려 세운다(pjsua
+  `setCaptureOrient`, 뒷면 카메라는 pjmedia android_dev 의 90·270 맞바꿈을 코어가 되돌려 넘긴다). Kotlin `CimsUe.start(cfg, context)` 가 기동
+  때 Camera2 `SENSOR_ORIENTATION` 으로 계산해 건다(앞 = 센서 + 화면, 뒤 = 센서 − 화면, 화면 = 자연 방향 0°) — 화면을 돌리는 앱은
+  `CimsUe.setCaptureRotation(context, displayRotation)` 를 회전마다 부른다. 카메라 열거는
   기동 때 한 번이라 `CimsUe.start(cfg, context)` 가 **기동 전에** `PjCameraInfo2.SetCameraManager` 를 넣는다. 코어 제어 스레드(`ue-ctl`)는
   네이티브 스레드라 `FindClass` 가 APK 의 `org.pjsip.PjCamera2` 를 못 찾으므로, pjlib 이 `JNI_OnLoad` 에서 앱 클래스 로더를 기억하고
   영상 장치가 `pj_jni_find_class` 로 찾는다(CIMS 패치). 카메라 도우미 두 파일은 pj 를 싣는 모듈마다 빌드 때 복사한다(S1-UE-ENGINE-SINGLE).

@@ -3584,6 +3584,34 @@ Result Engine::switchCamera(int callId) {
 #endif
 }
 
+Result Engine::setCaptureRotation(int devId, int degrees) {
+#if PJSUA_HAS_VIDEO
+    if (!impl_->running) return Result::fail(-1, "not running");
+    if (degrees % 90 != 0) return Result::fail(-2, "rotation must be a multiple of 90");
+    return impl_->ctl.runSync([this, devId, degrees]() -> Result {
+        Impl* o = impl_.get();
+        int deg = ((degrees % 360) + 360) % 360;
+        try {
+            pj::VideoDevInfo d = o->ep->vidDevManager().getDevInfo(devId);
+            if (!(d.dir & PJMEDIA_DIR_CAPTURE)) return Result::fail(-3, "not a capture device");
+            // pjmedia android_dev 는 뒷면 카메라의 90·270 을 서로 바꿔 적용한다(android_dev.c CAP_ORIENTATION) — 원하는 회전이
+            //   되게 미리 바꿔 넘긴다. 장치 이름 = android_dev 가 붙이는 "Back camera"/"Front camera".
+            if (d.driver == "Android" && d.name.find("Back") != std::string::npos && (deg == 90 || deg == 270)) deg = 360 - deg;
+            const pjmedia_orient orient = deg == 90  ? PJMEDIA_ORIENT_ROTATE_90DEG
+                                        : deg == 180 ? PJMEDIA_ORIENT_ROTATE_180DEG
+                                        : deg == 270 ? PJMEDIA_ORIENT_ROTATE_270DEG
+                                                     : PJMEDIA_ORIENT_NATURAL;
+            o->ep->vidDevManager().setCaptureOrient((pjmedia_vid_dev_index)devId, orient, true);
+        } catch (pj::Error& e) { return fromError(e); }
+        o->log(3, "capture rotation: dev " + std::to_string(devId) + " " + std::to_string(degrees) + " deg");
+        return Result::success();
+    });
+#else
+    (void)devId; (void)degrees;
+    return Result::fail(-3, "video not built");
+#endif
+}
+
 Result Engine::setVideoSend(int callId, bool on) {
 #if PJSUA_HAS_VIDEO
     if (!impl_->running) return Result::fail(-1, "not running");
