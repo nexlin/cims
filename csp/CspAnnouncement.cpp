@@ -66,6 +66,7 @@ static const struct {
     { ANN_SIT_CALL_WAITING, "call_waiting" },
     { ANN_SIT_FORWARDED, "forwarded" },
     { ANN_SIT_CALL_WAITING_ALERT, "call_waiting_alert" },
+    { ANN_SIT_SELF_BUSY, "self_busy" },
 };
 
 const char *CCspAnnouncementService::SituationName( EAnnSituation e ) {
@@ -91,6 +92,8 @@ static const char *kDefaultRules =
     "{\"profile\":\"default\",\"situation\":\"not_found\",\"mode\":\"announce\",\"media\":\"sys:ann_invalid_number\"},"
     "{\"profile\":\"default\",\"situation\":\"invalid\",\"mode\":\"announce\",\"media\":\"sys:ann_invalid_number\"},"
     "{\"profile\":\"default\",\"situation\":\"declined\",\"mode\":\"tone\",\"tone\":\"sys:busy_kr\",\"tone_ms\":6000},"
+    // 자기 번호 발신 통화중 — 화중음만(통화 중 안내는 상대가 있을 때의 말이다)
+    "{\"profile\":\"default\",\"situation\":\"self_busy\",\"mode\":\"tone\",\"tone\":\"sys:busy_kr\",\"tone_ms\":6000},"
     "{\"profile\":\"default\",\"situation\":\"congestion\",\"mode\":\"tone\",\"tone\":\"sys:congestion_kr\",\"tone_"
     "ms\":6000},"
     "{\"profile\":\"default\",\"situation\":\"forbidden\",\"mode\":\"none\"},"
@@ -499,10 +502,10 @@ bool CCspAnnouncementService::OnLegFailed( const char *pszBCallId, const CCallIn
 
 bool CCspAnnouncementService::Reject( const char *pszCallId, CSipCallRtp *pclsRtp, const char *pszFrom,
                                       const char *pszTo, int iSipStatus, const char *pszReason,
-                                      CSipMessage *pclsMessage ) {
+                                      CSipMessage *pclsMessage, EAnnSituation eSitOverride ) {
     if ( !IsEnabled() || pclsRtp == NULL || pszCallId == NULL ) return false;
     if ( !gclsSetup.m_bUseRtpRelay ) return false;
-    EAnnSituation eSit = Classify( iSipStatus, pszReason );
+    EAnnSituation eSit = eSitOverride != ANN_SIT_NONE ? eSitOverride : Classify( iSipStatus, pszReason );
     if ( eSit == ANN_SIT_NO_ANSWER && iSipStatus == SIP_TEMPORARILY_UNAVAILABLE )
         eSit = ANN_SIT_UNREACHABLE;  // CSP 판정 480 = 미등록
     const std::string strProfile = ProfileForCaller( pszFrom ? pszFrom : "", pclsMessage );

@@ -1101,12 +1101,13 @@ void CModuleDispatcher::EventIncomingCall( const char *pszCallId, const char *ps
     //   시도로 남긴다 — 기록하지 않으면 성공률·NER 의 분모에서 빠진다(F-54).
     //   그룹·private 거절에는 쓰지 않는다: volte 트리에 쓰면 집계가 svc='volte' 로 못 박아
     //   세므로(build_minutes) PTT 실패가 VoLTE 통계를 오염시킨다.
-    auto RejectVoice = [&]( int iCode ) {
+    // eSit = 최종 코드로 가릴 수 없는 안내 상황(자기 번호 발신 통화중 self_busy) — 비우면 코드로 판정.
+    auto RejectVoice = [&]( int iCode, EAnnSituation eSit = ANN_SIT_NONE ) {
         if ( gclsCallDir.IsEnabled() ) gclsCallDir.VoipCallRejected( pszCallId, pszFrom, pszTo, iCode );
         // 실패 안내(announcements.md §3.2) — early media 로 안내한 뒤 같은 코드로 끝난다(시도 기록은 위에서 이미
         // 남겼다).
         //   정책 none·CMP 미지원·조립 실패면 종전대로 응답만.
-        if ( gclsAnnouncement.Reject( pszCallId, pclsRtp, pszFrom, pszTo, iCode, NULL, pclsMessage ) ) return;
+        if ( gclsAnnouncement.Reject( pszCallId, pclsRtp, pszFrom, pszTo, iCode, NULL, pclsMessage, eSit ) ) return;
         return StopCall( pszCallId, iCode );
     };
 
@@ -1121,7 +1122,7 @@ void CModuleDispatcher::EventIncomingCall( const char *pszCallId, const char *ps
     std::string strDivertTarget;
     if ( m_clsTas.IsEnabled() && !gclsPendingRouteMap.Has( pszCallId ? pszCallId : "" ) ) {
         const int iDiv = m_clsTas.ResolveDiversion( pszFrom, pszTo, pclsMessage, clsDiv );
-        if ( iDiv < 0 ) return RejectVoice( -iDiv );
+        if ( iDiv < 0 ) return RejectVoice( -iDiv, clsDiv.bSelfCallBusy ? ANN_SIT_SELF_BUSY : ANN_SIT_NONE );
         if ( iDiv > 0 ) {
             bDiverted = true;
             strDivertTarget = clsDiv.strTarget;
@@ -1239,7 +1240,7 @@ void CModuleDispatcher::EventIncomingCall( const char *pszCallId, const char *ps
                 if ( !gclsUserMap.Select( pszTo ) ) return RejectVoice( SIP_NOT_FOUND );
                 CLog::Print( LOG_INFO, "EventIncomingCall: self call %s — 발신 단말뿐(NDUB) → 486 CallId=%s", pszTo,
                              pszCallId );
-                return RejectVoice( SIP_BUSY_HERE );
+                return RejectVoice( SIP_BUSY_HERE, ANN_SIT_SELF_BUSY );
             }
             if ( strCallerContact.empty() && gclsUserMap.Select( pszTo, clsUserInfo ) == false )
                 return RejectVoice( SIP_NOT_FOUND );

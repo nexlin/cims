@@ -204,6 +204,7 @@ int CTasModule::ResolveDiversion( const char *pszFrom, const char *pszTo, CSipMe
             //   CFB 가 있으면 그쪽으로(TS 24.604 — CFB 는 UDUB·NDUB 모두), 없으면 통화중(486 + 통화중 안내).
             if ( clsUser.m_strForwardBusy.empty() ) {
                 CLog::Print( LOG_INFO, "TAS: self call %s — 발신 단말뿐(NDUB) → 486", strCur.c_str() );
+                clsOut.bSelfCallBusy = true;
                 return -SIP_BUSY_HERE;
             }
             strRaw = clsUser.m_strForwardBusy;

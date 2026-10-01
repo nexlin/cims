@@ -275,7 +275,7 @@ UE-A ◄── 180(같은 SDP) · 200 ◄────────── 180 · 2
 | 같은 번호의 다른 단말 | 동작 |
 |---|---|
 | 있음(다른 바인딩 — 다른 Contact) | 그 단말로만 착신(`CUserMap::SelectOtherDevice` — 발신 단말 Contact 를 뺀 최선 바인딩) |
-| 없음 | **통화중**(Network Determined User Busy — TS 24.604 CFB 는 UDUB·NDUB 모두): CFB(`forward_busy_id`)가 있으면 그쪽으로 전환(cause 486, CFU 와 같은 181·History-Info·전환 안내), 없으면 **486 + 통화중 안내**(announcements.md `busy`) |
+| 없음 | **통화중**(Network Determined User Busy — TS 24.604 CFB 는 UDUB·NDUB 모두): CFB(`forward_busy_id`)가 있으면 그쪽으로 전환(cause 486, CFU 와 같은 181·History-Info·전환 안내), 없으면 **486 + 화중음**(안내 상황 `self_busy` — "통화 중이오니" 안내 없이 화중음만, announcements.md §2) |
 
 - 판정 한 곳 = `CTasModule::IsSelfCallBusy`(발신 = 착신 · 등록됨 · INVITE Contact 를 뺀 살아 있는 바인딩 없음).
   `ResolveDiversion` 이 CFU 다음 순서로 부른다(CFU 가 있으면 무조건 전환이 먼저). 같은 단말 판정은 `SelectForTarget`

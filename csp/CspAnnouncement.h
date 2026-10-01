@@ -47,6 +47,9 @@ enum EAnnSituation {
                         // 끝난다)
     ANN_SIT_CALL_WAITING_ALERT,  // 통화중대기 — 통화 중인 착신자의 활성 leg 에 섞는 in-band 대기음(TS 24.615, mode=mix,
                                  // §3.6)
+    ANN_SIT_SELF_BUSY,  // 자기 번호 발신 통화중(NDUB — volte_supplementary_services.md §6A.5). 486 이지만 "통화
+                        // 중이오니" 안내는 맞지 않는다(상대가 없다) — 화중음만. 최종 코드로는 판정할 수 없어 호출자가
+                        // 지정한다
 };
 
 /** 프로파일 표의 한 행 — 상황 하나의 동작 */
@@ -91,8 +94,9 @@ public:
      */
     bool OnLegFailed( const char *pszBCallId, const CCallInfo &clsB, int iSipStatus, const char *pszReason );
     /** B leg 이전 자체 거절(§3.2) — relay 를 A 만으로 잡고 안내 뒤 원코드. true = 인수(응답은 이 서비스가 낸다). */
+    /** eSitOverride = 최종 코드로 가릴 수 없는 상황(ANN_SIT_SELF_BUSY) — 비우면 Classify(코드·Reason). */
     bool Reject( const char *pszCallId, CSipCallRtp *pclsRtp, const char *pszFrom, const char *pszTo, int iSipStatus,
-                 const char *pszReason, CSipMessage *pclsMessage );
+                 const char *pszReason, CSipMessage *pclsMessage, EAnnSituation eSitOverride = ANN_SIT_NONE );
     /** 보류 — pszHolderCallId 의 offer 방향이 sendonly/inactive. 피보류 leg 에 음악. 반환 true = 재생
      * 시작(inactive→sendonly 재작성 근거) */
     bool OnHold( const char *pszHolderCallId, const CCallInfo &clsHolder );

@@ -45,6 +45,7 @@ SIP-I 트렁크의 ISUP 안내 인디케이터.
 | `not_found` 없는 번호 | 404·410, cause 1 | TS 24.229 | 안내 "없는 번호입니다" → **404** |
 | `invalid` 번호 불완전 | 484(다이얼 플랜 번역 불가) | TS 24.229 §5.4.3.2 | 안내 "없는 번호입니다" → **484** |
 | `declined` 거절 | 603(단말 거절·착신 차단 ICB — TS 24.611 §4.5.2.6.1), cause 21. | TS 24.628 | 화중음 6 s → **603** |
+| `self_busy` 자기 번호 통화중 | 자기 번호 발신에서 착신에 쓸 단말이 발신 단말뿐(망이 판정한 통화중 NDUB — volte_supplementary_services.md §6A.5). 최종 코드는 486 이지만 상대가 없어 "통화 중이오니" 안내는 맞지 않는다 — 코드로 가릴 수 없어 판정한 곳(TAS `IsSelfCallBusy`·디스패처)이 상황을 지정한다(`Reject` 의 `eSitOverride`) | TS 24.604(CFB — NDUB), E.180 화중음 | 화중음 6 s → **486** |
 | `congestion` 혼잡 | 5xx(재라우팅 소진)·488(코덱 불일치·변환 슬롯 소진)·CMP 자원 없음, cause 34/42 | E.182 §4.5 | 혼잡음 6 s → **원코드** |
 | `forbidden` 차단 | 403(ACL·채널 정책) | — | **안내 없음**(보안 — 응답만) |
 | `hold` 보류 | 한 leg 의 re-INVITE offer `a=sendonly`/`a=inactive` | TS 24.610 §4.5.2.4 | 피보류 leg 에 보류 음악 loop, resume(sendrecv) 에 정지 |

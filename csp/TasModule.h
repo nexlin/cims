@@ -137,6 +137,7 @@ public:
         std::string strTarget;                   // 최종 전환 대상 — B-leg 착신
         std::vector<CspDiversion::Hop> vecHops;  // 전환 열(대상·cause) — History-Info 항목
         int iHopsBefore = 0;                     // 수신 INVITE 의 History-Info 가 이미 담은 전환 수
+        bool bSelfCallBusy = false;              // -486 이 자기 번호 발신 통화중(NDUB) — 안내 상황 self_busy
     };
     /** 착신전환 판정 — 착신 가입자(등록 여부 무관, DB 폴백)에 forward_id(CFU) 가 있으면 전환 대상을 좇는다(연쇄 허용,
      *  대상의 forward_id 도 따른다). 대상 번호는 그 가입자 접속서비스의 다이얼 플랜으로 +E.164 번역(§2-10).
