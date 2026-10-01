@@ -59,6 +59,10 @@ public sealed unsafe class Engine : IDisposable
     public event EventHandler<TransmissionEvent>? TransmissionChanged;
     /// <summary>MCVideo 수신 제어(§6.2.5) — 새 송출 알림(manual 이면 Call.AcceptReception)·수신 허가·종료.</summary>
     public event EventHandler<ReceptionEvent>? ReceptionChanged;
+    /// <summary>영상 프레임(창 없는 프레임 렌더 — Windows 엔진, ue_sdk.md §4.5). **다른 이벤트와 달리 EventContext 로 넘기지 않고 영상 스레드에서
+    /// 곧바로** 부른다(프레임마다 초당 15~30회) — 화소를 복사하고 곧 돌아간다. 핸들러 안에서 엔진 명령을 부르지 않는다(엔진이 영상 포트를 멈추며
+    /// 이 스레드를 기다리는 중이면 교착한다). 수신 영상 = 그 호의 CallId, 셀프뷰 = -1(<see cref="SetVideoPreview"/>).</summary>
+    public event VideoFrameHandler? VideoFrameReceived;
     /// <summary>그룹 로스터(RFC 4575) — 구독 NOTIFY 또는 in-dialog NOTIFY.</summary>
     public event EventHandler<RosterUpdate>? RosterChanged;
     /// <summary>감시 대상 dialog 상태(RFC 4235 NOTIFY) — dialog 하나당 1회.</summary>
@@ -260,9 +264,15 @@ public sealed unsafe class Engine : IDisposable
     /// <summary>사운드 장치 재오픈 — 열려 있으면 닫고 곧바로 다시 연다(재생·캡처 트랙 재생성, 브리지 결선·게이트·라우트·음량 유지). 닫혀 있으면 아무것도 하지 않는다.</summary>
     public Result ReopenAudioDevice() => Status(cimsue_engine_reopen_audio_device(Handle));
 
-    // ── 영상 (§4.5 — 코어는 창을 열지 않는다) ──
-    /// <summary>수신 영상 렌더 대상 — 플랫폼 창 핸들(Windows = HWND, 참조를 세지 않는다). IntPtr.Zero = 해제. 영상 없는 빌드면 실패.</summary>
+    // ── 영상 (§4.5 — 코어는 창을 열지 않는다. Windows 엔진은 디코드 프레임을 VideoFrameReceived 로 넘긴다) ──
+    /// <summary>수신 영상 렌더 대상 — 플랫폼 창 핸들. IntPtr.Zero = 해제. 영상 없는 빌드면 실패. Windows 엔진(프레임 렌더)도 실패한다 —
+    /// 활성 영상 호마다 프레임이 <see cref="VideoFrameReceived"/> 로 온다.</summary>
     public Result SetVideoWindow(IntPtr nativeWindow) => Status(cimsue_engine_set_video_window(Handle, nativeWindow));
+    /// <summary>셀프뷰 프레임 — on 이면 내 영상을 보내는 동안 카메라 프레임을 <see cref="VideoFrameReceived"/>(CallId -1)로도 넘긴다.
+    /// 카메라는 송출이 연다(셀프뷰만으로 열지 않는다). 프레임 렌더가 없는 빌드면 실패.</summary>
+    public Result SetVideoPreview(bool on) => Status(cimsue_engine_set_video_preview(Handle, B(on)));
+    /// <summary>캡처 카메라 선택 — <see cref="VideoDevices"/> 의 캡처 장치 Id, -1 = 기본(이름에 front, 없으면 첫 카메라). 다음 송출부터 쓰고 지금 송출 중인 호는 곧바로 바꾼다.</summary>
+    public Result SetVideoCaptureDevice(int deviceId) => Status(cimsue_engine_set_video_capture_device(Handle, deviceId));
     /// <summary>캡처 카메라 전환 — 활성 영상 호의 송신 장치를 다음 카메라로.</summary>
     public Result SwitchCamera(int callId) => Status(cimsue_engine_switch_camera(Handle, callId));
     public IReadOnlyList<VideoDeviceInfo> VideoDevices
@@ -450,7 +460,7 @@ public sealed unsafe class Engine : IDisposable
                             ToManaged(c->mcptt), c->half_duplex != 0, c->listen_only != 0, Utf8.Str(c->joined_dialog),
                             c->rx_level, new McpttCondition(c->condition.emergency != 0, c->condition.imminent_peril != 0, c->condition.mine != 0,
                                                             c->condition.pending != 0, c->condition.last_code),
-                            Utf8.Str(c->answer_state), NonAck(c), (McService)c->service, Utf8.Str(c->session_uri));
+                            Utf8.Str(c->answer_state), NonAck(c), (McService)c->service, Utf8.Str(c->session_uri), c->video_send != 0);
     }
 
     private static string[] NonAck(cimsue_call_info_t* c)
@@ -530,6 +540,7 @@ public sealed unsafe class Engine : IDisposable
         on_non_acknowledged_users = &Cb.OnNonAcknowledgedUsers,
         on_transmission = &Cb.OnTransmission,
         on_reception = &Cb.OnReception,
+        on_video_frame = &Cb.OnVideoFrame,
     };
 
     /// <summary>앱 스레드로 넘긴다. 컨텍스트가 없으면 이벤트 스레드에서 직접 — 예외는 네이티브 경계 밖으로 새지 않게 잡는다.</summary>
@@ -680,6 +691,19 @@ public sealed unsafe class Engine : IDisposable
         {
             var e = Of(user); if (e is null) return;
             try { var r = ToManaged(ev); e.Dispatch(() => e.ReceptionChanged?.Invoke(e, r)); } catch { }
+        }
+
+        /// <summary>영상 스레드 — 복사·마샬링 없이 핸들러에 넘긴다(VideoFrame.Pixels 는 이 호출 동안만 유효).</summary>
+        [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
+        public static void OnVideoFrame(void* user, cimsue_video_frame_t* f)
+        {
+            var e = Of(user); var h = e?.VideoFrameReceived; if (e is null || h is null || f is null || f->data is null) return;
+            try
+            {
+                var frame = new VideoFrame(f->call_id, f->width, f->height, f->stride, new ReadOnlySpan<byte>(f->data, (int)f->size));
+                h(e, in frame);
+            }
+            catch (Exception ex) { try { e.HandlerFailed?.Invoke(e, ex); } catch { /* 마지막 방어 */ } }
         }
 
         [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]

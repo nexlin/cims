@@ -27,6 +27,10 @@ psip·opencore-amr 처럼 "수정해서 쓰는 외부 소스는 `ext/` 에 커�
   | 음성 레벨 — 마이크 AGC · 피크 리미터 (`cims_level.h`, `pjmedia_conf_set_rx_agc`, `pjsua_conf_set_rx_agc`, pjsua2 `AudDevManager::setCaptureAgc`) | `pjmedia/src/pjmedia/cims_level.h`·`conference.c`, `pjmedia/include/pjmedia/{config,conference}.h`, `pjsip/src/pjsua-lib/pjsua_aud.c`, `pjsip/{include,src}/pjsua2/media.*` | slot 0 마이크 rx 에 P.56 활성 레벨 AGC(목표 -26 dBov, 음성 게이트·원단 게이트, `PJMEDIA_CONF_CIMS_MIC_AGC`), 게인을 곱하는 포트 rx·tx 경로 끝의 하드 클립을 프레임 look-ahead 리미터(-1 dBFS, `PJMEDIA_CONF_CIMS_LIMITER`)로 교체 — 단말마다 34 dB 넘게 다른 마이크 레벨·배율 누적 포화 대책. 정본 docs/design/features/ue_audio_level.md |
   | 영상 스트림 keep-alive 즉시 송출 (`PJSUA_CALL_VID_STRM_SEND_KEEPALIVE`, `pjmedia_vid_stream_send_keep_alive`) | `pjsip/include/pjsua-lib/pjsua.h`, `pjsip/src/pjsua-lib/pjsua_vid.c`, `pjmedia/{include/pjmedia/vid_stream.h,src/pjmedia/vid_stream.c}` | 영상 keep-alive 는 인코딩 경로(put_frame)에서만 나가 송출 정지(STOP_TRANSMIT) 중인 수신 전용 참가자의 NAT 매핑이 풀린다 — PTT 그룹 영상 청취자(CMP 는 멤버 영상 포트를 그 멤버가 보낸 패킷으로 latch)를 위해 코어가 주기적으로 부른다(ue_sdk.md §4.5). 연산은 enum 끝에 붙여 pjsua2 `vidSetStream` 이 그대로 넘긴다 |
   | RTCP-XR 통계 조회 (`pjsua_call_get_stream_stat_xr`) | `pjsip/src/pjsua-lib/pjsua_call.c`, `pjsip/include/pjsua-lib/pjsua.h` | pjsua 가 dump 에서만 읽던 `pjmedia_stream_get_stat_xr`(RFC 3611 VoIP Metrics)를 API 로 — 코어 `callQuality` 의 입력(ue_voice_quality.md §3). 빌드 스위치는 config_site `common.h` `PJMEDIA_HAS_RTCP_XR`·`PJMEDIA_STREAM_ENABLE_XR` |
+  | 창 없는 프레임 렌더 장치 (`cims_frame_dev.c` «CIMS frame sink», `pjmedia_cims_frame_dev_set_callback`, `PJMEDIA_VIDEO_DEV_HAS_CIMS_FRAME`) | `pjmedia/{include,src}/pjmedia-videodev/cims_frame_dev.*`, `videodev.c`(렌더 장치 맨 앞 등록)·`config.h`(기본 0), 빌드 목록 셋(`pjmedia/build/Makefile`·`pjmedia_videodev.vcxproj(.filters)`·`pjmedia/CMakeLists.txt`) | Windows 관제 앱 영상(ue_sdk.md §4.5) — BGRA 프레임(디코더 I420 → libyuv)을 콜백으로, 창 핸들 = 코어가 고른 토큰(NULL = 버림). 콜백 등록·해제는 렌더 스트림이 없을 때(기동 직후·파괴 뒤) — 전달 경로에 잠금 없음 |
+  | CMake 영상 코덱 칸 (`PJMEDIA_HAS_OPENH264_CODEC`·`PJMEDIA_HAS_VPX_CODEC`) | `pjmedia/include/pjmedia-codec/config_auto.h.cm` | CMake 가 값을 정해 두고 틀에 칸이 없어 늘 미정의 — OpenH264 를 켜도 등록되지 않았다(autoconf 는 CFLAGS -D 로 넘긴다) |
+  | CMake DirectShow BaseClasses | `pjmedia/CMakeLists.txt`(`PJMEDIA_WITH_VIDEODEV_DSHOW` 면 `third_party/BaseClasses` 소스·include 를 pjmedia-videodev 에), `third_party/BaseClasses/streams.h`(min/max) | upstream CMake 의 TODO — dshowclasses.cpp 가 `streams.h` 를 못 찾았다. pjlib 설정 헤더(os_auto.h)가 NOMINMAX 를 정의해 windows.h min/max 가 없어 BaseClasses 쓰는 두 매크로를 둔다 |
+  | OpenH264 IDR 주기 2 초 (`uiIntraPeriod`) | `pjmedia/src/pjmedia-codec/openh264.cpp` | And-Media `KEYFRAME_INTERVAL 2` 와 같은 값 — 그룹 영상 수신자는 송출 중간에 붙고(MCVideo [보기]·MCPTT 늦은 합류) MCPTT 영상은 CMP 가 PLI 를 넘기지 않는다. upstream 0 = 요청에만 |
   | pjsua2 `CimsPjCfg` — UDP→TCP 승격 스위치 (`setDisableTcpSwitch`, SWIG 노출) | `pjsip/{include,src}/pjsua2/cims_cfg.*`, `pjsip/include/pjsua2.hpp`, 빌드 목록 셋(`pjsip/build/Makefile`·`pjsua2_lib.vcxproj`·`pjsip/CMakeLists.txt`) | 단말 스위치 `sip.udpNoTcpSwitch` — `pjsip_cfg()->endpt.disable_tcp_switch`(registration_binding_set.md §4.1b). pjsua2 에 파일을 더하면 빌드 목록 셋에 모두 올린다 — `pjsua2.hpp` 가 include 하므로 CMake 설치 FILE_SET 에 빠지면 Windows 코어 컴파일이 깨진다 |
 
 - `config_site.h` 는 upstream 이 무시하는 파일이라 트리에 없다. 플랫폼별 정본은 `sdk/engine/config_site/{common,android,linux,windows}.h`
@@ -38,7 +42,7 @@ psip·opencore-amr 처럼 "수정해서 쓰는 외부 소스는 `ext/` 에 커�
 |---|---|
 | Linux | 루트 CMake `ExternalProject_Add(pjproject)` — `aconfigure` + `make` (ue_sdk.md §8) |
 | Android | `sdk/android/build-native.sh` — 이 트리를 `configure-android`(NDK) 로 빌드 + SWIG 후 산출물 배치. 패치 적용 단계는 없다(트리가 정본). `android/docs/scripts/m1_build_pjsip.sh` 는 위임 스텁 |
-| Windows | `sdk/windows` 슈퍼빌드가 이 트리의 자체 CMake(`CMakeLists.txt`, WMME 백엔드)를 ExternalProject 로 빌드. `pjproject-vs14.sln` 은 폴백 (ue_sdk.md §6) |
+| Windows | `sdk/windows` 슈퍼빌드가 이 트리의 자체 CMake(`CMakeLists.txt`, WMME 백엔드 · 영상 = OpenH264(vcpkg)·DirectShow·libyuv·CIMS 프레임 렌더)를 ExternalProject 로 빌드. `pjproject-vs14.sln` 은 폴백 (ue_sdk.md §6) |
 
 ## 경계
 

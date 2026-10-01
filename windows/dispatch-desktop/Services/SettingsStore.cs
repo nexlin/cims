@@ -24,6 +24,13 @@ public sealed class AppSettings
     public bool SpeakerRouteEnabled { get; set; } = true;
     public bool AutoReturnToPreferredDevice { get; set; } = true;
 
+    // 영상 (§10) — 카메라도 엔진 장치 목록의 이름으로 기억한다
+    /// <summary>[영상 보내기] 카메라(엔진 영상 장치 이름 — DirectShow). 비면 첫 카메라.</summary>
+    public string VideoCaptureDevice { get; set; } = "";
+    /// <summary>«영상 보내는 중 무전»(mcvideo.md §7 D12, TS 22.280 R-8.3-003) — voice = 음성 우선(무전 발언 동안 영상 호 소리만 멈춘다, 영상은 계속 — 기본) ·
+    /// video = 영상 우선(영상을 보내는 동안 무전 발언 요청을 막는다, 긴급·임박 채널은 예외).</summary>
+    public string VideoMicPolicy { get; set; } = "voice";
+
     // 핫키 (§8)
     public Dictionary<string, string> HotKeys { get; set; } = new()
     {

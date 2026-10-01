@@ -105,6 +105,9 @@ internal static unsafe class NativeMethods
     [DllImport(Lib, CallingConvention = CC, ExactSpelling = true)] public static extern int cimsue_engine_set_audio_route(IntPtr e, int output, int input);
     [DllImport(Lib, CallingConvention = CC, ExactSpelling = true)] public static extern int cimsue_engine_reopen_audio_device(IntPtr e);
     [DllImport(Lib, CallingConvention = CC, ExactSpelling = true)] public static extern int cimsue_engine_set_video_window(IntPtr e, IntPtr native_window);
+    [DllImport(Lib, CallingConvention = CC, ExactSpelling = true)] public static extern int cimsue_engine_set_video_preview(IntPtr e, int on);
+    [DllImport(Lib, CallingConvention = CC, ExactSpelling = true)] public static extern int cimsue_engine_set_video_capture_device(IntPtr e, int device_id);
+    [DllImport(Lib, CallingConvention = CC, ExactSpelling = true)] public static extern int cimsue_engine_set_video_send(IntPtr e, int call_id, int on);
     [DllImport(Lib, CallingConvention = CC, ExactSpelling = true)] public static extern int cimsue_engine_switch_camera(IntPtr e, int call_id);
     [DllImport(Lib, CallingConvention = CC, ExactSpelling = true)] public static extern int cimsue_engine_video_devices(IntPtr e, cimsue_video_device_info_t** @out);
 

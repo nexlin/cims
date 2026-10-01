@@ -2,8 +2,8 @@
 //
 // 탐색 순서: CIMSUE_NATIVE_DIR 환경변수 → 앱 디렉터리/runtimes/win-x64/native(NuGet 배치·개발 출력) → 앱 디렉터리 → 기본 검색.
 // 앱 디렉터리를 뒤에 두는 이유: 관리 어셈블리 CimsUe.dll 이 그곳에 있고 Windows 는 cimsue.dll 과 같은 이름으로 본다.
-// cimsue.dll 은 vcpkg OpenSSL 런타임(libcrypto-3-x64·libssl-3-x64)에 의존한다 — 같은 디렉터리의 그 둘을 먼저 올려 두면
-// 의존 DLL 검색 경로와 무관하게 해석된다.
+// cimsue.dll 은 vcpkg OpenSSL 런타임(libcrypto-3-x64·libssl-3-x64)과 H.264 코덱(openh264-7)에 의존한다 — 같은 디렉터리의 그것들을
+// 먼저 올려 두면 의존 DLL 검색 경로와 무관하게 해석된다(하나라도 빠지면 cimsue.dll 이 안 올라 관리 CimsUe.dll 이 잡힌다 — EntryPointNotFound).
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
@@ -11,7 +11,7 @@ namespace CimsUe.Native;
 
 internal static class NativeLoader
 {
-    private static readonly string[] Deps = { "libcrypto-3-x64.dll", "libssl-3-x64.dll" };
+    private static readonly string[] Deps = { "libcrypto-3-x64.dll", "libssl-3-x64.dll", "openh264-7.dll" };
     private static int s_installed;
 
     [ModuleInitializer]

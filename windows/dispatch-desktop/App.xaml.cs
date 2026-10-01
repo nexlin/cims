@@ -110,7 +110,8 @@ public partial class App : Application
             string Arg(string name) => e.Args.FirstOrDefault(a => a.StartsWith(name + "=", StringComparison.OrdinalIgnoreCase))?.Split('=', 2)[1] ?? "";
             if (e.Args.Contains("--ui-preview-canvas", StringComparer.OrdinalIgnoreCase) && _mainVm is not null)
             {
-                _mainVm.SeedCanvasPreview(Arg("--ui-preview-banner") is { Length: > 0 } banner ? banner : "alerts");
+                _mainVm.SeedCanvasPreview(Arg("--ui-preview-banner") is { Length: > 0 } banner ? banner : "alerts",
+                                          e.Args.Contains("--ui-preview-videotx", StringComparer.OrdinalIgnoreCase));
                 // --ui-preview-mode=ptt|call · --ui-preview-panel=channel|other|users|group|event|dir · --ui-preview-keypad · --ui-preview-rotate=90|180|270(보는 영상 회전)
                 //   — 창이 뜬 뒤(RestoreFromSnapshot 다음) 적용
                 string mode = Arg("--ui-preview-mode"), panel = Arg("--ui-preview-panel");
@@ -204,6 +205,19 @@ public partial class App : Application
             //   열린 팝업(별 HWND — 검색·사람 메뉴·DTMF·전달·드롭다운)은 <png>-pop<n>.png 로 따로 찍는다.
             if (e.Args.FirstOrDefault(a => a.StartsWith("--ui-preview-shot=", StringComparison.OrdinalIgnoreCase))?.Split('=', 2)[1] is { Length: > 0 } shot && _main is not null)
             {
+                // --ui-preview-slide=out:<ms>|in:<ms>: 오른쪽 패널을 찍기 <ms> 전에 닫거나(out — 열린 패널) 연다(in — 순찰1 채널 상세) → 밀리는 도중의 한 장(§3.6 겹침 점검).
+                if (e.Args.FirstOrDefault(a => a.StartsWith("--ui-preview-slide=", StringComparison.OrdinalIgnoreCase))?.Split('=', 2)[1].Split(':') is [var slideDir, var slideMs]
+                    && int.TryParse(slideMs, out int beforeMs) && _mainVm is { } slideVm)
+                {
+                    var st = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(Math.Max(100, 3000 - beforeMs)) };
+                    st.Tick += (_, _) =>
+                    {
+                        st.Stop();
+                        if (slideDir.Equals("in", StringComparison.OrdinalIgnoreCase)) slideVm.ApplyPreview(null, "channel", false);
+                        else slideVm.Panel.CloseCommand.Execute(null);
+                    };
+                    st.Start();
+                }
                 var t = new DispatcherTimer { Interval = TimeSpan.FromSeconds(3) };
                 t.Tick += (_, _) =>
                 {

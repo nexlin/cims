@@ -675,6 +675,7 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="..\src\pjmedia-videodev\avi_dev.c" />
+    <ClCompile Include="..\src\pjmedia-videodev\cims_frame_dev.c" />
     <ClCompile Include="..\src\pjmedia-videodev\colorbar_dev.c" />
     <ClCompile Include="..\src\pjmedia-videodev\dshowclasses.cpp" />
     <ClCompile Include="..\src\pjmedia-videodev\dshow_dev.c" />
@@ -685,6 +686,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\include\pjmedia-videodev\avi_dev.h" />
+    <ClInclude Include="..\include\pjmedia-videodev\cims_frame_dev.h" />
     <ClInclude Include="..\include\pjmedia-videodev\config.h" />
     <ClInclude Include="..\include\pjmedia-videodev\errno.h" />
     <ClInclude Include="..\include\pjmedia-videodev\videodev.h" />

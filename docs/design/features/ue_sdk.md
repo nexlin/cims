@@ -79,7 +79,7 @@ SWIG 을 돌린 뒤 산출물을 배치하는 절차만** 담는다(`android/doc
 | 항목 | 규약 |
 |---|---|
 | **이벤트 구독 슬롯** | `pjsua_pres.c` 의 CIMS 구독 표(conference·xcap-diff·dialog 공용)는 `PJSUA_CIMS_MAX_SUB`(기본 256) 슬롯 — 관제조작반은 대표번호 + 감시 대상 전원(`monitor_scope=all` 이면 조직 전원) dialog 와 채널·청취 범위 conference, GMS PSI xcap-diff 를 동시에 든다. 넘치면 `PJ_ETOOMANY`(앱 로그 `dialogWatch …: -3 subscribe failed`) — 조직 규모가 크면 config_site 에서 올린다 |
-| **config_site.h** | upstream 이 무시하는 파일이므로 `sdk/engine/config_site/{common,android,windows,linux}.h` 로 커밋한다. `common.h` 에 세 플랫폼이 같아야 하는 결정(U10, `PJMEDIA_HAS_SRTP 1`, `PJSIP_HAS_TLS_TRANSPORT 1`, 코덱 표면 축소 — G.711 안전망 유지·AMR-NB/VP8/VP9/Speex 등 off, 이벤트 구독 패치 스위치, SIP 메시지 상한 `PJSIP_MAX_PKT_LEN 65535` — 서버발 그룹 INVITE·conference NOTIFY 는 멤버 수에 비례해 커지고 UDP 등록 단말에는 TCP 로 바꿔 보낼 수 없으므로 UDP 데이터그램 최대 크기를 받는다)을 두고, 플랫폼 파일은 `common.h` 를 include 한 뒤 장치·코덱 백엔드만 정한다(Android=And-Media MediaCodec 코덱·OpenSL/AAudio, Windows=WASAPI·SDL 창 off, Linux=null 장치·영상 off·opencore AMR-WB). 빌드가 `pjlib/include/pj/config_site.h` 에 해당 플랫폼 파일을 `#include` 하는 한 줄을 생성한다 — 플랫폼 파일이 `common.h` 를 상대경로로 include 하므로 복사가 없고 pjproject 트리에는 gitignore 된 한 줄짜리 파일만 생긴다 |
+| **config_site.h** | upstream 이 무시하는 파일이므로 `sdk/engine/config_site/{common,android,windows,linux}.h` 로 커밋한다. `common.h` 에 세 플랫폼이 같아야 하는 결정(U10, `PJMEDIA_HAS_SRTP 1`, `PJSIP_HAS_TLS_TRANSPORT 1`, 코덱 표면 축소 — G.711 안전망 유지·AMR-NB/VP8/VP9/Speex 등 off, 이벤트 구독 패치 스위치, SIP 메시지 상한 `PJSIP_MAX_PKT_LEN 65535` — 서버발 그룹 INVITE·conference NOTIFY 는 멤버 수에 비례해 커지고 UDP 등록 단말에는 TCP 로 바꿔 보낼 수 없으므로 UDP 데이터그램 최대 크기를 받는다)을 두고, 플랫폼 파일은 `common.h` 를 include 한 뒤 장치·코덱 백엔드만 정한다(Android=And-Media MediaCodec 코덱·OpenSL/AAudio, Windows=WMME·영상 DirectShow 캡처 + CIMS 프레임 렌더(SDL 창 off), Linux=null 장치·영상 off·opencore AMR-WB). 빌드가 `pjlib/include/pj/config_site.h` 에 해당 플랫폼 파일을 `#include` 하는 한 줄을 생성한다 — 플랫폼 파일이 `common.h` 를 상대경로로 include 하므로 복사가 없고 pjproject 트리에는 gitignore 된 한 줄짜리 파일만 생긴다 |
 | **Linux 빌드** | 루트 `CMakeLists.txt` 의 `ExternalProject_Add(pjproject)` (`option(CIMS_UE_SDK ON)`) — `aconfigure`(`--disable-sound --disable-video`, 서버가 만든 `pkg/opencore-amr`·`pkg/vo-amrwbenc` 링크, `-fPIC`) → `make dep` → `make lib` → `pkg/pjproject` 설치. 코어·`cimsue-cli`·단위시험이 링크한다(`pkg/pjproject/lib/pkgconfig/libpjproject.pc` 의 Libs/Libs.private + opencore·vo-amrwbenc 라이브러리 경로). 코덱은 config_site 로만 끈다 — configure `--disable-speex-codec` 은 third_party/speex 를 빼서 AEC(`echo_common.o`) 링크가 깨진다. pjproject 자체 CMake 는 upstream 이 Linux x86_64 만 시험한 실험 단계라 쓰지 않는다 |
 | **Windows 빌드** | 같은 트리의 `pjproject-vs14.sln`(MSVC) 로 빌드한다. pjproject CMake 채택은 upstream 안정화 후 |
 | **libsrtp 경계** | 서버(CMP)는 `ext/libsrtp` 독립 vendoring, 단말 엔진은 pjproject 동봉 `third_party/srtp`. 같은 CMake 트리에 들어오므로 타겟 이름·include 경로를 분리하고 서로 링크하지 않는다(루트 CMake 의 기존 주석이 규약) |
@@ -169,7 +169,7 @@ C++ 공개 표면은 `cimsue/engine.h` 의 `Engine` 하나이며 계정·호를 
 | `Engine` | `start(EngineConfig)` · `stop()` · `setAudioDevice(capture, playback)` · `addExtraPlayback(dev)` · `handleNetworkChange()` | 장치 목록 | `onLog` · `onAudioDeviceLost` |
 | `Provisioning` | `login(user, pw)` · `setAccessToken` · `fetchProfile()` · `fetchDirectory()` · `logout()` | `Profile{services[], dispatch?}` · `Directory` | `onProfile` · `onAuthFailed` |
 | `Account` (서비스 kind 당 1) | `register()` · `unregister()` · `refresh()` | `RegState{unregistered, registering, registered(code), failed(reason)}` | `onRegState` |
-| `Call` | `dial(uri, {video, emergency})` · `answer({video})` · `reject()` · `hangup()` · `hold/resume` · `mute(on)` · `listen(on)` · `rxLevel(f)` · `sendDtmf` · **`join(targetDialog)`**(RFC 3911, `a=recvonly`) · **`pickup(number?)`**(피처코드·지정 픽업) · **`transfer(target, {attended})`**(REFER) · **`replace(dialog)`**(RFC 3891) | `CallState{outgoing, incoming(remote, calledParty, isPilot), active, held, disconnected(code)}` · `MediaSources[]{ssrc, label, active, level}` · `videoSources[]` | `onCallState` · `onMediaSource` · `onVideoFrame(source, frame)` · `onTransferProgress` |
+| `Call` | `dial(uri, {video, emergency})` · `answer({video})` · `reject()` · `hangup()` · `hold/resume` · `mute(on)` · `listen(on)` · `rxLevel(f)` · `sendDtmf` · **`join(targetDialog)`**(RFC 3911, `a=recvonly`) · **`pickup(number?)`**(피처코드·지정 픽업) · **`transfer(target, {attended})`**(REFER) · **`replace(dialog)`**(RFC 3891) | `CallState{outgoing, incoming(remote, calledParty, isPilot), active, held, disconnected(code)}` · `MediaSources[]{ssrc, label, active, level}` · `videoSources[]` | `onCallState` · `onMediaSource` · `onVideoFrame(frame{callId, BGRA})`(Windows 프레임 렌더 — 영상 스레드, §4.5) · `onTransferProgress` |
 | `Group` (PTT) | `affiliate(on)` · `joinGroupCall({emergency, imminent, broadcast})` · `leave()` · `startAdhoc(members)` · `startPrivate(peer, {duplex, emergency})` · **`listenGroupCall()`**(recvonly JOIN, §7) · `setPrimary` · `channelVolume(f)`(= `setRxLevel`) · **`setCallCondition(emergency, imminent)`**(진행 중 상향·하향 re-INVITE) · **`sendEmergencyAlert(group, on)`** | `GroupCallState{idle, joining, active(listenOnly), ...}` · roster · affiliated · `CallInfo.condition`(긴급·임박 현재값) | `onGroupCall` · `onRoster`(RFC 4575) · **`onMcpttCondition`** · **`onEmergencyAlert`** |
 | `Floor` (그룹콜당 1) | `request(prio)` · `release()` · `queueCancel()` · `mediaFlow(on)` | `FloorState{idle, requesting, granted(duration), taken(speaker, permissionToRequest), queued(pos), denied(cause), revoked}` · `speakers[]`(multi-talker) | `onFloor` |
 | `Sds` | `sendGroupText(group, text)`(상한 초과 = MSRP) · **`sendText(peer, text)`**(1:1, `one-to-one-sds`) · `sendGroupFile(group, bytes, name, mime)` · `sendNotification(peer, conv, msg, type)` · `download(url)` | 발신 진행 | `onIncomingSds`(`mediaPlane`) · `onSendResult`(MESSAGE·MSRP) · `onDisposition` |
@@ -330,7 +330,18 @@ C++ 공개 표면은 `cimsue/engine.h` 의 `Engine` 하나이며 계정·호를 
   기동 때 한 번이라 `CimsUe.start(cfg, context)` 가 **기동 전에** `PjCameraInfo2.SetCameraManager` 를 넣는다. 코어 제어 스레드(`ue-ctl`)는
   네이티브 스레드라 `FindClass` 가 APK 의 `org.pjsip.PjCamera2` 를 못 찾으므로, pjlib 이 `JNI_OnLoad` 에서 앱 클래스 로더를 기억하고
   영상 장치가 `pj_jni_find_class` 로 찾는다(CIMS 패치). 카메라 도우미 두 파일은 pj 를 싣는 모듈마다 빌드 때 복사한다(S1-UE-ENGINE-SINGLE).
-  프레임 콜백(`onVideoFrame`)은 창 없는 렌더 장치 패치가 필요해 후속(§11). 감청 영상 격자 합성은 UI 몫.
+- **Windows 영상 = 창 없는 프레임 렌더.** 앱(WPF)은 화면 안의 칸에 그려야 해서 엔진이 창을 열지 않는다 — pjmedia-videodev 의 CIMS 렌더 장치
+  (`cims_frame_dev.c` «CIMS frame sink», driver `CIMS`, config_site `PJMEDIA_VIDEO_DEV_HAS_CIMS_FRAME`, 렌더 장치 중 맨 앞 = 기본 렌더 장치)가 받는 형식은 BGRA
+  하나라 vid_port 가 디코더 출력(I420)을 동봉 libyuv 로 바꿔 넘기고, 장치는 그 프레임을 콜백으로 코어에 넘긴다. 창 핸들 자리에는 코어가 고른 **토큰**을 건다 — 수신
+  창 = 그 호(`callId + 1`, 결선 = `attachVideo` — 영상이 활성되는 호마다 곧바로, `setVideoWindow` 없이), 셀프뷰 = 미리보기 창(-1). 토큰이 없는 렌더러의 프레임은 버린다.
+  코어는 `Listener::onVideoFrame(VideoFrame{callId, width, height, stride, data})` 로 넘긴다 — **영상 스레드**(영상 회의 브리지 클럭)에서 프레임마다 곧바로,
+  이벤트 잠금 밖(관찰자 목록은 따로 든다 — 이벤트 스레드 핸들러가 엔진 명령으로 영상 포트를 멈추는 중이어도 교착하지 않게). 콜백 안에서 엔진 명령을 부르지 않는다.
+  해상도가 바뀌면(상대 카메라 회전·인코더 크기) vid_port 가 변환기를 다시 만들고 장치에 새 크기를 알린다. **셀프뷰** = `setVideoPreview(true)` — 내 영상을 보내는
+  동안만 송출 카메라(`camDev`)에 미리보기 창을 열어(pjsua 는 같은 캡처 장치의 미리보기 창 하나를 송출과 함께 쓴다 — 카메라를 두 번 열지 않는다) 프레임을 callId -1 로
+  넘기고, 송출이 모두 멈추면(송출 정지·호 종료) 닫는다 — 셀프뷰만으로 카메라를 열지 않는다. **카메라** = `setVideoCaptureDevice(id)`(-1 = 이름에 front, 없으면 첫 카메라 —
+  `videoDevices()` 의 캡처 장치. 합성 색 막대 `Colorbar`·AVI 재생기는 앱이 가린다) — 다음 송출부터(송출 시작 직전 `CHANGE_CAP_DEV` 로 호의 캡처 장치를 맞춘다),
+  송출 중이면 곧바로 바꾼다. 캡처 = DirectShow(`dshow` — YUY2·RGB24·RGB32·IYUV·I420 형식만, MJPG·NV12 만 내는 카메라는 열리지 않는다). H.264 = OpenH264(vcpkg
+  `openh264` DLL — 디코드·인코드, IDR 주기 2 초 CIMS 패치), 인코딩 640×480(가로 4:3 — PC 웹캠; 단말은 480×640 세로)·15 fps·400/500 kbit/s. 감청 영상 격자 합성은 UI 몫.
 - **그룹 영상 = MCVideo 호(§4.6, [mcvideo.md](mcvideo.md)).** MCPTT 그룹 호는 음성만이다 — `joinGroupCall` 개시 INVITE 는 m=audio + m=application(floor)
   만 제안하고, 자동 수락하는 MCPTT 착신 INVITE 가 m=video 를 실어 오면 port 0 으로 거절한다(RFC 3264 §6). `CallInfo.video` 는 미디어가 성립하면
   협상된 영상 미디어 활성 여부로 갱신된다(그 전 = offer·발신 옵션). **내 영상 송출 허용** = `CallInfo.videoSend`(기본 true,
@@ -340,8 +351,9 @@ C++ 공개 표면은 `cimsue/engine.h` 의 `Engine` 하나이며 계정·호를 
   (pjmedia `force_keyframe`), 정지는 카메라를 닫는다(셀프뷰도 그 동안 멈춘다). CMP 는 멤버 영상 목적지를 그 멤버가 보낸 패킷으로 latch 하는데,
   pjmedia 영상 keep-alive 는 인코딩 경로에서만 나가 보내지 않는 수신자는 스트림 개시 때 한 번만 보낸다 — 코어가 송출하지 않는 MCVideo 영상
   스트림에 `PJMEDIA_STREAM_KA_INTERVAL`(5 s)마다 keep-alive 를 보낸다(첫 틱은 1 s 뒤, pjsua2 util timer → ue-ctl, CIMS 패치
-  `PJSUA_CALL_VID_STRM_SEND_KEEPALIVE`). 수신 창은 엔진에 하나라 여러 MCVideo 호에 동시에 참여하면 모든 영상 호가 같은 창에 그린다 —
-  호별 창은 후속(§11). C API·.NET 에는 `setVideoSend` 가 아직 없다 — F3(Windows 영상)에서 싣는다.
+  `PJSUA_CALL_VID_STRM_SEND_KEEPALIVE`). Android 수신 창은 엔진에 하나라 여러 MCVideo 호에 동시에 참여하면 모든 영상 호가 같은 창에 그린다 —
+  호별 창은 후속(§11, Windows 프레임 렌더는 호별). C API·.NET = `cimsue_engine_set_video_send`·`Call.SetVideoSend` +
+  `cimsue_call_info_t.video_send`·`CallInfo.VideoSend`(§6.4).
 - **캡처.** 카메라·마이크 권한과 장치 열기는 플랫폼 SDK 가 하고, 코어는 `setCaptureEnabled` 로 on/off 만 한다 — false = pjsua
   `SPEAKER_ONLY`(캡처 스트림을 열지 않고 재생만, OS 동시 캡처 중재에서 빠진다 — 앱 간 마이크 양보·PTT 유휴), `NO_IMMEDIATE_OPEN`
   동반이라 장치가 닫혀 있으면 모드만 두고, 모드는 장치 선택을 넘어 유지된다. 헤드리스(null 장치)는 상태만 둔다.
@@ -436,7 +448,7 @@ MCVideo PSI. 동작(구현 — 시험 `McvSip`·`McvCall`, 계약 K3 골든과 �
 | 항목 | 규격 | SDK | 사유 |
 |---|---|---|---|
 | 송출 RTP SSRC | Granted·answer 의 Audio/Video SSRC 를 쓴다(TS 24.581 §6.2.4.4.6 2·§14.4) | pjmedia 스트림 SSRC 그대로(offer 의 `a=ssrc` 광고) | pjmedia 는 호 중 스트림 SSRC 를 바꾸지 못한다. CMP 가 송출자를 멤버 전용 포트로 가려 할당 SSRC 를 찍고, 충돌이 없으면 offer `a=ssrc` 를 그대로 할당해(cmp_media_api.md §7.9) 분배·수신자 구분은 맞다 |
-| 영상 없는 빌드의 m=video | offer 에 m=video(§6.2.1 3)) | Linux 헤드리스·Windows 1차(config_site `PJMEDIA_HAS_VIDEO 0`)는 `m=video 0`(RFC 3264 §5.1 — 제안하되 쓰지 않는 스트림) | pjsua 영상 슬롯이 없다 — text 슬롯 둘 중 첫째를 영상 자리로. m-line 수·순서(K4)는 같고 음성·전송 제어는 그대로 협상된다. Android 는 실제 H.264 영상 |
+| 영상 없는 빌드의 m=video | offer 에 m=video(§6.2.1 3)) | Linux 헤드리스(config_site `PJMEDIA_HAS_VIDEO 0`)는 `m=video 0`(RFC 3264 §5.1 — 제안하되 쓰지 않는 스트림) | pjsua 영상 슬롯이 없다 — text 슬롯 둘 중 첫째를 영상 자리로. m-line 수·순서(K4)는 같고 음성·전송 제어는 그대로 협상된다. Android·Windows 는 실제 H.264 영상 |
 
 ### 4.7 `cimsue-cli`
 
@@ -607,7 +619,7 @@ sdk/windows/
 | 오디오 백엔드 | **WMME**. 2.16 의 `wasapi_dev.cpp` 는 UWP/Windows Phone 전용(`phoneaudioclient.h`·`Windows::Phone::Media::Devices`, vcxproj 도 `WinDesktop` 제외)이라 데스크톱에서 컴파일되지 않는다 | 실측 지연·핫플러그 문제가 있을 때 데스크톱 WASAPI 백엔드는 §11 과제 |
 | 이중 출력(헤드셋+스피커) | 코어 **재생 라우트** API — `addPlaybackRoute(dev)` 가 두 번째 재생 장치를 **재생 전용** `ExtraAudioDevice` 로 브리지에 열고, `setCallRoute(callId, route)` 로 호별 sink 를 고른다. 마이크는 기본 캡처 장치 하나 | pjsua2 `ExtraAudioDevice` 는 원래 캡처+재생을 함께 여는데 두 번째 장치의 마이크는 필요 없고 열면 장치 점유·에코 위험 → 엔진 패치(`recDev == PJMEDIA_AUD_INVALID_DEV` → `PJMEDIA_DIR_PLAYBACK`). 플랫폼 공통 API 라 Android 에서도 무전/통화 분리 출력에 쓸 수 있다 |
 | 코어 배포 형태 | **DLL**(`CIMSUE_SHARED`, `cimsue/export.h` 의 `CIMSUE_API` — Engine·Listener·CscClient·toString) + 같은 DLL 이 **C API `cimsue_c.h`** 를 export. pj 라이브러리는 DLL 안에 정적 링크 | C++ 클래스 export 는 같은 MSVC·CRT 전제라 같은 빌드의 `cimsue-cli`·단위시험 전용. 앱(.NET) 은 C API 만 본다 — ABI 가 툴체인·CRT 에 묶이지 않고 P/Invoke 가 그대로 붙는다(§6.4) |
-| 영상 | F1·F2 는 음성만(`PJMEDIA_HAS_VIDEO 0`). F3 에서 OpenH264 + DSHOW 캡처 + **CIMS 콜백 렌더 장치**(pjmedia-videodev 패치: 디코드 프레임 → `onVideoFrame`) | 관제 요구(감청·PTT 청취·BLF·픽업·전달)는 전부 음성. pjproject 에 "창 없는 프레임 콜백" 렌더러가 없어 패치가 필요 — 감청 영상 격자(§4.5)는 UI 합성 |
+| 영상 | `PJMEDIA_HAS_VIDEO 1` — OpenH264(vcpkg `openh264` DLL, 엔진 CMake 에 경로 고정) + DirectShow 캡처(BaseClasses 를 pjmedia-videodev 에 함께 컴파일) + 동봉 libyuv 변환 + **CIMS 프레임 렌더 장치**(pjmedia-videodev 패치: 디코드 프레임 BGRA → `onVideoFrame`, §4.5). SDL·OpenGL 창 없음 | 관제 앱 MCVideo 영상 칸·[영상 보내기]·셀프뷰(dispatch_desktop_ui.md §10.3). pjproject 에 "창 없는 프레임 콜백" 렌더러가 없어 패치가 필요 — 감청 영상 격자(§4.5)는 UI 합성. `openh264-7.dll` 은 `sdk/bin`·.NET `runtimes/win-x64/native`·앱 패키지에 함께 둔다(로더가 먼저 올린다) |
 | 인증 | Digest+TLS 만 — `PJSIP_HAS_DIGEST_AKA_AUTH 0` | 관제 소프트폰 가입자 규약(volte_supplementary_services §2)이 USIM 없는 Digest. pjproject CMake third_party 에 milenage 가 없어 켜면 링크 실패 |
 | OpenSSL | 외부(vcpkg `openssl` 또는 `CMAKE_PREFIX_PATH`) — SIP TLS·SRTP·코어 HTTPS 가 한 OpenSSL. 런타임 DLL(`libcrypto-3-x64`·`libssl-3-x64`)은 vcpkg applocal 이 실행 파일 옆에 두고 `sdk/bin` 이 함께 담는다 | 레포 vendoring 대상이 아님(서버도 시스템 libssl) |
 | CRT | 전 구간 **/MD**(`CMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded$<$<CONFIG:Debug>:Debug>DLL` 을 슈퍼빌드가 명시해 ExternalProject 에 전달) | vcpkg `x64-windows` 트리플릿·.NET 호스트가 동적 CRT. 비워 두면 ExternalProject 쪽이 cl 기본(/MT)이 돼 LNK2038 |
@@ -654,7 +666,8 @@ P0a·P0b·P3 코어 보강분(§4.2)도 같은 규칙으로 C API·.NET 에 나 
 (`send_group_sds`/`send_sds` 의 `msg_id` 입력·`cimsue_sds_message_t.media_plane`, 계정 `max_sds_cplane_bytes`·`mcdata_msrp`·`rp_*`·`mcptt_client_id`·
 `mcptt_server_uri`, 엔진 `grant_mic_delay_ms`), CMS 해석(`cimsue_csc_fetch_user_profile/service_config`·`cimsue_capabilities_of` → .NET
 `UserProfileDoc`·`ServiceConfigDoc`·`Capabilities.Of`), 장치(`set_capture_enabled`·`set_device_audio_levels`·`set_audio_route`·`reopen_audio_device`·
-`set_video_window`·`switch_camera`·`video_devices`), 프로파일(`udp_no_tcp_switch`·`sms_gateway`), 그룹 멤버 `title`. 구조체 필드는 끝에 덧붙이고
+`set_video_window`·`switch_camera`·`video_devices`·`set_video_preview`·`set_video_capture_device`·`set_video_send`, 영상 프레임 `on_video_frame`(`cimsue_video_frame_t` — 영상 스레드에서 곧바로,
+.NET `Engine.VideoFrameReceived`(`VideoFrameHandler(Engine, in VideoFrame)` — ref struct `Pixels` 는 핸들러 동안만, 마샬링 없음)), `cimsue_call_info_t.video_send`), 프로파일(`udp_no_tcp_switch`·`sms_gateway`), 그룹 멤버 `title`. 구조체 필드는 끝에 덧붙이고
 구조체 id 도 `CIMSUE_STRUCT_COUNT_` 앞에 붙여 `AbiLayoutTests` 가 크기를 대조한다.
 Android 앱은 아직 이 코어 위로 이행하지 않아(pjsua2 직접) 같은 규칙을 Kotlin 으로 둔다 — `core` 의 `CimsEndpoint.onTransportState`
 ·`CimsTls` OkHttp 인터셉터 → `TlsPeerObserver`/`TlsPeerExpiry`(임계 30/7·`worst`). 이행 시 이 자리가 `Engine::tlsPeerExpiry()` 바인딩으로 바뀐다.
@@ -743,7 +756,7 @@ NDK/MSVC 빌드는 개발 서버 밖(WSL2·Windows 머신)에서 수행하고, �
 | E. 관제 태블릿 앱 | `android/dispatch-tablet` — §7 다섯 구획. **구현 완료** — 정본 [android_dispatch_tablet.md](android_dispatch_tablet.md). 왼쪽 레일 셋([관제]·[이력]·[더보기]) + [관제] 안 [무전|통화]·하위 탭(6패널을 면 여섯 장으로 — [통화] 는 왼쪽 고정 칸 + 면 셋)·오른쪽 사이드 패널(채널 상세·채널 추가·새 그룹·이벤트 상세·주소록), [PTT 그룹]·[관리]·감청(«진행 중» 행)·착신 배너/알림. 엔진 단일화(`:cimsue-engine` 하나, 커밋 산출물 폐기)와 SWIG 이진 typemap 이 여기서 들어왔다. 실기 확인 = 로그인·등록·그룹콜 floor·SDS·감청(Join)·착신/발신·통화 내역 | 실기기 실측(§9) — 남은 것: [이력]·[PTT 그룹]·[관리] 세 화면이 서버 응답으로 미검증, 무전/통화 분리 출력, 6시간·부팅 상주 |
 | F1. Windows 엔진·코어 | `sdk/windows` 슈퍼빌드로 pjproject(WMME)·AMR-WB·`cimsue.dll`·`cimsue-cli.exe` MSVC 빌드 — **빌드 확정**(§6.1 엔진 빌드 확정·CRT 행). 남은 것: WMME 장치 열거 실측 | Windows 에서 `cimsue-cli` 등록·1:1(TLS+SRTP)·그룹콜 floor·Join 이 Linux 와 같은 결과 (S3 실측 전) |
 | F2. Windows C API·.NET 파사드·관제 앱 | C API `cimsue_c.h`(§6.4) — **구현·단위시험 반영**(`cimsue.dll` 이 114 함수 export — `cimsue_struct_size` ABI 자기검사 포함, `cimsue_test` 가 슈퍼빌드의 googletest 로 Windows 에서도 돈다) → `sdk/windows/dotnet/CimsUe`(파사드 + 접점: 엔드포인트·핫플러그·핫키·DPAPI·단일 인스턴스 — **구현·단위시험 50건 통과**: ABI 레이아웃 27 구조체 대조·헤드리스 엔진 수명·컨텍스트 마샬링·프로파일 파싱·접점. 네이티브 `cimsue.dll` 은 관리 `CimsUe.dll` 과 이름이 겹치므로 출력·패키지 모두 `runtimes/win-x64/native/` 에 두고 로더가 그곳을 먼저 본다) → `windows/dispatch-desktop`(WPF, §6.1 — **구현·빌드 완료**, [dispatch_desktop_ui.md](dispatch_desktop_ui.md) §11 구조 그대로. 로그인·메인 창 기동 확인, `--ui-preview` 로 로그인 없이 화면 점검) | 파사드로 `cimsue-cli` 와 같은 S3 시나리오 재현, 재생 라우트 이중 출력·핫플러그 실측, 관제 시나리오(BLF→Join→픽업→전달→PTT 청취) 실기 — **앱 실기 시험은 서버(CSC/CSP) 연결 후 일괄** |
-| F3. Windows 영상 | `PJMEDIA_HAS_VIDEO 1` + OpenH264 + DSHOW + CIMS 콜백 렌더 장치 패치 → `onVideoFrame` | 감청 영상 격자 실측 |
+| F3. Windows 영상 | `PJMEDIA_HAS_VIDEO 1` + OpenH264 + DSHOW + CIMS 프레임 렌더 장치 → `onVideoFrame`·셀프뷰·카메라 선택(C API·.NET 포함) — **구현·단위시험 반영**(`McvCall.VideoTransmitSelfViewAndReceiveFrames` = 합성 캡처 송출 H.264 RTP·셀프뷰 BGRA 640×480·가짜 CMP 가 되돌린 RTP 의 디코드 프레임, `CIMSUE_TEST_CAMERA=1` 이면 실카메라로 같은 경로 · `CimsUe.Tests` `VideoEngineIsFrameSink`) | 현장 앱 ↔ 관제 실기(영상 보기·보내기) · 감청 영상 격자 |
 | G. 기존 앱 전환 | `volte-client` → `ptt-client` 를 파사드로 — §5.3 이행 단계 P0a~P5(VoLTE 먼저) | 단계별 완료 조건(§5.3) |
 
 ---
@@ -762,18 +775,18 @@ NDK/MSVC 빌드는 개발 서버 밖(WSL2·Windows 머신)에서 수행하고, �
   앱이 사유별로 화면 비우기/재구독을 정하는 것. 실기기 회귀가 필요해 별건으로 둔다.
 - **Windows 오디오 이중 출력** — 재생 라우트(재생 전용 `ExtraAudioDevice`)의 WMME 지연·에코·장치 점유 실측. WMME 가 부족하면
   데스크톱 WASAPI 백엔드(`IMMDeviceEnumerator`+`IAudioClient` 공유 모드 — 2.16 의 UWP 전용 구현과 별개 파일)를 엔진 패치로 추가.
-- **Windows 영상 렌더 경로** — pjproject 에 "창 없는 프레임 콜백" 렌더 장치가 없다. F3 에서 pjmedia-videodev 콜백 장치를
-  CIMS 패치로 추가해 `onVideoFrame` 을 채운다(Android 프레임 콜백 선택지와 같은 장치를 공유).
-- **Android 영상 경로 선택** — Surface 직결(현행) vs 프레임 콜백(§4.5). 감청 격자 합성이 필요한 관제 태블릿은
-  프레임 콜백이 맞고, 1:1 영상 앱은 Surface 직결이 싸다. 파사드가 둘을 다 제공할지 결정.
+- **Windows 영상 남은 것** — 카메라 핫플러그 재열거(장치는 엔진 기동 때 한 번 열거 — `pjmedia_vid_dev_refresh` 노출), MJPG·NV12 만 내는 카메라(DirectShow 형식 표에 없다 —
+  Media Foundation 캡처 백엔드 또는 변환 추가), 송출 CVO(TS 26.114 §7.4.5) 읽기·쓰기. OpenH264 는 vcpkg 소스 빌드라 Cisco 특허 라이선스 바이너리가 아니다 — 배포 형태 정할 때 확인.
+- **Android 영상 경로 선택** — Surface 직결(현행) vs 프레임 콜백(§4.5 — Windows 의 CIMS 프레임 렌더 장치를 Android 빌드에도 켜면 같은 경로). 감청 격자 합성이
+  필요한 관제 태블릿은 프레임 콜백이 맞고, 1:1 영상 앱은 Surface 직결이 싸다. 파사드가 둘을 다 제공할지 결정(SWIG 는 지금 `onVideoFrame`·`setVideoPreview` 를 내지 않는다).
 - **Linux 엔진 영상(MCVideo M2 전제)** — Linux 헤드리스 엔진은 `PJMEDIA_HAS_VIDEO 0` 이라 cimsue-cli MCVideo 호가 `m=video 0` 이다(§4.6 편차 표).
   cimsue-cli 두 대 영상 e2e([mcvideo_dev_plan.md](../../dev/mcvideo_dev_plan.md) M2)와 송출 게이트의 영상 쪽 단위시험에는 ① H.264 코덱 — openh264 를
   ExternalProject 로 소스 빌드(opencore-amr 와 같은 방식, 시스템 패키지·sudo 불필요, 정적 링크) 후 pjproject `--with-openh264`, ② 캡처 = 내장 합성
   장치(colorbar, `PJMEDIA_VIDEO_DEV_HAS_CBAR_SRC`), ③ 렌더 = 코어가 등록하는 **null 렌더 장치**(`pjmedia_vid_register_factory` — 프레임을 버리고 수를
-  센다, 시험의 «수신 영상 프레임» 관측점. Windows «창 없는 프레임 콜백» 장치와 같은 틀)가 필요하다. 계측기 워커 패키지가 cimsue-cli 를 동봉하므로
+  센다, 시험의 «수신 영상 프레임» 관측점 — Windows CIMS 프레임 렌더 장치를 그대로 켜도 된다)가 필요하다. 계측기 워커 패키지가 cimsue-cli 를 동봉하므로
   (test_instrument.md real-ue) 의존성·패키지 크기·빌드 시간 영향을 함께 정해야 한다 — 사용자 결정 후 착수.
-- **호별 수신 창** — `setVideoWindow` 는 엔진 창 하나라 동시에 참여한 MCVideo 호가 둘 이상이면 같은 창에 겹쳐 그린다(§4.5 그룹 영상).
-  `setVideoWindow(callId, window)` 로 호마다 창을 두거나, 주채널 호에만 결선하는 정책이 필요하다.
+- **호별 수신 창(Android)** — `setVideoWindow` 는 엔진 창 하나라 동시에 참여한 MCVideo 호가 둘 이상이면 같은 창에 겹쳐 그린다(§4.5 그룹 영상).
+  `setVideoWindow(callId, window)` 로 호마다 창을 두거나, 주채널 호에만 결선하는 정책이 필요하다. Windows 프레임 렌더는 이미 호별이다(`VideoFrame.callId`).
 - **백그라운드 영상 송출** — Android 는 카메라를 전경 앱에만 허용한다. PTT 앱이 화면 밖에서 MCVideo 영상을 보내려면 서비스의
   전경 형식에 `camera` 를 더하고 송출 허가 동안 승격해야 한다(현행은 앱이 앞에 있을 때만 영상 송출, 음성은 무관).
 - **HTTP 전송 주입** — §4.4 의 `http::ITransport` 는 코어 내부에만 있고 주입 통로가 없다(세 플랫폼 공통).

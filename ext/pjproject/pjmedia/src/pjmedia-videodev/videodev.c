@@ -66,6 +66,10 @@ pjmedia_vid_dev_factory* pjmedia_opengl_factory(pj_pool_factory *pf);
 pjmedia_vid_dev_factory* pjmedia_and_factory(pj_pool_factory *pf);
 #endif
 
+#if PJMEDIA_VIDEO_DEV_HAS_CIMS_FRAME
+pjmedia_vid_dev_factory* pjmedia_cims_frame_factory(pj_pool_factory *pf);
+#endif
+
 #define MAX_DRIVERS     PJMEDIA_VID_DEV_MAX_DRIVERS
 #define MAX_DEVS        PJMEDIA_VID_DEV_MAX_DEVS
 
@@ -95,6 +99,10 @@ PJ_DEF(pj_status_t) pjmedia_vid_dev_subsys_init(pj_pool_factory *pf)
     vid_subsys->dev_cnt = 0;
 
     /* Register creation functions */
+#if PJMEDIA_VIDEO_DEV_HAS_CIMS_FRAME
+    /* CIMS: 창 없는 프레임 콜백 렌더러 — 렌더 장치 중 맨 앞(기본 렌더 장치) */
+    vid_subsys->drv[vid_subsys->drv_cnt++].create = &pjmedia_cims_frame_factory;
+#endif
 #if PJMEDIA_VIDEO_DEV_HAS_V4L2
     vid_subsys->drv[vid_subsys->drv_cnt++].create = &pjmedia_v4l2_factory;
 #endif

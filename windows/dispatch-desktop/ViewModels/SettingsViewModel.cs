@@ -1,4 +1,4 @@
-// 설정 창 — 오디오(§7)·핫키(§8)·관제·표시·주소록. 저장 = settings.json + 즉시 적용(오디오 재적용·핫키 재등록·테마).
+// 설정 창 — 오디오(§7)·영상(§10)·핫키(§8)·관제·표시·주소록. 저장 = settings.json + 즉시 적용(오디오·영상 재적용·핫키 재등록·테마).
 using System.Collections.ObjectModel;
 using CimsUe.Platform;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -32,6 +32,14 @@ public sealed partial class SettingsViewModel : ObservableObject
     [ObservableProperty] private string _speakerDevice;
     [ObservableProperty] private bool _speakerRouteEnabled;
     [ObservableProperty] private bool _autoReturnToPreferredDevice;
+    /// <summary>카메라 이름 목록(엔진 영상 장치 — 첫 줄 "" = 첫 카메라). 엔진이 서기 전(로그인 전)엔 비어 있다.</summary>
+    public ObservableCollection<string> Cameras { get; } = new();
+    [ObservableProperty] private string _videoCaptureDevice;
+    /// <summary>voice | video — «영상 보내는 중 무전»(D12).</summary>
+    [ObservableProperty] private string _videoMicPolicy;
+    public string CameraNote => _s.Engine.IsRunning
+        ? (Cameras.Count > 1 ? "카메라는 이름으로 기억합니다. 빈 값 = 첫 카메라. 카메라를 새로 꽂았으면 다시 로그인하면 목록에 나옵니다." : "이 PC 에서 카메라를 찾지 못했습니다 — [영상 보내기] 가 꺼져 있습니다(영상 보기는 됩니다).")
+        : "로그인한 뒤 카메라 목록이 나옵니다.";
     public ObservableCollection<HotKeyRow> HotKeys { get; } = new();
     [ObservableProperty] private string _pickupFeatureCode;
     [ObservableProperty] private bool _autoHoldOnAnswer;
@@ -59,6 +67,7 @@ public sealed partial class SettingsViewModel : ObservableObject
         _confirmCloseMonitor = c.ConfirmCloseMonitor; _maxMonitorWindows = c.MaxMonitorWindows; _followChannelThread = c.FollowChannelThread; _lockTalk = c.LockTalk;
         _minimizeToTray = c.MinimizeToTray; _messageRetentionDays = c.MessageRetentionDays; _theme = c.Theme; _directoryCsv = c.DirectoryCsv; _logLevel = c.LogLevel;
         _autoStart = CimsUe.Platform.AutoStart.IsEnabled(AppPaths.InstanceName);
+        _videoCaptureDevice = c.VideoCaptureDevice; _videoMicPolicy = c.VideoMicPolicy == "video" ? "video" : "voice";
         LoadDevices();
         foreach (var (name, label, global) in new[] { ("ptt", "PTT (누르는 동안)", true), ("answer", "응답", true), ("hangup", "종료", true), ("pickup", "그룹 픽업", true), ("hold", "보류/재개", false), ("mute", "음소거", false) })
         {
@@ -83,6 +92,10 @@ public sealed partial class SettingsViewModel : ObservableObject
             foreach (var d in _s.Endpoints.List(AudioFlow.Render)) RenderDevices.Add(d.Name);
         }
         catch (Exception ex) { _s.Log.Warn("endpoint list: " + ex.Message); }
+        Cameras.Clear();
+        Cameras.Add("");
+        foreach (var d in _s.Cameras()) Cameras.Add(d.Name);
+        OnPropertyChanged(nameof(CameraNote));
     }
 
     [RelayCommand]
@@ -103,6 +116,7 @@ public sealed partial class SettingsViewModel : ObservableObject
             c.ConfirmCloseMonitor = ConfirmCloseMonitor; c.MaxMonitorWindows = Math.Clamp(MaxMonitorWindows, 1, 16); c.FollowChannelThread = FollowChannelThread; c.LockTalk = LockTalk;
             c.MinimizeToTray = MinimizeToTray; c.MessageRetentionDays = Math.Clamp(MessageRetentionDays, 1, 365); c.Theme = Theme; c.DirectoryCsv = DirectoryCsv.Trim(); c.LogLevel = LogLevel;
             foreach (var h in HotKeys) c.HotKeys[h.Name] = h.Text.Trim();
+            c.VideoCaptureDevice = VideoCaptureDevice.Trim(); c.VideoMicPolicy = VideoMicPolicy;
         });
         var conflicts = _hotKeys.Apply(_s.Settings.Current.HotKeys);
         foreach (var h in HotKeys) h.Conflict = conflicts.Contains(h.Name);
@@ -110,6 +124,7 @@ public sealed partial class SettingsViewModel : ObservableObject
         _s.Log.MinLevel = LogLevel;
         _s.Directory.Load(_s.Settings.Current.DirectoryCsv.Length > 0 ? _s.Settings.Current.DirectoryCsv : null);
         _s.ApplyAudioSettings();
+        _s.ApplyVideoSettings();
         Saved?.Invoke(this, EventArgs.Empty);
     }
 }

@@ -45,6 +45,10 @@ public:
     virtual void onMessage(int accountId, const std::string& fromUri, const std::string& contentType,
                            const std::string& body) { (void)accountId; (void)fromUri; (void)contentType; (void)body; }
     virtual void onEngineStopped() {}
+    /** 영상 프레임 — 창 없는 프레임 렌더 빌드(Windows, ue_sdk.md §4.5)만. **예외: 이벤트 스레드가 아니라 영상 스레드**(영상 회의
+     *  브리지 클럭)에서 프레임마다(초당 15~30회) 곧바로 불린다. 화소를 복사하고 곧 돌아간다 — 이 콜백 안에서 Engine 명령을 부르지
+     *  않는다(엔진이 영상 포트를 멈추며 이 스레드를 기다리는 중이면 교착한다). 수신 영상 = 그 호의 callId, 셀프뷰 = callId -1. */
+    virtual void onVideoFrame(const VideoFrame& frame) { (void)frame; }
 };
 
 }  // namespace cimsue

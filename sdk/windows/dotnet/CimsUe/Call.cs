@@ -63,6 +63,9 @@ public sealed class Call
         Engine.Status(cimsue_engine_accept_reception(Engine.Handle, Id, transmitterId, priority));
     /// <summary>[그만 보기] — Media Reception End Request(§6.2.5.5). 완료 = ReceptionChanged(Released).</summary>
     public Result EndReception(string transmitterId) => Engine.Status(cimsue_engine_end_reception(Engine.Handle, Id, transmitterId));
+    /// <summary>내 영상 송출 허용(CallInfo.VideoSend, 기본 true) — MCPTT 반이중은 허용이면서 발언권을 가진 동안만, MCVideo 는 송출 허가에서만
+    /// 실제로 보낸다(재협상 없음). 영상 없는 빌드·호면 실패.</summary>
+    public Result SetVideoSend(bool on) => Engine.Status(cimsue_engine_set_video_send(Engine.Handle, Id, Engine.B(on)));
 
     // ── 관제 ──
     /// <summary>호 전달 blind — REFER(RFC 3515). 진행은 CallStateChanged(REFER 수락 후 서버가 BYE).</summary>

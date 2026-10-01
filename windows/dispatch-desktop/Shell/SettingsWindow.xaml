@@ -5,7 +5,7 @@
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008" xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" mc:Ignorable="d"
         d:DataContext="{d:DesignInstance vm:SettingsViewModel}"
         Style="{StaticResource Window.Base}" Title="설정" Width="640" Height="640" WindowStartupLocation="CenterOwner">
-    <!-- 설정 — 오디오(§7)·핫키(§8)·관제·표시·주소록 -->
+    <!-- 설정 — 오디오(§7)·영상(§10)·핫키(§8)·관제·표시·주소록 -->
     <DockPanel Margin="16">
         <DockPanel DockPanel.Dock="Bottom" Margin="0,12,0,0">
             <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
@@ -30,6 +30,25 @@
                     <ComboBox Style="{StaticResource FieldCombo}" ItemsSource="{Binding RenderDevices}" SelectedItem="{Binding SpeakerDevice}" IsEditable="True" Text="{Binding SpeakerDevice}" IsEnabled="{Binding SpeakerRouteEnabled}" Margin="0,2,0,10" />
                     <CheckBox Content="장치가 다시 붙으면 자동 복귀" IsChecked="{Binding AutoReturnToPreferredDevice}" />
                     <TextBlock Style="{StaticResource Hint}" Margin="0,10,0,0" Text="채널 상세·내 통화 카드·감청 행(감청 창)의 출력 [헤드셋/스피커] 토글은 세션별 라우트를 바꿉니다. 스피커 라우트가 없으면 비활성." />
+                </StackPanel>
+            </TabItem>
+            <TabItem Header="영상">
+                <StackPanel Margin="12">
+                    <DockPanel Margin="0,0,0,6">
+                        <Button DockPanel.Dock="Right" Style="{StaticResource Btn.Sm}" Content="다시 읽기" Command="{Binding LoadDevicesCommand}" />
+                        <TextBlock Style="{StaticResource Hint}" Text="{Binding CameraNote}" VerticalAlignment="Center" TextWrapping="Wrap" Margin="0,0,8,0" />
+                    </DockPanel>
+                    <TextBlock Text="카메라 — 채널 상세 [영상 보내기]" Style="{StaticResource Hint}" />
+                    <ComboBox Style="{StaticResource FieldCombo}" ItemsSource="{Binding Cameras}" SelectedItem="{Binding VideoCaptureDevice}" IsEditable="True" Text="{Binding VideoCaptureDevice}" Margin="0,2,0,14" />
+                    <TextBlock Text="영상 보내는 중 무전" Style="{StaticResource Hint}" />
+                    <StackPanel Margin="0,4,0,4">
+                        <RadioButton IsChecked="{Binding VideoMicPolicy, Converter={StaticResource Eq}, ConverterParameter=voice}" Margin="0,0,0,6"
+                                     Content="음성 우선 — 무전을 말하는 동안 영상 호 소리만 멈춘다(영상은 계속)" />
+                        <RadioButton IsChecked="{Binding VideoMicPolicy, Converter={StaticResource Eq}, ConverterParameter=video}"
+                                     Content="영상 우선 — 영상을 보내는 동안 무전 발언을 막는다(긴급·임박 채널은 말할 수 있다)" />
+                    </StackPanel>
+                    <TextBlock Style="{StaticResource Hint}" Margin="0,10,0,0" TextWrapping="Wrap"
+                               Text="마이크는 하나라 음성 무전과 영상 호가 함께 쓸 수 없습니다(TS 22.280 R-8.3-003). 발언 바 PTT 는 늘 음성 무전만 보냅니다 — 영상은 채널 상세의 [영상 보내기]." />
                 </StackPanel>
             </TabItem>
             <TabItem Header="핫키">

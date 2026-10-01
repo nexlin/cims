@@ -263,6 +263,7 @@ void fill(cimsue_call_info_t& o, const CallInfo& c, std::vector<cimsue_media_sou
     o.non_ack_user_count = (int32_t)ackBuf.size();
     o.service = (cimsue_mc_service_t)c.service;
     o.session_uri = C(c.sessionUri);
+    o.video_send = B(c.videoSend);
 }
 
 void fill(cimsue_video_transmitter_t& o, const VideoTransmitter& t) {
@@ -873,6 +874,11 @@ public:
         cimsue_reception_event_t o{}; fill(o, ev);
         cb.on_reception(cb.user, &o);
     }
+    void onVideoFrame(const VideoFrame& f) override {             // 영상 스레드 — 복사 없이 넘긴다(콜백 동안만 유효)
+        if (!cb.on_video_frame) return;
+        cimsue_video_frame_t o{f.callId, f.width, f.height, f.stride, f.data, (int64_t)f.size};
+        cb.on_video_frame(cb.user, &o);
+    }
     void onEmergencyAlert(const EmergencyAlert& alert) override {
         if (!cb.on_emergency_alert) return;
         cimsue_emergency_alert_t o{}; fill(o, alert);
@@ -1374,6 +1380,15 @@ cimsue_status_t CIMSUE_CALL cimsue_engine_reopen_audio_device(cimsue_engine_t* e
 cimsue_status_t CIMSUE_CALL cimsue_engine_set_video_window(cimsue_engine_t* e, void* native_window) {
     return e ? ret(e->eng.setVideoWindow(native_window)) : -1;
 }
+cimsue_status_t CIMSUE_CALL cimsue_engine_set_video_preview(cimsue_engine_t* e, int32_t on) {
+    return e ? ret(e->eng.setVideoPreview(on != 0)) : -1;
+}
+cimsue_status_t CIMSUE_CALL cimsue_engine_set_video_capture_device(cimsue_engine_t* e, int32_t device_id) {
+    return e ? ret(e->eng.setVideoCaptureDevice(device_id)) : -1;
+}
+cimsue_status_t CIMSUE_CALL cimsue_engine_set_video_send(cimsue_engine_t* e, int32_t call_id, int32_t on) {
+    return e ? ret(e->eng.setVideoSend(call_id, on != 0)) : -1;
+}
 cimsue_status_t CIMSUE_CALL cimsue_engine_switch_camera(cimsue_engine_t* e, int32_t call_id) {
     return e ? ret(e->eng.switchCamera(call_id)) : -1;
 }
@@ -1830,6 +1845,7 @@ int32_t CIMSUE_CALL cimsue_struct_size(cimsue_struct_id_t id) {
     case CIMSUE_STRUCT_MCVIDEO_GROUP_ATTRS: return (int32_t)sizeof(cimsue_mcvideo_group_attrs_t);
     case CIMSUE_STRUCT_MCVIDEO_USER_PROFILE_DOC: return (int32_t)sizeof(cimsue_mcvideo_user_profile_doc_t);
     case CIMSUE_STRUCT_MCVIDEO_SERVICE_CONFIG_DOC: return (int32_t)sizeof(cimsue_mcvideo_service_config_doc_t);
+    case CIMSUE_STRUCT_VIDEO_FRAME: return (int32_t)sizeof(cimsue_video_frame_t);
     default:                              return -1;
     }
 }

@@ -1,6 +1,5 @@
 // [무전] 한 화면 — 카드·타 채널 행 누름 = 채널 상세(버튼·✓ 위 누름은 그 컨트롤 몫), 칸 경계 끌기 저장(§3.3), 메시지 Enter 보내기,
-// 이벤트 [따라가기] = 새 줄이 오면 맨 위로. 작은 창 = 왼쪽 칸·위 줄을 줄이고 오른쪽 칸 좁은 배치(IsNarrow).
-using System.ComponentModel;
+// 이벤트 [따라가기] = 새 줄이 오면 맨 위로. 작은 창 = 왼쪽 칸·위 줄을 줄이고 오른쪽 칸 좁은 배치(IsNarrow). 오른쪽 패널은 이 화면 위에 겹치므로(§3.6) 배치를 바꾸지 않는다.
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
@@ -15,7 +14,7 @@ public sealed class AddTile { }
 
 public partial class PttModeView : UserControl
 {
-    /// <summary>오른쪽 칸이 좁다 — 패널이 열렸거나(§3.6) 창이 작아 오른쪽 칸이 560 에 못 미친다. 좁으면 타 채널 1열 · 이벤트 채널 열 접기 · 동시 청취·CSV 숨김.</summary>
+    /// <summary>오른쪽 칸이 좁다 — 창이 작아 오른쪽 칸이 560 에 못 미친다. 좁으면 타 채널 1열 · 이벤트 채널 열 접기 · 동시 청취·CSV 숨김.</summary>
     public static readonly DependencyProperty IsNarrowProperty = DependencyProperty.Register(nameof(IsNarrow), typeof(bool), typeof(PttModeView), new PropertyMetadata(false));
     public bool IsNarrow { get => (bool)GetValue(IsNarrowProperty); private set => SetValue(IsNarrowProperty, value); }
     public const double NarrowWidth = 560;
@@ -28,14 +27,10 @@ public partial class PttModeView : UserControl
 
     private MainViewModel? Vm => DataContext as MainViewModel;
     private PttActivityViewModel? _events;
-    private MainViewModel? _hooked;
 
     private void Hook()
     {
-        if (_hooked is not null) _hooked.PropertyChanged -= OnVm;
-        _hooked = Vm;
         if (Vm is not { } vm) return;
-        vm.PropertyChanged += OnVm;
         var seams = vm.Layout.File.Seams;
         TopRow.Height = new GridLength(seams.PttTop);
         ThreadCol.Width = new GridLength(seams.ThreadList);
@@ -45,10 +40,8 @@ public partial class PttModeView : UserControl
     }
 
     private void OnRowInserted(object? sender, EventArgs e) => Dispatcher.BeginInvoke(() => EventsScroll.ScrollToTop());
-    private void OnVm(object? sender, PropertyChangedEventArgs e) { if (e.PropertyName == nameof(MainViewModel.IsPanelOpen)) UpdateNarrow(); }
-
     private void UpdateNarrow() =>
-        IsNarrow = Vm?.IsPanelOpen == true || (Board.ActualWidth > 0 && Board.ActualWidth - LeftCol.Width.Value < NarrowWidth);
+        IsNarrow = Board.ActualWidth > 0 && Board.ActualWidth - LeftCol.Width.Value < NarrowWidth;
 
     /// <summary>누른 자리가 버튼(✓·음소거·[참여]·[청취] 등) 안이면 그 컨트롤 몫이다.</summary>
     private static bool FromButton(object sender, MouseButtonEventArgs e)

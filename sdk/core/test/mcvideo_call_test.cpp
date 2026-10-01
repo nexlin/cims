@@ -10,11 +10,13 @@
 
 #include <pjlib.h>
 
+#include <array>
 #include <chrono>
 #include <condition_variable>
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <sstream>
@@ -948,4 +950,138 @@ TEST(McvCall, MemberInvitationManualAnswerAndServerRelease) {
     ASSERT_TRUE(r.l.wait([&] { return r.l.hasState(in.callId, CallState::Disconnected); }));
     EXPECT_FALSE(ctrl.expectRr(rrSsrc, 2500));                                    // 1 s 간격 유지 RR 둘이 남아 있었다면 여기서 보인다
     EXPECT_EQ(r.eng.transmissionInfo(in.callId).localPort, 0);                     // 끝난 호 — 참여자 없음(기본값)
+}
+
+// ── 영상 그림(F3 — 창 없는 프레임 렌더 엔진만: Windows) ─────────────────────────────────────────────────────────────────
+
+namespace {
+
+/** onVideoFrame 관찰자 — 호별(셀프뷰 = -1) 장 수·크기·첫 화소. 영상 스레드에서 불린다. */
+struct FrameSink : Listener {
+    std::mutex m;
+    std::condition_variable cv;
+    std::map<int, int> count;
+    std::map<int, std::pair<int, int>> size;
+    std::map<int, std::array<uint8_t, 3>> firstPixel;   // B, G, R
+    bool badLayout = false;
+    void onVideoFrame(const VideoFrame& f) override {
+        {
+            std::lock_guard<std::mutex> lk(m);
+            ++count[f.callId];
+            size[f.callId] = {f.width, f.height};
+            if (!f.data || f.stride != f.width * 4 || f.size != (size_t)f.stride * (size_t)f.height) badLayout = true;
+            else firstPixel[f.callId] = {f.data[0], f.data[1], f.data[2]};
+        }
+        cv.notify_all();
+    }
+    int frames(int callId) { std::lock_guard<std::mutex> lk(m); return count.count(callId) ? count[callId] : 0; }
+    bool waitFrames(int callId, int n, int ms) {
+        std::unique_lock<std::mutex> lk(m);
+        return cv.wait_for(lk, std::chrono::milliseconds(ms), [&] { return count.count(callId) && count[callId] >= n; });
+    }
+};
+
+}  // namespace
+
+// 허가 = 카메라(합성 색 막대) 송출 → H.264 RTP · 셀프뷰 프레임(callId -1, BGRA 640x480) → 가짜 CMP 가 그 RTP 를 다른 송출자 SSRC 로
+// 되돌리면 디코드 프레임이 onVideoFrame(그 호)으로 온다 → 끝내면 셀프뷰도 멈춘다(카메라를 놓는다). 영상 없는 엔진은 건너뛴다.
+// CIMSUE_TEST_CAMERA=1 이면 합성 장치 대신 이 PC 의 첫 실카메라(DirectShow)로 같은 경로를 돈다(실장치 점검 — 색 판정은 건너뛴다).
+TEST(McvCall, VideoTransmitSelfViewAndReceiveFrames) {
+    FrameSink frames;                                         // Rig 보다 먼저 — 엔진 종료 뒤에 사라진다
+    Rig r;
+    r.eng.addObserver(&frames);
+    if (!r.eng.setVideoPreview(true).ok) { r.eng.removeObserver(&frames); GTEST_SKIP() << "프레임 렌더 엔진 아님(영상 없는 빌드)"; }
+    EXPECT_FALSE(r.eng.setVideoWindow(nullptr).ok);           // 프레임 렌더 = 창을 받지 않는다
+    const bool realCam = std::getenv("CIMSUE_TEST_CAMERA") != nullptr;
+    int cbar = -1;
+    for (const auto& d : r.eng.videoDevices()) {
+        const bool synthetic = d.driver == "Colorbar" || d.driver == "AVI";
+        if (d.capture && (realCam ? !synthetic : d.driver == "Colorbar")) { cbar = d.id; break; }   // 기본 = 시험 PC 의 웹캠과 무관한 합성 장치
+    }
+    if (cbar < 0 && realCam) { r.eng.removeObserver(&frames); GTEST_SKIP() << "실카메라 없음"; }
+    ASSERT_GE(cbar, 0);
+    ASSERT_TRUE(r.eng.setVideoCaptureDevice(cbar).ok);
+    EXPECT_FALSE(r.eng.setVideoCaptureDevice(9999).ok);
+    r.addAccount(r.account());
+    FakeUdp ctrl, audio, video;
+    VideoGroupCallOptions o;
+    o.queueing = true;
+    int id = r.eng.joinVideoGroupCall(r.acc, "g101", o);
+    ASSERT_GE(id, 0);
+    std::string inv = r.csp.recv("INVITE ");
+    ASSERT_FALSE(inv.empty());
+    std::vector<std::string> m = sdpLines(partOf(inv, "application/sdp"), "m=");
+    ASSERT_EQ(m.size(), 3u);
+    const int ueVideo = std::atoi(m[1].c_str() + 8);
+    ASSERT_GT(ueVideo, 0) << m[1];                            // 영상 엔진 — m=video 가 실제 포트(H.264)
+    r.csp.send(serverAnswer("04_chat_join_200.txt", inv, audio.port, video.port, ctrl.port, r.csp.port));
+    ASSERT_FALSE(r.csp.recv("ACK ").empty());
+    ASSERT_TRUE(r.l.wait([&] { return r.l.hasState(id, CallState::Active); }));
+    EXPECT_TRUE(r.eng.callInfo(id).video);
+    EXPECT_TRUE(r.eng.callInfo(id).videoSend);
+    EXPECT_EQ(video.countPayloadRtp(500), 0);                 // 허가 밖 — 카메라 닫힘
+    EXPECT_EQ(frames.frames(-1), 0);                          // 셀프뷰도 없다(카메라는 송출이 연다)
+
+    ASSERT_TRUE(r.eng.requestTransmission(id).ok);
+    ASSERT_TRUE(ctrl.expectTc(mcvideo::AppName::MCV0, (uint8_t)mcvideo::Mcv0::TRANSMISSION_REQUEST, nullptr));
+    ctrl.sendTc(mcvideo::AppName::MCV1, (uint8_t)mcvideo::Mcv1::TRANSMISSION_GRANTED,
+                {mcvideo::ssrcField(mcvideo::Field::AUDIO_SSRC, 0xA1A1A1A1), mcvideo::ssrcField(mcvideo::Field::VIDEO_SSRC, 0xB1B1B1B1)}, true);
+    ASSERT_TRUE(r.l.wait([&] { return r.l.hasTx(TransmissionEvent::Kind::Granted); }));
+
+    // 송출 — H.264 RTP(PT 97) 를 모은다
+    std::vector<std::string> rtp;
+    {
+        std::string pkt;
+        auto end = std::chrono::steady_clock::now() + std::chrono::milliseconds(2500);
+        while (std::chrono::steady_clock::now() < end && rtp.size() < 200) {
+            if (!video.recvRaw(pkt, 100)) continue;
+            const unsigned b1 = pkt.size() > 1 ? (unsigned char)pkt[1] : 0;
+            if (pkt.size() > 12 && ((unsigned char)pkt[0] >> 6) == 2 && (b1 & 0x7F) == 97) rtp.push_back(pkt);
+        }
+    }
+    ASSERT_GT(rtp.size(), 5u);
+    // 셀프뷰 — 내 카메라 프레임(인코더 크기 640x480, BGRA). 색 막대 첫 칸 = 흰색
+    ASSERT_TRUE(frames.waitFrames(-1, 3, 3000));
+    {
+        std::lock_guard<std::mutex> lk(frames.m);
+        EXPECT_FALSE(frames.badLayout);
+        EXPECT_EQ(frames.size[-1], std::make_pair(640, 480));
+        if (!realCam) {
+            EXPECT_GT(frames.firstPixel[-1][0], 200);
+            EXPECT_GT(frames.firstPixel[-1][2], 200);
+        }
+    }
+
+    // 수신 — 가짜 CMP 가 모은 RTP 를 다른 송출자 SSRC 로 단말에 되돌린다(첫 패킷부터 = IDR 포함)
+    for (auto& p : rtp) {
+        p[8] = (char)0xC5; p[9] = (char)0xC5; p[10] = (char)0xC5; p[11] = (char)0xC5;
+        video.sendTo(ueVideo, p);
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+    ASSERT_TRUE(frames.waitFrames(id, 1, 3000)) << "decoded frames for call " << id;
+    {
+        std::lock_guard<std::mutex> lk(frames.m);
+        EXPECT_FALSE(frames.badLayout);
+        EXPECT_EQ(frames.size[id], std::make_pair(640, 480));
+        if (!realCam) EXPECT_GT(frames.firstPixel[id][0], 150);   // 압축을 거친 흰 칸
+    }
+
+    // 송출 끝 — 셀프뷰도 멈춘다
+    ASSERT_TRUE(r.eng.releaseTransmission(id).ok);
+    ASSERT_TRUE(ctrl.expectTc(mcvideo::AppName::MCV2, (uint8_t)mcvideo::Mcv2::TRANSMISSION_END_REQUEST, nullptr));
+    ctrl.sendTc(mcvideo::AppName::MCV2, (uint8_t)mcvideo::Mcv2::TRANSMISSION_END_RESPONSE, {});
+    ASSERT_TRUE(r.l.wait([&] { return r.l.hasTx(TransmissionEvent::Kind::Ended); }));
+    std::this_thread::sleep_for(std::chrono::milliseconds(400));
+    const int selfAfterEnd = frames.frames(-1);
+    std::this_thread::sleep_for(std::chrono::milliseconds(600));
+    EXPECT_EQ(frames.frames(-1), selfAfterEnd);
+    video.countPayloadRtp(200);
+    EXPECT_EQ(video.countPayloadRtp(600), 0);
+
+    ASSERT_TRUE(r.eng.hangup(id).ok);
+    std::string bye = r.csp.recv("BYE ");
+    ASSERT_FALSE(bye.empty());
+    r.csp.reply(bye, 200, "OK");
+    ASSERT_TRUE(r.l.wait([&] { return r.l.hasState(id, CallState::Disconnected); }));
+    r.eng.removeObserver(&frames);
 }

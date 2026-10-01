@@ -263,17 +263,26 @@
                     </DockPanel>
                 </Border>
 
-                <!-- ═══ 본문 + 오른쪽 패널 ═══ -->
-                <DockPanel x:Name="Body">
-                    <v:SidePanelView DockPanel.Dock="Right" Visibility="{Binding Panel.IsOpen, Converter={StaticResource BoolToVis}}" />
-                    <Grid Background="{DynamicResource Brush.Surface}">
+                <!-- ═══ 본문 + 오른쪽 패널 — 패널은 본문 위에 겹친다(본문 배치는 그대로, 오른쪽 끝에서 밀려 들어오고 나간다 — §3.6) ═══ -->
+                <Grid x:Name="Body" Background="{DynamicResource Brush.Surface}" ClipToBounds="True">
                         <Grid Visibility="{Binding IsDispatch, Converter={StaticResource BoolToVis}}">
                             <v:PttModeView Visibility="{Binding IsPtt, Converter={StaticResource BoolToVis}}" />
                             <v:CallModeView Visibility="{Binding IsCall, Converter={StaticResource BoolToVis}}" />
                         </Grid>
                         <v:ScreenView x:Name="ScreenHost" Screen="{Binding Screen}" Visibility="{Binding IsDispatch, Converter={StaticResource NotToVis}}" />
-                        <!-- 토스트 — 본문 우하단 -->
-                        <ItemsControl ItemsSource="{Binding Notify.Toasts}" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,12,12" Width="440">
+                        <v:SlideOverPanel HorizontalAlignment="Right" IsOpen="{Binding Panel.IsOpen}">
+                            <v:SidePanelView />
+                        </v:SlideOverPanel>
+                        <!-- 토스트 — 본문 우하단(패널이 열려 있으면 패널 왼쪽) -->
+                        <ItemsControl ItemsSource="{Binding Notify.Toasts}" HorizontalAlignment="Right" VerticalAlignment="Bottom" Width="440">
+                            <ItemsControl.Style>
+                                <Style TargetType="ItemsControl">
+                                    <Setter Property="Margin" Value="0,0,12,12" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding Panel.IsOpen}" Value="True"><Setter Property="Margin" Value="0,0,452,12" /></DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </ItemsControl.Style>
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate DataType="{x:Type svc:Toast}">
                                     <Border x:Name="T" CornerRadius="8" Padding="14,10,8,10" Margin="0,6,0,0" Background="{DynamicResource Brush.Surface}" BorderBrush="{DynamicResource Brush.BorderStrong}" BorderThickness="1"
@@ -301,8 +310,7 @@
                                 </DataTemplate>
                             </ItemsControl.ItemTemplate>
                         </ItemsControl>
-                    </Grid>
-                </DockPanel>
+                </Grid>
             </DockPanel>
         </DockPanel>
 

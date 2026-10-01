@@ -45,6 +45,15 @@
 #include "quality/call_quality.h"
 #include "reg_recovery.h"
 
+// 창 없는 프레임 렌더(Windows 엔진 — config_site PJMEDIA_VIDEO_DEV_HAS_CIMS_FRAME): 디코드 프레임(BGRA)이 렌더 장치 콜백으로 와서
+//   Listener::onVideoFrame 으로 나간다(ue_sdk.md §4.5). 수신 창 = 그 호를 가리키는 토큰, 셀프뷰 = 미리보기 창 토큰.
+#if PJSUA_HAS_VIDEO && defined(PJMEDIA_VIDEO_DEV_HAS_CIMS_FRAME) && PJMEDIA_VIDEO_DEV_HAS_CIMS_FRAME
+#define CIMSUE_FRAME_SINK 1
+#include <pjmedia-videodev/cims_frame_dev.h>
+#else
+#define CIMSUE_FRAME_SINK 0
+#endif
+
 #define CIMSUE_VERSION "0.2.0"
 
 namespace cimsue {
@@ -339,10 +348,18 @@ struct MsrpLeg;
 class FanoutListener : public Listener {
 public:
     Listener* primary = nullptr;
-    void add(Listener* l) { std::lock_guard<std::recursive_mutex> lk(m_); if (l) obs_.push_back(l); }
+    void add(Listener* l) {
+        if (!l) return;
+        { std::lock_guard<std::recursive_mutex> lk(m_); obs_.push_back(l); }
+        std::lock_guard<std::mutex> lk(vm_); vobs_.push_back(l);
+    }
     void remove(Listener* l) {
-        std::lock_guard<std::recursive_mutex> lk(m_);
-        for (auto it = obs_.begin(); it != obs_.end();) it = *it == l ? obs_.erase(it) : it + 1;
+        {
+            std::lock_guard<std::recursive_mutex> lk(m_);
+            for (auto it = obs_.begin(); it != obs_.end();) it = *it == l ? obs_.erase(it) : it + 1;
+        }
+        std::lock_guard<std::mutex> lk(vm_);                // 진행 중인 프레임 전달이 끝난 뒤 반환
+        for (auto it = vobs_.begin(); it != vobs_.end();) it = *it == l ? vobs_.erase(it) : it + 1;
     }
     void onLog(int level, const std::string& msg) override { each([&](Listener* l) { l->onLog(level, msg); }); }
     void onRegState(const RegInfo& i) override { each([&](Listener* l) { l->onRegState(i); }); }
@@ -365,6 +382,13 @@ public:
         each([&](Listener* l) { l->onMessage(a, f, ct, b); });
     }
     void onEngineStopped() override { each([&](Listener* l) { l->onEngineStopped(); }); }
+    /** 영상 스레드 — 이벤트 전달 잠금(m_)을 잡지 않는다: 이벤트 스레드의 핸들러가 엔진 명령을 부르는 중(ue-ctl 이 영상 포트를 멈추며
+     *  이 스레드를 기다릴 수 있다)이면 교착한다. 관찰자 목록은 따로 든다(vm_). */
+    void onVideoFrame(const VideoFrame& f) override {
+        std::lock_guard<std::mutex> lk(vm_);
+        if (primary) primary->onVideoFrame(f);
+        for (Listener* l : vobs_) l->onVideoFrame(f);
+    }
 
 private:
     template <class F> void each(F fn) {
@@ -377,6 +401,8 @@ private:
     }
     std::recursive_mutex m_;
     std::vector<Listener*> obs_;
+    std::mutex vm_;                    // 영상 프레임 전달(onVideoFrame) 전용
+    std::vector<Listener*> vobs_;
 };
 
 }  // namespace
@@ -396,6 +422,8 @@ struct Engine::Impl {
     void* videoWindow = nullptr;        // setVideoWindow — 코어가 참조 하나를 소유(Android ANativeWindow). ue-ctl·콜백이 읽는다(videoM)
     std::mutex videoM;
     int camDev = -1;                    // 캡처 카메라 — -1 = 처음 쓸 때 전면 카메라로 정한다
+    bool previewWanted = false;         // setVideoPreview — 송출하는 동안 셀프뷰 프레임(프레임 렌더 빌드). ue-ctl 에서만
+    int previewDev = -2;                // 셀프뷰를 연 캡처 장치(-2 = 열지 않음). ue-ctl 에서만
     std::atomic<bool> videoTickArmed{false};   // 영상 keep-alive 틱(pjsua2 util timer) 예약 중
 
     Worker ctl;                 // ue-ctl — pjsua2 전용
@@ -577,6 +605,10 @@ struct Engine::Impl {
     /** 캡처 카메라 목록(합성 장치 제외)과 전면 카메라. */
     std::vector<int> cameras();
     int frontCamera();
+    /** 셀프뷰를 송출 상태에 맞춘다(ue-ctl 로 넘긴다) — 원하고(previewWanted) 영상을 보내는 호가 있으면 송출 카메라(camDev)에 미리보기 창을
+     *  연다(카메라는 송출이 이미 열어 두었다 — 같은 캡처 포트를 함께 쓴다), 아니면 닫는다. */
+    void requestPreviewSync();
+    void syncPreview();
 };
 
 static void setCallMedia(pj::CallSetting& opt, bool video);
@@ -1125,6 +1157,7 @@ public:
         if (ci.state == PJSIP_INV_STATE_DISCONNECTED) {
             o_->ctl.post([o = o_, id] {                    // 콜백 안에서 자기 객체를 지우지 않는다
                 o->calls.erase(id);                        // ~PjCall → floor participant close
+                o->syncPreview();                          // 송출하던 호가 끝났으면 셀프뷰도 닫는다(카메라를 놓는다)
                 std::lock_guard<std::mutex> lk(o->snapM);
                 o->pruneFinished();
             });
@@ -1563,17 +1596,23 @@ void Engine::Impl::applyCodecPolicy() {
     for (auto& id : ids) all += id + " ";
     log(3, "codecs: " + all + (amrwb.empty() ? "" : "(AMR-WB first)"));
 #if PJSUA_HAS_VIDEO
-    // 영상: H.264 최우선 + 인코딩 480x640(세로)·15 fps·평균 400 / 최대 500 kbit/s — 기존 VoLTE 앱(CodecConfig.kt)과 같은 값.
+    // 영상: H.264 최우선 + 인코딩 15 fps·평균 400 / 최대 500 kbit/s — 기존 VoLTE 앱(CodecConfig.kt)과 같은 값. 크기 = 카메라 방향:
+    //   단말(세로로 든 휴대폰) 480x640, Windows 웹캠은 가로라 640x480 — 캡처를 인코더 크기로 늘이면(vid_port 변환) 비율이 깨진다.
+#if defined(_WIN32)
+    const unsigned encW = 640, encH = 480;
+#else
+    const unsigned encW = 480, encH = 640;
+#endif
     try {
         for (auto& c : ep->videoCodecEnum2()) {
             if (c.codecId.find("H264") == std::string::npos) continue;
             ep->videoCodecSetPriority(c.codecId, 254);
             pj::VidCodecParam vp = ep->getVideoCodecParam(c.codecId);
-            vp.encFmt.width = 480; vp.encFmt.height = 640;
+            vp.encFmt.width = encW; vp.encFmt.height = encH;
             vp.encFmt.fpsNum = 15; vp.encFmt.fpsDenum = 1;
             vp.encFmt.avgBps = 400000; vp.encFmt.maxBps = 500000;
             ep->setVideoCodecParam(c.codecId, vp);
-            log(3, "video codec " + c.codecId + " first, enc 480x640 15fps 400k/500k");
+            log(3, "video codec " + c.codecId + " first, enc " + std::to_string(encW) + "x" + std::to_string(encH) + " 15fps 400k/500k");
             break;
         }
     } catch (pj::Error& e) { log(2, std::string("video codec: ") + e.info(false)); }
@@ -1587,6 +1626,26 @@ static void windowRelease(void* w) { if (w) ANativeWindow_release(static_cast<AN
 #else
 static void windowAcquire(void*) {}                     // 참조 수를 세지 않는 창(HWND 등)
 static void windowRelease(void*) {}
+#endif
+
+#if CIMSUE_FRAME_SINK
+/** 프레임 렌더 장치의 창 토큰 — 수신 창 = callId+1(NULL 은 장치가 버리므로 0 을 피한다), 셀프뷰 = -1. */
+static void* frameToken(int callId) { return reinterpret_cast<void*>(static_cast<intptr_t>(callId) + 1); }
+static void* const kPreviewToken = reinterpret_cast<void*>(static_cast<intptr_t>(-1));
+
+/** 렌더 장치 put_frame(영상 회의 브리지 클럭 스레드) → Listener::onVideoFrame. 프레임은 이 호출 동안만 유효하다. */
+static void onSinkFrame(void* user, void* token, const pjmedia_cims_frame* f) {
+    auto* o = static_cast<Engine::Impl*>(user);
+    if (!o || !o->running || !f || !f->data) return;
+    VideoFrame vf;
+    vf.callId = token == kPreviewToken ? -1 : static_cast<int>(reinterpret_cast<intptr_t>(token) - 1);
+    vf.width = static_cast<int>(f->width);
+    vf.height = static_cast<int>(f->height);
+    vf.stride = static_cast<int>(f->stride);
+    vf.data = static_cast<const uint8_t*>(f->data);
+    vf.size = f->size;
+    o->fanout.onVideoFrame(vf);
+}
 #endif
 
 std::vector<int> Engine::Impl::cameras() {
@@ -1638,18 +1697,25 @@ void Engine::Impl::attachVideo(PjCall* call, int accountId) {
             log(4, "video window: call " + std::to_string(call->getId()) + " has no renderer yet");
         } else {
             std::lock_guard<std::mutex> lk(videoM);
-            if (!videoWindow) {
+#if CIMSUE_FRAME_SINK
+            void* win = frameToken(call->getId());              // 프레임 렌더 — 창 = 이 호를 가리키는 토큰(프레임이 onVideoFrame 으로 간다)
+#else
+            void* win = videoWindow;
+#endif
+            if (!win) {
                 log(4, "video window: call " + std::to_string(call->getId()) + " renderer waits for a window");
             } else {
                 pj::VideoWindow vw = m.videoWindow;
                 try {
-                    if (vw.getInfo().winHandle.handle.window != videoWindow) {
+                    if (vw.getInfo().winHandle.handle.window != win) {
                         pj::VideoWindowHandle h;
 #if defined(__ANDROID__)
                         h.type = PJMEDIA_VID_DEV_HWND_TYPE_ANDROID;
 #endif
-                        h.handle.window = videoWindow;
-                        windowAcquire(videoWindow);             // 렌더러가 이 참조를 가진다(교체·스트림 소멸 때 푼다)
+                        h.handle.window = win;
+#if !CIMSUE_FRAME_SINK
+                        windowAcquire(win);                     // 렌더러가 이 참조를 가진다(교체·스트림 소멸 때 푼다)
+#endif
                         vw.setWindow(h);
                         log(3, "video window attached: call " + std::to_string(call->getId()) + " wid " +
                                std::to_string(m.videoIncomingWindowId));
@@ -1698,13 +1764,62 @@ void Engine::Impl::applyVideoTx(PjCall* call) {
             if (call->mcvideo) continue;                                  // 그룹 세션 방향은 서버가 정한다 — 재협상하지 않는다
             op = PJSUA_CALL_VID_STRM_CHANGE_DIR; p.dir = PJMEDIA_DIR_ENCODING_DECODING;
         }
+        if (want && camDev >= 0) {
+            // 송출 카메라 = 지금 고른 카메라(setVideoCaptureDevice) — 호의 캡처 장치는 계정 기본값으로 시작하므로 열기 전에 맞춘다
+            //   (송출 전이면 장치 번호만 바뀐다 — pjsua call_change_cap_dev).
+            try { pj::CallVidSetStreamParam cp; cp.medIdx = (int)m.index; cp.capDev = (pjmedia_vid_dev_index)camDev;
+                  call->vidSetStream(PJSUA_CALL_VID_STRM_CHANGE_CAP_DEV, cp); }
+            catch (pj::Error& e) { log(3, std::string("video capture device: ") + e.info(false)); }
+        }
         try {
             call->vidSetStream(op, p);
             log(3, std::string("video transmit ") + (want ? "start" : "stop") + ": call " + std::to_string(call->getId()));
         } catch (pj::Error& e) { log(2, std::string("video transmit: ") + e.info(false)); }
+        requestPreviewSync();
     }
 #else
     (void)call;
+#endif
+}
+
+void Engine::Impl::requestPreviewSync() {
+#if CIMSUE_FRAME_SINK
+    if (running) ctl.post([this] { syncPreview(); });
+#endif
+}
+
+void Engine::Impl::syncPreview() {
+#if CIMSUE_FRAME_SINK
+    if (!running || !ep) return;
+    // 영상을 보내는 호가 있는가 — pjsua 호 목록에서 직접 본다(호 소멸 직후에도 맞게)
+    bool anyTx = false;
+    pjsua_call_id ids[PJSUA_MAX_CALLS];
+    unsigned n = PJ_ARRAY_SIZE(ids);
+    if (pjsua_enum_calls(ids, &n) == PJ_SUCCESS) {
+        for (unsigned i = 0; i < n && !anyTx; ++i) {
+            pjsua_call_info ci;
+            if (pjsua_call_get_info(ids[i], &ci) != PJ_SUCCESS) continue;
+            for (unsigned mi = 0; mi < ci.media_cnt && !anyTx; ++mi)
+                if (ci.media[mi].type == PJMEDIA_TYPE_VIDEO && pjsua_call_vid_stream_is_running(ids[i], (int)mi, PJMEDIA_DIR_ENCODING))
+                    anyTx = true;
+        }
+    }
+    const int want = previewWanted && anyTx ? camDev : -2;
+    if (want == previewDev) return;
+    if (previewDev != -2) {
+        try { pj::VideoPreview(previewDev).stop(); } catch (pj::Error& e) { log(3, std::string("self view stop: ") + e.info(false)); }
+        log(3, "self view off (cam " + std::to_string(previewDev) + ")");
+        previewDev = -2;
+    }
+    if (want == -2) return;
+    try {
+        pj::VideoPreviewOpParam p;
+        p.show = true;
+        p.window.handle.window = kPreviewToken;                         // 프레임 렌더 — 셀프뷰 = callId -1
+        pj::VideoPreview(want).start(p);
+        previewDev = want;
+        log(3, "self view on (cam " + std::to_string(want) + ")");
+    } catch (pj::Error& e) { log(2, std::string("self view: ") + e.info(false)); }
 #endif
 }
 
@@ -1842,6 +1957,11 @@ Result Engine::start(const EngineConfig& cfg, Listener* listener) {
             pj_log_set_level(o->cfg.logLevel);               // libInit 전(writer 미설정) pjlib 기본 sink 는 stdout
             o->ep.reset(new PjEndpoint(o));
             o->ep->libCreate();
+#if CIMSUE_FRAME_SINK
+            pjmedia_cims_frame_dev_set_callback(&onSinkFrame, o);    // 렌더 스트림이 생기기 전에(장치 계약)
+            o->previewWanted = false;
+            o->previewDev = -2;
+#endif
             pj::EpConfig epc;
             epc.uaConfig.userAgent = o->cfg.userAgent;
             epc.logConfig.level = o->cfg.logLevel;
@@ -1908,6 +2028,10 @@ void Engine::stop() {
         o->accounts.clear();                     // ~Account → shutdown
         o->mcvideoAffiliations.clear();
         try { o->ep->libDestroy(); } catch (...) {}               // LogWriter 도 여기서 pjsua2 가 delete
+#if CIMSUE_FRAME_SINK
+        pjmedia_cims_frame_dev_set_callback(nullptr, nullptr);       // 렌더 스트림이 모두 사라진 뒤
+        o->previewDev = -2;
+#endif
         o->logWriter = nullptr;
         o->ep.reset();
         o->running = false;
@@ -3093,7 +3217,10 @@ Result Engine::reopenAudioDevice() {
 bool Engine::captureEnabled() const { return impl_->captureOn; }
 
 Result Engine::setVideoWindow(void* nativeWindow) {
-#if PJSUA_HAS_VIDEO
+#if CIMSUE_FRAME_SINK
+    (void)nativeWindow;
+    return Result::fail(-3, "frame sink build — frames come through onVideoFrame");
+#elif PJSUA_HAS_VIDEO
     if (!impl_->running) { windowRelease(nativeWindow); return Result::fail(-1, "not running"); }
     return impl_->ctl.runSync([this, nativeWindow]() -> Result {
         Impl* o = impl_.get();
@@ -3128,6 +3255,61 @@ Result Engine::setVideoWindow(void* nativeWindow) {
 #endif
 }
 
+Result Engine::setVideoPreview(bool on) {
+#if CIMSUE_FRAME_SINK
+    if (!impl_->running) return Result::fail(-1, "not running");
+    return impl_->ctl.runSync([this, on]() -> Result {
+        Impl* o = impl_.get();
+        o->previewWanted = on;
+        if (on && o->camDev < 0) o->camDev = o->frontCamera();
+        o->syncPreview();
+        return Result::success();
+    });
+#else
+    (void)on;
+    return Result::fail(-3, "no frame sink");
+#endif
+}
+
+Result Engine::setVideoCaptureDevice(int deviceId) {
+#if PJSUA_HAS_VIDEO
+    if (!impl_->running) return Result::fail(-1, "not running");
+    return impl_->ctl.runSync([this, deviceId]() -> Result {
+        Impl* o = impl_.get();
+        int dev = deviceId;
+        if (dev < 0) dev = o->frontCamera();
+        else {
+            try {
+                pj::VideoDevInfo info = o->ep->vidDevManager().getDevInfo(dev);
+                if (!(info.dir & PJMEDIA_DIR_CAPTURE)) return Result::fail(-2, "not a capture device");
+            } catch (pj::Error& e) { return fromError(e); }
+        }
+        if (dev == o->camDev) return Result::success();
+        o->camDev = dev;
+        o->log(3, "camera -> " + std::to_string(dev));
+        // 지금 보내는 호는 곧바로 바꾼다(pjsua 가 캡처 포트를 새 장치로 갈아 끼운다)
+        for (auto& kv : o->calls) {
+            auto* call = static_cast<PjCall*>(kv.second.get());
+            try {
+                for (auto& m : call->getInfo().media) {
+                    if (m.type != PJMEDIA_TYPE_VIDEO || m.status != PJSUA_CALL_MEDIA_ACTIVE) continue;
+                    if (!call->vidStreamIsRunning((int)m.index, PJMEDIA_DIR_ENCODING)) continue;
+                    pj::CallVidSetStreamParam p;
+                    p.medIdx = (int)m.index;
+                    p.capDev = (pjmedia_vid_dev_index)dev;
+                    call->vidSetStream(PJSUA_CALL_VID_STRM_CHANGE_CAP_DEV, p);
+                }
+            } catch (pj::Error& e) { o->log(2, std::string("camera switch: ") + e.info(false)); }
+        }
+        o->syncPreview();
+        return Result::success();
+    });
+#else
+    (void)deviceId;
+    return Result::fail(-3, "video not built");
+#endif
+}
+
 Result Engine::switchCamera(int callId) {
 #if PJSUA_HAS_VIDEO
     if (!impl_->running) return Result::fail(-1, "not running");
@@ -3155,6 +3337,7 @@ Result Engine::switchCamera(int callId) {
         if (!done) return Result::fail(-4, "no active video");
         o->camDev = next;
         o->log(3, "camera -> " + std::to_string(next));
+        o->syncPreview();
         return Result::success();
     });
 #else

@@ -1,4 +1,4 @@
-# Windows PC — 관제 앱 MCVideo (W1'·W4·W5 · 뒤에 F3·W6)
+# Windows PC — 관제 앱 MCVideo (W1'·W4·W5·F3 · 뒤에 W6)
 
 Claude Code 터미널에서 이 문서를 읽고 §1 부터 순서대로 한다. **원칙: VoLTE·MCPTT·MCVideo 규격 절을 먼저 확인하고 그대로 따른다(CLAUDE.md 설계 우선순위 1).**
 빌드·시험 명령은 [dispatch_desktop_handoff.md](dispatch_desktop_handoff.md) §4 그대로다. 서버(CSP·CMP·CSC)·SDK 코어·PTT 단말은 .45, 관제 앱 두 벌(Windows
@@ -79,7 +79,7 @@ Claude Code 터미널에서 이 문서를 읽고 §1 부터 순서대로 한다.
   - 누가 보냄 = «영상 n» 목록 행(이름 · 기능 별칭 · 경과 · 보는 사람 n + [보기]). 아직 영상 칸 없음.
   - [보기] 뒤 = 목록 위에 영상 칸 — **기본 세로 480×640(3:4)**, 패널 안 270×360 · [↺][↻] = 90° 씩 회전(가로면 4:3 360×270, 보내는 사람마다 기억 — 사용자 10-01)
     (캡션 «이름 · 기능 별칭 · 경과», [창으로 ↗]) · [그만 보기] · [영상 소리](영상 호 음량 — R-8.3-002), 목록의 그 행은 «보는 중», 다른 행은 [바꿔 보기].
-- **영상 칸 = F3 뒤**(§4). 그 전에는 «이 PC 에서는 영상을 표시할 수 없습니다(영상 엔진 준비 중)» 자리 — [보기] 는 그대로 둔다(영상 호 오디오는 들린다).
+- **영상 칸 = F3**(§4) — 엔진 프레임을 그린다. 첫 장 전 «영상 기다리는 중…», 영상 미디어가 없는 호는 «영상 미디어가 열리지 않았습니다 — 영상 호 소리만 들립니다».
 - **이벤트 칸** — «{그룹} · {이름} 영상 보내기 시작/끝».
 
 ### 3.3 화면 — Android 태블릿 (캔버스 T1)
@@ -100,21 +100,22 @@ Claude Code 터미널에서 이 문서를 읽고 §1 부터 순서대로 한다.
 | 송출 거절 #1 · #5 | 보내지 못했습니다 — 동시에 보낼 수 있는 수(n)가 찼습니다 · 이 그룹에서는 영상을 받기만 할 수 있습니다 | §9.2.6.2 |
 | 송출 회수 #2 · #4 | 보내기가 멈췄습니다 — 한 번에 보낼 수 있는 시간을 넘었습니다 · 우선순위가 높은 송출이 들어왔습니다 | §9.2.10.2 |
 
-## 4. F3 — Windows 영상 엔진 (사용자 결정 10-01 — 다음 Windows 세션에서 착수: 영상 표시·송출)
+## 4. F3 — Windows 영상 엔진 (구현 — 10-01)
 
-지금 Windows 엔진은 영상 없이 빌드된다(`sdk/engine/config_site/windows.h` `PJMEDIA_HAS_VIDEO 0`, `sdk/windows/CMakeLists.txt` `PJMEDIA_WITH_VIDEO=OFF`).
-MCVideo 신호·송출 제어·영상 호 오디오는 이 빌드로 되고(offer 의 m=video = port 0 자리), 그림만 없다. 관제 앱은 영상 칸 자리(기본 세로 480×640 3:4, [↺][↻] 90° 회전 —
-보내는 사람마다 기억)와 [영상 보내기](비활성 «카메라 없음»)까지 서 있다 — F3 은 그 자리에 그림과 송출을 넣는다.
+Windows 엔진이 영상으로 빌드된다 — 정본 = [ue_sdk.md](../design/features/ue_sdk.md) §4.5 «Windows 영상 = 창 없는 프레임 렌더»·§6.1 «영상» 행, 앱 = [dispatch_desktop_ui.md](../design/features/dispatch_desktop_ui.md) §10.3.
 
-- **방식(정해 둔 것 — [ue_sdk.md](../design/features/ue_sdk.md) §6 결정표 «영상» 행)** — `PJMEDIA_HAS_VIDEO 1` + OpenH264(디코드·인코드, vcpkg) + DSHOW 캡처 + **CIMS 콜백 렌더
-  장치**(pjmedia-videodev 패치: 디코드 프레임 → 코어 `onVideoFrame` → C API·.NET 이벤트 → WPF `WriteableBitmap`). pjproject 에 «창 없는 프레임 콜백» 렌더러가 없어 패치가 필요하다.
-  WPF 쪽은 프레임을 그대로 그리고 회전은 `LayoutTransform`(관제 앱 `ChannelDetailViewModel.VideoRotation` — 칸 모양이 이미 따라 바뀐다).
-- **코어 접점** — `Engine::setVideoWindow`(엔진 전역 창 하나)·`attachVideo`(engine.cpp — 창 핸들 종류가 Android 만 있다)·송출 `applyVideoTx`(송출 허가에서만 카메라, D11)는 이미 있다.
-  `Engine.SetVideoWindow` 는 Windows 에서 -3 «video not built». 콜백 렌더를 넣으면 창 핸들 대신 프레임 이벤트를 쓴다(C API·.NET 표면 추가 — .45 코어와 계약 맞춤).
-- **송출** — [영상 보내기] 토글 = `Call.RequestTransmission()` / `ReleaseTransmission()`(D11), 송출 중 PTT = 음성 우선(D12 — SDK `setMuted` 가 MCVideo 호에서는 음성만 멈춘다),
-  §3.4 송출 문구(요청 중·송출 중·대기 n·거절 #1·#5·회수 #2·#4 — `ResponseText.VideoTransmissionText` 에 거절·회수는 있다). 카메라 선택은 설정 창(장치 목록 = 코어 `videoDevices`).
-- **시험** — 단위(콜백 렌더 장치 · 코어 프레임 이벤트) + .48/.45 실기: 현장 앱(C9 빌드 W999·MF52)이 보내는 영상을 관제가 [보기] → 그림 · 회전 · [바꿔 보기], 관제 [영상 보내기] →
-  현장 앱이 [보기]. 영상 RTP·PLI 는 Linux 엔진에 영상이 없어 cimsue-cli 로는 못 본다(mcvideo.md §5.4).
+- **엔진(ext/pjproject — README.CIMS.md 인벤토리)** — `PJMEDIA_HAS_VIDEO 1` · OpenH264(vcpkg `openh264:x64-windows`, DLL `openh264-7.dll`) · DirectShow 캡처 · 동봉 libyuv ·
+  **CIMS 프레임 렌더 장치** `pjmedia-videodev/cims_frame_dev.{h,c}`(BGRA 프레임 → 콜백, 창 핸들 = 토큰). 엔진 CMake 결함 둘을 함께 고쳤다 — `config_auto.h.cm` 에 영상 코덱 칸이 없어
+  OpenH264 가 등록되지 않던 것, DirectShow 백엔드가 BaseClasses 를 빌드하지 않던 것(streams.h min/max 보정 포함). OpenH264 IDR 주기 2 초(upstream 0 = 요청에만).
+- **코어** — `Listener::onVideoFrame(VideoFrame)`(영상 스레드, 이벤트 잠금 밖) · `Engine::setVideoPreview`(송출 중 셀프뷰 callId -1) · `setVideoCaptureDevice` · Windows 인코딩 640×480 ·
+  `setVideoWindow` 는 프레임 렌더 빌드에서 실패. C API `on_video_frame`·`cimsue_video_frame_t`(struct id `VIDEO_FRAME`)·`set_video_preview`·`set_video_capture_device`·`set_video_send`·
+  `call_info.video_send`, .NET `Engine.VideoFrameReceived`(ref struct `VideoFrame`)·`SetVideoPreview`·`SetVideoCaptureDevice`·`Call.SetVideoSend`·`CallInfo.VideoSend`·
+  `VideoDeviceInfo.IsCamera`. SWIG(Android)는 프레임 표면을 내지 않는다(Surface 직결). **.45 SDK 코어와 계약 맞춤 필요** — 공개 헤더가 바뀌었다(아래 §7).
+- **앱** — `Services/VideoFrames`(우편함 — 보는 칸만 최신 한 장) · `Views/VideoView`(WriteableBitmap) · [영상 보내기] 요청·대기·송출·끝 · 셀프뷰 160×120(거울상) ·
+  «보는 사람 n»(서버 Media Reception Notification 이 올 때) · D12 설정 «영상 보내는 중 무전»(음성 우선 기본 / 영상 우선) · 설정 [영상] 카메라 · 패키지에 `openh264-7.dll`.
+- **시험** — 단위 `McvCall.VideoTransmitSelfViewAndReceiveFrames`(합성 캡처 → H.264 RTP → 셀프뷰 → 가짜 CMP 가 되돌린 RTP 디코드 프레임, `CIMSUE_TEST_CAMERA=1` = 이 PC 의
+  실카메라 OV02C10 으로도 통과) · `CimsUe.Tests.VideoEngineIsFrameSink`. 남은 실기: 현장 앱(C9 빌드 W999·MF52)이 보내는 영상을 관제가 [보기] → 그림 · 회전 · [바꿔 보기],
+  관제 [영상 보내기] → 현장 앱이 [보기](.48/.45 — §6).
 
 ## 5. W6 — 영상 벽 별창 (후속)
 
@@ -143,5 +144,7 @@ MCVideo 신호·송출 제어·영상 호 오디오는 이 빌드로 되고(offe
 | W4 데스크톱 | 끝 — 그룹 편집 «서비스» 절(MCPTT 음성 늘 켬 · MCVideo 영상 켜기·호 방식·송출 상한·TNG3·T5·최소 응답·우선순위·참가자 정보, 종단간 보호 비활성 false 명시, 읽은 객체 되싣기, 켜진 그룹 잠금 «끄기는 운영 콘솔에서») · 목록 행 칩 «음성»·«영상» · 상세 능력 줄 | «영상» 칩은 관리 목록에 서비스가 없어 내 영상 채널·열어 본 문서로만(서버 과제 X7) |
 | W5 데스크톱 | 끝(영상 그림·송출 제외 — F3, 다음 Windows 세션) — 게이트(ue-init-config MCVideo PSI ∧ user profile) · 계정 태그 · 영상 채널 MCVideo affiliation · D10 자동 합류(chat `Queueing`, 편성 = 초대 자동 수락, N6 안에서 카드 순서, 무전 T4 와 무관, 끝나면 3 s / 실패 10 s 배수 → 2 분 재합류, 그룹이 빠지면·로그아웃 때만 나감) · 채널 상세 «영상» 절 세 상태 · 영상 칸 기본 세로 480×640(3:4) + [↺][↻] 90° 회전(보내는 사람마다 기억) · [보기]/[바꿔 보기]/[그만 보기]/[영상 소리] · [영상 보내기 — 카메라 없음] 비활성 · 카드 «영상 n» · «새 영상» 배너 [보기][닫기] · «이벤트» [영상] · §3.4 문구 · D6 무전 음량 ×0.3 | 영상 칸 = «이 PC 에서는 영상을 표시할 수 없습니다(영상 엔진 준비 중)» 자리(F3). 미리보기 `--ui-preview-banner=video`·`--ui-preview-rotate=90` |
 | W5 태블릿 · W4 태블릿 | 안 함 — Windows 안정화 뒤(사용자 결정 09-29) | 의미론은 [android_dispatch_tablet.md](../design/features/android_dispatch_tablet.md) 한 줄 |
+| F3 | 끝(실기 전) — 엔진 영상(OpenH264·DirectShow·libyuv·CIMS 프레임 렌더 장치)·코어/C API/.NET 프레임·셀프뷰·카메라 선택·앱 영상 칸 그림·[영상 보내기]·셀프뷰·D12 설정·카메라 설정·패키지. `cimsue_test` 145/145(실카메라 `CIMSUE_TEST_CAMERA=1` 도 145/145) · `CimsUe.Tests` 87/87 · 앱 경고 0 · 패키지 `build-win/dist-f3`(63.4 MB, 패키지 dotnet.exe 로 렌더 확인) | 공개 헤더 변경 = `listener.h onVideoFrame`·`engine.h setVideoPreview/setVideoCaptureDevice`·`types.h VideoFrame`·`cimsue_c.h`(끝에 덧붙임) — .45 SDK 코어와 맞춘다. 미리보기 `--ui-preview-videotx` |
+| 오른쪽 패널 겹침 | 끝 — 패널이 본문 위에 겹쳐 오른쪽에서 밀려 들어오고 나간다(220/180 ms, 시스템 애니메이션 끔 = 즉시), 본문 배치 그대로(패널 때문에 좁은 배치로 바꾸지 않는다), 토스트는 패널 왼쪽 | 사용자 요청(10-01). 태블릿(400dp 밀어내기)은 그대로 — 태블릿 작업 때 정한다 |
 | 시험 ①~⑥ | 실기 전 | .45 가 MCVideo 를 켰다(41100484) — 관제 계정 PTT 회선의 MCVideo 자격·N6·영상 채널 멤버 편성은 사용자 확인 뒤 |
 | 서버 과제 | [server45_handoff.md](server45_handoff.md) §13 X1~X8 | X1 관제석 N6 · X2 상시 합류 자원 · X3 T11 · X4·X5 이력 · X6 N2 · X7 목록 서비스 표시 · X8 관리 화면 자격 |

@@ -88,6 +88,10 @@ public sealed partial class SessionItem : ObservableObject
     public HashSet<string> TransmitterAnnounced { get; } = new(StringComparer.OrdinalIgnoreCase);
     /// <summary>송출을 처음 안 시각(송출자 MCVideo ID → 시각) — 송출 목록의 경과. 코어 값에는 시각이 없다.</summary>
     public Dictionary<string, DateTime> TransmitterSince { get; } = new(StringComparer.OrdinalIgnoreCase);
+    /// <summary>내 송출 허가 시각(Granted — §6.2.4.4.6) — 끝나면 null. «내 영상 보내는 중 · 경과».</summary>
+    [ObservableProperty] private DateTime? _txSince;
+    /// <summary>내 송출을 보는 사람(Media Reception Notification 의 수신자 — §6.2.4.4.8, 서버가 알릴 때만).</summary>
+    public HashSet<string> TxReceivers { get; } = new(StringComparer.OrdinalIgnoreCase);
     public bool IsMcVideo => Kind == SessionKind.McVideo;
     /// <summary>지금 받고 있는 송출(1차는 하나) — 수신 상태 Receiving·PendingRelease.</summary>
     public VideoTransmitter? Receiving => Transmission.Transmitters.FirstOrDefault(t => t.State is ReceptionState.Receiving or ReceptionState.PendingRelease);

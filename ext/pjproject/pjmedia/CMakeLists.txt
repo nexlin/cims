@@ -790,6 +790,7 @@ target_link_libraries(pjmedia-audiodev
 add_library(pjmedia-videodev
   src/pjmedia-videodev/avi_dev.c
   src/pjmedia-videodev/android_opengl.c
+  src/pjmedia-videodev/cims_frame_dev.c
   src/pjmedia-videodev/colorbar_dev.c
   src/pjmedia-videodev/dshow_dev.c
   src/pjmedia-videodev/dshowclasses.cpp
@@ -817,6 +818,7 @@ target_sources(pjmedia-videodev
       FILES
         include/pjmedia_videodev.h
         include/pjmedia-videodev/avi_dev.h
+        include/pjmedia-videodev/cims_frame_dev.h
         include/pjmedia-videodev/config.h
         include/pjmedia-videodev/errno.h
         include/pjmedia-videodev/opengl_dev.h
@@ -849,6 +851,19 @@ if(PJMEDIA_WITH_VIDEODEV_OPENGL)
       PJMEDIA_VIDEO_DEV_HAS_ANDROID_OPENGL=$<BOOL:${ANDROID}>
       PJMEDIA_VIDEO_DEV_HAS_IOS_OPENGL=$<BOOL:${IOS}>
   )
+endif()
+
+# CIMS: DirectShow 백엔드(dshowclasses.cpp)는 DirectShow BaseClasses(third_party/BaseClasses — streams.h)를 쓴다. upstream CMake 는
+# 이 의존을 넣지 않았다(아래 TODO) — vcxproj(libbaseclasses)와 같은 소스·정의를 pjmedia-videodev 에 함께 컴파일한다(별도 라이브러리 없음).
+if(PJMEDIA_WITH_VIDEODEV_DSHOW)
+  set(cims_bc_dir ${CMAKE_CURRENT_SOURCE_DIR}/../third_party/BaseClasses)
+  set(cims_bc_srcs
+    ${cims_bc_dir}/amfilter.cpp ${cims_bc_dir}/amvideo.cpp ${cims_bc_dir}/arithutil.cpp ${cims_bc_dir}/combase.cpp
+    ${cims_bc_dir}/ctlutil.cpp ${cims_bc_dir}/mtype.cpp ${cims_bc_dir}/renbase.cpp ${cims_bc_dir}/wxdebug.cpp
+    ${cims_bc_dir}/wxlist.cpp ${cims_bc_dir}/wxutil.cpp)
+  target_sources(pjmedia-videodev PRIVATE ${cims_bc_srcs})
+  set_source_files_properties(${cims_bc_srcs} PROPERTIES COMPILE_DEFINITIONS "_WIN32_DCOM")
+  target_include_directories(pjmedia-videodev PRIVATE ${cims_bc_dir})
 endif()
 
 #

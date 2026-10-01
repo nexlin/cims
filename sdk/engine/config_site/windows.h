@@ -7,11 +7,16 @@
 
 #include "common.h"
 
-/* 영상: F1 은 음성만(감청·PTT 청취·BLF·픽업·전달 전부 음성). F3 에서 1 로 올리고 OpenH264(코덱)·DSHOW(캡처)·
-   CIMS 콜백 렌더 장치(프레임 → onVideoFrame, ue_sdk.md §4.5) 를 함께 켠다. SDL 창은 어느 단계에도 쓰지 않는다. */
-#define PJMEDIA_HAS_VIDEO              0
-#define PJMEDIA_VIDEO_DEV_HAS_SDL      0
-#define PJMEDIA_VIDEO_DEV_HAS_DSHOW    0
+/* 영상(F3, ue_sdk.md §4.5·§6.1): H.264 = OpenH264(디코드·인코드, vcpkg openh264) · 캡처 = DirectShow(웹캠) ·
+   렌더 = CIMS 프레임 콜백 장치(창 없음 — 디코드 프레임 BGRA → 코어 onVideoFrame → 앱 WriteableBitmap). I420→BGRA 변환은
+   동봉 libyuv. SDL·OpenGL 창은 쓰지 않는다(앱 화면 안의 칸에 그린다). 슈퍼빌드 CMake 옵션(sdk/windows/CMakeLists.txt)과 값이 같아야 한다 —
+   CMake 가 같은 매크로를 -D 로도 정의한다. 합성 색 막대(Colorbar)는 시험용 캡처 장치로 남긴다(코어가 카메라 목록에서 가린다). */
+#define PJMEDIA_HAS_VIDEO                  1
+#define PJMEDIA_HAS_LIBYUV                 1
+#define PJMEDIA_VIDEO_DEV_HAS_SDL          0
+#define PJMEDIA_VIDEO_DEV_HAS_DSHOW        1
+#define PJMEDIA_VIDEO_DEV_HAS_CIMS_FRAME   1
+#define PJMEDIA_VIDEO_DEV_HAS_AVI          1   /* pjsua 의 AVI 재생기가 쓴다(장치 목록에는 재생기를 만들 때만 생긴다) */
 
 /* 오디오: WMME 단일 백엔드. pjproject 2.16 의 wasapi_dev.cpp 는 UWP/Windows Phone 전용(phoneaudioclient.h·
    Windows::Phone::Media::Devices — vcxproj 도 WinDesktop 에서 제외)이라 데스크톱에서는 컴파일되지 않는다.

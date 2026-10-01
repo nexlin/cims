@@ -193,6 +193,16 @@ PJ_BEGIN_DECL
 
 
 /**
+ * CIMS: 창 없는 프레임 콜백 렌더 장치(cims_frame_dev.h) — 디코드 프레임(BGRA)을 앱 콜백으로 넘긴다.
+ *
+ * Default: 0 (Windows 단말 엔진 config_site 가 켠다)
+ */
+#ifndef PJMEDIA_VIDEO_DEV_HAS_CIMS_FRAME
+#   define PJMEDIA_VIDEO_DEV_HAS_CIMS_FRAME     0
+#endif
+
+
+/**
  * This setting controls whether colorbar source support should be included.
  *
  * Default: 1

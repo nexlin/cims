@@ -192,6 +192,7 @@ internal unsafe struct cimsue_call_info_t
     public int non_ack_user_count;
     public int service;
     public byte* session_uri;
+    public int video_send;
 }
 
 [StructLayout(LayoutKind.Sequential)]
@@ -353,6 +354,17 @@ internal unsafe struct cimsue_video_device_info_t
     public int render;
 }
 
+[StructLayout(LayoutKind.Sequential)]
+internal unsafe struct cimsue_video_frame_t
+{
+    public int call_id;
+    public int width;
+    public int height;
+    public int stride;
+    public byte* data;
+    public long size;
+}
+
 /// <summary>Listener 가상함수 1:1 의 함수 포인터 한 벌 + user. 코어 이벤트 스레드에서 호출된다.</summary>
 [StructLayout(LayoutKind.Sequential)]
 internal unsafe struct cimsue_video_transmitter_t
@@ -427,6 +439,7 @@ internal unsafe struct cimsue_listener_t
     public delegate* unmanaged[Cdecl]<void*, cimsue_call_info_t*, void> on_non_acknowledged_users;
     public delegate* unmanaged[Cdecl]<void*, cimsue_transmission_event_t*, void> on_transmission;
     public delegate* unmanaged[Cdecl]<void*, cimsue_reception_event_t*, void> on_reception;
+    public delegate* unmanaged[Cdecl]<void*, cimsue_video_frame_t*, void> on_video_frame;
 }
 
 // ── CSC 설정 평면 (csc.h) ──
@@ -794,5 +807,6 @@ internal enum cimsue_struct_id_t
     UE_INIT_CONFIG_DOC,
     VIDEO_GROUP_CALL_OPTIONS, VIDEO_TRANSMITTER, TRANSMISSION_EVENT, RECEPTION_EVENT, TRANSMISSION_INFO,
     MCVIDEO_GROUP_ATTRS, MCVIDEO_USER_PROFILE_DOC, MCVIDEO_SERVICE_CONFIG_DOC,
+    VIDEO_FRAME,
     COUNT_,
 }

@@ -263,7 +263,7 @@ public sealed record CallInfo(
     int LastCode, string LastReason, IReadOnlyList<MediaSource> Sources,
     bool IsMcptt, string GroupId, McpttInfo Mcptt, bool HalfDuplex, bool ListenOnly, string JoinedDialog,
     float RxLevel = 1f, McpttCondition Condition = default, string AnswerState = "", IReadOnlyList<string>? NonAcknowledgedUsers = null,
-    McService Service = McService.Mcptt, string SessionUri = "")
+    McService Service = McService.Mcptt, string SessionUri = "", bool VideoSend = true)
 {
     public static CallInfo Empty { get; } = new(-1, -1, CallDir.Outgoing, CallState.Null, "", "", false, false, false, true, 0, 0, "",
                                                 Array.Empty<MediaSource>(), false, "", McpttInfo.None, false, false, "");
@@ -352,8 +352,32 @@ public sealed record TlsPeerExpiry(bool Valid, DateTimeOffset NotAfter, DateTime
 
 public sealed record AudioDeviceInfo(int Id, string Name, string Driver, uint InputCount, uint OutputCount);
 
-/// <summary>영상 장치(types.h VideoDeviceInfo) — 캡처(카메라)·렌더.</summary>
-public sealed record VideoDeviceInfo(int Id, string Name, string Driver, bool Capture, bool Render);
+/// <summary>영상 장치(types.h VideoDeviceInfo) — 캡처(카메라)·렌더. Windows 웹캠 driver = "dshow", 합성 색 막대 = "Colorbar"(시험용), 렌더 = "CIMS"(프레임 콜백).</summary>
+public sealed record VideoDeviceInfo(int Id, string Name, string Driver, bool Capture, bool Render)
+{
+    /// <summary>실제 카메라 — 캡처 장치 중 합성 장치(Colorbar)·AVI 재생기를 뺀 것.</summary>
+    public bool IsCamera => Capture && Driver is not ("Colorbar" or "AVI");
+}
+
+/// <summary>영상 프레임 한 장(types.h VideoFrame) — BGRA 32 bpp(WPF PixelFormats.Bgr32/Bgra32), 위 줄부터. <see cref="Pixels"/> 는 핸들러가 도는 동안만
+/// 유효하다 — 복사해서 쓴다. CallId = 수신 영상의 호, -1 = 셀프뷰.</summary>
+public readonly ref struct VideoFrame
+{
+    public VideoFrame(int callId, int width, int height, int stride, ReadOnlySpan<byte> pixels)
+    {
+        CallId = callId; Width = width; Height = height; Stride = stride; Pixels = pixels;
+    }
+    public int CallId { get; }
+    public int Width { get; }
+    public int Height { get; }
+    /// <summary>한 줄 바이트 수.</summary>
+    public int Stride { get; }
+    public ReadOnlySpan<byte> Pixels { get; }
+    public bool IsSelfView => CallId < 0;
+}
+
+/// <summary><see cref="Engine.VideoFrameReceived"/> 핸들러 — 영상 스레드에서 곧바로 불린다.</summary>
+public delegate void VideoFrameHandler(Engine sender, in VideoFrame frame);
 
 /// <summary>MCData 가 아닌 MESSAGE/NOTIFY 본문(text/plain 문자, xcap-diff 등) — 앱이 해석.</summary>
 public sealed record SipMessage(int AccountId, string FromUri, string ContentType, string Body);

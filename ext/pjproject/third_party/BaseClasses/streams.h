@@ -47,6 +47,15 @@
 #include <ddraw.h>
 #include <mmsystem.h>
 
+/* CIMS: pjproject CMake 빌드는 pjlib 설정 헤더(pj/compat/os_auto.h)가 NOMINMAX 를 정의해 windows.h 의 min/max 매크로가 없다.
+   BaseClasses(amfilter.cpp·mtype.cpp)가 쓰는 두 매크로를 windows.h 정의와 같게 둔다. */
+#ifndef min
+#define min(a,b)            (((a) < (b)) ? (a) : (b))
+#endif
+#ifndef max
+#define max(a,b)            (((a) > (b)) ? (a) : (b))
+#endif
+
 
 #ifndef NUMELMS
 #if _WIN32_WINNT < 0x0600

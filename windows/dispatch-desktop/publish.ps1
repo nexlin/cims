@@ -7,7 +7,7 @@
   동봉해 zip 으로 만든다. 대상 PC 에는 .NET 도 VC 재배포 패키지도 필요 없다 — 풀고 CimsDispatch.exe 를 실행한다.
   Smart App Control 이 켜진 PC 는 미서명 apphost(CimsDispatch.exe)를 평판으로 차단하므로, Microsoft 서명 dotnet 뮤서(dotnet.exe + host/fxr/hostfxr.dll)를
   함께 동봉하고 그것으로 앱을 띄우는 CimsDispatch-run.cmd 를 둔다 — 두 진입점 모두 같은 폴더의 같은 파일을 실행한다.
-  전제: sdk/windows 슈퍼빌드가 끝나 있어야 한다(build-win/sdk/bin/cimsue.dll + OpenSSL 런타임 둘). 없으면 중단한다.
+  전제: sdk/windows 슈퍼빌드가 끝나 있어야 한다(build-win/sdk/bin/cimsue.dll + OpenSSL 런타임 둘 + H.264 코덱 openh264-7.dll). 없으면 중단한다.
 
 .PARAMETER Configuration   Release(기본)|Debug
 .PARAMETER NativeDir       cimsue.dll 위치 (기본 build-win/sdk/bin)
@@ -34,7 +34,7 @@ if ($OutDir -eq '') { $OutDir = Join-Path $RepoRoot 'build-win\dist' }
 $Rid = 'win-x64'
 
 # ── 0. 전제 확인 ──
-$nativeFiles = 'cimsue.dll', 'libcrypto-3-x64.dll', 'libssl-3-x64.dll'
+$nativeFiles = 'cimsue.dll', 'libcrypto-3-x64.dll', 'libssl-3-x64.dll', 'openh264-7.dll'
 foreach ($f in $nativeFiles) {
     if (-not (Test-Path (Join-Path $NativeDir $f))) {
         throw "네이티브 파일이 없다: $(Join-Path $NativeDir $f) — sdk/windows 슈퍼빌드를 먼저 돌린다 (sdk/windows/README.md '빌드')"
@@ -136,7 +136,7 @@ CimsDispatch.exe 가 "앱 제어 정책에서 이 파일을 차단했습니다" 
 폴더 구성
   CimsDispatch.exe             앱
   CimsDispatch-run.cmd         대체 진입점(위 참조) — dotnet.exe + host\fxr\ 와 짝
-  runtimes\win-x64\native\     단말 SDK 네이티브(cimsue.dll) + OpenSSL
+  runtimes\win-x64\native\     단말 SDK 네이티브(cimsue.dll) + OpenSSL + OpenH264(영상 코덱)
   msvcp140.dll 등              MSVC 런타임
   directory.sample.csv         주소록 CSV 예시(설정에서 다른 파일 지정 가능)
 "@ | Set-Content -Encoding UTF8 (Join-Path $stage 'README.txt')

@@ -139,11 +139,14 @@
                                     <TextBlock Style="{StaticResource Muted}" FontSize="12" Text="{Binding VideoSub}" Margin="8,0,0,0" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" ToolTip="{Binding VideoSub}" />
                                 </StackPanel>
                                 <!-- 보는 중 — 영상 칸: 기본 세로 480×640(3:4), [↺][↻] 90° 씩 돌리면 가로(4:3)로 칸이 바뀐다(보내는 사람마다 기억). 캡션 = 이름 · 기능 별칭 · 경과.
-                                     엔진이 영상을 그리지 못하면 자리 표시(단말 윤곽이 회전을 보여 준다 — 영상 호 소리는 들린다) -->
+                                     그림 = 엔진 프레임(VideoView — 창 없는 프레임 렌더). 첫 장 전·영상 미디어가 없으면 자리 표시(단말 윤곽이 회전을 보여 준다) -->
                                 <Border Margin="0,8,0,0" Width="{Binding VideoFrameWidth}" Height="{Binding VideoFrameHeight}" HorizontalAlignment="Center" CornerRadius="8" Background="{DynamicResource Brush.Ink}"
-                                        Visibility="{Binding IsVideoReceiving, Converter={StaticResource BoolToVis}}">
+                                        ClipToBounds="True" Visibility="{Binding IsVideoReceiving, Converter={StaticResource BoolToVis}}">
                                     <Grid>
-                                        <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Margin="20,0">
+                                        <v:VideoView x:Name="RxVideo" Feed="{Binding ReceivingFeed}">
+                                            <v:VideoView.LayoutTransform><RotateTransform Angle="{Binding VideoRotation}" /></v:VideoView.LayoutTransform>
+                                        </v:VideoView>
+                                        <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Margin="20,0" Visibility="{Binding HasPicture, ElementName=RxVideo, Converter={StaticResource NotToVis}}">
                                             <Path Style="{StaticResource Icon}" Data="{StaticResource Icon.Device}" Width="44" Height="44" StrokeThickness="1.4" Opacity="0.55" HorizontalAlignment="Center"
                                                   TextElement.Foreground="{DynamicResource Brush.Surface}" Margin="0,0,0,10">
                                                 <Path.LayoutTransform><RotateTransform Angle="{Binding VideoRotation}" /></Path.LayoutTransform>
@@ -168,9 +171,37 @@
                                             Visibility="{Binding IsVideoReceiving, Converter={StaticResource BoolToVis}}" />
                                     <Button Style="{StaticResource Pill.Line.Sm}" Padding="12,0" Margin="0,0,6,6" Content="영상 소리" Command="{Binding ToggleVideoVolumeCommand}"
                                             ToolTip="영상 호 소리 크기 — 무전과의 상대 음량(TS 22.280 R-8.3-002)" Visibility="{Binding IsVideoReceiving, Converter={StaticResource BoolToVis}}" />
-                                    <Button Style="{StaticResource Pill.Line.Sm}" Padding="12,0" Margin="0,0,6,6" Content="영상 보내기 — 카메라 없음" IsEnabled="False" ToolTipService.ShowOnDisabled="True"
-                                            ToolTip="이 PC 에는 영상 송출 장치(카메라·영상 엔진)가 없다 — 말하기는 발언 바 PTT(음성 무전, D11)" Visibility="{Binding VideoConnected, Converter={StaticResource BoolToVis}}" />
+                                    <!-- [영상 보내기](D11) — 송출 요청·대기·송출 중이면 같은 자리가 끄는 버튼(요청 취소·대기 취소·보내기 끝) -->
+                                    <Button Padding="12,0" Margin="0,0,6,6" Content="{Binding VideoSendText}" Command="{Binding ToggleVideoSendCommand}" IsEnabled="{Binding CanVideoSend}"
+                                            ToolTip="{Binding VideoSendTip}" ToolTipService.ShowOnDisabled="True" Visibility="{Binding VideoConnected, Converter={StaticResource BoolToVis}}">
+                                        <Button.Style>
+                                            <Style TargetType="Button" BasedOn="{StaticResource Pill.Line.Sm}">
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding IsVideoTxActive}" Value="True">
+                                                        <Setter Property="BorderBrush" Value="{DynamicResource Brush.Emg}" /><Setter Property="Foreground" Value="{DynamicResource Brush.Emg}" />
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </Button.Style>
+                                    </Button>
                                 </WrapPanel>
+                                <!-- 내 송출 — 셀프뷰(거울상 — 보내는 영상은 그대로) · 경과 · 보는 사람 n · D12 안내 -->
+                                <DockPanel Margin="0,0,0,8" Visibility="{Binding IsVideoSending, Converter={StaticResource BoolToVis}}">
+                                    <Border DockPanel.Dock="Left" Width="160" Height="120" CornerRadius="6" Background="{DynamicResource Brush.Ink}" ClipToBounds="True">
+                                        <Grid>
+                                            <v:VideoView x:Name="SelfVideo" Feed="{Binding SelfFeed}" RenderTransformOrigin="0.5,0.5">
+                                                <v:VideoView.RenderTransform><ScaleTransform ScaleX="-1" /></v:VideoView.RenderTransform>
+                                            </v:VideoView>
+                                            <TextBlock Text="카메라 여는 중…" Foreground="{DynamicResource Brush.Surface}" Opacity="0.75" FontSize="12" HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                       Visibility="{Binding HasPicture, ElementName=SelfVideo, Converter={StaticResource NotToVis}}" />
+                                        </Grid>
+                                    </Border>
+                                    <StackPanel Margin="10,0,0,0" VerticalAlignment="Center">
+                                        <TextBlock Text="{Binding SendingCaption}" FontSize="12.5" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                        <TextBlock Style="{StaticResource Hint}" Margin="0,4,0,0" TextWrapping="Wrap" Text="무전 중 — 영상은 계속, 영상 소리는 멈춤"
+                                                   Visibility="{Binding ShowVideoMicNote, Converter={StaticResource BoolToVis}}" />
+                                    </StackPanel>
+                                </DockPanel>
                                 <DockPanel Margin="0,0,0,4" Visibility="{Binding VideoVolumeOpen, Converter={StaticResource BoolToVis}}">
                                     <TextBlock DockPanel.Dock="Left" Text="영상 소리" FontSize="12.5" Foreground="{DynamicResource Brush.TextSoft}" VerticalAlignment="Center" Margin="0,0,10,0" />
                                     <TextBlock DockPanel.Dock="Right" Text="{Binding VideoVolume, StringFormat=P0}" FontSize="12.5" Width="44" TextAlignment="Right" VerticalAlignment="Center" />

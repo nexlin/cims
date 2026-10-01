@@ -571,13 +571,26 @@ struct AudioDeviceInfo {
     unsigned outputCount = 0;
 };
 
-/** 영상 장치(pjmedia videodev) — 캡처(카메라)·렌더. Android 카메라 driver = "Android"(Camera2), 합성 장치(Colorbar)는 driver 로 가린다. */
+/** 영상 장치(pjmedia videodev) — 캡처(카메라)·렌더. Android 카메라 driver = "Android"(Camera2), Windows 웹캠 = "dshow"(DirectShow),
+ *  합성 장치(Colorbar)는 driver 로 가린다. Windows 렌더 = 프레임 콜백 장치 하나(driver "CIMS" — Listener::onVideoFrame). */
 struct VideoDeviceInfo {
     int id = -1;
     std::string name;
     std::string driver;
     bool capture = false;
     bool render = false;
+};
+
+/** 영상 프레임 한 장 — 창 없는 프레임 렌더 빌드(Windows, ue_sdk.md §4.5)가 Listener::onVideoFrame 으로 넘긴다.
+ *  화소 = BGRA 32 bpp(바이트 순서 B,G,R,A — WPF Bgr32/Bgra32), 위 줄부터. data 는 콜백 동안만 유효하다. */
+struct VideoFrame {
+    /** 이 프레임을 받은 호(수신 영상) — -1 = 내 카메라(송출 중 셀프뷰, Engine::setVideoPreview). */
+    int callId = -1;
+    int width = 0;
+    int height = 0;
+    int stride = 0;                   // 한 줄 바이트 수
+    const uint8_t* data = nullptr;
+    size_t size = 0;                  // stride × height
 };
 
 CIMSUE_API const char* toString(RegState s);

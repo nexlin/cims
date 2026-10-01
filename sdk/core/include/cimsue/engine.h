@@ -214,10 +214,19 @@ public:
      *  (android_ue_client.md — 볼륨 변경으로 안 풀리고 트랙 재생성만 푼다). 닫혀 있으면 아무것도 하지 않는다(다음 개방이 새 트랙). */
     Result reopenAudioDevice();
 
-    // ── 영상 (§4.5 — 코어는 창을 열지 않는다. Android 는 Surface 에서 얻은 창에 pjmedia 렌더러가 그린다) ──
+    // ── 영상 (§4.5 — 코어는 창을 열지 않는다. Android 는 Surface 에서 얻은 창에 pjmedia 렌더러가 그리고, Windows 는 디코드 프레임을
+    //    Listener::onVideoFrame 으로 넘긴다 — 창 없는 프레임 렌더 장치) ──
     /** 수신 영상 렌더 대상 — 플랫폼 창 핸들(Android = ANativeWindow*, 참조 하나를 코어가 넘겨받는다 — 파사드가 Surface 에서 얻는다).
-     *  nullptr = 해제. 활성 영상 호에 곧바로 결선하고 뒤에 영상이 활성되는 호에도 쓴다. 영상 없는 빌드면 실패. */
+     *  nullptr = 해제. 활성 영상 호에 곧바로 결선하고 뒤에 영상이 활성되는 호에도 쓴다. 영상 없는 빌드면 실패. 프레임 렌더 빌드(Windows)도
+     *  실패한다 — 활성 영상 호마다 프레임이 onVideoFrame 으로 온다(창 없음). */
     Result setVideoWindow(void* nativeWindow);
+    /** 셀프뷰 프레임(프레임 렌더 빌드만) — on 이면 내 영상을 보내는 동안 카메라 프레임을 onVideoFrame(callId -1)으로도 넘긴다.
+     *  카메라는 송출이 연다 — 셀프뷰만으로 카메라를 열지 않고, 송출이 모두 멈추면 셀프뷰도 멈춘다. 다른 빌드는 실패
+     *  (Android 셀프뷰 = setPreviewSurface). */
+    Result setVideoPreview(bool on);
+    /** 캡처 카메라 선택 — videoDevices() 의 캡처 장치 id(-1 = 기본: 이름에 front 가 있는 카메라, 없으면 첫 카메라). 다음 송출부터
+     *  쓰고, 지금 송출 중인 호는 곧바로 바꾼다. 캡처 장치가 아니면 실패. */
+    Result setVideoCaptureDevice(int deviceId);
     /** 캡처 카메라 전환(전면↔후면) — 활성 영상 호의 송신 장치를 다음 카메라로 바꾸고, 이후 호의 기본 장치로도 쓴다. */
     Result switchCamera(int callId);
     /** 내 영상 송출 허용(CallInfo.videoSend) — 1:1 영상 호는 곧바로 송출을 시작·정지하고, MCVideo 호는 허용이면서 송출 허가를 가진

@@ -105,6 +105,26 @@ public class EngineHeadlessTests
         Assert.Equal(1, stoppedOnDrain);
     }
 
+    /// <summary>Windows 엔진 = 영상 빌드(F3) — 프레임 렌더 장치·웹캠(DirectShow)·합성 캡처가 열거되고, 셀프뷰·카메라 선택이 받힌다.
+    /// 창 렌더(SetVideoWindow)는 받지 않는다(프레임이 VideoFrameReceived 로 온다). 실제 프레임은 cimsue_test McvCall.VideoTransmitSelfViewAndReceiveFrames.</summary>
+    [Fact]
+    public void VideoEngineIsFrameSink()
+    {
+        using var e = Inline();
+        Assert.True(e.Start(new EngineConfig { LogLevel = 1, NullAudioDevice = true }).Ok);
+        var devs = e.VideoDevices;
+        Assert.Contains(devs, d => d.Render && d.Driver == "CIMS");
+        var cbar = Assert.Single(devs, d => d.Capture && d.Driver == "Colorbar" && d.Name == "Colorbar generator");
+        Assert.False(cbar.IsCamera);
+        Assert.True(e.SetVideoCaptureDevice(cbar.Id).Ok);
+        Assert.False(e.SetVideoCaptureDevice(9999).Ok);
+        Assert.True(e.SetVideoPreview(true).Ok);
+        Assert.True(e.SetVideoPreview(false).Ok);
+        Assert.False(e.SetVideoWindow(IntPtr.Zero).Ok);
+        e.Stop();
+        Assert.False(e.SetVideoPreview(true).Ok);    // 미기동
+    }
+
     [Fact]
     public void DisposeWhileRunningIsSafe()
     {

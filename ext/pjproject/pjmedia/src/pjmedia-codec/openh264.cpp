@@ -501,7 +501,11 @@ static pj_status_t oh264_codec_open(pjmedia_vid_codec *codec,
                                            1.0f /
                                            param->enc_fmt.det.vid.fps.denum);
     eprm.iTemporalLayerNum              = 1;
-    eprm.uiIntraPeriod                  = 0; /* I-Frame interval in frames */
+    /* CIMS: IDR 주기 2 초(And-Media 의 KEYFRAME_INTERVAL 2 와 같은 값) — 그룹 영상은 수신자가 송출 중간에 붙고(MCVideo [보기]·
+     * MCPTT 늦은 합류), MCPTT 영상은 CMP 가 수신자 PLI 를 화자에게 넘기지 않아 주기 IDR 이 회복 수단이다(ue_sdk.md §4.5).
+     * upstream 값 0 = 첫 IDR 뒤 요청에만. */
+    eprm.uiIntraPeriod                  = (unsigned)(2 * param->enc_fmt.det.vid.fps.num /
+                                           (param->enc_fmt.det.vid.fps.denum ? param->enc_fmt.det.vid.fps.denum : 1));
     eprm.eSpsPpsIdStrategy              = (oh264_data->whole ? CONSTANT_ID :
                                            INCREASING_ID);
     eprm.bEnableFrameCroppingFlag       = true;

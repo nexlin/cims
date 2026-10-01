@@ -19,9 +19,10 @@
 
   <!-- 네이티브 런타임 — 개발 출력·패키지 모두 runtimes/win-x64/native (NuGet 규약). 관리 어셈블리 CimsUe.dll 과 네이티브 cimsue.dll 은
        Windows 에서 같은 이름이라 한 디렉터리에 둘 수 없다(P/Invoke 가 관리 DLL 을 열어 EntryPointNotFound).
-       cimsue.dll 은 vcpkg OpenSSL 런타임(libcrypto-3-x64·libssl-3-x64)에 의존하므로 셋을 함께 둔다. 참조하는 프로젝트에도 전이 복사된다. -->
+       cimsue.dll 은 vcpkg OpenSSL 런타임(libcrypto-3-x64·libssl-3-x64)과 H.264 코덱 OpenH264(openh264-7)에 의존하므로 넷을 함께 둔다.
+       참조하는 프로젝트에도 전이 복사된다. -->
   <ItemGroup Condition="Exists('$(CimsUeNativeDir)cimsue.dll')">
-    <None Include="$(CimsUeNativeDir)cimsue.dll;$(CimsUeNativeDir)libcrypto-3-x64.dll;$(CimsUeNativeDir)libssl-3-x64.dll"
+    <None Include="$(CimsUeNativeDir)cimsue.dll;$(CimsUeNativeDir)libcrypto-3-x64.dll;$(CimsUeNativeDir)libssl-3-x64.dll;$(CimsUeNativeDir)openh264-7.dll"
           Link="runtimes/win-x64/native/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" Visible="false"
           Pack="true" PackagePath="runtimes/win-x64/native/" />
   </ItemGroup>

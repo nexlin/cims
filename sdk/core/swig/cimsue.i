@@ -45,6 +45,12 @@ using namespace cimsue;
 %ignore cimsue::CscClient::Impl;
 %ignore cimsue::DeviceLink::Impl;
 
+// 창 없는 프레임 렌더(onVideoFrame·셀프뷰 프레임)는 Windows 엔진만 — Android 는 Surface 에 pjmedia 렌더러가 직접 그리고
+// 셀프뷰는 setPreviewSurface 다(ue_sdk.md §4.5). 프레임마다 부르는 director 를 Java 로 내지 않는다.
+%ignore cimsue::VideoFrame;
+%ignore cimsue::Listener::onVideoFrame;
+%ignore cimsue::Engine::setVideoPreview;
+
 // 구동 세션(drive.h)은 앱이 **DeviceLink 하나와 상태 콜백만** 쓴다 — DriveSession·LineSink 는 링크 안에서
 // 쓰이고(cimsue-cli drive 는 C++ 로 직접 쓴다), drive:: 는 이벤트 줄 직렬화 조각이다(ue_voice_quality_handoff §2).
 %ignore cimsue::DriveSession;

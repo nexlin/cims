@@ -102,5 +102,15 @@
 #cmakedefine01 PJMEDIA_HAS_LYRA_CODEC
 #endif
 
+/* CIMS: 영상 코덱 — CMake 는 PJMEDIA_HAS_{OPENH264,VPX}_CODEC 를 정해 두고(CMakeLists.txt) 이 틀에 칸이 없어 늘 미정의였다
+   (autoconf 빌드는 aconfigure 가 CFLAGS -D 로 넘긴다). 없으면 OpenH264 를 켜도 코덱이 등록되지 않는다. */
+#ifndef PJMEDIA_HAS_OPENH264_CODEC
+#cmakedefine01 PJMEDIA_HAS_OPENH264_CODEC
+#endif
+
+#ifndef PJMEDIA_HAS_VPX_CODEC
+#cmakedefine01 PJMEDIA_HAS_VPX_CODEC
+#endif
+
 #endif  /* __PJMEDIA_CODEC_CONFIG_AUTO_H_ */
 

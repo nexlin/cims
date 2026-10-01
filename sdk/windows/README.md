@@ -24,8 +24,11 @@ C API(`cimsue_c.h`, 파사드용)를 함께 export 한다(ue_sdk.md §6.4).
 | Python 3 | `scripts/gen_floor_defs.py` (floor_defs.h 재생성). `find_package(Python3)` 로 잡으므로 `python3` 이름 불필요 | `winget install Python.Python.3.12 --scope user` |
 | .NET SDK 10 (LTS) | `dotnet/CimsUe`·WPF 앱 (`net10.0-windows`) | `winget install Microsoft.DotNet.SDK.10` |
 | vcpkg + `openssl:x64-windows` | SIP TLS·SRTP·코어 HTTPS 가 쓰는 OpenSSL (레포 vendoring 대상 아님) | `git clone https://github.com/microsoft/vcpkg C:\dev\vcpkg && C:\dev\vcpkg\bootstrap-vcpkg.bat -disableMetrics`, 사용자 환경변수 `VCPKG_ROOT=C:\dev\vcpkg`, `vcpkg install openssl:x64-windows` |
+| vcpkg `openh264:x64-windows` | 엔진 영상 H.264(디코드·인코드 — DLL `openh264-7.dll`, sdk/bin·.NET 패키지·앱 패키지에 함께 둔다) | `vcpkg install openh264:x64-windows`(meson·nasm 은 vcpkg 가 받는다) |
 
-OpenSSL 은 vcpkg 대신 설치본을 `-DCMAKE_PREFIX_PATH=<openssl 설치 경로>` 로 줘도 된다.
+OpenSSL·OpenH264 는 vcpkg 대신 설치본을 `-DCMAKE_PREFIX_PATH=<설치 경로>` 로 줘도 된다. 엔진은 영상으로 빌드된다(DirectShow 캡처·CIMS 프레임 렌더 —
+ue_sdk.md §4.5) — `ext/pjproject` 를 바꾸면 ExternalProject 가 스스로 다시 빌드하지 않으므로 `build-win/pjproject-prefix/src/pjproject-stamp/Release/pjproject-{build,install,done}`
+을 지우고 빌드한다(엔진 CMake 인자를 바꿨으면 `pjproject-configure` 도).
 
 ## 빌드
 

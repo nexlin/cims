@@ -166,9 +166,50 @@ public sealed partial class ChannelDetailViewModel : ObservableObject
     /// <summary>영상 칸 캡션 "김현장 · 현장지휘 · 0:34".</summary>
     public string ReceivingCaption => Video?.Receiving is { } r
         ? string.Join(" · ", new[] { _s.NameOfPtt(r.UserId), r.FunctionalAlias, ElapsedOf(Video, r.UserId) }.Where(x => x.Length > 0)) : "";
-    /// <summary>엔진이 영상을 그린다(호가 m=video 를 협상) — Windows 1차 엔진(PJMEDIA_HAS_VIDEO 0)은 영상 호 음성·전송 제어만이라 칸에 자리 표시(§10.3).</summary>
+    /// <summary>영상 미디어가 열렸다(호가 m=video 를 협상) — 아니면(서버 answer port 0) 그림이 오지 않는다(영상 호 소리만, §10.3).</summary>
     public bool VideoCanRender => Video?.Info.Video == true;
-    public string VideoSurfaceText => VideoCanRender ? "" : "이 PC 에서는 영상을 표시할 수 없습니다(영상 엔진 준비 중) — 영상 호 소리는 들립니다";
+    /// <summary>칸의 자리 표시 — 첫 장이 그려지면 거둔다(VideoView.HasPicture). [보기] 직후 첫 키프레임까지 잠깐 보인다.</summary>
+    public string VideoSurfaceText => VideoCanRender ? "영상 기다리는 중…" : "영상 미디어가 열리지 않았습니다 — 영상 호 소리만 들립니다";
+    /// <summary>보는 송출의 그림 우편함(그 영상 호) — 영상 칸의 VideoView 가 그린다(엔진 = 창 없는 프레임 렌더, ue_sdk.md §4.5).</summary>
+    public VideoFeed? ReceivingFeed => Video is { IsLive: true } v ? _s.VideoFrames.Feed(v.CallId) : null;
+
+    // ── 내 송출(D11 — [영상 보내기] 는 음성 무전과 따로, TS 24.581 §6.2.4) ──
+    public TransmissionState TxState => VideoConnected ? Video!.Transmission.State : TransmissionState.NoPermission;
+    public bool IsVideoSending => TxState == TransmissionState.Permitted;
+    /// <summary>요청·대기·송출 중 — [영상 보내기] 가 끄는 버튼이 된다.</summary>
+    public bool IsVideoTxActive => TxState != TransmissionState.NoPermission;
+    public bool CanVideoSend => VideoConnected && TxState != TransmissionState.PendingEnd && (TxState != TransmissionState.NoPermission || _s.HasCamera);
+    public string VideoSendText => TxState switch
+    {
+        TransmissionState.PendingRequest => "요청 중… · 취소",
+        TransmissionState.Queued => Video!.Transmission.QueuePosition is > 0 and < 254 and var q ? $"대기 {q}번째 · 대기 취소" : "대기 중 · 대기 취소",
+        TransmissionState.Permitted => "보내기 끝",
+        TransmissionState.PendingEnd => "끝내는 중…",
+        _ => _s.HasCamera ? "영상 보내기" : "영상 보내기 — 카메라 없음",
+    };
+    public string VideoSendTip => TxState switch
+    {
+        TransmissionState.NoPermission when !_s.HasCamera => "이 PC 에서 카메라를 찾지 못했습니다 — 설정 › 영상",
+        TransmissionState.NoPermission => $"이 채널에 내 카메라 영상을 보낸다({_s.CameraName}) — 말하기는 발언 바 PTT(음성 무전, D11)",
+        TransmissionState.Permitted => "영상 보내기를 끝낸다(카메라를 닫는다 — TS 24.581 §6.2.4.5)",
+        _ => "영상 보내기 요청을 거둔다",
+    };
+    /// <summary>"내 영상 보내는 중 · 0:12 · 보는 사람 2" — 보는 사람은 서버가 알릴 때만(Media Reception Notification).</summary>
+    public string SendingCaption => Video is { TxSince: { } at } v
+        ? "내 영상 보내는 중 · " + DispatchSession.Fmt(DateTime.Now - at) + (v.TxReceivers.Count > 0 ? $" · 보는 사람 {v.TxReceivers.Count}" : "")
+        : "내 영상 보내는 중";
+    /// <summary>셀프뷰 우편함(내 카메라 — 코어가 송출 중일 때만 넘긴다).</summary>
+    public VideoFeed SelfFeed => _s.VideoFrames.Feed(VideoFrames.SelfView);
+    /// <summary>D12 음성 우선 — 무전을 말하는 동안 영상 호 소리를 멈췄다.</summary>
+    public bool ShowVideoMicNote => IsVideoSending && _s.VideoMicYielded;
+    [RelayCommand]
+    private void ToggleVideoSend()
+    {
+        if (Video is not { IsLive: true } v) return;
+        if (TxState == TransmissionState.NoPermission) _s.RequestVideoTx(v);
+        else if (TxState != TransmissionState.PendingEnd) _s.ReleaseVideoTx(v);
+        Refresh(rows: false);
+    }
     /// <summary>영상 회전(°, 시계 방향) — 보고 있는 송출의 것(보내는 사람마다 기억, DispatchSession.RotateVideo).</summary>
     public int VideoRotation => Video?.Receiving is { } r ? _s.VideoRotationOf(r.UserId) : 0;
     /// <summary>칸 모양 — 기본 세로 480×640(3:4, 0°·180°), 90°·270° 면 가로 640×480(4:3). 오른쪽 패널 폭에 맞춰 0.5625 배(270×360 / 360×270).</summary>
@@ -301,7 +342,9 @@ public sealed partial class ChannelDetailViewModel : ObservableObject
                                   nameof(ShowStopListen), nameof(HasSegment), nameof(SegConnected), nameof(SegAll), nameof(RosterHead),
                                   nameof(ShowVideo), nameof(Video), nameof(VideoConnected), nameof(VideoSub), nameof(VideoSenderCount), nameof(ShowNoSender), nameof(VideoCountText),
                                   nameof(IsVideoReceiving), nameof(ReceivingCaption), nameof(VideoCanRender), nameof(VideoSurfaceText), nameof(VideoVolume),
-                                  nameof(VideoRotation), nameof(VideoLandscape), nameof(VideoFrameWidth), nameof(VideoFrameHeight), nameof(VideoRotationTip) })
+                                  nameof(VideoRotation), nameof(VideoLandscape), nameof(VideoFrameWidth), nameof(VideoFrameHeight), nameof(VideoRotationTip),
+                                  nameof(ReceivingFeed), nameof(TxState), nameof(IsVideoSending), nameof(IsVideoTxActive), nameof(CanVideoSend), nameof(VideoSendText),
+                                  nameof(VideoSendTip), nameof(SendingCaption), nameof(ShowVideoMicNote) })
             OnPropertyChanged(p);
         SyncVideoRows();
         if (rows) RebuildRows();

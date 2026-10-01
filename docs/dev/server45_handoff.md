@@ -813,7 +813,7 @@ ptt-client APK(V7 SDK) W999·MF52. 새 CSP 위 VoLTE 호(001↔002) relay 확인
 | 관찰 | W999 전면 카메라 영상이 가로 4:3 로 옴(3:4 칸 위아래 띠) · T11 10 s 동안 아무도 [보기] 안 하면 송출 꺼짐(#8 — 정상, 시연 주의) | cims-7c / — | 원인 미확인 |
 | V8 | 긴급·임박·방송·ad hoc·private·확인 통화·conference NOTIFY·E2E·영상 pull/push·원격 송출·관제 다중 스트림(SDK 송출자별 렌더 창) | — | 1차 뒤 |
 
-**사용자 결정 대기** — R11(Media Reception Notification) · Windows 영상 엔진 F3(openh264 디코드·렌더 — 없으면 관제 Windows 는 영상 칸 자리 표시만) · SDK 송출자별 렌더 창
+**사용자 결정 대기** — R11(Media Reception Notification) · SDK 송출자별 렌더 창
 (관제 다중 스트림 전제) · 관제사 자동 수신(TS 22.281 §5.2.7.1) · D6 «소리 겹침» 설정 항목화(R-8.3-003) · Linux 엔진 영상(openh264 — 영상 RTP·PLI 자동 시험) ·
 pjsua `on_send_request` 무효 계정 가드 · M4(협력업체 APK 전달 포함) 시점.
 
@@ -834,8 +834,12 @@ Windows PC 가 관제 앱의 MCVideo 몫(W1' SDK 재빌드·시험 · W4 그룹 
 | X7 | 관리 목록의 서비스 표시 | [PTT 그룹] 목록 행의 «영상» 칩은 관리 목록(`/provisioning/directory/groups`)에 서비스가 없어 내 영상 채널·열어 본 그룹 문서로만 단다 | 목록 항목에 `mcvideo: true`(또는 `services: ["mcptt","mcvideo"]`) 한 필드 |
 | X8 | 관제 관리 화면의 MCVideo 자격 | 관제 앱 [관리](F4, `/provisioning/directory/*`)에서는 구성원 PTT 회선의 MCVideo 자격·N6 을 못 바꾼다(콘솔 A6 만) | 필요하면 directory API 에 `mcvideo` 자격(admin_api §5.4 와 같은 모양). 1차는 콘솔 몫으로 둬도 된다 |
 
-- **엔진(F3 — 사용자 결정 10-01: 다음 Windows 세션에서 착수, 영상 표시·송출)** — 관제 앱의 영상 칸은 Windows 엔진 영상(F3)이 있어야 그린다. 방식 = ue_sdk.md §6
-  «영상» 행(OpenH264 + DSHOW + CIMS 콜백 렌더 장치 → `onVideoFrame`) — C API·.NET 프레임 이벤트 표면은 .45 코어와 맞춘다([dispatch_windows_next.md](dispatch_windows_next.md) §4). 그 전에는 «이 PC 에서는 영상을 표시할 수 없습니다(영상 엔진 준비 중) — 영상 호
-  소리는 들립니다» 자리다(`CallInfo.Video` 로 판정). 영상 벽(W6)은 SDK 송출자별 렌더 창 뒤.
+- **엔진(F3 — Windows 구현 10-01)** — Windows 엔진이 영상으로 빌드되고(OpenH264·DirectShow·CIMS 프레임 렌더 장치 — ue_sdk.md §4.5·§6.1) 관제 앱이 영상 칸에 그림·
+  [영상 보내기]·셀프뷰·D12 설정을 낸다([dispatch_windows_next.md](dispatch_windows_next.md) §4·§7). **.45 SDK 코어에 맞춰 달라는 것** — 공개 헤더가 바뀌었다(전부 덧붙임,
+  Linux·Android 빌드는 매크로로 꺼진다): `types.h VideoFrame` · `listener.h onVideoFrame`(영상 스레드에서 곧바로 — 이벤트 스레드 아님) · `engine.h setVideoPreview`·
+  `setVideoCaptureDevice`(+ 송출 시작 직전 `CHANGE_CAP_DEV` 로 호의 캡처 장치를 맞춤 · Windows 인코딩 640×480) · `cimsue_c.h on_video_frame`·`cimsue_video_frame_t`
+  (struct id `VIDEO_FRAME`)·`set_video_preview`·`set_video_capture_device`·`set_video_send`·`call_info.video_send` · SWIG `%ignore`(프레임 표면은 Java 로 내지 않는다).
+  엔진(ext/pjproject) 패치 넷 = `cims_frame_dev`·CMake `config_auto.h.cm` 영상 코덱 칸·DirectShow BaseClasses·OpenH264 IDR 2 초(README.CIMS.md). 실기 = 현장 앱(W999·MF52)
+  ↔ 관제 영상 보기·보내기(§12.5 .48 그룹 gmv1/gmv2). 영상 벽(W6)은 그 뒤.
 - **확인(Windows, W1')** — d1685a78 까지(b2a45e36 D6 · 6e9edd3a `setMuted` MCVideo 음성만) Windows 재빌드: `cimsue_test` 144/144 · `CimsUe.Tests` 85/85. 리눅스 149 와의 차 5건 =
   `FloorXCheck.*`(floor_xcheck_test.cpp — CMP `PFloorCodec` 이 pasf(pthread·semaphore)를 끌어 리눅스 전용, sdk/core/CMakeLists.txt). C API·헤더 변화 없음 → 앱 무변경.

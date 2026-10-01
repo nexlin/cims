@@ -4,7 +4,8 @@
 #   AMR-WB   ext/opencore-amr, ext/vo-amrwbenc-0.1.3   (deps/*/CMakeLists.txt 래퍼로 MSVC 빌드)
 #   엔진     ext/pjproject                              (자체 CMake — pjlib WIN32 분기·WMME 백엔드. config_site 는 sdk/engine/config_site/windows.h)
 #   코어     sdk/core                                   (CIMSUE_SHARED → cimsue.dll)
-# OpenSSL 만 외부(vcpkg `openssl` 또는 CMAKE_PREFIX_PATH 로 준 설치본) — pjproject·코어 HTTPS 가 같은 OpenSSL 을 쓴다.
+# 외부는 둘(vcpkg `openssl`·`openh264` 또는 CMAKE_PREFIX_PATH 로 준 설치본) — pjproject·코어 HTTPS 가 같은 OpenSSL 을, 엔진 H.264 가
+# OpenH264(DLL)를 쓴다.
 #
 #   cmake -S sdk/windows -B build-win -G "Visual Studio 17 2022" -A x64 ^
 #         -DCMAKE_TOOLCHAIN_FILE=%VCPKG_ROOT%/scripts/buildsystems/vcpkg.cmake
@@ -17,6 +18,8 @@
 #   - config_site_sample.h 는 CMake 설치 FILE_SET 에 없다 → INSTALL_COMMAND 가 보충.
 #   - CRT 는 /MD 로 명시(비우면 ExternalProject 가 /MT 로 떨어짐), pjmedia-codec 의 AMR 자동 링크 pragma 는 config_site 에서 끔.
 #   - vcpkg applocal 이 OpenSSL DLL 을 실행 파일 옆에 복사한다 → sdk/bin 은 그 디렉터리를 통째로 복사.
+# F3(영상): pjproject CMake 의 결함 둘을 엔진 트리에서 고쳤다(ext/pjproject/README.CIMS.md) — config_auto.h.cm 에 영상 코덱 칸이 없어
+#   OpenH264 가 등록되지 않던 것, DirectShow 백엔드가 BaseClasses 를 빌드하지 않던 것.
 # WMME 장치 열거·재생 라우트 이중 출력은 실기 검증 항목(ue_sdk.md §9).
 cmake_minimum_required(VERSION 3.21)
 project(cimsue-windows-sdk CXX C)
@@ -37,6 +40,16 @@ set(PKG_WIN ${CMAKE_BINARY_DIR}/pkg)                 # 의존성·엔진 설치 
 set(SDK_OUT ${CMAKE_BINARY_DIR}/sdk)                 # 배포 zip 의 원본 디렉터리
 
 find_package(OpenSSL REQUIRED COMPONENTS Crypto SSL)
+
+# H.264 코덱 OpenH264(vcpkg `openh264` — DLL openh264-7.dll). 엔진(pjmedia-codec)·코어가 같은 Release 가져오기 라이브러리를 쓴다 —
+# 엔진 CMake 의 FindOpenH264 는 vcpkg debug/lib 를 먼저 잡을 수 있어 경로를 넘겨 고정한다.
+find_library(OPENH264_LIB NAMES openh264 REQUIRED)
+find_path(OPENH264_INC NAMES wels/codec_api.h REQUIRED)
+get_filename_component(_oh264_lib_dir ${OPENH264_LIB} DIRECTORY)
+file(GLOB OPENH264_DLL ${_oh264_lib_dir}/../bin/openh264*.dll)
+if(NOT OPENH264_DLL)
+    message(FATAL_ERROR "openh264 DLL 이 ${_oh264_lib_dir}/../bin 에 없다 — vcpkg install openh264:x64-windows")
+endif()
 
 # ── 1. AMR-WB 코덱 ──
 # ExternalProject 타깃 이름은 링크 대상 라이브러리 이름(opencore-amrwb·vo-amrwbenc — PJ_LIBS)과 겹치면 안 된다(UTILITY 타깃은 링크 불가) → ep- 접두.
@@ -76,8 +89,13 @@ ExternalProject_Add(pjproject
                -DPJMEDIA_WITH_G722_CODEC=OFF -DPJMEDIA_WITH_L16_CODEC=OFF
                -DPJMEDIA_WITH_SPEEX_CODEC=OFF -DPJMEDIA_WITH_VPX_CODEC=OFF -DPJMEDIA_WITH_FFMPEG=OFF
                -DPJMEDIA_WITH_AUDIODEV_WMME=ON -DPJMEDIA_WITH_AUDIODEV_WASAPI=OFF
-               # 영상은 F3 (windows.h PJMEDIA_HAS_VIDEO 0 과 정합 — CMake 가 -DPJMEDIA_HAS_VIDEO 를 같이 정의하므로 옵션도 꺼야 C4005 가 없다)
-               -DPJMEDIA_WITH_VIDEO=OFF -DPJMEDIA_WITH_VIDEODEV_DSHOW=OFF
+               # 영상(F3) — windows.h 의 PJMEDIA_HAS_VIDEO·PJMEDIA_HAS_LIBYUV·PJMEDIA_VIDEO_DEV_HAS_{DSHOW,SDL,AVI}(AVI = pjsua 의 AVI 재생기가 쓴다) 와 같은 값이어야 한다
+               # (CMake 가 같은 매크로를 -D 로 정의 — 값이 다르면 C4005). H.264 = OpenH264(vcpkg openh264), 변환 = 동봉 libyuv,
+               # 캡처 = DirectShow, 렌더 = CIMS 프레임 콜백 장치(config_site 만 — CMake 옵션 없음)
+               -DPJMEDIA_WITH_VIDEO=ON -DPJMEDIA_WITH_OPEN_H264_CODEC=ON -DPJMEDIA_WITH_LIBYUV=ON -DPJ_DEP_YUV=bundled
+               -DOpenH264_LIBRARY=${OPENH264_LIB} -DOpenH264_INCLUDE_DIR=${OPENH264_INC}
+               -DPJMEDIA_WITH_VIDEODEV_DSHOW=ON -DPJMEDIA_WITH_VIDEODEV_SDL=OFF -DPJMEDIA_WITH_VIDEODEV_AVI=ON
+               -DPJMEDIA_WITH_VIDEODEV_FFMPEG=OFF
                -DPJNATH_WITH_UPNP=OFF
     BUILD_COMMAND ${CMAKE_COMMAND} --build <BINARY_DIR> --config $<CONFIG>
     # pjproject CMake 의 헤더 FILE_SET 에 config_site_sample.h 가 없다(autoconf install 은 복사) — config_site.h 가 include 하므로 보충.
@@ -86,11 +104,12 @@ ExternalProject_Add(pjproject
 
 # ── 3. 코어 libcimsue → cimsue.dll ──
 # pjproject CMake 의 설치 라이브러리 이름 — 타깃 이름 그대로(pjlib·pjsua-lib, autoconf 의 `-<target>` 접미 없음). MSVC 는 순서 무관.
-# third_party 는 위 옵션에서 켜진 것만 빌드된다: srtp·resample·webrtc(AEC)·webrtc_aec3. (g7221/gsm/ilbc/yuv 는 OFF 라 산출물 없음)
+# third_party 는 위 옵션에서 켜진 것만 빌드된다: srtp·resample·webrtc(AEC)·webrtc_aec3·yuv(영상 변환). (g7221/gsm/ilbc 는 OFF 라 산출물 없음)
+# OpenH264 = vcpkg 의 DLL(위 find_library) — 가져오기 라이브러리를 링크하고 DLL 은 sdk/bin 에 함께 둔다(아래 sdk-layout).
 if(NOT DEFINED PJ_LIBS)
     set(PJ_LIBS pjsua2 pjsua-lib pjsip-ua pjsip-simple pjsip pjmedia-codec pjmedia-videodev pjmedia-audiodev
-                pjmedia pjnath pjlib-util pjlib srtp resample webrtc webrtc_aec3
-                opencore-amrwb vo-amrwbenc OpenSSL::SSL OpenSSL::Crypto)
+                pjmedia pjnath pjlib-util pjlib srtp resample webrtc webrtc_aec3 yuv
+                opencore-amrwb vo-amrwbenc ${OPENH264_LIB} OpenSSL::SSL OpenSSL::Crypto)
 endif()
 set(PJ_DIR      ${PJ_SRC})
 set(PJ_PKG_DIR  ${PKG_WIN})
@@ -125,6 +144,8 @@ add_custom_target(sdk-layout ALL
     COMMAND ${CMAKE_COMMAND} -E copy_directory ${REPO_ROOT}/sdk/core/include ${SDK_OUT}/include
     # bin 디렉터리 통째로 — cimsue.dll·cimsue-cli.exe 에 더해 vcpkg applocal 이 가져다 둔 OpenSSL 런타임(libcrypto-3-x64.dll·libssl-3-x64.dll)
     COMMAND ${CMAKE_COMMAND} -E copy_directory $<TARGET_FILE_DIR:cimsue-cli> ${SDK_OUT}/bin
+    # OpenH264 런타임 — applocal 이 cimsue.dll 의 의존까지 따라가지 않는 경우에도 빠지지 않게 명시
+    COMMAND ${CMAKE_COMMAND} -E copy ${OPENH264_DLL} ${SDK_OUT}/bin
     COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_LINKER_FILE:cimsue> ${SDK_OUT}/lib
     DEPENDS cimsue cimsue-cli
     COMMENT "sdk/ 레이아웃(bin/lib/include) 구성")

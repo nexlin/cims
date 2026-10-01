@@ -82,6 +82,7 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
         Directory = directory;
         Log = log;
         Engine = new Engine(SynchronizationContext.Current);
+        VideoFrames = new VideoFrames(SynchronizationContext.Current);
         Credentials = new CredentialStore(AppPaths.AppName);
         Endpoints = new AudioEndpoints(SynchronizationContext.Current);
         Messages = new MessageStore(AppPaths.MessagesDb);
@@ -100,6 +101,7 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
         Engine.RosterChanged += (_, r) => OnRoster(r);
         Engine.TransmissionChanged += (_, e) => OnTransmission(e);       // MCVideo 송출·수신 제어(§10, TS 24.581 §6.2.4·§6.2.5)
         Engine.ReceptionChanged += (_, e) => OnReception(e);
+        Engine.VideoFrameReceived += VideoFrames.OnFrame;                 // 영상 스레드 — 보는 칸의 우편함에만 복사(§10.3)
         Engine.DialogInfoReceived += (_, d) => OnDialog(d);
         Engine.SdsReceived += (_, m) => SdsReceived?.Invoke(this, m);
         Engine.MessageReceived += (_, m) => { SipMessageReceived?.Invoke(this, m); OnSipMessage(m); };
@@ -433,6 +435,7 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
             Log.Info($"device user-agent=\"{userAgent}\" instance={instanceId ?? "(pjsip 기본)"}");
         }
         ApplyAudioSettings();
+        ApplyVideoSettings();
         // CMS user profile·service config(TS 24.484) — 정책 게이트와 Resource-Priority 값. 못 받아도 기동은 계속한다(게이트 없음 = 허용, RP = 코어 기본값).
         if (PttService is not null) await RefreshCmsAsync();
         // 참여 기능 PSI = UE initial configuration(TS 24.484 §7.2.1.1·§7.2.2.1 10)·14)) — 로그인 전 문서라 토큰 없이, MCS UE ID = +sip.instance 와
@@ -1321,6 +1324,7 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
             case FloorEventKind.TalkLimit:
                 s.TalkLimitNear = true; break;
         }
+        SyncVideoMic();
         Floor?.Invoke(this, (s, ev));
     }
 
@@ -1648,8 +1652,12 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
     private readonly Dictionary<int, List<string>> _adhocMembers = new();
     public IReadOnlyList<string> AdhocMembersOf(int callId) => _adhocMembers.TryGetValue(callId, out var m) ? m : Array.Empty<string>();
 
-    public Result FloorRequest(SessionItem s) { var r = Show(Engine.GetCall(s.CallId).FloorRequest(), ResponseText.Area.PttJoin); SyncFloor(s); return r; }
-    public Result FloorRelease(SessionItem s) { var r = Engine.GetCall(s.CallId).FloorRelease(); SyncFloor(s); return r; }
+    public Result FloorRequest(SessionItem s)
+    {
+        if (BlocksTalkForVideo(s)) return Result.Fail(-1, "영상 우선 — 영상을 보내는 중");
+        var r = Show(Engine.GetCall(s.CallId).FloorRequest(), ResponseText.Area.PttJoin); SyncFloor(s); SyncVideoMic(); return r;
+    }
+    public Result FloorRelease(SessionItem s) { var r = Engine.GetCall(s.CallId).FloorRelease(); SyncFloor(s); SyncVideoMic(); return r; }
     /// <summary>요청(→Requesting)·해제(→Idle/Listening)는 코어가 이벤트 없이 상태만 바꾼다 — 세션 투영을 즉시 맞춘다
     /// (그러지 않으면 다음 floor 이벤트 전까지 IsRequesting 이 옛 값이라 잠금 발언 판정이 어긋난다).</summary>
     private void SyncFloor(SessionItem s) { if (s.IsLive) s.Floor = Engine.GetCall(s.CallId).FloorInfo; }

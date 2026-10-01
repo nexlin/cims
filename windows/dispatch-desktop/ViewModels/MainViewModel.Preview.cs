@@ -1,7 +1,9 @@
 // 개발 스위치(§3.4) — --ui-preview-canvas: 서버 없이 관제 두 화면에 표본(멤버 그룹·청취 범위·진행 중 그룹콜/개별/애드혹·일제 통화·긴급·
 // VoLTE 통화·대표번호 대기열·진행 중 통화·그룹원·기록·무전 메시지)을 심는다. 코어 세션이 아니라 스냅샷 모델만 채우므로 조작 버튼은 동작하지 않는다.
-// --ui-preview-mode=ptt|call · --ui-preview-panel=channel|other|users|group|event|dir · --ui-preview-keypad · --ui-preview-banner=alerts|incoming|video|none.
+// --ui-preview-mode=ptt|call · --ui-preview-panel=channel|other|users|group|event|dir · --ui-preview-keypad · --ui-preview-banner=alerts|incoming|video|none ·
+// --ui-preview-videotx(내 영상 송출 중) · --ui-preview-slide=out:<ms>|in:<ms>(패널이 밀리는 도중의 한 장 — App.xaml.cs).
 // MCVideo(§10) — 순찰1 = 영상 채널(영상 호 함께 합류, 송출 둘 — 이순경(현장지휘)을 보는 중·박경장 알림), 상황실 = 영상 채널(보내는 사람 없음).
+//   영상 칸에는 표본 그림(세로 480×640)을 우편함에 넣어 실제 그리기 경로(VideoView)로 그린다. --ui-preview-videotx = 내 송출 중(셀프뷰 가로 640×480).
 using CimsUe;
 using DispatchDesktop.Models;
 using DispatchDesktop.Services;
@@ -10,7 +12,31 @@ namespace DispatchDesktop.ViewModels;
 
 public sealed partial class MainViewModel
 {
-    public void SeedCanvasPreview(string banner = "alerts")
+    /// <summary>표본 그림 한 장 — 하늘·땅 띠 + 색 막대 + 글(BGRA). 엔진 프레임과 같은 우편함 경로로 넣는다.</summary>
+    private static void PushPreviewFrame(VideoFeed feed, int w, int h, string label, int rgb)
+    {
+        var dv = new System.Windows.Media.DrawingVisual();
+        using (var dc = dv.RenderOpen())
+        {
+            var sky = System.Windows.Media.Color.FromRgb((byte)(rgb >> 16), (byte)(rgb >> 8), (byte)rgb);
+            dc.DrawRectangle(new System.Windows.Media.LinearGradientBrush(sky, System.Windows.Media.Color.FromRgb(0xD9, 0xE4, 0xEC), 90), null, new System.Windows.Rect(0, 0, w, h * 0.62));
+            dc.DrawRectangle(new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0x4A, 0x55, 0x4C)), null, new System.Windows.Rect(0, h * 0.62, w, h * 0.38));
+            var bars = new[] { 0xFFFFFF, 0xFFFF00, 0x00FFFF, 0x00FF00, 0xFF00FF, 0xFF0000, 0x0000FF };
+            for (int i = 0; i < bars.Length; ++i)
+                dc.DrawRectangle(new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb((byte)(bars[i] >> 16), (byte)(bars[i] >> 8), (byte)bars[i])), null,
+                                 new System.Windows.Rect(w * i / (double)bars.Length, h * 0.70, w / (double)bars.Length, h * 0.08));
+            var ft = new System.Windows.Media.FormattedText(label, System.Globalization.CultureInfo.CurrentUICulture, System.Windows.FlowDirection.LeftToRight,
+                                                            new System.Windows.Media.Typeface("Segoe UI"), Math.Max(18, w / 18.0), System.Windows.Media.Brushes.White, 1.0);
+            dc.DrawText(ft, new System.Windows.Point(w * 0.06, h * 0.08));
+        }
+        var rtb = new System.Windows.Media.Imaging.RenderTargetBitmap(w, h, 96, 96, System.Windows.Media.PixelFormats.Pbgra32);
+        rtb.Render(dv);
+        var px = new byte[w * h * 4];
+        rtb.CopyPixels(px, w * 4, 0);
+        feed.Push(new VideoFrame(feed.CallId, w, h, w * 4, px));
+    }
+
+    public void SeedCanvasPreview(string banner = "alerts", bool videoTx = false)
     {
         var s = Session;
         CallInfo Ci(int id, CallState st, string remote, bool mcptt, string group, bool priv = false, bool half = true, bool emg = false, bool listen = false,
@@ -69,8 +95,8 @@ public sealed partial class MainViewModel
         var mon = new SessionItem(Ci(21, CallState.Active, "tel:7002", false, "", listen: true, joined: "cd2",
                                      sources: new[] { new MediaSource(1, "caller", true, 0.62f), new MediaSource(2, "callee", false, 0.25f) }), AccountKind.Volte, Operation.Join)
                   { Title = "7002 이당직 ↔ 010-5555-1212", ConnectedAt = now.AddMinutes(-2) };
-        // MCVideo 그룹 영상 호(§10) — 순찰1 chat 영상 호: 송출 둘(이순경 = 보는 중 · 박경장 = 알림). 엔진 영상 없음(Video=false) → 음성만 안내 줄
-        var video = new SessionItem(Ci(22, CallState.Active, "sip:mcvideo_psi@ptt", false, "g-patrol1") with { Service = McService.McVideo, Video = false },
+        // MCVideo 그룹 영상 호(§10) — 순찰1 chat 영상 호: 송출 둘(이순경 = 보는 중 · 박경장 = 알림). 영상 미디어 성립(Video=true)
+        var video = new SessionItem(Ci(22, CallState.Active, "sip:mcvideo_psi@ptt", false, "g-patrol1") with { Service = McService.McVideo, Video = true },
                                     AccountKind.Ptt, Operation.VideoJoin) { Title = "순찰1", ConnectedAt = now.AddMinutes(-2).AddSeconds(-13) };
         video.TransmitterSince["tel:1003"] = now.AddSeconds(-41); video.TransmitterSince["tel:1006"] = now.AddSeconds(-12);
         video.Transmission = new TransmissionInfo(TransmissionState.NoPermission, new[]
@@ -81,6 +107,16 @@ public sealed partial class MainViewModel
         foreach (var gid in new[] { "g-patrol1", "g-ops" }) if (s.Groups.FirstOrDefault(g => g.Id == gid) is { } vg) { vg.McVideo = true; vg.McVideoType = "chat"; vg.McVideoMaxTransmitters = 2; }
         foreach (var x in new[] { ops, patrol, bcIn, priv, adhoc, night, volte, held, mon, video }) { x.Tick(now); s.Sessions.Add(x); }
         if (s.Groups.FirstOrDefault(g => g.Id == "g-patrol1") is { } vp) vp.VideoSession = video;
+        // 영상 그림 — 이순경 송출(세로 480×640) 한 장을 우편함에(실제 그리기 경로). 내 송출 표본이면 셀프뷰(가로 640×480)도
+        PushPreviewFrame(s.VideoFrames.Feed(video.CallId), 480, 640, "순찰1 · 이순경(현장지휘)", 0x2E6F9E);
+        if (videoTx)
+        {
+            s.SeedPreviewCamera("Integrated Camera");
+            video.Transmission = video.Transmission with { State = TransmissionState.Permitted };
+            video.TxSince = now.AddSeconds(-19);
+            video.TxReceivers.Add("1003"); video.TxReceivers.Add("1006");
+            PushPreviewFrame(s.VideoFrames.Feed(VideoFrames.SelfView), 640, 480, "관제1석 카메라", 0x6B4FA0);
+        }
         s.Activity.Add(ActivityPanel.Ptt, ActivityKind.Video, "순찰1 이순경(현장지휘) 영상 보내기 시작", "");
         s.Activity.Add(ActivityPanel.Ptt, ActivityKind.Video, "순찰1 이순경(현장지휘) 영상 보기", "");
         s.Activity.Add(ActivityPanel.Ptt, ActivityKind.Video, "순찰1 박경장 영상 보내기 시작", "");

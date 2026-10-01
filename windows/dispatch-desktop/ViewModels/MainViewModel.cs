@@ -299,10 +299,7 @@ public sealed partial class MainViewModel : ObservableObject
         if (!Panel.IsEvent) { Panel.Event = null; PttActivity.Mark(null); }
         if (!Panel.IsGroup && Panel.Group is { } g) { Panel.Group = null; if (!_groupToScreen && GroupsScreen.Editor == g) g.CancelCommand.Execute(null); }
         OnPropertyChanged(nameof(ListOpen));
-        OnPropertyChanged(nameof(IsPanelOpen));
     }
-    /// <summary>패널이 열려 오른쪽 칸이 좁다 — 타 채널 1열·이벤트 채널 열 접기·기록 목록만(§3.6).</summary>
-    public bool IsPanelOpen => Panel.IsOpen;
 
     /// <summary>내 채널 카드가 바뀌었다(개별·애드혹 종료) — 보던 카드가 사라졌으면 채널 상세를 닫는다.</summary>
     private void OnCardsChanged()

@@ -265,6 +265,7 @@ typedef struct {
     int32_t                      non_ack_user_count;
     cimsue_mc_service_t          service;           /* MCVideo 그룹 호면 MCVIDEO(그때 is_mcptt = 0) */
     const char*                  session_uri;       /* MC 세션 식별자 — 제어 기능 Contact(isfocus), 재합류에 쓴다 */
+    int32_t                      video_send;        /* 내 영상 송출 허용(set_video_send, 기본 1) — MCPTT 반이중은 발언권을 가진 동안만 실제로 보낸다 */
 } cimsue_call_info_t;
 
 typedef struct {
@@ -450,6 +451,16 @@ typedef struct {
     int32_t     render;
 } cimsue_video_device_info_t;
 
+/** 영상 프레임 한 장(types.h VideoFrame — 창 없는 프레임 렌더 빌드, Windows). BGRA 32 bpp, 위 줄부터. data 는 콜백 동안만 유효. */
+typedef struct {
+    int32_t        call_id;     /* 수신 영상 = 그 호, -1 = 내 카메라(셀프뷰 — cimsue_engine_set_video_preview) */
+    int32_t        width;
+    int32_t        height;
+    int32_t        stride;      /* 한 줄 바이트 수 */
+    const uint8_t* data;
+    int64_t        size;        /* stride × height */
+} cimsue_video_frame_t;
+
 /** 서버 인증서 만료 관측(types.h TlsPeerExpiry) — 마지막 성공 TLS 핸드셰이크의 peer 인증서. valid=0 이면 관측 없음. */
 typedef struct {
     int32_t     valid;
@@ -489,6 +500,9 @@ typedef struct {
     void (CIMSUE_CALL* on_transmission)(void* user, const cimsue_transmission_event_t* ev);
     /** MCVideo 수신 제어(Listener::onReception, §6.2.5) — 새 송출 알림(manual 이면 앱이 accept_reception)·수신 허가·종료. */
     void (CIMSUE_CALL* on_reception)(void* user, const cimsue_reception_event_t* ev);
+    /** 영상 프레임(Listener::onVideoFrame — 프레임 렌더 빌드만). **예외: 이벤트 스레드가 아니라 영상 스레드**에서 프레임마다 곧바로
+     *  불린다 — 화소를 복사하고 곧 돌아간다. 이 콜백 안에서 엔진 함수를 부르지 않는다(교착). */
+    void (CIMSUE_CALL* on_video_frame)(void* user, const cimsue_video_frame_t* frame);
 } cimsue_listener_t;
 
 /* ── 엔진 (engine.h 1:1) ── */
@@ -668,8 +682,16 @@ CIMSUE_API cimsue_status_t CIMSUE_CALL cimsue_engine_set_audio_route(cimsue_engi
                                                                      cimsue_audio_route_t input);
 /** 사운드 장치 재오픈(Engine::reopenAudioDevice) — 열려 있으면 닫고 곧바로 다시 연다. 닫혀 있으면 아무것도 하지 않는다. */
 CIMSUE_API cimsue_status_t CIMSUE_CALL cimsue_engine_reopen_audio_device(cimsue_engine_t* e);
-/** 수신 영상 렌더 대상(Engine::setVideoWindow) — 플랫폼 창 핸들(NULL = 해제). 영상 없는 빌드면 실패. */
+/** 수신 영상 렌더 대상(Engine::setVideoWindow) — 플랫폼 창 핸들(NULL = 해제). 영상 없는 빌드면 실패. 프레임 렌더 빌드(Windows)도
+ *  실패한다 — 프레임이 on_video_frame 으로 온다. */
 CIMSUE_API cimsue_status_t CIMSUE_CALL cimsue_engine_set_video_window(cimsue_engine_t* e, void* native_window);
+/** 셀프뷰 프레임(Engine::setVideoPreview — 프레임 렌더 빌드만) — on 이면 내 영상을 보내는 동안 카메라 프레임을 on_video_frame
+ *  (call_id -1)으로도 넘긴다. 카메라는 송출이 연다. */
+CIMSUE_API cimsue_status_t CIMSUE_CALL cimsue_engine_set_video_preview(cimsue_engine_t* e, int32_t on);
+/** 캡처 카메라 선택(Engine::setVideoCaptureDevice) — cimsue_engine_video_devices 의 캡처 장치 id, -1 = 기본. */
+CIMSUE_API cimsue_status_t CIMSUE_CALL cimsue_engine_set_video_capture_device(cimsue_engine_t* e, int32_t device_id);
+/** 내 영상 송출 허용(Engine::setVideoSend — CallInfo.videoSend). MCPTT 반이중은 허용이면서 발언권을 가진 동안만 보낸다. */
+CIMSUE_API cimsue_status_t CIMSUE_CALL cimsue_engine_set_video_send(cimsue_engine_t* e, int32_t call_id, int32_t on);
 /** 캡처 카메라 전환(Engine::switchCamera). */
 CIMSUE_API cimsue_status_t CIMSUE_CALL cimsue_engine_switch_camera(cimsue_engine_t* e, int32_t call_id);
 /** 영상 장치 목록. 반환 개수, *out 은 스냅샷 배열(다음 조회까지 유효). */
@@ -1159,6 +1181,7 @@ typedef enum {
     CIMSUE_STRUCT_VIDEO_GROUP_CALL_OPTIONS, CIMSUE_STRUCT_VIDEO_TRANSMITTER, CIMSUE_STRUCT_TRANSMISSION_EVENT,
     CIMSUE_STRUCT_RECEPTION_EVENT, CIMSUE_STRUCT_TRANSMISSION_INFO,
     CIMSUE_STRUCT_MCVIDEO_GROUP_ATTRS, CIMSUE_STRUCT_MCVIDEO_USER_PROFILE_DOC, CIMSUE_STRUCT_MCVIDEO_SERVICE_CONFIG_DOC,
+    CIMSUE_STRUCT_VIDEO_FRAME,
     CIMSUE_STRUCT_COUNT_
 } cimsue_struct_id_t;
 /** 구조체의 sizeof(이 DLL 의 컴파일 결과). 모르는 id 는 -1. */

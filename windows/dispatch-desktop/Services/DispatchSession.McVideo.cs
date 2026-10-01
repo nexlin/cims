@@ -4,7 +4,9 @@
 //   D10 «영상 참여» 단계가 없다 — 내 채널의 MCVideo 그룹은 앱이 영상 호에도 함께 합류한다(chat = 합류, prearranged = MCVideo affiliation +
 //   멤버 초대 자동 수락, TS 22.280 R-8.4.2-002). «채널» = 관제사가 내 채널에 둔 의도라 무전 세션의 T4·TNG3 해제(TS 24.379 §6.3.8.1)와 무관하게 이어지고,
 //   영상 호가 끝나면 다시 합류한다. 끝내는 것은 그룹이 내 채널에서 빠질 때·로그아웃뿐.
-//   D8 수신 manual — 송출을 골라 [보기](한 번에 하나 — 엔진 렌더 창이 전역 하나), [바꿔 보기] = 보던 것을 그만 보고 새것을 본다.
+//   D8 수신 manual — 송출을 골라 [보기](한 번에 하나 — 1차 수신 상한 1), [바꿔 보기] = 보던 것을 그만 보고 새것을 본다.
+//   그림 = 엔진 프레임(창 없는 프레임 렌더 — ue_sdk.md §4.5)을 VideoFrames 우편함이 보는 칸에만 넘긴다. 내 송출(D11)은 [영상 보내기] — 허가에서만 코어가
+//   카메라·영상 호 마이크를 연다. D12 마이크 경합 = 음성 우선(무전 발언 동안 영상 호 음성만 멈춤) / 영상 우선(영상 송출 동안 무전 발언 막음, 긴급·임박 예외).
 using CimsUe;
 using DispatchDesktop.Converters;
 using DispatchDesktop.Models;
@@ -33,6 +35,16 @@ public sealed partial class DispatchSession
 
     /// <summary>영상 절이 바뀌었다(연결·송출·수신) — 카드·채널 상세가 다시 그린다.</summary>
     public event EventHandler<GroupInfo>? VideoChanged;
+    /// <summary>영상 그림 우편함(§10.3) — 엔진 프레임(영상 스레드)을 보는 칸(호별·셀프뷰)에만 넘긴다.</summary>
+    public VideoFrames VideoFrames { get; }
+    /// <summary>[영상 보내기] 카메라(엔진 영상 장치 이름) — 비면 이 PC 에 카메라가 없다(송출 버튼 비활성).</summary>
+    public string CameraName { get; private set; } = "";
+    public bool HasCamera => CameraName.Length > 0;
+    /// <summary>D12 — 내가 무전 발언(요청·대기·발언) 중이라 영상 송출 호의 음성을 멈춰 둔 동안 true(채널 상세 «무전 중 — 영상은 계속» 안내).</summary>
+    public bool VideoMicYielded { get; private set; }
+    /// <summary>D12 음성 우선으로 음성을 멈춘 영상 호(callId).</summary>
+    private readonly HashSet<int> _videoMicMuted = new();
+    private DateTime _videoBlockNotedAt;
 
     private string McVideoPsi => _ueInit?.McvideoServerUri ?? "";
     /// <summary>동시 MCVideo 호 상한 N6(user profile &lt;MaxSimultaneousCallsN6&gt;) — 넘으면 서버가 486 103. 모르면 상한 없음으로 본다.</summary>
@@ -161,12 +173,95 @@ public sealed partial class DispatchSession
     {
         McVideoEnabled = false; _mcvideoProfile = null;               // 재합류 판정이 먼저 막힌다 — 호 번호는 다음 엔진에서 다시 쓰이므로 나가기 표시는 남기지 않는다
         _ducked.Clear(); _videoJoining.Clear(); _videoRetryAt.Clear(); _videoFailures.Clear(); _mcvideoAttrsLoading.Clear(); _videoLeaving.Clear(); _watchedLast.Clear();
+        _videoMicMuted.Clear(); VideoMicYielded = false;
+        VideoFrames.Remove(VideoFrames.SelfView);
         foreach (var b in Notify.Banners.Where(b => b.IsVideo).ToList()) Notify.RemoveBanner(b);
+    }
+
+    // ── 영상 장치(§10.3 — 엔진 = DirectShow 캡처 + 창 없는 프레임 렌더) ──
+
+    /// <summary>카메라·셀프뷰를 엔진에 건다 — 기동 뒤·설정 저장 뒤. 카메라는 설정 이름으로 찾고(id 는 재부팅마다 바뀔 수 있다) 없으면 첫 카메라.
+    /// 셀프뷰는 늘 켜 둔다 — 코어가 송출 중일 때만 카메라 프레임을 넘긴다(셀프뷰만으로 카메라를 열지 않는다).</summary>
+    public void ApplyVideoSettings()
+    {
+        if (!Engine.IsRunning) return;
+        var cams = Cameras();
+        string want = Settings.Current.VideoCaptureDevice;
+        var cam = cams.FirstOrDefault(d => d.Name == want) ?? cams.FirstOrDefault();
+        CameraName = cam?.Name ?? "";
+        if (cam is not null && Engine.SetVideoCaptureDevice(cam.Id) is { Ok: false } r) Log.Warn($"video capture device {cam.Name}: {r}");
+        if (Engine.SetVideoPreview(true) is { Ok: false } p) Log.Warn($"video self view: {p}");
+        Log.Info($"video camera={(cam is null ? "(없음)" : $"{cam.Name} [{cam.Driver}] #{cam.Id}")} cameras={cams.Count}" +
+                 (want.Length > 0 && cam?.Name != want ? $" — 설정 카메라 '{want}' 없음" : ""));
+        foreach (var g in Groups.Where(x => x.McVideo)) VideoChanged?.Invoke(this, g);
+    }
+
+    /// <summary>화면 점검(--ui-preview-videotx) — 엔진 없이 카메라가 있는 것처럼.</summary>
+    internal void SeedPreviewCamera(string name) => CameraName = name;
+
+    /// <summary>엔진이 아는 카메라(합성 색 막대·AVI 재생기 제외). 엔진이 서기 전엔 빈 목록 — 장치는 엔진 기동 때 한 번 열거한다.</summary>
+    public IReadOnlyList<VideoDeviceInfo> Cameras() =>
+        Engine.IsRunning ? Engine.VideoDevices.Where(d => d.IsCamera).ToList() : Array.Empty<VideoDeviceInfo>();
+
+    // ── 내 송출(§10.3 — D11 음성과 영상의 송출은 따로, TS 24.581 §6.2.4) ──
+
+    /// <summary>[영상 보내기] — Transmission Request(TS 24.581 §6.2.4.3.2). 허가가 오면 코어가 카메라·영상 호 마이크를 연다(허가에서만 — §6.2.4.4.6).</summary>
+    public Result RequestVideoTx(SessionItem s)
+    {
+        if (!HasCamera) return Show(Result.Fail(-1, "카메라 없음"), ResponseText.Area.Video);
+        var r = Engine.GetCall(s.CallId).RequestTransmission();
+        RefreshTransmission(s);
+        return Show(r, ResponseText.Area.Video);
+    }
+
+    /// <summary>[보내기 끝]·[요청 취소]·[대기 취소] — Transmission End Request(§6.2.4.5.3·§6.2.4.4.7·§6.2.4.9.4). 끝나면 코어가 카메라를 닫는다.</summary>
+    public Result ReleaseVideoTx(SessionItem s)
+    {
+        var r = Engine.GetCall(s.CallId).ReleaseTransmission();
+        RefreshTransmission(s);
+        return Show(r, ResponseText.Area.Video);
+    }
+
+    /// <summary>영상을 보내는(요청·대기 포함) 영상 호가 있다.</summary>
+    private bool SendingVideo => Sessions.Any(v => v.IsMcVideo && v.IsLive && v.Transmission.State is TransmissionState.Permitted or TransmissionState.PendingRequest or TransmissionState.Queued);
+
+    /// <summary>D12 영상 우선 — 영상을 보내는 동안 무전 발언 요청을 막는다(긴급·임박 채널은 늘 음성 — TS 22.280 R-8.3-004). 막으면 한 번 알린다.</summary>
+    private bool BlocksTalkForVideo(SessionItem s)
+    {
+        if (Settings.Current.VideoMicPolicy != "video" || s.IsMcVideo || !SendingVideo) return false;
+        if (s.Info.Condition.Emergency || s.Info.Condition.ImminentPeril) return false;
+        if (DateTime.Now - _videoBlockNotedAt > TimeSpan.FromSeconds(2))
+        {
+            _videoBlockNotedAt = DateTime.Now;
+            Notify.Warn("영상을 보내는 중 — 무전 발언을 막았습니다", "설정 «영상 보내는 중 무전» = 영상 우선. 긴급·임박 채널은 그대로 말할 수 있습니다.");
+        }
+        return true;
+    }
+
+    /// <summary>D12 음성 우선(마이크 경합 — TS 22.280 R-8.3-003) — 내가 무전 발언(요청·대기·발언) 중인 동안 영상 송출 호의 음성만 멈추고(코어 setMuted =
+    /// 오디오 인코더 정지, 영상은 계속 — ue_sdk.md §4.2), 끝나면 되돌린다. 영상 우선이라도 긴급·임박 발언은 여기를 지난다(마이크가 두 호로 겹치지 않게).</summary>
+    private void SyncVideoMic()
+    {
+        bool talking = Sessions.Any(x => !x.IsMcVideo && x.IsLive && x.Info.IsMcptt && x.Floor.State is FloorState.Requesting or FloorState.Speaking or FloorState.Queued);
+        bool yielded = false;
+        foreach (var v in Sessions.Where(x => x.IsMcVideo && x.IsLive).ToList())
+        {
+            bool mute = talking && v.Transmission.State == TransmissionState.Permitted;
+            yielded |= mute;
+            if (mute == _videoMicMuted.Contains(v.CallId)) continue;
+            var r = Engine.GetCall(v.CallId).SetMuted(mute);
+            if (!r.Ok) { Log.Warn($"video mic #{v.CallId} {mute}: {r}"); continue; }
+            if (mute) _videoMicMuted.Add(v.CallId); else _videoMicMuted.Remove(v.CallId);
+            Log.Info($"mcvideo #{v.CallId} audio {(mute ? "yielded to voice talk" : "resumed")} (D12)");
+        }
+        if (yielded == VideoMicYielded) return;
+        VideoMicYielded = yielded;
+        foreach (var g in Groups.Where(x => x.McVideo)) VideoChanged?.Invoke(this, g);
     }
 
     // ── 관제 동작 ──
 
-    /// <summary>[보기]·[바꿔 보기](§10.4) — Receive Media Request(TS 24.581 §6.2.5.3.3). 한 번에 하나 — 보던 송출이 있으면 먼저 그만 본다(엔진 렌더 창 하나).</summary>
+    /// <summary>[보기]·[바꿔 보기](§10.4) — Receive Media Request(TS 24.581 §6.2.5.3.3). 한 번에 하나 — 보던 송출이 있으면 먼저 그만 본다(1차 수신 상한 1).</summary>
     public Result AcceptVideo(SessionItem s, string transmitterId)
     {
         var call = Engine.GetCall(s.CallId);
@@ -176,8 +271,9 @@ public sealed partial class DispatchSession
             var e = call.EndReception(cur.UserId);
             if (!e.Ok) Log.Warn($"mcvideo end reception {cur.UserId}: {e}");
         }
-        foreach (var other in Sessions.Where(x => x.IsMcVideo && x != s && x.Receiving is not null).ToList())   // 다른 채널에서 보던 것도(창 하나)
+        foreach (var other in Sessions.Where(x => x.IsMcVideo && x != s && x.Receiving is not null).ToList())   // 다른 채널에서 보던 것도(한 번에 하나)
             Engine.GetCall(other.CallId).EndReception(other.Receiving!.UserId);
+        VideoFrames.Feed(s.CallId).Reset();                            // 앞 사람의 마지막 장이 남지 않게
         var r = call.AcceptReception(transmitterId);
         RefreshTransmission(s);
         return Show(r, ResponseText.Area.Video);
@@ -187,6 +283,7 @@ public sealed partial class DispatchSession
     public Result EndVideo(SessionItem s, string transmitterId)
     {
         var r = Engine.GetCall(s.CallId).EndReception(transmitterId);
+        VideoFrames.Feed(s.CallId).Reset();
         RefreshTransmission(s);
         return Show(r, ResponseText.Area.Video);
     }
@@ -241,6 +338,9 @@ public sealed partial class DispatchSession
         _videoJoining.Remove(ci.GroupId);
         if (Notify.VideoBannerOf(s) is { } b) Notify.RemoveBanner(b);
         Unduck(ci.GroupId);
+        VideoFrames.Remove(s.CallId);
+        _videoMicMuted.Remove(s.CallId);
+        if (!Sessions.Any(x => x.IsMcVideo && x != s && x.Transmission.State == TransmissionState.Permitted)) VideoFrames.Feed(VideoFrames.SelfView).Reset();
         Log.Info($"mcvideo session - #{s.CallId} {ci.GroupId} code={ci.LastCode} {ci.LastReason} mine={mine} connected={s.ConnectedAt is not null}");
         if (GroupOf(s) is not { } g) return;
         if (g.VideoSession == s) g.VideoSession = null;
@@ -261,14 +361,37 @@ public sealed partial class DispatchSession
         if (GroupOf(s) is { } g) VideoChanged?.Invoke(this, g);
     }
 
-    /// <summary>내 송출(§6.2.4) — 1차 관제 앱은 [영상 보내기]를 비활성(카메라 없음, D11)으로 두므로 서버발 거절·회수만 알린다.</summary>
+    /// <summary>내 송출(§6.2.4) — 허가(카메라·영상 호 마이크는 코어가 연다)·대기·거절·회수·끝. 보는 사람 = Media Reception Notification(§6.2.4.4.8)이 올 때만 센다.</summary>
     private void OnTransmission(TransmissionEvent e)
     {
         if (Find(e.CallId) is not { IsMcVideo: true } s) return;
-        Log.Info($"mcvideo tx #{e.CallId} {e.Kind} state={e.State} cause={e.Cause} {e.CauseText}");
-        if (e.Kind is TransmissionEventKind.Rejected or TransmissionEventKind.Revoked)
-            Notify.Warn($"{s.Title} — {ResponseText.VideoTransmissionText(e.Kind, e.Cause, GroupOf(s)?.McVideoMaxTransmitters ?? 0)}", $"#{e.Cause} {e.CauseText}");
+        Log.Info($"mcvideo tx #{e.CallId} {e.Kind} state={e.State} cause={e.Cause} {e.CauseText} queue={e.QueuePosition} rx={e.ReceiverId}");
+        switch (e.Kind)
+        {
+            case TransmissionEventKind.Granted:
+                s.TxSince = DateTime.Now; s.TxReceivers.Clear();
+                Activity.Add(ActivityPanel.Ptt, ActivityKind.Video, $"{s.Title} 내 영상 보내기 시작", "");
+                break;
+            case TransmissionEventKind.ReceiverJoined when e.ReceiverId.Length > 0:
+                s.TxReceivers.Add(UserPartConverter.UserPart(e.ReceiverId));
+                break;
+            case TransmissionEventKind.Rejected:
+            case TransmissionEventKind.Revoked:
+                Notify.Warn($"{s.Title} — {ResponseText.VideoTransmissionText(e.Kind, e.Cause, GroupOf(s)?.McVideoMaxTransmitters ?? 0)}", $"#{e.Cause} {e.CauseText}");
+                if (e.Kind == TransmissionEventKind.Revoked) Activity.Add(ActivityPanel.Ptt, ActivityKind.Error, $"{s.Title} 내 영상 보내기 회수", e.CauseText);
+                break;
+            case TransmissionEventKind.RequestTimeout:
+                Notify.Warn($"{s.Title} — 영상 보내기 요청에 응답이 없습니다");
+                break;
+        }
+        if (e.State == TransmissionState.NoPermission && s.TxSince is not null)
+        {
+            Activity.Add(ActivityPanel.Ptt, ActivityKind.Video, $"{s.Title} 내 영상 보내기 끝", DispatchSession.Fmt(DateTime.Now - s.TxSince.Value));
+            s.TxSince = null; s.TxReceivers.Clear();
+            if (!Sessions.Any(x => x.IsMcVideo && x != s && x.Transmission.State == TransmissionState.Permitted)) VideoFrames.Feed(VideoFrames.SelfView).Reset();
+        }
         RefreshTransmission(s);
+        SyncVideoMic();
     }
 
     /// <summary>수신 제어(§6.2.5) — 새 송출 알림·보기·끝. 새 송출은 «새 영상» 배너(채널마다 하나 — 가장 최근 송출)로 알린다: 송출자는 아무도 보지 않으면
@@ -301,13 +424,16 @@ public sealed partial class DispatchSession
                 s.TransmitterAnnounced.Remove(t.UserId);
                 Activity.Add(ActivityPanel.Ptt, ActivityKind.Video, $"{s.Title} {who} 영상 보내기 끝", "", number: num);
                 if (e.Transmitter.State == ReceptionState.Ended && _watchedLast.Remove((s.CallId, t.UserId))) Notify.Info($"{s.Title} — {ResponseText.WithIGa(who)} 영상 보내기를 멈췄습니다");
+                if (s.Receiving is null) VideoFrames.Feed(s.CallId).Reset();
                 break;
             case ReceptionEventKind.Released:
                 Activity.Add(ActivityPanel.Ptt, ActivityKind.Video, $"{s.Title} {who} 영상 그만 보기", "", number: num);
+                if (s.Receiving is null) VideoFrames.Feed(s.CallId).Reset();
                 break;
             case ReceptionEventKind.EndRequested:
                 Notify.Info($"{s.Title} — {who} 영상 보기가 끝났습니다", $"#{e.Cause} {e.CauseText}");
                 Activity.Add(ActivityPanel.Ptt, ActivityKind.Video, $"{s.Title} {who} 영상 보기 끝(서버)", e.CauseText, number: num);
+                if (s.Receiving is null) VideoFrames.Feed(s.CallId).Reset();
                 break;
         }
         if (e.Kind == ReceptionEventKind.Granted) _watchedLast.Add((s.CallId, t.UserId));
