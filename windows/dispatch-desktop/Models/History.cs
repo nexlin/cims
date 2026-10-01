@@ -30,6 +30,8 @@ public sealed record HistoryEntry(string Id, DateTime Time, HistoryKind Kind, st
     public int MemberCount { get; init; }
     /// <summary>발언 턴 = 화자 구간 수(동시 발언 세그먼트는 턴이 여럿). CMP segments.jsonl 집계(OAM 세션 인덱스) — 스캔 폴백이면 0.</summary>
     public int TurnCount { get; init; }
+    /// <summary>항목에 turnCount 가 실려 왔다 — 없으면 TurnCount 0 은 "발언 없음" 이 아니라 "모름".</summary>
+    public bool HasTurnCount { get; init; }
     public int SpeakerCount { get; init; }
     /// <summary>발화 구간 합(겹침 1회) / 발화 누적(화자별 합).</summary>
     public int TotalSpeechMs { get; init; }

@@ -138,6 +138,9 @@ public partial class App : Application
             }
             // --ui-preview-band=turns: 무전 시간대 밴드를 발언 수로 그려 본다(기본 = 세션 수).
             if (Arg("--ui-preview-band").Equals("turns", StringComparison.OrdinalIgnoreCase) && _mainVm is not null) _mainVm.HistoryScreen.BandMode = 1;
+            // --ui-preview-hour=<HH>: 시간대 밴드의 그 칸을 누른 상태(밴드가 발언 수면 그 시간의 발언 있는 세션만) · --ui-preview-bundles=open: 빈 세션 묶음을 다 펼친다.
+            if (Arg("--ui-preview-hour") is { Length: 2 } previewHour && _mainVm is not null) _mainVm.HistoryScreen.SelectedHour = previewHour;
+            if (Arg("--ui-preview-bundles").Equals("open", StringComparison.OrdinalIgnoreCase) && _mainVm is not null) _mainVm.HistoryScreen.PreviewOpenBundles();
             // --ui-preview-zoom=<배율>: 발언 타임라인 확대 상태로 그려 본다(눈금·트랙 폭·가로 스크롤).
             if (e.Args.FirstOrDefault(a => a.StartsWith("--ui-preview-zoom=", StringComparison.OrdinalIgnoreCase))?.Split('=', 2)[1] is { Length: > 0 } zoomArg && _mainVm is not null
                 && double.TryParse(zoomArg, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double z))

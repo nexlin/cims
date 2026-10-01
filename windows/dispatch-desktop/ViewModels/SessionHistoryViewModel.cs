@@ -7,8 +7,10 @@
 // 녹취 재생은 MP4(AAC) 를 받아(`/provisioning/recordings/{id}/segments/{seq}/audio?slot=`) 창의 MediaElement 로 튼다. ② ④ 실시간 내역과 달리
 // 이 화면은 지난 기록 열람 전용이다(폴링 없음).
 using System.Collections.ObjectModel;
+using System.Globalization;
 using System.IO;
 using System.Windows;
+using System.Windows.Data;
 using CimsUe;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -36,8 +38,9 @@ public sealed partial class HourCell : ObservableObject
     }
 }
 
-/// <summary>목록 한 행 — 통화(표 열)·PTT(요약 카드) 두 종류의 표시값을 서버 항목에서 미리 만든다. 이름은 주소록, 그룹은 GMS 목록 이름.</summary>
-public sealed class HistoryRow
+/// <summary>목록 한 행 — 통화(표 열)·PTT(요약 카드) 두 종류의 표시값을 서버 항목에서 미리 만든다. 이름은 주소록, 그룹은 GMS 목록 이름.
+/// 무전 목록은 빈 세션 묶음(§4.6)의 머리 행(IsBundle)과 펼친 묶음 안의 한 줄 행(IsBundleMember)도 이 행으로 그린다.</summary>
+public sealed partial class HistoryRow : ObservableObject
 {
     public HistoryEntry E { get; }
     public string TimeText => E.Time.ToString("HH:mm:ss");
@@ -64,7 +67,7 @@ public sealed class HistoryRow
     public string SessionKindText { get; }
     public bool IsDuplex => E.FloorControl == "off";
     public string TargetText { get; }
-    public string RangeText { get; }
+    public string RangeText { get; private set; }
     public string GroupIdText { get; }
     /// <summary>카드 둘째 줄 — 시각 범위(·길이)(· 그룹 id).</summary>
     public string SubText => GroupIdText.Length > 0 ? $"{RangeText} · {GroupIdText}" : RangeText;
@@ -82,6 +85,8 @@ public sealed class HistoryRow
     public bool IsAdhoc => E.SessionKind == "adhoc";
     /// <summary>MCVideo 그룹 호(영상 세션) — 무전 목록에 같이 서되 «영상» 라벨, 세는 말은 발언이 아니라 송출.</summary>
     public bool IsMcVideo => E.IsMcVideo;
+    /// <summary>발언(영상 세션은 송출) 없이 끝난 무전 세션 — 서버가 발언 수 0 을 실어 왔고 녹취도 없다(스캔 폴백은 발언 수가 늘 0 이라 녹취로 한 번 더 가른다). 진행 중이면 아니다.</summary>
+    public bool IsSilent => E.Kind == HistoryKind.Ptt && !IsLive && E.HasTurnCount && E.TurnCount == 0 && !E.HasRecording;
     /// <summary>영상 세션 속성 한 줄 — "chat · 동시 송출 2"(없으면 "").</summary>
     public string McvText => !E.IsMcVideo ? "" : string.Join(" · ", new[]
         { E.McvSessionType switch { "chat" => "chat", "prearranged" => "편성", _ => "" }, E.McvMaxTransmitters > 0 ? $"동시 송출 {E.McvMaxTransmitters}" : "" }.Where(x => x.Length > 0));
@@ -91,7 +96,43 @@ public sealed class HistoryRow
     public string StartClock => E.AxisTime.ToString("HH:mm");
     public int PeopleCount => E.People.Count > 0 ? E.People.Count : E.MemberCount;
     public string WhoLine { get; }
-    public string StatLine { get; }
+    public string StatLine { get; private set; }
+    /// <summary>세션 길이(초) — 시작~종료, 없으면 서버 duration.</summary>
+    public int DurSec { get; }
+
+    // ── 빈 세션 묶음(§4.6) — 목록에서 연달아 나오는 같은 그룹·같은 개시자의 빈 세션(IsSilent) 2건 이상을 한 장으로.
+    //    머리 행 = 가장 최근 세션의 행(고르면 그 세션이 열린다) + Members(최근이 앞), 펼치면 머리 아래에 한 줄 행(IsBundleMember)이 붙는다.
+    public bool IsBundle { get; private init; }
+    public IReadOnlyList<HistoryRow> Members { get; private init; } = Array.Empty<HistoryRow>();
+    /// <summary>펼침 상태의 열쇠 — 시간대 + 가장 이른 세션(새 세션이 위에 붙어도 이어진다).</summary>
+    public string BundleKey { get; private init; } = "";
+    public string BundleTagText => $"빈 세션 {Members.Count}건";
+    [ObservableProperty] private bool _isBundleMember;
+    [ObservableProperty] private bool _bundleExpanded;
+    public string BundleToggleText => BundleExpanded ? "접기" : $"{Members.Count}건 펼치기";
+    public bool IsCard => !IsBundleMember;
+    /// <summary>펼친 묶음 안 한 줄의 오른쪽 — "발언 0회"(영상 세션은 송출).</summary>
+    public string MemberStat => $"{(E.IsMcVideo ? "송출" : "발언")} {E.TurnCount}회";
+    partial void OnBundleExpandedChanged(bool value) => OnPropertyChanged(nameof(BundleToggleText));
+    partial void OnIsBundleMemberChanged(bool value) => OnPropertyChanged(nameof(IsCard));
+    private string _bundleRange = "";
+    /// <summary>카드 오른쪽 위 시각 — 묶음은 가장 이른 ~ 가장 늦은 시작 시각.</summary>
+    public string ClockText => IsBundle ? _bundleRange : StartClock;
+    /// <summary>시간대 머리 건수에 더하는 세션 수 — 묶음 머리 = 묶은 수, 펼친 한 줄 = 0(머리가 셌다), 나머지 1.</summary>
+    public int Weight => IsBundle ? Members.Count : IsBundleMember ? 0 : 1;
+
+    /// <summary>빈 세션 묶음의 머리 행 — members 는 목록 순서(최근이 앞), 2건 이상.</summary>
+    public static HistoryRow Bundle(IReadOnlyList<HistoryRow> members, DispatchSession s, string key)
+    {
+        var top = members[0]; var first = members[^1];
+        int lo = members.Min(m => m.DurSec), hi = members.Max(m => m.DurSec);
+        string each = lo == hi ? SessionHistoryViewModel.FmtDur(lo) : hi < 60 ? $"{lo}~{hi}초" : $"{SessionHistoryViewModel.FmtDur(lo)} ~ {SessionHistoryViewModel.FmtDur(hi)}";
+        var head = new HistoryRow(top.E, s) { IsBundle = true, Members = members, BundleKey = key };
+        head._bundleRange = $"{first.StartClock} ~ {top.StartClock}";
+        head.StatLine = $"각 {each} · {(top.E.IsMcVideo ? "송출" : "발언")} 0회";
+        head.RangeText = $"{first.E.StartTime ?? first.E.AxisTime:HH:mm:ss} ~ {top.E.EndTime ?? top.E.AxisTime:HH:mm:ss} · 빈 세션 {members.Count}건 — 고르면 가장 최근 세션";
+        return head;
+    }
 
     // 통화 카드·상세(§4.6 — 무전과 같은 짜임: 왼쪽 두 줄 카드 + 오른쪽 상세). 결과 = 응답/통화 중/부재/실패/거절/취소/오류,
     // 톤 = 태그 색(neutral 회색 · talk 초록 · warn 주황 · bad 빨강) — 관제 «기록»·채널 카드와 같은 상태색
@@ -134,6 +175,7 @@ public sealed class HistoryRow
             Parties = e.From.Length > 0 ? $"{TargetText} · 개시 {who(e.From)}" : TargetText;
             var st = e.StartTime ?? e.Time;
             int dur = e.EndTime is { } et && e.StartTime is { } s0 ? Math.Max(0, (int)(et - s0).TotalSeconds) : e.DurationSec;
+            DurSec = dur;
             RangeText = $"{st:HH:mm:ss} ~ {(IsLive ? "진행중" : Clock(e.EndTime))}" + (dur > 0 ? $" · {SessionHistoryViewModel.FmtDur(dur)}" : "");
             DurationText = dur > 0 ? SessionHistoryViewModel.FmtDur(dur) : "";
             GroupIdText = e.SessionKind is "" or "group" ? UserPartConverter.UserPart(e.Group) : "";
@@ -188,6 +230,14 @@ public sealed class HistoryRow
             _ => e.Event,
         };
     }
+}
+
+/// <summary>시간대 묶음 머리의 건수 — 행 수가 아니라 세션 수(묶음 머리 = 묶은 수, 펼친 한 줄 = 0). [0] = 그룹 Items, [1] = ItemCount(바뀜 알림용).</summary>
+public sealed class HourGroupCountConverter : IMultiValueConverter
+{
+    public object Convert(object[] values, Type t, object? p, CultureInfo c) =>
+        values.Length > 0 && values[0] is System.Collections.IEnumerable items ? $"{items.Cast<object>().Sum(x => x is HistoryRow r ? r.Weight : 1)}건" : "";
+    public object[] ConvertBack(object v, Type[] t, object? p, CultureInfo c) => throw new NotSupportedException();
 }
 
 /// <summary>선택 세션의 참여자 한 줄 — 입퇴장 기록 ∪ 화자(녹취 턴). 발언 통계는 턴에서 센다(참가만 한 사람은 0).</summary>
@@ -254,6 +304,8 @@ public sealed partial class SessionHistoryViewModel : ObservableObject
     [ObservableProperty] private bool _playingHasVideo;
     /// <summary>무전 목록의 서비스 거르기 — all | ptt(음성 무전) | mcvideo(영상). 서버가 서비스 축을 실어 줄 때만 칩이 보인다.</summary>
     [ObservableProperty] private string _serviceFilter = "all";
+    /// <summary>무전 목록의 빈 세션 묶기(기본 켬) — 연달아 나오는 같은 그룹·같은 개시자의 빈 세션(HistoryRow.IsSilent)을 한 장으로. 끄면 한 장씩.</summary>
+    [ObservableProperty] private bool _groupSilent = true;
     /// <summary>시간대 필터("" = 전체). 밴드 칸 클릭으로 토글, 날짜·종류가 바뀌면 해제.</summary>
     [ObservableProperty] private string _selectedHour = "";
     [ObservableProperty] private bool _detailLoading;
@@ -318,7 +370,10 @@ public sealed partial class SessionHistoryViewModel : ObservableObject
     [ObservableProperty] private int _bandMode;
     public bool BandShowsTurns => IsPtt && BandMode == 1;
     /// <summary>시간대 밴드 제목 — 무엇을 센 건지(통화 = 통화 시도 INVITE, PTT = 무전 세션 시작 / 발언).</summary>
-    public string BandTitle => !IsPtt ? "시간대별 통화 횟수" : BandShowsTurns ? "시간대별 발언 수" : "시간대별 무전 세션 수";
+    /// <summary>밴드 제목 — 무전은 [세션 수 | 발언 수] 전환이 제목 바로 뒤라 제목 글자를 고정한다(전환을 눌러도 전환 자리가 움직이지 않게).</summary>
+    public string BandTitle => !IsPtt ? "시간대별 통화 횟수" : "시간대별 무전";
+    /// <summary>밴드 칸 클릭의 뜻 — [발언 수] 에서는 그 시간의 발언 있는 세션만.</summary>
+    public string BandHint => BandShowsTurns ? "칸을 누르면 그 시간의 발언 있는 세션만 · 다시 누르면 전체" : "칸을 누르면 그 시간만 · 다시 누르면 전체";
     /// <summary>좌 목록 : 우 패널 폭 — 통화·무전 모두 상세 패널이 주역이라 1 : 3(카드 목록은 요약이면 충분하다).
     /// 화면은 이 값을 기본 폭으로 놓고 사용자가 경계를 끌어 바꿀 수 있다(더블클릭 = 기본 폭).</summary>
     public GridLength ListWidth => new GridLength(1, GridUnitType.Star);
@@ -332,16 +387,30 @@ public sealed partial class SessionHistoryViewModel : ObservableObject
     partial void OnKindIndexChanged(int value)
     {
         OnPropertyChanged(nameof(IsPtt)); OnPropertyChanged(nameof(IsCall)); OnPropertyChanged(nameof(PaneWidth)); OnPropertyChanged(nameof(BandTitle)); OnPropertyChanged(nameof(BandShowsTurns));
-        OnPropertyChanged(nameof(HasServiceAxis));
+        OnPropertyChanged(nameof(HasServiceAxis)); OnPropertyChanged(nameof(BandHint));
         SelectedHour = ""; if (!_suppressQuery) _ = QueryAsync();
     }
     partial void OnDateChanged(DateTime value) { SelectedHour = ""; _ = QueryAsync(); }
-    partial void OnSelectedChanged(HistoryRow? value) { OnPropertyChanged(nameof(HasSelection)); OnPropertyChanged(nameof(SelectedHasRecording)); RaiseVideoSessionChanged(); _ = LoadSelectionAsync(value); }
+    partial void OnSelectedChanged(HistoryRow? value)
+    {
+        OnPropertyChanged(nameof(HasSelection)); OnPropertyChanged(nameof(SelectedHasRecording)); RaiseVideoSessionChanged();
+        if (!_rebuilding) _ = LoadSelectionAsync(value);                  // 목록을 다시 채우는 동안(Filter)의 선택 흔들림은 패널을 다시 읽지 않는다
+    }
     partial void OnSelectedSegmentChanged(RecordingSegment? value) => OnPropertyChanged(nameof(CanPlay));
     partial void OnLoadingAudioChanged(bool value) => OnPropertyChanged(nameof(CanPlay));
     partial void OnMediaSourceChanged(string value) { OnPropertyChanged(nameof(IsPlaying)); OnPropertyChanged(nameof(ShowVideo)); }
     partial void OnPlayingHasVideoChanged(bool value) => OnPropertyChanged(nameof(ShowVideo));
     partial void OnServiceFilterChanged(string value) => Filter();
+    partial void OnGroupSilentChanged(bool value) => Filter();
+    /// <summary>묶음 머리의 [n건 펼치기]/[접기] — 그 묶음만 펼친다(펼친 묶음은 날짜를 다시 조회해도 열쇠가 같으면 펼친 채).</summary>
+    [RelayCommand] private void ToggleBundle(HistoryRow? row)
+    {
+        if (row is not { IsBundle: true }) return;
+        if (!_openBundles.Remove(row.BundleKey)) _openBundles.Add(row.BundleKey);
+        Filter();
+    }
+    /// <summary>--ui-preview-bundles=open — 표본의 빈 세션 묶음을 전부 펼친다.</summary>
+    public void PreviewOpenBundles() { foreach (var r in Rows.Where(r => r.IsBundle).ToList()) _openBundles.Add(r.BundleKey); Filter(); }
     partial void OnRecordingChanged(RecordingInfo? value) { OnPropertyChanged(nameof(HasRecording)); RaiseVideoSessionChanged(); }
     private void RaiseVideoSessionChanged()
     {
@@ -350,7 +419,11 @@ public sealed partial class SessionHistoryViewModel : ObservableObject
     [RelayCommand] private void SetServiceFilter(string value) => ServiceFilter = value;
     partial void OnSelectedHourChanged(string value) { OnPropertyChanged(nameof(HasHourFilter)); foreach (var c in Hours) c.IsSelected = c.Hour == value; Filter(); }
     partial void OnTalkZoomChanged(double value) { OnPropertyChanged(nameof(TalkZoomText)); OnPropertyChanged(nameof(IsTalkZoomed)); RebuildAxisTicks(); }
-    partial void OnBandModeChanged(int value) { OnPropertyChanged(nameof(BandTitle)); OnPropertyChanged(nameof(BandShowsTurns)); RebuildHours(); }
+    partial void OnBandModeChanged(int value)
+    {
+        OnPropertyChanged(nameof(BandTitle)); OnPropertyChanged(nameof(BandShowsTurns)); OnPropertyChanged(nameof(BandHint)); RebuildHours();
+        if (SelectedHour.Length > 0) Filter();                            // 고른 시간대의 거르기 뜻이 바뀐다(전체 ↔ 발언 있는 세션만)
+    }
     /// <summary>틈 줄임을 켜고 끄면 고른 세션의 패널을 같은 자료로 다시 그린다(막대 위치·눈금이 축에 달려 있다).</summary>
     partial void OnCompactGapsChanged(bool value)
     {
@@ -467,33 +540,85 @@ public sealed partial class SessionHistoryViewModel : ObservableObject
     /// <summary>밴드 칸 클릭 — 그 시간대만(다시 누르면 해제). 건수 0 인 칸은 무시.</summary>
     [RelayCommand] private void SelectHour(string hour)
     {
-        if (!_hours.TryGetValue(hour, out int n) || n == 0) { if (SelectedHour == hour) SelectedHour = ""; return; }
+        int n = BandShowsTurns ? Hours.FirstOrDefault(c => c.Hour == hour)?.Count ?? 0 : _hours.TryGetValue(hour, out int v) ? v : 0;
+        if (n == 0) { if (SelectedHour == hour) SelectedHour = ""; return; }
         SelectedHour = SelectedHour == hour ? "" : hour;
     }
 
+    // 목록 행 재사용 — 같은 항목이면 같은 행 객체(거르기·펼치기를 바꿔도 고른 행이 그대로 남는다). 받은 목록(_all)이 바뀌면 비운다
+    private readonly Dictionary<HistoryEntry, HistoryRow> _rowCache = new(ReferenceEqualityComparer.Instance);
+    private readonly Dictionary<string, HistoryRow> _bundleCache = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _openBundles = new(StringComparer.Ordinal);
+    private IReadOnlyList<HistoryEntry>? _cacheOf;
+    private bool _rebuilding;
+
     private void Filter()
     {
-        Rows.Clear();
+        if (!ReferenceEquals(_cacheOf, _all)) { _rowCache.Clear(); _bundleCache.Clear(); _cacheOf = _all; }
         string q = Search.Trim();
         string qn = DirectoryService.Normalize(q);
+        bool speechOnly = BandShowsTurns && SelectedHour.Length > 0;     // [발언 수] 칸을 눌렀다 — 그 시간의 발언 있는 세션만
+        var shown = new List<HistoryRow>();
         foreach (var e in _all)
         {
             if (SelectedHour.Length > 0 && e.AxisTime.ToString("HH") != SelectedHour) continue;
             if (IsPtt && ServiceFilter != "all" && (ServiceFilter == "mcvideo") != e.IsMcVideo) continue;
-            var row = new HistoryRow(e, _s);
+            if (speechOnly && e.TurnCount == 0 && !e.HasRecording) continue;
+            if (!_rowCache.TryGetValue(e, out var row)) _rowCache[e] = row = new HistoryRow(e, _s);
             if (q.Length > 0 && !row.Parties.Contains(q, StringComparison.OrdinalIgnoreCase)
                 && !(qn.Length > 0 && (DirectoryService.Normalize(e.From).Contains(qn) || DirectoryService.Normalize(e.To).Contains(qn)
                                        || e.People.Any(p => DirectoryService.Normalize(p).Contains(qn))))) continue;
-            Rows.Add(row);
+            shown.Add(row);
         }
-        int live = Rows.Count(x => x.IsLive);
-        Summary = $"{Date:yyyy-MM-dd}{(SelectedHour.Length > 0 ? $" {SelectedHour}시" : "")} · {Rows.Count}건"
+
+        // 목록 채우기 — 빈 세션 묶기가 켜져 있으면 연달아 나오는 같은 그룹·같은 개시자의 빈 세션 2건 이상을 머리 한 장(+ 펼치면 한 줄씩)으로
+        var keep = Selected;
+        int silent = 0, bundles = 0;
+        _rebuilding = true;
+        Rows.Clear();
+        for (int i = 0; i < shown.Count; i++)
+        {
+            var row = shown[i];
+            if (row.IsSilent) silent++;
+            int j = i;
+            if (IsPtt && GroupSilent && row.IsSilent)
+                while (j + 1 < shown.Count && SameSilentRun(row, shown[j + 1])) j++;
+            if (j == i) { row.IsBundleMember = false; Rows.Add(row); continue; }
+            var members = shown.GetRange(i, j - i + 1);
+            silent += members.Count - 1;
+            string key = $"{row.HourKey}|{members[^1].E.Id}";
+            string ck = $"{key}|{row.E.Id}|{members.Count}";
+            if (!_bundleCache.TryGetValue(ck, out var head)) _bundleCache[ck] = head = HistoryRow.Bundle(members, _s, key);
+            bool open = _openBundles.Contains(key);
+            head.BundleExpanded = open;
+            Rows.Add(head); bundles++;
+            foreach (var m in members) { m.IsBundleMember = true; if (open) Rows.Add(m); }
+            i = j;
+        }
+        _rebuilding = false;
+
+        int live = shown.Count(x => x.IsLive);
+        Summary = $"{Date:yyyy-MM-dd}{(SelectedHour.Length > 0 ? $" {SelectedHour}시" : "")}{(speechOnly ? " 발언 있는 세션" : "")} · {shown.Count}건"
                   + (live > 0 ? $" · 진행중 {live}" : "")
-                  + (Rows.Count(x => x.HasRecording) is > 0 and var n ? $" · 녹취 {n}건" : "")
-                  + (IsPtt && Rows.Count(x => x.IsMcVideo) is > 0 and var nv ? $" · 영상 {nv}건" : "")
-                  + (IsPtt && Rows.Where(x => !x.IsMcVideo).Sum(x => x.E.TotalSpeechMs) is > 0 and var sp ? $" · 발화 합 {FmtSpeech(sp)}" : "");
-        if (Selected is not null && !Rows.Contains(Selected)) Selected = null;
+                  + (shown.Count(x => x.HasRecording) is > 0 and var n ? $" · 녹취 {n}건" : "")
+                  + (IsPtt && shown.Count(x => x.IsMcVideo) is > 0 and var nv ? $" · 영상 {nv}건" : "")
+                  + (IsPtt && shown.Where(x => !x.IsMcVideo).Sum(x => x.E.TotalSpeechMs) is > 0 and var sp ? $" · 발화 합 {FmtSpeech(sp)}" : "")
+                  + (IsPtt && silent > 0 ? $" · 빈 세션 {silent}건{(bundles > 0 ? $" → {bundles}묶음" : "")}" : "");
+
+        // 고른 행을 되짚는다 — 목록을 다시 채우면 ListBox 가 선택을 놓는다. 그대로 있으면 다시 짚고, 묶음에 접혀 들어갔으면 그 묶음 머리를 고른다
+        if (keep is null) return;
+        HistoryRow? again = Rows.Contains(keep) ? keep
+            : Rows.FirstOrDefault(r => ReferenceEquals(r.E, keep.E))
+              ?? Rows.FirstOrDefault(r => r.IsBundle && r.Members.Any(m => ReferenceEquals(m.E, keep.E)));
+        if (again is null) Selected = null;
+        else if (ReferenceEquals(Selected, again)) OnPropertyChanged(nameof(Selected));
+        else { _rebuilding = ReferenceEquals(again.E, keep.E); Selected = again; _rebuilding = false; }   // 같은 세션이면 패널을 다시 읽지 않는다
     }
+
+    /// <summary>빈 세션 묶음에 이어 붙는가 — 같은 시간대 · 같은 서비스 · 같은 그룹 · 같은 개시자의 빈 세션.</summary>
+    private static bool SameSilentRun(HistoryRow a, HistoryRow b) =>
+        b.IsSilent && b.HourKey == a.HourKey && b.E.IsMcVideo == a.E.IsMcVideo
+        && string.Equals(b.E.Group, a.E.Group, StringComparison.OrdinalIgnoreCase) && SameUser(b.E.From, a.E.From);
 
     // ── 선택 세션 ──
 
@@ -1058,8 +1183,17 @@ public sealed partial class SessionHistoryViewModel : ObservableObject
             { State = "ended", SessionKind = "group", Service = "mcvideo", McvSessionType = "chat", McvMaxTransmitters = 2, StartTime = at(15, 5), EndTime = at(15, 8, 20),
               GroupName = "1팀 무전", MemberCount = 6, TurnCount = 2, SpeakerCount = 2, TotalSpeechMs = 95_000, TalkMs = 95_000,
               People = new[] { "+821310002001", "+821310002002", "+821310002003" } });
+            // 빈 세션 반복(§4.6 빈 세션 묶기) — 한 사람이 1분마다 호를 열었다 말없이 닫는다(유지 시간 T4 30초). 13:24 의 발언 세션이 묶음을 둘로 끊는다
+            for (int i = 0; i < 9; i++)
+            {
+                var st = at(13, 20 + i); bool spoke = i == 4; int len = spoke ? 46 : 30 + i % 2;
+                list.Add(new HistoryEntry($"rep-{i}", st.AddSeconds(len), HistoryKind.Ptt, "ptt.session.end", "tel:+821310002003", "", "tel:g003", len, false, "", spoke ? $"ptt/1/rep/{i}" : "", spoke)
+                { State = "ended", SessionKind = "group", StartTime = st, EndTime = st.AddSeconds(len), GroupName = "야간 순찰", MemberCount = 10, TurnCount = spoke ? 1 : 0,
+                  SpeakerCount = spoke ? 1 : 0, TotalSpeechMs = spoke ? 3_000 : 0, FloorControl = "on", FloorPolicy = "single" });
+            }
             // 서비스 축이 실린 응답의 모양으로 — 음성 세션은 "ptt"
             for (int i = 0; i < list.Count; i++) if (list[i].Service.Length == 0) list[i] = list[i] with { Service = "ptt" };
+            for (int i = 0; i < list.Count; i++) list[i] = list[i] with { HasTurnCount = true };   // 세션 인덱스가 실어 준 모양 — 발언 0 인 개별 호(ses-4)가 «발언 없음»
             var v0 = at(15, 5);
             _previewVideoSegments = new[]
             {

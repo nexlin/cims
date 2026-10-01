@@ -163,7 +163,7 @@ public sealed class HistoryClient : IDisposable
                 InviteTime = Time(it, "inviteTime"), AnswerTime = Time(it, "answerTime"), EndTime = Time(it, "endTime"),
                 EndReason = Str(it, "endReason"), SipStatus = Int(it, "sipStatus"),
                 SessionKind = Str(it, "sessionKind"), StartTime = Time(it, "startTime"), GroupName = Str(it, "groupName"),
-                MemberCount = Int(it, "memberCount"), TurnCount = Int(it, "turnCount"), SpeakerCount = Int(it, "speakerCount"),
+                MemberCount = Int(it, "memberCount"), TurnCount = Int(it, "turnCount"), HasTurnCount = it.TryGetProperty("turnCount", out var tc) && tc.ValueKind == JsonValueKind.Number, SpeakerCount = Int(it, "speakerCount"),
                 TotalSpeechMs = Int(it, "totalSpeechMs"), TalkMs = Int(it, "talkMs"), MaxConcurrent = Int(it, "maxConcurrent"),
                 FloorControl = Str(it, "floorControl"), FloorPolicy = Str(it, "floorPolicy"), MaxTalkers = Int(it, "maxTalkers"),
                 People = people,

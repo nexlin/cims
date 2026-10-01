@@ -205,13 +205,28 @@
         <!-- 무전 세션 카드 — 관제 채널 카드(§4 공통)와 같은 모양: 1줄 상태 점 · 이름 · 라벨(영상/개별/애드혹/전이중/진행 중/긴급) · 시각 · 2줄 개시·참여 · 3줄 길이·발언(영상 세션은 송출).
              고른 카드 = 남색 테두리 2.5 + 연한 남색 면, 긴급 = 빨강 테두리 2 + 연한 빨강 면 -->
         <DataTemplate x:Key="PttCardTpl" DataType="{x:Type vm:HistoryRow}">
-            <Border x:Name="Card" Margin="8,3,8,3" CornerRadius="10" BorderThickness="1" BorderBrush="{DynamicResource Brush.BorderStrong}" Background="{DynamicResource Brush.Surface}"
-                    Padding="12,7,10,7" Cursor="Hand" ToolTip="{Binding RangeText}">
+            <Grid x:Name="Root" Margin="8,3,8,3">
+            <!-- 빈 세션 묶음 머리 — 뒤에 겹친 카드 두 장(묶였다는 표시) -->
+            <Border Margin="10,0,10,-8" CornerRadius="10" BorderThickness="1" BorderBrush="{DynamicResource Brush.Border}" Background="{DynamicResource Brush.Surface}"
+                    Visibility="{Binding IsBundle, Converter={StaticResource BoolToVis}}" />
+            <Border Margin="5,0,5,-4" CornerRadius="10" BorderThickness="1" BorderBrush="{DynamicResource Brush.BorderStrong}" Background="{DynamicResource Brush.Surface}"
+                    Visibility="{Binding IsBundle, Converter={StaticResource BoolToVis}}" />
+            <!-- 펼친 묶음 안의 한 줄 — 시각 범위·길이 / 발언 0회 -->
+            <Border x:Name="Member" Margin="18,0,0,0" CornerRadius="7" BorderThickness="1" BorderBrush="{DynamicResource Brush.Border}" Background="{DynamicResource Brush.Surface2}"
+                    Padding="10,4,10,4" Cursor="Hand" Visibility="{Binding IsBundleMember, Converter={StaticResource BoolToVis}}">
+                <DockPanel>
+                    <TextBlock DockPanel.Dock="Right" Style="{StaticResource Muted}" Text="{Binding MemberStat}" FontSize="11.5" VerticalAlignment="Center" Margin="8,0,0,0" />
+                    <TextBlock Style="{StaticResource MonoMuted}" Text="{Binding RangeText}" FontSize="12" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                </DockPanel>
+            </Border>
+            <Border x:Name="Card" CornerRadius="10" BorderThickness="1" BorderBrush="{DynamicResource Brush.BorderStrong}" Background="{DynamicResource Brush.Surface}"
+                    Padding="12,7,10,7" Cursor="Hand" ToolTip="{Binding RangeText}" Visibility="{Binding IsCard, Converter={StaticResource BoolToVis}}">
                 <StackPanel>
                     <DockPanel>
                         <!-- 이름이 길면 이름만 줄인다 — 라벨·시각은 오른쪽에 붙어 잘리지 않는다 -->
-                        <TextBlock DockPanel.Dock="Right" Style="{StaticResource MonoMuted}" Text="{Binding StartClock}" FontSize="12" VerticalAlignment="Center" Margin="2,0,0,0" />
+                        <TextBlock DockPanel.Dock="Right" Style="{StaticResource MonoMuted}" Text="{Binding ClockText}" FontSize="12" VerticalAlignment="Center" Margin="2,0,0,0" />
                         <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center" Margin="6,0,0,0">
+                            <Border Style="{StaticResource Tag}" Visibility="{Binding IsBundle, Converter={StaticResource BoolToVis}}" ToolTip="같은 그룹·같은 개시자가 연달아 연 빈 세션(발언 없이 끝난 세션)"><TextBlock Text="{Binding BundleTagText}" /></Border>
                             <Border Style="{StaticResource Tag.Teal}" Visibility="{Binding IsMcVideo, Converter={StaticResource BoolToVis}}" ToolTip="MCVideo 그룹 영상 호 — 같은 그룹의 영상 세션"><TextBlock Text="영상" /></Border>
                             <Border Style="{StaticResource Tag}" Visibility="{Binding IsPrivate, Converter={StaticResource BoolToVis}}"><TextBlock Text="개별" /></Border>
                             <Border Style="{StaticResource Tag}" Visibility="{Binding IsAdhoc, Converter={StaticResource BoolToVis}}"><TextBlock Text="애드혹" /></Border>
@@ -224,12 +239,29 @@
                         <TextBlock x:Name="Name" Text="{Binding TargetText}" FontSize="14" FontWeight="Bold" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
                     </DockPanel>
                     <TextBlock Text="{Binding WhoLine}" FontSize="12.5" Margin="16,2,0,0" Foreground="{DynamicResource Brush.TextSoft}" TextTrimming="CharacterEllipsis" />
-                    <TextBlock Text="{Binding StatLine}" Style="{StaticResource Muted}" FontSize="12" Margin="16,1,0,0" TextTrimming="CharacterEllipsis" />
+                    <DockPanel Margin="16,1,0,0">
+                        <!-- 묶음 머리만 — 그 묶음을 펼친다/접는다 -->
+                        <Button DockPanel.Dock="Right" Style="{StaticResource Btn.Xs}" Margin="8,0,0,0" VerticalAlignment="Bottom"
+                                Command="{Binding DataContext.ToggleBundleCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding}"
+                                Visibility="{Binding IsBundle, Converter={StaticResource BoolToVis}}">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="{Binding BundleToggleText}" VerticalAlignment="Center" />
+                                <Path x:Name="Chev" Style="{StaticResource Icon}" Data="{StaticResource Icon.ChevronDown}" Width="11" Height="11" Margin="4,0,0,0" RenderTransformOrigin="0.5,0.5" />
+                            </StackPanel>
+                        </Button>
+                        <TextBlock Text="{Binding StatLine}" Style="{StaticResource Muted}" FontSize="12" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                    </DockPanel>
                 </StackPanel>
             </Border>
+            </Grid>
             <DataTemplate.Triggers>
                 <DataTrigger Binding="{Binding IsLive}" Value="True"><Setter TargetName="Dot" Property="Fill" Value="{DynamicResource Brush.Talk}" /></DataTrigger>
-                <DataTrigger Binding="{Binding IsMouseOver, RelativeSource={RelativeSource AncestorType=ListBoxItem}}" Value="True"><Setter TargetName="Card" Property="Background" Value="{DynamicResource Brush.Hover}" /></DataTrigger>
+                <DataTrigger Binding="{Binding IsMouseOver, RelativeSource={RelativeSource AncestorType=ListBoxItem}}" Value="True">
+                    <Setter TargetName="Card" Property="Background" Value="{DynamicResource Brush.Hover}" /><Setter TargetName="Member" Property="Background" Value="{DynamicResource Brush.Hover}" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding IsBundle}" Value="True"><Setter TargetName="Root" Property="Margin" Value="8,3,8,11" /></DataTrigger>
+                <DataTrigger Binding="{Binding IsBundleMember}" Value="True"><Setter TargetName="Root" Property="Margin" Value="8,1,8,1" /></DataTrigger>
+                <DataTrigger Binding="{Binding BundleExpanded}" Value="True"><Setter TargetName="Chev" Property="RenderTransform"><Setter.Value><RotateTransform Angle="180" /></Setter.Value></Setter></DataTrigger>
                 <DataTrigger Binding="{Binding IsEmergency}" Value="True">
                     <Setter TargetName="Card" Property="BorderBrush" Value="{DynamicResource Brush.Emg}" /><Setter TargetName="Card" Property="BorderThickness" Value="2" />
                     <Setter TargetName="Card" Property="Background" Value="{DynamicResource Brush.EmgSoft}" /><Setter TargetName="Dot" Property="Fill" Value="{DynamicResource Brush.Emg}" />
@@ -238,6 +270,8 @@
                 <DataTrigger Binding="{Binding IsSelected, RelativeSource={RelativeSource AncestorType=ListBoxItem}}" Value="True">
                     <Setter TargetName="Card" Property="BorderBrush" Value="{DynamicResource Brush.Primary}" /><Setter TargetName="Card" Property="BorderThickness" Value="2.5" />
                     <Setter TargetName="Card" Property="Background" Value="{DynamicResource Brush.PrimarySoft}" />
+                    <Setter TargetName="Member" Property="BorderBrush" Value="{DynamicResource Brush.Primary}" /><Setter TargetName="Member" Property="BorderThickness" Value="1.5" />
+                    <Setter TargetName="Member" Property="Background" Value="{DynamicResource Brush.PrimarySoft}" />
                 </DataTrigger>
             </DataTemplate.Triggers>
         </DataTemplate>
@@ -252,12 +286,15 @@
                 </Setter.Value>
             </Setter>
         </Style>
-        <!-- 카드 목록 = 시간대(밴드와 같은 축)로 묶는다 — 머리 "03시 · 60건" (통화·무전 공용) -->
+        <!-- 카드 목록 = 시간대(밴드와 같은 축)로 묶는다 — 머리 "03시 · 60건" (통화·무전 공용). 건수는 행 수가 아니라 세션 수(빈 세션 묶음은 묶은 수) -->
+        <vm:HourGroupCountConverter x:Key="HourCount" />
         <GroupStyle x:Key="HourGroup">
             <GroupStyle.HeaderTemplate>
                 <DataTemplate>
                     <DockPanel Margin="12,8,14,3">
-                        <TextBlock DockPanel.Dock="Right" Style="{StaticResource Muted}" FontSize="12"><Run Text="{Binding ItemCount, Mode=OneWay}" /><Run Text="건" /></TextBlock>
+                        <TextBlock DockPanel.Dock="Right" Style="{StaticResource Muted}" FontSize="12">
+                            <TextBlock.Text><MultiBinding Converter="{StaticResource HourCount}"><Binding Path="Items" /><Binding Path="ItemCount" /></MultiBinding></TextBlock.Text>
+                        </TextBlock>
                         <TextBlock Text="{Binding Name}" FontSize="12.5" FontWeight="Bold" Foreground="{DynamicResource Brush.TextSoft}" />
                     </DockPanel>
                 </DataTemplate>
@@ -294,6 +331,10 @@
                 <RadioButton Style="{StaticResource FilterChip}" Content="영상" IsChecked="{Binding ServiceFilter, Converter={StaticResource Eq}, ConverterParameter=mcvideo, Mode=OneWay}" Command="{Binding SetServiceFilterCommand}" CommandParameter="mcvideo"
                              ToolTip="영상(MCVideo) 세션만" />
             </StackPanel>
+            <!-- 무전만 — 빈 세션 묶기(기본 켬): 목록에서 연달아 나오는 같은 그룹·같은 개시자의 빈 세션(발언 없이 끝난 세션)을 한 장으로 -->
+            <ToggleButton Style="{StaticResource FilterChip}" Content="빈 세션 묶기" IsChecked="{Binding GroupSilent}" Margin="0,0,8,0" VerticalAlignment="Center"
+                          ToolTip="연달아 나오는 같은 그룹·같은 개시자의 빈 세션(발언 없이 끝난 세션)을 한 장으로 묶는다 · 끄면 한 장씩"
+                          Visibility="{Binding IsPtt, Converter={StaticResource BoolToVis}}" />
             <TextBlock Style="{StaticResource Muted}" Text="{Binding Summary}" FontSize="12" VerticalAlignment="Center" />
             <TextBlock Style="{StaticResource Hint}" Foreground="{DynamicResource Brush.Emg}" Text="{Binding Error}" VerticalAlignment="Center" Margin="12,0,0,0" TextTrimming="CharacterEllipsis"
                        Visibility="{Binding HasError, Converter={StaticResource BoolToVis}}" />
@@ -305,13 +346,13 @@
                 <DockPanel DockPanel.Dock="Top" Margin="1.5,0,1.5,6">
                     <Button DockPanel.Dock="Right" Style="{StaticResource Btn.Xs}" Content="전체 시간" Margin="8,0,0,0" VerticalAlignment="Center"
                             Command="{Binding SelectHourCommand}" CommandParameter="{Binding SelectedHour}" Visibility="{Binding HasHourFilter, Converter={StaticResource BoolToVis}}" />
-                    <TextBlock DockPanel.Dock="Right" Style="{StaticResource Hint}" Text="칸을 누르면 그 시간만 · 다시 누르면 전체" VerticalAlignment="Center" />
+                    <TextBlock DockPanel.Dock="Right" Style="{StaticResource Hint}" Text="{Binding BandHint}" VerticalAlignment="Center" />
                     <TextBlock DockPanel.Dock="Left" Style="{StaticResource SectionHeader}" Text="{Binding BandTitle}" Margin="0,0,10,0" />
-                    <!-- 무전만 — 무엇을 셀지: 성립한 세션 수 / 발언 수(세션 시작 시간대에 넣는다) -->
+                    <!-- 무전만 — 무엇을 셀지: 성립한 세션 수 / 발언 수(세션 시작 시간대에 넣는다). 제목 글자가 고정이라 전환 자리가 움직이지 않는다 -->
                     <Border DockPanel.Dock="Left" Style="{StaticResource SegGroup}" HorizontalAlignment="Left" VerticalAlignment="Center" Visibility="{Binding IsPtt, Converter={StaticResource BoolToVis}}">
                         <StackPanel Orientation="Horizontal">
-                            <RadioButton Style="{StaticResource Seg}" Content="세션" ToolTip="그 시간에 시작해 성립한 무전 세션 수" IsChecked="{Binding BandMode, Converter={StaticResource Eq}, ConverterParameter=0}" />
-                            <RadioButton Style="{StaticResource Seg}" Content="발언" ToolTip="그 시간에 시작한 세션들에서 말한 횟수의 합" IsChecked="{Binding BandMode, Converter={StaticResource Eq}, ConverterParameter=1}" />
+                            <RadioButton Style="{StaticResource Seg}" Content="세션 수" ToolTip="그 시간에 시작해 성립한 무전 세션 수 · 칸을 누르면 그 시간의 세션 전부" IsChecked="{Binding BandMode, Converter={StaticResource Eq}, ConverterParameter=0}" />
+                            <RadioButton Style="{StaticResource Seg}" Content="발언 수" ToolTip="그 시간에 시작한 세션들에서 말한 횟수의 합 · 칸을 누르면 그 시간의 발언 있는 세션만" IsChecked="{Binding BandMode, Converter={StaticResource Eq}, ConverterParameter=1}" />
                         </StackPanel>
                     </Border>
                     <Grid />
