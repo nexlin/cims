@@ -13,8 +13,8 @@
                           DownCommand="{Binding PttDownCommand}" UpCommand="{Binding PttUpCommand}" ToolTip="누르는 동안 발언 대상 전부에 발언권 요청 — 떼면 해제" ToolTipService.ShowOnDisabled="True">
                 <v:HoldButton.Style>
                     <Style TargetType="v:HoldButton">
-                        <Setter Property="Background" Value="{DynamicResource Brush.Ink}" />
-                        <Setter Property="Foreground" Value="{DynamicResource Brush.OnInk}" />
+                        <Setter Property="Background" Value="{DynamicResource Brush.Fill}" />
+                        <Setter Property="Foreground" Value="{DynamicResource Brush.OnFill}" />
                         <Setter Property="BorderBrush" Value="Transparent" />
                         <Setter Property="BorderThickness" Value="0" />
                         <Setter Property="Template">
@@ -32,8 +32,8 @@
                                 <Setter Property="BorderBrush" Value="{DynamicResource Brush.BorderStrong}" /><Setter Property="BorderThickness" Value="1" />
                             </DataTrigger>
                             <DataTrigger Binding="{Binding IsRequesting}" Value="True"><Setter Property="Background" Value="{DynamicResource Brush.Peril}" /><Setter Property="Foreground" Value="{DynamicResource Brush.OnPeril}" /></DataTrigger>
-                            <DataTrigger Binding="{Binding IsSpeaking}" Value="True"><Setter Property="Background" Value="{DynamicResource Brush.TalkInk}" /><Setter Property="Foreground" Value="{DynamicResource Brush.OnAccent}" /></DataTrigger>
-                            <DataTrigger Binding="{Binding AllDeniedFlash}" Value="True"><Setter Property="Background" Value="{DynamicResource Brush.Emg}" /><Setter Property="Foreground" Value="{DynamicResource Brush.OnAccent}" /></DataTrigger>
+                            <DataTrigger Binding="{Binding IsSpeaking}" Value="True"><Setter Property="Background" Value="{DynamicResource Brush.TalkFill}" /><Setter Property="Foreground" Value="{DynamicResource Brush.OnAccent}" /></DataTrigger>
+                            <DataTrigger Binding="{Binding AllDeniedFlash}" Value="True"><Setter Property="Background" Value="{DynamicResource Brush.EmgFill}" /><Setter Property="Foreground" Value="{DynamicResource Brush.OnAccent}" /></DataTrigger>
                             <DataTrigger Binding="{Binding IsLocked}" Value="True"><Setter Property="BorderBrush" Value="{DynamicResource Brush.Held}" /><Setter Property="BorderThickness" Value="3" /></DataTrigger>
                         </Style.Triggers>
                     </Style>
@@ -71,8 +71,8 @@
                 <ItemsControl.ItemsPanel><ItemsPanelTemplate><StackPanel Orientation="Horizontal" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
                 <ItemsControl.ItemTemplate>
                     <DataTemplate DataType="{x:Type vm:TalkTargetChip}">
-                        <Border x:Name="Chip" Height="36" CornerRadius="8" Padding="12,0,6,0" Margin="0,0,8,0" BorderThickness="1" BorderBrush="{DynamicResource Brush.Ink}" Background="{DynamicResource Brush.Surface}"
-                                TextElement.Foreground="{DynamicResource Brush.Ink}">
+                        <Border x:Name="Chip" Height="36" CornerRadius="8" Padding="12,0,6,0" Margin="0,0,8,0" BorderThickness="1" BorderBrush="{DynamicResource Brush.Edge}" Background="{DynamicResource Brush.Surface}"
+                                TextElement.Foreground="{DynamicResource Brush.Text}">
                             <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                                 <Button Style="{StaticResource Btn.Flat}" Command="{Binding DataContext.FocusCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}" CommandParameter="{Binding}"
                                         Foreground="{Binding (TextElement.Foreground), ElementName=Chip}" ToolTip="채널 상세 열기">
@@ -86,12 +86,12 @@
                         </Border>
                         <DataTemplate.Triggers>
                             <DataTrigger Binding="{Binding IsGranted}" Value="True">
-                                <Setter TargetName="Chip" Property="Background" Value="{DynamicResource Brush.TalkInk}" /><Setter TargetName="Chip" Property="BorderBrush" Value="{DynamicResource Brush.TalkInk}" />
+                                <Setter TargetName="Chip" Property="Background" Value="{DynamicResource Brush.TalkFill}" /><Setter TargetName="Chip" Property="BorderBrush" Value="{DynamicResource Brush.TalkFill}" />
                                 <Setter TargetName="Chip" Property="TextElement.Foreground" Value="{DynamicResource Brush.OnAccent}" />
                             </DataTrigger>
-                            <DataTrigger Binding="{Binding IsRequesting}" Value="True"><Setter TargetName="Chip" Property="BorderBrush" Value="{DynamicResource Brush.Peril}" /></DataTrigger>
-                            <DataTrigger Binding="{Binding IsQueued}" Value="True"><Setter TargetName="Chip" Property="BorderBrush" Value="{DynamicResource Brush.Peril}" /></DataTrigger>
-                            <DataTrigger Binding="{Binding IsDenied}" Value="True"><Setter TargetName="Chip" Property="BorderBrush" Value="{DynamicResource Brush.Emg}" /><Setter TargetName="Chip" Property="TextElement.Foreground" Value="{DynamicResource Brush.Emg}" /></DataTrigger>
+                            <DataTrigger Binding="{Binding IsRequesting}" Value="True"><Setter TargetName="Chip" Property="BorderBrush" Value="{DynamicResource Brush.Peril}" /><Setter TargetName="Chip" Property="Background" Value="{DynamicResource Brush.RingSoft}" /></DataTrigger>
+                            <DataTrigger Binding="{Binding IsQueued}" Value="True"><Setter TargetName="Chip" Property="BorderBrush" Value="{DynamicResource Brush.Peril}" /><Setter TargetName="Chip" Property="Background" Value="{DynamicResource Brush.RingSoft}" /></DataTrigger>
+                            <DataTrigger Binding="{Binding IsDenied}" Value="True"><Setter TargetName="Chip" Property="BorderBrush" Value="{DynamicResource Brush.Emg}" /><Setter TargetName="Chip" Property="Background" Value="{DynamicResource Brush.EmgSoft}" /><Setter TargetName="Chip" Property="TextElement.Foreground" Value="{DynamicResource Brush.Emg}" /></DataTrigger>
                             <DataTrigger Binding="{Binding IsEmergency}" Value="True"><Setter TargetName="Chip" Property="BorderThickness" Value="2" /><Setter TargetName="Chip" Property="BorderBrush" Value="{DynamicResource Brush.Emg}" /></DataTrigger>
                         </DataTemplate.Triggers>
                     </DataTemplate>

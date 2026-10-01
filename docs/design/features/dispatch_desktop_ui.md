@@ -31,7 +31,8 @@
   이고 `layout.json` 에 기억한다(§3.3).
 - **화면 한 장, 스크롤 없음.** 설계 캔버스 1920×1080, 목록이 넘치면 그 칸 안에서만 스크롤한다. 창이 좁아 오른쪽 칸이 360 보다 작아질 때만 왼쪽 칸을
   줄인다(640 까지).
-- **테마 기본 = 밝게** — 무채 + 남색(`#4F46E5`) 한 가지 + 상태색. 어둡게는 설정에서 고른다(`UiVersion` 없는 옛 설정을 처음 읽을 때 한 번 밝게로 되돌린다).
+- **테마 기본 = 밝게** — 무채 표면 + 브랜드 남색(`#4F46E5` — 채운 주 행동·선택) + 상태색(연한 면·채움). 어둡게는 설정에서 고른다(`UiVersion` 없는 옛 설정을 처음
+  읽을 때 한 번 밝게로 되돌린다). 두 테마는 같은 토큰 키를 쓰고 창 제목 표시줄도 테마를 따른다(§3.2 «색»).
 
 ## 2. 관제사 작업 모델 (화면이 지원해야 하는 일)
 
@@ -124,11 +125,11 @@
 | 탭 줄(48, 관제 화면만) | **[무전 n | 통화 n]** 세그먼트(수 = 무전: 안 읽은 무전 메시지, 통화: 대표번호 대기열 + 안 읽은 문자, 0 이면 숨김) · 모드 안내 · 오른쪽 끝 **목록 버튼** — [무전] = [사용자], [통화] = [주소록](오른쪽 패널, 열린 동안 먹 채움) |
 | 발언 바(80, 모든 화면) | **PTT**(150×64 — 대상 없음 흐림 · 준비 먹 채움 "누르고 말하기 · Ctrl+Space" · 요청 중 주황 · **발언 중 녹색**(일부만 승인이면 "발언 n/m") · 전부 거부 빨강 1초 · 잠금 발언 파란 테두리) · **대상 칩**("순찰1 · 승인" 녹색 채움 / "상황실 · 대기" · 요청 · 대기 n번째 · 거부 사유 — 누르면 채널 상세, × = 대상에서 빼기) · 남은 발언 게이지(승인된 대상 중 최소) · [모두 해제]. 대상이 없으면 "발언 대상 없음 — 채널 카드의 ✓ 를 누르세요" |
 | 착신 배너 | 상단 바 아래 64 — 두 줄("대표번호 7000 착신" / 발신자 크게) · 경과 · [응답 F9][거절]. 대표번호 착신(`calledParty`=pilot) 주황 면, 내선 직접 착신 파랑 면, PTT 개별 통화 착신 청록 면. 여러 착신은 스택(최신 위). 응답 핫키는 최상단 호 |
-| 긴급 배너 | 긴급(연한 빨강 면·진한 빨강 글자) / 임박(주황 채움·먹 글자) / 경보(연한 보라) — 두 줄("긴급 · 개시 1006 박경장" / 그룹명 크게) · 경과. 카드·타 채널 행과 동기. **긴급·임박**(채널마다 하나) = 세션 조건 `CallInfo.condition`(TS 24.379 §10.1.1.2.1.3~6 — 개시 mcptt-info 로 시작해 상향·하향 re-INVITE·서버 재광고·합류 200 OK 로 바뀐다; `CallInfo.mcptt` 는 호를 세운 INVITE 의 값이라 판정에 쓰지 않는다). 호 상태·미디어 스냅샷·조건 이벤트(`onMcpttCondition`) 셋 모두가 배너를 다시 판정한다 — 진행 중 격상·해제와 «이미 긴급인 그룹에 합류» 가 선다. 개시자는 호를 세운 INVITE 가 그 조건을 실었을 때만 적는다(진행 중에 걸린 조건은 비움). [긴급 해제] = 내가 올린 조건일 때만(서버 인가 = 개시자 ∨ user profile `allow-cancel-group-emergency` — TS 24.379 §6.3.3.1.13.4, 비인가·다른 긴급 사용자 송출 중이면 403 + `emergency-ind` true. 프로파일 값으로 넓히는 것은 §13), 조건이 내려가면 스스로 빠지고 닫기는 없다. **경보**(그룹·발신자마다 하나) = `onEmergencyAlert`(TS 24.379 §12.1.1.3) — 발신자의 취소(제3자 취소면 `originated-by` 가 가리키는 경보)로 해제, [경보 해제] = 경보 취소 MESSAGE(남의 경보는 제3자 취소 §12.1.1.2 4)e), user profile `allow-cancel-emergency-alert` 이 없으면 숨김), [닫기] = 로컬 표시만(취소 신호 유실 대비). 공통 [채널로 이동] = 관제 [무전] 의 그 채널 상세(내 채널 카드, 없으면 타 채널 행) — 합류하지 않는다(청취 범위 그룹에 sendrecv 로 붙으면 비멤버라 403, TS 24.379 §10.1.1) |
+| 긴급 배너 | 긴급(연한 빨강 면·진한 빨강 글자) / 임박(주황 채움·먹 글자) / 경보(연한 보라) — 두 줄("긴급 · 개시 1006 박경장" / 그룹명 크게) · 경과. 카드·타 채널 행과 동기. **긴급·임박**(채널마다 하나) = 세션 조건 `CallInfo.condition`(TS 24.379 §10.1.1.2.1.3~6 — 개시 mcptt-info 로 시작해 상향·하향 re-INVITE·서버 재광고·합류 200 OK 로 바뀐다; `CallInfo.mcptt` 는 호를 세운 INVITE 의 값이라 판정에 쓰지 않는다). 호 상태·미디어 스냅샷·조건 이벤트(`onMcpttCondition`) 셋 모두가 배너를 다시 판정한다 — 진행 중 격상·해제와 «이미 긴급인 그룹에 합류» 가 선다. 개시자는 호를 세운 INVITE 가 그 조건을 실었을 때만 적는다(진행 중에 걸린 조건은 비움). [긴급 해제] = 해제 자격이 있을 때만 — 긴급 = 내가 올린 조건 ∨ user profile `allow-cancel-group-emergency`, 임박 = `allow-cancel-imminent-peril`(서버 판정과 같은 식 — TS 24.379 §6.3.3.1.13.4·§6.3.3.1.13.6, `DispatchSession.CanCancelCondition`). 비인가·다른 긴급 사용자 송출 중이면 서버가 403 + 현재 상태 지시자로 거절하고 코어가 이전 값으로 되돌린다 — 토스트는 해제 거절 문구(§9). 조건이 내려가면 스스로 빠지고 닫기는 없다. **경보**(그룹·발신자마다 하나) = `onEmergencyAlert`(TS 24.379 §12.1.1.3) — 발신자의 취소(제3자 취소면 `originated-by` 가 가리키는 경보)로 해제, [경보 해제] = 경보 취소 MESSAGE(남의 경보는 제3자 취소 §12.1.1.2 4)e), user profile `allow-cancel-emergency-alert` 이 없으면 숨김) — 보낼 때 배너를 내리고, 최종 응답이 403(미인가, `alert-ind` true — §12.1.3.2)이면 되살려 거절 문구를 띄운다(전송 실패·시한은 판정을 모르므로 표시는 그대로 두고 알리기만), [닫기] = 로컬 표시만(취소 신호 유실 대비). 공통 [채널로 이동] = 관제 [무전] 의 그 채널 상세(내 채널 카드, 없으면 타 채널 행) — 합류하지 않는다(청취 범위 그룹에 sendrecv 로 붙으면 비멤버라 403, TS 24.379 §10.1.1) |
 | 서버 인증서 배너 | 같은 배너 층의 **한 줄**(경고 아이콘 + 제목 · 내용) — SDK 가 마지막 SIP TLS·HTTPS 핸드셰이크에서 관측한 서버 인증서 잔여(`Engine.TlsPeerExpiry`·`CscClient.TlsPeerExpiry` 중 짧은 것)가 **≤ 30일**이면 "서버 인증서 N일 후 만료 · `<host:port>` · `<subject>` · 만료 YYYY-MM-DD · 자동 갱신 실패 신호 — 운영자에게 알리세요 (콘솔 알람 A-PRC-009)". 경고(≤30일) 연한 빨강 + 빨강 글자, 위험(≤7일·만료) 진한 빨강 — 서버 A-PRC-009 warning/critical 과 같은 단계. **닫기 없음**(서버 인증서가 갱신되어 잔여가 임계를 벗어나면 사라진다), 버튼·경과 없음. 로그인 직후·TLS 등록 성공·1분 주기로 재평가, 로그아웃에 내림. 자격 갱신 실패 경고(`BannerKind.Credential`, §6)도 같은 한 줄 모양. 임계 셋(60 갱신/30 경고/7 위험)의 뜻은 [sip_tls_signaling.md §8.6](sip_tls_signaling.md) |
 | 토스트 | 명령 실패의 사유(§9 사전) — 본문 우하단(440), 6초, 오류는 수동 닫기. 오류 연한 빨강 · 경고 연한 주황 · 정보 흰 면. 원문 코드는 ▸상세 |
-| 상태 색상 | 발언·통화 녹색 · 긴급 빨강 · 임박·대표번호 주황 · 청취·문자 청록 · 감청 보라 · 보류 파랑 · 대기 회색 — 남색(`#4F46E5`)은 고른 카드·발언 대상 ✓·보낸 말풍선 한 가지에만. 아이콘·텍스트 병기(색맹 대비) |
-| 시각 언어 | 글꼴 Noto Sans KR(없으면 Pretendard → 맑은 고딕) 13px · 숫자/시각은 모노(JetBrains Mono → Cascadia). **먹(Ink)** = 채운 버튼·선택 칩(밝게 `#161A2B`, 어둡게는 밝은 먹 + 어두운 글자). **알약 버튼**(모서리 = 높이/2 — 먹 채움 · 먹 외곽선 1.5 · 연한 외곽선 · 빨강 외곽선/채움, 높이 30/36/44) · **네모 버튼**(모서리 8 — [발신]·[응답]·통화 카드 조작) · **필터 칩**(28, 모서리 6, 켜짐 = 먹 채움 흰 굵은 글자) · **라벨**(19, 모서리 4 — 외곽선 = 개별·애드혹·SDS 등, 먹 = 일제, 빨강 = 긴급, 주황 = 임박) · **수 배지**(먹 둥근 8) · **발언 대상 ✓**(원 34 — 빔 = 흰 바탕 흐린 ✓, 켬 = 남색 채움 흰 ✓, 일제 수신 = 점선 비활성) · **아이콘** = 스트로크 Path(`Themes/Icons.xaml`, Lucide 계열) — 텍스트 글리프(▾ × 🎧 🔊 ✉ ⚙)는 쓰지 않는다. 칸 머리 = 제목 16 굵게 + 수 + 오른쪽 작은 알약들. 표면 흰색, 칸 경계 1px. 토큰 정본 `Themes/Light.xaml`/`Dark.xaml`, 스타일 `Styles.xaml`/`Controls.xaml` |
+| 색 | **축 셋** — 표면(살짝 푸른 무채) · 브랜드 남색 · 상태색. **남색** = 채운 주 행동(`Brush.Fill` — [참여]·[보내기]·[그룹 만들기]·모드 [무전\|통화] 선택 칸·수 배지·로고)과 선택(연한 남색 면 + 남색 외곽선·글자 — 필터 칩·목록 토글·고른 행의 왼쪽 막대·레일 선택·발언 대상 ✓·보낸 말풍선). **상태색** = 발언·통화 녹색(통화 행동 [응답]·[발신]·PTT 발언 중·승인 칩) · 긴급 빨강([종료]·[거절]·긴급 라벨·음소거 중) · 임박·착신·대표번호 주황(대표번호 대기열·착신 카드·요청/대기 칩) · 청취·문자 청록([청취]·청취 중·문자 라벨) · 감청·경보 보라 · 보류·전달 파랑. 상태색마다 **네 값** — 기본(점·외곽선) · Ink(글자 — 흰 면·연한 면 공통) · Soft(연한 면) · Fill(흰 글자를 얹는 채움). 어둡게에서는 기본·Ink 를 밝게, Fill 을 진하게 둔다(한 값으로 겸하면 글자가 흐리거나 채움 위 흰 글자가 뜬다). **대비** = 글자 4.5:1 · 보조 글자·점 3:1(WCAG 2.x AA) — 두 테마의 모든 면에서 맞춘다(밝게의 녹색·주황·남색 기본색은 글자로 쓰면 모자라 Ink 를 쓴다). **외곽선** = `Brush.Edge`(입력칸·강조 경계 — 무채보다 한 단 진함), 호버 = 남색 외곽선, **키보드 포커스** = 남색 2px 고리(`FocusRing`/`FocusRing.Pill` — 입력칸은 테두리 색이 포커스라 고리 없음). **입력칸 안내** = 빈 칸 안의 흐린 글자(검색칸 — 무엇을 치는지, 치면 사라진다. 암시 TextBox 템플릿이 `Tag` 를 그린다), 글·비밀번호·콤보 칸은 같은 면·테두리·글자 들여쓰기. **비활성** = 흐리게(버튼·칩·세그먼트·목록 공통 — 목록은 WPF 기본 틀처럼 흰 판으로 바뀌지 않는다). **아바타** = 이름 해시로 8색 중 하나(`AvatarHue` — 같은 사람은 어느 목록에서나 같은 색, 면·글자 토큰이라 테마를 따른다), 번호뿐인 상대는 전화 아이콘. **창 제목 표시줄** = 표면색(DWM, `Shell/TitleBar`). 아이콘·텍스트 병기(색맹 대비) |
+| 시각 언어 | 글꼴 Noto Sans KR(없으면 Pretendard → 맑은 고딕) 13px · 숫자/시각은 모노(JetBrains Mono → Cascadia). **먹(Ink)** = 강한 글자색(밝게 `#161A2B`, 어둡게 `#E6E9F1`) — 채움에는 쓰지 않는다. **알약 버튼**(모서리 = 높이/2 — 남색 채움 `Pill.Ink` · 녹색 채움 `Pill.Call` · Edge 외곽선 1.5 `Pill.Line` · 연한 외곽선 · 빨강 외곽선/채움 · 청록 `Pill.Listen*`, 높이 30/36/44) · **네모 버튼**(모서리 8 — [발신]·[응답] = 녹색 `Rect.Call`, [종료]·[거절] = 빨강 `Rect.Red`, 통화 카드 조작 = `Rect.Soft`·`Rect.Toggle` — 같은 무게의 연한 외곽선) · **필터 칩**(28, 모서리 6, 켜짐 = 연한 남색 면 + 남색 외곽선·굵은 글자) · **라벨**(19, 모서리 4 — 기본 = 연한 회색 면(개별·애드혹·SDS), 연한 남색 = 일제·그룹, 채운 빨강 = 긴급, 주황 = 임박, 연한 상태색 면 = 통화 중·부재·문자·전달·감청·대표) · **수 배지**(남색 둥근 8) · **발언 대상 ✓**(원 34 — 빔 = 흰 바탕 흐린 ✓, 켬 = 남색 채움 흰 ✓, 일제 수신 = 점선 비활성) · **아이콘** = 스트로크 Path(`Themes/Icons.xaml`, Lucide 계열) — 텍스트 글리프(▾ × 🎧 🔊 ✉ ⚙)는 쓰지 않는다. 칸 머리 = 제목 16 굵게 + 수 + 오른쪽 작은 알약들. 표면 흰색, 칸 경계 1px. 토큰 정본 `Themes/Light.xaml`/`Dark.xaml`, 스타일 `Styles.xaml`/`Controls.xaml` |
 | 시간 | 진행 항목은 `mm:ss` 경과(1초 갱신) — 링잉·통화·감청·PTT 세션·발언 |
 | 신원 표시 | 내선 → 표시 이름(`users.name`) 병기 "1003 이순경"; PTT 번호는 "PTT 1001"; 외부 번호는 국내 표기. 원 값(URI user part)은 툴팁 |
 
@@ -138,7 +139,10 @@
 - **끌 수 있는 경계는 셋** — [무전] 위/아래 줄(기본 292, 200~520) · «메시지» 대화 목록 폭(기본 300, 220~480) · «기록» 상대 목록 폭(기본 300, 220~480).
   끈 값은 놓을 때 `%APPDATA%\CIMS\dispatch-desktop\layout.json` 의 `Seams` 에 저장한다. 왼쪽 칸 1040 은 끌지 않는다.
 - `layout.json` = 판(4) · 주 창 위치·크기·최대화 · 감청 창 위치 · `Seams`. 판 3(도킹 프리셋 파일)을 읽으면 그 현재 프리셋의 창·감청 창 위치만 옮겨 판 4 로 쓴다.
-- 창이 1920×1080 보다 작으면 재배열하지 않는다 — 오른쪽 칸이 360 에 못 미칠 때만 왼쪽 칸을 줄인다(640 까지). 작은 화면은 OS 배율이 fit 역할.
+- 창이 1920×1080 보다 작으면 재배열하지 않는다 — 오른쪽 칸이 360 에 못 미칠 때만 왼쪽 칸을 줄인다(640 까지). 오른쪽 칸이 좁으면(패널이 열렸거나 [무전] 560 · [통화] 640 미만)
+  패널이 열린 때와 같은 좁은 배치다 — 타 채널 1열 · 이벤트 채널 열 접기 · 동시 청취·[이력에서 보기]·CSV 숨김 / «기록» 목록만(제목·CSV 숨김, 머리·칩 여백을 줄이고 [대표번호] = [대표]). [통화] 머리 줄의 번호칸은 300 에서 150 까지 줄어 [발신]·[키패드]·[픽업] 이 잘리지 않는다. 카드·타 채널 격자는
+  칸 폭으로 열 수를 정한다(카드 최소 230 — 4열까지, 타 채널 최소 250 — 3열까지). 높이도 같다 — 끌어 둔 [무전] 위 줄이
+  창보다 커 아래 줄(메시지·이벤트)이 220 밑으로 밀리면 보이는 높이만 줄인다(저장값은 그대로, 창을 키우면 돌아온다). 작은 화면은 OS 배율이 fit 역할.
 
 ### 3.4 레일 — 화면 전환
 
@@ -166,8 +170,8 @@
 - 개발 스위치: `--ui-preview`(로그인 없이 메인, 실행 중인 관제 앱과 다른 단일 인스턴스 이름) · `--ui-preview-canvas`(두 화면에 표본 — 멤버 그룹 5·청취 범위 8·
   진행 중 그룹콜/개별/애드혹·일제 통화 수신·긴급·VoLTE 통화 2·감청 1·대표번호 대기열·진행 중 dialog·기록·문자·무전 메시지, 조작은 동작 안 함) ·
   `--ui-preview-banner=alerts|incoming|none` · `--ui-preview-mode=ptt|call` · `--ui-preview-panel=channel|other|users|group|event|dir` · `--ui-preview-keypad` ·
-  `--ui-preview-screen=history|groups|admin`(관리 화면은 범위 검사 생략) · `--ui-preview-history=call|ptt` · `--ui-preview-shot=<png>`(주 창을 WPF 로 렌더해 PNG 저장 후
-  종료 — 화면 잠금·원격 세션에서도 XAML 점검. 별 HWND 인 Popup(사람 메뉴·Ctrl+K·DTMF·전달)은 안 찍힌다). 모드·패널·화면 스위치는 창의 첫 스냅샷 재구성 뒤에 적용한다.
+  `--ui-preview-screen=history|groups|admin`(관리 화면은 범위 검사 생략, `--ui-preview-canvas` 와 함께면 관리 = 표본 조직 5·구성원 5·접속서비스 3 을 심고 한 명의 편집 폼을, PTT 그룹 = 멤버 셋의 새 그룹 폼(능력·한도 전부)을 연다) · `--ui-preview-history=call|ptt` · `--ui-preview-retheme=light|dark`(창이 다 그려진 뒤 테마를 바꾼다 — 그 테마로 바로 연 그림과 비교해 실행 중 전환에 옛 색이 남는 곳을 찾는다. 색은 전부 테마 토큰을 동적으로 참조하고, 값에 따라 색이 바뀌는 점·아바타도 변환기가 아닌 스타일 트리거로 고른다) · `--ui-preview-shot=<png>`(주 창을 WPF 로 렌더해 PNG 저장 후
+  종료 — 화면 잠금·원격 세션에서도 XAML 점검. 별 HWND 인 열린 Popup(사람 메뉴·Ctrl+K·DTMF·전달·드롭다운)은 `<png>-pop<n>.png` 로 따로 찍는다) · `--ui-preview-search=<검색어>`(Ctrl+K 검색을 열어 둔다) · `--ui-preview-person=<번호>`(사람 메뉴를 열어 둔다) · `--ui-preview-open=more|mon|session|dtmf|xfer|chan|suggest|combo`(더보기 메뉴·감청 중 목록·세션 목록·첫 통화 카드의 DTMF/전달·이벤트 채널 거르기·번호칸 제안·보이는 첫 콤보 목록을 열어 둔다). 모드·패널·화면 스위치는 창의 첫 스냅샷 재구성 뒤에 적용한다.
 
 ### 3.5 관제 요약 띠 (화면 별창)
 
@@ -228,7 +232,7 @@
   또는 채널 상세 [긴급](참여 중 = 그 호의 **조건 상향** — `Call.SetCondition(true,false)` in-dialog re-INVITE, TS 24.379 §10.1.1.2.1.3; 같은 그룹으로 새 INVITE 를
   보내면 코어가 같은 호를 돌려줘 아무 일도 없다)·[긴급 참여](미참여 = `GroupCallOptions.emergency`). 자격(user profile `allow-emergency-group-call` — `Capabilities`,
   못 받았으면 허용)이 없으면 비활성 + 툴팁, 서버 거절(그룹 능력 꺼짐 등)은 조건 이벤트 `Denied` → 403 사전 문구(호는 유지).
-  [긴급 해제] = 내가 올린 조건일 때만(§10.1.1.2.1.4 하향 — 서버는 개시자 ∨ `allow-cancel-group-emergency` 를 받는다, 앱이 넓히는 것은 §13).
+  [긴급 해제](§10.1.1.2.1.4 하향) = 긴급은 내가 올린 조건 ∨ `allow-cancel-group-emergency`, 임박은 `allow-cancel-imminent-peril`(§3.2 긴급 배너와 같은 판정).
 - **일제 통화**(TS 24.379 §4.12 — 그룹 종류가 아니라 호 속성, [mcptt_broadcast_group_call.md](mcptt_broadcast_group_call.md) §4.4 U6): 관제사 개시는 미참여 멤버 그룹의
   채널 상세 [일제 통화] — 멤버 편성 그룹에 진행 중 세션이 없을 때만 활성(진행 중이면 서버가 합류로만 받는다 — 그 문서 §3.2. chat 그룹은 서버가 broadcast-ind 를
   무시해 비활성 — TS 24.379 §6.2.8.2 는 broadcast-ind 를 prearranged 그룹 호에 싣는다. 그룹 종류는 관리 목록 `sessionType`, 관리 범위가 없어 모르면 누를 때 GMS 그룹
@@ -250,7 +254,7 @@
 개시자 = 나). 필터·검색 없음 — **항상 전부 표시**. 미참여 멤버 그룹은 대기 카드 + [참여](`joinGroupCall`), ✓ 없음.
 
 **채널 상세(내 채널)** 조작 — 카드의 판정을 그대로 쓴다: 미참여 멤버 = [참여] · [긴급 참여] · [일제 통화](한 버튼) · [메시지 ›] / 참여 중 멤버 = [긴급](조건 상향) ·
-[긴급 해제](내가 올린 조건) · [✓ 발언 대상](켬 = 남색) · 출력 [헤드셋/스피커](`setCallRoute`, 스피커 라우트가 없으면 비활성) · [나가기] · [메시지 n ›] / 개별 =
+[긴급 해제](해제 자격 — §4.1 «긴급») · [✓ 발언 대상](켬 = 남색) · 출력 [헤드셋/스피커](`setCallRoute`, 스피커 라우트가 없으면 비활성) · [나가기] · [메시지 n ›] / 개별 =
 [음소거](전이중) · [종료] / 애드혹 = [✓ 발언 대상] · [종료] · 공통 ⋮ = [편집 — PTT 그룹 화면] · [삭제…](내 소유·관리 범위만 — GMS XCAP DELETE 확인 후).
 로스터 = [접속 n | 편성 m](§3.6) — 사람 줄 [개별] = 반이중 개별 통화, [SDS] = 1:1 무전 메시지.
 
@@ -353,7 +357,7 @@
   말풍선(받은 말 = 회색 + 그룹이면 보낸 사람, 보낸 말 = 남색 + 상태 `보내는 중 → ✓ → ✓✓` / `· 실패` [재전송]) · 파일 말풍선 · **빠른 답**(«확인했습니다» · «이동 중» ·
   «도착했습니다» · «대기 바랍니다» — 한 번 눌러 곧바로 보낸다) · 입력(자리표시 "그룹 전원에게 (순찰1 · 12명)" / "이 사람에게 (윤순경)") · [📎] · [보내기](Enter, Shift+Enter 줄바꿈).
 - 발신 그룹 `sendGroupSds(acc_ptt, groupId, text, requestDelivery)` / 1:1 `sendSds(acc_ptt, peer, …)` → `(msgId, token)` · 최종 응답 `onRequestCompleted(MESSAGE, token)` 을
-  **token 으로** 상관해 2xx=SENT (자동 회신하는 disposition 통지의 완료 이벤트는 어느 메시지에도 맞지 않아 무시) · disposition 요청 수신은 `sendSdsNotification(delivered)` 자동 회신 ·
+  **token 으로** 상관해 2xx=SENT (자동 회신하는 disposition 통지의 완료 이벤트는 어느 메시지에도 맞지 않아 무시) · disposition 요청 수신은 `sendSdsNotification(delivered)` 자동 회신(대상 = 받은 SDS 의 `FromUri`, 그룹 SDS 면 `GroupUri` 를 넘긴다 — PTT 계정에 MCData PSI 가 있으면 코어가 참여 기능 PSI·`resource-lists`·`<mcdata-calling-group-id>` 규격형으로, 없으면 원 발신자 직행으로 보낸다, TS 24.282 §12.2.1.1) ·
   `onSds(notification)` 을 msgId 로 상관 → ✓✓. 재전송은 **처음의 msgId** 로 보낸다(`sendGroupSds`/`sendSds` 의 `msgId` — 앞 발신이 일부에게 닿았어도 받는 쪽이
   같은 메시지로 대조하고 ✓✓ 도 그 ID 로 맞물린다; 즉시 실패로 ID 가 없던 메시지만 새 ID) — token 만 새로 덮어쓴다. 그룹 본문이 프로파일 `mcdata.maxPayloadSdsCplaneBytes`
   를 넘으면 코어가 media plane(MSRP, TS 24.282 §9.2.3)으로 보내고 최종 결과가 `onRequestCompleted(MSRP, token)` 으로 온다(같은 token 상관). PTT 계정은
@@ -375,9 +379,10 @@
   [발언](floor Granted→Idle — 누가·몇 초) · [입퇴장](멤버 합류/이탈(로스터 diff)·세션 시작/종료·개별/애드혹 통화 시작·종료·청취 시작/종료(관제사 자신)·내가 연 통화의
   **미응답 멤버 n명**(서버 INFO `<non-acknowledged-user>`, TS 24.379 §6.3.3.3 — `onNonAcknowledgedUsers`, 토스트 함께)) · [긴급](긴급/임박 개시·해제·긴급 경보 발령·해제
   (`onEmergencyAlert`)) · [SDS](발신자·요약) · [오류](발언 요청 거부·발언권 회수·요청 시간 초과 — floor 사유) + **[채널 · 전체 ▾]**(채널 하나로 거르기).
+  칩마다 종류 색 점(발언 녹색 · 입퇴장 파랑 · 긴급 빨강 · SDS 청록 · 오류 빨강)이 있어 표 종류 라벨의 범례가 된다.
   «멤버 확인 전 연결»(개시 200 OK `P-Answer-State: Unconfirmed`, RFC 4964 — §10.1.1.2.1.1 2A))·그룹 생성/삭제는 종류 칩 밖(«기타» — 칩으로 숨기지 않는다).
 - **고정 줄**: 진행 중인 긴급·임박 세션(경과 · 라벨 · "상황실 진행 중" · [채널로]) — 목록 위.
-- **표**: 시각(초까지) | 채널 | 종류(라벨 — 긴급 빨강 채움 · 오류 빨강 외곽선) | 내용(오류는 빨강 글자). 패널이 열려 칸이 좁으면 채널 열을 접는다. 줄을 누르면 이벤트 상세(§3.6).
+- **표**: 시각(초까지) | 채널 | 종류(라벨 = 칩 점과 같은 색 — 발언 연한 녹색 · 입퇴장 연한 파랑 · SDS 연한 청록 · 긴급 빨강 채움 · 오류 연한 빨강) | 내용(오류는 빨강 글자). 패널이 열려 칸이 좁으면 채널 열을 접는다. 줄을 누르면 이벤트 상세(§3.6).
 - 앱 로컬 링 버퍼(200 행, 하루)·CSV 내보내기. 서버 정본(PTT 세션 이력·감사)과 별개 — 앱 이벤트는 관제사의 작업 메모리다. 범위 안 **타인**의 세션·발언·SDS 는 서버
   통합 이력 폴링(`HistoryClient`, §13)이 수초 지연으로 합친다(내가 당사자인 항목은 로컬 행이 이미 있어 건너뜀).
 
@@ -411,7 +416,7 @@
 
 조직·구성원·VoLTE/VoIP/PTT 번호·전화 그룹. 활성 조건 = `dispatch.directoryWrite`(전환기 `directoryAdmin`) = `own`\|`all`(관제 역할 **관리 범위** — 콘솔 `관리 > 역할`, manager 부여).
 왼쪽 **서브내비**(200px — "조직 · 구성원 · 번호" 한 항목 + 후속 항목 자리 "CSV 가져오기(예정)", 아래에 범위 안내) | 본문 = 세 카드. 왼쪽 **조직 트리**(범위 안, 선택 = 하위 포함 필터,
-머리 [+ 새 조직] · 바닥 [편집][삭제]) · 가운데 **구성원 표**(머리 "구성원 N명 · {조직} 하위 포함" + 검색 + [+ 새 구성원], 열 = 이름·직함·소속 | VoLTE | VoIP | PTT | 자격("그룹 생성"/"원격 청취" 배지),
+머리 [+ 새 조직] · 바닥 [편집][삭제]) · 가운데 **구성원 표**(머리 "구성원 N명 · {조직} 하위 포함" + 검색 + [+ 새 구성원], 열 = 이름·직함·소속 | VoLTE | VoIP | PTT | 자격("그룹 생성"/"원격 청취" 배지 — 표가 760 보다 좁으면(작은 창) 번호·자격 열을 접고 이름 줄에 배지, 소속 아래에 "VoLTE … · VoIP … · PTT …" 한 줄),
 **행 한 번 클릭 = 오른쪽 폼에 바로 편집**) · 오른쪽 **편집 폼**("편집 — 이름", 머리 오른쪽 [삭제]) — 구성원 속성(이름·직함·소속·로그인 아이디/비밀번호) +
 **회선 카드 셋 = VoLTE 번호(이동) / VoIP 번호(유선) / PTT 번호**(번호·접속서비스·SIP transport·SIP 비밀번호 — 비우면 회선 삭제, 새 회선·번호 변경·접속서비스 변경은 비밀번호 필수(서버가 H(A1) 로만 보관)) + PTT 자격 토글(그룹 생성·원격 청취 — 청취는 표시만, 역할 배정의 결과).
 회선 종류(와이어 kind `volte`·`voip`·`ptt`)는 `members[].{kind}`·`services.{kind}[]`·`PUT …/members/{id}/{kind}`·목록 열까지 한 축으로 갈라진다 — 서버가 종류당 첫 회선만 내리므로 이동·유선 회선을 둘 다 가진 관제사도 둘 다 관리된다.
@@ -451,7 +456,7 @@ SIP transport 콤보는 **ANY** 를 포함한 넷(콘솔 라벨과 같다) — A
   ① 참여자(입퇴장 기록 ∪ 화자 — 색점 = 레인 색, 개시자 배지, 입장~퇴장, 턴·발화) → ② 발언 타임라인(화자 레인 위 턴 막대, 세션 시간축 + 눈금 행 — **막대 클릭 = 그 턴 재생**,
   동시 발언 세그먼트는 단독 트랙 `slot`. **확대·축소** = [−]·[+]·[1:1] 버튼 / Ctrl+휠(커서 기준) ×1.25 단계·최대 ×64, 확대 상태에서 빈 곳 드래그·Shift+휠로 가로 이동,
   눈금 간격은 배율에 따라 1초~1시간 중 자동 — 콘솔 LaneTimebar 와 같은 조작) → ③ 이벤트 타임라인(floor 중재 op 8종 + 입퇴장 시간순, [발언권 n]·[멤버 n] 층 토글, op 별 부가 정보 = 선점·동시·대기 순번·
-  거절 사유·회수 유예) → 녹취(아래 고정 — 세그먼트 목록·[▶ 세그먼트 재생]·[다시 변환]).
+  거절 사유·회수 유예) → 녹취(아래 고정 — 세그먼트 목록·[▶ 세그먼트 재생]·[다시 변환]). 세 구획은 칸이 낮으면(작은 창·배너 둘) 0 으로 눌리지 않게 최소 420 을 두고 세로로 넘긴다.
   발언 턴은 녹취 세그먼트 `tracks[].speakers[]`(콘솔 segTurns 와 같은 해석)에서, 참여자·이벤트·floor 는 `GET /provisioning/history/ptt/{recordingId}` 에서,
   지표·종류·참여자 수는 목록 항목의 확장 필드에서 온다(서버가 OAM 세션 인덱스를 범위 게이트 뒤에서 프록시 — 스캔 폴백이면 지표 0).
 - **녹취 재생**: 세그먼트 목록(순번·발언자·길이·상태) → [▶ 재생](MP4/AAC 를 받아 `MediaElement` 로 — 202 변환 중이면 0.7→1.5초 간격 최대 120초 대기 문구) · [정지] ·
@@ -538,8 +543,13 @@ SIP transport 콤보는 **ANY** 를 포함한 넷(콘솔 라벨과 같다) — A
   주소로도 잦아 `DispatchSession.NoteNetworkChange` 가 2초 합친 뒤 유니캐스트 주소 지문(루프백·터널·링크 로컬 제외)이 바뀌었고 망이 있을 때만 알린다.
   진행 중 호의 유지는 코어 과제([ue_sdk.md §11](ue_sdk.md)).
 - **CMS 문서**(TS 24.484 user profile·service config — `CscClient.FetchUserProfile/FetchServiceConfig`, ETag 304) = 기동 때(PTT 계정을 올리기 전) + 5분마다.
-  user profile ruleset → `Capabilities`(UX 선차단 — [긴급 호출]·개별·애드혹·[경보 해제], 받지 못한 문서는 허용, 최종 판정은 서버), service config 의
-  `*-resource-priority` → PTT 계정 `Rp*`(없으면 코어 기본값). 엔진 `UdpNoTcpSwitch` = 올리는 서비스 중 하나라도 `sip.udpNoTcpSwitch`.
+  user profile ruleset → `Capabilities`(UX 선차단 — [긴급 호출]·[긴급 해제]·개별·애드혹·[경보 해제], 받지 못한 문서는 허용, 최종 판정은 서버 — 자격이 바뀌면
+  카드·배너의 해제 버튼도 다시 판정한다), service config 의 `*-resource-priority` → PTT 계정 `Rp*`(없으면 코어 기본값). 엔진 `UdpNoTcpSwitch` = 올리는 서비스 중
+  하나라도 `sip.udpNoTcpSwitch`.
+- **UE initial configuration**(TS 24.484 §7.2 — `CscClient.FetchUeInitConfig(<기기 urn>)`, 로그인 전 문서라 토큰 없음, MCS UE ID = `+sip.instance` 와 같은
+  `DeviceIdentity.InstanceUrn`) = 기동 때 PTT 계정을 올리기 전. 참여 기능 PSI 둘을 PTT 계정에 넣는다 — `McpttServerUri`(경보 Request-URI, TS 24.379 §12.1.1.1 8))·
+  `McdataServerUri`(disposition 통지 Request-URI, TS 24.282 §12.2.1.1). 광고하지 않은 서비스·못 받은 문서는 비워 둔다(경보 = 그룹 URI, 통지 = 원 발신자 직행 —
+  코어 전환기 경로).
 - **관제 편성 추적**: 로그인 후 60초마다 `GET /provisioning/me` 를 `If-None-Match` 로 재조회한다 — 304 면 끝, 200 이면 `dispatch.members[]`
   (`groupId == dispatch.groupId` 가 «관제 그룹원» 칸, 나머지는 감시 전용)·`pttTargets[]`·범위를 비교해 바뀐 것만 dialog watch 해제/추가·conference 구독
   재적용 후 토스트 한 줄. 그룹원 번호는 망 주소(`volteAor`)이고 내선 라벨은 이름에 병기된다.
@@ -638,6 +648,8 @@ SIP transport 콤보는 **ANY** 를 포함한 넷(콘솔 라벨과 같다) — A
 | 개별 | 404 / 480 / 486 | "상대를 찾을 수 없음 / 응답 없음 / 통화 중" | — |
 | 애드혹 | 403 | "애드혹 그룹 통화 자격이 없거나 시스템에서 꺼져 있습니다" | mcptt_emergency_modes §6 |
 | 긴급 개시 | 403 | "긴급 호출 자격이 없습니다" | mcptt_emergency_modes §4.2·§7 |
+| 긴급·임박 해제 | 403 | "해제 권한이 없거나 다른 사용자가 긴급 발언 중입니다 — 긴급은 계속됩니다" | TS 24.379 §10.1.1.4.7 7)·7a), mcptt_emergency_modes §4.2 |
+| 경보 해제 | 403 | "경보 해제 권한이 없습니다 — 경보는 계속됩니다"(배너를 되살린다) | TS 24.379 §12.1.3.2 |
 | 일제 통화 개시 | 403 | "그룹 멤버가 아닙니다"(PTT 참여와 같다) | mcptt_broadcast_group_call §3.1 |
 | MCData SDS | 403 / 413 / 404·408·503 | "그룹 문자 권한 없음 / 너무 긺(서버 한도) / 전송 실패 — 재전송" | mcdata §4·§5 |
 | MCData 파일(FD 업·다운로드) | 403 / 404 / 413 / 503 | 본문 `error` 로 세분 — "이 그룹은 파일 전송이 꺼져 있습니다" · "그룹 멤버가 아니라 파일을 보낼 수 없습니다" · "파일이 서버에 없습니다(보관 기간)" · "파일이 너무 큽니다(서버 한도)" · "서버 파일 저장소가 설정되지 않았습니다" | mcdata §4.5 (csc `mcdata_fd.py`) |
@@ -658,8 +670,10 @@ SIP transport 콤보는 **ANY** 를 포함한 넷(콘솔 라벨과 같다) — A
 ```
 windows/dispatch-desktop/                 DispatchDesktop.csproj — net10.0-windows, CommunityToolkit.Mvvm · Microsoft.Data.Sqlite
   App.xaml(.cs)                 단일 인스턴스·전역 예외·SynchronizationContext 캡처·테마·로그인→메인·1초 틱·망 전환 통지(→ NoteNetworkChange). 개발 스위치 `--ui-preview`
-                                (로그인 없이 메인, 별도 인스턴스 이름) · `--ui-preview-canvas`·`-banner`·`-mode`·`-panel`·`-keypad` · `--ui-preview-screen=history|groups|admin` ·
-                                `--ui-preview-history=call|ptt` · `--ui-preview-shot=<png>`(§3.4 — 모드·패널·화면 스위치는 창의 첫 스냅샷 재구성 뒤 ContextIdle 에 적용)
+                                (로그인 없이 메인, 별도 인스턴스 이름) · `--ui-preview-canvas`·`-banner`·`-mode`·`-panel`·`-keypad` · `--ui-preview-theme=light|dark`(설정을 바꾸지
+                                않고 그 테마로) · `--ui-preview-size=<W>x<H>`(작은 창) · `--ui-preview-window=settings|login|monitor|prompt|confirm`(별도 창) ·
+                                `--ui-preview-screen=history|groups|admin` ·
+                                `--ui-preview-history=call|ptt` · `--ui-preview-shot=<png>`(§3.4 — 모드·패널·화면 스위치는 창의 첫 스냅샷 재구성 뒤 ContextIdle 에 적용. 미리보기는 layout.json 을 저장하지 않는다 — 실제 앱의 창·칸 경계를 덮지 않게)
   Shell/MainWindow.xaml         왼쪽 레일(`RailItem` — [관제][이력] RadioButton · [더보기] ToggleButton + Popup 메뉴) · 상단 바(신원·등록 점·감청 중 N·검색 칸·⋮ 세션 메뉴 —
                                 드롭다운은 Popup, 시스템 메뉴는 테마 색을 못 입힌다) · 배너 층(두 줄 64 / 경고 한 줄) · 발언 바(`TalkBarView`) · 탭 줄([무전|통화] `ModeSeg` +
                                 목록 `ListToggle`, 관제 화면만) · 본문 = 오른쪽 `SidePanelView`(440) + 관제 두 화면(`PttModeView`·`CallModeView`, 모드로 가시성 — 항상 마운트) /
@@ -669,6 +683,8 @@ windows/dispatch-desktop/                 DispatchDesktop.csproj — net10.0-win
                                 Ctrl+M·Esc(메뉴·키패드·고정 안 한 패널)·F1~F4, 입력란 규칙 §8)·트레이 최소화·종료 확인
   Shell/MonitorWindow.xaml      감청 창(§5) — VoLTE/PTT 두 본문, 위치 기억, 닫기 = 종료(확인), 세션 종료 → 3초 후 자동 닫힘
   Shell/LoginWindow · SettingsWindow · PromptWindow
+  Shell/ConfirmWindow.xaml      확인 대화상자(`ConfirmWindow.Ask` — 삭제·종료·로그아웃·청취 종료·변경 버림). 시스템 MessageBox 는 테마를 따르지 않아 쓰지 않는다
+                                (기동 실패·처리 안 된 예외 알림만 — 테마가 없어도 떠야 한다). 삭제 = 빨강 버튼·Enter 는 취소
   Shell/ScreenWindow.xaml       화면 별창(§3.4) — 요약 띠(`DispatchStripView`) + `ScreenView(IsFloating)` 하나, 닫히면 `MainViewModel.OnScreenWindowClosed`, 키는 `MainWindow.RouteKeyDown/Up` 으로
   ViewModels/
     MainViewModel               VM 조립 · **모드**(`Mode` ptt|call — 바꾸면 고정 안 한 패널 닫힘, `PttBadge`·`CallBadge`·`DispatchBadge`) · **오른쪽 패널 규칙**(`OpenChannel`·`OpenOther`·
@@ -737,9 +753,12 @@ windows/dispatch-desktop/                 DispatchDesktop.csproj — net10.0-win
             그룹원 4열 · 기록 목록 : 한 줄기, 패널이 열리면 목록만) · SidePanelView(오른쪽 패널 다섯) · TalkBarView(발언 바) · HoldButton(누름/뗌 명령 — 캡처·터치, PTT·[일제 통화]) ·
             MessagesView(대화 말풍선·끌어 놓기·맨 아래 스크롤) · DispatchStripView(요약 띠 — 화면 별창) · ScreenView(레일 화면 호스트 — 머리·[별창으로]·자리표시자, 화면 VM 타입별 DataTemplate) ·
             HistoryView(MediaElement — Loaded~Unloaded 사이에만 재생 이벤트 구독) · PttGroupsView · GroupEditView([PTT 그룹] 화면 인라인 폼) · DirectoryAdminView(서브내비 + 3열)
-  Themes/   Light/Dark(같은 키 — 먹 `Brush.Ink`/`OnInk`·`TextSoft`·`Faint`·`Panel`·`Rail`·배너 면/테두리/글자) · Styles(알약 `Pill.*`·네모 `Rect.*`·`FilterChip`·`Tag.*`·`Count`·`Avatar`·
-            `TargetCheck`·`RoundBtn`·`RailItem`·`ModeSeg`·`ListToggle`·`RowBtn`·`Seam` + 공용 버튼·배지·칩·미터·PopPanel) · Icons(스트로크 Path) · Controls(기본 컨트롤 테마 템플릿)
-            Converters/  표시 규약 변환기(StrToVis `invert` = 자리표시자 · `Pick` = bool → "참|거짓" 값 · `SameRef` 고른 줄 · `HalfRadius` 알약 모서리)
+  Themes/   Light/Dark(같은 키 — 표면·글자 · 브랜드 `Brush.Primary`/`PrimarySoft`/`PrimaryInk`/`PrimaryEdge`/`Fill`/`OnFill` · 외곽선 `Edge` · 상태색 기본/`*Soft`/`*Ink`/`*Fill` ·
+            아바타 `Av0~7`(+`Fg`) · 제목 표시줄 `Color.Caption`/`CaptionText`) · Styles(알약 `Pill.*`·네모 `Rect.*`(`Call` 녹색)·`FilterChip`·`Tag.*`·`Count`·`Avatar`(Tag = 색 번호)·
+            `TargetCheck`·`RoundBtn`·`RailItem`·`ModeSeg`·`ListToggle`·`RowBtn`·`Seam` + 공용 버튼·배지·칩·미터·PopPanel) · Icons(스트로크 Path) · Controls(기본 컨트롤 테마 템플릿 —
+            ScrollBar·ComboBox·CheckBox·RadioButton·TabControl·ToolTip·TextBox·PasswordBox·Slider·DatePicker·Calendar)
+  Shell/TitleBar.cs             창 제목 표시줄 색 = 테마(DWM 어두운 모드·면·글자 색) — 모든 창 Loaded 에 걸고 테마를 바꾸면 떠 있는 창 전부
+            Converters/  표시 규약 변환기(StrToVis `invert` = 자리표시자 · `Pick` = bool → "참|거짓" 값 · `SameRef` 고른 줄 · `HalfRadius` 알약 모서리 · `AvatarHue` 이름 → 색 번호)
   publish.ps1                   배포 패키지 — 설치 없이 다른 PC 에서 실행되는 self-contained 게시(win-x64) → `build-win/dist/CimsDispatch-<버전>-win-x64.zip`(아래 "배포")
 ```
 
@@ -836,18 +855,6 @@ windows/dispatch-desktop/                 DispatchDesktop.csproj — net10.0-win
   잠깐만 서며 긴급 여부도 적지 않아, 다른 화면에 있는 동안 받은 긴급 개별 통화는 내 채널 카드 빨강(과 [관제]·[무전] 배지)이 유일한 표시다.
 - **진행 중 조건의 개시자** — 조건 재광고 re-INVITE 는 조건을 건 사용자를 싣지만(TS 24.379 §6.3.3.1.6 2)) 코어 `McpttCondition` 에 개시자가 없어
   진행 중에 걸린 조건의 배너 개시자는 비어 있다(§3.2, [ue_sdk.md §11](ue_sdk.md)).
-- **[긴급 해제] 자격 = user profile `allow-cancel-group-emergency`(코어·앱)** — 서버는 긴급 해제를 개시자 ∨ 이 값(TS 24.484 ruleset, 관제사에게 켠다)으로
-  받고 비인가·다른 긴급 사용자 송출 중이면 403 + `emergency-ind` true 다(TS 24.379 §6.3.3.1.13.4·§10.1.1.4.7 7)·7a), [mcptt_emergency_modes.md §4.2](mcptt_emergency_modes.md)).
-  코어는 이 요소(와 `allow-cancel-imminent-peril`)를 `Capabilities.CancelGroupEmergency`(·`CancelImminentPeril`)로 낸다([ue_sdk.md §4.2](ue_sdk.md)) — 앱이 `CanCancelCondition` 을 «내 조건 ∨ 이 값» 으로 넓히고,
-  403 은 조건 이벤트 `Denied` 의 해제 거절 문구로 적는다(코어는 이미 이전 값으로 되돌린다). 청취 중인 채널도 서버가 조건 재광고를 청취 leg 에 보내므로
-  타 채널 행·배너가 격상·해제를 따라간다(앱 변경 없음). 경보 취소는 서버가 `allow-cancel-emergency-alert` 로 판정한다(비인가 403 + `alert-ind` true) — 앱의
-  선차단과 같은 값이다.
-- **SDS 전달 확인의 규격 경로(코어)** — disposition 자동 회신(`sendSdsNotification`)이 원 발신자 AoR 로 SDS NOTIFICATION 한 파트만 보낸다. TS 24.282
-  V18.13.0 §12.2.1.1 은 MCData PSI 로, 대상 MCData ID 의 `resource-lists` 와 그룹 통지의 `<mcdata-calling-group-id>` 를 실어 보내게 한다 — CSP 는 규격형을
-  이미 받아 상관·중계한다([mcdata_messaging.md §4.4](mcdata_messaging.md)). 코어 통지 API 가 바뀌면 앱은 수신 SDS 의 그룹·발신자를 인자로 넘기기만 한다.
-- **경보 Request-URI(PSI)** — 경보 취소 MESSAGE 의 Request-URI 는 참여 기능 PSI(ue-init-config `MCPTT-Service-Details/Server-URI`, TS 24.379 §12.1.1.1 8))여야
-  한다. CSC 는 ue-init-config 에 이미 싣는다(`UeInitConfig.ServiceDetails.Mcptt.Enable`) — SDK 코어에 ue-init-config 해석이 없어 앱이 `AccountConfig.McpttServerUri` 를
-  비워 두고, 코어가 그룹 URI 로 보낸다(CSP 가 받는 옛 형식 전환기).
 - **대표번호 발신 표시** — 서버 확정([dispatch_center.md §4.7](dispatch_center.md)): 발신 INVITE 에 `P-Preferred-Identity: <sip:<pilotId>@…>` 를 실으면
   CSP 가 자기 관제 그룹 대표번호일 때 착신자에게 대표번호로 낸다(그 외는 무시 → 기본 신원). 앱: «통화» 머리 번호칸 옆 "대표번호로 발신" 토글(`dispatch.pilotId`
   있을 때) + SDK `makeCall` 헤더 옵션(남음).

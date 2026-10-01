@@ -93,6 +93,11 @@ public partial class HistoryView : UserControl
     private void OnPlay(object? sender, string path) { Player.Stop(); Player.Source = new Uri(path); Player.Play(); }
     private void OnStop(object? sender, EventArgs e) { Player.Stop(); Player.Source = null; }
 
+    /// <summary>본문 3구획의 높이 = 보이는 높이, 단 DetailMinHeight 아래로는 줄이지 않는다(그때는 바깥이 세로로 넘긴다) — ScrollViewer 는 안을 무한 높이로 재므로 * 행이 칸을 채우도록 높이를 직접 준다.</summary>
+    private const double DetailMinHeight = 420;
+    private void DetailScroll_SizeChanged(object sender, SizeChangedEventArgs e) =>
+        DetailBody.Height = Math.Max(DetailMinHeight, e.NewSize.Height - DetailBody.Margin.Top - DetailBody.Margin.Bottom);
+
     private void Segments_DoubleClick(object sender, MouseButtonEventArgs e) { if (Vm?.CanPlay == true) Vm.PlayCommand.Execute(null); }
     private void Player_MediaEnded(object sender, RoutedEventArgs e) => Vm?.OnMediaEnded();
     private void Player_MediaFailed(object sender, ExceptionRoutedEventArgs e) => Vm?.OnMediaFailed(e.ErrorException.Message);

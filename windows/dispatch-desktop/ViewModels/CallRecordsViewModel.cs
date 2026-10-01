@@ -31,7 +31,8 @@ public sealed partial class RecordRow : ObservableObject
     public bool HasMissed { get; set; }
     public bool HasPilot { get; set; }
     public RecordRow(string key) { Key = key; }
-    public string Initial => Name.Trim().Length > 0 ? Name.Trim()[..1] : "?";
+    /// <summary>아바타 머리글자 — 번호뿐인 상대(이름 없음)는 빈 값(화면이 전화 아이콘을 그린다).</summary>
+    public string Initial => Name.Trim() is { Length: > 0 } n && !(char.IsDigit(n[0]) || n[0] == '+') ? n[..1] : "";
     public string KindText => RecordsText.Of(Kind);
     public string TimeText => Kind == RecordKind.Live ? "지금" : Time == default ? "" : Time.Date == DateTime.Today ? Time.ToString("HH:mm") : Time.ToString("M/d");
     public bool HasUnread => Unread > 0;

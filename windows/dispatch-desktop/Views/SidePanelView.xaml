@@ -7,7 +7,7 @@
              d:DataContext="{d:DesignInstance vm:MainViewModel}" x:Name="Root">
     <!-- 오른쪽 패널 440(§3.6) — 머리 56([←] · 종류 라벨 · 제목 · 핀 · ×) + 내용 하나: 채널 상세 · 사용자 · 새 PTT 그룹 · 이벤트 상세 · 주소록.
          오른쪽 칸만 민다(왼쪽 칸 1040 은 그대로). 같은 대상 = 닫기 · 다른 대상 = 교체 · 핀 = 모드·레일을 옮겨도 남는다 -->
-    <Border Width="440" Background="{DynamicResource Brush.Surface}" BorderBrush="{DynamicResource Brush.Ink}" BorderThickness="1.5,0,0,0">
+    <Border Width="440" Background="{DynamicResource Brush.Surface}" BorderBrush="{DynamicResource Brush.Edge}" BorderThickness="1,0,0,0">
         <Border.Effect><DropShadowEffect BlurRadius="20" ShadowDepth="0" Opacity="0.18" Direction="180" /></Border.Effect>
         <DockPanel>
             <!-- 머리 -->
@@ -26,7 +26,7 @@
                                 </Border>
                                 <ControlTemplate.Triggers>
                                     <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Bd" Property="Background" Value="{DynamicResource Brush.Hover}" /></Trigger>
-                                    <Trigger Property="IsChecked" Value="True"><Setter TargetName="P" Property="Fill" Value="{DynamicResource Brush.Ink}" /><Setter TargetName="P" Property="Stroke" Value="{DynamicResource Brush.Ink}" /></Trigger>
+                                    <Trigger Property="IsChecked" Value="True"><Setter TargetName="P" Property="Fill" Value="{DynamicResource Brush.Primary}" /><Setter TargetName="P" Property="Stroke" Value="{DynamicResource Brush.Primary}" /></Trigger>
                                 </ControlTemplate.Triggers>
                             </ControlTemplate>
                         </ToggleButton.Template>
@@ -81,11 +81,11 @@
                                 <Button.Style>
                                     <Style TargetType="Button" BasedOn="{StaticResource Pill.Line}">
                                         <Setter Property="Content" Value="음소거" />
-                                        <Style.Triggers><DataTrigger Binding="{Binding IsMuted}" Value="True"><Setter Property="Content" Value="음소거 중" /><Setter Property="Background" Value="{DynamicResource Brush.Emg}" /><Setter Property="Foreground" Value="{DynamicResource Brush.OnAccent}" /><Setter Property="BorderThickness" Value="0" /></DataTrigger></Style.Triggers>
+                                        <Style.Triggers><DataTrigger Binding="{Binding IsMuted}" Value="True"><Setter Property="Content" Value="음소거 중" /><Setter Property="Background" Value="{DynamicResource Brush.EmgFill}" /><Setter Property="Foreground" Value="{DynamicResource Brush.OnAccent}" /><Setter Property="BorderThickness" Value="0" /></DataTrigger></Style.Triggers>
                                     </Style>
                                 </Button.Style>
                             </Button>
-                            <Button Style="{StaticResource Pill.Ink}" Height="36" Padding="14,0" Margin="0,0,6,6" Content="청취" Command="{Binding ToggleListenCommand}" IsEnabled="{Binding CanListen}" ToolTip="{Binding ListenTip}"
+                            <Button Style="{StaticResource Pill.Listen}" Height="36" Padding="14,0" Margin="0,0,6,6" Content="청취" Command="{Binding ToggleListenCommand}" IsEnabled="{Binding CanListen}" ToolTip="{Binding ListenTip}"
                                     Visibility="{Binding ShowListen, Converter={StaticResource BoolToVis}}" />
                             <Button Style="{StaticResource Pill.Line}" Height="36" Padding="14,0" Margin="0,0,6,6" Content="청취 중지" Command="{Binding ToggleListenCommand}" Visibility="{Binding ShowStopListen, Converter={StaticResource BoolToVis}}" />
                             <Button Style="{StaticResource Pill.Soft}" Height="36" Padding="14,0" Margin="0,0,6,6" Content="창으로 ↗" Command="{Binding ShowWindowCommand}" ToolTip="청취 창에 띄우기(두 번째 모니터)"
@@ -130,10 +130,10 @@
                             </DockPanel>
                         </StackPanel>
                         <!-- [접속 n | 편성 m] -->
-                        <Border Margin="16,14,16,8" Height="34" CornerRadius="8" BorderThickness="1.5" BorderBrush="{DynamicResource Brush.Ink}" ClipToBounds="True" Visibility="{Binding HasSegment, Converter={StaticResource BoolToVis}}">
+                        <Border Margin="16,14,16,8" Height="34" CornerRadius="9" BorderThickness="1.5" BorderBrush="{DynamicResource Brush.Fill}" Padding="2" Visibility="{Binding HasSegment, Converter={StaticResource BoolToVis}}">
                             <UniformGrid Columns="2">
                                 <RadioButton Style="{StaticResource ModeSeg}" Width="Auto" FontSize="13" Content="{Binding SegConnected}" IsChecked="{Binding Segment, Converter={StaticResource Eq}, ConverterParameter=connected, Mode=OneWay}" Command="{Binding SetSegmentCommand}" CommandParameter="connected" />
-                                <RadioButton Style="{StaticResource ModeSeg}" Width="Auto" FontSize="13" BorderThickness="1.5,0,0,0" Content="{Binding SegAll}" IsChecked="{Binding Segment, Converter={StaticResource Eq}, ConverterParameter=all, Mode=OneWay}" Command="{Binding SetSegmentCommand}" CommandParameter="all" />
+                                <RadioButton Style="{StaticResource ModeSeg}" Width="Auto" FontSize="13" Content="{Binding SegAll}" IsChecked="{Binding Segment, Converter={StaticResource Eq}, ConverterParameter=all, Mode=OneWay}" Command="{Binding SetSegmentCommand}" CommandParameter="all" />
                             </UniformGrid>
                         </Border>
                         <TextBlock FontSize="12.5" FontWeight="Bold" Foreground="{DynamicResource Brush.TextSoft}" Text="{Binding RosterHead}" Margin="16,14,16,6" Visibility="{Binding HasSegment, Converter={StaticResource NotToVis}}" />
@@ -154,8 +154,11 @@
                                                             Command="{Binding DataContext.SdsCommand, ElementName=RosterHost}" CommandParameter="{Binding}" ToolTip="무전 메시지(1:1)" />
                                                 </StackPanel>
                                             </StackPanel>
-                                            <Border x:Name="Av" Width="30" Height="30" CornerRadius="15" Background="{DynamicResource Brush.Border}" Margin="0,0,10,0" VerticalAlignment="Center">
+                                            <Border x:Name="Av" Style="{StaticResource Avatar}" Width="30" Height="30" CornerRadius="15" Margin="0,0,10,0" Tag="{Binding Name, Converter={StaticResource AvatarHue}}">
+                                                <Grid>
                                                 <TextBlock x:Name="AvT" Text="{Binding Initial}" FontSize="12.5" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                                <Path Style="{StaticResource Icon}" Data="{StaticResource Icon.Phone}" Width="14" Height="14" StrokeThickness="2" Visibility="{Binding Initial, Converter={StaticResource StrToVis}, ConverterParameter=invert}" />
+                                                </Grid>
                                             </Border>
                                             <Button Style="{StaticResource Btn.Flat}" HorizontalContentAlignment="Left" Command="{Binding DataContext.PersonMenuCommand, ElementName=RosterHost}" CommandParameter="{Binding}" ToolTip="사람 메뉴">
                                                 <StackPanel>
@@ -167,7 +170,7 @@
                                     </Border>
                                     <DataTemplate.Triggers>
                                         <DataTrigger Binding="{Binding IsMe}" Value="True">
-                                            <Setter TargetName="Av" Property="Background" Value="{DynamicResource Brush.Ink}" /><Setter TargetName="AvT" Property="Foreground" Value="{DynamicResource Brush.OnInk}" />
+                                            <Setter TargetName="Av" Property="Background" Value="{DynamicResource Brush.Fill}" /><Setter TargetName="AvT" Property="Foreground" Value="{DynamicResource Brush.OnFill}" />
                                             <Setter TargetName="Nm" Property="FontWeight" Value="Bold" />
                                         </DataTrigger>
                                         <DataTrigger Binding="{Binding IsSpeaking}" Value="True"><Setter TargetName="Sp" Property="Text" Value=" · 발언 중" /></DataTrigger>
@@ -187,7 +190,7 @@
                 <!-- ═══ 사용자(무전) ═══ -->
                 <DockPanel DataContext="{Binding Users}" Visibility="{Binding DataContext.Panel.IsUsers, ElementName=Root, Converter={StaticResource BoolToVis}}">
                     <Grid DockPanel.Dock="Top" Margin="16,12,16,8" Height="40">
-                        <Border CornerRadius="8" BorderThickness="1.5" BorderBrush="{DynamicResource Brush.Ink}" />
+                        <Border CornerRadius="8" BorderThickness="1.5" BorderBrush="{DynamicResource Brush.Edge}" />
                         <Path Style="{StaticResource Icon}" Data="{StaticResource Icon.Search}" Width="16" Height="16" StrokeThickness="2" HorizontalAlignment="Left" Margin="12,0,0,0" TextElement.Foreground="{DynamicResource Brush.Muted}" />
                         <TextBox Text="{Binding Search, UpdateSourceTrigger=PropertyChanged}" Margin="36,0,10,0" FontSize="13.5" BorderThickness="0" Background="Transparent" VerticalContentAlignment="Center"
                                  Foreground="{DynamicResource Brush.Text}" CaretBrush="{DynamicResource Brush.Text}" />
@@ -211,7 +214,7 @@
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
                     <!-- 바닥 — 고른 사람 · 긴급 · [일제 통화] · [애드혹 열기][그룹으로 저장] -->
-                    <Border DockPanel.Dock="Bottom" BorderBrush="{DynamicResource Brush.Ink}" BorderThickness="0,1.5,0,0" Padding="16,12,16,14">
+                    <Border DockPanel.Dock="Bottom" BorderBrush="{DynamicResource Brush.Border}" BorderThickness="0,1,0,0" Padding="16,12,16,14">
                         <StackPanel>
                             <DockPanel Margin="0,0,0,8">
                                 <Button DockPanel.Dock="Right" Style="{StaticResource Btn.Link}" Command="{Binding ClearPickedCommand}" Visibility="{Binding HasPicked, Converter={StaticResource BoolToVis}}">
@@ -251,8 +254,8 @@
                                             <Button Style="{StaticResource RowBtn}" Padding="16,0,6,0" Command="{Binding DataContext.ToggleCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}" CommandParameter="{Binding}">
                                                 <DockPanel>
                                                     <TextBlock x:Name="St" DockPanel.Dock="Right" Text="{Binding Status}" FontSize="12" Foreground="{DynamicResource Brush.Faint}" VerticalAlignment="Center" />
-                                                    <Border x:Name="Box" Width="22" Height="22" CornerRadius="4" BorderThickness="2" BorderBrush="{DynamicResource Brush.Ink}" Background="{DynamicResource Brush.Surface}" Margin="0,0,12,0" VerticalAlignment="Center">
-                                                        <Path x:Name="Ck" Data="{StaticResource Icon.Check}" Width="13" Height="13" Stretch="Uniform" Stroke="{DynamicResource Brush.OnInk}" StrokeThickness="3.5" Visibility="Collapsed"
+                                                    <Border x:Name="Box" Width="22" Height="22" CornerRadius="4" BorderThickness="2" BorderBrush="{DynamicResource Brush.Edge}" Background="{DynamicResource Brush.Surface}" Margin="0,0,12,0" VerticalAlignment="Center">
+                                                        <Path x:Name="Ck" Data="{StaticResource Icon.Check}" Width="13" Height="13" Stretch="Uniform" Stroke="{DynamicResource Brush.OnFill}" StrokeThickness="3.5" Visibility="Collapsed"
                                                               StrokeLineJoin="Round" StrokeStartLineCap="Round" StrokeEndLineCap="Round" HorizontalAlignment="Center" VerticalAlignment="Center" />
                                                     </Border>
                                                     <StackPanel VerticalAlignment="Center">
@@ -265,8 +268,8 @@
                                     </Border>
                                     <DataTemplate.Triggers>
                                         <DataTrigger Binding="{Binding Checked}" Value="True">
-                                            <Setter TargetName="Row" Property="Background" Value="{DynamicResource Brush.Surface2}" />
-                                            <Setter TargetName="Box" Property="Background" Value="{DynamicResource Brush.Ink}" /><Setter TargetName="Ck" Property="Visibility" Value="Visible" />
+                                            <Setter TargetName="Row" Property="Background" Value="{DynamicResource Brush.PrimarySoft}" />
+                                            <Setter TargetName="Box" Property="Background" Value="{DynamicResource Brush.Fill}" /><Setter TargetName="Box" Property="BorderBrush" Value="{DynamicResource Brush.Fill}" /><Setter TargetName="Ck" Property="Visibility" Value="Visible" />
                                         </DataTrigger>
                                         <DataTrigger Binding="{Binding IsBusy}" Value="True"><Setter TargetName="St" Property="Foreground" Value="{DynamicResource Brush.TalkInk}" /></DataTrigger>
                                     </DataTemplate.Triggers>
@@ -278,7 +281,7 @@
 
                 <!-- ═══ 새 PTT 그룹 ═══ -->
                 <DockPanel DataContext="{Binding Panel.Group}" Visibility="{Binding DataContext.Panel.IsGroup, ElementName=Root, Converter={StaticResource BoolToVis}}">
-                    <Border DockPanel.Dock="Bottom" BorderBrush="{DynamicResource Brush.Ink}" BorderThickness="0,1.5,0,0" Padding="16,12,16,14">
+                    <Border DockPanel.Dock="Bottom" BorderBrush="{DynamicResource Brush.Border}" BorderThickness="0,1,0,0" Padding="16,12,16,14">
                         <DockPanel>
                             <Button DockPanel.Dock="Left" Style="{StaticResource Pill.Line.Lg}" FontWeight="Normal" Content="취소" Command="{Binding CancelCommand}" />
                             <Button DockPanel.Dock="Right" Command="{Binding SaveCommand}" IsEnabled="{Binding CanSave}">
@@ -296,7 +299,7 @@
                         <StackPanel Margin="16,14,16,14">
                             <TextBlock Text="그룹 이름" FontSize="12" Foreground="{DynamicResource Brush.TextSoft}" Margin="0,0,0,5" />
                             <Grid Height="44" Margin="0,0,0,14">
-                                <Border CornerRadius="8" BorderThickness="1.5" BorderBrush="{DynamicResource Brush.Ink}" />
+                                <Border CornerRadius="8" BorderThickness="1.5" BorderBrush="{DynamicResource Brush.Edge}" />
                                 <TextBox Text="{Binding Name, UpdateSourceTrigger=PropertyChanged}" Margin="12,0" FontSize="14" BorderThickness="0" Background="Transparent" VerticalContentAlignment="Center"
                                          Foreground="{DynamicResource Brush.Text}" CaretBrush="{DynamicResource Brush.Text}" />
                                 <TextBlock Style="{StaticResource Muted}" FontSize="14" Text="예) 3번 게이트 대응" Margin="14,0" VerticalAlignment="Center" IsHitTestVisible="False"
@@ -310,10 +313,10 @@
                             <TextBlock Text="세션 종류" FontSize="12" Foreground="{DynamicResource Brush.TextSoft}" Margin="0,0,0,5" />
                             <StackPanel Orientation="Horizontal" Margin="0,0,0,14">
                                 <Button Height="36" Padding="14,0" Margin="0,0,6,0" Content="편성(prearranged)" Command="{Binding SetSessionTypeCommand}" CommandParameter="prearranged">
-                                    <Button.Style><Style TargetType="Button" BasedOn="{StaticResource Pill.Soft}"><Style.Triggers><DataTrigger Binding="{Binding IsPrearranged}" Value="True"><Setter Property="Background" Value="{DynamicResource Brush.Ink}" /><Setter Property="Foreground" Value="{DynamicResource Brush.OnInk}" /><Setter Property="BorderThickness" Value="0" /><Setter Property="FontWeight" Value="Bold" /></DataTrigger></Style.Triggers></Style></Button.Style>
+                                    <Button.Style><Style TargetType="Button" BasedOn="{StaticResource Pill.Soft}"><Style.Triggers><DataTrigger Binding="{Binding IsPrearranged}" Value="True"><Setter Property="Background" Value="{DynamicResource Brush.Fill}" /><Setter Property="Foreground" Value="{DynamicResource Brush.OnFill}" /><Setter Property="BorderThickness" Value="0" /><Setter Property="FontWeight" Value="Bold" /></DataTrigger></Style.Triggers></Style></Button.Style>
                                 </Button>
                                 <Button Height="36" Padding="14,0" Content="채팅(chat)" Command="{Binding SetSessionTypeCommand}" CommandParameter="chat">
-                                    <Button.Style><Style TargetType="Button" BasedOn="{StaticResource Pill.Soft}"><Style.Triggers><DataTrigger Binding="{Binding IsChat}" Value="True"><Setter Property="Background" Value="{DynamicResource Brush.Ink}" /><Setter Property="Foreground" Value="{DynamicResource Brush.OnInk}" /><Setter Property="BorderThickness" Value="0" /><Setter Property="FontWeight" Value="Bold" /></DataTrigger></Style.Triggers></Style></Button.Style>
+                                    <Button.Style><Style TargetType="Button" BasedOn="{StaticResource Pill.Soft}"><Style.Triggers><DataTrigger Binding="{Binding IsChat}" Value="True"><Setter Property="Background" Value="{DynamicResource Brush.Fill}" /><Setter Property="Foreground" Value="{DynamicResource Brush.OnFill}" /><Setter Property="BorderThickness" Value="0" /><Setter Property="FontWeight" Value="Bold" /></DataTrigger></Style.Triggers></Style></Button.Style>
                                 </Button>
                             </StackPanel>
                             <TextBlock FontSize="12" Foreground="{DynamicResource Brush.TextSoft}" Margin="0,0,0,6"><Run Text="멤버 " /><Run Text="{Binding MemberCountText, Mode=OneWay}" /><Run Text=" (나 포함) — 사용자 목록에서 고른 사람" /></TextBlock>
@@ -322,7 +325,7 @@
                                 <ItemsControl.ItemTemplate>
                                     <DataTemplate DataType="{x:Type vm:GroupMemberRow}">
                                         <Border x:Name="Chip" Height="30" CornerRadius="14" Padding="12,0,6,0" Margin="0,0,6,6" BorderThickness="1" BorderBrush="{DynamicResource Brush.BorderStrong}" Background="{DynamicResource Brush.Surface}"
-                                                TextElement.Foreground="{DynamicResource Brush.Ink}">
+                                                TextElement.Foreground="{DynamicResource Brush.Text}">
                                             <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                                                 <TextBlock x:Name="T" Text="{Binding Label}" FontSize="13" VerticalAlignment="Center" />
                                                 <TextBlock x:Name="Role" Text=" · 의장" FontSize="13" FontWeight="Bold" VerticalAlignment="Center" Visibility="Collapsed" />
@@ -334,8 +337,8 @@
                                         </Border>
                                         <DataTemplate.Triggers>
                                             <DataTrigger Binding="{Binding IsChair}" Value="True">
-                                                <Setter TargetName="Chip" Property="Background" Value="{DynamicResource Brush.Ink}" /><Setter TargetName="Chip" Property="BorderBrush" Value="{DynamicResource Brush.Ink}" />
-                                                <Setter TargetName="Chip" Property="TextElement.Foreground" Value="{DynamicResource Brush.OnInk}" /><Setter TargetName="Chip" Property="Padding" Value="12,0" />
+                                                <Setter TargetName="Chip" Property="Background" Value="{DynamicResource Brush.PrimarySoft}" /><Setter TargetName="Chip" Property="BorderBrush" Value="{DynamicResource Brush.Primary}" />
+                                                <Setter TargetName="Chip" Property="TextElement.Foreground" Value="{DynamicResource Brush.PrimaryInk}" /><Setter TargetName="Chip" Property="Padding" Value="12,0" />
                                                 <Setter TargetName="Role" Property="Visibility" Value="Visible" /><Setter TargetName="T" Property="FontWeight" Value="Bold" />
                                             </DataTrigger>
                                             <DataTrigger Binding="{Binding IsMe}" Value="True"><Setter TargetName="X" Property="Visibility" Value="Collapsed" /></DataTrigger>
@@ -361,7 +364,7 @@
 
                 <!-- ═══ 이벤트 상세 ═══ -->
                 <DockPanel DataContext="{Binding Panel.Event}" Visibility="{Binding DataContext.Panel.IsEvent, ElementName=Root, Converter={StaticResource BoolToVis}}">
-                    <Border DockPanel.Dock="Bottom" BorderBrush="{DynamicResource Brush.Ink}" BorderThickness="0,1.5,0,0" Padding="16,12,16,14">
+                    <Border DockPanel.Dock="Bottom" BorderBrush="{DynamicResource Brush.Border}" BorderThickness="0,1,0,0" Padding="16,12,16,14">
                         <UniformGrid Rows="1">
                             <Button Style="{StaticResource Pill.Ink.Lg}" Padding="6,0" Margin="0,0,6,0" FontSize="13" Content="답장" Command="{Binding DataContext.EventReplyCommand, ElementName=Root}" Visibility="{Binding CanReply, Converter={StaticResource BoolToVis}}" />
                             <Button Style="{StaticResource Pill.Line.Lg}" Padding="6,0" Margin="0,0,6,0" FontSize="13" Content="채널 열기" Command="{Binding DataContext.EventChannelCommand, ElementName=Root}" IsEnabled="{Binding HasChannel}" />
@@ -408,7 +411,7 @@
                 <!-- ═══ 주소록(통화) ═══ -->
                 <DockPanel DataContext="{Binding CallOriginate}" Visibility="{Binding DataContext.Panel.IsDirectory, ElementName=Root, Converter={StaticResource BoolToVis}}">
                     <Grid DockPanel.Dock="Top" Margin="16,12,16,8" Height="40">
-                        <Border CornerRadius="8" BorderThickness="1.5" BorderBrush="{DynamicResource Brush.Ink}" />
+                        <Border CornerRadius="8" BorderThickness="1.5" BorderBrush="{DynamicResource Brush.Edge}" />
                         <Path Style="{StaticResource Icon}" Data="{StaticResource Icon.Search}" Width="16" Height="16" StrokeThickness="2" HorizontalAlignment="Left" Margin="12,0,0,0" TextElement.Foreground="{DynamicResource Brush.Muted}" />
                         <TextBox Text="{Binding Search, UpdateSourceTrigger=PropertyChanged}" Margin="36,0,10,0" FontSize="13.5" BorderThickness="0" Background="Transparent" VerticalContentAlignment="Center"
                                  Foreground="{DynamicResource Brush.Text}" CaretBrush="{DynamicResource Brush.Text}" />

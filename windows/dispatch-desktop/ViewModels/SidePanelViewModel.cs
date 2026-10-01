@@ -16,7 +16,8 @@ public enum PanelView { None, Channel, Users, Group, Event, Directory }
 /// <summary>채널 상세의 사람 줄 — 접속 로스터 또는 편성 멤버(GMS 그룹 문서).</summary>
 public sealed record ChannelPersonRow(string Name, string Uri, string Meta, bool IsMe, bool IsSpeaking, bool IsAbsent, bool IsChair, bool IsListener)
 {
-    public string Initial => Name.Trim().Length > 0 ? Name.Trim()[..1] : "?";
+    /// <summary>아바타 머리글자 — 번호뿐인 사람은 빈 값(화면이 전화 아이콘을 그린다).</summary>
+    public string Initial => Name.Trim() is { Length: > 0 } n && !(char.IsDigit(n[0]) || n[0] == '+') ? n[..1] : "";
     public string Number => UserPartConverter.UserPart(Uri);
     public bool CanAct => !IsMe;
     public string NameText => IsMe ? $"{Name} (나)" : Name;

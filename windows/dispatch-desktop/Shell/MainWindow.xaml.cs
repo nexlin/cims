@@ -165,8 +165,7 @@ public partial class MainWindow : Window
     {
         var live = _vm.Session.SessionOfGroup(g.Id) ?? _vm.Session.ListenOfGroup(g.Id);
         string extra = live is not null ? "\n진행 중인 세션이 있습니다 — 삭제하면 서버가 세션을 정리합니다." : "";
-        if (MessageBox.Show(this, $"그룹 '{g.Name}' ({g.Id}) 을 삭제할까요?\n멤버 {g.MemberCount}명의 단말에서도 사라집니다.{extra}", "그룹 삭제",
-                            MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes) return;
+        if (!ConfirmWindow.Ask(this, "그룹 삭제", $"그룹 '{g.Name}' ({g.Id}) 을 삭제할까요?\n멤버 {g.MemberCount}명의 단말에서도 사라집니다.{extra}", "삭제", danger: true)) return;
         await _vm.Session.DeleteGroupAsync(g);
     }
 
@@ -193,7 +192,7 @@ public partial class MainWindow : Window
     {
         int live = _vm.Session.Sessions.Count(s => s.IsLive);
         if (live == 0) return true;
-        return MessageBox.Show(this, $"진행 중인 세션·감청이 {live}개 있습니다. {what}할까요?", what, MessageBoxButton.YesNo, MessageBoxImage.Warning) == MessageBoxResult.Yes;
+        return ConfirmWindow.Ask(this, what, $"진행 중인 세션·감청이 {live}개 있습니다. {what}할까요?", what);
     }
 
     private void OnClosing(object? sender, CancelEventArgs e)

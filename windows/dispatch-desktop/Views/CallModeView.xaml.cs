@@ -1,5 +1,5 @@
 // [통화] 한 화면 — 번호칸 Enter = 발신 · Esc = 제안 접기, 그룹원 칸 누름 = 번호칸에 채움 · 오른쪽 = 사람 메뉴, 기록 목록 폭 끌기 저장(§3.3),
-// 오른쪽 패널이 열리면 «기록» 은 목록만(한 줄기는 패널을 닫으면 돌아온다 — §3.6), 문자 Enter = 보내기, 새 사건이 붙으면 한 줄기 맨 아래로.
+// 오른쪽 칸이 좁으면(패널 열림·작은 창 — IsNarrow) «기록» 은 목록만(한 줄기는 넓어지면 돌아온다 — §3.6), 문자 Enter = 보내기, 새 사건이 붙으면 한 줄기 맨 아래로.
 using System.ComponentModel;
 using System.Windows;
 using System.Windows.Controls;
@@ -11,6 +11,11 @@ namespace DispatchDesktop.Views;
 
 public partial class CallModeView : UserControl
 {
+    /// <summary>오른쪽 칸이 좁다 — 패널이 열렸거나(§3.6) 창이 작아 오른쪽 칸이 640 에 못 미친다. 좁으면 «기록» 목록만 · 제목·CSV 숨김.</summary>
+    public static readonly DependencyProperty IsNarrowProperty = DependencyProperty.Register(nameof(IsNarrow), typeof(bool), typeof(CallModeView), new PropertyMetadata(false));
+    public bool IsNarrow { get => (bool)GetValue(IsNarrowProperty); private set => SetValue(IsNarrowProperty, value); }
+    public const double NarrowWidth = 640;
+
     private MainViewModel? _vm;
 
     public CallModeView()
@@ -30,13 +35,15 @@ public partial class CallModeView : UserControl
     }
 
     private void OnVm(object? sender, PropertyChangedEventArgs e) { if (e.PropertyName == nameof(MainViewModel.IsPanelOpen)) ApplyNarrow(); }
+    private bool RightNarrow => _vm?.IsPanelOpen == true || (Board.ActualWidth > 0 && Board.ActualWidth - LeftCol.Width.Value < NarrowWidth);
     private void OnItemsGrew(object? sender, EventArgs e) => Dispatcher.BeginInvoke(() => RecordScroll.ScrollToEnd());
 
-    /// <summary>패널이 열리면 오른쪽 칸이 360 으로 좁아진다 — 목록만 남기고, 닫히면 끈 폭으로 돌아온다.</summary>
+    /// <summary>오른쪽 칸이 좁으면(패널 360 · 작은 창) 목록만 남기고, 넓어지면 끈 폭으로 돌아온다.</summary>
     private void ApplyNarrow()
     {
         if (_vm is null) return;
-        bool narrow = _vm.IsPanelOpen;
+        bool narrow = RightNarrow;
+        IsNarrow = narrow;
         RecordCol.Width = narrow ? new GridLength(1, GridUnitType.Star) : new GridLength(_vm.Layout.File.Seams.RecordList);
         TimelineCol.Width = narrow ? new GridLength(0) : new GridLength(1, GridUnitType.Star);
         Timeline.Visibility = narrow ? Visibility.Collapsed : Visibility.Visible;
@@ -45,7 +52,7 @@ public partial class CallModeView : UserControl
 
     private void RecordSeam_DragCompleted(object sender, DragCompletedEventArgs e)
     {
-        if (_vm is null || _vm.IsPanelOpen) return;
+        if (_vm is null || IsNarrow) return;
         _vm.Layout.File.Seams.RecordList = Math.Round(RecordCol.ActualWidth);
         _vm.Layout.Save();
     }
@@ -86,5 +93,6 @@ public partial class CallModeView : UserControl
     {
         double w = Math.Clamp(e.NewSize.Width - 360, 640, 1040);
         if (Math.Abs(LeftCol.Width.Value - w) > 0.5) LeftCol.Width = new GridLength(w);
+        ApplyNarrow();
     }
 }

@@ -17,14 +17,14 @@
                     Padding="12,7,9,5" Cursor="Hand" ToolTip="{Binding DetailTip}" MouseLeftButtonUp="Card_Click">
                 <DockPanel>
                     <DockPanel DockPanel.Dock="Bottom" Height="34" Margin="16,0,0,0">
-                        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center" Margin="8,0,0,0">
                             <ToggleButton Style="{StaticResource TargetCheck}" IsChecked="{Binding IsChecked, Mode=OneWay}" IsEnabled="{Binding CanCheck}" ToolTip="{Binding TargetTip}"
                                           Visibility="{Binding ShowTarget, Converter={StaticResource BoolToVis}}"
                                           Command="{Binding DataContext.PttChannels.ToggleTargetCommand, ElementName=Root}" CommandParameter="{Binding}" />
                             <Button Command="{Binding ToggleMuteCommand}" ToolTip="{Binding MuteTip}" Visibility="{Binding ShowMute, Converter={StaticResource BoolToVis}}">
                                 <Button.Style>
                                     <Style TargetType="Button" BasedOn="{StaticResource RoundBtn}">
-                                        <Style.Triggers><DataTrigger Binding="{Binding IsMuted}" Value="True"><Setter Property="Background" Value="{DynamicResource Brush.Emg}" /><Setter Property="BorderThickness" Value="0" /><Setter Property="Foreground" Value="{DynamicResource Brush.OnAccent}" /></DataTrigger></Style.Triggers>
+                                        <Style.Triggers><DataTrigger Binding="{Binding IsMuted}" Value="True"><Setter Property="Background" Value="{DynamicResource Brush.EmgFill}" /><Setter Property="BorderThickness" Value="0" /><Setter Property="Foreground" Value="{DynamicResource Brush.OnAccent}" /></DataTrigger></Style.Triggers>
                                     </Style>
                                 </Button.Style>
                                 <Path Style="{StaticResource Icon}" Data="{StaticResource Icon.MicOff}" Width="17" Height="17" StrokeThickness="2" />
@@ -57,7 +57,7 @@
                 </DockPanel>
             </Border>
             <DataTemplate.Triggers>
-                <DataTrigger Binding="{Binding IsJoined}" Value="True"><Setter TargetName="Dot" Property="Fill" Value="{DynamicResource Brush.Ink}" /></DataTrigger>
+                <DataTrigger Binding="{Binding IsJoined}" Value="True"><Setter TargetName="Dot" Property="Fill" Value="{DynamicResource Brush.Primary}" /></DataTrigger>
                 <DataTrigger Binding="{Binding IsPrivate}" Value="True"><Setter TargetName="Dot" Property="Fill" Value="{DynamicResource Brush.Muted}" /></DataTrigger>
                 <DataTrigger Binding="{Binding SubIsMe}" Value="True"><Setter TargetName="Sub" Property="Foreground" Value="{DynamicResource Brush.TalkInk}" /><Setter TargetName="Sub" Property="FontWeight" Value="Bold" /></DataTrigger>
                 <DataTrigger Binding="{Binding SubIsWarn}" Value="True"><Setter TargetName="Sub" Property="Foreground" Value="{DynamicResource Brush.Emg}" /></DataTrigger>
@@ -117,7 +117,9 @@
                                 <v:AddTile />
                             </CompositeCollection>
                         </ItemsControl.ItemsSource>
-                        <ItemsControl.ItemsPanel><ItemsPanelTemplate><UniformGrid Columns="4" VerticalAlignment="Top" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+                        <!-- 카드 4열(1040) — 칸이 좁으면(작은 창에 패널) 열을 줄인다: 카드 최소 폭 230 -->
+                        <ItemsControl.ItemsPanel><ItemsPanelTemplate><UniformGrid VerticalAlignment="Top"
+                            Columns="{Binding ActualWidth, RelativeSource={RelativeSource AncestorType=ItemsControl}, Converter={StaticResource ColumnsByWidth}, ConverterParameter=230|4}" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
                     </ItemsControl>
                 </ScrollViewer>
             </DockPanel>
@@ -129,8 +131,8 @@
                 <DockPanel DockPanel.Dock="Top" Height="32">
                     <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
                         <TextBlock Style="{StaticResource Soft}" FontSize="12" Text="{Binding ListeningText}" VerticalAlignment="Center" Margin="0,0,6,0" ToolTip="동시 청취 상한(설정)"
-                                   Visibility="{Binding DataContext.IsPanelOpen, ElementName=Root, Converter={StaticResource Pick}, ConverterParameter=Collapsed|Visible}" />
-                        <TextBox Style="{StaticResource Field}" Width="150" Height="28" Text="{Binding Search, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,4,0" ToolTip="채널 이름 · id"
+                                   Visibility="{Binding IsNarrow, ElementName=Root, Converter={StaticResource Pick}, ConverterParameter=Collapsed|Visible}" />
+                        <TextBox Style="{StaticResource Field}" Width="150" Height="28" Text="{Binding Search, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,4,0" Tag="채널 이름 · id"
                                  Visibility="{Binding SearchOpen, Converter={StaticResource BoolToVis}}" />
                         <Button Style="{StaticResource IconBtn}" Width="32" Height="32" Command="{Binding ToggleSearchCommand}" ToolTip="채널 이름 검색">
                             <Path Style="{StaticResource Icon}" Data="{StaticResource Icon.Search}" Width="17" Height="17" StrokeThickness="2" />
@@ -153,14 +155,14 @@
                     <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Margin="-3,0">
                         <ItemsControl ItemsSource="{Binding Listen}">
                             <ItemsControl.ItemsPanel>
-                                <ItemsPanelTemplate><UniformGrid VerticalAlignment="Top" Columns="{Binding DataContext.IsPanelOpen, ElementName=Root, Converter={StaticResource Pick}, ConverterParameter=1|3}" /></ItemsPanelTemplate>
+                                <ItemsPanelTemplate><UniformGrid VerticalAlignment="Top" Columns="{Binding ActualWidth, RelativeSource={RelativeSource AncestorType=ItemsControl}, Converter={StaticResource ColumnsByWidth}, ConverterParameter=250|3}" /></ItemsPanelTemplate>
                             </ItemsControl.ItemsPanel>
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate DataType="{x:Type vm:ScopedCard}">
                                     <Border x:Name="Row" Height="56" Margin="3" CornerRadius="8" BorderThickness="1" BorderBrush="{DynamicResource Brush.Border}" Background="{DynamicResource Brush.Surface}"
                                             Padding="12,0,8,0" Cursor="Hand" MouseLeftButtonUp="Other_Click">
                                         <DockPanel>
-                                            <Button x:Name="Listen" DockPanel.Dock="Right" Style="{StaticResource Pill.Line.Sm}" Content="{Binding ListenText}" Command="{Binding ToggleListenCommand}" ToolTip="{Binding ListenTip}"
+                                            <Button x:Name="Listen" DockPanel.Dock="Right" Style="{StaticResource Pill.ListenLine.Sm}" Content="{Binding ListenText}" Command="{Binding ToggleListenCommand}" ToolTip="{Binding ListenTip}"
                                                     IsEnabled="{Binding CanListen}" />
                                             <Ellipse x:Name="Dot" Width="9" Height="9" Fill="{DynamicResource Brush.Border}" Margin="0,0,10,0" VerticalAlignment="Center" />
                                             <StackPanel VerticalAlignment="Center" Margin="0,0,8,0">
@@ -172,7 +174,7 @@
                                     <DataTemplate.Triggers>
                                         <DataTrigger Binding="{Binding HasSession}" Value="True"><Setter TargetName="Dot" Property="Fill" Value="{DynamicResource Brush.Muted}" /></DataTrigger>
                                         <DataTrigger Binding="{Binding IsListening}" Value="True">
-                                            <Setter TargetName="Dot" Property="Fill" Value="{DynamicResource Brush.Ink}" /><Setter TargetName="Listen" Property="Style" Value="{StaticResource Pill.Ink.Sm}" />
+                                            <Setter TargetName="Dot" Property="Fill" Value="{DynamicResource Brush.Listen}" /><Setter TargetName="Listen" Property="Style" Value="{StaticResource Pill.Listen.Sm}" />
                                             <Setter TargetName="Listen" Property="IsEnabled" Value="True" />
                                         </DataTrigger>
                                         <DataTrigger Binding="{Binding IsEmergency}" Value="True"><Setter TargetName="Dot" Property="Fill" Value="{DynamicResource Brush.Emg}" /><Setter TargetName="Row" Property="Background" Value="{DynamicResource Brush.EmgSoft}" /></DataTrigger>
@@ -230,7 +232,7 @@
                                                             <TextBlock Style="{StaticResource Muted}" FontSize="11" Text="{Binding LastTimeText}" HorizontalAlignment="Right" />
                                                             <Border Style="{StaticResource Count}" Margin="0,4,0,0" HorizontalAlignment="Right" Visibility="{Binding HasUnread, Converter={StaticResource BoolToVis}}"><TextBlock Text="{Binding Unread}" /></Border>
                                                         </StackPanel>
-                                                        <Border x:Name="Av" Style="{StaticResource Avatar}" Margin="0,0,10,0">
+                                                        <Border x:Name="Av" Style="{StaticResource Avatar}" Margin="0,0,10,0" Tag="{Binding Title, Converter={StaticResource AvatarHue}}">
                                                             <TextBlock Text="{Binding Initial}" HorizontalAlignment="Center" VerticalAlignment="Center" />
                                                         </Border>
                                                         <StackPanel VerticalAlignment="Center" Margin="0,0,6,0">
@@ -253,8 +255,8 @@
                                                             <Binding Path="DataContext.Selected" RelativeSource="{RelativeSource AncestorType=ItemsControl}" />
                                                         </MultiBinding>
                                                     </DataTrigger.Binding>
-                                                    <Setter TargetName="RowBtn" Property="Background" Value="{DynamicResource Brush.Surface2}" />
-                                                    <Setter TargetName="Edge" Property="BorderBrush" Value="{DynamicResource Brush.Ink}" />
+                                                    <Setter TargetName="RowBtn" Property="Background" Value="{DynamicResource Brush.PrimarySoft}" />
+                                                    <Setter TargetName="Edge" Property="BorderBrush" Value="{DynamicResource Brush.Primary}" />
                                                 </DataTrigger>
                                             </DataTemplate.Triggers>
                                         </DataTemplate>
@@ -280,8 +282,8 @@
                                             <Setter Property="TextElement.Foreground" Value="{DynamicResource Brush.TextSoft}" />
                                             <Style.Triggers>
                                                 <DataTrigger Binding="{Binding IsGroupConv}" Value="True">
-                                                    <Setter Property="Background" Value="{DynamicResource Brush.Ink}" /><Setter Property="BorderBrush" Value="{DynamicResource Brush.Ink}" />
-                                                    <Setter Property="TextElement.Foreground" Value="{DynamicResource Brush.OnInk}" />
+                                                    <Setter Property="Background" Value="{DynamicResource Brush.PrimarySoft}" /><Setter Property="BorderBrush" Value="{DynamicResource Brush.PrimaryEdge}" />
+                                                    <Setter Property="TextElement.Foreground" Value="{DynamicResource Brush.PrimaryInk}" />
                                                 </DataTrigger>
                                             </Style.Triggers>
                                         </Style>
@@ -314,7 +316,7 @@
                             </Button>
                             <Button DockPanel.Dock="Right" Style="{StaticResource Pill.Ink}" Height="42" Padding="20,0" FontSize="14" Content="보내기" Command="{Binding SendCommand}" IsEnabled="{Binding CanSend}" Margin="8,0,0,0" />
                             <Grid VerticalAlignment="Center">
-                                <Border Height="42" CornerRadius="21" BorderThickness="1.5" BorderBrush="{DynamicResource Brush.Ink}" Background="{DynamicResource Brush.Surface}" />
+                                <Border Height="42" CornerRadius="21" BorderThickness="1.5" BorderBrush="{DynamicResource Brush.Edge}" Background="{DynamicResource Brush.Surface}" />
                                 <TextBox x:Name="Input" Text="{Binding Input, UpdateSourceTrigger=PropertyChanged}" KeyDown="Input_KeyDown" IsEnabled="{Binding HasSelection}" Margin="16,0" FontSize="14"
                                          BorderThickness="0" Background="Transparent" VerticalContentAlignment="Center" Height="38" Foreground="{DynamicResource Brush.Text}" CaretBrush="{DynamicResource Brush.Text}" />
                                 <TextBlock Style="{StaticResource Muted}" FontSize="14" Text="{Binding InputHint}" Margin="18,0" VerticalAlignment="Center" IsHitTestVisible="False"
@@ -340,9 +342,9 @@
                                 </Style>
                             </Button.Style>
                         </Button>
-                        <Button Style="{StaticResource Pill.Soft.Sm}" Content="이력에서 보기" Command="{Binding OpenHistoryCommand}" Margin="0,0,6,0" ToolTip="끝난 PTT 세션의 날짜별 조회·녹취 — [이력] F2" />
+                        <Button Style="{StaticResource Pill.Soft.Sm}" Content="이력에서 보기" Command="{Binding OpenHistoryCommand}" Margin="0,0,6,0" Visibility="{Binding IsNarrow, ElementName=Root, Converter={StaticResource Pick}, ConverterParameter=Collapsed|Visible}" ToolTip="끝난 PTT 세션의 날짜별 조회·녹취 — [이력] F2" />
                         <Button Style="{StaticResource Pill.Soft.Sm}" Content="CSV" Command="{Binding ExportCommand}"
-                                Visibility="{Binding DataContext.IsPanelOpen, ElementName=Root, Converter={StaticResource Pick}, ConverterParameter=Collapsed|Visible}" />
+                                Visibility="{Binding IsNarrow, ElementName=Root, Converter={StaticResource Pick}, ConverterParameter=Collapsed|Visible}" />
                     </StackPanel>
                     <TextBlock Style="{StaticResource Title16}"><Run Text="이벤트 " /><Run Text="{Binding TotalCount, Mode=OneWay}" /></TextBlock>
                 </DockPanel>
@@ -353,8 +355,19 @@
                         <ItemsControl.ItemTemplate>
                             <DataTemplate DataType="{x:Type vm:EventKindChip}">
                                 <ToggleButton Style="{StaticResource FilterChip}" IsChecked="{Binding On}" Margin="0,0,5,0" ToolTip="이 종류 보이기 / 숨기기">
-                                    <TextBlock><Run Text="{Binding Name, Mode=OneWay}" /><Run Text=" " /><Run Text="{Binding Count, Mode=OneWay}" FontWeight="Normal" /></TextBlock>
+                                    <StackPanel Orientation="Horizontal">
+                                        <!-- 종류 색 점 — 표의 종류 라벨과 같은 색(범례) -->
+                                        <Ellipse x:Name="D" Width="7" Height="7" Margin="0,0,5,0" VerticalAlignment="Center" Fill="{DynamicResource Brush.Faint}" />
+                                        <TextBlock><Run Text="{Binding Name, Mode=OneWay}" /><Run Text=" " /><Run Text="{Binding Count, Mode=OneWay}" FontWeight="Normal" /></TextBlock>
+                                    </StackPanel>
                                 </ToggleButton>
+                                <DataTemplate.Triggers>
+                                    <DataTrigger Binding="{Binding Class}" Value="Talk"><Setter TargetName="D" Property="Fill" Value="{DynamicResource Brush.Talk}" /></DataTrigger>
+                                    <DataTrigger Binding="{Binding Class}" Value="Presence"><Setter TargetName="D" Property="Fill" Value="{DynamicResource Brush.Held}" /></DataTrigger>
+                                    <DataTrigger Binding="{Binding Class}" Value="Emergency"><Setter TargetName="D" Property="Fill" Value="{DynamicResource Brush.Emg}" /></DataTrigger>
+                                    <DataTrigger Binding="{Binding Class}" Value="Sds"><Setter TargetName="D" Property="Fill" Value="{DynamicResource Brush.Listen}" /></DataTrigger>
+                                    <DataTrigger Binding="{Binding Class}" Value="Error"><Setter TargetName="D" Property="Fill" Value="{DynamicResource Brush.Emg}" /></DataTrigger>
+                                </DataTemplate.Triggers>
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
@@ -410,12 +423,12 @@
                     </ItemsControl.ItemTemplate>
                 </ItemsControl>
                 <!-- 표 머리 -->
-                <Border DockPanel.Dock="Top" Height="28" Padding="8,0" BorderBrush="{DynamicResource Brush.Ink}" BorderThickness="0,0,0,1">
+                <Border DockPanel.Dock="Top" Height="28" Padding="8,0" BorderBrush="{DynamicResource Brush.Edge}" BorderThickness="0,0,0,1">
                     <Grid TextElement.FontSize="11" TextElement.Foreground="{DynamicResource Brush.Muted}">
                         <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="{Binding DataContext.IsPanelOpen, ElementName=Root, Converter={StaticResource Pick}, ConverterParameter=64|74}" />
-                            <ColumnDefinition Width="{Binding DataContext.IsPanelOpen, ElementName=Root, Converter={StaticResource Pick}, ConverterParameter=0|80}" />
-                            <ColumnDefinition Width="{Binding DataContext.IsPanelOpen, ElementName=Root, Converter={StaticResource Pick}, ConverterParameter=58|64}" />
+                            <ColumnDefinition Width="{Binding IsNarrow, ElementName=Root, Converter={StaticResource Pick}, ConverterParameter=64|74}" />
+                            <ColumnDefinition Width="{Binding IsNarrow, ElementName=Root, Converter={StaticResource Pick}, ConverterParameter=0|80}" />
+                            <ColumnDefinition Width="{Binding IsNarrow, ElementName=Root, Converter={StaticResource Pick}, ConverterParameter=58|64}" />
                             <ColumnDefinition Width="*" />
                         </Grid.ColumnDefinitions>
                         <TextBlock Grid.Column="0" Text="시각" VerticalAlignment="Center" />
@@ -434,9 +447,9 @@
                                         <Border Height="40" Padding="8,0" BorderBrush="{DynamicResource Brush.Line}" BorderThickness="0,0,0,1">
                                             <Grid>
                                                 <Grid.ColumnDefinitions>
-                                                    <ColumnDefinition Width="{Binding DataContext.IsPanelOpen, ElementName=Root, Converter={StaticResource Pick}, ConverterParameter=64|74}" />
-                                                    <ColumnDefinition Width="{Binding DataContext.IsPanelOpen, ElementName=Root, Converter={StaticResource Pick}, ConverterParameter=0|80}" />
-                                                    <ColumnDefinition Width="{Binding DataContext.IsPanelOpen, ElementName=Root, Converter={StaticResource Pick}, ConverterParameter=58|64}" />
+                                                    <ColumnDefinition Width="{Binding IsNarrow, ElementName=Root, Converter={StaticResource Pick}, ConverterParameter=64|74}" />
+                                                    <ColumnDefinition Width="{Binding IsNarrow, ElementName=Root, Converter={StaticResource Pick}, ConverterParameter=0|80}" />
+                                                    <ColumnDefinition Width="{Binding IsNarrow, ElementName=Root, Converter={StaticResource Pick}, ConverterParameter=58|64}" />
                                                     <ColumnDefinition Width="*" />
                                                 </Grid.ColumnDefinitions>
                                                 <TextBlock Grid.Column="0" Style="{StaticResource Mono}" FontSize="12.5" Foreground="{DynamicResource Brush.TextSoft}" Text="{Binding Time, StringFormat=HH:mm:ss}" VerticalAlignment="Center" />
@@ -447,9 +460,13 @@
                                         </Border>
                                     </Button>
                                     <DataTemplate.Triggers>
+                                        <!-- 종류 라벨 색 = 종류 칩의 점 색(발언 녹색 · 입퇴장 파랑 · SDS 청록 · 긴급 빨강 채움 · 오류 연한 빨강) -->
+                                        <DataTrigger Binding="{Binding Class}" Value="Talk"><Setter TargetName="Kind" Property="Style" Value="{StaticResource Tag.Talk}" /></DataTrigger>
+                                        <DataTrigger Binding="{Binding Class}" Value="Presence"><Setter TargetName="Kind" Property="Style" Value="{StaticResource Tag.Held}" /></DataTrigger>
+                                        <DataTrigger Binding="{Binding Class}" Value="Sds"><Setter TargetName="Kind" Property="Style" Value="{StaticResource Tag.Teal}" /></DataTrigger>
                                         <DataTrigger Binding="{Binding IsEmergency}" Value="True"><Setter TargetName="Kind" Property="Style" Value="{StaticResource Tag.Emg}" /></DataTrigger>
                                         <DataTrigger Binding="{Binding IsError}" Value="True"><Setter TargetName="Kind" Property="Style" Value="{StaticResource Tag.Red}" /><Setter TargetName="Txt" Property="Foreground" Value="{DynamicResource Brush.Emg}" /></DataTrigger>
-                                        <DataTrigger Binding="{Binding IsSelected}" Value="True"><Setter TargetName="Row" Property="Background" Value="{DynamicResource Brush.Surface2}" /><Setter TargetName="Txt" Property="FontWeight" Value="Bold" /></DataTrigger>
+                                        <DataTrigger Binding="{Binding IsSelected}" Value="True"><Setter TargetName="Row" Property="Background" Value="{DynamicResource Brush.PrimarySoft}" /><Setter TargetName="Txt" Property="FontWeight" Value="Bold" /></DataTrigger>
                                     </DataTemplate.Triggers>
                                 </DataTemplate>
                             </ItemsControl.ItemTemplate>

@@ -48,6 +48,8 @@ public sealed class MemberRow
     public string VolteCell => VolteText.Length > 0 ? VolteText : "–";
     public string VoipCell => VoipText.Length > 0 ? VoipText : "–";
     public string PttCell => PttText.Length > 0 ? PttText : "–";
+    /// <summary>좁은 표의 번호 한 줄 — 가진 회선만 "VoLTE … · VoIP … · PTT …".</summary>
+    public string NumbersLine => string.Join(" · ", new[] { ("VoLTE", VolteText), ("VoIP", VoipText), ("PTT", PttText) }.Where(x => x.Item2.Length > 0).Select(x => $"{x.Item1} {x.Item2}"));
 }
 
 public sealed partial class DirectoryAdminViewModel : ObservableObject
@@ -184,6 +186,31 @@ public sealed partial class DirectoryAdminViewModel : ObservableObject
         _view = r.Value; _etag = r.Value.ETag;
         Apply(r.Value);
         Loaded = true;
+    }
+
+    /// <summary>개발 스위치 --ui-preview-screen=admin 의 표본 — 서버 없이 조직 트리·구성원 표·편집 폼(회선 카드 셋)을 그려 본다. 저장은 로그인 전이라 동작하지 않는다.</summary>
+    public void SeedPreview()
+    {
+        NumberInfo N(string n, string svc, string tr = "TLS", bool create = false, bool listen = false) =>
+            new(n, "", svc, tr, "digest", svc == "ptt" ? new Dictionary<string, bool> { ["allowCreateGroup"] = create, ["allowAmbientListening"] = listen } : null);
+        var orgs = new[]
+        {
+            new OrgNode("hq", "본부", "", 0), new OrgNode("ops", "관제1과", "hq", 0), new OrgNode("pat", "순찰대", "hq", 1),
+            new OrgNode("pat1", "순찰1팀", "pat", 0), new OrgNode("pat2", "순찰2팀", "pat", 1),
+        };
+        var members = new[]
+        {
+            new MemberInfo(1, "김관제", "desk1", "ops", "관제사", null, N("7000", "voip-desk"), N("01310001001", "ptt", create: true, listen: true)),
+            new MemberInfo(2, "박경장", "park", "pat1", "팀장", N("01022223333", "volte"), null, N("01310002001", "ptt", create: true)),
+            new MemberInfo(3, "이순경", "lee", "pat1", "순경", N("01033334444", "volte", "ANY"), null, N("01310002002", "ptt")),
+            new MemberInfo(4, "윤순경", "yoon", "pat2", "순경", N("01044445555", "volte"), N("7004", "voip-desk"), N("01310002003", "ptt")),
+            new MemberInfo(5, "최순경", "choi", "pat2", "순경", null, null, N("01310002004", "ptt")),
+        };
+        var services = new[] { new ServiceRef(LineKind.Volte, "volte", "ims.example.org"), new ServiceRef(LineKind.Voip, "voip-desk", "ims.example.org"), new ServiceRef(LineKind.Ptt, "ptt", "mcptt.example.org") };
+        _view = new AdminView(new AdminScope("g-desk", "all", ""), services, orgs, members, "");
+        Apply(_view);
+        Error = ""; Loaded = true;
+        SelectedMember = Members.FirstOrDefault(m => m.UserId == 2);
     }
 
     private void Apply(AdminView v)

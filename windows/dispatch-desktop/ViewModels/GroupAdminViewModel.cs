@@ -267,6 +267,9 @@ public sealed partial class GroupAdminViewModel : ObservableObject
         return vm;
     }
 
+    /// <summary>개발 스위치 --ui-preview-screen=groups 의 표본 폼 — 표본에는 PTT 계정이 없어 생성 자격(CanCreate)이 거짓이므로 판정 없이 연다.</summary>
+    public void OpenPreview(GroupEditViewModel vm) => Open(vm);
+
     private void Open(GroupEditViewModel vm)
     {
         vm.Cancelled += (_, _) => { if (Editor == vm) Editor = null; };

@@ -82,13 +82,15 @@
                     </Border>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsHighlighted" Value="True"><Setter TargetName="Bd" Property="Background" Value="{DynamicResource Brush.Hover}" /></Trigger>
-                        <Trigger Property="IsSelected" Value="True"><Setter TargetName="Bd" Property="Background" Value="{DynamicResource Brush.PrimarySoft}" /><Setter Property="Foreground" Value="{DynamicResource Brush.Primary}" /></Trigger>
+                        <Trigger Property="IsSelected" Value="True"><Setter TargetName="Bd" Property="Background" Value="{DynamicResource Brush.PrimarySoft}" /><Setter Property="Foreground" Value="{DynamicResource Brush.PrimaryInk}" /></Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
             </Setter.Value>
         </Setter>
     </Style>
     <Style TargetType="ComboBox">
+        <Setter Property="FocusVisualStyle" Value="{DynamicResource FocusRing}" />
+
         <Setter Property="Foreground" Value="{DynamicResource Brush.Text}" />
         <Setter Property="Background" Value="{DynamicResource Brush.Surface}" />
         <Setter Property="FontSize" Value="13" />
@@ -100,7 +102,7 @@
                     <Grid>
                         <ToggleButton x:Name="Toggle" Template="{StaticResource ComboToggle}" Focusable="False" ClickMode="Press"
                                       IsChecked="{Binding IsDropDownOpen, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}" />
-                        <ContentPresenter x:Name="Content" Content="{TemplateBinding SelectionBoxItem}" ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}"
+                        <ContentPresenter x:Name="Content" Content="{TemplateBinding SelectionBoxItem}" ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}" ContentTemplateSelector="{TemplateBinding ItemTemplateSelector}"
                                           ContentStringFormat="{TemplateBinding SelectionBoxItemStringFormat}" Margin="9,0,26,0" VerticalAlignment="Center" IsHitTestVisible="False"
                                           Visibility="{Binding IsEditable, RelativeSource={RelativeSource TemplatedParent}, Converter={StaticResource NotToVis}}" />
                         <TextBox x:Name="PART_EditableTextBox" Margin="1,1,26,1" Padding="7,0,0,0" VerticalContentAlignment="Center" Background="Transparent" BorderThickness="0"
@@ -125,8 +127,10 @@
     </Style>
 
     <!-- ── CheckBox · RadioButton ── -->
-    <!-- 체크(예시 .cb/.tk) — 15px·모서리 3·1.5px 선. 켜진 색 = Background(기본 Primary, Check.Talk 는 Talk) -->
+    <!-- 체크(예시 .cb/.tk) — 15px·모서리 3·1.5px 선. 켜진 색 = Background(기본 Primary) -->
     <Style TargetType="CheckBox">
+        <Setter Property="FocusVisualStyle" Value="{DynamicResource FocusRing}" />
+
         <Setter Property="Foreground" Value="{DynamicResource Brush.Text}" />
         <Setter Property="Background" Value="{DynamicResource Brush.Primary}" />
         <Setter Property="VerticalContentAlignment" Value="Center" />
@@ -153,12 +157,9 @@
             </Setter.Value>
         </Setter>
     </Style>
-    <!-- 발언 대상 체크(예시 .tk) — 켜지면 녹색 -->
-    <Style TargetType="CheckBox" x:Key="Check.Talk" BasedOn="{StaticResource {x:Type CheckBox}}">
-        <Setter Property="Background" Value="{DynamicResource Brush.Talk}" />
-    </Style>
     <!-- 스위치(예시 .toggle) — 28×16 트랙 + 12 손잡이, 켜짐 = Primary 트랙 + Primary 라벨 -->
     <Style TargetType="CheckBox" x:Key="Switch">
+        <Setter Property="FocusVisualStyle" Value="{DynamicResource FocusRing}" />
         <Setter Property="Foreground" Value="{DynamicResource Brush.Muted}" />
         <Setter Property="FontSize" Value="12" />
         <Setter Property="VerticalContentAlignment" Value="Center" />
@@ -177,7 +178,7 @@
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsChecked" Value="True">
                             <Setter TargetName="Track" Property="Background" Value="{DynamicResource Brush.Primary}" />
-                            <Setter Property="Foreground" Value="{DynamicResource Brush.Primary}" />
+                            <Setter Property="Foreground" Value="{DynamicResource Brush.PrimaryInk}" />
                             <Trigger.EnterActions><BeginStoryboard><Storyboard><DoubleAnimation Storyboard.TargetName="KnobT" Storyboard.TargetProperty="X" To="12" Duration="0:0:0.15" /></Storyboard></BeginStoryboard></Trigger.EnterActions>
                             <Trigger.ExitActions><BeginStoryboard><Storyboard><DoubleAnimation Storyboard.TargetName="KnobT" Storyboard.TargetProperty="X" To="0" Duration="0:0:0.15" /></Storyboard></BeginStoryboard></Trigger.ExitActions>
                         </Trigger>
@@ -189,6 +190,8 @@
         </Setter>
     </Style>
     <Style TargetType="RadioButton">
+        <Setter Property="FocusVisualStyle" Value="{DynamicResource FocusRing}" />
+
         <Setter Property="Foreground" Value="{DynamicResource Brush.Text}" />
         <Setter Property="VerticalContentAlignment" Value="Center" />
         <Setter Property="Cursor" Value="Hand" />
@@ -235,6 +238,8 @@
         </Setter>
     </Style>
     <Style TargetType="TabItem">
+        <Setter Property="FocusVisualStyle" Value="{DynamicResource FocusRing}" />
+
         <Setter Property="Foreground" Value="{DynamicResource Brush.Muted}" />
         <Setter Property="Cursor" Value="Hand" />
         <Setter Property="Template">
@@ -263,14 +268,22 @@
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="ToolTip">
-                    <Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1" CornerRadius="6" Padding="9,5">
-                        <ContentPresenter TextElement.FontSize="12" />
+                    <!-- 긴 설명은 440 에서 줄바꿈(글 내용은 ContentPresenter 가 만드는 TextBlock 이라 암시 스타일로 감싼다) -->
+                    <Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1" CornerRadius="6" Padding="9,5" MaxWidth="440">
+                        <ContentPresenter TextElement.FontSize="12">
+                            <ContentPresenter.Resources>
+                                <Style TargetType="TextBlock"><Setter Property="TextWrapping" Value="Wrap" /></Style>
+                            </ContentPresenter.Resources>
+                        </ContentPresenter>
                     </Border>
                 </ControlTemplate>
             </Setter.Value>
         </Setter>
     </Style>
+    <!-- 입력칸 — 빈 칸 안내 = Tag(문자열, 흐린 글자 — 치면 사라진다). 검색칸처럼 무엇을 치는지 칸 안에서 보여야 하는 곳에 쓴다.
+         Padding 은 TextBox 가 글 영역(PART_ContentHost) 안쪽에 스스로 적용한다 — 테두리에 또 걸면 두 배로 들어가 콤보·안내 글자와 어긋난다 -->
     <Style TargetType="TextBox">
+        <Setter Property="FocusVisualStyle" Value="{x:Null}" />
         <Setter Property="Foreground" Value="{DynamicResource Brush.Text}" />
         <Setter Property="Background" Value="{DynamicResource Brush.Surface}" />
         <Setter Property="BorderBrush" Value="{DynamicResource Brush.Border}" />
@@ -279,10 +292,15 @@
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="TextBox">
-                    <Border x:Name="Bd" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="6" Padding="{TemplateBinding Padding}">
-                        <ScrollViewer x:Name="PART_ContentHost" VerticalAlignment="{TemplateBinding VerticalContentAlignment}" />
+                    <Border x:Name="Bd" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="6">
+                        <Grid>
+                            <TextBlock x:Name="Hint" Text="{Binding Tag, RelativeSource={RelativeSource TemplatedParent}}" Foreground="{DynamicResource Brush.Muted}" Margin="{TemplateBinding Padding}" Padding="2,0"
+                                       VerticalAlignment="{TemplateBinding VerticalContentAlignment}" TextTrimming="CharacterEllipsis" IsHitTestVisible="False" Visibility="Collapsed" />
+                            <ScrollViewer x:Name="PART_ContentHost" VerticalAlignment="{TemplateBinding VerticalContentAlignment}" />
+                        </Grid>
                     </Border>
                     <ControlTemplate.Triggers>
+                        <Trigger Property="Text" Value=""><Setter TargetName="Hint" Property="Visibility" Value="Visible" /></Trigger>
                         <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Bd" Property="BorderBrush" Value="{DynamicResource Brush.Primary}" /></Trigger>
                         <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.5" /></Trigger>
                     </ControlTemplate.Triggers>
@@ -291,6 +309,7 @@
         </Setter>
     </Style>
     <Style TargetType="PasswordBox">
+        <Setter Property="FocusVisualStyle" Value="{x:Null}" />
         <Setter Property="Foreground" Value="{DynamicResource Brush.Text}" />
         <Setter Property="Background" Value="{DynamicResource Brush.Surface}" />
         <Setter Property="BorderBrush" Value="{DynamicResource Brush.Border}" />
@@ -298,11 +317,12 @@
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="PasswordBox">
-                    <Border x:Name="Bd" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1" CornerRadius="6" Padding="{TemplateBinding Padding}">
+                    <Border x:Name="Bd" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1" CornerRadius="6">
                         <ScrollViewer x:Name="PART_ContentHost" VerticalAlignment="Center" />
                     </Border>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Bd" Property="BorderBrush" Value="{DynamicResource Brush.Primary}" /></Trigger>
+                        <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.45" /></Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
             </Setter.Value>
@@ -322,9 +342,22 @@
     <Style TargetType="ComboBox" x:Key="FieldCombo" BasedOn="{StaticResource {x:Type ComboBox}}">
         <Setter Property="Height" Value="30" />
     </Style>
+    <!-- 조직 콤보 — 항목(OrgRow)의 이름을 보이고, 펼친 목록에서만 깊이만큼 들여 쓴다(닫힌 상자는 이름만) -->
+    <Style TargetType="ComboBox" x:Key="OrgCombo" BasedOn="{StaticResource FieldCombo}">
+        <Setter Property="DisplayMemberPath" Value="Name" />
+        <Setter Property="ItemContainerStyle">
+            <Setter.Value>
+                <Style TargetType="ComboBoxItem" BasedOn="{StaticResource {x:Type ComboBoxItem}}">
+                    <Setter Property="Padding" Value="{Binding Depth, Converter={StaticResource DepthIndent}}" />
+                </Style>
+            </Setter.Value>
+        </Setter>
+    </Style>
     <Style TargetType="PasswordBox" x:Key="FieldPw" BasedOn="{StaticResource {x:Type PasswordBox}}">
         <Setter Property="Height" Value="30" />
         <Setter Property="Padding" Value="8,0" />
+        <Setter Property="Background" Value="{DynamicResource Brush.BgSoft}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource Brush.BorderStrong}" />
         <Setter Property="VerticalContentAlignment" Value="Center" />
         <Setter Property="FontSize" Value="13" />
     </Style>
@@ -343,39 +376,6 @@
         <Setter Property="Background" Value="Transparent" />
     </Style>
 
-    <!-- 상단 바 최상위 메뉴(§3.4) — 로고 옆 [관제][이력][PTT 그룹][관리]. 선택 = Primary 글자 + 아래 2px 밑줄, 비활성(관리 범위 없음) = 흐린 글자 + 툴팁 -->
-    <Style x:Key="NavItem" TargetType="RadioButton">
-        <Setter Property="Foreground" Value="{DynamicResource Brush.Muted}" />
-        <Setter Property="FontSize" Value="14" />
-        <Setter Property="FontWeight" Value="Medium" />
-        <Setter Property="Padding" Value="14,0" />
-        <Setter Property="Height" Value="55" />
-        <Setter Property="Cursor" Value="Hand" />
-        <Setter Property="Focusable" Value="False" />
-        <Setter Property="ToolTipService.ShowOnDisabled" Value="True" />
-        <Setter Property="Template">
-            <Setter.Value>
-                <ControlTemplate TargetType="RadioButton">
-                    <Border x:Name="Bd" Background="Transparent" Padding="{TemplateBinding Padding}" BorderThickness="0,2,0,2" BorderBrush="Transparent">
-                        <ContentPresenter VerticalAlignment="Center" />
-                    </Border>
-                    <ControlTemplate.Triggers>
-                        <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Bd" Property="Background" Value="{DynamicResource Brush.Hover}" /></Trigger>
-                        <Trigger Property="IsChecked" Value="True">
-                            <Setter Property="Foreground" Value="{DynamicResource Brush.Primary}" />
-                            <Setter Property="FontWeight" Value="SemiBold" />
-                            <Setter TargetName="Bd" Property="BorderBrush" Value="{DynamicResource Brush.Primary}" />
-                            <Setter TargetName="Bd" Property="BorderThickness" Value="0,2,0,2" />
-                        </Trigger>
-                        <Trigger Property="IsEnabled" Value="False">
-                            <Setter Property="Foreground" Value="{DynamicResource Brush.BorderStrong}" />
-                            <Setter Property="Cursor" Value="No" />
-                        </Trigger>
-                    </ControlTemplate.Triggers>
-                </ControlTemplate>
-            </Setter.Value>
-        </Setter>
-    </Style>
     <!-- 메뉴 항목 옆 핫키 칩(F1~F4) -->
     <Style x:Key="NavKey" TargetType="Border">
         <Setter Property="Background" Value="Transparent" />
@@ -393,6 +393,7 @@
 
     <!-- 상단 바 드롭다운(메뉴 대신 팝업 — 시스템 메뉴 색을 못 바꾸므로) -->
     <Style x:Key="DropButton" TargetType="ToggleButton">
+        <Setter Property="FocusVisualStyle" Value="{DynamicResource FocusRing}" />
         <Setter Property="Foreground" Value="{DynamicResource Brush.Text}" />
         <Setter Property="Background" Value="{DynamicResource Brush.Surface}" />
         <Setter Property="BorderBrush" Value="{DynamicResource Brush.BorderStrong}" />
@@ -411,7 +412,7 @@
                         <Trigger Property="IsChecked" Value="True">
                             <Setter TargetName="Bd" Property="BorderBrush" Value="{DynamicResource Brush.Primary}" />
                             <Setter TargetName="Bd" Property="Background" Value="{DynamicResource Brush.PrimarySoft}" />
-                            <Setter Property="Foreground" Value="{DynamicResource Brush.Primary}" />
+                            <Setter Property="Foreground" Value="{DynamicResource Brush.PrimaryInk}" />
                         </Trigger>
                         <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.45" /></Trigger>
                     </ControlTemplate.Triggers>
@@ -430,6 +431,8 @@
         <Setter Property="Effect"><Setter.Value><DropShadowEffect BlurRadius="12" ShadowDepth="2" Opacity="0.25" /></Setter.Value></Setter>
     </Style>
     <Style x:Key="DropItem" TargetType="Button">
+        <Setter Property="FocusVisualStyle" Value="{DynamicResource FocusRing}" />
+
         <Setter Property="Foreground" Value="{DynamicResource Brush.Text}" />
         <Setter Property="Background" Value="Transparent" />
         <Setter Property="HorizontalContentAlignment" Value="Left" />
@@ -440,10 +443,232 @@
             <Setter.Value>
                 <ControlTemplate TargetType="Button">
                     <Border x:Name="Bd" Background="{TemplateBinding Background}" CornerRadius="5" Padding="{TemplateBinding Padding}">
-                        <ContentPresenter HorizontalAlignment="Left" VerticalAlignment="Center" />
+                        <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" VerticalAlignment="Center" />
                     </Border>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Bd" Property="Background" Value="{DynamicResource Brush.Hover}" /></Trigger>
+                        <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.45" /></Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- ── Slider (감청·청취 음량) — 4px 트랙 + 채운 쪽 남색 + 원 손잡이. 기본 템플릿은 시스템 파랑·회색이라 두 테마 모두에서 튄다 ── -->
+    <Style x:Key="SliderFill" TargetType="RepeatButton">
+        <Setter Property="IsTabStop" Value="False" />
+        <Setter Property="Focusable" Value="False" />
+        <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="RepeatButton">
+            <Grid Background="Transparent"><Border Height="4" CornerRadius="2" VerticalAlignment="Center" Background="{DynamicResource Brush.Primary}" /></Grid>
+        </ControlTemplate></Setter.Value></Setter>
+    </Style>
+    <Style x:Key="SliderRest" TargetType="RepeatButton">
+        <Setter Property="IsTabStop" Value="False" />
+        <Setter Property="Focusable" Value="False" />
+        <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="RepeatButton"><Border Background="Transparent" /></ControlTemplate></Setter.Value></Setter>
+    </Style>
+    <Style x:Key="SliderThumb" TargetType="Thumb">
+        <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Thumb">
+            <Ellipse x:Name="E" Width="14" Height="14" Fill="{DynamicResource Brush.Surface}" Stroke="{DynamicResource Brush.Primary}" StrokeThickness="2" />
+            <ControlTemplate.Triggers>
+                <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="E" Property="Fill" Value="{DynamicResource Brush.PrimarySoft}" /></Trigger>
+                <Trigger Property="IsDragging" Value="True"><Setter TargetName="E" Property="Fill" Value="{DynamicResource Brush.Primary}" /></Trigger>
+            </ControlTemplate.Triggers>
+        </ControlTemplate></Setter.Value></Setter>
+    </Style>
+    <Style TargetType="Slider">
+        <Setter Property="Focusable" Value="False" />
+        <Setter Property="IsMoveToPointEnabled" Value="True" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Slider">
+                    <Grid Height="22" Background="Transparent">
+                        <Border Height="4" CornerRadius="2" VerticalAlignment="Center" Background="{DynamicResource Brush.MeterTrack}" />
+                        <Track x:Name="PART_Track">
+                            <Track.DecreaseRepeatButton><RepeatButton Command="Slider.DecreaseLarge" Style="{StaticResource SliderFill}" /></Track.DecreaseRepeatButton>
+                            <Track.IncreaseRepeatButton><RepeatButton Command="Slider.IncreaseLarge" Style="{StaticResource SliderRest}" /></Track.IncreaseRepeatButton>
+                            <Track.Thumb><Thumb Style="{StaticResource SliderThumb}" /></Track.Thumb>
+                        </Track>
+                    </Grid>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.45" /></Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <!-- ── DatePicker + Calendar (이력 화면 날짜) — 기본 템플릿은 흰 입력칸·흰 달력에 검정 글자를 고정해 어두운 테마에서 깨진다 ── -->
+    <Style TargetType="DatePickerTextBox">
+        <Setter Property="Foreground" Value="{DynamicResource Brush.Text}" />
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="CaretBrush" Value="{DynamicResource Brush.Text}" />
+        <Setter Property="SelectionBrush" Value="{DynamicResource Brush.Primary}" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="DatePickerTextBox">
+                    <Grid Background="{TemplateBinding Background}">
+                        <ScrollViewer x:Name="PART_ContentHost" VerticalAlignment="Center" Margin="{TemplateBinding Padding}" />
+                    </Grid>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+    <Style x:Key="CalNavButton" TargetType="Button">
+        <Setter Property="Width" Value="28" />
+        <Setter Property="Height" Value="28" />
+        <Setter Property="Focusable" Value="False" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="Foreground" Value="{DynamicResource Brush.TextSoft}" />
+        <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button">
+            <Border x:Name="Bd" Background="Transparent" CornerRadius="6"><ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" /></Border>
+            <ControlTemplate.Triggers>
+                <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Bd" Property="Background" Value="{DynamicResource Brush.Hover}" /></Trigger>
+                <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.45" /></Trigger>
+            </ControlTemplate.Triggers>
+        </ControlTemplate></Setter.Value></Setter>
+    </Style>
+    <Style x:Key="CalDay" TargetType="CalendarDayButton">
+        <Setter Property="Width" Value="32" />
+        <Setter Property="Height" Value="28" />
+        <Setter Property="FontSize" Value="12" />
+        <Setter Property="Foreground" Value="{DynamicResource Brush.Text}" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="CalendarDayButton">
+                    <Border x:Name="Bd" Background="Transparent" BorderBrush="Transparent" BorderThickness="1" CornerRadius="6" Margin="1">
+                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Bd" Property="Background" Value="{DynamicResource Brush.Hover}" /></Trigger>
+                        <Trigger Property="IsToday" Value="True"><Setter TargetName="Bd" Property="BorderBrush" Value="{DynamicResource Brush.Primary}" /></Trigger>
+                        <Trigger Property="IsSelected" Value="True">
+                            <Setter TargetName="Bd" Property="Background" Value="{DynamicResource Brush.Fill}" />
+                            <Setter Property="Foreground" Value="{DynamicResource Brush.OnFill}" />
+                        </Trigger>
+                        <Trigger Property="IsInactive" Value="True"><Setter Property="Foreground" Value="{DynamicResource Brush.Faint}" /></Trigger>
+                        <Trigger Property="IsBlackedOut" Value="True"><Setter Property="Opacity" Value="0.35" /></Trigger>
+                        <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.35" /></Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+    <Style x:Key="CalMonth" TargetType="CalendarButton">
+        <Setter Property="Width" Value="52" />
+        <Setter Property="Height" Value="40" />
+        <Setter Property="FontSize" Value="12" />
+        <Setter Property="Foreground" Value="{DynamicResource Brush.Text}" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="CalendarButton">
+                    <Border x:Name="Bd" Background="Transparent" CornerRadius="6" Margin="2">
+                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Bd" Property="Background" Value="{DynamicResource Brush.Hover}" /></Trigger>
+                        <Trigger Property="HasSelectedDays" Value="True"><Setter TargetName="Bd" Property="Background" Value="{DynamicResource Brush.PrimarySoft}" /><Setter Property="Foreground" Value="{DynamicResource Brush.PrimaryInk}" /></Trigger>
+                        <Trigger Property="IsInactive" Value="True"><Setter Property="Foreground" Value="{DynamicResource Brush.Faint}" /></Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+    <Style x:Key="CalItem" TargetType="CalendarItem">
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="CalendarItem">
+                    <ControlTemplate.Resources>
+                        <DataTemplate x:Key="{x:Static CalendarItem.DayTitleTemplateResourceKey}">
+                            <TextBlock Text="{Binding}" FontSize="11" FontWeight="SemiBold" Foreground="{DynamicResource Brush.Muted}" HorizontalAlignment="Center" Margin="0,4" />
+                        </DataTemplate>
+                    </ControlTemplate.Resources>
+                    <Grid x:Name="PART_Root">
+                        <Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="10" Padding="8">
+                            <Grid>
+                                <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
+                                <DockPanel Margin="0,0,0,4">
+                                    <Button x:Name="PART_PreviousButton" DockPanel.Dock="Left" Style="{StaticResource CalNavButton}">
+                                        <Path Data="M15,5 L8,12 L15,19" Width="10" Height="12" Stretch="Uniform" StrokeThickness="2" Stroke="{DynamicResource Brush.TextSoft}" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" />
+                                    </Button>
+                                    <Button x:Name="PART_NextButton" DockPanel.Dock="Right" Style="{StaticResource CalNavButton}">
+                                        <Path Data="M9,5 L16,12 L9,19" Width="10" Height="12" Stretch="Uniform" StrokeThickness="2" Stroke="{DynamicResource Brush.TextSoft}" StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" />
+                                    </Button>
+                                    <Button x:Name="PART_HeaderButton" Style="{StaticResource CalNavButton}" Width="Auto" FontSize="13" FontWeight="Bold" Foreground="{DynamicResource Brush.Text}" />
+                                </DockPanel>
+                                <Grid x:Name="PART_MonthView" Grid.Row="1" Visibility="Visible">
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" />
+                                    </Grid.RowDefinitions>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                </Grid>
+                                <Grid x:Name="PART_YearView" Grid.Row="1" Visibility="Hidden">
+                                    <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                </Grid>
+                            </Grid>
+                        </Border>
+                        <Rectangle x:Name="PART_DisabledVisual" Fill="{DynamicResource Brush.Surface}" Opacity="0" Visibility="Collapsed" />
+                    </Grid>
+                    <ControlTemplate.Triggers>
+                        <DataTrigger Binding="{Binding DisplayMode, RelativeSource={RelativeSource FindAncestor, AncestorType=Calendar}}" Value="Year">
+                            <Setter TargetName="PART_MonthView" Property="Visibility" Value="Hidden" /><Setter TargetName="PART_YearView" Property="Visibility" Value="Visible" />
+                        </DataTrigger>
+                        <DataTrigger Binding="{Binding DisplayMode, RelativeSource={RelativeSource FindAncestor, AncestorType=Calendar}}" Value="Decade">
+                            <Setter TargetName="PART_MonthView" Property="Visibility" Value="Hidden" /><Setter TargetName="PART_YearView" Property="Visibility" Value="Visible" />
+                        </DataTrigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+    <Style TargetType="Calendar">
+        <Setter Property="Foreground" Value="{DynamicResource Brush.Text}" />
+        <Setter Property="Background" Value="{DynamicResource Brush.Surface}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource Brush.BorderStrong}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CalendarItemStyle" Value="{StaticResource CalItem}" />
+        <Setter Property="CalendarDayButtonStyle" Value="{StaticResource CalDay}" />
+        <Setter Property="CalendarButtonStyle" Value="{StaticResource CalMonth}" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Calendar">
+                    <StackPanel x:Name="PART_Root" HorizontalAlignment="Center">
+                        <CalendarItem x:Name="PART_CalendarItem" Style="{TemplateBinding CalendarItemStyle}" Background="{TemplateBinding Background}"
+                                      BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" />
+                    </StackPanel>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+    <Style TargetType="DatePicker">
+        <Setter Property="Foreground" Value="{DynamicResource Brush.Text}" />
+        <Setter Property="Background" Value="{DynamicResource Brush.Surface}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource Brush.BorderStrong}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="Height" Value="28" />
+        <Setter Property="FontSize" Value="12.5" />
+        <Setter Property="IsTodayHighlighted" Value="True" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="DatePicker">
+                    <Border x:Name="Bd" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="6">
+                        <Grid x:Name="PART_Root">
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                            <DatePickerTextBox x:Name="PART_TextBox" Padding="8,0,0,0" Foreground="{TemplateBinding Foreground}" />
+                            <Button x:Name="PART_Button" Grid.Column="1" Style="{StaticResource CalNavButton}" Width="28" Height="24" Margin="0,0,2,0" ToolTip="달력">
+                                <Path Data="M3,5 H21 V21 H3 Z M3,10 H21 M8,2.5 V7 M16,2.5 V7" Width="14" Height="14" Stretch="Uniform" StrokeThickness="1.8" Stroke="{DynamicResource Brush.TextSoft}" StrokeLineJoin="Round" StrokeStartLineCap="Round" StrokeEndLineCap="Round" />
+                            </Button>
+                            <Popup x:Name="PART_Popup" PlacementTarget="{Binding ElementName=Bd}" Placement="Bottom" StaysOpen="False" AllowsTransparency="True" VerticalOffset="4" />
+                        </Grid>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsKeyboardFocusWithin" Value="True"><Setter TargetName="Bd" Property="BorderBrush" Value="{DynamicResource Brush.Primary}" /></Trigger>
+                        <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.5" /></Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
             </Setter.Value>

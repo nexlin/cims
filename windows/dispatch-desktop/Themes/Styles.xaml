@@ -16,18 +16,41 @@
     <c:LevelToWidthConverter x:Key="LevelWidth" />
     <c:NullToVisibilityConverter x:Key="NullToVis" />
     <c:NotNullToVisibilityConverter x:Key="NotNullToVis" />
-    <c:RegStateToBrushConverter x:Key="RegBrush" />
     <c:RouteIconConverter x:Key="RouteIcon" />
     <c:RatioToLengthConverter x:Key="RatioLen" />
     <c:ScaleToLengthConverter x:Key="ScaleLen" />
     <c:HalfRadiusConverter x:Key="HalfRadius" />
+    <c:DepthIndentConverter x:Key="DepthIndent" />
     <c:InitialConverter x:Key="Initial" />
+    <c:AvatarHueConverter x:Key="AvatarHue" />
+    <c:ColumnsByWidthConverter x:Key="ColumnsByWidth" />
     <c:PickConverter x:Key="Pick" />
     <c:SameRefConverter x:Key="SameRef" />
     <BooleanToVisibilityConverter x:Key="B2V" />
 
     <FontFamily x:Key="Font.Ui">Noto Sans KR, Pretendard, Malgun Gothic, Segoe UI, sans-serif</FontFamily>
     <FontFamily x:Key="Font.Mono">JetBrains Mono, Cascadia Mono, Consolas, D2Coding, monospace</FontFamily>
+
+    <!-- 키보드 포커스 고리 — 남색 2px(두 테마 공통 토큰). WPF 기본(점선 검정 사각)은 어두운 면에서 안 보이고 둥근 버튼과 어긋난다.
+         Ring = 네모·세그먼트·체크(모서리 10) · Ring.Pill = 알약(모서리 크게). 입력칸은 테두리 색이 포커스를 말하므로 고리를 두지 않는다 -->
+    <Style x:Key="FocusRing">
+        <Setter Property="Control.Template">
+            <Setter.Value>
+                <ControlTemplate>
+                    <Border Margin="-3" CornerRadius="10" BorderThickness="2" BorderBrush="{DynamicResource Brush.Primary}" SnapsToDevicePixels="True" />
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+    <Style x:Key="FocusRing.Pill">
+        <Setter Property="Control.Template">
+            <Setter.Value>
+                <ControlTemplate>
+                    <Border Margin="-3" CornerRadius="24" BorderThickness="2" BorderBrush="{DynamicResource Brush.Primary}" SnapsToDevicePixels="True" />
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
 
     <Style TargetType="Window" x:Key="Window.Base">
         <Setter Property="FontFamily" Value="{StaticResource Font.Ui}" />
@@ -48,11 +71,6 @@
     <Style TargetType="TextBlock" x:Key="MonoMuted" BasedOn="{StaticResource Mono}">
         <Setter Property="Foreground" Value="{DynamicResource Brush.Muted}" />
     </Style>
-    <Style TargetType="TextBlock" x:Key="H2">
-        <Setter Property="FontSize" Value="14" />
-        <Setter Property="FontWeight" Value="SemiBold" />
-        <Setter Property="VerticalAlignment" Value="Center" />
-    </Style>
     <Style TargetType="TextBlock" x:Key="SectionHeader">
         <Setter Property="FontSize" Value="12.5" />
         <Setter Property="FontWeight" Value="SemiBold" />
@@ -64,14 +82,6 @@
         <Setter Property="TextWrapping" Value="Wrap" />
     </Style>
 
-    <!-- 패널 (도킹 단위) -->
-    <Style TargetType="Border" x:Key="Pnl">
-        <Setter Property="Background" Value="{DynamicResource Brush.Surface}" />
-        <Setter Property="BorderBrush" Value="{DynamicResource Brush.Border}" />
-        <Setter Property="BorderThickness" Value="0" />
-        <Setter Property="CornerRadius" Value="0" />
-        <Setter Property="SnapsToDevicePixels" Value="True" />
-    </Style>
     <!-- 소구획 -->
     <Style TargetType="Border" x:Key="Sub">
         <Setter Property="Background" Value="{DynamicResource Brush.Surface}" />
@@ -96,12 +106,14 @@
         <Setter Property="SnapsToDevicePixels" Value="True" />
     </Style>
 
-    <!-- 버튼 -->
+    <!-- 버튼(이력·그룹·관리·설정 화면) — 네모 버튼(Rect.*)과 같은 모서리 8 · 호버 = 남색 외곽선. Pri = 남색 채움 -->
     <Style TargetType="Button" x:Key="Btn">
+        <Setter Property="FocusVisualStyle" Value="{DynamicResource FocusRing}" />
+
         <Setter Property="Height" Value="30" />
         <Setter Property="Padding" Value="12,0" />
         <Setter Property="FontSize" Value="12.5" />
-        <Setter Property="FontWeight" Value="Medium" />
+        <Setter Property="FontWeight" Value="SemiBold" />
         <Setter Property="Foreground" Value="{DynamicResource Brush.Text}" />
         <Setter Property="Background" Value="{DynamicResource Brush.Surface}" />
         <Setter Property="BorderBrush" Value="{DynamicResource Brush.BorderStrong}" />
@@ -112,12 +124,13 @@
             <Setter.Value>
                 <ControlTemplate TargetType="Button">
                     <Border x:Name="Bd" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
-                            BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="6" Padding="{TemplateBinding Padding}">
+                            BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="8" Padding="{TemplateBinding Padding}">
                         <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" RecognizesAccessKey="True" />
                     </Border>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="Bd" Property="Background" Value="{DynamicResource Brush.Hover}" />
+                            <Setter TargetName="Bd" Property="Opacity" Value="0.92" />
+                            <Setter TargetName="Bd" Property="BorderBrush" Value="{DynamicResource Brush.Primary}" />
                         </Trigger>
                         <Trigger Property="IsPressed" Value="True">
                             <Setter TargetName="Bd" Property="Opacity" Value="0.85" />
@@ -131,17 +144,14 @@
         </Setter>
     </Style>
     <Style TargetType="Button" x:Key="Btn.Pri" BasedOn="{StaticResource Btn}">
-        <Setter Property="Background" Value="{DynamicResource Brush.Primary}" />
-        <Setter Property="BorderBrush" Value="{DynamicResource Brush.Primary}" />
-        <Setter Property="Foreground" Value="{DynamicResource Brush.OnAccent}" />
+        <Setter Property="Background" Value="{DynamicResource Brush.Fill}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource Brush.Fill}" />
+        <Setter Property="Foreground" Value="{DynamicResource Brush.OnFill}" />
     </Style>
     <Style TargetType="Button" x:Key="Btn.Danger" BasedOn="{StaticResource Btn}">
-        <Setter Property="BorderBrush" Value="{DynamicResource Brush.Emg}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource Brush.EmgEdge}" />
         <Setter Property="Foreground" Value="{DynamicResource Brush.Emg}" />
-    </Style>
-    <Style TargetType="Button" x:Key="Btn.Mon" BasedOn="{StaticResource Btn}">
-        <Setter Property="BorderBrush" Value="{DynamicResource Brush.Mon}" />
-        <Setter Property="Foreground" Value="{DynamicResource Brush.Mon}" />
+        <Setter Property="Background" Value="{DynamicResource Brush.EmgSoft}" />
     </Style>
     <Style TargetType="Button" x:Key="Btn.Sm" BasedOn="{StaticResource Btn}">
         <Setter Property="Height" Value="26" />
@@ -159,11 +169,6 @@
         <Setter Property="FontSize" Value="11.5" />
     </Style>
     <Style TargetType="Button" x:Key="Btn.Xs.Danger" BasedOn="{StaticResource Btn.Danger}">
-        <Setter Property="Height" Value="22" />
-        <Setter Property="Padding" Value="7,0" />
-        <Setter Property="FontSize" Value="11.5" />
-    </Style>
-    <Style TargetType="Button" x:Key="Btn.Xs.Mon" BasedOn="{StaticResource Btn.Mon}">
         <Setter Property="Height" Value="22" />
         <Setter Property="Padding" Value="7,0" />
         <Setter Property="FontSize" Value="11.5" />
@@ -201,18 +206,10 @@
             <Trigger Property="IsMouseOver" Value="True"><Setter Property="Foreground" Value="{DynamicResource Brush.Text}" /></Trigger>
         </Style.Triggers>
     </Style>
-    <Style TargetType="Button" x:Key="Btn.Ghost" BasedOn="{StaticResource Btn}">
-        <Setter Property="BorderBrush" Value="Transparent" />
-        <Setter Property="Background" Value="Transparent" />
-        <Setter Property="Foreground" Value="{DynamicResource Brush.Muted}" />
-    </Style>
-    <Style TargetType="Button" x:Key="Btn.Xs.Ghost" BasedOn="{StaticResource Btn.Ghost}">
-        <Setter Property="Height" Value="22" />
-        <Setter Property="Padding" Value="7,0" />
-        <Setter Property="FontSize" Value="11.5" />
-    </Style>
     <!-- 세그먼트 토글(예시 .seg) — 바깥 진한 테두리 한 겹, 선택 = Primary 연한 배경 + Primary 글자 -->
     <Style TargetType="RadioButton" x:Key="Seg">
+        <Setter Property="FocusVisualStyle" Value="{DynamicResource FocusRing}" />
+
         <Setter Property="Foreground" Value="{DynamicResource Brush.Muted}" />
         <Setter Property="FontSize" Value="12" />
         <Setter Property="Cursor" Value="Hand" />
@@ -228,9 +225,10 @@
                         </Trigger>
                         <Trigger Property="IsChecked" Value="True">
                             <Setter TargetName="Bd" Property="Background" Value="{DynamicResource Brush.PrimarySoft}" />
-                            <Setter Property="Foreground" Value="{DynamicResource Brush.Primary}" />
-                            <Setter Property="FontWeight" Value="SemiBold" />
+                            <Setter Property="Foreground" Value="{DynamicResource Brush.PrimaryInk}" />
+                            <Setter Property="FontWeight" Value="Bold" />
                         </Trigger>
+                        <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.45" /></Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
             </Setter.Value>
@@ -240,7 +238,7 @@
         <Setter Property="Background" Value="{DynamicResource Brush.Surface}" />
         <Setter Property="BorderBrush" Value="{DynamicResource Brush.BorderStrong}" />
         <Setter Property="BorderThickness" Value="1" />
-        <Setter Property="CornerRadius" Value="6" />
+        <Setter Property="CornerRadius" Value="8" />
         <Setter Property="Padding" Value="0" />
         <Setter Property="ClipToBounds" Value="True" />
         <Setter Property="VerticalAlignment" Value="Center" />
@@ -260,57 +258,33 @@
         <Setter Property="TextElement.FontWeight" Value="SemiBold" />
         <Setter Property="SnapsToDevicePixels" Value="True" />
     </Style>
-    <!-- .badge.own — 중립, 본문색 글자 -->
-    <Style TargetType="Border" x:Key="Badge.Own" BasedOn="{StaticResource Badge}">
-        <Setter Property="TextElement.Foreground" Value="{DynamicResource Brush.Text}" />
-    </Style>
-    <!-- .badge.temp — 애드혹(애드혹 그룹 통화, ad hoc group call) -->
-    <Style TargetType="Border" x:Key="Badge.Temp" BasedOn="{StaticResource Badge}">
-        <Setter Property="Background" Value="{DynamicResource Brush.HeldSoft}" />
-        <Setter Property="TextElement.Foreground" Value="{DynamicResource Brush.Held}" />
-    </Style>
-    <!-- .badge.pin — 외곽선 + 모노(핀 번호·핫키) -->
-    <Style TargetType="Border" x:Key="Badge.Pin" BasedOn="{StaticResource Badge}">
-        <Setter Property="Background" Value="Transparent" />
-        <Setter Property="BorderBrush" Value="{DynamicResource Brush.BorderStrong}" />
-        <Setter Property="BorderThickness" Value="1" />
-        <Setter Property="Padding" Value="5,0" />
-        <Setter Property="TextElement.FontFamily" Value="{StaticResource Font.Mono}" />
-        <Setter Property="TextElement.FontWeight" Value="Medium" />
-        <Setter Property="TextElement.FontSize" Value="10.5" />
-    </Style>
     <Style TargetType="Border" x:Key="Badge.Pilot" BasedOn="{StaticResource Badge}">
         <Setter Property="Background" Value="{DynamicResource Brush.RingSoft}" />
-        <Setter Property="TextElement.Foreground" Value="{DynamicResource Brush.Ring}" />
+        <Setter Property="TextElement.Foreground" Value="{DynamicResource Brush.RingInk}" />
     </Style>
     <Style TargetType="Border" x:Key="Badge.Talk" BasedOn="{StaticResource Badge}">
         <Setter Property="Background" Value="{DynamicResource Brush.TalkSoft}" />
-        <Setter Property="TextElement.Foreground" Value="{DynamicResource Brush.Talk}" />
+        <Setter Property="TextElement.Foreground" Value="{DynamicResource Brush.TalkInk}" />
     </Style>
     <Style TargetType="Border" x:Key="Badge.Held" BasedOn="{StaticResource Badge}">
         <Setter Property="Background" Value="{DynamicResource Brush.HeldSoft}" />
-        <Setter Property="TextElement.Foreground" Value="{DynamicResource Brush.Held}" />
+        <Setter Property="TextElement.Foreground" Value="{DynamicResource Brush.HeldInk}" />
     </Style>
     <Style TargetType="Border" x:Key="Badge.Mon" BasedOn="{StaticResource Badge}">
         <Setter Property="Background" Value="{DynamicResource Brush.MonSoft}" />
-        <Setter Property="TextElement.Foreground" Value="{DynamicResource Brush.Mon}" />
+        <Setter Property="TextElement.Foreground" Value="{DynamicResource Brush.MonInk}" />
     </Style>
     <Style TargetType="Border" x:Key="Badge.Listen" BasedOn="{StaticResource Badge}">
         <Setter Property="Background" Value="{DynamicResource Brush.ListenSoft}" />
-        <Setter Property="TextElement.Foreground" Value="{DynamicResource Brush.Listen}" />
+        <Setter Property="TextElement.Foreground" Value="{DynamicResource Brush.ListenInk}" />
     </Style>
     <Style TargetType="Border" x:Key="Badge.Member" BasedOn="{StaticResource Badge}">
         <Setter Property="Background" Value="{DynamicResource Brush.PrimarySoft}" />
-        <Setter Property="TextElement.Foreground" Value="{DynamicResource Brush.Primary}" />
+        <Setter Property="TextElement.Foreground" Value="{DynamicResource Brush.PrimaryInk}" />
     </Style>
     <Style TargetType="Border" x:Key="Badge.Emg" BasedOn="{StaticResource Badge}">
         <Setter Property="Background" Value="{DynamicResource Brush.EmgSoft}" />
         <Setter Property="TextElement.Foreground" Value="{DynamicResource Brush.Emg}" />
-    </Style>
-    <!-- 채움형 긴급(배너·고정 행처럼 강하게 알릴 곳) -->
-    <Style TargetType="Border" x:Key="Badge.Emg.Solid" BasedOn="{StaticResource Badge}">
-        <Setter Property="Background" Value="{DynamicResource Brush.Emg}" />
-        <Setter Property="TextElement.Foreground" Value="{DynamicResource Brush.OnAccent}" />
     </Style>
 
     <!-- 칩 · 알약 -->
@@ -325,28 +299,6 @@
         <Setter Property="TextElement.FontSize" Value="12" />
         <Setter Property="TextElement.FontWeight" Value="Medium" />
         <Setter Property="SnapsToDevicePixels" Value="True" />
-    </Style>
-    <!-- .chip.ghost — 외곽선만 -->
-    <Style TargetType="Border" x:Key="Pill.Ghost" BasedOn="{StaticResource Pill}">
-        <Setter Property="Background" Value="Transparent" />
-        <Setter Property="BorderBrush" Value="{DynamicResource Brush.Border}" />
-        <Setter Property="BorderThickness" Value="1" />
-        <Setter Property="TextElement.Foreground" Value="{DynamicResource Brush.Muted}" />
-    </Style>
-    <!-- .mchip — 관제 그룹원 띠: 라운드 사각(모서리 7), 연한 바탕 + 테두리, 상태 = 테두리색·연한 배경 -->
-    <Style TargetType="Border" x:Key="MemberChip">
-        <Setter Property="CornerRadius" Value="7" />
-        <Setter Property="MinHeight" Value="32" />
-        <Setter Property="Padding" Value="10,0" />
-        <Setter Property="Background" Value="{DynamicResource Brush.BgSoft}" />
-        <Setter Property="BorderBrush" Value="{DynamicResource Brush.Border}" />
-        <Setter Property="BorderThickness" Value="1" />
-        <Setter Property="Margin" Value="0,0,6,6" />
-        <Setter Property="TextElement.FontSize" Value="12" />
-        <Setter Property="SnapsToDevicePixels" Value="True" />
-        <Style.Triggers>
-            <Trigger Property="IsMouseOver" Value="True"><Setter Property="Background" Value="{DynamicResource Brush.Hover}" /></Trigger>
-        </Style.Triggers>
     </Style>
     <!-- .m / .tchip — 22px 로스터·대상 칩: 연한 바탕 + 테두리, 상태색은 쓰는 곳의 트리거가 덮는다 -->
     <Style TargetType="Border" x:Key="Chip">
@@ -375,7 +327,7 @@
         <Setter Property="Height" Value="9" />
         <Setter Property="Minimum" Value="0" />
         <Setter Property="Maximum" Value="1" />
-        <Setter Property="Foreground" Value="{DynamicResource Brush.Talk}" />
+        <Setter Property="Foreground" Value="{DynamicResource Brush.TalkInk}" />
         <Setter Property="Background" Value="{DynamicResource Brush.MeterTrack}" />
         <Setter Property="BorderThickness" Value="0" />
         <Setter Property="Template">
@@ -395,6 +347,7 @@
 
 
     <!-- 목록 — 선택 강조 없는 얇은 ListBox -->
+    <!-- 목록 — 틀은 테마 면 그대로(WPF 기본 틀은 비활성일 때 흰 면·회색 테두리로 바꿔 어둡게에서 흰 판이 뜬다). 비활성 = 흐리게 -->
     <Style TargetType="ListBox" x:Key="PlainList">
         <Setter Property="Background" Value="Transparent" />
         <Setter Property="Foreground" Value="{DynamicResource Brush.Text}" />
@@ -402,6 +355,23 @@
         <Setter Property="Padding" Value="0" />
         <Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Disabled" />
         <Setter Property="VirtualizingPanel.IsVirtualizing" Value="True" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ListBox">
+                    <Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" SnapsToDevicePixels="True">
+                        <ScrollViewer Focusable="False" Padding="{TemplateBinding Padding}" CanContentScroll="{TemplateBinding ScrollViewer.CanContentScroll}"
+                                      HorizontalScrollBarVisibility="{TemplateBinding ScrollViewer.HorizontalScrollBarVisibility}"
+                                      VerticalScrollBarVisibility="{TemplateBinding ScrollViewer.VerticalScrollBarVisibility}">
+                            <ItemsPresenter SnapsToDevicePixels="{TemplateBinding SnapsToDevicePixels}" />
+                        </ScrollViewer>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.55" /></Trigger>
+                        <Trigger Property="IsGrouping" Value="True"><Setter Property="ScrollViewer.CanContentScroll" Value="False" /></Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
         <Setter Property="ItemContainerStyle">
             <Setter.Value>
                 <Style TargetType="ListBoxItem">
@@ -478,14 +448,8 @@
         <Setter Property="SnapsToDevicePixels" Value="True" />
         <Setter Property="Effect"><Setter.Value><DropShadowEffect BlurRadius="16" ShadowDepth="3" Opacity="0.22" /></Setter.Value></Setter>
     </Style>
-    <!-- 패널 안 섹션 라벨("청취 범위 · 3", "대표번호 대기열 1") -->
-    <Style TargetType="TextBlock" x:Key="SectionLabel">
-        <Setter Property="FontSize" Value="11.5" />
-        <Setter Property="FontWeight" Value="SemiBold" />
-        <Setter Property="Foreground" Value="{DynamicResource Brush.Muted}" />
-        <Setter Property="Margin" Value="2,6,0,4" />
-    </Style>
-    <!-- ══ 시안 «모드마다 한 화면»(§3.2 시각 언어) — 먹(Ink) 채움·외곽선 알약, 각진 필터 칩, 19px 라벨, 둥근 발언 대상 ✓ ══ -->
+    <!-- ══ «모드마다 한 화면»(§3.2 시각 언어) — 알약·네모 버튼(채움 = 남색 Fill, 외곽선 = Edge), 각진 필터 칩(선택 = 연한 남색), 19px 라벨(연한 상태색 면),
+         둥근 발언 대상 ✓. 색은 토큰만 쓴다(Light/Dark.xaml) ══ -->
     <Style TargetType="TextBlock" x:Key="Title16">
         <Setter Property="FontSize" Value="16" />
         <Setter Property="FontWeight" Value="Bold" />
@@ -495,15 +459,17 @@
         <Setter Property="Foreground" Value="{DynamicResource Brush.TextSoft}" />
     </Style>
 
-    <!-- 알약 버튼 — 기본 = 흰 바탕 + 먹 외곽선 1.5. 모서리 = 높이/2 -->
+    <!-- 알약 버튼 — 기본 = 표면 + Edge 외곽선 1.5(호버 = 남색 외곽선). 모서리 = 높이/2 -->
     <Style TargetType="Button" x:Key="Pill.Line">
+        <Setter Property="FocusVisualStyle" Value="{DynamicResource FocusRing.Pill}" />
+
         <Setter Property="Height" Value="32" />
         <Setter Property="Padding" Value="12,0" />
         <Setter Property="FontSize" Value="12.5" />
         <Setter Property="FontWeight" Value="Bold" />
-        <Setter Property="Foreground" Value="{DynamicResource Brush.Ink}" />
+        <Setter Property="Foreground" Value="{DynamicResource Brush.Text}" />
         <Setter Property="Background" Value="{DynamicResource Brush.Surface}" />
-        <Setter Property="BorderBrush" Value="{DynamicResource Brush.Ink}" />
+        <Setter Property="BorderBrush" Value="{DynamicResource Brush.Edge}" />
         <Setter Property="BorderThickness" Value="1.5" />
         <Setter Property="Cursor" Value="Hand" />
         <Setter Property="SnapsToDevicePixels" Value="True" />
@@ -516,7 +482,7 @@
                         <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" RecognizesAccessKey="True" />
                     </Border>
                     <ControlTemplate.Triggers>
-                        <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Bd" Property="Opacity" Value="0.88" /></Trigger>
+                        <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Bd" Property="Opacity" Value="0.9" /><Setter TargetName="Bd" Property="BorderBrush" Value="{DynamicResource Brush.Primary}" /></Trigger>
                         <Trigger Property="IsPressed" Value="True"><Setter TargetName="Bd" Property="Opacity" Value="0.75" /></Trigger>
                         <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.4" /></Trigger>
                     </ControlTemplate.Triggers>
@@ -524,9 +490,16 @@
             </Setter.Value>
         </Setter>
     </Style>
+    <!-- 채운 알약 = 주 행동(남색) -->
     <Style TargetType="Button" x:Key="Pill.Ink" BasedOn="{StaticResource Pill.Line}">
-        <Setter Property="Background" Value="{DynamicResource Brush.Ink}" />
-        <Setter Property="Foreground" Value="{DynamicResource Brush.OnInk}" />
+        <Setter Property="Background" Value="{DynamicResource Brush.Fill}" />
+        <Setter Property="Foreground" Value="{DynamicResource Brush.OnFill}" />
+        <Setter Property="BorderThickness" Value="0" />
+    </Style>
+    <!-- 통화 행동(응답·발신·당겨받기) = 녹색 채움 -->
+    <Style TargetType="Button" x:Key="Pill.Call" BasedOn="{StaticResource Pill.Line}">
+        <Setter Property="Background" Value="{DynamicResource Brush.TalkFill}" />
+        <Setter Property="Foreground" Value="{DynamicResource Brush.OnAccent}" />
         <Setter Property="BorderThickness" Value="0" />
     </Style>
     <Style TargetType="Button" x:Key="Pill.Soft" BasedOn="{StaticResource Pill.Line}">
@@ -539,19 +512,33 @@
         <Setter Property="Foreground" Value="{DynamicResource Brush.Emg}" />
     </Style>
     <Style TargetType="Button" x:Key="Pill.RedFill" BasedOn="{StaticResource Pill.Line}">
-        <Setter Property="Background" Value="{DynamicResource Brush.Emg}" />
-        <Setter Property="Foreground" Value="{DynamicResource Brush.OnAccent}" />
-        <Setter Property="BorderThickness" Value="0" />
-    </Style>
-    <Style TargetType="Button" x:Key="Pill.On" BasedOn="{StaticResource Pill.Line}">
-        <Setter Property="Background" Value="{DynamicResource Brush.Primary}" />
+        <Setter Property="Background" Value="{DynamicResource Brush.EmgFill}" />
         <Setter Property="Foreground" Value="{DynamicResource Brush.OnAccent}" />
         <Setter Property="BorderThickness" Value="0" />
     </Style>
     <Style TargetType="Button" x:Key="Pill.Talk" BasedOn="{StaticResource Pill.Line}">
         <Setter Property="BorderBrush" Value="{DynamicResource Brush.TalkInk}" />
         <Setter Property="Foreground" Value="{DynamicResource Brush.TalkInk}" />
+        <Setter Property="Background" Value="{DynamicResource Brush.TalkSoft}" />
     </Style>
+    <!-- 청취 = 청록 — 기본 외곽선, 청취 중이면 채움(Pill.Listen.Sm 을 트리거가 건다) -->
+    <Style TargetType="Button" x:Key="Pill.Listen" BasedOn="{StaticResource Pill.Line}">
+        <Setter Property="BorderBrush" Value="{DynamicResource Brush.Listen}" />
+        <Setter Property="Foreground" Value="{DynamicResource Brush.ListenInk}" />
+        <Setter Property="Background" Value="{DynamicResource Brush.ListenSoft}" />
+    </Style>
+    <Style TargetType="Button" x:Key="Pill.ListenLine.Sm" BasedOn="{StaticResource Pill.Line}">
+        <Setter Property="Height" Value="30" /><Setter Property="FontSize" Value="12" />
+        <Setter Property="BorderBrush" Value="{DynamicResource Brush.Listen}" />
+        <Setter Property="Foreground" Value="{DynamicResource Brush.ListenInk}" />
+    </Style>
+    <Style TargetType="Button" x:Key="Pill.Listen.Sm" BasedOn="{StaticResource Pill.Line}">
+        <Setter Property="Height" Value="30" /><Setter Property="FontSize" Value="12" />
+        <Setter Property="Background" Value="{DynamicResource Brush.ListenFill}" />
+        <Setter Property="Foreground" Value="{DynamicResource Brush.OnAccent}" />
+        <Setter Property="BorderThickness" Value="0" />
+    </Style>
+    <Style TargetType="Button" x:Key="Pill.Call.Lg" BasedOn="{StaticResource Pill.Call}"><Setter Property="Height" Value="44" /><Setter Property="FontSize" Value="13.5" /><Setter Property="Padding" Value="20,0" /></Style>
     <!-- 알약 크기 — 조작 행 30 / 패널 행동 36(기본 32) / 바닥 행동 44 -->
     <Style TargetType="Button" x:Key="Pill.Ink.Sm" BasedOn="{StaticResource Pill.Ink}"><Setter Property="Height" Value="30" /><Setter Property="FontSize" Value="12" /></Style>
     <Style TargetType="Button" x:Key="Pill.Line.Sm" BasedOn="{StaticResource Pill.Line}"><Setter Property="Height" Value="30" /><Setter Property="FontSize" Value="12" /></Style>
@@ -561,12 +548,14 @@
     <Style TargetType="Button" x:Key="Pill.Line.Lg" BasedOn="{StaticResource Pill.Line}"><Setter Property="Height" Value="44" /><Setter Property="FontSize" Value="13.5" /><Setter Property="Padding" Value="20,0" /></Style>
     <Style TargetType="Button" x:Key="Pill.Soft.Lg" BasedOn="{StaticResource Pill.Soft}"><Setter Property="Height" Value="44" /><Setter Property="FontSize" Value="13" /><Setter Property="Padding" Value="20,0" /></Style>
 
-    <!-- 네모 버튼(모서리 8) — [발신]·[응답]·통화 카드 조작 -->
+    <!-- 네모 버튼(모서리 8) — [발신]·[응답]·통화 카드 조작. 채움 = 남색(Ink)·녹색(Call)·빨강(Red) -->
     <Style TargetType="Button" x:Key="Rect.Soft">
+        <Setter Property="FocusVisualStyle" Value="{DynamicResource FocusRing}" />
+
         <Setter Property="Height" Value="34" />
         <Setter Property="Padding" Value="14,0" />
         <Setter Property="FontSize" Value="13" />
-        <Setter Property="Foreground" Value="{DynamicResource Brush.Ink}" />
+        <Setter Property="Foreground" Value="{DynamicResource Brush.Text}" />
         <Setter Property="Background" Value="{DynamicResource Brush.Surface}" />
         <Setter Property="BorderBrush" Value="{DynamicResource Brush.BorderStrong}" />
         <Setter Property="BorderThickness" Value="1" />
@@ -581,7 +570,7 @@
                         <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" RecognizesAccessKey="True" />
                     </Border>
                     <ControlTemplate.Triggers>
-                        <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Bd" Property="Opacity" Value="0.88" /></Trigger>
+                        <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Bd" Property="Opacity" Value="0.9" /><Setter TargetName="Bd" Property="BorderBrush" Value="{DynamicResource Brush.Primary}" /></Trigger>
                         <Trigger Property="IsPressed" Value="True"><Setter TargetName="Bd" Property="Opacity" Value="0.75" /></Trigger>
                         <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.4" /></Trigger>
                     </ControlTemplate.Triggers>
@@ -589,41 +578,47 @@
             </Setter.Value>
         </Setter>
     </Style>
-    <Style TargetType="Button" x:Key="Rect.Line" BasedOn="{StaticResource Rect.Soft}">
-        <Setter Property="BorderBrush" Value="{DynamicResource Brush.Ink}" />
-        <Setter Property="BorderThickness" Value="1.5" />
+    <Style TargetType="Button" x:Key="Rect.Ink" BasedOn="{StaticResource Rect.Soft}">
+        <Setter Property="Background" Value="{DynamicResource Brush.Fill}" />
+        <Setter Property="Foreground" Value="{DynamicResource Brush.OnFill}" />
+        <Setter Property="BorderThickness" Value="0" />
         <Setter Property="FontWeight" Value="Bold" />
     </Style>
-    <Style TargetType="Button" x:Key="Rect.Ink" BasedOn="{StaticResource Rect.Soft}">
-        <Setter Property="Background" Value="{DynamicResource Brush.Ink}" />
-        <Setter Property="Foreground" Value="{DynamicResource Brush.OnInk}" />
+    <Style TargetType="Button" x:Key="Rect.Call" BasedOn="{StaticResource Rect.Soft}">
+        <Setter Property="Background" Value="{DynamicResource Brush.TalkFill}" />
+        <Setter Property="Foreground" Value="{DynamicResource Brush.OnAccent}" />
         <Setter Property="BorderThickness" Value="0" />
         <Setter Property="FontWeight" Value="Bold" />
     </Style>
     <Style TargetType="Button" x:Key="Rect.Red" BasedOn="{StaticResource Rect.Soft}">
-        <Setter Property="Background" Value="{DynamicResource Brush.Emg}" />
+        <Setter Property="Background" Value="{DynamicResource Brush.EmgFill}" />
         <Setter Property="Foreground" Value="{DynamicResource Brush.OnAccent}" />
         <Setter Property="BorderThickness" Value="0" />
         <Setter Property="FontWeight" Value="Bold" />
     </Style>
     <Style TargetType="ToggleButton" x:Key="Rect.Toggle">
+        <Setter Property="FocusVisualStyle" Value="{DynamicResource FocusRing}" />
+
         <Setter Property="Height" Value="34" />
         <Setter Property="Padding" Value="12,0" />
         <Setter Property="FontSize" Value="13" />
         <Setter Property="FontWeight" Value="Bold" />
-        <Setter Property="Foreground" Value="{DynamicResource Brush.Ink}" />
+        <Setter Property="Foreground" Value="{DynamicResource Brush.Text}" />
         <Setter Property="Background" Value="{DynamicResource Brush.Surface}" />
         <Setter Property="Cursor" Value="Hand" />
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="ToggleButton">
-                    <Border x:Name="Bd" Background="{TemplateBinding Background}" BorderBrush="{DynamicResource Brush.Ink}" BorderThickness="1.5" CornerRadius="8" Padding="{TemplateBinding Padding}">
+                    <!-- 외곽선 = 옆의 Rect.Soft 와 같은 무게(통화 카드·머리 줄에서 [보류]·[DTMF] 가 한 줄로 읽히게) -->
+                    <Border x:Name="Bd" Background="{TemplateBinding Background}" BorderBrush="{DynamicResource Brush.BorderStrong}" BorderThickness="1" CornerRadius="8" Padding="{TemplateBinding Padding}">
                         <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
                     </Border>
                     <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Bd" Property="BorderBrush" Value="{DynamicResource Brush.Primary}" /></Trigger>
                         <Trigger Property="IsChecked" Value="True">
-                            <Setter TargetName="Bd" Property="Background" Value="{DynamicResource Brush.Ink}" />
-                            <Setter Property="Foreground" Value="{DynamicResource Brush.OnInk}" />
+                            <Setter TargetName="Bd" Property="Background" Value="{DynamicResource Brush.PrimarySoft}" />
+                            <Setter TargetName="Bd" Property="BorderBrush" Value="{DynamicResource Brush.Primary}" />
+                            <Setter Property="Foreground" Value="{DynamicResource Brush.PrimaryInk}" />
                         </Trigger>
                         <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.4" /></Trigger>
                     </ControlTemplate.Triggers>
@@ -632,7 +627,7 @@
         </Setter>
     </Style>
 
-    <!-- 필터 칩(모서리 6, 28px) — 켜짐 = 먹 바탕 + 흰 굵은 글자. RadioButton·CheckBox·ToggleButton 공용 -->
+    <!-- 필터 칩(모서리 6, 28px) — 켜짐 = 연한 남색 면 + 남색 외곽선 + 남색 굵은 글자. RadioButton·CheckBox·ToggleButton 공용 -->
     <Style TargetType="ToggleButton" x:Key="FilterChip">
         <Setter Property="Height" Value="28" />
         <Setter Property="Padding" Value="10,0" />
@@ -652,18 +647,19 @@
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Bd" Property="Background" Value="{DynamicResource Brush.Hover}" /></Trigger>
                         <Trigger Property="IsChecked" Value="True">
-                            <Setter TargetName="Bd" Property="Background" Value="{DynamicResource Brush.Ink}" />
-                            <Setter TargetName="Bd" Property="BorderBrush" Value="{DynamicResource Brush.Ink}" />
-                            <Setter Property="Foreground" Value="{DynamicResource Brush.OnInk}" />
+                            <Setter TargetName="Bd" Property="Background" Value="{DynamicResource Brush.PrimarySoft}" />
+                            <Setter TargetName="Bd" Property="BorderBrush" Value="{DynamicResource Brush.Primary}" />
+                            <Setter Property="Foreground" Value="{DynamicResource Brush.PrimaryInk}" />
                             <Setter Property="FontWeight" Value="Bold" />
                         </Trigger>
+                        <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.45" /></Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
             </Setter.Value>
         </Setter>
     </Style>
 
-    <!-- 19px 라벨(모서리 4) — 외곽선(개별·애드혹) · 먹(일제) · 빨강(긴급) · 주황(임박) -->
+    <!-- 19px 라벨(모서리 4) — 기본 = 연한 회색 면(개별·애드혹·SDS) · Ink = 연한 남색(일제·그룹) · 채움 빨강(긴급) · 주황(임박) · 연한 상태색 면(나머지) -->
     <Style TargetType="Border" x:Key="Tag">
         <Setter Property="Height" Value="19" />
         <Setter Property="CornerRadius" Value="4" />
@@ -671,19 +667,19 @@
         <Setter Property="Margin" Value="0,0,4,0" />
         <Setter Property="VerticalAlignment" Value="Center" />
         <Setter Property="BorderThickness" Value="1" />
-        <Setter Property="BorderBrush" Value="{DynamicResource Brush.Faint}" />
-        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="BorderBrush" Value="{DynamicResource Brush.Border}" />
+        <Setter Property="Background" Value="{DynamicResource Brush.Surface2}" />
         <Setter Property="TextElement.Foreground" Value="{DynamicResource Brush.TextSoft}" />
         <Setter Property="TextElement.FontSize" Value="11" />
         <Setter Property="TextElement.FontWeight" Value="Bold" />
         <Setter Property="SnapsToDevicePixels" Value="True" />
     </Style>
     <Style TargetType="Border" x:Key="Tag.Ink" BasedOn="{StaticResource Tag}">
-        <Setter Property="Background" Value="{DynamicResource Brush.Ink}" /><Setter Property="BorderBrush" Value="{DynamicResource Brush.Ink}" />
-        <Setter Property="TextElement.Foreground" Value="{DynamicResource Brush.OnInk}" />
+        <Setter Property="Background" Value="{DynamicResource Brush.PrimarySoft}" /><Setter Property="BorderBrush" Value="{DynamicResource Brush.PrimaryEdge}" />
+        <Setter Property="TextElement.Foreground" Value="{DynamicResource Brush.PrimaryInk}" />
     </Style>
     <Style TargetType="Border" x:Key="Tag.Emg" BasedOn="{StaticResource Tag}">
-        <Setter Property="Background" Value="{DynamicResource Brush.Emg}" /><Setter Property="BorderBrush" Value="{DynamicResource Brush.Emg}" />
+        <Setter Property="Background" Value="{DynamicResource Brush.EmgFill}" /><Setter Property="BorderBrush" Value="{DynamicResource Brush.EmgFill}" />
         <Setter Property="TextElement.Foreground" Value="{DynamicResource Brush.OnAccent}" />
     </Style>
     <Style TargetType="Border" x:Key="Tag.Peril" BasedOn="{StaticResource Tag}">
@@ -691,38 +687,76 @@
         <Setter Property="TextElement.Foreground" Value="{DynamicResource Brush.OnPeril}" />
     </Style>
     <Style TargetType="Border" x:Key="Tag.Red" BasedOn="{StaticResource Tag}">
-        <Setter Property="BorderBrush" Value="{DynamicResource Brush.Emg}" /><Setter Property="TextElement.Foreground" Value="{DynamicResource Brush.Emg}" />
+        <Setter Property="Background" Value="{DynamicResource Brush.EmgSoft}" /><Setter Property="BorderBrush" Value="{DynamicResource Brush.EmgEdge}" />
+        <Setter Property="TextElement.Foreground" Value="{DynamicResource Brush.Emg}" />
     </Style>
     <Style TargetType="Border" x:Key="Tag.Mon" BasedOn="{StaticResource Tag}">
-        <Setter Property="BorderBrush" Value="{DynamicResource Brush.Mon}" /><Setter Property="TextElement.Foreground" Value="{DynamicResource Brush.Mon}" />
+        <Setter Property="Background" Value="{DynamicResource Brush.MonSoft}" /><Setter Property="BorderBrush" Value="{DynamicResource Brush.MonEdge}" />
+        <Setter Property="TextElement.Foreground" Value="{DynamicResource Brush.MonInk}" />
     </Style>
     <Style TargetType="Border" x:Key="Tag.Pilot" BasedOn="{StaticResource Tag}">
-        <Setter Property="BorderBrush" Value="{DynamicResource Brush.Peril}" /><Setter Property="TextElement.Foreground" Value="{DynamicResource Brush.RingInk}" />
+        <Setter Property="Background" Value="{DynamicResource Brush.RingSoft}" /><Setter Property="BorderBrush" Value="{DynamicResource Brush.RingEdge}" />
+        <Setter Property="TextElement.Foreground" Value="{DynamicResource Brush.RingInk}" />
+    </Style>
+    <Style TargetType="Border" x:Key="Tag.Teal" BasedOn="{StaticResource Tag}">
+        <Setter Property="Background" Value="{DynamicResource Brush.ListenSoft}" /><Setter Property="BorderBrush" Value="{DynamicResource Brush.ListenSoft}" />
+        <Setter Property="TextElement.Foreground" Value="{DynamicResource Brush.ListenInk}" />
     </Style>
     <Style TargetType="Border" x:Key="Tag.Listen" BasedOn="{StaticResource Tag}">
-        <Setter Property="BorderBrush" Value="{DynamicResource Brush.Listen}" /><Setter Property="TextElement.Foreground" Value="{DynamicResource Brush.Listen}" />
+        <Setter Property="Background" Value="{DynamicResource Brush.ListenSoft}" /><Setter Property="BorderBrush" Value="{DynamicResource Brush.Listen}" />
+        <Setter Property="TextElement.Foreground" Value="{DynamicResource Brush.ListenInk}" />
         <Setter Property="CornerRadius" Value="10" /><Setter Property="Padding" Value="8,0" />
     </Style>
-    <!-- 수 배지(먹 둥근 8) — 미읽음·세그먼트 수 -->
+    <Style TargetType="Border" x:Key="Tag.Talk" BasedOn="{StaticResource Tag}">
+        <Setter Property="Background" Value="{DynamicResource Brush.TalkSoft}" /><Setter Property="BorderBrush" Value="{DynamicResource Brush.TalkEdge}" />
+        <Setter Property="TextElement.Foreground" Value="{DynamicResource Brush.TalkInk}" />
+    </Style>
+    <Style TargetType="Border" x:Key="Tag.Held" BasedOn="{StaticResource Tag}">
+        <Setter Property="Background" Value="{DynamicResource Brush.HeldSoft}" /><Setter Property="BorderBrush" Value="{DynamicResource Brush.HeldSoft}" />
+        <Setter Property="TextElement.Foreground" Value="{DynamicResource Brush.HeldInk}" />
+    </Style>
+    <!-- 수 배지(남색 둥근 8) — 미읽음·세그먼트 수 -->
     <Style TargetType="Border" x:Key="Count">
         <Setter Property="CornerRadius" Value="8" />
         <Setter Property="Padding" Value="6,0" />
         <Setter Property="MinHeight" Value="17" />
         <Setter Property="VerticalAlignment" Value="Center" />
-        <Setter Property="Background" Value="{DynamicResource Brush.Ink}" />
-        <Setter Property="TextElement.Foreground" Value="{DynamicResource Brush.OnInk}" />
+        <Setter Property="Background" Value="{DynamicResource Brush.Fill}" />
+        <Setter Property="TextElement.Foreground" Value="{DynamicResource Brush.OnFill}" />
         <Setter Property="TextElement.FontSize" Value="11" />
         <Setter Property="TextElement.FontWeight" Value="Bold" />
     </Style>
-    <!-- 아바타(원 34 · 그룹은 쓰는 곳이 모서리 8) -->
+    <!-- 등록 점등(§3.2) — Tag = RegState: 회색 미등록 · 주황 등록 중 · 녹색 등록 · 빨강 실패. 색이 테마 토큰이라 테마를 바꾸면 따라간다 -->
+    <Style TargetType="Ellipse" x:Key="RegDot">
+        <Setter Property="Width" Value="9" />
+        <Setter Property="Height" Value="9" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+        <Setter Property="Fill" Value="{DynamicResource Brush.Wire}" />
+        <Style.Triggers>
+            <DataTrigger Binding="{Binding Tag, RelativeSource={RelativeSource Self}}" Value="Registered"><Setter Property="Fill" Value="{DynamicResource Brush.Talk}" /></DataTrigger>
+            <DataTrigger Binding="{Binding Tag, RelativeSource={RelativeSource Self}}" Value="Registering"><Setter Property="Fill" Value="{DynamicResource Brush.Ring}" /></DataTrigger>
+            <DataTrigger Binding="{Binding Tag, RelativeSource={RelativeSource Self}}" Value="Failed"><Setter Property="Fill" Value="{DynamicResource Brush.Emg}" /></DataTrigger>
+        </Style.Triggers>
+    </Style>
+    <!-- 아바타(원 34 · 그룹은 쓰는 곳이 모서리 8) — Tag = 색 번호 "0"~"7"(AvatarHue: 이름 해시), 면·글자가 테마 토큰이라 테마를 바꾸면 따라간다 -->
     <Style TargetType="Border" x:Key="Avatar">
         <Setter Property="Width" Value="34" />
         <Setter Property="Height" Value="34" />
         <Setter Property="CornerRadius" Value="17" />
-        <Setter Property="Background" Value="{DynamicResource Brush.Border}" />
+        <Setter Property="Background" Value="{DynamicResource Brush.Av7}" />
+        <Setter Property="TextElement.Foreground" Value="{DynamicResource Brush.Av7Fg}" />
         <Setter Property="TextElement.FontSize" Value="13" />
         <Setter Property="TextElement.FontWeight" Value="Bold" />
         <Setter Property="VerticalAlignment" Value="Center" />
+        <Style.Triggers>
+            <Trigger Property="Tag" Value="0"><Setter Property="Background" Value="{DynamicResource Brush.Av0}" /><Setter Property="TextElement.Foreground" Value="{DynamicResource Brush.Av0Fg}" /></Trigger>
+            <Trigger Property="Tag" Value="1"><Setter Property="Background" Value="{DynamicResource Brush.Av1}" /><Setter Property="TextElement.Foreground" Value="{DynamicResource Brush.Av1Fg}" /></Trigger>
+            <Trigger Property="Tag" Value="2"><Setter Property="Background" Value="{DynamicResource Brush.Av2}" /><Setter Property="TextElement.Foreground" Value="{DynamicResource Brush.Av2Fg}" /></Trigger>
+            <Trigger Property="Tag" Value="3"><Setter Property="Background" Value="{DynamicResource Brush.Av3}" /><Setter Property="TextElement.Foreground" Value="{DynamicResource Brush.Av3Fg}" /></Trigger>
+            <Trigger Property="Tag" Value="4"><Setter Property="Background" Value="{DynamicResource Brush.Av4}" /><Setter Property="TextElement.Foreground" Value="{DynamicResource Brush.Av4Fg}" /></Trigger>
+            <Trigger Property="Tag" Value="5"><Setter Property="Background" Value="{DynamicResource Brush.Av5}" /><Setter Property="TextElement.Foreground" Value="{DynamicResource Brush.Av5Fg}" /></Trigger>
+            <Trigger Property="Tag" Value="6"><Setter Property="Background" Value="{DynamicResource Brush.Av6}" /><Setter Property="TextElement.Foreground" Value="{DynamicResource Brush.Av6Fg}" /></Trigger>
+        </Style.Triggers>
     </Style>
 
     <!-- 발언 대상 ✓(원 34) — 빔 = 흰 바탕 + 흐린 ✓ · 켬 = 남색 채움 + 흰 ✓ · 비활성(일제 수신) = 점선 -->
@@ -782,16 +816,11 @@
             </Setter.Value>
         </Setter>
     </Style>
-    <Style TargetType="Button" x:Key="RoundBtn.Red" BasedOn="{StaticResource RoundBtn}">
-        <Setter Property="Background" Value="{DynamicResource Brush.Emg}" />
-        <Setter Property="BorderThickness" Value="0" />
-        <Setter Property="Foreground" Value="{DynamicResource Brush.OnAccent}" />
-    </Style>
 
-    <!-- 왼쪽 레일 항목(§3.4) — 알약 56×32 안 아이콘 + 아래 글자(Tag). 선택 = 알약 채움 + 굵은 글자 -->
+    <!-- 왼쪽 레일 항목(§3.4) — 알약 56×32 안 아이콘 + 아래 글자(Tag). 선택 = 연한 남색 알약 + 남색 아이콘·굵은 글자 -->
     <Style TargetType="ToggleButton" x:Key="RailItem">
         <Setter Property="Width" Value="72" />
-        <Setter Property="Foreground" Value="{DynamicResource Brush.Ink}" />
+        <Setter Property="Foreground" Value="{DynamicResource Brush.TextSoft}" />
         <Setter Property="Cursor" Value="Hand" />
         <Setter Property="Focusable" Value="False" />
         <Setter Property="Margin" Value="0,0,0,12" />
@@ -808,18 +837,20 @@
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Pill" Property="Background" Value="{DynamicResource Brush.Border}" /></Trigger>
                         <Trigger Property="IsChecked" Value="True">
-                            <Setter TargetName="Pill" Property="Background" Value="{DynamicResource Brush.BorderStrong}" />
+                            <Setter TargetName="Pill" Property="Background" Value="{DynamicResource Brush.RailActive}" />
+                            <Setter Property="Foreground" Value="{DynamicResource Brush.PrimaryInk}" />
                             <Setter TargetName="Lbl" Property="FontWeight" Value="Bold" />
                         </Trigger>
+                        <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.45" /></Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
             </Setter.Value>
         </Setter>
     </Style>
-    <!-- 탭 줄 모드 세그먼트 [무전|통화] — 먹 외곽선 한 겹 안의 칸, 선택 = 먹 채움 -->
+    <!-- 탭 줄 모드 세그먼트 [무전|통화] — 남색 외곽선 한 겹(안쪽 여백 2) 안의 둥근 칸, 선택 = 남색 채움. 칸이 둥글어야 바깥 모서리를 덮지 않는다 -->
     <Style TargetType="RadioButton" x:Key="ModeSeg">
         <Setter Property="Width" Value="104" />
-        <Setter Property="Foreground" Value="{DynamicResource Brush.Ink}" />
+        <Setter Property="Foreground" Value="{DynamicResource Brush.TextSoft}" />
         <Setter Property="Background" Value="{DynamicResource Brush.Surface}" />
         <Setter Property="BorderThickness" Value="0" />
         <Setter Property="FontSize" Value="14" />
@@ -829,40 +860,49 @@
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="RadioButton">
-                    <Border x:Name="Bd" Background="{TemplateBinding Background}" BorderBrush="{DynamicResource Brush.Ink}" BorderThickness="{TemplateBinding BorderThickness}">
+                    <Border x:Name="Bd" Background="{TemplateBinding Background}" BorderBrush="{DynamicResource Brush.Fill}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="6">
                         <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
                     </Border>
                     <ControlTemplate.Triggers>
+                        <!-- 선택 = 컨트롤 자신의 Background/Foreground 를 바꾼다 — 칸 안 수 배지가 이 둘을 뒤집어 쓴다(MainWindow 탭 줄) -->
                         <Trigger Property="IsChecked" Value="True">
-                            <Setter Property="Background" Value="{DynamicResource Brush.Ink}" />
-                            <Setter Property="Foreground" Value="{DynamicResource Brush.OnInk}" />
+                            <Setter Property="Background" Value="{DynamicResource Brush.Fill}" />
+                            <Setter Property="Foreground" Value="{DynamicResource Brush.OnFill}" />
                         </Trigger>
+                        <MultiTrigger>
+                            <MultiTrigger.Conditions><Condition Property="IsMouseOver" Value="True" /><Condition Property="IsChecked" Value="False" /></MultiTrigger.Conditions>
+                            <Setter TargetName="Bd" Property="Background" Value="{DynamicResource Brush.Hover}" />
+                        </MultiTrigger>
+                        <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.45" /></Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
             </Setter.Value>
         </Setter>
     </Style>
-    <!-- 탭 줄 오른쪽 끝 목록 버튼([사용자]/[주소록]) — 열린 동안 먹 채움 -->
+    <!-- 탭 줄 오른쪽 끝 목록 버튼([사용자]/[주소록]) — 열린 동안 연한 남색 -->
     <Style TargetType="ToggleButton" x:Key="ListToggle">
         <Setter Property="Height" Value="36" />
         <Setter Property="Padding" Value="16,0" />
         <Setter Property="FontSize" Value="13.5" />
         <Setter Property="FontWeight" Value="Bold" />
-        <Setter Property="Foreground" Value="{DynamicResource Brush.Ink}" />
+        <Setter Property="Foreground" Value="{DynamicResource Brush.Text}" />
         <Setter Property="Background" Value="{DynamicResource Brush.Surface}" />
         <Setter Property="Cursor" Value="Hand" />
         <Setter Property="Focusable" Value="False" />
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="ToggleButton">
-                    <Border x:Name="Bd" Background="{TemplateBinding Background}" BorderBrush="{DynamicResource Brush.Ink}" BorderThickness="1.5" CornerRadius="18" Padding="{TemplateBinding Padding}">
+                    <Border x:Name="Bd" Background="{TemplateBinding Background}" BorderBrush="{DynamicResource Brush.Edge}" BorderThickness="1.5" CornerRadius="18" Padding="{TemplateBinding Padding}">
                         <ContentPresenter VerticalAlignment="Center" />
                     </Border>
                     <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Bd" Property="BorderBrush" Value="{DynamicResource Brush.Primary}" /></Trigger>
                         <Trigger Property="IsChecked" Value="True">
-                            <Setter TargetName="Bd" Property="Background" Value="{DynamicResource Brush.Ink}" />
-                            <Setter Property="Foreground" Value="{DynamicResource Brush.OnInk}" />
+                            <Setter TargetName="Bd" Property="Background" Value="{DynamicResource Brush.PrimarySoft}" />
+                            <Setter TargetName="Bd" Property="BorderBrush" Value="{DynamicResource Brush.Primary}" />
+                            <Setter Property="Foreground" Value="{DynamicResource Brush.PrimaryInk}" />
                         </Trigger>
+                        <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.45" /></Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
             </Setter.Value>
@@ -879,6 +919,7 @@
                     </Border>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Bd" Property="Background" Value="{DynamicResource Brush.Hover}" /></Trigger>
+                        <Trigger Property="IsEnabled" Value="False"><Setter Property="Opacity" Value="0.45" /></Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
             </Setter.Value>

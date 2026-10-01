@@ -49,7 +49,7 @@
                             <TextBox Style="{StaticResource Field}" Text="{Binding Priority, UpdateSourceTrigger=PropertyChanged}" Margin="0,2,0,0" />
                         </StackPanel>
                         <StackPanel>
-                            <TextBlock Text="최대 참가자 (0=제한 없음)" Style="{StaticResource Hint}" />
+                            <TextBlock Text="최대 참가자(0=무제한)" Style="{StaticResource Hint}" ToolTip="0 = 참가자 수 제한 없음" />
                             <TextBox Style="{StaticResource Field}" Text="{Binding MaxParticipants, UpdateSourceTrigger=PropertyChanged}" Margin="0,2,0,0" />
                         </StackPanel>
                     </UniformGrid>
@@ -113,7 +113,7 @@
                         <Button DockPanel.Dock="Right" Style="{StaticResource Btn.Xs}" Content="표시된 전원 추가" Command="{Binding AddAllShownCommand}" Margin="6,0,0,0" />
                         <TextBlock Style="{StaticResource SectionHeader}" Text="PTT 주소록" VerticalAlignment="Center" />
                     </DockPanel>
-                    <TextBox DockPanel.Dock="Top" Style="{StaticResource Field}" Height="26" Text="{Binding Search, UpdateSourceTrigger=PropertyChanged}" ToolTip="이름·번호 검색" Margin="0,0,0,4" />
+                    <TextBox DockPanel.Dock="Top" Style="{StaticResource Field}" Height="26" Text="{Binding Search, UpdateSourceTrigger=PropertyChanged}" Tag="이름·번호 검색" Margin="0,0,0,4" />
                     <ListBox Style="{StaticResource PlainList}" ItemsSource="{Binding Candidates}">
                         <ListBox.ItemTemplate>
                             <DataTemplate DataType="{x:Type vm:GroupCandidateRow}">

@@ -37,7 +37,7 @@
                                     <RadioButton Style="{StaticResource Seg}" Content="내 소유" IsChecked="{Binding ListFilter, Converter={StaticResource Eq}, ConverterParameter=mine, Mode=OneWay}" Command="{Binding SetFilterCommand}" CommandParameter="mine" />
                                 </StackPanel>
                             </Border>
-                            <TextBox Style="{StaticResource Field}" Height="26" Text="{Binding Search, UpdateSourceTrigger=PropertyChanged}" ToolTip="그룹명·id 검색" />
+                            <TextBox Style="{StaticResource Field}" Height="26" Text="{Binding Search, UpdateSourceTrigger=PropertyChanged}" Tag="그룹명·id 검색" />
                         </DockPanel>
                         <TextBlock Style="{StaticResource Hint}" Foreground="{DynamicResource Brush.Emg}" Text="{Binding Error}" Margin="0,6,0,0" TextWrapping="Wrap"
                                    Visibility="{Binding HasError, Converter={StaticResource BoolToVis}}" />
@@ -137,7 +137,7 @@
                                                         <Style TargetType="TextBlock" BasedOn="{StaticResource Muted}">
                                                             <Setter Property="Text" Value="{Binding Status}" />
                                                             <Style.Triggers>
-                                                                <DataTrigger Binding="{Binding IsSpeaking}" Value="True"><Setter Property="Foreground" Value="{DynamicResource Brush.Talk}" /><Setter Property="FontWeight" Value="SemiBold" /></DataTrigger>
+                                                                <DataTrigger Binding="{Binding IsSpeaking}" Value="True"><Setter Property="Foreground" Value="{DynamicResource Brush.TalkInk}" /><Setter Property="FontWeight" Value="SemiBold" /></DataTrigger>
                                                                 <DataTrigger Binding="{Binding Status}" Value="참여"><Setter Property="Text" Value="" /></DataTrigger>
                                                                 <DataTrigger Binding="{Binding IsMe}" Value="True"><Setter Property="Text" Value="나" /><Setter Property="Foreground" Value="{DynamicResource Brush.Text}" /></DataTrigger>
                                                             </Style.Triggers>

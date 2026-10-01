@@ -1,50 +1,85 @@
-<!-- 상태 색상·표면 (dispatch_desktop_ui.md §3.2) — 밝은 팔레트. Dark.xaml 이 같은 키를 덮는다. -->
+<!-- 색 토큰 (dispatch_desktop_ui.md §3.2 «색») — 밝은 팔레트. Dark.xaml 이 같은 키를 덮는다.
+     축 = 표면(무채, 살짝 푸른 회색) · 브랜드(남색 Primary — 채운 조작·선택·포커스) · 상태색(발언·통화 녹색 / 긴급 빨강 / 임박·대표번호 주황 /
+     청취·문자 청록 / 감청·경보 보라 / 보류·전달 파랑). 상태색마다 세 가지 — 기본(점·글자·외곽선) · Soft(연한 면) · Fill(흰 글자를 얹는 채움). -->
 <ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
                     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
-    <SolidColorBrush x:Key="Brush.Bg" Color="#F4F6FB" />
+    <!-- 표면 -->
+    <SolidColorBrush x:Key="Brush.Bg" Color="#F2F4FA" />
     <SolidColorBrush x:Key="Brush.BgSoft" Color="#F8FAFC" />
     <SolidColorBrush x:Key="Brush.Surface" Color="#FFFFFF" />
-    <SolidColorBrush x:Key="Brush.Surface2" Color="#EEF1F7" />
-    <SolidColorBrush x:Key="Brush.Hover" Color="#F2F4F9" />
-    <SolidColorBrush x:Key="Brush.Border" Color="#E5E8F1" />
+    <SolidColorBrush x:Key="Brush.Surface2" Color="#EEF1F8" />
+    <SolidColorBrush x:Key="Brush.Panel" Color="#F5F7FC" />
+    <SolidColorBrush x:Key="Brush.Rail" Color="#ECEFF8" />
+    <SolidColorBrush x:Key="Brush.RailActive" Color="#D9DFFA" />
+    <SolidColorBrush x:Key="Brush.Hover" Color="#F0F3FA" />
+    <SolidColorBrush x:Key="Brush.Line" Color="#EDF0F7" />
+    <SolidColorBrush x:Key="Brush.Border" Color="#E3E7F1" />
     <SolidColorBrush x:Key="Brush.BorderStrong" Color="#C9CFE0" />
+    <!-- 강조 외곽선 — 입력칸·패널 경계·섹션 머리 밑줄(무채보다 한 단 진하고 남색 기운) -->
+    <SolidColorBrush x:Key="Brush.Edge" Color="#AAB3CC" />
+    <SolidColorBrush x:Key="Brush.MeterTrack" Color="#E3E7F1" />
+    <SolidColorBrush x:Key="Brush.Wire" Color="#828BA0" />
+    <!-- 글자 -->
     <SolidColorBrush x:Key="Brush.Text" Color="#161A2B" />
-    <SolidColorBrush x:Key="Brush.Muted" Color="#64748B" />
+    <SolidColorBrush x:Key="Brush.Ink" Color="#161A2B" />
+    <SolidColorBrush x:Key="Brush.TextSoft" Color="#334155" />
+    <SolidColorBrush x:Key="Brush.Muted" Color="#5F6F86" />
+    <SolidColorBrush x:Key="Brush.Faint" Color="#7D8CA1" />
+    <SolidColorBrush x:Key="Brush.OnAccent" Color="#FFFFFF" />
+    <!-- 브랜드(남색) — Fill = 채운 조작(주 행동·선택된 세그먼트·수 배지), Soft/Ink/EdgeSoft = 선택된 칩·목록 -->
     <SolidColorBrush x:Key="Brush.Primary" Color="#4F46E5" />
     <SolidColorBrush x:Key="Brush.PrimarySoft" Color="#EEF2FF" />
-    <SolidColorBrush x:Key="Brush.Ring" Color="#D97706" />
-    <SolidColorBrush x:Key="Brush.RingSoft" Color="#FEF5E6" />
+    <SolidColorBrush x:Key="Brush.PrimaryInk" Color="#4338CA" />
+    <SolidColorBrush x:Key="Brush.PrimaryEdge" Color="#C7D2FE" />
+    <SolidColorBrush x:Key="Brush.Fill" Color="#4F46E5" />
+    <SolidColorBrush x:Key="Brush.OnFill" Color="#FFFFFF" />
+    <!-- 발언·통화 -->
     <SolidColorBrush x:Key="Brush.Talk" Color="#16A34A" />
-    <SolidColorBrush x:Key="Brush.TalkSoft" Color="#ECFDF5" />
-    <SolidColorBrush x:Key="Brush.Held" Color="#2563EB" />
-    <SolidColorBrush x:Key="Brush.HeldSoft" Color="#E8F0FF" />
-    <SolidColorBrush x:Key="Brush.Mon" Color="#7C3AED" />
-    <SolidColorBrush x:Key="Brush.MonSoft" Color="#F7F3FF" />
-    <SolidColorBrush x:Key="Brush.Listen" Color="#0F766E" />
-    <SolidColorBrush x:Key="Brush.ListenSoft" Color="#E6F7F5" />
+    <SolidColorBrush x:Key="Brush.TalkSoft" Color="#EAFBF0" />
+    <SolidColorBrush x:Key="Brush.TalkInk" Color="#15803D" />
+    <SolidColorBrush x:Key="Brush.TalkEdge" Color="#A7E3BC" />
+    <SolidColorBrush x:Key="Brush.TalkFill" Color="#15803D" />
+    <!-- 긴급 -->
     <SolidColorBrush x:Key="Brush.Emg" Color="#C62828" />
     <SolidColorBrush x:Key="Brush.EmgSoft" Color="#FDECEA" />
-    <SolidColorBrush x:Key="Brush.MeterTrack" Color="#E5E8F1" />
-    <SolidColorBrush x:Key="Brush.Wire" Color="#9AA3B8" />
-    <SolidColorBrush x:Key="Brush.OnAccent" Color="#FFFFFF" />
-    <!-- 시안 «모드마다 한 화면» — 무채 + 남색(Primary) 한 가지 + 상태색. 먹(Ink) = 채운 버튼·선택 칩, TextSoft = 보조 글자, Faint = 흐린 글자·빈 체크 -->
-    <SolidColorBrush x:Key="Brush.Ink" Color="#161A2B" />
-    <SolidColorBrush x:Key="Brush.OnInk" Color="#FFFFFF" />
-    <SolidColorBrush x:Key="Brush.TextSoft" Color="#334155" />
-    <SolidColorBrush x:Key="Brush.Faint" Color="#94A3B8" />
-    <SolidColorBrush x:Key="Brush.Panel" Color="#F6F7FA" />
-    <SolidColorBrush x:Key="Brush.Rail" Color="#EEF1F7" />
-    <SolidColorBrush x:Key="Brush.Line" Color="#EEF1F7" />
     <SolidColorBrush x:Key="Brush.EmgInk" Color="#7A1212" />
     <SolidColorBrush x:Key="Brush.EmgEdge" Color="#F5B5B0" />
+    <SolidColorBrush x:Key="Brush.EmgFill" Color="#C62828" />
+    <!-- 임박·착신·대표번호 -->
     <SolidColorBrush x:Key="Brush.Peril" Color="#F59E0B" />
     <SolidColorBrush x:Key="Brush.PerilEdge" Color="#D98A06" />
     <SolidColorBrush x:Key="Brush.OnPeril" Color="#161A2B" />
+    <SolidColorBrush x:Key="Brush.Ring" Color="#D97706" />
+    <SolidColorBrush x:Key="Brush.RingSoft" Color="#FEF5E6" />
     <SolidColorBrush x:Key="Brush.RingBanner" Color="#FDEBC6" />
     <SolidColorBrush x:Key="Brush.RingEdge" Color="#F5C77A" />
     <SolidColorBrush x:Key="Brush.RingInk" Color="#92400E" />
-    <SolidColorBrush x:Key="Brush.MonEdge" Color="#E9DDFF" />
-    <SolidColorBrush x:Key="Brush.TalkInk" Color="#15803D" />
-    <SolidColorBrush x:Key="Brush.OnEmgInk" Color="#FFFFFF" />
+    <!-- 보류·전달 -->
+    <SolidColorBrush x:Key="Brush.Held" Color="#2563EB" />
+    <SolidColorBrush x:Key="Brush.HeldSoft" Color="#E8F0FF" />
+    <SolidColorBrush x:Key="Brush.HeldInk" Color="#1D4ED8" />
+    <!-- 감청·경보 -->
+    <SolidColorBrush x:Key="Brush.Mon" Color="#7C3AED" />
+    <SolidColorBrush x:Key="Brush.MonSoft" Color="#F5F0FF" />
+    <SolidColorBrush x:Key="Brush.MonEdge" Color="#E4D7FE" />
+    <SolidColorBrush x:Key="Brush.MonInk" Color="#6D28D9" />
+    <SolidColorBrush x:Key="Brush.MonFill" Color="#7C3AED" />
     <SolidColorBrush x:Key="Brush.OnMon" Color="#FFFFFF" />
+    <!-- 청취·문자 -->
+    <SolidColorBrush x:Key="Brush.Listen" Color="#0F766E" />
+    <SolidColorBrush x:Key="Brush.ListenSoft" Color="#E3F6F3" />
+    <SolidColorBrush x:Key="Brush.ListenInk" Color="#0F766E" />
+    <SolidColorBrush x:Key="Brush.ListenFill" Color="#0F766E" />
+    <!-- 아바타 8색(사람·대화 — 이름 해시로 고른다, AvatarHueConverter). Bg = 연한 면, Fg = 같은 색의 진한 글자 -->
+    <SolidColorBrush x:Key="Brush.Av0" Color="#E0E7FF" /><SolidColorBrush x:Key="Brush.Av0Fg" Color="#3730A3" />
+    <SolidColorBrush x:Key="Brush.Av1" Color="#E0F2FE" /><SolidColorBrush x:Key="Brush.Av1Fg" Color="#075985" />
+    <SolidColorBrush x:Key="Brush.Av2" Color="#CCFBF1" /><SolidColorBrush x:Key="Brush.Av2Fg" Color="#115E59" />
+    <SolidColorBrush x:Key="Brush.Av3" Color="#DCFCE7" /><SolidColorBrush x:Key="Brush.Av3Fg" Color="#166534" />
+    <SolidColorBrush x:Key="Brush.Av4" Color="#FEF3C7" /><SolidColorBrush x:Key="Brush.Av4Fg" Color="#92400E" />
+    <SolidColorBrush x:Key="Brush.Av5" Color="#FFE4E6" /><SolidColorBrush x:Key="Brush.Av5Fg" Color="#9F1239" />
+    <SolidColorBrush x:Key="Brush.Av6" Color="#EDE9FE" /><SolidColorBrush x:Key="Brush.Av6Fg" Color="#5B21B6" />
+    <SolidColorBrush x:Key="Brush.Av7" Color="#E2E8F0" /><SolidColorBrush x:Key="Brush.Av7Fg" Color="#334155" />
+    <!-- 창 제목 표시줄(Windows 11 DWM) — 표면과 같은 색으로 -->
+    <Color x:Key="Color.Caption">#FFFFFF</Color>
+    <Color x:Key="Color.CaptionText">#161A2B</Color>
 </ResourceDictionary>

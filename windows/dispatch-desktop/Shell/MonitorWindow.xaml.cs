@@ -48,7 +48,7 @@ public partial class MonitorWindow : Window
         _layout.Save();
         if (_sessionEnded || ((App)Application.Current).IsExiting) return;   // 앱 종료 — 확인은 주 창이 했고 호 정리는 ExitApp 의 Logout
         if (_s.Settings.Current.ConfirmCloseMonitor
-            && MessageBox.Show(this, "창을 닫으면 청취가 종료됩니다. 계속할까요?", "청취 종료", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
+            && !ConfirmWindow.Ask(this, "청취 종료", "창을 닫으면 청취가 종료됩니다. 계속할까요?", "청취 종료"))
         { e.Cancel = true; return; }
         _sessionEnded = true;                       // 종료 이벤트가 다시 닫지 않도록
         _vm.StopCommand.Execute(null);

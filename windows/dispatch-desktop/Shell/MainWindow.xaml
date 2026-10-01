@@ -16,8 +16,8 @@
             <!-- ═══ 왼쪽 레일 ═══ -->
             <Border DockPanel.Dock="Left" Width="80" Background="{DynamicResource Brush.Rail}" BorderBrush="{DynamicResource Brush.Border}" BorderThickness="0,0,1,0">
                 <StackPanel Margin="0,12,0,0">
-                    <Border Width="48" Height="40" CornerRadius="8" Background="{DynamicResource Brush.Ink}" Margin="0,0,0,20">
-                        <TextBlock Text="CIMS" FontSize="11" FontWeight="Bold" Foreground="{DynamicResource Brush.OnInk}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    <Border Width="48" Height="40" CornerRadius="8" Background="{DynamicResource Brush.Fill}" Margin="0,0,0,20">
+                        <TextBlock Text="CIMS" FontSize="11" FontWeight="Bold" Foreground="{DynamicResource Brush.OnFill}" HorizontalAlignment="Center" VerticalAlignment="Center" />
                     </Border>
                     <RadioButton Style="{StaticResource RailItem}" Tag="관제" IsChecked="{Binding IsDispatch, Mode=OneWay}" Command="{Binding ShowScreenCommand}" CommandParameter="{x:Static m:AppScreen.Dispatch}"
                                   ToolTip="관제 F1 — [무전] 채널·메시지·이벤트 / [통화] 통화·기록">
@@ -132,9 +132,9 @@
                         <StackPanel Orientation="Horizontal" VerticalAlignment="Center" DataContext="{Binding Desk}">
                             <TextBlock Text="{Binding DisplayName}" FontSize="19" FontWeight="Bold" VerticalAlignment="Center" Margin="0,0,12,0" ToolTip="{Binding PttNumberFull}" />
                             <TextBlock Style="{StaticResource Muted}" FontSize="13" Text="{Binding DeskLine}" VerticalAlignment="Center" Margin="0,0,12,0" />
-                            <Ellipse Width="9" Height="9" Fill="{Binding PttState, Converter={StaticResource RegBrush}}" Margin="0,0,4,0" VerticalAlignment="Center" ToolTip="{Binding PttTip}"
+                            <Ellipse Style="{StaticResource RegDot}" Tag="{Binding PttState}" Margin="0,0,4,0" ToolTip="{Binding PttTip}"
                                      Visibility="{Binding HasPtt, Converter={StaticResource BoolToVis}}" />
-                            <Ellipse Width="9" Height="9" Fill="{Binding VolteState, Converter={StaticResource RegBrush}}" VerticalAlignment="Center" ToolTip="{Binding VolteTip}"
+                            <Ellipse Style="{StaticResource RegDot}" Tag="{Binding VolteState}" ToolTip="{Binding VolteTip}"
                                      Visibility="{Binding HasVolte, Converter={StaticResource BoolToVis}}" />
                         </StackPanel>
                     </DockPanel>
@@ -152,7 +152,7 @@
                                         <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
                                             <TextBlock Style="{StaticResource Mono}" FontSize="16" FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,14,0"
                                                        Text="{Binding Elapsed, Mode=OneWay, Converter={StaticResource Elapsed}}" Visibility="{Binding ShowElapsed, Converter={StaticResource BoolToVis}}" />
-                                            <Button Style="{StaticResource Pill.Ink.Lg}" MinWidth="104" FontSize="15" Content="응답" Margin="0,0,8,0" ToolTip="F9"
+                                            <Button Style="{StaticResource Pill.Call.Lg}" MinWidth="104" FontSize="15" Content="응답" Margin="0,0,8,0" ToolTip="F9"
                                                     Command="{Binding DataContext.AnswerBannerCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}" Visibility="{Binding IsIncoming, Converter={StaticResource BoolToVis}}" />
                                             <Button Style="{StaticResource Pill.Line.Lg}" FontWeight="Normal" FontSize="14" Content="거절"
                                                     Command="{Binding DataContext.RejectBannerCommand, RelativeSource={RelativeSource AncestorType=Window}}" CommandParameter="{Binding}" Visibility="{Binding IsIncoming, Converter={StaticResource BoolToVis}}" />
@@ -190,7 +190,7 @@
                                     <Setter TargetName="Bar" Property="Background" Value="{DynamicResource Brush.EmgSoft}" /><Setter TargetName="Bar" Property="BorderBrush" Value="{DynamicResource Brush.EmgEdge}" />
                                     <Setter TargetName="Bar" Property="TextElement.Foreground" Value="{DynamicResource Brush.EmgInk}" /><Setter TargetName="L1" Property="Foreground" Value="{DynamicResource Brush.EmgInk}" />
                                     <Setter TargetName="Dot" Property="Fill" Value="{DynamicResource Brush.Emg}" />
-                                    <Setter TargetName="Go" Property="Background" Value="{DynamicResource Brush.EmgInk}" /><Setter TargetName="Go" Property="Foreground" Value="{DynamicResource Brush.OnEmgInk}" />
+                                    <Setter TargetName="Go" Property="Background" Value="{DynamicResource Brush.EmgFill}" /><Setter TargetName="Go" Property="Foreground" Value="{DynamicResource Brush.OnAccent}" />
                                 </DataTrigger>
                                 <DataTrigger Binding="{Binding IsPeril}" Value="True">
                                     <Setter TargetName="Bar" Property="Background" Value="{DynamicResource Brush.Peril}" /><Setter TargetName="Bar" Property="BorderBrush" Value="{DynamicResource Brush.PerilEdge}" />
@@ -200,14 +200,14 @@
                                 </DataTrigger>
                                 <DataTrigger Binding="{Binding IsAlert}" Value="True">
                                     <Setter TargetName="Bar" Property="Background" Value="{DynamicResource Brush.MonSoft}" /><Setter TargetName="Bar" Property="BorderBrush" Value="{DynamicResource Brush.MonEdge}" />
-                                    <Setter TargetName="Bar" Property="TextElement.Foreground" Value="{DynamicResource Brush.Mon}" /><Setter TargetName="L1" Property="Foreground" Value="{DynamicResource Brush.Mon}" />
+                                    <Setter TargetName="Bar" Property="TextElement.Foreground" Value="{DynamicResource Brush.MonInk}" /><Setter TargetName="L1" Property="Foreground" Value="{DynamicResource Brush.MonInk}" />
                                     <Setter TargetName="Dot" Property="Fill" Value="{DynamicResource Brush.Mon}" />
-                                    <Setter TargetName="Go" Property="Background" Value="{DynamicResource Brush.Mon}" /><Setter TargetName="Go" Property="Foreground" Value="{DynamicResource Brush.OnMon}" />
+                                    <Setter TargetName="Go" Property="Background" Value="{DynamicResource Brush.MonFill}" /><Setter TargetName="Go" Property="Foreground" Value="{DynamicResource Brush.OnMon}" />
                                 </DataTrigger>
                                 <DataTrigger Binding="{Binding IsDirect}" Value="True"><Setter TargetName="Bar" Property="Background" Value="{DynamicResource Brush.HeldSoft}" /><Setter TargetName="L1" Property="Foreground" Value="{DynamicResource Brush.Held}" /><Setter TargetName="Dot" Property="Fill" Value="{DynamicResource Brush.Held}" /><Setter TargetName="Bar" Property="BorderBrush" Value="{DynamicResource Brush.Border}" /></DataTrigger>
                                 <DataTrigger Binding="{Binding IsPtt}" Value="True"><Setter TargetName="Bar" Property="Background" Value="{DynamicResource Brush.ListenSoft}" /><Setter TargetName="L1" Property="Foreground" Value="{DynamicResource Brush.Listen}" /><Setter TargetName="Dot" Property="Fill" Value="{DynamicResource Brush.Listen}" /><Setter TargetName="Bar" Property="BorderBrush" Value="{DynamicResource Brush.Border}" /></DataTrigger>
                                 <DataTrigger Binding="{Binding Critical}" Value="True">
-                                    <Setter TargetName="Warn" Property="Background" Value="{DynamicResource Brush.Emg}" /><Setter TargetName="Warn" Property="TextElement.Foreground" Value="{DynamicResource Brush.OnAccent}" />
+                                    <Setter TargetName="Warn" Property="Background" Value="{DynamicResource Brush.EmgFill}" /><Setter TargetName="Warn" Property="TextElement.Foreground" Value="{DynamicResource Brush.OnAccent}" />
                                 </DataTrigger>
                             </DataTemplate.Triggers>
                         </DataTemplate>
@@ -231,7 +231,7 @@
                             </StackPanel>
                         </ToggleButton>
                         <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                            <Border Height="36" CornerRadius="8" BorderThickness="1.5" BorderBrush="{DynamicResource Brush.Ink}" ClipToBounds="True" Margin="0,0,16,0">
+                            <Border Height="36" CornerRadius="9" BorderThickness="1.5" BorderBrush="{DynamicResource Brush.Fill}" Padding="2" Margin="0,0,16,0">
                                 <StackPanel Orientation="Horizontal">
                                     <RadioButton Style="{StaticResource ModeSeg}" IsChecked="{Binding IsPtt, Mode=OneWay}" Command="{Binding SetModeCommand}" CommandParameter="ptt" ToolTip="무전 — 말하고 듣기">
                                         <StackPanel Orientation="Horizontal">
@@ -242,7 +242,7 @@
                                             </Border>
                                         </StackPanel>
                                     </RadioButton>
-                                    <RadioButton Style="{StaticResource ModeSeg}" BorderThickness="1.5,0,0,0" IsChecked="{Binding IsCall, Mode=OneWay}" Command="{Binding SetModeCommand}" CommandParameter="call" ToolTip="통화 — 걸고 받기">
+                                    <RadioButton Style="{StaticResource ModeSeg}" IsChecked="{Binding IsCall, Mode=OneWay}" Command="{Binding SetModeCommand}" CommandParameter="call" ToolTip="통화 — 걸고 받기">
                                         <StackPanel Orientation="Horizontal">
                                             <TextBlock Text="통화" />
                                             <Border Style="{StaticResource Count}" Margin="6,0,0,0" Background="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}"
@@ -308,7 +308,7 @@
                     <Border DockPanel.Dock="Top" Padding="10,8" BorderBrush="{DynamicResource Brush.Border}" BorderThickness="0,0,0,1">
                         <DockPanel>
                             <Border DockPanel.Dock="Right" Style="{StaticResource NavKey}"><TextBlock Text="Esc" /></Border>
-                            <TextBox x:Name="SearchBox" Style="{StaticResource Field}" Height="32" FontSize="14" Text="{Binding Query, UpdateSourceTrigger=PropertyChanged}" KeyDown="SearchBox_KeyDown" ToolTip="이름 · 내선 · PTT 번호 · 그룹" />
+                            <TextBox x:Name="SearchBox" Style="{StaticResource Field}" Height="32" FontSize="14" Text="{Binding Query, UpdateSourceTrigger=PropertyChanged}" KeyDown="SearchBox_KeyDown" Tag="이름 · 내선 · PTT 번호 · 그룹" />
                         </DockPanel>
                     </Border>
                     <TextBlock DockPanel.Dock="Bottom" Style="{StaticResource Hint}" Margin="12,6,12,8" Text="↑↓ 이동 · Enter 첫 행동(개별 통화/통화/채널로) · 사람 행 = 소속 · PTT 상태 · 내선 상태" />
@@ -325,12 +325,12 @@
                                             <Button Content="무전 메시지" Command="{Binding DataContext.SdsCommand, RelativeSource={RelativeSource AncestorType=ListBox}}" CommandParameter="{Binding}" IsEnabled="{Binding HasPtt}" />
                                             <Button Content="애드혹에 추가" Command="{Binding DataContext.AddToAdhocCommand, RelativeSource={RelativeSource AncestorType=ListBox}}" CommandParameter="{Binding}" IsEnabled="{Binding HasPtt}" />
                                         </StackPanel>
-                                        <Border Style="{StaticResource Avatar}" Width="28" Height="28" CornerRadius="14" Margin="0,0,8,0">
+                                        <Border Style="{StaticResource Avatar}" Width="28" Height="28" CornerRadius="14" Margin="0,0,8,0" Tag="{Binding Name, Converter={StaticResource AvatarHue}}">
                                             <TextBlock Text="{Binding Initial}" FontSize="12" HorizontalAlignment="Center" VerticalAlignment="Center" />
                                         </Border>
                                         <StackPanel VerticalAlignment="Center">
-                                            <TextBlock Text="{Binding Head}" FontWeight="Medium" />
-                                            <TextBlock Style="{StaticResource Hint}" Text="{Binding Sub}" />
+                                            <TextBlock Text="{Binding Head}" FontWeight="Medium" TextTrimming="CharacterEllipsis" ToolTip="{Binding Head}" />
+                                            <TextBlock Style="{StaticResource Hint}" Text="{Binding Sub}" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" />
                                         </StackPanel>
                                     </DockPanel>
                                 </Border>
@@ -343,7 +343,7 @@
                                             <Button Style="{StaticResource Pill.Soft.Sm}" Height="26" Content="멤버 추가" Focusable="False" Command="{Binding DataContext.AddMemberCommand, RelativeSource={RelativeSource AncestorType=ListBox}}" CommandParameter="{Binding}" Margin="4,0,0,0"
                                                     Visibility="{Binding Group.IsOwner, Converter={StaticResource BoolToVis}}" ToolTip="[PTT 그룹] 화면 편집 폼" />
                                         </StackPanel>
-                                        <Border Style="{StaticResource Avatar}" Width="28" Height="28" CornerRadius="6" Margin="0,0,8,0">
+                                        <Border Style="{StaticResource Avatar}" Width="28" Height="28" CornerRadius="6" Margin="0,0,8,0" Tag="{Binding Name, Converter={StaticResource AvatarHue}}">
                                             <TextBlock Text="G" FontSize="12" HorizontalAlignment="Center" VerticalAlignment="Center" />
                                         </Border>
                                         <StackPanel VerticalAlignment="Center">

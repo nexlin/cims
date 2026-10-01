@@ -16,15 +16,24 @@
         <Border Grid.Column="0" BorderBrush="{DynamicResource Brush.Border}" BorderThickness="0,0,1,0">
             <Grid>
                 <DockPanel>
+                    <!-- 머리 줄 — 번호칸은 300 까지, 칸이 좁으면(작은 창·패널) 150 까지 줄어 버튼이 잘리지 않는다(맨 끝 * = 남는 폭) -->
                     <Border DockPanel.Dock="Top" Height="56" Padding="16,0" BorderBrush="{DynamicResource Brush.Border}" BorderThickness="0,0,0,1">
-                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                            <TextBlock Style="{StaticResource Title16}" Text="통화" Margin="0,0,16,0" />
-                            <Grid Width="300" Height="38" Margin="0,0,8,0">
-                                <Border CornerRadius="8" BorderThickness="1.5" BorderBrush="{DynamicResource Brush.Ink}" Background="{DynamicResource Brush.Surface}" />
+                        <Grid VerticalAlignment="Center">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="1000*" MinWidth="158" MaxWidth="308" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Style="{StaticResource Title16}" Text="통화" Margin="0,0,16,0" VerticalAlignment="Center" />
+                            <Grid Grid.Column="1" Height="38" Margin="0,0,8,0">
+                                <Border CornerRadius="8" BorderThickness="1.5" BorderBrush="{DynamicResource Brush.Edge}" Background="{DynamicResource Brush.Surface}" />
                                 <TextBox x:Name="NumberBox" Text="{Binding CallOriginate.Number, UpdateSourceTrigger=PropertyChanged}" KeyDown="Number_KeyDown" LostKeyboardFocus="Number_LostFocus"
                                          Margin="10,0" FontSize="14" BorderThickness="0" Background="Transparent" VerticalContentAlignment="Center" Height="34"
                                          Foreground="{DynamicResource Brush.Text}" CaretBrush="{DynamicResource Brush.Text}" ToolTip="번호 · 내선 · 이름 또는 sip: URI — Enter = 발신" />
-                                <TextBlock Style="{StaticResource Muted}" FontSize="14" Text="번호 · 내선 · 이름 — 숫자를 치면 여기로" Margin="12,0" VerticalAlignment="Center" IsHitTestVisible="False"
+                                <TextBlock Style="{StaticResource Muted}" FontSize="14" Text="번호 · 내선 · 이름 — 숫자를 치면 여기로" Margin="12,0" VerticalAlignment="Center" IsHitTestVisible="False" TextTrimming="CharacterEllipsis"
                                            Visibility="{Binding CallOriginate.Number, Converter={StaticResource StrToVis}, ConverterParameter=invert}" />
                                 <Popup IsOpen="{Binding CallOriginate.HasSuggestions, Mode=OneWay}" PlacementTarget="{Binding ElementName=NumberBox}" Placement="Bottom" StaysOpen="True" AllowsTransparency="True">
                                     <Border Style="{StaticResource PopPanel}" Width="320" Padding="4" MaxHeight="240">
@@ -49,17 +58,17 @@
                                     </Border>
                                 </Popup>
                             </Grid>
-                            <Button Style="{StaticResource Rect.Ink}" Height="38" Padding="18,0" FontSize="14" Content="발신" Command="{Binding CallOriginate.DialCommand}" Margin="0,0,8,0" />
-                            <ToggleButton Style="{StaticResource Rect.Toggle}" Height="38" IsChecked="{Binding KeypadOpen, Mode=TwoWay}" Margin="0,0,8,0" ToolTip="키패드 — 필요할 때만 (통화 중이면 DTMF)">
+                            <Button Grid.Column="2" Style="{StaticResource Rect.Call}" Height="38" Padding="18,0" FontSize="14" Content="발신" Command="{Binding CallOriginate.DialCommand}" Margin="0,0,8,0" />
+                            <ToggleButton Grid.Column="3" Style="{StaticResource Rect.Toggle}" Height="38" IsChecked="{Binding KeypadOpen, Mode=TwoWay}" Margin="0,0,8,0" ToolTip="키패드 — 필요할 때만 (통화 중이면 DTMF)">
                                 <StackPanel Orientation="Horizontal">
                                     <Path Style="{StaticResource Icon.Filled}" Data="{StaticResource Icon.Keypad}" Width="15" Height="15" Margin="0,0,6,0" />
                                     <TextBlock Text="키패드" />
                                 </StackPanel>
                             </ToggleButton>
-                            <Button Style="{StaticResource Rect.Soft}" Height="38" Padding="12,0" Command="{Binding CallOriginate.PickupCommand}" ToolTip="그룹 픽업(당겨받기) F8 — 가장 오래 울린 호">
+                            <Button Grid.Column="4" Style="{StaticResource Rect.Soft}" Height="38" Padding="12,0" Command="{Binding CallOriginate.PickupCommand}" ToolTip="그룹 픽업(당겨받기) F8 — 가장 오래 울린 호">
                                 <TextBlock><Run Text="픽업 " /><Run Text="(가장 오래 울린 호)" /></TextBlock>
                             </Button>
-                        </StackPanel>
+                        </Grid>
                     </Border>
                     <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                         <StackPanel Margin="16,10,16,14" DataContext="{Binding CallDesk}">
@@ -70,12 +79,12 @@
                                 <ItemsControl ItemsSource="{Binding Queue}">
                                     <ItemsControl.ItemTemplate>
                                         <DataTemplate DataType="{x:Type vm:QueueItem}">
-                                            <Border CornerRadius="10" BorderThickness="2" BorderBrush="{DynamicResource Brush.Ink}" Background="{DynamicResource Brush.Panel}" Padding="14,10" Margin="0,0,0,6">
+                                            <Border CornerRadius="10" BorderThickness="1.5" BorderBrush="{DynamicResource Brush.Ring}" Background="{DynamicResource Brush.RingSoft}" Padding="14,10" Margin="0,0,0,6">
                                                 <DockPanel>
                                                     <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
-                                                        <Button Style="{StaticResource Rect.Ink}" Height="36" Padding="18,0" Content="응답" Command="{Binding AnswerCommand}" Margin="0,0,6,0"
+                                                        <Button Style="{StaticResource Rect.Call}" Height="36" Padding="18,0" Content="응답" Command="{Binding AnswerCommand}" Margin="0,0,6,0"
                                                                 Visibility="{Binding RingsMe, Converter={StaticResource BoolToVis}}" ToolTip="이 발신자의 내 착신 leg 만 받는다" />
-                                                        <Button Style="{StaticResource Rect.Soft}" Height="36" BorderBrush="{DynamicResource Brush.Ink}" Content="당겨받기" Command="{Binding PickupCommand}"
+                                                        <Button Style="{StaticResource Rect.Soft}" Height="36" FontWeight="Bold" Content="당겨받기" Command="{Binding PickupCommand}"
                                                                 Visibility="{Binding IsRinging, Converter={StaticResource BoolToVis}}" />
                                                     </StackPanel>
                                                     <Path Style="{StaticResource Icon}" Data="{StaticResource Icon.Bell}" Width="17" Height="17" StrokeThickness="2" Margin="0,0,12,0" />
@@ -122,7 +131,7 @@
                                                         </StackPanel>
                                                         <WrapPanel>
                                                             <WrapPanel.Resources><Style TargetType="Button" BasedOn="{StaticResource Rect.Soft}"><Setter Property="Margin" Value="0,0,6,0" /></Style></WrapPanel.Resources>
-                                                            <Button Style="{StaticResource Rect.Ink}" Content="응답" Padding="18,0" Margin="0,0,6,0" Command="{Binding AnswerCommand}" Visibility="{Binding CanAnswer, Converter={StaticResource BoolToVis}}" />
+                                                            <Button Style="{StaticResource Rect.Call}" Content="응답" Padding="18,0" Margin="0,0,6,0" Command="{Binding AnswerCommand}" Visibility="{Binding CanAnswer, Converter={StaticResource BoolToVis}}" />
                                                             <Button Content="보류" Command="{Binding HoldCommand}" Visibility="{Binding CanHold, Converter={StaticResource BoolToVis}}" />
                                                             <Button Content="보류 해제" Command="{Binding ResumeCommand}" Visibility="{Binding CanResume, Converter={StaticResource BoolToVis}}" />
                                                             <Button Command="{Binding MuteCommand}" Visibility="{Binding CanHold, Converter={StaticResource BoolToVis}}">
@@ -224,9 +233,9 @@
                                                                 <TextBlock Text="청취 중" FontSize="12.5" FontWeight="Bold" Foreground="{DynamicResource Brush.Mon}" VerticalAlignment="Center" Margin="0,0,10,0" Visibility="{Binding IsMonitoring, Converter={StaticResource BoolToVis}}" />
                                                                 <Button Style="{StaticResource Rect.Soft}" Height="30" Padding="12,0" FontSize="12.5" FontWeight="Bold" BorderBrush="{DynamicResource Brush.Emg}" Foreground="{DynamicResource Brush.Emg}"
                                                                         Content="청취 종료" Command="{Binding StopMonitorCommand}" Visibility="{Binding IsMonitoring, Converter={StaticResource BoolToVis}}" />
-                                                                <Button Style="{StaticResource Rect.Soft}" Height="30" Padding="14,0" FontSize="12.5" BorderBrush="{DynamicResource Brush.Ink}" Content="청취" Command="{Binding StartMonitorCommand}"
+                                                                <Button Style="{StaticResource Rect.Soft}" Height="30" Padding="14,0" FontSize="12.5" BorderBrush="{DynamicResource Brush.Listen}" Foreground="{DynamicResource Brush.ListenInk}" Content="청취" Command="{Binding StartMonitorCommand}"
                                                                         IsEnabled="{Binding CanMonitor}" ToolTip="{Binding MonitorTip}" Visibility="{Binding ShowMonitor, Converter={StaticResource BoolToVis}}" />
-                                                                <Button Style="{StaticResource Rect.Soft}" Height="30" Padding="12,0" FontSize="12.5" BorderBrush="{DynamicResource Brush.Ink}" Content="지정 픽업" Command="{Binding PickupCommand}"
+                                                                <Button Style="{StaticResource Rect.Soft}" Height="30" Padding="12,0" FontSize="12.5" BorderBrush="{DynamicResource Brush.Edge}" Content="지정 픽업" Command="{Binding PickupCommand}"
                                                                         Visibility="{Binding CanPickup, Converter={StaticResource BoolToVis}}" />
                                                             </StackPanel>
                                                             <Ellipse x:Name="Dot" Width="9" Height="9" Fill="{DynamicResource Brush.Muted}" Margin="0,0,10,0" VerticalAlignment="Center" />
@@ -306,7 +315,7 @@
                         BorderBrush="{DynamicResource Brush.BorderStrong}" BorderThickness="1" Visibility="{Binding DataContext.KeypadOpen, ElementName=Root, Converter={StaticResource BoolToVis}}" DataContext="{Binding CallOriginate}">
                     <Border.Effect><DropShadowEffect BlurRadius="24" ShadowDepth="6" Opacity="0.28" /></Border.Effect>
                     <StackPanel>
-                        <Border Height="44" BorderBrush="{DynamicResource Brush.Ink}" BorderThickness="0,0,0,1.5" Margin="0,0,0,10">
+                        <Border Height="44" BorderBrush="{DynamicResource Brush.Edge}" BorderThickness="0,0,0,1.5" Margin="0,0,0,10">
                             <TextBlock Text="{Binding PadDisplay}" FontSize="22" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center" />
                         </Border>
                         <UniformGrid Columns="3" Rows="4">
@@ -323,7 +332,7 @@
                         </UniformGrid>
                         <DockPanel Margin="4,6,4,8">
                             <Button DockPanel.Dock="Left" Style="{StaticResource Rect.Soft}" Width="48" Height="44" FontSize="17" Content="←" Command="{Binding BackspaceCommand}" Focusable="False" Margin="0,0,8,0" ToolTip="한 글자 지우기" />
-                            <Button Style="{StaticResource Rect.Ink}" Height="44" FontSize="15" Content="발신" Command="{Binding DialCommand}" Focusable="False" />
+                            <Button Style="{StaticResource Rect.Call}" Height="44" FontSize="15" Content="발신" Command="{Binding DialCommand}" Focusable="False" />
                         </DockPanel>
                         <TextBlock Style="{StaticResource Muted}" FontSize="11.5" Text="{Binding PadHint}" HorizontalAlignment="Center" />
                     </StackPanel>
@@ -331,19 +340,19 @@
             </Grid>
         </Border>
 
-        <!-- ═══ 기록 — 통화 + 문자를 상대별로 ═══ -->
+        <!-- ═══ 기록 — 통화 + 문자를 상대별로 ═══ (좁으면 머리 여백·칩 여백을 줄이고 [대표번호] = [대표]) -->
         <DockPanel Grid.Column="1" DataContext="{Binding Records}">
-            <Border DockPanel.Dock="Top" Height="56" Padding="16,0" BorderBrush="{DynamicResource Brush.Border}" BorderThickness="0,0,0,1">
+            <Border DockPanel.Dock="Top" Height="56" Padding="{Binding IsNarrow, ElementName=Root, Converter={StaticResource Pick}, ConverterParameter='10,0|16,0'}" BorderBrush="{DynamicResource Brush.Border}" BorderThickness="0,0,0,1">
                 <DockPanel>
                     <Button DockPanel.Dock="Right" Style="{StaticResource Pill.Soft.Sm}" Content="CSV" Command="{Binding ExportCommand}" VerticalAlignment="Center"
-                            Visibility="{Binding DataContext.IsPanelOpen, ElementName=Root, Converter={StaticResource Pick}, ConverterParameter=Collapsed|Visible}" />
+                            Visibility="{Binding IsNarrow, ElementName=Root, Converter={StaticResource Pick}, ConverterParameter=Collapsed|Visible}" />
                     <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                        <TextBlock Style="{StaticResource Title16}" Text="기록" Margin="0,0,12,0" />
-                        <RadioButton Style="{StaticResource FilterChip}" Height="30" Content="전체" IsChecked="{Binding Filter, Converter={StaticResource Eq}, ConverterParameter=all, Mode=OneWay}" Command="{Binding SetFilterCommand}" CommandParameter="all" />
-                        <RadioButton Style="{StaticResource FilterChip}" Height="30" Content="통화" IsChecked="{Binding Filter, Converter={StaticResource Eq}, ConverterParameter=call, Mode=OneWay}" Command="{Binding SetFilterCommand}" CommandParameter="call" />
-                        <RadioButton Style="{StaticResource FilterChip}" Height="30" Content="문자" IsChecked="{Binding Filter, Converter={StaticResource Eq}, ConverterParameter=sms, Mode=OneWay}" Command="{Binding SetFilterCommand}" CommandParameter="sms" />
-                        <RadioButton Style="{StaticResource FilterChip}" Height="30" Content="{Binding MissedChipText}" IsChecked="{Binding Filter, Converter={StaticResource Eq}, ConverterParameter=missed, Mode=OneWay}" Command="{Binding SetFilterCommand}" CommandParameter="missed" />
-                        <RadioButton Style="{StaticResource FilterChip}" Height="30" Content="대표번호" IsChecked="{Binding Filter, Converter={StaticResource Eq}, ConverterParameter=pilot, Mode=OneWay}" Command="{Binding SetFilterCommand}" CommandParameter="pilot" />
+                        <TextBlock Style="{StaticResource Title16}" Text="기록" Margin="0,0,12,0" Visibility="{Binding IsNarrow, ElementName=Root, Converter={StaticResource Pick}, ConverterParameter=Collapsed|Visible}" />
+                        <RadioButton Style="{StaticResource FilterChip}" Height="30" Padding="{Binding IsNarrow, ElementName=Root, Converter={StaticResource Pick}, ConverterParameter='7,0|10,0'}" Content="전체" IsChecked="{Binding Filter, Converter={StaticResource Eq}, ConverterParameter=all, Mode=OneWay}" Command="{Binding SetFilterCommand}" CommandParameter="all" />
+                        <RadioButton Style="{StaticResource FilterChip}" Height="30" Padding="{Binding IsNarrow, ElementName=Root, Converter={StaticResource Pick}, ConverterParameter='7,0|10,0'}" Content="통화" IsChecked="{Binding Filter, Converter={StaticResource Eq}, ConverterParameter=call, Mode=OneWay}" Command="{Binding SetFilterCommand}" CommandParameter="call" />
+                        <RadioButton Style="{StaticResource FilterChip}" Height="30" Padding="{Binding IsNarrow, ElementName=Root, Converter={StaticResource Pick}, ConverterParameter='7,0|10,0'}" Content="문자" IsChecked="{Binding Filter, Converter={StaticResource Eq}, ConverterParameter=sms, Mode=OneWay}" Command="{Binding SetFilterCommand}" CommandParameter="sms" />
+                        <RadioButton Style="{StaticResource FilterChip}" Height="30" Padding="{Binding IsNarrow, ElementName=Root, Converter={StaticResource Pick}, ConverterParameter='7,0|10,0'}" Content="{Binding MissedChipText}" IsChecked="{Binding Filter, Converter={StaticResource Eq}, ConverterParameter=missed, Mode=OneWay}" Command="{Binding SetFilterCommand}" CommandParameter="missed" />
+                        <RadioButton Style="{StaticResource FilterChip}" Height="30" Padding="{Binding IsNarrow, ElementName=Root, Converter={StaticResource Pick}, ConverterParameter='7,0|10,0'}" Content="{Binding IsNarrow, ElementName=Root, Converter={StaticResource Pick}, ConverterParameter=대표|대표번호}" ToolTip="대표번호로 온 통화" IsChecked="{Binding Filter, Converter={StaticResource Eq}, ConverterParameter=pilot, Mode=OneWay}" Command="{Binding SetFilterCommand}" CommandParameter="pilot" />
                     </StackPanel>
                 </DockPanel>
             </Border>
@@ -381,7 +390,7 @@
                                                         <TextBlock Style="{StaticResource Muted}" FontSize="11" Text="{Binding TimeText}" HorizontalAlignment="Right" />
                                                         <Border Style="{StaticResource Count}" Margin="0,4,0,0" HorizontalAlignment="Right" Visibility="{Binding HasUnread, Converter={StaticResource BoolToVis}}"><TextBlock Text="{Binding Unread}" /></Border>
                                                     </StackPanel>
-                                                    <Border Style="{StaticResource Avatar}" Margin="0,0,10,0"><TextBlock Text="{Binding Initial}" HorizontalAlignment="Center" VerticalAlignment="Center" /></Border>
+                                                    <Border Style="{StaticResource Avatar}" Margin="0,0,10,0" Tag="{Binding Name, Converter={StaticResource AvatarHue}}"><Grid><TextBlock Text="{Binding Initial}" HorizontalAlignment="Center" VerticalAlignment="Center" /><Path Style="{StaticResource Icon}" Data="{StaticResource Icon.Phone}" Width="15" Height="15" StrokeThickness="2" Visibility="{Binding Initial, Converter={StaticResource StrToVis}, ConverterParameter=invert}" /></Grid></Border>
                                                     <StackPanel VerticalAlignment="Center" Margin="0,0,6,0">
                                                         <StackPanel Orientation="Horizontal">
                                                             <TextBlock x:Name="Name" Text="{Binding Name}" FontSize="14" FontWeight="Medium" TextTrimming="CharacterEllipsis" MaxWidth="150" Margin="0,0,6,0" />
@@ -398,11 +407,11 @@
                                         <DataTemplate.Triggers>
                                             <DataTrigger Binding="{Binding HasUnread}" Value="True"><Setter TargetName="Name" Property="FontWeight" Value="Bold" /></DataTrigger>
                                             <DataTrigger Binding="{Binding Kind}" Value="Missed"><Setter TargetName="Kind" Property="Style" Value="{StaticResource Tag.Red}" /></DataTrigger>
-                                            <DataTrigger Binding="{Binding Kind}" Value="Transfer"><Setter TargetName="Kind" Property="BorderBrush" Value="{DynamicResource Brush.Held}" /><Setter TargetName="Kind" Property="TextElement.Foreground" Value="{DynamicResource Brush.Held}" /></DataTrigger>
+                                            <DataTrigger Binding="{Binding Kind}" Value="Transfer"><Setter TargetName="Kind" Property="Style" Value="{StaticResource Tag.Held}" /></DataTrigger>
                                             <DataTrigger Binding="{Binding Kind}" Value="Monitor"><Setter TargetName="Kind" Property="Style" Value="{StaticResource Tag.Mon}" /></DataTrigger>
-                                            <DataTrigger Binding="{Binding Kind}" Value="Sms"><Setter TargetName="Kind" Property="BorderBrush" Value="{DynamicResource Brush.Listen}" /><Setter TargetName="Kind" Property="TextElement.Foreground" Value="{DynamicResource Brush.Listen}" /></DataTrigger>
-                                            <DataTrigger Binding="{Binding Kind}" Value="Live"><Setter TargetName="Kind" Property="BorderBrush" Value="{DynamicResource Brush.TalkInk}" /><Setter TargetName="Kind" Property="TextElement.Foreground" Value="{DynamicResource Brush.TalkInk}" /></DataTrigger>
-                                            <DataTrigger Binding="{Binding IsSelected}" Value="True"><Setter TargetName="RowBtn" Property="Background" Value="{DynamicResource Brush.Surface2}" /><Setter TargetName="Edge" Property="BorderBrush" Value="{DynamicResource Brush.Ink}" /></DataTrigger>
+                                            <DataTrigger Binding="{Binding Kind}" Value="Sms"><Setter TargetName="Kind" Property="Style" Value="{StaticResource Tag.Teal}" /></DataTrigger>
+                                            <DataTrigger Binding="{Binding Kind}" Value="Live"><Setter TargetName="Kind" Property="Style" Value="{StaticResource Tag.Talk}" /></DataTrigger>
+                                            <DataTrigger Binding="{Binding IsSelected}" Value="True"><Setter TargetName="RowBtn" Property="Background" Value="{DynamicResource Brush.PrimarySoft}" /><Setter TargetName="Edge" Property="BorderBrush" Value="{DynamicResource Brush.Primary}" /></DataTrigger>
                                         </DataTemplate.Triggers>
                                     </DataTemplate>
                                 </ItemsControl.ItemTemplate>
@@ -440,7 +449,7 @@
                                 <Button DockPanel.Dock="Right" Style="{StaticResource Pill.Ink}" Height="42" Padding="18,0" FontSize="14" Content="보내기" Command="{Binding SendCommand}" IsEnabled="{Binding CanSend}" Margin="8,0,0,0" />
                                 <TextBlock DockPanel.Dock="Right" Style="{StaticResource Muted}" FontSize="11" Text="{Binding CountText}" VerticalAlignment="Center" Margin="8,0,0,0" />
                                 <Grid>
-                                    <Border x:Name="SmsBorder" Height="42" CornerRadius="21" BorderThickness="1.5" BorderBrush="{DynamicResource Brush.Ink}" Background="{DynamicResource Brush.Surface}" />
+                                    <Border x:Name="SmsBorder" Height="42" CornerRadius="21" BorderThickness="1.5" BorderBrush="{DynamicResource Brush.Edge}" Background="{DynamicResource Brush.Surface}" />
                                     <TextBox Text="{Binding Input, UpdateSourceTrigger=PropertyChanged}" KeyDown="Sms_KeyDown" IsEnabled="{Binding SmsBlocked, Converter={StaticResource Not}}" Margin="16,0" FontSize="14"
                                              BorderThickness="0" Background="Transparent" VerticalContentAlignment="Center" Height="38" Foreground="{DynamicResource Brush.Text}" CaretBrush="{DynamicResource Brush.Text}" />
                                     <TextBlock Style="{StaticResource Muted}" FontSize="14" Text="문자" Margin="18,0" VerticalAlignment="Center" IsHitTestVisible="False"

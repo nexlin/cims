@@ -88,7 +88,8 @@ public sealed partial class MainViewModel
         s.Activity.Add(new ActivityRow(now.AddMinutes(-8), ActivityPanel.Call, ActivityKind.Missed, "부재 7000 ← 010-7777-8888", "넘김 7100", IsMissed: true, Number: "+821077778888", IsPilot: true));
         s.Activity.Add(new ActivityRow(now.AddHours(-5), ActivityPanel.Call, ActivityKind.Outgoing, "발신 → 7003 서상황", "01:05", Number: "7003"));
         s.Activity.Add(new ActivityRow(now.AddHours(-2), ActivityPanel.Call, ActivityKind.Incoming, "착신 ← 7003 서상황", "00:48", Number: "7003"));
-        Sms.SeedPreview("7003", (true, "오늘 교대 명단 부탁드려요", 200), (false, "교대 명단 보내 드렸어요", 20));
+        Sms.SeedPreview("7003", (true, "오늘 교대 명단 부탁드려요", 200), (false, "교대 명단 보내 드렸어요", 20),
+                        (true, "받았습니다. 야간조 2명이 바뀌었으니 확인 부탁드리고, 변경된 명단은 내일 아침 브리핑 전까지 게시판에도 올려 주세요.", 8));
         Sms.SeedPreview("+821055551212", (false, "네 알겠습니다", 64));
         // 대표번호 대기열(포크 대기 leg) · 진행 중(감시 대상 dialog) · 그룹원 칸
         s.SeedPreviewDialog(new DialogInfo(0, "tel:7000", "q1", "cq1", "", "", "recipient", "early", "tel:+821022223333", true));
@@ -117,6 +118,14 @@ public sealed partial class MainViewModel
         PttChannels.SetUnread(g => g.Id == "g-ops" ? 3 : 0);
         PttChannels.Tick(); TalkBar.Refresh(); Scoped.Rebuild(); CallActivity.Rebuild(); Records.Rebuild();
         Records.Open("7003");
+    }
+
+    /// <summary>--ui-preview-screen=groups 와 함께 — [PTT 그룹] 화면에 새 그룹 폼(능력·우선순위·확인 통화·멤버 역할 전부)을 세 멤버로 연다.</summary>
+    public void SeedGroupFormPreview()
+    {
+        var form = new GroupEditViewModel(Session, null) { Name = "3번 게이트 대응" };
+        form.AddMembers(Users.Users.Where(u => u.Name is "이순경" or "윤순경" or "최순경").Select(u => (u.Number, u.Name)));
+        GroupsScreen.OpenPreview(form);
     }
 
     /// <summary>표본 위에서 모드·패널·키패드를 골라 그린다(스크린숏 점검).</summary>

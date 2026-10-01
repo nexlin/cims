@@ -58,11 +58,15 @@ public partial class App : Application
     {
         AppPaths.Ensure();
         _log = new AppLog();
+        TitleBar.Register();                                                   // 창 제목 표시줄 = 테마 색(§3.2)
 
         var settings = new SettingsStore();
         settings.Load();
         _log.MinLevel = settings.Current.LogLevel;
-        ApplyTheme(settings.Current.Theme);
+        // --ui-preview-theme=light|dark: 설정을 바꾸지 않고 그 테마로 그려 본다(두 테마 점검용 개발 스위치)
+        string? previewTheme = e.Args.Contains("--ui-preview", StringComparer.OrdinalIgnoreCase)
+            ? e.Args.FirstOrDefault(a => a.StartsWith("--ui-preview-theme=", StringComparison.OrdinalIgnoreCase))?.Split('=', 2)[1] : null;
+        ApplyTheme(previewTheme is "light" or "dark" ? previewTheme : settings.Current.Theme);
 
         var directory = new DirectoryService();
         directory.Load(settings.Current.DirectoryCsv.Length > 0 ? settings.Current.DirectoryCsv : null);
@@ -71,7 +75,7 @@ public partial class App : Application
         // 토큰 자격이 되살릴 수 없게 끝났다(refresh 폐기·회전 실패) — 통화만 살아 있는 반쯤 로그인된 상태를 두지 않는다(§6 세션 수명).
         _session.CredentialsEnded += (_, why) => { _log!.Warn("session ended: " + why); _pendingLoginError = why; Logout(); };
         _hotKeys = new HotKeyMap();
-        _layout = new LayoutStore();
+        _layout = new LayoutStore { ReadOnly = e.Args.Contains("--ui-preview", StringComparer.OrdinalIgnoreCase) };
         _layout.Load();
 
         _tick = new DispatcherTimer(DispatcherPriority.Background) { Interval = TimeSpan.FromSeconds(1) };
@@ -85,7 +89,7 @@ public partial class App : Application
         if (e.Args.Contains("--ui-preview", StringComparer.OrdinalIgnoreCase))
         {
             ShowMain();
-            // --ui-preview-screen=history|groups|admin: 관제 외 화면(§3.4)으로 열어 서버 없이 XAML 자원·바인딩 점검(목록은 "로그인 전" 오류로 비어 있다).
+            // --ui-preview-screen=history|groups|admin: 관제 외 화면(§3.4)으로 열어 서버 없이 XAML 자원·바인딩 점검(목록은 "로그인 전" 오류로 비어 있다 — 표본은 이력 = --ui-preview-history, 관리·PTT 그룹 폼 = --ui-preview-canvas).
             // 관리 화면은 관리 범위 검사를 건너뛴다(프로파일이 없다). 구 스위치 --ui-preview-management = admin.
             string? screenArg = e.Args.FirstOrDefault(a => a.StartsWith("--ui-preview-screen=", StringComparison.OrdinalIgnoreCase))?.Split('=', 2)[1]
                                 ?? (e.Args.Contains("--ui-preview-management", StringComparer.OrdinalIgnoreCase) ? "admin" : null);
@@ -95,6 +99,12 @@ public partial class App : Application
                 var screen = screenArg.ToLowerInvariant() switch { "history" => Models.AppScreen.History, "groups" => Models.AppScreen.PttGroups, _ => Models.AppScreen.Admin };
                 var vmS = _mainVm;
                 _main!.Dispatcher.BeginInvoke(DispatcherPriority.ContextIdle, () => vmS.Screen = screen);
+                // 관리 화면은 --ui-preview-canvas 와 함께면 표본 조직·구성원을 심는다(화면 전환의 로드 = "로그인 전" 뒤에)
+                if (screen == Models.AppScreen.Admin && e.Args.Contains("--ui-preview-canvas", StringComparer.OrdinalIgnoreCase))
+                    _main.Dispatcher.BeginInvoke(DispatcherPriority.ApplicationIdle, () => vmS.AdminScreen.SeedPreview());
+                // [PTT 그룹] 화면은 새 그룹 폼(고급 설정 전부)을 연다
+                if (screen == Models.AppScreen.PttGroups && e.Args.Contains("--ui-preview-canvas", StringComparer.OrdinalIgnoreCase))
+                    _main.Dispatcher.BeginInvoke(DispatcherPriority.ApplicationIdle, () => vmS.SeedGroupFormPreview());
             }
             // --ui-preview-canvas: 관제 두 화면(§3.1)에 표본 채널·세션·대기열·기록·메시지를 심는다. --ui-preview-banner=alerts|incoming|none 으로 배너 층을 고른다.
             string Arg(string name) => e.Args.FirstOrDefault(a => a.StartsWith(name + "=", StringComparison.OrdinalIgnoreCase))?.Split('=', 2)[1] ?? "";
@@ -114,7 +124,82 @@ public partial class App : Application
             if (e.Args.FirstOrDefault(a => a.StartsWith("--ui-preview-zoom=", StringComparison.OrdinalIgnoreCase))?.Split('=', 2)[1] is { Length: > 0 } zoomArg && _mainVm is not null
                 && double.TryParse(zoomArg, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double z))
                 _mainVm.HistoryScreen.TalkZoom = Math.Clamp(z, 1, ViewModels.SessionHistoryViewModel.TalkZoomMax);
-            // --ui-preview-shot=<png>: 주 창을 그려 PNG 로 저장하고 종료 — 화면 잠금·원격 세션에서도 XAML 점검이 되게(화면 캡처가 아니라 WPF 렌더).
+            // --ui-preview-size=<W>x<H>: 주 창을 그 크기(최대화 해제)로 — 작은 화면(1366×768 등)에서 칸 줄임·잘림 점검. 저장된 창 위치는 바꾸지 않는다.
+            if (Arg("--ui-preview-size").Split('x', 'X') is [var sw, var sh] && double.TryParse(sw, out double pw0) && double.TryParse(sh, out double ph0))
+            {
+                var mw = _main!;
+                mw.Dispatcher.BeginInvoke(DispatcherPriority.ContextIdle, () => { mw.WindowState = WindowState.Normal; mw.Width = pw0; mw.Height = ph0; });
+            }
+            // --ui-preview-window=settings|login|monitor|prompt|confirm: 주 창 위에 그 창을 띄운다(-shot 이면 그 창을 찍는다) — 별도 창의 테마·배치 점검.
+            //   monitor 는 표본(-canvas)의 감청·청취 세션이 있어야 한다.
+            Window? extra = null;
+            if (_session is { } ps && _mainVm is not null)
+            {
+                extra = Arg("--ui-preview-window").ToLowerInvariant() switch
+                {
+                    "settings" => new SettingsWindow(new SettingsViewModel(ps, _mainVm.HotKeys)),
+                    "login" => new LoginWindow(new LoginViewModel(ps)),
+                    "prompt" => new PromptWindow("그룹 이름 바꾸기", "새 이름", "순찰1"),
+                    "confirm" => new ConfirmWindow("그룹 삭제", "그룹 '순찰1' (g-patrol1) 을 삭제할까요?\n멤버 12명의 단말에서도 사라집니다.", "삭제", danger: true),
+                    "monitor" when ps.Sessions.FirstOrDefault(x => x.IsListenLeg) is { } ms && _layout is not null
+                        => new MonitorWindow(new MonitorWindowViewModel(ps, ms), ps, _layout),
+                    _ => null,
+                };
+                if (extra is not null) { var ex = extra; _main!.Dispatcher.BeginInvoke(DispatcherPriority.ContextIdle, () => ex.Show()); }
+            }
+            // --ui-preview-retheme=light|dark: 창이 다 그려진 뒤(1.5초) 테마를 바꾼다 — 실행 중 전환에서 옛 테마 색이 남는 곳(한 번만 찾아 쥔 브러시) 점검. 찍힌 그림을 그 테마로 바로 연 것과 비교한다.
+            if (Arg("--ui-preview-retheme") is "light" or "dark" && _main is not null)
+            {
+                string to = Arg("--ui-preview-retheme");
+                var rt = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1.5) };
+                rt.Tick += (_, _) => { rt.Stop(); ApplyTheme(to); };
+                rt.Start();
+            }
+            // --ui-preview-search=<검색어>: Ctrl+K 통합 검색을 그 검색어로 연다(팝업 — -shot 이 따로 찍는다).
+            if (Arg("--ui-preview-search") is { Length: > 0 } q && _mainVm is not null)
+            {
+                var vmQ = _mainVm;
+                _main!.Dispatcher.BeginInvoke(DispatcherPriority.ApplicationIdle, () => { vmQ.People.SearchOpen = true; vmQ.People.Query = q; });
+            }
+            // --ui-preview-person=<번호>: 그 사람의 사람 메뉴(팝업)를 연다.
+            if (Arg("--ui-preview-person") is { Length: > 0 } who && _mainVm is not null)
+            {
+                var vmP = _mainVm;
+                _main!.Dispatcher.BeginInvoke(DispatcherPriority.ApplicationIdle, () => vmP.People.OpenMenu(who));
+            }
+            // --ui-preview-open=more|mon|session|dtmf|xfer|chan|suggest|combo: 그 팝업을 열어 둔다 — 더보기 메뉴 · 감청 중 목록 · 세션 목록 · 첫 통화 카드의 DTMF/전달 ·
+            //   이벤트 채널 거르기 · 번호칸 제안(dtmf·xfer·suggest 는 -mode=call) · 보이는 첫 콤보 목록. -shot 이 팝업을 따로 찍는다.
+            if (Arg("--ui-preview-open") is { Length: > 0 } openArg && _mainVm is not null)
+            {
+                var vmO = _mainVm; var mwO = _main!;
+                mwO.Dispatcher.BeginInvoke(DispatcherPriority.ApplicationIdle, () =>
+                {
+                    switch (openArg.ToLowerInvariant())
+                    {
+                        case "more": mwO.MorePop.IsOpen = true; break;
+                        case "mon": mwO.MonDrop.IsChecked = true; break;
+                        case "session": mwO.SessionDrop.IsChecked = true; break;
+                        case "dtmf": if (vmO.CallDesk.Calls.FirstOrDefault() is { } cd) cd.DtmfOpen = true; break;
+                        case "xfer": if (vmO.CallDesk.Calls.FirstOrDefault() is { } cx) cx.TransferOpen = true; break;
+                        case "chan": vmO.PttActivity.ChannelMenuOpen = true; break;
+                        case "suggest": vmO.CallOriginate.Number = "이"; break;
+                        case "combo":                           // 화면에 보이는 첫 콤보(항목 둘 이상)의 펼친 목록
+                            static IEnumerable<DependencyObject> Walk(DependencyObject d)
+                            {
+                                for (int i = 0; i < System.Windows.Media.VisualTreeHelper.GetChildrenCount(d); i++)
+                                {
+                                    var c = System.Windows.Media.VisualTreeHelper.GetChild(d, i);
+                                    yield return c;
+                                    foreach (var g in Walk(c)) yield return g;
+                                }
+                            }
+                            if (Walk(mwO).OfType<System.Windows.Controls.ComboBox>().FirstOrDefault(cb => cb.IsVisible && cb.Items.Count > 1) is { } combo) combo.IsDropDownOpen = true;
+                            break;
+                    }
+                });
+            }
+            // --ui-preview-shot=<png>: 주 창(또는 -window 의 창)을 그려 PNG 로 저장하고 종료 — 화면 잠금·원격 세션에서도 XAML 점검이 되게(화면 캡처가 아니라 WPF 렌더).
+            //   열린 팝업(별 HWND — 검색·사람 메뉴·DTMF·전달·드롭다운)은 <png>-pop<n>.png 로 따로 찍는다.
             if (e.Args.FirstOrDefault(a => a.StartsWith("--ui-preview-shot=", StringComparison.OrdinalIgnoreCase))?.Split('=', 2)[1] is { Length: > 0 } shot && _main is not null)
             {
                 var t = new DispatcherTimer { Interval = TimeSpan.FromSeconds(3) };
@@ -123,7 +208,7 @@ public partial class App : Application
                     t.Stop();
                     try
                     {
-                        var w = _main; int pw = (int)Math.Ceiling(w.ActualWidth), ph = (int)Math.Ceiling(w.ActualHeight);
+                        Window w = extra is { IsVisible: true } ? extra : _main; int pw = (int)Math.Ceiling(w.ActualWidth), ph = (int)Math.Ceiling(w.ActualHeight);
                         var rtb = new System.Windows.Media.Imaging.RenderTargetBitmap(pw, ph, 96, 96, System.Windows.Media.PixelFormats.Pbgra32);
                         rtb.Render(w);
                         var enc = new System.Windows.Media.Imaging.PngBitmapEncoder();
@@ -131,6 +216,18 @@ public partial class App : Application
                         using var fs = System.IO.File.Create(shot);
                         enc.Save(fs);
                         _log?.Info($"preview shot {pw}x{ph} → {shot}");
+                        int n = 0;
+                        foreach (PresentationSource src in PresentationSource.CurrentSources)
+                        {
+                            if (src.RootVisual is not FrameworkElement pop || pop is Window || pop.ActualWidth < 1 || pop.ActualHeight < 1) continue;
+                            var prt = new System.Windows.Media.Imaging.RenderTargetBitmap((int)Math.Ceiling(pop.ActualWidth), (int)Math.Ceiling(pop.ActualHeight), 96, 96, System.Windows.Media.PixelFormats.Pbgra32);
+                            prt.Render(pop);
+                            var penc = new System.Windows.Media.Imaging.PngBitmapEncoder();
+                            penc.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(prt));
+                            string pf = System.IO.Path.ChangeExtension(shot, null) + $"-pop{n++}.png";
+                            using var pfs = System.IO.File.Create(pf);
+                            penc.Save(pfs);
+                        }
                     }
                     catch (Exception ex) { _log?.Error("preview shot", ex); }
                     IsExiting = true;                       // 표본 세션·감청 창의 종료 확인을 띄우지 않는다. ExitApp(Logout)은 저장된 로그인을 지우므로 쓰지 않는다
@@ -191,9 +288,11 @@ public partial class App : Application
         bool dark = theme == "dark";
         var uri = new Uri(dark ? "Themes/Dark.xaml" : "Themes/Light.xaml", UriKind.Relative);
         var current = dict.FirstOrDefault(d => d.Source is not null && (d.Source.OriginalString.EndsWith("Themes/Light.xaml", StringComparison.OrdinalIgnoreCase) || d.Source.OriginalString.EndsWith("Themes/Dark.xaml", StringComparison.OrdinalIgnoreCase)));
+        TitleBar.Dark = dark;
         if (current is not null && current.Source!.OriginalString.EndsWith(uri.OriginalString, StringComparison.OrdinalIgnoreCase)) return;
         if (current is not null) dict.Remove(current);
         dict.Insert(0, new ResourceDictionary { Source = uri });
+        TitleBar.ApplyAll();
     }
 
     /// <summary>자격 만료로 끝난 세션의 사유 — 다음 로그인 창에 한 번 띄운다.</summary>

@@ -88,8 +88,12 @@ public sealed class LayoutStore
     }
 
     /// <summary>저장 실패(읽기 전용·잠김 %APPDATA%)는 삼킨다 — 배치는 메모리에 유효하고, 창 닫기마다 오류 창이 뜨면 안 된다.</summary>
+    /// <summary>개발 스위치(--ui-preview) 실행 — 창·칸 경계를 저장하지 않는다(실제 앱의 layout.json 을 미리보기 창 크기로 덮지 않게).</summary>
+    public bool ReadOnly { get; set; }
+
     public void Save()
     {
+        if (ReadOnly) return;
         try
         {
             AppPaths.Ensure();

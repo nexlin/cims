@@ -111,20 +111,6 @@ public sealed class LevelToWidthConverter : IValueConverter
     public object ConvertBack(object? v, Type t, object? p, CultureInfo c) => throw new NotSupportedException();
 }
 
-/// <summary>RegState → 점등 색(§3.2): 회색 미등록 · 노랑 등록중 · 녹색 등록 · 빨강 실패. 테마 리소스를 찾는다.</summary>
-public sealed class RegStateToBrushConverter : IValueConverter
-{
-    public object Convert(object? value, Type t, object? p, CultureInfo c)
-    {
-        string key = value is CimsUe.RegState s ? s switch
-        {
-            CimsUe.RegState.Registered => "Brush.Talk", CimsUe.RegState.Registering => "Brush.Ring", CimsUe.RegState.Failed => "Brush.Emg", _ => "Brush.Wire",
-        } : "Brush.Wire";
-        return Application.Current?.TryFindResource(key) ?? System.Windows.Media.Brushes.Gray;
-    }
-    public object ConvertBack(object? v, Type t, object? p, CultureInfo c) => throw new NotSupportedException();
-}
-
 public sealed class NullToVisibilityConverter : IValueConverter
 {
     public object Convert(object? value, Type t, object? p, CultureInfo c) => value is null ? Visibility.Visible : Visibility.Collapsed;
@@ -176,10 +162,46 @@ public sealed class HalfRadiusConverter : IValueConverter
     public object ConvertBack(object? v, Type t, object? p, CultureInfo c) => throw new NotSupportedException();
 }
 
+/// <summary>트리 깊이 → 드롭다운 항목 안쪽 여백(깊이당 14) — 조직 콤보가 펼친 목록에서만 들여 쓰고 닫힌 상자에는 이름만 보이게(ComboBoxItem 기본 여백 9,5 기준).</summary>
+public sealed class DepthIndentConverter : IValueConverter
+{
+    public object Convert(object? value, Type t, object? p, CultureInfo c) => new Thickness(9 + (value is int d && d > 0 ? d : 0) * 14, 5, 9, 5);
+    public object ConvertBack(object? v, Type t, object? p, CultureInfo c) => throw new NotSupportedException();
+}
+
 /// <summary>첫 글자(아바타 원) — 빈 값이면 "?".</summary>
 public sealed class InitialConverter : IValueConverter
 {
     public object Convert(object? value, Type t, object? p, CultureInfo c) => value is string s && s.Trim().Length > 0 ? s.Trim()[..1] : "?";
+    public object ConvertBack(object? v, Type t, object? p, CultureInfo c) => throw new NotSupportedException();
+}
+
+/// <summary>폭 → 격자 열 수 — parameter "최소 칸 폭|최대 열"(예 "230|4"). 칸이 최소 폭보다 좁아지면 열을 줄인다(작은 창·패널이 연 좁은 칸, §3.3).</summary>
+public sealed class ColumnsByWidthConverter : IValueConverter
+{
+    public object Convert(object? value, Type t, object? p, CultureInfo c)
+    {
+        var parts = (p as string ?? "240|3").Split('|');
+        double min = double.TryParse(parts[0], NumberStyles.Float, CultureInfo.InvariantCulture, out var m) ? m : 240;
+        int max = parts.Length > 1 && int.TryParse(parts[1], out var x) ? x : 3;
+        double w = value is double d && d > 0 ? d : min * max;
+        return Math.Clamp((int)(w / min), 1, max);
+    }
+    public object ConvertBack(object? v, Type t, object? p, CultureInfo c) => throw new NotSupportedException();
+}
+
+/// <summary>이름(또는 번호) → 아바타 색 번호 "0"~"6" — 같은 사람은 어느 목록에서나 같은 색(FNV-1a). 면·글자는 테마 토큰(Avatar 스타일 트리거)이라
+/// 테마를 바꾸면 따라간다. 빈 값 = "7"(무채).</summary>
+public sealed class AvatarHueConverter : IValueConverter
+{
+    public object Convert(object? value, Type t, object? p, CultureInfo c)
+    {
+        string s = (value as string ?? "").Trim();
+        if (s.Length == 0) return "7";
+        uint h = 2166136261;
+        foreach (char ch in s) { h ^= ch; h *= 16777619; }
+        return (h % 7).ToString(CultureInfo.InvariantCulture);
+    }
     public object ConvertBack(object? v, Type t, object? p, CultureInfo c) => throw new NotSupportedException();
 }
 
