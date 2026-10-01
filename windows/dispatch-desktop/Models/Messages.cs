@@ -18,6 +18,8 @@ public sealed partial class Message : ObservableObject
     public string Peer { get; init; } = "";
     public string PeerName { get; set; } = "";
     public string GroupUri { get; init; } = "";
+    /// <summary>주고받던 때의 그룹 이름(표시용) — 그룹이 내 목록에서 사라져도(삭제·탈퇴) 대화 제목이 uri 로 떨어지지 않게 함께 보관한다.</summary>
+    public string GroupName { get; init; } = "";
     public string ConvId { get; init; } = "";
     /// <summary>MCData 메시지 id — 재전송하면 새 id 를 받으므로 갱신된다(disposition 통지 상관).</summary>
     public string MsgId { get; set; } = "";

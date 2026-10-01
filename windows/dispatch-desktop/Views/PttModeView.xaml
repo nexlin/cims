@@ -280,7 +280,7 @@
                 <DockPanel Grid.Column="1">
                     <Border DockPanel.Dock="Top" Height="48" Padding="18,0,12,0" BorderBrush="{DynamicResource Brush.Border}" BorderThickness="0,0,0,1">
                         <DockPanel>
-                            <Button DockPanel.Dock="Right" Style="{StaticResource Pill.Line.Sm}" Content="채널 정보 ›" Command="{Binding OpenChannelInfoCommand}" Visibility="{Binding IsGroupConv, Converter={StaticResource BoolToVis}}" />
+                            <Button DockPanel.Dock="Right" Style="{StaticResource Pill.Line.Sm}" Content="채널 정보 ›" Command="{Binding OpenChannelInfoCommand}" Visibility="{Binding HasChannelInfo, Converter={StaticResource BoolToVis}}" />
                             <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Visibility="{Binding HasSelection, Converter={StaticResource BoolToVis}}">
                                 <TextBlock Style="{StaticResource Title16}" Text="{Binding Selected.Title}" Margin="0,0,10,0" TextTrimming="CharacterEllipsis" MaxWidth="260" />
                                 <Border x:Name="ConvTag" Height="22" CornerRadius="11" Padding="9,0" BorderThickness="1" VerticalAlignment="Center" Margin="0,0,10,0">

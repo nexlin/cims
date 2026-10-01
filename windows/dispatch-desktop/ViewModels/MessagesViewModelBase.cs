@@ -75,7 +75,8 @@ public abstract partial class MessagesViewModelBase : ObservableObject
     protected MessageThread Thread(string key, string title, bool isGroup, bool isExternal = false)
     {
         if (ThreadMap.TryGetValue(key, out var t)) { if (title.Length > 0 && t.Title != title) t.Title = title; return t; }
-        t = new MessageThread(key, Kind, title.Length > 0 ? title : key) { IsGroup = isGroup, IsExternal = isExternal };
+        // 이름을 모르는 그룹(목록에서 사라졌고 보관한 이름도 없다)은 uri 가 아니라 그룹 id 로 선다
+        t = new MessageThread(key, Kind, title.Length > 0 ? title : isGroup ? Converters.UserPartConverter.UserPart(key) : key) { IsGroup = isGroup, IsExternal = isExternal };
         t.PropertyChanged += (_, e) => { if (e.PropertyName == nameof(MessageThread.Unread)) { OnPropertyChanged(nameof(UnreadTotal)); OnPropertyChanged(nameof(UnreadChipText)); RaiseUnread(); if (ThreadFilter == "unread") ThreadsView.Refresh(); } };
         ThreadMap[key] = t;
         Threads.Add(t);
@@ -84,9 +85,22 @@ public abstract partial class MessagesViewModelBase : ObservableObject
 
     protected virtual string TitleOfKey(string key) => S.Directory.Label(key);
 
+    /// <summary>uri 의 그룹(멤버·청취 범위) — uri 형이 달라도(tel:/sip:) 그룹 id 로 맞춘다. 내 목록에 없으면(삭제·탈퇴) null.</summary>
+    protected GroupInfo? GroupOf(string uri)
+    {
+        string id = Converters.UserPartConverter.UserPart(uri);
+        return S.Groups.FirstOrDefault(g => string.Equals(g.Uri, uri, StringComparison.OrdinalIgnoreCase) || g.Id == id);
+    }
+
+    /// <summary>지금 목록의 그룹 이름 — 목록에 없거나 이름을 아직 모르는 자리표(로스터가 먼저 세운 것, 이름 = id)면 빈 값.</summary>
+    protected string GroupNameOf(string uri) => GroupOf(uri) is { } g && g.Name.Length > 0 && g.Name != g.Id ? g.Name : "";
+
+    /// <summary>그룹 대화 제목 — 지금 목록의 이름, 없으면 그 메시지를 주고받던 때의 이름(<see cref="Message.GroupName"/>).</summary>
+    private string GroupTitle(Message m) => GroupNameOf(m.GroupUri) is { Length: > 0 } n ? n : m.GroupName;
+
     protected void Put(Message m, bool persist)
     {
-        var t = Thread(m.ThreadKey, m.GroupUri.Length > 0 ? S.Groups.FirstOrDefault(g => g.Id == Converters.UserPartConverter.UserPart(m.GroupUri))?.Name ?? "" : TitleOfKey(m.ThreadKey),
+        var t = Thread(m.ThreadKey, m.GroupUri.Length > 0 ? GroupTitle(m) : TitleOfKey(m.ThreadKey),
                        m.GroupUri.Length > 0, Kind == MessageKind.Sms && S.Directory.IsExternal(m.ThreadKey));
         if (persist) S.Messages.Insert(m);
         if (m == null) return;

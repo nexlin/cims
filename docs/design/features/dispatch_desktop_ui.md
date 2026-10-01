@@ -361,7 +361,10 @@
 - 목록 머리: "메시지" · **[따라가기 ✓]**(기본 켬 — 채널 카드를 누르면 그 채널 대화로, 설정 `FollowChannelThread`) · **[＋ 새 대화]**([사용자] 패널 — 사람 메뉴 [무전 메시지]) ·
   거르기 **[전체|그룹|1:1|안 읽음 n]**. 줄(60) = 아바타(그룹 = 모서리 8, 1:1 = 원) · 이름(안 읽으면 굵게) · [그룹]/[1:1] 라벨 · 마지막 말 미리 보기(«나: …» / «박경장: …» /
   파일 이름) · 시각 · 안 읽은 수. 고른 대화 = 왼쪽 3px 먹 띠 + 연한 면. 스레드 키는 그룹 = `groupUri`, 1:1 = 상대(`threadKeyOf` 규칙).
+  **그룹 대화의 이름은 그룹 이름이다(키인 uri 를 내지 않는다)** — 지금 그룹 목록(멤버·청취 범위)의 이름을 쓰고 목록이 바뀌면(추가·삭제·이름 변경) 따라 바뀐다.
+  목록에서 사라진 그룹(삭제됐거나 내가 빠진 그룹)의 남은 대화는 **주고받던 때의 이름**(메시지와 함께 보관 — `group_name`)으로 서고, 그 이름도 없으면 그룹 id 로 선다.
 - 대화 머리: 이름 · 라벨(그룹 = 먹 채움 "그룹 전원 · 편성 n", 1:1 = 외곽선 "1:1") · 부제("접속 n" / "PTT <번호>") · [채널 정보 ›](그룹 — 채널 상세).
+  목록에 없는 그룹의 대화는 라벨 "목록에 없는 그룹" · 부제 "삭제됐거나 내가 빠진 그룹" 이고 [채널 정보 ›] 가 없다(발신은 서버가 판정한다).
   말풍선(받은 말 = 회색 + 그룹이면 보낸 사람, 보낸 말 = 남색 + 상태 `보내는 중 → ✓ → ✓✓` / `· 실패` [재전송]) · 파일 말풍선 · **빠른 답**(«확인했습니다» · «이동 중» ·
   «도착했습니다» · «대기 바랍니다» — 한 번 눌러 곧바로 보낸다) · 입력(자리표시 "그룹 전원에게 (순찰1 · 12명)" / "이 사람에게 (윤순경)") · [📎] · [보내기](Enter, Shift+Enter 줄바꿈).
 - 발신 그룹 `sendGroupSds(acc_ptt, groupId, text, requestDelivery)` / 1:1 `sendSds(acc_ptt, peer, …)` → `(msgId, token)` · 최종 응답 `onRequestCompleted(MESSAGE, token)` 을
@@ -582,7 +585,7 @@ SIP transport 콤보는 **ANY** 를 포함한 넷(콘솔 라벨과 같다) — A
 | **PTT 청취** | 타 채널 [청취] → `joinGroupCall(listenOnly)` | 행 [청취 중](먹 채움) · 채널 상세 "청취 전용 — 발언 요청 불가" · 음량 · 출력 · [청취 중지] · [창으로 ↗] | 제목 "청취 — 그룹명" · 배지 "청취 전용" · 발언자 이름·레벨·경과(`onFloor` Taken) · 참가자 수(`onRoster`) · 긴급 배지 · "발언 요청 불가(Permission=0)" 고정 문구 · 출력(기본 스피커) · 음량 · [청취 종료] | [청취 종료]·[청취 중지]·창 닫기 = `leaveGroupCall`. 480 이면 청취를 열지 않고 토스트 |
 
 - 상단 바 **"감청 중 N" 칩**이 진행 중인 감청·청취를 전부 나열하고, 누르면 그 감청 창(없으면 연다). 창을 최소화해도 청취는 계속된다. 창 닫기(×)는 종료
-  (설정 "닫기 전 확인"). 앱 종료로 닫힐 때는 다시 묻지 않는다 — 주 창 종료 확인이 진행 세션을 이미 세고(§6), Shutdown 중 취소는 무시되므로 두 번째 질문은
+  (설정 "닫기 전 확인"). 앱 종료로 닫힐 때는 다시 묻지 않는다 — 주 창 종료 확인이 진행 중인 것을 이미 세고(§6), Shutdown 중 취소는 무시되므로 두 번째 질문은
   종료만 붙잡는다(`App.IsExiting`). 재기동·재로그인 뒤 스냅샷 재구성은 감청 창을 다시 띄우지 않는다(인라인 표면이 바로 보인다).
 - 감청 창은 포커스를 훔치지 않는다. 주 창의 착신·긴급 배너가 우선.
 - 여러 청취의 소리는 라우트별로 섞인다 — 기본값이 VoLTE 감청 헤드셋 / PTT 청취 스피커인 이유. 동시 청취 상한 기본 4(설정, 타 채널 머리에 n/상한).
@@ -626,7 +629,9 @@ SIP transport 콤보는 **ANY** 를 포함한 넷(콘솔 라벨과 같다) — A
   요청). 로그아웃 = 창 숨김(+감청 창 닫기·창 위치 저장) → 로그인 창, 재로그인 = 스냅샷 재구성 후 다시 표시.
 - **기동 실패는 종료로 끝난다.** 데이터 폴더(`%APPDATA%\CIMS\dispatch-desktop`)의 `messages.db` 잠김·읽기 전용 등 기동 중 예외는 "기동 실패" 창을 띄우고
   프로세스를 끝낸다(창 없는 프로세스로 남지 않게). 주소록 CSV 가 잠겨 있으면 그 파일만 건너뛰고, 설정·배치 저장 실패는 조용히 삼킨다(메모리 값 유지).
-- 로그아웃: 등록 해제 → 토큰 폐기 → 로그인 창. **창 닫기(×) = 종료**(메뉴 [종료] 와 같다 — 감청 창·진행 세션이 있으면 확인, 저장된 자동 로그인은 남는다).
+- 로그아웃: 등록 해제 → 토큰 폐기 → 로그인 창. **창 닫기(×) = 종료**(메뉴 [종료] 와 같다 — 진행 중인 것이 있으면 확인, 저장된 자동 로그인은 남는다).
+  **종료·로그아웃 확인은 관제사가 하고 있는 것만 종류별로 센다** — "진행 중: 통화 1 · 무전 2 · 감청 1 · 청취 1 · 영상 보내기 1 · 영상 보기 1"(0 인 종류는 뺀다, `DispatchSession.LiveSummary`).
+  영상 채널 호는 앱이 내 채널에 맞춰 스스로 붙어 있는 것(§10 D10)이라 세지 않고, 영상을 보내거나(요청·대기 포함) 보고 있을 때만 센다 — 셀 것이 없으면 묻지 않고 끝낸다.
   설정 › 관제 «창 닫기(×)는 종료하지 않고 최소화» 를 켜면(기본 꺼짐) × 는 최소화이고 종료는 메뉴로만 한다. 설정 판(`UiVersion` 4)이 옛 기본값(최소화)을 한 번 끈다.
 
 **세션 수명 — 자격은 둘이지만 로그인은 하나다.** 단말은 규격상 자격을 둘 든다: SIP 시그널링은
@@ -989,7 +994,7 @@ windows/dispatch-desktop/                 DispatchDesktop.csproj — net10.0-win
             `UpdateDuck`/`Unduck`(×0.3), 카메라·셀프뷰 `ApplyVideoSettings`, 내 송출 `RequestVideoTx`/`ReleaseVideoTx`, D12 `SyncVideoMic`(음성 우선)·`BlocksTalkForVideo`(영상 우선)) ·
             VideoFrames(영상 그림 우편함 — `Engine.VideoFrameReceived`(영상 스레드)를 보는 칸의 호·셀프뷰(-1)만 최신 한 장 복사, UI 스레드에 «새 장» 한 번) ·
             Notifications(토스트·배너 — `Banner.Line1/Line2` 두 줄 문구, «새 영상» `BannerKind.Video`) · SettingsStore(json — FollowChannelThread/FollowEvents/LockTalk/Theme/`UiVersion` 등, 옛 판은 한 번 밝게로) ·
-            LayoutStore(창·감청 창 위치 + `Seams` 칸 경계, 판 4) · MessageStore(SQLite: mcdata/sms, FD 열 file_type·local_path 는 없으면 붙임) · ActivityLog(링 버퍼·CSV) · HotKeyMap ·
+            LayoutStore(창·감청 창 위치 + `Seams` 칸 경계, 판 4) · MessageStore(SQLite: mcdata/sms, FD 열 file_type·local_path·그룹 이름 열 group_name 은 없으면 붙임) · ActivityLog(링 버퍼·CSV) · HotKeyMap ·
             AudioPolicy(라우트 기본값·이름) · AdhocIdFactory(adhoc-<나>-<epoch>) · DirectoryService(그룹원·PTT 사용자·연락처 CSV, `Canonical` E.164 정규형) ·
             ResponseText(§9 사전 + Area.Management/Recording/File 오류 본문 `error` 사전) · AppLog(%APPDATA% logs, 7일) ·
             FD 전송(DispatchSession `UploadFileAsync`/`DownloadFileAsync` — 전용 CSC 핸들, 401 강제 갱신 1회) · AppPaths(`ReceivedFilesDir` = 다운로드\CIMS, `UniqueFile`, `MimeOf`) ·

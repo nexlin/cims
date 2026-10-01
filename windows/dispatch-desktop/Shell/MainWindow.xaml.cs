@@ -207,9 +207,10 @@ public partial class MainWindow : Window
 
     private bool ConfirmLeave(string what)
     {
-        int live = _vm.Session.Sessions.Count(s => s.IsLive);
-        if (live == 0) return true;
-        return ConfirmWindow.Ask(this, what, $"진행 중인 세션·감청이 {live}개 있습니다. {what}할까요?", what);
+        // 관제사가 하고 있는 것만 종류별로 — 앱이 스스로 붙어 있는 영상 채널 호는 세지 않는다(DispatchSession.LiveSummary)
+        string live = _vm.Session.LiveSummary();
+        if (live.Length == 0) return true;
+        return ConfirmWindow.Ask(this, what, $"진행 중: {live}. {what}할까요?", what);
     }
 
     private void OnClosing(object? sender, CancelEventArgs e)

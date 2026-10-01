@@ -33,6 +33,8 @@ public sealed class MessageStore : IDisposable
         // 보관 주인(로그인 ID) — 앞선 판의 행은 '' 로 붙고 첫 로그인이 한 번 가져간다(SetOwner)
         AddColumn("owner", "TEXT NOT NULL DEFAULT ''");
         Exec("CREATE INDEX IF NOT EXISTS ix_messages_owner ON messages(owner, kind, thread_key)");
+        // 그룹 이름(표시용) — 목록에서 사라진 그룹의 대화 제목. 앞선 판의 행은 '' 로 붙고 제목은 그룹 id 로 선다
+        AddColumn("group_name", "TEXT NOT NULL DEFAULT ''");
     }
 
     /// <summary>지금 보관 주인(로그인 ID). 비면(로그인 전) 조회는 빈 목록이다.</summary>
@@ -66,8 +68,8 @@ public sealed class MessageStore : IDisposable
     {
         using var cmd = _db.CreateCommand();
         cmd.CommandText = """
-            INSERT INTO messages(kind, thread_key, direction, peer, peer_name, group_uri, conv_id, msg_id, token, text, time, state, file_name, file_url, file_size, read, file_type, local_path, owner)
-            VALUES(@kind, @thread, @dir, @peer, @peer_name, @group, @conv, @msg, @token, @text, @time, @state, @fname, @furl, @fsize, @read, @ftype, @local, @owner);
+            INSERT INTO messages(kind, thread_key, direction, peer, peer_name, group_uri, conv_id, msg_id, token, text, time, state, file_name, file_url, file_size, read, file_type, local_path, owner, group_name)
+            VALUES(@kind, @thread, @dir, @peer, @peer_name, @group, @conv, @msg, @token, @text, @time, @state, @fname, @furl, @fsize, @read, @ftype, @local, @owner, @group_name);
             SELECT last_insert_rowid();
             """;
         cmd.Parameters.AddWithValue("@kind", (int)m.Kind);
@@ -89,6 +91,7 @@ public sealed class MessageStore : IDisposable
         cmd.Parameters.AddWithValue("@ftype", m.FileType);
         cmd.Parameters.AddWithValue("@local", m.LocalPath);
         cmd.Parameters.AddWithValue("@owner", Owner);
+        cmd.Parameters.AddWithValue("@group_name", m.GroupName);
         m.Id = (long)cmd.ExecuteScalar()!;
     }
 
@@ -113,7 +116,7 @@ public sealed class MessageStore : IDisposable
         var list = new List<Message>();
         if (Owner.Length == 0) return list;
         using var cmd = _db.CreateCommand();
-        cmd.CommandText = "SELECT id, kind, thread_key, direction, peer, peer_name, group_uri, conv_id, msg_id, token, text, time, state, file_name, file_url, file_size, read, file_type, local_path FROM messages WHERE owner=@o ORDER BY time";
+        cmd.CommandText = "SELECT id, kind, thread_key, direction, peer, peer_name, group_uri, conv_id, msg_id, token, text, time, state, file_name, file_url, file_size, read, file_type, local_path, group_name FROM messages WHERE owner=@o ORDER BY time";
         cmd.Parameters.AddWithValue("@o", Owner);
         using var r = cmd.ExecuteReader();
         while (r.Read())
@@ -124,7 +127,7 @@ public sealed class MessageStore : IDisposable
                 Peer = r.GetString(4), PeerName = r.GetString(5), GroupUri = r.GetString(6), ConvId = r.GetString(7), MsgId = r.GetString(8),
                 Token = r.GetInt64(9), Text = r.GetString(10), Time = DateTimeOffset.FromUnixTimeSeconds(r.GetInt64(11)).LocalDateTime,
                 State = (SendState)r.GetInt32(12), FileName = r.GetString(13), FileUrl = r.GetString(14), FileSize = r.GetInt64(15),
-                Read = r.GetInt32(16) != 0, FileType = r.GetString(17), LocalPath = r.GetString(18),
+                Read = r.GetInt32(16) != 0, FileType = r.GetString(17), LocalPath = r.GetString(18), GroupName = r.GetString(19),
             });
         }
         return list;

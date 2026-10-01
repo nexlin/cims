@@ -1555,6 +1555,22 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
         return Track(Ptt.JoinGroupCall(g.Id), Operation.PttJoin);
     }
 
+    /// <summary>종료·로그아웃 확인에 낼 «진행 중» 요약("통화 1 · 무전 2 · 감청 1") — 관제사가 하고 있는 것만 종류별로 센다. 없으면 빈 값.
+    /// 영상 채널 호는 앱이 내 채널에 맞춰 스스로 붙어 있는 것(D10)이라 세지 않고, 영상을 보내거나(요청·대기 포함) 보고 있을 때만 센다.</summary>
+    public string LiveSummary()
+    {
+        var live = Sessions.Where(s => s.IsLive).ToList();
+        var parts = new List<string>();
+        void Add(string label, int n) { if (n > 0) parts.Add($"{label} {n}"); }
+        Add("통화", live.Count(s => s.Kind == SessionKind.VolteCall));
+        Add("무전", live.Count(s => s.IsPttCard));
+        Add("감청", live.Count(s => s.Kind == SessionKind.VolteMonitor));
+        Add("청취", live.Count(s => s.Kind == SessionKind.PttListen));
+        Add("영상 보내기", live.Count(s => s.IsMcVideo && s.Transmission.State is TransmissionState.Permitted or TransmissionState.PendingRequest or TransmissionState.Queued));
+        Add("영상 보기", live.Count(s => s.IsMcVideo && s.Receiving is not null));
+        return string.Join(" · ", parts);
+    }
+
     public Result LeaveChannel(SessionItem s) => Show(Engine.GetCall(s.CallId).LeaveGroupCall(), ResponseText.Area.PttJoin);
 
     public Result ListenGroup(GroupInfo g)
