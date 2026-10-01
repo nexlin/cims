@@ -295,7 +295,10 @@ RFC 4575 conference)이 담당하고 이 API 는 대체하지 않는다 — ②P
     `endReason`(normal|no_answer|busy|rejected|error|timeout|incomplete — 문구는 앱 사전) · `sipStatus`.
   - ptt: `sessionKind`(group|private|adhoc) · `state`(ended|active) · `startTime` · `endTime` · `groupName` · `memberCount` · `people[]`(참여자) ·
     `turnCount`(발언 턴) · `speakerCount` · `totalSpeechMs`(발화 구간 합, 겹침 1회) · `talkMs`(화자별 누적) · `maxConcurrent` ·
-    `floorControl`(on|off|"") · `floorPolicy`(single|dual|multi) · `maxTalkers`.
+    `floorControl`(on|off|"") · `floorPolicy`(single|dual|multi) · `maxTalkers` · `service`(ptt|mcvideo — 같은 녹취 폴더의 MCPTT 그룹 호·MCVideo
+    그룹 호, OAM 세션 인덱스 `service`·파일 스캔 `session.json` `type`, 없으면 `ptt`) · `mcvideo`{`sessionType`(chat|prearranged) · `maxTransmitters`}
+    (`service` 가 `mcvideo` 일 때만 — mcvideo.md).
+  - call 의 종류는 `volte` 로 시작하는 것 전부(음성 `volte`·영상 `volte_video`) — 콘솔 VoLTE 이력과 같은 기준이다.
 - 최상위 `hours`: 시간대(HH) → 건수 — 통화는 INVITE, PTT 는 세션 시작 시각 기준(콘솔 `/call/logs`·`/ptt/sessions` 의 `hours` 와 같은 축),
   `limit` 절삭 **전** 창 안 전체 행으로 센다(앱 시간대 밴드 = 그날의 분포이자 필터).
 - **PTT 창 조회의 백엔드**(`kind=ptt` + `until`): 발언 지표는 CMP `segments.jsonl` 을 집계한 OAM 세션 인덱스(ptt_index — 콘솔 PTT 이력의

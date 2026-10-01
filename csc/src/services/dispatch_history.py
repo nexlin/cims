@@ -191,12 +191,13 @@ def scan_calls(rec_dir: str, state_dir: str, members: set, since_dt: datetime, u
                 if r and r["id"] not in seen:
                     seen.add(r["id"]); rows.append(r)
     # 종료분 — 시간 버킷의 call.json = {rec}/volte/{Y}/{M}/{D}/{H}/{prefix}/{caller}/{cid}.d/call.json
-    #   (flow_logger _find_all_d_dirs 와 동형).
+    #   (flow_logger _find_all_d_dirs 와 동형). 통화 종류는 `volte` 로 시작하는 것 전부 — 음성 `volte` · 영상 `volte_video`
+    #   (CSP CallDir VoipCallStart). 콘솔 VoLTE 이력(flow_logger `call_type.startswith("volte")`)과 같은 기준이다.
     if rec_dir:
         for (y, m, d, h) in _hour_buckets(since_dt, until_dt):
             for fp in _glob.glob(os.path.join(rec_dir, "volte", y, m, d, h, "**", "call.json"), recursive=True):
                 cj = _read_json(fp)
-                if cj and (cj.get('call_type') in (None, '', 'volte')) and _call_in_scope(cj, members):
+                if cj and str(cj.get('call_type') or 'volte').startswith('volte') and _call_in_scope(cj, members):
                     r = _call_row(cj, rec_dir, fp)
                     if r and r["id"] not in seen:
                         seen.add(r["id"]); rows.append(r)
@@ -225,7 +226,15 @@ def _ptt_row(sj: dict, rec_dir: str = "", path: Optional[str] = None) -> Optiona
         # 파일 스캔 경로에는 없다 — 창 조회는 OAM 세션 인덱스(ptt_row_from_oam)가 채운다.
         "floorControl": sj.get('floor_control', ''), "floorPolicy": sj.get('floor_policy', ''),
         "maxTalkers": sj.get('max_talkers', 0),
+        # 서비스 — 같은 녹취 폴더의 MCPTT 그룹 호(ptt)·MCVideo 그룹 호(mcvideo) — session.json type(recording.md §3.3), 없으면 ptt
+        **_service_fields(sj.get('type'), sj.get('mcvideo')),
     }
+
+
+def _service_fields(service, mcvideo) -> dict:
+    """PTT 이력 row 의 서비스 축 — `service`(ptt|mcvideo) 와 MCVideo 세션 속성(호 방식·동시 송출 상한, MCVideo 일 때만)."""
+    svc = service if service in ("ptt", "mcvideo") else "ptt"
+    return {"service": svc, "mcvideo": mcvideo if svc == "mcvideo" and isinstance(mcvideo, dict) else None}
 
 
 # 세션 디렉터리 키 'S{yyyymmddHHMMSSuuuuuu}_{n}' (콘솔 pttSession.tsx SES_KEY_RE 와 같은 규칙). 그 외는 구 녹취(시간창 = 디렉터리).
@@ -273,6 +282,8 @@ def ptt_row_from_oam(it: dict, rec_dir: str = "") -> Optional[dict]:
         "totalSpeechMs": it.get('total_speech_ms'), "talkMs": it.get('talk_ms'), "maxConcurrent": it.get('max_concurrent'),
         "floorControl": it.get('floor_control', ''), "floorPolicy": it.get('floor_policy', ''),
         "maxTalkers": it.get('max_talkers', 0),
+        # 서비스 — OAM 세션 인덱스의 service·mcvideo(콘솔 PTT 이력과 같은 축)
+        **_service_fields(it.get('service'), it.get('mcvideo')),
     }
 
 
@@ -444,7 +455,13 @@ def format_item(row: dict) -> dict:
             "maxConcurrent": _int0(row.get("maxConcurrent")),
             "floorControl": row.get("floorControl") or "", "floorPolicy": row.get("floorPolicy") or "",
             "maxTalkers": _int0(row.get("maxTalkers")),
+            # 서비스 축 — 무전(ptt)·영상(mcvideo, MCVideo 그룹 호). 앱은 영상 세션에 «영상»·송출 지표를 붙인다
+            "service": row.get("service") or "ptt",
         })
+        mv = row.get("mcvideo")
+        if item["service"] == "mcvideo" and isinstance(mv, dict):
+            item["mcvideo"] = {"sessionType": mv.get("session_type", "") or "",
+                               "maxTransmitters": _int0(mv.get("max_transmitters"))}
     return item
 
 

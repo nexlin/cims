@@ -57,24 +57,24 @@ class _Tree:
     def ts(self, minutes_ago=0):
         return (self.now - timedelta(minutes=minutes_ago)).strftime("%Y-%m-%dT%H:%M:%S")
 
-    def call(self, call_id, initiator, callee, minutes_ago=5, state="ended"):
+    def call(self, call_id, initiator, callee, minutes_ago=5, state="ended", call_type="volte"):
         y, mo, d, h = _now_parts(self.now - timedelta(minutes=minutes_ago))
         # 실서버 레이아웃: {rec}/volte/{Y}/{M}/{D}/{H}/{prefix}/{caller}/{cid}.d/call.json
         dd = _bucket(self.rec, "volte", y, mo, d, h, initiator[:10], initiator, call_id + ".d")
-        rec = {"call_id": call_id, "call_type": "volte", "initiator": initiator, "callee": callee,
+        rec = {"call_id": call_id, "call_type": call_type, "initiator": initiator, "callee": callee,
                "state": state, "invite_time": self.ts(minutes_ago + 1), "answer_time": self.ts(minutes_ago),
                "end_time": self.ts(minutes_ago) if state == "ended" else None,
                "duration": 30, "end_reason": "normal"}
         with open(os.path.join(dd, "call.json"), "w") as f:
             json.dump(rec, f)
 
-    def ptt(self, gid, sesid, initiator, minutes_ago=5):
+    def ptt(self, gid, sesid, initiator, minutes_ago=5, extra=None):
         y, mo, d, h = _now_parts(self.now - timedelta(minutes=minutes_ago))
         self._ptt_seq += 1
         dd = _bucket(self.rec, "ptt", str(self._ptt_seq), y, mo, d, h, "S" + str(self._ptt_seq))
         rec = {"mcptt_group_id": gid, "name": gid, "sesid": sesid, "initiator": initiator,
                "call_id": "cid_" + sesid, "state": "ended", "start_time": self.ts(minutes_ago + 1),
-               "end_time": self.ts(minutes_ago), "member_count": 3}
+               "end_time": self.ts(minutes_ago), "member_count": 3, **(extra or {})}
         with open(os.path.join(dd, "session.json"), "w") as f:
             json.dump(rec, f)
 
@@ -114,6 +114,26 @@ class ReaderTests(unittest.TestCase):
         self.assertNotIn("call-B", ids)
         self.assertEqual(items[0]["kind"], "call")
         self.assertTrue(nxt)
+
+    def test_call_video_type_included(self):
+        """영상 통화(call_type volte_video) 도 VoLTE 이력 — 콘솔 VoLTE 이력과 같은 기준(`volte` 로 시작)."""
+        self.t.call("call-V", "+821310002001", "+821310009999", call_type="volte_video")
+        self.t.call("call-P", "+821310002001", "+821310009998", call_type="ptt")      # VoLTE 가 아닌 종류는 제외
+        items, _ = dh.query(self.t.rec, self.t.state, "call", self._scope(members=["+821310002001"]), None, 100)
+        self.assertEqual([x["id"] for x in items], ["call-V"])
+        self.assertEqual(dh.format_item(items[0])["callType"], "volte_video")
+
+    def test_ptt_scan_service_mcvideo(self):
+        """session.json type=mcvideo(같은 녹취 폴더의 MCVideo 그룹 호) → service·mcvideo, type 없으면 ptt."""
+        self.t.ptt("g002", "ses-v", "+82510002001", minutes_ago=6,
+                   extra={"type": "mcvideo", "mcvideo": {"session_type": "chat", "max_transmitters": 2}})
+        self.t.ptt("g002", "ses-a", "+82510002001", minutes_ago=4)
+        items, _ = dh.query(self.t.rec, self.t.state, "ptt", self._scope(ptt=["g002"]), None, 100)
+        w = {x["id"]: dh.format_item(x) for x in items}
+        self.assertEqual(w["ses-v"]["service"], "mcvideo")
+        self.assertEqual(w["ses-v"]["mcvideo"], {"sessionType": "chat", "maxTransmitters": 2})
+        self.assertEqual(w["ses-a"]["service"], "ptt")
+        self.assertNotIn("mcvideo", w["ses-a"])
 
     def test_call_matches_callee_too(self):
         self.t.call("call-C", "+821310007777", "+821310002002")   # 감시 멤버 수신
@@ -376,6 +396,12 @@ class ExtendedWireTests(unittest.TestCase):
         # 파일 스캔 행(지표 없음) 도 같은 키를 0 으로 낸다
         w2 = dh.format_item({"kind": "ptt", "ts": "t", "id": "s2", "groupId": "g002", "state": "active"})
         self.assertEqual((w2["sessionKind"], w2["turnCount"], w2["people"], w2["floorControl"]), ("group", 0, [], ""))
+        self.assertEqual(w["service"], "ptt"); self.assertEqual(w2["service"], "ptt")    # 서비스 없으면 무전(ptt)
+        self.assertNotIn("mcvideo", w)
+        # MCVideo 그룹 호 — service·mcvideo{sessionType·maxTransmitters}
+        w3 = dh.format_item({"kind": "ptt", "ts": "t", "id": "s3", "groupId": "g002", "state": "ended",
+                             "service": "mcvideo", "mcvideo": {"session_type": "prearranged", "max_transmitters": "3"}})
+        self.assertEqual((w3["service"], w3["mcvideo"]), ("mcvideo", {"sessionType": "prearranged", "maxTransmitters": 3}))
 
     def test_hour_histogram_axis(self):
         rows = [{"kind": "call", "ts": "2026-09-06T19:05:00", "inviteTime": "2026-09-06T18:59:50"},     # INVITE 시각 기준
@@ -427,6 +453,11 @@ class OamIndexRowTests(unittest.TestCase):
         live = dh.ptt_row_from_oam({"dir": "S1_1", "group_key": "3", "mcptt_group_id": "g002", "state": "active",
                                     "start_time": "2026-09-06T19:01:02", "end_time": None}, "")
         self.assertEqual((live["id"], dh.format_item(live)["event"]), ("S1_1", "ptt.session.start"))
+        self.assertEqual((r["service"], r["mcvideo"]), ("ptt", None))
+        # MCVideo 세션 — OAM 인덱스의 service·mcvideo 를 그대로 싣는다
+        mv = dh.ptt_row_from_oam({**it, "service": "mcvideo", "mcvideo": {"session_type": "chat", "max_transmitters": 2}}, "")
+        self.assertEqual(dh.format_item(mv)["mcvideo"], {"sessionType": "chat", "maxTransmitters": 2})
+        self.assertEqual(dh.format_item(mv)["service"], "mcvideo")
         self.assertIsNone(dh.ptt_row_from_oam({"dir": "", "mcptt_group_id": "g002"}, ""))
         self.assertIsNone(dh.ptt_row_from_oam("junk", ""))
 
