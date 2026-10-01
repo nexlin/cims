@@ -33,12 +33,14 @@ internal class GroupPlane(private val c: PttController) {
 
     // ── 참여/이탈 ──
 
+    /** [takePrimary] = 주채널 세션이 없을 때 이 그룹을 주채널로 삼는다(사용자 참여). 채널 복원은 고른 주채널에만 준다 — 다른 그룹 복원이
+     *  고른 주채널(영상 채널, [VideoPlane])을 덮지 않게. */
     fun joinGroupCall(groupId: String, members: List<String> = emptyList(), emergency: Boolean = false,
-                      broadcast: Boolean = false) {
+                      broadcast: Boolean = false, takePrimary: Boolean = true) {
         val s = synchronized(c.lock) {
             if (c.sessionMap.containsKey(groupId)) return
             c.Session(groupId).also {
-                it.role = if (c.sessionMap.values.none { v -> v.role == ChannelRole.PRIMARY }) ChannelRole.PRIMARY
+                it.role = if (takePrimary && c.sessionMap.values.none { v -> v.role == ChannelRole.PRIMARY }) ChannelRole.PRIMARY
                 else ChannelRole.NONE
                 it.emergency = emergency
                 it.emergencyMine = emergency

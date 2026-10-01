@@ -573,7 +573,7 @@ class PttController(
                 if (!known) { Log.i(TAG, "채널 복원 보류 $g — 로스터 미확인(진행 여부 모름)"); continue }
                 if (!ongoing) { Log.i(TAG, "채널 복원 생략 $g — 진행 중 세션 없음"); continue }
                 _status.value = "채널 자동 복원: $g"
-                groupsPlane.joinGroupCall(g)
+                groupsPlane.joinGroupCall(g, takePrimary = primary == null || g == primary)
                 delay(300)
             }
             primary?.let { p -> if (synchronized(lock) { sessionMap.containsKey(p) }) setPrimary(p) }
