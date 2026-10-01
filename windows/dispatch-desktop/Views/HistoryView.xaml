@@ -8,118 +8,176 @@
     <!-- [이력] 화면 본문(§4.6) — 콘솔 VoLTE/PTT 이력과 같은 구성: 도구줄 · 시간대 밴드(그날의 분포 = 필터) · 통화 = 전체 폭 표(한 줄이 곧 상세, 녹취는 아래 띠) ·
          PTT = 좌 세션 카드 + 우 선택 세션 패널(지표 → 참여자 → 발언 타임라인 → 이벤트 타임라인 → 녹취, 1 : 3 드래그 조절). 진행 중·오늘은 관제 ②④ 가 정본 -->
     <UserControl.Resources>
-        <!-- 시간대 밴드 한 칸 -->
+        <!-- 시간대 밴드 한 칸 — 연한 남색 농도(글자가 늘 읽히는 범위) · 고른 칸 = 관제 카드 선택과 같은 남색 테두리 -->
         <DataTemplate x:Key="HourCellTpl" DataType="{x:Type vm:HourCell}">
-            <Grid Height="32" Margin="1,0" ToolTip="{Binding Tip}" Cursor="Hand" Background="Transparent">
+            <Grid x:Name="Cell" Height="34" Margin="1.5,0" ToolTip="{Binding Tip}" Cursor="Hand" Background="Transparent">
                 <Grid.InputBindings>
                     <MouseBinding MouseAction="LeftClick" Command="{Binding DataContext.SelectHourCommand, RelativeSource={RelativeSource AncestorType=UserControl}}" CommandParameter="{Binding Hour}" />
                 </Grid.InputBindings>
-                <Border CornerRadius="4" Background="{DynamicResource Brush.BgSoft}" BorderBrush="{DynamicResource Brush.Border}" BorderThickness="1" />
-                <Border CornerRadius="4" Background="{DynamicResource Brush.Primary}" Opacity="{Binding Ratio}" />
-                <Border CornerRadius="4" BorderBrush="{DynamicResource Brush.Text}" BorderThickness="2" Visibility="{Binding IsSelected, Converter={StaticResource BoolToVis}}" />
+                <Border CornerRadius="6" Background="{DynamicResource Brush.BgSoft}" />
+                <Border CornerRadius="6" Background="{DynamicResource Brush.Primary}" Opacity="{Binding Ratio}" />
+                <Border x:Name="Edge" CornerRadius="6" BorderBrush="Transparent" BorderThickness="2.5" />
                 <StackPanel VerticalAlignment="Center">
-                    <TextBlock Text="{Binding CountText}" FontSize="11" FontWeight="SemiBold" HorizontalAlignment="Center" Height="14" />
-                    <TextBlock Text="{Binding Hour}" FontSize="9" HorizontalAlignment="Center" Opacity=".8" />
+                    <TextBlock Text="{Binding CountText}" FontSize="12" FontWeight="Bold" Foreground="{DynamicResource Brush.Text}" HorizontalAlignment="Center" Height="15" />
+                    <TextBlock x:Name="H" Text="{Binding Hour}" FontSize="10.5" Foreground="{DynamicResource Brush.Muted}" HorizontalAlignment="Center" />
                 </StackPanel>
             </Grid>
+            <DataTemplate.Triggers>
+                <DataTrigger Binding="{Binding IsSelected}" Value="True"><Setter TargetName="Edge" Property="BorderBrush" Value="{DynamicResource Brush.Primary}" /><Setter TargetName="H" Property="Foreground" Value="{DynamicResource Brush.PrimaryInk}" /></DataTrigger>
+                <DataTrigger Binding="{Binding Count}" Value="0"><Setter TargetName="Cell" Property="Cursor" Value="Arrow" /><Setter TargetName="H" Property="Foreground" Value="{DynamicResource Brush.Faint}" /></DataTrigger>
+            </DataTemplate.Triggers>
         </DataTemplate>
-        <!-- 통화 표 행 -->
-        <DataTemplate x:Key="CallRowTpl" DataType="{x:Type vm:HistoryRow}">
-            <Border Style="{StaticResource LogRow}">
-                <Grid>
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="52" />
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="64" />
-                        <ColumnDefinition Width="72" />
-                        <ColumnDefinition Width="72" />
-                        <ColumnDefinition Width="72" />
-                        <ColumnDefinition Width="78" />
-                        <ColumnDefinition Width="110" />
-                        <ColumnDefinition Width="56" />
-                    </Grid.ColumnDefinitions>
-                    <Border Grid.Column="0" Style="{StaticResource Badge}" HorizontalAlignment="Left" Padding="6,1"><TextBlock Text="{Binding TypeText}" FontSize="10" /></Border>
-                    <TextBlock Grid.Column="1" VerticalAlignment="Center" TextTrimming="CharacterEllipsis">
-                        <Run Text="{Binding CallerLabel, Mode=OneWay}" FontWeight="SemiBold" Foreground="{DynamicResource Brush.PrimaryInk}" /><Run Text=" → " Foreground="{DynamicResource Brush.Muted}" /><Run Text="{Binding CalleeLabel, Mode=OneWay}" FontWeight="SemiBold" Foreground="{DynamicResource Brush.TalkInk}" />
-                    </TextBlock>
-                    <Border Grid.Column="2" Style="{StaticResource Badge}" HorizontalAlignment="Center" Padding="6,1" Visibility="{Binding IsLive, Converter={StaticResource NotToVis}}"><TextBlock Text="{Binding StateText}" FontSize="10" /></Border>
-                    <Border Grid.Column="2" Style="{StaticResource Badge.Talk}" HorizontalAlignment="Center" Padding="6,1" Visibility="{Binding IsLive, Converter={StaticResource BoolToVis}}"><TextBlock Text="{Binding StateText}" FontSize="10" /></Border>
-                    <TextBlock Grid.Column="3" Style="{StaticResource Mono}" Text="{Binding InviteText}" FontSize="12" VerticalAlignment="Center" />
-                    <TextBlock Grid.Column="4" Style="{StaticResource Mono}" Text="{Binding AnswerText}" FontSize="12" VerticalAlignment="Center" />
-                    <TextBlock Grid.Column="5" Style="{StaticResource Mono}" Text="{Binding EndText}" FontSize="12" VerticalAlignment="Center" />
-                    <TextBlock Grid.Column="6" Style="{StaticResource Mono}" Text="{Binding DurationText}" FontSize="12" VerticalAlignment="Center" HorizontalAlignment="Right" Margin="0,0,8,0" />
-                    <TextBlock Grid.Column="7" Style="{StaticResource Muted}" Text="{Binding EndReasonText}" FontSize="12" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
-                    <StackPanel Grid.Column="8" Orientation="Horizontal" VerticalAlignment="Center" HorizontalAlignment="Center">
-                        <Border Style="{StaticResource Badge.Emg}" Margin="0,0,4,0" Padding="6,1" Visibility="{Binding IsEmergency, Converter={StaticResource BoolToVis}}"><TextBlock Text="긴급" FontSize="10" /></Border>
-                        <Border Style="{StaticResource Badge.Mon}" Margin="0" Padding="6,1" Visibility="{Binding HasRecording, Converter={StaticResource BoolToVis}}"><TextBlock Text="녹취" FontSize="10" /></Border>
-                        <TextBlock Style="{StaticResource Muted}" Text="—" Visibility="{Binding HasRecording, Converter={StaticResource NotToVis}}" />
-                    </StackPanel>
-                </Grid>
-            </Border>
-        </DataTemplate>
-        <!-- PTT 세션 요약 카드 — 무엇을·언제·얼마나 한 덩어리 -->
-        <DataTemplate x:Key="PttCardTpl" DataType="{x:Type vm:HistoryRow}">
-            <Border Style="{StaticResource LogRow}" Padding="10,7">
+        <!-- 통화 결과 태그 — 응답(회색) · 통화 중/호출 중(초록) · 부재/실패/취소(주황) · 거절/오류(빨강): 관제 상태색 -->
+        <Style x:Key="ResultTag" TargetType="Border" BasedOn="{StaticResource Tag}">
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding ResultTone}" Value="talk">
+                    <Setter Property="Background" Value="{DynamicResource Brush.TalkSoft}" /><Setter Property="BorderBrush" Value="{DynamicResource Brush.TalkEdge}" /><Setter Property="TextElement.Foreground" Value="{DynamicResource Brush.TalkInk}" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding ResultTone}" Value="warn">
+                    <Setter Property="Background" Value="{DynamicResource Brush.RingSoft}" /><Setter Property="BorderBrush" Value="{DynamicResource Brush.RingEdge}" /><Setter Property="TextElement.Foreground" Value="{DynamicResource Brush.RingInk}" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding ResultTone}" Value="bad">
+                    <Setter Property="Background" Value="{DynamicResource Brush.EmgSoft}" /><Setter Property="BorderBrush" Value="{DynamicResource Brush.EmgEdge}" /><Setter Property="TextElement.Foreground" Value="{DynamicResource Brush.EmgInk}" />
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
+        <!-- 통화 카드 — 무전 카드와 같은 모양(두 줄): 1줄 결과 · 발신 → 착신 · 영상/긴급/녹취 · 시각 · 2줄 통화 시간·울림 또는 끝난 이유 -->
+        <DataTemplate x:Key="CallCardTpl" DataType="{x:Type vm:HistoryRow}">
+            <Border x:Name="Card" Margin="8,3,8,3" CornerRadius="10" BorderThickness="1" BorderBrush="{DynamicResource Brush.BorderStrong}" Background="{DynamicResource Brush.Surface}"
+                    Padding="12,7,10,7" Cursor="Hand">
                 <StackPanel>
                     <DockPanel>
-                        <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" VerticalAlignment="Center">
-                            <Border Style="{StaticResource Badge.Member}" Padding="6,1"><TextBlock Text="{Binding SessionKindText}" FontSize="10" /></Border>
-                            <Border Style="{StaticResource Badge.Held}" Padding="6,1" Visibility="{Binding IsDuplex, Converter={StaticResource BoolToVis}}"><TextBlock Text="전이중" FontSize="10" /></Border>
-                            <Border Style="{StaticResource Badge.Talk}" Padding="6,1" Visibility="{Binding IsLive, Converter={StaticResource BoolToVis}}"><TextBlock Text="진행중" FontSize="10" /></Border>
-                            <Border Style="{StaticResource Badge}" Padding="6,1" Visibility="{Binding IsLive, Converter={StaticResource NotToVis}}"><TextBlock Text="종료" FontSize="10" /></Border>
-                            <Border Style="{StaticResource Badge.Emg}" Padding="6,1" Visibility="{Binding IsEmergency, Converter={StaticResource BoolToVis}}"><TextBlock Text="긴급" FontSize="10" /></Border>
+                        <TextBlock DockPanel.Dock="Right" Style="{StaticResource MonoMuted}" Text="{Binding StartClock}" FontSize="12" VerticalAlignment="Center" Margin="2,0,0,0" />
+                        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center" Margin="6,0,0,0">
+                            <Border Style="{StaticResource Tag.Held}" Visibility="{Binding IsVideo, Converter={StaticResource BoolToVis}}"><TextBlock Text="영상" /></Border>
+                            <Border Style="{StaticResource Tag.Emg}" Visibility="{Binding IsEmergency, Converter={StaticResource BoolToVis}}"><TextBlock Text="긴급" /></Border>
+                            <Border Style="{StaticResource Tag.Mon}" Visibility="{Binding HasRecording, Converter={StaticResource BoolToVis}}" ToolTip="녹취 있음"><TextBlock Text="녹취" /></Border>
                         </StackPanel>
-                        <Border DockPanel.Dock="Right" Style="{StaticResource Badge.Mon}" Margin="6,0,0,0" Padding="6,1" VerticalAlignment="Center" Visibility="{Binding HasRecording, Converter={StaticResource BoolToVis}}"><TextBlock Text="녹취" FontSize="10" /></Border>
-                        <TextBlock Text="{Binding TargetText}" FontWeight="SemiBold" FontSize="13" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
-                    </DockPanel>
-                    <TextBlock Style="{StaticResource MonoMuted}" FontSize="11.5" Margin="0,3,0,0" Text="{Binding SubText}" />
-                    <DockPanel Margin="0,3,0,0">
-                        <TextBlock DockPanel.Dock="Right" Style="{StaticResource Muted}" FontSize="11" Visibility="{Binding HasInitiator, Converter={StaticResource BoolToVis}}">
-                            <Run Text="개시 " /><Run Text="{Binding InitiatorLabel, Mode=OneWay}" Foreground="{DynamicResource Brush.Text}" />
+                        <Border DockPanel.Dock="Left" Style="{StaticResource ResultTag}" Margin="0,0,8,0"><TextBlock Text="{Binding ResultText}" /></Border>
+                        <TextBlock x:Name="Name" FontSize="14" FontWeight="Bold" TextTrimming="CharacterEllipsis" VerticalAlignment="Center">
+                            <Run Text="{Binding CallerLabel, Mode=OneWay}" /><Run Text=" → " Foreground="{DynamicResource Brush.Faint}" FontWeight="Normal" /><Run Text="{Binding CalleeLabel, Mode=OneWay}" />
                         </TextBlock>
-                        <StackPanel Orientation="Horizontal">
-                            <TextBlock Style="{StaticResource Muted}" FontSize="11" Margin="0,0,10,0"><Run Text="턴 " /><Run Text="{Binding TurnCount, Mode=OneWay}" FontWeight="SemiBold" Foreground="{DynamicResource Brush.Text}" /></TextBlock>
-                            <TextBlock Style="{StaticResource Muted}" FontSize="11" Margin="0,0,10,0"><Run Text="화자 " /><Run Text="{Binding SpeakerCount, Mode=OneWay}" FontWeight="SemiBold" Foreground="{DynamicResource Brush.Text}" /></TextBlock>
-                            <TextBlock Style="{StaticResource Muted}" FontSize="11" Margin="0,0,10,0"><Run Text="발화 " /><Run Text="{Binding SpeechText, Mode=OneWay}" FontWeight="SemiBold" Foreground="{DynamicResource Brush.Text}" /></TextBlock>
-                            <Border Style="{StaticResource Badge.Held}" Padding="6,0" Visibility="{Binding ShowConcurrent, Converter={StaticResource BoolToVis}}">
-                                <TextBlock FontSize="9"><Run Text="동시 " /><Run Text="{Binding MaxConcurrent, Mode=OneWay}" /></TextBlock>
-                            </Border>
-                        </StackPanel>
                     </DockPanel>
+                    <TextBlock Text="{Binding CallSub}" Style="{StaticResource Muted}" FontSize="12.5" Margin="2,3,0,0" TextTrimming="CharacterEllipsis" />
                 </StackPanel>
             </Border>
+            <DataTemplate.Triggers>
+                <DataTrigger Binding="{Binding IsMouseOver, RelativeSource={RelativeSource AncestorType=ListBoxItem}}" Value="True"><Setter TargetName="Card" Property="Background" Value="{DynamicResource Brush.Hover}" /></DataTrigger>
+                <DataTrigger Binding="{Binding IsEmergency}" Value="True">
+                    <Setter TargetName="Card" Property="BorderBrush" Value="{DynamicResource Brush.Emg}" /><Setter TargetName="Card" Property="BorderThickness" Value="2" />
+                    <Setter TargetName="Card" Property="Background" Value="{DynamicResource Brush.EmgSoft}" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding IsSelected, RelativeSource={RelativeSource AncestorType=ListBoxItem}}" Value="True">
+                    <Setter TargetName="Card" Property="BorderBrush" Value="{DynamicResource Brush.Primary}" /><Setter TargetName="Card" Property="BorderThickness" Value="2.5" />
+                    <Setter TargetName="Card" Property="Background" Value="{DynamicResource Brush.PrimarySoft}" />
+                </DataTrigger>
+            </DataTemplate.Triggers>
         </DataTemplate>
+        <!-- 무전 세션 카드 — 관제 채널 카드(§4 공통)와 같은 모양: 1줄 상태 점 · 이름 · 라벨(개별/애드혹/전이중/진행 중/긴급) · 시각 · 2줄 개시·참여 · 3줄 길이·발언.
+             고른 카드 = 남색 테두리 2.5 + 연한 남색 면, 긴급 = 빨강 테두리 2 + 연한 빨강 면 -->
+        <DataTemplate x:Key="PttCardTpl" DataType="{x:Type vm:HistoryRow}">
+            <Border x:Name="Card" Margin="8,3,8,3" CornerRadius="10" BorderThickness="1" BorderBrush="{DynamicResource Brush.BorderStrong}" Background="{DynamicResource Brush.Surface}"
+                    Padding="12,7,10,7" Cursor="Hand" ToolTip="{Binding RangeText}">
+                <StackPanel>
+                    <DockPanel>
+                        <!-- 이름이 길면 이름만 줄인다 — 라벨·시각은 오른쪽에 붙어 잘리지 않는다 -->
+                        <TextBlock DockPanel.Dock="Right" Style="{StaticResource MonoMuted}" Text="{Binding StartClock}" FontSize="12" VerticalAlignment="Center" Margin="2,0,0,0" />
+                        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center" Margin="6,0,0,0">
+                            <Border Style="{StaticResource Tag}" Visibility="{Binding IsPrivate, Converter={StaticResource BoolToVis}}"><TextBlock Text="개별" /></Border>
+                            <Border Style="{StaticResource Tag}" Visibility="{Binding IsAdhoc, Converter={StaticResource BoolToVis}}"><TextBlock Text="애드혹" /></Border>
+                            <Border Style="{StaticResource Tag.Held}" Visibility="{Binding IsDuplex, Converter={StaticResource BoolToVis}}"><TextBlock Text="전이중" /></Border>
+                            <Border Style="{StaticResource Tag.Talk}" Visibility="{Binding IsLive, Converter={StaticResource BoolToVis}}"><TextBlock Text="진행 중" /></Border>
+                            <Border Style="{StaticResource Tag.Emg}" Visibility="{Binding IsEmergency, Converter={StaticResource BoolToVis}}"><TextBlock Text="긴급" /></Border>
+                            <Border Style="{StaticResource Tag.Mon}" Visibility="{Binding HasRecording, Converter={StaticResource BoolToVis}}" ToolTip="녹취 있음"><TextBlock Text="녹취" /></Border>
+                        </StackPanel>
+                        <Ellipse x:Name="Dot" DockPanel.Dock="Left" Width="9" Height="9" Fill="{DynamicResource Brush.Muted}" Margin="0,0,7,0" VerticalAlignment="Center" />
+                        <TextBlock x:Name="Name" Text="{Binding TargetText}" FontSize="14" FontWeight="Bold" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                    </DockPanel>
+                    <TextBlock Text="{Binding WhoLine}" FontSize="12.5" Margin="16,2,0,0" Foreground="{DynamicResource Brush.TextSoft}" TextTrimming="CharacterEllipsis" />
+                    <TextBlock Text="{Binding StatLine}" Style="{StaticResource Muted}" FontSize="12" Margin="16,1,0,0" TextTrimming="CharacterEllipsis" />
+                </StackPanel>
+            </Border>
+            <DataTemplate.Triggers>
+                <DataTrigger Binding="{Binding IsLive}" Value="True"><Setter TargetName="Dot" Property="Fill" Value="{DynamicResource Brush.Talk}" /></DataTrigger>
+                <DataTrigger Binding="{Binding IsMouseOver, RelativeSource={RelativeSource AncestorType=ListBoxItem}}" Value="True"><Setter TargetName="Card" Property="Background" Value="{DynamicResource Brush.Hover}" /></DataTrigger>
+                <DataTrigger Binding="{Binding IsEmergency}" Value="True">
+                    <Setter TargetName="Card" Property="BorderBrush" Value="{DynamicResource Brush.Emg}" /><Setter TargetName="Card" Property="BorderThickness" Value="2" />
+                    <Setter TargetName="Card" Property="Background" Value="{DynamicResource Brush.EmgSoft}" /><Setter TargetName="Dot" Property="Fill" Value="{DynamicResource Brush.Emg}" />
+                    <Setter TargetName="Name" Property="Foreground" Value="{DynamicResource Brush.EmgInk}" />
+                </DataTrigger>
+                <DataTrigger Binding="{Binding IsSelected, RelativeSource={RelativeSource AncestorType=ListBoxItem}}" Value="True">
+                    <Setter TargetName="Card" Property="BorderBrush" Value="{DynamicResource Brush.Primary}" /><Setter TargetName="Card" Property="BorderThickness" Value="2.5" />
+                    <Setter TargetName="Card" Property="Background" Value="{DynamicResource Brush.PrimarySoft}" />
+                </DataTrigger>
+            </DataTemplate.Triggers>
+        </DataTemplate>
+        <!-- 카드 목록의 항목 그릇 — 선택·호버는 카드가 그린다(목록 줄의 왼쪽 막대·면 없음) -->
+        <Style x:Key="CardItem" TargetType="ListBoxItem">
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ListBoxItem"><ContentPresenter /></ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <!-- 카드 목록 = 시간대(밴드와 같은 축)로 묶는다 — 머리 "03시 · 60건" (통화·무전 공용) -->
+        <GroupStyle x:Key="HourGroup">
+            <GroupStyle.HeaderTemplate>
+                <DataTemplate>
+                    <DockPanel Margin="12,8,14,3">
+                        <TextBlock DockPanel.Dock="Right" Style="{StaticResource Muted}" FontSize="12"><Run Text="{Binding ItemCount, Mode=OneWay}" /><Run Text="건" /></TextBlock>
+                        <TextBlock Text="{Binding Name}" FontSize="12.5" FontWeight="Bold" Foreground="{DynamicResource Brush.TextSoft}" />
+                    </DockPanel>
+                </DataTemplate>
+            </GroupStyle.HeaderTemplate>
+        </GroupStyle>
+        <CollectionViewSource x:Key="RowsByHour" Source="{Binding Rows}">
+            <CollectionViewSource.GroupDescriptions>
+                <PropertyGroupDescription PropertyName="HourKey" />
+            </CollectionViewSource.GroupDescriptions>
+        </CollectionViewSource>
     </UserControl.Resources>
 
     <DockPanel Margin="10">
         <!-- 도구줄 -->
         <DockPanel DockPanel.Dock="Top" Margin="0,0,0,8">
-            <Button DockPanel.Dock="Right" Style="{StaticResource Btn.Sm.Pri}" Content="조회" Command="{Binding QueryCommand}" />
-            <Border Style="{StaticResource SegGroup}" Margin="0,0,8,0" VerticalAlignment="Center">
+            <Button DockPanel.Dock="Right" Style="{StaticResource Btn.Sm}" Command="{Binding QueryCommand}" ToolTip="이 날짜를 다시 조회 — 날짜·종류를 바꾸면 저절로 조회합니다" Padding="7,0"><Path Style="{StaticResource Icon}" Data="{StaticResource Icon.RotateCw}" /></Button>
+            <!-- 관제 탭 줄과 같은 [무전|통화] — 같은 순서·같은 모양(남색 외곽선 안, 고른 칸 = 남색 채움) -->
+            <Border Height="36" CornerRadius="9" BorderThickness="1.5" BorderBrush="{DynamicResource Brush.Fill}" Padding="2" Margin="0,0,12,0" VerticalAlignment="Center">
                 <StackPanel Orientation="Horizontal">
-                    <RadioButton Style="{StaticResource Seg}" Content="통화 (VoLTE)" IsChecked="{Binding KindIndex, Converter={StaticResource Eq}, ConverterParameter=0}" />
-                    <RadioButton Style="{StaticResource Seg}" Content="PTT 세션" IsChecked="{Binding KindIndex, Converter={StaticResource Eq}, ConverterParameter=1}" />
+                    <RadioButton Style="{StaticResource ModeSeg}" Content="무전" ToolTip="지난 무전 세션" IsChecked="{Binding KindIndex, Converter={StaticResource Eq}, ConverterParameter=1}" />
+                    <RadioButton Style="{StaticResource ModeSeg}" Content="통화" ToolTip="지난 통화" IsChecked="{Binding KindIndex, Converter={StaticResource Eq}, ConverterParameter=0}" />
                 </StackPanel>
             </Border>
             <Button Style="{StaticResource Btn.Sm}" Command="{Binding ShiftDateCommand}" CommandParameter="-1" ToolTip="전날" Margin="0,0,4,0" Padding="7,0"><Path Style="{StaticResource Icon}" Data="{StaticResource Icon.ChevronLeft}" /></Button>
             <DatePicker SelectedDate="{Binding Date}" Width="140" VerticalAlignment="Center" />
             <Button Style="{StaticResource Btn.Sm}" Command="{Binding ShiftDateCommand}" CommandParameter="1" ToolTip="다음 날" Margin="4,0,4,0" Padding="7,0"><Path Style="{StaticResource Icon}" Data="{StaticResource Icon.ChevronRight}" /></Button>
             <Button Style="{StaticResource Btn.Sm}" Content="오늘" Command="{Binding ShiftDateCommand}" CommandParameter="0" Margin="0,0,8,0" />
-            <TextBox Style="{StaticResource Field}" Width="220" Height="26" Text="{Binding Search, UpdateSourceTrigger=PropertyChanged}" Tag="상대·그룹·참여자 검색" Margin="0,0,8,0" />
+            <TextBox Style="{StaticResource Field}" Width="220" Height="26" Text="{Binding Search, UpdateSourceTrigger=PropertyChanged}" Tag="이름 · 번호 · 그룹" Margin="0,0,8,0" />
             <TextBlock Style="{StaticResource Muted}" Text="{Binding Summary}" FontSize="12" VerticalAlignment="Center" />
             <TextBlock Style="{StaticResource Hint}" Foreground="{DynamicResource Brush.Emg}" Text="{Binding Error}" VerticalAlignment="Center" Margin="12,0,0,0" TextTrimming="CharacterEllipsis"
                        Visibility="{Binding HasError, Converter={StaticResource BoolToVis}}" />
         </DockPanel>
 
         <!-- 시간대 밴드 — 그날의 분포이자 필터(클릭 = 그 시간대만, 다시 클릭 = 해제) -->
-        <Border DockPanel.Dock="Top" Style="{StaticResource Sub}" Padding="10,6" Margin="0,0,0,8">
+        <Border DockPanel.Dock="Top" Style="{StaticResource Sub}" Padding="10,8" Margin="0,0,0,8">
             <DockPanel>
-                <StackPanel DockPanel.Dock="Left" Width="110" VerticalAlignment="Center" Margin="0,0,8,0">
-                    <TextBlock Style="{StaticResource Hint}" Text="시간대별 건수" />
-                    <TextBlock Style="{StaticResource Hint}" Text="진할수록 많음 · 클릭 = 그 시간대만" FontSize="10" Opacity=".8" TextWrapping="Wrap" />
-                </StackPanel>
-                <Button DockPanel.Dock="Right" Style="{StaticResource Btn.Xs}" Content="전체 시간" Margin="8,0,0,0" VerticalAlignment="Center"
-                        Command="{Binding SelectHourCommand}" CommandParameter="{Binding SelectedHour}" Visibility="{Binding HasHourFilter, Converter={StaticResource BoolToVis}}" />
+                <DockPanel DockPanel.Dock="Top" Margin="1.5,0,1.5,6">
+                    <Button DockPanel.Dock="Right" Style="{StaticResource Btn.Xs}" Content="전체 시간" Margin="8,0,0,0" VerticalAlignment="Center"
+                            Command="{Binding SelectHourCommand}" CommandParameter="{Binding SelectedHour}" Visibility="{Binding HasHourFilter, Converter={StaticResource BoolToVis}}" />
+                    <TextBlock DockPanel.Dock="Right" Style="{StaticResource Hint}" Text="칸을 누르면 그 시간만 · 다시 누르면 전체" VerticalAlignment="Center" />
+                    <TextBlock DockPanel.Dock="Left" Style="{StaticResource SectionHeader}" Text="{Binding BandTitle}" Margin="0,0,10,0" />
+                    <!-- 무전만 — 무엇을 셀지: 성립한 세션 수 / 발언 수(세션 시작 시간대에 넣는다) -->
+                    <Border DockPanel.Dock="Left" Style="{StaticResource SegGroup}" HorizontalAlignment="Left" VerticalAlignment="Center" Visibility="{Binding IsPtt, Converter={StaticResource BoolToVis}}">
+                        <StackPanel Orientation="Horizontal">
+                            <RadioButton Style="{StaticResource Seg}" Content="세션" ToolTip="그 시간에 시작해 성립한 무전 세션 수" IsChecked="{Binding BandMode, Converter={StaticResource Eq}, ConverterParameter=0}" />
+                            <RadioButton Style="{StaticResource Seg}" Content="발언" ToolTip="그 시간에 시작한 세션들에서 말한 횟수의 합" IsChecked="{Binding BandMode, Converter={StaticResource Eq}, ConverterParameter=1}" />
+                        </StackPanel>
+                    </Border>
+                    <Grid />
+                </DockPanel>
                 <ItemsControl ItemsSource="{Binding Hours}" ItemTemplate="{StaticResource HourCellTpl}">
                     <ItemsControl.ItemsPanel><ItemsPanelTemplate><UniformGrid Rows="1" Columns="24" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
                 </ItemsControl>
@@ -135,7 +193,7 @@
                 <ColumnDefinition x:Name="PaneCol" Width="380" />
             </Grid.ColumnDefinitions>
             <GridSplitter Grid.Column="1" Width="6" HorizontalAlignment="Center" VerticalAlignment="Stretch" Background="Transparent" ShowsPreview="False"
-                          ToolTip="드래그로 폭 조정 · 더블클릭으로 기본 폭" MouseDoubleClick="Splitter_DoubleClick" Visibility="{Binding IsPtt, Converter={StaticResource BoolToVis}}">
+                          ToolTip="드래그로 폭 조정 · 더블클릭으로 기본 폭" MouseDoubleClick="Splitter_DoubleClick">
                 <GridSplitter.Template>
                     <ControlTemplate TargetType="GridSplitter">
                         <Grid Background="Transparent" Cursor="SizeWE"><Rectangle Width="1" Fill="{DynamicResource Brush.Border}" HorizontalAlignment="Center" /></Grid>
@@ -145,75 +203,136 @@
             <!-- 재생기 — 보이지 않는다. 통화/PTT 패널의 재생 버튼·턴 막대가 VM 이벤트로 이 요소를 튼다 -->
             <MediaElement x:Name="Player" LoadedBehavior="Manual" UnloadedBehavior="Manual" Width="0" Height="0" MediaEnded="Player_MediaEnded" MediaFailed="Player_MediaFailed" />
 
-            <!-- 좌 — 통화 표 -->
-            <Border Grid.Column="0" Grid.ColumnSpan="3" Style="{StaticResource Sub}" Margin="0" Visibility="{Binding IsCall, Converter={StaticResource BoolToVis}}">
+            <!-- 좌 — 통화 카드(시간대 묶음) -->
+            <Border Grid.Column="0" Style="{StaticResource Sub}" Margin="0,0,4,0" Visibility="{Binding IsCall, Converter={StaticResource BoolToVis}}">
                 <DockPanel>
-                    <!-- 녹취 띠 — 통화는 상세가 따로 없어 한 줄이 전부다. 행을 고르면 표 아래에 녹취 상태(없으면 "녹취 없음")·있으면 세그먼트와 재생 -->
-                    <Border DockPanel.Dock="Bottom" BorderBrush="{DynamicResource Brush.Border}" BorderThickness="0,1,0,0" Padding="10,6"
-                            Visibility="{Binding HasSelection, Converter={StaticResource BoolToVis}}">
-                        <DockPanel>
-                            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center" Visibility="{Binding SelectedHasRecording, Converter={StaticResource BoolToVis}}">
-                                <Button Style="{StaticResource Btn.Xs}" Content="다시 변환" ToolTip="변환 실패 표식을 지우고 다시 변환 요청" Command="{Binding RetryTranscodeCommand}" IsEnabled="{Binding CanPlay}" Margin="0,0,4,0" />
-                                <Button Style="{StaticResource Btn.Xs}" Content="정지" Command="{Binding StopCommand}" IsEnabled="{Binding IsPlaying}" Margin="0,0,4,0" />
-                                <Button Style="{StaticResource Btn.Xs.Pri}" Command="{Binding PlayCommand}" IsEnabled="{Binding CanPlay}"><StackPanel Orientation="Horizontal"><Path Style="{StaticResource Icon.Filled}" Data="{StaticResource Icon.Play}" Width="10" Height="10" Margin="0,0,4,0" /><TextBlock Text="재생" /></StackPanel></Button>
-                            </StackPanel>
-                            <TextBlock DockPanel.Dock="Left" Style="{StaticResource SectionHeader}" Text="녹취" VerticalAlignment="Center" Margin="0,0,8,0" />
-                            <TextBlock DockPanel.Dock="Left" Style="{StaticResource Muted}" Text="{Binding Selected.Parties}" FontSize="12" VerticalAlignment="Center" Margin="0,0,10,0" />
-                            <TextBlock DockPanel.Dock="Left" Style="{StaticResource Hint}" Text="{Binding RecordingStatus}" VerticalAlignment="Center" Margin="0,0,10,0" />
-                            <TextBlock DockPanel.Dock="Right" Style="{StaticResource Muted}" Text="{Binding PlayingLabel}" FontSize="12" VerticalAlignment="Center" Margin="0,0,10,0" TextTrimming="CharacterEllipsis"
-                                       Visibility="{Binding PlayingLabel, Converter={StaticResource StrToVis}}" />
-                            <ListBox Style="{StaticResource SelectList}" ItemsSource="{Binding Segments}" SelectedItem="{Binding SelectedSegment}" MouseDoubleClick="Segments_DoubleClick"
-                                     VerticalAlignment="Center" Visibility="{Binding HasRecording, Converter={StaticResource BoolToVis}}">
-                                <ListBox.ItemsPanel><ItemsPanelTemplate><StackPanel Orientation="Horizontal" /></ItemsPanelTemplate></ListBox.ItemsPanel>
-                                <ListBox.ItemTemplate>
-                                    <DataTemplate DataType="{x:Type m:RecordingSegment}">
-                                        <Border Style="{StaticResource Chip}" Margin="0,0,6,0" ToolTip="{Binding Status}">
-                                            <TextBlock FontSize="12">
-                                                <Run Text="{Binding Label, Mode=OneWay}" FontWeight="Medium" /><Run Text=" " /><Run Text="{Binding Start, Mode=OneWay, StringFormat=HH:mm:ss}" Foreground="{DynamicResource Brush.Muted}" /><Run Text=" " /><Run Text="{Binding DurationText, Mode=OneWay}" Foreground="{DynamicResource Brush.Muted}" />
-                                            </TextBlock>
-                                        </Border>
-                                    </DataTemplate>
-                                </ListBox.ItemTemplate>
-                            </ListBox>
-                        </DockPanel>
-                    </Border>
-                    <Border DockPanel.Dock="Top" Style="{StaticResource LogHeader}">
-                        <Grid>
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="52" />
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="64" />
-                                <ColumnDefinition Width="72" />
-                                <ColumnDefinition Width="72" />
-                                <ColumnDefinition Width="72" />
-                                <ColumnDefinition Width="78" />
-                                <ColumnDefinition Width="110" />
-                                <ColumnDefinition Width="56" />
-                            </Grid.ColumnDefinitions>
-                            <TextBlock Grid.Column="0" Style="{StaticResource Hint}" Text="유형" />
-                            <TextBlock Grid.Column="1" Style="{StaticResource Hint}" Text="발신 → 착신" />
-                            <TextBlock Grid.Column="2" Style="{StaticResource Hint}" Text="상태" HorizontalAlignment="Center" />
-                            <TextBlock Grid.Column="3" Style="{StaticResource Hint}" Text="시작" />
-                            <TextBlock Grid.Column="4" Style="{StaticResource Hint}" Text="응답" />
-                            <TextBlock Grid.Column="5" Style="{StaticResource Hint}" Text="종료" />
-                            <TextBlock Grid.Column="6" Style="{StaticResource Hint}" Text="통화시간" HorizontalAlignment="Right" Margin="0,0,8,0" />
-                            <TextBlock Grid.Column="7" Style="{StaticResource Hint}" Text="종료사유" />
-                            <TextBlock Grid.Column="8" Style="{StaticResource Hint}" Text="녹취" HorizontalAlignment="Center" />
-                        </Grid>
-                    </Border>
-                    <TextBlock Style="{StaticResource Hint}" Text="조건에 맞는 통화가 없습니다" Margin="12" Visibility="{Binding Rows.Count, Converter={StaticResource ZeroToVis}}" />
-                    <ListBox Style="{StaticResource SelectList}" ItemsSource="{Binding Rows}" SelectedItem="{Binding Selected}" ItemTemplate="{StaticResource CallRowTpl}" />
+                    <TextBlock DockPanel.Dock="Top" Style="{StaticResource Hint}" Text="이 날에 맞는 통화가 없습니다" Margin="12" Visibility="{Binding Rows.Count, Converter={StaticResource ZeroToVis}}" />
+                    <ListBox Style="{StaticResource PlainList}" ItemsSource="{Binding Source={StaticResource RowsByHour}}" IsSynchronizedWithCurrentItem="False" SelectedItem="{Binding Selected}" ItemTemplate="{StaticResource CallCardTpl}"
+                             ItemContainerStyle="{StaticResource CardItem}" VirtualizingPanel.IsVirtualizingWhenGrouping="True" VirtualizingPanel.ScrollUnit="Pixel" Padding="0,4">
+                        <ListBox.GroupStyle><StaticResource ResourceKey="HourGroup" /></ListBox.GroupStyle>
+                    </ListBox>
                 </DockPanel>
+            </Border>
+
+            <!-- 우 — 통화: 고른 통화 상세 (머리 → 숫자 칸 → 당사자 → 진행 → 녹취). 영상 호도 같은 칸(종류 «영상»·태그) -->
+            <Border Grid.Column="2" Style="{StaticResource Card}" Padding="0" Margin="4,0,0,0" Visibility="{Binding IsCall, Converter={StaticResource BoolToVis}}">
+                <Grid>
+                    <TextBlock Style="{StaticResource Hint}" Text="왼쪽에서 통화를 고르면 여기 나옵니다" HorizontalAlignment="Center" VerticalAlignment="Center"
+                               Visibility="{Binding HasSelection, Converter={StaticResource NotToVis}}" />
+                    <DockPanel Visibility="{Binding HasSelection, Converter={StaticResource BoolToVis}}">
+                        <Border DockPanel.Dock="Top" Style="{StaticResource SubHeader}" Padding="16,10">
+                            <DockPanel DataContext="{Binding Selected}">
+                                <TextBlock DockPanel.Dock="Right" Style="{StaticResource MonoMuted}" Text="{Binding DayClock}" FontSize="12.5" VerticalAlignment="Center" />
+                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                    <TextBlock FontWeight="Bold" FontSize="16" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" MaxWidth="560" Margin="0,0,10,0">
+                                        <Run Text="{Binding CallerLabel, Mode=OneWay}" /><Run Text=" → " Foreground="{DynamicResource Brush.Faint}" FontWeight="Normal" /><Run Text="{Binding CalleeLabel, Mode=OneWay}" />
+                                    </TextBlock>
+                                    <Border Style="{StaticResource ResultTag}"><TextBlock Text="{Binding ResultText}" /></Border>
+                                    <Border Style="{StaticResource Tag.Held}" Visibility="{Binding IsVideo, Converter={StaticResource BoolToVis}}"><TextBlock Text="영상" /></Border>
+                                    <Border Style="{StaticResource Tag.Emg}" Visibility="{Binding IsEmergency, Converter={StaticResource BoolToVis}}"><TextBlock Text="긴급" /></Border>
+                                </StackPanel>
+                            </DockPanel>
+                        </Border>
+                        <!-- 녹취(아래 고정) -->
+                        <Border DockPanel.Dock="Bottom" BorderBrush="{DynamicResource Brush.Border}" BorderThickness="0,1,0,0" Padding="16,10">
+                            <StackPanel>
+                                <DockPanel>
+                                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Visibility="{Binding SelectedHasRecording, Converter={StaticResource BoolToVis}}">
+                                        <Button Style="{StaticResource Btn.Xs}" Content="다시 변환" ToolTip="변환 실패 표식을 지우고 다시 변환 요청" Command="{Binding RetryTranscodeCommand}" IsEnabled="{Binding CanPlay}" Margin="0,0,4,0" />
+                                        <Button Style="{StaticResource Btn.Xs}" Content="정지" Command="{Binding StopCommand}" IsEnabled="{Binding IsPlaying}" Margin="0,0,4,0" />
+                                        <Button Style="{StaticResource Btn.Xs.Pri}" Command="{Binding PlayCommand}" IsEnabled="{Binding CanPlay}"><StackPanel Orientation="Horizontal"><Path Style="{StaticResource Icon.Filled}" Data="{StaticResource Icon.Play}" Width="10" Height="10" Margin="0,0,4,0" /><TextBlock Text="재생" /></StackPanel></Button>
+                                    </StackPanel>
+                                    <TextBlock Style="{StaticResource SectionHeader}" Text="녹취" FontSize="13" FontWeight="Bold" VerticalAlignment="Center" Margin="0,0,8,0" />
+                                    <TextBlock Style="{StaticResource Hint}" Text="{Binding RecordingStatus}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                                </DockPanel>
+                                <TextBlock Style="{StaticResource Muted}" Text="{Binding PlayingLabel}" FontSize="12" TextWrapping="Wrap" Margin="0,4,0,0" Visibility="{Binding PlayingLabel, Converter={StaticResource StrToVis}}" />
+                                <ListBox Style="{StaticResource SelectList}" ItemsSource="{Binding Segments}" SelectedItem="{Binding SelectedSegment}" MouseDoubleClick="Segments_DoubleClick"
+                                         Margin="0,6,0,0" Visibility="{Binding HasRecording, Converter={StaticResource BoolToVis}}">
+                                    <ListBox.ItemsPanel><ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate></ListBox.ItemsPanel>
+                                    <ListBox.ItemTemplate>
+                                        <DataTemplate DataType="{x:Type m:RecordingSegment}">
+                                            <Border Style="{StaticResource Chip}" Margin="0,0,6,0" ToolTip="{Binding Status}">
+                                                <TextBlock FontSize="12">
+                                                    <Run Text="{Binding Label, Mode=OneWay}" FontWeight="Medium" /><Run Text=" " /><Run Text="{Binding Start, Mode=OneWay, StringFormat=HH:mm:ss}" Foreground="{DynamicResource Brush.Muted}" /><Run Text=" " /><Run Text="{Binding DurationText, Mode=OneWay}" Foreground="{DynamicResource Brush.Muted}" />
+                                                </TextBlock>
+                                            </Border>
+                                        </DataTemplate>
+                                    </ListBox.ItemTemplate>
+                                </ListBox>
+                            </StackPanel>
+                        </Border>
+                        <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                            <StackPanel Margin="16,14,16,14" DataContext="{Binding Selected}">
+                                <!-- 숫자 칸 — 울린 시간 · 통화 시간 · 끝난 이유 · 종류 -->
+                                <UniformGrid Rows="1" Columns="4" Margin="0,0,0,18">
+                                    <Border Margin="0,0,8,0" Padding="14,8" CornerRadius="8" Background="{DynamicResource Brush.Surface2}" ToolTip="호출부터 응답까지 — 응답이 없으면 끊길 때까지">
+                                        <StackPanel><TextBlock Style="{StaticResource Muted}" Text="울린 시간" FontSize="11.5" /><TextBlock Text="{Binding RingText}" FontSize="18" FontWeight="Bold" /></StackPanel>
+                                    </Border>
+                                    <Border Margin="0,0,8,0" Padding="14,8" CornerRadius="8" Background="{DynamicResource Brush.Surface2}">
+                                        <StackPanel><TextBlock Style="{StaticResource Muted}" Text="통화 시간" FontSize="11.5" /><TextBlock Text="{Binding DurationText}" FontSize="18" FontWeight="Bold" /></StackPanel>
+                                    </Border>
+                                    <Border Margin="0,0,8,0" Padding="14,8" CornerRadius="8" Background="{DynamicResource Brush.Surface2}">
+                                        <StackPanel><TextBlock Style="{StaticResource Muted}" Text="끝난 이유" FontSize="11.5" /><TextBlock Text="{Binding EndReasonText}" FontSize="18" FontWeight="Bold" TextTrimming="CharacterEllipsis" /></StackPanel>
+                                    </Border>
+                                    <Border Padding="14,8" CornerRadius="8" Background="{DynamicResource Brush.Surface2}">
+                                        <StackPanel><TextBlock Style="{StaticResource Muted}" Text="종류" FontSize="11.5" /><TextBlock Text="{Binding TypeText}" FontSize="18" FontWeight="Bold" /></StackPanel>
+                                    </Border>
+                                </UniformGrid>
+                                <!-- 당사자 -->
+                                <TextBlock Text="당사자" FontWeight="Bold" FontSize="13" Margin="0,0,0,8" />
+                                <Grid Margin="0,0,0,18">
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                                    <Border Grid.Column="0" Padding="12,10" CornerRadius="10" BorderThickness="1" BorderBrush="{DynamicResource Brush.Border}">
+                                        <DockPanel>
+                                            <Border DockPanel.Dock="Left" Style="{StaticResource Avatar}" Margin="0,0,10,0" Tag="{Binding CallerLabel, Converter={StaticResource AvatarHue}}"><TextBlock Text="{Binding CallerInitial}" HorizontalAlignment="Center" VerticalAlignment="Center" /></Border>
+                                            <StackPanel VerticalAlignment="Center">
+                                                <TextBlock Style="{StaticResource Muted}" Text="발신" FontSize="11.5" />
+                                                <TextBlock Text="{Binding CallerLabel}" FontWeight="Bold" FontSize="14" TextTrimming="CharacterEllipsis" />
+                                                <TextBlock Style="{StaticResource MonoMuted}" Text="{Binding CallerNumber}" FontSize="12" Visibility="{Binding HasCallerNumber, Converter={StaticResource BoolToVis}}" />
+                                            </StackPanel>
+                                        </DockPanel>
+                                    </Border>
+                                    <TextBlock Grid.Column="1" Text="→" FontSize="18" Foreground="{DynamicResource Brush.Faint}" VerticalAlignment="Center" Margin="12,0" />
+                                    <Border Grid.Column="2" Padding="12,10" CornerRadius="10" BorderThickness="1" BorderBrush="{DynamicResource Brush.Border}">
+                                        <DockPanel>
+                                            <Border DockPanel.Dock="Left" Style="{StaticResource Avatar}" Margin="0,0,10,0" Tag="{Binding CalleeLabel, Converter={StaticResource AvatarHue}}"><TextBlock Text="{Binding CalleeInitial}" HorizontalAlignment="Center" VerticalAlignment="Center" /></Border>
+                                            <StackPanel VerticalAlignment="Center">
+                                                <TextBlock Style="{StaticResource Muted}" Text="착신" FontSize="11.5" />
+                                                <TextBlock Text="{Binding CalleeLabel}" FontWeight="Bold" FontSize="14" TextTrimming="CharacterEllipsis" />
+                                                <TextBlock Style="{StaticResource MonoMuted}" Text="{Binding CalleeNumber}" FontSize="12" Visibility="{Binding HasCalleeNumber, Converter={StaticResource BoolToVis}}" />
+                                            </StackPanel>
+                                        </DockPanel>
+                                    </Border>
+                                </Grid>
+                                <!-- 진행 — 울림(주황) : 통화(남색) 막대 + 호출·응답·종료 시각 -->
+                                <TextBlock Text="진행" FontWeight="Bold" FontSize="13" Margin="0,0,0,8" />
+                                <Border CornerRadius="5" Height="10" Background="{DynamicResource Brush.Surface2}" ClipToBounds="True">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="{Binding RingStar}" /><ColumnDefinition Width="{Binding TalkStar}" /></Grid.ColumnDefinitions>
+                                        <Border Grid.Column="0" Background="{DynamicResource Brush.RingEdge}" CornerRadius="5,0,0,5" ToolTip="울림" />
+                                        <Border x:Name="TalkBar" Grid.Column="1" Background="{DynamicResource Brush.Primary}" CornerRadius="0,5,5,0" ToolTip="통화" />
+                                    </Grid>
+                                </Border>
+                                <Grid Margin="0,6,0,0">
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="0" FontSize="12.5"><Run Text="호출 " Foreground="{DynamicResource Brush.Muted}" /><Run Text="{Binding InviteText, Mode=OneWay}" FontFamily="{StaticResource Font.Mono}" /></TextBlock>
+                                    <TextBlock Grid.Column="1" FontSize="12.5" HorizontalAlignment="Center"><Run Text="응답 " Foreground="{DynamicResource Brush.Muted}" /><Run Text="{Binding AnswerText, Mode=OneWay}" FontFamily="{StaticResource Font.Mono}" /></TextBlock>
+                                    <TextBlock Grid.Column="2" FontSize="12.5" HorizontalAlignment="Right"><Run Text="종료 " Foreground="{DynamicResource Brush.Muted}" /><Run Text="{Binding EndText, Mode=OneWay}" FontFamily="{StaticResource Font.Mono}" /></TextBlock>
+                                </Grid>
+                            </StackPanel>
+                        </ScrollViewer>
+                    </DockPanel>
+                </Grid>
             </Border>
 
             <!-- 좌 — PTT 세션 카드 -->
             <Border Grid.Column="0" Style="{StaticResource Sub}" Margin="0,0,4,0" Visibility="{Binding IsPtt, Converter={StaticResource BoolToVis}}">
                 <DockPanel>
-                    <Border DockPanel.Dock="Top" Style="{StaticResource LogHeader}">
-                        <TextBlock Style="{StaticResource Hint}" Text="세션 — 최근이 위 · 선택하면 오른쪽에 참여자·발언·이벤트" />
-                    </Border>
-                    <TextBlock Style="{StaticResource Hint}" Text="조건에 맞는 세션이 없습니다" Margin="12" Visibility="{Binding Rows.Count, Converter={StaticResource ZeroToVis}}" />
-                    <ListBox Style="{StaticResource SelectList}" ItemsSource="{Binding Rows}" SelectedItem="{Binding Selected}" ItemTemplate="{StaticResource PttCardTpl}" />
+                    <TextBlock Style="{StaticResource Hint}" Text="이 날에 맞는 무전이 없습니다" Margin="12" Visibility="{Binding Rows.Count, Converter={StaticResource ZeroToVis}}" />
+                    <ListBox Style="{StaticResource PlainList}" ItemsSource="{Binding Source={StaticResource RowsByHour}}" IsSynchronizedWithCurrentItem="False" SelectedItem="{Binding Selected}" ItemTemplate="{StaticResource PttCardTpl}"
+                             ItemContainerStyle="{StaticResource CardItem}" VirtualizingPanel.IsVirtualizingWhenGrouping="True" VirtualizingPanel.ScrollUnit="Pixel" Padding="0,4">
+                        <ListBox.GroupStyle><StaticResource ResourceKey="HourGroup" /></ListBox.GroupStyle>
+                    </ListBox>
                 </DockPanel>
             </Border>
 
@@ -229,36 +348,37 @@
                                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
                                     <Button Style="{StaticResource Btn.Xs}" ToolTip="재생 가능한 세그먼트를 순서대로 재생"
                                             Command="{Binding DataContext.PlayAllCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
-                                            IsEnabled="{Binding DataContext.HasRecording, RelativeSource={RelativeSource AncestorType=UserControl}}" Margin="0,0,4,0"><StackPanel Orientation="Horizontal"><Path Style="{StaticResource Icon.Filled}" Data="{StaticResource Icon.Play}" Width="10" Height="10" Margin="0,0,4,0" /><TextBlock Text="전체" /></StackPanel></Button>
+                                            IsEnabled="{Binding DataContext.HasRecording, RelativeSource={RelativeSource AncestorType=UserControl}}" Margin="0,0,4,0"><StackPanel Orientation="Horizontal"><Path Style="{StaticResource Icon.Filled}" Data="{StaticResource Icon.Play}" Width="10" Height="10" Margin="0,0,4,0" /><TextBlock Text="전체 재생" /></StackPanel></Button>
                                     <Button Style="{StaticResource Btn.Xs}" Content="정지" Command="{Binding DataContext.StopCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
                                             IsEnabled="{Binding DataContext.IsPlaying, RelativeSource={RelativeSource AncestorType=UserControl}}" />
                                 </StackPanel>
                                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                                    <Border Style="{StaticResource Badge.Member}" Padding="6,1"><TextBlock Text="{Binding SessionKindText}" FontSize="10" /></Border>
-                                    <Border Style="{StaticResource Badge.Held}" Padding="6,1" Visibility="{Binding IsDuplex, Converter={StaticResource BoolToVis}}"><TextBlock Text="전이중 · 통화" FontSize="10" /></Border>
-                                    <Border Style="{StaticResource Badge.Talk}" Padding="6,1" Visibility="{Binding IsLive, Converter={StaticResource BoolToVis}}"><TextBlock Text="진행중" FontSize="10" /></Border>
-                                    <Border Style="{StaticResource Badge}" Padding="6,1" Visibility="{Binding IsLive, Converter={StaticResource NotToVis}}"><TextBlock Text="종료" FontSize="10" /></Border>
-                                    <TextBlock Text="{Binding TargetText}" FontWeight="SemiBold" FontSize="13" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" MaxWidth="520" Margin="0,0,6,0" />
-                                    <Border Style="{StaticResource Badge}" Padding="6,1" ToolTip="세션 당시 동시 발언 정책 (TS 24.380)" Visibility="{Binding HasFloorPolicy, Converter={StaticResource BoolToVis}}">
-                                        <TextBlock Text="{Binding FloorPolicyText}" FontSize="9" />
-                                    </Border>
+                                    <TextBlock Text="{Binding TargetText}" FontWeight="Bold" FontSize="16" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" MaxWidth="520" Margin="0,0,8,0" />
+                                    <Border Style="{StaticResource Tag}"><TextBlock Text="{Binding SessionKindText}" /></Border>
+                                    <Border Style="{StaticResource Tag.Held}" Visibility="{Binding IsDuplex, Converter={StaticResource BoolToVis}}"><TextBlock Text="전이중" /></Border>
+                                    <Border Style="{StaticResource Tag.Talk}" Visibility="{Binding IsLive, Converter={StaticResource BoolToVis}}"><TextBlock Text="진행 중" /></Border>
+                                    <Border Style="{StaticResource Tag.Emg}" Visibility="{Binding IsEmergency, Converter={StaticResource BoolToVis}}"><TextBlock Text="긴급" /></Border>
+                                    <Border Style="{StaticResource Tag}" ToolTip="세션 당시 동시 발언 정책 (TS 24.380)" Visibility="{Binding HasFloorPolicy, Converter={StaticResource BoolToVis}}"><TextBlock Text="{Binding FloorPolicyText}" FontWeight="Normal" /></Border>
+                                    <TextBlock Style="{StaticResource MonoMuted}" Text="{Binding RangeText}" FontSize="12" VerticalAlignment="Center" Margin="6,0,0,0" />
                                 </StackPanel>
                             </DockPanel>
                         </Border>
                         <!-- 지표 -->
-                        <Border DockPanel.Dock="Top" Style="{StaticResource SubHeader}" Padding="12,6">
+                        <Border DockPanel.Dock="Top" Padding="12,10,12,2">
                             <DockPanel>
                                 <TextBlock DockPanel.Dock="Right" Style="{StaticResource Hint}" Text="{Binding DetailStatus}" VerticalAlignment="Center" Visibility="{Binding DetailStatus, Converter={StaticResource StrToVis}}" />
                                 <ItemsControl ItemsSource="{Binding Metrics}">
                                     <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
                                     <ItemsControl.ItemTemplate>
                                         <DataTemplate DataType="{x:Type vm:MetricItem}">
-                                            <StackPanel Margin="0,0,18,0" ToolTip="{Binding Hint}">
-                                                <TextBlock Style="{StaticResource Hint}" Text="{Binding Key}" FontSize="10" FontWeight="SemiBold" />
-                                                <TextBlock Style="{StaticResource Mono}" FontSize="15" FontWeight="Bold">
-                                                    <Run Text="{Binding Value, Mode=OneWay}" /><Run Text="{Binding Suffix, Mode=OneWay}" FontSize="11" FontWeight="Medium" Foreground="{DynamicResource Brush.Muted}" />
-                                                </TextBlock>
-                                            </StackPanel>
+                                            <Border MinWidth="112" Margin="0,0,8,8" Padding="12,6" CornerRadius="8" Background="{DynamicResource Brush.Surface2}" ToolTip="{Binding Hint}">
+                                                <StackPanel>
+                                                    <TextBlock Style="{StaticResource Muted}" Text="{Binding Key}" FontSize="11.5" />
+                                                    <TextBlock FontSize="18" FontWeight="Bold">
+                                                        <Run Text="{Binding Value, Mode=OneWay}" /><Run Text="{Binding Suffix, Mode=OneWay}" FontSize="12" FontWeight="Normal" Foreground="{DynamicResource Brush.Muted}" />
+                                                    </TextBlock>
+                                                </StackPanel>
+                                            </Border>
                                         </DataTemplate>
                                     </ItemsControl.ItemTemplate>
                                 </ItemsControl>
@@ -301,37 +421,37 @@
                                 <RowDefinition Height="Auto" MaxHeight="260" />
                                 <RowDefinition Height="*" />
                             </Grid.RowDefinitions>
-                            <!-- ① 참여자 -->
-                            <DockPanel Grid.Row="0" Margin="0,0,0,8">
-                                <TextBlock DockPanel.Dock="Top" Margin="0,0,0,4">
-                                    <Run Text="참여자" FontWeight="SemiBold" FontSize="13" /><Run Text="  " /><Run Text="{Binding Participants.Count, Mode=OneWay}" FontSize="11" Foreground="{DynamicResource Brush.Muted}" /><Run Text="명" FontSize="11" Foreground="{DynamicResource Brush.Muted}" />
+                            <!-- ① 참여자 — 관제 화면의 이름표(아바타 색 = 이름에서). 말한 사람은 아래 발언 레인과 같은 색 점, 입장~퇴장·발언은 툴팁 -->
+                            <DockPanel Grid.Row="0" Margin="0,0,0,12">
+                                <TextBlock DockPanel.Dock="Top" Margin="0,0,0,6">
+                                    <Run Text="참여자" FontWeight="Bold" FontSize="13" /><Run Text="  " /><Run Text="{Binding Participants.Count, Mode=OneWay}" FontSize="12" Foreground="{DynamicResource Brush.Muted}" />
                                 </TextBlock>
                                 <TextBlock Style="{StaticResource Hint}" Text="참여자 기록이 없습니다" Visibility="{Binding HasParticipants, Converter={StaticResource NotToVis}}" />
-                                <Border Style="{StaticResource Sub}" Visibility="{Binding HasParticipants, Converter={StaticResource BoolToVis}}">
-                                    <ScrollViewer VerticalScrollBarVisibility="Auto">
-                                        <ItemsControl ItemsSource="{Binding Participants}">
-                                            <ItemsControl.ItemTemplate>
-                                                <DataTemplate DataType="{x:Type vm:ParticipantRow}">
-                                                    <Border Style="{StaticResource LogRow}" Padding="8,3">
-                                                        <DockPanel>
-                                                            <TextBlock DockPanel.Dock="Right" Style="{StaticResource Muted}" FontSize="11" VerticalAlignment="Center">
-                                                                <Run Text="턴 " /><Run Text="{Binding Turns, Mode=OneWay}" FontWeight="SemiBold" Foreground="{DynamicResource Brush.Text}" /><Run Text=" · 발화 " /><Run Text="{Binding SpeechText, Mode=OneWay}" FontWeight="SemiBold" Foreground="{DynamicResource Brush.Text}" />
-                                                            </TextBlock>
-                                                            <Rectangle DockPanel.Dock="Left" Width="8" Height="8" RadiusX="2" RadiusY="2" Fill="{Binding Color}" Margin="0,0,8,0" VerticalAlignment="Center" Visibility="{Binding HasSpoken, Converter={StaticResource BoolToVis}}" />
-                                                            <Rectangle DockPanel.Dock="Left" Width="8" Height="8" RadiusX="2" RadiusY="2" Fill="{DynamicResource Brush.Surface2}" Stroke="{DynamicResource Brush.Border}" Margin="0,0,8,0" VerticalAlignment="Center" Visibility="{Binding HasSpoken, Converter={StaticResource NotToVis}}" />
-                                                            <TextBlock Text="{Binding Label}" FontWeight="SemiBold" FontSize="12" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" MaxWidth="280" />
-                                                            <Border Style="{StaticResource Badge}" Padding="5,0" Margin="6,0,0,0" Visibility="{Binding IsInitiator, Converter={StaticResource BoolToVis}}"><TextBlock Text="개시자" FontSize="9" /></Border>
-                                                            <TextBlock Style="{StaticResource MonoMuted}" Text="{Binding RangeText}" FontSize="11" Margin="8,0,0,0" VerticalAlignment="Center" />
-                                                        </DockPanel>
-                                                    </Border>
-                                                </DataTemplate>
-                                            </ItemsControl.ItemTemplate>
-                                        </ItemsControl>
-                                    </ScrollViewer>
-                                </Border>
+                                <ScrollViewer VerticalScrollBarVisibility="Auto" Visibility="{Binding HasParticipants, Converter={StaticResource BoolToVis}}">
+                                    <ItemsControl ItemsSource="{Binding Participants}">
+                                        <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate DataType="{x:Type vm:ParticipantRow}">
+                                                <Border Margin="0,0,6,6" Padding="3,3,10,3" CornerRadius="15" Background="{DynamicResource Brush.BgSoft}" BorderBrush="{DynamicResource Brush.Border}" BorderThickness="1" ToolTip="{Binding Tip}">
+                                                    <StackPanel Orientation="Horizontal">
+                                                        <Border Style="{StaticResource Avatar}" Width="24" Height="24" CornerRadius="12" Margin="0,0,7,0" Tag="{Binding Label, Converter={StaticResource AvatarHue}}">
+                                                            <TextBlock Text="{Binding Initial}" FontSize="11" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                                        </Border>
+                                                        <TextBlock Text="{Binding Label}" FontWeight="SemiBold" FontSize="12.5" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" MaxWidth="160" />
+                                                        <Border Style="{StaticResource Tag.Ink}" Margin="6,0,0,0" Visibility="{Binding IsInitiator, Converter={StaticResource BoolToVis}}"><TextBlock Text="개시" /></Border>
+                                                        <Ellipse Width="8" Height="8" Fill="{Binding Color}" Margin="7,0,4,0" VerticalAlignment="Center" Visibility="{Binding HasSpoken, Converter={StaticResource BoolToVis}}" />
+                                                        <TextBlock Style="{StaticResource Muted}" FontSize="12" VerticalAlignment="Center" Margin="6,0,0,0" Visibility="{Binding HasSpoken, Converter={StaticResource BoolToVis}}">
+                                                            <Run Text="발언 " /><Run Text="{Binding Turns, Mode=OneWay}" /><Run Text="회" />
+                                                        </TextBlock>
+                                                    </StackPanel>
+                                                </Border>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </ScrollViewer>
                             </DockPanel>
                             <!-- ② 발언 타임라인 — 화자 레인 · 막대 클릭 = 그 턴 재생. 확대: [−][+][1:1] · Ctrl+휠(커서 기준) · 빈 곳 드래그 = 가로 이동(콘솔 LaneTimebar) -->
-                            <DockPanel Grid.Row="1" Margin="0,0,0,8">
+                            <DockPanel Grid.Row="1" Margin="0,0,0,12">
                                 <DockPanel DockPanel.Dock="Top" Margin="0,0,0,4">
                                     <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center" Visibility="{Binding HasLanes, Converter={StaticResource BoolToVis}}">
                                         <TextBlock Style="{StaticResource MonoMuted}" FontSize="11" VerticalAlignment="Center" Margin="0,0,8,0">
@@ -344,10 +464,10 @@
                                                 Visibility="{Binding IsTalkZoomed, Converter={StaticResource BoolToVis}}" />
                                     </StackPanel>
                                     <TextBlock>
-                                        <Run Text="발언 타임라인" FontWeight="SemiBold" FontSize="13" /><Run Text="  화자 레인 · 막대 클릭 = 재생 · Ctrl+휠 확대 · 드래그 이동" FontSize="11" Foreground="{DynamicResource Brush.Muted}" />
+                                        <Run Text="발언" FontWeight="Bold" FontSize="13" /><Run Text="  막대를 누르면 그 발언 재생 · Ctrl+휠 확대" FontSize="11.5" Foreground="{DynamicResource Brush.Muted}" />
                                     </TextBlock>
                                 </DockPanel>
-                                <TextBlock Style="{StaticResource Hint}" Text="발언 녹취가 없습니다" Visibility="{Binding HasLanes, Converter={StaticResource NotToVis}}" />
+                                <Border CornerRadius="8" Background="{DynamicResource Brush.BgSoft}" Padding="10,12" Visibility="{Binding HasLanes, Converter={StaticResource NotToVis}}"><TextBlock Style="{StaticResource Hint}" Text="이 세션에는 녹취된 발언이 없습니다" HorizontalAlignment="Center" /></Border>
                                 <!-- 좌 화자 라벨(고정) | 우 트랙(가로 스크롤, 폭 = 뷰포트 × 배율). 행 높이 24 로 두 열을 맞춘다 -->
                                 <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Visibility="{Binding HasLanes, Converter={StaticResource BoolToVis}}">
                                     <Grid>
@@ -451,14 +571,14 @@
                                 <DockPanel DockPanel.Dock="Top" Margin="0,0,0,4">
                                     <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
                                         <CheckBox IsChecked="{Binding ShowFloorLayer}" VerticalAlignment="Center" Margin="0,0,10,0">
-                                            <TextBlock FontSize="11"><Run Text="발언권 " /><Run Text="{Binding FloorCount, Mode=OneWay}" FontWeight="SemiBold" /></TextBlock>
+                                            <TextBlock FontSize="11.5"><Run Text="발언권 " /><Run Text="{Binding FloorCount, Mode=OneWay}" FontWeight="SemiBold" /></TextBlock>
                                         </CheckBox>
                                         <CheckBox IsChecked="{Binding ShowMemberLayer}" VerticalAlignment="Center">
-                                            <TextBlock FontSize="11"><Run Text="멤버 " /><Run Text="{Binding MemberEventCount, Mode=OneWay}" FontWeight="SemiBold" /></TextBlock>
+                                            <TextBlock FontSize="11.5"><Run Text="입퇴장 " /><Run Text="{Binding MemberEventCount, Mode=OneWay}" FontWeight="SemiBold" /></TextBlock>
                                         </CheckBox>
                                     </StackPanel>
                                     <TextBlock>
-                                        <Run Text="이벤트 타임라인" FontWeight="SemiBold" FontSize="13" /><Run Text="  발언권 중재 · 입퇴장" FontSize="11" Foreground="{DynamicResource Brush.Muted}" />
+                                        <Run Text="이벤트" FontWeight="Bold" FontSize="13" />
                                     </TextBlock>
                                 </DockPanel>
                                 <TextBlock Style="{StaticResource Hint}" Text="표시할 항목이 없습니다" Visibility="{Binding HasTimeline, Converter={StaticResource NotToVis}}" />
@@ -468,10 +588,10 @@
                                             <DataTemplate DataType="{x:Type vm:TimelineItem}">
                                                 <Border Style="{StaticResource LogRow}" Padding="8,3">
                                                     <DockPanel>
-                                                        <TextBlock DockPanel.Dock="Left" Style="{StaticResource MonoMuted}" Text="{Binding TimeText}" FontSize="11" Width="64" VerticalAlignment="Center" />
+                                                        <TextBlock DockPanel.Dock="Left" Style="{StaticResource MonoMuted}" Text="{Binding TimeText}" FontSize="12" Width="70" VerticalAlignment="Center" />
                                                         <Ellipse DockPanel.Dock="Left" Width="8" Height="8" Fill="{Binding Color}" Margin="0,0,8,0" VerticalAlignment="Center" />
-                                                        <TextBlock FontSize="12" VerticalAlignment="Center" TextTrimming="CharacterEllipsis">
-                                                            <Run Text="{Binding Who, Mode=OneWay}" FontWeight="Medium" /><Run Text=" " /><Run Text="{Binding Text, Mode=OneWay}" /><Run Text="  " /><Run Text="{Binding Detail, Mode=OneWay}" Foreground="{DynamicResource Brush.Muted}" FontSize="11" />
+                                                        <TextBlock FontSize="12.5" VerticalAlignment="Center" TextTrimming="CharacterEllipsis">
+                                                            <Run Text="{Binding Who, Mode=OneWay}" FontWeight="SemiBold" /><Run Text=" " /><Run Text="{Binding Text, Mode=OneWay}" /><Run Text="  " /><Run Text="{Binding Detail, Mode=OneWay}" Foreground="{DynamicResource Brush.Muted}" FontSize="11" />
                                                         </TextBlock>
                                                     </DockPanel>
                                                 </Border>

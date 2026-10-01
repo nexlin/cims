@@ -18,16 +18,22 @@ using DispatchDesktop.Services;
 
 namespace DispatchDesktop.ViewModels;
 
-/// <summary>시간대 밴드 한 칸 — 건수·상대 농도(0 = 없음, 0.18~1 = 많을수록 진하게)·선택.</summary>
+/// <summary>시간대 밴드 한 칸 — 값·상대 농도(0 = 없음, 0.08~0.45 = 많을수록 진하게 — 글자가 읽히는 연한 남색 범위)·선택.
+/// Tip = 무엇을 센 건지(통화 시도 / 무전 세션 / 발언). Partial = 목록 상한으로 덜 센 칸(값 뒤 "+").</summary>
 public sealed partial class HourCell : ObservableObject
 {
     public string Hour { get; }
     public int Count { get; }
     public double Ratio { get; }
-    public string CountText => Count > 0 ? Count.ToString() : "";
-    public string Tip => $"{Hour}시 · {Count}건";
+    public bool Partial { get; }
+    public string CountText => Count > 0 || Partial ? $"{Count}{(Partial ? "+" : "")}" : "";
+    public string Tip { get; }
     [ObservableProperty] private bool _isSelected;
-    public HourCell(string hour, int count, int max) { Hour = hour; Count = count; Ratio = count > 0 && max > 0 ? 0.18 + 0.82 * count / max : 0; }
+    public HourCell(string hour, int count, int max, string tip, bool partial = false)
+    {
+        Hour = hour; Count = count; Partial = partial; Ratio = count > 0 && max > 0 ? 0.08 + 0.37 * count / max : 0;
+        Tip = tip;
+    }
 }
 
 /// <summary>목록 한 행 — 통화(표 열)·PTT(요약 카드) 두 종류의 표시값을 서버 항목에서 미리 만든다. 이름은 주소록, 그룹은 GMS 목록 이름.</summary>
@@ -71,6 +77,33 @@ public sealed class HistoryRow
     public bool HasInitiator => E.From.Length > 0;
     public string FloorPolicyText { get; }
     public bool HasFloorPolicy => E.FloorControl == "on" && E.FloorPolicy.Length > 0;
+    // PTT 카드 — 관제 채널 카드(§4 공통)와 같은 줄 구성: 1줄 점·이름·라벨·시각 · 2줄 누가·몇 명 · 3줄 길이·발언
+    public bool IsPrivate => E.SessionKind == "private";
+    public bool IsAdhoc => E.SessionKind == "adhoc";
+    /// <summary>목록 묶음 열쇠 — 시간대 밴드와 같은 축(AxisTime)의 "HH시".</summary>
+    public string HourKey => E.AxisTime.ToString("HH") + "시";
+    public string StartClock => E.AxisTime.ToString("HH:mm");
+    public int PeopleCount => E.People.Count > 0 ? E.People.Count : E.MemberCount;
+    public string WhoLine { get; }
+    public string StatLine { get; }
+
+    // 통화 카드·상세(§4.6 — 무전과 같은 짜임: 왼쪽 두 줄 카드 + 오른쪽 상세). 결과 = 응답/통화 중/부재/실패/거절/취소/오류,
+    // 톤 = 태그 색(neutral 회색 · talk 초록 · warn 주황 · bad 빨강) — 관제 «기록»·채널 카드와 같은 상태색
+    public string ResultText { get; } = "";
+    public string ResultTone { get; } = "neutral";
+    public string CallSub { get; } = "";
+    public string RingText { get; } = "—";
+    /// <summary>진행 막대 — 울림(호출~응답) : 통화(응답~종료) 비율. 응답이 없으면 울림만.</summary>
+    public GridLength RingStar { get; } = new(1, GridUnitType.Star);
+    public GridLength TalkStar { get; } = new(0, GridUnitType.Star);
+    public string CallerInitial { get; } = "";
+    public string CalleeInitial { get; } = "";
+    /// <summary>이름이 있으면 그 아래 둘째 줄에 번호 — 이름이 없으면(번호가 곧 표시) 비운다.</summary>
+    public string CallerNumber { get; } = "";
+    public string CalleeNumber { get; } = "";
+    public bool HasCallerNumber => CallerNumber.Length > 0;
+    public bool HasCalleeNumber => CalleeNumber.Length > 0;
+    public string DayClock => E.AxisTime.ToString("yyyy-MM-dd HH:mm:ss");
 
     private static string Clock(DateTime? t) => t is { } d ? d.ToString("HH:mm:ss") : "—";
 
@@ -101,6 +134,10 @@ public sealed class HistoryRow
             InitiatorLabel = who(e.From);
             StateText = IsLive ? "진행중" : "종료";
             FloorPolicyText = e.FloorPolicy switch { "multi" => $"multi · 최대 {(e.MaxTalkers > 0 ? e.MaxTalkers.ToString() : "?")}명", "dual" => "dual · 2명", _ => "single" };
+            int people = PeopleCount;
+            WhoLine = string.Join(" · ", new[] { e.From.Length > 0 ? $"개시 {InitiatorLabel}" : "", people > 0 ? $"참여 {people}명" : "" }.Where(x => x.Length > 0));
+            string len = IsLive ? "진행 중" : dur > 0 ? SessionHistoryViewModel.FmtDur(dur) : "";
+            StatLine = string.Join(" · ", new[] { len, $"발언 {e.TurnCount}회", e.TotalSpeechMs > 0 ? $"말한 시간 {SpeechText}" : "" }.Where(x => x.Length > 0));
             CallerLabel = CalleeLabel = EndReasonText = "";
         }
         else
@@ -108,9 +145,35 @@ public sealed class HistoryRow
             CallerLabel = who(e.From); CalleeLabel = e.To.Length > 0 ? who(e.To) : "—";
             Parties = $"{CallerLabel} → {CalleeLabel}";
             DurationText = e.DurationSec > 0 ? SessionHistoryViewModel.FmtDur(e.DurationSec) : "—";
+            string num(string u) { if (u.Length == 0) return ""; string d = s.Directory.DisplayNumber(UserPartConverter.UserPart(u)); return d == who(u) ? "" : d; }
+            CallerNumber = num(e.From); CalleeNumber = num(e.To);
+            CallerInitial = SessionHistoryViewModel.InitialOf(CallerLabel); CalleeInitial = SessionHistoryViewModel.InitialOf(CalleeLabel);
+            (ResultText, ResultTone) = e.State switch
+            {
+                "active" => ("통화 중", "talk"),
+                "ringing" => ("호출 중", "talk"),
+                _ when e.AnswerTime is not null => ("응답", "neutral"),
+                _ => e.EndReason switch
+                {
+                    "no_answer" or "timeout" => ("부재", "warn"),
+                    "busy" => ("실패", "warn"),
+                    "rejected" => ("거절", "bad"),
+                    "error" or "incomplete" => ("오류", "bad"),
+                    _ => ("취소", "warn"),                                     // 응답 전에 발신자가 끊음
+                },
+            };
+            // 울림 = 호출(INVITE)~응답, 응답이 없으면 호출~종료. 통화 = 응답~종료(진행 중이면 지금까지 — 서버 duration)
+            double ringSec = e.InviteTime is { } inv ? Math.Max(0, ((e.AnswerTime ?? e.EndTime ?? inv) - inv).TotalSeconds) : 0;
+            double talkSec = e.AnswerTime is { } ans ? Math.Max(e.DurationSec, ((e.EndTime ?? ans) - ans).TotalSeconds) : 0;
+            RingText = ringSec >= 1 ? SessionHistoryViewModel.FmtDur((int)Math.Round(ringSec)) : "—";
+            RingStar = new GridLength(Math.Max(ringSec, e.AnswerTime is null ? 1 : 0.0001), GridUnitType.Star);
+            TalkStar = new GridLength(talkSec, GridUnitType.Star);
+            CallSub = ResultTone == "talk" ? (IsLive && e.AnswerTime is not null ? $"통화 중 · 울림 {RingText}" : "호출 중")
+                    : e.AnswerTime is not null ? $"{DurationText} · 울림 {RingText}"
+                    : $"{SessionHistoryViewModel.EndReasonText(e.EndReason)} · 울림 {RingText}";
             StateText = e.State switch { "active" => "통화중", "ringing" => "호출중", "ended" or "" => "종료", var x => x };
             EndReasonText = SessionHistoryViewModel.EndReasonText(e.EndReason);
-            SessionKindText = TargetText = RangeText = GroupIdText = InitiatorLabel = FloorPolicyText = "";
+            SessionKindText = TargetText = RangeText = GroupIdText = InitiatorLabel = FloorPolicyText = WhoLine = StatLine = "";
         }
         EventText = e.Event switch
         {
@@ -121,7 +184,12 @@ public sealed class HistoryRow
 }
 
 /// <summary>선택 세션의 참여자 한 줄 — 입퇴장 기록 ∪ 화자(녹취 턴). 발언 통계는 턴에서 센다(참가만 한 사람은 0).</summary>
-public sealed record ParticipantRow(string Id, string Label, bool IsInitiator, string RangeText, int Turns, string SpeechText, string Color, bool HasSpoken);
+public sealed record ParticipantRow(string Id, string Label, bool IsInitiator, string RangeText, int Turns, string SpeechText, string Color, bool HasSpoken)
+{
+    /// <summary>이름표 머리글자 — 이름이면 첫 글자, 번호면 비운다(관제 «기록» 아바타와 같은 규칙).</summary>
+    public string Initial => SessionHistoryViewModel.InitialOf(Label);
+    public string Tip => (RangeText.Length > 0 ? $"{RangeText} · " : "") + $"발언 {Turns}회 · 말한 시간 {SpeechText}";
+}
 
 /// <summary>발언 턴 막대 — 한 화자가 한 슬롯을 점유한 구간. Multi = 세그먼트에 턴이 여럿(동시 발언·슬롯 재사용) → 단독 트랙(slot) 재생.</summary>
 public sealed record TurnBar(int Seq, int Slot, bool Multi, string Speaker, string Color, double LeftRatio, double WidthRatio, string Tooltip, bool Playable);
@@ -149,9 +217,10 @@ public sealed partial class SessionHistoryViewModel : ObservableObject
 
     public SessionHistoryViewModel(DispatchSession s) { _s = s; }
 
-    public IReadOnlyList<string> Kinds { get; } = new[] { "통화(VoLTE)", "PTT 세션" };
+    public IReadOnlyList<string> Kinds { get; } = new[] { "통화", "무전" };
 
-    [ObservableProperty] private int _kindIndex;
+    /// <summary>0 = 통화, 1 = 무전. 처음은 무전 — 관제 화면의 [무전|통화] 와 같은 순서·같은 첫 모드.</summary>
+    [ObservableProperty] private int _kindIndex = 1;
     [ObservableProperty] private DateTime _date = DateTime.Today;
     [ObservableProperty] private string _search = "";
     [ObservableProperty] private bool _busy;
@@ -208,10 +277,15 @@ public sealed partial class SessionHistoryViewModel : ObservableObject
     public int FloorCount { get; private set; }
     public int MemberEventCount { get; private set; }
     public bool HasHourFilter => SelectedHour.Length > 0;
-    /// <summary>좌 목록 : 우 패널 폭 — 통화는 한 줄이 곧 상세라 표가 전체 폭(우 패널 0), PTT 는 세션 패널이 주역이라 콘솔처럼 1 : 3
-    /// (카드 목록은 요약이면 충분하다). 화면은 이 값을 기본 폭으로 놓고 사용자가 경계를 끌어 바꿀 수 있다(더블클릭 = 기본 폭).</summary>
+    /// <summary>무전 시간대 밴드가 세는 것 — 0 = 성립한 세션 수(서버 hours), 1 = 발언 수(세션별 발언 턴의 합, 세션 시작 시간대에 넣는다).</summary>
+    [ObservableProperty] private int _bandMode;
+    public bool BandShowsTurns => IsPtt && BandMode == 1;
+    /// <summary>시간대 밴드 제목 — 무엇을 센 건지(통화 = 통화 시도 INVITE, PTT = 무전 세션 시작 / 발언).</summary>
+    public string BandTitle => !IsPtt ? "시간대별 통화 횟수" : BandShowsTurns ? "시간대별 발언 수" : "시간대별 무전 세션 수";
+    /// <summary>좌 목록 : 우 패널 폭 — 통화·무전 모두 상세 패널이 주역이라 1 : 3(카드 목록은 요약이면 충분하다).
+    /// 화면은 이 값을 기본 폭으로 놓고 사용자가 경계를 끌어 바꿀 수 있다(더블클릭 = 기본 폭).</summary>
     public GridLength ListWidth => new GridLength(1, GridUnitType.Star);
-    public GridLength PaneWidth => IsPtt ? new GridLength(3, GridUnitType.Star) : new GridLength(0);
+    public GridLength PaneWidth => new GridLength(3, GridUnitType.Star);
     /// <summary>고른 행에 녹취가 있는가 — 통화 표 아래 녹취 띠의 표시 조건(세그먼트 로딩 중에도 띠는 보인다).</summary>
     public bool SelectedHasRecording => Selected?.HasRecording == true;
 
@@ -223,7 +297,7 @@ public sealed partial class SessionHistoryViewModel : ObservableObject
     partial void OnSearchChanged(string value) => Filter();
     partial void OnKindIndexChanged(int value)
     {
-        OnPropertyChanged(nameof(IsPtt)); OnPropertyChanged(nameof(IsCall)); OnPropertyChanged(nameof(PaneWidth));
+        OnPropertyChanged(nameof(IsPtt)); OnPropertyChanged(nameof(IsCall)); OnPropertyChanged(nameof(PaneWidth)); OnPropertyChanged(nameof(BandTitle)); OnPropertyChanged(nameof(BandShowsTurns));
         SelectedHour = ""; if (!_suppressQuery) _ = QueryAsync();
     }
     partial void OnDateChanged(DateTime value) { SelectedHour = ""; _ = QueryAsync(); }
@@ -234,6 +308,7 @@ public sealed partial class SessionHistoryViewModel : ObservableObject
     partial void OnRecordingChanged(RecordingInfo? value) => OnPropertyChanged(nameof(HasRecording));
     partial void OnSelectedHourChanged(string value) { OnPropertyChanged(nameof(HasHourFilter)); foreach (var c in Hours) c.IsSelected = c.Hour == value; Filter(); }
     partial void OnTalkZoomChanged(double value) { OnPropertyChanged(nameof(TalkZoomText)); OnPropertyChanged(nameof(IsTalkZoomed)); RebuildAxisTicks(); }
+    partial void OnBandModeChanged(int value) { OnPropertyChanged(nameof(BandTitle)); OnPropertyChanged(nameof(BandShowsTurns)); RebuildHours(); }
     partial void OnShowFloorLayerChanged(bool value) => ApplyTimelineLayers();
     partial void OnShowMemberLayerChanged(bool value) => ApplyTimelineLayers();
 
@@ -278,11 +353,38 @@ public sealed partial class SessionHistoryViewModel : ObservableObject
     private void RebuildHours()
     {
         Hours.Clear();
+        if (BandShowsTurns)
+        {
+            // 발언 수 — 받은 세션들의 발언 턴을 세션 시작 시간대(밴드·목록 묶음과 같은 AxisTime 축)에 더한다. 서버 hours 는 limit 절삭 전 세션 수라,
+            // 받은 세션이 그보다 적은 시간대(하루 상한을 넘은 날의 이른 시간)는 덜 센 값이다 → 칸에 "+" 와 툴팁.
+            var turns = new Dictionary<string, int>(StringComparer.Ordinal);
+            var loaded = new Dictionary<string, int>(StringComparer.Ordinal);
+            foreach (var e in _all)
+            {
+                string h = e.AxisTime.ToString("HH");
+                turns[h] = (turns.TryGetValue(h, out int t) ? t : 0) + e.TurnCount;
+                loaded[h] = (loaded.TryGetValue(h, out int c) ? c : 0) + 1;
+            }
+            int tmax = turns.Count > 0 ? turns.Values.Max() : 0;
+            for (int h = 0; h < 24; h++)
+            {
+                string k = h.ToString("00");
+                int n = turns.TryGetValue(k, out int tn) ? tn : 0;
+                int sessions = _hours.TryGetValue(k, out int sn) ? sn : 0, got = loaded.TryGetValue(k, out int gn) ? gn : 0;
+                bool partial = got < sessions;
+                string tip = $"{k}시에 시작한 무전 세션 {sessions}건의 발언 {n}회"
+                             + (partial ? $" — 목록이 하루 상한을 넘어 {sessions - got}건은 세지 못했습니다" : "");
+                Hours.Add(new HourCell(k, n, tmax, tip, partial) { IsSelected = k == SelectedHour });
+            }
+            return;
+        }
         int max = _hours.Count > 0 ? _hours.Values.Max() : 0;
+        string unit = IsPtt ? "무전 세션" : "통화";
         for (int h = 0; h < 24; h++)
         {
             string k = h.ToString("00");
-            Hours.Add(new HourCell(k, _hours.TryGetValue(k, out int n) ? n : 0, max) { IsSelected = k == SelectedHour });
+            int n = _hours.TryGetValue(k, out int v) ? v : 0;
+            Hours.Add(new HourCell(k, n, max, $"{k}시에 시작한 {unit} {n}건") { IsSelected = k == SelectedHour });
         }
     }
 
@@ -461,14 +563,15 @@ public sealed partial class SessionHistoryViewModel : ObservableObject
         FloorCount = floor.Count; MemberEventCount = events.Count;
         ApplyTimelineLayers();
 
-        // 지표 — 왼쪽 카드와 겹치지 않게 발화 구간/누적·세그먼트를 함께 둔다
+        // 지표 — 관제 사람이 먼저 묻는 넷(얼마나·몇 명·몇 번·얼마 동안) + 있을 때만 동시 발언·녹취
         int talkMs = e.TalkMs > 0 ? e.TalkMs : turns.Sum(t => t.DurMs);
-        Metrics.Add(new MetricItem("발언 턴", (e.TurnCount > 0 ? e.TurnCount : turns.Count).ToString(), "건", "화자 구간 수 — 동시 발언 세그먼트는 턴이 여럿"));
-        Metrics.Add(new MetricItem("녹취 세그먼트", Segments.Count.ToString(), "개", ""));
+        int durSec = e.EndTime is { } de && e.StartTime is { } ds ? Math.Max(0, (int)(de - ds).TotalSeconds) : e.DurationSec;
+        Metrics.Add(new MetricItem("길이", row.IsLive ? "진행 중" : FmtDur(durSec), "", "세션 시작~종료"));
+        Metrics.Add(new MetricItem("참여", Participants.Count.ToString(), "명", "입퇴장 기록과 말한 사람을 합친 수"));
+        Metrics.Add(new MetricItem("발언", (e.TurnCount > 0 ? e.TurnCount : turns.Count).ToString(), "회", "말한 구간 수 — 동시 발언은 사람마다 따로 센다"));
+        Metrics.Add(new MetricItem("말한 시간", FmtSpeech(e.TotalSpeechMs), "", $"겹친 구간은 한 번으로 센 무전 점유 시간 · 사람별 합 {FmtSpeech(talkMs)}"));
         if (e.MaxConcurrent > 1) Metrics.Add(new MetricItem("최대 동시 발언", e.MaxConcurrent.ToString(), "명", ""));
-        Metrics.Add(new MetricItem("발화 구간", FmtSpeech(e.TotalSpeechMs), "", "겹침을 1회로 센 실제 무전 점유 시간"));
-        Metrics.Add(new MetricItem("발화 누적", FmtSpeech(talkMs), "", "화자별 발언 시간의 합"));
-        Metrics.Add(new MetricItem("화자", (e.SpeakerCount > 0 ? e.SpeakerCount : order.Count).ToString(), "명", ""));
+        if (Segments.Count > 0) Metrics.Add(new MetricItem("녹취", Segments.Count.ToString(), "개", "녹취 세그먼트 수"));
         if (detail is null && DetailStatus.Length == 0 && e.RecordingId.Length == 0) DetailStatus = "세션 기록 없음";
         RebuildAxisTicks();
         RaiseDetailChanged();
@@ -498,7 +601,17 @@ public sealed partial class SessionHistoryViewModel : ObservableObject
     private void ApplyTimelineLayers()
     {
         Timeline.Clear();
-        foreach (var it in _timelineAll) if (it.IsFloor ? ShowFloorLayer : ShowMemberLayer) Timeline.Add(it);
+        // 같은 초에 같은 입퇴장이 몰리면(그룹 통화 개시·해제) 한 줄로 — "테스트003 외 3명 입장"
+        TimelineItem? run = null; int more = 0;
+        void flush() { if (run is null) return; Timeline.Add(more > 0 ? run with { Who = $"{run.Who} 외 {more}명" } : run); run = null; more = 0; }
+        foreach (var it in _timelineAll)
+        {
+            if (!(it.IsFloor ? ShowFloorLayer : ShowMemberLayer)) continue;
+            if (run is { } r && !it.IsFloor && !r.IsFloor && it.Text == r.Text && it.Detail.Length == 0 && r.Detail.Length == 0 && it.HasWho && r.HasWho
+                && it.Ts.ToString("HH:mm:ss") == r.TimeText) { more++; continue; }
+            flush(); run = it;
+        }
+        flush();
         OnPropertyChanged(nameof(HasTimeline));
     }
 
@@ -636,6 +749,7 @@ public sealed partial class SessionHistoryViewModel : ObservableObject
         }
         else
         {
+            _suppressQuery = true; KindIndex = 0; _suppressQuery = false;
             list.Add(new HistoryEntry("c1", at(9, 5, 12), HistoryKind.Call, "call.answered", "tel:+821310002001", "tel:+821310009999", "", 42, false, "", "volte/2026/09/08/09/010/01000000001/c1.d", true)
             { State = "ended", CallType = "volte", InviteTime = at(9, 4, 25), AnswerTime = at(9, 4, 30), EndTime = at(9, 5, 12), EndReason = "normal", SipStatus = 200 });
             list.Add(new HistoryEntry("c2", at(9, 31), HistoryKind.Call, "call.missed", "tel:+821310002002", "tel:+821310002001", "", 0, false, "", "volte/2026/09/08/09/010/01000000002/c2.d", false)
@@ -744,6 +858,9 @@ public sealed partial class SessionHistoryViewModel : ObservableObject
         "config_change" => ("설정 변경", "#9333EA"), "member_invite" => ("초대", "#0891B2"),
         var x => (x, "#9CA3AF"),
     };
+
+    /// <summary>이름표 머리글자 — 이름이면 첫 글자, 번호면 "#"(관제 «기록» 아바타와 같은 규칙).</summary>
+    internal static string InitialOf(string label) => label.Trim() is { Length: > 0 } n && !(char.IsDigit(n[0]) || n[0] == '+') ? n[..1] : "#";
 
     internal static string FmtDur(int sec) { if (sec <= 0) return "—"; int m = sec / 60; return m > 0 ? $"{m}분 {sec % 60}초" : $"{sec}초"; }
     /// <summary>발화 시간(ms) — 1분 이상은 "m분 s초", 미만은 "s.d초".</summary>
