@@ -443,6 +443,10 @@ class PttController(
                 if (regState.value is RegState.Registered) {
                     groupsPlane.affiliateAll()
                     groupsPlane.syncRosterSubs()   // 편성 변경으로 채널이 늘/줄었으면 구독도 따라간다
+                    // 문서 구독 재확인(SUB_REASSERT_MS) — 서버가 재기동으로 구독을 잃어도 등록은 갱신으로 이어져
+                    //   등록 전이(onReg)가 없다. 여기서 다시 던져야 편성·프로파일 변경 통지가 돌아온다.
+                    groupsPlane.subscribeXcap(XCAP_GMS, true)
+                    groupsPlane.subscribeXcap(XCAP_CMS, true)
                 }
             }
         }

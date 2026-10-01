@@ -579,16 +579,32 @@ internal class GroupPlane(private val c: PttController) {
         loadGroups()
     }
 
+    /** 편성에서 사라진 채널 정리 — 그룹이 삭제됐거나 내가 멤버에서 빠졌다(TS 24.481 그룹 목록 = 내가 멤버인 그룹).
+     *  참여 의도(joined)·고른 주채널·선택 그룹에서 지운다: 남겨 두면 주채널 화면이 없는 그룹(id)을 가리키고,
+     *  PTT 가 그 그룹으로 개시해 거절되고, 주기 affiliation 이 그 그룹을 계속 PUBLISH 한다.
+     *  애드혹 임시 그룹은 편성 목록에 없는 것이 정상이라 건드리지 않는다. 진행 중 세션은 서버가 해제한다. */
+    private fun dropRemovedChannels(present: Set<String>) {
+        val st = c.channelStore ?: return
+        val gone = (st.joined + listOfNotNull(st.primary, c._selectedGroup.value))
+            .filter { !isAdhocId(it) && it !in present }.distinct()
+        if (gone.isEmpty()) return
+        Log.i(TAG, "편성에서 사라진 채널 정리: $gone")
+        gone.forEach { st.remove(it) }                       // primary 였으면 함께 비운다
+        if (c._selectedGroup.value in gone) c._selectedGroup.value = null
+        c.publish()                                           // 고른 주채널(chosenPrimary) 화면 갱신
+    }
+
     fun loadGroups() = c.scope.launch {
         if (c.token == null) { c._status.value = "토큰 없음"; return@launch }
         val r = c.withToken { cl, t -> cl.listGroups(t, c.mcpttId) }
         if (r.ok) {
             val list = r.value.orEmpty().map { GroupSummary.of(it) }
             c._groups.value = list
+            val ids = list.map { bareId(it.uri) }
+            dropRemovedChannels(ids.toSet())
             // 선택 그룹(TS 24.484 currently-selected group) 복원 — 마지막 주채널 우선,
             // 이력이 없거나 편성에서 빠졌으면 목록 첫 그룹(최초 1회 폴백).
             if (c._selectedGroup.value == null) {
-                val ids = list.map { bareId(it.uri) }
                 c._selectedGroup.value = c.channelStore?.lastPrimary?.takeIf { it in ids } ?: ids.firstOrNull()
             }
             affiliateAll()   // 편성 채널 전체 affiliation (등록 전이면 등록 완료 트리거가 수행)
