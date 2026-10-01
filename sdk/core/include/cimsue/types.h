@@ -256,6 +256,13 @@ struct MediaSource {
     float level = 0.f;
 };
 
+/** 통화 중 영상 전환 요청(1:1 호 — re-INVITE 의 m=video 추가, RFC 3264 §8.1)의 진행 중 쪽. 답이 오면 None 으로 돌아간다. */
+enum class VideoRequestState {
+    None,
+    Sent,                             // 내가 요청했다(Engine::setCallVideo) — 상대 답 대기
+    Received                          // 상대가 요청했다 — Engine::answerVideoRequest 대기(코어가 re-INVITE 를 100 으로 붙잡고 있다)
+};
+
 struct CallInfo {
     int callId = -1;
     int accountId = -1;
@@ -266,8 +273,10 @@ struct CallInfo {
     std::string calledParty;
     /** 영상 — 착신 대기 중 = offer 에 m=video 가 있다, 발신 = 영상으로 걸었다, 미디어 성립 뒤 = 협상된 영상 미디어가 활성이다. */
     bool video = false;
-    /** 내 영상 송출 허용(Engine::setVideoSend, 기본 true) — MCPTT 반이중은 이 값이 true 이고 발언권을 가진 동안만 실제로 보낸다. */
+    /** 내 영상 송출 허용(Engine::setVideoSend, 기본 true) — MCVideo 호는 이 값이 true 이고 송출 허가를 가진 동안만 실제로 보낸다. */
     bool videoSend = true;
+    /** 통화 중 영상 전환 요청의 진행(1:1 호) — 결과는 Listener::onVideoRequest. */
+    VideoRequestState videoRequest = VideoRequestState::None;
     bool mediaActive = false;
     bool muted = false;
     bool listen = true;
@@ -300,6 +309,26 @@ struct CallInfo {
      *  `<non-acknowledged-user>`(TS 24.379 §6.3.3.3). 알리면 onNonAcknowledgedUsers. */
     std::vector<std::string> nonAcknowledgedUsers;
 };
+
+/**
+ * 통화 중 영상 전환(1:1 호 — RFC 3264 §8.1 영상 추가·§8.2 제거, re-INVITE). 추가는 상대의 수락이 필요하다 — 받은 쪽은 사용자에게 묻고
+ * Engine::answerVideoRequest 로 답한다(거절 = m=video port 0 인 200 OK, 음성은 그대로 — §6). 제거는 묻지 않는다(CallInfo.video 로 온다).
+ */
+struct VideoRequestEvent {
+    enum class Kind {
+        Received,                     // 상대가 영상 추가를 요청했다 — answerVideoRequest 로 답한다(kVideoRequestAnswerSec 안에 답이 없으면 코어가 거절)
+        Accepted,                     // 내 요청을 상대가 받았다 — 영상이 협상됐다(CallInfo.video)
+        Declined,                     // 내 요청을 상대가 거절했다 — 200 OK 의 m=video port 0(RFC 3264 §6)
+        Failed,                       // 내 요청이 실패했다 — 최종 응답 code(491 은 RFC 3261 §14.1 대기 뒤 한 번 다시 보낸 결과)
+        Withdrawn                     // 받은 요청이 답하기 전에 끝났다 — 답 시한 초과(코어가 거절)·호 종료
+    };
+    Kind kind = Kind::Received;
+    int callId = -1;
+    int code = 0;                     // Failed — 최종 응답 코드(로컬 송신 실패 = 0)
+    std::string reason;
+};
+/** 받은 영상 추가 요청에 답할 시한(초) — 넘으면 코어가 거절한다(re-INVITE 를 오래 붙잡으면 같은 다이얼로그의 다른 요청이 491 로 막힌다). */
+constexpr int kVideoRequestAnswerSec = 20;
 
 // ── floor (TS 24.380 participant) ──
 enum class FloorState { Idle, Requesting, Speaking, Listening, Queued };
@@ -604,5 +633,7 @@ CIMSUE_API const char* toString(TransmissionState s);
 CIMSUE_API const char* toString(ReceptionState s);
 CIMSUE_API const char* toString(TransmissionEvent::Kind k);
 CIMSUE_API const char* toString(ReceptionEvent::Kind k);
+CIMSUE_API const char* toString(VideoRequestState s);
+CIMSUE_API const char* toString(VideoRequestEvent::Kind k);
 
 }  // namespace cimsue

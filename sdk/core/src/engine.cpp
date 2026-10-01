@@ -36,6 +36,7 @@
 #endif
 
 #include "account_map.h"
+#include "call_video.h"
 #include "floor/floor_participant.h"
 #include "mcdata/msrp.h"
 #include "mcdata/sds_codec.h"
@@ -366,6 +367,7 @@ public:
     void onIncomingCall(const CallInfo& i) override { each([&](Listener* l) { l->onIncomingCall(i); }); }
     void onCallState(const CallInfo& i) override { each([&](Listener* l) { l->onCallState(i); }); }
     void onCallMedia(const CallInfo& i) override { each([&](Listener* l) { l->onCallMedia(i); }); }
+    void onVideoRequest(const VideoRequestEvent& e) override { each([&](Listener* l) { l->onVideoRequest(e); }); }
     void onFloor(const FloorEvent& e) override { each([&](Listener* l) { l->onFloor(e); }); }
     void onRoster(int a, const std::string& g, const std::vector<RosterEntry>& u, bool f) override {
         each([&](Listener* l) { l->onRoster(a, g, u, f); });
@@ -425,6 +427,10 @@ struct Engine::Impl {
     bool previewWanted = false;         // setVideoPreview — 송출하는 동안 셀프뷰 프레임(프레임 렌더 빌드). ue-ctl 에서만
     int previewDev = -2;                // 셀프뷰를 연 캡처 장치(-2 = 열지 않음). ue-ctl 에서만
     std::atomic<bool> videoTickArmed{false};   // 영상 keep-alive 틱(pjsua2 util timer) 예약 중
+    // 일회성 지연 작업(later) — pjsua2 util timer 의 token 이 열쇠다. token 이 없는 타이머는 영상 keep-alive 틱이다.
+    std::mutex laterM;
+    std::map<intptr_t, std::function<void()>> laterJobs;
+    intptr_t laterSeq = 0;
 
     Worker ctl;                 // ue-ctl — pjsua2 전용
     Worker evt;                 // ue-evt — 리스너 전용
@@ -594,6 +600,10 @@ struct Engine::Impl {
     void videoTick();
     /** 틱 예약 — 첫 예약은 1 s 뒤(스트림 개시 keep-alive 가 서버 JOIN 보다 먼저 닿아 버려질 수 있다), 이후 KA 주기. */
     void armVideoTick(unsigned delayMs = PJMEDIA_STREAM_KA_INTERVAL * 1000);
+    /** delayMs 뒤 ue-ctl 에서 fn 을 한 번 — 엔진이 멈추면 버린다. 호에 걸린 작업은 fn 안에서 호가 아직 있는지·같은 요청인지 본다. */
+    void later(unsigned delayMs, std::function<void()> fn);
+    /** util timer 만료(pjsua 작업 스레드) — token 이 있으면 later 작업, 없으면 영상 틱. */
+    void onUtilTimer(void* token);
     /** 기억한 장치 단 음량을 slot 0 에 다시 건다 — 게이트 전환·재오픈·미디어 결선 뒤(재오픈은 slot 0 레벨을 초기화한다). */
     void applyDeviceLevels();
     /** media plane SDS 입출력 스레드(분리 실행) — 결과는 onRequestResult(MSRP)·onSds 로, 끝나면 호를 정리한다. */
@@ -683,10 +693,8 @@ public:
         std::lock_guard<std::mutex> lk(o_->snapM);
         o_->tlsPeer = e;
     }
-    /** util timer — 코어가 쓰는 것은 영상 keep-alive 틱 하나다. pjsua 작업 스레드에서 오므로 ue-ctl 로 넘긴다. */
-    void onTimer(const pj::OnTimerParam&) override {
-        o_->ctl.post([o = o_] { o->videoTick(); });
-    }
+    /** util timer — 영상 keep-alive 틱과 일회성 지연 작업(Impl::later). pjsua 작업 스레드에서 오므로 ue-ctl 로 넘긴다. */
+    void onTimer(const pj::OnTimerParam& prm) override { o_->onUtilTimer(prm.userData); }
 private:
     Engine::Impl* o_;
 };
@@ -713,6 +721,168 @@ public:
     std::unique_ptr<MsrpLeg> msrp;       // media plane SDS 호 — 앱에 나오지 않는다
     bool recvOnly = false;               // 감청 Join 등 청취 전용 평문 leg (a=recvonly, 마이크 없음)
     bool videoSend = true;               // 내 영상 송출 허용(Engine::setVideoSend) — CallInfo.videoSend 의 원본
+
+    /** 통화 중 영상 전환(1:1 호 — RFC 3264 §8.1 추가·§8.2 제거, ue_sdk.md §4.5). 내 요청 = setCallVideo 의 re-INVITE, 상대 요청 = 영상을
+     *  더하는 re-INVITE 를 100 으로 붙잡고(pjsua 비동기 응답) 사용자 답을 기다린다. pjsip 콜백과 ue-ctl 이 같이 만진다(condPending 와 같은 방식). */
+    struct VideoReq {
+        bool outPending = false;         // 내 요청 — 응답 대기 또는 491 뒤 재전송 대기
+        bool want = false;               // 요청한 영상 상태(추가 = true)
+        bool armTsx = false;             // 방금 보냈다 — 다음 UAC INVITE 트랜잭션(CALLING)이 그 요청이다
+        void* tsx = nullptr;             // 그 re-INVITE 트랜잭션 — 401/407 이면 스택이 새 트랜잭션으로 다시 보내므로 다시 붙잡는다
+        bool retried = false;            // 491 뒤 한 번 다시 보냈다(RFC 3261 §14.1)
+        bool inPending = false;          // 상대 요청을 붙잡고 있다
+        void* inTsx = nullptr;           // 붙잡은 re-INVITE 의 UAS 트랜잭션 — 답 전에 끝나면 Withdrawn
+        bool captureAnswer = false;      // 이번 offer 로 pjsua 가 만드는 answer SDP(영상 받음)를 onCallSdpCreated 에서 담는다
+        std::string answerSdp;
+        unsigned seq = 0;                // 요청 세대 — 늦게 온 시한·재전송 타이머를 거른다(호 사이에도 겹치지 않게 전역 증가)
+    } videoReq;
+    static unsigned nextVideoReqSeq() { static std::atomic<unsigned> n{0}; return ++n; }
+
+    bool oneToOne() const { return !mcptt && !mcvideo && !msrp && !recvOnly; }
+
+    /** 영상 미디어가 있다 — 활성·보류. 거절·제거된 port 0 줄은 없음으로 본다. */
+    bool videoPresent() {
+        try {
+            for (auto& m : getInfo().media)
+                if (m.type == PJMEDIA_TYPE_VIDEO && m.status != PJSUA_CALL_MEDIA_NONE && m.status != PJSUA_CALL_MEDIA_ERROR) return true;
+        } catch (...) {}
+        return false;
+    }
+
+    /** CallInfo.videoRequest 를 옮기고, kind 가 있으면 onVideoRequest 를 낸다(스냅샷 onCallMedia 가 먼저). */
+    void publishVideoRequest(VideoRequestState st, const VideoRequestEvent* ev = nullptr) {
+        CallInfo snap;
+        o_->updateCall(getId(), [&](CallInfo& c) { c.videoRequest = st; }, &snap);
+        if (ev) o_->emit([o = o_, snap, e = *ev] { o->listener->onCallMedia(snap); o->listener->onVideoRequest(e); });
+        else o_->emit([o = o_, snap] { o->listener->onCallMedia(snap); });
+    }
+    void videoRequestEvent(VideoRequestEvent::Kind kind, int code = 0, const std::string& reason = std::string()) {
+        VideoRequestEvent ev;
+        ev.kind = kind; ev.callId = getId(); ev.code = code; ev.reason = reason;
+        publishVideoRequest(kind == VideoRequestEvent::Kind::Received ? VideoRequestState::Received : VideoRequestState::None, &ev);
+    }
+
+    /** 영상 추가·제거 re-INVITE — pjsua 는 영상 개수가 줄면 그 줄을 port 0 으로 남기고, 늘면 port 0 줄을 먼저 되살린다(pjsua_media.c
+     *  channel_init) — 켜고 끄기를 되풀이해도 m 줄이 쌓이지 않는다. 음성·보류 상태는 그대로. ue-ctl 에서. */
+    void sendVideoReinvite(bool on) {
+        pj::CallOpParam prm(true);
+        setCallMedia(prm.opt, on);
+        videoReq.tsx = nullptr;
+        videoReq.armTsx = true;
+        try { reinvite(prm); } catch (...) { videoReq.armTsx = false; throw; }
+    }
+
+    /** setCallVideo — 상태 판정은 호출측. 추가 요청이면 CallInfo.videoRequest = Sent. */
+    void startVideoRequest(bool on) {
+        videoReq.want = on;
+        videoReq.retried = false;
+        videoReq.seq = nextVideoReqSeq();
+        videoReq.outPending = true;
+        try { sendVideoReinvite(on); } catch (...) { videoReq.outPending = false; throw; }
+        o_->log(3, "call " + std::to_string(getId()) + (on ? ": video add requested" : ": video removed"));
+        if (on) publishVideoRequest(VideoRequestState::Sent);
+    }
+
+    /** 내 요청의 최종 응답. answer = 2xx 의 SDP(없으면 협상 결과로 판정). */
+    void finishVideoRequest(int code, const std::string& reason, const std::string& answer) {
+        if (code == 491 && !videoReq.retried) {
+            // 같은 다이얼로그에서 상대 re-INVITE 와 엇갈렸다 — RFC 3261 §14.1 대기 뒤 한 번 다시. Call-ID 를 만든 쪽 = 첫 INVITE 를 보낸 쪽
+            videoReq.retried = true;
+            static thread_local std::mt19937 rng{std::random_device{}()};
+            const bool owner = o_->snapshotCall(getId()).dir == CallDir::Outgoing;
+            const unsigned ms = detail::reinviteRetryDelayMs(owner, std::uniform_real_distribution<double>(0, 1)(rng));
+            o_->log(3, "call " + std::to_string(getId()) + ": video re-INVITE 491 — retry in " + std::to_string(ms) + " ms");
+            o_->later(ms, [o = o_, id = getId(), seq = videoReq.seq] { if (PjCall* c = o->findCall(id)) c->retryVideoRequest(seq); });
+            return;
+        }
+        videoReq.outPending = false;
+        const bool want = videoReq.want;
+        o_->log(3, "call " + std::to_string(getId()) + ": video re-INVITE → " + std::to_string(code));
+        if (code / 100 != 2) { videoRequestEvent(VideoRequestEvent::Kind::Failed, code, reason); return; }
+        if (!want) return;                                                // 제거 — 결과는 CallInfo.video(onCallMediaState)
+        const bool accepted = answer.empty() ? videoPresent() : detail::sdpVideoPort(answer) > 0;
+        videoRequestEvent(accepted ? VideoRequestEvent::Kind::Accepted : VideoRequestEvent::Kind::Declined);
+    }
+
+    /** 491 대기 끝(ue-ctl) — 그새 상대 요청으로 이뤄졌으면 그것이 결과다. */
+    void retryVideoRequest(unsigned seq) {
+        if (!videoReq.outPending || videoReq.seq != seq || videoReq.tsx) return;
+        if (videoPresent() == videoReq.want) {
+            videoReq.outPending = false;
+            if (videoReq.want) videoRequestEvent(VideoRequestEvent::Kind::Accepted);
+            return;
+        }
+        try { sendVideoReinvite(videoReq.want); }
+        catch (pj::Error& e) {
+            videoReq.outPending = false;
+            videoRequestEvent(VideoRequestEvent::Kind::Failed, 0, e.info(false));
+        }
+    }
+
+    /**
+     * 붙잡은 상대 요청에 답한다(ue-ctl) — 수락 = pjsua 가 만든 answer 그대로, 거절 = 그 answer 의 영상 줄을 port 0 으로(RFC 3264 §6 —
+     * 음성은 그대로). answer 를 못 담았으면(SDP 출력 실패) 488 — 요청만 거절되고 세션은 그대로다(RFC 3261 §14.2). withdrawn = 시한
+     * 초과로 코어가 거절했다(앱에 Withdrawn).
+     */
+    void answerVideoRequest(bool accept, bool withdrawn) {
+        std::string sdp;
+        sdp.swap(videoReq.answerSdp);
+        videoReq.inPending = false;
+        videoReq.captureAnswer = false;
+        videoReq.inTsx = nullptr;
+        videoReq.seq = nextVideoReqSeq();
+        o_->log(3, "call " + std::to_string(getId()) + ": video request " + (accept ? "accepted" : withdrawn ? "expired — declined" : "declined"));
+        if (withdrawn) videoRequestEvent(VideoRequestEvent::Kind::Withdrawn);
+        else publishVideoRequest(VideoRequestState::None);
+        pj::CallOpParam prm;
+        if (sdp.empty()) {
+            prm.statusCode = PJSIP_SC_NOT_ACCEPTABLE_HERE;
+        } else {
+            prm.statusCode = PJSIP_SC_OK;
+            prm.sdp.wholeSdp = accept ? sdp : detail::rejectVideoSdp(sdp);
+        }
+        answer(prm);
+    }
+
+    /** 답 시한(kVideoRequestAnswerSec) — 아직 그 요청을 붙잡고 있으면 거절한다. */
+    void expireVideoRequest(unsigned seq) {
+        if (!videoReq.inPending || videoReq.seq != seq) return;
+        try { answerVideoRequest(false, true); } catch (pj::Error& e) { o_->log(2, std::string("video request expire: ") + e.info(false)); }
+    }
+
+    /**
+     * 상대 re-INVITE 의 offer(RFC 3261 §14.2). 1:1 호에 영상을 **더하는** offer(지금 영상 없음 + offer m=video port ≠ 0 — RFC 3264 §8.1)는
+     * 사용자 동의가 필요하다 — 100 으로 붙잡고(pjsua 비동기 응답) 앱에 묻는다. 내 추가 요청이 491 로 다시 보낼 차례를 기다리던 중이면
+     * 상대도 같은 것을 원하므로 묻지 않고 받는다. 그 밖의 offer(보류·해제·영상 제거·갱신)는 pjsua 기본 응답이다.
+     */
+    void onCallRxReinvite(pj::OnCallRxReinviteParam& prm) override {
+#if !PJSUA_HAS_VIDEO
+        (void)prm;
+        return;                                                           // 영상 없는 빌드 — pjsua 기본 응답이 영상 줄을 port 0 으로 거절한다
+#else
+        if (!oneToOne() || videoReq.inPending) return;
+        if (detail::sdpVideoPort(prm.offer.wholeSdp) <= 0 || videoPresent()) return;
+        prm.opt.videoCount = 1;                                           // 영상 매체 준비 — 거절이면 answer 의 영상 줄만 port 0 으로 고친다
+        prm.opt.reqKeyframeMethod = PJSUA_VID_REQ_KEYFRAME_RTCP_PLI;      // setCallMedia 와 같다(TS 26.114 §7.3)
+        if (videoReq.outPending && videoReq.want && !videoReq.tsx) {
+            videoReq.outPending = false;
+            o_->log(3, "call " + std::to_string(getId()) + ": peer video request while waiting to retry ours — accepted");
+            videoRequestEvent(VideoRequestEvent::Kind::Accepted);
+            return;                                                       // pjsua 기본 응답 = 영상을 받는 200 OK
+        }
+        prm.isAsync = true;
+        videoReq.inPending = true;
+        videoReq.captureAnswer = true;
+        videoReq.answerSdp.clear();
+        videoReq.seq = nextVideoReqSeq();
+        videoReq.inTsx = prm.rdata.pjRxData ? pjsip_rdata_get_tsx(static_cast<pjsip_rx_data*>(prm.rdata.pjRxData)) : nullptr;
+        o_->log(3, "call " + std::to_string(getId()) + ": peer requests video — waiting for the user");
+        o_->later(kVideoRequestAnswerSec * 1000, [o = o_, id = getId(), seq = videoReq.seq] {
+            if (PjCall* c = o->findCall(id)) c->expireVideoRequest(seq);
+        });
+        videoRequestEvent(VideoRequestEvent::Kind::Received);
+#endif
+    }
 
     /**
      * 이 호가 **낡은 스냅샷을 아직 비우지 않았다**.
@@ -984,6 +1154,12 @@ public:
             } catch (...) {}
             return;
         }
+        if (videoReq.captureAnswer && !prm.remSdp.wholeSdp.empty()) {
+            // 붙잡은 영상 추가 offer 의 answer(onCallRxReinvite — pjsua 비동기 경로는 만들고 보내지 않는다) — 사용자 답에 쓴다
+            videoReq.captureAnswer = false;
+            videoReq.answerSdp = prm.sdp.wholeSdp;
+            return;
+        }
         if (!mcptt && !recvOnly) return;
         try {
             if (recvOnly && !prm.sdp.wholeSdp.empty()) prm.sdp.wholeSdp = forceRecvOnly(prm.sdp.wholeSdp);
@@ -1027,6 +1203,24 @@ public:
                         publishCondition(ok ? ConditionCause::Confirmed : ConditionCause::Denied);
                     }
                 }
+            }
+            // 통화 중 영상 전환 — 내 re-INVITE 의 최종 응답(2xx 의 SDP 로 수락·거절을 가른다), 붙잡은 상대 re-INVITE 가 답 전에 끝남
+            if (videoReq.outPending && tsx.role == PJSIP_ROLE_UAC && tsx.method == "INVITE") {
+                if (videoReq.armTsx && tsx.state == PJSIP_TSX_STATE_CALLING) { videoReq.armTsx = false; videoReq.tsx = tsx.pjTransaction; }
+                if (videoReq.tsx && tsx.pjTransaction == videoReq.tsx && tsx.statusCode >= 200) {
+                    videoReq.tsx = nullptr;
+                    if (tsx.statusCode == 401 || tsx.statusCode == 407) videoReq.armTsx = true;   // 인증을 실은 새 트랜잭션
+                    else finishVideoRequest(tsx.statusCode, tsx.statusText,
+                                            prm.e.body.tsxState.type == PJSIP_EVENT_RX_MSG
+                                                ? sipBody(prm.e.body.tsxState.src.rdata.wholeMsg) : std::string());
+                }
+            }
+            if (videoReq.inPending && videoReq.inTsx && tsx.pjTransaction == videoReq.inTsx &&
+                tsx.state >= PJSIP_TSX_STATE_COMPLETED) {
+                videoReq.inPending = false; videoReq.captureAnswer = false; videoReq.inTsx = nullptr; videoReq.answerSdp.clear();
+                videoReq.seq = nextVideoReqSeq();
+                o_->log(3, "call " + std::to_string(getId()) + ": peer video request ended before the answer (" + std::to_string(tsx.statusCode) + ")");
+                videoRequestEvent(VideoRequestEvent::Kind::Withdrawn, tsx.statusCode, tsx.statusText);
             }
             if (prm.e.body.tsxState.type != PJSIP_EVENT_RX_MSG) return;
             const std::string& msg = prm.e.body.tsxState.src.rdata.wholeMsg;
@@ -1147,6 +1341,7 @@ public:
                 case PJSIP_INV_STATE_DISCONNECTED:
                     ns = CallState::Disconnected;
                     c.mediaActive = false;
+                    c.videoRequest = VideoRequestState::None;
                     break;
                 default: break;
             }
@@ -1154,6 +1349,15 @@ public:
             c.state = ns;
         }, &snap);
         if (changed) o_->emit([o = o_, snap] { o->listener->onCallState(snap); });
+        if (ci.state == PJSIP_INV_STATE_DISCONNECTED && (videoReq.inPending || videoReq.outPending)) {
+            const bool held = videoReq.inPending;                         // 붙잡은 상대 요청 — 답하지 못하고 끝났다
+            videoReq = VideoReq();
+            if (held) {
+                VideoRequestEvent ev;
+                ev.kind = VideoRequestEvent::Kind::Withdrawn; ev.callId = id;
+                o_->emit([o = o_, ev] { o->listener->onVideoRequest(ev); });
+            }
+        }
         if (ci.state == PJSIP_INV_STATE_DISCONNECTED) {
             o_->ctl.post([o = o_, id] {                    // 콜백 안에서 자기 객체를 지우지 않는다
                 o->calls.erase(id);                        // ~PjCall → floor participant close
@@ -1860,6 +2064,37 @@ void Engine::Impl::armVideoTick(unsigned delayMs) {
 #endif
 }
 
+void Engine::Impl::later(unsigned delayMs, std::function<void()> fn) {
+    if (!ep) return;
+    intptr_t id;
+    {
+        std::lock_guard<std::mutex> lk(laterM);
+        id = ++laterSeq;
+        laterJobs[id] = std::move(fn);
+    }
+    try { ep->utilTimerSchedule(delayMs, (pj::Token)id); }
+    catch (pj::Error& e) {
+        { std::lock_guard<std::mutex> lk(laterM); laterJobs.erase(id); }
+        log(2, std::string("later: ") + e.info(false));
+    }
+}
+
+void Engine::Impl::onUtilTimer(void* token) {
+    if (!token) { ctl.post([this] { videoTick(); }); return; }
+    const intptr_t id = (intptr_t)token;
+    ctl.post([this, id] {
+        std::function<void()> fn;
+        {
+            std::lock_guard<std::mutex> lk(laterM);
+            auto it = laterJobs.find(id);
+            if (it == laterJobs.end()) return;
+            fn = std::move(it->second);
+            laterJobs.erase(it);
+        }
+        if (running && fn) fn();
+    });
+}
+
 void Engine::Impl::wireMedia(PjCall* call, int callId) {
     // conference bridge 결선 — 호 → 스피커(listen), 마이크 → 호. MCPTT 반이중은 floor Granted(micOpen)에서만
     // 마이크를 결선한다. 장치 미디어는 Endpoint 소유라 보관하지 않고 매번 재취득.
@@ -2035,6 +2270,7 @@ void Engine::stop() {
         o->logWriter = nullptr;
         o->ep.reset();
         o->running = false;
+        { std::lock_guard<std::mutex> lk(o->laterM); o->laterJobs.clear(); }   // libDestroy 가 타이머를 거뒀다
         return 0;
     });
     {
@@ -2241,10 +2477,12 @@ Result Engine::hold(int callId) {
     return withCall(impl_.get(), callId, [](pj::Call& c) { pj::CallOpParam prm; c.setHold(prm); });
 }
 Result Engine::resume(int callId) {
-    return withCall(impl_.get(), callId, [](pj::Call& c) {
+    return withCall(impl_.get(), callId, [](PjCall& c) {
+        // 재초대의 설정이 호 설정을 대신한다 — 지금의 영상 상태를 그대로 싣는다(pjsua 기본값은 영상 1 이라 음성 호의 보류 해제가 영상을 더한다)
         pj::CallOpParam prm(true);
+        if (c.mcvideo) setMcVideoMedia(prm.opt);
+        else setCallMedia(prm.opt, c.videoPresent());
         prm.opt.flag |= PJSUA_CALL_UNHOLD;
-        prm.opt.reqKeyframeMethod = PJSUA_VID_REQ_KEYFRAME_RTCP_PLI;   // 재초대의 설정이 호 설정을 대신한다(setCallMedia)
         c.reinvite(prm);
     });
 }
@@ -3364,6 +3602,37 @@ Result Engine::setVideoSend(int callId, bool on) {
     (void)callId; (void)on;
     return Result::fail(-3, "video not built");
 #endif
+}
+
+Result Engine::setCallVideo(int callId, bool on) {
+#if PJSUA_HAS_VIDEO
+    if (!impl_->running) return Result::fail(-1, "not running");
+    return impl_->ctl.runSync([this, callId, on]() -> Result {
+        Impl* o = impl_.get();
+        PjCall* c = o->findCall(callId);
+        if (!c) return Result::fail(-2, "no such call");
+        if (!c->oneToOne()) return Result::fail(-3, "not a 1:1 call");
+        if (c->videoReq.outPending || c->videoReq.inPending) return Result::fail(-4, "video request pending");
+        if (o->snapshotCall(callId).state != CallState::Active) return Result::fail(-5, "call not active");
+        if (c->videoPresent() == on) return Result::success();
+        try { c->startVideoRequest(on); } catch (pj::Error& e) { return fromError(e); }
+        return Result::success();
+    });
+#else
+    (void)callId; (void)on;
+    return Result::fail(-3, "video not built");
+#endif
+}
+
+Result Engine::answerVideoRequest(int callId, bool accept) {
+    if (!impl_->running) return Result::fail(-1, "not running");
+    return impl_->ctl.runSync([this, callId, accept]() -> Result {
+        PjCall* c = impl_->findCall(callId);
+        if (!c) return Result::fail(-2, "no such call");
+        if (!c->videoReq.inPending) return Result::fail(-3, "no video request");
+        try { c->answerVideoRequest(accept, false); } catch (pj::Error& e) { return fromError(e); }
+        return Result::success();
+    });
 }
 
 std::vector<VideoDeviceInfo> Engine::videoDevices() const {

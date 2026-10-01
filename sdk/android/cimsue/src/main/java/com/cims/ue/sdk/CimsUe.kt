@@ -134,6 +134,7 @@ class CimsUe(private val io: CoroutineDispatcher = Dispatchers.IO) : AutoCloseab
     private val _condition = lossy<ConditionChange>()
     private val _transmission = lossy<TransmissionEvent>()
     private val _reception = lossy<ReceptionEvent>()
+    private val _videoRequest = lossy<VideoRequestEvent>()
     private val _stopped = lossy<Unit>()
 
     // ③ 유실 불가 — 무제한 버퍼. 소비는 한 번뿐이라 수집자를 하나만 둔다(Service 의 세션).
@@ -159,6 +160,9 @@ class CimsUe(private val io: CoroutineDispatcher = Dispatchers.IO) : AutoCloseab
     val transmission: SharedFlow<TransmissionEvent> = _transmission.asSharedFlow()
     /** MCVideo 수신 제어(§6.2.5) — 새 송출 알림(manual 이면 [Call.acceptReception])·수신 허가·종료. */
     val reception: SharedFlow<ReceptionEvent> = _reception.asSharedFlow()
+    /** 통화 중 영상 전환(1:1 호, RFC 3264 §8.1) — 상대의 요청(RECEIVED → [Call.answerVideoRequest])·내 요청의 결과. 권위는
+     *  `callInfo().videoRequest` 스냅샷(② 정책). */
+    val videoRequest: SharedFlow<VideoRequestEvent> = _videoRequest.asSharedFlow()
     val stopped: SharedFlow<Unit> = _stopped.asSharedFlow()
 
     /** MCData SDS 수신. **유실되지 않는다** — 수집자가 붙기 전 것도 쌓인다. 수집자는 하나만 둔다. */
@@ -407,6 +411,7 @@ class CimsUe(private val io: CoroutineDispatcher = Dispatchers.IO) : AutoCloseab
         override fun onFloor(ev: JniFloorEvent) { _floor.emitLossy(FloorEvent.of(ev)) }
         override fun onTransmission(ev: com.cims.ue.sdk.jni.TransmissionEvent) { _transmission.emitLossy(TransmissionEvent.of(ev)) }
         override fun onReception(ev: com.cims.ue.sdk.jni.ReceptionEvent) { _reception.emitLossy(ReceptionEvent.of(ev)) }
+        override fun onVideoRequest(ev: com.cims.ue.sdk.jni.VideoRequestEvent) { _videoRequest.emitLossy(VideoRequestEvent.of(ev)) }
 
         override fun onRoster(accountId: Int, groupId: String, users: RosterVector, full: Boolean) {
             _roster.emitLossy(RosterUpdate.of(accountId, groupId, users, full))
@@ -646,9 +651,15 @@ class Call internal constructor(private val ue: CimsUe, val id: Int, private val
     /** 캡처 카메라 전환(전면↔후면) — 이후 호의 기본 카메라로도 쓴다. */
     suspend fun switchCamera(): CimsResult<Unit> = cmd { CimsResult.of(ue.jni.switchCamera(id)) }
 
-    /** 내 영상 송출 허용 — MCPTT 반이중은 허용이면서 발언권을 가진 동안만 보내고(승인 = 송출 시작·키프레임, 놓음 = 정지·카메라 닫힘),
+    /** 내 영상 송출 허용 — MCVideo 호는 허용이면서 송출 허가를 가진 동안만 보내고(허가 = 송출 시작·키프레임, 종료 = 정지·카메라 닫힘),
      *  그 밖의 호는 곧바로 시작·정지한다. 재협상 없음. */
     suspend fun setVideoSend(on: Boolean): CimsResult<Unit> = cmd { CimsResult.of(ue.jni.setVideoSend(id, on)) }
+
+    /** 통화 중 영상 전환(1:1 호, re-INVITE — RFC 3264 §8.1·§8.2). on = 추가 **요청** — 결과는 `videoRequest` 이벤트(ACCEPTED·DECLINED·
+     *  FAILED)와 [CallInfo.video], off = 제거(묻지 않는다). 성립 전·보류 중·진행 중인 요청이 있으면 실패. */
+    suspend fun setVideo(on: Boolean): CimsResult<Unit> = cmd { CimsResult.of(ue.jni.setCallVideo(id, on)) }
+    /** 상대의 영상 추가 요청(`videoRequest` RECEIVED)에 답한다 — accept = 영상을 받는 200 OK, false = m=video port 0(음성은 그대로). */
+    suspend fun answerVideoRequest(accept: Boolean): CimsResult<Unit> = cmd { CimsResult.of(ue.jni.answerVideoRequest(id, accept)) }
 
     /** 수신 음성을 재생할 라우트(0=기본). 활성 호면 즉시 재결선. */
     suspend fun setRoute(routeId: Int): CimsResult<Unit> = cmd { CimsResult.of(ue.jni.setCallRoute(id, routeId)) }

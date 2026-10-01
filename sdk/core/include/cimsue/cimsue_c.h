@@ -91,6 +91,15 @@ typedef enum {
     CIMSUE_RXEV_NOTIFIED = 0, CIMSUE_RXEV_GRANTED = 1, CIMSUE_RXEV_REJECTED = 2, CIMSUE_RXEV_ENDED = 3, CIMSUE_RXEV_RELEASED = 4,
     CIMSUE_RXEV_END_REQUESTED = 5, CIMSUE_RXEV_REQUEST_TIMEOUT = 6, CIMSUE_RXEV_OTHER = 7
 } cimsue_reception_kind_t;
+/** 통화 중 영상 전환 요청의 진행(types.h VideoRequestState — 1:1 호, RFC 3264 §8.1). */
+typedef enum {
+    CIMSUE_VIDEO_REQ_NONE = 0, CIMSUE_VIDEO_REQ_SENT = 1, CIMSUE_VIDEO_REQ_RECEIVED = 2
+} cimsue_video_request_state_t;
+/** on_video_request 의 종류(types.h VideoRequestEvent::Kind). */
+typedef enum {
+    CIMSUE_VIDEO_REQEV_RECEIVED = 0, CIMSUE_VIDEO_REQEV_ACCEPTED = 1, CIMSUE_VIDEO_REQEV_DECLINED = 2, CIMSUE_VIDEO_REQEV_FAILED = 3,
+    CIMSUE_VIDEO_REQEV_WITHDRAWN = 4
+} cimsue_video_request_kind_t;
 /** 오디오 라우트(types.h AudioRoute) — 입력의 EARPIECE = 내장 기본 마이크 고정, DEFAULT = 정책. */
 typedef enum { CIMSUE_ROUTE_DEFAULT = 0, CIMSUE_ROUTE_EARPIECE = 1, CIMSUE_ROUTE_LOUDSPEAKER = 2 } cimsue_audio_route_t;
 /** 마이크 AGC 기본 목표(types.h kMicAgcTargetDbov) — ITU-T P.56 활성 레벨 -26 dBov. */
@@ -266,7 +275,17 @@ typedef struct {
     cimsue_mc_service_t          service;           /* MCVideo 그룹 호면 MCVIDEO(그때 is_mcptt = 0) */
     const char*                  session_uri;       /* MC 세션 식별자 — 제어 기능 Contact(isfocus), 재합류에 쓴다 */
     int32_t                      video_send;        /* 내 영상 송출 허용(set_video_send, 기본 1) — MCPTT 반이중은 발언권을 가진 동안만 실제로 보낸다 */
+    cimsue_video_request_state_t video_request;     /* 통화 중 영상 전환 요청의 진행(1:1 호) — 결과는 on_video_request */
 } cimsue_call_info_t;
+
+/** 통화 중 영상 전환 이벤트(types.h VideoRequestEvent — 1:1 호, RFC 3264 §8.1·§8.2). RECEIVED 면 앱이 사용자에게 묻고
+ *  cimsue_engine_answer_video_request 로 답한다(20 s 안에 답이 없으면 코어가 거절 — WITHDRAWN). */
+typedef struct {
+    cimsue_video_request_kind_t kind;
+    int32_t                     call_id;
+    int32_t                     code;            /* FAILED — 최종 응답 코드(로컬 송신 실패 = 0) */
+    const char*                 reason;
+} cimsue_video_request_event_t;
 
 typedef struct {
     const char* id;                     /* MCPTT ID */
@@ -503,6 +522,8 @@ typedef struct {
     /** 영상 프레임(Listener::onVideoFrame — 프레임 렌더 빌드만). **예외: 이벤트 스레드가 아니라 영상 스레드**에서 프레임마다 곧바로
      *  불린다 — 화소를 복사하고 곧 돌아간다. 이 콜백 안에서 엔진 함수를 부르지 않는다(교착). */
     void (CIMSUE_CALL* on_video_frame)(void* user, const cimsue_video_frame_t* frame);
+    /** 통화 중 영상 전환(Listener::onVideoRequest, RFC 3264 §8.1) — 상대의 요청(RECEIVED → answer_video_request)·내 요청의 결과. */
+    void (CIMSUE_CALL* on_video_request)(void* user, const cimsue_video_request_event_t* ev);
 } cimsue_listener_t;
 
 /* ── 엔진 (engine.h 1:1) ── */
@@ -694,6 +715,10 @@ CIMSUE_API cimsue_status_t CIMSUE_CALL cimsue_engine_set_video_capture_device(ci
 CIMSUE_API cimsue_status_t CIMSUE_CALL cimsue_engine_set_video_send(cimsue_engine_t* e, int32_t call_id, int32_t on);
 /** 캡처 카메라 전환(Engine::switchCamera). */
 CIMSUE_API cimsue_status_t CIMSUE_CALL cimsue_engine_switch_camera(cimsue_engine_t* e, int32_t call_id);
+/** 통화 중 영상 전환(Engine::setCallVideo — 1:1 호, re-INVITE). on = 추가 요청(결과는 on_video_request), 0 = 제거(묻지 않는다). */
+CIMSUE_API cimsue_status_t CIMSUE_CALL cimsue_engine_set_call_video(cimsue_engine_t* e, int32_t call_id, int32_t on);
+/** 상대의 영상 추가 요청에 답한다(Engine::answerVideoRequest) — accept = 영상을 받는 200 OK, 0 = m=video port 0(음성 유지). */
+CIMSUE_API cimsue_status_t CIMSUE_CALL cimsue_engine_answer_video_request(cimsue_engine_t* e, int32_t call_id, int32_t accept);
 /** 영상 장치 목록. 반환 개수, *out 은 스냅샷 배열(다음 조회까지 유효). */
 CIMSUE_API int32_t CIMSUE_CALL cimsue_engine_video_devices(const cimsue_engine_t* e,
                                                            const cimsue_video_device_info_t** out);
@@ -715,6 +740,8 @@ CIMSUE_API const char* CIMSUE_CALL cimsue_transmission_state_str(cimsue_transmis
 CIMSUE_API const char* CIMSUE_CALL cimsue_reception_state_str(cimsue_reception_state_t s);
 CIMSUE_API const char* CIMSUE_CALL cimsue_transmission_kind_str(cimsue_transmission_kind_t k);
 CIMSUE_API const char* CIMSUE_CALL cimsue_reception_kind_str(cimsue_reception_kind_t k);
+CIMSUE_API const char* CIMSUE_CALL cimsue_video_request_state_str(cimsue_video_request_state_t s);
+CIMSUE_API const char* CIMSUE_CALL cimsue_video_request_kind_str(cimsue_video_request_kind_t k);
 
 /* ── 문자열 산출 헬퍼 (C++ 인라인 멤버·types.h 자유 함수 1:1) ──
  * 공통 규약: out 에 최대 cap 바이트(NUL 포함)를 NUL 종료로 기록하고, NUL 을 제외한 실제 길이를 반환한다.
@@ -1182,6 +1209,7 @@ typedef enum {
     CIMSUE_STRUCT_RECEPTION_EVENT, CIMSUE_STRUCT_TRANSMISSION_INFO,
     CIMSUE_STRUCT_MCVIDEO_GROUP_ATTRS, CIMSUE_STRUCT_MCVIDEO_USER_PROFILE_DOC, CIMSUE_STRUCT_MCVIDEO_SERVICE_CONFIG_DOC,
     CIMSUE_STRUCT_VIDEO_FRAME,
+    CIMSUE_STRUCT_VIDEO_REQUEST_EVENT,
     CIMSUE_STRUCT_COUNT_
 } cimsue_struct_id_t;
 /** 구조체의 sizeof(이 DLL 의 컴파일 결과). 모르는 id 는 -1. */

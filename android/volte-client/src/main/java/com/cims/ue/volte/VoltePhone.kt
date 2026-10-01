@@ -22,6 +22,8 @@ import com.cims.ue.sdk.CimsUe
 import com.cims.ue.sdk.EngineConfig
 import com.cims.ue.sdk.MediaSecurity
 import com.cims.ue.sdk.Transport
+import com.cims.ue.sdk.VideoRequestEvent
+import com.cims.ue.sdk.VideoRequestEventKind
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -72,9 +74,17 @@ class VoltePhone(
     private val _messages = MutableSharedFlow<ImMessage>(extraBufferCapacity = 64, onBufferOverflow = BufferOverflow.DROP_OLDEST)
     val incomingMessage: SharedFlow<ImMessage> = _messages.asSharedFlow()
 
-    /** 지금 호의 영상 여부 — 발신은 발신 전 토글(M1.3), 착신은 응답 방식(영상/음성)이 정한다.
-     *  근접 센서 화면 꺼짐(SipService)도 이 값을 본다. */
+    /** 지금 호의 영상 여부 — 발신은 발신 전 토글(M1.3), 착신은 응답 방식(영상/음성)이 정하고, 통화 중에는 협상 결과([callVideo])를
+     *  따른다(통화 중 영상 전환). 근접 센서 화면 꺼짐(SipService)도 이 값을 본다. */
     @Volatile var videoEnabled = false
+
+    private val _callVideo = MutableStateFlow(false)
+    /** 통화 중인 호의 영상 협상 결과(코어 CallInfo.video) — 통화 중 영상 전환(요청 수락·상대의 영상 제거)이 바꾼다. 영상 칸·근접 센서가 본다. */
+    val callVideo: StateFlow<Boolean> = _callVideo.asStateFlow()
+
+    private val _videoRequests = MutableSharedFlow<VideoRequestEvent>(extraBufferCapacity = 16, onBufferOverflow = BufferOverflow.DROP_OLDEST)
+    /** 통화 중 영상 전환(RFC 3264 §8.1) — 상대의 요청(RECEIVED → [answerVideoRequest])·내 요청의 결과. 명령이 곧바로 실패해도 FAILED 로 온다. */
+    val videoRequests: SharedFlow<VideoRequestEvent> = _videoRequests.asSharedFlow()
 
     /** 마지막으로 본 호 — 카메라 전환 대상. */
     @Volatile private var lastCallId = -1
@@ -89,6 +99,8 @@ class VoltePhone(
         scope.launch { ue.regState.collect { onReg(it) } }
         scope.launch { ue.incomingCall.collect { onCall(it, incoming = true) } }
         scope.launch { ue.callState.collect { onCall(it, incoming = false) } }
+        scope.launch { ue.callMedia.collect { onMedia(it) } }
+        scope.launch { ue.videoRequest.collect { _videoRequests.tryEmit(it) } }
         scope.launch { ue.requestResult.collect { r -> onResult(SendReqResult(r.token, r.method, r.code, r.reason, r.etag.ifBlank { null })) } }
         scope.launch { ue.message.collect { m -> _messages.tryEmit(ImMessage(m.fromUri, m.contentType, m.body)) } }
     }
@@ -146,6 +158,21 @@ class VoltePhone(
     fun setCaptureEnabled(on: Boolean) = scope.launch { ue.setCaptureEnabled(on) }
 
     // ── 영상 ──
+    /** 통화 중 영상 전환 — on = 영상 추가 요청(상대가 [수락]하면 [callVideo]), off = 영상 제거(묻지 않는다). */
+    fun setCallVideo(on: Boolean) = scope.launch {
+        val id = lastCallId
+        if (id < 0) return@launch
+        val r = ue.call(id).setVideo(on)
+        if (!r.ok) {
+            Log.w(TAG, "setCallVideo($on): ${r.code} ${r.reason}")
+            _videoRequests.tryEmit(VideoRequestEvent(VideoRequestEventKind.FAILED, id, r.code, r.reason))
+        }
+    }
+    /** 상대의 영상 전환 요청에 답한다 — accept = 영상으로, false = 음성 그대로. */
+    fun answerVideoRequest(callId: Int, accept: Boolean) = scope.launch {
+        ue.call(callId).answerVideoRequest(accept).let { if (!it.ok) Log.w(TAG, "answerVideoRequest: ${it.code} ${it.reason}") }
+    }
+
     fun setVideoSurface(surface: Any?) = scope.launch { ue.setVideoSurface(surface as? Surface) }
     fun setPreviewSurface(surface: Any?) { ue.setPreviewSurface(surface as? Surface) }
     fun switchCamera() = scope.launch {
@@ -204,7 +231,19 @@ class VoltePhone(
             c.state == SdkCallState.DISCONNECTED -> CallState.Disconnected(c.callId, c.lastCode, c.lastReason)
             else -> return
         }
+        when (c.state) {
+            SdkCallState.ACTIVE -> { videoEnabled = c.video; _callVideo.value = c.video }   // 협상 결과(영상 발신을 음성으로 받았으면 false)
+            SdkCallState.DISCONNECTED -> _callVideo.value = false
+            else -> {}
+        }
         _call.value = mapped
+    }
+
+    /** 미디어 결선 — 통화 중(성립 뒤)에는 협상된 영상이 이 호의 영상 여부다(통화 중 영상 전환·상대의 영상 거절). */
+    private fun onMedia(c: SdkCallInfo) {
+        if (c.callId != lastCallId || c.state != SdkCallState.ACTIVE) return
+        videoEnabled = c.video
+        _callVideo.value = c.video
     }
 
     /** 기존 래퍼(`SipController.buildAccountConfig`)와 같은 입력 — 매핑 규칙 자체는 코어(account_map.cpp)가 같다. */

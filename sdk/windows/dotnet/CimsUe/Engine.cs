@@ -63,6 +63,8 @@ public sealed unsafe class Engine : IDisposable
     /// 곧바로** 부른다(프레임마다 초당 15~30회) — 화소를 복사하고 곧 돌아간다. 핸들러 안에서 엔진 명령을 부르지 않는다(엔진이 영상 포트를 멈추며
     /// 이 스레드를 기다리는 중이면 교착한다). 수신 영상 = 그 호의 CallId, 셀프뷰 = -1(<see cref="SetVideoPreview"/>).</summary>
     public event VideoFrameHandler? VideoFrameReceived;
+    /// <summary>통화 중 영상 전환(1:1 호, RFC 3264 §8.1) — 상대의 요청(Received → <see cref="AnswerVideoRequest"/>)·내 요청의 결과.</summary>
+    public event EventHandler<VideoRequestEvent>? VideoRequestChanged;
     /// <summary>그룹 로스터(RFC 4575) — 구독 NOTIFY 또는 in-dialog NOTIFY.</summary>
     public event EventHandler<RosterUpdate>? RosterChanged;
     /// <summary>감시 대상 dialog 상태(RFC 4235 NOTIFY) — dialog 하나당 1회.</summary>
@@ -275,6 +277,11 @@ public sealed unsafe class Engine : IDisposable
     public Result SetVideoCaptureDevice(int deviceId) => Status(cimsue_engine_set_video_capture_device(Handle, deviceId));
     /// <summary>캡처 카메라 전환 — 활성 영상 호의 송신 장치를 다음 카메라로.</summary>
     public Result SwitchCamera(int callId) => Status(cimsue_engine_switch_camera(Handle, callId));
+    /// <summary>통화 중 영상 전환(1:1 호, re-INVITE) — on = 추가 요청(결과는 <see cref="VideoRequestChanged"/>), false = 제거(묻지 않는다).
+    /// 성립 전·보류 중·진행 중인 요청이 있으면 실패. 영상 없는 빌드면 실패.</summary>
+    public Result SetCallVideo(int callId, bool on) => Status(cimsue_engine_set_call_video(Handle, callId, on ? 1 : 0));
+    /// <summary>상대의 영상 추가 요청에 답한다 — accept = 영상을 받는 200 OK, false = m=video port 0(음성은 그대로, RFC 3264 §6).</summary>
+    public Result AnswerVideoRequest(int callId, bool accept) => Status(cimsue_engine_answer_video_request(Handle, callId, accept ? 1 : 0));
     public IReadOnlyList<VideoDeviceInfo> VideoDevices
     {
         get
@@ -460,7 +467,8 @@ public sealed unsafe class Engine : IDisposable
                             ToManaged(c->mcptt), c->half_duplex != 0, c->listen_only != 0, Utf8.Str(c->joined_dialog),
                             c->rx_level, new McpttCondition(c->condition.emergency != 0, c->condition.imminent_peril != 0, c->condition.mine != 0,
                                                             c->condition.pending != 0, c->condition.last_code),
-                            Utf8.Str(c->answer_state), NonAck(c), (McService)c->service, Utf8.Str(c->session_uri), c->video_send != 0);
+                            Utf8.Str(c->answer_state), NonAck(c), (McService)c->service, Utf8.Str(c->session_uri), c->video_send != 0,
+                            (VideoRequestState)c->video_request);
     }
 
     private static string[] NonAck(cimsue_call_info_t* c)
@@ -498,6 +506,9 @@ public sealed unsafe class Engine : IDisposable
 
     internal static ReceptionEvent ToManaged(cimsue_reception_event_t* e) =>
         new((ReceptionEventKind)e->kind, e->call_id, ToManaged(e->transmitter), e->cause, Utf8.Str(e->cause_text), e->raw_type);
+
+    internal static VideoRequestEvent ToManaged(cimsue_video_request_event_t* e) =>
+        new((VideoRequestEventKind)e->kind, e->call_id, e->code, Utf8.Str(e->reason));
 
     internal static TransmissionInfo ToManaged(cimsue_transmission_info_t* t)
     {
@@ -541,6 +552,7 @@ public sealed unsafe class Engine : IDisposable
         on_transmission = &Cb.OnTransmission,
         on_reception = &Cb.OnReception,
         on_video_frame = &Cb.OnVideoFrame,
+        on_video_request = &Cb.OnVideoRequest,
     };
 
     /// <summary>앱 스레드로 넘긴다. 컨텍스트가 없으면 이벤트 스레드에서 직접 — 예외는 네이티브 경계 밖으로 새지 않게 잡는다.</summary>
@@ -704,6 +716,13 @@ public sealed unsafe class Engine : IDisposable
                 h(e, in frame);
             }
             catch (Exception ex) { try { e.HandlerFailed?.Invoke(e, ex); } catch { /* 마지막 방어 */ } }
+        }
+
+        [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
+        public static void OnVideoRequest(void* user, cimsue_video_request_event_t* ev)
+        {
+            var e = Of(user); if (e is null) return;
+            try { var r = ToManaged(ev); e.Dispatch(() => e.VideoRequestChanged?.Invoke(e, r)); } catch { }
         }
 
         [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]

@@ -37,6 +37,10 @@ public sealed class Call
     /// <summary>수신 음량(1.0=원음, 0=무음).</summary>
     public Result SetRxLevel(float level) => Engine.Status(cimsue_engine_set_rx_level(Engine.Handle, Id, level));
     public Result SendDtmf(string digits) => Engine.Status(cimsue_engine_send_dtmf(Engine.Handle, Id, digits));
+    /// <summary>통화 중 영상 전환(1:1 호, re-INVITE) — on = 추가 요청(결과는 Engine.VideoRequestChanged), false = 제거(묻지 않는다).</summary>
+    public Result SetVideo(bool on) => Engine.Status(cimsue_engine_set_call_video(Engine.Handle, Id, Engine.B(on)));
+    /// <summary>상대의 영상 추가 요청에 답한다 — accept = 영상을 받는 200 OK, false = m=video port 0(음성은 그대로).</summary>
+    public Result AnswerVideoRequest(bool accept) => Engine.Status(cimsue_engine_answer_video_request(Engine.Handle, Id, Engine.B(accept)));
 
     // ── MCPTT ──
     /// <summary>세션 이탈(BYE).</summary>

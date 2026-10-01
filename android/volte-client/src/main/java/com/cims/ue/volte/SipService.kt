@@ -69,6 +69,10 @@ class SipService : Service() {
 
     val regState: StateFlow<RegState>? get() = controller?.regState
     val callState: StateFlow<CallState>? get() = controller?.callState
+    /** 통화 중인 호의 영상 협상 결과 — 통화 중 영상 전환이 바꾼다. */
+    val callVideo: StateFlow<Boolean>? get() = controller?.callVideo
+    /** 통화 중 영상 전환 — 상대의 요청(RECEIVED)·내 요청의 결과. */
+    val videoRequests: kotlinx.coroutines.flow.SharedFlow<com.cims.ue.sdk.VideoRequestEvent>? get() = controller?.videoRequests
 
     /** 문자 저장소 변경 신호(수신/발신 시 증가) — UI 는 이걸 관찰해 목록을 다시 읽는다. */
     val messagesVersion = MutableStateFlow(0L)
@@ -285,6 +289,9 @@ class SipService : Service() {
     fun setVideoSurface(surface: Any?) { controller?.setVideoSurface(surface) }
     fun setPreviewSurface(surface: Any?) { controller?.setPreviewSurface(surface) }
     fun switchCamera() { controller?.switchCamera() }
+    /** 통화 중 영상 전환 — on = 영상 추가 요청(상대 수락 필요), off = 영상 제거. */
+    fun setCallVideo(on: Boolean) { controller?.setCallVideo(on) }
+    fun answerVideoRequest(callId: Int, accept: Boolean) { controller?.answerVideoRequest(callId, accept) }
 
     /** 통화중 마이크 음소거 토글. */
     fun setMuted(callId: Int, on: Boolean) { controller?.setMuted(callId, on) }
@@ -552,10 +559,7 @@ class SipService : Service() {
                 elevateForCall(call is CallState.Active || call is CallState.Outgoing)
                 // 통화 오디오 세션 소유(MODE_IN_COMMUNICATION) — 미소유 시 일부 단말 완전 무음(setInCallAudio 참조)
                 setInCallAudio(call is CallState.Active || call is CallState.Outgoing)
-                // 발신·통화 중 근접 센서 화면 꺼짐(전화 앱과 같은 동작). 착신 벨 울림 중에는 잡지 않는다 — 받기 조작이 필요하다.
-                // 영상 호도 잡지 않는다 — 화면을 보며 통화하므로 손이 센서를 가리면 영상이 꺼진다(전화 앱도 영상 통화엔 쓰지 않는다).
-                val voiceCall = (call is CallState.Active || call is CallState.Outgoing) && !c.videoEnabled
-                if (voiceCall) proximityLock.acquire() else proximityLock.release()
+                applyProximity(c)                                       // 음성 발신·통화 중에만 근접 센서 화면 꺼짐
                 // 착신 — 기본 전화앱처럼 벨소리 + 풀스크린/헤드업 착신 알림(받기/거절).
                 if (call is CallState.Incoming) {
                     showIncomingCallNotification(call)
@@ -577,6 +581,9 @@ class SipService : Service() {
                 if (line != null) updateNotification("CIMS Phone", line)
             }.launchIn(this)
 
+            // 통화 중 영상 전환 — 영상이 붙거나 빠지면 근접 센서 판정을 다시 한다.
+            c.callVideo.onEach { applyProximity(c) }.launchIn(this)
+
             // 문자 MESSAGE 최종 응답(token 상관) → 말풍선 상태 SENT/FAILED. token 당 1회(remove 로 dedupe).
             c.sendReqResults.onEach { r ->
                 val msgId = msgPending.remove(r.token) ?: return@onEach
@@ -594,6 +601,14 @@ class SipService : Service() {
                 showMessageNotification(peer, im.body)
             }.launchIn(this)
         }
+    }
+
+    /** 발신·통화 중 근접 센서 화면 꺼짐(전화 앱과 같은 동작) — 착신 벨 울림 중에는 잡지 않는다(받기 조작이 필요하다). 영상 호도 잡지
+     *  않는다 — 화면을 보며 통화하므로 손이 센서를 가리면 영상이 꺼진다(전화 앱도 영상 통화엔 쓰지 않는다). */
+    private fun applyProximity(c: VoltePhone) {
+        val call = c.callState.value
+        val voiceCall = (call is CallState.Active || call is CallState.Outgoing) && !c.videoEnabled
+        if (voiceCall) proximityLock.acquire() else proximityLock.release()
     }
 
     override fun onDestroy() {

@@ -20,6 +20,8 @@ public:
     virtual void onCallState(const CallInfo& info) { (void)info; }
     /** 미디어 활성/보류/소스 변화(SSRC 라벨 포함). */
     virtual void onCallMedia(const CallInfo& info) { (void)info; }
+    /** 통화 중 영상 전환(1:1 호 — RFC 3264 §8.1) — 상대의 요청(Received → Engine::answerVideoRequest)·내 요청의 결과. */
+    virtual void onVideoRequest(const VideoRequestEvent& ev) { (void)ev; }
     /** floor participant 상태 전이 (TS 24.380 §6.2.4). 마이크 게이트는 코어가 이미 처리했다. */
     virtual void onFloor(const FloorEvent& ev) { (void)ev; }
     /** 그룹 로스터(RFC 4575 conference-info) — 구독 NOTIFY 또는 in-dialog NOTIFY. full=전체 스냅샷. */

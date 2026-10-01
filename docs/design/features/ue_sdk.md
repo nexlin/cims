@@ -320,7 +320,8 @@ C++ 공개 표면은 `cimsue/engine.h` 의 `Engine` 하나이며 계정·호를 
   앱은 소스별 활성·레벨 표시만 한다(dispatch_center §5.4).
 - **영상.** 키프레임 요청은 RTCP PLI 만 쓴다(호 설정 `reqKeyframeMethod` — TS 26.114 §7.3 영상 코덱 제어 = RTCP AVPF PLI/FIR).
   pjsua 기본값의 SIP INFO(RFC 5168 `media_control+xml`)는 서버가 INFO 를 Allow 에 두지 않아 501 로 끝나므로 보내지 않는다 —
-  발신·응답·재개(re-INVITE) 설정이 호 설정을 대신하므로 셋 모두에 싣는다. 코어는 창을 열지 않는다. Android 는 Surface 를 받아 pjmedia 렌더러가 직접 그린다 — `Engine::setVideoWindow(void*)`
+  발신·응답·재개(re-INVITE) 설정이 호 설정을 대신하므로 셋 모두에 싣는다(재개는 지금의 영상 유무를 그대로 싣는다 — pjsua 기본 설정은 영상 1 이라
+  그대로 두면 음성 호의 보류 해제가 영상을 더한다). 코어는 창을 열지 않는다. Android 는 Surface 를 받아 pjmedia 렌더러가 직접 그린다 — `Engine::setVideoWindow(void*)`
   (파사드 `CimsUe.setVideoSurface(Surface?)`, SWIG typemap 이 `ANativeWindow_fromSurface` 로 참조 하나를 코어에 넘기고 코어가 결선마다
   렌더러 몫을 따로 잡는다 — 렌더러는 교체·스트림 소멸 때 자기 참조를 푼다). 수신 창은 디코딩 스트림이 렌더러를 만든 뒤에만
   결선·해제한다(`win_in` 무효면 건너뛴다 — pjsua 창 함수가 무효 id 를 단정으로 막아 프로세스가 abort 한다). 영상이 활성되는 호마다 수신 창을 결선하고, 계정
@@ -354,6 +355,19 @@ C++ 공개 표면은 `cimsue/engine.h` 의 `Engine` 하나이며 계정·호를 
   `PJSUA_CALL_VID_STRM_SEND_KEEPALIVE`). Android 수신 창은 엔진에 하나라 여러 MCVideo 호에 동시에 참여하면 모든 영상 호가 같은 창에 그린다 —
   호별 창은 후속(§11, Windows 프레임 렌더는 호별). C API·.NET = `cimsue_engine_set_video_send`·`Call.SetVideoSend` +
   `cimsue_call_info_t.video_send`·`CallInfo.VideoSend`(§6.4).
+- **통화 중 영상 전환(1:1 호 — RFC 3264 §8.1 추가·§8.2 제거).** `Engine::setCallVideo(callId, on)`(C `cimsue_engine_set_call_video`·.NET
+  `Call.SetVideo`·Kotlin `Call.setVideo`) — on = 영상을 더하는 re-INVITE(영상 개수 1), off = 영상 개수 0 인 re-INVITE(m=video port 0). pjsua 는
+  줄어든 영상 줄을 port 0 으로 남기고 다시 늘 때 그 줄을 되살리므로 켜고 끄기를 되풀이해도 m 줄이 쌓이지 않는다(`vidSetStream` ADD 는 매번 새 줄을
+  덧붙여 쓰지 않는다). 성립(Active) 전·보류 중·진행 중인 요청이 있으면 실패, MC 호는 실패(그룹 영상은 MCVideo 호). **추가는 상대 동의가
+  필요하다** — 받는 쪽 코어는 1:1 호에 영상을 더하는 offer(지금 영상 없음 + offer m=video port ≠ 0)를 `onCallRxReinvite` 에서 비동기 응답으로
+  돌려 100 으로 붙잡고(pjsua 가 그 자리에서 만드는 answer SDP 를 `onCallSdpCreated` 에서 담아 둔다) `onVideoRequest(Received)` 를 낸다. 앱이
+  `answerVideoRequest(callId, accept)` 로 답한다 — 수락 = 담아 둔 answer 그대로(영상 받음), 거절 = 그 answer 의 영상 줄만 port 0 으로 고친 200 OK
+  (음성은 그대로 — RFC 3264 §6, 거절된 절의 `a=`·`b=` 줄은 뺀다). answer 를 못 담았으면 488(요청만 거절 — RFC 3261 §14.2). `kVideoRequestAnswerSec`(20 s)
+  안에 답이 없으면 코어가 거절하고 `Withdrawn` — re-INVITE 를 오래 붙잡으면 같은 다이얼로그의 다른 요청이 491 로 막힌다. 붙잡은 요청이 답 전에
+  끝나거나(취소) 호가 끝나도 `Withdrawn`. 거는 쪽은 그 re-INVITE 의 최종 응답으로 결과를 낸다 — 2xx 의 SDP 에서 m=video port 가 0 이 아니면
+  `Accepted`, 0 이면 `Declined`, 그 밖은 `Failed(code)`. 491(엇갈림)은 RFC 3261 §14.1 대기(Call-ID 를 만든 쪽 2.1~4 s, 아니면 0~2 s) 뒤 한 번
+  다시 보내고, 그 사이 상대가 같은 요청을 보내 오면 묻지 않고 받는다(`Accepted`). 진행 상태 = `CallInfo.videoRequest`(None·Sent·Received), 결과는
+  `CallInfo.video`(협상된 영상 활성). 영상 없는 빌드(Linux 헤드리스·Windows 1차)는 묻지 않고 pjsua 기본 응답이 영상 줄을 port 0 으로 거절한다.
 - **캡처.** 카메라·마이크 권한과 장치 열기는 플랫폼 SDK 가 하고, 코어는 `setCaptureEnabled` 로 on/off 만 한다 — false = pjsua
   `SPEAKER_ONLY`(캡처 스트림을 열지 않고 재생만, OS 동시 캡처 중재에서 빠진다 — 앱 간 마이크 양보·PTT 유휴), `NO_IMMEDIATE_OPEN`
   동반이라 장치가 닫혀 있으면 모드만 두고, 모드는 장치 선택을 넘어 유지된다. 헤드리스(null 장치)는 상태만 둔다.

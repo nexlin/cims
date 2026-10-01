@@ -193,6 +193,7 @@ internal unsafe struct cimsue_call_info_t
     public int service;
     public byte* session_uri;
     public int video_send;
+    public int video_request;
 }
 
 [StructLayout(LayoutKind.Sequential)]
@@ -406,6 +407,15 @@ internal unsafe struct cimsue_reception_event_t
 }
 
 [StructLayout(LayoutKind.Sequential)]
+internal unsafe struct cimsue_video_request_event_t
+{
+    public int kind;
+    public int call_id;
+    public int code;
+    public byte* reason;
+}
+
+[StructLayout(LayoutKind.Sequential)]
 internal unsafe struct cimsue_transmission_info_t
 {
     public int state;
@@ -440,6 +450,7 @@ internal unsafe struct cimsue_listener_t
     public delegate* unmanaged[Cdecl]<void*, cimsue_transmission_event_t*, void> on_transmission;
     public delegate* unmanaged[Cdecl]<void*, cimsue_reception_event_t*, void> on_reception;
     public delegate* unmanaged[Cdecl]<void*, cimsue_video_frame_t*, void> on_video_frame;
+    public delegate* unmanaged[Cdecl]<void*, cimsue_video_request_event_t*, void> on_video_request;
 }
 
 // ── CSC 설정 평면 (csc.h) ──
@@ -808,5 +819,6 @@ internal enum cimsue_struct_id_t
     VIDEO_GROUP_CALL_OPTIONS, VIDEO_TRANSMITTER, TRANSMISSION_EVENT, RECEPTION_EVENT, TRANSMISSION_INFO,
     MCVIDEO_GROUP_ATTRS, MCVIDEO_USER_PROFILE_DOC, MCVIDEO_SERVICE_CONFIG_DOC,
     VIDEO_FRAME,
+    VIDEO_REQUEST_EVENT,
     COUNT_,
 }

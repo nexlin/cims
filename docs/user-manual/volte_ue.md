@@ -281,6 +281,24 @@ a=sendrecv
 - Video RTP: SDP m=video 포트
 - Video RTCP: Video RTP + 1
 
+### 6.4 통화 중 영상 전환
+
+음성 통화 중 영상을 더하고 빼는 것은 같은 다이얼로그의 re-INVITE 다(RFC 3264 §8.1 추가 · §8.2 제거). CSP 는 re-INVITE 를 상대 leg 로
+전달하고 영상 미디어를 CMP relay 에 반영한다 — 단말 사이의 절차다.
+
+```
+UE-A ── re-INVITE (m=audio …, m=video 30002 …) ──► CSP ── re-INVITE ──► UE-B
+UE-A ◄── 100 Trying ─────────────────────────────── CSP ◄── 100 Trying ── UE-B   (UE-B 사용자에게 묻는 동안)
+UE-A ◄── 200 OK (m=video <port> = 수락 / m=video 0 = 거절) ── CSP ◄── 200 OK ── UE-B
+UE-A ── ACK ──► CSP ── ACK ──► UE-B
+```
+
+- **추가는 상대 동의가 필요하다.** 받는 단말은 사용자에게 묻는 동안 100 으로 응답을 미루고, 거절은 영상 줄을 port 0 으로 둔 200 OK 로
+  한다(RFC 3264 §6 — 음성은 그대로). 오래 붙잡지 않는다 — 진행 중인 re-INVITE 가 있으면 같은 다이얼로그의 다른 요청이 491 이 된다.
+- **제거는 묻지 않는다** — 영상 줄을 port 0 으로 둔 re-INVITE(줄은 지우지 않는다 — m 줄 수는 줄지 않는다, RFC 3264 §8.2).
+- **491 Request Pending**(양쪽이 동시에 요청) — RFC 3261 §14.1 대기(첫 INVITE 를 보낸 쪽 2.1~4 s, 상대 0~2 s) 뒤 다시 보낸다.
+- 보류 해제(re-INVITE)는 지금의 영상 유무를 그대로 싣는다 — 보류 해제가 영상을 더하거나 빼지 않는다.
+
 ---
 
 ## 7. 단말 구현 요구사항

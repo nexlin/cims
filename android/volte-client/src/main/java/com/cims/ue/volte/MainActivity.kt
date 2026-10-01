@@ -16,6 +16,7 @@ import android.view.Surface
 import android.view.SurfaceHolder
 import android.view.SurfaceView
 import android.view.TextureView
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -144,6 +145,7 @@ import com.cims.ue.core.sip.CallState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import com.cims.ue.sdk.VideoRequestEventKind
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
@@ -458,6 +460,47 @@ private fun HomeScreen(
         else { videoOn = false; service?.answer(id, false) }
     }
 
+    // 통화 중 영상 전환(RFC 3264 §8.1 — re-INVITE 로 영상 추가, 상대 수락 필요). 통화 중 영상 칸은 협상 결과(callVideo)를 따른다.
+    val fallbackVideo = remember { MutableStateFlow(false) }
+    val callVideo by (service?.callVideo ?: fallbackVideo).collectAsState()
+    var videoRequestPending by remember { mutableStateOf(false) }          // 내 영상 추가 요청 — 상대 답 대기
+    var incomingVideoRequest by remember { mutableStateOf<Int?>(null) }    // 상대의 영상 전환 요청 — 답할 호
+    LaunchedEffect(call, callVideo) { if (call is CallState.Active) videoOn = callVideo }
+    // 내 요청 — 카메라 권한 확보 뒤 보낸다(거부되면 보내지 않는다).
+    val upgradeCamLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        if (granted) { videoRequestPending = true; service?.setCallVideo(true) }
+    }
+    // 상대 요청 수락 — 카메라 권한 확보 뒤 수락, 거부되면 거절(음성 그대로).
+    var pendingVideoAccept by remember { mutableStateOf<Int?>(null) }
+    val acceptCamLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        val id = pendingVideoAccept; pendingVideoAccept = null
+        if (id != null) service?.answerVideoRequest(id, granted)
+    }
+    LaunchedEffect(service) {
+        service?.videoRequests?.collect { ev ->
+            when (ev.kind) {
+                VideoRequestEventKind.RECEIVED -> incomingVideoRequest = ev.callId
+                VideoRequestEventKind.WITHDRAWN -> if (incomingVideoRequest == ev.callId) {
+                    incomingVideoRequest = null
+                    if (call is CallState.Active) Toast.makeText(context, "응답이 없어 영상 전환 요청을 거절했습니다", Toast.LENGTH_SHORT).show()
+                }
+                VideoRequestEventKind.ACCEPTED -> videoRequestPending = false
+                VideoRequestEventKind.DECLINED -> {
+                    videoRequestPending = false
+                    Toast.makeText(context, "상대가 영상 전환을 거절했습니다", Toast.LENGTH_SHORT).show()
+                }
+                VideoRequestEventKind.FAILED -> {
+                    videoRequestPending = false
+                    Toast.makeText(context, "영상 전환 실패 (${ev.code})", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
+
     // 착신 알림 "받기" — 서비스 연결을 기다렸다 응답(잠금화면/백그라운드에서 알림으로 진입한 경우).
     val notifAnswerReq by notifAnswer.collectAsState()
     LaunchedEffect(service, notifAnswerReq) {
@@ -484,6 +527,7 @@ private fun HomeScreen(
             }
             is CallState.Disconnected -> {
                 muted = false; speakerOn = false
+                videoRequestPending = false; incomingVideoRequest = null
                 pendingNumber?.let { n ->
                     val dur = if (connectedAt > 0) ((System.currentTimeMillis() - connectedAt) / 1000).toInt() else 0
                     val type = when {
@@ -517,11 +561,14 @@ private fun HomeScreen(
         CallScreen(
             call = call,
             videoOn = videoOn,
+            videoRequestPending = videoRequestPending,
+            connectedAt = connectedAt,
             muted = muted,
             speakerOn = speakerOn,
             onToggleVideo = { on ->
-                videoOn = on
-                if (on) cameraLauncher.launch(Manifest.permission.CAMERA) else service?.setVideoEnabled(false)
+                // 통화 중 영상 전환 — 켜기는 상대에게 요청(답이 오면 callVideo 가 바꾼다), 끄기는 곧바로 제거
+                if (!on) service?.setCallVideo(false)
+                else if (!videoRequestPending) upgradeCamLauncher.launch(Manifest.permission.CAMERA)
             },
             onToggleMute = { id, on -> muted = on; service?.setMuted(id, on) },
             onToggleSpeaker = { on -> speakerOn = on; service?.setSpeaker(on) },
@@ -533,6 +580,29 @@ private fun HomeScreen(
             onReject = { id -> service?.reject(id) },
             onHangup = { id -> service?.hangup(id) },
         )
+        // 상대의 영상 전환 요청 — 수락하면 카메라 권한 뒤 영상으로, 거절하면 음성 그대로(코어가 20 초 뒤 스스로 거절한다)
+        val active = call as? CallState.Active
+        val reqId = incomingVideoRequest
+        if (active != null && reqId == active.id) {
+            AlertDialog(
+                onDismissRequest = {},
+                title = { Text("영상 통화 전환") },
+                text = { Text("${fmtNumber(extractNumber(active.remote))} 님이 영상 통화로 전환을 요청합니다.") },
+                confirmButton = {
+                    Button(onClick = {
+                        incomingVideoRequest = null
+                        pendingVideoAccept = reqId
+                        acceptCamLauncher.launch(Manifest.permission.CAMERA)
+                    }) { Text("수락") }
+                },
+                dismissButton = {
+                    TextButton(onClick = {
+                        incomingVideoRequest = null
+                        service?.answerVideoRequest(reqId, false)
+                    }) { Text("거절") }
+                },
+            )
+        }
     } else {
         val msgStore = remember { MessageStore(context) }
         val unread = remember(msgVersion) { msgStore.unreadTotal() }
@@ -1789,10 +1859,20 @@ private fun ConversationScreen(
 
 // ─────────────────────────────────────── 통화 화면 ───────────────────────────────────────
 
+/** 통화 시간(초) — 연결 시각 기준이라 음성·영상 화면을 오가도 이어진다. */
+@Composable
+private fun rememberElapsedSec(connectedAt: Long): Int {
+    var now by remember { mutableStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(connectedAt) { while (true) { now = System.currentTimeMillis(); delay(1000) } }
+    return if (connectedAt > 0) ((now - connectedAt) / 1000).toInt().coerceAtLeast(0) else 0
+}
+
 @Composable
 private fun CallScreen(
     call: CallState,
     videoOn: Boolean,
+    videoRequestPending: Boolean,
+    connectedAt: Long,
     muted: Boolean,
     speakerOn: Boolean,
     onToggleVideo: (Boolean) -> Unit,
@@ -1810,6 +1890,7 @@ private fun CallScreen(
     if (videoOn && call is CallState.Active) {
         VideoCallFullScreen(
             call = call,
+            connectedAt = connectedAt,
             muted = muted,
             speakerOn = speakerOn,
             onToggleMute = onToggleMute,
@@ -1831,7 +1912,7 @@ private fun CallScreen(
         val (remote, stateLine) = when (val c = call) {
             is CallState.Incoming -> extractNumber(c.remote) to (if (c.video) "영상 수신 전화" else "수신 전화")
             is CallState.Outgoing -> extractNumber(c.remote) to (if (videoOn) "영상 발신 중…" else "발신 중…")
-            is CallState.Active -> extractNumber(c.remote) to "통화 중"
+            is CallState.Active -> extractNumber(c.remote) to (if (videoRequestPending) "영상 전환 요청 중…" else "통화 중")
             else -> "" to ""
         }
         // 상단 중앙 — 상태 라벨(민트) + 이니셜 아바타 + 큰 번호 (수신 전체화면 참고 UX).
@@ -1851,8 +1932,7 @@ private fun CallScreen(
         Spacer(Modifier.height(8.dp))
 
         if (call is CallState.Active) {
-            var elapsed by remember { mutableStateOf(0) }
-            LaunchedEffect(Unit) { while (true) { delay(1000); elapsed++ } }
+            val elapsed = rememberElapsedSec(connectedAt)
             Text("%02d:%02d".format(elapsed / 60, elapsed % 60),
                 style = MaterialTheme.typography.titleMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -1885,7 +1965,7 @@ private fun CallScreen(
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
                     ToggleRound("음소거", Icons.Filled.MicOff, muted) { onToggleMute(c.id, !muted) }
                     ToggleRound("스피커", Icons.AutoMirrored.Filled.VolumeUp, speakerOn) { onToggleSpeaker(!speakerOn) }
-                    ToggleRound("영상", Icons.Filled.Videocam, videoOn, activeBg = VIDEO_BLUE) { onToggleVideo(!videoOn) }
+                    ToggleRound("영상", Icons.Filled.Videocam, videoOn || videoRequestPending, activeBg = VIDEO_BLUE) { onToggleVideo(!videoOn) }
                 }
                 Spacer(Modifier.height(24.dp))
                 LabeledRound("종료", HANGUP_RED, Icons.Filled.CallEnd) { onHangup(c.id) }
@@ -1905,6 +1985,7 @@ private fun CallScreen(
 @Composable
 private fun VideoCallFullScreen(
     call: CallState.Active,
+    connectedAt: Long,
     muted: Boolean,
     speakerOn: Boolean,
     onToggleMute: (Int, Boolean) -> Unit,
@@ -1916,8 +1997,7 @@ private fun VideoCallFullScreen(
     onHangup: (Int) -> Unit,
 ) {
     var controlsVisible by remember { mutableStateOf(true) }
-    var elapsed by remember { mutableStateOf(0) }
-    LaunchedEffect(Unit) { while (true) { delay(1000); elapsed++ } }
+    val elapsed = rememberElapsedSec(connectedAt)
     // 컨트롤 표시 후 4초 뒤 자동 숨김.
     LaunchedEffect(controlsVisible) {
         if (controlsVisible) { delay(4000); controlsVisible = false }

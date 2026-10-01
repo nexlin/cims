@@ -81,6 +81,7 @@ endif()
 add_library(cimsue_objs OBJECT
     src/engine.cpp
     src/account_map.cpp
+    src/call_video.cpp
     src/types.cpp
     src/floor/floor_codec.cpp
     src/floor/floor_participant.cpp
@@ -163,6 +164,7 @@ endif()
 if(DEFINED GTEST_DIR)
     add_executable(cimsue_test
         test/account_map_test.cpp
+        test/call_video_test.cpp
         test/floor_codec_test.cpp
         test/floor_participant_test.cpp
         test/sds_codec_test.cpp

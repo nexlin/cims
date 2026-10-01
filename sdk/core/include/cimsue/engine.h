@@ -232,6 +232,13 @@ public:
     /** 내 영상 송출 허용(CallInfo.videoSend) — 1:1 영상 호는 곧바로 송출을 시작·정지하고, MCVideo 호는 허용이면서 송출 허가를 가진
      *  동안만 보낸다. 재협상(re-INVITE) 없음. 영상 없는 빌드·호면 실패. 그룹 영상은 MCVideo 호다 — MCPTT 호는 음성만(mcvideo.md §8). */
     Result setVideoSend(int callId, bool on);
+    /** 통화 중 영상 전환(1:1 호 — re-INVITE, RFC 3264 §8.1·§8.2). on = 영상 추가 **요청** — 상대가 받으면 onVideoRequest(Accepted)와
+     *  CallInfo.video, 거절이면 Declined(음성은 그대로). off = 영상 제거 — 묻지 않는다(m=video port 0). 성립(Active) 전·보류 중·
+     *  진행 중인 요청이 있으면 실패, 이미 그 상태면 그대로 성공. MC 호(MCPTT·MCVideo)는 실패 — 그룹 영상은 MCVideo 호다. */
+    Result setCallVideo(int callId, bool on);
+    /** 상대의 영상 추가 요청(onVideoRequest Received)에 답한다 — accept = 영상을 받는 200 OK(송출은 계정 videoAutoTransmit·
+     *  setVideoSend 를 따른다), 거절 = m=video port 0 인 200 OK(음성은 그대로, RFC 3264 §6). 받은 요청이 없으면 실패. */
+    Result answerVideoRequest(int callId, bool accept);
     std::vector<VideoDeviceInfo> videoDevices() const;
     /** 추가 재생 라우트 — 두 번째 재생 장치를 재생 전용으로 브리지에 연다(관제석 헤드셋+스피커 분리 출력,
      *  ue_sdk.md §6). 마이크는 기본 캡처 장치 하나만 쓴다. 반환 routeId ≥ 1, 실패 -1. 기본 재생 장치 = 라우트 0. */

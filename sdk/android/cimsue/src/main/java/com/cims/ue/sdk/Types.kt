@@ -40,6 +40,7 @@ import com.cims.ue.sdk.jni.QualityDirection as JniQualityDirection
 import com.cims.ue.sdk.jni.StringVector
 import com.cims.ue.sdk.jni.TlsPeerExpiry as JniTlsPeerExpiry
 import com.cims.ue.sdk.jni.ReceptionEvent as JniReceptionEvent
+import com.cims.ue.sdk.jni.VideoRequestEvent as JniVideoRequestEvent
 import com.cims.ue.sdk.jni.TransmissionEvent as JniTransmissionEvent
 import com.cims.ue.sdk.jni.TransmissionInfo as JniTransmissionInfo
 import com.cims.ue.sdk.jni.VideoGroupCallOptions as JniVideoGroupCallOptions
@@ -115,6 +116,11 @@ enum class TransmissionEventKind {
 }
 /** 수신 제어 이벤트 종류(서수 = 코어 ReceptionEvent::Kind). */
 enum class ReceptionEventKind { NOTIFIED, GRANTED, REJECTED, ENDED, RELEASED, END_REQUESTED, REQUEST_TIMEOUT, OTHER }
+/** 통화 중 영상 전환 요청의 진행(1:1 호, 서수 = 코어 VideoRequestState) — 결과는 `videoRequest` 이벤트. */
+enum class VideoRequestState { NONE, SENT, RECEIVED }
+/** 통화 중 영상 전환 이벤트 종류(서수 = 코어 VideoRequestEvent::Kind). RECEIVED 면 사용자에게 묻고 [Call.answerVideoRequest] —
+ *  20 s 안에 답이 없으면 코어가 거절한다(WITHDRAWN). */
+enum class VideoRequestEventKind { RECEIVED, ACCEPTED, DECLINED, FAILED, WITHDRAWN }
 /** 계측 링크 상태(cimsue/drive.h) — REFUSED(연결 키 거절·지문 불일치)는 다시 붙지 않는다. */
 enum class LinkState { IDLE, CONNECTING, CONNECTED, DISCONNECTED, REFUSED }
 
@@ -320,12 +326,14 @@ data class CallInfo(
     val condition: McpttCondition = McpttCondition(),
     /** 이 호에서 듣는 크기(setRxLevel) — 코어가 기억해 재결선마다 다시 건다. */
     val rxLevel: Float = 1f,
-    /** 내 영상 송출 허용([Call.setVideoSend]) — MCPTT 반이중은 허용이면서 발언권을 가진 동안만 보낸다. [video] 는 협상된 영상 활성. */
+    /** 내 영상 송출 허용([Call.setVideoSend]) — MCVideo 호는 허용이면서 송출 허가를 가진 동안만 보낸다. [video] 는 협상된 영상 활성. */
     val videoSend: Boolean = true,
     /** MC 호의 서비스 — MCVideo 그룹 호면 MCVIDEO(그때 [isMcptt] 는 false, 제어는 전송 제어 — `transmission`·`reception` 이벤트). */
     val service: McService = McService.MCPTT,
     /** MC 세션 식별자 — 제어 기능 Contact(isfocus)의 세션 URI, 재합류([VideoGroupCallOptions.sessionUri])에 쓴다. */
     val sessionUri: String = "",
+    /** 통화 중 영상 전환 요청의 진행(1:1 호) — SENT = 내 요청 응답 대기, RECEIVED = 상대 요청에 답할 차례. */
+    val videoRequest: VideoRequestState = VideoRequestState.NONE,
 ) {
     val active: Boolean get() = state == CallState.ACTIVE
     val ended: Boolean get() = state == CallState.DISCONNECTED
@@ -336,7 +344,14 @@ data class CallInfo(
             c.playbackRoute, c.lastCode, c.lastReason, MediaSource.list(c.sources),
             c.isMcptt, c.groupId, McpttInfo.of(c.mcptt), c.halfDuplex, c.listenOnly, c.joinedDialog,
             McpttCondition.of(c.condition), c.rxLevel, c.videoSend,
-            ordinalOf(c.service.swigValue()), c.sessionUri)
+            ordinalOf(c.service.swigValue()), c.sessionUri, ordinalOf(c.videoRequest.swigValue()))
+    }
+}
+
+/** 통화 중 영상 전환 이벤트(1:1 호 — RFC 3264 §8.1 추가·§8.2 제거). code = FAILED 의 최종 응답 코드(로컬 송신 실패 = 0). */
+data class VideoRequestEvent(val kind: VideoRequestEventKind, val callId: Int, val code: Int, val reason: String) {
+    internal companion object {
+        fun of(e: JniVideoRequestEvent) = VideoRequestEvent(ordinalOf(e.kind.swigValue()), e.callId, e.code, e.reason)
     }
 }
 

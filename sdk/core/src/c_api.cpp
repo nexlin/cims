@@ -264,6 +264,14 @@ void fill(cimsue_call_info_t& o, const CallInfo& c, std::vector<cimsue_media_sou
     o.service = (cimsue_mc_service_t)c.service;
     o.session_uri = C(c.sessionUri);
     o.video_send = B(c.videoSend);
+    o.video_request = (cimsue_video_request_state_t)c.videoRequest;
+}
+
+void fill(cimsue_video_request_event_t& o, const VideoRequestEvent& e) {
+    o.kind = (cimsue_video_request_kind_t)e.kind;
+    o.call_id = e.callId;
+    o.code = e.code;
+    o.reason = C(e.reason);
 }
 
 void fill(cimsue_video_transmitter_t& o, const VideoTransmitter& t) {
@@ -879,6 +887,11 @@ public:
         cimsue_video_frame_t o{f.callId, f.width, f.height, f.stride, f.data, (int64_t)f.size};
         cb.on_video_frame(cb.user, &o);
     }
+    void onVideoRequest(const VideoRequestEvent& ev) override {
+        if (!cb.on_video_request) return;
+        cimsue_video_request_event_t o{}; fill(o, ev);
+        cb.on_video_request(cb.user, &o);
+    }
     void onEmergencyAlert(const EmergencyAlert& alert) override {
         if (!cb.on_emergency_alert) return;
         cimsue_emergency_alert_t o{}; fill(o, alert);
@@ -1392,6 +1405,12 @@ cimsue_status_t CIMSUE_CALL cimsue_engine_set_video_send(cimsue_engine_t* e, int
 cimsue_status_t CIMSUE_CALL cimsue_engine_switch_camera(cimsue_engine_t* e, int32_t call_id) {
     return e ? ret(e->eng.switchCamera(call_id)) : -1;
 }
+cimsue_status_t CIMSUE_CALL cimsue_engine_set_call_video(cimsue_engine_t* e, int32_t call_id, int32_t on) {
+    return e ? ret(e->eng.setCallVideo(call_id, on != 0)) : -1;
+}
+cimsue_status_t CIMSUE_CALL cimsue_engine_answer_video_request(cimsue_engine_t* e, int32_t call_id, int32_t accept) {
+    return e ? ret(e->eng.answerVideoRequest(call_id, accept != 0)) : -1;
+}
 int32_t CIMSUE_CALL cimsue_engine_video_devices(const cimsue_engine_t* e, const cimsue_video_device_info_t** out) {
     g_s.vdevs = e ? e->eng.videoDevices() : std::vector<VideoDeviceInfo>();
     g_s.vdevsC.clear();
@@ -1418,6 +1437,8 @@ const char* CIMSUE_CALL cimsue_transmission_state_str(cimsue_transmission_state_
 const char* CIMSUE_CALL cimsue_reception_state_str(cimsue_reception_state_t s) { return toString((ReceptionState)s); }
 const char* CIMSUE_CALL cimsue_transmission_kind_str(cimsue_transmission_kind_t k) { return toString((TransmissionEvent::Kind)k); }
 const char* CIMSUE_CALL cimsue_reception_kind_str(cimsue_reception_kind_t k) { return toString((ReceptionEvent::Kind)k); }
+const char* CIMSUE_CALL cimsue_video_request_state_str(cimsue_video_request_state_t s) { return toString((VideoRequestState)s); }
+const char* CIMSUE_CALL cimsue_video_request_kind_str(cimsue_video_request_kind_t k) { return toString((VideoRequestEvent::Kind)k); }
 
 // 문자열 산출 헬퍼
 
@@ -1846,6 +1867,7 @@ int32_t CIMSUE_CALL cimsue_struct_size(cimsue_struct_id_t id) {
     case CIMSUE_STRUCT_MCVIDEO_USER_PROFILE_DOC: return (int32_t)sizeof(cimsue_mcvideo_user_profile_doc_t);
     case CIMSUE_STRUCT_MCVIDEO_SERVICE_CONFIG_DOC: return (int32_t)sizeof(cimsue_mcvideo_service_config_doc_t);
     case CIMSUE_STRUCT_VIDEO_FRAME: return (int32_t)sizeof(cimsue_video_frame_t);
+    case CIMSUE_STRUCT_VIDEO_REQUEST_EVENT: return (int32_t)sizeof(cimsue_video_request_event_t);
     default:                              return -1;
     }
 }

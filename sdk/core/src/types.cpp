@@ -132,4 +132,24 @@ const char* toString(ReceptionEvent::Kind k) {
     return "?";
 }
 
+const char* toString(VideoRequestState s) {
+    switch (s) {
+        case VideoRequestState::None: return "none";
+        case VideoRequestState::Sent: return "sent";
+        case VideoRequestState::Received: return "received";
+    }
+    return "?";
+}
+
+const char* toString(VideoRequestEvent::Kind k) {
+    switch (k) {
+        case VideoRequestEvent::Kind::Received: return "received";
+        case VideoRequestEvent::Kind::Accepted: return "accepted";
+        case VideoRequestEvent::Kind::Declined: return "declined";
+        case VideoRequestEvent::Kind::Failed: return "failed";
+        case VideoRequestEvent::Kind::Withdrawn: return "withdrawn";
+    }
+    return "?";
+}
+
 }  // namespace cimsue

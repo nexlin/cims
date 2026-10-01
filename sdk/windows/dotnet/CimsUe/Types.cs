@@ -52,6 +52,10 @@ public enum TransmissionEventKind
     QueueCancelled = 8, RequestTimeout = 9, Other = 10
 }
 public enum ReceptionEventKind { Notified = 0, Granted = 1, Rejected = 2, Ended = 3, Released = 4, EndRequested = 5, RequestTimeout = 6, Other = 7 }
+/// <summary>통화 중 영상 전환 요청의 진행(1:1 호, RFC 3264 §8.1) — 결과는 <see cref="Engine.VideoRequestChanged"/>.</summary>
+public enum VideoRequestState { None = 0, Sent = 1, Received = 2 }
+/// <summary>통화 중 영상 전환 이벤트 종류 — Received 면 사용자에게 묻고 <see cref="Engine.AnswerVideoRequest"/>(20 s 안에 답이 없으면 코어가 거절 — Withdrawn).</summary>
+public enum VideoRequestEventKind { Received = 0, Accepted = 1, Declined = 2, Failed = 3, Withdrawn = 4 }
 
 /// <summary>Floor Indicator 비트(TS 24.380 §8.2.3.15) — <see cref="FloorEvent.Indicator"/>·<see cref="FloorInfo.Indicator"/> 해석용.
 /// 정본 = docs/design/features/mcptt_floor_defs.yaml `indicator` — scripts/gen_floor_defs.py --check 가 이 값을 대조한다.</summary>
@@ -263,7 +267,8 @@ public sealed record CallInfo(
     int LastCode, string LastReason, IReadOnlyList<MediaSource> Sources,
     bool IsMcptt, string GroupId, McpttInfo Mcptt, bool HalfDuplex, bool ListenOnly, string JoinedDialog,
     float RxLevel = 1f, McpttCondition Condition = default, string AnswerState = "", IReadOnlyList<string>? NonAcknowledgedUsers = null,
-    McService Service = McService.Mcptt, string SessionUri = "", bool VideoSend = true)
+    McService Service = McService.Mcptt, string SessionUri = "", bool VideoSend = true,
+    VideoRequestState VideoRequest = VideoRequestState.None)
 {
     public static CallInfo Empty { get; } = new(-1, -1, CallDir.Outgoing, CallState.Null, "", "", false, false, false, true, 0, 0, "",
                                                 Array.Empty<MediaSource>(), false, "", McpttInfo.None, false, false, "");
@@ -292,6 +297,9 @@ public sealed record TransmissionEvent(TransmissionEventKind Kind, int CallId, T
 
 /// <summary>MCVideo 수신 제어 이벤트(§6.2.5) — 새 송출 알림(manual 이면 앱이 [받기])·수신 허가·종료.</summary>
 public sealed record ReceptionEvent(ReceptionEventKind Kind, int CallId, VideoTransmitter Transmitter, int Cause, string CauseText, int RawType);
+
+/// <summary>통화 중 영상 전환 이벤트(1:1 호 — RFC 3264 §8.1 추가·§8.2 제거). Code = Failed 의 최종 응답 코드(로컬 송신 실패 = 0).</summary>
+public sealed record VideoRequestEvent(VideoRequestEventKind Kind, int CallId, int Code, string Reason);
 
 /// <summary>MCVideo 호의 전송 제어 현재값. Transmitters = 알려진 송출(내 것 제외).</summary>
 public sealed record TransmissionInfo(TransmissionState State, IReadOnlyList<VideoTransmitter> Transmitters, int QueuePosition,
