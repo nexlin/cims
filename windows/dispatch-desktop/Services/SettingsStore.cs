@@ -34,7 +34,7 @@ public sealed class AppSettings
     // 핫키 (§8)
     public Dictionary<string, string> HotKeys { get; set; } = new()
     {
-        ["ptt"] = "Ctrl+Space", ["answer"] = "F9", ["hangup"] = "F10", ["pickup"] = "F8", ["hold"] = "F11", ["mute"] = "F12",
+        ["ptt"] = "Space", ["answer"] = "F9", ["hangup"] = "F10", ["pickup"] = "F8", ["hold"] = "F11", ["mute"] = "F12",
     };
 
     // 관제 (§4.3) — 당겨받기 피처코드는 접속서비스 pickup_feature_code 값(프로파일 공급 전까지 설정)
@@ -54,7 +54,8 @@ public sealed class AppSettings
     // 표시
     /// <summary>light | dark — 기본 밝게(«모드마다 한 화면» 시안이 밝은 테마로 그려졌다, §3.2).</summary>
     public string Theme { get; set; } = "light";
-    /// <summary>화면 구성 판 — 2 = 모드마다 한 화면. 옛 판(0·1 — 도킹 6패널)의 설정을 처음 읽을 때 테마를 밝게로 한 번 되돌린다.</summary>
+    /// <summary>설정 판 — 2 = 모드마다 한 화면(옛 판 0·1 — 도킹 6패널의 설정을 처음 읽을 때 테마를 밝게로 한 번 되돌린다) · 3 = PTT 기본 키 Space
+    /// (옛 기본값 Ctrl+Space 를 그대로 둔 설정을 한 번 Space 로 옮긴다).</summary>
     public int UiVersion { get; set; } = SettingsStore.CurrentUiVersion;
     /// <summary>주소록 CSV 경로 재지정(비면 %APPDATA% 의 directory.csv, 없으면 앱 옆 directory.sample.csv).</summary>
     public string DirectoryCsv { get; set; } = "";
@@ -68,7 +69,7 @@ public sealed class SettingsStore
         WriteIndented = true, DefaultIgnoreCondition = JsonIgnoreCondition.Never, Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
     };
 
-    public const int CurrentUiVersion = 2;
+    public const int CurrentUiVersion = 3;
     public AppSettings Current { get; private set; } = new();
     public event EventHandler? Changed;
 
@@ -80,10 +81,14 @@ public sealed class SettingsStore
             {
                 string text = File.ReadAllText(AppPaths.Settings);
                 Current = JsonSerializer.Deserialize<AppSettings>(text, Json) ?? new AppSettings();
-                // UiVersion 이 없던 판(도킹 6패널)의 저장값 — 새 화면의 기본 테마(밝게)로 한 번 되돌린다. 어둡게는 설정에서 다시 고른다
-                if (!text.Contains("\"UiVersion\"", StringComparison.Ordinal) || Current.UiVersion < CurrentUiVersion)
+                // 옛 판의 저장값을 한 번씩 옮긴다 — 판 2: UiVersion 이 없던 판(도킹 6패널)은 새 화면의 기본 테마(밝게)로(어둡게는 설정에서 다시 고른다) ·
+                //   판 3: PTT 기본 키 Space — 옛 기본값(Ctrl+Space)을 그대로 둔 설정만 옮긴다(직접 고른 다른 키는 그대로)
+                int from = text.Contains("\"UiVersion\"", StringComparison.Ordinal) ? Current.UiVersion : 0;
+                if (from < CurrentUiVersion)
                 {
-                    Current.Theme = "light";
+                    if (from < 2) Current.Theme = "light";
+                    if (from < 3 && Current.HotKeys.TryGetValue("ptt", out var ptt) && string.Equals(ptt.Replace(" ", ""), "Ctrl+Space", StringComparison.OrdinalIgnoreCase))
+                        Current.HotKeys["ptt"] = "Space";
                     Current.UiVersion = CurrentUiVersion;
                     Save();
                 }

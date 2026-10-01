@@ -491,6 +491,8 @@
                                         <TextBlock Style="{StaticResource MonoMuted}" FontSize="11" VerticalAlignment="Center" Margin="0,0,8,0">
                                             <Run Text="{Binding AxisStartText, Mode=OneWay}" /><Run Text=" ~ " /><Run Text="{Binding AxisEndText, Mode=OneWay}" />
                                         </TextBlock>
+                                        <ToggleButton Style="{StaticResource FilterChip}" Content="틈 줄임" IsChecked="{Binding CompactGaps}" Height="24" FontSize="11.5" Margin="0,0,8,0"
+                                                      ToolTip="말(송출)이 없는 구간을 짧게 접어 말한 구간을 넓게 본다 — 끄면 시간에 비례한 축" />
                                         <Button Style="{StaticResource Btn.Xs}" Content="−" Width="24" ToolTip="축소 (Ctrl+휠)" Command="{Binding TalkZoomOutCommand}" />
                                         <TextBlock Style="{StaticResource Mono}" Text="{Binding TalkZoomText}" FontSize="11" Width="38" TextAlignment="Center" VerticalAlignment="Center" />
                                         <Button Style="{StaticResource Btn.Xs}" Content="+" Width="24" ToolTip="확대 (Ctrl+휠)" Command="{Binding TalkZoomInCommand}" />
@@ -556,6 +558,7 @@
                                                         </DataTemplate>
                                                     </ItemsControl.ItemTemplate>
                                                 </ItemsControl>
+                                                <Grid>
                                                 <ItemsControl ItemsSource="{Binding Lanes}">
                                                     <ItemsControl.ItemTemplate>
                                                         <DataTemplate DataType="{x:Type vm:SpeakerLane}">
@@ -595,6 +598,38 @@
                                                         </DataTemplate>
                                                     </ItemsControl.ItemTemplate>
                                                 </ItemsControl>
+                                                <!-- 줄인 틈(«틈 줄임») — 말이 없어 짧게 접은 구간. 레인 전체 높이의 흰 띠 + 가운데 "⋯", 툴팁에 실제 시각·길이 -->
+                                                <ItemsControl x:Name="GapLayer" ItemsSource="{Binding AxisGaps}">
+                                                    <ItemsControl.ItemsPanel><ItemsPanelTemplate><Canvas ClipToBounds="True" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+                                                    <ItemsControl.ItemContainerStyle>
+                                                        <Style TargetType="ContentPresenter">
+                                                            <Setter Property="Canvas.Top" Value="0" />
+                                                            <Setter Property="Canvas.Left">
+                                                                <Setter.Value>
+                                                                    <MultiBinding Converter="{StaticResource RatioLen}">
+                                                                        <Binding Path="LeftRatio" />
+                                                                        <Binding Path="ActualWidth" RelativeSource="{RelativeSource AncestorType=ItemsControl}" />
+                                                                    </MultiBinding>
+                                                                </Setter.Value>
+                                                            </Setter>
+                                                        </Style>
+                                                    </ItemsControl.ItemContainerStyle>
+                                                    <ItemsControl.ItemTemplate>
+                                                        <DataTemplate DataType="{x:Type vm:AxisGap}">
+                                                            <Border Background="{DynamicResource Brush.Surface}" BorderBrush="{DynamicResource Brush.BorderStrong}" BorderThickness="1,0,1,0" ToolTip="{Binding Tip}"
+                                                                    Height="{Binding ActualHeight, ElementName=GapLayer}">
+                                                                <Border.Width>
+                                                                    <MultiBinding Converter="{StaticResource RatioLen}">
+                                                                        <Binding Path="WidthRatio" />
+                                                                        <Binding Path="ActualWidth" RelativeSource="{RelativeSource AncestorType=ItemsControl}" />
+                                                                    </MultiBinding>
+                                                                </Border.Width>
+                                                                <TextBlock Text="⋯" FontSize="12" Foreground="{DynamicResource Brush.Muted}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                                            </Border>
+                                                        </DataTemplate>
+                                                    </ItemsControl.ItemTemplate>
+                                                </ItemsControl>
+                                                </Grid>
                                             </StackPanel>
                                         </ScrollViewer>
                                     </Grid>

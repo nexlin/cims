@@ -17,7 +17,9 @@ public sealed partial class HotKeyRow : ObservableObject
     [ObservableProperty] private bool _conflict;
     public HotKeyRow(string name, string label, bool global, string text) { Name = name; Label = label; IsGlobal = global; _text = text; }
     public bool IsValid => Text.Trim().Length == 0 || HotKey.TryParse(Text, out _);
-    partial void OnTextChanged(string value) => OnPropertyChanged(nameof(IsValid));
+    /// <summary>전역 이름인데 글자 키(Space 등) — 전역 등록하지 않고 앱이 앞에 있을 때(입력칸 밖)만 받는다.</summary>
+    public bool IsFocusOnly => IsGlobal && HotKey.TryParse(Text, out var k) && DispatchDesktop.Services.HotKeyMap.IsTypingKey(k);
+    partial void OnTextChanged(string value) { OnPropertyChanged(nameof(IsValid)); OnPropertyChanged(nameof(IsFocusOnly)); }
 }
 
 public sealed partial class SettingsViewModel : ObservableObject
@@ -79,7 +81,7 @@ public sealed partial class SettingsViewModel : ObservableObject
 
     /// <summary>해석되지 않는 핫키 문자열이 있으면 저장하지 않는다 — 조용히 등록만 빠지던 것을 막는다.</summary>
     public bool CanSave => HotKeys.All(h => h.IsValid);
-    public string HotKeyError => CanSave ? "" : "핫키 형식 오류: " + string.Join(", ", HotKeys.Where(h => !h.IsValid).Select(h => h.Label)) + " — 예: Ctrl+Space, F9, Alt+Shift+P";
+    public string HotKeyError => CanSave ? "" : "핫키 형식 오류: " + string.Join(", ", HotKeys.Where(h => !h.IsValid).Select(h => h.Label)) + " — 예: Space, Ctrl+Space, F9, Alt+Shift+P";
 
     [RelayCommand]
     private void LoadDevices()

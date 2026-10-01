@@ -218,6 +218,9 @@ public sealed record MetricItem(string Key, string Value, string Suffix, string 
 /// <summary>발언 타임라인 눈금 — 트랙 폭 대비 위치(0~1)와 시각 표기.</summary>
 public sealed record AxisTick(double Ratio, string Label);
 
+/// <summary>발언 타임라인의 줄인 틈 — 발언이 없어 짧게 접은 구간(트랙 폭 대비 위치·폭)과 실제 길이.</summary>
+public sealed record AxisGap(double LeftRatio, double WidthRatio, string Tip);
+
 public sealed partial class SessionHistoryViewModel : ObservableObject
 {
     private readonly DispatchSession _s;
@@ -256,8 +259,14 @@ public sealed partial class SessionHistoryViewModel : ObservableObject
     [ObservableProperty] private string _axisEndText = "";
     /// <summary>발언 타임라인 확대 배율(1 = 세션 전체가 트랙 폭). 콘솔 LaneTimebar 와 같은 ×1.25 단계, 상한 64.</summary>
     [ObservableProperty] private double _talkZoom = 1.0;
+    /// <summary>발언 타임라인의 «틈 줄임» — 발언(송출)이 없는 구간을 짧게 접어 발언 구간이 넓게 보이게 한다(기본 켬). 끄면 시간에 비례한 축.</summary>
+    [ObservableProperty] private bool _compactGaps = true;
     private DateTime _axisT0;
     private double _axisSpanMs = 1000;
+    // 시간축 사상 — 실제 구간(세션 시작 기준 ms) → 표시 구간. 틈 줄임이 꺼져 있으면 한 구간(선형)이다
+    private readonly List<(double R0, double R1, double D0, double D1, bool Gap)> _axisMap = new();
+    private double _axisDispMs = 1000;
+    private HistoryRow? _paneRow; private PttSessionDetail? _paneDetail;
 
     private IReadOnlyList<HistoryEntry> _all = Array.Empty<HistoryEntry>();
     private bool _suppressQuery;                                          // 표본 심기 중 종류 전환이 서버 조회를 부르지 않게
@@ -273,6 +282,7 @@ public sealed partial class SessionHistoryViewModel : ObservableObject
     public ObservableCollection<TimelineItem> Timeline { get; } = new();
     public ObservableCollection<MetricItem> Metrics { get; } = new();
     public ObservableCollection<AxisTick> AxisTicks { get; } = new();
+    public ObservableCollection<AxisGap> AxisGaps { get; } = new();
     public string TalkZoomText => TalkZoom > 1.001 ? $"×{TalkZoom:0.#}" : "";
     public bool IsTalkZoomed => TalkZoom > 1.001;
     public const double TalkZoomMax = 64;
@@ -294,6 +304,7 @@ public sealed partial class SessionHistoryViewModel : ObservableObject
     public string TurnsHint => IsVideoSession ? "  막대를 누르면 그 송출 재생(영상) · Ctrl+휠 확대" : "  막대를 누르면 그 발언 재생 · Ctrl+휠 확대";
     public string NoTurnsText => IsVideoSession ? "이 세션에는 녹취된 송출이 없습니다" : "이 세션에는 녹취된 발언이 없습니다";
     public bool HasLanes => Lanes.Count > 0;
+    public bool HasAxisGaps => AxisGaps.Count > 0;
     public bool HasTimeline => Timeline.Count > 0;
     public bool HasParticipants => Participants.Count > 0;
     public int FloorCount { get; private set; }
@@ -339,6 +350,13 @@ public sealed partial class SessionHistoryViewModel : ObservableObject
     partial void OnSelectedHourChanged(string value) { OnPropertyChanged(nameof(HasHourFilter)); foreach (var c in Hours) c.IsSelected = c.Hour == value; Filter(); }
     partial void OnTalkZoomChanged(double value) { OnPropertyChanged(nameof(TalkZoomText)); OnPropertyChanged(nameof(IsTalkZoomed)); RebuildAxisTicks(); }
     partial void OnBandModeChanged(int value) { OnPropertyChanged(nameof(BandTitle)); OnPropertyChanged(nameof(BandShowsTurns)); RebuildHours(); }
+    /// <summary>틈 줄임을 켜고 끄면 고른 세션의 패널을 같은 자료로 다시 그린다(막대 위치·눈금이 축에 달려 있다).</summary>
+    partial void OnCompactGapsChanged(bool value)
+    {
+        if (_paneRow is null || !ReferenceEquals(_paneRow, Selected)) return;
+        Participants.Clear(); Lanes.Clear(); Timeline.Clear(); Metrics.Clear(); _timelineAll.Clear();
+        BuildPttPane(_paneRow, _paneDetail);
+    }
     partial void OnShowFloorLayerChanged(bool value) => ApplyTimelineLayers();
     partial void OnShowMemberLayerChanged(bool value) => ApplyTimelineLayers();
 
@@ -360,7 +378,9 @@ public sealed partial class SessionHistoryViewModel : ObservableObject
         var m = _s.Management; if (m is null) { Error = "로그인 전"; return; }
         Busy = true; Error = "";
         var from = Date.Date; var to = Date.Date.AddDays(1).AddSeconds(-1);
+        var sw = System.Diagnostics.Stopwatch.StartNew();
         var r = await m.QueryHistoryAsync(Kind, from, to);
+        long queryMs = sw.ElapsedMilliseconds;
         Busy = false;
         if (!r.Ok)
         {
@@ -371,10 +391,22 @@ public sealed partial class SessionHistoryViewModel : ObservableObject
         _all = r.Value.Items.OrderByDescending(e => e.Time).ToList();      // 표시는 최근이 위
         _hours = r.Value.Hours.Count > 0 ? r.Value.Hours : CountHours(_all);
         // 받은 것의 구성을 남긴다 — "콘솔에는 있는데 앱에는 없다" 를 서버 응답에서 가른다(영상 통화 = callType volte_video · 영상 세션 = service mcvideo)
-        _s.Log.Info($"history window {HistoryClient.KindName(Kind)} {from:yyyy-MM-dd}: {_all.Count} items"
-                    + (Kind == HistoryKind.Call ? $" (video {_all.Count(e => e.CallType == "volte_video")})"
-                                                : $" (mcvideo {_all.Count(e => e.IsMcVideo)}, service axis {(_all.Any(e => e.Service.Length > 0) ? "yes" : "no")})"));
+        string what = $"history window {HistoryClient.KindName(Kind)} {from:yyyy-MM-dd}: {_all.Count} items"
+                      + (Kind == HistoryKind.Call ? $" (video {_all.Count(e => e.CallType == "volte_video")})"
+                                                  : $" (mcvideo {_all.Count(e => e.IsMcVideo)}, service axis {(_all.Any(e => e.Service.Length > 0) ? "yes" : "no")})");
+        sw.Restart();
         ApplyLoaded();
+        LogTimings(what, queryMs, sw);
+    }
+
+    /// <summary>창 조회 한 번의 시간을 로그 한 줄로 — 서버 응답(query) · 목록 만들기(list) · 화면 그리기(render, 다음 유휴 때까지).
+    /// 조회가 느릴 때 서버 탓인지 화면 탓인지를 가른다.</summary>
+    private void LogTimings(string what, long queryMs, System.Diagnostics.Stopwatch sinceList)
+    {
+        long listMs = sinceList.ElapsedMilliseconds;
+        if (Application.Current?.Dispatcher is not { } d) { _s.Log.Info($"{what} · query {queryMs} ms · list {listMs} ms"); return; }
+        d.BeginInvoke(System.Windows.Threading.DispatcherPriority.ApplicationIdle,
+                      () => _s.Log.Info($"{what} · query {queryMs} ms · list {listMs} ms · render {sinceList.ElapsedMilliseconds - listMs} ms"));
     }
 
     /// <summary>받은 항목을 화면에 — 서비스 축이 없으면 거르기를 풀고(칩이 사라진다) 밴드·목록을 다시 만든다.</summary>
@@ -469,7 +501,8 @@ public sealed partial class SessionHistoryViewModel : ObservableObject
         int seq = ++_detailSeq;
         Stop(); _playQueue.Clear();
         Recording = null; Segments.Clear(); RecordingStatus = "";
-        Participants.Clear(); Lanes.Clear(); Timeline.Clear(); Metrics.Clear(); _timelineAll.Clear();
+        Participants.Clear(); Lanes.Clear(); Timeline.Clear(); Metrics.Clear(); _timelineAll.Clear(); AxisGaps.Clear();
+        _paneRow = null; _paneDetail = null;
         FloorCount = MemberEventCount = 0; AxisStartText = AxisEndText = ""; DetailStatus = "";
         RaiseDetailChanged();
         if (row is null) return;
@@ -528,6 +561,7 @@ public sealed partial class SessionHistoryViewModel : ObservableObject
     /// <summary>발언 턴(세그먼트 슬롯 트랙) · 참여자 · 이벤트 타임라인 · 지표를 만든다. 콘솔 PanelDetail 과 같은 구성.</summary>
     private void BuildPttPane(HistoryRow row, PttSessionDetail? detail)
     {
+        _paneRow = row; _paneDetail = detail;
         var e = row.E;
         // 발언 턴 — 세그먼트 → 슬롯 트랙의 화자 구간(콘솔 segTurns). 트랙이 없으면 세그먼트 전체가 대표 화자의 한 턴.
         var turns = new List<(int Seq, int Slot, string Spk, DateTime Start, DateTime End, int DurMs, bool Playable, bool Multi)>();
@@ -572,13 +606,14 @@ public sealed partial class SessionHistoryViewModel : ObservableObject
         double span = Math.Max(1000, (t1 - t0).TotalMilliseconds);
         AxisStartText = t0.ToString("HH:mm:ss"); AxisEndText = t1.ToString("HH:mm:ss");
         _axisT0 = t0; _axisSpanMs = span;
+        BuildAxisMap(turns.Select(t => ((t.Start - t0).TotalMilliseconds, (t.End - t0).TotalMilliseconds)), span);
         TalkZoom = 1.0;                                                    // 눈금은 레인을 다 만든 뒤(아래) 다시 센다
 
         // 화자 레인
         foreach (var spk in order)
         {
             var bars = turns.Where(t => t.Spk == spk).Select(t => new TurnBar(t.Seq, t.Slot, t.Multi, spk, colorOf(spk),
-                (t.Start - t0).TotalMilliseconds / span, Math.Max(0.002, t.DurMs / span),
+                AxisRatio(t.Start), Math.Max(0.002, AxisRatio(t.End) - AxisRatio(t.Start)),
                 $"#{t.Seq}{(t.Multi ? $" 슬롯 {t.Slot}" : "")} · {Who(_s, spk)} · {t.Start:HH:mm:ss} · {FmtSpeech(t.DurMs)}{(t.Playable ? " · 클릭 = 재생" : " · 녹음 중")}",
                 t.Playable)).ToList();
             Lanes.Add(new SpeakerLane(spk, Who(_s, spk), colorOf(spk), bars));
@@ -643,11 +678,72 @@ public sealed partial class SessionHistoryViewModel : ObservableObject
     /// <summary>배율을 factor 배 — Ctrl+휠(코드비하인드가 커서 기준으로 스크롤 위치를 맞춘다).</summary>
     public void TalkZoomBy(double factor) => TalkZoom = Math.Clamp(TalkZoom * factor, 1.0, TalkZoomMax);
 
-    /// <summary>눈금 — 배율에 따라 6~8 개가 보이도록 간격을 1·2·5·10·15·30초·1·2·5·10·30분 중에서 고른다.</summary>
+    // ── 발언 타임라인의 시간축 ──
+
+    /// <summary>발언 구간(세션 시작 기준 ms)으로 시간축 사상을 만든다. 틈 줄임이 켜져 있으면 발언이 없는 구간(세션 머리·꼬리 포함)을 상한 길이로 접는다 —
+    /// 상한 = 발언 시간 합의 5 %(1.5~15초). 그보다 짧은 틈과 발언 구간은 시간에 비례한 그대로다(막대 길이끼리는 늘 비교된다).</summary>
+    private void BuildAxisMap(IEnumerable<(double S, double E)> turns, double span)
+    {
+        _axisMap.Clear(); AxisGaps.Clear();
+        var blocks = new List<(double S, double E)>();
+        foreach (var (s, en) in turns.Select(t => (Math.Clamp(t.S, 0, span), Math.Clamp(t.E, 0, span))).Where(t => t.Item2 > t.Item1).OrderBy(t => t.Item1))
+        {
+            if (blocks.Count > 0 && s <= blocks[^1].E + 300) blocks[^1] = (blocks[^1].S, Math.Max(blocks[^1].E, en));   // 겹치거나 0.3초 안에 이어진 발언은 한 덩어리
+            else blocks.Add((s, en));
+        }
+        if (!CompactGaps || blocks.Count == 0) { _axisMap.Add((0, span, 0, span, false)); _axisDispMs = span; return; }
+        double cap = Math.Clamp(blocks.Sum(b => b.E - b.S) * 0.05, 1500, 15_000);
+        double cur = 0, disp = 0;
+        void gap(double until)
+        {
+            double g = until - cur;
+            if (g <= 0) return;
+            double shown = Math.Min(g, cap);
+            _axisMap.Add((cur, until, disp, disp + shown, g > cap));
+            disp += shown; cur = until;
+        }
+        foreach (var b in blocks)
+        {
+            gap(b.S);
+            _axisMap.Add((b.S, b.E, disp, disp + (b.E - b.S), false));
+            disp += b.E - b.S; cur = b.E;
+        }
+        gap(span);
+        _axisDispMs = Math.Max(1, disp);
+        foreach (var m in _axisMap.Where(m => m.Gap))
+            AxisGaps.Add(new AxisGap(m.D0 / _axisDispMs, (m.D1 - m.D0) / _axisDispMs,
+                                     $"{TurnWord} 없음 {_axisT0.AddMilliseconds(m.R0):HH:mm:ss} ~ {_axisT0.AddMilliseconds(m.R1):HH:mm:ss} · {FmtSpeech((int)(m.R1 - m.R0))} — 줄여서 표시"));
+    }
+
+    /// <summary>시각 → 트랙 폭 대비 위치(0~1).</summary>
+    private double AxisRatio(DateTime t)
+    {
+        double ms = Math.Clamp((t - _axisT0).TotalMilliseconds, 0, _axisSpanMs);
+        foreach (var m in _axisMap)
+            if (ms <= m.R1) return (m.D0 + (m.R1 > m.R0 ? (ms - m.R0) / (m.R1 - m.R0) * (m.D1 - m.D0) : 0)) / _axisDispMs;
+        return 1;
+    }
+
+    /// <summary>눈금 — 배율에 따라 6~8 개가 보이도록 간격을 1·2·5·10·15·30초·1·2·5·10·30분 중에서 고른다.
+    /// 틈을 줄인 축은 시간에 비례하지 않으므로 고른 간격 대신 발언 덩어리가 시작하는 시각을 적는다(너무 붙은 것은 건너뛴다).</summary>
     private void RebuildAxisTicks()
     {
         AxisTicks.Clear();
         if (Lanes.Count == 0 || _axisSpanMs <= 0) return;
+        if (_axisMap.Any(m => m.Gap))
+        {
+            double last = -1, minStep = 0.11 / TalkZoom;
+            foreach (var m in _axisMap.Where(m => !m.Gap && m.R1 - m.R0 > 0))
+            {
+                double r = m.D0 / _axisDispMs;
+                bool afterGap = _axisMap.Any(g => g.Gap && Math.Abs(g.R1 - m.R0) < 0.5);
+                if (!afterGap && last >= 0) continue;                                   // 덩어리의 첫 눈금만 — 줄인 틈 바로 뒤(또는 맨 처음)
+                if (last >= 0 && r - last < minStep) continue;
+                AxisTicks.Add(new AxisTick(r, _axisT0.AddMilliseconds(m.R0).ToString("HH:mm:ss")));
+                last = r;
+            }
+            return;
+        }
         double targetMs = _axisSpanMs / (6.0 * TalkZoom);
         int[] steps = { 1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600 };
         int stepSec = steps.FirstOrDefault(x => x * 1000.0 >= targetMs);
@@ -676,6 +772,7 @@ public sealed partial class SessionHistoryViewModel : ObservableObject
 
     private void RaiseDetailChanged()
     {
+        OnPropertyChanged(nameof(HasAxisGaps));
         OnPropertyChanged(nameof(HasLanes)); OnPropertyChanged(nameof(HasTimeline)); OnPropertyChanged(nameof(HasParticipants));
         OnPropertyChanged(nameof(FloorCount)); OnPropertyChanged(nameof(MemberEventCount)); OnPropertyChanged(nameof(HasRecording));
     }
@@ -762,7 +859,7 @@ public sealed partial class SessionHistoryViewModel : ObservableObject
 
     /// <summary>표본 이력 한 날(통화 또는 PTT)을 심고 첫 행을 고른다. 서버 조회 없이 §4.6 화면을 그려 보는 개발 스위치용.
     /// video = 무전 표본의 영상 세션(MCVideo)을 고르고 영상 칸을 열어 둔다(재생은 하지 않는다 — 칸 배치 점검).</summary>
-    public void SeedPreview(HistoryKind kind, bool video = false)
+    public void SeedPreview(HistoryKind kind, bool video = false, int rows = 0)
     {
         var day = Date.Date;
         DateTime at(int h, int m, int s = 0) => day.AddHours(h).AddMinutes(m).AddSeconds(s);
@@ -842,9 +939,19 @@ public sealed partial class SessionHistoryViewModel : ObservableObject
             { State = "ended", CallType = "volte", InviteTime = at(16, 1, 30), EndTime = at(16, 2), EndReason = "busy", SipStatus = 486 });
             _previewSegments = new[] { new RecordingSegment(1, "volte", "+821310002001", at(9, 4, 30), at(9, 5, 12), 42_000, false, "ready", Array.Empty<string>(), 2) };
         }
+        // rows = 하루 상한(1000)까지 찬 날을 흉내 — 한 그룹에 짧은 세션이 종일 이어진 모양(목록 가상화·그리기 시간 점검)
+        for (int i = list.Count; i < rows && kind == HistoryKind.Ptt; i++)
+        {
+            var st = day.AddSeconds(86_340.0 * i / rows);
+            list.Add(new HistoryEntry($"gen-{i}", st.AddSeconds(30), HistoryKind.Ptt, "ptt.session.end", "tel:+821310002001", "", "tel:g001", 30, false, "", $"ptt/2/gen/{i}", true)
+            { State = "ended", SessionKind = "group", Service = "ptt", StartTime = st, EndTime = st.AddSeconds(30), GroupName = "상황실", MemberCount = 5, TurnCount = 1, SpeakerCount = 1,
+              TotalSpeechMs = 4_000, TalkMs = 4_000, FloorControl = "on", FloorPolicy = "single", People = new[] { "+821310002001", "+821310002002" } });
+        }
+        var swSeed = System.Diagnostics.Stopwatch.StartNew();
         _all = list.OrderByDescending(e => e.Time).ToList();
         _hours = CountHours(_all);
         RebuildHours(); Filter();
+        if (rows > 0) LogTimings($"history preview {_all.Count} items", 0, swSeed);
         Selected = (video ? Rows.FirstOrDefault(r => r.IsMcVideo) : null)
                    ?? Rows.FirstOrDefault(r => _previewDetail is { } pd && r.E.RecordingId == pd.RecordingId) ?? Rows.FirstOrDefault(r => r.HasRecording) ?? Rows.FirstOrDefault();
         if (video && Selected is { IsMcVideo: true } && SelectedSegment is { } vs)

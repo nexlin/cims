@@ -132,7 +132,9 @@ public partial class App : Application
             if (e.Args.FirstOrDefault(a => a.StartsWith("--ui-preview-history=", StringComparison.OrdinalIgnoreCase))?.Split('=', 2)[1] is { Length: > 0 } histKind && _mainVm is not null)
                 {
                 bool histVideo = histKind.Equals("video", StringComparison.OrdinalIgnoreCase);
-                _mainVm.HistoryScreen.SeedPreview(histVideo || histKind.Equals("ptt", StringComparison.OrdinalIgnoreCase) ? Models.HistoryKind.Ptt : Models.HistoryKind.Call, histVideo);
+                // --ui-preview-history-rows=<n>: 무전 표본을 n 줄로 불린다(하루 상한 1000 — 목록 가상화·그리기 시간 점검, 시간은 앱 로그 "history preview")
+                int histRows = int.TryParse(Arg("--ui-preview-history-rows"), out int hr) ? Math.Clamp(hr, 0, 5000) : 0;
+                _mainVm.HistoryScreen.SeedPreview(histVideo || histKind.Equals("ptt", StringComparison.OrdinalIgnoreCase) ? Models.HistoryKind.Ptt : Models.HistoryKind.Call, histVideo, histRows);
             }
             // --ui-preview-band=turns: 무전 시간대 밴드를 발언 수로 그려 본다(기본 = 세션 수).
             if (Arg("--ui-preview-band").Equals("turns", StringComparison.OrdinalIgnoreCase) && _mainVm is not null) _mainVm.HistoryScreen.BandMode = 1;

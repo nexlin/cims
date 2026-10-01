@@ -38,6 +38,8 @@ public partial class MainWindow : Window
         Closing += OnClosing;
         PreviewKeyDown += OnKeyDown;
         PreviewKeyUp += OnKeyUp;
+        // 키로 누르고 있던 PTT — 앱이 뒤로 가면 뗌(KeyUp)이 오지 않으므로 여기서 놓는다
+        Application.Current.Deactivated += (_, _) => ReleasePttKey();
     }
 
     // ── 창 위치(layout.json) ──
@@ -82,7 +84,7 @@ public partial class MainWindow : Window
 
     private void OnKeyDown(object sender, KeyEventArgs e)
     {
-        // 입력란에 포커스가 있으면 "글자를 넣는 키"만 양보한다 — 관리 화면은 입력 폼투성이라 여기서 다 버리면 폴백 PTT·화면 전환이 죽는다
+        // 입력란에 포커스가 있으면 "글자를 넣는 키"만 양보한다(PTT 기본 키 Space 도 입력칸에서는 빈칸이다) — 관리 화면은 입력 폼투성이라 여기서 다 버리면 폴백 PTT·화면 전환이 죽는다
         if (Keyboard.FocusedElement is System.Windows.Controls.Primitives.TextBoxBase or System.Windows.Controls.PasswordBox && IsTypingKey(e)) return;
         var map = _vm.Session.Settings.Current.HotKeys;
         // Ctrl+Shift+n = 발언 대상 토글(다중) · Ctrl+n = 발언 대상을 그 채널 하나로(+ 메시지 따라가기)
@@ -95,9 +97,14 @@ public partial class MainWindow : Window
         if (Keyboard.Modifiers == ModifierKeys.None && e.Key == Key.Escape && CloseTransients()) { e.Handled = true; return; }
         foreach (var name in HotKeyMap.LocalNames)
             if (map.TryGetValue(name, out var t) && CimsUe.Platform.HotKey.TryParse(t, out var hk) && Matches(hk, e)) { _vm.OnHotKey(name, true); e.Handled = true; return; }
-        // 전역 핫키 등록에 실패한 키(충돌)는 앱 포커스에서라도 동작
-        foreach (var name in _vm.HotKeys.Conflicts)
-            if (map.TryGetValue(name, out var t) && CimsUe.Platform.HotKey.TryParse(t, out var hk) && Matches(hk, e) && !e.IsRepeat) { _vm.OnHotKey(name, true); e.Handled = true; return; }
+        // 창이 맡는 전역 이름 — 전역 등록에 실패한 키(충돌)와 글자 키(PTT 기본 Space — 전역 등록하지 않는다, 입력칸은 위에서 이미 양보했다).
+        // 누르고 있는 동안의 반복도 삼킨다 — 흘리면 포커스가 있는 버튼·체크가 그 키로 눌린다
+        foreach (var name in HotKeyMap.GlobalNames)
+            if (_vm.HotKeys.HandledInApp(name) && map.TryGetValue(name, out var t) && CimsUe.Platform.HotKey.TryParse(t, out var hk) && Matches(hk, e))
+            {
+                if (!e.IsRepeat) { if (name == "ptt") _pttKeyHeld = true; _vm.OnHotKey(name, true); }
+                e.Handled = true; return;
+            }
         // 화면 전환 F1~F4 — 설정 핫키가 같은 키를 쓰면 위에서 먼저 잡힌다
         if (Keyboard.Modifiers == ModifierKeys.None && AppScreens.OfFunctionKey(e.Key) is { } screen && !e.IsRepeat)
         {
@@ -140,11 +147,22 @@ public partial class MainWindow : Window
         }
     }
 
+    /// <summary>창의 키 처리로 PTT 를 누르고 있다 — 뗌은 누른 것만 놓는다(입력칸에서 친 Space 의 뗌은 PTT 가 아니다).</summary>
+    private bool _pttKeyHeld;
+
     private void OnKeyUp(object sender, KeyEventArgs e)
     {
+        if (!_pttKeyHeld) return;
         var map = _vm.Session.Settings.Current.HotKeys;
-        if (_vm.HotKeys.Conflicts.Contains("ptt") && map.TryGetValue("ptt", out var t) && CimsUe.Platform.HotKey.TryParse(t, out var hk)
-            && KeyInterop.VirtualKeyFromKey(e.Key == Key.System ? e.SystemKey : e.Key) == hk.VirtualKey) _vm.OnHotKey("ptt", false);
+        if (map.TryGetValue("ptt", out var t) && CimsUe.Platform.HotKey.TryParse(t, out var hk)
+            && KeyInterop.VirtualKeyFromKey(e.Key == Key.System ? e.SystemKey : e.Key) == hk.VirtualKey) { ReleasePttKey(); e.Handled = true; }
+    }
+
+    private void ReleasePttKey()
+    {
+        if (!_pttKeyHeld) return;
+        _pttKeyHeld = false;
+        _vm.OnHotKey("ptt", false);
     }
 
     private static bool Matches(CimsUe.Platform.HotKey hk, KeyEventArgs e)
