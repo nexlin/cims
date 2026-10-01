@@ -171,9 +171,10 @@
                                             Visibility="{Binding IsVideoReceiving, Converter={StaticResource BoolToVis}}" />
                                     <Button Style="{StaticResource Pill.Line.Sm}" Padding="12,0" Margin="0,0,6,6" Content="영상 소리" Command="{Binding ToggleVideoVolumeCommand}"
                                             ToolTip="영상 호 소리 크기 — 무전과의 상대 음량(TS 22.280 R-8.3-002)" Visibility="{Binding IsVideoReceiving, Converter={StaticResource BoolToVis}}" />
-                                    <!-- [영상 보내기](D11) — 송출 요청·대기·송출 중이면 같은 자리가 끄는 버튼(요청 취소·대기 취소·보내기 끝) -->
+                                    <!-- [영상 보내기](D11) — 송출 요청·대기·송출 중이면 같은 자리가 끄는 버튼(요청 취소·대기 취소·보내기 끝).
+                                         편성(prearranged) 채널에 영상 호가 없으면 이 버튼이 영상 호를 연다(«여는 중… · 취소» — TS 24.281 §9.2.1.2.1.1) -->
                                     <Button Padding="12,0" Margin="0,0,6,6" Content="{Binding VideoSendText}" Command="{Binding ToggleVideoSendCommand}" IsEnabled="{Binding CanVideoSend}"
-                                            ToolTip="{Binding VideoSendTip}" ToolTipService.ShowOnDisabled="True" Visibility="{Binding VideoConnected, Converter={StaticResource BoolToVis}}">
+                                            ToolTip="{Binding VideoSendTip}" ToolTipService.ShowOnDisabled="True" Visibility="{Binding ShowVideoSend, Converter={StaticResource BoolToVis}}">
                                         <Button.Style>
                                             <Style TargetType="Button" BasedOn="{StaticResource Pill.Line.Sm}">
                                                 <Style.Triggers>

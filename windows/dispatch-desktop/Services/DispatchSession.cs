@@ -734,8 +734,19 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
         if (!m.Body.Contains("org.openmobilealliance.groups", StringComparison.Ordinal)) return;
         int seq = ++_groupRefreshSeq;
         Log.Info("xcap-diff: group document changed — refreshing");
-        _ = Task.Delay(500).ContinueWith(_ => { if (seq == _groupRefreshSeq && Ptt is not null) _ = RefreshGroupsAsync(); },
+        _ = Task.Delay(500).ContinueWith(_ => { if (seq == _groupRefreshSeq && Ptt is not null) _ = RefreshAfterGroupChangeAsync(); },
                                          TaskScheduler.FromCurrentSynchronizationContext());
+    }
+
+    /// <summary>그룹 문서가 바뀌었다 — 그룹 목록을 다시 받고, 영상 채널 목록(MCVideo user profile 의 그룹 목록 — §10.2)도 다시 받는다(ETag, 안 바뀌었으면 304).
+    /// 영상 채널 목록은 그룹 문서의 MCVideo 몫에서 나온다(그룹에 영상을 켜면 멤버의 user profile 에 그 그룹이 든다). CMS 문서는 5분 주기로만 다시 받으므로
+    /// 여기서 받지 않으면 방금 영상을 켠 그룹의 영상 호에 최대 5분 늦게 들고, 그동안 그 그룹의 송출 알림([보기])이 오지 않는다.</summary>
+    private async Task RefreshAfterGroupChangeAsync()
+    {
+        await RefreshGroupsAsync();
+        if (!McVideoEnabled || Ptt is null) return;
+        await RefreshMcVideoProfileAsync();
+        await RefreshMcVideoDocsAsync();                         // 호 방식·동시 송출 상한 변경, 문서가 바뀐 채널의 물러남·affiliation 다시(§10.2)
     }
 
     /// <summary>새 그룹 uri — XCAP 은 클라이언트가 문서를 명명한다. 정규형 `tel:g-&lt;소문자 hex 8&gt;`(mcptt_api.md §2; `adhoc-`/`priv-` 예약).</summary>
@@ -1162,7 +1173,8 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
                 break;
         }
         // 실패한 발신 동작의 사유(§9 사전) — 착신·정상 종료(BYE)는 제외
-        if (s.ConnectedAt is null && ci.Dir == CallDir.Outgoing && ci.LastCode >= 300)
+        bool quiet = s.IsMcVideo && QuietVideoEnd(s.CallId);                // 내가 거둔 영상 호 개시·내가 떠난 영상 채널
+        if (s.ConnectedAt is null && ci.Dir == CallDir.Outgoing && ci.LastCode >= 300 && !quiet)
         {
             var area = ResponseText.AreaOf(s.Operation);
             if (s.Operation == Operation.Dial && ci.IsMcptt) area = s.Kind == SessionKind.PttPrivate ? ResponseText.Area.PttPrivate : ResponseText.Area.PttJoin;

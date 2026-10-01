@@ -154,7 +154,15 @@ public sealed partial class ChannelDetailViewModel : ObservableObject
     public SessionItem? Video => Card?.Video;
     public bool VideoConnected => Video is { IsLive: true };
     /// <summary>머리 옆 작은 글 — 연결됨이면 «채널 참여와 함께 연결됨», 아니면 연결 상태(연결 중·편성 초대 대기·한도·실패·재시도).</summary>
-    public string VideoSub => VideoConnected ? "채널 참여와 함께 연결됨"
+    /// <summary>내가 연 편성 영상 호가 성립 전 — 제어 기능이 멤버를 초대하는 중(TS 24.281 §9.2.1.4.2).</summary>
+    public bool VideoOpening => _s.IsVideoOpening(Video);
+    /// <summary>편성 영상 채널에 영상 호가 없다 — [영상 보내기] 가 영상 호를 연다.</summary>
+    public bool CanOpenVideo => Group is { } g && _s.CanOpenVideo(g);
+    public bool IsPrearrangedVideo => Group is { McVideo: true, McVideoType: "prearranged" };
+    /// <summary>[영상 보내기] 를 보일 것인가 — 영상 호가 있거나, 편성 채널(호가 없으면 이 버튼이 연다).</summary>
+    public bool ShowVideoSend => VideoConnected || IsPrearrangedVideo;
+    public string VideoSub => VideoOpening ? "영상 호를 여는 중 — 멤버가 받기를 기다립니다"
+        : VideoConnected ? (IsPrearrangedVideo ? "편성 영상 호 연결됨" : "채널 참여와 함께 연결됨")
         : Group?.VideoNote is { Length: > 0 } n ? n : "영상 연결 중…";
     public int VideoSenderCount => VideoConnected ? Video!.Transmitters.Count : 0;
     /// <summary>보내는 사람 없음 = 머리 한 줄 + [영상 보내기]만(영상 칸·목록 없음).</summary>
@@ -176,10 +184,10 @@ public sealed partial class ChannelDetailViewModel : ObservableObject
     // ── 내 송출(D11 — [영상 보내기] 는 음성 무전과 따로, TS 24.581 §6.2.4) ──
     public TransmissionState TxState => VideoConnected ? Video!.Transmission.State : TransmissionState.NoPermission;
     public bool IsVideoSending => TxState == TransmissionState.Permitted;
-    /// <summary>요청·대기·송출 중 — [영상 보내기] 가 끄는 버튼이 된다.</summary>
-    public bool IsVideoTxActive => TxState != TransmissionState.NoPermission;
-    public bool CanVideoSend => VideoConnected && TxState != TransmissionState.PendingEnd && (TxState != TransmissionState.NoPermission || _s.HasCamera);
-    public string VideoSendText => TxState switch
+    /// <summary>여는 중·요청·대기·송출 중 — [영상 보내기] 가 끄는 버튼이 된다.</summary>
+    public bool IsVideoTxActive => VideoOpening || TxState != TransmissionState.NoPermission;
+    public bool CanVideoSend => VideoOpening || (VideoConnected ? TxState != TransmissionState.PendingEnd && (TxState != TransmissionState.NoPermission || _s.HasCamera) : CanOpenVideo);
+    public string VideoSendText => VideoOpening ? "여는 중… · 취소" : TxState switch
     {
         TransmissionState.PendingRequest => "요청 중… · 취소",
         TransmissionState.Queued => Video!.Transmission.QueuePosition is > 0 and < 254 and var q ? $"대기 {q}번째 · 대기 취소" : "대기 중 · 대기 취소",
@@ -187,9 +195,11 @@ public sealed partial class ChannelDetailViewModel : ObservableObject
         TransmissionState.PendingEnd => "끝내는 중…",
         _ => _s.HasCamera ? "영상 보내기" : "영상 보내기 — 카메라 없음",
     };
-    public string VideoSendTip => TxState switch
+    public string VideoSendTip => VideoOpening ? "영상 호 열기를 거둔다(멤버 초대 취소)" : TxState switch
     {
         TransmissionState.NoPermission when !_s.HasCamera => "이 PC 에서 카메라를 찾지 못했습니다 — 설정 › 영상",
+        TransmissionState.NoPermission when !VideoConnected && Group is { McVideoAffiliated: false } => "이 채널의 영상(MCVideo) 제휴가 아직 서지 않았습니다 — 잠시 뒤 다시",
+        TransmissionState.NoPermission when !VideoConnected => $"편성 영상 그룹 — 영상 호를 열고 내 카메라 영상을 보낸다({_s.CameraName}). 영상 채널에 있는 멤버를 초대한다(TS 24.281 §9.2.1.2.1.1)",
         TransmissionState.NoPermission => $"이 채널에 내 카메라 영상을 보낸다({_s.CameraName}) — 말하기는 발언 바 PTT(음성 무전, D11)",
         TransmissionState.Permitted => "영상 보내기를 끝낸다(카메라를 닫는다 — TS 24.581 §6.2.4.5)",
         _ => "영상 보내기 요청을 거둔다",
@@ -205,7 +215,12 @@ public sealed partial class ChannelDetailViewModel : ObservableObject
     [RelayCommand]
     private void ToggleVideoSend()
     {
-        if (Video is not { IsLive: true } v) return;
+        if (VideoOpening) { _s.CancelVideoOpen(Video!); Refresh(rows: false); return; }                 // 여는 중에 다시 누름 = 개시를 거둔다
+        if (Video is not { IsLive: true } v)
+        {
+            if (Group is { } g && _s.CanOpenVideo(g)) { _s.OpenVideoTx(g); Refresh(rows: false); }      // 편성 채널 — 영상 호를 연다
+            return;
+        }
         if (TxState == TransmissionState.NoPermission) _s.RequestVideoTx(v);
         else if (TxState != TransmissionState.PendingEnd) _s.ReleaseVideoTx(v);
         Refresh(rows: false);
@@ -344,7 +359,8 @@ public sealed partial class ChannelDetailViewModel : ObservableObject
                                   nameof(IsVideoReceiving), nameof(ReceivingCaption), nameof(VideoCanRender), nameof(VideoSurfaceText), nameof(VideoVolume),
                                   nameof(VideoRotation), nameof(VideoLandscape), nameof(VideoFrameWidth), nameof(VideoFrameHeight), nameof(VideoRotationTip),
                                   nameof(ReceivingFeed), nameof(TxState), nameof(IsVideoSending), nameof(IsVideoTxActive), nameof(CanVideoSend), nameof(VideoSendText),
-                                  nameof(VideoSendTip), nameof(SendingCaption), nameof(ShowVideoMicNote) })
+                                  nameof(VideoSendTip), nameof(SendingCaption), nameof(ShowVideoMicNote), nameof(VideoOpening), nameof(CanOpenVideo), nameof(IsPrearrangedVideo),
+                                  nameof(ShowVideoSend) })
             OnPropertyChanged(p);
         SyncVideoRows();
         if (rows) RebuildRows();

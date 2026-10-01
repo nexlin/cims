@@ -32,6 +32,17 @@ public sealed partial class DispatchSession
     private readonly HashSet<int> _videoLeaving = new();
     private const int VideoBackoffSec = 10, VideoBackoffMaxSec = 120, VideoRejoinSec = 3;
     private readonly HashSet<string> _mcvideoAttrsLoading = new(StringComparer.OrdinalIgnoreCase);
+    /// <summary>내가 연 편성(prearranged) 영상 호(callId) — 성립 전에는 [영상 보내기] 가 «여는 중…» 이고 다시 누르면 개시를 거둔다(CANCEL), 성립 전에 끝나면
+    /// 다시 열지 않고 사유만 알린다(TS 24.281 §9.2.1.2.1.1 · §9.2.1.4.2). chat 합류의 자동 재시도(물러남)와 섞지 않는다.</summary>
+    private readonly HashSet<int> _videoOpening = new();
+    /// <summary>내가 거둔 개시(CANCEL) — 실패 토스트(487)를 내지 않는다.</summary>
+    private readonly HashSet<int> _quietVideoEnd = new();
+    /// <summary>마지막으로 맞춘 영상 채널 그룹 문서의 지문(ETag) — 문서가 바뀌었을 때만 물러남을 풀고 affiliation 을 다시 싣는다(같은 문서 재조회로는 풀지 않는다).</summary>
+    private readonly Dictionary<string, string> _mcvideoDocPrint = new(StringComparer.OrdinalIgnoreCase);
+    /// <summary>동시 제휴 그룹 한도(N2)를 넘어 MCVideo 로 affiliate 하지 않은 영상 채널 — chat 합류도 하지 않는다(서버가 486 Warning 102).</summary>
+    private readonly HashSet<string> _videoOverN2 = new(StringComparer.OrdinalIgnoreCase);
+    private const string PrearrangedNote = "편성 영상 그룹 — [영상 보내기] 로 영상 호를 엽니다";
+    private const string OpeningNote = "영상 호를 여는 중 — 멤버가 받기를 기다립니다";
 
     /// <summary>영상 절이 바뀌었다(연결·송출·수신) — 카드·채널 상세가 다시 그린다.</summary>
     public event EventHandler<GroupInfo>? VideoChanged;
@@ -49,6 +60,8 @@ public sealed partial class DispatchSession
     private string McVideoPsi => _ueInit?.McvideoServerUri ?? "";
     /// <summary>동시 MCVideo 호 상한 N6(user profile &lt;MaxSimultaneousCallsN6&gt;) — 넘으면 서버가 486 103. 모르면 상한 없음으로 본다.</summary>
     private int McVideoN6 => _mcvideoProfile is { MaxSimultaneousCallsN6: > 0 } p ? p.MaxSimultaneousCallsN6 : int.MaxValue;
+    /// <summary>동시 MCVideo 제휴 그룹 한도 N2(user profile &lt;MaxAffiliationsN2&gt; — 회선 «동시 제휴 그룹», 기본 4). 넘는 그룹은 서버가 제휴 PUBLISH 에서 줄인다. 모르면 상한 없음.</summary>
+    private int McVideoN2 => _mcvideoProfile is { MaxAffiliationsN2: > 0 } p ? p.MaxAffiliationsN2 : int.MaxValue;
 
     /// <summary>MCVideo user profile 재조회(ETag). 404 = 자격 없음(사본을 버린다), 그 밖의 실패(망·5xx)는 가진 사본을 둔다.</summary>
     private async Task RefreshMcVideoProfileAsync()
@@ -69,16 +82,33 @@ public sealed partial class DispatchSession
     {
         var ptt = Ptt;
         var ids = (_mcvideoProfile?.Groups ?? Array.Empty<string>()).Select(UserPartConverter.UserPart).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        foreach (var g in Groups.Where(x => x.IsMember))
+        var members = Groups.Where(x => x.IsMember).ToList();
+        // 켜는 그룹을 먼저, 끄는 그룹을 뒤에 — 코어 PUBLISH 는 관심 그룹 전부를 싣는데, 먼저 끄면 빈 집합(Expires 0 = 그 사용자 MCVideo 제휴 전부 해제)을 한 번 거친다.
+        // 영상 채널은 카드 순서로 N2 개까지만 affiliate 한다 — 넘는 그룹은 서버가 PUBLISH 에서 줄이고(제휴 NOTIFY 에 없다) chat 합류는 486 Warning 102 다.
+        int n = 0;
+        foreach (var g in members.Where(x => McVideoEnabled && ids.Contains(x.Id)))
         {
-            bool on = McVideoEnabled && ids.Contains(g.Id);
-            if (g.McVideo && !on) LeaveVideoChannel(g);
-            g.McVideo = on;
-            if (ptt is null || on == g.McVideoAffiliated) continue;
-            var r = ptt.Affiliate(g.Id, on, McService.McVideo);
-            if (!r.Ok) { Log.Warn($"mcvideo affiliate {g.Id} {on}: {r}"); continue; }
-            g.McVideoAffiliated = on;
+            g.McVideo = true;
+            bool over = n >= McVideoN2;
+            if (over)
+            {
+                if (_videoOverN2.Add(g.Id)) Log.Warn($"mcvideo channel {g.Id}: not affiliated — N2 {McVideoN2} reached");
+                g.VideoNote = $"동시 제휴 그룹 한도(N2 = {McVideoN2})가 찼습니다 — 이 채널 영상은 연결하지 않았습니다(운영자에게 한도 상향 요청)";
+                continue;
+            }
+            n++;
+            if (_videoOverN2.Remove(g.Id)) g.VideoNote = "";
+            if (ptt is null || g.McVideoAffiliated) continue;
+            var r = ptt.Affiliate(g.Id, true, McService.McVideo);
+            if (!r.Ok) { Log.Warn($"mcvideo affiliate {g.Id} True: {r}"); continue; }
+            g.McVideoAffiliated = true;
         }
+        foreach (var g in members.Where(x => !(McVideoEnabled && ids.Contains(x.Id))))
+        {
+            if (g.McVideo || g.McVideoAffiliated) LeaveVideoChannel(g);   // 영상 호를 끊고 MCVideo 제휴도 푼다
+            g.McVideo = false;
+        }
+        foreach (var g in members.Where(x => x.McVideoAffiliated && _videoOverN2.Contains(x.Id))) LeaveVideoChannel(g);   // 한도가 줄어 밀려난 채널
         EnsureVideoChannels();
     }
 
@@ -103,12 +133,52 @@ public sealed partial class DispatchSession
             _videoRetryAt[g.Id] = DateTime.Now.AddSeconds(30);
             return;
         }
-        if (r.Value.Mcvideo is { } a)
+        ApplyMcVideoDoc(g, r.Value);
+    }
+
+    /// <summary>그룹 문서의 MCVideo 몫을 그 채널에 맞춘다 — 호 방식·동시 송출 상한이 바뀌었으면 갱신하고, **문서가 바뀌었으면**(지문 = 문서 ETag — 처음 받은 것과
+    /// 같은 문서 재조회는 변경이 아니다) 그 그룹의 합류 물러남을 지우고 MCVideo affiliation 을 다시 싣는다. 갓 만든 그룹은 서버가 아직 MCVideo 그룹으로 모를 때
+    /// 합류가 거절되거나(404 Warning 113) affiliation 이 기록되지 않을 수 있는데(PUBLISH 는 200 — 결과는 NOTIFY 로만 온다, TS 24.281 §8.2.2.2.3) 서버는 그룹을
+    /// 다시 적재한 뒤 문서 변경을 통지한다 — 그때 다시 맞춘다. affiliation 재호출 = 코어가 관심 그룹 집합을 다시 PUBLISH(§8.2.1.2).</summary>
+    private void ApplyMcVideoDoc(GroupInfo g, GroupDoc doc)
+    {
+        string type = doc.Mcvideo is { } a ? (a.InviteMembers ? "prearranged" : "chat") : "";
+        int max = doc.Mcvideo?.MaxTransmitters ?? 0;
+        string print = doc.ETag.Length > 0 ? doc.ETag : $"{type}|{max}|{string.Join(',', doc.Members.Select(m => m.Uri))}";
+        bool changed = _mcvideoDocPrint.TryGetValue(g.Id, out var old) && old != print;
+        _mcvideoDocPrint[g.Id] = print;
+        if (type != g.McVideoType || max != g.McVideoMaxTransmitters || changed)
+            // 영상 채널이 왜 연결되거나 안 되는지 로그에서 가른다 — chat = 앱이 합류, prearranged = [영상 보내기] 가 열거나 멤버의 초대를 받는다
+            Log.Info($"mcvideo channel {g.Id}: {(type.Length > 0 ? type : "(no MCVideo part)")} max-tx={max}{(changed ? " — document changed" : "")}");
+        g.McVideoType = type; g.McVideoMaxTransmitters = max;
+        if (type.Length == 0) g.VideoNote = "그룹 문서에 영상(MCVideo) 몫이 없습니다";
+        else if (g.VideoSession is null && !_videoJoining.Contains(g.Id) && !_videoOverN2.Contains(g.Id)) g.VideoNote = type == "prearranged" ? PrearrangedNote : "";
+        if (!changed) return;
+        _videoRetryAt.Remove(g.Id); _videoFailures.Remove(g.Id);
+        if (Ptt is { } ptt && g.McVideo && !_videoOverN2.Contains(g.Id))
         {
-            g.McVideoType = a.InviteMembers ? "prearranged" : "chat";
-            g.McVideoMaxTransmitters = a.MaxTransmitters ?? 0;
+            var r = ptt.Affiliate(g.Id, true, McService.McVideo);
+            if (r.Ok) g.McVideoAffiliated = true; else Log.Warn($"mcvideo re-affiliate {g.Id}: {r}");
         }
-        else g.VideoNote = "그룹 문서에 영상(MCVideo) 몫이 없습니다";
+    }
+
+    /// <summary>그룹 문서가 바뀌었을 수 있다(GMS xcap-diff) — 영상 채널의 그룹 문서를 다시 받아 맞춘다: 콘솔에서 호 방식(편성 ↔ chat)·동시 송출 상한을 바꾸면
+    /// 로그인 중에도 따라가고, 문서가 바뀐 채널은 물러남·affiliation 을 새로 한다(<see cref="ApplyMcVideoDoc"/>).</summary>
+    private async Task RefreshMcVideoDocsAsync()
+    {
+        if (!McVideoEnabled) return;
+        foreach (var g in Groups.Where(x => x.IsMember && x.McVideo).ToList())
+        {
+            if (!_mcvideoAttrsLoading.Add(g.Id)) continue;
+            try
+            {
+                var r = await GetGroupAsync(g);
+                if (r.Ok) ApplyMcVideoDoc(g, r.Value); else Log.Warn($"mcvideo attrs {g.Id}: {r}");
+            }
+            finally { _mcvideoAttrsLoading.Remove(g.Id); }
+            VideoChanged?.Invoke(this, g);
+        }
+        EnsureVideoChannels();
     }
 
     // ── 영상 채널 합류(D10) ──
@@ -122,11 +192,17 @@ public sealed partial class DispatchSession
         int live = Sessions.Count(s => s.IsMcVideo && s.IsLive) + _videoJoining.Count;
         foreach (var g in Groups.Where(x => x.IsMember && x.McVideo))
         {
-            if (g.VideoSession is not null || _videoJoining.Contains(g.Id)) continue;
+            if (g.VideoSession is not null || _videoJoining.Contains(g.Id) || _videoOverN2.Contains(g.Id)) continue;
             if (_videoRetryAt.TryGetValue(g.Id, out var at) && now < at) continue;
             if (g.McVideoType.Length == 0) { _ = EnsureMcVideoAttrsAsync(g); continue; }        // 호 방식을 안 뒤 다시
-            if (g.McVideoType == "prearranged") { g.VideoNote = "편성 영상 그룹 — 멤버가 영상 호를 열면 함께 합류합니다"; continue; }
-            if (live >= McVideoN6) { g.VideoNote = $"동시 영상 호 한도(N6 = {McVideoN6})가 찼습니다 — 이 채널 영상은 연결하지 않았습니다(운영자에게 한도 상향 요청)"; continue; }
+            // 편성 = 앱이 호를 열어 두지 않는다(전원 초대라 보낼 사람이 연다 — [영상 보내기], OpenVideoTx). 멤버가 열면 초대를 자동 수락한다
+            if (g.McVideoType == "prearranged") { g.VideoNote = PrearrangedNote; continue; }
+            if (live >= McVideoN6)
+            {
+                string note = $"동시 영상 호 한도(N6 = {McVideoN6})가 찼습니다 — 이 채널 영상은 연결하지 않았습니다(운영자에게 한도 상향 요청)";
+                if (g.VideoNote != note) Log.Warn($"mcvideo channel {g.Id}: not joined — N6 {McVideoN6} reached ({live} live)");
+                g.VideoNote = note; continue;
+            }
             var r = ptt.JoinVideoGroupCall(g.Id, new VideoGroupCallOptions { Prearranged = false, Queueing = true });
             if (!r.Ok) { Log.Warn($"mcvideo join {g.Id}: {r}"); VideoBackoff(g, failed: true); continue; }
             _pendingOps[r.Value.Id] = Operation.VideoJoin;
@@ -154,8 +230,16 @@ public sealed partial class DispatchSession
     /// <summary>영상 채널에서 나간다(그룹이 내 채널에서 빠짐·자격 없어짐) — 영상 호 BYE(MCPTT 호는 그대로 — TS 24.281 §6.2.4.1). 다시 합류하지 않는다.</summary>
     private void LeaveVideoChannel(GroupInfo g)
     {
-        if (VideoOfGroup(g.Id) is { } v) { _videoLeaving.Add(v.CallId); Engine.GetCall(v.CallId).Hangup(); }
-        _videoJoining.Remove(g.Id); _videoRetryAt.Remove(g.Id); _videoFailures.Remove(g.Id);
+        if (VideoOfGroup(g.Id) is { } v) { _videoLeaving.Add(v.CallId); _quietVideoEnd.Add(v.CallId); Engine.GetCall(v.CallId).Hangup(); }
+        _videoJoining.Remove(g.Id); _videoRetryAt.Remove(g.Id); _videoFailures.Remove(g.Id); _mcvideoDocPrint.Remove(g.Id);
+        // 떠나면 MCVideo 제휴도 푼다(영상 호 BYE 다음에) — chat 합류의 암묵적 제휴는 나갈 때 풀어 주는 절차가 규격에 없어(해제는 클라이언트 몫 — TS 24.281 §8.2.1.2)
+        //   그대로 두면 옮겨 다닌 채널이 쌓여 N2 를 넘고 새 채널 합류가 486 Warning 102 로 막힌다
+        if (g.McVideoAffiliated && Ptt is { } ptt)
+        {
+            var r = ptt.Affiliate(g.Id, false, McService.McVideo);
+            if (!r.Ok) Log.Warn($"mcvideo affiliate {g.Id} False: {r}");
+        }
+        g.McVideoAffiliated = false;
     }
 
     /// <summary>1초 틱 — 재합류 시각이 된 채널.</summary>
@@ -173,6 +257,7 @@ public sealed partial class DispatchSession
     {
         McVideoEnabled = false; _mcvideoProfile = null;               // 재합류 판정이 먼저 막힌다 — 호 번호는 다음 엔진에서 다시 쓰이므로 나가기 표시는 남기지 않는다
         _ducked.Clear(); _videoJoining.Clear(); _videoRetryAt.Clear(); _videoFailures.Clear(); _mcvideoAttrsLoading.Clear(); _videoLeaving.Clear(); _watchedLast.Clear();
+        _videoOpening.Clear(); _quietVideoEnd.Clear(); _mcvideoDocPrint.Clear(); _videoOverN2.Clear();
         _videoMicMuted.Clear(); VideoMicYielded = false;
         VideoFrames.Remove(VideoFrames.SelfView);
         foreach (var b in Notify.Banners.Where(b => b.IsVideo).ToList()) Notify.RemoveBanner(b);
@@ -213,6 +298,46 @@ public sealed partial class DispatchSession
         RefreshTransmission(s);
         return Show(r, ResponseText.Area.Video);
     }
+
+    /// <summary>편성(prearranged) 영상 채널에 영상 호가 없다 — [영상 보내기] 가 영상 호를 연다(초대 대상이 되려면 MCVideo 제휴가 서 있어야 한다).</summary>
+    public bool CanOpenVideo(GroupInfo g) =>
+        McVideoEnabled && g.IsMember && g.McVideo && g.McVideoType == "prearranged" && g.McVideoAffiliated && g.VideoSession is null && !_videoJoining.Contains(g.Id)
+        && HasCamera && Ptt is not null && PttReg.State == RegState.Registered;
+
+    /// <summary>내가 연 편성 영상 호가 아직 성립 전인가 — [영상 보내기] 는 «여는 중…», 다시 누르면 개시를 거둔다.</summary>
+    public bool IsVideoOpening(SessionItem? s) => s is { IsLive: true, IsActive: false } && _videoOpening.Contains(s.CallId);
+
+    /// <summary>[영상 보내기](편성 영상 채널, 영상 호 없음) — prearranged MCVideo 그룹 호를 연다(TS 24.281 §9.2.1.2.1.1). 송출 요청은 개시 INVITE 에 싣는다
+    /// (16) · §6.4 — TS 24.581 §14.2.4 `mc_implicit_request`). 제어 기능이 MCVideo 로 affiliate 한 멤버를 초대하고 첫 멤버가 붙으면 200 OK, 10 s 안에 아무도 붙지 않으면
+    /// 480(§9.2.1.4.2). 그사이 다른 멤버가 먼저 열었으면 서버가 합류로 받고 암묵 요청은 받지 않는다(§14.3.5) — 코어가 명시 Transmission Request 로 잇는다.
+    /// 코어는 호 성립 전에는 송출 이벤트를 내지 않으므로 «여는 중…» 은 앱이 그린다. 실패는 다시 열지 않는다 — 사용자가 다시 누른다.</summary>
+    public Result OpenVideoTx(GroupInfo g)
+    {
+        if (!HasCamera) return Show(Result.Fail(-1, "카메라 없음"), ResponseText.Area.Video);
+        if (Ptt is not { } ptt || !CanOpenVideo(g)) return Result.Fail(-1, "영상 호를 열 수 없는 상태");
+        if (Sessions.Count(s => s.IsMcVideo && s.IsLive) + _videoJoining.Count >= McVideoN6)
+            return Show(Result.Fail(486, $"동시 영상 호 한도 N6 = {McVideoN6}"), ResponseText.Area.Video);
+        var r = ptt.JoinVideoGroupCall(g.Id, new VideoGroupCallOptions { Prearranged = true, ImplicitTransmissionRequest = true, Queueing = true });
+        if (!r.Ok) { Log.Warn($"mcvideo open {g.Id}: {r}"); return Show(Result.Fail(r.Code, r.Reason), ResponseText.Area.Video); }
+        _pendingOps[r.Value.Id] = Operation.VideoJoin;
+        _videoJoining.Add(g.Id); _videoOpening.Add(r.Value.Id);
+        Log.Info($"mcvideo open prearranged {g.Id} → call {r.Value.Id} (implicit transmission request)");
+        if (Find(r.Value.Id) is null && r.Value.Info.IsLive) OnCallState(r.Value.Info);
+        if (g.VideoSession is null) g.VideoNote = OpeningNote;
+        VideoChanged?.Invoke(this, g);
+        return Result.Success;
+    }
+
+    /// <summary>«여는 중…» 에 다시 누름 — 개시를 거둔다(hangup → CANCEL). 실패 토스트(487)는 내지 않는다.</summary>
+    public Result CancelVideoOpen(SessionItem s)
+    {
+        _quietVideoEnd.Add(s.CallId);
+        var r = Engine.GetCall(s.CallId).Hangup();
+        return Show(r, ResponseText.Area.Video);
+    }
+
+    /// <summary>끝난 영상 호의 실패 토스트를 내지 않을 것인가(내가 거둔 개시·내가 떠난 채널) — 호 종료 처리가 한 번 묻는다.</summary>
+    private bool QuietVideoEnd(int callId) => _quietVideoEnd.Remove(callId);
 
     /// <summary>[보내기 끝]·[요청 취소]·[대기 취소] — Transmission End Request(§6.2.4.5.3·§6.2.4.4.7·§6.2.4.9.4). 끝나면 코어가 카메라를 닫는다.</summary>
     public Result ReleaseVideoTx(SessionItem s)
@@ -324,30 +449,31 @@ public sealed partial class DispatchSession
         _videoJoining.Remove(s.Info.GroupId);
         if (GroupOf(s) is { } g)
         {
-            g.VideoSession = s; g.VideoNote = "";
+            g.VideoSession = s; g.VideoNote = _videoOpening.Contains(s.CallId) ? OpeningNote : "";
             VideoChanged?.Invoke(this, g);
         }
         RefreshTransmission(s);
-        Log.Info($"mcvideo session + #{s.CallId} {s.Info.GroupId} {(s.Info.Dir == CallDir.Incoming ? "invited" : "joined")}");
+        Log.Info($"mcvideo session + #{s.CallId} {s.Info.GroupId} {(s.Info.Dir == CallDir.Incoming ? "invited" : _videoOpening.Contains(s.CallId) ? "opening" : "joined")}");
     }
 
     private void OnVideoSessionEnded(SessionItem s, string dur)
     {
         var ci = s.Info;
         bool mine = _videoLeaving.Remove(s.CallId);
+        bool opened = _videoOpening.Remove(s.CallId);                  // 내가 연 편성 호 — 성립 전에 끝났어도 다시 열지 않는다(사유는 호 종료 토스트)
         _videoJoining.Remove(ci.GroupId);
         if (Notify.VideoBannerOf(s) is { } b) Notify.RemoveBanner(b);
         Unduck(ci.GroupId);
         VideoFrames.Remove(s.CallId);
         _videoMicMuted.Remove(s.CallId);
         if (!Sessions.Any(x => x.IsMcVideo && x != s && x.Transmission.State == TransmissionState.Permitted)) VideoFrames.Feed(VideoFrames.SelfView).Reset();
-        Log.Info($"mcvideo session - #{s.CallId} {ci.GroupId} code={ci.LastCode} {ci.LastReason} mine={mine} connected={s.ConnectedAt is not null}");
+        Log.Info($"mcvideo session - #{s.CallId} {ci.GroupId} code={ci.LastCode} {ci.LastReason} mine={mine} opened={opened} connected={s.ConnectedAt is not null}");
         if (GroupOf(s) is not { } g) return;
         if (g.VideoSession == s) g.VideoSession = null;
         // 채널은 남아 있다(D10) — 관제사가 끝낸 게 아니면 다시 합류한다(chat). 서지 못한 합류(4xx~6xx)는 물러나고, 섰다가 끝난 호(TNG3·서버 해제)는 곧바로
         if (!mine && McVideoEnabled && g.McVideo && g.McVideoType == "chat")
             VideoBackoff(g, failed: s.ConnectedAt is null || ci.LastCode >= 300, ci.LastCode);
-        else if (g.McVideoType == "prearranged") g.VideoNote = "편성 영상 그룹 — 멤버가 영상 호를 열면 함께 합류합니다";
+        else if (g.McVideoType == "prearranged") g.VideoNote = PrearrangedNote;
         VideoChanged?.Invoke(this, g);
     }
 
