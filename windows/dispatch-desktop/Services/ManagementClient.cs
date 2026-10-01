@@ -279,7 +279,8 @@ public sealed class ManagementClient
                                               Int(s, "duration_ms"), Bool(s, "has_video"), Str(s, "status"), ids, Int(s, "talker_count")) { Tracks = tracks });
             }
         return new RecordingInfo(Str(root, "id").Length > 0 ? Str(root, "id") : id, Str(root, "call_type"), Str(root, "caller"), Str(root, "callee"),
-                                 Str(root, "group_id"), Time(root, "start_time"), Time(root, "end_time"), Int(root, "duration"), Str(root, "status"), segs);
+                                 Str(root, "group_id"), Time(root, "start_time"), Time(root, "end_time"), Int(root, "duration"), Str(root, "status"), segs)
+        { Service = Str(root, "service") };
     }
 
     /// <summary>세그먼트 오디오(MP4/AAC)를 받아 로컬 파일로 — 202(변환 중)는 700ms→1.5s 간격으로 최대 120초 재시도(콘솔 SegmentPlayer 와 같은 규약).

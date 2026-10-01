@@ -42,6 +42,13 @@ public sealed record HistoryEntry(string Id, DateTime Time, HistoryKind Kind, st
     public int MaxTalkers { get; init; }
     /// <summary>참여자(발언 안 한 참가자 포함) — 1:1·애드혹은 개시자를 뺀 나머지가 상대.</summary>
     public IReadOnlyList<string> People { get; init; } = Array.Empty<string>();
+    /// <summary>ptt: MC 서비스 — "ptt"(MCPTT 그룹 호) | "mcvideo"(MCVideo 그룹 호 — 같은 그룹의 영상 호, 녹취는 같은 폴더·세션 type 으로 가른다).
+    /// 서버가 싣지 않으면 ""(무전으로 읽는다 — 그때는 녹취 메타의 service 로만 영상 세션을 안다).</summary>
+    public string Service { get; init; } = "";
+    public bool IsMcVideo => Service == "mcvideo";
+    /// <summary>mcvideo: 호 방식 chat | prearranged · 동시 송출 상한(세션 당시 그룹 문서 값) — 없으면 ""/0.</summary>
+    public string McvSessionType { get; init; } = "";
+    public int McvMaxTransmitters { get; init; }
 
     /// <summary>시간대 밴드·필터 축 — 통화는 INVITE, PTT 는 세션 시작(서버 hours 와 같은 규칙), 없으면 항목 시각.</summary>
     public DateTime AxisTime => InviteTime ?? StartTime ?? Time;

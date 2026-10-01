@@ -73,7 +73,7 @@
                 </DataTrigger>
             </DataTemplate.Triggers>
         </DataTemplate>
-        <!-- 무전 세션 카드 — 관제 채널 카드(§4 공통)와 같은 모양: 1줄 상태 점 · 이름 · 라벨(개별/애드혹/전이중/진행 중/긴급) · 시각 · 2줄 개시·참여 · 3줄 길이·발언.
+        <!-- 무전 세션 카드 — 관제 채널 카드(§4 공통)와 같은 모양: 1줄 상태 점 · 이름 · 라벨(영상/개별/애드혹/전이중/진행 중/긴급) · 시각 · 2줄 개시·참여 · 3줄 길이·발언(영상 세션은 송출).
              고른 카드 = 남색 테두리 2.5 + 연한 남색 면, 긴급 = 빨강 테두리 2 + 연한 빨강 면 -->
         <DataTemplate x:Key="PttCardTpl" DataType="{x:Type vm:HistoryRow}">
             <Border x:Name="Card" Margin="8,3,8,3" CornerRadius="10" BorderThickness="1" BorderBrush="{DynamicResource Brush.BorderStrong}" Background="{DynamicResource Brush.Surface}"
@@ -83,6 +83,7 @@
                         <!-- 이름이 길면 이름만 줄인다 — 라벨·시각은 오른쪽에 붙어 잘리지 않는다 -->
                         <TextBlock DockPanel.Dock="Right" Style="{StaticResource MonoMuted}" Text="{Binding StartClock}" FontSize="12" VerticalAlignment="Center" Margin="2,0,0,0" />
                         <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center" Margin="6,0,0,0">
+                            <Border Style="{StaticResource Tag.Teal}" Visibility="{Binding IsMcVideo, Converter={StaticResource BoolToVis}}" ToolTip="MCVideo 그룹 영상 호 — 같은 그룹의 영상 세션"><TextBlock Text="영상" /></Border>
                             <Border Style="{StaticResource Tag}" Visibility="{Binding IsPrivate, Converter={StaticResource BoolToVis}}"><TextBlock Text="개별" /></Border>
                             <Border Style="{StaticResource Tag}" Visibility="{Binding IsAdhoc, Converter={StaticResource BoolToVis}}"><TextBlock Text="애드혹" /></Border>
                             <Border Style="{StaticResource Tag.Held}" Visibility="{Binding IsDuplex, Converter={StaticResource BoolToVis}}"><TextBlock Text="전이중" /></Border>
@@ -156,6 +157,14 @@
             <Button Style="{StaticResource Btn.Sm}" Command="{Binding ShiftDateCommand}" CommandParameter="1" ToolTip="다음 날" Margin="4,0,4,0" Padding="7,0"><Path Style="{StaticResource Icon}" Data="{StaticResource Icon.ChevronRight}" /></Button>
             <Button Style="{StaticResource Btn.Sm}" Content="오늘" Command="{Binding ShiftDateCommand}" CommandParameter="0" Margin="0,0,8,0" />
             <TextBox Style="{StaticResource Field}" Width="220" Height="26" Text="{Binding Search, UpdateSourceTrigger=PropertyChanged}" Tag="이름 · 번호 · 그룹" Margin="0,0,8,0" />
+            <!-- 무전만 — 서비스 거르기 [전체|무전|영상]: 음성 무전(MCPTT) 세션과 영상(MCVideo) 세션. 서버가 서비스 축을 실어 줄 때만 보인다 -->
+            <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,6,0" Visibility="{Binding HasServiceAxis, Converter={StaticResource BoolToVis}}">
+                <RadioButton Style="{StaticResource FilterChip}" Content="전체" IsChecked="{Binding ServiceFilter, Converter={StaticResource Eq}, ConverterParameter=all, Mode=OneWay}" Command="{Binding SetServiceFilterCommand}" CommandParameter="all" />
+                <RadioButton Style="{StaticResource FilterChip}" Content="무전" IsChecked="{Binding ServiceFilter, Converter={StaticResource Eq}, ConverterParameter=ptt, Mode=OneWay}" Command="{Binding SetServiceFilterCommand}" CommandParameter="ptt"
+                             ToolTip="음성 무전(MCPTT) 세션만" />
+                <RadioButton Style="{StaticResource FilterChip}" Content="영상" IsChecked="{Binding ServiceFilter, Converter={StaticResource Eq}, ConverterParameter=mcvideo, Mode=OneWay}" Command="{Binding SetServiceFilterCommand}" CommandParameter="mcvideo"
+                             ToolTip="영상(MCVideo) 세션만" />
+            </StackPanel>
             <TextBlock Style="{StaticResource Muted}" Text="{Binding Summary}" FontSize="12" VerticalAlignment="Center" />
             <TextBlock Style="{StaticResource Hint}" Foreground="{DynamicResource Brush.Emg}" Text="{Binding Error}" VerticalAlignment="Center" Margin="12,0,0,0" TextTrimming="CharacterEllipsis"
                        Visibility="{Binding HasError, Converter={StaticResource BoolToVis}}" />
@@ -191,6 +200,7 @@
                 <ColumnDefinition x:Name="ListCol" Width="*" />
                 <ColumnDefinition Width="Auto" />
                 <ColumnDefinition x:Name="PaneCol" Width="380" />
+                <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
             <GridSplitter Grid.Column="1" Width="6" HorizontalAlignment="Center" VerticalAlignment="Stretch" Background="Transparent" ShowsPreview="False"
                           ToolTip="드래그로 폭 조정 · 더블클릭으로 기본 폭" MouseDoubleClick="Splitter_DoubleClick">
@@ -200,8 +210,28 @@
                     </ControlTemplate>
                 </GridSplitter.Template>
             </GridSplitter>
-            <!-- 재생기 — 보이지 않는다. 통화/PTT 패널의 재생 버튼·턴 막대가 VM 이벤트로 이 요소를 튼다 -->
-            <MediaElement x:Name="Player" LoadedBehavior="Manual" UnloadedBehavior="Manual" Width="0" Height="0" MediaEnded="Player_MediaEnded" MediaFailed="Player_MediaFailed" />
+            <!-- 영상 칸 + 재생기 — 통화/PTT 패널의 재생 버튼·턴 막대가 VM 이벤트로 재생기를 튼다. 영상이 있는 녹취(영상 통화 · MCVideo 송출 구간)를
+                 틀 때만 칸이 열리고(폭 0 ↔ 372, 왼쪽 두 칸이 그만큼 준다) 소리만 있는 녹취는 닫힌 채 소리만 난다. 재생기는 늘 트리에 둔다 -->
+            <Border Grid.Column="3" Style="{StaticResource Card}" Padding="0" ClipToBounds="True"
+                    Width="{Binding ShowVideo, Converter={StaticResource Pick}, ConverterParameter=372|0}"
+                    Margin="{Binding ShowVideo, Converter={StaticResource Pick}, ConverterParameter='8,0,0,0|0'}"
+                    BorderThickness="{Binding ShowVideo, Converter={StaticResource Pick}, ConverterParameter=1|0}">
+                <DockPanel Width="370">
+                    <Border DockPanel.Dock="Top" Style="{StaticResource SubHeader}" Padding="14,10">
+                        <DockPanel>
+                            <Button DockPanel.Dock="Right" Style="{StaticResource Btn.Xs}" Content="정지" Command="{Binding StopCommand}" ToolTip="재생을 멈추고 영상 칸을 닫는다" />
+                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                <TextBlock Text="녹취 영상" FontWeight="Bold" FontSize="14" VerticalAlignment="Center" Margin="0,0,8,0" />
+                                <Border Style="{StaticResource Tag.Teal}"><TextBlock Text="재생 중" /></Border>
+                            </StackPanel>
+                        </DockPanel>
+                    </Border>
+                    <TextBlock DockPanel.Dock="Bottom" Style="{StaticResource Muted}" Text="{Binding PlayingLabel}" FontSize="12" TextWrapping="Wrap" Margin="14,0,14,12" />
+                    <Border Margin="12" CornerRadius="8" Background="{DynamicResource Brush.Ink}" ClipToBounds="True">
+                        <MediaElement x:Name="Player" LoadedBehavior="Manual" UnloadedBehavior="Manual" Stretch="Uniform" MediaEnded="Player_MediaEnded" MediaFailed="Player_MediaFailed" />
+                    </Border>
+                </DockPanel>
+            </Border>
 
             <!-- 좌 — 통화 카드(시간대 묶음) -->
             <Border Grid.Column="0" Style="{StaticResource Sub}" Margin="0,0,4,0" Visibility="{Binding IsCall, Converter={StaticResource BoolToVis}}">
@@ -253,7 +283,7 @@
                                         <DataTemplate DataType="{x:Type m:RecordingSegment}">
                                             <Border Style="{StaticResource Chip}" Margin="0,0,6,0" ToolTip="{Binding Status}">
                                                 <TextBlock FontSize="12">
-                                                    <Run Text="{Binding Label, Mode=OneWay}" FontWeight="Medium" /><Run Text=" " /><Run Text="{Binding Start, Mode=OneWay, StringFormat=HH:mm:ss}" Foreground="{DynamicResource Brush.Muted}" /><Run Text=" " /><Run Text="{Binding DurationText, Mode=OneWay}" Foreground="{DynamicResource Brush.Muted}" />
+                                                    <Run Text="{Binding Label, Mode=OneWay}" FontWeight="Medium" /><Run Text=" " /><Run Text="{Binding Start, Mode=OneWay, StringFormat=HH:mm:ss}" Foreground="{DynamicResource Brush.Muted}" /><Run Text=" " /><Run Text="{Binding DurationText, Mode=OneWay}" Foreground="{DynamicResource Brush.Muted}" /><Run Text="{Binding HasVideo, Mode=OneWay, Converter={StaticResource Pick}, ConverterParameter=' · 영상|'}" Foreground="{DynamicResource Brush.ListenInk}" FontWeight="SemiBold" />
                                                 </TextBlock>
                                             </Border>
                                         </DataTemplate>
@@ -355,6 +385,9 @@
                                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                                     <TextBlock Text="{Binding TargetText}" FontWeight="Bold" FontSize="16" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" MaxWidth="520" Margin="0,0,8,0" />
                                     <Border Style="{StaticResource Tag}"><TextBlock Text="{Binding SessionKindText}" /></Border>
+                                    <Border Style="{StaticResource Tag.Teal}" ToolTip="MCVideo 그룹 영상 호 — 세그먼트 = 송출 구간(재생하면 오른쪽에 영상 칸)"
+                                            Visibility="{Binding DataContext.IsVideoSession, RelativeSource={RelativeSource AncestorType=UserControl}, Converter={StaticResource BoolToVis}}"><TextBlock Text="영상" /></Border>
+                                    <Border Style="{StaticResource Tag}" ToolTip="세션 당시 MCVideo 호 방식 · 동시 송출 상한" Visibility="{Binding HasMcvText, Converter={StaticResource BoolToVis}}"><TextBlock Text="{Binding McvText}" FontWeight="Normal" /></Border>
                                     <Border Style="{StaticResource Tag.Held}" Visibility="{Binding IsDuplex, Converter={StaticResource BoolToVis}}"><TextBlock Text="전이중" /></Border>
                                     <Border Style="{StaticResource Tag.Talk}" Visibility="{Binding IsLive, Converter={StaticResource BoolToVis}}"><TextBlock Text="진행 중" /></Border>
                                     <Border Style="{StaticResource Tag.Emg}" Visibility="{Binding IsEmergency, Converter={StaticResource BoolToVis}}"><TextBlock Text="긴급" /></Border>
@@ -403,6 +436,7 @@
                                             <Border Style="{StaticResource LogRow}" Padding="6,2">
                                                 <DockPanel>
                                                     <TextBlock DockPanel.Dock="Right" Style="{StaticResource Mono}" Text="{Binding DurationText}" FontSize="11" VerticalAlignment="Center" />
+                                                    <Border DockPanel.Dock="Right" Style="{StaticResource Tag.Teal}" Height="16" Margin="0,0,8,0" Visibility="{Binding HasVideo, Converter={StaticResource BoolToVis}}"><TextBlock Text="영상" FontSize="10.5" /></Border>
                                                     <TextBlock FontSize="12" TextTrimming="CharacterEllipsis" VerticalAlignment="Center">
                                                         <Run Text="{Binding Label, Mode=OneWay}" FontWeight="Medium" /><Run Text=" · " Foreground="{DynamicResource Brush.Muted}" /><Run Text="{Binding Start, Mode=OneWay, StringFormat=HH:mm:ss}" Foreground="{DynamicResource Brush.Muted}" /><Run Text=" · " Foreground="{DynamicResource Brush.Muted}" /><Run Text="{Binding Status, Mode=OneWay}" Foreground="{DynamicResource Brush.Muted}" />
                                                     </TextBlock>
@@ -441,7 +475,7 @@
                                                         <Border Style="{StaticResource Tag.Ink}" Margin="6,0,0,0" Visibility="{Binding IsInitiator, Converter={StaticResource BoolToVis}}"><TextBlock Text="개시" /></Border>
                                                         <Ellipse Width="8" Height="8" Fill="{Binding Color}" Margin="7,0,4,0" VerticalAlignment="Center" Visibility="{Binding HasSpoken, Converter={StaticResource BoolToVis}}" />
                                                         <TextBlock Style="{StaticResource Muted}" FontSize="12" VerticalAlignment="Center" Margin="6,0,0,0" Visibility="{Binding HasSpoken, Converter={StaticResource BoolToVis}}">
-                                                            <Run Text="발언 " /><Run Text="{Binding Turns, Mode=OneWay}" /><Run Text="회" />
+                                                            <Run Text="{Binding Word, Mode=OneWay}" /><Run Text=" " /><Run Text="{Binding Turns, Mode=OneWay}" /><Run Text="회" />
                                                         </TextBlock>
                                                     </StackPanel>
                                                 </Border>
@@ -450,7 +484,7 @@
                                     </ItemsControl>
                                 </ScrollViewer>
                             </DockPanel>
-                            <!-- ② 발언 타임라인 — 화자 레인 · 막대 클릭 = 그 턴 재생. 확대: [−][+][1:1] · Ctrl+휠(커서 기준) · 빈 곳 드래그 = 가로 이동(콘솔 LaneTimebar) -->
+                            <!-- ② 발언 타임라인(영상 세션은 «송출» — 누가 언제 영상을 보냈나) — 화자 레인 · 막대 클릭 = 그 턴 재생. 확대: [−][+][1:1] · Ctrl+휠(커서 기준) · 빈 곳 드래그 = 가로 이동(콘솔 LaneTimebar) -->
                             <DockPanel Grid.Row="1" Margin="0,0,0,12">
                                 <DockPanel DockPanel.Dock="Top" Margin="0,0,0,4">
                                     <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center" Visibility="{Binding HasLanes, Converter={StaticResource BoolToVis}}">
@@ -464,10 +498,10 @@
                                                 Visibility="{Binding IsTalkZoomed, Converter={StaticResource BoolToVis}}" />
                                     </StackPanel>
                                     <TextBlock>
-                                        <Run Text="발언" FontWeight="Bold" FontSize="13" /><Run Text="  막대를 누르면 그 발언 재생 · Ctrl+휠 확대" FontSize="11.5" Foreground="{DynamicResource Brush.Muted}" />
+                                        <Run Text="{Binding TurnWord, Mode=OneWay}" FontWeight="Bold" FontSize="13" /><Run Text="{Binding TurnsHint, Mode=OneWay}" FontSize="11.5" Foreground="{DynamicResource Brush.Muted}" />
                                     </TextBlock>
                                 </DockPanel>
-                                <Border CornerRadius="8" Background="{DynamicResource Brush.BgSoft}" Padding="10,12" Visibility="{Binding HasLanes, Converter={StaticResource NotToVis}}"><TextBlock Style="{StaticResource Hint}" Text="이 세션에는 녹취된 발언이 없습니다" HorizontalAlignment="Center" /></Border>
+                                <Border CornerRadius="8" Background="{DynamicResource Brush.BgSoft}" Padding="10,12" Visibility="{Binding HasLanes, Converter={StaticResource NotToVis}}"><TextBlock Style="{StaticResource Hint}" Text="{Binding NoTurnsText}" HorizontalAlignment="Center" /></Border>
                                 <!-- 좌 화자 라벨(고정) | 우 트랙(가로 스크롤, 폭 = 뷰포트 × 배율). 행 높이 24 로 두 열을 맞춘다 -->
                                 <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Visibility="{Binding HasLanes, Converter={StaticResource BoolToVis}}">
                                     <Grid>

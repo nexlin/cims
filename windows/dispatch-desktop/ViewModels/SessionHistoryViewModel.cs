@@ -80,6 +80,12 @@ public sealed class HistoryRow
     // PTT 카드 — 관제 채널 카드(§4 공통)와 같은 줄 구성: 1줄 점·이름·라벨·시각 · 2줄 누가·몇 명 · 3줄 길이·발언
     public bool IsPrivate => E.SessionKind == "private";
     public bool IsAdhoc => E.SessionKind == "adhoc";
+    /// <summary>MCVideo 그룹 호(영상 세션) — 무전 목록에 같이 서되 «영상» 라벨, 세는 말은 발언이 아니라 송출.</summary>
+    public bool IsMcVideo => E.IsMcVideo;
+    /// <summary>영상 세션 속성 한 줄 — "chat · 동시 송출 2"(없으면 "").</summary>
+    public string McvText => !E.IsMcVideo ? "" : string.Join(" · ", new[]
+        { E.McvSessionType switch { "chat" => "chat", "prearranged" => "편성", _ => "" }, E.McvMaxTransmitters > 0 ? $"동시 송출 {E.McvMaxTransmitters}" : "" }.Where(x => x.Length > 0));
+    public bool HasMcvText => McvText.Length > 0;
     /// <summary>목록 묶음 열쇠 — 시간대 밴드와 같은 축(AxisTime)의 "HH시".</summary>
     public string HourKey => E.AxisTime.ToString("HH") + "시";
     public string StartClock => E.AxisTime.ToString("HH:mm");
@@ -137,7 +143,8 @@ public sealed class HistoryRow
             int people = PeopleCount;
             WhoLine = string.Join(" · ", new[] { e.From.Length > 0 ? $"개시 {InitiatorLabel}" : "", people > 0 ? $"참여 {people}명" : "" }.Where(x => x.Length > 0));
             string len = IsLive ? "진행 중" : dur > 0 ? SessionHistoryViewModel.FmtDur(dur) : "";
-            StatLine = string.Join(" · ", new[] { len, $"발언 {e.TurnCount}회", e.TotalSpeechMs > 0 ? $"말한 시간 {SpeechText}" : "" }.Where(x => x.Length > 0));
+            StatLine = string.Join(" · ", new[] { len, $"{(e.IsMcVideo ? "송출" : "발언")} {e.TurnCount}회",
+                                                   e.TotalSpeechMs > 0 ? $"{(e.IsMcVideo ? "보낸 시간" : "말한 시간")} {SpeechText}" : "" }.Where(x => x.Length > 0));
             CallerLabel = CalleeLabel = EndReasonText = "";
         }
         else
@@ -186,9 +193,11 @@ public sealed class HistoryRow
 /// <summary>선택 세션의 참여자 한 줄 — 입퇴장 기록 ∪ 화자(녹취 턴). 발언 통계는 턴에서 센다(참가만 한 사람은 0).</summary>
 public sealed record ParticipantRow(string Id, string Label, bool IsInitiator, string RangeText, int Turns, string SpeechText, string Color, bool HasSpoken)
 {
+    /// <summary>세는 말 — 무전 "발언" · 영상 세션 "송출".</summary>
+    public string Word { get; init; } = "발언";
     /// <summary>이름표 머리글자 — 이름이면 첫 글자, 번호면 비운다(관제 «기록» 아바타와 같은 규칙).</summary>
     public string Initial => SessionHistoryViewModel.InitialOf(Label);
-    public string Tip => (RangeText.Length > 0 ? $"{RangeText} · " : "") + $"발언 {Turns}회 · 말한 시간 {SpeechText}";
+    public string Tip => (RangeText.Length > 0 ? $"{RangeText} · " : "") + $"{Word} {Turns}회 · {(Word == "송출" ? "보낸 시간" : "말한 시간")} {SpeechText}";
 }
 
 /// <summary>발언 턴 막대 — 한 화자가 한 슬롯을 점유한 구간. Multi = 세그먼트에 턴이 여럿(동시 발언·슬롯 재사용) → 단독 트랙(slot) 재생.</summary>
@@ -233,6 +242,10 @@ public sealed partial class SessionHistoryViewModel : ObservableObject
     [ObservableProperty] private string _mediaSource = "";
     [ObservableProperty] private string _playingLabel = "";
     [ObservableProperty] private bool _loadingAudio;
+    /// <summary>지금 트는 녹취에 영상이 있다 — 영상 칸(재생기)이 열린다. 영상 통화 녹취·MCVideo 송출 구간.</summary>
+    [ObservableProperty] private bool _playingHasVideo;
+    /// <summary>무전 목록의 서비스 거르기 — all | ptt(음성 무전) | mcvideo(영상). 서버가 서비스 축을 실어 줄 때만 칩이 보인다.</summary>
+    [ObservableProperty] private string _serviceFilter = "all";
     /// <summary>시간대 필터("" = 전체). 밴드 칸 클릭으로 토글, 날짜·종류가 바뀌면 해제.</summary>
     [ObservableProperty] private string _selectedHour = "";
     [ObservableProperty] private bool _detailLoading;
@@ -271,6 +284,15 @@ public sealed partial class SessionHistoryViewModel : ObservableObject
     public bool IsPtt => KindIndex == 1;
     public bool IsCall => KindIndex != 1;
     public bool HasSelection => Selected is not null;
+    /// <summary>받은 무전 항목에 서비스 축이 실려 있다 — [전체|무전|영상] 칩을 보인다.</summary>
+    public bool HasServiceAxis => IsPtt && _all.Any(e => e.Service.Length > 0);
+    public bool ShowVideo => IsPlaying && PlayingHasVideo;
+    /// <summary>고른 세션이 MCVideo 영상 세션 — 이력 항목의 service, 없으면 녹취 메타(service·세그먼트 type)로 안다.</summary>
+    public bool IsVideoSession => Selected?.IsMcVideo == true || (IsPtt && Recording?.IsMcVideo == true);
+    /// <summary>세션 패널의 낱말 — 무전 "발언" / 영상 세션 "송출"(TS 24.581 전송 제어 — 발언권이 아니라 송출 허가).</summary>
+    public string TurnWord => IsVideoSession ? "송출" : "발언";
+    public string TurnsHint => IsVideoSession ? "  막대를 누르면 그 송출 재생(영상) · Ctrl+휠 확대" : "  막대를 누르면 그 발언 재생 · Ctrl+휠 확대";
+    public string NoTurnsText => IsVideoSession ? "이 세션에는 녹취된 송출이 없습니다" : "이 세션에는 녹취된 발언이 없습니다";
     public bool HasLanes => Lanes.Count > 0;
     public bool HasTimeline => Timeline.Count > 0;
     public bool HasParticipants => Participants.Count > 0;
@@ -298,14 +320,22 @@ public sealed partial class SessionHistoryViewModel : ObservableObject
     partial void OnKindIndexChanged(int value)
     {
         OnPropertyChanged(nameof(IsPtt)); OnPropertyChanged(nameof(IsCall)); OnPropertyChanged(nameof(PaneWidth)); OnPropertyChanged(nameof(BandTitle)); OnPropertyChanged(nameof(BandShowsTurns));
+        OnPropertyChanged(nameof(HasServiceAxis));
         SelectedHour = ""; if (!_suppressQuery) _ = QueryAsync();
     }
     partial void OnDateChanged(DateTime value) { SelectedHour = ""; _ = QueryAsync(); }
-    partial void OnSelectedChanged(HistoryRow? value) { OnPropertyChanged(nameof(HasSelection)); OnPropertyChanged(nameof(SelectedHasRecording)); _ = LoadSelectionAsync(value); }
+    partial void OnSelectedChanged(HistoryRow? value) { OnPropertyChanged(nameof(HasSelection)); OnPropertyChanged(nameof(SelectedHasRecording)); RaiseVideoSessionChanged(); _ = LoadSelectionAsync(value); }
     partial void OnSelectedSegmentChanged(RecordingSegment? value) => OnPropertyChanged(nameof(CanPlay));
     partial void OnLoadingAudioChanged(bool value) => OnPropertyChanged(nameof(CanPlay));
-    partial void OnMediaSourceChanged(string value) => OnPropertyChanged(nameof(IsPlaying));
-    partial void OnRecordingChanged(RecordingInfo? value) => OnPropertyChanged(nameof(HasRecording));
+    partial void OnMediaSourceChanged(string value) { OnPropertyChanged(nameof(IsPlaying)); OnPropertyChanged(nameof(ShowVideo)); }
+    partial void OnPlayingHasVideoChanged(bool value) => OnPropertyChanged(nameof(ShowVideo));
+    partial void OnServiceFilterChanged(string value) => Filter();
+    partial void OnRecordingChanged(RecordingInfo? value) { OnPropertyChanged(nameof(HasRecording)); RaiseVideoSessionChanged(); }
+    private void RaiseVideoSessionChanged()
+    {
+        OnPropertyChanged(nameof(IsVideoSession)); OnPropertyChanged(nameof(TurnWord)); OnPropertyChanged(nameof(TurnsHint)); OnPropertyChanged(nameof(NoTurnsText));
+    }
+    [RelayCommand] private void SetServiceFilter(string value) => ServiceFilter = value;
     partial void OnSelectedHourChanged(string value) { OnPropertyChanged(nameof(HasHourFilter)); foreach (var c in Hours) c.IsSelected = c.Hour == value; Filter(); }
     partial void OnTalkZoomChanged(double value) { OnPropertyChanged(nameof(TalkZoomText)); OnPropertyChanged(nameof(IsTalkZoomed)); RebuildAxisTicks(); }
     partial void OnBandModeChanged(int value) { OnPropertyChanged(nameof(BandTitle)); OnPropertyChanged(nameof(BandShowsTurns)); RebuildHours(); }
@@ -335,10 +365,23 @@ public sealed partial class SessionHistoryViewModel : ObservableObject
         if (!r.Ok)
         {
             Error = ResponseText.Describe(ResponseText.Area.Management, r.Code, r.Reason);
-            _all = Array.Empty<HistoryEntry>(); _hours = new Dictionary<string, int>(); RebuildHours(); Filter(); return;
+            _s.Log.Warn($"history window {HistoryClient.KindName(Kind)} {from:yyyy-MM-dd}: {r.Code} {r.Reason}");
+            _all = Array.Empty<HistoryEntry>(); _hours = new Dictionary<string, int>(); ApplyLoaded(); return;
         }
         _all = r.Value.Items.OrderByDescending(e => e.Time).ToList();      // 표시는 최근이 위
         _hours = r.Value.Hours.Count > 0 ? r.Value.Hours : CountHours(_all);
+        // 받은 것의 구성을 남긴다 — "콘솔에는 있는데 앱에는 없다" 를 서버 응답에서 가른다(영상 통화 = callType volte_video · 영상 세션 = service mcvideo)
+        _s.Log.Info($"history window {HistoryClient.KindName(Kind)} {from:yyyy-MM-dd}: {_all.Count} items"
+                    + (Kind == HistoryKind.Call ? $" (video {_all.Count(e => e.CallType == "volte_video")})"
+                                                : $" (mcvideo {_all.Count(e => e.IsMcVideo)}, service axis {(_all.Any(e => e.Service.Length > 0) ? "yes" : "no")})"));
+        ApplyLoaded();
+    }
+
+    /// <summary>받은 항목을 화면에 — 서비스 축이 없으면 거르기를 풀고(칩이 사라진다) 밴드·목록을 다시 만든다.</summary>
+    private void ApplyLoaded()
+    {
+        OnPropertyChanged(nameof(HasServiceAxis));
+        if (!HasServiceAxis && ServiceFilter != "all") { ServiceFilter = "all"; RebuildHours(); return; }   // 값이 바뀌면 Filter 는 OnServiceFilterChanged 가 돈다
         RebuildHours();
         Filter();
     }
@@ -403,6 +446,7 @@ public sealed partial class SessionHistoryViewModel : ObservableObject
         foreach (var e in _all)
         {
             if (SelectedHour.Length > 0 && e.AxisTime.ToString("HH") != SelectedHour) continue;
+            if (IsPtt && ServiceFilter != "all" && (ServiceFilter == "mcvideo") != e.IsMcVideo) continue;
             var row = new HistoryRow(e, _s);
             if (q.Length > 0 && !row.Parties.Contains(q, StringComparison.OrdinalIgnoreCase)
                 && !(qn.Length > 0 && (DirectoryService.Normalize(e.From).Contains(qn) || DirectoryService.Normalize(e.To).Contains(qn)
@@ -413,7 +457,8 @@ public sealed partial class SessionHistoryViewModel : ObservableObject
         Summary = $"{Date:yyyy-MM-dd}{(SelectedHour.Length > 0 ? $" {SelectedHour}시" : "")} · {Rows.Count}건"
                   + (live > 0 ? $" · 진행중 {live}" : "")
                   + (Rows.Count(x => x.HasRecording) is > 0 and var n ? $" · 녹취 {n}건" : "")
-                  + (IsPtt && Rows.Sum(x => x.E.TotalSpeechMs) is > 0 and var sp ? $" · 발화 합 {FmtSpeech(sp)}" : "");
+                  + (IsPtt && Rows.Count(x => x.IsMcVideo) is > 0 and var nv ? $" · 영상 {nv}건" : "")
+                  + (IsPtt && Rows.Where(x => !x.IsMcVideo).Sum(x => x.E.TotalSpeechMs) is > 0 and var sp ? $" · 발화 합 {FmtSpeech(sp)}" : "");
         if (Selected is not null && !Rows.Contains(Selected)) Selected = null;
     }
 
@@ -432,8 +477,10 @@ public sealed partial class SessionHistoryViewModel : ObservableObject
         {
             if (row.HasRecording)
             {
-                foreach (var s in _previewSegments) Segments.Add(s);
-                Recording = new RecordingInfo(row.E.RecordingId, row.E.Kind == HistoryKind.Ptt ? "ptt" : "volte", row.E.From, row.E.To, row.E.Group, row.E.StartTime, row.E.EndTime, row.E.DurationSec, "ready", _previewSegments);
+                var segs = row.IsMcVideo && _previewVideoSegments is not null ? _previewVideoSegments : _previewSegments;
+                foreach (var s in segs) Segments.Add(s);
+                Recording = new RecordingInfo(row.E.RecordingId, row.E.Kind == HistoryKind.Ptt ? "ptt" : "volte", row.E.From, row.E.To, row.E.Group, row.E.StartTime, row.E.EndTime, row.E.DurationSec, "ready", segs)
+                { Service = row.E.Kind == HistoryKind.Ptt ? (row.IsMcVideo ? "mcvideo" : "ptt") : "" };
                 RecordingStatus = $"세그먼트 {Segments.Count}개 · ready (표본)"; SelectedSegment = Segments.FirstOrDefault();
             }
             else RecordingStatus = row.IsLive ? "진행 중 — 끝나면 녹취가 잡힙니다" : "녹취 없음";
@@ -488,7 +535,9 @@ public sealed partial class SessionHistoryViewModel : ObservableObject
         {
             if (seg.Start is not { } b) continue;
             bool playable = seg.Status != "recording";
+            // 화자 구간은 음성 트랙에서 — 음성 없이 영상만 있는 송출 구간(MCVideo — 송출 중 무전으로 마이크를 넘긴 동안)은 영상 트랙에서
             var audio = seg.Tracks.Where(t => t.Kind == "audio").ToList();
+            if (audio.Count == 0) audio = seg.Tracks.Where(t => t.Kind == "video").ToList();
             var mine = new List<(int, int, string, DateTime, DateTime, int, bool, bool)>();
             if (audio.Count == 0)
                 mine.Add((seg.Seq, 0, seg.SpeakerId, b, b.AddMilliseconds(seg.DurationMs), seg.DurationMs, playable, false));
@@ -546,7 +595,7 @@ public sealed partial class SessionHistoryViewModel : ObservableObject
                 ? $"{(p.Join is { } j ? j.ToString("HH:mm:ss") : "—")} ~ {(p.Leave is { } l ? l.ToString("HH:mm:ss") : (row.IsLive ? "참여중" : "—"))}" : "";
             bool spoke = order.Any(o => SameUser(o, id));
             Participants.Add(new ParticipantRow(id, Who(_s, id), p?.Role == "initiator" || (p is null && SameUser(id, e.From)), range,
-                                                mine.Count, FmtSpeech(mine.Sum(t => t.DurMs)), spoke ? colorOf(order.First(o => SameUser(o, id))) : "", spoke));
+                                                mine.Count, FmtSpeech(mine.Sum(t => t.DurMs)), spoke ? colorOf(order.First(o => SameUser(o, id))) : "", spoke) { Word = TurnWord });
         }
 
         // 이벤트 타임라인 — floor 중재 + 입퇴장, 시간순
@@ -567,10 +616,20 @@ public sealed partial class SessionHistoryViewModel : ObservableObject
         int talkMs = e.TalkMs > 0 ? e.TalkMs : turns.Sum(t => t.DurMs);
         int durSec = e.EndTime is { } de && e.StartTime is { } ds ? Math.Max(0, (int)(de - ds).TotalSeconds) : e.DurationSec;
         Metrics.Add(new MetricItem("길이", row.IsLive ? "진행 중" : FmtDur(durSec), "", "세션 시작~종료"));
-        Metrics.Add(new MetricItem("참여", Participants.Count.ToString(), "명", "입퇴장 기록과 말한 사람을 합친 수"));
-        Metrics.Add(new MetricItem("발언", (e.TurnCount > 0 ? e.TurnCount : turns.Count).ToString(), "회", "말한 구간 수 — 동시 발언은 사람마다 따로 센다"));
-        Metrics.Add(new MetricItem("말한 시간", FmtSpeech(e.TotalSpeechMs), "", $"겹친 구간은 한 번으로 센 무전 점유 시간 · 사람별 합 {FmtSpeech(talkMs)}"));
-        if (e.MaxConcurrent > 1) Metrics.Add(new MetricItem("최대 동시 발언", e.MaxConcurrent.ToString(), "명", ""));
+        bool mcv = IsVideoSession;
+        Metrics.Add(new MetricItem("참여", Participants.Count.ToString(), "명", mcv ? "입퇴장 기록과 영상을 보낸 사람을 합친 수" : "입퇴장 기록과 말한 사람을 합친 수"));
+        if (mcv)
+        {
+            Metrics.Add(new MetricItem("송출", (e.TurnCount > 0 ? e.TurnCount : turns.Count).ToString(), "회", "영상을 보낸 구간 수 — 동시에 보낸 사람은 따로 센다 (TS 24.581 전송 제어)"));
+            Metrics.Add(new MetricItem("보낸 시간", FmtSpeech(e.TotalSpeechMs > 0 ? e.TotalSpeechMs : talkMs), "", $"겹친 구간은 한 번으로 센 송출 시간 · 사람별 합 {FmtSpeech(talkMs)}"));
+            if (e.MaxConcurrent > 1) Metrics.Add(new MetricItem("최대 동시 송출", e.MaxConcurrent.ToString(), "명", ""));
+        }
+        else
+        {
+            Metrics.Add(new MetricItem("발언", (e.TurnCount > 0 ? e.TurnCount : turns.Count).ToString(), "회", "말한 구간 수 — 동시 발언은 사람마다 따로 센다"));
+            Metrics.Add(new MetricItem("말한 시간", FmtSpeech(e.TotalSpeechMs), "", $"겹친 구간은 한 번으로 센 무전 점유 시간 · 사람별 합 {FmtSpeech(talkMs)}"));
+            if (e.MaxConcurrent > 1) Metrics.Add(new MetricItem("최대 동시 발언", e.MaxConcurrent.ToString(), "명", ""));
+        }
         if (Segments.Count > 0) Metrics.Add(new MetricItem("녹취", Segments.Count.ToString(), "개", "녹취 세그먼트 수"));
         if (detail is null && DetailStatus.Length == 0 && e.RecordingId.Length == 0) DetailStatus = "세션 기록 없음";
         RebuildAxisTicks();
@@ -653,7 +712,8 @@ public sealed partial class SessionHistoryViewModel : ObservableObject
         StopMedia();
         _playCts = new CancellationTokenSource();
         var ct = _playCts.Token;
-        LoadingAudio = true; RecordingStatus = "오디오 받는 중…";
+        bool video = seg.HasVideo || seg.Tracks.Any(t => t.Kind == "video");
+        LoadingAudio = true; RecordingStatus = video ? "영상 받는 중…" : "오디오 받는 중…";
         Result<string> r;
         try { r = await m.FetchSegmentAudioAsync(rec.Id, seg.Seq, slot, retry, st => RecordingStatus = st, ct); }
         catch (OperationCanceledException) { LoadingAudio = false; return; }
@@ -665,6 +725,7 @@ public sealed partial class SessionHistoryViewModel : ObservableObject
         LoadingAudio = false;
         if (ct.IsCancellationRequested) return;
         if (!r.Ok) { RecordingStatus = ResponseText.Describe(ResponseText.Area.Recording, r.Code, r.Reason); _playQueue.Clear(); return; }
+        PlayingHasVideo = video;
         MediaSource = r.Value;
         PlayingLabel = $"{Parties()} · {seg.Label}{(slot is { } sl ? $" 슬롯 {sl}" : "")} ({seg.DurationText})";
         RecordingStatus = _playQueue.Count > 0 ? $"재생 중 · 이어서 {_playQueue.Count}개" : "재생 중";
@@ -681,7 +742,7 @@ public sealed partial class SessionHistoryViewModel : ObservableObject
     {
         _playCts?.Cancel(); _playCts = null;
         if (MediaSource.Length > 0) { StopRequested?.Invoke(this, EventArgs.Empty); MediaSource = ""; PlayingLabel = ""; if (Recording is not null) RecordingStatus = "정지"; }
-        LoadingAudio = false;
+        LoadingAudio = false; PlayingHasVideo = false;
     }
 
     /// <summary>재생 끝(MediaEnded) — 창이 알린다. 전체 재생 대기열이 있으면 다음 세그먼트로.</summary>
@@ -689,16 +750,19 @@ public sealed partial class SessionHistoryViewModel : ObservableObject
     {
         MediaSource = ""; PlayingLabel = "";
         if (_playQueue.Count > 0) { SelectedSegment = _playQueue.Dequeue(); _ = PlayAsync(retry: false, slot: null); return; }
+        PlayingHasVideo = false;
         RecordingStatus = "재생 끝";
     }
-    public void OnMediaFailed(string reason) { _playQueue.Clear(); MediaSource = ""; PlayingLabel = ""; RecordingStatus = "재생 실패 — " + reason; }
+    public void OnMediaFailed(string reason) { _playQueue.Clear(); MediaSource = ""; PlayingLabel = ""; PlayingHasVideo = false; RecordingStatus = "재생 실패 — " + reason; }
 
     // ── --ui-preview 표본 (서버 없이 화면 배치·바인딩 점검 — App.xaml.cs 개발 스위치 전용) ──
     private PttSessionDetail? _previewDetail;
     private IReadOnlyList<RecordingSegment>? _previewSegments;
+    private IReadOnlyList<RecordingSegment>? _previewVideoSegments;
 
-    /// <summary>표본 이력 한 날(통화 또는 PTT)을 심고 첫 행을 고른다. 서버 조회 없이 §4.6 화면을 그려 보는 개발 스위치용.</summary>
-    public void SeedPreview(HistoryKind kind)
+    /// <summary>표본 이력 한 날(통화 또는 PTT)을 심고 첫 행을 고른다. 서버 조회 없이 §4.6 화면을 그려 보는 개발 스위치용.
+    /// video = 무전 표본의 영상 세션(MCVideo)을 고르고 영상 칸을 열어 둔다(재생은 하지 않는다 — 칸 배치 점검).</summary>
+    public void SeedPreview(HistoryKind kind, bool video = false)
     {
         var day = Date.Date;
         DateTime at(int h, int m, int s = 0) => day.AddHours(h).AddMinutes(m).AddSeconds(s);
@@ -716,6 +780,22 @@ public sealed partial class SessionHistoryViewModel : ObservableObject
             { State = "active", SessionKind = "group", StartTime = at(11, 40), GroupName = "야간 순찰", TurnCount = 1, SpeakerCount = 1, TotalSpeechMs = 3_000, FloorControl = "on" });
             list.Add(new HistoryEntry("ses-4", at(14, 20, 30), HistoryKind.Ptt, "ptt.session.end", "tel:+821310002001", "", "tel:priv-1", 30, false, "", "", false)
             { State = "ended", SessionKind = "private", StartTime = at(14, 20), EndTime = at(14, 20, 30), FloorControl = "off", People = new[] { "+821310002001", "+821310002004" } });
+            // 영상 세션(MCVideo 그룹 호) — 같은 그룹의 영상 호. 세는 것은 송출, 재생하면 영상 칸
+            list.Add(new HistoryEntry("mcv-1", at(15, 8, 20), HistoryKind.Ptt, "ptt.session.end", "tel:+821310002002", "", "tel:g002", 200, false, "", "ptt/1/2026/09/08/15/S20260908150500000000_2", true)
+            { State = "ended", SessionKind = "group", Service = "mcvideo", McvSessionType = "chat", McvMaxTransmitters = 2, StartTime = at(15, 5), EndTime = at(15, 8, 20),
+              GroupName = "1팀 무전", MemberCount = 6, TurnCount = 2, SpeakerCount = 2, TotalSpeechMs = 95_000, TalkMs = 95_000,
+              People = new[] { "+821310002001", "+821310002002", "+821310002003" } });
+            // 서비스 축이 실린 응답의 모양으로 — 음성 세션은 "ptt"
+            for (int i = 0; i < list.Count; i++) if (list[i].Service.Length == 0) list[i] = list[i] with { Service = "ptt" };
+            var v0 = at(15, 5);
+            _previewVideoSegments = new[]
+            {
+                new RecordingSegment(1, "mcvideo", "+821310002002", v0.AddSeconds(6), v0.AddSeconds(66), 60_000, true, "ready", new[] { "+821310002002" }, 1)
+                { Tracks = new[] { new SegmentTrack(0, "audio", new[] { new SpeakerSpan("+821310002002", 0, 60_000) }, true, "ready"),
+                                   new SegmentTrack(0, "video", new[] { new SpeakerSpan("+821310002002", 0, 60_000) }, true, "ready") } },
+                new RecordingSegment(2, "mcvideo", "+821310002003", v0.AddSeconds(120), v0.AddSeconds(155), 35_000, true, "ready", new[] { "+821310002003" }, 1)
+                { Tracks = new[] { new SegmentTrack(0, "video", new[] { new SpeakerSpan("+821310002003", 0, 35_000) }, true, "ready") } },
+            };
             var s0 = at(9, 10);
             _previewSegments = new[]
             {
@@ -765,7 +845,13 @@ public sealed partial class SessionHistoryViewModel : ObservableObject
         _all = list.OrderByDescending(e => e.Time).ToList();
         _hours = CountHours(_all);
         RebuildHours(); Filter();
-        Selected = Rows.FirstOrDefault(r => _previewDetail is { } pd && r.E.RecordingId == pd.RecordingId) ?? Rows.FirstOrDefault(r => r.HasRecording) ?? Rows.FirstOrDefault();
+        Selected = (video ? Rows.FirstOrDefault(r => r.IsMcVideo) : null)
+                   ?? Rows.FirstOrDefault(r => _previewDetail is { } pd && r.E.RecordingId == pd.RecordingId) ?? Rows.FirstOrDefault(r => r.HasRecording) ?? Rows.FirstOrDefault();
+        if (video && Selected is { IsMcVideo: true } && SelectedSegment is { } vs)
+        {
+            PlayingHasVideo = true; MediaSource = "(표본)";
+            PlayingLabel = $"{Selected.Parties} · {vs.Label} ({vs.DurationText})"; RecordingStatus = "재생 중 (표본)";
+        }
     }
 
     /// <summary>임시 오디오 파일 정리(창 닫을 때).</summary>

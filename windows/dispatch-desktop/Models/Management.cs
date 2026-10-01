@@ -86,10 +86,15 @@ public sealed record RecordingSegment(int Seq, string Type, string SpeakerId, Da
 {
     /// <summary>슬롯 트랙(발언 턴 = 화자 구간 — 콘솔 segTurns 와 같은 해석). 없으면 세그먼트 전체가 대표 화자의 한 턴.</summary>
     public IReadOnlyList<SegmentTrack> Tracks { get; init; } = Array.Empty<SegmentTrack>();
-    public string Label => Type == "ptt" ? (SpeakerIds.Count > 1 ? $"#{Seq} {string.Join(", ", SpeakerIds)}" : $"#{Seq} {SpeakerId}") : $"#{Seq}";
+    public string Label => Type is "ptt" or "mcvideo" ? (SpeakerIds.Count > 1 ? $"#{Seq} {string.Join(", ", SpeakerIds)}" : $"#{Seq} {SpeakerId}") : $"#{Seq}";
     public string DurationText => TimeSpan.FromMilliseconds(Math.Max(0, DurationMs)).ToString(@"mm\:ss");
 }
 
 /// <summary>녹취 세션(GET /provisioning/recordings/{id}).</summary>
 public sealed record RecordingInfo(string Id, string CallType, string Caller, string Callee, string GroupId, DateTime? Start, DateTime? End,
-                                   int DurationSec, string Status, IReadOnlyList<RecordingSegment> Segments);
+                                   int DurationSec, string Status, IReadOnlyList<RecordingSegment> Segments)
+{
+    /// <summary>PTT 세션의 MC 서비스 — "ptt" | "mcvideo"(MCVideo 그룹 호, 세그먼트 = 송출 구간). 통화 녹취는 "".</summary>
+    public string Service { get; init; } = "";
+    public bool IsMcVideo => Service == "mcvideo" || Segments.Any(s => s.Type == "mcvideo");
+}

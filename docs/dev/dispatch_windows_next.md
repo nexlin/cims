@@ -147,4 +147,4 @@ Windows 엔진이 영상으로 빌드된다 — 정본 = [ue_sdk.md](../design/f
 | F3 | 끝(실기 전) — 엔진 영상(OpenH264·DirectShow·libyuv·CIMS 프레임 렌더 장치)·코어/C API/.NET 프레임·셀프뷰·카메라 선택·앱 영상 칸 그림·[영상 보내기]·셀프뷰·D12 설정·카메라 설정·패키지. `cimsue_test` 145/145(실카메라 `CIMSUE_TEST_CAMERA=1` 도 145/145) · `CimsUe.Tests` 87/87 · 앱 경고 0 · 패키지 `build-win/dist-f3`(63.4 MB, 패키지 dotnet.exe 로 렌더 확인) | 공개 헤더 변경 = `listener.h onVideoFrame`·`engine.h setVideoPreview/setVideoCaptureDevice`·`types.h VideoFrame`·`cimsue_c.h`(끝에 덧붙임) — .45 SDK 코어와 맞춘다. 미리보기 `--ui-preview-videotx` |
 | 오른쪽 패널 겹침 | 끝 — 패널이 본문 위에 겹쳐 오른쪽에서 밀려 들어오고 나간다(220/180 ms, 시스템 애니메이션 끔 = 즉시), 본문 배치 그대로(패널 때문에 좁은 배치로 바꾸지 않는다), 토스트는 패널 왼쪽 | 사용자 요청(10-01). 태블릿(400dp 밀어내기)은 그대로 — 태블릿 작업 때 정한다 |
 | 시험 ①~⑥ | 실기 전 | .45 가 MCVideo 를 켰다(41100484) — 관제 계정 PTT 회선의 MCVideo 자격·N6·영상 채널 멤버 편성은 사용자 확인 뒤 |
-| 서버 과제 | [server45_handoff.md](server45_handoff.md) §13 X1~X8 | X1 관제석 N6 · X2 상시 합류 자원 · X3 T11 · X4·X5 이력 · X6 N2 · X7 목록 서비스 표시 · X8 관리 화면 자격 |
+| 서버 과제 | [server45_handoff.md](server45_handoff.md) §13 X1~X9 | X1 관제석 N6 · X2 상시 합류 자원 · X3 T11 · X4 이력 서비스 축(앱 반영 — CSC 패치 대기)·X5 이력 피드·X9 통화 이력의 영상 통화 누락(CSC 패치 대기) · X6 N2 · X7 목록 서비스 표시 · X8 관리 화면 자격 |

@@ -828,12 +828,23 @@ Windows PC 가 관제 앱의 MCVideo 몫(W1' SDK 재빌드·시험 · W4 그룹 
 | X1 | **관제석 회선의 N6**(동시 MCVideo 호 상한) | D10 으로 관제 앱은 내 채널의 영상 채널(chat) **전부**에 영상 호를 상시 든다. 기본 `max_calls_n6` 1 이면 둘째 채널부터 486 103 이라, 앱은 user profile N6 만큼 카드 순서로만 합류하고 나머지 영상 절에 «동시 영상 호 한도(N6 = 1)가 찼습니다» 를 띄운다 | 관제석 PTT 회선은 N6 ≥ 영상 채널 수(콘솔 A6 «MCVideo 이용 자격» 동시 영상 호 1~16). 16 을 넘는 관제석이 있으면 CSC 상한(`PROFILE_LIMITS`)을 다시 본다. 운영 가이드에 한 줄 |
 | X2 | **관제석 상시 합류의 자원** | 관제석 n 개 × 영상 채널 m 개만큼 영상 호가 상시 선다 — CMP 멤버 유닛(6 포트, .48 풀 40)·CSP 세션. 편성 그룹도 초대 자동 수락으로 같다 | 규모 검토(풀 크기·`McVideoMemberPoolSize`). 수신 RTP 는 [보기] 한 1개뿐이라 대역은 작다 |
 | X3 | **T11 과 수동 수신의 시한** | 송출자가 보내기 시작해 아무도 10초(T11 Stream Reception Idle — service config 기본, TS 24.581 §6.3.4.4.13) 안에 [보기] 하지 않으면 서버가 송출을 끝낸다(#8). 관제 앱은 «새 영상» 배너로 바로 넘긴다 | 사이트 운용값(`McVideoServiceConfig.*` T11)을 정할 때 관제 동선을 본다. 관제사 자동 보기(TS 22.281 §5.2.7.1)는 사용자 결정 대기(W6 와 함께) |
-| X4 | **영상 녹취의 이력 노출**(R3 짝) | [이력] PTT 세션 카드에 영상 세션을 «영상» 칩으로 두고 세그먼트를 영상으로 재생하려면 이력 항목·녹취 메타에 서비스(`mcvideo`)와 영상 트랙이 있어야 한다 | `/provisioning/history?kind=ptt` 항목에 서비스 축(D5 추천 — `service: mcvideo`) · `/provisioning/recordings/*` 세그먼트 트랙 `kind: video`(MP4 영상 트랙). 앱 재생기는 MediaElement 라 영상 MP4 를 그대로 그린다 |
+| X4 | **영상 세션의 이력 서비스 축**(R3 짝) — **앱은 반영됨, CSC 만 남음** | 콘솔 PTT 이력은 영상 세션을 서비스 배지로 보이는데 관제 앱 [이력]·[무전] 에서는 영상 세션이 **라벨 없이 무전 세션처럼** 선다(«발언 n회») — 관제사는 "영상 호가 안 보인다" 로 겪는다 | CSC 가 OAM 세션 인덱스 행의 `service`·`mcvideo` 를 와이어에 싣지 않는다 — 아래 «X4 패치». 녹취 쪽은 그대로 된다(`/provisioning/recordings/{id}` 가 OAM 메타 그대로라 `service`·`has_video`·영상 트랙이 오고, `/audio` MP4 에 영상이 들어 있다 — 앱이 영상 칸에 그린다) |
+| X9 | **통화 이력에서 영상 통화가 빠진다** | 콘솔 VoLTE 이력에는 영상 통화가 보이는데 관제 앱 [이력]·[통화] 와 «기록» 병합(폴링)에는 **영상 통화가 한 건도 오지 않는다** | `csc/src/services/dispatch_history.py` `scan_calls` 가 종료분을 `call_type in (None, '', 'volte')` 로 걸러 CSP 가 영상 통화에 쓰는 `volte_video`(`CallDir.h VoipCallStart`)를 버린다 — 아래 «X9 패치». 앱은 `callType: volte_video` 를 이미 읽는다(«영상» 태그·종류 칸) |
 | X5 | **영상 세션 이벤트의 이력 피드**(R4 짝) | 관제 범위 안 타인의 영상 채널 송출 시작·끝이 «이벤트» 에 오지 않는다(관제사가 든 영상 채널만 로컬 줄) | `/provisioning/history` 의 `event` 이름표에 `mcvideo.session.start/end`·`mcvideo.transmit` 류 — 이름은 서버가 정하고 앱이 사전에 더한다 |
 | X6 | N2 집행(R7) 과 관제석 | affiliation 수 한도가 걸리면 그룹이 많은 관제석의 MCVideo affiliation 일부가 거절된다 | 거절 응답(TS 24.281 §8.2.2.2 — 코드·Warning)을 정하면 앱이 영상 절에 알린다 |
 | X7 | 관리 목록의 서비스 표시 | [PTT 그룹] 목록 행의 «영상» 칩은 관리 목록(`/provisioning/directory/groups`)에 서비스가 없어 내 영상 채널·열어 본 그룹 문서로만 단다 | 목록 항목에 `mcvideo: true`(또는 `services: ["mcptt","mcvideo"]`) 한 필드 |
 | X8 | 관제 관리 화면의 MCVideo 자격 | 관제 앱 [관리](F4, `/provisioning/directory/*`)에서는 구성원 PTT 회선의 MCVideo 자격·N6 을 못 바꾼다(콘솔 A6 만) | 필요하면 directory API 에 `mcvideo` 자격(admin_api §5.4 와 같은 모양). 1차는 콘솔 몫으로 둬도 된다 |
 
+- **X4·X9 패치(CSC — 관제 앱 [이력] 의 영상, Windows 분석 10-01)** — 두 건 모두 `csc/src/services/dispatch_history.py` 몇 줄이고 OAM·CSP 는 그대로다.
+  - **X9** `scan_calls` 종료분 필터를 `call_type` 이 `volte` 로 시작하는 것으로(콘솔 `flow_logger` 의 `call_type.startswith("volte")` 와 같은 기준 — 같은 폴더에 섞인 `ptt` 만 뺀다):
+    `if cj and str(cj.get('call_type') or 'volte').startswith('volte') and _call_in_scope(cj, members):` — live(`{state}/volte`) 쪽은 필터가 없어 그대로. `_call_row` 는 이미
+    `callType` 에 원값을 싣는다. 시험 = `tests/test_csc_provisioning_history.py` 에 `call_type: volte_video` 인 call.json 한 건이 `kind=call` 응답에 `callType: "volte_video"` 로 오는지.
+  - **X4** ① `ptt_row_from_oam` 이 행에 `"service": it.get('service') or 'ptt'` 와 `"mcvideo": it.get('mcvideo')`(dict 일 때만) 를 넣는다 ② 파일 스캔 `_ptt_row` 는 `session.json` 의
+    `type`(`ptt`|`mcvideo` — 없으면 `ptt`)과 `mcvideo` 객체를 같은 키로 ③ `format_item` 의 `kind == "ptt"` 확장 필드에
+    `"service": row.get("service") or "ptt"` + service 가 `mcvideo` 이고 객체가 있으면 `"mcvideo": {"sessionType": mv.get("session_type",""), "maxTransmitters": _int0(mv.get("max_transmitters"))}`.
+    앱 파서(`HistoryClient.Parse`)는 `service` 와 `mcvideo{sessionType|session_type, maxTransmitters|max_transmitters}` 를 읽는다 — 서비스 축이 오면 [전체|무전|영상] 칩이 켜지고
+    카드에 «영상»·"송출 n회 · 보낸 시간" 이 붙는다. 계약 문서 android_ue_provisioning.md §3-2 의 PTT 항목 표에 두 필드를 더한다. 시험 = `test_row_mapping`·`test_ptt_item_extended_fields` 에 mcvideo 행.
+  - 확인 = 앱 로그 한 줄: `history window ptt <날짜>: n items (mcvideo m, service axis yes)` · `history window call <날짜>: n items (video m)`.
 - **엔진(F3 — Windows 구현 10-01)** — Windows 엔진이 영상으로 빌드되고(OpenH264·DirectShow·CIMS 프레임 렌더 장치 — ue_sdk.md §4.5·§6.1) 관제 앱이 영상 칸에 그림·
   [영상 보내기]·셀프뷰·D12 설정을 낸다([dispatch_windows_next.md](dispatch_windows_next.md) §4·§7). **.45 SDK 코어에 맞춰 달라는 것** — 공개 헤더가 바뀌었다(전부 덧붙임,
   Linux·Android 빌드는 매크로로 꺼진다): `types.h VideoFrame` · `listener.h onVideoFrame`(영상 스레드에서 곧바로 — 이벤트 스레드 아님) · `engine.h setVideoPreview`·

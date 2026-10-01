@@ -7,7 +7,8 @@
 // 응답 기대치(앱이 읽는 것 — 서버 확정 대기):
 //   { "items": [ { "id": "...", "time": "2026-09-06T10:00:00+09:00", "kind": "call|ptt|message", "event": "call.answered|call.missed|...",
 //                  "from": "tel:+82...", "to": "tel:+82...", "group": "tel:g003", "duration": 42, "emergency": false, "text": "...",
-//                  "recordingId": "ptt/24/2026/09/07/10/S…_1", "hasRecording": true } ],
+//                  "recordingId": "ptt/24/2026/09/07/10/S…_1", "hasRecording": true,
+//                  "service": "ptt|mcvideo", "mcvideo": { "sessionType": "chat|prearranged", "maxTransmitters": 2 } } ],
 //     "next": "<since 커서 — 다음 폴링에 그대로>", "etag": "..." }
 using System.Text.Json;
 using CimsUe;
@@ -147,6 +148,13 @@ public sealed class HistoryClient : IDisposable
             var people = new List<string>();
             if (it.TryGetProperty("people", out var pa) && pa.ValueKind == JsonValueKind.Array)
                 foreach (var x in pa.EnumerateArray()) if (x.ValueKind == JsonValueKind.String && x.GetString() is { Length: > 0 } s) people.Add(s);
+            // MCVideo 세션 속성(service = mcvideo 일 때) — 서버가 OAM 세션 인덱스의 객체를 그대로 실어도(snake_case) 읽는다
+            string mcvType = ""; int mcvMax = 0;
+            if (it.TryGetProperty("mcvideo", out var mv) && mv.ValueKind == JsonValueKind.Object)
+            {
+                mcvType = Str(mv, "sessionType") is { Length: > 0 } st ? st : Str(mv, "session_type");
+                mcvMax = Int(mv, "maxTransmitters") is > 0 and var mx ? mx : Int(mv, "max_transmitters");
+            }
             items.Add(new HistoryEntry(id, t.ToLocalTime(), k, Str(it, "event"), Str(it, "from"), Str(it, "to"), Str(it, "group"),
                                        Int(it, "duration"), Bool(it, "emergency"), Str(it, "text"),
                                        Str(it, "recordingId"), Bool(it, "hasRecording"))
@@ -159,6 +167,7 @@ public sealed class HistoryClient : IDisposable
                 TotalSpeechMs = Int(it, "totalSpeechMs"), TalkMs = Int(it, "talkMs"), MaxConcurrent = Int(it, "maxConcurrent"),
                 FloorControl = Str(it, "floorControl"), FloorPolicy = Str(it, "floorPolicy"), MaxTalkers = Int(it, "maxTalkers"),
                 People = people,
+                Service = Str(it, "service"), McvSessionType = mcvType, McvMaxTransmitters = mcvMax,
             });
         }
         items.Sort((a, b) => a.Time.CompareTo(b.Time));
