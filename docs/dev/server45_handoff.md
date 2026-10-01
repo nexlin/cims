@@ -777,3 +777,36 @@ MCVideo 와 같은 송신 보정) · CSP MCPTT re-INVITE answer fmtp 를 re-offe
 
 **다음 세션(.45)** — ① D6 구현(SDK·CSP, 라이브 PTT 단말 동작이 바뀌므로 .48 에서 먼저 실측) ② R3 녹취 CSP 몫(D4 같은 폴더) ③ A12 통계(D5) ④ R7 1차 잔여 소항목 · R6
 xcap-diff ⑤ R5 콘솔(도안 확인 뒤) ⑥ cli PTT REGISTER MCPTT 태그. 남은 사용자 결정 = Linux 엔진 영상(openh264) · pjsua `on_send_request` 가드.
+
+### 12.6 10-01 오전 진행 · 남은 일 (.45 · cims-7c · Windows)
+
+**끝난 것** — D6 b2a45e36(MCPTT 착신 refresher=uas · 갱신 offer/answer fmtp · 멤버 leg 갱신 SDP floor 거절 수정) · 단말 UX 확정(사용자 — mcvideo.md §7
+D8·D10~D12: 영상 칸은 고른 영상이 있을 때만 · «영상 n» 목록 [보기] · «영상 참여» 없음(채널 = 사용자가 고른 주채널, 무전 T4 해제와 무관) · PTT = 음성, [영상 보내기]
+토글 · 송출 중 PTT = 마이크 음성 우선 · 하단 탭 유지, 전체화면 대신 주채널 안 [크게]) · C9·C11 앱 6e9edd3a(cims-7c, 실기 .45 W999·MF52 g002 통과) · 화면 테마·D12
+설정 줄 edca5fce · **.45 MCVideo 서버 ON** 41100484(csp 0.2.183·cmp 0.2.107·csc 0.2.140 — D6 포함, 사용자 지시) · 관제 앱 착수 문서 3c754553·2144b98b·b73cc2a0
+([dispatch_windows_next.md](dispatch_windows_next.md), dev_share 알림 — Windows 응답 전) · UX 캔버스 «MCVideo 단말 UX 검토»(claude.ai artifact VpEmGRtdnGnHdyE1sXVgUy).
+
+**남은 일**
+
+| # | 할 일 | 몫 | 상태·전제 |
+|---|---|---|---|
+| R3 | 녹취 CSP 몫 — MCVideo `PTT_GROUP_ADD` 에 `record_dir`·`session_dir`·디스크립터(D4 같은 폴더 `recordings/ptt/{id}`, 메타 `type: mcvideo`) · OAM 이력 서비스 축 · 콘솔 재생 | .45 | 미착수 — CMP 기록기·`CmpClientMcvideo` 필드는 준비, `McVideoCallService` 가 싣지 않는다 |
+| R4 | A12 통계 — 서비스 값 `mcvideo`(ICSI 판정) → CSP 시도 장부·세션 색인 → oam-svc 롤업 `by_service`(D5) | .45 | 미착수 |
+| R5 | 콘솔 — 그룹 편집 «서비스» 절 · PTT 회선 «MCVideo 이용 자격»(D3 도안 artifact 9mVfQxdqp39GovpmtjsHoJ) | .45 | 도안 확인 대기 → 구현 |
+| R6 | CMS 문서 변경 xcap-diff 에 MCVideo user profile·service config | .45 | 미착수(RFC 5875 먼저) |
+| R7 | 1차 잔여 — N2 · `<ImplicitAffiliations>` · 정원 486 122 · 비멤버 재합류 403 121 · prearranged 검사 순서 | .45 | 미착수 |
+| R7b | D6 에서 찾은 MCPTT 소항목 — 사설 호 수동 개시 180 `Require: timer` · 멤버 초대 `mc_priority` 고정 3(§14.2.3 `<user-priority>`) · SDK answer 의 `mc_priority` 되돌림(§14.3.3) · psip 422 재시도 refresher | .45 | 미착수 |
+| R8 | V7 — 현행 PTT 영상 제거(A13 CSP · B11 CMP · C11 SDK 필드 · 콘솔·관제 «PTT 영상(현행)») | **cims-7c** | 이관(사용자 결정). .45 배포 = 협력업체 옛 APK 그룹 영상 중단 — 시점 사용자 확인 |
+| R11 | CMP Media Reception Notification(TS 24.581 §9.2.16) — 지금 안 보내 송출자 «보는 사람 n» = 0(앱은 0 이면 숨김). §6.3 에 서버 절차가 없어 위반은 아니고, 보내면 TS 22.280 R-5.20.2-001 을 채운다 | .45 | **사용자 결정 대기** |
+| R12 | OAM 배포 job 인덱스 캐시 경합(`_job_create`/`_job_pick_pending` 잠금 없는 갱신 — §12.4) 근본 수정 | .45 | 미착수 |
+| C10 | verify S3 `S3-SCN-MCVIDEO-CHAT`·`-TRANSMIT`·`-RECEPTION`·`-MAX-TX`(cimsue-cli 두 대) | .45 | 미착수 — M4 전제 |
+| C12 | cimsue-cli PTT 계정 REGISTER 에 MCPTT 태그 없음(TS 24.379 §7.2.1 대조) | .45 | 미착수 |
+| D6 실측 | .48 은 csp 0.2.182(D6 전) — .45 는 0.2.183 로 이미 D6 | .45 | .48 은 따라 올릴 때(관리자 자격 = 사용자) |
+| W1'·W4·W5 | 관제 앱 MCVideo(데스크톱·태블릿) | **Windows** | 착수 문서 전달, 응답 대기 |
+| B10 | 계측기 MCVideo 단말·시나리오 | 팀원 트랙 | 요구서 = [mcvideo_tester_requirements.md](mcvideo_tester_requirements.md), 계측기 코드 미착수 |
+| 관찰 | W999 전면 카메라 영상이 가로 4:3 로 옴(3:4 칸 위아래 띠) · T11 10 s 동안 아무도 [보기] 안 하면 송출 꺼짐(#8 — 정상, 시연 주의) | cims-7c / — | 원인 미확인 |
+| V8 | 긴급·임박·방송·ad hoc·private·확인 통화·conference NOTIFY·E2E·영상 pull/push·원격 송출·관제 다중 스트림(SDK 송출자별 렌더 창) | — | 1차 뒤 |
+
+**사용자 결정 대기** — R11(Media Reception Notification) · Windows 영상 엔진 F3(openh264 디코드·렌더 — 없으면 관제 Windows 는 영상 칸 자리 표시만) · SDK 송출자별 렌더 창
+(관제 다중 스트림 전제) · 관제사 자동 수신(TS 22.281 §5.2.7.1) · D6 «소리 겹침» 설정 항목화(R-8.3-003) · Linux 엔진 영상(openh264 — 영상 RTP·PLI 자동 시험) ·
+pjsua `on_send_request` 무효 계정 가드 · V7 의 .45 배포 시점 · M4(협력업체 APK 전달 포함) 시점.
