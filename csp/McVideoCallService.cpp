@@ -149,6 +149,18 @@ void CMcVideoCallService::_Reject( const char *pszCallId, int iStatus, int iWarn
     gclsUserAgent.StopCall( pszCallId, iStatus, NULL, vecHdr );  // Warning = TS 24.281 §4.4
 }
 
+void CMcVideoCallService::_CloseAttempt( Session &clsSes, bool bEstablished, const char *pszReason,
+                                         const char *pszCause, int iStatus ) {
+    if ( !clsSes.bAttemptOpen ) return;
+    clsSes.bAttemptOpen = false;
+    if ( bEstablished ) clsSes.bEstablished = true;
+    if ( !gclsCallDir.IsEnabled() ) return;
+    gclsCallDir.PttAttempt( clsSes.strGroupId, clsSes.strGroupKey, clsSes.strInitiator,
+                            bEstablished ? "established" : "failed", bEstablished ? "" : pszReason,
+                            bEstablished ? "" : pszCause, bEstablished ? 0 : iStatus,
+                            bEstablished ? clsSes.strSesId : "", "mcvideo" );
+}
+
 bool CMcVideoCallService::IsMcVideoCall( const std::string &strCallId ) {
     std::lock_guard<std::recursive_mutex> lock( m_mutex );
     return m_mapCallGroup.count( strCallId ) != 0;
@@ -381,8 +393,12 @@ void CMcVideoCallService::_ResolvePendingInitiator( const std::string strGroupId
     clsSes.pclsInitiatorOffer = nullptr;
     const bool bOk = pOffer && _AcceptLeg( clsSes, strInit, clsSes.strInitiator, pOffer, clsSes.bInitiatorImplicit );
     delete pOffer;
-    if ( bOk ) return;
+    if ( bOk ) {
+        _CloseAttempt( clsSes, true );  // 개시자 200 OK = 성립(sip_statistics.md §2.1)
+        return;
+    }
     CLog::Print( LOG_ERROR, "MCVIDEO: group(%s) initiator accept 실패 → 500, 세션 해제", strGroupId.c_str() );
+    _CloseAttempt( clsSes, false, "error", "accept_failed", SIP_INTERNAL_SERVER_ERROR );
     gclsUserAgent.StopCall( strInit.c_str(), SIP_INTERNAL_SERVER_ERROR );
     clsSes.mapLegs.erase( strInit );
     m_mapCallGroup.erase( strInit );
@@ -397,6 +413,7 @@ void CMcVideoCallService::_FailPendingIfNoInvitee( const std::string strGroupId 
         if ( kv.second.eRole == E_LEG_INVITED ) return;
     const std::string strInit = clsSes.strInitiatorCallId;
     CLog::Print( LOG_INFO, "MCVIDEO: group(%s) 초대가 모두 실패 → 개시자 480", strGroupId.c_str() );
+    _CloseAttempt( clsSes, false, "no_answer", "no_member_answered", SIP_TEMPORARILY_UNAVAILABLE );
     gclsUserAgent.StopCall( strInit.c_str(), SIP_TEMPORARILY_UNAVAILABLE );
     m_mapCallGroup.erase( strInit );
     clsSes.mapLegs.erase( strInit );
@@ -537,10 +554,34 @@ void CMcVideoCallService::OnIncomingInvite( const char *pszCallId, const char *p
     const CMcVideoInfo clsMvi =
         ParseMcVideoInfo( McVideoBodyPart( pclsMessage->m_strBody, strCtype, kMcVideoInfoSubtype ) );
 
+    std::lock_guard<std::recursive_mutex> lock( m_mutex );
+    // 대상 — Request-URI 의 gr(재합류, §9.2.1.4.5.1) 이면 그 세션, 아니면 <mcvideo-request-uri>
+    std::string strGroupId;
+    const char *pszGr = SearchSipParameter( pclsMessage->m_clsReqUri.m_clsUriParamList, "gr" );
+    const bool bRejoin = pszGr && *pszGr;
+    if ( bRejoin ) {
+        for ( const auto &kv : m_mapSession )
+            if ( kv.second.strGr == pszGr ) strGroupId = kv.first;
+    } else {
+        strGroupId = McpttBareId( clsMvi.strRequestUri );
+    }
+    // 시도 판정 — 진행 중 세션이 없는 그룹으로의 INVITE 가 개시 시도 1건이다(sip_statistics.md §2.1·§2.3). 진행 중
+    //   세션에 붙는 합류·재합류(gr)는 시도가 아니다(참여율이 본다). 세션을 열기 전에 거절하면 그 자리에서 장부에
+    //   남기고, 세션을 연 뒤의 결말은 _CloseAttempt 가 남긴다.
+    const bool bAttempt = !bRejoin && !strGroupId.empty() && m_mapSession.find( strGroupId ) == m_mapSession.end();
+    std::string strGroupKey;
+    auto reject = [&]( int iStatus, int iWarnCode, const char *pszWarnText, const char *pszReason,
+                       const char *pszCause ) {
+        if ( bAttempt && gclsCallDir.IsEnabled() )
+            gclsCallDir.PttAttempt( strGroupId, strGroupKey, strFrom, "failed", pszReason, pszCause, iStatus, "",
+                                    "mcvideo" );
+        _Reject( pszCallId, iStatus, iWarnCode, pszWarnText );
+    };
+
     // 1) 자원 — CMP 가 MCVideo 멤버 풀을 광고하지 않으면 받지 않는다(§9.2.2.4.1.1 1) — 500)
     if ( !gclsCmpClient.SupportsMcVideo() ) {
         CLog::Print( LOG_INFO, "MCVIDEO: INVITE from(%s) — CMP resource.mcvideo 없음 → 500", strFrom.c_str() );
-        return _Reject( pszCallId, SIP_INTERNAL_SERVER_ERROR, 0, NULL );
+        return reject( SIP_INTERNAL_SERVER_ERROR, 0, NULL, "error", "media_unavailable" );
     }
     // 2) Accept-Contact 의 g.3gpp.mcvideo·MCVideo icsi-ref, Contact 에 isfocus 가 없어야 한다(§9.2.2.4.1.1 2))
     const std::string strAccept = HeaderValues( pclsMessage, "Accept-Contact" );
@@ -551,50 +592,40 @@ void CMcVideoCallService::OnIncomingInvite( const char *pszCallId, const char *p
     if ( !McVideoFeatureIn( strAccept ) || !McVideoIcsiIn( strAccept ) ||
          strContactParams.find( ";isfocus" ) != std::string::npos ) {
         CLog::Print( LOG_INFO, "MCVIDEO: INVITE from(%s) — Accept-Contact/isfocus 조건 불일치 → 403", strFrom.c_str() );
-        return _Reject( pszCallId, SIP_FORBIDDEN, 0, NULL );
+        return reject( SIP_FORBIDDEN, 0, NULL, "denied", "invalid_request" );
     }
-
-    std::lock_guard<std::recursive_mutex> lock( m_mutex );
-    // 대상 — Request-URI 의 gr(재합류, §9.2.1.4.5.1) 이면 그 세션, 아니면 <mcvideo-request-uri>
-    std::string strGroupId;
-    const char *pszGr = SearchSipParameter( pclsMessage->m_clsReqUri.m_clsUriParamList, "gr" );
-    if ( pszGr && *pszGr ) {
-        for ( const auto &kv : m_mapSession )
-            if ( kv.second.strGr == pszGr ) strGroupId = kv.first;
-        if ( strGroupId.empty() ) {
-            CLog::Print( LOG_INFO, "MCVIDEO: rejoin gr=%s from(%s) — 진행 중 세션 없음 → 404 137", pszGr,
-                         strFrom.c_str() );
-            return _Reject( pszCallId, SIP_NOT_FOUND, 137, kMcVideoWarn137 );
-        }
-    } else {
-        strGroupId = McpttBareId( clsMvi.strRequestUri );
+    if ( bRejoin && strGroupId.empty() ) {
+        CLog::Print( LOG_INFO, "MCVIDEO: rejoin gr=%s from(%s) — 진행 중 세션 없음 → 404 137", pszGr, strFrom.c_str() );
+        return _Reject( pszCallId, SIP_NOT_FOUND, 137, kMcVideoWarn137 );
     }
     CspPttGroup clsGroup;
     if ( strGroupId.empty() || !gclsGroupMap.Select( strGroupId.c_str(), clsGroup ) || !clsGroup._mcvideo ) {
         CLog::Print( LOG_INFO, "MCVIDEO: INVITE from(%s) group(%s) — MCVideo 그룹 문서 없음 → 404 113", strFrom.c_str(),
                      strGroupId.c_str() );
-        return _Reject( pszCallId, SIP_NOT_FOUND, 113, kMcVideoWarn113 );
+        return reject( SIP_NOT_FOUND, 113, kMcVideoWarn113, "denied", "group_not_found" );
     }
+    strGroupKey = clsGroup._dbId > 0 ? std::to_string( clsGroup._dbId ) : "";
     int iPrio = 0;
-    if ( !IsMember( clsGroup, strFrom, &iPrio ) ) return _Reject( pszCallId, SIP_FORBIDDEN, 116, kMcVideoWarn116 );
+    if ( !IsMember( clsGroup, strFrom, &iPrio ) )
+        return reject( SIP_FORBIDDEN, 116, kMcVideoWarn116, "denied", "not_member" );
     const bool bPrearranged = clsGroup._mcvideoAttrs.bInviteMembers;
     // §6.3.5.2 5)c)·d) — session-type 이 그룹 종류와 다르면 404 117/118
     if ( !clsMvi.strSessionType.empty() && clsMvi.strSessionType != clsGroup._mcvideoAttrs.SessionType() ) {
-        return bPrearranged ? _Reject( pszCallId, SIP_NOT_FOUND, 117, kMcVideoWarn117 )
-                            : _Reject( pszCallId, SIP_NOT_FOUND, 118, kMcVideoWarn118 );
+        return bPrearranged ? reject( SIP_NOT_FOUND, 117, kMcVideoWarn117, "denied", "session_type_mismatch" )
+                            : reject( SIP_NOT_FOUND, 118, kMcVideoWarn118, "denied", "session_type_mismatch" );
     }
     // 이용 자격 (MCVideo user profile) · N6
     CspMcVideoProfile clsProf;
     if ( gclsDbManager.SelectMcVideoProfile( strFrom, clsProf ) != 1 )
-        return bPrearranged ? _Reject( pszCallId, SIP_FORBIDDEN, 109, kMcVideoWarn109 )
-                            : _Reject( pszCallId, SIP_FORBIDDEN, 108, kMcVideoWarn108 );
+        return bPrearranged ? reject( SIP_FORBIDDEN, 109, kMcVideoWarn109, "denied", "not_entitled" )
+                            : reject( SIP_FORBIDDEN, 108, kMcVideoWarn108, "denied", "not_entitled" );
     auto itSes = m_mapSession.find( strGroupId );
     bool bInThis = false;
     if ( itSes != m_mapSession.end() )
         for ( const auto &kv : itSes->second.mapLegs )
             if ( kv.second.strMember == strFrom ) bInThis = true;
     if ( !bInThis && _ActiveCallsOf( strFrom ) >= clsProf.m_iMaxCallsN6 )
-        return _Reject( pszCallId, SIP_BUSY_HERE, 103, kMcVideoWarn103 );
+        return reject( SIP_BUSY_HERE, 103, kMcVideoWarn103, "denied", "max_calls_exceeded" );
     // 제휴 — prearranged 는 제휴된 사용자만 개시·합류한다(§9.2.1.4.2 13)a)·14)a) — 일반 호에 암묵적 affiliation 없음,
     //   403 120). chat 은 멤버면 암묵적 affiliation 적격(§9.2.2.4.1.1 5) · §8.2.2.3.6) — 제휴는 SDP 검사를 지난 뒤에
     //   한다(아래, 12)).
@@ -602,7 +633,7 @@ void CMcVideoCallService::OnIncomingInvite( const char *pszCallId, const char *p
     if ( !bAffiliated && bPrearranged ) {
         CLog::Print( LOG_INFO, "MCVIDEO: INVITE from(%s) group(%s) prearranged — 제휴 안 됨 → 403 120", strFrom.c_str(),
                      strGroupId.c_str() );
-        return _Reject( pszCallId, SIP_FORBIDDEN, 120, kMcVideoWarn120 );
+        return reject( SIP_FORBIDDEN, 120, kMcVideoWarn120, "denied", "not_affiliated" );
     }
     // SDP — 제어 채널(m=application udp MCVideo)과 음성 AMR-WB 가 있어야 한다(§9.2.2.4.1.1 9) — 488)
     int iCtl = 0;
@@ -613,7 +644,7 @@ void CMcVideoCallService::OnIncomingInvite( const char *pszCallId, const char *p
     McvMediaOf( pclsRtp, "audio", "AMR-WB", uSsrc, iAmrPt );
     if ( !pclsRtp || !bCtl || iCtl <= 0 || iAmrPt <= 0 ) {
         CLog::Print( LOG_INFO, "MCVIDEO: INVITE from(%s) — SDP 에 udp MCVideo/AMR-WB 없음 → 488", strFrom.c_str() );
-        return _Reject( pszCallId, SIP_NOT_ACCEPTABLE_HERE, 0, NULL );
+        return reject( SIP_NOT_ACCEPTABLE_HERE, 0, NULL, "error", "codec_mismatch" );
     }
     // 미디어 SRTP (SDES — media_security.md §4·§5): 접속서비스 정책 × offer crypto, m= 라인마다. 음성은 필수 성분이라
     //   협상이 깨지면 488, 영상은 그 성분만 거절한다(answer m=video 0 — RFC 3264 §6). 서버 키는 m= 라인마다 따로(RFC
@@ -626,7 +657,7 @@ void CMcVideoCallService::OnIncomingInvite( const char *pszCallId, const char *p
              0 ) {
             CLog::Print( LOG_INFO, "MCVIDEO: INVITE from(%s) — audio SRTP 협상 불가(policy=%s) → 488", strFrom.c_str(),
                          clsSvc.media_srtp.c_str() );
-            return _Reject( pszCallId, SIP_NOT_ACCEPTABLE_HERE, 0, NULL );
+            return reject( SIP_NOT_ACCEPTABLE_HERE, 0, NULL, "error", "srtp_failed" );
         }
         if ( MediaSdes::EvalRelayOfferSdes( clsSvc.media_srtp, pclsRtp->m_clsMediaList, "video", clsSdes.clsVideo ) <
              0 ) {
@@ -644,7 +675,7 @@ void CMcVideoCallService::OnIncomingInvite( const char *pszCallId, const char *p
     if ( !bAffiliated ) {
         const std::string strClient = clsMvi.strClientId.empty() ? strFrom : clsMvi.strClientId;
         if ( !gclsDbManager.InsertAffiliation( strGroupId, strFrom, strClient, 0, EMcService::McVideo ) )
-            return _Reject( pszCallId, SIP_FORBIDDEN, 120, kMcVideoWarn120 );
+            return reject( SIP_FORBIDDEN, 120, kMcVideoWarn120, "denied", "affiliation_failed" );
         EmitAffiliationChanged( strGroupId, "affiliate", strFrom, EMcService::McVideo );
         SendAffiliationNotify( strFrom, "", EMcService::McVideo );
         CLog::Print( LOG_INFO, "MCVIDEO: implicit affiliation group(%s) user(%s)", strGroupId.c_str(),
@@ -662,6 +693,8 @@ void CMcVideoCallService::OnIncomingInvite( const char *pszCallId, const char *p
         s.strInitiator = strFrom;
         s.tStart = time( NULL );
         s.iMaxDurationSec = clsGroup._mcvideoAttrs.iMaxDurationSec;
+        s.bAttemptOpen = true;
+        s.strGroupKey = strGroupKey;
         itSes = m_mapSession.emplace( strGroupId, s ).first;
         _RecordSessionStart( itSes->second, clsGroup, strCallId );
         CLog::Print( LOG_INFO, "MCVIDEO: session start group(%s) type=%s initiator(%s) sesid=%s gr=%s",
@@ -717,6 +750,7 @@ void CMcVideoCallService::OnIncomingInvite( const char *pszCallId, const char *p
             CLog::Print( LOG_INFO, "MCVIDEO: group(%s) prearranged — 초대할 제휴·등록 멤버 없음 → 480",
                          strGroupId.c_str() );
             _Reject( pszCallId, SIP_TEMPORARILY_UNAVAILABLE, 0, NULL );
+            _CloseAttempt( clsSes, false, "no_answer", "no_member_available", SIP_TEMPORARILY_UNAVAILABLE );
             m_mapCallGroup.erase( strCallId );
             clsSes.mapLegs.erase( strCallId );
             _ReleaseSession( strGroupId, "no invitee" );
@@ -734,9 +768,13 @@ void CMcVideoCallService::OnIncomingInvite( const char *pszCallId, const char *p
         CLog::Print( LOG_ERROR, "MCVIDEO: group(%s) member(%s) accept 실패 → 500", strGroupId.c_str(),
                      strFrom.c_str() );
         _Reject( pszCallId, SIP_INTERNAL_SERVER_ERROR, 0, NULL );
+        if ( leg.eRole == E_LEG_INITIATOR )
+            _CloseAttempt( clsSes, false, "error", "accept_failed", SIP_INTERNAL_SERVER_ERROR );
         _DropLeg( strGroupId, strCallId, "accept failed" );
         return;
     }
+    // chat 개시자 — 200 OK 를 보냈다 = 성립(MCPTT 장부와 같은 정의, sip_statistics.md §2.1)
+    if ( leg.eRole == E_LEG_INITIATOR ) _CloseAttempt( clsSes, true );
     // 개시 대기 중인 prearranged 세션에 멤버가 스스로 붙었다 — 개시자에게 이제 답한다
     _ResolvePendingInitiator( strGroupId );
 }
@@ -814,6 +852,7 @@ bool CMcVideoCallService::OnCallEnded( const std::string &strCallId, int iSipSta
     Session &clsSes = itS->second;
     // 대기 중 개시자의 CANCEL — 세션 개시 중단(초대 leg 도 끝낸다)
     if ( clsSes.bInitiatorPending && strCallId == clsSes.strInitiatorCallId ) {
+        _CloseAttempt( clsSes, false, "canceled", "initiator_canceled" );
         m_mapCallGroup.erase( strCallId );
         clsSes.mapLegs.erase( strCallId );
         _ReleaseSession( strGroupId, "initiator cancelled" );
@@ -901,6 +940,9 @@ void CMcVideoCallService::_ReleaseSession( const std::string strGroupId, const c
     // 값으로 받는다 — 호출자가 세션 안의 문자열을 넘겨도 아래에서 세션을 지운 뒤 쓸 수 있게
     auto itS = m_mapSession.find( strGroupId );
     if ( itS == m_mapSession.end() ) return;
+    // 결말을 안 남긴 개시 시도 — 위 경로들이 사유를 남기므로 여기 오면 기록이 빠진 새 경로다. 사유 없이 남겨
+    //   집계의 «사유 모름» 으로 드러나게 한다(sip_statistics.md §2.3)
+    _CloseAttempt( itS->second, false, "", "", itS->second.bInitiatorPending ? SIP_TEMPORARILY_UNAVAILABLE : 0 );
     Session clsSes = itS->second;
     m_mapSession.erase( itS );
     // 남은 leg — 확립 = BYE, 응답 전 초대 = CANCEL, 대기 중 개시자 = 480 (StopCall 은 EventCallEnd 를 부르지 않는다)
@@ -912,10 +954,11 @@ void CMcVideoCallService::_ReleaseSession( const std::string strGroupId, const c
     }
     delete clsSes.pclsInitiatorOffer;
     gclsCmpClient.McvRemove( strGroupId, clsSes.strSesId );
-    // 녹취 세션 끝 — 개시하지 못하고 끝난 세션(초대·수락 실패)은 error 로 남긴다(end_reason)
+    // 녹취 세션 끝 — 성립하지 못한 세션(개시자 200 OK 전에 해제 — 초대 무응답·수락 실패·개시자 취소)은 setup_failed:
+    //   세션 디렉터리는 CMP 녹취 자리라 개시 때 서지만 통화는 없었다 — 집계가 세션으로 세지 않는다(sip_statistics.md
+    //   §3). 성립한 세션의 해제(참가자·T1·TNG3)는 normal, CMP 회수는 error(OnCmpEvent)
     if ( !clsSes.strRecKey.empty() )
-        gclsCallDir.PttSessionEnd( clsSes.strRecKey,
-                                   strstr( pszWhy, "failed" ) || strstr( pszWhy, "no invite" ) ? "error" : "normal" );
+        gclsCallDir.PttSessionEnd( clsSes.strRecKey, clsSes.bEstablished ? "normal" : "setup_failed" );
     CLog::Print( LOG_INFO, "MCVIDEO: session end group(%s) (%s) legs=%d", strGroupId.c_str(), pszWhy,
                  (int)clsSes.mapLegs.size() );
 }
@@ -939,6 +982,8 @@ void CMcVideoCallService::OnCmpEvent( const std::string &strCmd, const std::stri
         // CMP 가 그룹을 회수했다(주소 등록 멤버 0 + 무활동) — 미디어 평면이 없으니 남은 leg 를 끝내고 캐시를 지운다.
         //   CMP 그룹은 이미 없으므로 REMOVE 는 보내지 않는다.
         if ( bThis ) {
+            if ( itS->second.bInitiatorPending )
+                _CloseAttempt( itS->second, false, "error", "media_aborted", SIP_TEMPORARILY_UNAVAILABLE );
             Session clsSes = itS->second;
             m_mapSession.erase( itS );
             for ( const auto &kv : clsSes.mapLegs ) {
@@ -949,7 +994,8 @@ void CMcVideoCallService::OnCmpEvent( const std::string &strCmd, const std::stri
                                             : 0 );
             }
             delete clsSes.pclsInitiatorOffer;
-            if ( !clsSes.strRecKey.empty() ) gclsCallDir.PttSessionEnd( clsSes.strRecKey, "error" );
+            if ( !clsSes.strRecKey.empty() )
+                gclsCallDir.PttSessionEnd( clsSes.strRecKey, clsSes.bEstablished ? "error" : "setup_failed" );
             CLog::Print( LOG_INFO, "MCVIDEO: group(%s) aborted by CMP — session cache cleared", strGroupId.c_str() );
         }
     }
@@ -976,9 +1022,10 @@ void CMcVideoCallService::Tick() {
     std::vector<std::pair<std::string, const char *>> vecRelease;
     for ( auto &kv : m_mapSession ) {
         Session &s = kv.second;
-        if ( s.bInitiatorPending && s.tInitiatorDeadline && tNow >= s.tInitiatorDeadline )
+        if ( s.bInitiatorPending && s.tInitiatorDeadline && tNow >= s.tInitiatorDeadline ) {
+            _CloseAttempt( s, false, "no_answer", "answer_timeout", SIP_TEMPORARILY_UNAVAILABLE );
             vecRelease.emplace_back( kv.first, "no invited member answered in time" );
-        else if ( s.iMaxDurationSec > 0 && tNow - s.tStart >= s.iMaxDurationSec )
+        } else if ( s.iMaxDurationSec > 0 && tNow - s.tStart >= s.iMaxDurationSec )
             vecRelease.emplace_back( kv.first, "TNG3 max duration" );  // §6.3.8.1 5)
     }
     for ( const auto &r : vecRelease ) _ReleaseSession( r.first, r.second );

@@ -181,11 +181,12 @@ static std::string FindSessionJson( const std::string &strDir, const std::string
 static int TestServiceAxis( const std::string &strRoot ) {
     const std::string strRec = strRoot + "/svc";
     const std::string strState = strRoot + "/svc_state";
+    const std::string strStats = strRoot + "/svc_stats";
     const std::string strKey = CCallDir::PttSessionKey( "mcvideo", "g3" );
     std::string strPttBase, strMcvBase, strPttName, strMcvName;
     {
         CCallDir clsDir;
-        clsDir.Init( strRec, strState, "", "csp", 5 );
+        clsDir.Init( strRec, strState, strStats, "csp", 5 );
         CHECK( CCallDir::PttSessionKey( "ptt", "g3" ) == "g3" && strKey == "mcvideo:g3",
                "세션 키 — MCPTT 는 그룹 id, MCVideo 는 mcvideo:<그룹>" );
         strPttBase = clsDir.GetPttSessionDir( "g3", "+821011112222::csp::20261001110000000001::1", "9" );
@@ -197,7 +198,17 @@ static int TestServiceAxis( const std::string &strRoot ) {
         strMcvName = clsDir.GetPttSessionName( strKey );
         clsDir.PttMemberJoin( strKey, "+821055556666", "call-w" );
         clsDir.PttSessionEnd( strKey, "normal" );  // MCVideo 만 끝난다 — MCPTT 는 진행 중
+        // 시도 장부 — 같은 파일에 서비스 값으로 가른다(sip_statistics.md §2.3)
+        clsDir.PttAttempt( "g3", "9", "+821011112222", "established", "", "", 0,
+                           "+821011112222::csp::20261001110000000001::1" );
+        clsDir.PttAttempt( "g3", "9", "+821033334444", "failed", "denied", "not_entitled", 403, "", "mcvideo" );
     }
+    const std::string strLedger = ReadAll( FindFile( strStats + "/ptt_attempts", "*.jsonl" ) );
+    CHECK( strLedger.find( "\"caller\":\"+821011112222\"" ) != std::string::npos &&
+               strLedger.find( "\"service\":\"ptt\"" ) != std::string::npos &&
+               strLedger.find( "\"cause\":\"not_entitled\",\"status\":403,\"sesid\":\"\",\"service\":\"mcvideo\"" ) !=
+                   std::string::npos,
+           "시도 장부 service — MCPTT 기본 ptt · MCVideo mcvideo" );
     CHECK( strPttBase == strRec + "/ptt/9" && strMcvBase == strPttBase, "같은 녹취 폴더 = <recordings>/ptt/<저장 키>" );
     CHECK( strPttName == "S20261001110000000001_1" && strMcvName == "S20261001110000000002_2",
            "세션 디렉터리는 서비스마다 따로(sesid 에서 유도) — 서로 덮지 않는다" );

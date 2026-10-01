@@ -567,10 +567,13 @@ public:
      *         시간창 이탈과 AcceptCall 실패는 **응답코드가 아예 없다**(0). 어휘는
      *         sip_statistics.md §2.3 의 표가 정본이고, 콘솔 라벨이 그 슬러그를 읽는다
      *  @param iStatus    결말 SIP 응답코드(403·488·480…). 성립·무응답 경로면 0
+     *  @param strService 서비스 축 — `ptt`(MCPTT 그룹 호) | `mcvideo`(MCVideo 그룹 호). 같은 장부에
+     *         서비스 값으로 가른다(sip_statistics.md §2.3 — 둘 다 접속환경 kind 가 `ptt` 라 kind 로는
+     *         못 가른다)
      */
     void PttAttempt( const std::string &strGroupId, const std::string &strGroupKey, const std::string &strCaller,
                      const std::string &strOutcome, const std::string &strReason = "", const std::string &strCause = "",
-                     int iStatus = 0, const std::string &strSesId = "" ) {
+                     int iStatus = 0, const std::string &strSesId = "", const std::string &strService = "ptt" ) {
         if ( m_strStatsDir.empty() ) return;
         char ts[32];
         IsoNow( ts, sizeof( ts ) );
@@ -580,7 +583,7 @@ public:
                            "\",\"group_key\":\"" + Esc( strGroupKey ) + "\",\"caller\":\"" + Esc( strCaller ) +
                            "\",\"outcome\":\"" + Esc( strOutcome ) + "\",\"reason\":\"" + Esc( strReason ) +
                            "\",\"cause\":\"" + Esc( strCause ) + "\",\"status\":" + std::to_string( iStatus ) +
-                           ",\"sesid\":\"" + Esc( strSesId ) + "\"}\n";
+                           ",\"sesid\":\"" + Esc( strSesId ) + "\",\"service\":\"" + Esc( strService ) + "\"}\n";
         std::string path = m_strStatsDir + "/ptt_attempts/" + day + ".jsonl";
         m_worker.Enqueue( [path, line]() { return _appendLineS( path, line ); } );
     }

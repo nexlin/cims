@@ -313,7 +313,7 @@ chat|prearranged(그룹 속성 `invite_members`) · 개시자 · 시작 시각(T
 | CMP `TRANSMISSION_INACTIVITY{T1}` | prearranged 면 해제(§6.3.8.1 1)), chat 은 로그만(세션은 참가자가 끝낸다). `T5` 는 로그만 |
 | TNG3 (`max_duration_sec`) | 해제(§6.3.8.1 5)) |
 | CMP `PTT_GROUP_ABORTED` (service mcvideo) | CMP 가 그룹을 회수했다 — 남은 leg 를 끝내고 캐시를 지운다(REMOVE 는 보내지 않는다). **MCPTT 서비스의 같은 그룹 id 를 건드리지 않는다**(A11 에서 서비스로 가른다) |
-| CMP `TRANSMITTERS` (service mcvideo) | 로그(세션 송출 축은 A12) |
+| CMP `TRANSMITTERS` (service mcvideo) | 로그. 통계·이력의 송출 축은 녹취 세그먼트(세그먼트 = 송출 구간, 슬롯 = 송출자)가 원천이다(§5.6) |
 
 **CmpClient (A11)** — `McvAddGroup`·`McvJoin`·`McvLeave`·`McvRemove`(payload `service:"mcvideo"` → hdr.service). 세션·끝점 캐시 키 = `mcvideo|<group>`(MCPTT 키와
 겹치지 않게). JOIN 응답에서 `port`·`video_port`·`control_port`·`tc_ssrc`·`granted`·`audio_ssrc`·`video_ssrc` 를 읽는다. `HandleEvent` 는 hdr.service 가
@@ -402,10 +402,11 @@ Indicator, automatic 수신; 1차 CSP 는 normal) · JOIN 응답 `audio_ssrc`·`
   **CSP 몫**(구현 — §7 D4 같은 폴더) — 세션을 세울 때 `CCallDir` 세션 키 `mcvideo:<그룹>`(`PttSessionKey` — 같은 그룹의 MCPTT 세션과 따로)으로
   `recordings/ptt/{id}` 아래 세션 디렉터리를 잡고 `session.json`(그룹 편성·멤버 + `mcvideo{session_type,max_transmitters,reception_mode}`, **`type:
   "mcvideo"`**, MCPTT floor 축 없음)을 쓴 뒤 매 `PTT_GROUP_ADD` 에 `record_dir`·`session_dir` 를 싣는다. 참가·이탈 = 세션 `events.jsonl`
-  `member_join`/`member_leave`, 끝 = 종료 마킹(`end_reason` normal/error). 그룹 루트 `group.json`·가입자 상태 파일(`<state>/ptt/`)은 MCPTT 세션 것이라
+  `member_join`/`member_leave`, 끝 = 종료 마킹(`end_reason` — 성립한 세션 normal · CMP 회수 error · **개시자 200 OK 전에 끝난 세션 setup_failed**
+  — 세션 디렉터리는 CMP 녹취 자리라 prearranged 초대 응답 전에 서지만 통화는 없었다). 그룹 루트 `group.json`·가입자 상태 파일(`<state>/ptt/`)은 MCPTT 세션 것이라
   쓰지 않는다. **OAM·콘솔 몫**(구현) — 세션 이력 인덱스·`/api/v1/ptt/sessions`(`?service=`)·녹취 API 에 서비스 값 `service`(`ptt`|`mcvideo`), 재생
   변환은 PTT 세션 경로 그대로(오디오 없는 송출 구간 = 영상만 MP4), 콘솔 PTT 세션 이력에 «영상» 배지·호 방식·동시 송출 상한. MCPTT 통계·이용 정보는
-  MCVideo 세션을 세지 않는다(MCVideo 통계 축은 A12). 남은 것 = 송출 제어 이벤트 기록(MCPTT `floor.jsonl` 짝 — 허가·거절·회수·수신 허가).
+  MCVideo 세션을 세지 않는다(MCVideo 통계는 서비스 축 `mcvideo` — §5.6). 남은 것 = 송출 제어 이벤트 기록(MCPTT `floor.jsonl` 짝 — 허가·거절·회수·수신 허가).
 
 ### 5.4 단말 SDK (`libcimsue`)
 
@@ -474,7 +475,12 @@ Indicator, automatic 수신; 1차 CSP 는 normal) · JOIN 응답 `audio_ssrc`·`
 
 ### 5.6 콘솔 · OAM · 계측기
 
-- 통계(sip_statistics 의 서비스 축에 `mcvideo`). 콘솔 그룹 편집 서비스 절·가입자 MCVideo 자격(§5.1 콘솔)과 녹취·세션 이력 서비스 축 `mcvideo`(§5.3 녹취)는 구현.
+- **통계**(구현 — [sip_statistics.md](sip_statistics.md) §2.3·§3) — 서비스 축 값 `mcvideo`(`ptt` 와 나란히, 새 축 없음 — §7 D5). 판정 = CSP 가
+  요청의 MCVideo ICSI 로 가른 결과: CSP 시도 장부(`ptt_attempts` 줄 `service: mcvideo` — 시도 = 진행 중 세션이 없는 그룹으로의 INVITE, 결말 =
+  개시자 200 OK 또는 반환 지점마다의 원인 슬러그)와 세션 기록(`session.json` `type: mcvideo`, 성립 못 한 `setup_failed` 는 세지 않음) →
+  oam-svc 롤업 레코드 `svc: mcvideo` → `GET /api/v1/stats/calls?svc=mcvideo` → 콘솔 `성능 › MCVideo 통계`(`/stats/mcvideo` — 시도·세션·성공률·
+  완료율·**송출률**(영상 송출이 있던 세션 비율)·참여율·그룹별·구간별 상세). 발언 축 = 송출(녹취 세그먼트 슬롯마다 한 번, 영상 우선). 메시지 통계는
+  접속환경 축 그대로(MCVideo SIP 는 `ptt`). 콘솔 그룹 편집 서비스 절·가입자 MCVideo 자격(§5.1 콘솔)과 녹취·세션 이력 서비스 축 `mcvideo`(§5.3 녹취)도 구현.
 - 계측기 — libcsim MCVideo 단말(REGISTER 태그·affiliation·chat 합류·MCV0/1/2), 시나리오 `MCVIDEO-GROUP-CHAT`·`MCVIDEO-TRANSMIT-RECEIVE`·
   `MCVIDEO-MAX-TRANSMITTERS`, 지표(송출 허가 시간·수신 허가 시간·영상 RTP 도달율). 계측기 코드는 팀원 트랙이라 요구만 넘긴다.
 

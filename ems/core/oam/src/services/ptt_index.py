@@ -249,6 +249,25 @@ def seg_audio_tracks(s: dict) -> list:
     return out
 
 
+def seg_tx_tracks(s: dict) -> list:
+    """MCVideo 세그먼트의 송출 슬롯 목록 — 슬롯마다 송출자 구간 한 벌(영상 트랙이 있으면 그것, 없으면 음성).
+
+    송출 하나는 슬롯의 영상·음성 두 트랙에 같은 송출자 구간으로 실린다(CMP 가 슬롯의 두 트랙에 같은 송출자를 단다 —
+    recording.md §3.3.1). 트랙을 다 세면 송출이 두 번 잡히고, 음성만 세면 영상만 보낸 송출(송출 중 무전 — mcvideo.md
+    D12)이 빠진다. 그래서 슬롯 단위로 한 번 센다. tracks[] 가 없으면 음성 슬롯 규칙(seg_audio_tracks)을 쓴다."""
+    raw = s.get("tracks")
+    if not isinstance(raw, list) or not raw:
+        return seg_audio_tracks(s)
+    by_slot: dict = {}
+    for t in raw:
+        if not isinstance(t, dict) or not t.get("file") or t.get("kind") not in ("audio", "video"):
+            continue
+        cur = by_slot.get(t.get("slot", 0))
+        if cur is None or (t.get("kind") == "video" and cur.get("kind") != "video"):
+            by_slot[t.get("slot", 0)] = t
+    return [{"slot": sl, "speakers": t.get("speakers") or []} for sl, t in sorted(by_slot.items())]
+
+
 def seg_max_concurrent(tracks: list) -> int:
     """세그먼트 안에서 동시에 열려 있던 화자 구간의 최대 수"""
     events = []
@@ -328,9 +347,16 @@ def summarize(group_key: str, key: str, parts: list = None, gd: dict = None) -> 
     total_ms = talk_ms = 0
     st_min = en_max = ""
     active = False
-    sj = {}
     seg_type = ""
     now_window = datetime.now().strftime("%Y%m%d%H")
+    # 세션 디스크립터 — CSP 가 세션 시작 버킷에 남긴 당시 스냅샷(첫 버킷). floor 축은 이것이 정본(그룹 루트 group.json 은
+    #   최신이라 과거 세션에 소급되면 왜곡). 세그먼트를 세기 전에 읽는다 — MCVideo 는 발언 축이 송출(슬롯 단위)이다.
+    sj = {}
+    for d in parts:
+        sj = _read_json(os.path.join(d, "session.json")) or {}
+        if sj:
+            break
+    mcv = sj.get("type") == "mcvideo"
 
     for d in parts:
         windows.append(window_of(d))
@@ -340,8 +366,8 @@ def summarize(group_key: str, key: str, parts: list = None, gd: dict = None) -> 
                 seg_type = s["type"]
             total_ms += int(s.get("duration_ms", 0) or 0)
             # 동시 발언·전이중 private call 은 한 세그먼트에 슬롯 트랙이 여럿이다 —
-            #   speaker_id(대표 화자)만 세면 화자·발언이 과소 집계된다.
-            tracks = seg_audio_tracks(s)
+            #   speaker_id(대표 화자)만 세면 화자·발언이 과소 집계된다. MCVideo 는 송출 슬롯(영상 우선)으로 센다.
+            tracks = seg_tx_tracks(s) if (mcv or s.get("type") == "mcvideo") else seg_audio_tracks(s)
             max_con = max(max_con, seg_max_concurrent(tracks))
             for t in tracks:
                 spans = t.get("speakers") or []
@@ -379,10 +405,6 @@ def summarize(group_key: str, key: str, parts: list = None, gd: dict = None) -> 
         if not emergency:
             emergency = any((e.get("type") or "") in ("emergency_activated", "imminent_activated")
                             for e in _read_jsonl(os.path.join(d, "events.jsonl")))
-        if not sj:
-            # 세션 디스크립터 — CSP 가 세션 시작 버킷에 남긴 당시 스냅샷. floor 축은
-            #   이것이 정본(그룹 루트 group.json 은 최신이라 과거 세션에 소급되면 왜곡).
-            sj = _read_json(os.path.join(d, "session.json")) or {}
 
     # 서비스 축 — 같은 폴더의 MCPTT(ptt)·MCVideo(mcvideo) 세션(recording.md §3.3). session.json type 이 정본, 없으면(구 녹취·
     #   시간 경계 뒤 버킷) 세그먼트 type.

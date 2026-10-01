@@ -1087,6 +1087,294 @@
       }
     },
     {
+      "id": "cims.svc.mcvideo",
+      "label": "MCVideo 서비스",
+      "shapes": [
+        "kpi",
+        "time-bar",
+        "distribution",
+        "matrix"
+      ],
+      "endpoint": "/stats/calls?svc=mcvideo",
+      "query": [
+        "granularity",
+        "from",
+        "to"
+      ],
+      "map": {
+        "kpi": {
+          "items": [
+            {
+              "label": "세션",
+              "path": "totals.mcvideo.sessions",
+              "unit": "건"
+            },
+            {
+              "label": "송출률",
+              "path": "totals.mcvideo.talk_rate_sessions",
+              "unit": "%"
+            },
+            {
+              "label": "참여율",
+              "path": "totals.mcvideo.join_rate",
+              "unit": "%"
+            },
+            {
+              "label": "평균 세션 시간",
+              "path": "totals.mcvideo.avg_duration_sec",
+              "format": "duration"
+            },
+            {
+              "label": "호 시도",
+              "path": "totals.mcvideo.attempts",
+              "unit": "건"
+            },
+            {
+              "label": "성공률",
+              "path": "totals.mcvideo.success_rate",
+              "unit": "%"
+            },
+            {
+              "label": "완료율",
+              "path": "totals.mcvideo.completion_rate",
+              "unit": "%"
+            }
+          ]
+        },
+        "time-bar": {
+          "from": "buckets",
+          "label": [
+            "bucket",
+            "label",
+            "hour",
+            "date"
+          ],
+          "value": "mcvideo.sessions",
+          "unit": "건"
+        },
+        "distribution": {
+          "fromObject": "totals.mcvideo.by_group_sessions",
+          "totalPath": "totals.mcvideo.sessions"
+        },
+        "matrix": {
+          "from": "buckets",
+          "label": [
+            "bucket",
+            "label",
+            "hour",
+            "date"
+          ],
+          "columns": [
+            {
+              "key": "attempts",
+              "label": "시도",
+              "path": "mcvideo.attempts",
+              "totalPath": "totals.mcvideo.attempts",
+              "unit": "건",
+              "group": "attempt"
+            },
+            {
+              "key": "success",
+              "label": "성공률",
+              "path": "mcvideo.success_rate",
+              "totalPath": "totals.mcvideo.success_rate",
+              "unit": "%",
+              "paintZero": true,
+              "group": "setup"
+            },
+            {
+              "key": "r_denied",
+              "label": "거부",
+              "path": "mcvideo.reasons.denied",
+              "totalPath": "totals.mcvideo.reasons.denied",
+              "unit": "건",
+              "detailFrom": "mcvideo.causes",
+              "detailLabels": {
+                "group_not_found": "MCVideo 그룹 아님(404·113)",
+                "not_member": "비멤버(403·116)",
+                "not_affiliated": "제휴 안 됨 — prearranged(403·120)",
+                "affiliation_failed": "암묵적 제휴 실패 — chat(403·120)",
+                "not_entitled": "MCVideo 이용 자격 없음(403·108/109)",
+                "session_type_mismatch": "호 방식 불일치(404·117/118)",
+                "max_calls_exceeded": "동시 영상 호 상한 N6(486·103)",
+                "invalid_request": "MCVideo 요청 조건 불일치(403)"
+              },
+              "statusFrom": "mcvideo.statuses",
+              "statusLabels": {
+                "403": "403 비멤버·자격·제휴 없음",
+                "404": "404 MCVideo 그룹 아님·호 방식 불일치",
+                "486": "486 동시 영상 호 상한"
+              },
+              "detailUnknownLabel": "원인 미기록(응답코드 없음)",
+              "group": "setup"
+            },
+            {
+              "key": "r_error",
+              "label": "오류",
+              "path": "mcvideo.reasons.error",
+              "totalPath": "totals.mcvideo.reasons.error",
+              "unit": "건",
+              "detailFrom": "mcvideo.causes",
+              "detailLabels": {
+                "codec_mismatch": "제어 채널·AMR-WB 없음(488)",
+                "srtp_failed": "SRTP 협상 실패(488)",
+                "media_unavailable": "미디어 평면 MCVideo 자원 없음(500)",
+                "accept_failed": "개시자 leg 확립 실패(500)",
+                "media_aborted": "개시 중 CMP 회수"
+              },
+              "statusFrom": "mcvideo.statuses",
+              "statusLabels": {
+                "488": "488 제어 채널·코덱 없음 또는 SRTP 협상 실패",
+                "500": "500 미디어 자원 없음·확립 실패"
+              },
+              "detailUnknownLabel": "원인 미기록(응답코드 없음)",
+              "group": "setup"
+            },
+            {
+              "key": "r_noanswer",
+              "label": "무응답",
+              "path": "mcvideo.reasons.no_answer",
+              "totalPath": "totals.mcvideo.reasons.no_answer",
+              "unit": "건",
+              "detailFrom": "mcvideo.causes",
+              "detailLabels": {
+                "no_member_available": "초대할 제휴·등록 멤버 없음 — prearranged(480)",
+                "no_member_answered": "초대한 멤버 전원 거절 — prearranged(480)",
+                "answer_timeout": "초대 응답 한도 안에 아무도 안 받음 — prearranged(480)"
+              },
+              "statusFrom": "mcvideo.statuses",
+              "statusLabels": {
+                "480": "480 받을 멤버 없음"
+              },
+              "detailUnknownLabel": "원인 미기록(응답코드 없음)",
+              "group": "setup"
+            },
+            {
+              "key": "r_canceled",
+              "label": "취소",
+              "path": "mcvideo.reasons.canceled",
+              "totalPath": "totals.mcvideo.reasons.canceled",
+              "unit": "건",
+              "help": "prearranged 개시 대기 중(첫 멤버가 붙기 전) 개시자가 CANCEL 한 시도.",
+              "group": "setup"
+            },
+            {
+              "key": "r_unknown",
+              "label": "사유 모름",
+              "path": "mcvideo.reasons.unknown",
+              "totalPath": "totals.mcvideo.reasons.unknown",
+              "unit": "건",
+              "help": "사유도 응답코드도 없어 무엇 때문에 실패했는지 특정할 수 없는 호. 나중에 사유를 세분화해도 가를 근거가 없는 건들이라 따로 센다 — 이 칸이 줄어드는 것이 세분화의 진척도다.",
+              "group": "setup"
+            },
+            {
+              "key": "talk",
+              "label": "송출률",
+              "path": "mcvideo.talk_rate_sessions",
+              "totalPath": "totals.mcvideo.talk_rate_sessions",
+              "unit": "%",
+              "paintZero": true,
+              "group": "talk"
+            },
+            {
+              "key": "sessions",
+              "label": "세션",
+              "path": "mcvideo.sessions",
+              "totalPath": "totals.mcvideo.sessions",
+              "unit": "건",
+              "group": "talk"
+            },
+            {
+              "key": "talked",
+              "label": "송출있음",
+              "path": "mcvideo.talked",
+              "totalPath": "totals.mcvideo.talked",
+              "unit": "건",
+              "group": "talk"
+            },
+            {
+              "key": "join",
+              "label": "참여율",
+              "path": "mcvideo.join_rate",
+              "totalPath": "totals.mcvideo.join_rate",
+              "unit": "%",
+              "paintZero": true,
+              "group": "join"
+            },
+            {
+              "key": "invited",
+              "label": "초대 leg",
+              "path": "mcvideo.legs_invited",
+              "totalPath": "totals.mcvideo.legs_invited",
+              "unit": "개",
+              "group": "join"
+            },
+            {
+              "key": "joined",
+              "label": "참여 leg",
+              "path": "mcvideo.legs_joined",
+              "totalPath": "totals.mcvideo.legs_joined",
+              "unit": "개",
+              "group": "join"
+            },
+            {
+              "key": "comp",
+              "label": "완료율",
+              "path": "mcvideo.completion_rate",
+              "totalPath": "totals.mcvideo.completion_rate",
+              "unit": "%",
+              "paintZero": true,
+              "group": "end"
+            },
+            {
+              "key": "completed",
+              "label": "정상종료",
+              "path": "mcvideo.completed",
+              "totalPath": "totals.mcvideo.completed",
+              "unit": "건",
+              "group": "end"
+            },
+            {
+              "key": "reclaimed",
+              "label": "강제회수",
+              "path": "mcvideo.end_reasons.error",
+              "totalPath": "totals.mcvideo.end_reasons.error",
+              "unit": "건",
+              "group": "end"
+            },
+            {
+              "key": "open",
+              "label": "미결",
+              "path": "mcvideo.open",
+              "totalPath": "totals.mcvideo.open",
+              "unit": "건",
+              "help": "아직 끝나지 않은 세션. 끝나면 그 버킷이 다시 계산된다.",
+              "group": "pending"
+            },
+            {
+              "key": "late",
+              "label": "보존초과",
+              "path": "mcvideo.late_dropped",
+              "totalPath": "totals.mcvideo.late_dropped",
+              "unit": "건",
+              "help": "끝나기 전에 1분 집계 보존기간이 지나 되짚지 못한 세션.",
+              "group": "pending"
+            }
+          ],
+          "notes": [
+            "MCVideo 그룹 호(TS 24.281) — 시도·성립은 CSP 시도 장부(service mcvideo), 송출·참여·시간·종료는 세션 기록(녹취 폴더 session.json type mcvideo)이 센다. MCPTT 그룹 호와 같은 장부·같은 폴더를 쓰되 서비스 값으로 가른다",
+            "성공률 = 세션 / 시도 — **진행 중 세션이 없는 그룹으로 INVITE 한 사람 1명이 시도 1건**이다(chat 은 첫 합류자, prearranged 는 개시자). 진행 중 세션에 붙는 합류·재합류는 시도가 아니다(그건 참여율이 본다)",
+            "성립 = 개시자에게 200 OK 를 보냄. prearranged 는 첫 초대 멤버가 붙은 뒤에 보낸다 — 그 전에 끝난 세션(초대 무응답·개시자 취소)은 세션으로 세지 않고 시도의 실패로만 남는다",
+            "송출률 = 송출있음 / 세션 — 영상 송출(전송 제어 허가, TS 24.581)이 한 번이라도 있었던 세션의 비율. 세션은 섰는데 아무도 보내지 못한 송출 제어 장애는 이 값에서만 드러난다",
+            "완료율 = 정상종료 / 세션 — 참가자 해제·T1·TNG3 로 정상으로 끝난 세션의 비율. CMP 회수는 강제회수로 빠진다",
+            "비율 칸의 `—` 와 `0` 은 다르다 — `—` 는 분모가 없다(그 구간에 호가 없었거나 시도 장부가 MCVideo 를 남기기 전이다), **0 은 호가 있었는데 하나도 안 됐다**는 뜻이다",
+            "검산: **시도 = 세션 + 거부 + 오류 + 무응답 + 취소 + 사유 모름 + 미결**, **세션 = 정상종료 + 강제회수 + 진행 중**"
+          ],
+          "blankLabel": "호가 없는 시간"
+        }
+      }
+    },
+    {
       "id": "cims.msg-summary",
       "label": "메시지 합계 (전 interface)",
       "shapes": [

@@ -168,7 +168,7 @@ PTT 녹취는 세션 단위 단일 파일로 기록 (화자 변경과 무관하�
 | 파일 | 위치 | 의미 | 갱신 |
 |---|---|---|---|
 | `group.json` | 그룹 base 루트 1개 | **최신** 편성 스냅샷 — 좌측 목록(요약)의 분류·이름·멤버 근거 | 매 세션 시작 시 전체 재작성, 종료 시 `state:"ended"`+`end_time` 마킹 |
-| `session.json` | 세션 디렉터리(시작 버킷) | **세션 당시** 스냅샷 + 세션 사실(`type`/`sesid`/`initiator`/`call_id`/`start_time`) — 세션 이력 행의 정본. `type` = 서비스(`ptt` MCPTT 그룹 호 · `mcvideo` MCVideo 그룹 호 — 없으면 `ptt`) | 세션당 1회 기록(두 번째 멤버의 INVITE 가 개시자·시작시각을 덮지 않는다), 종료 시 동일 마킹 |
+| `session.json` | 세션 디렉터리(시작 버킷) | **세션 당시** 스냅샷 + 세션 사실(`type`/`sesid`/`initiator`/`call_id`/`start_time`) — 세션 이력 행의 정본. `type` = 서비스(`ptt` MCPTT 그룹 호 · `mcvideo` MCVideo 그룹 호 — 없으면 `ptt`) | 세션당 1회 기록(두 번째 멤버의 INVITE 가 개시자·시작시각을 덮지 않는다), 종료 시 동일 마킹 — `end_reason` = `normal`(정상 해제) · `error`(강제 회수) · `setup_failed`(MCVideo — 개시자 200 OK 전에 끝나 통화가 없던 세션, 통계는 세지 않는다 — sip_statistics.md §3) |
 
 `group.json` 은 **MCPTT 세션**이 쓴다 — 그 `state` 는 그룹의 MCPTT 세션 상태라, 같은 그룹의 MCVideo 세션은 `session.json` 만 쓴다(MCVideo 가 끝날 때
 진행 중인 MCPTT 세션이 ended 로 보이지 않게). MCVideo `session.json` 의 디스크립터는 편성·멤버 + `mcvideo{session_type,max_transmitters,

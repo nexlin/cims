@@ -52,5 +52,7 @@ export const STATS_VOLTE_LAYOUT = oneCard(
   'stats.volte', 'VoLTE 통계', 'cims.stats.volte', 10)
 export const STATS_PTT_LAYOUT = oneCard(
   'stats.ptt', 'PTT 통계', 'cims.stats.ptt', 10)
+export const STATS_MCVIDEO_LAYOUT = oneCard(
+  'stats.mcvideo', 'MCVideo 통계', 'cims.stats.mcvideo', 1)
 export const STATS_IFACE_LAYOUT = oneCard(
   'stats.interfaces', '인터페이스 통계', 'cims.stats.interfaces', 11)

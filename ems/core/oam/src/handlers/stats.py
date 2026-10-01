@@ -38,6 +38,9 @@ logger = logging.getLogger(__name__)
 # 클라이언트 응답용 공통 에러 바디 — 원인 상세(호스트/계정 힌트가 실리는 DB 예외 문자열 등)는
 # 화면에 노출하지 않고 oam 로그에만 남긴다.
 _ERR_INTERNAL = {'error': 'stats query failed (oam 로그 참조)'}
+# 호 통계 서비스축 — 접속환경 축(volte·ptt) + MC 서비스 mcvideo(MCVideo 그룹 호는 접속환경 kind 가 ptt 라 시도 장부·세션
+#   기록의 service 로 가른다 — sip_statistics.md §3). 메시지 통계는 접속환경 축 그대로(volte·ptt)
+_CALL_SVCS = ('all', 'volte', 'ptt', 'mcvideo', 'unknown')
 
 
 def _get_db(config: dict):
@@ -494,9 +497,8 @@ async def handle_stats(handler_args: HandlerArgs, kwargs: dict) -> HandlerResult
                     'error': 'invalid granularity',
                     'allowed': list(stats_rollup.GRANULARITIES)})
             svc = (qp('svc', 'all') or 'all').lower()
-            if svc not in ('all', 'volte', 'ptt', 'unknown'):
-                return HandlerResult(status=400, body={
-                    'error': 'invalid svc', 'allowed': ['all', 'volte', 'ptt', 'unknown']})
+            if svc not in _CALL_SVCS:
+                return HandlerResult(status=400, body={'error': 'invalid svc', 'allowed': list(_CALL_SVCS)})
             # date=YYYY-MM-DD 는 "그 날 하루" 축약 — messages 축과 같은 규약.
             d = qp('date')
             f = _norm_dt(qp('from') or (d or ''))
@@ -3596,7 +3598,8 @@ CIMS_STATS_API_DOCS = [
          {'name': 'granularity', 'in': 'query', 'type': 'string', 'required': False,
           'enum': list(stats_rollup.GRANULARITIES), 'desc': '버킷 단위 (기본 1h)'},
          {'name': 'svc', 'in': 'query', 'type': 'string', 'required': False,
-          'enum': ['all', 'volte', 'ptt', 'unknown'], 'desc': '서비스축 (기본 all)'},
+          'enum': list(_CALL_SVCS),
+          'desc': '서비스축 (기본 all) — volte · ptt(MCPTT 그룹 호) · mcvideo(MCVideo 그룹 호, sip_statistics.md §3)'},
      ],
      'response': '{from, to, granularity, svc, source, totals{}, buckets[]}',
      'response_fields': [
@@ -3625,8 +3628,10 @@ CIMS_STATS_API_DOCS = [
                               'all': {'attempts': 12, 'sessions': 11}}]},
      'errors': list(_ERR_COMMON),
      'notes': ['비율은 저장하지 않는다 — 분자·분모를 함께 내므로 화면이 구간을 다시 합칠 수 있다.',
-               'PTT 는 attempts 가 0 이다: 실패한 그룹통화 시도가 원천에 없다(sip_statistics.md §8 Y6). '
-               '세션 기록이 곧 성립이라 세면 성공률이 항상 100% 가 된다.',
+               'PTT·MCVideo 시도는 CSP 시도 장부(ptt_attempts — 줄의 service 로 서비스를 가른다)가 센다. 장부가 그 서비스를 '
+               '남기기 전 구간은 attempts 가 null(모름)이고 비율이 비며 rate_gap 이 이유를 알린다(sip_statistics.md §2.1).',
+               'mcvideo 의 talked·turns·talk_sum_sec 는 송출(영상 전송 — TS 24.581)을 센다: 송출이 한 번이라도 있었던 세션·'
+               '송출 횟수·송출 시간.',
                '`all` 은 svc 필터와 무관하게 전체 서비스 합계다.'],
      'auth': dict(_AUTH_MONITOR)},
 

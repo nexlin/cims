@@ -96,6 +96,9 @@ export const STATS_SCREEN_LAYOUTS = {
   //   들어왔나)과 세션 기준 소통률(세션은 섰는데 아무도 발언 못 한 floor 장애).
   //   NER 은 내지 않는다: 면제할 '상대 사정' 이 PTT 에는 없다.
   ptt: svcLayout('cims.svc.ptt', [4, 0, 5, 6, 1, 2, 3], '그룹콜 수 추이', '그룹별 사용 빈도'),
+  // MCVideo 그룹 호 — PTT 와 같은 차례(시도 → 세션 → 비율). 소통률 자리는 **송출률**(영상 송출이 있던 세션 비율 —
+  //   TS 24.581 전송 제어 허가)이다. 시도는 진행 중 세션이 없는 그룹으로의 INVITE 1건(sip_statistics.md §2.3).
+  mcvideo: svcLayout('cims.svc.mcvideo', [4, 0, 5, 6, 1, 2, 3], '영상 호 수 추이', '그룹별 사용 빈도'),
   interfaces: ifaceLayout,
 } as const
 
@@ -109,5 +112,6 @@ const screen = (key: keyof typeof STATS_SCREEN_LAYOUTS, id: string, title: strin
 export const STATS_SCREEN_WIDGETS: WidgetDef[] = [
   screen('volte', 'cims.stats.volte', 'VoLTE 통계 화면'),
   screen('ptt', 'cims.stats.ptt', 'PTT 통계 화면'),
+  screen('mcvideo', 'cims.stats.mcvideo', 'MCVideo 통계 화면'),
   screen('interfaces', 'cims.stats.interfaces', '인터페이스 통계 화면'),
 ]

@@ -26,6 +26,7 @@
 |---|---|---|---|---|
 | 1:1 통화 | 1 | 1 | 2 | 기준 |
 | 그룹통화 (멤버 N) | 1 | 1 | 1+N | 발신 1 + 착신 N (fan-out) |
+| MCVideo 그룹 호 | 1 | 1 | 1+N | **진행 중 세션이 없는 그룹으로의 INVITE** 1건 — chat 은 첫 합류자, prearranged 는 개시자(초대 N, TS 24.281 §9.2.1·§9.2.2). 진행 중 세션에 붙는 합류·재합류(`gr`)는 leg |
 | 감청 | 1 | 1 | +1 | **감청 leg 은 시도·세션 지표에서 제외** |
 | 착신전환 | 1 | 1 | 2~3 | 원착신 실패 + 전환착신 성공 = 시도 1·성공 1 |
 | 당겨받기 | 1 | 1 | 2~3 | 받은 주체가 달라도 시도는 1 |
@@ -398,7 +399,7 @@ VoLTE 표에는 `rejected`(거절)·`no_answer`(무응답) 두 열이 없어, �
 두 화면이 다른 숫자를 내는 것은 정상이므로, 콘솔은 제목으로 축을 갈라 표시한다 —
 `성능 > PTT/VoLTE 통계` = **시도 결말**, `성능 > 인터페이스 통계` = **응답 메시지 수**.
 
-**PTT 시도 장부 레코드** (통계 영역 `ptt_attempts/YYYYMMDD.jsonl`, CSP 가 결말마다 1줄):
+**시도 장부 레코드** (통계 영역 `ptt_attempts/YYYYMMDD.jsonl`, CSP 가 결말마다 1줄 — MCPTT·MCVideo 그룹 호가 같은 장부):
 
 | 키 | 뜻 |
 |---|---|
@@ -410,6 +411,7 @@ VoLTE 표에는 `rejected`(거절)·`no_answer`(무응답) 두 열이 없어, �
 | `cause` | **실패 원인 슬러그** — 반환 지점마다 하나(아래 표). 성립이면 비움 |
 | `status` | 결말 SIP 응답코드(403·488·480…) — 성립·무응답 경로면 0 |
 | `sesid` | 성립한 경우 세션 키 (세션 기록과 대조용 — §3) |
+| `service` | `ptt`(MCPTT 그룹 호) \| `mcvideo`(MCVideo 그룹 호) — 없는 줄(서비스 값 이전 CSP)은 `ptt`. 둘 다 접속환경 kind 가 `ptt` 라 kind 로는 못 가른다 |
 
 **사유(`reason`) 두 칸으로는 "왜" 를 답할 수 없다.** 조치가 갈리는 지점이 사유 안에 있다 —
 같은 488 이 코덱 불일치와 SRTP 협상 실패 둘이고(전자는 서비스 코덱 설정, 후자는 SRTP 정책),
@@ -433,6 +435,34 @@ VoLTE 표에는 `rejected`(거절)·`no_answer`(무응답) 두 열이 없어, �
 | `ack_timeout_abandoned` | 확인 통화 설정 — TNG1 만료, 만료 동작 abandon (§6.3.3.3) | `no_answer` | 480 |
 | `ack_required_rejected` | 확인 통화 설정 — 필수 멤버 거절, 만료 동작 abandon (§6.3.3.3) | `no_answer` | 멤버 거절 코드 |
 | `initiator_canceled` | 확인 통화 설정 대기 중 개시자 CANCEL | `canceled` | — |
+
+**MCVideo 그룹 호의 원인** — `CMcVideoAsModule`(`McVideoCallService::OnIncomingInvite` 와 개시 대기 결말)의 반환 지점과 1:1 이다.
+같은 사정은 MCPTT 슬러그를 그대로 쓰고(`group_not_found`·`not_member`·`not_affiliated`·`codec_mismatch`·`srtp_failed`·
+`accept_failed`·`no_member_answered`·`initiator_canceled`), MCVideo 에만 있는 것을 더한다. Warning 은 TS 24.281 §4.4 코드다.
+
+| `cause` | 뜻 | `reason` | `status` |
+|---|---|---|---|
+| `media_unavailable` | 미디어 평면이 MCVideo 자원(`resource.mcvideo`)을 광고하지 않음 (TS 24.281 §9.2.2.4.1.1 1)) | `error` | 500 |
+| `invalid_request` | Accept-Contact 에 MCVideo feature·ICSI 가 없거나 Contact 에 `isfocus` (§9.2.2.4.1.1 2)) | `denied` | 403 |
+| `group_not_found` | MCVideo 그룹 문서가 없음 — Warning 113 | `denied` | 404 |
+| `not_member` | 그룹 멤버가 아님 — Warning 116 | `denied` | 403 |
+| `session_type_mismatch` | mcvideo-info `session-type` 이 그룹 호 방식과 다름 — Warning 117/118 (§6.3.5.2 5)) | `denied` | 404 |
+| `not_entitled` | MCVideo 이용 자격(user profile) 없음 — Warning 108/109 | `denied` | 403 |
+| `max_calls_exceeded` | 동시 MCVideo 호 상한 N6 — Warning 103 | `denied` | 486 |
+| `not_affiliated` | prearranged 에 제휴하지 않은 개시 — Warning 120 (§9.2.1.4.2 13)a)) | `denied` | 403 |
+| `affiliation_failed` | chat 합류의 암묵적 제휴 실패 — Warning 120 (§9.2.2.4.1.1 12)) | `denied` | 403 |
+| `codec_mismatch` | 제어 채널(m=application MCVideo)·AMR-WB 음성이 offer 에 없음 (§9.2.2.4.1.1 9)) | `error` | 488 |
+| `srtp_failed` | 음성 SRTP 협상 실패 | `error` | 488 |
+| `accept_failed` | 개시자 leg 확립(로스터·JOIN·200 OK) 실패 | `error` | 500 |
+| `no_member_available` | prearranged — 초대할 제휴·MCVideo 등록 멤버가 없음 | `no_answer` | 480 |
+| `no_member_answered` | prearranged — 초대한 멤버 전원 최종 거절 | `no_answer` | 480 |
+| `answer_timeout` | prearranged — 개시 대기 한도(`kInitiateWaitSec` 10 s) 안에 아무도 받지 않음 | `no_answer` | 480 |
+| `initiator_canceled` | prearranged 개시 대기 중 개시자 CANCEL | `canceled` | — |
+| `media_aborted` | 개시 대기 중 미디어 평면이 그룹을 회수(`PTT_GROUP_ABORTED`) | `error` | 480 |
+
+**성립 = 개시자에게 200 OK 를 보낸 지점**이다(MCPTT 와 같은 정의) — chat 은 첫 합류자 수락, prearranged 는 첫 초대 멤버가
+붙은 뒤(§9.2.1.4.2). 개시 결말을 남기지 않은 채 세션이 해제되는 경로가 생기면 사유 없이 남는다 — `사유 모름` 이 늘어
+스스로 드러난다.
 
 집계는 이것을 `causes: {슬러그: 건수}` 축으로 접는다. **`cause` 가 없는 줄은 담지 않는다** —
 `unknown` 으로 채우면 "원인 불명" 과 "구 판본이 안 남긴 것" 이 한 칸에 섞인다.
@@ -634,8 +664,8 @@ CANCEL 은 한 자리) 표 전체를 기준으로 정규화하면 작은 열이 
 | 통계 | 원천 | 위치 |
 |---|---|---|
 | 호 (VoLTE) | `call.json` | `{Recording.Dir}/volte/YYYY/MM/DD/HH/…/{key}.d/call.json` (`end_status` 포함) |
-| 호 (PTT) — 시도 | **시도 장부** | `{Stats.Dir}/ptt_attempts/YYYYMMDD.jsonl` (CSP 가 결말마다 1줄) |
-| 호 (PTT) — 내용 | 세션 디스크립터 | `{Recording.Dir}/ptt/{gid}/YYYY/MM/DD/HH/{sessKey}/session.json` (`services.ptt_index` 경유) |
+| 호 (PTT·MCVideo) — 시도 | **시도 장부** | `{Stats.Dir}/ptt_attempts/YYYYMMDD.jsonl` (CSP 가 결말마다 1줄, 줄의 `service` 로 서비스) |
+| 호 (PTT·MCVideo) — 내용 | 세션 디스크립터 | `{Recording.Dir}/ptt/{gid}/YYYY/MM/DD/HH/{sessKey}/session.json` (`services.ptt_index` 경유, `type` 으로 서비스) |
 | leg 묶음 | `session.json` | `{"session_id":…, "sesid":…, "call_ids":[…]}` |
 | 메시지 (sip·cmp·csc) | 원문 JSONL | `{ServiceLogging.Dir}/sip/YYYY/MM/DD/HH/{sys}_{iface}.msg.{5분버킷}.jsonl` |
 | 메시지 (https) | **flow 로그** | `{ServiceLogging.Dir}/sip/YYYY/MM/DD/HH/{sys}.flow.{5분버킷}.jsonl` 의 `proto=HTTPS` 엔트리 |
@@ -657,6 +687,20 @@ CANCEL 은 한 자리) 표 전체를 기준으로 정규화하면 작은 열이 
 
 **둘이 어긋나면 그 자체가 신호다** — 장부의 성립 수와 그 구간의 세션 수가 다르면 한쪽이
 유실된 것이므로 집계가 로그로 남긴다(조용히 큰 쪽을 택하지 않는다).
+
+**MCVideo 그룹 호는 같은 두 원천을 서비스 값으로 가른다** — 장부 줄의 `service`, 세션 행의 `service`(`session.json`
+`type`). 집계 레코드의 `svc` 가 `mcvideo` 로 따로 서고(`services.stats_rollup.MC_SVCS`), MCPTT 지표에 섞이지 않는다.
+세 가지가 MCPTT 와 다르다:
+
+- **발언 축은 송출이다** — `talked` = 영상 송출(전송 제어 허가, TS 24.581)이 한 번이라도 있었던 세션, `turns`·`talk_sum_sec`·
+  `by_user` = 송출 횟수·시간·송출자. 녹취 세그먼트의 슬롯마다 한 번 센다(영상 트랙 우선, 없으면 음성 —
+  `ptt_index.seg_tx_tracks`): 송출 하나가 슬롯의 영상·음성 두 트랙에 같은 구간으로 실리므로 트랙을 다 세면 두 번이고,
+  음성만 세면 영상만 보낸 송출(송출 중 무전, [mcvideo.md](mcvideo.md) D12)이 빠진다.
+- **성립하지 못한 세션은 세션이 아니다** — prearranged 는 첫 초대 멤버의 응답 전에 CMP 녹취 자리(세션 디렉터리)가
+  먼저 서므로, 개시자 200 OK 전에 끝난 세션도 `session.json` 이 남는다. CSP 가 그 종료를 `end_reason: setup_failed` 로
+  적고 집계는 그 행을 세지 않는다 — 그 시도의 실패는 장부가 센다.
+- **장부가 그 서비스를 남기는가는 서비스마다 본다** — 장부 파일이 있어도 서비스 값을 남기기 전의 CSP 는 MCVideo 시도를
+  적지 않았다. 그 날 장부에 그 서비스의 줄이 하나도 없으면 성립은 세션 기록이 세고 시도는 모름(`attempts_unknown`)이다.
 
 원문 레코드 키: `ts · dir · peer · caller · callee · sesid · proto · msg`. `proto` 에는
 `SIP` 외에 `CSC`(내부 HTTP)·`JSON`(CMP 제어)·`HTTPS` 가 섞여 들어오므로 **인터페이스로 먼저
@@ -690,6 +734,11 @@ CSC 는 이 복제를 **읽을 때마다 디렉터리에서 다시 읽는다**(`
 프로비저닝·H(A1) 결박·관제 앱 번호 개설 후보·IdMS 도메인 유도). CSC 는 이 정의를 쓰지 않으므로 변경을 알리는 신호가
 없고, 기동 시 1회만 읽으면 접속 서비스를 새로 만든 직후 그 서비스의 가입자 자격(H(A1)) 유도가 재기동 전까지
 `unknown service` 로 실패한다. 복제가 없는 배포(store 비공유)에서는 csc.json `Provisioning.Services` 가 폴백이다.
+
+**호 통계의 서비스축에는 MC 서비스 `mcvideo` 가 더해진다** — MCVideo 그룹 호는 접속환경 kind 가 `ptt` 라 이 판정으로는
+`ptt` 이고, CSP 가 요청의 MCVideo ICSI 로 가른 결과(시도 장부·세션 기록의 `service`, §3)를 그대로 쓴다. **메시지 통계는
+접속환경 축 그대로**(`volte | ptt`)다 — MCVideo SIP 메시지는 `ptt` 에 든다. 응답에는 ICSI 가 없어 메시지 단위로 MC 서비스를
+가를 근거가 없고, 메시지 축이 답하는 것("어느 접속환경에 어떤 응답이 얼마나 나갔나")은 그것으로 충분하다.
 
 ## 4. 시간 축
 
@@ -763,7 +812,7 @@ SIP 원문 / 호 이력          ← 원본. 조회에 직접 쓰지 않는다
   "bucket": "2026-09-02 15:59",        // 버킷 시작 (KST)
   "unit": "1m",
   "v": 2,                               // 레코드 세대 (없으면 1)
-  "svc": "ptt",                         // volte | ptt | unknown
+  "svc": "ptt",                         // volte | ptt | mcvideo | unknown
   "call": {                             // 호 통계 — 시도 기준
     "attempts": 12,
     "sessions": 11,                     // 세션 성립 (성공률 분자)
@@ -941,7 +990,7 @@ store 는 이중화에서 단일 writer 리스 하에 있는 공유 자원이고
 CREATE TABLE stats_agg (
   unit    VARCHAR(4)  NOT NULL,   -- 1m | 1h | 1d | 1M
   bucket  DATETIME    NOT NULL,   -- 버킷 시작 (§4.3)
-  svc     VARCHAR(16) NOT NULL,   -- volte | ptt | unknown
+  svc     VARCHAR(16) NOT NULL,   -- volte | ptt | mcvideo | unknown
   attempts BIGINT, sessions BIGINT, talked BIGINT, completed BIGINT,
   duration_sum BIGINT, pdd_sum BIGINT, pdd_n BIGINT,
   extra   JSON,                   -- 메시지 축·종료사유·그룹별 (확장 축)
@@ -1065,8 +1114,8 @@ GET /api/v1/stats/messages/{iface}?from=&to=&granularity=&svc=
 
 - `granularity`: `1m|5m|10m|1h|1d|1w|1M|1y`
 - `{iface}`: `sip|cmp|csc|https` — **넷 다 집계 경로**다(§4.1)
-- `svc`: `volte|ptt|unknown|all` (기본 `all`) — 서비스축은 `sip` 에만 뜻이 있고, 나머지는
-  판정할 SIP URI 가 없어 `unknown` 으로 모인다(§5.1)
+- `svc`: `volte|ptt|mcvideo|unknown|all` (기본 `all`) — 메시지 축에서 서비스축은 `sip` 에만 뜻이 있고, 나머지는
+  판정할 SIP URI 가 없어 `unknown` 으로 모인다(§5.1). `mcvideo` 는 호 축(`/stats/calls`)에만 있다(§3.1)
 - **`sip` 외는 세대 2 이상의 레코드만 쓴다.** 인터페이스 축 이전 레코드에는 그 칸이 아예
   없어서, 그대로 읽으면 0 건이 나가고 커버리지는 "덮였다" 고 한다. 세대가 모자란 구간은
   원본에서 다시 세거나 `missing_days` 로 나간다(§5.1 세대)
@@ -1235,6 +1284,7 @@ PTT 거절 지점에도 장부 기록을 둔다 — 응답코드는 그대로 40
 | `/stats/messages/{iface}` (`date`·`granularity`, 버킷 `label`) | `svc` + 1m/1w/1M/1y, 버킷 키 통일. 옛 필드(`label`·`count`·`volte`·`ptt`·`unknown`·`hour`)는 그대로 유지 | 완료 — **네 인터페이스 전부** 집계 경로(§4.1). 집계가 없는 구간만 옛 스캔으로 폴백 |
 | `/stats/service/voip` (`attempts`/`success`/`success_rate`) | `/stats/calls?svc=volte` 로 흡수 | 신규 엔드포인트 제공. 옛 엔드포인트는 존치 |
 | `/stats/service/ptt` (`calls`) | `/stats/calls?svc=ptt` | 완료 — 그룹 축까지 집계에 포함. 콘솔 데이터소스 `cims.svc.ptt` 가 새 엔드포인트를 읽는다 |
+| (없음 — MCVideo 그룹 호) | `/stats/calls?svc=mcvideo` | 완료 — 콘솔 `성능 › MCVideo 통계`(`/stats/mcvideo`, 데이터소스 `cims.svc.mcvideo` — 소통률 자리 = 송출률, 취소 열) |
 
 콘솔 `성능 > VoLTE/PTT 통계` 는 데이터소스(`cims.svc.volte`/`cims.svc.ptt`)가 이 엔드포인트를
 가리킨다 — 지표 카드·추이·분포가 한 응답에서 나오므로 화면 안에서 숫자가 갈라지지 않는다.

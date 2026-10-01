@@ -36,7 +36,7 @@ import { SERVICE_DEFS_LAYOUT } from '@core/widgets/layouts'  // 코어 레이아
 
 import {
   SERVICE_STATUS_LAYOUT, SERVICE_HISTORY_VOLTE_LAYOUT, SERVICE_HISTORY_PTT_LAYOUT,
-  STATS_VOLTE_LAYOUT, STATS_PTT_LAYOUT, STATS_IFACE_LAYOUT, ABNORMAL_SESSIONS_LAYOUT,
+  STATS_VOLTE_LAYOUT, STATS_PTT_LAYOUT, STATS_MCVIDEO_LAYOUT, STATS_IFACE_LAYOUT, ABNORMAL_SESSIONS_LAYOUT,
   LEAK_RECLAIMS_LAYOUT,
 } from './layouts'
 
@@ -118,6 +118,8 @@ export const cimsManifest: ServiceManifest = {
       routes: [
         { path: '/stats/volte', title: 'VoLTE 통계', layout: STATS_VOLTE_LAYOUT, layoutId: 'stats.volte', requiredRole: 'monitor' },
         { path: '/stats/ptt',   title: 'PTT 통계',   layout: STATS_PTT_LAYOUT,   layoutId: 'stats.ptt',   requiredRole: 'monitor' },
+        { path: '/stats/mcvideo', title: 'MCVideo 통계', layout: STATS_MCVIDEO_LAYOUT, layoutId: 'stats.mcvideo',
+          requiredRole: 'monitor' },
         { path: '/stats/interfaces', title: '인터페이스 통계', layout: STATS_IFACE_LAYOUT,
           layoutId: 'stats.interfaces', requiredRole: 'monitor' },
         { path: '/stats/leak-reclaims', title: '누수 회수(sweeper)', requiredRole: 'monitor',

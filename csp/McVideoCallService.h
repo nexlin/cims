@@ -23,8 +23,9 @@ class CspPttGroup;
  * psip 규약(이 서비스가 기대는 것): StopCall 은 EventCallEnd 를 부르지 않는다(로컬 종료) · EventCallStart 는 나가는
  * INVITE 의 2xx 에서만 온다(AcceptCall 한 들어오는 leg 는 오지 않는다).
  *
- * 1차 범위: 일반 호(normal)의 chat·prearranged 개시·합류·재합류·이탈·해제. 긴급·임박·방송·ad hoc·private·확인
- * 통화·녹취· conference NOTIFY·미디어 SRTP 는 뒤(§5.2.1 «1차 범위 밖»).
+ * 1차 범위: 일반 호(normal)의 chat·prearranged 개시·합류·재합류·이탈·해제 + 미디어 SRTP·녹취(recording.md §3.3)·
+ * 시도 장부(sip_statistics.md §2.3). 긴급·임박·방송·ad hoc·private·확인 통화·conference NOTIFY 는 뒤(§5.2.1
+ * «1차 범위 밖»).
  */
 class CMcVideoCallService {
 public:
@@ -90,6 +91,11 @@ private:
         std::string strRecKey;      // CallDir 세션 키 (PttSessionKey("mcvideo", 그룹))
         std::string strRecordDir;   // 그룹 base — PTT_GROUP_ADD record_dir
         std::string strSessionDir;  // 세션 디렉터리 이름 S{ts}_{n} — PTT_GROUP_ADD session_dir
+        // 시도 장부(sip_statistics.md §2.3 — 서비스 mcvideo). 세션을 연 INVITE 가 개시 시도 1건이고, 결말(개시자 200 OK
+        //   = 성립 · 개시 실패)을 한 번만 남긴다. bAttemptOpen = 결말이 아직 안 남았다
+        bool bAttemptOpen = false;
+        bool bEstablished = false;  // 개시자에게 200 OK 를 보냈다 — 아니면 끝날 때 end_reason setup_failed
+        std::string strGroupKey;    // 장부 group_key = ptt_groups.id (surrogate)
     };
 
     /** 녹취 세션 시작 — CallDir 세션 디렉터리·session.json(그룹 디스크립터 + MCVideo 속성, type mcvideo)을
@@ -101,6 +107,10 @@ private:
     static std::string _RecordDescriptor( const CspPttGroup &clsGroup, bool bPrearranged );
     /** 검사 실패 응답 (Warning 은 비면 싣지 않는다) */
     void _Reject( const char *pszCallId, int iStatus, int iWarnCode, const char *pszWarnText );
+    /** 개시 시도의 결말을 시도 장부에 한 번 남긴다 — 성립(개시자 200 OK) 또는 실패(pszReason·pszCause·iStatus 는
+     * sip_statistics.md §2.3 어휘). 이미 남겼으면(bAttemptOpen false) 아무것도 하지 않는다. 호출자가 m_mutex 보유. */
+    void _CloseAttempt( Session &clsSes, bool bEstablished, const char *pszReason = "", const char *pszCause = "",
+                        int iStatus = 0 );
     /** 개시자·합류자 수락 — 로스터 등록 → JOIN ①·② → 200 OK(answer). 성공이면 true. 호출자가 m_mutex 보유. */
     bool _AcceptLeg( Session &clsSes, const std::string &strCallId, const std::string &strMember,
                      CSipCallRtp *pclsOffer, bool bImplicit );

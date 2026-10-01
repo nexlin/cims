@@ -359,8 +359,20 @@ def _scan_volte_hour(recordings: str, hour: str) -> list:
     return out
 
 
+# 시도 장부·세션 기록이 함께 담는 MC 서비스(sip_statistics.md §3) — 장부 줄·인덱스 행의 `service` 로 가른다.
+#   MCPTT 그룹 호(`ptt`)와 MCVideo 그룹 호(`mcvideo`)는 같은 장부·같은 녹취 폴더를 쓴다(접속환경 kind 가 둘 다 ptt 라
+#   kind 로는 못 가른다). 값이 없는 줄·행은 서비스 값 이전 것이라 `ptt` 다.
+MC_SVCS = ('ptt', 'mcvideo')
+
+
+def _mc_svc(row: dict) -> str:
+    v = row.get('service') or 'ptt'
+    return v if v in MC_SVCS else 'ptt'
+
+
 def _scan_ptt_day(day: str, force_index: bool = False) -> list:
-    """그 날 시작한 PTT 세션 → [(minute, row)]. 소스는 세션 읽기 모델(ptt_index).
+    """그 날 시작한 MC 그룹 호 세션(MCPTT·MCVideo) → [(minute, row)]. 소스는 세션 읽기 모델(ptt_index). 서비스는 행의
+    `service` 로 호출측이 가른다(`_mc_svc`).
 
     디렉터리를 직접 훑지 않는 이유는 `_calc_ptt_stats` 와 같다 — 콘솔 호 이력과 세션 판정
     기준이 두 벌이 되면 두 화면이 다른 값을 낸다.
@@ -374,9 +386,9 @@ def _scan_ptt_day(day: str, force_index: bool = False) -> list:
     rows = ptt_index.day(day[0:4] + day[5:7] + day[8:10], force=force_index) or []
     out = []
     for r in rows:
-        # MCPTT 세션만 — 같은 녹취 폴더의 MCVideo 그룹 호(service mcvideo)는 floor 가 아니라 송출 제어라 MCPTT 지표(발언·완료율)에
-        #   섞이지 않는다. MCVideo 축은 따로 센다(sip_statistics.md 서비스 축 — A12).
-        if (r.get('service') or 'ptt') != 'ptt':
+        # 성립하지 못한 세션 — CSP 가 개시자에게 200 OK 를 보내기 전에 끝난 MCVideo 세션(초대 무응답·수락 실패)은 세션
+        #   디렉터리(CMP 녹취 자리)만 섰고 통화는 없었다. 세션이 아니므로 세지 않는다 — 그 시도의 실패는 장부가 센다(§3).
+        if r.get('end_reason') == 'setup_failed':
             continue
         mi = _minute(r.get('start', '') or r.get('start_time', ''))
         # 시작일이 이 날짜인 세션만 — 자정을 넘긴 세션은 두 날의 목록에 모두 나타날 수
@@ -745,6 +757,7 @@ def build_minutes(roots: Roots, minutes: set, config: dict = None,
 
     hours = sorted({_hour_of(m) for m in minutes})
     days = sorted({_day_of(m) for m in minutes})
+    ledger_by_day: dict = {}     # 날 → 장부가 남기는 서비스 집합
 
     # 서비스 판정 맵 — 시간마다 다시 만들 이유가 없어 한 번만.
     try:
@@ -775,43 +788,48 @@ def build_minutes(roots: Roots, minutes: set, config: dict = None,
     for day in days:
         if deadline is not None and time.monotonic() >= deadline:
             break
-        # 시도 장부 — 분모(attempts)·성립(sessions)·실패 사유
-        has_ledger = bool(_ptt_attempts_file(roots.stats, day)) and \
-            os.path.isfile(_ptt_attempts_file(roots.stats, day))
-        n_established = 0
+        # 시도 장부 — 분모(attempts)·성립(sessions)·실패 사유. 서비스(`ptt`·`mcvideo`)마다 따로 접는다.
+        #   **장부가 그 서비스를 남기는가는 서비스마다 본다** — 장부 파일이 있어도 서비스 값을 남기기 전의 CSP 는
+        #   MCVideo 시도를 적지 않았다. 그 서비스의 줄이 하루 내내 없으면 그 날 그 서비스는 장부 이전과 같다(성립은
+        #   세션 기록이 세고, 시도는 모름 — 아래 표시).
+        ledger_svcs: set = set()
+        n_established: dict = {}
         for mi, row in _scan_ptt_attempts_day(roots.stats, day):
+            sv = _mc_svc(row)
+            ledger_svcs.add(sv)
             if mi in minutes:
-                _fold_ptt_attempt(row, _agg(mi, 'ptt'))
+                _fold_ptt_attempt(row, _agg(mi, sv))
                 if (row.get('outcome') or '') == 'established':
-                    n_established += 1
-        # 세션 기록 — 발언·참여·시간·완료 (장부가 없는 날은 성립까지)
-        n_sessions = 0
+                    n_established[sv] = n_established.get(sv, 0) + 1
+        ledger_by_day[day] = ledger_svcs
+        # 세션 기록 — 발언(MCVideo 는 송출)·참여·시간·완료 (장부가 그 서비스를 안 남긴 날은 성립까지)
+        n_sessions: dict = {}
         for mi, row in _scan_ptt_day(day, force_index=force_index):
             if mi in minutes:
-                _fold_ptt(row, _agg(mi, 'ptt'), count_session=not has_ledger)
-                n_sessions += 1
+                sv = _mc_svc(row)
+                _fold_ptt(row, _agg(mi, sv), count_session=sv not in ledger_svcs)
+                n_sessions[sv] = n_sessions.get(sv, 0) + 1
         # 두 원천의 성립 수가 다르면 한쪽이 유실된 것이다(§3). 조용히 큰 쪽을 택하지 않고
         #   알린다 — 장부만 있고 세션이 없으면 녹취/세션 디렉터리 쓰기가 막힌 것이고,
-        #   반대면 장부 쓰기가 막힌 것이라 원인이 서로 다르다.
-        if has_ledger and n_established != n_sessions and (n_established or n_sessions):
-            logger.log_warning(
-                f"[stats-rollup] PTT 성립 수 불일치 {day}: 장부 {n_established} vs 세션 {n_sessions} "
-                f"— 한쪽 원천이 유실됐을 수 있습니다")
+        #   반대면 장부 쓰기가 막힌 것이라 원인이 서로 다르다. 장부가 남기는 서비스만 대조한다.
+        for sv in sorted(ledger_svcs):
+            ne, ns = n_established.get(sv, 0), n_sessions.get(sv, 0)
+            if ne != ns and (ne or ns):
+                logger.log_warning(
+                    f"[stats-rollup] {sv} 성립 수 불일치 {day}: 장부 {ne} vs 세션 {ns} "
+                    f"— 한쪽 원천이 유실됐을 수 있습니다")
 
     # 시도를 모르는 레코드에 표를 붙인다 — **여기가 판정할 수 있는 마지막 자리**다.
     #   이 아래(저장 계층 합산·조회 합산)부터는 아는 시도가 더해져 구별이 사라진다.
-    for day in days:
-        if _ptt_attempts_file(roots.stats, day) and os.path.isfile(_ptt_attempts_file(roots.stats, day)):
-            continue                       # 장부가 있는 날 — 시도 0 은 진짜 0 이다
-        for (mi, svc), rec in out.items():
-            if svc != 'ptt' or _day_of(mi) != day:
-                continue
-            c = rec['call']
-            if not c.get('sessions'):
-                continue
-            c['attempts_unknown'] = 1
-            c['sessions_unmeasured'] = c.get('sessions', 0)
-            c['talked_unmeasured'] = c.get('talked', 0)
+    for (mi, svc), rec in out.items():
+        if svc not in MC_SVCS or svc in ledger_by_day.get(_day_of(mi), set()):
+            continue                       # 장부가 그 서비스를 남기는 날 — 시도 0 은 진짜 0 이다
+        c = rec['call']
+        if not c.get('sessions'):
+            continue
+        c['attempts_unknown'] = 1
+        c['sessions_unmeasured'] = c.get('sessions', 0)
+        c['talked_unmeasured'] = c.get('talked', 0)
 
     return out
 
