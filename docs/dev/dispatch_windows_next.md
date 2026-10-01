@@ -43,7 +43,6 @@ Claude Code 터미널에서 이 문서를 읽고 §1 부터 순서대로 한다.
 | 동시 송출 상한 | `MaxTransmitters` | TS 24.481 §7.2.2 |
 | 최대 통화 시간 · 수신 유지(T5) · 시작 최소 응답 · 그룹 우선순위 · 참가자 정보 구독 | `MaxDurationSec` · `ReceptionHangTimerSec` · `MinNumberToStart` · `GroupPriority` · `AllowConferenceState` | TS 24.481 §7.2.2 · TS 24.581 §11.1.3 |
 | 보호(E2E) | `ProtectMedia`·`ProtectTransmissionControl` = **false 명시**, 칸은 비활성 + «종단간 보호는 아직 지원하지 않습니다» | mcvideo.md D7 |
-| PTT 영상(현행) | 지금 «영상» 스위치를 이 이름으로 남기고 «V7 배포에서 없어집니다» 안내 | mcvideo.md D9 |
 
 - **끄기는 관제 앱에서 하지 않는다.** CSC 전환기 규칙 — MCVideo `<service>` 가 없는 PUT 은 MCVideo 상태를 건드리지 않는다(mcvideo.md §5.1 — 옛 단말 PUT
   보호). 켜진 그룹은 체크를 잠그고 «끄기는 운영 콘솔에서» 안내.
@@ -141,7 +140,7 @@ MCVideo 신호·송출 제어·영상 호 오디오는 이 빌드로 되고(offe
 | 항목 | 결과 | 비고 |
 |---|---|---|
 | W1' | 끝 — d1685a78 까지 Windows 재빌드: `cimsue_test` 144/144 · `CimsUe.Tests` 85/85(`AbiLayoutTests` 포함) · 관제 앱 Release 경고 0 | 리눅스 149 와의 차 5건 = `FloorXCheck.*`(floor_xcheck_test.cpp — CMP `PFloorCodec` 이 pasf(pthread·semaphore)를 끌어 리눅스 전용) |
-| W4 데스크톱 | 끝 — 그룹 편집 «서비스» 절(MCPTT 음성 늘 켬 · MCVideo 영상 켜기·호 방식·송출 상한·TNG3·T5·최소 응답·우선순위·참가자 정보, 종단간 보호 비활성 false 명시, 읽은 객체 되싣기, 켜진 그룹 잠금 «끄기는 운영 콘솔에서») · «PTT 영상(현행)» + «V7 배포에서 없어집니다» · 목록 행 칩 «음성»·«영상» · 상세 능력 줄 | «영상» 칩은 관리 목록에 서비스가 없어 내 영상 채널·열어 본 문서로만(서버 과제 X7) |
+| W4 데스크톱 | 끝 — 그룹 편집 «서비스» 절(MCPTT 음성 늘 켬 · MCVideo 영상 켜기·호 방식·송출 상한·TNG3·T5·최소 응답·우선순위·참가자 정보, 종단간 보호 비활성 false 명시, 읽은 객체 되싣기, 켜진 그룹 잠금 «끄기는 운영 콘솔에서») · 목록 행 칩 «음성»·«영상» · 상세 능력 줄 | «영상» 칩은 관리 목록에 서비스가 없어 내 영상 채널·열어 본 문서로만(서버 과제 X7) |
 | W5 데스크톱 | 끝(영상 그림·송출 제외 — F3, 다음 Windows 세션) — 게이트(ue-init-config MCVideo PSI ∧ user profile) · 계정 태그 · 영상 채널 MCVideo affiliation · D10 자동 합류(chat `Queueing`, 편성 = 초대 자동 수락, N6 안에서 카드 순서, 무전 T4 와 무관, 끝나면 3 s / 실패 10 s 배수 → 2 분 재합류, 그룹이 빠지면·로그아웃 때만 나감) · 채널 상세 «영상» 절 세 상태 · 영상 칸 기본 세로 480×640(3:4) + [↺][↻] 90° 회전(보내는 사람마다 기억) · [보기]/[바꿔 보기]/[그만 보기]/[영상 소리] · [영상 보내기 — 카메라 없음] 비활성 · 카드 «영상 n» · «새 영상» 배너 [보기][닫기] · «이벤트» [영상] · §3.4 문구 · D6 무전 음량 ×0.3 | 영상 칸 = «이 PC 에서는 영상을 표시할 수 없습니다(영상 엔진 준비 중)» 자리(F3). 미리보기 `--ui-preview-banner=video`·`--ui-preview-rotate=90` |
 | W5 태블릿 · W4 태블릿 | 안 함 — Windows 안정화 뒤(사용자 결정 09-29) | 의미론은 [android_dispatch_tablet.md](../design/features/android_dispatch_tablet.md) 한 줄 |
 | 시험 ①~⑥ | 실기 전 | .45 가 MCVideo 를 켰다(41100484) — 관제 계정 PTT 회선의 MCVideo 자격·N6·영상 채널 멤버 편성은 사용자 확인 뒤 |

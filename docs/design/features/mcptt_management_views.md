@@ -55,7 +55,8 @@
 
 | 표시 | 원천 | 비고 |
 |---|---|---|
-| 그룹 속성 (유형 · 우선순위 · 동시 발언 · 소유자 · 조직 · 긴급/영상/보안 플래그) | DB `ptt_groups` | 편집 화면과 같은 필드, 읽기 전용 |
+| 그룹 속성 (유형 · 우선순위 · 동시 발언 · 소유자 · 조직 · 긴급/보안 플래그) | DB `ptt_groups` | 편집 화면과 같은 필드, 읽기 전용 |
+| 서비스 (MCPTT · MCVideo) | DB `mcvideo_group_attrs` 행 유무 → 응답 `mcvideo` | 한 그룹 = 서비스 집합(TS 23.280 §3) — MCPTT 는 늘, MCVideo 는 그룹 문서에 MCVideo 몫이 있을 때([mcvideo.md](mcvideo.md) §5.1). 표가 없으면(마이그레이션 전) 전부 false |
 | 멤버 · 역할(chair/participant) | DB `ptt_group_members` | |
 | 멤버 참여(affiliation) | DB `ptt_affiliations` (CSP 가 쓴다) | TS 24.379 §9 — 활성 = `status='affiliated'` · 만료 전(CSP `IsAffiliated` 와 같은 조건) |
 | 멤버 접속 | `ptt_subscriptions.register_time/logout_time` | [monitoring.md](monitoring.md) §1.2 등록 조건 |

@@ -81,9 +81,9 @@ export default function PttGroupInfoPage() {
                     <Td align="right">{g.today_sessions}</Td>
                     <Td><span className="flex gap-1">
                       {g.emergency_call && <Badge variant="dangerSoft">긴급</Badge>}
-                      {g.video_enabled && <Badge variant="infoSoft">영상</Badge>}
+                      {g.mcvideo && <Badge variant="infoSoft">MCVideo</Badge>}
                       {g.encryption && <Badge variant="neutralSoft">보안</Badge>}
-                      {!g.emergency_call && !g.video_enabled && !g.encryption && <span className="text-muted-foreground">—</span>}
+                      {!g.emergency_call && !g.mcvideo && !g.encryption && <span className="text-muted-foreground">—</span>}
                     </span></Td>
                   </TrLink>
                 ))}
@@ -133,6 +133,8 @@ function GroupDetail({ id, onClose }: { id: string; onClose: () => void }) {
           </div>
           <Section title="그룹 속성">
             <div className="grid grid-cols-[120px_minmax(0,1fr)] gap-x-3 gap-y-1.5 text-sm">
+              <span className="text-muted-foreground">서비스</span>
+              <span className="flex flex-wrap gap-1"><Badge variant="brandSoft">MCPTT</Badge>{g.mcvideo && <Badge variant="infoSoft">MCVideo</Badge>}</span>
               <span className="text-muted-foreground">유형</span><span>{TYPE_LABEL[g.group_type] || g.group_type}</span>
               <span className="text-muted-foreground">우선순위</span><span>{orDash(g.priority)}</span>
               <span className="text-muted-foreground">동시 발언</span><span>{POLICY_LABEL[g.floor_policy] || g.floor_policy}{g.floor_policy === 'multi' ? ` (${g.max_talkers}명)` : ''}</span>
@@ -144,7 +146,6 @@ function GroupDetail({ id, onClose }: { id: string; onClose: () => void }) {
               <span className="flex flex-wrap gap-1">
                 <Badge variant={g.emergency_call ? 'dangerSoft' : 'neutralSoft'}>긴급 호출 {g.emergency_call ? '허용' : '불허'}</Badge>
                 <Badge variant="neutralSoft">긴급 경보 {g.emergency_alert ? '허용' : '불허'}</Badge>
-                <Badge variant="neutralSoft">영상 {g.video_enabled ? '허용' : '불허'}</Badge>
                 <Badge variant="neutralSoft">보안 {g.encryption ? '사용' : '미사용'}</Badge>
                 <Badge variant="neutralSoft">참여(affiliation) {g.require_affiliation ? '필요' : '불요'}</Badge>
               </span>

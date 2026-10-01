@@ -289,7 +289,8 @@ export type PttGroupStateFilter = 'all' | 'active' | 'talking' | 'emergency'
 export type PttGroupLiveState = 'idle' | 'active' | 'talking'
 export interface PttGroupStatusRow {
   id: string; name: string; group_type: string; org_code: string; priority: number | null
-  floor_policy: string; emergency_call: boolean; video_enabled: boolean; encryption: boolean
+  // mcvideo = 그룹이 MCVideo 서비스를 가진다(그룹 문서 MCVideo 몫, mcvideo.md §5.1)
+  floor_policy: string; emergency_call: boolean; mcvideo: boolean; encryption: boolean
   member_count: number; registered_count: number; affiliated_count: number
   state: PttGroupLiveState; participants: number; floor_holders: string[]
   today_sessions: number; today_talked: number
@@ -305,7 +306,7 @@ export interface PttGroupMemberStatus {
 export interface PttGroupStatusResponse {
   group: {
     id: string; name: string; group_type: string; org_code: string; priority: number | null; floor_policy: string
-    max_talkers: number | null; emergency_call: boolean; emergency_alert: boolean; video_enabled: boolean; encryption: boolean
+    max_talkers: number | null; emergency_call: boolean; emergency_alert: boolean; mcvideo: boolean; encryption: boolean
     require_affiliation: boolean; hang_timer_sec: number | null; max_duration_sec: number | null; owner: string
   }
   state: PttGroupLiveState; participants: number; floor_holders: string[]

@@ -2,7 +2,7 @@ import { useConfirm } from '@core/components/custom/confirm'
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import IconBtn from '@core/components/IconBtn'
 import { ArrowLeft, ArrowRight, Check, ChevronDown, ChevronRight, Crown, Pencil, Plus, Trash2, X } from 'lucide-react'
-import { groupsApi, type Group, type GroupInput, type Member } from '@core/api/groups'
+import { groupsApi, MCVIDEO_GROUP_DEFAULTS, type Group, type GroupInput, type McVideoGroupAttrs, type Member } from '@core/api/groups'
 import { usersApi, type UserSummary } from '@core/api/users'
 import { orgApi, type Organization } from '@core/api/organizations'
 import OrgTreePanel from '@core/components/OrgTreePanel'
@@ -18,6 +18,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { NONE, fromSel, toSel } from '@core/components/custom/select-value'
 import { Badge } from '@core/components/ui/badge'
 import { Checkbox } from '@core/components/ui/checkbox'
+import { Alert } from '@core/components/ui/alert'
+import { ToggleGroup, ToggleGroupItem } from '@core/components/ui/toggle-group'
 
 // ── PTT 그룹 워크벤치 ─────────────────────────────────────────
 //  좌: 조직트리(공유 스코프) | 그룹 DataTable | 행 확장: 속성 편집 + 멤버(다중선택 추가).
@@ -34,6 +36,10 @@ const MAX_DURATION_MAX = 86400
 /** 확인 통화 설정 상한 — CSC 관리 API 검증(on-network-minimum-number-to-start = unsignedShort, TNG1 1~300초)과 같은 값. */
 const MIN_TO_START_MAX = 65535
 const ACK_TIMEOUT_MAX = 300
+/** MCVideo 그룹 속성 상한 — CSC services/mcvideo.py validate_attrs 와 같은 값(동시 송출 = CMP 자원 1~16, T5 0~3600, 그룹 우선순위 0~255). */
+const MCV_TRANSMITTERS_MAX = 16
+const MCV_RECEPTION_HANG_MAX = 3600
+const MCV_PRIORITY_MAX = 255
 
 function Caret({ open }: { open: boolean }) {
   return <span className="text-muted-foreground inline-flex">
@@ -109,8 +115,11 @@ export default function PttGroupsWorkbenchPage() {
       <span><span className="font-semibold">{g.name}</span>
         {g.encryption && <Badge className="ml-1" variant="successSoft">암호</Badge>}
         {g.emergency_call && <Badge className="ml-0.5" variant="dangerSoft">긴급</Badge>}
-        {g.video_enabled && <Badge className="ml-0.5" variant="brandSoft">영상</Badge>}
       </span>
+    ) },
+    // 한 그룹 = 서비스 집합(TS 23.280 §3) — MCPTT 는 늘, MCVideo 는 그룹 문서에 MCVideo 몫이 있을 때
+    { key: 'svc', header: '서비스', width: 130, render: g => (
+      <span className="flex gap-1"><Badge variant="brandSoft">MCPTT</Badge>{g.mcvideo && <Badge variant="infoSoft">MCVideo</Badge>}</span>
     ) },
     { key: 'id', header: 'ID', width: 130, sortable: true, render: g => <span className="text-sm text-muted-foreground">{g.id}</span> },
     { key: 'type', header: '타입', width: 90, render: g => <span className="text-sm text-muted-foreground">{g.group_type || 'prearranged'}</span> },
@@ -133,6 +142,8 @@ export default function PttGroupsWorkbenchPage() {
   ]
 
   const openGroup = openId ? groups.find(g => g.id === openId) : undefined
+  // 옛 «PTT 영상» 플래그를 아직 주는 CSC(V7 전)인가 — 새 그룹 폼에 그 칸을 둘지 정한다(기존 그룹은 그 그룹 응답으로)
+  const legacyVideo = useMemo(() => groups.some(g => g.video_enabled !== undefined), [groups])
 
   return (
     <div className="flex gap-4 items-stretch flex-1 min-h-0">
@@ -158,7 +169,7 @@ export default function PttGroupsWorkbenchPage() {
         {adding && (
           <div className="border-b border-border bg-muted py-3 px-4">
             <div className="font-semibold text-sm text-primary mb-2">새 PTT 그룹</div>
-            <GroupDrawer mode="add" orgs={orgs} me={me} canGroupCreate={canGroupCreate}
+            <GroupDrawer mode="add" orgs={orgs} me={me} canGroupCreate={canGroupCreate} legacyVideo={legacyVideo}
               pttIndex={pttIndex} userIndex={userIndex} pttName={pttName} orgScope={orgScope} orgPathOf={orgPathOf}
               onClose={() => setAdding(false)} onSaved={() => { setAdding(false); load() }} reload={load} />
           </div>
@@ -169,7 +180,7 @@ export default function PttGroupsWorkbenchPage() {
           expandedKey={openId}
           renderExpanded={openGroup ? () => (
             <div className="py-3 px-4">
-              <GroupDrawer key={openGroup.id} mode="view" group={openGroup} orgs={orgs} me={me} canGroupCreate={canGroupCreate}
+              <GroupDrawer key={openGroup.id} mode="view" group={openGroup} orgs={orgs} me={me} canGroupCreate={canGroupCreate} legacyVideo={legacyVideo}
                 pttIndex={pttIndex} userIndex={userIndex} pttName={pttName} orgScope={orgScope} orgPathOf={orgPathOf}
                 onClose={() => setOpenId(null)} onSaved={() => { setOpenId(null); load() }} reload={load} />
             </div>
@@ -189,6 +200,7 @@ interface GroupDrawerProps {
   orgs: Organization[]
   me: ReturnType<typeof useAuth>['user']
   canGroupCreate: boolean
+  legacyVideo: boolean
   pttIndex: PickItem[]
   userIndex: PickItem[]
   pttName: Map<string, string>
@@ -211,8 +223,18 @@ function GroupDrawer(p: GroupDrawerProps) {
   const [tab, setTab] = useState<'config' | 'activity'>('config')
 
   const [form, setForm] = useState<Partial<GroupExt>>(() => existing
-    ? { name: existing.name, priority: existing.priority ?? 5, encryption: existing.encryption, emergency_call: existing.emergency_call, emergency_alert: existing.emergency_alert ?? true, allow_conference_state: existing.allow_conference_state ?? true, allow_sds: existing.allow_sds ?? true, allow_fd: existing.allow_fd ?? false, max_sds_size: existing.max_sds_size ?? 10000, max_auto_recv: existing.max_auto_recv ?? 1048576, video_enabled: existing.video_enabled, org_code: existing.org_code || '', authorized_user_id: existing.authorized_user_id ?? null, group_type: existing.group_type, floor_policy: existing.floor_policy || 'single', max_talkers: existing.max_talkers ?? 2, hang_timer_sec: existing.hang_timer_sec ?? 30, max_duration_sec: existing.max_duration_sec ?? 3600, min_number_to_start: existing.min_number_to_start ?? 0, ack_timeout_sec: existing.ack_timeout_sec ?? 5, ack_action: existing.ack_action || 'abandon' }
-    : { id: '', name: '', priority: 5, encryption: false, emergency_call: false, emergency_alert: true, allow_conference_state: true, allow_sds: true, allow_fd: false, max_sds_size: 10000, max_auto_recv: 1048576, video_enabled: false, org_code: '', group_type: 'prearranged', authorized_user_id: null, floor_policy: 'single', max_talkers: 2, hang_timer_sec: 30, max_duration_sec: 3600, min_number_to_start: 0, ack_timeout_sec: 5, ack_action: 'abandon' })
+    ? { name: existing.name, priority: existing.priority ?? 5, encryption: existing.encryption, emergency_call: existing.emergency_call, emergency_alert: existing.emergency_alert ?? true, allow_conference_state: existing.allow_conference_state ?? true, allow_sds: existing.allow_sds ?? true, allow_fd: existing.allow_fd ?? false, max_sds_size: existing.max_sds_size ?? 10000, max_auto_recv: existing.max_auto_recv ?? 1048576, org_code: existing.org_code || '', authorized_user_id: existing.authorized_user_id ?? null, group_type: existing.group_type, floor_policy: existing.floor_policy || 'single', max_talkers: existing.max_talkers ?? 2, hang_timer_sec: existing.hang_timer_sec ?? 30, max_duration_sec: existing.max_duration_sec ?? 3600, min_number_to_start: existing.min_number_to_start ?? 0, ack_timeout_sec: existing.ack_timeout_sec ?? 5, ack_action: existing.ack_action || 'abandon' }
+    : { id: '', name: '', priority: 5, encryption: false, emergency_call: false, emergency_alert: true, allow_conference_state: true, allow_sds: true, allow_fd: false, max_sds_size: 10000, max_auto_recv: 1048576, org_code: '', group_type: 'prearranged', authorized_user_id: null, floor_policy: 'single', max_talkers: 2, hang_timer_sec: 30, max_duration_sec: 3600, min_number_to_start: 0, ack_timeout_sec: 5, ack_action: 'abandon' })
+  // 옛 «PTT 영상»(MCPTT 호에 m=video) — V7 전 CSC 가 그 값을 줄 때만 칸을 두고 본문에 싣는다. V7 CSC 는 키가 없다(mcvideo.md §8).
+  const legacyVideo = existing ? existing.video_enabled !== undefined : p.legacyVideo
+  const [legacyVideoOn, setLegacyVideoOn] = useState(!!existing?.video_enabled)
+  // MCVideo 서비스 — 끄면 그룹 문서에서 MCVideo 몫을 뺀다(저장 = mcvideo null). 껐다 켜도 이 화면에서 고친 값은 남는다.
+  const mcvWas = !!existing?.mcvideo
+  const [mcvOn, setMcvOn] = useState(mcvWas)
+  const [mcv, setMcv] = useState<McVideoGroupAttrs>(() => ({ ...MCVIDEO_GROUP_DEFAULTS, ...(existing?.mcvideo || {}) }))
+  const [mcvAudio, setMcvAudio] = useState(() => mcv.audio_encodings.join(', '))
+  const [mcvVideo, setMcvVideo] = useState(() => mcv.video_encodings.join(', '))
+  const [mcvPrio, setMcvPrio] = useState(() => mcv.group_priority == null ? '' : String(mcv.group_priority))
   // 소유자 표시명 (피커 선택 결과 보존)
   const [ownerName, setOwnerName] = useState<string>(existing?.authorized_user_name || '')
 
@@ -239,9 +261,25 @@ function GroupDrawer(p: GroupDrawerProps) {
 
   async function save() {
     if (!form.name || (isNew && !form.id)) { show('ID/이름 필수', 'err'); return }
-    const body = { ...form }
+    const body: Partial<GroupInput> = { ...form }
+    if (legacyVideo) body.video_enabled = legacyVideoOn
+    // mcvideo: 켬 = 객체(이 화면이 다루는 키만 — 해상도·프레임률은 그대로 둔다) · 끔 = null · 처음부터 꺼져 있던 그룹은 키를 싣지 않는다
+    if (mcvOn) {
+      const split = (t: string) => t.split(/[,\s]+/).map(x => x.trim()).filter(Boolean)
+      const audio = split(mcvAudio), video = split(mcvVideo)
+      if (!audio.length || !video.length) { show('MCVideo 선호 코덱은 음성·영상 각각 하나 이상 적는다', 'err'); return }
+      const prio = mcvPrio.trim()
+      body.mcvideo = {
+        invite_members: mcv.invite_members, max_transmitters: mcv.max_transmitters, max_duration_sec: mcv.max_duration_sec,
+        reception_hang_timer_sec: mcv.reception_hang_timer_sec, min_number_to_start: mcv.min_number_to_start,
+        group_priority: prio === '' ? null : Number(prio), audio_encodings: audio, video_encodings: video,
+        allow_conference_state: mcv.allow_conference_state,
+      }
+    } else if (mcvWas) {
+      body.mcvideo = null
+    }
     try {
-      if (existing) { await groupsApi.update(existing.id, body as Partial<GroupInput>); show('저장', 'ok'); setEditing(false); p.reload() }
+      if (existing) { await groupsApi.update(existing.id, body); show('저장', 'ok'); setEditing(false); p.reload() }
       else { await groupsApi.create(body as GroupInput); show('저장', 'ok'); p.onSaved() }
     } catch (e: unknown) { show(String(e), 'err') }
   }
@@ -310,112 +348,195 @@ function GroupDrawer(p: GroupDrawerProps) {
       <>
       {/* ── 속성 ── */}
       {editing ? (
-        <FieldRow>
-          {isNew && <Field label="그룹 ID *" w={130}><Input  autoFocus value={form.id || ''} onChange={e => setForm({ ...form, id: e.target.value })} /></Field>}
-          <Field label="그룹명 *" w={160}><Input  value={form.name || ''} onChange={e => setForm({ ...form, name: e.target.value })} /></Field>
-          <Field label="타입" w={150}>
-            <Select value={toSel(form.group_type || 'prearranged')} onValueChange={(v: string) => setForm({ ...form, group_type: fromSel(v) as GroupExt['group_type'] })}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="prearranged">prearranged</SelectItem>
-                <SelectItem value="chat">chat</SelectItem>
-              </SelectContent>
-            </Select>
-          </Field>
-          <Field label="우선순위" w={80}><Input  type="number" value={form.priority ?? 5} onChange={e => setForm({ ...form, priority: Number(e.target.value) })} /></Field>
-          <Field label="동시 발언" w={110}>
-            <Select value={toSel(form.floor_policy || 'single')} onValueChange={(v: string) => {
-                const fp = fromSel(v) as GroupExt['floor_policy']
-                // multi 로 바꿀 때 정원이 범위 밖이면 기본 2 로 — 저장 거절(400) 을 미리 막는다.
-                const mt = fp === 'multi' ? Math.min(Math.max(form.max_talkers ?? 2, 2), MAX_TALKERS_LIMIT) : 2
-                setForm({ ...form, floor_policy: fp, max_talkers: mt })
-              }}>
-              <SelectTrigger title="floor 동시 발언 정책 — CSP 가 CMP 로 발행"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="single">단일 — 한 명씩</SelectItem>
-                <SelectItem value="dual">듀얼 — 긴급 끼어들기</SelectItem>
-                <SelectItem value="multi">멀티 — N명 동시</SelectItem>
-              </SelectContent>
-            </Select>
-          </Field>
-          {form.floor_policy === 'multi' && (
-            <Field label={`동시 발언자 수 (2~${MAX_TALKERS_LIMIT})`} w={130}>
-              <Input  type="number" min={2} max={MAX_TALKERS_LIMIT}
-                title="CMP 화자 슬롯 수 — 이 수만큼 동시에 발언할 수 있다"
-                value={form.max_talkers ?? 2}
-                onChange={e => setForm({ ...form, max_talkers: Number(e.target.value) })} />
+        <div className="flex flex-col gap-3">
+          {/* 기본 — 서비스와 무관한 그룹 속성 + MCData 메시징·파일전송 허용 */}
+          <FieldRow>
+            {isNew && <Field label="그룹 ID *" w={130}><Input  autoFocus value={form.id || ''} onChange={e => setForm({ ...form, id: e.target.value })} /></Field>}
+            <Field label="그룹명 *" w={160}><Input  value={form.name || ''} onChange={e => setForm({ ...form, name: e.target.value })} /></Field>
+            <Field label="우선순위" w={80}><Input  type="number" value={form.priority ?? 5} onChange={e => setForm({ ...form, priority: Number(e.target.value) })} /></Field>
+            {allowOwner && <Field label="소유자 (가입자 검색)" w={230}>
+              {form.authorized_user_id != null
+                ? <div className="flex items-center gap-1.5">
+                    <Badge className="text-xs" variant="brandSoft">{ownerName || `user#${form.authorized_user_id}`}</Badge>
+                    <Button variant="ghost" onClick={() => { setForm({ ...form, authorized_user_id: null }); setOwnerName('') }}>변경</Button>
+                  </div>
+                : <SubscriberPicker kind="user" index={p.userIndex} orgScope={p.orgScope} orgPathOf={p.orgPathOf}
+                    placeholder={isNew && !hasRole(p.me, 'manager') ? '비우면 본인' : '소유자 이름 검색'}
+                    onPick={it => { setForm({ ...form, authorized_user_id: Number(it.value) }); setOwnerName(it.label) }} />}
+            </Field>}
+            <Field label="조직 코드" w={170}>
+              <Select value={toSel(form.org_code || '')} onValueChange={(v: string) => setForm({ ...form, org_code: fromSel(v) })}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={NONE}>없음</SelectItem>
+                  {p.orgs.map(o => <SelectItem key={o.id} value={o.code}>{o.name} ({o.code})</SelectItem>)}
+                </SelectContent>
+              </Select>
             </Field>
-          )}
-          <Field label="유지 시간(T4, 초)" w={110}>
-            <Input  type="number" min={0} max={HANG_TIMER_MAX}
-              title="on-network-hang-timer — 발언 없이 이 시간이 지나면 그룹 호를 해제한다 (0=미사용, 편성 그룹만). 일제 통화에 쓰는 그룹은 짧게 준다"
-              value={form.hang_timer_sec ?? 30}
-              onChange={e => setForm({ ...form, hang_timer_sec: Number(e.target.value) })} />
-          </Field>
-          <Field label="최대 통화 시간(초)" w={120}>
-            <Input  type="number" min={0} max={MAX_DURATION_MAX}
-              title="on-network-maximum-duration — 그룹 호 최대 시간 (0=무제한, 편성 그룹만)"
-              value={form.max_duration_sec ?? 3600}
-              onChange={e => setForm({ ...form, max_duration_sec: Number(e.target.value) })} />
-          </Field>
-          <Field label="시작 최소 응답(명)" w={120}>
-            <Input  type="number" min={0} max={MIN_TO_START_MAX}
-              title="on-network-minimum-number-to-start — 개시자에게 응답하기 전에 받아야 할 멤버 응답 수 (0=기다리지 않음, 편성 그룹만)"
-              value={form.min_number_to_start ?? 0}
-              onChange={e => setForm({ ...form, min_number_to_start: Number(e.target.value) })} />
-          </Field>
-          <Field label="필수 멤버 대기(TNG1, 초)" w={140}>
-            <Input  type="number" min={1} max={ACK_TIMEOUT_MAX}
-              title="on-network-timeout-for-acknowledgement-of-required-members — 필수 멤버의 응답을 기다리는 시간 (필수 멤버가 있을 때만)"
-              value={form.ack_timeout_sec ?? 5}
-              onChange={e => setForm({ ...form, ack_timeout_sec: Number(e.target.value) })} />
-          </Field>
-          <Field label="대기 만료 시" w={130}>
-            <Select value={form.ack_action || 'abandon'} onValueChange={(v: string) => setForm({ ...form, ack_action: v as 'proceed' | 'abandon' })}>
-              <SelectTrigger title="on-network-action-upon-expiration-of-timeout-for-acknowledgement-of-required-members — 필수 멤버가 응답하지 않거나 거절하면"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="abandon">통화 포기</SelectItem>
-                <SelectItem value="proceed">없이 진행</SelectItem>
-              </SelectContent>
-            </Select>
-          </Field>
-          {allowOwner && <Field label="소유자 (가입자 검색)" w={230}>
-            {form.authorized_user_id != null
-              ? <div className="flex items-center gap-1.5">
-                  <Badge className="text-xs" variant="brandSoft">{ownerName || `user#${form.authorized_user_id}`}</Badge>
-                  <Button variant="ghost" onClick={() => { setForm({ ...form, authorized_user_id: null }); setOwnerName('') }}>변경</Button>
+            <div className="flex gap-3 items-center self-center flex-wrap">
+              <label className="flex items-center gap-1"><Checkbox  checked={form.encryption || false} onCheckedChange={(c) => setForm({ ...form, encryption: (c === true) })} />암호</label>
+              <label className="flex items-center gap-1" title="mcdata-allow-short-data-service (그룹 메시징, TS 24.481)"><Checkbox  checked={form.allow_sds ?? true} onCheckedChange={(c) => setForm({ ...form, allow_sds: (c === true) })} />메시징</label>
+              <label className="flex items-center gap-1" title="mcdata-allow-file-distribution (그룹 파일전송)"><Checkbox  checked={form.allow_fd || false} onCheckedChange={(c) => setForm({ ...form, allow_fd: (c === true) })} />파일전송</label>
+            </div>
+            <Field label="메시지 최대(byte)" w={110}><Input  type="number" title="mcdata-on-network-max-data-size-for-SDS (0=무제한)" value={form.max_sds_size ?? 10000} onChange={e => setForm({ ...form, max_sds_size: Number(e.target.value) })} /></Field>
+            <Field label="자동수신 최대(byte)" w={120}><Input  type="number" title="mcdata-on-network-max-data-size-auto-recv (파일 자동 다운로드 임계)" value={form.max_auto_recv ?? 1048576} onChange={e => setForm({ ...form, max_auto_recv: Number(e.target.value) })} /></Field>
+          </FieldRow>
+
+          {/* 서비스 — 한 그룹 = 서비스 집합(TS 23.280 §3), 서비스마다 그룹 문서에 자기 속성(TS 24.481 §7.2.2) */}
+          <div className="flex flex-col gap-2.5">
+            <div className="flex items-baseline gap-2.5 border-b border-border pb-1.5">
+              <span className="text-sm font-semibold">서비스</span>
+              <span className="text-xs text-muted-foreground">한 그룹 = 서비스 집합(TS 23.280 §3) — 서비스마다 자기 속성을 가진다(TS 24.481 §7.2.2)</span>
+            </div>
+            <div className="grid grid-cols-1 gap-3.5 xl:grid-cols-2">
+              <div className="flex min-w-0 flex-col gap-3 rounded-md border border-border p-3.5">
+                <div className="flex items-center gap-2">
+                  <Checkbox id="svc-mcptt" checked disabled />
+                  <label htmlFor="svc-mcptt" className="font-semibold">MCPTT 음성</label>
+                  <span className="ml-auto text-xs text-muted-foreground">항상 켬 — 그룹의 기본 서비스</span>
                 </div>
-              : <SubscriberPicker kind="user" index={p.userIndex} orgScope={p.orgScope} orgPathOf={p.orgPathOf}
-                  placeholder={isNew && !hasRole(p.me, 'manager') ? '비우면 본인' : '소유자 이름 검색'}
-                  onPick={it => { setForm({ ...form, authorized_user_id: Number(it.value) }); setOwnerName(it.label) }} />}
-          </Field>}
-          <Field label="조직 코드" w={170}>
-            <Select value={toSel(form.org_code || '')} onValueChange={(v: string) => setForm({ ...form, org_code: fromSel(v) })}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value={NONE}>없음</SelectItem>
-                {p.orgs.map(o => <SelectItem key={o.id} value={o.code}>{o.name} ({o.code})</SelectItem>)}
-              </SelectContent>
-            </Select>
-          </Field>
-          <div className="flex gap-3 items-center self-center flex-wrap">
-            <label className="flex items-center gap-1"><Checkbox  checked={form.encryption || false} onCheckedChange={(c) => setForm({ ...form, encryption: (c === true) })} />암호</label>
-            <label className="flex items-center gap-1"><Checkbox  checked={form.video_enabled || false} onCheckedChange={(c) => setForm({ ...form, video_enabled: (c === true) })} />영상</label>
-            <label className="flex items-center gap-1" title="allow-MCPTT-emergency-call — 긴급·임박위험 condition 공통 허용 게이트"><Checkbox  checked={form.emergency_call || false} onCheckedChange={(c) => setForm({ ...form, emergency_call: (c === true) })} />긴급콜</label>
-            <label className="flex items-center gap-1" title="allow-MCPTT-emergency-alert — 위험 통지(위치·신원) 전파 허용, 통화와 무관하게 동작"><Checkbox  checked={form.emergency_alert ?? true} onCheckedChange={(c) => setForm({ ...form, emergency_alert: (c === true) })} />긴급경보</label>
-            <label className="flex items-center gap-1" title="on-network-allow-conference-state — 멤버가 그룹 세션의 참가자 정보(conference 이벤트)를 구독할 수 있음. 끄면 CSP 가 403 (관제사 청취 범위는 별도)"><Checkbox  checked={form.allow_conference_state ?? true} onCheckedChange={(c) => setForm({ ...form, allow_conference_state: (c === true) })} />참가자 정보 구독</label>
-            <label className="flex items-center gap-1" title="mcdata-allow-short-data-service (그룹 메시징, TS 24.481)"><Checkbox  checked={form.allow_sds ?? true} onCheckedChange={(c) => setForm({ ...form, allow_sds: (c === true) })} />메시징</label>
-            <label className="flex items-center gap-1" title="mcdata-allow-file-distribution (그룹 파일전송)"><Checkbox  checked={form.allow_fd || false} onCheckedChange={(c) => setForm({ ...form, allow_fd: (c === true) })} />파일전송</label>
+                <FieldRow>
+                  <Field label="호 방식" w={150}>
+                    <Select value={toSel(form.group_type || 'prearranged')} onValueChange={(v: string) => setForm({ ...form, group_type: fromSel(v) as GroupExt['group_type'] })}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="prearranged">prearranged</SelectItem>
+                        <SelectItem value="chat">chat</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </Field>
+                  <Field label="동시 발언" w={110}>
+                    <Select value={toSel(form.floor_policy || 'single')} onValueChange={(v: string) => {
+                        const fp = fromSel(v) as GroupExt['floor_policy']
+                        // multi 로 바꿀 때 정원이 범위 밖이면 기본 2 로 — 저장 거절(400) 을 미리 막는다.
+                        const mt = fp === 'multi' ? Math.min(Math.max(form.max_talkers ?? 2, 2), MAX_TALKERS_LIMIT) : 2
+                        setForm({ ...form, floor_policy: fp, max_talkers: mt })
+                      }}>
+                      <SelectTrigger title="floor 동시 발언 정책 — CSP 가 CMP 로 발행"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="single">단일 — 한 명씩</SelectItem>
+                        <SelectItem value="dual">듀얼 — 긴급 끼어들기</SelectItem>
+                        <SelectItem value="multi">멀티 — N명 동시</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </Field>
+                  {form.floor_policy === 'multi' && (
+                    <Field label={`동시 발언자 수 (2~${MAX_TALKERS_LIMIT})`} w={130}>
+                      <Input  type="number" min={2} max={MAX_TALKERS_LIMIT}
+                        title="CMP 화자 슬롯 수 — 이 수만큼 동시에 발언할 수 있다"
+                        value={form.max_talkers ?? 2}
+                        onChange={e => setForm({ ...form, max_talkers: Number(e.target.value) })} />
+                    </Field>
+                  )}
+                  <Field label="유지 시간(T4, 초)" w={110}>
+                    <Input  type="number" min={0} max={HANG_TIMER_MAX}
+                      title="on-network-hang-timer — 발언 없이 이 시간이 지나면 그룹 호를 해제한다 (0=미사용, 편성 그룹만). 일제 통화에 쓰는 그룹은 짧게 준다"
+                      value={form.hang_timer_sec ?? 30}
+                      onChange={e => setForm({ ...form, hang_timer_sec: Number(e.target.value) })} />
+                  </Field>
+                  <Field label="최대 통화 시간(초)" w={120}>
+                    <Input  type="number" min={0} max={MAX_DURATION_MAX}
+                      title="on-network-maximum-duration — 그룹 호 최대 시간 (0=무제한, 편성 그룹만)"
+                      value={form.max_duration_sec ?? 3600}
+                      onChange={e => setForm({ ...form, max_duration_sec: Number(e.target.value) })} />
+                  </Field>
+                  <Field label="시작 최소 응답(명)" w={120}>
+                    <Input  type="number" min={0} max={MIN_TO_START_MAX}
+                      title="on-network-minimum-number-to-start — 개시자에게 응답하기 전에 받아야 할 멤버 응답 수 (0=기다리지 않음, 편성 그룹만)"
+                      value={form.min_number_to_start ?? 0}
+                      onChange={e => setForm({ ...form, min_number_to_start: Number(e.target.value) })} />
+                  </Field>
+                  <Field label="필수 멤버 대기(TNG1, 초)" w={140}>
+                    <Input  type="number" min={1} max={ACK_TIMEOUT_MAX}
+                      title="on-network-timeout-for-acknowledgement-of-required-members — 필수 멤버의 응답을 기다리는 시간 (필수 멤버가 있을 때만)"
+                      value={form.ack_timeout_sec ?? 5}
+                      onChange={e => setForm({ ...form, ack_timeout_sec: Number(e.target.value) })} />
+                  </Field>
+                  <Field label="대기 만료 시" w={130}>
+                    <Select value={form.ack_action || 'abandon'} onValueChange={(v: string) => setForm({ ...form, ack_action: v as 'proceed' | 'abandon' })}>
+                      <SelectTrigger title="on-network-action-upon-expiration-of-timeout-for-acknowledgement-of-required-members — 필수 멤버가 응답하지 않거나 거절하면"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="abandon">통화 포기</SelectItem>
+                        <SelectItem value="proceed">없이 진행</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </Field>
+                </FieldRow>
+                <div className="flex gap-3 items-center flex-wrap">
+                  <label className="flex items-center gap-1" title="allow-MCPTT-emergency-call — 긴급·임박위험 condition 공통 허용 게이트"><Checkbox  checked={form.emergency_call || false} onCheckedChange={(c) => setForm({ ...form, emergency_call: (c === true) })} />긴급콜</label>
+                  <label className="flex items-center gap-1" title="allow-MCPTT-emergency-alert — 위험 통지(위치·신원) 전파 허용, 통화와 무관하게 동작"><Checkbox  checked={form.emergency_alert ?? true} onCheckedChange={(c) => setForm({ ...form, emergency_alert: (c === true) })} />긴급경보</label>
+                  <label className="flex items-center gap-1" title="on-network-allow-conference-state — 멤버가 그룹 세션의 참가자 정보(conference 이벤트)를 구독할 수 있음. 끄면 CSP 가 403 (관제사 청취 범위는 별도)"><Checkbox  checked={form.allow_conference_state ?? true} onCheckedChange={(c) => setForm({ ...form, allow_conference_state: (c === true) })} />참가자 정보 구독</label>
+                  {legacyVideo && <label className="flex items-center gap-1" title="video_enabled — MCPTT 그룹 호에 m=video 를 싣는 옛 방식"><Checkbox checked={legacyVideoOn} onCheckedChange={(c) => setLegacyVideoOn(c === true)} />PTT 영상(현행)</label>}
+                </div>
+                {legacyVideo && <Alert variant="warning" className="text-sm">PTT 영상(현행)은 MCPTT 호에 m=video 를 싣는 옛 방식이다 — MCVideo 전환(V7)에서 없어진다. 새 영상은 오른쪽 MCVideo 로.</Alert>}
+                <div className="basis-full text-xs text-muted-foreground">호 방식: {groupTypeHint[form.group_type || 'prearranged']}</div>
+                <div className="basis-full text-xs text-muted-foreground">동시 발언: {floorPolicyHint[form.floor_policy || 'single']}</div>
+              </div>
+              <div className={`flex min-w-0 flex-col gap-3 rounded-md border p-3.5 ${mcvOn ? 'border-info' : 'self-start border-border'}`}>
+                <div className="flex items-center gap-2">
+                  <Checkbox id="svc-mcvideo" checked={mcvOn} onCheckedChange={(c) => setMcvOn(c === true)} />
+                  <label htmlFor="svc-mcvideo" className="font-semibold">MCVideo 영상</label>
+                  <span className="ml-auto text-xs text-muted-foreground">끄면 그룹 문서에서 MCVideo 서비스를 뺀다</span>
+                </div>
+                {!mcvOn && <span className="text-xs text-muted-foreground">MCVideo 그룹 아님 — 켜면 그룹 문서에 MCVideo 서비스가 들어간다(TS 24.481 §7.2.2)</span>}
+                {mcvOn && (<>
+                  <div className="flex flex-col gap-1">
+                    <span className="text-xs text-muted-foreground">호 방식</span>
+                    <ToggleGroup type="single" aria-label="MCVideo 호 방식" className="w-fit justify-start rounded-md bg-muted p-[3px]"
+                      value={mcv.invite_members ? 'prearranged' : 'chat'}
+                      onValueChange={(v: string) => v && setMcv({ ...mcv, invite_members: v === 'prearranged' })}>
+                      <ToggleGroupItem value="chat" title="mcvideo-on-network-invite-members = false — 그룹 호에 원하는 멤버가 스스로 합류한다">chat — 원하는 사람이 합류</ToggleGroupItem>
+                      <ToggleGroupItem value="prearranged" title="mcvideo-on-network-invite-members = true — 개시하면 서버가 제휴 멤버를 초대한다">prearranged — 제휴 멤버를 초대</ToggleGroupItem>
+                    </ToggleGroup>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2.5">
+                    <Field label={`동시 송출 상한(1~${MCV_TRANSMITTERS_MAX})`}>
+                      <Input type="number" min={1} max={MCV_TRANSMITTERS_MAX}
+                        title="mcvideo-maximum-simultaneous-mcvideo-transmitting-group-members — 한 번에 영상을 보낼 수 있는 멤버 수 (CMP 송출 제어가 집행)"
+                        value={mcv.max_transmitters} onChange={e => setMcv({ ...mcv, max_transmitters: Number(e.target.value) })} />
+                    </Field>
+                    <Field label="최대 통화 시간(TNG3, 초)">
+                      <Input type="number" min={0} max={MAX_DURATION_MAX}
+                        title="mcvideo-on-network-maximum-duration — MCVideo 그룹 호 최대 시간 (0=무제한)"
+                        value={mcv.max_duration_sec} onChange={e => setMcv({ ...mcv, max_duration_sec: Number(e.target.value) })} />
+                    </Field>
+                    <Field label="수신 유지 시간(T5, 초)">
+                      <Input type="number" min={0} max={MCV_RECEPTION_HANG_MAX}
+                        title="on-network-reception-hang-timer — 송출이 끝난 뒤 수신 측을 붙잡아 두는 시간 (TS 24.581 §11.1.3)"
+                        value={mcv.reception_hang_timer_sec} onChange={e => setMcv({ ...mcv, reception_hang_timer_sec: Number(e.target.value) })} />
+                    </Field>
+                    <Field label="시작 최소 응답(명)">
+                      <Input type="number" min={0} max={MIN_TO_START_MAX}
+                        title="mcvideo-on-network-minimum-number-to-start — 개시자에게 응답하기 전에 받아야 할 멤버 응답 수 (0=기다리지 않음)"
+                        value={mcv.min_number_to_start} onChange={e => setMcv({ ...mcv, min_number_to_start: Number(e.target.value) })} />
+                    </Field>
+                    <Field label={`그룹 우선순위(0~${MCV_PRIORITY_MAX})`}>
+                      <Input type="number" min={0} max={MCV_PRIORITY_MAX} placeholder="—"
+                        title="mcvideo-on-network-group-priority — 비우면 요소를 싣지 않는다(가장 낮음)"
+                        value={mcvPrio} onChange={e => setMcvPrio(e.target.value)} />
+                    </Field>
+                    <Field label="선호 코덱(음성 · 영상)">
+                      <div className="flex gap-1.5">
+                        <Input className="font-mono" title="mcvideo-preferred-audio-encodings — rtpmap 이름, 쉼표로 여럿" value={mcvAudio} onChange={e => setMcvAudio(e.target.value)} />
+                        <Input className="font-mono" title="mcvideo-preferred-video-encodings — rtpmap 이름, 쉼표로 여럿" value={mcvVideo} onChange={e => setMcvVideo(e.target.value)} />
+                      </div>
+                    </Field>
+                  </div>
+                  <div className="flex gap-3 items-center flex-wrap">
+                    <label className="flex items-center gap-1" title="mcvideo-on-network-allow-conference-state — 멤버가 MCVideo 그룹 세션의 참가자 정보(conference 이벤트)를 구독할 수 있음"><Checkbox checked={mcv.allow_conference_state} onCheckedChange={(c) => setMcv({ ...mcv, allow_conference_state: c === true })} />참가자 정보 구독</label>
+                    <label className="flex items-center gap-1 text-muted-foreground" title="mcvideo-protect-media · mcvideo-protect-transmission-control — 종단간 키(GMK, TS 33.180)가 있어야 켤 수 있다"><Checkbox checked={false} disabled />미디어·전송 제어 종단간 보호</label>
+                    <span className="text-xs text-muted-foreground">E2E 키 관리(GMK) 뒤에 켤 수 있다</span>
+                  </div>
+                </>)}
+              </div>
+            </div>
           </div>
-          <Field label="메시지 최대(byte)" w={110}><Input  type="number" title="mcdata-on-network-max-data-size-for-SDS (0=무제한)" value={form.max_sds_size ?? 10000} onChange={e => setForm({ ...form, max_sds_size: Number(e.target.value) })} /></Field>
-          <Field label="자동수신 최대(byte)" w={120}><Input  type="number" title="mcdata-on-network-max-data-size-auto-recv (파일 자동 다운로드 임계)" value={form.max_auto_recv ?? 1048576} onChange={e => setForm({ ...form, max_auto_recv: Number(e.target.value) })} /></Field>
-          <div className="flex gap-1.5 items-center">
+
+          <div className="flex gap-1.5 items-center border-t border-border pt-3">
             <Button variant="default" onClick={save}>저장</Button>
             <Button variant="ghost" onClick={() => isNew ? p.onClose() : setEditing(false)}>취소</Button>
           </div>
-          <div className="basis-full text-xs text-muted-foreground">타입: {groupTypeHint[form.group_type || 'prearranged']}</div>
-          <div className="basis-full text-xs text-muted-foreground">동시 발언: {floorPolicyHint[form.floor_policy || 'single']}</div>
-        </FieldRow>
+        </div>
       ) : existing && (
         <div className="flex items-center gap-4 flex-wrap text-sm">
           <span className="text-sm text-muted-foreground">ID {existing.id}</span>
@@ -427,6 +548,10 @@ function GroupDrawer(p: GroupDrawerProps) {
             : (existing.floor_policy === 'dual' ? '듀얼(긴급 끼어들기)' : `멀티(${existing.max_talkers ?? 2}명 동시)`)}</span>
           <span className="text-sm text-muted-foreground">소유자 {existing.authorized_user_name || existing.authorized_user || '—'}</span>
           <span className="text-sm text-muted-foreground">조직 {p.orgs.find(o => o.code === existing.org_code)?.name || existing.org_code || '—'}</span>
+          <span className="flex items-center gap-1 text-sm text-muted-foreground">서비스 <Badge variant="brandSoft">MCPTT</Badge>
+            {existing.mcvideo && <Badge variant="infoSoft">MCVideo</Badge>}</span>
+          {existing.mcvideo && <span className="text-sm text-muted-foreground">MCVideo {existing.mcvideo.invite_members ? 'prearranged' : 'chat'}
+            {' · '}동시 송출 {existing.mcvideo.max_transmitters}명 · 수신 유지 {existing.mcvideo.reception_hang_timer_sec}초</span>}
           {canManage && <Button className="ml-auto" onClick={() => setEditing(true)}>그룹 속성 편집</Button>}
         </div>
       )}

@@ -40,7 +40,17 @@ export interface Subscription {
   register_time?: string | null
   logout_time?: string | null
   mcptt_profile?: McpttProfile | null   // PTT 번호에만 (상세 응답 동봉, 미설정=null → 기본값)
+  mcvideo_profile?: McVideoProfile | null  // PTT 번호에만 (상세 응답 동봉) — MCVideo 이용 자격, null = 자격 없음
 }
+
+// PTT 회선의 MCVideo 이용 자격 (MCVideo user profile — TS 24.484 §9.3, mcvideo_user_profile 행 = 자격).
+//   자격이 있으면 user profile 문서·IdMS scope 3gpp:mc:video_*·토큰 mcvideo_id claim 이 따른다(admin_api.md §5.4).
+export interface McVideoProfile {
+  max_video_streams: number   // MaxSimultaneousVideoStreams — 동시에 받는 영상 수 C9 (1~16, CMP max_rx_streams)
+  max_calls_n6: number        // MaxSimultaneousCallsN6 — 동시 MCVideo 호 수 N6 (1~16, 넘으면 486)
+}
+/** 자격 상한 범위 — CSC services/mcvideo.py PROFILE_LIMITS 와 같은 값. */
+export const MCVIDEO_PROFILE_MAX = 16
 
 // 사용자 MCPTT 프로파일 (ptt_user_profile — TS 24.484). SOS 대상 결정 + 개시 인가.
 export interface McpttProfile {
@@ -137,4 +147,8 @@ export const usersApi = {
 
   getPttProfile:    (pid: number, msisdn: string)                        => api.get<McpttProfile & {id:string, exists:boolean}>(`/users/${pid}/ptt/${enc(msisdn)}/profile`),
   updatePttProfile: (pid: number, msisdn: string, data: McpttProfile)    => api.put<McpttProfile & {id:string}>(`/users/${pid}/ptt/${enc(msisdn)}/profile`, data),
+  // MCVideo 이용 자격 — GET 404 {error:'not_entitled'} = 자격 없음 · PUT = 부여/상한 변경(준 키만) · DELETE = 회수
+  getPttMcVideo:    (pid: number, msisdn: string)                        => api.get<McVideoProfile & {id:string}>(`/users/${pid}/ptt/${enc(msisdn)}/mcvideo`),
+  putPttMcVideo:    (pid: number, msisdn: string, data: Partial<McVideoProfile>) => api.put<McVideoProfile & {id:string}>(`/users/${pid}/ptt/${enc(msisdn)}/mcvideo`, data),
+  deletePttMcVideo: (pid: number, msisdn: string)                        => api.delete<{id:string}>(`/users/${pid}/ptt/${enc(msisdn)}/mcvideo`),
 }

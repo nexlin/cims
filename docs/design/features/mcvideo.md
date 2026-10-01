@@ -7,7 +7,7 @@
 > **설계 정본.** 구현된 것 — 계약(전송 제어 정의 테이블 [mcvideo_tc_defs.yaml](mcvideo_tc_defs.yaml)(생성 헤더 양 끝, §5.3·§5.4) · DB 표(§5.1) ·
 > 설정 문서 골든 `tests/fixtures/mcvideo/` · SDP 프로파일(§1.4) · CSP↔CMP 제어 API([cmp_media_api.md](../../api/cmp_media_api.md) §7.9) · 단말 SDK 공개
 > 표면([ue_sdk.md](ue_sdk.md) §4.6)), 양 끝 전송 제어 코덱(CMP `PTransmissionCodec` · SDK `mcvideo/tc_codec`, 교차 시험), 단말 전송 제어 참여자 상태 머신
-> (SDK `mcvideo/tc_participant`), V0 전부, CSC 설정 평면·관리 API(§5.1 — 콘솔 제외)과 그 문서들의 SDK 해석(§5.4), CSP 호 제어 부품·모듈·서비스 판별·
+> (SDK `mcvideo/tc_participant`), V0 전부, CSC 설정 평면·관리 API·콘솔(§5.1)과 그 문서들의 SDK 해석(§5.4), CSP 호 제어 부품·모듈·서비스 판별·
 > 등록 능력·서비스별 affiliation(§5.2), CMP 그룹 종류·멤버 포트·제어 명령·송출·수신 제어 상태 머신·미디어 분배·보호(SRTP·전송 제어 SRTCP)·영상 RTCP 키프레임 요청(§5.3·§5.3.1),
 > 단말 SDK 등록 태그·affiliation·그룹 호(개시·재합류·멤버 초대 수락)·전송 제어 결선·송출 게이트(§5.4 — 루프백 시험, 실서버 미연동), CSP 그룹 호
 > (§5.2.1 — chat·prearranged 개시·합류·재합류·해제), 녹취(§5.3 — CSP·OAM·콘솔 몫 포함). 송출자별 렌더(다중 수신)는 V8(바인딩 C7 은 구현 —
@@ -240,7 +240,13 @@ MCPTT 그룹 호는 **음성과 floor 만** 싣는다(TS 24.379·24.380 — MCPT
   객체 켬·갱신(준 키만), 검사 `services/mcvideo.api_group_attrs` = XCAP PUT 과 같은 범위·보호 true 400, 쓰기 전에 검사) · PTT 회선 MCVideo 자격
   `GET/PUT/DELETE /api/v1/users/{pid}/ptt/{msisdn}/mcvideo`(행 = 자격, 상한 C9·N6 1~16, 캐시 `MCVIDEO_PROFILES` 즉시 갱신 → 문서·scope·claim). 표가 없으면
   400 `schema_not_migrated`. 변경 통지는 기존 경로(`GROUP_CHANGED`·`USER_CHANGED`). 시험 `tests/test_csc_mcvideo.py` AdminApiTest.
-- **콘솔** — 그룹 편집 «서비스» 절(MCPTT·MCVideo 켜기, MCVideo 속성), 가입자 PTT 회선 카드 옆 «MCVideo» 자격·상한 — 미구현(위 API 를 쓴다).
+- **콘솔** (위 API 를 쓴다) — 그룹 편집 «서비스» 절(`PttGroupsWorkbenchPage`): **MCPTT 음성** 카드(항상 켬 — 호 방식·동시 발언·T4·최대 통화 시간·
+  확인 통화·긴급콜/긴급경보·참가자 정보 구독)와 **MCVideo 영상** 카드(켬/끔 = 저장 본문 `mcvideo` 객체/`null`, 처음부터 꺼져 있던 그룹은 키를 싣지
+  않는다 · 호 방식 chat «원하는 사람이 합류»/prearranged «제휴 멤버를 초대» · 동시 송출 상한·TNG3·T5·시작 최소 응답·그룹 우선순위(비우면 생략)·
+  선호 코덱(음성·영상)·참가자 정보 구독 · 종단간 보호는 E2E(GMK) 전까지 비활성 · 해상도·프레임률은 화면에 없고 저장도 건드리지 않는다).
+  그룹 목록·MCPTT 그룹 정보 화면(`/service/ptt-groups`, OAM 응답 `mcvideo` = `mcvideo_group_attrs` 행 유무)은 서비스 칩 MCPTT·MCVideo 로 보인다.
+  가입자 PTT 회선 카드 «MCVideo 이용 자격»(`ProvisioningWorkbenchPage`) — 스위치 = 곧바로 부여(PUT)·회수(DELETE), 부여된 회선만 동시 수신 영상(C9)·
+  동시 영상 호(N6) [상한 저장] · 표 없음(400 `schema_not_migrated`)은 «DB 마이그레이션 전»으로 표시. 진행 중 MCVideo 호는 다음 개시부터 반영된다.
 
 ### 5.2 CSP (호 제어)
 
@@ -468,7 +474,7 @@ Indicator, automatic 수신; 1차 CSP 는 normal) · JOIN 응답 `audio_ssrc`·`
 
 ### 5.6 콘솔 · OAM · 계측기
 
-- 콘솔 그룹 편집 서비스 절·가입자 MCVideo 자격, 통계(sip_statistics 의 서비스 축에 `mcvideo`). 녹취·세션 이력 서비스 축 `mcvideo` 는 구현(§5.3 녹취).
+- 통계(sip_statistics 의 서비스 축에 `mcvideo`). 콘솔 그룹 편집 서비스 절·가입자 MCVideo 자격(§5.1 콘솔)과 녹취·세션 이력 서비스 축 `mcvideo`(§5.3 녹취)는 구현.
 - 계측기 — libcsim MCVideo 단말(REGISTER 태그·affiliation·chat 합류·MCV0/1/2), 시나리오 `MCVIDEO-GROUP-CHAT`·`MCVIDEO-TRANSMIT-RECEIVE`·
   `MCVIDEO-MAX-TRANSMITTERS`, 지표(송출 허가 시간·수신 허가 시간·영상 RTP 도달율). 계측기 코드는 팀원 트랙이라 요구만 넘긴다.
 

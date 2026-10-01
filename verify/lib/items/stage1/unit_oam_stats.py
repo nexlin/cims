@@ -15,6 +15,8 @@
        SIP 도 JSON 도 아닌 바이트(평문 포트로 온 TLS 레코드)는 `unknown` 으로 몬다
   · tests/test_ue_devices.py         단말 속성 file-store ue_devices — CSP 관측 줄 접기(같은 단말 재등록·단말 교체·해제·커서)·
                                      User-Agent 파싱·IMEI 가림(mcptt_management_views.md §4.1)
+  · tests/test_oam_ptt_group_mcvideo.py  MCPTT 그룹 정보의 서비스 표시 — MCVideo = mcvideo_group_attrs 행 유무, 표가 없으면
+                                     (마이그레이션 전) 전부 아님(mcptt_management_views.md §3)
   · tests/test_stats_msg_iface.py     메시지 통계의 **인터페이스 축** — 네 인터페이스가 같은 집계 피라미드를 타는지,
        축이 서로 새지 않는지, **세대(`v`)가 모자란 옛 레코드를 0 건으로 읽지 않는지**(sip 만 세던 시절의
        레코드에는 cmp/csc/https 칸이 아예 없다 — 그걸 0 으로 내면 화면이 정상 조회한 얼굴로 거짓을 말한다)
@@ -34,7 +36,7 @@ _TESTS = ["tests/test_oam_stats_classify.py", "tests/test_stats_probe.py",
           "tests/test_stats_rebuild_job.py", "tests/test_stats_ptt_attempts.py",
           "tests/test_stats_descriptor_reasons.py",
           "tests/test_oam_stats_method_key.py", "tests/test_stats_msg_iface.py",
-          "tests/test_ue_devices.py"]
+          "tests/test_ue_devices.py", "tests/test_oam_ptt_group_mcvideo.py"]
 
 
 @verify_item(

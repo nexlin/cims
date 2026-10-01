@@ -3040,6 +3040,21 @@ def _ptt_today_by_group(config: dict) -> dict:
         return {}
 
 
+def _mcvideo_group_ids(cur, gid: str = None) -> set:
+    """MCVideo 서비스를 가진 그룹(mcptt_group_id) — 그룹 문서에 MCVideo 몫(mcvideo_group_attrs 행)이 있는 그룹 (mcvideo.md §5.1).
+    gid 를 주면 그 그룹만 본다. 표가 없으면(sql/migrate_mcvideo.sql 전) 빈 집합."""
+    sql = "SELECT g.mcptt_group_id FROM mcvideo_group_attrs a JOIN ptt_groups g ON g.id=a.group_id"
+    try:
+        if gid is None:
+            cur.execute(sql)
+        else:
+            cur.execute(sql + " WHERE g.mcptt_group_id=%s", (gid,))
+        return {r['mcptt_group_id'] for r in cur.fetchall()}
+    except Exception as e:
+        logger.debug('mcvideo_group_attrs skipped (pre-migration?): %s', e)
+        return set()
+
+
 def _ptt_state_of(live: dict) -> str:
     if not live:
         return 'idle'
@@ -3075,6 +3090,7 @@ def _ptt_groups_status(config: dict, state: str = 'all', q: str = '') -> Handler
                     f"   WHERE a.group_id=g.id AND {_AFF_ACTIVE}) AS affiliated_count "
                     f"FROM ptt_groups g {where} ORDER BY g.name, g.mcptt_group_id", args)
                 rows = cur.fetchall()
+                mcvideo = _mcvideo_group_ids(cur)
     except Exception as e:
         logger.exception('ptt groups status error: %s', e)
         return HandlerResult(status=500, body=_ERR_INTERNAL)
@@ -3095,7 +3111,7 @@ def _ptt_groups_status(config: dict, state: str = 'all', q: str = '') -> Handler
             'id': gid, 'name': r.get('name') or gid, 'group_type': r.get('group_type') or 'prearranged',
             'org_code': r.get('org_code') or '', 'priority': r.get('priority'),
             'floor_policy': r.get('floor_policy') or 'single', 'emergency_call': emergency,
-            'video_enabled': bool(r.get('video_enabled')), 'encryption': bool(r.get('encryption')),
+            'mcvideo': gid in mcvideo, 'encryption': bool(r.get('encryption')),
             'member_count': int(r.get('member_count') or 0), 'registered_count': int(r.get('registered_count') or 0),
             'affiliated_count': int(r.get('affiliated_count') or 0),
             'state': st, 'participants': len(lv['participants']) if lv else 0, 'floor_holders': lv['holders'] if lv else [],
@@ -3118,6 +3134,7 @@ def _ptt_group_status(config: dict, gid: str) -> HandlerResult:
                 g = cur.fetchone()
                 if not g:
                     return HandlerResult(status=404, body={'error': 'group not found'})
+                g_mcvideo = gid in _mcvideo_group_ids(cur, gid)
                 cur.execute(
                     "SELECT m.user_id AS msisdn, m.role, m.priority, u.name, ps.register_time, ps.logout_time, "
                     f" {_PTT_ON} AS registered, "
@@ -3141,7 +3158,7 @@ def _ptt_group_status(config: dict, gid: str) -> HandlerResult:
         'id': g.get('mcptt_group_id'), 'name': g.get('name') or gid, 'group_type': g.get('group_type') or 'prearranged',
         'org_code': g.get('org_code') or '', 'priority': g.get('priority'), 'floor_policy': g.get('floor_policy') or 'single',
         'max_talkers': g.get('max_talkers'), 'emergency_call': bool(g.get('emergency_call')),
-        'emergency_alert': bool(g.get('emergency_alert', 1)), 'video_enabled': bool(g.get('video_enabled')),
+        'emergency_alert': bool(g.get('emergency_alert', 1)), 'mcvideo': g_mcvideo,
         'encryption': bool(g.get('encryption')), 'require_affiliation': bool(g.get('require_affiliation', 1)),
         'hang_timer_sec': g.get('hang_timer_sec'), 'max_duration_sec': g.get('max_duration_sec'),
         'owner': g.get('owner_name') or '',

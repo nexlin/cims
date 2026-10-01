@@ -835,8 +835,7 @@ private:
     std::map<std::string, std::string> m_mapPttSessionId;    // groupId → 현재 세션 sesid
     std::map<std::string, std::string> m_mapPttSesName;      // groupId → 세션 디렉터리 이름 S{ts}_{n}
     std::map<std::string, std::string> m_mapPttSessionDesc;  // groupId → 세션 시작 버킷 session.json 경로
-    std::map<std::string, std::string>
-        m_mapPttSessionType;  // 세션 키 → 서비스 축 "ptt" | "mcvideo" (session.json type)
+    std::map<std::string, std::string> m_mapPttSessionType;  // 세션 키 → session.json type (ptt|mcvideo)
     std::set<std::string> m_setCallJson;                     // call.json 기록 완료 dir (멱등 가드)
 
     std::string _dir( const std::string &key ) {

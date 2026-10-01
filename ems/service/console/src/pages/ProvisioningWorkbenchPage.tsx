@@ -2,7 +2,7 @@ import { useConfirm } from '@core/components/custom/confirm'
 import { Fragment, useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import IconBtn from '@core/components/IconBtn'
 import { AlertTriangle, ChevronRight, Pencil, Plus, Trash2, Upload, X } from 'lucide-react'
-import { usersApi, MCPTT_PROFILE_OPT_KEYS, mcpttProfileOptDefault, type UserSummary, type Subscription, type UserInput, type McpttProfile, type SipTransport, type AuthScheme, type ImportResult, type LineSvc } from '@core/api/users'
+import { usersApi, MCPTT_PROFILE_OPT_KEYS, MCVIDEO_PROFILE_MAX, mcpttProfileOptDefault, type McVideoProfile, type UserSummary, type Subscription, type UserInput, type McpttProfile, type SipTransport, type AuthScheme, type ImportResult, type LineSvc } from '@core/api/users'
 import { groupsApi, type Group } from '@core/api/groups'
 import { phoneGroupsApi, type PhoneGroup } from '@core/api/phoneGroups'
 import { rolesApi, type RoleDef } from '@core/api/roles'
@@ -10,6 +10,7 @@ import { orgApi, type Organization } from '@core/api/organizations'
 import OrgTreePanel from '@core/components/OrgTreePanel'
 import { DataTable, type Column } from '@core/components/DataTable'
 import { useToast } from '@core/components/Toast'
+import { ApiError } from '@core/api/client'
 import { useAuth } from '@core/contexts/AuthContext'
 import { canWriteConfig } from '@core/utils/permissions'
 import { Button } from '@core/components/ui/button'
@@ -24,6 +25,7 @@ import { StatusDot } from '@core/components/custom/status-dot'
 import { EmptyState } from '@core/components/custom/empty-state'
 import Modal from '@core/components/Modal'
 import { Checkbox } from '@core/components/ui/checkbox'
+import { Switch } from '@core/components/ui/switch'
 import { announcementsApi } from '../api/announcements'
 
 // ── 가입자 관리 (사용자 = 가입, 회선 등록이 가입 행위) ─────────────────────────────
@@ -800,6 +802,7 @@ function LineCard({ user, row, catalog, pttGroups, phoneGroups, canWrite, highli
                   ]} />
                 </Section>
               )}
+              <McVideoEntitlement user={user} sub={sub} canWrite={canWrite} />
             </div>
           )}
         </div>
@@ -948,6 +951,88 @@ function LineCard({ user, row, catalog, pttGroups, phoneGroups, canWrite, highli
         </div>
       )}
     </article>
+  )
+}
+
+// ── PTT 회선의 MCVideo 이용 자격 (MCVideo user profile — TS 24.484 §9.3, admin_api.md §5.4) ──
+//   행 = 자격 — 있으면 user profile 문서·IdMS scope 3gpp:mc:video_*·토큰 mcvideo_id claim 이 따른다. 스위치는 곧바로 부여(PUT)·
+//   회수(DELETE), 상한은 [상한 저장]. 진행 중 MCVideo 호는 끊지 않고 다음 개시부터 반영된다.
+function McVideoEntitlement({ user, sub, canWrite }: { user: UserSummary; sub: Subscription; canWrite: boolean }) {
+  const { show } = useToast()
+  // undefined = 읽는 중 · null = 자격 없음 · 'unmigrated' = MCVideo 표 없음(마이그레이션 전) · 'unavailable' = 조회 실패(CSC 구버전 등)
+  const [ent, setEnt] = useState<McVideoProfile | null | 'unmigrated' | 'unavailable' | undefined>(undefined)
+  const [lim, setLim] = useState({ max_video_streams: '1', max_calls_n6: '1' })
+  const [busy, setBusy] = useState(false)
+  const apply = useCallback((pr: McVideoProfile | null) => {
+    setEnt(pr)
+    if (pr) setLim({ max_video_streams: String(pr.max_video_streams), max_calls_n6: String(pr.max_calls_n6) })
+  }, [])
+  useEffect(() => {
+    usersApi.getPttMcVideo(user.id, sub.id)
+      .then(r => apply({ max_video_streams: r.max_video_streams, max_calls_n6: r.max_calls_n6 }))
+      .catch((e: unknown) => {
+        const code = e instanceof ApiError ? e.data.error : ''
+        setEnt(code === 'not_entitled' ? null : code === 'schema_not_migrated' ? 'unmigrated' : 'unavailable')
+      })
+  }, [user.id, sub.id, apply])
+
+  const granted = ent != null && typeof ent === 'object'
+  async function toggle(on: boolean) {
+    setBusy(true)
+    try {
+      if (on) {
+        const r = await usersApi.putPttMcVideo(user.id, sub.id, {})
+        apply({ max_video_streams: r.max_video_streams, max_calls_n6: r.max_calls_n6 }); show('MCVideo 이용 자격 부여', 'ok')
+      } else {
+        await usersApi.deletePttMcVideo(user.id, sub.id); apply(null); show('MCVideo 이용 자격 회수', 'ok')
+      }
+    } catch (e: unknown) { show(String(e), 'err') }
+    finally { setBusy(false) }
+  }
+  async function saveLimits() {
+    const v = Number(lim.max_video_streams), n = Number(lim.max_calls_n6)
+    const ok = (x: number) => Number.isInteger(x) && x >= 1 && x <= MCVIDEO_PROFILE_MAX
+    if (!ok(v) || !ok(n)) { show(`상한은 1~${MCVIDEO_PROFILE_MAX} 정수`, 'err'); return }
+    setBusy(true)
+    try {
+      const r = await usersApi.putPttMcVideo(user.id, sub.id, { max_video_streams: v, max_calls_n6: n })
+      apply({ max_video_streams: r.max_video_streams, max_calls_n6: r.max_calls_n6 }); show('MCVideo 상한 저장', 'ok')
+    } catch (e: unknown) { show(String(e), 'err') }
+    finally { setBusy(false) }
+  }
+
+  return (
+    <div className={`flex flex-col gap-3 rounded-md border p-3.5 ${granted ? 'border-info' : 'border-border'}`}>
+      <div className="flex flex-wrap items-center gap-2.5">
+        <span className="font-semibold">MCVideo 이용 자격</span>
+        <span className="text-xs text-muted-foreground">MCVideo user profile(TS 24.484 §9.3) — 있으면 영상 그룹 호를 쓸 수 있다</span>
+        {ent === undefined ? <span className="ml-auto text-xs text-muted-foreground">읽는 중…</span>
+        : ent === 'unmigrated' ? <span className="ml-auto text-xs text-muted-foreground">DB 마이그레이션 전 (sql/migrate_mcvideo.sql)</span>
+        : ent === 'unavailable' ? <span className="ml-auto text-xs text-muted-foreground">조회 실패(서버 구버전?)</span>
+        : <label className="ml-auto flex items-center gap-2 text-sm">
+            <span>{granted ? '부여됨' : '없음'}</span>
+            <Switch checked={granted} disabled={!canWrite || busy} onCheckedChange={toggle} aria-label="MCVideo 이용 자격" />
+          </label>}
+      </div>
+      {granted && (<>
+        <div className="grid grid-cols-[repeat(2,minmax(0,220px))] gap-3">
+          <Field label={`동시 수신 영상(1~${MCVIDEO_PROFILE_MAX})`}>
+            <Input type="number" min={1} max={MCVIDEO_PROFILE_MAX} disabled={!canWrite} value={lim.max_video_streams}
+              onChange={e => setLim({ ...lim, max_video_streams: e.target.value })} />
+            <span className="text-xs text-muted-foreground">MaxSimultaneousVideoStreams — 서버 C9</span>
+          </Field>
+          <Field label={`동시 영상 호(1~${MCVIDEO_PROFILE_MAX})`}>
+            <Input type="number" min={1} max={MCVIDEO_PROFILE_MAX} disabled={!canWrite} value={lim.max_calls_n6}
+              onChange={e => setLim({ ...lim, max_calls_n6: e.target.value })} />
+            <span className="text-xs text-muted-foreground">MaxSimultaneousCallsN6 — 넘으면 486</span>
+          </Field>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          {canWrite && <Button variant="outline" disabled={busy} onClick={saveLimits}>상한 저장</Button>}
+          <span className="text-xs text-muted-foreground">스위치 = 곧바로 부여(PUT)·회수(DELETE) · 진행 중 영상 호는 끊지 않고 다음 개시부터</span>
+        </div>
+      </>)}
+    </div>
   )
 }
 

@@ -23,7 +23,11 @@ export interface Group {
   allow_fd?: boolean               // mcdata-allow-file-distribution (그룹 파일전송)
   max_sds_size?: number            // mcdata-on-network-max-data-size-for-SDS (octets, 0=무제한)
   max_auto_recv?: number           // mcdata-on-network-max-data-size-auto-recv (octets)
+  // 옛 «PTT 영상»(MCPTT 호에 m=video) — V7 전 CSC 만 응답에 싣는다. V7 CSC 는 키가 없고 받아도 무시한다(mcvideo.md §8).
   video_enabled?: boolean
+  // MCVideo 서비스 (TS 24.481 §7.2.2 — 한 그룹 = 서비스 집합, TS 23.280 §3). null/없음 = MCVideo 그룹 아님.
+  //   쓰기: 키 없음 = 그대로 · null = 끔 · 객체 = 켬/갱신(준 키만) — admin_api.md §6.
+  mcvideo?: McVideoGroupAttrs | null
   org_code?: string
   session_start?: string | null
   session_end?: string | null
@@ -48,7 +52,32 @@ export interface Group {
   authorized_user_name?: string | null    // 소유자 표시명, 읽기전용
 }
 
-export type GroupInput = Omit<Group, 'members'> & { members?: Member[] }
+// 그룹 문서 MCVideo 몫 (mcvideo-* 요소 — TS 24.481 §7.2.2, CSC services/mcvideo.py GROUP_ATTR_DEFAULTS 와 같은 키)
+export interface McVideoGroupAttrs {
+  invite_members: boolean                 // mcvideo-on-network-invite-members — true = prearranged(제휴 멤버 초대), false = chat
+  max_duration_sec: number                // mcvideo-on-network-maximum-duration — TNG3 (0~86400, 0 = 무제한)
+  max_transmitters: number                // mcvideo-maximum-simultaneous-mcvideo-transmitting-group-members (1~16)
+  audio_encodings: string[]               // mcvideo-preferred-audio-encodings (rtpmap 이름)
+  video_encodings: string[]               // mcvideo-preferred-video-encodings
+  video_resolutions: string | null        // mcvideo-preferred-video-resolutions — null = 요소 생략
+  video_frame_rate: string | null         // mcvideo-preferred-video-frame-rate — null = 요소 생략
+  reception_hang_timer_sec: number        // on-network-reception-hang-timer — T5 (TS 24.581 §11.1.3, 0~3600)
+  min_number_to_start: number             // mcvideo-on-network-minimum-number-to-start
+  group_priority: number | null           // mcvideo-on-network-group-priority (0~255) — null = 생략(가장 낮음)
+  protect_media: boolean                  // mcvideo-protect-media — E2E(GMK) 전에는 false 만
+  protect_transmission_control: boolean   // mcvideo-protect-transmission-control — 같음
+  allow_conference_state: boolean         // mcvideo-on-network-allow-conference-state
+}
+
+/** MCVideo 를 켤 때 쓰는 기본값 — CSC GROUP_ATTR_DEFAULTS 와 같은 값. */
+export const MCVIDEO_GROUP_DEFAULTS: McVideoGroupAttrs = {
+  invite_members: false, max_duration_sec: 3600, max_transmitters: 2, audio_encodings: ['AMR-WB'], video_encodings: ['H264'],
+  video_resolutions: null, video_frame_rate: null, reception_hang_timer_sec: 30, min_number_to_start: 0, group_priority: null,
+  protect_media: false, protect_transmission_control: false, allow_conference_state: true,
+}
+
+// 쓰기 본문 — mcvideo 는 준 키만 바꾼다(부분 객체), null = 끔
+export type GroupInput = Omit<Group, 'members' | 'mcvideo'> & { members?: Member[]; mcvideo?: Partial<McVideoGroupAttrs> | null }
 
 export const groupsApi = {
   list:   ()                                  => api.get<{ groups: Group[] }>('/ptt/groups').then(r => r.groups),

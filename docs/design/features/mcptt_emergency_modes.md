@@ -364,7 +364,7 @@ MESSAGE(호 없는 그룹 긴급 상태 해제, §12.1.3.3)도 같은 곳으로 
 
 ## 8. 콘솔/관측
 
-- **그룹 편집(PttGroupsWorkbenchPage)**: capability 체크박스 — 긴급콜(condition 공통 게이트),
+- **그룹 편집(PttGroupsWorkbenchPage)**: «서비스» 절 MCPTT 카드의 capability 체크박스 — 긴급콜(condition 공통 게이트),
   긴급경보. (임박위험·ad-hoc 은 별도 축을 두지 않는다 — §2.)
 - **가입자(ProvisioningWorkbench)**: 드로어의 **PTT 회선 카드 › 긴급(SOS) 섹션**(PTT 번호 = MCPTT ID 단위 프로파일을
   카드 안에 품는다 — 별도 프로파일 행 없음) — 긴급 그룹콜 대상 select(`현재 선택 그룹(단말)` = `UseCurrentlySelectedGroup`,

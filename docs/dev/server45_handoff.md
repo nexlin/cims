@@ -695,7 +695,7 @@ S1-UNIT-PSIP [M] 으로 확인했다. 알아 둘 것 하나 — 갱신 answer �
 | R2 | M2 에서 드러나는 CSP·CMP 결함 수정 | R1 | 실측 전 코드다 — 특히 개시 대기(10 s)·초대 응답 한도(30 s)·해제 규칙·SRTP·NAT(latch) 경로. 로그 `MCVIDEO:`·CMP `STATS mcvideo_groups` |
 | R3 | B8 CSP·OAM 몫 — CSP 가 `PTT_GROUP_ADD` 에 `record_dir`·`session_dir` 를 싣고 그룹·세션 디스크립터를 쓰기 · OAM 이력의 서비스 축 `mcvideo` · 콘솔 재생 | **사용자 결정 D4**(녹취 레이아웃) | CMP 기록기는 준비됨(PTT 세션 레이아웃·`type:"mcvideo"` — [recording.md](../design/features/recording.md) §3.3.1). CSP 는 지금 싣지 않아 녹취 없음 |
 | R4 | A12 로그·CDR·통계 서비스 축 `mcvideo` | **사용자 결정 D5** | [sip_statistics.md](../design/features/sip_statistics.md) — CSP `CallDir`(시도 장부·세션 색인) → oam-svc 롤업 |
-| R5 | A6 콘솔 화면 — 그룹 편집 «서비스» 절·가입자 PTT 회선 «MCVideo» 자격 | **사용자 결정 D3** | API 는 준비됨. 기존 «영상» 체크박스(`video_enabled`, 현행 PTT 영상)와 V7 전까지 겹친다. 콘솔 규칙 = `ems/core/console/CLAUDE.md` |
+| R5 | A6 콘솔 화면 — 그룹 편집 «서비스» 절·가입자 PTT 회선 «MCVideo» 자격 | **구현**(§12.6 R5) | D3 도안대로. «PTT 영상(현행)» 칸은 그룹 응답에 `video_enabled` 가 있는 CSC(V7 전)에서만 보인다 |
 | R6 | CMS 문서 변경 xcap-diff 에 MCVideo user profile·service config 싣기 | — | 지금 CSP `BuildXcapDiffBody` 는 MCPTT 문서만. SDK 는 본문 없는 SUBSCRIBE — RFC 5875 읽기 먼저 |
 | R7 | 1차 잔여 소항목 | — | N2(`MaxAffiliationsN2`)·user profile `<ImplicitAffiliations>`(§8.2.2.2.15)·`on-network-max-participant-count`(486 122)·비멤버 재합류 403 121(지금 116)·검사 순서(prearranged 는 488 이 Accept-Contact 403 앞 — §9.2.1.4.2 2)·3)) |
 | R8 | V7 — 현행 PTT 영상 제거(A13·B11·C11) | M3 뒤, 한 창 배포 | D9(전환 기간 없음). psip 는 SRTP leg 의 PTT 영상을 여전히 port 0 |
@@ -752,7 +752,7 @@ csc 0.2.139(dep 3, `UeInitConfig.ServiceDetails.McVideo.Enable=true`). 공유 DB
 **D3 콘솔 도안** — 두 장(Artifact «MCVideo 콘솔 도안»): ① PTT 그룹 편집 «서비스» 절 = MCPTT 음성(항상 켬 — 기존 속성) · MCVideo 영상(체크 = 서비스 켬/끔 →
 `mcvideo` 객체/null, 호 방식 chat/prearranged 세그먼트 · 동시 송출 상한 · TNG3 · T5 · 시작 최소 응답 · 그룹 우선순위 · 선호 코덱 · 참가자 정보 구독 · E2E 보호는 사유 병기
 비활성), 기존 «영상» 체크박스 = «PTT 영상(현행)» + V7 에서 없어진다는 안내 · 목록에 서비스 칩 ② 가입자 PTT 회선 «MCVideo 이용 자격» = Switch(즉시 PUT/DELETE) + 동시 수신
-영상(C9)·동시 영상 호(N6) + [상한 저장]. 구현(R5)은 도안 확인 뒤.
+영상(C9)·동시 영상 호(N6) + [상한 저장]. 구현 = §12.6 R5.
 
 **D5 추천(통계 서비스 축)** — `mcvideo` 를 `ptt` 와 나란한 서비스 값으로 둔다(판정 = 요청의 MCVideo ICSI — 접속서비스 kind 는 둘 다 `ptt` 라 kind 로는 못 가른다).
 CSP 시도 장부·세션 색인(sip_statistics §3 attempt/session/leg)에 `service: mcvideo` 를 싣고 oam-svc 롤업 `by_service` 가 그대로 받는다 — 새 축을 만들지 않는다(체계성).
@@ -776,7 +776,7 @@ MCVideo 와 같은 송신 보정) · CSP MCPTT re-INVITE answer fmtp 를 re-offe
   `<user-priority>`) · SDK MCPTT answer 가 offer `mc_priority` 를 되돌리지 않음(§14.3.3 끝 문단) · psip 422 재시도 INVITE 가 refresher 를 다시 싣는다.
 
 **다음 세션(.45)** — ① D6 구현(SDK·CSP, 라이브 PTT 단말 동작이 바뀌므로 .48 에서 먼저 실측) ② R3 녹취 CSP 몫(D4 같은 폴더) ③ A12 통계(D5) ④ R7 1차 잔여 소항목 · R6
-xcap-diff ⑤ R5 콘솔(도안 확인 뒤) ⑥ cli PTT REGISTER MCPTT 태그. 남은 사용자 결정 = Linux 엔진 영상(openh264) · pjsua `on_send_request` 가드.
+xcap-diff ⑤ R5 콘솔(구현) ⑥ cli PTT REGISTER MCPTT 태그. 남은 사용자 결정 = Linux 엔진 영상(openh264) · pjsua `on_send_request` 가드.
 
 ### 12.6 10-01 오전 진행 · 남은 일 (.45 · cims-7c · Windows)
 
@@ -792,7 +792,7 @@ D8·D10~D12: 영상 칸은 고른 영상이 있을 때만 · «영상 n» 목록
 |---|---|---|---|
 | R3 | 녹취 CSP 몫 — MCVideo `PTT_GROUP_ADD` 에 `record_dir`·`session_dir`·디스크립터(D4 같은 폴더 `recordings/ptt/{id}`, 메타 `type: mcvideo`) · OAM 이력 서비스 축 · 콘솔 재생 | .45 | **구현**(미배포) — CSP `CCallDir` 세션 키 `mcvideo:<그룹>`·session.json `type`·group.json 은 MCPTT 만 · OAM 인덱스·`/ptt/sessions?service=`·녹취 API `service`·재생 변환(영상만 구간 포함)·MCPTT 통계에서 제외 · 콘솔 «영상» 배지. 남은 것 = 송출 제어 이벤트 기록(`floor.jsonl` 짝)·.48/.45 실측 |
 | R4 | A12 통계 — 서비스 값 `mcvideo`(ICSI 판정) → CSP 시도 장부·세션 색인 → oam-svc 롤업 `by_service`(D5) | .45 | 미착수 |
-| R5 | 콘솔 — 그룹 편집 «서비스» 절 · PTT 회선 «MCVideo 이용 자격»(D3 도안 artifact 9mVfQxdqp39GovpmtjsHoJ) | .45 | 도안 확인 대기 → 구현 |
+| R5 | 콘솔 — 그룹 편집 «서비스» 절 · PTT 회선 «MCVideo 이용 자격»(D3 도안 artifact 9mVfQxdqp39GovpmtjsHoJ) | .45 | **구현**(미배포 — oam 패키지) — MCPTT 카드(기존 MCPTT 속성) + MCVideo 카드(켬/끔 = `mcvideo` 객체/null, 속성 7종) · 그룹 목록·MCPTT 그룹 정보 서비스 칩(OAM 응답 `video_enabled` → `mcvideo`) · 회선 «MCVideo 이용 자격» 스위치(즉시 PUT/DELETE)·상한 C9·N6 · «PTT 영상(현행)» 칸은 V7 전 CSC 에서만(V7 CSC 는 키가 없어 자동으로 사라짐). 가짜 API 헤드리스 렌더·저장 본문 확인, S1-UNIT-OAM-STATS(`tests/test_oam_ptt_group_mcvideo.py`) |
 | R6 | CMS 문서 변경 xcap-diff 에 MCVideo user profile·service config | .45 | 미착수(RFC 5875 먼저) |
 | R7 | 1차 잔여 — N2 · `<ImplicitAffiliations>` · 정원 486 122 · 비멤버 재합류 403 121 · prearranged 검사 순서 | .45 | 미착수 |
 | R7b | D6 에서 찾은 MCPTT 소항목 — 사설 호 수동 개시 180 `Require: timer` · 멤버 초대 `mc_priority` 고정 3(§14.2.3 `<user-priority>`) · SDK answer 의 `mc_priority` 되돌림(§14.3.3) · psip 422 재시도 refresher | .45 | 미착수 |
