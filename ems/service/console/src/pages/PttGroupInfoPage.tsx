@@ -141,7 +141,7 @@ function GroupDetail({ id, onClose }: { id: string; onClose: () => void }) {
               <span className="text-muted-foreground">소유자</span><span>{orDash(g.owner)}</span>
               <span className="text-muted-foreground">조직</span><span className="font-mono">{orDash(g.org_code)}</span>
               <span className="text-muted-foreground">유지 시간(T4)</span><span>{secLabel(g.hang_timer_sec)}</span>
-              <span className="text-muted-foreground">최대 통화 시간</span><span>{g.max_duration_sec === 0 ? '무제한' : secLabel(g.max_duration_sec)}</span>
+              <span className="text-muted-foreground">최대 통화 시간(TNG3)</span><span>{g.max_duration_sec === 0 ? '무제한' : secLabel(g.max_duration_sec)}</span>
               <span className="text-muted-foreground">허용</span>
               <span className="flex flex-wrap gap-1">
                 <Badge variant={g.emergency_call ? 'dangerSoft' : 'neutralSoft'}>긴급 호출 {g.emergency_call ? '허용' : '불허'}</Badge>

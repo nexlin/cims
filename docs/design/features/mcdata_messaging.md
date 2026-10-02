@@ -6,6 +6,10 @@
 긴급경보(alert-ind)뿐이다 — 그 경로는 본 기능과 별개로 유지된다
 ([mcptt_emergency_modes.md](mcptt_emergency_modes.md)).
 
+> **보완 목록** — 규격 원문(TS 24.282 V18.13·24.481·24.484)과 코드를 절차 단계별로 대조해 나온 미정합 지점은
+> [../../dev/mcdata_conformance_gaps.md](../../dev/mcdata_conformance_gaps.md) 에 모았다(§7 편차 표·§8 잔여 과제에 없는 것). 그 목록 §5 가 짚은
+> 서술은 실제와 다르다 — 항목이 반영되면 이 문서를 고치고 목록에서 지운다.
+
 ## 1. 아키텍처
 
 ```

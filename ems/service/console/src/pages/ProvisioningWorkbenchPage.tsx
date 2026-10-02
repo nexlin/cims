@@ -1029,13 +1029,13 @@ function McVideoEntitlement({ user, sub, canWrite }: { user: UserSummary; sub: S
               onChange={e => setLim({ ...lim, max_video_streams: e.target.value })} />
             <span className="text-xs text-muted-foreground">MaxSimultaneousVideoStreams — 서버 C9</span>
           </Field>
-          <Field label={`동시 영상 호(1~${MCVIDEO_PROFILE_MAX})`}>
+          <Field label={`동시 영상 호(N6, 1~${MCVIDEO_PROFILE_MAX})`}>
             <Input type="number" min={1} max={MCVIDEO_PROFILE_MAX} disabled={!canWrite} value={lim.max_calls_n6}
               onChange={e => setLim({ ...lim, max_calls_n6: e.target.value })} />
             <span className="text-xs text-muted-foreground">MaxSimultaneousCallsN6 — 넘으면 486</span>
           </Field>
           {hasN2 && (
-            <Field label={`동시 제휴 그룹(1~${MCVIDEO_N2_MAX})`}>
+            <Field label={`동시 제휴 그룹(N2, 1~${MCVIDEO_N2_MAX})`}>
               <Input type="number" min={1} max={MCVIDEO_N2_MAX} disabled={!canWrite} value={lim.max_affiliations_n2}
                 onChange={e => setLim({ ...lim, max_affiliations_n2: e.target.value })} />
               <span className="text-xs text-muted-foreground">MaxAffiliationsN2 — 기본 4</span>

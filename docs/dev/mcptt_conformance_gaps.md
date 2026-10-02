@@ -43,21 +43,21 @@ PTT(MCPTT) 서비스 구현을 3GPP 규격 원문과 대조해 **규격과 다�
 | 영역 | 항목 | A | B | C | D |
 |---|---|---|---|---|---|
 | 등록·서비스 인가 (REG) | 4 | — | 3 | — | 1 |
-| 제휴 (AFF) | 12 | 6 | 4 | 2 | — |
+| 제휴 (AFF) | 11 | 6 | 4 | 1 | — |
 | 그룹 호 — 서버 (GCS) | 22 | 9 | 7 | 5 | 1 |
 | 그룹 호 — 단말 (GCC) | 10 | — | 8 | — | 2 |
 | 개별 호 (PRV) | 9 | 4 | 4 | 1 | — |
 | 애드혹 그룹 호 (ADH) | 10 | 4 | 4 | 1 | 1 |
 | 긴급·임박·경보 (EMG) | 17 | 6 | 3 | 8 | — |
-| 발언권 — 서버 (FCS) | 24 | 4 | 11 | 6 | 3 |
-| 발언권 — 단말 (FCC) | 6 | 3 | 1 | 2 | — |
+| 발언권 — 서버 (FCS) | 20 | 2 | 9 | 6 | 3 |
+| 발언권 — 단말 (FCC) | 1 | — | — | 1 | — |
 | 발언권 SDP 협상 (SDP) | 3 | 1 | 2 | — | — |
 | 그룹 문서·GMS (GMS) | 18 | 3 | 13 | 2 | — |
 | 설정 문서·CMS (CMS) | 13 | 2 | 5 | 5 | 1 |
 | 신원 관리 (IDM) | 9 | 4 | 1 | 3 | 1 |
-| **계** | **157** | **46** | **66** | **35** | **10** |
+| **계** | **147** | **41** | **63** | **33** | **10** |
 
-확인 수준 — ◎ 88 · ○ 55 · △ 14.
+확인 수준 — ◎ 80 · ○ 53 · △ 14.
 
 읽는 순서 — §2(먼저 볼 것) → §3(영역별 전체) → §4(미구현 목록에 빠진 기능) → §5(문서 정정) → §6(묶음과 순서).
 
@@ -77,21 +77,12 @@ PTT(MCPTT) 서비스 구현을 3GPP 규격 원문과 대조해 **규격과 다�
 | FCS-21 | T2 제외 대상이 코드(긴급만)와 문서 세 곳(긴급·임박)이 다르다 |
 | FCS-20 | Floor Granted 의 Duration 이 늘 T2 다 — T2 에서 빼 준 긴급 화자도 단말이 그 시각에 스스로 끊는다 |
 
-**단말 발언권 상태 머신 (우리 CMP 와도 난다)**
-
-| 항목 | 내용 |
-|---|---|
-| FCC-1 | 대기 중(`U: queued`)에 Floor Taken 을 받으면 대기 상태를 잃는다 → PTT 를 떼도 Release 가 안 나가고, 차례가 오면 PTT 없이 마이크가 열린다(대기자 2명 이상) |
-| FCC-2 | 요청 중(`U: pending Request`)에 Floor Idle 을 받으면 요청 상태를 버린다 — 놓고 바로 다시 누를 때 |
-| FCC-3 | Floor Granted 를 어느 상태에서나 받아들여 마이크를 연다 — 위 둘과 겹쳐 «유령 승인» 이 송출로 이어진다. 관제 앱 두 벌에는 방어가 없다 |
-
 **인가·보안 구멍**
 
 | 항목 | 내용 |
 |---|---|
 | EMG-1 | 긴급 경보 MESSAGE 가 발신자의 그룹 멤버십을 보지 않는다 — 비멤버가 임의 그룹에 경보를 내고 남의 경보를 취소할 수 있다 |
 | PRV-2 | 개별 호 발신 인가(`<allow-private-call>`)가 문서에도 서버 판정에도 없다 — 개별 호를 막을 설정이 없다 |
-| FCS-2 | 누구든 Queued Floor Requests 로 남의 대기 요청을 지울 수 있다(인가 검사 없음) |
 | SDP-3 | offer 의 `mc_priority` 를 상한 없이 받아 Floor Priority 로 선점 서열을 올릴 수 있다 |
 | IDM-1 | PTT 가입이 없는 전화 계정에도 MC scope 토큰·MCPTT user profile·KMS 키가 나간다 |
 | IDM-3·IDM-4 | 클라이언트 등록·`redirect_uri` 필수 검사가 없다(PKCE 만이 방어선) |
@@ -121,7 +112,6 @@ PTT(MCPTT) 서비스 구현을 3GPP 규격 원문과 대조해 **규격과 다�
 
 | # | 급 | 대상 | 규격 | CIMS 지금 | 영향 | 확인 |
 |---|---|---|---|---|---|---|
-| AFF-1 | C | CSP | §9.2.2.2.3 1)·4) — served MCPTT ID 는 mcptt-info `<mcptt-request-uri>`. 남의 ID 인데 권한이 없으면 403 (shall) | mcptt-info 를 읽지 않고 served ID = From 으로 본다. 남의 ID 는 pidf `entity` 불일치로만 걸려 200 무동작 — `csp/CscfModule.cpp:1958-1963` (MCVideo 가지는 403 한다, `:1900-1909`) | 권한 없는 타인 제휴 변경이 성공처럼 보인다 | ◎ |
 | AFF-2 | A | CSP | §9.2.2.2.3 13)·15) — Expires 0 은 **그 클라이언트**의 목록만 해제 (shall) | `RemoveAffiliationsByUser` — 그 사용자의 모든 클라이언트 행(암시적 제휴 포함)을 지운다 — `csp/CscfModule.cpp:1934-1948` | 한 MCPTT ID 가 단말 둘이면 한 단말의 전체 해제가 다른 단말의 초대를 끊는다 | ◎ |
 | AFF-3 | C | CSP | §9.2.2.2.3 8)a) — 200 OK 에 Expires (shall) | 해제(Expires 0)·entity 불일치의 200 에 Expires 가 없다 — `csp/CscfModule.cpp:1947`·`:1962`, 구형 `:1827` | RFC 3903 게시자가 해제 확인을 못 한다(우리 SDK 는 읽지 않는다) | ◎ |
 | AFF-4 | B | CSP | §6.3.6 3. · §9.2.2.2.11 2) — 제휴는 사용자 × **클라이언트**(mcptt-info `<mcptt-client-id>`) 단위로 판정 (shall) | `IsAffiliated(group, user)` 가 client_id 를 보지 않는다 — `csp/DbManager.cpp:1022-1038`. 개시 검사 `csp/GroupCallService.cpp:951`, fan-out `:1491`·`:1572` | 제휴하지 않은 단말로 개시·합류가 되고 초대가 간다(한 사용자 한 단말이면 증상 없음) | ◎ |
@@ -235,15 +225,11 @@ CSP 는 참여 기능과 제어 기능을 겸한다.
 
 | # | 급 | 대상 | 규격 | CIMS 지금 | 영향 | 확인 |
 |---|---|---|---|---|---|---|
-| FCS-1 | B | CMP | §6.3.5.4.5 3) · §8.2.7 — 대기 중인 참가자의 Floor Release 는 대기 요청을 지운다 (shall) | 발언자가 아니면 바로 돌아간다 — `cmp/PMcpttGroup.cpp:1631` | 규격 단말(PTT 를 떼면 Floor Release)이 대기열에 남아 나중에 Floor Granted 를 받는다. conformance F5 는 «무시» 를 정합으로 적었다 | ◎ |
-| FCS-2 | A | CMP | §6.3.5.4.12 2) — 권한 없는 참가자의 Queued Floor Requests 취소는 결과 `1`(Not authorized). §6.3.4.4.13 2)a) — 목록이 없으면 **전체** 삭제 | 누구든 목록에 남을 적으면 지워진다(인가 검사 없음). 목록이 없으면 본인 것만 지운다 — `cmp/PMcpttGroup.cpp:1443-1481` | 일반 멤버가 남의 대기 요청을 지울 수 있다. 규격 관제 단말의 «전체 취소» 는 자기 것만 지운다. 짝 = FCC-4 | ◎ |
-| FCS-3 | B | CMP | §6.3.5.3.7 2) · §6.3.5.4.5 4) — 발언자가 아닌 참가자의 Floor Release 에 Floor Idle(유휴) 또는 Floor Taken(점유)으로 답한다 | 아무것도 보내지 않는다 — `cmp/PMcpttGroup.cpp:1628-1631` | 첫 Floor Idle 을 놓친 단말이 Release 를 재전송해도 응답이 없다(T7 기본 0) | ◎ |
 | FCS-4 | B | CMP·SDK | §8.2.3.14 — Floor Ack 의 Message Type 은 5비트 subtype 의 첫 비트를 0 으로 | 양쪽 다 ack 요구 비트를 넣어 싣는다 — `cmp/PMcpttGroup.cpp:1523-1524`, `sdk/core/src/floor/floor_participant.cpp:311`. 단위시험도 그 값을 기대한다(`tests/cmp_floor_codec_test.cpp:200-211`) | 규격 상대는 Ack 를 자기 메시지와 맞추지 못해 재전송한다. conformance F1/F2 · android_ue_client U1 은 정합으로 적었다 | ◎ |
 | FCS-5 | B | CSP·CMP | §6.3.4.4.2 3)a)i · §8.2.3.8 — Granted Party's Identity·User ID = MCPTT ID(URI) | CMP 는 `user_uri` 가 없으면 가입자 번호를 싣는데(`cmp/PMcpttGroup.cpp:1180-1184`), CSP 의 MCPTT 합류 명령은 `user_uri` 를 보내지 않는다(MCVideo 경로만 — `csp/CmpClientMcvideo.cpp:113`) | Floor Taken 의 화자 신원이 번호 문자열이다. conformance F5 는 «`PTT_JOIN.user_uri` 로 받는다» 고 적었으나 MCPTT 경로는 늘 폴백이다 | ◎ |
 | FCS-6 | B | CMP·CSP·SDK | §6.3.4.4.2 1)f — Audio SSRC 는 서버가 만든 전역 유일 값이고 발언자는 그 값을 RTP 에 쓴다(단말 §6.2.4.4.2 7. · `mc_ssrc` §14.4) | 필드 값 = 단말이 floor 헤더에 쓴 SSRC 를 되실은 것(`cmp/PMcpttGroup.cpp:991-995`·`:1239`). 하향 RTP 는 수신자별 SSRC 로 다시 쓴다(`:1845-1848`). SDK 는 Granted 의 SSRC·`mc_ssrc` 를 읽지 않는다 | Floor Taken·List of SSRCs 로 수신 스트림을 화자에 귀속할 수 없다(동시 발언에서 규격 단말은 화자 구분 불가) | ○ |
 | FCS-7 | B | CMP | §6.3.5.4.6 2) · §6.3.5.3.8 — 발언권 없는 참가자의 RTP 에 Floor Revoke `#3`(No permission to send a Media Burst) | 중계만 하지 않는다(통지 없음) — `cmp/PMcpttGroup.cpp:663-665`. cause #3 상수가 없다 | 승인됐다고 오인했거나 강제 회수된 단말이 계속 송신해도 알 길이 없다(조용한 무음 발언) | ◎ |
 | FCS-8 | B | CMP | §8.2.3.5 — 대기 중이 아니면 Queue Position Info = 254 | 미대기 = 0 을 싣는다. 우선순위도 대기 요청의 값이 아니라 멤버 기본값 — `cmp/PMcpttGroup.cpp:1560-1578` | 규격 단말이 «0번째 대기» 로 읽어 `U: queued` 로 들어간다 | ◎ |
-| FCS-9 | A | CMP | §6.3.4.5.2 — T3 는 회수 진입 때 한 번. §6.3.5.6.3 — Revoke 재전송은 같은 cause | 회수 유예 중 선점 요청이 다시 오면 다시 `_beginRevoke` — T3·T8·cause 를 새로 쓴다 — `cmp/PMcpttGroup.cpp:841-842`·`:878` | 선점 요청자가 Floor Request 를 재전송할 때마다(타이머 D2 가 들어가면 흔해진다) 회수 유예가 늘어난다 | ○ |
 | FCS-10 | B | CMP·SDK | §6.3.6.3.2 — dual floor 의 Floor Taken 은 Granted Party 하나 + G-bit + Audio SSRC. §6.3.6.3.6 — override 종료는 Floor Idle + G-bit. 단말 §6.2.4.5.8 — G-bit Taken 을 받은 발언자는 발언을 유지, §6.2.4.5.3 1.c — Release 에 G-bit | CMP 는 화자가 둘이면 multi-talker 형식(목록 필드, 0x0F 로 종료 통지)으로 보낸다 — `cmp/PMcpttGroup.cpp:1774-1784`. SDK 는 «목록에 내가 있나» 로만 판정하고 Release 에 G-bit 를 싣지 않는다(`floor_participant.cpp:372-378`·`:103`) | 사내끼리는 맞는다. 규격 상대와 dual floor 가 성립하지 않는다 | ○ |
 | FCS-11 | C | CMP·CSP·SDK | §6.3.4.4.2 3)f — Floor Indicator 는 호 종류(긴급·임박·일제). 단말 §6.2.4.3.5 1.b — 임박 위험 호의 요청에 E-bit | CMP 는 멤버 tier 로 비트를 정하고 Floor Idle 은 늘 Normal(`cmp/PMcpttGroup.cpp:977-1003`). 받은 요청의 Indicator 는 쓰지 않는다(`:762-785`). SDK 는 임박 E-bit 를 싣지 않는다(`floor_participant.cpp:96`) | 긴급 호에서 일반 멤버 발언의 Taken·Idle 이 Normal 로 나간다. conformance F2 «tier 로 승격» 은 코드와 다르고 emergency_modes §10 과도 모순이다 | ◎ |
 | FCS-12 | B | CMP·SDK | 표 8.2.2.1-1 — Floor Revoke Request(subtype 7), §6.3.5.4.15. Revoke cause `#7` | 미지 subtype 으로 버린다 — `cmp/PMcpttGroup.cpp:399-415`. 정의 정본(`mcptt_floor_defs.yaml`)에 subtype 7·cause 7·취소 결과 1·4·255 가 없다 | 관제 단말의 «남의 발언 회수» 요청이 사라진다. 미구현 목록에도 없다(§4) | ◎ |
@@ -266,12 +252,7 @@ CSP 는 참여 기능과 제어 기능을 겸한다.
 
 | # | 급 | 대상 | 규격 | CIMS 지금 | 영향 | 확인 |
 |---|---|---|---|---|---|---|
-| FCC-1 | A | SDK·관제 | §6.2.4.9.3 7. — `U: queued` 에서 Floor Taken 을 받아도 그 상태에 머문다. §6.2.4.9.6 — 뗄 때 Floor Release | Taken 목록에 내가 없으면 상태와 무관하게 Listening 으로 — `sdk/core/src/floor/floor_participant.cpp:377`. 그 뒤 `release()` 는 Speaking·Requesting·Queued 일 때만 Release 를 보낸다(`:193`) | 대기자가 둘 이상이면 CMP 가 앞 사람을 승급시키며 Taken 을 뿌린다 → 내 대기 상태 소실 → PTT 를 떼도 서버 큐에 요청이 남음 → 차례가 오면 Granted → PTT 없이 마이크가 열린다(FCC-3). 현장 앱만 늦은 승인을 반납한다(`PttFloor.kt:186-191`) — 실측 필요 | ◎ |
-| FCC-2 | A | SDK | §6.2.4.1 — 그 상태에 절차가 없는 메시지는 버리고 상태를 유지. `U: pending Request` 에는 Floor Idle 절차가 없다 | `if (state_ != Speaking) state_ = Idle` — `sdk/core/src/floor/floor_participant.cpp:349-353` | 놓고 바로 다시 누를 때(앞 Release 의 Idle 이 새 Request 뒤에 도착)·T7 Idle 재송신 때 요청 상태를 잃는다 → Release 누락·시간 초과 통지 없음 | ◎ |
-| FCC-3 | A | SDK·관제 | §6.2.4.1 — `U: has no permission` 에는 Floor Granted 절차가 없다(버린다) | `pendingRelease_`·`releaseOnAnswer_` 만 거르고 마이크를 연다 — `sdk/core/src/floor/floor_participant.cpp:323-337` | 요청 시한 뒤의 늦은 승인, FCC-1·2 로 Release 가 빠진 뒤의 승인이 PTT 없이 송출을 연다. 관제 앱 두 벌은 Duration 까지 송출한다 | ◎ |
-| FCC-4 | B | SDK | §6.2.4.9.6 · §8.2.7 — 내 대기 요청 취소 = Floor Release. §6.2.4.7.4 1.b — 목록 없는 Queued Floor Requests = 전체 대기 요청 삭제 요청 | 대기 중 `release()` 가 목록 없는 0x0E 를 먼저 보낸다(`floor_participant.cpp:190`). `cancelQueued()` 는 0x0E 만 보낸다(`:203-207`) | 규격 서버에서 PTT 를 뗄 때마다 남의 대기 요청까지 지우려 한다. conformance F5·android_ue_client U16 은 정합으로 적었다. 짝 = FCS-1·FCS-2 | ◎ |
 | FCC-5 | C | SDK | §8.2.3.10 — Message Sequence Number 는 Taken·Idle 묶음을 잇는 값 | Taken·Idle 공용 카운터로 «되돌아간 번호» 를 버린다 — `floor_participant.cpp:83-87`·`:313-319` | 번호를 따로 세거나 다시 매기는 서버에서 정상 메시지가 버려진다. android_ue_client U7 은 정합으로 적었다 | △ |
-| FCC-6 | C | SDK | §6.2.4.6.9 2. — `U: pending Release` 에서 내 이탈을 알리는 Floor Release Multi Talker 를 받으면 끝낸다 | T100 재전송을 멈추지 않는다 — `floor_participant.cpp:382-397` | Release 가 두 번 더 나간다(무해) | ○ |
 
 ### 3.10 발언권 SDP 협상 (SDP) — TS 24.380 §4.3 · §14 · TS 24.379 §6.2.1 · §6.3.3.1.1
 
@@ -362,14 +343,14 @@ mcptt_standard_conformance.md §0-R 은 통째 미구현 기능을 나열하는�
 
 | 문서 | 적힌 것 | 실제 | 항목 |
 |---|---|---|---|
-| mcptt_standard_conformance.md C1 | `Expires: 0` = 그 사용자의 제휴 전부 해제 | 규격은 그 클라이언트의 것만. served ID 판정(`<mcptt-request-uri>`)도 없다 | AFF-1·AFF-2 |
+| mcptt_standard_conformance.md C1 | `Expires: 0` = 그 사용자의 제휴 전부 해제 | 규격은 그 클라이언트의 것만 | AFF-2 |
 | 같은 문서 C4 | `m=application … UDP MCPTT` + `a=floorid:0 mstrm:audio` 를 TS 24.380 §12 정합으로 | 규격 표는 `udp`, `floorid` 는 규격에 없다 | SDP-1 |
 | 같은 문서 C4g | «그 밖의 그룹은 멤버십이 곧 affiliation» | 규격은 제휴 멤버만 초대 | AFF-11 |
 | 같은 문서 C4h | 개별 통화 대상 = `<mcptt-request-uri>`, §11.1.1.2.1.1 정합 | 규격은 resource-lists | PRV-1 |
 | 같은 문서 C9 · CSP 주석 | 암시적 제휴 근거 «§7.3.2 13)» | 그 단계는 §7.3.3·§7.3.4 에 있다 | — |
 | 같은 문서 F1/F2 | Floor Ack = Source + Message Type 정합 · 받은 Indicator 의 긴급·임박 비트는 tier 로 승격 | Message Type 에 ack 비트가 섞인다 · 받은 Indicator 는 쓰지 않는다 | FCS-4·FCS-11 |
 | 같은 문서 F4 · cmp_media_api.md §7.7 · mcptt_timers.md §5.2 | T2 에서 긴급·임박 화자 제외 | 코드는 긴급만(emergency_modes §3.1 과는 일치) | FCS-21 |
-| 같은 문서 F5 | 목록 없는 Queued Floor Requests = 본인만 · Floor Release 는 대기 요청을 지우지 못한다 · MCPTT ID 는 `PTT_JOIN.user_uri` | 규격은 반대(목록 없음 = 전체, 대기 취소 = Release) · MCPTT 경로는 `user_uri` 를 보내지 않는다 | FCS-1·FCS-2·FCS-5 |
+| 같은 문서 F5 | MCPTT ID 는 `PTT_JOIN.user_uri` | MCPTT 경로는 `user_uri` 를 보내지 않는다 | FCS-5 |
 | 같은 문서 §0 S3 | xcap-diff SUBSCRIBE/NOTIFY 정합 | 본문 미해석·`sel` 고정·`new-etag` 불일치 | GMS-14·GMS-15 |
 | 같은 문서 §0 S4 · §3 CMS | service-config·user-profile 정합 | 문서 주소·이름이 규격과 다르고 필수 뜻을 가진 요소가 빠졌다 | CMS-1~CMS-4 |
 | ptt_flows.md B4·B6 | 제휴 PUBLISH 도식의 `Event: poc-settings` · late entry 는 «UE 주도 = 규격 모델» · «서버는 개시 시 fan-out 만» · «de-affiliate 시 이탈» | poc-settings 는 489 · 규격은 서버 초대 · 합류 때마다 재초대 · 해제해도 leg 유지 | REG-2·GCS-3·GCS-4·GCS-22 |
@@ -377,7 +358,7 @@ mcptt_standard_conformance.md §0-R 은 통째 미구현 기능을 나열하는�
 | server45_handoff.md §12.6 C12 | REGISTER Contact 의 MCPTT 태그 — «앱은 싣는다» | 앱도 싣지 않는다 | REG-1 |
 | server45_handoff.md §14.1 | 구독의 3600초 갱신은 규격대로 | conference·제휴·그룹 동적 데이터 구독의 규격 값은 4294967295 | GCC-7 |
 | mcptt_emergency_modes.md §2·§5 · §4.2 | 경보 인가 = 콜과 공통 판정 · 미인가 403 은 §6.3.3.1.14 대로 | 경보는 대상 일치·멤버십을 보지 않는다 · 개시 403 에 본문이 없다 | EMG-1·EMG-2·EMG-5 |
-| android_ue_client.md U1·U7·U16 | Floor Ack 정합 · Message Sequence Number 폐기 정합 · 목록 없는 0x0E = 본인 요청 | FCS-4 · FCC-5 · FCC-4 | — |
+| android_ue_client.md U1·U7 | Floor Ack 정합 · Message Sequence Number 폐기 정합 | FCS-4 · FCC-5 | — |
 | ue_sdk.md §4 | API 표의 `presence(uri)` | 그런 API 가 없다 | AFF-12 |
 | mcptt_api.md | `on-network-allow-conference-state` 기본 true · «정원보다 많으면 400» | 규격 기본 false · XCAP 경로에는 그 검사가 없다 | GMS-8·GMS-11 |
 | mcptt_authorization.md · dispatch_center.md · db_schema.md · CLAUDE.md | «TS 24.484 `allow_ambient_listening`» | 규격에 없는 요소 이름 | CMS-6 |
@@ -390,13 +371,13 @@ mcptt_standard_conformance.md §0-R 은 통째 미구현 기능을 나열하는�
 | # | 묶음 | 항목 | 몫 |
 |---|---|---|---|
 | 1 | **문서 값 한두 줄** — 규격 기본값이 «켜짐» 인 요소를 명시, 깨진 산출 수정 | CMS-4 · GMS-7 · GMS-13 · GMS-11 · CMS-7 · FCS-21(문서) | .45 CSC |
-| 2 | **단말 발언권 상태 머신** — 대기·요청 중 상태 유지, 승인은 요청·대기 상태에서만, 대기 취소 = Floor Release. 타이머 D2(T101 재전송)와 같은 파일 | FCC-1~FCC-4 · 서버 짝 FCS-1~FCS-4 · FCS-8 · FCS-9 · FCS-20 | .45 SDK·CMP |
-| 3 | **인가 구멍** | EMG-1 · EMG-2 · FCS-2 · SDP-3 · ADH-3 · IDM-1 · IDM-3 · IDM-4 · IDM-5 | .45 CSP·CMP·CSC·SDK |
+| 2 | **발언권 메시지 정합** — Ack 의 Message Type · 미대기 Queue Position 254 · Granted Duration | FCS-4 · FCS-8 · FCS-20 | .45 SDK·CMP |
+| 3 | **인가 구멍** | EMG-1 · EMG-2 · SDP-3 · ADH-3 · IDM-1 · IDM-3 · IDM-4 · IDM-5 | .45 CSP·CMP·CSC·SDK |
 | 4 | **user profile 인가 요소와 서버 판정** — 요소를 싣고(없음 = false), CSP 가 본다, SDK 의 «없음 = 허용» 을 뒤집는다 | CMS-3 · PRV-2 · PRV-4 · PRV-8 · EMG-4 · ADH-5 | .45 CSC·CSP·SDK → Windows(콘솔 칸은 .45) |
 | 5 | **Warning 코드** — 거절 사유를 규격 코드로. handoff §14 K1(SDK 가 Warning 을 올림)과 한 묶음 | GCS-7 · GCS-8 · GCS-11 · REG-3 · ADH-4 · PRV-6 · PRV-7 · EMG-5 | .45 CSP·SDK → Windows(문구 사전) |
 | 6 | **service configuration 요소** — `<private-call>`·`<adhoc-group-call>`. 타이머 D5·D6 과 같은 자리 | ADH-1 · ADH-3 · PRV-5 | .45 CSC·CSP |
 | 7 | **SDK 요청 규격화** — REGISTER Contact 태그, INVITE 헤더·Request-URI(PSI)·`<mcptt-client-id>`·session-type, 개별 호 resource-lists, 재합류 세션 식별자, conference·xcap-diff SUBSCRIBE. 서버가 양쪽을 받는 전환기를 먼저 둔다(PRV-1) — 서버 쪽 검사(GCS-9·GCS-10)는 SDK 뒤 | REG-1 · GCC-1~GCC-4 · GCC-7 · GCC-8 · PRV-1 · ADH-8 · GMS-16 · SDP-1 | .45 SDK·CSP |
-| 8 | **제휴를 클라이언트 단위로** — 행 키 통일, 클라이언트 단위 해제·판정, 암묵 제휴 취소. handoff §14 K3·S2 와 한 묶음 | AFF-1~AFF-8 · AFF-12 · EMG-3 | .45 CSP·SDK |
+| 8 | **제휴를 클라이언트 단위로** — 행 키 통일, 클라이언트 단위 해제·판정, 암묵 제휴 취소. handoff §14 K3·S2 와 한 묶음 | AFF-2~AFF-8 · AFF-12 · EMG-3 | .45 CSP·SDK |
 | 9 | **호 모델 결정** — chat 그룹(초대 없이 합류·1명 이하 해제)과 편성 그룹의 재초대·late call entry·제휴 해제 시 이탈. 규격대로 바꿀지, 편차로 남기고 사유를 적을지 정한다 | GCS-1~GCS-4 · GCS-22 · AFF-11 | 결정 → .45 CSP |
 | 10 | **그룹 문서 집행** — 정원·on-network-disabled·수신 전용·N6 | GCS-5 · GCS-6 · GCS-19 · FCS-14 | .45 CSP·CMP·CSC |
 | 11 | **XCAP 규격 주소·절차** — global tree·문서 이름·교체 PUT·오류 형식·구독 본문·etag | GMS-1~GMS-6 · GMS-14~GMS-17 · CMS-1 · CMS-2 · CMS-9 | .45 CSC·CSP·SDK |
@@ -406,17 +387,16 @@ mcptt_standard_conformance.md §0-R 은 통째 미구현 기능을 나열하는�
 
 - GCC-6 — 거절을 480 + Warning 110 으로(코어 `reject` 가 Warning 을 받게 된 뒤).
 - EMG-8 — 긴급 개시·상향·경보의 대상 그룹 판정(전용 긴급 그룹).
-- FCC-1·FCC-3 — SDK 가 고쳐지면 앱 쪽 방어는 필요 없다. 그 전까지는 «PTT 를 누르지 않은 상태의 승인은 반납» 을 관제 앱에도 둔다(현장 앱 `PttFloor.kt` 와 같은 규칙).
 - GMS-11·GMS-18 — 그룹 편집 폼: 정원 0(무제한)을 되돌릴 수 있게, 우선순위 범위.
 - CMS-13 — CMS 변경 구독(지금은 5분 폴링).
 - 묶음 4·5 가 들어오면 Capabilities 게이트와 응답 문구 사전.
 
 ## 7. 보지 못한 것
 
-- **MCData(TS 24.282)·MCVideo(TS 24.281·24.581)** — 이번 범위 밖.
+- **MCData(TS 24.282)·MCVideo(TS 24.281·24.581)** — 각자의 목록: [mcdata_conformance_gaps.md](mcdata_conformance_gaps.md) · [mcvideo_conformance_gaps.md](mcvideo_conformance_gaps.md).
 - **통째 미구현 절** — pre-established session, call-back, first-to-answer, 원격 개시, ambient listening, regroup, functional alias, MBMS, off-network, 위치 관리, 긴급 개별 호의 단말 절차 세부, 애드혹 긴급·임박.
 - **floor SRTCP(TS 24.380 §13)·KMS(TS 33.180 본문)** — placeholder 로 문서에 있어 내부를 읽지 않았다. 토큰 교환·파트너 도메인(부록 B.7~B.9)도.
 - **OMA XDM Group·RFC 원문 일부** — 그룹 문서의 OMA 스키마 시퀀스, RFC 6665·OIDC Core 의 해당 절은 규격 폴더에 없어 대조하지 못했다(AFF-9·IDM-6 의 근거 일부).
-- **실행 확인** — 모든 항목이 코드 읽기다. △ 표시 항목과 FCC-1(대기자 2명 이상)·PRV-3(전이중 개별 호)·AFF-5(제휴 행 키)는 실서버로 재현해 확정한다.
+- **실행 확인** — 모든 항목이 코드 읽기다. △ 표시 항목과 PRV-3(전이중 개별 호)·AFF-5(제휴 행 키)는 실서버로 재현해 확정한다.
 - **cspsim·계측기(libcsim)** — 시험 도구의 MCPTT 송신 형태는 보지 않았다. 서버 쪽 검사를 켜면(GCS-9·GCS-10·REG-3·PRV-1) 도구도 함께 맞춰야 한다.
 - **콘솔·현장 앱 화면 규칙** — 인가 요소가 늘면(묶음 4) 콘솔 가입자 프로파일 칸이 따라가야 한다.

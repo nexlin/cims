@@ -13,7 +13,7 @@ import { Input } from '@core/components/ui/input'
 //  Resource-Priority 는 CSC 배포 설정(ServiceConfig.*)이다.
 
 const NUMBERS: { key: keyof McpttServiceConfig; label: string; tag: string; min: number; max: number; desc: string }[] = [
-  { key: 'max_affiliations_n2', label: '동시 제휴 상한 N2', tag: 'user-profile MaxAffiliationsN2', min: 1, max: 1000,
+  { key: 'max_affiliations_n2', label: '동시 제휴 상한(N2)', tag: 'user-profile MaxAffiliationsN2', min: 1, max: 1000,
     desc: '한 사용자가 동시에 제휴(편성)할 수 있는 채널 수 — 각 가입자 user-profile 에 실린다. 집행은 서버가 하고, 단말은 초과를 로그로만 남긴다.' },
   { key: 'num_levels_group_hierarchy', label: '그룹 계층 깊이', tag: 'common/broadcast-group/num-levels-group-hierarchy', min: 1, max: 10,
     desc: '브로드캐스트 그룹 계층 최대 깊이.' },

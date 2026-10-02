@@ -434,9 +434,12 @@ function GroupDrawer(p: GroupDrawerProps) {
                       value={form.hang_timer_sec ?? 30}
                       onChange={e => setForm({ ...form, hang_timer_sec: Number(e.target.value) })} />
                   </Field>
-                  <Field label="최대 통화 시간(초)" w={120}>
+                  <Field label="최대 통화 시간(TNG3, 초)" w={150}>
                     <Input  type="number" min={0} max={MAX_DURATION_MAX}
-                      title="on-network-maximum-duration — 그룹 호 최대 시간 (0=무제한, 편성 그룹만)"
+                      disabled={form.group_type === 'chat'}
+                      title={form.group_type === 'chat'
+                        ? 'chat 그룹은 상시 세션이라 TNG3 를 쓰지 않는다 — 그룹 문서에 on-network-maximum-duration 을 싣지 않는다(TS 24.379 §6.3.3.5.1)'
+                        : 'on-network-maximum-duration — 그룹 호 최대 시간 (0=무제한, 편성 그룹만)'}
                       value={form.max_duration_sec ?? 3600}
                       onChange={e => setForm({ ...form, max_duration_sec: Number(e.target.value) })} />
                   </Field>
@@ -542,7 +545,7 @@ function GroupDrawer(p: GroupDrawerProps) {
           <span className="text-sm text-muted-foreground">ID {existing.id}</span>
           <span className="text-sm text-muted-foreground">타입 {existing.group_type || 'prearranged'}</span>
           <span className="text-sm text-muted-foreground">우선순위 {existing.priority ?? 5}</span>
-          <span className="text-sm text-muted-foreground">유지 시간 {existing.hang_timer_sec ?? 30}초</span>
+          <span className="text-sm text-muted-foreground">유지 시간(T4) {existing.hang_timer_sec ?? 30}초</span>
           {(existing.min_number_to_start ?? 0) > 0 && <span className="text-sm text-muted-foreground">시작 최소 응답 {existing.min_number_to_start}명</span>}
           <span className="text-sm text-muted-foreground">동시발언 {(existing.floor_policy || 'single') === 'single' ? '단일(한 명씩)'
             : (existing.floor_policy === 'dual' ? '듀얼(긴급 끼어들기)' : `멀티(${existing.max_talkers ?? 2}명 동시)`)}</span>

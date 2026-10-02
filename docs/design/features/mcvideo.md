@@ -18,6 +18,10 @@
 > [ptt_flows.md](ptt_flows.md), CMP 미디어 [../modules/cmp.md](../modules/cmp.md), 단말 영상 [ue_sdk.md](ue_sdk.md) §4.5, 신원·scope
 > [mcx_identity_scope.md](mcx_identity_scope.md), 종단간 보안 [mcx_e2e_security.md](mcx_e2e_security.md).
 
+> **보완 목록** — 규격 원문(TS 24.281·24.581·24.481·24.484)과 코드를 절차 단계별로 대조해 나온 미정합 지점은
+> [../../dev/mcvideo_conformance_gaps.md](../../dev/mcvideo_conformance_gaps.md) 에 모았다(§9 편차·결정 D1~D12·V 항목에 없는 것). 그 목록 §5 가
+> 짚은 서술은 실제와 다르다 — 항목이 반영되면 이 문서를 고치고 목록에서 지운다.
+
 ## 1. 규격 모델 요약
 
 ### 1.1 서비스 구조

@@ -918,6 +918,39 @@ Windows PC 가 관제 앱의 MCVideo 몫(W1' SDK 재빌드·시험 · W4 그룹 
 
 `cimsue-cli` 로는 `--affiliate g… register --hold N` 중에 연결을 끊었다 붙여 ②~④ 의 서버 쪽만 따로 볼 수 있다.
 
+### 14.5 .45 반영
+
+K2 = **코어로 올린다**(사용자 결정). 규칙 정본 = [ue_sdk.md](../design/features/ue_sdk.md) §4.2 «등록에 묶인 것의 유지»·«MCPTT 제휴 게시는 규격형이다».
+
+| # | 반영 | 위치 · 확인 |
+|---|---|---|
+| K2 | 코어가 목표 집합(제휴 MCPTT·MCVideo, 구독 conference·xcap-diff·dialog)을 들고 ① 등록이 끊겼다 다시 섬 ② 망 변경 뒤 첫 등록 성공 ③ 부여 수명 절반(1분 틱)에 다시 싣는다. 거절·무응답 = 1분부터 배로 최대 30분. ①·②의 제휴 재게시는 초기 게시(ETag 버림), ③은 조건부. **유지가 다시 실은 요청의 결과는 앱에 올리지 않는다.** 구독은 스택 evsub 이라 응답이 코어로 오지 않으므로 보낸 것을 확인으로 치고 같은 계기에 다시 부른다(살아 있으면 대화 안 갱신, 끝났으면 새 구독) | `sdk/core/src/upkeep.h` · `engine.cpp` · 시험 `Upkeep.*` 9건 · `AffiliationUpkeep.SpecFormPublishAndRenewAfterNetworkChange` |
+| K3 | 규격형 MCPTT 제휴 게시 — R-URI = 참여 기능 PSI, `Event: presence`, ICSI, `Expires: 4294967295`(빈 집합 0), multipart = mcptt-info + pidf(관심 그룹 전부·client ID·status/expires 없음·p-id). PSI 나 MCPTT client ID 가 없는 계정만 구형 | `engine.cpp` `sendMcpttAffiliationSet` · `mcptt_xml` `affiliationInfo`·`affiliationPidf` |
+| K1 | `CallInfo.warningCode`·`warningText` — 개시 INVITE 최종 응답의 Warning 첫 값(RFC 3261 §20.43). C API 는 구조체 끝에 `warning_code`·`warning_text`, .NET `CallInfo.WarningCode`·`WarningText`, Kotlin `CallInfo.warningCode`·`warningText`. §16 D9(480 112 · 200 111)도 같은 필드 | `types.h` · `cimsue_c.h` · `c_api.cpp` · `NativeStructs.cs`·`Engine.cs`·`Types.cs` · `Types.kt` · 시험 `Warning.ParsesFirstValue` · .NET 파사드 Linux 컴파일 통과 |
+| S2 | 규격형 MCPTT 요청(Expires 4294967295)은 그대로 부여 — DB `expires_at` NULL·200 `Expires: 4294967295`. 짧은 Expires 는 min(요청, 3600) 그대로(옛 단말 완화). 함께: pidf 를 multipart 에서 뽑는다 · served MCPTT ID(mcptt-info) ≠ 요청자 → 403(§9.2.2.2.3 4)) · 감사 E-AUD-009 는 새로 선 제휴만 | `csp/CscfModule.cpp` `RecvPublishAffiliationPidf` · [mcptt_standard_conformance.md](../design/features/mcptt_standard_conformance.md) C1 |
+| S1 | flow 실패로만 풀린 등록은 제휴 회수를 그 등록의 수명 끝(등록 시각 + Expires + grace)까지 미룬다 — 그 안의 재등록이 유예를 거두고 제휴가 그대로 이어진다. 해지 REGISTER·등록 만료는 즉시(지금대로). 유예 만료 회수는 서비스마다·감사 그룹마다. CSP 재기동 시 대기열은 사라진다(행은 남음) | `csp/AffiliationGrace.h` · `UserMap.cpp` `DeleteTimeout` · `CspServer.cpp` sweep · 시험 `tests/csp_affiliation_grace_test.cpp`(S1-UNIT-CSP) · [registration_binding_set.md](../design/features/registration_binding_set.md) §4.4 |
+| T1·T2·T5 | 코어 K2 가 맡는다 — 현장 앱의 제휴 확인은 시각 기반(30분 재게시)에서 «서버가 받은 집합»(`affConfirmed`)으로, 등록이 내려가도 비우지 않는다(다시 선 등록에 코어가 싣는다) | `android/ptt-client` `PttController`·`PttGroups` |
+| T3 | 현장 PTT 앱 `PttService` 에 SDK 접점 `NetworkWatcher` → `PttController.handleNetworkChange`(코어 `handleNetworkChange`). VoLTE 앱도 망 변경은 `refreshRegistration` 대신 `handleNetworkChange`(포그라운드 복귀 계기는 재-REGISTER 그대로) | `PttService.kt` · `volte-client` `SipService.kt`·`VoltePhone.kt` |
+| T4 | 편성 그룹 [참여]·개시가 403 + Warning 120 → 그 그룹 확정을 지우고 제휴 재게시, 2xx 뒤 한 번 다시 건다(10초 안 두 번째 120 은 그대로) · 긴급·애드혹·1:1 제외 · 일제 통화는 제휴만 | `PttGroups.handleNotAffiliated` |
+| (발견) | pjsua CIMS 구독 패치 — 갱신 송신이 곧바로 실패하면(전송 오류·해석 실패) evsub 종료 콜백이 슬롯을 비운 뒤 비워진 dialog 로 잠금을 풀어 **assert 로 앱이 죽었다**. 지역 사본으로 잠금 | `ext/pjproject/pjsip/src/pjsua-lib/pjsua_pres.c` `pjsua_cims_conf_subscribe` · README.CIMS.md — Windows 엔진도 재빌드 대상 |
+
+확인: S1-UNIT-CSP PASS · `cimsue_test` 164/165(1 SKIP 기존) · Android `:ptt-client`·`:volte-client`·`:dispatch-tablet`·`:cimsue` 단위시험 통과 · APK 빌드.
+**실기(망 끊김 → 복귀 → [참여])는 §14.4 절차로 확인한다.**
+
+### 14.6 관제 앱 몫 (Windows — .45 반영 뒤)
+
+코어가 유지를 맡았으므로 관제 앱 두 벌(`windows/dispatch-desktop` · `android/dispatch-tablet`)에서 바꿀 것이다. 남겨 두어도 동작은 하지만 같은 게시·구독이
+겹쳐 나간다(규격형은 `affiliate` 한 번이 관심 그룹 전부를 싣는 게시라 그룹 수만큼 전체 게시가 되풀이된다 — 서버 감사는 바뀐 것만 내므로 이벤트는 늘지 않는다).
+
+| # | 할 일 | 내용 | 대상 |
+|---|---|---|---|
+| W-U1 | **엔진 재빌드** | 코어(K1·K2·K3) + pjproject 패치(`pjsua_pres.c` — 갱신 송신 동기 실패 시 assert)를 Windows DLL·태블릿 AAR 에 싣는다. C API 는 `cimsue_call_info_t` 끝에 `warning_code`·`warning_text` 를 덧붙였다(.NET 파사드 반영 — `CallInfo.WarningCode`·`WarningText`) | `sdk/windows` 슈퍼빌드 · `sdk/android/build-native.sh` |
+| W-U2 | **유지 ①②③ 걷어내기** | `UpkeepRules`·`UpkeepPlane`(태블릿)·`DispatchSession.Upkeep`(데스크톱)의 등록 재성립·망 변경 뒤 재적재·수명 절반 갱신(`LIFETIME_SEC`·`TICK_MS`·`due`·`renewed`·`subsAtMs`·`watchAtMs`)을 지운다 — 코어가 같은 규칙(같은 값: 1분 틱·1분~30분 물러남)으로 한다. 앱은 목표 집합(편성 그룹 제휴·conference·xcap-diff·dialog 감시 대상)만 `affiliate`·`subscribe*`·`dialogWatch` on/off 로 준다. 제휴 확인(2xx)은 앱 token 의 `onRequestResult` 그대로 — 코어가 다시 실은 요청의 결과는 올라오지 않는다 | 태블릿 `session/UpkeepPlane.kt`·`DispatchSession.kt`(`noteNetworkChanged`·`beginUpkeep`) · 데스크톱 `Services/DispatchSession.Upkeep.cs`·`DispatchSession.cs` |
+| W-U3 | **④ 403 재시도는 Warning 으로** | `UpkeepRules.rejoin(code, member, …)` 의 «GMS 멤버십으로 추정» 을 `code == 403 && warningCode == 120` 으로 바꾼다(비멤버 403 은 다시 걸지 않는다). 남는 규칙 = 제휴 재게시 → 2xx 뒤 한 번 → 10초 안 두 번째 120 은 알림(현장 앱 `PttGroups.handleNotAffiliated` 와 같은 값) | `UpkeepPlane.kt` `rejoinsAfterAffiliation` · `DispatchSession.Upkeep.cs` `Rejoin` |
+| W-U4 | **문구 사전** | 403 + 120 = «제휴가 서지 않았습니다 — 다시 싣는 중», 그 밖의 PTT 참여 403 = «그룹 멤버가 아닙니다». MCVideo 117·118·120, §16 D9 의 480 + 112(필수 멤버 무응답 취소)·200 + 111 도 `warningCode` 로 가른다 | 태블릿 `session/ResponseText.kt` · 데스크톱 응답 문구 사전 |
+| W-U5 | **규격형 게시 확인** | 두 앱 모두 ue-init-config PSI 를 계정 `mcpttServerUri` 에 싣고 instance URN(client ID)도 있어 엔진만 바꾸면 규격형으로 나간다. 서버 로그 `[Affiliation/PUBLISH:pidf] service=mcptt user=… 요청 n개 → 제휴 n` 으로 확인(구형이면 `[Affiliation/PUBLISH] affiliate`) | — |
+| W-U6 | **문서** | [android_dispatch_tablet.md](../design/features/android_dispatch_tablet.md) §6.7a · [dispatch_desktop_ui.md](../design/features/dispatch_desktop_ui.md) 의 «유지 평면» 서술을 «목표 집합은 앱, 다시 싣기는 코어(ue_sdk.md §4.2), 앱에는 ④만» 으로 | — |
+
 ## 15. 설정 값 이름에 규격 이름 병기 — 콘솔·현장 앱 (Windows → .45)
 
 설정 값이 규격의 타이머·카운터면 **한글 이름 뒤 괄호에 규격 이름을 적는다**(사용자 요청). 규격 문서·서버 로그·화면이 같은 이름으로 이어져야 «유지 시간» 과
@@ -951,6 +984,10 @@ Windows PC 가 관제 앱의 MCVideo 몫(W1' SDK 재빌드·시험 · W4 그룹 
 | L9 | 콘솔 규칙 문서 | — | 규칙 한 줄을 콘솔 문서에(`ems/core/console/CLAUDE.md` 또는 console_design_system.md) | — |
 
 이미 맞는 곳(그대로): 콘솔 `유지 시간(T4, 초)`·`필수 멤버 대기(TNG1, 초)`·MCVideo `최대 통화 시간(TNG3, 초)`·`수신 유지 시간(T5, 초)`.
+
+**.45 반영** — L1·L2(그룹 편집 `최대 통화 시간(TNG3, 초)`·접힌 요약 `유지 시간(T4)`) · L3 · L4 `동시 제휴 상한(N2)` · L5 `동시 영상 호(N6, …)`·`동시 제휴 그룹(N2, …)` ·
+L9 규칙 한 줄 = `ems/core/console/CLAUDE.md`. L6(TNG2 편집 칸 없음)·L8(현장 앱에 값 표시 없음)은 칸이 생길 때의 규칙이고, L7 = 콘솔에 TNG3 만료를 따로
+보이는 곳이 없어(세션 종료 사유는 `무활동 만료(T4)` 뿐) 바꿀 것 없음.
 규격에 짧은 이름이 없는 요소(시작 최소 응답·동시 송출 상한 등)는 지금처럼 요소 이름을 툴팁(`title`)에 둔다.
 
 ## 16. MCPTT 타이머 — 규격 대비 편차 (Windows → .45)
@@ -985,8 +1022,12 @@ Windows PC 가 관제 앱의 MCVideo 몫(W1' SDK 재빌드·시험 · W4 그룹 
 
 ### 16.3 Windows 몫 (.45 반영 뒤)
 
-- D1 의 SDK API 가 정해지면 관제 앱 두 벌이 ue-init-config 의 타이머를 계정에 싣는다(지금은 PSI 만 싣는다).
-- D7 을 ① 로 정하면 그룹 편집 폼의 «최대 통화 시간(TNG3, 초)» 칸을 chat 그룹에서 잠근다(두 앱).
+- D1 — 관제 앱 두 벌이 ue-init-config 의 타이머를 계정에 싣는다: 데스크톱 `cfg.FloorTimers = ui.FloorTimers ?? new()`, 태블릿
+  `floorTimers = ui?.floorTimers ?: FloorTimers()`(현장 앱 `PttController.accountConfig` 와 같다). cms xcap-diff 의 선택자에 `mcptt.ue-init-config` 가
+  있으면 문서를 다시 받아 `Account.SetFloorTimers`(다음 호부터 — 현장 앱 `reloadUeInitConfig`).
+- D7(①) — 그룹 편집 폼의 «최대 통화 시간(TNG3, 초)» 칸을 chat 그룹에서 잠근다(두 앱, 콘솔은 반영).
+- D8 — 그룹 문서를 읽어 폼에 보일 때 `<on-network-hang-timer>` 없음 = T4 0(미사용), `PT2147483647S` = TNG3 0(무제한). 그 값을 폼 상한
+  86400 으로 깎아 저장하지 않는다(DB 값이 바뀐다). 0 을 `PT0S` 로 저장하는 것은 된다.
 - D9 가 올라오면 응답 문구 사전에 111·112 를 넣는다.
 
 ### 16.4 확인
@@ -995,6 +1036,30 @@ Windows PC 가 관제 앱의 MCVideo 몫(W1' SDK 재빌드·시험 · W4 그룹 
 2. `cimsue-cli` — 그룹 호에서 Floor Request 를 서버가 한 번 버리게 하고(또는 CMP 를 잠깐 막고) 재전송으로 승인되는지.
 3. 콘솔에서 `UeInitConfig.Timers.T101` 을 바꾸고 재로그인 → 단말의 재전송 간격이 따라오는지(D1), 재로그인 없이 따라오는지(D10).
 4. 개별 호를 걸어 두고 말하지 않기 → `<private-call><hang-time>` 뒤 서버가 호를 끝내는지(D5).
+
+### 16.5 .45 반영
+
+| # | 반영 | 위치 · 확인 |
+|---|---|---|
+| D1 | 코어가 UE initial configuration `<on-network><Timers>` 를 해석한다(초 → ms, 0·없음 = 기본값) — `UeInitConfigDoc.floorTimers` → `AccountConfig.floorTimers` → 발언권 참여자(`setTimers`). 문서가 바뀌면 `Engine::setFloorTimers(acc, …)`(다음 MCPTT 호부터). C API = `cimsue_floor_timers_t`(계정 설정·ue-init 문서 구조체 **끝에** 덧붙임)·`cimsue_engine_set_floor_timers`, .NET `FloorTimers`·`AccountConfig.FloorTimers`·`UeInitConfigDoc.FloorTimers`·`Account.SetFloorTimers`, Kotlin 같은 이름. 현장 앱 = 계정에 싣고 cms xcap-diff 의 `mcptt.ue-init-config` 선택자에 다시 받아 적용, cimsue-cli 도 싣는다 | `sdk/core` `types.h FloorTimers` · `csc/cms_doc.cpp` · `floor_participant` · 시험 `CmsDoc.ParseUeInitConfig` |
+| D2 | T101 만료마다 Floor Request 재전송(C101 회 뒤 «요청 시간 초과», §6.2.4.4.5·§6.2.4.4.6) — 암묵적 발언 요청도 같은 규칙(§6.2.4.2.2 4.a). 기본 T101 1 s × C101 3 = 지금과 같은 총 3 s | `FloorParticipant.RequestRetransmittedByT101ThenTimesOut` |
+| D3 | T103 = 받던 미디어가 그치면 그 발언이 끝났다(코어가 1초마다 수신 RTP 수를 보고 알린다 — 알림 전에는 돌지 않는다, §6.2.4.3.6) · T104·C104 = 대기열 위치 요청 재전송(새 API `floorQueuePosition` — C104 회 무응답이면 대기 시간 초과 + Floor Release, §6.2.4.9.11) · T132 = 대기 끝 승인 뒤 누르지 않으면 Floor Release(§6.2.4.9.13). 우리 앱은 누른 채 대기하므로 승인 = 곧 송출(§6.2.4.9.12) | `FloorParticipant.MediaEndTimerEndsListening`·`QueuePositionRequestRetransmitsThenReleases`·`QueuedGrantWhileHeldStartsSpeaking` |
+| D4 | UE initial configuration `<Timers>` 기본값 = T100 1 · T101 1 · T103 4 · T104 4 · T132 2(초) — `_UE_INIT_DEFAULTS`·`config_template.json`. **배포 사이트의 저장값이 이긴다** — .45 csc overlay 는 `UeInitConfig.Timers.*` = 4/4/4/4/6 을 들고 있어 함께 고친다(아래) | `csc/src/services/mcptt.py` · `tests/test_csc_ue_init_config.py` |
+| D5 | service configuration `<on-network><private-call><hang-time>`·`<max-duration-with(out)-floor-control>` 와 `<anyExt><adhoc-group-call>`(지원·최대 인원·`hang-time`·`broadcast-hang-time`·`max-duration-of-call`) — CSC 키 `ServiceConfig.PrivateCall.*`·`ServiceConfig.AdhocGroupCall.*`(ms, 0 = 요소 생략). CSP `CspSessionT4Sec` 가 호 종류별 T4 를 고른다(편성 = 그룹 문서, 애드혹 = `hang-time`/일제면 `broadcast-hang-time`, 발언권 있는 개별 호 = `<private-call><hang-time>`, chat·전이중 개별 = 0) → CMP `floor_timers.t4_inactivity`, `OnFloorInactivity` 는 chat 밖 모든 호를 해제(§6.3.8.1 1)·§6.3.8.2 1)). 개별 호 최대 시간(§6.3.8.2 2))도 | `csp/CspServiceConfig.*` · `GroupCallService.cpp` `CmpSessionOf`·`CheckSessionLimits` · `tests/csp_service_config_test.cpp` |
+| D6 | 애드혹 TNG3 = `<adhoc-group-call><max-duration-of-call>`(`CspSessionMaxDurationSec`) — 긴급·임박으로 개시한 애드혹 호와 긴급 상태 동안은 걸지 않는다(§17.4.2.2 13) · §6.3.3.5.2) | 같은 곳 |
+| D7 | ① — chat 그룹 문서에 `<on-network-maximum-duration>` 을 싣지 않는다(CSP 는 chat 에 TNG3 를 돌리지 않음 그대로). 콘솔 그룹 편집은 chat 그룹에서 TNG3 칸을 잠근다 | `mcptt.py` · `PttGroupsWorkbenchPage.tsx` |
+| D8 | T4 0 = `<on-network-hang-timer>` 생략 · TNG3 0(편성 그룹) = `PT2147483647S`(규격·스키마에 상한이 없어 32비트 초의 최댓값 — 설정 범위 밖이라 XCAP PUT 이 0 으로 되읽는다, 남은 편차는 mcptt_timers.md §7 D8) | `mcptt.py` · `tests/test_csc_gms_group_crud.py` |
+| D9 | §14 K1 — `CallInfo.warningCode`·`warningText` 로 480 112·200 111 도 가른다 | §14.5 |
+| D10 | CSC 가 재적재로 ue-init 문서 ETag 가 바뀌면 `UE_INIT_CONFIG_CHANGED` → CSP 가 cms 구독 단말마다 xcap-diff NOTIFY(선택자 `org.3gpp.mcptt.ue-init-config/users/sip:<instance>/<instance>`, 등록 `+sip.instance` 로 찾음 — TS 24.484 §6.3.13.3·§7.2.1.1) → 단말이 다시 받아 `setFloorTimers` | `mcptt.py` `apply_config` · `csp/CscInterface.cpp` · `CspServer.cpp` `SendUeInitConfigNotify` |
+| (§17 짝) | 발언권 상태 머신 FCC-1·2·3·4·6 과 서버 짝 FCS-1·2·3·9 를 함께 고쳤다(§17.3) — D2 의 재전송이 CMP 회수 유예를 늘리지 않게(FCS-9) | §17.3 |
+
+**배포 때 주의**
+- **csc overlay** — `UeInitConfig.Timers.T100=1 · T101=1 · T103=4 · T104=4 · T132=2` 로 고친다(D4). 새 단말 앱은 이 값을 쓰므로 옛 값(4/4/4/4/6)이
+  남으면 요청 시간 초과가 3 s → 12 s, Release 재전송이 12 s(표 11.1.1-1 NOTE 1 위반)가 된다 — **csc 를 먼저, 앱 설치는 그 뒤**.
+- **동작 변화(D5·D6)** — 발언권 있는 개별 호와 애드혹 호가 30 s 동안 아무도 말하지 않으면(T4) 끝나고, 최대 1 h(TNG3·개별 호 최대 시간)다. 값은
+  csc `ServiceConfig.PrivateCall.*`·`ServiceConfig.AdhocGroupCall.*`. CSP 는 csc 의 service configuration 을 받아야 쓰므로 csc 가 올라가기 전에는 지금과 같다.
+- **CMP(FCS-1·2·3)** — 새 앱은 대기 취소를 Floor Release 로만 보낸다. 옛 CMP 는 대기자의 Release 를 무시하므로 **CMP 도 함께** 올린다.
+- 애드혹 `allow-adhoc-group-call-support`·`max-no-participants` 는 문서에 싣지만 CSP 가 아직 보지 않는다(ADH-1 서버 몫·ADH-3, 403 186/189 미구현).
 
 ## 17. MCPTT 규격 정합 보완 목록 (Windows → .45)
 
@@ -1019,3 +1084,27 @@ Windows 에서는 대조·문서화만 했다(코드 무변경, 실서버 실측
 
 거절 480 + Warning 110(GCC-6) · 긴급 대상 그룹 판정(EMG-8) · 그룹 편집 폼의 정원·우선순위(GMS-11·GMS-18) · CMS 변경 구독(CMS-13) ·
 인가 요소·Warning 코드가 들어오면 Capabilities 게이트와 응답 문구 사전.
+
+### 17.3 .45 반영
+
+- **단말 발언권 상태 머신**(SDK `floor_participant`) — 그 상태에 절차가 없는 메시지는 버리고 상태를 유지한다(§6.2.4.1):
+  FCC-1(대기 중 Floor Taken 에도 대기 유지 §6.2.4.9.3) · FCC-2('U: pending Request' 의 Floor Idle 무시) · FCC-3(요청하지 않은 상태의 Floor Granted 를
+  버림 — 송출을 열지 않는다, 대기 끝 승인은 누르고 있을 때만 §6.2.4.9.12) · FCC-4(대기 취소 = Floor Release, Queued Floor Requests 를 보내지 않는다
+  §6.2.4.9.6 — `floorQueueCancel` 도 Release) · FCC-6(내 이탈을 알리는 Floor Release Multi Talker 에 T100 정지). 선점(긴급) 요청은 Floor Taken 에도
+  'U: pending Request' 를 유지한다(§6.2.4.4.11 7.). 시험 `FloorParticipant.*` 14건.
+- **CMP 짝** — FCS-1·FCS-3(발언자가 아닌 참가자의 Floor Release = 대기 요청 삭제 + 지금 상태로 답 — 화자 없음 Floor Idle, 있음 Floor Taken
+  §6.3.5.3.7·§6.3.5.4.5) · FCS-2(Queued Floor Requests 취소는 인가 사용자만 — 멤버 역할 `chair`, 아니면 결과 1, 목록 없음 = 전체 §6.3.5.4.12·
+  §6.3.4.4.13) · FCS-9(회수 중 화자에게 선점 요청이 다시 와도 T3·T8 을 다시 잡지 않는다). 시험 `tests/cmp_smoke_floor_queue.py`(S1-UNIT-CMP 가 시험용
+  CMP 를 띄워 돌린다 — 고치기 전 CMP 에서는 «대기 중 PTT 를 뗐는데 차례가 오면 Floor Granted» 가 그대로 재현된다).
+- **제휴** — AFF-1(MCPTT 규격형 PUBLISH 의 served MCPTT ID ≠ 요청자 → 403, §9.2.2.2.3 4)) — §14.5.
+- 위 항목은 [mcptt_conformance_gaps.md](mcptt_conformance_gaps.md) 에서 지웠고 정본(mcptt_standard_conformance.md F5 · android_ue_client.md U16 · cmp.md ·
+  ue_sdk.md §4.2)을 고쳤다.
+- **MCData·MCVideo 대조** — 같은 형식의 목록 [mcdata_conformance_gaps.md](mcdata_conformance_gaps.md)(43 항목 — A 2 · B 14 · C 20 · D 7) ·
+  [mcvideo_conformance_gaps.md](mcvideo_conformance_gaps.md)(64 항목 — A 3 · B 7 · C 32 · D 22). 급 A = MCData FD-1(FD 의 FILEURL 무검증 — 규격 단말의
+  토큰 유출 경로, 403 212) · AFF-2(`require_affiliation` 끈 그룹의 SDS·FD 가 제휴 해제 멤버에게도) / MCVideo VAFF-1(`Expires: 0` 이 그 사용자의 모든
+  클라이언트 제휴를 지움 — MCPTT AFF-2 와 같은 코드) · VGC-3(on-network 끈 그룹의 영상 호 — 403 115 없음) · RCS-1(NAT 뒤 단말이 송출 중인 호에
+  합류하면 Media Transmission Notification 을 못 받는다 △). 전부 코드 읽기다.
+- **관제 앱 몫(Windows)** — 엔진 재빌드(§14.6 W-U1 과 함께) 뒤: 앱 쪽 «PTT 를 누르지 않은 상태의 승인 반납» 방어는 필요 없다(코어가 버린다) ·
+  `FloorQueueCancel` 은 이제 Floor Release 를 보낸다 · Floor Taken 을 받아도 대기 표시를 유지한다(코어 상태 = Queued) ·
+  `RequestTimeout` 은 T101 × C101 뒤(기본 3 s)에 온다.
+

@@ -1,0 +1,312 @@
+# MCVideo 규격 정합 보완 목록
+
+MCVideo(그룹 영상) 구현을 3GPP 규격 원문과 대조해 **규격과 다른 지점**을 모은 목록이다. 고친 것은 없다 — 찾아서 적은 것이다.
+이미 문서에 적힌 편차·결정과 통째 미구현(V8) 기능은 여기 다시 싣지 않는다(§0 «이미 있는 판정»). 설계 정본은
+[mcvideo.md](../design/features/mcvideo.md) 이고, 이 목록의 항목이 반영되면 그 문서(§5·§9)를 갱신하고 여기서 지운다.
+MCPTT 쪽 같은 뿌리의 결함은 [mcptt_conformance_gaps.md](mcptt_conformance_gaps.md) 에 있다 — MCVideo 가 코드 경로를 따로 가진 것만 여기에 싣고 짝 항목 번호를 적는다.
+
+## 0. 범위·방법·표기
+
+**대조 기준**
+
+| 규격 | 판 | 범위 |
+|---|---|---|
+| TS 24.281 | V18.14.0 | 호 제어 — 등록·서비스 인가(§7) · 제휴(§8) · 그룹 호(§6.2·§6.3·§9.2) · Warning(§4.4) · mcvideo-info(부록 F.1) |
+| TS 24.581 | V18.8.0 | 전송·수신 제어 — 참여자(§6.2.4·§6.2.5) · 서버(§6.3.4~§6.3.7) · 메시지(§9) · 타이머·카운터(§11) · SDP(§4.3·§12·§14) |
+| TS 24.481 | V19.3.0 | 그룹 문서 MCVideo 몫(§7.2.2·§7.2.8) |
+| TS 24.484 | V20.0.0 | UE initial configuration(§7.2) · MCVideo user profile(§9.3) · service configuration(§9.4) · UE configuration(§9.2) |
+| TS 23.281 | V18.12.0 | 필요한 곳만 |
+
+코드 = `main` `8cd89604` 에 handoff §14·§16 반영분을 얹은 트리(이 목록과 같은 변경 묶음). 서버(CSP·CMP·CSC)와 단말(SDK `sdk/core`·현장 앱 `android/ptt-client`·관제 앱 두 벌)·
+골든(`tests/fixtures/mcvideo/`)을 함께 봤다. 전부 **코드 읽기**다 — 실서버·실기·와이어 캡처로 확인한 항목은 없다.
+
+**이미 있는 판정 (여기 싣지 않음)** — mcvideo.md §1.3~§1.6(문서·SDP 규약) · §5.2.1 표 · §5.3.1 «규격을 읽은 방식» · §5.4 참여자 구현 ①~⑤·«송출 SSRC»·«영상 없는 엔진 빌드» ·
+§7 D1~D12 · §9 판본·불일치 메모 · §6 V8 후속 · [mcvideo_dev_plan.md](mcvideo_dev_plan.md) §7 R1~R7·§8 · [ue_sdk.md](../design/features/ue_sdk.md) §4.6 편차 표 ·
+[cmp_media_api.md](../api/cmp_media_api.md) §7.9 · [mcx_identity_scope.md](../design/features/mcx_identity_scope.md)(CSP 토큰 검증 §10) ·
+[mcx_e2e_security.md](../design/features/mcx_e2e_security.md)(GMK·CSK·전송 제어 SRTCP 키 — placeholder).
+
+**급**
+
+| 급 | 뜻 |
+|---|---|
+| **A** | 우리 단말·서버끼리도 오동작하거나, 인가·보안·운영에 구멍이 난다 |
+| **B** | 규격 단말·규격 서버와 붙이면 그 절차가 성립하지 않는다 |
+| **C** | 규격의 shall 과 다르지만 영향이 작거나 받아들이는 쪽이 넓은 것 |
+| **D** | 권고(should·may)·정의 누락 |
+
+**확인** — ◎ 규격 원문 줄과 코드 줄을 둘 다 직접 읽어 확인 · ○ 한쪽은 직접 읽고 다른 쪽은 추론·간접 확인 · △ 실측이나 추가 원문 확인이 있어야 확정.
+
+**대상** — CSP·CMP·CSC = 서버 · SDK = `sdk/core` · 현장 = `android/ptt-client` · 관제 = `windows/dispatch-desktop` + `android/dispatch-tablet` · 앱 = 셋 다 · 콘솔 = `ems/service/console`.
+
+## 1. 요약
+
+| 영역 | 항목 | A | B | C | D |
+|---|---|---|---|---|---|
+| 등록·서비스 인가 (VREG) | 4 | — | 1 | 2 | 1 |
+| 제휴 (VAFF) | 8 | 1 | 1 | 6 | — |
+| 그룹 호 — 서버 (VGC) | 13 | 1 | 2 | 9 | 1 |
+| 그룹 호 — 단말 (VGU) | 6 | — | — | 2 | 4 |
+| 개별·그 밖의 호 (VPRV) | 1 | — | — | — | 1 |
+| 송출 제어 — 서버 (TCS) | 11 | — | — | 5 | 6 |
+| 송출 제어 — 단말 (TCU) | 4 | — | — | 1 | 3 |
+| 수신 제어 — 서버 (RCS) | 3 | 1 | — | — | 2 |
+| 수신 제어 — 단말 (RCU) | 1 | — | — | 1 | — |
+| SDP (VSDP) | 4 | — | 1 | 3 | — |
+| 그룹 문서 (VGMS) | 3 | — | 1 | — | 2 |
+| 설정 문서·CMS (VCMS) | 6 | — | 1 | 3 | 2 |
+| **계** | **64** | **3** | **7** | **32** | **22** |
+
+확인 수준 — ◎ 47 · ○ 9 · △ 8.
+
+읽는 순서 — §2(먼저 볼 것) → §3(영역별 전체) → §4(미구현 목록에 빠진 기능) → §5(문서 정정) → §6(묶음과 순서).
+
+## 2. 먼저 볼 것
+
+급 A 와, 급 B 가운데 규격 단말과의 연동을 통째로 막거나 손이 적게 드는 것이다. 번호는 §3 의 항목 번호.
+
+**급 A — 우리끼리도 난다**
+
+| 항목 | 내용 |
+|---|---|
+| RCS-1 | NAT 뒤 단말이 송출 중인 영상 호에 들어가면 Media Transmission Notification 을 받지 못한다 — CMP 가 JOIN ② 때 SDP 사설 주소로 한 번만 보내고, latch 뒤 다시 알리지 않는다. 수동 수신이라 [보기] 를 못 하고, 받는 이가 없어 T11 이 10 s 뒤 그 송출을 끊는다(△ — 실측으로 확정) |
+| VAFF-1 | 제휴 `Expires: 0` 이 그 클라이언트가 아니라 사용자의 모든 클라이언트 제휴를 지운다 — 같은 MCVideo ID 의 다른 단말이 prearranged 초대에서 빠진다(MCPTT AFF-2 와 같은 코드) |
+| VGC-3 | on-network 를 끈 그룹에서도 MCVideo 호가 선다 — 403 `115 group is disabled` 판정이 없다(MCPTT GCS-19 의 MCVideo 경로) |
+
+**규격 단말·서버와 붙이면 막히는 것**
+
+| 항목 | 내용 |
+|---|---|
+| VGC-1 | 긴급·임박·경보·방송 지시자가 있는 INVITE·re-INVITE 를 일반 호로 200 — 규격 단말은 «긴급 호 허가» 상태로 간다. V8 전까지는 403 + `<emergency-ind>false` 로 거절해야 한다 |
+| VREG-1 | 단말이 MCVideo 서비스 설정 PUBLISH(`poc-settings`, §7.2.3)를 보내지 않는다 — 규격 서버의 착신 참여 기능은 Answer-Mode 를 몰라 prearranged 초대를 늘 480 `146` 으로 거절한다 |
+| VGC-2 | late call entry 가 없다 — 개시 뒤에 제휴·재등록한 멤버는 진행 중 prearranged 영상 호를 받지 못한다 |
+| VAFF-2 | 제휴 판정이 사용자 단위다 — 제휴하지 않은 클라이언트로 개시·합류가 되고, 제휴한 단말 대신 마지막 등록 단말이 초대된다 |
+| VSDP-1 | CSP 가 음성 AMR-WB·영상 H.264 를 고정으로 요구하는데 CSC·콘솔은 그룹 선호 코덱을 아무 이름으로나 바꾸게 둔다 — 문서대로 offer 한 규격 단말이 488 |
+| VGMS-1 | 그룹 문서 PUT 이 빠진 MCVideo 요소를 «기존값 유지» 로 읽는다 — 규격 기본값(없음 = chat·보호 켬·conference 불허)과 반대로 저장된다 |
+| VCMS-1 | MCVideo user profile·service config 가 xcap-diff 통지 대상에 없다 — 구독한 규격 단말이 변경을 모른다 |
+
+**한두 줄로 끝나는 것**
+
+| 항목 | 내용 |
+|---|---|
+| VSDP-4 | 편성 그룹 멤버 초대 offer 에 `mc_queueing` 이 없다 — CMP 는 대기열을 지원한다 |
+| VSDP-3 | 현장 앱이 `mc_queueing` 을 offer 하지 않는다(관제 앱 두 벌은 한다) — 대기 화면이 있는데 상한에서 거절 #1 만 받는다 |
+| VGC-4·VGC-5 | 합류 200 의 Warning `123`, 정원으로 일부만 초대한 개시자 200 의 Warning `122` |
+| VGC-6·VGC-7 | 200 OK `Supported` 의 `norefersub`·`explicitsub`·`nosub`, 멤버 초대 INVITE 의 `tdialog`·`norefersub` |
+| VAFF-3 | 해제 PUBLISH 의 200 OK 에 Expires |
+
+## 3. 영역별 목록
+
+### 3.1 등록·서비스 인가 (VREG) — TS 24.281 §7
+
+| # | 급 | 대상 | 규격 | CIMS 지금 | 영향 | 확인 |
+|---|---|---|---|---|---|---|
+| VREG-1 | B | SDK·앱 | §7.2.3 — MCVideo 서비스 설정 PUBLISH(`Event: poc-settings`, P-Preferred-Service = MCVideo ICSI, `<am-settings>`). 규격 착신 참여 기능은 Answer-Mode Indication 을 받기 전이면 480 + `146 T-PF unable to determine the service settings for the called user`(§9.2.1.3.2 3)) | SDK 에 poc-settings 송신 경로가 없다(`sdk/core/src` 전체에 없음). mcvideo.md §5.2 는 서버 쪽 §7.2.2(인가 겸용)만 «토큰 검증과 한 짝» 으로 미뤘다 — 서비스 설정만 싣는 §7.2.3 은 적히지 않았다 | 규격 서버에 붙으면 prearranged 멤버 초대가 늘 480 146 으로 끝난다. MCPTT REG-2 와 따로인 MCVideo 몫 | ◎ |
+| VREG-2 | C | CSP | §7.2.1 NOTE 1 · §9.2.2.3.1.1 2) · §9.2.1.3.1.1 2) — MCVideo ID 는 서비스 인가 때 IMPU 에 묶이고 그 묶임으로 요청자를 인가한다. 묶임이 없으면 표 4.4.2-2 `141 user unknown to the participating function` | MCVideo 태그 없는 바인딩(로그오프한 클라이언트 포함)의 INVITE·제휴 PUBLISH 도 그대로 처리한다 — 개시 검사는 이용 자격 행만(`csp/McVideoCallService.cpp:598-602`), PUBLISH 는 역할·자격만(`csp/CscfModule.cpp:1914-1953`) 본다. 바인딩 능력 `m_bMcVideo`(`csp/UserMap.cpp:206`)는 팬아웃 대상 선별에만 쓴다(`csp/McVideoCallService.cpp:425`) | 로그오프한 단말이 MCVideo 호를 열고 제휴를 바꾼다 — 초대는 못 받는데 개시·제휴는 된다 | ◎ |
+| VREG-3 | C | SDK·앱 | §7.1 · §7.2.1AA NOTE — MCVideo 만 로그오프하면 MCVideo 태그만 뺀 재-REGISTER, 다른 MC 서비스 등록은 유지 | 계정을 고치는 API 가 없다 — `addAccount`·`removeAccount` 뿐(`sdk/core/src/engine.cpp:2425`·`:2502`), 공개 헤더도 «값을 바꾼 뒤 계정을 다시 만든다» 고 적는다(`sdk/core/include/cimsue/types.h:113-116`) | MCVideo 를 켜고 끌 때 등록 해제 + 새 등록이 된다 — 서버가 MCPTT·MCVideo 제휴를 모두 지우고(`csp/DbManager.cpp:554-571`) 진행 중 MCPTT 호도 끊긴다 | ◎ |
+| VREG-4 | D | CSP | §7.1 · §7.3.5 3) NOTE «Removal of MCVideo service settings includes removal of all group affiliations» | MCVideo 로그오프(태그를 뺀 재-REGISTER)는 바인딩 능력만 끈다. `mcvideo_affiliations` 행은 등록 해제 때만 지운다(`csp/DbManager.cpp:564-571`) | 로그오프한 클라이언트가 제휴 NOTIFY·N2 계산에 남는다(초대 대상 선별은 `m_bMcVideo` 가 걸러 영향 없음). 규격의 해제 계기는 poc-settings Expires 0 이라 REGISTER 로그오프에 같은 뜻을 줄지는 원문 재확인 | △ |
+
+### 3.2 제휴 (VAFF) — TS 24.281 §8
+
+| # | 급 | 대상 | 규격 | CIMS 지금 | 영향 | 확인 |
+|---|---|---|---|---|---|---|
+| VAFF-1 | A | CSP | §8.2.2.2.3 15)·16) — Expires 0 은 **그 클라이언트**(pidf tuple id)의 제휴 목록만 해제 | `Expires: 0` = `RemoveAffiliationsByUser` — 그 사용자의 모든 클라이언트 행(설정 그룹·chat 암묵 제휴 포함)을 지운다(`csp/CscfModule.cpp:1977-1991`, `csp/DbManager.cpp:1117-1124`). MCPTT AFF-2 와 같은 코드 | 한 MCVideo ID 를 두 클라이언트에서 쓰면(§6.8) 한쪽의 전체 해제가 다른 쪽 제휴를 지워 prearranged 초대가 끊긴다. mcvideo.md §5.5 는 이 동작을 사실로 적고 앱이 피해 가게 했지만 편차로 적지 않았다 | ◎ |
+| VAFF-2 | B | CSP | §6.3.6 3. · §8.2.2.2.11 2) — 제휴 판정은 MCVideo ID × **클라이언트**(INVITE `<mcvideo-client-id>`) | `IsAffiliated(group, user, McVideo)` 가 client_id 를 보지 않는다(`csp/DbManager.cpp:1023-1039`). 개시·합류 판정 `csp/McVideoCallService.cpp:648`, prearranged 팬아웃은 제휴 사용자의 등록 바인딩 하나로 보낸다(`:791`·`:425`) | 제휴하지 않은 클라이언트로 개시·합류가 되고, 제휴한 단말이 아니라 마지막 등록 단말이 초대된다(MCPTT AFF-4 의 MCVideo 경로) | ◎ |
+| VAFF-3 | C | CSP | §8.2.2.2.3 8)a) — 200 OK 에 Expires(후보 만료) | Expires 0 해제의 200 과 pidf `entity` 불일치의 200 에 Expires 가 없다(`csp/CscfModule.cpp:1990`·`:2005`) | RFC 3903 게시자가 해제·무시 결과를 확인하지 못한다(우리 SDK 는 읽지 않는다) | ◎ |
+| VAFF-4 | C | CSP | §8.2.2.2.13 · §8.2.2.2.14 — 암묵 제휴는 2xx 뒤에 «affiliated» + 통지, 요청이 거절되면 그 항목을 지운다 | chat 합류의 암묵 제휴를 정원 검사 직후 기록·NOTIFY 하고(`csp/McVideoCallService.cpp:721-729`) 뒤의 수락 실패 500(`:817-824`)에서 되돌리지 않는다 — 이 파일에 `RemoveAffiliation` 이 없다 | 실패한 합류의 제휴가 남아 N2 를 먹고(다음 합류 486 102), 구독자는 성립 전 제휴를 본다(MCPTT AFF-6 의 MCVideo 경로) | ◎ |
+| VAFF-5 | C | CSP | §8.2.2.2.12 1) — 암묵 제휴의 클라이언트 = INVITE `<mcvideo-client-id>`. 명시·암묵·설정 그룹 제휴가 같은 client information entry 를 다룬다 | 행 client 키가 경로마다 다르다 — chat 암묵 = `<mcvideo-client-id>`, 없으면 **사용자 id**(`csp/McVideoCallService.cpp:722`) · 설정 그룹 = client-id > `+sip.instance` > Contact(`csp/CscfModule.cpp:856-858`) · PUBLISH = tuple id > Contact(`:2032`) | client-id 없는 INVITE 로 생긴 행은 클라이언트 단위 해제(`:2081`)로 지워지지 않고 NOTIFY tuple id 가 사용자 id 로 나간다(MCPTT AFF-5 와 같은 결). 우리 SDK 는 client-id 를 싣는다(골든 03) | ○ |
+| VAFF-6 | C | CSP | §8.2.2.2.15 — 설정 그룹 암묵 제휴는 서비스 인가에 성공했을 때 | 재-REGISTER(갱신)마다 다시 건다 — 갱신 여부를 보지 않는다(`csp/CscfModule.cpp:1216-1219`) | 단말이 PUBLISH 로 뺀 설정 그룹이 다음 갱신에 되살아나 해제·제휴 NOTIFY 가 갱신 주기로 반복된다(현장 앱은 영상 채널 하나만 싣는다 — mcvideo.md §5.5). 갱신 REGISTER 를 «서비스 인가» 로 볼지는 원문 재확인 | △ |
+| VAFF-7 | C | CSP | §8.2.2.3.8 — 제휴 적격 = 그룹 존재 · 멤버 · MCVideo 그룹 | 그룹 변경(멤버 제거·MCVideo 서비스 끔·그룹 삭제)이 `mcvideo_affiliations` 행에 닿지 않는다 — 그룹 동기화는 MCPTT 만 본다(`csp/GroupCallService.cpp:2757-`), MCVideo 쪽 처리기가 없다 | 빠진 멤버·MCVideo 를 끈 그룹의 제휴가 NOTIFY·N2 에 남는다(MCPTT AFF-7 의 MCVideo 경로) | ○ |
+| VAFF-8 | C | SDK·앱 | §8.2.1.1 · §8.2.1.3 — 제휴 결과는 상태 결정 SUBSCRIBE(`Event: presence`, MCVideo ICSI, Expires 2^32-1)의 NOTIFY 로 안다 | MCVideo 제휴 SUBSCRIBE 가 없다 — PUBLISH 200 만 보고 제휴됐다고 여긴다(`sdk/core/src/engine.cpp:3123-3161`). 현장 앱 주석도 «결과는 NOTIFY 로만 온다» 고 적는다(`android/ptt-client/src/main/java/com/cims/ue/ptt/PttVideo.kt:160-162`) | 서버가 N2 로 줄인 그룹·MCVideo 를 끈 그룹·자격 없음을 단말이 모른다. 관제 앱 두 벌은 N2 를 자체 계산으로 대신한다 | ◎ |
+
+### 3.3 그룹 호 — 서버 (VGC) — TS 24.281 §6.3 · §9.2.1.3~4 · §9.2.2.3~4
+
+| # | 급 | 대상 | 규격 | CIMS 지금 | 영향 | 확인 |
+|---|---|---|---|---|---|---|
+| VGC-1 | B | CSP | §9.2.2.4.1.1 6)·7) · §9.2.1.4.2 10)·11) · §9.2.1.4.7 3)·4) · §6.3.3.1.13 — 인가되지 않은 긴급·임박 요청은 403 + mcvideo-info `<emergency-ind>false`·`<alert-ind>false`(임박은 `<imminentperil-ind>false`) | 지시자를 해석만 하고(`csp/McVideoInfo.h:64-68`) 개시·합류·re-INVITE 어디서도 보지 않는다 — 일반 호로 200 을 준다(`csp/McVideoCallService.cpp`, `OnReInvite` `:916-964`). `<broadcast-ind>` 도 같다. CSC 그룹 문서의 `mcvideo-allow-emergency-call` 은 false 다 | 규격 단말은 2xx 를 받으면 «MVEGC 3: emergency-call-granted» 로 간다(§6.2.8.1.4) — 서버는 일반 호(manual 수신·우선순위 없음)라 긴급 영상이 수신자에게 자동으로 열리지 않는다. 긴급을 V8 로 미룬 동안은 거절해야 한다 | ◎ |
+| VGC-2 | B | CSP | §9.2.1.4.6 — 새로 제휴했거나 돌아온 클라이언트를 진행 중 prearranged 호에 초대(late call entry) (shall) | MCVideo 제휴 PUBLISH(`csp/CscfModule.cpp:2060-2087`)·설정 그룹 암묵 제휴(`:873-883`) 어디에도 진행 중 세션 초대가 없다. 팬아웃은 새 세션 개시 때 한 번(`csp/McVideoCallService.cpp:786-815`) | 개시 뒤에 제휴·재등록한 멤버는 그 호를 받지 못한다 — 세션 식별자를 모르면 재합류도 못 한다(MCPTT GCS-4 의 MCVideo 경로) | ◎ |
+| VGC-3 | A | CSP·CSC | §6.3.5.2 5)a) — 그룹 문서에 `<on-network-disabled>` 가 있으면 403 + `115 group is disabled` (shall) | MCVideo 개시·합류 검사는 113·116·117/118 만 한다(`csp/McVideoCallService.cpp:688-700`). DB `on_network` 는 적재만 한다(`csp/DbManager.cpp:621`). 그룹 문서에도 요소가 없다 | 콘솔에서 on-network 를 꺼도 영상 호가 선다(MCPTT GCS-19 와 같은 결 — MCVideo 경로는 따로 고쳐야 한다) | ◎ |
+| VGC-4 | C | CSP | §9.2.1.4.2 14)j) — 진행 중 prearranged 호 합류의 200 OK 에 Warning `123 MCVideo session already exists` | 합류 200 에 Warning 이 없고(`csp/McVideoCallService.cpp:358-371`) 문구 상수도 없다(`csp/McVideoInfo.h:298-313`) | 단말이 «새 호» 와 «진행 중 호 합류» 를 가르지 못한다 | ◎ |
+| VGC-5 | C | CSP | §9.2.1.4.2(첫 2xx·TNG1 분기의 «122» 단계) — 정원 때문에 일부만 초대했으면 개시자 200 OK 에 Warning `122 too many participants` | 정원 − 1 명까지만 초대하고(`csp/McVideoCallService.cpp:792-798`) 개시자 200 에 Warning 을 싣지 않는다(`_ResolvePendingInitiator` → `_AcceptLeg` `:386-406`) | 개시자는 그룹 일부만 초대된 줄 모른다 | ◎ |
+| VGC-6 | C | CSP | §6.3.3.2.3.2 9)·10) — 제어 기능 200 OK 의 Supported 에 `norefersub`·`explicitsub`·`nosub` | `Supported: tdialog` 만 싣는다(`csp/McVideoCallService.cpp:368`, 골든 04) | 규격 단말의 REFER·구독 협상 판단(원격 송출 등 후속 절차)이 어긋난다 | ◎ |
+| VGC-7 | C | CSP | §6.3.2.2.3 5)·6) · §6.3.2.2.5.2 7)·8) · §6.3.2.2.6.2 4)·5) — 단말 초대 INVITE 에 `Supported: tdialog`·`norefersub`, 자동·수동 개시에 맞는 `Answer-Mode` | 팬아웃 INVITE 는 `Supported: timer` 뿐이고 Answer-Mode 가 없다(`csp/McVideoCallService.cpp:484-497`, 골든 07). Answer-Mode 를 정할 poc-settings 는 받지 않는다(mcvideo.md §5.2) | 수동 개시로 받은 규격 단말은 사용자 수락을 기다리고, 초대 응답 한도 30 s 에 걸려 CANCEL 된다 | ◎ |
+| VGC-8 | C | CSP | §6.3.3.1.1 1)a)·2) — 초대 offer 의 영상 미디어 = 개시자 offer 의 그 m-line(미디어 속성 전부), 진행 중 세션이면 그 세션이 쓰는 스트림 | 초대 offer 를 코덱 테이블 AMR-WB + psip 고정 H.264 로 짓는다(`csp/McVideoCallService.cpp:436-445`) — 개시자 offer 의 profile-level-id·해상도·`a=` 속성이 옮겨지지 않는다 | 개시자와 초대 멤버의 영상 형식이 다를 수 있다(CMP 는 트랜스코딩하지 않는다) | ○ |
+| VGC-9 | C | CSP | TS 24.581 표 11.1.3-1 T5 «On expiry: The MCVideo call is released» | `TRANSMISSION_INACTIVITY{T5}` 는 로그만 한다(`csp/McVideoCallService.cpp:1021-1026`). mcvideo.md §5.2.1 표에 «T5 는 로그만» 이라 적혔지만 §9 편차 메모에 없다 | 수신자가 없는 호가 T5 뒤에도 남는다 | ◎ |
+| VGC-10 | C | CSP·CSC | §9.2.3.4.1 — MCVideo 세션 식별자로 온 conference 구독은 그 MCVideo 세션의 것이고, 그룹 문서 `mcvideo-on-network-allow-conference-state` 로 판정(불허 403 `138`) | `Event: conference` 분기가 서비스를 가르지 않는다 — R-URI 사용자부(포커스 Contact 의 사용자부 = 그룹 id)로 MCPTT conference 구독이 된다(`csp/CscfModule.cpp:1364-1366`). `bAllowConferenceState` 는 적재만 한다. CSC 는 그 요소를 기본 true 로 광고한다(`csc/src/services/mcvideo.py:46`·`:441-442`) | 규격 단말이 MCVideo 세션 참가자 정보를 구독하면 같은 그룹 id 의 MCPTT 로스터를 받거나 4xx 로 끝난다 | △ |
+| VGC-11 | C | CSP | §6.8 · §8.2.2.2.2 — 한 MCVideo ID 의 여러 클라이언트는 따로 참가한다 | 같은 멤버의 새 INVITE 를 «BYE 없는 재합류» 로 보고 옛 leg 를 끝낸다(`csp/McVideoCallService.cpp:755-769`) — 클라이언트를 가리지 않는다. CMP 멤버 키도 (그룹, 사용자)다 | 같은 신원의 두 번째 단말이 합류하면 첫 단말이 끊긴다 | ○ |
+| VGC-12 | C | CSP | §9.2.1.4.4.3 — 제휴 해제 등으로 참가자를 세션에서 뺄 때 BYE | 제휴 해제 PUBLISH(`csp/CscfModule.cpp:2080-2084`)·멤버 제거·MCVideo 서비스 끔이 진행 중 MCVideo leg 에 닿지 않는다 — `McVideoCallService` 에 그룹·제휴 변경 처리기가 없다 | 그룹에서 빠진 멤버가 영상 호에 남아 보내고 받는다(MCPTT GCS-22 의 MCVideo 경로) | ○ |
+| VGC-13 | D | CSP·CSC | §9.2.1.4.1.1 3) — 제어 기능 PSI 를 P-Asserted-Identity 로. TS 24.484 §7.2.2.1 — 참여 기능 PSI = `MCVideo-Service-Details/<Server-URI>` | CSP 는 PSI 를 `mcvideo_psi` 로 고정한다(`csp/McVideoCallService.cpp:49-50`, 제휴 NOTIFY `csp/CspServer.cpp:974`). CSC 는 `UeInitConfig.ServiceDetails.McVideo.ServerUri` 로 다른 PSI 를 줄 수 있다(`csc/src/services/mcptt.py:1914-1918`) | ServerUri 를 바꾼 사이트에서 단말이 겨누는 PSI 와 서버가 내는 PAI·Contact·entity 가 어긋난다 | ○ |
+
+### 3.4 그룹 호 — 단말 (VGU) — TS 24.281 §6.2 · §9.2.1.2 · §9.2.2.2
+
+| # | 급 | 대상 | 규격 | CIMS 지금 | 영향 | 확인 |
+|---|---|---|---|---|---|---|
+| VGU-1 | D | SDK | §9.2.1.2.1.2 7)·8) — 자동·수동 개시는 Answer-Mode·Priv-Answer-Mode 와 단말 설정의 조합으로 정한다 | Answer-Mode 를 읽지 않고 로컬 `autoAnswerMcvideo` 만 본다(`sdk/core/src/engine.cpp:1671`). 앱 셋 모두 true 고정 | 규격 서버가 수동(Manual)을 요구해도 자동 수락한다 — 규격의 «단말이 허용하면» 문언에 기대는 수준 | ◎ |
+| VGU-2 | D | SDK | §6.2.3.1.2 — 그룹 호 자동 개시는 곧바로 200. 그룹 호 수동 개시는 §6.2.3.2.2(선택 183 + `P-Answer-State: Unconfirmed`), 180 은 개별 호(§6.2.3.2.1) | 초대마다 180(`Require: timer`)을 먼저 보내고(`sdk/core/src/engine.cpp:1661-1668`) 자동이면 그 뒤 200. 주석 근거가 §6.2.3.2.1(개별 호)이다 | 자동 개시에 불필요한 임시 응답이 끼고, 그룹 호 수동 개시의 응답 모양이 규격과 다르다 | ◎ |
+| VGU-3 | C | SDK·앱 | §9.2.1.2.1.2 1)·2) · §6.2.3.2.2 2) — 거절은 적절한 코드 + Warning, 사용자 거절이면 480 + `110 user declined the call invitation` | `Engine::reject` 는 상태 코드만 받는다(`sdk/core/src/engine.cpp:2602`). 앱은 원치 않는 초대를 `hangup` 으로 끊는다 — 200 전이면 pjsua 기본 603, 자동 200 뒤면 BYE(`PttVideo.kt:336-345`, `android/dispatch-tablet/.../session/VideoPlane.kt:894-896`) | 규격 서버가 거절 사유를 못 가른다. 200 뒤 BYE 는 prearranged 첫 응답자면 개시자 200 → 곧바로 «참가자 1명 이하» 해제로 이어질 수 있다 | ◎(BYE 경합 △) |
+| VGU-4 | C | SDK | §6.2.1 2)b)·3)b) — 그룹 문서 선호 음성·영상 encoding 을 지원하면 offer rtpmap 에 넣는다 (shall) | `McVideoGroupAttrs.audioEncodings`·`videoEncodings`·`videoResolutions` 를 해석만 하고 쓰지 않는다 — offer 코덱은 전역 우선순위(AMR-WB 먼저, H.264)다(`sdk/core/src/engine.cpp:1864-1898`·`:2867-2943`) | CIMS 기본값(AMR-WB/H264)에서는 드러나지 않는다. 다른 GMS 의 그룹이나 바꾼 설정에서는 규격과 다른 offer 가 나간다(서버 쪽 짝 VSDP-1) | ◎ |
+| VGU-5 | D | SDK·앱 | §9.2.1.2.1.1 · §9.2.2.2.1.1 첫 단락 — 그룹 문서 `<preconfigured-group-use-only>` true 면 호를 열지 않고 알린다 | 요소를 해석하지도 보지도 않는다(SDK·앱에 없음) | 사전 구성 전용 그룹에서도 개시 INVITE 가 나간다(서버도 403 `167` 을 하지 않는다) | ◎ |
+| VGU-6 | D | 앱 | §9.2.1.2.4.1 — 사용자 요청·커버리지 복귀 때 세션 식별자로 재합류 INVITE | SDK 는 `VideoGroupCallOptions.sessionUri` 를 지원하지만 앱 셋 모두 쓰지 않는다. prearranged 호를 잃으면 초대를 기다리거나 [영상 보내기](송출 요청 겸 개시)뿐 | 망이 끊긴 뒤 prearranged 영상 호로 «보기만» 돌아갈 수 없다(서버 late call entry 도 없다 — VGC-2) | ○ |
+
+### 3.5 개별·그 밖의 호 (VPRV) — TS 24.281 부록 F.1.3 · §10~§15
+
+| # | 급 | 대상 | 규격 | CIMS 지금 | 영향 | 확인 |
+|---|---|---|---|---|---|---|
+| VPRV-1 | D | CSP | 부록 F.1.3 `<session-type>`(private·ambient-viewing·pull-*·push-*·adhoc) · 표 4.4.2-2 `107 user not authorised to make private calls`·`154`·`186 the MCVideo system do not support adhoc group call`·`100 function not allowed due to local policy` | 그룹 호가 아닌 session-type 도 그룹 호 경로를 탄다 — `<mcvideo-request-uri>`(사용자 id)를 그룹으로 찾아 404 `113 group document does not exist`, 그 전에 N2 486 `102` 가 날 수도 있다(`csp/McVideoCallService.cpp:566`·`:645-659`·`:689-693`) | 1:1·pull·push·ad hoc 을 시도한 규격 단말이 엉뚱한 사유를 표시한다(V8 까지 미지원은 맞다 — 사유 코드 문제) | ◎ |
+
+### 3.6 송출 제어 — 서버 (TCS) — TS 24.581 §6.3.4 · §6.3.5 · §9 · §11.1.3
+
+| # | 급 | 대상 | 규격 | CIMS 지금 | 영향 | 확인 |
+|---|---|---|---|---|---|---|
+| TCS-1 | C | CSP·CMP | 표 11.1.3-1 — T2·T3·T4·T6·T11 은 MCVideo service configuration 값 · §11.2.3 — C2·C4·C6·C7·C11 도 같다 | CSP 는 `tc_timers` 에 `t1_ms`·`t5_ms` 만 싣는다(`csp/CmpClientMcvideo.cpp:52-58`). CSC `/internal/mcvideo/service-config`(`csc/src/handlers/internal_api.py:14-39`)를 읽는 CSP 코드가 없다. `SERVICE_CONFIG_CHANGED` 는 MCPTT 문서만 다시 받는다(`csp/CscInterface.cpp:312-318`) | 운영자가 `McVideoServiceConfig.*` 를 바꾸면 단말 문서만 바뀌고 CMP 는 K5 기본값으로 돈다(지금은 값이 같아 드러나지 않는다) | ◎ |
+| TCS-2 | C | CMP·SDK | §6.3.4.4.2 3g · §6.3.7.3.3 3 · §6.3.7.4.5 5 — Transmission Request 에 Functional Alias 가 있으면 Media Transmission Notification 에 싣는다 (shall) | `_sendNotification` 이 별칭을 싣지 않고 송출 기록(`Tx`)에 자리도 없다(`cmp/PMcvControl.cpp:498-506`, `cmp/PMcvControl.h:162-176`). SDK Transmission Request 도 별칭을 보내지 않는다(`sdk/core/src/mcvideo/tc_codec.cpp:164-169`) | 앱의 «영상 n» 목록이 별칭 칸을 그리지만(`android/ptt-client/.../ui/VideoViews.kt:171`) 늘 비어 있고, 규격 단말이 보낸 별칭도 버려진다 | ◎ |
+| TCS-3 | C | CMP | §6.3.5.4.4 5) — 선점 전달은 «큐에 다른 선점 요청이 없고 현재 송출자도 선점 우선순위가 아닐 때» 만, 아니면 거절 #1 또는 대기 | 요청 서열이 가장 약한 송출보다 높으면 언제나 회수하고 요청을 큐 맨 앞에 넣는다 — 큐의 앞선 선점 요청을 보지 않는다(`cmp/PMcvControl.cpp:416-424`) | 선점 요청이 연달아 오면 나중 요청이 먼저 온 선점자를 앞지르고, 상한이 2 이상이면 송출이 둘 회수된다 | ◎ |
+| TCS-4 | C | CMP | §6.3.5.4.4 첫 단락 — 대기열·`mc_priority` 를 협상하지 않은 참여자는 상한에서 거절 #1(우선순위 판정 없음) | 협상 여부와 무관하게 로스터 `<user-priority>`·chair 로 선점한다(`cmp/PMcvControl.cpp:82-92`·`:416`) | 협상하지 않은 규격 단말이 우선순위만으로 남의 송출을 회수한다. 원문 단락끼리 조건이 겹쳐 원문 재확인 필요 | △ |
+| TCS-5 | C | CMP | §6.3.5.1 1) · §6.3.4.2.2 3 — 개시자의 참가자 상태 머신은 서버가 200 OK 를 보낼 때 선다 | 암묵적 송출 요청의 즉시 허가가 JOIN ② 처리 때, 곧 200 OK 보다 먼저 Granted 를 한 번 보내고 T4 재송신이 없다(`cmp/PMcvControl.cpp:270-273`) | 우리 SDK 는 이른 메시지를 담아 두고(`sdk/core/src/mcvideo/tc_participant.cpp:340`) answer `mc_granted` 로도 안다. offer 에 `mc_granted` 가 없는 규격 단말은 T100 재요청으로만 복구된다 | △ |
+| TCS-6 | D | CMP | §9.2.3.2 — Priority 필드가 없으면 기본 '0' · §6.3.5.4.4 1a iii·iv · §6.3.5.2.2 3c i — 암묵적 요청의 우선순위는 협상 상한 | 기본 우선순위로 `<user-priority>` 를 쓰고 Granted 의 Priority 필드에도 그 값을 싣는다. 암묵적 허가도 협상 상한 대신 로스터 값이다(`cmp/PMcvControl.cpp:82-92`·`:272`) | §4.1.1.4 지역 정책 범위지만 §9 편차 메모에 이 읽기가 없다 | ◎ |
+| TCS-7 | D | CMP | §6.3.5.2.2 3c iv — 위치가 바뀐 다른 대기자에게 Queue Position Info 갱신 (should) | 큐 삽입·선점 때 다른 대기자에게 보내지 않는다(`cmp/PMcvControl.cpp:648-659`) | 대기 단말의 «대기 n» 표시가 묵는다 | ◎ |
+| TCS-8 | D | CMP | §6.3.5.7.3 NOTE — 허가 없이 계속 보내는 참여자를 포기할 때는 호에서 내보내기를 권고 | 5회 재송신 뒤 Idle/Taken 으로 되돌리고, 다음 payload 가 오면 다시 Revoked #3 — 회수가 끝없이 되풀이된다(`cmp/PMcvControl.cpp:901-911`) | 무허가 송출 단말이 남는다. mcvideo.md 는 허가된 송출의 포기만 적었다 | ◎ |
+| TCS-9 | D | CMP | 표 9.2.2.1-3 — Ack subtype `00100`(ack 비트 자리 없음) · §9.1.4 1 — 모르는 subtype 은 버린다 · §9.1.2 — P 비트 '0' | MCV2 도 `subtype & 0x0F` 로 가려 `10100` 을 «ack 요구 Ack» 로 받는다(`cmp/PTransmissionDefs.h:9`·`:97-116`). P 비트를 보지 않아 P=1 이면 패딩 옥텟을 필드로 읽는다(`cmp/PTransmissionCodec.cpp:103`) | 수신 관대함의 문제, 영향 작다 | ◎ |
+| TCS-10 | D | CSP·CMP·CSC | §6.3.4.3.3 1b · §6.3.4.4.7A 1b — `<on-network-recvonly>` 멤버의 송출 요청은 거절 #5 · §14.3.3 1. — 그 멤버 answer 에 `mc_priority` 없음 | CMP 는 JOIN `recv_only` 를 받지만 CSP 가 `CmpMcvMemberDecl::bRecvOnly` 를 채우는 곳이 없다(`csp/CmpClientMcvideo.cpp:121` 은 읽기만). CSP 그룹 모델·그룹 문서에도 그 요소가 없고, answer 는 offer 에 있으면 늘 `mc_priority` 를 싣는다(`csp/McVideoInfo.h:273-277`) | 수신 전용 멤버를 둘 수 없다(MCPTT FCS-14 와 같은 뿌리). cmp_media_api.md §7.9 의 #5 경로는 쓰이지 않는다 | ◎ |
+| TCS-11 | D | CMP | §9.1.2 SSRC — 보내는 쪽 자기 RTCP SSRC · §4.3.3.1 — `mc_transmission_ssrc` 는 받는 쪽이 기대하는 값 | 멤버가 `mc_transmission_ssrc` 를 주지 않으면 CMP→멤버 헤더 SSRC 로 `tc_ssrc` 를 쓴다(`cmp/PMcvideoGroup.cpp:775`) — answer 로 «이 값으로 보내라» 고 준 값이라 양방향이 같은 SSRC 다 | RFC 3550 SSRC 충돌 검출을 하는 규격 단말에서 오동작할 수 있다. 우리 SDK 는 늘 그 값을 싣는다 | △ |
+
+### 3.7 송출 제어 — 단말 (TCU) — TS 24.581 §6.2.4 · §9 · §11.1.1
+
+| # | 급 | 대상 | 규격 | CIMS 지금 | 영향 | 확인 |
+|---|---|---|---|---|---|---|
+| TCU-1 | C | SDK·앱 | 표 11.1.1 — T100~T104 는 MCVideo service configuration `<tc-timers-counters-R14>` 값 | `McVideoServiceConfigDoc` 가 T100~T104 를 해석하지만(`sdk/core/src/csc/cms_doc.cpp:230-237`) 참여자는 늘 K5 기본값으로 만든다 — `sdk/core/src/engine.cpp:996` `new mcvideo::Participant(-1, mcvideoTcSsrc(), userId, cb)`(`TcTimers` 인자 없음). 값을 넣을 API 도 없고 앱도 MCVideo service config 를 받지 않는다 | 서버가 바꾼 단말 타이머가 반영되지 않는다(서버 쪽 짝 TCS-1) | ◎ |
+| TCU-2 | D | SDK | §6.2.4.3.2 2)a) · §6.2.5.3.3 1)a) — Transmission/Reception Priority 는 협상값(answer `mc_priority`·`mc_reception_priority`)을 넘지 않는다 | 요청 인자를 그대로 싣고 answer 상한으로 자르지 않는다(`sdk/core/src/mcvideo/tc_participant.cpp:223-235`·`:255-266`) | 지금 앱은 기본값(-1)만 써서 영향 없다. API 를 쓰면 규격 밖 값이 나간다 | ◎ |
+| TCU-3 | D | SDK | §6.2.4.5.1 NOTE — 대기에서 허가되면 송출 전에 사용자 확인 · §6.2.4.9.3 — 사용자의 Queue Position Request | 'U: queued' 에서 Granted 를 받으면 곧바로 카메라·마이크를 연다(`tc_participant.cpp:349-357`). 사용자가 위치를 묻는 API 가 없다(QPR 은 회수 #7 뒤에만) | 오래 기다린 대기 송출이 사용자 모르게 시작된다 | ◎ |
+| TCU-4 | D | SDK | 표 9.2.20-1 · 9.2.21-1 — Transmission End Request/Response 의 User ID of the Transmitting User·Audio SSRC·Video SSRC | 참여자가 보내는 End Request·End Response 에 그 필드가 없다(Indicator 만 — `sdk/core/src/mcvideo/tc_codec.cpp:170-177`) | 우리 CMP 는 제어 채널로 송출자를 가린다. 필드를 기대하는 규격 서버와는 다를 수 있다(필수 여부를 규격이 명시하지 않음) | △ |
+
+### 3.8 수신 제어 — 서버 (RCS) — TS 24.581 §6.3.6 · §6.3.7
+
+| # | 급 | 대상 | 규격 | CIMS 지금 | 영향 | 확인 |
+|---|---|---|---|---|---|---|
+| RCS-1 | A | CMP·SDK | §6.3.7.2.2 2b ii · §6.3.7.3.3 1 — 진행 중 송출이 있는 호에 합류하면 Media Transmission Notification · §6.3.5.2.2 2a·4 — 없으면 Transmission Idle | 첫 제어 메시지 목적지가 SDP 주소다 — CSP 가 SDP IP 를 `user_ip` 로 넘기고(`csp/McVideoCallService.cpp:265`) CMP 가 그 값으로 목적지를 잡는다(`cmp/PMcvideoGroup.cpp:225-230`). 합류 때 Notification·Idle 을 JOIN ② 처리에서 한 번만 보내고 재송신이 없다(`cmp/PMcvControl.cpp:294-303`), latch 가 되어도 다시 알리지 않는다(`cmp/PMcvideoGroup.cpp:391-395`). JOIN ② 는 200 OK 전이고(`csp/McVideoCallService.cpp:340`·`:367`), 단말은 호가 선 뒤에야 빈 RR 로 하향 경로를 연다(`sdk/core/src/mcvideo/tc_participant.cpp:528`) | NAT 뒤 현장 단말이 송출 중인 영상 채널에 들어가면 «영상 n» 이 뜨지 않아 [보기] 를 할 수 없다. 받는 이가 없으니 T11 이 10 s 뒤 그 송출을 끊는다(#8) | △ |
+| RCS-2 | D | CMP | §6.3.6.4.8 · §6.3.6.4.3 f — T6 은 수신 허가마다 따로 | Ack 하나가 그 수신자의 모든 수신 허가 T6 을 멈춘다 — Ack 에는 송출 식별자가 없다(`cmp/PMcvControl.cpp:800-803`) | C9 가 2 이상이면 두 번째 허가 응답을 잃어도 재송신이 없다. 1차는 C9 = 1 이라 드러나지 않는다 | ◎ |
+| RCS-3 | D | CSP·CMP | §6.3.7.3.4 · §6.3.7.4.10 끝 단락 — 수신 우선순위 = min(요청, 협상 상한) · TS 24.581 §14.3.6 — answer `mc_reception_priority` = min(offer, `<user-reception-priority>`) | CSP answer 는 offer 값을 그대로 돌려주고(`csp/McVideoInfo.h:278`) `max_reception_priority` 를 보내지 않는다(`csp/CmpClientMcvideo.cpp:98-131`). CMP 는 받아도 버리고(`cmp/PCmpServerMcvideo.cpp:325` → `cmp/PMcvideoGroup.cpp:112-126`) Reception Priority 필드를 판정에 쓰지 않는다 | override·수신 선점이 없어 지금은 효과가 없다 — 정의만 빠졌다 | ◎ |
+
+### 3.9 수신 제어 — 단말 (RCU) — TS 24.581 §6.2.5
+
+| # | 급 | 대상 | 규격 | CIMS 지금 | 영향 | 확인 |
+|---|---|---|---|---|---|---|
+| RCU-1 | C | SDK | §6.2.5.5.4 — Media Reception Override Notification 을 받으면 알리고 Media Reception End Request + T104 → 'U: pending reception release' | 코덱은 해석하지만(`sdk/core/src/mcvideo/tc_defs.h:59`) 참여자 처리 분기가 없어 버린다(`sdk/core/src/mcvideo/tc_participant.cpp:444-518`) | 수신 무효화가 와도 단말은 수신 상태로 남고 End Request 를 보내지 않아 서버와 상태가 갈린다 | ◎ |
+
+### 3.10 SDP (VSDP) — TS 24.281 §6.2.1·§6.2.2·§6.3.3 · TS 24.581 §12 · §14
+
+| # | 급 | 대상 | 규격 | CIMS 지금 | 영향 | 확인 |
+|---|---|---|---|---|---|---|
+| VSDP-1 | B | CSP·CSC·콘솔 | TS 24.281 §6.2.1 2)b)·3)b) — 단말 offer 코덱 = 그룹 `mcvideo-preferred-audio-encodings`·`-video-encodings` · §9.2.2.4.1.1 9)·§9.2.1.4.2 2) — 받아들일 수 없으면 488 | CSP 는 음성 AMR-WB(`csp/McVideoCallService.cpp:51`·`:603-613`)·영상 H.264(`:273-277`)를 고정으로 요구하고, 그룹 선호 코덱은 적재·지문에만 쓴다(`csp/DbManager.cpp:682-683`, `csp/GroupCallService.cpp:2750`). CSC 는 선호 코덱에 아무 이름이나 받고(`csc/src/services/mcvideo.py:275-277`) 콘솔·태블릿 그룹 편집도 EVS·H265 를 저장한다 | 서버가 받지 못하는 코덱을 그룹 선호로 설정할 수 있다 — 문서대로 offer 한 규격 단말은 488(음성) 또는 영상 없는 호(영상)가 된다 | ◎ |
+| VSDP-2 | C | SDK | TS 24.581 §14.3.1 — answer 에 offer 에 없던 파라미터 금지 · §14.3.3 끝 단락 — 단말은 offer 의 `mc_priority` 를 되돌린다 | 다이얼로그 안 서버 re-offer 의 answer 에 고정된 `pendingAppSdp` 를 그대로 끼운다(`sdk/core/src/engine.cpp:1184`) — 발신 호는 개시 offer 형식(`mc_queueing`·자기 `mc_priority`·`mc_reception_priority`, `:2918-2920`), 착신 호는 첫 offer 기준 answer(`:1642-1647`)라 re-offer 내용을 보지 않는다 | 서버가 re-INVITE 로 제어 채널을 다시 협상하면 answer fmtp 가 규격 밖이다(긴급 격상 등 V8 경로에서 드러난다) | ◎ |
+| VSDP-3 | C | SDK·현장 | TS 24.581 §14.2.2 — 대기열을 지원하면 offer 에 `mc_queueing` (shall) | SDK 참여자는 'U: queued' 를 구현했는데 옵션 기본값이 false 다(`sdk/core/include/cimsue/types.h:196`). 현장 앱은 chat 합류·prearranged 개시 모두 지정하지 않는다(`PttVideo.kt:233`·`:241`). 관제 앱 두 벌은 true(`windows/dispatch-desktop/Services/DispatchSession.McVideo.cs:206`·`:320`, `VideoPlane.kt:784`·`:1252`) | 현장 앱은 상한에서 대기 대신 거절 #1 을 받는다 — 대기 화면(«대기 n»·[대기 취소])은 회수 #7 밖에서는 나오지 않는다 | ◎ |
+| VSDP-4 | C | CSP | TS 24.581 §14.2.2 — 제어 기능은 대기열을 지원하면 offer 에 `mc_queueing` (shall) | 편성 그룹 멤버 초대 offer fmtp = `mc_priority`·`mc_transmission_ssrc` 뿐이다(`csp/McVideoInfo.h:292-296`, 골든 07). answer 는 `mc_queueing` 을 되돌리고(`:272`, 골든 04) CMP 는 대기열을 쓴다 | 초대받은 멤버는 큐를 협상하지 못해 상한에서 거절 #1, 스스로 합류한 멤버는 대기열에 들어간다 | ◎ |
+
+### 3.11 그룹 문서 (VGMS) — TS 24.481 §7.2
+
+| # | 급 | 대상 | 규격 | CIMS 지금 | 영향 | 확인 |
+|---|---|---|---|---|---|---|
+| VGMS-1 | B | CSC | §7.2.8 — 요소가 없을 때의 뜻: `mcvideo-on-network-invite-members` 없음 = false(chat) · `mcvideo-protect-media`·`-transmission-control` 없음 = true · `mcvideo-on-network-group-priority` 없음 = 최저 · `mcvideo-on-network-allow-conference-state` 없음 = false | XCAP PUT 해석이 빠진 MCVideo 요소를 None 으로 두고(`csc/src/services/mcvideo.py:499-519`) 쓰기는 기존값(새 그룹은 `GROUP_ATTR_DEFAULTS`)을 유지한다(`:230`). 기본값 `allow_conference_state` 는 True(`:46`). 보호 요소가 빠진 문서(규격상 true)를 거절하지 않는다 | 요소를 생략한 규격 문서를 PUT 하면 반대 뜻(prearranged 유지·보호 꺼짐·conference 허용)으로 저장되고 GET 이 PUT 과 달라진다 | ◎ |
+| VGMS-2 | D | CSC | §7.2.8 a)~e) — MCVideo 그룹이려면 `<group-media><mcvideo-video-media>` · §7.2.2 — MCVideo entry 는 `<mcvideo-mcvideo-id>` 를 싣는다 | PUT 해석이 `enabler` 만 본다(`csc/src/services/mcvideo.py:461-462`). entry 에 `<mcvideo-mcvideo-id>` 가 없어도 받고 값이 entry uri 와 달라도 버린다. 규칙 action `mcvideo-allow-*` 는 읽지 않고 GET 에서 false 로 다시 낸다(`:434-442`·`:499-519`) | 스키마를 어긴 문서를 받고, PUT 한 값이 소리 없이 사라진다 | ○ |
+| VGMS-3 | D | CSC | §7.2.8 — `<mcvideo-mcvideo-id uri>` 는 그 멤버의 MCVideo 신원 · TS 33.180 B.2.1.3 — `mcvideo_id` 는 MCVideo 이용자에게 필수 | 그룹 모든 멤버 entry 에 MCVideo ID 를 싣는다 — 이용 자격(`mcvideo_user_profile` 행)이 없는 멤버도(`csc/src/services/mcptt.py:1424-1425`). 그런 멤버는 토큰에 `mcvideo_id` 가 없고(`mcptt.py:1206`) CSP 가 403 109/108 로 거절한다 | 관제 앱·규격 단말이 영상을 쓸 수 없는 사람을 영상 멤버로 보여 준다 | ○ |
+
+### 3.12 설정 문서·CMS (VCMS) — TS 24.484 §7.2 · §9
+
+| # | 급 | 대상 | 규격 | CIMS 지금 | 영향 | 확인 |
+|---|---|---|---|---|---|---|
+| VCMS-1 | B | CSP·CSC | §9.3.2.12 · §9.4.2.12 — 두 MCVideo 문서는 변경 구독(§6.3.13.3)을 지원한다 (shall) | cms xcap-diff 본문 `sel` 이 MCPTT user-profile·service-config 둘로 고정이다(`csp/CspServer.cpp:723-729`). MCVideo service config 가 바뀌어도(`csc/src/services/mcptt.py:360-363` → `SERVICE_CONFIG_CHANGED`) 같은 MCPTT `sel` 로 통지하고(`csp/CspServer.cpp:1429-1437`), MCVideo 자격·N2·N6·그룹 목록 변경은 USER_CHANGED 의 MCPTT `sel` 만 남는다 | MCVideo 문서를 구독한 규격 단말이 변경을 알 수 없다(MCPTT GMS-14·15 의 형식 문제와 별개로 대상 자체가 빠졌다) | ◎ |
+| VCMS-2 | C | SDK | TS 24.484 표 9.3.2.7-6 등 — `allow-private-call` 등 인가 요소는 없으면 false | `McVideoUserProfileDoc` 가 allow-* 가 없으면 허용으로 읽는다(`sdk/core/src/csc/cms_doc.cpp:17-21`·`:190-198`, 주석 `sdk/core/include/cimsue/csc.h:244`) | CIMS CSC 는 false 를 명시해 드러나지 않는다. 규격 CMS 와 붙으면 반대 뜻(MCPTT PRV-2·CMS-3 의 MCVideo 짝) | ◎ |
+| VCMS-3 | C | CSC | §9.3.2.1 9)b) — `<OnNetwork>` 는 `<MCVideoGroupInfo>` 를 하나 이상, `<entry>` 는 `index` 속성, `<ProSeUserID-entry>` 는 `<DiscoveryGroupID>`·`index` | entry 에 `index` 가 없다(`csc/src/services/mcvideo.py:581-584`). ProSe entry 는 `<User-Info-ID>` 만(`:594`). 자격은 있으나 MCVideo 그룹 멤버가 아니면 `<MCVideoGroupInfo>` 가 0 개이고, 긴급 대상 entry 에 본인 URI 가 들어간다(`:590`·`:610-611`) | `index` 를 키로 쓰는 규격 단말에서 해석 실패 가능, 긴급 대상이 그룹이 아니라 사용자 URI(MCPTT CMS-8 의 MCVideo 짝) | ◎ |
+| VCMS-4 | C | CSC | §9.2.1A — CMS 는 MCVideo UE configuration(`org.3gpp.mcvideo.ue-config`)을 낸다 (shall) | 라우트가 없다(`csc/src/services/mcptt.py:3838-3843` — MCPTT ue-config 도 없다) | 규격 단말은 404 를 받고 단말 상한(동시 호·송출)을 받지 못한다 | ◎ |
+| VCMS-5 | D | CSC | §9.4.2.7 NOTE 1 — `<protection-between-mcvideo-servers>` 의 두 요소는 없으면 true | service config `<on-network>` 에 이 요소가 없다(`csc/src/services/mcvideo.py:682-700`) | 서버 간 연동(파트너 MCVideo 서버)에서만 뜻이 있다 — 지금은 영향 없음 | ◎ |
+| VCMS-6 | D | CSC | §9.3.1A · §9.3.2.8 — 문서 이름 `mcvideo-user-profile-<index>.xml` · §9.4.2.8 — `mcvideo-service-config.xml` | user profile 은 문서 이름을 보지 않고(`csc/src/services/mcptt.py:3019-3046`) service config 는 `/global/` 아래 어떤 경로든 같은 문서를 준다(`:3050-3064`) | 잘못된 URI 도 200, 없는 인덱스에 404 가 없다 | ◎ |
+
+## 4. 미구현 기능 목록에 빠진 것
+
+mcvideo.md §6 V8 은 통째 미구현 기능을 나열하는데 아래는 그 표에 없다. 항목을 더한다.
+
+| 기능 | 규격 | 지금 |
+|---|---|---|
+| MCVideo 서비스 설정 PUBLISH·구독(Answer-Mode·선택 user profile) — 단말 송신과 서버 수신·통지 | TS 24.281 §7.2.3·§7.2.4 · §7.3.4·§7.3.6 | 단말 없음(VREG-1). 서버는 §7.2.2·§7.3.3(인가 겸용)만 «토큰 검증과 한 짝» 으로 적혀 있다 |
+| late call entry | §9.2.1.4.6 | 없음(VGC-2) |
+| 제휴 상태 결정 구독 — 단말 | §8.2.1.3 | 서버는 받지만 단말이 보내지 않는다(VAFF-8) |
+| 협상 모드 제휴 변경(타인 제휴 MESSAGE) · 규칙 기반 제휴 · `<manual-deaffiliation-not-allowed-if-affiliation-rules-are-met>` | §8.2.1.4·§8.2.1.5·§8.2.2.2.8~10 · §8.2.1.7 · §8.2.1.2 | 없음. 서버는 남의 제휴를 403 으로 막는다 |
+| 그룹 동적 데이터 구독(그룹 상태·호 진행·제휴 멤버) | §8.2.1.6 · §8.2.2.3.9·§8.2.2.3.10 | `Event: presence` + 그룹 `<mcvideo-request-uri>` 는 served ≠ 요청자 403 으로 끝난다(`csp/CscfModule.cpp:1355-1361`) |
+| MCVideo UE configuration 문서 | TS 24.484 §9.2 | 라우트 없음(VCMS-4) |
+| Media Reception Override(수신 무효화) | TS 24.581 §6.2.5.5.4 · §6.3.7 | 단말 버림(RCU-1), 서버 송신 없음 |
+| Functional Alias(호·송출 표시·바인딩) | TS 24.281 §9.2.1.3.1.1 6a) · TS 24.581 §6.3.4.4.2 3g | 별칭이 서버에서 전달되지 않는다(TCS-2) |
+| 원격 선택 그룹 변경 | TS 24.281 §9.2.4 | 없음 |
+| 위치 보고 | TS 24.281 §6.2.9 | 없음 |
+| regroup · 임시 그룹(TGI) · non-controlling 기능 · MCVideo gateway | §9.2.1.5 · §6.3.5.2 4)·6) · §6.9 | 없음(regroup 그룹이면 403 148 대상 — 판정 없음) |
+| 다중 단말 표시 · 동시 인가 상한 | §7.3.2 2a)·2b)·6) `<multiple-devices-ind>` · `<user-max-simultaneous-authorizations>` | 없음(REGISTER 인가 본문 자체가 미구현) |
+| 사전 구성 전용 그룹 | §9.2.1.4.2 5)b) · §9.2.2.4.1.1 2A) — 403 `167` | 서버·단말 모두 없음(VGU-5) |
+| 수신 전용 멤버 | TS 24.481 `<on-network-recvonly>` · TS 24.581 #5 | 그룹 모델·문서·CSP 에 없음 — CMP 만 받는다(TCS-10) |
+
+## 5. 문서 정정
+
+문서가 «정합» 이라고 적었거나 사실로 적은 것이 코드·규격과 다른 곳이다. 코드를 고치든 편차로 남기든, 문서의 서술은 바로잡아야 한다.
+
+| 문서 | 적힌 것 | 실제 | 항목 |
+|---|---|---|---|
+| mcvideo.md §1.4 «서버 answer» · §6 V8 «송출 큐» · mcvideo_dev_plan.md §1 «제외 … 송출 큐»·§8 | `mc_queueing` 은 싣지 않는다(1차 송출 큐 없음) | CSP answer 가 되돌리고(`csp/McVideoInfo.h:272`, 골든 04) CMP 대기열이 동작한다(mcvideo.md §5.3.1) — 초대 offer 에만 없다 | VSDP-4 |
+| mcvideo.md §5.1 CMS 단락 · cmp_media_api.md §7.9 `tc_timers` 행 · `csc/src/services/mcptt.py:357` 주석 | CSP 가 `/internal/mcvideo/service-config` 를 받고, T1·T5 밖의 타이머는 service configuration 값 | CSP 에 그 코드가 없고 T1·T5 만 보낸다 — CMP 는 K5 기본값 | TCS-1 |
+| ue_sdk.md §4.6(타이머 단락) · `sdk/core/include/cimsue/csc.h` `McVideoServiceConfigDoc` 주석 · `sdk/core/src/mcvideo/tc_participant.h:37` | 참여자 타이머 = service configuration 값, 없으면 K5 | 엔진이 값을 넘기지 않아 늘 K5 | TCU-1 |
+| mcvideo.md §1.4 SDP offer | m=audio 코덱 = 그룹 `mcvideo-preferred-audio-encodings`, m=video = `-video-encodings` | 단말·서버 모두 그룹 값을 쓰지 않고 AMR-WB/H.264 고정 | VSDP-1·VGU-4 |
+| mcvideo.md §5.1 «xcap-diff 통지 축에 두 문서를 싣는 것은 CSP 몫(§5.2)» · §6 V1 «xcap-diff» | (구현된 것처럼 읽힌다) | §5.2 에 구현 서술이 없고 코드에도 없다 — «남은 것» 으로 적어야 한다 | VCMS-1 |
+| mcvideo.md §5.3.1 Transmission Request 행 · cmp_media_api.md §7.9 `recv_only` | 그룹 문서 `<on-network-recvonly>` 면 거절 #5 | 그룹 문서에 그 요소가 없고 CSP 가 보내지 않는다 | TCS-10 |
+| cmp_media_api.md §7.9 `max_reception_priority` | 협상 수신 우선순위 상한 | CSP 가 보내지 않고 CMP 는 쓰지 않는다 | RCS-3 |
+| mcvideo.md §5.2.1 표 `TRANSMISSION_INACTIVITY` 행 | «T5 는 로그만» (설계로 적힘) | TS 24.581 표 11.1.3-1 은 T5 만료 = 호 해제 — §9 편차 메모로 옮겨 사유를 적거나 해제해야 한다 | VGC-9 |
+| mcvideo.md §5.5 PTT 단말 | «빈 집합 = Expires 0 = 그 사용자 제휴 전부 해제» 를 피하는 이유로 적음 | 그 서버 동작이 규격(클라이언트 단위 해제)과 다르다 — 편차로 적거나 서버를 고친다 | VAFF-1 |
+| mcvideo.md §5.5 PTT 단말 | 내 송출 카드의 «대기 n»·[대기 취소] | 현장 앱은 `mc_queueing` 을 offer 하지 않아 회수 #7 밖에서는 대기가 없다 | VSDP-3 |
+| mcvideo.md §5.5 PTT 단말 | «영상 n» 목록(이름·기능 별칭·경과) | 별칭이 서버에서 전달되지 않아 늘 비어 있다 | TCS-2 |
+| mcvideo.md §1.2 · `sdk/core/include/cimsue/types.h:113-116` | MCVideo 로그오프 = 태그를 뺀 재-REGISTER | SDK 는 계정을 다시 만든다(등록 해제 + 새 등록) | VREG-3 |
+| mcvideo.md §5.2 «등록» | poc-settings 는 §7.2.2(인가 겸용)로만 적음 | 단말 §7.2.3(서비스 설정만)이 규격 서버 착신의 전제다 — 단말 몫이 빠졌다 | VREG-1 |
+| ue_sdk.md §4.6(초대 수락 단락)·`sdk/core/src/engine.cpp:1665` 주석 | «autoAnswerMcvideo 면 곧바로 200» · 그룹 수동 개시 근거 §6.2.3.2.1 | 늘 180 을 먼저 보낸다. 그룹 호 수동 개시는 §6.2.3.2.2(183 허용, 180 아님) | VGU-2 |
+| mcvideo_tc_defs.yaml 194-195행 주석 | C7·C11 은 한도에서 Receive Media Request 를 거절한다 | 수로만 쓴다(`cmp/PMcvControl.h:16-17`, mcvideo.md §5.3.1) | — |
+| `tests/fixtures/mcvideo/README.md` 해석 값 표 | user profile «N2 10» | 골든 파일은 `<MaxAffiliationsN2>4</MaxAffiliationsN2>` | — |
+| mcvideo.md §9 (누락) | — | TS 24.484 §9.4.2.1 본문 `<private-call-hang-time>` 과 XSD·§9.4.2.7 `private-call-hang-timer` 불일치 메모가 없다(CSC 는 XSD 를 따른다) | — |
+| `csp/CscfModule.cpp:830` 주석 · `:1885-1889` 문서 주석 | «N2 상한은 … 적용하지 않는다» | MCVideo 는 설정 그룹·PUBLISH 모두 N2 를 적용한다(`:859-867`·`:2038-2059`) — 주석이 MCPTT 몫만 맞다 | — |
+
+## 6. 묶음과 순서 (권고)
+
+같은 자리를 고치는 것끼리 묶었다. 앞 묶음일수록 손이 적게 들고 영향이 크다.
+
+| # | 묶음 | 항목 | 몫 |
+|---|---|---|---|
+| 1 | **헤더·fmtp 한두 줄** — Warning 123·122, Supported 옵션 태그, 초대 offer `mc_queueing`, 해제 200 Expires, 현장 앱 `queueing` 켬 | VGC-4 · VGC-5 · VGC-6 · VGC-7(Supported 몫) · VSDP-4 · VAFF-3 · VSDP-3 | .45 CSP · 현장 앱 |
+| 2 | **긴급·임박·방송 지시자 거절** — V8 전까지 403 + `<emergency-ind>false`(§6.3.3.1.13), re-INVITE 격상도 | VGC-1 | .45 CSP |
+| 3 | **NAT 합류 알림** — latch 뒤(또는 첫 RR 수신 때) 현재 상태(Idle·Notification)를 다시 보내거나, 단말이 200 OK 직후가 아니라 offer 직후 RR 로 경로를 연다 | RCS-1 | .45 CMP·SDK |
+| 4 | **제휴를 클라이언트 단위로** — 행 키 통일, 클라이언트 단위 해제·판정, 암묵 제휴 취소·완료 시점. MCPTT 묶음 8(AFF-1~8)과 한 작업 | VAFF-1 · VAFF-2 · VAFF-4 · VAFF-5 · VGC-11 | .45 CSP |
+| 5 | **진행 중 호와 제휴·그룹 변경** — late call entry, 제휴 해제·멤버 제거·서비스 끔 → BYE, 제휴 행 정리, on-network 꺼짐 115. MCPTT 묶음 9·10 의 결정과 같이 | VGC-2 · VGC-12 · VAFF-7 · VGC-3 · VAFF-6(결정) | 결정 → .45 CSP |
+| 6 | **service configuration 값 결선** — CSP 가 `/internal/mcvideo/service-config` 를 받아 `tc_timers` 전부를 싣고 변경을 통지받는다, SDK 엔진이 `TcTimers` 를 문서에서 넣는다, xcap-diff `sel` 에 MCVideo 문서 | TCS-1 · TCU-1 · VCMS-1 | .45 CSP·SDK |
+| 7 | **코덱 선호의 한 줄기** — 서버 집행 범위로 선호 코덱을 묶을지(CSC·콘솔 검증) CSP 가 그룹 선호를 따를지 정한다. 단말 offer·초대 offer 가 그 값을 쓴다 | VSDP-1 · VGU-4 · VGC-8 | 결정 → .45 CSC·CSP·SDK, 콘솔 |
+| 8 | **그룹 문서 PUT 해석·CMS 문서** — 없음의 뜻(§7.2.8), `<mcvideo-mcvideo-id>`·`<group-media>` 검사, 자격 없는 멤버 표시, user profile `index`, 문서 이름 검사 | VGMS-1 · VGMS-2 · VGMS-3 · VCMS-3 · VCMS-6 · VGC-10(CSC 기본값 몫) | .45 CSC |
+| 9 | **단말 호 절차** — poc-settings §7.2.3 송신(+ 서버 §7.3.4 수신과 짝), 계정 갱신 API(태그만 뺀 재-REGISTER), Answer-Mode 해석, 그룹 호 응답 모양, 거절 480 + 110, 제휴 상태 구독, preconfigured-group-use-only, 재합류 UI | VREG-1 · VREG-3 · VGU-1 · VGU-2 · VGU-3 · VGU-5 · VGU-6 · VAFF-8 · VGC-7(Answer-Mode 몫) | .45 SDK·현장 → Windows(관제 앱) |
+| 10 | **송출 제어 서버 세부** — 선점 순서·협상 조건, 이른 Granted, 기본 우선순위, 대기 위치 갱신, 무허가 송출 포기, Ack subtype·P 비트, SSRC 기본값, 별칭 전달 | TCS-2 · TCS-3 · TCS-4 · TCS-5 · TCS-6 · TCS-7 · TCS-8 · TCS-9 · TCS-11 · RCS-2 · RCS-3 | .45 CMP(·SDK 별칭) |
+| 11 | **단말 참여자 세부** — 우선순위 상한, 대기 허가 확인, End 필드, override, re-offer answer | TCU-2 · TCU-3 · TCU-4 · RCU-1 · VSDP-2 | .45 SDK |
+| 12 | **서버 사유 코드·신원 세부** — 그룹 호 밖 session-type 사유, PSI 고정, 로그오프 바인딩 판정·제휴 정리, conference 구독 서비스 분리, T5 | VPRV-1 · VGC-13 · VREG-2 · VREG-4 · VGC-10 · VGC-9 | .45 CSP |
+| 13 | **수신 전용 멤버** — 그룹 모델·문서 `<on-network-recvonly>` → CSP JOIN `recv_only`·answer `mc_priority` 생략. MCPTT FCS-14 와 같이 | TCS-10 | .45 CSC·CSP |
+
+**Windows 몫(관제 앱 두 벌)** — SDK·서버가 정해진 뒤 맞춘다.
+
+- VGU-3 — 원치 않는 초대 거절을 `hangup` 대신 480 + Warning 110 으로(코어 `reject` 가 Warning 을 받게 된 뒤).
+- VAFF-8 — N2 자체 계산 대신 제휴 상태 NOTIFY 로.
+- VGU-6 — 재합류(세션 식별자)로 prearranged 영상 호에 «보기만» 돌아가기.
+- 묶음 6·7 이 들어오면 service config 타이머·그룹 선호 코덱 반영.
+
+## 7. 보지 못한 것
+
+- **V8·통째 미구현 절** — 긴급·임박·경보·방송·1:1·pull·push·ambient viewing·ad hoc·pre-established·MBMS·off-network(TS 24.581 §7·§9.3~§9.5)·non-controlling 기능(§6.5)·Track Info. 거절 사유만 VGC-1·VPRV-1 로 봤다.
+- **전송 제어 SRTCP 키 유도(TS 24.581 §13)·KMS·GMK** — mcx_e2e_security.md 에 placeholder 로 있어 내부를 읽지 않았다. 단말은 `protect-media` true 를 무시한다(D7 범위).
+- **OMA list-service 실 스키마** — `tests/fixtures/mcvideo/xsd/aux-*` 는 CIMS 가 만든 보조 틀이다. 그룹 문서의 자식 순서(`list`·`ruleset`·`supported-services`·mcpttgi 확장 위치)는 원문 스키마로 검증하지 못했다.
+- **XDM collection·여러 user profile** — 디렉터리 GET, `<Pre-selected-indication>` 동작.
+- **영상 RTCP 동기** — CMP 가 송출자 SR 을 수신자에게 옮기지 않아(mcvideo.md B6) 단말의 음성·영상 동기(RFC 3550 §6.4.1)에 영향이 있을 수 있다. TS 24.581 밖이라 항목으로 올리지 않았다.
+- **멤버 포트 배치·SDP 표 4.3.3.1-1 대조** — 하지 않았다.
+- **Windows .NET/C API 바인딩 내부·태블릿 `VideoPlane.kt`·현장 `ui/VideoViews.kt` 화면** — grep 수준으로만 봤다.
+- **cimsue-cli drive·libcsim(계측기)** — 시험 도구의 MCVideo 송신 형태는 보지 않았다. 서버 검사를 켜면(VREG-2·VAFF-2) 도구도 함께 맞춰야 한다.
+- **실행 확인** — 모든 항목이 코드 읽기다. 단위시험·스모크는 돌리지 않았다. 확정하려면 실측이 필요하다:
+  - RCS-1 — NAT 단말이 송출 중인 호에 합류.
+  - VGC-10 — MCVideo ICSI 를 단 conference SUBSCRIBE 가 MCPTT 로스터를 받는지.
+  - TCS-4 — 협상하지 않은 단말의 선점 · TCS-5 — `mc_granted` 없이 암묵 요청만 보낼 때 · TCS-11 — `mc_transmission_ssrc` 없는 단말.
+  - VAFF-6 — 설정 그룹 제휴가 갱신 REGISTER 마다 되살아나는지(현장 앱 PUBLISH 와의 반복).
+  - VGU-3 — 자동 200 뒤 BYE 가 prearranged 개시 직후 해제로 이어지는 경합.
+  - 와이어 — pjsip 이 실제로 골든과 같은 Contact·`i=`·multipart 를 내는지.
