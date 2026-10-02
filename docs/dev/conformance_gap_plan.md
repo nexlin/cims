@@ -137,8 +137,8 @@
 | **U05** | MCData 요청 규격화·수신 파서 | MCData REG-1 · SDS-3 · SDS-6 · SDS-7 · SDS-10 · MSRP-1 · MSRP-4 · FD-7(SDK — Metadata `file-selector:`·`uploadFd` 규격형, CSP 생성분은 S16) | B3 · C2 · D3 | 1 | S17 | — | — | 대기 |
 | **U06** | 제휴 상태 구독 | AFF-12 / VAFF-8 | B1 · C1 | 1 | S13 | — | W01(VAFF-8) | 대기 |
 | **U07** | XCAP 단말 전환 | GMS-16 · GMS-17 · GMS-1(SDK — global tree 조회) · GMS-6(SDK — 멤버 제외 조회) | B4 | 1 | C04·S19 | — | W01(GMS-16 PSI) | 대기 |
-| **U08** | 발언권·송출 제어 단말 세부 | FCC-5 / TCU-1 · TCU-3 · TCU-4 · RCU-1 | C3 · D2 | 1 | — | — | — | 대기 |
-| **U09** | MCVideo 단말 호 절차 | VREG-1 · VREG-3 · VGU-4 · VGU-5 · VGU-6 · VSDP-3 | B1 · C3 · D2 | 1 | — | D7 | W01(VGU-6) | 대기 |
+| **U08** | 발언권·송출 제어 단말 세부 | FCC-5 / TCU-1(코어) · TCU-3 · TCU-4 · RCU-1 | C3 · D2 | 1 | — | — | — | 완료 9e9a8169 (TCU-1 앱 결선 → U09) |
+| **U09** | MCVideo 단말 호 절차 | VREG-1 · VREG-3 · VGU-4 · VGU-5 · VGU-6 · VSDP-3 · TCU-1(앱 결선 — Kotlin 파사드·C API·현장 앱) | B1 · C3 · D2 | 1 | — | D7 | W01(VGU-6) | 대기 |
 
 ### 5.4 Windows — 관제 앱 (W01)
 
