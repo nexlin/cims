@@ -387,4 +387,62 @@ inline std::string CspMcVideoServiceConfigSel() {
     return "org.3gpp.mcvideo.service-config/global/mcvideo-service-config.xml";
 }
 
+// ── 규격형 xcap-diff 구독 본문 (TS 24.481 §6.3.13.2.1 a) · TS 24.484 §6.3.13.2 — RFC 5875 §4.1) ──
+
+/** 구독 본문(application/resource-lists+xml — multipart 안이어도)의 <entry uri> 값들 → XCAP root 뒤 경로. 절대 URI 는
+ * AUID
+ *  (`org.openmobilealliance.` · `org.3gpp.`) 앞을 뗀다 — 상대 경로는 «XCAP root URI 를 base 로» 쓴 것이다(§6.3.13.2.1
+ * a)1)A)). &amp; 는 푼다. AUID 를 찾지 못한 entry 는 버린다. */
+inline std::vector<std::string> CspXcapDiffEntries( const std::string &strBody ) {
+    std::vector<std::string> out;
+    size_t pos = 0;
+    while ( ( pos = strBody.find( "entry", pos ) ) != std::string::npos ) {
+        const bool bTag = pos > 0 && ( strBody[pos - 1] == '<' || strBody[pos - 1] == ':' );
+        const size_t end = strBody.find( '>', pos );
+        if ( !bTag || end == std::string::npos ) {
+            pos += 5;
+            continue;
+        }
+        const std::string strTag = strBody.substr( pos, end - pos );
+        pos = end;
+        size_t u = strTag.find( "uri=" );
+        if ( u == std::string::npos || u + 5 > strTag.size() ) continue;
+        const char q = strTag[u + 4];
+        if ( q != '"' && q != '\'' ) continue;
+        const size_t ue = strTag.find( q, u + 5 );
+        if ( ue == std::string::npos ) continue;
+        std::string v = strTag.substr( u + 5, ue - u - 5 );
+        for ( size_t a; ( a = v.find( "&amp;" ) ) != std::string::npos; ) v.replace( a, 5, "&" );
+        size_t k = v.find( "org.openmobilealliance." );
+        const size_t k2 = v.find( "org.3gpp." );
+        if ( k == std::string::npos || ( k2 != std::string::npos && k2 < k ) ) k = k2;
+        if ( k == std::string::npos ) continue;
+        out.push_back( v.substr( k ) );
+    }
+    return out;
+}
+
+/** 선택자가 AUID strAuid 의 문서인가 («AUID/…»). */
+inline bool CspXcapSelIsAuid( const std::string &strSel, const std::string &strAuid ) {
+    return strSel.size() > strAuid.size() && strSel.compare( 0, strAuid.size(), strAuid ) == 0 &&
+           strSel[strAuid.size()] == '/';
+}
+
+/** 그룹 문서 선택자(org.openmobilealliance.groups/…/<그룹 ID>)가 그룹 strGroupId 의 문서인가 — 마지막 경로 세그먼트를
+ *  %3A·%40 를 풀고 tel:/sip: 접두·@도메인을 떼어 비교한다(TS 24.481 §7.2.10.2 — 그룹 ID 로 가리키는 문서). */
+inline bool CspXcapSelIsGroupDoc( const std::string &strSel, const std::string &strGroupId ) {
+    if ( !CspXcapSelIsAuid( strSel, "org.openmobilealliance.groups" ) ) return false;
+    auto bare = []( std::string v ) {
+        for ( size_t a; ( a = v.find( "%3A" ) ) != std::string::npos || ( a = v.find( "%3a" ) ) != std::string::npos; )
+            v.replace( a, 3, ":" );
+        for ( size_t a; ( a = v.find( "%40" ) ) != std::string::npos; ) v.replace( a, 3, "@" );
+        if ( v.compare( 0, 4, "tel:" ) == 0 || v.compare( 0, 4, "sip:" ) == 0 ) v = v.substr( 4 );
+        const size_t at = v.find( '@' );
+        if ( at != std::string::npos ) v = v.substr( 0, at );
+        return v;
+    };
+    const size_t slash = strSel.rfind( '/' );
+    return !strGroupId.empty() && bare( strSel.substr( slash + 1 ) ) == bare( strGroupId );
+}
+
 #endif

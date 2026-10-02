@@ -24,6 +24,7 @@
 #include "CspPhoneGroup.h"
 #include "CspPttGroup.h"
 #include "CspRole.h"
+#include "CspServiceConfig.h"
 #include "CspServiceMap.h"
 #include "CspTrunkRegistrar.h"
 #include "CspUser.h"
@@ -1362,6 +1363,12 @@ bool CCscfModule::RecvRequestSubscribe( int iThreadId, CSipMessage *pclsMessage 
         ( pclsSubEvent && pclsSubEvent->m_strValue == "presence" ) ||
         ( pclsSubAccept && pclsSubAccept->m_strValue.find( "mcptt-affiliation-info" ) != std::string::npos );
 
+    // xcap-diff 규격형 구독의 본문(RFC 5875 §4.1 — resource-lists 의 <entry uri>). 없으면 본문 없는 CIMS 구독(고정
+    // 선택자).
+    std::vector<std::string> vecXcapEntries;
+    if ( strEventHdr == "xcap-diff" && !pclsMessage->m_strBody.empty() )
+        vecXcapEntries = CspXcapDiffEntries( pclsMessage->m_strBody );
+
     std::string strEventType;
     if ( strEventHdr == "reg" ) {
         // RFC 3680 reg-event: 실제 UE 는 REGISTER 200 OK 직후 자신의 등록 상태를 구독.
@@ -1397,6 +1404,12 @@ bool CCscfModule::RecvRequestSubscribe( int iThreadId, CSipMessage *pclsMessage 
         // RFC 4235 dialog-event — 관제 BLF/당겨받기(volte_supplementary_services.md §6.2).
         //   자원(watched AoR) = R-URI user (없으면 refresh 복원 또는 To URI).
         strEventType = "dialog";
+    } else if ( strEventHdr == "xcap-diff" && !vecXcapEntries.empty() ) {
+        // 규격형 구독 — 본문 entry 의 AUID 로 가른다(그룹 문서 = gms, 설정 문서 = cms — TS 24.481 §6.3.13.3.2.2 ·
+        //   TS 24.484 §6.3.13.3). Request-URI 는 PSI 다.
+        strEventType = "cms";
+        for ( const auto &e : vecXcapEntries )
+            if ( CspXcapSelIsAuid( e, "org.openmobilealliance.groups" ) ) strEventType = "gms";
     } else if ( strReqUri.find( "gms" ) != std::string::npos ) {
         strEventType = "gms";
     } else if ( strReqUri.find( "cms" ) != std::string::npos ) {
@@ -1423,6 +1436,8 @@ bool CCscfModule::RecvRequestSubscribe( int iThreadId, CSipMessage *pclsMessage 
     const bool bRefresh = gclsSubscriptionManager.GetSubscriptionByCallId( strSubCallId, clsPrev );
     if ( bRefresh ) {
         if ( !clsPrev.strEventType.empty() ) strEventType = clsPrev.strEventType;
+        // 갱신은 구독 문서 집합을 바꿀 수 있다(본문이 있으면 — §6.3.13.3.2.2 re-SUBSCRIBE), 없으면 이어 쓴다.
+        if ( vecXcapEntries.empty() ) vecXcapEntries = clsPrev.vecXcapEntries;
         if ( strReqUriUser.empty() && !clsPrev.strResourceId.empty() ) strReqUriUser = clsPrev.strResourceId;
         bAffiliation = !strReqUriUser.empty() && gclsGroupMap.Contains( strReqUriUser.c_str() );
     }
@@ -1631,6 +1646,7 @@ bool CCscfModule::RecvRequestSubscribe( int iThreadId, CSipMessage *pclsMessage 
     info.strCallId = strSubCallId;
     info.strEventType = strEventType;
     info.strResourceId = strReqUriUser;  // 자원 기준 조회용 (conference = 그룹 ID)
+    info.vecXcapEntries = vecXcapEntries;
     info.iExpires = ( iExpires > 0 ) ? iExpires : 3600;
     info.tStartTime = time( NULL );
     // 상태 없는 in-dialog 갱신(재기동 후 옛 dialog 승계 — 위 To tag 승계 분기)은 RFC 3261 §12.2.2 의 수용 조건대로

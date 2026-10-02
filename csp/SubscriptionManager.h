@@ -6,6 +6,7 @@
 #include <map>
 #include <mutex>
 #include <string>
+#include <vector>
 
 #include "SipTransport.h"
 
@@ -32,6 +33,9 @@ struct SubscriptionInfo {
     std::string strSrcIp;
     int iSrcPort = 0;
     ESipTransport eSrcTransport = E_SIP_UDP;
+    // xcap-diff 규격형 구독의 본문 entry(XCAP root 뒤 경로 — CspXcapDiffEntries). 비면 본문 없는 CIMS 구독(고정
+    // 선택자).
+    std::vector<std::string> vecXcapEntries;
 };
 
 /**

@@ -815,7 +815,11 @@ SIP SUBSCRIBE/NOTIFY 다이얼로그 상태 관리.
 타입 판별은 `CscfModule` 의 `Event` 헤더 우선 순서를 따른다: `reg` → `affiliation`(Event:presence
 또는 옛 단말의 Accept 에 mcptt-affiliation-info — MCVideo 서비스 표시가 있으면 `mcvideo_affiliation`: 역할 off 404, served ID
 = mcvideo-info `<mcvideo-request-uri>` ≠ 요청자 403, TS 24.281 §8.2.2.2.4) → `conference`(Event:conference **또는** Request-URI 가 알려진
-그룹 — Event 헤더 없는 구현 호환) → Request-URI 의 gms/cms → 기본값 gms.
+그룹 — Event 헤더 없는 구현 호환) → `Event: xcap-diff` 에 resource-lists 본문(규격형 구독 — TS 24.481 §6.3.13.2.1 · TS 24.484 §6.3.13.2,
+multipart 안이어도)이 있으면 `<entry uri>` 의 AUID(그룹 문서 `org.openmobilealliance.groups` = gms, 그 밖 = cms) → Request-URI 의 gms/cms → 기본값 gms.
+규격형 구독은 entry(XCAP root 뒤 경로 — 절대 URI 면 AUID 앞을 뗀다, `CspXcapDiffEntries`)를 구독에 담아 두고(본문 없는 갱신은 이어 쓴다), NOTIFY 의
+`sel` = **구독한 entry 그대로**·구독하지 않은 문서는 통지하지 않는다(RFC 5875 §4.6 — 첫 통지 = 구독한 문서 전부). 본문 없는 구독(CIMS 단말)은 고정
+선택자([mcptt_api.md](../../api/mcptt_api.md) «변경 통지»).
 
 ⚠️ **갱신(in-dialog refresh) SUBSCRIBE 는 이 판별을 타면 안 된다.** 갱신 요청의 Request-URI 는
 자원이 아니라 200 OK 의 Contact(서버 자기 주소)이므로, URI 로 재분류하면 conference 구독이 gms 로

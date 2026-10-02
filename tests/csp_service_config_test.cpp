@@ -123,6 +123,24 @@ int main(){
      xu.find("<document sel=\"org.3gpp.mcvideo.user-profile/users/tel:+8250/mcvideo-user-profile-1.xml\"/>")!=std::string::npos &&
      xu.find("service-config")==std::string::npos);
   CK("mcvideo service config sel",CspMcVideoServiceConfigSel()=="org.3gpp.mcvideo.service-config/global/mcvideo-service-config.xml");
+  // 규격형 구독 본문(TS 24.481 §6.3.13.2.1 a) — resource-lists entry → XCAP root 뒤 경로, multipart 안이어도)
+  const std::string rl = "--b\r\nContent-Type: application/resource-lists+xml\r\n\r\n<?xml version=\"1.0\"?>"
+    "<resource-lists xmlns=\"urn:ietf:params:xml:ns:resource-lists\"><list>"
+    "<entry uri=\"org.openmobilealliance.groups/global/byGroupID/tel:g-0a1b2c3d\"/>"
+    "<rl:entry uri='https://csc:4430/org.openmobilealliance.groups/global/byGroupID/sip%3Ag2%40ptt.example'/>"
+    "<entry uri=\"https://csc:4430/org.3gpp.mcptt.user-profile/users/sip:a@d/mcptt-user-profile-1.xml\"/>"
+    "<entry uri=\"https://other/no-auid\"/></list></resource-lists>\r\n--b\r\nContent-Type: application/vnd.3gpp.mcptt-info+xml\r\n\r\n"
+    "<mcpttinfo><mcptt-Params><mcptt-access-token>x</mcptt-access-token></mcptt-Params></mcpttinfo>\r\n--b--\r\n";
+  const auto ents = CspXcapDiffEntries(rl);
+  CK("entries parsed (relative · absolute · prefixed tag · non-AUID dropped)",ents.size()==3 &&
+     ents[0]=="org.openmobilealliance.groups/global/byGroupID/tel:g-0a1b2c3d" &&
+     ents[1]=="org.openmobilealliance.groups/global/byGroupID/sip%3Ag2%40ptt.example" &&
+     ents[2]=="org.3gpp.mcptt.user-profile/users/sip:a@d/mcptt-user-profile-1.xml");
+  CK("group doc match by group ID",CspXcapSelIsGroupDoc(ents[0],"g-0a1b2c3d") && CspXcapSelIsGroupDoc(ents[1],"g2") &&
+     !CspXcapSelIsGroupDoc(ents[0],"g-0a1b2c3e") && !CspXcapSelIsGroupDoc(ents[2],"a"));
+  CK("auid match",CspXcapSelIsAuid(ents[2],"org.3gpp.mcptt.user-profile") && !CspXcapSelIsAuid(ents[2],"org.3gpp.mcptt.user") &&
+     !CspXcapSelIsAuid(ents[0],"org.3gpp.mcptt.user-profile"));
+  CK("no body entries",CspXcapDiffEntries("").empty() && CspXcapDiffEntries("<presence entity=\"x\"/>").empty());
   CK("mcptt service config sel",CspMcpttServiceConfigSel("+8250")=="org.3gpp.mcptt.service-config/users/tel:+8250/service-config");
   printf("%s (%d fail)\n",fail?"FAIL":"PASS",fail); return fail?1:0;
 }

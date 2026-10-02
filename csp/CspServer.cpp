@@ -1288,6 +1288,13 @@ void SendInitialNotify( const SubscriptionInfo &sub ) {
         }
         return;
     }
+    if ( ( sub.strEventType == "gms" || sub.strEventType == "cms" ) && !sub.vecXcapEntries.empty() ) {
+        // 규격형 구독의 첫 통지 — 구독한 문서 전부(RFC 5875 §4.4).
+        const std::string strBody =
+            CspXcapDiffDocsBody( gclsCscEndpointCache.GetXcapRoot(), sub.vecXcapEntries, "init" );
+        SendNotifyToSubscriber( sub, "init", "", NULL, NULL, &strBody );
+        return;
+    }
     if ( sub.strEventType == "gms" ) {
         // GMS 초기 동기화: 가입자가 속한 그룹별로 group document NOTIFY 발송.
         //   (기존엔 빈 group sel `tel:` 하나만 보내 UE GET 이 404 였음.)
@@ -1393,6 +1400,17 @@ void SendPttDialogEventNotify( const std::string &strWatchedAor, const std::stri
  */
 void SendUserDocNotify( const std::string &strUri, const std::string &strEtag );
 
+// 규격형 구독(본문 entry — TS 24.481 §6.3.13.2.1 · TS 24.484 §6.3.13.2)이면 바뀐 문서의 선택자 = 구독한 entry 가운데 그
+// 문서인 것
+//   (RFC 5875 §4.6 — sel 은 구독한 URI 와 같다). 그 문서를 구독하지 않았으면 빈 목록 — 통지하지 않는다.
+template <typename F>
+static std::vector<std::string> SubscribedSels( const SubscriptionInfo &sub, F match ) {
+    std::vector<std::string> out;
+    for ( const auto &e : sub.vecXcapEntries )
+        if ( match( e ) ) out.push_back( e );
+    return out;
+}
+
 void SendGroupDocNotify( const std::string &strGroupId, const std::set<std::string> &setUsers,
                          const std::string &strEtag ) {
     int nSent = 0;
@@ -1400,7 +1418,15 @@ void SendGroupDocNotify( const std::string &strGroupId, const std::set<std::stri
         std::list<SubscriptionInfo> subList;
         gclsSubscriptionManager.GetSubscriptionsByUser( strUser, "gms", subList );
         for ( auto &sub : subList ) {
-            SendNotifyToSubscriber( sub, strEtag, strGroupId );
+            if ( !sub.vecXcapEntries.empty() ) {
+                const auto vecSel = SubscribedSels(
+                    sub, [&]( const std::string &e ) { return CspXcapSelIsGroupDoc( e, strGroupId ); } );
+                if ( vecSel.empty() ) continue;
+                const std::string strBody = CspXcapDiffDocsBody( gclsCscEndpointCache.GetXcapRoot(), vecSel, strEtag );
+                SendNotifyToSubscriber( sub, strEtag, strGroupId, NULL, NULL, &strBody );
+            } else {
+                SendNotifyToSubscriber( sub, strEtag, strGroupId );
+            }
             ++nSent;
         }
     }
@@ -1430,6 +1456,17 @@ void SendUserDocNotify( const std::string &strUri, const std::string &strEtag ) 
         vecSel.push_back( CspMcVideoUserProfileSel( strId ) );
     const std::string strBody = CspXcapDiffDocsBody( gclsCscEndpointCache.GetXcapRoot(), vecSel, strEtag );
     for ( auto &sub : subList ) {
+        if ( !sub.vecXcapEntries.empty() ) {
+            const bool bMcv = vecSel.size() > 1;
+            const auto vecSub = SubscribedSels( sub, [&]( const std::string &e ) {
+                return CspXcapSelIsAuid( e, "org.3gpp.mcptt.user-profile" ) ||
+                       ( bMcv && CspXcapSelIsAuid( e, "org.3gpp.mcvideo.user-profile" ) );
+            } );
+            if ( vecSub.empty() ) continue;
+            const std::string strSubBody = CspXcapDiffDocsBody( gclsCscEndpointCache.GetXcapRoot(), vecSub, strEtag );
+            SendNotifyToSubscriber( sub, strEtag, strId, NULL, NULL, &strSubBody );
+            continue;
+        }
         SendNotifyToSubscriber( sub, strEtag, strId, NULL, NULL, &strBody );
     }
     CLog::Print( LOG_INFO, "SendUserDocNotify: User=%s ETag=%s notified=%d", strId.c_str(), strEtag.c_str(),
@@ -1450,8 +1487,15 @@ void SendServiceConfigNotify( const std::string &etag, const std::string &strUri
                  (int)subList.size(), etag.c_str() );
     const std::string strXcapRoot = gclsCscEndpointCache.GetXcapRoot();
     for ( auto &sub : subList ) {
-        const std::string strBody = CspXcapDiffDocBody(
-            strXcapRoot, bMcVideo ? CspMcVideoServiceConfigSel() : CspMcpttServiceConfigSel( sub.strUserId ), etag );
+        std::vector<std::string> vecSel;
+        if ( !sub.vecXcapEntries.empty() ) {
+            const char *pszAuid = bMcVideo ? "org.3gpp.mcvideo.service-config" : "org.3gpp.mcptt.service-config";
+            vecSel = SubscribedSels( sub, [&]( const std::string &e ) { return CspXcapSelIsAuid( e, pszAuid ); } );
+            if ( vecSel.empty() ) continue;
+        } else {
+            vecSel.push_back( bMcVideo ? CspMcVideoServiceConfigSel() : CspMcpttServiceConfigSel( sub.strUserId ) );
+        }
+        const std::string strBody = CspXcapDiffDocsBody( strXcapRoot, vecSel, etag );
         SendNotifyToSubscriber( sub, etag, "", NULL, NULL, &strBody );
     }
 }
@@ -1469,6 +1513,18 @@ void SendUeInitConfigNotify( const std::string &etag ) {
     const std::string strXcapRoot = gclsCscEndpointCache.GetXcapRoot();
     int nSent = 0, nSkipped = 0;
     for ( auto &sub : subList ) {
+        if ( !sub.vecXcapEntries.empty() ) {  // 규격형 구독 — 구독한 그 단말 문서의 entry 그대로
+            const auto vecSel = SubscribedSels(
+                sub, []( const std::string &e ) { return CspXcapSelIsAuid( e, "org.3gpp.mcptt.ue-init-config" ); } );
+            if ( vecSel.empty() ) {
+                ++nSkipped;
+                continue;
+            }
+            const std::string strBody = CspXcapDiffDocsBody( strXcapRoot, vecSel, etag );
+            SendNotifyToSubscriber( sub, etag, "", NULL, NULL, &strBody );
+            ++nSent;
+            continue;
+        }
         CUserInfo clsInfo;
         bool bOtherDevice = false;
         std::string strInstance;
