@@ -2300,7 +2300,7 @@ def _build_ue_init_config_xml(base_url: str) -> str:
                            ('MCData-Service-Details', 'McData', 'mcdata_psi')):
         if _xml_bool(_ue_init_cfg('ServiceDetails', key, 'Enable')) != 'true':
             continue
-        uri = str(_ue_init_cfg('ServiceDetails', key, 'ServerUri')).strip() or f"sip:{psi}@{domain}"
+        uri = _service_server_uri(key, psi, domain)
         ext += (f"      <{elem}>\n"
                 f"        <IPv6-Required>false</IPv6-Required>\n"
                 f"        <Server-URI>{esc(uri)}</Server-URI>\n"
@@ -2339,6 +2339,21 @@ def _build_ue_init_config_xml(base_url: str) -> str:
     <confidentiality-protection-enabled>{_xml_bool(_ue_init_cfg('ConfidentialityProtection'))}</confidentiality-protection-enabled>
 {any_ext}  </on-network>
 </mcptt-UE-initial-configuration>"""
+
+
+def _service_server_uri(key: str, psi: str, domain: str) -> str:
+    """참여 기능 PSI — `UeInitConfig.ServiceDetails.<key>.ServerUri`, 비우면 `sip:<psi>@<PTT 도메인>`."""
+    return str(_ue_init_cfg('ServiceDetails', key, 'ServerUri')).strip() or f"sip:{psi}@{domain}"
+
+
+def service_psis() -> dict:
+    """서비스별 참여 기능 PSI(단말이 UE initial configuration `<*-Service-Details><Server-URI>` 로 받는 값 — TS 24.484 §7.2.2.1).
+    서버(CSP)가 같은 값을 P-Asserted-Identity·제휴 NOTIFY 발신자에 쓰도록 `/internal/mcptt/endpoint` 로 낸다(TS 24.379·24.281
+    §9.2.1.4.1.1 3)). 광고를 끈 서비스(Enable false)도 값은 낸다 — 켰을 때 단말이 받을 값이다."""
+    from services import access_services as _access_services
+    domain = (_access_services.ptt_domain(PROVISIONING) or IDMS_DOMAIN).strip()
+    return {name: _service_server_uri(key, psi, domain)
+            for name, key, psi in (('mcptt', 'Mcptt', 'mcptt_psi'), ('mcvideo', 'McVideo', 'mcvideo_psi'), ('mcdata', 'McData', 'mcdata_psi'))}
 
 
 def ue_init_config_for(base_url, ue_id: str = ''):

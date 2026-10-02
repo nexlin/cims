@@ -89,6 +89,48 @@ class UeInitHplmnTest(unittest.TestCase):
             m._UE_INIT_LAST_GOOD.pop(BASE + "/plmn", None)
 
 
+class ServicePsiTest(unittest.TestCase):
+    """`/internal/mcptt/endpoint` 의 `psi` — 단말이 ue-init-config `<*-Service-Details><Server-URI>` 로 받는 값과 같다(TS 24.484 §7.2.2.1)."""
+
+    def setUp(self):
+        self._keep = m.UE_INIT_CONFIG
+
+    def tearDown(self):
+        m.UE_INIT_CONFIG = self._keep
+
+    def test_defaults_and_configured_uri_match_ue_init_config(self):
+        m.UE_INIT_CONFIG = {}
+        psi = m.service_psis()
+        self.assertEqual(sorted(psi), ["mcdata", "mcptt", "mcvideo"])
+        for name, user in (("mcptt", "mcptt_psi"), ("mcvideo", "mcvideo_psi"), ("mcdata", "mcdata_psi")):
+            self.assertTrue(psi[name].startswith(f"sip:{user}@"), psi[name])
+        m.UE_INIT_CONFIG = {"ServiceDetails": {"McVideo": {"Enable": True, "ServerUri": "sip:video-pf@ptt.example"},
+                                               "Mcptt": {"Enable": True, "ServerUri": ""}}}
+        psi = m.service_psis()
+        self.assertEqual(psi["mcvideo"], "sip:video-pf@ptt.example")
+        xml = m.get_ue_init_config_xml(BASE)[0]
+        self.assertIn(f"<Server-URI>{psi['mcvideo']}</Server-URI>", xml)      # 단말이 받는 값과 같다
+        self.assertIn(f"<Server-URI>{psi['mcptt']}</Server-URI>", xml)
+        self.assertTrue(psi["mcdata"].startswith("sip:mcdata_psi@"), "광고를 끈 서비스도 값은 낸다")
+
+    def test_endpoint_carries_psi(self):
+        import asyncio
+        from handlers import internal_api as ia
+        from httpsrv.handler import HandlerArgs
+        keep = ia.auc.internal_token
+        ia.auc.internal_token = lambda: "tok"
+        try:
+            args = HandlerArgs.__new__(HandlerArgs)
+            args.method = "GET"; args.headers = {"authorization": "Bearer tok", "host": "csc.ptt.cims.example.kr:4430"}
+            args.full_path = ia.ENDPOINT_PATH; args.query_params = {}; args.body = b""
+            r = asyncio.run(ia.handle_mcptt_endpoint(args, {}))
+        finally:
+            ia.auc.internal_token = keep
+        self.assertEqual(r.status, 200)
+        self.assertEqual(r.body["psi"], m.service_psis())
+        self.assertIn("xcap_root", r.body)
+
+
 class UeInitChangeNotifyTest(unittest.TestCase):
     """재적재 → UE_INIT_CONFIG_CHANGED (D10). apply_config 가 건드리는 모듈 전역은 시험 뒤 되돌린다."""
 

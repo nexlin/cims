@@ -2,10 +2,13 @@
 
   GET /internal/mcptt/endpoint
     Authorization: Bearer <InternalApi.Token>
-  200 {"xcap_root": "https://host:4430/", "mcptt_port": 4430, "public_url_configured": true|false}
+  200 {"xcap_root": "https://host:4430/", "mcptt_port": 4430, "public_url_configured": true|false,
+       "psi": {"mcptt": "sip:mcptt_psi@<도메인>", "mcvideo": "sip:mcvideo_psi@<도메인>", "mcdata": "sip:mcdata_psi@<도메인>"}}
   401 토큰 불일치 · 503 auc_disabled(토큰 미설정)
 
-CSP 는 이 값을 xcap-diff NOTIFY 의 `xcap-root` 와 MCData FD 다운로드 URL base 로 쓴다.
+CSP 는 이 값을 xcap-diff NOTIFY 의 `xcap-root` 와 MCData FD 다운로드 URL base 로 쓴다. `psi` = 서비스별 참여 기능 PSI
+(`UeInitConfig.ServiceDetails.*.ServerUri`, 비우면 `sip:<svc>_psi@<PTT 도메인>` — 단말이 ue-init-config 로 받는 값과 같다): CSP 가
+P-Asserted-Identity·제휴 NOTIFY 발신자에 쓴다(TS 24.281 §9.2.1.4.1.1 3)).
 
   GET /internal/mcptt/service-config
     Authorization: Bearer <InternalApi.Token>   [If-None-Match: <ETag>]
@@ -74,6 +77,8 @@ async def handle_mcptt_endpoint(handler_args: HandlerArgs, kwargs: dict) -> Hand
         "xcap_root": xcap_root,
         "mcptt_port": _mcptt._MCPTT_PORT,
         "public_url_configured": configured,
+        # 서비스별 참여 기능 PSI — 단말이 ue-init-config 로 받는 값과 같다(CSP 가 PAI·제휴 NOTIFY 발신자에 쓴다)
+        "psi": _mcptt.service_psis(),
     })
 
 
