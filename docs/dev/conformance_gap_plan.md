@@ -119,7 +119,7 @@
 |---|---|---|---|---|---|---|---|---|
 | **C01** | MCPTT 설정·그룹 문서 값 | CMS-4 · GMS-7 · GMS-13 · GMS-11 · CMS-7 · CMS-6 · CMS-8 · GMS-12 · GMS-18 · GCC-10 | A4 · B3 · C3 | 1 | — | D2 | S01 · W01(GMS-11·GMS-18 폼) | 완료 647584ae |
 | **C02** | MCData·MCVideo 문서 값·선호 코덱 검증 | MCData GRP-1 · GRP-2 · GRP-3 / VCMS-3 · VCMS-5 · VGMS-3 · VSDP-1 | B3 · C1 · D3 | 1 | — | D7 | U09(VGU-4 — 단말 offer 가 그룹 선호를 따름) | 완료 e3ea9f97 |
-| **C03** | user profile·service config 인가 요소(+SDK «없음 = false») | CMS-3 · ADH-1 / VCMS-2 | A1 · B1 · C1 | 1 | — | — | S10 · S11 · W01 | 대기 |
+| **C03** | user profile·service config 인가 요소(+SDK «없음 = false») | CMS-3 · ADH-1 / VCMS-2 | A1 · B1 · C1 | 1 | — | — | S10 · S11 · W01 | 완료 d9a762a1 |
 | **C04** | XCAP 주소·문서 이름(양쪽 수용) | GMS-1 · GMS-6 · CMS-1 · CMS-2 · CMS-9 · CMS-11 · CMS-12 / VCMS-4 · VCMS-6 | B5 · C2 · D2 | 1 | — | — | S19(NOTIFY `sel`) · U07 | 대기 |
 | **C05** | XCAP 쓰기 의미·오류 형식 | GMS-2 · GMS-3 · GMS-4 · GMS-5 · GMS-8 · GMS-9 · GMS-10 / VGMS-1 · VGMS-2 | B7 · C1 · D1 | 2 | C04 | — | W01(그룹 편집 PUT 본문) | 대기 |
 | **C06** | IdMS·토큰 | IDM-1 · IDM-2 · IDM-3 · IDM-4 · IDM-6 · IDM-7 · IDM-8 · IDM-9 · CMS-10 | A3 · B1 · C4 · D1 | 2 | — | D4 | U02(IDM-5) · 앱 로그인(client_id 등록 목록) | 대기 |
