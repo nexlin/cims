@@ -309,7 +309,10 @@ Floor 코덱은 `cmp/PFloorCodec.cpp` 에 분리되어 있고(단말 `ptt-client
 - **유효 우선순위**(§6.3.5.4.4-1a): 기본값은 제어평면이 준 멤버 우선순위(default priority).
   `PTT_JOIN.max_priority`(= SDP `mc_priority` 협상값)가 있는 멤버만 요청에 실린 Floor Priority
   로 낮출 수 있고(둘 중 낮은 쪽), **미협상 멤버의 Floor Priority 필드는 무시**한다 — 관례적으로
-  0 을 실어 보내는 단말의 요청을 우선순위 0 으로 해석하면 선점 서열이 무너진다.
+  0 을 실어 보내는 단말의 요청을 우선순위 0 으로 해석하면 선점 서열이 무너진다. 협상값은 CSP 가
+  min(offer `mc_priority`, 그룹 문서 `<user-priority>`, service config `<num-levels-priority-hierarchy>`)로 정한다(TS 24.380
+  §14.3.3 — 문서에 계층 수가 없으면 스키마 최솟값 4) — 단말이 offer 에 큰 값을 적어도 그룹 문서 우선순위를 넘지 못한다.
+- **선점 요청자의 Queue Position Info**(§6.3.4.4.7 2)f)): 그 요청자가 큐잉을 협상했을 때만(멤버 `PTT_JOIN.queueing`).
 - **초기 발언권**(`PTT_JOIN.granted` = CSP 가 개시 INVITE 의 암묵적 발언 요청 `mc_implicit_request` 를 받아들였다, §14.3.5):
   참가 시점에 발언자가 없으면 그 멤버에게 Floor Granted+Taken 을 보낸다(§6.3.4.2.2 3)·§6.3.4.4.2 1.).
 - **1인 세션**: 참가자가 한 명뿐인 세션의 요청은 Deny **#3**(Only one participant).
@@ -434,11 +437,14 @@ PSI·MCPTT client ID 가 있는 계정. [ue_sdk.md](ue_sdk.md) §4.2) → ③구
 ### C4. floor SDP 토큰
 
 - `m=application {port} UDP MCPTT` + `c=IN IP4 ...` + `a=floorid:0 mstrm:audio` +
-  `a=fmtp:MCPTT mc_queueing;mc_priority=3` + **`a=mcptt-floor-request-uri:sip:{group}@{domain}`**
-  (`GroupCallService.cpp`). 단말은 floor 목적지를 이 `m=application` 포트에서 학습.
-  위 `mc_priority=3` 은 서버 **offer**(fan-out INVITE)의 값이다.
+  `a=fmtp:MCPTT mc_queueing;mc_priority=<그 멤버의 그룹 우선순위>` + **`a=mcptt-floor-request-uri:sip:{group}@{domain}`**
+  (`GroupCallService.cpp` `MemberFloorOfferFmtp`). 단말은 floor 목적지를 이 `m=application` 포트에서 학습.
+  이 fmtp 는 서버 **offer**(fan-out INVITE)의 값이다 — TS 24.380 §14.2.3 `mc_priority` = 그 멤버 entry 의 `<user-priority>`,
+  §14.2.2 `mc_queueing` 은 큐잉을 지원하는 호만(개별 호는 CMP 가 큐를 끄므로 개별 호 offer 에는 floor fmtp 를 싣지 않는다).
 - **개시자 200 OK answer**(psip `CSipDialog::AddSdp`, CSP 가 `CSipCallRtp::m_strApplicationFmtp` 로 정한다) — offer 에 있던 파라미터만(§14.3.1): `mc_queueing`
-  은 offer 가 실었을 때(fmtp 없는 구단말 offer 에는 종전대로 광고), **암묵적 발언 요청**을 받아들였으면 `mc_implicit_request` 를 되돌린다(§14.3.5 — 승인 뜻은
+  은 offer 가 실었고 큐잉을 지원하는 호일 때(개별 호는 아니다 · fmtp 없는 구단말 offer 에는 종전대로 광고), `mc_priority` 는 offer 에
+  있었으면 협상값(min(offer, `<user-priority>`, `<num-levels-priority-hierarchy>`), §14.3.3 — CMP `max_priority` 와 같은 값),
+  **암묵적 발언 요청**을 받아들였으면 `mc_implicit_request` 를 되돌린다(§14.3.5 — 승인 뜻은
   아니다, §12.1.2.2 NOTE 4). 요청은 offer 의 `mc_implicit_request` 이고 `mc_granted` 는 200 OK 승인 표시를 받을 수 있다는 능력이라 요청으로 읽지 않는다
   (§14.2.4·§14.2.5·§12.1.2.2 NOTE 2). 받아들이는 것은 새 세션 개시뿐 — chat·진행 중 세션 합류·청취 합류는 아니다. 승인은 Floor Granted 로만 알린다(answer
   `mc_granted` 는 선택 "may", §14.3.4). 단말(SDK)은 두 속성을 함께 싣는다([mcptt_broadcast_group_call.md](mcptt_broadcast_group_call.md) R14).
@@ -458,7 +464,7 @@ PSI·MCPTT client ID 가 있는 계정. [ue_sdk.md](ue_sdk.md) §4.2) → ③구
 | 서비스 식별 | §6.3.3.1.2 3) — P-Asserted-Service(RFC 6050) | `P-Asserted-Service: urn:urn-7:3gpp-service.ims.icsi.mcptt` (본문의 "P-Asserted-Service-Id" 는 표기 — 와이어 헤더 이름은 RFC 6050 §4.1, 부록 예시도 같다. 경보 팬아웃 MESSAGE 도 같은 이름) |
 | Accept-Contact | §6.3.3.1.2 2)·4) | `*;+g.3gpp.icsi-ref=…;+g.3gpp.mcptt;require;explicit` |
 | 세션 타이머 | §6.3.3.1.2 6) — Session-Expires 권고, «The refresher parameter shall be omitted» · 단말 200 OK = `refresher=uas`(§6.2.3.1.1 5)) | `Session-Expires` 는 refresher 없이 싣는다(psip 이 붙인 것을 지운다 — `McStripSessionRefresher`). 규격 단말은 `uas` 로 답해 스스로 갱신하고 CSP 는 만료를 감시한다. refresher 를 정하지 않는 단말(pjsip 기본 = `uac`)이면 CSP 가 갱신한다([leg_liveness.md](leg_liveness.md) §5.3) |
-| floor 선언 유지 | RFC 3264 §8 — 이어지는 offer·answer 의 m= 는 처음과 같다(포트 0 = 스트림 끔) | floor `m=application`·`a=fmtp:MCPTT`(`mc_queueing;mc_priority=3`)는 본문에 덧붙이는 줄이라 다이얼로그에도 같은 선언을 둔다(psip `SetLocalApplicationMedia`) — 스택이 만드는 세션 갱신 offer·멤버 re-INVITE answer 가 floor 를 그대로 싣는다 |
+| floor 선언 유지 | RFC 3264 §8 — 이어지는 offer·answer 의 m= 는 처음과 같다(포트 0 = 스트림 끔) | floor `m=application`·`a=fmtp:MCPTT`(`MemberFloorOfferFmtp`)는 본문에 덧붙이는 줄이라 다이얼로그에도 같은 선언을 둔다(psip `SetLocalApplicationMedia`) — 스택이 만드는 세션 갱신 offer·멤버 re-INVITE answer 가 floor 를 그대로 싣는다 |
 
 ### C4b. 개시자 응답 (제어 기능 → 개시자) — §6.3.3.2.3
 

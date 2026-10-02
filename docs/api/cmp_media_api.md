@@ -594,7 +594,7 @@ RELAY_REMOVE 와 동일 규칙).
 | `floor_suppress` | - | 1 = 이 멤버에게 floor 메시지(GRANT/TAKEN/IDLE/DENY)를 **보내지 않는다** — 청취 사실이 floor 상태로 드러나지 않게 한다 |
 | `user_uri` | - | 이 멤버의 **MCPTT ID(URI)** — floor 메시지의 User ID(6)/Granted Party(4)/화자 리스트에 싣는 값(TS 24.380 §8.2.3.8). 생략 시 `session_id` |
 | `queueing` | - | `0` = 이 멤버가 SDP `mc_queueing` 을 협상하지 않음 → 비선점 요청은 큐잉하지 않고 **Deny #1**(기본 1) |
-| `max_priority` | - | SDP `mc_priority=N` 로 협상한 **요청 가능 최대 우선순위**. 이 값이 있을 때만 Floor Request 의 Floor Priority 로 우선순위를 낮출 수 있다(둘 중 낮은 쪽). 없으면(미협상) 요청의 우선순위 필드를 무시하고 `members` 의 기본값을 쓴다(TS 24.380 §6.3.5.4.4-1a) |
+| `max_priority` | - | SDP `mc_priority=N` 로 협상한 **요청 가능 최대 우선순위** — CSP 가 정한 협상값 min(offer, 그룹 우선순위, `<num-levels-priority-hierarchy>`)(TS 24.380 §14.3.3), offer 원값이 아니다. 이 값이 있을 때만 Floor Request 의 Floor Priority 로 우선순위를 낮출 수 있다(둘 중 낮은 쪽). 없으면(미협상) 요청의 우선순위 필드를 무시하고 `members` 의 기본값을 쓴다(TS 24.380 §6.3.5.4.4-1a) |
 | `granted` | - | `1` = CSP 가 이 멤버의 개시 INVITE 를 **암묵적 발언 요청**(offer `mc_implicit_request`)으로 받아들였다(TS 24.380 §14.3.5 — 새 세션 개시만) — 참가 시점에 발언자가 없으면 이 멤버에게 **초기 발언권**을 준다(§6.3.4.2.2 3)·§6.3.4.4.2 1.). offer 의 `mc_granted` 는 능력 표시라 이 값의 원천이 아니다 |
 | `floor_crypto` | - | 이 멤버의 floor SRTCP 키 `{alg,key,salt[,mki]}` — **유니캐스트 floor 는 클라이언트별 CSK 로 보호**(TS 33.180 §9.4)한다. 생략 시 그룹 키([§7.8](#78-floor_crypto--floor-rtcp-보호-ts-33180)) |
 | `media_crypto` | - | 이 멤버 leg 의 음성 SRTP 키 `{alg,rx{key,salt},tx{key,salt}}` ([§6.4](#64-media_crypto--미디어-srtp-종단-relayptt-공통)). 생략 = 평문 leg(신규) / 기존 키 유지(재-JOIN) — optional 혼용 그룹 표현 |
@@ -782,7 +782,7 @@ audio RTP(`port`, RTCP = +1)·video RTP(`video_port`, RTCP = +1 — 수신자 PL
 | `queueing` | - | `1` = SDP `mc_queueing` 협상(§14.2.2) — 동시 송출 상한에서 요청을 대기열에 넣고 Queue Position Info 로 위치를 알린다(같은 유효 우선순위의 대기 바로 뒤, §6.3.5.4.4). 미협상이면 거절 #1. 선점 요청은 협상과 무관하게 대기열 맨 앞(§6.3.4.4.7) |
 | `recv_only` | - | `1` = 그룹 문서 `<on-network-recvonly>`(TS 24.481) — 이 멤버의 Transmission Request 는 Rejected **#5**(Receive only, §6.3.4.3.3 1b) |
 | `max_priority` | - | 협상한 송출 우선순위 상한(answer `mc_priority`, §14.3.3). 없으면 `members` 의 prio |
-| `max_reception_priority` | - | 협상한 수신 우선순위 상한(answer `mc_reception_priority`, §14.3.6) |
+| `max_reception_priority` | - | 협상한 수신 우선순위 상한(answer `mc_reception_priority`, §14.3.6 — `<user-reception-priority>` 를 두지 않아 offer 값). CMP 는 참가자 선언에 둔다 — 수신 선점(override)이 없어 판정에는 아직 쓰지 않는다 |
 | `max_rx_streams` | - | **C9** — 이 멤버의 동시 수신 스트림 상한 = user profile `<MaxSimultaneousVideoStreams>`(TS 24.581 §11.2.3, 1차 1). 넘는 Receive Media Request 는 Receive Media Response rejected **#7**(Max no of simultaneous stream). 없으면 K5 기본값 4 |
 | `implicit_request` | - | `1` = CSP 가 offer `mc_implicit_request` 를 받아들였다 — **새 prearranged 세션 개시만**(chat 합류·진행 중 합류는 받지 않는다, §14.3.5), 주소 등록(`user_ip`·`user_port`)과 함께만. CMP 는 참가 시점에 Transmission Request 로 처리한다(§6.3.5.2.2 1) — 다른 참가자가 있으면 곧바로 허가, 개시자 혼자면 첫 초대 참가자가 주소 등록될 때 허가하고 Transmission Granted 를 보낸다(§6.3.2.2, 미디어 버퍼링 없음) |
 | `tc_crypto` | - | 이 멤버의 전송 제어 SRTCP 키(CSK) — 형식은 ADD `tc_crypto` 와 같다. 있으면 이 멤버와의 전송 제어는 이 키로만, 없으면 그룹 키, 둘 다 없으면 평문. 보호 채널에서 풀리지 않는 패킷(평문·다른 키·재전송)은 버리고 `crypto_drop` 에 센다. `media_crypto`·`media_crypto_video` 와 함께 **참가 등록 전**에 걸린다(첫 Idle 부터 보호) |

@@ -116,6 +116,7 @@ bool CCmpClient::McvJoin( const std::string &strGroupId, const std::string &strS
         if ( d.uVideoSsrc ) req.Set( "user_video_ssrc", (long long)d.uVideoSsrc );
         if ( d.iQueueing >= 0 ) req.Set( "queueing", d.iQueueing );
         if ( d.iMaxPriority >= 0 ) req.Set( "max_priority", d.iMaxPriority );
+        if ( d.iMaxReceptionPriority >= 0 ) req.Set( "max_reception_priority", d.iMaxReceptionPriority );
         if ( d.iMaxRxStreams > 0 ) req.Set( "max_rx_streams", d.iMaxRxStreams );
         if ( d.bImplicit ) req.Set( "implicit_request", 1 );
         if ( d.bRecvOnly ) req.Set( "recv_only", 1 );

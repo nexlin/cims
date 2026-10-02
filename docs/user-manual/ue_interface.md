@@ -445,7 +445,7 @@ a=rtpmap:99 AMR-WB/16000
 a=sendrecv
 m=application 50001 UDP MCPTT
 a=floorid:0 mstrm:audio
-a=fmtp:MCPTT mc_queueing;mc_priority=3
+a=fmtp:MCPTT mc_queueing;mc_priority=5
 --mcptt--
 ```
 

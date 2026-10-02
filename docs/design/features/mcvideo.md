@@ -586,6 +586,12 @@ Indicator, automatic 수신; 1차 CSP 는 normal) · JOIN 응답 `audio_ssrc`·`
 - mcvideo-info 루트 — 본문 설명의 `<mcvideo-info>` vs 스키마 `<mcvideoinfo>`(→ 스키마).
 - `session-type` — §12.2.2.x 의 «one-to-one video pull» 등이 Annex F.1.3 값 목록에 없다(→ V8 에서 판본 재확인).
 - 전송 요청 본문 MIME — F.5.1 `vnd.3gpp.transmission-request+xml` vs IANA 템플릿 `vnd.3gpp.mcvideo-transmission-request+xml`(→ V8, 1차 범위 밖).
+- TS 24.581 §6.3.5.4.4 첫 단락 «did not negotiate queueing … **or** did not include a priority in mc_priority» 와 셋째 단락 «negotiated queueing … **or**
+  included a transmission priority … or both» 가 겹친다(대기열만 협상한 참여자가 두 단락에 다 든다)(→ 셋째 단락을 «하나라도 협상», 첫 단락을 그 여집합
+  «둘 다 미협상»으로 읽는다 — 둘 다 미협상인 참여자의 일반 호 요청은 상한에서 #1, 우선순위로 선점하지 않는다. `PMcvControl`).
+- 기본 송출 우선순위(§9.2.3.2 «If the Transmission Priority field is not included … the default priority is used … as described in clause 4.1.1.4», §4.1.1.4
+  local policy)(→ 그룹 문서 `<user-priority>`(로스터)를 기본값으로 쓰고 Granted 의 Transmission Priority 에도 그 값을 싣는다). 암묵적 요청이 큐에 들 때의
+  협상 상한(§6.3.5.2.2 3)c)i))은 진행 중 호의 암묵 요청에만 걸리는데 CIMS 는 새 세션 개시에서만 암묵 요청을 받아(§14.3.5) 대기열에 들 일이 없다.
 - TS 24.581 §12.1.2 ABNF — `mc_priority` 1*2DIGIT(값 범위 1~255 와 어긋남), `mc_transmission_ssrc` 값 표기 누락(→ 본문 설명과 예시).
 - 동시 송출 카운터 «Cx» 가 §11.2.3 목록에 없다(→ 그룹 속성 `mcvideo-maximum-simultaneous-mcvideo-transmitting-group-members` 가 상한).
 - TS 24.581 §12.1.2.3 ABNF 의 fmtp 파라미터 구분자 `COLON` vs §4.3.3.1 예시 `;`(→ `;` — MCPTT fmtp 와 같다).

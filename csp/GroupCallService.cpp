@@ -45,11 +45,6 @@
 static const char *kFocusContactParams =
     "+g.3gpp.mcptt;+g.3gpp.icsi-ref=\"urn%3Aurn-7%3A3gpp-service.ims.icsi.mcptt\";isfocus";
 
-// 제어 기능의 멤버 초대 offer 의 floor fmtp(TS 24.380 §14.2.2 mc_queueing · §14.2.3 mc_priority).
-//   이어지는 offer(조건 재광고·세션 갱신)도 같은 값이다(§14.5 — 처음 offer 규칙, mc_granted 없음).
-//   mc_priority 는 그룹 문서 <user-priority> 가 아니라 고정값이다(mcptt_standard_conformance.md C4a).
-static const char *kMemberFloorOfferFmtp = "mc_queueing;mc_priority=3";
-
 // CspServer.cpp — PTT 세션 참가 leg 의 dialog-event NOTIFY (dispatch_center.md §5.6a)
 extern void SendPttDialogEventNotify( const std::string &strWatchedAor, const std::string &strDlgCallId,
                                       const std::string &strState, bool bInitiator, const std::string &strSessionUri,
@@ -178,11 +173,47 @@ bool CGroupCallService::AcceptsImplicitFloorRequest( const McpttFmtp &clsOffer, 
     return clsOffer.iImplicit > 0 && bNewSession && !bListen && clsGroup._groupType != "chat";
 }
 
-std::string CGroupCallService::AnswerFloorFmtp( const McpttFmtp &clsOffer, bool bImplicitAccepted ) {
+std::string CGroupCallService::AnswerFloorFmtp( const McpttFmtp &clsOffer, bool bImplicitAccepted, bool bQueueSupported,
+                                                int iNegotiatedPrio ) {
     std::string str;
-    if ( clsOffer.iQueueing != 0 ) str = "mc_queueing";  // 1 = offer 가 실었다 · -1 = fmtp 없는 구단말(종전 광고 유지)
+    // §14.3.2 — 큐잉을 지원하고 offer 에 있었을 때만(개별 호는 CMP 가 큐를 끈다). -1 = fmtp 없는 구단말(종전 광고 유지)
+    if ( bQueueSupported && clsOffer.iQueueing != 0 ) str = "mc_queueing";
+    // §14.3.3 2)b) — offer 에 mc_priority 가 있으면 협상값(NegotiatedFloorPriority)
+    if ( clsOffer.iMaxPriority > 0 && iNegotiatedPrio >= 0 )
+        str += std::string( str.empty() ? "" : ";" ) + "mc_priority=" + std::to_string( iNegotiatedPrio );
     if ( bImplicitAccepted ) str += std::string( str.empty() ? "" : ";" ) + "mc_implicit_request";
     return str;
+}
+
+std::string CGroupCallService::MemberFloorOfferFmtp( const CspPttGroup &clsGroup, const std::string &strMember ) {
+    // 제어 기능의 멤버 초대 offer(TS 24.380 §14.2) — 이어지는 offer(조건 재광고·세션 갱신)도 같은 값(§14.5 — mc_granted
+    // 없음).
+    //   §14.2.2 mc_queueing = 큐잉을 지원할 때만(개별 호는 CMP 가 큐를 끈다), §14.2.3 mc_priority = 그 멤버의 그룹 문서
+    //   <user-priority>(편성·애드혹 그룹 호 — 개별 호에는 그룹 문서가 없다).
+    if ( clsGroup._groupType == "private" ) return std::string();
+    std::string str = "mc_queueing";
+    for ( const auto &p : clsGroup._pusers )
+        if ( p && p->_id == strMember ) {
+            str += ";mc_priority=" + std::to_string( p->_priority );
+            break;
+        }
+    return str;
+}
+
+int CGroupCallService::NegotiatedFloorPriority( const CspPttGroup &clsGroup, const std::string &strMember,
+                                                int iOffered ) {
+    // §14.3.3 2)a) — offer(또는 서버 offer 에 대한 answer)의 mc_priority · 그룹 문서 <user-priority> · service
+    // configuration
+    //   <num-levels-priority-hierarchy> 가운데 가장 낮은 값. CMP 는 이 값을 요청 가능 최대 우선순위로 쓴다 — 단말이
+    //   offer 에 큰 값을 적어도 그룹 문서 우선순위를 넘지 못한다. 0 = 미협상(CMP 는 기본 = 로스터 우선순위).
+    if ( iOffered <= 0 ) return 0;
+    int iUser = 0;
+    for ( const auto &p : clsGroup._pusers )
+        if ( p && p->_id == strMember ) {
+            iUser = (int)p->_priority;
+            break;
+        }
+    return McpttNegotiatedFloorPriority( iOffered, iUser, gclsCspServiceConfig.GetNumLevelsPriorityHierarchy() );
 }
 void CGroupCallService::StripInitialOnlyFloorFmtp( CSipMessage *pclsOffer ) {
     if ( pclsOffer == NULL ) return;
@@ -221,9 +252,22 @@ bool CGroupCallService::RebuildReInviteFloorFmtp( const std::string &strCallId, 
         std::unique_lock<std::recursive_mutex> lock( m_mutex );
         if ( m_mapCallSession.find( strCallId ) == m_mapCallSession.end() ) return false;
     }
+    std::string strGroupId, strMemberId;
+    {
+        std::unique_lock<std::recursive_mutex> lock( m_mutex );
+        auto it = m_mapCallSession.find( strCallId );
+        if ( it != m_mapCallSession.end() ) {
+            strGroupId = it->second.strGroupId;
+            strMemberId = it->second.strMemberId;
+        }
+    }
+    CspPttGroup clsGroup;
+    gclsGroupMap.Select( strGroupId.c_str(), clsGroup );
     McpttFmtp clsReOffer;
     ParseMcpttFmtp( pclsRemoteRtp, clsReOffer );
-    const std::string strFmtp = AnswerFloorFmtp( clsReOffer, false );
+    const std::string strFmtp =
+        AnswerFloorFmtp( clsReOffer, false, clsGroup._groupType != "private",
+                         NegotiatedFloorPriority( clsGroup, strMemberId, clsReOffer.iMaxPriority ) );
     if ( strFmtp != pclsLocalRtp->m_strApplicationFmtp )
         CLog::Print( LOG_DEBUG, "ReInvite(%s): floor answer fmtp '%s' → '%s' (re-offer 기준, TS 24.380 §14.3.1)",
                      strCallId.c_str(), pclsLocalRtp->m_strApplicationFmtp.c_str(), strFmtp.c_str() );
@@ -1251,6 +1295,9 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
     //   Request).
     McpttFmtp clsCallerOffer;
     ParseMcpttFmtp( pclsRtp, clsCallerOffer );
+    const int iCallerOfferedPrio = clsCallerOffer.iMaxPriority;
+    // §14.3.3 — CMP 에 주는 요청 가능 최대 우선순위 = 협상값(offer 원값이 아니다)
+    clsCallerOffer.iMaxPriority = NegotiatedFloorPriority( clsGroup, pszCallerInfo, iCallerOfferedPrio );
     const bool bImplicitAccepted = AcceptsImplicitFloorRequest( clsCallerOffer, clsGroup, bNewSession, bListen );
     if ( clsCallerOffer.iImplicit > 0 )
         CLog::Print(
@@ -1292,7 +1339,12 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
         clsCallerRtp.m_iApplicationPort = iSharedFloorPort;
         //   answer fmtp — offer 에 있던 파라미터만, 암묵적 발언 요청을 받아들였으면 mc_implicit_request 를
         //   되돌린다(§14.3.1·§14.3.5)
-        clsCallerRtp.m_strApplicationFmtp = AnswerFloorFmtp( clsCallerOffer, bImplicitAccepted );
+        {
+            McpttFmtp clsAnswerBase = clsCallerOffer;
+            clsAnswerBase.iMaxPriority = iCallerOfferedPrio;  // answer 에 mc_priority 를 실을지 = offer 에 있었는가
+            clsCallerRtp.m_strApplicationFmtp = AnswerFloorFmtp(
+                clsAnswerBase, bImplicitAccepted, clsGroup._groupType != "private", clsCallerOffer.iMaxPriority );
+        }
         // MCPTT 는 음성만이다 — 개시자가 m=video 를 오퍼하면 psip 이 port 0 으로 거절한다(m_iVideoPort 미지정, RFC 3264
         // §6 —
         //   라인 생략은 규격 위반: answer 의 m= 수·순서 = offer). 그룹 영상 = MCVideo 호(mcvideo.md §8).
@@ -2691,12 +2743,13 @@ bool CGroupCallService::InviteMember( const char *pszUserId, const char *pszGrou
             //   하므로 라인은 유지하되 포트 0(미사용)으로 내린다 (RFC 3264 §6).
             if ( clsGroup._floorControl == "off" ) iFloorPort = 0;
             std::string strGroupUri = "sip:" + std::string( pszGroupId ) + "@" + strMcpttDomain;
+            const std::string strFloorOfferFmtp = MemberFloorOfferFmtp( clsGroup, pszUserId );
             WrapMultipartBody( pclsInvite, strGroupXml, strSharedIp, iFloorPort, strGroupUri,
-                               clsGroup._floorControl == "off" );
+                               clsGroup._floorControl == "off", strFloorOfferFmtp );
             // floor 줄은 본문에 덧붙인 것이라 다이얼로그 상태에 없다 — 스택이 만드는 세션 갱신 offer·멤버 re-INVITE
             //   answer 가 floor 를 m=application 0 으로 끄지 않게 같은 선언을 다이얼로그에 둔다(RFC 3264 §8)
             if ( iFloorPort > 0 )
-                gclsUserAgent.SetLocalApplicationMedia( strCallId.c_str(), iFloorPort, kMemberFloorOfferFmtp );
+                gclsUserAgent.SetLocalApplicationMedia( strCallId.c_str(), iFloorPort, strFloorOfferFmtp.c_str() );
 
             // MCPTT capability required (3GPP TS 24.379 §6.3.1)
             pclsInvite->AddHeader(
@@ -3284,6 +3337,9 @@ void CGroupCallService::OnCallStarted( const std::string &strCallId, const std::
     McpttFmtp clsMemberFmtp;
     ParseMcpttFmtp( pclsRtp, clsMemberFmtp );
     clsMemberFmtp.iGranted = 0;
+    // 멤버 answer 의 mc_priority 도 협상 상한 안으로(§14.3.3 — 단말은 offer 값을 되돌린다, 넘으면 그룹 문서 값)
+    if ( bHaveGroup )
+        clsMemberFmtp.iMaxPriority = NegotiatedFloorPriority( clsGroup, strMemberId, clsMemberFmtp.iMaxPriority );
     // 미디어 SRTP (media_security.md §5.2) — 서버 offer 에 crypto 를 실었는지는 다이얼로그
     //   local RTP 가 기억한다 (재협상 re-INVITE 합류 경로 포함 — 키 불변이면 CMP 가 세션 유지).
     CmpMediaCrypto clsMemberCrypto;
@@ -4315,7 +4371,8 @@ std::string CGroupCallService::BuildGroupDescriptor( const CspPttGroup &clsGroup
  */
 void CGroupCallService::WrapMultipartBody( CSipMessage *pclsInvite, const std::string &strGroupXml,
                                            const std::string &strFloorIp, int iFloorPort,
-                                           const std::string &strGroupUri, bool bNoFloorCtrl ) {
+                                           const std::string &strGroupUri, bool bNoFloorCtrl,
+                                           const std::string &strFloorFmtp ) {
     if ( pclsInvite == NULL || pclsInvite->m_strBody.empty() ) return;
 
     // F-16: boundary를 랜덤 hex 문자열로 생성 — body 내 "mcptt" 등장과 충돌 방지 (RFC 2046 §5.1.1)
@@ -4337,8 +4394,8 @@ void CGroupCallService::WrapMultipartBody( CSipMessage *pclsInvite, const std::s
     //   수신 단말이 전이중(마이크 상시)으로 수락한다 (G17 — 협상 결과의 양방향 정합).
     if ( bNoFloorCtrl )
         sdpFloor << "a=fmtp:MCPTT mc_queueing;mc_no_floor_ctrl\r\n";
-    else
-        sdpFloor << "a=fmtp:MCPTT " << kMemberFloorOfferFmtp << "\r\n";
+    else if ( !strFloorFmtp.empty() )
+        sdpFloor << "a=fmtp:MCPTT " << strFloorFmtp << "\r\n";
     if ( !strGroupUri.empty() ) sdpFloor << "a=mcptt-floor-request-uri:" << strGroupUri << "\r\n";  // TS 24.379 §C.3
     strSdp += sdpFloor.str();
 
@@ -4469,7 +4526,7 @@ int CGroupCallService::PropagateConditionToMembers( const std::string &strGroupI
             //   보존한다. 있으면 초기 오퍼의 fmtp 그대로(WrapMultipartBody).
             if ( clsGroup._floorControl != "off" && iFloorPort > 0 ) {
                 clsRtp.m_iApplicationPort = iFloorPort;
-                clsRtp.m_strApplicationFmtp = kMemberFloorOfferFmtp;
+                clsRtp.m_strApplicationFmtp = MemberFloorOfferFmtp( clsGroup, leg.strMemberId );
             }
             CSipCallRtp clsLocalRtp;  // SRTP leg — 기존 키 그대로 (재협상 아님)
             if ( gclsUserAgent.GetLocalCallRtp( leg.strCallId.c_str(), &clsLocalRtp ) &&

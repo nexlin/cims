@@ -351,7 +351,7 @@ private:
      */
     static void WrapMultipartBody( class CSipMessage *pclsInvite, const std::string &strGroupXml,
                                    const std::string &strFloorIp, int iFloorPort, const std::string &strGroupUri = "",
-                                   bool bNoFloorCtrl = false );
+                                   bool bNoFloorCtrl = false, const std::string &strFloorFmtp = "" );
 
     /** 기존 바디(psip AddSdp 산출 SDP)를 유지한 채 mcptt-info part 를 앞세운 multipart/mixed 로
      *  감싼다 — in-call 조건 재광고 re-INVITE·조인 200 OK 동봉용(SDP 는 손대지 않는다). */
@@ -505,7 +505,17 @@ private:
      * offer 가 실었을 때(fmtp 없는 구단말 offer 는 종전대로 광고), mc_implicit_request 는 암묵 요청을 받아들였을
      * 때(§14.3.5 — 승인 뜻은 아니다, §12.1.2.2 NOTE 4). 승인은 CMP 의 Floor Granted 로만 알린다(answer mc_granted 는
      * 선택 "may" — §14.3.4). */
-    static std::string AnswerFloorFmtp( const struct McpttFmtp &clsOffer, bool bImplicitAccepted );
+    /** 제어 기능 answer 의 fmtp:MCPTT (TS 24.380 §14.3) — offer 에 있던 파라미터만. bQueueSupported = 이 호가 큐잉을
+     *  지원하는가(개별 호 아님), iNegotiatedPrio = NegotiatedFloorPriority 값(offer 에 mc_priority 가 있을 때만
+     * 싣는다). */
+    static std::string AnswerFloorFmtp( const struct McpttFmtp &clsOffer, bool bImplicitAccepted, bool bQueueSupported,
+                                        int iNegotiatedPrio );
+    /** 제어 기능의 멤버 초대 offer fmtp:MCPTT (§14.2.2·§14.2.3) — mc_queueing(개별 호 아님) · mc_priority = 그 멤버
+     *  <user-priority>. 빈 값이면 fmtp 를 싣지 않는다. */
+    static std::string MemberFloorOfferFmtp( const class CspPttGroup &clsGroup, const std::string &strMember );
+    /** floor 우선순위 협상값 (§14.3.3 2)a)) = min(offer mc_priority, 그룹 문서 <user-priority>,
+     *  <num-levels-priority-hierarchy>). iOffered <= 0(미협상)이면 0. */
+    static int NegotiatedFloorPriority( const class CspPttGroup &clsGroup, const std::string &strMember, int iOffered );
     /** 제어 기능이 보내는 이어지는 offer(조건 재광고 re-INVITE)의 `a=fmtp:MCPTT` 에서 개시 전용 파라미터를 뺀다 —
      * mc_granted 는 이어지는 offer 에 싣지 않고(TS 24.380 §14.5), mc_implicit_request 는 단말의 격상 요청에만 뜻이
      * 있다(§14.5 · TS 24.379 §6.4). 응답한 leg 의 재광고는 다이얼로그의 로컬 선언(개시 answer)으로 offer 를 만들므로

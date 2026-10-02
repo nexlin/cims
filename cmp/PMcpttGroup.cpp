@@ -883,8 +883,14 @@ void PMcpttGroup::handleFloorRequest(const std::string& sessionId, unsigned int 
                      ownerId.c_str(), freed ? 0 : _t3GraceSec);
             _logFloorLocal("QUEUE", sessionId, ssrc, requesterPrio, ex);
         }
-        // 큐잉을 협상한 그룹에만 위치를 알린다(§6.3.4.4.7-2f).
-        if (_queueEnable) _sendQueuePos(sessionId, ssrc);
+        // 위치는 그 요청자가 큐잉을 협상했을 때만 알린다(§6.3.4.4.7 2)f) — «if the floor participant negotiated support of
+        //   queueing»). 그룹 차원(_queueEnable — 개별 호는 큐 없음)과 멤버의 SDP mc_queueing 둘 다.
+        bool requesterQueueing = true;
+        {
+            auto itQ = _members.find(sessionId);
+            if (itQ != _members.end()) requesterQueueing = itQ->second.queueing;
+        }
+        if (_queueEnable && requesterQueueing) _sendQueuePos(sessionId, ssrc);
         // 유예 없이 바로 비었으면(T3=0) 즉시 승급 + 잔여 화자 정합.
         _advanceFloorOrIdle();
         _notifyTalkers();

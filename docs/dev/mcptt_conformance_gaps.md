@@ -46,17 +46,17 @@ PTT(MCPTT) 서비스 구현을 3GPP 규격 원문과 대조해 **규격과 다�
 | 제휴 (AFF) | 11 | 6 | 4 | 1 | — |
 | 그룹 호 — 서버 (GCS) | 19 | 7 | 6 | 5 | 1 |
 | 그룹 호 — 단말 (GCC) | 9 | — | 7 | — | 2 |
-| 개별 호 (PRV) | 9 | 4 | 4 | 1 | — |
+| 개별 호 (PRV) | 8 | 4 | 3 | 1 | — |
 | 애드혹 그룹 호 (ADH) | 9 | 4 | 3 | 1 | 1 |
 | 긴급·임박·경보 (EMG) | 10 | 1 | 2 | 7 | — |
-| 발언권 — 서버 (FCS) | 20 | 2 | 9 | 6 | 3 |
+| 발언권 — 서버 (FCS) | 19 | 2 | 9 | 5 | 3 |
 | 발언권 — 단말 (FCC) | 1 | — | — | 1 | — |
-| 발언권 SDP 협상 (SDP) | 3 | 1 | 2 | — | — |
+| 발언권 SDP 협상 (SDP) | 2 | — | 2 | — | — |
 | 그룹 문서·GMS (GMS) | 13 | — | 12 | 1 | — |
 | 설정 문서·CMS (CMS) | 7 | — | 4 | 2 | 1 |
-| **계** | **115** | **25** | **56** | **25** | **9** |
+| **계** | **112** | **24** | **55** | **24** | **9** |
 
-확인 수준 — ◎ 60 · ○ 43 · △ 12.
+확인 수준 — ◎ 59 · ○ 41 · △ 12.
 
 읽는 순서 — §2(먼저 볼 것) → §3(영역별 전체) → §4(미구현 목록에 빠진 기능) → §5(문서 정정) → §6(묶음과 순서).
 
@@ -76,7 +76,6 @@ PTT(MCPTT) 서비스 구현을 3GPP 규격 원문과 대조해 **규격과 다�
 | 항목 | 내용 |
 |---|---|
 | PRV-2 | 개별 호 발신 인가(`<allow-private-call>`)가 문서에도 서버 판정에도 없다 — 개별 호를 막을 설정이 없다 |
-| SDP-3 | offer 의 `mc_priority` 를 상한 없이 받아 Floor Priority 로 선점 서열을 올릴 수 있다 |
 | ADH-3 | 애드혹 그룹 호 참가자 수 상한이 없다 — INVITE 한 건으로 전원 fan-out |
 
 **호 모델이 규격과 다른 것 (결정이 필요)**
@@ -169,7 +168,6 @@ CSP 는 참여 기능과 제어 기능을 겸한다.
 | PRV-6 | C | CSP | §11.1.1.3.2 7) — 착신자의 바인딩이 없으면 404 | 미등록 = 480 — `csp/ModuleDispatcher.cpp:945-958` | 없는 MCPTT ID 와 일시 부재를 가르지 못한다 | ◎ |
 | PRV-7 | B | CSP | §6.3.3.2.3.1 2) — 개시자에게 가는 응답에 P-Asserted-Identity. §11.1.1.3.1.1 — 받은 180 의 Warning 을 옮긴다. §11.1.1.4.2 — SDP 없는 응답은 본문째 전달 | 개시자 180 은 헤더 없이 낸다(`csp/GroupCallService.cpp:594`). 거절 최종 응답에는 CSP 의 112 만 실리고 멤버 응답의 Warning 은 200 OK 에만 쓴다(`:439-447`·`:540-548`) | 착신 측이 준 사유(110·127 등)가 발신 단말에 닿지 않는다 | ○ |
 | PRV-8 | A | CSC·CSP | §11.1.1.3.2 8)·9) — 착신 인가(`<allow-private-call-participation>`, IncomingPrivateCallList) 403 `127`·`159` | 착신 검사는 등록 여부뿐. 문서에 요소가 없다 | 개별 호 착신을 막을 설정이 없다 | ○ |
-| PRV-9 | B | CSP·CMP | TS 24.380 §14.3.2 — `mc_queueing` 은 큐잉을 지원할 때만 answer 에 싣는다 | 개별 호는 CMP 가 큐를 끄는데(`cmp/PMcpttGroup.cpp:97-99`) CSP 는 answer·착신 offer 에 `mc_queueing` 을 싣는다(`csp/GroupCallService.cpp:181-186`·`:4095`) | 큐잉을 협상한 규격 단말이 Queue Position 대신 Deny #1 을 받는다 | ○ |
 
 ### 3.6 애드혹 그룹 호 (ADH) — TS 24.379 §17
 
@@ -221,7 +219,6 @@ CSP 는 참여 기능과 제어 기능을 겸한다.
 | FCS-19 | C | CMP·CSC | §6.3.4.3.2·§6.3.4.4.9 — C7·C20 은 1 부터 세어 상한까지. 표 11.2.3-1 C7 기본 10 | 재송신 잔여 = 상한 그대로(첫 송신 포함 상한 + 1 회), C7 기본 3 — `cmp/PMcpttGroup.cpp:1622`·`:1226` | 재송신 1회 초과(무해). 타이머 문서 편차 표에 더할 것 | △ |
 | FCS-20 | A | CMP | §8.2.3.3 — Duration = 그 발언자에게 허용된 시간(초) | 늘 T2 값을 싣는다 — `cmp/PMcpttGroup.cpp:1238`. T2 에서 빼 준 긴급 화자에게도 같은 값이 가고, T2 = 0(무제한)이면 0 이 간다 | 우리 SDK 는 Duration 마감 직전에 스스로 Release 한다 — 긴급 화자가 T2 에 스스로 끊는다(제외 정책이 무력). 규격 단말은 0 을 «0초» 로 읽을 수 있다 | ○ |
 | FCS-21 | A | CMP·문서 | §6.3.4.4.5 — T2 는 발언자마다(제외는 로컬 정책) | 코드는 긴급 tier 만 제외(`tierOf(owner) < TIER_EMERGENCY` — `cmp/PMcpttGroup.cpp:1724`)라 임박 화자는 T2 에 회수된다 | conformance F4·cmp_media_api §7.7·mcptt_timers §5.2 는 «긴급·임박 제외», emergency_modes §3.1 은 «임박은 적용» — 문서끼리 모순 | ◎ |
-| FCS-22 | C | CMP | §6.3.4.4.7 2)f — 선점 요청자에게 Queue Position Info 는 **그 단말이 큐잉을 협상했을 때** | 그룹 플래그 `_queueEnable` 로 정한다 — `cmp/PMcpttGroup.cpp:887` | 협상하지 않은 단말이 위치 통지를 받는다 | ◎ |
 | FCS-23 | D | CMP·CSP | §6.3.4.4.2 3)a)i — 화자 신원은 «privacy 를 요청하지 않았을 때» | 조건 없이 싣는다. 합류 명령에 privacy 입력이 없다 | CSP 가 privacy 요청 절차를 받는지부터 확인 필요 | △ |
 | FCS-24 | D | CMP | §8.2.15 — Queued Floor Requests 결과 메시지의 요청자 신원·목록 부호화 | Cancel Result 에 신원 필드가 없고 목록 항목 길이를 1옥텟으로 다룬다 — `cmp/PMcpttGroup.cpp:1451-1457`·`:1487-1496` | 규격 그림(PDF 원본)으로 필드 폭을 다시 확인할 것 | △ |
 
@@ -239,7 +236,6 @@ CSP 는 참여 기능과 제어 기능을 겸한다.
 |---|---|---|---|---|---|---|
 | SDP-1 | B | SDK·CSP | TS 24.380 표 4.3.3.1-1 — `m=application <port> udp MCPTT` (proto = "udp") | `UDP MCPTT` + 규격에 없는 `a=floorid:0 mstrm:audio` — `sdk/core/src/mcptt/mcptt_xml.cpp:317-323`, CSP offer 도 같다 | proto 를 대소문자 구분으로 대조하는 상대는 제어 채널을 못 알아본다. conformance C4 는 이 표기를 «정합» 으로 적었다 | ◎ |
 | SDP-2 | B | SDK·CSP·CMP | §4.3.3.1 · §14.2.7 · §14.3.8 — `mc_floor_ssrc`(다중화를 지원하면 필수): 상대는 그 값을 floor 메시지의 RTCP 헤더 SSRC 로 쓴다 | 레포 어디에도 `mc_floor_ssrc`·`mc_ssrc` 처리가 없다. 단말 헤더 SSRC = MCPTT ID 해시(`sdk/core/src/engine.cpp:160-163`), 서버 = 그룹당 순번(`cmp/PMcpttGroup.cpp:67`) | 한 포트에 여러 세션의 제어 채널을 다중화하는 상대는 메시지를 세션에 못 묶는다 | ◎ |
-| SDP-3 | A | CSP·CMP·SDK | §14.2.3 — 초대 offer 의 `mc_priority` = 그룹 문서 `<user-priority>`. §14.3.3 — 제어 기능 answer = min(offer, user-priority, 계층 수), 단말 answer 는 받은 값을 되돌린다. §14.3.1 — answer 는 offer 에 없던 파라미터를 싣지 않는다 | 초대 offer 는 상수 `mc_priority=3`(`csp/GroupCallService.cpp:51`), 개시자 answer 에는 없다(`:181-186`). offer 의 `mc_priority` 원값을 상한 없이 `max_priority` 로 CMP 에 준다(`:771-773`). SDK 착신 answer 는 늘 `mc_queueing` 만(`sdk/core/src/engine.cpp:1516`) | 단말이 offer 에 큰 값을 적고 같은 Floor Priority 로 요청하면 그룹 문서 우선순위와 무관하게 선점 서열이 오른다. MCVideo 쪽은 min(offer, roster) 가 구현돼 있다 | ○ |
 
 ### 3.11 그룹 문서·GMS (GMS) — TS 24.481
 
@@ -312,7 +308,7 @@ CSP 는 참여 기능과 제어 기능을 겸한다.
 |---|---|---|---|
 | 1 | **문서 값 한두 줄** — 문서 셋의 T2 제외 대상 | FCS-21(문서) | .48 |
 | 2 | **발언권 메시지 정합** — Ack 의 Message Type · 미대기 Queue Position 254 · Granted Duration | FCS-4 · FCS-8 · FCS-20 | .45 SDK·CMP |
-| 3 | **인가 구멍** | SDP-3 · ADH-3 | .45 CSP·CMP |
+| 3 | **인가 구멍** | ADH-3 | .45 CSP·CMP |
 | 4 | **user profile 인가 요소의 서버 판정** — 문서는 요소를 싣는다(`ptt_user_profile.allow_private_call*`), CSP 가 그 값으로 판정한다 | PRV-2 · PRV-4 · PRV-8 · EMG-4 · ADH-5 | .48 CSP → Windows(Capabilities) |
 | 5 | **Warning 코드** — 거절 사유를 규격 코드로. handoff §14 K1(SDK 가 Warning 을 올림)과 한 묶음 | GCS-7 · GCS-8 · GCS-11 · REG-3 · ADH-4 · PRV-6 · PRV-7 · EMG-5 | .45 CSP·SDK → Windows(문구 사전) |
 | 6 | **service configuration 요소의 서버 판정** — `<private-call>`·`<adhoc-group-call>` 값을 CSP 가 쓴다 | ADH-3 · PRV-5 | .48 CSP |
@@ -321,7 +317,7 @@ CSP 는 참여 기능과 제어 기능을 겸한다.
 | 9 | **호 모델 결정** — chat 그룹(초대 없이 합류·1명 이하 해제)과 편성 그룹의 재초대·late call entry·제휴 해제 시 이탈. 규격대로 바꿀지, 편차로 남기고 사유를 적을지 정한다 | GCS-1~GCS-4 · GCS-22 · AFF-11 | 결정 → .45 CSP |
 | 10 | **그룹 문서 집행** — 수신 전용 | FCS-14 | .45 CSP·CMP·CSC |
 | 11 | **XCAP 규격 주소·절차** — global tree·문서 이름·교체 PUT·오류 형식·구독 본문·etag | GMS-1~GMS-6 · GMS-14~GMS-17 · CMS-1 · CMS-2 · CMS-9 | .45 CSC·CSP·SDK |
-| 12 | **발언권 메시지 형식** — MCPTT ID·Audio SSRC·Indicator·dual floor·Location·Revoke Request, SDP `mc_floor_ssrc`·`mc_priority` | FCS-5~FCS-7 · FCS-10~FCS-16 · SDP-2 · SDP-3 | .45 CMP·CSP·SDK |
+| 12 | **발언권 메시지 형식** — MCPTT ID·Audio SSRC·Indicator·dual floor·Location·Revoke Request, SDP `mc_floor_ssrc` | FCS-5~FCS-7 · FCS-10~FCS-16 · SDP-2 | .45 CMP·CSP·SDK |
 
 **Windows 몫(관제 앱 두 벌)** — SDK·서버가 정해진 뒤 맞춘다.
 

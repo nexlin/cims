@@ -95,6 +95,14 @@ public:
      * Refresh 가 다시 읽는다(기동·SERVICE_CONFIG_CHANGED). */
     int GetMaxCallsN6( bool bDispatch );
 
+    /** on-network <num-levels-priority-hierarchy> (TS 24.484 §8.4.2 6) — 4~256). 문서에 없으면 스키마의 가장 낮은 값 4
+     * 다 (같은 절 «Absence … indicates that the lowest possible value is used»). floor 우선순위 협상의 상한(TS 24.380
+     * §14.3.3). */
+    int GetNumLevelsPriorityHierarchy();
+
+    /** 문서 → on-network <num-levels-priority-hierarchy>. 없거나 범위(4~256) 밖이면 -1. */
+    static int ParseNumLevelsPriorityHierarchy( const std::string &strXml );
+
     /** xs:duration("PT<h>H<m>M<s>S", 초는 소수 허용) → 밀리초. 형식 오류면 -1. */
     static long long DurationMs( const std::string &strDuration );
 
@@ -118,6 +126,7 @@ private:
     CspCallTimerParams m_clsCallTimers;
     int m_iMaxCallsN6 = 5;           ///< 그 밖 단말 N6 (mcptt_service_config.max_calls_n6)
     int m_iMaxCallsN6Dispatch = 10;  ///< 관제 N6 (max_calls_n6_dispatch)
+    int m_iNumLevelsPriority = -1;   ///< <num-levels-priority-hierarchy> (-1 = 문서에 없음 → 4)
 };
 
 extern CCspServiceConfig gclsCspServiceConfig;
@@ -234,6 +243,11 @@ inline bool CCspServiceConfig::Parse( const std::string &strXml, CspFloorParams 
     f.iC20 = _CspScCount( strOn, "C20-floor-granted" );
     clsOut = f;
     return true;
+}
+
+inline int CCspServiceConfig::ParseNumLevelsPriorityHierarchy( const std::string &strXml ) {
+    const int n = _CspScCount( _CspScOnNetwork( strXml ), "num-levels-priority-hierarchy" );
+    return ( n >= 4 && n <= 256 ) ? n : -1;
 }
 
 inline void CCspServiceConfig::ParseCallTimers( const std::string &strXml, CspCallTimerParams &clsOut ) {

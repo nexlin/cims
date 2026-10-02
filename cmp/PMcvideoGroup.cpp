@@ -117,6 +117,7 @@ McvParticipantDecl PMcvideoGroup::_ctlDecl(const std::string& sessionId, const M
     auto ip = _priorities.find(sessionId);
     c.rosterPriority = ip != _priorities.end() ? ip->second : 0;
     c.maxPriority = d.maxPriority;
+    c.maxRxPriority = d.maxRxPriority;
     auto ir = _roles.find(sessionId);
     c.chair = (ir != _roles.end() && ir->second == "chair") || d.role == "chair";
     c.maxRxStreams = d.maxRxStreams;

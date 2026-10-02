@@ -47,16 +47,16 @@ MCPTT 쪽 같은 뿌리의 결함은 [mcptt_conformance_gaps.md](mcptt_conforman
 | 그룹 호 — 서버 (VGC) | 11 | — | 1 | 9 | 1 |
 | 그룹 호 — 단말 (VGU) | 6 | — | — | 2 | 4 |
 | 개별·그 밖의 호 (VPRV) | 1 | — | — | — | 1 |
-| 송출 제어 — 서버 (TCS) | 11 | — | — | 5 | 6 |
+| 송출 제어 — 서버 (TCS) | 9 | — | — | 4 | 5 |
 | 송출 제어 — 단말 (TCU) | 3 | — | — | 1 | 2 |
-| 수신 제어 — 서버 (RCS) | 3 | 1 | — | — | 2 |
+| 수신 제어 — 서버 (RCS) | 2 | 1 | — | — | 1 |
 | 수신 제어 — 단말 (RCU) | 1 | — | — | 1 | — |
 | SDP (VSDP) | 2 | — | — | 2 | — |
 | 그룹 문서 (VGMS) | 2 | — | 1 | — | 1 |
 | 설정 문서·CMS (VCMS) | 3 | — | 1 | 1 | 1 |
-| **계** | **55** | **2** | **5** | **29** | **19** |
+| **계** | **52** | **2** | **5** | **28** | **17** |
 
-확인 수준 — ◎ 39 · ○ 8 · △ 8.
+확인 수준 — ◎ 37 · ○ 8 · △ 7.
 
 읽는 순서 — §2(먼저 볼 것) → §3(영역별 전체) → §4(미구현 목록에 빠진 기능) → §5(문서 정정) → §6(묶음과 순서).
 
@@ -155,9 +155,7 @@ MCPTT 쪽 같은 뿌리의 결함은 [mcptt_conformance_gaps.md](mcptt_conforman
 | TCS-1 | C | CSP·CMP | 표 11.1.3-1 — T2·T3·T4·T6·T11 은 MCVideo service configuration 값 · §11.2.3 — C2·C4·C6·C7·C11 도 같다 | CSP 는 `tc_timers` 에 `t1_ms`·`t5_ms` 만 싣는다(`csp/CmpClientMcvideo.cpp:52-58`). CSC `/internal/mcvideo/service-config`(`csc/src/handlers/internal_api.py:14-39`)를 읽는 CSP 코드가 없다. `SERVICE_CONFIG_CHANGED` 는 MCPTT 문서만 다시 받는다(`csp/CscInterface.cpp:312-318`) | 운영자가 `McVideoServiceConfig.*` 를 바꾸면 단말 문서만 바뀌고 CMP 는 K5 기본값으로 돈다(지금은 값이 같아 드러나지 않는다) | ◎ |
 | TCS-2 | C | CMP·SDK | §6.3.4.4.2 3g · §6.3.7.3.3 3 · §6.3.7.4.5 5 — Transmission Request 에 Functional Alias 가 있으면 Media Transmission Notification 에 싣는다 (shall) | `_sendNotification` 이 별칭을 싣지 않고 송출 기록(`Tx`)에 자리도 없다(`cmp/PMcvControl.cpp:498-506`, `cmp/PMcvControl.h:162-176`). SDK Transmission Request 도 별칭을 보내지 않는다(`sdk/core/src/mcvideo/tc_codec.cpp:164-169`) | 앱의 «영상 n» 목록이 별칭 칸을 그리지만(`android/ptt-client/.../ui/VideoViews.kt:171`) 늘 비어 있고, 규격 단말이 보낸 별칭도 버려진다 | ◎ |
 | TCS-3 | C | CMP | §6.3.5.4.4 5) — 선점 전달은 «큐에 다른 선점 요청이 없고 현재 송출자도 선점 우선순위가 아닐 때» 만, 아니면 거절 #1 또는 대기 | 요청 서열이 가장 약한 송출보다 높으면 언제나 회수하고 요청을 큐 맨 앞에 넣는다 — 큐의 앞선 선점 요청을 보지 않는다(`cmp/PMcvControl.cpp:416-424`) | 선점 요청이 연달아 오면 나중 요청이 먼저 온 선점자를 앞지르고, 상한이 2 이상이면 송출이 둘 회수된다 | ◎ |
-| TCS-4 | C | CMP | §6.3.5.4.4 첫 단락 — 대기열·`mc_priority` 를 협상하지 않은 참여자는 상한에서 거절 #1(우선순위 판정 없음) | 협상 여부와 무관하게 로스터 `<user-priority>`·chair 로 선점한다(`cmp/PMcvControl.cpp:82-92`·`:416`) | 협상하지 않은 규격 단말이 우선순위만으로 남의 송출을 회수한다. 원문 단락끼리 조건이 겹쳐 원문 재확인 필요 | △ |
 | TCS-5 | C | CMP | §6.3.5.1 1) · §6.3.4.2.2 3 — 개시자의 참가자 상태 머신은 서버가 200 OK 를 보낼 때 선다 | 암묵적 송출 요청의 즉시 허가가 JOIN ② 처리 때, 곧 200 OK 보다 먼저 Granted 를 한 번 보내고 T4 재송신이 없다(`cmp/PMcvControl.cpp:270-273`) | 우리 SDK 는 이른 메시지를 담아 두고(`sdk/core/src/mcvideo/tc_participant.cpp:340`) answer `mc_granted` 로도 안다. offer 에 `mc_granted` 가 없는 규격 단말은 T100 재요청으로만 복구된다 | △ |
-| TCS-6 | D | CMP | §9.2.3.2 — Priority 필드가 없으면 기본 '0' · §6.3.5.4.4 1a iii·iv · §6.3.5.2.2 3c i — 암묵적 요청의 우선순위는 협상 상한 | 기본 우선순위로 `<user-priority>` 를 쓰고 Granted 의 Priority 필드에도 그 값을 싣는다. 암묵적 허가도 협상 상한 대신 로스터 값이다(`cmp/PMcvControl.cpp:82-92`·`:272`) | §4.1.1.4 지역 정책 범위지만 §9 편차 메모에 이 읽기가 없다 | ◎ |
 | TCS-7 | D | CMP | §6.3.5.2.2 3c iv — 위치가 바뀐 다른 대기자에게 Queue Position Info 갱신 (should) | 큐 삽입·선점 때 다른 대기자에게 보내지 않는다(`cmp/PMcvControl.cpp:648-659`) | 대기 단말의 «대기 n» 표시가 묵는다 | ◎ |
 | TCS-8 | D | CMP | §6.3.5.7.3 NOTE — 허가 없이 계속 보내는 참여자를 포기할 때는 호에서 내보내기를 권고 | 5회 재송신 뒤 Idle/Taken 으로 되돌리고, 다음 payload 가 오면 다시 Revoked #3 — 회수가 끝없이 되풀이된다(`cmp/PMcvControl.cpp:901-911`) | 무허가 송출 단말이 남는다. mcvideo.md 는 허가된 송출의 포기만 적었다 | ◎ |
 | TCS-9 | D | CMP | 표 9.2.2.1-3 — Ack subtype `00100`(ack 비트 자리 없음) · §9.1.4 1 — 모르는 subtype 은 버린다 · §9.1.2 — P 비트 '0' | MCV2 도 `subtype & 0x0F` 로 가려 `10100` 을 «ack 요구 Ack» 로 받는다(`cmp/PTransmissionDefs.h:9`·`:97-116`). P 비트를 보지 않아 P=1 이면 패딩 옥텟을 필드로 읽는다(`cmp/PTransmissionCodec.cpp:103`) | 수신 관대함의 문제, 영향 작다 | ◎ |
@@ -178,7 +176,6 @@ MCPTT 쪽 같은 뿌리의 결함은 [mcptt_conformance_gaps.md](mcptt_conforman
 |---|---|---|---|---|---|---|
 | RCS-1 | A | CMP·SDK | §6.3.7.2.2 2b ii · §6.3.7.3.3 1 — 진행 중 송출이 있는 호에 합류하면 Media Transmission Notification · §6.3.5.2.2 2a·4 — 없으면 Transmission Idle | 첫 제어 메시지 목적지가 SDP 주소다 — CSP 가 SDP IP 를 `user_ip` 로 넘기고(`csp/McVideoCallService.cpp:265`) CMP 가 그 값으로 목적지를 잡는다(`cmp/PMcvideoGroup.cpp:225-230`). 합류 때 Notification·Idle 을 JOIN ② 처리에서 한 번만 보내고 재송신이 없다(`cmp/PMcvControl.cpp:294-303`), latch 가 되어도 다시 알리지 않는다(`cmp/PMcvideoGroup.cpp:391-395`). JOIN ② 는 200 OK 전이고(`csp/McVideoCallService.cpp:340`·`:367`), 단말은 호가 선 뒤에야 빈 RR 로 하향 경로를 연다(`sdk/core/src/mcvideo/tc_participant.cpp:528`) | NAT 뒤 현장 단말이 송출 중인 영상 채널에 들어가면 «영상 n» 이 뜨지 않아 [보기] 를 할 수 없다. 받는 이가 없으니 T11 이 10 s 뒤 그 송출을 끊는다(#8) | △ |
 | RCS-2 | D | CMP | §6.3.6.4.8 · §6.3.6.4.3 f — T6 은 수신 허가마다 따로 | Ack 하나가 그 수신자의 모든 수신 허가 T6 을 멈춘다 — Ack 에는 송출 식별자가 없다(`cmp/PMcvControl.cpp:800-803`) | C9 가 2 이상이면 두 번째 허가 응답을 잃어도 재송신이 없다. 1차는 C9 = 1 이라 드러나지 않는다 | ◎ |
-| RCS-3 | D | CSP·CMP | §6.3.7.3.4 · §6.3.7.4.10 끝 단락 — 수신 우선순위 = min(요청, 협상 상한) · TS 24.581 §14.3.6 — answer `mc_reception_priority` = min(offer, `<user-reception-priority>`) | CSP answer 는 offer 값을 그대로 돌려주고(`csp/McVideoInfo.h:278`) `max_reception_priority` 를 보내지 않는다(`csp/CmpClientMcvideo.cpp:98-131`). CMP 는 받아도 버리고(`cmp/PCmpServerMcvideo.cpp:325` → `cmp/PMcvideoGroup.cpp:112-126`) Reception Priority 필드를 판정에 쓰지 않는다 | override·수신 선점이 없어 지금은 효과가 없다 — 정의만 빠졌다 | ◎ |
 
 ### 3.9 수신 제어 — 단말 (RCU) — TS 24.581 §6.2.5
 
@@ -224,7 +221,6 @@ MCPTT 쪽 같은 뿌리의 결함은 [mcptt_conformance_gaps.md](mcptt_conforman
 | mcvideo.md §1.4 SDP offer | m=audio 코덱 = 그룹 `mcvideo-preferred-audio-encodings`, m=video = `-video-encodings` | 단말은 그룹 값을 읽지 않고 전역 우선순위(AMR-WB/H.264)로 offer 한다 — 그룹 선호는 서버 집행 코덱(AMR-WB·H264)만 받으므로 결과는 같다 | VGU-4 |
 | mcvideo.md §5.1 «xcap-diff 통지 축에 두 문서를 싣는 것은 CSP 몫(§5.2)» · §6 V1 «xcap-diff» | (구현된 것처럼 읽힌다) | §5.2 에 구현 서술이 없고 코드에도 없다 — «남은 것» 으로 적어야 한다 | VCMS-1 |
 | mcvideo.md §5.3.1 Transmission Request 행 · cmp_media_api.md §7.9 `recv_only` | 그룹 문서 `<on-network-recvonly>` 면 거절 #5 | 그룹 문서에 그 요소가 없고 CSP 가 보내지 않는다 | TCS-10 |
-| cmp_media_api.md §7.9 `max_reception_priority` | 협상 수신 우선순위 상한 | CSP 가 보내지 않고 CMP 는 쓰지 않는다 | RCS-3 |
 | mcvideo.md §5.2.1 표 `TRANSMISSION_INACTIVITY` 행 | «T5 는 로그만» (설계로 적힘) | TS 24.581 표 11.1.3-1 은 T5 만료 = 호 해제 — §9 편차 메모로 옮겨 사유를 적거나 해제해야 한다 | VGC-9 |
 | mcvideo.md §5.5 PTT 단말 | «빈 집합 = Expires 0 = 그 사용자 제휴 전부 해제» 를 피하는 이유로 적음 | 그 서버 동작이 규격(클라이언트 단위 해제)과 다르다 — 편차로 적거나 서버를 고친다 | VAFF-1 |
 | mcvideo.md §5.5 PTT 단말 | 내 송출 카드의 «대기 n»·[대기 취소] | 현장 앱은 `mc_queueing` 을 offer 하지 않아 회수 #7 밖에서는 대기가 없다 | VSDP-3 |
@@ -248,7 +244,7 @@ MCPTT 쪽 같은 뿌리의 결함은 [mcptt_conformance_gaps.md](mcptt_conforman
 | 7 | **코덱 선호의 한 줄기** — 그룹 선호 = 서버 집행 코덱(CSC·콘솔이 검증). 단말 offer·초대 offer 가 그 값을 쓴다 | VGU-4 · VGC-8 | .45 SDK · .48 CSP |
 | 8 | **그룹 문서 PUT 해석·CMS 문서** — 없음의 뜻(§7.2.8), `<mcvideo-mcvideo-id>`·`<group-media>` 검사, 문서 이름 검사 | VGMS-1 · VGMS-2 · VCMS-6 · VGC-10(CSC 기본값 몫) | .45 CSC |
 | 9 | **단말 호 절차** — poc-settings §7.2.3 송신(+ 서버 §7.3.4 수신과 짝), 계정 갱신 API(태그만 뺀 재-REGISTER), Answer-Mode 해석, 그룹 호 응답 모양, 거절 480 + 110, 제휴 상태 구독, preconfigured-group-use-only, 재합류 UI | VREG-1 · VREG-3 · VGU-1 · VGU-2 · VGU-3 · VGU-5 · VGU-6 · VAFF-8 · VGC-7(Answer-Mode 몫) | .45 SDK·현장 → Windows(관제 앱) |
-| 10 | **송출 제어 서버 세부** — 선점 순서·협상 조건, 이른 Granted, 기본 우선순위, 대기 위치 갱신, 무허가 송출 포기, Ack subtype·P 비트, SSRC 기본값, 별칭 전달 | TCS-2 · TCS-3 · TCS-4 · TCS-5 · TCS-6 · TCS-7 · TCS-8 · TCS-9 · TCS-11 · RCS-2 · RCS-3 | .45 CMP(·SDK 별칭) |
+| 10 | **송출 제어 서버 세부** — 선점 순서, 이른 Granted, 대기 위치 갱신, 무허가 송출 포기, Ack subtype·P 비트, SSRC 기본값, 별칭 전달 | TCS-2 · TCS-3 · TCS-5 · TCS-7 · TCS-8 · TCS-9 · TCS-11 · RCS-2 | .45 CMP(·SDK 별칭) |
 | 11 | **단말 참여자 세부** — 대기 허가 확인, End 필드, override | TCU-3 · TCU-4 · RCU-1 | .45 SDK |
 | 12 | **서버 사유 코드·신원 세부** — 그룹 호 밖 session-type 사유, PSI 고정, 로그오프 바인딩 판정·제휴 정리, conference 구독 서비스 분리, T5 | VPRV-1 · VGC-13 · VREG-2 · VREG-4 · VGC-10 · VGC-9 | .45 CSP |
 | 13 | **수신 전용 멤버** — 그룹 모델·문서 `<on-network-recvonly>` → CSP JOIN `recv_only`·answer `mc_priority` 생략. MCPTT FCS-14 와 같이 | TCS-10 | .45 CSC·CSP |
@@ -273,7 +269,7 @@ MCPTT 쪽 같은 뿌리의 결함은 [mcptt_conformance_gaps.md](mcptt_conforman
 - **실행 확인** — 모든 항목이 코드 읽기다. 단위시험·스모크는 돌리지 않았다. 확정하려면 실측이 필요하다:
   - RCS-1 — NAT 단말이 송출 중인 호에 합류.
   - VGC-10 — MCVideo ICSI 를 단 conference SUBSCRIBE 가 MCPTT 로스터를 받는지.
-  - TCS-4 — 협상하지 않은 단말의 선점 · TCS-5 — `mc_granted` 없이 암묵 요청만 보낼 때 · TCS-11 — `mc_transmission_ssrc` 없는 단말.
+  - TCS-5 — `mc_granted` 없이 암묵 요청만 보낼 때 · TCS-11 — `mc_transmission_ssrc` 없는 단말.
   - VAFF-6 — 설정 그룹 제휴가 갱신 REGISTER 마다 되살아나는지(현장 앱 PUBLISH 와의 반복).
   - VGU-3 — 자동 200 뒤 BYE 가 prearranged 개시 직후 해제로 이어지는 경합.
   - 와이어 — pjsip 이 실제로 골든과 같은 Contact·`i=`·multipart 를 내는지.

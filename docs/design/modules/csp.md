@@ -547,9 +547,12 @@ mc_queueing[;mc_priority=N][;mc_implicit_request][;mc_granted]` 를 `CGroupCallS
   CMP 가 Deny #1 (TS 24.380 §6.3.5.4.4).
 - 재협상(re-INVITE)도 같은 경로(`OnCallStarted` 멱등 JOIN)로 최신 협상값이 재전달된다.
 
-CSP 자신은 fan-out INVITE offer(`WrapMultipartBody`)에 `a=fmtp:MCPTT mc_queueing;mc_priority=3` 을 광고한다. 개시자 200 OK
+CSP 자신은 fan-out INVITE offer(`WrapMultipartBody` ← `MemberFloorOfferFmtp`)에 `a=fmtp:MCPTT mc_queueing;mc_priority=<그 멤버의 그룹
+우선순위>` 를 광고한다(TS 24.380 §14.2.2·§14.2.3 — 개별 호는 큐잉이 없고 그룹 문서가 없어 floor fmtp 를 싣지 않는다). 개시자 200 OK
 answer(psip `CSipDialog::AddSdp`)의 fmtp 는 `AnswerFloorFmtp` 가 정해 `CSipCallRtp::m_strApplicationFmtp` 로 넘긴다 — offer 에 있던 파라미터만
-(§14.3.1: `mc_queueing` 은 offer 가 실었을 때, fmtp 없는 구단말 offer 에는 종전대로), 암묵 요청을 받아들였으면 `mc_implicit_request`(§14.3.5).
+(§14.3.1: `mc_queueing` 은 offer 가 실었고 개별 호가 아닐 때, fmtp 없는 구단말 offer 에는 종전대로 · `mc_priority` 는 협상값
+`NegotiatedFloorPriority` = min(offer, 그룹 우선순위, `<num-levels-priority-hierarchy>`(없으면 4)) — §14.3.3, CMP `max_priority` 도 같은 값),
+암묵 요청을 받아들였으면 `mc_implicit_request`(§14.3.5).
 승인은 CMP 의 Floor Granted 로만 알린다(answer `mc_granted` 는 싣지 않는다 — 선택 "may", §14.3.4).
 
 **일제 통화 세션 속성**(TS 24.379 §4.12) — 개시 INVITE 의 `<broadcast-ind>` 를 편성 그룹 on-demand 호와 ad hoc 그룹 호에서 받는다

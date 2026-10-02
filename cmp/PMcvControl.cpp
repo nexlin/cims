@@ -413,6 +413,13 @@ void PMcvControl::_onTxRequest(Part& p, const ParsedTransmission& m, int64_t now
         _grant(p, pr, false, now);   // 동시 송출 자리가 남았다 (§6.3.4.4.7A 3)
         return;
     }
+    // §6.3.5.4.4 첫 단락 — 대기열도 mc_priority 도 협상하지 않은 참여자의 일반 호 요청은 우선순위를 따지지 않는다: 상한이면
+    //   #1. (셋째 단락은 «queueing 또는 mc_priority 또는 둘 다» 협상한 참여자 — 첫 단락의 «or» 는 그 여집합 = 둘 다 미협상으로
+    //   읽는다. mcvideo.md §9.)
+    if (!p.decl.queueing && p.decl.maxPriority < 0 && _callType == MCV_CALL_NORMAL) {
+        _sendReject(p, TC_REJECT_TRANSMISSION_LIMIT);
+        return;
+    }
     Tx* w = _weakestTx();
     if (w && _outranks(pr, w->prio)) {
         // 선점 — 가장 약한 송출에 Revoked #4, 요청은 큐 맨 앞(§6.3.4.4.7 2), 큐 협상이면 Queue Position Info

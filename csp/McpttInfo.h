@@ -217,6 +217,13 @@ inline std::string McBodyPart( const std::string &body, const std::string &bodyC
     return "";
 }
 
+/** floor 우선순위 협상값 (TS 24.380 §14.3.3 2)a)) = min(offer mc_priority, <user-priority>,
+ * <num-levels-priority-hierarchy>). iOffered <= 0(offer 에 없음 — 미협상)이면 0. */
+inline int McpttNegotiatedFloorPriority( int iOffered, int iUserPriority, int iLevels ) {
+    if ( iOffered <= 0 ) return 0;
+    return std::min( { iOffered, iUserPriority, iLevels } );
+}
+
 /** 초대 대상을 정원 안으로 (TS 24.379 §6.3.5.5) — iSlots(개시자를 뺀 자리)를 넘으면 필수 멤버(<on-network-required>)를
  *  먼저 두고 나머지는 받은 순서대로 자른다. 잘랐으면 bCapped. iSlots < 0 = 상한 없음. */
 inline std::vector<std::string> McpttCapInvitees( const std::vector<std::string> &vecIn,

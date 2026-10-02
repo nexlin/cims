@@ -248,7 +248,10 @@ static void testLimitQueuePreempt() {
     c.queueing = true;
     h.join("B", h.decl("sip:B@mcv", 1));
     h.join("C", c);
-    h.join("D", h.decl("sip:D@mcv", 9));
+    McvParticipantDecl d = h.decl("sip:D@mcv", 9);
+    d.maxPriority = 9;  // mc_priority 협상 — 선점 판정 대상(§6.3.5.4.4 셋째 단락)
+    h.join("D", d);
+    h.join("E", h.decl("sip:E@mcv", 9));  // 로스터 9 · 대기열·mc_priority 둘 다 미협상
     h.request("A");
     h.clear();
     h.request("B");
@@ -262,8 +265,14 @@ static void testLimitQueuePreempt() {
     const ParsedTransmission* qb = h.last("B", MCV_APP_1, MCV1_QUEUE_POSITION_INFO);
     CHECK(qb && qb->queuePosition() == TC_QUEUE_NOT_QUEUED, "not queued → position 254");
 
+    // §6.3.5.4.4 첫 단락 — 대기열·mc_priority 를 둘 다 협상하지 않으면 로스터 우선순위가 높아도 선점하지 않고 #1 (S06 TCS-4)
     h.clear();
-    h.request("D");   // 로스터 우선순위 9 > 1 — 선점
+    h.request("E");
+    const ParsedTransmission* rejE = h.last("E", MCV_APP_1, MCV1_TRANSMISSION_REJECTED);
+    CHECK(rejE && rejE->cause() == TC_REJECT_TRANSMISSION_LIMIT && h.count("A", MCV_APP_1, MCV1_TRANSMISSION_REVOKED) == 0,
+          "no queueing·no mc_priority (roster 9) → Rejected #1, no pre-emption (§6.3.5.4.4)");
+    h.clear();
+    h.request("D");   // mc_priority 협상 · 로스터 우선순위 9 > 1 — 선점
     const ParsedTransmission* rv = h.last("A", MCV_APP_1, MCV1_TRANSMISSION_REVOKED);
     CHECK(rv && rv->cause() == TC_REVOKE_PREEMPTED, "A revoked #4");
     CHECK(h.ctl.txState("A") == MCV_U_PENDING_REVOKE, "A pending revoke");

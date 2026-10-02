@@ -78,7 +78,8 @@ struct CmpMcvMemberDecl {
     unsigned int uTcSsrc = 0, uAudioSsrc = 0, uVideoSsrc = 0;  // offer mc_transmission_ssrc · a=ssrc
     int iQueueing = -1;                                        // -1 = 미협상(싣지 않음)
     int iMaxPriority = -1;
-    int iMaxRxStreams = 0;  // C9 (0 = CMP 기본)
+    int iMaxReceptionPriority = -1;  // 협상 수신 우선순위 상한(TS 24.581 §14.3.6) — -1 = 미협상(싣지 않음)
+    int iMaxRxStreams = 0;           // C9 (0 = CMP 기본)
     bool bImplicit = false;
     bool bRecvOnly = false;
     int iVideoFb = -1;  // 영상 SDP 가 협상한 키프레임 요청 — 비트 1 = PLI(nack pli) · 2 = FIR(ccm fir), -1 = 싣지 않음

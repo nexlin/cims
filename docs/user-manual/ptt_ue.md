@@ -302,7 +302,7 @@ a=sendrecv
 m=application 54000 UDP MCPTT
 c=IN IP4 <CMP IP>
 a=floorid:0 mstrm:audio
-a=fmtp:MCPTT mc_queueing;mc_priority=3
+a=fmtp:MCPTT mc_queueing;mc_priority=<그룹 우선순위>
 a=mcptt-floor-request-uri:sip:<그룹>@<도메인>
 --boundary1--
 ```

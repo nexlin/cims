@@ -291,6 +291,10 @@ void CMcVideoCallService::_FillDecl( CmpMcvMemberDecl &d, const std::string &str
     d.iQueueing = clsFmtp.bPresent ? ( clsFmtp.bQueueing ? 1 : 0 ) : -1;
     // 협상 송출 우선순위 상한 = min(offer mc_priority, <user-priority>)(TS 24.581 §14.3.3)
     if ( clsFmtp.iPriority >= 0 ) d.iMaxPriority = std::min( clsFmtp.iPriority, iRosterPrio );
+    // 협상 수신 우선순위 상한 = min(offer mc_reception_priority, <user-reception-priority>)(§14.3.6) — 그룹 문서에 그
+    // 요소를
+    //   두지 않으므로 offer 값(answer 와 같은 값 — BuildMcVideoAnswerFmtp)
+    if ( clsFmtp.iReceptionPriority >= 0 ) d.iMaxReceptionPriority = clsFmtp.iReceptionPriority;
     // NAT — SDP 선언 IP vs 등록 바인딩(received/rport latch), MCPTT leg 과 같은 규칙(ue_nat_traversal.md §5)
     ServiceInfo clsSvc = gclsServiceMap.GetForUser( strMember, "ptt" );
     CUserInfo clsInfo;

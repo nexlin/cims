@@ -96,5 +96,10 @@ int main(){
     CK("cap unlimited",!cap && v.size()==2);
     v=McpttCapInvitees({"a"},{},0,cap);
     CK("cap zero slots",cap && v.empty()); }
+  // floor 우선순위 협상값 (McpttNegotiatedFloorPriority — TS 24.380 §14.3.3, S06 SDP-3): offer 를 그룹 문서 값 위로 못 올린다
+  CK("prio offer capped by user-priority",McpttNegotiatedFloorPriority(255,5,256)==5);
+  CK("prio offer lower kept",McpttNegotiatedFloorPriority(2,5,256)==2);
+  CK("prio capped by levels",McpttNegotiatedFloorPriority(9,9,4)==4);
+  CK("prio not offered",McpttNegotiatedFloorPriority(0,9,256)==0);
   printf("%s (%d fail)\n",fail?"FAIL":"PASS",fail); return fail?1:0;
 }

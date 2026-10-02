@@ -56,6 +56,8 @@ struct McvParticipantDecl {
     bool queueing = false;    // SDP mc_queueing 협상 (§14.2.2)
     int rosterPriority = 0;   // 그룹 문서 <user-priority> — 기본 우선순위(default priority)
     int maxPriority = -1;     // 협상 mc_priority 상한 (-1 = 미협상 — 요청의 Transmission Priority 를 쓰지 않는다)
+    int maxRxPriority = -1;   // 협상 mc_reception_priority 상한 (§14.3.6, -1 = 미협상). 수신 우선순위 = min(요청, 상한)
+                              //   (§6.3.7.3.4) — 수신 선점(override)이 없어 판정에는 아직 쓰지 않는다(mcvideo.md §5.3.1)
     bool chair = false;       // 로스터 role "chair"
     int maxRxStreams = MCV_C9;       // C9 — 동시 수신 스트림 상한 (user profile MaxSimultaneousVideoStreams)
     unsigned int preferredAudioSsrc = 0;  // 멤버 offer 의 audio a=ssrc (송출 SSRC 할당 선호값, 0 = 없음)

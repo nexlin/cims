@@ -54,13 +54,17 @@ bool CCspServiceConfig::Refresh() {
     const int iTng2 = ParseEmergencyGroupTimeLimitSec( strBody );
     CspCallTimerParams ct;
     ParseCallTimers( strBody, ct );
+    const int iLevels = ParseNumLevelsPriorityHierarchy( strBody );
     {
         std::lock_guard<std::mutex> lock( m_clsMutex );
         m_clsFloor = f;
         m_clsPriority = rp;
         m_iTng2Sec = iTng2;
         m_clsCallTimers = ct;
+        m_iNumLevelsPriority = iLevels;
     }
+    CLog::Print( LOG_SYSTEM, "[service-config] num-levels-priority-hierarchy=%d%s", iLevels < 0 ? 4 : iLevels,
+                 iLevels < 0 ? " (문서에 없음 — 스키마 최솟값)" : "" );
     CLog::Print( LOG_SYSTEM,
                  "[service-config] floor 값 적재 (CSC 정본) T1=%d T2=%d T3=%d T7=%d T8=%d T20=%d C7=%d C20=%d (s, "
                  "-1=문서에 없음)",
@@ -100,4 +104,9 @@ CspCallTimerParams CCspServiceConfig::GetCallTimerParams() {
 int CCspServiceConfig::GetMaxCallsN6( bool bDispatch ) {
     std::lock_guard<std::mutex> lock( m_clsMutex );
     return bDispatch ? m_iMaxCallsN6Dispatch : m_iMaxCallsN6;
+}
+
+int CCspServiceConfig::GetNumLevelsPriorityHierarchy() {
+    std::lock_guard<std::mutex> lock( m_clsMutex );
+    return m_iNumLevelsPriority < 0 ? 4 : m_iNumLevelsPriority;
 }
