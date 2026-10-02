@@ -123,7 +123,7 @@
 | **C03** | user profile·service config 인가 요소(+SDK «없음 = false») | CMS-3 · ADH-1 / VCMS-2 | A1 · B1 · C1 | 1 | — | — | S10 · S11 · W01 | 완료 d9a762a1 |
 | **C04** | XCAP 주소·문서 이름(양쪽 수용) | GMS-1 · GMS-6 · CMS-1 · CMS-2 · CMS-9 · CMS-11 · CMS-12 / VCMS-4 · VCMS-6 | B5 · C2 · D2 | 1 | — | — | S19(NOTIFY `sel`) · U07 | 대기 |
 | **C05** | XCAP 쓰기 의미·오류 형식 | GMS-2 · GMS-3 · GMS-4 · GMS-5 · GMS-8 · GMS-9 · GMS-10 / VGMS-1 · VGMS-2 | B7 · C1 · D1 | 2 | C04 | — | W01(그룹 편집 PUT 본문) | 대기 |
-| **C06** | IdMS·토큰 | IDM-1 · IDM-2 · IDM-3 · IDM-4 · IDM-6 · IDM-7 · IDM-8 · IDM-9 · CMS-10 | A3 · B1 · C4 · D1 | 2 | — | D4 | U02(IDM-5) · 앱 로그인(client_id 등록 목록) | 진행 1/2 ef37031a — 남은 것 IDM-6 |
+| **C06** | IdMS·토큰 | IDM-1 · IDM-2 · IDM-3 · IDM-4 · IDM-6 · IDM-7 · IDM-8 · IDM-9 · CMS-10 | A3 · B1 · C4 · D1 | 2 | — | D4 | U02(IDM-5) · 앱 로그인(client_id 등록 목록) | 완료 ef37031a · 88f0f149 |
 | **C07** | MCData 콘텐츠 서버 | MCData FD-2 · FD-3 · FD-5 · FD-6 · FD-7 | B2 · C2 · D1 | 1 | — | — | U05(`uploadFd` Location) | 대기 |
 
 ### 5.3 .45 — 단말 SDK·현장 앱 (9 WP · 44 항목 · ≈ 10 세션)
