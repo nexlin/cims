@@ -159,7 +159,7 @@ void usage() {
         "  drive [--sample-file WAV] [--service volte|voip|ptt]   (구동 모드 — stdin 명령 / stdout JSON 이벤트; cimsue/drive.h 명령표)\n"
         "  link HOST[:PORT] [--pair-key K] [--link-ca PEM | --link-pin FILE] [--sample-file WAV] [--service S] [--duration S]\n"
         "          (계측 링크 — 등록 뒤 계측기 워커에 TLS 로 붙어 워커 명령을 실행, 앱 시험 모드와 같은 경로)\n"
-        "  groups | group-get URI | group-put URI --name N [--members tel:..,tel:..] | group-delete URI   (--csc-host --user --pw)\n");
+        "  groups | group-get URI | group-info URI(멤버 제외) | group-put URI --name N [--members tel:..,tel:..] | group-delete URI   (--csc-host --user --pw)\n");
 }
 
 bool parse(int argc, char** argv, Opts& o) {
@@ -252,15 +252,16 @@ bool parse(int argc, char** argv, Opts& o) {
     }
     if (pos.empty()) return false;
     o.cmd = pos[0];
-    static const char* needTarget[] = {"call", "group-call", "video-call", "alert", "dialog-watch", "join", "transfer", "group-get", "group-put",
-                                       "group-delete", "link"};
+    static const char* needTarget[] = {"call", "group-call", "video-call", "alert", "dialog-watch", "join", "transfer", "group-get", "group-info",
+                                       "group-put", "group-delete", "link"};
     for (auto n : needTarget) if (o.cmd == n) { if (pos.size() < 2) return false; o.target = pos[1]; }
     if (o.cmd == "sds") { if (pos.size() < 3) return false; o.target = pos[1]; for (size_t i = 2; i < pos.size(); ++i) o.text += (i > 2 ? " " : "") + pos[i]; }
     if (o.cmd == "pickup") { if (pos.size() >= 2) o.target = pos[1]; if (o.code.empty()) return false; }
     if (o.cmd == "drive" || o.cmd == "link") o.json = true;   // 구동·링크 모드는 언제나 JSON 이벤트
     if (o.cmd == "transfer" && o.transferTo.empty()) return false;
     static const char* known[] = {"register", "call", "answer", "group-call", "video-call", "video-answer", "alert", "sds", "sds-recv", "login",
-                                  "dialog-watch", "join", "pickup", "transfer", "groups", "group-get", "group-put", "group-delete", "drive", "link"};
+                                  "dialog-watch", "join", "pickup", "transfer", "groups", "group-get", "group-info", "group-put", "group-delete", "drive",
+                                  "link"};
     bool ok = false;
     for (auto k : known) if (o.cmd == k) ok = true;
     return ok;
@@ -637,7 +638,8 @@ int main(int argc, char** argv) {
     if (!parse(argc, argv, o)) { usage(); return 2; }
 
     // ── CSC 로그인 / 프로파일 (login 명령 또는 --from-profile) ──
-    const bool groupCmd = o.cmd == "groups" || o.cmd == "group-get" || o.cmd == "group-put" || o.cmd == "group-delete";
+    const bool groupCmd = o.cmd == "groups" || o.cmd == "group-get" || o.cmd == "group-info" || o.cmd == "group-put" ||
+                          o.cmd == "group-delete";
     if (o.cmd == "login" || groupCmd || !o.fromProfile.empty()) {
         if (o.cscHost.empty() || o.user.empty()) { std::fprintf(stderr, "need --csc-host --user --pw\n"); return 2; }
         Profile prof; TokenSet tok;
@@ -673,6 +675,10 @@ int main(int argc, char** argv) {
                 GroupDoc d;
                 r = csc.getGroup(tok.accessToken, me, o.target, d);
                 if (r.ok) printDoc("group-get", d);
+            } else if (o.cmd == "group-info") {                               // 멤버를 뺀 문서(TS 24.481 §6.3.16 — 기본 조회)
+                GroupDoc d;
+                r = csc.getGroupExcludingMembers(tok.accessToken, o.target, d);
+                if (r.ok) printDoc("group-info", d);
             } else if (o.cmd == "group-put") {
                 GroupDoc d, out;
                 r = csc.getGroup(tok.accessToken, me, o.target, d);           // 기존 문서면 수정(etag 조건부), 없으면 신규

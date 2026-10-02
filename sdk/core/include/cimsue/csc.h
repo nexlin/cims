@@ -177,6 +177,7 @@ struct GroupDoc {
     CIMSUE_API static bool parse(const std::string& xml, GroupDoc& out, std::string* err = nullptr);
 };
 constexpr const char* kCtGroupDoc = "application/vnd.oma.poc.groups+xml";
+constexpr const char* kCtGmop = "application/vnd.3gpp.GMOP+xml";        // TS 24.481 §7.3.2
 
 /** CMS 문서의 대상 항목 — EntryType(TS 24.484 §8.3.2.7): uri = `<uri-entry>`, mode = `entry-info` 속성
  *  (그룹 = DedicatedGroup | UseCurrentlySelectedGroup, 사설 수신자 = UsePreConfigured | LocallyDetermined).
@@ -394,14 +395,23 @@ public:
     }
 
     // ── GMS 그룹 관리(TS 24.481 — 그룹 생성·수정·삭제 주체 = authorized user, XCAP PUT/DELETE, PKCE 토큰) ──
-    /** 그룹 문서 GET → GroupDoc(etag 포함). userUri 는 자기 XCAP 트리(토큰 mcptt_id). */
+    /** 그룹 문서 GET → GroupDoc(etag 포함) — 멤버 명단까지 필요할 때 쓴다(TS 24.481 §6.3.3.2.1). 주소 = 그룹 ID 로 찾는 문서
+     *  (global tree `…/global/byGroupID/<그룹 ID>`, §6.2.2.2·§7.2.10.2) — 남이 만든 그룹도 읽는다. global tree 가 없는 옛 서버(404·405)면
+     *  사용자 트리(userUri = 토큰 mcptt_id)로 다시 읽는다. */
     Result getGroup(const std::string& accessToken, const std::string& userUri, const std::string& groupUri, GroupDoc& out);
+    /** 멤버를 뺀 그룹 문서 — POST + GMOP `<get-excluding-memberlist>`(TS 24.481 §6.3.16.2). 규격의 **기본 조회**다: 그룹 속성(종류·타이머·
+     *  규칙)만 볼 때 쓰고, 명단이 필요할 때만 getGroup 을 부른다. out.members 는 비고 etag 도 없다(문서 전체의 etag 가 아니다). */
+    Result getGroupExcludingMembers(const std::string& accessToken, const std::string& groupUri, GroupDoc& out);
     /** 그룹 생성(신규 uri)/수정(기존 uri) — PUT 본문 = doc.toXml(). ifMatch 가 비지 않으면 조건부(412 = 충돌).
      *  성공 시 out = 서버가 확정한 문서(etag·authorizedUser 채워짐). 실패 code = HTTP(403 자격/소유, 409 타인 소유, 412). */
     Result putGroup(const std::string& accessToken, const std::string& userUri, const GroupDoc& doc, const std::string& ifMatch, GroupDoc& out);
     /** 그룹 삭제 — 본인 소유만(403). */
     Result deleteGroup(const std::string& accessToken, const std::string& userUri, const std::string& groupUri);
-    /** XCAP 그룹 문서 경로(/org.openmobilealliance.groups/users/{user}/{group}). */
+    /** 그룹 ID 로 찾는 그룹 문서 경로(/org.openmobilealliance.groups/global/byGroupID/{group} — TS 24.481 §7.2.10.2). 읽기 주소. */
+    static std::string groupByIdPath(const std::string& groupUri) {
+        return "/org.openmobilealliance.groups/global/byGroupID/" + enc(groupUri);
+    }
+    /** XCAP 그룹 문서 경로(/org.openmobilealliance.groups/users/{user}/{group}) — 쓰기(PUT·DELETE) 주소. */
     static std::string groupPath(const std::string& userUri, const std::string& groupUri) {
         return "/org.openmobilealliance.groups/users/" + enc(userUri) + "/" + enc(groupUri);
     }

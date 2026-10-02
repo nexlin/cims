@@ -118,6 +118,8 @@ std::string GroupDoc::toXml() const {
         x += "        <mcpttgi:user-priority>" + std::to_string(m.priority) + "</mcpttgi:user-priority>\n";
         // MCVideo entry(§7.2.2) — MCVideo ID = MCPTT ID(mcvideo.md §7 D1)
         if (mcvideo.present) x += "        <mcpttgi:mcvideo-mcvideo-id uri=\"" + esc(m.mcvideoId.empty() ? m.uri : m.mcvideoId) + "\"/>\n";
+        // MCData entry(§7.2.2) — MCData 그룹의 entry 는 <mcdata-mcdata-id> 를 싣는다. MCData ID = MCPTT ID(단일 MC service ID, TS 23.280 §10.1.4.1)
+        if (allowSds || allowFd) x += "        <mcpttgi:mcdata-mcdata-id uri=\"" + esc(m.uri) + "\"/>\n";
         x += "      </entry>\n";
     }
     x += "    </list>\n";
@@ -179,7 +181,14 @@ std::string GroupDoc::toXml() const {
         if (v.receptionHangTimerSec >= 0)
             x += "    <mcpttgi:on-network-reception-hang-timer>" + xsDuration(v.receptionHangTimerSec) + "</mcpttgi:on-network-reception-hang-timer>\n";
     }
-    x += "    <cp:ruleset>\n      <cp:rule id=\"a7c\">\n         <cp:actions>\n";
+    // 규칙 — 멤버(<is-list-member/>)에게 그룹 호 개시(<allow-initiate-conference>)·진행 중 세션 합류(<join-handling>)·명단 열람을 준다.
+    //   제어 기능은 이 조건·action 으로 개시·합류를 인가한다(TS 24.379 §6.3.5.3 2)·§6.3.5.4 3)) — 없으면 규격 GMS 에 저장된 그룹은 아무도
+    //   호를 열지 못한다. CIMS 의 그룹 모델은 «멤버 전원에게 같은 action» 하나다(서버가 내는 문서와 같은 규칙).
+    x += "    <cp:ruleset>\n      <cp:rule id=\"a7c\">\n        <cp:conditions>\n          <is-list-member/>\n        </cp:conditions>\n"
+         "        <cp:actions>\n"
+         "          <allow-initiate-conference>true</allow-initiate-conference>\n"
+         "          <join-handling>true</join-handling>\n"
+         "          <mcpttgi:on-network-allow-getting-member-list>true</mcpttgi:on-network-allow-getting-member-list>\n";
     x += std::string("          <mcpttgi:allow-MCPTT-emergency-call>") + bs(emergencyCall) + "</mcpttgi:allow-MCPTT-emergency-call>\n";
     x += std::string("          <mcpttgi:allow-imminent-peril-call>") + bs(emergencyCall) + "</mcpttgi:allow-imminent-peril-call>\n";
     x += std::string("          <mcpttgi:allow-MCPTT-emergency-alert>") + bs(emergencyAlert) + "</mcpttgi:allow-MCPTT-emergency-alert>\n";
@@ -193,6 +202,9 @@ std::string GroupDoc::toXml() const {
         triXml(x, "          ", "mcvideo-allow-imminent-peril-call", v.allowImminentPerilCall);
         triXml(x, "          ", "mcvideo-on-network-allow-conference-state", v.allowConferenceState);
     }
+    // 멤버의 그룹 데이터 송신 인가(§7.2.2 MCData actions) — 없으면 false 라 아무도 못 보낸다(TS 24.282 §11.1 2))
+    if (allowSds || allowFd)
+        x += "          <mcpttgi:mcdata-allow-transmit-data-in-this-group>true</mcpttgi:mcdata-allow-transmit-data-in-this-group>\n";
     x += "        </cp:actions>\n      </cp:rule>\n    </cp:ruleset>\n";
     // 서비스마다 <service> 하나 — enabler = 그 서비스의 ICSI(TS 24.481 §7.2.2 — MCPTT 는 TS 24.379 Annex E.2.1, mcvideo.md §6 V0)
     x += std::string("    <oxe:supported-services>\n     <oxe:service enabler=\"") + kIcsiMcptt +

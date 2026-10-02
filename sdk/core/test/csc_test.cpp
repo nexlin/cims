@@ -882,3 +882,108 @@ TEST(GroupDoc, AckCallSetupRoundTrip) {
     EXPECT_EQ(u.ackAction, "abandon");                                           // 정의 밖 값 = abandon (§7.2.2 u))
     EXPECT_EQ(u.minNumberToStart, GroupDoc::kUnset);
 }
+
+// ── 그룹 문서 읽기 주소·멤버 제외 조회·PUT 규칙 (TS 24.481 §6.2.2.2·§6.3.16·§7.2.2 — 갭 GMS-1·GMS-6·GMS-17) ──
+namespace {
+/** URL 로 답을 고르는 흉내 — 받은 요청을 순서대로 적어 둔다. */
+struct RouteTransport : http::ITransport {
+    std::map<std::string, http::Response> byPath;                  // URL 에 이 조각이 있으면 그 답(없으면 404)
+    std::vector<std::string> calls;                                // "METHOD url"
+    std::map<std::string, std::string> lastHeaders;
+    std::string lastBody;
+    http::Response request(const std::string& method, const std::string& url,
+                           const std::map<std::string, std::string>& headers, const std::string& body) override {
+        calls.push_back(method + " " + url); lastHeaders = headers; lastBody = body;
+        for (const auto& kv : byPath) if (url.find(kv.first) != std::string::npos) return kv.second;
+        http::Response r; r.status = 404; return r;
+    }
+};
+const char* kGroupXml =
+    "<group xmlns=\"urn:oma:xml:poc:list-service\"><list-service uri=\"sip:g7@ptt.example\"><display-name>칠</display-name>"
+    "<list><entry uri=\"tel:+821\"/><entry uri=\"tel:+822\"/></list>"
+    "<mcpttgi:on-network-invite-members>false</mcpttgi:on-network-invite-members></list-service></group>";
+}  // namespace
+
+TEST(Csc, GroupReadsGlobalTreeFirst) {
+    auto tp = std::make_shared<RouteTransport>();
+    CscEndpoint ep; ep.host = "csc.example"; ep.port = 4430;
+    CscClient c(ep, tp);
+    http::Response ok; ok.status = 200; ok.body = kGroupXml; ok.headers["etag"] = "\"e7\"";
+
+    // 그룹 ID 로 찾는 문서(§7.2.10.2) — 한 번에 읽는다. 사용자 트리는 건드리지 않는다
+    tp->byPath["/global/byGroupID/"] = ok;
+    GroupDoc d;
+    Result r = c.getGroup("tok", "tel:+821", "sip:g7@ptt.example", d);
+    ASSERT_TRUE(r.ok) << r.reason;
+    ASSERT_EQ(tp->calls.size(), 1u);
+    EXPECT_EQ(tp->calls[0], "GET " + ep.baseUrl() + "/org.openmobilealliance.groups/global/byGroupID/sip%3Ag7%40ptt.example");
+    EXPECT_EQ(d.members.size(), 2u); EXPECT_EQ(d.etag, "\"e7\""); EXPECT_EQ(d.sessionType, "chat");
+
+    // global tree 가 없는 옛 서버(404) — 사용자 트리로 다시 읽는다
+    tp->byPath.clear(); tp->calls.clear();
+    tp->byPath["/users/"] = ok;
+    GroupDoc legacy;
+    ASSERT_TRUE(c.getGroup("tok", "tel:+821", "sip:g7@ptt.example", legacy).ok);
+    ASSERT_EQ(tp->calls.size(), 2u);
+    EXPECT_NE(tp->calls[1].find("/org.openmobilealliance.groups/users/tel%3A%2B821/sip%3Ag7%40ptt.example"), std::string::npos);
+    EXPECT_EQ(legacy.members.size(), 2u);
+
+    // 권한 거절(403)은 폴백하지 않는다 — 사용자 트리로 돌아가 다른 답을 얻지 않는다
+    tp->byPath.clear(); tp->calls.clear();
+    http::Response deny; deny.status = 403;
+    tp->byPath["/global/byGroupID/"] = deny; tp->byPath["/users/"] = ok;
+    r = c.getGroup("tok", "tel:+821", "sip:g7@ptt.example", d);
+    EXPECT_FALSE(r.ok); EXPECT_EQ(r.code, 403); EXPECT_EQ(tp->calls.size(), 1u);
+}
+
+TEST(Csc, GroupExcludingMembers) {
+    auto tp = std::make_shared<RouteTransport>();
+    CscEndpoint ep; ep.host = "csc.example"; ep.port = 4430;
+    CscClient c(ep, tp);
+    http::Response ok; ok.status = 200;
+    ok.body = "<group xmlns=\"urn:oma:xml:poc:list-service\"><list-service uri=\"sip:g7@ptt.example\"><display-name>칠</display-name>"
+              "<mcpttgi:on-network-invite-members>true</mcpttgi:on-network-invite-members>"
+              "<mcpttgi:on-network-hang-timer>PT30S</mcpttgi:on-network-hang-timer></list-service></group>";
+    tp->byPath["/global/byGroupID/"] = ok;
+    GroupDoc d;
+    Result r = c.getGroupExcludingMembers("tok", "sip:g7@ptt.example", d);
+    ASSERT_TRUE(r.ok) << r.reason;
+    ASSERT_EQ(tp->calls.size(), 1u);
+    EXPECT_EQ(tp->calls[0], "POST " + ep.baseUrl() + "/org.openmobilealliance.groups/global/byGroupID/sip%3Ag7%40ptt.example");
+    EXPECT_EQ(tp->lastHeaders["Content-Type"], "application/vnd.3gpp.GMOP+xml");
+    EXPECT_NE(tp->lastBody.find("<document xmlns=\"urn:3gpp:ns:mcpttGMOP:1.0\"><request><get-excluding-memberlist/></request></document>"),
+              std::string::npos);
+    EXPECT_TRUE(d.members.empty());
+    EXPECT_EQ(d.uri, "sip:g7@ptt.example"); EXPECT_EQ(d.sessionType, "prearranged"); EXPECT_EQ(d.hangTimerSec, 30);
+
+    http::Response no; no.status = 403; tp->byPath["/global/byGroupID/"] = no;
+    r = c.getGroupExcludingMembers("tok", "sip:g7@ptt.example", d);
+    EXPECT_FALSE(r.ok); EXPECT_EQ(r.code, 403);
+}
+
+TEST(GroupDoc, PutBodyCarriesMemberRuleAndMcDataEntries) {
+    GroupDoc d; d.uri = "sip:g7@ptt.example"; d.displayName = "칠";
+    GroupMember m; m.uri = "tel:+821"; d.members.push_back(m);
+    std::string x = d.toXml();
+    // 개시·합류 인가의 근거(TS 24.379 §6.3.5.3 2)·§6.3.5.4 3)) — 멤버 조건 + 두 action
+    size_t cond = x.find("<cp:conditions>"), act = x.find("<cp:actions>");
+    ASSERT_NE(cond, std::string::npos); ASSERT_NE(act, std::string::npos);
+    EXPECT_LT(cond, act);
+    EXPECT_NE(x.find("<is-list-member/>"), std::string::npos);
+    EXPECT_NE(x.find("<allow-initiate-conference>true</allow-initiate-conference>"), std::string::npos);
+    EXPECT_NE(x.find("<join-handling>true</join-handling>"), std::string::npos);
+    EXPECT_NE(x.find("<mcpttgi:on-network-allow-getting-member-list>true</mcpttgi:on-network-allow-getting-member-list>"), std::string::npos);
+    // MCData 그룹(allowSds 기본 true) — entry 에 <mcdata-mcdata-id>, 규칙에 송신 인가
+    EXPECT_NE(x.find("<mcpttgi:mcdata-mcdata-id uri=\"tel:+821\"/>"), std::string::npos);
+    EXPECT_NE(x.find("<mcpttgi:mcdata-allow-transmit-data-in-this-group>true<"), std::string::npos);
+    // 다시 읽어도 멤버·긴급 규칙이 같다
+    GroupDoc back;
+    ASSERT_TRUE(GroupDoc::parse(x, back));
+    ASSERT_EQ(back.members.size(), 1u); EXPECT_EQ(back.members[0].uri, "tel:+821");
+    EXPECT_TRUE(back.emergencyCall); EXPECT_TRUE(back.allowSds);
+
+    d.allowSds = false; d.allowFd = false;                       // MCData 를 쓰지 않는 그룹 — MCData 요소 없음
+    x = d.toXml();
+    EXPECT_EQ(x.find("mcdata-mcdata-id"), std::string::npos);
+    EXPECT_EQ(x.find("mcdata-allow-transmit-data-in-this-group"), std::string::npos);
+}

@@ -294,11 +294,28 @@ Result CscClient::listGroups(const std::string& accessToken, const std::string& 
 
 Result CscClient::getGroup(const std::string& accessToken, const std::string& userUri, const std::string& groupUri, GroupDoc& out) {
     XcapDoc doc;
-    Result r = xcapGet(accessToken, groupPath(userUri, groupUri), kCtGroupDoc, "", doc);
+    Result r = xcapGet(accessToken, groupByIdPath(groupUri), kCtGroupDoc, "", doc);
+    // global tree 가 없는 옛 서버 — 사용자 트리로(그룹이 정말 없으면 거기서도 404 다)
+    if (!r.ok && (r.code == 404 || r.code == 405) && !userUri.empty())
+        r = xcapGet(accessToken, groupPath(userUri, groupUri), kCtGroupDoc, "", doc);
     if (!r.ok) return r;
     std::string err;
     GroupDoc d; d.etag = doc.etag;
     if (!GroupDoc::parse(doc.body, d, &err)) return Result::fail(-2, "group doc: " + err);
+    out = d;
+    return Result::success();
+}
+
+Result CscClient::getGroupExcludingMembers(const std::string& accessToken, const std::string& groupUri, GroupDoc& out) {
+    // GMOP 문서(§7.3.4.2) — <document> › <request> › <get-excluding-memberlist/>
+    static const char* kBody = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+                               "<document xmlns=\"urn:3gpp:ns:mcpttGMOP:1.0\"><request><get-excluding-memberlist/></request></document>\n";
+    http::Response r = impl_->request("POST", impl_->ep.baseUrl() + groupByIdPath(groupUri),
+                                      {{"Authorization", "Bearer " + accessToken}, {"Content-Type", kCtGmop}, {"Accept", kCtGroupDoc}}, kBody);
+    if (r.status / 100 != 2) return httpFail(r, "getGroupExcludingMembers");
+    std::string err;
+    GroupDoc d;
+    if (!GroupDoc::parse(r.body, d, &err)) return Result::fail(-2, "group doc: " + err);
     out = d;
     return Result::success();
 }
