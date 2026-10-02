@@ -118,6 +118,10 @@ public:
                         ImplicitResult* res = nullptr);
     // 이탈(LEAVE) — 송출 중이면 송출을 끝내고(End Notify 전원 · Cx−1 · Idle/큐), 큐에서 빼고, 수신 몫을 정리한다(§6.3.5.8.2 · §6.3.4.4.11).
     void removeParticipant(const std::string& id, int64_t nowMs);
+    // 제어 채널 목적지가 잡혔다·바뀌었다(NAT latch) — 합류 때 알린 지금 상태를 다시 보낸다: 진행 중 송출이 없으면 Transmission Idle,
+    //   있으면 송출마다 Media Transmission Notification(§6.3.5.2.2 2a·4 · §6.3.7.2.2 2b ii · §6.3.7.3.3 1). JOIN ② 의 알림은 SDP 주소로
+    //   나가 NAT 뒤 단말에 닿지 않는다(단말은 호가 선 뒤 빈 RR 로 하향 경로를 연다). 허가·요청 중인 참가자는 스스로 보냈으니 두지 않는다.
+    void resendJoinState(const std::string& id, int64_t nowMs);
     // 호 해제 — 타이머를 풀고 SSRC 를 반환한다. 메시지는 보내지 않는다(§6.3.4.6.2 · §6.3.4.7.2).
     void close();
     bool hasParticipant(const std::string& id) const { return _parts.count(id) != 0; }

@@ -68,7 +68,6 @@ MCPTT 쪽 같은 뿌리의 결함은 [mcptt_conformance_gaps.md](mcptt_conforman
 
 | 항목 | 내용 |
 |---|---|
-| RCS-1 | NAT 뒤 단말이 송출 중인 영상 호에 들어가면 Media Transmission Notification 을 받지 못한다 — CMP 가 JOIN ② 때 SDP 사설 주소로 한 번만 보내고, latch 뒤 다시 알리지 않는다. 수동 수신이라 [보기] 를 못 하고, 받는 이가 없어 T11 이 10 s 뒤 그 송출을 끊는다(△ — 실측으로 확정) |
 | VAFF-1 | 제휴 `Expires: 0` 이 그 클라이언트가 아니라 사용자의 모든 클라이언트 제휴를 지운다 — 같은 MCVideo ID 의 다른 단말이 prearranged 초대에서 빠진다(MCPTT AFF-2 와 같은 코드) |
 
 **규격 단말·서버와 붙이면 막히는 것**
@@ -171,7 +170,6 @@ MCPTT 쪽 같은 뿌리의 결함은 [mcptt_conformance_gaps.md](mcptt_conforman
 
 | # | 급 | 대상 | 규격 | CIMS 지금 | 영향 | 확인 |
 |---|---|---|---|---|---|---|
-| RCS-1 | A | CMP·SDK | §6.3.7.2.2 2b ii · §6.3.7.3.3 1 — 진행 중 송출이 있는 호에 합류하면 Media Transmission Notification · §6.3.5.2.2 2a·4 — 없으면 Transmission Idle | 첫 제어 메시지 목적지가 SDP 주소다 — CSP 가 SDP IP 를 `user_ip` 로 넘기고(`csp/McVideoCallService.cpp:265`) CMP 가 그 값으로 목적지를 잡는다(`cmp/PMcvideoGroup.cpp:225-230`). 합류 때 Notification·Idle 을 JOIN ② 처리에서 한 번만 보내고 재송신이 없다(`cmp/PMcvControl.cpp:294-303`), latch 가 되어도 다시 알리지 않는다(`cmp/PMcvideoGroup.cpp:391-395`). JOIN ② 는 200 OK 전이고(`csp/McVideoCallService.cpp:340`·`:367`), 단말은 호가 선 뒤에야 빈 RR 로 하향 경로를 연다(`sdk/core/src/mcvideo/tc_participant.cpp:528`) | NAT 뒤 현장 단말이 송출 중인 영상 채널에 들어가면 «영상 n» 이 뜨지 않아 [보기] 를 할 수 없다. 받는 이가 없으니 T11 이 10 s 뒤 그 송출을 끊는다(#8) | △ |
 | RCS-2 | D | CMP | §6.3.6.4.8 · §6.3.6.4.3 f — T6 은 수신 허가마다 따로 | Ack 하나가 그 수신자의 모든 수신 허가 T6 을 멈춘다 — Ack 에는 송출 식별자가 없다(`cmp/PMcvControl.cpp:800-803`) | C9 가 2 이상이면 두 번째 허가 응답을 잃어도 재송신이 없다. 1차는 C9 = 1 이라 드러나지 않는다 | ◎ |
 
 ### 3.9 수신 제어 — 단말 (RCU) — TS 24.581 §6.2.5
@@ -233,7 +231,6 @@ MCPTT 쪽 같은 뿌리의 결함은 [mcptt_conformance_gaps.md](mcptt_conforman
 | # | 묶음 | 항목 | 몫 |
 |---|---|---|---|
 | 1 | **헤더·fmtp 한두 줄** — Warning 123·122, Supported 옵션 태그, 초대 offer `mc_queueing`, 해제 200 Expires, 현장 앱 `queueing` 켬 | VGC-4 · VGC-5 · VGC-6 · VGC-7(Supported 몫) · VSDP-4 · VAFF-3 · VSDP-3 | .45 CSP · 현장 앱 |
-| 3 | **NAT 합류 알림** — latch 뒤(또는 첫 RR 수신 때) 현재 상태(Idle·Notification)를 다시 보내거나, 단말이 200 OK 직후가 아니라 offer 직후 RR 로 경로를 연다 | RCS-1 | .45 CMP·SDK |
 | 4 | **제휴를 클라이언트 단위로** — 행 키 통일, 클라이언트 단위 해제·판정, 암묵 제휴 취소·완료 시점. MCPTT 묶음 8(AFF-1~8)과 한 작업 | VAFF-1 · VAFF-2 · VAFF-4 · VAFF-5 · VGC-11 | .45 CSP |
 | 5 | **진행 중 호와 제휴·그룹 변경** — late call entry, 제휴 해제·멤버 제거·서비스 끔 → BYE, 제휴 행 정리. MCPTT 묶음 9·10 의 결정과 같이 | VGC-2 · VGC-12 · VAFF-7 · VAFF-6(결정) | 결정 → .45 CSP |
 | 6 | **service configuration 값 결선** — CSP 가 `/internal/mcvideo/service-config` 를 받아 `tc_timers` 전부를 싣고 변경을 통지받는다, SDK 엔진이 `TcTimers` 를 문서에서 넣는다, xcap-diff `sel` 에 MCVideo 문서 | TCS-1 · TCU-1 · VCMS-1 | .45 CSP·SDK |
@@ -263,7 +260,6 @@ MCPTT 쪽 같은 뿌리의 결함은 [mcptt_conformance_gaps.md](mcptt_conforman
 - **Windows .NET/C API 바인딩 내부·태블릿 `VideoPlane.kt`·현장 `ui/VideoViews.kt` 화면** — grep 수준으로만 봤다.
 - **cimsue-cli drive·libcsim(계측기)** — 시험 도구의 MCVideo 송신 형태는 보지 않았다. 서버 검사를 켜면(VREG-2·VAFF-2) 도구도 함께 맞춰야 한다.
 - **실행 확인** — 모든 항목이 코드 읽기다. 단위시험·스모크는 돌리지 않았다. 확정하려면 실측이 필요하다:
-  - RCS-1 — NAT 단말이 송출 중인 호에 합류.
   - VGC-10 — MCVideo ICSI 를 단 conference SUBSCRIBE 가 MCPTT 로스터를 받는지.
   - TCS-5 — `mc_granted` 없이 암묵 요청만 보낼 때 · TCS-11 — `mc_transmission_ssrc` 없는 단말.
   - VAFF-6 — 설정 그룹 제휴가 갱신 REGISTER 마다 되살아나는지(현장 앱 PUBLISH 와의 반복).

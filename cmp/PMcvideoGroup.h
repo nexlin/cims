@@ -159,6 +159,7 @@ private:
         std::shared_ptr<PMediaCrypto> mediaCrypto;       // audio SRTP (null = 평문 leg)
         std::shared_ptr<PMediaCrypto> mediaCryptoVideo;  // video SRTP
         int64_t followLogUsec = 0;       // dest follow 로그 rate-limit
+        int64_t ctlResendUsec = 0;       // 제어 채널 latch 뒤 합류 상태 재송신 rate-limit (소스 경합 대비)
         unsigned int rxVideoSsrc = 0;    // 멤버가 보낸 영상 RTP 의 원래 SSRC — 키프레임 요청의 media source(분배 때 찍는 할당값이 아님)
         int64_t keyReqMs = 0;            // 이 멤버(송출자)에게 마지막으로 키프레임을 요청한 시각 (kKeyReqMinMs)
         unsigned char firSeq = 0;        // CMP → 이 멤버 FIR 의 Seq nr (RFC 5104 §4.3.1.1 — 새 요청마다 +1)

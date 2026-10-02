@@ -533,6 +533,31 @@ static void testImplicitAndRecvOnly() {
     }
 }
 
+// 제어 채널 NAT latch 뒤 합류 상태 재송신(§6.3.5.2.2 2a·4 · §6.3.7.2.2 2b ii — RCS-1)
+static void testResendJoinState() {
+    printf("[resend join state after control latch]\n");
+    Harness h;
+    h.join("A");
+    h.join("B");
+    h.clear();
+    h.ctl.resendJoinState("B", h.now);
+    CHECK(h.count("B", MCV_APP_1, MCV1_TRANSMISSION_IDLE) == 1, "no transmission → Transmission Idle again");
+    h.request("A");
+    CHECK(h.ctl.txState("A") == MCV_U_PERMITTED, "A granted");
+    h.join("C");   // 송출 중 합류 — JOIN ② 의 Notification 은 SDP 주소로 나가 잃었다고 본다
+    h.clear();
+    h.ctl.resendJoinState("C", h.now);
+    const ParsedTransmission* n = h.last("C", MCV_APP_1, MCV1_MEDIA_TRANSMISSION_NOTIFICATION);
+    CHECK(n && n->str(TF_TRANSMITTING_USER_ID) == "sip:A@mcv", "ongoing transmission → Media Transmission Notification again");
+    CHECK(h.ctl.txState("C") == MCV_U_TAKEN, "state unchanged (U: not permitted and Transmit Taken)");
+    h.ctl.resendJoinState("A", h.now);
+    CHECK(h.count("A", MCV_APP_1, MCV1_MEDIA_TRANSMISSION_NOTIFICATION) == 0 && h.count("A", MCV_APP_1, MCV1_TRANSMISSION_IDLE) == 0,
+          "transmitter (opened its own path) → nothing resent");
+    h.ctl.resendJoinState("nobody", h.now);
+    CHECK(h.out.size() == 1, "unknown participant → nothing");
+    CHECK(h.buildFail == 0, "all messages encode");
+}
+
 int main() {
     testJoinIdleAndOnlyOne();
     testGrantNotifyReceive();
@@ -544,6 +569,7 @@ int main() {
     testTimers();
     testUnauthorizedMedia();
     testImplicitAndRecvOnly();
+    testResendJoinState();
     printf("cmp_mcvideo_control_test: %d passed, %d failed\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }

@@ -303,6 +303,18 @@ void PMcvControl::addParticipant(const std::string& id, const McvParticipantDecl
     }
 }
 
+void PMcvControl::resendJoinState(const std::string& id, int64_t nowMs) {
+    Part* pp = _part(id);
+    if (!pp || pp->implicitPending) return;
+    Part& p = *pp;
+    if (p.state == MCV_U_IDLE && _tx.empty()) {
+        ++_msgSeq;
+        _sendIdle(id);
+    } else if (p.state == MCV_U_TAKEN && !_tx.empty()) {
+        _notifyCurrent(p, nowMs);
+    }
+}
+
 void PMcvControl::removeParticipant(const std::string& id, int64_t nowMs) {
     Part* pp = _part(id);
     if (!pp) return;

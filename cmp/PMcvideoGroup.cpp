@@ -403,6 +403,11 @@ void PMcvideoGroup::_natLatch(Peer& peer, McvChannel ch, const std::string& ip, 
             LOG_INFO("PMcvideoGroup", "[%s] %s dest follow (NAT) member=%s %s:%d", _groupId.c_str(), kName[ch],
                      peer.id.c_str(), ip.c_str(), port);
         }
+        // 제어 채널의 하향 경로가 이제 열렸다 — JOIN ② 때 SDP 주소로 나간 합류 알림(Idle·Notification)을 다시 보낸다(RCS-1).
+        if (ch == MCV_CH_CONTROL && now - peer.ctlResendUsec >= 2000000LL) {
+            peer.ctlResendUsec = now;
+            _ctl.resendJoinState(peer.id, _nowMs());
+        }
     }
 }
 
