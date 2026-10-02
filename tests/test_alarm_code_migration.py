@@ -632,6 +632,23 @@ class TestEventWording(unittest.TestCase):
             shutil.rmtree(d, ignore_errors=True)
 
 
+class TestAlarmClassMatchesCatalog(unittest.TestCase):
+    """구현 알람의 분류(type)는 카탈로그 정의 행(alarm_catalog.csv)의 type 과 같아야 한다 —
+    서비스 로그 기록 실패를 「저장소 장애」 로 띄우던 어긋남(정의는 observability_lost) 재발 방지."""
+
+    def test_module_and_oam_types_match_definition(self):
+        with open(os.path.join(_REPO, 'docs', 'design', 'alarm_catalog.csv'), encoding='utf-8') as f:
+            defs = {r['code']: r['type'] for r in csv.DictReader(f) if r['행'] == '정의' and r['구분'] == '알람'}
+        for m in ('csp', 'cmp', 'cmdp', 'csc'):
+            with open(os.path.join(_REPO, m, 'config', 'fm_catalog.json'), encoding='utf-8') as f:
+                for a in json.load(f)['alarms']:
+                    self.assertEqual(a['type'], defs.get(a['code']), f"{m} {a['code']}")
+        seed = [service_registry.normalize_alert_rule(r) for d in service_registry._load_seed_files()
+                for r in (d.get('alert_rules') or [])]
+        for r in service_registry.alert_rules({}) + seed:
+            self.assertEqual(r.get('type'), defs.get(r.get('code')), f"{r.get('check')} {r.get('code')}")
+
+
 class TestCatalogCsvInvariants(unittest.TestCase):
     """alarm_catalog.csv 불변식 (alarm_catalog.md §8)."""
 

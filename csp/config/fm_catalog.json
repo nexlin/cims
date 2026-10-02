@@ -118,7 +118,7 @@
       "recommended_action": "대국 상태·네트워크·방화벽(OPTIONS 응답) 확인. 회복은 recovery_probes 연속 성공 뒤 자동"
     },
     {
-      "type": "storage_failure",
+      "type": "retention_failure",
       "code": "A-PRC-013",
       "perceived_severity": "critical",
       "event_type": "processingError",
@@ -131,7 +131,7 @@
       "recommended_action": "ServiceLogging.Dir 볼륨(NAS/NFS) 마운트·권한·용량 확인. 회복되면 이후 기록은 재개되나 장애 구간 유실분은 params.dropped 로 산정"
     },
     {
-      "type": "storage_failure",
+      "type": "observability_lost",
       "code": "A-PRC-006",
       "perceived_severity": "major",
       "event_type": "processingError",

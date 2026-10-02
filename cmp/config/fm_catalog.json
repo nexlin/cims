@@ -14,7 +14,7 @@
       "recommended_action": "동시 호 수 확인, 풀 크기(RtpPoolSize 등) 증설, stale 세션 sweep 점검"
     },
     {
-      "type": "storage_failure",
+      "type": "retention_failure",
       "code": "A-PRC-017",
       "perceived_severity": "critical",
       "event_type": "processingError",
@@ -27,7 +27,7 @@
       "recommended_action": "녹취 볼륨(NAS/NFS) 마운트·권한·용량 확인·유실 구간 산정 (params.dropped)"
     },
     {
-      "type": "storage_failure",
+      "type": "observability_lost",
       "code": "A-PRC-006",
       "perceived_severity": "major",
       "event_type": "processingError",

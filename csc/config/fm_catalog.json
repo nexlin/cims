@@ -14,7 +14,7 @@
       "recommended_action": "DB 서버 상태·네트워크·계정 확인, csc.json CimsDatabase 설정 점검"
     },
     {
-      "type": "storage_failure",
+      "type": "observability_lost",
       "code": "A-PRC-006",
       "perceived_severity": "major",
       "event_type": "processingError",

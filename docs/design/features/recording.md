@@ -89,7 +89,7 @@ CMP는 트랜스코딩을 **절대 하지 않음**. raw 파일만 저장하고 �
 - RTP 리액터/제어 스레드는 트랙 상태·메타를 메모리에서만 관리하고 저장 연산을 op 로
   적재한다. `FILE*` 는 worker 전용 테이블에 산다.
 - 쓰기 실패(연속)·in-flight 정체(`ServiceLogging.StallSec`)·큐 포화(64MB/2만 op) 시
-  패킷 op 를 드롭하고 **A-PRC-017** record storage_failure 로 자기보고한다 — 장애 구간
+  패킷 op 를 드롭하고 **A-PRC-017** record retention_failure(보존 기록 실패) 로 자기보고한다 — 장애 구간
   녹취는 유실을 수용한다(미디어 볼륨이라 스풀 부적합). 회복 시 이후 세그먼트부터 재개.
 - **seq 시딩 비동기**: CMP 재기동 후 같은 세션 복귀 시 segments.jsonl 마지막 seq 는
   worker 가 비동기 계수한다(그룹 ADD 시 예약). 시딩 미도착으로 seq 가 겹쳐도 close op

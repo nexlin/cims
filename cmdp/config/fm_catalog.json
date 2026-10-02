@@ -14,7 +14,7 @@
       "recommended_action": "스토어 디렉토리 권한/마운트/디스크 용량 확인 (McDataFd.Dir)"
     },
     {
-      "type": "storage_failure",
+      "type": "observability_lost",
       "code": "A-PRC-006",
       "perceived_severity": "major",
       "event_type": "processingError",

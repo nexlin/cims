@@ -162,7 +162,7 @@
       "recommended_action": "DB 가용성/방화벽/연결설정 확인"
     },
     {
-      "type": "threshold_crossed",
+      "type": "capacity_threshold",
       "code": "A-QOS-024",
       "perceived_severity": "warning",
       "event_type": "qualityOfService",

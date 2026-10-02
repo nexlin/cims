@@ -101,7 +101,7 @@ csp 는 `CSipMessageLogger` 가 포맷/seq 를 맡고 writer 를 위임, csc 는
   비동기로 수행해 합류한다. 합류 전에 첫 write 가 오면 0 부터 시작 (리더 폴백 흡수).
 - **정지**: 저장소가 건강하면 flusher 드레인을 기다리고, 죽어 있으면 잔량을 스풀로 회수 후
   flusher 를 detach 한다 (NFS killable 대기라 프로세스 종료가 회수). 다음 기동이 재생한다.
-- **자기보고**: 폴백 진입 시 알람 `A-PRC-006 storage_failure`(mo=`<시스템ID>/<모듈>/service_log`)
+- **자기보고**: 폴백 진입 시 알람 `A-PRC-006 observability_lost`(관측 공백)(mo=`<시스템ID>/<모듈>/service_log`)
   open, 스풀 드레인 완료 시 close — 모듈별 감지 행은 [alarm_catalog.csv](../alarm_catalog.csv).
   스풀 용량 상한 `ServiceLogging.SpoolMaxMb`(기본 1024) 초과 시 오래된 스풀 파일부터
   폐기(폐기 줄 수는 알람 params `dropped` 로 노출).

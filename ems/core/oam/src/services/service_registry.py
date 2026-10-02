@@ -348,6 +348,11 @@ _LEGACY_SEED_ALERT_MSGS = frozenset({
 })
 
 
+# 분류(type) 이행 — 옛 seed 분류 그대로인 것만 seed 값으로(운영자가 바꾼 분류는 보존).
+#   rtp_pct_gte 는 「수용 상한 접근」 이라 capacity_threshold(alarm_catalog.md §4) — 옛 seed 는 threshold_crossed.
+_LEGACY_SEED_ALERT_TYPES = frozenset({('rtp_pct_gte', 'threshold_crossed')})
+
+
 def _migrate_seed_alert_msgs(cur: dict, doc: dict) -> int:
     """store descriptor(cur) 의 알람 규칙 중 seed(doc) 와 같은 규칙(check+target)의 옛 seed 문구를 갱신."""
     def _key(r):
@@ -364,6 +369,10 @@ def _migrate_seed_alert_msgs(cur: dict, doc: dict) -> int:
             if r.get(k) in _LEGACY_SEED_ALERT_MSGS and sr.get(k) and r.get(k) != sr.get(k):
                 r[k] = sr[k]
                 n += 1
+        if (r.get('check'), r.get('type')) in _LEGACY_SEED_ALERT_TYPES and sr.get('type') \
+                and r.get('type') != sr.get('type'):
+            r['type'] = sr['type']
+            n += 1
     return n
 
 
