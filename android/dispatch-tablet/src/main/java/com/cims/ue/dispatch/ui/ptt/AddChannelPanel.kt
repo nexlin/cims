@@ -44,6 +44,7 @@ import com.cims.ue.dispatch.ui.FilterPill
 import com.cims.ue.dispatch.ui.PersonAction
 import com.cims.ue.dispatch.ui.PersonEntry
 import com.cims.ue.dispatch.ui.PersonMenu
+import com.cims.ue.dispatch.ui.Pill
 import com.cims.ue.dispatch.ui.PillButton
 import com.cims.ue.dispatch.ui.SidePanelFrame
 import com.cims.ue.dispatch.ui.Tokens
@@ -64,7 +65,8 @@ data class UserRowUi(
  * 주소록 → 사용자 줄(순수 함수, 시험 대상). 나는 뺀다 — 나를 골라 통화를 걸거나 그룹에 두 번 넣을 일이 없다.
  * 상태는 [present](로스터에 접속으로 잡힌 번호, 정규형)가 준다.
  */
-internal fun userRows(book: DirectoryBook, me: String, present: Set<String>): List<UserRowUi> {
+internal fun userRows(book: DirectoryBook, me: String, present: Set<String>,
+                      statusOf: (String) -> String = { "" }): List<UserRowUi> {
     val meKey = DirectoryBook.normalize(me)
     return book.entries.asSequence()
         .filter { !it.external && it.msisdn.isNotBlank() && DirectoryBook.normalize(it.msisdn) != meKey }
@@ -72,8 +74,9 @@ internal fun userRows(book: DirectoryBook, me: String, present: Set<String>): Li
         .map { e ->
             val org = if (e.org.isBlank()) "" else book.orgPath(e.org).substringAfterLast(" › ").ifBlank { e.org }
             UserRowUi(e.msisdn, e.name.ifBlank { e.msisdn }, org,
-                listOf("PTT ${e.msisdn}", org).filter { it.isNotBlank() }.joinToString(" · "),
-                if (DirectoryBook.normalize(e.msisdn) in present) "접속" else "")
+                listOf("PTT ${com.cims.ue.dispatch.session.localNumber(e.msisdn)}", org).filter { it.isNotBlank() }.joinToString(" · "),
+                // 어느 채널에서 말하는지·참여 중인지(«순찰1 발언»·«순찰1 참여») — 모르고 부르지 않게. 그것을 모르면 «접속».
+                statusOf(e.msisdn).ifEmpty { if (DirectoryBook.normalize(e.msisdn) in present) "접속" else "" })
         }
         .sortedWith(compareBy({ it.status.isEmpty() }, { it.name }))
         .toList()
@@ -165,19 +168,26 @@ fun AddChannelPanel(
     onClose: () -> Unit,
     onGroup: () -> Unit,
     onPerson: (PersonAction, String) -> Unit,
+    /** 걸었다 — «채널» 면으로(다른 면에서 패널을 열어 걸면 새 카드가 보이지 않는다). */
+    onStarted: () -> Unit = {},
 ) {
     val book by channels.pttBook.collectAsStateWithLifecycle()
     val error by channels.originError.collectAsStateWithLifecycle()
     val bcHeld by channels.broadcastHeld.collectAsStateWithLifecycle()
     val holding = bcHeld == PttChannelsViewModel.ADHOC_BROADCAST
-    val rows = remember(book, present) { userRows(book, channels.myPttNumber, present) }
+    val cards by channels.cards.collectAsStateWithLifecycle()      // 발언자·세션이 바뀌면 줄의 상태도 다시 낸다
+    val rows = remember(book, present, cards) {
+        val status = channels.pttStatusMap()                  // 한 번 만들어 줄마다 찾는다
+        userRows(book, channels.myPttNumber, present) { n -> status[DirectoryBook.normalize(n)].orEmpty() }
+    }
     var query by remember { mutableStateOf("") }
     var emergency by remember { mutableStateOf(false) }
     var fullDuplex by remember { mutableStateOf(false) }
     val actions = addChannelActions(book, query, picked, canCreate, holding)
 
     // 걸었다 — 고름·입력을 비우고 패널을 닫는다(새 카드가 내 채널에 선다). 실패면 남겨 두고 사유를 적는다.
-    val done = { onClear(); query = ""; emergency = false; fullDuplex = false; onClose() }
+    //   고정(핀)한 패널은 닫지 않는다 — 연달아 부르려고 고정해 둔 것이다(데스크톱과 같다).
+    val done = { onClear(); query = ""; emergency = false; fullDuplex = false; if (!pinned) onClose(); onStarted() }
     // 애드혹 일제 통화를 놓았다(끝) — 누르는 동안은 닫지 않았다. 개시 실패면 고름·패널을 남긴다.
     var wasHolding by remember { mutableStateOf(false) }
     LaunchedEffect(holding) {
@@ -261,7 +271,7 @@ fun AddChannelPanelContent(
         // 고른 사람으로 하는 일 — 지금 걸기(개별·애드혹·일제) / 두고 쓰기(그룹 추가).
         Column(
             Modifier.fillMaxWidth()
-                .drawBehind { drawLine(p.ink, Offset(0f, 0f), Offset(size.width, 0f), 1.5.dp.toPx()) }
+                .drawBehind { drawLine(p.edge, Offset(0f, 0f), Offset(size.width, 0f), 1.dp.toPx()) }
                 .padding(start = 16.dp, end = 16.dp, top = 10.dp, bottom = 12.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
@@ -280,17 +290,17 @@ fun AddChannelPanelContent(
                 if (picked.isNotEmpty()) TextButton(onClick = onClear, enabled = !holding,
                     contentPadding = PaddingValues(horizontal = 6.dp)) { Text("선택 해제", fontSize = Type.meta) }
             }
-            error?.let { Text(it, fontSize = Type.meta, color = p.emergency) }
+            error?.let { Text(it, fontSize = Type.meta, color = p.emg) }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                PillButton("개별 통화", onPrivate, height = 44.dp, strongBorder = true,
+                PillButton("개별 통화", onPrivate, height = 44.dp, kind = Pill.LINE,
                     enabled = actions.canPrivate, modifier = Modifier.weight(1f))
-                PillButton("애드혹 통화", onAdhoc, height = 44.dp, strongBorder = true,
+                PillButton("애드혹 통화", onAdhoc, height = 44.dp, kind = Pill.LINE,
                     enabled = actions.canAdhoc, modifier = Modifier.weight(1f))
                 // 누르는 동안 개시+발언, 놓으면 끝 — 채널 상세의 [일제 통화] 와 같은 한 버튼. 누르는 동안 버튼이 사라지면 끝난다.
                 BroadcastHoldButton(enabled = actions.canBroadcast, held = holding,
                     onDown = onBroadcastDown, onUp = onBroadcastUp, height = 44.dp, modifier = Modifier.weight(1f))
             }
-            PillButton("그룹 추가 ›", onGroup, height = 44.dp, filled = true,
+            PillButton("그룹 추가 ›", onGroup, height = 44.dp, kind = Pill.INK,
                 enabled = actions.canGroup, modifier = Modifier.fillMaxWidth())
         }
     }
@@ -307,21 +317,21 @@ private fun UserRow(
     val p = Tokens.palette
     var menu by remember { mutableStateOf(false) }
     Row(
-        Modifier.fillMaxWidth().height(48.dp).background(if (selected) p.fill else p.paper)
+        Modifier.fillMaxWidth().height(48.dp).background(if (selected) p.primarySoft else p.paper)
             .drawBehind { drawLine(p.hair, Offset(0f, 0f), Offset(size.width, 0f), 1.dp.toPx()) }
             .clickable(onClick = onToggle)
             .padding(start = 16.dp, end = 4.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        Box(Modifier.size(22.dp).clip(RoundedCornerShape(4.dp)).background(if (selected) p.ink else p.paper)
-                .border(2.dp, p.ink, RoundedCornerShape(4.dp)), contentAlignment = Alignment.Center) {
-            if (selected) Icon(Icons.Filled.Check, contentDescription = null, tint = p.onInk, modifier = Modifier.size(14.dp))
+        Box(Modifier.size(22.dp).clip(RoundedCornerShape(5.dp)).background(if (selected) p.primary else p.paper)
+                .border(1.5.dp, if (selected) p.primary else p.edge, RoundedCornerShape(5.dp)), contentAlignment = Alignment.Center) {
+            if (selected) Icon(Icons.Filled.Check, contentDescription = null, tint = p.onPrimary, modifier = Modifier.size(14.dp))
         }
         Column(Modifier.weight(1f)) {
             Text(r.name, fontSize = Type.strong, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(r.meta, fontSize = Type.meta, color = p.muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
-        if (r.status.isNotEmpty()) Text(r.status, fontSize = Type.meta, color = p.ink)
+        if (r.status.isNotEmpty()) Text(r.status, fontSize = Type.meta, color = p.talkInk)
         Box {
             IconButton(onClick = { menu = true }, modifier = Modifier.size(36.dp)) {
                 Icon(Icons.Filled.MoreVert, contentDescription = "${r.name} 사람 메뉴", tint = p.muted, modifier = Modifier.size(18.dp))

@@ -32,18 +32,23 @@ private val THREAD = listOf(
     msg(5, "순찰 2조 교대 요청합니다 — 인원 2명 부족합니다. 지원 가능한지 회신 부탁드립니다", from = "이당직"),
     msg(6, "확인 중", out = true, state = SendState.PENDING),
     msg(7, "전송 실패한 메시지", out = true, state = SendState.FAILED),
+    // 파일(FD) — 받은 파일(아직 안 받음 → [받기]) · 올리는 중인 보낸 파일
+    msg(8, "", from = "이순경").copy(fileName = "현장사진_01.jpg", fileUrl = "https://csc/mcdata/fd/0",
+        fileSize = 1_258_291, fileType = "image/jpeg"),
+    msg(9, "", out = true, state = SendState.PENDING).copy(fileName = "순찰 구역 변경.pdf", fileSize = 348_160,
+        fileType = "application/pdf", transferNote = "올리는 중…"),
 )
 
 private val CHIPS = listOf(
-    ThreadChip("g1", "순찰1", 0, T0),
-    ThreadChip("g2", "상황실", 3, T0),
-    ThreadChip("+821012345678", "박현장", 1, T0),
-    ThreadChip("g3", "교통1", 0, T0),
+    ThreadChip("g1", "순찰1", 0, T0, last = "나: 순찰 구역 변경.pdf", group = true),
+    ThreadChip("g2", "상황실", 3, T0, last = "이당직: 확인 후 보고 드리겠습니다", group = true),
+    ThreadChip("+821012345678", "박현장", 1, T0, last = "교대 인원 2명 부족합니다"),
+    ThreadChip("g3", "교통1", 0, T0, last = "최순찰: 교차로 정체 해소", group = true),
 )
 
 @Preview(name = "④ 메시지 — 전체 화면", device = PreviewBody, showBackground = true)
 @Composable
-private fun PreviewMessages() = PreviewFrame {
+internal fun PreviewMessages() = PreviewFrame {
     Box(Modifier.fillMaxSize().padding(8.dp)) {
         MessagesContent(thread = THREAD, title = "순찰1", follow = true, groupId = "g1",
             threads = CHIPS, isGroup = true)

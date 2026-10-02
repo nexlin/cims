@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 앱 아이콘 — Windows 관제 앱과 같은 로고(남색 면 + 흰 «CIMS»). 전경은 gen-icon.ps1 이 그린다.
+     monochrome = Android 13+ 테마 아이콘(런처가 바탕색을 고른다). -->
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@color/ic_launcher_background" />
+    <foreground android:drawable="@mipmap/ic_launcher_foreground" />
+    <monochrome android:drawable="@mipmap/ic_launcher_foreground" />
+</adaptive-icon>

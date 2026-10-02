@@ -8,7 +8,6 @@ package com.cims.ue.dispatch
 import com.cims.ue.dispatch.ui.AppScreen
 import com.cims.ue.dispatch.ui.CallPane
 import com.cims.ue.dispatch.ui.DispatchMode
-import com.cims.ue.dispatch.ui.MoreItem
 import com.cims.ue.dispatch.ui.NavState
 import com.cims.ue.dispatch.ui.PttPane
 import com.cims.ue.dispatch.ui.SidePanel
@@ -44,8 +43,8 @@ class NavigationTest {
     }
 
     @Test fun `레일은 멀어도 한 번에 간다`() {
-        assertEquals(AppScreen.MORE, home.onNav(AppScreen.MORE).screen)
-        assertEquals(AppScreen.DISPATCH, home.onNav(AppScreen.MORE).onNav(AppScreen.DISPATCH).screen)
+        assertEquals(AppScreen.ADMIN, home.onNav(AppScreen.ADMIN).screen)
+        assertEquals(AppScreen.DISPATCH, home.onNav(AppScreen.ADMIN).onNav(AppScreen.DISPATCH).screen)
     }
 
     @Test fun `레일을 옮기면 고정하지 않은 패널은 닫히고 고정한 패널은 남는다`() {
@@ -55,12 +54,17 @@ class NavigationTest {
         assertEquals("돌아오면 그대로", ch, pinned.onNav(AppScreen.DISPATCH).panel)
     }
 
-    /** 같은 항목 재탭 = **그 메뉴의** 안쪽 닫기 — 관제는 패널, 더보기는 안쪽 화면. */
-    @Test fun `같은 레일 재탭은 제 메뉴의 안쪽만 닫는다`() {
+    /** [관제] 재탭 = 패널 닫기. 다른 레일 화면은 안쪽이 없어 재탭이 아무 일도 하지 않는다. */
+    @Test fun `같은 레일 재탭은 관제의 패널만 닫는다`() {
         assertNull(home.togglePanel(ch).onNav(AppScreen.DISPATCH).panel)
-        val more = NavState(AppScreen.MORE, more = MoreItem.ADMIN)
-        assertNull(more.onNav(AppScreen.MORE).more)
+        val groups = NavState(AppScreen.PTT_GROUPS)
+        assertEquals(groups, groups.onNav(AppScreen.PTT_GROUPS))
         assertEquals(home, home.onNav(AppScreen.DISPATCH))
+    }
+
+    /** 레일 = 데스크톱과 같은 넷(F1~F4) — [설정] 은 화면이 아니라 시트라 여기 없다. */
+    @Test fun `레일은 관제 이력 PTT 그룹 관리 순서다`() {
+        assertEquals(listOf("관제", "이력", "PTT 그룹", "관리"), AppScreen.entries.map { it.label })
     }
 
     // ── 모드·면 ───────────────────────────────────────────────────────────
@@ -104,7 +108,7 @@ class NavigationTest {
         listOf(
             home.toPage(pageOf(PttPane.MESSAGES)),
             home.toPage(pageOf(CallPane.LOG)),
-            NavState(AppScreen.MORE, more = MoreItem.PTT_GROUPS),
+            NavState(AppScreen.PTT_GROUPS),
             NavState(AppScreen.HISTORY),
         ).forEach { start ->
             val s = start.openChannel("g1")
@@ -148,7 +152,7 @@ class NavigationTest {
     @Test fun `되돌릴 때마다 화면이 바뀐다`() {
         val starts = listOf(
             home.togglePanel(ch).togglePin().onNav(AppScreen.HISTORY),
-            NavState(AppScreen.MORE, more = MoreItem.ADMIN, panel = ch, pinned = true),
+            NavState(AppScreen.ADMIN, panel = ch, pinned = true),
             home.toPage(pageOf(CallPane.MESSAGES)).togglePanel(SidePanel.Event(3)).togglePin(),
             home.togglePanel(SidePanel.AddChannel).showPanel(SidePanel.NewGroup),
             NavState(AppScreen.HISTORY, callPane = CallPane.LOG, pttPane = PttPane.EVENTS))

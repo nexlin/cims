@@ -25,12 +25,23 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import com.cims.ue.dispatch.ui.MainActivity
 
+/**
+ * 화면(Activity)이 보이는가 — 착신을 배너로 알릴지 알림으로 알릴지를 가른다. Activity 의 `onStart`/`onStop` 이 쓴다
+ * (화면이 꺼지면 `onStop` 이라 «안 보임» 이다 — 잠금 화면 위 전체 화면 인텐트가 그때 선다).
+ */
+object UiPresence {
+    private val _visible = kotlinx.coroutines.flow.MutableStateFlow(false)
+    val visible: kotlinx.coroutines.flow.StateFlow<Boolean> = _visible
+    fun set(visible: Boolean) { _visible.value = visible }
+}
+
 class IncomingAlert(private val context: Context) {
 
     private val nm = NotificationManagerCompat.from(context)
     private var ringtone: Ringtone? = null
     private var loop: Handler? = null
     private var shownCallId: Int? = null
+    private var notified = false
 
     init { createChannel() }
 
@@ -39,20 +50,32 @@ class IncomingAlert(private val context: Context) {
      *
      * 같은 호가 계속 울리는 동안 알림을 다시 만들지 않는다 — 다시 만들면 소리가 처음부터 나고
      * 전체 화면 인텐트가 되풀이된다. 착신이 없어지면 전부 내린다.
+     *
+     * **알림은 화면이 보이지 않을 때만 띄운다**([uiVisible] — [UiPresence]). 화면이 보이면 배너가 착신을 말하고, 그 위에
+     * 뜨는 헤드업 알림은 배너의 [응답]·[거절] 을 가려 첫 누름을 삼킨다. 벨소리는 어느 쪽이든 울린다. 울리는 도중에 화면을
+     * 벗어나면 그때 띄우고, 돌아오면 내린다.
      */
-    fun apply(top: SessionItem?, label: String) {
+    fun apply(top: SessionItem?, label: String, uiVisible: Boolean = false) {
         if (top == null) return clear()
-        if (shownCallId == top.callId) return
-        shownCallId = top.callId
-        notify(top.callId, label)
-        startRinging()
+        if (shownCallId != top.callId) {
+            shownCallId = top.callId
+            notified = false
+            startRinging()
+        }
+        if (uiVisible) {
+            if (notified) { notified = false; runCatching { nm.cancel(NOTIFICATION_ID) } }
+        } else if (!notified) {
+            notified = true
+            notify(top.callId, label)
+        }
     }
 
     fun clear() {
         if (shownCallId == null) return
         shownCallId = null
         stopRinging()
-        runCatching { nm.cancel(NOTIFICATION_ID) }
+        if (notified) runCatching { nm.cancel(NOTIFICATION_ID) }
+        notified = false
     }
 
     private fun notify(callId: Int, label: String) {

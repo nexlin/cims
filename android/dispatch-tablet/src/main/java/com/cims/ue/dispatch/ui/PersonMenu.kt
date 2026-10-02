@@ -44,7 +44,7 @@ data class PersonEntry(
     /** 메뉴 머리 — 이름 · PTT · 내선(가진 것만). */
     val head: String
         get() = listOf(name,
-                       if (hasPtt) "PTT $pttNumber" else "",
+                       if (hasPtt) "PTT ${com.cims.ue.dispatch.session.localNumber(pttNumber)}" else "",
                        if (hasLine) "내선 $extension" else "")
             .filter { it.isNotEmpty() }.joinToString(" · ")
 }
@@ -89,7 +89,10 @@ internal fun mergePeople(
             orgPath = book.orgPath(e.org),
         )
         if (cur == null) { byKey[key] = entry; return }
-        if (cur.hasPtt && cur.hasLine) { byKey[num] = entry; return }   // 회선이 이미 둘 — 따로 세운다
+        // 같은 종류의 회선이 이미 차 있다(전화 둘 — 이동+유선, 또는 같은 조직의 동명이인) — 다른 번호면 따로 세운다. 덮어쓰지도
+        //   버리지도 않는다(버리면 그 번호가 통합 검색에 없다).
+        val taken = if (isPtt) cur.pttNumber else cur.extension
+        if (taken.isNotEmpty()) { if (taken != num) byKey[num] = entry; return }
         byKey[key] = cur.copy(
             pttNumber = cur.pttNumber.ifEmpty { entry.pttNumber },
             extension = cur.extension.ifEmpty { entry.extension },
@@ -156,6 +159,7 @@ fun PersonMenu(
 ) {
     if (person == null) return
     DropdownMenu(expanded = expanded, onDismissRequest = onDismiss) {
+        ForwardPttKeys()                // 메뉴도 제 창이다 — 열려 있는 동안 측면 PTT 키가 죽지 않게
         Column(Modifier.padding(horizontal = 12.dp, vertical = 4.dp)) {
             Text(person.head, fontWeight = FontWeight.Bold, fontSize = Type.strong)
             if (person.orgPath.isNotEmpty())

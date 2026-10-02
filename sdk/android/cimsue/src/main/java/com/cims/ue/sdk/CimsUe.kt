@@ -136,6 +136,7 @@ class CimsUe(private val io: CoroutineDispatcher = Dispatchers.IO) : AutoCloseab
     private val _transmission = lossy<TransmissionEvent>()
     private val _reception = lossy<ReceptionEvent>()
     private val _videoRequest = lossy<VideoRequestEvent>()
+    private val _nonAcknowledged = lossy<CallInfo>()
     private val _stopped = lossy<Unit>()
 
     // ③ 유실 불가 — 무제한 버퍼. 소비는 한 번뿐이라 수집자를 하나만 둔다(Service 의 세션).
@@ -164,6 +165,8 @@ class CimsUe(private val io: CoroutineDispatcher = Dispatchers.IO) : AutoCloseab
     /** 통화 중 영상 전환(1:1 호, RFC 3264 §8.1) — 상대의 요청(RECEIVED → [Call.answerVideoRequest])·내 요청의 결과. 권위는
      *  `callInfo().videoRequest` 스냅샷(② 정책). */
     val videoRequest: SharedFlow<VideoRequestEvent> = _videoRequest.asSharedFlow()
+    /** 내가 연 그룹 통화에 필수 멤버가 응답하지 않은 채 진행됐다(TS 24.379 §6.3.3.3) — `nonAcknowledgedUsers` 가 그 목록. */
+    val nonAcknowledged: SharedFlow<CallInfo> = _nonAcknowledged.asSharedFlow()
     val stopped: SharedFlow<Unit> = _stopped.asSharedFlow()
 
     /** MCData SDS 수신. **유실되지 않는다** — 수집자가 붙기 전 것도 쌓인다. 수집자는 하나만 둔다. */
@@ -455,6 +458,7 @@ class CimsUe(private val io: CoroutineDispatcher = Dispatchers.IO) : AutoCloseab
             _condition.emitLossy(ConditionChange(CallInfo.of(info), ConditionCause.entries.getOrElse(cause.swigValue()) { ConditionCause.LOCAL }))
         }
         override fun onEmergencyAlert(alert: JniEmergencyAlert) { _emergencyAlert.trySend(EmergencyAlert.of(alert)) }
+        override fun onNonAcknowledgedUsers(info: JniCallInfo) { _nonAcknowledged.emitLossy(CallInfo.of(info)) }
 
         // ③ 유실 불가 — trySend 는 UNLIMITED 채널이라 닫히지 않은 한 실패하지 않는다.
         override fun onSds(msg: JniSdsMessage) { _sds.trySend(SdsMessage.of(msg)) }

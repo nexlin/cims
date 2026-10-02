@@ -6,7 +6,6 @@ package com.cims.ue.dispatch.ui
 
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -15,16 +14,25 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 
 /**
- * 상태·분류를 한 낱말로 붙이는 라벨. 누를 수 없다 — 누르는 것은 `FilterChip`·`AssistChip` 이다.
+ * 상태·분류를 한 낱말로 붙이는 라벨. 누를 수 없다 — 누르는 것은 칩·알약 버튼이다.
  *
- * @param color 글자색. 배경은 같은 색의 옅은 면이다(단일 투명도 — 화면마다 달라지지 않게).
+ * 색조가 정해진 상태(긴급·임박·통화 중·부재·청취·감청·대표…)는 [style] 로 준다 — [Label] 과 같은 토큰이다.
+ *
  * @param leading 앞에 두는 간격. 이름 뒤에 붙일 때 4dp, 문장 뒤면 0.
  */
 @Composable
-fun Tag(text: String, color: Color = MaterialTheme.colorScheme.primary, leading: Int = 4) {
-    Surface(color = color.copy(alpha = 0.20f), shape = RoundedCornerShape(4.dp),
+fun Tag(text: String, style: LabelStyle = LabelStyle.FILL, leading: Int = 4) {
+    Label(text, style, Modifier.padding(start = leading.dp))
+}
+
+/**
+ * 색을 직접 주는 라벨 — 토큰에 없는 색(레인 색처럼 값에서 나온 것)에만 쓴다. 배경은 그 색의 옅은 면(단일 투명도).
+ */
+@Composable
+fun Tag(text: String, color: Color, leading: Int = 4) {
+    Surface(color = color.copy(alpha = 0.16f), shape = RoundedCornerShape(4.dp),
         modifier = Modifier.padding(start = leading.dp)) {
         Text(text, Modifier.padding(horizontal = 5.dp, vertical = 1.dp),
-            fontSize = Type.micro, color = color)
+            fontSize = Type.micro, color = color, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
     }
 }

@@ -35,7 +35,7 @@ fun rememberCsvExport(): (String, () -> String) -> Unit {
         val text = pending
         pending = null
         if (uri == null || text == null) return@rememberLauncherForActivityResult
-        scope.launch {
+        scope.launch(com.cims.ue.dispatch.session.UnhandledGuard) {
             val r = withContext(Dispatchers.IO) {
                 runCatching {
                     context.contentResolver.openOutputStream(uri)?.use { it.write(BOM + text.toByteArray(Charsets.UTF_8)) }
@@ -48,5 +48,12 @@ fun rememberCsvExport(): (String, () -> String) -> Unit {
                 r.exceptionOrNull()?.message.orEmpty())
         }
     }
-    return { name, content -> pending = content(); launcher.launch(name) }
+    return { name, content ->
+        pending = content()
+        // 문서 저장 화면(DocumentsUI)이 막힌 기기에서는 여는 것부터 실패한다 — 앱이 죽지 않고 까닭을 말한다
+        runCatching { launcher.launch(name) }.onFailure {
+            pending = null
+            DispatchService.session?.notify(NoticeLevel.ERROR, "CSV 저장 화면을 열 수 없습니다", it.message.orEmpty())
+        }
+    }
 }

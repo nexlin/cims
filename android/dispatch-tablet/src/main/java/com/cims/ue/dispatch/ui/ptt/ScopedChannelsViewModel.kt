@@ -35,8 +35,11 @@ data class ScopedCard(
     val listenSession: SessionItem? = null,
 ) {
     val listening: Boolean get() = listenSession?.isLive == true
-    val hasSession: Boolean get() = group.hasSession
+    /** 진행 중인가 — 로스터로 알거나 **내가 청취 중**이다(로스터가 아직 안 왔어도 청취 중인 채널은 활성이다). */
+    val hasSession: Boolean get() = group.hasSession || listening
     val participants: Int get() = group.connectedCount
+    /** 일제 통화(TS 24.379 §4.12) — 청취 중인 세션이 알려 준 호 속성. */
+    val broadcast: Boolean get() = listenSession?.isBroadcast == true
     val emergency: Boolean get() = listenSession?.isEmergency == true
     val imminentPeril: Boolean get() = listenSession?.isImminentPeril == true
     val speaker: String get() = listenSession?.speaker.orEmpty()
@@ -51,7 +54,9 @@ data class ScopedCard(
         listening && speaker.isNotEmpty() -> "발언 $speaker"
         listening -> "청취 중 · 발언 없음"
         hasSession -> "세션 진행 중 · 참가 $participants"
-        group.sessionSinceMs != null -> "마지막 세션"
+        group.lastSessionEndMs != null -> "마지막 세션 " +
+            java.text.SimpleDateFormat("HH:mm", java.util.Locale.ROOT).format(java.util.Date(group.lastSessionEndMs)) +
+            (group.lastSessionDurMs / 1000).let { if (it > 0) " · %d:%02d".format(it / 60, it % 60) else "" }
         else -> "대기"
     }
 }
@@ -95,7 +100,7 @@ class ScopedChannelsViewModel(private val s: DispatchSession) : ScreenViewModel(
                 }
         }.stateIn(scope, SharingStarted.Eagerly, emptyList())
 
-    /** 청취 범위 목록 — 필터·검색을 건 [allCards]. 긴급(임박 포함) › 진행 › 대기 순. 데스크톱과 같은 정렬이다. */
+    /** 청취 범위 목록 — 필터·검색을 건 [allCards]. 긴급(임박 포함) › 청취 중 › 진행 › 대기 순. 데스크톱과 같은 정렬이다. */
     val cards: StateFlow<List<ScopedCard>> =
         combine(allCards, _filter, _query) { all, filter, q ->
             all
@@ -109,7 +114,9 @@ class ScopedChannelsViewModel(private val s: DispatchSession) : ScreenViewModel(
                             ScopeFilter.LISTENING -> c.listening
                         }
                 }
+                // 긴급(임박 포함) › 청취 중 › 진행 › 대기 — 내가 듣고 있는 채널이 대기 채널들 사이에 묻히지 않는다
                 .sortedWith(compareByDescending<ScopedCard> { it.emergency || it.imminentPeril }
+                    .thenByDescending { it.listening }
                     .thenByDescending { it.hasSession }
                     .thenBy { it.title })
         }.stateIn(scope, SharingStarted.Eagerly, emptyList())

@@ -29,7 +29,9 @@ import com.cims.ue.dispatch.session.floorRequest
 import com.cims.ue.dispatch.session.joinGroup
 import com.cims.ue.dispatch.session.leave
 import com.cims.ue.dispatch.session.setEmergency
+import com.cims.ue.dispatch.session.cancelCondition
 import com.cims.ue.dispatch.session.toggleMuted
+import com.cims.ue.dispatch.session.videoCalls
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -75,6 +77,14 @@ data class ChannelCard(
     val queued: Boolean get() = session?.isQueued == true
     val speaker: String get() = session?.speaker.orEmpty()
     val floorNote: String get() = session?.floorNote.orEmpty()
+    /** 발언·요청·대기 중 — 잠금 발언은 요청해 둔 대상이 **전부** 여기서 벗어나야 풀린다. */
+    val talkBusy: Boolean get() = speaking || requesting || queued
+    /** 남은 발언 0~1(Floor Granted 의 Duration 기준) · 시한 임박 — 발언 바 게이지. */
+    val talkGauge: Float get() = session?.talkGauge ?: 0f
+    val talkLimitNear: Boolean get() = session?.talkLimitNear == true
+    val speakerElapsedMs: Long get() = session?.speakerElapsedMs ?: 0L
+    /** 내가 건 개별 통화(반이중)·애드혹 그룹 통화 — 세션이 서면 단일 발언 대상이 된다(«내가 건 호 우선»). */
+    val isOwnOutgoing: Boolean get() = kind != CardKind.MEMBER && session?.info?.dir == com.cims.ue.sdk.CallDir.OUTGOING
     val participants: Int get() = group?.connectedCount ?: session?.adhocMembers?.size ?: 0
     val memberCount: Int get() = group?.memberCount ?: 0
 
@@ -83,7 +93,8 @@ data class ChannelCard(
      * 전이중 개별 통화는 마이크가 늘 열려 있어 floor 가 없다(음소거로 다룬다 — [canMute]). 남이 연 일제 통화의 수신 멤버는
      * Floor Taken 의 Permission 0 이라 요청할 수 없다(TS 24.380 §6.3.4.4.2 3d).
      */
-    val canCheck: Boolean get() = joined && session?.isFullDuplex != true && session?.canRequestFloor != false
+    val canCheck: Boolean get() = joined && session?.isFullDuplex != true && session?.canRequestFloor != false &&
+        !(isBroadcast && !isBroadcastInitiator)     // 남이 연 일제 통화 — Permission 을 받기 전(착신 직후)에도 ✓ 가 켜지지 않는다
 
     /** 일제 통화(TS 24.379 §4.12) — 서버가 알린 호 속성. */
     val isBroadcast: Boolean get() = session?.isBroadcast == true
@@ -117,6 +128,7 @@ data class ChannelCard(
         val base = when {
             speaker.isNotEmpty() -> "발언 $speaker" + fmtSpeaker()
             joined && floorNote.isNotEmpty() -> floorNote
+            joined && session?.isFullDuplex == true -> "전이중"      // floor 가 없다 — «발언 없음» 은 반이중의 말이다
             joined -> "발언 없음"
             kind == CardKind.MEMBER -> "멤버 $memberCount"
             else -> ""
@@ -128,6 +140,38 @@ data class ChannelCard(
 
     private fun fmtSpeaker(): String =
         session?.speakerElapsedMs?.takeIf { it > 0 }?.let { " " + fmtElapsed(it) } ?: ""
+}
+
+/**
+ * 애드혹 카드·칩의 이름 — 내가 연 것은 **초대한 사람 앞 둘 + «+n»**(데스크톱과 같다), 남이 연 것은 «애드혹 · <개시자>».
+ * 전부 «애드혹» 이면 애드혹 통화가 둘일 때 카드·발언 바 칩을 구별할 수 없다.
+ */
+internal fun adhocTitle(invited: List<String>, initiator: String = ""): String = when {
+    invited.isNotEmpty() -> invited.take(2).joinToString(" · ") + if (invited.size > 2) " +${invited.size - 2}" else ""
+    initiator.isNotBlank() -> "애드혹 · $initiator"
+    else -> "애드혹"
+}
+
+/**
+ * 발언 대상·발언 소유의 규칙 — 순수 함수라 JVM 에서 시험한다(dispatch_desktop_ui.md §4.1).
+ *
+ * **동시 발언 = 단말 팬아웃.** 3GPP 에 UE 의 다중 그룹 동시 발언 절차가 없어, 대상 세션마다 floor 를 따로 요청하고 코어가
+ * 승인된 세션마다 같은 마이크를 결선한다(세션별 floor participant). 그래서 대상 집합에 **상한이 없다** — 서버 변경도 없다.
+ */
+internal object TalkRules {
+    /** 카드 ✓ — 대상 집합에 넣고 뺀다. 발언 요청을 할 수 없는 카드는 그대로. */
+    fun toggle(targets: Set<String>, id: String, canCheck: Boolean = true): Set<String> = when {
+        !canCheck -> targets
+        id in targets -> targets - id
+        else -> targets + id
+    }
+
+    /**
+     * 잠금 발언이 풀려야 하나 — 요청해 둔 호가 **한 번이라도 발언·요청·대기에 들었고**([seenBusy]) 지금은 **전부** 벗어났을 때.
+     * 한 채널의 회수·시한(TalkLimit·Revoked·Denied)이 나머지 채널의 발언을 풀지 않는다(데스크톱 `IsLocked && !IsTalking`).
+     * 요청 직후(아직 아무도 «요청 중» 이 아니다)에는 풀지 않는다 — 그걸 끝으로 읽으면 누르자마자 잠금이 풀린다.
+     */
+    fun lockEnded(seenBusy: Boolean, busyNow: Boolean): Boolean = seenBusy && !busyNow
 }
 
 internal fun fmtElapsed(ms: Long): String {
@@ -142,6 +186,10 @@ data class TalkTargetChip(val card: ChannelCard) {
     val granted: Boolean get() = card.speaking
     val requesting: Boolean get() = card.requesting
     val queued: Boolean get() = card.queued
+    /** 거부·회수 — floor 사유가 남아 있는데 승인·요청·대기가 아니다(칩이 빨강으로 선다). */
+    val denied: Boolean get() = !granted && !requesting && !queued && card.floorNote.isNotEmpty()
+    /** 내가 연 일제 통화 — 발언을 놓으면 코어가 호를 해제한다(TS 24.380 §6.2.4.6.4). 발언 바 문구가 그것을 미리 말한다. */
+    val broadcastInitiator: Boolean get() = card.isBroadcastInitiator
     val stateText: String get() = when {
         granted -> "승인"
         queued -> card.floorNote.ifEmpty { "대기" }
@@ -155,15 +203,6 @@ class PttChannelsViewModel(private val s: DispatchSession) : ScreenViewModel() {
 
     /** 정책 게이트(user profile ruleset) — 채널 상세 [긴급 해제] 가 읽는다(내 긴급 ∨ cancelGroupEmergency). */
     val capabilities: StateFlow<com.cims.ue.sdk.Capabilities> = s.capabilities
-
-    /**
-     * 한 번에 발언할 수 있는 채널 수.
-     *
-     * 다중 채널 동시 발언은 **단말 팬아웃**으로 푼다 — 3GPP 에 UE 의 다중 그룹 동시 발언 절차가 없다.
-     * 코어에 발언 대상 집합 API(`setTalkTargets`)가 들어오기 전까지 1개다. 발언 바·칩·게이지는 이미
-     * 집합 기준이라 이 상수만 바꾸면 열린다(dispatch_desktop_ui.md §13).
-     */
-    val maxTargets: Int get() = if (MULTI_TALK_SUPPORTED) Int.MAX_VALUE else 1
 
     // ── 포커스(보는 채널) ──
     private val _selectedId = MutableStateFlow<String?>(null)
@@ -186,6 +225,12 @@ class PttChannelsViewModel(private val s: DispatchSession) : ScreenViewModel() {
      */
     private var speakingCallIds: Set<Int> = emptySet()
 
+    /** 요청해 둔 호가 발언·요청·대기에 든 것을 한 번이라도 봤나 — 잠금 발언 해제 판정([TalkRules.lockEnded]). 누를 때마다 다시 센다. */
+    private var lockSeenBusy = false
+
+    /** 이미 본 «내가 건 호» — 처음 설 때 한 번만 단일 발언 대상으로 올린다(그 뒤 관제사가 바꾼 대상을 되돌리지 않는다). */
+    private val ownCallsSeen = HashSet<Int>()
+
     /**
      * 참여를 누른 채널 — 세션이 서면 **자동으로 단일 발언 대상**이 된다.
      *
@@ -194,6 +239,8 @@ class PttChannelsViewModel(private val s: DispatchSession) : ScreenViewModel() {
      * 포커스와 발언 대상이 독립이라는 계약은 그대로다(둘을 따로 바꿀 수 있다).
      */
     private var pendingTargetId: String? = null
+    /** 대기 중인 참여의 세션이 한 번 목록에 올랐다 — 그 뒤에 사라지면 참여가 실패로 끝난 것이다. */
+    private var pendingSeen = false
 
     /** 지금 누르고 있는 일제 통화(아래 «일제 통화 한 버튼») — 카드 id, 애드혹 일제 통화면 [ADHOC_BROADCAST]. null = 없음.
      *  [cards] 의 onEach 가 읽으므로 그보다 먼저 선언한다(생성 중 Eagerly 수집이 초기화 전 값을 읽지 않게). */
@@ -210,7 +257,8 @@ class PttChannelsViewModel(private val s: DispatchSession) : ScreenViewModel() {
      */
     val cards: StateFlow<List<ChannelCard>> =
         combine(s.groups, s.sessions, s.messages) { groups, sessions, messages ->
-            val memberCards = groups.filter { it.isMember }.sortedBy { it.name }.map { g ->
+            // 서버(GMS) 목록 순 그대로 — 이름순으로 세우면 같은 계정의 핀 번호가 데스크톱과 다르고, 그룹이 늘 때마다 번호가 밀린다
+            val memberCards = groups.filter { it.isMember }.map { g ->
                 ChannelCard(
                     id = g.id, kind = CardKind.MEMBER, title = g.name, group = g,
                     session = sessions.firstOrNull {
@@ -225,16 +273,43 @@ class PttChannelsViewModel(private val s: DispatchSession) : ScreenViewModel() {
                     ChannelCard(
                         id = se.channelId,
                         kind = if (se.kind == SessionKind.PTT_PRIVATE) CardKind.PRIVATE else CardKind.ADHOC,
-                        title = se.title.ifEmpty { se.info.groupId },
+                        title = if (se.kind == SessionKind.PTT_ADHOC)
+                                    adhocTitle(se.adhocMembers.map { m -> s.displayName(m) },
+                                        se.info.mcptt.callingUserId.takeIf { it.isNotBlank() && se.info.dir == com.cims.ue.sdk.CallDir.INCOMING }
+                                            ?.let { s.displayName(it) }.orEmpty())
+                                else se.title.ifEmpty { se.info.groupId },
                         session = se)
                 }
-            memberCards + adhocCards
+            // 카드 id 가 목록 키다 — 같은 상대와의 개별 통화가 겹쳐도(내 발신과 상대 발신이 엇갈림) 한 장만 세운다
+            (memberCards + adhocCards).distinctBy { it.id }
         }.onEach { list ->
-            // 참여가 성립하면(세션이 붙어 canCheck) 대기 중이던 채널을 발언 대상으로 올린다.
+            // 참여가 성립하면(세션이 붙어 canCheck) 대기 중이던 채널을 발언 대상으로 올린다. 판정은 **이번 목록**으로 한다 —
+            //   `cards.value` 는 이 블록이 끝난 뒤에야 바뀐다.
             pendingTargetId?.let { id ->
-                if (list.firstOrNull { it.id == id }?.canCheck == true) {
-                    setSingleTarget(id)
-                    pendingTargetId = null
+                val c = list.firstOrNull { it.id == id }
+                when {
+                    c?.canCheck == true -> { applyTargets(setOf(id), list); pendingTargetId = null }
+                    c?.session != null -> pendingSeen = true
+                    // 참여가 성립 없이 끝났다(4xx·취소) — 남겨 두면 한참 뒤 그 그룹에 선 착신 세션을 «내가 참여한 것» 으로 읽어
+                    //   지금 말하던 채널의 발언권을 놓고 대상을 바꾼다.
+                    pendingSeen -> pendingTargetId = null
+                }
+            }
+            // «내가 건 호 우선» — 내가 건 애드혹 그룹 통화·반이중 개별 통화는 단일 발언 대상이 된다(발신자가 곧 말하려는 채널).
+            list.filter { it.isOwnOutgoing }.forEach { c ->
+                val callId = c.session?.callId ?: return@forEach
+                if (ownCallsSeen.add(callId) && c.canCheck) applyTargets(setOf(c.id), list)
+            }
+            ownCallsSeen.retainAll(list.mapNotNull { it.session?.callId }.toSet())
+            // 잠금 발언 — 요청해 둔 호가 전부 끝나야 풀린다(한 채널의 회수·시한이 나머지 발언을 풀지 않는다).
+            if (_locked.value) {
+                val busy = list.any { it.session?.callId in speakingCallIds && it.talkBusy }
+                if (busy) lockSeenBusy = true
+                else if (TalkRules.lockEnded(lockSeenBusy, busyNow = false)) {
+                    // 카드가 사라진(멤버에서 빠진) 호는 «끝남» 으로 읽히지만 세션은 살아 있을 수 있다 — 소유를 버리기 전에 놓는다
+                    val carded = list.mapNotNull { it.session?.callId }.toSet()
+                    (speakingCallIds - carded).filter(s::isCallAlive).forEach { release(it) }
+                    _locked.value = false; speakingCallIds = emptySet()
                 }
             }
             // 일제 통화 한 버튼으로 연 호가 끝났다(서버·코어가 먼저 끝냄) — 누름 상태를 푼다. 목록에 오르기 전(개시 직후)은 끝이 아니다
@@ -245,10 +320,7 @@ class PttChannelsViewModel(private val s: DispatchSession) : ScreenViewModel() {
             }
             // 세션이 끝났거나 전이중으로 바뀐 대상은 스스로 빠진다 — 없는 세션에 floor 를 걸지 않게.
             val ok = list.filter { it.canCheck }.map { it.id }.toSet()
-            if (!ok.containsAll(_targetIds.value)) {
-                _targetIds.value = _targetIds.value intersect ok
-                if (_targetIds.value.isEmpty()) _locked.value = false
-            }
+            if (!ok.containsAll(_targetIds.value)) applyTargets(_targetIds.value intersect ok, list)
         }.stateIn(scope, SharingStarted.Eagerly, emptyList())
 
     /** 발언 바의 대상 칩 — 체크된 카드의 투영. */
@@ -277,7 +349,6 @@ class PttChannelsViewModel(private val s: DispatchSession) : ScreenViewModel() {
     /** 카드 탭 — 같은 카드를 다시 누르면 접힌다. **발언 대상은 건드리지 않는다.** */
     fun focus(id: String) {
         _selectedId.value = if (_selectedId.value == id) null else id
-        _selectedId.value?.let { s.markRead(it) }
     }
 
     /**
@@ -288,25 +359,24 @@ class PttChannelsViewModel(private val s: DispatchSession) : ScreenViewModel() {
      */
     fun setFocus(id: String) {
         if (id.isBlank()) return
+        // 읽음으로 닫지 않는다 — 채널 상세를 여는 것은 글을 읽은 것이 아니다(메시지는 다른 면에 있다). 읽음은 «메시지» 면에서
+        //   그 대화가 보일 때 된다(`PttMessagesViewModel`).
         _selectedId.value = id
-        s.markRead(id)
     }
 
     // ── 발언 대상 조작 ──
     /**
-     * 카드 체크 — 발언 대상 집합에 넣고 뺀다. **포커스는 건드리지 않는다.**
-     * 상한([maxTargets])을 넘으면 가장 오래된 것을 밀어낸다(팬아웃 전에는 1개라 교체가 된다).
+     * 카드 체크 — 발언 대상 집합에 넣고 뺀다. **포커스는 건드리지 않는다.** 여럿을 켜면 한 번의 PTT 가 그 전부로 나간다
+     * (동시 발언 = 단말 팬아웃 — [TalkRules]). 참여하지 않은 채널은 대상이 될 수 없다 — 왜인지 말해 준다.
      */
     fun toggleTarget(id: String) {
         val card = cards.value.firstOrNull { it.id == id } ?: return
-        if (!card.canCheck) return
-        val cur = _targetIds.value
-        applyTargets(when {
-            id in cur -> cur - id
-            cur.size < maxTargets -> cur + id
-            maxTargets == 1 -> setOf(id)                 // 교체
-            else -> cur.drop(1).toSet() + id
-        })
+        if (!card.canCheck) {
+            if (card.session == null && card.group != null)
+                s.notify(com.cims.ue.dispatch.session.NoticeLevel.INFO, "${card.title} — 먼저 [참여]하세요")
+            return
+        }
+        applyTargets(TalkRules.toggle(_targetIds.value, id))
     }
 
     /**
@@ -318,10 +388,10 @@ class PttChannelsViewModel(private val s: DispatchSession) : ScreenViewModel() {
      *
      * 불변: 대상에서 빠진 호는 **반드시** `floorRelease` 를 받고 `speakingCallIds` 가 그만큼 줄어든다.
      */
-    private fun applyTargets(next: Set<String>) {
+    private fun applyTargets(next: Set<String>, list: List<ChannelCard> = cards.value) {
         _targetIds.value = next
-        val stillTarget = cards.value.filter { it.id in next }.mapNotNull { it.session?.callId }.toSet()
-        (speakingCallIds - stillTarget).forEach { release(it) }
+        val stillTarget = list.filter { it.id in next }.mapNotNull { it.session?.callId }.toSet()
+        (speakingCallIds - stillTarget).filter(s::isCallAlive).forEach { release(it) }    // 끝난 호에는 보낼 것이 없다
         speakingCallIds = speakingCallIds intersect stillTarget
         // 대상이 없거나 발언하던 채널이 전부 빠졌으면 잠금도 의미가 없다 — 화면과 실제를 맞춘다.
         if (next.isEmpty() || speakingCallIds.isEmpty()) _locked.value = false
@@ -348,6 +418,9 @@ class PttChannelsViewModel(private val s: DispatchSession) : ScreenViewModel() {
     }
 
     // ── 발언 ──
+    /** 누름의 차례 — 늦게 도는 뒤처리(잠금 풀기)가 **그 누름**의 것일 때만 손대게 한다. */
+    private var pressSeq = 0
+
     /** PTT 누름 — 대상 **전부**에 floor 요청. 잠금 발언이면 토글로 동작한다. */
     fun pttDown(lockEnabled: Boolean) {
         if (lockEnabled && _locked.value) { releaseAll(); _locked.value = false; return }
@@ -356,8 +429,23 @@ class PttChannelsViewModel(private val s: DispatchSession) : ScreenViewModel() {
         if (callIds.isEmpty()) return
         (speakingCallIds - callIds).forEach { release(it) }     // 이전 요청이 남아 있으면 먼저 푼다
         speakingCallIds = callIds
-        scope.launch { callIds.forEach { s.floorRequest(it) } }
+        lockSeenBusy = false
+        val press = ++pressSeq
+        // 잠금은 요청을 띄우기 **전에** 적는다 — 요청이 중단 없이 곧바로 실패하면(영상 우선·엔진 없음) 아래 블록이 그 자리에서
+        //   끝까지 돌아 잠금을 풀고, 뒤에 적으면 그 위에 다시 «잠금» 이 덮인다.
         if (lockEnabled) _locked.value = true
+        scope.launch {
+            val requested = callIds.count { s.floorRequest(it).ok }
+            // 하나도 요청되지 않았다(영상 우선으로 막힘 · 명령 실패) — 소유와 잠금을 남기면 말하지 않는데 «잠금» 으로 보인다.
+            if (requested == 0 && speakingCallIds == callIds) { speakingCallIds = emptySet(); _locked.value = false }
+            // 요청은 갔는데 «요청·대기·발언» 인 카드를 한 번도 못 본 채 끝났다(곧바로 거부 — 상태가 한꺼번에 접혀 중간이 보이지
+            //   않았다). 잠금이 풀릴 계기가 없어 «잠금» 이 남고 다음 누름이 풀기만 한다 — 잠시 뒤에도 전부 한가하면 푼다.
+            else if (lockEnabled) {
+                kotlinx.coroutines.delay(LOCK_SETTLE_MS)
+                if (press == pressSeq && _locked.value && !lockSeenBusy && speakingCallIds == callIds &&
+                    cards.value.none { it.session?.callId in callIds && it.talkBusy }) { releaseAll(); _locked.value = false }
+            }
+        }
     }
 
     /** PTT 뗌 — 잠금 중이면 무시(다음 누름이 푼다). */
@@ -398,6 +486,9 @@ class PttChannelsViewModel(private val s: DispatchSession) : ScreenViewModel() {
     /** ViewModel 이 정리될 때도 발언을 놓는다 — 최후의 방어선. */
     override fun close() {
         releaseAll(viaSession = true)     // 내 스코프는 곧 끊긴다 — 해제는 세션이 끝까지 보낸다
+        // 일제 통화 한 버튼을 켠 채 닫힌다 — 놓은 것으로 친다. 개시가 아직 돌아오지 않았으면 돌아오는 대로 끝낸다
+        //   (개시 블록은 세션 스코프에서 돈다 — `beginBroadcast`).
+        if (_broadcastHeld.value != null) { bcReleased = true; if (bcCallId >= 0) finishBroadcast() }
         super.close()
     }
 
@@ -432,16 +523,35 @@ class PttChannelsViewModel(private val s: DispatchSession) : ScreenViewModel() {
         bcCallId = -1
         bcReleased = false
         bcSeen = false
-        scope.launch {
+        // 앞선 개시(개별·애드혹)의 실패 사유가 남아 있으면 지운다 — 남으면 이번 일제 통화가 성공해도 패널이 «실패» 로 읽어
+        //   고름·패널을 정리하지 않는다.
+        if (key == ADHOC_BROADCAST) _originError.value = null
+        // 편성 그룹의 일제 통화는 세션이 서면 **단일 발언 대상**이 된다(데스크톱 `Operation.Broadcast → SetSingleTarget`) — 누르고
+        //   말하는 동안 발언 바가 «대상 없음» 이 아니라 그 채널·남은 발언·«놓으면 끝납니다» 를 말한다. 애드혹은 «내가 건 호 우선».
+        if (key != ADHOC_BROADCAST) { pendingTargetId = key; pendingSeen = false }
+        // 세션 스코프에서 돈다 — 화면이 닫혀 이 VM 의 스코프가 끊겨도 개시한 호의 id 를 받아 끝낼 수 있어야 한다. 받지 못하면
+        //   암묵 승인된 발언권을 든 일제 통화가 아무도 놓지 못한 채 남는다.
+        s.scopeLaunch {
             val r = start()
-            if (_broadcastHeld.value != key) return@launch
+            if (_broadcastHeld.value != key) return@scopeLaunch
             if (!r.ok) {
                 // [채널 추가] 패널의 [일제 통화] 는 패널이 그 자리에 적는다. 채널 상세의 [일제 통화] 는 적을 자리가 없어 토스트다
                 //   (§6.2a-2) — 패널 오류로 두면 보이지 않다가 다음에 패널을 열 때 엉뚱하게 뜬다.
                 if (key == ADHOC_BROADCAST) _originError.value = r.reason else s.report(TextArea.PTT_JOIN, r)
-                clearBroadcastHold(); return@launch
+                if (pendingTargetId == key) pendingTargetId = null
+                clearBroadcastHold(); return@scopeLaunch
             }
             bcCallId = r.value!!
+            // 개시가 돌아오기 전에 호가 이미 끝났다(곧바로 거절 — 403·404·480). 호 이벤트는 id 를 모를 때 지나갔으므로 여기서
+            //   풀지 않으면 «일제 통화 중» 이 남고, 끝낼 때 낡은 id 로 다른 호를 끊게 된다.
+            if (!s.isCallAlive(bcCallId)) {
+                // 서지 못한 호를 기다리던 발언 대상도 지운다 — 남으면 뒤에 그 그룹으로 온 착신이 단일 발언 대상이 되며 지금 발언을 놓는다
+                if (pendingTargetId == key) pendingTargetId = null
+                clearBroadcastHold(); return@scopeLaunch
+            }
+            // 호 이벤트가 먼저 와 세션이 이미 목록에 올라 있었다 — 그때는 id 를 몰라 «봤다» 를 적지 못했다. 여기서 맞춰 두어야
+            //   그 호가 끝날 때(곧바로 거절 포함) 누름 상태가 풀린다.
+            if (s.sessions.value.any { it.callId == bcCallId }) bcSeen = true
             if (bcReleased) finishBroadcast()
         }
     }
@@ -473,11 +583,31 @@ class PttChannelsViewModel(private val s: DispatchSession) : ScreenViewModel() {
     /** PTT 주소록 — 개별·애드혹 대상 후보. 세션이 로그인 때 받아 둔 것을 본다. */
     val pttBook: StateFlow<DirectoryBook> = s.pttBook
 
+    /** 영상 호(MCVideo) — 카드 1줄 «영상 n» 태그의 원천(§6.14). 영상 호는 카드를 만들지 않는다. */
+    val videoCalls: StateFlow<List<com.cims.ue.dispatch.session.VideoCall>> get() = s.videoCalls
+
     /** 내 PTT 번호 — 로스터 칩의 «나» 표시. */
     val myPttNumber: String get() = userPart(s.myPttId)
 
-    /** 번호 → 이름(양 주소록). 로스터 칩 라벨. */
-    fun nameOf(number: String): String = s.displayLabel(number).takeIf { it != number }.orEmpty()
+    /** 청취가 로스터에 드러나지 않는가(역할 `listen_visibility`) — 채널 상세가 청취자 줄을 세울지 가른다. */
+    val listenHidden: Boolean get() = s.listenHidden
+
+    /** PTT 가입자의 지금 상태(«<그룹> 발언»·«<그룹> 참여») — 사용자 패널의 줄. */
+    fun pttStatusOf(number: String): String = s.pttStatusOf(number)
+    /** 같은 것을 목록용으로 한 번에(번호 정규형 → 상태). */
+    fun pttStatusMap(): Map<String, String> = s.pttStatusMap()
+
+    /**
+     * 1초 틱 — 세션이 있는 동안만 간다. 카드·채널 상세의 «경과»·«발언 n초» 는 계산 속성이라 스스로 알리지 않는다 — 화면이
+     * 이 값을 읽어 1초마다 다시 그린다(통화 쪽 `CallDeskViewModel` 과 같은 틱).
+     */
+    val tick: StateFlow<Long> get() = s.tick
+
+    /**
+     * 번호 → 이름(양 주소록, 없으면 빈 문자열). 로스터 칩·접속자 줄의 라벨 — **이름만**이다(데스크톱 `RosterLine` 과 같다).
+     * PTT 번호는 길어서 «번호 이름» 으로 병기하면 카드 한 줄에 한 사람도 못 들어간다. 번호는 채널 상세의 사람 행이 따로 보인다.
+     */
+    fun nameOf(number: String): String = s.nameOrEmpty(number)
 
     /**
      * 사람 메뉴가 쓰는 사람 목록 — ③ VM 과 같은 순수 함수(`mergePeople`)를 쓴다.
@@ -520,22 +650,30 @@ class PttChannelsViewModel(private val s: DispatchSession) : ScreenViewModel() {
         }
     }
 
-    fun join(card: ChannelCard) {
-        pendingTargetId = card.id
-        _selectedId.value = card.id
-        scope.launch { s.joinGroup(card.id) }
-    }
+    fun join(card: ChannelCard) = join(card, emergency = false)
 
-    fun joinEmergency(card: ChannelCard) {
+    fun joinEmergency(card: ChannelCard) = join(card, emergency = true)
+
+    private fun join(card: ChannelCard, emergency: Boolean) {
         pendingTargetId = card.id
+        pendingSeen = false
         _selectedId.value = card.id
-        scope.launch { s.joinGroup(card.id, emergency = true) }
+        scope.launch {
+            // 명령이 곧바로 실패했다 — 세션이 서지 않으니 대기 대상도 거둔다
+            if (!s.joinGroup(card.id, emergency = emergency).ok && pendingTargetId == card.id) pendingTargetId = null
+        }
     }
 
     /** 진행 중 긴급 상향·하향 — 채널 상세의 [긴급]·[긴급 해제](확인은 패널이 받았다). */
     fun setEmergency(card: ChannelCard, on: Boolean) {
         val callId = card.session?.callId ?: return
         scope.launch { s.setEmergency(callId, on) }
+    }
+
+    /** 채널 상세 [긴급 해제]·[임박 해제] — 배너와 **같은 경로**(`cancelCondition`: 성립·진행 중 변경·청취 leg 판정 + ⑤ «해제 요청»). */
+    fun cancelCondition(card: ChannelCard) {
+        val callId = card.session?.callId ?: return
+        scope.launch { s.cancelCondition(callId) }
     }
 
     fun leave(card: ChannelCard) {
@@ -557,9 +695,9 @@ class PttChannelsViewModel(private val s: DispatchSession) : ScreenViewModel() {
     }
 
     companion object {
-        /** 코어에 발언 대상 집합 API 가 들어오면 true 로 바꾼다 — 그것 하나로 다중 발언이 열린다. */
-        const val MULTI_TALK_SUPPORTED = false
         /** [broadcastHeld] 의 애드혹 일제 통화 값 — 카드 id 와 겹치지 않는다(카드 id 는 그룹 id·adhoc-·call-). */
         const val ADHOC_BROADCAST = "#adhoc-broadcast"
+        /** 잠금 발언 — 요청 뒤 이만큼 지나도 요청·대기·발언인 카드가 없으면 잠금을 푼다. */
+        const val LOCK_SETTLE_MS = 2_000L
     }
 }

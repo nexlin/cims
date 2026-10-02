@@ -75,4 +75,13 @@ class RosterPreviewTest {
         val p = rosterPreview(listOf(r("1003"), r("1001"), r("1002")), speaker = "", me = "")
         assertEquals(listOf("1003", "1001", "1002"), p.chips.map { it.number })
     }
+
+    // 목록 키가 번호다 — 같은 사람이 tel:·sip: 두 꼴로 실려 와도 칩은 하나(둘이면 목록이 같은 키로 죽는다).
+    @Test fun `같은 사람이 두 URI 꼴로 와도 한 칩이다`() {
+        val p = rosterPreview(
+            listOf(RosterEntry("tel:+82510001002", "connected"), RosterEntry("sip:+82510001002@ptt.test", "connected"),
+                   RosterEntry("tel:+82510001003", "connected")),
+            speaker = "", me = "", max = 10)
+        assertEquals(listOf("+82510001002", "+82510001003"), p.chips.map { it.number })
+    }
 }

@@ -53,6 +53,8 @@ data class MemberChip(
     val dialog: DialogRow? = null,
     /** 내가 이 회선을 감청 중인가. */
     val monitoring: Boolean = false,
+    /** 감청 범위가 있는가(`monitorScope != none`) — 없으면 [청취] 를 세우지 않는다(누르면 403 이다). */
+    val inScope: Boolean = true,
 ) {
     val ringing: Boolean get() = dialog?.isEarly == true && dialog.isIncomingLeg
     val talking: Boolean get() = dialog?.isConfirmed == true
@@ -64,7 +66,7 @@ data class MemberChip(
     /** 남의 링잉만 당겨받는다(내 것은 응답이다). */
     val canPickup: Boolean get() = ringing && !isMe
     /** 남의 통화만 청취한다. 인가는 서버가 한다(403 이면 거절). */
-    val canMonitor: Boolean get() = talking && !isMe && !monitoring
+    val canMonitor: Boolean get() = talking && !isMe && !monitoring && inScope
 }
 
 /** 대표번호로 들어온 호 하나 — 포크된 leg 들을 발신자 기준으로 묶는다. */
@@ -91,6 +93,8 @@ data class CallCard(
     val dtmfOpen: Boolean = false,
     val dtmfSent: String = "",
     val transferOpen: Boolean = false,
+    /** 대표번호로 온 호인가 — `P-Called-Party-ID`(RFC 3455)가 **내 대표번호**일 때(`DispatchSession.isPilot`). */
+    val viaPilot: Boolean = false,
 ) {
     val callId: Int get() = session.callId
     val peer: String get() = session.title.ifEmpty { userPart(session.info.remoteUri) }
@@ -98,8 +102,6 @@ data class CallCard(
     val active: Boolean get() = session.isActive
     val held: Boolean get() = session.info.state == CallState.HELD
     val muted: Boolean get() = session.info.muted
-    /** 대표번호로 온 호인가 — `P-Called-Party-ID`(RFC 3455). */
-    val viaPilot: Boolean get() = session.info.calledParty.isNotEmpty()
     val stateText: String get() = when {
         incoming -> "착신"; held -> "보류"; active -> "통화"; else -> "연결 중"
     }
@@ -186,8 +188,8 @@ data class LiveCallRow(
         else -> "연결 중"
     }
 
-    /** 지정 픽업 — 울리는 **타인** 회선만. 내 전화는 배너·카드에서 받는다. */
-    val canPickup: Boolean get() = ringing && !talking && !mine
+    /** 지정 픽업 — 울리는 **타인의 착신** 회선만(그룹원이 **거는 중**인 호는 당겨받을 것이 없다 — 404). 내 전화는 배너·카드에서 받는다. */
+    val canPickup: Boolean get() = legs.any { it.isEarly && it.isIncomingLeg } && !talking && !mine
     /** 감청 — 확립된 **타인** 통화이고 청취 범위가 있을 때(최종 판정은 서버). */
     val canMonitor: Boolean get() = talking && !mine && !monitoring && inScope
     /** 픽업 대상 번호 — 울리는 착신 leg 의 감시 대상. */
@@ -203,6 +205,12 @@ data class LiveCallRow(
  */
 /** 결합 판정에 쓰는 시각 근접 창 — 같은 통화의 두 leg 은 거의 동시에 관측된다(§4.4). */
 internal const val PAIR_WINDOW_MS = 5_000L
+
+/** DTMF «보냄» 줄에 보이는 자릿수. */
+internal const val DTMF_SHOWN = 24
+
+/** 응답된 대표번호 호가 대기열에 남는 시간 — 누가 받았는지 읽고 나면 내려간다. */
+internal const val QUEUE_ANSWERED_KEEP_MS = 3_000L
 
 /**
  * dialog 행을 통화 단위로 묶는다.
@@ -260,21 +268,34 @@ class CallDeskViewModel(private val s: DispatchSession) : ScreenViewModel() {
     private val _transferTarget = MutableStateFlow("")
     val transferTarget: StateFlow<String> = _transferTarget.asStateFlow()
 
+    init {
+        // 전달·DTMF 칸은 **그 호**의 것이다 — 호가 끝나면 닫고 비운다(데스크톱은 호 카드가 들고 카드와 함께 사라진다). 호 번호는
+        //   다시 쓰이므로, 남겨 두면 다음 호의 카드가 전달 칸이 열린 채로 서고 앞 통화에서 친 대상으로 전달된다.
+        scope.launch {
+            s.sessions.collect { list ->
+                val live = list.filter { it.kind == SessionKind.PHONE_CALL && it.isLive }.mapTo(HashSet()) { it.callId }
+                _transferFor.value?.let { if (it !in live) { _transferFor.value = null; _transferTarget.value = "" } }
+                _dtmfFor.value?.let { if (it !in live) { _dtmfFor.value = null; _dtmfSent.value = "" } }
+            }
+        }
+    }
+
     /** 그룹원 띠 — 전화 그룹원(`dispatch.members` 중 내 그룹). PTT 전용 가입자는 뺀다. */
     val members: StateFlow<List<MemberChip>> =
         combine(s.dialogs, s.sessions, s.tick) { dialogs, sessions, _ ->
             val d = s.dispatch
             val me = s.profile.value?.phoneService?.msisdn.orEmpty()
+            val inScope = d.monitorScope != "none"
             d.members
                 .filter { it.volteAor.isNotEmpty() && it.groupId == d.groupId }
                 .map { m ->
-                    val row = dialogs.firstOrNull {
-                        userPart(it.watched) == userPart(m.volteAor) && !it.isTerminated
-                    }
+                    // 한 회선에 통화와 링잉이 겹치면 **통화**를 보인다(데스크톱과 같다 — 먼저 온 것을 보이면 갱신마다 바뀐다)
+                    val mine = dialogs.filter { userPart(it.watched) == userPart(m.volteAor) && !it.isTerminated }
+                    val row = mine.firstOrNull { it.isConfirmed } ?: mine.firstOrNull()
                     MemberChip(
                         aor = m.volteAor, number = userPart(m.volteAor),
                         name = m.name, isMe = userPart(m.volteAor) == userPart(me),
-                        dialog = row,
+                        dialog = row, inScope = inScope,
                         monitoring = row != null && sessions.any {
                             it.kind == SessionKind.PHONE_MONITOR && it.info.joinedDialog == row.info.callId
                         })
@@ -286,8 +307,12 @@ class CallDeskViewModel(private val s: DispatchSession) : ScreenViewModel() {
      * 포크된 그룹원 leg 들은 «누가 울리는지» 로만 쓴다(TS 24.239 병렬 호출).
      */
     val queue: StateFlow<List<QueueItem>> =
-        combine(s.dialogs, s.sessions) { dialogs, sessions ->
+        combine(s.dialogs, s.sessions, s.tick) { dialogs, sessions, _ ->
             dialogs.filter { s.isPilot(it.watched) && !it.isTerminated }
+                // 응답된 호는 3초 보이고 내려간다(누가 받았는지 읽을 시간) — 통화가 끝날 때까지 대기열에 두면 «기다리는 호» 가
+                //   아닌 것이 주황 카드와 배지로 남는다(데스크톱 `CallDeskViewModel` 과 같다). 같은 발신자는 한 줄.
+                .filterNot { it.isConfirmed && it.elapsedMs > QUEUE_ANSWERED_KEEP_MS }
+                .distinctBy { userPart(it.info.remoteIdentity) }
                 .map { pilot ->
                     val caller = userPart(pilot.info.remoteIdentity)
                     val peers = dialogs.filter {
@@ -314,29 +339,44 @@ class CallDeskViewModel(private val s: DispatchSession) : ScreenViewModel() {
     val live: StateFlow<List<LiveCallRow>> =
         combine(s.dialogs, s.sessions, s.tick) { dialogs, sessions, _ ->
             val inScope = s.dispatch.monitorScope != "none"
-            combineDialogs(dialogs).map { legs ->
+            // 대표번호 dialog 는 행으로 세우지 않는다 — 대기열이 그 호를 말하고, 여기 섞으면 한 통화가 «대표 ↔ 발신자» 와
+            //   «그룹원 ↔ 발신자» 두 줄이 돼 같은 통화에 감청을 두 번 걸게 된다. 그 발신자의 그룹원 leg 에 [대표] 를 붙인다.
+            val pilotCallers = dialogs.filter { s.isPilot(it.watched) && !it.isTerminated }
+                .map { userPart(it.info.remoteIdentity) }.toSet()
+            combineDialogs(dialogs.filterNot { s.isPilot(it.watched) }).map { legs ->
                 val a = legs.first()
                 val tap = sessions.firstOrNull { se ->
                     se.kind == SessionKind.PHONE_MONITOR &&
                         legs.any { se.info.joinedDialog == it.info.callId }
                 }
+                // 왼쪽 = 건 사람, 오른쪽 = 받은 사람(RFC 4235 direction — 감시 대상이 받는 쪽이면 뒤집는다)
+                val watchedLabel = s.displayLabel(a.watched)
+                val remoteLabel = s.displayLabel(a.info.remoteIdentity)
                 LiveCallRow(
                     legs = legs,
-                    aLabel = s.displayLabel(a.watched),
-                    bLabel = s.displayLabel(a.info.remoteIdentity),
-                    viaPilot = legs.any { s.isPilot(it.watched) },
+                    aLabel = if (a.isIncomingLeg) remoteLabel else watchedLabel,
+                    bLabel = if (a.isIncomingLeg) watchedLabel else remoteLabel,
+                    viaPilot = legs.any { userPart(it.info.remoteIdentity) in pilotCallers },
                     mine = legs.any { s.isMine(it.watched) },
                     monitoring = tap != null,
                     inScope = inScope,
                     tap = tap)
-            }
+            }.sortedByDescending { it.monitoring }        // 청취 중인 통화가 맨 위(안정 정렬 — 그 아래는 링잉 › 최근)
         }.stateIn(scope, SharingStarted.Eagerly, emptyList())
 
     /**
      * 감청이 상대에게 숨겨지는가 — 서버가 준 역할 속성이다(`listen_visibility`, dispatch_center.md §5.6).
      * 화면이 정하지 않으므로 흐름이 아니라 값 하나로 든다.
      */
-    val listenHidden: Boolean get() = s.dispatch.listenVisibility != "transparent"
+    val listenHidden: Boolean get() = s.listenHidden
+
+    /** 감시 중인 회선의 dialog — 주소록 줄의 «통화 중»·«링잉» 이 이것을 따라 다시 그려진다. */
+    val dialogs: StateFlow<List<DialogRow>> = s.dialogs
+    fun lineStatusOf(number: String): String = s.lineStatusOf(number)
+
+    /** 내 전화 번호(비교 정규형) — 주소록 목록에서 나를 뺀다. */
+    val myPhoneKey: String get() =
+        com.cims.ue.dispatch.session.DirectoryBook.normalize(userPart(s.profile.value?.phoneService?.msisdn.orEmpty()))
 
     /** ⑥ 행의 [청취] — 확립된 leg 으로 Join 한다(RFC 3911 `a=recvonly`). */
     fun monitorLive(row: LiveCallRow) {
@@ -361,7 +401,7 @@ class CallDeskViewModel(private val s: DispatchSession) : ScreenViewModel() {
             val xferFor = a[3] as Int?
             // **살아 있는 호만.** 끝난 호는 ⑥ 내역이 맡는다 — 카드로 남으면 조작 버튼이 붙는다.
             sessions.filter { it.kind == SessionKind.PHONE_CALL && it.isLive }
-                .map { CallCard(it, dtmfOpen = it.callId == dtmfFor, dtmfSent = if (it.callId == dtmfFor) sent else "",
+                .map { CallCard(it, viaPilot = s.isPilot(it.info.calledParty), dtmfOpen = it.callId == dtmfFor, dtmfSent = if (it.callId == dtmfFor) sent else "",
                                 transferOpen = it.callId == xferFor) }
         }.stateIn(scope, SharingStarted.Eagerly, emptyList())
 
@@ -426,14 +466,15 @@ class CallDeskViewModel(private val s: DispatchSession) : ScreenViewModel() {
     fun dial() {
         val n = _dialNumber.value.trim()
         if (n.isEmpty()) return
-        scope.launch { s.dial(n); _dialNumber.value = "" }
+        // 걸렸을 때만 비운다 — 실패했는데 번호가 사라지면 다시 쳐야 한다(데스크톱 `Dial`)
+        scope.launch { if (s.dial(n).ok && _dialNumber.value.trim() == n) _dialNumber.value = "" }
     }
 
-    /** 주소록·최근·다이얼패드에서 바로 건다 — 입력칸을 거치지 않는다. */
+    /** 주소록·최근·번호칸의 제안에서 바로 건다 — 입력칸을 거치지 않는다. 걸렸으면 치던 것을 비운다(제안 팝업도 닫힌다). */
     fun dialTo(number: String) {
         val n = number.trim()
         if (n.isEmpty()) return
-        scope.launch { s.dial(n); _dialNumber.value = "" }
+        scope.launch { if (s.dial(n).ok) _dialNumber.value = "" }
     }
 
     /** **전화** 주소록(§6.2b) — 주소록 시트가 읽는다. PTT 번호는 전화로 걸리지 않으므로 섞지 않는다. */
@@ -475,8 +516,8 @@ class CallDeskViewModel(private val s: DispatchSession) : ScreenViewModel() {
     fun openDtmf(c: CallCard) { _dtmfFor.value = c.callId; _dtmfSent.value = "" }
     fun closeDtmf() { _dtmfFor.value = null; _dtmfSent.value = "" }
     fun sendDtmf(c: CallCard, digit: String) {
-        _dtmfSent.value += digit
-        scope.launch { s.sendDtmf(c.callId, digit) }
+        // 보낸 것만 적는다 — 실패한 숫자가 «보냄» 줄에 남지 않게. 길어지면 뒤 24자만 보인다(데스크톱과 같다).
+        scope.launch { if (s.sendDtmf(c.callId, digit).ok) _dtmfSent.value = (_dtmfSent.value + digit).takeLast(DTMF_SHOWN) }
     }
 
     // 전달 — blind(REFER) 와 상담(원 통화 보류 + 상담 호 → [전달 완결], Replaces). 데스크톱 CallDeskViewModel 과 같다.

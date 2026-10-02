@@ -27,7 +27,8 @@ import kotlinx.coroutines.launch
 
 class DispatchService : UeForegroundService() {
 
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    // 미처리 예외는 프로세스를 죽이지 않는다([UnhandledGuard]) — 진행 중인 통화·무전이 한 조회의 예외로 끊기지 않게
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate + UnhandledGuard)
 
     /** 착신 알림·벨소리 — 화면이 꺼져 있어도 울려야 한다(§6.2). */
     private val alert by lazy { IncomingAlert(applicationContext) }
@@ -63,9 +64,34 @@ class DispatchService : UeForegroundService() {
         observeIncoming(s)                  // 착신 알림·벨소리
         netWatcher.start()                  // 망 복귀·전환 → 곧바로 재등록
         // 저장된 자격이 있으면 화면 없이도 등록까지 되돌린다(부팅·프로세스 복귀).
-        if (s.hasSavedLogin) scope.launch {
-            if (s.resume().ok) s.start()
-            updateNotification()
+        autoLogin(s)
+    }
+
+    private var autoLoginJob: kotlinx.coroutines.Job? = null
+
+    /**
+     * 자동 로그인 — **될 때까지 물러나며 다시 건다.** 부팅 직후에는 Wi-Fi 가 아직 붙지 않았을 수 있고, 한 번 실패로 그치면
+     * 사람이 비밀번호를 넣을 때까지 미등록이라 착신·그룹콜을 전부 놓친다. 망이 돌아오면 곧바로 다시 건다([netWatcher]).
+     * 그치는 때 = 로그인됨 · 저장된 자격이 없어짐(폐기·만료 — 사람이 로그인해야 한다) · 사람이 로그인을 시도함.
+     */
+    private fun autoLogin(s: DispatchSession) {
+        if (!s.hasSavedLogin || autoLoginJob?.isActive == true) return
+        autoLoginJob = scope.launch {
+            var wait = AUTO_LOGIN_RETRY_MS
+            var hard = 0
+            while (s.hasSavedLogin && !s.manualLoginTried) {
+                val r = s.resumeAndStart()
+                updateNotification()
+                if (r.ok) break
+                // 서버에 닿았는데도 안 되는 것(회선이 전부 회수됨·기동 실패)은 몇 번만 — 끝없이 다시 걸면 1분마다 로그인 화면이
+                //   새로 서며 치던 것이 지워진다. 닿지 못한 것(음수 코드)은 닿을 때까지 건다.
+                //   «닿았다» = 서버가 답했거나(코드 ≥ 0) 프로파일까지 받았는데 기동이 안 됐다.
+                val reached = r.code >= 0 || s.profile.value != null
+                if (reached && ++hard >= AUTO_LOGIN_HARD_LIMIT) break
+                if (!reached) hard = 0
+                kotlinx.coroutines.delay(wait)
+                wait = (wait * 2).coerceAtMost(AUTO_LOGIN_RETRY_MAX_MS)
+            }
         }
     }
 
@@ -77,7 +103,9 @@ class DispatchService : UeForegroundService() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_SHUTDOWN -> {
-                session?.logout()
+                // 종료는 로그아웃이 아니다 — 등록은 풀되 저장된 자동 로그인은 남긴다(다음 기동이 이어 로그인한다).
+                autoLoginJob?.cancel()
+                session?.logout(forgetLogin = false)
                 stopSelf()
                 return START_NOT_STICKY
             }
@@ -103,10 +131,11 @@ class DispatchService : UeForegroundService() {
      */
     private fun observeIncoming(s: DispatchSession) {
         scope.launch {
-            s.incoming.collect { list ->
-                val top = list.firstOrNull()
-                alert.apply(top, top?.let { s.displayLabel(it.info.remoteUri) }.orEmpty())
-            }
+            // 화면이 보이는 동안은 배너가 말한다 — 알림(헤드업)은 화면을 벗어났을 때만(§6.2a)
+            kotlinx.coroutines.flow.combine(s.incoming, UiPresence.visible) { list, visible -> list.firstOrNull() to visible }
+                .collect { (top, visible) ->
+                    alert.apply(top, top?.let { s.displayLabel(it.info.remoteUri) }.orEmpty(), uiVisible = visible)
+                }
         }
     }
 
@@ -137,7 +166,20 @@ class DispatchService : UeForegroundService() {
      * `NetworkWatcher` 가 한다(등록 직후 지금 망의 첫 알림은 거르고, 망 없이 기동했으면 처음 서는 망을 변화로 본다) —
      * 변화면 코어에 알린다(`handleNetworkChange` — 전송 재수립·재등록은 코어 몫).
      */
-    private val netWatcher by lazy { NetworkWatcher(this) { session?.handleNetworkChange() } }
+    private val netWatcher by lazy {
+        NetworkWatcher(this) {
+            // 알림은 ConnectivityManager 의 스레드에서 온다 — 세션·`autoLoginJob` 은 메인에서만 만진다
+            scope.launch {
+                val s = session ?: return@launch
+                s.handleNetworkChange()
+                // 로그인 전(자동 로그인이 망 없이 실패한 뒤)이면 물러남을 기다리지 않고 곧바로 다시 건다
+                if (s.state.value == SessionState.FAILED || s.state.value == SessionState.LOGGED_OUT) {
+                    autoLoginJob?.cancel()
+                    autoLogin(s)
+                }
+            }
+        }
+    }
 
     override fun onDestroy() {
         netWatcher.close()
@@ -167,6 +209,11 @@ class DispatchService : UeForegroundService() {
     }
 
     companion object {
+        /** 자동 로그인 재시도 — 5초에서 두 배씩 1분까지 물러난다(망 복귀 통지는 기다리지 않고 곧바로). */
+        private const val AUTO_LOGIN_RETRY_MS = 5_000L
+        private const val AUTO_LOGIN_RETRY_MAX_MS = 60_000L
+        private const val AUTO_LOGIN_HARD_LIMIT = 3
+
         /** 프로세스 안의 단일 세션. Activity·ViewModel 이 이것을 본다. */
         @Volatile
         var session: DispatchSession? = null

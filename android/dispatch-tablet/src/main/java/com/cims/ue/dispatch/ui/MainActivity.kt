@@ -33,6 +33,7 @@ import com.cims.ue.dispatch.session.SessionState
 import androidx.activity.compose.BackHandler
 import androidx.compose.material.icons.automirrored.filled.Message
 import com.cims.ue.dispatch.ui.ptt.ChannelPanel
+import com.cims.ue.dispatch.ui.ptt.VideoSection
 import com.cims.ue.dispatch.ui.ptt.ChannelsPane
 import com.cims.ue.dispatch.ui.ptt.AddChannelPanel
 import com.cims.ue.dispatch.ui.groups.NewGroupPanel
@@ -64,14 +65,21 @@ class MainActivity : ComponentActivity() {
         // 세션(엔진)은 서비스가 든다 — Activity 보다 오래 산다.
         DispatchService.start(this)
         setContent {
-            // 테마는 설정을 따른다(바꾸면 곧바로) — 세션이 서기 전에는 기본(어둡게)으로 선다.
+            // 테마는 설정을 따른다(바꾸면 곧바로) — 세션이 서기 전에는 기본(밝게)으로 선다.
             val session by vm.sessionFlow.collectAsStateWithLifecycle()
-            val dark = session?.settingsFlow?.collectAsStateWithLifecycle()?.value?.dark ?: true
+            val dark = session?.settingsFlow?.collectAsStateWithLifecycle()?.value?.dark ?: false
             // 시스템 막대 아이콘도 테마를 따른다 — 밝은 바탕에 흰 아이콘이면 시각·배터리가 보이지 않는다.
             SideEffect {
                 androidx.core.view.WindowCompat.getInsetsController(window, window.decorView).apply {
                     isAppearanceLightStatusBars = !dark
                     isAppearanceLightNavigationBars = !dark
+                }
+                // 막대 **바탕**도 테마를 따른다 — 매니페스트 테마는 밝은 값 고정이라, 그대로 두면 어둡게일 때 흰 막대에 흰 아이콘이
+                //   된다(Android 14 이하. 15 이상은 막대가 투명해 이 값이 쓰이지 않는다).
+                @Suppress("DEPRECATION")
+                run {
+                    window.statusBarColor = if (dark) 0xFF161D2C.toInt() else 0xFFFFFFFF.toInt()
+                    window.navigationBarColor = if (dark) 0xFF10172A.toInt() else 0xFFF5F7FC.toInt()
                 }
             }
             CimsTheme(dark = dark) { Root(vm, ::shutdown) }
@@ -81,6 +89,17 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         vm.refresh()          // 재생성·복귀 후 화면은 코어 스냅샷에서 다시 그린다
+    }
+
+    // 화면이 보이는 동안 착신은 배너가 말한다 — 알림(헤드업)은 화면을 벗어났을 때만 뜬다(`IncomingAlert`)
+    override fun onStart() {
+        super.onStart()
+        com.cims.ue.dispatch.session.UiPresence.set(true)
+    }
+
+    override fun onStop() {
+        com.cims.ue.dispatch.session.UiPresence.set(false)
+        super.onStop()
     }
 
     /**
@@ -132,11 +151,7 @@ private fun Root(vm: MainViewModel, onShutdown: () -> Unit) {
 @Composable
 private fun CredentialBanner(session: DispatchSession) {
     val why by session.credentialWarning.collectAsStateWithLifecycle()
-    val text = why ?: return
-    Surface(color = MaterialTheme.colorScheme.errorContainer, modifier = Modifier.fillMaxWidth()) {
-        Text(text, Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
-            fontSize = Type.body, color = MaterialTheme.colorScheme.onErrorContainer)
-    }
+    WarnLine(why ?: return)
 }
 
 @Composable
@@ -144,7 +159,7 @@ private fun Waiting() {
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
 }
 
-/** 관제 셸 — 왼쪽 레일(관제·이력·더보기) + 관제의 면 + 오른쪽 사이드 패널(§6.3). */
+/** 관제 셸 — 왼쪽 레일(관제·이력·PTT 그룹·관리 + 설정) + 관제의 면 + 오른쪽 사이드 패널(§6.3). */
 @Composable
 private fun Shell(vm: MainViewModel, onShutdown: () -> Unit) {
     val nav by vm.nav.collectAsStateWithLifecycle()
@@ -153,12 +168,20 @@ private fun Shell(vm: MainViewModel, onShutdown: () -> Unit) {
     var searchOpen by remember { mutableStateOf(false) }
     var settingsOpen by remember { mutableStateOf(false) }
     // 배지 — 요약 띠가 하던 «어디에 뭐가 쌓였나» 를 레일·탭이 받는다(§6.10).
-    val unread = vm.ptt?.cards?.collectAsStateWithLifecycle()?.value?.sumOf { it.unread } ?: 0
+    //   무전 안 읽은 수 = **대화 전부**의 합(1:1 포함) — 카드의 합으로 세면 1:1 로 온 글이 배지에 서지 않는다.
+    val msgVm = vm.messages
+    val unread = msgVm?.threads?.collectAsStateWithLifecycle()?.value?.sumOf { it.unread } ?: 0
+    // «메시지» 면이 보이는 동안에는 열어 둔 대화로 온 글이 곧바로 읽음이 된다(`PttMessagesViewModel.setVisible`)
+    val msgVisible = nav.screen == AppScreen.DISPATCH && nav.mode == DispatchMode.PTT && nav.pttPane == PttPane.MESSAGES
+    LaunchedEffect(msgVm, msgVisible) { msgVm?.setVisible(msgVisible) }
+    val smsVm = vm.sms
+    val smsVisible = nav.screen == AppScreen.DISPATCH && nav.mode == DispatchMode.CALL && nav.callPane == CallPane.MESSAGES
+    LaunchedEffect(smsVm, smsVisible) { smsVm?.setVisible(smsVisible) }
     val queue = vm.calls?.queue?.collectAsStateWithLifecycle()?.value.orEmpty()
     val ringing = vm.calls?.calls?.collectAsStateWithLifecycle()?.value.orEmpty().count { it.incoming }
     val smsUnread = vm.sms?.threads?.collectAsStateWithLifecycle()?.value.orEmpty().sumOf { it.unread }
     val badges = NavBadges(unread = unread, callWaiting = queue.size + ringing, smsUnread = smsUnread,
-        adminDirty = vm.adminDirty)
+        adminDirty = vm.adminDirtyFlow.collectAsStateWithLifecycle().value)
 
     // 뒤로가기 = 연 순서의 역순으로 한 겹씩(§6.3). **되돌릴 것이 있을 때만 가로챈다** — 첫 화면에서 가로채면 앱을 벗어날
     //   방법이 없어진다. 판정은 **되돌릴 동작 그 자체**에 묻는다(`onBack() != null`).
@@ -166,19 +189,48 @@ private fun Shell(vm: MainViewModel, onShutdown: () -> Unit) {
 
     val profile = session?.profile?.collectAsStateWithLifecycle()?.value
     val regs = session?.registrations?.collectAsStateWithLifecycle()?.value.orEmpty()
+    val accounts = session?.accounts?.collectAsStateWithLifecycle()?.value.orEmpty()
+    val settings = session?.settingsFlow?.collectAsStateWithLifecycle()?.value
+    val panelWidth = (settings?.panelWidthDp ?: 400).dp
+    // 진행 중인 감청·청취 — 상단 바 «감청 중 N»(누르면 그 자리로).
+    val live = session?.sessions?.collectAsStateWithLifecycle()?.value.orEmpty()
+    val monitors = live.filter { it.isLive && it.kind.isSheet }
 
     AppShellContent(
         screen = nav.screen,
         top = TopBarUi(
             displayName = profile?.displayName.orEmpty(),
-            deskLine = session?.dispatch?.takeIf { it.present }
-                ?.let { "${it.groupName} · 대표 ${it.pilotId}" }.orEmpty(),
-            registrations = regs.values.map { it.registered }),
+            // 소속 줄 — «그룹 · 대표 N» 중 있는 것만(그룹 이름이 비면 id). 데스크가 없으면 «PTT …1234»(어느 회선으로 들어왔는지).
+            deskLine = session?.dispatch?.takeIf { it.present }?.let { d ->
+                listOf(d.groupName.ifBlank { d.groupId },
+                       if (d.pilotId.isBlank()) "" else "대표 " + com.cims.ue.dispatch.session.localNumber(com.cims.ue.dispatch.session.userPart(d.pilotId)))
+                    .filter { it.isNotBlank() }.joinToString(" · ")
+            }.orEmpty().ifEmpty {
+                com.cims.ue.dispatch.session.userPart(session?.myPttId.orEmpty()).takeIf { it.isNotEmpty() }?.let { "PTT …" + it.takeLast(4) }.orEmpty()
+            },
+            // 계정 순서 = PTT · 전화(데스크톱 상단 바와 같다). **프로파일에 그 서비스가 있으면** 점을 그린다 — 계정 추가가 실패한
+            //   서비스의 점이 사라지면 «원래 없는 회선» 처럼 보인다(회색 = 미등록).
+            registrations = listOfNotNull(
+                com.cims.ue.dispatch.session.AccountKind.PTT.takeIf { profile?.pttService != null },
+                com.cims.ue.dispatch.session.AccountKind.PHONE.takeIf { profile?.phoneService != null })
+                .map { k -> accounts[k]?.let { a -> regDotOf(regs[a.id]?.state) } ?: RegDot.OFF },
+            monitors = monitors.size),
         badges = badges,
         onSelect = vm::show,
         onSearch = { searchOpen = true },
-        menu = { SessionMenu(vm, onShutdown) },
-        talkBar = { vm.ptt?.let { TalkBar(it, lockEnabled = vm.lockTalk) } },
+        onSettings = { settingsOpen = true },
+        canAdmin = vm.canAdmin,
+        onAdminDenied = vm::adminDenied,
+        // 감청은 [통화] 고정 칸의 그 행, 청취는 그 채널 상세(§6.5). 여럿이면 가장 최근 것으로 간다.
+        onMonitors = {
+            monitors.maxByOrNull { it.startedAtMs }?.let { m ->
+                if (m.kind == com.cims.ue.dispatch.session.SessionKind.PTT_LISTEN) vm.openChannel(m.channelId) else vm.goToCalls()
+            }
+        },
+        panelOpen = nav.panel != null,
+        panelWidth = panelWidth,
+        menu = { SessionMenu(vm, onShutdown, onSettings = { settingsOpen = true }) },
+        talkBar = { vm.ptt?.let { TalkBar(it, lockEnabled = vm.lockTalk, onOpenChannel = vm::openChannel) } },
         // 토스트 — 방금 누른 것이 왜 안 됐나(§6.2a-2). 본문 위 우하단.
         notices = { m -> if (session != null) Notices(session, m) },
         banners = {
@@ -186,7 +238,12 @@ private fun Shell(vm: MainViewModel, onShutdown: () -> Unit) {
             //   착신 배너보다 위다 — 착신은 받으면 사라지지만 긴급은 풀릴 때까지 남는 상태다.
             if (session != null) EmergencyBanners(session, onOpen = vm::openChannel)
             // 착신 배너 — **화면과 무관하게** 상단 바 아래에 뜬다(§6.2a). 유일한 전역 착신 표면이다.
-            if (session != null) IncomingBanners(session, onAnswered = vm::goToCalls)
+            // 받은 호가 서는 자리로 간다 — 전화는 [통화], 무전 개별 통화는 [무전] › «채널»(카드가 거기 선다)
+            if (session != null) IncomingBanners(session, onAnswered = { c ->
+                if (c.info.isMcptt) vm.setPttPane(PttPane.CHANNELS) else vm.goToCalls()
+            })
+            // «새 영상» 배너 — 영상 채널(MCVideo)에 새 송출이 왔다. [보기] = 그 채널 상세를 열고 그 송출을 본다(§6.14).
+            if (session != null) VideoBanners(session, onOpen = vm::openChannel)
             // 자격 갱신이 흔들리는 동안 미리 알린다 — 조회를 누른 그 순간에야 튕기지 않게(§6.1b).
             if (session != null) CredentialBanner(session)
             // 서버 인증서 만료 — 서버 자동 갱신이 죽었다는 신호. 닫기 없음, 서버가 갱신되면 내린다(§6.2a-3).
@@ -194,10 +251,12 @@ private fun Shell(vm: MainViewModel, onShutdown: () -> Unit) {
         },
         tabs = {
             DispatchTabs(nav.page, onMode = vm::setMode, onPage = vm::showPage, badges = badges) {
-                // [주소록] — 어느 통화 면에서든 오른쪽에 펴서 곧바로 걸고 문자를 보낸다(§6.2b). 통화의 일이라 통화에만 선다.
-                //   무전의 사람 고르기는 «채널» 면의 [채널 추가하기] 가 받는다(탭 줄에 두지 않는다).
-                if (nav.mode == DispatchMode.CALL) PillButton("주소록", { vm.togglePanel(SidePanel.Book) },
-                    strongBorder = true, filled = nav.panel == SidePanel.Book, leading = Icons.Filled.Contacts)
+                // 사람 찾기 — 무전 [사용자](채널 추가 패널: 개별·애드혹·그룹 추가) · 통화 [주소록](데스크톱 탭 줄의 목록 버튼과 같다).
+                //   어느 면에서든 오른쪽에 펴서 곧바로 걸고 문자를 보낸다(§6.2b·§6.2e).
+                if (nav.mode == DispatchMode.CALL) ListToggle("주소록", open = nav.panel == SidePanel.Book,
+                    onClick = { vm.togglePanel(SidePanel.Book) }, leading = Icons.Filled.Contacts)
+                else ListToggle("사용자", open = nav.panel == SidePanel.AddChannel || nav.panel == SidePanel.NewGroup,
+                    onClick = { vm.togglePanel(SidePanel.AddChannel) }, leading = Icons.Filled.Group)
             }
         },
     ) {
@@ -205,6 +264,8 @@ private fun Shell(vm: MainViewModel, onShutdown: () -> Unit) {
             AppScreen.DISPATCH -> DispatchBody(
                 page = nav.page, onPage = vm::showPage,
                 panel = nav.panel?.let { p -> { SidePanelFor(vm, p, nav.pinned) } },
+                panelWidth = panelWidth,
+                onPanelWidth = { w -> session?.updateSettings { it.copy(panelWidthDp = w.value.toInt()) } },
                 // [통화] 의 왼쪽 고정 칸 — 통화 면 셋 위에 한 벌만(면을 옮겨도 제자리, §6.3).
                 fixed = vm.calls?.let { calls ->
                     FixedColumn(DispatchMode.CALL, CallStatusWidth + 1.dp) {
@@ -220,14 +281,11 @@ private fun Shell(vm: MainViewModel, onShutdown: () -> Unit) {
 
             AppScreen.HISTORY -> vm.history?.let { HistoryScreen(it, Modifier.fillMaxSize()) } ?: Waiting()
 
-            AppScreen.MORE -> when (nav.more) {
-                MoreItem.PTT_GROUPS -> vm.pttGroups?.let {
-                    PttGroupsScreen(it, onOpenChannel = vm::openChannel, Modifier.fillMaxSize())
-                } ?: Waiting()
-                MoreItem.ADMIN -> vm.admin?.let { AdminScreen(it, Modifier.fillMaxSize()) } ?: Waiting()
-                null -> MoreScreen(onOpen = vm::openMore, onSettings = { settingsOpen = true },
-                    dirty = vm.adminDirty, modifier = Modifier.fillMaxSize())
-            }
+            AppScreen.PTT_GROUPS -> vm.pttGroups?.let {
+                PttGroupsScreen(it, onOpenChannel = vm::openChannel, Modifier.fillMaxSize())
+            } ?: Waiting()
+
+            AppScreen.ADMIN -> vm.admin?.let { AdminScreen(it, Modifier.fillMaxSize()) } ?: Waiting()
         }
     }
 
@@ -242,7 +300,11 @@ private fun Shell(vm: MainViewModel, onShutdown: () -> Unit) {
             people = people, groups = groups,
             onPerson = { a, n -> vm.runPersonAction(a, n) },
             onChannel = { id -> vm.focusChannel(id) },
-            onDismiss = { searchOpen = false })
+            onDismiss = { searchOpen = false },
+            onEditGroup = vm::editGroup,
+            statusOf = { e -> listOf(if (e.hasPtt) session.pttStatusOf(e.pttNumber) else "",
+                                     if (e.hasLine) session.lineStatusOf(e.extension) else "")
+                .filter { it.isNotEmpty() }.joinToString(" · ") })
     }
 }
 
@@ -263,7 +325,7 @@ private fun DispatchPane(vm: MainViewModel, page: DispatchPage, panel: SidePanel
                 selectedId = (panel as? SidePanel.Event)?.id,
                 onSelect = { r -> vm.togglePanel(SidePanel.Event(r.id)) },
                 onOpenChannel = vm::openChannel,
-                onHistory = { vm.show(AppScreen.HISTORY) })
+                onHistory = { vm.showHistory(com.cims.ue.dispatch.session.HistoryKind.PTT) })
         }
         return
     }
@@ -274,9 +336,9 @@ private fun DispatchPane(vm: MainViewModel, page: DispatchPage, panel: SidePanel
             Spacer(Modifier.width(CallStatusWidth + 1.dp))
             CallsScreen(it, pane = pane, onPane = vm::setCallPane,
                 onPerson = vm::runPersonAction,
-                smsPane = { vm.sms?.let { m -> SmsPane(m) } ?: Waiting() },
+                smsPane = { vm.sms?.let { m -> SmsPane(m, onCall = { n -> vm.runPersonAction(PersonAction.CALL, n) }) } ?: Waiting() },
                 showTabs = false,
-                onHistory = { vm.show(AppScreen.HISTORY) },
+                onHistory = { vm.showHistory(com.cims.ue.dispatch.session.HistoryKind.CALL) },
                 modifier = Modifier.weight(1f).fillMaxHeight())
         }
     } ?: Waiting()
@@ -298,7 +360,8 @@ private fun SidePanelFor(vm: MainViewModel, panel: SidePanel, pinned: Boolean) {
                 canEdit = vm.canManageGroup(panel.id, managed),
                 pinned = pinned, onPin = vm::togglePin, onClose = vm::closePanel,
                 onMessages = vm::openThread, onEdit = vm::editGroup, onDelete = vm::deleteGroup,
-                onPerson = vm::runPersonAction)
+                onPerson = vm::runPersonAction,
+                video = { VideoSection(session, panel.id) })          // 영상 채널(MCVideo)이면 «영상» 절(§6.14)
         }
         SidePanel.AddChannel -> {
             val groups by session.groups.collectAsStateWithLifecycle()
@@ -314,7 +377,8 @@ private fun SidePanelFor(vm: MainViewModel, panel: SidePanel, pinned: Boolean) {
                 onToggle = vm::togglePick, onClear = vm::clearPicked,
                 canCreate = vm.canCreateGroups,
                 pinned = pinned, onPin = vm::togglePin, onClose = vm::closePanel,
-                onGroup = vm::startNewGroup, onPerson = vm::runPersonAction)
+                onGroup = vm::startNewGroup, onPerson = vm::runPersonAction,
+                onStarted = vm::showChannelsKeepingPanel)
         }
         SidePanel.Book -> vm.calls?.let { c ->
             BookPanel(c, pinned = pinned, onPin = vm::togglePin, onClose = vm::closePanel, onPerson = vm::runPersonAction)
@@ -328,7 +392,7 @@ private fun SidePanelFor(vm: MainViewModel, panel: SidePanel, pinned: Boolean) {
             val channels by act.channelIds.collectAsStateWithLifecycle()
             val row = all.firstOrNull { it.id == panel.id }
             EventPanel(row = row, all = all, onClose = vm::closePanel,
-                onOpenChannel = vm::openChannel, onHistory = { vm.show(AppScreen.HISTORY) },
+                onOpenChannel = vm::openChannel, onHistory = { vm.showHistory(com.cims.ue.dispatch.session.HistoryKind.PTT) },
                 onReply = vm::openThread, canOpen = row != null && row.groupId in channels)
         }
     }
@@ -345,22 +409,29 @@ private fun SidePanelFor(vm: MainViewModel, panel: SidePanel, pinned: Boolean) {
  * 둘 다 진행 중인 통화·무전을 끊으므로 확인을 받는다.
  */
 @Composable
-private fun SessionMenu(vm: MainViewModel, onShutdown: () -> Unit) {
+private fun SessionMenu(vm: MainViewModel, onShutdown: () -> Unit, onSettings: () -> Unit) {
     var open by remember { mutableStateOf(false) }
     var confirm by remember { mutableStateOf<String?>(null) }
-    var settings by remember { mutableStateOf(false) }
-    val session = DispatchService.session
 
-    if (settings && session != null) SettingsSheet(session) { settings = false }
-
+    // 버튼과 메뉴를 한 상자에 둔다 — 메뉴는 **부모**를 기준으로 뜨므로, 따로 두면 상단 바의 왼쪽 끝에 뜬다.
+    Box {
     IconButton(onClick = { open = true }) {
         Icon(Icons.Filled.MoreVert, contentDescription = "메뉴")
     }
     DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+        ForwardPttKeys()
+        // 오디오 요약 — 지금 소리가 어디로 나가는지(누르면 설정). 데스크톱 세션 메뉴의 «오디오» 줄.
+        val route = DispatchService.session?.settingsFlow?.collectAsStateWithLifecycle()?.value?.audioRoute
+        if (route != null) {
+            DropdownMenuItem(
+                text = { Text("오디오 · " + routeLabel(route), color = MaterialTheme.colorScheme.onSurfaceVariant) },
+                onClick = { open = false; onSettings() })
+            HorizontalDivider()
+        }
         DropdownMenuItem(
             text = { Text("설정") },
             leadingIcon = { Icon(Icons.Filled.Settings, contentDescription = null) },
-            onClick = { open = false; settings = true })
+            onClick = { open = false; onSettings() })
         HorizontalDivider()
         DropdownMenuItem(
             text = { Text("로그아웃") },
@@ -371,6 +442,7 @@ private fun SessionMenu(vm: MainViewModel, onShutdown: () -> Unit) {
             text = { Text("앱 종료") },
             leadingIcon = { Icon(Icons.Filled.PowerSettingsNew, contentDescription = null) },
             onClick = { open = false; confirm = "exit" })
+    }
     }
 
     confirm?.let { what ->
@@ -390,4 +462,12 @@ private fun SessionMenu(vm: MainViewModel, onShutdown: () -> Unit) {
             },
             dismissButton = { TextButton(onClick = { confirm = null }) { Text("취소") } })
     }
+}
+
+/** 코어 등록 상태 → 상단 바 점등. 스냅샷이 아직 없으면 미등록(회색). */
+private fun regDotOf(state: com.cims.ue.sdk.RegState?): RegDot = when (state) {
+    com.cims.ue.sdk.RegState.REGISTERED -> RegDot.ON
+    com.cims.ue.sdk.RegState.REGISTERING -> RegDot.PENDING
+    com.cims.ue.sdk.RegState.FAILED -> RegDot.FAILED
+    else -> RegDot.OFF
 }

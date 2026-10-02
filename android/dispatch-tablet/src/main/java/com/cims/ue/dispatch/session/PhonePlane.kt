@@ -43,6 +43,16 @@ data class DialogRow(
     val isIncomingLeg: Boolean get() = info.direction == "recipient"
     val elapsedMs: Long get() = System.currentTimeMillis() - stateSinceMs
 
+    companion object {
+        /**
+         * 처음 본 dialog 의 행. **이미 confirmed 로** 보였으면(로그인·재구독 때 진행 중이던 통화의 full 스냅샷) 응답된 통화다 —
+         * 그렇게 세우지 않으면 그 통화가 끝날 때 «부재»·«전원 무응답» 으로 적히고 오늘 부재 집계에 든다(데스크톱 `OnDialog`).
+         */
+        fun of(d: DialogInfo): DialogRow = DialogRow(d.watched, d.id, d).let {
+            if (d.state == "confirmed") it.copy(wasConfirmed = true, confirmedAtMs = it.startedAtMs) else it
+        }
+    }
+
     fun apply(d: DialogInfo): DialogRow = copy(
         info = d,
         stateSinceMs = if (d.state != info.state) System.currentTimeMillis() else stateSinceMs,
@@ -82,8 +92,16 @@ data class CallLogRow(
      * 따로 있다. 섞어 보면 «내가 놓친 것» 과 «동료가 받은 것» 이 구분되지 않는다.
      */
     val viaPilot: Boolean = false,
+    /**
+     * 세션이 붙이는 순번(`addCallLog`) — **목록 키**다. 시각·상대로 키를 만들면 포크 leg 여럿이 같은 ms 에 끝나거나 서버 이력이
+     * 초 단위로 같은 두 사람의 줄을 줄 때 키가 겹쳐 화면이 죽는다. 0 = 아직 안 붙었다(미리보기 픽스처).
+     */
+    val id: Long = 0,
 ) {
     val endedAtMs: Long get() = atMs
+
+    /** 목록에서 이 행을 가리키는 키 — 순번이 있으면 그것, 없으면 시각·상대(픽스처). */
+    val rowKey: String get() = if (id != 0L) "#$id" else atMs.toString() + number + peer
 
     /** **통화 시간** = 응답~종료. 응답하지 못한 호는 0 이다(울린 시간과 섞지 않는다). */
     val durationSec: Int
@@ -138,9 +156,11 @@ internal fun callLogKindText(k: CallLogKind): String = when (k) {
     CallLogKind.PICKUP -> "당겨받기"
     CallLogKind.TRANSFER -> "전달"
     CallLogKind.MONITOR -> "감청"
+    CallLogKind.SMS -> "문자"
 }
 
-enum class CallLogKind { ANSWERED, MISSED, OUTGOING, PICKUP, TRANSFER, MONITOR }
+/** [SMS] = 감시 대상끼리 주고받은 1:1 문자(서버 통합 이력이 준다 — `HistoryFeed`). 통화가 아니라 데스크 집계에 들지 않는다. */
+enum class CallLogKind { ANSWERED, MISSED, OUTGOING, PICKUP, TRANSFER, MONITOR, SMS }
 
 /** 오늘 데스크 집계 — ③ 상단 칩. */
 data class DeskTally(
@@ -153,9 +173,31 @@ data class DeskTally(
 /** 발신 — 번호 또는 SIP URI. 전화 계정으로 건다. */
 suspend fun DispatchSession.dial(target: String): CimsResult<Unit> {
     val a = phoneAccount ?: return report(TextArea.CALL, CimsResult.fail(-1, "전화 계정 없음"))
-    val r = a.dial(target.trim())
+    val r = a.dial(dialTargetOf(target, phoneBook.value))
     if (r.ok) noteOperation(r.value!!.id, Operation.DIAL)
     return report(TextArea.CALL, if (r.ok) CimsResult.ok(Unit) else CimsResult.fail(r.code, r.reason))
+}
+
+/**
+ * 번호칸에 친 것 → 걸 대상(순수 함수, 시험 대상 — 데스크톱 `CallOriginateViewModel.Resolve`·`Dial`).
+ *
+ * - URI(`sip:`·`tel:`·`@`)는 그대로.
+ * - **이름**이면 주소록의 그 사람 번호(한 사람으로 정해질 때만 — 동명이인이면 친 대로 두어 서버가 거절하게 한다).
+ * - 번호면 구분자(공백·`-`·`(`·`)`·`.`)를 뺀다. 피처코드(`*`·`#`)는 거기까지.
+ * - 주소록에 있는 번호면 **저장된 원 번호**로 건다 — `010…` 으로 쳐도 가입 id(`+8210…`)로 나간다.
+ */
+internal fun dialTargetOf(input: String, book: DirectoryBook): String {
+    val t = input.trim()
+    if (t.isEmpty() || t.contains(':') || t.contains('@')) return t
+    val isNumber = t.all { it.isDigit() || it in "+*#-(). " }
+    if (!isNumber) return book.entries.filter { it.name == t && it.msisdn.isNotBlank() }
+        .map { e -> e.msisdn.filter { it.isDigit() || it == '+' }.ifEmpty { e.msisdn } }.distinct().singleOrNull() ?: t
+    val digits = t.filter { it.isDigit() || it == '+' || it == '*' || it == '#' }
+    if (digits.isEmpty() || '*' in digits || '#' in digits) return digits
+    val n = DirectoryBook.normalize(digits)
+    // 주소록의 번호도 구분자를 뺀다 — 로컬 CSV 줄은 `010-1234-5678` 처럼 원문 그대로 들어 있다
+    return book.entries.firstOrNull { it.msisdn.isNotBlank() && DirectoryBook.normalize(it.msisdn) == n }
+        ?.msisdn?.filter { it.isDigit() || it == '+' }?.ifEmpty { null } ?: digits
 }
 
 /**
@@ -174,11 +216,15 @@ suspend fun DispatchSession.pickup(number: String = ""): CimsResult<Unit> {
 suspend fun DispatchSession.answer(callId: Int): CimsResult<Unit> =
     report(TextArea.CALL, engineOrNull()?.call(callId)?.answer() ?: CimsResult.fail(-1, "엔진 없음"))
 
-suspend fun DispatchSession.hangup(callId: Int): CimsResult<Unit> =
-    report(TextArea.CALL, engineOrNull()?.call(callId)?.hangup() ?: CimsResult.fail(-1, "엔진 없음"))
+suspend fun DispatchSession.hangup(callId: Int): CimsResult<Unit> {
+    noteLocalHangup(callId)
+    return report(TextArea.CALL, engineOrNull()?.call(callId)?.hangup() ?: CimsResult.fail(-1, "엔진 없음"))
+}
 
 suspend fun DispatchSession.hold(callId: Int, on: Boolean): CimsResult<Unit> {
     val c = engineOrNull()?.call(callId) ?: return report(TextArea.CALL, CimsResult.fail(-1, "엔진 없음"))
+    // 보류를 풀면 그 통화가 활성 통화다 — 자동 보류가 켜져 있으면 말하던 다른 통화를 먼저 보류한다(두 통화가 동시에 들리지 않게)
+    if (!on && settingsSnapshot().autoHoldOnAnswer) holdOtherCalls(callId)
     return report(TextArea.CALL, if (on) c.hold() else c.resume())
 }
 
@@ -331,17 +377,70 @@ internal fun routableTarget(aor: String): String {
 
 suspend fun DispatchSession.watchAll(): CimsResult<Unit> {
     val a = phoneAccount ?: return CimsResult.fail(-1, "전화 계정 없음")
-    val d = dispatch
-    val targets = buildSet {
-        if (d.pilotId.isNotEmpty()) add(routableTarget(d.pilotId))
-        d.members.forEach { m -> if (m.volteAor.isNotEmpty()) add(routableTarget(m.volteAor)) }
-    }
+    val targets = watchTargets(dispatch)
     // **목록을 먼저 세우고 그다음 구독한다.** 순서를 뒤집으면 구독 도중 도착한 NOTIFY 를 뒤이은
     // 초기화가 지운다 — RFC 6665 상 SUBSCRIBE 직후 NOTIFY 가 오므로, 대상이 수십이면 거의 전부가
     // 루프 안에서 도착한다. 그러면 실제로는 성립한 구독이 «0 성립» 으로 보인다.
     setWatched(targets)
-    targets.forEach { a.dialogWatch(it, true) }
+    val gen = loginGeneration.value
+    val failed = targets.filterNot { a.dialogWatch(it, true).ok }
+    // 구독하는 사이 로그아웃 — 지운 계정의 구독은 전부 실패로 돌아온다. 그것을 알리면 비운 화면에 경고가 서고, 깃발이 다음
+    //   로그인의 첫 경고를 삼킨다.
+    if (gen != loginGeneration.value) return CimsResult.fail(-1, "로그아웃됨")
+    // 실패한 회선은 «구독 중» 목록에서 뺀다 — 남겨 두면 다음 편성 재조회의 차분(`want - had`)에서 빠져 재로그인 전까지 다시
+    //   걸리지 않는다. 빼 두면 60초 재조회가 다시 건다([retryWatch]).
+    if (failed.isNotEmpty()) setWatched(targets - failed.toSet())
+    noteWatchFailures(failed)
     return CimsResult.ok(Unit)
+}
+
+/**
+ * 감시 대상 — 대표번호를 **먼저**(대기열은 이 구독 하나에 달렸다), 그다음 그룹원 회선. 구독 슬롯이 모자라면 앞쪽이 산다.
+ * PTT 전용 가입자(`volteAor` 가 빈 것)는 전화 감시에서 뺀다. 순서를 지키려고 삽입 순서 집합을 쓴다.
+ */
+internal fun watchTargets(d: com.cims.ue.sdk.DispatchProfile): Set<String> = buildSet {
+    if (!d.present) return@buildSet
+    if (d.pilotId.isNotEmpty()) add(routableTarget(d.pilotId))
+    d.members.forEach { m -> if (m.volteAor.isNotEmpty()) add(routableTarget(m.volteAor)) }
+}
+
+/**
+ * 편성이 바뀌었다 — **차분만** 다시 건다(데스크톱 `RefreshDispatchAsync`). 빠진 회선은 구독을 풀고 그 행을 치우며, 새 회선만
+ * 구독한다. 남은 회선은 건드리지 않는다 — 다시 걸면 진행 중 통화의 행이 초기 스냅샷으로 한 번 비었다 찬다.
+ */
+internal suspend fun DispatchSession.rewatch() {
+    val a = phoneAccount ?: return
+    val want = watchTargets(dispatch)
+    val had = watchedTargets()
+    val gen = loginGeneration.value
+    setWatched(want)
+    (had - want).forEach { aor ->
+        a.dialogWatch(aor, false)
+        setDialogs(dialogs.value.filterNot { userPart(it.watched) == userPart(aor) })
+    }
+    val failed = (want - had).filterNot { a.dialogWatch(it, true).ok }
+    if (gen != loginGeneration.value) return               // 그사이 로그아웃 — 비운 목록·깃발을 건드리지 않는다
+    if (failed.isNotEmpty()) setWatched(want - failed.toSet())
+    noteWatchFailures(failed)
+}
+
+/** 걸리지 못한 감시 구독이 있으면 다시 건다 — 편성 재조회 주기(60초)마다, 편성이 바뀌지 않았어도. */
+internal suspend fun DispatchSession.retryWatch() {
+    if (phoneAccount != null && watchTargets(dispatch) != watchedTargets()) rewatch()
+}
+
+/**
+ * 감시 구독이 곧바로 실패했다 — 줄마다 로그하되 관제사에게는 **한 번만** 알린다. 감시 누락은 조용히 넘기면 안 되는 상태다
+ * (그룹원 상태·대기열이 빈 채로 «통화 없음» 처럼 보인다).
+ */
+private fun DispatchSession.noteWatchFailures(failed: List<String>) {
+    if (failed.isEmpty()) { watchFailureNoted = false; return }
+    failed.forEach { android.util.Log.w("DispatchSession", "dialogWatch $it 실패") }
+    // 다시 걸 때마다(60초) 또 알리지 않는다 — 실패가 이어지는 동안은 처음 한 번만
+    if (watchFailureNoted) return
+    watchFailureNoted = true
+    notify(NoticeLevel.WARN, "회선 감시 구독 실패 ${failed.size}건",
+        "${failed.first()} 등 — 그룹원 상태·대기열이 빠질 수 있습니다(주기적으로 다시 겁니다)")
 }
 
 // ── 이벤트 접기 ───────────────────────────────────────────────────────────────
@@ -361,32 +460,112 @@ internal fun DispatchSession.applyDialog(d: DialogInfo) {
     }
     val key = d.watched + "|" + d.id
     val cur = dialogs.value
-    val prev = cur.firstOrNull { it.key == key }
-    val next = when {
-        prev != null -> cur.map { if (it.key == key) it.apply(d) else it }
-        d.state == "terminated" -> cur                     // 못 보던 dialog 의 종료는 버린다
-        else -> cur + DialogRow(d.watched, d.id, d)
-    }
-    setDialogs(next.filterNot { it.isTerminated && it.elapsedMs > TERMINATED_KEEP_MS })
+    fun prune(list: List<DialogRow>) = list.filterNot { it.isTerminated && it.elapsedMs > TERMINATED_KEEP_MS }
+    if (isPilot(d.watched)) notePilotCaller(userPart(d.remoteIdentity))
 
-    // ⑥ 내역 — 전이만 남긴다(진행 중은 카드가 보여준다).
-    //
-    // **여기서는 타인(감시 대상)만 남긴다.** 내 통화는 내 세션이 권위라 `applyCallState` 가 남긴다 —
-    // 둘 다 남기면 같은 통화가 두 줄이 되고, `isMine` 이 어긋나면(그룹원 목록의 번호와 내 등록 회선이
-    // 다를 때) 내 통화가 «타인» 으로 잘못 분류된다.
-    if (prev != null && !prev.isTerminated && d.state == "terminated") {
-        val row = next.first { it.key == key }
-        if (!isMine(row.watched)) addCallLog(CallLogRow(
-            atMs = System.currentTimeMillis(),
-            peer = displayName(row.info.remoteIdentity),
-            number = userPart(row.info.remoteIdentity),
-            text = if (row.wasConfirmed) "통화 종료" else "부재",
-            kind = if (row.wasConfirmed) CallLogKind.ANSWERED else CallLogKind.MISSED,
-            others = true,
-            startedAtMs = row.startedAtMs,
-            answeredAtMs = row.confirmedAtMs,
-            viaPilot = isPilot(row.watched)))
+    if (d.state == "terminated") {
+        // dialog id(Call-ID+태그)는 양 당사자에게 같은 하나의 dialog 다 — 종료는 entity 가 무엇이든 **그 id 의 행 전부**에 적용한다.
+        //   서버가 대표번호 포크 호의 종료 NOTIFY 를 다른 회선의 entity 로 붙여 보내는 경우, entity|id 키만 보면 «통화 중» 행이
+        //   남는다(데스크톱 `OnDialog`). 못 보던 dialog 의 종료는 버린다.
+        //   id 가 비면(서버가 빠뜨림) 그 회선의 그 행만 — 빈 id 끼리 묶으면 무관한 통화가 함께 끝난다.
+        fun same(r: DialogRow) = r.key == key || (d.id.isNotEmpty() && r.id == d.id)
+        val ended = cur.filter { same(it) && !it.isTerminated }
+        setDialogs(prune(cur.map { r ->
+            when {
+                !same(r) || r.isTerminated -> r
+                r.key == key -> r.apply(d)
+                else -> r.apply(r.info.copy(state = "terminated"))
+            }
+        }))
+        ended.forEach(::noteDialogEnd)                    // ⑥ 내역 — 전이만 남긴다(진행 중은 카드가 보여준다)
+        return
     }
+
+    var next = if (cur.any { it.key == key }) cur.map { if (it.key == key) it.apply(d) else it }
+               else cur + DialogRow.of(d)
+    // 대표번호 호의 응답자(포크 승자) — 그룹원 회선이 같은 발신자와 confirmed 되면 그 회선이 받은 것이다. 대표번호·회선의
+    //   confirmed 순서는 서버가 정하지 않으므로 어느 쪽이 먼저 와도 맞물리게 양쪽에서 본다.
+    val row = next.first { it.key == key }
+    if (row.isConfirmed) {
+        val caller = userPart(row.info.remoteIdentity)
+        if (!isPilot(row.watched))
+            next = next.map { p ->
+                if (isPilot(p.watched) && p.answeredBy.isEmpty() && userPart(p.info.remoteIdentity) == caller)
+                    p.copy(answeredBy = userPart(row.watched)) else p
+            }
+        else if (row.answeredBy.isEmpty())
+            next.firstOrNull { !isPilot(it.watched) && it.isConfirmed && userPart(it.info.remoteIdentity) == caller }?.let { w ->
+                next = next.map { if (it.key == key) it.copy(answeredBy = userPart(w.watched)) else it }
+            }
+    }
+    setDialogs(prune(next))
+}
+
+/**
+ * 끝난 dialog 의 ⑥ 내역 한 줄.
+ *
+ * - **대표번호 dialog 가 대표번호 호의 정본이다**(데스크톱 `RecordPilotOutcome`): 전원 무응답 = «부재» 한 줄, 동료가 받았으면
+ *   «응답 <회선>» 한 줄. 둘 다 데스크의 일이라 오늘 집계에 든다. 내가 받은 호는 내 세션이 남기므로 여기서 적지 않는다.
+ * - 대표번호 포크의 **그룹원 leg** 은 적지 않는다 — 받지 않은 회선마다 «부재» 가 서면 한 호가 여러 줄이 되고, 동료가 받은
+ *   호가 부재로 읽힌다.
+ * - 그 밖의 감시 대상 통화는 타인 통화 한 줄. **내 통화는 내 세션이 권위**라 `applyCallState` 가 남긴다 — 둘 다 남기면 같은
+ *   통화가 두 줄이 된다.
+ */
+private fun DispatchSession.noteDialogEnd(r: DialogRow) {
+    val now = System.currentTimeMillis()
+    val caller = userPart(r.info.remoteIdentity)
+    if (isPilot(r.watched)) {
+        when {
+            !r.wasConfirmed -> addCallLog(CallLogRow(
+                atMs = now, peer = displayName(r.info.remoteIdentity), number = caller,
+                text = "전원 무응답", kind = CallLogKind.MISSED, startedAtMs = r.startedAtMs, viaPilot = true))
+            r.answeredBy.isNotEmpty() && isMine(r.answeredBy) -> Unit
+            else -> addCallLog(CallLogRow(
+                atMs = now, peer = displayName(r.info.remoteIdentity), number = caller,
+                text = "응답 " + if (r.answeredBy.isNotEmpty()) displayLabel(r.answeredBy) else "그룹원(미상)",
+                kind = CallLogKind.ANSWERED, startedAtMs = r.startedAtMs, answeredAtMs = r.confirmedAtMs, viaPilot = true))
+        }
+        return
+    }
+    if (isMine(r.watched) || (r.isIncomingLeg && isPilotFork(caller, r.startedAtMs))) return
+    addCallLog(CallLogRow(
+        atMs = now,
+        peer = displayName(r.info.remoteIdentity),
+        number = caller,
+        text = if (r.wasConfirmed) "통화 종료" else "부재",
+        kind = if (r.wasConfirmed) CallLogKind.ANSWERED else CallLogKind.MISSED,
+        others = true,
+        startedAtMs = r.startedAtMs,
+        answeredAtMs = r.confirmedAtMs))
+}
+
+/** 이 발신자의 호가 대표번호 포크인가 — 대표번호 dialog 가 살아 있거나 방금까지 있었다. */
+internal fun DispatchSession.isPilotFork(caller: String, legStartedAtMs: Long): Boolean {
+    if (caller.isEmpty()) return false
+    if (dialogs.value.any { isPilot(it.watched) && !it.isTerminated && userPart(it.info.remoteIdentity) == caller }) return true
+    // 대표번호 dialog 가 방금 끝났다 — 그 dialog 가 살아 있는 동안 **시작한** leg 만 포크다. 대표번호 호가 끝난 뒤 같은 발신자가
+    //   그룹원에게 곧바로 직통으로 건 호까지 삼키지 않는다.
+    val seen = pilotCallerSeenAt(caller) ?: return false
+    return System.currentTimeMillis() - seen < PILOT_FORK_WINDOW_MS && legStartedAtMs <= seen + 1_000L
+}
+
+private const val PILOT_FORK_WINDOW_MS = 15_000L
+
+/** 오늘 데스크 집계 — **오늘 끝난** 내 줄에서 센다(데스크톱 `Today*`). 타인 통화(`others`)는 빼고, 동료가 받은 대표번호 호는 든다. */
+internal fun deskTallyOf(rows: List<CallLogRow>, sinceMs: Long): DeskTally {
+    var t = DeskTally()
+    rows.forEach { r ->
+        if (r.others || r.atMs < sinceMs) return@forEach
+        t = when (r.kind) {
+            CallLogKind.ANSWERED, CallLogKind.PICKUP -> t.copy(answered = t.answered + 1)
+            CallLogKind.MISSED -> t.copy(missed = t.missed + 1)
+            CallLogKind.OUTGOING -> t.copy(outgoing = t.outgoing + 1)
+            CallLogKind.TRANSFER -> t.copy(transfer = t.transfer + 1)
+            CallLogKind.MONITOR -> t.copy(monitor = t.monitor + 1)
+            CallLogKind.SMS -> t
+        }
+    }
+    return t
 }
 
 private const val TERMINATED_KEEP_MS = 3_000L
@@ -398,5 +577,7 @@ private const val TERMINATED_KEEP_MS = 3_000L
  * 포크 집합을 통째로 접을 수 있어, 대표번호 병렬 호출(TS 24.239)에서는 486 이 맞다 — 다른 관제석은
  * 계속 울려야 한다.
  */
-suspend fun DispatchSession.reject(callId: Int, code: Int = 486): CimsResult<Unit> =
-    report(TextArea.CALL, engineOrNull()?.call(callId)?.reject(code) ?: CimsResult.fail(-1, "엔진 없음"))
+suspend fun DispatchSession.reject(callId: Int, code: Int = 486): CimsResult<Unit> {
+    noteLocalHangup(callId)                  // 내가 거절한 호 — 내역에 «부재 · 거절» 로 남는다(놓친 호와 구분)
+    return report(TextArea.CALL, engineOrNull()?.call(callId)?.reject(code) ?: CimsResult.fail(-1, "엔진 없음"))
+}

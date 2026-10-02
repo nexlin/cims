@@ -91,4 +91,10 @@ class SessionEndedTest {
     @Test fun `400 이어도 다른 사유면 종료가 아니다`() {
         assertFalse(ended(400, """refresh 400: {"error":"invalid_request"}"""))
     }
+
+    // 녹취의 out_of_scope 는 청취 범위 밖이다 — 관리 범위(조직·구성원) 문장으로 읽지 않는다
+    @Test fun `녹취의 범위 밖은 청취 범위로 말한다`() {
+        assertEquals("청취 범위 밖의 녹취입니다", ResponseText.of(TextArea.RECORDING, 403, """{"error":"out_of_scope"}"""))
+        assertTrue(ResponseText.of(TextArea.MANAGEMENT, 403, """{"error":"out_of_scope"}""").contains("관리 범위 밖"))
+    }
 }

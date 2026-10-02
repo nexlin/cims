@@ -8,7 +8,8 @@ import com.cims.ue.dispatch.ui.CimsFilterChip
 
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -23,12 +24,12 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.cims.ue.dispatch.ui.PerilAmber
 import com.cims.ue.dispatch.ui.Tag
 import com.cims.ue.dispatch.ui.PersonAction
 import com.cims.ue.dispatch.ui.PersonEntry
@@ -123,18 +124,25 @@ internal fun BroadcastHoldButton(
     // 제스처(pointerInput)는 한 번 걸리므로 재구성 뒤의 최신 콜백을 읽는다 — 옛 카드로 개시하지 않게.
     val down by rememberUpdatedState(onDown)
     val up by rememberUpdatedState(onUp)
+    // 켜진 동안 «일제 통화 중» 남색 채움(데스크톱과 같다). 비활성 = 흐리게.
     Surface(
-        color = when { !enabled -> p.bar; held -> p.ink; else -> p.paper },
-        contentColor = when { !enabled -> p.faint; held -> p.onInk; else -> p.ink },
+        color = if (held) p.primary else p.paper,
+        contentColor = if (held) p.onPrimary else p.ink,
         shape = RoundedCornerShape(height / 2),
-        border = if (held) null else BorderStroke(1.5.dp, if (enabled) p.ink else p.line),
-        modifier = modifier.height(height).then(
+        border = if (held) null else BorderStroke(1.5.dp, p.edge),
+        modifier = modifier.height(height).alpha(if (enabled) 1f else com.cims.ue.dispatch.ui.DisabledAlpha).then(
             if (!enabled) Modifier
             else Modifier.pointerInput(Unit) {
-                detectTapGestures(onPress = {
+                // **손가락이 떨어질 때까지** 누름이다. `detectTapGestures` 의 누름은 손가락이 버튼 밖으로 나가면 끝나는데, 이 버튼은
+                //   누르는 순간 줄의 다른 버튼([참여]·[긴급 참여])이 바뀌어 **제자리에서 밀려난다** — 가만히 누르고 있어도 «밖으로
+                //   나간» 것이 돼 연 일제 통화가 곧바로 끝난다. 화면에서 사라지면(취소) `finally` 가 뗌을 보낸다.
+                awaitEachGesture {
+                    awaitFirstDown(requireUnconsumed = false)
                     down()
-                    try { tryAwaitRelease() } finally { up() }
-                })
+                    try {
+                        do { val e = awaitPointerEvent() } while (e.changes.any { it.pressed })
+                    } finally { up() }
+                }
             }),
     ) {
         Box(Modifier.padding(horizontal = 12.dp), contentAlignment = Alignment.Center) {
@@ -148,12 +156,14 @@ internal fun BroadcastHoldButton(
  * 접어 둔다 — 자주 하는 일(참여·발언 대상·청취)이 앞에 선다. 삭제는 되돌릴 수 없어 여기서 한 번 더 묻는다.
  */
 @Composable
-internal fun ManageMenu(onEdit: () -> Unit, onDelete: () -> Unit, title: String) {
+internal fun ManageMenu(onEdit: () -> Unit, onDelete: () -> Unit, title: String,
+                        groupId: String = "", memberCount: Int = 0, ongoing: Boolean = false) {
     var open by remember { mutableStateOf(false) }
     var confirm by remember { mutableStateOf(false) }
     Box {
         IconButton(onClick = { open = true }) { Icon(Icons.Filled.MoreVert, contentDescription = "그룹 관리") }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            com.cims.ue.dispatch.ui.ForwardPttKeys()        // 메뉴도 제 창이다 — 열려 있는 동안 측면 PTT 키가 죽지 않게
             DropdownMenuItem(text = { Text("편집") }, onClick = { open = false; onEdit() })
             DropdownMenuItem(text = { Text("삭제", color = MaterialTheme.colorScheme.error) },
                 onClick = { open = false; confirm = true })
@@ -162,7 +172,13 @@ internal fun ManageMenu(onEdit: () -> Unit, onDelete: () -> Unit, title: String)
     if (confirm) AlertDialog(
         onDismissRequest = { confirm = false },
         title = { com.cims.ue.dispatch.ui.ForwardPttKeys(); Text("그룹 삭제") },
-        text = { Text("«$title» 을(를) 지웁니다. 멤버 전원의 단말에서도 사라집니다. 되돌릴 수 없습니다.") },
+        // [PTT 그룹] 화면의 확인과 같은 내용 — 무엇을(이름·id) 몇 명에게서 지우는지, 진행 중인 세션이 있는지
+        text = {
+            Text("그룹 «$title»" + (if (groupId.isNotBlank()) " ($groupId)" else "") + " 을(를) 삭제할까요?\n" +
+                (if (memberCount > 0) "멤버 ${memberCount}명의 단말에서도 사라집니다." else "멤버 전원의 단말에서도 사라집니다.") +
+                " 되돌릴 수 없습니다." +
+                if (ongoing) "\n진행 중인 세션이 있습니다 — 삭제하면 서버가 세션을 정리합니다." else "")
+        },
         confirmButton = {
             TextButton(onClick = { confirm = false; onDelete() }) {
                 Text("삭제", color = MaterialTheme.colorScheme.error)

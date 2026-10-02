@@ -10,6 +10,7 @@ import com.cims.ue.dispatch.session.DispatchSession
 import com.cims.ue.dispatch.session.Message
 import com.cims.ue.dispatch.session.canSms
 import com.cims.ue.dispatch.session.isExternalNumber
+import com.cims.ue.dispatch.session.isSmsBlocked
 import com.cims.ue.dispatch.session.sendSms
 import com.cims.ue.dispatch.session.resendSms
 import com.cims.ue.dispatch.session.userPart
@@ -45,15 +46,23 @@ class SmsMessagesViewModel(private val s: DispatchSession) : ScreenViewModel() {
 
     val title: StateFlow<String> =
         combine(_peer, s.phoneBook) { p, book ->
-            if (p == null) "" else book.nameOf(p).ifBlank { p }
+            if (p == null) "" else book.nameOf(p).ifBlank { com.cims.ue.dispatch.session.localNumber(p) }
         }.stateIn(scope, SharingStarted.Eagerly, "")
 
     /** 이 사이트에서 문자를 쓸 수 있는가(전화 계정). */
     val available: Boolean get() = s.canSms
 
-    /** 고른 상대가 외부망인가 — 보내기를 막고 이유를 말한다. */
+    /** 고른 상대가 외부망인가 — 머리의 «외부망» 라벨. */
     val selectedIsExternal: StateFlow<Boolean> =
         _peer.combine(s.phoneBook) { p, _ -> p != null && s.isExternalNumber(p) }
+            .stateIn(scope, SharingStarted.Eagerly, false)
+
+    /**
+     * 고른 상대에게 보낼 수 없는가 — **외부망인데 게이트웨이가 없을 때만**(프로파일 `smsGateway`, 데스크톱 `SendAllowed`).
+     * 프로파일이 편성 재조회로 바뀌면 따라온다.
+     */
+    val selectedBlocked: StateFlow<Boolean> =
+        combine(_peer, s.phoneBook, s.profile) { p, _, _ -> p != null && s.isSmsBlocked(p) }
             .stateIn(scope, SharingStarted.Eagerly, false)
 
     /**
@@ -67,17 +76,30 @@ class SmsMessagesViewModel(private val s: DispatchSession) : ScreenViewModel() {
             book.entries.filter { it.msisdn.isNotBlank() }.map { e ->
                 RecipientOption(
                     key = e.msisdn,
-                    title = e.name.ifBlank { e.msisdn },
-                    subtitle = listOf(e.msisdn, book.orgPath(e.org)).filter { it.isNotBlank() }
+                    title = e.name.ifBlank { com.cims.ue.dispatch.session.localNumber(e.msisdn) },
+                    subtitle = listOf(com.cims.ue.dispatch.session.localNumber(e.msisdn), book.orgPath(e.org)).filter { it.isNotBlank() }
                         .joinToString(" · "))
             }
         }.stateIn(scope, SharingStarted.Eagerly, emptyList())
 
     fun pick(peer: String) {
-        val n = userPart(peer)
+        val n = com.cims.ue.dispatch.session.smsKey(peer)        // 대화 키 = 정규형(`010…`·`+8210…` 이 한 대화)
         if (n.isEmpty()) return
         _peer.value = n
         s.markSmsRead(n)
+    }
+
+    /** 문자 면이 지금 보이는가 — 셸이 알려 준다([PttMessagesViewModel.setVisible] 과 같은 규칙). */
+    private val _visible = MutableStateFlow(false)
+    fun setVisible(v: Boolean) { _visible.value = v }
+
+    init {
+        // 열어 둔 대화로 온 문자는 곧바로 읽음 — 면이 보이고 화면이 켜져 있을 때만
+        scope.launch {
+            combine(s.sms, _peer, _visible, com.cims.ue.dispatch.session.UiPresence.visible) { all, p, vis, ui ->
+                p?.takeIf { vis && ui && all[it]?.any { m -> !m.read && !m.outgoing } == true }
+            }.collect { p -> if (p != null) s.markSmsRead(p) }
+        }
     }
 
     /** 사람 메뉴 «문자» — 대화가 없으면 빈 스레드로 연다. */
@@ -103,7 +125,7 @@ internal fun smsThreads(map: Map<String, List<Message>>, book: DirectoryBook): L
         if (msgs.isEmpty()) return@mapNotNull null
         ThreadChip(
             key = peer,
-            title = book.nameOf(peer).ifBlank { peer },
+            title = book.nameOf(peer).ifBlank { com.cims.ue.dispatch.session.localNumber(peer) },
             unread = msgs.count { !it.read && !it.outgoing },
             lastAtMs = msgs.maxOf { it.atMs })
     }.sortedByDescending { it.lastAtMs }

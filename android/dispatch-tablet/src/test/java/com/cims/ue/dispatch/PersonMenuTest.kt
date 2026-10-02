@@ -162,9 +162,31 @@ class PersonMenuTest {
         assertEquals(6, hits.count { it is SearchHit.Channel })
     }
 
+    // 줄의 키가 번호다 — 같은 번호가 다른 이름으로 두 줄(주소록의 사람 + 내 연락처)이면 목록이 같은 키 둘로 죽는다
+    @Test fun `같은 번호가 다른 이름으로 두 줄이어도 한 줄만 선다`() {
+        val dup = mergePeople(book(Triple("t1", "이순경", "1001"), Triple("", "순찰 이 순경", "1001")), DirectoryBook())
+        assertEquals(2, dup.size)
+        val hits = searchDirectory(dup, emptyList(), "1001")
+        assertEquals(1, hits.size)
+    }
+
     @Test fun `채널 부제는 멤버 수와 범위를 적는다`() {
         assertTrue(channelMeta(grp("g1", "경비", members = 5)).contains("멤버 5"))
         assertTrue(channelMeta(grp("g1", "경비", isMember = false)).contains("청취 범위"))
+    }
+
+    // 같은 종류의 회선이 둘(이동 + 유선) — 둘째 번호를 버리지 않는다(버리면 그 번호가 통합 검색에 없다)
+    @Test fun `전화 회선이 둘이면 둘째도 따로 선다`() {
+        val phone = book(Triple("t1", "이순경", "+821011112222"), Triple("t1", "이순경", "1001"))
+        val people = mergePeople(phone, DirectoryBook())
+        assertEquals(listOf("+821011112222", "1001"), people.map { it.extension })
+    }
+
+    @Test fun `같은 조직의 동명이인 PTT 는 둘 다 선다`() {
+        val ptt = book(Triple("t1", "김철수", "+825100001"), Triple("t1", "김철수", "+825100002"))
+        val people = mergePeople(DirectoryBook(), ptt)
+        assertEquals(2, people.size)
+        assertEquals(setOf("+825100001", "+825100002"), people.map { it.pttNumber }.toSet())
     }
 }
 

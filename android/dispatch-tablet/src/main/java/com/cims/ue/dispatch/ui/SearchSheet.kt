@@ -71,8 +71,9 @@ internal fun searchDirectory(
     val hitGroups = if (q.isEmpty()) groups else groups.filter {
         it.name.contains(q, ignoreCase = true) || it.id.contains(q, ignoreCase = true)
     }
-    return hitPeople.take(MAX_PEOPLE).map { SearchHit.Person(it) } +
-        hitGroups.take(MAX_GROUPS).map { SearchHit.Channel(it) }
+    // 줄의 키가 «PTT 번호/내선»·그룹 id 다 — 같은 번호가 다른 이름으로 두 줄(주소록의 사람 + 내 연락처 CSV)이어도 한 줄만 세운다
+    return hitPeople.distinctBy { it.pttNumber + "/" + it.extension }.take(MAX_PEOPLE).map { SearchHit.Person(it) } +
+        hitGroups.distinctBy { it.id }.take(MAX_GROUPS).map { SearchHit.Channel(it) }
 }
 
 /** 채널 행의 부제 — 데스크톱 `GroupEntry.Meta` 와 같은 구성. */
@@ -90,6 +91,10 @@ fun SearchSheet(
     onPerson: (PersonAction, String) -> Unit,
     onChannel: (String) -> Unit,
     onDismiss: () -> Unit,
+    /** 그룹 행 [멤버 추가] — 내 소유 그룹만 선다(데스크톱 통합 검색과 같다). 그 그룹의 편집 폼으로 간다. */
+    onEditGroup: (String) -> Unit = {},
+    /** 그 사람의 지금 상태(«순찰1 발언»·«통화 중») — 조직 옆에 선다. 모르면 빈 문자열. */
+    statusOf: (PersonEntry) -> String = { "" },
 ) {
     var query by remember { mutableStateOf("") }
     val hits = searchDirectory(people, groups, query)
@@ -118,8 +123,8 @@ fun SearchSheet(
                     }
                 }) { hit ->
                     when (hit) {
-                        is SearchHit.Person -> PersonRow(hit.entry) { a, n -> onPerson(a, n); onDismiss() }
-                        is SearchHit.Channel -> ChannelRow(hit.group) { onChannel(it); onDismiss() }
+                        is SearchHit.Person -> PersonRow(hit.entry, statusOf(hit.entry)) { a, n -> onPerson(a, n); onDismiss() }
+                        is SearchHit.Channel -> ChannelRow(hit.group, onEdit = { onEditGroup(it); onDismiss() }) { onChannel(it); onDismiss() }
                     }
                     HorizontalDivider()
                 }
@@ -129,13 +134,14 @@ fun SearchSheet(
 }
 
 @Composable
-private fun PersonRow(p: PersonEntry, onPick: (PersonAction, String) -> Unit) {
+private fun PersonRow(p: PersonEntry, status: String = "", onPick: (PersonAction, String) -> Unit) {
     Row(Modifier.fillMaxWidth().padding(vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
             Text(p.head, fontSize = Type.strong, fontWeight = FontWeight.Medium, maxLines = 1)
-            if (p.orgPath.isNotEmpty())
-                Text(p.orgPath, fontSize = Type.meta, maxLines = 1,
+            val sub = listOf(p.orgPath, status).filter { it.isNotEmpty() }.joinToString(" · ")
+            if (sub.isNotEmpty())
+                Text(sub, fontSize = Type.meta, maxLines = 1,
                      color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         // 가진 회선에 있는 행동만 — 비활성 버튼을 늘어놓지 않는다(사람 메뉴와 같은 규칙).
@@ -144,12 +150,15 @@ private fun PersonRow(p: PersonEntry, onPick: (PersonAction, String) -> Unit) {
             Small("애드혹 그룹") { onPick(PersonAction.ADHOC_ADD, p.pttNumber) }
             Small("SDS") { onPick(PersonAction.SDS, p.pttNumber) }
         }
-        if (p.hasLine) Small("통화") { onPick(PersonAction.CALL, p.extension) }
+        if (p.hasLine) {
+            Small("통화") { onPick(PersonAction.CALL, p.extension) }
+            Small("문자") { onPick(PersonAction.SMS, p.extension) }
+        }
     }
 }
 
 @Composable
-private fun ChannelRow(g: GroupInfo, onChannel: (String) -> Unit) {
+private fun ChannelRow(g: GroupInfo, onEdit: (String) -> Unit = {}, onChannel: (String) -> Unit) {
     Row(Modifier.fillMaxWidth().padding(vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
@@ -157,6 +166,7 @@ private fun ChannelRow(g: GroupInfo, onChannel: (String) -> Unit) {
             Text(channelMeta(g), fontSize = Type.meta,
                  color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
+        if (g.isOwner) Small("멤버 추가") { onEdit(g.id) }
         Small("채널로") { onChannel(g.id) }
     }
 }

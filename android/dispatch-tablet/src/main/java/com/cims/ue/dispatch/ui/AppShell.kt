@@ -7,8 +7,16 @@
 // 그만큼이 본문 높이로 간다. 시스템 막대(상태·제스처)가 보이면 그 몫은 본문에서 빠진다.
 package com.cims.ue.dispatch.ui
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.FastOutLinearInEasing
+import androidx.compose.animation.core.LinearOutSlowInEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -29,15 +37,18 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.PagerState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.outlined.AccountTree
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.History
-import androidx.compose.material.icons.filled.MoreHoriz
+import androidx.compose.material.icons.outlined.Groups
+import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.SupportAgent
+import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.outlined.SupportAgent
 import androidx.compose.material.icons.outlined.PushPin
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -51,12 +62,15 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -64,13 +78,18 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlin.math.abs
 
+/** 등록 점등 한 개 — 계정의 등록 상태(Windows `RegDot`: 회색 미등록 · 주황 등록 중 · 녹색 등록 · 빨강 실패). */
+enum class RegDot { OFF, PENDING, ON, FAILED }
+
 /** 상단 바가 쓰는 값 — 내가 누구이고 어디에 붙어 있는가. */
 data class TopBarUi(
     val displayName: String = "관제",
     /** "관제1과 · 대표 7000" — 전화 그룹이 없으면 빈 값. */
     val deskLine: String = "",
-    /** 등록 점등 — 계정 수만큼 ●(등록) / ○(미등록). 권위는 코어 스냅샷이다. */
-    val registrations: List<Boolean> = emptyList(),
+    /** 등록 점등 — 계정마다 하나(PTT · 전화). 권위는 코어 스냅샷이다. */
+    val registrations: List<RegDot> = emptyList(),
+    /** 진행 중인 감청·청취 수 — 0 이면 칩을 그리지 않는다(데스크톱 «감청 중 N»). */
+    val monitors: Int = 0,
 )
 
 /**
@@ -83,20 +102,39 @@ data class NavBadges(
     val callWaiting: Int = 0,
     /** [관제] › [통화] › «메시지» — 미읽음 문자. */
     val smsUnread: Int = 0,
-    /** [더보기] 점 — [관리]에 저장하지 않은 폼. */
+    /** 레일 [관리] 점 — 저장하지 않은 폼. */
     val adminDirty: Boolean = false,
 )
 
-/** 레일 폭·패널 폭 — 시안 값(§6.3). */
+/** 레일 폭(§6.3). */
 val RailWidth = 80.dp
+
+/**
+ * 오른쪽 패널 폭 — 기본 400. 패널 왼쪽 가장자리를 **끌어서** 바꾼다(태블릿은 화면이 좁아 겹친 패널이 가리는 만큼을 사람이
+ * 정한다): [PanelMinWidth] ~ 본문 폭 − [PanelBodyKeep]. 끈 값은 설정에 남는다(`Settings.panelWidthDp`).
+ */
 val PanelWidth = 400.dp
+val PanelMinWidth = 320.dp
+/** 패널을 아무리 넓혀도 본문에 남기는 폭 — 내 채널 칸·통화 고정 칸의 절반은 늘 보인다. */
+val PanelBodyKeep = 240.dp
+
+/** 지금의 패널 폭 — 패널 틀([SidePanelFrame])이 읽는다. Preview 처럼 본문 밖에서 그리면 기본값이다. */
+val LocalPanelWidth = androidx.compose.runtime.compositionLocalOf { PanelWidth }
+
+/** 끈 뒤의 패널 폭 — 순수 함수(시험 대상). [dragDp] 는 왼쪽으로 끈 만큼이 양수다. */
+internal fun panelWidthAfterDrag(width: Dp, dragDp: Dp, bodyWidth: Dp): Dp {
+    val max = (bodyWidth - PanelBodyKeep).coerceAtLeast(PanelMinWidth)
+    return (width + dragDp).coerceIn(PanelMinWidth, max)
+}
 
 /**
  * 껍데기 한 장.
  *
- * @param tabs 관제 탭 줄 — [관제] 에서만 부른다(이력·더보기는 한 면이라 탭이 없다).
+ * @param tabs 관제 탭 줄 — [관제] 에서만 부른다(이력·PTT 그룹·관리는 한 면이라 탭이 없다).
  * @param banners 긴급·착신·자격 배너 — 상단 바 바로 아래, 화면과 무관하게 뜬다(§6.2a).
  * @param notices 토스트 자리 — 본문 **위에 겹쳐** 우하단(§6.2a-2). 넘겨받은 Modifier 가 자리다.
+ * @param canAdmin 관리 범위가 있는가 — 없으면 레일 [관리] 가 흐리고, 누르면 [onAdminDenied].
+ * @param panelOpen 오른쪽 패널이 열려 있다 — 토스트가 패널 왼쪽에 선다([panelWidth] 만큼).
  */
 @Composable
 fun AppShellContent(
@@ -105,6 +143,12 @@ fun AppShellContent(
     badges: NavBadges = NavBadges(),
     onSelect: (AppScreen) -> Unit = {},
     onSearch: () -> Unit = {},
+    onSettings: () -> Unit = {},
+    canAdmin: Boolean = true,
+    onAdminDenied: () -> Unit = {},
+    onMonitors: () -> Unit = {},
+    panelOpen: Boolean = false,
+    panelWidth: Dp = PanelWidth,
     menu: @Composable () -> Unit = {},
     talkBar: @Composable () -> Unit = {},
     banners: @Composable ColumnScope.() -> Unit = {},
@@ -115,75 +159,97 @@ fun AppShellContent(
     val p = Tokens.palette
     Surface(color = p.paper, contentColor = p.ink, modifier = Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)) {
-            Rail(screen, badges, onSelect)
+            Rail(screen, badges, onSelect, onSettings, canAdmin, onAdminDenied)
             Box(Modifier.weight(1f).fillMaxHeight()) {
                 Column(Modifier.fillMaxSize()) {
-                    TopBar(top, onSearch, menu)
+                    TopBar(top, onSearch, onMonitors, menu)
                     banners()
                     if (screen == AppScreen.DISPATCH) tabs()
                     Box(Modifier.weight(1f).fillMaxWidth()) { body() }
                     // **발언 바는 상시로 둔다**(§6.3). 관제사는 전화를 받으면서도, 이력을 보면서도 무전한다.
                     talkBar()
                 }
-                notices(Modifier.align(Alignment.BottomEnd).padding(end = 12.dp, bottom = 92.dp))
+                // 패널이 열린 동안은 패널 왼쪽에 선다 — 패널이 토스트를 가리지 않게.
+                notices(Modifier.align(Alignment.BottomEnd)
+                    .padding(end = if (panelOpen && screen == AppScreen.DISPATCH) panelWidth + 12.dp else 12.dp, bottom = 92.dp))
             }
         }
     }
 }
 
-/** 왼쪽 레일 — 메뉴 셋. 고른 것은 알약 면 + 굵은 글자. */
+/**
+ * 왼쪽 레일 — [관제][이력][PTT 그룹][관리] + 바닥 [설정]. 전부 한 번에 누른다. 고른 것 = 연한 남색 알약 + 남색 아이콘·굵은 글자
+ * (Windows `RailItem`).
+ */
 @Composable
-private fun Rail(screen: AppScreen, badges: NavBadges, onSelect: (AppScreen) -> Unit) {
+private fun Rail(screen: AppScreen, badges: NavBadges, onSelect: (AppScreen) -> Unit, onSettings: () -> Unit,
+                 canAdmin: Boolean, onAdminDenied: () -> Unit) {
     val p = Tokens.palette
     Column(
-        Modifier.width(RailWidth).fillMaxHeight().background(p.fill)
+        Modifier.width(RailWidth).fillMaxHeight().background(p.rail)
             .drawBehind { drawLine(p.divider, Offset(size.width - 0.5f, 0f), Offset(size.width - 0.5f, size.height), 1.dp.toPx()) }
             .padding(top = 12.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        // 앱 표시 — 로고가 정해지면 이 자리에 둔다.
-        Box(Modifier.size(48.dp, 40.dp).clip(RoundedCornerShape(8.dp)).background(p.ink),
+        Box(Modifier.size(48.dp, 40.dp).clip(RoundedCornerShape(8.dp)).background(p.primary),
             contentAlignment = Alignment.Center) {
-            Text("CIMS", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = p.onInk, letterSpacing = 0.5.sp)
+            Text("CIMS", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = p.onPrimary, letterSpacing = 0.5.sp)
         }
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(20.dp))
         AppScreen.entries.forEach { s ->
-            val on = s == screen
-            val n = when (s) { AppScreen.DISPATCH -> badges.unread + badges.callWaiting + badges.smsUnread; else -> 0 }
-            val dot = s == AppScreen.MORE && badges.adminDirty
-            Column(
-                Modifier.width(RailWidth).clickable { onSelect(s) }.padding(vertical = 4.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
-                Box(Modifier.size(56.dp, 32.dp).clip(RoundedCornerShape(16.dp))
-                        .background(if (on) p.line else androidx.compose.ui.graphics.Color.Transparent),
-                    contentAlignment = Alignment.Center) {
-                    Icon(railIconOf(s), contentDescription = null, modifier = Modifier.size(22.dp), tint = p.ink)
-                    if (n > 0) CountPill(n, Modifier.align(Alignment.TopEnd).padding(top = 0.dp))
-                    if (dot) Box(Modifier.align(Alignment.TopEnd).padding(4.dp).size(8.dp).clip(RoundedCornerShape(4.dp))
-                            .background(p.emergency))
-                }
-                Text(s.label, fontSize = Type.meta, fontWeight = if (on) FontWeight.Bold else FontWeight.Normal,
-                    color = p.ink)
-            }
+            val enabled = s != AppScreen.ADMIN || canAdmin
+            RailItem(
+                label = s.label, icon = railIconOf(s), selected = s == screen, enabled = enabled,
+                count = if (s == AppScreen.DISPATCH) badges.unread + badges.callWaiting + badges.smsUnread else 0,
+                dot = s == AppScreen.ADMIN && badges.adminDirty,
+                onClick = { if (enabled) onSelect(s) else onAdminDenied() })
+            Spacer(Modifier.height(12.dp))
         }
+        Spacer(Modifier.weight(1f))
+        // [설정] — 화면이 아니라 시트를 연다(켜짐 표시 없음).
+        RailItem(label = "설정", icon = Icons.Outlined.Settings, selected = false, onClick = onSettings)
+        Spacer(Modifier.height(12.dp))
+    }
+}
+
+@Composable
+private fun RailItem(label: String, icon: ImageVector, selected: Boolean, onClick: () -> Unit,
+                     enabled: Boolean = true, count: Int = 0, dot: Boolean = false) {
+    val p = Tokens.palette
+    val fg = if (selected) p.primaryInk else p.ink2
+    Column(
+        Modifier.width(72.dp).alpha(if (enabled) 1f else 0.45f).clip(RoundedCornerShape(12.dp)).clickable(onClick = onClick)
+            .padding(vertical = 2.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Box(Modifier.size(56.dp, 32.dp), contentAlignment = Alignment.Center) {
+            Box(Modifier.fillMaxSize().clip(RoundedCornerShape(16.dp))
+                    .background(if (selected) p.railActive else Color.Transparent), contentAlignment = Alignment.Center) {
+                Icon(icon, contentDescription = null, modifier = Modifier.size(22.dp), tint = fg)
+            }
+            if (count > 0) CountPill(count, Modifier.align(Alignment.TopEnd))
+            if (dot) Box(Modifier.align(Alignment.TopEnd).padding(4.dp).size(8.dp).clip(CircleShape).background(p.emg))
+        }
+        Text(label, fontSize = Type.meta, fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal, color = fg,
+            maxLines = 1)
     }
 }
 
 internal fun railIconOf(s: AppScreen): ImageVector = when (s) {
-    AppScreen.DISPATCH -> Icons.Filled.SupportAgent
-    AppScreen.HISTORY -> Icons.Filled.History
-    AppScreen.MORE -> Icons.Filled.MoreHoriz
+    // 선 아이콘(Outlined) — 데스크톱 레일의 스트로크 아이콘과 같은 인상(채움 아이콘은 레일이 무겁다)
+    AppScreen.DISPATCH -> Icons.Outlined.SupportAgent
+    AppScreen.HISTORY -> Icons.Outlined.History
+    AppScreen.PTT_GROUPS -> Icons.Outlined.Groups
+    AppScreen.ADMIN -> Icons.Outlined.AccountTree
 }
 
-/** 상단 바(64) — 이름 · 소속·대표번호 · 등록 점 · 검색 · 세션 메뉴. */
+/** 상단 바(64) — 이름 · 소속·대표번호 · 등록 점 · «감청 중 N» · 검색 칸 · 세션 메뉴. */
 @Composable
-private fun TopBar(top: TopBarUi, onSearch: () -> Unit, menu: @Composable () -> Unit) {
+private fun TopBar(top: TopBarUi, onSearch: () -> Unit, onMonitors: () -> Unit, menu: @Composable () -> Unit) {
     val p = Tokens.palette
     Row(
-        Modifier.fillMaxWidth().height(64.dp)
+        Modifier.fillMaxWidth().height(64.dp).background(p.paper)
             .drawBehind { drawLine(p.divider, Offset(0f, size.height - 0.5f), Offset(size.width, size.height - 0.5f), 1.dp.toPx()) }
             .padding(start = 20.dp, end = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -192,20 +258,38 @@ private fun TopBar(top: TopBarUi, onSearch: () -> Unit, menu: @Composable () -> 
         Text(top.displayName.ifBlank { "관제" }, fontSize = Type.display, fontWeight = FontWeight.Bold, maxLines = 1)
         if (top.deskLine.isNotBlank()) Text(top.deskLine, fontSize = Type.body, color = p.muted, maxLines = 1,
             overflow = TextOverflow.Ellipsis)
-        // 등록 점등 — 계정마다 하나(●등록·○미등록).
-        if (top.registrations.isNotEmpty()) Text(top.registrations.joinToString("") { if (it) "●" else "○" },
-            fontSize = Type.body, letterSpacing = 2.sp)
+        // 등록 점등 — 계정마다 하나: 회색 미등록 · 주황 등록 중 · 녹색 등록 · 빨강 실패.
+        if (top.registrations.isNotEmpty()) Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            top.registrations.forEach { r ->
+                StatusDot(when (r) { RegDot.ON -> p.talk; RegDot.PENDING -> p.ring; RegDot.FAILED -> p.emg; RegDot.OFF -> p.wire })
+            }
+        }
         Spacer(Modifier.weight(1f))
+        // 진행 중인 감청·청취 — 누르면 그 자리로(데스크톱 «감청 중 N» 칩, §6.5).
+        if (top.monitors > 0) Row(
+            Modifier.height(32.dp).clip(RoundedCornerShape(16.dp)).background(p.monSoft)
+                .border(1.dp, p.mon, RoundedCornerShape(16.dp)).clickable(onClick = onMonitors).padding(horizontal = 12.dp),
+            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Box(Modifier.size(8.dp).clip(CircleShape).background(p.mon))
+            Text("감청 중 ${top.monitors}", fontSize = Type.body, fontWeight = FontWeight.SemiBold, color = p.monInk)
+        }
         // 통합 검색 — 데스크톱 `Ctrl+K` 자리. 태블릿엔 그 입력이 없어 상단 바가 입구다(§6.2f).
-        IconButton(onClick = onSearch, modifier = Modifier.size(44.dp)) {
-            Icon(Icons.Filled.Search, contentDescription = "검색", modifier = Modifier.size(22.dp))
+        Row(
+            Modifier.width(280.dp).height(36.dp).clip(RoundedCornerShape(8.dp)).background(p.paper)
+                .border(1.dp, p.line, RoundedCornerShape(8.dp)).clickable(onClickLabel = "검색", onClick = onSearch)
+                .padding(horizontal = 10.dp),
+            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Icon(Icons.Filled.Search, contentDescription = null, modifier = Modifier.size(18.dp), tint = p.muted)
+            Text("이름 · 내선 · PTT 번호 · 채널", fontSize = Type.body, color = p.muted, maxLines = 1)
         }
         menu()
     }
 }
 
 /**
- * 관제 탭 줄(48) — [무전|통화] 세그먼트 · 그 모드의 하위 탭 · 뒤에 붙는 동작([통화] 의 [주소록]).
+ * 관제 탭 줄(48) — [무전|통화] 세그먼트 · 그 모드의 하위 탭 · 뒤에 붙는 목록 버튼(무전 [사용자] · 통화 [주소록]).
  *
  * 탭 줄은 **면 pager 위에 고정**으로 놓인다 — 면을 밀 때 줄은 제자리에 남고 본문만 미끄러진다. 강조는 **정착할 면**을
  * 가리킨다(밀기가 끝나기 전에도 도착할 탭이 켜진다).
@@ -226,12 +310,13 @@ fun DispatchTabs(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(16.dp),
     ) {
+        // 수 = 무전: 안 읽은 무전 메시지, 통화: 응답 대기 + 안 읽은 문자(데스크톱 탭 줄과 같다).
         Segmented(
             options = DispatchMode.entries.map { it.label },
             selected = page.mode.ordinal,
             onSelect = { onMode(DispatchMode.entries[it]) },
             itemWidth = 104.dp,
-            badges = listOf(0, badges.callWaiting))
+            badges = listOf(badges.unread, badges.callWaiting + badges.smsUnread))
         Box(Modifier.width(1.dp).height(24.dp).background(p.line))
         Row(Modifier.fillMaxHeight()) {
             val tabs = when (page.mode) {
@@ -258,16 +343,34 @@ private fun SubTab(label: String, selected: Boolean, badge: Int, onClick: () -> 
     Box(
         Modifier.width(112.dp).fillMaxHeight().clickable(onClick = onClick)
             .drawBehind {
-                if (selected) drawRect(p.ink, topLeft = Offset(0f, size.height - 3.dp.toPx()),
+                if (selected) drawRect(p.primaryLine, topLeft = Offset(0f, size.height - 3.dp.toPx()),
                     size = androidx.compose.ui.geometry.Size(size.width, 3.dp.toPx()))
             },
         contentAlignment = Alignment.Center,
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(label, fontSize = Type.strong, fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
-                color = if (selected) p.ink else p.muted)
+                color = if (selected) p.primaryInk else p.muted)
             if (badge > 0) { Spacer(Modifier.width(6.dp)); CountPill(badge) }
         }
+    }
+}
+
+/**
+ * 탭 줄 오른쪽 끝의 목록 버튼([사용자]·[주소록]) — 열린 동안 연한 남색(Windows `ListToggle`).
+ */
+@Composable
+fun ListToggle(text: String, open: Boolean, onClick: () -> Unit, leading: ImageVector? = null) {
+    val p = Tokens.palette
+    val shape = RoundedCornerShape(18.dp)
+    Row(
+        Modifier.height(36.dp).clip(shape).background(if (open) p.primarySoft else p.paper)
+            .border(1.5.dp, if (open) p.primaryLine else p.edge, shape).clickable(onClick = onClick).padding(horizontal = 16.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        val fg = if (open) p.primaryInk else p.ink
+        if (leading != null) Icon(leading, contentDescription = null, modifier = Modifier.size(16.dp), tint = fg)
+        Text(text, fontSize = Type.strong, fontWeight = FontWeight.Bold, color = fg, maxLines = 1)
     }
 }
 
@@ -293,13 +396,21 @@ internal fun fixedShift(pos: Float, first: Int, last: Int): Float = when {
     else -> 0f
 }
 
+/** 패널이 밀려 들어오고 나가는 시간(ms) — Windows `SlideOverPanel` 과 같다(들어옴 220 감속 · 나감 180 가속). */
+internal const val PANEL_IN_MS = 220
+internal const val PANEL_OUT_MS = 180
+
 /**
- * [관제] 본문 — 면 pager + 오른쪽 사이드 패널(밀어내기).
+ * [관제] 본문 — 면 pager + 오른쪽 사이드 패널.
  *
- * 패널은 **덮지 않고 민다** — 면의 폭이 그만큼 줄고 면이 스스로 다시 배치한다(타 채널 2열 → 1열). 내 채널·통화 고정 칸처럼
- * 폭이 정해진 칸은 움직이지 않는다. 가장자리 스와이프로 열지 않는다 — 면 넘기기와 겹친다.
+ * 패널은 **본문 위에 겹친다** — 오른쪽 끝에서 왼쪽으로 밀려 들어오고 닫으면 오른쪽으로 밀려 나간다(Windows 관제 앱과 같다,
+ * dispatch_desktop_ui.md §3.6). 본문(면)은 폭·배치를 바꾸지 않고 오른쪽 400 이 패널 아래에 가려진다. 같은 패널 안에서 내용만
+ * 바뀌면(다른 대상 = 교체) 움직이지 않는다. 가장자리 스와이프로 열지 않는다 — 면 넘기기와 겹친다.
  *
- * @param panel 열린 패널 — null 이면 닫힘. 폭은 [PanelWidth] 로 이 함수가 준다.
+ * 패널 왼쪽 가장자리의 손잡이를 끌면 폭이 바뀐다([panelWidthAfterDrag]) — 놓을 때 [onPanelWidth] 로 알린다(설정에 저장).
+ *
+ * @param panel 열린 패널 — null 이면 닫힘.
+ * @param panelWidth 패널 폭(저장된 값). 본문이 좁으면 그 안으로 죈다.
  * @param fixed 한 모드의 면들 위에 얹는 고정 칸([FixedColumn]) — 없으면 null.
  */
 @Composable
@@ -308,9 +419,11 @@ fun DispatchBody(
     onPage: (DispatchPage) -> Unit,
     panel: (@Composable () -> Unit)?,
     fixed: FixedColumn? = null,
+    panelWidth: Dp = PanelWidth,
+    onPanelWidth: (Dp) -> Unit = {},
     content: @Composable (DispatchPage) -> Unit,
 ) {
-    Row(Modifier.fillMaxSize()) {
+    BoxWithConstraints(Modifier.fillMaxSize().clipToBounds()) {
         // **저장·복원하지 않는다**(`rememberPagerState` 가 아니라 `remember`). 면의 기억은 VM(NavState)이 갖는다 —
         //   pager 가 한 벌 더 가지면 복원된 옛 면이 VM 의 면을 덮는다.
         val pager = remember { PagerState(currentPage = page.index.coerceAtLeast(0)) { DISPATCH_PAGES.size } }
@@ -329,26 +442,69 @@ fun DispatchBody(
                 if (now != page) onPage(now)
             }
         }
-        BoxWithConstraints(Modifier.weight(1f).fillMaxHeight().clipToBounds()) {
-            HorizontalPager(state = pager, modifier = Modifier.fillMaxSize()) { i ->
-                Box(Modifier.fillMaxSize()) { content(DISPATCH_PAGES[i]) }
-            }
-            if (fixed != null) {
-                val first = DISPATCH_PAGES.indexOfFirst { it.mode == fixed.mode }
-                val last = DISPATCH_PAGES.indexOfLast { it.mode == fixed.mode }
-                val pageWidth = constraints.maxWidth.toFloat()
-                // 위치는 그리기 단계에서만 읽는다 — 미는 동안 칸을 다시 구성하지 않는다.
-                Box(Modifier.width(fixed.width).fillMaxHeight().graphicsLayer {
-                    translationX = fixedShift(pager.currentPage + pager.currentPageOffsetFraction, first, last) * pageWidth
-                }) { fixed.content() }
+        HorizontalPager(state = pager, modifier = Modifier.fillMaxSize()) { i ->
+            Box(Modifier.fillMaxSize()) { content(DISPATCH_PAGES[i]) }
+        }
+        if (fixed != null) {
+            val first = DISPATCH_PAGES.indexOfFirst { it.mode == fixed.mode }
+            val last = DISPATCH_PAGES.indexOfLast { it.mode == fixed.mode }
+            val pageWidth = constraints.maxWidth.toFloat()
+            // 위치는 그리기 단계에서만 읽는다 — 미는 동안 칸을 다시 구성하지 않는다.
+            Box(Modifier.width(fixed.width).fillMaxHeight().graphicsLayer {
+                translationX = fixedShift(pager.currentPage + pager.currentPageOffsetFraction, first, last) * pageWidth
+            }) { fixed.content() }
+        }
+        // 닫는 순간 VM 은 패널을 곧바로 비운다 — 밀려 나가는 동안 그릴 내용은 마지막 것을 든다(빈 패널이 미끄러지지 않게).
+        var last by remember { mutableStateOf(panel) }
+        if (panel != null) last = panel
+        // 끄는 동안의 폭은 여기서 든다(저장값은 놓을 때 한 번) — 끌 때마다 설정을 쓰지 않는다.
+        val bodyWidth = maxWidth
+        var width by remember(panelWidth, bodyWidth) { mutableStateOf(panelWidthAfterDrag(panelWidth, 0.dp, bodyWidth)) }
+        val density = androidx.compose.ui.platform.LocalDensity.current
+        AnimatedVisibility(
+            visible = panel != null,
+            modifier = Modifier.align(Alignment.CenterEnd),
+            enter = slideInHorizontally(tween(PANEL_IN_MS, easing = LinearOutSlowInEasing)) { it },
+            exit = slideOutHorizontally(tween(PANEL_OUT_MS, easing = FastOutLinearInEasing)) { it },
+        ) {
+            // 패널의 빈 자리를 민 손짓이 아래 면(pager)으로 새지 않게 여기서 받는다.
+            Box(Modifier.width(width).fillMaxHeight().pointerInput(Unit) {}) {
+                androidx.compose.runtime.CompositionLocalProvider(LocalPanelWidth provides width) { (panel ?: last)?.invoke() }
+                PanelGrip(
+                    onDrag = { px -> width = panelWidthAfterDrag(width, with(density) { (-px).toDp() }, bodyWidth) },
+                    onEnd = { onPanelWidth(width) },
+                    modifier = Modifier.align(Alignment.CenterStart))
             }
         }
-        if (panel != null) panel()
     }
 }
 
 /**
- * 오른쪽 사이드 패널 틀(폭 400) — 머리(56: 종류 라벨 또는 ←, 제목, 고정, 닫기) + 내용.
+ * 패널 폭 손잡이 — 패널 안 왼쪽 가장자리의 세로 띠(닿는 폭 16 — 패널 밖으로 내면 부모 경계 밖이라 손짓을 못 받는다). 가운데 짧은
+ * 막대가 «끌 수 있다» 를 말한다. 끄는 동안 막대가 남색이 된다.
+ */
+@Composable
+private fun PanelGrip(onDrag: (Float) -> Unit, onEnd: () -> Unit, modifier: Modifier = Modifier) {
+    val p = Tokens.palette
+    var dragging by remember { mutableStateOf(false) }
+    Box(
+        modifier.width(16.dp).fillMaxHeight()
+            .pointerInput(Unit) {
+                detectHorizontalDragGestures(
+                    onDragStart = { dragging = true },
+                    onDragEnd = { dragging = false; onEnd() },
+                    onDragCancel = { dragging = false; onEnd() },
+                ) { change, amount -> change.consume(); onDrag(amount) }
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(Modifier.size(5.dp, 44.dp).clip(RoundedCornerShape(3.dp))
+            .background(if (dragging) p.primaryLine else p.edge))
+    }
+}
+
+/**
+ * 오른쪽 사이드 패널 틀(폭 = [LocalPanelWidth], 기본 400) — 머리(56: 종류 라벨 또는 ←, 제목, 고정, 닫기) + 내용.
  *
  * @param tag 종류 라벨(«채널 상세»·«사용자»·«이벤트 상세»). [onBack] 이 있으면(패널 안에서 한 겹 들어온 것) 라벨 대신 ← 이다.
  * @param pinned 고정 상태 — null 이면 고정 단추를 두지 않는다(한 겹 들어온 폼·이벤트 상세).
@@ -365,10 +521,10 @@ fun SidePanelFrame(
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val p = Tokens.palette
-    Surface(color = p.paper, contentColor = p.ink, shadowElevation = 10.dp,
-        modifier = modifier.width(PanelWidth).fillMaxHeight()) {
+    Surface(color = p.paper, contentColor = p.ink, shadowElevation = 12.dp,
+        modifier = modifier.width(LocalPanelWidth.current).fillMaxHeight()) {
         Column(Modifier.fillMaxSize()
-            .drawBehind { drawLine(p.ink, Offset(0.75.dp.toPx(), 0f), Offset(0.75.dp.toPx(), size.height), 1.5.dp.toPx()) }) {
+            .drawBehind { drawLine(p.edge, Offset(0.5.dp.toPx(), 0f), Offset(0.5.dp.toPx(), size.height), 1.dp.toPx()) }) {
             Row(
                 Modifier.fillMaxWidth().height(56.dp)
                     .drawBehind { drawLine(p.divider, Offset(0f, size.height - 0.5f), Offset(size.width, size.height - 0.5f), 1.dp.toPx()) }
@@ -384,7 +540,7 @@ fun SidePanelFrame(
                 if (pinned != null) IconButton(onClick = onPin, modifier = Modifier.size(40.dp)) {
                     Icon(if (pinned) Icons.Filled.PushPin else Icons.Outlined.PushPin,
                         contentDescription = if (pinned) "패널 고정 풀기" else "패널 고정",
-                        modifier = Modifier.size(18.dp), tint = if (pinned) p.ink else p.muted)
+                        modifier = Modifier.size(18.dp), tint = if (pinned) p.primaryInk else p.muted)
                 }
                 IconButton(onClick = onClose, modifier = Modifier.size(44.dp)) {
                     Icon(Icons.Filled.Close, contentDescription = "패널 닫기", modifier = Modifier.size(20.dp))

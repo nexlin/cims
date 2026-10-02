@@ -9,12 +9,14 @@ import org.json.JSONObject
 /**
  * 문구 영역 — 같은 상태코드라도 화면에 따라 다르게 읽힌다.
  *
- * 앞 셋은 HTTP 관리 API(본문 `error` 로 세분, [of]), 나머지는 SIP 응답(상태코드로, [sip]) — 데스크톱
+ * 앞 넷은 HTTP API(관리·녹취·그룹·MCData 파일 — 본문 `error` 로 세분, [of]), 나머지는 SIP 응답(상태코드로, [sip]) — 데스크톱
  * `ResponseText.Area` 와 같은 축이다.
  */
 enum class TextArea {
-    MANAGEMENT, RECORDING, GROUP,
-    PICKUP, TRANSFER, JOIN, PTT_LISTEN, PTT_JOIN, PTT_PRIVATE, PTT_ADHOC, EMERGENCY, EMERGENCY_CANCEL, SDS, SMS, REGISTER, CALL,
+    MANAGEMENT, RECORDING, GROUP, FILE,
+    PICKUP, TRANSFER, JOIN, PTT_LISTEN, PTT_JOIN, PTT_PRIVATE, PTT_ADHOC, EMERGENCY, EMERGENCY_CANCEL, ALERT_CANCEL, SDS, SMS, REGISTER, CALL,
+    /** MCVideo 그룹 영상 호(TS 24.281) — 데스크톱 `Area.Video`. */
+    VIDEO,
 }
 
 object ResponseText {
@@ -43,6 +45,16 @@ object ResponseText {
             409 -> "같은 id 의 그룹을 다른 사용자가 소유하고 있습니다"
             412 -> "다른 곳에서 먼저 바뀐 그룹입니다 — 다시 열어 편집하세요"
             400 -> "그룹 문서 형식 오류"
+            else -> null
+        }
+        // MCData FD 콘텐츠 서버(POST/GET /mcdata/fd, mcdata_messaging.md §4.5) — 403 은 본문으로 세분([forFileError])
+        TextArea.FILE -> when (code) {
+            401 -> LOGIN_EXPIRED
+            403 -> "파일 전송 권한이 없습니다"
+            404 -> "그룹 또는 파일이 서버에 없습니다"
+            413 -> "파일이 너무 큽니다 (서버 한도)"
+            503 -> "서버 파일 저장소가 설정되지 않았습니다 (운영자)"
+            -2 -> "받을 수 없는 파일 주소입니다"
             else -> null
         }
         TextArea.PICKUP -> when (code) {
@@ -80,7 +92,7 @@ object ResponseText {
             else -> null
         }
         TextArea.PTT_ADHOC -> when (code) {
-            403 -> "애드혹 그룹통화 자격이 없거나 시스템에서 꺼져 있습니다"
+            403 -> "애드혹 그룹 통화 자격이 없거나 시스템에서 꺼져 있습니다"
             else -> null
         }
         TextArea.EMERGENCY -> when (code) {
@@ -90,6 +102,11 @@ object ResponseText {
         // 조건 하향 거절(TS 24.379 §10.1.1.4.7 7)·7a)) — 비인가 또는 다른 긴급 사용자가 송출 중. 코어는 이전 값으로 되돌린다
         TextArea.EMERGENCY_CANCEL -> when (code) {
             403 -> "해제 권한이 없거나 다른 사용자가 긴급 발언 중입니다 — 긴급은 계속됩니다"
+            else -> null
+        }
+        // 경보 취소 거절(TS 24.379 §12.1.3.2 — allow-cancel-emergency-alert, 403 + alert-ind true)
+        TextArea.ALERT_CANCEL -> when (code) {
+            403 -> "경보 해제 권한이 없습니다 — 경보는 계속됩니다"
             else -> null
         }
         TextArea.SDS -> when (code) {
@@ -116,6 +133,16 @@ object ResponseText {
             403 -> "발신이 허용되지 않습니다"
             487 -> "취소됨"
             603 -> "거절됨"
+            else -> null
+        }
+        // MCVideo 그룹 영상 호(TS 24.281 §9.2.1.4·§9.2.2.4 검사 순서 — mcvideo.md §5.2.1, Warning 은 ▸상세)
+        TextArea.VIDEO -> when (code) {
+            403 -> "영상 그룹 멤버가 아니거나 영상(MCVideo) 이용 자격이 없습니다"
+            404 -> "영상 그룹이 아니거나 영상 세션이 끝났습니다"
+            486 -> "동시에 참가할 수 있는 영상 호 수를 넘었습니다"
+            480 -> "영상 호를 열지 못했습니다 — 영상을 받을 멤버가 없습니다"
+            488 -> "영상 호 미디어 조건 불일치 — 관리자 문의"
+            500, 503 -> "영상 서버 자원이 없습니다 — 잠시 후 다시"
             else -> null
         }
     }
@@ -213,17 +240,38 @@ object ResponseText {
         else -> null
     }
 
+    /** FD 콘텐츠 서버 오류 본문의 `error`(문장형, csc `services/mcdata_fd.py`) → 문구. 없으면 null. */
+    fun forFileError(error: String): String? = when {
+        error.startsWith("file distribution disabled") -> "이 그룹은 파일 전송이 꺼져 있습니다 (그룹 설정 — 파일 전송 허용)"
+        error.startsWith("not a member") -> "그룹 멤버가 아니라 파일을 보낼 수 없습니다"
+        error.startsWith("unknown group") -> "서버에 없는 그룹입니다"
+        error.startsWith("file too large") -> "파일이 너무 큽니다 (서버 한도)"
+        error.startsWith("file not found") || error.startsWith("file content missing") ->
+            "파일이 서버에 없습니다 (보관 기간이 지났을 수 있습니다)"
+        error == "insufficient_scope" -> "토큰 권한이 부족합니다 — 다시 로그인하세요"
+        else -> null
+    }
+
+    /** SDK 실패 사유(`uploadFd 403: {"error":"…"}`)에서 서버 본문만 — 본문이 없으면 그대로(데스크톱 `GroupError` 가 사유에서 뽑는 것과 같다). */
+    internal fun jsonPart(reason: String): String = reason.indexOf('{').let { if (it >= 0) reason.substring(it) else reason }
+
     /**
      * 실패 한 건을 문장으로. 본문이 JSON 이면 `error`·`detail`·`where` 를 뽑아 세분 사전을 먼저 본다.
      *
      * 사전에 없으면 서버 문장을 그대로 보인다 — 조용히 삼키면 원인을 못 찾는다.
      */
     fun of(area: TextArea, code: Int, body: String): String {
-        val (error, detail, where) = parse(body)
+        // SDK 는 실패 사유 앞에 호출 이름과 코드를 붙인다(`putGroup 403: {"error":"…"}`) — JSON 부분만 떼어 읽는다. 떼지 않으면
+        //   본문 전체가 `error` 로 읽혀 세분 문구(본인 소유 아님·미가입 번호 …)가 하나도 맞지 않는다(데스크톱 `GroupError` 는 정규식으로 뽑는다).
+        val (error, detail, where) = parse(jsonPart(body))
         val fine = when (area) {
             TextArea.GROUP -> forGroupError(error, detail)
-            TextArea.MANAGEMENT, TextArea.RECORDING -> forManagementError(error, detail, where)
-            else -> null                                       // SIP 영역은 본문이 없다 — [sip]
+            TextArea.MANAGEMENT -> forManagementError(error, detail, where)
+            // 녹취의 `out_of_scope` 는 **청취 범위** 밖이다(csc `dispatch_recordings.py`) — 관리 범위 문장(«조직·구성원»)으로 읽지 않고
+            //   코드 표의 «청취 범위 밖의 녹취입니다» 로 보낸다.
+            TextArea.RECORDING -> if (error == "out_of_scope") null else forManagementError(error, detail, where)
+            TextArea.FILE -> forFileError(error)
+            else -> null                                      // SIP 영역은 본문이 없다 — [sip]
         }
         if (fine != null) return fine
         forStatus(area, code)?.let { return it }
@@ -241,7 +289,7 @@ object ResponseText {
                 o.isNull("detail") -> ""
                 else -> o.get("detail").toString()
             }
-            Triple(o.optString("error", ""), detail, o.optString("where", ""))
+            Triple(o.str("error", ""), detail, o.str("where", ""))
         } catch (_: Exception) {
             Triple(s, "", "")
         }

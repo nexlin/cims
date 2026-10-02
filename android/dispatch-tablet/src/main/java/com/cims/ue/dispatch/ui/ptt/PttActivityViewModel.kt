@@ -51,7 +51,7 @@ class PttActivityViewModel(private val s: DispatchSession) : ScreenViewModel() {
      * 배너와 다른 수를 말하지 않는다. 필터·따라가기와 무관하게 늘 선다 — 가리면 고정하는 뜻이 없다.
      */
     val pinned: StateFlow<List<AlertBannerUi>> =
-        s.alerts.map { list -> list.mapNotNull { it.toAlertBannerUi(s::displayLabel) } }
+        s.alerts.map { list -> list.mapNotNull { it.toAlertBannerUi(label = s::displayLabel) } }
             .stateIn(scope, SharingStarted.Eagerly, emptyList())
 
     /**
@@ -67,6 +67,10 @@ class PttActivityViewModel(private val s: DispatchSession) : ScreenViewModel() {
 
     /** 세션이 든 이벤트 전부(최신 위) — «이벤트» 면의 종류·채널 거르기와 상세 패널이 이것을 쓴다. */
     val allRows: StateFlow<List<ActivityRow>> = s.activity
+
+    /** «새 이벤트 따라가기» — 저장된 값(설정 `followChannelEvents`, 기본 켬 · 데스크톱 `FollowEvents`). 끄면 표가 맨 위로 따라 올라가지 않는다. */
+    val followEvents: StateFlow<Boolean> = _followFocus.asStateFlow()
+    fun toggleFollowEvents() = toggleFollowFocus()
 
     fun setFilter(f: ActivityFilter) { _filter.value = f }
     fun toggleFollowFocus() {
@@ -101,4 +105,6 @@ internal fun activityKindText(k: ActivityKind): String = when (k) {
     ActivityKind.EMERGENCY -> "긴급"
     ActivityKind.SDS -> "SDS"
     ActivityKind.ERROR -> "오류"
+    ActivityKind.VIDEO -> "영상"
+    ActivityKind.NOTE -> "기타"
 }

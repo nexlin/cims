@@ -1,9 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- 플랫폼 테마 사용(Material Components 의존 회피). UI 는 Compose Material3 로 렌더. -->
-    <style name="Theme.CimsDispatch" parent="android:Theme.Material.NoActionBar">
-        <item name="android:windowBackground">#0D1211</item>
-        <item name="android:statusBarColor">#0D1211</item>
-        <item name="android:navigationBarColor">#111917</item>
+    <!-- 플랫폼 테마 사용(Material Components 의존 회피). UI 는 Compose Material3 로 렌더.
+         창 바탕은 앱 색 토큰의 밝은 표면(ui/Theme.kt LightPalette) — Compose 가 첫 장을 그리기 전의 잠깐이다. -->
+    <style name="Theme.CimsDispatch" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">#FFFFFF</item>
+        <item name="android:statusBarColor">#FFFFFF</item>
+        <item name="android:navigationBarColor">#F5F7FC</item>
+        <item name="android:windowLightStatusBar">true</item>
     </style>
 </resources>

@@ -7,7 +7,6 @@ package com.cims.ue.dispatch
 import com.cims.ue.dispatch.ui.AppScreen
 import com.cims.ue.dispatch.ui.CallPane
 import com.cims.ue.dispatch.ui.DispatchMode
-import com.cims.ue.dispatch.ui.MoreItem
 import com.cims.ue.dispatch.ui.PttPane
 import com.cims.ue.sdk.AuthScheme
 import com.cims.ue.sdk.MediaSecurity
@@ -22,9 +21,9 @@ import org.junit.Test
 
 class AppSkeletonTest {
 
-    // ── 화면 배열 — 레일은 «하는 일» 셋이다(§6.3) ──
-    @Test fun `레일은 관제·이력·더보기 순이다`() {
-        assertEquals(listOf("관제", "이력", "더보기"), AppScreen.entries.map { it.label })
+    // ── 화면 배열 — 레일은 데스크톱과 같은 넷이다(§6.3) ──
+    @Test fun `레일은 관제·이력·PTT 그룹·관리 순이다`() {
+        assertEquals(listOf("관제", "이력", "PTT 그룹", "관리"), AppScreen.entries.map { it.label })
     }
 
     @Test fun `첫 화면은 관제다`() {
@@ -64,9 +63,9 @@ class AppSkeletonTest {
         assertEquals(listOf("통화", "메시지", "통화내역"), CallPane.entries.map { it.label })
     }
 
-    @Test fun `더보기에는 편성·관리만 남는다`() {
-        // 이력은 최상위로 올라갔다(§6.3).
-        assertEquals(listOf("PTT 그룹", "관리"), MoreItem.entries.map { it.label })
+    @Test fun `PTT 그룹·관리는 레일에 바로 선다`() {
+        // 데스크톱과 같다 — 메뉴를 거치지 않고 한 번에 누른다(§6.3).
+        assertTrue(AppScreen.entries.map { it.label }.containsAll(listOf("PTT 그룹", "관리")))
     }
 
     // ── 계정 선택 규칙 — 전화 계열은 하나만 올린다 ──

@@ -3,34 +3,33 @@
 // 채널 행의 빨강은 [무전] 목록을 보고 있을 때만 보인다. 관제사가 [통화]·[이력]·[더보기] 에 있는 동안 선 긴급
 // 그룹콜은 어디에도 안 보인다 — 착신 배너와 같은 이유로 **화면과 무관한 표면**이 따로 있어야 한다.
 //
-// 착신 배너와 다른 점: 받을 것이 아니라 **알아야 할 상태**다. 닫기가 없고(조건이 풀리거나 세션이 끝나면 스스로
-// 빠진다), 버튼은 [채널로 이동] 하나다. 착신 배너(옅은 면)와 헷갈리지 않게 **꽉 찬 면**으로 그린다.
+// 착신 배너와 다른 점: 받을 것이 아니라 **알아야 할 상태**다. 긴급·임박은 닫기가 없고(조건이 풀리거나 세션이 끝나면 스스로
+// 빠진다), 버튼은 [채널로 이동] 과 자격이 있을 때의 [긴급 해제]·[임박 해제] 다. **긴급 경보**(TS 24.379 §12.1 — 세션 없이도 오는
+// 별개 신호)는 보라 배너로 같은 스택에 서고 [경보 해제](자격이 있을 때)·[닫기](이 화면의 표시만 내린다)를 갖는다.
 package com.cims.ue.dispatch.ui
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.shrinkVertically
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.cims.ue.dispatch.session.AlertKind
 import com.cims.ue.dispatch.session.DispatchSession
+import com.cims.ue.dispatch.session.EmergencyAlertBanner
 import com.cims.ue.dispatch.session.SessionItem
-import com.cims.ue.dispatch.ui.ptt.fmtElapsed
-
-/** 임박 위험의 색 — 배너 면·행·머리 태그가 같은 값을 쓴다(데스크톱 `Brush.Ring`). */
-internal val PerilAmber = Color(0xFFF59E0B)
+import com.cims.ue.dispatch.session.canCancelCondition
+import com.cims.ue.dispatch.session.cancelAlert
+import com.cims.ue.dispatch.session.cancelCondition
+import com.cims.ue.dispatch.session.dismissAlert
+import kotlinx.coroutines.launch
 
 /** 배너 한 장이 그리는 데 필요한 전부 — 세션 없이 Preview·단위시험이 서게 한다. */
 data class AlertBannerUi(
@@ -42,17 +41,36 @@ data class AlertBannerUi(
     /** 개시자 표시(번호 이름 병기). 모르면 빈 값 — 내가 건 긴급·진행 중에 걸린 조건은 개시자를 모른다([SessionItem.alertInitiator]). */
     val initiator: String = "",
     val sinceMs: Long = System.currentTimeMillis(),
-)
+    /** [긴급 해제]·[임박 해제]·[경보 해제] 를 낼 자격이 있나 — 세션 조건·user profile 이 바뀌면 따라온다. */
+    val canCancel: Boolean = false,
+    /** 조건 배너면 그 세션의 호 — [해제] 가 조건 하향을 보낼 대상. 경보 배너는 null. */
+    val callId: Int? = null,
+    /** 긴급 경보 배너면 그 경보([kind] 는 쓰이지 않는다) — [경보 해제]·[닫기] 의 대상. */
+    val alert: EmergencyAlertBanner? = null,
+) {
+    val isAlert: Boolean get() = alert != null
+    /** 스택 안에서 이 배너를 가리키는 열쇠 — 조건 배너는 채널마다 하나, 경보는 그룹·발신자마다 하나. */
+    val key: String get() = alert?.let { "alert|" + it.key } ?: "cond|$channelId"
+}
+
+/** 긴급 경보 → 배너. 제목은 그룹 이름, 머리는 «긴급 경보 · 개시 누구». */
+internal fun EmergencyAlertBanner.toAlertBannerUi(canCancel: Boolean): AlertBannerUi = AlertBannerUi(
+    channelId = groupId, kind = AlertKind.EMERGENCY, title = groupName, initiator = userLabel,
+    sinceMs = sinceMs, canCancel = canCancel, alert = this)
 
 /** 세션 → 배너. 개시자는 mcptt-info `<mcptt-calling-user-id>` 다([SessionItem.alertInitiator]). */
-internal fun SessionItem.toAlertBannerUi(label: (String) -> String): AlertBannerUi? {
+internal fun SessionItem.toAlertBannerUi(canCancel: Boolean = false, label: (String) -> String): AlertBannerUi? {
     val kind = alertKind ?: return null
     val caller = alertInitiator
     return AlertBannerUi(
         channelId = channelId, kind = kind, title = title.ifEmpty { info.groupId },
         initiator = if (caller.isBlank()) "" else label(caller),
-        sinceMs = alertSinceMs ?: startedAtMs)
+        sinceMs = alertSinceMs ?: startedAtMs, canCancel = canCancel, callId = callId)
 }
+
+/** 조건 배너와 경보 배너를 한 스택으로 — 최신이 위(어느 것부터 볼지는 «언제부터» 가 정한다). */
+internal fun alertBannerStack(conditions: List<AlertBannerUi>, alerts: List<AlertBannerUi>): List<AlertBannerUi> =
+    (conditions + alerts).sortedByDescending { it.sinceMs }
 
 @Composable
 fun EmergencyBanners(
@@ -61,7 +79,20 @@ fun EmergencyBanners(
     modifier: Modifier = Modifier,
 ) {
     val alerts by session.alerts.collectAsStateWithLifecycle()
-    EmergencyBannerContent(alerts.mapNotNull { it.toAlertBannerUi(session::displayLabel) }, onOpen, modifier)
+    val raised by session.alertBanners.collectAsStateWithLifecycle()
+    val caps by session.capabilities.collectAsStateWithLifecycle()
+    val scope = rememberCoroutineScope()
+    val items = alertBannerStack(
+        alerts.mapNotNull { it.toAlertBannerUi(canCancelCondition(it, caps), session::displayLabel) },
+        raised.map { it.toAlertBannerUi(caps.cancelEmergencyAlert) })
+    EmergencyBannerContent(items, onOpen, modifier,
+        onCancel = { b ->
+            scope.launch(com.cims.ue.dispatch.session.UnhandledGuard) {
+                val a = b.alert
+                if (a != null) session.cancelAlert(a) else b.callId?.let { session.cancelCondition(it) }
+            }
+        },
+        onDismiss = { b -> b.alert?.let(session::dismissAlert) })
 }
 
 /**
@@ -83,6 +114,8 @@ fun EmergencyBannerContent(
     items: List<AlertBannerUi>,
     onOpen: (String) -> Unit = {},
     modifier: Modifier = Modifier,
+    onCancel: (AlertBannerUi) -> Unit = {},
+    onDismiss: (AlertBannerUi) -> Unit = {},
 ) {
     var expanded by remember { mutableStateOf(false) }
     AnimatedVisibility(
@@ -94,7 +127,9 @@ fun EmergencyBannerContent(
         Column(Modifier.fillMaxWidth()) {
             val shown = alertFold(items.size, expanded)
             Column(Modifier.heightIn(max = ALERT_EXPANDED_MAX).verticalScroll(rememberScrollState())) {
-                items.take(shown).forEach { AlertBanner(it) { onOpen(it.channelId) } }
+                items.take(shown).forEach { b ->
+                    key(b.key) { AlertBanner(b, onOpen = { onOpen(b.channelId) }, onCancel = { onCancel(b) }, onDismiss = { onDismiss(b) }) }
+                }
             }
             if (items.size > ALERT_VISIBLE) MoreAlerts(hidden = items.size - shown, expanded) { expanded = !expanded }
         }
@@ -104,47 +139,37 @@ fun EmergencyBannerContent(
 /** 접힌 배너 줄 — «긴급·임박 n건 더» / «접기». 긴급 색의 옅은 면이라 스택의 일부로 읽힌다. */
 @Composable
 private fun MoreAlerts(hidden: Int, expanded: Boolean, onToggle: () -> Unit) {
-    Surface(color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.6f),
-        contentColor = MaterialTheme.colorScheme.onErrorContainer,
+    val p = Tokens.palette
+    Surface(color = p.emgSoft, contentColor = p.emgInk,
         modifier = Modifier.fillMaxWidth().clickable(onClick = onToggle)) {
         Text(if (expanded) "접기" else "긴급·임박 ${hidden}건 더 — 눌러서 펼치기",
-            Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+            Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
             fontSize = Type.body, fontWeight = FontWeight.Bold)
     }
 }
 
 @Composable
-private fun AlertBanner(b: AlertBannerUi, onOpen: () -> Unit) {
-    // 긴급 = 앱 전체의 긴급 색(행·머리와 같은 errorContainer), 임박 = 주황. 둘 다 꽉 찬 면이다.
-    val (bg, fg) = when (b.kind) {
-        AlertKind.EMERGENCY -> MaterialTheme.colorScheme.errorContainer to MaterialTheme.colorScheme.onErrorContainer
-        AlertKind.IMMINENT_PERIL -> PerilAmber to Color.Black
+private fun AlertBanner(b: AlertBannerUi, onOpen: () -> Unit, onCancel: () -> Unit, onDismiss: () -> Unit) {
+    // 긴급 = 연한 빨강 면 + 진한 빨강 글자, 임박 = 주황 채움 + 먹 글자, 경보 = 연한 보라(데스크톱 배너 층과 같은 토큰).
+    //   경과는 1초마다 다시 그린다 — 얼마나 됐는지가 대응 순서의 판단 재료다.
+    val peril = !b.isAlert && b.kind == AlertKind.IMMINENT_PERIL
+    val head = when {
+        b.isAlert -> "긴급 경보"
+        else -> b.kind.bannerTitle
     }
-    // 경과는 1초마다 다시 그린다 — 얼마나 됐는지가 대응 순서의 판단 재료다.
-    var tick by remember { mutableIntStateOf(0) }
-    LaunchedEffect(b.channelId, b.sinceMs) {
-        while (true) { kotlinx.coroutines.delay(1000); tick++ }
-    }
-
-    Surface(color = bg, contentColor = fg, modifier = Modifier.fillMaxWidth()) {
-        Row(
-            Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            Box(Modifier.size(10.dp).background(fg, RoundedCornerShape(5.dp)))
-            Column(Modifier.weight(1f)) {
-                Text(
-                    b.kind.bannerTitle + if (b.initiator.isNotEmpty()) " · 개시 ${b.initiator}" else "",
-                    fontSize = Type.body, fontWeight = FontWeight.Bold, maxLines = 1)
-                Text(b.title, fontSize = Type.display, fontWeight = FontWeight.Bold, maxLines = 1)
-            }
-            @Suppress("UNUSED_EXPRESSION") tick     // 1초 틱을 이 조합에 묶는다
-            Text(fmtElapsed((System.currentTimeMillis() - b.sinceMs).coerceAtLeast(0)), fontSize = Type.title)
-            Button(onClick = onOpen, modifier = Modifier.height(48.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = fg, contentColor = bg)) {
-                Text("채널로 이동", fontWeight = FontWeight.Bold)
-            }
-        }
+    BannerBar(
+        tone = when { b.isAlert -> BannerTone.ALERT; peril -> BannerTone.PERIL; else -> BannerTone.EMERGENCY },
+        line1 = head + if (b.initiator.isNotEmpty()) " · 개시 ${b.initiator}" else "",
+        line2 = b.title,
+        sinceMs = b.sinceMs,
+    ) {
+        // [해제] — 긴급·임박 = 조건 해제 요청, 경보 = 경보 취소(남의 경보면 제3자 취소). 자격이 있을 때만 선다.
+        if (b.canCancel) PillButton(
+            when { b.isAlert -> "경보 해제"; peril -> "임박 해제"; else -> "긴급 해제" }, onCancel,
+            kind = when { b.isAlert -> Pill.MON_LINE; peril -> Pill.ON_PERIL_LINE; else -> Pill.EMG_LINE }, height = 44.dp)
+        PillButton("채널로 이동", onOpen,
+            kind = when { b.isAlert -> Pill.MON_FILL; peril -> Pill.ON_PERIL; else -> Pill.RED_FILL }, height = 44.dp)
+        // [닫기] — 경보만. 이 화면의 표시만 내린다(취소 신호를 놓쳤을 때) — 서버의 경보는 그대로다.
+        if (b.isAlert) PillButton("닫기", onDismiss, kind = Pill.MON_LINE, height = 44.dp)
     }
 }

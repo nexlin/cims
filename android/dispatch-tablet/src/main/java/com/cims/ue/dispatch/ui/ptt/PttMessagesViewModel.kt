@@ -1,12 +1,19 @@
 // ④ PTT 메시지 (docs/design/features/android_dispatch_tablet.md §6.7, dispatch_desktop_ui.md §4.4)
 //
-// MCData SDS 스레드. **포커스 채널을 따라간다** — ① 에서 보는 채널이 바뀌면 이 패널도 바뀐다
-// (따라가기 토글로 고정할 수 있다).
+// MCData SDS·파일(FD) 스레드. **포커스 채널을 따라간다** — ① 에서 보는 채널이 바뀌면 이 패널도 바뀐다
+// (따라가기 토글로 고정할 수 있다). 파일 = [📎] 로 고른 것을 올리고 FD 알림을 보낸다, 받은 파일은 [받기] 로 받는다
+// (mcdata_messaging.md §4.5 — `FilePlane`).
 package com.cims.ue.dispatch.ui.ptt
 
+import android.content.Context
+import android.net.Uri
 import com.cims.ue.dispatch.ui.ScreenViewModel
 import com.cims.ue.dispatch.session.DispatchSession
 import com.cims.ue.dispatch.session.Message
+import com.cims.ue.dispatch.session.downloadFile
+import com.cims.ue.dispatch.session.openFile
+import com.cims.ue.dispatch.session.resendFile
+import com.cims.ue.dispatch.session.sendFile
 import com.cims.ue.dispatch.session.sendSdsTo
 import com.cims.ue.dispatch.session.resendSds
 import com.cims.ue.dispatch.ui.RecipientOption
@@ -24,7 +31,7 @@ data class ThreadChip(
     val title: String,
     val unread: Int,
     val lastAtMs: Long,
-    /** 마지막 한 통 미리보기 — «나: …»·«이당직: …»(그룹)·«…»(1:1). */
+    /** 마지막 한 통 미리보기 — «나: …»·«이당직: …»(그룹)·«…»(1:1). 파일뿐인 말풍선은 «파일 <이름>». */
     val last: String = "",
     /** 편성 그룹 스레드(아니면 사람 1:1). */
     val group: Boolean = false,
@@ -51,9 +58,9 @@ internal fun threadChips(
             unread = list.count { !it.read && !it.outgoing },
             lastAtMs = lastMsg.atMs,
             last = when {
-                lastMsg.outgoing -> "나: ${lastMsg.text}"
-                group && lastMsg.fromName.isNotBlank() -> "${lastMsg.fromName}: ${lastMsg.text}"
-                else -> lastMsg.text
+                lastMsg.outgoing -> "나: ${lastMsg.preview}"
+                group && lastMsg.fromName.isNotBlank() -> "${lastMsg.fromName}: ${lastMsg.preview}"
+                else -> lastMsg.preview
             },
             group = group)
     }.sortedByDescending { it.lastAtMs }
@@ -107,10 +114,24 @@ class PttMessagesViewModel(private val s: DispatchSession) : ScreenViewModel() {
             } ?: "채널을 고르세요"
         } }.stateIn(scope, SharingStarted.Eagerly, "")
 
+    /** «메시지» 면이 지금 보이는가 — 셸이 알려 준다(면은 좌우로 넘기는 여섯 장 중 하나라 VM 은 스스로 모른다). */
+    private val _visible = MutableStateFlow(false)
+    fun setVisible(v: Boolean) { _visible.value = v }
+
+    init {
+        // 열어 둔 대화로 온 글은 곧바로 읽음이다(데스크톱 `MessagesViewModelBase` — 고른 대화의 수신은 즉시 읽음). 면이 보이고
+        //   화면이 켜져 있을 때만 — 안 보이는 동안 온 글까지 읽음으로 닫으면 배지가 서지 않는다.
+        scope.launch {
+            combine(s.messages, groupId, _visible, com.cims.ue.dispatch.session.UiPresence.visible) { all, g, vis, ui ->
+                g?.takeIf { vis && ui && all[it]?.any { m -> !m.read && !m.outgoing } == true }
+            }.collect { g -> if (g != null) s.markRead(g) }
+        }
+    }
+
     /** ① 이 포커스를 바꾸면 부른다. */
     fun onFocusChanged(groupId: String?) {
+        // 대화만 옮긴다 — 읽음은 그 대화가 «메시지» 면에 **보일 때** 된다(위 수집자). 채널을 연 것만으로 읽음이 되면 안 읽은 글이 사라진다.
         _focusGroupId.value = groupId
-        if (_follow.value && groupId != null) s.markRead(groupId)
     }
 
     /**
@@ -127,8 +148,11 @@ class PttMessagesViewModel(private val s: DispatchSession) : ScreenViewModel() {
     }
 
     fun toggleFollow() {
+        // 끄면 **지금 보던 스레드**에 머문다 — 고정은 끄기 **전에** 적는다. 끈 뒤에 읽으면 `groupId` 가 이미 옛 고정값으로
+        //   바뀌어 있어, 예전에 고른 스레드로 튀고 다음 발신이 거기로 나간다(데스크톱 `ToggleFollow` 는 선택을 건드리지 않는다).
+        val showing = groupId.value
+        if (_follow.value) _pinned.value = showing
         _follow.value = !_follow.value
-        if (!_follow.value) _pinned.value = groupId.value
         val v = _follow.value
         s.updateSettings { it.copy(followChannelThread = v) }
     }
@@ -162,19 +186,50 @@ class PttMessagesViewModel(private val s: DispatchSession) : ScreenViewModel() {
             .stateIn(scope, SharingStarted.Eagerly, false)
 
     /**
+     * 실패한 말풍선 다시 보내기 — 같은 말풍선이 갱신된다. 글은 `resendSds`, 파일은 `resendFile`(아직 못 올렸으면 업로드부터,
+     * 올렸으면 알림만 — 데스크톱 `ResendCore`).
+     */
+    fun resend(m: Message) {
+        if (m.isAttachment) s.scopeLaunch { s.resendFile(m) } else scope.launch { s.resendSds(m) }
+    }
+
+    /**
      * 보내기 — 키가 **그룹이면 그룹 SDS, 사람이면 1:1 SDS**.
      *
      * 판정은 세션이 한다(`sendSdsTo`). 전에는 무조건 그룹 경로로 보냈는데, 사람 스레드에서 답장하면
      * request-type 이 `group-sds` 인 채로 나가 서버가 그룹 게이트를 거치고 받는 쪽 스레드 귀속도
      * 틀어졌다(mcdata_messaging.md §4).
      */
-    /** 실패한 말풍선 다시 보내기 — 같은 말풍선이 갱신된다(`resendSds`). */
-    fun resend(m: Message) { scope.launch { s.resendSds(m) } }
-
     fun send(text: String) {
         val g = groupId.value ?: return
         if (text.isBlank()) return
         scope.launch { s.sendSdsTo(g, text.trim()) }
+    }
+
+    // ── 파일(MCData FD, mcdata_messaging.md §4.5) ──
+    // 전송은 **세션의 코루틴**에서 돈다 — 화면(VM)이 닫혀도 올리던 파일이 «올리는 중…» 에 멈추지 않게.
+
+    /**
+     * [📎] 로 고른 파일들을 지금 대화로 보낸다 — 하나씩 차례로(데스크톱 `AttachCore`). 대화는 **고를 때의 것**으로 잡는다 —
+     * 올리는 동안 다른 대화로 옮겨도 고른 곳으로 간다.
+     */
+    fun attach(context: Context, uris: List<Uri>) {
+        val g = groupId.value ?: return
+        if (uris.isEmpty()) return
+        val app = context.applicationContext
+        s.scopeLaunch { uris.forEach { s.sendFile(app, g, it) } }
+    }
+
+    /** 받은 파일 [받기] — 받은 파일 폴더에 저장하고 연다. */
+    fun download(context: Context, m: Message) {
+        val app = context.applicationContext
+        s.scopeLaunch { s.downloadFile(app, m) }
+    }
+
+    /** 파일 이름·[열기] — 연결된 앱으로 연다. 아직 안 받은 수신 파일이면 받기부터. */
+    fun open(context: Context, m: Message) {
+        val app = context.applicationContext
+        s.scopeLaunch { s.openFile(app, m) }
     }
 
     /** «새 대화» 에서 고른 상대로 연다 — 그룹이든 사람이든 스레드 키 하나다. */

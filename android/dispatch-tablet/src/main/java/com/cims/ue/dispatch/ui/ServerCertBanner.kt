@@ -12,7 +12,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -27,7 +28,11 @@ data class CertBannerUi(val level: CertLevel, val title: String, val subtitle: S
 fun ServerCertBanner(session: DispatchSession, modifier: Modifier = Modifier) {
     val e by session.serverCert.collectAsStateWithLifecycle()
     val cert = e ?: return
-    val now = System.currentTimeMillis() / 1000L
+    // 잔여 일수는 **시간이 가며** 줄어든다 — 관측은 그대로라(같은 값이면 흐름이 다시 내지 않는다) 화면이 1분마다 스스로 다시
+    //   판정한다(데스크톱의 60초 틱). 아니면 며칠 켜 둔 관제석에서 배너가 서지 않고, 경고가 위험으로 넘어가지 않는다.
+    val now by androidx.compose.runtime.produceState(System.currentTimeMillis() / 1000L) {
+        while (true) { kotlinx.coroutines.delay(60_000L); value = System.currentTimeMillis() / 1000L }
+    }
     val level = ServerCert.level(cert, now)
     if (level == CertLevel.OK) return
     ServerCertBannerContent(CertBannerUi(level, ServerCert.title(cert, now), ServerCert.subtitle(cert)), modifier)
@@ -36,27 +41,27 @@ fun ServerCertBanner(session: DispatchSession, modifier: Modifier = Modifier) {
 /** 배너 — **순수 컴포저블**. */
 @Composable
 fun ServerCertBannerContent(b: CertBannerUi, modifier: Modifier = Modifier) {
-    // 위험 = 진한 빨강 면, 경고 = 옅은 빨강 면 + 빨강 글자 — 두 테마 모두. 진한 쪽 토큰이 테마마다 다르다(어둡게는
-    //   errorContainer, 밝게는 error 가 진하다). 긴급 배너와는 [채널로 이동] 이 없고 한 줄 제목이라는 모양으로 갈린다.
-    val cs = MaterialTheme.colorScheme
-    val dark = cs.background.luminance() < 0.5f
-    val critical = b.level == CertLevel.CRITICAL
-    val bg = when {
-        critical -> if (dark) cs.errorContainer else cs.error
-        else -> if (dark) cs.errorContainer.copy(alpha = 0.35f) else cs.errorContainer
-    }
-    val fg = when {
-        critical -> if (dark) cs.onErrorContainer else cs.onError
-        else -> cs.error
-    }
-    Surface(color = bg, contentColor = fg, modifier = modifier.fillMaxWidth()) {
-        Row(Modifier.padding(horizontal = 14.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically,
+    WarnLine(b.title, b.subtitle, critical = b.level == CertLevel.CRITICAL, modifier = modifier)
+}
+
+/**
+ * 경고 한 줄 — 서버 인증서 만료·자격 갱신 실패(데스크톱 배너 층의 «경고 한 줄»). 닫기가 없다. 경고 = 연한 빨강 면 + 빨강 글자,
+ * 위험([critical]) = 진한 빨강 채움 + 흰 글자. 긴급 배너와는 버튼·경과가 없는 한 줄이라는 모양으로 갈린다.
+ */
+@Composable
+fun WarnLine(title: String, subtitle: String = "", critical: Boolean = false, modifier: Modifier = Modifier) {
+    val p = Tokens.palette
+    val bg = if (critical) p.emgFill else p.emgSoft
+    val fg = if (critical) p.onAccent else p.emg
+    Surface(color = bg, contentColor = fg, modifier = modifier.fillMaxWidth()
+        .drawBehind { drawLine(p.emgEdge, Offset(0f, size.height - 0.5f), Offset(size.width, size.height - 0.5f), 1.dp.toPx()) }) {
+        Row(Modifier.padding(start = 20.dp, end = 14.dp, top = 10.dp, bottom = 10.dp), verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            Icon(Icons.Filled.Warning, contentDescription = null, modifier = Modifier.size(22.dp))
-            Column(Modifier.weight(1f)) {
-                Text(b.title, fontSize = Type.body, fontWeight = FontWeight.Bold, maxLines = 1)
-                Text(b.subtitle, fontSize = Type.meta, maxLines = 2)
-            }
+            Icon(Icons.Filled.Warning, contentDescription = null, modifier = Modifier.size(18.dp))
+            Text(androidx.compose.ui.text.buildAnnotatedString {
+                pushStyle(androidx.compose.ui.text.SpanStyle(fontWeight = FontWeight.Bold)); append(title); pop()
+                if (subtitle.isNotEmpty()) append(" · $subtitle")
+            }, fontSize = Type.strong, maxLines = 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
         }
     }
 }

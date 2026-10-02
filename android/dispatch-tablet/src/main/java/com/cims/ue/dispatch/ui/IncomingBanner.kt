@@ -11,37 +11,31 @@ package com.cims.ue.dispatch.ui
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.shrinkVertically
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.cims.ue.dispatch.session.DispatchSession
 import com.cims.ue.dispatch.session.SessionItem
 import com.cims.ue.dispatch.session.SessionKind
 import com.cims.ue.dispatch.session.answer
 import com.cims.ue.dispatch.session.reject
-import com.cims.ue.dispatch.ui.ptt.fmtElapsed
 import kotlinx.coroutines.launch
 
-/** 착신 종류별 색(§3.2) — 대표번호 주황 · 직접 파랑 · 개별 통화 청록. */
-private fun bannerColor(s: SessionItem, isPilot: Boolean): Color = when {
-    s.kind == SessionKind.PTT_PRIVATE -> Color(0xFF14B8A6)
-    isPilot -> Color(0xFFF59E0B)
-    else -> Color(0xFF3B82F6)
+/** 착신 종류 → 배너 색(§3.2) — 대표번호 옅은 주황 · 직접 옅은 파랑 · 개별 통화 옅은 청록. */
+private fun bannerTone(s: SessionItem, isPilot: Boolean): BannerTone = when {
+    s.kind == SessionKind.PTT_PRIVATE -> BannerTone.PTT
+    isPilot -> BannerTone.PILOT
+    else -> BannerTone.DIRECT
 }
 
 @Composable
 fun IncomingBanners(
     session: DispatchSession,
-    onAnswered: () -> Unit,
+    onAnswered: (SessionItem) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val calls by session.incoming.collectAsStateWithLifecycle()
@@ -58,8 +52,8 @@ fun IncomingBanners(
             calls.forEach { c ->
                 Banner(
                     session = session, call = c,
-                    onAnswer = { scope.launch { session.answer(c.callId); onAnswered() } },
-                    onReject = { scope.launch { session.reject(c.callId) } })
+                    onAnswer = { scope.launch(com.cims.ue.dispatch.session.UnhandledGuard) { session.answer(c.callId); onAnswered(c) } },
+                    onReject = { scope.launch(com.cims.ue.dispatch.session.UnhandledGuard) { session.reject(c.callId) } })
             }
         }
     }
@@ -73,36 +67,20 @@ private fun Banner(
     onReject: () -> Unit,
 ) {
     val pilot = call.info.calledParty.isNotEmpty() && session.isPilot(call.info.calledParty)
-    val color = bannerColor(call, pilot)
+    // 주소록이 늦게 서도(기동 직후의 착신) 이름이 따라 붙게 한다 — 라벨은 주소록에서 풀지만 스스로 알리지 않는다.
+    val book by session.phoneBook.collectAsStateWithLifecycle()
+    @Suppress("UNUSED_EXPRESSION") book
     // 경과는 1초마다 다시 그린다 — 얼마나 울리고 있는지가 받을지 말지의 판단 재료다.
-    var tick by remember { mutableIntStateOf(0) }
-    LaunchedEffect(call.callId) {
-        while (true) { kotlinx.coroutines.delay(1000); tick++ }
-    }
-
-    Surface(color = color.copy(alpha = 0.22f), modifier = Modifier.fillMaxWidth()) {
-        Row(
-            Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            Box(Modifier.size(10.dp).background(color, RoundedCornerShape(5.dp)))
-            Column(Modifier.weight(1f)) {
-                Text(
-                    buildString {
-                        append(if (pilot) "대표번호 ${session.dispatch.pilotId} 착신" else "착신")
-                        if (call.kind == SessionKind.PTT_PRIVATE) append(" · 개별 통화")
-                    },
-                    fontSize = Type.body, color = color, fontWeight = FontWeight.Bold)
-                Text(session.displayLabel(call.info.remoteUri),
-                    fontSize = Type.display, fontWeight = FontWeight.Bold)
-            }
-            @Suppress("UNUSED_EXPRESSION") tick     // 1초 틱을 이 조합에 묶는다
-            Text(fmtElapsed(call.elapsedMs), fontSize = Type.title)
-            Button(onClick = onAnswer, modifier = Modifier.height(48.dp).widthIn(min = 104.dp)) {
-                Text("응답", fontSize = Type.title, fontWeight = FontWeight.Bold)
-            }
-            OutlinedButton(onClick = onReject, modifier = Modifier.height(48.dp)) { Text("거절") }
-        }
+    BannerBar(
+        tone = bannerTone(call, pilot),
+        line1 = buildString {
+            append(if (pilot) "대표번호 ${com.cims.ue.dispatch.session.localNumber(com.cims.ue.dispatch.session.userPart(session.dispatch.pilotId))} 착신" else "착신")
+            if (call.kind == SessionKind.PTT_PRIVATE) append(" · 개별 통화")
+        },
+        line2 = session.displayLabel(call.info.remoteUri),
+        sinceMs = call.connectedAtMs ?: call.startedAtMs,
+    ) {
+        PillButton("응답", onAnswer, kind = Pill.CALL, height = 44.dp, modifier = Modifier.widthIn(min = 104.dp))
+        PillButton("거절", onReject, kind = Pill.LINE, height = 44.dp)
     }
 }

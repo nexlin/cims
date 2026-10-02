@@ -21,9 +21,11 @@ abstract class ScreenViewModel : AutoCloseable {
      * 이 VM 의 수명 스코프. `viewModelScope` 를 대신한다.
      *
      * `Main.immediate` 인 것은 화면 상태를 바꾸는 일이 대부분이고, 이벤트 처리 중 상태 갱신이
-     * 한 프레임 밀리지 않게 하기 위해서다(기존 `viewModelScope` 와 같은 디스패처).
+     * 한 프레임 밀리지 않게 하기 위해서다(기존 `viewModelScope` 와 같은 디스패처). 미처리 예외는 적고 알릴 뿐 프로세스를
+     * 죽이지 않는다(`UnhandledGuard` — 화면 하나의 예외로 진행 중인 통화·무전이 끊기지 않게).
      */
-    protected val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    protected val scope: CoroutineScope =
+        CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate + com.cims.ue.dispatch.session.UnhandledGuard)
 
     /** 소유자가 버릴 때 부른다. 하위 클래스는 정리한 뒤 `super.close()` 를 부른다. 멱등이다. */
     override fun close() {

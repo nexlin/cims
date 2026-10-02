@@ -22,7 +22,9 @@ package com.cims.ue.dispatch.session
 import com.cims.ue.sdk.CimsResult
 import com.cims.ue.sdk.CscClient
 import com.cims.ue.sdk.HttpResponse
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -66,13 +68,19 @@ class ManagementClient(
         return CimsResult(false, r.code, ResponseText.of(area, r.code, body.ifEmpty { r.reason }), r.value)
     }
 
-    private fun <T> map(r: CimsResult<HttpResponse>, parse: (JSONObject) -> T): CimsResult<T> {
+    /**
+     * 응답 해석 — **메인 밖에서** 한다. 하루 1000건 이력·수천 명 전화번호부의 JSON 을 메인에서 풀면 그동안 화면과 무전 이벤트
+     * 처리가 멎는다. 파서는 값만 만든다(세션 상태를 만지지 않는다).
+     */
+    private suspend fun <T> map(r: CimsResult<HttpResponse>, parse: (JSONObject) -> T): CimsResult<T> {
         if (!r.ok) return CimsResult.fail(r.code, r.reason)
         val body = r.value?.text.orEmpty().ifBlank { "{}" }
-        return try {
-            CimsResult.ok(parse(JSONObject(body)))
-        } catch (e: Exception) {
-            CimsResult.fail(-2, "응답 해석 실패: ${e.message}")
+        return kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+            try {
+                CimsResult.ok(parse(JSONObject(body)))
+            } catch (e: Exception) {
+                CimsResult.fail(-2, "응답 해석 실패: ${e.message}")
+            }
         }
     }
 
@@ -169,10 +177,14 @@ class ManagementClient(
         return map(send(TextArea.MANAGEMENT, "GET", path)) { parseHistory(kind, it) }
     }
 
-    suspend fun pttSessionDetail(recordingId: String): CimsResult<PttSessionDetail> =
-        map(send(TextArea.MANAGEMENT, "GET", "/provisioning/history/ptt/${encPath(recordingId)}")) {
-            parsePttDetail(it, recordingId)
-        }
+    suspend fun pttSessionDetail(recordingId: String): CimsResult<PttSessionDetail> {
+        val r = send(TextArea.MANAGEMENT, "GET", "/provisioning/history/ptt/${encPath(recordingId)}")
+        // 이 조회의 `out_of_scope` 는 **청취 범위** 밖이다(녹취와 같은 판정 — csc `dispatch_recordings.py`). 관리 범위 문장
+        //   («조직·구성원»)으로 읽지 않는다.
+        if (!r.ok && r.value?.text.orEmpty().contains("\"out_of_scope\""))
+            return CimsResult.fail(r.code, "청취 범위 밖의 세션입니다")
+        return map(r) { parsePttDetail(it, recordingId) }
+    }
 
     // ── 녹취(§4.6) ──────────────────────────────────────────────────────────
 
@@ -180,7 +192,8 @@ class ManagementClient(
         map(send(TextArea.RECORDING, "GET", "/provisioning/recordings/${encPath(id)}")) { parseRecording(it, id) }
 
     /**
-     * 세그먼트 오디오(MP4/AAC)를 받아 로컬 파일로. `slot` = 단독 발언자 트랙(null = 믹스).
+     * 세그먼트 MP4 를 받아 로컬 파일로. `slot` = 단독 발언자 트랙(null = 믹스). 소리만 있는 세그먼트는 AAC 한 트랙,
+     * 영상이 있는 세그먼트(영상 통화 녹취·MCVideo 송출 구간)는 AAC + H.264 한 파일이다 — 그래서 형식을 가리지 않고 받는다.
      *
      * 202 는 "변환 중" 이라 서버가 만들 때까지 기다린다 — 0.7→1.5초 간격으로 최대 120초
      * (콘솔 SegmentPlayer 와 같은 규약).
@@ -190,12 +203,7 @@ class ManagementClient(
     suspend fun fetchSegment(dir: File, id: String, seq: Int, slot: Int?, retry: Boolean,
                              onStatus: (String) -> Unit = {}): CimsResult<File> {
         var t = token() ?: return CimsResult.fail(-1, "로그인 전")
-        val q = buildList {
-            if (slot != null) add("slot=$slot")
-            if (retry) add("retry=1")
-        }
-        val path = "/provisioning/recordings/${encPath(id)}/segments/$seq/audio" +
-            if (q.isEmpty()) "" else "?" + q.joinToString("&")
+        var path = segmentPath(id, seq, slot, retry)
 
         dir.mkdirs()
         val base = "${sanitize(id)}_${seq}_${slot?.toString() ?: "mix"}"
@@ -210,28 +218,36 @@ class ManagementClient(
         val deadline = System.currentTimeMillis() + FETCH_TIMEOUT_MS
         var wait = 700L
         while (true) {
-            var r = csc.request(t, "GET", path, accept = "audio/mp4")
+            var r = csc.request(t, "GET", path, accept = "*/*")
             if (r.value?.status == 401) {                 // 이진 경로도 같은 복구(send 를 타지 않는다)
                 val fresh = renew()
-                if (fresh != null && fresh != t) { t = fresh; r = csc.request(t, "GET", path, accept = "audio/mp4") }
+                if (fresh != null && fresh != t) { t = fresh; r = csc.request(t, "GET", path, accept = "*/*") }
             }
             val v = r.value
             if (r.ok && v != null && v.status == 200 && v.body.isNotEmpty()) {
-                // 재생 중인 파일을 덮어쓰면 MediaPlayer 가 깨지므로 매번 새 이름으로 쓴다.
+                // 재생 중인 파일을 덮어쓰면 MediaPlayer 가 깨지므로 매번 새 이름으로 쓴다. 영상 세그먼트는 수 MB 라
+                // 화면 스레드에서 쓰지 않는다.
                 val out = File(dir, "${base}_${System.currentTimeMillis()}.mp4")
-                out.writeBytes(v.body)
+                try {
+                    withContext(Dispatchers.IO) { dir.mkdirs(); out.writeBytes(v.body) }
+                } catch (e: java.io.IOException) {
+                    return CimsResult.fail(-3, "임시 파일을 쓸 수 없습니다 — ${e.message}")
+                }
                 return CimsResult.ok(out)
             }
             if (v?.status == 200) return CimsResult.fail(200, "녹취 응답이 비었습니다 — [다시 변환]")
             if (v?.status != 202) {
                 val body = v?.text.orEmpty()
-                return CimsResult.fail(v?.status ?: r.code,
-                    ResponseText.of(TextArea.RECORDING, v?.status ?: r.code, body.ifEmpty { r.reason }))
+                // 닿지 못한 요청은 응답 객체가 있어도 상태가 0 이다 — 그때는 결과의 코드(음수 = 서버에 닿지 않음)를 쓴다
+                val code = v?.status?.takeIf { it > 0 } ?: r.code
+                return CimsResult.fail(code, ResponseText.of(TextArea.RECORDING, code, body.ifEmpty { r.reason }))
             }
             if (System.currentTimeMillis() >= deadline) return CimsResult.fail(408, "녹취 변환이 끝나지 않았습니다 — 잠시 후 다시")
-            onStatus("변환 중…")
+            onStatus(transcodeStatusText(v.text))
             delay(wait)
             wait = (wait + 200L).coerceAtMost(1500L)
+            // 재변환 요청은 한 번이면 된다 — 기다리는 동안 `retry=1` 을 되풀이하면 그때마다 표식을 지우고 다시 건다.
+            path = segmentPath(id, seq, slot, retry = false)
         }
     }
 
@@ -269,6 +285,22 @@ class ManagementClient(
         /** 녹취 id 는 `ptt/24/2026/09/07/10/S…_1` 처럼 경로형이다 — 구분자는 남기고 조각만 인코딩한다. */
         internal fun encPath(id: String): String = id.split('/').joinToString("/") { enc(it) }
 
+        /** 세그먼트 MP4 경로 — `slot` = 단독 트랙, `retry` = 변환 실패 표식을 지우고 다시 변환. */
+        internal fun segmentPath(id: String, seq: Int, slot: Int?, retry: Boolean): String {
+            val q = buildList {
+                if (slot != null) add("slot=$slot")
+                if (retry) add("retry=1")
+            }
+            return "/provisioning/recordings/${encPath(id)}/segments/$seq/audio" +
+                if (q.isEmpty()) "" else "?" + q.joinToString("&")
+        }
+
+        /** 202 본문(`{status: transcoding|recording}`) → 기다리는 동안의 문구. */
+        internal fun transcodeStatusText(json: String): String {
+            val status = try { JSONObject(json.ifBlank { "{}" }).str("status", "") } catch (_: Exception) { "" }
+            return if (status == "recording") "녹음 진행 중 — 세그먼트가 닫히면 재생됩니다" else "서버가 변환 중입니다…"
+        }
+
         private fun sanitize(s: String): String = s.map { if (it.isLetterOrDigit() || it == '-') it else '_' }.joinToString("")
 
         /** 오프셋 없는 로컬 표기 `2026-09-15T00:00:00`. */
@@ -278,7 +310,7 @@ class ManagementClient(
 
         /** ISO8601(오프셋 있으면 그대로, 없으면 로컬) → epoch ms. 못 읽으면 null. */
         internal fun timeMs(o: JSONObject, name: String): Long? {
-            val s = o.optString(name, "")
+            val s = o.str(name)
             if (s.isBlank()) return null
             return try {
                 OffsetDateTime.parse(s).toInstant().toEpochMilli()
@@ -291,7 +323,8 @@ class ManagementClient(
 
         private fun strings(a: JSONArray?): List<String> {
             if (a == null) return emptyList()
-            return (0 until a.length()).mapNotNull { i -> a.optString(i, "").takeIf { it.isNotBlank() } }
+            // JSON null 은 뺀다 — Android 의 `optString` 은 null 원소에 글자 «null» 을 낸다(`str()` 과 같은 까닭)
+            return (0 until a.length()).mapNotNull { i -> if (a.isNull(i)) null else a.optString(i, "").takeIf { it.isNotBlank() } }
         }
 
         private fun objects(o: JSONObject, name: String): List<JSONObject> {
@@ -306,8 +339,8 @@ class ManagementClient(
         internal fun parseAdminView(root: JSONObject, etag: String): AdminView {
             val sc = root.optJSONObject("scope") ?: JSONObject()
             // 전환기 서버는 관리 범위를 `directoryAdmin` 으로 냈다 — 새 이름을 먼저 본다.
-            val write = sc.optString("directoryWrite", "").ifBlank { sc.optString("directoryAdmin", "") }
-            val scope = AdminScope(sc.optString("groupId", ""), write, sc.optString("orgCode", ""))
+            val write = sc.str("directoryWrite", "").ifBlank { sc.str("directoryAdmin", "") }
+            val scope = AdminScope(sc.str("groupId", ""), write, sc.str("orgCode", ""))
 
             // 접속서비스 후보 — 버킷이 곧 회선 종류다. 항목이 제 kind 를 실으면 그것을 따른다
             // (전환기 서버는 voip 항목을 volte 버킷에 함께 실었다).
@@ -315,28 +348,28 @@ class ManagementClient(
             root.optJSONObject("services")?.let { sv ->
                 LineKind.all.forEach { bucket ->
                     objects(sv, bucket).forEach { x ->
-                        val raw = x.optString("kind", "").lowercase()
+                        val raw = x.str("kind", "").lowercase()
                         val kind = when {
                             raw.isBlank() -> bucket
                             raw == "mcptt" -> LineKind.PTT
                             raw in LineKind.all -> raw
                             else -> bucket
                         }
-                        services.add(ServiceRef(kind, x.optString("name", ""), x.optString("domain", "")))
+                        services.add(ServiceRef(kind, x.str("name", ""), x.str("domain", "")))
                     }
                 }
             }
 
             val orgs = objects(root, "orgs").map {
-                OrgNode(it.optString("code", ""), it.optString("name", ""), it.optString("parent", ""), it.optInt("sort", 0))
+                OrgNode(it.str("code", ""), it.str("name", ""), it.str("parent", ""), it.optInt("sort", 0))
             }
             val members = objects(root, "members").map { m ->
                 MemberInfo(
                     userId = m.optLong("userId", 0L),
-                    name = m.optString("name", ""),
-                    loginId = m.optString("loginId", ""),
-                    org = m.optString("org", ""),
-                    title = m.optString("title", ""),
+                    name = m.str("name", ""),
+                    loginId = m.str("loginId", ""),
+                    org = m.str("org", ""),
+                    title = m.str("title", ""),
                     volte = parseNumber(m, LineKind.VOLTE),
                     voip = parseNumber(m, LineKind.VOIP),
                     ptt = parseNumber(m, LineKind.PTT))
@@ -350,18 +383,18 @@ class ManagementClient(
                 p.keys().asSequence().associateWith { p.optBoolean(it, false) }
             } ?: emptyMap()
             // 픽업 그룹은 읽기 전용 — 서버가 실어 줄 때만 보인다(편성은 콘솔 전화 그룹).
-            val pickup = n.optString("pickupGroup", "").ifBlank { n.optString("pickup_group", "") }
-            return NumberInfo(n.optString("msisdn", ""), n.optString("imsi", ""), n.optString("serviceRef", ""),
-                n.optString("sipTransport", ""), n.optString("authScheme", ""), prof, pickup)
+            val pickup = n.str("pickupGroup", "").ifBlank { n.str("pickup_group", "") }
+            return NumberInfo(n.str("msisdn", ""), n.str("imsi", ""), n.str("serviceRef", ""),
+                n.str("sipTransport", ""), n.str("authScheme", ""), prof, pickup)
         }
 
         internal fun parseDirectory(root: JSONObject, etag: String): DirectoryBook {
             val orgs = objects(root, "orgs").map {
-                OrgNode(it.optString("code", ""), it.optString("name", ""), it.optString("parent", ""), it.optInt("sort", 0))
+                OrgNode(it.str("code", ""), it.str("name", ""), it.str("parent", ""), it.optInt("sort", 0))
             }
             val entries = objects(root, "entries").mapNotNull { e ->
-                val n = e.optString("msisdn", "")
-                if (n.isBlank()) null else DirectoryEntry(e.optString("org", ""), e.optString("name", ""), n)
+                val n = e.str("msisdn", "")
+                if (n.isBlank()) null else DirectoryEntry(e.str("org", ""), e.str("name", ""), n)
             }
             return DirectoryBook(orgs, entries, etag)
         }
@@ -369,10 +402,10 @@ class ManagementClient(
         internal fun parseGroups(root: JSONObject): List<ManagedGroup> =
             objects(root, "groups").map { g ->
                 ManagedGroup(
-                    id = g.optString("id", ""), uri = g.optString("uri", ""), name = g.optString("name", ""),
+                    id = g.str("id", ""), uri = g.str("uri", ""), name = g.str("name", ""),
                     memberCount = g.optInt("memberCount", 0), isOwner = g.optBoolean("isOwner", false),
-                    orgCode = g.optString("orgCode", ""), sessionType = g.optString("sessionType", ""),
-                    etag = g.optString("etag", ""),
+                    orgCode = g.str("orgCode", ""), sessionType = g.str("sessionType", ""),
+                    etag = g.str("etag", ""),
                     // 구 서버(필드 없음) = 종전대로 전부 관리 가능
                     canManage = g.optBoolean("canManage", true),
                     inListenScope = g.optBoolean("inListenScope", false),
@@ -383,76 +416,84 @@ class ManagementClient(
             val hours = HashMap<String, Int>()
             root.optJSONObject("hours")?.let { h -> h.keys().forEach { hours[it] = h.optInt(it, 0) } }
             val items = objects(root, "items").mapNotNull { it ->
-                val id = it.optString("id", "")
+                val id = it.str("id", "")
                 val at = timeMs(it, "time") ?: return@mapNotNull null
                 if (id.isBlank()) return@mapNotNull null
+                // MCVideo 세션 속성(`service` = mcvideo 일 때) — 서버가 세션 인덱스의 객체를 그대로 실어도(snake_case) 읽는다.
+                val mcv = it.optJSONObject("mcvideo")
                 HistoryEntry(
                     id = id, atMs = at,
-                    kind = when (it.optString("kind", "")) {
+                    kind = when (it.str("kind", "")) {
                         "call" -> HistoryKind.CALL
                         "ptt" -> HistoryKind.PTT
                         "message" -> HistoryKind.MESSAGE
                         else -> kind
                     },
-                    event = it.optString("event", ""), from = it.optString("from", ""), to = it.optString("to", ""),
-                    group = it.optString("group", ""), durationSec = it.optInt("duration", 0),
-                    emergency = it.optBoolean("emergency", false), text = it.optString("text", ""),
-                    recordingId = it.optString("recordingId", ""), hasRecording = it.optBoolean("hasRecording", false),
-                    state = it.optString("state", ""), callType = it.optString("callType", ""),
+                    event = it.str("event", ""), from = it.str("from", ""), to = it.str("to", ""),
+                    group = it.str("group", ""), durationSec = it.optInt("duration", 0),
+                    emergency = it.optBoolean("emergency", false), text = it.str("text", ""),
+                    recordingId = it.str("recordingId", ""), hasRecording = it.optBoolean("hasRecording", false),
+                    state = it.str("state", ""), callType = it.str("callType", ""),
                     inviteAtMs = timeMs(it, "inviteTime"), answerAtMs = timeMs(it, "answerTime"),
-                    endAtMs = timeMs(it, "endTime"), endReason = it.optString("endReason", ""),
+                    endAtMs = timeMs(it, "endTime"), endReason = it.str("endReason", ""),
                     sipStatus = it.optInt("sipStatus", 0),
-                    sessionKind = it.optString("sessionKind", ""), startAtMs = timeMs(it, "startTime"),
-                    groupName = it.optString("groupName", ""), memberCount = it.optInt("memberCount", 0),
-                    turnCount = it.optInt("turnCount", 0), speakerCount = it.optInt("speakerCount", 0),
+                    sessionKind = it.str("sessionKind", ""), startAtMs = timeMs(it, "startTime"),
+                    groupName = it.str("groupName", ""), memberCount = it.optInt("memberCount", 0),
+                    turnCount = it.optInt("turnCount", 0), hasTurnCount = it.opt("turnCount") is Number,
+                    speakerCount = it.optInt("speakerCount", 0),
                     totalSpeechMs = it.optInt("totalSpeechMs", 0), talkMs = it.optInt("talkMs", 0),
-                    maxConcurrent = it.optInt("maxConcurrent", 0), floorControl = it.optString("floorControl", ""),
-                    floorPolicy = it.optString("floorPolicy", ""), maxTalkers = it.optInt("maxTalkers", 0),
-                    people = strings(it.optJSONArray("people")))
+                    maxConcurrent = it.optInt("maxConcurrent", 0), floorControl = it.str("floorControl", ""),
+                    floorPolicy = it.str("floorPolicy", ""), maxTalkers = it.optInt("maxTalkers", 0),
+                    people = strings(it.optJSONArray("people")),
+                    service = it.str("service", ""),
+                    mcvSessionType = mcv?.let { m -> m.str("sessionType", "").ifBlank { m.str("session_type", "") } }.orEmpty(),
+                    mcvMaxTransmitters = mcv?.let { m ->
+                        m.optInt("maxTransmitters", 0).takeIf { n -> n > 0 } ?: m.optInt("max_transmitters", 0)
+                    } ?: 0)
             }.sortedBy { it.atMs }
-            return HistoryPage(items, root.optString("next", ""), hours)
+            return HistoryPage(items, root.str("next", ""), hours)
         }
 
         internal fun parsePttDetail(root: JSONObject, recordingId: String): PttSessionDetail {
             val parts = objects(root, "participants").mapNotNull { p ->
-                val id = p.optString("msisdn", "")
+                val id = p.str("msisdn", "")
                 if (id.isBlank()) null
-                else PttParticipant(id, p.optString("role", ""), timeMs(p, "join_time"), timeMs(p, "leave_time"))
+                else PttParticipant(id, p.str("role", ""), timeMs(p, "join_time"), timeMs(p, "leave_time"))
             }
             val events = objects(root, "events").map { e ->
-                PttEvent(timeMs(e, "ts"), e.optString("type", ""), e.optString("member", ""),
-                    e.optString("role", ""), nInt(e, "duration"))
+                PttEvent(timeMs(e, "ts"), e.str("type", ""), e.str("member", ""),
+                    e.str("role", ""), nInt(e, "duration"))
             }
             val floor = objects(root, "floor").map { f ->
-                PttFloorEvent(timeMs(f, "ts"), f.optString("op", ""), f.optString("user", ""),
-                    nInt(f, "slot"), nInt(f, "prio"), nInt(f, "talkers"), f.optString("policy", ""),
-                    f.optBoolean("preempt", false), f.optString("preempted_from", ""), f.optString("reason", ""),
-                    nInt(f, "cause"), f.optString("owner", ""), nInt(f, "pos"), nInt(f, "qsize"),
-                    f.optString("revoked", ""), nInt(f, "removed"), nInt(f, "grace_sec"), nInt(f, "idle_ms"),
-                    f.optString("preempted_by", ""))
+                PttFloorEvent(timeMs(f, "ts"), f.str("op", ""), f.str("user", ""),
+                    nInt(f, "slot"), nInt(f, "prio"), nInt(f, "talkers"), f.str("policy", ""),
+                    f.optBoolean("preempt", false), f.str("preempted_from", ""), f.str("reason", ""),
+                    nInt(f, "cause"), f.str("owner", ""), nInt(f, "pos"), nInt(f, "qsize"),
+                    f.str("revoked", ""), nInt(f, "removed"), nInt(f, "grace_sec"), nInt(f, "idle_ms"),
+                    f.str("preempted_by", ""))
             }
-            return PttSessionDetail(root.optString("recordingId", "").ifBlank { recordingId },
+            return PttSessionDetail(root.str("recordingId", "").ifBlank { recordingId },
                 parts, events, floor, root.optBoolean("hasRecording", false))
         }
 
         internal fun parseRecording(root: JSONObject, id: String): RecordingInfo {
             val segs = objects(root, "segments").map { s ->
                 val tracks = objects(s, "tracks").map { tr ->
-                    SegmentTrack(tr.optInt("slot", 0), tr.optString("kind", ""),
+                    SegmentTrack(tr.optInt("slot", 0), tr.str("kind", "").ifBlank { "audio" },
                         objects(tr, "speakers").map {
-                            SpeakerSpan(it.optString("id", ""), it.optInt("offset_ms", 0), it.optInt("dur_ms", 0))
+                            SpeakerSpan(it.str("id", ""), it.optInt("offset_ms", 0), it.optInt("dur_ms", 0))
                         },
-                        tr.optBoolean("has_video", false), tr.optString("status", ""))
+                        tr.optBoolean("has_video", false), tr.str("status", ""))
                 }
-                RecordingSegment(s.optInt("seq", 0), s.optString("type", ""), s.optString("speaker_id", ""),
+                RecordingSegment(s.optInt("seq", 0), s.str("type", ""), s.str("speaker_id", ""),
                     timeMs(s, "start_time"), timeMs(s, "end_time"), s.optInt("duration_ms", 0),
-                    s.optBoolean("has_video", false), s.optString("status", ""),
+                    s.optBoolean("has_video", false), s.str("status", ""),
                     strings(s.optJSONArray("speaker_ids")), s.optInt("talker_count", 0), tracks)
             }
-            return RecordingInfo(root.optString("id", "").ifBlank { id }, root.optString("call_type", ""),
-                root.optString("caller", ""), root.optString("callee", ""), root.optString("group_id", ""),
+            return RecordingInfo(root.str("id", "").ifBlank { id }, root.str("call_type", ""),
+                root.str("caller", ""), root.str("callee", ""), root.str("group_id", ""),
                 timeMs(root, "start_time"), timeMs(root, "end_time"), root.optInt("duration", 0),
-                root.optString("status", ""), segs)
+                root.str("status", ""), segs, root.str("service", ""))
         }
     }
 }

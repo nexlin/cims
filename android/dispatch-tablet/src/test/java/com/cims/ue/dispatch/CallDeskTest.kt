@@ -242,4 +242,15 @@ class CallLogRowTest {
         assertTrue(keepInDesk(row(CallLogKind.PICKUP), "answered"))
         assertTrue(keepInDesk(row(CallLogKind.ANSWERED), ""))
     }
+
+    // 통화내역 목록 키 — 세션이 붙인 순번이다. 포크 leg 여럿이 같은 ms 에 끝나거나 서버 이력이 초 단위로 같은 두 사람의 줄을
+    //   주어도(시각·상대가 같다) 키가 겹치지 않는다. 순번이 없는 픽스처만 시각·상대로 만든다.
+    @Test fun `통화내역 키는 순번이라 같은 시각 같은 상대도 겹치지 않는다`() {
+        val a = com.cims.ue.dispatch.session.CallLogRow(atMs = 1000L, peer = "김민원", text = "", number = "0101",
+            kind = com.cims.ue.dispatch.session.CallLogKind.MISSED, id = 7)
+        val b = a.copy(id = 8)
+        org.junit.Assert.assertNotEquals(a.rowKey, b.rowKey)
+        org.junit.Assert.assertEquals("#7", a.rowKey)
+        org.junit.Assert.assertEquals("10000101김민원", a.copy(id = 0).rowKey)
+    }
 }

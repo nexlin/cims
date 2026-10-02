@@ -47,10 +47,10 @@ data class Settings(
     /** ⑤ «이벤트» 가 포커스 채널만 보이는가(데스크톱 `FollowChannelEvents`, 기본 켬). */
     val followChannelEvents: Boolean = true,
     /**
-     * 화면 테마 — `dark` | `light`(데스크톱 `Theme` 과 같은 값). 기본은 어둡게다 — 관제실·차량의 어두운 자리에서 쓰는 단말이라
-     * 태블릿은 처음부터 어둡게 섰다(데스크톱 기본은 밝게).
+     * 화면 테마 — `dark` | `light`(데스크톱 `Theme` 과 같은 값). 기본은 밝게다(데스크톱과 같다) — 어둡게는 설정에서 고른다.
+     * 설정 판([SettingsStore.UI_VERSION]) 이전에 저장된 값은 처음 읽을 때 한 번 밝게로 되돌린다.
      */
-    val theme: String = THEME_DARK,
+    val theme: String = THEME_LIGHT,
     /**
      * 선호 이어폰(장치 이름) — 경로가 헤드셋·블루투스일 때 여럿 중 이것을 고른다(데스크톱 `HeadsetDevice`, 이름 기준).
      * `AudioDeviceInfo.id` 는 재연결·재부팅 때 바뀌어 이름으로 든다.
@@ -58,8 +58,17 @@ data class Settings(
     val preferredHeadset: String = "",
     /** 선호 이어폰이 다시 연결되면 그리로 되돌린다(데스크톱 `AutoReturnToPreferredDevice`, 기본 켬). */
     val autoReturnHeadset: Boolean = true,
+    /** 오른쪽 패널 폭(dp) — 패널 왼쪽 가장자리를 끌어 바꾼 값(기본 400, §6.3). 본문이 좁으면 화면이 그 안으로 죈다. */
+    val panelWidthDp: Int = 400,
+    /**
+     * «영상 보내는 중 무전»(mcvideo.md §7 D12) — `voice`(기본 — 무전 발언 동안 영상 호 음성만 멈춘다) | `video`(영상을 보내는 동안
+     * 무전 발언을 막는다, 긴급·임박 예외). 데스크톱 `VideoMicPolicy` 와 같은 값([VideoMicPolicy]).
+     */
+    val videoMicPolicy: String = VideoMicPolicy.VOICE,
+    /** [영상 보내기] 카메라 — `front`(기본 — 엔진의 처음 카메라) | `back`([VideoCamera]). */
+    val videoCamera: String = VideoCamera.FRONT,
 ) {
-    val dark: Boolean get() = theme != THEME_LIGHT
+    val dark: Boolean get() = theme == THEME_DARK
 
     companion object {
         const val THEME_DARK = "dark"
@@ -76,7 +85,7 @@ class SettingsStore(context: Context) {
      * **관측 가능해야 한다** — 설정 화면이 바꾼 값을 그 화면이 다시 그려야 하고, 잠금 발언·자동 보류처럼
      * 다른 화면이 읽는 값도 즉시 따라야 한다. `@Volatile` 필드만으로는 Compose 가 재구성을 걸지 못한다.
      */
-    private val _flow = kotlinx.coroutines.flow.MutableStateFlow(load())
+    private val _flow = kotlinx.coroutines.flow.MutableStateFlow(run { migrate(); load() })
     val flow: kotlinx.coroutines.flow.StateFlow<Settings> = _flow
 
     val current: Settings get() = _flow.value
@@ -103,7 +112,20 @@ class SettingsStore(context: Context) {
             .putString(K_THEME, next.theme)
             .putString(K_HEADSET, next.preferredHeadset)
             .putBoolean(K_AUTORETURN, next.autoReturnHeadset)
+            .putInt(K_PANEL_W, next.panelWidthDp)
+            .putString(K_VIDEO_MIC, next.videoMicPolicy)
+            .putString(K_VIDEO_CAM, next.videoCamera)
             .apply()
+    }
+
+    /**
+     * 설정 판 — 화면 구성이 크게 바뀔 때 올린다. 옛 판의 저장값은 처음 읽을 때 한 번 손본다(데스크톱 `UiVersion` 과 같은 규약):
+     * 2 = 밝게 기본(옛 저장값의 테마를 한 번 밝게로 — 직접 다시 어둡게를 고르면 그 뒤로는 남는다).
+     */
+    private fun migrate() {
+        val v = prefs.getInt(K_UI_VERSION, 1)
+        if (v >= UI_VERSION) return
+        prefs.edit().putString(K_THEME, Settings.THEME_LIGHT).putInt(K_UI_VERSION, UI_VERSION).apply()
     }
 
     private fun load(): Settings = Settings(
@@ -123,10 +145,13 @@ class SettingsStore(context: Context) {
         messageRetentionDays = prefs.getInt(K_RETAIN, 30).coerceIn(1, 365),
         followChannelThread = prefs.getBoolean(K_FOLLOW_THREAD, true),
         followChannelEvents = prefs.getBoolean(K_FOLLOW_EVENTS, true),
-        theme = prefs.getString(K_THEME, Settings.THEME_DARK)
-            ?.takeIf { it == Settings.THEME_LIGHT || it == Settings.THEME_DARK } ?: Settings.THEME_DARK,
+        theme = prefs.getString(K_THEME, Settings.THEME_LIGHT)
+            ?.takeIf { it == Settings.THEME_LIGHT || it == Settings.THEME_DARK } ?: Settings.THEME_LIGHT,
         preferredHeadset = prefs.getString(K_HEADSET, "") ?: "",
-        autoReturnHeadset = prefs.getBoolean(K_AUTORETURN, true))
+        autoReturnHeadset = prefs.getBoolean(K_AUTORETURN, true),
+        panelWidthDp = prefs.getInt(K_PANEL_W, 400).coerceIn(320, 1200),
+        videoMicPolicy = if (prefs.getString(K_VIDEO_MIC, null) == VideoMicPolicy.VIDEO) VideoMicPolicy.VIDEO else VideoMicPolicy.VOICE,
+        videoCamera = if (prefs.getString(K_VIDEO_CAM, null) == VideoCamera.BACK) VideoCamera.BACK else VideoCamera.FRONT)
 
     private companion object {
         const val K_HOST = "csc_host"; const val K_PORT = "csc_port"; const val K_LOGIN = "login_id"
@@ -136,7 +161,10 @@ class SettingsStore(context: Context) {
         const val K_AUTOHOLD = "auto_hold_on_answer"; const val K_MAXLISTEN = "max_listen"
         const val K_RETAIN = "message_retention_days"
         const val K_FOLLOW_THREAD = "follow_channel_thread"; const val K_FOLLOW_EVENTS = "follow_channel_events"
-        const val K_THEME = "theme"
+        const val K_THEME = "theme"; const val K_UI_VERSION = "ui_version"
+        const val UI_VERSION = 2
         const val K_HEADSET = "preferred_headset"; const val K_AUTORETURN = "auto_return_headset"
+        const val K_PANEL_W = "panel_width_dp"
+        const val K_VIDEO_MIC = "video_mic_policy"; const val K_VIDEO_CAM = "video_camera"
     }
 }

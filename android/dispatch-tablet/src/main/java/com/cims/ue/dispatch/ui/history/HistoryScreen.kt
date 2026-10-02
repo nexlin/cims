@@ -1,144 +1,208 @@
-// [이력] 화면 (docs/design/features/android_dispatch_tablet.md §6.5, dispatch_desktop_ui.md §4.6)
+// [이력] 화면 (docs/design/features/android_dispatch_tablet.md §6.11, dispatch_desktop_ui.md §4.6)
 //
-// 데스크톱과 같은 구성이되 태블릿 밀도로 접는다(§12) — 별창이 없으므로 PTT 는 한 화면에서
-// 좌(세션 카드 1) : 우(세션 패널 3) 로 나눈다. 통화는 상세가 따로 없어 표가 전체 폭이다.
+// Windows 관제 앱의 [이력] 과 같은 구성이다 — 도구줄 · 시간대 밴드(그날의 분포이자 필터) · **왼쪽 카드 목록(시간대 묶음) +
+// 오른쪽 상세 패널**. 통화도 무전도 같은 짜임이고, 영상이 있는 녹취를 틀 때만 상세 오른쪽에 영상 칸이 열린다.
+// 이 파일은 껍데기(VM 을 붙인다)와 도구줄·밴드·목록이고, 상세 패널은 `HistoryDetail.kt`, 녹취 재생 바·영상 칸은
+// `HistoryPlayerBar.kt` 다. 판정 규칙은 전부 순수 함수(`HistoryRows.kt`·`HistoryAxis.kt`·`HistoryPlayback.kt`)다.
 package com.cims.ue.dispatch.ui.history
 
-import com.cims.ue.dispatch.ui.CimsFilterChip
-
-import com.cims.ue.dispatch.ui.Tag
-import com.cims.ue.dispatch.ui.Type
+import android.view.Surface
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material3.DatePicker
+import androidx.compose.material3.DatePickerDialog
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberDatePickerState
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.cims.ue.dispatch.session.HistoryEntry
 import com.cims.ue.dispatch.session.HistoryKind
-import com.cims.ue.dispatch.session.PttFloorEvent
-import com.cims.ue.dispatch.session.RecordingInfo
-import com.cims.ue.dispatch.session.TurnBar
+import com.cims.ue.dispatch.ui.FilterPill
+import com.cims.ue.dispatch.ui.ForwardPttKeys
+import com.cims.ue.dispatch.ui.Label
+import com.cims.ue.dispatch.ui.LabelStyle
+import com.cims.ue.dispatch.ui.Rect
+import com.cims.ue.dispatch.ui.RectButton
+import com.cims.ue.dispatch.ui.Segmented
+import com.cims.ue.dispatch.ui.StatusDot
+import com.cims.ue.dispatch.ui.Tokens
+import com.cims.ue.dispatch.ui.Type
+import com.cims.ue.dispatch.ui.VDivider
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
-import java.time.format.DateTimeFormatter
 
-private val HHMMSS: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm:ss")
+/** 왼쪽 목록 칸의 폭 — 카드 한 장에 대상·라벨·시각이 한 줄로 드는 값. 상세 패널이 주역이라 나머지를 다 준다. */
+private val ListWidth = 360.dp
 
-internal fun hhmmss(ms: Long?): String =
-    ms?.let { Instant.ofEpochMilli(it).atZone(ZoneId.systemDefault()).toLocalTime().format(HHMMSS) } ?: "—"
+/** 도구줄의 종류 — 관제 탭 줄과 같은 [무전|통화] 순서. */
+private val KINDS = listOf(HistoryKind.PTT, HistoryKind.CALL)
 
-internal fun durText(sec: Int): String =
-    if (sec <= 0) "—" else "%d:%02d".format(sec / 60, sec % 60)
-
+/** [이력] 화면 — **VM 을 붙이는 껍데기**. 그리는 일은 [HistoryScreenContent] 가 한다. */
 @Composable
 fun HistoryScreen(vm: HistoryViewModel, modifier: Modifier = Modifier) {
     if (!vm.available) return Locked("관제 역할 미배정 — 이력을 볼 수 없습니다")
 
-    val kind by vm.kind.collectAsStateWithLifecycle()
-    val rows by vm.rows.collectAsStateWithLifecycle()
-    val loading by vm.loading.collectAsStateWithLifecycle()
-    val error by vm.error.collectAsStateWithLifecycle()
-    val truncated by vm.truncated.collectAsStateWithLifecycle()
-    val hour by vm.hourFilter.collectAsStateWithLifecycle()
-    val date by vm.date.collectAsStateWithLifecycle()
-    val query by vm.query.collectAsStateWithLifecycle()
-    val band by vm.band.collectAsStateWithLifecycle()
-    val selected by vm.selected.collectAsStateWithLifecycle()
+    val ui by vm.ui.collectAsStateWithLifecycle()
+    val pane by vm.pane.collectAsStateWithLifecycle()
+    val player by vm.playback.collectAsStateWithLifecycle()
 
-    // 화면에 처음 들어올 때 한 번 조회하고, 떠날 때 재생을 멈춘다(§4.6).
-    LaunchedEffect(Unit) { if (rows.isEmpty()) vm.load() }
+    // 화면에 처음 들어올 때 한 번 조회하고, 떠날 때 재생을 멈춘다(§6.11).
+    LaunchedEffect(Unit) { if (vm.ui.value.rows.isEmpty()) vm.load() }
     DisposableEffect(Unit) { onDispose { vm.onLeave() } }
 
-    HistoryScreenContent(
-        ui = HistoryUi(kind = kind, rows = rows, loading = loading, error = error,
-            truncated = truncated, hourFilter = hour, date = date, query = query, band = band,
-            selected = selected),
-        act = HistoryActions(show = vm::show, load = { vm.load() }, search = vm::search,
-            shiftDay = vm::shiftDay, toggleHour = vm::toggleHour, clearHour = vm::clearHour,
-            select = vm::select, showDate = vm::showDate, today = vm::today),
-        // 재생기·세션 상세는 MediaPlayer·상세 조회를 들고 있어 통째로 넘긴다.
-        recordingStrip = { RecordingStrip(vm) },
-        sessionPane = { e -> SessionPane(vm, e) },
-        modifier = modifier)
+    val act = remember(vm) {
+        HistoryActions(
+            show = vm::show, load = { vm.refresh() }, search = vm::search, shiftDay = vm::shiftDay,
+            showDate = vm::showDate, today = vm::today, toggleHour = vm::toggleHour, clearHour = vm::clearHour,
+            setBandMode = vm::setBandMode, setService = vm::setService, setGroupSilent = vm::setGroupSilent,
+            toggleBundle = vm::toggleBundle, select = vm::select, setCompactGaps = vm::setCompactGaps,
+            seek = vm::seekRatio, togglePlay = vm::togglePlay, back10 = vm::back10, fwd10 = vm::fwd10,
+            prevTurn = vm::prevTurn, nextTurn = vm::nextTurn, playAll = vm::playAll, stop = vm::stop, retry = vm::retry,
+            playTurn = vm::playTurn, setSpeed = vm::setSpeed, setSkipGaps = vm::setSkipGaps, surface = vm::attachSurface)
+    }
+    HistoryScreenContent(ui, act, pane, player, vm.names, modifier)
 }
 
-/** [이력] 화면이 그리는 데 필요한 값 전부. */
-@Suppress("ArrayInDataClass")   // band 는 24칸 고정 배열 — 동등성 비교 대상이 아니다
-data class HistoryUi(
-    val kind: HistoryKind = HistoryKind.CALL,
-    val rows: List<HistoryEntry> = emptyList(),
-    val loading: Boolean = false,
-    val error: String = "",
-    /** 서버 상한에 걸려 잘렸는가 — 조용히 일부만 보여 주면 «없는 통화» 로 읽힌다. */
-    val truncated: Boolean = false,
-    val hourFilter: Int? = null,
-    val date: java.time.LocalDate = java.time.LocalDate.now(),
-    val query: String = "",
-    /** 시간대 밴드 — 24칸의 건수. */
-    val band: IntArray = IntArray(24),
-    val selected: HistoryEntry? = null,
-)
-
+/** [이력] 화면의 조작 — 조회 축과 녹취 재생. Preview·시험은 기본값(아무 일도 하지 않는다)으로 선다. */
 data class HistoryActions(
     val show: (HistoryKind) -> Unit = {},
     val load: () -> Unit = {},
     val search: (String) -> Unit = {},
     val shiftDay: (Long) -> Unit = {},
+    val showDate: (LocalDate) -> Unit = {},
+    val today: () -> Unit = {},
     val toggleHour: (Int) -> Unit = {},
     val clearHour: () -> Unit = {},
+    val setBandMode: (BandMode) -> Unit = {},
+    val setService: (ServiceFilter) -> Unit = {},
+    val setGroupSilent: (Boolean) -> Unit = {},
+    val toggleBundle: (String) -> Unit = {},
     val select: (HistoryEntry) -> Unit = {},
-    val showDate: (java.time.LocalDate) -> Unit = {},
-    val today: () -> Unit = {},
+    val setCompactGaps: (Boolean) -> Unit = {},
+    // ── 녹취 재생 ──
+    /** 막대를 눌렀다 — 막대 폭 대비 위치(0~1). */
+    val seek: (Float) -> Unit = {},
+    val togglePlay: () -> Unit = {},
+    val back10: () -> Unit = {},
+    val fwd10: () -> Unit = {},
+    val prevTurn: () -> Unit = {},
+    val nextTurn: () -> Unit = {},
+    val playAll: () -> Unit = {},
+    val stop: () -> Unit = {},
+    val retry: () -> Unit = {},
+    val playTurn: (Turn) -> Unit = {},
+    val setSpeed: (Int) -> Unit = {},
+    val setSkipGaps: (Boolean) -> Unit = {},
+    /** 영상 칸의 그리기 면이 생겼다/사라졌다(null). */
+    val surface: (Surface?) -> Unit = {},
 )
 
-/** [이력] 본문 — **순수 컴포저블**. 녹취 재생·세션 상세만 호출자가 넘긴다. */
+/**
+ * [이력] 본문 — **순수 컴포저블**. 세션·VM 없이 선다(Preview).
+ *
+ * @param pane 고른 무전 세션의 패널. null 이면 고른 항목만으로 머리·숫자 칸을 세운다.
+ * @param player 녹취 재생 바의 값.
+ * @param names 이름 풀이(사람 = 주소록, 그룹 = 그룹 목록).
+ */
 @Composable
 fun HistoryScreenContent(
     ui: HistoryUi,
     act: HistoryActions = HistoryActions(),
-    recordingStrip: @Composable () -> Unit = {},
-    sessionPane: @Composable (HistoryEntry) -> Unit = {},
+    pane: SessionPaneUi? = null,
+    player: PlayerUi = PlayerUi(),
+    names: HistoryNames = remember { HistoryNames() },
     modifier: Modifier = Modifier,
 ) {
-    Column(modifier.fillMaxSize()) {
+    val p = Tokens.palette
+    val ptt = ui.kind == HistoryKind.PTT
+    // 하루 상한(1000건)까지 오는 목록이라 행·묶음은 자료가 바뀔 때만 다시 만든다.
+    val rows = remember(ui.rows, names) { ui.rows.map { rowOf(it, names) } }
+    val list = remember(rows, ui.kind, ui.groupSilent, ui.openBundles) {
+        historyListOf(rows, ui.kind, ui.groupSilent, ui.openBundles)
+    }
+    val selected = remember(ui.selected, names) { ui.selected?.let { rowOf(it, names) } }
+
+    Column(modifier.fillMaxSize().background(p.paper)) {
         Toolbar(ui, act)
         HourBand(ui, act)
-        if (ui.error.isNotBlank()) {
-            Text(ui.error, Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
-                color = MaterialTheme.colorScheme.error, fontSize = Type.strong)
-        }
-        if (ui.truncated) Text(
-            if (ui.hourFilter == null) "서버 상한 ${HistoryViewModel.QUERY_LIMIT}건에 걸려 **최근 것만** 보입니다 — 시간대 칸을 눌러 좁혀 보세요"
-            else "이 시간대도 상한에 걸렸습니다 — 더 좁은 범위는 콘솔 이력에서 봅니다",
-            Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
-            color = MaterialTheme.colorScheme.tertiary, fontSize = Type.body)
-        if (ui.loading) LinearProgressIndicator(Modifier.fillMaxWidth())
-        when (ui.kind) {
-            HistoryKind.PTT -> PttPane(ui, act, sessionPane, Modifier.weight(1f))
-            else -> CallPane(ui, act, recordingStrip, Modifier.weight(1f))
+        Notices(ui)
+        Row(Modifier.weight(1f).fillMaxWidth()) {
+            ListColumn(list, ui, act, Modifier.width(ListWidth).fillMaxHeight())
+            VDivider()
+            Row(Modifier.weight(1f).fillMaxHeight()) {
+                Box(Modifier.weight(1f).fillMaxHeight()) {
+                    when {
+                        selected == null -> Hint(if (ptt) "왼쪽에서 세션을 고르면 참여자·발언·이벤트가 여기 나옵니다"
+                                                 else "왼쪽에서 통화를 고르면 여기 나옵니다")
+                        ptt -> SessionPane(
+                            pane?.takeIf { it.row.e.id == selected.e.id }
+                                ?: remember(selected, ui.compactGaps) { buildSessionPane(selected, null, null, ui.compactGaps, names) },
+                            player, ui.compactGaps, act)
+                        else -> CallDetail(selected, player, act)
+                    }
+                }
+                // 영상 칸 — 영상이 있는 녹취(영상 통화 · MCVideo 송출 구간)를 틀 때만 열린다. 소리만 있는 녹취는 칸 없이 소리만 난다.
+                if (player.video) {
+                    VDivider()
+                    VideoPane(player, act, Modifier.width(VideoPaneWidth).fillMaxHeight())
+                }
+            }
         }
     }
 }
 
 @Composable
-private fun Locked(text: String) {
-    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Text(text, color = MaterialTheme.colorScheme.onSurfaceVariant)
+private fun Locked(text: String) = Hint(text)
+
+@Composable
+internal fun Hint(text: String, modifier: Modifier = Modifier) {
+    Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Text(text, fontSize = Type.body, color = Tokens.palette.muted)
     }
 }
 
@@ -147,444 +211,304 @@ private fun Locked(text: String) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun Toolbar(ui: HistoryUi, act: HistoryActions) {
-    val kind = ui.kind
-    val date = ui.date
-    val query = ui.query
-    val rows = ui.rows
+    val p = Tokens.palette
     var pick by remember { mutableStateOf(false) }
+    val ptt = ui.kind == HistoryKind.PTT
 
-    Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    Row(Modifier.fillMaxWidth().height(52.dp).padding(horizontal = 12.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        // 관제 탭 줄과 같은 [무전|통화] — 같은 순서·같은 모양.
+        Segmented(options = KINDS.map { it.label }, selected = KINDS.indexOf(ui.kind).coerceAtLeast(0),
+            onSelect = { act.show(KINDS[it]) }, itemWidth = 72.dp)
+        Spacer(Modifier.width(4.dp))
 
-        val kinds = listOf(HistoryKind.CALL, HistoryKind.PTT)
-        com.cims.ue.dispatch.ui.Segmented(options = kinds.map { it.label }, selected = kinds.indexOf(kind).coerceAtLeast(0),
-            onSelect = { act.show(kinds[it]) }, itemWidth = 120.dp)
+        // 날짜 — 하루 단위 창 조회(서버 스캔 48시간 버킷 상한). 미래로는 못 간다.
+        RectButton("◀", { act.shiftDay(-1) }, height = 32.dp)
+        RectButton(ui.date.toString(), { pick = true }, height = 32.dp, bold = true)
+        RectButton("▶", { act.shiftDay(1) }, height = 32.dp, enabled = ui.date.isBefore(LocalDate.now()))
+        RectButton("오늘", act.today, height = 32.dp)
 
-        TextButton(onClick = { act.shiftDay(-1) }) { Text("◀") }
-        TextButton(onClick = { pick = true }) { Text(date.toString(), fontWeight = FontWeight.Bold) }
-        TextButton(onClick = { act.shiftDay(1) }, enabled = date.isBefore(LocalDate.now())) { Text("▶") }
-        TextButton(onClick = act.today) { Text("오늘") }
+        SearchBox(ui.query, act.search, "이름 · 번호 · 그룹", Modifier.width(170.dp))
 
-        OutlinedTextField(
-            value = query, onValueChange = act.search,
-            placeholder = { Text("상대·그룹·참여자", fontSize = Type.strong) },
-            singleLine = true,
-            modifier = Modifier.width(220.dp).height(52.dp),
-            textStyle = MaterialTheme.typography.bodySmall)
-
+        if (ptt) {
+            // 서비스 거르기 — 음성 무전(MCPTT) 세션 / 영상(MCVideo) 세션. 받은 항목에 서비스 축이 실려 있을 때만.
+            if (ui.serviceAxis || ui.rows.any { it.service.isNotEmpty() }) ServiceFilter.entries.forEach { f ->
+                FilterPill(f.label, ui.service == f, onClick = { act.setService(f) })
+            }
+            FilterPill("빈 세션 묶기", ui.groupSilent, onClick = { act.setGroupSilent(!ui.groupSilent) })
+        }
         Spacer(Modifier.weight(1f))
-        Text(summaryOf(kind, rows), fontSize = Type.body, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        TextButton(onClick = { act.load() }) { Text("조회") }
+        IconButton(onClick = act.load, modifier = Modifier.size(36.dp)) {
+            Icon(Icons.Filled.Refresh, contentDescription = "이 날짜를 다시 조회", modifier = Modifier.size(20.dp), tint = p.ink2)
+        }
     }
 
     if (pick) {
         val state = rememberDatePickerState(
-            initialSelectedDateMillis = date.atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli())
+            initialSelectedDateMillis = ui.date.atStartOfDay(ZoneId.of("UTC")).toInstant().toEpochMilli())
         DatePickerDialog(
             onDismissRequest = { pick = false },
             confirmButton = {
                 TextButton(onClick = {
-                    state.selectedDateMillis?.let {
-                        act.showDate(Instant.ofEpochMilli(it).atZone(ZoneId.systemDefault()).toLocalDate())
-                    }
+                    // 달력은 고른 날의 UTC 자정을 준다 — UTC 로 읽어야 시간대와 상관없이 그 날짜다.
+                    state.selectedDateMillis?.let { act.showDate(Instant.ofEpochMilli(it).atZone(ZoneId.of("UTC")).toLocalDate()) }
                     pick = false
                 }) { Text("확인") }
             },
             dismissButton = { TextButton(onClick = { pick = false }) { Text("취소") } }
-        ) { com.cims.ue.dispatch.ui.ForwardPttKeys(); DatePicker(state = state) }
+        ) { ForwardPttKeys(); DatePicker(state = state) }
     }
 }
 
-/** 요약 — 건수·진행중·녹취·PTT 발화 합(§4.6). */
-private fun summaryOf(kind: HistoryKind, rows: List<HistoryEntry>): String {
-    val live = rows.count { it.isActive }
-    val rec = rows.count { it.hasRecording }
-    val base = "${rows.size}건 · 진행중 $live · 녹취 $rec"
-    if (kind != HistoryKind.PTT) return base
-    val talkSec = rows.sumOf { it.totalSpeechMs } / 1000
-    return "$base · 발화 ${talkSec / 60}분"
+/** 한 줄 검색 입력(32) — 도구줄에 선다. */
+@Composable
+private fun SearchBox(value: String, onValue: (String) -> Unit, hint: String, modifier: Modifier = Modifier) {
+    val p = Tokens.palette
+    val shape = RoundedCornerShape(8.dp)
+    BasicTextField(
+        value = value, onValueChange = onValue, singleLine = true,
+        textStyle = TextStyle(fontSize = Type.body, color = p.ink),
+        cursorBrush = SolidColor(p.primaryLine),
+        modifier = modifier.height(32.dp).clip(shape).background(p.paper).border(1.dp, p.edge, shape),
+        decorationBox = { inner ->
+            Box(Modifier.fillMaxSize().padding(horizontal = 10.dp), contentAlignment = Alignment.CenterStart) {
+                if (value.isEmpty()) Text(hint, fontSize = Type.body, color = p.faint, maxLines = 1)
+                inner()
+            }
+        })
 }
 
 // ── 시간대 밴드 ─────────────────────────────────────────────────────────────
 
+/**
+ * 시간대 밴드 — 그날의 분포이자 필터(칸 = 그 시간대만, 다시 누르면 해제). 통화 = «시간대별 통화 횟수», 무전 = «시간대별 무전» +
+ * [세션 수 | 발언 수]. 제목 글자가 모드와 상관없이 같아 전환 자리가 움직이지 않는다.
+ */
 @Composable
 private fun HourBand(ui: HistoryUi, act: HistoryActions) {
-    val band = ui.band
-    val sel = ui.hourFilter
-    val max = band.maxOrNull()?.coerceAtLeast(1) ?: 1
-
-    Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp).height(34.dp),
-        horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-        (0..23).forEach { h ->
-            val n = band.getOrElse(h) { 0 }
-            // 진할수록 많음 — 0 칸은 누를 수 없다(§4.6).
-            val alpha = if (n == 0) 0.06f else 0.20f + 0.65f * (n.toFloat() / max)
-            val bg = if (sel == h) MaterialTheme.colorScheme.primary
-                     else MaterialTheme.colorScheme.primary.copy(alpha = alpha)
-            Column(Modifier.weight(1f).fillMaxHeight()
-                .clip(RoundedCornerShape(3.dp))
-                .background(bg)
-                .clickable(enabled = n > 0) { act.toggleHour(h) },
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center) {
-                Text("%02d".format(h), fontSize = Type.micro)
-                if (n > 0) Text("$n", fontSize = Type.micro, fontWeight = FontWeight.Bold)
-            }
-        }
-        if (sel != null) TextButton(onClick = { act.clearHour() },
-            contentPadding = PaddingValues(horizontal = 6.dp)) { Text("전체", fontSize = Type.meta) }
-    }
-}
-
-// ── 통화 ────────────────────────────────────────────────────────────────────
-
-@Composable
-private fun CallPane(ui: HistoryUi, act: HistoryActions, recordingStrip: @Composable () -> Unit, modifier: Modifier) {
-    val rows = ui.rows
-    val sel = ui.selected
-    Column(modifier.fillMaxSize()) {
-        CallHeader()
-        HorizontalDivider()
-        LazyColumn(Modifier.weight(1f)) {
-            items(rows, key = { it.id }) { e -> CallRow(e, e.id == sel?.id) { act.select(e) } }
-        }
-        // 녹취 있는 행을 고르면 표 아래 띠만 나온다 — 통화는 한 줄이 곧 상세다.
-        sel?.takeIf { it.hasRecording }?.let { recordingStrip() }
-    }
-}
-
-@Composable
-private fun CallHeader() {
-    Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp)) {
-        listOf("유형" to 60, "발신 → 착신" to 260, "상태" to 70, "시작" to 80, "응답" to 80,
-               "종료" to 80, "통화시간" to 76, "종료사유" to 100).forEach { (t, w) ->
-            Text(t, Modifier.width(w.dp), fontSize = Type.meta, fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onSurfaceVariant)
+    val p = Tokens.palette
+    val ptt = ui.kind == HistoryKind.PTT
+    val turns = ptt && ui.bandMode == BandMode.TURNS
+    val cells = remember(ui.band, ui.turnBand, ui.rows, turns) {
+        when {
+            !turns -> sessionCells(ui.band)
+            ui.turnBand.isNotEmpty() -> ui.turnBand
+            else -> turnCells(ui.rows, ui.band)
         }
     }
-}
-
-@Composable
-private fun CallRow(e: HistoryEntry, selected: Boolean, onClick: () -> Unit) {
-    val bg = if (selected) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent
-    Row(Modifier.fillMaxWidth().background(bg).clickable(onClick = onClick)
-            .padding(horizontal = 12.dp, vertical = 7.dp),
-        verticalAlignment = Alignment.CenterVertically) {
-        Text(HistoryViewModel.callTypeText(e.callType), Modifier.width(60.dp), fontSize = Type.body)
-        Text("${short(e.from)} → ${short(e.to)}", Modifier.width(260.dp), fontSize = Type.body, maxLines = 1)
-        Text(HistoryViewModel.stateText(e), Modifier.width(70.dp), fontSize = Type.body)
-        Text(hhmmss(e.inviteAtMs ?: e.atMs), Modifier.width(80.dp), fontSize = Type.body)
-        Text(hhmmss(e.answerAtMs), Modifier.width(80.dp), fontSize = Type.body)
-        Text(hhmmss(e.endAtMs), Modifier.width(80.dp), fontSize = Type.body)
-        Text(durText(e.durationSec), Modifier.width(76.dp), fontSize = Type.body)
-        Text(HistoryViewModel.endReasonText(e.endReason), Modifier.width(100.dp), fontSize = Type.body)
-        if (e.emergency) Tag("긴급", MaterialTheme.colorScheme.error)
-        if (e.hasRecording) Tag("녹취", MaterialTheme.colorScheme.tertiary)
-    }
-}
-
-private fun short(uri: String): String =
-    uri.substringAfter(':', uri).substringBefore('@').substringBefore(';').ifBlank { uri }
-
-
-// ── PTT ─────────────────────────────────────────────────────────────────────
-
-@Composable
-private fun PttPane(ui: HistoryUi, act: HistoryActions, sessionPane: @Composable (HistoryEntry) -> Unit, modifier: Modifier) {
-    val rows = ui.rows
-    val sel = ui.selected
-    Row(modifier.fillMaxSize()) {
-        LazyColumn(Modifier.weight(1f).fillMaxHeight()) {
-            items(rows, key = { it.id }) { e -> SessionCard(e, e.id == sel?.id) { act.select(e) } }
+    val shape = RoundedCornerShape(10.dp)
+    Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp).clip(shape).background(p.canvas).border(1.dp, p.divider, shape)
+            .padding(horizontal = 10.dp, vertical = 6.dp)) {
+        Row(Modifier.fillMaxWidth().height(28.dp), verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text(if (ptt) "시간대별 무전" else "시간대별 통화 횟수", fontSize = Type.body, fontWeight = FontWeight.Bold, color = p.ink)
+            if (ptt) Segmented(options = BandMode.entries.map { it.label }, selected = ui.bandMode.ordinal,
+                onSelect = { act.setBandMode(BandMode.entries[it]) }, height = 26.dp, itemWidth = 62.dp, strong = false)
+            // 칸을 누르면 무엇이 걸러지는지 — [발언 수] 에서는 그 시간대의 발언 있는 세션만.
+            Text(if (turns) "칸을 누르면 그 시간의 발언 있는 세션만 · 다시 누르면 전체 · «+» = 하루 상한으로 덜 센 칸"
+                 else "칸을 누르면 그 시간만 · 다시 누르면 전체",
+                Modifier.weight(1f), fontSize = Type.meta, color = p.muted, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                textAlign = TextAlign.End)
+            if (ui.hourFilter != null) RectButton("전체 시간", act.clearHour, height = 26.dp)
         }
-        VerticalDivider()
-        Box(Modifier.weight(3f).fillMaxHeight()) {
-            sel?.let { sessionPane(it) }
-                ?: Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text("세션을 고르세요", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-        }
-    }
-}
-
-@Composable
-private fun SessionCard(e: HistoryEntry, selected: Boolean, onClick: () -> Unit) {
-    val bg = if (selected) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent
-    Column(Modifier.fillMaxWidth().background(bg).clickable(onClick = onClick)
-            .padding(horizontal = 10.dp, vertical = 8.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(HistoryViewModel.sessionKindText(e.sessionKind), fontSize = Type.meta,
-                fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-            if (e.isFullDuplex) Tag("전이중", MaterialTheme.colorScheme.primary)
-            if (e.isActive) Tag("진행중", MaterialTheme.colorScheme.tertiary)
-            if (e.emergency) Tag("긴급", MaterialTheme.colorScheme.error)
-            if (e.hasRecording) Tag("녹취", MaterialTheme.colorScheme.tertiary)
-        }
-        Text(e.groupName.ifBlank { short(e.group) }.ifBlank { e.people.joinToString(" ↔ ") { short(it) } },
-            fontSize = Type.title, fontWeight = FontWeight.Bold, maxLines = 1)
-        Text("${hhmmss(e.startAtMs ?: e.atMs)}~${hhmmss(e.endAtMs)} · ${durText(e.durationSec)}",
-            fontSize = Type.meta, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Text("턴 ${e.turnCount} · 화자 ${e.speakerCount} · 동시 ${e.maxConcurrent}",
-            fontSize = Type.meta, color = MaterialTheme.colorScheme.onSurfaceVariant)
-    }
-    HorizontalDivider()
-}
-
-@Composable
-private fun SessionPane(vm: HistoryViewModel, e: HistoryEntry) {
-    val detail by vm.detail.collectAsStateWithLifecycle()
-    val rec by vm.recording.collectAsStateWithLifecycle()
-    val turns by vm.turns.collectAsStateWithLifecycle()
-    var layers by remember { mutableStateOf(setOf("floor", "member")) }
-
-    Column(Modifier.fillMaxSize().padding(12.dp)) {
-        // 머리 — 종류·상태·대상·floor 정책
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(e.groupName.ifBlank { short(e.group) }, fontSize = Type.title, fontWeight = FontWeight.Bold)
-            Spacer(Modifier.width(8.dp))
-            Text("${HistoryViewModel.sessionKindText(e.sessionKind)} · ${HistoryViewModel.stateText(e)}" +
-                 (if (e.floorPolicy.isNotBlank()) " · ${e.floorPolicy}" else ""),
-                fontSize = Type.body, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Spacer(Modifier.weight(1f))
-            if (e.hasRecording) {
-                TextButton(onClick = { vm.playAll() }) { Text("▶ 전체") }
-                TextButton(onClick = { vm.stop() }) { Text("정지") }
-            }
-        }
-        // 지표 띠
-        Text("발언 턴 ${e.turnCount} · 녹취 ${rec?.segments?.size ?: 0} · 최대 동시 ${e.maxConcurrent} · " +
-             "발화 구간 ${e.totalSpeechMs / 1000}초 · 발화 누적 ${e.talkMs / 1000}초 · 화자 ${e.speakerCount}",
-            fontSize = Type.meta, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Spacer(Modifier.height(8.dp))
-
-        Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
-            Section("참여자 ${detail?.participants?.size ?: 0}")
-            detail?.participants?.forEach { p ->
-                Row(Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
-                    Text(short(p.msisdn), Modifier.width(160.dp), fontSize = Type.body)
-                    if (p.role == "initiator") Tag("개시자", MaterialTheme.colorScheme.primary)
-                    Spacer(Modifier.weight(1f))
-                    Text("${hhmmss(p.joinAtMs)}~${hhmmss(p.leaveAtMs)}", fontSize = Type.meta,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Spacer(Modifier.height(4.dp))
+        Row(Modifier.fillMaxWidth().height(34.dp), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+            cells.forEach { c ->
+                val on = ui.hourFilter == c.hour
+                val cell = RoundedCornerShape(6.dp)
+                // 농도 = 그날 가장 많은 칸 대비 연한 남색(글자가 늘 읽히는 범위), 고른 칸 = 남색 테두리.
+                Column(Modifier.weight(1f).fillMaxHeight().clip(cell).background(p.paper)
+                        .background(p.primary.copy(alpha = c.ratio))
+                        .then(if (on) Modifier.border(2.5.dp, p.primaryLine, cell) else Modifier)
+                        .clickable(enabled = c.count > 0 || on) { act.toggleHour(c.hour) },
+                    horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+                    Text(c.countText, fontSize = Type.meta, fontWeight = FontWeight.Bold, color = p.ink, maxLines = 1)
+                    Text("%02d".format(c.hour), fontSize = Type.micro, maxLines = 1,
+                        color = when { on -> p.primaryInk; c.count == 0 -> p.faint; else -> p.muted })
                 }
             }
-
-            Spacer(Modifier.height(10.dp))
-            Section("발언 타임라인")
-            TurnTimeline(turns, rec) { t -> vm.play(t.seq, t.slot, "${short(t.speaker)} ${t.durMs / 1000}초") }
-
-            Spacer(Modifier.height(10.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Section("이벤트")
-                Spacer(Modifier.width(8.dp))
-                CimsFilterChip(selected = "floor" in layers,
-                    onClick = { layers = layers.toggle("floor") },
-                    label = { Text("발언권 ${detail?.floor?.size ?: 0}", fontSize = Type.meta) })
-                Spacer(Modifier.width(4.dp))
-                CimsFilterChip(selected = "member" in layers,
-                    onClick = { layers = layers.toggle("member") },
-                    label = { Text("멤버 ${detail?.events?.size ?: 0}", fontSize = Type.meta) })
-            }
-            EventList(detail?.floor.orEmpty().takeIf { "floor" in layers }.orEmpty(),
-                      detail?.events.orEmpty().takeIf { "member" in layers }.orEmpty())
         }
-
-        if (e.hasRecording) RecordingStrip(vm)
     }
 }
 
-private fun Set<String>.toggle(k: String): Set<String> = if (k in this) this - k else this + k
-
+/** 조회 실패·절삭 알림·진행 표시 — 있을 때만 한 줄씩. */
 @Composable
-private fun Section(title: String) {
-    Text(title, fontSize = Type.strong, fontWeight = FontWeight.Bold)
+private fun Notices(ui: HistoryUi) {
+    val p = Tokens.palette
+    if (ui.error.isNotBlank()) Text(ui.error, Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 4.dp),
+        color = p.emg, fontSize = Type.body, maxLines = 2, overflow = TextOverflow.Ellipsis)
+    // 절삭되면 그렇다고 쓴다 — 조용히 일부만 보여 주면 «없는 통화» 로 읽힌다.
+    if (ui.truncated) Text(
+        if (ui.hourFilter == null) "서버 상한 ${HistoryViewModel.QUERY_LIMIT}건에 걸려 최근 것만 보입니다 — 시간대 칸을 눌러 좁혀 보세요"
+        else "이 시간대도 상한에 걸렸습니다 — 더 좁은 범위는 콘솔 이력에서 봅니다",
+        Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 4.dp), color = p.ringInk, fontSize = Type.meta)
+    if (ui.loading) LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 4.dp).height(2.dp),
+        color = p.primary, trackColor = p.hair)
+    else Spacer(Modifier.height(6.dp))
 }
 
-/**
- * 타임라인 위 픽셀 위치 — **Long 으로 곱한 뒤 내린다**.
- *
- * `widthDp * offsetMs` 를 Int 로 하면 56분 지점에서 Int.MAX 를 넘어 음수가 된다. 음수 padding 은
- * Compose 가 `IllegalArgumentException` 으로 거절하므로, 긴 세션을 여는 것만으로 화면이 죽는다.
- * 결과는 0..width 로 가둔다 — 계산이 어긋나도 그리기가 실패하지 않게.
- */
-internal fun barPos(widthDp: Int, valueMs: Int, totalMs: Int): Int {
-    if (totalMs <= 0) return 0
-    val v = widthDp.toLong() * valueMs.toLong() / totalMs.toLong()
-    return v.coerceIn(0L, widthDp.toLong()).toInt()
-}
+// ── 목록 ────────────────────────────────────────────────────────────────────
 
-/** 타임라인 배율 상한 — 데스크톱 `TalkZoomMax` 와 같다(1시간 세션에서 한 턴의 1초가 막대로 보이는 정도). */
-internal const val TIMELINE_ZOOM_MAX = 64f
-/** 한 번 누를 때의 배율 — 데스크톱 휠 한 칸과 같다. */
-internal const val TIMELINE_ZOOM_STEP = 1.25f
-
-/**
- * 눈금 간격(초) — 배율에 따라 대여섯 개가 보이게 1·2·5·10·15·30초·1·2·5·10·15·30분·1시간 중에서 고른다(데스크톱
- * `RebuildAxisTicks` 와 같은 규칙). 순수 함수(시험 대상).
- */
-internal fun axisStepSec(spanMs: Int, zoom: Float): Int {
-    val target = spanMs / (6.0 * zoom.coerceAtLeast(1f))
-    val steps = intArrayOf(1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600)
-    return steps.firstOrNull { it * 1000.0 >= target } ?: steps.last()
-}
-
-/**
- * 발언 막대 — 세션 시간축 위 화자 레인. 막대를 누르면 그 턴을 재생한다(§4.6).
- *
- * **배율은 버튼으로** 바꾼다(×1.25, 최대 ×64, 데스크톱 Ctrl+휠·[＋][－] 와 같은 범위). 핀치를 쓰지 않는 것은 막대 누름(턴
- * 재생)·가로 스크롤과 제스처가 겹치기 때문이다. 배율을 바꿔도 **보던 가운데가 그대로** 있게 스크롤을 옮긴다. 세션을 바꾸면
- * ×1 로 돌아간다(데스크톱과 같다).
- */
+/** 왼쪽 목록 — 요약 한 줄 + 시간대 묶음 카드. 보이는 카드만 만든다(하루 상한 1000건). */
 @Composable
-private fun TurnTimeline(turns: List<TurnBar>, rec: RecordingInfo?, onPlay: (TurnBar) -> Unit) {
-    if (turns.isEmpty()) {
-        Text("발언 기록이 없습니다", fontSize = Type.body, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        return
-    }
-    val total = (turns.maxOf { it.offsetMs + it.durMs }).coerceAtLeast(1)
-    val lanes = turns.map { it.speaker }.distinct()
-    var zoom by remember(turns) { mutableFloatStateOf(1f) }
-    val scroll = rememberScrollState()
-    var pendingScroll by remember { mutableStateOf<Int?>(null) }
-    val widthDp = (640 * zoom).toInt()
-    // 새 폭이 그려진 뒤에 옮긴다 — 먼저 옮기면 옛 폭의 끝에서 잘린다.
-    LaunchedEffect(zoom) {
-        val target = pendingScroll ?: return@LaunchedEffect
-        withFrameNanos { }
-        scroll.scrollTo(target)
-        pendingScroll = null
-    }
-    fun zoomTo(next: Float) {
-        val z = next.coerceIn(1f, TIMELINE_ZOOM_MAX)
-        if (z == zoom) return
-        val half = scroll.viewportSize / 2
-        pendingScroll = (((scroll.value + half) * (z / zoom)) - half).toInt().coerceAtLeast(0)
-        zoom = z
-    }
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        TextButton(onClick = { zoomTo(zoom / TIMELINE_ZOOM_STEP) }, enabled = zoom > 1f) { Text("－", fontSize = Type.title) }
-        TextButton(onClick = { zoomTo(zoom * TIMELINE_ZOOM_STEP) }, enabled = zoom < TIMELINE_ZOOM_MAX) { Text("＋", fontSize = Type.title) }
-        if (zoom > 1.001f) {
-            Text("×${"%.1f".format(zoom)}", fontSize = Type.meta)
-            TextButton(onClick = { zoomTo(1f) }) { Text("맞춤", fontSize = Type.meta) }
-        }
-    }
-    Column(Modifier.horizontalScroll(scroll)) {
-        // 눈금 — 배율에 맞춘 간격, 세션 시작부터의 경과로 적는다.
-        val step = axisStepSec(total, zoom) * 1000
-        Box(Modifier.padding(start = 110.dp).width(widthDp.dp).height(14.dp)) {
-            var t = step
-            var n = 0
-            while (t < total && n++ < 400) {                // 상한은 데스크톱과 같다 — 긴 세션에서 수천 개를 그리지 않게
-                Text(elapsedLabel(t), Modifier.padding(start = barPos(widthDp, t, total).dp),
-                    fontSize = Type.micro, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                t += step
-            }
-        }
-        lanes.forEach { who ->
-            Row(Modifier.padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text(short(who), Modifier.width(110.dp), fontSize = Type.meta, maxLines = 1)
-                Box(Modifier.width(widthDp.dp).height(18.dp)
-                    .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(3.dp))) {
-                    turns.filter { it.speaker == who }.forEach { t ->
-                        // **Long 으로 올려 곱한다.** Int 로는 640 × 3,600,000 이 Int.MAX 를 넘어
-                        // 음수가 되고(56분 지점부터), `padding(start = 음수)` 는 예외를 던져
-                        // 한 시간 넘는 세션을 여는 것만으로 앱이 죽는다.
-                        val x = barPos(widthDp, t.offsetMs, total)
-                        val w = barPos(widthDp, t.durMs, total).coerceAtLeast(3)
-                        Box(Modifier.padding(start = x.dp).width(w.dp).fillMaxHeight()
-                            .clip(RoundedCornerShape(3.dp))
-                            .background(MaterialTheme.colorScheme.primary)
-                            .clickable { onPlay(t) })
+private fun ListColumn(list: HistoryList, ui: HistoryUi, act: HistoryActions, modifier: Modifier) {
+    val p = Tokens.palette
+    val ptt = ui.kind == HistoryKind.PTT
+    val selectedId = ui.selected?.id
+    Column(modifier.background(p.canvas)) {
+        Text(summaryOf(list, ui.kind, ui.date, ui.hourFilter, ui.speechOnly),
+            Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, top = 6.dp, bottom = 2.dp),
+            fontSize = Type.meta, color = p.muted, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        if (list.items.isEmpty() && !ui.loading)
+            Text(if (ptt) "이 날에 맞는 무전이 없습니다" else "이 날에 맞는 통화가 없습니다",
+                Modifier.padding(12.dp), fontSize = Type.body, color = p.muted)
+        LazyColumn(Modifier.weight(1f).fillMaxWidth(), contentPadding = PaddingValues(bottom = 10.dp)) {
+            items(list.items, key = { it.key }, contentType = { item ->
+                when (item) { is ListItem.Hour -> 0; is ListItem.Line -> item.row.kind.ordinal + 1 }
+            }) { item ->
+                when (item) {
+                    is ListItem.Hour -> HourHead(item)
+                    is ListItem.Line -> {
+                        val line = item.row
+                        val on = line.holds(selectedId)
+                        when {
+                            !ptt -> CallCard(line.row, on) { act.select(line.row.e) }
+                            line.kind == RowKind.MEMBER -> BundleMember(line, on) { act.select(line.row.e) }
+                            else -> PttCard(line, on, onClick = { act.select(line.row.e) },
+                                onToggle = { act.toggleBundle(line.bundleKey) })
+                        }
                     }
                 }
             }
         }
-        Text("0 ~ ${total / 1000}초" + (rec?.let { " · 세그먼트 ${it.segments.size}" } ?: ""),
-            fontSize = Type.micro, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
-/** 세션 시작부터의 경과 — `m:ss`, 한 시간 넘으면 `h:mm:ss`. */
-private fun elapsedLabel(ms: Int): String {
-    val t = ms / 1000
-    return if (t >= 3600) "%d:%02d:%02d".format(t / 3600, (t % 3600) / 60, t % 60) else "%d:%02d".format(t / 60, t % 60)
-}
-
+/** 시간대 묶음 머리 — "HH시 · n건"(밴드와 같은 축). 건수는 줄 수가 아니라 세션 수다. */
 @Composable
-private fun EventList(floor: List<PttFloorEvent>, events: List<com.cims.ue.dispatch.session.PttEvent>) {
-    data class Item(val atMs: Long, val text: String, val extra: String)
-    val merged = buildList {
-        floor.forEach { f ->
-            add(Item(f.atMs ?: 0L, "${HistoryViewModel.floorOpText(f.op)} · ${short(f.user)}", floorExtra(f)))
-        }
-        events.forEach { ev ->
-            add(Item(ev.atMs ?: 0L, "${HistoryViewModel.eventTypeText(ev.type)} · ${short(ev.member)}",
-                ev.durationSec?.let { "${it}초" } ?: ""))
-        }
-    }.sortedBy { it.atMs }
-
-    if (merged.isEmpty()) {
-        Text("이벤트가 없습니다", fontSize = Type.body, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        return
+private fun HourHead(h: ListItem.Hour) {
+    val p = Tokens.palette
+    Row(Modifier.fillMaxWidth().padding(start = 14.dp, end = 14.dp, top = 8.dp, bottom = 3.dp),
+        verticalAlignment = Alignment.CenterVertically) {
+        Text(h.title, fontSize = Type.body, fontWeight = FontWeight.Bold, color = p.ink2)
+        Spacer(Modifier.weight(1f))
+        Text("${h.count}건", fontSize = Type.meta, color = p.muted)
     }
-    merged.forEach { i ->
-        Row(Modifier.fillMaxWidth().padding(vertical = 1.dp)) {
-            Text(hhmmss(i.atMs.takeIf { it > 0 }), Modifier.width(80.dp), fontSize = Type.meta,
-                color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text(i.text, Modifier.weight(1f), fontSize = Type.meta)
-            if (i.extra.isNotBlank()) Text(i.extra, fontSize = Type.meta,
-                color = MaterialTheme.colorScheme.onSurfaceVariant)
+}
+
+/** 통화 결과 태그 — 응답(회색) · 통화 중/호출 중(초록) · 부재/실패/취소(주황) · 거절/오류(빨강). */
+@Composable
+internal fun ResultTag(r: CallResult) {
+    Label(r.text, when (r.tone) {
+        ResultTone.NEUTRAL -> LabelStyle.FILL
+        ResultTone.TALK -> LabelStyle.TALK
+        ResultTone.WARN -> LabelStyle.PILOT
+        ResultTone.BAD -> LabelStyle.RED
+    })
+}
+
+/** 카드의 테두리·면 — 고른 카드 = 남색 테두리 2.5 + 연한 남색 면, 긴급 = 빨강 테두리 2 + 연한 빨강 면(관제 채널 카드와 같다). */
+@Composable
+private fun cardFrame(selected: Boolean, emergency: Boolean): Modifier {
+    val p = Tokens.palette
+    val shape = RoundedCornerShape(10.dp)
+    val bg = when { selected -> p.primarySoft; emergency -> p.emgSoft; else -> p.paper }
+    val (bw, line) = when {
+        selected -> 2.5.dp to p.primaryLine
+        emergency -> 2.dp to p.emg
+        else -> 1.dp to p.line
+    }
+    return Modifier.clip(shape).background(bg).border(bw, line, shape)
+}
+
+/**
+ * 통화 카드(두 줄) — 1줄 결과 태그 · 발신 → 착신 · 영상/긴급/녹취 · 호출 시각 / 2줄 통화 시간 · 울림 또는 끝난 이유 · 울림.
+ * 이름이 길면 이름만 줄이고 라벨·시각은 오른쪽에 붙는다.
+ */
+@Composable
+private fun CallCard(row: HistoryRow, selected: Boolean, onClick: () -> Unit) {
+    val p = Tokens.palette
+    Column(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 3.dp)
+            .then(cardFrame(selected, row.e.emergency)).clickable(onClick = onClick)
+            .padding(start = 12.dp, end = 10.dp, top = 8.dp, bottom = 8.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            ResultTag(row.result)
+            Spacer(Modifier.width(2.dp))
+            Text(buildAnnotatedString {
+                append(row.caller)
+                withStyle(SpanStyle(color = p.faint, fontWeight = FontWeight.Normal)) { append(" → ") }
+                append(row.callee)
+            }, Modifier.weight(1f), fontSize = Type.strong, fontWeight = FontWeight.Bold, color = p.ink,
+                maxLines = 1, overflow = TextOverflow.Ellipsis)
+            if (row.isVideoCall) Label("영상", LabelStyle.HELD)
+            if (row.e.emergency) Label("긴급", LabelStyle.EMG)
+            if (row.e.hasRecording) Label("녹취", LabelStyle.MON)
+            Text(row.startClock, Modifier.padding(start = 2.dp), fontSize = Type.meta, color = p.muted, maxLines = 1)
+        }
+        Text(row.callSub, Modifier.padding(start = 2.dp, top = 3.dp), fontSize = Type.meta, color = p.muted,
+            maxLines = 1, overflow = TextOverflow.Ellipsis)
+    }
+}
+
+/**
+ * 무전 세션 카드(세 줄) — 1줄 상태 점 · 대상 · 라벨(영상/개별/애드혹/전이중/진행 중/긴급/녹취) · 시작 시각 / 2줄 개시·참여 n명 /
+ * 3줄 길이 · 발언 n회 · 말한 시간(영상 세션은 송출·보낸 시간). 빈 세션 묶음의 머리는 뒤에 카드 두 장이 겹쳐 보이고
+ * «빈 세션 n건» 라벨과 [n건 펼치기] 가 붙는다 — 고르면 가장 최근 세션이 열린다.
+ */
+@Composable
+private fun PttCard(line: ListRow, selected: Boolean, onClick: () -> Unit, onToggle: () -> Unit) {
+    val p = Tokens.palette
+    val row = line.row
+    val bundle = line.kind == RowKind.BUNDLE
+    val shape = RoundedCornerShape(10.dp)
+    Box(Modifier.fillMaxWidth().padding(start = 8.dp, end = 8.dp, top = 3.dp, bottom = if (bundle) 11.dp else 3.dp)) {
+        if (bundle) {
+            Box(Modifier.matchParentSize().offset(y = 8.dp).padding(horizontal = 10.dp).clip(shape).background(p.paper)
+                .border(1.dp, p.divider, shape))
+            Box(Modifier.matchParentSize().offset(y = 4.dp).padding(horizontal = 5.dp).clip(shape).background(p.paper)
+                .border(1.dp, p.line, shape))
+        }
+        Column(Modifier.fillMaxWidth().then(cardFrame(selected, row.e.emergency)).clickable(onClick = onClick)
+                .padding(start = 12.dp, end = 10.dp, top = 8.dp, bottom = 8.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                StatusDot(when { row.e.emergency -> p.emg; row.live -> p.talk; else -> p.muted })
+                Text(row.target, Modifier.weight(1f).padding(start = 3.dp), fontSize = Type.strong, fontWeight = FontWeight.Bold,
+                    color = if (row.e.emergency) p.emgInk else p.ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                if (bundle) Label(line.tagText)
+                if (row.e.isMcVideo) Label("영상", LabelStyle.TEAL)
+                if (row.isPrivate) Label("개별")
+                if (row.isAdhoc) Label("애드혹")
+                if (row.e.isFullDuplex) Label("전이중", LabelStyle.HELD)
+                if (row.live) Label("진행 중", LabelStyle.TALK)
+                if (row.e.emergency) Label("긴급", LabelStyle.EMG)
+                if (row.e.hasRecording) Label("녹취", LabelStyle.MON)
+                Text(line.clock, Modifier.padding(start = 2.dp), fontSize = Type.meta, color = p.muted, maxLines = 1)
+            }
+            if (row.whoLine.isNotEmpty()) Text(row.whoLine, Modifier.padding(start = 16.dp, top = 2.dp), fontSize = Type.meta,
+                color = p.ink2, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Row(Modifier.padding(start = 16.dp, top = 1.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(line.statLine, Modifier.weight(1f), fontSize = Type.meta, color = p.muted, maxLines = 1,
+                    overflow = TextOverflow.Ellipsis)
+                // 묶음 머리만 — 그 묶음을 펼친다/접는다.
+                if (bundle) RectButton(line.toggleText + if (line.expanded) " ▴" else " ▾", onToggle, height = 26.dp,
+                    kind = if (line.expanded) Rect.ON else Rect.SOFT)
+            }
         }
     }
 }
 
-/** op 별 부가 정보 — 선점·동시·대기 순번·거절 사유·회수 유예(§4.6). */
-private fun floorExtra(f: PttFloorEvent): String = buildList {
-    if (f.preempt) add("선점" + (f.preemptedFrom.takeIf { it.isNotBlank() }?.let { " ← ${short(it)}" } ?: ""))
-    f.talkers?.let { if (it > 1) add("동시 $it") }
-    f.pos?.let { p -> f.qsize?.let { add("대기 $p/$it") } ?: add("대기 $p") }
-    if (f.reason.isNotBlank()) add(HistoryViewModel.denyReasonText(f.reason))
-    f.graceSec?.let { add("유예 ${it}초") }
-    if (f.revoked.isNotBlank()) add("회수 ${short(f.revoked)}")
-}.joinToString(" · ")
-
-// ── 녹취 띠 ─────────────────────────────────────────────────────────────────
-
+/** 펼친 묶음 안의 한 줄 — 시각 범위·길이 / 발언 0회. 하나씩 고를 수 있다. */
 @Composable
-private fun RecordingStrip(vm: HistoryViewModel) {
-    val rec by vm.recording.collectAsStateWithLifecycle()
-    val pb by vm.playback.collectAsStateWithLifecycle()
-    val r = rec ?: return
-
-    Surface(tonalElevation = 2.dp, modifier = Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(horizontal = 12.dp, vertical = 6.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("녹취 ${r.segments.size}개", fontSize = Type.body, fontWeight = FontWeight.Bold)
-                Spacer(Modifier.width(10.dp))
-                when {
-                    pb.error.isNotBlank() -> Text(pb.error, fontSize = Type.meta, color = MaterialTheme.colorScheme.error)
-                    pb.busy -> Text(pb.note.ifBlank { "받는 중…" }, fontSize = Type.meta)
-                    pb.label.isNotBlank() -> Text("재생 중 · ${pb.label}", fontSize = Type.meta,
-                        color = MaterialTheme.colorScheme.primary)
-                }
-                Spacer(Modifier.weight(1f))
-                TextButton(onClick = { vm.stop() }) { Text("정지") }
-            }
-            Row(Modifier.horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                r.segments.forEach { seg ->
-                    AssistChip(
-                        onClick = {
-                            vm.play(seg.seq, null, "${seg.seq} ${short(seg.speakerId)}", retry = !seg.playable)
-                        },
-                        label = {
-                            Text("${seg.seq} ${short(seg.speakerId)} ${seg.durationMs / 1000}초" +
-                                 (if (!seg.playable) " · 다시 변환" else ""), fontSize = Type.meta)
-                        })
-                }
-            }
-        }
+private fun BundleMember(line: ListRow, selected: Boolean, onClick: () -> Unit) {
+    val p = Tokens.palette
+    val shape = RoundedCornerShape(7.dp)
+    Row(Modifier.fillMaxWidth().padding(start = 26.dp, end = 8.dp, top = 1.dp, bottom = 1.dp).clip(shape)
+            .background(if (selected) p.primarySoft else p.fill)
+            .border(if (selected) 1.5.dp else 1.dp, if (selected) p.primaryLine else p.divider, shape)
+            .clickable(onClick = onClick).padding(horizontal = 10.dp, vertical = 5.dp),
+        verticalAlignment = Alignment.CenterVertically) {
+        Text(line.row.rangeText, Modifier.weight(1f), fontSize = Type.meta, color = p.muted, maxLines = 1,
+            overflow = TextOverflow.Ellipsis)
+        Text(line.memberStat, Modifier.padding(start = 8.dp), fontSize = Type.micro, color = p.muted, maxLines = 1)
     }
 }

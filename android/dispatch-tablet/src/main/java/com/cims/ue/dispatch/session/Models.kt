@@ -24,7 +24,12 @@ enum class SessionKind {
     /** ① 애드혹 그룹 통화 카드(ad hoc group call). */
     PTT_ADHOC,
     /** 청취 시트 — 그룹콜 recvonly. */
-    PTT_LISTEN;
+    PTT_LISTEN,
+    /**
+     * MCVideo 그룹 영상 호(TS 24.281) — 카드도 시트도 아니고 그 그룹 채널 상세의 «영상» 절에 붙는다. MCPTT 호와 독립된 다이얼로그라
+     * `isMcptt` 가 false 다 — 따로 가르지 않으면 전화 통화로 읽힌다. 영상 호는 세션 목록에 넣지 않는다(`VideoPlane.kt` `takeVideoCall`).
+     */
+    MC_VIDEO;
 
     /** 시트로 여는 종류인가(카드가 아니라). */
     val isSheet: Boolean get() = this == PHONE_MONITOR || this == PTT_LISTEN
@@ -35,6 +40,7 @@ enum class SessionKind {
         const val ADHOC_PREFIX = "adhoc-"
 
         fun of(c: CallInfo): SessionKind = when {
+            c.service == com.cims.ue.sdk.McService.MCVIDEO -> MC_VIDEO      // isMcptt 는 false — 먼저 갈라야 전화로 읽지 않는다
             c.isMcptt && c.listenOnly -> PTT_LISTEN
             c.isMcptt && c.mcptt.privateCall -> PTT_PRIVATE
             c.isMcptt && c.groupId.startsWith(ADHOC_PREFIX) -> PTT_ADHOC
@@ -44,6 +50,9 @@ enum class SessionKind {
         }
     }
 }
+
+/** 남은 발언이 이 비율 아래면 «시한 임박» — 게이지가 빨강으로 바뀐다. */
+const val TALK_LIMIT_NEAR = 0.15f
 
 /** Floor Indicator B-bit "Broadcast group call"(TS 24.380 §8.2.3.15) — 코어 `floor::indicator::BROADCAST_GROUP` 과 같은 값. */
 const val FLOOR_IND_BROADCAST = 0x4000
@@ -133,6 +142,12 @@ data class SessionItem(
     val consultFor: Int? = null,
     /** 전달을 걸었다(«전달 중 → 이순경») — 서버가 받아들이면 이 leg 은 BYE 로 끝난다. */
     val transferNote: String = "",
+    /** «멤버 확인 전 연결»(P-Answer-State: Unconfirmed)을 ⑤ 에 이미 적었다 — 한 호에 한 번(`noteAnswerState`). */
+    val answerStateNoted: Boolean = false,
+    /** 지금 발언의 허용 시간(초) — Floor Granted 의 Duration(TS 24.380 §8.2.3.13). 발언 중이 아니거나 서버가 싣지 않았으면 0. */
+    val grantedSec: Int = 0,
+    /** 코어가 발언 시한 임박을 알렸다(`TALK_LIMIT` — 코어가 곧 스스로 Release 한다). */
+    val talkLimit: Boolean = false,
 ) {
     val kind: SessionKind get() = SessionKind.of(info)
     val isLive: Boolean get() = info.state != CallState.DISCONNECTED && info.state != CallState.NULL
@@ -194,6 +209,16 @@ data class SessionItem(
         val left = grantedSec * 1000L - speakerElapsedMs
         return (left.toFloat() / (grantedSec * 1000f)).coerceIn(0f, 1f)
     }
+
+    /** 남은 발언 0~1 — 발언 바의 게이지. 시한을 모르면(서버가 Duration 을 싣지 않았다) 가득 찬 채로 둔다. */
+    val talkGauge: Float get() = when {
+        !isSpeaking -> 0f
+        grantedSec <= 0 -> 1f
+        else -> talkGauge(grantedSec)
+    }
+
+    /** 발언 시한이 임박했다 — 코어의 `TALK_LIMIT` 또는 남은 발언 15 % 미만(데스크톱 `SessionItem.Tick`). */
+    val talkLimitNear: Boolean get() = isSpeaking && (talkLimit || (grantedSec > 0 && talkGauge < TALK_LIMIT_NEAR))
 }
 
 /**
@@ -217,9 +242,19 @@ data class GroupInfo(
      */
     val sessionType: String = "",
     val affiliated: Boolean = false,
+    /**
+     * 영상 채널인가 — MCVideo user profile 의 `<MCVideoGroupInfo>` 에 있는 멤버 그룹(dispatch_desktop_ui.md §10.2). 음성(MCPTT 그룹 호)과
+     * 나란한 서비스라 같은 카드에서 영상 호를 따로 든다(TS 23.280 §3).
+     */
+    val mcVideo: Boolean = false,
     val roster: List<RosterEntry> = emptyList(),
     /** 로스터에 접속 참가자가 생긴 시각 — ② 진행 중 카드의 경과. */
     val sessionSinceMs: Long? = null,
+    /** 로스터를 한 번이라도 받았다 — 구독 직후의 첫 스냅샷에 이미 있던 참가자를 «합류» 로 적지 않는다(`applyRoster`). */
+    val rosterSeen: Boolean = false,
+    /** 마지막 세션이 끝난 때와 그 길이 — 대기 중인 채널의 «마지막 hh:mm»(앱이 본 것만 — 켜기 전의 세션은 [이력] 이 안다). */
+    val lastSessionEndMs: Long? = null,
+    val lastSessionDurMs: Long = 0,
 ) {
     val connectedCount: Int get() = roster.count { it.status == "connected" }
     /** 진행 중 세션이 있는가(참여하지 않아도 로스터로 안다). */
@@ -228,14 +263,36 @@ data class GroupInfo(
     /** 로스터를 갈아끼운다 — 세션 시작 시각을 함께 관리한다. */
     fun withRoster(next: List<RosterEntry>): GroupInfo {
         val connected = next.count { it.status == "connected" } > 0
+        val now = System.currentTimeMillis()
+        val ended = !connected && sessionSinceMs != null       // 방금 세션이 끝났다
         return copy(
             roster = next,
+            lastSessionEndMs = if (ended) now else lastSessionEndMs,
+            lastSessionDurMs = if (ended) now - sessionSinceMs!! else lastSessionDurMs,
             sessionSinceMs = when {
                 !connected -> null
                 sessionSinceMs != null -> sessionSinceMs
-                else -> System.currentTimeMillis()
+                else -> now
             })
     }
+}
+
+/**
+ * 로스터 NOTIFY 한 건을 지금 로스터에 접는다(RFC 4575) — 전체 스냅샷이면 갈아 끼우고, 부분 갱신이면 온 사람만 바꾼다
+ * (`disconnected` 는 빠진다). 부분 갱신을 전체로 읽으면 한 명이 들어올 때마다 나머지가 로스터에서 사라진다.
+ */
+internal fun mergeRoster(cur: List<RosterEntry>, users: List<RosterEntry>, full: Boolean): List<RosterEntry> {
+    if (full) return users
+    val changed = users.map { it.uri.lowercase() }.toSet()
+    return cur.filterNot { it.uri.lowercase() in changed } + users.filter { it.status != "disconnected" }
+}
+
+/** 로스터가 바뀌며 접속에 들어온 사람·빠진 사람(URI) — ⑤ 의 «합류»·«이탈» 줄. */
+internal fun rosterMoves(before: List<RosterEntry>, after: List<RosterEntry>): Pair<List<String>, List<String>> {
+    fun connected(l: List<RosterEntry>) = l.filter { it.status == "connected" }.map { it.uri }
+    val b = connected(before); val a = connected(after)
+    val bk = b.map { it.lowercase() }.toSet(); val ak = a.map { it.lowercase() }.toSet()
+    return a.filter { it.lowercase() !in bk } to b.filter { it.lowercase() !in ak }
 }
 
 /** ⑤ PTT 이벤트 한 줄 — 링 버퍼에 쌓인다(진행 중 행은 없다). */
@@ -250,7 +307,12 @@ data class ActivityRow(
     val id: Long = 0L,
 )
 
-enum class ActivityKind { TALK, JOIN, LEAVE, EMERGENCY, SDS, ERROR }
+/** [VIDEO] = MCVideo 영상 채널(영상 호 연결·종료, 송출 시작·끝, 보기·그만 보기 — android_dispatch_tablet.md §6.14). */
+/**
+ * ⑤ 이벤트 줄의 종류. [NOTE] = «기타»(그룹 생성·편집·삭제 · 멤버 확인 전 연결 · 녹취 재생) — 종류 칩으로 숨기지 않는다
+ * (dispatch_desktop_ui.md §4.4 — 데스크톱 `ActivityKind.Note`).
+ */
+enum class ActivityKind { TALK, JOIN, LEAVE, EMERGENCY, SDS, ERROR, VIDEO, NOTE }
 
 /**
  * 메시지 종류 — 같은 표에 담되 **섞이지 않게** 가른다.
@@ -261,7 +323,7 @@ enum class ActivityKind { TALK, JOIN, LEAVE, EMERGENCY, SDS, ERROR }
  */
 enum class MessageKind { SDS, SMS }
 
-/** 메시지 한 통 — PTT 채널의 SDS 또는 전화 축의 SMS/LMS. */
+/** 메시지 한 통 — PTT 채널의 SDS·파일(FD) 또는 전화 축의 SMS/LMS. */
 data class Message(
     val id: String,
     val groupId: String,
@@ -276,7 +338,28 @@ data class Message(
     val state: SendState = SendState.NONE,
     val read: Boolean = true,
     val kind: MessageKind = MessageKind.SDS,
-)
+    // ── MCData FD 첨부(mcdata_messaging.md §4.5) — SDS 만 쓴다(문자에는 파일이 없다) ──
+    val fileName: String = "",
+    /** FILEURL — 수신은 FD 알림 값, 발신은 업로드가 끝난 뒤 채워진다(빈 값 = 아직 안 올라감 → 재전송이 업로드부터). */
+    val fileUrl: String = "",
+    val fileType: String = "",
+    val fileSize: Long = 0,
+    /** 이 기기의 파일 — 발신 사본 또는 받은 파일. 비면 아직 안 받음(수신). */
+    val localPath: String = "",
+    /** 진행 문구(«올리는 중…»·«받는 중…») — 비면 진행 없음. 보관하지 않는다(재기동 뒤의 진행은 없다). */
+    val transferNote: String = "",
+) {
+    val isAttachment: Boolean get() = fileName.isNotEmpty() || fileUrl.isNotEmpty()
+    val isTransferring: Boolean get() = transferNote.isNotEmpty()
+    /** 기기에 파일이 있는가 — 경로가 아니라 **파일**을 본다(보관 정리·저장소 비움 뒤에는 다시 받는다). */
+    val hasLocalFile: Boolean get() = localPath.isNotEmpty() && java.io.File(localPath).exists()
+    /** [받기] 가 서는가 — 받은 파일이고, 아직 기기에 없고, 받는 중이 아니고, 받을 주소가 있다(데스크톱 `CanDownload`). */
+    val canDownload: Boolean get() = FileRules.canDownload(this, hasLocalFile)
+    /** 크기 한 낱말 — «812 B»·«340 KB»·«1.2 MB». 모르면(0) 빈 값. */
+    val fileSizeText: String get() = FileRules.sizeText(fileSize)
+    /** 대화 목록의 한 줄 — 글이 있으면 글, 파일뿐이면 «파일 <이름>»(데스크톱 `LastPreview`). */
+    val preview: String get() = text.ifEmpty { if (isAttachment) "파일 $fileName" else "" }
+}
 
 enum class SendState { NONE, PENDING, SENT, DELIVERED, READ, FAILED }
 

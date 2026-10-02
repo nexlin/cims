@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- debug 빌드 전용 — 기기 미리보기 진입점(adb 로만 띄운다 — 런처에 나오지 않는다). release 매니페스트에는 없다. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <activity
+            android:name=".debug.PreviewActivity"
+            android:exported="true"
+            android:screenOrientation="userLandscape"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|density"
+            android:label="CIMS 관제 미리보기" />
+    </application>
+</manifest>

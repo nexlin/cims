@@ -13,6 +13,7 @@ import com.cims.ue.dispatch.ui.ptt.CardKind
 import com.cims.ue.dispatch.ui.ptt.ChannelCard
 import com.cims.ue.dispatch.ui.ptt.PttChannelsViewModel
 import com.cims.ue.dispatch.ui.ptt.ScopeFilter
+import com.cims.ue.dispatch.ui.ptt.TalkRules
 import com.cims.ue.sdk.CallDir
 import com.cims.ue.sdk.CallInfo
 import com.cims.ue.sdk.CallState
@@ -133,11 +134,37 @@ class PttChannelTest {
         assertFalse(card(s = session(call(state = CallState.DISCONNECTED))).canCheck)
     }
 
-    // ── 다중 발언 상한 ──
-    @Test fun `팬아웃 전에는 발언 대상이 하나다`() {
-        // 3GPP 에 UE 다중 그룹 동시 발언 절차가 없어 단말 팬아웃으로 푼다. 코어 API 가 들어오면
-        // 이 상수만 바꾸면 되도록 발언 바·칩·게이지는 집합 기준으로 만들어 뒀다.
-        assertFalse(PttChannelsViewModel.MULTI_TALK_SUPPORTED)
+    // ── 동시 발언(단말 팬아웃) ──
+    @Test fun `발언 대상은 여럿을 켤 수 있다`() {
+        // 3GPP 에 UE 다중 그룹 동시 발언 절차가 없어 단말 팬아웃으로 푼다 — 대상마다 floor 를 따로 요청하므로 상한이 없다.
+        var t = emptySet<String>()
+        listOf("순찰1", "상황실", "교통1", "정비반").forEach { t = TalkRules.toggle(t, it) }
+        assertEquals(setOf("순찰1", "상황실", "교통1", "정비반"), t)
+        assertEquals(setOf("순찰1", "교통1", "정비반"), TalkRules.toggle(t, "상황실"))
+    }
+
+    @Test fun `발언 요청을 할 수 없는 채널은 대상이 되지 않는다`() {
+        assertEquals(setOf("순찰1"), TalkRules.toggle(setOf("순찰1"), "일제수신", canCheck = false))
+    }
+
+    @Test fun `잠금 발언은 요청한 대상이 전부 끝나야 풀린다`() {
+        // 누른 직후 — 아직 아무도 «요청 중» 이 아니다. 이것을 끝으로 읽으면 누르자마자 풀린다.
+        assertFalse(TalkRules.lockEnded(seenBusy = false, busyNow = false))
+        // 한 채널이 회수돼도 다른 채널이 발언 중이면 유지한다.
+        assertFalse(TalkRules.lockEnded(seenBusy = true, busyNow = true))
+        assertTrue(TalkRules.lockEnded(seenBusy = true, busyNow = false))
+    }
+
+    @Test fun `남은 발언은 승인 시한에서 줄어든다`() {
+        val speaking = session(call()).copy(
+            floor = com.cims.ue.dispatch.ui.previewFloor(state = FloorState.SPEAKING),
+            speaker = "나", speakerSinceMs = System.currentTimeMillis() - 27_000, grantedSec = 30)
+        assertTrue(speaking.talkGauge in 0.05f..0.15f)
+        assertTrue(speaking.talkLimitNear)                       // 15 % 아래 = 임박
+        assertEquals(1f, speaking.copy(grantedSec = 0).talkGauge) // 시한을 모르면 가득 찬 채로
+        assertFalse(speaking.copy(grantedSec = 0).talkLimitNear)
+        assertTrue(speaking.copy(grantedSec = 0, talkLimit = true).talkLimitNear)   // 코어가 알린 임박
+        assertEquals(0f, speaking.copy(floor = null).talkGauge)   // 발언 중이 아니면 0
     }
 
     // ── 카드 표시 ──

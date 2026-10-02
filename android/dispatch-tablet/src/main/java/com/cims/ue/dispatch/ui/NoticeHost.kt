@@ -29,7 +29,7 @@ fun Notices(session: DispatchSession, modifier: Modifier = Modifier) {
 @Composable
 fun NoticeStack(items: List<Notice>, onDismiss: (Long) -> Unit = {}, modifier: Modifier = Modifier) {
     if (items.isEmpty()) return
-    Column(modifier.widthIn(max = 480.dp), verticalArrangement = Arrangement.spacedBy(6.dp),
+    Column(modifier.widthIn(max = 440.dp), verticalArrangement = Arrangement.spacedBy(6.dp),
         horizontalAlignment = Alignment.End) {
         items.forEach { NoticeCard(it, onDismiss) }
     }
@@ -38,23 +38,27 @@ fun NoticeStack(items: List<Notice>, onDismiss: (Long) -> Unit = {}, modifier: M
 @Composable
 private fun NoticeCard(n: Notice, onDismiss: (Long) -> Unit) {
     var open by remember(n.id) { mutableStateOf(false) }
-    val (bg, fg) = when (n.level) {
-        NoticeLevel.ERROR -> MaterialTheme.colorScheme.errorContainer to MaterialTheme.colorScheme.onErrorContainer
-        NoticeLevel.WARN -> MaterialTheme.colorScheme.tertiaryContainer to MaterialTheme.colorScheme.onTertiaryContainer
-        NoticeLevel.INFO -> MaterialTheme.colorScheme.inverseSurface to MaterialTheme.colorScheme.inverseOnSurface
+    val p = Tokens.palette
+    // 오류 연한 빨강 · 경고 연한 주황 · 정보 흰 면(데스크톱 토스트와 같은 토큰).
+    val (bg, fg, edge) = when (n.level) {
+        NoticeLevel.ERROR -> Triple(p.emgSoft, p.emgInk, p.emgEdge)
+        NoticeLevel.WARN -> Triple(p.ringBanner, p.ringInk, p.ringEdge)
+        NoticeLevel.INFO -> Triple(p.paper, p.ink, p.line)
     }
-    Surface(color = bg, contentColor = fg, shape = RoundedCornerShape(8.dp), shadowElevation = 4.dp) {
-        Column(Modifier.padding(start = 12.dp, end = 4.dp, top = 4.dp, bottom = 6.dp)) {
+    Surface(color = bg, contentColor = fg, shape = RoundedCornerShape(8.dp), shadowElevation = 6.dp,
+        border = androidx.compose.foundation.BorderStroke(1.dp, edge)) {
+        Column(Modifier.padding(start = 14.dp, end = 4.dp, top = 4.dp, bottom = 6.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(n.text, fontSize = Type.body, fontWeight = FontWeight.Bold,
                     modifier = Modifier.weight(1f, fill = false))
                 // 원문 코드는 접어 둔다 — 문장이 먼저 읽혀야 하고, 코드는 운영자에게 전할 때 편다.
                 if (n.detail.isNotEmpty()) TextButton(onClick = { open = !open }) {
-                    Text(if (open) "▾상세" else "▸상세", fontSize = Type.meta)
+                    Text(if (open) "▾상세" else "▸상세", fontSize = Type.meta, color = fg)
                 }
-                IconButton(onClick = { onDismiss(n.id) }) { Icon(Icons.Filled.Close, contentDescription = "닫기") }
+                IconButton(onClick = { onDismiss(n.id) }) { Icon(Icons.Filled.Close, contentDescription = "닫기", tint = fg) }
             }
-            if (open) Text(n.detail, fontSize = Type.meta, modifier = Modifier.padding(end = 8.dp))
+            if (open) Text(n.detail, fontSize = Type.meta, modifier = Modifier.padding(end = 8.dp),
+                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
         }
     }
 }

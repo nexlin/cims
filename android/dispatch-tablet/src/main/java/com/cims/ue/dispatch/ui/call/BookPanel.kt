@@ -58,9 +58,11 @@ fun BookPanel(
     onPerson: (PersonAction, String) -> Unit,
 ) {
     val book by vm.book.collectAsStateWithLifecycle()
-    BookPanelContent(book = book, pinned = pinned, onPin = onPin, onClose = onClose,
+    val dialogs by vm.dialogs.collectAsStateWithLifecycle()
+    @Suppress("UNUSED_EXPRESSION") dialogs      // 회선 상태가 바뀌면 줄을 다시 그린다
+    BookPanelContent(book = book, pinned = pinned, onPin = onPin, onClose = onClose, statusOf = vm::lineStatusOf,
         onDial = vm::dialTo, onSms = { n -> onPerson(PersonAction.SMS, n) },
-        personAt = vm::personAt, onPerson = onPerson)
+        personAt = vm::personAt, onPerson = onPerson, me = vm.myPhoneKey)
 }
 
 /** 주소록 본문 — **순수 컴포저블**(검색어·조직만 제 상태). */
@@ -74,11 +76,19 @@ fun BookPanelContent(
     onSms: (String) -> Unit = {},
     personAt: (String) -> PersonEntry? = { null },
     onPerson: (PersonAction, String) -> Unit = { _, _ -> },
+    /** 내 전화 번호(비교 정규형) — 목록에서 뺀다. */
+    me: String = "",
+    /** 그 회선의 지금 상태(«통화 중»·«링잉») — 감시 중인 회선만 안다. 걸기 전에 보인다. */
+    statusOf: (String) -> String = { "" },
 ) {
     val p = Tokens.palette
     var q by remember { mutableStateOf("") }
     var org by remember { mutableStateOf("") }
-    val rows = remember(book, q, org) { filter(book, q, org) }
+    // 나는 뺀다 — 내 번호에 걸거나 문자를 보낼 일이 없다(데스크톱과 같다)
+    val rows = remember(book, q, org, me) {
+        filter(book, q, org).filterNot { me.isNotEmpty() && DirectoryBook.normalize(it.msisdn) == me }
+            .distinctBy { it.msisdn }                      // 목록 키가 번호다 — 같은 번호가 두 번 있어도 한 줄
+    }
     // 거르기 칩 — «전체» 가 늘 처음, 그다음은 **트리 순서**(부모 → 자식, 형제는 `sort`·이름 — 관리 화면의 조직 트리와 같다).
     //   고르면 그 조직과 하위 전부다(`filter`).
     val orgs = remember(book) { com.cims.ue.dispatch.session.flattenOrgs(book.orgs).map { it.first } }
@@ -96,7 +106,7 @@ fun BookPanelContent(
         LazyColumn(Modifier.weight(1f)) {
             items(rows, key = { it.msisdn }) { e ->
                 BookRow(e, book.orgPath(e.org), onDial = { onDial(e.msisdn) }, onSms = { onSms(e.msisdn) },
-                    personAt = personAt, onPerson = onPerson)
+                    personAt = personAt, onPerson = onPerson, status = statusOf(e.msisdn))
             }
             if (rows.isEmpty()) item {
                 Text(if (book.entries.isEmpty()) "전화번호부를 받지 못했습니다 — 서버 연결을 확인하세요" else "일치하는 사람이 없습니다",
@@ -114,6 +124,7 @@ private fun BookRow(
     onSms: () -> Unit,
     personAt: (String) -> PersonEntry?,
     onPerson: (PersonAction, String) -> Unit,
+    status: String = "",
 ) {
     val p = Tokens.palette
     var menu by remember { mutableStateOf(false) }
@@ -125,11 +136,15 @@ private fun BookRow(
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         Column(Modifier.weight(1f)) {
-            Text(e.name.ifBlank { e.msisdn }, fontSize = Type.strong, fontWeight = FontWeight.SemiBold, maxLines = 1,
+            Text(e.name.ifBlank { com.cims.ue.dispatch.session.localNumber(e.msisdn) }, fontSize = Type.strong, fontWeight = FontWeight.SemiBold, maxLines = 1,
                 overflow = TextOverflow.Ellipsis)
-            Text(listOfNotNull(e.msisdn, orgPath.takeIf { it.isNotBlank() }).joinToString(" · "),
+            Text(listOfNotNull(com.cims.ue.dispatch.session.localNumber(e.msisdn), orgPath.takeIf { it.isNotBlank() },
+                    "외부".takeIf { e.external }).joinToString(" · "),
                 fontSize = Type.meta, color = p.muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
+        // 통화 중 = 녹색, 링잉 = 주황 — 통화 화면의 상태 점과 같은 색
+        if (status.isNotEmpty()) Text(status, fontSize = Type.micro, fontWeight = FontWeight.Bold,
+            color = if (status == "링잉") p.ring else p.talk, maxLines = 1)
         IconButton(onClick = onDial, modifier = Modifier.size(44.dp)) {
             Icon(Icons.Filled.Call, contentDescription = "${e.name.ifBlank { e.msisdn }} 발신", tint = p.ink,
                 modifier = Modifier.size(20.dp))
@@ -154,7 +169,8 @@ internal fun filter(book: DirectoryBook, q: String, org: String): List<Directory
             needle.isEmpty() || it.name.lowercase().contains(needle) ||
                 (digits.isNotEmpty() && DirectoryBook.normalize(it.msisdn).contains(digits.trimStart('+')))
         }
-        .sortedBy { it.name.ifBlank { it.msisdn } }
+        // 사이트 가입자 먼저(이름순), CSV 로 넣은 외부 번호는 맨 뒤 — 줄에 «외부» 가 붙는다
+        .sortedWith(compareBy<DirectoryEntry>({ it.external }, { it.name.ifBlank { it.msisdn } }))
         .toList()
 }
 

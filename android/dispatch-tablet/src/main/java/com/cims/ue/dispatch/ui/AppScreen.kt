@@ -1,13 +1,14 @@
-// 최상위 화면 — 왼쪽 메뉴 셋 + 관제의 면 + 오른쪽 사이드 패널 (docs/design/features/android_dispatch_tablet.md §6.3)
+// 최상위 화면 — 왼쪽 레일 + 관제의 면 + 오른쪽 사이드 패널 (docs/design/features/android_dispatch_tablet.md §6.3)
 //
-// **모바일 앱으로 짠다.** 데스크톱은 1920×1080 한 장에 6패널을 동시에 편다(dispatch_desktop_ui.md §3.1). 태블릿 본문은
+// **모바일 앱으로 짠다.** 데스크톱은 1920×1080 에 모드마다 한 화면을 편다(dispatch_desktop_ui.md §3.1). 태블릿 본문은
 // 그 절반도 안 되므로 같은 격자를 줄여 넣으면 어느 칸도 제 몫을 못 한다. 그래서 **한 면은 한 가지 일만** 하고 나머지는
 // 탭과 좌우 스와이프로 **이동해서** 본다. 예외는 둘 — 어디서나 무전할 수 있어야 하는 발언 바(아래 상시)와, 보던 면을
-// 떠나지 않고 한 대상을 자세히 보는 **오른쪽 사이드 패널**(밀어내기, 400dp)이다.
+// 떠나지 않고 한 대상을 자세히 보는 **오른쪽 사이드 패널**(본문 위에 겹친다, 400dp)이다.
 //
-// **메뉴는 셋 — 관제 · 이력 · 더보기.** 무전과 통화는 둘 다 «관제사가 지금 거는 일» 이라 [관제] 하나로 묶고, 그 안을
-// [무전|통화] 세그먼트와 하위 탭 한 줄로 나눈다. 탭을 두 줄로 쌓으면 세로(가로 전용 화면에서 가장 모자란 자원)를 한 줄
-// 더 쓰므로, 메뉴는 아래가 아니라 **왼쪽 세로 레일**(폭 80)에 둔다 — 그 80dp 가 본문 높이로 간다.
+// **레일은 데스크톱과 같다 — 관제 · 이력 · PTT 그룹 · 관리 + 바닥 [설정].** 전부 한 번에 누른다(메뉴를 거치지 않는다).
+// 무전과 통화는 둘 다 «관제사가 지금 거는 일» 이라 [관제] 하나로 묶고, 그 안을 [무전|통화] 세그먼트와 하위 탭 한 줄로 나눈다.
+// 탭을 두 줄로 쌓으면 세로(가로 전용 화면에서 가장 모자란 자원)를 한 줄 더 쓰므로, 메뉴는 아래가 아니라 **왼쪽 세로
+// 레일**(폭 80)에 둔다 — 그 80dp 가 본문 높이로 간다. [설정] 은 화면이 아니라 시트를 연다(켜짐 표시 없음).
 //
 // **가로 스와이프는 관제의 면 여섯 장을 한 줄로 꿴다**([DISPATCH_PAGES]) — 무전(채널·메시지·이벤트) 다음에 통화(통화·
 // 메시지·통화내역). 끝 면에서 더 밀면 다른 모드로 넘어간다. 메뉴(레일)는 밀어서 바꾸지 않는다 — 세로 레일을
@@ -17,22 +18,17 @@
 // 남아 지금 벌어지는 통화를 놓치지 않는다. 주소록도 면이 아니라 탭 줄 [주소록] 이 여는 오른쪽 패널이다.
 package com.cims.ue.dispatch.ui
 
-/** 왼쪽 레일의 메뉴. 순서가 곧 레일의 배열이다. 첫 화면은 [관제] — 관제사가 가장 오래 머무는 곳이다. */
+/**
+ * 왼쪽 레일의 화면. 순서가 곧 레일의 배열이다(데스크톱 F1~F4 — dispatch_desktop_ui.md §3.4). 첫 화면은 [관제] — 관제사가
+ * 가장 오래 머무는 곳이다. [설정] 은 여기 없다 — 레일 바닥의 버튼이 시트를 연다.
+ */
 enum class AppScreen(val label: String) {
     DISPATCH("관제"),
     HISTORY("이력"),
-    MORE("더보기"),
-}
-
-/**
- * [더보기] 안에서 여는 화면 — 레일 항목이 **아니라** 그 안의 이동이다(뒤로가기로 목록에 돌아온다).
- *
- * 그룹 **만들기**는 여기 없다 — [관제] › [무전] «채널» 의 [채널 추가하기] 패널에서 고른 사람으로 만든다(§6.12). 여기는
- * 이미 있는 그룹을 고치고 지우는 곳이다.
- */
-enum class MoreItem(val label: String, val hint: String) {
-    PTT_GROUPS("PTT 그룹", "범위 안 그룹 보기·편집·삭제"),
-    ADMIN("관리", "조직·구성원·번호"),
+    /** 범위 안 PTT 그룹 보기·편집·삭제(§6.12). 새 그룹은 [무전] «채널» 의 [채널 추가하기] 패널에서 만든다. */
+    PTT_GROUPS("PTT 그룹"),
+    /** 조직·구성원·번호(§6.13) — 관리 범위(`dispatch.directoryWrite`)가 없으면 레일에서 흐리다. */
+    ADMIN("관리"),
 }
 
 /** [관제] 의 두 모드 — 탭 줄 왼쪽의 [무전|통화] 세그먼트. */
@@ -83,8 +79,8 @@ sealed interface SidePanel {
     /** 채널 상세 — 채널 카드·타 채널 행·메시지 [채널 정보]·배너 [채널로 이동]·검색. id 는 채널 카드 id. */
     data class Channel(val id: String) : SidePanel
     /**
-     * 채널 추가 — «채널» 면의 [채널 추가하기] 타일. 사람을 골라 **개별 통화**(1명)·**애드혹 통화**(여럿)를 걸거나 **그룹을
-     * 추가**한다(그룹 추가는 한 겹 들어간 [NewGroup]). 셋 다 내 채널에 카드 한 장을 더하는 일이라 한 자리에서 한다.
+     * 채널 추가 — 탭 줄 [사용자]·«채널» 면의 [채널 추가하기] 타일. 사람을 골라 **개별 통화**(1명)·**애드혹 통화**(여럿)를 걸거나
+     * **그룹을 추가**한다(그룹 추가는 한 겹 들어간 [NewGroup]). 셋 다 내 채널에 카드 한 장을 더하는 일이라 한 자리에서 한다.
      */
     data object AddChannel : SidePanel
     /** 새 PTT 그룹 — 채널 추가에서 한 겹 들어온 것(← 가 채널 추가로 돌아간다). */
@@ -117,8 +113,6 @@ data class NavState(
     val panel: SidePanel? = null,
     /** 패널 고정 — 고정하면 탭·모드를 옮겨도 남고, 아니면 옮길 때 닫힌다. 패널이 닫히면 풀린다. */
     val pinned: Boolean = false,
-    /** [더보기] 가 열어 둔 안쪽 화면. */
-    val more: MoreItem? = null,
 ) {
     /** 지금 [관제] 가 보여 주는 면. */
     val page: DispatchPage get() = when (mode) {
@@ -128,13 +122,12 @@ data class NavState(
 }
 
 /**
- * 레일을 눌렀다. 같은 항목을 다시 누르면 **그 메뉴의** 안쪽을 닫는다(모바일 관례) — [관제] 는 패널, [더보기] 는 안쪽 화면.
- * 다른 메뉴로 옮기면 고정하지 않은 패널은 닫힌다(탭을 옮길 때와 같다).
+ * 레일을 눌렀다. [관제] 를 다시 누르면 패널을 닫는다(모바일 관례). 다른 화면으로 옮기면 고정하지 않은 패널은 닫힌다
+ * (탭을 옮길 때와 같다).
  */
 fun NavState.onNav(target: AppScreen): NavState = when {
     screen != target -> copy(screen = target).let { if (it.pinned) it else it.copy(panel = null) }
     target == AppScreen.DISPATCH && panel != null -> copy(panel = null, pinned = false)
-    target == AppScreen.MORE && more != null -> copy(more = null)
     else -> this
 }
 
@@ -150,7 +143,7 @@ fun NavState.toPage(page: DispatchPage): NavState {
 fun NavState.toMode(mode: DispatchMode): NavState =
     toPage(if (mode == DispatchMode.PTT) pageOf(pttPane) else pageOf(callPane))
 
-/** 패널을 연다 — 같은 대상이면 닫고(토글), 다른 대상이면 바꾼다. 면은 옮기지 않는다(보던 면 옆에 선다). */
+/** 패널을 연다 — 같은 대상이면 닫고(토글), 다른 대상이면 바꾼다. 면은 옮기지 않는다(보던 면 위에 선다). */
 fun NavState.togglePanel(p: SidePanel): NavState =
     if (panel == p) copy(panel = null, pinned = false) else copy(screen = AppScreen.DISPATCH, panel = p)
 
@@ -171,8 +164,8 @@ fun NavState.togglePin(): NavState = if (panel == null) this else copy(pinned = 
 /**
  * 뒤로가기 한 겹 — 되돌릴 것이 없으면 null(그때는 가로채지 않는다).
  *
- * 순서는 연 순서의 역순이다: ① 패널 안의 한 겹 → ② 패널 → ③ [더보기] 안쪽 → ④ 그 모드의 첫 면 → ⑤ [무전] → ⑥ [관제].
- * **보고 있는 메뉴의 것만** 되돌린다 — 보이지 않는 패널을 닫으면 화면은 그대로인데 뒤로가기만 한 번 먹힌다.
+ * 순서는 연 순서의 역순이다: ① 패널 안의 한 겹 → ② 패널 → ③ 그 모드의 첫 면 → ④ [무전] → ⑤ [관제].
+ * **보고 있는 화면의 것만** 되돌린다 — 보이지 않는 패널을 닫으면 화면은 그대로인데 뒤로가기만 한 번 먹힌다.
  * 돌려주는 값은 **반드시 지금과 다르다** — 같으면 «되돌릴 것이 없다» 는 뜻이므로 null 이다.
  */
 fun NavState.onBack(): NavState? {
@@ -180,7 +173,6 @@ fun NavState.onBack(): NavState? {
     return when {
         screen == AppScreen.DISPATCH && p?.parent != null -> copy(panel = p.parent)
         screen == AppScreen.DISPATCH && p != null -> closePanel()
-        screen == AppScreen.MORE && more != null -> copy(more = null)
         screen == AppScreen.DISPATCH && mode == DispatchMode.CALL && callPane != CallPane.CALLS -> copy(callPane = CallPane.CALLS)
         screen == AppScreen.DISPATCH && mode == DispatchMode.CALL -> copy(mode = DispatchMode.PTT)
         screen == AppScreen.DISPATCH && pttPane != PttPane.CHANNELS -> copy(pttPane = PttPane.CHANNELS)

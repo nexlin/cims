@@ -71,7 +71,12 @@ class DispatchRedesignTest {
     @Test fun `남이 진행 중인 그룹은 참여 전이라도 진행 중이라고 적는다`() {
         val live = group.copy(roster = listOf(RosterEntry("tel:5002", "connected")))
         assertTrue(live.hasSession)
-        assertEquals("진행 중 · 멤버 12", ui(ChannelCard("g1", CardKind.MEMBER, "교통1", group = live)).sub)
+        // 진행 중이면 편성 수가 아니라 **지금 참가 수**를 적는다(데스크톱 «세션 진행 중 · 참가 n»)
+        assertEquals("진행 중 · 참가 1", ui(ChannelCard("g1", CardKind.MEMBER, "교통1", group = live)).sub)
+        // 대기 중이고 앱이 본 마지막 세션이 있으면 끝난 때를 붙인다
+        val hhmm = java.text.SimpleDateFormat("HH:mm", java.util.Locale.ROOT).format(java.util.Date(1_000_000L))
+        assertEquals("대기 · 멤버 12 · 마지막 $hhmm",
+            ui(ChannelCard("g1", CardKind.MEMBER, "교통1", group = group.copy(lastSessionEndMs = 1_000_000L))).sub)
     }
 
     @Test fun `핀 번호는 내 채널의 차례다 — 0 이면 달지 않는다`() {
@@ -84,20 +89,23 @@ class DispatchRedesignTest {
         assertEquals(CardControl.TARGET, ui(ChannelCard("g1", CardKind.MEMBER, "순찰1", group = group, session = session(call()))).control)
     }
 
-    @Test fun `전이중 개별 통화는 발언 대상 대신 음소거다 — 이름 앞에 종류, 접속자 줄은 상대`() {
+    @Test fun `전이중 개별 통화는 발언 대상 대신 음소거다 — 종류는 라벨, 접속자 줄은 상대`() {
         val c = ChannelCard("p1", CardKind.PRIVATE, "김반장", session = session(call(privateCall = true, noFloorCtrl = true)))
         assertEquals(CardControl.MUTE, ui(c).control)
-        assertEquals("4. 개별 · 김반장", ui(c, pin = 4).title)
+        assertEquals("4. 김반장", ui(c, pin = 4).title)
+        assertEquals("종류는 이름 뒤 라벨이 말한다(데스크톱 카드와 같다)", "개별", ui(c).kindTag)
         assertEquals("김반장", ui(c).roster)
         assertEquals("1:1 은 참가 수 없이 경과만", "00:00", ui(c).meta)
     }
 
-    @Test fun `긴급 세션은 2줄 앞에 긴급을 적는다`() {
+    @Test fun `긴급 세션은 라벨과 카드 색으로 알린다 — 2줄은 발언 줄 그대로`() {
         val c = ChannelCard("g1", CardKind.MEMBER, "순찰1", group = group,
             session = session(call().copy(condition = McpttCondition(emergency = true))))
         val u = ui(c)
         assertTrue(u.emergency)
-        assertTrue(u.sub, u.sub.startsWith("긴급 · "))
+        assertEquals("발언 없음", u.sub)
+        assertEquals("멤버 그룹은 종류 라벨이 없다", "", u.kindTag)
+        assertTrue("참여 중 — 점이 남색", u.joined)
     }
 
     @Test fun `접속자 줄은 발언자·나를 먼저 세우고 셋까지 편다`() {
@@ -217,6 +225,6 @@ class DispatchRedesignTest {
     }
 
     @Test fun `종류 낱말`() {
-        assertEquals(listOf("발언", "입장", "퇴장", "긴급", "SDS", "오류"), ActivityKind.entries.map(::kindLabel))
+        assertEquals(listOf("발언", "입장", "퇴장", "긴급", "SDS", "오류", "영상", "기타"), ActivityKind.entries.map(::kindLabel))
     }
 }

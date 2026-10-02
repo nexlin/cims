@@ -77,10 +77,12 @@ internal object DirectoryCsv {
 internal fun mergeBook(server: DirectoryBook, csv: List<CsvContact>, kinds: Set<CsvKind>,
                        countryCode: String = "82"): DirectoryBook {
     val extra = LinkedHashMap<String, CsvContact>()
-    csv.filter { it.kind in kinds }.forEach { extra[DirectoryBook.normalize(it.number, countryCode)] = it }
+    // 숫자가 없는 번호(영숫자 id)는 정규형이 비어 서로 같아진다 — 그런 것은 원문이 키다(한 줄로 뭉개지지 않게)
+    fun keyOf(n: String) = DirectoryBook.normalize(n, countryCode).ifEmpty { n.trim() }
+    csv.filter { it.kind in kinds }.forEach { extra[keyOf(it.number)] = it }
     if (extra.isEmpty()) return server
     val merged = server.entries.map { e ->
-        val c = extra.remove(DirectoryBook.normalize(e.msisdn, countryCode))
+        val c = extra.remove(keyOf(e.msisdn))
         if (c == null || e.name.isNotBlank()) e else e.copy(name = c.name)
     }
     val added = extra.values.map { DirectoryEntry("", it.name, it.number, external = it.kind == CsvKind.EXTERNAL) }
@@ -110,7 +112,7 @@ internal object DirectoryCache {
         val root = JSONObject(text)
         root.keys().asSequence().associateWith { svc ->
             val o = root.getJSONObject(svc)
-            ManagementClient.parseDirectory(o, o.optString("etag", ""))
+            ManagementClient.parseDirectory(o, o.str("etag", ""))
         }
     }.getOrDefault(emptyMap())
 }

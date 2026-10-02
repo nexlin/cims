@@ -4,7 +4,7 @@
 // 휴대폰 문자 앱과 같은 모양 — **왼쪽 대화 목록 : 오른쪽 대화**. [무전] > «메시지» 와 같은 배치를 쓰되
 // 망이 다르다(이쪽은 SIP MESSAGE text/plain, 저쪽은 MCData SDS).
 //
-// **외부망 번호는 보내기가 막힌다** — 게이트웨이가 없다. 막는 것을 말하지 않으면 «왜 안 가지» 가 된다.
+// **외부망 번호는 게이트웨이가 없으면 보내기가 막힌다**(프로파일 `smsGateway`). 막는 것을 말하지 않으면 «왜 안 가지» 가 된다.
 //
 // 목록 머리의 **[＋ 새 대화]** 가 «아직 주고받은 적 없는 사람에게 처음 보내는» 길이다. 이것이 없으면
 // 상대에게서 먼저 오기를 기다리거나 사람 메뉴를 거치는 수밖에 없어, 문자 면만 열어서는 아무것도 못 쓴다.
@@ -44,12 +44,13 @@ private val hhmm = SimpleDateFormat("HH:mm", Locale.KOREA)
 
 /** VM 을 붙이는 껍데기. */
 @Composable
-fun SmsPane(vm: SmsMessagesViewModel, modifier: Modifier = Modifier) {
+fun SmsPane(vm: SmsMessagesViewModel, modifier: Modifier = Modifier, onCall: (String) -> Unit = {}) {
     val threads by vm.threads.collectAsStateWithLifecycle()
     val thread by vm.thread.collectAsStateWithLifecycle()
     val peer by vm.peer.collectAsStateWithLifecycle()
     val title by vm.title.collectAsStateWithLifecycle()
     val external by vm.selectedIsExternal.collectAsStateWithLifecycle()
+    val blocked by vm.selectedBlocked.collectAsStateWithLifecycle()
     val candidates by vm.candidates.collectAsStateWithLifecycle()
 
     var picking by remember { mutableStateOf(false) }
@@ -63,8 +64,9 @@ fun SmsPane(vm: SmsMessagesViewModel, modifier: Modifier = Modifier) {
 
     SmsPaneContent(
         threads = threads, thread = thread, peer = peer, title = title,
-        available = vm.available, external = external,
-        onPick = vm::pick, onSend = vm::send, onResend = vm::resend, onNew = { picking = true }, modifier = modifier)
+        available = vm.available, external = external, externalBlocked = blocked,
+        onPick = vm::pick, onSend = vm::send, onResend = vm::resend, onNew = { picking = true }, modifier = modifier,
+        onCall = onCall)
 }
 
 /**
@@ -78,13 +80,18 @@ fun SmsPaneContent(
     peer: String?,
     title: String,
     available: Boolean = true,
+    /** 고른 상대가 외부망 번호다 — 머리에 «외부망» 라벨. */
     external: Boolean = false,
+    /** 외부망인데 게이트웨이가 없어 보낼 수 없다(프로파일 `smsGateway`) — 보내기 줄을 막고 이유를 적는다. */
+    externalBlocked: Boolean = external,
     onPick: (String) -> Unit = {},
     onSend: (String) -> Unit = {},
     /** 실패한 발신 말풍선의 [재전송]. */
     onResend: (Message) -> Unit = {},
     onNew: () -> Unit = {},
     modifier: Modifier = Modifier,
+    /** 대화 머리 [전화] — 문자를 보다가 그 사람에게 바로 건다(데스크톱 «기록» 머리와 같다). */
+    onCall: (String) -> Unit = {},
 ) {
     BoxWithConstraints(modifier.fillMaxSize()) {
         val compact = maxWidth < 600.dp
@@ -93,13 +100,13 @@ fun SmsPaneContent(
         if (compact) {
             if (showList || peer == null) ThreadList(threads, peer, onPick = { k -> onPick(k); showList = false }, onNew,
                 Modifier.fillMaxSize())
-            else Conversation(thread, peer, title, available, external, onSend, onResend, onNew,
-                onBack = { showList = true }, modifier = Modifier.fillMaxSize())
+            else Conversation(thread, peer, title, available, external, externalBlocked, onSend, onResend, onNew,
+                onBack = { showList = true }, modifier = Modifier.fillMaxSize(), onCall = onCall)
         } else Row(Modifier.fillMaxSize()) {
             ThreadList(threads, peer, onPick, onNew, Modifier.width(340.dp).fillMaxHeight())
             com.cims.ue.dispatch.ui.VDivider()
-            Conversation(thread, peer, title, available, external, onSend, onResend, onNew, onBack = null,
-                modifier = Modifier.weight(1f).fillMaxHeight())
+            Conversation(thread, peer, title, available, external, externalBlocked, onSend, onResend, onNew, onBack = null,
+                modifier = Modifier.weight(1f).fillMaxHeight(), onCall = onCall)
         }
     }
 }
@@ -112,7 +119,7 @@ private fun ThreadList(threads: List<ThreadChip>, peer: String?, onPick: (String
     Column(modifier) {
         com.cims.ue.dispatch.ui.SectionHead("문자 ${threads.size}") {
             Spacer(Modifier.weight(1f))
-            com.cims.ue.dispatch.ui.PillButton("＋ 새 대화", onNew, height = 32.dp, strongBorder = true)
+            com.cims.ue.dispatch.ui.PillButton("＋ 새 대화", onNew, height = 32.dp, kind = com.cims.ue.dispatch.ui.Pill.LINE)
         }
         if (threads.isEmpty()) Text(
             "주고받은 문자가 없습니다 — [＋ 새 대화] 로 시작합니다",
@@ -133,11 +140,13 @@ private fun Conversation(
     title: String,
     available: Boolean,
     external: Boolean,
+    externalBlocked: Boolean,
     onSend: (String) -> Unit,
     onResend: (Message) -> Unit,
     onNew: () -> Unit,
     onBack: (() -> Unit)?,
     modifier: Modifier,
+    onCall: (String) -> Unit = {},
 ) {
     val p = com.cims.ue.dispatch.ui.Tokens.palette
     Column(modifier) {
@@ -146,7 +155,7 @@ private fun Conversation(
                 horizontalAlignment = Alignment.CenterHorizontally) {
                 Text("대화를 고르세요", fontSize = Type.body, color = p.muted)
                 Spacer(Modifier.height(8.dp))
-                com.cims.ue.dispatch.ui.PillButton("＋ 새 대화", onNew, strongBorder = true)
+                com.cims.ue.dispatch.ui.PillButton("＋ 새 대화", onNew, kind = com.cims.ue.dispatch.ui.Pill.LINE)
             }
             return@Column
         }
@@ -158,18 +167,27 @@ private fun Conversation(
             }
             Text(title, fontSize = Type.head, fontWeight = FontWeight.Bold, maxLines = 1,
                 overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
-            com.cims.ue.dispatch.ui.Label("문자", com.cims.ue.dispatch.ui.LabelStyle.OUTLINE, round = true)
-            if (external) com.cims.ue.dispatch.ui.Label("외부망", com.cims.ue.dispatch.ui.LabelStyle.OUTLINE,
-                round = true, color = p.emergency)
+            // 문자 = 청록 라벨, 외부망 = 빨강 라벨(데스크톱 «기록» 머리와 같은 색).
+            com.cims.ue.dispatch.ui.Label("문자", com.cims.ue.dispatch.ui.LabelStyle.TEAL)
+            if (external) com.cims.ue.dispatch.ui.Label("외부망", com.cims.ue.dispatch.ui.LabelStyle.EMG)
+            // 이름이 있으면 번호도 보인다(국내 표기) — 누구에게 보내는지 번호로 확인한다
+            com.cims.ue.dispatch.session.localNumber(peer).let { n ->
+                if (n.isNotEmpty() && n != title) Text(n, fontSize = Type.meta, color = p.muted, maxLines = 1)
+            }
+            Spacer(Modifier.weight(1f))
+            if (peer != null) com.cims.ue.dispatch.ui.PillButton("전화", { onCall(peer) }, kind = com.cims.ue.dispatch.ui.Pill.CALL, height = 36.dp)
         }
         com.cims.ue.dispatch.ui.HDivider()
-        LazyColumn(Modifier.weight(1f).padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(8.dp),
+        val list = androidx.compose.foundation.lazy.rememberLazyListState()
+        // 새 글이 오면 맨 아래로 — 대화는 아래가 최신이다(SDS 대화와 같다).
+        androidx.compose.runtime.LaunchedEffect(thread.size) { if (thread.isNotEmpty()) list.animateScrollToItem(thread.size - 1) }
+        LazyColumn(Modifier.weight(1f).padding(horizontal = 20.dp), state = list, verticalArrangement = Arrangement.spacedBy(8.dp),
             contentPadding = PaddingValues(vertical = 14.dp)) {
             items(thread, key = { it.id }) { m ->
                 com.cims.ue.dispatch.ui.ptt.Bubble(m, showName = false, onResend = { onResend(m) })
             }
         }
-        SmsInput(available = available, external = external, onSend = onSend, peer = peer)
+        SmsInput(available = available, external = externalBlocked, onSend = onSend, peer = peer)
     }
 }
 
@@ -185,18 +203,18 @@ private fun SmsInput(available: Boolean, external: Boolean, peer: String, onSend
             if (!available) "전화 계정이 없어 문자를 보낼 수 없습니다"
             else "외부망 번호입니다 — 게이트웨이가 없어 보낼 수 없습니다(받는 것은 됩니다)",
             Modifier.fillMaxWidth().padding(top = 8.dp),
-            fontSize = Type.meta, color = p.emergency, textAlign = TextAlign.Center)
+            fontSize = Type.meta, color = p.emg, textAlign = TextAlign.Center)
         Row(Modifier.fillMaxWidth().height(68.dp).padding(horizontal = 20.dp),
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             val send = { if (!blocked && draft.isNotBlank()) { onSend(draft); draft = "" } }
             androidx.compose.foundation.text.BasicTextField(
                 value = draft, onValueChange = { draft = it }, singleLine = true, enabled = !blocked,
                 textStyle = androidx.compose.ui.text.TextStyle(fontSize = Type.strong, color = p.ink),
-                cursorBrush = androidx.compose.ui.graphics.SolidColor(p.ink),
+                cursorBrush = androidx.compose.ui.graphics.SolidColor(p.primaryLine),
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
                 keyboardActions = androidx.compose.foundation.text.KeyboardActions(onSend = { send() }),
                 modifier = Modifier.weight(1f).height(44.dp).clip(RoundedCornerShape(22.dp))
-                    .border(1.5.dp, if (blocked) p.line else p.ink, RoundedCornerShape(22.dp))
+                    .border(1.5.dp, if (blocked) p.line else p.edge, RoundedCornerShape(22.dp))
                     .background(if (blocked) p.bar else p.paper),
                 decorationBox = { inner ->
                     Box(Modifier.fillMaxSize().padding(horizontal = 16.dp), contentAlignment = Alignment.CenterStart) {
@@ -205,7 +223,7 @@ private fun SmsInput(available: Boolean, external: Boolean, peer: String, onSend
                     }
                 })
             Text(smsCountText(draft), fontSize = Type.micro, color = p.muted)
-            com.cims.ue.dispatch.ui.PillButton("보내기", send, height = 44.dp, filled = true,
+            com.cims.ue.dispatch.ui.PillButton("보내기", send, height = 44.dp, kind = com.cims.ue.dispatch.ui.Pill.INK,
                 enabled = !blocked && draft.isNotBlank())
         }
     }

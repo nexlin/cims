@@ -16,6 +16,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -44,8 +45,8 @@ fun SettingsSheet(session: DispatchSession, onDismiss: () -> Unit) {
 
             Section("화면")
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                listOf(com.cims.ue.dispatch.session.Settings.THEME_DARK to "어둡게",
-                       com.cims.ue.dispatch.session.Settings.THEME_LIGHT to "밝게").forEach { (v, label) ->
+                listOf(com.cims.ue.dispatch.session.Settings.THEME_LIGHT to "밝게",
+                       com.cims.ue.dispatch.session.Settings.THEME_DARK to "어둡게").forEach { (v, label) ->
                     CimsFilterChip(selected = s.theme == v,
                         onClick = { session.updateSettings { it.copy(theme = v) } },
                         label = { Text(label, fontSize = Type.meta) })
@@ -89,6 +90,10 @@ fun SettingsSheet(session: DispatchSession, onDismiss: () -> Unit) {
                 s.autoHoldOnAnswer) { v -> session.updateSettings { it.copy(autoHoldOnAnswer = v) } }
             Hint("자동 보류를 끄면 두 통화가 동시에 들려 어느 쪽에 말하는지 알 수 없다.")
 
+            // 영상(MCVideo 영상 채널 — §6.14) — [영상 보내기] 카메라와 «영상 보내는 중 무전»(D12).
+            Section("영상")
+            VideoSettings(session)
+
             Section("PTT 하드키")
             HardKeyRow(session)
 
@@ -101,44 +106,28 @@ fun SettingsSheet(session: DispatchSession, onDismiss: () -> Unit) {
                 onValueChange = { v -> session.updateSettings { it.copy(pickupFeatureCode = v.trim()) } },
                 label = { Text("피처코드") }, singleLine = true,
                 supportingText = { Text("접속서비스의 pickup_feature_code 와 같아야 한다 (기본 **)", fontSize = Type.meta) },
-                modifier = Modifier.fillMaxWidth())
+                modifier = Modifier.fillMaxWidth(), shape = com.cims.ue.dispatch.ui.FieldShape6, colors = com.cims.ue.dispatch.ui.cimsFieldColors())
 
             Section("청취")
-            OutlinedTextField(
-                value = s.maxListen.toString(),
-                onValueChange = { v ->
-                    // 1~16 으로 죈다(데스크톱과 같은 범위, `SettingsViewModel` 의 Clamp). 빈 칸·글자는 무시한다 —
-                    //   0 이 되면 청취가 통째로 막히고 그 이유가 화면에 없다.
-                    v.toIntOrNull()?.coerceIn(1, 16)?.let { n -> session.updateSettings { it.copy(maxListen = n) } }
-                },
-                label = { Text("동시 청취 상한") }, singleLine = true,
-                supportingText = {
-                    Text("감청·PTT 청취를 합쳐 한 번에 열 수 있는 수 (1~16, 기본 4). 넘으면 서버가 거절하기 전에 앱이 막는다",
-                         fontSize = Type.meta)
-                },
-                modifier = Modifier.fillMaxWidth())
+            // 1~16 으로 죈다(데스크톱과 같은 범위, `SettingsViewModel` 의 Clamp) — 0 이 되면 청취가 통째로 막히고 그 이유가 화면에 없다.
+            SettingNumberField(s.maxListen, 1..16, "동시 청취 상한",
+                "감청·PTT 청취를 합쳐 한 번에 열 수 있는 수 (1~16, 기본 4). 넘으면 서버가 거절하기 전에 앱이 막는다") { n ->
+                session.updateSettings { it.copy(maxListen = n) }
+            }
 
             Section("메시지")
-            OutlinedTextField(
-                value = s.messageRetentionDays.toString(),
-                onValueChange = { v ->
-                    // 1~365 로 죈다(데스크톱과 같은 범위). 빈 칸·글자는 무시한다 — 치는 도중의 값으로 지우지 않도록
-                    //   정리는 다음 기동 때 한 번만 한다.
-                    v.toIntOrNull()?.coerceIn(1, 365)?.let { n -> session.updateSettings { it.copy(messageRetentionDays = n) } }
-                },
-                label = { Text("보관 일수") }, singleLine = true,
-                supportingText = {
-                    Text("앱을 다시 켤 때 이보다 오래된 SDS·문자를 지운다 (1~365, 기본 30). 서버에 이력이 없어 지운 것은 " +
-                         "되살릴 수 없다", fontSize = Type.meta)
-                },
-                modifier = Modifier.fillMaxWidth())
+            // 1~365 로 죈다(데스크톱과 같은 범위). 정리는 다음 기동 때 한 번만 한다.
+            SettingNumberField(s.messageRetentionDays, 1..365, "보관 일수",
+                "앱을 다시 켤 때 이보다 오래된 SDS·문자를 지운다 (1~365, 기본 30). 서버에 이력이 없어 지운 것은 되살릴 수 없다") { n ->
+                session.updateSettings { it.copy(messageRetentionDays = n) }
+            }
 
             Section("서버")
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(value = s.cscHost, onValueChange = {}, enabled = false,
-                    label = { Text("CSC 주소") }, singleLine = true, modifier = Modifier.weight(2f))
+                    label = { Text("CSC 주소") }, singleLine = true, modifier = Modifier.weight(2f), shape = com.cims.ue.dispatch.ui.FieldShape6, colors = com.cims.ue.dispatch.ui.cimsFieldColors())
                 OutlinedTextField(value = s.cscPort.toString(), onValueChange = {}, enabled = false,
-                    label = { Text("포트") }, singleLine = true, modifier = Modifier.weight(1f))
+                    label = { Text("포트") }, singleLine = true, modifier = Modifier.weight(1f), shape = com.cims.ue.dispatch.ui.FieldShape6, colors = com.cims.ue.dispatch.ui.cimsFieldColors())
             }
             Hint("접속점은 로그인 화면에서 정한다 — 등록·구독이 붙어 있는 동안 바꾸면 세션이 어긋난다.")
 
@@ -149,13 +138,13 @@ fun SettingsSheet(session: DispatchSession, onDismiss: () -> Unit) {
             }
             if (!s.verifyServer) Warn(
                 "검증이 꺼져 있습니다 — 중간자 공격을 막지 못합니다. 시험 목적으로만 쓰고 운영에서는 켜 두세요. " +
-                "다음 로그인부터 적용됩니다.")
+                "로그인 서버에는 다음 로그인부터, 통화·무전(SIP)에는 앱을 다시 시작한 뒤 적용됩니다.")
 
             Section("진단")
             Text("로그 수준 ${s.logLevel}", fontSize = Type.body)
-            Slider(value = s.logLevel.toFloat(), valueRange = 0f..5f, steps = 4,
+            CimsSlider(value = s.logLevel.toFloat(), valueRange = 0f..5f, steps = 4,
                 onValueChange = { v -> session.updateSettings { it.copy(logLevel = v.toInt()) } })
-            Hint("0=끔 … 5=자세히. 엔진 기동 때 읽으므로 다음 로그인부터 적용된다.")
+            Hint("0=끔 … 5=자세히. 엔진 기동 때 읽으므로 앱을 다시 시작한 뒤 적용된다(로그아웃으로는 엔진이 내려가지 않는다).")
 
             Spacer(Modifier.height(20.dp))
         }
@@ -174,7 +163,7 @@ private fun DirectoryCsvRow(session: DispatchSession) {
     val pick = androidx.activity.compose.rememberLauncherForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.OpenDocument()) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
-        scope.launch {
+        scope.launch(com.cims.ue.dispatch.session.UnhandledGuard) {
             val text = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                 runCatching { context.contentResolver.openInputStream(uri)?.use { it.readBytes().toString(Charsets.UTF_8) } }
                     .getOrNull()
@@ -195,10 +184,8 @@ private fun DirectoryCsvRow(session: DispatchSession) {
             Text(if (rows.isEmpty()) "없음" else "${rows.size}줄 · 외부망 ${rows.count { it.kind == com.cims.ue.dispatch.session.CsvKind.EXTERNAL }}",
                 fontSize = Type.meta, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
-        OutlinedButton(onClick = { pick.launch(arrayOf("text/*", "application/csv", "application/vnd.ms-excel")) }) {
-            Text("가져오기")
-        }
-        TextButton(onClick = { scope.launch { session.clearDirectoryCsv() } }, enabled = rows.isNotEmpty()) { Text("지우기") }
+        RectButton("가져오기", { pick.launch(arrayOf("text/*", "application/csv", "application/vnd.ms-excel")) })
+        RectButton("지우기", { scope.launch(com.cims.ue.dispatch.session.UnhandledGuard) { session.clearDirectoryCsv() } }, enabled = rows.isNotEmpty())
     }
     Hint("형식 kind,number,name,tags — kind = ext(가입자·내선) | external(외부망) | ptt. 같은 번호가 서버 전화번호부에 있으면 " +
          "서버 이름이 앞서고 CSV 이름은 빈 곳만 채운다. 서버 전화번호부는 캐시해 두어 켜자마자 이름이 선다.")
@@ -226,7 +213,7 @@ private fun ServerCertRow(session: DispatchSession) {
                 fontSize = Type.body, fontWeight = if (level == CertLevel.OK) FontWeight.Normal else FontWeight.Bold,
                 color = when (level) {
                     CertLevel.OK -> MaterialTheme.colorScheme.onSurfaceVariant
-                    CertLevel.WARN -> PerilAmber
+                    CertLevel.WARN -> Tokens.palette.ring
                     CertLevel.CRITICAL -> MaterialTheme.colorScheme.error
                 })
         }
@@ -256,16 +243,16 @@ private fun HardKeyRow(session: DispatchSession) {
         if (learning == PttKey.TALK) {
             Text("측면 PTT 버튼을 누르세요", fontSize = Type.body, fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.primary)
-            TextButton(onClick = hw::cancelLearn) { Text("취소") }
+            RectButton("취소", hw::cancelLearn)
         } else {
-            OutlinedButton(onClick = { hw.startLearn(PttKey.TALK) }) { Text("버튼 학습") }
-            TextButton(onClick = hw::resetMapping, enabled = mapping.talk > 0) { Text("기본값") }
+            RectButton("버튼 학습", { hw.startLearn(PttKey.TALK) })
+            RectButton("기본값", hw::resetMapping, enabled = mapping.talk > 0)
         }
     }
     Hint("누르는 동안 발언, 떼면 해제 — 발언 바와 같다(잠금 발언도 따른다). 시트가 열려 있어도 먹는다.")
 }
 
-private fun routeLabel(r: Route): String = when (r) {
+internal fun routeLabel(r: Route): String = when (r) {
     Route.EARPIECE -> "수화부"
     Route.SPEAKER -> "스피커"
     Route.HEADSET -> "유선 헤드셋"
@@ -299,4 +286,31 @@ private fun Warn(text: String) {
         Text(text, Modifier.padding(8.dp), fontSize = Type.meta,
             color = MaterialTheme.colorScheme.onErrorContainer)
     }
+}
+
+/**
+ * 설정의 숫자 칸 — 글자는 칸이 들고, **칸을 떠날 때**(다른 칸·완료·시트 닫힘) 범위로 잘라 적는다. 치는 도중의 값을 곧바로 적으면
+ * «30» 을 고치려 한 글자 지운 «3» 이 저장되고(보관 일수라면 다음 기동이 3일보다 오래된 글을 지운다 — 되살릴 수 없다), 빈 칸을
+ * 받지 않으면 지울 수도 없다.
+ */
+@Composable
+private fun SettingNumberField(value: Int, range: IntRange, label: String, hint: String, onCommit: (Int) -> Unit) {
+    var text by remember { mutableStateOf(value.toString()) }
+    val commit by rememberUpdatedState {
+        val n = text.toIntOrNull()?.coerceIn(range.first, range.last)
+        if (n != null && n != value) onCommit(n)
+        text = (n ?: value).toString()
+    }
+    DisposableEffect(Unit) { onDispose { commit() } }
+    OutlinedTextField(
+        value = text,
+        onValueChange = { v -> text = v.filter(Char::isDigit).take(4) },
+        label = { Text(label) }, singleLine = true,
+        supportingText = { Text(hint, fontSize = Type.meta) },
+        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+            keyboardType = androidx.compose.ui.text.input.KeyboardType.Number,
+            imeAction = androidx.compose.ui.text.input.ImeAction.Done),
+        keyboardActions = androidx.compose.foundation.text.KeyboardActions(onDone = { commit() }),
+        modifier = Modifier.fillMaxWidth().onFocusChanged { if (!it.isFocused) commit() },
+        shape = com.cims.ue.dispatch.ui.FieldShape6, colors = com.cims.ue.dispatch.ui.cimsFieldColors())
 }

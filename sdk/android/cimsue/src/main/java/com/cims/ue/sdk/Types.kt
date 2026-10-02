@@ -334,6 +334,10 @@ data class CallInfo(
     val sessionUri: String = "",
     /** 통화 중 영상 전환 요청의 진행(1:1 호) — SENT = 내 요청 응답 대기, RECEIVED = 상대 요청에 답할 차례. */
     val videoRequest: VideoRequestState = VideoRequestState.NONE,
+    /** 개시 200 OK 의 P-Answer-State(RFC 4964) — "Unconfirmed" = 서버가 멤버 확인 전에 받았다(TS 24.379 §10.1.1.2.1.1). 없으면 빈 값. */
+    val answerState: String = "",
+    /** 내가 연 그룹 통화의 미응답 필수 멤버(TS 24.379 §6.3.3.3 — 서버 INFO `<non-acknowledged-user>`) — 알림은 `nonAcknowledged` 이벤트. */
+    val nonAcknowledgedUsers: List<String> = emptyList(),
 ) {
     val active: Boolean get() = state == CallState.ACTIVE
     val ended: Boolean get() = state == CallState.DISCONNECTED
@@ -344,7 +348,8 @@ data class CallInfo(
             c.playbackRoute, c.lastCode, c.lastReason, MediaSource.list(c.sources),
             c.isMcptt, c.groupId, McpttInfo.of(c.mcptt), c.halfDuplex, c.listenOnly, c.joinedDialog,
             McpttCondition.of(c.condition), c.rxLevel, c.videoSend,
-            ordinalOf(c.service.swigValue()), c.sessionUri, ordinalOf(c.videoRequest.swigValue()))
+            ordinalOf(c.service.swigValue()), c.sessionUri, ordinalOf(c.videoRequest.swigValue()),
+            c.answerState, c.nonAcknowledgedUsers.let { v -> List(v.size) { v[it] } })
     }
 }
 

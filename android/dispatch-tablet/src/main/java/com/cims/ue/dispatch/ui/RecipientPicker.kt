@@ -55,8 +55,9 @@ fun RecipientPicker(
     var q by remember { mutableStateOf("") }
     var manual by remember { mutableStateOf("") }
     val hits = remember(options, q) { filterRecipients(options, q) }
-    val groups = hits.filter { it.group }
-    val people = hits.filterNot { it.group }
+    // 목록 키가 `key` 다 — 주소록에 같은 번호가 두 번 있어도(서버 줄 + CSV 줄) 한 줄로 세운다(키가 겹치면 목록이 죽는다)
+    val groups = hits.filter { it.group }.distinctBy { it.key }
+    val people = hits.filterNot { it.group }.distinctBy { it.key }
 
     Dialog(onDismissRequest = onDismiss) {
         ForwardPttKeys()                    // 대화상자가 떠 있어도 측면 키는 발언이다(§7)

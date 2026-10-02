@@ -56,6 +56,7 @@ import com.cims.ue.dispatch.ui.CountPill
 import com.cims.ue.dispatch.ui.FilterPill
 import com.cims.ue.dispatch.ui.Label
 import com.cims.ue.dispatch.ui.LabelStyle
+import com.cims.ue.dispatch.ui.Pill
 import com.cims.ue.dispatch.ui.PillButton
 import com.cims.ue.dispatch.ui.SectionHead
 import com.cims.ue.dispatch.ui.StatusDot
@@ -71,18 +72,29 @@ val MineColumnWidth = 470.dp
 /** 카드 오른쪽 아래의 조작 — 한 카드에 하나만 선다(서로 모순이라 같이 두지 않는다). */
 enum class CardControl { TARGET, MUTE, JOIN, NONE }
 
+/** 카드 2줄의 색조 — 데스크톱 카드의 `SubIsMe`(내 발언)·`SubIsWarn`(거부·회수). */
+enum class SubTone { NORMAL, ME, WARN }
+
 /** 내 채널 카드 한 장 — 도메인 카드에서 잘라낸 표시용 값(Preview·시험이 이것만으로 그린다). */
 data class MineCardUi(
     val id: String,
     /**
      * 1줄 — «핀 번호. 이름». 핀 번호는 내 채널 안의 **고정 순서**(데스크톱 ① 핀 번호, dispatch_desktop_ui.md §4.1 — 진행 중이라고
-     * 위로 올리지 않는다). 개별 통화는 이름 앞에 종류를 붙인다(«4. 개별 · 김반장», 애드혹은 이름이 이미 «애드혹 3인»).
+     * 위로 올리지 않는다). 종류·상태는 이름 뒤의 라벨([kindTag]·[broadcast]·긴급·임박)이 말한다.
      */
     val title: String,
     /** 채널 이름만 — 접근성 라벨이 쓴다(«순찰1 발언 대상»). */
     val name: String = title,
-    /** 2줄 — 발언자·사유(«발언 김관제 00:14»·«발언 없음»·«대기 · 멤버 12»). 긴급·임박·일제는 앞에 그 낱말. */
+    /** 2줄 — 발언자·사유(«발언 김관제 00:14»·«발언 없음»·«대기 · 멤버 12»). 일제 통화면 앞에 그 낱말. */
     val sub: String = "",
+    /** 2줄의 색조 — 내 발언(녹색 굵게) · floor 거부·회수(빨강) · 그 밖. */
+    val subTone: SubTone = SubTone.NORMAL,
+    /** 1줄 종류 라벨 — «개별»·«애드혹»(멤버 그룹은 빈 값). */
+    val kindTag: String = "",
+    /** 1줄 «일제» 라벨 — 일제 통화 세션(TS 24.379 §4.12). */
+    val broadcast: Boolean = false,
+    /** 참여 중 — 상태 점이 남색이다. */
+    val joined: Boolean = false,
     /** 3줄 — 접속자 미리보기(«김관제 · 이당직 · 박현장 +4»·«미참여»). */
     val roster: String = "",
     /** 4줄 왼쪽 — «참가 7 · 12:31»(참여 전이면 비고 [참여]·[긴급] 이 선다). */
@@ -97,6 +109,12 @@ data class MineCardUi(
     val on: Boolean = false,
     /** 오른쪽 패널에 열려 있다. */
     val selected: Boolean = false,
+    /** 1줄 «영상 n» — 그 영상 채널(MCVideo)에 영상을 보내는 중인 사람 수. 0 이면 태그가 없다(`withVideo`, §6.14). */
+    val videoCount: Int = 0,
+    /** 그 영상을 보고 있다 — 태그가 굵다. */
+    val videoWatching: Boolean = false,
+    /** 이 채널에 **내가 영상을 보내는 중**이다 — 채널 상세를 닫아도 카드가 말한다(카메라가 나가는데 화면에 흔적이 없지 않게). */
+    val videoSending: Boolean = false,
 )
 
 /**
@@ -113,12 +131,15 @@ internal fun ChannelCard.toCardUi(
 ): MineCardUi {
     // 참여하지 않은 멤버 그룹 — 시안 «3. 교통1 / 대기 · 멤버 12 / 미참여 / [참여] [긴급]».
     val waiting = kind == CardKind.MEMBER && !joined
-    val named = if (kind == CardKind.MEMBER || title.startsWith(badge)) title else "$badge · $title"
+    val named = title
     val base = when {
-        waiting -> listOf(if (group?.hasSession == true) "진행 중" else "대기", line2).filter { it.isNotEmpty() }.joinToString(" · ")
+        // 미참여 멤버 그룹 — 진행 중이면 참가 수, 대기면 멤버 수와 마지막 세션이 끝난 때(데스크톱 «세션 진행 중 · 참가 n» / «대기 · 마지막 hh:mm»)
+        waiting && group?.hasSession == true -> "진행 중 · 참가 ${group.connectedCount}"
+        waiting -> listOfNotNull("대기", line2.takeIf { it.isNotEmpty() },
+            group?.lastSessionEndMs?.let { "마지막 " + java.text.SimpleDateFormat("HH:mm", java.util.Locale.ROOT).format(java.util.Date(it)) })
+            .joinToString(" · ")
         else -> line2.ifEmpty { if (joined) "발언 없음" else "" }
     }
-    val state = listOfNotNull("긴급".takeIf { emergency }, "임박".takeIf { imminentPeril && !emergency })
     val roster = when {
         waiting -> "미참여"
         kind == CardKind.PRIVATE -> title                          // 상대 — 시안 «김반장»
@@ -145,7 +166,13 @@ internal fun ChannelCard.toCardUi(
     }
     return MineCardUi(
         id = id, title = if (pin > 0) "$pin. $named" else named, name = title,
-        sub = (state + base).filter { it.isNotEmpty() }.joinToString(" · "),
+        sub = base,
+        subTone = when {
+            speaking -> SubTone.ME
+            joined && speaker.isEmpty() && floorNote.isNotEmpty() && !queued && !requesting -> SubTone.WARN
+            else -> SubTone.NORMAL
+        },
+        kindTag = if (kind == CardKind.MEMBER) "" else badge, broadcast = isBroadcast, joined = joined,
         roster = roster, meta = meta,
         unread = unread, emergency = emergency, peril = imminentPeril && !emergency,
         speaking = speaking || speaker.isNotEmpty(), active = hasSession,
@@ -176,11 +203,14 @@ fun ChannelsPane(
     val filter by scoped.filter.collectAsStateWithLifecycle()
     val query by scoped.query.collectAsStateWithLifecycle()
     val listenText by scoped.listenText.collectAsStateWithLifecycle()
+    val videos by channels.videoCalls.collectAsStateWithLifecycle()       // 카드 «영상 n»(§6.14)
+    val tick by channels.tick.collectAsStateWithLifecycle()
+    @Suppress("UNUSED_EXPRESSION") tick     // 1초 틱을 이 조합에 묶는다 — 카드의 경과·발언 시간이 이벤트 없이도 간다
 
     ChannelsPaneContent(
         mine = mine.mapIndexed { i, c ->
             c.toCardUi(pin = i + 1, targeted = c.id in targets, selected = c.id == selectedId,
-                me = channels.myPttNumber, nameOf = channels::nameOf)
+                me = channels.myPttNumber, nameOf = channels::nameOf).withVideo(videos)
         },
         other = scopedCards.map { it.toRowUi() },
         selectedId = selectedId,
@@ -282,12 +312,14 @@ private fun MineCard(
 ) {
     val p = Tokens.palette
     val shape = RoundedCornerShape(10.dp)
-    // 테두리 — 기본 1 옅은 선, 열림 2.5 검정 + 회색 면(시안 E2), 긴급·임박 2 그 색 + 옅은 면(데스크톱 §4.1 «카드 테두리 빨강/주황»).
-    val (bw, line, bg) = when {
-        c.emergency -> Triple(2.dp, p.emergency, p.emergencyFill)
-        c.peril -> Triple(2.dp, p.peril, p.peril.copy(alpha = 0.10f))
-        c.selected -> Triple(2.5.dp, p.ink, p.bar)
-        else -> Triple(1.dp, p.line, p.paper)
+    // 테두리 — 기본 1 옅은 선, 고른 카드 2.5 남색 + 연한 남색 면, 긴급 2 빨강 + 연한 빨강 면, 임박 2 주황 + 연한 주황 면
+    //   (데스크톱 §4 «채널 카드» 와 같은 토큰). 고른 긴급·임박 카드는 면은 그 색, 테두리는 남색이다.
+    val bg = when { c.emergency -> p.emgSoft; c.peril -> p.ringSoft; c.selected -> p.primarySoft; else -> p.paper }
+    val (bw, line) = when {
+        c.selected -> 2.5.dp to p.primaryLine
+        c.emergency -> 2.dp to p.emg
+        c.peril -> 2.dp to p.peril
+        else -> 1.dp to p.line
     }
     // 시안은 border-box — 안쪽 여백이 **테두리 안에서** 잰 값이다(위 10 · 오른쪽 10 · 아래 8 · 왼쪽 12).
     Column(
@@ -295,15 +327,29 @@ private fun MineCard(
             .padding(start = 12.dp + bw, end = 10.dp + bw, top = 10.dp + bw, bottom = 8.dp + bw),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            StatusDot(dotColor(c.emergency, c.peril, c.speaking, c.active))
-            Text(c.title, style = CardTitle, color = p.ink, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f))
+            StatusDot(dotColor(c.emergency, c.peril, c.joined, c.active))
+            // 이름은 남는 폭을 다 쓰고(길면 줄인다) 라벨은 이름 바로 뒤에 붙는다 — 미읽음 수만 오른쪽 끝.
+            Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                Text(c.title, style = CardTitle, color = p.ink, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false))
+                // 라벨 — 종류(개별·애드혹) · 일제 · 긴급 · 임박(데스크톱 카드 1줄과 같은 낱말·같은 색).
+                if (c.kindTag.isNotEmpty()) Label(c.kindTag)
+                if (c.broadcast) Label("일제", LabelStyle.INK)
+                if (c.emergency) Label("긴급", LabelStyle.EMG)
+                if (c.peril) Label("임박", LabelStyle.PERIL)
+                // «영상 n» — 청록(보고 듣는 축), 보고 있으면 굵게. 조작은 채널 상세 «영상» 절에 있다(카드 = 조작 하나).
+                if (c.videoCount > 0) Label("영상 ${c.videoCount}", LabelStyle.TEAL, bold = c.videoWatching)
+                if (c.videoSending) Label("영상 보내는 중", LabelStyle.EMG, bold = true)
+            }
             CountPill(c.unread)
         }
         val indent = Modifier.padding(start = 17.dp)
         if (c.sub.isNotEmpty()) {
             Spacer(Modifier.height(4.dp))
-            Text(c.sub, indent, style = CardSub, color = p.ink2, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(c.sub, indent, style = CardSub, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                fontWeight = if (c.subTone == SubTone.ME) FontWeight.Bold else FontWeight.Normal,
+                color = when (c.subTone) { SubTone.ME -> p.talkInk; SubTone.WARN -> p.emg; SubTone.NORMAL -> p.ink2 })
         }
         if (c.roster.isNotEmpty()) {
             Spacer(Modifier.height(4.dp))
@@ -313,24 +359,24 @@ private fun MineCard(
         Row(indent, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             if (c.control == CardControl.JOIN) {
                 // 참여 전 — 시안이 4줄 왼쪽에 [참여]·[긴급] 을 둔다. 오른쪽 ✓ 도 참여다(참여는 곧 단일 발언 대상 — `join`).
-                PillButton("참여", onJoin, height = 30.dp, filled = true)
-                PillButton("긴급", onJoinEmergency, height = 30.dp, color = p.emergency)
+                PillButton("참여", onJoin, height = 30.dp, kind = Pill.INK)
+                PillButton("긴급", onJoinEmergency, height = 30.dp, kind = Pill.RED)
                 Spacer(Modifier.weight(1f))
             } else Text(c.meta, style = CardMeta, color = p.muted, maxLines = 1, overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f))
             when (c.control) {
                 CardControl.TARGET -> RoundToggle(on = c.on, onClick = onControl,
                     label = if (c.on) "${c.name} 발언 대상 해제" else "${c.name} 발언 대상") {
-                    CheckMark(if (c.on) p.onInk else p.faint)
+                    CheckMark(if (c.on) p.onPrimary else p.faint)
                 }
                 CardControl.JOIN -> RoundToggle(on = false, onClick = onJoin, label = "${c.name} 참여하고 발언 대상") {
                     CheckMark(p.faint)
                 }
                 // 음소거 — 켜지면 경고색으로 채운다(«말하고 있다고 믿는데 안 나가는» 상태를 놓치지 않게).
-                CardControl.MUTE -> RoundToggle(on = c.on, onClick = onControl, onColor = p.emergency,
+                CardControl.MUTE -> RoundToggle(on = c.on, onClick = onControl, onColor = p.emgFill,
                     label = if (c.on) "${c.name} 음소거 풀기" else "${c.name} 음소거") {
                     Icon(if (c.on) Icons.Filled.MicOff else Icons.Filled.Mic, contentDescription = null,
-                        modifier = Modifier.size(18.dp), tint = if (c.on) p.onInk else p.ink)
+                        modifier = Modifier.size(18.dp), tint = if (c.on) p.onAccent else p.ink2)
                 }
                 CardControl.NONE -> Unit
             }
@@ -338,13 +384,13 @@ private fun MineCard(
     }
 }
 
-/** 둥근 토글(36) — 발언 대상 ✓·음소거. 켜지면 면을 채운다(시안 테두리 1.5 · 꺼짐 옅은 선). */
+/** 둥근 토글(36) — 발언 대상 ✓·음소거. 켜지면 면을 채운다(✓ = 남색, 음소거 중 = 빨강 — 데스크톱 `TargetCheck`·`RoundBtn`). */
 @Composable
 private fun RoundToggle(
     on: Boolean,
     onClick: () -> Unit,
     label: String,
-    onColor: Color = Tokens.palette.ink,
+    onColor: Color = Tokens.palette.primary,
     icon: @Composable () -> Unit,
 ) {
     val p = Tokens.palette
@@ -372,11 +418,11 @@ private fun AddChannelTile(open: Boolean, onClick: () -> Unit) {
     val p = Tokens.palette
     Column(
         Modifier.height(120.dp).fillMaxWidth().clip(RoundedCornerShape(10.dp))
-            .background(if (open) p.bar else Color.Transparent)
+            .background(if (open) p.primarySoft else Color.Transparent)
             .clickable(onClickLabel = if (open) "채널 추가 닫기" else "채널 추가", onClick = onClick)
             .drawBehind {
                 val w = (if (open) 2.5.dp else 1.5.dp).toPx()
-                drawRoundRect(if (open) p.ink else p.faint, topLeft = Offset(w / 2, w / 2),
+                drawRoundRect(if (open) p.primaryLine else p.faint, topLeft = Offset(w / 2, w / 2),
                     size = androidx.compose.ui.geometry.Size(size.width - w, size.height - w),
                     cornerRadius = CornerRadius(10.dp.toPx()),
                     style = Stroke(width = w, pathEffect = PathEffect.dashPathEffect(floatArrayOf(4.5.dp.toPx(), 4.5.dp.toPx()))))
@@ -409,7 +455,7 @@ private fun OtherColumn(
         val twoCols = maxWidth >= 560.dp
         Column(Modifier.fillMaxSize()) {
             SectionHead("타 채널") {
-                Label("청취 가능", LabelStyle.OUTLINE, round = true)
+                Label("청취 가능", LabelStyle.LISTEN)
                 Text("${other.size}", fontSize = Type.title, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.weight(1f))
                 if (listenText.isNotEmpty() && twoCols) Text(listenText, fontSize = Type.meta, color = p.muted)
@@ -462,26 +508,28 @@ private fun OtherRow(
     val p = Tokens.palette
     val shape = RoundedCornerShape(8.dp)
     val bg = when {
-        o.emergency -> p.emergencyFill
-        o.imminentPeril -> p.peril.copy(alpha = 0.10f)
+        o.emergency -> p.emgSoft
+        o.imminentPeril -> p.ringSoft
         selected -> p.fill
         else -> p.paper
     }
     val base = Modifier.fillMaxWidth().height(64.dp)
     val framed = if (card) base.clip(shape).background(bg)
-            .border(if (selected) 2.dp else 1.dp, if (selected) p.ink else p.divider, shape)
+            .border(if (selected) 2.dp else 1.dp, if (selected) p.primaryLine else p.divider, shape)
         else base.background(bg).drawBehind { drawLine(p.hair, Offset(0f, 0f), Offset(size.width, 0f), 1.dp.toPx()) }
     Row(
         framed.clickable(onClick = onOpen).padding(start = if (card) 14.dp else 16.dp, end = if (card) 10.dp else 12.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        StatusDot(dotColor(o.emergency, o.imminentPeril, o.speaking, o.active || o.listening == true))
-        TwoLines(o.title, o.subtitle, Modifier.weight(1f))
-        if (o.emergency) Label("긴급", LabelStyle.STRONG, color = p.emergency)
-        else if (o.imminentPeril) Label("임박", LabelStyle.STRONG, color = p.peril)
         val on = o.listening == true
-        PillButton(if (on) "청취 중" else "청취", onToggleListen, height = 34.dp, filled = on, strongBorder = !on)
+        StatusDot(dotColor(o.emergency, o.imminentPeril, joined = false, active = o.active, listening = on))
+        TwoLines(o.title, o.subtitle, Modifier.weight(1f))
+        if (o.emergency) Label("긴급", LabelStyle.EMG)
+        else if (o.imminentPeril) Label("임박", LabelStyle.PERIL)
+        // 청취 = 청록 외곽선, 청취 중 = 청록 채움(누르면 청취 종료). 세션 없는 그룹은 들을 것이 없어 흐리다.
+        PillButton(if (on) "청취 중" else "청취", onToggleListen, height = 32.dp,
+            kind = if (on) Pill.LISTEN_FILL else Pill.LISTEN_LINE, enabled = on || o.active)
     }
 }
 
@@ -492,9 +540,9 @@ internal fun SearchField(value: String, onValue: (String) -> Unit, hint: String,
     BasicTextField(
         value = value, onValueChange = onValue, singleLine = true,
         textStyle = TextStyle(fontSize = Type.body, color = p.ink),
-        cursorBrush = SolidColor(p.ink),
-        modifier = modifier.fillMaxWidth().height(40.dp).clip(RoundedCornerShape(6.dp))
-            .border(1.dp, p.line, RoundedCornerShape(6.dp)).background(p.paper),
+        cursorBrush = SolidColor(p.primaryLine),
+        modifier = modifier.fillMaxWidth().height(40.dp).clip(RoundedCornerShape(8.dp))
+            .border(1.dp, p.edge, RoundedCornerShape(8.dp)).background(p.paper),
         decorationBox = { inner ->
             Box(Modifier.fillMaxSize().padding(horizontal = 12.dp), contentAlignment = Alignment.CenterStart) {
                 if (value.isEmpty()) Text(hint, fontSize = Type.body, color = p.faint)

@@ -53,7 +53,7 @@ internal fun rosterPreview(
             label = nameOf(num).ifBlank { num },
             speaking = speakerKey.isNotEmpty() && key == speakerKey,
             isMe = meKey.isNotEmpty() && key == meKey)
-    }
+    }.distinctBy { DirectoryBook.normalize(it.number).ifEmpty { it.number } }      // 같은 사람이 두 URI 꼴(tel:·sip:)로 와도 한 칩 — 목록 키가 번호다
     // 발언자 → 나 → 나머지(서버 순서). 안정 정렬이라 같은 등급끼리는 순서가 유지된다.
     val ordered = all.sortedBy { if (it.speaking) 0 else if (it.isMe) 1 else 2 }
     val shown = ordered.take(max.coerceAtLeast(1))

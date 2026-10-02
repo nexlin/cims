@@ -1,4 +1,4 @@
-// [이력] 화면의 순수 로직 — 날짜 창·시간대 밴드·검색·발언 막대 (dispatch_desktop_ui.md §4.6)
+// [이력] 화면의 순수 로직 — 날짜 창·시간대 밴드·검색·발언 턴·문구 사전 (dispatch_desktop_ui.md §4.6)
 package com.cims.ue.dispatch
 
 import com.cims.ue.dispatch.session.HistoryEntry
@@ -7,7 +7,19 @@ import com.cims.ue.dispatch.session.RecordingInfo
 import com.cims.ue.dispatch.session.RecordingSegment
 import com.cims.ue.dispatch.session.SegmentTrack
 import com.cims.ue.dispatch.session.SpeakerSpan
+import com.cims.ue.dispatch.ui.history.HistoryNames
 import com.cims.ue.dispatch.ui.history.HistoryViewModel
+import com.cims.ue.dispatch.ui.history.axisStepSec
+import com.cims.ue.dispatch.ui.history.denyReasonText
+import com.cims.ue.dispatch.ui.history.endReasonText
+import com.cims.ue.dispatch.ui.history.eventTypeText
+import com.cims.ue.dispatch.ui.history.floorOpText
+import com.cims.ue.dispatch.ui.history.fmtDur
+import com.cims.ue.dispatch.ui.history.fmtSpeech
+import com.cims.ue.dispatch.ui.history.matches
+import com.cims.ue.dispatch.ui.history.mmss
+import com.cims.ue.dispatch.ui.history.rowOf
+import com.cims.ue.dispatch.ui.history.turnsOf
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -45,16 +57,23 @@ class HistoryLogicTest {
     }
 
     @Test fun `검색 — 상대·그룹·참여자에 걸린다`() {
-        val e = entry("a", 9, from = "tel:+821011112222", group = "tel:g003",
-                      people = listOf("tel:1001", "김순경"))
-        assertTrue(HistoryViewModel.matches(e, ""))
-        assertTrue(HistoryViewModel.matches(e, "1111"))
-        assertTrue(HistoryViewModel.matches(e, "g003"))
-        assertTrue(HistoryViewModel.matches(e, "김순경"))
-        assertFalse(HistoryViewModel.matches(e, "없는번호"))
+        val row = rowOf(entry("a", 9, from = "tel:+821011112222", group = "tel:g003", people = listOf("tel:1001", "김순경")))
+        assertTrue(matches(row, ""))
+        assertTrue(matches(row, "1111"))
+        assertTrue(matches(row, "g003"))
+        assertTrue(matches(row, "김순경"))
+        assertFalse(matches(row, "없는번호"))
     }
 
-    @Test fun `발언 막대 — 트랙의 화자 구간이 턴의 원자다`() {
+    @Test fun `검색 — 주소록 이름과 번호의 다른 표기에도 걸린다`() {
+        val names = HistoryNames(who = { if (it.contains("11112222")) "박현장" else it })
+        val row = rowOf(entry("a", 9, from = "tel:+821011112222"), names)
+        assertTrue("이름으로 찾는다", matches(row, "박현장"))
+        assertTrue("국내 표기로 쳐도 E.164 로 저장된 번호에 걸린다", matches(row, "01011112222"))
+        assertFalse(matches(row, "01099998888"))
+    }
+
+    @Test fun `발언 턴 — 트랙의 화자 구간이 턴의 원자다`() {
         val rec = RecordingInfo(
             id = "r", startAtMs = at(9),
             segments = listOf(
@@ -63,73 +82,71 @@ class HistoryLogicTest {
                     SegmentTrack(1, speakers = listOf(SpeakerSpan("1002", 1000, 900))))),
                 RecordingSegment(seq = 2, startAtMs = at(9, 1), durationMs = 2000, speakerId = "1003")))
 
-        val turns = HistoryViewModel.turnsOf(rec)
+        val turns = turnsOf(rec)
         assertEquals(3, turns.size)
-        // 세션 시작 기준으로 옮겨 한 축에 놓는다
-        assertEquals(listOf(0, 1000, 60_000), turns.map { it.offsetMs })
+        // 벽시계 시각으로 한 축에 놓는다
+        assertEquals(listOf(0L, 1000L, 60_000L), turns.map { it.startMs - at(9) })
+        assertEquals(listOf(4000, 900, 2000), turns.map { it.durMs })
         assertEquals(listOf("1001", "1002", "1003"), turns.map { it.speaker })
-        // 재생은 (seq, slot) 로 건다 — 트랙 없는 세그먼트는 믹스(null)
-        assertEquals(listOf(0, 1, null), turns.map { it.slot })
+        assertEquals(listOf(0, 1, 0), turns.map { it.slot })
+        // 세그먼트에 턴이 여럿이면(동시 발언) multi — 트랙 없는 세그먼트는 그 자체가 한 턴이다
+        assertEquals(listOf(true, true, false), turns.map { it.multi })
     }
 
-    @Test fun `발언 막대 — 시작 시각이 없으면 빈 목록`() {
-        assertTrue(HistoryViewModel.turnsOf(RecordingInfo(id = "r")).isEmpty())
+    @Test fun `발언 턴 — 음성 없이 영상만 있는 송출 구간은 영상 트랙에서 읽는다`() {
+        val rec = RecordingInfo(id = "r", segments = listOf(
+            RecordingSegment(seq = 1, type = "mcvideo", startAtMs = at(9), durationMs = 5000, tracks = listOf(
+                SegmentTrack(0, "audio", listOf(SpeakerSpan("1001", 0, 5000))),
+                SegmentTrack(0, "video", listOf(SpeakerSpan("1001", 0, 5000))))),
+            RecordingSegment(seq = 2, type = "mcvideo", startAtMs = at(9, 1), durationMs = 3000, speakerId = "1002", tracks = listOf(
+                SegmentTrack(0, "video", listOf(SpeakerSpan("", 0, 3000)))))))
+        val turns = turnsOf(rec)
+        assertEquals("음성 트랙이 있으면 영상 트랙은 따로 세지 않는다", 2, turns.size)
+        assertEquals("화자가 비면 세그먼트의 대표 화자", listOf("1001", "1002"), turns.map { it.speaker })
+    }
+
+    @Test fun `발언 턴 — 녹음 중인 세그먼트는 아직 틀 수 없고 시작 시각이 없으면 뺀다`() {
+        val rec = RecordingInfo(id = "r", segments = listOf(
+            RecordingSegment(seq = 1, startAtMs = at(9), durationMs = 1000, speakerId = "1001", status = "recording"),
+            RecordingSegment(seq = 2, durationMs = 1000, speakerId = "1002")))
+        val turns = turnsOf(rec)
+        assertEquals(1, turns.size)
+        assertFalse(turns[0].playable)
+        assertTrue(turnsOf(RecordingInfo(id = "r")).isEmpty())
     }
 
     @Test fun `문구 사전 — 데스크톱과 같은 문장`() {
-        assertEquals("무응답", HistoryViewModel.endReasonText("no_answer"))
-        assertEquals("비정상 종료", HistoryViewModel.endReasonText("incomplete"))
-        assertEquals("알수없음", HistoryViewModel.endReasonText("알수없음"))   // 모르는 값은 그대로
-        assertEquals("1:1", HistoryViewModel.sessionKindText("private"))
-        assertEquals("영상", HistoryViewModel.callTypeText("volte_video"))
-        assertEquals("발언권 회수", HistoryViewModel.floorOpText("revoke"))
-        assertEquals("입장", HistoryViewModel.eventTypeText("member_join"))
-        assertEquals("대기열 가득참", HistoryViewModel.denyReasonText("queue_full"))
-    }
-}
-
-/**
- * 발언 타임라인의 픽셀 위치 — **긴 세션에서 Int 오버플로로 죽지 않아야 한다.**
- *
- * `widthDp * offsetMs` 를 Int 로 곱하면 640 × 3,360,000(56분)에서 이미 Int.MAX 를 넘어 음수가 된다.
- * 음수 padding 은 Compose 가 예외로 거절하므로, 한 시간 넘는 세션을 **여는 것만으로** 앱이 죽었다.
- */
-class TimelinePosTest {
-
-    private val W = 640
-
-    @Test fun `한 시간 넘는 세션에서도 음수가 되지 않는다`() {
-        listOf(30, 56, 60, 120, 480).forEach { minutes ->
-            val off = minutes * 60 * 1000
-            val x = com.cims.ue.dispatch.ui.history.barPos(W, off, off + 3000)
-            assertTrue("$minutes 분 지점이 음수다: $x", x >= 0)
-            assertTrue("$minutes 분 지점이 폭을 넘었다: $x", x <= W)
-        }
+        assertEquals("무응답", endReasonText("no_answer"))
+        assertEquals("비정상 종료(기록 없음)", endReasonText("incomplete"))
+        assertEquals("—", endReasonText(""))
+        assertEquals("알수없음", endReasonText("알수없음"))   // 모르는 값은 그대로
+        assertEquals("회수 통지", floorOpText("revoke"))
+        assertEquals("발언 종료", floorOpText("RELEASE"))
+        assertEquals("입장", eventTypeText("member_join"))
+        assertEquals("수신전용(ambient)", denyReasonText("recv_only"))
     }
 
-    @Test fun `비율이 맞는다`() {
-        assertEquals(0, com.cims.ue.dispatch.ui.history.barPos(W, 0, 1000))
-        assertEquals(W / 2, com.cims.ue.dispatch.ui.history.barPos(W, 500, 1000))
-        assertEquals(W, com.cims.ue.dispatch.ui.history.barPos(W, 1000, 1000))
-    }
-
-    @Test fun `전체 길이가 0 이어도 죽지 않는다`() {
-        assertEquals(0, com.cims.ue.dispatch.ui.history.barPos(W, 100, 0))
-        assertEquals(0, com.cims.ue.dispatch.ui.history.barPos(W, 100, -5))
-    }
-
-    @Test fun `값이 전체를 넘어도 폭 안으로 가둔다`() {
-        assertEquals(W, com.cims.ue.dispatch.ui.history.barPos(W, 5000, 1000))
+    @Test fun `길이·발화 시간·재생 위치 표기`() {
+        assertEquals("—", fmtDur(0))
+        assertEquals("42초", fmtDur(42))
+        assertEquals("2분 40초", fmtDur(160))
+        assertEquals("0초", fmtSpeech(0))
+        assertEquals("3.5초", fmtSpeech(3500))
+        assertEquals("9초", fmtSpeech(9000))
+        assertEquals("12초", fmtSpeech(12_400))
+        assertEquals("1분 1초", fmtSpeech(61_000))
+        assertEquals("00:30", mmss(30_000))
+        assertEquals("02:40", mmss(160_000))
+        assertEquals("음수는 0 으로", "00:00", mmss(-5))
     }
 
     // ── 타임라인 배율 — 눈금 간격(데스크톱 `RebuildAxisTicks` 와 같은 규칙) ──
     @Test fun `배율을 올리면 눈금이 촘촘해진다 — 대여섯 개가 보이게`() {
         val hour = 3_600_000
-        assertEquals(600, com.cims.ue.dispatch.ui.history.axisStepSec(hour, 1f))     // 1시간 ÷ 6 = 10분
-        assertEquals(10, com.cims.ue.dispatch.ui.history.axisStepSec(hour, 64f))     // ×64 → 9.4초 → 10초
-        assertEquals(1, com.cims.ue.dispatch.ui.history.axisStepSec(3_000, 1f))      // 짧은 세션은 1초
-        assertEquals(3600, com.cims.ue.dispatch.ui.history.axisStepSec(100 * hour, 1f))  // 가장 큰 간격에서 멈춘다
-        assertEquals("×1 아래로는 내려가지 않는다",
-            com.cims.ue.dispatch.ui.history.axisStepSec(hour, 1f), com.cims.ue.dispatch.ui.history.axisStepSec(hour, 0.5f))
+        assertEquals(600, axisStepSec(hour, 1f))     // 1시간 ÷ 6 = 10분
+        assertEquals(10, axisStepSec(hour, 64f))     // ×64 → 9.4초 → 10초
+        assertEquals(1, axisStepSec(3_000, 1f))      // 짧은 세션은 1초
+        assertEquals(3600, axisStepSec(100 * hour, 1f))  // 가장 큰 간격에서 멈춘다
+        assertEquals("×1 아래로는 내려가지 않는다", axisStepSec(hour, 1f), axisStepSec(hour, 0.5f))
     }
 }

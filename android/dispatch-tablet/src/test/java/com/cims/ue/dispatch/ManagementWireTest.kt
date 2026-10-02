@@ -46,6 +46,18 @@ class ManagementWireTest {
         assertEquals("pg1", m.ptt?.pickupGroup)               // snake_case 대체 이름도 읽는다
     }
 
+    @Test fun `접속서비스 후보의 글자 — 도메인이 있으면 괄호로 붙인다`() {
+        val v = ManagementClient.parseAdminView(JSONObject("""
+            {"services":{"voip":[{"name":"voip-desk","domain":"ims.example.org"},{"name":"voip-b"}]}}
+        """.trimIndent()), "")
+        assertEquals(listOf("voip-desk (ims.example.org)", "voip-b"), v.servicesOf(LineKind.VOIP).map { it.label })
+    }
+
+    @Test fun `회선 카드의 제목과 보조 글자`() {
+        assertEquals(listOf("VoLTE 번호", "VoIP 번호", "PTT 번호"), LineKind.all.map(LineKind::label))
+        assertEquals(listOf("이동", "유선", ""), LineKind.all.map(LineKind::note))
+    }
+
     @Test fun `전환기 서버의 directoryAdmin 도 관리 범위로 읽는다`() {
         val v = ManagementClient.parseAdminView(JSONObject("""{"scope":{"directoryAdmin":"own"}}"""), "")
         assertEquals("own", v.scope.directoryWrite)

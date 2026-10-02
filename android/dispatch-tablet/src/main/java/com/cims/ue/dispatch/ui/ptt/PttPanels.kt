@@ -23,6 +23,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AttachFile
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -40,6 +43,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.cims.ue.dispatch.session.ActivityKind
 import com.cims.ue.dispatch.session.AlertKind
+import com.cims.ue.dispatch.session.FileRules
 import com.cims.ue.dispatch.session.SendState
 import com.cims.ue.dispatch.ui.AlertBannerUi
 import com.cims.ue.dispatch.ui.CountPill
@@ -48,6 +52,7 @@ import com.cims.ue.dispatch.ui.HDivider
 import com.cims.ue.dispatch.ui.Initial
 import com.cims.ue.dispatch.ui.Label
 import com.cims.ue.dispatch.ui.LabelStyle
+import com.cims.ue.dispatch.ui.Pill
 import com.cims.ue.dispatch.ui.PillButton
 import com.cims.ue.dispatch.ui.RecipientPicker
 import com.cims.ue.dispatch.ui.SectionHead
@@ -87,12 +92,19 @@ internal fun Messages(vm: PttMessagesViewModel, onChannelInfo: (String) -> Unit 
         onPick = { k -> vm.openTo(k); picking = false },
         onDismiss = { picking = false })
 
+    // 파일(FD) — [📎] 는 시스템 파일 고르개를 연다(여러 개 고를 수 있다). 고른 것은 그때의 대화로 차례로 나간다.
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val pick = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.OpenMultipleDocuments()) { uris -> vm.attach(context, uris) }
+
     MessagesContent(
         thread = thread, title = title, follow = follow, groupId = groupId, threads = threads,
         isGroup = isGroup, members = info?.memberCount ?: 0, online = info?.connectedCount ?: 0,
         onToggleFollow = vm::toggleFollow, onPickThread = vm::pickThread,
         onSend = vm::send, onResend = vm::resend, onNew = { picking = true },
-        onChannelInfo = onChannelInfo)
+        onChannelInfo = onChannelInfo,
+        onAttach = { pick.launch(arrayOf("*/*")) },
+        onDownload = { m -> vm.download(context, m) }, onOpenFile = { m -> vm.open(context, m) })
 }
 
 /** 대화 목록 거르기. */
@@ -120,15 +132,21 @@ fun MessagesContent(
     onResend: (Message) -> Unit = {},
     onNew: () -> Unit = {},
     onChannelInfo: (String) -> Unit = {},
+    /** 입력줄 [📎] — 보낼 파일 고르기(MCData FD). */
+    onAttach: () -> Unit = {},
+    /** 받은 파일 말풍선의 [받기]. */
+    onDownload: (Message) -> Unit = {},
+    /** 파일 말풍선의 이름·[열기] — 안 받은 수신 파일이면 받기부터. */
+    onOpenFile: (Message) -> Unit = {},
 ) {
     val p = Tokens.palette
     var tf by remember { mutableStateOf(ThreadFilter.ALL) }
-    val shown = remember(threads, tf) {
+    val shown = remember(threads, tf, groupId) {
         threads.filter { t -> when (tf) {
             ThreadFilter.ALL -> true
             ThreadFilter.GROUP -> t.group
             ThreadFilter.DIRECT -> !t.group
-            ThreadFilter.UNREAD -> t.unread > 0
+            ThreadFilter.UNREAD -> t.unread > 0 || t.key == groupId     // 고른 대화는 읽음이 돼도 목록에 남는다
         } }
     }
     Row(Modifier.fillMaxSize()) {
@@ -138,9 +156,9 @@ fun MessagesContent(
                 Spacer(Modifier.weight(1f))
                 // 따라가기 = 포커스 채널로 자동 전환. 끄면 고른 대화에 머문다(§6.9a).
                 PillButton(if (follow) "따라가기 ✓" else "따라가기", onToggleFollow, height = 32.dp)
-                PillButton("＋ 새 대화", onNew, height = 32.dp, strongBorder = true)
+                PillButton("＋ 새 대화", onNew, height = 32.dp, kind = Pill.LINE)
             }
-            val unreadTotal = threads.count { it.unread > 0 }
+            val unreadTotal = threads.sumOf { it.unread }             // 안 읽은 메시지 합(대화 수가 아니다 — 데스크톱과 같다)
             Row(Modifier.padding(start = 16.dp, end = 16.dp, bottom = 8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 ThreadFilter.entries.forEach { f ->
                     FilterPill(if (f == ThreadFilter.UNREAD && unreadTotal > 0) "${f.label} $unreadTotal" else f.label,
@@ -162,7 +180,7 @@ fun MessagesContent(
                     horizontalAlignment = Alignment.CenterHorizontally) {
                     Text("대화를 고르세요", fontSize = Type.body, color = p.muted)
                     Spacer(Modifier.height(8.dp))
-                    PillButton("＋ 새 대화", onNew, strongBorder = true)
+                    PillButton("＋ 새 대화", onNew, kind = Pill.LINE)
                 }
                 return@Column
             }
@@ -177,7 +195,7 @@ fun MessagesContent(
                 Text(title, fontSize = Type.head, fontWeight = FontWeight.Bold, maxLines = 1,
                     overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 360.dp))
                 if (isGroup) {
-                    Label(if (members > 0) "그룹 전원 · 편성 $members" else "그룹 전원", LabelStyle.STRONG, round = true)
+                    Label(if (members > 0) "그룹 전원 · 편성 $members" else "그룹 전원", LabelStyle.INK, round = true)
                     if (online > 0) Text("접속 $online", fontSize = Type.meta, color = p.muted)
                 } else Label("1:1", LabelStyle.OUTLINE, round = true)
                 Spacer(Modifier.weight(1f))
@@ -199,7 +217,10 @@ fun MessagesContent(
                             Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) { Label(day, LabelStyle.OUTLINE, round = true) }
                         }
                     }
-                    item(key = m.id) { Bubble(m, showName = isGroup, onResend = { onResend(m) }) }
+                    item(key = m.id) {
+                        Bubble(m, showName = isGroup, onResend = { onResend(m) },
+                            onOpenFile = { onOpenFile(m) }, onDownload = { onDownload(m) })
+                    }
                 }
             }
             var draft by remember(groupId) { mutableStateOf("") }
@@ -214,13 +235,14 @@ fun MessagesContent(
             Row(Modifier.fillMaxWidth().height(68.dp).padding(horizontal = 20.dp),
                 verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 val send = { if (draft.isNotBlank()) { onSend(draft); draft = "" } }
+                AttachButton(onAttach)
                 BasicTextField(
                     value = draft, onValueChange = { draft = it }, singleLine = true,
-                    textStyle = TextStyle(fontSize = Type.strong, color = p.ink), cursorBrush = SolidColor(p.ink),
+                    textStyle = TextStyle(fontSize = Type.strong, color = p.ink), cursorBrush = SolidColor(p.primaryLine),
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
                     keyboardActions = KeyboardActions(onSend = { send() }),
                     modifier = Modifier.weight(1f).height(44.dp).clip(RoundedCornerShape(22.dp))
-                        .border(1.5.dp, p.ink, RoundedCornerShape(22.dp)).background(p.paper),
+                        .border(1.5.dp, p.edge, RoundedCornerShape(22.dp)).background(p.paper),
                     decorationBox = { inner ->
                         Box(Modifier.fillMaxSize().padding(horizontal = 16.dp), contentAlignment = Alignment.CenterStart) {
                             if (draft.isEmpty()) Text(
@@ -229,7 +251,7 @@ fun MessagesContent(
                             inner()
                         }
                     })
-                PillButton("보내기", send, height = 44.dp, filled = true, enabled = draft.isNotBlank())
+                PillButton("보내기", send, height = 44.dp, kind = Pill.INK, enabled = draft.isNotBlank())
             }
         }
     }
@@ -240,10 +262,10 @@ fun MessagesContent(
 internal fun ThreadRow(t: ThreadChip, selected: Boolean, showKind: Boolean = true, onClick: () -> Unit) {
     val p = Tokens.palette
     Row(
-        Modifier.fillMaxWidth().height(68.dp).background(if (selected) p.fill else p.paper)
+        Modifier.fillMaxWidth().height(68.dp).background(if (selected) p.primarySoft else p.paper)
             .drawBehind {
                 drawLine(p.hair, Offset(0f, 0f), Offset(size.width, 0f), 1.dp.toPx())
-                if (selected) drawRect(p.ink, size = androidx.compose.ui.geometry.Size(3.dp.toPx(), size.height))
+                if (selected) drawRect(p.primaryLine, size = androidx.compose.ui.geometry.Size(3.dp.toPx(), size.height))
             }
             .clickable(onClick = onClick).padding(start = 16.dp, end = 12.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -253,20 +275,26 @@ internal fun ThreadRow(t: ThreadChip, selected: Boolean, showKind: Boolean = tru
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(t.title, fontSize = Type.strong, fontWeight = if (t.unread > 0) FontWeight.Bold else FontWeight.Medium,
                     maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
-                if (showKind) Label(if (t.group) "그룹" else "1:1", LabelStyle.OUTLINE)
+                if (showKind) Label(if (t.group) "그룹" else "1:1")
             }
             if (t.last.isNotEmpty()) Text(t.last, fontSize = Type.meta, color = p.muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            if (t.lastAtMs > 0) Text(hhmm.format(Date(t.lastAtMs)), fontSize = Type.micro, color = p.muted)
+            // 오늘이면 시각, 아니면 날짜 — 시각만 적으면 어제 대화가 오늘 것으로 읽힌다
+            if (t.lastAtMs > 0) Text(if (dayLabel(t.lastAtMs) == "오늘") hhmm.format(Date(t.lastAtMs)) else md.format(Date(t.lastAtMs)),
+                fontSize = Type.micro, color = p.muted)
             CountPill(t.unread)
         }
     }
 }
 
-/** 말풍선 — 받은 것 = 옅은 면(그룹이면 보낸 사람 이름 위), 보낸 것 = 검정 면 오른쪽. 시각·전달 상태는 풍선 바깥. */
+/**
+ * 말풍선 — 받은 것 = 옅은 면(그룹이면 보낸 사람 이름 위), 보낸 것 = 남색 면 오른쪽. 시각·전달 상태는 풍선 바깥.
+ * 파일(FD)이면 글 아래에 파일 줄이 선다([FileLine]) — 문자(SMS)에는 파일이 없어 두 콜백을 넘기지 않는다.
+ */
 @Composable
-internal fun Bubble(m: Message, showName: Boolean, onResend: () -> Unit) {
+internal fun Bubble(m: Message, showName: Boolean, onResend: () -> Unit,
+                    onOpenFile: () -> Unit = {}, onDownload: () -> Unit = {}) {
     val p = Tokens.palette
     Column(Modifier.fillMaxWidth(), horizontalAlignment = if (m.outgoing) Alignment.End else Alignment.Start,
         verticalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -275,12 +303,52 @@ internal fun Bubble(m: Message, showName: Boolean, onResend: () -> Unit) {
             Text(m.fromName, fontSize = Type.meta, fontWeight = FontWeight.Bold, color = p.ink2)
         Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             if (m.outgoing) Meta(m, onResend)
-            Box(Modifier.widthIn(max = 520.dp).clip(RoundedCornerShape(10.dp))
-                    .background(if (m.outgoing) p.ink else p.fill).padding(horizontal = 12.dp, vertical = 9.dp)) {
-                Text(m.text, fontSize = Type.strong, color = if (m.outgoing) p.onInk else p.ink)
+            Column(Modifier.widthIn(max = 520.dp).clip(RoundedCornerShape(10.dp))
+                    .background(if (m.outgoing) p.primary else p.fill).padding(horizontal = 12.dp, vertical = 9.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                if (m.text.isNotEmpty() || !m.isAttachment)
+                    Text(m.text, fontSize = Type.strong, color = if (m.outgoing) p.onPrimary else p.ink)
+                if (m.isAttachment) FileLine(m, onOpenFile, onDownload)
             }
             if (!m.outgoing) Meta(m, onResend)
         }
+    }
+}
+
+/**
+ * 파일 줄 — 클립 · 이름(누르면 열기, 안 받았으면 받기) · 크기·진행(«올리는 중…»·«받는 중…») · [받기] 또는 [열기].
+ * 받은 파일은 자동으로 받지 않는다 — [받기] 가 서 있다가, 받으면 [열기] 로 바뀐다. 보낸 파일은 앱이 둔 사본을 연다.
+ */
+@Composable
+private fun FileLine(m: Message, onOpen: () -> Unit, onDownload: () -> Unit) {
+    val p = Tokens.palette
+    val sub = if (m.outgoing) p.onPrimary else p.muted
+    // 기기에 있는가는 디스크를 본다 — 경로·진행 문구가 바뀔 때만 다시 본다(그릴 때마다 묻지 않는다).
+    val local = remember(m.localPath, m.transferNote) { m.hasLocalFile }
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        Icon(Icons.Filled.AttachFile, contentDescription = null, tint = if (m.outgoing) p.onPrimary else p.ink2,
+            modifier = Modifier.size(16.dp))
+        Text(m.fileName.ifEmpty { "파일" }, fontSize = Type.strong, color = if (m.outgoing) p.onPrimary else p.ink,
+            maxLines = 1, overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f, fill = false).clickable(enabled = !m.isTransferring, onClick = onOpen))
+        val note = listOf(m.fileSizeText, m.transferNote).filter { it.isNotEmpty() }.joinToString(" ")
+        if (note.isNotEmpty()) Text(note, fontSize = Type.meta, color = sub, maxLines = 1)
+        when {
+            m.isTransferring -> CircularProgressIndicator(Modifier.size(14.dp), color = sub, strokeWidth = 2.dp)
+            FileRules.canDownload(m, local) -> PillButton("받기", onDownload, height = 30.dp)
+            local -> PillButton("열기", onOpen, height = 30.dp)
+        }
+    }
+}
+
+/** 입력줄 [📎] — 보낼 파일 고르기. 둥근 테두리 버튼(입력칸과 같은 높이). */
+@Composable
+private fun AttachButton(onClick: () -> Unit) {
+    val p = Tokens.palette
+    Box(Modifier.size(44.dp).clip(androidx.compose.foundation.shape.CircleShape).background(p.paper)
+            .border(1.5.dp, p.line, androidx.compose.foundation.shape.CircleShape).clickable(onClick = onClick),
+        contentAlignment = Alignment.Center) {
+        Icon(Icons.Filled.AttachFile, contentDescription = "파일 보내기", tint = p.ink2, modifier = Modifier.size(20.dp))
     }
 }
 
@@ -289,7 +357,7 @@ private fun Meta(m: Message, onResend: () -> Unit) {
     val p = Tokens.palette
     Column(horizontalAlignment = if (m.outgoing) Alignment.End else Alignment.Start) {
         Text(hhmm.format(Date(m.atMs)) + (if (m.outgoing) sendMark(m.state) else ""), fontSize = Type.micro,
-            color = if (m.state == SendState.FAILED) p.emergency else p.muted, maxLines = 1)
+            color = if (m.state == SendState.FAILED) p.emg else p.muted, maxLines = 1)
         // 실패는 누르면 다시 보낸다 — 같은 말풍선이 갱신된다(데스크톱 ⚠ 링크).
         if (m.outgoing && m.state == SendState.FAILED) ResendButton(onResend)
     }
@@ -300,7 +368,7 @@ private fun Meta(m: Message, onResend: () -> Unit) {
 internal fun ResendButton(onClick: () -> Unit) {
     TextButton(onClick = onClick, contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp),
         modifier = Modifier.heightIn(min = 28.dp)) {
-        Text("재전송", fontSize = Type.meta, color = Tokens.palette.emergency)
+        Text("재전송", fontSize = Type.meta, fontWeight = FontWeight.Bold, color = Tokens.palette.emg)
     }
 }
 
@@ -330,6 +398,8 @@ enum class EventKind(val label: String, val kinds: Set<ActivityKind>) {
     MOVE("입퇴장", setOf(ActivityKind.JOIN, ActivityKind.LEAVE)),
     EMERGENCY("긴급", setOf(ActivityKind.EMERGENCY)),
     SDS("SDS", setOf(ActivityKind.SDS)),
+    /** MCVideo 영상 채널 — 영상 호 연결·종료, 송출 시작·끝, 보기·그만 보기(§6.14). */
+    VIDEO("영상", setOf(ActivityKind.VIDEO)),
     ERROR("오류", setOf(ActivityKind.ERROR)),
 }
 
@@ -337,6 +407,7 @@ enum class EventKind(val label: String, val kinds: Set<ActivityKind>) {
 internal fun kindLabel(k: ActivityKind): String = when (k) {
     ActivityKind.TALK -> "발언"; ActivityKind.JOIN -> "입장"; ActivityKind.LEAVE -> "퇴장"
     ActivityKind.EMERGENCY -> "긴급"; ActivityKind.SDS -> "SDS"; ActivityKind.ERROR -> "오류"
+    ActivityKind.VIDEO -> "영상"; ActivityKind.NOTE -> "기타"
 }
 
 /**
@@ -356,9 +427,10 @@ internal fun Activity(
 ) {
     val rows by vm.allRows.collectAsStateWithLifecycle()
     val pinned by vm.pinned.collectAsStateWithLifecycle()
+    val follow by vm.followEvents.collectAsStateWithLifecycle()
     val export = com.cims.ue.dispatch.ui.rememberCsvExport()
     ActivityContent(rows, pinned = pinned, selectedId = selectedId, onSelect = onSelect, onOpenChannel = onOpenChannel,
-        onHistory = onHistory,
+        onHistory = onHistory, follow = follow, onFollow = vm::toggleFollowEvents,
         onExport = { export("ptt-activity-" + SimpleDateFormat("yyyyMMdd-HHmm", Locale.ROOT).format(Date()) + ".csv", vm::csv) })
 }
 
@@ -374,14 +446,17 @@ fun ActivityContent(
     onOpenChannel: (String) -> Unit = {},
     onHistory: () -> Unit = {},
     onExport: () -> Unit = {},
+    /** «새 이벤트 따라가기» — 저장되는 값이라 밖에서 든다(면이 다시 서거나 재기동해도 남는다). */
+    follow: Boolean = true,
+    onFollow: () -> Unit = {},
 ) {
     val p = Tokens.palette
     var kinds by remember { mutableStateOf(EventKind.entries.toSet()) }
     var hidden by remember { mutableStateOf(emptySet<String>()) }
-    var follow by remember { mutableStateOf(true) }
     val channels = remember(rows) { rows.map { it.groupId to it.groupName }.distinctBy { it.first } }
     val shown = remember(rows, kinds, hidden) {
-        val allowed = kinds.flatMap { it.kinds }.toSet()
+        // «기타»(그룹 생성·편집·삭제, 멤버 확인 전 연결, 녹취 재생)는 종류 칩으로 숨기지 않는다 — 채널 거르기만 탄다
+        val allowed = kinds.flatMap { it.kinds }.toSet() + ActivityKind.NOTE
         rows.filter { it.kind in allowed && it.groupId !in hidden }
     }
     Row(Modifier.fillMaxSize()) {
@@ -392,7 +467,7 @@ fun ActivityContent(
             Text("종류", fontSize = Type.meta, fontWeight = FontWeight.Bold, color = p.ink2, modifier = Modifier.padding(bottom = 4.dp))
             EventKind.entries.forEach { k ->
                 val n = rows.count { it.kind in k.kinds }
-                CheckLine(k.label, k in kinds, count = n) { kinds = if (k in kinds) kinds - k else kinds + k }
+                CheckLine(k.label, k in kinds, count = n, dot = kindDot(k)) { kinds = if (k in kinds) kinds - k else kinds + k }
             }
             HDivider(Modifier.padding(vertical = 8.dp))
             Text("채널", fontSize = Type.meta, fontWeight = FontWeight.Bold, color = p.ink2, modifier = Modifier.padding(bottom = 4.dp))
@@ -406,14 +481,14 @@ fun ActivityContent(
         Column(Modifier.weight(1f).fillMaxHeight()) {
             SectionHead("이벤트 ${shown.size}") {
                 Spacer(Modifier.weight(1f))
-                PillButton(if (follow) "새 이벤트 따라가기 ✓" else "새 이벤트 따라가기", { follow = !follow }, height = 32.dp)
+                PillButton(if (follow) "새 이벤트 따라가기 ✓" else "새 이벤트 따라가기", onFollow, height = 32.dp)
                 // 끝난 세션의 날짜별 조회·녹취는 [이력] 이다 — 여기는 관제사의 작업 메모리(데스크톱 ⑤ 머리와 같다).
                 PillButton("이력에서 보기", onHistory, height = 32.dp)
                 PillButton("CSV", onExport, height = 32.dp)
             }
             pinned.forEach { PinnedAlertRow(it) { onOpenChannel(it.channelId) } }
             Row(Modifier.fillMaxWidth().height(32.dp)
-                    .drawBehind { drawLine(p.ink, Offset(0f, size.height - 0.5f), Offset(size.width, size.height - 0.5f), 1.dp.toPx()) }
+                    .drawBehind { drawLine(p.edge, Offset(0f, size.height - 0.5f), Offset(size.width, size.height - 0.5f), 1.dp.toPx()) }
                     .padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
                 listOf("시각" to 76.dp, "채널" to 96.dp, "종류" to 70.dp).forEach { (h, w) ->
                     Text(h, fontSize = Type.micro, color = p.muted, modifier = Modifier.width(w))
@@ -443,39 +518,61 @@ fun ActivityContent(
 private fun EventRow(r: ActivityRow, selected: Boolean, onClick: () -> Unit) {
     val p = Tokens.palette
     Row(
-        Modifier.fillMaxWidth().height(46.dp).background(if (selected) p.fill else p.paper)
+        Modifier.fillMaxWidth().height(46.dp).background(if (selected) p.primarySoft else p.paper)
             .drawBehind { drawLine(p.hair, Offset(0f, size.height - 0.5f), Offset(size.width, size.height - 0.5f), 1.dp.toPx()) }
             .clickable(onClick = onClick).padding(horizontal = 16.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(hhmmss.format(Date(r.atMs)), fontSize = Type.meta, fontFamily = FontFamily.Monospace, modifier = Modifier.width(76.dp))
+        Text(hhmmss.format(Date(r.atMs)), fontSize = Type.meta, fontFamily = FontFamily.Monospace, color = p.ink2,
+            modifier = Modifier.width(76.dp))
         Text(r.groupName, fontSize = Type.body, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis,
             modifier = Modifier.width(96.dp).padding(end = 8.dp))
         Box(Modifier.width(70.dp)) { KindLabel(r) }
         Text(r.text, fontSize = Type.body, maxLines = 1, overflow = TextOverflow.Ellipsis,
             fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
-            color = if (r.kind == ActivityKind.ERROR) p.emergency else p.ink, modifier = Modifier.weight(1f))
+            color = if (r.kind == ActivityKind.ERROR) p.emg else p.ink, modifier = Modifier.weight(1f))
     }
 }
 
+/** 종류 라벨 — 거르기 칸의 점과 같은 색(발언 녹색 · 입퇴장 파랑 · SDS 청록 · 긴급 빨강 채움 · 오류 연한 빨강). */
 @Composable
 private fun KindLabel(r: ActivityRow) {
+    Label(kindLabel(r.kind), when (r.kind) {
+        ActivityKind.TALK -> LabelStyle.TALK
+        ActivityKind.JOIN, ActivityKind.LEAVE -> LabelStyle.HELD
+        ActivityKind.SDS -> LabelStyle.TEAL
+        ActivityKind.VIDEO -> LabelStyle.LISTEN        // 영상 = 청록(보고 듣는 축) — SDS 와 같은 색, 테두리 있는 알약으로 가른다
+        ActivityKind.EMERGENCY -> LabelStyle.EMG
+        ActivityKind.ERROR -> LabelStyle.RED
+        ActivityKind.NOTE -> LabelStyle.OUTLINE
+    })
+}
+
+/** 종류의 색 점 — 표 종류 라벨의 범례. */
+@Composable
+private fun kindDot(k: EventKind): androidx.compose.ui.graphics.Color {
     val p = Tokens.palette
-    when {
-        r.kind == ActivityKind.EMERGENCY -> Label(kindLabel(r.kind), LabelStyle.STRONG, color = p.emergency)
-        r.kind == ActivityKind.ERROR -> Label(kindLabel(r.kind), LabelStyle.OUTLINE, color = p.emergency)
-        else -> Label(kindLabel(r.kind), LabelStyle.OUTLINE)
+    return when (k) {
+        EventKind.TALK -> p.talk
+        EventKind.MOVE -> p.held
+        EventKind.EMERGENCY, EventKind.ERROR -> p.emg
+        EventKind.SDS, EventKind.VIDEO -> p.listen
     }
 }
 
 /** 체크 한 줄(36) — 거르기 칸. */
 @Composable
-private fun CheckLine(label: String, on: Boolean, count: Int? = null, onClick: () -> Unit) {
+private fun CheckLine(label: String, on: Boolean, count: Int? = null, dot: androidx.compose.ui.graphics.Color? = null,
+                      onClick: () -> Unit) {
     val p = Tokens.palette
     Row(Modifier.fillMaxWidth().height(36.dp).clickable(onClick = onClick), verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-        Box(Modifier.size(18.dp).clip(RoundedCornerShape(3.dp)).background(if (on) p.ink else p.paper)
-                .border(2.dp, p.ink, RoundedCornerShape(3.dp)))
+        Box(Modifier.size(18.dp).clip(RoundedCornerShape(4.dp)).background(if (on) p.primary else p.paper)
+                .border(1.5.dp, if (on) p.primary else p.edge, RoundedCornerShape(4.dp)), contentAlignment = Alignment.Center) {
+            if (on) Icon(Icons.Filled.Check, contentDescription = null, tint = p.onPrimary,
+                modifier = Modifier.size(13.dp))
+        }
+        if (dot != null) Box(Modifier.size(7.dp).clip(androidx.compose.foundation.shape.CircleShape).background(dot))
         Text(label, fontSize = Type.body, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
         if (count != null) Text("$count", fontSize = Type.meta, color = p.muted)
     }
@@ -493,17 +590,16 @@ private fun PinnedAlertRow(b: AlertBannerUi, onOpen: () -> Unit) {
         while (true) { kotlinx.coroutines.delay(1000); tick++ }
     }
     val emergency = b.kind == AlertKind.EMERGENCY
-    val c = if (emergency) p.emergency else p.peril
-    Row(Modifier.fillMaxWidth().height(44.dp).background(if (emergency) p.emergencyFill else p.peril.copy(alpha = 0.14f))
-            .padding(start = 16.dp, end = 8.dp),
+    Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 2.dp).height(40.dp).clip(RoundedCornerShape(8.dp))
+            .background(if (emergency) p.emgSoft else p.ringSoft).padding(start = 12.dp, end = 8.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
         @Suppress("UNUSED_EXPRESSION") tick     // 1초 틱을 이 조합에 묶는다
-        Text(fmtElapsed((System.currentTimeMillis() - b.sinceMs).coerceAtLeast(0)), fontSize = Type.meta,
-            fontFamily = FontFamily.Monospace, modifier = Modifier.width(66.dp))
-        Label(if (emergency) "긴급" else "임박", LabelStyle.STRONG, color = c)
+        Text(fmtElapsed((System.currentTimeMillis() - b.sinceMs).coerceAtLeast(0)), fontSize = Type.body,
+            fontWeight = FontWeight.SemiBold, fontFamily = FontFamily.Monospace, modifier = Modifier.width(60.dp))
+        Label(if (emergency) "긴급" else "임박", if (emergency) LabelStyle.EMG else LabelStyle.PERIL)
         Text("${b.title} 진행 중", fontSize = Type.body, fontWeight = FontWeight.Bold, maxLines = 1,
-            color = if (emergency) p.emergency else p.ink, modifier = Modifier.weight(1f))
-        PillButton("채널로", onOpen, height = 32.dp, color = c)
+            color = if (emergency) p.emg else p.ink, modifier = Modifier.weight(1f))
+        PillButton("채널로", onOpen, height = 30.dp, kind = if (emergency) Pill.RED_FILL else Pill.PERIL_FILL)
     }
 }
 
@@ -561,8 +657,8 @@ fun EventPanel(
                 .drawBehind { drawLine(p.divider, Offset(0f, 0f), Offset(size.width, 0f), 1.dp.toPx()) }
                 .padding(horizontal = 16.dp, vertical = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             if (row.kind == ActivityKind.SDS && row.groupId.isNotBlank())
-                PillButton("답장", { onReply(row.groupId) }, height = 44.dp, filled = true, modifier = Modifier.weight(1f))
-            PillButton("채널 열기", { onOpenChannel(row.groupId) }, height = 44.dp, strongBorder = true, enabled = canOpen,
+                PillButton("답장", { onReply(row.groupId) }, height = 44.dp, kind = Pill.INK, modifier = Modifier.weight(1f))
+            PillButton("채널 열기", { onOpenChannel(row.groupId) }, height = 44.dp, kind = Pill.LINE, enabled = canOpen,
                 modifier = Modifier.weight(1f))
             PillButton("이력에서 세션 보기 ›", onHistory, height = 44.dp, modifier = Modifier.weight(1f))
         }
@@ -588,5 +684,5 @@ private fun Kv(k: String, v: String, mono: Boolean = false) {
 // ── 공용 ─────────────────────────────────────────────────────────────────────
 @Composable
 internal fun StateDot(active: Boolean, speaking: Boolean, emergency: Boolean) {
-    com.cims.ue.dispatch.ui.StatusDot(com.cims.ue.dispatch.ui.dotColor(emergency, false, speaking, active))
+    com.cims.ue.dispatch.ui.StatusDot(com.cims.ue.dispatch.ui.dotColor(emergency, false, joined = speaking, active = active))
 }

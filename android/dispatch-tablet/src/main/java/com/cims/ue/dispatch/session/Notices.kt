@@ -5,6 +5,16 @@
 // 띄우고, 원문 코드는 ▸상세 에 둔다.
 package com.cims.ue.dispatch.session
 
+/**
+ * 수명 스코프(세션·화면 VM)의 **미처리 예외** — 프로세스를 죽이지 않는다(§6.1). 관제석은 통화·무전이 걸린 채로 돈다: 한 조회의
+ * 예상 밖 응답이 앱을 내리면 진행 중인 호가 전부 끊긴다. 로그에 적고 한 번 알린 뒤 계속 돈다(데스크톱
+ * `DispatcherUnhandledException` 과 같다 — 기동 뒤의 예외는 알리고 이어 간다).
+ */
+internal val UnhandledGuard = kotlinx.coroutines.CoroutineExceptionHandler { _, e ->
+    runCatching { android.util.Log.e("Dispatch", "unhandled", e) }
+    runCatching { DispatchService.session?.noteInternalErrorLater("background", e) }
+}
+
 /** 토스트 등급 — 데스크톱 `ToastLevel` 과 같다. */
 enum class NoticeLevel { INFO, WARN, ERROR }
 
