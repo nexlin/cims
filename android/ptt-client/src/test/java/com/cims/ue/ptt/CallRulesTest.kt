@@ -39,6 +39,15 @@ class CallRulesTest {
         assertNull("Warning 없음", CallRules.rejectionText(486, 0))
     }
 
+    // TS 24.379 §10.1.1.2.1.1 · TS 24.281 §9.2.1.2.1.1 — <preconfigured-group-use-only> true 면 호·경보를 열지 않는다
+    @Test fun `사전 구성 전용 그룹으로는 호를 열지 않는다`() {
+        assertFalse(CallRules.groupUsable(true))
+        assertTrue(CallRules.groupUsable(false))
+        assertTrue("문서를 아직 받지 못했다 — 서버가 판정한다", CallRules.groupUsable(null))
+        assertEquals("이 그룹으로는 통화할 수 없습니다", CallRules.rejectionText(403, 167))
+        assertEquals("이 그룹에는 경보를 보낼 수 없습니다", CallRules.rejectionText(403, 168))
+    }
+
     @Test fun `성립한 호의 Warning 은 실패 사유가 아니다`() {
         // 200 OK 의 Warning 122 = «정원 때문에 일부만 불렀다» — 호는 성립했다
         assertNull(CallRules.rejectionText(200, 122))

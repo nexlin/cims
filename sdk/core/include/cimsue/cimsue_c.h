@@ -606,6 +606,13 @@ CIMSUE_API cimsue_status_t CIMSUE_CALL cimsue_engine_floor_queue_position(cimsue
 /** 계정의 발언권 참여자 타이머를 바꾼다(Engine::setFloorTimers) — 다음 MCPTT 호부터. */
 CIMSUE_API cimsue_status_t CIMSUE_CALL cimsue_engine_set_floor_timers(cimsue_engine_t* e, int32_t account_id,
                                                                      const cimsue_floor_timers_t* timers);
+/** 계정의 MCVideo 전송 제어 참여자 타이머를 바꾼다(Engine::setTcTimers — TS 24.581 표 11.1.1-1, ms · 0 = 기본값 1 s). 값의 출처 =
+ *  MCVideo service configuration `<tc-timers-counters-R14>`(cimsue_mcvideo_service_config_doc_t 의 t10x_sec × 1000). 다음 MCVideo 호부터. */
+CIMSUE_API cimsue_status_t CIMSUE_CALL cimsue_engine_set_tc_timers(cimsue_engine_t* e, int32_t account_id, int32_t t100_ms,
+                                                                  int32_t t101_ms, int32_t t102_ms, int32_t t103_ms, int32_t t104_ms);
+/** MCVideo 서비스만 켜고 끈다(Engine::setMcVideoEnabled, TS 24.281 §7.2.1AA NOTE) — 등록 해제 없이 REGISTER Contact 의 MCVideo 태그만
+ *  넣고 뺀다. MCPTT·MCData 제휴와 진행 중 호는 그대로다. 끌 때 코어가 MCVideo 제휴를 먼저 내린다. */
+CIMSUE_API cimsue_status_t CIMSUE_CALL cimsue_engine_set_mcvideo_enabled(cimsue_engine_t* e, int32_t account_id, int32_t enabled);
 CIMSUE_API void CIMSUE_CALL cimsue_engine_floor_info(const cimsue_engine_t* e, int32_t call_id,
                                                      cimsue_floor_info_t* out);
 /** 진행 중 그룹콜의 조건 상향·하향(Engine::setCallCondition, TS 24.379 §10.1.1.2.1.3~5) — 결과는 on_mcptt_condition
@@ -634,6 +641,11 @@ CIMSUE_API int32_t CIMSUE_CALL cimsue_engine_join_video_group_call(cimsue_engine
 CIMSUE_API cimsue_status_t CIMSUE_CALL cimsue_engine_request_transmission(cimsue_engine_t* e, int32_t call_id, int32_t priority);
 /** [보내기 끝] — Transmission End Request(§6.2.4.5.3). */
 CIMSUE_API cimsue_status_t CIMSUE_CALL cimsue_engine_release_transmission(cimsue_engine_t* e, int32_t call_id);
+/** 대기 끝에 허가된 송출의 사용자 확인(Engine::confirmTransmission, §6.2.4.5.1 NOTE — 계정 confirm_queued_transmission 일 때).
+ *  accept = 송출 시작, 0 = 허가를 거둔다(Transmission End Request). */
+CIMSUE_API cimsue_status_t CIMSUE_CALL cimsue_engine_confirm_transmission(cimsue_engine_t* e, int32_t call_id, int32_t accept);
+/** 대기 중인 송출 요청의 순번을 묻는다(Engine::requestQueuePosition, §6.2.4.9.3) — 답은 on_transmission(QUEUE_POSITION). */
+CIMSUE_API cimsue_status_t CIMSUE_CALL cimsue_engine_request_queue_position(cimsue_engine_t* e, int32_t call_id);
 /** [받기] — Receive Media Request(§6.2.5.3.3). transmitter_id = on_reception(NOTIFIED) 의 transmitter.user_id. */
 CIMSUE_API cimsue_status_t CIMSUE_CALL cimsue_engine_accept_reception(cimsue_engine_t* e, int32_t call_id, const char* transmitter_id,
                                                                       int32_t priority);
@@ -1181,6 +1193,9 @@ CIMSUE_API void CIMSUE_CALL cimsue_capabilities_of(const cimsue_user_profile_doc
 /** 그룹 문서 GET → *out (핸들 스냅샷). */
 CIMSUE_API cimsue_status_t CIMSUE_CALL cimsue_csc_get_group(cimsue_csc_t* c, const char* access_token, const char* user_uri,
                                                             const char* group_uri, cimsue_group_doc_t* out);
+/** 멤버를 뺀 그룹 문서(CscClient::getGroupExcludingMembers — POST + GMOP, TS 24.481 §6.3.16: 규격의 기본 조회) → *out. members 는 0 개. */
+CIMSUE_API cimsue_status_t CIMSUE_CALL cimsue_csc_get_group_excluding_members(cimsue_csc_t* c, const char* access_token,
+                                                                              const char* group_uri, cimsue_group_doc_t* out);
 /** 그룹 생성/수정 — doc 를 PUT. if_match(NULL 가능)로 조건부. 성공 시 *out = 서버 확정 문서(etag 포함). */
 CIMSUE_API cimsue_status_t CIMSUE_CALL cimsue_csc_put_group(cimsue_csc_t* c, const char* access_token, const char* user_uri,
                                                             const cimsue_group_doc_t* doc, const char* if_match,

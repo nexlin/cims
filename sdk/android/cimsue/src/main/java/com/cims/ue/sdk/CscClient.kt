@@ -227,7 +227,13 @@ data class GroupDoc(
     val ackAction: String? = null,
     /** MCVideo 몫 — null = MCVideo 그룹 아님(PUT 에 싣지 않는다). 서비스 집합 = MCPTT + MCVideo(TS 23.280 §3). */
     val mcvideo: McVideoGroupAttrs? = null,
+    /** `<preconfigured-group-use-only>`(TS 24.481 §7.2.4.2) — true 면 재편성의 설정 원본으로만 쓰는 그룹이다: 호·경보를 열지 않고 사용자에게
+     *  알린다(TS 24.281 §9.2.1.2.1.1, TS 24.379 §10.1.1.2.1.1). 읽은 값을 그대로 되돌린다. */
+    val preconfiguredGroupUseOnly: Boolean = false,
 ) {
+    /** 이 그룹으로 호·경보를 열 수 있는가. */
+    val usableForCalls: Boolean get() = !preconfiguredGroupUseOnly
+
     internal fun toJni(): JniGroupDoc = JniGroupDoc().also { d ->
         d.uri = uri; d.displayName = displayName; d.etag = etag
         d.members = GroupMemberVector().apply {
@@ -245,6 +251,7 @@ data class GroupDoc(
         d.minNumberToStart = minNumberToStart.orUnset(); d.ackTimeoutSec = ackTimeoutSec.orUnset()
         d.ackAction = ackAction ?: ""
         mcvideo?.fill(d.mcvideo)                           // null — present = false 그대로(싣지 않는다)
+        d.preconfiguredGroupUseOnly = preconfiguredGroupUseOnly
     }
     internal companion object {
         /** 코어 `GroupDoc::kUnset`. */
@@ -261,7 +268,8 @@ data class GroupDoc(
             allowConferenceState = d.allowConferenceState.let { if (it < 0) null else it != 0 },
             maxSdsSize = d.maxSdsSize.orNull(), maxAutoRecv = d.maxAutoRecv.orNull(),
             minNumberToStart = d.minNumberToStart.orNull(), ackTimeoutSec = d.ackTimeoutSec.orNull(),
-            ackAction = d.ackAction.ifEmpty { null }, mcvideo = McVideoGroupAttrs.of(d.mcvideo))
+            ackAction = d.ackAction.ifEmpty { null }, mcvideo = McVideoGroupAttrs.of(d.mcvideo),
+            preconfiguredGroupUseOnly = d.preconfiguredGroupUseOnly)
     }
 }
 
@@ -407,6 +415,13 @@ data class McVideoServiceConfigDoc(
     val confidentialityProtection: Boolean = true, val integrityProtection: Boolean = true,
     val t100Sec: Int? = null, val t101Sec: Int? = null, val t102Sec: Int? = null, val t103Sec: Int? = null, val t104Sec: Int? = null,
 ) {
+    /** 참여자 타이머(TS 24.581 표 11.1.1-1) → [AccountConfig.tcTimers] / [Account.setTcTimers]. 문서에 없는 값은 0(코어 기본값). */
+    val tcTimers: McVideoTcTimers
+        get() {
+            fun ms(sec: Int?) = if (sec != null && sec > 0) sec * 1000 else 0
+            return McVideoTcTimers(ms(t100Sec), ms(t101Sec), ms(t102Sec), ms(t103Sec), ms(t104Sec))
+        }
+
     internal companion object {
         fun of(d: JniMcVideoServiceConfigDoc) = McVideoServiceConfigDoc(d.etag, d.domain, d.rpEmergency, d.rpImminentPeril, d.rpNormal,
             d.confidentialityProtection, d.integrityProtection,
@@ -540,6 +555,13 @@ class CscClient(
     suspend fun getGroup(accessToken: String, userUri: String, groupUri: String): CimsResult<GroupDoc> = call {
         val out = JniGroupDoc()
         CimsResult.of(jni.getGroup(accessToken, userUri, groupUri, out), GroupDoc.of(out))
+    }
+
+    /** 멤버를 뺀 그룹 문서 — POST + GMOP `<get-excluding-memberlist>`(TS 24.481 §6.3.16). 규격의 기본 조회다: 그룹 속성(종류·타이머·규칙)만
+     *  볼 때 쓰고 명단이 필요할 때만 [getGroup]. `members` 는 비고 `etag` 도 없다. */
+    suspend fun getGroupExcludingMembers(accessToken: String, groupUri: String): CimsResult<GroupDoc> = call {
+        val out = JniGroupDoc()
+        CimsResult.of(jni.getGroupExcludingMembers(accessToken, groupUri, out), GroupDoc.of(out))
     }
 
     /** 생성(신규 uri)/수정(기존 uri). ifMatch 가 비지 않으면 조건부(412 = 충돌).

@@ -43,6 +43,8 @@ data class GroupDoc(
     val etag: String?,
     /** MCVideo 몫(TS 24.481 MCVideo `<service>`) — null 이면 MCVideo 그룹이 아니다(영상 참여 없음, mcvideo.md §7 D4). */
     val mcvideo: McVideoAttrs? = null,
+    /** `<preconfigured-group-use-only>`(TS 24.481 §7.2.4.2) — 재편성의 설정 원본으로만 쓰는 그룹. 호·경보를 열지 않는다([CallRules.groupUsable]). */
+    val preconfiguredOnly: Boolean = false,
 ) {
     companion object {
         fun of(d: com.cims.ue.sdk.GroupDoc) = GroupDoc(
@@ -57,6 +59,7 @@ data class GroupDoc(
             autoRecvBytes = d.maxAutoRecv,
             etag = d.etag.ifBlank { null },
             mcvideo = d.mcvideo?.let { McVideoAttrs(prearranged = it.inviteMembers, maxTransmitters = it.maxTransmitters) },
+            preconfiguredOnly = d.preconfiguredGroupUseOnly,
         )
     }
 }

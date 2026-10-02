@@ -509,7 +509,10 @@ Indicator, automatic 수신; 1차 CSP 는 normal) · JOIN 응답 `audio_ssrc`·`
   서버가 해제한다, 채널을 바꿀 때는 새 그룹을 먼저 싣고 옛 그룹을 뺀다(빈 집합 = Expires 0 = 그 사용자 제휴 전부 해제를 거치지 않게).
   호를 열거나 합류할 때 offer 에 `mc_queueing` 을 싣는다(TS 24.581 §14.2.2 — 상한에서 거절 #1 대신 대기). **망이 끊겨 잃은 prearranged 영상 호**
   (성립했던 호가 408·503 으로 끝남)는 등록이 돌아오면 그 세션 식별자(`CallInfo.sessionUri`)로 한 번 재합류한다(TS 24.281 §9.2.1.2.4.1 —
-  `CallRules.rejoinVideoSession`, 실패하면 다음 초대를 기다린다. 서버의 정상 해제(BYE)는 세션이 끝난 것이라 재합류하지 않는다).
+  `CallRules.rejoinVideoSession`, 실패하면 다음 초대를 기다린다. 서버의 정상 해제(BYE)는 세션이 끝난 것이라 재합류하지 않는다). 전송 제어 참여자 타이머는 MCVideo service configuration(TS 24.484 §9.4)을
+  받아 계정에 싣는다(`PttGroups.loadMcVideoServiceConfig` → `Account.setTcTimers` — CMS 문서와 같은 계기·xcap-diff `mcvideo.service-config`, 다음 호부터).
+  그룹 문서의 `<preconfigured-group-use-only>` 가 true 면 MCPTT·MCVideo 호와 긴급 경보를 열지 않고 알린다(`CallRules.groupUsable` — TS 24.281 §9.2.1.2.1.1·
+  §9.2.2.2.1.1·§12.1.1.1, TS 24.379 §10.1.1.2.1.1, 문서를 아직 못 받았으면 서버 판정 403 167·168 에 맡긴다).
   주채널 화면 = 발언 상태 줄 오른쪽 **[영상 보내기] 토글**(D11 — 켬 = 송출 요청, 끔 = 송출 끝내기, 요청 중·대기 n·보내는 중 — prearranged 그룹에
   영상 호가 없으면 [영상 보내기] 가 호를 연다: 개시 INVITE 에 암묵적 송출 요청(TS 24.281 §9.2.1.2.1.1 16) · TS 24.581 §14.2.4 — 표시 «여는 중…», 끔 =
   개시를 거둔다(CANCEL), 480 = «영상을 받을 멤버가 없습니다», 실패는 다시 열지 않는다 — 사용자가 다시 누른다; 영상 채널이나 그 그룹

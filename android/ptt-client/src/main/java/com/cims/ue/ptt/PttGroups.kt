@@ -39,6 +39,12 @@ internal class GroupPlane(private val c: PttController) {
      *  PTT 를 누른 채 호를 여는 경우, 성립과 함께 발언권). */
     fun joinGroupCall(groupId: String, members: List<String> = emptyList(), emergency: Boolean = false,
                       broadcast: Boolean = false, takePrimary: Boolean = true, implicitFloor: Boolean = false) {
+        // 사전 구성 전용 그룹 — 호를 열지 않고 알린다(TS 24.379 §10.1.1.2.1.1·§10.1.2.2.1.1)
+        if (!CallRules.groupUsable(c._groupDocs.value[groupId]?.preconfiguredOnly)) {
+            c._status.value = "통화할 수 없는 그룹 $groupId"
+            c.feedback?.blocked("이 그룹으로는 통화할 수 없습니다")
+            return
+        }
         val s = synchronized(c.lock) {
             if (c.sessionMap.containsKey(groupId)) return
             c.Session(groupId).also {
@@ -452,12 +458,14 @@ internal class GroupPlane(private val c: PttController) {
             .mapNotNull { it.substringAfterLast("tel:").takeIf { g -> g.isNotBlank() } }
         val profileChanged = sels.any { it.contains("mcptt.user-profile", ignoreCase = true) }
         val svcCfgChanged = sels.any { it.contains("mcptt.service-config", ignoreCase = true) }
+        val mcvSvcCfgChanged = sels.any { it.contains("mcvideo.service-config", ignoreCase = true) }
         val ueInitChanged = sels.any { it.contains("mcptt.ue-init-config", ignoreCase = true) }
         Log.i(TAG, "xcap-diff NOTIFY — 편성 $changed / 프로파일 $profileChanged / 시스템설정 $svcCfgChanged / 단말초기설정 $ueInitChanged")
         if (profileChanged) loadUserProfile()
         if (svcCfgChanged) loadServiceConfig()
+        if (mcvSvcCfgChanged) loadMcVideoServiceConfig()
         if (ueInitChanged) c.reloadUeInitConfig()
-        if (changed.isEmpty() && (profileChanged || svcCfgChanged || ueInitChanged)) {
+        if (changed.isEmpty() && (profileChanged || svcCfgChanged || mcvSvcCfgChanged || ueInitChanged)) {
             c._status.value = "설정 변경 통지"   // CMS 축 — 편성은 건드리지 않는다
             return
         }
@@ -671,6 +679,7 @@ internal class GroupPlane(private val c: PttController) {
         val cmsLive = xcapConfirmed(XCAP_CMS)
         if (!cmsLive || _userProfile.value == null) loadUserProfile()
         if (!cmsLive || _serviceConfig.value == null) loadServiceConfig()
+        if (!cmsLive || !mcvServiceConfigLoaded) loadMcVideoServiceConfig()
     }
 
     /** 그룹 문서(TS 24.481, GMS XCAP) 조회 — 채널 상세 진입·편성 변경 통지 때. */
@@ -729,5 +738,21 @@ internal class GroupPlane(private val c: PttController) {
         )
         _serviceConfig.value = cfg
         Log.i(TAG, "service-config 적재 — RP 긴급=${cfg.rpEmergency} 임박=${cfg.rpImminentPeril} 일반=${cfg.rpNormal}")
+    }
+
+    @Volatile private var mcvServiceConfigEtag = ""
+    @Volatile private var mcvServiceConfigLoaded = false
+
+    /** MCVideo service configuration 조회(TS 24.484 §9.4) — 전송 제어 참여자 타이머 T100~T104(`<tc-timers-counters-R14>`, TS 24.581
+     *  표 11.1.1-1)를 계정에 싣는다. 다음 MCVideo 호부터 쓴다. MCVideo 를 쓰지 않는 계정(PSI 없음)은 받지 않는다. 실패 무해 · ETag 캐시. */
+    fun loadMcVideoServiceConfig() = c.scope.launch {
+        if (c.token == null || !c.videoPlane.available.value) return@launch
+        val r = c.withToken { cl, t -> cl.fetchMcVideoServiceConfig(t, mcvServiceConfigEtag) }
+        if (!r.ok) { Log.d(TAG, "mcvideo service-config 조회 실패(기본 타이머로 동작): ${r.code} ${r.reason}"); return@launch }
+        mcvServiceConfigLoaded = true
+        val d = r.value ?: return@launch                          // 304 — 실은 값 그대로
+        mcvServiceConfigEtag = d.etag
+        val set = c.account?.setTcTimers(d.tcTimers)
+        Log.i(TAG, "mcvideo service-config 적재 — 전송 제어 타이머 ${d.tcTimers} (${set?.ok})")
     }
 }

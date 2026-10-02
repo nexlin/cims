@@ -1203,6 +1203,16 @@ cimsue_status_t CIMSUE_CALL cimsue_engine_set_floor_timers(cimsue_engine_t* e, i
     if (!e || !timers) return -1;
     return ret(e->eng.setFloorTimers(account_id, toCxx(*timers)));
 }
+cimsue_status_t CIMSUE_CALL cimsue_engine_set_tc_timers(cimsue_engine_t* e, int32_t account_id, int32_t t100_ms, int32_t t101_ms,
+                                                        int32_t t102_ms, int32_t t103_ms, int32_t t104_ms) {
+    if (!e) return -1;
+    McVideoTcTimers t;
+    t.t100Ms = t100_ms; t.t101Ms = t101_ms; t.t102Ms = t102_ms; t.t103Ms = t103_ms; t.t104Ms = t104_ms;
+    return ret(e->eng.setTcTimers(account_id, t));
+}
+cimsue_status_t CIMSUE_CALL cimsue_engine_set_mcvideo_enabled(cimsue_engine_t* e, int32_t account_id, int32_t enabled) {
+    return e ? ret(e->eng.setMcVideoEnabled(account_id, enabled != 0)) : -1;
+}
 
 void CIMSUE_CALL cimsue_engine_floor_info(const cimsue_engine_t* e, int32_t call_id, cimsue_floor_info_t* out) {
     if (!out) return;
@@ -1258,6 +1268,12 @@ cimsue_status_t CIMSUE_CALL cimsue_engine_request_transmission(cimsue_engine_t* 
 }
 cimsue_status_t CIMSUE_CALL cimsue_engine_release_transmission(cimsue_engine_t* e, int32_t call_id) {
     return e ? ret(e->eng.releaseTransmission(call_id)) : -1;
+}
+cimsue_status_t CIMSUE_CALL cimsue_engine_confirm_transmission(cimsue_engine_t* e, int32_t call_id, int32_t accept) {
+    return e ? ret(e->eng.confirmTransmission(call_id, accept != 0)) : -1;
+}
+cimsue_status_t CIMSUE_CALL cimsue_engine_request_queue_position(cimsue_engine_t* e, int32_t call_id) {
+    return e ? ret(e->eng.requestQueuePosition(call_id)) : -1;
 }
 cimsue_status_t CIMSUE_CALL cimsue_engine_accept_reception(cimsue_engine_t* e, int32_t call_id, const char* transmitter_id,
                                                            int32_t priority) {
@@ -1571,6 +1587,16 @@ cimsue_status_t CIMSUE_CALL cimsue_csc_get_group(cimsue_csc_t* c, const char* ac
     if (!c) return -1;
     c->group.cxx = GroupDoc();
     cimsue_status_t st = ret(c->cli->getGroup(S(access_token), S(user_uri), S(group_uri), c->group.cxx));
+    c->group.build();
+    if (out) *out = c->group.out;
+    return st;
+}
+
+cimsue_status_t CIMSUE_CALL cimsue_csc_get_group_excluding_members(cimsue_csc_t* c, const char* access_token, const char* group_uri,
+                                                                   cimsue_group_doc_t* out) {
+    if (!c) return -1;
+    c->group.cxx = GroupDoc();
+    cimsue_status_t st = ret(c->cli->getGroupExcludingMembers(S(access_token), S(group_uri), c->group.cxx));
     c->group.build();
     if (out) *out = c->group.out;
     return st;

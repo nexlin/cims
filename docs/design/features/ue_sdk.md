@@ -470,7 +470,12 @@ select ≤100 ms → 해석·전이·타이머, 공개 메서드는 mutex, 콜�
 `TransmissionEvent.awaitingConfirmation` 으로 알린다 → `Engine::confirmTransmission(callId, accept)`(받으면 송출, 아니면 Transmission End Request). 끄면
 (기본) 곧바로 송출한다. Transmission End Request·Response 는 끝낼 송출(= 내 송출)의 User ID·Audio SSRC·Video SSRC 를 싣는다(표 9.2.20-1·9.2.21-1).
 **수신 무효화**(Media Reception Override Notification — §6.2.5.5.4) = 그 수신을 닫고 Media Reception End Request + T104 → `PendingRelease`,
-이벤트 `ReceptionEvent::Overridden`(`overridingId`). 규격이 비워 둔 곳의 해석은 [mcvideo.md](mcvideo.md) §5.4. `cimsue_test` `McvParticipant`(루프백 가짜 서버 —
+이벤트 `ReceptionEvent::Overridden`(`overridingId`). 규격이 비워 둔 곳의 해석은 [mcvideo.md](mcvideo.md) §5.4. 바인딩 — Kotlin `AccountConfig.tcTimers`·`confirmQueuedTransmission`·
+`mcvideoServiceSettings`, `Account.setTcTimers`·`setMcVideoEnabled`, `Call.confirmTransmission`·`requestQueuePosition`, `McVideoServiceConfigDoc.tcTimers`(초 → ms),
+이벤트 `TransmissionEvent.awaitingConfirmation`·`ReceptionEventKind.OVERRIDDEN`(`overridingId`), `CscClient.getGroupExcludingMembers`·`GroupDoc.preconfiguredGroupUseOnly`
+(`usableForCalls`). C API 는 구조체 배치를 바꾸지 않는 함수만 덧붙였다 — `cimsue_engine_set_tc_timers`(스칼라 ms)·`cimsue_engine_set_mcvideo_enabled`·
+`cimsue_engine_confirm_transmission`·`cimsue_engine_request_queue_position`·`cimsue_csc_get_group_excluding_members`. 계정·이벤트·그룹 문서 구조체의 새 칸
+(`tc_timers`·`confirm_queued_transmission`·`awaiting_confirmation`·`overriding_id`·`preconfigured_group_use_only`)은 .NET 파사드와 배치를 맞춰 끝에 덧붙인다(남음). `cimsue_test` `McvParticipant`(루프백 가짜 서버 —
 허가·종료·재전송 시한·거절·회수 #4/#7·서버 종료 요청·manual/automatic 수신·수신 거절·서버 수신 종료·암묵 요청 셋·상태 가드).
 
 **MCVideo 공개 표면**(계약 K7 — [../../dev/mcvideo_dev_plan.md](../../dev/mcvideo_dev_plan.md) §3) — `McService`(Mcptt·McVideo)·

@@ -254,6 +254,14 @@ TEST(CApi, EngineLifecycleHeadless) {
     EXPECT_EQ(cimsue_engine_request_transmission(e, 7, -1), -2);
     EXPECT_STREQ(cimsue_last_error(), "no such call");
     EXPECT_EQ(cimsue_engine_accept_reception(e, 7, "tel:+82510002001", -1), -2);
+    // 덧붙인 함수(구조체 배치는 그대로) — 없는 호·계정은 C++ 결과 그대로, NULL 엔진은 -1
+    EXPECT_EQ(cimsue_engine_confirm_transmission(e, 7, 1), -2);
+    EXPECT_EQ(cimsue_engine_request_queue_position(e, 7), -2);
+    EXPECT_EQ(cimsue_engine_set_mcvideo_enabled(e, 99, 0), -2);
+    EXPECT_STREQ(cimsue_last_error(), "no such account");
+    EXPECT_EQ(cimsue_engine_set_tc_timers(e, 99, 2000, 0, 0, 0, 0), -2);
+    EXPECT_EQ(cimsue_engine_set_mcvideo_enabled(nullptr, 0, 1), -1);
+    EXPECT_EQ(cimsue_csc_get_group_excluding_members(nullptr, "t", "tel:g1", nullptr), -1);
     cimsue_transmission_info_t ti{};
     cimsue_engine_transmission_info(e, 7, &ti);
     EXPECT_EQ(ti.state, CIMSUE_TX_NO_PERMISSION);

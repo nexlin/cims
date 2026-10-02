@@ -510,6 +510,11 @@ class Account internal constructor(private val ue: CimsUe, val id: Int) {
     suspend fun refreshRegistration(): CimsResult<Unit> = ue.command { CimsResult.of(ue.jni.refreshRegistration(id)) }
     /** 발언권 참여자 타이머를 바꾼다(ue-init-config 가 바뀌었을 때) — 다음 MCPTT 호부터. */
     suspend fun setFloorTimers(t: FloorTimers): CimsResult<Unit> = ue.command { CimsResult.of(ue.jni.setFloorTimers(id, t.toJni())) }
+    /** MCVideo 전송 제어 참여자 타이머를 바꾼다(MCVideo service configuration 이 바뀌었을 때) — 다음 MCVideo 호부터. */
+    suspend fun setTcTimers(t: McVideoTcTimers): CimsResult<Unit> = ue.command { CimsResult.of(ue.jni.setTcTimers(id, t.toJni())) }
+    /** MCVideo 서비스만 켜고 끈다(TS 24.281 §7.2.1AA NOTE) — 등록 해제 없이 REGISTER Contact 의 MCVideo 태그만 넣고 뺀다. MCPTT·MCData 제휴와
+     *  진행 중 호는 그대로다. 끌 때 코어가 MCVideo 제휴를 먼저 내린다. 진행 중 MCVideo 호는 앱이 먼저 끝낸다. */
+    suspend fun setMcVideoEnabled(enabled: Boolean): CimsResult<Unit> = ue.command { CimsResult.of(ue.jni.setMcVideoEnabled(id, enabled)) }
     suspend fun remove(): CimsResult<Unit> = ue.command { CimsResult.of(ue.jni.removeAccount(id)) }
 
     private fun callOrFail(callId: Int, what: String): CimsResult<Call> =
@@ -669,6 +674,11 @@ class Call internal constructor(private val ue: CimsUe, val id: Int, private val
     suspend fun requestTransmission(priority: Int = -1): CimsResult<Unit> = cmd { CimsResult.of(ue.jni.requestTransmission(id, priority)) }
     /** [보내기 끝] — Transmission End Request(§6.2.4.5.3). 대기·요청 중이면 요청을 거둔다. */
     suspend fun releaseTransmission(): CimsResult<Unit> = cmd { CimsResult.of(ue.jni.releaseTransmission(id)) }
+    /** 대기 끝에 허가된 송출의 사용자 확인(§6.2.4.5.1 NOTE — `transmission` GRANTED·awaitingConfirmation). accept = 송출 시작,
+     *  아니면 허가를 거둔다(Transmission End Request). */
+    suspend fun confirmTransmission(accept: Boolean): CimsResult<Unit> = cmd { CimsResult.of(ue.jni.confirmTransmission(id, accept)) }
+    /** 대기 중인 송출 요청의 순번을 묻는다(Queue Position Request, §6.2.4.9.3) — 답은 `transmission`(QUEUE_POSITION). */
+    suspend fun requestQueuePosition(): CimsResult<Unit> = cmd { CimsResult.of(ue.jni.requestQueuePosition(id)) }
     /** [받기] — Receive Media Request(§6.2.5.3.3). transmitterId = `reception`(NOTIFIED) 의 transmitter.userId. */
     suspend fun acceptReception(transmitterId: String, priority: Int = -1): CimsResult<Unit> =
         cmd { CimsResult.of(ue.jni.acceptReception(id, transmitterId, priority)) }

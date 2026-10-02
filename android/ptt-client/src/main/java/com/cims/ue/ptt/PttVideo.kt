@@ -254,6 +254,11 @@ internal class VideoPlane(private val c: PttController, context: Context) {
     }
 
     private fun start(groupId: String, opts: VideoGroupCallOptions, opening: Boolean) {
+        // 사전 구성 전용 그룹 — 호를 열지 않고 알린다(TS 24.281 §9.2.1.2.1.1·§9.2.2.2.1.1). 사용자가 누른 것(열기)에만 알림을 띄운다
+        if (!CallRules.groupUsable(c._groupDocs.value[groupId]?.preconfiguredOnly)) {
+            if (opening) { releaseCaptureIfIdle(); c.feedback?.blocked("이 그룹으로는 영상 통화를 할 수 없습니다") }
+            return
+        }
         synchronized(c.lock) {
             if (calls.containsKey(groupId)) return
             calls[groupId] = Call(groupId).also {

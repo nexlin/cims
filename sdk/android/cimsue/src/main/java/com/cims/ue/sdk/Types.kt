@@ -40,6 +40,7 @@ import com.cims.ue.sdk.jni.CallQuality as JniCallQuality
 import com.cims.ue.sdk.jni.QualityDirection as JniQualityDirection
 import com.cims.ue.sdk.jni.StringVector
 import com.cims.ue.sdk.jni.TlsPeerExpiry as JniTlsPeerExpiry
+import com.cims.ue.sdk.jni.McVideoTcTimers as JniMcVideoTcTimers
 import com.cims.ue.sdk.jni.ReceptionEvent as JniReceptionEvent
 import com.cims.ue.sdk.jni.VideoRequestEvent as JniVideoRequestEvent
 import com.cims.ue.sdk.jni.TransmissionEvent as JniTransmissionEvent
@@ -116,7 +117,11 @@ enum class TransmissionEventKind {
     GRANTED, REJECTED, REVOKED, QUEUE_POSITION, END_REQUESTED, ENDED, RECEIVER_JOINED, IDLE, QUEUE_CANCELLED, REQUEST_TIMEOUT, OTHER,
 }
 /** 수신 제어 이벤트 종류(서수 = 코어 ReceptionEvent::Kind). */
-enum class ReceptionEventKind { NOTIFIED, GRANTED, REJECTED, ENDED, RELEASED, END_REQUESTED, REQUEST_TIMEOUT, OTHER }
+enum class ReceptionEventKind {
+    NOTIFIED, GRANTED, REJECTED, ENDED, RELEASED, END_REQUESTED, REQUEST_TIMEOUT, OTHER,
+    /** Media Reception Override Notification(TS 24.581 §6.2.5.5.4) — 이 수신이 다른 송출에 밀렸다. 코어가 수신을 닫았다([ReceptionEvent.overridingId]). */
+    OVERRIDDEN,
+}
 /** 통화 중 영상 전환 요청의 진행(1:1 호, 서수 = 코어 VideoRequestState) — 결과는 `videoRequest` 이벤트. */
 enum class VideoRequestState { NONE, SENT, RECEIVED }
 /** 통화 중 영상 전환 이벤트 종류(서수 = 코어 VideoRequestEvent::Kind). RECEIVED 면 사용자에게 묻고 [Call.answerVideoRequest] —
@@ -211,6 +216,14 @@ data class AccountConfig(
     val autoAnswerMcvideo: Boolean = true,
     /** 발언권 참여자 타이머 — ue-init-config `<Timers>`([UeInitConfigDoc.floorTimers])를 싣는다. 다음 MCPTT 호부터 쓴다. */
     val floorTimers: FloorTimers = FloorTimers(),
+    /** MCVideo 서비스 설정 PUBLISH(TS 24.281 §7.2.3 — `Event: poc-settings`, Answer-Mode·선택 프로파일). 등록이 설 때마다 한 번.
+     *  받지 않는 서버는 489 로 답한다 — 서버가 받게 된 뒤에 켠다. */
+    val mcvideoServiceSettings: Boolean = false,
+    /** MCVideo 전송 제어 참여자 타이머 — MCVideo service configuration([McVideoServiceConfigDoc.tcTimers])을 싣는다. 다음 MCVideo 호부터. */
+    val tcTimers: McVideoTcTimers = McVideoTcTimers(),
+    /** 대기 끝에 허가된 송출을 사용자 확인 뒤에 시작한다(TS 24.581 §6.2.4.5.1 NOTE) — `transmission`(GRANTED, awaitingConfirmation)
+     *  → [Call.confirmTransmission]. 끄면(기본) 허가 즉시 송출한다. */
+    val confirmQueuedTransmission: Boolean = false,
 ) {
     internal fun toJni(): JniAccountConfig = JniAccountConfig().also {
         it.serverHost = serverHost; it.serverPort = serverPort
@@ -230,6 +243,21 @@ data class AccountConfig(
         it.mcpttServerUri = mcpttServerUri; it.mcdataServerUri = mcdataServerUri
         it.mcvideoEnabled = mcvideoEnabled; it.mcvideoServerUri = mcvideoServerUri; it.autoAnswerMcvideo = autoAnswerMcvideo
         it.floorTimers = floorTimers.toJni()
+        it.mcvideoServiceSettings = mcvideoServiceSettings
+        it.tcTimers = tcTimers.toJni()
+        it.confirmQueuedTransmission = confirmQueuedTransmission
+    }
+}
+
+/**
+ * MCVideo 전송 제어 참여자 타이머(TS 24.581 표 11.1.1-1, ms) — 0 = 기본값(1 s). 값의 출처 = MCVideo service configuration
+ * `<tc-timers-counters-R14>`(TS 24.484 §9.4.2.1).
+ */
+data class McVideoTcTimers(
+    val t100Ms: Int = 0, val t101Ms: Int = 0, val t102Ms: Int = 0, val t103Ms: Int = 0, val t104Ms: Int = 0,
+) {
+    internal fun toJni(): JniMcVideoTcTimers = JniMcVideoTcTimers().also {
+        it.t100Ms = t100Ms; it.t101Ms = t101Ms; it.t102Ms = t102Ms; it.t103Ms = t103Ms; it.t104Ms = t104Ms
     }
 }
 
@@ -415,20 +443,25 @@ data class TransmissionEvent(
     val kind: TransmissionEventKind, val callId: Int, val state: TransmissionState,
     val cause: Int, val causeText: String, val durationSec: Int, val priority: Int, val queuePosition: Int, val indicator: Int,
     val audioSsrc: Long, val videoSsrc: Long, val receiverId: String, val rawType: Int,
+    /** GRANTED — 대기 끝 허가라 사용자 확인을 기다린다([AccountConfig.confirmQueuedTransmission]). 송출은 닫혀 있다 → [Call.confirmTransmission]. */
+    val awaitingConfirmation: Boolean = false,
 ) {
     internal companion object {
         fun of(e: JniTransmissionEvent) = TransmissionEvent(ordinalOf(e.kind.swigValue()), e.callId, ordinalOf(e.state.swigValue()),
-            e.cause, e.causeText, e.durationSec, e.priority, e.queuePosition, e.indicator, e.audioSsrc, e.videoSsrc, e.receiverId, e.rawType)
+            e.cause, e.causeText, e.durationSec, e.priority, e.queuePosition, e.indicator, e.audioSsrc, e.videoSsrc, e.receiverId, e.rawType,
+            e.awaitingConfirmation)
     }
 }
 
 /** MCVideo 수신 제어 이벤트(§6.2.5) — 새 송출 알림(manual 이면 앱이 [받기])·수신 허가·종료. */
 data class ReceptionEvent(
     val kind: ReceptionEventKind, val callId: Int, val transmitter: VideoTransmitter, val cause: Int, val causeText: String, val rawType: Int,
+    /** OVERRIDDEN — 수신을 밀어낸 송출자(Overriding ID, 없으면 빈 문자열). */
+    val overridingId: String = "",
 ) {
     internal companion object {
         fun of(e: JniReceptionEvent) = ReceptionEvent(ordinalOf(e.kind.swigValue()), e.callId, VideoTransmitter.of(e.transmitter),
-            e.cause, e.causeText, e.rawType)
+            e.cause, e.causeText, e.rawType, e.overridingId)
     }
 }
 
@@ -436,10 +469,12 @@ data class ReceptionEvent(
 data class TransmissionInfo(
     val state: TransmissionState, val transmitters: List<VideoTransmitter>, val queuePosition: Int,
     val localPort: Int, val remoteIp: String, val remotePort: Int,
+    /** 허가됐지만 사용자 확인 전 — 송출은 닫혀 있다([Call.confirmTransmission]). */
+    val awaitingConfirmation: Boolean = false,
 ) {
     internal companion object {
         fun of(t: JniTransmissionInfo) = TransmissionInfo(ordinalOf(t.state.swigValue()), VideoTransmitter.list(t.transmitters),
-            t.queuePosition, t.localPort, t.remoteIp, t.remotePort)
+            t.queuePosition, t.localPort, t.remoteIp, t.remotePort, t.awaitingConfirmation)
     }
 }
 

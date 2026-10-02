@@ -22,6 +22,13 @@ internal object CallRules {
         prearranged && wasActive && sessionUri.isNotBlank() && (lastCode == 408 || lastCode == 503)
 
     /**
+     * 이 그룹으로 호·경보를 열어도 되는가 — 그룹 문서의 `<preconfigured-group-use-only>` 가 true 면 열지 않고 사용자에게 알린다
+     * (TS 24.379 §10.1.1.2.1.1·§10.1.2.2.1.1 · TS 24.281 §9.2.1.2.1.1·§9.2.2.2.1.1·§12.1.1.1 — 재편성의 설정 원본으로만 쓰는 그룹).
+     * 문서를 아직 받지 못했으면(null) 막지 않는다 — 서버가 403 Warning 167·168 로 판정한다.
+     */
+    fun groupUsable(preconfiguredOnly: Boolean?): Boolean = preconfiguredOnly != true
+
+    /**
      * 호가 거절됐을 때 사용자에게 보일 사유 — 응답의 Warning 문구 번호(TS 24.379 §4.4.2 · TS 24.281 §4.4.2)로 가른다.
      * 모르는 번호·Warning 없는 실패는 null(호출자가 일반 문구를 쓴다).
      */
@@ -36,6 +43,8 @@ internal object CallRules {
         122 -> "그룹 통화 정원이 찼습니다"                                // too many participants
         127 -> "상대가 개별 통화를 받을 수 없습니다"                       // user not authorised to be called in private call
         144 -> "이 사용자에게는 개별 통화를 걸 수 없습니다"                 // user not authorised to call this particular user
+        167 -> "이 그룹으로는 통화할 수 없습니다"                         // call is not allowed on the preconfigured group
+        168 -> "이 그룹에는 경보를 보낼 수 없습니다"                       // alert is not allowed on the preconfigured group
         else -> null
     }.takeIf { statusCode >= 300 }
 }

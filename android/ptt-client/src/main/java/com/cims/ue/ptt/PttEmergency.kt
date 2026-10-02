@@ -215,6 +215,12 @@ internal class EmergencyPlane(private val c: PttController) {
             c.feedback?.blocked("긴급경보 권한이 없습니다")
             return
         }
+        // 사전 구성 전용 그룹 — 경보를 보내지 않고 알린다(TS 24.379 §12.1.1.1 · TS 24.281 §12.1.1.1). 취소는 막지 않는다
+        if (activate && !CallRules.groupUsable(c._groupDocs.value[groupId]?.preconfiguredOnly)) {
+            c._status.value = "긴급경보: 쓸 수 없는 그룹"
+            c.feedback?.blocked("이 그룹에는 경보를 보낼 수 없습니다")
+            return
+        }
         c.ctl.launch {
             val r = c.account?.sendEmergencyAlert(groupId, activate)
             val token = r?.getOrNull()

@@ -106,7 +106,9 @@ class FacadeMappingTest {
             "Released" to com.cims.ue.sdk.jni.ReceptionEvent.Kind.Released.swigValue(),
             "EndRequested" to com.cims.ue.sdk.jni.ReceptionEvent.Kind.EndRequested.swigValue(),
             "RequestTimeout" to com.cims.ue.sdk.jni.ReceptionEvent.Kind.RequestTimeout.swigValue(),
-            "Other" to com.cims.ue.sdk.jni.ReceptionEvent.Kind.Other.swigValue()))
+            "Other" to com.cims.ue.sdk.jni.ReceptionEvent.Kind.Other.swigValue(),
+            // 코어가 끝에 더한 값(TS 24.581 §6.2.5.5.4) — 서수가 모자라면 그 이벤트에서 파사드가 죽는다
+            "Overridden" to com.cims.ue.sdk.jni.ReceptionEvent.Kind.Overridden.swigValue()))
         // floor 이벤트 종류 — Denied 와 Revoked 가 뒤바뀌면 발언 거절과 회수 표시가 반대가 된다
         check(FloorEventKind.entries.map { it.name.replace("_", "") }, listOf(
             "Granted" to com.cims.ue.sdk.jni.FloorEvent.Kind.Granted.swigValue(),
@@ -135,6 +137,18 @@ class FacadeMappingTest {
     }
 
     // ── ② 결과 래핑 ──
+    // MCVideo service configuration 의 T100~T104(초) → 참여자 타이머(ms). 문서에 없는 값·0 은 0(코어 기본값 1 s) — TS 24.581 표 11.1.1-1
+    @Test fun `MCVideo 전송 제어 타이머는 초를 ms 로 옮긴다`() {
+        val d = McVideoServiceConfigDoc(t100Sec = 2, t101Sec = null, t102Sec = 0, t103Sec = 3, t104Sec = 1)
+        assertEquals(McVideoTcTimers(t100Ms = 2000, t101Ms = 0, t102Ms = 0, t103Ms = 3000, t104Ms = 1000), d.tcTimers)
+        assertEquals(McVideoTcTimers(), McVideoServiceConfigDoc().tcTimers)
+    }
+
+    @Test fun `사전 구성 전용 그룹은 호에 쓰지 않는다`() {
+        assertTrue(GroupDoc(uri = "tel:g1").usableForCalls)                                   // 요소 없음 = false(TS 24.481 §7.2.4.2)
+        assertFalse(GroupDoc(uri = "tel:g1", preconfiguredGroupUseOnly = true).usableForCalls)
+    }
+
     @Test fun `CimsResult 는 실패에서 값을 내주지 않는다`() {
         val ok = CimsResult.ok(7)
         assertTrue(ok.ok); assertFalse(ok.failed); assertEquals(7, ok.getOrNull())
