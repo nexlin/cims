@@ -708,6 +708,7 @@ DynamicRouteProc.set_request_hooks(pre=_pre_hook, post=_post_hook)
 | `GROUP_CHANGED` | 그룹/멤버 CUD | GroupMap reload + CMP 동기화 + GMS NOTIFY |
 | `SERVICE_CONFIG_CHANGED` | MCPTT 정책 PUT · 재적재로 service-config 문서 ETag 변화(uri `mcvideo` = MCVideo 문서) | service-config 재취득(floor·세션 타이머) + cms 구독자 전원 xcap-diff NOTIFY |
 | `UE_INIT_CONFIG_CHANGED` | 재적재로 UE initial configuration 문서 ETag 변화(etag = 새 ETag) | cms 구독 단말마다 그 단말의 ue-init-config 선택자로 xcap-diff NOTIFY(TS 24.484 §7.2.2.12) |
+| `USER_PROFILE_CONFIG_CHANGED` | 재적재로 user profile 기본값(`UserProfile.*`)이 바뀜(uri·etag 없음 — 문서가 사용자마다 다르다) | cms 구독 단말 전원에게 자기 user profile 문서의 xcap-diff(TS 24.484 §8.3.2.12) — **CSP 처리는 남음**(지금 CSP 는 이 이벤트를 모른다 → 무시) |
 | `STATS_REQUEST` | 상태 조회 | CSP 통계 응답 반환 |
 | `CSC_RESTART` | CSC 재시작 | DB 전체 재동기화 |
 

@@ -115,6 +115,19 @@ class UeInitChangeNotifyTest(unittest.TestCase):
     def _ui_events(self):
         return [e for e in self.sent if e[0] == "UE_INIT_CONFIG_CHANGED"]
 
+    # user profile 기본값(UserProfile.*) 재적재 → USER_PROFILE_CONFIG_CHANGED(TS 24.484 §8.3.2.12 — cms 구독자 전원의 user profile 통지 계기)
+    def test_user_profile_defaults_change_notifies(self):
+        m._USER_PROFILE_CONFIG_LOADED = False
+        up = lambda: [e for e in self.sent if e[0] == "USER_PROFILE_CONFIG_CHANGED"]
+        m.apply_config(self._cfg(UserProfile={"AllowPrivateCall": True}))
+        self.assertEqual(up(), [], "첫 적재(기동)는 통지하지 않는다")
+        m.apply_config(self._cfg(UserProfile={"AllowPrivateCall": True}))
+        self.assertEqual(up(), [], "내용이 같으면 통지하지 않는다")
+        m.apply_config(self._cfg(UserProfile={"AllowPrivateCall": False}))
+        self.assertEqual(up(), [("USER_PROFILE_CONFIG_CHANGED", "", "PUT", "")])
+        m.apply_config(self._cfg())                                      # 절을 지워 기본값으로 — 역시 바뀐 것
+        self.assertEqual(len(up()), 2)
+
     def test_first_load_and_unchanged_reload_do_not_notify(self):
         m.apply_config(self._cfg())
         self.assertEqual(self._ui_events(), [], "첫 적재(기동)는 통지하지 않는다")

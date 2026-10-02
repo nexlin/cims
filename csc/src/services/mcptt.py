@@ -212,6 +212,7 @@ _SERVICE_CONFIG_PARAM_DEFAULTS = {
 }
 SERVICE_CONFIG_PARAMS = {}
 _SERVICE_CONFIG_PARAMS_LOADED = False   # 첫 적재 뒤 재적재(SIGUSR1)에서만 변경 통지
+_USER_PROFILE_CONFIG_LOADED = False     # 같은 규칙 — user profile 기본값(UserProfile.*) 재적재 통지
 # DB 사본 — load_shared_data 가 채우고 admin PUT 이 갱신한다(update_service_config_cache).
 SERVICE_CONFIG = dict(SERVICE_CONFIG_DEFAULTS)
 
@@ -451,11 +452,18 @@ def apply_config(config):
         if _mv_now != _mv_prev:
             notify_csp("SERVICE_CONFIG_CHANGED", "mcvideo", "PUT", etag=(_mv_now or "").strip('"'))
     # user-profile 규격 파라미터값 — 같은 규칙(ETag 내용 파생, SIGUSR1 리로드)
-    global USER_PROFILE_CONFIG
+    global USER_PROFILE_CONFIG, _USER_PROFILE_CONFIG_LOADED
+    _up_prev = json.dumps(USER_PROFILE_CONFIG, sort_keys=True, default=str) if _USER_PROFILE_CONFIG_LOADED else None
+    _USER_PROFILE_CONFIG_LOADED = True
     USER_PROFILE_CONFIG = config.get('UserProfile') or {}
     if not isinstance(USER_PROFILE_CONFIG, dict):
         logger.log_error("[CMS] UserProfile 이 객체가 아님 — 기본값 사용")
         USER_PROFILE_CONFIG = {}
+    # 재적재(SIGUSR1)로 user profile 기본값이 바뀌었으면 CSP 에 알린다 — 사용자마다의 user profile 문서가 모두 바뀐 것이므로 CSP 가
+    #   cms 구독 단말 전원에게 자기 user profile 문서의 xcap-diff 를 낸다(TS 24.484 §8.3.2.12 — 문서 변경 구독). uri·etag 는 없다
+    #   (문서가 사용자마다 다르다 — 단말이 다시 받아 자기 ETag 를 안다).
+    if _up_prev is not None and _up_prev != json.dumps(USER_PROFILE_CONFIG, sort_keys=True, default=str):
+        notify_csp("USER_PROFILE_CONFIG_CHANGED", "", "PUT")
 
     global CSP_NOTIFY_IP, CSP_NOTIFY_PORT, PSP_NOTIFY_IP, PSP_NOTIFY_PORT
     notify_cfg = config.get('CspNotify', {})
