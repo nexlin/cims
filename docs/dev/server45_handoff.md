@@ -995,3 +995,27 @@ Windows PC 가 관제 앱의 MCVideo 몫(W1' SDK 재빌드·시험 · W4 그룹 
 2. `cimsue-cli` — 그룹 호에서 Floor Request 를 서버가 한 번 버리게 하고(또는 CMP 를 잠깐 막고) 재전송으로 승인되는지.
 3. 콘솔에서 `UeInitConfig.Timers.T101` 을 바꾸고 재로그인 → 단말의 재전송 간격이 따라오는지(D1), 재로그인 없이 따라오는지(D10).
 4. 개별 호를 걸어 두고 말하지 않기 → `<private-call><hang-time>` 뒤 서버가 호를 끝내는지(D5).
+
+## 17. MCPTT 규격 정합 보완 목록 (Windows → .45)
+
+PTT 서비스 전체를 규격 원문(TS 24.379 V19.8.0 · 24.380 V19.3.0 · 24.481 V19.3.0 · 24.484 V19.6.0 · 24.482 · 33.180 부록 B)과 코드로 다시 대조했다.
+결과 = [mcptt_conformance_gaps.md](mcptt_conformance_gaps.md) — 157 항목(급 A 46 · B 66 · C 35 · D 10), 항목마다 규격 절·코드 위치·영향·확인 수준.
+Windows 에서는 대조·문서화만 했다(코드 무변경, 실서버 실측 없음). 이미 넘긴 것(§14·§16)과 겹치는 항목은 그 목록에 싣지 않았다.
+
+### 17.1 .45 가 먼저 볼 것
+
+- **한두 줄** — service configuration 에 `<signalling-protection>` false 명시(CMS-4) · 그룹 문서에 `<protect-media>`·`<protect-floor-control-signalling>` false
+  명시(GMS-7) · 그룹 문서 XML 이스케이프(GMS-13) · 정원 0 을 10 으로 내는 것(GMS-11 — 관제 앱이 저장하면 DB 에 10 이 굳는다) · PLMN 유도(CMS-7).
+- **단말 발언권 상태 머신**(FCC-1~FCC-4, `sdk/core/src/floor/floor_participant.cpp`) — 대기·요청 중 상태를 잃어 Release 가 빠지고, 뒤늦은 승인에
+  PTT 없이 마이크가 열린다. §16 D2(T101 재전송)와 같은 파일이라 함께 본다. 서버 짝 = FCS-1~FCS-4.
+- **인가 구멍** — 경보 MESSAGE 의 멤버십 미검사(EMG-1) · 개별 호 인가 요소·판정 없음(PRV-2·CMS-3) · 남의 대기 요청 삭제(FCS-2) ·
+  `mc_priority` 상한 없음(SDP-3) · 애드혹 인원 상한 없음(ADH-3) · PTT 가입 없는 계정의 MC 토큰(IDM-1).
+- **결정이 필요한 것** — chat 그룹의 서버 초대·상시 세션, 편성 그룹의 재초대와 late call entry(GCS-1~GCS-4·GCS-22·AFF-11). 규격대로 바꿀지,
+  편차로 남기고 사유를 적을지.
+
+묶음과 순서는 그 문서 §6, 문서 서술을 바로잡을 곳은 §5 다.
+
+### 17.2 Windows 몫 (.45 반영 뒤)
+
+거절 480 + Warning 110(GCC-6) · 긴급 대상 그룹 판정(EMG-8) · 그룹 편집 폼의 정원·우선순위(GMS-11·GMS-18) · CMS 변경 구독(CMS-13) ·
+인가 요소·Warning 코드가 들어오면 Capabilities 게이트와 응답 문구 사전.

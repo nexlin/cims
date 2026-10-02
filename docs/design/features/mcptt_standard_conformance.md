@@ -14,6 +14,10 @@
 > | **TS 33.180** | Identity Management (OIDC) / KMS — **CSC(IdMS/KMS)** |
 > | **TS 24.481** | Group Management (GMS, XCAP) — **CSC(GMS)** |
 > | **TS 24.484** | Configuration Management (CMS, XCAP) — **CSC(CMS)** |
+>
+> **보완 목록** — 규격 원문(R19)과 코드를 절차 단계별로 다시 대조해 나온 미정합 지점은
+> [../../dev/mcptt_conformance_gaps.md](../../dev/mcptt_conformance_gaps.md) 에 모았다. 아래 «✅ 정합» 서술 가운데 그 목록 §5 가
+> 짚은 곳(C1·C4·C4g·C4h·F1·F2·F4·F5·S3·S4)은 실제와 다르다 — 항목이 반영되면 이 문서를 고치고 목록에서 지운다.
 
 ---
 
