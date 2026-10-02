@@ -37,19 +37,19 @@
 - **K2 커밋·푸시** — WP 마다 S1 이 통과하면 `main` 에 커밋·푸시하고 dev_share 로 알린다(이 트랙의 허가).
 - **K3 .45 라이브 반영** — 트랙 중에는 하지 않는다. 끝에 한 번 따로(§8). 그때까지 개발·실측은 전부 .48.
 
-**WP 전에 받을 것** — 권고는 규격 근거를 따른 안이다. 받기 전에는 그 WP 만 «보류(D?)» 로 두고 다른 WP 를 고른다.
+**WP 별 결정** — 걸리는 WP 의 «결정» 칸이 이 번호다.
 
-| # | 정할 것 | 권고 | 걸리는 WP |
+| # | 정할 것 | 정한 것 | 걸리는 WP |
 |---|---|---|---|
-| D1 | 그룹 호 모델 | 규격대로 — chat 은 서버 초대 없이 각자 합류·1명 이하면 해제(TS 23.379 §10.6.2.3.1.2.1 · TS 24.379 §6.3.8.1), 편성 그룹은 합류 때 재초대를 멈추고 late call entry 를 서버가 초대(§10.1.1.4.6), 제휴 해제 = BYE(§10.1.1.4.4.3), 비제휴 멤버 초대·배포 중단(§6.3.5.5 · TS 24.282 §6.3.4). 현장 앱의 자체 합류와 «제휴 안 해도 받던» 운용이 바뀐다 — 영향 확인 뒤 | S14 |
-| D2 | `<MaxSimultaneousCallsN6>` | user profile N6 = 운용 상한값(설정 키), CSP 가 그 값으로 486 + 103 집행. 지금처럼 문서 1·서버 무제한이면 규격 단말이 둘째 그룹 호를 스스로 막는다 | S01 |
+| D1 | 그룹 호 모델 | **규격대로** — chat 은 서버 초대 없이 각자 합류·참가자 1명 이하면 해제(TS 23.379 §10.6.2.3.1.2.1 · TS 24.379 §6.3.8.1), 편성 그룹은 합류 때 재초대를 멈추고 새로 제휴·복귀한 단말을 서버가 초대(late call entry, §10.1.1.4.6), 제휴 해제 = 그 호에서 BYE(§10.1.1.4.4.3), 제휴한 멤버에게만 초대·배포(§6.3.5.5 · TS 24.282 §6.3.4 — `require_affiliation` 스위치는 없앤다). 현장 앱의 conference NOTIFY 자체 합류는 S14 의 짝으로 정리한다 | S14 |
+| D2 | 동시 그룹 호 상한 N6 | **규격대로** — N6 는 사용자마다의 MCPTT user profile 값이다(TS 24.484 §8.3.2.1 `<MCPTT-group-call>` `<MaxSimultaneousCallsN6>`). 서버는 그 사용자의 N6 를 넘는 개시·합류에 486 + `103`(TS 24.379 §10.1.1.3.1.1 5) 등), 단말·앱은 문서의 N6 를 읽어 그 안에서 동작하고 103 을 사용자에게 알린다. **기본값 = 관제 10 · 그 밖의 단말 5**(설정 키 둘, 사이트에서 바꿀 수 있다). «관제» = 관제 역할이 배정된 사용자([mcptt_authorization.md](../design/features/mcptt_authorization.md) 역할) — CSC(문서)와 CSP(집행)가 같은 판정을 쓰도록 판정 자리를 한 곳으로 정한다(C01·S01 재확인) | S01 · C01 |
 | D3 | 전이중 개별 호 SDP | TS 24.379 §11.1.2.2(`m=application` 없음)를 정본으로, CSP 는 전환기 동안 `mc_no_floor_ctrl` 도 받는다 | S17 |
-| D4 | IdMS 클라이언트 등록·서명 | IDM-3 = 등록 저장소 + `enforce·log·off` 3단(`IdMs.ScopeEnforcement` 와 같은 방식, log 로 시작) · IDM-6 RS256 = 서명 키를 나눠 줄 범위와 HS256 병행 기간 | C06 |
-| D5 | 엄격 검사 시점 | 스위치(`enforce·log·off`)로 만들어 `log` 로 내보내고, 협력업체 APK·계측기·cspsim 이 규격형 요청으로 바뀐 뒤 `enforce` | S18 |
-| D6 | 서비스 설정(poc-settings) | 구현 — 규격 단말 착신의 전제(REG-2·VREG-1). 순서는 웨이브 5 | S25 · U09 |
-| D7 | MCVideo 선호 코덱 | 1차 = CSC·콘솔이 서버가 집행하는 코덱(AMR-WB·H.264)만 그룹 선호로 받고, 단말 offer 는 그룹 선호를 따른다 | S23 · U09 |
-| D8 | T2 제외 대상 | 코드대로 긴급만 두고 문서 셋(conformance F4 · cmp_media_api §7.7 · mcptt_timers §5.2)을 고친다 — 대안은 긴급·임박 | S20 |
-| D9 | 서비스 인가 바인딩 없는 요청 404 + 141 | S18 과 같은 때(계측기·cspsim 이 등록 없이 보내는 경로가 있다) | S08 |
+| D4 | IdMS 클라이언트 등록·서명 | IDM-3·IDM-4 = 클라이언트 등록 저장소 + `enforce·log·off` 3단(`IdMs.ScopeEnforcement` 와 같은 방식), **처음에는 `log`**(어떤 client_id·redirect_uri 가 쓰이는지 모은 뒤 `enforce`) · IDM-6 = RS256 서명을 더하고 검증 쪽은 전환기 동안 HS256 도 받는다(끝 = 모든 소비자가 RS256 검증) | C06 |
+| D5 | 엄격 검사 시점 | 스위치(`enforce·log·off`)로 만들어 `log` 로 내보내고, 협력업체 APK·계측기·cspsim 이 규격형 요청으로 바뀐 뒤 `enforce`(§8 3단계) | S18 |
+| D6 | 서비스 설정(poc-settings) | **이번 트랙에 넣는다** — 웨이브 5 | S25 · U09 |
+| D7 | MCVideo 선호 코덱 | **(a)** — CSC 관리 API·XCAP PUT·콘솔이 서버가 집행하는 코덱(음성 AMR-WB · 영상 H.264)만 그룹 선호로 받는다(VSDP-1 → C02). 단말 offer 는 그룹 선호를 따른다(VGU-4) | C02 · U09 |
+| D8 | T2 제외 대상 | 코드대로 긴급만 — 문서 셋(conformance F4 · cmp_media_api §7.7 · mcptt_timers §5.2)을 고친다 | S20 |
+| D9 | 서비스 인가 바인딩 없는 요청 404 + 141 | S18 의 엄격 검사 스위치 안에 넣는다(계측기·cspsim 이 등록 없이 보내는 경로가 있다) — S08 은 판정·응답을 만들고 스위치는 `log` | S08 |
 
 ## 4. 세션 절차
 
@@ -82,11 +82,11 @@
 «항목» 은 MCPTT 번호가 앞, `MCData` 접두가 MCData, `V…`·`TCS`·`TCU`·`RCS`·`RCU` 가 MCVideo 다. «급» 은 그 WP 의 급별 항목 수, «세션» 은 추정.
 «상태» = 대기 · 완료 <커밋> · 보류(<이유>) — 진행 중인지는 dev_share 의 claim 메시지로 본다.
 
-### 5.1 .48 — 호 제어·미디어 서버 (25 WP · 158 항목 · ≈ 34 세션)
+### 5.1 .48 — 호 제어·미디어 서버 (25 WP · 157 항목 · ≈ 34 세션)
 
 | WP | 이름 | 항목 | 급 | 세션 | 선행 | 결정 | 짝 | 상태 |
 |---|---|---|---|---|---|---|---|---|
-| **S01** | on-network-disabled·정원·N6 집행 | GCS-19 · GCS-5 · GCS-6 / VGC-3 | A3 · B1 | 1 | — | D2 | C01(문서에 `<on-network-disabled>`·정원 값 산출) | 대기 |
+| **S01** | on-network-disabled·정원·N6 집행 | GCS-19 · GCS-5 · GCS-6 / VGC-3 | A3 · B1 | 1 | — | D2 | C01(`<on-network-disabled>`·정원·사용자별 N6 산출) · U03(SDK·앱이 N6 를 따르고 103 을 알림) · W01 | 대기 |
 | **S02** | MCVideo 헤더·fmtp·Supported 한두 줄 | AFF-3 · GCS-15 / VGC-4 · VGC-5 · VGC-6 · VGC-7 · VSDP-4 · VAFF-3 | C8 | 1 | — | — | — | 대기 |
 | **S03** | 경보·긴급 인가 | EMG-1 · EMG-2 · EMG-5 / MCData EMG-1 / VGC-1 | A2 · B2 · C1 | 1 | — | — | U01(단말 경보 대상) | 대기 |
 | **S04** | 긴급 지시자·상태 통지 | EMG-10 · EMG-11 · EMG-13 · EMG-14 · EMG-15 · EMG-16 · EMG-17 | B1 · C6 | 1 | S03 | — | — | 대기 |
@@ -108,16 +108,16 @@
 | **S20** | 발언권 메시지 필드·타이머 | FCS-4 · FCS-5 · FCS-7 · FCS-8 · FCS-17 · FCS-18 · FCS-19 · FCS-20 · FCS-21 · FCS-23 · FCS-24 | A2 · B4 · C2 · D3 | 2 | — | D8 | U08(SDK Ack) | 대기 |
 | **S21** | 발언권 확장 형식·수신 전용 멤버 | FCS-6 · FCS-10 · FCS-11 · FCS-12 · FCS-13 · FCS-14 · FCS-15 · FCS-16 · SDP-2 / TCS-10 | B6 · C3 · D1 | 2 | S20 | — | U08(SDK 코덱 생성물) · C05(그룹 문서 요소) | 대기 |
 | **S22** | MCVideo 송출·수신 제어 서버 세부 | TCS-1 · TCS-2 · TCS-3 · TCS-5 · TCS-7 · TCS-8 · TCS-9 · TCS-11 · RCS-2 | C4 · D5 | 2 | — | — | U08(TCU-1) | 대기 |
-| **S23** | MCVideo 코덱 선호·호 세부 | VSDP-1 · VGC-8 · VGC-9 · VGC-10 · VGC-13 | B1 · C3 · D1 | 1 | — | D7 | U09(VGU-4) · C05(선호 코덱 검증·콘솔) | 대기 |
+| **S23** | MCVideo 호 세부(초대 offer·T5·conference·PSI) | VGC-8 · VGC-9 · VGC-10 · VGC-13 | C3 · D1 | 1 | — | — | — | 대기 |
 | **S24** | MCData 미디어 평면 수명·색인·재전달 | MCData MSRP-3 · SDS-9 · DISP-1 | C3 | 1 | X00(TS 24.582) | — | U05(MSRP-4) | 대기 |
 | **S25** | 서비스 설정·인가(poc-settings) | REG-2 · REG-4 / MCData REG-3 · REG-4 / VREG-2 | B3 · C1 · D1 | 2 | — | D6 | U09(VREG-1) · U03(Answer-Mode) | 대기 |
 
-### 5.2 .45 — 설정 평면 서버 CSC (7 WP · 51 항목 · ≈ 9 세션)
+### 5.2 .45 — 설정 평면 서버 CSC (7 WP · 52 항목 · ≈ 9 세션)
 
 | WP | 이름 | 항목 | 급 | 세션 | 선행 | 결정 | 짝 | 상태 |
 |---|---|---|---|---|---|---|---|---|
-| **C01** | MCPTT 설정·그룹 문서 값 | CMS-4 · GMS-7 · GMS-13 · GMS-11 · CMS-7 · CMS-6 · CMS-8 · GMS-12 · GMS-18 · GCC-10 | A4 · B3 · C3 | 1 | — | — | S01 · W01(GMS-11·GMS-18 폼) | 대기 |
-| **C02** | MCData·MCVideo 문서 값 | MCData GRP-1 · GRP-2 · GRP-3 / VCMS-3 · VCMS-5 · VGMS-3 | B2 · C1 · D3 | 1 | — | — | — | 대기 |
+| **C01** | MCPTT 설정·그룹 문서 값 | CMS-4 · GMS-7 · GMS-13 · GMS-11 · CMS-7 · CMS-6 · CMS-8 · GMS-12 · GMS-18 · GCC-10 | A4 · B3 · C3 | 1 | — | D2 | S01 · W01(GMS-11·GMS-18 폼) | 대기 |
+| **C02** | MCData·MCVideo 문서 값·선호 코덱 검증 | MCData GRP-1 · GRP-2 · GRP-3 / VCMS-3 · VCMS-5 · VGMS-3 · VSDP-1 | B3 · C1 · D3 | 1 | — | D7 | U09(VGU-4 — 단말 offer 가 그룹 선호를 따름) | 대기 |
 | **C03** | user profile·service config 인가 요소(+SDK «없음 = false») | CMS-3 · ADH-1 / VCMS-2 | A1 · B1 · C1 | 1 | — | — | S10 · S11 · W01 | 대기 |
 | **C04** | XCAP 주소·문서 이름(양쪽 수용) | GMS-1 · GMS-6 · CMS-1 · CMS-2 · CMS-9 · CMS-11 · CMS-12 / VCMS-4 · VCMS-6 | B5 · C2 · D2 | 1 | — | — | S19(NOTIFY `sel`) · U07 | 대기 |
 | **C05** | XCAP 쓰기 의미·오류 형식 | GMS-2 · GMS-3 · GMS-4 · GMS-5 · GMS-8 · GMS-9 · GMS-10 / VGMS-1 · VGMS-2 | B7 · C1 · D1 | 2 | C04 | — | W01(그룹 편집 PUT 본문) | 대기 |
@@ -130,7 +130,7 @@
 |---|---|---|---|---|---|---|---|---|
 | **U01** | 긴급·경보 단말 | EMG-6 · EMG-7 · EMG-8 · EMG-9 | A3 · C1 | 1 | — | — | W01(EMG-8) | 대기 |
 | **U02** | SDK 보안·협상 상한 | IDM-5 / VSDP-2 · TCU-2 | A1 · C1 · D1 | 1 | — | — | — | 대기 |
-| **U03** | 거절 응답·Answer-Mode 해석 | GCC-6 / VGU-1 · VGU-2 · VGU-3 | B1 · C1 · D2 | 1 | — | — | W01(GCC-6·VGU-3) | 대기 |
+| **U03** | 거절 응답·Answer-Mode 해석 | GCC-6 / VGU-1 · VGU-2 · VGU-3 | B1 · C1 · D2 | 1 | — | — | S01(N6·103 의 단말 몫) · W01(GCC-6·VGU-3) | 대기 |
 | **U04** | MCPTT 요청 규격화 | REG-1 · GCC-1 · GCC-2 · GCC-3 · GCC-4 · GCC-5 · GCC-7 · GCC-8 · GCC-9 · ADH-8 · SDP-1 | B9 · D2 | 2 | S17 | — | W01(엔진 재빌드) | 대기 |
 | **U05** | MCData 요청 규격화·수신 파서 | MCData REG-1 · SDS-3 · SDS-6 · SDS-7 · SDS-10 · MSRP-1 · MSRP-4 | B3 · C2 · D2 | 1 | S17 | — | — | 대기 |
 | **U06** | 제휴 상태 구독 | AFF-12 / VAFF-8 | B1 · C1 | 1 | S13 | — | W01(VAFF-8) | 대기 |
