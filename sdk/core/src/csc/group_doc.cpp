@@ -150,6 +150,7 @@ std::string GroupDoc::toXml() const {
              "</mcpttgi:on-network-action-upon-expiration-of-timeout-for-acknowledgement-of-required-members>\n";
     x += "    <mcpttgi:on-network-group-priority>" + std::to_string(priority) + "</mcpttgi:on-network-group-priority>\n";
     x += std::string("    <mcpttgi:on-network-encryption>") + bs(encryption) + "</mcpttgi:on-network-encryption>\n";
+    if (preconfiguredGroupUseOnly) x += "    <mcpttgi:preconfigured-group-use-only>true</mcpttgi:preconfigured-group-use-only>\n";
     const McVideoGroupAttrs& v = mcvideo;
     if (v.present) {
         // MCVideo 속성(§7.2.2 목록 순) — 보호 둘은 명시한다(없으면 true 로 읽힌다 — §7.2.8, mcvideo.md §7 D7)
@@ -271,6 +272,7 @@ bool GroupDoc::parse(const std::string& xml, GroupDoc& out, std::string* err) {
     v = elemText(xml, "on-network-require-affiliation", &f, after); if (f) d.requireAffiliation = isTrue(v);
     v = elemText(xml, "on-network-group-priority", &f, after); if (f) d.priority = std::atoi(v.c_str());
     v = elemText(xml, "on-network-encryption", &f, after); if (f) d.encryption = isTrue(v);
+    v = elemText(xml, "preconfigured-group-use-only", &f, after); if (f) d.preconfiguredGroupUseOnly = isTrue(v);
     v = elemText(xml, "allow-MCPTT-emergency-call", &f, after); if (f) d.emergencyCall = isTrue(v);
     v = elemText(xml, "allow-MCPTT-emergency-alert", &f, after); if (f) d.emergencyAlert = isTrue(v);
     // 없는 요소는 미기재(kUnset)로 남긴다 — «문서에 없었다» 와 «0» 은 다른 뜻이다.

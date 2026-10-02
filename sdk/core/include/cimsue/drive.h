@@ -7,7 +7,7 @@
 //
 //   명령: register | unregister | use <service> | dial <번호|URI> [video] | answer <call> [video] | reject <call> [code] | hangup <call>
 //         hold <call> | resume <call> | dtmf <call> <digits> | transfer <call> <대상> | group_call <group> [listen] [emergency] [broadcast] [implicit]
-//         floor_request <call> | floor_release <call> | affiliate <group> on|off [mcvideo] | pickup <code> [number] | media mic|sample [<wav>]
+//         floor_request <call> | floor_release <call> | affiliate <group> on|off [mcvideo] | mcvideo on|off | pickup <code> [number] | media mic|sample [<wav>]
 //         video_call <group> [prearranged] [queueing] [implicit] | transmit_request <call> [priority] | transmit_release <call>
 //         reception_accept <call> <userId> | reception_end <call> <userId>   (MCVideo 그룹 호·전송 제어 — TS 24.281 · TS 24.581)
 //         stats [call] | quality <call> | quit

@@ -45,16 +45,16 @@ MCPTT 쪽 같은 뿌리의 결함은 [mcptt_conformance_gaps.md](mcptt_conforman
 | 등록·서비스 인가 (VREG) | 4 | — | 1 | 2 | 1 |
 | 제휴 (VAFF) | 7 | 1 | 1 | 5 | — |
 | 그룹 호 — 서버 (VGC) | 7 | — | 1 | 5 | 1 |
-| 그룹 호 — 단말 (VGU) | 3 | — | — | 1 | 2 |
+| 그룹 호 — 단말 (VGU) | 2 | — | — | — | 2 |
 | 개별·그 밖의 호 (VPRV) | 1 | — | — | — | 1 |
 | 송출 제어 — 서버 (TCS) | 9 | — | — | 4 | 5 |
 | 송출 제어 — 단말 (TCU) | 1 | — | — | 1 | — |
 | 수신 제어 — 서버 (RCS) | 1 | — | — | — | 1 |
 | 그룹 문서 (VGMS) | 1 | — | 1 | — | — |
 | 설정 문서·CMS (VCMS) | 1 | — | 1 | — | — |
-| **계** | **35** | **1** | **5** | **18** | **11** |
+| **계** | **34** | **1** | **5** | **17** | **11** |
 
-확인 수준 — ◎ 23 · ○ 7 · △ 5.
+확인 수준 — ◎ 22 · ○ 7 · △ 5.
 
 읽는 순서 — §2(먼저 볼 것) → §3(영역별 전체) → §4(미구현 목록에 빠진 기능) → §5(문서 정정) → §6(묶음과 순서).
 
@@ -91,7 +91,7 @@ MCPTT 쪽 같은 뿌리의 결함은 [mcptt_conformance_gaps.md](mcptt_conforman
 |---|---|---|---|---|---|---|
 | VREG-1 | B | 앱·CSP | §7.2.3 — MCVideo 서비스 설정 PUBLISH(`Event: poc-settings`, P-Preferred-Service = MCVideo ICSI, `<am-settings>`). 규격 착신 참여 기능은 Answer-Mode Indication 을 받기 전이면 480 + `146 T-PF unable to determine the service settings for the called user`(§9.2.1.3.2 3)) | 코어는 보낼 수 있다(`AccountConfig.mcvideoServiceSettings` — 등록마다 한 번, `Engine::Impl::publishMcVideoServiceSettings`). **기본 꺼짐** — CSP 가 489 로 답한다(S25). 앱 셋 모두 켜지 않는다 | 규격 서버에 붙으면 prearranged 멤버 초대가 늘 480 146 으로 끝난다(옵션을 켜면 해소). MCPTT REG-2 와 따로인 MCVideo 몫 | ◎ |
 | VREG-2 | C | CSP | §7.2.1 NOTE 1 · §9.2.2.3.1.1 2) · §9.2.1.3.1.1 2) — MCVideo ID 는 서비스 인가 때 IMPU 에 묶이고 그 묶임으로 요청자를 인가한다. 묶임이 없으면 표 4.4.2-2 `141 user unknown to the participating function` | MCVideo 태그 없는 바인딩(로그오프한 클라이언트 포함)의 INVITE·제휴 PUBLISH 도 그대로 처리한다 — 개시 검사는 이용 자격 행만(`csp/McVideoCallService.cpp:598-602`), PUBLISH 는 역할·자격만(`csp/CscfModule.cpp:1914-1953`) 본다. 바인딩 능력 `m_bMcVideo`(`csp/UserMap.cpp:206`)는 팬아웃 대상 선별에만 쓴다(`csp/McVideoCallService.cpp:425`) | 로그오프한 단말이 MCVideo 호를 열고 제휴를 바꾼다 — 초대는 못 받는데 개시·제휴는 된다 | ◎ |
-| VREG-3 | C | SDK·앱 | §7.1 · §7.2.1AA NOTE — MCVideo 만 로그오프하면 MCVideo 태그만 뺀 재-REGISTER, 다른 MC 서비스 등록은 유지 | 계정을 고치는 API 가 없다 — `addAccount`·`removeAccount` 뿐(`sdk/core/src/engine.cpp:2425`·`:2502`), 공개 헤더도 «값을 바꾼 뒤 계정을 다시 만든다» 고 적는다(`sdk/core/include/cimsue/types.h:113-116`) | MCVideo 를 켜고 끌 때 등록 해제 + 새 등록이 된다 — 서버가 MCPTT·MCVideo 제휴를 모두 지우고(`csp/DbManager.cpp:554-571`) 진행 중 MCPTT 호도 끊긴다 | ◎ |
+| VREG-3 | C | SDK 바인딩 | §7.1 · §7.2.1AA NOTE — MCVideo 만 로그오프하면 MCVideo 태그만 뺀 재-REGISTER, 다른 MC 서비스 등록은 유지 | 코어는 한다(`Engine::setMcVideoEnabled` — 등록 해제 없이 같은 바인딩을 새 Contact 로, `sdk/core/src/engine.cpp`). **C API·Kotlin 파사드에 칸이 없다** | 앱이 실행 중에 MCVideo 를 켜고 끄려면 계정을 다시 만들어야 한다(지금 앱 셋은 실행 중에 바꾸지 않는다) | ◎ |
 | VREG-4 | D | CSP | §7.1 · §7.3.5 3) NOTE «Removal of MCVideo service settings includes removal of all group affiliations» | MCVideo 로그오프(태그를 뺀 재-REGISTER)는 바인딩 능력만 끈다. `mcvideo_affiliations` 행은 등록 해제 때만 지운다(`csp/DbManager.cpp:564-571`) | 로그오프한 클라이언트가 제휴 NOTIFY·N2 계산에 남는다(초대 대상 선별은 `m_bMcVideo` 가 걸러 영향 없음). 규격의 해제 계기는 poc-settings Expires 0 이라 REGISTER 로그오프에 같은 뜻을 줄지는 원문 재확인 | △ |
 
 ### 3.2 제휴 (VAFF) — TS 24.281 §8
@@ -122,8 +122,7 @@ MCPTT 쪽 같은 뿌리의 결함은 [mcptt_conformance_gaps.md](mcptt_conforman
 
 | # | 급 | 대상 | 규격 | CIMS 지금 | 영향 | 확인 |
 |---|---|---|---|---|---|---|
-| VGU-4 | C | SDK | §6.2.1 2)b)·3)b) — 그룹 문서 선호 음성·영상 encoding 을 지원하면 offer rtpmap 에 넣는다 (shall) | `McVideoGroupAttrs.audioEncodings`·`videoEncodings`·`videoResolutions` 를 해석만 하고 쓰지 않는다 — offer 코덱은 전역 우선순위(AMR-WB 먼저, H.264)다(`sdk/core/src/engine.cpp:1864-1898`·`:2867-2943`) | CIMS 기본값(AMR-WB/H264)에서는 드러나지 않는다. 다른 GMS 의 그룹이나 바꾼 설정에서는 규격과 다른 offer 가 나간다(서버 쪽 짝 VSDP-1) | ◎ |
-| VGU-5 | D | SDK·앱 | §9.2.1.2.1.1 · §9.2.2.2.1.1 첫 단락 — 그룹 문서 `<preconfigured-group-use-only>` true 면 호를 열지 않고 알린다 | 요소를 해석하지도 보지도 않는다(SDK·앱에 없음) | 사전 구성 전용 그룹에서도 개시 INVITE 가 나간다(서버도 403 `167` 을 하지 않는다) | ◎ |
+| VGU-5 | D | SDK 바인딩·앱 | §9.2.1.2.1.1 · §9.2.2.2.1.1 첫 단락 — 그룹 문서 `<preconfigured-group-use-only>` true 면 호를 열지 않고 알린다 | 코어는 읽는다(`GroupDoc.preconfiguredGroupUseOnly`·`usableForCalls()`). **C API·Kotlin 파사드에 칸이 없고 앱이 보지 않는다** | 사전 구성 전용 그룹에서도 개시 INVITE 가 나간다(서버도 403 `167` 을 하지 않는다) | ◎ |
 | VGU-6 | D | 관제 | §9.2.1.2.4.1 — 사용자 요청·커버리지 복귀 때 세션 식별자로 재합류 INVITE | SDK 는 `VideoGroupCallOptions.sessionUri` 를 지원한다. 현장 앱은 망 끊김으로 잃은 prearranged 호를 한 번 재합류한다(`CallRules.rejoinVideoSession`). 관제 앱 두 벌은 쓰지 않는다 | 관제 앱은 망이 끊긴 뒤 prearranged 영상 호로 «보기만» 돌아갈 수 없다(서버 late call entry 도 없다 — VGC-2) | ○ |
 
 ### 3.5 개별·그 밖의 호 (VPRV) — TS 24.281 부록 F.1.3 · §10~§15
@@ -191,13 +190,11 @@ MCPTT 쪽 같은 뿌리의 결함은 [mcptt_conformance_gaps.md](mcptt_conforman
 | 문서 | 적힌 것 | 실제 | 항목 |
 |---|---|---|---|
 | mcvideo.md §5.1 CMS 단락 · cmp_media_api.md §7.9 `tc_timers` 행 · `csc/src/services/mcptt.py:357` 주석 | CSP 가 `/internal/mcvideo/service-config` 를 받고, T1·T5 밖의 타이머는 service configuration 값 | CSP 에 그 코드가 없고 T1·T5 만 보낸다 — CMP 는 K5 기본값 | TCS-1 |
-| mcvideo.md §1.4 SDP offer | m=audio 코덱 = 그룹 `mcvideo-preferred-audio-encodings`, m=video = `-video-encodings` | 단말은 그룹 값을 읽지 않고 전역 우선순위(AMR-WB/H.264)로 offer 한다 — 그룹 선호는 서버 집행 코덱(AMR-WB·H264)만 받으므로 결과는 같다 | VGU-4 |
 | mcvideo.md §5.1 «xcap-diff 통지 축에 두 문서를 싣는 것은 CSP 몫(§5.2)» · §6 V1 «xcap-diff» | (구현된 것처럼 읽힌다) | §5.2 에 구현 서술이 없고 코드에도 없다 — «남은 것» 으로 적어야 한다 | VCMS-1 |
 | mcvideo.md §5.3.1 Transmission Request 행 · cmp_media_api.md §7.9 `recv_only` | 그룹 문서 `<on-network-recvonly>` 면 거절 #5 | 그룹 문서에 그 요소가 없고 CSP 가 보내지 않는다 | TCS-10 |
 | mcvideo.md §5.2.1 표 `TRANSMISSION_INACTIVITY` 행 | «T5 는 로그만» (설계로 적힘) | TS 24.581 표 11.1.3-1 은 T5 만료 = 호 해제 — §9 편차 메모로 옮겨 사유를 적거나 해제해야 한다 | VGC-9 |
 | mcvideo.md §5.5 PTT 단말 | «빈 집합 = Expires 0 = 그 사용자 제휴 전부 해제» 를 피하는 이유로 적음 | 그 서버 동작이 규격(클라이언트 단위 해제)과 다르다 — 편차로 적거나 서버를 고친다 | VAFF-1 |
 | mcvideo.md §5.5 PTT 단말 | «영상 n» 목록(이름·기능 별칭·경과) | 별칭이 서버에서 전달되지 않아 늘 비어 있다 | TCS-2 |
-| mcvideo.md §1.2 · `sdk/core/include/cimsue/types.h:113-116` | MCVideo 로그오프 = 태그를 뺀 재-REGISTER | SDK 는 계정을 다시 만든다(등록 해제 + 새 등록) | VREG-3 |
 | `csp/CscfModule.cpp:830` 주석 · `:1885-1889` 문서 주석 | «N2 상한은 … 적용하지 않는다» | MCVideo 는 설정 그룹·PUBLISH 모두 N2 를 적용한다(`:859-867`·`:2038-2059`) — 주석이 MCPTT 몫만 맞다 | — |
 
 ## 6. 묶음과 순서 (권고)
@@ -209,7 +206,7 @@ MCPTT 쪽 같은 뿌리의 결함은 [mcptt_conformance_gaps.md](mcptt_conforman
 | 4 | **제휴를 클라이언트 단위로** — 행 키 통일, 클라이언트 단위 해제·판정, 암묵 제휴 취소·완료 시점. MCPTT 묶음 8(AFF-1~8)과 한 작업 | VAFF-1 · VAFF-2 · VAFF-4 · VAFF-5 · VGC-11 | .45 CSP |
 | 5 | **진행 중 호와 제휴·그룹 변경** — late call entry, 제휴 해제·멤버 제거·서비스 끔 → BYE, 제휴 행 정리. MCPTT 묶음 9·10 의 결정과 같이 | VGC-2 · VGC-12 · VAFF-7 · VAFF-6(결정) | 결정 → .45 CSP |
 | 6 | **service configuration 값 결선** — CSP 가 `/internal/mcvideo/service-config` 를 받아 `tc_timers` 전부를 싣고 변경을 통지받는다, 앱이 MCVideo service config 를 받아 `AccountConfig.tcTimers` 로 싣는다(Kotlin 파사드·C API·.NET — 코어는 받는다), xcap-diff `sel` 에 MCVideo 문서 | TCS-1 · TCU-1 · VCMS-1 | .45 CSP·SDK |
-| 7 | **코덱 선호의 한 줄기** — 그룹 선호 = 서버 집행 코덱(CSC·콘솔이 검증). 단말 offer·초대 offer 가 그 값을 쓴다 | VGU-4 · VGC-8 | .45 SDK · .48 CSP |
+| 7 | **코덱 선호의 한 줄기** — 그룹 선호 = 서버 집행 코덱(CSC·콘솔이 검증). 초대 offer 가 그 값을 쓴다(단말 offer 는 지원 encoding 을 전부 싣는다) | VGC-8 | .48 CSP |
 | 8 | **그룹 문서 PUT 해석** — 없음의 뜻(§7.2.8) | VGMS-1 · VGC-10(CSC 기본값 몫) | .45 CSC |
 | 9 | **단말 호 절차** — poc-settings §7.2.3 송신(+ 서버 §7.3.4 수신과 짝 — 받은 Answer-Mode Indication 으로 멤버 초대의 `Answer-Mode` 를 정한다, 지금은 늘 `Auto`), 계정 갱신 API(태그만 뺀 재-REGISTER), 제휴 상태 구독, preconfigured-group-use-only, 재합류 UI | VREG-1 · VREG-3 · VGU-5 · VGU-6 · VAFF-8 | .45 SDK·현장 → Windows(관제 앱) |
 | 10 | **송출 제어 서버 세부** — 선점 순서, 이른 Granted, 대기 위치 갱신, 무허가 송출 포기, Ack subtype·P 비트, SSRC 기본값, 별칭 전달 | TCS-2 · TCS-3 · TCS-5 · TCS-7 · TCS-8 · TCS-9 · TCS-11 · RCS-2 | .45 CMP(·SDK 별칭) |

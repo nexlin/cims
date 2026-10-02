@@ -270,6 +270,9 @@ struct DriveSession::Impl : public Listener {
             int64_t tok = eng.affiliate(acc, arg(1), on, svc);
             if (tok >= 0) { std::lock_guard<std::mutex> lk(m); tokens[tok] = { op, on, Clock::now() }; }
             result(op, tok >= 0, -1, 0, tok >= 0 ? "" : "affiliate refused");
+        } else if (op == "mcvideo") {
+            // MCVideo 서비스만 켜고 끈다 — 등록은 유지한 채 Contact 의 MCVideo 태그만 바꾼 REGISTER(TS 24.281 §7.2.1AA NOTE)
+            res(op, eng.setMcVideoEnabled(acc, arg(1) != "off"));
         } else if (op == "pickup") {
             int id = eng.pickup(acc, arg(1), arg(2));
             if (id >= 0) markDial(id);

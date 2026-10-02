@@ -635,7 +635,7 @@ struct Engine::Impl {
     /** MCVideo affiliation PUBLISH(TS 24.281 §8.2.1.2) — 관심 그룹 전부(mcvideoAffiliations)를 한 게시로. ue-ctl 에서. */
     int64_t sendMcVideoAffiliation(int accountId, int64_t token, int64_t appToken, bool allowConditional, bool internal = false);
     /** MCVideo 서비스 설정 PUBLISH(TS 24.281 §7.2.3) — 등록이 선 뒤 한 번(AccountConfig.mcvideoServiceSettings). */
-    void publishMcVideoServiceSettings(int accountId);
+    void publishMcVideoServiceSettings(int accountId, bool remove = false);
     std::set<int> mcvideoSettingsSent;                     // 이 등록에서 서비스 설정을 올린 계정(등록이 끊기면 지운다)
     /** 영상 미디어가 활성된 호 — 수신 창 결선 + (계정 videoAutoTransmit 면) 카메라 송신 개시. 영상 없는 빌드면 아무것도 안 한다. */
     void attachVideo(PjCall* call, int accountId);
@@ -2605,6 +2605,51 @@ Result Engine::handleNetworkChange() {
     });
 }
 
+Result Engine::setMcVideoEnabled(int id, bool enabled) {
+    if (!impl_->running) return Result::fail(-1, "not running");
+    return impl_->ctl.runSync([this, id, enabled]() -> Result {
+        Impl* o = impl_.get();
+        auto it = o->accounts.find(id);
+        auto ic = o->accountCfgs.find(id);
+        if (it == o->accounts.end() || ic == o->accountCfgs.end()) return Result::fail(-2, "no such account");
+        if (ic->second.mcvideoEnabled == enabled) return Result::success();
+        if (!enabled) {
+            // 로그오프 — 태그가 빠진 뒤에는 서버가 MCVideo 요청을 받지 않으므로 그 앞에 제휴를 내리고(§8.2.1.2 5)) 서비스 설정을 지운다
+            auto ag = o->mcvideoAffiliations.find(id);
+            if (ag != o->mcvideoAffiliations.end() && !ag->second.empty()) {
+                ag->second.clear();
+                const detail::UpkeepKey k{id, detail::UpkeepKind::McVideoAffiliation, std::string()};
+                o->upkeep.unwant(k);
+                const int64_t t = o->nextToken++;
+                { std::lock_guard<std::mutex> lk(o->snapM); o->tracked[t] = Impl::Tracked{k, true}; }   // 앱의 요청이 아니다 — 결과를 올리지 않는다
+                o->sendMcVideoAffiliation(id, t, t, true, true);
+            }
+            if (o->mcvideoSettingsSent.erase(id)) o->publishMcVideoServiceSettings(id, true);
+        }
+        AccountConfig cfg = ic->second;
+        cfg.mcvideoEnabled = enabled;
+        try {
+            std::string note;
+            pj::AccountConfig ac = detail::buildPjAccountConfig(cfg, &note);
+#if PJSUA_HAS_VIDEO
+            ac.videoConfig.defaultCaptureDevice = (pjmedia_vid_dev_index)o->camDev;
+#endif
+            // pjsua 는 등록 Contact 파라미터가 바뀌면 등록 해제(Expires 0)부터 보낸다(pjsua_acc_modify unreg_first) — 그러면 서버가 이 등록에
+            //   묶인 MCPTT 제휴까지 내리고 진행 중 호의 도달 경로도 사라진다. 해제·재등록을 pjsua 에 맡기지 않고(disableRegOnModify)
+            //   설정만 바꾼 뒤 같은 바인딩을 새 Contact 로 다시 등록한다(TS 24.229 §5.1.1.4 — 재등록).
+            ac.regConfig.disableRegOnModify = true;
+            it->second->modify(ac);
+        } catch (pj::Error& e) {
+            return fromError(e);
+        }
+        ic->second = cfg;
+        o->log(3, "account " + std::to_string(id) + " mcvideo " + (enabled ? "on" : "off") + " — re-REGISTER without unregistering");
+        if (enabled) o->mcvideoSettingsSent.erase(id);       // 켠 뒤 첫 등록 성공에 서비스 설정을 올린다(§7.2.3)
+        if (o->regRecovery.wanted(id)) o->reRegister(id);
+        return Result::success();
+    });
+}
+
 Result Engine::removeAccount(int id) {
     if (!impl_->running) return Result::fail(-1, "not running");
     return impl_->ctl.runSync([this, id]() -> Result {
@@ -3281,11 +3326,34 @@ int64_t Engine::Impl::sendMcpttAffiliationSet(int accountId, int64_t token, int6
     return r < 0 ? -1 : appToken;
 }
 
-void Engine::Impl::publishMcVideoServiceSettings(int accountId) {
+void Engine::Impl::publishMcVideoServiceSettings(int accountId, bool remove) {
     auto ic = accountCfgs.find(accountId);
     if (ic == accountCfgs.end()) return;
     const AccountConfig& cfg = ic->second;
     if (!cfg.mcvideoEnabled || !cfg.mcvideoServiceSettings || cfg.mcvideoServerUri.empty()) return;
+    if (remove) {
+        // 서비스 설정 지우기 — Expires 0(§7.2.1A 4)). 본문 없이, 받은 entity-tag 로(RFC 3903 §4.5). 서버가 받은 적이 없으면 지울 것도 없다.
+        std::string etag;
+        {
+            std::lock_guard<std::mutex> lk(snapM);
+            auto et = publishEtag.find(publishKey(accountId, "poc-settings", McService::McVideo));
+            if (et == publishEtag.end()) return;
+            etag = et->second;
+            publishEtag.erase(et);
+        }
+        std::map<std::string, std::string> rh;
+        rh["P-Preferred-Service"] = mcvideo::kIcsi;
+        rh["Event"] = "poc-settings";
+        rh["Expires"] = "0";
+        rh["SIP-If-Match"] = etag;
+        const int64_t rt = nextToken++;
+        { std::lock_guard<std::mutex> lk(snapM); tracked[rt] = Tracked{detail::UpkeepKey{accountId, detail::UpkeepKind::McVideoAffiliation, "poc-settings"}, true}; }
+        if (doSendRequest(accountId, "PUBLISH", cfg.mcvideoServerUri, "", "", rh, rt) < 0) {
+            std::lock_guard<std::mutex> lk(snapM);
+            tracked.erase(rt);
+        }
+        return;
+    }
     const std::string clientId = cfg.effectiveMcpttClientId();
     const std::string entity = !cfg.instanceId.empty() ? cfg.instanceId : clientId;
     if (entity.empty()) { log(2, "mcvideo service settings: no instance ID — not published"); return; }

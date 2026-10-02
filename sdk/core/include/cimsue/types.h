@@ -136,8 +136,8 @@ struct AccountConfig {
      *  (CSP 0.2.180 전 서버와의 전환기 — 그 서버는 PSI 로 온 통지를 상관하지 못한다). */
     std::string mcdataServerUri;
     /** MCVideo 서비스 사용(mcvideo.md §5.4) — REGISTER Contact 에 `+g.3gpp.mcvideo` 와 `+g.3gpp.icsi-ref` 목록의 mcvideo ICSI 를
-     *  싣는다(TS 24.281 §7.2.1AA — 서비스 인가 본문 없는 등록. MCVideo 로그오프 = 태그를 뺀 재-REGISTER, §7.2.1 NOTE 1 — 값을 바꾼 뒤
-     *  계정을 다시 만들어 등록한다). MCVideo ID 는 effectiveMcpttId(), MCVideo client ID 는 effectiveMcpttClientId()(단일 MC 서비스
+     *  싣는다(TS 24.281 §7.2.1AA — 서비스 인가 본문 없는 등록. MCVideo 로그오프 = 태그를 뺀 재-REGISTER, §7.2.1AA NOTE — 등록 뒤에 켜고
+     *  끌 때는 Engine::setMcVideoEnabled: 계정·등록·다른 MC 서비스는 그대로 두고 Contact 의 MCVideo 태그만 바꾼다). MCVideo ID 는 effectiveMcpttId(), MCVideo client ID 는 effectiveMcpttClientId()(단일 MC 서비스
      *  신원 — mcvideo.md §7 D1). */
     bool mcvideoEnabled = false;
     /** 참여 MCVideo 기능의 PSI — ue-init-config `<anyExt><MCVideo-Service-Details><Server-URI>`(TS 24.484 §7.2.2.1).

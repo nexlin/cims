@@ -21,6 +21,7 @@ class RegRecovery {
 public:
     /** 앱이 등록을 켠 계정(registerAccount). */
     void want(int id) { wanted_.insert(id); }
+    bool wanted(int id) const { return wanted_.count(id) > 0; }
     /** 등록을 끈 계정(unregisterAccount·removeAccount) — 망이 바뀌어도 다시 등록하지 않는다. */
     void unwant(int id) { wanted_.erase(id); pending_.erase(id); }
     /** 망이 바뀌었다 — 다시 등록할 계정. */

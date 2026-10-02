@@ -514,6 +514,8 @@ MCVideo PSI. 동작(구현 — 시험 `McvSip`·`McvCall`, 계약 K3 골든과 �
   (TS 24.581 §6.3.5.3.8) 브리지 결선만이 아니라 **오디오 인코더를 멈춘다**(무음 프레임도 내지 않는다 — `noVad`) — 새 스트림은 브리지 결선 전(onStreamCreated)
   에 멈추고 허가·재협상마다 다시 건다. 빈 RTP keep-alive(PJMEDIA_STREAM_ENABLE_KA)·RTCP 는 그대로라 NAT·CMP latch 는 유지된다. 제어 채널은 호 성립 때
   1회 + 1 s 간격 2회 + 15 s 주기로 빈 RTCP RR(헤더 SSRC = 전송 제어와 같은 값)을 보낸다(ue_nat_traversal.md §7.1).
+- **MCVideo 만 켜고 끄기**(TS 24.281 §7.2.1AA NOTE — `Engine::setMcVideoEnabled(account, on)`) — 계정·등록·MCPTT/MCData 제휴·진행 중 호를 그대로 두고 REGISTER Contact 의 `+g.3gpp.mcvideo`·mcvideo ICSI 만 넣거나 뺀 REGISTER 를 같은 바인딩으로 보낸다. **등록 해제(Expires 0)를 보내지 않는다** — pjsua 는 등록 Contact 파라미터가 바뀌면 해제부터 보내므로(`pjsua_acc_modify`) `disableRegOnModify` 로 설정만 바꾸고 코어가 다시 등록한다. 끌 때는 그 앞에 MCVideo 제휴를 내리고(§8.2.1.2 5) — Expires 0, 결과는 앱에 올리지 않는다) 받아들여진 서비스 설정을 지운다(§7.2.1A 4) — entity-tag 가 있을 때). 등록을 켜지 않은 계정이면 값만 바꾼다. 구동 명령 `mcvideo on|off`(`cimsue/drive.h`).
+- **사전 구성 전용 그룹**(TS 24.481 §7.2.4.2 `<preconfigured-group-use-only>`) — `GroupDoc.preconfiguredGroupUseOnly`·`usableForCalls()`. true 면 그 그룹으로 호·경보를 열지 않고 사용자에게 알린다(TS 24.281 §9.2.1.2.1.1·§9.2.2.2.1.1·§12.1.1.1, TS 24.379 §10.1.1.2.1.1 — 판정은 앱이 그룹 문서로 한다). 읽은 값은 PUT 에 되돌린다.
 - **MCVideo 서비스 설정 PUBLISH**(TS 24.281 §7.2.3 — `AccountConfig.mcvideoServiceSettings`, 기본 false) — 등록이 설 때마다 한 번
   `Event: poc-settings` 로 Answer-Mode 설정·선택한 user profile 을 올린다([mcvideo.md](mcvideo.md) §5.2). 결과는 앱에 올리지 않는다
   (받지 않는 서버의 489 는 로그만 — 다음 등록에서 다시 올린다).

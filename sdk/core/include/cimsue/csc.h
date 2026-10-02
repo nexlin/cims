@@ -152,6 +152,12 @@ struct GroupDoc {
     int priority = 5;                          // on-network-group-priority
     int maxParticipants = 0;                   // on-network-max-participant-count (0 = 미기재)
     std::string orgCode, authorizedUser;       // authorized-user 는 서버 산출(읽기 전용)
+    /** `<preconfigured-group-use-only>`(TS 24.481 §7.2.4.2 — 없으면 false). true 면 이 그룹은 재편성(regroup)의 설정 원본으로만 쓴다:
+     *  단말은 이 그룹으로 호·경보를 열지 않고 사용자에게 알린다(TS 24.281 §9.2.1.2.1.1·§9.2.2.2.1.1·§12.1.1.1, TS 24.379 §10.1.1.2.1.1·
+     *  §10.1.2.2.1.1 — 서버는 403 Warning 167·168). 읽은 값을 그대로 되돌린다(true 일 때만 PUT 에 싣는다). */
+    bool preconfiguredGroupUseOnly = false;
+    /** 이 그룹으로 호·경보를 열 수 있는가 — preconfiguredGroupUseOnly 가 아니다. 앱은 개시·합류·경보 조작 앞에서 본다. */
+    bool usableForCalls() const { return !preconfiguredGroupUseOnly; }
     /** MCVideo 몫 — present 면 toXml 이 MCVideo `<service>`·속성·규칙·entry `<mcvideo-mcvideo-id>` 를 함께 낸다. present 가 아니면 싣지 않고,
      *  서버는 MCVideo `<service>` 가 없는 PUT 으로 그 그룹의 MCVideo 설정을 바꾸지 않는다(전환기 — mcvideo.md §5.1). */
     McVideoGroupAttrs mcvideo;

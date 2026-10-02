@@ -46,7 +46,8 @@ REGISTER 를 공유하는 독립 다이얼로그이고(TS 24.281 §7.1 «shares 
 - **MC service ID 하나** — MC 서비스 제공자가 전 서비스에 한 ID 를 쓰면 MCVideo ID = MCPTT ID 이고, 요청은 서비스 표시(ICSI)로
   가른다(TS 23.280 §10.1.4.1). CIMS 는 이미 `mcdata_id = mcptt_id` 이므로 MCVideo 도 같은 값이다(§7 D1).
 - **REGISTER** — Contact 에 `+g.3gpp.mcvideo` 와 `+g.3gpp.icsi-ref` 의 mcvideo ICSI 를 MCPTT 것과 함께 싣는다. MCVideo 에서 로그오프 =
-  태그를 뺀 재-REGISTER(TS 24.281 §7.2.1). 서비스 인가 = REGISTER 의 mcvideo-info `<mcvideo-access-token>`·`<mcvideo-client-id>`(§7.2.1) 또는
+  태그를 뺀 재-REGISTER(TS 24.281 §7.2.1AA NOTE — 단말은 `Engine::setMcVideoEnabled`: 등록 해제 없이 같은 바인딩을 새 Contact 로 다시 등록한다. MCPTT·MCData
+  제휴와 진행 중 호는 그대로다, ue_sdk.md §4.6). 서비스 인가 = REGISTER 의 mcvideo-info `<mcvideo-access-token>`·`<mcvideo-client-id>`(§7.2.1) 또는
   `Event: poc-settings` PUBLISH(§7.2.1A·§7.2.2). 서버는 MCVideo ID·client ID 를 IMPU 에 묶는다(§7.3.2).
 - **요청마다** — Contact 태그, Accept-Contact `+g.3gpp.mcvideo`·ICSI(require;explicit), P-Preferred-Service, Request-URI = 참여 MCVideo
   기능 PSI(§4.2, §9.2.1.2.1.1).
@@ -80,8 +81,9 @@ REGISTER 를 공유하는 독립 다이얼로그이고(TS 24.281 §7.1 «shares 
 | 긴급·임박·경보 | §4.6, §6.2.8.1.x, §11.2 | re-INVITE 상향·해제, MESSAGE 경보 — MCPTT 와 같은 모양, mcvideo-info 지시자 |
 | 1:1 · 방송 · pull · push · ambient viewing · ad hoc | §10.2 · §6.2.8.2 · §12.2 · §13.2 · §15 · §22 | 후속(§6 V8) |
 
-- **SDP offer**(§6.2.1): `m=audio`(코덱 = 그룹 `mcvideo-preferred-audio-encodings` — CIMS 는 AMR-WB 만 받는다) · `m=video`(코덱 = `mcvideo-preferred-video-encodings`
-  — H.264 만. 그룹 선호는 서버가 집행하는 코덱으로만 둘 수 있다, §7 D13) · 전송 제어를 쓰면 `m=application <RTCP 포트> udp MCVideo` + `a=fmtp:MCVideo …`(TS 24.581 §4.3.3.1). answer 규칙 §6.2.2,
+- **SDP offer**(§6.2.1): `m=audio`·`m=video` 는 단말이 지원하는 encoding 을 **전부** 싣는다(음성 AMR-WB·PCMA·PCMU, 영상 H.264) — 그룹 문서의 선호
+  encoding(`mcvideo-preferred-audio-encodings`·`-video-encodings`)을 지원하면 rtpmap 에 넣으라는 규칙(§6.2.1 2)b)·3)b))은 그것으로 충족된다. 그룹 선호는
+  서버가 집행하는 코덱(AMR-WB·H.264)으로만 둘 수 있어(§7 D13) 늘 offer 안에 있다 · 전송 제어를 쓰면 `m=application <RTCP 포트> udp MCVideo` + `a=fmtp:MCVideo …`(TS 24.581 §4.3.3.1). answer 규칙 §6.2.2,
   참여 기능의 IP·포트·`mc_transmission_ssrc` 재작성 §6.3.2.1.1.1.
 - **fmtp**(TS 24.581 §12.1.2·§14): `mc_queueing` · `mc_priority`(1~255) · `mc_reception_priority` · `mc_granted` · `mc_implicit_request` · `mc_audio_ssrc` ·
   `mc_video_ssrc` · `mc_transmission_ssrc`. answer 는 파라미터를 더하지 않는다(§14.3.1), 제어 기능 `mc_priority` = min(offer, `<user-priority>`, 계층 수)

@@ -693,6 +693,59 @@ TEST(McvCall, RegisterAndAffiliation) {
     ASSERT_TRUE(r.l.wait([&] { return r.l.results.size() >= 4; }));
 }
 
+// MCVideo 만 로그오프·로그온(§7.2.1AA NOTE) — 등록 해제 없이 Contact 의 MCVideo 태그만 뺀·넣은 REGISTER. 끄기 전에 MCVideo 제휴를 내린다
+TEST(McvCall, ServiceLogoffKeepsRegistration) {
+    Rig r;
+    r.addAccount(r.account());
+    ASSERT_TRUE(r.eng.registerAccount(r.acc).ok);
+    std::string reg = r.csp.recv("REGISTER ");
+    ASSERT_FALSE(reg.empty());
+    std::string c = headerOf(reg, "Contact");
+    ASSERT_NE(c.find(";+g.3gpp.mcvideo"), std::string::npos) << c;
+    r.csp.reply(reg, 200, "OK", "Contact: " + c + ";expires=3600\r\nExpires: 3600\r\n");
+    ASSERT_TRUE(r.l.wait([&] { return !r.l.regs.empty() && r.l.regs.back().state == RegState::Registered; }));
+
+    ASSERT_GE(r.eng.affiliate(r.acc, "g101", true, McService::McVideo), 0);
+    std::string pub = r.csp.recv("PUBLISH ");
+    ASSERT_FALSE(pub.empty());
+    r.csp.reply(pub, 200, "OK", "SIP-ETag: e1\r\nExpires: 4294967295\r\n");
+    ASSERT_TRUE(r.l.wait([&] { return r.l.results.size() >= 1; }));
+
+    // 끄기 — ① 제휴 내림(Expires 0, §8.2.1.2 5)) ② MCVideo 태그가 없는 REGISTER. Expires 0 인 REGISTER(등록 해제)는 없다
+    const size_t regsBefore = r.l.regs.size();
+    ASSERT_TRUE(r.eng.setMcVideoEnabled(r.acc, false).ok);
+    std::string off = r.csp.recv("PUBLISH ");
+    ASSERT_FALSE(off.empty());
+    EXPECT_EQ(headerOf(off, "Event"), "presence");
+    EXPECT_EQ(headerOf(off, "Expires"), "0");
+    r.csp.reply(off, 200, "OK");
+    std::string reg2 = r.csp.recv("REGISTER ");
+    ASSERT_FALSE(reg2.empty());
+    c = headerOf(reg2, "Contact");
+    EXPECT_EQ(c.find("+g.3gpp.mcvideo"), std::string::npos) << c;
+    EXPECT_EQ(c.find("icsi.mcvideo"), std::string::npos) << c;
+    EXPECT_NE(c.find(std::string("+sip.instance=\"<") + kClientId + ">\""), std::string::npos) << c;   // 같은 바인딩(인스턴스 ID)
+    EXPECT_EQ(c.find("expires=0"), std::string::npos) << c;
+    EXPECT_NE(headerOf(reg2, "Expires"), "0");
+    r.csp.reply(reg2, 200, "OK", "Contact: " + c + ";expires=3600\r\nExpires: 3600\r\n");
+    ASSERT_TRUE(r.l.wait([&] { return r.l.regs.size() > regsBefore && r.l.regs.back().state == RegState::Registered; }));
+    for (size_t i = regsBefore; i < r.l.regs.size(); i++) EXPECT_NE(r.l.regs[i].state, RegState::Unregistered);
+    EXPECT_EQ(r.l.results.size(), 1u);                         // 코어가 내린 제휴의 결과는 앱에 올리지 않는다
+    EXPECT_TRUE(r.eng.setMcVideoEnabled(r.acc, false).ok);     // 같은 값 — 아무것도 보내지 않는다
+    EXPECT_TRUE(r.csp.recv("REGISTER ", 500).empty());
+
+    // 다시 켜기 — 태그를 넣은 REGISTER, 역시 해제 없이
+    ASSERT_TRUE(r.eng.setMcVideoEnabled(r.acc, true).ok);
+    std::string reg3 = r.csp.recv("REGISTER ");
+    ASSERT_FALSE(reg3.empty());
+    c = headerOf(reg3, "Contact");
+    EXPECT_NE(c.find(";+g.3gpp.mcvideo"), std::string::npos) << c;
+    EXPECT_NE(c.find("icsi.mcvideo"), std::string::npos) << c;
+    EXPECT_NE(headerOf(reg3, "Expires"), "0");
+    r.csp.reply(reg3, 200, "OK", "Contact: " + c + ";expires=3600\r\nExpires: 3600\r\n");
+    EXPECT_FALSE(r.eng.setMcVideoEnabled(99, true).ok);        // 없는 계정
+}
+
 // ── 엔진 — 그룹 호 (C4) ─────────────────────────────────────────────────────────
 
 // chat 합류(골든 03) → 200 OK(골든 04) → 제어 채널 NAT 유지 RR → [영상 보내기] 허가 전·후의 오디오 RTP(허가 밖에서는 payload 없음) → [보내기 끝]
@@ -725,6 +778,18 @@ TEST(McvCall, ChatJoinTransmitAndRelease) {
     EXPECT_EQ(sdpLines(sdp, "i=").size(), 2u) << sdp;         // 미디어 i= 둘(송신 직전 보정)
     EXPECT_TRUE(partLengthsMatch(inv)) << inv;               // 보정 뒤에도 파트 Content-Length = 파트 본문 바이트
     EXPECT_NE(sdp.find("m=audio"), std::string::npos);
+    // §6.2.1 2)b)·3)b) — 그룹 문서의 선호 encoding 을 지원하면 rtpmap 에 넣는다: offer 는 단말이 지원하는 encoding 을 **전부** 싣는다
+    //   (음성 AMR-WB·PCMA·PCMU, 영상 H264 — 서버가 받는 선호값 AMR-WB/H264 는 늘 들어 있다, mcvideo.md D13)
+    for (const char* enc : {"AMR-WB/16000", "PCMA/8000", "PCMU/8000"}) {
+        bool found = false;
+        for (const auto& l : sectionOf(sdp, "m=audio ")) if (l.rfind("a=rtpmap:", 0) == 0 && l.find(enc) != std::string::npos) found = true;
+        EXPECT_TRUE(found) << enc << "\n" << sdp;
+    }
+    {
+        bool h264 = false;
+        for (const auto& l : sectionOf(sdp, "m=video ")) if (l.rfind("a=rtpmap:", 0) == 0 && l.find("H264/90000") != std::string::npos) h264 = true;
+        EXPECT_TRUE(h264) << sdp;
+    }
     std::vector<std::string> fm = sdpLines(sdp, "a=fmtp:MCVideo ");
     ASSERT_EQ(fm.size(), 1u);
     EXPECT_EQ(fm[0].rfind("a=fmtp:MCVideo mc_queueing;mc_priority=5;mc_transmission_ssrc=", 0), 0u) << fm[0];

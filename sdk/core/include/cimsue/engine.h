@@ -45,6 +45,15 @@ public:
      * `refreshRegistration()` 은 망은 그대로인데 등록만 잃은 경우(서버 재기동)의 복구다.
      */
     Result handleNetworkChange();
+    /**
+     * MCVideo 서비스만 켜고 끈다(TS 24.281 §7.1·§7.2.1AA NOTE — MCVideo 로그오프 = MCVideo 태그를 뺀 재-REGISTER, 다른 MC 서비스 등록은 유지).
+     *
+     * 계정·등록·MCPTT/MCData 제휴·진행 중 호는 그대로 두고 REGISTER Contact 의 `+g.3gpp.mcvideo`·mcvideo ICSI 만 넣거나 뺀 REGISTER 를
+     * 같은 바인딩으로 보낸다 — **등록 해제를 보내지 않는다**(해제하면 서버가 이 등록에 묶인 제휴를 모두 내린다). 끌 때는 그 앞에
+     * MCVideo 제휴를 내리고(§8.2.1.2 5) — Expires 0) 올려 둔 서비스 설정을 지운다(§7.2.1A 4)). 진행 중 MCVideo 호는 앱이 먼저 끝낸다.
+     * 등록을 켜지 않은 계정이면 값만 바꾼다(다음 등록에 반영). AccountConfig.mcvideoServerUri 등 나머지 값은 addAccount 때 것 그대로다.
+     */
+    Result setMcVideoEnabled(int accountId, bool enabled);
     Result removeAccount(int accountId);
     RegInfo regInfo(int accountId) const;
     std::vector<int> accounts() const;

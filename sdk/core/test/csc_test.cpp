@@ -987,3 +987,19 @@ TEST(GroupDoc, PutBodyCarriesMemberRuleAndMcDataEntries) {
     EXPECT_EQ(x.find("mcdata-mcdata-id"), std::string::npos);
     EXPECT_EQ(x.find("mcdata-allow-transmit-data-in-this-group"), std::string::npos);
 }
+
+// 사전 구성 전용 그룹(TS 24.481 §7.2.4.2 <preconfigured-group-use-only>) — 호·경보를 열지 않는다(TS 24.281 §9.2.1.2.1.1, 갭 VGU-5)
+TEST(GroupDoc, PreconfiguredGroupUseOnly) {
+    const std::string head = "<group><list-service uri=\"sip:g@d\"><list></list>", tail = "</list-service></group>";
+    GroupDoc d;
+    ASSERT_TRUE(GroupDoc::parse(head + tail, d));
+    EXPECT_FALSE(d.preconfiguredGroupUseOnly); EXPECT_TRUE(d.usableForCalls());     // 없으면 false(기본값)
+    EXPECT_EQ(d.toXml().find("preconfigured-group-use-only"), std::string::npos);
+    ASSERT_TRUE(GroupDoc::parse(head + "<mcpttgi:preconfigured-group-use-only>false</mcpttgi:preconfigured-group-use-only>" + tail, d));
+    EXPECT_TRUE(d.usableForCalls());
+    ASSERT_TRUE(GroupDoc::parse(head + "<mcpttgi:preconfigured-group-use-only>true</mcpttgi:preconfigured-group-use-only>" + tail, d));
+    EXPECT_TRUE(d.preconfiguredGroupUseOnly); EXPECT_FALSE(d.usableForCalls());
+    GroupDoc back;                                                                   // 읽은 값을 되돌린다
+    ASSERT_TRUE(GroupDoc::parse(d.toXml(), back));
+    EXPECT_TRUE(back.preconfiguredGroupUseOnly);
+}
