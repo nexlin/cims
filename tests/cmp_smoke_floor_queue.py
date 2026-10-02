@@ -104,8 +104,11 @@ try:
         hb = req("HEARTBEAT", {}, 0.2)
         if hb: break
     check("cmp up", bool(hb))
+    # T1(End of RTP media, §6.3.4.4.3)은 끈다 — 이 시험은 RTP 를 보내지 않아 기본 4 s 만료가 수신 창과 겹치면
+    #   A 의 Floor Release 전에 발언권이 회수되고 그 Floor Idle 을 앞 단계 수신이 먹는다(간헐 실패).
     r = req("PTT_GROUP_ADD", {"group_id": GROUP, "group_type": "prearranged", "initiator_id": A_ID,
-                              "members": f"{A_ID}:5:participant,{B_ID}:5:participant,{C_ID}:5:chair", "subid": "1"})
+                              "members": f"{A_ID}:5:participant,{B_ID}:5:participant,{C_ID}:5:chair", "subid": "1",
+                              "floor_timers": {"t1_end_rtp": 0}})
     fport = r.get("payload", {}).get("floor_port")
     check("group add", bool(fport), json.dumps(r)[:200])
     socks = {}
