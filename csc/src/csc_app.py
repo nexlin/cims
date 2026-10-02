@@ -337,6 +337,13 @@ if __name__ == '__main__':
 
         # ── MCPTT server (IdMS / GMS / CMS / KMS) ───────────────────────────
         mcptt_conf = config.get('McpttServer', {'Ip': '0.0.0.0', 'Port': 4430})
+        # IdM·CMS·GMS·KMS 구간은 TLS 가 필수다(TS 33.180 B.12 «IdMS interface security» · §5.1.3 — 자격·토큰·키가 오간다). 인증서가
+        #   없으면 평문으로 띄우지 않고 기동을 멈춘다(오류 로그 — lifecycle 엔진이 기동 전에 인증서를 보증하므로 배포본에서는
+        #   나지 않는다). 시험용으로만 McpttServer.AllowPlaintext=true 로 평문 기동을 허용한다.
+        if not (ssl_keyfile and ssl_certfile) and not mcptt_conf.get('AllowPlaintext'):
+            logger.log_error("MCPTT server NOT started — TLS certificate (server.key/server.crt) not found. "
+                             "IdMS/CMS/GMS/KMS require TLS (TS 33.180 B.12); set McpttServer.AllowPlaintext=true only for tests.")
+            raise RuntimeError("MCPTT server requires TLS: server.key / server.crt not found")
         mcptt_server = HttpServer(
             mcptt_conf.get('Ip', '0.0.0.0'),
             mcptt_conf.get('Port', 4430),

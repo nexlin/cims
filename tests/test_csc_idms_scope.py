@@ -159,10 +159,13 @@ class RequireScopeTest(unittest.TestCase):
         self.assertEqual(r.status, 403)
 
     def test_unauthorized_header(self):
+        # TS 24.482 A.2.3 — Bearer 토큰이 없으면 403(1)), 있었는데 검증 실패면 401 invalid_token(2)a) → RFC 6750 §3.1)
         r = m.unauthorized(_args(auth=None))
-        self.assertEqual(r.status, 401)
-        self.assertEqual(r.headers["WWW-Authenticate"], f'Bearer realm="{m.IDMS_DOMAIN}"')
+        self.assertEqual(r.status, 403)
+        self.assertEqual(m.unauthorized(_args(auth="Basic abc")).status, 403, "Bearer scheme 이 아니면 토큰 없음과 같다")
+        self.assertEqual(m.unauthorized(_args(auth="Bearer ")).status, 403)
         r = m.unauthorized(_args(auth="Bearer bad"))
+        self.assertEqual(r.status, 401)
         self.assertIn('error="invalid_token"', r.headers["WWW-Authenticate"])
 
 
@@ -289,6 +292,163 @@ class IssuanceFlowTest(unittest.TestCase):
         self.assertEqual(r.status, 403)
         strong = self._login("openid " + LEGACY)["access_token"]
         self.assertIsNone(m.require_scope(_args(), m.validate_access_token(strong), "GMS", m.SCOPE_PTT_GMS, m.SCOPE_DATA_GMS))
+
+
+class MemberOnlyAndClientRegistrationTest(IssuanceFlowTest):
+    """C06 — IDM-1(MC scope·신원은 PTT 가입자에게만) · IDM-2·3·4(필수 파라미터·클라이언트 등록, IdMs.ClientEnforcement) ·
+    IDM-7(refresh 때 계정 재확인) · IDM-8(no-store) · CMS-10(Bearer 없음 = 403)."""
+    PHONE, PHONE_LINE = "unit-phone", "tel:+821300009999"
+
+    def setUp(self):
+        super().setUp()
+        self._client = (m.CLIENT_ENFORCEMENT, dict(m.IDMS_CLIENTS))
+        m.LOGIN_ACCOUNTS[self.LOGIN]["line_id"] = self.PTT
+        # 전화 전용 계정 — PTT 가입 없음(mcptt_id None), 회선은 VoLTE
+        m.LOGIN_ACCOUNTS[self.PHONE] = {"user_id": 2, "mcptt_id": None, "line_id": self.PHONE_LINE, "password": "pw2", "name": "p"}
+
+    def tearDown(self):
+        m.CLIENT_ENFORCEMENT, clients = self._client
+        m.IDMS_CLIENTS.clear(); m.IDMS_CLIENTS.update(clients)
+        super().tearDown()
+
+    def _auth(self, login, pw, **over):
+        q = {"user_name": login, "user_password": pw, "client_id": "MCPTT_UE", "redirect_uri": "http://localhost/cb",
+             "code_challenge": self.challenge, "code_challenge_method": "S256", "scope": "openid cims:provisioning " + LEGACY,
+             "response_type": "code", "state": "s1", "acr_values": "3gpp:acr:password"}
+        q.update(over)
+        q = {k: v for k, v in q.items() if v is not None}
+        return self.run_(m.handle_auth_req(HandlerArgs("GET", "/idms/authreq", "127.0.0.1", 0, query_params=q), {}))
+
+    def _token(self, code, **over):
+        body = {"grant_type": "authorization_code", "code": code, "code_verifier": self.verifier,
+                "client_id": "MCPTT_UE", "redirect_uri": "http://localhost/cb"}
+        body.update(over)
+        body = {k: v for k, v in body.items() if v is not None}
+        return self.run_(m.handle_token_req(HandlerArgs("POST", "/idms/tokenreq", "127.0.0.1", 0, body=body), {}))
+
+    # ── IDM-1 (TS 24.482 §4.1 · TS 33.180 B.4.2.2) ──
+    def test_phone_only_account_gets_no_mc_scope_or_identity(self):
+        r = self._auth(self.PHONE, "pw2")
+        self.assertEqual(r.status, 200, r.body)
+        t = self._token(r.body["code"])
+        self.assertEqual(t.status, 200, t.body)
+        self.assertEqual(t.body["scope"], "openid cims:provisioning", "MC scope(구 별칭 포함)는 PTT 가입자에게만")
+        for tok, aud in ((t.body["access_token"], "mcptt_client"), (t.body["id_token"], "MCPTT_UE")):
+            pl = jwt.decode(tok, "unit-flow-secret", algorithms=["HS256"], audience=aud)
+            for c in ("mcptt_id", "mcdata_id", "mcvideo_id"):
+                self.assertNotIn(c, pl)
+            self.assertEqual(pl["sub"], self.PHONE)
+        acc = m.validate_access_token(t.body["access_token"])
+        self.assertEqual(m.token_line_id(acc), self.PHONE_LINE, "프로비저닝은 로그인 계정의 회선으로 사람을 찾는다")
+        # KMS 는 MC 신원 없는 토큰에 키를 내지 않는다
+        keep = m.extract_token
+        try:
+            m.extract_token = lambda hdr: acc
+            r = self.run_(m.handle_kms_keyprov(_args(), {}))
+            self.assertEqual(r.status, 403)
+        finally:
+            m.extract_token = keep
+        # refresh 로도 MC scope 를 얻지 못한다(옛 refresh token 이 MC scope 를 들고 있어도)
+        m.storage.tokens["old-phone"] = {"user_id": self.PHONE, "mcptt_id": self.PHONE_LINE, "client_id": "MCPTT_UE",
+                                         "scope": "openid cims:provisioning " + LEGACY, "issued_at": 0,
+                                         "expires_at": 2**31, "revoked": False}
+        r = self._refresh("old-phone", "3gpp:mc:ptt_service")
+        self.assertEqual(r["scope"], "openid cims:provisioning")
+        self.assertNotIn("mcptt_id", jwt.decode(r["access_token"], "unit-flow-secret", algorithms=["HS256"], audience="mcptt_client"))
+
+    def test_ptt_account_unchanged_and_line_id(self):
+        t = self._token(self._auth(self.LOGIN, self.PW).body["code"]).body
+        self.assertEqual(t["scope"].split(), ["openid", "cims:provisioning", LEGACY] + MC8)
+        self.assertEqual(m.token_line_id(m.validate_access_token(t["access_token"])), self.PTT)
+
+    def test_load_login_accounts_mcptt_id_only_from_ptt_line(self):
+        class Cur:
+            def execute(self, sql, params=None): pass
+            def fetchall(self):
+                return [{"uid": 1, "login_id": "a", "passwd": "x", "name": "A", "ptt": "+8250001", "volte": "+8213001", "voip": None},
+                        {"uid": 2, "login_id": "b", "passwd": "y", "name": "B", "ptt": None, "volte": "+8213002", "voip": None},
+                        {"uid": 3, "login_id": "c", "passwd": "z", "name": "C", "ptt": None, "volte": None, "voip": None}]
+        keep_has, keep_acc = m._subs.has_table, dict(m.LOGIN_ACCOUNTS)
+        try:
+            m._subs.has_table = lambda cur, kind: False
+            m._load_login_accounts(Cur())
+            self.assertEqual((m.LOGIN_ACCOUNTS["a"]["mcptt_id"], m.LOGIN_ACCOUNTS["a"]["line_id"]), ("tel:+8250001", "tel:+8250001"))
+            self.assertEqual((m.LOGIN_ACCOUNTS["b"]["mcptt_id"], m.LOGIN_ACCOUNTS["b"]["line_id"]), (None, "tel:+8213002"))
+            self.assertEqual((m.LOGIN_ACCOUNTS["c"]["mcptt_id"], m.LOGIN_ACCOUNTS["c"]["line_id"]), (None, None))
+        finally:
+            m._subs.has_table = keep_has
+            m.LOGIN_ACCOUNTS.clear(); m.LOGIN_ACCOUNTS.update(keep_acc)
+
+    # ── IDM-2·3 (TS 33.180 표 B.4.2.2-1 · B.3) ──
+    def test_auth_request_required_params_and_registration(self):
+        m.IDMS_CLIENTS.clear(); m.IDMS_CLIENTS["MCPTT_UE"] = {"http://localhost/cb"}
+        m.CLIENT_ENFORCEMENT = "enforce"
+        self.assertEqual(self._auth(self.LOGIN, self.PW).status, 200)
+        for missing in ("response_type", "state", "acr_values", "client_id", "scope"):
+            r = self._auth(self.LOGIN, self.PW, **{missing: None})
+            self.assertEqual(r.status, 400, missing)
+            self.assertIn(missing, r.body["error_description"])
+        self.assertEqual(self._auth(self.LOGIN, self.PW, scope="3gpp:mc:ptt_service").status, 400, "scope 에 openid 필수")
+        self.assertEqual(self._auth(self.LOGIN, self.PW, acr_values="urn:other").status, 400)
+        r = self._auth(self.LOGIN, self.PW, client_id="rogue")
+        self.assertIn("not registered", r.body["error_description"])
+        r = self._auth(self.LOGIN, self.PW, redirect_uri="http://evil/cb")
+        self.assertEqual(r.status, 400)
+        self.assertIn("redirect_uri", r.body["error_description"])
+        # log(기본) — 로그만 남기고 통과 · off — 검사 없음
+        for mode in ("log", "off"):
+            m.CLIENT_ENFORCEMENT = mode
+            self.assertEqual(self._auth(self.LOGIN, self.PW, client_id="rogue", state=None, acr_values=None).status, 200, mode)
+
+    def test_parse_idms_clients(self):
+        got = m.parse_idms_clients([{"ClientId": "app1", "RedirectUris": "cims://cb, http://localhost/cb"},
+                                    {"ClientId": "app2", "RedirectUris": ["x://y"]}, {"ClientId": ""}, "junk"])
+        self.assertEqual(got, {"app1": {"cims://cb", "http://localhost/cb"}, "app2": {"x://y"}})
+        self.assertEqual(m.parse_idms_clients(None), {})
+
+    # ── IDM-4 (표 B.4.2.4-1) ──
+    def test_token_request_requires_client_and_redirect(self):
+        m.IDMS_CLIENTS.clear(); m.IDMS_CLIENTS["MCPTT_UE"] = {"http://localhost/cb"}
+        m.CLIENT_ENFORCEMENT = "enforce"
+        code = self._auth(self.LOGIN, self.PW).body["code"]
+        r = self._token(code, redirect_uri=None)
+        self.assertEqual((r.status, r.body["error"]), (400, "invalid_grant"))
+        self.assertIn("redirect_uri is required", r.body["error_description"])
+        self.assertEqual(self._token(code, redirect_uri="http://other/cb").status, 400, "인증 요청과 다른 redirect_uri")
+        ok = self._token(code)
+        self.assertEqual(ok.status, 200, ok.body)
+        m.CLIENT_ENFORCEMENT = "log"
+        code = self._auth(self.LOGIN, self.PW).body["code"]
+        self.assertEqual(self._token(code, redirect_uri=None).status, 200, "log 모드는 통과")
+
+    # ── IDM-8 (B.4.2.5·B.5.3 · RFC 6749 §5.1) ──
+    def test_token_responses_are_no_store(self):
+        t = self._token(self._auth(self.LOGIN, self.PW).body["code"])
+        self.assertEqual((t.headers["Cache-Control"], t.headers["Pragma"]), ("no-store", "no-cache"))
+        r = self.run_(m.handle_token_req(HandlerArgs("POST", "/idms/tokenreq", "127.0.0.1", 0, body={
+            "grant_type": "refresh_token", "refresh_token": t.body["refresh_token"]}), {}))
+        self.assertEqual(r.status, 200, "refresh 요청의 client_id 는 필수가 아니다(표 B.5.2-1)")
+        self.assertEqual(r.headers["Cache-Control"], "no-store")
+        bad = self._token("no-such-code")
+        self.assertEqual((bad.status, bad.headers["Cache-Control"]), (400, "no-store"))
+
+    # ── IDM-7 (B.5.3 RECOMMENDED) ──
+    def test_refresh_revalidates_account(self):
+        t = self._token(self._auth(self.LOGIN, self.PW).body["code"]).body
+        ref = t["refresh_token"]
+        self.assertEqual(m.storage.tokens[ref]["cred"], m.account_cred(self.LOGIN))
+        m.LOGIN_ACCOUNTS[self.LOGIN]["password"] = "changed"                 # 비밀번호 변경
+        r = self.run_(m.handle_token_req(HandlerArgs("POST", "/idms/tokenreq", "127.0.0.1", 0, body={
+            "grant_type": "refresh_token", "refresh_token": ref, "client_id": "MCPTT_UE"}), {}))
+        self.assertEqual((r.status, r.body["error"]), (400, "invalid_grant"))
+        self.assertTrue(m.storage.tokens[ref]["revoked"], "회수한다")
+        m.LOGIN_ACCOUNTS[self.LOGIN]["password"] = self.PW
+        ref2 = self._token(self._auth(self.LOGIN, self.PW).body["code"]).body["refresh_token"]
+        del m.LOGIN_ACCOUNTS[self.LOGIN]                                    # 계정 삭제
+        r = self.run_(m.handle_token_req(HandlerArgs("POST", "/idms/tokenreq", "127.0.0.1", 0, body={
+            "grant_type": "refresh_token", "refresh_token": ref2, "client_id": "MCPTT_UE"}), {}))
+        self.assertEqual(r.status, 400)
+        self.assertTrue(m.storage.tokens[ref2]["revoked"])
 
 
 if __name__ == "__main__":

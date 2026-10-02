@@ -67,6 +67,14 @@
           "restart": false,
           "reload_hint": "SIGUSR1 로 재로드. 다음 요청/조회부터 적용.",
           "help": "단말이 실제로 도달하는 이 서비스의 base URL (예: https://ptt.example.com:4430). 단말에 주소를 알려주는 모든 자리 — ue-init-config 의 XCAP-root-URI, openid-configuration, /provisioning/me 의 csc, CSP 가 xcap-diff NOTIFY 로 광고하는 xcap-root — 의 정본. 비우면 단말/CSP 가 접속해 온 주소에서 유도(올인원 단일 노드 전용). VIP·NAT·리버스 프록시 뒤라면 반드시 지정."
+        },
+        {
+          "key": "McpttServer.AllowPlaintext",
+          "label": "인증서 없이 평문 기동 허용 (시험용)",
+          "type": "bool",
+          "default": false,
+          "restart": true,
+          "help": "IdMS·CMS·GMS·KMS 구간은 TLS 가 필수다(TS 33.180 B.12). 인증서(server.key/server.crt)가 없으면 CSC 는 기동을 멈춘다 — 이 값을 켜면 평문 HTTP 로 띄운다. 운영에서는 켜지 않는다."
         }
       ],
       "scope": "service"
@@ -657,7 +665,48 @@
           "default": [],
           "restart": false,
           "reload_hint": "SIGUSR1 로 재로드 — 다음 authreq 부터 집행.",
-          "help": "비우면 전부 허용(시험 기본). 채우면 authreq 의 redirect_uri 가 목록의 값과 **정확히 일치**(RFC 6749 §3.1.2.3)해야 하고 아니면 400. 상용 전환 시 자체 단말의 redirect_uri 와 외부 단말 것을 함께 등록하고 활성화한다."
+          "help": "비우면 전부 허용(시험 기본). 채우면 authreq 의 redirect_uri 가 목록의 값과 **정확히 일치**(RFC 6749 §3.1.2.3)해야 하고 아니면 400. 클라이언트별 등록은 IdMs.Clients 가 정본이다 — 이 목록은 그와 별개로 늘 집행하는 전역 제한이다."
+        },
+        {
+          "key": "IdMs.ClientEnforcement",
+          "label": "클라이언트 등록·필수 파라미터 검사",
+          "type": "enum",
+          "options": [
+            "off",
+            "log",
+            "enforce"
+          ],
+          "default": "log",
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드 — 다음 요청부터.",
+          "help": "IdMS 가 인증 요청·토큰 요청의 클라이언트 등록(TS 33.180 B.3 — client_id·redirect_uri 가 IdMs.Clients 의 등록 값)과 필수 파라미터(B.4.2.2 response_type·client_id·scope(openid)·redirect_uri·state·acr_values · B.4.2.4 토큰 요청의 client_id·redirect_uri)를 검사하는 방식. log=판정만 '[IdMS][client] would-reject' 로그로 남기고 통과(쓰이는 client_id·redirect_uri 를 모으는 창) / enforce=400 / off=검사 없음. enforce 로 올리기 전에 IdMs.Clients 를 채운다 — 비어 있으면 모든 요청이 거절된다."
+        },
+        {
+          "key": "IdMs.Clients",
+          "label": "등록 클라이언트",
+          "type": "object_list",
+          "default": [],
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드 — 다음 요청부터.",
+          "help": "IdMS 에 등록된 클라이언트(TS 33.180 B.3) — client_id 와 그 클라이언트의 redirect_uri 목록. IdMs.ClientEnforcement 가 이 목록으로 판정한다.",
+          "item_schema": {
+            "fields": [
+              {
+                "key": "ClientId",
+                "label": "client_id",
+                "type": "string",
+                "required": true,
+                "help": "클라이언트 식별자 — 인증·토큰 요청의 client_id 와 정확히 같아야 한다."
+              },
+              {
+                "key": "RedirectUris",
+                "label": "redirect_uri (쉼표로 여럿)",
+                "type": "string",
+                "required": true,
+                "help": "이 클라이언트가 쓰는 redirect_uri — 정확히 일치해야 한다(RFC 6749 §3.1.2.3). 여럿이면 쉼표로 구분."
+              }
+            ]
+          }
         }
       ],
       "scope": "service"

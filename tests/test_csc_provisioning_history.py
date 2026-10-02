@@ -298,9 +298,9 @@ class HandlerTests(unittest.TestCase):
         a = HandlerArgs("GET", "/provisioning/history", "127.0.0.1", 0, headers=h, query_params=qp)
         return asyncio.run(m.handle_provisioning_history(a, {}))
 
-    def test_no_token_401(self):
+    def test_no_token_403(self):
         r = self._get(token="")
-        self.assertEqual(r.status, 401)
+        self.assertEqual(r.status, 403, "Bearer 토큰이 없는 요청 = 403 (TS 24.482 A.2.3 1))")
 
     def test_bad_kind_400(self):
         r = self._get(kind="bogus")

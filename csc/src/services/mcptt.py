@@ -61,6 +61,12 @@ SCOPE_LEGACY_MCPTT = "3gpp:mcptt:ptt_server"
 SCOPE_ALIASES      = {SCOPE_LEGACY_MCPTT: SCOPE_MC_SERVICES}
 # 리소스 서버 scope 검사 모드 (IdMs.ScopeEnforcement): off=검사 없음 / log=would-deny 로그만 / enforce=403.
 SCOPE_ENFORCEMENT  = "enforce"
+# 클라이언트 등록 검사(TS 33.180 B.3 — 클라이언트는 IdM 서버에 등록돼 있고 client_id·redirect_uri 가 등록 값과 같아야 한다)와
+#   인증·토큰 요청의 필수 파라미터 검사(B.4.2.2·B.4.2.4) 모드 — IdMs.ClientEnforcement: off=검사 없음 / log=would-reject 로그만 /
+#   enforce=400. 등록 저장소 = IdMs.Clients([{ClientId, RedirectUris[]}]) → client_id → 허용 redirect_uri 집합.
+CLIENT_ENFORCEMENT = "log"
+IDMS_CLIENTS: dict = {}
+ACR_PASSWORD = "3gpp:acr:password"      # 최소 연동 요건의 ACR 값(B.4.2.2 acr_values) — CIMS IdMS 는 이 방식만 한다
 
 # IdMS 신원 값 — 설정이 비면 apply_config 가 PTT 도메인(Provisioning.Services.ptt.domain)에서 유도한다.
 #   Issuer = IdMs.Issuer > McpttServer.PublicUrl(URL 형, TS 33.180 B.2.1.2) > idms.<Domain>
@@ -332,6 +338,21 @@ def resolve_idms_identity(idms_config: dict, ptt_domain: str, public_url: str):
     return issuer, domain, kms_uri
 
 
+def parse_idms_clients(items) -> dict:
+    """IdMs.Clients([{ClientId, RedirectUris}]) → {client_id: {redirect_uri…}}. RedirectUris 는 목록 또는 쉼표·줄바꿈 구분 문자열."""
+    out: dict = {}
+    for c in (items or []):
+        if not isinstance(c, dict):
+            continue
+        cid = str(c.get('ClientId') or c.get('client_id') or '').strip()
+        uris = c.get('RedirectUris') or c.get('redirect_uris') or []
+        if isinstance(uris, str):
+            uris = [u for u in (x.strip() for x in uris.replace('\n', ',').split(',')) if u]
+        if cid:
+            out.setdefault(cid, set()).update(str(u).strip() for u in uris if str(u).strip())
+    return out
+
+
 def apply_config(config):
     """설정 스칼라 값만 모듈 전역에 재적용 — 가입자/그룹 데이터 로드는 하지 않는다.
 
@@ -370,6 +391,16 @@ def apply_config(config):
         logger.log_error(f"[IdMS] IdMs.ScopeEnforcement='{_enf}' 미지 값 — enforce 로 동작")
         _enf = 'enforce'
     SCOPE_ENFORCEMENT = _enf
+    # 클라이언트 등록(TS 33.180 B.3) — IdMs.Clients = [{ClientId, RedirectUris[]}], IdMs.ClientEnforcement = off|log|enforce(기본 log)
+    global CLIENT_ENFORCEMENT, IDMS_CLIENTS
+    _cenf = str(idms_config.get('ClientEnforcement') or 'log').strip().lower()
+    if _cenf not in ('off', 'log', 'enforce'):
+        logger.log_error(f"[IdMS] IdMs.ClientEnforcement='{_cenf}' 미지 값 — log 로 동작")
+        _cenf = 'log'
+    CLIENT_ENFORCEMENT = _cenf
+    IDMS_CLIENTS = parse_idms_clients(idms_config.get('Clients'))
+    if CLIENT_ENFORCEMENT == 'enforce' and not IDMS_CLIENTS:
+        logger.log_error("[IdMS] IdMs.ClientEnforcement=enforce 인데 IdMs.Clients 가 비었다 — 모든 인증 요청이 거절된다")
 
     # 규격 로그인 폼 입력칸 이름 · redirect_uri 허용 목록 (둘 다 리로드 가능 — 다음 요청부터)
     global IDMS_FORM_LOGIN_FIELD, IDMS_FORM_PASSWORD_FIELD, IDMS_REDIRECT_URI_ALLOW
@@ -669,8 +700,13 @@ def load_shared_data(config):
                 logger.log_error(f"Error loading group {fpath}: {e}")
 
 def _load_login_accounts(cur) -> None:
-    """users.login_id/passwd → LOGIN_ACCOUNTS 전량 교체. 기동 적재와 admin API 변경 후 갱신이 같은 코드를 쓴다."""
-    # MCPTT ID 파생 회선 = ptt → volte → voip 순의 첫 가입(voip 테이블은 있을 때만 — services.subscriptions 프로브)
+    """users.login_id/passwd → LOGIN_ACCOUNTS 전량 교체. 기동 적재와 admin API 변경 후 갱신이 같은 코드를 쓴다.
+
+    `mcptt_id` = MC 서비스 신원 — **PTT 가입(ptt_subscriptions)이 있는 사람만** 가진다(TS 24.482 §4.1·TS 33.180 B.4.2.2: 토큰의
+    scope·MC service ID 는 그 사용자가 인가된 MC 서비스로 정해진다). 전화 전용(volte·voip) 계정은 None — MC scope·`mcptt_id`
+    claim 을 받지 못하고 CMS·GMS·KMS 를 열 수 없다. `line_id` = 그 사람의 첫 회선(ptt → volte → voip)의 tel URI — 프로비저닝
+    (/provisioning/*)이 사람을 찾는 신원이다(token_line_id)."""
+    # 회선 = ptt → volte → voip 순의 첫 가입(voip 테이블은 있을 때만 — services.subscriptions 프로브)
     voip_col = ("(SELECT id FROM voip_subscriptions WHERE user_id=u.id LIMIT 1) voip "
                 if _subs.has_table(cur, 'voip') else "NULL voip ")
     cur.execute(
@@ -679,16 +715,18 @@ def _load_login_accounts(cur) -> None:
         "(SELECT id FROM volte_subscriptions WHERE user_id=u.id LIMIT 1) volte, " + voip_col +
         "FROM users u WHERE u.login_id IS NOT NULL AND u.login_id<>''")
     fresh = {}
+    def _tel(msisdn):
+        if not msisdn:
+            return None
+        m = str(msisdn)
+        return m if m.startswith('tel:') else (f"tel:{m}" if m.startswith('+') else f"tel:+{m}")
+
     for r in cur.fetchall():
-        msisdn = r.get('ptt') or r.get('volte') or r.get('voip')
-        if msisdn:
-            mcptt_id = msisdn if str(msisdn).startswith('tel:') else (
-                f"tel:{msisdn}" if str(msisdn).startswith('+') else f"tel:+{msisdn}")
-        else:
-            mcptt_id = f"login:{r['login_id']}"
         fresh[r['login_id']] = {
             "password": r.get('passwd') or '', "user_id": r['uid'],
-            "mcptt_id": mcptt_id, "name": r.get('name'),
+            "mcptt_id": _tel(r.get('ptt')),
+            "line_id": _tel(r.get('ptt') or r.get('volte') or r.get('voip')),
+            "name": r.get('name'),
         }
     LOGIN_ACCOUNTS.clear()
     LOGIN_ACCOUNTS.update(fresh)
@@ -1248,8 +1286,20 @@ def verify_pkce(code_verifier: str, code_challenge: str, method: str = "S256") -
 # scope        = access_token 에 실리는 (좁혀진) 용도 scope.
 # refresh_scope= 회전된 refresh_token 에 보존할 scope. None 이면 scope 와 동일.
 #   scope 분리 refresh 시 access 만 좁히고 refresh 는 원 grant(broad) 유지 → 다음 다른-용도 refresh 가능.
-def create_tokens(subject, scope, client_id="mcptt_client", nonce=None, refresh_scope=None, mcptt_id=None):
+def account_cred(login_id: str) -> str:
+    """로그인 자격의 지문 — refresh token 에 실어 두고 재발급 때 지금 계정과 대조한다(TS 33.180 B.5.3 «refresh 때 계정이 여전히
+    유효한지 확인하고 아니면 회수» RECOMMENDED). 비밀번호가 바뀌면 값이 달라진다. 계정이 없으면 빈 문자열."""
+    acct = LOGIN_ACCOUNTS.get(login_id or '')
+    if not acct:
+        return ''
+    return hashlib.sha256(f"{login_id}:{acct.get('password') or ''}".encode('utf-8')).hexdigest()[:16]
+
+
+def create_tokens(subject, scope, client_id="mcptt_client", nonce=None, refresh_scope=None, mcptt_id=None, mc_user=True):
     """토큰 3종 발급. `scope` 는 이미 허가 계산(grant_scope / refresh 축소)을 거친 공백 구분 문자열.
+
+    mc_user=False = MC 서비스 신원이 없는 계정(전화 전용 — PTT 가입 없음): `mcptt_id`·`mcdata_id`·`mcvideo_id` claim 을 싣지 않는다
+    (프로비저닝 scope 만 쓰는 토큰). mc_user=True 이고 mcptt_id 가 없으면 subject 를 MC 신원으로 쓴다(DB 없는 legacy 로그인).
 
     claim 은 TS 33.180 Annex B: ID token = iss/sub/aud/exp/iat + mcptt_id/mcdata_id(+nonce),
     access token = exp/scope(공백 구분 문자열)/client_id + mcptt_id/mcdata_id (iss/sub/aud/iat 는 RFC 7519 추가분).
@@ -1258,16 +1308,15 @@ def create_tokens(subject, scope, client_id="mcptt_client", nonce=None, refresh_
     now = int(time.time())
     # sub = CIMS 로그인 ID(인증 신원). mcptt_id = 규격 MCPTT 서비스 신원(분리). 미지정 시 subject 로 폴백.
     sub = subject
-    mcptt = mcptt_id or subject
+    mcptt = (mcptt_id or subject) if mc_user else None
     scope = " ".join(scope.split()) if isinstance(scope, str) else " ".join(scope or [])
 
-    mcvideo_claim = {"mcvideo_id": mcptt} if _mcvideo.has_profile(_ptt_msisdn_of(mcptt)) else {}
+    mcvideo_claim = {"mcvideo_id": mcptt} if mcptt and _mcvideo.has_profile(_ptt_msisdn_of(mcptt)) else {}
+    mc_claims = {"mcptt_id": mcptt, **mcvideo_claim, "mcdata_id": mcptt} if mcptt else {}
 
     # ID Token (OIDC) — nonce 가 있으면 반영(S2b: CSRF/replay 방지, OIDC Core §3.1.2.1)
     id_token_payload = {
-        "mcptt_id": mcptt,
-        **mcvideo_claim,
-        "mcdata_id": mcptt,
+        **mc_claims,
         "iss": IDMS_ISSUER,
         "sub": sub,
         "aud": client_id or "mcptt_client",
@@ -1280,9 +1329,7 @@ def create_tokens(subject, scope, client_id="mcptt_client", nonce=None, refresh_
 
     # Access Token — sub=login_id, mcptt_id/mcdata_id=MC 서비스 신원, client_id=요청 클라이언트(B.2.2.2).
     access_token_payload = {
-        "mcptt_id": mcptt,
-        **mcvideo_claim,
-        "mcdata_id": mcptt,
+        **mc_claims,
         "iss": IDMS_ISSUER,
         "sub": sub,
         "aud": "mcptt_client",
@@ -1300,6 +1347,7 @@ def create_tokens(subject, scope, client_id="mcptt_client", nonce=None, refresh_
         "mcptt_id": mcptt,
         "client_id": client_id,
         "scope": refresh_scope if refresh_scope is not None else scope,
+        "cred": account_cred(subject),
         "issued_at": now,
         "expires_at": now + REFRESH_TOKEN_TTL,
         "revoked": False,
@@ -1331,16 +1379,20 @@ def expand_scopes(scope) -> list:
     return out
 
 
-def grant_scope(requested, mcptt_id=None):
+def grant_scope(requested, mcptt_id=None, mc_user=True):
     """허가 scope 계산 — 요청 ∩ (카탈로그 ∪ 별칭). 반환 (허가 공백 구분 문자열, 제외된 요청 항목 목록).
     별칭은 확장 집합과 원문을 함께 허가한다. 모르는 값은 제외 — 토큰 응답 `scope` 로 알린다.
-    mcptt_id 를 주면 사용자 단위 인가를 더한다 — MCVideo 4종은 MCVideo 이용 자격(mcvideo_user_profile 행)이 있을 때만
-    (TS 33.180 B.4.2.2 — scope 는 사용자가 인가된 MC 서비스만)."""
+    사용자 단위 인가(TS 33.180 B.4.2.2 — scope 는 사용자가 인가된 MC 서비스만 · TS 24.482 §4.1): mc_user=False(PTT 가입이 없는
+    계정)면 MC 서비스 scope 전부(3gpp:mc:* 12종·구 별칭)를 주지 않는다. mcptt_id 를 주면 MCVideo 4종은 MCVideo 이용 자격
+    (mcvideo_user_profile 행)이 있을 때만."""
     items = requested.split() if isinstance(requested, str) else list(requested or [])
     video_ok = mcptt_id is None or _mcvideo.has_profile(_ptt_msisdn_of(mcptt_id))
     granted: list = []
     dropped: list = []
     for s in items:
+        if not mc_user and (s in SCOPE_MC_SERVICES or s in SCOPE_VIDEO_SERVICES or s in SCOPE_ALIASES):
+            dropped.append(s)
+            continue
         if s in SCOPE_VIDEO_SERVICES and not video_ok:
             dropped.append(s)
             continue
@@ -1378,11 +1430,24 @@ def _bearer_challenge(error: str = '', scope: str = '') -> dict:
 
 
 def unauthorized(args) -> HandlerResult:
-    """401 — 토큰 부재는 Bearer 챌린지만, 토큰이 있었으면 error=invalid_token (RFC 6750 §3.1)."""
-    had = bool(args.headers.get('authorization') or args.headers.get('Authorization'))
-    return HandlerResult(status=401, body={"error": "invalid_token" if had else "unauthorized"},
-                         media_type="application/json",
-                         headers=_bearer_challenge('invalid_token' if had else ''))
+    """Bearer 토큰이 없거나 틀렸을 때의 응답 — Authorization 에 Bearer 토큰이 **없으면 403**(TS 24.482 A.2.3 1) — X-3GPP-Asserted-Identity
+    도 받지 않으므로 신원을 알 길이 없는 요청), 토큰이 있었는데 검증에 실패했으면 **401** + error=invalid_token(A.2.3 2)a) →
+    RFC 6750 §3.1 — 단말이 토큰을 갱신하는 신호)."""
+    auth = str(args.headers.get('authorization') or args.headers.get('Authorization') or '').strip()
+    if not (auth[:7].lower() == 'bearer ' and auth[7:].strip()):
+        return HandlerResult(status=403, body={"error": "bearer_token_required"}, media_type="application/json")
+    return HandlerResult(status=401, body={"error": "invalid_token"}, media_type="application/json",
+                         headers=_bearer_challenge('invalid_token'))
+
+
+def token_line_id(payload: dict) -> str:
+    """토큰 주인의 회선 신원(tel URI) — 프로비저닝·관제 관리 API 가 사람을 찾는 값. MC 서비스 신원(mcptt_id)이 있으면 그것,
+    없으면(전화 전용 계정) 로그인 계정의 첫 회선, 그것도 없으면 sub(DB 없는 legacy 로그인은 sub 가 tel URI 다)."""
+    payload = payload or {}
+    if payload.get('mcptt_id'):
+        return payload['mcptt_id']
+    acct = LOGIN_ACCOUNTS.get(payload.get('sub') or '') or {}
+    return acct.get('line_id') or payload.get('sub') or ''
 
 
 def require_scope(args, payload: dict, endpoint: str, *accepted: str) -> Optional[HandlerResult]:
@@ -2354,16 +2419,44 @@ def extract_token(auth_header: str) -> Optional[dict]:
 #   을 공유하고 응답 표현만 다르다.
 
 _OIDC_CTX_KEYS = ('client_id', 'redirect_uri', 'state', 'scope', 'nonce',
-                  'code_challenge', 'code_challenge_method', 'response_type')
+                  'code_challenge', 'code_challenge_method', 'response_type', 'acr_values')
 
 
 def _oidc_ctx(src: dict) -> dict:
-    """요청(query 또는 form)에서 OIDC 인증 요청 문맥만 추려 정규화한다."""
+    """요청(query 또는 form)에서 OIDC 인증 요청 문맥만 추려 정규화한다. `_given` = 요청에 실제로 실려 온 파라미터 이름
+    (기본값으로 채운 것과 구분 — 필수 파라미터 검사용)."""
     src = src if isinstance(src, dict) else {}
     ctx = {k: str(src.get(k) or '') for k in _OIDC_CTX_KEYS}
+    ctx['_given'] = {k for k in _OIDC_CTX_KEYS if ctx[k]}
     ctx['client_id'] = ctx['client_id'] or 'MCPTT_UE'
     ctx['code_challenge_method'] = ctx['code_challenge_method'] or 'S256'
     return ctx
+
+
+def _client_problems(client_id: str, client_given: bool, redirect_uri: str) -> list:
+    """클라이언트 등록 대조(TS 33.180 B.3) — client_id 가 등록돼 있고 redirect_uri 가 그 클라이언트의 등록 값이어야 한다."""
+    out = []
+    if not client_given:
+        out.append("client_id is required")
+    elif client_id not in IDMS_CLIENTS:
+        out.append(f"client_id '{client_id}' is not registered")
+    elif redirect_uri and redirect_uri not in IDMS_CLIENTS[client_id]:
+        out.append(f"redirect_uri '{redirect_uri}' is not registered for client '{client_id}'")
+    return out
+
+
+def _client_gate(stage: str, client_id: str, problems: list, error: str = "invalid_request") -> Optional[HandlerResult]:
+    """클라이언트 등록·필수 파라미터 검사의 판정(IdMs.ClientEnforcement) — off=검사 없음 / log=`would-reject` 한 줄 로그 후 통과
+    (어떤 client_id·redirect_uri 가 쓰이는지 모으는 창) / enforce=400. problems 가 비면 통과(None)."""
+    if not problems or CLIENT_ENFORCEMENT == 'off':
+        return None
+    line = f"[IdMS][client] would-reject stage={stage} client_id={client_id} problems={'; '.join(problems)}"
+    if CLIENT_ENFORCEMENT != 'enforce':
+        logger.log_warning(line)
+        return None
+    logger.log_error(line.replace('would-reject', 'reject', 1))
+    return HandlerResult(status=400, body={"error": error, "error_description": problems[0]},
+                         media_type="application/json", headers={"Cache-Control": "no-store"})
 
 
 def _redirect_uri_allowed(uri: str) -> bool:
@@ -2390,29 +2483,39 @@ def _oidc_validate(ctx: dict, need_redirect: bool) -> Optional[HandlerResult]:
         return _oidc_reject("redirect_uri is required")
     if ctx['redirect_uri'] and not _redirect_uri_allowed(ctx['redirect_uri']):
         return _oidc_reject("redirect_uri is not registered")
-    return None
+    # 필수 파라미터(TS 33.180 표 B.4.2.2-1 — response_type·client_id·scope(openid 포함)·redirect_uri·state·acr_values)와
+    #   클라이언트 등록(B.3). 판정은 IdMs.ClientEnforcement — log 로 내보내 쓰이는 값을 모은 뒤 enforce 로 올린다.
+    given = ctx.get('_given') or set()
+    problems = [f"{k} is required" for k in ('response_type', 'state', 'scope', 'redirect_uri', 'acr_values') if k not in given]
+    if 'scope' in given and SCOPE_OPENID not in ctx['scope'].split():
+        problems.append("scope must include openid")
+    if 'acr_values' in given and ACR_PASSWORD not in ctx['acr_values'].split():
+        problems.append(f"acr_values must include {ACR_PASSWORD}")
+    problems += _client_problems(ctx['client_id'], 'client_id' in given, ctx['redirect_uri'])
+    return _client_gate('authreq', ctx['client_id'], problems)
 
 
 def _authenticate(login_id: str, password: str):
-    """사용자 인증 — (mcptt_id, None) 또는 (None, 실패 사유).
-    CIMS 로그인 ID(login_id) 우선: 토큰 sub=login_id, mcptt_id=규격 MCPTT ID(분리).
-    (DB 미연결 등으로 LOGIN_ACCOUNTS 가 비면 legacy: USERS(tel:+msisdn) 직접 로그인 호환.)"""
+    """사용자 인증 — (True, mcptt_id, None) 또는 (False, None, 실패 사유).
+    CIMS 로그인 ID(login_id) 우선: 토큰 sub=login_id, mcptt_id=규격 MCPTT ID(분리) — PTT 가입이 없는 계정은 mcptt_id 가 None 이다
+    (MC 서비스 신원 없음, _load_login_accounts). DB 미연결 등으로 LOGIN_ACCOUNTS 가 비면 legacy: USERS(tel:+msisdn) 직접 로그인 —
+    그 로그인 ID 가 곧 MC 신원이다."""
     acct = LOGIN_ACCOUNTS.get(login_id) if login_id else None
     expected_pw = None
     mcptt_id = login_id
     if acct is not None:
         expected_pw = acct.get("password")
-        mcptt_id = acct.get("mcptt_id") or login_id
+        mcptt_id = acct.get("mcptt_id")
     elif login_id in USERS:
         expected_pw = USERS[login_id].get("password")
         mcptt_id = login_id
     if not expected_pw:
         logger.log_error(f"[IdMS] Auth Req Failed: login_id {login_id} not found (or no login credential)")
-        return None, "사용자를 찾을 수 없습니다"
+        return False, None, "사용자를 찾을 수 없습니다"
     if expected_pw != password:
         logger.log_error(f"[IdMS] Auth Req Failed: Password mismatch for {login_id}")
-        return None, "비밀번호가 올바르지 않습니다"
-    return mcptt_id, None
+        return False, None, "비밀번호가 올바르지 않습니다"
+    return True, mcptt_id, None
 
 
 def _issue_auth_code(login_id: str, mcptt_id: str, ctx: dict) -> str:
@@ -2421,7 +2524,8 @@ def _issue_auth_code(login_id: str, mcptt_id: str, ctx: dict) -> str:
     now = int(time.time())
     storage.save_auth_code(code, {
         "login_id": login_id,
-        "mcptt_id": mcptt_id,
+        "mcptt_id": mcptt_id,                   # None = MC 서비스 신원 없는 계정(전화 전용)
+        "mc_user": bool(mcptt_id),
         "client_id": ctx['client_id'],
         "redirect_uri": ctx['redirect_uri'] or None,
         "scope": ctx['scope'],
@@ -2490,8 +2594,8 @@ async def handle_auth_req(args: HandlerArgs, kwargs: dict) -> HandlerResult:
         login_id = str(form.get(IDMS_FORM_LOGIN_FIELD) or form.get('user_name') or '').strip()
         password = str(form.get(IDMS_FORM_PASSWORD_FIELD) or form.get('user_password') or '')
         logger.log_info(f"[IdMS] Auth Req(form): user={login_id}, client={ctx['client_id']}, pkce=S256")
-        mcptt_id, why = _authenticate(login_id, password)
-        if not mcptt_id:
+        ok, mcptt_id, why = _authenticate(login_id, password)
+        if not ok:
             # 인증 실패 = 폼 재표시 + 오류(200) — 단말이 다시 채워 제출할 수 있게 문맥을 그대로 이월.
             return HandlerResult(status=200, body=_login_form_html(_authreq_action_url(args), ctx, error=why),
                                  media_type="text/html; charset=utf-8",
@@ -2517,8 +2621,8 @@ async def handle_auth_req(args: HandlerArgs, kwargs: dict) -> HandlerResult:
             return bad
         login_id = str(params.get('user_name') or '')
         logger.log_info(f"[IdMS] Auth Req: user={login_id}, client={ctx['client_id']}, pkce=S256")
-        mcptt_id, why = _authenticate(login_id, str(params.get('user_password') or ''))
-        if not mcptt_id:
+        ok, mcptt_id, why = _authenticate(login_id, str(params.get('user_password') or ''))
+        if not ok:
             return HandlerResult(status=401, body={"error": "access_denied", "error_description": why},
                                  media_type="application/json")
         code = _issue_auth_code(login_id, mcptt_id, ctx)
@@ -2539,8 +2643,17 @@ async def handle_token_req(args: HandlerArgs, kwargs: dict) -> HandlerResult:
     # POST /idms/tokenreq
     # (로깅은 pi_http post_hook 에서 자동 처리)
     data = args.body
+    # 토큰 응답은 캐시에 남기지 않는다(TS 33.180 B.4.2.5·B.5.3 예시 · RFC 6749 §5.1 — 오류 응답 포함)
+    no_store = {"Cache-Control": "no-store", "Pragma": "no-cache"}
+
+    def _err(error: str, desc: str = '') -> HandlerResult:
+        body = {"error": error}
+        if desc:
+            body["error_description"] = desc
+        return HandlerResult(status=400, body=body, media_type="application/json", headers=dict(no_store))
+
     if not isinstance(data, dict):
-        return HandlerResult(status=400, body={"error": "invalid_request"}, media_type="application/json")
+        return _err("invalid_request")
 
     grant_type = data.get('grant_type')
     logger.log_info(f"[IdMS] Token Req: grant_type={grant_type}")
@@ -2549,72 +2662,81 @@ async def handle_token_req(args: HandlerArgs, kwargs: dict) -> HandlerResult:
     if grant_type == 'authorization_code':
         code = data.get('code')
         code_verifier = data.get('code_verifier')
-        client_id = data.get('client_id', 'MCPTT_UE')
+        client_given = bool(data.get('client_id'))
+        client_id = data.get('client_id') or 'MCPTT_UE'
         redirect_uri = data.get('redirect_uri')
-        
+
         if not code:
-            return HandlerResult(status=400, body={"error": "invalid_request"}, media_type="application/json")
-        
+            return _err("invalid_request")
+
         # 1. auth-code 조회
         auth_data = storage.get_auth_code(code)
         if not auth_data:
             logger.log_error(f"Auth code not found: {code}")
-            return HandlerResult(status=400, body={"error": "invalid_grant"}, media_type="application/json")
-        
+            return _err("invalid_grant")
+
         # 2. 만료 체크
         now = int(time.time())
         if now > auth_data.get("expires_at", 0):
             logger.log_error(f"Auth code expired: {code}")
             storage.delete_auth_code(code)
-            return HandlerResult(status=400, body={"error": "invalid_grant"}, media_type="application/json")
-        
+            return _err("invalid_grant")
+
         # 3. 1회성 체크
         if auth_data.get("used", False):
             logger.log_error(f"Auth code already used: {code}")
             storage.delete_auth_code(code)
-            return HandlerResult(status=400, body={"error": "invalid_grant"}, media_type="application/json")
-        
+            return _err("invalid_grant")
+
         # 4. client_id 일치 확인
         if auth_data.get("client_id") != client_id:
             logger.log_error(f"Client ID mismatch: {client_id} != {auth_data.get('client_id')}")
-            return HandlerResult(status=400, body={"error": "invalid_grant"}, media_type="application/json")
-        
-        # 5. redirect_uri 일치 확인 (있으면)
+            return _err("invalid_grant")
+
+        # 5. redirect_uri — 실려 왔으면 인증 요청의 값과 같아야 한다(TS 33.180 표 B.4.2.4-1 «identical», RFC 6749 §4.1.3)
         if redirect_uri and auth_data.get("redirect_uri") != redirect_uri:
             logger.log_error(f"Redirect URI mismatch")
-            return HandlerResult(status=400, body={"error": "invalid_grant"}, media_type="application/json")
-        
+            return _err("invalid_grant")
+        # 5a. 필수 파라미터 client_id·redirect_uri(표 B.4.2.4-1)와 클라이언트 등록(B.3) — 판정은 IdMs.ClientEnforcement.
+        #   redirect_uri 가 빠지면 코드를 가로챈 쪽이 인증 요청의 redirect 를 몰라도 토큰을 받는다(코드 가로채기 방어 한 겹).
+        problems = _client_problems(client_id, client_given, redirect_uri or '')
+        if not redirect_uri:
+            problems.append("redirect_uri is required")
+        deny = _client_gate('tokenreq', client_id, problems, error="invalid_grant")
+        if deny:
+            return deny
+
         # 6. PKCE 검증 (필수)
         if "code_challenge" not in auth_data:
             logger.log_error("PKCE: code_challenge not found in auth_data")
-            return HandlerResult(status=400, body={"error": "invalid_grant", "error_description": "PKCE required"}, media_type="application/json")
-        
+            return _err("invalid_grant", "PKCE required")
+
         if not code_verifier:
             logger.log_error("PKCE: code_verifier missing")
-            return HandlerResult(status=400, body={"error": "invalid_grant", "error_description": "code_verifier required"}, media_type="application/json")
-        
+            return _err("invalid_grant", "code_verifier required")
+
         if not verify_pkce(code_verifier, auth_data["code_challenge"], auth_data.get("code_challenge_method", "S256")):
             logger.log_error("PKCE: verification failed")
-            return HandlerResult(status=400, body={"error": "invalid_grant", "error_description": "PKCE verification failed"}, media_type="application/json")
-            
-            logger.log_info("PKCE: verification success")
-        
+            return _err("invalid_grant", "PKCE verification failed")
+
         # 7. 성공 - 토큰 발급 (sub=login_id, mcptt_id=서비스 신원 분리. nonce 반영)
         login_id = auth_data.get("login_id") or auth_data.get("user_id")
-        mcptt_id = auth_data.get("mcptt_id", login_id)
+        mcptt_id = auth_data.get("mcptt_id")
+        # MC 서비스 신원이 있는 계정인가 — 옛 코드(키 없음)는 mcptt_id 유무로. 없으면 MC scope·claim 을 주지 않는다(IDM-1).
+        mc_user = bool(auth_data.get("mc_user", bool(mcptt_id)))
         nonce = auth_data.get("nonce", "")
-        # 허가 scope = 요청 ∩ 카탈로그(별칭 확장). 제외분은 로그 + 응답 `scope` 로 실제 허가분을 알린다(RFC 6749 §5.1).
-        scope, dropped = grant_scope(auth_data.get("scope", ""), mcptt_id=mcptt_id)
+        # 허가 scope = 요청 ∩ 카탈로그(별칭 확장) ∩ 사용자 인가. 제외분은 로그 + 응답 `scope` 로 실제 허가분을 알린다(RFC 6749 §5.1).
+        scope, dropped = grant_scope(auth_data.get("scope", ""), mcptt_id=mcptt_id if mc_user else None, mc_user=mc_user)
         if dropped:
             logger.log_info(f"[IdMS] scope not granted (unknown or not authorised): {' '.join(dropped)} "
                             f"login_id={login_id}")
 
         id_token, access_token, refresh_token = create_tokens(
-            login_id, scope, client_id, nonce=nonce, mcptt_id=mcptt_id)
-        
+            login_id, scope, client_id, nonce=nonce, mcptt_id=mcptt_id, mc_user=mc_user)
+
         # auth-code 삭제 (1회성)
         storage.delete_auth_code(code)
-        
+
         logger.log_info(f"Token issued for login_id={login_id} mcptt_id={mcptt_id} scope={scope}")
         return HandlerResult(status=200, body={
             "access_token": access_token,
@@ -2623,42 +2745,58 @@ async def handle_token_req(args: HandlerArgs, kwargs: dict) -> HandlerResult:
             "token_type": "Bearer",
             "expires_in": ACCESS_TOKEN_TTL,
             "scope": scope,
-        }, media_type="application/json")
-    
+        }, media_type="application/json", headers=dict(no_store))
+
     # ==================== refresh_token ====================
     elif grant_type == 'refresh_token':
         refresh_token = data.get('refresh_token')
-        client_id = data.get('client_id', 'MCPTT_UE')
-        
+        client_id = data.get('client_id')
+
         if not refresh_token:
-            return HandlerResult(status=400, body={"error": "invalid_request"}, media_type="application/json")
-        
+            return _err("invalid_request")
+
         # 1. refresh_token 조회
         token_data = storage.get_refresh_token(refresh_token)
         if not token_data:
             logger.log_error(f"Refresh token not found")
-            return HandlerResult(status=400, body={"error": "invalid_grant"}, media_type="application/json")
-        
+            return _err("invalid_grant")
+
         # 2. revoked/만료 확인
         now = int(time.time())
         if token_data.get("revoked", False):
             logger.log_error(f"Refresh token revoked")
-            return HandlerResult(status=400, body={"error": "invalid_grant"}, media_type="application/json")
-        
+            return _err("invalid_grant")
+
         if now > token_data.get("expires_at", 0):
             logger.log_error(f"Refresh token expired")
             storage.revoke_refresh_token(refresh_token)
-            return HandlerResult(status=400, body={"error": "invalid_grant"}, media_type="application/json")
-        
-        # 3. client_id 일치 확인
-        if token_data.get("client_id") != client_id:
+            return _err("invalid_grant")
+
+        # 3. client_id — 실려 왔으면 발급 때의 클라이언트와 같아야 한다(refresh 요청의 필수 파라미터는 grant_type 뿐 — 표 B.5.2-1)
+        if client_id and token_data.get("client_id") != client_id:
             logger.log_error(f"Client ID mismatch for refresh token")
-            return HandlerResult(status=400, body={"error": "invalid_grant"}, media_type="application/json")
-        
-        # 4. refresh token rotation
+            return _err("invalid_grant")
+        client_id = token_data.get("client_id") or client_id or 'MCPTT_UE'
+
+        # 3a. 계정 재확인(TS 33.180 B.5.3 RECOMMENDED) — 계정이 지워졌거나 비밀번호가 바뀌었으면 refresh token 을 회수한다.
+        #   LOGIN_ACCOUNTS 가 비면(DB 없는 legacy 로그인) 확인할 원천이 없어 건너뛴다. `cred` 가 없는 옛 refresh token 은 계정
+        #   유무만 본다.
         login_id = token_data["user_id"]                 # = subject(login_id)
-        mcptt_id = token_data.get("mcptt_id", login_id)  # 규격 MCPTT 신원 보존
+        acct = LOGIN_ACCOUNTS.get(login_id) if LOGIN_ACCOUNTS else None
+        if LOGIN_ACCOUNTS:
+            cred = token_data.get("cred")
+            if acct is None or (cred and cred != account_cred(login_id)):
+                logger.log_error(f"[IdMS] refresh token revoked — account {'removed' if acct is None else 'credential changed'}: "
+                                 f"login_id={login_id}")
+                storage.revoke_refresh_token(refresh_token)
+                return _err("invalid_grant")
+
+        # 4. refresh token rotation — MC 서비스 신원은 지금 계정에서 다시 읽는다(PTT 가입이 생기거나 없어졌을 수 있다)
+        mcptt_id = acct.get("mcptt_id") if acct is not None else token_data.get("mcptt_id", login_id)
+        mc_user = bool(mcptt_id)
         granted_scope = token_data.get("scope", "") or ""
+        if not mc_user:
+            granted_scope = grant_scope(granted_scope, mc_user=False)[0]
 
         # scope 분리: refresh 요청이 scope 를 명시하면 원 grant 의 subset 으로 좁혀 발급한다.
         #   (AccountManager 가 authTokenType 별로 provisioning / MC 서비스 토큰을 따로 받기 위함.)
@@ -2674,11 +2812,11 @@ async def handle_token_req(args: HandlerArgs, kwargs: dict) -> HandlerResult:
 
         # 새 토큰 발급 — access 는 좁힌 scope, refresh 는 원 grant(broad) 보존(다음 다른-용도 refresh 가능).
         id_token, access_token, new_refresh_token = create_tokens(
-            login_id, scope, client_id, refresh_scope=granted_scope, mcptt_id=mcptt_id)
-        
+            login_id, scope, client_id, refresh_scope=granted_scope, mcptt_id=mcptt_id, mc_user=mc_user)
+
         # 기존 토큰 회수
         storage.revoke_refresh_token(refresh_token, rotated_to=new_refresh_token)
-        
+
         logger.log_info(f"Refresh token rotated for user: {login_id} scope={scope}")
         return HandlerResult(status=200, body={
             "access_token": access_token,
@@ -2687,9 +2825,9 @@ async def handle_token_req(args: HandlerArgs, kwargs: dict) -> HandlerResult:
             "token_type": "Bearer",
             "expires_in": ACCESS_TOKEN_TTL,
             "scope": scope,
-        }, media_type="application/json")
-    
-    return HandlerResult(status=400, body={"error": "unsupported_grant_type"}, media_type="application/json")
+        }, media_type="application/json", headers=dict(no_store))
+
+    return _err("unsupported_grant_type")
 
 
 # ── GMS XCAP 그룹 CRUD — 가입자(관제사) 주체 (mcptt_authorization.md §3, TS 24.481 Ut PUT/DELETE) ──
@@ -3362,6 +3500,8 @@ async def handle_kms_init(args: HandlerArgs, kwargs: dict) -> HandlerResult:
         return deny
         
     user_uri = token_payload.get('mcptt_id')
+    if not user_uri:                                   # MC 서비스 신원 없는 계정(전화 전용) — 키를 내지 않는다
+        return HandlerResult(status=403, body={"error": "no_mc_service_identity"}, media_type="application/json")
     logger.log_info(f"[KMS] Init: {user_uri}")
     
     xml = get_kms_init_xml(user_uri)
@@ -3376,6 +3516,8 @@ async def handle_kms_keyprov(args: HandlerArgs, kwargs: dict) -> HandlerResult:
         return deny
         
     user_uri = token_payload.get('mcptt_id')
+    if not user_uri:
+        return HandlerResult(status=403, body={"error": "no_mc_service_identity"}, media_type="application/json")
     logger.log_info(f"[KMS] Key Provision: {user_uri}")
     
     xml = get_kms_keyprov_xml(user_uri)
@@ -3765,7 +3907,7 @@ async def handle_provisioning_me(args: HandlerArgs, kwargs: dict) -> HandlerResu
                              body={"error": "insufficient_scope", "required": SCOPE_PROVISIONING},
                              media_type="application/json",
                              headers=_bearer_challenge('insufficient_scope', SCOPE_PROVISIONING))
-    msisdn = _msisdn_from_id(token.get('mcptt_id') or token.get('sub') or '')
+    msisdn = _msisdn_from_id(token_line_id(token))
     # 시그널링(CSP/PSP) host 폴백 = 요청 Host (올인원 전제). CSC 자기 주소는 공개 URL 정본에서.
     host_ip = (args.headers.get('host') or args.headers.get('Host') or '').split(':')[0]
     csc_host, csc_port = public_host_port(args)
@@ -3949,7 +4091,7 @@ async def handle_provisioning_history(args: HandlerArgs, kwargs: dict) -> Handle
     except (TypeError, ValueError):
         limit = 200
 
-    msisdn = _msisdn_from_id(token.get('mcptt_id') or token.get('sub') or '')
+    msisdn = _msisdn_from_id(token_line_id(token))
     if not _DB_CONFIG:
         return HandlerResult(status=503, body={"error": "db_unavailable"}, media_type="application/json")
     scope = None

@@ -53,11 +53,11 @@ PTT(MCPTT) 서비스 구현을 3GPP 규격 원문과 대조해 **규격과 다�
 | 발언권 — 단말 (FCC) | 1 | — | — | 1 | — |
 | 발언권 SDP 협상 (SDP) | 3 | 1 | 2 | — | — |
 | 그룹 문서·GMS (GMS) | 13 | — | 12 | 1 | — |
-| 설정 문서·CMS (CMS) | 8 | — | 4 | 3 | 1 |
-| 신원 관리 (IDM) | 9 | 4 | 1 | 3 | 1 |
-| **계** | **128** | **31** | **58** | **29** | **10** |
+| 설정 문서·CMS (CMS) | 7 | — | 4 | 2 | 1 |
+| 신원 관리 (IDM) | 2 | 1 | 1 | — | — |
+| **계** | **120** | **28** | **58** | **25** | **9** |
 
-확인 수준 — ◎ 66 · ○ 49 · △ 13.
+확인 수준 — ◎ 64 · ○ 44 · △ 12.
 
 읽는 순서 — §2(먼저 볼 것) → §3(영역별 전체) → §4(미구현 목록에 빠진 기능) → §5(문서 정정) → §6(묶음과 순서).
 
@@ -78,8 +78,6 @@ PTT(MCPTT) 서비스 구현을 3GPP 규격 원문과 대조해 **규격과 다�
 |---|---|
 | PRV-2 | 개별 호 발신 인가(`<allow-private-call>`)가 문서에도 서버 판정에도 없다 — 개별 호를 막을 설정이 없다 |
 | SDP-3 | offer 의 `mc_priority` 를 상한 없이 받아 Floor Priority 로 선점 서열을 올릴 수 있다 |
-| IDM-1 | PTT 가입이 없는 전화 계정에도 MC scope 토큰·MCPTT user profile·KMS 키가 나간다 |
-| IDM-3·IDM-4 | 클라이언트 등록·`redirect_uri` 필수 검사가 없다(PKCE 만이 방어선) |
 | ADH-3 | 애드혹 그룹 호 참가자 수 상한이 없다 — INVITE 한 건으로 전원 fan-out |
 
 **호 모델이 규격과 다른 것 (결정이 필요)**
@@ -273,7 +271,6 @@ CSP 는 참여 기능과 제어 기능을 겸한다.
 | CMS-2 | B | CSC·CSP·SDK | §8.3.1A · §8.3.2.8 — user profile 문서 = `…/users/sip:MCPTTID/mcptt-user-profile-<index>.xml` | 핸들러가 `/user-profile` 문자열로 XUI 를 자른다 — `mcptt.py:2955-2967`. 규격 이름이면 `tel:` XUI 는 403 | 규격 단말의 user profile 조회가 실패한다 | ◎ |
 | CMS-5 | B | CSC·CSP | §8.3.2.12 — user profile 문서의 변경을 구독자에게 통지 | 문서의 `<MCPTTGroupInfo>`·`<ImplicitAffiliations>`·`<PrivateCallList>` 는 그룹 멤버십에서 나오는데, 그룹 변경은 `GROUP_CHANGED`(gms 구독자 통지)만 낸다. `UserProfile.*` 설정 재적재도 통지가 없다(`mcptt.py:364-369`) | user profile 을 그룹 목록의 원천으로 쓰는 규격 단말은 편성 변경을 재로그인 전까지 모른다 | ○ |
 | CMS-9 | B | CSC | §5.2 — CMS 는 문서 생성·수정·삭제와 요소 단위 절차를 지원 | user profile·service config 핸들러가 메서드를 가리지 않는다 — PUT·DELETE 에도 200 + 문서 — `mcptt.py:2945-3017` | 규격 CMC 의 수정이 «성공한 것처럼» 보인다 | ○ |
-| CMS-10 | C | CSC | TS 24.482 A.2.3 — Bearer 가 없으면 403 | 401 + `WWW-Authenticate: Bearer` — `mcptt.py:1322-1327` | RFC 6750 관행과는 맞다. 401·403 분기가 규격과 반대 | ○ |
 | CMS-11 | C | CSC | §7.2.1.1 — 만들어 준 UE initial configuration 의 `<mcptt-UE-id>` = 그 단말의 UE ID | 어떤 XUI 로 와도 같은 전역 문서이고 요소가 없다 — `mcptt.py:1925-1956` | UE ID 일치를 확인하는 단말이면 거절 가능 | ○ |
 | CMS-12 | D | CSC | TS 24.482 A.2.1.2 — 단말은 home HTTP proxy 로 XCAP 을 보낸다 | `<http-proxy>` 기본값이 빈 문자열 — `mcptt.py:199`·`:1941` | 프록시 주소로만 보내는 단말은 접속할 곳이 없다(공개 base URL 을 넣으면 해소) | △ |
 | CMS-13 | C | 관제 | §5.1 · §4.2.2.1.1 — 단말은 설정 문서의 변경을 구독한다 | Windows 관제 앱은 gms 축만 구독하고 CMS 는 5분 폴링 — `DispatchSession.cs:515-556` | 인가 변경이 최대 5분 늦게 버튼에 반영된다 | ○ |
@@ -282,15 +279,8 @@ CSP 는 참여 기능과 제어 기능을 겸한다.
 
 | # | 급 | 대상 | 규격 | CIMS 지금 | 영향 | 확인 |
 |---|---|---|---|---|---|---|
-| IDM-1 | A | CSC | TS 24.482 §4.1 — access token 은 그 사용자가 인가된 서비스로 scope 가 정해진다. `mcptt_id` = MCPTT 사용자의 ID | MCPTT ID 를 ptt → volte → voip 순 첫 회선에서 만든다 — `csc/src/services/mcptt.py:634-641`. scope 의 사용자 검사는 MCVideo 뿐 | 전화 전용 가입자가 `3gpp:mc:ptt_*` scope 와 `mcptt_id`(전화번호) 토큰으로 CMS·GMS·KMS 를 연다(KMS 키 프로비저닝 포함) | ◎ |
-| IDM-2 | C | CSC | TS 33.180 B.4.2.2 — `response_type`·`client_id`·`state`·`acr_values` REQUIRED | `acr_values` 는 읽지 않고, `client_id` 가 없으면 `MCPTT_UE` 로 채우며, `state`·`response_type` 이 없어도 통과 — `mcptt.py:2097-2107` | 받아들이는 쪽이 넓다(적합성 시험의 거절 케이스 실패) | ◎ |
-| IDM-3 | A | CSC | B.3 — 클라이언트는 IdM 서버에 등록돼 있어야 하고 `client_id` 는 등록 값과 같아야 한다 | 등록 저장소가 없다 — 아무 `client_id` 나 받는다. `redirect_uri` 허용 목록은 전역 하나이고 비면 전부 허용 | 임의 클라이언트가 임의 redirect 로 코드·토큰을 받는다 | ○ |
-| IDM-4 | A | CSC | B.4.2.4 — 토큰 요청의 `redirect_uri`·`client_id` REQUIRED, `redirect_uri` 는 인증 요청과 같아야 한다 | 없으면 통과(«있으면» 만 대조) — `mcptt.py:2293-2326` | 코드 가로채기 방어 한 겹이 없다 | ○ |
 | IDM-5 | A | SDK | B.11.1 — 단말은 ID token 을 검증한다. B.4.2.3 — `state` 가 다르면 코드를 버린다 | `id_token` 은 보관만 하고(iss·aud·exp·nonce 검사 없음) `state` 를 응답과 비교하지 않는다 — `sdk/core/src/csc/csc_client.cpp:111-136` | 다른 사용자·발급자의 응답을 거르지 못한다(TLS 검증에만 기댄다) | ○ |
 | IDM-6 | B | CSC | B.2.2.1 — 토큰은 JSON web **digital signature** 프로파일(예시 RS256) | HS256(공유 비밀 MAC)뿐 — `mcptt.py:1221`·`:1236`·`:3151` | 단말·분리 배치된 리소스 서버가 서명을 검증할 수 없다. RS256 만 받는 규격 단말은 ID token 검증에서 실패한다 | ◎ |
-| IDM-7 | D | CSC | B.5.3 — refresh 때 계정 유효성을 다시 보고 아니면 회수 (RECOMMENDED) | refresh 는 저장된 값으로 바로 재발급한다. 계정 삭제·비밀번호 변경이 refresh token 을 회수하지 않는다 — `mcptt.py:2370-2431` | 삭제·정지된 가입자가 refresh 수명(기본 7일) 동안 토큰을 받는다 | ○ |
-| IDM-8 | C | CSC | B.4.2.5 · RFC 6749 §5.1 — 토큰 응답에 `Cache-Control: no-store` | 토큰 응답 200 에 헤더가 없다 — `mcptt.py:2360-2367`·`:2424-2431` | 중간 캐시에 토큰이 남을 수 있다 | ○ |
-| IDM-9 | C | CSC | B.12 — IdM·CMS 구간 TLS 필수 | 인증서 파일이 없으면 평문 HTTP 로 뜬다(로그 한 줄) — `csc/src/csc_app.py:309-345` | 인증서가 빠진 배포에서 자격·토큰이 평문으로 오간다(lifecycle 엔진이 인증서를 보증하는 배포에서는 나지 않는다) | △ |
 
 ## 4. 미구현 기능 목록에 빠진 것
 
@@ -345,7 +335,7 @@ mcptt_standard_conformance.md §0-R 은 통째 미구현 기능을 나열하는�
 |---|---|---|---|
 | 1 | **문서 값 한두 줄** — 문서 셋의 T2 제외 대상 | FCS-21(문서) | .48 |
 | 2 | **발언권 메시지 정합** — Ack 의 Message Type · 미대기 Queue Position 254 · Granted Duration | FCS-4 · FCS-8 · FCS-20 | .45 SDK·CMP |
-| 3 | **인가 구멍** | SDP-3 · ADH-3 · IDM-1 · IDM-3 · IDM-4 · IDM-5 | .45 CSP·CMP·CSC·SDK |
+| 3 | **인가 구멍** | SDP-3 · ADH-3 · IDM-5 | .45 CSP·CMP·CSC·SDK |
 | 4 | **user profile 인가 요소의 서버 판정** — 문서는 요소를 싣는다(`ptt_user_profile.allow_private_call*`), CSP 가 그 값으로 판정한다 | PRV-2 · PRV-4 · PRV-8 · EMG-4 · ADH-5 | .48 CSP → Windows(Capabilities) |
 | 5 | **Warning 코드** — 거절 사유를 규격 코드로. handoff §14 K1(SDK 가 Warning 을 올림)과 한 묶음 | GCS-7 · GCS-8 · GCS-11 · REG-3 · ADH-4 · PRV-6 · PRV-7 · EMG-5 | .45 CSP·SDK → Windows(문구 사전) |
 | 6 | **service configuration 요소의 서버 판정** — `<private-call>`·`<adhoc-group-call>` 값을 CSP 가 쓴다 | ADH-3 · PRV-5 | .48 CSP |

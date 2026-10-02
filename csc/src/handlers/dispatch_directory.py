@@ -106,7 +106,7 @@ def _auth(args: HandlerArgs) -> Tuple[Optional[dict], Optional[HandlerResult]]:
 
 def caller_identity(cur, token: dict) -> Tuple[str, Optional[int]]:
     """토큰 → (msisdn, users.id). /provisioning/history 와 같은 해석(가입 id → user_id), 없으면 LOGIN_ACCOUNTS."""
-    msisdn = _m._msisdn_from_id(token.get('mcptt_id') or token.get('sub') or '')
+    msisdn = _m._msisdn_from_id(_m.token_line_id(token))
     for _k, t in _subs.tables(cur):
         cur.execute(f"SELECT user_id FROM {t} WHERE id=%s", (msisdn,))
         r = cur.fetchone()

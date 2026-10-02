@@ -628,6 +628,12 @@ REGISTER/SUBSCRIBE/NOTIFY 의 헤더·본문을 상용 IMS 캡처 기준으로 �
 - **S2a access_token 클레임**: `sub`(=login_id)/`iss`/`iat`/`exp`/`aud`/`client_id`/`scope`(공백 구분 문자열)/
   `mcptt_id`/`mcdata_id`(`create_tokens`). scope = 요청 ∩ 카탈로그(`grant_scope`, B.4.2.2 `3gpp:mc:*`), 리소스 서버 검사
   `require_scope`(B.10). 상세·별칭·롤아웃 = [mcx_identity_scope.md](mcx_identity_scope.md).
+  **MC 신원·MC scope 는 PTT 가입이 있는 계정에만**(TS 24.482 §4.1 — scope 는 그 사용자가 인가된 서비스) — 전화 전용 계정의 토큰에는
+  `mcptt_id`·`mcdata_id`·`3gpp:mc:*` 가 없고, MCPTT user profile·KMS 키 요청은 403 이다.
+- **리소스 서버 응답**(TS 24.482 A.2.3): Bearer 토큰 없음 = **403**, 토큰 검증 실패 = 401 `invalid_token`(`unauthorized`).
+- **토큰 응답**(TS 33.180 B.4.2.5 · RFC 6749 §5.1): `Cache-Control: no-store`·`Pragma: no-cache`. **refresh**(B.5.3)는 계정을 다시
+  본다 — 계정이 없거나 비밀번호가 바뀌었으면 회수하고 `invalid_grant`.
+- **TLS**(B.12): 단말 접속점은 인증서가 없으면 뜨지 않는다(평문 폴백 없음, 시험용 `McpttServer.AllowPlaintext`).
 - **S2b nonce**: authreq `nonce` 저장(`handle_auth_req`) → id_token `nonce` 클레임 반영(OIDC Core §3.1.2.1).
 - **인증 요청 두 말투 병행**(`handle_auth_req` 한 핸들러 안 분기 — 검증·인증·코드 발급은 공유, 응답 표현만 다름):
   - *자체 단말 간이형*: `GET /idms/authreq?user_name&user_password&…` → `200 JSON {code,state,Location}`.
@@ -640,8 +646,12 @@ REGISTER/SUBSCRIBE/NOTIFY 의 헤더·본문을 상용 IMS 캡처 기준으로 �
     `IdMs.FormPasswordField`(기본 `username`/`password` — 외부 SDK 의 헤드리스 폼 자동화가 찾는 이름,
     벤더 설정과 맞춘다). 폼 `action` 은 요청 Host 유도 절대 URL.
   - 공통 검증: PKCE S256 필수, `response_type` 은 있으면 `code`, 미지 scope 비거절,
-    **`redirect_uri` 허용목록 `IdMs.RedirectUriAllow`**(비면 전부 허용 — 상용 전 등록·활성, 정확 일치
-    RFC 6749 §3.1.2.3, 위반 400). 폼 경로는 redirect_uri 필수(302 목적지), 간이형은 선택(종전 호환).
+    전역 `redirect_uri` 제한 `IdMs.RedirectUriAllow`(비면 전부 허용, 정확 일치 RFC 6749 §3.1.2.3, 위반 400).
+  - **클라이언트 등록·필수 파라미터**(TS 33.180 B.3·B.4.2.2·B.4.2.4): 등록 = `IdMs.Clients`(`client_id` → 허용 `redirect_uri`).
+    인증 요청은 `response_type`·`client_id`·`state`·`scope`(openid)·`redirect_uri`·`acr_values`(`3gpp:acr:password`) 필수,
+    토큰 요청은 `client_id`·`redirect_uri` 필수·인증 요청과 일치·등록 대조. 집행은 `IdMs.ClientEnforcement`(`enforce|log|off`,
+    기본 `log` — 위반을 `[IdMS][client] would-reject` 로 남기고 통과; 앱이 전부 맞춘 뒤 `enforce`) —
+    [mcx_identity_scope.md](mcx_identity_scope.md) §4.1.
   - 회귀: 규격 사슬 `tests/csc_bootstrap_conformance.py` Step 3(간이형)·3b(규격), 오프라인 단위
     `tests/csc_idms_authreq_unit.py` §B.
 - 보존: **PKCE S256 강제**(plain/누락 400), refresh 회전/취소.

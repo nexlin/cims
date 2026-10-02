@@ -453,8 +453,11 @@ UE                    IdMS (CSC:4430)      UE                              IdMS 
 ```
 
 폼 입력칸 이름은 `IdMs.FormLoginField`/`IdMs.FormPasswordField`(기본 `username`/`password`),
-`redirect_uri` 허용목록은 `IdMs.RedirectUriAllow`(비면 전부 허용 — 상용 전 등록·활성). 규격 대비는
-[mcptt_standard_conformance.md §3](../features/mcptt_standard_conformance.md).
+전역 `redirect_uri` 제한은 `IdMs.RedirectUriAllow`(비면 전부 허용). **클라이언트 등록**(TS 33.180 B.3)은 `IdMs.Clients`
+(`[{ClientId, RedirectUris}]`)가 정본이고, 인증·토큰 요청의 등록 대조와 필수 파라미터 검사는 `IdMs.ClientEnforcement`
+(`enforce|log|off`, 기본 `log`)가 정한다 — [mcx_identity_scope.md](../features/mcx_identity_scope.md) §4.1. 단말 접속점(4430)은 TLS
+가 필수다(TS 33.180 B.12) — 인증서(`runtime/cert/server.key`·`server.crt`)가 없으면 CSC 는 평문으로 띄우지 않고 기동을 멈춘다
+(시험용 `McpttServer.AllowPlaintext`). 규격 대비는 [mcptt_standard_conformance.md §3](../features/mcptt_standard_conformance.md).
 
 **토큰 구조 (JWT, HS256)** — claim·scope 카탈로그·리소스 서버 검사 규칙의 정본은
 [mcx_identity_scope.md](../features/mcx_identity_scope.md). access token 예:
@@ -476,12 +479,14 @@ UE                    IdMS (CSC:4430)      UE                              IdMS 
 `scope` = 요청 ∩ 카탈로그(TS 33.180 B.4.2.2 `3gpp:mc:*` 8종 + `openid` + 자체 `cims:provisioning`), 공백 구분 문자열.
 구 `3gpp:mcptt:ptt_server` 는 전환기 별칭(8종 전체 확장·병기). GMS/CMS/KMS/MCData FD 는 `IdMs.ScopeEnforcement`
 (`enforce|log|off`)에 따라 자기 scope 를 검사한다. `iss`/`IdMs.Domain`/`KmsUri` 는 비우면 PTT 도메인에서 유도.
+`mcptt_id`·`mcdata_id`·MC scope 는 **PTT 가입이 있는 계정에만** 실린다 — 전화 전용 계정의 토큰은 `sub`·`openid`·`cims:provisioning` 뿐이다.
+Bearer 토큰이 없는 요청은 403, 토큰 검증 실패는 401 `invalid_token`(TS 24.482 A.2.3). 토큰 응답은 `Cache-Control: no-store`.
 
 **토큰 저장 (영속성 규칙):**
 
 - access/id 토큰 = **JWT(서명 검증)** — 서버에 저장하지 않는다. CSC 재기동과 무관하게 만료까지 유효.
 - **refresh 토큰 = file_store** (`{CimsRuntimeDir}/refresh_tokens/`, auth code 도 동일 루트) — 갱신 시
-  회전(rotated_to)·회수 기록. `CimsRuntimeDir` 는 **버전 무관 영속 경로**여야 한다: 버전 디렉터리나
+  회전(rotated_to)·회수 기록. 갱신 때 계정을 다시 본다(TS 33.180 B.5.3) — 계정 삭제·비밀번호 변경이면 회수하고 `invalid_grant`. `CimsRuntimeDir` 는 **버전 무관 영속 경로**여야 한다: 버전 디렉터리나
   개발 트리 경로를 주면 업그레이드마다 저장소가 갈려 단말 refresh 가 "not found" 로 실패하고
   **전 단말 재로그인**이 필요해진다(SIP 평면은 Digest 라 무관 — CSC 평면만 죽는다).
   미설정(빈 값)이면 csc_app 이 인증서(runtime/cert)와 같은 규칙으로 설치 트리의

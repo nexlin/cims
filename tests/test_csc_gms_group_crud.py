@@ -426,13 +426,13 @@ class GateTests(_Base):
         self.assertIn("tel:g-0a1b2c3e", m.GROUPS)
         self.assertEqual(self._delete("g-ffffffff").status, 404)
 
-    def test_tree_owner_mismatch_403_and_no_token_401(self):
+    def test_tree_owner_mismatch_403_and_no_token_403(self):
         self._grant_create()
         r = self._put("g-0a1b2c3d", _doc("tel:g-0a1b2c3d", "n", []), xui=OTHER_PTT)
         self.assertEqual(r.status, 403)
         r = _run(m.handle_group_management(
             HandlerArgs("PUT", f"/org.openmobilealliance.groups/users/tel:{OWNER_PTT}/tel:g-0a1b2c3d", "127.0.0.1", 0, headers={}), {}))
-        self.assertEqual(r.status, 401)
+        self.assertEqual(r.status, 403, "Bearer 토큰이 없는 요청 = 403 (TS 24.482 A.2.3 1))")
 
     def test_list_includes_owner_and_marks_is_owner(self):
         import json

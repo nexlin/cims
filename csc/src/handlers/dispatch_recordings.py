@@ -98,7 +98,7 @@ def _safe_id(rec_id: str) -> bool:
 def _scope_sets(config: dict, token: dict):
     """(msisdn, scope, group_key_of) — /provisioning/history 와 같은 해석(역할 범위). DB 오류는 예외."""
     db = (config or {}).get('CimsDatabase') or {}
-    msisdn = _m._msisdn_from_id(token.get('mcptt_id') or token.get('sub') or '')
+    msisdn = _m._msisdn_from_id(_m.token_line_id(token))
     conn = pymysql.connect(host=db.get('Host', '127.0.0.1'), port=int(db.get('Port', 3306)),
                            user=db.get('User', 'root'), password=db.get('Password', ''),
                            database=db.get('Db', 'cims'), connect_timeout=5)

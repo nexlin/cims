@@ -20,8 +20,14 @@ MCPTT 단말 로그인 + 토큰 발급 (OAuth 2.0 Authorization Code + PKCE S256
 | POST | `/idms/introspect` | 토큰 introspection (RFC 7662: `active sub iss client_id mcptt_id mcdata_id aud exp iat scope`) |
 
 검증 공통: PKCE 누락/plain → 400, `redirect_uri` 허용목록 `IdMs.RedirectUriAllow`(비면 전부 허용,
-정확 일치) 위반 → 400, 인증 실패(간이형) → 401 `access_denied`. 리소스 서버(GMS/CMS/KMS/`/mcdata/fd`)는
-토큰 부재/무효 → 401 `WWW-Authenticate: Bearer`, scope 부족 → 403 `insufficient_scope` + `WWW-Authenticate: Bearer
+정확 일치) 위반 → 400, 인증 실패(간이형) → 401 `access_denied`. 인증 요청의 필수 파라미터(`response_type=code`·`client_id`·
+`state`·`scope`(openid 포함)·`redirect_uri`·`acr_values`(`3gpp:acr:password`), TS 33.180 B.4.2.2)와 클라이언트 등록 대조
+(`IdMs.Clients` — `client_id` 와 그 `redirect_uri`, B.3), 토큰 요청의 `client_id`·`redirect_uri` 필수·인증 요청과 일치(B.4.2.4)는
+`IdMs.ClientEnforcement` 가 정한다 — `enforce` 는 400 `invalid_request`(토큰 요청은 `invalid_grant`), `log`(기본)는 통과시키고
+`[IdMS][client] would-reject` 로그, `off` 는 검사 없음. refresh 는 계정을 다시 보고(삭제·비밀번호 변경 → 회수·`invalid_grant`,
+B.5.3) `client_id` 는 주면 대조한다. 토큰 응답은 `Cache-Control: no-store`·`Pragma: no-cache`. MC scope·`mcptt_id`/`mcdata_id` 는
+PTT 가입이 있는 계정에만 나간다. 리소스 서버(GMS/CMS/KMS/`/mcdata/fd`)는
+**Bearer 토큰 없음 → 403**(TS 24.482 A.2.3), 토큰 무효·만료 → 401 `WWW-Authenticate: Bearer error="invalid_token"`, scope 부족 → 403 `insufficient_scope` + `WWW-Authenticate: Bearer
 error="insufficient_scope", scope="…"`(`IdMs.ScopeEnforcement=enforce`; `log` 는 로그만). 흐름 상세는 3GPP TS 24.482 §6.3.1 과
 [mcptt_standard_conformance.md §3 IdMS](../design/features/mcptt_standard_conformance.md).
 

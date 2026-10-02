@@ -21,6 +21,12 @@ CIMS 는 사업자 하나·서버 한 벌(CSC+CSP)·가입 테이블 하나(`ptt
 MC 서비스인지 표시"(같은 절)이며, SIP 평면은 Content-Type(`application/vnd.3gpp.mcdata-*`), 토큰 평면은 서비스별
 claim(`mcptt_id`/`mcdata_id`)과 scope 로 충족한다.
 
+**MC service ID 는 PTT 가입이 있는 사람만 가진다**(TS 24.482 §4.1 · TS 33.180 B.4.2.2 — 토큰의 scope·MC service ID 는 그 사용자가
+인가된 MC 서비스로 정해진다). 로그인 계정의 `mcptt_id` 는 그 사람의 `ptt_subscriptions` 회선에서만 만든다(`_load_login_accounts`).
+전화 전용(volte·voip) 계정은 IdMS 로그인은 되지만(프로비저닝 `/provisioning/*` 용) 토큰에 `mcptt_id`·`mcdata_id`·`mcvideo_id` 가
+없고 MC scope 를 받지 못한다 — CMS·GMS 는 본인 문서 대조에서 403, KMS 는 403 `no_mc_service_identity`. 프로비저닝 계열은 토큰의
+MC 신원이 없으면 로그인 계정의 첫 회선(`line_id` — ptt → volte → voip)으로 사람을 찾는다(`token_line_id`).
+
 ## 2. 토큰 claim
 
 `create_tokens` 가 발급한다. 서명 = HS256(`IdMs.JwtSecret`), 수명 = `IdMs.AccessTokenTtl`(기본 3600 s).
@@ -64,13 +70,36 @@ discovery `scopes_supported` 는 카탈로그 전체와 §5 별칭을 광고한�
 - **허가 = 요청 ∩ 카탈로그** (`grant_scope`). 모르는 값은 조용히 제외하고(RFC 6749 §3.3 허용 동작) 응답 `scope` 로
   실제 허가분을 알린다. 요청 자체는 거절하지 않는다(`invalid_scope` 없음).
 - `openid` 부재를 거절하지 않는다 — 규격 SDK 중 `openid` 를 빼고 요청하는 구현이 있어(실측) ID token 은 항상 발급한다.
-- **사용자 단위 인가**: PTT 가입자는 MCPTT·MCData 8종 전부를 받을 수 있다(MCData 만 막는 가입자 플래그 없음 — §10). MCVideo 4종은
+- **사용자 단위 인가**: MC 서비스 scope(12종·구 별칭)는 **PTT 가입이 있는 계정에만** 준다(`grant_scope(…, mc_user)` — 전화 전용 계정은
+  `openid`·`cims:provisioning` 만. refresh 도 지금 계정으로 다시 판정한다). PTT 가입자는 MCPTT·MCData 8종 전부를 받을 수 있다(MCData 만 막는 가입자 플래그 없음 — §10). MCVideo 4종은
   MCVideo 이용 자격(`mcvideo_user_profile` 행)이 있을 때만 준다(`grant_scope(requested, mcptt_id)` — 없으면 제외하고 응답 `scope` 로 알린다).
 - **refresh 축소**: refresh 요청에 `scope` 가 있으면 `expand(요청) ∩ expand(원 grant)` 로 좁혀 access 를 발급하고,
   회전된 refresh 는 원 grant(broad)를 그대로 보존한다. 교집합이 비면 원 grant 로 발급한다. CIMS 앱의 AccountManager 가
   용도별(provisioning / MC 서비스) 토큰을 이 경로로 따로 받는다.
 - authreq 두 말투(자격 쿼리 간이형 / 규격 폼) 모두 같은 규칙을 거친다(`_issue_auth_code` 는 요청 scope 를 저장, 허가 계산은
   tokenreq 에서).
+- **refresh 때 계정 재확인**(B.5.3 RECOMMENDED): refresh token 은 발급 때의 자격 지문(`cred` — 로그인 ID·비밀번호의 해시)을 들고,
+  재발급 때 지금 계정과 대조한다. 계정이 지워졌거나 비밀번호가 바뀌었으면 그 refresh token 을 회수하고 `invalid_grant`.
+  refresh 요청의 `client_id` 는 필수가 아니다(표 B.5.2-1) — 실려 오면 발급 때의 값과 같아야 한다.
+- **토큰 응답은 캐시 금지** — 성공·오류 모두 `Cache-Control: no-store`·`Pragma: no-cache`(B.4.2.5·B.5.3, RFC 6749 §5.1).
+
+### 4.1 클라이언트 등록·필수 파라미터 (TS 33.180 B.3 · B.4.2.2 · B.4.2.4)
+
+클라이언트는 IdMS 에 등록돼 있어야 하고 `client_id`·`redirect_uri` 는 등록 값과 같아야 한다. 등록 저장소 = 설정 `IdMs.Clients`
+(`[{ClientId, RedirectUris}]`), 판정 = `IdMs.ClientEnforcement`(SIGUSR1 리로드):
+
+| 모드 | 동작 |
+|---|---|
+| `log` (기본) | 판정만 계산해 통과. `[IdMS][client] would-reject stage=authreq\|tokenreq client_id=… problems=…` 한 줄 — 어떤 `client_id`·`redirect_uri` 가 쓰이는지 모으는 창 |
+| `enforce` (최종 상태) | 400 — 인증 요청 `invalid_request`, 토큰 요청 `invalid_grant`, `error_description` 에 첫 사유. `IdMs.Clients` 가 비면 모든 요청이 거절된다 |
+| `off` | 검사 없음 |
+
+검사하는 것 — **인증 요청**(표 B.4.2.2-1): `response_type`·`client_id`·`scope`(`openid` 포함)·`redirect_uri`·`state`·`acr_values`
+(`3gpp:acr:password` 포함) 필수 + `client_id` 등록 + `redirect_uri` 가 그 클라이언트의 등록 값. **토큰 요청**(표 B.4.2.4-1): `client_id`·
+`redirect_uri` 필수 + 등록 대조. 모드와 무관하게 늘 집행하는 것 = PKCE S256(`code_challenge` 필수)·`response_type` 이 있으면 `code`·
+토큰 요청의 `redirect_uri` 가 실려 오면 인증 요청의 값과 일치·전역 `IdMs.RedirectUriAllow`(채웠을 때).
+**롤아웃**: `log` 로 내보내 우리 앱·협력업체·외부 SDK 의 값을 모은다 → `IdMs.Clients` 등록(자체 단말의 간이형 요청은 `state`·
+`acr_values`·`response_type` 을 싣게 고친 뒤) → `enforce`.
 
 ## 5. 전환기 별칭 `3gpp:mcptt:ptt_server`
 
@@ -92,7 +121,8 @@ discovery `scopes_supported` 는 카탈로그 전체와 §5 별칭을 광고한�
 ## 6. 리소스 서버 scope 검사
 
 `require_scope(args, token, endpoint, *accepted)` — `accepted` 중 하나가 토큰에 있으면 통과(TS 33.180 B.10).
-토큰 부재/무효는 `unauthorized()` = 401 + `WWW-Authenticate: Bearer realm="<domain>"`(토큰이 있었으면 `error="invalid_token"`).
+`unauthorized()` — Authorization 에 Bearer 토큰이 **없으면 403**(TS 24.482 A.2.3 1)), 토큰이 있었는데 검증에 실패했으면(만료·서명 불일치)
+**401** + `WWW-Authenticate: Bearer realm="<domain>", error="invalid_token"`(A.2.3 2)a) → RFC 6750 §3.1 — 단말이 토큰을 갱신하는 신호).
 
 | 모드 (`IdMs.ScopeEnforcement`, SIGUSR1 리로드) | 동작 | 용도 |
 |---|---|---|
@@ -138,7 +168,9 @@ introspection(`/idms/introspect`, RFC 7662): `active sub iss client_id mcptt_id 
 ## 9. 검증
 
 - **S1-UNIT-CSC** `tests/test_csc_idms_scope.py`: 요청∩카탈로그·미지 제외·별칭 확장/병기·배열형 구 토큰 수용·claim(scope
-  문자열/`client_id`/`mcdata_id`)·refresh 축소(별칭 위)·검사 3모드·RFC 6750 헤더·issuer 유도·discovery·인프로세스 발급 흐름.
+  문자열/`client_id`/`mcdata_id`)·refresh 축소(별칭 위)·검사 3모드·RFC 6750 헤더·issuer 유도·discovery·인프로세스 발급 흐름 ·
+  전화 전용 계정(MC scope·신원 없음, KMS 403, refresh 로도 못 얻음)·클라이언트 등록 3모드·필수 파라미터·토큰 요청 `redirect_uri` ·
+  no-store · refresh 계정 재확인(비밀번호 변경·삭제 → 회수) · Bearer 없음 403.
 - **S3** `tests/csc_bootstrap_conformance.py --enforcement enforce|log|off`: Step 3 토큰 계약, Step 3c 카탈로그(video 제외)·
   scope 부족 403(`WWW-Authenticate` 에 필요 scope)·충분 200·refresh 축소/broad 보존·discovery 정합(issuer = 토큰 `iss`).
 
