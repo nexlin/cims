@@ -151,6 +151,16 @@ bool UeInitConfigDoc::parse(const std::string& xml, UeInitConfigDoc& out, std::s
         if (mcdata.found) d.mcdataServerUri = elemText(mcdata.inner, "Server-URI");
         Elem mcvideo = elem(on.inner, "MCVideo-Service-Details");
         if (mcvideo.found) d.mcvideoServerUri = elemText(mcvideo.inner, "Server-URI");
+        // 발언권 참여자 타이머(초, unsignedByte 0~255 — §7.2.2.7, TS 24.380 표 11.1.1-1). 0·없음 = 기본값.
+        Elem t = elem(on.inner, "Timers");
+        if (t.found) {
+            auto ms = [&](const char* local) { int v = intElem(t.inner, local); return v > 0 && v <= 255 ? v * 1000 : 0; };
+            d.floorTimers.t100Ms = ms("T100");
+            d.floorTimers.t101Ms = ms("T101");
+            d.floorTimers.t103Ms = ms("T103");
+            d.floorTimers.t104Ms = ms("T104");
+            d.floorTimers.t132Ms = ms("T132");
+        }
     }
     out = d;
     return true;

@@ -25,6 +25,7 @@ import com.cims.ue.sdk.jni.EngineConfig as JniEngineConfig
 import com.cims.ue.sdk.jni.FdFile as JniFdFile
 import com.cims.ue.sdk.jni.FloorEvent as JniFloorEvent
 import com.cims.ue.sdk.jni.FloorInfo as JniFloorInfo
+import com.cims.ue.sdk.jni.FloorTimers as JniFloorTimers
 import com.cims.ue.sdk.jni.GroupCallOptions as JniGroupCallOptions
 import com.cims.ue.sdk.jni.McpttCondition as JniMcpttCondition
 import com.cims.ue.sdk.jni.McpttInfo as JniMcpttInfo
@@ -208,6 +209,8 @@ data class AccountConfig(
     val mcvideoServerUri: String = "",
     /** MCVideo 멤버 초대(prearranged) 자동 수락(§6.2.3.1.2) — 수락은 세션 합류일 뿐, 영상 보기는 수신 제어([Call.acceptReception]). */
     val autoAnswerMcvideo: Boolean = true,
+    /** 발언권 참여자 타이머 — ue-init-config `<Timers>`([UeInitConfigDoc.floorTimers])를 싣는다. 다음 MCPTT 호부터 쓴다. */
+    val floorTimers: FloorTimers = FloorTimers(),
 ) {
     internal fun toJni(): JniAccountConfig = JniAccountConfig().also {
         it.serverHost = serverHost; it.serverPort = serverPort
@@ -226,6 +229,24 @@ data class AccountConfig(
         it.maxSdsCplaneBytes = maxSdsCplaneBytes; it.mcdataMsrp = mcdataMsrp
         it.mcpttServerUri = mcpttServerUri; it.mcdataServerUri = mcdataServerUri
         it.mcvideoEnabled = mcvideoEnabled; it.mcvideoServerUri = mcvideoServerUri; it.autoAnswerMcvideo = autoAnswerMcvideo
+        it.floorTimers = floorTimers.toJni()
+    }
+}
+
+/**
+ * 발언권 참여자 타이머·카운터(TS 24.380 표 11.1.1-1·11.2.1-1, ms) — 0 = 기본값(T100·T101 1 s · T103 4 s · T104 4 s · T132 2 s · C 3).
+ * 값의 출처 = UE initial configuration `<on-network><Timers>`(TS 24.484 §7.2.2.7).
+ */
+data class FloorTimers(
+    val t100Ms: Int = 0, val t101Ms: Int = 0, val t103Ms: Int = 0, val t104Ms: Int = 0, val t132Ms: Int = 0,
+    val c100: Int = 0, val c101: Int = 0, val c104: Int = 0,
+) {
+    internal fun toJni(): JniFloorTimers = JniFloorTimers().also {
+        it.t100Ms = t100Ms; it.t101Ms = t101Ms; it.t103Ms = t103Ms; it.t104Ms = t104Ms; it.t132Ms = t132Ms
+        it.c100 = c100; it.c101 = c101; it.c104 = c104
+    }
+    internal companion object {
+        fun of(t: JniFloorTimers) = FloorTimers(t.t100Ms, t.t101Ms, t.t103Ms, t.t104Ms, t.t132Ms, t.c100, t.c101, t.c104)
     }
 }
 
@@ -338,6 +359,10 @@ data class CallInfo(
     val answerState: String = "",
     /** 내가 연 그룹 통화의 미응답 필수 멤버(TS 24.379 §6.3.3.3 — 서버 INFO `<non-acknowledged-user>`) — 알림은 `nonAcknowledged` 이벤트. */
     val nonAcknowledgedUsers: List<String> = emptyList(),
+    /** 개시 INVITE 최종 응답의 Warning(RFC 3261 §20.43 — 첫 값). 같은 코드의 사유를 가른다 — 편성 그룹 [참여] 403 의 120 = 미제휴
+     *  (TS 24.379 §10.1.1.4.2 — 제휴를 다시 싣고 다시 건다), 그 밖의 403 = 비멤버 등. 없으면 0·빈 값. */
+    val warningCode: Int = 0,
+    val warningText: String = "",
 ) {
     val active: Boolean get() = state == CallState.ACTIVE
     val ended: Boolean get() = state == CallState.DISCONNECTED
@@ -349,7 +374,7 @@ data class CallInfo(
             c.isMcptt, c.groupId, McpttInfo.of(c.mcptt), c.halfDuplex, c.listenOnly, c.joinedDialog,
             McpttCondition.of(c.condition), c.rxLevel, c.videoSend,
             ordinalOf(c.service.swigValue()), c.sessionUri, ordinalOf(c.videoRequest.swigValue()),
-            c.answerState, c.nonAcknowledgedUsers.let { v -> List(v.size) { v[it] } })
+            c.answerState, c.nonAcknowledgedUsers.let { v -> List(v.size) { v[it] } }, c.warningCode, c.warningText)
     }
 }
 

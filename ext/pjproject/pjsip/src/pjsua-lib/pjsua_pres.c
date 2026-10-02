@@ -2889,13 +2889,20 @@ pj_status_t pjsua_cims_conf_subscribe(pjsua_acc_id acc_id,
      */
     cs = cims_conf_find(target, ev);
     if (cs) {
-        pjsip_dlg_inc_lock(cs->dlg);
-        status = pjsip_evsub_initiate(cs->sub, NULL, expires, &tdata);
+        /* 갱신 송신이 곧바로 실패하면(전송 오류·해석 실패) evsub 가 그 자리에서 TERMINATED 를 알리고
+         * cims_conf_on_evsub_state 가 슬롯(cs)을 비운다 — 잠금·송신은 지역 사본으로 한다. dialog 는
+         * inc_lock 이 잡은 세션 수로 dec_lock 까지 산다. 끝난 구독은 다음 호출이 새로 만든다.
+         */
+        pjsip_dialog *cdlg = cs->dlg;
+        pjsip_evsub *csub = cs->sub;
+
+        pjsip_dlg_inc_lock(cdlg);
+        status = pjsip_evsub_initiate(csub, NULL, expires, &tdata);
         if (status == PJ_SUCCESS) {
             pjsua_process_msg_data(tdata, NULL);
-            status = pjsip_evsub_send_request(cs->sub, tdata);
+            status = pjsip_evsub_send_request(csub, tdata);
         }
-        pjsip_dlg_dec_lock(cs->dlg);
+        pjsip_dlg_dec_lock(cdlg);
 
         if (status != PJ_SUCCESS) {
             pjsua_perror(THIS_FILE, "Unable to update CIMS subscription",

@@ -415,8 +415,18 @@ public sealed unsafe class Engine : IDisposable
         n.mcvideo_enabled = B(a.McvideoEnabled);
         n.mcvideo_server_uri = s.Add(a.McvideoServerUri);
         n.auto_answer_mcvideo = B(a.AutoAnswerMcvideo);
+        n.floor_timers = ToNative(a.FloorTimers);
         return n;
     }
+
+    internal static cimsue_floor_timers_t ToNative(FloorTimers t) => new()
+    {
+        t100_ms = t.T100Ms, t101_ms = t.T101Ms, t103_ms = t.T103Ms, t104_ms = t.T104Ms, t132_ms = t.T132Ms,
+        c100 = t.C100, c101 = t.C101, c104 = t.C104,
+    };
+
+    internal static FloorTimers ToManaged(in cimsue_floor_timers_t t) =>
+        new(t.t100_ms, t.t101_ms, t.t103_ms, t.t104_ms, t.t132_ms, t.c100, t.c101, t.c104);
 
     /// <summary>산출 AccountConfig(to_account) → 관리. 빈 문자열은 null(코어 기본값)로 — 다시 넣어도 같은 뜻이다.</summary>
     internal static AccountConfig FromNative(cimsue_account_config_t* n)
@@ -437,7 +447,7 @@ public sealed unsafe class Engine : IDisposable
             RpNormal = Opt(n->rp_normal), MaxSdsCplaneBytes = n->max_sds_cplane_bytes, McdataMsrp = n->mcdata_msrp != 0,
             McpttServerUri = Opt(n->mcptt_server_uri), McdataServerUri = Opt(n->mcdata_server_uri),
             McvideoEnabled = n->mcvideo_enabled != 0, McvideoServerUri = Opt(n->mcvideo_server_uri),
-            AutoAnswerMcvideo = n->auto_answer_mcvideo != 0,
+            AutoAnswerMcvideo = n->auto_answer_mcvideo != 0, FloorTimers = ToManaged(n->floor_timers),
         };
     }
 
@@ -470,7 +480,7 @@ public sealed unsafe class Engine : IDisposable
                             c->rx_level, new McpttCondition(c->condition.emergency != 0, c->condition.imminent_peril != 0, c->condition.mine != 0,
                                                             c->condition.pending != 0, c->condition.last_code),
                             Utf8.Str(c->answer_state), NonAck(c), (McService)c->service, Utf8.Str(c->session_uri), c->video_send != 0,
-                            (VideoRequestState)c->video_request);
+                            (VideoRequestState)c->video_request, c->warning_code, Utf8.Str(c->warning_text));
     }
 
     private static string[] NonAck(cimsue_call_info_t* c)

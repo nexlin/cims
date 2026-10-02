@@ -258,6 +258,7 @@ class PttController(
         var talkerSsrc: Map<String, Long> = emptyMap()  // 화자 → RTP SSRC (SSRC 별 재생용, U10)
         var floorIndicator: Int = 0           // 마지막 수신 Floor Indicator (G/I 비트 표시)
         var privatePeer: Boolean = false      // 1:1 private call — groupId=상대 번호
+        var broadcast: Boolean = false        // 내가 연 일제 통화(TS 24.379 §4.12) — 미제휴 403 뒤 다시 걸지 않는다
         var fullDuplex: Boolean = false       // 전이중 1:1 — floor 없음, PTT 가 로컬 마이크 게이트(setMuted)
 
         /** 이 세션이 동시 발언을 허용하는가 — 서버 Floor Indicator 의 I-bit(multi-talker)/
@@ -358,7 +359,8 @@ class PttController(
 
     // ── affiliation 목표 집합(TS 24.379 §9) — 편성 채널 전체를 서버 확인 기반으로 유지(정책은 앱, PUBLISH·ETag 는 코어) ──
     internal val affPending = java.util.concurrent.ConcurrentHashMap<Long, Pair<String, Boolean>>()
-    internal val affExpireAt = java.util.concurrent.ConcurrentHashMap<String, Long>()   // 확정 만료(elapsedRealtime)
+    /** 서버가 2xx 로 받은 제휴 — 수명 갱신·등록 재성립·망 변경 뒤 다시 싣기는 코어가 한다(ue_sdk.md §4.2 «등록에 묶인 것의 유지»). */
+    internal val affConfirmed: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
     internal val affAttempts = java.util.concurrent.ConcurrentHashMap<String, Int>()
     internal val affBackoffUntil = java.util.concurrent.ConcurrentHashMap<String, Long>()  // 백오프 대기 종료 시각
     /** 시그널링 평면·media plane SDS 의 코어 token → msgId — 최종 응답을 [sendResult] 로 대응. */
@@ -436,7 +438,7 @@ class PttController(
         on(ue.message) { groupsPlane.onSipMessage(it) }
         on(ue.requestResult) { onRequestResult(it) }
 
-        // 주기 갱신 — TTL 절반 경과 그룹 재-PUBLISH(1h 만료 방치로 fan-out 이 조용히 죽는 것 방지)
+        // 주기 맞춤 — 목표 집합(편성 채널)을 서버 확인으로 맞춘다. 수명 갱신·등록 재성립 뒤 다시 싣기는 코어 몫이다(ue_sdk.md §4.2).
         scope.launch {
             while (true) {
                 delay(60_000)
@@ -453,6 +455,14 @@ class PttController(
     }
 
     // ── 등록 ──
+
+    /** 망이 돌아왔거나 바뀌었다(서비스의 SDK 접점 NetworkWatcher) — 코어가 옛 TCP/TLS 연결을 닫고 다시 등록하며, 그 등록이 서면
+     *  제휴·구독을 다시 싣는다(`Engine::handleNetworkChange`, ue_sdk.md §4.2). 계정이 없으면(로그인 전) 할 일이 없다. */
+    fun handleNetworkChange() = ctl.launch {
+        if (account == null) return@launch
+        val r = ue.handleNetworkChange()
+        if (!r.ok) Log.w(TAG, "망 변경 처리 실패: ${r.code} ${r.reason}")
+    }
 
     /** 엔진 기동 → 계정 → REGISTER. 유휴 기본은 스피커 전용(마이크 미보유) — 발언([setTalkCapture])에서만 전이중. */
     fun register() = ctl.launch {
@@ -487,6 +497,15 @@ class PttController(
     /** 등록 해제(명시 종료·설정 변경 재시작). */
     fun unregister() = ctl.launch { account?.unregister() }
 
+    /** UE initial configuration 이 바뀌었다(cms xcap-diff — TS 24.484 §6.3.13.3) — 다시 받아 발언권 타이머를 계정에 싣는다.
+     *  참여 기능 PSI 가 바뀐 경우는 계정을 다시 만들어야 하므로 다음 로그인 때 닿는다. */
+    internal fun reloadUeInitConfig() = ctl.launch {
+        val id = instanceId?.takeIf { it.isNotEmpty() } ?: return@launch
+        val doc = csc?.fetchUeInitConfig(id)?.getOrNull() ?: return@launch
+        val r = account?.setFloorTimers(doc.floorTimers)
+        Log.i(TAG, "ue-init-config 재적재 — 발언권 타이머 ${doc.floorTimers} (${r?.ok})")
+    }
+
     /** 기존 설정(SipAccountConfig) → 코어 계정 — 매핑 규칙(Digest·SRTP·sec-agree)은 코어(account_map.cpp)가 한다. */
     private fun accountConfig(ueInit: UeInitConfigDoc? = null): AccountConfig {
         val c = sipConfig
@@ -519,6 +538,8 @@ class PttController(
             //   멤버 초대(prearranged)는 자동 수락 — 합류일 뿐이고 영상 보기는 [받기](manual 수신)가 따로 정한다.
             mcvideoEnabled = !ueInit?.mcvideoServerUri.isNullOrEmpty(),
             mcvideoServerUri = ueInit?.mcvideoServerUri.orEmpty(),
+            // 발언권 참여자 타이머 T100·T101·T103·T104·T132 = UE initial configuration <Timers>(TS 24.484 §7.2.2.7, TS 24.380 표 11.1.1-1)
+            floorTimers = ueInit?.floorTimers ?: com.cims.ue.sdk.FloorTimers(),
             autoAnswerMcvideo = true,
         )
     }
@@ -541,7 +562,8 @@ class PttController(
             groupsPlane.subscribeXcap(XCAP_CMS, true)
             maybeRestoreChannels()
         } else if (was is RegState.Registered) {
-            // 등록이 끊기면 서버측 구독도 사라진다 — 확인 상태를 비워 재등록 시 다시 걸리게 한다.
+            // 등록이 끊기면 서버측 구독도 사라진다 — 확인 상태를 비워 재등록 시 다시 걸리게 한다. 제휴 확인(affConfirmed)은 두고 —
+            //   다시 선 등록에 코어가 관심 그룹 전부를 다시 싣는다(같은 게시를 앱이 겹쳐 보내지 않는다).
             synchronized(lock) { groupsPlane.clearSubStateLocked() }
             groupsPlane.publishRosters()
         }
@@ -602,6 +624,7 @@ class PttController(
             }
             CallState.DISCONNECTED -> {
                 emergencyPlane.handleEmergencyDenied(c.callId, c.lastCode)   // 긴급 개시 403 → normal 재발신 폴백
+                groupsPlane.handleNotAffiliated(c.callId, c.lastCode, c.warningCode)   // 403 120 → 제휴 다시 싣고 한 번 더
                 onCallEnded(c.callId)
             }
             else -> Unit
@@ -939,7 +962,6 @@ class PttController(
         const val AUDIO_ROUTE_HEADSET = 3
 
         /** affiliation PUBLISH 유지 수명(초) — 코어 PUBLISH Expires 와 같다. 잔여 수명이 절반 미만이면 주기 루프가 재발행. */
-        internal const val AFF_EXPIRES_SEC = 3600L
 
         /** 최초 SUBSCRIBE 발행 후 확인(NOTIFY) 대기 시한 — 초과하면 재발행 대상으로 되돌린다.
          *  CSP 는 구독 수락 직후 초기 NOTIFY 를 보내므로 정상 경로는 수십 ms 다. 이 창은
@@ -949,6 +971,8 @@ class PttController(
         /** 구독 재확인 주기 — 이 시간마다 SUBSCRIBE 를 다시 던진다(살아 있으면 엔진이 in-dialog 갱신으로 흡수,
          *  죽었으면 새로 생성). 서버가 구독을 잃어도 최대 이 시간 안에 복구된다. */
         internal const val SUB_REASSERT_MS = 600_000L
+        /** 미제휴 403(120) 뒤 같은 그룹을 다시 거는 최소 간격 — 다시 건 것까지 120 이면 그대로 둔다(관제 앱 UpkeepRules 와 같은 값). */
+        internal const val REJOIN_GAP_MS = 10_000L
 
         /** 채널 복원 전 양보 — 재로그인 경로에서 서버 fan-out INVITE 가 먼저 오면 그 세션을 쓴다. */
         internal const val RESTORE_YIELD_MS = 3000L

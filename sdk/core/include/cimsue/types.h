@@ -56,6 +56,22 @@ struct EngineConfig {
     int grantMicDelayMs = 0;
 };
 
+/**
+ * 발언권 참여자 타이머·카운터(TS 24.380 표 11.1.1-1·11.2.1-1). 타이머 값의 출처 = MCS UE initial configuration
+ * `<on-network><Timers>`(TS 24.484 §7.2.2.7 — 초 단위, UeInitConfigDoc.floorTimers). 0 = 기본값:
+ * T100·T101 1 s(재전송 총 시간 6초 미만 — 표 11.1.1-1 NOTE 1·2) · T103 4 s(= 서버 T1) · T104 4 s · T132 2 s · C100·C101·C104 3.
+ */
+struct FloorTimers {
+    int t100Ms = 0;                   // Floor Release 재전송 간격
+    int t101Ms = 0;                   // Floor Request 재전송 간격(암묵적 발언 요청도)
+    int t103Ms = 0;                   // End of RTP media — Floor Taken·RTP 뒤 이만큼 미디어가 없으면 그 발언이 끝났다
+    int t104Ms = 0;                   // Floor Queue Position Request 재전송 간격
+    int t132Ms = 0;                   // Queued granted user action — 대기 끝 승인 뒤 사용자가 누르지 않으면 Floor Release
+    int c100 = 0;                     // Floor Release 송신 상한
+    int c101 = 0;                     // Floor Request 송신 상한
+    int c104 = 0;                     // Floor Queue Position Request 송신 상한
+};
+
 /** 계정(접속서비스 kind 당 1개) 설정 — 프로비저닝 프로파일에서 채운다 (android_ue_provisioning.md). */
 struct AccountConfig {
     std::string serverHost;           // CSP 접속점 IP/FQDN
@@ -121,6 +137,9 @@ struct AccountConfig {
     /** MCVideo 그룹 호 초대(제어 기능의 prearranged 멤버 초대 — TS 24.281 §9.2.1.3) 자동 수락 = 자동 개시(§6.2.3.1.2). 수락은 세션
      *  합류일 뿐이고 영상 보기는 수신 제어(acceptReception — manual 수신)가 따로 정한다. false 면 앱이 answer/reject(수동 개시 §6.2.3.2.2). */
     bool autoAnswerMcvideo = true;
+    /** 발언권 참여자 타이머 — ue-init-config `<Timers>`(UeInitConfigDoc.floorTimers)를 싣는다. 계정의 다음 MCPTT 호부터 쓴다
+     *  (Engine::setFloorTimers 로 바꿀 수 있다 — 문서 변경 통지 뒤). */
+    FloorTimers floorTimers;
 
     std::string aor() const { return "sip:" + msisdn + "@" + domain; }
     std::string effectiveMcpttId() const { return mcpttId.empty() ? "tel:" + msisdn : mcpttId; }
@@ -286,6 +305,10 @@ struct CallInfo {
     float rxLevel = 1.f;
     int lastCode = 0;
     std::string lastReason;
+    /** 개시 INVITE 최종 응답의 Warning(RFC 3261 §20.43 — 첫 값의 warn-code·warn-text). 같은 응답 코드의 사유를 가른다 — 예: 편성 그룹
+     *  [참여] 403 의 120 «미제휴»(TS 24.379 §10.1.1.4.2 — 제휴를 다시 싣고 다시 건다)와 비멤버 403. 없으면 0·빈 값. */
+    int warningCode = 0;
+    std::string warningText;
     std::vector<MediaSource> sources;
     // ── MC 서비스 ──
     /** MC 호의 서비스 — MCVideo 그룹 호면 McVideo(그때 isMcptt 는 false, 제어는 전송 제어 — onTransmission·onReception),

@@ -62,6 +62,14 @@ internal unsafe struct cimsue_account_config_t
     public int mcvideo_enabled;
     public byte* mcvideo_server_uri;
     public int auto_answer_mcvideo;
+    public cimsue_floor_timers_t floor_timers;
+}
+
+[StructLayout(LayoutKind.Sequential)]
+internal struct cimsue_floor_timers_t
+{
+    public int t100_ms, t101_ms, t103_ms, t104_ms, t132_ms;
+    public int c100, c101, c104;
 }
 
 [StructLayout(LayoutKind.Sequential)]
@@ -194,6 +202,8 @@ internal unsafe struct cimsue_call_info_t
     public byte* session_uri;
     public int video_send;
     public int video_request;
+    public int warning_code;
+    public byte* warning_text;
 }
 
 [StructLayout(LayoutKind.Sequential)]
@@ -787,6 +797,7 @@ internal unsafe struct cimsue_ue_init_config_doc_t
     public byte* mcptt_server_uri;
     public byte* mcdata_server_uri;
     public byte* mcvideo_server_uri;
+    public cimsue_floor_timers_t floor_timers;
 }
 
 [StructLayout(LayoutKind.Sequential)]

@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdlib>
 #include <vector>
 
 #include "mcvideo/mcvideo_sip.h"
@@ -191,6 +192,25 @@ std::string headerValue(const std::string& whole, const std::string& name) {
         pos = eol + 2;
     }
     return std::string();
+}
+
+bool parseWarning(const std::string& value, int& code, std::string& text) {
+    code = 0;
+    text.clear();
+    size_t p = value.find_first_not_of(" \t");
+    if (p == std::string::npos || p + 3 > value.size()) return false;
+    for (size_t i = p; i < p + 3; ++i) if (!std::isdigit((unsigned char)value[i])) return false;
+    if (p + 3 < value.size() && value[p + 3] != ' ' && value[p + 3] != '\t') return false;
+    code = std::atoi(value.substr(p, 3).c_str());
+    // warn-text = quoted-string — 첫 값의 따옴표 안(이스케이프 \" 는 그대로 문자로). 뒤따르는 값(쉼표)은 보지 않는다.
+    size_t q = value.find('"', p + 3);
+    if (q == std::string::npos) return true;
+    for (size_t i = q + 1; i < value.size(); ++i) {
+        if (value[i] == '\\' && i + 1 < value.size()) { text += value[++i]; continue; }
+        if (value[i] == '"') break;
+        text += value[i];
+    }
+    return true;
 }
 
 std::string uriUser(const std::string& hv) {

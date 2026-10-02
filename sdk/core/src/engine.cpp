@@ -18,6 +18,7 @@
 #include <algorithm>
 #include <cctype>
 #include <atomic>
+#include <chrono>
 #include <condition_variable>
 #include <cstring>
 #include <ctime>
@@ -45,6 +46,7 @@
 #include "mcvideo/tc_participant.h"
 #include "quality/call_quality.h"
 #include "reg_recovery.h"
+#include "upkeep.h"
 
 // 창 없는 프레임 렌더(Windows 엔진 — config_site PJMEDIA_VIDEO_DEV_HAS_CIMS_FRAME): 디코드 프레임(BGRA)이 렌더 장치 콜백으로 와서
 //   Listener::onVideoFrame 으로 나간다(ue_sdk.md §4.5). 수신 창 = 그 호를 가리키는 토큰, 셀프뷰 = 미리보기 창 토큰.
@@ -60,6 +62,17 @@
 namespace cimsue {
 
 namespace {
+
+/** 유지(upkeep.h)의 시계(ms) — 단말이 자는 동안도 센다(서버가 준 수명은 그동안에도 흐른다). */
+int64_t upkeepNowMs() {
+#if defined(__linux__)
+    timespec ts;
+    clock_gettime(CLOCK_BOOTTIME, &ts);
+    return (int64_t)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+#else
+    return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
+#endif
+}
 
 /** 단일 워커 스레드 + 작업 큐. */
 class Worker {
@@ -451,6 +464,23 @@ struct Engine::Impl {
     /** 망 변경 뒤 재등록의 줄(Engine::handleNetworkChange) — ue-ctl 에서만. */
     detail::RegRecovery regRecovery;
     void reRegister(int accountId);
+    /** 등록에 묶인 게시·구독의 유지(upkeep.h, ue_sdk.md §4.2) — ue-ctl 에서만. */
+    detail::Upkeep upkeep;
+    /** MCPTT 관심 그룹(bare, 계정별) — 규격형 제휴 게시는 늘 전부를 싣는다(TS 24.379 §9.2.1.2 5)b)i)). ue-ctl 에서만. */
+    std::map<int, std::set<std::string>> mcpttAffiliations;
+    /** 규격형 MCPTT 제휴 게시를 쓰는 계정 — 참여 MCPTT 기능 PSI 와 MCPTT client ID 가 있다. 없으면 구형(그룹마다 Event: mcptt). */
+    static bool mcpttSetForm(const AccountConfig& c) { return !c.mcpttServerUri.empty() && !c.effectiveMcpttClientId().empty(); }
+    /** 유지 단위의 요청을 보냈다 — 응답을 그 단위로 돌려받게 적는다. internal = 유지가 다시 실은 요청(결과를 앱에 올리지 않는다). */
+    void track(int64_t token, const detail::UpkeepKey& k, bool internal);
+    /** 유지가 다시 싣는다(ue-ctl) — renew = 등록 재성립·망 변경(서버가 잃었을 수 있어 조건부 게시가 아니라 초기 게시로). */
+    void upkeepResend(const detail::UpkeepKey& k, bool renew);
+    /** 1분 틱(ue-ctl) — 수명 절반·물러남이 끝난 것을 다시 싣고 다음 틱을 건다. */
+    void upkeepTick();
+    /** 1초 틱(ue-ctl) — MCPTT 호의 수신 RTP 패킷 수가 늘었으면 발언권 참여자에 알린다(T103 — TS 24.380 §6.2.4.3.4). */
+    void floorMediaTick();
+    static constexpr unsigned kFloorMediaTickMs = 1000;
+    /** 구독 SUBSCRIBE(conference·xcap-diff·dialog — 스택 evsub 구독) — ue-ctl 에서. 켜는 요청만 유지 단위로 적는다. */
+    int64_t sendSubscribe(const detail::UpkeepKey& k, bool on, int64_t token, bool internal);
 
     // 스냅샷 — 콜백(pjsip 스레드)이 쓰고 조회(임의 스레드)가 읽는다
     std::mutex snapM;
@@ -462,13 +492,20 @@ struct Engine::Impl {
     /** 응답을 기다리는 affiliation PUBLISH — 내부 token 별. 412 초기 재발행은 새 내부 token 이고 앱에는 appToken 으로 알린다. */
     struct PendingPublish {
         int accountId = -1;
-        std::string groupId;                               // MCVideo 는 비어 있다 — 게시 하나가 관심 그룹 전부다
+        std::string groupId;                               // 규격형(MCPTT·MCVideo)은 비어 있다 — 게시 하나가 관심 그룹 전부다
         bool on = false;
         bool conditional = false;                          // SIP-If-Match 를 실었다(ETag 조건부 갱신)
         int64_t appToken = -1;                             // affiliate() 가 돌려준 token
         McService service = McService::Mcptt;
+        bool internal = false;                             // 유지가 다시 실은 게시 — 412 재발행도 내부 요청이다
     };
     std::map<int64_t, PendingPublish> publishPending;
+    /** 응답을 기다리는 유지 대상 요청 — token → (유지 단위, 내부 요청). 콜백(pjsip 스레드)이 읽는다. */
+    struct Tracked {
+        detail::UpkeepKey key;
+        bool internal = false;
+    };
+    std::map<int64_t, Tracked> tracked;
     /** MCVideo 관심 그룹(bare, 계정별) — affiliation PUBLISH 는 늘 전부를 싣는다(TS 24.281 §8.2.1.2 6)a)). ue-ctl 에서만. */
     std::map<int, std::set<std::string>> mcvideoAffiliations;
     static std::string publishKey(int accountId, const std::string& groupId, McService service) {
@@ -586,10 +623,14 @@ struct Engine::Impl {
     int64_t doSendRequest(int accountId, const std::string& method, const std::string& targetUri,
                        const std::string& contentType, const std::string& body,
                        const std::map<std::string, std::string>& headers, int64_t token);
-    /** affiliation PUBLISH(TS 24.379 §9) — ue-ctl 에서. allowConditional 이면 저장된 ETag 로 SIP-If-Match(RFC 3903 §4.4). */
-    int64_t sendAffiliation(int accountId, const std::string& groupId, bool on, int64_t token, int64_t appToken, bool allowConditional);
+    /** 구형 affiliation PUBLISH(그룹마다 Event: mcptt) — ue-ctl 에서. allowConditional 이면 저장된 ETag 로 SIP-If-Match(RFC 3903 §4.4).
+     *  참여 기능 PSI·client ID 가 없는 계정만(mcpttSetForm) — 전환기. */
+    int64_t sendAffiliation(int accountId, const std::string& groupId, bool on, int64_t token, int64_t appToken, bool allowConditional,
+                            bool internal = false);
+    /** 규격형 MCPTT affiliation PUBLISH(TS 24.379 §9.2.1.2) — 관심 그룹 전부(mcpttAffiliations)를 한 게시로. ue-ctl 에서. */
+    int64_t sendMcpttAffiliationSet(int accountId, int64_t token, int64_t appToken, bool allowConditional, bool internal = false);
     /** MCVideo affiliation PUBLISH(TS 24.281 §8.2.1.2) — 관심 그룹 전부(mcvideoAffiliations)를 한 게시로. ue-ctl 에서. */
-    int64_t sendMcVideoAffiliation(int accountId, int64_t token, int64_t appToken, bool allowConditional);
+    int64_t sendMcVideoAffiliation(int accountId, int64_t token, int64_t appToken, bool allowConditional, bool internal = false);
     /** 영상 미디어가 활성된 호 — 수신 창 결선 + (계정 videoAutoTransmit 면) 카메라 송신 개시. 영상 없는 빌드면 아무것도 안 한다. */
     void attachVideo(PjCall* call, int accountId);
     /** 내 영상 송출 개폐 — MCVideo 호는 허용(videoSend)·송출 허가(sendOn)가 둘 다일 때만, 그 밖의 호는 허용만 본다(ue_sdk.md §4.5).
@@ -644,6 +685,7 @@ struct McpttSession {
     std::string pendingAppSdp;           // 송신 SDP 에 주입할 m=application 섹션
     std::unique_ptr<floor::Participant> floor;
     bool remoteLearned = false;
+    unsigned rxPktSeen = 0;              // 마지막으로 본 수신 RTP 패킷 수 — 늘면 floor->onMedia()(T103)
 };
 
 /** MCVideo 그룹 호(TS 24.281 §9.2.1 prearranged · §9.2.2 chat) 부속 상태 — PjCall 소유. MCPTT 세션과 독립 다이얼로그다(§7.1). */
@@ -1095,6 +1137,7 @@ public:
         mcptt->floor.reset(new floor::Participant(-1, ssrcOf(userId), userId, cb));
         if (!mcptt->floor->open(0)) { mcptt->floor.reset(); return false; }
         mcptt->floor->setMicOpenDelay(o_->cfg.grantMicDelayMs);
+        mcptt->floor->setTimers(o_->accountCfgs[accountId_].floorTimers);      // UE initial configuration <Timers>(AccountConfig)
         if (mcptt->listenOnly) mcptt->floor->setListenOnly(true);
         return true;
     }
@@ -1305,9 +1348,22 @@ public:
         } catch (...) {}
     }
 
-    void onCallState(pj::OnCallStateParam&) override {
+    void onCallState(pj::OnCallStateParam& prm) override {
         pj::CallInfo ci = getInfo();
         const int id = getId();
+        // 개시 INVITE 의 최종 응답이 실은 Warning(RFC 3261 §20.43) — 거절 사유를 가른다(TS 24.379 403 + 120 미제휴 / 비멤버 403).
+        //   호 상태 콜백이 tsx 콜백보다 먼저라(sip_inv.c) 이 이벤트의 원문에서 읽어야 Disconnected 스냅샷에 실린다.
+        int warnCode = 0;
+        std::string warnText;
+        bool warnSeen = false;
+        try {
+            if (prm.e.type == PJSIP_EVENT_TSX_STATE && prm.e.body.tsxState.type == PJSIP_EVENT_RX_MSG &&
+                prm.e.body.tsxState.tsx.role == PJSIP_ROLE_UAC && prm.e.body.tsxState.tsx.method == "INVITE" &&
+                prm.e.body.tsxState.tsx.statusCode >= 200) {
+                const std::string w = detail::headerValue(prm.e.body.tsxState.src.rdata.wholeMsg, "Warning");
+                warnSeen = !w.empty() && detail::parseWarning(w, warnCode, warnText);
+            }
+        } catch (...) {}
         if (msrp) {                                                       // 앱 호 목록 밖 — 끝나면 정리만
             if (ci.state != PJSIP_INV_STATE_DISCONNECTED) return;
             msrp->cancel->store(true);
@@ -1335,6 +1391,7 @@ public:
             c.remoteUri = ci.remoteUri;
             c.lastCode = ci.lastStatusCode;
             c.lastReason = ci.lastReason;
+            if (warnSeen) { c.warningCode = warnCode; c.warningText = warnText; }
             CallState ns = c.state;
             switch (ci.state) {
                 case PJSIP_INV_STATE_CALLING:
@@ -1457,7 +1514,16 @@ public:
         { std::lock_guard<std::mutex> lk(o_->snapM); o_->regInfos[accountId_] = ri; }
         o_->emit([o = o_, ri] { o->listener->onRegState(ri); });
         // 앞 등록이 끝났다 — 망 변경으로 미뤄 둔 재등록이 있으면 지금 보낸다(Engine::handleNetworkChange).
-        o_->ctl.post([o = o_, id = accountId_] { if (o->running && o->regRecovery.settled(id)) o->reRegister(id); });
+        //   등록이 끊겼다 다시 섰거나 망이 바뀐 뒤 첫 성공이면 등록에 묶인 제휴·구독을 다시 싣는다(upkeep.h ①·②).
+        o_->ctl.post([o = o_, id = accountId_, reg = ri.state == RegState::Registered] {
+            if (!o->running) return;
+            if (o->regRecovery.settled(id)) o->reRegister(id);
+            if (o->upkeep.onRegEvent(id, reg)) {
+                const std::vector<detail::UpkeepKey> keys = o->upkeep.wantedFor(id);
+                if (!keys.empty()) o->log(3, "upkeep: registration renewed — re-sending " + std::to_string(keys.size()) + " item(s)");
+                for (const auto& k : keys) o->upkeepResend(k, true);
+            }
+        });
     }
 
     void onIncomingCall(pj::OnIncomingCallParam& prm) override {
@@ -1632,11 +1698,21 @@ public:
             r.method = ts.tsx.method;
             r.code = ts.tsx.statusCode;
             r.reason = ts.tsx.statusText;
-            if (ts.type == PJSIP_EVENT_RX_MSG) r.etag = detail::headerValue(ts.src.rdata.wholeMsg, "SIP-ETag");
+            int64_t grantedSec = 0;                        // 2xx 의 Expires — 게시(RFC 3903 §6 8))·구독(RFC 6665 §4.2.1.1) 모두 싣는다
+            if (ts.type == PJSIP_EVENT_RX_MSG) {
+                r.etag = detail::headerValue(ts.src.rdata.wholeMsg, "SIP-ETag");
+                const std::string ex = detail::headerValue(ts.src.rdata.wholeMsg, "Expires");
+                if (!ex.empty()) grantedSec = std::strtoll(ex.c_str(), nullptr, 10);
+            }
+            const int64_t reqToken = r.token;
             Engine::Impl::PendingPublish retry;
             int64_t retryToken = -1;
+            bool hasKey = false, internal = false;
+            detail::UpkeepKey key;
             {
                 std::lock_guard<std::mutex> lk(o_->snapM);
+                auto tk = o_->tracked.find(reqToken);
+                if (tk != o_->tracked.end()) { key = tk->second.key; internal = tk->second.internal; hasKey = true; o_->tracked.erase(tk); }
                 auto it = o_->publishPending.find(r.token);
                 if (it != o_->publishPending.end()) {
                     const Engine::Impl::PendingPublish p = it->second;
@@ -1654,12 +1730,26 @@ public:
                 }
             }
             if (retryToken >= 0) {
-                o_->ctl.post([o = o_, retry, retryToken, r] {
-                    const int64_t t = retry.service == McService::McVideo
-                                          ? o->sendMcVideoAffiliation(retry.accountId, retryToken, retry.appToken, false)
-                                          : o->sendAffiliation(retry.accountId, retry.groupId, retry.on, retryToken, retry.appToken, false);
-                    if (t < 0) o->emit([o, r] { o->listener->onRequestResult(r); });   // 재발행을 못 만들면 412 를 그대로
+                o_->ctl.post([o = o_, retry, retryToken, r, hasKey, key] {
+                    const int64_t t =
+                        retry.service == McService::McVideo
+                            ? o->sendMcVideoAffiliation(retry.accountId, retryToken, retry.appToken, false, retry.internal)
+                        : retry.groupId.empty()
+                            ? o->sendMcpttAffiliationSet(retry.accountId, retryToken, retry.appToken, false, retry.internal)
+                            : o->sendAffiliation(retry.accountId, retry.groupId, retry.on, retryToken, retry.appToken, false,
+                                                 retry.internal);
+                    if (t >= 0) return;
+                    if (hasKey) o->upkeep.result(key, r.code, 0, upkeepNowMs());
+                    if (!retry.internal) o->emit([o, r] { o->listener->onRequestResult(r); });   // 재발행을 못 만들면 412 를 그대로
                 });
+                return;
+            }
+            if (hasKey) {
+                o_->ctl.post([o = o_, key, code = r.code, grantedSec] { o->upkeep.result(key, code, grantedSec, upkeepNowMs()); });
+            }
+            if (internal) {
+                // 유지가 다시 실은 요청 — 앱의 요청이 아니므로 결과를 올리지 않는다(실패는 유지가 물러나 다시 싣는다)
+                o_->log(r.code / 100 == 2 ? 4 : 2, "upkeep " + r.method + " → " + std::to_string(r.code) + " " + r.reason);
                 return;
             }
             o_->emit([o = o_, r] { o->listener->onRequestResult(r); });
@@ -2154,6 +2244,55 @@ void Engine::Impl::applyDeviceLevels() {
     } catch (pj::Error& e) { log(4, std::string("mic agc: ") + e.info(false)); }   // 장치 지연 개방 중 — 다음 결선에서 다시
 }
 
+void Engine::Impl::track(int64_t token, const detail::UpkeepKey& k, bool internal) {
+    { std::lock_guard<std::mutex> lk(snapM); tracked[token] = Tracked{k, internal}; }
+    upkeep.sent(k, upkeepNowMs());
+}
+
+void Engine::Impl::upkeepResend(const detail::UpkeepKey& k, bool renew) {
+    const int64_t token = nextToken++;
+    switch (k.kind) {
+        case detail::UpkeepKind::McpttAffiliation:
+        case detail::UpkeepKind::McVideoAffiliation: {
+            const bool mcv = k.kind == detail::UpkeepKind::McVideoAffiliation;
+            // 등록이 새로 섰거나 앞 시도가 실패했으면 서버가 게시를 잃었을 수 있다 — ETag 를 버리고 초기 게시로(RFC 3903 §4.2).
+            //   갱신(③)은 조건부 게시(§4.4) — 규격형은 본문을 함께 싣는다(TS 24.379 §9.2.1.2 NOTE 4).
+            if (renew || upkeep.failing(k)) {
+                std::lock_guard<std::mutex> lk(snapM);
+                publishEtag.erase(publishKey(k.account, k.target, mcv ? McService::McVideo : McService::Mcptt));
+            }
+            if (mcv) sendMcVideoAffiliation(k.account, token, token, true, true);
+            else if (k.target.empty()) sendMcpttAffiliationSet(k.account, token, token, true, true);
+            else sendAffiliation(k.account, k.target, true, token, token, true, true);
+            break;
+        }
+        default: sendSubscribe(k, true, token, true); break;
+    }
+}
+
+void Engine::Impl::floorMediaTick() {
+    if (!running) return;
+    for (auto& kv : calls) {
+        PjCall* c = static_cast<PjCall*>(kv.second.get());
+        if (!c || !c->mcptt || !c->mcptt->floor) continue;
+        try {
+            unsigned idx = 0;
+            if (!activeAudio(c, &idx)) continue;
+            const unsigned pkt = c->getStreamStat(idx).rtcp.rxStat.pkt;
+            if (pkt == c->mcptt->rxPktSeen) continue;
+            c->mcptt->rxPktSeen = pkt;
+            c->mcptt->floor->onMedia();
+        } catch (...) {}
+    }
+    later(kFloorMediaTickMs, [this] { floorMediaTick(); });
+}
+
+void Engine::Impl::upkeepTick() {
+    if (!running) return;
+    for (const auto& k : upkeep.due(upkeepNowMs())) upkeepResend(k, false);
+    later((unsigned)detail::Upkeep::kTickMs, [this] { upkeepTick(); });
+}
+
 int64_t Engine::Impl::doSendRequest(int accountId, const std::string& method, const std::string& targetUri,
                                  const std::string& contentType, const std::string& body,
                                  const std::map<std::string, std::string>& headers, int64_t token) {
@@ -2247,7 +2386,10 @@ Result Engine::start(const EngineConfig& cfg, Listener* listener) {
             o->applyCodecPolicy();
             o->captureOn = true;
             o->regRecovery.clear();
+            o->upkeep.clear();
             o->running = true;
+            o->later((unsigned)detail::Upkeep::kTickMs, [o] { o->upkeepTick(); });
+            o->later(Impl::kFloorMediaTickMs, [o] { o->floorMediaTick(); });
             o->log(3, std::string("libcimsue ") + version() + " started");
             return Result::success();
         } catch (pj::Error& e) {
@@ -2300,6 +2442,7 @@ void Engine::stop() {
     impl_->finalQuality.clear();
     impl_->publishPending.clear();
     impl_->publishEtag.clear();
+    impl_->tracked.clear();
 }
 
 int Engine::addAccount(const AccountConfig& cfg) {
@@ -2372,6 +2515,8 @@ Result Engine::handleNetworkChange() {
         if (st != PJ_SUCCESS) o->log(2, "network change: transport shutdown " + std::to_string(st));
         // ② 등록을 켠 계정마다 다시 등록 — 걸려 있으면 끝난 뒤 한 번 더(RegRecovery). 일반 등록 경로라 실패하면
         //    pjsua 자동 재시도(regConfig.retryIntervalSec)가 그대로 산다.
+        // ③ 그 등록이 서면 등록에 묶인 제휴·구독을 다시 싣는다(상태는 «등록됨» 그대로여도 서버 바인딩은 새것일 수 있다 — upkeep.h ②)
+        o->upkeep.networkChanged(o->regRecovery.targets());
         for (int id : o->regRecovery.targets()) o->reRegister(id);
         return Result::success();
     });
@@ -2384,6 +2529,8 @@ Result Engine::removeAccount(int id) {
         if (!o->accounts.erase(id)) return Result::fail(-2, "no such account");
         o->accountCfgs.erase(id);
         o->mcvideoAffiliations.erase(id);
+        o->mcpttAffiliations.erase(id);
+        o->upkeep.dropAccount(id);
         o->regRecovery.unwant(id);
         std::lock_guard<std::mutex> lk(o->snapM);
         o->regInfos.erase(id);
@@ -2728,6 +2875,20 @@ Result Engine::floorQueueCancel(int callId) {
         if (c.mcptt && c.mcptt->floor) c.mcptt->floor->cancelQueued();
     });
 }
+Result Engine::floorQueuePosition(int callId) {
+    return withCall(impl_.get(), callId, [](PjCall& c) {
+        if (c.mcptt && c.mcptt->floor) c.mcptt->floor->requestQueuePosition();
+    });
+}
+Result Engine::setFloorTimers(int accountId, const FloorTimers& timers) {
+    if (!impl_->running) return Result::fail(-1, "not running");
+    return impl_->ctl.runSync([=]() -> Result {
+        auto it = impl_->accountCfgs.find(accountId);
+        if (it == impl_->accountCfgs.end()) return Result::fail(-2, "no such account");
+        it->second.floorTimers = timers;
+        return Result::success();
+    });
+}
 FloorInfo Engine::floorInfo(int callId) const {
     FloorInfo fi;
     if (!impl_->running) return fi;
@@ -2934,27 +3095,69 @@ int64_t Engine::sendRequest(int accountId, const std::string& method, const std:
 }
 
 int64_t Engine::Impl::sendAffiliation(int accountId, const std::string& groupId, bool on, int64_t token, int64_t appToken,
-                                      bool allowConditional) {
+                                      bool allowConditional, bool internal) {
     auto ic = accountCfgs.find(accountId);
     if (ic == accountCfgs.end()) return -1;
     std::map<std::string, std::string> h;
-    h["Event"] = "mcptt";                                              // TS 24.379 §9 — 없으면 CSP 489
+    h["Event"] = "mcptt";                                              // 구형 자체 규약 — 없으면 CSP 489
     h["Expires"] = on ? "3600" : "0";
     {
         std::lock_guard<std::mutex> lk(snapM);
         PendingPublish p;
-        p.accountId = accountId; p.groupId = groupId; p.on = on; p.appToken = appToken;
+        p.accountId = accountId; p.groupId = groupId; p.on = on; p.appToken = appToken; p.internal = internal;
         auto et = publishEtag.find(publishKey(accountId, groupId, McService::Mcptt));
         if (allowConditional && et != publishEtag.end()) { h["SIP-If-Match"] = et->second; p.conditional = true; }
         publishPending[token] = p;
     }
+    const detail::UpkeepKey k{accountId, detail::UpkeepKind::McpttAffiliation, mcptt::bareId(groupId)};
+    if (on) track(token, k, internal);
     int64_t r = doSendRequest(accountId, "PUBLISH", "sip:" + groupId + "@" + ic->second.domain, mcptt::kCtAffiliation,
                               mcptt::affiliationCommand("tel:" + groupId, on), h, token);
-    if (r < 0) { std::lock_guard<std::mutex> lk(snapM); publishPending.erase(token); }
+    if (r < 0) {
+        { std::lock_guard<std::mutex> lk(snapM); publishPending.erase(token); tracked.erase(token); }
+        if (on) upkeep.result(k, 0, 0, upkeepNowMs());
+    }
     return r < 0 ? -1 : appToken;
 }
 
-int64_t Engine::Impl::sendMcVideoAffiliation(int accountId, int64_t token, int64_t appToken, bool allowConditional) {
+int64_t Engine::Impl::sendMcpttAffiliationSet(int accountId, int64_t token, int64_t appToken, bool allowConditional, bool internal) {
+    auto ic = accountCfgs.find(accountId);
+    if (ic == accountCfgs.end()) return -1;
+    const AccountConfig& cfg = ic->second;
+    const std::set<std::string>& groups = mcpttAffiliations[accountId];
+    std::vector<std::string> uris;
+    for (const auto& g : groups) uris.push_back("tel:" + g);
+    // TS 24.379 §9.2.1.2 — R-URI = 참여 MCPTT 기능 PSI(1), mcptt-info request-uri = 자기 MCPTT ID(2), ICSI(3),
+    //   Expires = 관심 그룹이 있으면 2^32-1 · 없으면 0(4·5)a)), pidf = 관심 그룹 전부 · client ID · 유일 p-id(5)b)), Event presence(RFC 3856).
+    std::map<std::string, std::string> h;
+    h["P-Preferred-Service"] = mcptt::kIcsiMcptt;
+    h["Event"] = "presence";
+    h["Expires"] = groups.empty() ? "0" : mcptt::kAffiliationExpires;
+    {
+        std::lock_guard<std::mutex> lk(snapM);
+        PendingPublish p;
+        p.accountId = accountId; p.on = !groups.empty(); p.appToken = appToken; p.internal = internal;
+        auto et = publishEtag.find(publishKey(accountId, std::string(), McService::Mcptt));
+        if (allowConditional && et != publishEtag.end()) { h["SIP-If-Match"] = et->second; p.conditional = true; }
+        publishPending[token] = p;
+    }
+    const std::string boundary = "aff-pub-" + mcdata::newMessageId().substr(0, 12);
+    const std::string body = "--" + boundary + "\r\nContent-Type: " + mcptt::kCtMcpttInfo + "\r\n\r\n" +
+                             mcptt::affiliationInfo(cfg.effectiveMcpttId()) + "\r\n" +
+                             "--" + boundary + "\r\nContent-Type: " + mcptt::kCtPidf + "\r\n\r\n" +
+                             mcptt::affiliationPidf(cfg.effectiveMcpttId(), cfg.effectiveMcpttClientId(), uris, mcdata::newMessageId()) +
+                             "\r\n" + "--" + boundary + "--\r\n";
+    const detail::UpkeepKey k{accountId, detail::UpkeepKind::McpttAffiliation, std::string()};
+    if (!groups.empty()) track(token, k, internal);
+    int64_t r = doSendRequest(accountId, "PUBLISH", cfg.mcpttServerUri, "multipart/mixed;boundary=" + boundary, body, h, token);
+    if (r < 0) {
+        { std::lock_guard<std::mutex> lk(snapM); publishPending.erase(token); tracked.erase(token); }
+        if (!groups.empty()) upkeep.result(k, 0, 0, upkeepNowMs());
+    }
+    return r < 0 ? -1 : appToken;
+}
+
+int64_t Engine::Impl::sendMcVideoAffiliation(int accountId, int64_t token, int64_t appToken, bool allowConditional, bool internal) {
     auto ic = accountCfgs.find(accountId);
     if (ic == accountCfgs.end()) return -1;
     const AccountConfig& cfg = ic->second;
@@ -2975,7 +3178,7 @@ int64_t Engine::Impl::sendMcVideoAffiliation(int accountId, int64_t token, int64
     {
         std::lock_guard<std::mutex> lk(snapM);
         PendingPublish p;
-        p.accountId = accountId; p.on = !groups.empty(); p.appToken = appToken; p.service = McService::McVideo;
+        p.accountId = accountId; p.on = !groups.empty(); p.appToken = appToken; p.service = McService::McVideo; p.internal = internal;
         auto et = publishEtag.find(publishKey(accountId, std::string(), McService::McVideo));
         if (allowConditional && et != publishEtag.end()) { h["SIP-If-Match"] = et->second; p.conditional = true; }
         publishPending[token] = p;
@@ -2987,8 +3190,13 @@ int64_t Engine::Impl::sendMcVideoAffiliation(int accountId, int64_t token, int64
                              "--" + boundary + "\r\nContent-Type: " + mcvideo::kCtPidf + "\r\n\r\n" +
                              mcvideo::affiliationPidf(cfg.effectiveMcpttId(), clientId, uris, mcdata::newMessageId()) + "\r\n" +
                              "--" + boundary + "--\r\n";
+    const detail::UpkeepKey k{accountId, detail::UpkeepKind::McVideoAffiliation, std::string()};
+    if (!groups.empty()) track(token, k, internal);
     int64_t r = doSendRequest(accountId, "PUBLISH", cfg.mcvideoServerUri, "multipart/mixed;boundary=" + boundary, body, h, token);
-    if (r < 0) { std::lock_guard<std::mutex> lk(snapM); publishPending.erase(token); }
+    if (r < 0) {
+        { std::lock_guard<std::mutex> lk(snapM); publishPending.erase(token); tracked.erase(token); }
+        if (!groups.empty()) upkeep.result(k, 0, 0, upkeepNowMs());
+    }
     return r < 0 ? -1 : appToken;
 }
 
@@ -3002,10 +3210,53 @@ int64_t Engine::affiliate(int accountId, const std::string& groupId, bool on, Mc
             std::set<std::string>& groups = o->mcvideoAffiliations[accountId];
             const std::string gid = mcptt::bareId(groupId);
             if (on) groups.insert(gid); else groups.erase(gid);
+            const detail::UpkeepKey k{accountId, detail::UpkeepKind::McVideoAffiliation, std::string()};
+            if (groups.empty()) o->upkeep.unwant(k); else o->upkeep.want(k);
             return o->sendMcVideoAffiliation(accountId, token, token, true);
         });
     }
-    return impl_->ctl.runSync([=]() -> int64_t { return impl_->sendAffiliation(accountId, groupId, on, token, token, true); });
+    return impl_->ctl.runSync([=]() -> int64_t {
+        Impl* o = impl_.get();
+        auto ic = o->accountCfgs.find(accountId);
+        if (ic == o->accountCfgs.end()) return -1;
+        const std::string gid = mcptt::bareId(groupId);
+        if (Impl::mcpttSetForm(ic->second)) {
+            // 규격형 — 관심 그룹 집합을 바꾸고 집합 전부를 한 게시로(TS 24.379 §9.2.1.2)
+            std::set<std::string>& groups = o->mcpttAffiliations[accountId];
+            if (on) groups.insert(gid); else groups.erase(gid);
+            const detail::UpkeepKey k{accountId, detail::UpkeepKind::McpttAffiliation, std::string()};
+            if (groups.empty()) o->upkeep.unwant(k); else o->upkeep.want(k);
+            return o->sendMcpttAffiliationSet(accountId, token, token, true);
+        }
+        const detail::UpkeepKey k{accountId, detail::UpkeepKind::McpttAffiliation, gid};
+        if (on) o->upkeep.want(k); else o->upkeep.unwant(k);
+        return o->sendAffiliation(accountId, groupId, on, token, token, true);
+    });
+}
+
+int64_t Engine::Impl::sendSubscribe(const detail::UpkeepKey& k, bool on, int64_t token, bool internal) {
+    auto ic = accountCfgs.find(k.account);
+    if (ic == accountCfgs.end()) return -1;
+    std::string event, target;
+    switch (k.kind) {
+        case detail::UpkeepKind::Conference: event = "conference"; target = "sip:" + k.target + "@" + ic->second.domain; break;
+        case detail::UpkeepKind::XcapDiff: event = "xcap-diff"; target = k.target; break;
+        case detail::UpkeepKind::Dialog: event = "dialog"; target = detail::normalizeTarget(k.target, ic->second.domain); break;
+        default: return -1;
+    }
+    std::map<std::string, std::string> h{{"Event", event}, {"Expires", on ? "3600" : "0"}};
+    (void)internal;
+    int64_t r = doSendRequest(k.account, "SUBSCRIBE", target, "", "", h, token);
+    // 이 세 이벤트는 스택의 구독(evsub — pjsua_cims_conf_subscribe)으로 나간다: 같은 대상을 다시 부르면 대화 안 갱신, 구독이
+    //   끝났으면(서버 종료·갱신 실패) 새 구독이다. 응답은 코어로 올라오지 않고 만료 전 갱신은 스택이 한다(RFC 6665 §4.1.2.2).
+    //   그래서 유지는 보낸 것을 확인으로 치고 수명 절반마다·등록이 다시 설 때 다시 부른다 — 서버가 잃었거나 스택이 끝낸 구독을
+    //   되살리는 몫이다. 보내지도 못했으면 물러나 다시.
+    if (on) {
+        const int64_t now = upkeepNowMs();
+        upkeep.sent(k, now);
+        upkeep.result(k, r < 0 ? 0 : 200, detail::Upkeep::kDefaultLifetimeSec, now);
+    }
+    return r;
 }
 
 Result Engine::subscribeConference(int accountId, const std::string& groupId, bool on) {
@@ -3013,11 +3264,10 @@ Result Engine::subscribeConference(int accountId, const std::string& groupId, bo
     int64_t token = impl_->nextToken++;
     return impl_->ctl.runSync([=]() -> Result {
         Impl* o = impl_.get();
-        auto ic = o->accountCfgs.find(accountId);
-        if (ic == o->accountCfgs.end()) return Result::fail(-2, "no such account");
-        std::map<std::string, std::string> h{{"Event", "conference"}, {"Expires", on ? "3600" : "0"}};
-        int64_t r = o->doSendRequest(accountId, "SUBSCRIBE", "sip:" + groupId + "@" + ic->second.domain, "", "", h, token);
-        return r < 0 ? Result::fail(-3, "subscribe failed") : Result::success();
+        if (!o->accountCfgs.count(accountId)) return Result::fail(-2, "no such account");
+        const detail::UpkeepKey k{accountId, detail::UpkeepKind::Conference, groupId};
+        if (on) o->upkeep.want(k); else o->upkeep.unwant(k);
+        return o->sendSubscribe(k, on, token, false) < 0 ? Result::fail(-3, "subscribe failed") : Result::success();
     });
 }
 
@@ -3025,9 +3275,11 @@ Result Engine::subscribeXcapDiff(int accountId, const std::string& psiUri, bool 
     if (!impl_->running) return Result::fail(-1, "not running");
     int64_t token = impl_->nextToken++;
     return impl_->ctl.runSync([=]() -> Result {
-        std::map<std::string, std::string> h{{"Event", "xcap-diff"}, {"Expires", on ? "3600" : "0"}};
-        int64_t r = impl_->doSendRequest(accountId, "SUBSCRIBE", psiUri, "", "", h, token);
-        return r < 0 ? Result::fail(-3, "subscribe failed") : Result::success();
+        Impl* o = impl_.get();
+        if (!o->accountCfgs.count(accountId)) return Result::fail(-2, "no such account");
+        const detail::UpkeepKey k{accountId, detail::UpkeepKind::XcapDiff, psiUri};
+        if (on) o->upkeep.want(k); else o->upkeep.unwant(k);
+        return o->sendSubscribe(k, on, token, false) < 0 ? Result::fail(-3, "subscribe failed") : Result::success();
     });
 }
 
@@ -3038,11 +3290,10 @@ Result Engine::dialogWatch(int accountId, const std::string& targetAor, bool on)
     int64_t token = impl_->nextToken++;
     return impl_->ctl.runSync([=]() -> Result {
         Impl* o = impl_.get();
-        auto ic = o->accountCfgs.find(accountId);
-        if (ic == o->accountCfgs.end()) return Result::fail(-2, "no such account");
-        std::map<std::string, std::string> h{{"Event", "dialog"}, {"Expires", on ? "3600" : "0"}};
-        int64_t r = o->doSendRequest(accountId, "SUBSCRIBE", detail::normalizeTarget(targetAor, ic->second.domain), "", "", h, token);
-        return r < 0 ? Result::fail(-3, "subscribe failed") : Result::success();
+        if (!o->accountCfgs.count(accountId)) return Result::fail(-2, "no such account");
+        const detail::UpkeepKey k{accountId, detail::UpkeepKind::Dialog, targetAor};
+        if (on) o->upkeep.want(k); else o->upkeep.unwant(k);
+        return o->sendSubscribe(k, on, token, false) < 0 ? Result::fail(-3, "subscribe failed") : Result::success();
     });
 }
 

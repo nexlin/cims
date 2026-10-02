@@ -19,6 +19,9 @@ constexpr const char* kCtResourceLists = "application/resource-lists+xml";
 constexpr const char* kCtAffiliation = "application/vnd.3gpp.mcptt-affiliation-command+xml";
 constexpr const char* kCtConferenceInfo = "application/conference-info+xml";
 constexpr const char* kIcsiMcptt = "urn:urn-7:3gpp-service.ims.icsi.mcptt";
+constexpr const char* kNsPresInfo = "urn:3gpp:ns:mcpttPresInfo:1.0";          // TS 24.379 §9.3.1.1
+constexpr const char* kCtPidf = "application/pidf+xml";
+constexpr const char* kAffiliationExpires = "4294967295";                      // 2^32-1 — §9.2.1.2 5)a) NOTE 3
 
 /** mcptt-info (TS 24.379 §F.1). emergency/imminent/alert: 0=미기재, 1=true, -1=false(명시 하향).
  *  broadcast = 일제 통화 개시 `<broadcast-ind>true`(§6.2.8.2) — session-type 은 prearranged 그대로.
@@ -31,6 +34,12 @@ std::string mcpttInfo(const std::string& sessionType, const std::string& request
 std::string resourceLists(const std::vector<std::string>& memberUris);
 /** affiliation-command (TS 24.379 §F.3). */
 std::string affiliationCommand(const std::string& groupUri, bool affiliate);
+/** 제휴 게시의 mcptt-info — `<mcptt-request-uri>` = 대상 MCPTT ID 만(TS 24.379 §9.2.1.2 2)). */
+std::string affiliationInfo(const std::string& targetMcpttId);
+/** 제휴 게시의 pidf(TS 24.379 §9.3.1 per-user affiliation information) — entity = 대상 MCPTT ID, tuple id = MCPTT client ID,
+ *  관심 그룹 전부(§9.2.1.2 5)b)i)·ii)), `<affiliation>` 에 status·expires 없음(iii)), 유일 p-id(iv)). */
+std::string affiliationPidf(const std::string& entity, const std::string& clientId, const std::vector<std::string>& groupUris,
+                            const std::string& pid);
 
 /** 긴급 경보 MESSAGE 본문(TS 24.379 §12.1.1.1·§12.1.1.2, 요소 순서 = §F.1 mcptt-ParamsType). callingUserId 는 규격상 서버가
  *  채우는 값이지만 이 CSP 는 원본 본문을 그대로 팬아웃하므로 수신자가 발신자를 알 수 있게 싣는다. clientId 가 비면 요소를 뺀다.

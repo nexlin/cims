@@ -175,6 +175,8 @@ public sealed class AccountConfig
     public string? McvideoServerUri { get; set; }
     /// <summary>MCVideo 멤버 초대(prearranged) 자동 수락(§6.2.3.1.2). 수락은 세션 합류일 뿐 — 영상 보기는 수신 제어(AcceptReception).</summary>
     public bool AutoAnswerMcvideo { get; set; } = true;
+    /// <summary>발언권 참여자 타이머 — ue-init-config &lt;Timers&gt;(<see cref="UeInitConfigDoc.FloorTimers"/>)를 싣는다. 다음 MCPTT 호부터 쓴다.</summary>
+    public FloorTimers FloorTimers { get; set; } = new();
 
     /// <summary>"sip:msisdn@domain".</summary>
     public string Aor() => Engine.AccountConfigString(this, Engine.AccountStringKind.Aor);
@@ -261,6 +263,11 @@ public sealed record MediaSource(uint Ssrc, string Label, bool Active, float Lev
 /// Mcptt = 개시·착신 INVITE 의 mcptt-info(호 종류 — 이후 불변), Condition = 긴급·임박의 현재값(판정은 이것으로). RxLevel = 이 호에서 듣는 크기.
 /// AnswerState = 개시 200 OK 의 P-Answer-State(RFC 4964 — "Unconfirmed" = 서버가 멤버 확인 전에 받았다, TS 24.379 §10.1.1.2.1.1 2A)),
 /// NonAcknowledgedUsers = 서버가 알린 미응답 멤버 MCPTT ID(bare, §6.3.3.3 — 알릴 때 <see cref="Engine.NonAcknowledgedUsersReceived"/>).</summary>
+/// <summary>발언권 참여자 타이머·카운터(TS 24.380 표 11.1.1-1·11.2.1-1, ms) — 0 = 기본값(T100·T101 1 s · T103 4 s · T104 4 s · T132 2 s · C 3).
+/// 값의 출처 = UE initial configuration &lt;on-network&gt;&lt;Timers&gt;(TS 24.484 §7.2.2.7).</summary>
+public sealed record FloorTimers(int T100Ms = 0, int T101Ms = 0, int T103Ms = 0, int T104Ms = 0, int T132Ms = 0,
+                                 int C100 = 0, int C101 = 0, int C104 = 0);
+
 public sealed record CallInfo(
     int CallId, int AccountId, CallDir Dir, CallState State, string RemoteUri, string CalledParty,
     bool Video, bool MediaActive, bool Muted, bool Listen, int PlaybackRoute,
@@ -268,7 +275,9 @@ public sealed record CallInfo(
     bool IsMcptt, string GroupId, McpttInfo Mcptt, bool HalfDuplex, bool ListenOnly, string JoinedDialog,
     float RxLevel = 1f, McpttCondition Condition = default, string AnswerState = "", IReadOnlyList<string>? NonAcknowledgedUsers = null,
     McService Service = McService.Mcptt, string SessionUri = "", bool VideoSend = true,
-    VideoRequestState VideoRequest = VideoRequestState.None)
+    VideoRequestState VideoRequest = VideoRequestState.None,
+    // 개시 INVITE 최종 응답의 Warning(RFC 3261 §20.43) — 403 의 120 «미제휴»(TS 24.379)와 비멤버 403 을 가른다. 없으면 0·빈 값.
+    int WarningCode = 0, string WarningText = "")
 {
     public static CallInfo Empty { get; } = new(-1, -1, CallDir.Outgoing, CallState.Null, "", "", false, false, false, true, 0, 0, "",
                                                 Array.Empty<MediaSource>(), false, "", McpttInfo.None, false, false, "");

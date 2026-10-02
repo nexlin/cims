@@ -237,6 +237,8 @@ struct UeInitConfigDoc {
     std::string mcpttServerUri;                // MCPTT-Service-Details/Server-URI — 참여 MCPTT 기능 PSI
     std::string mcdataServerUri;               // MCData-Service-Details/Server-URI — 참여 MCData 기능 PSI
     std::string mcvideoServerUri;              // MCVideo-Service-Details/Server-URI — 참여 MCVideo 기능 PSI(AccountConfig.mcvideoServerUri)
+    /** on-network/Timers — T100·T101·T103·T104·T132(초 → ms, TS 24.484 §7.2.2.7). 없는 요소는 0(기본값) → AccountConfig.floorTimers. */
+    FloorTimers floorTimers;
     CIMSUE_API static bool parse(const std::string& xml, UeInitConfigDoc& out, std::string* err = nullptr);
 };
 

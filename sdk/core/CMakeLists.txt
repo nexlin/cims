@@ -171,6 +171,8 @@ if(DEFINED GTEST_DIR)
         test/csc_test.cpp
         test/engine_route_test.cpp
         test/reg_recovery_test.cpp
+        test/upkeep_test.cpp
+        test/affiliation_upkeep_test.cpp
         test/c_api_test.cpp
         test/quality_test.cpp
         test/drive_test.cpp

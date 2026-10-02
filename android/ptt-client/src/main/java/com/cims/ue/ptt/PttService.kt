@@ -287,6 +287,10 @@ class PttService : Service() {
         }
     }
 
+    /** 기본 네트워크가 바뀌면(Wi-Fi ↔ 이동망, 끊겼다 다시 붙음) 코어에 알린다 — 옛 연결을 닫고 다시 등록하며, 그 등록이 서면 제휴·구독을
+     *  다시 싣는다(`Engine::handleNetworkChange`, ue_sdk.md §4.2). 판정은 SDK 접점 NetworkWatcher(지금 망의 첫 알림은 거른다). */
+    private val netWatcher by lazy { com.cims.ue.sdk.platform.NetworkWatcher(this) { controller?.handleNetworkChange() } }
+
     /** 로그인 중 CPU 를 재우지 않는다 — keepalive 가 멈추면 NAT 포트가 유실된다(core/power/PartialWakeLock). */
     private val wakeLock by lazy { PartialWakeLock(this, "cims:ptt") }
 
@@ -296,6 +300,7 @@ class PttService : Service() {
         createChannel()
         startForegroundCompat(notification("CIMS PTT", "시작 중…"))
         wakeLock.acquire()
+        netWatcher.start()
         runCatching {
             if (Build.VERSION.SDK_INT >= 33)
                 registerReceiver(vendorKeyReceiver, VendorPttReceiver.filter(), RECEIVER_EXPORTED)
@@ -565,6 +570,7 @@ class PttService : Service() {
 
     override fun onDestroy() {
         instance = null
+        netWatcher.close()
         wakeLock.release()
         controller?.proximityLock?.release()
         runCatching { unregisterReceiver(vendorKeyReceiver) }

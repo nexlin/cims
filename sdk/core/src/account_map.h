@@ -30,6 +30,10 @@ std::string normalizeTarget(const std::string& target, const std::string& domain
 /** SIP 원문에서 헤더 값 1개(대소문자 무시, 첫 매치). 없으면 빈 문자열. */
 std::string headerValue(const std::string& wholeMsg, const std::string& name);
 
+/** Warning 헤더 값(RFC 3261 §20.43 `warn-code SP warn-agent SP warn-text`)의 첫 값 — code 와 text(따옴표를 벗긴 문구).
+ *  형식이 아니면 false(code 0·text 빈 값). */
+bool parseWarning(const std::string& value, int& code, std::string& text);
+
 /** 헤더 값의 URI 사용자부(예: <sip:+8210@d>;x → +8210). */
 std::string uriUser(const std::string& headerVal);
 

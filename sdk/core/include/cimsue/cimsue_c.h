@@ -121,6 +121,12 @@ typedef struct {
     int32_t     grant_mic_delay_ms;     /* Floor Granted 뒤 마이크를 여는 지연(승인 톤 길이, 0 = 즉시) */
 } cimsue_engine_config_t;
 
+/** 발언권 참여자 타이머·카운터(cimsue/types.h FloorTimers, TS 24.380 표 11.1.1-1·11.2.1-1) — 0 = 기본값. */
+typedef struct {
+    int32_t t100_ms, t101_ms, t103_ms, t104_ms, t132_ms;
+    int32_t c100, c101, c104;
+} cimsue_floor_timers_t;
+
 typedef struct {
     const char*             server_host;
     int32_t                 server_port;
@@ -157,6 +163,7 @@ typedef struct {
     int32_t                 mcvideo_enabled;    /* REGISTER Contact 에 MCVideo 태그(TS 24.281 §7.2.1AA) — 빼면 MCVideo 로그오프 */
     const char*             mcvideo_server_uri; /* 참여 MCVideo 기능 PSI — MCVideo 그룹 호·affiliation Request-URI(§9.2.1.2.1.1·§8.2) */
     int32_t                 auto_answer_mcvideo; /* MCVideo 멤버 초대 자동 수락(§6.2.3.1.2) — 기본 1 */
+    cimsue_floor_timers_t   floor_timers;       /* 발언권 참여자 타이머 — ue-init-config <Timers>(끝에 덧붙였다) */
 } cimsue_account_config_t;
 
 typedef struct {
@@ -276,6 +283,8 @@ typedef struct {
     const char*                  session_uri;       /* MC 세션 식별자 — 제어 기능 Contact(isfocus), 재합류에 쓴다 */
     int32_t                      video_send;        /* 내 영상 송출 허용(set_video_send, 기본 1) — MCPTT 반이중은 발언권을 가진 동안만 실제로 보낸다 */
     cimsue_video_request_state_t video_request;     /* 통화 중 영상 전환 요청의 진행(1:1 호) — 결과는 on_video_request */
+    int32_t                      warning_code;      /* 개시 INVITE 최종 응답의 Warning 코드(RFC 3261 §20.43, 없으면 0) — 403 120 = 미제휴(TS 24.379) */
+    const char*                  warning_text;      /* 그 Warning 의 문구(따옴표를 벗긴 warn-text) */
 } cimsue_call_info_t;
 
 /** 통화 중 영상 전환 이벤트(types.h VideoRequestEvent — 1:1 호, RFC 3264 §8.1·§8.2). RECEIVED 면 앱이 사용자에게 묻고
@@ -592,6 +601,11 @@ CIMSUE_API cimsue_status_t CIMSUE_CALL cimsue_engine_floor_request(cimsue_engine
                                                                    int32_t priority);
 CIMSUE_API cimsue_status_t CIMSUE_CALL cimsue_engine_floor_release(cimsue_engine_t* e, int32_t call_id);
 CIMSUE_API cimsue_status_t CIMSUE_CALL cimsue_engine_floor_queue_cancel(cimsue_engine_t* e, int32_t call_id);
+/** 대기열 위치 요청(Engine::floorQueuePosition) — 대기 중일 때. */
+CIMSUE_API cimsue_status_t CIMSUE_CALL cimsue_engine_floor_queue_position(cimsue_engine_t* e, int32_t call_id);
+/** 계정의 발언권 참여자 타이머를 바꾼다(Engine::setFloorTimers) — 다음 MCPTT 호부터. */
+CIMSUE_API cimsue_status_t CIMSUE_CALL cimsue_engine_set_floor_timers(cimsue_engine_t* e, int32_t account_id,
+                                                                     const cimsue_floor_timers_t* timers);
 CIMSUE_API void CIMSUE_CALL cimsue_engine_floor_info(const cimsue_engine_t* e, int32_t call_id,
                                                      cimsue_floor_info_t* out);
 /** 진행 중 그룹콜의 조건 상향·하향(Engine::setCallCondition, TS 24.379 §10.1.1.2.1.3~5) — 결과는 on_mcptt_condition
@@ -1068,6 +1082,7 @@ typedef struct {
     const char* mcptt_server_uri;           /* MCPTT-Service-Details/Server-URI → 계정 mcptt_server_uri */
     const char* mcdata_server_uri;          /* MCData-Service-Details/Server-URI → 계정 mcdata_server_uri */
     const char* mcvideo_server_uri;         /* MCVideo-Service-Details/Server-URI → 계정 mcvideo_server_uri(끝에 덧붙였다) */
+    cimsue_floor_timers_t floor_timers;     /* on-network/Timers(초 → ms) → 계정 floor_timers(끝에 덧붙였다) */
 } cimsue_ue_init_config_doc_t;
 
 /** 정책 게이트 스냅샷(csc.h Capabilities) — 받지 못한 문서는 허용. UX 선차단용, 최종 판정은 서버. */

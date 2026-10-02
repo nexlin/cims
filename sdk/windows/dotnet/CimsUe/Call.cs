@@ -47,9 +47,12 @@ public sealed class Call
     public Result LeaveGroupCall() => Engine.Status(cimsue_engine_leave_group_call(Engine.Handle, Id));
     /// <summary>PTT down — Floor Request. 응답은 FloorChanged(Granted/Denied/QueuePosition). priority&lt;0 = 미기재.</summary>
     public Result FloorRequest(int priority = -1) => Engine.Status(cimsue_engine_floor_request(Engine.Handle, Id, priority));
-    /// <summary>PTT up — Floor Release(대기 중이면 Queued Cancel 선행).</summary>
+    /// <summary>PTT up — Floor Release(대기 중이면 이 Release 가 대기 요청을 거둔다, TS 24.380 §6.2.4.9.6).</summary>
     public Result FloorRelease() => Engine.Status(cimsue_engine_floor_release(Engine.Handle, Id));
+    /// <summary>내 대기 요청 취소 = Floor Release(§6.2.4.9.6) — 대기 중이 아니면 아무것도 안 한다.</summary>
     public Result FloorQueueCancel() => Engine.Status(cimsue_engine_floor_queue_cancel(Engine.Handle, Id));
+    /// <summary>대기열 위치 요청(§6.2.4.9.9) — 대기 중일 때. 답은 FloorChanged(QueuePosition).</summary>
+    public Result FloorQueuePosition() => Engine.Status(cimsue_engine_floor_queue_position(Engine.Handle, Id));
     /// <summary>진행 중 그룹콜의 조건 상향·하향(TS 24.379 §10.1.1.2.1.3~5) — in-dialog re-INVITE. 결과는 McpttConditionChanged(Local → Confirmed/Denied),
     /// 거절은 호를 끊지 않는다. emergency·imminentPeril 을 함께 true 로 줄 수 없다. 사설콜·응답 대기 중·성립 전 호는 실패.</summary>
     public Result SetCondition(bool emergency, bool imminentPeril) =>

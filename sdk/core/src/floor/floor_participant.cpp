@@ -88,27 +88,57 @@ bool Participant::isStaleSeq(int seq) const {
 
 // ── 명령 ──
 
+void Participant::setTimers(const FloorTimers& t) {
+    std::lock_guard<std::mutex> lk(m_);
+    auto pick = [](int v, int def) { return v > 0 ? v : def; };
+    t100Ms_ = pick(t.t100Ms, kDefT100Ms);
+    t101Ms_ = pick(t.t101Ms, kDefT101Ms);
+    t103Ms_ = pick(t.t103Ms, kDefT103Ms);
+    t104Ms_ = pick(t.t104Ms, kDefT104Ms);
+    t132Ms_ = pick(t.t132Ms, kDefT132Ms);
+    c100_ = pick(t.c100, kDefCounter);
+    c101_ = pick(t.c101, kDefCounter);
+    c104_ = pick(t.c104, kDefCounter);
+}
+
+void Participant::onMedia() {
+    std::lock_guard<std::mutex> lk(m_);
+    if (state_ == FloorState::Speaking) return;                     // 'U: has permission' 에는 T103 이 없다
+    mediaEndAt_ = Clock::now() + std::chrono::milliseconds(t103Ms_);
+}
+
 void Participant::sendRequest(int priority, bool emergency) {
-    releaseRetxLeft_ = 0;
-    pendingRelease_ = false;
+    stopRelease();
     // 긴급 세션의 발언은 Floor Indicator emergency 비트 — CMP tier 상향/선점(TS 24.380).
     //   일제 통화 개시자는 호 종류 B-bit 를 함께 싣는다(§6.2.4.3.5 1.b, 비트 OR — §8.2.3.15).
     int ind = (emergency ? (int)indicator::EMERGENCY : 0) | (broadcastInitiator_ ? (int)indicator::BROADCAST_GROUP : 0);
-    send(floor::request(ssrc_, userId_, priority, ind ? ind : -1));
+    requestPkt_ = floor::request(ssrc_, userId_, priority, ind ? ind : -1);
+    send(requestPkt_);
+    requestEmergency_ = emergency;
     state_ = FloorState::Requesting;
-    requestDeadline_ = Clock::now() + std::chrono::milliseconds(kRequestTimeoutMs);
+    requestSends_ = 1;                                              // T101 시작·C101 = 1(§6.2.4.3.5 2.)
+    requestDeadline_ = Clock::now() + std::chrono::milliseconds(t101Ms_);
 }
 
-void Participant::sendRelease() {
-    releaseRetxPkt_ = floor::release(ssrc_, userId_);
+void Participant::startRelease(const std::string& pkt) {
+    releaseRetxPkt_ = pkt;
     send(releaseRetxPkt_);
     pendingRelease_ = true;
-    releaseRetxLeft_ = kReleaseRetxMax;
-    releaseRetxAt_ = Clock::now() + std::chrono::milliseconds(kReleaseRetxMs);
+    releaseSends_ = 1;                                              // T100 시작·C100 = 1
+    releaseRetxAt_ = Clock::now() + std::chrono::milliseconds(t100Ms_);
 }
 
+void Participant::stopRelease() {
+    pendingRelease_ = false;
+    releaseSends_ = 0;
+    releaseRetxAt_ = {};
+}
+
+void Participant::sendRelease() { startRelease(floor::release(ssrc_, userId_)); }
+
 void Participant::grantSelf(int durationSec) {
-    revokePending_ = false; releaseRetxLeft_ = 0; requestDeadline_ = {}; pendingRelease_ = false;
+    revokePending_ = false; requestDeadline_ = {}; queuePosAt_ = {}; queuedGrantAt_ = {}; mediaEndAt_ = {};
+    stopRelease();
     bool haveSelf = false;
     for (auto& t : talkers_) if (t.self) haveSelf = true;
     if (!haveSelf) talkers_.insert(talkers_.begin(), Talker{userId_, ssrc_, true});
@@ -125,6 +155,7 @@ void Participant::armImplicitRequest(bool emergency) {
     implicitPending_ = true;
     implicitEmergency_ = emergency;
     releaseOnAnswer_ = false;
+    pttHeld_ = true;                             // 암묵적 발언 요청 = 누른 채 개시했다
     state_ = FloorState::Requesting;             // 'U: pending Request' — 시한(T101)은 answer 에서 건다(목적지를 그때 안다)
 }
 
@@ -149,7 +180,13 @@ void Participant::onInitialAnswer(bool granted, bool accepted) {
             ev.kind = FloorEvent::Kind::Granted;
             notify = true;
         } else if (accepted) {
-            requestDeadline_ = Clock::now() + std::chrono::milliseconds(kRequestTimeoutMs);   // Floor Granted 대기(T101)
+            // §6.2.4.2.2 4.a — 암묵 요청이 받아들여졌다: T101·C101 = 1. 만료마다 보낼 Floor Request 는 같은 조건의 명시 요청이다(§6.2.4.4.5).
+            int ind = (implicitEmergency_ ? (int)indicator::EMERGENCY : 0) |
+                      (broadcastInitiator_ ? (int)indicator::BROADCAST_GROUP : 0);
+            requestPkt_ = floor::request(ssrc_, userId_, -1, ind ? ind : -1);
+            requestEmergency_ = implicitEmergency_;
+            requestSends_ = 1;
+            requestDeadline_ = Clock::now() + std::chrono::milliseconds(t101Ms_);
         } else {
             if (cb_.log) cb_.log(3, "floor implicit request not accepted — explicit Floor Request (call " + std::to_string(callId_) + ")");
             sendRequest(-1, implicitEmergency_);
@@ -160,23 +197,37 @@ void Participant::onInitialAnswer(bool granted, bool accepted) {
 }
 
 void Participant::request(int priority, bool emergency) {
-    std::lock_guard<std::mutex> lk(m_);
-    if (listenOnly_ || !canRequest_) {
-        FloorEvent ev; ev.kind = FloorEvent::Kind::Denied; ev.state = state_; ev.cause = 5;
-        ev.causeText = "Receive only"; emit(ev); return;
+    FloorEvent ev;
+    bool notify = false;
+    {
+        std::lock_guard<std::mutex> lk(m_);
+        if (listenOnly_ || !canRequest_) {
+            ev.kind = FloorEvent::Kind::Denied; ev.state = state_; ev.cause = 5; ev.causeText = "Receive only";
+            notify = true;
+        } else {
+            pttHeld_ = true;
+            if (state_ == FloorState::Queued && queuedGrantAt_ != Clock::time_point{}) {
+                // §6.2.4.9.12 — 대기 끝에 승인됐고(T132) 사용자가 송출을 원한다 → 'U: has permission'
+                grantSelf(queuedGrantDuration_);
+                ev.kind = FloorEvent::Kind::Granted; ev.state = state_; ev.talkers = talkers_; ev.indicator = indicator_;
+                ev.durationSec = queuedGrantDuration_;
+                notify = true;
+            } else if (state_ == FloorState::Speaking || state_ == FloorState::Requesting || state_ == FloorState::Queued) {
+                // 이미 요청·대기·발언 중
+            } else if (implicitPending_) {                            // answer 전에 놓았다가 다시 눌렀다 — 암묵 요청이 아직 유효하다
+                releaseOnAnswer_ = false;
+                state_ = FloorState::Requesting;
+            } else {
+                sendRequest(priority, emergency);
+            }
+        }
     }
-    if (state_ == FloorState::Speaking || state_ == FloorState::Requesting || state_ == FloorState::Queued) return;
-    if (implicitPending_) {                                           // answer 전에 놓았다가 다시 눌렀다 — 암묵 요청이 아직 유효하다
-        releaseOnAnswer_ = false;
-        state_ = FloorState::Requesting;
-        return;
-    }
-    sendRequest(priority, emergency);
+    if (notify) emit(ev);
 }
 
 void Participant::release() {
     std::lock_guard<std::mutex> lk(m_);
-    releaseRetxLeft_ = 0;
+    pttHeld_ = false;
     talkDeadline_ = {};
     requestDeadline_ = {};
     if (implicitPending_) {
@@ -186,24 +237,36 @@ void Participant::release() {
         setMic(false);
         return;
     }
-    // 대기 중이면 대기 요청부터 취소(§8.2.15) — 발언 중이 아닌 leg 의 Release 는 서버가 무시한다.
-    if (state_ == FloorState::Queued) send(cancelQueuedRequest(ssrc_));
-    // 요청/점유한 적이 있을 때만 Release — 그 외의 Release 는 고아 메시지.
-    //   U: pending Release — T100 으로 재전송(§6.2.4.6.2), Idle·Taken 이 오면 멈춘다. 유실되면 서버가 발언권을 계속 쥔다.
+    // 요청·점유·대기한 적이 있을 때만 Release(§6.2.4.4.8 · §6.2.4.5.3 · §6.2.4.9.6) — 그 외의 Release 는 고아 메시지.
+    //   대기 중이면 이 Release 가 내 대기 요청을 거둔다(서버 §6.3.5.4.5 3)). U: pending Release — T100·C100 으로 재전송,
+    //   Idle·Taken 이 오면 멈춘다. 유실되면 서버가 발언권을 계속 쥔다.
     if (state_ == FloorState::Speaking || state_ == FloorState::Requesting || state_ == FloorState::Queued) sendRelease();
     queuePos_ = -1;
+    queuePosAt_ = {};
+    queuedGrantAt_ = {};
     setMic(false);
     // 내 발언만 끝난다 — 동시 발언 중이면 남은 화자를 계속 듣는다.
     std::vector<Talker> rest;
     for (auto& t : talkers_) if (!t.self) rest.push_back(t);
     talkers_ = rest;
-    state_ = rest.empty() ? FloorState::Idle : FloorState::Listening;
+    state_ = noPermissionState();
 }
 
 void Participant::cancelQueued() {
+    {
+        std::lock_guard<std::mutex> lk(m_);
+        if (state_ != FloorState::Queued) return;
+    }
+    release();
+}
+
+void Participant::requestQueuePosition() {
     std::lock_guard<std::mutex> lk(m_);
-    send(cancelQueuedRequest(ssrc_));
-    if (state_ == FloorState::Queued) state_ = FloorState::Idle;
+    if (state_ != FloorState::Queued || queuedGrantAt_ != Clock::time_point{}) return;   // §6.2.4.9.9 — T132 가 돌면 하지 않는다
+    queuePosPkt_ = floor::queuePositionRequest(ssrc_, userId_);
+    send(queuePosPkt_);
+    queuePosSends_ = 1;
+    queuePosAt_ = Clock::now() + std::chrono::milliseconds(t104Ms_);
 }
 
 FloorInfo Participant::info() const {
@@ -254,11 +317,12 @@ void Participant::tick() {
     {
         std::lock_guard<std::mutex> lk(m_);
         auto now = Clock::now();
+        auto after = [&](int ms) { return now + std::chrono::milliseconds(ms); };
         if (nextAck_ != Clock::time_point{} && now >= nextAck_ && remotePort_ > 0) {
             send(ack(ssrc_, userId_));                                    // NAT keepalive(≤20s)
             if (ackStartLeft_ > 0) {
                 --ackStartLeft_;
-                nextAck_ = now + std::chrono::milliseconds(kAckStartIntervalMs);
+                nextAck_ = after(kAckStartIntervalMs);
             } else {
                 nextAck_ = now + std::chrono::seconds(kAckPeriodSec);
             }
@@ -267,33 +331,74 @@ void Participant::tick() {
             micOpenAt_ = {};
             if (state_ == FloorState::Speaking) setMic(true);
         }
-        if (releaseRetxLeft_ > 0 && now >= releaseRetxAt_) {              // Release 재전송(T100, §6.2.4.6.2)
-            send(releaseRetxPkt_);
-            if (--releaseRetxLeft_ > 0) releaseRetxAt_ = now + std::chrono::milliseconds(kReleaseRetxMs);
-            else pendingRelease_ = false;                                 // T100 N회 만료 → U: has no permission(§6.2.4.6.3)
+        if (releaseRetxAt_ != Clock::time_point{} && now >= releaseRetxAt_) {
+            if (releaseSends_ < c100_) {                                  // T100 만료 < C100 — 다시 보낸다(§6.2.4.6.2)
+                send(releaseRetxPkt_);
+                ++releaseSends_;
+                releaseRetxAt_ = after(t100Ms_);
+            } else {
+                stopRelease();                                            // C100 회 만료 → U: has no permission(§6.2.4.6.3)
+            }
         }
         if (requestDeadline_ != Clock::time_point{} && now >= requestDeadline_) {
-            requestDeadline_ = {};
-            if (state_ == FloorState::Requesting) {                      // GRANT/DENY 무응답 → Idle
+            if (state_ == FloorState::Requesting && requestSends_ < c101_ && !requestPkt_.empty()) {
+                send(requestPkt_);                                        // T101 만료 < C101 — 다시 보낸다(§6.2.4.4.5)
+                ++requestSends_;
+                requestDeadline_ = after(t101Ms_);
+            } else {
+                requestDeadline_ = {};
+                if (state_ == FloorState::Requesting) {                  // C101 회 만료 → 요청 시간 초과, U: has no permission(§6.2.4.4.6)
+                    state_ = noPermissionState();
+                    setMic(false);
+                    FloorEvent ev; ev.kind = FloorEvent::Kind::RequestTimeout; ev.state = state_; ev.talkers = talkers_;
+                    pending.push_back(ev);
+                }
+            }
+        }
+        if (queuePosAt_ != Clock::time_point{} && now >= queuePosAt_) {
+            if (state_ == FloorState::Queued && queuePosSends_ < c104_) {
+                send(queuePosPkt_);                                       // T104 만료 < C104 — 다시 보낸다(§6.2.4.9.10)
+                ++queuePosSends_;
+                queuePosAt_ = after(t104Ms_);
+            } else {
+                queuePosAt_ = {};
+                if (state_ == FloorState::Queued) {                      // C104 회 만료 → 대기 시간 초과 + Floor Release(§6.2.4.9.11)
+                    sendRelease();
+                    queuePos_ = -1;
+                    state_ = noPermissionState();
+                    FloorEvent ev; ev.kind = FloorEvent::Kind::RequestTimeout; ev.state = state_; ev.talkers = talkers_;
+                    pending.push_back(ev);
+                }
+            }
+        }
+        if (queuedGrantAt_ != Clock::time_point{} && now >= queuedGrantAt_) {
+            queuedGrantAt_ = {};
+            if (state_ == FloorState::Queued) {                          // T132 만료 — 누르지 않았다: Floor Release, U: has no permission(§6.2.4.9.13)
+                send(floor::release(ssrc_, userId_));
+                queuePos_ = -1;
+                state_ = noPermissionState();
+                FloorEvent ev; ev.kind = FloorEvent::Kind::RequestTimeout; ev.state = state_; ev.talkers = talkers_;
+                pending.push_back(ev);
+            }
+        }
+        if (mediaEndAt_ != Clock::time_point{} && now >= mediaEndAt_) {
+            mediaEndAt_ = {};
+            if (state_ == FloorState::Listening) {                       // T103 만료 — 받던 발언이 끝났다(§6.2.4.3.6, floor idle 알림)
+                talkers_.clear();
                 state_ = FloorState::Idle;
-                setMic(false);
-                FloorEvent ev; ev.kind = FloorEvent::Kind::RequestTimeout; ev.state = state_;
+                FloorEvent ev; ev.kind = FloorEvent::Kind::Idle; ev.state = state_;
                 pending.push_back(ev);
             }
         }
         if (talkDeadline_ != Clock::time_point{} && now >= talkDeadline_) {   // Granted Duration(T2) 자체 종료
             talkDeadline_ = {};
             if (state_ == FloorState::Speaking) {
-                releaseRetxPkt_ = floor::release(ssrc_, userId_);
-                send(releaseRetxPkt_);
-                pendingRelease_ = true;
-                releaseRetxLeft_ = kReleaseRetxMax;
-                releaseRetxAt_ = now + std::chrono::milliseconds(kReleaseRetxMs);
+                sendRelease();
                 setMic(false);
                 std::vector<Talker> rest;
                 for (auto& t : talkers_) if (!t.self) rest.push_back(t);
                 talkers_ = rest;
-                state_ = rest.empty() ? FloorState::Idle : FloorState::Listening;
+                state_ = noPermissionState();
                 FloorEvent ev; ev.kind = FloorEvent::Kind::TalkLimit; ev.state = state_; ev.talkers = talkers_;
                 pending.push_back(ev);
             }
@@ -317,48 +422,86 @@ void Participant::handle(const Message& m) {
                 lastMsgSeq_ = seq;
             }
         }
+        auto discard = [&](const char* why) {                         // 그 상태에 절차가 없는 메시지(§6.2.4.1)
+            if (cb_.log) cb_.log(3, std::string("floor recv ") + opName(m.op) + " in " + toString(state_) + " — " + why +
+                                    " (call " + std::to_string(callId_) + ")");
+        };
         ev.rawType = m.op;
         ev.indicator = m.indicator() < 0 ? 0 : m.indicator();
         switch ((Op)m.op) {
             case Op::GRANTED: {
-                // U: pending Release 에서 받은 Granted(§6.2.4.6.8) — 놓은 뒤 늦게 온 승인이다. Ack(위에서 회신)만 하고
-                //   상태를 유지한다: 마이크를 열거나 Speaking 으로 가면 이어 오는 Idle 을 무시해 서버는 유휴인데 단말만
-                //   발언 중이 되고, 일제 통화 개시자는 호 해제(§6.2.4.6.4)를 놓친다. 재전송 중인 Release 가 서버를 정리한다.
-                //   개시 INVITE 의 answer 전에 놓은 경우(releaseOnAnswer_)도 같다 — Release 는 answer 에서 나간다.
-                if (pendingRelease_ || releaseOnAnswer_) {
-                    if (cb_.log) cb_.log(3, "floor recv GRANTED in pending Release — ignored (call " + std::to_string(callId_) + ")");
-                    return;
+                // U: pending Release 에서 받은 Granted(§6.2.4.6.8) — 놓은 뒤 늦게 온 승인이다. Ack(위에서 회신)만 하고 상태를 유지한다:
+                //   마이크를 열거나 Speaking 으로 가면 이어 오는 Idle 을 무시해 서버는 유휴인데 단말만 발언 중이 되고, 일제 통화 개시자는
+                //   호 해제(§6.2.4.6.4)를 놓친다. 재전송 중인 Release 가 서버를 정리한다. 개시 INVITE 의 answer 전에 놓은 경우도 같다.
+                if (pendingRelease_ || releaseOnAnswer_) { discard("released (pending Release)"); return; }
+                if (state_ == FloorState::Queued) {
+                    // §6.2.4.9.4 — 대기 끝 승인: T104 정지·T132 시작. 누르고 있으면 그 자체가 송출 의사다(§6.2.4.9.12 → has permission).
+                    queuePosAt_ = {};
+                    mediaEndAt_ = {};
+                    indicator_ = ev.indicator;
+                    ev.durationSec = m.durationSec();
+                    grantedCount_++;
+                    ev.kind = FloorEvent::Kind::Granted;
+                    if (pttHeld_) {
+                        grantSelf(ev.durationSec);
+                    } else {
+                        queuedGrantDuration_ = ev.durationSec;
+                        queuedGrantAt_ = Clock::now() + std::chrono::milliseconds(t132Ms_);
+                    }
+                    break;
                 }
+                // 승인은 요청에 대한 답이다 — 'U: has no permission' 에는 절차가 없어 버린다(§6.2.4.1): 요청 시간 초과 뒤의 늦은 승인이
+                //   PTT 없이 송출을 열지 않게. 'U: has permission' 에서는 머물며 시한만 받는다(§6.2.4.5.5).
+                if (state_ != FloorState::Requesting && state_ != FloorState::Speaking) { discard("no request outstanding"); return; }
                 ev.kind = FloorEvent::Kind::Granted;
                 grantedCount_++;
                 indicator_ = ev.indicator;
                 ev.durationSec = m.durationSec();
-                grantSelf(ev.durationSec);     // 200 OK 로 이미 승인됐으면 'U: has permission' 에 머물며 시한만 받는다(§6.2.4.5.5)
+                grantSelf(ev.durationSec);
                 break;
             }
             case Op::DENY:
+                if (state_ != FloorState::Requesting && state_ != FloorState::Queued) { discard("no request outstanding"); return; }
                 ev.kind = FloorEvent::Kind::Denied;
                 denyCount_++;
                 if (ev.indicator) indicator_ = ev.indicator;             // 호 종류(B-bit 등, §8.2.3.15) — 첫 서버 메시지가 Deny 여도 안다
                 requestDeadline_ = {};
-                state_ = talkers_.empty() ? FloorState::Idle : FloorState::Listening;
+                queuePosAt_ = {};
+                queuedGrantAt_ = {};
+                queuePos_ = -1;
+                state_ = noPermissionState();                            // §6.2.4.4.4 · §6.2.4.9.5
                 ev.cause = m.cause();
                 if (const char* t = rejectCauseText(ev.cause)) ev.causeText = t;
                 setMic(false);
                 break;
             case Op::IDLE: {
-                ev.kind = FloorEvent::Kind::Idle;
-                revokePending_ = false; releaseRetxLeft_ = 0;
-                talkers_.clear();
-                if (state_ != FloorState::Speaking) state_ = FloorState::Idle;
                 int perm = m.permission();                               // 일제 통화 Idle 은 Permission 0 일 수 있다(§6.3.4.3.2)
                 if (perm >= 0) canRequest_ = perm != (int)Permission::DENIED;
-                ev.permission = perm;
                 indicator_ = ev.indicator;
-                // U: pending Release 에서 받은 Idle — 일제 통화로 개시한 호면 송출 완료 → Releasing(= 호 해제, §6.2.4.6.4 6.)
-                if (pendingRelease_ && state_ != FloorState::Speaking) {
-                    pendingRelease_ = false;
-                    broadcastEnd = broadcastInitiator_ && (ev.indicator & indicator::BROADCAST_GROUP) != 0;
+                // 'U: pending Request' 에는 Floor Idle 절차가 없다(§6.2.4.1) — 놓고 바로 다시 눌렀을 때 앞 Release 의 Idle 이 새 요청 뒤에
+                //   도착하는 경우다. 요청을 잃지 않는다(화자 표시만 비운다).
+                if (state_ == FloorState::Requesting && !pendingRelease_) {
+                    talkers_.clear();
+                    mediaEndAt_ = {};
+                    discard("pending Request");
+                    return;
+                }
+                ev.kind = FloorEvent::Kind::Idle;
+                ev.permission = perm;
+                revokePending_ = false;
+                mediaEndAt_ = {};
+                const bool wasPendingRelease = pendingRelease_;
+                stopRelease();
+                if (state_ == FloorState::Speaking) {
+                    // 'U: has permission' 에 머문다(§6.2.4.5.7) — 내 발언 표시는 그대로
+                } else {
+                    talkers_.clear();
+                    queuePosAt_ = {};
+                    queuedGrantAt_ = {};
+                    queuePos_ = -1;
+                    state_ = FloorState::Idle;                           // §6.2.4.3.2 · §6.2.4.6.4 · §6.2.4.9.8
+                    // U: pending Release 에서 받은 Idle — 일제 통화로 개시한 호면 송출 완료 → Releasing(= 호 해제, §6.2.4.6.4 6.)
+                    broadcastEnd = wasPendingRelease && broadcastInitiator_ && (ev.indicator & indicator::BROADCAST_GROUP) != 0;
                 }
                 break;
             }
@@ -372,17 +515,41 @@ void Participant::handle(const Message& m) {
                 talkers_ = markSelf(m.talkers());
                 bool me = false;
                 for (auto& t : talkers_) if (t.self) me = true;
-                // 동시 발언에서 뒤에 승급한 화자의 Taken 은 먼저 말하던 나에게도 온다 — 강등하지 않는다.
-                // U: pending Release 에서 받은 Taken(§6.2.4.6.5) — T100 정지, U: has no permission.
-                if (!me) { revokePending_ = false; releaseRetxLeft_ = 0; pendingRelease_ = false; talkDeadline_ = {}; state_ = FloorState::Listening; setMic(false); }
-                else state_ = FloorState::Speaking;
                 ev.meSpeaking = me;
+                if (me) {
+                    // 동시 발언에서 뒤에 승급한 화자의 Taken 은 먼저 말하던 나에게도 온다 — 강등하지 않는다.
+                    if (state_ != FloorState::Speaking) state_ = FloorState::Speaking;
+                    break;
+                }
+                switch (state_) {
+                    case FloorState::Speaking:                           // §6.2.4.5.8 — 'U: has permission' 에 머문다(dual·multi)
+                        break;
+                    case FloorState::Queued:                             // §6.2.4.9.3 7. — 대기 상태 유지(앞사람이 승급했다)
+                        break;
+                    case FloorState::Requesting:
+                        // §6.2.4.4.11 7. — 선점(긴급) 요청이면 'U: pending Request' 유지, 아니면 T101 정지·'U: has no permission'
+                        if (requestEmergency_) break;
+                        requestDeadline_ = {};
+                        state_ = FloorState::Listening;
+                        setMic(false);
+                        break;
+                    default:                                             // 'U: has no permission' · 'U: pending Release'(T100 정지 §6.2.4.6.5)
+                        revokePending_ = false;
+                        stopRelease();
+                        talkDeadline_ = {};
+                        state_ = FloorState::Listening;
+                        setMic(false);
+                        break;
+                }
                 break;
             }
             case Op::RELEASE_MULTI: {                                    // 한 명만 이탈(§8.2.14)
                 ev.kind = FloorEvent::Kind::TalkerLeft;
                 std::string gone = m.userId();
                 uint32_t goneSsrc = m.speakerSsrc();
+                // 내 이탈을 알리는 것이면 'U: pending Release' 를 끝낸다(§6.2.4.6.9 2.)
+                if (pendingRelease_ && ((!gone.empty() && sameUser(gone, userId_)) || (gone.empty() && goneSsrc == ssrc_)))
+                    stopRelease();
                 std::vector<Talker> rest;
                 for (auto& t : talkers_) {
                     bool match = (!gone.empty() && sameUser(t.id, gone)) || (gone.empty() && goneSsrc && t.ssrc == goneSsrc);
@@ -391,20 +558,22 @@ void Participant::handle(const Message& m) {
                 talkers_ = rest;
                 bool me = false;
                 for (auto& t : talkers_) if (t.self) me = true;
-                state_ = me ? FloorState::Speaking : (rest.empty() ? FloorState::Idle : FloorState::Listening);
+                if (me) state_ = FloorState::Speaking;
+                else if (state_ != FloorState::Requesting && state_ != FloorState::Queued) state_ = noPermissionState();
                 ev.meSpeaking = me;
                 break;
             }
             case Op::REVOKE: {                                           // §6.2.4.5.4 — Release 로 응답(재전송)
                 if (ev.indicator) indicator_ = ev.indicator;
-                int g = ev.indicator & indicator::DUAL_FLOOR;
-                releaseRetxPkt_ = floor::release(ssrc_, userId_, g ? g : -1);
-                send(releaseRetxPkt_);
-                pendingRelease_ = true;
-                releaseRetxLeft_ = kReleaseRetxMax;
-                releaseRetxAt_ = Clock::now() + std::chrono::milliseconds(kReleaseRetxMs);
-                if (revokePending_) return;                              // 서버 T8 재전송 — 이벤트 1회
+                if (state_ != FloorState::Speaking && !pendingRelease_) { discard("not permitted"); return; }
+                if (revokePending_) return;                              // 서버 T8 재전송 — Release 재전송(T100)이 이미 돈다, 이벤트 1회
                 revokePending_ = true;
+                // 'U: has permission' — G-bit 를 맞춘 Floor Release 로 답하고 T100(§6.2.4.5.4 4.~6.). 'U: pending Release' 에서는 그 상태에
+                //   머물며 알리기만 한다(§6.2.4.6.7).
+                if (!pendingRelease_) {
+                    int g = ev.indicator & indicator::DUAL_FLOOR;
+                    startRelease(floor::release(ssrc_, userId_, g ? g : -1));
+                }
                 talkDeadline_ = {};
                 ev.kind = FloorEvent::Kind::Revoked;
                 ev.cause = m.cause();
@@ -412,13 +581,15 @@ void Participant::handle(const Message& m) {
                 std::vector<Talker> rest;
                 for (auto& t : talkers_) if (!t.self) rest.push_back(t);
                 talkers_ = rest;
-                state_ = rest.empty() ? FloorState::Idle : FloorState::Listening;
+                state_ = noPermissionState();
                 setMic(false);
                 break;
             }
             case Op::QUEUE_POS_INFO:
+                if (state_ != FloorState::Requesting && state_ != FloorState::Queued) { discard("no request outstanding"); return; }
                 ev.kind = FloorEvent::Kind::QueuePosition;
-                requestDeadline_ = {};
+                requestDeadline_ = {};                                   // §6.2.4.4.9 3A. · §6.2.4.9.7 3.
+                queuePosAt_ = {};
                 state_ = FloorState::Queued;
                 queuePos_ = m.queuePosition();
                 ev.queuePosition = queuePos_;
@@ -429,7 +600,13 @@ void Participant::handle(const Message& m) {
                 ev.kind = FloorEvent::Kind::QueueCancelled;
                 ev.cause = m.queuedResult();
                 if (const char* t = queuedResultText(ev.cause)) ev.causeText = t;
-                if (state_ == FloorState::Queued) state_ = FloorState::Idle;
+                if (purpose == (int)QueuedPurpose::CANCEL_NOTIFY && state_ == FloorState::Queued) {
+                    // 인가 사용자가 내 대기 요청을 지웠다 — T104 정지, U: has no permission(§6.2.4.9.15)
+                    queuePosAt_ = {};
+                    queuedGrantAt_ = {};
+                    queuePos_ = -1;
+                    state_ = noPermissionState();
+                }
                 break;
             }
             default:
@@ -439,7 +616,8 @@ void Participant::handle(const Message& m) {
         ev.state = state_;
         ev.talkers = talkers_;
         if (cb_.log) cb_.log(3, std::string("floor recv ") + opName(m.op) + (m.ackRequired ? "(ack-req)" : "") +
-                                " → " + toString(state_) + " (call " + std::to_string(callId_) + ")");
+                                " → " + toString(state_) + (pendingRelease_ ? " (pending Release)" : "") +
+                                " (call " + std::to_string(callId_) + ")");
     }
     emit(ev);
     if (broadcastEnd && cb_.onBroadcastEnd) cb_.onBroadcastEnd();

@@ -508,6 +508,8 @@ class Account internal constructor(private val ue: CimsUe, val id: Int) {
     suspend fun unregister(): CimsResult<Unit> = ue.command { CimsResult.of(ue.jni.unregisterAccount(id)) }
     /** 즉시 재-REGISTER — 서버 재기동 등으로 등록을 잃었을 때. */
     suspend fun refreshRegistration(): CimsResult<Unit> = ue.command { CimsResult.of(ue.jni.refreshRegistration(id)) }
+    /** 발언권 참여자 타이머를 바꾼다(ue-init-config 가 바뀌었을 때) — 다음 MCPTT 호부터. */
+    suspend fun setFloorTimers(t: FloorTimers): CimsResult<Unit> = ue.command { CimsResult.of(ue.jni.setFloorTimers(id, t.toJni())) }
     suspend fun remove(): CimsResult<Unit> = ue.command { CimsResult.of(ue.jni.removeAccount(id)) }
 
     private fun callOrFail(callId: Int, what: String): CimsResult<Call> =
@@ -656,7 +658,10 @@ class Call internal constructor(private val ue: CimsUe, val id: Int, private val
     suspend fun floorRequest(priority: Int = -1): CimsResult<Unit> = cmd { CimsResult.of(ue.jni.floorRequest(id, priority)) }
     /** PTT 뗌 — Floor Release(대기 중이면 Queued Cancel 선행). */
     suspend fun floorRelease(): CimsResult<Unit> = cmd { CimsResult.of(ue.jni.floorRelease(id)) }
+    /** 내 대기 요청 취소 = Floor Release(TS 24.380 §6.2.4.9.6) — 대기 중이 아니면 아무것도 안 한다. */
     suspend fun floorQueueCancel(): CimsResult<Unit> = cmd { CimsResult.of(ue.jni.floorQueueCancel(id)) }
+    /** 대기열 위치 요청(§6.2.4.9.9) — 대기 중일 때. 답은 floor 이벤트 QUEUE_POSITION. */
+    suspend fun floorQueuePosition(): CimsResult<Unit> = cmd { CimsResult.of(ue.jni.floorQueuePosition(id)) }
 
     // ── MCVideo 전송 제어 (TS 24.581) ──
     suspend fun transmissionInfo(): TransmissionInfo? = if (isStale) null else ue.transmissionInfo(id)

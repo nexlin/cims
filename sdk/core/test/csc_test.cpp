@@ -448,7 +448,7 @@ TEST(CmsDoc, ParseUeInitConfig) {
 <mcptt-UE-initial-configuration xmlns="urn:3gpp:mcptt:mcpttUEinitConfig:1.0" domain="ptt.example.org">
   <name>CIMS</name>
   <on-network>
-    <Timers><T100>4</T100></Timers>
+    <Timers><T100>1</T100><T101>2</T101><T103>4</T103><T104>3</T104><T132>0</T132></Timers>
     <App-Server-Info><idms-auth-endpoint>https://h/idms</idms-auth-endpoint></App-Server-Info>
     <anyExt>
       <MCPTT-Service-Details>
@@ -469,6 +469,12 @@ TEST(CmsDoc, ParseUeInitConfig) {
     EXPECT_EQ(d.domain, "ptt.example.org");
     EXPECT_EQ(d.mcpttServerUri, "sip:mcptt_psi@ptt.example.org");
     EXPECT_EQ(d.mcdataServerUri, "sip:mcdata_psi@ptt.example.org");
+    // on-network/Timers(초 → ms, TS 24.484 §7.2.2.7) — 0 은 기본값(0)
+    EXPECT_EQ(d.floorTimers.t100Ms, 1000);
+    EXPECT_EQ(d.floorTimers.t101Ms, 2000);
+    EXPECT_EQ(d.floorTimers.t103Ms, 4000);
+    EXPECT_EQ(d.floorTimers.t104Ms, 3000);
+    EXPECT_EQ(d.floorTimers.t132Ms, 0);
     // MCData 를 광고하지 않으면(CSC UeInitConfig.ServiceDetails.McData.Enable=false) 빈 값 — 통지는 전환기 형식
     UeInitConfigDoc m;
     ASSERT_TRUE(UeInitConfigDoc::parse("<mcptt-UE-initial-configuration domain=\"d\"><on-network><anyExt><MCPTT-Service-Details>"

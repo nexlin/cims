@@ -725,7 +725,10 @@ int main(int argc, char** argv) {
             UeInitConfigDoc ui;
             // MCS UE ID = instance ID. 없으면 Nil UUID(RFC 4122 §4.1.7) — 이 CMS 는 모든 UE 에 같은 문서를 준다.
             Result ur = csc.fetchUeInitConfig(a.instanceId.empty() ? "urn:uuid:00000000-0000-0000-0000-000000000000" : a.instanceId, "", ui);
-            if (ur.ok) { a.mcpttServerUri = ui.mcpttServerUri; a.mcdataServerUri = ui.mcdataServerUri; a.mcvideoServerUri = ui.mcvideoServerUri; }
+            if (ur.ok) {
+                a.mcpttServerUri = ui.mcpttServerUri; a.mcdataServerUri = ui.mcdataServerUri; a.mcvideoServerUri = ui.mcvideoServerUri;
+                a.floorTimers = ui.floorTimers;                   // 발언권 참여자 타이머(<Timers>, TS 24.484 §7.2.2.7)
+            }
             else std::fprintf(stderr, "[cimsue-cli] ue-init-config: %s\n", ur.reason.c_str());
         }
         if (!o.acc.mcpttServerUri.empty()) a.mcpttServerUri = o.acc.mcpttServerUri;

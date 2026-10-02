@@ -20,6 +20,12 @@ public sealed unsafe class Account
     public Result Unregister() => Engine.Status(cimsue_engine_unregister_account(Engine.Handle, Id));
     /// <summary>즉시 재-REGISTER(네트워크 복귀·서버 재기동 뒤 복구).</summary>
     public Result RefreshRegistration() => Engine.Status(cimsue_engine_refresh_registration(Engine.Handle, Id));
+    /// <summary>발언권 참여자 타이머를 바꾼다(ue-init-config 가 바뀌었을 때) — 다음 MCPTT 호부터.</summary>
+    public Result SetFloorTimers(FloorTimers t)
+    {
+        var n = Engine.ToNative(t);
+        return Engine.Status(cimsue_engine_set_floor_timers(Engine.Handle, Id, in n));
+    }
     public Result Remove() => Engine.Status(cimsue_engine_remove_account(Engine.Handle, Id));
 
     // ── 호 (VoLTE 1:1) ──

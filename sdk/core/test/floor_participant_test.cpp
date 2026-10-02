@@ -5,6 +5,8 @@
 #include <pjlib.h>
 
 #include <atomic>
+#include <mutex>
+#include <vector>
 #include <chrono>
 #include <thread>
 
@@ -282,5 +284,168 @@ TEST(FloorParticipant, MicOpensAfterGrantDelayAndNotAfterEarlyRelease) {
     ASSERT_TRUE(srv.expect(Op::RELEASE));
     std::this_thread::sleep_for(std::chrono::milliseconds(500));
     EXPECT_EQ(micOn.load(), 1);                                      // ①의 한 번뿐
+    p.close();
+}
+
+// ── 타이머(TS 24.380 표 11.1.1-1)와 상태별 메시지 처리(§6.2.4.1 «절차가 없는 메시지는 버리고 상태 유지») ──
+
+namespace {
+struct Events {
+    std::mutex m;
+    std::vector<FloorEvent> evs;
+    std::atomic<int> micOn{0};
+    Participant::Callbacks cb() {
+        Participant::Callbacks c;
+        c.onEvent = [this](const FloorEvent& ev) { std::lock_guard<std::mutex> lk(m); evs.push_back(ev); };
+        c.onMic = [this](bool on) { if (on) micOn++; };
+        return c;
+    }
+    int count(FloorEvent::Kind k) {
+        std::lock_guard<std::mutex> lk(m);
+        int n = 0;
+        for (auto& e : evs) if (e.kind == k) ++n;
+        return n;
+    }
+};
+FloorTimers fastTimers() {
+    FloorTimers t;
+    t.t100Ms = 150; t.t101Ms = 150; t.t103Ms = 300; t.t104Ms = 150; t.t132Ms = 300;
+    return t;                                    // 카운터는 기본값 3
+}
+int countOp(FakeServer& srv, Op op, int ms) {
+    int n = 0;
+    auto end = std::chrono::steady_clock::now() + std::chrono::milliseconds(ms);
+    while (std::chrono::steady_clock::now() < end) {
+        int left = (int)std::chrono::duration_cast<std::chrono::milliseconds>(end - std::chrono::steady_clock::now()).count();
+        if (left <= 0 || !srv.expect(op, left)) break;
+        ++n;
+    }
+    return n;
+}
+Tlv strField(Field id, const std::string& v) { return Tlv{(uint8_t)id, v}; }
+}  // namespace
+
+// §6.2.4.4.5·§6.2.4.4.6 — Floor Request 는 T101 만료마다 다시 보내고(C101 회), 그래도 답이 없으면 요청 시간 초과·'U: has no permission'.
+TEST(FloorParticipant, RequestRetransmittedByT101ThenTimesOut) {
+    cimsue_test::PjScope pj("floor-test");
+    FakeServer srv;
+    Events e;
+    Participant p(10, 0x1010u, "tel:+82500000010", e.cb());
+    p.setTimers(fastTimers());
+    ASSERT_TRUE(p.open(0));
+    p.setRemote("127.0.0.1", srv.port);
+    p.request();
+    EXPECT_EQ(countOp(srv, Op::REQUEST, 900), 3);                    // 처음 1 + 재전송 2 = C101
+    EXPECT_TRUE(waitFor([&] { return e.count(FloorEvent::Kind::RequestTimeout) == 1; }, 1000));
+    EXPECT_EQ(p.info().state, FloorState::Idle);
+    // 시간 초과 뒤의 늦은 승인 — 'U: has no permission' 에는 절차가 없다: 마이크를 열지 않는다(FCC-3)
+    srv.send(p.localPort(), Op::GRANTED, {u16Field((uint8_t)Field::DURATION, 30)});
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    EXPECT_EQ(e.micOn.load(), 0);
+    EXPECT_NE(p.info().state, FloorState::Speaking);
+    p.close();
+}
+
+// §6.2.4.1 — 'U: pending Request' 에 Floor Idle 절차는 없다: 앞 Release 의 Idle 이 새 요청 뒤에 와도 요청을 잃지 않는다(FCC-2).
+TEST(FloorParticipant, IdleDuringPendingRequestKeepsRequest) {
+    cimsue_test::PjScope pj("floor-test");
+    FakeServer srv;
+    Events e;
+    Participant p(11, 0x1111u, "tel:+82500000011", e.cb());
+    ASSERT_TRUE(p.open(0));
+    p.setRemote("127.0.0.1", srv.port);
+    p.request();
+    ASSERT_TRUE(srv.expect(Op::REQUEST));
+    srv.send(p.localPort(), Op::IDLE, {u16Field((uint8_t)Field::MSG_SEQ, 7)});
+    std::this_thread::sleep_for(std::chrono::milliseconds(150));
+    EXPECT_EQ(p.info().state, FloorState::Requesting);
+    srv.send(p.localPort(), Op::GRANTED, {u16Field((uint8_t)Field::DURATION, 30)});
+    EXPECT_TRUE(waitFor([&] { return p.info().state == FloorState::Speaking; }, 1000));
+    p.close();
+}
+
+// §6.2.4.9.3 — 'U: queued' 에서 Floor Taken(앞사람 승급)을 받아도 대기 상태에 머문다(FCC-1).
+//   §6.2.4.9.6 — PTT 를 떼면 Floor Release 로 대기를 거둔다. Queued Floor Requests(남의 대기 삭제 절차)는 보내지 않는다(FCC-4).
+TEST(FloorParticipant, QueuedSurvivesTakenAndReleaseCancelsWithFloorRelease) {
+    cimsue_test::PjScope pj("floor-test");
+    FakeServer srv;
+    Events e;
+    Participant p(12, 0x1212u, "tel:+82500000012", e.cb());
+    ASSERT_TRUE(p.open(0));
+    p.setRemote("127.0.0.1", srv.port);
+    p.request();
+    ASSERT_TRUE(srv.expect(Op::REQUEST));
+    srv.send(p.localPort(), Op::QUEUE_POS_INFO, {u16Field((uint8_t)Field::QUEUE_INFO, (2 << 8) | 5)});
+    ASSERT_TRUE(waitFor([&] { return p.info().state == FloorState::Queued; }, 1000));
+    srv.send(p.localPort(), Op::TAKEN, {strField(Field::GRANTED_PARTY, "tel:+82500000099"), u16Field((uint8_t)Field::MSG_SEQ, 3)});
+    std::this_thread::sleep_for(std::chrono::milliseconds(150));
+    EXPECT_EQ(p.info().state, FloorState::Queued);
+    p.release();
+    EXPECT_TRUE(srv.expect(Op::RELEASE, 1000));
+    EXPECT_FALSE(srv.expect(Op::QUEUED_CANCEL, 300));
+    // 대기 끝 승인이 Release 뒤에 와도('U: pending Release') 마이크를 열지 않는다
+    srv.send(p.localPort(), Op::GRANTED, {u16Field((uint8_t)Field::DURATION, 30)});
+    std::this_thread::sleep_for(std::chrono::milliseconds(150));
+    EXPECT_EQ(e.micOn.load(), 0);
+    p.close();
+}
+
+// §6.2.4.9.4·§6.2.4.9.12 — 누른 채 대기하다 받은 승인은 곧 'U: has permission'(송출 의사가 이미 있다).
+TEST(FloorParticipant, QueuedGrantWhileHeldStartsSpeaking) {
+    cimsue_test::PjScope pj("floor-test");
+    FakeServer srv;
+    Events e;
+    Participant p(13, 0x1313u, "tel:+82500000013", e.cb());
+    ASSERT_TRUE(p.open(0));
+    p.setRemote("127.0.0.1", srv.port);
+    p.request();
+    ASSERT_TRUE(srv.expect(Op::REQUEST));
+    srv.send(p.localPort(), Op::QUEUE_POS_INFO, {u16Field((uint8_t)Field::QUEUE_INFO, (1 << 8) | 5)});
+    ASSERT_TRUE(waitFor([&] { return p.info().state == FloorState::Queued; }, 1000));
+    srv.send(p.localPort(), Op::GRANTED, {u16Field((uint8_t)Field::DURATION, 30)});
+    EXPECT_TRUE(waitFor([&] { return p.info().state == FloorState::Speaking && e.micOn.load() == 1; }, 1000));
+    p.close();
+}
+
+// §6.2.4.9.9~11 — 대기열 위치 요청은 T104 로 재전송(C104), 답이 없으면 대기 시간 초과 + Floor Release.
+TEST(FloorParticipant, QueuePositionRequestRetransmitsThenReleases) {
+    cimsue_test::PjScope pj("floor-test");
+    FakeServer srv;
+    Events e;
+    Participant p(14, 0x1414u, "tel:+82500000014", e.cb());
+    p.setTimers(fastTimers());
+    ASSERT_TRUE(p.open(0));
+    p.setRemote("127.0.0.1", srv.port);
+    p.request();
+    ASSERT_TRUE(srv.expect(Op::REQUEST));
+    srv.send(p.localPort(), Op::QUEUE_POS_INFO, {u16Field((uint8_t)Field::QUEUE_INFO, (1 << 8) | 5)});
+    ASSERT_TRUE(waitFor([&] { return p.info().state == FloorState::Queued; }, 1000));
+    p.requestQueuePosition();
+    EXPECT_EQ(countOp(srv, Op::QUEUE_POS_REQ, 900), 3);
+    EXPECT_TRUE(srv.expect(Op::RELEASE, 1000));
+    EXPECT_TRUE(waitFor([&] { return e.count(FloorEvent::Kind::RequestTimeout) == 1; }, 1000));
+    EXPECT_NE(p.info().state, FloorState::Queued);
+    p.close();
+}
+
+// §6.2.4.3.6 — T103: 받던 미디어가 그치면 그 발언이 끝났다(Floor Idle 이 유실돼도 «말하는 중» 에 머물지 않는다). 미디어 알림이 없으면 돌지 않는다.
+TEST(FloorParticipant, MediaEndTimerEndsListening) {
+    cimsue_test::PjScope pj("floor-test");
+    FakeServer srv;
+    Events e;
+    Participant p(15, 0x1515u, "tel:+82500000015", e.cb());
+    p.setTimers(fastTimers());
+    ASSERT_TRUE(p.open(0));
+    p.setRemote("127.0.0.1", srv.port);
+    srv.send(p.localPort(), Op::TAKEN, {strField(Field::GRANTED_PARTY, "tel:+82500000099"), u16Field((uint8_t)Field::MSG_SEQ, 1)});
+    ASSERT_TRUE(waitFor([&] { return p.info().state == FloorState::Listening; }, 1000));
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    EXPECT_EQ(p.info().state, FloorState::Listening);                // 미디어 알림 전에는 T103 이 돌지 않는다
+    p.onMedia();
+    std::this_thread::sleep_for(std::chrono::milliseconds(150));
+    p.onMedia();                                                     // 받는 동안 다시 건다
+    EXPECT_EQ(p.info().state, FloorState::Listening);
+    EXPECT_TRUE(waitFor([&] { return p.info().state == FloorState::Idle; }, 1000));
+    EXPECT_GE(e.count(FloorEvent::Kind::Idle), 1);
     p.close();
 }

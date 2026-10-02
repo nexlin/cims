@@ -86,6 +86,26 @@ std::string affiliationCommand(const std::string& groupUri, bool affiliate) {
     return s;
 }
 
+std::string affiliationInfo(const std::string& targetMcpttId) {
+    std::string s = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n";
+    s += std::string("<mcpttinfo xmlns=\"") + kNsMcpttInfo + "\">\n  <mcptt-Params>\n";
+    s += infoUri("mcptt-request-uri", targetMcpttId);
+    s += "  </mcptt-Params>\n</mcpttinfo>\n";
+    return s;
+}
+
+std::string affiliationPidf(const std::string& entity, const std::string& clientId, const std::vector<std::string>& groupUris,
+                            const std::string& pid) {
+    std::string s = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n";
+    s += std::string("<presence xmlns=\"urn:ietf:params:xml:ns:pidf\" xmlns:mcpttPI10=\"") + kNsPresInfo + "\"\n";
+    s += "  entity=\"" + xmlEscape(entity) + "\">\n";
+    s += "  <tuple id=\"" + xmlEscape(clientId) + "\">\n    <status>\n";
+    for (const auto& g : groupUris) s += "      <mcpttPI10:affiliation group=\"" + xmlEscape(g) + "\"/>\n";
+    s += "    </status>\n  </tuple>\n";
+    s += "  <mcpttPI10:p-id>" + xmlEscape(pid) + "</mcpttPI10:p-id>\n</presence>\n";
+    return s;
+}
+
 static std::string elemText(const std::string& s, const std::string& name) {
     size_t p = s.find("<" + name);
     if (p == std::string::npos) return std::string();

@@ -96,7 +96,12 @@ public:
     Result floorRequest(int callId, int priority = -1);
     /** PTT up — Floor Release(대기 중이면 Queued Cancel 선행). */
     Result floorRelease(int callId);
+    /** 내 대기 요청 취소 = Floor Release(TS 24.380 §6.2.4.9.6) — 대기 중이 아니면 아무것도 안 한다. */
     Result floorQueueCancel(int callId);
+    /** 대기열 위치 요청(Floor Queue Position Request, §6.2.4.9.9) — 대기 중일 때. 답은 floor 이벤트 QueuePosition. */
+    Result floorQueuePosition(int callId);
+    /** 계정의 발언권 참여자 타이머를 바꾼다(UE initial configuration 이 바뀌었을 때 — AccountConfig.floorTimers). 다음 MCPTT 호부터. */
+    Result setFloorTimers(int accountId, const FloorTimers& timers);
     FloorInfo floorInfo(int callId) const;
 
     /** 진행 중 그룹콜의 조건 상향·하향(TS 24.379 §10.1.1.2.1.3~5) — in-dialog re-INVITE: multipart mcptt-info(바뀐 지시자를

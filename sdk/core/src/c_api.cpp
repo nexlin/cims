@@ -78,6 +78,20 @@ EngineConfig toCxx(const cimsue_engine_config_t* c) {
     return e;
 }
 
+FloorTimers toCxx(const cimsue_floor_timers_t& t) {
+    FloorTimers o;
+    o.t100Ms = t.t100_ms; o.t101Ms = t.t101_ms; o.t103Ms = t.t103_ms; o.t104Ms = t.t104_ms; o.t132Ms = t.t132_ms;
+    o.c100 = t.c100; o.c101 = t.c101; o.c104 = t.c104;
+    return o;
+}
+
+cimsue_floor_timers_t toC(const FloorTimers& t) {
+    cimsue_floor_timers_t o{};
+    o.t100_ms = t.t100Ms; o.t101_ms = t.t101Ms; o.t103_ms = t.t103Ms; o.t104_ms = t.t104Ms; o.t132_ms = t.t132Ms;
+    o.c100 = t.c100; o.c101 = t.c101; o.c104 = t.c104;
+    return o;
+}
+
 AccountConfig toCxx(const cimsue_account_config_t* c) {
     AccountConfig a;
     if (!c) return a;
@@ -112,6 +126,7 @@ AccountConfig toCxx(const cimsue_account_config_t* c) {
     a.mcvideoEnabled = c->mcvideo_enabled != 0;
     assignIf(a.mcvideoServerUri, c->mcvideo_server_uri);
     a.autoAnswerMcvideo = c->auto_answer_mcvideo != 0;
+    a.floorTimers = toCxx(c->floor_timers);
     return a;
 }
 
@@ -265,6 +280,8 @@ void fill(cimsue_call_info_t& o, const CallInfo& c, std::vector<cimsue_media_sou
     o.session_uri = C(c.sessionUri);
     o.video_send = B(c.videoSend);
     o.video_request = (cimsue_video_request_state_t)c.videoRequest;
+    o.warning_code = c.warningCode;
+    o.warning_text = C(c.warningText);
 }
 
 void fill(cimsue_video_request_event_t& o, const VideoRequestEvent& e) {
@@ -462,6 +479,7 @@ void fill(cimsue_account_config_t& o, const AccountConfig& a, std::vector<const 
     o.mcvideo_enabled = B(a.mcvideoEnabled);
     o.mcvideo_server_uri = C(a.mcvideoServerUri);
     o.auto_answer_mcvideo = B(a.autoAnswerMcvideo);
+    o.floor_timers = toC(a.floorTimers);
 }
 
 /** CMS 문서의 C 스냅샷 — 핸들(fetch)과 스레드 스크래치(parse) 양쪽이 쓴다. */
@@ -566,6 +584,7 @@ struct UeInitConfigHolder {
         out.etag = C(cxx.etag); out.not_modified = B(cxx.notModified); out.domain = C(cxx.domain);
         out.mcptt_server_uri = C(cxx.mcpttServerUri); out.mcdata_server_uri = C(cxx.mcdataServerUri);
         out.mcvideo_server_uri = C(cxx.mcvideoServerUri);
+        out.floor_timers = toC(cxx.floorTimers);
     }
 };
 
@@ -1175,6 +1194,14 @@ cimsue_status_t CIMSUE_CALL cimsue_engine_floor_release(cimsue_engine_t* e, int3
 }
 cimsue_status_t CIMSUE_CALL cimsue_engine_floor_queue_cancel(cimsue_engine_t* e, int32_t call_id) {
     return e ? ret(e->eng.floorQueueCancel(call_id)) : -1;
+}
+cimsue_status_t CIMSUE_CALL cimsue_engine_floor_queue_position(cimsue_engine_t* e, int32_t call_id) {
+    return e ? ret(e->eng.floorQueuePosition(call_id)) : -1;
+}
+cimsue_status_t CIMSUE_CALL cimsue_engine_set_floor_timers(cimsue_engine_t* e, int32_t account_id,
+                                                           const cimsue_floor_timers_t* timers) {
+    if (!e || !timers) return -1;
+    return ret(e->eng.setFloorTimers(account_id, toCxx(*timers)));
 }
 
 void CIMSUE_CALL cimsue_engine_floor_info(const cimsue_engine_t* e, int32_t call_id, cimsue_floor_info_t* out) {

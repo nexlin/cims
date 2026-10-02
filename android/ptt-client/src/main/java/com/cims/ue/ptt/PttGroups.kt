@@ -4,8 +4,8 @@ import android.os.SystemClock
 import android.util.Log
 import com.cims.ue.core.sip.ImMessage
 import com.cims.ue.core.sip.RegState
-import com.cims.ue.ptt.PttController.Companion.AFF_EXPIRES_SEC
 import com.cims.ue.ptt.PttController.Companion.SUB_CONFIRM_TIMEOUT_MS
+import com.cims.ue.ptt.PttController.Companion.REJOIN_GAP_MS
 import com.cims.ue.ptt.PttController.Companion.SUB_REASSERT_MS
 import com.cims.ue.ptt.PttController.Companion.TAG
 import com.cims.ue.ptt.PttController.Companion.XCAP_CMS
@@ -46,6 +46,7 @@ internal class GroupPlane(private val c: PttController) {
                 else ChannelRole.NONE
                 it.emergency = emergency
                 it.emergencyMine = emergency
+                it.broadcast = broadcast
                 if (implicitFloor) it.floorState = FloorState.REQUESTING
                 c.sessionMap[groupId] = it
             }
@@ -451,10 +452,12 @@ internal class GroupPlane(private val c: PttController) {
             .mapNotNull { it.substringAfterLast("tel:").takeIf { g -> g.isNotBlank() } }
         val profileChanged = sels.any { it.contains("mcptt.user-profile", ignoreCase = true) }
         val svcCfgChanged = sels.any { it.contains("mcptt.service-config", ignoreCase = true) }
-        Log.i(TAG, "xcap-diff NOTIFY — 편성 $changed / 프로파일 $profileChanged / 시스템설정 $svcCfgChanged")
+        val ueInitChanged = sels.any { it.contains("mcptt.ue-init-config", ignoreCase = true) }
+        Log.i(TAG, "xcap-diff NOTIFY — 편성 $changed / 프로파일 $profileChanged / 시스템설정 $svcCfgChanged / 단말초기설정 $ueInitChanged")
         if (profileChanged) loadUserProfile()
         if (svcCfgChanged) loadServiceConfig()
-        if (changed.isEmpty() && (profileChanged || svcCfgChanged)) {
+        if (ueInitChanged) c.reloadUeInitConfig()
+        if (changed.isEmpty() && (profileChanged || svcCfgChanged || ueInitChanged)) {
             c._status.value = "설정 변경 통지"   // CMS 축 — 편성은 건드리지 않는다
             return
         }
@@ -472,9 +475,8 @@ internal class GroupPlane(private val c: PttController) {
         c._selectedGroup.value?.let { add(it) }
     }
 
-    /** 서버 확정이 아직 신선한가 — 잔여 수명이 TTL 절반 미만이면 재발행 대상. */
-    private fun affValid(groupId: String): Boolean =
-        (c.affExpireAt[groupId] ?: 0L) - SystemClock.elapsedRealtime() > AFF_EXPIRES_SEC * 500L
+    /** 서버가 받은 제휴인가. 수명 갱신(TS 24.379 §9.2.1.2 — 규격형은 만료 없음)·등록 재성립 뒤 다시 싣기는 코어가 한다. */
+    private fun affValid(groupId: String): Boolean = groupId in c.affConfirmed
 
     /** 확정이 없거나 낡았고, in-flight·백오프 대기 중도 아닐 때만 발행(트리거 중복 억제). */
     fun ensureAffiliated(groupId: String) {
@@ -521,15 +523,18 @@ internal class GroupPlane(private val c: PttController) {
             c.affAttempts.remove(g)
             c.affBackoffUntil.remove(g)
             if (on) {
-                c.affExpireAt[g] = SystemClock.elapsedRealtime() + AFF_EXPIRES_SEC * 1000L
+                c.affConfirmed.add(g)
                 c._affiliated.value = c._affiliated.value + g
+                if (rejoinPending.remove(g)) rejoinAfterAffiliation(g)
             } else {
-                c.affExpireAt.remove(g)
+                c.affConfirmed.remove(g)
                 c._affiliated.value = c._affiliated.value - g
             }
             return true
         }
         if (!on) return true
+        c.affConfirmed.remove(g)
+        rejoinPending.remove(g)
         c._affiliated.value = c._affiliated.value - g
         val n = ((c.affAttempts[g] ?: 0) + 1).also { c.affAttempts[g] = it }
         if (r.code == 403) {
@@ -556,6 +561,50 @@ internal class GroupPlane(private val c: PttController) {
             if (c.regState.value is RegState.Registered && g in desiredAffiliations() && !affValid(g)) affiliate(g, true)
         }
         return true
+    }
+
+    // ── 미제휴 거절의 자기 복구(TS 24.379 §10.1.1.4.2) ──
+
+    /** 미제휴 403 뒤 제휴 2xx 를 기다리는 그룹(다시 걸 그룹)과, 그 그룹을 마지막으로 다시 건 시각. */
+    private val rejoinPending: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
+    private val rejoinAt = java.util.concurrent.ConcurrentHashMap<String, Long>()
+    private val rejoinPrimary: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
+
+    /**
+     * 편성 그룹의 [참여]·개시가 403 + Warning 120(미제휴 — TS 24.379 §10.1.1.4.2 «user is not affiliated to this group»)으로 끝났다.
+     * 서버만 제휴를 잃은 경우(망 순단으로 등록이 풀렸던 동안 등)라 단말이 알 수 있는 유일한 신호다 — 제휴를 다시 싣고 2xx 뒤 **한 번**
+     * 다시 건다. [REJOIN_GAP_MS] 안의 두 번째 120 은 그대로 둔다(되풀이하지 않는다). 비멤버 403(Warning 이 다르거나 없다)·긴급(서버
+     * 암묵적 제휴)·애드혹·1:1 은 대상이 아니고, 일제 통화는 제휴만 다시 싣는다(다시 걸면 전원에게 다시 울린다).
+     */
+    fun handleNotAffiliated(callId: Int, code: Int, warningCode: Int) {
+        if (code != 403 || warningCode != 120) return
+        val s = synchronized(c.lock) { c.sessionMap.values.firstOrNull { it.callId == callId } } ?: return
+        val gid = s.groupId
+        if (isAdhocId(gid) || s.privatePeer || s.emergency) return
+        val now = SystemClock.elapsedRealtime()
+        c.affConfirmed.remove(gid)
+        c._affiliated.value = c._affiliated.value - gid
+        if (s.broadcast || now - (rejoinAt[gid] ?: 0L) < REJOIN_GAP_MS) {
+            Log.w(TAG, "[$gid] 403 120(미제휴) — 제휴만 다시 싣는다")
+            affiliate(gid, true)
+            return
+        }
+        rejoinAt[gid] = now
+        rejoinPending.add(gid)
+        if (s.role == ChannelRole.PRIMARY) rejoinPrimary.add(gid) else rejoinPrimary.remove(gid)
+        Log.i(TAG, "[$gid] 403 120(미제휴) — 제휴를 다시 싣고 한 번 더 건다")
+        c._status.value = "[$gid] 제휴 다시 싣는 중"
+        affiliate(gid, true)
+    }
+
+    private fun rejoinAfterAffiliation(groupId: String) {
+        val primary = rejoinPrimary.remove(groupId)
+        c.scope.launch {
+            delay(300)                 // 거절 세션 teardown(onCallEnded) 정리 후
+            if (c.regState.value !is RegState.Registered) return@launch
+            Log.i(TAG, "[$groupId] 제휴 2xx — 그룹콜 다시 건다")
+            joinGroupCall(groupId, takePrimary = primary)
+        }
     }
 
     fun selectGroup(groupId: String) {

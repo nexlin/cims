@@ -55,9 +55,10 @@ class SipService : Service() {
         })
     private var controller: VoltePhone? = null
     private var stateJob: Job? = null
-    /** 기본 네트워크가 바뀌면 재등록 — doze/슬립/와이파이↔LTE 전환 후 등록 끊김 자동 복구(SDK 접점 NetworkWatcher). */
+    /** 기본 네트워크가 바뀌면 코어에 알린다 — 옛 TCP/TLS 연결을 닫고 다시 등록한다(`Engine::handleNetworkChange` — 재-REGISTER 만으로는
+     *  옛 망의 연결을 재사용하고, 진행 중 등록이 있으면 요청이 사라진다, ue_sdk.md §4.2). doze/슬립/와이파이↔LTE 전환 뒤 착신 복구. */
     private val netWatcher by lazy {
-        com.cims.ue.sdk.platform.NetworkWatcher(this) { if (controller?.hasAccount() == true) controller?.reregister() }
+        com.cims.ue.sdk.platform.NetworkWatcher(this) { if (controller?.hasAccount() == true) controller?.handleNetworkChange() }
     }
     private var ringtone: Ringtone? = null
     // 상시 알림 상태 — 등록 줄·아이콘과 마지막 호(통화 중이면 진행 중 통화 알림이 등록 줄을 대신한다).

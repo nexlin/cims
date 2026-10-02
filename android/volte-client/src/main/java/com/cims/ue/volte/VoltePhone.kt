@@ -127,7 +127,15 @@ class VoltePhone(
         if (!r.ok) _reg.value = RegState.Failed("${r.code} ${r.reason}")
     }
 
-    /** 즉시 재-REGISTER — 망 복귀·포그라운드 복귀. */
+    /** 망이 돌아왔거나 바뀌었다 — 코어가 옛 연결을 닫고 다시 등록한다(`Engine::handleNetworkChange`, ue_sdk.md §4.2). */
+    fun handleNetworkChange() = scope.launch {
+        if (account == null) return@launch
+        _reg.value = RegState.Registering
+        val r = ue.handleNetworkChange()
+        if (!r.ok) android.util.Log.w("VoltePhone", "망 변경 처리 실패: ${r.code} ${r.reason}")
+    }
+
+    /** 즉시 재-REGISTER — 포그라운드 복귀·keepalive 계기(망은 그대로). */
     fun reregister() = scope.launch {
         val acc = account ?: return@launch
         _reg.value = RegState.Registering

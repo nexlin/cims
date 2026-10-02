@@ -331,9 +331,12 @@ data class UeInitConfigDoc(
     val mcpttServerUri: String = "", val mcdataServerUri: String = "",
     /** MCVideo-Service-Details/Server-URI → [AccountConfig.mcvideoServerUri]. */
     val mcvideoServerUri: String = "",
+    /** on-network/Timers(초 → ms) → [AccountConfig.floorTimers]. */
+    val floorTimers: FloorTimers = FloorTimers(),
 ) {
     internal companion object {
-        fun of(d: JniUeInitConfigDoc) = UeInitConfigDoc(d.etag, d.domain, d.mcpttServerUri, d.mcdataServerUri, d.mcvideoServerUri)
+        fun of(d: JniUeInitConfigDoc) = UeInitConfigDoc(d.etag, d.domain, d.mcpttServerUri, d.mcdataServerUri, d.mcvideoServerUri,
+            FloorTimers.of(d.floorTimers))
     }
 }
 

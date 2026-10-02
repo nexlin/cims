@@ -148,7 +148,7 @@ sdk/core/
 | floor | `ptt-client/floor/FloorClient.kt`·`FloorCodec.kt`·`FloorControl.kt` | opcode/field/cause 상수 → 단일 정의 테이블(§4.6) |
 | mcdata | `ptt-client/mcdata/McDataCodec.kt`·`msrp/MsrpSession.kt`·`MsrpCodec.kt` | SDS TLV·MSRP 프레이밍·FD |
 | csc | `ptt-client/csc/CscClient.kt`·`core/provision/ProvisioningClient.kt`·`Pkce.kt` | PKCE S256·XCAP 경로·If-None-Match 304 |
-| (코어 밖 — 앱 세션 층, §5.3) | `ptt-client/PttController.kt` 의 정책 부분 | 세션 목록·listen policy·affiliation 목표 집합과 재시도·채널 복원·긴급 대상 선택·N2 미강제. 규격 절차(긴급 re-INVITE·경보 메시지·CMS AND 게이트 판정 입력)는 코어로 |
+| (코어 밖 — 앱 세션 층, §5.3) | `ptt-client/PttController.kt` 의 정책 부분 | 세션 목록·listen policy·affiliation 목표 집합(무엇을 원하나 — 다시 싣기는 코어, §4.2)·미제휴 403 뒤 재시도·채널 복원·긴급 대상 선택·N2 미강제. 규격 절차(긴급 re-INVITE·경보 메시지·CMS AND 게이트 판정 입력)는 코어로 |
 
 ### 4.2 공개 API 모델
 
@@ -260,15 +260,29 @@ C++ 공개 표면은 `cimsue/engine.h` 의 `Engine` 하나이며 계정·호를 
   건드리지 않는다(§11). `refreshRegistration` 은 망은 그대로인데 등록만 잃은 경우(서버 재기동)의 복구다. Android 는 접점
   `platform.NetworkWatcher` 가 변화를 판정한다(§5.3 — 걸 때의 망을 심어 등록 직후 그 망의 첫 통지는 넘기고, 망 없이 걸었으면
   처음 잡히는 망을 변화로 본다).
-- **등록에 묶인 것의 유지는 앱 세션 층이 한다.** 코어는 `affiliate`(PUBLISH `Expires: 3600`)·`subscribeConference`·`subscribeXcapDiff`·
-  `dialogWatch`(SUBSCRIBE `Expires: 3600`)를 **부를 때 한 번** 보낸다 — 수명 갱신도, 등록이 새로 선 뒤의 재적재도 하지 않는다. 서버는
-  등록이 사라질 때(해지 REGISTER · 등록 만료 · TCP/TLS 연결이 끊긴 바인딩의 회수) 그 가입자의 제휴를 전부 내리므로, 망이 끊겼다
-  돌아온 뒤 `handleNetworkChange` 가 등록을 되살려도 제휴는 비어 있다(편성 그룹 호 = 403 Warning 120). 앱은 ① 등록이 끊겼다 다시 선 때
-  ② 망 변경 뒤 첫 등록 성공(등록 상태는 줄곧 «등록됨» 으로만 보일 수 있다 — `onRegState` 는 REGISTER 응답마다 온다) ③ 수명 절반
-  ④ 그룹 호 403 에 다시 싣는다(관제 앱 [android_dispatch_tablet.md](android_dispatch_tablet.md) §6.7a · 현장 앱 `PttGroups`).
-  `affiliate()` 의 성공 반환은 «보냈다» 일 뿐이다 — 제휴가 섰는지는 token 의 최종 응답(`onRequestResult` 2xx)으로 본다.
+- **등록에 묶인 것의 유지는 코어가 한다**(게시 갱신 = EPA 의 일 RFC 3903 §4.1 · 구독 갱신 = 구독자의 일 RFC 6665 §4.1.2.2).
+  앱은 **목표 집합**만 준다 — `affiliate(on/off)`·`subscribeConference`·`subscribeXcapDiff`·`dialogWatch` 의 on/off 가 집합 변경이다.
+  코어(`src/upkeep.h` `detail::Upkeep`)는 켠 것을 들고 세 계기에 다시 싣는다: ① 등록이 끊겼다 다시 섰다(등록 **이벤트** 기준 —
+  `onRegState` 는 REGISTER 응답마다 온다) ② `handleNetworkChange` 뒤 첫 등록 성공(상태는 줄곧 «등록됨» 으로만 보여도 서버 바인딩은
+  새것일 수 있다) ③ 부여된 수명의 절반(1분 틱 — 응답 `Expires`, 없으면 요청값 3600. 만료 없는 부여 2^32-1 은 갱신하지 않는다).
+  거절·응답 없음(40 s) 뒤에는 1분부터 배로 최대 30분 물러나 다시 싣는다. 서버는 등록이 끝날 때(해지 REGISTER·등록 만료) 그 가입자의
+  제휴를 내리고, 연결이 끊겨 풀린 등록은 그 등록의 수명까지 제휴를 남긴다([registration_binding_set.md](registration_binding_set.md) §4.4) —
+  어느 쪽이든 다시 선 등록에 코어가 관심 그룹 전부를 다시 싣는다. ①·②의 제휴 재게시는 조건 없는 초기 게시(ETag 를 버린다 — 서버가 잃었을
+  수 있다), ③은 조건부 게시다. **유지가 다시 실은 요청의 결과는 앱에 올리지 않는다**(`onRequestResult` 는 앱이 부른 token 의 것만 —
+  실패는 코어가 물러나 다시 싣는다). 구독 셋은 스택의 구독(evsub — §11)이라 응답이 코어로 오지 않는다: 유지는 보낸 것을 확인으로 치고
+  ①·②·③에 같은 대상을 다시 부른다(살아 있으면 대화 안 갱신, 끝났으면 새 구독). 앱에 남는 것은 ④ 그룹 호가 **403 + Warning 120**
+  (미제휴 — TS 24.379 §10.1.1.4.2)으로 끝났을 때 제휴를 다시 싣고 2xx 뒤 한 번 더 거는 것뿐이다 — `CallInfo.warningCode`·`warningText`
+  (개시 INVITE 최종 응답의 Warning, RFC 3261 §20.43)로 미제휴와 비멤버 403 을 가른다(현장 앱 `PttGroups.handleNotAffiliated`). `affiliate()`
+  의 성공 반환은 «보냈다» 일 뿐이다 — 제휴가 섰는지는 token 의 최종 응답(`onRequestResult` 2xx)으로 본다. 시험 `Upkeep.*`(규칙)·
+  `AffiliationUpkeep.SpecFormPublishAndRenewAfterNetworkChange`(가짜 서버 왕복).
+- **MCPTT 제휴 게시는 규격형이다**(TS 24.379 §9.2.1.2). `affiliate(acc, g, on)` 은 계정의 MCPTT 관심 그룹 집합을 바꾸고 **전부**를 한
+  PUBLISH 로 보낸다 — Request-URI = 참여 MCPTT 기능 PSI(`AccountConfig.mcpttServerUri`), `Event: presence`, P-Preferred-Service = MCPTT ICSI,
+  `Expires` = 관심 그룹이 있으면 4294967295·없으면 0, 본문 multipart = mcptt-info(`<mcptt-request-uri>` = 자기 MCPTT ID) + pidf(entity = MCPTT ID,
+  tuple id = MCPTT client ID, `<affiliation group>` 에 status·expires 없음, 유일 p-id). 서버는 제휴에 시간 만료를 두지 않는다
+  ([mcptt_standard_conformance.md](mcptt_standard_conformance.md) C1). PSI 나 MCPTT client ID 가 없는 계정(ue-init-config 를 받지 못한 단말·
+  `--mcptt-psi` 없는 cimsue-cli)만 구형(그룹마다 R-URI = 그룹, `Event: mcptt`, `Expires: 3600`)으로 보낸다 — 전환기.
 - **ABI.** 공개 헤더는 pjsua2 타입을 include 하지 않는다. 구현체는 pImpl.
-- **affiliation PUBLISH 의 entity-tag**(RFC 3903). 코어가 EPA 다 — 2xx 의 `SIP-ETag` 를 그룹별로 기억해 다음 `affiliate` 에
+- **affiliation PUBLISH 의 entity-tag**(RFC 3903). 코어가 EPA 다 — 2xx 의 `SIP-ETag` 를 게시별로(규격형 = 계정·서비스마다 하나, 구형 = 그룹마다) 기억해 다음 `affiliate` 에
   `SIP-If-Match` 로 싣는다. 412 를 받으면 그 ETag 를 버리고(§5 MUST) 같은 요청을 다시 보내지 않으며, `SIP-If-Match` 없는 초기 PUBLISH
   (§4.2)로 한 번 다시 알린다. 앱에는 412 가 올라가지 않고 재발행의 최종 응답이 `affiliate()` 가 돌려준 token 으로 온다(시험
   `AffiliationPublish.StaleEtag412FallsBackToInitialPublish`).
@@ -281,6 +295,19 @@ C++ 공개 표면은 `cimsue/engine.h` 의 `Engine` 하나이며 계정·호를 
   `Requesting`('U: pending Request', §6.2.4.2.2)으로 둔다. answer 의 `mc_granted` = 승인 → `Speaking`, `mc_implicit_request` 만 = Floor Granted 대기,
   둘 다 없음(진행 중 호 합류 등 — §14.3.5) = 코어가 명시 Floor Request 로 잇는다. 호 성립 전에 `floorRelease` 하면 answer 에서 Floor Release 로
   돌려준다(그 사이 Floor Granted 는 무시). 이어지는 offer(re-INVITE)에는 둘 다 싣지 않는다(§14.5). 누르는 동안 개시하고 말하는 한 버튼 발신용.
+- **발언권 참여자 상태 머신**(TS 24.380 §6.2.4, `src/floor/floor_participant.*`). `FloorState` = 규격 상태 — `Idle`·`Listening` = 'U: has no
+  permission', `Requesting` = 'U: pending Request', `Queued` = 'U: queued', `Speaking` = 'U: has permission'('U: pending Release' 는 화면상
+  has no permission 이고 내부 표시로 든다). **그 상태에 절차가 없는 메시지는 버리고 상태를 유지한다**(§6.2.4.1): 요청하지 않은 상태의 Floor Granted
+  (시간 초과 뒤의 늦은 승인 — 송출을 열지 않는다)·'U: pending Request' 의 Floor Idle(놓고 바로 다시 누를 때 앞 Release 의 Idle)·요청 없는 Deny·
+  Queue Position Info. 'U: queued' 는 Floor Taken(앞사람 승급)에도 유지되고(§6.2.4.9.3), 대기 끝 승인은 누르고 있으면 곧 'U: has permission'
+  (§6.2.4.9.12), 아니면 T132 뒤 Floor Release(§6.2.4.9.13). 선점(긴급) 요청은 Floor Taken 에도 'U: pending Request' 를 유지한다(§6.2.4.4.11).
+  **대기 취소 = Floor Release**(`floorRelease`·`floorQueueCancel`, §6.2.4.9.6) — Queued Floor Requests 는 남의 대기 요청을 지우는 인가 사용자의
+  절차라 보내지 않는다. 타이머·카운터 = `AccountConfig.floorTimers`(UE initial configuration `<Timers>` → `UeInitConfigDoc.floorTimers`,
+  0 = 기본값 T100·T101 1 s · T103 4 s · T104 4 s · T132 2 s · C100·C101·C104 3 — 표 11.1.1-1 NOTE 1·2 의 재전송 총 6초 미만):
+  T101 만료마다 Floor Request 재전송(C101 회 뒤 «요청 시간 초과», 암묵적 발언 요청도 같은 규칙 §6.2.4.4.5·§6.2.4.4.6), T100 = Floor Release
+  재전송(C100), T103 = 받던 미디어가 그치면 그 발언이 끝났다(코어가 1초마다 수신 RTP 수를 보고 알린다 — 알림 전에는 돌지 않는다, §6.2.4.3.6),
+  T104 = 대기열 위치 요청(`floorQueuePosition`) 재전송(C104 회 무응답이면 대기 시간 초과 + Floor Release, §6.2.4.9.11). 문서가 바뀌면 앱이 다시
+  받아 `setFloorTimers` 로 계정에 싣는다(다음 호부터). 시험 `FloorParticipant.*`.
 - **단말 속성**([mcptt_management_views.md](mcptt_management_views.md) §4.1). `EngineConfig.userAgent` 는
   `userAgentOf(제품, 앱 버전, OS, 모델)` 형식(`CIMS-PTT/1.4.2 (Android 15; SM-S921N)`)으로 앱이 채운다. `userAgentOf` 는 OS·모델을
   comment 규칙(RFC 3261 §25.1)으로 정리한다 — 괄호·역슬래시 제거, 공백·제어 문자 접기, OS 의 `;`(OS·모델 구분자) 제거.
@@ -520,7 +547,7 @@ cimsue-cli [계정] sds-recv [--duration S]        # 수신 SDS 를 JSON 줄로 
 ```
 
 결과는 stdout 에 JSON 한 줄(`outcome`·`rx_pkts`·`tx_pkts`·`granted`·`taken`·`denied`·`code`), 종료코드 0/2/3/4/5/6/7
-(성공/인자/등록/호/미디어 없음/floor·송출 미획득/SDS 실패). `--affiliate` 는 시작 시 PUBLISH(Event: mcptt), 종료 시 de-affiliate.
+(성공/인자/등록/호/미디어 없음/floor·송출 미획득/SDS 실패). `--affiliate` 는 시작 시 PUBLISH(규격형 — `--mcptt-psi`·provisioning 의 PSI 가 있을 때, 없으면 구형 Event: mcptt), 종료 시 de-affiliate.
 ```
 cimsue-cli [계정] dialog-watch <aor> [--duration S]   # RFC 4235 구독 → dialog-info 를 JSON 줄로
 cimsue-cli [계정] join <aor> [--duration S]           # 감시 → confirmed dialog 에 INVITE-Join(recvonly) → 수신 RTP·SSRC 라벨

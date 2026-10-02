@@ -60,6 +60,8 @@ internal static unsafe class NativeMethods
     [DllImport(Lib, CallingConvention = CC, ExactSpelling = true)] public static extern int cimsue_engine_floor_request(IntPtr e, int call_id, int priority);
     [DllImport(Lib, CallingConvention = CC, ExactSpelling = true)] public static extern int cimsue_engine_floor_release(IntPtr e, int call_id);
     [DllImport(Lib, CallingConvention = CC, ExactSpelling = true)] public static extern int cimsue_engine_floor_queue_cancel(IntPtr e, int call_id);
+    [DllImport(Lib, CallingConvention = CC, ExactSpelling = true)] public static extern int cimsue_engine_floor_queue_position(IntPtr e, int call_id);
+    [DllImport(Lib, CallingConvention = CC, ExactSpelling = true)] public static extern int cimsue_engine_set_floor_timers(IntPtr e, int account_id, in cimsue_floor_timers_t timers);
     [DllImport(Lib, CallingConvention = CC, ExactSpelling = true)] public static extern void cimsue_engine_floor_info(IntPtr e, int call_id, cimsue_floor_info_t* @out);
     [DllImport(Lib, CallingConvention = CC, ExactSpelling = true)] public static extern int cimsue_engine_set_call_condition(IntPtr e, int call_id, int emergency, int imminent_peril);
     [DllImport(Lib, CallingConvention = CC, ExactSpelling = true)] public static extern long cimsue_engine_send_emergency_alert(IntPtr e, int account_id, [MarshalAs(U8)] string group_id, int activate, [MarshalAs(U8)] string? originated_by, int cancel_group_emergency);
