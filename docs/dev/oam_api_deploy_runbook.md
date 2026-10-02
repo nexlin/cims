@@ -7,6 +7,7 @@ CLI 로 부르는 절차다. 개발 테스트베드(.48, 관리평면 OAM 4419, 
 ## 0. 전제
 
 - 대상 OAM(4419)이 살아 있고 관리자 계정으로 로그인할 수 있다(`POST /api/v1/auth/login {login_id, password}` → `token`).
+  .48 테스트베드는 `admin` / `1234`(테스트 서버 — 기록 허용).
 - 패키지 tarball 은 **OAM 프로세스가 읽을 수 있는 경로**에 있어야 한다(`POST /packages` 는 업로드가 아니라 `file_path` 등록이다).
   저장소는 base oam 배포의 실효 `Packages.Dir`(사이트 디렉터리의 `packages/` — [site_directory_layout.md](../design/features/site_directory_layout.md))이고
   스크립트가 OAM 에서 읽는다(`packages --store`·`OAM_PACKAGE_STORE` 로 덮을 수 있다). .48([testbed_48_site_migration.md](testbed_48_site_migration.md))은

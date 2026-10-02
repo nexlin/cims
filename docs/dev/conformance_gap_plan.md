@@ -158,7 +158,7 @@ W01 이 주인인 항목은 CMS-13(CMS 변경 구독, 지금 5분 폴링) 하나
 
 | WP | 이름 | 호스트 | 세션 | 할 일 | 상태 |
 |---|---|---|---|---|---|
-| **X00** | 준비 | .48 | 1 | .48 첫 세션 — 지시 = dev_share `20261003-0027_45_kickoff-48-gap-track.md`. ① worktree `/home/cims/work/.wt-gap`(브랜치 `gap48`, 공유 트리는 팀원 계측기 트리라 pull 도 하지 않는다)·첫 빌드·S1 기준선(S1-UNIT-CSP·CMP·PSIP) ② 배포 id·`cimsue-cli` 시험 신원(MCPTT·MCData — M2 runbook 의 test023~025·gmv1/gmv2 방식)·계측기 시나리오 목록 ③ dev_share `…_48_done-X00-48.md`. 규격 원문은 `/mnt/cims/dev_share/spec/` 에 갖춰졌다 | 대기 |
+| **X00** | 준비 | .48 | 1 | .48 첫 세션 — 지시 = dev_share `20261003-0027_45_kickoff-48-gap-track.md`. ① worktree `/home/cims/work/.wt-gap`(브랜치 `gap48`, 공유 트리는 팀원 계측기 트리라 pull 도 하지 않는다)·첫 빌드·S1 기준선(S1-UNIT-CSP·CMP·PSIP) ② 배포 id·`cimsue-cli` 시험 신원(MCPTT·MCData — M2 runbook 의 test023~025·gmv1/gmv2 방식)·계측기 시나리오 목록 ③ dev_share `…_48_done-X00-48.md`. 규격 원문은 `/mnt/cims/dev_share/spec/` 에 갖춰졌다 | 완료 1efbcd2d |
 | **X01** | 문서 정정 잔여 | .45 | 1 | 세 목록 §5 중 항목 번호가 없는 줄(근거 절 번호·Warning 절 §4.4→§4.9·mcdata_messaging §3·§5 파일 이름·mcx_identity_scope §10·fixtures README N2·mcvideo.md §9 hang-time 메모) + 세 목록 §4 «미구현 목록에 빠진 기능» 을 정본 미구현 목록(mcptt_standard_conformance §0-R · mcdata_messaging §8 · mcvideo §6 V8)으로 옮긴다. 코드 주석 정정(`csp/CscfModule.cpp` N2 주석 등)은 그 파일을 고치는 WP(S13)가 함께 한다 | 대기 |
 
 ## 6. 순서 — 웨이브
@@ -206,6 +206,11 @@ flowchart LR
 
 - **.48** — 트랙의 개발·실측 대상 전부. 서버 WP 마다 올린다(§4 5단계). .45 의 CSC·단말 WP 도 .48 에 원격 배포해 시험한다.
   단말 시험은 .48 을 겨눈 `cimsue-cli` 로 한다 — 사내 단말(W999·MF52)은 .45 라이브에 붙어 있어 새 SDK 를 깔면 아직 반영되지 않은 서버와 어긋난다.
+  - **시험 신원** = test026 · test027 · test028(`+82500000026~28`, 로그인 비밀번호 `1234`, MCVideo 자격 있음) · 그룹 `gap1`(prearranged, T4 10 s) ·
+    `gap2`(chat) — 세 신원만 멤버, SDS·FD·긴급 허용, MCVideo 속성 있음. 계측기 PTT 신원(test001~006·011·012·023~025)은 팀원 워커가 등록을
+    잡고 있어 쓰지 않는다. 계정 = `cimsue-cli --csc-host 127.0.0.1 --user test026 --pw 1234 --no-tls-verify --from-profile ptt
+    --server 121.161.164.48 --port 15060 --affiliate gap1 …`(프로파일이 주는 `127.0.0.1:15060` 에는 CSP 가 없어 `--server` 가 필요하다).
+    OAM 관리자 = [oam_api_deploy_runbook.md](oam_api_deploy_runbook.md) §0.
 - **.45 라이브 반영**(협력업체 단말) — 웨이브 6 의 .48 전체 회귀가 통과한 뒤 한 번, 사용자 go·시각 지정 뒤. 실행은 사용자가 `!` 로 한 줄씩
   (분류기가 배포 호출을 막는다 · 여러 줄을 붙이면 첫 줄만 돈다). 한 창 안에서 단계를 나눈다:
   1. 서버 전부(CSC → CMP → CMDP → CSP → OAM, 엄격 검사 스위치 = `log`) — 공유 DB 변경은 이미 추가만이라 따로 할 것이 없다.
