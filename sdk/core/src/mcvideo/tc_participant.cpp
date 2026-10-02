@@ -100,6 +100,7 @@ void Participant::emitTx(Out& out, TransmissionEvent::Kind k, const Message* m, 
     ev.queuePosition = queuePosition_;
     ev.audioSsrc = txAudioSsrc_;
     ev.videoSsrc = txVideoSsrc_;
+    ev.awaitingConfirmation = k == TransmissionEvent::Kind::Granted && awaitingConfirm_;
     if (m) {
         ev.causeText = m->causePhrase();
         ev.durationSec = m->durationSec();
@@ -122,6 +123,7 @@ void Participant::emitRx(Out& out, ReceptionEvent::Kind k, const VideoTransmitte
     if (m) {
         ev.causeText = m->causePhrase();
         ev.rawType = m->op;
+        if (k == ReceptionEvent::Kind::Overridden) ev.overridingId = m->overridingId();
     }
     if (ev.causeText.empty() && cause >= 0) {
         const char* s = receiveRejectCauseText(cause);
@@ -156,7 +158,8 @@ void Participant::sendTransmissionRequest() {
 }
 
 void Participant::sendEndRequest() {
-    send(transmissionEndRequest(hdrSsrc()));
+    // 끝낼 송출 = 내 송출(표 9.2.20-1 — User ID of the Transmitting User·Audio SSRC·Video SSRC)
+    send(transmissionEndRequest(hdrSsrc(), -1, userId_, txAudioSsrc_, txVideoSsrc_));
     deadline_ = Clock::now() + std::chrono::milliseconds(timers_.t101Ms);
 }
 
@@ -218,6 +221,11 @@ void Participant::onEstablished(bool implicitAccepted, bool granted, uint32_t au
     flush(out);
 }
 
+void Participant::setConfirmQueuedGrant(bool on) {
+    std::lock_guard<std::mutex> lk(m_);
+    confirmQueued_ = on;
+}
+
 void Participant::setNegotiatedPriority(int transmission, int reception) {
     std::lock_guard<std::mutex> lk(m_);
     maxPriority_ = transmission;
@@ -249,12 +257,41 @@ Result Participant::releaseTransmission() {
         if (state_ != TransmissionState::PendingRequest && state_ != TransmissionState::Permitted &&
             state_ != TransmissionState::Queued)
             return Result::fail(-2, std::string("transmission ") + toString(state_));
+        awaitingConfirm_ = false;
         setSending(out, false);
         retries_ = 1;
         sendEndRequest();
         state_ = TransmissionState::PendingEnd;
     }
     flush(out);
+    return Result::success();
+}
+
+Result Participant::confirmTransmission(bool accept) {
+    Out out;
+    {
+        std::lock_guard<std::mutex> lk(m_);
+        if (!established_ || releasing_) return Result::fail(-2, "mcvideo call not established");
+        if (state_ != TransmissionState::Permitted || !awaitingConfirm_) return Result::fail(-2, "no transmission awaiting confirmation");
+        awaitingConfirm_ = false;
+        if (accept) {
+            setSending(out, true);
+        } else {                                              // 확인하지 않으면 허가를 거둔다(§6.2.4.5.1 NOTE → §6.2.4.5.3)
+            retries_ = 1;
+            sendEndRequest();
+            state_ = TransmissionState::PendingEnd;
+        }
+    }
+    flush(out);
+    return Result::success();
+}
+
+Result Participant::requestQueuePosition() {
+    std::lock_guard<std::mutex> lk(m_);
+    if (!established_ || releasing_) return Result::fail(-2, "mcvideo call not established");
+    if (state_ != TransmissionState::Queued) return Result::fail(-2, std::string("transmission ") + toString(state_));
+    retries_ = 1;                                             // C102 = 1(§6.2.4.9.3 2)
+    sendQueuePositionRequest();
     return Result::success();
 }
 
@@ -296,6 +333,7 @@ TransmissionInfo Participant::info() const {
     ti.state = state_;
     for (auto& r : receptions_) ti.transmitters.push_back(r.t);
     ti.queuePosition = queuePosition_;
+    ti.awaitingConfirmation = awaitingConfirm_;
     ti.localPort = localPort_;
     ti.remoteIp = remoteIp_;
     ti.remotePort = remotePort_;
@@ -356,10 +394,13 @@ void Participant::handleTransmission(const Message& m, Out& out) {
             ack(m);
             if (m.audioSsrc()) txAudioSsrc_ = m.audioSsrc();  // 송출 RTP 에 쓸 값(2)
             if (m.videoSsrc()) txVideoSsrc_ = m.videoSsrc();
+            const bool fromQueue = state_ == TransmissionState::Queued;
             deadline_ = {};
             queuePosition_ = -1;
             state_ = TransmissionState::Permitted;
-            setSending(out, true);
+            // 대기하던 요청이 허가됐으면 송출 전에 사용자 확인을 받는다(§6.2.4.5.1 NOTE — 설정했을 때). 확인 전에는 송출을 열지 않는다.
+            awaitingConfirm_ = fromQueue && confirmQueued_;
+            if (!awaitingConfirm_) setSending(out, true);
             emitTx(out, K::Granted, &m);
         } else if (state_ == TransmissionState::Permitted) {
             // answer mc_granted 뒤 서버가 따로 보낸 Granted — 확인만 하고, 값이 다르면 송출 SSRC 를 새 값으로
@@ -394,6 +435,7 @@ void Participant::handleTransmission(const Message& m, Out& out) {
     if (is(m, AppName::MCV1, (uint8_t)Mcv1::TRANSMISSION_REVOKED)) {
         if (state_ != TransmissionState::Permitted) return;
         ack(m);                                                                                   // §6.2.4.5.5
+        awaitingConfirm_ = false;
         setSending(out, false);
         int cause = m.cause();
         retries_ = 1;
@@ -430,8 +472,9 @@ void Participant::handleTransmission(const Message& m, Out& out) {
     if (is(m, AppName::MCV2, (uint8_t)Mcv2::TRANSMISSION_END_REQUEST)) {                          // 서버가 송출을 끝낸다
         if (state_ != TransmissionState::Permitted && state_ != TransmissionState::PendingEnd) return;
         ack(m);                                                                                   // §6.2.4.5.7
+        awaitingConfirm_ = false;
         setSending(out, false);
-        send(transmissionEndResponse(hdrSsrc()));
+        send(transmissionEndResponse(hdrSsrc(), userId_, txAudioSsrc_, txVideoSsrc_));           // 표 9.2.21-1
         deadline_ = {};
         state_ = TransmissionState::NoPermission;
         emitTx(out, K::EndRequested, &m, m.cause(), revokeCauseText(m.cause()));
@@ -498,6 +541,22 @@ void Participant::handleReception(const Message& m, Out& out) {
             receptions_.erase(receptions_.begin() + (long)i);
             break;
         }
+        return;
+    }
+    if (is(m, AppName::MCV1, (uint8_t)Mcv1::MEDIA_RECEPTION_OVERRIDE_NOTIFICATION)) {             // §6.2.5.5.4
+        ack(m);
+        // 밀려난 수신 = Overridden ID 의 송출. 필드가 없으면(수신이 하나뿐인 호) 지금 받고 있는 송출이다.
+        Reception* r = m.overriddenId().empty() ? nullptr : findReception(m.overriddenId(), 0);
+        if (!r) {
+            for (auto& x : receptions_)
+                if (x.t.state == ReceptionState::Receiving) { r = &x; break; }
+        }
+        if (!r || r->t.state != ReceptionState::Receiving) return;
+        setReceiving(out, *r, false);                        // 1 — 사용자에게 알리고(아래 이벤트) 수신을 닫는다
+        r->retries = 1;                                      // 4 — C104 = 1
+        sendReceptionEnd(*r);                                // 3 — Media Reception End Request + T104
+        r->t.state = ReceptionState::PendingRelease;         // 5 — 'U: pending reception release'
+        emitRx(out, K::Overridden, r->t, &m);
         return;
     }
     if (is(m, AppName::MCV2, (uint8_t)Mcv2::MEDIA_RECEPTION_END_REQUEST)) {                       // §6.2.5.5.5

@@ -1000,7 +1000,23 @@ public:
             o->log(3, "mcvideo call " + std::to_string(*idRef) + " receive " + t.userId + (on ? " on" : " off"));
         };
         cb.log = [o](int level, const std::string& m) { o->log(level, m); };
-        mcvideo->tc.reset(new mcvideo::Participant(-1, mcvideoTcSsrc(), userId, cb));
+        // 참여자 타이머 = MCVideo service configuration <tc-timers-counters-R14>(AccountConfig.tcTimers — 0 은 K5 기본값)
+        mcvideo::TcTimers tm;
+        bool confirmQueued = false;
+        {
+            auto ic = o_->accountCfgs.find(accountId_);
+            if (ic != o_->accountCfgs.end()) {
+                const McVideoTcTimers& t = ic->second.tcTimers;
+                if (t.t100Ms > 0) tm.t100Ms = t.t100Ms;
+                if (t.t101Ms > 0) tm.t101Ms = t.t101Ms;
+                if (t.t102Ms > 0) tm.t102Ms = t.t102Ms;
+                if (t.t103Ms > 0) tm.t103Ms = t.t103Ms;
+                if (t.t104Ms > 0) tm.t104Ms = t.t104Ms;
+                confirmQueued = ic->second.confirmQueuedTransmission;
+            }
+        }
+        mcvideo->tc.reset(new mcvideo::Participant(-1, mcvideoTcSsrc(), userId, cb, tm));
+        mcvideo->tc->setConfirmQueuedGrant(confirmQueued);
         if (!mcvideo->tc->open(0)) { mcvideo->tc.reset(); return false; }
         return true;
     }
@@ -2972,6 +2988,15 @@ Result Engine::setFloorTimers(int accountId, const FloorTimers& timers) {
         return Result::success();
     });
 }
+Result Engine::setTcTimers(int accountId, const McVideoTcTimers& timers) {
+    if (!impl_->running) return Result::fail(-1, "not running");
+    return impl_->ctl.runSync([=]() -> Result {
+        auto it = impl_->accountCfgs.find(accountId);
+        if (it == impl_->accountCfgs.end()) return Result::fail(-2, "no such account");
+        it->second.tcTimers = timers;
+        return Result::success();
+    });
+}
 FloorInfo Engine::floorInfo(int callId) const {
     FloorInfo fi;
     if (!impl_->running) return fi;
@@ -3078,6 +3103,12 @@ Result Engine::requestTransmission(int callId, int priority) {
 }
 Result Engine::releaseTransmission(int callId) {
     return withTc(impl_.get(), callId, [](mcvideo::Participant& p) { return p.releaseTransmission(); });
+}
+Result Engine::confirmTransmission(int callId, bool accept) {
+    return withTc(impl_.get(), callId, [accept](mcvideo::Participant& p) { return p.confirmTransmission(accept); });
+}
+Result Engine::requestQueuePosition(int callId) {
+    return withTc(impl_.get(), callId, [](mcvideo::Participant& p) { return p.requestQueuePosition(); });
 }
 Result Engine::acceptReception(int callId, const std::string& transmitterId, int priority) {
     return withTc(impl_.get(), callId, [transmitterId, priority](mcvideo::Participant& p) { return p.acceptReception(transmitterId, priority); });

@@ -429,6 +429,39 @@ TEST(FloorParticipant, QueuePositionRequestRetransmitsThenReleases) {
 }
 
 // §6.2.4.3.6 — T103: 받던 미디어가 그치면 그 발언이 끝났다(Floor Idle 이 유실돼도 «말하는 중» 에 머물지 않는다). 미디어 알림이 없으면 돌지 않는다.
+// §8.2.3.10 — Message Sequence Number 는 Floor Taken 묶음·Floor Idle 묶음을 각각 잇는다. 같은 종류 안의 재전송·역전만 버리고,
+//   Taken 과 Idle 의 번호는 서로 견주지 않는다(서버가 둘을 따로 세면 같은 번호가 양쪽에 나온다).
+TEST(FloorParticipant, MessageSequenceIsPerMessageKind) {
+    cimsue_test::PjScope pj("floor-test");
+    FakeServer srv;
+    Events e;
+    Participant p(16, 0x1616u, "tel:+82500000016", e.cb());
+    p.setTimers(fastTimers());
+    ASSERT_TRUE(p.open(0));
+    p.setRemote("127.0.0.1", srv.port);
+    auto taken = [&](int seq) {
+        srv.send(p.localPort(), Op::TAKEN, {strField(Field::GRANTED_PARTY, "tel:+82500000099"), u16Field((uint8_t)Field::MSG_SEQ, seq)});
+    };
+    auto idle = [&](int seq) { srv.send(p.localPort(), Op::IDLE, {u16Field((uint8_t)Field::MSG_SEQ, seq)}); };
+    taken(1);
+    ASSERT_TRUE(waitFor([&] { return p.info().state == FloorState::Listening; }, 1000));
+    idle(1);                                                         // Idle 계열의 1 — Taken 의 1 과 같은 번호지만 다른 묶음이다
+    ASSERT_TRUE(waitFor([&] { return p.info().state == FloorState::Idle; }, 1000));
+    taken(2);
+    ASSERT_TRUE(waitFor([&] { return p.info().state == FloorState::Listening; }, 1000));
+    int takenEvents = e.count(FloorEvent::Kind::Taken);
+    taken(2);                                                        // 같은 묶음의 재전송 — 버린다
+    taken(1);                                                        // 같은 묶음의 지난 번호 — 버린다
+    std::this_thread::sleep_for(std::chrono::milliseconds(150));
+    EXPECT_EQ(e.count(FloorEvent::Kind::Taken), takenEvents);
+    idle(1);                                                         // Idle 묶음의 재전송 — 버린다(지금은 Taken 2 가 최신)
+    std::this_thread::sleep_for(std::chrono::milliseconds(150));
+    EXPECT_EQ(p.info().state, FloorState::Listening);
+    idle(2);
+    EXPECT_TRUE(waitFor([&] { return p.info().state == FloorState::Idle; }, 1000));
+    p.close();
+}
+
 TEST(FloorParticipant, MediaEndTimerEndsListening) {
     cimsue_test::PjScope pj("floor-test");
     FakeServer srv;

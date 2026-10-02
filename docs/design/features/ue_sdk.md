@@ -463,8 +463,14 @@ CMP 코덱은 pasf 에 기대지 않아 Windows 시험 빌드에도 들어간다
 하나와 수신 'general' 하나 + 송출마다 'basic reception control' 을 가진다(TS 24.581 §6.2.5.1). floor participant 와 같은 틀(수신 스레드 1개가
 select ≤100 ms → 해석·전이·타이머, 공개 메서드는 mutex, 콜백은 락 밖)이고, 소유자에게 `onTransmission`·`onReception` 이벤트와 두 결선 신호를
 준다 — `onSend(on, audioSsrc, videoSsrc)`(허가 = 송출 열기, SSRC = Granted·answer 값 — §6.2.4.4.6 2·§14.4) · `onReceive(송출, on)`(수신 허가 =
-그 SSRC 렌더). 헤더 SSRC 는 answer `mc_transmission_ssrc`(§4.3.3.1), offer 에는 `localSsrc` 를 광고한다. 타이머·카운터는 `TcTimers`(service
-configuration 값, 없으면 K5 기본). 규격이 비워 둔 곳의 해석은 [mcvideo.md](mcvideo.md) §5.4. `cimsue_test` `McvParticipant`(루프백 가짜 서버 —
+그 SSRC 렌더). 헤더 SSRC 는 answer `mc_transmission_ssrc`(§4.3.3.1), offer 에는 `localSsrc` 를 광고한다. 타이머 T100~T104 = `AccountConfig.tcTimers`
+(MCVideo service configuration `<tc-timers-counters-R14>` → `McVideoServiceConfigDoc::tcTimers()` — 앱이 문서를 받아 싣는다, 바뀌면
+`Engine::setTcTimers`; 0 = K5 기본값), 카운터는 K5. 대기(Queued)에서 순번을 다시 물으려면 `Engine::requestQueuePosition`(§6.2.4.9.3 — T102·C102).
+**대기 끝 허가의 사용자 확인**(§6.2.4.5.1 NOTE) = `AccountConfig.confirmQueuedTransmission` 을 켜면 대기에서 온 Granted 에 송출을 열지 않고
+`TransmissionEvent.awaitingConfirmation` 으로 알린다 → `Engine::confirmTransmission(callId, accept)`(받으면 송출, 아니면 Transmission End Request). 끄면
+(기본) 곧바로 송출한다. Transmission End Request·Response 는 끝낼 송출(= 내 송출)의 User ID·Audio SSRC·Video SSRC 를 싣는다(표 9.2.20-1·9.2.21-1).
+**수신 무효화**(Media Reception Override Notification — §6.2.5.5.4) = 그 수신을 닫고 Media Reception End Request + T104 → `PendingRelease`,
+이벤트 `ReceptionEvent::Overridden`(`overridingId`). 규격이 비워 둔 곳의 해석은 [mcvideo.md](mcvideo.md) §5.4. `cimsue_test` `McvParticipant`(루프백 가짜 서버 —
 허가·종료·재전송 시한·거절·회수 #4/#7·서버 종료 요청·manual/automatic 수신·수신 거절·서버 수신 종료·암묵 요청 셋·상태 가드).
 
 **MCVideo 공개 표면**(계약 K7 — [../../dev/mcvideo_dev_plan.md](../../dev/mcvideo_dev_plan.md) §3) — `McService`(Mcptt·McVideo)·

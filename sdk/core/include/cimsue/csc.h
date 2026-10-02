@@ -291,6 +291,13 @@ struct McVideoServiceConfigDoc {
     bool confidentialityProtection = true;
     bool integrityProtection = true;
     int t100Sec = -1, t101Sec = -1, t102Sec = -1, t103Sec = -1, t104Sec = -1;   // tc-timers-counters-R14 T100~T104 (-1 = 미기재)
+    /** 참여자 타이머(TS 24.581 표 11.1.1-1) → AccountConfig.tcTimers / Engine::setTcTimers. 문서에 없는 값은 0(기본값). */
+    McVideoTcTimers tcTimers() const {
+        McVideoTcTimers t;
+        auto ms = [](int sec) { return sec > 0 ? sec * 1000 : 0; };
+        t.t100Ms = ms(t100Sec); t.t101Ms = ms(t101Sec); t.t102Ms = ms(t102Sec); t.t103Ms = ms(t103Sec); t.t104Ms = ms(t104Sec);
+        return t;
+    }
     CIMSUE_API static bool parse(const std::string& xml, McVideoServiceConfigDoc& out, std::string* err = nullptr);
 };
 constexpr const char* kCtMcVideoServiceConfig = "application/vnd.3gpp.mcvideo-service-config+xml";

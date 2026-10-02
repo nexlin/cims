@@ -173,6 +173,14 @@ TEST(McvConfig, ServiceConfig) {
     EXPECT_EQ(d.rpImminentPeril, "mcpttp.8");
     EXPECT_EQ(d.rpNormal, "mcpttp.0");
     EXPECT_EQ(d.t100Sec * 1000, mcvideo::timer::T100_MS);
+    {                                                                // 참여자 타이머로 — AccountConfig.tcTimers(TS 24.581 표 11.1.1-1)
+        McVideoServiceConfigDoc x = d;
+        x.t100Sec = 2; x.t102Sec = 3; x.t104Sec = -1;
+        McVideoTcTimers t = x.tcTimers();
+        EXPECT_EQ(t.t100Ms, 2000);
+        EXPECT_EQ(t.t102Ms, 3000);
+        EXPECT_EQ(t.t104Ms, 0);                                      // 문서에 없으면 0 = 기본값
+    }
     EXPECT_EQ(d.t101Sec * 1000, mcvideo::timer::T101_MS);
     EXPECT_EQ(d.t102Sec * 1000, mcvideo::timer::T102_MS);
     EXPECT_EQ(d.t103Sec * 1000, mcvideo::timer::T103_MS);

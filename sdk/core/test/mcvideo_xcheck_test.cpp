@@ -68,6 +68,13 @@ TEST(McvXCheck, CoreParticipantMessagesParsedByCmp) {
     EXPECT_EQ(p.u16(TF_TRANSMISSION_INDICATOR), (int)TI_NORMAL);
     ASSERT_TRUE(cmpParse(mv::transmissionEndResponse(5), p));
     EXPECT_EQ(p.op(), MCV2_TRANSMISSION_END_RESPONSE);
+    // 송출자 ID·SSRC 를 실은 End Request·Response 도 CMP 가 읽는다(표 9.2.20-1·9.2.21-1)
+    ASSERT_TRUE(cmpParse(mv::transmissionEndRequest(5, -1, "tel:+82500000013", 0x1111, 0x2222), p));
+    EXPECT_EQ(p.op(), MCV2_TRANSMISSION_END_REQUEST);
+    EXPECT_EQ(p.ssrcOf(TF_AUDIO_SSRC), 0x1111u);
+    EXPECT_EQ(p.ssrcOf(TF_VIDEO_SSRC), 0x2222u);
+    ASSERT_TRUE(cmpParse(mv::transmissionEndResponse(5, "tel:+82500000013", 0x1111, 0x2222), p));
+    EXPECT_EQ(p.op(), MCV2_TRANSMISSION_END_RESPONSE);
     ASSERT_TRUE(cmpParse(mv::mediaReceptionEndResponse(5, "tel:+82500000013", 0x1111, 0x2222), p));
     EXPECT_EQ(p.op(), MCV2_MEDIA_RECEPTION_END_RESPONSE);
 

@@ -235,7 +235,8 @@ subtype 에서 비트를 걷어내 기본 타입으로 다루고(`FloorMessage.t
 - **발언 시간 제한**(Granted Duration=서버 T2) → 잔여 시간을 발언 스트립에 표시하고, 마감 5초 전 알림 톤·진동, 마감 300ms 전 **스스로 Release**. 초과하면 서버가 Revoke #2(Media burst too long)로 끊는다.
 - **Permission to Request the Floor**(Floor Taken 필드, §8.2.3.7) = 0 인 leg(일제 통화 비개시자·ambient 청취)은 PTT 버튼을 비활성("청취 전용 채널") — 눌러도 Deny 만 돌아온다.
 - **대기열**(Floor Deny 대신 Queue Position Info 수신, `mc_queueing` 협상 전제) → PTT 바·발언 스트립에 "대기 N번째"(황색). **버튼을 계속 누르고 있으면 순번을 기다리고, 떼면 Floor Release 로 자기 대기 요청을 거둔다**(TS 24.380 §6.2.4.9.6 — 서버는 대기자의 Release 로 대기 요청을 지우고 Floor Taken 으로 답한다, §6.3.5.4.5). Queued Floor Requests(0x0E)는 남의 대기 요청을 지우는 인가 사용자의 절차라 보내지 않는다. 대기 중 앞사람이 승급해 오는 Floor Taken 에도 대기 상태를 유지하고(§6.2.4.9.3), 의장이 지운 경우의 Cancel Notification 으로 대기를 끝낸다.
-- **Message Sequence Number**(Taken/Idle) 역전·중복은 폐기한다. 단 직전 64개 안쪽으로 되돌아간 것만 — 그보다 멀리 뒤로 간 값은 서버측 카운터 초기화로 보고 새 기준으로 재동기한다(폐기하면 floor 표시가 영영 얼어붙는다).
+- **Message Sequence Number**(TS 24.380 §8.2.3.10 — Floor Taken 묶음·Floor Idle 묶음을 각각 잇는 값) — **같은 종류 안에서** 역전·중복을 폐기한다
+  (Taken 과 Idle 의 번호는 서로 견주지 않는다 — 서버가 둘을 따로 세면 같은 번호가 양쪽에 나온다). 단 직전 64개 안쪽으로 되돌아간 것만 — 그보다 멀리 뒤로 간 값은 서버측 카운터 초기화로 보고 새 기준으로 재동기한다(폐기하면 floor 표시가 영영 얼어붙는다).
 - **Taken** → 발언자 카드에 화자(Granted Party's Identity)+발언 경과시간 표시, LISTENING 중 버튼 누름은 무시(불필요한 REJECT 방지).
 - **동시 발언**(dual/multi) → Taken 은 화자 **집합 전체**(List of Granted Users/SSRCs)를 싣고, 한 명이 끝나면 Idle 대신 0x0F 로 그 화자만 알린다. 단말은 집합을 들고 증분 갱신한다(Taken=전체·0x0F=한 명 제거·Idle=비움). ⚠️**뒤에 승급한 화자의 Taken 은 먼저 말하던 나에게도 오고 그 목록에 내가 있다** — 목록에 내가 있으면 SPEAKING 을 유지해야 내 마이크가 닫히지 않는다. 화자별 SSRC 는 `Session.talkerSsrc` 에 남겨 SSRC 별 재생(U10)의 입력으로 쓴다. UI 는 화자가 2명 이상이면 발언 스트립에 전원 명단, 목록·칩에는 "외 N".
 - **UX 구현**: 톤/진동=`ptt-client/audio/PttFeedback.kt`(ToneGenerator STREAM_VOICE_CALL+Vibrator, 서비스가 컨트롤러에 주입), 발언자 추적=`PttController.speaker: StateFlow<Speaker?>`(내 GRANT/타인 TAKEN, elapsedRealtime 기준).
@@ -365,7 +366,7 @@ subtype 에서 비트를 걷어내 기본 타입으로 다루고(`FloorMessage.t
 | # | 요구사항 | 규격 | 서버 동작 | 단말 현재 |
 |---|---|---|---|---|
 | U6 | **Permission to Request the Floor(5)** — 0 이면 발언 요청 불가(일제 통화 비개시자·ambient 청취 leg) → PTT 버튼 비활성 | §8.2.3.7, §6.3.4.4.2-3d | broadcast=0, ambient(recv_only) leg 에는 0 변형을 따로 송신 | ✅ `GroupCallState.canRequestFloor` — 화면 PTT 바 비활성("청취 전용 채널")·`pttDown` 조기 차단. 값이 실려 올 때만 갱신(미포함 = 종전 유지) |
-| U7 | **Message Sequence Number(8)** — Taken/Idle 의 순서 식별. 역전·중복 수신 시 오래된 것 폐기 | §8.2.3.10 | Taken/Idle 마다 +1(65535 순환) | ✅ `FloorClient.isStaleSeq` — 직전 64개 안쪽으로 되돌아간 Taken/Idle 만 폐기. 더 멀리 뒤로 간 값은 서버 카운터 초기화로 보고 재동기(폐기하면 표시가 영구 정지) |
+| U7 | **Message Sequence Number(8)** — Taken/Idle 의 순서 식별. 역전·중복 수신 시 오래된 것 폐기 | §8.2.3.10 | Taken/Idle 마다 +1(65535 순환) | ✅ 코어 `floor::Participant::isStaleSeq` — Taken·Idle 각각의 마지막 번호와 견줘 직전 64개 안쪽으로 되돌아간 것만 폐기. 더 멀리 뒤로 간 값은 서버 카운터 초기화로 보고 재동기(폐기하면 표시가 영구 정지) |
 | U8 | **SSRC 필드(14)** — 화자의 RTP SSRC. **헤더 SSRC 는 서버 SSRC** 이므로 화자 식별에 쓰면 안 된다 | §8.2.5, §8.2.9 | Granted/Taken 에 화자 SSRC 를 필드로 실음(단말이 보낸 SSRC 를 학습해 되싣는다) | △ `FloorMessage.speakerSsrc` 로 파싱해 `FloorEvent.Taken` 으로 전달(헤더 SSRC 는 화자 식별에 쓰지 않는다). 실제 소비처는 U10(SSRC 별 재생) |
 | U9 | **Granted Party(4) = MCPTT ID(URI)** — 표시 시 URI 를 사용자 이름으로 매핑 | §8.2.3.8 | `PTT_JOIN.user_uri` 가 있으면 URI, 없으면 가입자 번호 | △ 문자열 그대로 표시(`sameUser` 가 URI/번호 혼용을 흡수) |
 

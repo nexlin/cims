@@ -72,6 +72,15 @@ struct FloorTimers {
     int c104 = 0;                     // Floor Queue Position Request 송신 상한
 };
 
+/**
+ * MCVideo 전송 제어 참여자 타이머(TS 24.581 표 11.1.1-1 — T100 Transmission Request · T101 Transmission End Request · T102 Queue
+ * Position Request · T103 Receive Media Request · T104 Receive Media Release). 값의 출처 = MCVideo service configuration
+ * `<tc-timers-counters-R14>`(TS 24.484 §9.4.2.1 — 초 단위, McVideoServiceConfigDoc::tcTimers()). 0 = 기본값(1 s).
+ */
+struct McVideoTcTimers {
+    int t100Ms = 0, t101Ms = 0, t102Ms = 0, t103Ms = 0, t104Ms = 0;
+};
+
 /** 계정(접속서비스 kind 당 1개) 설정 — 프로비저닝 프로파일에서 채운다 (android_ue_provisioning.md). */
 struct AccountConfig {
     std::string serverHost;           // CSP 접속점 IP/FQDN
@@ -140,6 +149,13 @@ struct AccountConfig {
     /** 발언권 참여자 타이머 — ue-init-config `<Timers>`(UeInitConfigDoc.floorTimers)를 싣는다. 계정의 다음 MCPTT 호부터 쓴다
      *  (Engine::setFloorTimers 로 바꿀 수 있다 — 문서 변경 통지 뒤). */
     FloorTimers floorTimers;
+    /** MCVideo 전송 제어 참여자 타이머 — MCVideo service configuration 값(McVideoServiceConfigDoc::tcTimers())을 싣는다. 계정의 다음
+     *  MCVideo 호부터 쓴다(Engine::setTcTimers 로 바꿀 수 있다 — 문서 변경 통지 뒤). */
+    McVideoTcTimers tcTimers;
+    /** 대기하던 송출 요청이 허가되면 사용자 확인을 받고 송출한다(TS 24.581 §6.2.4.5.1 NOTE). true 면 대기(Queued)에서 온 Granted 에
+     *  코어가 마이크·카메라를 열지 않고 `TransmissionEvent.awaitingConfirmation` 으로 알린다 — 앱이 Engine::confirmTransmission 으로
+     *  받거나(송출 시작) 거둔다(Transmission End Request). false(기본)면 곧바로 송출한다. */
+    bool confirmQueuedTransmission = false;
 
     std::string aor() const { return "sip:" + msisdn + "@" + domain; }
     std::string effectiveMcpttId() const { return mcpttId.empty() ? "tel:" + msisdn : mcpttId; }
@@ -450,6 +466,7 @@ struct TransmissionEvent {
     TransmissionState state = TransmissionState::NoPermission;
     int cause = -1;                   // Rejected·Revoked·EndRequested 의 Reject Cause
     std::string causeText;            // Reject Phrase(있으면), 없으면 원인 표의 문구
+    bool awaitingConfirmation = false;   // Granted — 대기 끝 허가라 사용자 확인을 기다린다(AccountConfig.confirmQueuedTransmission)
     int durationSec = -1;             // Granted — 허가된 송출 시간(Duration)
     int priority = -1;                // Granted — 허가된 송출 우선순위
     int queuePosition = -1;           // QueuePosition — 254 = 대기 아님, 255 = 알 수 없음(§9.2.3.5)
@@ -469,12 +486,15 @@ struct ReceptionEvent {
         Released,                     // Media Reception End Response — 내 [그만 보기] 완료 → Notified
         EndRequested,                 // 서버 Media Reception End Request — 코어가 응답하고 수신을 닫았다 → Notified
         RequestTimeout,               // 요청 응답 없음(T103×C103 · T104×C104) → Notified
-        Other
+        Other,
+        Overridden                    // Media Reception Override Notification — 이 수신이 다른 송출에 밀렸다(§6.2.5.5.4): 코어가 수신을
+                                      //   닫고 Media Reception End Request 를 보냈다 → PendingRelease (overridingId = 밀어낸 송출자)
     };
     Kind kind = Kind::Other;
     int callId = -1;
     VideoTransmitter transmitter;     // 이 이벤트의 송출(state = 전이 뒤)
     int cause = -1;
+    std::string overridingId;         // Overridden — 수신을 밀어낸 송출자(Overriding ID, 없으면 빈 문자열)
     std::string causeText;
     int rawType = -1;
 };
@@ -484,6 +504,7 @@ struct TransmissionInfo {
     TransmissionState state = TransmissionState::NoPermission;
     std::vector<VideoTransmitter> transmitters;   // 알려진 송출(내 것 제외) — Ended 는 빠진다
     int queuePosition = -1;
+    bool awaitingConfirmation = false;   // 허가됐지만 사용자 확인 전 — 송출은 닫혀 있다(Engine::confirmTransmission)
     int localPort = 0;                // SDP m=application udp MCVideo 에 광고한 RTCP 포트
     std::string remoteIp;             // 전송 제어 서버 목적지(SDP 학습)
     int remotePort = 0;

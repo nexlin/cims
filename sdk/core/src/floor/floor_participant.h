@@ -96,7 +96,7 @@ private:
     FloorState noPermissionState() const { return talkers_.empty() ? FloorState::Idle : FloorState::Listening; }
     void grantSelf(int durationSec);                                // m_ 잡은 채 — 'U: has permission' 진입
     bool sameUser(const std::string& a, const std::string& b) const;
-    bool isStaleSeq(int seq) const;
+    static bool isStaleSeq(int seq, int last);
     std::vector<cimsue::Talker> markSelf(const std::vector<Speaker>& in) const;
 
     const int callId_;
@@ -119,7 +119,7 @@ private:
     bool canRequest_ = true;
     int indicator_ = 0;
     int queuePos_ = -1;
-    int lastMsgSeq_ = -1;
+    int lastTakenSeq_ = -1, lastIdleSeq_ = -1;            // Message Sequence Number — Floor Taken 묶음·Floor Idle 묶음 따로(§8.2.3.10)
     bool revokePending_ = false;
     bool pendingRelease_ = false;                 // U: pending Release — Floor Release 를 보낸 뒤 Idle 대기(§6.2.4.6)
     bool implicitPending_ = false;                // 암묵 요청을 실은 개시 INVITE 의 answer 대기(§6.2.4.2.2)

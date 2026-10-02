@@ -37,6 +37,8 @@ struct Message {
 
     std::string userId() const { return str(Field::USER_ID); }
     std::string transmittingUserId() const { return str(Field::TRANSMITTING_USER_ID); }
+    std::string overridingId() const { return str(Field::OVERRIDING_ID); }
+    std::string overriddenId() const { return str(Field::OVERRIDDEN_ID); }
     std::string functionalAlias() const { return str(Field::FUNCTIONAL_ALIAS); }
     uint32_t audioSsrc() const { return ssrcOf(Field::AUDIO_SSRC); }
     uint32_t videoSsrc() const { return ssrcOf(Field::VIDEO_SSRC); }
@@ -72,9 +74,13 @@ Tlv causeField(int cause, const std::string& phrase = std::string());
 /** Transmission Request(§6.2.4.3.2) — priority<0 = 기본 우선순위라 싣지 않는다(2a), indicator<0 = 일반 호라 싣지 않는다(2b). */
 std::string transmissionRequest(uint32_t ssrc, int priority = -1, int indicator = -1);
 /** Transmission End Request(§6.2.4.5.3·§6.2.4.4.7·§6.2.4.9.4) — indicator 는 normal 로 시작한 방송 호에서만(A-bit). */
-std::string transmissionEndRequest(uint32_t ssrc, int indicator = -1);
+/** Transmission End Request(§9.2.20) — 끝낼 송출의 User ID of the Transmitting User·Audio SSRC·Video SSRC(표 9.2.20-1, 값이 있을 때). */
+std::string transmissionEndRequest(uint32_t ssrc, int indicator = -1, const std::string& transmitterId = std::string(),
+                                   uint32_t audioSsrc = 0, uint32_t videoSsrc = 0);
 /** Transmission End Response(§6.2.4.5.7 4) — 서버의 Transmission End Request 에 답한다. */
-std::string transmissionEndResponse(uint32_t ssrc);
+/** Transmission End Response(§9.2.21) — 같은 세 필드(표 9.2.21-1). */
+std::string transmissionEndResponse(uint32_t ssrc, const std::string& transmitterId = std::string(), uint32_t audioSsrc = 0,
+                                    uint32_t videoSsrc = 0);
 /** Queue Position Request(§6.2.4.9.3). */
 std::string queuePositionRequest(uint32_t ssrc);
 /** Receive Media Request(§6.2.5.3.3) — 받을 송출 = Media Transmission Notification 에서 저장한 송출자 ID·Audio/Video SSRC. */

@@ -71,6 +71,8 @@ public:
      *  §14.3.6). 요청의 Transmission/Reception Priority 는 이 값을 넘지 않는다(§6.2.4.3.2 2)a) · §6.2.5.3.3 1)a)). <0 = 협상 없음 —
      *  그때는 우선순위 필드를 싣지 않는다(기본 우선순위). */
     void setNegotiatedPriority(int transmission, int reception);
+    /** 대기 끝 허가의 사용자 확인(§6.2.4.5.1 NOTE)을 쓴다 — 켜면 'U: queued' 에서 받은 Granted 에 송출을 열지 않고 확인을 기다린다. */
+    void setConfirmQueuedGrant(bool on);
 
     // ── 호 성립 (§6.2.4.2 · §6.2.5.2) ──
     /** 개시 INVITE 가 암묵적 송출 요청이다(offer `mc_implicit_request`) — 'U: pending request to transmit'(§6.2.4.2.2 4). */
@@ -85,6 +87,10 @@ public:
     Result requestTransmission(int priority = -1);
     /** [보내기 끝] — 요청·허가·대기 중에서(§6.2.4.4.7·§6.2.4.5.3·§6.2.4.9.4). */
     Result releaseTransmission();
+    /** 대기 끝 허가의 사용자 확인 — accept = 송출 시작, 아니면 허가를 거둔다(Transmission End Request, §6.2.4.5.3). */
+    Result confirmTransmission(bool accept);
+    /** 대기 순번을 묻는다 — 'U: queued transmission' 에서(§6.2.4.9.3: Queue Position Request, T102·C102). */
+    Result requestQueuePosition();
     /** [받기] — 알림을 받은 송출(§6.2.5.3.3). */
     Result acceptReception(const std::string& transmitterId, int priority = -1);
     /** [그만 보기] — 요청 중(취소, §6.2.5.4.6)·수신 중(§6.2.5.5.3). */
@@ -157,6 +163,8 @@ private:
     TransmissionState state_ = TransmissionState::NoPermission;
     int priority_ = -1;                                   // 요청 우선순위(재전송에 같게)
     int maxPriority_ = -1, maxReceptionPriority_ = -1;    // 협상 상한(setNegotiatedPriority)
+    bool confirmQueued_ = false;                          // 대기 끝 허가는 사용자 확인 뒤 송출(setConfirmQueuedGrant)
+    bool awaitingConfirm_ = false;                        // 'U: has permission' 인데 사용자 확인 전 — 송출은 닫혀 있다
     static int capPriority(int asked, int negotiated) { return (asked < 0 || negotiated < 0) ? -1 : (asked < negotiated ? asked : negotiated); }
     int queuePosition_ = -1;
     bool sending_ = false;

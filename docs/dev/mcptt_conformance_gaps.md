@@ -50,13 +50,12 @@ PTT(MCPTT) 서비스 구현을 3GPP 규격 원문과 대조해 **규격과 다�
 | 애드혹 그룹 호 (ADH) | 9 | 4 | 3 | 1 | 1 |
 | 긴급·임박·경보 (EMG) | 10 | 1 | 2 | 7 | — |
 | 발언권 — 서버 (FCS) | 19 | 2 | 9 | 5 | 3 |
-| 발언권 — 단말 (FCC) | 1 | — | — | 1 | — |
 | 발언권 SDP 협상 (SDP) | 2 | — | 2 | — | — |
 | 그룹 문서·GMS (GMS) | 13 | — | 12 | 1 | — |
 | 설정 문서·CMS (CMS) | 2 | — | 1 | 1 | — |
-| **계** | **106** | **24** | **51** | **23** | **8** |
+| **계** | **105** | **24** | **51** | **22** | **8** |
 
-확인 수준 — ◎ 56 · ○ 39 · △ 11.
+확인 수준 — ◎ 56 · ○ 39 · △ 10.
 
 읽는 순서 — §2(먼저 볼 것) → §3(영역별 전체) → §4(미구현 목록에 빠진 기능) → §5(문서 정정) → §6(묶음과 순서).
 
@@ -227,7 +226,6 @@ CSP 는 참여 기능과 제어 기능을 겸한다.
 
 | # | 급 | 대상 | 규격 | CIMS 지금 | 영향 | 확인 |
 |---|---|---|---|---|---|---|
-| FCC-5 | C | SDK | §8.2.3.10 — Message Sequence Number 는 Taken·Idle 묶음을 잇는 값 | Taken·Idle 공용 카운터로 «되돌아간 번호» 를 버린다 — `floor_participant.cpp:83-87`·`:313-319` | 번호를 따로 세거나 다시 매기는 서버에서 정상 메시지가 버려진다. android_ue_client U7 은 정합으로 적었다 | △ |
 
 ### 3.10 발언권 SDP 협상 (SDP) — TS 24.380 §4.3 · §14 · TS 24.379 §6.2.1 · §6.3.3.1.1
 
@@ -288,7 +286,7 @@ CSP 는 참여 기능과 제어 기능을 겸한다.
 | mcptt_broadcast_group_call.md R4 | chat = 서버가 초대하지 않음 | 서버가 10초마다 초대 | GCS-1 |
 | server45_handoff.md §12.6 C12 | REGISTER Contact 의 MCPTT 태그 — «앱은 싣는다» | 앱도 싣지 않는다 | REG-1 |
 | server45_handoff.md §14.1 | 구독의 3600초 갱신은 규격대로 | conference·제휴·그룹 동적 데이터 구독의 규격 값은 4294967295 | GCC-7 |
-| android_ue_client.md U1·U7 | Floor Ack 정합 · Message Sequence Number 폐기 정합 | Ack 의 Message Type 에 ack 요구 비트가 섞인다 · Taken·Idle 공용 카운터로 폐기한다 | FCS-4·FCC-5 |
+| android_ue_client.md U1 | Floor Ack 정합 | Ack 의 Message Type 에 ack 요구 비트가 섞인다 | FCS-4 |
 | ue_sdk.md §4 | API 표의 `presence(uri)` | 그런 API 가 없다 | AFF-12 |
 | mcptt_api.md | `on-network-allow-conference-state` 기본 true | 규격 기본 false | GMS-8 |
 | csp.md · mcptt_csp_cmp_roadmap_contract.md · `sdk/core/include/cimsue/engine.h` 주석 | floor 없는 개별 호 = `mc_no_floor_ctrl` | on-demand 는 «m=application 없음» — SDK 발신은 실제로 그렇게 보내 CSP 판정과 어긋난다 | PRV-3 |

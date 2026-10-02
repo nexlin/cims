@@ -102,6 +102,8 @@ public:
     Result floorQueuePosition(int callId);
     /** 계정의 발언권 참여자 타이머를 바꾼다(UE initial configuration 이 바뀌었을 때 — AccountConfig.floorTimers). 다음 MCPTT 호부터. */
     Result setFloorTimers(int accountId, const FloorTimers& timers);
+    /** 계정의 MCVideo 전송 제어 참여자 타이머를 바꾼다(MCVideo service configuration 이 바뀌었을 때 — AccountConfig.tcTimers). 다음 MCVideo 호부터. */
+    Result setTcTimers(int accountId, const McVideoTcTimers& timers);
     FloorInfo floorInfo(int callId) const;
 
     /** 진행 중 그룹콜의 조건 상향·하향(TS 24.379 §10.1.1.2.1.3~5) — in-dialog re-INVITE: multipart mcptt-info(바뀐 지시자를
@@ -145,6 +147,11 @@ public:
     /** [보내기 끝] — Transmission End Request(MCV2, §6.2.4.5.3·§6.2.4.4.7·§6.2.4.9.4 — T101·C101). 대기·요청 중이면 요청을 거둔다.
      *  완료 = onTransmission(Ended). */
     Result releaseTransmission(int callId);
+    /** 대기 끝에 허가된 송출의 사용자 확인(TS 24.581 §6.2.4.5.1 NOTE — AccountConfig.confirmQueuedTransmission 일 때
+     *  TransmissionEvent.awaitingConfirmation). accept = 송출 시작, 아니면 허가를 거둔다(Transmission End Request). */
+    Result confirmTransmission(int callId, bool accept);
+    /** 대기 중인 송출 요청의 순번을 묻는다(Queue Position Request — §6.2.4.9.3). 답은 TransmissionEvent QueuePosition. */
+    Result requestQueuePosition(int callId);
     /** [받기] — Receive Media Request(MCV0, §6.2.5.3.3 — T103·C103). transmitterId = onReception(Notified) 의 송출자 MCVideo ID.
      *  결과는 onReception(Granted·Rejected). priority<0 = 미기재, 아니면 협상한 mc_reception_priority 이하. */
     Result acceptReception(int callId, const std::string& transmitterId, int priority = -1);

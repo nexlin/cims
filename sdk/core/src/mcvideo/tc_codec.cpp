@@ -167,13 +167,24 @@ std::string transmissionRequest(uint32_t ssrc, int priority, int indicator) {
     if (indicator >= 0) m.fields.push_back(u16Field(Field::TRANSMISSION_INDICATOR, indicator));
     return encode(m);
 }
-std::string transmissionEndRequest(uint32_t ssrc, int indicator) {
+// 내 송출을 가리키는 세 필드 — ID 는 늘, SSRC 는 아는 값만(허가 전 취소에는 아직 SSRC 가 없다).
+static void addOwnTransmission(Message& m, const std::string& id, uint32_t audioSsrc, uint32_t videoSsrc) {
+    if (id.empty()) return;
+    m.fields.push_back(strField(Field::TRANSMITTING_USER_ID, id));
+    if (audioSsrc) m.fields.push_back(ssrcField(Field::AUDIO_SSRC, audioSsrc));
+    if (videoSsrc) m.fields.push_back(ssrcField(Field::VIDEO_SSRC, videoSsrc));
+}
+std::string transmissionEndRequest(uint32_t ssrc, int indicator, const std::string& transmitterId, uint32_t audioSsrc,
+                                   uint32_t videoSsrc) {
     Message m = msg(AppName::MCV2, (uint8_t)Mcv2::TRANSMISSION_END_REQUEST, ssrc);
+    addOwnTransmission(m, transmitterId, audioSsrc, videoSsrc);
     if (indicator >= 0) m.fields.push_back(u16Field(Field::TRANSMISSION_INDICATOR, indicator));
     return encode(m);
 }
-std::string transmissionEndResponse(uint32_t ssrc) {
-    return encode(msg(AppName::MCV2, (uint8_t)Mcv2::TRANSMISSION_END_RESPONSE, ssrc));
+std::string transmissionEndResponse(uint32_t ssrc, const std::string& transmitterId, uint32_t audioSsrc, uint32_t videoSsrc) {
+    Message m = msg(AppName::MCV2, (uint8_t)Mcv2::TRANSMISSION_END_RESPONSE, ssrc);
+    addOwnTransmission(m, transmitterId, audioSsrc, videoSsrc);
+    return encode(m);
 }
 std::string queuePositionRequest(uint32_t ssrc) {
     return encode(msg(AppName::MCV0, (uint8_t)Mcv0::QUEUE_POSITION_REQUEST, ssrc));

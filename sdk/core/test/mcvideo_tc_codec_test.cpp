@@ -85,6 +85,17 @@ TEST(McvCodec, ParticipantBuildersRoundTrip) {
     ASSERT_TRUE(dec(mv::transmissionEndResponse(3), m));
     EXPECT_EQ(m.op, (uint8_t)mv::Mcv2::TRANSMISSION_END_RESPONSE);
     EXPECT_TRUE(m.fields.empty());
+    // 표 9.2.20-1·9.2.21-1 — 끝낼 송출의 User ID of the Transmitting User·Audio SSRC·Video SSRC
+    ASSERT_TRUE(dec(mv::transmissionEndRequest(3, -1, "tel:+82500000013", 0x1111, 0x2222), m));
+    EXPECT_EQ(m.transmittingUserId(), "tel:+82500000013");
+    EXPECT_EQ(m.audioSsrc(), 0x1111u);
+    EXPECT_EQ(m.videoSsrc(), 0x2222u);
+    EXPECT_LT(m.indicator(), 0);
+    ASSERT_TRUE(dec(mv::transmissionEndRequest(3, -1, "tel:+82500000013"), m));      // 허가 전 취소 — SSRC 를 아직 모른다
+    EXPECT_EQ(m.fields.size(), 1u);
+    ASSERT_TRUE(dec(mv::transmissionEndResponse(3, "tel:+82500000013", 0x1111, 0x2222), m));
+    EXPECT_EQ(m.transmittingUserId(), "tel:+82500000013");
+    EXPECT_EQ(m.videoSsrc(), 0x2222u);
     ASSERT_TRUE(dec(mv::queuePositionRequest(3), m));
     EXPECT_EQ(m.app, AppName::MCV0);
     EXPECT_EQ(m.op, (uint8_t)mv::Mcv0::QUEUE_POSITION_REQUEST);

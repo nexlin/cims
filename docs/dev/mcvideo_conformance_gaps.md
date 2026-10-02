@@ -48,15 +48,14 @@ MCPTT 쪽 같은 뿌리의 결함은 [mcptt_conformance_gaps.md](mcptt_conforman
 | 그룹 호 — 단말 (VGU) | 3 | — | — | 1 | 2 |
 | 개별·그 밖의 호 (VPRV) | 1 | — | — | — | 1 |
 | 송출 제어 — 서버 (TCS) | 9 | — | — | 4 | 5 |
-| 송출 제어 — 단말 (TCU) | 3 | — | — | 1 | 2 |
+| 송출 제어 — 단말 (TCU) | 1 | — | — | 1 | — |
 | 수신 제어 — 서버 (RCS) | 1 | — | — | — | 1 |
-| 수신 제어 — 단말 (RCU) | 1 | — | — | 1 | — |
 | SDP (VSDP) | 2 | — | — | 2 | — |
 | 그룹 문서 (VGMS) | 2 | — | 1 | — | 1 |
 | 설정 문서·CMS (VCMS) | 1 | — | 1 | — | — |
-| **계** | **46** | **1** | **5** | **26** | **14** |
+| **계** | **43** | **1** | **5** | **25** | **12** |
 
-확인 수준 — ◎ 32 · ○ 8 · △ 6.
+확인 수준 — ◎ 30 · ○ 8 · △ 5.
 
 읽는 순서 — §2(먼저 볼 것) → §3(영역별 전체) → §4(미구현 목록에 빠진 기능) → §5(문서 정정) → §6(묶음과 순서).
 
@@ -162,9 +161,7 @@ MCPTT 쪽 같은 뿌리의 결함은 [mcptt_conformance_gaps.md](mcptt_conforman
 
 | # | 급 | 대상 | 규격 | CIMS 지금 | 영향 | 확인 |
 |---|---|---|---|---|---|---|
-| TCU-1 | C | SDK·앱 | 표 11.1.1 — T100~T104 는 MCVideo service configuration `<tc-timers-counters-R14>` 값 | `McVideoServiceConfigDoc` 가 T100~T104 를 해석하지만(`sdk/core/src/csc/cms_doc.cpp:230-237`) 참여자는 늘 K5 기본값으로 만든다 — `sdk/core/src/engine.cpp:996` `new mcvideo::Participant(-1, mcvideoTcSsrc(), userId, cb)`(`TcTimers` 인자 없음). 값을 넣을 API 도 없고 앱도 MCVideo service config 를 받지 않는다 | 서버가 바꾼 단말 타이머가 반영되지 않는다(서버 쪽 짝 TCS-1) | ◎ |
-| TCU-3 | D | SDK | §6.2.4.5.1 NOTE — 대기에서 허가되면 송출 전에 사용자 확인 · §6.2.4.9.3 — 사용자의 Queue Position Request | 'U: queued' 에서 Granted 를 받으면 곧바로 카메라·마이크를 연다(`tc_participant.cpp:349-357`). 사용자가 위치를 묻는 API 가 없다(QPR 은 회수 #7 뒤에만) | 오래 기다린 대기 송출이 사용자 모르게 시작된다 | ◎ |
-| TCU-4 | D | SDK | 표 9.2.20-1 · 9.2.21-1 — Transmission End Request/Response 의 User ID of the Transmitting User·Audio SSRC·Video SSRC | 참여자가 보내는 End Request·End Response 에 그 필드가 없다(Indicator 만 — `sdk/core/src/mcvideo/tc_codec.cpp:170-177`) | 우리 CMP 는 제어 채널로 송출자를 가린다. 필드를 기대하는 규격 서버와는 다를 수 있다(필수 여부를 규격이 명시하지 않음) | △ |
+| TCU-1 | C | 앱 | 표 11.1.1 — T100~T104 는 MCVideo service configuration `<tc-timers-counters-R14>` 값 | 코어는 `AccountConfig.tcTimers`·`Engine::setTcTimers` 로 받아 참여자에 넣는다(`McVideoServiceConfigDoc::tcTimers()`). **앱이 MCVideo service config 를 받아 싣지 않는다** — Kotlin 파사드·C API 에 그 칸이 없고 현장 앱·관제 앱이 문서를 받지 않는다 | 서버가 바꾼 단말 타이머가 반영되지 않는다(서버 쪽 짝 TCS-1) | ◎ |
 
 ### 3.8 수신 제어 — 서버 (RCS) — TS 24.581 §6.3.6 · §6.3.7
 
@@ -176,7 +173,6 @@ MCPTT 쪽 같은 뿌리의 결함은 [mcptt_conformance_gaps.md](mcptt_conforman
 
 | # | 급 | 대상 | 규격 | CIMS 지금 | 영향 | 확인 |
 |---|---|---|---|---|---|---|
-| RCU-1 | C | SDK | §6.2.5.5.4 — Media Reception Override Notification 을 받으면 알리고 Media Reception End Request + T104 → 'U: pending reception release' | 코덱은 해석하지만(`sdk/core/src/mcvideo/tc_defs.h:59`) 참여자 처리 분기가 없어 버린다(`sdk/core/src/mcvideo/tc_participant.cpp:444-518`) | 수신 무효화가 와도 단말은 수신 상태로 남고 End Request 를 보내지 않아 서버와 상태가 갈린다 | ◎ |
 
 ### 3.10 SDP (VSDP) — TS 24.281 §6.2.1·§6.2.2·§6.3.3 · TS 24.581 §12 · §14
 
@@ -210,7 +206,6 @@ MCPTT 쪽 같은 뿌리의 결함은 [mcptt_conformance_gaps.md](mcptt_conforman
 |---|---|---|---|
 | mcvideo.md §1.4 «서버 answer» · §6 V8 «송출 큐» · mcvideo_dev_plan.md §1 «제외 … 송출 큐»·§8 | `mc_queueing` 은 싣지 않는다(1차 송출 큐 없음) | CSP answer 가 되돌리고(`csp/McVideoInfo.h:272`, 골든 04) CMP 대기열이 동작한다(mcvideo.md §5.3.1) — 초대 offer 에만 없다 | VSDP-4 |
 | mcvideo.md §5.1 CMS 단락 · cmp_media_api.md §7.9 `tc_timers` 행 · `csc/src/services/mcptt.py:357` 주석 | CSP 가 `/internal/mcvideo/service-config` 를 받고, T1·T5 밖의 타이머는 service configuration 값 | CSP 에 그 코드가 없고 T1·T5 만 보낸다 — CMP 는 K5 기본값 | TCS-1 |
-| ue_sdk.md §4.6(타이머 단락) · `sdk/core/include/cimsue/csc.h` `McVideoServiceConfigDoc` 주석 · `sdk/core/src/mcvideo/tc_participant.h:37` | 참여자 타이머 = service configuration 값, 없으면 K5 | 엔진이 값을 넘기지 않아 늘 K5 | TCU-1 |
 | mcvideo.md §1.4 SDP offer | m=audio 코덱 = 그룹 `mcvideo-preferred-audio-encodings`, m=video = `-video-encodings` | 단말은 그룹 값을 읽지 않고 전역 우선순위(AMR-WB/H.264)로 offer 한다 — 그룹 선호는 서버 집행 코덱(AMR-WB·H264)만 받으므로 결과는 같다 | VGU-4 |
 | mcvideo.md §5.1 «xcap-diff 통지 축에 두 문서를 싣는 것은 CSP 몫(§5.2)» · §6 V1 «xcap-diff» | (구현된 것처럼 읽힌다) | §5.2 에 구현 서술이 없고 코드에도 없다 — «남은 것» 으로 적어야 한다 | VCMS-1 |
 | mcvideo.md §5.3.1 Transmission Request 행 · cmp_media_api.md §7.9 `recv_only` | 그룹 문서 `<on-network-recvonly>` 면 거절 #5 | 그룹 문서에 그 요소가 없고 CSP 가 보내지 않는다 | TCS-10 |
@@ -231,12 +226,11 @@ MCPTT 쪽 같은 뿌리의 결함은 [mcptt_conformance_gaps.md](mcptt_conforman
 | 1 | **헤더·fmtp 한두 줄** — Warning 123·122, Supported 옵션 태그, 초대 offer `mc_queueing`, 해제 200 Expires, 현장 앱 `queueing` 켬 | VGC-4 · VGC-5 · VGC-6 · VGC-7(Supported 몫) · VSDP-4 · VAFF-3 · VSDP-3 | .45 CSP · 현장 앱 |
 | 4 | **제휴를 클라이언트 단위로** — 행 키 통일, 클라이언트 단위 해제·판정, 암묵 제휴 취소·완료 시점. MCPTT 묶음 8(AFF-1~8)과 한 작업 | VAFF-1 · VAFF-2 · VAFF-4 · VAFF-5 · VGC-11 | .45 CSP |
 | 5 | **진행 중 호와 제휴·그룹 변경** — late call entry, 제휴 해제·멤버 제거·서비스 끔 → BYE, 제휴 행 정리. MCPTT 묶음 9·10 의 결정과 같이 | VGC-2 · VGC-12 · VAFF-7 · VAFF-6(결정) | 결정 → .45 CSP |
-| 6 | **service configuration 값 결선** — CSP 가 `/internal/mcvideo/service-config` 를 받아 `tc_timers` 전부를 싣고 변경을 통지받는다, SDK 엔진이 `TcTimers` 를 문서에서 넣는다, xcap-diff `sel` 에 MCVideo 문서 | TCS-1 · TCU-1 · VCMS-1 | .45 CSP·SDK |
+| 6 | **service configuration 값 결선** — CSP 가 `/internal/mcvideo/service-config` 를 받아 `tc_timers` 전부를 싣고 변경을 통지받는다, 앱이 MCVideo service config 를 받아 `AccountConfig.tcTimers` 로 싣는다(Kotlin 파사드·C API·.NET — 코어는 받는다), xcap-diff `sel` 에 MCVideo 문서 | TCS-1 · TCU-1 · VCMS-1 | .45 CSP·SDK |
 | 7 | **코덱 선호의 한 줄기** — 그룹 선호 = 서버 집행 코덱(CSC·콘솔이 검증). 단말 offer·초대 offer 가 그 값을 쓴다 | VGU-4 · VGC-8 | .45 SDK · .48 CSP |
 | 8 | **그룹 문서 PUT 해석·CMS 문서** — 없음의 뜻(§7.2.8), `<mcvideo-mcvideo-id>`·`<group-media>` 검사 | VGMS-1 · VGMS-2 · VGC-10(CSC 기본값 몫) | .45 CSC |
 | 9 | **단말 호 절차** — poc-settings §7.2.3 송신(+ 서버 §7.3.4 수신과 짝), 계정 갱신 API(태그만 뺀 재-REGISTER), 제휴 상태 구독, preconfigured-group-use-only, 재합류 UI | VREG-1 · VREG-3 · VGU-5 · VGU-6 · VAFF-8 · VGC-7(Answer-Mode 몫) | .45 SDK·현장 → Windows(관제 앱) |
 | 10 | **송출 제어 서버 세부** — 선점 순서, 이른 Granted, 대기 위치 갱신, 무허가 송출 포기, Ack subtype·P 비트, SSRC 기본값, 별칭 전달 | TCS-2 · TCS-3 · TCS-5 · TCS-7 · TCS-8 · TCS-9 · TCS-11 · RCS-2 | .45 CMP(·SDK 별칭) |
-| 11 | **단말 참여자 세부** — 대기 허가 확인, End 필드, override | TCU-3 · TCU-4 · RCU-1 | .45 SDK |
 | 12 | **서버 사유 코드·신원 세부** — 그룹 호 밖 session-type 사유, PSI 고정, 로그오프 바인딩 판정·제휴 정리, conference 구독 서비스 분리, T5 | VPRV-1 · VGC-13 · VREG-2 · VREG-4 · VGC-10 · VGC-9 | .45 CSP |
 | 13 | **수신 전용 멤버** — 그룹 모델·문서 `<on-network-recvonly>` → CSP JOIN `recv_only`·answer `mc_priority` 생략. MCPTT FCS-14 와 같이 | TCS-10 | .45 CSC·CSP |
 

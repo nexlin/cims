@@ -286,6 +286,97 @@ TEST(McvParticipant, RevokedPreemptedEndsAndQueueRequeues) {
     p.close();
 }
 
+// §6.2.4.5.1 NOTE — 대기하던 요청이 허가되면 송출 전에 사용자 확인(설정했을 때) · §6.2.4.9.3 — 사용자의 Queue Position Request ·
+//   표 9.2.20-1 — Transmission End Request 의 송출자 ID·SSRC
+TEST(McvParticipant, QueuedGrantAwaitsConfirmationAndQueuePositionRequest) {
+    cimsue_test::PjScope pj;
+    for (bool accept : {true, false}) {
+        FakeServer srv;
+        Rec rec;
+        Participant p(1, 0x11, kMe, rec.cb());
+        wire(p, srv);
+        p.setConfirmQueuedGrant(true);
+        p.onEstablished();
+        EXPECT_FALSE(p.requestQueuePosition().ok);                // 대기 중이 아니다
+        ASSERT_TRUE(p.requestTransmission().ok);
+        ASSERT_TRUE(srv.expect(AppName::MCV0, (uint8_t)Mcv0::TRANSMISSION_REQUEST));
+        srv.send(AppName::MCV1, (uint8_t)Mcv1::QUEUE_POSITION_INFO, {Tlv{(uint8_t)Field::QUEUE_INFO, std::string("\x03\x00", 2)}});
+        ASSERT_TRUE(waitFor([&] { return p.info().state == TransmissionState::Queued; }, 1000));
+
+        ASSERT_TRUE(p.requestQueuePosition().ok);                 // §6.2.4.9.3 — 순번을 묻는다
+        ASSERT_TRUE(srv.expect(AppName::MCV0, (uint8_t)Mcv0::QUEUE_POSITION_REQUEST));
+        srv.send(AppName::MCV1, (uint8_t)Mcv1::QUEUE_POSITION_INFO, {Tlv{(uint8_t)Field::QUEUE_INFO, std::string("\x01\x00", 2)}});
+        ASSERT_TRUE(waitFor([&] { return p.info().queuePosition == 1; }, 1000));
+
+        srv.send(AppName::MCV1, (uint8_t)Mcv1::TRANSMISSION_GRANTED, {ssrcField(Field::AUDIO_SSRC, 0xA1), ssrcField(Field::VIDEO_SSRC, 0xB1)});
+        ASSERT_TRUE(waitFor([&] { return rec.hasTx(TransmissionEvent::Kind::Granted); }, 1000));
+        EXPECT_TRUE(rec.lastTx().awaitingConfirmation);
+        EXPECT_TRUE(p.info().awaitingConfirmation);
+        EXPECT_EQ(p.info().state, TransmissionState::Permitted);
+        EXPECT_EQ(rec.sendCount(), 0u);                           // 확인 전에는 마이크·카메라를 열지 않는다
+
+        ASSERT_TRUE(p.confirmTransmission(accept).ok);
+        if (accept) {
+            ASSERT_TRUE(waitFor([&] { return rec.sendCount() == 1; }, 1000));
+            EXPECT_TRUE(rec.send[0].first);
+            EXPECT_EQ(rec.send[0].second.second, 0xB1u);
+            EXPECT_FALSE(p.info().awaitingConfirmation);
+            EXPECT_FALSE(p.confirmTransmission(true).ok);         // 기다리는 확인이 없다
+        } else {
+            Message m;
+            ASSERT_TRUE(srv.expect(AppName::MCV2, (uint8_t)Mcv2::TRANSMISSION_END_REQUEST, &m));
+            EXPECT_EQ(m.transmittingUserId(), kMe);               // 끝낼 송출 = 내 송출(표 9.2.20-1)
+            EXPECT_EQ(m.audioSsrc(), 0xA1u);
+            EXPECT_EQ(m.videoSsrc(), 0xB1u);
+            EXPECT_EQ(p.info().state, TransmissionState::PendingEnd);
+            EXPECT_EQ(rec.sendCount(), 0u);
+        }
+        p.close();
+    }
+    // 설정하지 않으면(기본) 대기 끝 허가에 곧바로 송출한다
+    FakeServer srv;
+    Rec rec;
+    Participant p(1, 0x11, kMe, rec.cb());
+    wire(p, srv);
+    p.onEstablished();
+    ASSERT_TRUE(p.requestTransmission().ok);
+    srv.send(AppName::MCV1, (uint8_t)Mcv1::QUEUE_POSITION_INFO, {Tlv{(uint8_t)Field::QUEUE_INFO, std::string("\x02\x00", 2)}});
+    ASSERT_TRUE(waitFor([&] { return p.info().state == TransmissionState::Queued; }, 1000));
+    srv.send(AppName::MCV1, (uint8_t)Mcv1::TRANSMISSION_GRANTED, {});
+    ASSERT_TRUE(waitFor([&] { return rec.sendCount() == 1; }, 1000));
+    EXPECT_FALSE(rec.lastTx().awaitingConfirmation);
+    p.close();
+}
+
+// §6.2.5.5.4 — Media Reception Override Notification: 알리고, Media Reception End Request + T104, 'U: pending reception release'
+TEST(McvParticipant, ReceptionOverrideEndsReception) {
+    cimsue_test::PjScope pj;
+    FakeServer srv;
+    Rec rec;
+    Participant p(1, 0x11, kMe, rec.cb());
+    wire(p, srv);
+    p.onEstablished();
+    auto note = transmission(kPeer, 0xA2, 0xB2);
+    note.push_back(u16Field(Field::RECEPTION_MODE, (int)ReceptionMode::AUTOMATIC));
+    srv.send(AppName::MCV1, (uint8_t)Mcv1::MEDIA_TRANSMISSION_NOTIFICATION, note);
+    ASSERT_TRUE(waitFor([&] { return rec.recvCount() == 1; }, 1000));                // automatic — 받는 중
+    const std::string other = "tel:+82500000015";
+    srv.send(AppName::MCV1, (uint8_t)Mcv1::MEDIA_RECEPTION_OVERRIDE_NOTIFICATION,
+             {strField(Field::OVERRIDING_ID, other), strField(Field::OVERRIDDEN_ID, kPeer)});
+    Message m;
+    ASSERT_TRUE(srv.expect(AppName::MCV2, (uint8_t)Mcv2::MEDIA_RECEPTION_END_REQUEST, &m));
+    EXPECT_EQ(m.transmittingUserId(), kPeer);
+    EXPECT_EQ(m.videoSsrc(), 0xB2u);
+    ASSERT_TRUE(waitFor([&] { return rec.hasRx(ReceptionEvent::Kind::Overridden); }, 1000));
+    EXPECT_EQ(rec.lastRx().overridingId, other);
+    EXPECT_EQ(rec.lastRx().transmitter.state, ReceptionState::PendingRelease);
+    ASSERT_EQ(rec.recvCount(), 2u);
+    EXPECT_FALSE(rec.recv[1].second);                         // 수신을 닫았다
+    srv.send(AppName::MCV2, (uint8_t)Mcv2::MEDIA_RECEPTION_END_RESPONSE, transmission(kPeer, 0xA2, 0xB2));
+    ASSERT_TRUE(waitFor([&] { return rec.hasRx(ReceptionEvent::Kind::Released); }, 1000));
+    p.close();
+}
+
 // §6.2.4.5.7 — 서버가 송출을 끝낸다(Transmission End Request) → End Response, 'U: has no permission'
 TEST(McvParticipant, ServerEndRequestAnswered) {
     cimsue_test::PjScope pj;

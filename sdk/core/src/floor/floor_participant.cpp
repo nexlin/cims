@@ -80,9 +80,9 @@ std::vector<Talker> Participant::markSelf(const std::vector<Speaker>& in) const 
     return out;
 }
 
-bool Participant::isStaleSeq(int seq) const {
-    if (lastMsgSeq_ < 0) return false;
-    int d = (lastMsgSeq_ - seq) & 0xffff;
+bool Participant::isStaleSeq(int seq, int last) {
+    if (last < 0) return false;
+    int d = (last - seq) & 0xffff;
     return d >= 0 && d < kSeqReorderWindow;
 }
 
@@ -414,12 +414,15 @@ void Participant::handle(const Message& m) {
         std::lock_guard<std::mutex> lk(m_);
         // Ack 요구 변종(§8.2.2) — 상태 처리보다 먼저 회신(없으면 상대가 T100 재전송).
         if (m.ackRequired) send(ackOf(ssrc_, (uint8_t)(m.op | kAckRequiredBit)));
-        // Message Sequence Number(§8.2.3.10) — Taken/Idle 순서 역전·재전송 폐기.
+        // Message Sequence Number(§8.2.3.10) — «Floor Taken 여럿을 잇거나 Floor Idle 여럿을 잇는» 값이다. 같은 종류 안에서만
+        //   재전송·순서 역전을 버린다. Taken 과 Idle 의 번호는 서로 견주지 않는다 — 서버가 둘을 따로 세면(같은 번호가 양쪽에
+        //   나온다) 한 계열로 견줄 때 정상 메시지를 버리게 된다.
         if (m.op == (uint8_t)Op::TAKEN || m.op == (uint8_t)Op::IDLE) {
             int seq = m.msgSeq();
+            int& last = m.op == (uint8_t)Op::TAKEN ? lastTakenSeq_ : lastIdleSeq_;
             if (seq >= 0) {
-                if (isStaleSeq(seq)) return;
-                lastMsgSeq_ = seq;
+                if (isStaleSeq(seq, last)) return;
+                last = seq;
             }
         }
         auto discard = [&](const char* why) {                         // 그 상태에 절차가 없는 메시지(§6.2.4.1)
