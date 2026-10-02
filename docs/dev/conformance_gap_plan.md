@@ -136,7 +136,7 @@
 | **U04** | MCPTT 요청 규격화 | REG-1 · GCC-1 · GCC-2 · GCC-3 · GCC-4 · GCC-5 · GCC-7 · GCC-8 · GCC-9 · ADH-8 · SDP-1 | B9 · D2 | 2 | S17 | — | W01(엔진 재빌드) | 대기 |
 | **U05** | MCData 요청 규격화·수신 파서 | MCData REG-1 · SDS-3 · SDS-6 · SDS-7 · SDS-10 · MSRP-1 · MSRP-4 · FD-7(SDK — Metadata `file-selector:`·`uploadFd` 규격형, CSP 생성분은 S16) | B3 · C2 · D3 | 1 | S17 | — | — | 대기 |
 | **U06** | 제휴 상태 구독 | AFF-12 / VAFF-8 | B1 · C1 | 1 | S13 | — | W01(VAFF-8) | 대기 |
-| **U07** | XCAP 단말 전환 | GMS-16 · GMS-17 · GMS-1(SDK — global tree 조회) · GMS-6(SDK — 멤버 제외 조회) | B4 | 1 | C04·S19 | — | W01(GMS-16 PSI) | 진행 65046fec(GMS-1·GMS-17·GMS-6 코어 — global tree 조회·PUT 규칙·멤버 제외 조회) — 남은 것 GMS-16(구독 본문·PSI, S19 뒤) · GMS-6 바인딩·앱 |
+| **U07** | XCAP 단말 전환 | GMS-16 · GMS-17 · GMS-1(SDK — global tree 조회) · GMS-6(SDK — 멤버 제외 조회) | B4 | 1 | C04·S19 | — | W01(GMS-16 PSI) | 진행 65046fec(GMS-1·GMS-17·GMS-6 코어 — global tree 조회·PUT 규칙·멤버 제외 조회) · 1c475d6e(GMS-6 Kotlin 파사드·C API) — 남은 것 GMS-16(구독 본문·PSI, S19 뒤) |
 | **U08** | 발언권·송출 제어 단말 세부 | FCC-5 / TCU-1(코어) · TCU-3 · TCU-4 · RCU-1 | C3 · D2 | 1 | — | — | — | 완료 9e9a8169 (TCU-1 앱 결선 → U09) |
 | **U09** | MCVideo 단말 호 절차 | VREG-1 · VREG-3 · VGU-4 · VGU-5 · VGU-6 · VSDP-3 · TCU-1(앱 결선 — Kotlin 파사드·C API·현장 앱) | B1 · C3 · D2 | 1 | — | D7 | W01(VGU-6) | 진행 6c2c411a(VSDP-3·VGU-6 현장 앱) · 0251aa8e(VREG-1 코어 — 선택 옵션) · 354bc013(VREG-3 코어·VGU-5 코어·VGU-4 재확인 충족) · 1c475d6e(Kotlin 파사드·C API 함수·현장 앱 결선 — TCU-1·VGU-5·VREG-3) — 남은 것 VREG-1 켜기(S25 뒤) · C API 구조체 칸(W01 과 배치 맞춤) |
 
