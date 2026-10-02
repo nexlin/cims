@@ -48,12 +48,12 @@ MCPTT 와 뿌리가 같은 것(제휴 클라이언트 단위·비제휴 멤버 �
 | SDS — 시그널링 평면 (SDS) | 10 | — | 4 | 3 | 3 |
 | SDS — 미디어 평면 (MSRP) | 6 | — | 2 | 3 | 1 |
 | disposition 통지 (DISP) | 1 | — | — | 1 | — |
-| 파일 배포 (FD) | 3 | — | — | 2 | 1 |
+| 파일 배포 (FD) | 2 | — | — | 1 | 1 |
 | 설정 문서 (CFG) | 1 | — | — | 1 | — |
 | 응답 코드·Warning (WRN) | 3 | — | — | 3 | — |
-| **계** | **31** | **1** | **10** | **15** | **5** |
+| **계** | **30** | **1** | **10** | **14** | **5** |
 
-확인 수준 — ◎ 26 · ○ 2 · △ 3.
+확인 수준 — ◎ 25 · ○ 2 · △ 3.
 
 읽는 순서 — §2(먼저 볼 것) → §3(영역별 전체) → §4(미구현 목록에 빠진 기능) → §5(문서 정정) → §6(묶음과 순서).
 
@@ -139,7 +139,6 @@ CSP 는 참여 기능과 제어 기능을 겸한다.
 
 | # | 급 | 대상 | 규격 | CIMS 지금 | 영향 | 확인 |
 |---|---|---|---|---|---|---|
-| FD-1 | C | CSP·CSC | §10.2.4.4.2 7)b) · §6.7.3 — FILEURL 의 파일이 media storage function 에 없으면 403 `212`. 확인 = 제어 기능이 그 URL 에 HTTP HEAD(access token), 404 면 없음 | CSP 는 URL 이 콘텐츠 서버 base(`Setup.McData.FdUrlBase`·CSC PublicUrl)의 `/mcdata/fd/<id>` 인지만 본다(`csp/McDataGates.cpp` `McDataFdPayloadCheck` → `McDataFdUrlIsOurs`) — HEAD 를 보내지 않는다. CSC 콘텐츠 서버는 HEAD 가 없고(405) FD URL 을 요청 Host 헤더로 만든다(`csc/src/services/mcdata_fd.py`) | 없는 id 의 URL 도 배포된다(수신자 GET 이 404). 단말이 PublicUrl 과 다른 이름으로 CSC 에 붙으면 업로드 URL 이 base 와 달라 212 가 된다 | ◎ |
 | FD-4 | C | CSP·SDK·현장 | §11.2 · §10.2.4.4.1 5) — 제어 기능이 파일 크기 ≤ 그룹 `<mcdata-on-network-max-data-size-auto-recv>`(1:1 = `<max-data-size-auto-recv-bytes>`)면 Mandatory download IE 를 넣는다. §10.2.1.2.2 — 단말은 그 IE 로 자동 다운로드 | CSP 는 IE 를 넣지 않는다. SDK 는 Mandatory download IE(0xA-)를 건너뛰고(`sdk/core/src/mcdata/sds_codec.cpp:376`) 앱이 그룹 문서 값과 Metadata 크기로 직접 정한다(`android/ptt-client/…/PttService.kt:556`) | 규격 단말은 우리 서버에서 자동 다운로드하지 않고, 우리 앱은 발신자가 요구한 필수 다운로드를 무시한다. 1:1 FD 는 자동 수신 기준이 없다 | ◎ |
 | FD-7 | D | SDK·CSP | §15.2.17 — Metadata = RFC 5547 `file-selector-attr`(name·size·type·hash) + file-date·file-availability·file-description | `name:"…" size:N type:…` 만, `file-selector:` 접두·hash·availability 없음(`sdk/core/src/mcdata/sds_codec.cpp:137-138`, `csp/McDataCodecBuild.cpp:67`) | 엄격한 규격 파서가 크기를 못 읽으면 FD-4 자동 수신 판정이 어긋난다. RFC 5547 원문 미대조 | △ |
 
@@ -187,7 +186,7 @@ CSP 는 참여 기능과 제어 기능을 겸한다.
 
 | # | 묶음 | 항목 | 몫 |
 |---|---|---|---|
-| 2 | **인가·보안** — FILEURL 파일 존재 확인(212 HEAD), 제휴 멤버만 배포 | FD-1 · AFF-2 | .45 CSP |
+| 2 | **인가·보안** — 제휴 멤버만 배포 | AFF-2 | .45 CSP |
 | 3 | **응답 코드·Warning** — MCPTT 묶음 5 와 한 묶음(같은 `McpttWarning`) | WRN-1~3 · SDS-4 | .45 CSP |
 | 4 | **서버가 내는 본문 규격화** — 수신자별 mcdata-info(request-uri = 수신자, calling-group-id, calling-user-id), PAI·P-Asserted-Service, MSRP 배포 INVITE 헤더, 폴백 FD 본문 | SDS-2 · MSRP-2 · MSRP-6 · SDS-8 | .45 CSP |
 | 5 | **규격형 요청 수용** — 서버가 PSI 형·그룹 URI 형을 둘 다 받는 전환기를 먼저 둔다. 서버 쪽 검사(MSRP-5)는 SDK 뒤 | SDS-1 · SDS-5 · CFG-1 → SDK: REG-1 · SDS-3 · MSRP-1 · SDS-10 | .45 CSP → SDK |

@@ -31,6 +31,8 @@ public:
 	bool DoGet( const char * pszUrl, std::string & strOutputContentType, std::string & strOutputBody );
 	bool DoGet( const char * pszUrl, const char * pszInputContentType, const char * pszInputBody, std::string & strOutputContentType, std::string & strOutputBody );
 	bool DoGet( const char * pszUrl, HTTP_HEADER_LIST * pclsHeaderList, std::string & strOutputContentType, std::string & strOutputBody );
+	/** HTTP HEAD — 응답 헤더만 받는다(본문 없음, RFC 9110 §9.3.2). 상태 코드는 GetStatusCode. 2xx 면 true. */
+	bool DoHead( const char * pszUrl, HTTP_HEADER_LIST * pclsHeaderList, HTTP_HEADER_LIST & clsResponseHeaders );
 	bool DoPost( const char * pszUrl, const char * pszInputContentType, const char * pszInputBody, std::string & strOutputContentType, std::string & strOutputBody );
 	bool DoPost( const char * pszUrl, HTTP_HEADER_LIST * pclsHeaderList, const char * pszInputContentType, const char * pszInputBody, std::string & strOutputContentType, std::string & strOutputBody );
 	bool DoSoap( const char * pszUrl, const char * pszSoapAction, const char * pszInputBody, std::string & strOutputBody );
@@ -43,7 +45,7 @@ private:
 	int m_iRecvTimeout;
 	int m_iStatusCode;
 
-	bool Execute( CHttpUri * pclsUri, CHttpMessage * pclsRequest, CHttpPacket * pclsPacket );
+	bool Execute( CHttpUri * pclsUri, CHttpMessage * pclsRequest, CHttpPacket * pclsPacket, bool bHeadersOnly = false );
 };
 
 #endif

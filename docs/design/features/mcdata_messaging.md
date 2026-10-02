@@ -96,7 +96,8 @@ MCDATA-AS 게이트 (모두 controlling function 검사 — SDS TS 24.282 §9.2.
    **403 `212 file referenced by file URL does not exist`**(§10.2.4.4.2 6)·7) — 1:1 FD 도 ③ 에서 같은 검사, `McDataFdPayloadCheck`).
    «이 서버의 파일» = 콘텐츠 서버 base(`Setup.McData.FdUrlBase`, 비면 CSC PublicUrl — CSP 가 FD URL 을 만들 때와 같은 값)와 scheme·
    host·port 가 같고 경로가 `/mcdata/fd/<32 hex>`(`McDataFdUrlIsOurs`). 규격 단말은 받은 URL 로 Bearer 토큰을 실어 GET 하므로(§10.2.3.1)
-   다른 호스트의 URL 은 배포하지 않는다. 파일 존재의 HEAD 확인(§6.7.3)은 §8.
+   다른 호스트의 URL 은 배포하지 않는다. 그 다음 그 URL 에 HEAD(§6.7.3.1 — CSC 내부 토큰, §4.5)로 파일이 있는지 보고 404 면 `212`, 그 밖의
+   실패(401·연결 실패·옛 CSC 405)는 확인하지 못한 것이라 배포하고 로그를 남긴다(psip `CHttpClient::DoHead`).
 1. `allow_sds`(FD 는 `allow_fd`)=false → **403 Forbidden**
 2. 발신자가 그룹 멤버가 아님 → **403 Forbidden**
 3. 발신자가 그 그룹에 제휴하지 않음 → **403 `120 user is not affiliated to this group`**(6)j) · 7)g) · 12)g))
@@ -206,7 +207,7 @@ mcdata-info `<mcdata-calling-group-id>` 를 실어 보낸다(5)). CSP `CMcDataAs
 - **존재 확인**(§6.7.3) `HEAD /mcdata/fd/{id}` — 200(본문 없음, `Content-Length`·`Content-Type`) / 404. 단말 토큰이면 GET 과 같은 수신
   제어, **제어 기능(CSP)은 내부 토큰**(`Authorization: Bearer <InternalApi.Token>` — `/internal/*` 과 같은 값, HEAD 에만 통한다)으로
   부르고 그때 응답에 `X-Cims-Fd-Group`(올린 그룹, 1:1 은 빈 값)·`X-Cims-Fd-Uploader` 가 실린다 — FILEURL 을 다른 그룹에 다시 돌리는 것을
-  거를 때 쓴다.
+  거를 때 쓸 수 있다(CSP 는 쓰지 않는다 — 그 그룹 밖 수신자는 GET 이 403 이다).
 - 저장: `{McDataFd.Dir | {Content.Dir}/mcdata_fd}/{YYYY}/{MM}/{DD}/{id}.bin` +
   `index/{id}.json`(메타 — name·size·type·group·uploader·ts). CMDP 의 media plane 저장분(§4.7)도 같은 스키마라 같은 수신 제어를 받는다.
 - **FD SIGNALLING PAYLOAD** (TS 24.282 §15.1.3): Payload IE(0x78)=FILEURL(0x04, URL 문자열),
@@ -397,9 +398,6 @@ CSP fan-out (하이브리드):
 - 멤버 단위 송신권한 — 수신전용 멤버(지금은 멤버 전원 `<mcdata-allow-transmit-data-in-this-group>` true)·멤버별 `<mcdata-max-data-in-single-request>`
 - 메시지·FD 파일 retention/purge (녹취와 공통 정리 메커니즘)
 - FD NOTIFICATION(다운로드 완료)·READ 통지
-- **FD 파일 존재 확인**(TS 24.282 §6.7.3 — 제어 기능이 FILEURL 에 HTTP HEAD, 404 면 403 `212`): CSP 는 지금 URL 이 이 서버의 콘텐츠
-  서버를 가리키는지만 본다(§4 게이트 0). 콘텐츠 서버(CSC)는 HEAD 와 공개 base URL 의 FD URL 을 낸다(§4.5) — CSP 가 내부 토큰으로
-  HEAD 를 불러 확인하는 것이 남았다(conformance_gap_plan.md S26)
 - **단말 SDK 의 규격형 업로드** — `CscClient::uploadFd` 는 간이형(query)으로 올린다. multipart/mixed + mcdata-info·`Location` 사용과
   Metadata 의 `file-selector:` 접두(TS 24.282 §15.2.17 · RFC 5547)는 conformance_gap_plan.md U05
 - **MCData 긴급 경보**(TS 24.282 §16.2 · 애드혹 그룹 경보 §16.2A — 미지원): 그룹 문서가 `<mcdata-allow-emergency-alert>` 를 싣지 않으므로 발령은 늘 미인가다

@@ -116,6 +116,11 @@ bool CHttpPacket::IsCompleted( )
 	return false;
 }
 
+bool CHttpPacket::IsHeaderCompleted( )
+{
+	return m_eStatus != H_HPS_HEADER;
+}
+
 // HTTP 메시지 객체를 초기화시킨다.
 void CHttpPacket::ClearMessage( )
 {

@@ -161,6 +161,39 @@ bool CHttpClient::DoGet( const char * pszUrl, HTTP_HEADER_LIST * pclsHeaderList,
 	return false;
 }
 
+// HTTP HEAD 명령을 실행한다 — 응답 헤더만 받는다(본문을 기다리지 않는다).
+bool CHttpClient::DoHead( const char * pszUrl, HTTP_HEADER_LIST * pclsHeaderList, HTTP_HEADER_LIST & clsResponseHeaders )
+{
+	clsResponseHeaders.clear();
+	m_iStatusCode = 0;
+
+	if( pszUrl == NULL )
+	{
+		CLog::Print( LOG_ERROR, "%s pszUrl is null", __FUNCTION__ );
+		return false;
+	}
+
+	CHttpUri clsUri;
+	if( clsUri.Parse( pszUrl, strlen( pszUrl ) ) == -1 )
+	{
+		CLog::Print( LOG_ERROR, "%s clsUri.Parse(%s) error", __FUNCTION__, pszUrl );
+		return false;
+	}
+
+	CHttpMessage clsRequest;
+	CHttpPacket clsPacket;
+
+	clsRequest.SetRequest( "HEAD", &clsUri );
+	if( pclsHeaderList )
+	{
+		clsRequest.m_clsHeaderList.insert( clsRequest.m_clsHeaderList.end(), pclsHeaderList->begin(), pclsHeaderList->end() );
+	}
+
+	const bool bRes = Execute( &clsUri, &clsRequest, &clsPacket, true );
+	clsResponseHeaders = clsPacket.GetHttpMessage()->m_clsHeaderList;
+	return bRes;
+}
+
 // HTTP POST 명령을 실행한다.
 bool CHttpClient::DoPost( const char * pszUrl, const char * pszInputContentType, const char * pszInputBody, std::string & strOutputContentType, std::string & strOutputBody )
 {
@@ -259,7 +292,7 @@ int CHttpClient::GetStatusCode()
 }
 
 // HTTP 서버에 연결하여서 HTTP 요청 메시지를 전송한 후, HTTP 응답 메시지를 수신한다.
-bool CHttpClient::Execute( CHttpUri * pclsUri, CHttpMessage * pclsRequest, CHttpPacket * pclsPacket )
+bool CHttpClient::Execute( CHttpUri * pclsUri, CHttpMessage * pclsRequest, CHttpPacket * pclsPacket, bool bHeadersOnly )
 {
 	char * pszBuf = NULL;
 	int iBufLen, n;
@@ -306,6 +339,20 @@ bool CHttpClient::Execute( CHttpUri * pclsUri, CHttpMessage * pclsRequest, CHttp
 		}
 
 		CLog::Print( LOG_NETWORK, "SSLConnect(%s:%d) success", pclsUri->m_strHost.c_str(), pclsUri->m_iPort );
+
+		// 헤더만 받는 요청(HEAD)은 TLS 수신에도 시한을 건다 — 서버가 연결을 유지하면 SSL_read 가 끝나지 않는다.
+		if( bHeadersOnly && m_iRecvTimeout > 0 )
+		{
+#ifdef WIN32
+			int iTimeoutMs = m_iRecvTimeout * 1000;
+			setsockopt( hSocket, SOL_SOCKET, SO_RCVTIMEO, (char *)&iTimeoutMs, sizeof(iTimeoutMs) );
+#else
+			struct timeval sttTime;
+			sttTime.tv_sec = m_iRecvTimeout;
+			sttTime.tv_usec = 0;
+			setsockopt( hSocket, SOL_SOCKET, SO_RCVTIMEO, &sttTime, sizeof(sttTime) );
+#endif
+		}
 	}
 
 	if( psttSsl )
@@ -354,6 +401,7 @@ bool CHttpClient::Execute( CHttpUri * pclsUri, CHttpMessage * pclsRequest, CHttp
 		}
 
 		if( pclsPacket->IsCompleted() ) break;
+		if( bHeadersOnly && pclsPacket->IsHeaderCompleted() ) break;
 	}
 
 	m_iStatusCode = pclsResponse->m_iStatusCode;

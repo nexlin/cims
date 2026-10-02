@@ -10,6 +10,7 @@
 #include "CallDir.h"
 #include "CscEndpointCache.h"
 #include "DbManager.h"
+#include "HttpClient.h"
 #include "Log.h"
 #include "SipServerSetup.h"
 #include "SipStatusCode.h"
@@ -116,9 +117,28 @@ int McDataFdPayloadCheck( const CMcDataSdsInfo &clsInfo, int *piWarn ) {
     } else {
         const std::string strBase =
             gclsSetup.m_strFdUrlBase.empty() ? gclsCscEndpointCache.GetServiceUrlBase() : gclsSetup.m_strFdUrlBase;
-        // 7)b) 이 서버의 media storage function 파일 — 다른 호스트는 우리 저장소에 없는 파일이다. 파일 존재의 HEAD 확인
-        //   (§6.7.3)은 콘텐츠 서버의 HEAD 지원 뒤(conformance_gap_plan.md S26)
-        if ( !McDataFdUrlIsOurs( clsInfo.m_strFileUrl, strBase ) ) *piWarn = 212;
+        // 7)b) 이 서버의 media storage function 파일 — 다른 호스트는 우리 저장소에 없는 파일이다
+        if ( !McDataFdUrlIsOurs( clsInfo.m_strFileUrl, strBase ) ) {
+            *piWarn = 212;
+        } else if ( !gclsSetup.m_strCscInternalToken.empty() ) {
+            // 그 파일이 있는가 — §6.7.3.1 HEAD(그 URL 그대로, access token). 제어 기능의 자격 = CSC 내부 API
+            // 토큰(콘텐츠 서버가
+            //   HEAD 에만 받는다 — mcdata_messaging.md §4.5). 404 = 없음 → 212. 그 밖(401·연결 실패·옛 CSC 405)은
+            //   확인하지 못한 것이라 막지 않는다 — 배포는 하고 로그를 남긴다.
+            HTTP_HEADER_LIST clsHeaders, clsResp;
+            clsHeaders.push_back(
+                CHttpHeader( "Authorization", ( "Bearer " + gclsSetup.m_strCscInternalToken ).c_str() ) );
+            CHttpClient clsClient;
+            const int iSec = ( gclsSetup.m_iCscTimeoutMs + 999 ) / 1000;
+            clsClient.SetRecvTimeout( iSec < 1 ? 1 : iSec );
+            clsClient.DoHead( clsInfo.m_strFileUrl.c_str(), &clsHeaders, clsResp );
+            const int iStatus = clsClient.GetStatusCode();
+            if ( iStatus == 404 )
+                *piWarn = 212;
+            else if ( iStatus != 200 )
+                CLog::Print( LOG_ERROR, "McDataGate: FD url(%s) HEAD %d — 파일 존재를 확인하지 못함(배포는 한다)",
+                             clsInfo.m_strFileUrl.c_str(), iStatus );
+        }
     }
     if ( *piWarn == 0 ) return 0;
     CLog::Print( LOG_INFO, "McDataGate: FD payloads=%d non-fileurl=%d url(%s) — 403 (%d)", clsInfo.m_iFdPayloadCount,

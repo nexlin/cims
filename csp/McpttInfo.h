@@ -177,7 +177,7 @@ inline std::string McpttInfoDocument( const std::string &strParams ) {
            "</mcpttinfo>\r\n";
 }
 
-/** MCPTT/MCData Warning 헤더 값 (TS 24.379 §4.4·TS 24.282 §4.4) — RFC 3261 §20.43 warning-value =
+/** MCPTT/MCData Warning 헤더 값 (TS 24.379 §4.4·TS 24.282 §4.9) — RFC 3261 §20.43 warning-value =
  *  warn-code(399 — 기타 경고) SP warn-agent SP warn-text, warn-text = DQUOTE mcptt-warn-code SP mcptt-warn-text DQUOTE.
  *  pszAgent = 경고를 붙이는 서버(hostport 또는 pseudonym). 비면 "cims". */
 inline std::string McpttWarning( int iCode, const char *pszText, const std::string &strAgent = "" ) {

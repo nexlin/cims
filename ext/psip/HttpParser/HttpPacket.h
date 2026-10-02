@@ -38,6 +38,8 @@ public:
 
 	bool AddPacket( const char * pszPacket, int iPacketLen );
 	bool IsCompleted( );
+	/** 헤더까지 받았는가 — 본문 없는 응답(HEAD, RFC 9110 §9.3.2)은 여기서 끝난다. */
+	bool IsHeaderCompleted( );
 	void ClearMessage( );
 
 	CHttpMessage * GetHttpMessage( );
