@@ -109,7 +109,7 @@
 | **S21** | 발언권 확장 형식·수신 전용 멤버 | FCS-6 · FCS-10 · FCS-11 · FCS-12 · FCS-13 · FCS-14 · FCS-15 · FCS-16 · SDP-2 / TCS-10 | B6 · C3 · D1 | 2 | S20 | — | U08(SDK 코덱 생성물) · C05(그룹 문서 요소) | 대기 |
 | **S22** | MCVideo 송출·수신 제어 서버 세부 | TCS-1 · TCS-2 · TCS-3 · TCS-5 · TCS-7 · TCS-8 · TCS-9 · TCS-11 · RCS-2 | C4 · D5 | 2 | — | — | U08(TCU-1) | 대기 |
 | **S23** | MCVideo 호 세부(초대 offer·T5·conference·PSI) | VGC-8 · VGC-9 · VGC-10 · VGC-13 | C3 · D1 | 1 | — | — | — | 대기 |
-| **S24** | MCData 미디어 평면 수명·색인·재전달 | MCData MSRP-3 · SDS-9 · DISP-1 | C3 | 1 | X00(TS 24.582) | — | U05(MSRP-4) | 대기 |
+| **S24** | MCData 미디어 평면 수명·색인·재전달 | MCData MSRP-3 · SDS-9 · DISP-1 | C3 | 1 | — | — | U05(MSRP-4) | 대기 |
 | **S25** | 서비스 설정·인가(poc-settings) | REG-2 · REG-4 / MCData REG-3 · REG-4 / VREG-2 | B3 · C1 · D1 | 2 | — | D6 | U09(VREG-1) · U03(Answer-Mode) | 대기 |
 
 ### 5.2 .45 — 설정 평면 서버 CSC (7 WP · 52 항목 · ≈ 9 세션)
@@ -157,7 +157,7 @@ W01 이 주인인 항목은 CMS-13(CMS 변경 구독, 지금 5분 폴링) 하나
 
 | WP | 이름 | 호스트 | 세션 | 할 일 | 상태 |
 |---|---|---|---|---|---|
-| **X00** | 준비 | .45 | 1 | ① 규격 원문 = `/mnt/cims/dev_share/spec/`(README 에 판·없는 것) — 남은 것은 TS 24.582·23.282 받기(3GPP·ETSI 가 .45 망에서 봇 확인 페이지를 돌려준다 — 브라우저로) ② .48 worktree `/home/cims/work/.wt-gap` 와 첫 빌드, .48 배포 자격(사용자) ③ 시험 신원 — .48 `cimsue-cli`(M2 runbook 의 test023~025·gmv1/gmv2 방식으로 MCPTT·MCData 몫) · 계측기 시나리오 목록 | 대기 |
+| **X00** | 준비 | .45 | 1 | ① 규격 원문 = `/mnt/cims/dev_share/spec/`(README 에 판·없는 것 — 갖춰짐) ② .48 worktree `/home/cims/work/.wt-gap` 와 첫 빌드, .48 배포 자격(사용자) ③ 시험 신원 — .48 `cimsue-cli`(M2 runbook 의 test023~025·gmv1/gmv2 방식으로 MCPTT·MCData 몫) · 계측기 시나리오 목록 | 대기 |
 | **X01** | 문서 정정 잔여 | .45 | 1 | 세 목록 §5 중 항목 번호가 없는 줄(근거 절 번호·Warning 절 §4.4→§4.9·mcdata_messaging §3·§5 파일 이름·mcx_identity_scope §10·fixtures README N2·mcvideo.md §9 hang-time 메모) + 세 목록 §4 «미구현 목록에 빠진 기능» 을 정본 미구현 목록(mcptt_standard_conformance §0-R · mcdata_messaging §8 · mcvideo §6 V8)으로 옮긴다. 코드 주석 정정(`csp/CscfModule.cpp` N2 주석 등)은 그 파일을 고치는 WP(S13)가 함께 한다 | 대기 |
 
 ## 6. 순서 — 웨이브
@@ -229,7 +229,7 @@ flowchart LR
 | R5 | 두 호스트가 같은 문서를 동시에 고침 | 행·절 단위, pull 직전·커밋 직후 |
 | R6 | .48 테스트베드를 팀원과 같이 씀 | 배포 알림, 팀원 run 중에는 대기 |
 | R7 | 원문 판 차이(V18·V19·V20) | X00 README 에 판 고정, 다르면 최신 판으로 다시 본다 |
-| R8 | TS 24.582(MCData 미디어 평면) 원문 없음 | X00 에서 받기 전에는 S24 를 열지 않는다 |
+| R8 | TS 24.582 원문이 V17.1.0 으로 TS 24.282(V18·V19)보다 오래됐다 | S24·U05 재확인에서 판 차이로 보이면 새 판을 받아 다시 본다 |
 | R9 | 호 모델(D1) 변경의 운용 영향 | 현장 앱·관제 운용 시나리오를 S14 재확인에서 먼저 돌려 본다 |
 
 ## 11. 완료 기준
