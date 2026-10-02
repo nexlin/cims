@@ -265,9 +265,13 @@ ue-init-config 의 주소류(IdMS/CMS/GMS/KMS/XCAP 루트)의 base 는 CSC 설�
 바뀐다([mcptt_standard_conformance.md §R4-1](../design/features/mcptt_standard_conformance.md)). 단말 타이머 `<Timers>` 기본값 =
 T100 1 · T101 1 · T103 4 · T104 4 · T132 2 초(TS 24.380 표 11.1.1-1).
 
-**변경 통지(xcap-diff)** — cms 축(`sip:cms_psi@<domain>`)을 구독한 단말은 문서가 바뀌면 xcap-diff NOTIFY(RFC 5875)를 받는다.
-user-profile·service-config 는 `<document sel="org.3gpp.mcptt.user-profile/users/tel:<id>/user-profile">`·
-`<document sel="org.3gpp.mcptt.service-config/users/tel:<id>/service-config">`, UE initial configuration 은 그 단말의 문서 선택자
+**변경 통지(xcap-diff)** — cms 축(`sip:cms_psi@<domain>`)을 구독한 단말은 문서가 바뀌면 xcap-diff NOTIFY(RFC 5875)를 받는다. 본문은
+**바뀐 문서만** 싣는다(RFC 5874 — 구독 직후 첫 통지만 MCPTT 두 문서). MCPTT user profile·service config 는
+`<document sel="org.3gpp.mcptt.user-profile/users/tel:<id>/user-profile">`·
+`<document sel="org.3gpp.mcptt.service-config/users/tel:<id>/service-config">`, MCVideo user profile·service configuration 은
+`<document sel="org.3gpp.mcvideo.user-profile/users/tel:<id>/mcvideo-user-profile-1.xml">`(MCPTT user profile 과 함께 — 사용자 변경·그룹
+멤버십 변경)·`<document sel="org.3gpp.mcvideo.service-config/global/mcvideo-service-config.xml">`(TS 24.484 §9.3.2.12·§9.4.2.12), 그룹
+변경도 멤버의 user profile 통지를 낸다(`<MCPTTGroupInfo>`·`<ImplicitAffiliations>` 가 멤버십에서 나온다 — §8.3.2.12). UE initial configuration 은 그 단말의 문서 선택자
 `<document new-etag="…" sel="org.3gpp.mcptt.ue-init-config/users/sip:<MCS UE ID>/<MCS UE ID>"/>` 하나(TS 24.484 §7.2.1.1·§7.2.2.12 —
 MCS UE ID = 단말 instance ID, 등록 Contact `+sip.instance`). 단말은 그 선택자의 문서를 If-None-Match 로 다시 받는다.
 

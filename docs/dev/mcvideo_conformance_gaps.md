@@ -49,10 +49,9 @@ MCPTT 쪽 같은 뿌리의 결함은 [mcptt_conformance_gaps.md](mcptt_conforman
 | 송출 제어 — 서버 (TCS) | 4 | — | — | 2 | 2 |
 | 송출 제어 — 단말 (TCU) | 1 | — | — | 1 | — |
 | 그룹 문서 (VGMS) | 1 | — | 1 | — | — |
-| 설정 문서·CMS (VCMS) | 1 | — | 1 | — | — |
-| **계** | **25** | **1** | **5** | **13** | **6** |
+| **계** | **24** | **1** | **4** | **13** | **6** |
 
-확인 수준 — ◎ 13 · ○ 9 · △ 3.
+확인 수준 — ◎ 12 · ○ 9 · △ 3.
 
 읽는 순서 — §2(먼저 볼 것) → §3(영역별 전체) → §4(미구현 목록에 빠진 기능) → §5(문서 정정) → §6(묶음과 순서).
 
@@ -74,7 +73,6 @@ MCPTT 쪽 같은 뿌리의 결함은 [mcptt_conformance_gaps.md](mcptt_conforman
 | VGC-2 | late call entry 가 없다 — 개시 뒤에 제휴·재등록한 멤버는 진행 중 prearranged 영상 호를 받지 못한다 |
 | VAFF-2 | 제휴 판정이 사용자 단위다 — 제휴하지 않은 클라이언트로 개시·합류가 되고, 제휴한 단말 대신 마지막 등록 단말이 초대된다 |
 | VGMS-1 | 그룹 문서 PUT 이 빠진 MCVideo 요소를 «기존값 유지» 로 읽는다 — 규격 기본값(없음 = chat·보호 켬·conference 불허)과 반대로 저장된다 |
-| VCMS-1 | MCVideo user profile·service config 가 xcap-diff 통지 대상에 없다 — 구독한 규격 단말이 변경을 모른다 |
 
 **한두 줄로 끝나는 것**
 
@@ -164,9 +162,7 @@ MCPTT 쪽 같은 뿌리의 결함은 [mcptt_conformance_gaps.md](mcptt_conforman
 
 ### 3.12 설정 문서·CMS (VCMS) — TS 24.484 §7.2 · §9
 
-| # | 급 | 대상 | 규격 | CIMS 지금 | 영향 | 확인 |
-|---|---|---|---|---|---|---|
-| VCMS-1 | B | CSP·CSC | §9.3.2.12 · §9.4.2.12 — 두 MCVideo 문서는 변경 구독(§6.3.13.3)을 지원한다 (shall) | cms xcap-diff 본문 `sel` 이 MCPTT user-profile·service-config 둘로 고정이다(`csp/CspServer.cpp:723-729`). MCVideo service config 가 바뀌어도(`csc/src/services/mcptt.py:360-363` → `SERVICE_CONFIG_CHANGED`) 같은 MCPTT `sel` 로 통지하고(`csp/CspServer.cpp:1429-1437`), MCVideo 자격·N2·N6·그룹 목록 변경은 USER_CHANGED 의 MCPTT `sel` 만 남는다 | MCVideo 문서를 구독한 규격 단말이 변경을 알 수 없다(MCPTT GMS-14·15 의 형식 문제와 별개로 대상 자체가 빠졌다) | ◎ |
+남은 항목 없음 — 두 MCVideo 문서의 변경 통지는 [mcptt_api.md](../api/mcptt_api.md) «변경 통지».
 
 ## 4. 미구현 기능 목록에 빠진 것
 
@@ -179,7 +175,6 @@ MCPTT 쪽 같은 뿌리의 결함은 [mcptt_conformance_gaps.md](mcptt_conforman
 | 문서 | 적힌 것 | 실제 | 항목 |
 |---|---|---|---|
 | mcvideo.md §5.1 CMS 단락 · cmp_media_api.md §7.9 `tc_timers` 행 · `csc/src/services/mcptt.py:357` 주석 | CSP 가 `/internal/mcvideo/service-config` 를 받고, T1·T5 밖의 타이머는 service configuration 값 | CSP 에 그 코드가 없고 T1·T5 만 보낸다 — CMP 는 K5 기본값 | TCS-1 |
-| mcvideo.md §5.1 «xcap-diff 통지 축에 두 문서를 싣는 것은 CSP 몫(§5.2)» · §6 V1 «xcap-diff» | (구현된 것처럼 읽힌다) | §5.2 에 구현 서술이 없고 코드에도 없다 — «남은 것» 으로 적어야 한다 | VCMS-1 |
 | mcvideo.md §5.3.1 Transmission Request 행 · cmp_media_api.md §7.9 `recv_only` | 그룹 문서 `<on-network-recvonly>` 면 거절 #5 | 그룹 문서에 그 요소가 없고 CSP 가 보내지 않는다 | TCS-10 |
 | mcvideo.md §5.5 PTT 단말 | «빈 집합 = Expires 0 = 그 사용자 제휴 전부 해제» 를 피하는 이유로 적음 | 그 서버 동작이 규격(클라이언트 단위 해제)과 다르다 — 편차로 적거나 서버를 고친다 | VAFF-1 |
 | mcvideo.md §5.5 PTT 단말 | «영상 n» 목록(이름·기능 별칭·경과) | 별칭이 서버에서 전달되지 않아 늘 비어 있다 | TCS-2 |
@@ -193,7 +188,7 @@ MCPTT 쪽 같은 뿌리의 결함은 [mcptt_conformance_gaps.md](mcptt_conforman
 |---|---|---|---|
 | 4 | **제휴를 클라이언트 단위로** — 행 키 통일, 클라이언트 단위 해제·판정, 암묵 제휴 취소·완료 시점. MCPTT 묶음 8(AFF-1~8)과 한 작업 | VAFF-1 · VAFF-2 · VAFF-4 · VAFF-5 · VGC-11 | .45 CSP |
 | 5 | **진행 중 호와 제휴·그룹 변경** — late call entry, 제휴 해제·멤버 제거·서비스 끔 → BYE, 제휴 행 정리. MCPTT 묶음 9·10 의 결정과 같이 | VGC-2 · VGC-12 · VAFF-7 · VAFF-6(결정) | 결정 → .45 CSP |
-| 6 | **service configuration 값 결선** — CSP 가 `/internal/mcvideo/service-config` 를 받아 `tc_timers` 전부를 싣고 변경을 통지받는다, 관제 앱이 MCVideo service config 를 받아 계정 타이머로 싣는다(현장 앱·Kotlin 파사드는 한다, C API 는 `cimsue_engine_set_tc_timers`), xcap-diff `sel` 에 MCVideo 문서 | TCS-1 · TCU-1 · VCMS-1 | .45 CSP·SDK |
+| 6 | **service configuration 값 결선** — CSP 가 `/internal/mcvideo/service-config` 를 받아 `tc_timers` 전부를 싣고 변경을 통지받는다, 관제 앱이 MCVideo service config 를 받아 계정 타이머로 싣는다(현장 앱·Kotlin 파사드는 한다, C API 는 `cimsue_engine_set_tc_timers`) | TCS-1 · TCU-1 | .45 CSP·SDK |
 | 7 | **코덱 선호의 한 줄기** — 그룹 선호 = 서버 집행 코덱(CSC·콘솔이 검증). 초대 offer 가 그 값을 쓴다(단말 offer 는 지원 encoding 을 전부 싣는다) | VGC-8 | .48 CSP |
 | 8 | **그룹 문서 PUT 해석** — 없음의 뜻(§7.2.8) | VGMS-1 · VGC-10(CSC 기본값 몫) | .45 CSC |
 | 9 | **단말 호 절차** — poc-settings §7.2.3 송신(+ 서버 §7.3.4 수신과 짝 — 받은 Answer-Mode Indication 으로 멤버 초대의 `Answer-Mode` 를 정한다, 지금은 늘 `Auto`), 제휴 상태 구독, preconfigured-group-use-only, 재합류 UI | VREG-1 · VGU-5 · VGU-6 · VAFF-8 | .45 SDK·현장 → Windows(관제 앱) |

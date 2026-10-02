@@ -251,7 +251,9 @@ MCPTT 그룹 호는 **음성과 floor 만** 싣는다(TS 24.379·24.380 — MCPT
   MCVideo 그룹 멤버가 아닌 자격자는 `<MCVideoGroupInfo>` 가 없고 긴급 대상 entry 는 본인 URI 다(그룹 호를 할 수 없는 퇴화 경우). service config =
   `<signalling-protection>`·`<protection-between-mcvideo-servers>` false 명시(둘 다 없으면 true — §9.4.2.7 NOTE 1) · Resource-Priority(MCPTT 네임스페이스 재사용, TS 24.281 §6.2.8.1.16) · `<tc-timers-counters-R14>` 17요소 전부
   (설정 `McVideoServiceConfig.*`, 기본값 정본 = [mcvideo_tc_defs.yaml](mcvideo_tc_defs.yaml)). CSP 는 같은 문서를 `/internal/mcvideo/service-config` 로 받는다.
-  xcap-diff 통지 축에 두 문서를 싣는 것은 CSP 몫(§5.2).
+  xcap-diff 통지 = CSP 가 cms 구독에 싣는다 — 사용자 변경·그룹 멤버십 변경은 MCVideo user profile(`…/users/tel:<id>/mcvideo-user-profile-1.xml`)을 MCPTT
+  user profile 과 함께, MCVideo service config 변경(`SERVICE_CONFIG_CHANGED` uri `mcvideo`)은 `org.3gpp.mcvideo.service-config/global/mcvideo-service-config.xml`
+  하나(§9.3.2.12·§9.4.2.12, [mcptt_api.md](../../api/mcptt_api.md) «변경 통지»).
 - **ue-init-config** — `<anyExt><MCVideo-Service-Details>`(MCPTT → MCVideo → MCData 순, 설정 `UeInitConfig.ServiceDetails.McVideo.{Enable,ServerUri}` —
   기본 끔(CSP `Roles.MCVIDEO` 를 켠 사이트만), 기본 PSI `sip:mcvideo_psi@<PTT 도메인>`).
 - **IdMS** — `SCOPE_CATALOG` 에 `3gpp:mc:video_*` 넷. **사용자 단위 인가** — MCVideo 넷은 자격 행이 있는 사용자에게만 준다(`grant_scope(…, mcptt_id)`).

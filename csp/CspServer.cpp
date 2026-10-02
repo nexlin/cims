@@ -721,12 +721,11 @@ static std::string BuildXcapDiffBody( const SubscriptionInfo &sub, const std::st
                        "tel:" + sub.strUserId + "/tel:" + strChangedId + "\"/>\r\n";
         }
     } else {
-        // cms: user-profile
-        strBody += "  <document new-etag=\"" + etag + "\" sel=\"org.3gpp.mcptt.user-profile/users/" +
-                   "tel:" + sub.strUserId + "/user-profile\"/>\r\n";
-        // cms: service-config
-        strBody += "  <document new-etag=\"" + etag + "\" sel=\"org.3gpp.mcptt.service-config/users/" +
-                   "tel:" + sub.strUserId + "/service-config\"/>\r\n";
+        // cms 초기 통지 — user-profile · service-config (바뀐 문서 하나의 통지는 Send*DocNotify 가 본문을 따로 짓는다)
+        strBody +=
+            "  <document new-etag=\"" + etag + "\" sel=\"" + CspMcpttUserProfileSel( sub.strUserId ) + "\"/>\r\n";
+        strBody +=
+            "  <document new-etag=\"" + etag + "\" sel=\"" + CspMcpttServiceConfigSel( sub.strUserId ) + "\"/>\r\n";
     }
 
     strBody += "</xcap-diff>\r\n";
@@ -1392,6 +1391,8 @@ void SendPttDialogEventNotify( const std::string &strWatchedAor, const std::stri
  *   받는 사람은 호출자가 정한다(재적재 전 멤버 ∪ 후 멤버 — CGroupCallService::ReloadGroupMap). 그룹 맵을 여기서 다시
  *   찾지 않는다: 새 그룹은 재적재 전 맵에 없고, 삭제된 그룹·빠진 멤버는 재적재 후 맵에 없다.
  */
+void SendUserDocNotify( const std::string &strUri, const std::string &strEtag );
+
 void SendGroupDocNotify( const std::string &strGroupId, const std::set<std::string> &setUsers,
                          const std::string &strEtag ) {
     int nSent = 0;
@@ -1405,6 +1406,10 @@ void SendGroupDocNotify( const std::string &strGroupId, const std::set<std::stri
     }
     CLog::Print( LOG_INFO, "SendGroupDocNotify: Group=%s ETag=%s users=%d notified=%d", strGroupId.c_str(),
                  strEtag.c_str(), (int)setUsers.size(), nSent );
+    // 사용자 문서도 바뀌었다 — user profile 의 <MCPTTGroupInfo>·<ImplicitAffiliations>·(MCVideo) 그룹 목록은 그룹
+    // 멤버십에서
+    //   나온다(TS 24.484 §8.3.2.12 · §9.3.2.12 — 변경 구독 지원). 문서 ETag 는 CSC 몫이라 싣지 않는다(new-etag 없음).
+    for ( const auto &strUser : setUsers ) SendUserDocNotify( strUser, "" );
 }
 
 /**
@@ -1416,25 +1421,38 @@ void SendUserDocNotify( const std::string &strUri, const std::string &strEtag ) 
     if ( strId.rfind( "tel:", 0 ) == 0 || strId.rfind( "sip:", 0 ) == 0 ) strId = strId.substr( 4 );
     std::list<SubscriptionInfo> subList;
     gclsSubscriptionManager.GetSubscriptionsByUser( strId, "cms", subList );
+    if ( subList.empty() ) return;
+    // 바뀐 문서 = 그 사용자의 user profile — MCPTT, MCVideo 역할이면 MCVideo user profile 도(USER_CHANGED 가 MCVideo
+    // 자격·
+    //   N2·N6 도 싣는다 — TS 24.484 §9.3.2.12). service config 는 사용자 문서가 아니다(SendServiceConfigNotify).
+    std::vector<std::string> vecSel{ CspMcpttUserProfileSel( strId ) };
+    if ( gclsSetup.m_bRoleMcVideo && gclsDbManager.HasMcVideoTables() )
+        vecSel.push_back( CspMcVideoUserProfileSel( strId ) );
+    const std::string strBody = CspXcapDiffDocsBody( gclsCscEndpointCache.GetXcapRoot(), vecSel, strEtag );
     for ( auto &sub : subList ) {
-        SendNotifyToSubscriber( sub, strEtag, strId );
+        SendNotifyToSubscriber( sub, strEtag, strId, NULL, NULL, &strBody );
     }
     CLog::Print( LOG_INFO, "SendUserDocNotify: User=%s ETag=%s notified=%d", strId.c_str(), strEtag.c_str(),
                  (int)subList.size() );
 }
 
 /**
- * @brief SERVICE_CONFIG_CHANGED: service-config(TS 24.484)는 시스템 전역 문서 1건이라
- *   특정 사용자가 아니라 cms 구독자 **전원**에게 xcap-diff NOTIFY 를 보낸다.
- *   본문은 cms 공통(BuildXcapDiffBody)이라 user-profile sel 도 함께 실리지만, 단말의
- *   ETag 캐시(If-None-Match)가 변화 없는 문서를 304 로 거르므로 무해하다.
+ * @brief SERVICE_CONFIG_CHANGED: service configuration(TS 24.484 §8.4 MCPTT · §9.4 MCVideo)은 시스템 전역 문서 1건이라
+ *   특정 사용자가 아니라 cms 구독자 **전원**에게 xcap-diff NOTIFY 를 보낸다. 본문 = 바뀐 그 문서 하나(RFC 5874 —
+ *   strUri "mcvideo" 면 MCVideo service configuration(§9.4.2.12), 아니면 MCPTT service configuration).
  */
-void SendServiceConfigNotify( const std::string &etag ) {
+void SendServiceConfigNotify( const std::string &etag, const std::string &strUri ) {
+    const bool bMcVideo = strUri == "mcvideo";
+    if ( bMcVideo && !gclsSetup.m_bRoleMcVideo ) return;
     std::list<SubscriptionInfo> subList;
     gclsSubscriptionManager.GetSubscriptionsByEvent( "cms", subList );
-    CLog::Print( LOG_INFO, "SendServiceConfigNotify: subs=%d ETag=%s", (int)subList.size(), etag.c_str() );
+    CLog::Print( LOG_INFO, "SendServiceConfigNotify: doc=%s subs=%d ETag=%s", bMcVideo ? "mcvideo" : "mcptt",
+                 (int)subList.size(), etag.c_str() );
+    const std::string strXcapRoot = gclsCscEndpointCache.GetXcapRoot();
     for ( auto &sub : subList ) {
-        SendNotifyToSubscriber( sub, etag, "" );
+        const std::string strBody = CspXcapDiffDocBody(
+            strXcapRoot, bMcVideo ? CspMcVideoServiceConfigSel() : CspMcpttServiceConfigSel( sub.strUserId ), etag );
+        SendNotifyToSubscriber( sub, etag, "", NULL, NULL, &strBody );
     }
 }
 

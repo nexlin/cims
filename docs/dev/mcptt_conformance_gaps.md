@@ -220,7 +220,7 @@ CSP 는 참여 기능과 제어 기능을 겸한다.
 
 | # | 급 | 대상 | 규격 | CIMS 지금 | 영향 | 확인 |
 |---|---|---|---|---|---|---|
-| CMS-5 | B | CSC·CSP | §8.3.2.12 — user profile 문서의 변경을 구독자에게 통지 | 문서의 `<MCPTTGroupInfo>`·`<ImplicitAffiliations>`·`<PrivateCallList>` 는 그룹 멤버십에서 나오는데, 그룹 변경은 `GROUP_CHANGED`(gms 구독자 통지)만 낸다. `UserProfile.*` 설정 재적재도 통지가 없다(`mcptt.py:364-369`) | user profile 을 그룹 목록의 원천으로 쓰는 규격 단말은 편성 변경을 재로그인 전까지 모른다 | ○ |
+| CMS-5 | B | CSC·CSP | §8.3.2.12 — user profile 문서의 변경을 구독자에게 통지 | (그룹 멤버십 변경은 CSP 가 멤버의 cms 구독에 user profile 통지를 낸다 — S19.) `UserProfile.*` 설정 재적재에는 통지가 없다(`mcptt.py:364-369` — CSC 가 이벤트를 내지 않는다) | 운영자가 user profile 기본값(`UserProfile.*`)을 바꾸면 구독한 단말이 재로그인 전까지 모른다 | ○ |
 | CMS-13 | C | 관제 | §5.1 · §4.2.2.1.1 — 단말은 설정 문서의 변경을 구독한다 | Windows 관제 앱은 gms 축만 구독하고 CMS 는 5분 폴링 — `DispatchSession.cs:515-556` | 인가 변경이 최대 5분 늦게 버튼에 반영된다 | ○ |
 
 ### 3.13 신원 관리 (IDM) — TS 24.482 · TS 33.180 부록 B

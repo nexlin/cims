@@ -7,7 +7,8 @@
 //   TNG2 는 <emergency-call><group-time-limit>(§6.3.3.1.16, 없으면 -1).
 //   개별 호·애드혹 그룹 호의 세션 타이머(`ParseCallTimers` — <private-call>·<anyExt><adhoc-group-call>, TS 24.484 §8.4.2.1)와
 //   호 종류별 T4·최대 시간 선택(`CspSessionT4Sec`·`CspSessionMaxDurationSec` — TS 24.380 표 11.1.3-1 · TS 24.379 §6.3.8 ·
-//   §17.4.2.2 13)), UE initial configuration 변경 통지의 문서 선택자(`CspUeInitConfigSelector` — §7.2.1.1)·xcap-diff 본문.
+//   §17.4.2.2 13)), UE initial configuration 변경 통지의 문서 선택자(`CspUeInitConfigSelector` — §7.2.1.1)·xcap-diff 본문(바뀐 문서만 — CMS 문서
+//   선택자 `CspMcpttUserProfileSel`·`CspMcVideoUserProfileSel`·`CspMcVideoServiceConfigSel`).
 //   빌드·실행은 S1-UNIT-CSP(verify/lib/items/stage1/unit_csp.py)가 수행한다.
 #include "CspServiceConfig.h"
 #include <cstdio>
@@ -116,5 +117,12 @@ int main(){
   CK("xcap-diff body",xd.find("<xcap-diff xmlns=\"urn:ietf:params:xml:ns:xcap-diff\" xcap-root=\"https://csc:4430/\">")!=std::string::npos &&
      xd.find("<document new-etag=\"e1\" sel=\"org.3gpp.mcptt.ue-init-config/users/sip:a/a\"/>")!=std::string::npos);
   CK("xcap-diff no etag",CspXcapDiffDocBody("r","s","").find("<document sel=\"s\"/>")!=std::string::npos);
+  // 바뀐 문서만 싣는다(RFC 5874) — 사용자 문서 = MCPTT·MCVideo user profile, MCVideo service config 는 전역 문서(S19 VCMS-1·CMS-5)
+  const std::string xu = CspXcapDiffDocsBody("r",{CspMcpttUserProfileSel("+8250"),CspMcVideoUserProfileSel("+8250")},"");
+  CK("user docs body",xu.find("<document sel=\"org.3gpp.mcptt.user-profile/users/tel:+8250/user-profile\"/>")!=std::string::npos &&
+     xu.find("<document sel=\"org.3gpp.mcvideo.user-profile/users/tel:+8250/mcvideo-user-profile-1.xml\"/>")!=std::string::npos &&
+     xu.find("service-config")==std::string::npos);
+  CK("mcvideo service config sel",CspMcVideoServiceConfigSel()=="org.3gpp.mcvideo.service-config/global/mcvideo-service-config.xml");
+  CK("mcptt service config sel",CspMcpttServiceConfigSel("+8250")=="org.3gpp.mcptt.service-config/users/tel:+8250/service-config");
   printf("%s (%d fail)\n",fail?"FAIL":"PASS",fail); return fail?1:0;
 }

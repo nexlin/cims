@@ -314,8 +314,8 @@ void CCscInterface::ProcessMessage( const std::string &strMsg, const struct sock
         // 부터
         //   CMP 로 전달), cms 구독자 전원에게 재조회를 통지한다.
         gclsCspServiceConfig.Refresh();
-        extern void SendServiceConfigNotify( const std::string &etag );
-        SendServiceConfigNotify( strEtag );
+        extern void SendServiceConfigNotify( const std::string &etag, const std::string &strUri );
+        SendServiceConfigNotify( strEtag, strUri );
     } else if ( strEvent == "UE_INIT_CONFIG_CHANGED" ) {
         // UE initial configuration(TS 24.484 §7.2) 변경 — 이 문서의 application usage 도 변경 구독을 지원한다
         //   (§7.2.2.12 → §6.3.13.3). CSP 는 값을 쓰지 않고 cms 구독 단말에 그 단말의 문서 선택자로 xcap-diff 를

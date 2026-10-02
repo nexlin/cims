@@ -33,6 +33,7 @@
 
 #include <mutex>
 #include <string>
+#include <vector>
 
 #include "McpttInfo.h"
 
@@ -351,15 +352,39 @@ inline std::string CspUeInitConfigSelector( const std::string &strMcsUeId ) {
     return "org.3gpp.mcptt.ue-init-config/users/sip:" + strId + "/" + strId;
 }
 
-/** xcap-diff 본문(RFC 5874) — 바뀐 문서 하나. strEtag 가 비면 new-etag 를 싣지 않는다. */
-inline std::string CspXcapDiffDocBody( const std::string &strXcapRoot, const std::string &strSel,
-                                       const std::string &strEtag ) {
+/** xcap-diff 본문(RFC 5874) — 바뀐 문서들(바뀐 것만 — §4.2). strEtag 가 비면 new-etag 를 싣지 않는다. */
+inline std::string CspXcapDiffDocsBody( const std::string &strXcapRoot, const std::vector<std::string> &vecSel,
+                                        const std::string &strEtag ) {
     std::string s = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n";
     s += "<xcap-diff xmlns=\"urn:ietf:params:xml:ns:xcap-diff\" xcap-root=\"" + strXcapRoot + "\">\r\n";
-    s += "  <document" + ( strEtag.empty() ? std::string() : " new-etag=\"" + strEtag + "\"" ) + " sel=\"" + strSel +
-         "\"/>\r\n";
+    for ( const auto &strSel : vecSel )
+        s += "  <document" + ( strEtag.empty() ? std::string() : " new-etag=\"" + strEtag + "\"" ) + " sel=\"" +
+             strSel + "\"/>\r\n";
     s += "</xcap-diff>\r\n";
     return s;
+}
+
+/** xcap-diff 본문(RFC 5874) — 바뀐 문서 하나. */
+inline std::string CspXcapDiffDocBody( const std::string &strXcapRoot, const std::string &strSel,
+                                       const std::string &strEtag ) {
+    return CspXcapDiffDocsBody( strXcapRoot, std::vector<std::string>{ strSel }, strEtag );
+}
+
+// ── CMS 문서 선택자 (xcap-diff sel — XCAP root 뒤 경로) ──
+//   MCPTT 두 문서는 본문 없는 구독(CIMS 단말)이 받아 온 사용자 트리 경로 그대로 — 단말은 sel 의 AUID 로 문서를 가른다.
+//   MCVideo 두 문서는 규격 이름(TS 24.484 §9.3.2.8 «mcvideo-user-profile-<index>.xml»(index 1) · §9.4.2.8·§9.4.2.9 전역
+//   «mcvideo-service-config.xml»).
+inline std::string CspMcpttUserProfileSel( const std::string &strUserId ) {
+    return "org.3gpp.mcptt.user-profile/users/tel:" + strUserId + "/user-profile";
+}
+inline std::string CspMcpttServiceConfigSel( const std::string &strUserId ) {
+    return "org.3gpp.mcptt.service-config/users/tel:" + strUserId + "/service-config";
+}
+inline std::string CspMcVideoUserProfileSel( const std::string &strUserId ) {
+    return "org.3gpp.mcvideo.user-profile/users/tel:" + strUserId + "/mcvideo-user-profile-1.xml";
+}
+inline std::string CspMcVideoServiceConfigSel() {
+    return "org.3gpp.mcvideo.service-config/global/mcvideo-service-config.xml";
 }
 
 #endif

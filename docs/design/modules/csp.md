@@ -938,10 +938,10 @@ CSP/PSP/ISP 가 4421 을 공유할 때 destination IP 로 인스턴스 구분). 
 
 | 이벤트 | 처리 |
 |--------|------|
-| `USER_CHANGED` | CspUserMap 캐시 즉시 갱신/삭제 + 그 사용자의 cms 구독에 xcap-diff NOTIFY |
-| `SERVICE_CONFIG_CHANGED` | service-config 재취득(`CCspServiceConfig::Refresh`) + cms 구독자 **전원**에게 xcap-diff NOTIFY (service-config 은 시스템 전역 문서) |
+| `USER_CHANGED` | CspUserMap 캐시 즉시 갱신/삭제 + 그 사용자의 cms 구독에 xcap-diff NOTIFY — 본문 = 바뀐 문서만(RFC 5874): MCPTT user profile, MCVideo 역할이면 MCVideo user profile 도(`SendUserDocNotify` — TS 24.484 §8.3.2.12·§9.3.2.12) |
+| `SERVICE_CONFIG_CHANGED` | service-config 재취득(`CCspServiceConfig::Refresh`) + cms 구독자 **전원**에게 xcap-diff NOTIFY (service-config 은 시스템 전역 문서) — 본문 = 그 문서 하나: uri `mcvideo` 면 MCVideo service configuration(`org.3gpp.mcvideo.service-config/global/mcvideo-service-config.xml` — §9.4.2.12, MCVideo 역할이 꺼져 있으면 보내지 않는다), 아니면 MCPTT service configuration |
 | `UE_INIT_CONFIG_CHANGED` | cms 구독 단말마다 xcap-diff NOTIFY — 선택자 `org.3gpp.mcptt.ue-init-config/users/sip:<MCS UE ID>/<MCS UE ID>`(TS 24.484 §7.2.1.1), MCS UE ID = 그 구독 단말의 등록 Contact `+sip.instance`(`SendUeInitConfigNotify` — 등록·instance 없는 구독은 건너뜀). CSP 는 이 문서의 값을 쓰지 않는다(§7.2.2.12 → §6.3.13.3) |
-| `GROUP_CHANGED` | 그룹 설정 reload → 재적재 전·후 멤버 합집합의 gms 구독에 xcap-diff NOTIFY(`ReloadGroupMap` — 새 그룹·추가·제외 멤버 포함) → CMP 동기화 |
+| `GROUP_CHANGED` | 그룹 설정 reload → 재적재 전·후 멤버 합집합의 gms 구독에 xcap-diff NOTIFY(`ReloadGroupMap` — 새 그룹·추가·제외 멤버 포함) + 같은 멤버들의 cms 구독에 user profile 통지(`USER_CHANGED` 와 같은 본문, `new-etag` 없음 — user profile 의 `<MCPTTGroupInfo>`·`<ImplicitAffiliations>`·MCVideo 그룹 목록이 그룹 멤버십에서 나온다, §8.3.2.12) → CMP 동기화 |
 | `STATS_REQUEST` | CSP 통계 응답 (등록자 수, 활성 호 등) |
 | `CSC_RESTART` | DB 전체 재동기화 + 단말용 XCAP root 재취득 (`CscEndpointCache::Refresh`) |
 
