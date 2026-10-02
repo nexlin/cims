@@ -803,7 +803,7 @@ NDK/MSVC 빌드는 개발 서버 밖(WSL2·Windows 머신)에서 수행하고, �
   행을 비우지 못하고, `deactivated` 의 «즉시 재구독» 권고(RFC 6665 §4.1.3)도 성립하지 않는다. 필요한 것 =
   CIMS 콜백이 사유·자원을 코어로 올리고, 파사드가 `onSubscriptionEnded(event, resource, reason)` 로 공개하며,
   앱이 사유별로 화면 비우기/재구독을 정하는 것. 실기기 회귀가 필요해 별건으로 둔다.
-- **음성 지연 남은 것**(§4.5) — ① 소프트웨어 클록(`PJSUA_DEFAULT_SND_USE_SW_CLOCK`)의 녹음·재생 지연 버퍼(`sound_port.c` `cap_dbuf`·`play_dbuf`)와
+- **음성 지연 남은 것**(§4.5 — 항목별 근거·방법·확인 = [ue_voice_latency_followup.md](../../dev/ue_voice_latency_followup.md)) — ① 소프트웨어 클록(`PJSUA_DEFAULT_SND_USE_SW_CLOCK`)의 녹음·재생 지연 버퍼(`sound_port.c` `cap_dbuf`·`play_dbuf`)와
   클록 콜백 순서(재생 get → 녹음 put 이라 마이크 프레임이 다음 틱에 나간다, +20 ms) ② 녹음 경로(`AudioRecord` 최소 버퍼·VOICE_COMMUNICATION 전처리)
   ③ Oboe/AAudio 백엔드(단말 기본 속도·FAST 경로) ④ 지터 버퍼의 TS 26.114 §8 최소 성능 요건 대조(GSMA IR.92 §3.2.6)·통화 중 Wi-Fi 저지연 잠금
   ⑤ AMR-WB 대역 효율 형식 요청(IR.92 §3.2.5 — 지금은 octet-align 만 제안) ⑥ 단말 AEC 와 Speex AEC 이중(`common.h` 의 «Android 는 Speex AEC 가
