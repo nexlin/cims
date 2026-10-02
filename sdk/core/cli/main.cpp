@@ -8,6 +8,7 @@
 //   cimsue-cli [계정 옵션] call <번호|sip:URI> [--duration S] [--video]
 //   cimsue-cli [계정 옵션] answer [--duration S] [--transfer-to X --transfer-after S]
 //   cimsue-cli [계정 옵션] group-call <groupId> [--duration S] [--ptt-at S --ptt-len S] [--listen-only] [--emergency] [--broadcast] [--implicit]
+//              (--members tel:..,tel:.. = 애드혹 그룹 호 — 명단을 싣고 session-type adhoc. 끝낼 때 BYE + Reason 으로 호 전체를 해제, TS 24.379 §17)
 //              (MCPTT 그룹콜은 음성만 — 그룹 영상은 video-call(MCVideo 호, mcvideo.md §8))
 //              (--broadcast = 일제 통화 개시 — 발언을 놓은 뒤 서버 Floor Idle(B-bit)이면 코어가 호를 해제, outcome 에 broadcast_released)
 //              (--implicit = 개시 INVITE 가 암묵적 발언 요청 — mc_implicit_request+mc_granted, TS 24.380 §14.2.4·§14.2.5. --ptt-at 0 과 함께)
@@ -902,6 +903,7 @@ int main(int argc, char** argv) {
     if (o.cmd == "group-call") {
         GroupCallOptions go; go.listenOnly = o.listenOnly; go.emergency = o.emergency; go.broadcast = o.broadcast;
         go.implicitFloorRequest = o.implicit;             // --ptt-at 의 floorRequest 는 이미 요청 중이라 무시된다
+        go.members = o.groupMembers;                      // --members = 애드혹 그룹 호의 초대 명단(TS 24.379 §17 — session-type adhoc)
         s.callId = eng.joinGroupCall(acc, o.target, go);
         if (s.callId < 0) { s.outcome = "invite_failed"; rc = 4; return finish(-1); }
         bool up = waitActive(ls, s.callId, o.timeoutSec);

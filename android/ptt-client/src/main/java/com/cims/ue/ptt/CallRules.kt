@@ -33,18 +33,27 @@ internal object CallRules {
      * 모르는 번호·Warning 없는 실패는 null(호출자가 일반 문구를 쓴다).
      */
     fun rejectionText(statusCode: Int, warningCode: Int): String? = when (warningCode) {
+        100 -> "지금은 이 그룹으로 통화할 수 없습니다"                     // function not allowed due to <reason> (운용 시간 밖 등 로컬 정책)
         102 -> "참여할 수 있는 그룹 수를 넘었습니다"                       // too many simultaneous affiliations (N2)
         103 -> "동시에 참여할 수 있는 그룹 통화 수를 넘었습니다"            // maximum simultaneous MCPTT group calls reached (N6)
         107 -> "개별 통화 권한이 없습니다"                                // user not authorised to make private calls
         110 -> "상대가 통화를 받지 않았습니다"                            // user declined the call invitation
+        113 -> "없는 그룹입니다"                                         // group document does not exist
         115 -> "사용이 중지된 그룹입니다"                                 // group is disabled
         116 -> "이 그룹의 멤버가 아닙니다"                                // user is not part of the MCPTT group
         120 -> "이 그룹에 참여(제휴)하지 않았습니다"                       // user is not affiliated to this group
+        121 -> "이 그룹 통화에 참여할 권한이 없습니다"                     // user is not authorised to join the group call
         122 -> "그룹 통화 정원이 찼습니다"                                // too many participants
+        125 -> "자동 수락 개별 통화 권한이 없습니다"                       // not authorised to make private call with automatic commencement
+        126 -> "수동 수락 개별 통화 권한이 없습니다"                       // not authorised to make private call with manual commencement
         127 -> "상대가 개별 통화를 받을 수 없습니다"                       // user not authorised to be called in private call
         144 -> "이 사용자에게는 개별 통화를 걸 수 없습니다"                 // user not authorised to call this particular user
         167 -> "이 그룹으로는 통화할 수 없습니다"                         // call is not allowed on the preconfigured group
         168 -> "이 그룹에는 경보를 보낼 수 없습니다"                       // alert is not allowed on the preconfigured group
+        185 -> "애드혹 통화 권한이 없습니다"                              // user not authorised to initiate the adhoc group call
+        186 -> "애드혹 통화를 지원하지 않는 시스템입니다"                   // the MCPTT system do not support adhoc group call
+        189 -> "애드혹 통화에 부를 수 있는 인원을 넘었습니다"               // maximum number of allowed adhoc group participants exceeded
+        190 -> "애드혹 통화 참가자를 바꿀 권한이 없습니다"                  // not authorised to modify adhoc group call participants
         else -> null
     }.takeIf { statusCode >= 300 }
 }

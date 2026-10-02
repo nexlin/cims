@@ -293,6 +293,10 @@ C++ 공개 표면은 `cimsue/engine.h` 의 `Engine` 하나이며 계정·호를 
   `SIP-If-Match` 로 싣는다. 412 를 받으면 그 ETag 를 버리고(§5 MUST) 같은 요청을 다시 보내지 않으며, `SIP-If-Match` 없는 초기 PUBLISH
   (§4.2)로 한 번 다시 알린다. 앱에는 412 가 올라가지 않고 재발행의 최종 응답이 `affiliate()` 가 돌려준 token 으로 온다(시험
   `AffiliationPublish.StaleEtag412FallsBackToInitialPublish`).
+- **애드혹 그룹 호**(TS 24.379 §17). `joinGroupCall({members})` — 명단(resource-lists)을 실은 개시는 mcptt-info `<session-type>adhoc`
+  (§17.2.2.1.1 10)a)). 이렇게 연 호를 개시자가 `hangup` 하면 **호 전체를 끝낸다** — BYE 에 `Reason: SIP;cause=200;text="User requested release"`
+  (§17.2.3.1.1 1)), 제어 기능이 전원을 해제한다(§6.3.3.2.4 3A)). 초대받은 참가자의 `hangup` 은 Reason 없는 BYE = 자기만 나가기(§17.2.4.1.1)이고,
+  애드혹 호는 한 명이 남아도 서버가 풀지 않는다. 성립 전의 끊기는 CANCEL 이다. `cimsue-cli group-call <id> --members tel:..,tel:..`.
 - **일제 통화**(TS 24.379 §4.12, [mcptt_broadcast_group_call.md](mcptt_broadcast_group_call.md) §4.4). `joinGroupCall({broadcast})` 는
   `prearranged` + `<broadcast-ind>true` 로 개시하고 그 단말을 개시자로 둔다 — Floor Request 에 B-bit 를 싣고, Floor Release 뒤
   B-bit Floor Idle 을 받으면 **코어가 호를 해제**한다(TS 24.380 §6.2.4.6.4, 앱 조작 없음). 수신 멤버의 표시는 앱 몫이다

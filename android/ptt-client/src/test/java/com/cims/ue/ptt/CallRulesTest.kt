@@ -35,6 +35,13 @@ class CallRulesTest {
         assertEquals("그룹 통화 정원이 찼습니다", CallRules.rejectionText(486, 122))
         assertEquals("사용이 중지된 그룹입니다", CallRules.rejectionText(403, 115))
         assertEquals("상대가 통화를 받지 않았습니다", CallRules.rejectionText(480, 110))
+        // CSP 응답 코드 표(mcptt_standard_conformance.md C4e) — 없는 그룹 404 113 · 재합류 미인가 403 121 · 애드혹 403 185·186·189 · 운용 시간 밖 403 100
+        assertEquals("없는 그룹입니다", CallRules.rejectionText(404, 113))
+        assertEquals("이 그룹 통화에 참여할 권한이 없습니다", CallRules.rejectionText(403, 121))
+        assertEquals("애드혹 통화 권한이 없습니다", CallRules.rejectionText(403, 185))
+        assertEquals("애드혹 통화를 지원하지 않는 시스템입니다", CallRules.rejectionText(403, 186))
+        assertEquals("애드혹 통화에 부를 수 있는 인원을 넘었습니다", CallRules.rejectionText(403, 189))
+        assertEquals("지금은 이 그룹으로 통화할 수 없습니다", CallRules.rejectionText(403, 100))
         assertNull("모르는 번호", CallRules.rejectionText(403, 999))
         assertNull("Warning 없음", CallRules.rejectionText(486, 0))
     }

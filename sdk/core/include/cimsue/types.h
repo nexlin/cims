@@ -212,7 +212,9 @@ struct GroupCallOptions {
     bool listenOnly = false;
     /** 전이중 1:1(mc_no_floor_ctrl) — floor 없이 마이크 상시 개방. startPrivateCall 전용. */
     bool fullDuplex = false;
-    /** 애드혹 임시 그룹 멤버(tel: URI) — resource-lists 로 실린다. joinGroupCall 전용. */
+    /** 애드혹 그룹 호의 초대 명단(tel: URI) — resource-lists 로 실리고 mcptt-info session-type 이 `adhoc` 이 된다(TS 24.379 §17.2.2.1.1).
+     *  joinGroupCall 전용. 이렇게 연 호를 개시자가 Engine::hangup 하면 **호 전체를 끝낸다**(BYE + Reason «User requested release»,
+     *  §17.2.3.1.1 — 초대받은 참가자의 hangup 은 자기만 나간다). */
     std::vector<std::string> members;
     /** 일제 통화 개시(TS 24.379 §4.12·§6.2.8.2) — mcptt-info `<broadcast-ind>true`. 개시자의 Floor Request 는 B-bit 를
      *  싣고(TS 24.380 §6.2.4.3.5), 개시자가 발언을 놓은 뒤 B-bit Floor Idle 을 받으면 코어가 호를 해제한다(§6.2.4.6.4).

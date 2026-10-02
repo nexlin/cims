@@ -47,15 +47,15 @@ PTT(MCPTT) 서비스 구현을 3GPP 규격 원문과 대조해 **규격과 다�
 | 그룹 호 — 서버 (GCS) | 14 | 7 | 4 | 3 | — |
 | 그룹 호 — 단말 (GCC) | 8 | — | 6 | — | 2 |
 | 개별 호 (PRV) | 4 | 1 | 3 | — | — |
-| 애드혹 그룹 호 (ADH) | 2 | 1 | 1 | — | — |
+| 애드혹 그룹 호 (ADH) | 1 | — | 1 | — | — |
 | 긴급·임박·경보 (EMG) | 9 | 1 | 1 | 7 | — |
 | 발언권 — 서버 (FCS) | 19 | 2 | 9 | 5 | 3 |
 | 발언권 SDP 협상 (SDP) | 2 | — | 2 | — | — |
 | 그룹 문서·GMS (GMS) | 6 | — | 6 | — | — |
 | 설정 문서·CMS (CMS) | 2 | — | 1 | 1 | — |
-| **계** | **80** | **18** | **40** | **16** | **6** |
+| **계** | **79** | **17** | **40** | **16** | **6** |
 
-확인 수준 — ◎ 44 · ○ 27 · △ 9.
+확인 수준 — ◎ 44 · ○ 26 · △ 9.
 
 읽는 순서 — §2(먼저 볼 것) → §3(영역별 전체) → §4(미구현 목록에 빠진 기능) → §5(문서 정정) → §6(묶음과 순서).
 
@@ -159,8 +159,7 @@ CSP 는 참여 기능과 제어 기능을 겸한다.
 
 | # | 급 | 대상 | 규격 | CIMS 지금 | 영향 | 확인 |
 |---|---|---|---|---|---|---|
-| ADH-7 | A | SDK | §17.2.3.1.1 — 호 해제는 BYE + `Reason: SIP;cause=200;text="User requested release"`. §6.3.3.2.4 3A) — 서버는 전원 해제 | SDK BYE 에 Reason 이 없다 — CSP 는 개시자 BYE 의 이 Reason 으로 전원을 해제한다(csp.md «Ad hoc group call») | 개시자가 애드혹 호를 끝낼 수 없다(본인만 나간다) | ○ |
-| ADH-8 | B | CSP·SDK | §17.2.2.1.1 10)a) · §17.4.2.1.1 — `<session-type>adhoc` (Annex F.1) | SDK 개시도 CSP 멤버 INVITE 도 `prearranged` 로 싣는다 — `sdk/core/src/engine.cpp:2666`, `csp/ModuleDispatcher.cpp:1028` → `csp/GroupCallService.cpp:3966` | 규격 단말이 애드혹 호를 편성 그룹 호로 다룬다(그룹 문서를 찾는다) | ◎ |
+| ADH-8 | B | CSP | §17.4.2.1.1 — 멤버 초대의 `<session-type>adhoc` (Annex F.1) | SDK 개시는 `adhoc` 로 싣는다(명단을 실은 개시 — `sdk/core/src/engine.cpp` `startMcptt`). **CSP 멤버 INVITE 는 `prearranged`** — `csp/ModuleDispatcher.cpp` → `csp/GroupCallService.cpp` | 규격 단말이 초대받은 애드혹 호를 편성 그룹 호로 다룬다(그룹 문서를 찾는다) | ◎ |
 
 ### 3.7 긴급·임박 위험·경보 (EMG) — TS 24.379 §6.2.8 · §6.3.3.1.13~20 · §12
 
@@ -273,7 +272,7 @@ CSP 는 참여 기능과 제어 기능을 겸한다.
 | 1 | **문서 값 한두 줄** — 문서 셋의 T2 제외 대상 | FCS-21(문서) | .48 |
 | 2 | **발언권 메시지 정합** — Ack 의 Message Type · 미대기 Queue Position 254 · Granted Duration | FCS-4 · FCS-8 · FCS-20 | .45 SDK·CMP |
 | 5 | **Warning 코드** — 거절 사유를 규격 코드로. handoff §14 K1(SDK 가 Warning 을 올림)과 한 묶음 | REG-3(enforce) · PRV-7(본문) | .45 CSP·SDK → Windows(문구 사전) |
-| 7 | **SDK 요청 규격화** — REGISTER Contact 태그, INVITE 헤더·Request-URI(PSI)·`<mcptt-client-id>`·session-type, 개별 호 resource-lists, 재합류 세션 식별자, conference·xcap-diff SUBSCRIBE. 서버가 양쪽을 받는 전환기를 먼저 둔다(PRV-1) — 서버 쪽 검사(GCS-9·GCS-10)는 SDK 뒤 | REG-1 · GCC-1~GCC-4 · GCC-7 · GCC-8 · PRV-1 · PRV-4 · ADH-8 · GMS-16 · SDP-1 | .45 SDK·CSP |
+| 7 | **SDK 요청 규격화** — REGISTER Contact 태그, INVITE 헤더·Request-URI(PSI)·`<mcptt-client-id>`·session-type, 개별 호 resource-lists, 재합류 세션 식별자, conference·xcap-diff SUBSCRIBE. 서버가 양쪽을 받는 전환기를 먼저 둔다(PRV-1) — 서버 쪽 검사(GCS-9·GCS-10)는 SDK 뒤 | REG-1 · GCC-1~GCC-4 · GCC-7 · GCC-8 · PRV-1 · PRV-4 · ADH-8(CSP 멤버 INVITE) · GMS-16 · SDP-1 | .45 SDK·CSP |
 | 8 | **제휴를 클라이언트 단위로** — 행 키 통일, 클라이언트 단위 해제·판정, 암묵 제휴 취소. handoff §14 K3·S2 와 한 묶음 | AFF-2~AFF-8 · AFF-12 · EMG-3 | .45 CSP·SDK |
 | 9 | **호 모델 결정** — chat 그룹(초대 없이 합류·1명 이하 해제)과 편성 그룹의 재초대·late call entry·제휴 해제 시 이탈. 규격대로 바꿀지, 편차로 남기고 사유를 적을지 정한다 | GCS-1~GCS-4 · GCS-22 · AFF-11 | 결정 → .45 CSP |
 | 10 | **그룹 문서 집행** — 수신 전용 | FCS-14 | .45 CSP·CMP·CSC |

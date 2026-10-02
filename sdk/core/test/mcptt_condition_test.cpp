@@ -448,6 +448,61 @@ TEST(McpttCondition, UpgradeDeniedConfirmedAndAdvertised) {
     eng.stop();
 }
 
+// 애드혹 그룹 호(TS 24.379 §17) — 개시 INVITE 의 session-type = adhoc(§17.2.2.1.1 10)a)), 개시자의 끝내기 = BYE + Reason(§17.2.3.1.1 1)).
+//   편성 그룹 호의 BYE 에는 Reason 이 없다(나가기)
+TEST(McpttAdhoc, SessionTypeAndReleaseReason) {
+    Engine eng;
+    CondListener l;
+    EngineConfig cfg;
+    cfg.logLevel = std::getenv("COND_LOG") ? 5 : 0;
+    cfg.nullAudioDevice = true;
+    ASSERT_TRUE(eng.start(cfg, &l).ok);
+    {
+        cimsue_test::PjScope pj("adhoc-test");
+        FakeServer srv;
+        AccountConfig ac;
+        ac.serverHost = "127.0.0.1"; ac.serverPort = srv.port; ac.transport = Transport::UDP;
+        ac.domain = "ptt.test"; ac.msisdn = "+82500000001"; ac.authId = "450000000000001@ptt.test"; ac.password = "x";
+        int acc = eng.addAccount(ac);
+        ASSERT_GE(acc, 0);
+
+        auto establish = [&](const std::string& group, const GroupCallOptions& o) {
+            int id = eng.joinGroupCall(acc, group, o);
+            EXPECT_GE(id, 0);
+            std::string inv = srv.recv("INVITE ");
+            EXPECT_FALSE(inv.empty());
+            srv.callId = headerOf(inv, "Call-ID");
+            srv.ueFrom = headerOf(inv, "From");
+            srv.ueContact = uriIn(headerOf(inv, "Contact"));
+            srv.reply(inv, 200, "OK", "application/sdp", sdp(1));
+            EXPECT_FALSE(srv.recv("ACK ").empty());
+            EXPECT_TRUE(l.wait([&] { return l.lastState.callId == id && l.lastState.state == CallState::Active; }));
+            return std::make_pair(id, inv);
+        };
+
+        GroupCallOptions adhoc;
+        adhoc.members = {"tel:+82500000002", "tel:+82500000003"};
+        auto a = establish("adhoc-82500000001-1790000000", adhoc);
+        EXPECT_NE(a.second.find("<session-type>adhoc</session-type>"), std::string::npos) << a.second;
+        EXPECT_NE(a.second.find("resource-lists"), std::string::npos);
+        ASSERT_TRUE(eng.hangup(a.first).ok);
+        std::string bye = srv.recv("BYE ");
+        ASSERT_FALSE(bye.empty());
+        EXPECT_EQ(headerOf(bye, "Reason"), "SIP;cause=200;text=\"User requested release\"");
+        srv.reply(bye, 200, "OK");
+        ASSERT_TRUE(l.wait([&] { return l.lastState.callId == a.first && l.lastState.state == CallState::Disconnected; }));
+
+        auto g = establish("g001", GroupCallOptions());
+        EXPECT_NE(g.second.find("<session-type>prearranged</session-type>"), std::string::npos);
+        ASSERT_TRUE(eng.hangup(g.first).ok);
+        bye = srv.recv("BYE ");
+        ASSERT_FALSE(bye.empty());
+        EXPECT_EQ(headerOf(bye, "Reason"), "");                            // 편성 그룹 호 — 나가기
+        srv.reply(bye, 200, "OK");
+    }
+    eng.stop();
+}
+
 TEST(McpttXml, AlertBuildAndParse) {
     std::string b = mcptt::alertInfo("tel:g002", "tel:+82500000002", "urn:uuid:abc", false, "tel:+82500000013", -1);
     // 요소 순서 = TS 24.379 §F.1 mcptt-ParamsType(request-uri → calling-user-id → emergency-ind → alert-ind → originated-by → client-id)

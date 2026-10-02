@@ -687,6 +687,7 @@ struct McpttSession {
     bool prevEmergency = false, prevImminent = false, prevMine = false;
     int condLastCode = 0;
     bool broadcast = false;              // 일제 통화 개시(<broadcast-ind>) — 이 단말이 개시자
+    bool adhoc = false;                  // 애드혹 그룹 호(TS 24.379 §17) — 이 단말이 명단을 실어 개시했다(session-type adhoc)
     bool micOpen = false;                // floor Granted 로 열림
     bool implicitAwaitAnswer = false;    // 개시 INVITE 가 암묵적 발언 요청 — 200 OK answer 의 fmtp 로 판정(TS 24.380 §14.3.4·§14.3.5)
     std::string pendingAppSdp;           // 송신 SDP 에 주입할 m=application 섹션
@@ -2781,6 +2782,17 @@ Result Engine::hangup(int callId) {
     return withCall(impl_.get(), callId, [&](PjCall& c) {
         if (declineMcInvitation(impl_.get(), c)) return;          // 받기 전의 초대를 끊는 것 = 거절(pjsua 기본 603 대신)
         pj::CallOpParam prm;
+        // 애드혹 그룹 호의 해제(TS 24.379 §17.2.3.1.1 1)) — 개시자의 «끝내기» 는 BYE 에 Reason 을 실어 호 전체를 끝낸다(제어 기능이
+        //   전원을 해제한다, §6.3.3.2.4 3A)). Reason 없는 BYE 는 «나가기»(§17.2.4.1.1)라 남은 참가자의 호가 이어진다 — 초대받은
+        //   참가자의 끊기가 그것이다. 성립 전(CANCEL)에는 싣지 않는다.
+        if (c.mcptt && c.mcptt->adhoc) {
+            bool confirmed = false;
+            try { confirmed = c.getInfo().state == PJSIP_INV_STATE_CONFIRMED; } catch (...) {}
+            if (confirmed) {
+                pj::SipHeader h; h.hName = "Reason"; h.hValue = "SIP;cause=200;text=\"User requested release\"";
+                prm.txOption.headers.push_back(h);
+            }
+        }
         c.hangup(prm);
     });
 }
@@ -2940,6 +2952,7 @@ static int startMcptt(Engine::Impl* o, int accountId, const std::string& id, boo
     call->mcptt->imminentPeril = opts.imminentPeril && !opts.emergency;       // 긴급이 임박을 대체
     call->mcptt->condMine = opts.emergency || opts.imminentPeril;
     call->mcptt->broadcast = !isPrivate && opts.broadcast;               // 일제 통화는 그룹 호 속성(TS 24.379 §4.12)
+    call->mcptt->adhoc = !isPrivate && !opts.members.empty();           // 명단을 실은 개시 = 애드혹 그룹 호(§17.2.2.1.1)
     const std::string mcpttId = cfg.effectiveMcpttId();
     // floor 소켓은 makeCall 전에 — makeCall 이 동기적으로 onCallSdpCreated 를 부르며 로컬 offer 에 포트를 광고한다.
     if (!call->mcptt->fullDuplex) {
@@ -2962,7 +2975,8 @@ static int startMcptt(Engine::Impl* o, int accountId, const std::string& id, boo
         p1.contentType.type = "application"; p1.contentType.subType = "vnd.3gpp.mcptt-info+xml";
         // 지시자 조합(TS 24.379 §6.3.3.1.17) — 긴급 개시는 alert-ind 를 함께 싣고(경보를 요청하지 않았으면 false, §6.2.8.1.1 4)),
         //   임박은 긴급·경보 지시자 없이(§6.2.8.1.9). 둘 다 요청하면 긴급이 임박을 대체한다(위 mcptt->imminentPeril).
-        p1.body = mcptt::mcpttInfo(isPrivate ? "private" : "prearranged", "tel:" + id, mcpttId, "tel:" + id,
+        // session-type(Annex F.1) — 개별 호 private · 애드혹 그룹 호 adhoc(§17.2.2.1.1 10)a)) · 그 밖 prearranged
+        p1.body = mcptt::mcpttInfo(isPrivate ? "private" : call->mcptt->adhoc ? "adhoc" : "prearranged", "tel:" + id, mcpttId, "tel:" + id,
                                    call->mcptt->emergency ? 1 : 0, call->mcptt->imminentPeril ? 1 : 0, call->mcptt->broadcast,
                                    call->mcptt->emergency ? -1 : 0);
         prm.txOption.multipartParts.push_back(p1);
