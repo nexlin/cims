@@ -510,7 +510,9 @@ struct Engine::Impl {
     /** MCVideo 관심 그룹(bare, 계정별) — affiliation PUBLISH 는 늘 전부를 싣는다(TS 24.281 §8.2.1.2 6)a)). ue-ctl 에서만. */
     std::map<int, std::set<std::string>> mcvideoAffiliations;
     static std::string publishKey(int accountId, const std::string& groupId, McService service) {
-        return std::to_string(accountId) + ":" + (service == McService::McVideo ? std::string("mcvideo") : groupId);
+        // MCVideo 는 게시 하나가 관심 그룹 전부라 그룹이 비어 있다 — 값이 있으면 다른 게시(서비스 설정 "poc-settings")의 열쇠다
+        if (service == McService::McVideo) return std::to_string(accountId) + ":mcvideo" + (groupId.empty() ? "" : ":" + groupId);
+        return std::to_string(accountId) + ":" + groupId;
     }
     // media plane SDS(MSRP) 입출력 스레드 — 분리 실행, stop() 이 취소하고 모두 끝날 때까지 기다린다.
     std::mutex msrpM;
@@ -632,6 +634,9 @@ struct Engine::Impl {
     int64_t sendMcpttAffiliationSet(int accountId, int64_t token, int64_t appToken, bool allowConditional, bool internal = false);
     /** MCVideo affiliation PUBLISH(TS 24.281 §8.2.1.2) — 관심 그룹 전부(mcvideoAffiliations)를 한 게시로. ue-ctl 에서. */
     int64_t sendMcVideoAffiliation(int accountId, int64_t token, int64_t appToken, bool allowConditional, bool internal = false);
+    /** MCVideo 서비스 설정 PUBLISH(TS 24.281 §7.2.3) — 등록이 선 뒤 한 번(AccountConfig.mcvideoServiceSettings). */
+    void publishMcVideoServiceSettings(int accountId);
+    std::set<int> mcvideoSettingsSent;                     // 이 등록에서 서비스 설정을 올린 계정(등록이 끊기면 지운다)
     /** 영상 미디어가 활성된 호 — 수신 창 결선 + (계정 videoAutoTransmit 면) 카메라 송신 개시. 영상 없는 빌드면 아무것도 안 한다. */
     void attachVideo(PjCall* call, int accountId);
     /** 내 영상 송출 개폐 — MCVideo 호는 허용(videoSend)·송출 허가(sendOn)가 둘 다일 때만, 그 밖의 호는 허용만 본다(ue_sdk.md §4.5).
@@ -1586,6 +1591,9 @@ public:
         o_->ctl.post([o = o_, id = accountId_, reg = ri.state == RegState::Registered] {
             if (!o->running) return;
             if (o->regRecovery.settled(id)) o->reRegister(id);
+            // MCVideo 서비스 설정(§7.2.3) — 등록이 설 때 한 번. 등록이 끊기면 다음 등록에서 다시 올린다.
+            if (!reg) o->mcvideoSettingsSent.erase(id);
+            else if (o->mcvideoSettingsSent.insert(id).second) o->publishMcVideoServiceSettings(id);
             if (o->upkeep.onRegEvent(id, reg)) {
                 const std::vector<detail::UpkeepKey> keys = o->upkeep.wantedFor(id);
                 if (!keys.empty()) o->log(3, "upkeep: registration renewed — re-sending " + std::to_string(keys.size()) + " item(s)");
@@ -3271,6 +3279,43 @@ int64_t Engine::Impl::sendMcpttAffiliationSet(int accountId, int64_t token, int6
         if (!groups.empty()) upkeep.result(k, 0, 0, upkeepNowMs());
     }
     return r < 0 ? -1 : appToken;
+}
+
+void Engine::Impl::publishMcVideoServiceSettings(int accountId) {
+    auto ic = accountCfgs.find(accountId);
+    if (ic == accountCfgs.end()) return;
+    const AccountConfig& cfg = ic->second;
+    if (!cfg.mcvideoEnabled || !cfg.mcvideoServiceSettings || cfg.mcvideoServerUri.empty()) return;
+    const std::string clientId = cfg.effectiveMcpttClientId();
+    const std::string entity = !cfg.instanceId.empty() ? cfg.instanceId : clientId;
+    if (entity.empty()) { log(2, "mcvideo service settings: no instance ID — not published"); return; }
+    // TS 24.281 §7.2.1A — R-URI = 참여 MCVideo 기능 PSI(1), ICSI(2), Event poc-settings(3), Expires 2^32-1(4).
+    //   §7.2.3 3) — mcvideo-info: request-uri = 자기 MCVideo ID · client-id, 4) — poc-settings: Answer-Mode·선택 프로파일·multiplex.
+    std::map<std::string, std::string> h;
+    h["P-Preferred-Service"] = mcvideo::kIcsi;
+    h["Event"] = "poc-settings";
+    h["Expires"] = mcvideo::kSettingsExpires;
+    const int64_t token = nextToken++;
+    {
+        std::lock_guard<std::mutex> lk(snapM);
+        PendingPublish p;
+        p.accountId = accountId; p.groupId = "poc-settings"; p.on = true; p.appToken = token; p.service = McService::McVideo; p.internal = true;
+        publishPending[token] = p;
+        tracked[token] = Tracked{detail::UpkeepKey{accountId, detail::UpkeepKind::McVideoAffiliation, "poc-settings"}, true};
+    }
+    mcvideo::InfoParams ip;
+    ip.requestUri = cfg.effectiveMcpttId();
+    ip.clientId = clientId;
+    const std::string boundary = "mcv-set-" + mcdata::newMessageId().substr(0, 12);
+    const std::string body = "--" + boundary + "\r\nContent-Type: " + mcvideo::kCtInfo + "\r\n\r\n" + mcvideo::info(ip) + "\r\n" +
+                             "--" + boundary + "\r\nContent-Type: " + mcvideo::kCtPocSettings + "\r\n\r\n" +
+                             mcvideo::pocSettings(entity, cfg.autoAnswerMcvideo, 1, false) + "\r\n" +
+                             "--" + boundary + "--\r\n";
+    if (doSendRequest(accountId, "PUBLISH", cfg.mcvideoServerUri, "multipart/mixed;boundary=" + boundary, body, h, token) < 0) {
+        std::lock_guard<std::mutex> lk(snapM);
+        publishPending.erase(token); tracked.erase(token);
+        mcvideoSettingsSent.erase(accountId);
+    }
 }
 
 int64_t Engine::Impl::sendMcVideoAffiliation(int accountId, int64_t token, int64_t appToken, bool allowConditional, bool internal) {

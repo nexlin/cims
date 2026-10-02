@@ -19,6 +19,9 @@ constexpr const char* kCtInfo = "application/vnd.3gpp.mcvideo-info+xml";        
 constexpr const char* kNsInfo = "urn:3gpp:ns:mcvideoInfo:1.0";
 constexpr const char* kNsPresInfo = "urn:3gpp:ns:mcvideoPresInfo:1.0";             // §8.3.1.2
 constexpr const char* kCtPidf = "application/pidf+xml";
+constexpr const char* kCtPocSettings = "application/poc-settings+xml";       // RFC 4354 — 서비스 설정(§7.2.3)
+/** 서비스 설정 PUBLISH Expires(§7.2.1A 4)) — 설정을 올릴 때 2^32-1, 지울 때(= MCVideo 로그오프, NOTE 3) 0. */
+constexpr const char* kSettingsExpires = "4294967295";
 constexpr const char* kAudioInfo = "audio component of MCVideo";                   // §6.2.1 2)c) · §6.2.2 3)c)
 constexpr const char* kVideoInfo = "video component of MCVideo";                   // §6.2.1 3)d) · §6.2.2 4)c)
 /** affiliation PUBLISH Expires — 관심 그룹이 하나라도 있으면 2^32-1, 없으면 0(§8.2.1.2 4)·5)). */
@@ -54,6 +57,10 @@ InfoRx parseInfo(const std::string& wholeOrBody);
 
 /** affiliation PUBLISH 의 pidf(§8.2.1.2 6) · §8.3.1) — entity = MCVideo ID, tuple id = MCVideo client ID, 관심 그룹 **전부**를
  *  `<mcvideoPI10:affiliation group>` 로(status·expires 속성 없음), `<mcvideoPI10:p-id>` = 요청마다 전역 유일 값. */
+/** 서비스 설정 본문 application/poc-settings+xml(RFC 4354 + TS 24.281 §7.4.1.2 확장) — `<entity id>` = 이 단말(instance ID),
+ *  `<am-settings><answer-mode>` automatic|manual, `<mcs10Set:selected-user-profile-index>`, `<mcs10Set:multiplex-support>`. */
+std::string pocSettings(const std::string& entityId, bool autoAnswer, int userProfileIndex, bool multiplexSupport);
+
 std::string affiliationPidf(const std::string& entity, const std::string& clientId,
                             const std::vector<std::string>& groupUris, const std::string& pid);
 

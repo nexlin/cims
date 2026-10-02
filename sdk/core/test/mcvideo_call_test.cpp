@@ -586,6 +586,43 @@ TEST(McvSip, MediaInfoInserted) {
     EXPECT_EQ(icsis[1], "urn%3Ab");
 }
 
+// 서비스 설정 PUBLISH(TS 24.281 §7.2.3 · §7.2.1A · §7.4.1.2 — RFC 4354 poc-settings): 등록이 서면 한 번, 설정했을 때만
+TEST(McvCall, ServiceSettingsPublishedAfterRegistration) {
+    {
+        const std::string xml = mcvideo::pocSettings("urn:uuid:a<1>", false, 1, false);
+        EXPECT_NE(xml.find("<poc-settings xmlns=\"urn:oma:params:xml:ns:poc:poc-settings\""), std::string::npos);
+        EXPECT_NE(xml.find("<entity id=\"urn:uuid:a&lt;1&gt;\">"), std::string::npos) << xml;
+        EXPECT_NE(xml.find("<am-settings><answer-mode>manual</answer-mode></am-settings>"), std::string::npos);
+        EXPECT_NE(xml.find("xmlns:mcs10Set=\"urn:3gpp:mcsSettings:1.0\""), std::string::npos);
+    }
+    Rig r;
+    AccountConfig ac = r.account();
+    ac.mcvideoServiceSettings = true;
+    r.addAccount(ac);
+    ASSERT_TRUE(r.eng.registerAccount(r.acc).ok);
+    std::string reg = r.csp.recv("REGISTER ");
+    ASSERT_FALSE(reg.empty());
+    const std::string c = headerOf(reg, "Contact");
+    r.csp.reply(reg, 200, "OK", "Contact: " + c + ";expires=3600\r\nExpires: 3600\r\n");
+    std::string pub = r.csp.recv("PUBLISH ");
+    ASSERT_FALSE(pub.empty());
+    EXPECT_EQ(pub.substr(0, pub.find("\r\n")), std::string("PUBLISH ") + kPsi + " SIP/2.0");   // §7.2.1A 1) R-URI = 참여 기능 PSI
+    EXPECT_EQ(headerOf(pub, "Event"), "poc-settings");                                          // 3)
+    EXPECT_EQ(headerOf(pub, "Expires"), "4294967295");                                          // 4)
+    EXPECT_NE(headerOf(pub, "P-Preferred-Service").find("icsi.mcvideo"), std::string::npos);    // 2)
+    const std::string info = partOf(pub, mcvideo::kCtInfo);
+    EXPECT_NE(info.find("<mcvideo-request-uri type=\"Normal\"><mcvideoURI>tel:"), std::string::npos) << info;   // §7.2.3 3)a) — 자기 MCVideo ID
+    EXPECT_NE(info.find(std::string("<mcvideoString>") + kClientId), std::string::npos) << info;               // 3)b) — client ID
+    const std::string set = partOf(pub, mcvideo::kCtPocSettings);
+    EXPECT_NE(set.find(std::string("<entity id=\"") + kClientId + "\">"), std::string::npos) << set;
+    EXPECT_NE(set.find("<answer-mode>automatic</answer-mode>"), std::string::npos);            // 4)a) — autoAnswerMcvideo(기본 자동)
+    EXPECT_NE(set.find("<mcs10Set:user-profile-index>1</mcs10Set:user-profile-index>"), std::string::npos);   // 4)b)
+    EXPECT_NE(set.find("<mcs10Set:multiplex-support>false</mcs10Set:multiplex-support>"), std::string::npos); // 4)c)
+    r.csp.reply(pub, 489, "Bad Event", "");                   // 받지 않는 서버 — 다시 보내지 않는다, 앱에 결과를 올리지 않는다
+    EXPECT_TRUE(r.csp.recv("PUBLISH ", 700).empty());
+    EXPECT_TRUE(r.l.results.empty());
+}
+
 // ── 엔진 — 등록·affiliation (C3) ─────────────────────────────────────────────────
 
 // REGISTER(§7.2.1AA · 골든 01 의 Contact 태그) → affiliation PUBLISH(§8.2.1.2 · 골든 02) — 관심 그룹 전부를 한 게시로, ETag 조건부 갱신, 0 개면 Expires 0

@@ -146,6 +146,10 @@ struct AccountConfig {
     /** MCVideo 그룹 호 초대(제어 기능의 prearranged 멤버 초대 — TS 24.281 §9.2.1.3) 자동 수락 = 자동 개시(§6.2.3.1.2). 수락은 세션
      *  합류일 뿐이고 영상 보기는 수신 제어(acceptReception — manual 수신)가 따로 정한다. false 면 앱이 answer/reject(수동 개시 §6.2.3.2.2). */
     bool autoAnswerMcvideo = true;
+    /** MCVideo 서비스 설정 PUBLISH(TS 24.281 §7.2.3 — `Event: poc-settings`: Answer-Mode 설정·선택한 user profile·multiplex 지원)를
+     *  등록이 설 때마다 낸다. 규격의 착신 참여 기능은 이 설정을 받기 전의 초대를 480 + Warning 146 으로 거절한다(§9.2.1.3.2 3)).
+     *  서비스 설정 PUBLISH 를 받지 않는 서버는 489 로 답한다 — 서버가 받게 된 뒤 켠다(기본 false). */
+    bool mcvideoServiceSettings = false;
     /** 발언권 참여자 타이머 — ue-init-config `<Timers>`(UeInitConfigDoc.floorTimers)를 싣는다. 계정의 다음 MCPTT 호부터 쓴다
      *  (Engine::setFloorTimers 로 바꿀 수 있다 — 문서 변경 통지 뒤). */
     FloorTimers floorTimers;

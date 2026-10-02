@@ -278,6 +278,11 @@ psip 합성 SDP 프로파일(`CSipCallRtp::m_eMcMediaProfile = E_MC_MEDIA_MCVIDE
 - **등록** (구현 — §7.2.1AA 모양) — Contact 의 `+g.3gpp.mcvideo` 와 icsi-ref MCVideo ICSI **둘 다**를 바인딩 능력 `CUserInfo::m_bMcVideo` 로 기록,
   재-REGISTER 마다 다시 판정(태그를 빼면 MCVideo 로그오프, §7.2.1 NOTE 1). 서비스 인가 본문(mcvideo-info 토큰·client-id, §7.2.1)과 `Event:
   poc-settings` PUBLISH(§7.2.2)는 읽지 않는다 — CSP 토큰 검증([mcx_identity_scope.md](mcx_identity_scope.md) §10)과 한 짝으로 MCPTT·MCVideo 를 함께 넣는다.
+  **서비스 설정만 싣는 PUBLISH(§7.2.3 — Answer-Mode·선택한 user profile)** 도 서버는 아직 받지 않는다(489 — conformance_gap_plan.md S25).
+  단말 코어는 보낼 수 있다: `AccountConfig.mcvideoServiceSettings`(기본 false)를 켜면 등록이 설 때마다 `Event: poc-settings`·`Expires:
+  4294967295`·P-Preferred-Service MCVideo ICSI 로, 본문 = mcvideo-info(자기 MCVideo ID·client ID) + `application/poc-settings+xml`
+  (`<entity id>` = instance ID, `<answer-mode>` = `autoAnswerMcvideo` 에 따라 automatic|manual, `<mcs10Set:selected-user-profile-index>` 1,
+  `<mcs10Set:multiplex-support>` false — §7.4.1.2). 서버가 받게 되면 앱이 켠다(cimsue-cli `--mcvideo-service-settings`).
 - **affiliation** (구현 — §8.2.2.2.3~§8.2.2.2.5) — 규격형 PUBLISH·SUBSCRIBE(`Event: presence`)를 서비스로 먼저 갈라 MCVideo 는 표 `mcvideo_affiliations`
   (§5.1)에 쓴다: served ID = mcvideo-info `<mcvideo-request-uri>`(요청자와 다르면 403 — 남의 제휴를 바꾸는 권한은 두지 않는다), Expires 없음·0 이 아닌데
   2^32-1 미만 423(Min-Expires 4294967295), 이용 자격(`mcvideo_user_profile` 행) 없음 403, 대상 = MCVideo 서비스를 가진 그룹, 만료 없음(등록 해제가 행을 지운다),

@@ -73,7 +73,7 @@ MCPTT 쪽 같은 뿌리의 결함은 [mcptt_conformance_gaps.md](mcptt_conforman
 
 | 항목 | 내용 |
 |---|---|
-| VREG-1 | 단말이 MCVideo 서비스 설정 PUBLISH(`poc-settings`, §7.2.3)를 보내지 않는다 — 규격 서버의 착신 참여 기능은 Answer-Mode 를 몰라 prearranged 초대를 늘 480 `146` 으로 거절한다 |
+| VREG-1 | 단말(앱)이 MCVideo 서비스 설정 PUBLISH(`poc-settings`, §7.2.3)를 켜지 않는다(코어는 보낼 수 있다 — 서버 S25 뒤) — 규격 서버의 착신 참여 기능은 Answer-Mode 를 몰라 prearranged 초대를 늘 480 `146` 으로 거절한다 |
 | VGC-2 | late call entry 가 없다 — 개시 뒤에 제휴·재등록한 멤버는 진행 중 prearranged 영상 호를 받지 못한다 |
 | VAFF-2 | 제휴 판정이 사용자 단위다 — 제휴하지 않은 클라이언트로 개시·합류가 되고, 제휴한 단말 대신 마지막 등록 단말이 초대된다 |
 | VGMS-1 | 그룹 문서 PUT 이 빠진 MCVideo 요소를 «기존값 유지» 로 읽는다 — 규격 기본값(없음 = chat·보호 켬·conference 불허)과 반대로 저장된다 |
@@ -94,7 +94,7 @@ MCPTT 쪽 같은 뿌리의 결함은 [mcptt_conformance_gaps.md](mcptt_conforman
 
 | # | 급 | 대상 | 규격 | CIMS 지금 | 영향 | 확인 |
 |---|---|---|---|---|---|---|
-| VREG-1 | B | SDK·앱 | §7.2.3 — MCVideo 서비스 설정 PUBLISH(`Event: poc-settings`, P-Preferred-Service = MCVideo ICSI, `<am-settings>`). 규격 착신 참여 기능은 Answer-Mode Indication 을 받기 전이면 480 + `146 T-PF unable to determine the service settings for the called user`(§9.2.1.3.2 3)) | SDK 에 poc-settings 송신 경로가 없다(`sdk/core/src` 전체에 없음). mcvideo.md §5.2 는 서버 쪽 §7.2.2(인가 겸용)만 «토큰 검증과 한 짝» 으로 미뤘다 — 서비스 설정만 싣는 §7.2.3 은 적히지 않았다 | 규격 서버에 붙으면 prearranged 멤버 초대가 늘 480 146 으로 끝난다. MCPTT REG-2 와 따로인 MCVideo 몫 | ◎ |
+| VREG-1 | B | 앱·CSP | §7.2.3 — MCVideo 서비스 설정 PUBLISH(`Event: poc-settings`, P-Preferred-Service = MCVideo ICSI, `<am-settings>`). 규격 착신 참여 기능은 Answer-Mode Indication 을 받기 전이면 480 + `146 T-PF unable to determine the service settings for the called user`(§9.2.1.3.2 3)) | 코어는 보낼 수 있다(`AccountConfig.mcvideoServiceSettings` — 등록마다 한 번, `Engine::Impl::publishMcVideoServiceSettings`). **기본 꺼짐** — CSP 가 489 로 답한다(S25). 앱 셋 모두 켜지 않는다 | 규격 서버에 붙으면 prearranged 멤버 초대가 늘 480 146 으로 끝난다(옵션을 켜면 해소). MCPTT REG-2 와 따로인 MCVideo 몫 | ◎ |
 | VREG-2 | C | CSP | §7.2.1 NOTE 1 · §9.2.2.3.1.1 2) · §9.2.1.3.1.1 2) — MCVideo ID 는 서비스 인가 때 IMPU 에 묶이고 그 묶임으로 요청자를 인가한다. 묶임이 없으면 표 4.4.2-2 `141 user unknown to the participating function` | MCVideo 태그 없는 바인딩(로그오프한 클라이언트 포함)의 INVITE·제휴 PUBLISH 도 그대로 처리한다 — 개시 검사는 이용 자격 행만(`csp/McVideoCallService.cpp:598-602`), PUBLISH 는 역할·자격만(`csp/CscfModule.cpp:1914-1953`) 본다. 바인딩 능력 `m_bMcVideo`(`csp/UserMap.cpp:206`)는 팬아웃 대상 선별에만 쓴다(`csp/McVideoCallService.cpp:425`) | 로그오프한 단말이 MCVideo 호를 열고 제휴를 바꾼다 — 초대는 못 받는데 개시·제휴는 된다 | ◎ |
 | VREG-3 | C | SDK·앱 | §7.1 · §7.2.1AA NOTE — MCVideo 만 로그오프하면 MCVideo 태그만 뺀 재-REGISTER, 다른 MC 서비스 등록은 유지 | 계정을 고치는 API 가 없다 — `addAccount`·`removeAccount` 뿐(`sdk/core/src/engine.cpp:2425`·`:2502`), 공개 헤더도 «값을 바꾼 뒤 계정을 다시 만든다» 고 적는다(`sdk/core/include/cimsue/types.h:113-116`) | MCVideo 를 켜고 끌 때 등록 해제 + 새 등록이 된다 — 서버가 MCPTT·MCVideo 제휴를 모두 지우고(`csp/DbManager.cpp:554-571`) 진행 중 MCPTT 호도 끊긴다 | ◎ |
 | VREG-4 | D | CSP | §7.1 · §7.3.5 3) NOTE «Removal of MCVideo service settings includes removal of all group affiliations» | MCVideo 로그오프(태그를 뺀 재-REGISTER)는 바인딩 능력만 끈다. `mcvideo_affiliations` 행은 등록 해제 때만 지운다(`csp/DbManager.cpp:564-571`) | 로그오프한 클라이언트가 제휴 NOTIFY·N2 계산에 남는다(초대 대상 선별은 `m_bMcVideo` 가 걸러 영향 없음). 규격의 해제 계기는 poc-settings Expires 0 이라 REGISTER 로그오프에 같은 뜻을 줄지는 원문 재확인 | △ |
@@ -211,7 +211,6 @@ MCPTT 쪽 같은 뿌리의 결함은 [mcptt_conformance_gaps.md](mcptt_conforman
 | mcvideo.md §5.5 PTT 단말 | «빈 집합 = Expires 0 = 그 사용자 제휴 전부 해제» 를 피하는 이유로 적음 | 그 서버 동작이 규격(클라이언트 단위 해제)과 다르다 — 편차로 적거나 서버를 고친다 | VAFF-1 |
 | mcvideo.md §5.5 PTT 단말 | «영상 n» 목록(이름·기능 별칭·경과) | 별칭이 서버에서 전달되지 않아 늘 비어 있다 | TCS-2 |
 | mcvideo.md §1.2 · `sdk/core/include/cimsue/types.h:113-116` | MCVideo 로그오프 = 태그를 뺀 재-REGISTER | SDK 는 계정을 다시 만든다(등록 해제 + 새 등록) | VREG-3 |
-| mcvideo.md §5.2 «등록» | poc-settings 는 §7.2.2(인가 겸용)로만 적음 | 단말 §7.2.3(서비스 설정만)이 규격 서버 착신의 전제다 — 단말 몫이 빠졌다 | VREG-1 |
 | `csp/CscfModule.cpp:830` 주석 · `:1885-1889` 문서 주석 | «N2 상한은 … 적용하지 않는다» | MCVideo 는 설정 그룹·PUBLISH 모두 N2 를 적용한다(`:859-867`·`:2038-2059`) — 주석이 MCPTT 몫만 맞다 | — |
 
 ## 6. 묶음과 순서 (권고)

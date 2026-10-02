@@ -514,6 +514,9 @@ MCVideo PSI. 동작(구현 — 시험 `McvSip`·`McvCall`, 계약 K3 골든과 �
   (TS 24.581 §6.3.5.3.8) 브리지 결선만이 아니라 **오디오 인코더를 멈춘다**(무음 프레임도 내지 않는다 — `noVad`) — 새 스트림은 브리지 결선 전(onStreamCreated)
   에 멈추고 허가·재협상마다 다시 건다. 빈 RTP keep-alive(PJMEDIA_STREAM_ENABLE_KA)·RTCP 는 그대로라 NAT·CMP latch 는 유지된다. 제어 채널은 호 성립 때
   1회 + 1 s 간격 2회 + 15 s 주기로 빈 RTCP RR(헤더 SSRC = 전송 제어와 같은 값)을 보낸다(ue_nat_traversal.md §7.1).
+- **MCVideo 서비스 설정 PUBLISH**(TS 24.281 §7.2.3 — `AccountConfig.mcvideoServiceSettings`, 기본 false) — 등록이 설 때마다 한 번
+  `Event: poc-settings` 로 Answer-Mode 설정·선택한 user profile 을 올린다([mcvideo.md](mcvideo.md) §5.2). 결과는 앱에 올리지 않는다
+  (받지 않는 서버의 489 는 로그만 — 다음 등록에서 다시 올린다).
 - **개시 방식**(MCPTT·MCVideo 공통 — TS 24.379 §10.1.1.2.1.2 7)·8) · TS 24.281 §9.2.1.2.1.2 7)·8), `mcptt/commencement.h`) — 초대의 `Answer-Mode`·
   `Priv-Answer-Mode`(RFC 5373)와 단말 설정(`autoAnswerMcptt`·`autoAnswerMcvideo`)으로 정한다: `Priv-Answer-Mode: Auto` = 자동 ·
   `Answer-Mode: Manual` = 수동(설정이 자동이어도 따른다) · `Answer-Mode: Auto` 또는 헤더 없음 = 단말 설정(설정이 수동이면 자동 응답을 허용하지 않는다).

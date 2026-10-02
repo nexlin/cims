@@ -144,6 +144,7 @@ void usage() {
         "        [--mcdata-psi URI]  (참여 MCData 기능 PSI — disposition 통지 Request-URI, TS 24.282 §12.2.1.1)\n"
         "        [--instance-id URN] (+sip.instance · ue-init-config 의 MCS UE ID. --from-profile ptt 면 ue-init-config 로 PSI 를 채운다)\n"
         "        [--mcvideo] [--mcvideo-psi URI]   (MCVideo 등록 태그 · 참여 MCVideo 기능 PSI — TS 24.281 §7.2.1AA·§9.2.1.2.1.1)\n"
+        "        [--mcvideo-service-settings]   (등록 뒤 MCVideo 서비스 설정 PUBLISH — Event: poc-settings, TS 24.281 §7.2.3)\n"
         "        [--affiliate-mcvideo G,..]   (MCVideo affiliation — 관심 그룹 전부를 한 PUBLISH 로, TS 24.281 §8.2.1.2)\n"
         "        또는 --csc-host H [--csc-port N] --user U (--pw P | --pw-env VAR) [--csc-ca FILE] --from-profile volte|ptt\n"
         "  register [--hold S] | call TARGET [--duration S] [--video] | answer [--duration S] [--transfer-to X]\n"
@@ -241,6 +242,7 @@ bool parse(int argc, char** argv, Opts& o) {
         else if (a == "--notify-delivered") o.notifyDelivered = true;
         else if (a == "--cancel-group-emergency") o.cancelGroupEmergency = true;
         else if (a == "--mcvideo") o.acc.mcvideoEnabled = true;
+        else if (a == "--mcvideo-service-settings") o.acc.mcvideoServiceSettings = true;   // 서비스 설정 PUBLISH(TS 24.281 §7.2.3)
         else if (a == "--prearranged") o.prearranged = true;
         else if (a == "--queueing") o.queueing = true;
         else if (a == "--accept") o.accept = true;
@@ -735,6 +737,7 @@ int main(int argc, char** argv) {
         if (!o.acc.mcdataServerUri.empty()) a.mcdataServerUri = o.acc.mcdataServerUri;
         if (!o.acc.mcvideoServerUri.empty()) a.mcvideoServerUri = o.acc.mcvideoServerUri;
         a.mcvideoEnabled = o.acc.mcvideoEnabled;                          // MCVideo 등록은 명시할 때만(--mcvideo)
+        a.mcvideoServiceSettings = o.acc.mcvideoServiceSettings;
         if (!a.mcpttServerUri.empty() || !a.mcdataServerUri.empty() || !a.mcvideoServerUri.empty())
             std::fprintf(stderr, "[cimsue-cli] psi mcptt=%s mcdata=%s mcvideo=%s\n", a.mcpttServerUri.c_str(), a.mcdataServerUri.c_str(),
                          a.mcvideoServerUri.c_str());
