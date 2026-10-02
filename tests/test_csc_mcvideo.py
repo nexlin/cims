@@ -172,6 +172,24 @@ class GroupDocumentTest(unittest.TestCase):
         self.assertEqual(mvd["group_priority"], 100)
         self.assertEqual(mvd["allow_conference_state"], True)
 
+    # VGMS-2 — MCVideo <service> 의 <group-media>·멤버 <mcvideo-mcvideo-id>·규칙 mcvideo-allow-* 검사
+    def test_put_validates_mcvideo_service_shape(self):
+        base = m.get_group_xml("tel:g101")[0]
+        m.parse_group_document_xml(base)                                  # 서버가 낸 문서는 그대로 받는다
+        import re
+        no_media = re.sub(r"<oxe:group-media>\s*<mcpttgi:mcvideo-video-media/>\s*</oxe:group-media>", "", base)
+        self.assertNotEqual(no_media, base)
+        with self.assertRaisesRegex(ValueError, "mcvideo-video-media"):
+            m.parse_group_document_xml(no_media)
+        other_id = re.sub(r'<mcpttgi:mcvideo-mcvideo-id uri="[^"]+"/>', '<mcpttgi:mcvideo-mcvideo-id uri="tel:+82599999999"/>', base, count=1)
+        self.assertNotEqual(other_id, base)
+        with self.assertRaisesRegex(ValueError, "mcvideo-mcvideo-id"):
+            m.parse_group_document_xml(other_id)
+        if "<mcpttgi:mcvideo-allow-emergency-call>false" in base:
+            with self.assertRaisesRegex(ValueError, "mcvideo-allow-emergency-call"):
+                m.parse_group_document_xml(base.replace("<mcpttgi:mcvideo-allow-emergency-call>false",
+                                                        "<mcpttgi:mcvideo-allow-emergency-call>true"))
+
     def test_put_without_mcvideo_service_keeps_state(self):
         """전환기 규칙 — MCVideo 를 모르는 단말(옛 SDK: enabler example.mcptt)의 PUT 은 MCVideo 를 건드리지 않는다."""
         old_sdk_doc = m.get_group_xml("tel:g102")[0].replace(mv.ICSI_MCPTT, "example.mcptt")

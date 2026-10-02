@@ -478,6 +478,89 @@ class _FakeConn:
     def __exit__(self, *a): return False
 
 
+class XcapWriteTests(_Base):
+    """C05 — 규칙·이름공간 해석, XCAP 오류 형식(RFC 4825 §11), 그룹 생성 XUI(TS 24.481 §6.3.2)."""
+    XE = {"accept": "application/xcap-error+xml, */*"}
+
+    def _create(self, uri, name="n", doc_name="new-group.xml", headers=None, body=None):
+        self._keep_pub = m._MCPTT_PUBLIC_URL
+        m._MCPTT_PUBLIC_URL = "https://csc.example:4430"
+        try:
+            xml = body if body is not None else _doc(uri, name, [(f"tel:{OWNER_PTT}", "chair", 1)])
+            return _run(m.handle_group_management(
+                _args("PUT", "/org.openmobilealliance.groups/users/https://csc.example:4430/" + doc_name,
+                      body=xml.encode(), headers=headers), {}))
+        finally:
+            m._MCPTT_PUBLIC_URL = self._keep_pub
+
+    # GMS-9 — 담을 수 없는 규칙은 받지 않는다(전 멤버 허용으로 넓혀 저장하지 않는다)
+    def test_identity_rule_and_join_handling_false_are_rejected(self):
+        self._existing("g-0a1b2c3d", OWNER_UID)
+        ident = ('<cp:ruleset><cp:rule id="r1"><cp:conditions><cp:identity><cp:one id="tel:+82500000001"/></cp:identity>'
+                 '</cp:conditions><cp:actions><mcpttgi:allow-MCPTT-emergency-call>true</mcpttgi:allow-MCPTT-emergency-call>'
+                 '</cp:actions></cp:rule></cp:ruleset>')
+        r = self._put("g-0a1b2c3d", _doc("tel:g-0a1b2c3d", "n", [], extra=ident))
+        self.assertEqual(r.status, 400)
+        self.assertIn("identities", r.body)
+        nojoin = ('<cp:ruleset><cp:rule id="r1"><cp:conditions><is-list-member/></cp:conditions><cp:actions>'
+                  '<join-handling>false</join-handling></cp:actions></cp:rule></cp:ruleset>')
+        self.assertEqual(self._put("g-0a1b2c3d", _doc("tel:g-0a1b2c3d", "n", [], extra=nojoin)).status, 400)
+        ok = nojoin.replace("false", "true")
+        self.assertEqual(self._put("g-0a1b2c3d", _doc("tel:g-0a1b2c3d", "n", [], extra=ok)).status, 200)
+
+    # GMS-4 — XCAP 클라이언트에는 409 + application/xcap-error+xml, CIMS 앱에는 종전 JSON
+    def test_document_errors_as_xcap_error_when_asked(self):
+        self._existing("g-0a1b2c3d", OWNER_UID)
+        bad = _doc("tel:g-0a1b2c3d", "n", [("tel:+82500000001", "boss", 0)])
+        r = self._put("g-0a1b2c3d", bad)
+        self.assertEqual((r.status, r.media_type), (400, "application/json"))
+        r = self._put("g-0a1b2c3d", bad, headers=self.XE)
+        self.assertEqual((r.status, r.media_type), (409, "application/xcap-error+xml"))
+        self.assertIn('<xcap-error xmlns="urn:ietf:params:xml:ns:xcap-error"><schema-validation-error phrase=', r.body)
+        r = self._put("g-0a1b2c3d", "<group", headers=self.XE)
+        self.assertEqual(r.status, 409)
+        self.assertIn("<not-well-formed", r.body)
+        import xml.dom.minidom
+        xml.dom.minidom.parseString(r.body.encode())
+        r = self._put("g-0a1b2c3d", '{"name": "x"}', headers={"content-type": "application/json"})
+        self.assertEqual(r.status, 415, "MIME 이 그룹 문서가 아니다(RFC 4825 §8.2.2)")
+        ok = self._put("g-0a1b2c3d", _doc("tel:g-0a1b2c3d", "n", []), headers={"content-type": "application/vnd.oma.poc.groups+xml"})
+        self.assertEqual(ok.status, 200)
+
+    # GMS-10 — CIMS 자체 요소는 cims: 이름공간에서도 읽는다
+    def test_own_elements_read_from_cims_namespace_too(self):
+        cims = ('<cims:on-network-require-affiliation xmlns:cims="urn:cims:groupinfo:1.0">false</cims:on-network-require-affiliation>'
+                '<cims:on-network-encryption xmlns:cims="urn:cims:groupinfo:1.0">true</cims:on-network-encryption>'
+                '<cims:org-code xmlns:cims="urn:cims:groupinfo:1.0">HQ</cims:org-code>')
+        d = m.parse_group_document_xml(_doc("tel:g-0a1b2c3d", "n", [], extra=cims))
+        self.assertEqual((d["require_affiliation"], d["encryption"], d["org_code"]), (False, True, "HQ"))
+        old = ('<mcpttgi:on-network-require-affiliation>true</mcpttgi:on-network-require-affiliation>'
+               '<mcpttgi:org-code>OLD</mcpttgi:org-code>')
+        d = m.parse_group_document_xml(_doc("tel:g-0a1b2c3d", "n", [], extra=old))
+        self.assertEqual((d["require_affiliation"], d["org_code"]), (True, "OLD"))
+
+    # GMS-2 — 그룹 생성 XUI 의 tree 에 PUT: 그룹 ID 는 본문 uri, 맞지 않으면 409 uniqueness-failure + alt-value
+    def test_creation_xui_assigns_group_id_via_alt_value(self):
+        import re
+        self.assertEqual(self._create("").status, 403, "생성 자격이 없다")
+        self._grant_create()
+        r = self._create("")                                  # GMS 가 정해 주길 기다린다(§6.3.2.2.2 NOTE)
+        self.assertEqual((r.status, r.media_type), (409, "application/xcap-error+xml"))
+        alt = re.search(r"<uniqueness-failure><exists field=\"group/list-service/@uri\"><alt-value>(tel:g-[0-9a-f]{8})</alt-value>", r.body)
+        self.assertIsNotNone(alt, r.body)
+        self.assertEqual(self._create("tel:g001").status, 409, "정책에 맞지 않는 ID")
+        self._existing("g-0a1b2c3e", OTHER_UID)
+        self.assertEqual(self._create("tel:g-0a1b2c3e").status, 409, "이미 쓰이는 ID")
+        r = self._create(alt.group(1), name="새 그룹")
+        self.assertEqual(r.status, 201, r.body)
+        g = m.GROUPS[alt.group(1)]
+        self.assertEqual((g["display_name"], g["authorized_user_id"]), ("새 그룹", OWNER_UID))
+        self.assertEqual(self._create(alt.group(1)).status, 409, "같은 ID 로 다시 만들 수 없다")
+        r = self._create("tel:g-0a1b2c3f", body="<group")
+        self.assertEqual((r.status, r.media_type), (409, "application/xcap-error+xml"))
+        self.assertEqual(self._create("tel:g-0a1b2c3f", headers={"content-type": "text/plain"}).status, 415)
+
+
 class DbWriteTests(unittest.TestCase):
     def setUp(self):
         self._saved = (m._db_connect, m.sync_group_from_db)

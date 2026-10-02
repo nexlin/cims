@@ -3034,6 +3034,24 @@ def parse_group_document_xml(xml_text: str) -> dict:
     ls = root if root.tag == f"{{{_NS['poc']}}}list-service" else root.find('poc:list-service', _NS)
     if ls is None:
         raise ValueError('list-service element missing')
+    # 규칙(TS 24.481 §7.2.2 — <rule> 은 조건에 맞는 신원에 action 을 준다). CIMS 의 그룹 모델은 «그룹 전원(<is-list-member/>)에게 같은
+    #   action» 하나다 — 특정 신원에게만 주는 규칙(<identity>)이나 개시·합류를 막는 action 은 담을 수 없으므로 **받지 않는다**
+    #   (전 멤버 허용으로 바꿔 저장하면 문서가 준 것보다 권한이 넓어진다).
+    for rule in ls.iter(f"{{{_NS['cp']}}}rule"):
+        cond = rule.find('cp:conditions', _NS)
+        if cond is not None and cond.find('cp:identity', _NS) is not None:
+            raise ValueError('rules for specific identities (<identity>) are not supported — only <is-list-member/> rules')
+        for el in rule.iter():
+            if el.tag.rsplit('}', 1)[-1] in ('allow-initiate-conference', 'join-handling') \
+                    and (el.text or '').strip().lower() == 'false':
+                raise ValueError(f"<{el.tag.rsplit('}', 1)[-1]}> false is not supported — every member may initiate and join")
+
+    # CIMS 자체 요소 다섯(TS 24.481 §7.2.4.2 스키마에 없는 것) — `cims:` 이름공간(urn:cims:groupinfo:1.0)과, 전환기 동안 옛 자리인
+    #   3GPP 이름공간(mcpttgi) 둘 다에서 읽는다.
+    def _own(fn, tag):
+        v = fn(ls, f'cims:{tag}')
+        return v if v is not None else fn(ls, f'gi:{tag}')
+
     out = {
         'display_name': _xtext(ls, 'poc:display-name'),
         'group_type': None,
@@ -3048,13 +3066,13 @@ def parse_group_document_xml(xml_text: str) -> dict:
         'max_sds_size': _xint(ls, 'gi:mcdata-on-network-max-data-size-for-SDS'),
         'max_auto_recv': _xint(ls, 'gi:mcdata-on-network-max-data-size-auto-recv'),
         'max_members': _xint(ls, 'gi:on-network-max-participant-count'),
-        'require_affiliation': _xbool(ls, 'gi:on-network-require-affiliation'),
+        'require_affiliation': _own(_xbool, 'on-network-require-affiliation'),
         'priority': _xint(ls, 'gi:on-network-group-priority'),
-        'encryption': _xbool(ls, 'gi:on-network-encryption'),
+        'encryption': _own(_xbool, 'on-network-encryption'),
         'emergency_call': _xbool(ls, './/cp:actions/gi:allow-MCPTT-emergency-call'),
         'emergency_alert': _xbool(ls, './/cp:actions/gi:allow-MCPTT-emergency-alert'),
         'allow_conference_state': _xbool(ls, './/cp:actions/gi:on-network-allow-conference-state'),
-        'org_code': _xtext(ls, 'gi:org-code'),
+        'org_code': _own(_xtext, 'org-code'),
         'on_network': None,
         'members': None,
         # MCVideo 서비스 — None = 문서가 MCVideo 를 말하지 않음(기존 상태 유지), dict = MCVideo <service> 가 있어 켜고 속성 반영
@@ -3273,6 +3291,61 @@ async def handle_user_groups(args: HandlerArgs, kwargs: dict) -> HandlerResult:
     return HandlerResult(status=200, body=json.dumps(result), media_type='application/json')
 
 
+def _gms_create_by_creation_xui(args: HandlerArgs, token_payload: dict) -> HandlerResult:
+    """규격 GC 의 그룹 생성(TS 24.481 §6.3.2) — `PUT …/users/<group creation XUI>/<문서 이름>`. 그룹 ID 는 본문 `<list-service uri>` 다
+    (문서 이름이 아니다). ID 가 비었거나(§6.3.2.2.2 NOTE — GMS 가 정해 주길 기다린다) 정책에 맞지 않거나 이미 쓰이면
+    **409 + `<uniqueness-failure>` + `<alt-value>`**(GMS 가 받을 수 있는 그룹 ID — §6.3.2.3 c)), GC 는 그 값으로 다시 PUT 한다.
+    인가(생성 자격)·문서 검사는 users tree 의 생성과 같다. 오류는 XCAP 형식(application/xcap-error+xml)."""
+    requester = (token_payload or {}).get('mcptt_id')
+    my_uid = _token_user_id(token_payload)
+    if not get_user_profile(_requester_ptt_id(token_payload)).get('allow_create_group') \
+            and not _admin_manages_group(token_payload, None):
+        logger.log_error(f"[GMS] group creation denied: '{requester}' lacks allow_create_group")
+        return _json_result(403, {'error': 'group_creation_not_allowed'})
+    if my_uid is None:
+        return _json_result(403, {'error': 'group_creation_not_allowed', 'detail': 'token subject has no users.id'})
+    _ct = (args.headers.get('content-type') or '').split(';', 1)[0].strip().lower()
+    if _ct and not (_ct.endswith('+xml') or _ct in ('application/xml', 'text/xml')):
+        return HandlerResult(status=415, body={'error': 'unsupported_media_type', 'expected': GROUP_DOC_MIME},
+                             media_type='application/json')
+    text = args.body.decode('utf-8', 'replace') if isinstance(args.body, (bytes, bytearray)) else (args.body if isinstance(args.body, str) else '')
+    try:
+        doc = parse_group_document_xml(text)
+        root = _ET.fromstring(text)
+    except ValueError as ve:
+        return gms_doc_error(args, 400, {'error': 'invalid_group_document', 'detail': str(ve)}, force_xml=True)
+    ls = root if root.tag == f"{{{_NS['poc']}}}list-service" else root.find('poc:list-service', _NS)
+    asked = (ls.get('uri') or '').strip()
+
+    def _alt():
+        return HandlerResult(status=409, media_type=XCAP_ERROR_MIME,
+                             body=xcap_error_xml('uniqueness-failure', alt_values=[_group_uri(new_gms_group_id())],
+                                                 field='group/list-service/@uri'))
+    if not asked:
+        return _alt()
+    gid, dom = _gms_gid_from_uri(asked)
+    if gid.startswith(('adhoc-', 'priv-')) or validate_new_gms_group_id(gid, dom) or _group_uri(gid) in GROUPS:
+        return _alt()
+    uri_key = _group_uri(gid)
+    if not _DB_CONFIG:
+        grp = {"created_by": requester or "", "created_at": datetime.datetime.now().isoformat(), "members": [],
+               "authorized_user": requester or "", "authorized_user_id": my_uid,
+               "display_name": doc.get('display_name') or gid, "etag": f"etag_{int(time.time())}"}
+        if doc.get('members') is not None:
+            grp["members"] = [{"uri": m.get('mcptt_id') or f"tel:{m['user_id']}", "name": m['user_id'],
+                               "role": m['role'], "priority": m['priority'], "joined_at": ""} for m in doc['members']]
+        GROUPS[uri_key] = grp
+        save_group_to_file(uri_key, grp)
+    else:
+        st, err = gms_write_group(gid, doc, my_uid, create=True)
+        if st:
+            return gms_doc_error(args, st, err, force_xml=True)
+    logger.log_info(f"[GMS] Group created via creation XUI: {uri_key} by {requester}")
+    notify_csp("GROUP_CHANGED", uri_key, "PUT", GROUPS.get(uri_key, {}).get('etag', ''))
+    xml, etag = get_group_xml(uri_key)
+    return HandlerResult(status=201, body=xml, media_type=GROUP_DOC_MIME, headers={'Etag': etag})
+
+
 # GMS: unified handler — dispatches on path depth
 # GET  /org.openmobilealliance.groups/users/{user_uri}              → list user's groups (JSON)
 # GET/PUT/DELETE /org.openmobilealliance.groups/users/{user_uri}/{group_uri} → specific group
@@ -3293,6 +3366,15 @@ async def handle_group_management(args: HandlerArgs, kwargs: dict) -> HandlerRes
     from urllib.parse import unquote as _unq
     requester = (token_payload or {}).get('mcptt_id')
     tree_owner = _unq(parts[2]) if len(parts) >= 3 else ""
+    # 그룹 생성 XUI 의 tree — 규격 GC 의 생성 PUT 자리(TS 24.481 §6.3.2.2.1). XUI 가 URL 이면 경로 조각이 여럿이라 접두로 견준다.
+    creation = False
+    if args.method == 'PUT' and len(parts) >= 4:
+        _cx = group_creation_xui(args)
+        _tail = _unq(path.split('/users/', 1)[1]) if '/users/' in path else ''
+        if _cx and (_tail == _cx or _tail.startswith(_cx + '/')):
+            creation = True
+    if creation:
+        return _gms_create_by_creation_xui(args, token_payload)
     if tree_owner and not _uri_eq(requester, tree_owner):
         logger.log_error(f"[GMS] Forbidden: token '{requester}' != XCAP tree owner '{tree_owner}'")
         return HandlerResult(status=403, body="Forbidden: cannot access another user's XCAP tree")
@@ -3365,10 +3447,15 @@ async def handle_group_management(args: HandlerArgs, kwargs: dict) -> HandlerRes
                     _x, cur_etag = get_group_xml(uri_key)
                     if if_match.strip('"') != (cur_etag or '').strip('"'):
                         return _json_result(412, {'error': 'etag_mismatch', 'etag': cur_etag})
+            # 본문 = XML 문서(application/vnd.oma.poc.groups+xml). 다른 형식이면 415(RFC 4825 §8.2.2 — MIME 이 application usage 와 다르다).
+            _ct = (args.headers.get('content-type') or '').split(';', 1)[0].strip().lower()
+            if _ct and not (_ct.endswith('+xml') or _ct in ('application/xml', 'text/xml')):
+                return HandlerResult(status=415, body={'error': 'unsupported_media_type', 'expected': GROUP_DOC_MIME},
+                                     media_type='application/json')
             try:
-                doc = parse_group_document_xml(args.body.decode('utf-8', 'replace') if isinstance(args.body, (bytes, bytearray)) else (args.body or ''))
+                doc = parse_group_document_xml(args.body.decode('utf-8', 'replace') if isinstance(args.body, (bytes, bytearray)) else (args.body if isinstance(args.body, str) else ''))
             except ValueError as ve:
-                return _json_result(400, {'error': 'invalid_group_document', 'detail': str(ve)})
+                return gms_doc_error(args, 400, {'error': 'invalid_group_document', 'detail': str(ve)})
             if not _DB_CONFIG:
                 # DB 없는 개발 환경 폴백 — 파일 그룹만 갱신(종전 동작). 운영은 항상 DB.
                 grp = existing or {"created_by": user_uri, "created_at": datetime.datetime.now().isoformat(),
@@ -3388,7 +3475,7 @@ async def handle_group_management(args: HandlerArgs, kwargs: dict) -> HandlerRes
             else:
                 st, err = gms_write_group(gid, doc, my_uid, create=existing is None)
                 if st:
-                    return _json_result(st, err)
+                    return gms_doc_error(args, st, err)
             notify_csp("GROUP_CHANGED", uri_key, "PUT", GROUPS.get(uri_key, {}).get('etag', ''))
             xml, etag = get_group_xml(uri_key)
             return HandlerResult(status=201 if existing is None else 200, body=xml,
@@ -3423,6 +3510,60 @@ async def handle_group_management(args: HandlerArgs, kwargs: dict) -> HandlerRes
 
 # CMS: User Profile
 # CMS: UE 초기 설정 (로그인 전 부트스트랩)
+XCAP_ERROR_MIME = 'application/xcap-error+xml'
+# XCAP 오류 조건(RFC 4825 §11) — CIMS 오류 코드 → <xcap-error> 의 자식 요소
+_XCAP_ERROR_ELEM = {
+    'invalid_group_document': 'schema-validation-error',
+    'not_well_formed': 'not-well-formed',
+    'unknown_member': 'constraint-failure',
+    'required_exceeds_max_members': 'constraint-failure',
+    'invalid_group_id': 'constraint-failure',
+    'reserved_prefix': 'constraint-failure',
+}
+
+
+def wants_xcap_error(args) -> bool:
+    """요청이 XCAP 오류 문서를 받겠다고 했는가 — `Accept` 에 application/xcap-error+xml(RFC 4825 §11). CIMS 앱은 JSON 을 읽는다."""
+    return XCAP_ERROR_MIME in (args.headers.get('accept') or '').lower()
+
+
+def xcap_error_xml(element: str, phrase: str = '', alt_values=None, field: str = '') -> str:
+    """application/xcap-error+xml(RFC 4825 §11.1). uniqueness-failure 는 `<exists field>` 아래 `<alt-value>` 를 싣는다(§11.2)."""
+    import html as _html
+    ph = f' phrase="{_html.escape(phrase, quote=True)}"' if phrase else ''
+    if element == 'uniqueness-failure':
+        alts = ''.join(f'<alt-value>{_html.escape(v, quote=False)}</alt-value>' for v in (alt_values or []))
+        inner = f'<uniqueness-failure><exists field="{_html.escape(field, quote=True)}">{alts}</exists></uniqueness-failure>'
+    else:
+        inner = f'<{element}{ph}/>'
+    return f'<?xml version="1.0" encoding="UTF-8"?>\n<xcap-error xmlns="urn:ietf:params:xml:ns:xcap-error">{inner}</xcap-error>'
+
+
+def gms_doc_error(args, status: int, body: dict, force_xml: bool = False) -> HandlerResult:
+    """그룹 문서 쓰기의 문서 오류 응답. XCAP 클라이언트(Accept: application/xcap-error+xml 또는 규격 생성 경로)에는 RFC 4825
+    §8.2.2·§8.2.5 대로 **409 + application/xcap-error+xml**, 그 밖(CIMS 앱)에는 종전 JSON(`{"error": …}`)."""
+    code = body.get('error', '')
+    if (force_xml or wants_xcap_error(args)) and code in _XCAP_ERROR_ELEM:
+        detail = str(body.get('detail') or code)
+        elem = 'not-well-formed' if 'malformed XML' in detail else _XCAP_ERROR_ELEM[code]
+        return HandlerResult(status=409, body=xcap_error_xml(elem, detail), media_type=XCAP_ERROR_MIME)
+    return _json_result(status, body)
+
+
+def new_gms_group_id() -> str:
+    """GMS 가 내주는 새 그룹 ID(`g-` + hex 8 — validate_new_gms_group_id 가 받는 모양) — 쓰이지 않는 값."""
+    while True:
+        gid = 'g-' + _secrets.token_hex(4)
+        if _group_uri(gid) not in GROUPS:
+            return gid
+
+
+def group_creation_xui(args) -> str:
+    """그룹 생성 XUI(TS 24.481 §6.3.2.2.1 — GC 는 이 XUI 의 users tree 에 PUT 한다) = UE initial configuration 이 알리는
+    `<group-creation-XUI>`(설정 UeInitConfig.GroupCreationXui, 비면 공개 base URL)."""
+    return str(_ue_init_cfg('GroupCreationXui')).strip() or public_base_url(args)
+
+
 GMOP_MIME = 'application/vnd.3gpp.GMOP+xml'
 GROUP_DOC_MIME = 'application/vnd.oma.poc.groups+xml'
 

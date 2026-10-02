@@ -555,6 +555,23 @@ def parse_group_attrs(ls, ns: dict):
     cs = ls.find('.//{urn:ietf:params:xml:ns:common-policy}actions/gi:mcvideo-on-network-allow-conference-state', ns)
     if cs is not None and cs.text is not None:
         attrs['allow_conference_state'] = cs.text.strip().lower() == 'true'
+    # MCVideo 그룹이려면 <service> 에 <group-media><mcvideo-video-media/> 가 있어야 한다(TS 24.481 §7.2.8 a)~e)).
+    for svc in ls.findall('.//{urn:oma:xml:xdm:extensions}service'):
+        if (svc.get('enabler') or '').strip() == ICSI_MCVIDEO and svc.find(f'.//{{{NS_GI}}}mcvideo-video-media') is None:
+            raise ValueError('MCVideo <service> needs <group-media><mcvideo-video-media/>')
+    # 멤버의 <mcvideo-mcvideo-id> — MCVideo ID 는 MCPTT ID 와 같은 값이다(단일 MC 서비스 신원). 다른 값은 담을 수 없어 받지 않는다.
+    from services.mcptt import _uri_eq as _same_id
+    for e in ls.findall('.//{urn:oma:xml:poc:list-service}entry'):
+        mv = e.find(f'{{{NS_GI}}}mcvideo-mcvideo-id')
+        if mv is not None and (mv.get('uri') or '').strip() and not _same_id(mv.get('uri'), e.get('uri')):
+            raise ValueError(f"mcvideo-mcvideo-id of {e.get('uri')} differs from the entry uri (single MC service ID)")
+    # 규칙 action mcvideo-allow-*(긴급 호·경보·임박 위험)는 지원하지 않는다 — true 를 받아 false 로 되돌려 내지 않고 거절한다.
+    for act in ls.findall('.//{urn:ietf:params:xml:ns:common-policy}actions'):
+        for el in act:
+            name = el.tag.rsplit('}', 1)[-1]
+            if name in ('mcvideo-allow-emergency-call', 'mcvideo-allow-emergency-alert', 'mcvideo-allow-imminent-peril-call') \
+                    and (el.text or '').strip().lower() == 'true':
+                raise ValueError(f'{name} true is not supported')
     # 보호 true 는 E2E(GMK) 가 설 때까지 받지 않는다 — true 로 저장하면 규격 단말이 GMK 없이 호를 열지 못한다(§7 D7).
     for k in ('protect_media', 'protect_transmission_control'):
         if attrs.get(k):

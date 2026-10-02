@@ -197,7 +197,8 @@ ETag 는 그 문서의 것이다(master 가 바뀌면 같이 바뀐다).
 | 기능 | 규격 | 상태 |
 |---|---|---|
 | **GMS** — global tree(`byGroupID`) · 요소 단위 XCAP · 멤버 제외 조회(POST) | TS 24.481 §6.2.2.2 · §6.3.6~§6.3.12 · §6.3.16 | ✗ — users tree 의 그룹 문서 통째 GET·PUT·DELETE 만(mcptt_conformance_gaps.md GMS-1·GMS-5·GMS-6) |
-| **CMS** — 문서 생성·수정·삭제 · 요소 단위 절차 | TS 24.484 §6.3.2~§6.3.12 | ✗ — 문서 GET 만(mcptt_conformance_gaps.md CMS-9) |
+| **CMS** — 문서 생성·수정·삭제 · 요소 단위 절차 | TS 24.484 §6.3.2~§6.3.12 | ✗ — 문서 GET 만(그 밖 405) |
+| **그룹 문서 규칙의 신원별 action** — `<rule>` 조건 `<identity>`(특정 신원에게만 긴급·경보 등) · 개시·합류 금지(`<allow-initiate-conference>`·`<join-handling>` false) | TS 24.481 §7.2.2 · §7.2.8 | ✗ — 그룹 모델은 «멤버 전원에게 같은 action». 그런 문서의 PUT 은 거절한다(전원 허용으로 넓혀 저장하지 않는다) |
 
 ### R5. 시그널링 세부 (RFC/구독) — 부분 미반영
 
@@ -691,6 +692,10 @@ REGISTER/SUBSCRIBE/NOTIFY 의 헤더·본문을 상용 IMS 캡처 기준으로 �
 ### GMS (TS 24.481)
 - 그룹문서 XML(`urn:oma:xml:poc:list-service`+`urn:3gpp:ns:mcpttGroupInfo:1.0`), ETag/If-None-Match 304,
   수평/수직 권한(403).
+- **그룹 문서 쓰기(XCAP PUT)**: 생성 = 본인 XUI 의 users tree(그룹 ID = 문서 이름) 또는 **그룹 생성 XUI 의 tree**(TS 24.481 §6.3.2 — 그룹 ID =
+  본문 `<list-service uri>`, 맞지 않으면 409 `<uniqueness-failure>` + `<alt-value>`). 문서 오류는 XCAP 클라이언트(`Accept:
+  application/xcap-error+xml`)에 409 + xcap-error(RFC 4825 §11), CIMS 앱에 400 JSON — 편차: 응답 형식을 요청의 Accept 로 가른다.
+  MIME 불일치 415. PUT 의 뜻은 «준 요소만 갱신»(RFC 4825 의 문서 교체가 아니다 — mcptt_conformance_gaps.md GMS-3, 관제 앱 전환 뒤 바꾼다).
 - **S3 변경통지**: 그룹 CRUD 시 `notify_csp("GROUP_CHANGED")`(`handlers/admin.py`) → CSP `CscInterface`
   → `OnGroupConfigChanged` → `ReloadGroupMap`(그룹 맵 재적재 **뒤**, 재적재 전·후 멤버 합집합) → `SendGroupDocNotify`
   → GMS 구독자에 **xcap-diff NOTIFY**(RFC 5875). 60초 주기 재적재도 같은 전후 비교로 놓친 변경을 통지한다.

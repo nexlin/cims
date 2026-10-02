@@ -233,7 +233,10 @@ MCPTT 그룹 호는 **음성과 floor 만** 싣는다(TS 24.379·24.380 — MCPT
   `SUPPORTED_ENCODINGS`(음성 AMR-WB · 영상 H264)만 — 관리 API·XCAP PUT 이 그 밖의 이름을 400 으로 거절하고(대소문자 무시, 정본 표기로 저장),
   옛 저장분의 다른 이름은 문서에 싣지 않는다) + 규칙 action `mcvideo-*`(긴급·임박·경보
   false — V8) + entry `<mcvideo-mcvideo-id uri>`. MCData 서비스가 있으면 entry `<mcdata-mcdata-id uri>`(§7.2.2 MCData entry c)). XCAP PUT 해석
-  (`parse_group_document_xml`) = MCVideo `<service>` 가 있으면 켜고 속성 반영(보호 true·범위 밖 400). **전환기 규칙** — MCVideo `<service>` 가 없는 PUT 은
+  (`parse_group_document_xml`) = MCVideo `<service>` 가 있으면 켜고 속성 반영(보호 true·범위 밖 400). MCVideo `<service>` 에는
+  `<group-media><mcvideo-video-media/>` 가 있어야 하고(TS 24.481 §7.2.8), entry `<mcvideo-mcvideo-id>` 는 entry uri 와 같은 신원이어야 하며
+  (단일 MC 서비스 ID), 규칙 `mcvideo-allow-emergency-call`·`-emergency-alert`·`-imminent-peril-call` true 는 받지 않는다(GET 이 false 로 되돌려
+  내는 값을 조용히 받지 않는다). **전환기 규칙** — MCVideo `<service>` 가 없는 PUT 은
   MCVideo 상태를 건드리지 않는다(MCVideo 를 모르는 옛 단말의 PUT 이 서비스를 지우지 않게. 끄기는 관리 API. «부재 = 끔» 은 관제 앱 그룹 편집이 MCVideo 몫을 보존·편집하게 된 뒤(W4)).
 - **CMS** — `CMSXCAPROOT/org.3gpp.mcvideo.user-profile/users/<MCVideo ID>/mcvideo-user-profile-1.xml`(본인만·scope `video_config_management_service`·
   자격 행 없으면 404, 다른 이름·index 는 404 — §9.3.2.8) · `CMSXCAPROOT/org.3gpp.mcvideo.service-config/global/mcvideo-service-config.xml`(전역 문서,

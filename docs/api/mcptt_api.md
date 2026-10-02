@@ -51,6 +51,19 @@ XCAP(RFC 4825) 리소스 기반 — TS 24.481 Ut. 인증 = `Authorization: Beare
 
 - **신규 그룹 식별자는 클라이언트가 정한다**(XCAP 관습): `g-` + 소문자 hex 8자리(`tel:g-0a1b2c3d`). `adhoc-`/`priv-` 는
   즉석 세션 예약 접두사라 거부. 콘솔이 만든 `g001` 류는 형식이 달라도 소유자면 PUT/DELETE 가능.
+- **규격 GC 의 생성 경로**(TS 24.481 §6.3.2) — `PUT …/users/{group creation XUI}/{문서 이름}`(XUI = ue-init-config `<group-creation-XUI>` —
+  `UeInitConfig.GroupCreationXui`, 비면 공개 base URL). 그룹 ID 는 본문 `<list-service uri>` 다. 비었거나(§6.3.2.2.2 NOTE) 형식이 아니거나 이미
+  쓰이면 **409 + `application/xcap-error+xml` `<uniqueness-failure><exists field="group/list-service/@uri"><alt-value>tel:g-xxxxxxxx</alt-value>`**
+  (§6.3.2.3 c)) — 그 값으로 다시 PUT 하면 201. 생성 자격·문서 검사는 위와 같다.
+- **문서 오류의 형식**(RFC 4825 §8.2.2·§8.2.5·§11) — 요청 `Accept` 에 `application/xcap-error+xml` 이 있으면 **409 + xcap-error**
+  (`<not-well-formed>`·`<schema-validation-error phrase>`·`<constraint-failure phrase>`), 없으면(CIMS 앱) 400 JSON `{"error","detail"}`.
+  본문 Content-Type 이 XML 이 아니면 415.
+- **담을 수 없는 규칙은 거절한다** — `<cp:rule>` 의 조건이 `<identity>`(특정 신원에게만)이거나 action `<allow-initiate-conference>`·
+  `<join-handling>` 가 false 면 문서 오류다(그룹 모델은 «멤버 전원에게 같은 action» 하나 — 전원 허용으로 넓혀 저장하지 않는다).
+  MCVideo 몫은 `<service>` 에 `<group-media><mcvideo-video-media/>` 가 있어야 하고, entry `<mcvideo-mcvideo-id>` 는 entry uri 와 같은 신원,
+  규칙 `mcvideo-allow-*`(긴급·경보·임박) true 는 받지 않는다.
+- CIMS 자체 요소(`on-network-require-affiliation`·`on-network-require-talker-id`·`on-network-encryption`·`org-code`·`authorized-user`)는
+  PUT 에서 `cims:`(urn:cims:groupinfo:1.0)와 옛 자리 `mcpttgi:` 둘 다 읽는다(GET 은 아직 `mcpttgi:` 로 낸다).
 - 처리 = DB(`ptt_groups`·`ptt_group_members`, 소유자 = 토큰 가입자 `users.id`) → in-memory GROUPS 동기화 →
   CSP `GROUP_CHANGED` 통지(CSP 가 xcap-diff NOTIFY 로 단말에 전파). 관리 API(4421, 콘솔 토큰)의 그룹 CRUD 와
   같은 정본·같은 동기화를 쓴다.
