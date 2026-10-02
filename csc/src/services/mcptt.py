@@ -1709,17 +1709,20 @@ def get_group_xml(group_uri):
     #   (CSP Setup.Media.Codecs 첫 항목, 기본 AMR-WB — 그 코덱이 없는 offer 는 488).
     # 보호 둘 <protect-media>·<protect-floor-control-signalling>(§7.2.2 v)w)) 은 요소가 없으면 true(GMK 필수·floor 보호 필수, §7.2.8)
     #   라 false 를 명시한다 — CIMS 는 E2E 미디어 보호(GMK)를 하지 않는다(mcx_e2e_security.md, MCVideo 몫과 같다).
+    # CIMS 자체 요소(TS 24.481 §7.2.4.2 스키마에 없는 것 — require-affiliation·require-talker-id·encryption·org-code·authorized-user)는
+    #   자기 이름공간 `cims:`(urn:cims:groupinfo:1.0)로 싣는다. 3GPP 이름공간에 스키마 밖 요소를 두지 않는다(규격 단말은 모르는
+    #   이름공간 요소를 무시한다 — §7.2.8). PUT 은 전환기 동안 옛 자리(mcpttgi)에서도 읽는다(parse_group_xml `_own`).
     xml += f"""
     <mcpttgi:preferred-voice-encodings><mcpttgi:encoding name="{esc(SERVICE_VOICE_ENCODING)}"/></mcpttgi:preferred-voice-encodings>
-    <mcpttgi:on-network-require-affiliation>{affil_required}</mcpttgi:on-network-require-affiliation>{timers}
+    <cims:on-network-require-affiliation>{affil_required}</cims:on-network-require-affiliation>{timers}
     <mcpttgi:on-network-minimum-number-to-start>{min_to_start}</mcpttgi:on-network-minimum-number-to-start>
     <mcpttgi:on-network-timeout-for-acknowledgement-of-required-members>{xs_duration(ack_timeout)}</mcpttgi:on-network-timeout-for-acknowledgement-of-required-members>
     <mcpttgi:on-network-action-upon-expiration-of-timeout-for-acknowledgement-of-required-members>{ack_action}</mcpttgi:on-network-action-upon-expiration-of-timeout-for-acknowledgement-of-required-members>
     <mcpttgi:protect-media>false</mcpttgi:protect-media>
     <mcpttgi:protect-floor-control-signalling>false</mcpttgi:protect-floor-control-signalling>
-    <mcpttgi:on-network-require-talker-id>false</mcpttgi:on-network-require-talker-id>
+    <cims:on-network-require-talker-id>false</cims:on-network-require-talker-id>
     <mcpttgi:on-network-group-priority>{grp_priority}</mcpttgi:on-network-group-priority>
-    <mcpttgi:on-network-encryption>{encryption_val}</mcpttgi:on-network-encryption>"""
+    <cims:on-network-encryption>{encryption_val}</cims:on-network-encryption>"""
     if mcvideo_attrs is not None:
         xml += _mcvideo.list_service_xml(mcvideo_attrs)
     # 규칙 — 멤버(<is-list-member>)에게 그룹 호 개시(<allow-initiate-conference>)·진행 중 세션 합류(<join-handling>)·명단 열람
@@ -1771,12 +1774,12 @@ def get_group_xml(group_uri):
     </oxe:supported-services>"""
     if org_code:
         xml += f"""
-    <mcpttgi:org-code>{esc(org_code)}</mcpttgi:org-code>"""
+    <cims:org-code>{esc(org_code)}</cims:org-code>"""
     # 그룹 소유 (3GPP TS 23.280 authorized user = 관리주체)
     authorized_user = group.get('authorized_user', '')
     if authorized_user:
         xml += f"""
-    <mcpttgi:authorized-user>{esc(authorized_user)}</mcpttgi:authorized-user>"""
+    <cims:authorized-user>{esc(authorized_user)}</cims:authorized-user>"""
     xml += """
   </list-service>
 </group>"""

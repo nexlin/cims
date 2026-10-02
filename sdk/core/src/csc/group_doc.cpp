@@ -133,7 +133,9 @@ std::string GroupDoc::toXml() const {
     // 그룹 종류 = on-network-invite-members(TS 24.481 §7.2.2 a — true=prearranged, false=chat). 그룹 문서에 session-type 요소는 없다.
     x += std::string("    <mcpttgi:on-network-invite-members>") + bs(sessionType != "chat") + "</mcpttgi:on-network-invite-members>\n";
     if (maxParticipants > 0) x += "    <mcpttgi:on-network-max-participant-count>" + std::to_string(maxParticipants) + "</mcpttgi:on-network-max-participant-count>\n";
-    x += std::string("    <mcpttgi:on-network-require-affiliation>") + bs(requireAffiliation) + "</mcpttgi:on-network-require-affiliation>\n";
+    // CIMS 자체 요소(TS 24.481 스키마에 없는 것 — require-affiliation·encryption·org-code·authorized-user)는 `cims:` 이름공간으로 싣는다.
+    //   읽기는 접두를 가리지 않는다(xml_scan — 옛 서버의 mcpttgi 자리도 읽는다).
+    x += std::string("    <cims:on-network-require-affiliation>") + bs(requireAffiliation) + "</cims:on-network-require-affiliation>\n";
     // 그룹 호 타이머(TS 24.481 §7.2.2 o·§7.2.7) — xs:duration. 미기재면 싣지 않는다(0 은 미사용·무제한이라는 값).
     if (hangTimerSec >= 0) x += "    <mcpttgi:on-network-hang-timer>" + xsDuration(hangTimerSec) + "</mcpttgi:on-network-hang-timer>\n";
     if (maxDurationSec >= 0) x += "    <mcpttgi:on-network-maximum-duration>" + xsDuration(maxDurationSec) +
@@ -149,7 +151,7 @@ std::string GroupDoc::toXml() const {
              esc(ackAction == "proceed" ? "proceed" : "abandon") +
              "</mcpttgi:on-network-action-upon-expiration-of-timeout-for-acknowledgement-of-required-members>\n";
     x += "    <mcpttgi:on-network-group-priority>" + std::to_string(priority) + "</mcpttgi:on-network-group-priority>\n";
-    x += std::string("    <mcpttgi:on-network-encryption>") + bs(encryption) + "</mcpttgi:on-network-encryption>\n";
+    x += std::string("    <cims:on-network-encryption>") + bs(encryption) + "</cims:on-network-encryption>\n";
     if (preconfiguredGroupUseOnly) x += "    <mcpttgi:preconfigured-group-use-only>true</mcpttgi:preconfigured-group-use-only>\n";
     const McVideoGroupAttrs& v = mcvideo;
     if (v.present) {
@@ -216,8 +218,8 @@ std::string GroupDoc::toXml() const {
     if (allowSds) x += "     <oxe:service enabler=\"urn:urn-7:3gpp-service.ims.icsi.mcdata.sds\"/>\n";
     if (allowFd) x += "     <oxe:service enabler=\"urn:urn-7:3gpp-service.ims.icsi.mcdata.fd\"/>\n";
     x += "    </oxe:supported-services>\n";
-    if (!orgCode.empty()) x += "    <mcpttgi:org-code>" + esc(orgCode) + "</mcpttgi:org-code>\n";
-    if (!authorizedUser.empty()) x += "    <mcpttgi:authorized-user>" + esc(authorizedUser) + "</mcpttgi:authorized-user>\n";
+    if (!orgCode.empty()) x += "    <cims:org-code>" + esc(orgCode) + "</cims:org-code>\n";
+    if (!authorizedUser.empty()) x += "    <cims:authorized-user>" + esc(authorizedUser) + "</cims:authorized-user>\n";
     x += "  </list-service>\n</group>\n";
     return x;
 }

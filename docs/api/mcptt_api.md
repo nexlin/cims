@@ -72,7 +72,8 @@ XCAP(RFC 4825) 리소스 기반 — TS 24.481 Ut. 인증 = `Authorization: Beare
   MCVideo 몫은 `<service>` 에 `<group-media><mcvideo-video-media/>` 가 있어야 하고, entry `<mcvideo-mcvideo-id>` 는 entry uri 와 같은 신원,
   규칙 `mcvideo-allow-*`(긴급·경보·임박) true 는 받지 않는다.
 - CIMS 자체 요소(`on-network-require-affiliation`·`on-network-require-talker-id`·`on-network-encryption`·`org-code`·`authorized-user`)는
-  PUT 에서 `cims:`(urn:cims:groupinfo:1.0)와 옛 자리 `mcpttgi:` 둘 다 읽는다(GET 은 아직 `mcpttgi:` 로 낸다).
+  3GPP 스키마(TS 24.481 §7.2.4.2)에 없으므로 자기 이름공간 `cims:`(urn:cims:groupinfo:1.0)에 둔다 — GET 문서도 SDK 의 PUT 본문도 `cims:` 다.
+  PUT 은 전환기 동안 옛 자리 `mcpttgi:` 에서도 읽는다(SDK 는 접두를 가리지 않고 읽는다).
 - 처리 = DB(`ptt_groups`·`ptt_group_members`, 소유자 = 토큰 가입자 `users.id`) → in-memory GROUPS 동기화 →
   CSP `GROUP_CHANGED` 통지(CSP 가 xcap-diff NOTIFY 로 단말에 전파). 관리 API(4421, 콘솔 토큰)의 그룹 CRUD 와
   같은 정본·같은 동기화를 쓴다.
@@ -103,7 +104,7 @@ XCAP(RFC 4825) 리소스 기반 — TS 24.481 Ut. 인증 = `Authorization: Beare
   `<mcpttgi:mcdata-protect-transmission-control>` false · `<mcpttgi:mcdata-on-network-group-priority>` · `<mcpttgi:mcdata-default-charset>` 106 ·
   actions `<mcpttgi:mcdata-allow-transmit-data-in-this-group>true`([mcdata_messaging.md](../design/features/mcdata_messaging.md) §2). PUT 은 이 값들을 읽지 않는다.
   MCVideo 선호 코덱은 서버가 집행하는 이름(AMR-WB·H264)만 — 그 밖은 400.
-  `<mcpttgi:authorized-user>` 는 서버가 정한다(본문의 값 무시). floor 정책(`floor_policy`/`max_talkers`)은 관리 API 전용.
+  `<cims:authorized-user>` 는 서버가 정한다(본문의 값 무시). floor 정책(`floor_policy`/`max_talkers`)은 관리 API 전용.
   entry 의 `<mcpttgi:participant-type>` 를 생략하면 **`participant` 로 저장**된다 — 그룹 소유(chair 권한)는 member role 이
   아니라 `authorized_user_id`(= 생성자)로 판정하므로, 생성자를 chair 로 표기하려면 자기 entry 에 `chair` 를 명시한다(앱 기본 동작).
   `<cp:actions>` 의 `<mcpttgi:on-network-allow-conference-state>`(TS 24.481 §7.2.4.2, 기본 true) = 멤버의 conference 이벤트
@@ -114,7 +115,8 @@ XCAP(RFC 4825) 리소스 기반 — TS 24.481 Ut. 인증 = `Authorization: Beare
 <group xmlns="urn:oma:xml:poc:list-service"
   xmlns:rl="urn:ietf:params:xml:ns:resource-lists"
   xmlns:cp="urn:ietf:params:xml:ns:common-policy"
-  xmlns:mcpttgi="urn:3gpp:ns:mcpttGroupInfo:1.0">
+  xmlns:mcpttgi="urn:3gpp:ns:mcpttGroupInfo:1.0"
+  xmlns:cims="urn:cims:groupinfo:1.0">
   <list-service uri="tel:g-0a1b2c3d">
     <display-name xml:lang="en-us">관제채널</display-name>
     <list>
@@ -135,7 +137,7 @@ XCAP(RFC 4825) 리소스 기반 — TS 24.481 Ut. 인증 = `Authorization: Beare
     <mcpttgi:on-network-invite-members>true</mcpttgi:on-network-invite-members>
     <mcpttgi:on-network-max-participant-count>10</mcpttgi:on-network-max-participant-count>
     <mcpttgi:preferred-voice-encodings><mcpttgi:encoding name="AMR-WB"/></mcpttgi:preferred-voice-encodings>
-    <mcpttgi:on-network-require-affiliation>true</mcpttgi:on-network-require-affiliation>
+    <cims:on-network-require-affiliation>true</cims:on-network-require-affiliation>
     <mcpttgi:on-network-hang-timer>PT30S</mcpttgi:on-network-hang-timer>
     <mcpttgi:on-network-maximum-duration>PT3600S</mcpttgi:on-network-maximum-duration>
     <mcpttgi:on-network-minimum-number-to-start>0</mcpttgi:on-network-minimum-number-to-start>
@@ -144,7 +146,7 @@ XCAP(RFC 4825) 리소스 기반 — TS 24.481 Ut. 인증 = `Authorization: Beare
     <mcpttgi:protect-media>false</mcpttgi:protect-media>
     <mcpttgi:protect-floor-control-signalling>false</mcpttgi:protect-floor-control-signalling>
     <mcpttgi:on-network-group-priority>5</mcpttgi:on-network-group-priority>
-    <mcpttgi:on-network-encryption>false</mcpttgi:on-network-encryption>
+    <cims:on-network-encryption>false</cims:on-network-encryption>
     <cp:ruleset><cp:rule id="a7c"><cp:actions>
       <mcpttgi:on-network-allow-getting-member-list>true</mcpttgi:on-network-allow-getting-member-list>
       <mcpttgi:allow-MCPTT-emergency-call>false</mcpttgi:allow-MCPTT-emergency-call>
@@ -155,7 +157,7 @@ XCAP(RFC 4825) 리소스 기반 — TS 24.481 Ut. 인증 = `Authorization: Beare
 </group>
 ```
 
-GET 응답은 여기에 `<mcpttgi:authorized-user>tel:+82510001001</mcpttgi:authorized-user>`(소유자)·`<cims:user-title>`
+GET 응답은 여기에 `<cims:authorized-user>tel:+82510001001</cims:authorized-user>`(소유자)·`<cims:user-title>`
 (직함, CIMS 확장)·MCData 크기 요소·`<oxe:supported-services>` 가 더 실린다. 클라이언트가 변경 구독 시
 SIP `SUBSCRIBE Event: xcap-diff` 이용.
 

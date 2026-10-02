@@ -1003,3 +1003,25 @@ TEST(GroupDoc, PreconfiguredGroupUseOnly) {
     ASSERT_TRUE(GroupDoc::parse(d.toXml(), back));
     EXPECT_TRUE(back.preconfiguredGroupUseOnly);
 }
+
+// CIMS 자체 요소는 `cims:` 이름공간으로 쓴다(TS 24.481 §7.2.4.2 스키마 밖 요소를 3GPP 이름공간에 두지 않는다 — 갭 GMS-10). 읽기는 두 자리 다
+TEST(GroupDoc, OwnElementsUseCimsNamespace) {
+    GroupDoc d; d.uri = "sip:g7@ptt.example"; d.requireAffiliation = false; d.encryption = true; d.orgCode = "HQ"; d.authorizedUser = "tel:+821";
+    const std::string x = d.toXml();
+    EXPECT_NE(x.find("xmlns:cims=\"urn:cims:groupinfo:1.0\""), std::string::npos);
+    EXPECT_NE(x.find("<cims:on-network-require-affiliation>false</cims:on-network-require-affiliation>"), std::string::npos);
+    EXPECT_NE(x.find("<cims:on-network-encryption>true</cims:on-network-encryption>"), std::string::npos);
+    EXPECT_NE(x.find("<cims:org-code>HQ</cims:org-code>"), std::string::npos);
+    EXPECT_NE(x.find("<cims:authorized-user>tel:+821</cims:authorized-user>"), std::string::npos);
+    for (const char* tag : {"on-network-require-affiliation", "on-network-encryption", "org-code", "authorized-user"})
+        EXPECT_EQ(x.find(std::string("<mcpttgi:") + tag), std::string::npos) << tag;
+    GroupDoc back;
+    ASSERT_TRUE(GroupDoc::parse(x, back));
+    EXPECT_FALSE(back.requireAffiliation); EXPECT_TRUE(back.encryption); EXPECT_EQ(back.orgCode, "HQ"); EXPECT_EQ(back.authorizedUser, "tel:+821");
+    GroupDoc old;                                                  // 옛 서버 문서(mcpttgi 자리)도 읽는다
+    ASSERT_TRUE(GroupDoc::parse("<group><list-service uri=\"sip:g@d\"><list></list>"
+                                "<mcpttgi:on-network-require-affiliation>false</mcpttgi:on-network-require-affiliation>"
+                                "<mcpttgi:on-network-encryption>true</mcpttgi:on-network-encryption>"
+                                "<mcpttgi:org-code>OLD</mcpttgi:org-code></list-service></group>", old));
+    EXPECT_FALSE(old.requireAffiliation); EXPECT_TRUE(old.encryption); EXPECT_EQ(old.orgCode, "OLD");
+}

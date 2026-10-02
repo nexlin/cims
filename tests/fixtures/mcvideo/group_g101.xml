@@ -41,7 +41,7 @@
     <mcpttgi:mcdata-default-charset>106</mcpttgi:mcdata-default-charset>
     <mcpttgi:on-network-invite-members>true</mcpttgi:on-network-invite-members>
     <mcpttgi:preferred-voice-encodings><mcpttgi:encoding name="AMR-WB"/></mcpttgi:preferred-voice-encodings>
-    <mcpttgi:on-network-require-affiliation>true</mcpttgi:on-network-require-affiliation>
+    <cims:on-network-require-affiliation>true</cims:on-network-require-affiliation>
     <mcpttgi:on-network-hang-timer>PT30S</mcpttgi:on-network-hang-timer>
     <mcpttgi:on-network-maximum-duration>PT3600S</mcpttgi:on-network-maximum-duration>
     <mcpttgi:on-network-minimum-number-to-start>0</mcpttgi:on-network-minimum-number-to-start>
@@ -49,9 +49,9 @@
     <mcpttgi:on-network-action-upon-expiration-of-timeout-for-acknowledgement-of-required-members>abandon</mcpttgi:on-network-action-upon-expiration-of-timeout-for-acknowledgement-of-required-members>
     <mcpttgi:protect-media>false</mcpttgi:protect-media>
     <mcpttgi:protect-floor-control-signalling>false</mcpttgi:protect-floor-control-signalling>
-    <mcpttgi:on-network-require-talker-id>false</mcpttgi:on-network-require-talker-id>
+    <cims:on-network-require-talker-id>false</cims:on-network-require-talker-id>
     <mcpttgi:on-network-group-priority>5</mcpttgi:on-network-group-priority>
-    <mcpttgi:on-network-encryption>false</mcpttgi:on-network-encryption>
+    <cims:on-network-encryption>false</cims:on-network-encryption>
     <mcpttgi:mcvideo-on-network-invite-members>false</mcpttgi:mcvideo-on-network-invite-members>
     <mcpttgi:mcvideo-on-network-maximum-duration>PT1800S</mcpttgi:mcvideo-on-network-maximum-duration>
     <mcpttgi:mcvideo-protect-media>false</mcpttgi:mcvideo-protect-media>

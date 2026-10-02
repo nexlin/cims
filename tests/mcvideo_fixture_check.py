@@ -28,13 +28,10 @@ GI = "urn:3gpp:ns:mcpttGroupInfo:1.0"
 CIMS_GI = "urn:cims:groupinfo:1.0"
 
 # CIMS 그룹 문서의 3GPP 이름공간 비규격 요소 — MCVideo 계약 밖의 기존 편차(검증 전에 뗀다).
+#   CIMS 자체 요소 다섯(require-affiliation·require-talker-id·encryption·org-code·authorized-user)은 `cims:` 이름공간이라 여기 없다
+#   (_strip_known 이 그 이름공간을 통째로 뗀다).
 KNOWN_DEVIATIONS = {
     f"{{{GI}}}mcptt-video": "현행 «PTT 영상» 전환기 요소 — V7 에서 제거 (mcvideo.md §6 V0 ②)",
-    f"{{{GI}}}on-network-require-affiliation": "CIMS 기존 요소(TS 24.481 스키마에 없음) — MCPTT 편차",
-    f"{{{GI}}}on-network-require-talker-id": "CIMS 기존 요소(TS 24.481 스키마에 없음) — MCPTT 편차",
-    f"{{{GI}}}on-network-encryption": "CIMS 기존 요소(TS 24.481 스키마에 없음) — MCPTT 편차",
-    f"{{{GI}}}org-code": "CIMS 기존 요소(TS 24.481 스키마에 없음) — MCPTT 편차",
-    f"{{{GI}}}authorized-user": "CIMS 기존 요소(TS 24.481 스키마에 없음) — MCPTT 편차",
 }
 
 

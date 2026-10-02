@@ -284,7 +284,8 @@ class GroupDocValuesTests(unittest.TestCase):
         e = ls.find("poc:list/poc:entry", self.NS)
         self.assertEqual(e.find("{urn:ietf:params:xml:ns:resource-lists}display-name").text, "홍&길동 <1>")
         self.assertEqual(e.find("cims:user-title", self.NS).text, '팀장 "A"')
-        self.assertEqual(ls.find("gi:org-code", self.NS).text, "R&D")
+        self.assertEqual(ls.find("cims:org-code", self.NS).text, "R&D")
+        self.assertIsNone(ls.find("gi:org-code", self.NS))            # 자체 요소는 3GPP 이름공간에 두지 않는다(GMS-10)
 
     def test_protection_false_and_preferred_voice(self):
         _, ls = self._ls()
