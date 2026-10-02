@@ -85,7 +85,14 @@ public sealed partial class MainViewModel : ObservableObject
         Summary = new DispatchSummaryViewModel(session, PttChannels, TalkBar, CallDesk, Desk, Sms);
 
         // 그룹 종류(prearranged|chat)는 GMS 목록에 없다 — 관리 목록이 적재될 때 멤버 그룹에 옮긴다([일제 통화]는 편성 그룹만)
-        GroupsScreen.Loaded += (_, _) => session.NoteGroupTypes(GroupsScreen.All.Select(m => (m.Id, m.SessionType)));
+        //   관리 범위로 고칠 수 있는 그룹도 같이 옮긴다 — 내 소유가 아닌 멤버 그룹의 채널 카드에도 ⋮[편집]·[삭제] 가 선다(타 채널 행과 같은 판정)
+        GroupsScreen.Loaded += (_, _) =>
+        {
+            session.NoteGroupTypes(GroupsScreen.All.Select(m => (m.Id, m.SessionType)));
+            session.NoteManagedGroups(GroupsScreen.All.Where(m => m.CanManage).Select(m => m.Id));
+            foreach (var c in PttChannels.Cards) c.Refresh();
+            Panel.Channel?.Refresh(rows: false);
+        };
         GroupsScreen.ChannelRequested += (_, id) => FocusChannel(id);   // [채널로] — 채널 상세로(합류하지 않는다)
         GroupsScreen.PropertyChanged += (_, e) => { if (e.PropertyName == nameof(GroupAdminViewModel.IsEditing) && !GroupsScreen.IsEditing) OnGroupFormClosed(); };
         AdminScreen.PropertyChanged += (_, e) => { if (e.PropertyName is nameof(DirectoryAdminViewModel.IsDirty)) OnPropertyChanged(nameof(AdminEditing)); };

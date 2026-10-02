@@ -175,7 +175,7 @@ public sealed partial class CallRecordsViewModel : ObservableObject
         string disp = _s.Directory.DisplayNumber(raw);
         r.Name = name.Length > 0 ? name : disp;
         r.IsExternal = _s.Directory.IsExternal(raw);
-        r.Sub = r.HasPilot && _s.PilotId.Length > 0 ? "대표 " + UserPartConverter.UserPart(_s.PilotId) : name.Length > 0 ? disp : "";
+        r.Sub = r.HasPilot && _s.PilotId.Length > 0 ? "대표 " + _s.Directory.DisplayNumber(UserPartConverter.UserPart(_s.PilotId)) : name.Length > 0 ? disp : "";
     }
 
     private string Detail(string key)
@@ -185,7 +185,7 @@ public sealed partial class CallRecordsViewModel : ObservableObject
         if (_s.Directory.NameOf(key).Length > 0) parts.Add((_s.Directory.IsExternal(key) ? "" : "내선 ") + disp);
         var c = _s.Directory.Contacts.FirstOrDefault(x => _s.Directory.Canonical(x.Number) == key);
         if (c is not null && c.OrgCode.Length > 0) parts.Add(_s.Directory.OrgName(c.OrgCode));
-        if (_rows.TryGetValue(key, out var r) && r.HasPilot && _s.PilotId.Length > 0) parts.Add($"대표번호 {UserPartConverter.UserPart(_s.PilotId)} 으로 온 호");
+        if (_rows.TryGetValue(key, out var r) && r.HasPilot && _s.PilotId.Length > 0) parts.Add($"대표번호 {_s.Directory.DisplayNumber(UserPartConverter.UserPart(_s.PilotId))} 으로 온 호");
         return string.Join(" · ", parts);
     }
 

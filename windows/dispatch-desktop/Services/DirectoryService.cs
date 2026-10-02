@@ -342,8 +342,9 @@ public sealed class DirectoryService
         string key = Canonical(number);
         var c = _merged.FirstOrDefault(x => Canonical(x.Number) == key);
         if (c is not null) return c.Kind == ContactKind.External;
-        string digits = key;
-        return digits.Length > 6 && !digits.StartsWith('+');       // 내선 규약(짧은 번호)·E.164 가입자 밖이면 외부망으로 본다
+        // 주소록에 없는 번호 — 내선 규약(6자리 이하)이 아니면 외부망으로 본다. 정규형은 국내 표기(010…)를 E.164(+8210…)로 올리므로 `+` 로
+        //   시작한다는 것으로 가입자라 볼 수 없다(주소록에 없는 휴대번호가 게이트웨이 없이도 문자 발신이 열린다). 가입자는 주소록이 말한다.
+        return key.TrimStart('+').Length > 6;
     }
 
     /// <summary>번호 비교 키 — 숫자·+ 만.</summary>

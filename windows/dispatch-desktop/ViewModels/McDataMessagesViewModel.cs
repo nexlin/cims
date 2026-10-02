@@ -43,6 +43,13 @@ public sealed partial class McDataMessagesViewModel : MessagesViewModelBase
         bool group = m.GroupUri.Length > 0;
         // 1:1 스레드 키 = 상대 번호(OpenUser 와 같은 형) — 발신 uri 형이 tel:/sip: 로 달라도 스레드가 갈라지지 않게
         string key = group ? m.GroupUri : UserPartConverter.UserPart(m.FromUri);
+        // 같은 메시지는 한 번만 선다 — 이미 받은 message ID 가 또 오면(상대의 재전송 — 처음 ID 그대로 — 이나 중복 배달) 말풍선·«이벤트» 줄을
+        //   또 세우지 않고, 전달 확인만 다시 돌려준다(상대는 그것을 못 받아 다시 보냈다).
+        if (m.MsgId.Length > 0 && ThreadMap.TryGetValue(key, out var seen) && seen.Messages.Any(x => !x.IsOut && x.MsgId == m.MsgId))
+        {
+            if (m.DispositionReq is 1 or 3) S.SendSdsNotification(m.FromUri, m.ConvId, m.MsgId, 2, m.GroupUri);
+            return;
+        }
         var msgIn = new Message
         {
             Kind = MessageKind.McData, ThreadKey = key, Direction = MessageDirection.In, Peer = m.FromUri, PeerName = S.NameOfPtt(m.FromUri),

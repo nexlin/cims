@@ -561,10 +561,19 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
     {
         if (_csc is null || _tokens is null || !HasDesk) return;
         _history?.Dispose();
-        _history = new HistoryClient(_csc, AccessTokenAsync, RenewAccessTokenAsync, Log);
-        _history.Received += (_, e) => OnHistory(e);
-        if (await _history.ProbeAsync() == true)
-            _history.Start(new[] { HistoryKind.Call, HistoryKind.Ptt, HistoryKind.Message });
+        var h = _history = new HistoryClient(_csc, AccessTokenAsync, RenewAccessTokenAsync, Log);
+        h.Received += (_, e) => OnHistory(e);
+        // 탐침이 판단을 못 내리면(null — 그 순간 서버에 닿지 않았다) 물러나며 다시 묻는다. 한 번 실패로 그 로그인 내내 폴링이 꺼지지 않게.
+        //   서버가 이 API 를 내지 않거나(404·501·405) 범위가 없으면(403) 거기서 끝이다. 로그아웃·재로그인은 _history 를 갈아 끼운다.
+        for (int wait = 5000; ; wait = Math.Min(wait * 2, 60_000))
+        {
+            bool? ok = await h.ProbeAsync();
+            if (_history != h) return;
+            if (ok == true) { h.Start(new[] { HistoryKind.Call, HistoryKind.Ptt, HistoryKind.Message }); return; }
+            if (ok == false) return;
+            await Task.Delay(wait);
+            if (_history != h) return;
+        }
     }
 
     /// <summary>이력 항목 → «이벤트»·«기록» 행. 내가 당사자인 항목은 이미 로컬 행이 있으니 건너뛴다 — 서버 이력의 몫은 관제 범위 안 타인의 통화·세션·메시지.
@@ -592,6 +601,9 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
             }
             case HistoryKind.Ptt:
             {
+                // 내가 들어가 있는(청취 포함) 그룹의 발언은 내 세션의 floor 가 이미 «이벤트» 에 적었다 — 같은 발언이 두 줄이 되지 않게 건너뛴다
+                if (e.Event == "ptt.talk" && Sessions.Any(x => x.IsLive && x.Info.IsMcptt
+                        && string.Equals(x.Info.GroupId, UserPartConverter.UserPart(e.Group), StringComparison.OrdinalIgnoreCase))) break;
                 string group = Groups.FirstOrDefault(g => string.Equals(g.Uri, e.Group, StringComparison.OrdinalIgnoreCase))?.Name ?? UserPartConverter.UserPart(e.Group);
                 var kind = e.Event switch
                 {
@@ -767,6 +779,16 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
         foreach (var g in Groups) if (_groupTypes.TryGetValue(g.Id, out var t)) g.SessionType = t;
     }
 
+    /// <summary>관리 범위로 고칠 수 있는 그룹(관리 목록의 CanManage) — 내 소유가 아니어도 채널 카드·채널 상세의 ⋮[편집]·[삭제] 가 선다
+    /// (타 채널 행 ScopedCard.CanEdit 와 같은 판정). 관리 목록을 받을 때마다 통째로 갈아 끼운다.</summary>
+    private readonly HashSet<string> _manageable = new(StringComparer.OrdinalIgnoreCase);
+    public void NoteManagedGroups(IEnumerable<string> ids)
+    {
+        _manageable.Clear();
+        foreach (string id in ids) if (id.Length > 0) _manageable.Add(id);
+    }
+    public bool CanManageGroup(string groupId) => _manageable.Contains(groupId);
+
     public async Task<Result<GroupDoc>> GetGroupAsync(GroupInfo g, CancellationToken ct = default)
     {
         if (_csc is null || _tokens is null) return Result<GroupDoc>.Fail(-1, "로그인 전");
@@ -864,7 +886,10 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
         CredentialWarning = false;
         Volte = null; Ptt = null; Profile = null;
         _accountKinds.Clear(); _watched.Clear(); _pendingOps.Clear(); _pendingConsult.Clear(); _adhocMembers.Clear(); _regRetryAt.Clear(); _regBackoff.Clear();
-        _broadcastPending.Clear(); _groupTypes.Clear();
+        _broadcastPending.Clear(); _groupTypes.Clear(); _manageable.Clear(); _localHangups.Clear(); _conditionCancel.Clear(); _alertCancel.Clear(); _pttRegLost = false;
+        // 화면에 쌓인 것도 이 로그인의 것이다 — 다음 사람(다른 자리 ID)에게 앞 사람의 «이벤트»·«기록»·토스트가 보이지 않게. 앱 종료(자격을 남기는
+        //   로그아웃)에서도 같다 — 보관은 메시지 보관소(로그인 ID 로 격리)와 서버 이력이 한다.
+        Activity.Clear(); Notify.Toasts.Clear();
         _userProfile = null; _serviceConfig = null; _ueInit = null; Capabilities = Capabilities.Of(null, null); _nextCmsPoll = DateTime.MaxValue; _netPrint = "";
         foreach (var ab in Notify.Banners.Where(b => b.IsAlert).ToList()) Notify.RemoveBanner(ab);
         Sessions.Clear(); Groups.Clear(); Dialogs.Clear();
@@ -919,25 +944,43 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
     }
 
     // ── 등록 ──
+    /// <summary>PTT 등록이 한 번 내려갔다 — 다음 등록 성공 때 MCVideo 제휴를 다시 싣는다.</summary>
+    private bool _pttRegLost;
+
     private void OnRegistration(RegInfo r)
     {
         // 로그아웃 뒤 늦게 오는 un-REGISTER 실패 등 — 계정 표가 비어 있으면 이 세션의 것이 아니다(로그인 창에 토스트가 뜨지 않게)
         if (!_accountKinds.ContainsKey(r.AccountId)) { Log.Info($"reg late acc={r.AccountId} {r.State} {r.Code} — ignored"); return; }
         var kind = KindOf(r.AccountId);
+        var prev = kind == AccountKind.Ptt ? PttReg : VolteReg;
         if (kind == AccountKind.Ptt) PttReg = r; else VolteReg = r;
         string name = kind == AccountKind.Ptt ? "PTT" : "VoLTE";
         Log.Info($"reg {name} {r.State} {r.Code} {r.Reason}");
+        // PTT 등록이 내려갔다(실패·해제) — 다시 서면 제휴를 새로 싣는다(재시도는 Registering 을 거치므로 직전 상태가 아니라 깃발로 든다)
+        if (kind == AccountKind.Ptt && r.State is RegState.Failed or RegState.Unregistered) _pttRegLost = true;
         if (r.State == RegState.Registered)
         {
             _regRetryAt.Remove(r.AccountId); _regBackoff.Remove(r.AccountId);
             if (IsReady) UpdateServerCertBanner();                 // TLS 등록 = 새 핸드셰이크 = 관측 갱신 시점
-            if (kind == AccountKind.Ptt) EnsureVideoChannels();   // 영상 채널 합류(D10 — §10.2)는 PTT 등록 뒤
+            if (kind == AccountKind.Ptt)
+            {
+                // 등록이 끊겼다 다시 섰다 — 서버는 등록이 사라질 때 제휴(affiliation)도 내린다(TS 24.281 §8.2.2.2). 영상 채널의 MCVideo 제휴를
+                //   다시 싣는다(코어가 관심 그룹 전부를 한 PUBLISH 로) — 그러지 않으면 편성 영상 호의 초대가 오지 않는다.
+                bool lost = _pttRegLost; _pttRegLost = false;
+                if (lost && Groups.Any(g => g.McVideoAffiliated))
+                {
+                    foreach (var g in Groups.Where(g => g.McVideoAffiliated)) g.McVideoAffiliated = false;
+                    ApplyMcVideoGroups();                          // 제휴를 다시 걸고 영상 채널 합류를 맞춘다(§10.2)
+                }
+                else EnsureVideoChannels();                        // 영상 채널 합류(D10 — §10.2)는 PTT 등록 뒤
+            }
             return;
         }
         if (r.State == RegState.Failed)
         {
             string msg = ResponseText.Describe(ResponseText.Area.Register, r.Code, r.Reason);
-            Notify.Error($"{name} 등록 실패 — {msg}", $"{r.Code} {r.Reason}");
+            // 실패로 **바뀔 때만** 알린다 — 재시도가 실패할 때마다 오류 토스트를 쌓으면(닫을 때까지 남는다) 다른 실패를 밀어낸다
+            if (prev.State != RegState.Failed) Notify.Error($"{name} 등록 실패 — {msg}", $"{r.Code} {r.Reason}");
             int back = _regBackoff.TryGetValue(r.AccountId, out int b) ? Math.Min(60, b * 2) : 5;
             _regBackoff[r.AccountId] = back;
             _regRetryAt[r.AccountId] = DateTime.Now.AddSeconds(back);
@@ -1005,7 +1048,7 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
             string who = Directory.Label(ci.RemoteUri);
             string title = kind switch
             {
-                BannerKind.PilotIncoming => $"대표번호 {UserPartConverter.UserPart(ci.CalledParty)} 착신",
+                BannerKind.PilotIncoming => $"대표번호 {Directory.DisplayNumber(UserPartConverter.UserPart(ci.CalledParty))} 착신",
                 BannerKind.PttPrivateIncoming => "PTT 개별 통화 착신",
                 _ => "착신",
             };
@@ -1030,6 +1073,9 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
             End(s);
             return;
         }
+        // 이 호가 **처음** 성립하는가 — 자동 보류는 새 통화가 붙을 때만 건다. 이미 성립한 호가 다시 Active 가 되는 것(상대가 보류를 풀어 줌)에
+        //   걸면 내가 말하던 다른 통화가 보류된다. 내가 보류를 푸는 것은 Resume 이 직접 다른 통화를 보류한다.
+        bool firstActive = ci.State == CallState.Active && s?.ConnectedAt is null;
         if (s is null)
         {
             Operation op = _pendingOps.Remove(ci.CallId, out var o) ? o : ci.Dir == CallDir.Incoming ? Operation.Incoming : Operation.Dial;
@@ -1037,7 +1083,7 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
         }
         else { s.Info = ci; NoteAnswerState(s); }
         if (ci.State != CallState.Incoming && Notify.BannerOf(s) is { IsVideo: false } b) Notify.RemoveBanner(b);   // «새 영상» 은 송출 투영이 내린다
-        if (ci.State == CallState.Active && s.Kind == SessionKind.VolteCall && Settings.Current.AutoHoldOnAnswer)
+        if (firstActive && s.Kind == SessionKind.VolteCall && Settings.Current.AutoHoldOnAnswer)
             foreach (var other in VolteCalls.Where(o => o != s && o.IsActive).ToList()) Engine.GetCall(other.CallId).Hold();
         UpdateEmergencyBanner(s);
         SessionChanged?.Invoke(this, s);
@@ -1129,10 +1175,19 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
         return label.Length > 0 ? label : UserPartConverter.UserPart(ci.RemoteUri);
     }
 
+    /// <summary>내가 끊은(거둔·거절한) 호 — 끝날 때 한 번 묻는다. 연결 전에 끊으면 CANCEL → 487, 거절하면 486 으로 끝나는데 그것은 실패도 부재도 아니다
+    /// (오류 토스트·«실패 487»·«부재» 로 적지 않는다). 호 번호는 다시 쓰이므로 끝날 때 지운다.</summary>
+    private readonly HashSet<int> _localHangups = new();
+
     private void End(SessionItem s)
     {
         Sessions.Remove(s);
         _broadcastPending.Remove(s.CallId);
+        _conditionCancel.Remove(s.CallId);                       // 답을 못 받은 해제 요청 — 그 번호를 물려받은 다음 호의 거절 문구가 되지 않게
+        bool mine = _localHangups.Remove(s.CallId);
+        // 자동 합류한 영상 채널 호(내가 연 편성 호가 아니다)의 연속 실패는 처음만 알린다 — 물러나며 다시 붙을 때마다 오류 토스트가 쌓이지 않게
+        bool videoAuto = s.IsMcVideo && !_videoOpening.Contains(s.CallId);
+        bool videoRepeat = videoAuto && _videoFailures.GetValueOrDefault(s.Info.GroupId) > 0;
         if (Notify.BannerOf(s) is { } b) Notify.RemoveBanner(b);
         var ci = s.Info;
         string dur = s.ConnectedAt is null ? "" : $" · {Fmt(DateTime.Now - s.ConnectedAt.Value)}";
@@ -1147,17 +1202,19 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
                 // 전원 무응답 부재는 대표번호 dialog 가 confirmed 없이 terminated 될 때(OnDialog) 1건만 기록한다.
                 break;
             case SessionKind.VolteCall when ci.Dir == CallDir.Incoming && s.ConnectedAt is null:
-                Activity.Add(ActivityPanel.Call, ActivityKind.Missed, $"부재 {MyExtension} ← {s.Title}", "", missed: true, number: s.PeerNumber);
+                // 내가 거절한 호는 «부재 · 거절» — 받지 않은 호라 부재로 세되, 놓친 것과 구분한다
+                Activity.Add(ActivityPanel.Call, ActivityKind.Missed, $"부재 {MyExtension} ← {s.Title}", mine ? "거절" : "", missed: true, number: s.PeerNumber);
                 break;
             case SessionKind.VolteCall when ci.Dir == CallDir.Incoming:
-                Activity.Add(ActivityPanel.Call, ActivityKind.Incoming, $"착신 {(IsPilot(ci.CalledParty) ? UserPartConverter.UserPart(ci.CalledParty) : MyExtension)} ← {s.Title}",
+                Activity.Add(ActivityPanel.Call, ActivityKind.Incoming, $"착신 {(IsPilot(ci.CalledParty) ? Directory.DisplayNumber(UserPartConverter.UserPart(ci.CalledParty)) : MyExtension)} ← {s.Title}",
                              $"응답 {MyExtension}{dur}", number: s.PeerNumber, pilot: IsPilot(ci.CalledParty));
                 break;
             case SessionKind.VolteCall when s.Operation == Operation.Pickup:
                 Activity.Add(ActivityPanel.Call, ActivityKind.Pickup, $"픽업 {s.Title}", dur.Trim(' ', '·'), number: s.PeerNumber);
                 break;
             case SessionKind.VolteCall:
-                Activity.Add(ActivityPanel.Call, ActivityKind.Outgoing, $"발신 {MyExtension} → {s.Title}", s.ConnectedAt is null ? Fail(s) : dur.Trim(' ', '·'), number: s.PeerNumber);
+                Activity.Add(ActivityPanel.Call, ActivityKind.Outgoing, $"발신 {MyExtension} → {s.Title}",
+                             s.ConnectedAt is not null ? dur.Trim(' ', '·') : mine ? "취소" : Fail(s), number: s.PeerNumber);
                 break;
             case SessionKind.VolteMonitor:
                 Activity.Add(ActivityPanel.Call, ActivityKind.ListenEnd, $"청취 종료 {s.Title}", dur.Trim(' ', '·'), number: s.PeerNumber);
@@ -1166,7 +1223,9 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
                 Activity.Add(ActivityPanel.Ptt, ActivityKind.ListenEnd, $"청취 종료 {s.Title}", dur.Trim(' ', '·'));
                 break;
             case SessionKind.PttPrivate:
-                Activity.Add(ActivityPanel.Ptt, ActivityKind.Private, $"개별 통화 종료 {s.Title}", s.ConnectedAt is null ? Fail(s) : dur.Trim(' ', '·'));
+                // 실패는 내가 건 호가 성립하지 못한 것이다 — 내가 거둔 호·받지 않은 착신(상대가 거둠 487·내가 거절 486)은 실패가 아니다
+                Activity.Add(ActivityPanel.Ptt, ActivityKind.Private, $"개별 통화 종료 {s.Title}",
+                             s.ConnectedAt is not null ? dur.Trim(' ', '·') : mine || ci.Dir == CallDir.Incoming ? "" : Fail(s));
                 break;
             case SessionKind.PttAdhoc:
                 Activity.Add(ActivityPanel.Ptt, ActivityKind.SessionEnd, $"애드혹 종료 {s.Title}", $"{dur.Trim(' ', '·')} · 참가 {s.AdhocMembers.Count}");
@@ -1184,11 +1243,14 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
         }
         // 실패한 발신 동작의 사유(§9 사전) — 착신·정상 종료(BYE)는 제외
         bool quiet = s.IsMcVideo && QuietVideoEnd(s.CallId);                // 내가 거둔 영상 호 개시·내가 떠난 영상 채널
-        if (s.ConnectedAt is null && ci.Dir == CallDir.Outgoing && ci.LastCode >= 300 && !quiet)
+        //   내가 거둔 발신(연결 전 종료 = CANCEL → 487)은 실패가 아니다 — «취소됨» 오류를 띄우지 않는다.
+        if (s.ConnectedAt is null && ci.Dir == CallDir.Outgoing && ci.LastCode >= 300 && !quiet && !mine && !videoRepeat)
         {
             var area = ResponseText.AreaOf(s.Operation);
             if (s.Operation == Operation.Dial && ci.IsMcptt) area = s.Kind == SessionKind.PttPrivate ? ResponseText.Area.PttPrivate : ResponseText.Area.PttJoin;
-            Notify.Error(ResponseText.Describe(area, ci.LastCode, ci.LastReason), $"{ci.LastCode} {ci.LastReason}");
+            string text = ResponseText.Describe(area, ci.LastCode, ci.LastReason);
+            // 영상 채널 호는 화면 어디에서 눌러 건 것이 아니다(앱이 채널에 맞춰 붙는다) — 어느 채널인지 적는다
+            Notify.Error(s.IsMcVideo ? $"{s.Title} 영상 — {text}" : text, $"{ci.LastCode} {ci.LastReason}");
         }
         if (Notify.BannerOfGroup(ci.GroupId) is { } eb && SessionOfGroup(ci.GroupId) is null) Notify.RemoveBanner(eb);
         SessionEnded?.Invoke(this, s);
@@ -1318,8 +1380,11 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
         {
             case FloorEventKind.Granted:
                 s.Speaker = "나"; s.SpeakerSince = now; s.FloorNote = ""; s.TalkLimitNear = false; s.TalkGauge = 1;
+                s.GrantedSec = Math.Max(0, ev.DurationSec);            // 남은 발언 게이지의 기준 — 그 승인의 Granted Duration
                 break;
             case FloorEventKind.Taken:
+                // 내가 말하는 중에 온 Taken(동시 발언 — 다른 사람도 발언권을 얻었다)은 내 발언 표시·게이지를 바꾸지 않는다
+                if (s.IsSpeaking) break;
                 var t = ev.Talkers.FirstOrDefault(x => !x.Self) ?? ev.Talkers.FirstOrDefault();
                 string who = t is null ? "" : t.Self ? "나" : NameOfPtt(t.Id);
                 if (s.Speaker != who) { CloseTalk(s, now); s.Speaker = who; s.SpeakerSince = now; }
@@ -1331,20 +1396,26 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
                 s.TalkGauge = 0; s.TalkLimitNear = false;
                 break;
             case FloorEventKind.Denied:
-                s.FloorNote = ev.CauseText.Length > 0 ? ev.CauseText : "요청 거부"; CloseTalk(s, now);
+                // 앱 쪽 거부(수신 전용 — 코어가 서버 메시지 없이 낸다, RawType -1)는 발언자를 싣지 않는다 — 그것으로 지금 말하는 사람의 발언을
+                //   닫지 않는다(닫으면 남의 발언이 일찍 끝난 것으로 «이벤트» 에 적힌다). 서버의 Floor Deny 는 발언 줄을 닫는다.
+                s.FloorNote = ev.CauseText.Length > 0 ? ev.CauseText : "요청 거부"; if (ev.RawType >= 0) CloseTalk(s, now);
                 Activity.Add(ActivityPanel.Ptt, ActivityKind.Error, $"{s.Title} 발언 요청 거부", ev.CauseText); break;
             case FloorEventKind.Revoked:
                 s.FloorNote = ev.CauseText.Length > 0 ? ev.CauseText : "발언권 회수"; CloseTalk(s, now);
                 Activity.Add(ActivityPanel.Ptt, ActivityKind.Error, $"{s.Title} 발언권 회수", ev.CauseText); break;
             case FloorEventKind.QueuePosition:
-                s.FloorNote = ev.QueuePosition >= 0 ? $"대기 {ev.QueuePosition + 1}번째" : "대기열"; break;
+                // Queue Position Info(TS 24.380 §8.2.3.9)의 위치는 1 부터다 — 그대로 적는다. 254(대기 아님)·255(알 수 없음)·그 밖은 위치를 적지 않는다.
+                s.FloorNote = ev.QueuePosition is >= 1 and <= 253 ? $"대기 {ev.QueuePosition}번째" : "대기열"; break;
             case FloorEventKind.QueueCancelled:
                 s.FloorNote = ""; break;
             case FloorEventKind.RequestTimeout:
                 s.FloorNote = "요청 시간 초과";
                 Activity.Add(ActivityPanel.Ptt, ActivityKind.Error, $"{s.Title} 발언 요청 시간 초과"); break;
             case FloorEventKind.TalkLimit:
-                s.TalkLimitNear = true; break;
+                // 승인된 발언 시간(Granted Duration)이 다해 코어가 스스로 놓았다(TS 24.380 T2) — 왜 발언이 끊겼는지 «이벤트» 에 남긴다.
+                //   코어는 이 이벤트를 발언 상태를 벗어난 뒤에 낸다(내 발언 줄은 여기서 닫는다 — 뒤따르는 Floor Idle 은 닫을 것이 없다).
+                CloseTalk(s, now); s.TalkGauge = 0; s.TalkLimitNear = false;
+                Activity.Add(ActivityPanel.Ptt, ActivityKind.Error, $"{s.Title} 발언 시간 초과", "발언이 끝났습니다"); break;
         }
         SyncVideoMic();
         Floor?.Invoke(this, (s, ev));
@@ -1450,7 +1521,7 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
     /// 서버 이력(call.*)의 대표번호 항목은 응답자 필드가 없어 이 행과 겹치므로 OnHistory 가 건너뛴다.</summary>
     private void RecordPilotOutcome(DialogRow r, DialogInfo last, DateTime confirmedAt)
     {
-        string pilot = UserPartConverter.UserPart(PilotId);
+        string pilot = Directory.DisplayNumber(UserPartConverter.UserPart(PilotId));       // 표시용 — 국내 표기
         string caller = UserPartConverter.UserPart(last.RemoteIdentity);
         if (!r.WasConfirmed)
         {
@@ -1497,14 +1568,34 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
         if (Volte is null) return Fail("VoLTE 계정 없음");
         if (MonitorOfDialog(row.Info.CallId) is not null) return Fail("이미 청취 중");
         if (MonitorCount >= Settings.Current.MaxMonitorWindows) return Fail($"동시 청취 상한 {Settings.Current.MaxMonitorWindows}");
-        return Track(Volte.Join(row.Watched, row.Info), Operation.Join);
+        // 합류 INVITE 의 대상은 라우팅되는 주소여야 한다 — dialog NOTIFY 의 entity 가 `tel:` 이면 호스트가 없어 INVITE 가 나가지 못한다.
+        //   번호만 떼어 전화 도메인의 sip: 주소로 올린다(구독 때 쓰는 주소와 같은 꼴).
+        string target = row.Watched.StartsWith("tel:", StringComparison.OrdinalIgnoreCase) ? ToSipUri(UserPartConverter.UserPart(row.Watched)) : row.Watched;
+        return Track(Volte.Join(target, row.Info), Operation.Join);
     }
 
+    /// <summary>열려 있는 듣기 전용 leg 수 — 통화 감청 + PTT 청취. 동시 청취 상한(설정)은 이 합에 건다.</summary>
     public int MonitorCount => Sessions.Count(s => s.IsListenLeg);
 
+    /// <summary>종료·로그아웃 확인에 낼 «진행 중» 요약("통화 1 · 무전 2 · 감청 1") — 관제사가 하고 있는 것만 종류별로 센다. 없으면 빈 값.
+    /// 영상 채널 호는 앱이 내 채널에 맞춰 스스로 붙어 있는 것(D10)이라 세지 않고, 영상을 보내거나(요청·대기 포함) 보고 있을 때만 센다.</summary>
+    public string LiveSummary()
+    {
+        var live = Sessions.Where(s => s.IsLive).ToList();
+        var parts = new List<string>();
+        void Add(string label, int n) { if (n > 0) parts.Add($"{label} {n}"); }
+        Add("통화", live.Count(s => s.Kind == SessionKind.VolteCall));
+        Add("무전", live.Count(s => s.IsPttCard));
+        Add("감청", live.Count(s => s.Kind == SessionKind.VolteMonitor));
+        Add("청취", live.Count(s => s.Kind == SessionKind.PttListen));
+        Add("영상 보내기", live.Count(s => s.IsMcVideo && s.Transmission.State is TransmissionState.Permitted or TransmissionState.PendingRequest or TransmissionState.Queued));
+        Add("영상 보기", live.Count(s => s.IsMcVideo && s.Receiving is not null));
+        return string.Join(" · ", parts);
+    }
+
     public Result Answer(SessionItem s) => Show(Engine.GetCall(s.CallId).Answer(), ResponseText.Area.Call);
-    public Result Reject(SessionItem s) => Show(Engine.GetCall(s.CallId).Reject(486), ResponseText.Area.Call);
-    public Result Hangup(SessionItem s) => Show(Engine.GetCall(s.CallId).Hangup(), ResponseText.Area.Call);
+    public Result Reject(SessionItem s) { if (s.IsLive) _localHangups.Add(s.CallId); return Show(Engine.GetCall(s.CallId).Reject(486), ResponseText.Area.Call); }
+    public Result Hangup(SessionItem s) { if (s.IsLive) _localHangups.Add(s.CallId); return Show(Engine.GetCall(s.CallId).Hangup(), ResponseText.Area.Call); }
     public Result Hold(SessionItem s) => Show(Engine.GetCall(s.CallId).Hold(), ResponseText.Area.Call);
     public Result Resume(SessionItem s)
     {
@@ -1543,6 +1634,7 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
     public Result CancelConsult(SessionItem consult)
     {
         var orig = consult.ConsultFor;
+        if (consult.IsLive) _localHangups.Add(consult.CallId);
         var r = Engine.GetCall(consult.CallId).Hangup();
         if (orig is not null && orig.IsHeld) Engine.GetCall(orig.CallId).Resume();
         return Show(r, ResponseText.Area.Call);
@@ -1553,22 +1645,6 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
     {
         if (Ptt is null) return Fail("PTT 계정 없음");
         return Track(Ptt.JoinGroupCall(g.Id), Operation.PttJoin);
-    }
-
-    /// <summary>종료·로그아웃 확인에 낼 «진행 중» 요약("통화 1 · 무전 2 · 감청 1") — 관제사가 하고 있는 것만 종류별로 센다. 없으면 빈 값.
-    /// 영상 채널 호는 앱이 내 채널에 맞춰 스스로 붙어 있는 것(D10)이라 세지 않고, 영상을 보내거나(요청·대기 포함) 보고 있을 때만 센다.</summary>
-    public string LiveSummary()
-    {
-        var live = Sessions.Where(s => s.IsLive).ToList();
-        var parts = new List<string>();
-        void Add(string label, int n) { if (n > 0) parts.Add($"{label} {n}"); }
-        Add("통화", live.Count(s => s.Kind == SessionKind.VolteCall));
-        Add("무전", live.Count(s => s.IsPttCard));
-        Add("감청", live.Count(s => s.Kind == SessionKind.VolteMonitor));
-        Add("청취", live.Count(s => s.Kind == SessionKind.PttListen));
-        Add("영상 보내기", live.Count(s => s.IsMcVideo && s.Transmission.State is TransmissionState.Permitted or TransmissionState.PendingRequest or TransmissionState.Queued));
-        Add("영상 보기", live.Count(s => s.IsMcVideo && s.Receiving is not null));
-        return string.Join(" · ", parts);
     }
 
     public Result LeaveChannel(SessionItem s) => Show(Engine.GetCall(s.CallId).LeaveGroupCall(), ResponseText.Area.PttJoin);
@@ -1641,7 +1717,7 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
         var call = Engine.GetCall(callId);
         var info = call.Info;
         if (!info.IsLive) return;
-        if (info.State != CallState.Active) Show(call.Hangup(), ResponseText.Area.Call);
+        if (info.State != CallState.Active) { _localHangups.Add(callId); Show(call.Hangup(), ResponseText.Area.Call); }
         else { call.FloorRelease(); if (Find(callId) is { } s) SyncFloor(s); }
     }
 

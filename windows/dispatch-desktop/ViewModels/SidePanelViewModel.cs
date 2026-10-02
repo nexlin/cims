@@ -124,7 +124,9 @@ public sealed partial class ChannelDetailViewModel : ObservableObject
     public bool CanTarget => Card?.CanCheck == true;
     public bool IsTarget => Card?.IsChecked == true;
     public string TargetText => IsTarget ? "✓ 발언 대상" : "발언 대상";
-    public bool ShowBroadcast => Card is { IsMember: true, IsJoined: false };
+    /// <summary>[일제 통화] — 미참여 멤버 그룹에. **누르고 있는 동안은 남긴다** — 개시되면 참여 중이 되는데, 그때 버튼을 숨기면 마우스 캡처가 풀려
+    /// (HoldButton.OnLostMouseCapture) 놓은 것으로 읽히고 연 일제 통화가 곧바로 끝난다.</summary>
+    public bool ShowBroadcast => Card is { IsMember: true } c && (!c.IsJoined || c.IsBroadcastHeld);
     public bool CanPressBroadcast => Card?.CanPressBroadcast == true;
     public string BroadcastText => Card?.BroadcastText ?? "";
     public string BroadcastTip => Card?.BroadcastTip ?? "";
@@ -152,7 +154,8 @@ public sealed partial class ChannelDetailViewModel : ObservableObject
     // ── 영상 채널(MCVideo, §10.3) — 멤버 영상 채널만. «영상 참여» 없음(D10 — 앱이 영상 호에 함께 합류), 수신 manual(D8 — 골라 [보기]) ──
     public bool ShowVideo => Card?.IsVideoGroup == true;
     public SessionItem? Video => Card?.Video;
-    public bool VideoConnected => Video is { IsLive: true };
+    /// <summary>영상 호가 **성립했다**(200 OK 뒤) — 합류 INVITE 가 나가 있는 동안은 아니다(«연결됨»·[영상 보내기] 를 성립 전에 세우지 않는다).</summary>
+    public bool VideoConnected => Video is { IsActive: true };
     /// <summary>머리 옆 작은 글 — 연결됨이면 «채널 참여와 함께 연결됨», 아니면 연결 상태(연결 중·편성 초대 대기·한도·실패·재시도).</summary>
     /// <summary>내가 연 편성 영상 호가 성립 전 — 제어 기능이 멤버를 초대하는 중(TS 24.281 §9.2.1.4.2).</summary>
     public bool VideoOpening => _s.IsVideoOpening(Video);
@@ -221,6 +224,7 @@ public sealed partial class ChannelDetailViewModel : ObservableObject
             if (Group is { } g && _s.CanOpenVideo(g)) { _s.OpenVideoTx(g); Refresh(rows: false); }      // 편성 채널 — 영상 호를 연다
             return;
         }
+        if (!v.IsActive) return;                                                                         // 합류 중 — 성립한 뒤에 누른다
         if (TxState == TransmissionState.NoPermission) _s.RequestVideoTx(v);
         else if (TxState != TransmissionState.PendingEnd) _s.ReleaseVideoTx(v);
         Refresh(rows: false);

@@ -324,9 +324,11 @@
                             </Button>
                             <Button DockPanel.Dock="Right" Style="{StaticResource Pill.Ink}" Height="42" Padding="20,0" FontSize="14" Content="보내기" Command="{Binding SendCommand}" IsEnabled="{Binding CanSend}" Margin="8,0,0,0" />
                             <Grid VerticalAlignment="Center">
-                                <Border Height="42" CornerRadius="21" BorderThickness="1.5" BorderBrush="{DynamicResource Brush.Edge}" Background="{DynamicResource Brush.Surface}" />
-                                <TextBox x:Name="Input" Text="{Binding Input, UpdateSourceTrigger=PropertyChanged}" KeyDown="Input_KeyDown" IsEnabled="{Binding HasSelection}" Margin="16,0" FontSize="14"
-                                         BorderThickness="0" Background="Transparent" VerticalContentAlignment="Center" Height="38" Foreground="{DynamicResource Brush.Text}" CaretBrush="{DynamicResource Brush.Text}" />
+                                <Border MinHeight="42" CornerRadius="21" BorderThickness="1.5" BorderBrush="{DynamicResource Brush.Edge}" Background="{DynamicResource Brush.Surface}" />
+                                <!-- Enter = 보내기, Shift+Enter = 줄바꿈(§4.4) — 줄이 늘면 칸이 세 줄까지 자란다. Enter 는 글상자가 먹기 전에(Preview) 받는다 -->
+                                <TextBox x:Name="Input" Text="{Binding Input, UpdateSourceTrigger=PropertyChanged}" PreviewKeyDown="Input_KeyDown" IsEnabled="{Binding HasSelection}" Margin="16,2" FontSize="14"
+                                         AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" MinHeight="38" MaxHeight="84"
+                                         BorderThickness="0" Background="Transparent" VerticalContentAlignment="Center" Foreground="{DynamicResource Brush.Text}" CaretBrush="{DynamicResource Brush.Text}" />
                                 <TextBlock Style="{StaticResource Muted}" FontSize="14" Text="{Binding InputHint}" Margin="18,0" VerticalAlignment="Center" IsHitTestVisible="False"
                                            Visibility="{Binding Input, Converter={StaticResource StrToVis}, ConverterParameter=invert}" />
                             </Grid>

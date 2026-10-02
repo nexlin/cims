@@ -47,7 +47,7 @@ public sealed partial class DeskViewModel : ObservableObject
     public string PttNumber => _s.MyPttNumber.Length > 4 ? "PTT …" + _s.MyPttNumber[^4..] : "PTT " + _s.MyPttNumber;
     public string PttNumberFull => _s.MyPttId;
     public string GroupName => _s.GroupName;
-    public string Pilot => _s.PilotId.Length > 0 ? "대표 " + UserPartConverter.UserPart(_s.PilotId) : "";
+    public string Pilot => _s.PilotId.Length > 0 ? "대표 " + _s.Directory.DisplayNumber(UserPartConverter.UserPart(_s.PilotId)) : "";
     public bool HasDesk => _s.HasDesk;
     /// <summary>상단 바 이름 옆 한 줄 — "관제1과 · 대표 7000"(관제 데스크가 없으면 PTT 번호).</summary>
     public string DeskLine => string.Join(" · ", new[] { GroupName, Pilot }.Where(x => x.Length > 0)) is { Length: > 0 } d ? d : PttNumber;

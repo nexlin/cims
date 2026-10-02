@@ -109,7 +109,8 @@ public sealed class HistoryClient : IDisposable
         {
             if (r.Code is 404 or 501 or 403) { _log.Warn($"history {kind}: {r.Code} — polling off"); Available = false; Stop(); }
             else if (r.Code < 0) { if (_unreachable++ == 0) _log.Warn($"history: CSC unreachable ({r.Reason}) — backing off"); }
-            else _log.Warn($"history {kind}: {r}");
+            // 닿았는데 안 되는 것(갱신이 안 되는 401·5xx)도 물러난다 — 2.5초마다 같은 실패를 되풀이하며 로그를 채우지 않는다
+            else { if (_unreachable++ == 0) _log.Warn($"history {kind}: {r} — backing off"); }
             return;
         }
         if (_unreachable > 0) { _log.Info($"history: CSC reachable again after {_unreachable} failed polls"); _unreachable = 0; }

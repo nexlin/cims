@@ -326,6 +326,12 @@ public sealed partial class SessionHistoryViewModel : ObservableObject
     private HistoryRow? _paneRow; private PttSessionDetail? _paneDetail;
 
     private IReadOnlyList<HistoryEntry> _all = Array.Empty<HistoryEntry>();
+    /// <summary>서버 창 조회 상한(csc dispatch_history) — 이만큼 왔으면 그 날은 잘린 것이다.</summary>
+    private const int QueryLimit = 1000;
+    private bool _dayTruncated;
+    /// <summary>잘린 날에 고른 시간대의 항목 — 그 시간대를 서버에 다시 물은 것(<see cref="QueryHourAsync"/>). null = 하루 목록에서 거른다.</summary>
+    private IReadOnlyList<HistoryEntry>? _hourAll;
+    private string _hourOf = "";
     private bool _suppressQuery;                                          // 표본 심기 중 종류 전환이 서버 조회를 부르지 않게
     private IReadOnlyDictionary<string, int> _hours = new Dictionary<string, int>();
     private readonly List<TimelineItem> _timelineAll = new();
@@ -390,7 +396,12 @@ public sealed partial class SessionHistoryViewModel : ObservableObject
         OnPropertyChanged(nameof(HasServiceAxis)); OnPropertyChanged(nameof(BandHint));
         SelectedHour = ""; if (!_suppressQuery) _ = QueryAsync();
     }
-    partial void OnDateChanged(DateTime value) { SelectedHour = ""; _ = QueryAsync(); }
+    partial void OnDateChanged(DateTime value)
+    {
+        // 달력에서 내일 이후를 고를 수 있다 — 오늘로 되돌린다([▶] 과 같은 상한. 올 일의 이력은 없다)
+        if (value.Date > DateTime.Today) { Date = DateTime.Today; return; }
+        SelectedHour = ""; _ = QueryAsync();
+    }
     partial void OnSelectedChanged(HistoryRow? value)
     {
         OnPropertyChanged(nameof(HasSelection)); OnPropertyChanged(nameof(SelectedHasRecording)); RaiseVideoSessionChanged();
@@ -417,7 +428,38 @@ public sealed partial class SessionHistoryViewModel : ObservableObject
         OnPropertyChanged(nameof(IsVideoSession)); OnPropertyChanged(nameof(TurnWord)); OnPropertyChanged(nameof(TurnsHint)); OnPropertyChanged(nameof(NoTurnsText));
     }
     [RelayCommand] private void SetServiceFilter(string value) => ServiceFilter = value;
-    partial void OnSelectedHourChanged(string value) { OnPropertyChanged(nameof(HasHourFilter)); foreach (var c in Hours) c.IsSelected = c.Hour == value; Filter(); }
+    partial void OnSelectedHourChanged(string value)
+    {
+        OnPropertyChanged(nameof(HasHourFilter)); foreach (var c in Hours) c.IsSelected = c.Hour == value;
+        if (_hourOf != value) { _hourAll = null; _hourOf = ""; }
+        // 잘린 날 — 하루 목록에는 최근 1000건뿐이라 앞 시간대 칸은 건수가 있어도 눌러 보면 비어 있다. 그 시간대를 서버에 다시 묻는다.
+        if (value.Length > 0 && _dayTruncated) _ = QueryHourAsync(value);
+        Filter();
+    }
+
+    /// <summary>잘린 날의 시간대 칸 — 창을 그 한 시간으로 좁혀 다시 묻는다(상한 안에 들어온다 — 잘려 나간 이력과 그 녹취에 닿는 길). 서버는 창을
+    /// 종료 시각으로 자르므로 끝을 한 시간 넓혀 받고(그 시간대에 시작해 다음 시간대에 끝난 것), 받은 것을 밴드와 같은 축(시작 시각)으로 다시 거른다.
+    /// 밴드(시간대 분포)는 하루 조회의 것을 그대로 둔다.</summary>
+    private async Task QueryHourAsync(string hour)
+    {
+        var m = _s.Management; if (m is null || !int.TryParse(hour, out int h)) return;
+        var day = Date.Date; var kind = Kind;
+        Busy = true;
+        var r = await m.QueryHistoryAsync(kind, day.AddHours(h), day.AddHours(Math.Min(24, h + 2)));
+        Busy = false;
+        if (day != Date.Date || kind != Kind || SelectedHour != hour) return;       // 받는 사이 다른 날·종류·칸으로 갔다
+        if (!r.Ok)
+        {
+            Error = ResponseText.Describe(ResponseText.Area.Management, r.Code, r.Reason);
+            _s.Log.Warn($"history window {HistoryClient.KindName(kind)} {day:yyyy-MM-dd} {hour}h: {r.Code} {r.Reason}");
+            return;
+        }
+        _hourAll = r.Value.Items.Where(e => e.AxisTime >= day && e.AxisTime < day.AddDays(1) && e.AxisTime.ToString("HH") == hour)
+                                .OrderByDescending(e => e.Time).ToList();
+        _hourOf = hour;
+        _s.Log.Info($"history window {HistoryClient.KindName(kind)} {day:yyyy-MM-dd} {hour}h: {_hourAll.Count} items (day truncated)");
+        Filter();
+    }
     partial void OnTalkZoomChanged(double value) { OnPropertyChanged(nameof(TalkZoomText)); OnPropertyChanged(nameof(IsTalkZoomed)); RebuildAxisTicks(); }
     partial void OnBandModeChanged(int value)
     {
@@ -451,18 +493,25 @@ public sealed partial class SessionHistoryViewModel : ObservableObject
     {
         var m = _s.Management; if (m is null) { Error = "로그인 전"; return; }
         Busy = true; Error = "";
-        var from = Date.Date; var to = Date.Date.AddDays(1).AddSeconds(-1);
+        // 하루 창 = [0시, 다음 날 0시) — 서버의 until 은 «이하» 라 다음 날 0시까지 묻고(23:59:59 로 물으면 마지막 1초가 빠진다),
+        //   정확히 다음 날 0시에 시작한 것은 그 날의 것이라 여기서 뺀다.
+        var from = Date.Date; var to = Date.Date.AddDays(1);
+        var kind = Kind;
         var sw = System.Diagnostics.Stopwatch.StartNew();
-        var r = await m.QueryHistoryAsync(Kind, from, to);
+        var r = await m.QueryHistoryAsync(kind, from, to);
         long queryMs = sw.ElapsedMilliseconds;
         Busy = false;
+        if (from != Date.Date || kind != Kind) return;                     // 받는 사이 날짜·종류를 바꿨다 — 뒤 조회가 채운다
+        _hourAll = null; _hourOf = "";
         if (!r.Ok)
         {
             Error = ResponseText.Describe(ResponseText.Area.Management, r.Code, r.Reason);
             _s.Log.Warn($"history window {HistoryClient.KindName(Kind)} {from:yyyy-MM-dd}: {r.Code} {r.Reason}");
-            _all = Array.Empty<HistoryEntry>(); _hours = new Dictionary<string, int>(); ApplyLoaded(); return;
+            _all = Array.Empty<HistoryEntry>(); _hours = new Dictionary<string, int>(); _dayTruncated = false; ApplyLoaded(); return;
         }
-        _all = r.Value.Items.OrderByDescending(e => e.Time).ToList();      // 표시는 최근이 위
+        // 상한에 닿았으면 잘린 날이다 — 서버는 창 안에서 최근 limit 건만 주고 hours 는 절삭 전 전체로 낸다(시간대 칸은 서버에 다시 묻는다)
+        _dayTruncated = r.Value.Items.Count >= QueryLimit;
+        _all = r.Value.Items.Where(e => e.AxisTime < to).OrderByDescending(e => e.Time).ToList();      // 표시는 최근이 위
         _hours = r.Value.Hours.Count > 0 ? r.Value.Hours : CountHours(_all);
         // 받은 것의 구성을 남긴다 — "콘솔에는 있는데 앱에는 없다" 를 서버 응답에서 가른다(영상 통화 = callType volte_video · 영상 세션 = service mcvideo)
         string what = $"history window {HistoryClient.KindName(Kind)} {from:yyyy-MM-dd}: {_all.Count} items"
@@ -559,7 +608,8 @@ public sealed partial class SessionHistoryViewModel : ObservableObject
         string qn = DirectoryService.Normalize(q);
         bool speechOnly = BandShowsTurns && SelectedHour.Length > 0;     // [발언 수] 칸을 눌렀다 — 그 시간의 발언 있는 세션만
         var shown = new List<HistoryRow>();
-        foreach (var e in _all)
+        // 잘린 날에 시간대를 골랐으면 그 시간대를 다시 받은 목록에서(QueryHourAsync), 아니면 하루 목록에서 거른다
+        foreach (var e in SelectedHour.Length > 0 && _hourAll is not null && _hourOf == SelectedHour ? _hourAll : _all)
         {
             if (SelectedHour.Length > 0 && e.AxisTime.ToString("HH") != SelectedHour) continue;
             if (IsPtt && ServiceFilter != "all" && (ServiceFilter == "mcvideo") != e.IsMcVideo) continue;
@@ -665,7 +715,9 @@ public sealed partial class SessionHistoryViewModel : ObservableObject
             var d = await detailTask;
             if (seq != _detailSeq) return;
             if (d.Ok) { detail = d.Value; DetailStatus = ""; }
-            else DetailStatus = ResponseText.Describe(ResponseText.Area.Management, d.Code, d.Reason);
+            // 이 조회의 out_of_scope 는 청취 범위 밖이다(녹취와 같은 판정 — csc dispatch_recordings.py). 관리 범위 문장(«조직·구성원»)으로 읽지 않는다.
+            else DetailStatus = ResponseText.GroupError(d.Reason).Error == "out_of_scope" ? "청취 범위 밖의 세션입니다"
+                              : ResponseText.Describe(ResponseText.Area.Management, d.Code, d.Reason);
         }
         if (recTask is not null)
         {
@@ -979,7 +1031,9 @@ public sealed partial class SessionHistoryViewModel : ObservableObject
         DateTime cursor = Recording?.Start ?? row.E.AnswerTime ?? row.E.StartTime ?? row.E.Time;
         foreach (var sg in Segments.OrderBy(x => x.Seq))
         {
-            var st = sg.Start ?? cursor; var en = st.AddMilliseconds(Math.Max(0, sg.DurationMs));
+            var st = sg.Start ?? cursor;
+            // 길이를 싣지 않은 세그먼트(duration_ms 0)는 끝 시각으로 — 길이 0 으로 두면 재생 막대가 그 세그먼트를 맞히지 못한다
+            var en = sg.DurationMs > 0 ? st.AddMilliseconds(sg.DurationMs) : sg.End is { } e2 && e2 > st ? e2 : st;
             _segs.Add((sg, st, en)); cursor = en;
         }
         _segs.Sort((a, b) => a.Start.CompareTo(b.Start));

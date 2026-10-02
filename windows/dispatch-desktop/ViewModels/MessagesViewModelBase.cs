@@ -129,7 +129,13 @@ public abstract partial class MessagesViewModelBase : ObservableObject
     [RelayCommand] private void Send() => SendCore();
     /// <summary>빠른 답 — 한 번 눌러 곧바로 보낸다(관제사가 가장 자주 치는 말, §4.4).</summary>
     public IReadOnlyList<string> QuickReplies { get; } = new[] { "확인했습니다", "이동 중", "도착했습니다", "대기 바랍니다" };
-    [RelayCommand] private void QuickReply(string text) { if (Selected is null || !SendAllowed(Selected)) return; Input = text; SendCore(); }
+    [RelayCommand] private void QuickReply(string text)
+    {
+        if (Selected is null || !SendAllowed(Selected)) return;
+        string draft = Input;                    // 쓰던 글은 남긴다 — 빠른 답은 입력란을 거쳐 나갈 뿐이다(보내고 나면 입력란이 비워진다)
+        Input = text; SendCore();
+        Input = draft;
+    }
     [RelayCommand] private void Resend(Message m) => ResendCore(m);
     [RelayCommand] private Task Attach() => AttachCore();
     protected abstract void SendCore();

@@ -69,6 +69,9 @@ public sealed partial class SessionItem : ObservableObject
     /// <summary>발언 시간 게이지 0~1 (Granted Duration 기준, 남은 비율).</summary>
     [ObservableProperty] private double _talkGauge;
     [ObservableProperty] private bool _talkLimitNear;
+    /// <summary>지금 발언의 승인 시간(Granted Duration, 초) — 0 = 시한 없음. 승인(Granted) 때 적는다: 발언 중에 다른 floor 이벤트(동시 발언의 Taken·
+    /// 대기열 위치)가 와도 남은 발언 게이지가 그 승인을 기준으로 계속 간다(마지막 이벤트 종류로 판정하면 그 순간 멈춘다).</summary>
+    public int GrantedSec { get; set; }
     /// <summary>Denied/Revoked 사유 한 줄(카드 하단, 잠시 표시).</summary>
     [ObservableProperty] private string _floorNote = "";
     /// <summary>표시 이름(그룹명·상대 이름) — 주소록으로 해석.</summary>
@@ -111,6 +114,7 @@ public sealed partial class SessionItem : ObservableObject
         Account = account;
         Operation = op;
         _info = info;
+        if (info.State == CallState.Active) _connectedAt = DateTime.Now;      // 이미 성립한 호로 처음 본 세션(스냅샷 재구성·자동 수락)
     }
 
     public SessionKind Kind => SessionKinds.Of(Info);
@@ -181,9 +185,9 @@ public sealed partial class SessionItem : ObservableObject
     {
         Elapsed = now - (ConnectedAt ?? StartedAt);
         if (SpeakerSince is DateTime s) SpeakerElapsed = now - s;
-        if (LastFloor is { Kind: FloorEventKind.Granted, DurationSec: > 0 } g && SpeakerSince is DateTime since)
+        if (IsSpeaking && GrantedSec > 0 && SpeakerSince is DateTime since)
         {
-            double remain = 1 - (now - since).TotalSeconds / g.DurationSec;
+            double remain = 1 - (now - since).TotalSeconds / GrantedSec;
             TalkGauge = Math.Clamp(remain, 0, 1);
             TalkLimitNear = remain < 0.15;
         }

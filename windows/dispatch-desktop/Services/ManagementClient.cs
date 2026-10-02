@@ -292,16 +292,13 @@ public sealed class ManagementClient
         if (slot is not null) q.Add("slot=" + slot.Value);
         if (retry) q.Add("retry=1");
         string full = q.Count > 0 ? path + "?" + string.Join('&', q) : path;
-        // 로컬 캐시 — 같은 세그먼트(·슬롯)는 한 번만 받는다. 재변환(retry)이 아니면 있는 파일을 그대로 튼다. 재생 중인 파일은
-        // MediaElement 가 잠고 있어 덮어쓰면 IOException("The process cannot access the file") 이라, 다시 받을 때는 새 이름으로 쓴다.
+        // **재생할 때마다 서버에 다시 묻는다.** 받아 둔 파일로 서버 호출을 건너뛰면 청취 범위가 회수된 뒤에도 계속 재생되고(서버 판정 403
+        // out_of_scope 를 지나친다) 감사 기록(E-AUD-016 tap_mode=recording — 재생 단위)이 남지 않는다. 합법감청의 인가 경계를 앱의 임시 파일이
+        // 대신할 수 없다(dispatch_center.md §5.7b). 로컬 파일은 이번 요청의 산출을 담는 자리일 뿐이다 — 재생 중인 파일은 MediaElement 가 잡고
+        // 있어 덮어쓰면 IOException 이라 그때는 새 이름으로 쓴다.
         string dir = Path.Combine(Path.GetTempPath(), "CIMS", AppPaths.AppName, "rec");
         string baseName = $"{Sanitize(id)}_{seq}_{(slot?.ToString() ?? "mix")}";
         string file = Path.Combine(dir, baseName + ".mp4");
-        try
-        {
-            if (!retry && File.Exists(file) && new FileInfo(file).Length > 0) return Result<string>.Success(file);
-        }
-        catch (IOException) { }
         var deadline = DateTime.UtcNow.AddSeconds(120);
         int delay = 700;
         while (true)

@@ -251,6 +251,9 @@
                                                                     <Button Style="{StaticResource Btn.Link}" FontSize="12.5" Command="{Binding ToggleRouteCommand}" IsEnabled="{Binding CanToggleRoute}" ToolTip="출력 라우트 바꾸기" Margin="0,0,12,0">
                                                                         <TextBlock><Run Text="{Binding RouteLabel, Mode=OneWay}" /><Run Text=" · 음량 " /><Run Text="{Binding Volume, Mode=OneWay, StringFormat=P0}" /></TextBlock>
                                                                     </Button>
+                                                                    <!-- 음량 — 감청 창과 같은 값(0~2). 창을 띄우지 않고도 이 통화만 줄이거나 키운다 -->
+                                                                    <Slider Minimum="0" Maximum="2" Value="{Binding Volume}" SmallChange="0.05" LargeChange="0.25" Width="90" VerticalAlignment="Center" Margin="0,0,12,0"
+                                                                            ToolTip="이 감청의 음량" />
                                                                     <Button Style="{StaticResource Btn.Link}" FontSize="12.5" Content="창으로 ↗" ToolTip="감청 창에 띄우기(두 번째 모니터)"
                                                                             Command="{Binding DataContext.ShowWindowCommand, RelativeSource={RelativeSource AncestorType=ContentPresenter}}" />
                                                                 </StackPanel>
@@ -449,9 +452,11 @@
                                 <Button DockPanel.Dock="Right" Style="{StaticResource Pill.Ink}" Height="42" Padding="18,0" FontSize="14" Content="보내기" Command="{Binding SendCommand}" IsEnabled="{Binding CanSend}" Margin="8,0,0,0" />
                                 <TextBlock DockPanel.Dock="Right" Style="{StaticResource Muted}" FontSize="11" Text="{Binding CountText}" VerticalAlignment="Center" Margin="8,0,0,0" />
                                 <Grid>
-                                    <Border x:Name="SmsBorder" Height="42" CornerRadius="21" BorderThickness="1.5" BorderBrush="{DynamicResource Brush.Edge}" Background="{DynamicResource Brush.Surface}" />
-                                    <TextBox Text="{Binding Input, UpdateSourceTrigger=PropertyChanged}" KeyDown="Sms_KeyDown" IsEnabled="{Binding SmsBlocked, Converter={StaticResource Not}}" Margin="16,0" FontSize="14"
-                                             BorderThickness="0" Background="Transparent" VerticalContentAlignment="Center" Height="38" Foreground="{DynamicResource Brush.Text}" CaretBrush="{DynamicResource Brush.Text}" />
+                                    <Border x:Name="SmsBorder" MinHeight="42" CornerRadius="21" BorderThickness="1.5" BorderBrush="{DynamicResource Brush.Edge}" Background="{DynamicResource Brush.Surface}" />
+                                    <!-- Enter = 보내기, Shift+Enter = 줄바꿈 — 무전 메시지 입력과 같다 -->
+                                    <TextBox Text="{Binding Input, UpdateSourceTrigger=PropertyChanged}" PreviewKeyDown="Sms_KeyDown" IsEnabled="{Binding SmsBlocked, Converter={StaticResource Not}}" Margin="16,2" FontSize="14"
+                                             AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" MinHeight="38" MaxHeight="84"
+                                             BorderThickness="0" Background="Transparent" VerticalContentAlignment="Center" Foreground="{DynamicResource Brush.Text}" CaretBrush="{DynamicResource Brush.Text}" />
                                     <TextBlock Style="{StaticResource Muted}" FontSize="14" Text="문자" Margin="18,0" VerticalAlignment="Center" IsHitTestVisible="False"
                                                Visibility="{Binding Input, Converter={StaticResource StrToVis}, ConverterParameter=invert}" />
                                 </Grid>

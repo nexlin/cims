@@ -193,7 +193,10 @@ public static class ResponseText
         if (area is Area.Management or Area.Recording)
         {
             var (err, detail) = GroupError(reason);
-            if (err.Length > 0 && ForManagementError(err, detail, Field(reason, "where")) is { } mg) return mg;
+            // 녹취의 out_of_scope 는 **청취 범위** 밖이다(csc dispatch_recordings.py) — 관리 범위 문장(«조직·구성원»)이 아니라 코드 표의
+            //   «청취 범위 밖의 녹취입니다» 로 보낸다.
+            bool recScope = area == Area.Recording && err == "out_of_scope";
+            if (err.Length > 0 && !recScope && ForManagementError(err, detail, Field(reason, "where")) is { } mg) return mg;
             if (err.Length == 0 && reason.Contains("required", StringComparison.OrdinalIgnoreCase)) return "필수 항목이 빠졌습니다: " + reason;
         }
         if (area == Area.File)

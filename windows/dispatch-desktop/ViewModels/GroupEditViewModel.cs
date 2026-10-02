@@ -22,9 +22,11 @@ public sealed partial class GroupMemberRow : ObservableObject
     [ObservableProperty] private bool _required;
     private readonly bool _readChair;
     private readonly int _readPriority;
-    public GroupMemberRow(string uri, string name, string displayNumber, bool isMe, bool isChair, bool required = false, int? priority = null)
+    /// <summary>MCVideo entry 의 MCVideo ID(그룹 문서의 영상 몫) — 폼은 편집하지 않고 읽은 값을 되돌린다(PUT 은 멤버 목록 전체 교체라 빼면 지워진다).</summary>
+    public string McvideoId { get; }
+    public GroupMemberRow(string uri, string name, string displayNumber, bool isMe, bool isChair, bool required = false, int? priority = null, string mcvideoId = "")
     {
-        Uri = uri; Name = name; DisplayNumber = displayNumber; IsMe = isMe; _isChair = isChair; _required = required;
+        Uri = uri; Name = name; DisplayNumber = displayNumber; IsMe = isMe; _isChair = isChair; _required = required; McvideoId = mcvideoId;
         _readChair = isChair; _readPriority = priority ?? DefaultPriority(isChair);
     }
     public string Label => Name.Length > 0 ? Name : DisplayNumber;
@@ -192,7 +194,7 @@ public sealed partial class GroupEditViewModel : ObservableObject
             McVideoGroupPriority = mv.GroupPriority?.ToString() ?? ""; McVideoAllowConferenceState = mv.AllowConferenceState ?? true;
         }
         Members.Clear();
-        foreach (var m in d.Members) AddMember(m.Uri, m.Name, m.Role == "chair", m.Required, m.Priority);
+        foreach (var m in d.Members) AddMember(m.Uri, m.Name, m.Role == "chair", m.Required, m.Priority, m.McvideoId);
         Loaded = true;
         Filter();
     }
@@ -210,12 +212,12 @@ public sealed partial class GroupEditViewModel : ObservableObject
     [RelayCommand] private void SetSessionType(string t) { if (SessionTypes.Contains(t)) SessionType = t; }
     partial void OnSessionTypeChanged(string value) { OnPropertyChanged(nameof(IsPrearranged)); OnPropertyChanged(nameof(IsChat)); }
 
-    private void AddMember(string uri, string name, bool chair, bool required = false, int? priority = null)
+    private void AddMember(string uri, string name, bool chair, bool required = false, int? priority = null, string mcvideoId = "")
     {
         string number = UserPartConverter.UserPart(uri);
         if (Members.Any(m => DirectoryService.Normalize(UserPartConverter.UserPart(m.Uri)) == DirectoryService.Normalize(number))) return;
         string n = name.Length > 0 ? name : _s.Directory.NameOf(number);
-        Members.Add(new GroupMemberRow(uri, n, _s.Directory.DisplayNumber(number), _s.IsMe(uri), chair, required, priority));
+        Members.Add(new GroupMemberRow(uri, n, _s.Directory.DisplayNumber(number), _s.IsMe(uri), chair, required, priority, mcvideoId));
         OnPropertyChanged(nameof(MemberCountText)); OnPropertyChanged(nameof(CanSave));
     }
 
@@ -286,7 +288,7 @@ public sealed partial class GroupEditViewModel : ObservableObject
         };
         foreach (var m in Members)
             doc.Members.Add(new GroupMember { Uri = m.Uri, Name = m.Name, Role = m.IsChair ? "chair" : "participant", Priority = m.Priority,
-                                              Required = m.Required });
+                                              Required = m.Required, McvideoId = m.McvideoId });
         Busy = true;
         var r = await _s.SaveGroupAsync(doc, IsNew ? null : _ifMatch);       // 409 uri_taken 재시도는 세션이 처리
         Busy = false;

@@ -428,8 +428,17 @@ public sealed partial class DirectoryAdminViewModel : ObservableObject
             Busy = false;
             if (!r.Ok) { Error = "구성원 생성 실패 — " + ResponseText.Describe(ResponseText.Area.Management, r.Code, r.Reason); return; }
             // 원격 청취 자격(allowAmbientListening)은 관제 앱이 바꾸지 않는다 — 콘솔에서 역할(청취 범위)로 부여(서버 400 not_editable).
+            //   자격 저장이 실패해도 구성원은 이미 만들어졌다 — 조용히 넘기지 않고 알린다(다시 열어 저장하면 갱신 경로로 간다).
             if (ptt.Length > 0 && AllowCreateGroup)
-                await m.PutPttProfileAsync(r.Value, new Dictionary<string, bool> { ["allowCreateGroup"] = AllowCreateGroup });
+            {
+                var pr = await m.PutPttProfileAsync(r.Value, new Dictionary<string, bool> { ["allowCreateGroup"] = AllowCreateGroup });
+                if (!pr.Ok)
+                {
+                    _s.Log.Warn($"mgmt PTT 자격 저장(새 구성원 {r.Value}): {pr.Code} {pr.Reason}");
+                    _s.Notify.Error("구성원은 만들었지만 PTT 자격(그룹 생성)을 저장하지 못했습니다 — " + ResponseText.Describe(ResponseText.Area.Management, pr.Code, pr.Reason),
+                                    $"{pr.Code} {pr.Reason}");
+                }
+            }
             _s.Notify.Info("구성원 생성 완료");
             await LoadAsync(force: true); _ = _s.SyncDirectoryAsync();
             MemberEditing = false;

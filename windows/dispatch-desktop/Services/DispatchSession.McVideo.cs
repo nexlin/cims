@@ -390,19 +390,25 @@ public sealed partial class DispatchSession
     public Result AcceptVideo(SessionItem s, string transmitterId)
     {
         var call = Engine.GetCall(s.CallId);
-        if (s.Receiving is { } cur)
+        // 보는 중 = 받고 있거나(Receiving·PendingRelease) **요청해 둔**(PendingRequest) 송출 — 요청 중인 것을 빼면 [보기] 를 잇달아 눌렀을 때
+        //   앞 요청이 살아남아 둘을 받게 된다(1차 수신 상한 1).
+        if (Watching(s) is { } cur)
         {
             if (string.Equals(cur.UserId, transmitterId, StringComparison.OrdinalIgnoreCase)) return Result.Success;
             var e = call.EndReception(cur.UserId);
             if (!e.Ok) Log.Warn($"mcvideo end reception {cur.UserId}: {e}");
         }
-        foreach (var other in Sessions.Where(x => x.IsMcVideo && x != s && x.Receiving is not null).ToList())   // 다른 채널에서 보던 것도(한 번에 하나)
-            Engine.GetCall(other.CallId).EndReception(other.Receiving!.UserId);
+        foreach (var other in Sessions.Where(x => x.IsMcVideo && x != s && Watching(x) is not null).ToList())   // 다른 채널에서 보던 것도(한 번에 하나)
+            Engine.GetCall(other.CallId).EndReception(Watching(other)!.UserId);
         VideoFrames.Feed(s.CallId).Reset();                            // 앞 사람의 마지막 장이 남지 않게
         var r = call.AcceptReception(transmitterId);
         RefreshTransmission(s);
         return Show(r, ResponseText.Area.Video);
     }
+
+    /// <summary>이 영상 호에서 보고 있는(또는 보기를 요청해 둔) 송출 — 없으면 null.</summary>
+    private static VideoTransmitter? Watching(SessionItem s) =>
+        s.Receiving ?? s.Transmission.Transmitters.FirstOrDefault(t => t.State == ReceptionState.PendingRequest);
 
     /// <summary>[그만 보기] — Media Reception End Request(§6.2.5.5). 영상 호는 남는다 — 다른 송출을 다시 고를 수 있다.</summary>
     public Result EndVideo(SessionItem s, string transmitterId)
@@ -446,6 +452,26 @@ public sealed partial class DispatchSession
     /// <summary>영상 호가 생겼다 — 그 그룹 카드의 «영상» 절에 붙인다(카드를 새로 만들지 않는다).</summary>
     private void OnVideoSessionAdded(SessionItem s)
     {
+        var owner = GroupOf(s);
+        // 붙을 «영상» 절이 없는 호 — 영상 채널이 아닌 그룹의 편성 초대(코어가 자동 수락한다), 또는 같은 그룹의 영상 호가 이미 있다(내가 여는 사이
+        //   멤버의 초대가 먼저 붙었다 — 한 그룹에 영상 호는 하나). 화면 없이 남기지 않고 조용히 나간다.
+        //   영상 채널인가는 자격의 그룹 목록(MCVideo user profile)으로 가른다 — 그룹 목록을 아직 못 받은 기동 직후의 초대를 버리지 않게.
+        var live = owner?.VideoSession is { IsLive: true } cur && cur != s ? cur : null;
+        bool channel = (_mcvideoProfile?.Groups ?? Array.Empty<string>()).Any(u => string.Equals(UserPartConverter.UserPart(u), s.Info.GroupId, StringComparison.OrdinalIgnoreCase));
+        if (!channel || live is not null)
+        {
+            Log.Info($"mcvideo session #{s.CallId} {s.Info.GroupId}: {(live is not null ? $"duplicate of #{live.CallId}" : "not a video channel")} — leaving");
+            bool mineOpening = _videoOpening.Contains(s.CallId);
+            _videoLeaving.Add(s.CallId); _quietVideoEnd.Add(s.CallId);
+            Engine.GetCall(s.CallId).Hangup();
+            // 보내려고 연 호였다 — 남은 호가 성립해 있으면 거기에 명시 송출 요청으로 잇는다(TS 24.581 §6.2.4.3.2). 아니면 성립 뒤 다시 누른다.
+            if (live is not null && mineOpening)
+            {
+                if (live.IsActive && live.Transmission.State == TransmissionState.NoPermission && HasCamera) RequestVideoTx(live);
+                else Notify.Info($"{live.Title} — 영상 호에 합류하는 중입니다", "다른 멤버가 먼저 열었습니다 — 연결되면 [영상 보내기] 를 다시 누르세요");
+            }
+            return;
+        }
         _videoJoining.Remove(s.Info.GroupId);
         if (GroupOf(s) is { } g)
         {

@@ -104,7 +104,7 @@ public sealed partial class CallCard : ObservableObject
 
     public string Title => Session.Title;
     public bool IsPilotIncoming => Session.Info.Dir == CimsUe.CallDir.Incoming && _s.IsPilot(Session.Info.CalledParty);
-    public string PathBadge => IsPilotIncoming ? $"대표 {Session.CalledParty} 착신" : Session.ConsultFor is not null ? "상담" : "";
+    public string PathBadge => IsPilotIncoming ? $"대표 {_s.Directory.DisplayNumber(Session.CalledParty)} 착신" : Session.ConsultFor is not null ? "상담" : "";
     public bool IsConsult => Session.ConsultFor is not null;
     public bool HasTransferNote => Session.TransferNote.Length > 0;
     public bool CanToggleRoute => _s.Audio.HasSpeaker;
@@ -190,7 +190,8 @@ public sealed partial class CallDeskViewModel : ObservableObject
     public int QueueCount => Queue.Count;
     public int CallCount => Calls.Count;
     public int MemberCount => Members.Count;
-    public string PilotText => _s.PilotId.Length > 0 ? "대표 " + UserPartConverter.UserPart(_s.PilotId) : "";
+    /// <summary>대표번호 — 국내 표기로(가입 id 는 E.164, 표시는 사람이 읽는 번호).</summary>
+    public string PilotText => _s.PilotId.Length > 0 ? "대표 " + _s.Directory.DisplayNumber(UserPartConverter.UserPart(_s.PilotId)) : "";
     private void RefreshDesk() { foreach (var p in new[] { nameof(TodayAnswered), nameof(TodayMissed), nameof(TodayOutgoing), nameof(TodayTransfer), nameof(TodayMonitor) }) OnPropertyChanged(p); }
 
     private void RebuildMembers()

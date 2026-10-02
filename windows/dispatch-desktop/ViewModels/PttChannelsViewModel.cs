@@ -60,7 +60,17 @@ public sealed partial class ChannelCard : ObservableObject
 
     public string Id => Group?.Id ?? Session?.Info.GroupId ?? Session?.CallId.ToString() ?? "";
     /// <summary>이름 — 멤버 그룹 = 그룹명, 애드혹 = 초대한 사람 앞 둘 + "+n"(라벨 «애드혹» 이 종류를 말한다), 개별 = 상대.</summary>
-    public string Title => Kind == CardKind.Member ? Group!.Name : Kind == CardKind.Adhoc ? string.Join(", ", AdhocChips.Take(2)) + (AdhocChips.Count > 2 ? $" +{AdhocChips.Count - 2}" : "") : Session?.Title ?? "";
+    public string Title => Kind == CardKind.Member ? Group!.Name : Kind == CardKind.Adhoc ? AdhocTitle : Session?.Title ?? "";
+    /// <summary>애드혹 카드 이름 — 내가 초대한 사람 앞 둘 + "+n". 남이 연 애드혹(착신)은 초대 목록을 모른다 — 연 사람의 이름으로 적는다(빈 제목으로 두지 않는다).</summary>
+    private string AdhocTitle
+    {
+        get
+        {
+            if (AdhocChips.Count > 0) return string.Join(", ", AdhocChips.Take(2)) + (AdhocChips.Count > 2 ? $" +{AdhocChips.Count - 2}" : "");
+            string by = Session?.Info.Mcptt.CallingUserId ?? "";
+            return by.Length > 0 ? $"애드혹 · {_s.NameOfPtt(by)}" : "애드혹";
+        }
+    }
     public string Badge => Kind switch { CardKind.Member => "멤버", CardKind.Private => "개별", _ => "애드혹" };
     public string Duplex => Kind == CardKind.Private ? (Session?.IsFullDuplex == true ? "전이중" : "반이중") : "";
     public bool IsMember => Kind == CardKind.Member;
@@ -134,7 +144,8 @@ public sealed partial class ChannelCard : ObservableObject
     public IReadOnlyList<RosterRow> Roster => (Group?.Roster ?? Array.Empty<RosterEntry>())
         .Where(r => r.Status != "listener" || !_s.ListenHidden)
         .Select(r => new RosterRow(_s.NameOfPtt(r.Uri), r.Uri, r.Status, _s.IsMe(r.Uri), Speaker.Length > 0 && _s.NameOfPtt(r.Uri) == Speaker)).ToList();
-    public bool CanEdit => Group?.IsOwner == true;
+    /// <summary>⋮[편집]·[삭제] — 내 소유(GMS is_owner)이거나 관리 범위로 고칠 수 있는 그룹(관리 목록 CanManage). 최종 판정은 서버다.</summary>
+    public bool CanEdit => Group is { } g && (g.IsOwner || _s.CanManageGroup(g.Id));
     // ── MCVideo 영상 채널(§10.3) — 카드는 1줄 태그 «영상 n»(보내는 중 수, 없으면 태그 없음)만. 조작은 채널 상세 «영상» 절 ──
     /// <summary>영상 채널(user profile 그룹 목록에 있는 멤버 그룹 — 영상 호에 앱이 함께 합류한다, D10).</summary>
     public bool IsVideoGroup => Group?.McVideo == true;

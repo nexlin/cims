@@ -101,7 +101,9 @@ public sealed partial class ScopedChannelsViewModel : ObservableObject
     }
 
     public int ListenCount => _s.Groups.Count(g => !g.IsMember);
-    public int ListeningCount => _s.Sessions.Count(x => x.Kind == SessionKind.PttListen);
+    /// <summary>열려 있는 듣기 전용 leg — PTT 청취 + 통화 감청. 상한(설정 «동시 청취»)이 이 합에 걸리므로 세는 것도 같아야 한다
+    /// (PTT 청취만 세면 «2/4» 인데 [청취] 가 상한으로 막힌다).</summary>
+    public int ListeningCount => _s.MonitorCount;
     public int ListenLimit => _s.Settings.Current.MaxMonitorWindows;
     public string ListeningText => $"동시 청취 {ListeningCount}/{ListenLimit}";
     public bool HasNoScope => !_s.CanListenPtt;

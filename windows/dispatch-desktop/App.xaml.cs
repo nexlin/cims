@@ -280,13 +280,10 @@ public partial class App : Application
             var s = _session!;
             var login = new LoginViewModel(s);
             if (_pendingLoginError.Length > 0) { login.Error = _pendingLoginError; _pendingLoginError = ""; }
-            bool ok = false;
-            if (s.HasSavedLogin) ok = await login.ResumeAsync();
-            if (!ok)
-            {
-                var w = new LoginWindow(login);
-                if (w.ShowDialog() != true) { ExitApp(); return; }
-            }
+            // 저장된 로그인이 있으면 로그인 창이 뜬 채로 이어 접속한다(창 없이 기다리게 하지 않는다) — 성공하면 창이 닫히고 주 창이 선다
+            var w = new LoginWindow(login, autoResume: s.HasSavedLogin);
+            if (w.ShowDialog() != true) { ExitApp(); return; }
+            await Task.CompletedTask;
             ShowMain();
         }
         catch (Exception ex)
