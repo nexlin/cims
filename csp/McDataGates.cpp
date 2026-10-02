@@ -8,8 +8,10 @@
 #include <unordered_map>
 
 #include "CallDir.h"
+#include "CscEndpointCache.h"
 #include "DbManager.h"
 #include "Log.h"
+#include "SipServerSetup.h"
 #include "SipStatusCode.h"
 
 /** JSON 문자열 이스케이프 (보관 레코드용) */
@@ -45,7 +47,8 @@ static std::string _jesc( const std::string &s ) {
     return r;
 }
 
-int McDataGateCheck( const CspPttGroup &clsGroup, const char *pszFrom, bool bFd ) {
+int McDataGateCheck( const CspPttGroup &clsGroup, const char *pszFrom, bool bFd, int *piWarn ) {
+    if ( piWarn ) *piWarn = 0;
     // 게이트 1 — 그룹문서 mcdata-allow-short-data-service / mcdata-allow-file-distribution (TS 24.481)
     if ( bFd ? clsGroup._allowFd == false : clsGroup._allowSds == false ) {
         CLog::Print( LOG_INFO, "McDataGate: group(%s) %s disabled — 403 from(%s)", clsGroup._id.c_str(),
@@ -54,22 +57,89 @@ int McDataGateCheck( const CspPttGroup &clsGroup, const char *pszFrom, bool bFd 
     }
 
     // 게이트 2 — 발신자 그룹 멤버십 (controlling function 검사)
-    for ( const auto &pUser : clsGroup._pusers ) {
-        if ( pUser && pUser->_id == pszFrom ) return 0;
+    bool bMember = false;
+    for ( const auto &pUser : clsGroup._pusers )
+        if ( pUser && pUser->_id == pszFrom ) bMember = true;
+    if ( !bMember ) {
+        CLog::Print( LOG_INFO, "McDataGate: from(%s) is not a member of group(%s) — 403", pszFrom,
+                     clsGroup._id.c_str() );
+        return SIP_FORBIDDEN;
     }
-    CLog::Print( LOG_INFO, "McDataGate: from(%s) is not a member of group(%s) — 403", pszFrom, clsGroup._id.c_str() );
+
+    // 게이트 3 — 발신자 제휴 (§9.2.2.4.2 6)j) · §9.2.3.4.4 7)g) · §10.2.4.4.2 12)g)). 제휴를 쓰지 않는 그룹은 멤버십이
+    //   곧 제휴다. 제휴 저장소에 닿지 못하면 판정할 수 없다 — 500(§9.2.2.4.2 1)), 통과시키지 않는다.
+    if ( !clsGroup._requireAffiliation ) return 0;
+    if ( !gclsDbManager.IsConnected() ) {
+        CLog::Print( LOG_ERROR, "McDataGate: group(%s) from(%s) — 제휴 저장소(DB) 미연결, 제휴 판정 불가 → 500",
+                     clsGroup._id.c_str(), pszFrom );
+        return SIP_INTERNAL_SERVER_ERROR;
+    }
+    if ( !gclsDbManager.IsAffiliated( clsGroup._id, pszFrom ) ) {
+        CLog::Print( LOG_INFO, "McDataGate: from(%s) is not affiliated to group(%s) — 403 (120)", pszFrom,
+                     clsGroup._id.c_str() );
+        if ( piWarn ) *piWarn = 120;
+        return SIP_FORBIDDEN;
+    }
+    return 0;
+}
+
+int McDataDeliveryTargets( const CspPttGroup &clsGroup, const char *pszFrom, const char *pszGroup,
+                           std::vector<std::string> &vecTargets, int *piWarn ) {
+    if ( piWarn ) *piWarn = 0;
+    vecTargets.clear();
+    // 제휴 저장소에 닿지 못하면 대상을 정할 수 없다 — 그룹 전원에게 보내지 않는다(§6.3.4 «affiliated group members
+    // only»)
+    if ( clsGroup._requireAffiliation && !gclsDbManager.IsConnected() ) {
+        CLog::Print( LOG_ERROR, "McDataGate: group(%s) — 제휴 저장소(DB) 미연결, 배포 대상 판정 불가 → 500", pszGroup );
+        return SIP_INTERNAL_SERVER_ERROR;
+    }
+    for ( const auto &pUser : clsGroup._pusers ) {
+        if ( !pUser || pUser->_id == pszFrom ) continue;
+        if ( clsGroup._requireAffiliation && !gclsDbManager.IsAffiliated( pszGroup, pUser->_id ) ) continue;
+        vecTargets.push_back( pUser->_id );
+    }
+    // 발신자 말고 제휴 멤버가 없다 — 보낼 곳이 없는 요청을 200 으로 받지 않는다(발신자 자신은 배포 대상이 아니다)
+    if ( vecTargets.empty() ) {
+        CLog::Print( LOG_INFO, "McDataGate: group(%s) from(%s) — 제휴 멤버 없음 → 403 (198)", pszGroup, pszFrom );
+        if ( piWarn ) *piWarn = 198;
+        return SIP_FORBIDDEN;
+    }
+    return 0;
+}
+
+int McDataFdPayloadCheck( const CMcDataSdsInfo &clsInfo, int *piWarn ) {
+    *piWarn = 0;
+    if ( clsInfo.m_iFdPayloadCount != 1 ) {
+        *piWarn = 210;  // 6) Payload IE 는 하나
+    } else if ( clsInfo.m_bFdNonFileUrlPayload ) {
+        *piWarn = 211;  // 7)a) 내용 형식 = FILEURL
+    } else {
+        const std::string strBase =
+            gclsSetup.m_strFdUrlBase.empty() ? gclsCscEndpointCache.GetServiceUrlBase() : gclsSetup.m_strFdUrlBase;
+        // 7)b) 이 서버의 media storage function 파일 — 다른 호스트는 우리 저장소에 없는 파일이다. 파일 존재의 HEAD 확인
+        //   (§6.7.3)은 콘텐츠 서버의 HEAD 지원 뒤(conformance_gap_plan.md S26)
+        if ( !McDataFdUrlIsOurs( clsInfo.m_strFileUrl, strBase ) ) *piWarn = 212;
+    }
+    if ( *piWarn == 0 ) return 0;
+    CLog::Print( LOG_INFO, "McDataGate: FD payloads=%d non-fileurl=%d url(%s) — 403 (%d)", clsInfo.m_iFdPayloadCount,
+                 clsInfo.m_bFdNonFileUrlPayload ? 1 : 0, clsInfo.m_strFileUrl.c_str(), *piWarn );
     return SIP_FORBIDDEN;
 }
 
-void McDataDeliveryTargets( const CspPttGroup &clsGroup, const char *pszFrom, const char *pszGroup,
-                            std::vector<std::string> &vecTargets ) {
-    vecTargets.clear();
-    for ( const auto &pUser : clsGroup._pusers ) {
-        if ( !pUser || pUser->_id == pszFrom ) continue;
-        if ( clsGroup._requireAffiliation && gclsDbManager.IsConnected() &&
-             !gclsDbManager.IsAffiliated( pszGroup, pUser->_id ) )
-            continue;
-        vecTargets.push_back( pUser->_id );
+const char *McDataWarnText( int iWarn ) {
+    switch ( iWarn ) {  // TS 24.282 §4.9 표 4.9-1
+        case 120:
+            return "user is not affiliated to this group";
+        case 198:
+            return "no users are affiliated to this group";
+        case 210:
+            return "Only one File URL must be present in the FD request";
+        case 211:
+            return "payload for an FD request is not FILEURL";
+        case 212:
+            return "file referenced by file URL does not exist";
+        default:
+            return "";
     }
 }
 

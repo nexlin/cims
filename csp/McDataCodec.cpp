@@ -4,6 +4,7 @@
 
 #include "McDataCodec.h"
 
+#include <ctype.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -205,8 +206,11 @@ static bool _parseSignalling( const std::string &bin, CMcDataSdsInfo &clsInfo ) 
                 if ( i + 3 + iLen > n ) break;
                 if ( iei == 0x78 && iLen >= 1 ) {
                     clsInfo.m_iPayloadSize += iLen - 1;
+                    clsInfo.m_iFdPayloadCount++;
                     if ( b[i + 3] == 0x04 )  // FILEURL (§15.2.13)
                         clsInfo.m_strFileUrl.assign( (const char *)b + i + 4, iLen - 1 );
+                    else
+                        clsInfo.m_bFdNonFileUrlPayload = true;
                 } else if ( iei == 0x79 ) {
                     // Metadata = RFC 5547 file-selector 문자열: name:"..." size:N type:MIME
                     std::string meta( (const char *)b + i + 3, iLen );
@@ -346,4 +350,57 @@ bool McDataParseBody( const std::string &strContentType, const std::string &strB
         }
     }
     return bSignalling;
+}
+
+namespace {
+    /** scheme://host[:port]/path?query → 소문자 scheme·host, 포트(생략 = scheme 기본), 경로(질의·조각 포함 나머지) */
+    bool _splitUrl( const std::string &strUrl, std::string &strScheme, std::string &strHost, int &iPort,
+                    std::string &strRest ) {
+        const size_t p = strUrl.find( "://" );
+        if ( p == std::string::npos || p == 0 ) return false;
+        strScheme = strUrl.substr( 0, p );
+        for ( auto &c : strScheme ) c = (char)tolower( (unsigned char)c );
+        const size_t a = p + 3;
+        const size_t e = strUrl.find_first_of( "/?#", a );
+        std::string strAuth = strUrl.substr( a, ( e == std::string::npos ? strUrl.size() : e ) - a );
+        strRest = e == std::string::npos ? std::string() : strUrl.substr( e );
+        if ( strAuth.empty() || strAuth.find( '@' ) != std::string::npos ) return false;  // userinfo 는 받지 않는다
+        iPort = strScheme == "https" ? 443 : ( strScheme == "http" ? 80 : 0 );
+        size_t c = std::string::npos;
+        if ( strAuth[0] == '[' ) {  // IPv6 literal
+            const size_t rb = strAuth.find( ']' );
+            if ( rb == std::string::npos ) return false;
+            strHost = strAuth.substr( 0, rb + 1 );
+            if ( rb + 1 < strAuth.size() ) {
+                if ( strAuth[rb + 1] != ':' ) return false;
+                c = rb + 1;
+            }
+        } else {
+            c = strAuth.rfind( ':' );
+            strHost = strAuth.substr( 0, c );
+        }
+        if ( c != std::string::npos ) {
+            const std::string strPort = strAuth.substr( c + 1 );
+            if ( strPort.empty() || strPort.find_first_not_of( "0123456789" ) != std::string::npos ) return false;
+            iPort = atoi( strPort.c_str() );
+        }
+        for ( auto &ch : strHost ) ch = (char)tolower( (unsigned char)ch );
+        return !strHost.empty() && iPort > 0;
+    }
+}  // namespace
+
+bool McDataFdUrlIsOurs( const std::string &strUrl, const std::string &strBase ) {
+    std::string strS1, strH1, strR1, strS2, strH2, strR2;
+    int iP1 = 0, iP2 = 0;
+    if ( !_splitUrl( strUrl, strS1, strH1, iP1, strR1 ) || !_splitUrl( strBase, strS2, strH2, iP2, strR2 ) )
+        return false;
+    if ( strS1 != strS2 || strH1 != strH2 || iP1 != iP2 ) return false;
+    // 경로 = base 경로(후행 '/' 없이) + /mcdata/fd/ + 32 hex — CSP·CSC 가 FD URL 을 만드는 방식(base + "/mcdata/fd/" +
+    // id)
+    while ( !strR2.empty() && strR2.back() == '/' ) strR2.pop_back();
+    if ( strR2.find_first_of( "?#" ) != std::string::npos ) return false;
+    const std::string strPrefix = strR2 + "/mcdata/fd/";
+    const size_t n = strPrefix.size();
+    if ( strR1.size() != n + 32 || strR1.compare( 0, n, strPrefix ) != 0 ) return false;
+    return strR1.find_first_not_of( "0123456789abcdef", n ) == std::string::npos;
 }

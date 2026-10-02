@@ -11,6 +11,7 @@
 #include "Log.h"
 #include "McDataCodec.h"
 #include "McDataGates.h"
+#include "McpttInfo.h"
 #include "SipServer.h"
 #include "SipServerSetup.h"
 #include "SipStatusCode.h"
@@ -197,9 +198,21 @@ void CMcDataMediaService::OnIncomingMsrpInvite( const char *pszCallId, const cha
         return;
     }
 
-    int iGate = McDataGateCheck( clsGroup, pszFrom, false );
+    // 게이트 — allow_sds·멤버십·발신자 제휴(§9.2.3.4.4 7)c)·d)·g)), 그 뒤 배포 대상(7)h)·i) — 제휴 멤버가 없으면 403
+    // 198,
+    //   제휴 저장소에 닿지 못하면 500). 대상은 내용 수신 뒤 배포 때 다시 정한다(그 사이 제휴가 바뀔 수 있다).
+    int iWarn = 0;
+    int iGate = McDataGateCheck( clsGroup, pszFrom, false, &iWarn );
+    if ( iGate == 0 ) {
+        std::vector<std::string> vecProbe;
+        iGate = McDataDeliveryTargets( clsGroup, pszFrom, pszTo, vecProbe, &iWarn );
+    }
     if ( iGate != 0 ) {
-        gclsUserAgent.StopCall( pszCallId, iGate );
+        std::vector<std::pair<std::string, std::string>> vecHdr;
+        if ( iWarn > 0 )
+            vecHdr.emplace_back(
+                "Warning", McpttWarning( iWarn, McDataWarnText( iWarn ), gclsServiceMap.GetDomainByKind( "ptt" ) ) );
+        gclsUserAgent.StopCall( pszCallId, iGate, NULL, vecHdr );
         return;
     }
 

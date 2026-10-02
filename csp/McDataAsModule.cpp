@@ -22,6 +22,20 @@ bool CMcDataAsModule::IsEnabled() const {
     return gclsSetup.m_bRoleMcData;
 }
 
+namespace {
+    /** 응답 + Warning (TS 24.282 §4.9 — 399 <agent> "<code> <text>") */
+    void _RejectWithWarning( CSipMessage *pclsMessage, int iStatus, int iWarn, const char *pszText ) {
+        CSipMessage *pclsResponse = pclsMessage->CreateResponseWithToTag( iStatus );
+        if ( !pclsResponse ) return;
+        pclsResponse->AddHeader( "Warning",
+                                 McpttWarning( iWarn, pszText, gclsServiceMap.GetDomainByKind( "ptt" ) ).c_str() );
+        gclsUserAgent.m_clsSipStack.SendSipMessage( pclsResponse );
+    }
+    std::string _TelOf( const std::string &strId ) {
+        return strId.find( ':' ) == std::string::npos ? "tel:" + strId : strId;
+    }
+}  // namespace
+
 /**
  * 그룹 SDS 처리 (TS 24.282 group standard SDS, controlling function).
  * 처리했으면(성공·거부 모두) true 이고, 보낼 최종 응답 코드를 iStatus 로 돌려준다.
@@ -47,6 +61,14 @@ bool CMcDataAsModule::OnMessage( const char *pszFrom, const char *pszTo, CSipMes
         McDataIsMultipartMixed( szContentType ) && McDataParseBody( szContentType, pclsMessage->m_strBody, clsInfo );
     bool bFd = bMcData && clsInfo.m_iMsgType == MCDATA_MSG_FD_SIGNALLING;
     int iPayloadSize = bMcData ? clsInfo.m_iPayloadSize : (int)pclsMessage->m_strBody.size();
+    int iWarn = 0;
+
+    // FD Payload 검사 (§10.2.4.4.2 6)·7)) — 그룹 판정(12))보다 먼저: Payload 하나 · FILEURL · 이 서버의 파일
+    if ( bFd && McDataFdPayloadCheck( clsInfo, &iWarn ) != 0 ) {
+        _RejectWithWarning( pclsMessage, SIP_FORBIDDEN, iWarn, McDataWarnText( iWarn ) );
+        iStatus = 0;
+        return true;
+    }
 
     // 게이트 0 — max-payload-size-sds-cplane-bytes (TS 24.484 서비스 설정, 0/미설정=무제한).
     //   초과 SDS 는 media plane(MSRP) 을 써야 한다 — participating 검사 (TS 24.282 §9.2.2 step 8).
@@ -66,10 +88,15 @@ bool CMcDataAsModule::OnMessage( const char *pszFrom, const char *pszTo, CSipMes
         return true;
     }
 
-    // 게이트 1·2 — allow_sds/allow_fd + 발신자 멤버십 (media plane 과 공용, McDataGates)
-    int iGate = McDataGateCheck( clsGroup, pszFrom, bFd );
+    // 게이트 1·2·3 — allow_sds/allow_fd + 발신자 멤버십 + 발신자 제휴 (media plane 과 공용, McDataGates)
+    int iGate = McDataGateCheck( clsGroup, pszFrom, bFd, &iWarn );
     if ( iGate != 0 ) {
-        iStatus = iGate;
+        if ( iWarn > 0 ) {
+            _RejectWithWarning( pclsMessage, iGate, iWarn, McDataWarnText( iWarn ) );
+            iStatus = 0;
+        } else {
+            iStatus = iGate;
+        }
         return true;
     }
 
@@ -82,9 +109,19 @@ bool CMcDataAsModule::OnMessage( const char *pszFrom, const char *pszTo, CSipMes
         return true;
     }
 
-    // fan-out — 발신자 제외. affiliation 요구 그룹은 affiliate 멤버만 (긴급경보 경로와 동일 규칙).
+    // fan-out — 발신자 제외, 제휴 멤버만(§6.3.4). 제휴 멤버가 없으면 403 198(§9.2.2.4.2 6)k)ii) · §10.2.4.4.2 12)i)),
+    //   제휴 저장소에 닿지 못하면 500.
     std::vector<std::string> vecTargets;
-    McDataDeliveryTargets( clsGroup, pszFrom, pszTo, vecTargets );
+    const int iTargets = McDataDeliveryTargets( clsGroup, pszFrom, pszTo, vecTargets, &iWarn );
+    if ( iTargets != 0 ) {
+        if ( iWarn > 0 ) {
+            _RejectWithWarning( pclsMessage, iTargets, iWarn, McDataWarnText( iWarn ) );
+            iStatus = 0;
+        } else {
+            iStatus = iTargets;
+        }
+        return true;
+    }
     int iFanout = 0;
     for ( const auto &strMember : vecTargets ) {
         CUserInfo clsMemInfo;
@@ -109,20 +146,6 @@ bool CMcDataAsModule::OnMessage( const char *pszFrom, const char *pszTo, CSipMes
     iStatus = SIP_OK;
     return true;
 }
-
-namespace {
-    /** 응답 + Warning (TS 24.282 §4.9 — 399 <agent> "<code> <text>") */
-    void _RejectWithWarning( CSipMessage *pclsMessage, int iStatus, int iWarn, const char *pszText ) {
-        CSipMessage *pclsResponse = pclsMessage->CreateResponseWithToTag( iStatus );
-        if ( !pclsResponse ) return;
-        pclsResponse->AddHeader( "Warning",
-                                 McpttWarning( iWarn, pszText, gclsServiceMap.GetDomainByKind( "ptt" ) ).c_str() );
-        gclsUserAgent.m_clsSipStack.SendSipMessage( pclsResponse );
-    }
-    std::string _TelOf( const std::string &strId ) {
-        return strId.find( ':' ) == std::string::npos ? "tel:" + strId : strId;
-    }
-}  // namespace
 
 bool CMcDataAsModule::OnDispositionNotification( const char *pszFrom, CSipMessage *pclsMessage, int &iStatus ) {
     char szContentType[512];
@@ -165,8 +188,18 @@ bool CMcDataAsModule::OnDispositionNotification( const char *pszFrom, CSipMessag
         _RejectWithWarning( pclsMessage, SIP_FORBIDDEN, 216, "unable to correlate the disposition notification" );
         return true;
     }
-    // 15)b) 그룹 통지면 통지자가 그 그룹 멤버여야 한다
+    // 4) 상관 — 통지의 그룹 문맥(<mcdata-calling-group-id>, 1:1 이면 없음)이 원 SDS 의 것(1:1 이면 빈 값)과 같아야
+    // 한다.
+    //   다르면 다른 대화의 통지다 — 216. 그 뒤 15)b) 그룹 통지면 통지자가 그 그룹 멤버여야 한다
     const std::string strGroup = McpttBareId( clsInfo.m_strCallingGroupId );
+    if ( strGroup != strOrigGroup ) {
+        CLog::Print( LOG_INFO,
+                     "McDataAs: disposition from(%s) conv(%s) msg(%s) group(%s) — 원 SDS 그룹(%s)과 다름 → 403 (216)",
+                     strNotifier.c_str(), clsInfo.m_strConvId.c_str(), clsInfo.m_strMsgId.c_str(),
+                     strGroup.empty() ? "-" : strGroup.c_str(), strOrigGroup.empty() ? "-" : strOrigGroup.c_str() );
+        _RejectWithWarning( pclsMessage, SIP_FORBIDDEN, 216, "unable to correlate the disposition notification" );
+        return true;
+    }
     if ( !strGroup.empty() ) {
         CspPttGroup clsGroup;
         bool bMember = false;

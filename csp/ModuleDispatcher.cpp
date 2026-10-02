@@ -2716,6 +2716,20 @@ int CModuleDispatcher::EventMessage( const char *pszFrom, const char *pszTo, CSi
     CMcDataSdsInfo clsInfo;
     const bool bMc =
         McDataIsMultipartMixed( szContentType ) && McDataParseBody( szContentType, pclsMessage->m_strBody, clsInfo );
+    // 1:1 FD 의 Payload 검사 (TS 24.282 §10.2.4.4.2 6)·7) — 그룹 FD 와 같은 제어 기능 검사, McDataFdPayloadCheck)
+    if ( bMc && clsInfo.m_iMsgType == MCDATA_MSG_FD_SIGNALLING ) {
+        int iWarn = 0;
+        if ( McDataFdPayloadCheck( clsInfo, &iWarn ) != 0 ) {
+            CSipMessage *pclsResp = pclsMessage->CreateResponseWithToTag( SIP_FORBIDDEN );
+            if ( pclsResp ) {
+                pclsResp->AddHeader(
+                    "Warning",
+                    McpttWarning( iWarn, McDataWarnText( iWarn ), gclsServiceMap.GetDomainByKind( "ptt" ) ).c_str() );
+                gclsUserAgent.m_clsSipStack.SendSipMessage( pclsResp );
+            }
+            return 0;  // 응답을 여기서 보냈다
+        }
+    }
     if ( bMc && clsInfo.m_iMsgType == MCDATA_MSG_SDS_SIGNALLING && !clsInfo.m_strMsgId.empty() )
         McDataRememberSds( clsInfo.m_strConvId, clsInfo.m_strMsgId, pszFrom, "" );
 

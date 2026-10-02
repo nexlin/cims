@@ -78,6 +78,9 @@ public:
     std::string m_strSignallingPart;
 
     // ── FD SIGNALLING (msg type 0x02) 전용 ──
+    /** Payload IE 수와 FILEURL 이 아닌 내용 형식이 있었는가 — 제어 기능 검사(TS 24.282 §10.2.4.4.2 6)·7)a)) */
+    int m_iFdPayloadCount = 0;
+    bool m_bFdNonFileUrlPayload = false;
     /** Payload IE(FILEURL) 의 다운로드 URL */
     std::string m_strFileUrl;
     /** Metadata IE(file-selector, RFC 5547) 의 name/size/type */
@@ -88,6 +91,13 @@ public:
 
 /** Content-Type 이 multipart/mixed 인지 (MCData SDS 판별 1차 조건) */
 bool McDataIsMultipartMixed( const std::string &strContentType );
+
+/** FD 의 FILEURL 이 이 서버의 media storage function(CSC 콘텐츠 서버) 파일을 가리키는가 — TS 24.282 §10.2.4.4.2 7)b).
+ *  strBase = 콘텐츠 서버 base URL(scheme://host[:port], 후행 '/' 없음 — 단말에 내주는 MCData FD URL 의 base). 같은
+ * scheme· host(대소문자 무시)·port(생략 = scheme 기본)이고 경로가 정확히 /mcdata/fd/<32 hex>(질의·조각 없음)여야 한다.
+ * 다른 호스트를 가리키는 URL 은 우리 저장소에 없는 파일이다 — 규격 단말이 그 URL 로 Bearer 토큰을 실어 GET 하므로
+ * 배포하지 않는다. */
+bool McDataFdUrlIsOurs( const std::string &strUrl, const std::string &strBase );
 
 /** 그룹 상시 대화 Conversation ID — UUID v3(MD5) 결정적 발급 (앱 conversationIdOf 와 동일 규칙) */
 std::string McDataConversationIdOf( const std::string &strGroupId );

@@ -6,6 +6,7 @@
 #include "McDataCodec.h"
 #include <cstdio>
 #include <string>
+#include <vector>
 static int fail=0;
 #define CK(n,c) do{ if(!(c)){printf("FAIL %s\n",n);fail++;}else printf("ok   %s\n",n);}while(0)
 static std::string b64(const std::string& in){
@@ -46,5 +47,38 @@ int main(){
   CMcDataSdsInfo j;
   CK("old form parse", McDataParseBody("multipart/mixed;boundary=bb", old, j));
   CK("old form: no resource-lists", !j.m_bHasResourceLists && j.m_vecListUris.empty());
+  // FD SIGNALLING PAYLOAD(0x02) — Payload IE 수·FILEURL 여부 (TS 24.282 §10.2.4.4.2 6)·7)a), S05 FD-1)
+  //   [type 0x02][date-time 5][conv 16][msg 16] + Payload IE(0x78 TLV-E: [len 2][content-type 1][data])
+  auto fdBody=[&](const std::vector<std::pair<unsigned char,std::string>>& payloads){
+    std::string fd("\x02",1); fd += std::string(5,'\0');
+    for(int i=0;i<16;i++) fd += (char)(0x30+i);
+    for(int i=0;i<16;i++) fd += (char)(0x40+i);
+    for(const auto& p:payloads){ const int n=(int)p.second.size()+1; fd += (char)0x78; fd += (char)(n>>8); fd += (char)(n&0xFF); fd += (char)p.first; fd += p.second; }
+    return std::string("--fb\r\nContent-Type: application/vnd.3gpp.mcdata-info+xml\r\n\r\n<mcdatainfo><mcdata-Params/></mcdatainfo>\r\n"
+                       "--fb\r\nContent-Type: application/vnd.3gpp.mcdata-signalling\r\nContent-Transfer-Encoding: base64\r\n\r\n") + b64(fd) + "\r\n--fb--\r\n";
+  };
+  const std::string url="https://121.161.164.48:4430/mcdata/fd/0123456789abcdef0123456789abcdef";
+  CMcDataSdsInfo f1; McDataParseBody("multipart/mixed;boundary=fb", fdBody({{0x04,url}}), f1);
+  CK("fd one FILEURL", f1.m_iMsgType==MCDATA_MSG_FD_SIGNALLING && f1.m_iFdPayloadCount==1 && !f1.m_bFdNonFileUrlPayload && f1.m_strFileUrl==url);
+  CMcDataSdsInfo f2; McDataParseBody("multipart/mixed;boundary=fb", fdBody({{0x04,url},{0x04,url}}), f2);
+  CK("fd two payloads (210)", f2.m_iFdPayloadCount==2);
+  CMcDataSdsInfo f3; McDataParseBody("multipart/mixed;boundary=fb", fdBody({{0x01,"hello"}}), f3);
+  CK("fd TEXT payload (211)", f3.m_iFdPayloadCount==1 && f3.m_bFdNonFileUrlPayload);
+  CMcDataSdsInfo f4; McDataParseBody("multipart/mixed;boundary=fb", fdBody({}), f4);
+  CK("fd no payload (210)", f4.m_iMsgType==MCDATA_MSG_FD_SIGNALLING && f4.m_iFdPayloadCount==0);
+  // FILEURL = 이 서버의 media storage function 파일인가 (McDataFdUrlIsOurs — §10.2.4.4.2 7)b) 212)
+  const std::string base="https://121.161.164.48:4430";
+  CK("url ours", McDataFdUrlIsOurs(url, base));
+  CK("url ours host case", McDataFdUrlIsOurs("HTTPS://121.161.164.48:4430/mcdata/fd/0123456789abcdef0123456789abcdef", base));
+  CK("url other host", !McDataFdUrlIsOurs("https://evil.example.com:4430/mcdata/fd/0123456789abcdef0123456789abcdef", base));
+  CK("url other port", !McDataFdUrlIsOurs("https://121.161.164.48:8443/mcdata/fd/0123456789abcdef0123456789abcdef", base));
+  CK("url other scheme", !McDataFdUrlIsOurs("http://121.161.164.48:4430/mcdata/fd/0123456789abcdef0123456789abcdef", base));
+  CK("url userinfo", !McDataFdUrlIsOurs("https://121.161.164.48:4430@evil.example.com/mcdata/fd/0123456789abcdef0123456789abcdef", base));
+  CK("url path traversal", !McDataFdUrlIsOurs("https://121.161.164.48:4430/mcdata/fd/../../etc/passwd", base));
+  CK("url query", !McDataFdUrlIsOurs(url+"?x=1", base));
+  CK("url bad id", !McDataFdUrlIsOurs("https://121.161.164.48:4430/mcdata/fd/0123456789ABCDEF0123456789abcdef", base));
+  CK("url default port", McDataFdUrlIsOurs("https://csc.example.kr/mcdata/fd/0123456789abcdef0123456789abcdef", "https://csc.example.kr:443"));
+  CK("url base path", McDataFdUrlIsOurs("https://h:4430/cims/mcdata/fd/0123456789abcdef0123456789abcdef", "https://h:4430/cims/"));
+  CK("url empty", !McDataFdUrlIsOurs("", base) && !McDataFdUrlIsOurs(url, ""));
   printf("%s (%d fail)\n",fail?"FAIL":"PASS",fail); return fail?1:0;
 }

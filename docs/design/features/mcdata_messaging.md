@@ -88,13 +88,22 @@ SIP MESSAGE 본문 = `multipart/mixed;boundary=…` 3파트:
 SDS NOTIFICATION 은 ③ — 상대의 등록 바인딩으로 본문 그대로 전달하며 게이트·보관은 없다(§8). 1:1 SDS 는 ③ 에서 disposition
 상관 색인(§4.4)에 오른다.
 
-MCDATA-AS 게이트 (모두 controlling function 검사, TS 24.282 §9.2.2):
-1. `allow_sds`=false → **403 Forbidden**
+MCDATA-AS 게이트 (모두 controlling function 검사 — SDS TS 24.282 §9.2.2.4.2 · media plane §9.2.3.4.4 · FD §10.2.4.4.2,
+`McDataGates`):
+0. FD 만 — Payload IE 가 하나가 아니면 **403 `210`**, FILEURL 이 아니면 **403 `211`**, FILEURL 이 이 서버의 콘텐츠 서버 파일이 아니면
+   **403 `212 file referenced by file URL does not exist`**(§10.2.4.4.2 6)·7) — 1:1 FD 도 ③ 에서 같은 검사, `McDataFdPayloadCheck`).
+   «이 서버의 파일» = 콘텐츠 서버 base(`Setup.McData.FdUrlBase`, 비면 CSC PublicUrl — CSP 가 FD URL 을 만들 때와 같은 값)와 scheme·
+   host·port 가 같고 경로가 `/mcdata/fd/<32 hex>`(`McDataFdUrlIsOurs`). 규격 단말은 받은 URL 로 Bearer 토큰을 실어 GET 하므로(§10.2.3.1)
+   다른 호스트의 URL 은 배포하지 않는다. 파일 존재의 HEAD 확인(§6.7.3)은 §8.
+1. `allow_sds`(FD 는 `allow_fd`)=false → **403 Forbidden**
 2. 발신자가 그룹 멤버가 아님 → **403 Forbidden**
-3. payload 크기(MCData 는 TLV payload 합, text/plain 은 본문 길이) > `max_sds_size` → **413**
+3. 발신자가 그 그룹에 제휴하지 않음 → **403 `120 user is not affiliated to this group`**(6)j) · 7)g) · 12)g))
+4. payload 크기(MCData 는 TLV payload 합, text/plain 은 본문 길이) > `max_sds_size` → **413**
+5. 배포 대상(발신자 제외 제휴 멤버, §6.3.4)이 없음 → **403 `198 no users are affiliated to this group`**(6)k)ii) · 7)i) · 12)i)) —
+   media plane 은 INVITE 를 받을 때 3·5 를 본다
 
-통과 시 발신자 제외 멤버에게 fan-out — `require_affiliation` 그룹은 affiliate 멤버만(긴급경보
-경로와 동일 규칙). 원본 본문·Content-Type(boundary 포함) 그대로 전달(`SendSms` 5-인자
+제휴는 `require_affiliation` 그룹만 본다 — 그 밖의 그룹은 멤버 전원을 초대하는 그룹이라 멤버십이 곧 제휴다(긴급경보·그룹 호와 같은
+규칙). 제휴 저장소(DB)에 닿지 못하면 제휴를 판정할 수 없어 **500**(§9.2.2.4.2 1) — 그룹 전원에게 보내지 않는다). 통과 시 배포 대상에게 fan-out. 원본 본문·Content-Type(boundary 포함) 그대로 전달(`SendSms` 5-인자
 오버로드, `ext/psip/SipUserAgent/SipUserAgentSms.hpp`). `text/plain` 그룹 문자(구버전 앱)도
 같은 게이트·fan-out 을 통과한다.
 
@@ -137,6 +146,7 @@ mcdata-info `<mcdata-calling-group-id>` 를 실어 보낸다(5)). CSP `CMcDataAs
 | §12.2.3 2) | Accept-Contact 에 ICSI `urn:urn-7:3gpp-service.ims.icsi.mcdata.sds` | 403 |
 | 3) | resource-lists entry 가 정확히 하나 | 403 Warning `145 unable to determine called party` |
 | 4)·5) | 대화·메시지 ID 가 이 서버가 전달한 SDS 이고 그 발신자가 통지 대상 — 상관 색인 `McDataCorrelateSds`(그룹 SDS 는 `McDataArchiveMessage`, 1:1 SDS 는 ③ 전달이 올린다. 최근 24 시간·최대 20000 건 인메모리, CSP 재기동 전 발신분은 상관 불가) | 403 Warning `216 unable to correlate the disposition notification` |
+| 4) | 통지의 그룹 문맥(`<mcdata-calling-group-id>`, 1:1 이면 없음)이 원 SDS 의 것과 같다 — 그룹 SDS 의 통지인데 그룹이 없거나 다른 그룹이면 다른 대화의 통지다 | 403 Warning `216` |
 | 15)b) | 그룹 통지면 통지자가 그 그룹 멤버 | 403 Warning `116 user is not part of the MCData group` |
 
 통과하면 원 발신자에게 새 MESSAGE 로 중계한다 — mcdata-info `<mcdata-request-uri>` = 원 발신자(14)), `<mcdata-calling-user-id>` =
@@ -371,6 +381,9 @@ CSP fan-out (하이브리드):
 - 멤버 단위 송신권한 — 수신전용 멤버(지금은 멤버 전원 `<mcdata-allow-transmit-data-in-this-group>` true)·멤버별 `<mcdata-max-data-in-single-request>`
 - 메시지·FD 파일 retention/purge (녹취와 공통 정리 메커니즘)
 - FD NOTIFICATION(다운로드 완료)·READ 통지
+- **FD 파일 존재 확인**(TS 24.282 §6.7.3 — 제어 기능이 FILEURL 에 HTTP HEAD, 404 면 403 `212`): 지금은 URL 이 이 서버의 콘텐츠 서버를
+  가리키는지만 본다(§4 게이트 0). 콘텐츠 서버(CSC)의 HEAD 지원(§6.7.3.2)과 FD URL 을 PublicUrl base 로 내는 것(Host 헤더가 아니라 —
+  단말이 다른 이름으로 CSC 에 붙으면 URL 이 base 와 달라 212 가 된다) 뒤에 CSP 가 HEAD 로 확인한다(conformance_gap_plan.md S26)
 - **MCData 긴급 경보**(TS 24.282 §16.2 · 애드혹 그룹 경보 §16.2A — 미지원): 그룹 문서가 `<mcdata-allow-emergency-alert>` 를 싣지 않으므로 발령은 늘 미인가다
   (§6.3.7.2.1) — CSP `CMcDataAsModule::OnEmergencyAlert` 가 **403 + mcdata-info `<alert-ind>` false**(§16.2.3.1 4)a))로 답하고 배포하지
   않는다. 취소(`<alert-ind>` false, §16.2.3.2)는 남은 MCData 경보가 없어 지울 것도 보낼 통지도 없다 → 200. 지원할 때 = 그룹 문서 요소·
