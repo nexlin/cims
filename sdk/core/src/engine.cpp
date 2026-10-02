@@ -1249,7 +1249,15 @@ public:
             // 개시 200 OK 의 P-Answer-State(RFC 4964 — TS 24.379 §10.1.1.2.1.1 2A) 사용자에게 알릴 수 있게 기록한다
             if (tsx.role == PJSIP_ROLE_UAC && tsx.method == "INVITE" && msg.rfind("SIP/2.0 200", 0) == 0) {
                 const std::string st = detail::headerValue(msg, "P-Answer-State");
-                if (!st.empty()) o_->updateCall(getId(), [&](CallInfo& c) { c.answerState = st; });
+                if (!st.empty()) {
+                    // 성립 이벤트(onCallState Active)는 INVITE 상태 콜백에서 이미 나갔다 — pjsip 은 그 콜백을 이 tsx 콜백보다 먼저 부르므로
+                    //   (sip_inv.c mod_inv_on_tsx_state) 그 스냅샷에는 이 값이 없다. 값이 실린 스냅샷을 한 번 더 낸다 — 앱은 호 상태 이벤트에서
+                    //   «멤버 확인 전 연결» 을 적는다(상태가 그대로인 이벤트는 호 정보 갱신으로 읽힌다).
+                    CallInfo snap;
+                    bool changed = false;
+                    o_->updateCall(getId(), [&](CallInfo& c) { changed = c.answerState != st; c.answerState = st; }, &snap);
+                    if (changed) o_->emit([o = o_, snap] { o->listener->onCallState(snap); });
+                }
             }
             if (msrp) {
                 // 발신 200 OK answer 의 cmdp a=path → 입출력 스레드(TS 24.282 §9.2.3)

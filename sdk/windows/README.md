@@ -49,6 +49,8 @@ powershell -ExecutionPolicy Bypass -File windows/dispatch-desktop/publish.ps1   
 > Smart App Control 이 켜진 PC 는 새로 링크한 미서명 exe 를 파일별 평판으로 간헐 차단한다("Application Control policy has blocked
 > this file"). 재빌드·재시도로 풀리기도 하며, 정책 변경은 개발자 본인의 결정이다. 개발 실행은 apphost 대신 `dotnet <출력>\CimsDispatch.dll` 로 띄우면
 > 막히지 않고, 배포 패키지는 같은 이유로 서명된 dotnet 뮤서 진입점(`CimsDispatch-run.cmd`)을 함께 둔다.
+> 새로 링크한 `cimsue.dll` 도 같은 판정을 받는다 — 막히면(`LoadLibrary` 오류 4551) 로더가 관리 `CimsUe.dll` 로 넘어가
+> `EntryPointNotFoundException: cimsue_engine_create` 로 보인다. `build-win/bin/Release/cimsue.dll` 을 지우고 다시 링크하면 해시가 바뀐다.
 
 ## 상태
 

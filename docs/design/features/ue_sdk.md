@@ -220,6 +220,8 @@ C++ 공개 표면은 `cimsue/engine.h` 의 `Engine` 하나이며 계정·호를 
   `mcptt-calling-group-id` 없으면 `mcptt-request-uri`, 경보 없는 그룹 긴급 통지도 `alertInd 0` 으로).
 - **개시 응답 상태·미응답 멤버**(TS 24.379 §10.1.1.2.1.1 2A)·§6.3.3.3, [mcptt_standard_conformance.md](mcptt_standard_conformance.md) C4c·C4f).
   개시 200 OK 의 `P-Answer-State`(RFC 4964)를 `CallInfo.answerState` 에 둔다 — `Unconfirmed` = 서버가 멤버 확인 전에 받았다(미디어 버퍼링).
+  값을 적은 뒤 그 스냅샷으로 `onCallState` 를 한 번 더 낸다 — pjsip 은 INVITE 상태 콜백(성립 이벤트)을 200 OK 의 tsx 콜백보다 먼저 부르므로 성립 이벤트의
+  스냅샷에는 이 값이 없다(상태가 그대로인 `onCallState` 는 호 정보 갱신이다).
   in-dialog INFO 는 Info Package(RFC 6086)로 가린다: `g.3gpp.mcptt-info` 는 코어가 200 으로 받고 `<non-acknowledged-user>` 를
   `CallInfo.nonAcknowledgedUsers`(bare id)에 담아 `onNonAcknowledgedUsers` 를 낸다, 모르는 패키지는 469(§4.2.2), 패키지 없는 INFO 는 스택 기본.
   C API(`cimsue_call_info_t.answer_state`·`non_ack_users`·리스너 `on_non_acknowledged_users`)·.NET(`CallInfo.AnswerState`·`NonAcknowledgedUsers`·
