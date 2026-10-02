@@ -152,12 +152,14 @@ std::string fdSignallingTlv(const std::string& convId, const std::string& msgId,
     return s;
 }
 
-static std::string infoXml(const std::string& requestType, const std::string& uri) {
+static std::string infoXml(const std::string& requestType, const std::string& uri, const std::string& clientId = std::string()) {
     return "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
            "<mcdatainfo xmlns=\"urn:3gpp:ns:mcdataInfo:1.0\">\n"
            "  <mcdata-Params>\n"
            "    <request-type>" + requestType + "</request-type>\n"
-           "    <mcdata-request-uri type=\"Normal\"><mcdataURI>" + uri + "</mcdataURI></mcdata-request-uri>\n"
+           "    <mcdata-request-uri type=\"Normal\"><mcdataURI>" + uri + "</mcdataURI></mcdata-request-uri>\n" +
+           (clientId.empty() ? std::string()
+                             : "    <mcdata-client-id type=\"Normal\"><mcdataString>" + clientId + "</mcdataString></mcdata-client-id>\n") +
            "  </mcdata-Params>\n"
            "</mcdatainfo>";
 }
@@ -175,10 +177,11 @@ static void appendPart(std::string& b, const std::string& boundary, const std::s
 // 그룹과 1:1 은 **mcdata-info 의 request-type·request-uri 만** 다르다(TS 24.282 Annex D) — 서명·payload
 //   파트는 같다. 그래서 한 함수로 짓고 둘은 그 앞에서 갈린다.
 static Body buildSds(const char* requestType, const std::string& uri, const std::string& text,
-                     const std::string& convId, const std::string& msgId, bool requestDelivery, int64_t timeSec) {
+                     const std::string& convId, const std::string& msgId, bool requestDelivery, int64_t timeSec,
+                     const std::string& clientId = std::string()) {
     std::string boundary = "mcdata-" + msgId.substr(0, 16);
     std::string body;
-    appendPart(body, boundary, kCtInfo, nullptr, infoXml(requestType, uri));
+    appendPart(body, boundary, kCtInfo, nullptr, infoXml(requestType, uri, clientId));
     appendPart(body, boundary, kCtSignalling, "base64", base64Encode(sdsSignallingTlv(convId, msgId, requestDelivery, timeSec)));
     appendPart(body, boundary, kCtPayload, "base64", base64Encode(sdsPayloadTlv(text)));
     body += "--" + boundary + "--\r\n";
@@ -186,8 +189,8 @@ static Body buildSds(const char* requestType, const std::string& uri, const std:
 }
 
 Body buildGroupSds(const std::string& groupUri, const std::string& text, const std::string& convId,
-                   const std::string& msgId, bool requestDelivery, int64_t timeSec) {
-    return buildSds("group-sds", groupUri, text, convId, msgId, requestDelivery, timeSec);
+                   const std::string& msgId, bool requestDelivery, int64_t timeSec, const std::string& clientId) {
+    return buildSds("group-sds", groupUri, text, convId, msgId, requestDelivery, timeSec, clientId);
 }
 
 Body buildOneToOneSds(const std::string& peerUri, const std::string& text, const std::string& convId,
@@ -196,18 +199,19 @@ Body buildOneToOneSds(const std::string& peerUri, const std::string& text, const
 }
 
 static Body buildFd(const char* requestType, const std::string& uri, const FdFile& file,
-                    const std::string& convId, const std::string& msgId, int64_t timeSec) {
+                    const std::string& convId, const std::string& msgId, int64_t timeSec,
+                    const std::string& clientId = std::string()) {
     std::string boundary = "mcdata-fd-" + msgId.substr(0, 14);
     std::string body;
-    appendPart(body, boundary, kCtInfo, nullptr, infoXml(requestType, uri));
+    appendPart(body, boundary, kCtInfo, nullptr, infoXml(requestType, uri, clientId));
     appendPart(body, boundary, kCtSignalling, "base64", base64Encode(fdSignallingTlv(convId, msgId, file, timeSec)));
     body += "--" + boundary + "--\r\n";
     return Body{"multipart/mixed;boundary=" + boundary, body};
 }
 
 Body buildGroupFd(const std::string& groupUri, const FdFile& file, const std::string& convId,
-                  const std::string& msgId, int64_t timeSec) {
-    return buildFd("group-fd", groupUri, file, convId, msgId, timeSec);
+                  const std::string& msgId, int64_t timeSec, const std::string& clientId) {
+    return buildFd("group-fd", groupUri, file, convId, msgId, timeSec, clientId);
 }
 
 Body buildOneToOneFd(const std::string& peerUri, const FdFile& file, const std::string& convId,
@@ -322,6 +326,12 @@ static std::string elemText(const std::string& xml, const std::string& elem) {
 }
 
 bool parse(const std::string& contentType, const std::string& body, SdsMessage& out) {
+    bool forApplication = false;
+    return parse(contentType, body, out, forApplication);
+}
+
+bool parse(const std::string& contentType, const std::string& body, SdsMessage& out, bool& forApplication) {
+    forApplication = false;
     std::string boundary = boundaryOf(contentType);
     if (boundary.empty()) {
         size_t nl = body.find_first_of("\r\n");
@@ -349,11 +359,22 @@ bool parse(const std::string& contentType, const std::string& body, SdsMessage& 
                 out.timeSec = readDateTime(raw, 1);
                 out.convId = hexEncode(raw.substr(6, 16));
                 out.msgId = hexEncode(raw.substr(22, 16));
+                // 선택 IE(표 15.1.2.1-1 순서): InReplyTo 0x21(TV 17) · Application ID 0x22(TV 2) · disposition 요청 0x8-(TV 1) ·
+                //   Extended application ID 0x7D · User location 0x7E · Sender MCData user ID 0x51 · Application metadata container 0x53
+                //   (TLV-E — 길이 2 octet). 모르는 IE 에서 멈춘다(길이를 알 수 없다).
                 size_t i = 38;
                 while (i < raw.size()) {
                     int iei = (unsigned char)raw[i];
                     if ((iei & 0xF0) == 0x80) { out.dispositionReq = iei & 0x0F; i += 1; }
                     else if (iei == 0x21) i += 17;                      // InReplyTo message ID
+                    else if (iei == 0x22) { forApplication = true; i += 2; }   // Application ID — 응용 대상(§9.2.1.2 7))
+                    else if (iei == 0x7D || iei == 0x7E || iei == 0x51 || iei == 0x53) {
+                        if (i + 3 > raw.size()) break;
+                        size_t l = ((unsigned char)raw[i + 1] << 8) | (unsigned char)raw[i + 2];
+                        if (i + 3 + l > raw.size()) break;
+                        if (iei == 0x7D) forApplication = true;         // Extended application ID — 응용 대상(§9.2.1.2 8))
+                        i += 3 + l;
+                    }
                     else break;
                 }
             } else if (t == kMsgSdsNotification) {
@@ -375,7 +396,7 @@ bool parse(const std::string& contentType, const std::string& body, SdsMessage& 
                     int iei = (unsigned char)raw[i];
                     if ((iei & 0xF0) == 0x90 || (iei & 0xF0) == 0xA0) { i += 1; continue; }
                     if (iei == 0x21) { i += 17; continue; }
-                    if (iei == 0x22) { i += 2; continue; }
+                    if (iei == 0x22) { forApplication = true; i += 2; continue; }   // 응용 대상 파일(§10.2.1.2 — SDS 와 같은 규칙)
                     if ((iei != 0x78 && iei != 0x79) || i + 3 > raw.size()) break;
                     size_t l = ((unsigned char)raw[i + 1] << 8) | (unsigned char)raw[i + 2];
                     if (i + 3 + l > raw.size()) break;

@@ -1869,7 +1869,11 @@ public:
         }
         if (body.find("mcdata-signalling") != std::string::npos) {
             SdsMessage m;
-            if (mcdata::parse(ct, body, m)) {
+            bool forApp = false;
+            if (mcdata::parse(ct, body, m, forApp)) {
+                // 응용 대상 메시지(Application ID·Extended application ID)는 사용자용이 아니다 — 알리지 않는다. 받을 응용을 등록하는 길이
+                //   없으므로 모르는 응용이고, 모르는 응용의 메시지는 버린다(TS 24.282 §9.2.1.2 7)c)·8)c)).
+                if (forApp) { o_->log(3, "mcdata: message for an application (Application ID) — not for the user, discarded"); return; }
                 m.accountId = acc;
                 if (m.fromUri.empty()) m.fromUri = from;          // mcdata-calling-user-id 가 없는 발신(옛 단말·1:1 직행)
                 o_->emit([o = o_, m] { o->listener->onSds(m); });
@@ -3659,7 +3663,11 @@ void Engine::Impl::startMsrpRecv(int callId, int accountId, const MsrpLeg& leg) 
         std::string ct, body, err;
         if (!sp.empty() && msrp::receiveSds(sp, lp, 15, *cancel, ct, body, err)) {
             SdsMessage m;
-            if (mcdata::parse(ct, body, m)) {
+            bool forApp = false;
+            if (mcdata::parse(ct, body, m, forApp) && forApp) {
+                // 응용 대상 메시지 — 사용자에게 알리지 않고 버린다(TS 24.282 §9.2.1.2 7)·8), 시그널링 평면과 같은 규칙)
+                log(3, "msrp recv call " + std::to_string(callId) + ": message for an application — discarded");
+            } else if (mcdata::parse(ct, body, m)) {
                 m.accountId = accountId;
                 if (m.fromUri.empty()) m.fromUri = from;          // 본문에 mcdata-info 가 없다 — 배포 INVITE 의 것
                 if (m.groupUri.empty()) m.groupUri = group;
@@ -3739,7 +3747,9 @@ SdsSend Engine::sendGroupSds(int accountId, const std::string& groupId, const st
             return o->startMsrpInvite(accountId, groupId, token,
                                       mcdata::sdsSignallingTlv(mcdata::conversationIdOf(groupId), msgId, requestDelivery, now),
                                       mcdata::sdsPayloadTlv(text));
-        mcdata::Body b = mcdata::buildGroupSds("tel:" + groupId, text, mcdata::conversationIdOf(groupId), msgId, requestDelivery, now);
+        // mcdata-info 에 MCData client ID(§9.2.2.2.1 3)b)iv) — 단일 MC client ID, 없으면 싣지 않는다)
+        mcdata::Body b = mcdata::buildGroupSds("tel:" + groupId, text, mcdata::conversationIdOf(groupId), msgId, requestDelivery, now,
+                                               ic->second.effectiveMcpttClientId());
         return o->doSendRequest(accountId, "MESSAGE", "sip:" + groupId + "@" + ic->second.domain, b.contentType, b.body, {}, token) >= 0;
     });
     if (!ok) { out.code = -3; out.reason = "send failed"; return out; }
@@ -3788,7 +3798,7 @@ SdsSend Engine::sendGroupFd(int accountId, const std::string& groupId, const FdF
         if (ic == o->accountCfgs.end()) return false;
         // 그룹 SDS 와 같은 대화(conversation ID) — 파일도 그 그룹 스레드에 놓인다.
         mcdata::Body b = mcdata::buildGroupFd("tel:" + groupId, file, mcdata::conversationIdOf(groupId), msgId,
-                                              (int64_t)std::time(nullptr));
+                                              (int64_t)std::time(nullptr), ic->second.effectiveMcpttClientId());   // §10.2.4.2.1 3)b)iii)
         return o->doSendRequest(accountId, "MESSAGE", "sip:" + groupId + "@" + ic->second.domain, b.contentType, b.body, {}, token) >= 0;
     });
     if (!ok) { out.code = -3; out.reason = "send failed"; return out; }

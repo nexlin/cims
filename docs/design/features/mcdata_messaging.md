@@ -79,6 +79,13 @@ SIP MESSAGE 본문 = `multipart/mixed;boundary=…` 3파트:
 - **Message ID** = 발신 시 신규 UUID. delivered 통지 대사·로컬 저장 키.
 - **Disposition**: 발신 시 `DELIVERY`(0x81) 요청 → 수신 앱이 **SDS NOTIFICATION**(type 0x05,
   DELIVERED=0x02)을 원 발신자에게 1:1 MESSAGE 로 회신 → 발신 앱 말풍선에 ✓ 표시.
+- **mcdata-info 의 client ID**: 그룹 SDS·그룹 FD 는 `<mcdata-client-id type="Normal"><mcdataString>` 로 MCData client ID(단일 MC client ID —
+  `AccountConfig.effectiveMcpttClientId()`)를 싣는다(TS 24.282 §9.2.2.2.1 3)b)iv) · §10.2.4.2.1 3)b)iii) — 제어 기능의 클라이언트 단위 판정). 1:1 은 싣지 않는다.
+- **선택 IE 와 응용 대상 메시지**(표 15.1.2.1-1 · §9.2.1.2 7)·8)): SDS SIGNALLING PAYLOAD 의 선택 IE 는 InReplyTo `0x21` → Application ID `0x22`
+  → disposition 요청 `0x8N` → Extended application ID `0x7D` → User location `0x7E` → Sender MCData user ID `0x51` → Application metadata container
+  `0x53`(뒤 넷은 TLV-E) 순서로 읽는다. Application ID 나 Extended application ID 가 있는 메시지는 **사용자용이 아니다** — 단말은 사용자에게
+  알리지 않고, 받을 응용을 모르면 버린다. SDK 에는 응용을 등록하는 길이 없어 그런 메시지는 모두 버린다(`onSds` 로 올리지 않는다 — 시그널링·
+  미디어 평면 같다). FD 의 Application ID 도 같다.
 - 코덱 구현: 단말 = SDK 코어 `sdk/core/src/mcdata/sds_codec.{h,cpp}`(단위시험 `sdk/core/test/sds_codec_test.cpp` — 현장 앱·관제 앱이
   같은 코덱을 쓴다), CSP 파서 `csp/McDataCodec.{h,cpp}` (게이트·flow 로깅용 필드만).
 

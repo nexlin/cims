@@ -45,14 +45,14 @@ MCPTT 와 뿌리가 같은 것(제휴 클라이언트 단위·비제휴 멤버 �
 |---|---|---|---|---|---|
 | 등록·서비스 인가 (REG) | 4 | — | 3 | 1 | — |
 | 제휴·배포 대상 (AFF) | 3 | 1 | 1 | 1 | — |
-| SDS — 시그널링 평면 (SDS) | 10 | — | 4 | 3 | 3 |
+| SDS — 시그널링 평면 (SDS) | 8 | — | 3 | 2 | 3 |
 | SDS — 미디어 평면 (MSRP) | 6 | — | 2 | 3 | 1 |
 | disposition 통지 (DISP) | 1 | — | — | 1 | — |
 | 파일 배포 (FD) | 2 | — | — | 1 | 1 |
 | 설정 문서 (CFG) | 1 | — | — | 1 | — |
-| **계** | **27** | **1** | **10** | **11** | **5** |
+| **계** | **25** | **1** | **9** | **10** | **5** |
 
-확인 수준 — ◎ 22 · ○ 2 · △ 3.
+확인 수준 — ◎ 20 · ○ 2 · △ 3.
 
 읽는 순서 — §2(먼저 볼 것) → §3(영역별 전체) → §4(미구현 목록에 빠진 기능) → §5(문서 정정) → §6(묶음과 순서).
 
@@ -108,10 +108,8 @@ CSP 는 참여 기능과 제어 기능을 겸한다.
 |---|---|---|---|---|---|---|
 | SDS-1 | B | CSP | §6.2.4.1 4) — Request-URI = 참여 기능 PSI. §9.2.2.2.1 3)b)ii) — 그룹 = `<mcdata-request-uri>`, 2)a) — 1:1 대상 = resource-lists. §9.2.2.3.1 4) — 참여 기능은 본문으로 제어 기능을 정한다 | 대상 = To user(psip `SipUserAgentMessage.hpp:31`) → 그룹이면 MCDATA-AS(`csp/McDataAsModule.cpp:33`), 아니면 1:1 전달(`csp/ModuleDispatcher.cpp:2669-2679`). `<mcdata-request-uri>` 는 파싱만 하고 읽는 곳이 없다(`csp/McDataCodec.cpp:295`) | To 가 PSI 인 규격 단말의 그룹·1:1 SDS 가 404. mcdata_messaging.md §7 «서버는 양쪽 모두 수용» 과 다르다(규격 단말의 To 값은 실측) | ◎ |
 | SDS-2 | B | CSP | §9.2.2.4.1.1 5) — 수신자별 mcdata-info `<mcdata-request-uri>` = 수신자 MCData ID, 그룹이면 `<mcdata-calling-group-id>` = 그룹. §9.2.2.3.1 12) — `<mcdata-calling-user-id>` = 발신자. 7)·8) — P-Asserted-Identity = 제어 기능 PSI, P-Asserted-Service | fan-out 은 받은 본문·Content-Type 을 그대로 복사(`csp/McDataAsModule.cpp:94`, psip `SendSms` — 헤더 추가 없음). request-uri 는 그룹으로 남고 calling-group-id·calling-user-id 가 없다. 우리 SDK 는 request-uri·From 으로 보정한다(`sdk/core/src/mcdata/sds_codec.cpp:339-343`, `engine.cpp:1784`) | 규격 단말은 그룹·발신자를 알 수 없어 스레드를 못 묶고, §12.2.1.1 의 통지 대상(`<mcdata-calling-user-id>`)이 없어 DELIVERED 를 못 보낸다 | ◎ |
-| SDS-3 | B | SDK | §9.2.2.2.1 3)b)iv) · §10.2.4.2.1 3)b)iii) — 그룹 SDS·FD 의 mcdata-info 에 `<mcdata-client-id>` (shall) | mcdata-info = `request-type`·`mcdata-request-uri` 둘뿐(`sdk/core/src/mcdata/sds_codec.cpp:155-163`) | 규격 제어 기능이 §6.3.5 제휴 판정(클라이언트 단위)을 못 한다(MCPTT GCC-3 과 같은 결) | ◎ |
 | SDS-4 | C | CSP | §9.2.2.4.2 2) — mcdata-info·mcdata-signalling·mcdata-payload 가 없으면 403 + `199 expected MIME bodies not in the request` | CSP 가 판정·응답을 낸다 — 엄격 검사 스위치 `Setup.Mcptt.StrictCheck` 기본 `log`(구버전 앱의 `text/plain` 은 로그만 남기고 그대로 배포, 결정 D5). `enforce` 전환은 앱이 규격형으로 바뀐 뒤(S18 과 같이) | 스위치가 log 인 동안 형식이 깨진 본문도 그룹 전원에게 간다 | ◎ |
 | SDS-5 | D | CSP | §9.2.2.4.2 5)·6) — `<request-type>`(one-to-one-sds·group-sds·ad-hoc-group-sds)로 절차를 가른다 | request-type 을 읽지 않는다 — To 가 그룹이면 그룹 절차(`csp/McDataAsModule.cpp:33`) | `one-to-one-sds` 본문을 그룹 URI 로 보내면 그룹 배포 | ◎ |
-| SDS-6 | C | SDK | §9.2.1.2 7)·8) — Application ID·Extended application ID 가 있으면 사용자용이 아니다(알리지 않음, 모르는 값이면 버림). 표 15.1.2.1-1 순서 = 0x21 → 0x22 → 8- → 7D… | SDS 파서는 8-·0x21 만 알고 0x22 에서 멈춘다(`sdk/core/src/mcdata/sds_codec.cpp:352-357`) | 앱 대상 SDS(명령·위치 등)가 사용자 말풍선으로 보이고, 0x22 뒤의 disposition 요청을 잃어 수신 확인이 안 간다 | ◎ |
 | SDS-7 | D | SDK | §15.2.13 · §6.2.2.1 3) — Payload content type TEXT·BINARY·HYPERLINKS·FILEURL·LOCATION·CODED TEXT, payload 여러 개. TEXT charset = 단말 설정 또는 그룹 `<mcdata-default-charset>` | TEXT·FILEURL 만 읽고 나머지는 버린다, TEXT 가 여럿이면 마지막 것만(`sdk/core/src/mcdata/sds_codec.cpp:393-407`). charset 은 UTF-8 고정 | 규격 단말의 HYPERLINKS·CODED TEXT·LOCATION SDS 가 빈 메시지가 된다 | ◎ |
 | SDS-8 | B | CSP·SDK | TS 24.481 §7.2 — MCData group ID 는 그룹 문서의 `list-service uri` 와 같은 값 | 숫자 그룹 ID 를 SDK `"tel:" + groupId`(`sdk/core/src/engine.cpp:3454`), CSP `_TelOf`(`csp/McDataAsModule.cpp:122-124`)·`_TelUriOf`(`csp/McDataMediaService.cpp:114-117`)가 `tel:123` 으로, 그룹 문서는 `tel:+123`(`csc/src/services/mcptt.py:261-270`), FILEURL 폴백은 `sip:<gid>@<도메인>`(`csp/McDataMediaService.cpp:410-416`) | 규격 단말은 같은 그룹으로 묶지 못한다. 우리 앱도 `bareId` 가 `+123`/`123` 으로 갈려 스레드가 나뉠 수 있다 — 실측(MCPTT GCS-17 과 같은 뿌리) | △ |
 | SDS-9 | C | CSP | §9.2.2.4.2 4) — 제어 기능은 대화·메시지 ID 를 저장해 통지와 상관한다(§12.2.3 4)·5)) | 그룹 SDS 는 fan-out 루프를 다 돈 뒤에 색인을 적는다(`csp/McDataAsModule.cpp:87-104` → `csp/McDataGates.cpp:80-81`). 1:1 은 전달 전에 적는다(`csp/ModuleDispatcher.cpp:2688-2692`). MESSAGE 는 다중 스레드로 처리된다(psip `RecvMessageRequest(iThreadId…)`) | 멤버가 많은 그룹에서 먼저 받은 단말의 DELIVERED 가 색인보다 먼저 오면 403 216 — 발신자 ✓ 누락. 실측으로 확정되면 A | △ |
@@ -184,19 +182,19 @@ CSP 는 참여 기능과 제어 기능을 겸한다.
 | 2 | **인가·보안** — 제휴 멤버만 배포 | AFF-2 | .45 CSP |
 | 3 | **응답 코드·Warning** — MCPTT 묶음 5 와 한 묶음(같은 `McpttWarning`) | SDS-4(enforce) | .45 CSP |
 | 4 | **서버가 내는 본문 규격화** — 수신자별 mcdata-info(request-uri = 수신자, calling-group-id, calling-user-id), PAI·P-Asserted-Service, MSRP 배포 INVITE 헤더, 폴백 FD 본문 | SDS-2 · MSRP-2 · MSRP-6 · SDS-8 | .45 CSP |
-| 5 | **규격형 요청 수용** — 서버가 PSI 형·그룹 URI 형을 둘 다 받는 전환기를 먼저 둔다. 서버 쪽 검사(MSRP-5)는 SDK 뒤 | SDS-1 · SDS-5 · CFG-1 → SDK: REG-1 · SDS-3 · MSRP-1 · SDS-10 | .45 CSP → SDK |
+| 5 | **규격형 요청 수용** — 서버가 PSI 형·그룹 URI 형을 둘 다 받는 전환기를 먼저 둔다. 서버 쪽 검사(MSRP-5)는 SDK 뒤 | SDS-1 · SDS-5 · CFG-1 → SDK: REG-1 · MSRP-1 · SDS-10 | .45 CSP → SDK |
 | 6 | **FD Metadata 형식** — `file-selector:` 접두·hash (SDK 는 규격형 업로드·Location 사용과 함께 — U05) | FD-7 | .45 SDK · CSP |
 | 7 | **자동 수신** — CSP 가 Mandatory download 를 붙이고 SDK·앱은 그 IE 를 따른다 | FD-4 | .45 CSP·SDK → 앱 |
 | 8 | **제휴 서비스 분리** — MCData 제휴 표·`mcdataPresInfo`, 클라이언트 단위. MCPTT 묶음 8 과 한 묶음 | AFF-1 · AFF-6 · REG-2 | .45 CSP·SDK |
 | 9 | **서비스 인가·설정** — MCPTT REG 묶음과 한 묶음 | REG-3 · REG-4 · §4 앞 두 줄 | .45 CSP·SDK |
-| 10 | **수신 파서** — Application ID·Extended application ID·content type·charset | SDS-6 · SDS-7 | .45 SDK |
+| 10 | **수신 파서** — content type·charset | SDS-7 | .45 SDK |
 | 11 | **미디어 평면 수명** — 첫 멤버 응답 뒤 200, 단말 BYE + Reason. TS 24.582 확보 뒤 | MSRP-3 · MSRP-4 | .45 CSP·CMDP·SDK |
 | 12 | **나머지** — 색인 순서(실측 뒤), UNDELIVERED | SDS-9 · DISP-1 | .45 CSP |
 
 **Windows 몫(관제 앱 두 벌)** — SDK·서버가 정해진 뒤 맞춘다.
 
 - FD-4 — 데스크톱은 자동 다운로드를 하지 않으므로([받기]) Mandatory download 가 오면 바로 받는 규칙만 더한다. 태블릿은 그룹 문서 값 대신 IE 를 따른다.
-- SDS-6·SDS-7 — 앱 대상 SDS(Application ID)는 말풍선으로 그리지 않는다, HYPERLINKS·LOCATION 표시.
+- SDS-7 — HYPERLINKS·LOCATION 표시(앱 대상 SDS 는 코어가 올리지 않는다 — 앱이 할 일 없음).
 - 묶음 3 이 들어오면 SDS·FD 거절 문구 사전(116·206·213·217·120·198).
 - 묶음 6 이 들어오면 FD 업로드 결과의 URL 출처(Location)만 바뀐다 — 앱 코드는 SDK `uploadFd` 를 그대로 쓴다.
 

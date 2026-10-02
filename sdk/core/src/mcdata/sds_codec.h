@@ -33,15 +33,16 @@ std::string conversationIdOneToOne(const std::string& a, const std::string& b);
 std::string newMessageId();
 
 struct Body { std::string contentType; std::string body; };
-/** 그룹 SDS 발신 본문(request-type group-sds). groupUri 예 "tel:g001". */
+/** 그룹 SDS 발신 본문(request-type group-sds). groupUri 예 "tel:g001". clientId = MCData client ID(단일 MC client ID — URN) — 주면
+ *  mcdata-info `<mcdata-client-id>` 로 싣는다(TS 24.282 §9.2.2.2.1 3)b)iv) · 그룹 FD §10.2.4.2.1 3)b)iii) — 제어 기능의 클라이언트 단위 제휴 판정). */
 Body buildGroupSds(const std::string& groupUri, const std::string& text, const std::string& convId,
-                   const std::string& msgId, bool requestDelivery, int64_t timeSec);
+                   const std::string& msgId, bool requestDelivery, int64_t timeSec, const std::string& clientId = std::string());
 /** 1:1 SDS 발신 본문(request-type one-to-one-sds). peerUri 예 "tel:1002" — 받는 사람. */
 Body buildOneToOneSds(const std::string& peerUri, const std::string& text, const std::string& convId,
                       const std::string& msgId, bool requestDelivery, int64_t timeSec);
 /** 그룹 FD 발신 본문(request-type group-fd) — mcdata-info + FD SIGNALLING PAYLOAD 두 파트(DATA PAYLOAD 없음, §4.5). */
 Body buildGroupFd(const std::string& groupUri, const FdFile& file, const std::string& convId,
-                  const std::string& msgId, int64_t timeSec);
+                  const std::string& msgId, int64_t timeSec, const std::string& clientId = std::string());
 /** 1:1 FD 발신 본문(request-type one-to-one-fd). peerUri = 받는 사람. */
 Body buildOneToOneFd(const std::string& peerUri, const FdFile& file, const std::string& convId,
                      const std::string& msgId, int64_t timeSec);
@@ -54,6 +55,9 @@ Body buildNotification(const std::string& convId, const std::string& msgId, int 
 /** multipart/mixed MCData 본문 파싱 — mcdata-signalling 파트가 없으면 false. groupUri = <mcdata-calling-group-id>, 없으면 그룹
  *  request-type 의 request-uri. fromUri = <mcdata-calling-user-id>(없으면 빈 값 — 호출자가 From 으로 채운다). */
 bool parse(const std::string& contentType, const std::string& body, SdsMessage& out);
+/** 같은 해석 + 이 메시지가 **응용 대상**인가(SDS·FD SIGNALLING PAYLOAD 에 Application ID 0x22 또는 Extended application ID 0x7D 가 있다).
+ *  응용 대상 메시지는 사용자용이 아니다 — 사용자에게 알리지 않고, 그 응용을 모르면 버린다(TS 24.282 §9.2.1.2 7)·8)). */
+bool parse(const std::string& contentType, const std::string& body, SdsMessage& out, bool& forApplication);
 
 // 유틸(시험용 공개)
 std::string base64Encode(const std::string& raw);

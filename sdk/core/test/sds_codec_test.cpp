@@ -288,3 +288,62 @@ TEST(McpttXml, ConferenceInfo) {
     EXPECT_EQ(users[1].status, "disconnected");
     EXPECT_FALSE(mcptt::parseConferenceInfo("<other/>", users, full));
 }
+
+// SDS SIGNALLING PAYLOAD 의 선택 IE(TS 24.282 표 15.1.2.1-1 — 0x21 → 0x22 → 0x8- → 0x7D → 0x7E → 0x51 → 0x53)와 응용 대상 판정(§9.2.1.2 7)·8))
+TEST(SdsCodec, OptionalIesAndApplicationTargetedMessages) {
+    const std::string conv = mcdata::conversationIdOf("g001"), msg = mcdata::newMessageId();
+    mcdata::Body b = mcdata::buildGroupSds("tel:g001", "hi", conv, msg, false, 1700000000L);
+    const std::string base = mcdata::sdsSignallingTlv(conv, msg, false, 1700000000L);          // 고정부 38 octet
+    auto withSig = [&](const std::string& sig) {
+        // 서명 파트(base64 본문)를 바꿔 끼운다 — buildGroupSds 가 실은 것과 같은 인코딩
+        std::string body = b.body;
+        const std::string was = mcdata::base64Encode(base);
+        size_t p = body.find(was);
+        EXPECT_NE(p, std::string::npos);
+        if (p != std::string::npos) body.replace(p, was.size(), mcdata::base64Encode(sig));
+        return body;
+    };
+    auto tlve = [](int iei, const std::string& v) {
+        std::string s; s += (char)iei; s += (char)(v.size() >> 8); s += (char)(v.size() & 0xFF); return s + v;
+    };
+
+    // InReplyTo(0x21, TV 17) 뒤의 disposition 요청 — 사용자용
+    SdsMessage m; bool app = true;
+    ASSERT_TRUE(mcdata::parse(b.contentType, withSig(base + std::string("\x21", 1) + std::string(16, '\x11') + std::string("\x83", 1)), m, app));
+    EXPECT_FALSE(app); EXPECT_EQ(m.dispositionReq, 3); EXPECT_EQ(m.text, "hi");
+
+    // Application ID(0x22, TV 2) — 응용 대상. 그 뒤의 disposition 요청도 읽는다(전엔 0x22 에서 멈췄다)
+    SdsMessage a; app = false;
+    ASSERT_TRUE(mcdata::parse(b.contentType, withSig(base + std::string("\x22\x05", 2) + std::string("\x81", 1)), a, app));
+    EXPECT_TRUE(app); EXPECT_EQ(a.dispositionReq, 1);
+
+    // Extended application ID(0x7D, TLV-E) — 응용 대상. User location(0x7E)·Sender ID(0x51)·metadata(0x53)는 건너뛴다
+    SdsMessage e; app = false;
+    ASSERT_TRUE(mcdata::parse(b.contentType, withSig(base + std::string("\x82", 1) + tlve(0x7D, std::string("\x01", 1) + "app.example")), e, app));
+    EXPECT_TRUE(app); EXPECT_EQ(e.dispositionReq, 2);
+    SdsMessage u; app = true;
+    ASSERT_TRUE(mcdata::parse(b.contentType, withSig(base + std::string("\x81", 1) + tlve(0x7E, "loc") + tlve(0x51, "tel:+821") + tlve(0x53, "meta")), u, app));
+    EXPECT_FALSE(app); EXPECT_EQ(u.dispositionReq, 1); EXPECT_EQ(u.text, "hi");
+
+    SdsMessage plain;                                           // 옛 시그니처 — 응용 대상 여부를 묻지 않는 호출자
+    ASSERT_TRUE(mcdata::parse(b.contentType, b.body, plain));
+    EXPECT_EQ(plain.text, "hi");
+}
+
+// 그룹 SDS·FD 의 mcdata-info 는 MCData client ID 를 싣는다(TS 24.282 §9.2.2.2.1 3)b)iv) · §10.2.4.2.1 3)b)iii)) — 1:1 은 싣지 않는다
+TEST(SdsCodec, GroupRequestsCarryClientId) {
+    const std::string cid = "urn:uuid:00000000-0000-4000-8000-000000000001";
+    const std::string elem = "<mcdata-client-id type=\"Normal\"><mcdataString>" + cid + "</mcdataString></mcdata-client-id>";
+    mcdata::Body b = mcdata::buildGroupSds("tel:g001", "hi", mcdata::conversationIdOf("g001"), mcdata::newMessageId(), false, 1700000000L, cid);
+    EXPECT_NE(b.body.find(elem), std::string::npos);
+    SdsMessage out;
+    ASSERT_TRUE(mcdata::parse(b.contentType, b.body, out));               // 받는 쪽 해석은 그대로
+    EXPECT_EQ(out.groupUri, "tel:g001"); EXPECT_EQ(out.text, "hi");
+    FdFile f; f.url = "https://c/x"; f.name = "a.jpg"; f.size = 3;
+    b = mcdata::buildGroupFd("tel:g001", f, mcdata::conversationIdOf("g001"), mcdata::newMessageId(), 1700000000L, cid);
+    EXPECT_NE(b.body.find(elem), std::string::npos);
+    b = mcdata::buildGroupSds("tel:g001", "hi", mcdata::conversationIdOf("g001"), mcdata::newMessageId(), false, 1700000000L);
+    EXPECT_EQ(b.body.find("mcdata-client-id"), std::string::npos);        // client ID 를 모르면 싣지 않는다
+    b = mcdata::buildOneToOneSds("tel:+821", "hi", mcdata::conversationIdOneToOne("+820", "+821"), mcdata::newMessageId(), false, 1700000000L);
+    EXPECT_EQ(b.body.find("mcdata-client-id"), std::string::npos);
+}
