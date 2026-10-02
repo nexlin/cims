@@ -75,8 +75,9 @@ public:
     /** 등록 시간을 갱신한다 */
     bool UpdateRegisterTime( const std::string &strUserId );
 
-    /** 로그아웃 시간을 갱신한다 */
-    bool UpdateLogoutTime( const std::string &strUserId );
+    /** 로그아웃 시간을 갱신한다. bReclaimAffiliations = 그 가입자의 제휴(MCPTT·MCVideo)도 함께 지운다.
+     *  flow 실패로 풀린 등록은 false 로 부르고 회수를 등록 수명 끝까지 미룬다(AffiliationGrace.h). */
+    bool UpdateLogoutTime( const std::string &strUserId, bool bReclaimAffiliations = true );
 
     // ─────────────────────────────────────────────
     //  Group operations

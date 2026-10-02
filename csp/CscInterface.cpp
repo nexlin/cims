@@ -316,6 +316,12 @@ void CCscInterface::ProcessMessage( const std::string &strMsg, const struct sock
         gclsCspServiceConfig.Refresh();
         extern void SendServiceConfigNotify( const std::string &etag );
         SendServiceConfigNotify( strEtag );
+    } else if ( strEvent == "UE_INIT_CONFIG_CHANGED" ) {
+        // UE initial configuration(TS 24.484 §7.2) 변경 — 이 문서의 application usage 도 변경 구독을 지원한다
+        //   (§7.2.2.12 → §6.3.13.3). CSP 는 값을 쓰지 않고 cms 구독 단말에 그 단말의 문서 선택자로 xcap-diff 를
+        //   보낸다(RFC 5875).
+        extern void SendUeInitConfigNotify( const std::string &etag );
+        SendUeInitConfigNotify( strEtag );
     } else if ( strEvent == "PHONE_GROUP_CHANGED" || strEvent == "DISPATCH_GROUP_CHANGED" ) {
         // 전화 그룹 변경 (dispatch_center.md §3.5) — uri = 그룹 id. DELETE 는 맵에서 제거, 그 외(POST/PUT/멤버 변경)는
         //   DB 단건 재적재. uri 가 비면 전량 재적재. 가입자 pickup_group 파생 갱신은 CSC 가 USER_CHANGED 를 따로

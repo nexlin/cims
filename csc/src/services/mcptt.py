@@ -148,6 +148,9 @@ SERVICE_CONFIG_DEFAULTS = {
 #   ResourcePriority 는 RFC 8101 `mcpttp` 네임스페이스 서열(TS 24.379 §6.2.8.1.15) — CSP fan-out 과 같다.
 #   EmergencyCall.GroupTimeLimit 은 controlling MCPTT function(CSP)의 TNG2(진행 중 긴급 그룹 호 타이머, TS 24.379 §6.3.3.1.16·
 #   부속서 F 타이머 표)다 — CSP 가 같은 문서의 <emergency-call><group-time-limit> 을 읽는다. 0(기본) = 요소 생략 = TNG2 미가동.
+#   PrivateCall·AdhocGroupCall 은 개별 호·애드혹 그룹 호의 세션 타이머 값이다(§8.4.2.1 on-network 2)·13)d)) — 그룹 문서가 없는
+#   호라 T4·최대 시간을 이 문서에서 얻는다(TS 24.380 표 11.1.3-1 T4 · TS 24.379 §6.3.8.2 · §17.4.2.2 13)). CSP 가 받아
+#   개별·애드혹 세션의 T4 를 CMP floor_timers 로 싣고 최대 시간을 센다. 시간 값 0 = 요소 생략 = 그 타이머 미가동.
 _SERVICE_CONFIG_PARAM_DEFAULTS = {
     "FcTimersCounters": {
         "T1-end-of-rtp-media": 4000, "T3-stop-talking-grace": 3000, "T7-floor-idle": 0, "T8-floor-revoke": 1000,
@@ -161,6 +164,14 @@ _SERVICE_CONFIG_PARAM_DEFAULTS = {
     "TransmitTime": {"TimeLimit": 30000},
     # emergency-call/group-time-limit = 진행 중 긴급 그룹 호 시한(§8.4.2.1 on-network) — controlling 기능 TNG2. 0 = 요소 생략
     "EmergencyCall": {"GroupTimeLimit": 0},
+    # private-call = 개별 호(§8.4.2.7 on-network 3)~5)) — hang-time = T4(규격 기본 30초, TS 24.380 표 11.1.3-1), 최대 시간 =
+    #   발언권 제어가 있는 호 / 없는 호(full-duplex)의 «maximum of duration of private call»(TS 24.379 §6.3.8.2 2)).
+    "PrivateCall": {"HangTime": 30000, "MaxDurationWithFloorControl": 3600000, "MaxDurationWithoutFloorControl": 3600000},
+    # anyExt/adhoc-group-call = 애드혹 그룹 호(§8.4.2.7 on-network 47)~51)) — 요소가 없으면 «애드혹 미지원»(§8.4.2.6)이라
+    #   필수 자식 allow-adhoc-group-call-support·max-no-participants 와 함께 늘 싣는다. hang-time = T4, broadcast-hang-time =
+    #   일제 애드혹 호의 T4(TS 24.380 표 11.1.3-1), max-duration-of-call = TNG3(TS 24.379 §17.4.2.2 13)).
+    "AdhocGroupCall": {"AllowSupport": True, "MaxNoParticipants": 64, "HangTime": 30000, "BroadcastHangTime": 30000,
+                       "MaxDurationOfCall": 3600000},
 }
 SERVICE_CONFIG_PARAMS = {}
 _SERVICE_CONFIG_PARAMS_LOADED = False   # 첫 적재 뒤 재적재(SIGUSR1)에서만 변경 통지
@@ -190,11 +201,15 @@ _MCPTT_PORT = 4430           # csc McpttServer.Port (응답 csc.port)
 _MCPTT_PUBLIC_URL = ''
 
 # ue-init-config 규격 파라미터값 (config UeInitConfig.* — 주소류는 토폴로지 유도라 여기 없음).
-#   빈 dict 면 코드 기본값(_UE_INIT_DEFAULTS) — 설정 섹션이 없는 배포본(업그레이드 직후)도 종전 문서 그대로.
+#   빈 dict 면 코드 기본값(_UE_INIT_DEFAULTS) — 설정 섹션이 없는 배포본(업그레이드 직후)도 기본값 문서를 낸다.
+#   Timers = 단말 발언권 참여자 타이머(초, xs:unsignedByte — TS 24.380 표 11.1.1-1). T100·T101 은 재전송 간격이고 재전송 총
+#   시간이 6초 미만이어야 한다(NOTE 1 — T100 shall · NOTE 2 — T101 should). 카운터 C100·C101 기본 3회와 곱해 6초 미만이 되는
+#   초 단위 값은 1 이다. T103 = T1(service configuration T1-end-of-rtp-media 4초)과 같게(표 «Should be equal to T1»),
+#   T132 = 규격 기본 2초, T104 = 규격 기본값이 없는 사이트 값.
 UE_INIT_CONFIG = {}
 _UE_INIT_DEFAULTS = {
     "Name": "CIMS",
-    "Timers": {"T100": 4, "T101": 4, "T103": 4, "T104": 4, "T132": 6},
+    "Timers": {"T100": 1, "T101": 1, "T103": 4, "T104": 4, "T132": 2},
     "Hplmn": {"Plmn": "", "McpttConRef": "internet", "McCommonCoreConRef": "internet", "McIdConRef": "internet"},
     "HttpProxy": "",
     "TlsMutualAuthentication": False,
@@ -206,6 +221,7 @@ _UE_INIT_DEFAULTS = {
                        "McData": {"Enable": False, "ServerUri": ""}},
 }
 _UE_INIT_LAST_GOOD = {}      # base_url → (xml, etag): 설정값이 문서를 깨뜨렸을 때 유지할 마지막 정상 문서
+_UE_INIT_LOADED = False      # 첫 적재 뒤 재적재(SIGUSR1)에서만 변경 통지(UE_INIT_CONFIG_CHANGED)
 
 
 def _request_host(args, default_port: bool = True) -> str:
@@ -300,6 +316,10 @@ def apply_config(config):
     전역만 갱신되고 실제 반영은 재기동이 필요하다."""
     db_config  = config.get('CimsDatabase')
     group_path = config.get('Data', {}).get('Group')
+    # UE initial configuration 변경 통지의 비교 기준 — 이 문서는 주소류(PublicUrl·PTT 도메인)도 담으므로 어떤 값도 바꾸기 전에
+    #   뜬다. 첫 적재(기동)는 비교하지 않는다(함수 끝).
+    global _UE_INIT_LOADED
+    _ui_prev = _ue_init_ref_etag() if _UE_INIT_LOADED else None
 
     # Read IdMs config
     global SECRET_KEY, IDMS_ISSUER, KMS_URI, IDMS_DOMAIN, KMS_CLIENT_REQ_URL
@@ -416,6 +436,15 @@ def apply_config(config):
     global GROUP_DIR
     if group_path:
         GROUP_DIR = group_path
+
+    # UE initial configuration(TS 24.484 §7.2)도 변경 구독을 지원한다(§7.2.2.12 → §6.3.13.3) — 재적재로 문서가 바뀌었으면
+    #   CSP 에 알린다. CSP 가 cms 구독 단말에 문서 선택자 org.3gpp.mcptt.ue-init-config/users/sip:<MCS UE ID>/<MCS UE ID> 의
+    #   xcap-diff NOTIFY(RFC 5875)를 보내고 단말은 문서를 다시 받는다 — service-config 의 SERVICE_CONFIG_CHANGED 와 같은 경로.
+    if _ui_prev is not None:
+        _ui_now = _ue_init_ref_etag()
+        if _ui_now != _ui_prev:
+            notify_csp("UE_INIT_CONFIG_CHANGED", "", "PUT", etag=(_ui_now or "").strip('"'))
+    _UE_INIT_LOADED = True
 
 
 def load_shared_data(config):
@@ -680,11 +709,18 @@ def refresh_login_accounts() -> bool:
 #   맞춘다 — 어느 경로도 GROUPS 를 직접 조립하지 않는다.
 # 그룹 호 타이머 (TS 24.481 §7.2.2 o·§7.2.7) — 그룹 문서 <on-network-hang-timer>(T4 Inactivity,
 #   TS 24.380 §6.3.4.3.5 · Table 11.1.3-1 기본 30초) · <on-network-maximum-duration>(TNG3, TS 24.379 §6.3.8.1).
-#   범위 상한은 CMP floor_timers.t4_inactivity 계약(0..3600)과 같다. 0 = 미사용/무제한.
+#   범위 상한은 CMP floor_timers.t4_inactivity 계약(0..3600)과 같다. 0 = 미사용/무제한 — 규격에 없는 CIMS 약속이라 문서에는
+#   0 을 싣지 않는다(mcptt_timers.md §7 D8): T4 0 = <on-network-hang-timer> 생략(요소가 없으면 T4 를 걸지 않는다), TNG3 0 =
+#   편성 그룹은 값이 필수(TS 24.481 §7.2.7 «invite-members true 면 shall contain a value»)라 GROUP_MAX_DURATION_UNLIMITED 를
+#   싣는다. chat 그룹은 TNG3 를 돌리지 않으므로(상시 세션 — TS 24.379 §6.3.3.5.1 은 요소가 있을 때만 켠다) 요소를 싣지 않는다.
 GROUP_HANG_TIMER_DEFAULT = 30
 GROUP_HANG_TIMER_MAX = 3600
 GROUP_MAX_DURATION_DEFAULT = 3600
 GROUP_MAX_DURATION_MAX = 86400
+# «무제한» 의 문서 표기 — 규격·스키마에 xs:duration 상한이 없어(XML Schema Part 2 §3.2.6 — 자리수 무제한) 32비트 부호 있는
+#   초 카운터의 최댓값(약 68년)을 쓴다: 설정 범위(0..GROUP_MAX_DURATION_MAX)와 겹치지 않아 XCAP PUT 이 0 으로 되읽을 수 있고,
+#   초를 int32 로 드는 수신 측(단말 SDK parseXsDuration 등)이 넘치지 않는 가장 큰 값이다. 이 값 이상은 PUT 에서 0 으로 읽는다.
+GROUP_MAX_DURATION_UNLIMITED = 2 ** 31 - 1
 GROUP_TYPES = ('prearranged', 'chat')   # 일제 통화는 그룹 종류가 아니라 호 속성(<broadcast-ind>)
 # 확인 통화 설정(acknowledged call setup) — TS 24.481 §7.2.2 s)t)u) · TS 24.379 §6.3.3.3(TNG1)·§10.1.1.4.2.
 #   <on-network-minimum-number-to-start>(xs:unsignedShort — 개시자 200 OK 전 멤버 200 수, 0 = 기다리지 않음),
@@ -1457,6 +1493,15 @@ def get_group_xml(group_uri):
     invite_members = 'true' if group_type != 'chat' else 'false'
     hang_timer = int(group.get('hang_timer_sec', GROUP_HANG_TIMER_DEFAULT))
     max_duration = int(group.get('max_duration_sec', GROUP_MAX_DURATION_DEFAULT))
+    # 그룹 호 타이머(TS 24.481 §7.2.2 o)p)) — 0 은 문서에 싣지 않는다(GROUP_MAX_DURATION_UNLIMITED 주석): T4 0 = 생략,
+    #   TNG3 = 편성 그룹만(0 = 무제한 표기), chat 그룹은 생략(TNG3 미가동).
+    timers = ''
+    if hang_timer > 0:
+        timers += f"""
+    <mcpttgi:on-network-hang-timer>{xs_duration(hang_timer)}</mcpttgi:on-network-hang-timer>"""
+    if group_type != 'chat':
+        timers += f"""
+    <mcpttgi:on-network-maximum-duration>{xs_duration(max_duration if max_duration > 0 else GROUP_MAX_DURATION_UNLIMITED)}</mcpttgi:on-network-maximum-duration>"""
     min_to_start = int(group.get('min_number_to_start') or 0)
     ack_timeout = int(group.get('ack_timeout_sec', GROUP_ACK_TIMEOUT_DEFAULT))
     ack_action = norm_ack_action(group.get('ack_action'))
@@ -1475,9 +1520,7 @@ def get_group_xml(group_uri):
     xml += f"""
     <mcpttgi:on-network-invite-members>{invite_members}</mcpttgi:on-network-invite-members>
     <mcpttgi:on-network-max-participant-count>{max_count}</mcpttgi:on-network-max-participant-count>
-    <mcpttgi:on-network-require-affiliation>{affil_required}</mcpttgi:on-network-require-affiliation>
-    <mcpttgi:on-network-hang-timer>{xs_duration(hang_timer)}</mcpttgi:on-network-hang-timer>
-    <mcpttgi:on-network-maximum-duration>{xs_duration(max_duration)}</mcpttgi:on-network-maximum-duration>
+    <mcpttgi:on-network-require-affiliation>{affil_required}</mcpttgi:on-network-require-affiliation>{timers}
     <mcpttgi:on-network-minimum-number-to-start>{min_to_start}</mcpttgi:on-network-minimum-number-to-start>
     <mcpttgi:on-network-timeout-for-acknowledgement-of-required-members>{xs_duration(ack_timeout)}</mcpttgi:on-network-timeout-for-acknowledgement-of-required-members>
     <mcpttgi:on-network-action-upon-expiration-of-timeout-for-acknowledgement-of-required-members>{ack_action}</mcpttgi:on-network-action-upon-expiration-of-timeout-for-acknowledgement-of-required-members>
@@ -1788,8 +1831,11 @@ def get_service_config_xml(user_uri):
     구조 = §8.4.2.1·§8.4.2.3 스키마: <service-configuration-info> › <service-configuration-params domain> ›
       <common><broadcast-group>(계층 수) · <on-network>(스키마 순: <emergency-call><group-time-limit> 선택 — 설정
       ServiceConfig.EmergencyCall.GroupTimeLimit 이 0·빈 값·잘못된 값이면 요소째 생략(TNG2 미가동, TS 24.379 §6.3.3.1.16) ·
-      <transmit-time><time-limit> · <fc-timers-counters> 필수 · <emergency-/imminent-peril-/normal-resource-priority> 필수 —
-      각 <resource-priority-namespace>·<resource-priority-priority>).
+      <private-call> 선택 — 개별 호 <hang-time>(T4)·<max-duration-with-floor-control>·<max-duration-without-floor-control>,
+      값이 0 인 자식은 싣지 않고 셋 다 0 이면 요소째 생략 · <transmit-time><time-limit> · <fc-timers-counters> 필수 ·
+      <emergency-/imminent-peril-/normal-resource-priority> 필수 — 각 <resource-priority-namespace>·<resource-priority-priority> ·
+      <anyExt><adhoc-group-call> — 필수 자식 <allow-adhoc-group-call-support>·<max-no-participants> 뒤에 <hang-time>(T4)·
+      <broadcast-hang-time>(일제 애드혹 호의 T4)·<max-duration-of-call>(TNG3), 값이 0 인 시간 요소는 싣지 않는다).
     사용자마다 달라지지 않으므로 user_uri 는 호출자 인가(self-access 검증)에만 쓰인다. ETag 는 내용 파생이라 값이 바뀌면
     자동 갱신되고, 단말은 xcap-diff(cms) NOTIFY 로 재조회한다.
     """
@@ -1831,6 +1877,39 @@ def get_service_config_xml(user_uri):
              f"        <group-time-limit>{_xs_duration(eg_limit)}</group-time-limit>\n"
              f"      </emergency-call>\n") if eg_limit > 0 else ""
 
+    def _ms(section, key):
+        try:
+            return max(0, int(_svc_param(section, key)))
+        except (TypeError, ValueError):
+            return 0
+
+    def _durations(section, pairs, indent):
+        # 시간 요소 — 0 은 «그 타이머를 돌리지 않는다» 라 요소를 싣지 않는다(PT0S 는 «0초» 로 읽힌다)
+        return "".join(f"{indent}<{elem}>{_xs_duration(_ms(section, key))}</{elem}>\n"
+                       for elem, key in pairs if _ms(section, key) > 0)
+
+    # <private-call> — on-network 시퀀스에서 <emergency-call> 다음(§8.4.2.3 on-networkType). 자식이 없으면 요소째 뺀다.
+    priv = _durations("PrivateCall", (("hang-time", "HangTime"),
+                                      ("max-duration-with-floor-control", "MaxDurationWithFloorControl"),
+                                      ("max-duration-without-floor-control", "MaxDurationWithoutFloorControl")),
+                      "        ")
+    priv = f"      <private-call>\n{priv}      </private-call>\n" if priv else ""
+    # <anyExt><adhoc-group-call> — on-network 의 마지막 자식(§8.4.2.1 on-network 13)d)). adhoc-group-callType 은 앞의 두 자식이
+    #   필수다(minOccurs 기본 1) — max-no-participants 는 xs:positiveInteger.
+    try:
+        adhoc_max = max(1, min(65535, int(_svc_param("AdhocGroupCall", "MaxNoParticipants"))))
+    except (TypeError, ValueError):
+        adhoc_max = _SERVICE_CONFIG_PARAM_DEFAULTS["AdhocGroupCall"]["MaxNoParticipants"]
+    adhoc = (f"      <anyExt>\n"
+             f"        <adhoc-group-call>\n"
+             f"          <allow-adhoc-group-call-support>{_xml_bool(_svc_param('AdhocGroupCall', 'AllowSupport'))}"
+             f"</allow-adhoc-group-call-support>\n"
+             f"          <max-no-participants>{adhoc_max}</max-no-participants>\n"
+             + _durations("AdhocGroupCall", (("hang-time", "HangTime"), ("broadcast-hang-time", "BroadcastHangTime"),
+                                             ("max-duration-of-call", "MaxDurationOfCall")), "          ") +
+             f"        </adhoc-group-call>\n"
+             f"      </anyExt>\n")
+
     nl = "\n"
     xml = f"""<?xml version="1.0" encoding="UTF-8"?>
 <service-configuration-info xmlns="urn:3gpp:ns:mcpttServiceConfig:1.0"
@@ -1843,7 +1922,7 @@ def get_service_config_xml(user_uri):
       </broadcast-group>
     </common>
     <on-network>
-{emerg}      <transmit-time>
+{emerg}{priv}      <transmit-time>
         <time-limit>{_xs_duration(_svc_param('TransmitTime', 'TimeLimit'))}</time-limit>
       </transmit-time>
       <fc-timers-counters>
@@ -1852,7 +1931,7 @@ def get_service_config_xml(user_uri):
 {_rp('emergency-resource-priority', 'Emergency')}
 {_rp('imminent-peril-resource-priority', 'ImminentPeril')}
 {_rp('normal-resource-priority', 'Normal')}
-    </on-network>
+{adhoc}    </on-network>
   </service-configuration-params>
 </service-configuration-info>"""
     return xml, _content_etag(xml)
@@ -1990,6 +2069,14 @@ def get_ue_init_config_xml(base_url):
     result = (xml, _content_etag(xml))
     _UE_INIT_LAST_GOOD[base_url] = result
     return result
+
+
+def _ue_init_ref_etag() -> str:
+    """재적재 전후를 비교하는 UE initial configuration 문서의 ETag — 공개 base URL(McpttServer.PublicUrl) 기준.
+
+    PublicUrl 이 없으면(올인원) 주소류가 단말의 요청 Host 로 갈려 단말마다 문서가 다르므로 IdMS 도메인 기준 문서로 비교한다 —
+    그때 통지의 new-etag 는 참고값이고, 단말은 자기 사본의 ETag(If-None-Match)로 다시 받는다."""
+    return get_ue_init_config_xml(_MCPTT_PUBLIC_URL or f"https://{IDMS_DOMAIN}:{_MCPTT_PORT}")[1]
 
 
 def get_kms_init_xml(user_uri):
@@ -2595,6 +2682,10 @@ def parse_group_document_xml(xml_text: str) -> dict:
     inv = _xbool(ls, 'gi:on-network-invite-members')
     if inv is not None:
         out['group_type'] = 'prearranged' if inv else 'chat'
+    # TNG3 «무제한» 표기(GET 이 0 대신 싣는 값) 이상은 0 으로 되읽는다 — 받은 문서를 그대로 PUT 해도 DB 값이 바뀌지 않는다.
+    #   요소가 없으면 None(갱신 = 기존값 유지) — T4 0 을 생략한 문서의 왕복도 0 을 지킨다.
+    if out['max_duration_sec'] is not None and out['max_duration_sec'] >= GROUP_MAX_DURATION_UNLIMITED:
+        out['max_duration_sec'] = 0
     for k, tag, lo, hi in (('hang_timer_sec', 'on-network-hang-timer', 0, GROUP_HANG_TIMER_MAX),
                            ('max_duration_sec', 'on-network-maximum-duration', 0, GROUP_MAX_DURATION_MAX),
                            ('ack_timeout_sec', 'on-network-timeout-for-acknowledgement-of-required-members',

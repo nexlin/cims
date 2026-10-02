@@ -216,7 +216,9 @@ public:
     bool select( std::string strToId, CspUser &clsUser );
 
     bool registerUser( std::string strUserId, std::string strPassWord );
-    bool unregisterUser( std::string strUserId );
+    /** 등록 해제를 반영한다(logout_time·Redis 바인딩). bReclaimAffiliations = false 면 제휴는 남긴다
+     *  (flow 실패 유예 — AffiliationGrace.h). */
+    bool unregisterUser( std::string strUserId, bool bReclaimAffiliations = true );
     bool Select( const char *pszUserId, CspUser &clsXmlUser );
     void Insert( CspUser &clsXmlUser );
     bool Load( const char *pszDirName );

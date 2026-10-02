@@ -270,7 +270,7 @@ bool CspUserMap::registerUser( std::string strUserId, std::string strPassWord ) 
     return true;
 }
 
-bool CspUserMap::unregisterUser( std::string strUserId ) {
+bool CspUserMap::unregisterUser( std::string strUserId, bool bReclaimAffiliations ) {
     CspUser user;
     bool bRes = false;
 
@@ -289,7 +289,7 @@ bool CspUserMap::unregisterUser( std::string strUserId ) {
 
     // logout_time 동기화 (DB 연결된 경우 항상)
     if ( gclsDbManager.IsConnected() ) {
-        gclsDbManager.UpdateLogoutTime( strUserId );
+        gclsDbManager.UpdateLogoutTime( strUserId, bReclaimAffiliations );
     }
 
     // Phase 1.D-1 — Redis 에서 binding 삭제 (cold-mode 면 no-op)

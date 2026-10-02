@@ -39,11 +39,14 @@ bool CCspServiceConfig::Refresh() {
     CspPriorityParams rp;
     ParsePriority( strBody, rp );
     const int iTng2 = ParseEmergencyGroupTimeLimitSec( strBody );
+    CspCallTimerParams ct;
+    ParseCallTimers( strBody, ct );
     {
         std::lock_guard<std::mutex> lock( m_clsMutex );
         m_clsFloor = f;
         m_clsPriority = rp;
         m_iTng2Sec = iTng2;
+        m_clsCallTimers = ct;
     }
     CLog::Print( LOG_SYSTEM,
                  "[service-config] floor 값 적재 (CSC 정본) T1=%d T2=%d T3=%d T7=%d T8=%d T20=%d C7=%d C20=%d (s, "
@@ -52,6 +55,11 @@ bool CCspServiceConfig::Refresh() {
     CLog::Print( LOG_SYSTEM, "[service-config] Resource-Priority emergency=%s imminent=%s normal=%s · TNG2=%d s%s",
                  rp.strEmergency.c_str(), rp.strImminentPeril.c_str(), rp.strNormal.c_str(), iTng2,
                  iTng2 > 0 ? "" : " (문서에 없음 — TNG2 없음)" );
+    CLog::Print( LOG_SYSTEM,
+                 "[service-config] 개별 호 T4=%d 최대=%d/%d(발언권 제어 있음/없음) · 애드혹 T4=%d 일제 T4=%d "
+                 "TNG3=%d (s, -1=문서에 없음 — 그 타이머 없음)",
+                 ct.iPrivateHangSec, ct.iPrivateMaxFloorSec, ct.iPrivateMaxNoFloorSec, ct.iAdhocHangSec,
+                 ct.iAdhocBroadcastHangSec, ct.iAdhocMaxDurationSec );
     return true;
 }
 
@@ -69,4 +77,9 @@ std::string CCspServiceConfig::ResourcePriorityOf( int iCond ) {
 int CCspServiceConfig::GetEmergencyGroupTimeLimitSec() {
     std::lock_guard<std::mutex> lock( m_clsMutex );
     return m_iTng2Sec;
+}
+
+CspCallTimerParams CCspServiceConfig::GetCallTimerParams() {
+    std::lock_guard<std::mutex> lock( m_clsMutex );
+    return m_clsCallTimers;
 }

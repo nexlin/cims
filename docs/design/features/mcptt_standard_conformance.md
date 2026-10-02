@@ -31,7 +31,7 @@
 | F4 | floor 상태머신(T1/T2/T3/T7/T8/T20, pending Floor Revoke, 재요청·큐 안정성) | CMP | TS 24.380 §6.3.4 | ✅ 정합 |
 | F5 | 멤버 프로파일(MCPTT ID·mc_queueing·초기 발언권)·Unicast Media Flow Control·Queued Floor Requests | CMP | TS 24.380 §6.3.5, §8.2.15~8.2.16 | ✅ 정합 |
 | F6 | floor SRTCP — 유니캐스트 leg 별 클라이언트 키(CSK) | CMP | TS 33.180 §9.4 / TS 24.380 §13.3.2 | ✅ 정합 (키 배포는 CSC KMS 연동 대기) |
-| C1 | affiliation PUBLISH — 규격형(Event: presence + pidf 집합 교체) + 구형(Event: mcptt + affiliation-command) 양립 | CSP | TS 24.379 §9.2.2.2.3, §9.3.1.2 | ✅ 정합 (구형은 전환기 한시) |
+| C1 | affiliation PUBLISH — 규격형(Event: presence + pidf 집합 교체, 만료 없음) + 구형(Event: mcptt + affiliation-command) 양립 | CSP·SDK | TS 24.379 §9.2.1.2, §9.2.2.2.3, §9.3.1.2 | ✅ 정합 (SDK 규격형 — 구형은 PSI 없는 단말의 전환기 한시) |
 | C2 | 제휴 상태 SUBSCRIBE/NOTIFY (presence, pidf) | CSP | TS 24.379 §9.2.2.2.4·§9.2.2.2.5·§9.3.1 | ✅ 정합 (편차 C2 참조) |
 | C3 | Resource-Priority namespace 정규화(단일값) | CSP | RFC 4412 | ✅ 정합 |
 | C4 | floor SDP `m=application` + `mcptt-floor-request-uri` | CSP | TS 24.380 §12 | ✅ 정합 |
@@ -70,7 +70,7 @@ CIMS 에 **아직 구현되지 않은** 기능을 규격 위치와 함께 나열
 | **Private call (1:1)** — on-demand | TS 24.379 §11.1 | ✓ 구현 — mcptt-info `session-type=private` INVITE(상대 MCPTT ID 직접, affiliation 불요) → CSP 가 2인 세션(`private:<from>-<to>`)을 CMP `PTT_GROUP_ADD group_type:"private"` + `floor_control`(on/off — fmtp `mc_no_floor_ctrl`)로 세운다([mcptt_csp_cmp_roadmap_contract.md](mcptt_csp_cmp_roadmap_contract.md) §A.1). 착신 미등록 480 |
 | **Broadcast group call** — 호 단위 개시(`<broadcast-ind>`)·개시자 고정·개시자 발언 종료 후 호 해제 | TS 24.379 §4.12·§6.2.8.2, TS 24.380 §6.2.4.6.4 | ✓ 서버(C7·C8)·단말 코어(SDK·Android PTT — 일제 통화 발신·B-bit Floor Request·발언 종료 후 호 해제)·관제 앱 Windows(U6)·Android 태블릿(코드 반영, 빌드 미확인 — [mcptt_broadcast_group_call.md](mcptt_broadcast_group_call.md) §7) |
 | **Broadcast adhoc group call** — 애드혹(ad hoc) 호에 `<broadcast-ind>` | TS 24.379 §17.2.2.1.1 9)·§17.1 | ✓ 단말(SDK)·관제 앱·CSP(`IsBroadcastCapable` — 개시자 고정·Deny #5·B-bit·구독 480/105·개시자 이탈 해제, [mcptt_broadcast_group_call.md](mcptt_broadcast_group_call.md) R13). ad hoc 그룹 ID 서버 부여(§17.1)는 남음 |
-| **그룹 호 세션 해제 정책** — T4(Inactivity) 만료·참가자 1명 이하·TNG3 | TS 24.379 §6.3.8.1 / TS 24.380 §6.3.4.3.5 | ✓ 편성 그룹 호 — T4 = 그룹 `hang_timer_sec`(CMP `PTT_FLOOR_INACTIVITY`)·TNG3 = `max_duration_sec`. 최소 affiliation 인원 미달 해제는 미구현 |
+| **세션 해제 정책** — 그룹 호(T4(Inactivity) 만료·참가자 1명 이하·TNG3) · 개별 호(T4·최대 통화 시간) | TS 24.379 §6.3.8.1·§6.3.8.2 / TS 24.380 §6.3.4.3.5 | ✓ 편성·일제 그룹 호 — T4 = 그룹 `hang_timer_sec`(CMP `PTT_FLOOR_INACTIVITY`)·TNG3 = `max_duration_sec` · 애드혹 그룹 호 — T4·TNG3 = service configuration `<adhoc-group-call>`(일제면 `<broadcast-hang-time>`, 긴급·임박 개시 호는 TNG3 없음 — §17.4.2.2 13)) · 개별 호 — T4(발언권 제어 있는 호)·최대 통화 시간 = `<private-call>`. 정본 [mcptt_timers.md](mcptt_timers.md). 최소 affiliation 인원 미달 해제는 미구현 |
 | **Private call — pre-established session** | TS 24.379 §11.2 | ✗ |
 | **Private call call-back** (요청/취소) | TS 24.379 §11.3 | ✗ |
 | **Private emergency call** / 통화 중 emergency upgrade | TS 24.379 §11 | ✓ 개시 인가 구현 — 사용자 프로파일 `allow-emergency-private-call` + `MCPTTPrivateRecipient`(UsePreConfigured 모드는 사전 지정 수신자 일치까지, `IsConditionInitAuthorized` private 분기). 그룹콜 emergency 는 [mcptt_emergency_modes.md](mcptt_emergency_modes.md) |
@@ -166,11 +166,14 @@ transport 목록/선택 등 규격 문서에 없는 요구 때문). 자체 단�
 | 계층 | 요소 | 출처 |
 |---|---|---|
 | ① 토폴로지 유도 | `domain`·PLMN(도메인 mnc/mcc)·idms-auth/token-endpoint·gms/cms/kms·GMS/CMS-XCAP-root-URI·GMS-URI(`sip:gms_psi@도메인`) | `Provisioning.Services.ptt.domain`/`IdMs.Domain` + 공개 base URL = **`McpttServer.PublicUrl`**(비면 요청 Host 유도). CSP 가 NOTIFY 로 광고하는 `xcap-root` 도 같은 값(내부 API 취득) |
-| ② 규격 파라미터값 | `<name>`·Timers T100/T101/T103/T104/T132(TS 24.380 단말 floor 타이머, unsignedByte)·HPLMN PLMN 수동 지정·`*-to-con-ref`(APN/DNN)·`http-proxy`·`mutual-authentication`·`group-creation-XUI`·`integrity/confidentiality-protection-enabled` | csc `config_template.json` 섹션 **"MCS UE 초기 설정 문서"** = `UeInitConfig.*`(scope=service, `restart:false` — SIGUSR1 리로드, ETag 내용파생이라 자동 갱신). 빈 값 = 유도값/기본값 |
+| ② 규격 파라미터값 | `<name>`·Timers T100/T101/T103/T104/T132(TS 24.380 단말 floor 타이머, unsignedByte — 기본 1/1/4/4/2 초, 표 11.1.1-1 NOTE 1·2 의 «재전송 총 시간 6초 미만» 안)·HPLMN PLMN 수동 지정·`*-to-con-ref`(APN/DNN)·`http-proxy`·`mutual-authentication`·`group-creation-XUI`·`integrity/confidentiality-protection-enabled` | csc `config_template.json` 섹션 **"MCS UE 초기 설정 문서"** = `UeInitConfig.*`(scope=service, `restart:false` — SIGUSR1 리로드, ETag 내용파생이라 자동 갱신). 빈 값 = 유도값/기본값 |
 | ③ 확장 요소 | `<on-network><anyExt>` 의 `MCPTT-Service-Details`(기본 on, Server-URI 기본 `sip:mcptt_psi@도메인` = CSP 의 MCPTT 서버 PSI) · `MCData-Service-Details`(기본 off) — `IPv6-Required` 는 false 고정 | `UeInitConfig.ServiceDetails.{Mcptt,McData}.{Enable,ServerUri}` |
 
 산출물은 값 `html.escape` 후 minidom well-formed 검사 — 실패하면 경고를 남기고 **마지막 정상
-문서**를 계속 서빙한다(설정 실수가 부트스트랩을 끊지 않게). 자유 XML 조각 주입(ExtraXml)은 두지
+문서**를 계속 서빙한다(설정 실수가 부트스트랩을 끊지 않게). 변경 구독(§7.2.2.12 → §6.3.13.3) — 재적재로 문서가 바뀌면 CSC 가
+`UE_INIT_CONFIG_CHANGED` 를 보내고 CSP 가 cms 구독 단말마다 그 단말의 문서 선택자
+(`org.3gpp.mcptt.ue-init-config/users/sip:<instance ID>/<instance ID>`, §7.2.1.1)로 xcap-diff NOTIFY 를 보낸다
+([mcptt_timers.md](mcptt_timers.md) §4.3). 자유 XML 조각 주입(ExtraXml)은 두지
 않는다. 규격 사슬 회귀 = `tests/csc_bootstrap_conformance.py`, 생성기 단위시험 =
 `tests/csc_idms_authreq_unit.py` §A.
 
@@ -294,12 +297,16 @@ Floor 코덱은 `cmp/PFloorCodec.cpp` 에 분리되어 있고(단말 `ptt-client
 - **1인 세션**: 참가자가 한 명뿐인 세션의 요청은 Deny **#3**(Only one participant).
 - **Unicast Media Flow Control**(0x0B): 멤버가 자기 하향 미디어 중단/재개를 요청한다 —
   중단 상태 멤버에게는 audio/video 를 보내지 않는다(§6.3.4.4.14~15).
-- **Queued Floor Requests**(0x0E): Cancel Request(purpose 0)를 받으면 지정 사용자(List of
-  Queued Users)의 대기 요청을 제거하고, 제거된 대기자에게 Cancel Notification(2),
-  요청자에게 Cancel Result(1)+Result 값을 보낸 뒤 남은 대기자에게 위치를 다시 알린다.
-  **목록이 없으면 요청자 본인의 요청만** 제거한다(§6.3.4.4.13 — 참가자에게 남의 대기 요청을
-  지울 권한은 없다). 단말은 PTT 버튼을 뗄 때 이 목록 없는 형태로 자기 취소를 보낸다 —
-  Floor Release 는 발언 중이 아닌 leg 에서 무시되므로 대기 요청을 지우지 못한다.
+- **발언자가 아닌 참가자의 Floor Release**: 그 참가자의 대기 요청이 있으면 지우고(§6.3.5.3.7 5) · §6.3.5.4.5 3)),
+  지금 상태로 답한다 — 화자 없음 = Floor Idle(§6.3.5.3.7 2)), 화자 있음 = Floor Taken(§6.3.5.4.5 4)). 단말은 PTT 를 떼면
+  Floor Release 로 자기 대기 요청을 거둔다(§6.2.4.9.6). Floor Idle 을 놓쳐 Release 를 재전송하는 단말도 이 답으로 멈춘다.
+- **Queued Floor Requests**(0x0E): 남의 대기 요청을 지우는 절차라 **인가된 사용자만** 쓴다(§6.3.5.4.12) — CIMS 는 그룹
+  문서의 멤버 역할 `chair` 로 판정한다(참가자 유형 dispatcher·dispatch supervisor·MC service administrator 는 CMP 에
+  전달되지 않는다 — 편차). 인가되지 않은 요청에는 Cancel Result(1) + Result **1**(Not authorized)만 돌려준다. 인가된
+  요청은 지정 사용자(List of Queued Users)의 대기 요청을, **목록이 없으면 전체**를 지우고(§6.3.4.4.13 2)a)), 제거된 대기자에게
+  Cancel Notification(2), 요청자에게 Cancel Result(1)+Result 값을 보낸 뒤 남은 대기자에게 위치를 다시 알린다.
+- **회수 유예**: 회수 중(pending Floor Revoke)인 화자에게 선점 요청이 다시 와도(요청자의 T101 재전송) T3·T8·cause 를 다시
+  잡지 않는다 — T3 는 회수에 들어갈 때 한 번이다(§6.3.4.5.2 · §6.3.5.6.3).
 
 ### F6. floor SRTCP 키 범위 (TS 33.180 §9.4)
 
@@ -329,17 +336,22 @@ Floor 코덱은 `cmp/PFloorCodec.cpp` 에 분리되어 있고(단말 `ptt-client
 `Event` 헤더로 두 형태를 가른다(`CscfModule.cpp` `RecvRequestPublish`). 그 외 값은 489 Bad Event(RFC 6665 §8.2.1).
 
 **규격형 `Event: presence`** (TS 24.379 §9.2.2.2.3, `RecvPublishAffiliationPidf`) — Request-URI 는 참여 MCPTT
-기능의 PSI 라 대상 그룹을 본문에서 읽는다. 본문 `application/pidf+xml`(§9.3.1.2)은 **그 클라이언트의 제휴 그룹
+기능의 PSI 라 대상 그룹을 본문에서 읽는다. 본문은 mcptt-info(`<mcptt-request-uri>` = served MCPTT ID, §9.2.1.2 2))와
+`application/pidf+xml`(§9.3.1.2)의 multipart 다(pidf 하나만 실은 본문도 받는다). pidf 는 **그 클라이언트의 제휴 그룹
 집합 전체**를 싣는다 — 증분이 아니라 **교체**다.
 
 - 파싱 `ParsePidfAffiliation`(`McpttInfo.h`): `<presence entity>`=MCPTT ID · `<tuple id>`=MCPTT client ID ·
   `<affiliation group>` 집합. namespace prefix 무관, 태그·속성 경계를 확인해 유사 이름(`<affiliationX>`,
   `groupStatus=`)과 종료태그를 배제한다(외부 XML 파서 비의존).
+- served MCPTT ID(mcptt-info `<mcptt-request-uri>`)가 요청자와 다르면 403(§9.2.2.2.3 1)~4) — 남의 제휴를 바꾸는 권한은 두지 않는다).
 - 적용: 멤버인 그룹을 훑어 목록에 있으면 제휴, 없으면 해제. `Expires: 0` 은 그 사용자의 제휴 전부 해제.
-  `entity` 가 요청자와 다르면 상태를 바꾸지 않고 200(§9.2.2.2.3 9). pidf 본문이 없으면 415.
+  `entity` 가 요청자와 다르면 상태를 바꾸지 않고 200(§9.2.2.2.3 9). pidf 본문이 없으면 415. 감사(E-AUD-009)는 새로 선 제휴·해제만
+  낸다 — 집합 교체라 같은 집합을 다시 실어도(등록 재성립) 요청마다 모든 그룹이 온다.
+- **만료** — `Expires: 4294967295`(규격형 요청, §9.2.1.2 5)a))는 그대로 부여한다: 제휴에 시간 만료가 없고(DB `expires_at` NULL,
+  200 OK `Expires: 4294967295`), 끝은 해제 PUBLISH·등록 종료다. 그룹 호 해제(T4 Inactivity·TNG3, §6.3.8.1)는 세션만 끝내고 제휴는 남긴다.
 - **의도적 완화 둘** — 규격 클라이언트는 그대로 통과하고, 받아들이는 범위만 넓힌다:
   §9.2.2.2.3 5) 의 "Expires 가 4294967295 미만이면 423" 을 적용하지 않고 RFC 3903 §6 대로 서버가 짧게
-  부여한다(min(요청, 상한)). N2(`MaxAffiliationsN2`) 상한도 적용하지 않는다 — 우리 인가 축은 그룹 멤버십이다.
+  부여한다(min(요청, 상한) — 짧은 Expires 를 싣는 옛 단말). N2(`MaxAffiliationsN2`) 상한도 적용하지 않는다 — 우리 인가 축은 그룹 멤버십이다.
 
 **구형 `Event: mcptt`** — 규격에 없는 자체 규약이며 **전환기 한시**다. Request-URI 가 그룹이고 본문은
 `application/vnd.3gpp.mcptt-affiliation-command+xml`(아니면 415). `ParseAffiliationCommand` 가 `<actions>` 안의
@@ -350,8 +362,8 @@ de-affiliate 액션 → 해제, group 속성은 Req-URI 그룹과 교차검증.
 > 협상 모드로 *타인*의 제휴를 바꾸라고 보내는 SIP MESSAGE, Annex F.4). 구형이 이 이름을 빌려 쓰고 있으므로,
 > 그 절차를 구현하기 전에 구형을 제거해야 한다.
 
-**이행 순서**: ①서버 양립(완료) → ②우리 SDK·앱을 규격형으로(`sdk/core/src/engine.cpp` 가 `Event: mcptt` +
-affiliation-command 를 보낸다) → ③구형 제거.
+**이행 순서**: ①서버 양립(완료) → ②우리 SDK 를 규격형으로(완료 — `sdk/core/src/engine.cpp` `sendMcpttAffiliationSet`,
+PSI·MCPTT client ID 가 있는 계정. [ue_sdk.md](ue_sdk.md) §4.2) → ③구형 제거(옛 APK·PSI 없는 단말이 사라진 뒤).
 
 - 보존: 멤버십 게이트(비멤버 affiliate 거절 — 규격형은 건너뛰고 로그, 구형은 403), REGISTER Expires:0 시 affiliation 정리.
 - 검증: `tests/csp_pidf_affiliation_test.cpp`(S1-UNIT-CSP).
@@ -640,6 +652,14 @@ REGISTER/SUBSCRIBE/NOTIFY 의 헤더·본문을 상용 IMS 캡처 기준으로 �
 - **S3 변경통지**: 그룹 CRUD 시 `notify_csp("GROUP_CHANGED")`(`handlers/admin.py`) → CSP `CscInterface`
   → `OnGroupConfigChanged` → `ReloadGroupMap`(그룹 맵 재적재 **뒤**, 재적재 전·후 멤버 합집합) → `SendGroupDocNotify`
   → GMS 구독자에 **xcap-diff NOTIFY**(RFC 5875). 60초 주기 재적재도 같은 전후 비교로 놓친 변경을 통지한다.
+- **그룹 호 타이머 요소**(TS 24.481 §7.2.2 o)p)·§7.2.7) — 문서에 0 을 싣지 않는다: T4 0 = `<on-network-hang-timer>` 생략(요소가
+  없으면 T4 를 걸지 않는다), chat 그룹 = `<on-network-maximum-duration>` 생략(TNG3 를 돌리지 않는다 — TS 24.379 §6.3.3.5.1 은
+  요소가 있을 때만 켜고 chat 은 선택). XCAP PUT 은 요소가 없으면 기존값을 둔다.
+- **규격 대비 편차 — TNG3 «무제한»**: 편성 그룹은 `<on-network-maximum-duration>` 에 값이 필수인데(§7.2.7) 규격에 «무제한» 표기가
+  없다. CIMS 의 0(무제한)은 무제한 표기 `PT2147483647S`(`GROUP_MAX_DURATION_UNLIMITED` — 32비트 초 카운터 최댓값, 약 68년)로
+  싣고, XCAP PUT 은 그 값 이상을 0 으로 되읽는다. 사유 = xs:duration 에 상한이 없어(XML Schema Part 2 §3.2.6) 수신 측이 초를
+  32비트 정수로 들어도 넘치지 않는 가장 큰 값이자, 설정 범위(0~86400초)와 겹치지 않아 왕복이 DB 값을 바꾸지 않는 값이다.
+  CSP 는 0 이면 TNG3 를 돌리지 않는다([mcptt_timers.md](mcptt_timers.md) §7 D8).
 
 ### CMS (TS 24.484)
 - user-profile XML(ns = 규격 §8.3.2.4 정본 `urn:3gpp:mcptt:user-profile:1.0`), self-access 권한(신원 표기 tel:/sip:/sip:@도메인 관용), ETag.
@@ -659,7 +679,15 @@ REGISTER/SUBSCRIBE/NOTIFY 의 헤더·본문을 상용 IMS 캡처 기준으로 �
 - **S4 service-config**: 문서 = TS 24.484 §8.4.2.1·§8.4.2.3 스키마 — `<service-configuration-info>` ›
   `<service-configuration-params domain=<PTT 도메인>>` › `<common><broadcast-group>`(계층 수) · `<on-network>`
   (`<emergency-call><group-time-limit>` 선택 — 첫 자식, 진행 중 긴급 그룹 호 시한 = CSP TNG2(TS 24.379 §6.3.3.1.16), 값이 0 이면 생략 ·
-  `<transmit-time><time-limit>` · `<fc-timers-counters>` 17 요소 필수 · `<emergency-/imminent-peril-/normal-resource-priority>` 필수, 각 namespace·priority).
+  `<private-call>` 선택 — 개별 호 T4 `<hang-time>`·`<max-duration-with-floor-control>`·`<max-duration-without-floor-control>`(TS 24.379
+  §6.3.8.2), 0 인 자식 생략 · `<transmit-time><time-limit>` · `<fc-timers-counters>` 17 요소 필수 · `<emergency-/imminent-peril-/normal-resource-priority>`
+  필수, 각 namespace·priority · `<anyExt><adhoc-group-call>` — 필수 `<allow-adhoc-group-call-support>`·`<max-no-participants>` 뒤 T4
+  `<hang-time>`·일제 T4 `<broadcast-hang-time>`·TNG3 `<max-duration-of-call>`(§17.4.2.2 13)). 요소가 없으면 «애드혹 미지원»(§8.4.2.6)이라
+  늘 싣는다). 값 = CSC 설정 `ServiceConfig.PrivateCall.*`·`ServiceConfig.AdhocGroupCall.*`(시간 ms, 0 = 요소 생략 = 미가동).
+  CSP 는 `<private-call>`·`<adhoc-group-call>` 의 시간 값을 개별·애드혹 세션의 T4(`floor_timers.t4_inactivity`)·최대 시간으로 쓴다.
+  `<allow-adhoc-group-call-support>`·`<max-no-participants>` 는 단말에 알리는 값이고 CSP 판정에는 아직 쓰지 않는다 — 애드혹 개시
+  게이트는 csp.json `Setup.PttAdhocEnabled`(두 값을 같게 둔다), 인원 상한 403 + Warning `189`(§17.4.2.2 6))·미지원 403 + `186`(§17.4.2.2 5))
+  은 미구현.
   값의 정본은 두 곳 — DB `mcptt_service_config` **단일 행**(id=1: N2 = user-profile `MaxAffiliationsN2` 기본값·계층 수, 관리 API
   `GET/PUT /api/v1/mcptt/service-config`·콘솔 **구성 > MCPTT 정책**)과 CSC 설정 `ServiceConfig.*`(`EmergencyCall.GroupTimeLimit` →
   `<emergency-call><group-time-limit>`(ms, 기본 0 = 없음) · `<transmit-time><time-limit>`·
@@ -673,7 +701,8 @@ REGISTER/SUBSCRIBE/NOTIFY 의 헤더·본문을 상용 IMS 캡처 기준으로 �
   xcap-diff NOTIFY 를 push 한다(`GetSubscriptionsByEvent("cms")` — 전역 문서라 사용자/자원 키가
   없는 유일한 전체 조회). 구독이 없는 단말은 목록 갱신·재로그인 계기의 재조회로 반영된다.
 - **S3 변경통지**: 가입자(번호) CRUD 시 `notify_csp("USER_CHANGED")` → CSP `SendUserDocNotify`
-  → CMS 구독자에 xcap-diff NOTIFY(user-profile/service-config sel).
+  → CMS 구독자에 xcap-diff NOTIFY(user-profile/service-config sel). UE initial configuration 이 바뀌면 `UE_INIT_CONFIG_CHANGED` →
+  `SendUeInitConfigNotify` → cms 구독 단말마다 그 단말의 ue-init-config 선택자(§R4-1).
 - **단말 소비**: PTT 단말은 `sip:cms_psi@<domain>` 으로 cms 축을 구독하고 NOTIFY 의 sel 대로 두 문서를
   `If-None-Match` 재조회한 뒤, 사용자별 인가(`user-profile` 의 `ruleset`)로 게이트한다(발신·개시만, 착신은 서버 판정).
   `service-config` 에서는 Resource-Priority 값을 쓴다. 소비 지점 표는

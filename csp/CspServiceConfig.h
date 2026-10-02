@@ -13,12 +13,22 @@
  *    §6.3.3.1.19). 멤버 fan-out·조건 재광고가 싣는다. 문서에 없으면 mcpttp.15/8/0.
  *  - TNG2(진행 중 긴급 그룹콜 타이머) — <emergency-call><group-time-limit> (TS 24.379 §6.3.3.1.16·부속서 F 타이머 표).
  *    없으면 TNG2 를 돌리지 않는다.
+ *  - 개별 호·애드혹 그룹 호의 세션 타이머 — 그룹 문서가 없는 호라 값이 이 문서에 있다(TS 24.380 표 11.1.3-1 T4 출처).
+ *    개별 호 = <private-call><hang-time>(T4)·<max-duration-with-floor-control>·<max-duration-without-floor-control>
+ *    (TS 24.379 §6.3.8.2), 애드혹 = <anyExt><adhoc-group-call><hang-time>(T4)·<broadcast-hang-time>(일제 애드혹 T4)·
+ *    <max-duration-of-call>(TNG3, §17.4.2.2 13)). 요소가 없으면 그 타이머를 돌리지 않는다. 호 종류별 선택 규칙은
+ *    CspSessionT4Sec·CspSessionMaxDurationSec(아래)가 한곳에서 정한다.
  *
  * 갱신 시점: 기동 · SIGUSR1 reload · CSC_RESTART · SERVICE_CONFIG_CHANGED. 실패하면 마지막 성공값을 유지한다.
+ *
+ * 같은 CMS 문서 축의 변경 통지 — UE initial configuration(TS 24.484 §7.2) 변경(UE_INIT_CONFIG_CHANGED)은 cms 구독
+ * 단말마다 그 단말의 문서 선택자로 xcap-diff 를 낸다(CspUeInitConfigSelector · CspXcapDiffDocBody, §7.2.2.12 →
+ * §6.3.13.3, RFC 5875).
  */
 #ifndef _CSP_SERVICE_CONFIG_H_
 #define _CSP_SERVICE_CONFIG_H_
 
+#include <ctype.h>
 #include <stdlib.h>
 
 #include <mutex>
@@ -46,6 +56,24 @@ struct CspPriorityParams {
     std::string strNormal = "mcpttp.0";
 };
 
+/** 개별 호·애드혹 그룹 호의 세션 타이머 (초, 1 s 미만은 버린다). -1 = 문서에 없음(그 타이머를 돌리지 않는다). */
+struct CspCallTimerParams {
+    int iPrivateHangSec = -1;         // <private-call><hang-time> — 개별 호 T4 (TS 24.380 표 11.1.3-1)
+    int iPrivateMaxFloorSec = -1;     // <private-call><max-duration-with-floor-control> (TS 24.379 §6.3.8.2 2))
+    int iPrivateMaxNoFloorSec = -1;   // <private-call><max-duration-without-floor-control>
+    int iAdhocHangSec = -1;           // <anyExt><adhoc-group-call><hang-time> — 애드혹 그룹 호 T4
+    int iAdhocBroadcastHangSec = -1;  // <adhoc-group-call><broadcast-hang-time> — 일제 애드혹 그룹 호 T4
+    int iAdhocMaxDurationSec = -1;    // <adhoc-group-call><max-duration-of-call> — 애드혹 그룹 호 TNG3 (§17.4.2.2 13))
+};
+
+/** 호 종류 — T4·최대 시간의 출처와 해제 정책이 호 종류별이다 (TS 24.380 표 11.1.3-1 · TS 24.379 §6.3.8). */
+enum class ECspCallKind {
+    Prearranged,  // 편성 그룹 호(일제 통화 포함) — 그룹 문서
+    Chat,         // chat 그룹 호 — 상시 세션
+    Adhoc,        // 애드혹 그룹 호 — service configuration <adhoc-group-call>
+    Private       // 개별 호 — service configuration <private-call>
+};
+
 class CCspServiceConfig {
 public:
     /** CSC 에서 문서를 다시 받는다. 실패면 기존 값을 유지한다. @return 새 값을 적재했으면 true */
@@ -59,6 +87,9 @@ public:
     /** TNG2 초 (<emergency-call><group-time-limit>) — 0 이하 = 문서에 없음(TNG2 를 돌리지 않는다). */
     int GetEmergencyGroupTimeLimitSec();
 
+    /** 개별 호·애드혹 그룹 호의 세션 타이머 (<private-call> · <anyExt><adhoc-group-call>). */
+    CspCallTimerParams GetCallTimerParams();
+
     /** xs:duration("PT<h>H<m>M<s>S", 초는 소수 허용) → 밀리초. 형식 오류면 -1. */
     static long long DurationMs( const std::string &strDuration );
 
@@ -71,11 +102,15 @@ public:
     /** 문서 → on-network <emergency-call><group-time-limit> 초. 없거나 형식 오류면 -1. */
     static int ParseEmergencyGroupTimeLimitSec( const std::string &strXml );
 
+    /** 문서 → on-network <private-call>·<anyExt><adhoc-group-call> 의 세션 타이머. 없는 요소는 -1. */
+    static void ParseCallTimers( const std::string &strXml, CspCallTimerParams &clsOut );
+
 private:
     std::mutex m_clsMutex;
     CspFloorParams m_clsFloor;
     CspPriorityParams m_clsPriority;
     int m_iTng2Sec = -1;
+    CspCallTimerParams m_clsCallTimers;
 };
 
 extern CCspServiceConfig gclsCspServiceConfig;
@@ -192,6 +227,104 @@ inline bool CCspServiceConfig::Parse( const std::string &strXml, CspFloorParams 
     f.iC20 = _CspScCount( strOn, "C20-floor-granted" );
     clsOut = f;
     return true;
+}
+
+inline void CCspServiceConfig::ParseCallTimers( const std::string &strXml, CspCallTimerParams &clsOut ) {
+    // 요소 이름은 정확히 맞춘다(McpttElemValue) — <hang-time> 은 <broadcast-hang-time>·<hang-time-warning> 이 아니다
+    const std::string strOn = _CspScOnNetwork( strXml );
+    const std::string strPriv = _CspScSection( strOn, "private-call" );
+    const std::string strAdhoc = _CspScSection( strOn, "adhoc-group-call" );  // <anyExt> 아래 (§8.4.2.1 13)d))
+    CspCallTimerParams p;
+    if ( !strPriv.empty() ) {
+        p.iPrivateHangSec = _CspScSec( strPriv, "hang-time" );
+        p.iPrivateMaxFloorSec = _CspScSec( strPriv, "max-duration-with-floor-control" );
+        p.iPrivateMaxNoFloorSec = _CspScSec( strPriv, "max-duration-without-floor-control" );
+    }
+    if ( !strAdhoc.empty() ) {
+        p.iAdhocHangSec = _CspScSec( strAdhoc, "hang-time" );
+        p.iAdhocBroadcastHangSec = _CspScSec( strAdhoc, "broadcast-hang-time" );
+        p.iAdhocMaxDurationSec = _CspScSec( strAdhoc, "max-duration-of-call" );
+    }
+    clsOut = p;
+}
+
+/** 세션 T4(Inactivity) 초 — 0 = 걸지 않는다. 출처는 호 종류별 하나다(TS 24.380 표 11.1.3-1): 편성 그룹 호 = 그룹 문서
+ *  <on-network-hang-timer>(iGroupHangSec) · 애드혹 그룹 호 = <adhoc-group-call><hang-time>(일제 통화면
+ *  <broadcast-hang-time>) · 개별 호 = <private-call><hang-time> — 발언권 제어 없는 개별 호(full-duplex)는 T4 를 돌릴
+ *  floor 제어 서버가 없어 0 · chat = 0 (T4 만료 해제 목록에 없다 — TS 24.379 §6.3.8.1 1)). */
+inline int CspSessionT4Sec( ECspCallKind eKind, int iGroupHangSec, bool bBroadcast, bool bFloorControl,
+                            const CspCallTimerParams &p ) {
+    int iSec = 0;
+    if ( eKind == ECspCallKind::Prearranged )
+        iSec = iGroupHangSec;
+    else if ( eKind == ECspCallKind::Adhoc )
+        iSec = bBroadcast ? p.iAdhocBroadcastHangSec : p.iAdhocHangSec;
+    else if ( eKind == ECspCallKind::Private && bFloorControl )
+        iSec = p.iPrivateHangSec;
+    return iSec > 0 ? iSec : 0;
+}
+
+/** 세션 최대 시간 초 — 0 = 세지 않는다. iStartCond = 세션을 개시한 INVITE 의 조건, iCond = 지금 조건
+ *  (2=긴급·1=임박·0=없음).
+ *  - 편성 그룹 호 = TNG3, 그룹 문서 <on-network-maximum-duration>(iGroupMaxSec — 0 = 무제한).
+ *  - 애드혹 그룹 호 = TNG3, <adhoc-group-call><max-duration-of-call> — 긴급·임박으로 개시한 호(priority adhoc group
+ *    call)에는 걸지 않는다(TS 24.379 §17.4.2.2 13)). 두 그룹 호 모두 긴급 상태 동안은 TNG2 가 대신한다(§6.3.3.5.2).
+ *  - 개별 호 = 발언권 제어 유무별 «maximum of duration of private call»(§6.3.8.2 2)·§11.1.1.4.1 10)) — 조건과 무관.
+ *  - chat = 0 — TNG3 를 돌리지 않는다(그룹 문서에 요소를 싣지 않는다, mcptt_timers.md §7 D7). */
+inline int CspSessionMaxDurationSec( ECspCallKind eKind, int iGroupMaxSec, bool bFloorControl, int iStartCond,
+                                     int iCond, const CspCallTimerParams &p ) {
+    int iSec = 0;
+    if ( eKind == ECspCallKind::Prearranged )
+        iSec = iCond >= 2 ? 0 : iGroupMaxSec;
+    else if ( eKind == ECspCallKind::Adhoc )
+        iSec = ( iCond >= 2 || iStartCond >= 1 ) ? 0 : p.iAdhocMaxDurationSec;
+    else if ( eKind == ECspCallKind::Private )
+        iSec = bFloorControl ? p.iPrivateMaxFloorSec : p.iPrivateMaxNoFloorSec;
+    return iSec > 0 ? iSec : 0;
+}
+
+// ── UE initial configuration 변경 통지 (TS 24.484 §7.2.2.12 → §6.3.13.3, RFC 5875 xcap-diff) ──
+
+/** 등록 Contact 의 +sip.instance 값(RFC 5626 §4.1 — "<urn:uuid:…>") → MCS UE ID. 따옴표·꺾쇠를 뗀다. */
+inline std::string CspMcsUeIdOf( const std::string &strInstance ) {
+    std::string o;
+    for ( char c : strInstance )
+        if ( c != '"' && c != '<' && c != '>' ) o += c;
+    return o;
+}
+
+/** UE initial configuration 문서 선택자 — XCAP root 뒤 경로 «org.3gpp.mcptt.ue-init-config/users/sip:MCSUEID/MCSUEID»
+ *  (TS 24.484 §7.2.1.1). 경로 세그먼트에 쓸 수 없는 문자는 %XX 로 싣는다(RFC 3986 §3.3 pchar — 속성 값에도 안전).
+ *  빈 ID 면 빈 문자열. */
+inline std::string CspUeInitConfigSelector( const std::string &strMcsUeId ) {
+    if ( strMcsUeId.empty() ) return std::string();
+    auto enc = []( const std::string &v ) {
+        static const char kHex[] = "0123456789ABCDEF";
+        std::string o;
+        for ( unsigned char c : v ) {
+            if ( isalnum( c ) || c == '-' || c == '.' || c == '_' || c == '~' || c == ':' || c == '@' || c == '+' ) {
+                o += (char)c;
+            } else {
+                o += '%';
+                o += kHex[c >> 4];
+                o += kHex[c & 0x0F];
+            }
+        }
+        return o;
+    };
+    const std::string strId = enc( strMcsUeId );
+    return "org.3gpp.mcptt.ue-init-config/users/sip:" + strId + "/" + strId;
+}
+
+/** xcap-diff 본문(RFC 5874) — 바뀐 문서 하나. strEtag 가 비면 new-etag 를 싣지 않는다. */
+inline std::string CspXcapDiffDocBody( const std::string &strXcapRoot, const std::string &strSel,
+                                       const std::string &strEtag ) {
+    std::string s = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n";
+    s += "<xcap-diff xmlns=\"urn:ietf:params:xml:ns:xcap-diff\" xcap-root=\"" + strXcapRoot + "\">\r\n";
+    s += "  <document" + ( strEtag.empty() ? std::string() : " new-etag=\"" + strEtag + "\"" ) + " sel=\"" + strSel +
+         "\"/>\r\n";
+    s += "</xcap-diff>\r\n";
+    return s;
 }
 
 #endif

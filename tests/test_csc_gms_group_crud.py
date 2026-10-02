@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 import sys
 import unittest
 
@@ -125,11 +126,46 @@ class ParseTests(unittest.TestCase):
         self.assertIn("<mcpttgi:on-network-invite-members>false</mcpttgi:on-network-invite-members>", xml)
         self.assertNotIn("session-type", xml)   # 규격 밖 요소 — 그룹 문서에 싣지 않는다
         self.assertIn("<mcpttgi:on-network-hang-timer>PT5S</mcpttgi:on-network-hang-timer>", xml)
-        self.assertIn("<mcpttgi:on-network-maximum-duration>PT600S</mcpttgi:on-network-maximum-duration>", xml)
         self.assertNotIn("on-network-hang-time>", xml)
-        self.assertEqual((d["hang_timer_sec"], d["max_duration_sec"]), (5, 600))
+        # chat 그룹은 TNG3 를 돌리지 않는다 — 요소를 싣지 않고(mcptt_timers.md §7 D7), PUT 으로 되읽으면 «기존값 유지»
+        self.assertNotIn("on-network-maximum-duration", xml)
+        self.assertEqual((d["hang_timer_sec"], d["max_duration_sec"]), (5, None))
         self.assertEqual([(x["user_id"], x["role"], x["priority"]) for x in d["members"]],
                          [("+82510001001", "chair", 1), ("+82500000001", "participant", 5)])
+
+    def test_call_timers_zero_and_chat(self):
+        """그룹 호 타이머의 0(TS 24.481 §7.2.2 o)p)·§7.2.7, mcptt_timers.md §7 D7·D8) — T4 0 = 요소 생략, 편성 그룹 TNG3 0 =
+        무제한 표기(값 필수), chat 그룹 = TNG3 요소 없음. GET 문서를 그대로 PUT 해도 값이 바뀌지 않는다."""
+        tag_t4, tag_tng3 = "on-network-hang-timer", "on-network-maximum-duration"
+        cases = (  # (그룹 종류, T4, TNG3) → (T4 요소, TNG3 요소, 되읽은 T4, 되읽은 TNG3)
+            ("prearranged", 0, 0, None, f"PT{m.GROUP_MAX_DURATION_UNLIMITED}S", None, 0),
+            ("prearranged", 30, 3600, "PT30S", "PT3600S", 30, 3600),
+            ("prearranged", 0, 86400, None, "PT86400S", None, 86400),
+            ("chat", 0, 0, None, None, None, None),
+            ("chat", 45, 3600, "PT45S", None, 45, None),
+        )
+        for gt, t4, tng3, want_t4, want_tng3, back_t4, back_tng3 in cases:
+            m.GROUPS["tel:g-0000t4t3"] = {"display_name": "t", "etag": "e", "group_type": gt,
+                                          "hang_timer_sec": t4, "max_duration_sec": tng3, "members": []}
+            try:
+                xml, _ = m.get_group_xml("tel:g-0000t4t3")
+            finally:
+                m.GROUPS.pop("tel:g-0000t4t3", None)
+            got = {t: re.search(rf"<mcpttgi:{t}>([^<]*)</mcpttgi:{t}>", xml) for t in (tag_t4, tag_tng3)}
+            self.assertEqual(got[tag_t4] and got[tag_t4].group(1), want_t4, (gt, t4, tng3))
+            self.assertEqual(got[tag_tng3] and got[tag_tng3].group(1), want_tng3, (gt, t4, tng3))
+            self.assertNotIn("PT0S", xml, "0 은 문서에 싣지 않는다(규격 단말이 «0초» 로 읽는다)")
+            d = m.parse_group_document_xml(xml)
+            self.assertEqual((d["hang_timer_sec"], d["max_duration_sec"]), (back_t4, back_tng3), (gt, t4, tng3))
+        # 무제한 표기 이상(다른 xs:duration 표기 포함)은 0, 설정 범위 밖 유한값은 400 그대로, PT0S 는 0 으로 받는다
+        for text, want in (("PT2147483647S", 0), ("P24855DT3H14M7S", 0), ("PT0S", 0), ("PT600S", 600)):
+            self.assertEqual(m.parse_group_document_xml(_doc("tel:g-00000001", "n", [], extra=(
+                f"<mcpttgi:{tag_tng3}>{text}</mcpttgi:{tag_tng3}>")))["max_duration_sec"], want, text)
+        with self.assertRaises(ValueError):
+            m.parse_group_document_xml(_doc("tel:g-00000001", "n", [], extra=(
+                f"<mcpttgi:{tag_tng3}>PT86401S</mcpttgi:{tag_tng3}>")))
+        self.assertEqual(m.parse_group_document_xml(_doc("tel:g-00000001", "n", [], extra=(
+            f"<mcpttgi:{tag_t4}>PT0S</mcpttgi:{tag_t4}>")))["hang_timer_sec"], 0, "명시한 PT0S = T4 미사용")
 
     def test_ack_call_setup_elements(self):
         """확인 통화 설정 (TS 24.481 §7.2.2 s)t)u)·§7.2.4.2) — 필수 멤버만 <on-network-required>, list-service 3 요소 왕복."""
@@ -407,6 +443,24 @@ class DbWriteTests(unittest.TestCase):
         self.assertEqual(upd[0], "UPDATE ptt_groups SET name=%s, priority=%s WHERE id=%s")
         self.assertEqual(upd[1], ("새이름", 2, 42))
         self.assertFalse(any(q.startswith("DELETE FROM ptt_group_members") for q, _ in cur.sql))
+
+    def test_update_roundtrip_of_zero_timers_keeps_db(self):
+        """T4 0·TNG3 0 인 편성 그룹의 GET 문서를 그대로 PUT — T4 는 요소가 없어 열을 건드리지 않고, TNG3 무제한 표기는 0 으로
+        써서 DB 값이 바뀌지 않는다(mcptt_timers.md §7 D8)."""
+        m.GROUPS["tel:g-0a1b2c3d"] = {"display_name": "n", "etag": "e", "group_type": "prearranged",
+                                      "hang_timer_sec": 0, "max_duration_sec": 0, "members": []}
+        try:
+            xml, _ = m.get_group_xml("tel:g-0a1b2c3d")
+        finally:
+            m.GROUPS.pop("tel:g-0a1b2c3d", None)
+        cur = _FakeCursor(set(), existing_pk=42)
+        m._db_connect = lambda: _FakeConn(cur)
+        st, _ = m.gms_write_group("g-0a1b2c3d", m.parse_group_document_xml(xml), 5020, create=False)
+        self.assertEqual(st, 0)
+        q, a = next((q, a) for q, a in cur.sql if q.startswith("UPDATE ptt_groups"))
+        self.assertNotIn("hang_timer_sec", q)
+        cols = [c.split("=")[0].strip() for c in q[len("UPDATE ptt_groups SET "):q.index(" WHERE")].split(",")]
+        self.assertEqual(a[cols.index("max_duration_sec")], 0)
 
     def test_update_missing_group_404_and_delete(self):
         cur = _FakeCursor(set(), existing_pk=None)

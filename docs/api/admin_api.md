@@ -864,8 +864,8 @@ Content-Type: application/json
 | `name` | string | Y | 그룹 표시 이름 |
 | `allow_conference_state` | boolean | N | `on-network-allow-conference-state`(TS 24.481) — 멤버의 conference 이벤트(RFC 4575) 구독 허용 (기본: true). false 면 CSP 가 초기 SUBSCRIBE 를 403 `Warning: 138` 로 거절. 관제사 청취 범위 인가는 별도(역할 `ptt_listen` — [dispatch_center.md §5.6](../design/features/dispatch_center.md)) |
 | `group_type` | string | N | 그룹 종류 `prearranged`(기본)/`chat` — 그룹 문서 `<on-network-invite-members>`(true/false, TS 24.481 §7.2.2). 그 밖의 값은 400 — 일제 통화는 그룹 종류가 아니라 호 속성이다([mcptt_broadcast_group_call.md](../design/features/mcptt_broadcast_group_call.md)) |
-| `hang_timer_sec` | integer | N | 그룹 호 T4(Inactivity) 초 — 그룹 문서 `<on-network-hang-timer>`(TS 24.481 §7.2.2 o). 발언 없이 이 시간이 지나면 CSP 가 세션을 해제한다(TS 24.380 §6.3.4.3.5). 0~3600, 0=미사용, 기본 30 |
-| `max_duration_sec` | integer | N | 그룹 호 최대 시간(TNG3) 초 — `<on-network-maximum-duration>`(TS 24.481 §7.2.7). 0~86400, 0=무제한, 기본 3600 |
+| `hang_timer_sec` | integer | N | 그룹 호 T4(Inactivity) 초 — 그룹 문서 `<on-network-hang-timer>`(TS 24.481 §7.2.2 o). 발언 없이 이 시간이 지나면 CSP 가 세션을 해제한다(TS 24.380 §6.3.4.3.5). 0~3600, 0=미사용(그룹 문서에 요소를 싣지 않는다), 기본 30 |
+| `max_duration_sec` | integer | N | 그룹 호 최대 시간(TNG3) 초 — `<on-network-maximum-duration>`(TS 24.481 §7.2.7). 0~86400, 0=무제한(편성 그룹 문서에는 무제한 표기 `PT2147483647S`), 기본 3600. chat 그룹은 TNG3 를 돌리지 않아 문서에 싣지 않는다 |
 | `min_number_to_start` | integer | N | 확인 통화 설정 — 개시자 200 OK 전에 받아야 할 멤버 200 수, 그룹 문서 `<on-network-minimum-number-to-start>`(TS 24.481 §7.2.2 s), TS 24.379 §10.1.1.4.2). 0~65535, 0=기다리지 않음, 기본 0 |
 | `ack_timeout_sec` | integer | N | TNG1 — 필수 멤버 응답 대기 초, `<on-network-timeout-for-acknowledgement-of-required-members>`(§7.2.2 t), TS 24.379 §6.3.3.3). 1~300, 기본 5 |
 | `ack_action` | string | N | TNG1 만료·필수 멤버 거절 때 `proceed`(200 + Warning 111)/`abandon`(480 + Warning 112, 기본) — `<on-network-action-upon-expiration-of-timeout-for-acknowledgement-of-required-members>`(§7.2.2 u)) |

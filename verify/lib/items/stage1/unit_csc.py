@@ -13,7 +13,10 @@
                                           access token scope 문자열/client_id/mcdata_id·리소스 서버 검사 3모드·
                                           issuer 유도(mcx_identity_scope.md)
   · tests/test_csc_user_profile.py        MCPTT user-profile 문서(TS 24.484 §8.3.2) — OnNetwork MCPTTGroupInfo(소속 그룹·소유 표시)·
-                                          ImplicitAffiliations·PrivateCallList(동료)·긴급 요소 부재/폴백·common-policy ruleset·ETag
+                                          ImplicitAffiliations·PrivateCallList(동료)·긴급 요소 부재/폴백·common-policy ruleset·ETag ·
+                                          service-config 문서(§8.4 — 개별 호 <private-call>·애드혹 <adhoc-group-call> 타이머 포함)
+  · tests/test_csc_ue_init_config.py      UE initial configuration(TS 24.484 §7.2) — <Timers> 기본값 규격 범위(TS 24.380 표 11.1.1-1)·
+                                          설정 반영·재적재 변경 통지 UE_INIT_CONFIG_CHANGED(§7.2.2.12, mcptt_timers.md §7 D4·D10)
   · tests/test_csc_access_services.py   접속 서비스 단일 읽기 경로 — 미러(CSP 정본) 이름 매칭·가족 경계·kind 폴백·csc.json 도달 정보
                                         합성·드리프트 경고·미러 부재 폴백(services/access_services)
   · tests/test_csc_dispatch_management.py 관제 앱 관리 평면 — 역할 directory_write 범위(admin_scope/in_scope)·
@@ -38,7 +41,7 @@ _MODULES = ["tests.test_csc_dispatch_rbac", "tests.test_csc_subscription_realm",
             "tests.test_csc_gms_group_crud", "tests.test_csc_provisioning_dispatch",
             "tests.test_csc_provisioning_history", "tests.test_csc_idms_scope", "tests.test_csc_user_profile",
             "tests.test_csc_dispatch_management", "tests.test_csc_access_services",
-            "tests.test_csc_subscriptions", "tests.test_csc_mcvideo"]
+            "tests.test_csc_subscriptions", "tests.test_csc_mcvideo", "tests.test_csc_ue_init_config"]
 
 
 @verify_item(

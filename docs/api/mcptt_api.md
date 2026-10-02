@@ -56,7 +56,9 @@ XCAP(RFC 4825) 리소스 기반 — TS 24.481 Ut. 인증 = `Authorization: Beare
   없을 때만 `<mcpttgi:session-type>`(규격 밖 전환기 요소 — 구 단말)을 읽고, `broadcast` 는 400(일제 통화는 호 속성 —
   [mcptt_broadcast_group_call.md](../design/features/mcptt_broadcast_group_call.md)). 그룹 호 타이머 =
   `<mcpttgi:on-network-hang-timer>`(T4 Inactivity, 0~3600초) · `<mcpttgi:on-network-maximum-duration>`(TNG3, 0~86400초) —
-  xs:duration(`PT30S`), 범위 밖·형식 오류는 400. 확인 통화 설정(TS 24.481 §7.2.2 s)t)u), TS 24.379 §6.3.3.3) =
+  xs:duration(`PT30S`), 범위 밖·형식 오류는 400. GET 은 0 을 싣지 않는다 — T4 0 = 요소 생략, chat 그룹 = TNG3 요소 생략(TNG3 를
+  돌리지 않는다), 편성 그룹 TNG3 0(무제한) = `PT2147483647S`. PUT 은 그 값 이상과 `PT0S` 를 0 으로 읽는다 — 받은 문서를 그대로
+  PUT 해도 값이 바뀌지 않는다([mcptt_timers.md](../design/features/mcptt_timers.md) §3). 확인 통화 설정(TS 24.481 §7.2.2 s)t)u), TS 24.379 §6.3.3.3) =
   `<mcpttgi:on-network-minimum-number-to-start>`(0~65535, 기본 0) · `<mcpttgi:on-network-timeout-for-acknowledgement-of-required-members>`
   (TNG1, xs:duration 1~300초, 기본 5초) · `<mcpttgi:on-network-action-upon-expiration-of-timeout-for-acknowledgement-of-required-members>`
   (`proceed`·`abandon`, 정의 밖 값 = abandon, 기본 abandon) — GET 은 셋을 늘 싣는다. 필수 멤버 = entry 의 `<mcpttgi:on-network-required/>`
@@ -157,6 +159,30 @@ user-profile 의 인가 `<cp:ruleset><cp:rule id="mcptt-user-authorisation"><cp:
 
 service-config 의 `<on-network>` 는 선택 요소 `<emergency-call><group-time-limit>` 를 첫 자식으로 싣는다 — 진행 중 긴급 그룹 호 시한으로,
 MCPTT 서버(CSP)가 TNG2 로 쓴다(TS 24.379 §6.3.3.1.16). 값 = CSC 설정 `ServiceConfig.EmergencyCall.GroupTimeLimit`(ms), 0(기본)이면 요소째 뺀다.
+개별 호·애드혹 그룹 호의 세션 타이머(TS 24.484 §8.4.2.1·§8.4.2.3 — 그룹 문서가 없는 호라 이 문서가 출처다):
+
+```xml
+<on-network>
+  <emergency-call>…</emergency-call>                                    <!-- 선택 -->
+  <private-call>                                                         <!-- ServiceConfig.PrivateCall.* -->
+    <hang-time>PT30S</hang-time>                                         <!-- 개별 호 T4 (TS 24.380 표 11.1.3-1) -->
+    <max-duration-with-floor-control>PT3600S</max-duration-with-floor-control>        <!-- TS 24.379 §6.3.8.2 2) -->
+    <max-duration-without-floor-control>PT3600S</max-duration-without-floor-control>  <!-- full-duplex 개별 호 -->
+  </private-call>
+  <transmit-time>…</transmit-time> <fc-timers-counters>…</fc-timers-counters> <!-- RP 셋 -->
+  <anyExt>
+    <adhoc-group-call>                                                   <!-- ServiceConfig.AdhocGroupCall.* -->
+      <allow-adhoc-group-call-support>true</allow-adhoc-group-call-support>  <!-- 필수 — 없으면 «애드혹 미지원» -->
+      <max-no-participants>64</max-no-participants>                      <!-- 필수 -->
+      <hang-time>PT30S</hang-time>                                       <!-- 애드혹 T4 -->
+      <broadcast-hang-time>PT30S</broadcast-hang-time>                   <!-- 일제 애드혹 T4 -->
+      <max-duration-of-call>PT3600S</max-duration-of-call>               <!-- 애드혹 TNG3 (§17.4.2.2 13)) -->
+    </adhoc-group-call>
+  </anyExt>
+</on-network>
+```
+
+시간 값 0 인 요소는 싣지 않는다(그 타이머 미가동), `<private-call>` 은 자식이 없으면 요소째 뺀다.
 
 ue-init-config 의 주소류(IdMS/CMS/GMS/KMS/XCAP 루트)의 base 는 CSC 설정 `McpttServer.PublicUrl`
 이 정본이다(비면 요청 Host 유도 — 올인원 전용). CSP 가 xcap-diff NOTIFY 로 광고하는 `xcap-root`
@@ -172,7 +198,14 @@ ue-init-config 의 주소류(IdMS/CMS/GMS/KMS/XCAP 루트)의 base 는 CSC 설�
 나머지 주소류(domain·PLMN·GMS-URI)는 토폴로지에서 유도되고,
 규격 파라미터값(Timers·con-ref·http-proxy·보호 플래그·group-creation-XUI·name)과 확장 요소
 (`MCPTT/MCVideo/MCData-Service-Details` — MCVideo 는 기본 끔) 는 csc 설정 `UeInitConfig.*` 로 사용자지정한다 — 값이 바뀌면 ETag 도
-바뀐다([mcptt_standard_conformance.md §R4-1](../design/features/mcptt_standard_conformance.md)).
+바뀐다([mcptt_standard_conformance.md §R4-1](../design/features/mcptt_standard_conformance.md)). 단말 타이머 `<Timers>` 기본값 =
+T100 1 · T101 1 · T103 4 · T104 4 · T132 2 초(TS 24.380 표 11.1.1-1).
+
+**변경 통지(xcap-diff)** — cms 축(`sip:cms_psi@<domain>`)을 구독한 단말은 문서가 바뀌면 xcap-diff NOTIFY(RFC 5875)를 받는다.
+user-profile·service-config 는 `<document sel="org.3gpp.mcptt.user-profile/users/tel:<id>/user-profile">`·
+`<document sel="org.3gpp.mcptt.service-config/users/tel:<id>/service-config">`, UE initial configuration 은 그 단말의 문서 선택자
+`<document new-etag="…" sel="org.3gpp.mcptt.ue-init-config/users/sip:<MCS UE ID>/<MCS UE ID>"/>` 하나(TS 24.484 §7.2.1.1·§7.2.2.12 —
+MCS UE ID = 단말 instance ID, 등록 Contact `+sip.instance`). 단말은 그 선택자의 문서를 If-None-Match 로 다시 받는다.
 
 ---
 

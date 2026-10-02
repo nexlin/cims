@@ -231,13 +231,32 @@ bool CGroupCallService::RebuildReInviteFloorFmtp( const std::string &strCallId, 
     return true;
 }
 
+// 호 종류 — 즉석 세션(_isAdhoc)은 개별 호("private")와 애드혹 그룹 호로 갈린다. T4·최대 시간의 출처와 해제 정책이
+//   호 종류별이다(TS 24.380 표 11.1.3-1 · TS 24.379 §6.3.8 — CspSessionT4Sec·CspSessionMaxDurationSec).
+static ECspCallKind _callKindOf( const CspPttGroup &clsGroup ) {
+    if ( clsGroup._groupType == "private" ) return ECspCallKind::Private;
+    if ( clsGroup._isAdhoc ) return ECspCallKind::Adhoc;
+    if ( clsGroup._groupType == "chat" ) return ECspCallKind::Chat;
+    return ECspCallKind::Prearranged;
+}
+
+static const char *_callKindName( ECspCallKind eKind ) {
+    return eKind == ECspCallKind::Private ? "private"
+           : eKind == ECspCallKind::Adhoc ? "adhoc"
+           : eKind == ECspCallKind::Chat  ? "chat"
+                                          : "prearranged";
+}
+
 CmpGroupSession CGroupCallService::CmpSessionOf( const CspPttGroup &clsGroup ) {
     const GroupSession clsSes = SessionOf( clsGroup._id );
     CmpGroupSession clsCmp;
     clsCmp.strInitiator = clsSes.strInitiator;
     clsCmp.bBroadcast = clsSes.bBroadcast;
-    // T4 출처는 호 종류별 하나(TS 24.379 §6.3.8.1 · TS 24.481 §7.2.2 o) — 그룹 호 = 그룹 문서 hang-timer.
-    clsCmp.iT4Sec = IsOnDemandGroupCall( clsGroup ) ? std::max( 0, clsGroup._hangTimerSec ) : 0;
+    // T4 출처는 호 종류별 하나(TS 24.380 표 11.1.3-1) — 편성 그룹 호 = 그룹 문서 hang-timer(TS 24.481 §7.2.2 o),
+    //   애드혹 그룹 호·개별 호 = service configuration <adhoc-group-call>·<private-call>(TS 24.484 §8.4.2.1).
+    //   chat 은 0.
+    clsCmp.iT4Sec = CspSessionT4Sec( _callKindOf( clsGroup ), clsGroup._hangTimerSec, clsSes.bBroadcast,
+                                     clsGroup._floorControl != "off", gclsCspServiceConfig.GetCallTimerParams() );
     return clsCmp;
 }
 
@@ -251,10 +270,15 @@ void CGroupCallService::OnFloorInactivity( const std::string &strGroupId, const 
             return;
         }
     }
+    // 해제 정책 — 편성·일제·애드혹 그룹 호는 TS 24.379 §6.3.8.1 1), 개별 호는 §6.3.8.2 1). chat 그룹 호는 T4 해제
+    //   목록에 없다(상시 세션 — CMP 에 T4 를 싣지 않는다).
     CspPttGroup clsGroup;
-    if ( !gclsGroupMap.Select( strGroupId.c_str(), clsGroup ) || !IsOnDemandGroupCall( clsGroup ) ) return;
-    CLog::Print( LOG_INFO, "OnFloorInactivity: group=%s T4(%ds) 만료 — 그룹 호 해제 (TS 24.379 §6.3.8.1)",
-                 strGroupId.c_str(), clsGroup._hangTimerSec );
+    if ( !gclsGroupMap.Select( strGroupId.c_str(), clsGroup ) ) return;
+    const ECspCallKind eKind = _callKindOf( clsGroup );
+    if ( eKind == ECspCallKind::Chat ) return;
+    CLog::Print( LOG_INFO, "OnFloorInactivity: group=%s(%s) T4(%ds) 만료 — 호 해제 (TS 24.379 %s)", strGroupId.c_str(),
+                 _callKindName( eKind ), CmpSessionOf( clsGroup ).iT4Sec,
+                 eKind == ECspCallKind::Private ? "§6.3.8.2 1)" : "§6.3.8.1 1)" );
     ReleaseGroupSession( strGroupId, "t4_inactivity" );
 }
 
@@ -277,7 +301,13 @@ void CGroupCallService::ReleaseGroupSession( const std::string &strGroupId, cons
 }
 
 void CGroupCallService::CheckSessionLimits() {
-    std::vector<std::pair<std::string, time_t>> vecStarts;
+    struct SessionClock {
+        std::string strGroupId;
+        time_t tStart;
+        int iStartCond;  // 개시 INVITE 의 조건
+        int iCond;       // 지금 조건
+    };
+    std::vector<SessionClock> vecStarts;
     std::vector<std::string> vecTng2;
     const time_t tNow = time( NULL );
     const int iTng2Sec = gclsCspServiceConfig.GetEmergencyGroupTimeLimitSec();
@@ -285,10 +315,10 @@ void CGroupCallService::CheckSessionLimits() {
         std::unique_lock<std::recursive_mutex> lock( m_mutex );
         for ( const auto &kv : m_mapGroupSession ) {
             if ( kv.second.tStart <= 0 || !HasActiveLeg( kv.first ) ) continue;
-            // 긴급 상태 동안은 TNG2 가 TNG3 를 대신한다 (§6.3.3.5.2 — TNG2 를 켜면 TNG3 를 켜지 않는다)
+            // 긴급 상태 동안은 TNG2 가 TNG3 를 대신한다(§6.3.3.5.2) — 판정은 CspSessionMaxDurationSec 가 한다
             auto itCond = m_mapGroupCond.find( kv.first );
-            if ( itCond != m_mapGroupCond.end() && itCond->second.iCond >= 2 ) continue;
-            vecStarts.push_back( { kv.first, kv.second.tStart } );
+            vecStarts.push_back( { kv.first, kv.second.tStart, kv.second.iStartCond,
+                                   itCond != m_mapGroupCond.end() ? itCond->second.iCond : 0 } );
         }
         if ( iTng2Sec > 0 )
             for ( const auto &kv : m_mapGroupCond )
@@ -302,13 +332,21 @@ void CGroupCallService::CheckSessionLimits() {
                      strGroupId.c_str(), iTng2Sec );
         CancelGroupEmergency( strGroupId, "", McpttIndicators(), "", "tng2" );
     }
+    // 최대 시간 — 편성·애드혹 그룹 호 = TNG3(§6.3.8.1 5) · 애드혹 §17.4.2.2 13)), 개별 호 = 최대 통화 시간
+    //   (§6.3.8.2 2)). 값의 출처는 호 종류별(그룹 문서 · service configuration), chat 은 세지 않는다.
+    const CspCallTimerParams clsTimers = gclsCspServiceConfig.GetCallTimerParams();
     for ( const auto &st : vecStarts ) {
         CspPttGroup clsGroup;
-        if ( !gclsGroupMap.Select( st.first.c_str(), clsGroup ) || !IsOnDemandGroupCall( clsGroup ) ) continue;
-        if ( clsGroup._maxDurationSec <= 0 || tNow - st.second < clsGroup._maxDurationSec ) continue;
-        CLog::Print( LOG_INFO, "CheckSessionLimits: group=%s TNG3(%ds) 만료 — 그룹 호 해제 (TS 24.379 §6.3.8.1)",
-                     st.first.c_str(), clsGroup._maxDurationSec );
-        ReleaseGroupSession( st.first, "max_duration" );
+        if ( !gclsGroupMap.Select( st.strGroupId.c_str(), clsGroup ) ) continue;
+        const ECspCallKind eKind = _callKindOf( clsGroup );
+        const int iMaxSec = CspSessionMaxDurationSec( eKind, clsGroup._maxDurationSec, clsGroup._floorControl != "off",
+                                                      st.iStartCond, st.iCond, clsTimers );
+        if ( iMaxSec <= 0 || tNow - st.tStart < iMaxSec ) continue;
+        CLog::Print( LOG_INFO, "CheckSessionLimits: group=%s(%s) %s(%ds) 만료 — 호 해제 (TS 24.379 %s)",
+                     st.strGroupId.c_str(), _callKindName( eKind ),
+                     eKind == ECspCallKind::Private ? "최대 통화 시간" : "TNG3", iMaxSec,
+                     eKind == ECspCallKind::Private ? "§6.3.8.2 2)" : "§6.3.8.1 5)" );
+        ReleaseGroupSession( st.strGroupId, "max_duration" );
     }
 }
 
@@ -1033,6 +1071,7 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
             clsSes.bBroadcast =
                 bBroadcastInd && IsBroadcastCapable( clsGroup );  // 편성 on-demand · ad hoc(§17.2.2.1.1 9))
             clsSes.tStart = time( NULL );
+            clsSes.iStartCond = iCond;  // 긴급·임박으로 개시한 애드혹 호에는 TNG3 를 걸지 않는다(§17.4.2.2 13))
             clsSes.bPending = true;
             bClaimedSession = true;
             if ( bBroadcastInd && !clsSes.bBroadcast )
@@ -2723,6 +2762,15 @@ size_t CGroupCallService::ComputeGroupConfigHash( const CspPttGroup &group ) {
     }
     strHashInput += "|floor=" + group._floorPolicy + ":" + std::to_string( group._maxTalkers );
     strHashInput += "|t4=" + std::to_string( group._hangTimerSec );  // hang-timer 변경도 MODIFY 로 CMP 에 도달
+    // 개별·애드혹 호의 T4 출처는 service configuration — 그 값의 변경도 진행 중 세션에 닿게 한다(일제 여부는 세션
+    //   속성이라 두 값을 다 싣는다)
+    const ECspCallKind eKind = _callKindOf( group );
+    if ( eKind == ECspCallKind::Private || eKind == ECspCallKind::Adhoc ) {
+        const CspCallTimerParams ct = gclsCspServiceConfig.GetCallTimerParams();
+        const bool bFloor = group._floorControl != "off";
+        strHashInput += "|sct4=" + std::to_string( CspSessionT4Sec( eKind, 0, false, bFloor, ct ) ) + "," +
+                        std::to_string( CspSessionT4Sec( eKind, 0, true, bFloor, ct ) );
+    }
     return std::hash<std::string>{}( strHashInput );
 }
 

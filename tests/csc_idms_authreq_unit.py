@@ -32,6 +32,9 @@ os.chdir(_TMP)   # Logger()/file_store 가 CWD 기준 산출물을 만들지 않
 from services import mcptt                      # noqa: E402
 from httpsrv.handler import HandlerArgs         # noqa: E402
 
+# 재적재(apply_config)가 문서 변경을 CSP 에 UDP 로 알린다(SERVICE_CONFIG_CHANGED·UE_INIT_CONFIG_CHANGED) — 오프라인 시험이라 끊는다.
+mcptt.notify_csp = lambda *a, **k: None
+
 g_pass, g_fail = 0, 0
 
 
@@ -94,7 +97,7 @@ def main():
     base = 'https://cims.example:4430'
     xml0, etag0 = mcptt.get_ue_init_config_xml(base)
     minidom.parseString(xml0.encode())
-    check('<T132>6</T132>' in xml0 and '<name>CIMS</name>' in xml0, "기본값 문서(T132=6, name=CIMS)")
+    check('<T132>2</T132>' in xml0 and '<name>CIMS</name>' in xml0, "기본값 문서(T132=2, name=CIMS)")
     check('PLMN="45033"' in xml0, "PLMN 설정값 45033")
     check('<MCPTT-Service-Details>' in xml0 and 'sip:mcptt_psi@ptt.cims.example.kr' in xml0,
           "anyExt MCPTT-Service-Details 기본 on + Server-URI 유도")
@@ -113,7 +116,7 @@ def main():
     xml1, etag1 = mcptt.get_ue_init_config_xml(base)
     minidom.parseString(xml1.encode())
     check('<name>Acme &lt;MCX&gt; &amp; &quot;Co&quot;</name>' in xml1, "값 html.escape (well-formed 유지)")
-    check('<T100>7</T100>' in xml1 and '<T132>255</T132>' in xml1 and '<T101>4</T101>' in xml1,
+    check('<T100>7</T100>' in xml1 and '<T132>255</T132>' in xml1 and '<T101>1</T101>' in xml1,
           "Timers 설정 반영 + 범위 절단(300→255) + 미지정은 기본값")
     check('PLMN="00101"' in xml1 and '<MCPTT-to-con-ref>mcx.apn</MCPTT-to-con-ref>' in xml1, "HPLMN 설정 우선")
     check('<http-proxy>http://proxy.acme:8080</http-proxy>' in xml1 and

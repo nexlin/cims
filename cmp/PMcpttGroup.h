@@ -101,6 +101,7 @@ enum FloorQueuedPurpose {
 };
 enum FloorQueuedResult {
     QFR_OK            = 0,   // 지정된(또는 전체) 대기 요청을 모두 제거
+    QFR_NOT_AUTHORIZED = 1,  // 남의 대기 요청을 지울 권한이 없음(§6.3.5.4.12 2))
     QFR_QUEUE_EMPTY   = 2,   // 대기열이 이미 비어 있음
     QFR_NOT_QUEUED    = 3,   // 지정된 사용자들의 대기 요청이 없음
     QFR_PARTIAL       = 5    // 일부 사용자의 대기 요청이 없음
@@ -440,6 +441,10 @@ private:
     void _queueFront(const std::string& sessionId, unsigned int ssrc, int prio);
     // Floor Queue Position Info 송신(position=1-based, 없으면 0).
     void _sendQueuePos(const std::string& sessionId, unsigned int ssrc);
+    // 한 참가자에게 지금 발언권 상태를 알린다 — 화자가 있으면 Floor Taken, 없으면 Floor Idle(§6.3.5.3.7 2) · §6.3.5.4.5).
+    void _sendFloorStatusTo(const std::string& sessionId);
+    // 그 참가자의 대기 요청을 지운다 — 있었으면 true.
+    bool _removeQueued(const std::string& sessionId);
     // 큐 항목을 우선순위(tier>chair>prio>ts)로 정렬한 순서에서의 1-based 위치(없으면 0).
     int  _queuePositionOf(const std::string& sessionId) const;
     // 큐에서 최우선 대기자 추출(없으면 빈 문자열). 추출 시 큐에서 제거.

@@ -3,11 +3,11 @@
   <name>CIMS</name>
   <on-network>
     <Timers>
-      <T100>4</T100>
-      <T101>4</T101>
+      <T100>1</T100>
+      <T101>1</T101>
       <T103>4</T103>
       <T104>4</T104>
-      <T132>6</T132>
+      <T132>2</T132>
     </Timers>
     <HPLMN PLMN="00101">
       <service>

@@ -543,13 +543,14 @@ bool CDbManager::UpdateRegisterTime( const std::string &strUserId ) {
     return true;
 }
 
-bool CDbManager::UpdateLogoutTime( const std::string &strUserId ) {
+bool CDbManager::UpdateLogoutTime( const std::string &strUserId, bool bReclaimAffiliations ) {
     std::lock_guard<std::recursive_mutex> lock( m_mutex );
     if ( !m_pMysql && !Reconnect() ) return false;
 
     for ( const SubTable &t : SubTables() )
         ExecuteQuery( std::string( "UPDATE " ) + t.pszTable + " SET logout_time=NOW() WHERE id='" +
                       Escape( strUserId ) + "'" );
+    if ( !bReclaimAffiliations ) return true;
     // de-register 시 affiliation 해제 (TS 24.379 §9 — 제휴는 등록에 묶인다).
     //   가입자의 **전 그룹 제휴를 한 번에 지우는 유일한 경로**이므로 반드시 흔적을 남긴다.
     //   종전엔 무로그였고, 그래서 "제휴 테이블이 비었다" 를 조사할 때 지운 주체를 특정할 수

@@ -193,7 +193,11 @@ public:
 
     void DeleteTimeout( int iTimeout );
     void DeleteTimeout( int iTimeout, USER_ID_LIST &clsDeletedList );
-    void DeleteTimeout( int iTimeout, USER_INFO_LIST &clsDeletedInfoList );
+    /** @param pmapFlowLoss (선택) 이번에 등록이 풀린 가입자 중 **flow 실패로만** 풀린 사람 → 그 등록의 수명 끝
+     *  (등록 시각 + Expires + iTimeout 중 가장 늦은 것, epoch 초). 제휴 회수를 그때까지 미룬다
+     *  (registration_binding_set.md §4.4). */
+    void DeleteTimeout( int iTimeout, USER_INFO_LIST &clsDeletedInfoList,
+                        std::map<std::string, time_t> *pmapFlowLoss = nullptr );
     void SendOptions();
 
     void GetRegisteredUsers( USER_ID_LIST &clsList );

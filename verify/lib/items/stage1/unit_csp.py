@@ -9,12 +9,16 @@
                                    영역 키가 비었을 때 단일 루트 규칙(include/SiteLayout.h)
   · tests/csp_pidf_affiliation_test.cpp  규격형 제휴 PUBLISH 의 pidf 본문 파싱(csp/McpttInfo.h — TS 24.379 §9.3.1.2):
       entity·tuple@id·affiliation@group 집합 추출, prefix 무관 매칭, 유사 이름/속성 오매칭 배제.
+  · tests/csp_affiliation_grace_test.cpp  flow 실패로 풀린 등록의 제휴 유예 회수(csp/AffiliationGrace.h — registration_binding_set.md §4.4):
+      등록 수명 끝까지 미룸 · 재등록·해지가 거둠 · 시한이 지난 것만 한 번 내줌 · 늦은 시한 유지.
   · tests/csp_mcptt_info_test.cpp  mcptt-info 파싱(csp/McpttInfo.h — TS 24.379 Annex F.1): contentType 자식(<mcpttURI>/<mcpttBoolean>)
                                    과 값 직접 기재 두 형식 · 경보 요소(request-uri·calling-user-id·originated-by·client-id) ·
                                    이름 경계(<alert-ind-rcvd>) · 접두사·엔티티
   · tests/csp_service_config_test.cpp  service-config 해석(csp/CspServiceConfig.h — TS 24.484 §8.4): xs:duration · on-network
                                    transmit-time(T2)·fc-timers-counters → CMP floor_timers 값 · off-network·group-time-limit 배제 ·
-                                   Resource-Priority namespace.priority(TS 24.379 §6.3.3.1.19) · TNG2 <emergency-call><group-time-limit>
+                                   Resource-Priority namespace.priority(TS 24.379 §6.3.3.1.19) · TNG2 <emergency-call><group-time-limit> ·
+                                   개별·애드혹 호 세션 타이머(<private-call>·<adhoc-group-call>)와 호 종류별 T4·최대 시간 선택
+                                   (TS 24.380 표 11.1.3-1 · TS 24.379 §6.3.8 · §17.4.2.2 13)) · ue-init-config 변경 통지 선택자(§7.2.1.1)
   · tests/csp_mcdata_codec_test.cpp  MCData 본문 해석(csp/McDataCodec.cpp — TS 24.282 §12.2.1.1·§12.2.3, mcdata_messaging.md §4.4):
                                    SDS NOTIFICATION · resource-lists entry 목록 · mcdata-calling-group-id · signalling 파트 원문 보존 ·
                                    옛 형식(resource-lists 없음) 구분
@@ -52,9 +56,11 @@ _TESTS = {
     "tests/csp_rule_field_test.cpp": (["csp/CspRuleField.cpp", "csp/CspDialPlan.cpp"], ["libSipParser.a", "libSipPlatform.a"]),
     # 제휴 pidf 파싱 — 헤더 전용(McpttInfo.h inline), 링크 대상 없음
     "tests/csp_pidf_affiliation_test.cpp": ([], []),
+    # flow 실패로 풀린 등록의 제휴 유예 회수(AffiliationGrace.h — 헤더 전용, registration_binding_set.md §4.4)
+    "tests/csp_affiliation_grace_test.cpp": ([], []),
     # mcptt-info 파싱(두 인코딩) — 헤더 전용
     "tests/csp_mcptt_info_test.cpp": ([], []),
-    # service-config 해석(floor 타이머) — 헤더 인라인
+    # service-config 해석(floor 타이머·개별/애드혹 세션 타이머·ue-init-config 선택자) — 헤더 인라인
     "tests/csp_service_config_test.cpp": ([], []),
     "tests/csp_mcdata_codec_test.cpp": (["csp/McDataCodec.cpp"], ["libSipPlatform.a"]),
     # MCVideo 호 제어 경계(McVideoInfo.h — 헤더 전용) — 계약 골든 tests/fixtures/mcvideo/sip/ 를 레포 루트 기준으로 읽는다

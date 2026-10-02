@@ -554,6 +554,8 @@ HTTP 계층은 `*+xml`/`application/xml` 본문을 원시 바이트로 핸들러
 </group>
 ```
 
+그룹 호 타이머 요소는 0 을 싣지 않는다 — T4 0 = `<on-network-hang-timer>` 생략, chat 그룹 = `<on-network-maximum-duration>` 생략,
+편성 그룹 TNG3 0 = 무제한 표기 `PT2147483647S`(XCAP PUT 은 0 으로 되읽는다 — [mcptt_timers.md](../features/mcptt_timers.md) §3·§7 D8).
 멤버 `<entry>` 의 이름·직함은 `users` 테이블(name/title)에서 채운다. `<cims:user-title>`(직함) 은
 3GPP 미정의 필드라 CIMS 전용 네임스페이스(`urn:cims:groupinfo:1.0`) 확장으로 전달한다 —
 `<entry>` 는 `##other` lax 확장을 허용하므로(TS 24.481/RFC 4826 resource-lists) 규격 적합이며,
@@ -585,7 +587,11 @@ XCAP 기반 사용자 프로파일/서비스 설정 관리.
 **부재 시 값**으로 읽는다(`services.mcptt.USER_PROFILE_OPT_ABSENT_SQL` — 대개 false, `allow_cancel_imminent_peril` = true,
 `allow_cancel_emergency_alert` = `allow_emergency_alert`). 서비스 설정 문서의 on-network 값은 CSC 설정 `ServiceConfig.*` 와
 DB `mcptt_service_config` 에서 만든다 — `EmergencyCall.GroupTimeLimit`(ms, 기본 0) 이 0 보다 크면 첫 자식
-`<emergency-call><group-time-limit>`(CSP TNG2, TS 24.379 §6.3.3.1.16)을 싣고, 0 이면 요소째 뺀다.
+`<emergency-call><group-time-limit>`(CSP TNG2, TS 24.379 §6.3.3.1.16)을 싣고, 0 이면 요소째 뺀다. 개별 호·애드혹 그룹 호의
+세션 타이머는 `ServiceConfig.PrivateCall.*` → `<private-call>`(T4·최대 통화 시간)·`ServiceConfig.AdhocGroupCall.*` →
+`<anyExt><adhoc-group-call>`(지원·인원·T4·일제 T4·TNG3)이고, 시간 값 0 인 요소는 싣지 않는다(CSP 가 그 타이머를 돌리지 않는다).
+UE initial configuration 의 단말 타이머(`UeInitConfig.Timers.*` — 기본 T100·T101 1 · T103·T104 4 · T132 2 초, TS 24.380 표 11.1.1-1)는
+단말 몫이다. 두 문서 모두 재적재(SIGUSR1)로 내용이 바뀌면 CSP 에 알린다(§5.3) — 정본 [mcptt_timers.md](../features/mcptt_timers.md).
 문서 구성 = [mcptt_api.md §3](../../api/mcptt_api.md). MCVideo 문서(`services/mcvideo.py`)의 원천·규칙은 [mcvideo.md](../features/mcvideo.md) §5.1.
 
 ### 4.4 KMS (Key Management Service)
@@ -678,6 +684,8 @@ DynamicRouteProc.set_request_hooks(pre=_pre_hook, post=_post_hook)
 |--------|--------|----------|
 | `USER_CHANGED` | 가입자/구독 CUD | CspUserMap 캐시 갱신 |
 | `GROUP_CHANGED` | 그룹/멤버 CUD | GroupMap reload + CMP 동기화 + GMS NOTIFY |
+| `SERVICE_CONFIG_CHANGED` | MCPTT 정책 PUT · 재적재로 service-config 문서 ETag 변화(uri `mcvideo` = MCVideo 문서) | service-config 재취득(floor·세션 타이머) + cms 구독자 전원 xcap-diff NOTIFY |
+| `UE_INIT_CONFIG_CHANGED` | 재적재로 UE initial configuration 문서 ETag 변화(etag = 새 ETag) | cms 구독 단말마다 그 단말의 ue-init-config 선택자로 xcap-diff NOTIFY(TS 24.484 §7.2.2.12) |
 | `STATS_REQUEST` | 상태 조회 | CSP 통계 응답 반환 |
 | `CSC_RESTART` | CSC 재시작 | DB 전체 재동기화 |
 

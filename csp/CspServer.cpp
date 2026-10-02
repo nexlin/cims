@@ -22,6 +22,7 @@
 #include <csignal>
 #include <set>
 
+#include "AffiliationGrace.h"
 #include "AuthzRevoke.h"
 #include "CallDir.h"
 #include "CspAddressing.h"
@@ -93,6 +94,9 @@ void SendGroupDocNotify( const std::string &strGroupId, const std::set<std::stri
 void SendUserDocNotify( const std::string &strUri, const std::string &strEtag );
 void SendInitialNotify( const SubscriptionInfo &sub );
 void SendRegEventNotify( const std::string &strUserId, const char *pszEvent, const CUserInfo *pclsInfo );
+void ReclaimUserAffiliations( const std::string &strUserId, const char *pszWhy );  // CscfModule.cpp
+
+CAffiliationGrace gclsAffiliationGrace;
 
 bool gbFork = true;
 /**
@@ -604,15 +608,30 @@ int ServiceMain() {
 
             // 등록 만료 사용자 삭제 → DB logout_time 동기화 + PTT 세션 정리
             USER_INFO_LIST clsExpiredUsers;
-            gclsUserMap.DeleteTimeout( 1000, clsExpiredUsers );
+            std::map<std::string, time_t> mapFlowLoss;  // flow 실패로만 풀린 등록 → 그 등록의 수명 끝
+            gclsUserMap.DeleteTimeout( 1000, clsExpiredUsers, &mapFlowLoss );
             for ( const auto &clsExpired : clsExpiredUsers ) {
                 const std::string &strUserId = clsExpired.first;
-                CLog::Print( LOG_INFO, "Registration expired: user(%s) — syncing DB and cleaning resources",
-                             strUserId.c_str() );
-                gclsCspUserMap.unregisterUser( strUserId );
+                auto itLoss = mapFlowLoss.find( strUserId );
+                const bool bFlowLoss = itLoss != mapFlowLoss.end();
+                CLog::Print( LOG_INFO, "Registration expired: user(%s) — syncing DB and cleaning resources%s",
+                             strUserId.c_str(), bFlowLoss ? " (flow 실패 — 제휴는 등록 수명까지 유예)" : "" );
+                // 연결 하나가 끊긴 것은 등록 종료가 아니다 — 제휴 회수를 그 등록의 수명 끝까지 미룬다
+                //   (registration_binding_set.md §4.4). 그 안에 다시 등록하면 REGISTER 처리가 유예를 거둔다.
+                if ( bFlowLoss )
+                    gclsAffiliationGrace.Defer( strUserId, itLoss->second );
+                else
+                    gclsAffiliationGrace.Cancel( strUserId );
+                gclsCspUserMap.unregisterUser( strUserId, !bFlowLoss );
                 gclsGroupCallService.ClearUserCall( strUserId );
                 // reg-event 구독자에게 만료 통지 (partial, 삭제 직전 바인딩)
                 SendRegEventNotify( strUserId, "expired", &clsExpired.second );
+            }
+
+            // flow 실패 유예가 끝났는데 다시 등록하지 않은 가입자 — 이제 제휴를 회수한다
+            for ( const std::string &strUserId : gclsAffiliationGrace.TakeDue( time( NULL ) ) ) {
+                if ( gclsUserMap.Select( strUserId.c_str() ) ) continue;  // 그새 다시 등록했다(유예를 거두기 전 경합)
+                ReclaimUserAffiliations( strUserId, "flow 실패 유예 만료" );
             }
 
             gclsUserMap.SendOptions();
@@ -1051,8 +1070,10 @@ static void SendNotifyToSubscriber( const SubscriptionInfo &sub, const std::stri
         }
         pMsg->m_clsContentType.Set( "application", "dialog-info+xml" );
     } else {
+        // xcap-diff (RFC 5875) — 본문은 구독 종류의 기본 문서 목록(BuildXcapDiffBody), 문서마다 선택자가 다른 통지(UE
+        //   initial configuration)는 호출자가 만든 prebuilt body.
         pMsg->AddHeader( "Event", "xcap-diff" );
-        strBody = BuildXcapDiffBody( sub, etag, strChangedId );
+        strBody = ( pstrPrebuiltBody != NULL ) ? *pstrPrebuiltBody : BuildXcapDiffBody( sub, etag, strChangedId );
         pMsg->m_clsContentType.Set( "application", "xcap-diff+xml" );
     }
     pMsg->m_strBody = strBody;
@@ -1413,6 +1434,39 @@ void SendServiceConfigNotify( const std::string &etag ) {
     for ( auto &sub : subList ) {
         SendNotifyToSubscriber( sub, etag, "" );
     }
+}
+
+/**
+ * @brief UE_INIT_CONFIG_CHANGED: UE initial configuration(TS 24.484 §7.2) 변경을 cms 구독자 전원에게 xcap-diff 로
+ *   알린다(§7.2.2.12 → §6.3.13.3, RFC 5875). 이 문서는 단말(MCS UE ID)마다 경로가 따로라
+ *   (§7.2.1.1 users/sip:<MCS UE ID>/<MCS UE ID>) 본문을 구독자마다 만든다 — MCS UE ID = 단말의 instance ID
+ *   (§7.2.1.0) = 그 구독 단말(SUBSCRIBE Contact 와 같은 단말)의 등록 Contact `+sip.instance`. 등록이 없거나
+ *   instance 가 없는 구독은 문서 경로를 만들 수 없어 건너뛴다(단말은 다음 로그인 때 문서를 받는다).
+ */
+void SendUeInitConfigNotify( const std::string &etag ) {
+    std::list<SubscriptionInfo> subList;
+    gclsSubscriptionManager.GetSubscriptionsByEvent( "cms", subList );
+    const std::string strXcapRoot = gclsCscEndpointCache.GetXcapRoot();
+    int nSent = 0, nSkipped = 0;
+    for ( auto &sub : subList ) {
+        CUserInfo clsInfo;
+        bool bOtherDevice = false;
+        std::string strInstance;
+        if ( gclsUserMap.SelectForTarget( sub.strUserId.c_str(), sub.strContact.c_str(), clsInfo, &bOtherDevice ) )
+            SearchSipParameter( clsInfo.m_clsContactParamList, "+sip.instance", strInstance );
+        const std::string strSel = CspUeInitConfigSelector( CspMcsUeIdOf( strInstance ) );
+        if ( strSel.empty() ) {
+            ++nSkipped;
+            CLog::Print( LOG_DEBUG, "SendUeInitConfigNotify: User=%s Contact=%s — MCS UE ID 없음(등록·instance 없음)",
+                         sub.strUserId.c_str(), sub.strContact.c_str() );
+            continue;
+        }
+        const std::string strBody = CspXcapDiffDocBody( strXcapRoot, strSel, etag );
+        SendNotifyToSubscriber( sub, etag, "", NULL, NULL, &strBody );
+        ++nSent;
+    }
+    CLog::Print( LOG_INFO, "SendUeInitConfigNotify: subs=%d notified=%d skipped=%d ETag=%s", (int)subList.size(), nSent,
+                 nSkipped, etag.c_str() );
 }
 
 /**

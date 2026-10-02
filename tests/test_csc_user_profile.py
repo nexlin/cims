@@ -10,7 +10,8 @@ common-policy ruleset, escape, ETag 내용 파생, 단말 정규식 호환(첫 M
 ruleset anyExt 의 미응답 멤버 알림 자격(allow-to-receive-non-acknowledged-users-information, TS 24.379 §6.3.3.3),
 ruleset 해제 인가 셋(allow-cancel-group-emergency·allow-cancel-imminent-peril·allow-cancel-emergency-alert — 목록 순서·
 대상 결정과 AND 하지 않음·부재 시 값) — admin API 프로파일 GET/PUT 의 선택 컬럼 규약(부재 = 부재 시 값·입력 400)과 캐시 반영까지,
-service-config 문서의 on-network <emergency-call><group-time-limit>(TNG2 — 0 이면 요소 생략).
+service-config 문서의 on-network <emergency-call><group-time-limit>(TNG2 — 0 이면 요소 생략)·<private-call>(개별 호 T4·최대 시간)·
+<anyExt><adhoc-group-call>(애드혹 지원·인원·T4·TNG3 — mcptt_timers.md §7 D5·D6).
 
   python3 -m unittest tests.test_csc_user_profile
 """
@@ -539,10 +540,10 @@ class ServiceConfigDocTest(unittest.TestCase):
         self.assertEqual(len(list(fc)), 17, "fc-timers-countersType 시퀀스 17 요소(필수)")
         self.assertEqual(fc.find("sc:T16-map-group-to-bearer", SC).text, "PT0.5S")
         self.assertEqual(on.find("sc:transmit-time/sc:time-limit", SC).text, "PT30S", "T2 = transmit-time/time-limit")
-        # 스키마 시퀀스 — fc-timers-counters 뒤 RP 셋, 그 순서
+        # 스키마 시퀀스(on-networkType) — private-call · transmit-time · fc-timers-counters · RP 셋 · anyExt, 그 순서
         tags = [c.tag.split("}")[1] for c in on]
-        self.assertEqual(tags, ["transmit-time", "fc-timers-counters", "emergency-resource-priority",
-                                "imminent-peril-resource-priority", "normal-resource-priority"])
+        self.assertEqual(tags, ["private-call", "transmit-time", "fc-timers-counters", "emergency-resource-priority",
+                                "imminent-peril-resource-priority", "normal-resource-priority", "anyExt"])
         e = on.find("sc:emergency-resource-priority", SC)
         self.assertEqual((e.find("sc:resource-priority-namespace", SC).text, e.find("sc:resource-priority-priority", SC).text),
                          ("mcpttp", "15"))
@@ -573,7 +574,7 @@ class ServiceConfigDocTest(unittest.TestCase):
             self.assertEqual(on[0].tag.split("}")[1], "emergency-call", "on-network 시퀀스의 첫 자식")
             self.assertEqual([c.tag.split("}")[1] for c in on[0]], ["group-time-limit"])
             self.assertEqual(on.find("sc:emergency-call/sc:group-time-limit", SC).text, want)
-            self.assertEqual(on[1].tag.split("}")[1], "transmit-time")
+            self.assertEqual(on[1].tag.split("}")[1], "private-call", "다음 자식 = private-call(§8.4.2.3 순서)")
             self.assertNotEqual(etag0, etag)
         for v in (0, "", None, "abc", -5):
             m.SERVICE_CONFIG_PARAMS["EmergencyCall"] = {"GroupTimeLimit": v}
@@ -582,6 +583,47 @@ class ServiceConfigDocTest(unittest.TestCase):
             self.assertEqual(etag, etag0, "생략 = 기본 문서와 같다")
         m.SERVICE_CONFIG_PARAMS.pop("EmergencyCall")
         self.assertEqual(m._SERVICE_CONFIG_PARAM_DEFAULTS["EmergencyCall"]["GroupTimeLimit"], 0, "기본 = 없음")
+
+    def test_private_call_timers(self):
+        """on-network <private-call> — 개별 호 T4(<hang-time>, TS 24.380 표 11.1.3-1)·최대 시간(TS 24.379 §6.3.8.2 2)).
+        privateType 순서 = hang-time · max-duration-with-floor-control · max-duration-without-floor-control, 0 인 자식은 생략,
+        셋 다 0 이면 요소째 생략."""
+        root, etag0 = self._doc()
+        pc = root.find("sc:service-configuration-params/sc:on-network/sc:private-call", SC)
+        self.assertEqual([(c.tag.split("}")[1], c.text) for c in pc],
+                         [("hang-time", "PT30S"), ("max-duration-with-floor-control", "PT3600S"),
+                          ("max-duration-without-floor-control", "PT3600S")], "기본값 — T4 규격 기본 30초")
+        m.SERVICE_CONFIG_PARAMS["PrivateCall"] = {"HangTime": 15000, "MaxDurationWithFloorControl": 0,
+                                                  "MaxDurationWithoutFloorControl": "1800000"}
+        root, etag = self._doc()
+        pc = root.find("sc:service-configuration-params/sc:on-network/sc:private-call", SC)
+        self.assertEqual([(c.tag.split("}")[1], c.text) for c in pc],
+                         [("hang-time", "PT15S"), ("max-duration-without-floor-control", "PT1800S")])
+        self.assertNotEqual(etag, etag0)
+        m.SERVICE_CONFIG_PARAMS["PrivateCall"] = {"HangTime": 0, "MaxDurationWithFloorControl": 0,
+                                                  "MaxDurationWithoutFloorControl": "x"}
+        root, _ = self._doc()
+        self.assertIsNone(root.find(".//sc:private-call", SC), "자식이 없으면 요소째 생략")
+        self.assertNotIn("PT0S</hang-time>", m.get_service_config_xml(None)[0])
+
+    def test_adhoc_group_call(self):
+        """on-network <anyExt><adhoc-group-call> (TS 24.484 §8.4.2.1 13)d)·§8.4.2.3 adhoc-group-callType) — 필수 자식
+        allow-adhoc-group-call-support·max-no-participants 뒤 hang-time(T4)·broadcast-hang-time·max-duration-of-call(TNG3,
+        TS 24.379 §17.4.2.2 13)). 요소가 없으면 «애드혹 미지원»(§8.4.2.6)이라 늘 싣는다."""
+        root, _ = self._doc()
+        on = root.find("sc:service-configuration-params/sc:on-network", SC)
+        self.assertEqual(on[-1].tag.split("}")[1], "anyExt", "anyExt 는 on-network 의 마지막 자식")
+        ag = on.find("sc:anyExt/sc:adhoc-group-call", SC)
+        self.assertEqual([(c.tag.split("}")[1], c.text) for c in ag],
+                         [("allow-adhoc-group-call-support", "true"), ("max-no-participants", "64"),
+                          ("hang-time", "PT30S"), ("broadcast-hang-time", "PT30S"), ("max-duration-of-call", "PT3600S")])
+        m.SERVICE_CONFIG_PARAMS["AdhocGroupCall"] = {"AllowSupport": "false", "MaxNoParticipants": 0, "HangTime": 0,
+                                                     "BroadcastHangTime": 2500, "MaxDurationOfCall": 0}
+        root, _ = self._doc()
+        ag = root.find("sc:service-configuration-params/sc:on-network/sc:anyExt/sc:adhoc-group-call", SC)
+        self.assertEqual([(c.tag.split("}")[1], c.text) for c in ag],
+                         [("allow-adhoc-group-call-support", "false"), ("max-no-participants", "1"),
+                          ("broadcast-hang-time", "PT2.5S")], "필수 둘은 남고(positiveInteger ≥ 1), 0 인 시간 요소는 생략")
 
 
 if __name__ == "__main__":

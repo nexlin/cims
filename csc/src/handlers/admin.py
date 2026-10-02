@@ -2203,9 +2203,11 @@ _GROUP_FIELDS = [
     {'name': 'max_talkers', 'type': 'integer', 'unit': '명',
      'desc': 'multi 정원 (2~8). dual 은 2 고정이라 값 무시'},
     {'name': 'hang_timer_sec', 'type': 'integer', 'unit': '초',
-     'desc': 'on-network-hang-timer — 그룹 호 T4 Inactivity (발언 없는 채로 이 시간이 지나면 세션 해제, 0=미사용, 0~3600, 기본 30)'},
+     'desc': 'on-network-hang-timer — 그룹 호 T4 Inactivity (발언 없는 채로 이 시간이 지나면 세션 해제, 0=미사용 — 그룹 문서에 '
+             '요소를 싣지 않는다, 0~3600, 기본 30)'},
     {'name': 'max_duration_sec', 'type': 'integer', 'unit': '초',
-     'desc': 'on-network-maximum-duration — 그룹 호 최대 시간 TNG3 (0=무제한, 0~86400, 기본 3600)'},
+     'desc': 'on-network-maximum-duration — 그룹 호 최대 시간 TNG3 (0=무제한 — 편성 그룹 문서에는 무제한 표기 PT2147483647S, '
+             'chat 그룹은 TNG3 를 돌리지 않아 문서에 싣지 않는다, 0~86400, 기본 3600)'},
     {'name': 'min_number_to_start', 'type': 'integer', 'unit': '명',
      'desc': 'on-network-minimum-number-to-start — 개시자 200 OK 전에 받아야 할 멤버 200 수 (TS 24.379 §10.1.1.4.2, 0=기다리지 않음, 0~65535, 기본 0)'},
     {'name': 'ack_timeout_sec', 'type': 'integer', 'unit': '초',

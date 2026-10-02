@@ -1358,18 +1358,22 @@ bool PMcpttGroup::_beginRevoke(Talker& t, int cause) {
     unsigned int ssrc = t.ssrc;
     int prio = t.prio;
 
-    if (!t.revokePending) {
-        _sendRevoke(owner, cause);
+    // 이미 회수 중이다 — T3 는 회수에 들어갈 때 한 번이고(§6.3.4.5.2) Revoke 재전송은 같은 cause 다(§6.3.5.6.3).
+    //   선점 요청자가 Floor Request 를 재전송해도(T101, §6.2.4.4.5) 유예를 다시 잡지 않는다.
+    if (t.revokePending) return false;
+
+    _sendRevoke(owner, cause);
+    {
         char ex[128];
         snprintf(ex, sizeof(ex), "\"cause\":%d,\"grace_sec\":%d", cause, _t3GraceSec);
         _logFloorLocal("REVOKE", owner, ssrc, prio, ex);
-        if (_logFlow) {
-            char detail[256];
-            snprintf(detail, sizeof(detail),
-                     "{\"op\":\"REVOKE\",\"user\":\"%s\",\"ssrc\":%u,\"cause\":%d,\"grace_sec\":%d}",
-                     owner.c_str(), ssrc, cause, _t3GraceSec);
-            _logFlow(_groupId, "cmp", "ue", "MCPTT", "FLOOR_REVOKE", detail);
-        }
+    }
+    if (_logFlow) {
+        char detail[256];
+        snprintf(detail, sizeof(detail),
+                 "{\"op\":\"REVOKE\",\"user\":\"%s\",\"ssrc\":%u,\"cause\":%d,\"grace_sec\":%d}", owner.c_str(),
+                 ssrc, cause, _t3GraceSec);
+        _logFlow(_groupId, "cmp", "ue", "MCPTT", "FLOOR_REVOKE", detail);
     }
 
     if (_t3GraceSec <= 0) {          // 유예 없음 — 즉시 회수
@@ -1457,10 +1461,23 @@ void PMcpttGroup::_handleQueuedCancel(const std::string& sessionId, unsigned int
             p += len;
         }
     }
-    // 목록이 없으면 **자기 취소**다 — 참가자에게 남의 대기 요청까지 지울 권한은 없다
-    //   (§6.3.4.4.13 은 "지시된 사용자들"의 요청만 제거한다). 단말은 PTT 버튼을 뗄 때
-    //   목록 없이 취소를 보내므로, 전체 취소로 해석하면 대기열이 통째로 날아간다.
-    if (targets.empty()) targets.push_back(sessionId);
+    // 남의 대기 요청을 지우는 절차다 — 인가된 사용자(관제사·관제 감독·MC 서비스 관리자)만 한다(§6.3.5.4.12 1)·2)).
+    //   CIMS 는 그룹 문서의 멤버 역할 chair 로 판정한다(참가자 유형은 CMP 에 전달되지 않는다). 인가되지 않았으면
+    //   결과 1(Not authorized)만 돌려준다 — 자기 대기 요청은 Floor Release 로 거둔다(§6.2.4.9.6 · §6.3.5.4.5 3)).
+    if (!isChair(sessionId)) {
+        char buf[256];
+        std::vector<FloorTlv> f{ FloorTlv(FF_QUEUED_PURPOSE, FloorU16(QFR_CANCEL_RESULT)),
+                                 FloorTlv(FF_QUEUED_RESULT, FloorU16(QFR_NOT_AUTHORIZED)) };
+        int n = BuildFloorMessage(buf, sizeof(buf), FLOOR_QUEUED_CANCEL, _serverSsrc, f);
+        if (n > 0) sendToMember(sessionId, buf, n);
+        LOG_INFO("PMcpttGroup", "[%s] Queued floor requests cancel by %s — not authorized (result=1)", _groupId.c_str(),
+                 sessionId.c_str());
+        _logFloorLocal("QUEUE_CANCEL", sessionId, ssrc, 0, "\"reason\":\"not_authorized\",\"result\":1");
+        return;
+    }
+    // 목록이 없으면 **전체** 대기 요청을 지운다(§6.3.4.4.13 2)a)).
+    if (targets.empty())
+        for (const auto& q : _floorQueue) targets.push_back(q.sessionId);
 
     int before = (int)_floorQueue.size();
     std::vector<std::string> removed;
@@ -1567,6 +1584,37 @@ int PMcpttGroup::_queuePositionOf(const std::string& sessionId) const {
     return pos;
 }
 
+bool PMcpttGroup::_removeQueued(const std::string& sessionId) {
+    bool removed = false;
+    for (auto it = _floorQueue.begin(); it != _floorQueue.end();) {
+        if (it->sessionId == sessionId) {
+            it = _floorQueue.erase(it);
+            removed = true;
+        } else {
+            ++it;
+        }
+    }
+    return removed;
+}
+
+void PMcpttGroup::_sendFloorStatusTo(const std::string& sessionId) {
+    auto itM = _members.find(sessionId);
+    if (itM == _members.end() || itM->second.floorSuppress) return;
+    std::vector<FloorTlv> f;
+    unsigned char op;
+    if (!_talkers.empty()) {
+        op = FLOOR_TAKEN;
+        f = _takenFields(_talkers.back().sessionId, itM->second.recvOnly);
+    } else {
+        op = FLOOR_IDLE;
+        f.push_back(FloorTlv(FF_MSG_SEQ, FloorU16(_nextMsgSeq())));
+        f.push_back(FloorTlv(FF_FLOOR_INDICATOR, FloorU16(_groupIndicator())));
+    }
+    char buf[512];
+    int n = BuildFloorMessage(buf, sizeof(buf), op, _serverSsrc, f);
+    if (n > 0) sendToMember(sessionId, buf, n);
+}
+
 void PMcpttGroup::_sendQueuePos(const std::string& sessionId, unsigned int ssrc) {
     int pos = _queuePositionOf(sessionId);
     int prio = 0;
@@ -1628,7 +1676,21 @@ void PMcpttGroup::_advanceFloorOrIdle() {
 void PMcpttGroup::handleFloorRelease(const std::string& sessionId, unsigned int ssrc) {
     PAutoLock lock(_mutex);
     if (!_floorControl) return;
-    if (!_dropTalker(sessionId)) return;   // 발언 중이 아니면 무시(멱등)
+    if (!_dropTalker(sessionId)) {
+        // 발언자가 아닌 참가자의 Floor Release — 대기 요청이 있으면 지우고(§6.3.5.3.7 5) · §6.3.5.4.5 3)), 지금 상태로 답한다
+        //   (화자 없음 = Floor Idle §6.3.5.3.7 2) · 화자 있음 = Floor Taken §6.3.5.4.5 4)). PTT 를 떼며 대기를 거두는 단말
+        //   (대기 취소 = Floor Release, §6.2.4.9.6)과 Floor Idle 을 놓쳐 Release 를 재전송하는 단말이 여기로 온다.
+        const bool wasQueued = _removeQueued(sessionId);
+        _sendFloorStatusTo(sessionId);
+        if (wasQueued) {
+            LOG_INFO("PMcpttGroup", "[%s] Floor RELEASE by queued session=%s — queued request removed (queue=%zu)",
+                     _groupId.c_str(), sessionId.c_str(), _floorQueue.size());
+            _logFloorLocal("QUEUE_CANCEL", sessionId, ssrc, 0, "\"reason\":\"release\"");
+            // 남은 대기자들의 위치가 바뀌었다
+            for (const auto& q : _floorQueue) _sendQueuePos(q.sessionId, q.ssrc);
+        }
+        return;
+    }
 
     int ownerPrio = 0;
     if (_priorities.find(sessionId) != _priorities.end()) ownerPrio = _priorities[sessionId];

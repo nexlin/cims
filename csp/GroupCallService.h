@@ -194,8 +194,9 @@ public:
      *  다음 그룹 사용 시 SyncGroupsState/AddGroup 경로가 깨끗한 sesid 로 재수립한다. CmpClient 이벤트 핸들러가 호출. */
     void OnGroupAborted( const std::string &strGroupId );
 
-    /** CMP T4(Inactivity) 만료(PTT_FLOOR_INACTIVITY) — 그룹 호 해제 정책(TS 24.379 §6.3.8.1): on-demand 세션을
-     *  해제한다(chat·즉석 세션은 T4 를 걸지 않는다). strSesId 가 현재 세션과 다르면 지난 세션의 이벤트라 무시. */
+    /** CMP T4(Inactivity) 만료(PTT_FLOOR_INACTIVITY) — 호를 해제한다: 편성·일제·애드혹 그룹 호 = TS 24.379 §6.3.8.1 1),
+     *  개별 호 = §6.3.8.2 1). chat 그룹 호는 해제 목록에 없다(T4 를 걸지 않는다). strSesId 가 현재 세션과 다르면 지난
+     *  세션의 이벤트라 무시. */
     void OnFloorInactivity( const std::string &strGroupId, const std::string &strSesId );
 
     /**
@@ -404,7 +405,8 @@ private:
     struct GroupSession {
         std::string strInitiator;  ///< 개시자 — mcptt-calling-user-id·dialog initiator·CMP initiator_id
         bool bBroadcast = false;   ///< 일제 통화 (TS 24.379 §4.12)
-        time_t tStart = 0;         ///< 세션 개시 시각 — TNG3(그룹 호 최대 시간) 판정
+        time_t tStart = 0;         ///< 세션 개시 시각 — TNG3(그룹 호 최대 시간)·개별 호 최대 통화 시간 판정
+        int iStartCond = 0;        ///< 개시 INVITE 의 조건(2=긴급·1=임박) — 긴급·임박 애드혹 호는 TNG3 없음
         /** 개시 INVITE 처리 중(개시자 leg 확립 전) — 같은 그룹에 거의 동시에 온 INVITE 는 이 선점을 보고 합류로
          *  처리한다(개시자 = 세션을 연 사용자, TS 24.380 §6.3.5.3.4). 개시자 leg 확립에서 풀고, 개시가 실패하면
          *  속성째 지운다. 일제 통화 **진행 중** 판정(구독 480/105, TS 24.379 §10.1.3.4.1)은 확정된 세션만 본다. */
@@ -476,10 +478,11 @@ private:
     bool IsBroadcastInProgress( const std::string &strGroupId );
     /** 세션 속성 스냅샷 (없으면 기본값). m_mutex 를 잡는다. */
     GroupSession SessionOf( const std::string &strGroupId );
-    /** CMP 로 싣는 세션 속성 — 개시자·일제 통화 + T4(on-demand 그룹 호만 그룹 hang-timer, 그 밖은 0). */
+    /** CMP 로 싣는 세션 속성 — 개시자·일제 통화 + T4. T4 출처는 호 종류별(TS 24.380 표 11.1.3-1): 편성 그룹 호 = 그룹
+     *  hang-timer, 애드혹 그룹 호·개별 호 = service configuration(<adhoc-group-call>·<private-call>, TS 24.484
+     *  §8.4.2.7), chat = 0 (CspSessionT4Sec). */
     CmpGroupSession CmpSessionOf( const CspPttGroup &clsGroup );
-    /** T4 를 거는 세션인가 — on-demand 편성 그룹(prearranged)만. chat(상시)·즉석 세션(private·ad hoc)은 제외 —
-     *  개인 호·ad hoc 의 hang-time 은 service config 쪽 값이라(TS 24.484 §8.4.2.7) 그룹 문서 값을 쓰지 않는다. */
+    /** on-demand 편성 그룹 호인가 — chat(상시)·즉석 세션(private·ad hoc)은 아니다. */
     static bool IsOnDemandGroupCall( const CspPttGroup &clsGroup );
     /** 일제 통화로 개시할 수 있는 세션인가 — 편성 그룹 on-demand 호 또는 ad hoc 그룹 호(TS 24.379 §4.12 · §17.2.2.1.1
      * 9) — broadcast adhoc group call). chat(상시 채널 합류)·개별 호(private)는 아니다. */
@@ -502,8 +505,10 @@ private:
     /** 그룹 호 해제 (TS 24.379 §6.3.8.1) — 참가 leg(확립·미확립·청취) 전부 BYE/CANCEL 후 마지막 leg 의 teardown 이
      *  CMP REMOVE·세션 정리를 끝낸다. pszReason 은 로그용. */
     void ReleaseGroupSession( const std::string &strGroupId, const char *pszReason );
-    /** TNG3(on-network-maximum-duration) 만료 세션 해제 · TNG2(진행 중 긴급 그룹콜 타이머) 만료 긴급 해제 —
-     *  MonitorLoop 1초 주기. 긴급 상태 동안은 TNG3 를 세지 않는다(TS 24.379 §6.3.3.5.2). */
+    /** 최대 시간 만료 세션 해제 — 편성 그룹 호 TNG3(그룹 문서 on-network-maximum-duration) · 애드혹 그룹 호
+     *  TNG3(service configuration max-duration-of-call, §17.4.2.2 13)) · 개별 호 최대 통화 시간(§6.3.8.2 2)) — 와
+     *  TNG2(진행 중 긴급 그룹콜 타이머) 만료 긴급 해제. MonitorLoop 1초 주기. 긴급 상태 동안은 TNG3 를 세지 않는다
+     *  (TS 24.379 §6.3.3.5.2). */
     void CheckSessionLimits();
     /** OnInCallConditionRequest 의 판정·전이 본체 — Warning 149 의 스택 연결은 호출측(공개 함수)이 한다. */
     InCallConditionVerdict EvaluateInCallCondition( const std::string &strGroupId, const std::string &strMemberId,

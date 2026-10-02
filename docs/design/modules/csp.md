@@ -293,16 +293,28 @@ class CGroupCallService {
 struct GroupSession {            // m_mapGroupSession: group_id → 세션 속성
     std::string strInitiator;    // 개시자 — mcptt-calling-user-id · dialog initiator · CMP initiator_id
     bool bBroadcast;             // 일제 통화 (<broadcast-ind>, TS 24.379 §4.12)
-    time_t tStart;               // TNG3 판정
+    time_t tStart;               // TNG3·개별 호 최대 통화 시간 판정
+    int iStartCond;              // 개시 INVITE 의 조건 — 긴급·임박 애드혹 호는 TNG3 없음(§17.4.2.2 13))
 };
 ```
 
 - 세션을 **개시**하는 INVITE(그룹에 참가 leg 이 없을 때)에서만 정하고 `RemoveGroupSesId`(세션 종료)에서 지운다 —
   늦은 합류·재참여·청취 leg 은 바꾸지 못한다(TS 24.380 §6.3.5.3.4). 일제 통화는 편성 그룹 호에만(chat·즉석 세션의
   `<broadcast-ind>` 는 무시). CMP 로 가는 모든 `PTT_GROUP_ADD`(개시·녹취 경로·재수립)는 `CmpSessionOf()` 로 같은 값을 싣는다.
-- 해제 정책(TS 24.379 §6.3.8.1, on-demand 편성 그룹 호): CMP `PTT_FLOOR_INACTIVITY`(T4 = 그룹 `hang_timer_sec`) →
-  `OnFloorInactivity` / 참가 leg 1개 남음 → 그 leg BYE / `CheckSessionLimits`(TNG3 = `max_duration_sec`) — 모두
-  `ReleaseGroupSession`(참가 leg 전부 `StopCall` + `OnCallTerminated`, 마지막 leg 이 CMP REMOVE·세션 정리).
+- 해제 정책(그룹 호 TS 24.379 §6.3.8.1 · 개별 호 §6.3.8.2): CMP `PTT_FLOOR_INACTIVITY` → `OnFloorInactivity`(chat 제외) /
+  참가 leg 1개 남음 → 그 leg BYE / `CheckSessionLimits`(최대 시간) — 모두 `ReleaseGroupSession`(참가 leg 전부 `StopCall` +
+  `OnCallTerminated`, 마지막 leg 이 CMP REMOVE·세션 정리). T4·최대 시간의 출처는 호 종류별이고 `CspSessionT4Sec`·
+  `CspSessionMaxDurationSec`(`CspServiceConfig.h`)가 한곳에서 고른다(TS 24.380 표 11.1.3-1):
+
+  | 호 종류 | T4 (`floor_timers.t4_inactivity`) | 최대 시간 |
+  |---|---|---|
+  | 편성·일제 그룹 호 | 그룹 `hang_timer_sec` | TNG3 = 그룹 `max_duration_sec`(0 = 무제한) — 긴급 상태 동안은 TNG2 가 대신 |
+  | chat 그룹 호 | 0 (해제 목록 밖) | 없음 (TNG3 를 돌리지 않는다) |
+  | 애드혹 그룹 호 | service-config `<adhoc-group-call><hang-time>`(일제면 `<broadcast-hang-time>`) | TNG3 = `<max-duration-of-call>` — 긴급·임박 개시 호·긴급 상태 동안은 없음 |
+  | 개별 호 | 발언권 제어 있는 호 = `<private-call><hang-time>`, 없는 호 = 0 | `<max-duration-with-floor-control>` / `<max-duration-without-floor-control>` — 조건 무관 |
+
+  service-config 의 T4 는 CMP 지문(`ComputeGroupConfigHash`)에 들어 있어 값이 바뀌면 진행 중 개별·애드혹 세션에도 60초 주기
+  동기화의 `PTT_GROUP_MODIFY` 로 닿는다. 정본 [mcptt_timers.md](../features/mcptt_timers.md).
 - 일제 통화 세션의 conference 구독은 480 + `Warning: 105`(`CheckConferenceSubscribe`), fan-out mcptt-info 는
   `session-type`=그룹 종류 + `<broadcast-ind>true`, dialog `<mcptt broadcast="true">`, 세션 디스크립터 `"broadcast":true`.
 
@@ -893,7 +905,8 @@ CSP/PSP/ISP 가 4421 을 공유할 때 destination IP 로 인스턴스 구분). 
 | 이벤트 | 처리 |
 |--------|------|
 | `USER_CHANGED` | CspUserMap 캐시 즉시 갱신/삭제 + 그 사용자의 cms 구독에 xcap-diff NOTIFY |
-| `SERVICE_CONFIG_CHANGED` | cms 구독자 **전원**에게 xcap-diff NOTIFY (service-config 은 시스템 전역 문서 — CSP 는 소비하지 않고 중계만) |
+| `SERVICE_CONFIG_CHANGED` | service-config 재취득(`CCspServiceConfig::Refresh`) + cms 구독자 **전원**에게 xcap-diff NOTIFY (service-config 은 시스템 전역 문서) |
+| `UE_INIT_CONFIG_CHANGED` | cms 구독 단말마다 xcap-diff NOTIFY — 선택자 `org.3gpp.mcptt.ue-init-config/users/sip:<MCS UE ID>/<MCS UE ID>`(TS 24.484 §7.2.1.1), MCS UE ID = 그 구독 단말의 등록 Contact `+sip.instance`(`SendUeInitConfigNotify` — 등록·instance 없는 구독은 건너뜀). CSP 는 이 문서의 값을 쓰지 않는다(§7.2.2.12 → §6.3.13.3) |
 | `GROUP_CHANGED` | 그룹 설정 reload → 재적재 전·후 멤버 합집합의 gms 구독에 xcap-diff NOTIFY(`ReloadGroupMap` — 새 그룹·추가·제외 멤버 포함) → CMP 동기화 |
 | `STATS_REQUEST` | CSP 통계 응답 (등록자 수, 활성 호 등) |
 | `CSC_RESTART` | DB 전체 재동기화 + 단말용 XCAP root 재취득 (`CscEndpointCache::Refresh`) |
@@ -912,7 +925,7 @@ CSC admin 서버(HTTPS, 기본 4421)로의 **내부 API 클라이언트** 세 �
 |---|---|---|---|
 | `CCscAvClient` | `POST /internal/aka/av` | IMS AKA 인증 벡터(RAND/AUTN/XRES) — S-CSCF↔HSS/AuC 상당 | AKA 가입자 REGISTER 챌린지마다 (동기) |
 | `CCscEndpointCache` | `GET /internal/mcptt/endpoint` | **단말용 MCPTT 서비스 주소**(`xcap_root`) | 기동 1회 · SIGUSR1 · `CSC_RESTART` (캐시) |
-| `CCspServiceConfig` | `GET /internal/mcptt/service-config` | **service-config 문서**(TS 24.484 §8.4 — Annex A.2.3 서버 취득) → floor 제어 파라미터(on-network `transmit-time/time-limit`=T2 · `fc-timers-counters` T1·T3·T7·T8·T20·C7·C20). `CmpClient` 가 PTT_GROUP_ADD/MODIFY `floor_timers` 로 싣는다(CMP 범위로 맞춤, 1 s 미만 버림) | 기동 · SIGUSR1 · `CSC_RESTART` · `SERVICE_CONFIG_CHANGED` (실패 = 이전 값, 미취득 = CMP 설정값) |
+| `CCspServiceConfig` | `GET /internal/mcptt/service-config` | **service-config 문서**(TS 24.484 §8.4 — Annex A.2.3 서버 취득) → floor 제어 파라미터(on-network `transmit-time/time-limit`=T2 · `fc-timers-counters` T1·T3·T7·T8·T20·C7·C20) · 개별·애드혹 세션 타이머(`<private-call>`·`<anyExt><adhoc-group-call>` — `ParseCallTimers`) · TNG2 · Resource-Priority. `CmpClient` 가 PTT_GROUP_ADD/MODIFY `floor_timers` 로 싣는다(CMP 범위로 맞춤, 1 s 미만 버림) | 기동 · SIGUSR1 · `CSC_RESTART` · `SERVICE_CONFIG_CHANGED` (실패 = 이전 값, 미취득 = CMP 설정값) |
 
 `CCscEndpointCache` 가 취득한 `xcap_root` 는 xcap-diff NOTIFY 의 `xcap-root` 속성과 MCData FD
 다운로드 URL base(`Setup.McData.FdUrlBase` 미설정 시)로 쓰인다. **CSP 에는 이 주소를 적는 설정이

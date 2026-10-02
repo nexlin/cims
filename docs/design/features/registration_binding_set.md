@@ -98,7 +98,7 @@ bool Select( const char *pszUserId, CUserInfo &clsInfo );   // 26곳이 이것�
 | # | 계기 | 대상 | 근거 |
 |---|---|---|---|
 | 1 | **같은 transport 재등록** | 그 transport 의 기존 바인딩 | 한 단말은 한 transport 에 살아있는 경로가 하나뿐이다. 새 등록이 온 시점에 옛 경로는 무효다 |
-| 2 | **flow 실패** (스트림만) | 연결이 닫힌 바인딩 | **RFC 5626 — flow 실패는 바인딩 무효.** 만료를 기다리면 Expires+grace(현 배치 최대 ~77분) 동안 유령이 남는다 |
+| 2 | **flow 실패** (스트림만) | 연결이 닫힌 바인딩 | **RFC 5626 — flow 실패는 바인딩 무효.** 만료를 기다리면 Expires+grace(현 배치 최대 ~77분) 동안 유령이 남는다. 마지막 바인딩이면 등록 해제지만 제휴 회수는 그 등록의 수명까지 미룬다(§4.4) |
 | 3 | **등록 만료** | `등록시각 + Expires + grace` 초과 | RFC 3261 §10 바인딩 수명 |
 
 정리 시점은 **등록 처리(1)와 만료 sweep(2·3)** 이다. 조회 경로(`Select`)에서는 죽은 바인딩을
@@ -192,8 +192,28 @@ RFC 3680 의 contact state 는 `active`(등록 유효) / `terminated`(등록 종
   전제가 깨진다. 그때는 instance-id 로 기기를 구분해 **같은 기기의 같은 transport** 만 교체해야
   한다. 단말의 instance-id 유일화가 선행 조건이다.
 - **UDP 침묵을 계기 2로 승격** — 지금은 침묵한 UDP 바인딩을 선택에서 빼기만 하고 지우지 않는다
-  ([§4.1](#41-udp--keepalive-로-판정한다)). 등록에 종속된 PTT affiliation 을 흔들지 않을 회수
-  절차(예: 재등록 유예를 둔 단계적 회수)가 정해지면 계기 2를 UDP 로 확장할 수 있다.
+  ([§4.1](#41-udp--keepalive-로-판정한다)). 스트림의 flow 실패에는 제휴를 흔들지 않는 유예 회수가 있으므로([§4.4](#44-flow-실패로-풀린-등록의-제휴--등록-수명까지-유예)),
+  같은 회수를 UDP 침묵에 적용하면 계기 2를 UDP 로 확장할 수 있다.
+
+### 4.4 flow 실패로 풀린 등록의 제휴 — 등록 수명까지 유예
+
+계기 2 로 마지막 바인딩이 지워지면 등록 해제다(가입자 제거·logout_time·reg-event `expired`). 그러나 **제휴(MCPTT·MCVideo)는 곧바로
+회수하지 않는다** — 규격에서 제휴가 한꺼번에 내려가는 것은 로그오프·등록 종료이고(TS 24.379 §7.3.5 NOTE «Removal of MCPTT service
+settings includes removal of all group affiliations»), 연결 하나가 끊긴 것은 등록 종료가 아니다(IMS 등록은 만료·해지까지 산다).
+곧바로 지우면 순단 뒤 단말이 다시 등록해도 제휴가 없어 편성 그룹 [참여] 가 403(Warning 120)으로 거절되고 그 사이 그룹콜 초대도 놓친다.
+
+| 상황 | 제휴 |
+|---|---|
+| 해지 REGISTER(`Expires: 0`) · 등록 만료(계기 3) | 즉시 회수(지금대로) |
+| flow 실패로만 등록이 풀렸다(이번 정리에서 지운 바인딩이 전부 계기 2) | **그 등록의 수명 끝**(지운 바인딩들의 등록 시각 + Expires + grace 중 가장 늦은 것)까지 남긴다 |
+| 유예 중 다시 등록했다 | 유예를 거두고 그대로 잇는다 — 로그 `[Affiliation] 재등록 — flow 실패 유예 중이던 제휴 유지` |
+| 유예가 끝날 때까지 등록하지 않았다 | 그때 회수한다(서비스마다, 감사 E-AUD-009 를 그룹마다) — 로그 `[Affiliation] de-register 회수 … (flow 실패 유예 만료)` |
+
+유예 중 제휴는 DB 에 남지만 바인딩이 없으므로 팬아웃 초대는 그 멤버에게 닿지 않는다(도달 경로가 없는 것은 그대로다). 대기열은 CSP
+메모리(`csp/AffiliationGrace.h` `CAffiliationGrace`)라 CSP 가 재기동하면 유예 중이던 행은 회수하지 않은 채 남는다 — 재기동 중 등록이 끝난
+가입자와 같은 처지이고, 다시 등록하면 단말이 제휴를 다시 싣는다([ue_sdk.md](ue_sdk.md) §4.2 «등록에 묶인 것의 유지»). 판정·정리 위치 =
+`CUserMap::DeleteTimeout`(flow 실패로만 풀린 가입자와 수명 끝) → `CspServer.cpp` 10초 sweep(유예 등록·시한 회수), REGISTER 처리(유예 거둠).
+시험 `tests/csp_affiliation_grace_test.cpp`(S1-UNIT-CSP).
 
 ## 5. reg-event(RFC 3680) 정합
 

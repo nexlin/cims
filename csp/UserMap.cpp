@@ -611,11 +611,13 @@ void CUserMap::DeleteTimeout( int iTimeout, USER_ID_LIST &clsDeletedList ) {
  * @param iTimeout           만료 이후 대기 시간 (초단위)
  * @param clsDeletedInfoList 삭제된 사용자 (ID, 바인딩) 을 받는 리스트
  */
-void CUserMap::DeleteTimeout( int iTimeout, USER_INFO_LIST &clsDeletedInfoList ) {
+void CUserMap::DeleteTimeout( int iTimeout, USER_INFO_LIST &clsDeletedInfoList,
+                              std::map<std::string, time_t> *pmapFlowLoss ) {
     USER_MAP::iterator itMap, itNext;
     time_t iTime;
 
     clsDeletedInfoList.clear();
+    if ( pmapFlowLoss ) pmapFlowLoss->clear();
     time( &iTime );
 
     m_clsMutex.acquire();
@@ -623,6 +625,8 @@ void CUserMap::DeleteTimeout( int iTimeout, USER_INFO_LIST &clsDeletedInfoList )
         USER_BINDING_LIST &clsList = itMap->second;
         CUserInfo clsLastRemoved;
         bool bRemoved = false;
+        bool bAnyExpired = false;  // 이번에 지운 바인딩 중 수명이 끝난 것이 있다
+        time_t iLifeEnd = 0;       // 이번에 지운 바인딩들의 등록 수명 끝 중 가장 늦은 것
 
         // 만료는 **바인딩 단위**다 — 한 flow 가 만료돼도 다른 flow 로 등록이 살아 있을 수 있다.
         for ( size_t i = clsList.size(); i > 0; --i ) {
@@ -645,6 +649,9 @@ void CUserMap::DeleteTimeout( int iTimeout, USER_INFO_LIST &clsDeletedInfoList )
                     clsLastRemoved = clsBind;
                     bRemoved = true;
                 }
+                if ( bTimeout ) bAnyExpired = true;
+                const time_t iEnd = clsBind.m_iLoginTime + clsBind.m_iLoginTimeout + iTimeout;
+                if ( iEnd > iLifeEnd ) iLifeEnd = iEnd;
                 _releaseBindingSa( clsBind, bTimeout ? "expired" : "flow dead" );
                 clsList.erase( clsList.begin() + ( i - 1 ) );
             }
@@ -655,6 +662,7 @@ void CUserMap::DeleteTimeout( int iTimeout, USER_INFO_LIST &clsDeletedInfoList )
             CLog::Print( LOG_DEBUG, "user(%s) is deleted - timeout", itMap->first.c_str() );
             _indexGroupRemove( clsLastRemoved.m_strGroupId, itMap->first );
             clsDeletedInfoList.push_back( std::make_pair( itMap->first, clsLastRemoved ) );
+            if ( pmapFlowLoss && !bAnyExpired && iLifeEnd > iTime ) ( *pmapFlowLoss )[itMap->first] = iLifeEnd;
             itMap = m_clsMap.erase( itMap );
         } else {
             ++itMap;
