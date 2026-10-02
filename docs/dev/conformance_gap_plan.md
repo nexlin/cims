@@ -131,7 +131,7 @@
 | WP | 이름 | 항목 | 급 | 세션 | 선행 | 결정 | 짝 | 상태 |
 |---|---|---|---|---|---|---|---|---|
 | **U01** | 긴급·경보 단말 | EMG-6 · EMG-7 · EMG-8 · EMG-9 | A3 · C1 | 1 | — | — | W01(EMG-8) | 완료 df892fa2 |
-| **U02** | SDK 보안·협상 상한 | IDM-5 / VSDP-2 · TCU-2 | A1 · C1 · D1 | 1 | — | — | — | 대기 |
+| **U02** | SDK 보안·협상 상한 | IDM-5 / VSDP-2 · TCU-2 | A1 · C1 · D1 | 1 | — | — | — | 완료 43421903 |
 | **U03** | 거절 응답·Answer-Mode 해석 | GCC-6 / VGU-1 · VGU-2 · VGU-3 | B1 · C1 · D2 | 1 | — | — | S01(N6·103 의 단말 몫) · W01(GCC-6·VGU-3) | 대기 |
 | **U04** | MCPTT 요청 규격화 | REG-1 · GCC-1 · GCC-2 · GCC-3 · GCC-4 · GCC-5 · GCC-7 · GCC-8 · GCC-9 · ADH-8 · SDP-1 | B9 · D2 | 2 | S17 | — | W01(엔진 재빌드) | 대기 |
 | **U05** | MCData 요청 규격화·수신 파서 | MCData REG-1 · SDS-3 · SDS-6 · SDS-7 · SDS-10 · MSRP-1 · MSRP-4 · FD-7(SDK — Metadata `file-selector:`·`uploadFd` 규격형, CSP 생성분은 S16) | B3 · C2 · D3 | 1 | S17 | — | — | 대기 |
