@@ -433,7 +433,11 @@ void PMcvControl::_onTxRequest(Part& p, const ParsedTransmission& m, int64_t now
         return;
     }
     Tx* w = _weakestTx();
-    if (w && _outranks(pr, w->prio)) {
+    // 선점은 큐에 다른 선점 요청이 없을 때만(§6.3.5.4.4 5) — «no other pre-emptive requests in the active Transmission request
+    //   queue»). 있으면 선점 요청도 보통 요청처럼 다룬다 — 큐 협상이면 우선순위 자리에 대기, 아니면 #1(같은 절 다음 단락).
+    const bool bOtherPreempt = std::any_of(_queue.begin(), _queue.end(),
+                                           [&](const Queued& q) { return q.preemptive && q.member != p.id; });
+    if (w && _outranks(pr, w->prio) && !bOtherPreempt) {
         // 선점 — 가장 약한 송출에 Revoked #4, 요청은 큐 맨 앞(§6.3.4.4.7 2), 큐 협상이면 Queue Position Info
         _log("pre-empt member=" + w->member + " by " + p.id);
         _revoke(*w, TC_REVOKE_PREEMPTED, false, now);
@@ -665,16 +669,28 @@ void PMcvControl::_sendRevoke(const Tx& t) {
 
 // active Transmission request queue — front(선점) 또는 같은 유효 우선순위의 대기 바로 뒤(§6.3.5.4.4 · §6.3.4.4.7 2e).
 void PMcvControl::_enqueue(Part& p, const Prio& prio, bool front) {
+    // 자리가 밀린 다른 대기자에게 Queue Position Info 갱신(§6.3.5.2.2 3c iv «should» — 큐 협상한 대기자만)
+    std::map<std::string, int> before;
+    for (size_t i = 0; i < _queue.size(); ++i) before[_queue[i].member] = (int)i + 1;
     _dequeue(p.id);
     Queued q;
     q.member = p.id;
     q.prio = prio;
+    q.preemptive = front;
     if (front) {
         _queue.push_front(q);
-        return;
+    } else {
+        auto pos = std::find_if(_queue.begin(), _queue.end(), [&](const Queued& e) { return _outranks(prio, e.prio); });
+        _queue.insert(pos, q);
     }
-    auto pos = std::find_if(_queue.begin(), _queue.end(), [&](const Queued& e) { return _outranks(prio, e.prio); });
-    _queue.insert(pos, q);
+    for (size_t i = 0; i < _queue.size(); ++i) {
+        const std::string& m = _queue[i].member;
+        if (m == p.id) continue;
+        auto it = before.find(m);
+        if (it == before.end() || it->second == (int)i + 1) continue;
+        if (Part* o = _part(m))
+            if (o->decl.queueing) _sendQueueInfo(*o);
+    }
 }
 
 void PMcvControl::_dequeue(const std::string& member) {
@@ -818,7 +834,12 @@ void PMcvControl::_onRxEnd(Part& r, const ParsedTransmission& m, bool request, i
 // Transmission control Ack — Receive Media Response 의 확인이면 T6 정지.
 void PMcvControl::_onAck(Part& r, const ParsedTransmission& m) {
     if (m.messageName() != MCV_NAME_1 || m.u8(TF_MSG_TYPE) != MCV1_RECEIVE_MEDIA_RESPONSE) return;
-    for (auto& kv : r.active) kv.second.t6At = 0;
+    // T6 는 수신 허가마다 따로 돈다(§6.3.6.4.8 · §6.3.6.4.3 f). Ack 에는 송출 식별자가 없어 가장 먼저 보낸(만료가 가장 이른) 허가
+    //   응답의 T6 만 멈춘다 — 응답과 Ack 는 같은 순서로 오간다.
+    RxGrant* oldest = nullptr;
+    for (auto& kv : r.active)
+        if (kv.second.t6At > 0 && (!oldest || kv.second.t6At < oldest->t6At)) oldest = &kv.second;
+    if (oldest) oldest->t6At = 0;
 }
 
 // Gr: Reception Idle(C7 = 0)이면 T5 — 이미 돌면 그대로. 받는 이가 생기면 정지.

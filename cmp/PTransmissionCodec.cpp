@@ -108,10 +108,18 @@ bool ParseTransmissionMessage(const char* buf, int len, ParsedTransmission& out)
     if (app < 0) return false;                                          // 전송 제어 APP 이 아니다
     int subtype = (unsigned char)buf[0] & 0x1F;
     if (!McvKnownMessage(app, subtype)) return false;                   // §9.1.4 1 — 메시지 전체를 버린다
+    // Transmission control Ack 의 subtype 은 00100 하나다 — ack 비트 자리가 없다(표 9.2.2.1-3). 10100 은 모르는 subtype(§9.1.4 1)
+    if (app == MCV_APP_2 && subtype == (MCV2_TRANSMISSION_CONTROL_ACK | MCV_ACK_REQ_BIT)) return false;
     // 헤더 length(32비트 워드 - 1)가 가리키는 끝까지만 읽는다 — 한 IP 패킷에 여러 메시지가 올 수 있다(§9.1.1).
     int declared = ((((unsigned char)buf[2]) << 8) | (unsigned char)buf[3]) * 4 + 4;
     if (declared < MCV_RTCP_APP_HDR) return false;                      // 헤더도 못 담는 length — 손상
     if (declared < len) len = declared;
+    // P 비트(§9.1.2 — 보내는 쪽은 '0'). '1' 로 왔으면 RFC 3550 §6.1 대로 끝 옥텟이 패딩 수 — 패딩을 필드로 읽지 않는다.
+    if ((unsigned char)buf[0] & 0x20) {
+        const int pad = (unsigned char)buf[len - 1];
+        if (pad <= 0 || len - pad < MCV_RTCP_APP_HDR) return false;  // 손상
+        len -= pad;
+    }
 
     out.app = app;
     out.subtype = subtype;

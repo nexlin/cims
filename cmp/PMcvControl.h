@@ -200,6 +200,7 @@ private:
     struct Queued {
         std::string member;
         Prio prio;
+        bool preemptive = false;  // 선점으로 큐 맨 앞에 넣은 요청 — 그 동안 다른 선점 요청은 선점하지 못한다(§6.3.5.4.4 5))
     };
 
     // 판정

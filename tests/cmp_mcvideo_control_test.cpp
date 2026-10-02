@@ -558,6 +558,99 @@ static void testResendJoinState() {
     CHECK(h.buildFail == 0, "all messages encode");
 }
 
+// 선점은 큐에 다른 선점 요청이 없을 때만(§6.3.5.4.4 5)) · 자리가 밀린 대기자에게 Queue Position Info(§6.3.5.2.2 3c iv) — S22 TCS-3·TCS-7
+static void testPreemptOnceAndQueueUpdates() {
+    printf("[pre-emption once · queue position updates]\n");
+    Harness h(1);
+    h.join("A", h.decl("sip:A@mcv", 1));
+    McvParticipantDecl q = h.decl("sip:Q@mcv", 1);
+    q.queueing = true;
+    h.join("Q", q);
+    McvParticipantDecl d = h.decl("sip:D@mcv", 9);
+    d.maxPriority = 9;
+    d.queueing = true;
+    h.join("D", d);
+    McvParticipantDecl f = h.decl("sip:F@mcv", 9);
+    f.maxPriority = 9;
+    f.queueing = true;
+    h.join("F", f);
+    McvParticipantDecl g = h.decl("sip:G@mcv", 9);
+    g.maxPriority = 9;  // 선점 우선순위지만 대기열 미협상
+    h.join("G", g);
+    h.request("A");
+    h.request("Q");
+    CHECK(h.ctl.queuePosition("Q") == 1, "Q queued at 1");
+    h.clear();
+    h.request("D");   // 선점
+    CHECK(h.count("A", MCV_APP_1, MCV1_TRANSMISSION_REVOKED) == 1, "D pre-empts A (Revoked #4)");
+    CHECK(h.ctl.queuePosition("D") == 1 && h.ctl.queuePosition("Q") == 2, "D in front, Q pushed to 2");
+    const ParsedTransmission* qq = h.last("Q", MCV_APP_1, MCV1_QUEUE_POSITION_INFO);
+    CHECK(qq && qq->queuePosition() == 2, "Q told its new position 2");
+    h.clear();
+    h.request("F");   // 다른 선점 요청(D)이 큐에 있다 — 선점하지 않고 우선순위 자리에 대기
+    CHECK(h.count("A", MCV_APP_1, MCV1_TRANSMISSION_REVOKED) == 0, "second pre-emptive request does not revoke again");
+    CHECK(h.ctl.queuePosition("D") == 1 && h.ctl.queuePosition("F") == 2 && h.ctl.queuePosition("Q") == 3,
+          "F queued behind D, ahead of Q");
+    const ParsedTransmission* qf = h.last("F", MCV_APP_1, MCV1_QUEUE_POSITION_INFO);
+    CHECK(qf && qf->queuePosition() == 2, "F gets Queue Position Info 2");
+    CHECK(h.count("D", MCV_APP_1, MCV1_QUEUE_POSITION_INFO) == 0, "D (unchanged position) not re-notified");
+    const ParsedTransmission* qq2 = h.last("Q", MCV_APP_1, MCV1_QUEUE_POSITION_INFO);
+    CHECK(qq2 && qq2->queuePosition() == 3, "Q told its new position 3");
+    h.clear();
+    h.request("G");   // 대기열 미협상 + 다른 선점 요청 있음 — #1
+    const ParsedTransmission* rg = h.last("G", MCV_APP_1, MCV1_TRANSMISSION_REJECTED);
+    CHECK(rg && rg->cause() == TC_REJECT_TRANSMISSION_LIMIT && h.count("A", MCV_APP_1, MCV1_TRANSMISSION_REVOKED) == 0,
+          "non-queueing pre-emptive request while another is queued → Rejected #1");
+    CHECK(h.buildFail == 0, "all messages encode");
+}
+
+// Ack 하나는 가장 먼저 보낸 수신 허가 응답의 T6 만 멈춘다(§6.3.6.4.8 — T6 은 허가마다) — S22 RCS-2
+static void testAckStopsOneT6() {
+    printf("[Ack stops one T6]\n");
+    Harness h(2);
+    h.join("A");
+    h.join("B");
+    McvParticipantDecl r = h.decl("sip:R@mcv");
+    r.maxRxStreams = 2;
+    h.join("R", r);
+    h.request("A");
+    h.request("B");
+    h.receive("R", "sip:A@mcv");
+    h.advance(100);
+    h.receive("R", "sip:B@mcv");
+    h.rx("R", MCV_APP_2, MCV2_TRANSMISSION_CONTROL_ACK,
+         { McvTlv(TF_MSG_TYPE, McvU8(MCV1_RECEIVE_MEDIA_RESPONSE)), McvTlv(TF_SOURCE, McvU16(TC_SRC_PARTICIPANT)),
+           McvTlv(TF_MESSAGE_NAME, McvName(MCV_NAME_1)) });
+    h.clear();
+    h.advance(1200);
+    const ParsedTransmission* rr = h.last("R", MCV_APP_1, MCV1_RECEIVE_MEDIA_RESPONSE);
+    CHECK(rr && rr->str(TF_TRANSMITTING_USER_ID) == "sip:B@mcv",
+          "first Ack stops A's T6 only — B's response is retransmitted");
+    CHECK(h.buildFail == 0, "all messages encode");
+}
+
+// 코덱 — Ack subtype 10100 은 모르는 subtype(표 9.2.2.1-3 · §9.1.4 1), P 비트 패딩은 필드로 읽지 않는다(§9.1.2) — S22 TCS-9
+static void testCodecAckSubtypeAndPadding() {
+    printf("[codec: Ack subtype · P bit]\n");
+    std::vector<McvTlv> ackf{ McvTlv(TF_MSG_TYPE, McvU8(MCV1_RECEIVE_MEDIA_RESPONSE)),
+                              McvTlv(TF_SOURCE, McvU16(TC_SRC_PARTICIPANT)), McvTlv(TF_MESSAGE_NAME, McvName(MCV_NAME_1)) };
+    char buf[256];
+    int n = BuildTransmissionMessage(buf, sizeof(buf), MCV_APP_2, MCV2_TRANSMISSION_CONTROL_ACK, 1u, ackf);
+    ParsedTransmission m;
+    CHECK(n > 0 && ParseTransmissionMessage(buf, n, m), "Ack 00100 parses");
+    buf[0] = (char)(((unsigned char)buf[0] & 0xE0) | (MCV2_TRANSMISSION_CONTROL_ACK | MCV_ACK_REQ_BIT));
+    CHECK(!ParseTransmissionMessage(buf, n, m), "Ack 10100 discarded");
+    // P 비트 — 4 옥텟 패딩(끝 옥텟 = 4)을 붙이고 length 를 늘린다
+    std::vector<McvTlv> idle{ McvTlv(TF_MSG_SEQ, McvU16(7)) };
+    n = BuildTransmissionMessage(buf, sizeof(buf), MCV_APP_1, MCV1_TRANSMISSION_IDLE, 1u, idle);
+    buf[n] = 0x11; buf[n + 1] = 0x22; buf[n + 2] = 0x33; buf[n + 3] = 4;
+    const int words = ((((unsigned char)buf[2]) << 8) | (unsigned char)buf[3]) + 1;
+    buf[2] = (char)(words >> 8); buf[3] = (char)(words & 0xFF);
+    buf[0] = (char)((unsigned char)buf[0] | 0x20);
+    CHECK(ParseTransmissionMessage(buf, n + 4, m) && m.fields.size() == 1 && m.u16(TF_MSG_SEQ) == 7,
+          "padding stripped (P=1) — fields intact");
+}
+
 int main() {
     testJoinIdleAndOnlyOne();
     testGrantNotifyReceive();
@@ -570,6 +663,9 @@ int main() {
     testUnauthorizedMedia();
     testImplicitAndRecvOnly();
     testResendJoinState();
+    testPreemptOnceAndQueueUpdates();
+    testAckStopsOneT6();
+    testCodecAckSubtypeAndPadding();
     printf("cmp_mcvideo_control_test: %d passed, %d failed\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }
