@@ -3,6 +3,7 @@
 기기 없이 돌아가는 것만 여기 있다(android_dispatch_tablet.md §9) — 프로파일 파싱, 포커스/발언 대상
 분리, 발언 소유권, 관리 와이어 파서, 회선 저장 판정, 이력 날짜 창/시간대 밴드/발언 막대, dialog 결합,
 응답 문구 사전, E.164 정규화. 기기가 필요한 판정(감청 SSRC 귀속·오디오 분리·화면 밀도)은 실기기 행이다.
+현장 앱(:ptt-client)의 순수 판정(긴급 대상·경보 결과 — EmergencyRulesTest)도 같은 실행에 넣는다.
 
 Android SDK 가 없으면 SKIP — S1 은 정적 검사 stage 라 모든 개발 장비에 SDK 가 있다고 전제하지 않는다.
 """
@@ -17,7 +18,7 @@ from ._ue_common import p, skip, done, block
 
 _ID = "S1-UE-TABLET-UNIT"
 _NAME = "관제 태블릿 단위시험 (gradlew testDebugUnitTest)"
-_MODULES = ["dispatch-tablet", "cimsue"]
+_MODULES = ["dispatch-tablet", "cimsue", "ptt-client"]
 
 
 def _sdk_root() -> str:
@@ -45,7 +46,8 @@ def unit_ue_tablet(ctx: VerifyContext) -> ItemResult:
                     "(docs/DEV_SERVER_SETUP.md)")
 
     rc, out, err = shell.run(
-        [gradlew, "--offline", "-q", ":dispatch-tablet:testDebugUnitTest", ":cimsue:testDebugUnitTest"],
+        [gradlew, "--offline", "-q", ":dispatch-tablet:testDebugUnitTest", ":cimsue:testDebugUnitTest",
+         ":ptt-client:testDebugUnitTest"],
         cwd=p(ctx.repo_root, "android"), timeout=1800)
     full = (out + err).splitlines()
 
@@ -54,7 +56,8 @@ def unit_ue_tablet(ctx: VerifyContext) -> ItemResult:
     total = fails = errs = 0
     found = []
     for mod, base in (("dispatch-tablet", ("android", "dispatch-tablet")),
-                      ("cimsue", ("sdk", "android", "cimsue"))):
+                      ("cimsue", ("sdk", "android", "cimsue")),
+                      ("ptt-client", ("android", "ptt-client"))):
         d = p(ctx.repo_root, *base, "build", "test-results", "testDebugUnitTest")
         if not os.path.isdir(d):
             continue

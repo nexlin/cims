@@ -48,16 +48,16 @@ PTT(MCPTT) 서비스 구현을 3GPP 규격 원문과 대조해 **규격과 다�
 | 그룹 호 — 단말 (GCC) | 9 | — | 7 | — | 2 |
 | 개별 호 (PRV) | 9 | 4 | 4 | 1 | — |
 | 애드혹 그룹 호 (ADH) | 9 | 4 | 3 | 1 | 1 |
-| 긴급·임박·경보 (EMG) | 17 | 6 | 3 | 8 | — |
+| 긴급·임박·경보 (EMG) | 13 | 3 | 3 | 7 | — |
 | 발언권 — 서버 (FCS) | 20 | 2 | 9 | 6 | 3 |
 | 발언권 — 단말 (FCC) | 1 | — | — | 1 | — |
 | 발언권 SDP 협상 (SDP) | 3 | 1 | 2 | — | — |
 | 그룹 문서·GMS (GMS) | 13 | — | 12 | 1 | — |
 | 설정 문서·CMS (CMS) | 8 | — | 4 | 3 | 1 |
 | 신원 관리 (IDM) | 9 | 4 | 1 | 3 | 1 |
-| **계** | **135** | **36** | **59** | **30** | **10** |
+| **계** | **131** | **33** | **59** | **29** | **10** |
 
-확인 수준 — ◎ 71 · ○ 50 · △ 14.
+확인 수준 — ◎ 69 · ○ 49 · △ 13.
 
 읽는 순서 — §2(먼저 볼 것) → §3(영역별 전체) → §4(미구현 목록에 빠진 기능) → §5(문서 정정) → §6(묶음과 순서).
 
@@ -201,10 +201,6 @@ CSP 는 참여 기능과 제어 기능을 겸한다.
 | EMG-3 | A | CSP | §9.2.2.3.3 14) → §12.1.3.4 — 새로 제휴한 단말에 진행 중 경보를 MESSAGE 로 알린다 (shall) | 경보 캐시는 호 경로에서만 읽는다(`csp/GroupCallService.cpp:1327`·`:1344`·`:2002`). 제휴 경로는 NOTIFY 만 낸다(`csp/CscfModule.cpp:2028-2041`) | 경보 뒤에 로그인하거나 망 복귀로 제휴를 다시 실은 단말·관제석은 그 경보를 모른다 | ◎ |
 | EMG-4 | B | CSC | TS 24.484 §8.3.2.1 11)xvi) `<allow-imminent-peril-call>` · TS 24.379 §6.2.8.1.8 — true 가 아니면 임박 위험 호는 미인가 | user profile ruleset 에 요소가 없다 — `csc/src/services/mcptt.py:1746-1753` (`<ImminentPerilCall>` entry 는 싣는다) | 규격 단말은 임박 위험 호를 요청하지 않는다. SDK 는 «없으면 허용» 이라 드러나지 않는다 (CMS-3 과 한 묶음) | ◎ |
 | EMG-5 | B | CSP | §6.3.3.1.14 · §10.1.1.4.2 10)·11) — 미인가 긴급·임박 개시의 403 에 mcptt-info(`emergency-ind` false + `alert-ind` false / `imminentperil-ind` false) (shall) | 개시 INVITE 는 본문 없는 403 — `csp/GroupCallService.cpp:931-941`. re-INVITE 경로만 본문을 싣는다 | 단말이 긴급 미인가 403 을 다른 403 과 가르지 못한다(현장 앱은 403 이면 모두 일반 호로 다시 건다) | ◎ |
-| EMG-6 | A | SDK | §10.1.1.2.1.6 3)b)ii)B) — 받은 재광고의 `<alert-ind>` false 에서 `<originated-by>` 가 나면 MEA 1(경보 없음) | 재광고에서 `emergency-ind`·`imminentperil-ind` 만 읽는다 — `sdk/core/src/engine.cpp:1292-1296`. `McpttInfo` 에 alert·originatedBy 가 없다 | CSP 는 «경보 취소 + 긴급 해제» 를 참여 leg 에 re-INVITE 로만 알린다 — 참여 단말은 경보 배너가 남고 내 경보의 제3자 취소도 모른다 | ◎ |
-| EMG-7 | C | SDK | §6.2.8.1.4 2) — 임박 상향의 2xx 에 Warning `149` 가 있으면 임박으로 확정하지 않는다. §6.2.8.1.13 — 뒤따르는 INFO 의 지시자 | 2xx 면 무조건 Confirmed — `sdk/core/src/engine.cpp:1195-1203`. INFO 는 미응답 멤버만 해석한다 | 긴급 진행 중 그룹에 임박 상향을 보내면 표시·Floor Request 비트가 어긋난다(경합 때만) | △ |
-| EMG-8 | A | 현장·관제 | §6.2.8.1.8 1)a) · §12.1.1.1 4)a)i)A) — DedicatedGroup 이면 긴급·경보 대상은 그 그룹 | 현장 앱 통화 중 SOS 는 현재 세션 그룹으로 경보 + 상향(`android/ptt-client/…/PttEmergency.kt:30-41`). 관제 앱은 `allow-emergency-group-call` 만 본다(`DispatchSession.cs:1657-1669`, `PttPlane.kt:140-187`) | 전용 그룹 사용자가 다른 그룹 통화 중 SOS 를 누르면 상향은 403, 경보는 EMG-2 때문에 그 그룹에 퍼진다 | ○ |
-| EMG-9 | A | 현장 | §12.1.1.1 — 경보 MESSAGE 가 4xx·5xx·6xx 면 MEA 1 로. §12.1.1.2 — 취소 실패면 경보 유지 | 403 만 되돌린다(`if (r.code != 403) return true`) — `android/ptt-client/…/PttEmergency.kt:218-236` | 발령이 404·480·5xx 로 실패해도 내 경보 표시가 남고, 취소가 실패해도 표시는 내려간다 | ◎ |
 | EMG-10 | C | CSP | §6.3.3.1.11 — 상태가 바뀌면 제휴 멤버에 통지 | 세션이 끝나면 긴급·임박 상태를 지우기만 한다 — `csp/GroupCallService.cpp:125-134` | 비참여 제휴 단말과 BYE 로 나간 단말이 그룹을 계속 긴급으로 본다(«그룹 긴급 상태의 수명» 편차의 부작용) | △ |
 | EMG-11 | C | CSP | §6.3.3.1.11 5) — 경보 팬아웃 MESSAGE 에 P-Asserted-Identity(제어 기능 PSI) | 헤더는 Accept-Contact 둘 + P-Asserted-Service 뿐 — `csp/PttAsModule.cpp:213-216`. 상태 통지 쪽은 싣는다 | 규격 단말·중간 노드에 사용자 발신 MESSAGE 로 보인다 | ◎ |
 | EMG-12 | C | CSP | §12.1.3.1 2) — Accept-Contact 에 MCPTT icsi-ref 가 없으면 403 | mcptt-info 지시자 유무만으로 경보 경로에 넣는다 — `csp/ModuleDispatcher.cpp:2658-2662` | 받아들이는 쪽이 넓다 | ○ |
@@ -368,7 +364,7 @@ mcptt_standard_conformance.md §0-R 은 통째 미구현 기능을 나열하는�
 **Windows 몫(관제 앱 두 벌)** — SDK·서버가 정해진 뒤 맞춘다.
 
 - GCC-6 — 거절을 480 + Warning 110 으로(코어 `reject` 가 Warning 을 받게 된 뒤).
-- EMG-8 — 긴급 개시·상향·경보의 대상 그룹 판정(전용 긴급 그룹).
+- EMG-8 — 긴급 개시·상향·경보의 대상 그룹 판정(전용 긴급 그룹 — TS 24.379 §6.2.8.1.8 1)a) · §12.1.1.1 4)a)i). 현장 앱은 `EmergencyRules.targetGroup` 으로 반영).
 - GMS-11·GMS-18 — 그룹 편집 폼: 정원 0(무제한)을 되돌릴 수 있게(서버는 0 이면 요소를 싣지 않는다), 우선순위 0~255(서버가 범위 밖 400 — 앱의 0~15 절단을 없앤다).
 - CMS-13 — CMS 변경 구독(지금은 5분 폴링).
 - 묶음 4·5 가 들어오면 Capabilities 게이트와 응답 문구 사전.

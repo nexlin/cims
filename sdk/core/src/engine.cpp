@@ -677,6 +677,7 @@ struct McpttSession {
     bool condMine = false;               // 이 단말이 올린 조건
     bool condPending = false;            // 상향·하향 re-INVITE 응답 대기 — 끝나면 prev* 로 되돌리거나(Denied) 확정(Confirmed)
     void* condTsx = nullptr;             // 그 re-INVITE 의 pjsip 트랜잭션 — 보낼 때(CALLING) 붙잡는다
+    bool condAwaitInfo = false;          // 임박 상향의 2xx 가 Warning 149 — 확정을 뒤따르는 INFO 로 미룬다(TS 24.379 §6.2.8.1.4 2)·§6.2.8.1.13)
     bool prevEmergency = false, prevImminent = false, prevMine = false;
     int condLastCode = 0;
     bool broadcast = false;              // 일제 통화 개시(<broadcast-ind>) — 이 단말이 개시자
@@ -1072,7 +1073,7 @@ public:
         CallInfo snap;
         o_->updateCall(getId(), [&](CallInfo& c) {
             c.condition.emergency = mcptt->emergency; c.condition.imminentPeril = mcptt->imminentPeril;
-            c.condition.mine = mcptt->condMine; c.condition.pending = mcptt->condPending;
+            c.condition.mine = mcptt->condMine; c.condition.pending = mcptt->condPending || mcptt->condAwaitInfo;
             c.condition.lastCode = mcptt->condLastCode;
         }, &snap);
         o_->emit([o = o_, snap, cause] { o->listener->onMcpttCondition(snap, cause); });
@@ -1243,7 +1244,19 @@ public:
                         const bool ok = tsx.statusCode / 100 == 2;
                         if (!ok) { mcptt->emergency = mcptt->prevEmergency; mcptt->imminentPeril = mcptt->prevImminent; mcptt->condMine = mcptt->prevMine; }
                         o_->log(3, "call " + std::to_string(getId()) + " condition re-INVITE → " + std::to_string(tsx.statusCode));
-                        publishCondition(ok ? ConditionCause::Confirmed : ConditionCause::Denied);
+                        // 임박 위험 상향의 2xx 에 Warning 149(«SIP INFO request pending») 가 있으면 임박으로 확정하지 않는다 — 그룹이 이미
+                        //   긴급 중일 수 있고, 결과는 같은 다이얼로그의 INFO 가 알린다(TS 24.379 §6.2.8.1.4 2) · §6.2.8.1.13).
+                        //   MC 경고 코드는 warn-text 의 앞 숫자다 — `Warning: 399 <agent> "149 …"`(TS 24.379 §4.4).
+                        int wc = 0; std::string wt;
+                        if (ok && mcptt->imminentPeril && !mcptt->prevImminent && prm.e.body.tsxState.type == PJSIP_EVENT_RX_MSG &&
+                            detail::parseWarning(detail::headerValue(prm.e.body.tsxState.src.rdata.wholeMsg, "Warning"), wc, wt) &&
+                            std::atoi(wt.c_str()) == 149) {
+                            mcptt->condAwaitInfo = true;
+                            o_->log(3, "call " + std::to_string(getId()) + " imminent peril: 2xx Warning 149 — INFO 를 기다린다");
+                            publishCondition(ConditionCause::Local);          // pending 그대로 — 확정은 INFO 뒤
+                        } else {
+                            publishCondition(ok ? ConditionCause::Confirmed : ConditionCause::Denied);
+                        }
                     }
                 }
             }
@@ -1278,6 +1291,20 @@ public:
                     auto* t = static_cast<pjsip_transaction*>(tsx.pjTransaction);
                     pjsip_dialog* dlg = t ? pjsip_tsx_get_dlg(t) : nullptr;
                     if (rd && dlg) pjsip_dlg_respond(dlg, rd, known ? 200 : 469, nullptr, nullptr, nullptr);
+                    if (known && mcptt) {
+                        // 우선 호 요청 뒤의 INFO(TS 24.379 §6.2.8.1.13) — 지시자로 세션 조건을 정한다. 임박 상향이 149 로 미뤄져 있었으면
+                        //   여기서 끝난다: imminentperil-ind false + emergency-ind true = 그룹이 긴급 중(내 임박은 서지 않았다).
+                        const std::string ib = sipBody(msg);
+                        const int e = mcptt::indicator(ib, "emergency-ind"), i = mcptt::indicator(ib, "imminentperil-ind");
+                        if (e || i) {
+                            const bool awaited = mcptt->condAwaitInfo;
+                            mcptt->condAwaitInfo = false;
+                            const bool changed = applyAdvertised(e, i);
+                            if (awaited && !mcptt->imminentPeril) mcptt->condMine = false;   // 내 임박 상향은 서지 않았다
+                            if (changed || awaited)
+                                publishCondition(changed ? ConditionCause::Advertised : ConditionCause::Confirmed);
+                        }
+                    }
                     if (known) {
                         std::vector<std::string> nonAck = mcptt::nonAcknowledgedUsers(sipBody(msg));
                         if (!nonAck.empty()) {
@@ -1336,6 +1363,19 @@ public:
                 msg.find("mcpttinfo") != std::string::npos) {
                 if (applyAdvertised(mcptt::indicator(msg, "emergency-ind"), mcptt::indicator(msg, "imminentperil-ind")))
                     publishCondition(ConditionCause::Advertised);
+                // 재광고 re-INVITE 의 긴급 경보 지시자(§10.1.1.2.1.6 1)b) · 3)b)) — <alert-ind> true = 경보, false = 경보 취소
+                //   (+ <originated-by> = 원 경보 발신자, 그것이 나면 내 경보가 풀린 것 3)b)ii)B)). 제어 기능은 호에 참여 중인 단말에게
+                //   경보 변화를 MESSAGE 가 아니라 이 re-INVITE 로 알린다 — MESSAGE 수신과 같은 이벤트로 올린다.
+                if (msg.rfind("INVITE ", 0) == 0) {
+                    EmergencyAlert a; a.accountId = accountId_;
+                    if (mcptt::parseEmergencyAlert(sipBody(msg), a) && a.alertInd != 0) {
+                        if (a.groupId.empty()) a.groupId = mcptt->groupId;
+                        auto ic = o_->accountCfgs.find(accountId_);
+                        a.self = ic != o_->accountCfgs.end() && !a.userId.empty() &&
+                                 a.userId == mcptt::bareId(ic->second.effectiveMcpttId());
+                        o_->emit([o = o_, a] { o->listener->onEmergencyAlert(a); });
+                    }
+                }
             }
             if (msg.rfind("NOTIFY ", 0) == 0 && msg.find("conference-info") != std::string::npos) {
                 std::vector<RosterEntry> users; bool full = false;
@@ -3034,6 +3074,7 @@ Result Engine::setCallCondition(int callId, bool emergency, bool imminentPeril) 
         m.emergency = emergency; m.imminentPeril = imminentPeril;
         m.condMine = emergency || imminentPeril;
         m.condPending = true;
+        m.condAwaitInfo = false;
         m.condTsx = nullptr;
         m.condLastCode = 0;
         c.publishCondition(ConditionCause::Local);

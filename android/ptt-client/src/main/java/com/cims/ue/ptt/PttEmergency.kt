@@ -12,6 +12,28 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 
 /**
+ * 긴급 대상·경보 결과의 판정 규칙 — 화면·세션 상태와 떨어진 순수 함수(단위시험 EmergencyRulesTest).
+ */
+internal object EmergencyRules {
+    /**
+     * SOS(긴급 그룹 호·긴급 경보)의 대상 그룹 — user profile 의 entry-info 가 정한다(TS 24.379 §6.2.8.1.8 1) · §12.1.1.1 4)a)i)).
+     * `DedicatedGroup` = 문서의 전용 긴급그룹([profileGroup])뿐이다 — 다른 그룹에서 통화 중이어도 그 그룹이 아니라 전용 그룹으로 낸다
+     * (다른 그룹으로 내면 서버가 미인가로 거절한다). 미지정이면 null(불발).
+     * 그 밖(`UseCurrentlySelectedGroup`·문서 미수신) = 현재 주채널 → 선택 그룹 → 문서의 폴백 uri-entry(선택한 그룹이 없을 때,
+     * §12.1.1.1 4)a)i)B)).
+     */
+    fun targetGroup(mode: String?, profileGroup: String?, primaryGroup: String?, selectedGroup: String?): String? =
+        if (mode == "DedicatedGroup") profileGroup else primaryGroup ?: selectedGroup ?: profileGroup
+
+    /**
+     * 경보 MESSAGE 의 최종 응답 뒤 내 경보가 서 있는가(TS 24.379 §12.1.1.1 · §12.1.1.2). 2xx = 보낸 대로(발령 = 섬, 취소 = 내려감).
+     * 4xx·5xx·6xx — 전송 실패·시한(코어가 408·503 등으로 올린다)도 같다 — 는 요청이 서지 않은 것이다: 발령 실패 = 경보 없음
+     * (MEA 1), 취소 실패 = 경보 유지(MEA 3).
+     */
+    fun alertStandsAfter(activate: Boolean, code: Int): Boolean = if (code in 200..299) activate else !activate
+}
+
+/**
  * 긴급 평면 — SOS 개시·해제, 긴급 경보, 세션 조건의 화면 투영(mcptt_emergency_modes.md §4.3).
  * 규격 절차(상향·하향 re-INVITE + Resource-Priority, 403 복원, 서버 재광고 해석, 경보 MESSAGE 빌드·해석)는 코어가 하고
  * (ue_sdk.md §4.2 «긴급·임박 세션 조건»), 여기는 **대상 결정·403 뒤 normal 재발신·경보 정합·배너 latch** 정책만 한다.
@@ -20,14 +42,16 @@ internal class EmergencyPlane(private val c: PttController) {
 
     /**
      * 긴급(SOS) 개시 — 하드웨어 SOS 키/화면 SOS 버튼.
-     * 주채널 통화 중이면 조건 상향(re-INVITE emergency-ind=true), 미참여면 긴급 그룹콜 발신.
-     * 새 긴급콜 대상은 프로파일 entry-info(TS 24.484)가 결정: DedicatedGroup=전용 긴급그룹,
-     * UseCurrentlySelectedGroup=선택 그룹(마지막 주채널) — 프로파일을 아직 받지 못했으면 먼저 취득한다([startEmergencyCall]).
+     * 대상 그룹은 프로파일 entry-info(TS 24.484)가 정한다([EmergencyRules.targetGroup]): DedicatedGroup = 전용 긴급그룹(다른 그룹에서
+     * 통화 중이어도 — TS 24.379 §6.2.8.1.8 1)a)), UseCurrentlySelectedGroup = 현재 주채널. 그 그룹의 세션에 참여 중이면 조건 상향
+     * (re-INVITE emergency-ind=true), 아니면 긴급 그룹콜 발신 — 프로파일을 아직 받지 못했으면 먼저 취득한다([startEmergencyCall]).
      * 서버가 미인가로 403 거절하면 normal 재발신 폴백(개시)·latch 복원(상향 — 코어 DENIED)한다.
      */
     fun startEmergency() {
         if (!emergencyAllowed()) return
-        val s = c.primarySession()
+        val p = c.userProfile.value
+        val target = EmergencyRules.targetGroup(p?.emergencyGroupMode, p?.emergencyGroupId, c.primarySession()?.groupId, null)
+        val s = target?.let { g -> synchronized(c.lock) { c.sessionMap[g] } }
         if (s == null) {
             if (startingCall) { c._status.value = "긴급: 개시 중"; return }
             startingCall = true
@@ -79,18 +103,16 @@ internal class EmergencyPlane(private val c: PttController) {
     private fun emergencyTargetGroup(): String? {
         if (c.userProfile.value == null) Log.w(TAG, "긴급: user-profile 없음 — 선택 그룹 ${c._selectedGroup.value} 으로 개시")
         val p = c.userProfile.value
-        if (p != null && p.emergencyGroupMode == "DedicatedGroup") {
-            return p.emergencyGroupId ?: run {
-                c._status.value = "긴급: 전용 긴급그룹 미지정 — 관리자에게 문의"
-                c.feedback?.blocked("긴급 불가: 전용 긴급그룹 미지정 — 관리자에게 문의")
-                null
-            }
-        }
-        return c._selectedGroup.value ?: run {
+        val gid = EmergencyRules.targetGroup(p?.emergencyGroupMode, p?.emergencyGroupId, null, c._selectedGroup.value)
+        if (gid != null) return gid
+        if (p?.emergencyGroupMode == "DedicatedGroup") {
+            c._status.value = "긴급: 전용 긴급그룹 미지정 — 관리자에게 문의"
+            c.feedback?.blocked("긴급 불가: 전용 긴급그룹 미지정 — 관리자에게 문의")
+        } else {
             c._status.value = "긴급: 대상 그룹 없음"
             c.feedback?.blocked("긴급 불가: 대상 그룹 없음")
-            null
         }
+        return null
     }
 
     /** 긴급 1:1 개시 (TS 24.379 §11 emergency private call) — 대상 결정은 프로파일 MCPTTPrivateRecipient
@@ -213,22 +235,24 @@ internal class EmergencyPlane(private val c: PttController) {
     /** 경보 MESSAGE token → (그룹, 발령 여부) — 최종 응답으로 로컬 표시를 서버 판정에 맞춘다. */
     private val alertPending = java.util.concurrent.ConcurrentHashMap<Long, Pair<String, Boolean>>()
 
-    /** 경보 MESSAGE 최종 응답 — 이 평면의 token 이면 true. 서버는 미인가 발령을 403 + alert-ind false(TS 24.379 §12.1.3.1 4)a) —
-     *  전파 없음), 미인가 취소를 403 + alert-ind true(§12.1.3.2 — 경보 유지)로 답한다. 로컬 표시는 보낼 때 먼저 바꿨으므로 되돌린다. */
+    /** 경보 MESSAGE 최종 응답 — 이 평면의 token 이면 true. 4xx·5xx·6xx(전송 실패·시한 포함)면 요청이 서지 않은 것이다
+     *  (TS 24.379 §12.1.1.1 — 발령 실패 = MEA 1 경보 없음 · §12.1.1.2 — 취소 실패 = 경보 유지). 서버는 미인가 발령을 403 + alert-ind
+     *  false(§12.1.3.1 4)a) — 전파 없음), 미인가 취소를 403 + alert-ind true(§12.1.3.2)로 답한다. 로컬 표시는 보낼 때 먼저 바꿨으므로
+     *  [EmergencyRules.alertStandsAfter] 대로 되돌린다. */
     fun onAlertResult(r: com.cims.ue.sdk.RequestResult): Boolean {
         val (groupId, activate) = alertPending.remove(r.token) ?: return false
         if (r.code in 200..299) return true
-        Log.w(TAG, "긴급경보 ${if (activate) "발신" else "취소"} 거절: ${r.code} ${r.reason}")
-        if (r.code != 403) return true                      // 전송 실패·시한 — 서버 판정을 모르므로 표시는 그대로
+        Log.w(TAG, "긴급경보 ${if (activate) "발신" else "취소"} 실패: ${r.code} ${r.reason}")
         val me = bareId(c.mcpttId)
-        if (activate) {
+        val denied = r.code == 403
+        if (!EmergencyRules.alertStandsAfter(activate, r.code)) {
             removeAlert(groupId, me)
-            c._status.value = "[$groupId] 긴급경보 미인가"
-            c.feedback?.blocked("긴급경보 권한이 없습니다")
+            c._status.value = if (denied) "[$groupId] 긴급경보 미인가" else "[$groupId] 긴급경보 발신 실패 (${r.code})"
+            c.feedback?.blocked(if (denied) "긴급경보 권한이 없습니다" else "긴급경보를 보내지 못했습니다")
             c.emit(PttEventKind.ALERT_END, groupId)
         } else {
             addAlert(ActiveAlert(groupId, me, System.currentTimeMillis(), mine = true))
-            c._status.value = "[$groupId] 긴급경보 해제 권한 없음"
+            c._status.value = if (denied) "[$groupId] 긴급경보 해제 권한 없음" else "[$groupId] 긴급경보 해제 실패 (${r.code}) — 경보 유지"
             c.emit(PttEventKind.ALERT, groupId)
         }
         c.publish()

@@ -216,7 +216,11 @@ C++ 공개 표면은 `cimsue/engine.h` 의 `Engine` 하나이며 계정·호를 
   임박을 내린다, §6.3.3.1.6 3)d)), 임박은 긴급·경보 지시자 없이(§6.2.8.1.9), 긴급 중 임박 상향은 실패(긴급 해제가 먼저 — §6.2.8.1.9 1)).
   요소 순서 = mcptt-ParamsType(emergency-ind · alert-ind · imminentperil-ind). 보내면서 반영(`Local`) → 2xx `Confirmed` / 4xx~6xx 이전 값 복원
   `Denied`(§6.2.8.1.5 — 미인가 상향 403, 재-INVITE 거절은 호를 끊지 않는다). 서버 재광고(수신 re-INVITE·조인 200 OK 의 mcptt-info) =
-  `Advertised` — emergency-ind true 는 임박을 내린다(§10.1.1.2.1.6 1)d)). Floor Request 의 긴급 비트는 현재값을 따른다. 대상 선택·403 뒤
+  `Advertised` — emergency-ind true 는 임박을 내린다(§10.1.1.2.1.6 1)d)). 임박 상향의 2xx 에 Warning `149`(warn-text 의 MC 코드)가 있으면
+  임박으로 확정하지 않고(`pending` 그대로, §6.2.8.1.4 2)) 같은 다이얼로그의 INFO(Info-Package `g.3gpp.mcptt-info`) 지시자로 끝낸다
+  (§6.2.8.1.13 — `imminentperil-ind` false + `emergency-ind` true = 그룹이 긴급 중, `Advertised`·`mine` false). 재광고 re-INVITE 의
+  `<alert-ind>`(+ `<originated-by>`)는 `onEmergencyAlert` 로 올린다(§10.1.1.2.1.6 1)b)·3)b) — 그룹 = 본문에 없으면 그 호의 그룹).
+  Floor Request 의 긴급 비트는 현재값을 따른다. 대상 선택·403 뒤
   normal 재발신·경보 정합은 앱 정책이다. 경보 = `sendEmergencyAlert`(MESSAGE mcptt-info `alert-ind`·`mcptt-client-id`(`AccountConfig.mcpttClientId`,
   비면 `urn:uuid:` instanceId)·ICSI 헤더, 제3자 취소 `originated-by`·그룹 긴급 해제 동봉 §12.1.1.2, Request-URI = `AccountConfig.mcpttServerUri` —
   참여 기능 PSI(ue-init-config `MCPTT-Service-Details/Server-URI`, §12.1.1.1 8)), 비면 그룹 URI(CSP 0.2.166 전 서버)) · 수신 `onEmergencyAlert`(§12.1.1.3 —

@@ -29,5 +29,5 @@
 - S1-UE-ANDROID-BIND     : SWIG 생성 Java 에 SWIGTYPE_p_* 부재 + HttpResult.body=byte[] (녹취 MP4 가 NUL 에서 잘리지 않게) + cimsue.i 타입맵 본문 맨 # 지시문 부재(%# — 플랫폼 분기 보존)
 - S1-UE-ENGINE-SINGLE    : 커밋된 엔진 산출물 부재 + org.pjsip.pjsua2 제공처가 :cimsue-engine 하나(카메라 도우미 PjCamera* 는 pj 를 싣는 두 모듈)
 - S1-UE-CSC-XCHECK       : 코어 csc_client.cpp ↔ :core ProvisioningClient.kt IdMS·프로비저닝 경로 대조
-- S1-UE-TABLET-UNIT      : android/gradlew testDebugUnitTest (:dispatch-tablet·:cimsue — 기기 불필요)
+- S1-UE-TABLET-UNIT      : android/gradlew testDebugUnitTest (:dispatch-tablet·:cimsue·:ptt-client — 기기 불필요)
 """

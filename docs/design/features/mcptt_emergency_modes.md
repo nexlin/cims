@@ -226,12 +226,19 @@ MESSAGE(호 없는 그룹 긴급 상태 해제, §12.1.3.3)도 같은 곳으로 
   발신자 취소로 자동 해제, [닫기]는 로컬 표시만 제거. 내 경보는 같은 배너에 [해제](취소 MESSAGE —
   `cancelAlert`)로 보인다 — 같은 그룹의 내 긴급 세션 배너가 떠 있으면 그 [해제]가 세션 조건과 경보를 함께
   거두므로 경보 배너는 숨긴다. 이력 이벤트 `ALERT/ALERT_IN/ALERT_END`.
-- **단말 SOS 대상 결정** (새 긴급콜 — 통화 중이면 항상 현재 주채널 통화 격상): user-profile
-  문서의 `MCPTTGroupInitiation` entry-info 를 따른다 — `DedicatedGroup`(기본)이면 프로비저닝된
+  **경보 MESSAGE 의 결과**(TS 24.379 §12.1.1.1·§12.1.1.2 — `EmergencyRules.alertStandsAfter`): 발령이 4xx·5xx·6xx(전송 실패·시한 포함)면
+  내 경보 표시를 내린다(MEA 1 — 403 은 «미인가», 그 밖은 «발신 실패»), 취소가 실패하면 경보를 다시 세운다(경보 유지).
+  호에 참여 중인 단말에는 제어 기능이 경보 변화를 MESSAGE 가 아니라 재광고 re-INVITE(`<alert-ind>`·`<originated-by>`,
+  §10.1.1.2.1.6 1)b)·3)b))로 알린다 — 코어가 MESSAGE 와 같은 `onEmergencyAlert` 로 올려 같은 경로로 처리한다(내 경보의 제3자
+  취소 = `originated-by` 가 나 → 내 경보 표시를 내린다).
+- **단말 SOS 대상 결정**(`EmergencyRules.targetGroup` — TS 24.379 §6.2.8.1.8 1) · §12.1.1.1 4)a)i)): user-profile
+  문서의 `MCPTTGroupInitiation` entry-info 를 따른다. `DedicatedGroup` 이면 **다른 그룹에서 통화 중이어도** 전용 긴급그룹이 대상이다 —
+  그 그룹의 세션에 참여 중이면 조건 상향, 아니면 그 그룹으로 긴급 그룹콜을 건다(통화 중인 그룹을 상향하면 서버가 미인가 403 으로
+  거절한다). `UseCurrentlySelectedGroup` 이면 통화 중인 주채널을 상향하고, 통화 중이 아니면 선택 그룹으로 건다. `DedicatedGroup`(기본)이면 프로비저닝된
   전용 긴급그룹(미지정이어도 문서는 TS 24.484 §8.3.2.1 이 "shall" 로 요구하는 EmergencyCall/ImminentPerilCall/EmergencyAlert 를
   항상 싣되 entry-info 를 `UseCurrentlySelectedGroup`(uri-entry = 폴백 그룹)으로 내리고, 개시 인가는 ruleset `allow-emergency-group-call`=false 로 표현 — 단말은 ruleset 으로 차단, 서버도 403), `UseCurrentlySelectedGroup` 이면(uri-entry = 미선택 시 폴백 그룹)
   **선택 그룹 = 마지막 주채널**(`ChannelStore.lastPrimary` 영속 — 참여 전부 이탈 후에도 유지,
-  이력 없으면 그룹 목록 첫 그룹 폴백). 프로파일을 아직 받지 못했으면 SOS 가 먼저 취득한다(최대 3초 —
+  이력 없으면 그룹 목록 첫 그룹 폴백, 선택 그룹이 없으면 문서의 uri-entry — §12.1.1.1 4)a)i)B)). 프로파일을 아직 받지 못했으면 SOS 가 먼저 취득한다(최대 3초 —
   등록 직후 cms NOTIFY 가 토큰보다 먼저 와 조회가 건너뛰어진 경우 등). 취득하고도 없으면(CSC 불통)
   선택 그룹으로 개시한다 — 긴급은 막지 않는다(서버 게이트가 최종 판정). 대상을 정하는 동안 겹친 SOS 는
   무시한다. 경보 MESSAGE 도 같은 대상 그룹으로 보낸다(`EmergencyAlert` entry 공통).
