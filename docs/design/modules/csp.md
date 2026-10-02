@@ -417,7 +417,7 @@ CMP 로스터는 붙는 멤버만 싣는다(멤버마다 `PTT_GROUP_ADD` members
 | 멤버 200 OK | JOIN ②(answer) → 대기 중 개시자 수락 (JOIN 실패 = BYE) |
 | re-INVITE (미디어 변경) | JOIN ② 재선언 — answer 는 스택의 직전 로컬 선언 |
 | BYE·실패 | CMP LEAVE · prearranged 참가자 1명 이하 / chat 0명이면 세션 해제(남은 leg BYE · CMP REMOVE) |
-| CMP 이벤트 | `TRANSMISSION_INACTIVITY` T1 → prearranged 해제 · `TRANSMITTERS` 로그 · `PTT_GROUP_ABORTED` 캐시 정리 |
+| CMP 이벤트 | `TRANSMISSION_INACTIVITY` T1·T5 → prearranged 해제(chat 은 로그만) · `TRANSMITTERS` 로그 · `PTT_GROUP_ABORTED` 캐시 정리 |
 
 ### 3.5 CIbcfModule
 
@@ -958,7 +958,7 @@ CSC admin 서버(HTTPS, 기본 4421)로의 **내부 API 클라이언트** 세 �
 | 클래스 | 호출 | 용도 | 시점 |
 |---|---|---|---|
 | `CCscAvClient` | `POST /internal/aka/av` | IMS AKA 인증 벡터(RAND/AUTN/XRES) — S-CSCF↔HSS/AuC 상당 | AKA 가입자 REGISTER 챌린지마다 (동기) |
-| `CCscEndpointCache` | `GET /internal/mcptt/endpoint` | **단말용 MCPTT 서비스 주소**(`xcap_root`) | 기동 1회 · SIGUSR1 · `CSC_RESTART` (캐시) |
+| `CCscEndpointCache` | `GET /internal/mcptt/endpoint` | **단말용 MCPTT 서비스 주소**(`xcap_root`) + 참여 기능 PSI(`psi.mcptt`·`psi.mcvideo` 의 사용자부 — 제휴 NOTIFY 발신자·MCVideo P-Asserted-Identity, `GetPsiUser`, 없으면 `mcptt_psi`·`mcvideo_psi` — TS 24.484 §7.2.2.1 · TS 24.281 §9.2.1.4.1.1 3)) | 기동 1회 · SIGUSR1 · `CSC_RESTART` (캐시) |
 | `CCspServiceConfig` | `GET /internal/mcptt/service-config` | **service-config 문서**(TS 24.484 §8.4 — Annex A.2.3 서버 취득) → floor 제어 파라미터(on-network `transmit-time/time-limit`=T2 · `fc-timers-counters` T1·T3·T7·T8·T20·C7·C20) · 개별·애드혹 세션 타이머(`<private-call>`·`<anyExt><adhoc-group-call>` — `ParseCallTimers`) · TNG2 · Resource-Priority. `CmpClient` 가 PTT_GROUP_ADD/MODIFY `floor_timers` 로 싣는다(CMP 범위로 맞춤, 1 s 미만 버림) | 기동 · SIGUSR1 · `CSC_RESTART` · `SERVICE_CONFIG_CHANGED` (실패 = 이전 값, 미취득 = CMP 설정값) |
 
 `CCscEndpointCache` 가 취득한 `xcap_root` 는 xcap-diff NOTIFY 의 `xcap-root` 속성과 MCData FD

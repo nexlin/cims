@@ -36,7 +36,7 @@ std::string CCscEndpointCache::Derive() {
     return std::string( "https://" ) + strHost + ":" + szPort + "/";
 }
 
-bool CCscEndpointCache::Fetch( std::string &strOut ) {
+bool CCscEndpointCache::Fetch( std::string &strOut, std::string &strMcpttPsi, std::string &strMcvideoPsi ) {
     if ( gclsSetup.m_strCscInternalToken.empty() ) {
         CLog::Print( LOG_ERROR, "[topology] Setup.Csc.InternalToken 미설정 — MCPTT endpoint 조회 불가" );
         return false;
@@ -82,12 +82,25 @@ bool CCscEndpointCache::Fetch( std::string &strOut ) {
     }
     if ( strRoot[strRoot.size() - 1] != '/' ) strRoot += "/";
     strOut = strRoot;
+    // 참여 기능 PSI (선택) — sip:<user>@<도메인> 의 사용자부만 쓴다(도메인은 PTT 서비스 도메인)
+    if ( root.Has( "psi" ) ) {
+        SimpleJson::JsonNode psi = root.Get( "psi" );
+        auto userOf = []( const std::string &u ) {
+            std::string s = u;
+            const size_t c = s.find( ':' );
+            if ( c != std::string::npos ) s = s.substr( c + 1 );
+            const size_t at = s.find( '@' );
+            return at == std::string::npos ? std::string() : s.substr( 0, at );
+        };
+        if ( psi.Has( "mcptt" ) ) strMcpttPsi = userOf( psi.GetString( "mcptt" ) );
+        if ( psi.Has( "mcvideo" ) ) strMcvideoPsi = userOf( psi.GetString( "mcvideo" ) );
+    }
     return true;
 }
 
 bool CCscEndpointCache::Refresh() {
-    std::string strRoot;
-    const bool bOk = Fetch( strRoot );
+    std::string strRoot, strMcpttPsi, strMcvideoPsi;
+    const bool bOk = Fetch( strRoot, strMcpttPsi, strMcvideoPsi );
 
     std::lock_guard<std::mutex> lock( m_clsMutex );
     m_tLastAttempt = time( NULL );
@@ -96,6 +109,14 @@ bool CCscEndpointCache::Refresh() {
             CLog::Print( LOG_SYSTEM, "[topology] MCPTT xcap-root = %s (CSC 정본)", strRoot.c_str() );
         }
         m_strXcapRoot = strRoot;
+        if ( !strMcpttPsi.empty() && strMcpttPsi != m_strMcpttPsiUser ) {
+            CLog::Print( LOG_SYSTEM, "[topology] MCPTT 참여 기능 PSI = %s (CSC 정본)", strMcpttPsi.c_str() );
+            m_strMcpttPsiUser = strMcpttPsi;
+        }
+        if ( !strMcvideoPsi.empty() && strMcvideoPsi != m_strMcvideoPsiUser ) {
+            CLog::Print( LOG_SYSTEM, "[topology] MCVideo 참여 기능 PSI = %s (CSC 정본)", strMcvideoPsi.c_str() );
+            m_strMcvideoPsiUser = strMcvideoPsi;
+        }
         return true;
     }
     if ( m_strXcapRoot.empty() ) {
@@ -114,11 +135,13 @@ std::string CCscEndpointCache::GetXcapRoot() {
         m_tLastAttempt = time( NULL );  // 시도 선점 — 동시 진입 스레드는 유도값으로 진행
     }
 
-    std::string strRoot;
-    if ( Fetch( strRoot ) ) {
+    std::string strRoot, strMcpttPsi, strMcvideoPsi;
+    if ( Fetch( strRoot, strMcpttPsi, strMcvideoPsi ) ) {
         std::lock_guard<std::mutex> lock( m_clsMutex );
         CLog::Print( LOG_SYSTEM, "[topology] MCPTT xcap-root = %s (CSC 정본)", strRoot.c_str() );
         m_strXcapRoot = strRoot;
+        if ( !strMcpttPsi.empty() ) m_strMcpttPsiUser = strMcpttPsi;
+        if ( !strMcvideoPsi.empty() ) m_strMcvideoPsiUser = strMcvideoPsi;
         return strRoot;
     }
 
@@ -131,4 +154,9 @@ std::string CCscEndpointCache::GetServiceUrlBase() {
     std::string strRoot = GetXcapRoot();
     if ( !strRoot.empty() && strRoot[strRoot.size() - 1] == '/' ) strRoot.erase( strRoot.size() - 1 );
     return strRoot;
+}
+
+std::string CCscEndpointCache::GetPsiUser( bool bMcVideo ) {
+    std::lock_guard<std::mutex> lock( m_clsMutex );
+    return bMcVideo ? m_strMcvideoPsiUser : m_strMcpttPsiUser;
 }

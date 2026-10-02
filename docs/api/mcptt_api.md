@@ -254,7 +254,7 @@ ue-init-config 의 주소류(IdMS/CMS/GMS/KMS/XCAP 루트)의 base 는 CSC 설�
 
 | Method | Path | 인증 | 응답 |
 |---|---|---|---|
-| GET | `/internal/mcptt/endpoint` (admin 4421) | `Bearer {InternalApi.Token}` | `{"xcap_root","mcptt_port","public_url_configured"}` |
+| GET | `/internal/mcptt/endpoint` (admin 4421) | `Bearer {InternalApi.Token}` | `{"xcap_root","mcptt_port","public_url_configured","psi":{"mcptt","mcvideo"}}` — `psi` = 단말이 ue-init-config `<…-Service-Details>/<Server-URI>` 로 받는 참여 기능 PSI(선택 — 없으면 CSP 가 `mcptt_psi`·`mcvideo_psi` 로 본다) |
 | GET | `/internal/mcvideo/service-config` (admin 4421) | `Bearer {InternalApi.Token}` · `If-None-Match` | 단말이 받는 MCVideo service-config 문서와 같은 XML — MCVideo 서버(CSP)가 전송 제어 타이머를 CMP 로 전달한다(변경 통지 = `SERVICE_CONFIG_CHANGED` uri `mcvideo`) |
 
 `/api/v1` 밖이라 OAM 게이트웨이가 프록시하지 않는다(CSP 직접 호출 전용, `/internal/aka/av` 와 동일).

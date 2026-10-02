@@ -20,6 +20,7 @@
 #include <sstream>
 
 #include "CallDir.h"
+#include "CscEndpointCache.h"  // GetPsiUser — 참여 MCVideo 기능 PSI (CSC ue-init-config MCVideo-Service-Details)
 #include "CspAddressing.h"
 #include "CspPttGroup.h"
 #include "CspServiceMap.h"
@@ -46,8 +47,6 @@ extern void EmitAffiliationChanged( const std::string &strGroupId, const char *p
 
 namespace {
 
-    const char *const kMcVideoPsiUser =
-        "mcvideo_psi";  // 참여 MCVideo 기능 PSI (CSC ue-init-config MCVideo-Service-Details)
     const char *const kMcVideoAudioCodec = "AMR-WB/16000";  // MCVideo 음성 성분 (TS 26.281 — mcvideo.md §1.4 K4)
     const int kMcvStreamCap = 16;  // CMP 가 받는 max_transmitters·max_rx_streams 상한 (1~16, cmp_media_api.md §7.9)
 
@@ -375,8 +374,9 @@ bool CMcVideoCallService::_AcceptLeg( Session &clsSes, const std::string &strCal
     pclsOk->AddHeader( "Supported", kMcFocusOkSupported );
     if ( iWarnCode > 0 && pszWarnText )
         pclsOk->AddHeader( "Warning", McpttWarning( iWarnCode, pszWarnText, strDomain ).c_str() );
-    pclsOk->AddHeader( "P-Asserted-Identity",
-                       ( std::string( "<sip:" ) + kMcVideoPsiUser + "@" + strDomain + ">" ).c_str() );
+    pclsOk->AddHeader(
+        "P-Asserted-Identity",
+        ( std::string( "<sip:" ) + gclsCscEndpointCache.GetPsiUser( true ) + "@" + strDomain + ">" ).c_str() );
     if ( !gclsUserAgent.m_clsSipStack.SendSipMessage( pclsOk ) ) return false;
 
     leg.bEstablished = true;
@@ -507,7 +507,7 @@ bool CMcVideoCallService::_InviteMember( Session &clsSes, const CspPttGroup &cls
     // P-Asserted-Identity = 제어 기능 PSI (TS 24.281 §9.2.1.4.1.1 3) — 개시자 200 OK 의 PAI 와 같은 신원, 골든 07).
     //   스택이 From(그룹)으로 먼저 넣은 PAI 는 지운다(RFC 3325 §9.1 — SIP URI 하나)
     McvReplaceHeader( pclsInvite->m_clsHeaderList, "P-Asserted-Identity",
-                      std::string( "<sip:" ) + kMcVideoPsiUser + "@" + strDomain + ">" );
+                      std::string( "<sip:" ) + gclsCscEndpointCache.GetPsiUser( true ) + "@" + strDomain + ">" );
     McStripSessionRefresher( pclsInvite->m_clsHeaderList );
     gclsUserAgent.SetContactParams( strCallId.c_str(), kMcVideoFocusContactParams );
     gclsUserAgent.SetContactUriParams( strCallId.c_str(), ( "gr=" + clsSes.strGr ).c_str() );
@@ -1078,8 +1078,12 @@ void CMcVideoCallService::OnCmpEvent( const std::string &strCmd, const std::stri
         const std::string strTimer = payload.GetString( "timer" );
         CLog::Print( LOG_INFO, "MCVIDEO: group(%s) %s expired%s", strGroupId.c_str(), strTimer.c_str(),
                      bThis ? "" : " (지난 세션)" );
-        // prearranged 의 T1(Inactivity) — 해제(§6.3.8.1 1)). chat 은 참가자가 끝낸다.
-        if ( bThis && strTimer == "T1" && itS->second.bPrearranged ) _ReleaseSession( strGroupId, "T1 inactivity" );
+        // prearranged 의 T1(Inactivity)·T5(Reception Inactivity) — 해제(§6.3.8.1 1) · TS 24.581 표 11.1.3-1 T5 «The
+        // MCVideo call
+        //   is released» · §6.3.6.3.5 2) — 서비스 사업자 정책으로 해제를 고른다). chat 은 참가자가 끝낸다(CMP 가 T5 를
+        //   다시 건다 — §6.3.6.3.5 3)).
+        if ( bThis && ( strTimer == "T1" || strTimer == "T5" ) && itS->second.bPrearranged )
+            _ReleaseSession( strGroupId, strTimer == "T1" ? "T1 inactivity" : "T5 reception inactivity" );
     } else if ( strCmd == "TRANSMITTERS" ) {
         SimpleJson::JsonNode arr = payload.Get( "transmitters" );
         CLog::Print( LOG_INFO, "MCVIDEO: group(%s) transmitters=%d", strGroupId.c_str(),

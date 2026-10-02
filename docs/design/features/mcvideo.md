@@ -343,7 +343,7 @@ chat|prearranged(그룹 속성 `invite_members`) · 개시자 · 시작 시각(T
 | 멤버 200 OK | JOIN ②(answer 주소·포트·`a=ssrc`, 단말 송신 PT = 서버 offer PT) → prearranged 개시 대기면 개시자 수락. JOIN ② 실패 → BYE·leg 정리. 4xx~6xx → leg 정리 |
 | re-INVITE | answer = 스택의 직전 로컬 선언(멤버 CMP 포트·제어 채널·SRTP 서버 키)이되 `a=fmtp:MCVideo` 는 **re-offer 로 다시 짓는다**(offer 에 있던 파라미터 + `mc_transmission_ssrc` — TS 24.581 §14.3.1; 개시 answer 의 `mc_implicit_request`·`mc_granted`·`mc_*_ssrc` 가 갱신 answer 에 남지 않게 — 암묵 요청은 새 세션 개시에서만, §14.3.5). 미디어 변경(망 전환·주소 변경)이면 JOIN ② 재선언(새 주소·PT·`a=ssrc`·SRTP 단말 재키잉 — CMP 는 협상 값만 갱신하고 전송 제어 상태는 둔다), 세션 갱신(미디어 무변경)은 CMP 를 부르지 않는다(leg_liveness.md §6.3). psip 부품 시험 S1-UNIT-PSIP [N] |
 | BYE / 이탈 | CMP LEAVE(같은 멤버의 다른 leg 가 남으면 하지 않는다), leg 제거. **prearranged 는 참가자 1명 이하, chat 은 0명** → 세션 해제(§6.3.8.1 2) — chat 은 참가자가 모이기를 기다리는 세션이다) — 남은 leg 에 BYE/CANCEL, CMP REMOVE. 개시 대기 중에는 개시 쪽 판정(위)만 |
-| CMP `TRANSMISSION_INACTIVITY{T1}` | prearranged 면 해제(§6.3.8.1 1)), chat 은 로그만(세션은 참가자가 끝낸다). `T5` 는 로그만 |
+| CMP `TRANSMISSION_INACTIVITY{T1·T5}` | prearranged 면 해제(T1 = §6.3.8.1 1) · T5 = TS 24.581 표 11.1.3-1 «call is released» — §6.3.6.3.5 의 사업자 정책으로 해제를 고른다), chat 은 로그만(세션은 참가자가 끝내고 CMP 가 T5 를 다시 건다 — §6.3.6.3.5 3)) |
 | TNG3 (`max_duration_sec`) | 해제(§6.3.8.1 5)) |
 | CMP `PTT_GROUP_ABORTED` (service mcvideo) | CMP 가 그룹을 회수했다 — 남은 leg 를 끝내고 캐시를 지운다(REMOVE 는 보내지 않는다). **MCPTT 서비스의 같은 그룹 id 를 건드리지 않는다**(A11 에서 서비스로 가른다) |
 | CMP `TRANSMITTERS` (service mcvideo) | 로그. 통계·이력의 송출 축은 녹취 세그먼트(세그먼트 = 송출 구간, 슬롯 = 송출자)가 원천이다(§5.6) |

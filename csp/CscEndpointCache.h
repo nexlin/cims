@@ -3,7 +3,8 @@
  *
  *   GET {Setup.Csc.Scheme}://{Host}:{Port}/internal/mcptt/endpoint
  *       Authorization: Bearer {Setup.Csc.InternalToken}
- *   → {"xcap_root":"https://host:4430/","mcptt_port":4430,"public_url_configured":bool}
+ *   → {"xcap_root":"https://host:4430/","mcptt_port":4430,"public_url_configured":bool,
+ *      "psi":{"mcptt":"sip:…","mcvideo":"sip:…"}}   ← psi 는 선택(ue-init-config ServiceDetails.*.ServerUri 와 같은 값)
  *
  * 단말이 XCAP 문서(그룹/user-profile/service-config)를 받는 주소의 정본은 **CSC**
  * (`McpttServer.PublicUrl`) 한 곳이다. CSP 에는 그 주소를 적는 설정이 없다 — 과거
@@ -40,14 +41,21 @@ public:
     /** CSC 재조회. 성공 시 true. 기동/SIGUSR1/CSC_RESTART 경로에서 호출. */
     bool Refresh();
 
+    /** 참여 기능 PSI 의 사용자부 — 단말이 ue-init-config(<…-Service-Details>/<Server-URI>)로 받는 PSI 와 같아야 한다
+     *  (TS 24.484 §7.2.2.1 · TS 24.281 §9.2.1.4.1.1 3)). CSC 응답의 `psi.{mcptt,mcvideo}` 가 정본이고, 없으면(구 CSC)
+     *  기본값 mcptt_psi · mcvideo_psi. CSP 가 내는 P-Asserted-Identity·제휴 NOTIFY 발신자에 쓴다. */
+    std::string GetPsiUser( bool bMcVideo );
+
 private:
     /** 설정 유도값 — CSC 주소 + 기본 MCPTT 포트. 조회 실패 시의 최후 폴백. */
     std::string Derive();
-    bool Fetch( std::string &strOut );
+    bool Fetch( std::string &strOut, std::string &strMcpttPsi, std::string &strMcvideoPsi );
 
     std::mutex m_clsMutex;
-    std::string m_strXcapRoot;  // 마지막 성공값 (빈 문자열 = 미취득)
-    time_t m_tLastAttempt = 0;  // 실패 후 재시도 억제 (스탬피드 방지)
+    std::string m_strXcapRoot;                        // 마지막 성공값 (빈 문자열 = 미취득)
+    std::string m_strMcpttPsiUser = "mcptt_psi";      // CSC psi.mcptt 의 사용자부 (없으면 기본값)
+    std::string m_strMcvideoPsiUser = "mcvideo_psi";  // CSC psi.mcvideo 의 사용자부
+    time_t m_tLastAttempt = 0;                        // 실패 후 재시도 억제 (스탬피드 방지)
 };
 
 extern CCscEndpointCache gclsCscEndpointCache;

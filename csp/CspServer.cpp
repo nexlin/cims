@@ -969,10 +969,11 @@ static void SendNotifyToSubscriber( const SubscriptionInfo &sub, const std::stri
         // dialog-event: notifier = 감시 대상 AoR (RFC 4235, watched resource)
         pMsg->m_clsFrom.m_clsUri.Set( "sip", sub.strResourceId.c_str(), strLocalIp.c_str(), iLocalPort );
     } else {
-        std::string strServerPsi = ( sub.strEventType == "gms" )                   ? "gms_psi"
-                                   : ( sub.strEventType == "affiliation" )         ? "mcptt_psi"
-                                   : ( sub.strEventType == "mcvideo_affiliation" ) ? "mcvideo_psi"
-                                                                                   : "cms_psi";
+        std::string strServerPsi = ( sub.strEventType == "gms" )           ? "gms_psi"
+                                   : ( sub.strEventType == "affiliation" ) ? gclsCscEndpointCache.GetPsiUser( false )
+                                   : ( sub.strEventType == "mcvideo_affiliation" )
+                                       ? gclsCscEndpointCache.GetPsiUser( true )
+                                       : "cms_psi";
         pMsg->m_clsFrom.m_clsUri.Set( "sip", strServerPsi.c_str(), strLocalIp.c_str(), iLocalPort );
     }
     if ( !sub.strToTag.empty() ) {
@@ -1122,10 +1123,11 @@ void SendTerminatedNotify( const SubscriptionInfo &sub, const char *pszReason ) 
         // dialog-event: notifier = 감시 대상 AoR (RFC 4235, watched resource)
         pMsg->m_clsFrom.m_clsUri.Set( "sip", sub.strResourceId.c_str(), strLocalIp.c_str(), iLocalPort );
     } else {
-        std::string strServerPsi = ( sub.strEventType == "gms" )                   ? "gms_psi"
-                                   : ( sub.strEventType == "affiliation" )         ? "mcptt_psi"
-                                   : ( sub.strEventType == "mcvideo_affiliation" ) ? "mcvideo_psi"
-                                                                                   : "cms_psi";
+        std::string strServerPsi = ( sub.strEventType == "gms" )           ? "gms_psi"
+                                   : ( sub.strEventType == "affiliation" ) ? gclsCscEndpointCache.GetPsiUser( false )
+                                   : ( sub.strEventType == "mcvideo_affiliation" )
+                                       ? gclsCscEndpointCache.GetPsiUser( true )
+                                       : "cms_psi";
         pMsg->m_clsFrom.m_clsUri.Set( "sip", strServerPsi.c_str(), strLocalIp.c_str(), iLocalPort );
     }
     if ( !sub.strToTag.empty() ) {

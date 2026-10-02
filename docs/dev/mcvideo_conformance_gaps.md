@@ -44,16 +44,16 @@ MCPTT 쪽 같은 뿌리의 결함은 [mcptt_conformance_gaps.md](mcptt_conforman
 |---|---|---|---|---|---|
 | 등록·서비스 인가 (VREG) | 3 | — | 1 | 1 | 1 |
 | 제휴 (VAFF) | 7 | 1 | 1 | 5 | — |
-| 그룹 호 — 서버 (VGC) | 7 | — | 1 | 5 | 1 |
+| 그룹 호 — 서버 (VGC) | 6 | — | 1 | 4 | 1 |
 | 그룹 호 — 단말 (VGU) | 2 | — | — | — | 2 |
 | 송출 제어 — 서버 (TCS) | 9 | — | — | 4 | 5 |
 | 송출 제어 — 단말 (TCU) | 1 | — | — | 1 | — |
 | 수신 제어 — 서버 (RCS) | 1 | — | — | — | 1 |
 | 그룹 문서 (VGMS) | 1 | — | 1 | — | — |
 | 설정 문서·CMS (VCMS) | 1 | — | 1 | — | — |
-| **계** | **32** | **1** | **5** | **16** | **10** |
+| **계** | **31** | **1** | **5** | **15** | **10** |
 
-확인 수준 — ◎ 18 · ○ 9 · △ 5.
+확인 수준 — ◎ 17 · ○ 9 · △ 5.
 
 읽는 순서 — §2(먼저 볼 것) → §3(영역별 전체) → §4(미구현 목록에 빠진 기능) → §5(문서 정정) → §6(묶음과 순서).
 
@@ -110,11 +110,10 @@ MCPTT 쪽 같은 뿌리의 결함은 [mcptt_conformance_gaps.md](mcptt_conforman
 |---|---|---|---|---|---|---|
 | VGC-2 | B | CSP | §9.2.1.4.6 — 새로 제휴했거나 돌아온 클라이언트를 진행 중 prearranged 호에 초대(late call entry) (shall) | MCVideo 제휴 PUBLISH(`csp/CscfModule.cpp:2060-2087`)·설정 그룹 암묵 제휴(`:873-883`) 어디에도 진행 중 세션 초대가 없다. 팬아웃은 새 세션 개시 때 한 번(`csp/McVideoCallService.cpp:786-815`) | 개시 뒤에 제휴·재등록한 멤버는 그 호를 받지 못한다 — 세션 식별자를 모르면 재합류도 못 한다(MCPTT GCS-4 의 MCVideo 경로) | ◎ |
 | VGC-8 | C | CSP | §6.3.3.1.1 1)a)·2) — 초대 offer 의 영상 미디어 = 개시자 offer 의 그 m-line(미디어 속성 전부), 진행 중 세션이면 그 세션이 쓰는 스트림 | 초대 offer 를 코덱 테이블 AMR-WB + psip 고정 H.264 로 짓는다(`csp/McVideoCallService.cpp:436-445`) — 개시자 offer 의 profile-level-id·해상도·`a=` 속성이 옮겨지지 않는다 | 개시자와 초대 멤버의 영상 형식이 다를 수 있다(CMP 는 트랜스코딩하지 않는다) | ○ |
-| VGC-9 | C | CSP | TS 24.581 표 11.1.3-1 T5 «On expiry: The MCVideo call is released» | `TRANSMISSION_INACTIVITY{T5}` 는 로그만 한다(`csp/McVideoCallService.cpp:1021-1026`). mcvideo.md §5.2.1 표에 «T5 는 로그만» 이라 적혔지만 §9 편차 메모에 없다 | 수신자가 없는 호가 T5 뒤에도 남는다 | ◎ |
 | VGC-10 | C | CSP·CSC | §9.2.3.4.1 — MCVideo 세션 식별자로 온 conference 구독은 그 MCVideo 세션의 것이고, 그룹 문서 `mcvideo-on-network-allow-conference-state` 로 판정(불허 403 `138`) | `Event: conference` 분기가 서비스를 가르지 않는다 — R-URI 사용자부(포커스 Contact 의 사용자부 = 그룹 id)로 MCPTT conference 구독이 된다(`csp/CscfModule.cpp:1364-1366`). `bAllowConferenceState` 는 적재만 한다. CSC 는 그 요소를 기본 true 로 광고한다(`csc/src/services/mcvideo.py:46`·`:441-442`) | 규격 단말이 MCVideo 세션 참가자 정보를 구독하면 같은 그룹 id 의 MCPTT 로스터를 받거나 4xx 로 끝난다 | △ |
 | VGC-11 | C | CSP | §6.8 · §8.2.2.2.2 — 한 MCVideo ID 의 여러 클라이언트는 따로 참가한다 | 같은 멤버의 새 INVITE 를 «BYE 없는 재합류» 로 보고 옛 leg 를 끝낸다(`csp/McVideoCallService.cpp:755-769`) — 클라이언트를 가리지 않는다. CMP 멤버 키도 (그룹, 사용자)다 | 같은 신원의 두 번째 단말이 합류하면 첫 단말이 끊긴다 | ○ |
 | VGC-12 | C | CSP | §9.2.1.4.4.3 — 제휴 해제 등으로 참가자를 세션에서 뺄 때 BYE | 제휴 해제 PUBLISH(`csp/CscfModule.cpp:2080-2084`)·멤버 제거·MCVideo 서비스 끔이 진행 중 MCVideo leg 에 닿지 않는다 — `McVideoCallService` 에 그룹·제휴 변경 처리기가 없다 | 그룹에서 빠진 멤버가 영상 호에 남아 보내고 받는다(MCPTT GCS-22 의 MCVideo 경로) | ○ |
-| VGC-13 | D | CSP·CSC | §9.2.1.4.1.1 3) — 제어 기능 PSI 를 P-Asserted-Identity 로. TS 24.484 §7.2.2.1 — 참여 기능 PSI = `MCVideo-Service-Details/<Server-URI>` | CSP 는 PSI 를 `mcvideo_psi` 로 고정한다(`csp/McVideoCallService.cpp:49-50`, 제휴 NOTIFY `csp/CspServer.cpp:974`). CSC 는 `UeInitConfig.ServiceDetails.McVideo.ServerUri` 로 다른 PSI 를 줄 수 있다(`csc/src/services/mcptt.py:1914-1918`) | ServerUri 를 바꾼 사이트에서 단말이 겨누는 PSI 와 서버가 내는 PAI·Contact·entity 가 어긋난다 | ○ |
+| VGC-13 | D | CSC | §9.2.1.4.1.1 3) — 제어 기능 PSI 를 P-Asserted-Identity 로. TS 24.484 §7.2.2.1 — 참여 기능 PSI = `MCVideo-Service-Details/<Server-URI>` | CSP 는 CSC `/internal/mcptt/endpoint` 의 선택 필드 `psi.{mcptt,mcvideo}` 를 읽어 PAI·제휴 NOTIFY 발신자에 쓴다(S23 — 없으면 mcptt_psi·mcvideo_psi). CSC 가 아직 그 필드를 내지 않는다(`UeInitConfig.ServiceDetails.*.ServerUri` 를 실어야 한다 — `csc/src/handlers/internal_api.py`) | ServerUri 를 바꾼 사이트에서 단말이 겨누는 PSI 와 서버가 내는 PAI·entity 가 어긋난다 | ○ |
 
 ### 3.4 그룹 호 — 단말 (VGU) — TS 24.281 §6.2 · §9.2.1.2 · §9.2.2.2
 
@@ -189,7 +188,6 @@ MCPTT 쪽 같은 뿌리의 결함은 [mcptt_conformance_gaps.md](mcptt_conforman
 | mcvideo.md §5.1 CMS 단락 · cmp_media_api.md §7.9 `tc_timers` 행 · `csc/src/services/mcptt.py:357` 주석 | CSP 가 `/internal/mcvideo/service-config` 를 받고, T1·T5 밖의 타이머는 service configuration 값 | CSP 에 그 코드가 없고 T1·T5 만 보낸다 — CMP 는 K5 기본값 | TCS-1 |
 | mcvideo.md §5.1 «xcap-diff 통지 축에 두 문서를 싣는 것은 CSP 몫(§5.2)» · §6 V1 «xcap-diff» | (구현된 것처럼 읽힌다) | §5.2 에 구현 서술이 없고 코드에도 없다 — «남은 것» 으로 적어야 한다 | VCMS-1 |
 | mcvideo.md §5.3.1 Transmission Request 행 · cmp_media_api.md §7.9 `recv_only` | 그룹 문서 `<on-network-recvonly>` 면 거절 #5 | 그룹 문서에 그 요소가 없고 CSP 가 보내지 않는다 | TCS-10 |
-| mcvideo.md §5.2.1 표 `TRANSMISSION_INACTIVITY` 행 | «T5 는 로그만» (설계로 적힘) | TS 24.581 표 11.1.3-1 은 T5 만료 = 호 해제 — §9 편차 메모로 옮겨 사유를 적거나 해제해야 한다 | VGC-9 |
 | mcvideo.md §5.5 PTT 단말 | «빈 집합 = Expires 0 = 그 사용자 제휴 전부 해제» 를 피하는 이유로 적음 | 그 서버 동작이 규격(클라이언트 단위 해제)과 다르다 — 편차로 적거나 서버를 고친다 | VAFF-1 |
 | mcvideo.md §5.5 PTT 단말 | «영상 n» 목록(이름·기능 별칭·경과) | 별칭이 서버에서 전달되지 않아 늘 비어 있다 | TCS-2 |
 | `csp/CscfModule.cpp:830` 주석 · `:1885-1889` 문서 주석 | «N2 상한은 … 적용하지 않는다» | MCVideo 는 설정 그룹·PUBLISH 모두 N2 를 적용한다(`:859-867`·`:2038-2059`) — 주석이 MCPTT 몫만 맞다 | — |
@@ -207,7 +205,7 @@ MCPTT 쪽 같은 뿌리의 결함은 [mcptt_conformance_gaps.md](mcptt_conforman
 | 8 | **그룹 문서 PUT 해석** — 없음의 뜻(§7.2.8) | VGMS-1 · VGC-10(CSC 기본값 몫) | .45 CSC |
 | 9 | **단말 호 절차** — poc-settings §7.2.3 송신(+ 서버 §7.3.4 수신과 짝 — 받은 Answer-Mode Indication 으로 멤버 초대의 `Answer-Mode` 를 정한다, 지금은 늘 `Auto`), 제휴 상태 구독, preconfigured-group-use-only, 재합류 UI | VREG-1 · VGU-5 · VGU-6 · VAFF-8 | .45 SDK·현장 → Windows(관제 앱) |
 | 10 | **송출 제어 서버 세부** — 선점 순서, 이른 Granted, 대기 위치 갱신, 무허가 송출 포기, Ack subtype·P 비트, SSRC 기본값, 별칭 전달 | TCS-2 · TCS-3 · TCS-5 · TCS-7 · TCS-8 · TCS-9 · TCS-11 · RCS-2 | .45 CMP(·SDK 별칭) |
-| 12 | **서버 사유 코드·신원 세부** — PSI 고정, 로그오프 바인딩 판정·제휴 정리, conference 구독 서비스 분리, T5 | VGC-13 · VREG-2 · VREG-4 · VGC-10 · VGC-9 | .45 CSP |
+| 12 | **서버 사유 코드·신원 세부** — PSI(CSC 내부 API 필드), 로그오프 바인딩 판정·제휴 정리, conference 구독 서비스 분리 | VGC-13 · VREG-2 · VREG-4 · VGC-10 | .45 CSC·CSP |
 | 13 | **수신 전용 멤버** — 그룹 모델·문서 `<on-network-recvonly>` → CSP JOIN `recv_only`·answer `mc_priority` 생략. MCPTT FCS-14 와 같이 | TCS-10 | .45 CSC·CSP |
 
 **Windows 몫(관제 앱 두 벌)** — SDK·서버가 정해진 뒤 맞춘다.
