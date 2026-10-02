@@ -13,6 +13,8 @@
 .PARAMETER NativeDir       cimsue.dll 위치 (기본 build-win/sdk/bin)
 .PARAMETER OutDir          zip 을 둘 디렉터리 (기본 build-win/dist)
 .PARAMETER NoZip           stage 디렉터리만 만들고 zip 은 생략
+.PARAMETER NewHash         관리 DLL(CimsUe.dll·CimsDispatch.dll)을 비결정적으로 다시 빌드해 파일 해시를 바꾼다 — Smart App Control 이 지금 해시를
+                           막을 때 쓴다(같은 소스의 결정적 빌드는 늘 같은 해시라 다시 게시해도 계속 막힌다, sdk/windows/README.md)
 
 .EXAMPLE
   powershell -ExecutionPolicy Bypass -File windows/dispatch-desktop/publish.ps1
@@ -23,7 +25,8 @@ param(
     [ValidateSet('Release', 'Debug')] [string] $Configuration = 'Release',
     [string] $NativeDir = '',
     [string] $OutDir = '',
-    [switch] $NoZip
+    [switch] $NoZip,
+    [switch] $NewHash
 )
 $ErrorActionPreference = 'Stop'
 
@@ -53,9 +56,16 @@ New-Item -ItemType Directory -Force $stage | Out-Null
 #   PublishTrimmed 는 WPF 미지원. ReadyToRun 은 크기 대비 이득이 작아 끈다.
 Write-Host "== dotnet publish ($Configuration, $Rid, self-contained) → $stage"
 $nativeDirArg = $NativeDir.TrimEnd('\') + '\'
+$hashArgs = @()
+if ($NewHash) {
+    $hashArgs = @('-p:Deterministic=false')     # 전역 속성이라 참조 프로젝트(CimsUe)까지 간다
+    # 중간 산출물을 지워 다시 컴파일하게 한다 — 입력이 같으면 증분 빌드가 앞 빌드(같은 해시)를 그대로 쓴다
+    Get-ChildItem (Join-Path $AppDir "obj\$Configuration"), (Join-Path $RepoRoot "sdk\windows\dotnet\CimsUe\obj\$Configuration") -Recurse -File `
+        -Include 'CimsDispatch.dll', 'CimsUe.dll' -ErrorAction SilentlyContinue | Remove-Item -Force
+}
 & dotnet publish $csproj -c $Configuration -r $Rid --self-contained true -o $stage `
     -p:PublishSingleFile=false -p:PublishReadyToRun=false -p:DebugType=none -p:DebugSymbols=false `
-    "-p:CimsUeNativeDir=$nativeDirArg" -nologo -v:minimal
+    "-p:CimsUeNativeDir=$nativeDirArg" -nologo -v:minimal @hashArgs
 if ($LASTEXITCODE -ne 0) { throw "dotnet publish 실패 (exit $LASTEXITCODE)" }
 
 # ── 2. MSVC 14 런타임 동봉 ──

@@ -78,6 +78,15 @@ public partial class PttModeView : UserControl
         vm.Layout.Save();
     }
 
+    // [＋ 새 대화] 선택 창 — 열리면 검색 칸에 초점, Enter = 맨 위 후보, Esc = 닫기
+    private void NewConvPop_Opened(object sender, EventArgs e) => Dispatcher.BeginInvoke(() => { NewConvBox.Focus(); NewConvBox.SelectAll(); });
+    private void NewConvBox_KeyDown(object sender, KeyEventArgs e)
+    {
+        if (Vm?.McData is not { } m) return;
+        if (e.Key == Key.Enter) { m.PickFirstRecipient(); e.Handled = true; }
+        else if (e.Key == Key.Escape) { m.NewOpen = false; e.Handled = true; }
+    }
+
     private void Input_KeyDown(object sender, KeyEventArgs e)
     {
         if (e.Key == Key.Enter && Keyboard.Modifiers != ModifierKeys.Shift && Vm?.McData is { } m && m.SendCommand.CanExecute(null))

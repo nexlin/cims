@@ -125,7 +125,9 @@ public partial class App : Application
                 bool keypad = e.Args.Contains("--ui-preview-keypad", StringComparer.OrdinalIgnoreCase);
                 int rotate = int.TryParse(Arg("--ui-preview-rotate"), out int rot) ? rot : 0;
                 var vm0 = _mainVm;
-                _main!.Dispatcher.BeginInvoke(DispatcherPriority.ContextIdle, () => vm0.ApplyPreview(mode, panel, keypad, rotate));
+                // --ui-preview-newconv: «메시지» [＋ 새 대화] 선택 창(그룹·사람)을 연 채로 — 팝업은 -pop<n>.png 로 찍힌다
+                bool newConv = e.Args.Contains("--ui-preview-newconv", StringComparer.OrdinalIgnoreCase);
+                _main!.Dispatcher.BeginInvoke(DispatcherPriority.ContextIdle, () => { vm0.ApplyPreview(mode, panel, keypad, rotate); if (newConv) vm0.McData.NewConversationCommand.Execute(null); });
             }
             // --ui-preview-history=call|ptt|video: 이력 화면(§4.6)에 표본 하루를 심어(시간대 밴드·표/카드·선택 세션 패널) 서버 없이 그려 본다.
             //   video = 무전 표본의 영상 세션(MCVideo)을 고르고 영상 칸을 열어 둔다.

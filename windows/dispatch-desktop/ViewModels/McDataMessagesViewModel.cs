@@ -183,10 +183,50 @@ public sealed partial class McDataMessagesViewModel : MessagesViewModelBase
         : SelectedGroup is { } g ? $"그룹 전원에게 ({Selected.Title} · {g.MemberCount}명)" : $"목록에 없는 그룹 ({Selected.Title})";
     /// <summary>[채널 정보 ›] → 오른쪽 채널 상세.</summary>
     public event EventHandler<GroupInfo>? ChannelInfoRequested;
-    /// <summary>[＋ 새 대화] → 오른쪽 [사용자] 목록(사람 메뉴 [무전 메시지]).</summary>
-    public event EventHandler? NewConversationRequested;
     [CommunityToolkit.Mvvm.Input.RelayCommand] private void OpenChannelInfo() { if (SelectedGroup is { } g) ChannelInfoRequested?.Invoke(this, g); }
-    [CommunityToolkit.Mvvm.Input.RelayCommand] private void NewConversation() => NewConversationRequested?.Invoke(this, EventArgs.Empty);
+    // ── [＋ 새 대화](§4.4) — 받을 상대를 고른다: «그룹»(멤버 그룹 = 그룹 전원에게) 과 «사람»(PTT 주소록 = 그 사람에게만) 을 갈라 세운다 ──
+    //   한 목록에 섞지 않는다 — 그룹으로 보내면 편성 전원이 받아, 잘못 고르면 되돌릴 수 없다. 청취 범위 그룹은 내지 않는다(비멤버의 그룹 SDS 는 서버가 403).
+    [CommunityToolkit.Mvvm.ComponentModel.ObservableProperty] private bool _newOpen;
+    [CommunityToolkit.Mvvm.ComponentModel.ObservableProperty] private string _newQuery = "";
+    public IReadOnlyList<RecipientOption> NewGroups { get; private set; } = Array.Empty<RecipientOption>();
+    public IReadOnlyList<RecipientOption> NewPeople { get; private set; } = Array.Empty<RecipientOption>();
+    public string NewGroupsHead => $"그룹 {NewGroups.Count}";
+    public string NewPeopleHead => _newPeopleTotal > NewPeople.Count ? $"사람 {NewPeople.Count} / {_newPeopleTotal} — 검색으로 좁히세요" : $"사람 {NewPeople.Count}";
+    public bool HasNewGroups => NewGroups.Count > 0;
+    public bool HasNewPeople => NewPeople.Count > 0;
+    public string NewEmptyText => NewGroups.Count + NewPeople.Count > 0 ? "" : NewQuery.Trim().Length > 0 ? "일치하는 상대가 없습니다" : "받을 수 있는 상대가 없습니다";
+    private int _newPeopleTotal;
+    private const int NewPeopleMax = 200;      // 한 번에 세우는 사람 줄 — 넘으면 검색으로 좁힌다
+
+    [CommunityToolkit.Mvvm.Input.RelayCommand] private void NewConversation() { NewQuery = ""; BuildRecipients(); NewOpen = true; }
+    partial void OnNewQueryChanged(string value) { if (NewOpen) BuildRecipients(); }
+
+    private void BuildRecipients()
+    {
+        string q = NewQuery.Trim();
+        bool Hit(params string[] f) => q.Length == 0 || f.Any(x => x.Contains(q, StringComparison.OrdinalIgnoreCase));
+        NewGroups = S.Groups.Where(g => g.IsMember)
+            .Select(g => new RecipientOption(g.Uri, g.Name.Length > 0 ? g.Name : g.Id, $"편성 {g.MemberCount}명", g))
+            .Where(o => Hit(o.Title, o.Group!.Id)).OrderBy(o => o.Title, StringComparer.CurrentCulture).ToList();
+        var people = S.Directory.PttUsers.Where(c => c.Number.Length > 0 && !S.IsMe(c.Number))
+            .GroupBy(c => DirectoryService.Normalize(c.Number)).Select(x => x.First())      // 같은 번호의 서버 줄 + CSV 줄은 한 줄로
+            .Select(c => new RecipientOption(c.Number, c.Name.Length > 0 ? c.Name : S.Directory.DisplayNumber(c.Number),
+                                             string.Join(" · ", new[] { "PTT " + S.Directory.DisplayNumber(c.Number), c.OrgCode.Length > 0 ? S.Directory.OrgPath(c.OrgCode) : "" }.Where(x => x.Trim().Length > 0)), null))
+            .Where(o => Hit(o.Title, o.Key, o.Sub)).OrderBy(o => o.Title, StringComparer.CurrentCulture).ToList();
+        _newPeopleTotal = people.Count;
+        NewPeople = people.Count > NewPeopleMax ? people.Take(NewPeopleMax).ToList() : people;
+        foreach (var n in new[] { nameof(NewGroups), nameof(NewPeople), nameof(NewGroupsHead), nameof(NewPeopleHead), nameof(HasNewGroups), nameof(HasNewPeople), nameof(NewEmptyText) }) OnPropertyChanged(n);
+    }
+
+    /// <summary>고른 상대의 대화를 연다 — 주고받은 적이 없으면 빈 대화가 선다(첫 글을 보낼 자리).</summary>
+    [CommunityToolkit.Mvvm.Input.RelayCommand]
+    private void PickRecipient(RecipientOption o)
+    {
+        NewOpen = false;
+        if (o.Group is { } g) OpenGroup(g); else OpenUser(o.Key);
+    }
+    /// <summary>검색 칸 Enter — 맨 위 후보(그룹 먼저).</summary>
+    public void PickFirstRecipient() { if ((NewGroups.FirstOrDefault() ?? NewPeople.FirstOrDefault()) is { } o) PickRecipient(o); }
     protected override void OnSelectionChanged() => RefreshHeader();
     public void RefreshHeader() { foreach (var p in new[] { nameof(SelectedGroup), nameof(IsGroupConv), nameof(HasChannelInfo), nameof(ConvLabel), nameof(ConvSub), nameof(InputHint) }) OnPropertyChanged(p); }
 
@@ -207,4 +247,11 @@ public sealed partial class McDataMessagesViewModel : MessagesViewModelBase
         SelectKey(g.Uri, g.Name, true);
     }
     public void OpenUser(string number) => SelectKey(UserPartConverter.UserPart(number), S.NameOfPtt(number), false);
+}
+
+/// <summary>[＋ 새 대화] 의 후보 한 줄 — 그룹이면 <see cref="Group"/>(키 = 그룹 uri), 사람이면 키 = PTT 번호.</summary>
+public sealed record RecipientOption(string Key, string Title, string Sub, GroupInfo? Group)
+{
+    public bool IsGroup => Group is not null;
+    public string Initial => Title.Length > 0 ? Title[..1] : "?";
 }

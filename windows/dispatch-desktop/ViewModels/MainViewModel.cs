@@ -108,7 +108,6 @@ public sealed partial class MainViewModel : ObservableObject
         TalkBar.FocusRequested += (_, c) => { ShowDispatch("ptt"); OpenChannel(c, toggle: false); };
         McData.UnreadChanged += (_, _) => { PttChannels.SetUnread(g => McData.UnreadOf(g.Uri)); RaiseBadges(); };
         McData.ChannelInfoRequested += (_, g) => FocusChannel(g.Id);
-        McData.NewConversationRequested += (_, _) => OpenUsers();
         PttActivity.ChannelRequested += (_, id) => FocusChannel(id);
         PttActivity.RowRequested += (_, r) => OpenEvent(r);
         Scoped.WindowRequested += (_, s) => MonitorWindowActivateRequested?.Invoke(this, s);

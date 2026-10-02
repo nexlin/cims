@@ -210,7 +210,45 @@
                 <Border Grid.Column="0" BorderBrush="{DynamicResource Brush.Border}" BorderThickness="0,0,1,0">
                     <DockPanel>
                         <DockPanel DockPanel.Dock="Top" Height="48" Margin="16,0,10,0">
-                            <Button DockPanel.Dock="Right" Style="{StaticResource Pill.Line.Sm}" Content="＋ 새 대화" Command="{Binding NewConversationCommand}" ToolTip="사람을 골라 무전 메시지 — [사용자] 패널" />
+                            <Grid DockPanel.Dock="Right">
+                                <!-- [＋ 새 대화](§4.4) — 받을 상대 고르기: «그룹»(그룹 전원에게) 과 «사람»(그 사람에게만) 을 갈라 세운다. 고르면 그 대화가 열린다(없으면 빈 대화) -->
+                                <Button x:Name="NewConvBtn" Style="{StaticResource Pill.Line.Sm}" Content="＋ 새 대화" Command="{Binding NewConversationCommand}" ToolTip="그룹이나 사람을 골라 무전 메시지" />
+                                <Popup IsOpen="{Binding NewOpen, Mode=TwoWay}" PlacementTarget="{Binding ElementName=NewConvBtn}" Placement="Bottom" StaysOpen="False" AllowsTransparency="True" Opened="NewConvPop_Opened">
+                                    <Border Style="{StaticResource PopPanel}" Width="380">
+                                        <DockPanel>
+                                            <Border DockPanel.Dock="Top" Padding="10,8" BorderBrush="{DynamicResource Brush.Border}" BorderThickness="0,0,0,1">
+                                                <TextBox x:Name="NewConvBox" Style="{StaticResource Field}" Height="32" FontSize="14" Text="{Binding NewQuery, UpdateSourceTrigger=PropertyChanged}" KeyDown="NewConvBox_KeyDown" Tag="이름 · PTT 번호 · 조직" />
+                                            </Border>
+                                            <ScrollViewer MaxHeight="420" VerticalScrollBarVisibility="Auto">
+                                                <StackPanel Margin="4,2,4,6">
+                                                    <StackPanel.Resources>
+                                                        <DataTemplate x:Key="RecipientRow">
+                                                            <Button Style="{StaticResource DropItem}" HorizontalContentAlignment="Stretch" Padding="8,6"
+                                                                    Command="{Binding DataContext.PickRecipientCommand, RelativeSource={RelativeSource AncestorType=Popup}}" CommandParameter="{Binding}">
+                                                                <DockPanel>
+                                                                    <Border DockPanel.Dock="Right" Style="{StaticResource Tag}" Height="17" Padding="4,0" VerticalAlignment="Center" Visibility="{Binding IsGroup, Converter={StaticResource BoolToVis}}"><TextBlock Text="그룹" /></Border>
+                                                                    <Border Style="{StaticResource Avatar}" Width="28" Height="28" CornerRadius="14" Margin="0,0,8,0" Tag="{Binding Title, Converter={StaticResource AvatarHue}}">
+                                                                        <TextBlock Text="{Binding Initial}" FontSize="12" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                                                    </Border>
+                                                                    <StackPanel VerticalAlignment="Center">
+                                                                        <TextBlock Text="{Binding Title}" FontSize="13.5" FontWeight="Medium" TextTrimming="CharacterEllipsis" />
+                                                                        <TextBlock Style="{StaticResource Hint}" Text="{Binding Sub}" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" />
+                                                                    </StackPanel>
+                                                                </DockPanel>
+                                                            </Button>
+                                                        </DataTemplate>
+                                                    </StackPanel.Resources>
+                                                    <TextBlock Style="{StaticResource Hint}" Text="{Binding NewEmptyText}" Margin="10,14" Visibility="{Binding NewEmptyText, Converter={StaticResource StrToVis}}" />
+                                                    <TextBlock Style="{StaticResource Hint}" FontWeight="SemiBold" Text="{Binding NewGroupsHead}" Margin="10,8,0,2" Visibility="{Binding HasNewGroups, Converter={StaticResource BoolToVis}}" />
+                                                    <ItemsControl ItemsSource="{Binding NewGroups}" ItemTemplate="{StaticResource RecipientRow}" />
+                                                    <TextBlock Style="{StaticResource Hint}" FontWeight="SemiBold" Text="{Binding NewPeopleHead}" Margin="10,8,0,2" Visibility="{Binding HasNewPeople, Converter={StaticResource BoolToVis}}" />
+                                                    <ItemsControl ItemsSource="{Binding NewPeople}" ItemTemplate="{StaticResource RecipientRow}" />
+                                                </StackPanel>
+                                            </ScrollViewer>
+                                        </DockPanel>
+                                    </Border>
+                                </Popup>
+                            </Grid>
                             <Button DockPanel.Dock="Right" Command="{Binding ToggleFollowCommand}" Margin="0,0,6,0" ToolTip="카드를 누르면 그 채널 대화로">
                                 <Button.Style>
                                     <Style TargetType="Button" BasedOn="{StaticResource Pill.Soft.Sm}">
@@ -228,7 +266,7 @@
                             <RadioButton Style="{StaticResource FilterChip}" Padding="9,0" Content="{Binding UnreadChipText}" IsChecked="{Binding ThreadFilter, Converter={StaticResource Eq}, ConverterParameter=unread, Mode=OneWay}" Command="{Binding SetThreadFilterCommand}" CommandParameter="unread" />
                         </StackPanel>
                         <Grid>
-                            <TextBlock Style="{StaticResource Hint}" Text="대화 없음" Margin="16,6" Visibility="{Binding Threads.Count, Converter={StaticResource ZeroToVis}}" />
+                            <TextBlock Style="{StaticResource Hint}" Text="주고받은 대화가 없습니다 — [＋ 새 대화] 로 그룹이나 사람을 고릅니다" TextWrapping="Wrap" Margin="16,6" Visibility="{Binding Threads.Count, Converter={StaticResource ZeroToVis}}" />
                             <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                                 <ItemsControl ItemsSource="{Binding ThreadsView}">
                                     <ItemsControl.ItemTemplate>

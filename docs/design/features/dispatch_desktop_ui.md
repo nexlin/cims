@@ -175,7 +175,7 @@
 - 개발 스위치: `--ui-preview`(로그인 없이 메인, 실행 중인 관제 앱과 다른 단일 인스턴스 이름) · `--ui-preview-canvas`(두 화면에 표본 — 멤버 그룹 5·청취 범위 8·
   진행 중 그룹콜/개별/애드혹·일제 통화 수신·긴급·VoLTE 통화 2·감청 1·대표번호 대기열·진행 중 dialog·기록·문자·무전 메시지, 조작은 동작 안 함) ·
   `--ui-preview-banner=alerts|incoming|video|none`(video = «새 영상» 배너, 표본 = 순찰1 chat 영상 호 송출 둘) · `--ui-preview-rotate=90|180|270`(보는 영상 회전 — 칸 가로/세로) · `--ui-preview-videotx`(내 영상 송출 중 — 셀프뷰·«보내기 끝»; 영상 칸·셀프뷰 그림은 표본 프레임을 우편함에 넣어 실제 그리기 경로로) ·
-  `--ui-preview-slide=out:<ms>|in:<ms>`(`-shot` 과 함께 — 찍기 <ms> 전에 오른쪽 패널을 닫거나 열어 밀리는 도중의 한 장을 찍는다, §3.6) · `--ui-preview-mode=ptt|call` · `--ui-preview-panel=channel|other|users|group|event|dir` · `--ui-preview-keypad` ·
+  `--ui-preview-slide=out:<ms>|in:<ms>`(`-shot` 과 함께 — 찍기 <ms> 전에 오른쪽 패널을 닫거나 열어 밀리는 도중의 한 장을 찍는다, §3.6) · `--ui-preview-mode=ptt|call` · `--ui-preview-panel=channel|other|users|group|event|dir` · `--ui-preview-keypad` · `--ui-preview-newconv`(«메시지» [＋ 새 대화] 선택 창을 연 채로) ·
   `--ui-preview-screen=history|groups|admin`(관리 화면은 범위 검사 생략, `--ui-preview-canvas` 와 함께면 관리 = 표본 조직 5·구성원 5·접속서비스 3 을 심고 한 명의 편집 폼을, PTT 그룹 = 멤버 셋의 새 그룹 폼(능력·한도 전부)을 연다) · `--ui-preview-history=call|ptt` · `--ui-preview-retheme=light|dark`(창이 다 그려진 뒤 테마를 바꾼다 — 그 테마로 바로 연 그림과 비교해 실행 중 전환에 옛 색이 남는 곳을 찾는다. 색은 전부 테마 토큰을 동적으로 참조하고, 값에 따라 색이 바뀌는 점·아바타도 변환기가 아닌 스타일 트리거로 고른다) · `--ui-preview-shot=<png>`(주 창을 WPF 로 렌더해 PNG 저장 후
   종료 — 화면 잠금·원격 세션에서도 XAML 점검. 별 HWND 인 열린 Popup(사람 메뉴·Ctrl+K·DTMF·전달·드롭다운)은 `<png>-pop<n>.png` 로 따로 찍는다) · `--ui-preview-search=<검색어>`(Ctrl+K 검색을 열어 둔다) · `--ui-preview-person=<번호>`(사람 메뉴를 열어 둔다) · `--ui-preview-admin=org|none`(`-screen=admin` 과 함께 — 구성원 폼 대신 조직 폼 / 자리표시) · `--ui-preview-groups=detail`(`-screen=groups` 와 함께 — 새 그룹 폼 대신 상세(보기) 카드를 표본 문서·멤버로) · `--ui-preview-open=mon|session|dtmf|xfer|chan|suggest|combo`(감청 중 목록·세션 목록·첫 통화 카드의 DTMF/전달·이벤트 채널 거르기·번호칸 제안·보이는 첫 콤보 목록을 열어 둔다). 모드·패널·화면 스위치는 창의 첫 스냅샷 재구성 뒤에 적용한다.
 
@@ -209,7 +209,7 @@
 | 내용 | 여는 곳 | 구성 |
 |---|---|---|
 | **채널 상세** | 내 채널 카드 · 타 채널 행 · 발언 대상 칩 · 배너 [채널로 이동] · «메시지» [채널 정보 ›] · «이벤트» [채널로]·고정 줄 · `Ctrl+K` [채널로] · [PTT 그룹] 화면 [채널로] | 요약 한 줄("멤버 그룹 · 참가 7 · 02:03 · 편성 12 · 발언 김관제") · 라벨(긴급·임박 위험·일제 통화) · 조작(§4.1·§4.2) · **«영상» 절**(영상 채널만 — 연결 상태·볼 때만 영상 칸·«영상 n» 목록 [보기]/[바꿔 보기], §10.3) · **[접속 n \| 편성 m]** 세그먼트 · 사람 줄(아바타 · 이름(나 굵게, « · 발언 중» 녹색) · "PTT 1001 · 순찰대" · 의장 라벨 · [개별][SDS] — 이름을 누르면 사람 메뉴). [편성]은 처음 누를 때 GMS 그룹 문서(`GetGroupAsync`)를 받아 전 멤버를 접속 여부(미참가 흐림)와 함께 보인다. 개별·애드혹은 세그먼트 없이 나 + 상대 |
-| **사용자**(무전) | 탭 줄 [사용자] · 내 채널 [+ 개별 · 애드혹 열기] · «메시지» [＋ 새 대화] · 사람 메뉴 [애드혹에 추가] | 검색(이름 · PTT 번호 · 조직) · 조직 칩(전체 + 위 두 단) · 줄 48(☐ · 이름 · "PTT 1001 · 순찰대" · 상태(어느 채널 참여/발언 중) · ⋮ 사람 메뉴) — 줄을 누르면 고르기 · 바닥 = "n명 선택 · 선택 해제" · ☐ 긴급으로 열기 · **[일제 통화]**(한 버튼 — §4.1) · **[애드혹 열기 · 지금 한 번]** · **[그룹으로 저장 ›]** |
+| **사용자**(무전) | 탭 줄 [사용자] · 내 채널 [+ 개별 · 애드혹 열기] · 사람 메뉴 [애드혹에 추가] | 검색(이름 · PTT 번호 · 조직) · 조직 칩(전체 + 위 두 단) · 줄 48(☐ · 이름 · "PTT 1001 · 순찰대" · 상태(어느 채널 참여/발언 중) · ⋮ 사람 메뉴) — 줄을 누르면 고르기 · 바닥 = "n명 선택 · 선택 해제" · ☐ 긴급으로 열기 · **[일제 통화]**(한 버튼 — §4.1) · **[애드혹 열기 · 지금 한 번]** · **[그룹으로 저장 ›]** |
 | **새 PTT 그룹** | 사용자 [그룹으로 저장 ›] | 그룹 이름 · 그룹 id(자동 — 만든 뒤 바꿀 수 없음) · 세션 종류 [편성(prearranged)][채팅(chat)] · 멤버 칩(나 = 의장, 고른 사람 ×) · **[▸ 고급 설정]**(SDS·파일·암호화·긴급·우선순위·확인 통화 — [PTT 그룹] 화면으로 넘어가 **같은 폼**을 이어 쓴다) · [취소][그룹 만들기]. 저장·취소 = 사용자 목록으로(←) |
 | **이벤트 상세** | «이벤트» 행 | 시각(초까지) · 채널 · 종류 · 내용 · 같은 채널의 **앞뒤 이벤트**(앞 둘·뒤 둘, 지금 것 굵게) · [답장](SDS 만 — 그 그룹 대화) · [채널 열기] · [이력에서 세션 보기 ›] |
 | **주소록**(통화) | 탭 줄 [주소록] | 검색(이름 · 번호) · 조직 칩 · 줄 54(이름 · 번호 · 조직 · BLF 상태(통화중·링잉) · [바로 걸기]) — 줄을 누르면 사람 메뉴 · 바닥 = 전화번호부 동기화 시각 |
@@ -368,7 +368,7 @@
 ### 4.4 [무전] 메시지 · 이벤트 / [통화] 기록
 
 **[무전] 메시지**(아래 줄 왼쪽) — [mcdata_messaging.md](mcdata_messaging.md) §5 의 앱 동작. **대화 목록(300, 경계 끌기) : 대화**.
-- 목록 머리: "메시지" · **[따라가기 ✓]**(기본 켬 — 채널 카드를 누르면 그 채널 대화로, 설정 `FollowChannelThread`) · **[＋ 새 대화]**([사용자] 패널 — 사람 메뉴 [무전 메시지]) ·
+- 목록 머리: "메시지" · **[따라가기 ✓]**(기본 켬 — 채널 카드를 누르면 그 채널 대화로, 설정 `FollowChannelThread`) · **[＋ 새 대화]**(받을 상대 선택 창 — 버튼 아래 팝업: 검색(이름 · PTT 번호 · 조직) + **«그룹 n»**(멤버 그룹 — 그룹 전원에게, «편성 n명») 과 **«사람 n»**(PTT 주소록 — 그 사람에게만, "PTT 1001 · 순찰대") 을 갈라 세운다. 한 목록에 섞지 않는다 — 그룹으로 보내면 편성 전원이 받는다. 청취 범위 그룹은 내지 않는다(비멤버의 그룹 SDS 는 서버가 403). 고르면 그 대화가 열리고(주고받은 적이 없으면 빈 대화), Enter = 맨 위 후보 · Esc = 닫기. 사람이 200 을 넘으면 검색으로 좁힌다. 태블릿 «새 대화»(android_dispatch_tablet.md §6.9a)와 같은 의미론) ·
   거르기 **[전체|그룹|1:1|안 읽음 n]**. 줄(60) = 아바타(그룹 = 모서리 8, 1:1 = 원) · 이름(안 읽으면 굵게) · [그룹]/[1:1] 라벨 · 마지막 말 미리 보기(«나: …» / «박경장: …» /
   파일 이름) · 시각 · 안 읽은 수. 고른 대화 = 왼쪽 3px 먹 띠 + 연한 면. 스레드 키는 그룹 = `groupUri`, 1:1 = 상대(`threadKeyOf` 규칙).
   **그룹 대화의 이름은 그룹 이름이다(키인 uri 를 내지 않는다)** — 지금 그룹 목록(멤버·청취 범위)의 이름을 쓰고 목록이 바뀌면(추가·삭제·이름 변경) 따라 바뀐다.
@@ -976,7 +976,7 @@ windows/dispatch-desktop/                 DispatchDesktop.csproj — net10.0-win
                                 검색(`SearchOpen`) · 정렬 긴급 › 청취 중 › 진행 › 대기 · `SubLine` · 청취 토글(`ToggleListen` = listenOnly join / hangup)·[창으로] · `Mark`(고른 행) · 마지막 세션 메모 ·
                                 `ListeningText`(동시 청취 n/상한)
     McDataMessagesViewModel     «메시지» — 대화(그룹·1:1 양방향)·말풍선·disposition 자동 회신·발신 token 으로 MESSAGE 최종 응답 상관 · 대화 머리(`SelectedGroup`·`ConvLabel`·`ConvSub`·
-                                `InputHint`·[채널 정보 ›]) · `FollowGroup`([따라가기]) · [＋ 새 대화] · 파일 `AttachCore`([📎])·`SendFileAsync`(끌어 놓기 공용 — 업로드 → FD 알림, 재전송)
+                                `InputHint`·[채널 정보 ›]) · `FollowGroup`([따라가기]) · [＋ 새 대화] 선택 창(`NewConversation`·`BuildRecipients`·`PickRecipient` — `RecipientOption`) · 파일 `AttachCore`([📎])·`SendFileAsync`(끌어 놓기 공용 — 업로드 → FD 알림, 재전송)
     MessagesViewModelBase       대화 목록 `ThreadsView`(거르기 all|group|one|unread) · 빠른 답 `QuickReplies`/`QuickReplyCommand`(곧바로 보냄) · 첨부 말풍선 명령(`DownloadFile`/`OpenFile`/`ShowFile`) ·
                                 `ToggleFollow`·`UnreadOf`·`UnreadChanged` (SMS 와 공용)
     PttActivityViewModel        «이벤트» — `EventRow`(시각·채널·종류·내용, `EventClass` 발언/입퇴장/긴급/SDS/오류) · 종류 칩(`EventKindChip` 켜고 끄기 + 수) · 채널 거르기 · `Pinned`(진행 중
@@ -1049,7 +1049,7 @@ windows/dispatch-desktop/                 DispatchDesktop.csproj — net10.0-win
 `e_sqlite3.dll`, `directory.sample.csv`, README.txt 를 담는다. 대상 PC 요구 = Windows 10 1809+/11 x64 뿐. 진입점은 둘 — `CimsDispatch.exe`(apphost) 와
 `CimsDispatch-run.cmd`: Windows 11 Smart App Control 이 켜진 PC 는 미서명 apphost 를 파일 평판으로 차단하므로, Microsoft 서명 dotnet 뮤서(`dotnet.exe` +
 `host/fxr/<ver>/hostfxr.dll`, 게시된 런타임과 같은 버전)를 동봉하고 `.cmd` 가 콘솔 창 없이 `dotnet.exe CimsDispatch.dll` 로 같은 앱을 띄운다(hostfxr 가 runtimeconfig
-`includedFrameworks` 를 보고 앱 폴더의 런타임을 쓴다 — SAC 는 exe 만 막고 이 앱의 관리/네이티브 DLL 은 통과, 개발 PC 실측). 사용자 데이터는 `%APPDATA%\CIMS\dispatch-desktop`.
+`includedFrameworks` 를 보고 앱 폴더의 런타임을 쓴다). SAC 는 서명 없는 DLL 도 **파일 해시마다** 판정한다 — 새로 빌드한 `CimsUe.dll`·`CimsDispatch.dll`·`cimsue.dll` 이 막히면(로드 오류 4551) 같은 소스의 결정적 빌드는 다시 게시해도 같은 해시라 계속 막힌다. `publish.ps1 -NewHash` 가 관리 DLL 을 비결정적으로 다시 빌드해 해시를 바꾸고, 네이티브는 다시 링크한다(sdk/windows/README.md). 사용자 데이터는 `%APPDATA%\CIMS\dispatch-desktop`.
 코드 서명·MSIX 는 향후 과제(서명 인증서가 생기면 apphost 하나로 충분해 `.cmd` 진입점을 거둔다).
 
 - **배치 = 고정 Grid**(도킹 라이브러리 없음). 칸 경계는 `GridSplitter`(`Seam` 스타일 — 1px 선 위 투명 손잡이), 놓을 때 `LayoutStore.File.Seams` 에 저장한다(§3.3).
