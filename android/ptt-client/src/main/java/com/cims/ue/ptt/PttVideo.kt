@@ -90,6 +90,8 @@ internal class VideoPlane(private val c: PttController, context: Context) {
         var active = false
         var leaving = false                                            // hangup 을 보냈다(끝나기를 기다린다)
         var opening = false                                            // 내가 연 prearranged 호(§9.2.1.2.1.1)
+        var prearranged = false                                        // prearranged 호(초대·개시·재합류) — chat 은 sync 가 다시 합류한다
+        var sessionUri = ""                                            // 제어 기능이 준 MCVideo 세션 식별자(재합류 R-URI — §9.2.1.2.4)
         var tx = TransmissionState.NO_PERMISSION
         var sendingSince = 0L
         val receivers = HashSet<String>()
@@ -132,6 +134,7 @@ internal class VideoPlane(private val c: PttController, context: Context) {
     private var wasRegistered = false
     private val retryAt = HashMap<String, Long>()                      // 합류 재시도 가능 시각(elapsedRealtime) (c.lock 아래)
     private val failures = HashMap<String, Int>()
+    private val rejoin = HashMap<String, String>()                     // 그룹 → 잃은 prearranged 세션의 식별자(한 번 재합류, c.lock 아래)
     @Volatile private var ducking = false
     @Volatile private var voiceMuted = false                           // 무전 발언 동안 영상 호 음성을 멈췄다(D12)
 
@@ -196,6 +199,14 @@ internal class VideoPlane(private val c: PttController, context: Context) {
             val due = synchronized(c.lock) { !calls.containsKey(want) && now >= (retryAt[want] ?: 0L) }
             if (due) join(want)
         }
+        // 망이 끊겨 잃은 prearranged 영상 호 — 등록이 돌아오면 세션 식별자로 한 번 재합류한다(TS 24.281 §9.2.1.2.4.1). 채널을 떠났으면 버린다.
+        val back = synchronized(c.lock) {
+            rejoin.keys.filter { it != want }.forEach { rejoin.remove(it) }
+            val now = SystemClock.elapsedRealtime()
+            if (want != null && registered && !calls.containsKey(want) && now >= (retryAt[want] ?: 0L)) rejoin.remove(want) else null
+        }
+        if (want != null && back != null)
+            start(want, VideoGroupCallOptions(prearranged = true, queueing = true, sessionUri = back), opening = false)
     }
 
     private fun notRegistered(): CimsResult<Long> = CimsResult.fail(-1, "not registered")
@@ -230,7 +241,7 @@ internal class VideoPlane(private val c: PttController, context: Context) {
 
     /** chat 그룹 MCVideo 호 합류(§9.2.2 — 합류가 곧 affiliation). 호 종류는 그룹 문서의 `mcvideo-on-network-invite-members` 와 맞아야
      *  한다(§6.3.5.2 — 어긋나면 404 117·118). */
-    private fun join(groupId: String) = start(groupId, VideoGroupCallOptions(prearranged = false), opening = false)
+    private fun join(groupId: String) = start(groupId, VideoGroupCallOptions(prearranged = false, queueing = true), opening = false)
 
     /** prearranged 그룹 MCVideo 호 열기(§9.2.1.2.1.1) — 호가 없는데 [영상 보내기] 를 눌렀다. 송출 요청은 개시 INVITE 에 싣는다(16) · §6.4 —
      *  TS 24.581 §14.2.4 mc_implicit_request). 제어 기능이 MCVideo 로 affiliate 한 멤버를 초대하고 첫 멤버가 붙으면 200 OK, 아무도 붙지 않으면
@@ -238,13 +249,15 @@ internal class VideoPlane(private val c: PttController, context: Context) {
      *  마이크는 요청과 함께 확보한다([setTransmit] 과 같은 이유). */
     private fun open(groupId: String) {
         c.setVideoCapture(true)
-        start(groupId, VideoGroupCallOptions(prearranged = true, implicitTransmissionRequest = true), opening = true)
+        // 송출 요청 대기열을 쓴다 — offer `mc_queueing`(TS 24.581 §14.2.2 «지원하면 싣는다»): 상한에서 거절 #1 대신 «대기 n» 이 된다
+        start(groupId, VideoGroupCallOptions(prearranged = true, queueing = true, implicitTransmissionRequest = true), opening = true)
     }
 
     private fun start(groupId: String, opts: VideoGroupCallOptions, opening: Boolean) {
         synchronized(c.lock) {
             if (calls.containsKey(groupId)) return
             calls[groupId] = Call(groupId).also {
+                it.prearranged = opts.prearranged
                 if (opening) { it.opening = true; it.tx = TransmissionState.PENDING_REQUEST }   // 코어도 호 성립까지 'U: pending request'
             }
         }
@@ -345,7 +358,7 @@ internal class VideoPlane(private val c: PttController, context: Context) {
             val cur = calls[gid]
             val inCall = cur != null && cur.callId >= 0 && cur.callId != ci.callId      // 이미 이 그룹 영상 호에 있다
             CallRules.acceptVideoInvitation(gid, want, inCall).also { ok ->
-                if (ok) calls.getOrPut(gid) { Call(gid) }.callId = ci.callId
+                if (ok) calls.getOrPut(gid) { Call(gid) }.also { it.callId = ci.callId; it.prearranged = true }
             }
         }
         if (!keep) { c.cmd("video decline $gid") { c.ue.call(ci.callId).reject() }; return }
@@ -360,7 +373,10 @@ internal class VideoPlane(private val c: PttController, context: Context) {
         when (ci.state) {
             CallState.ACTIVE -> {
                 val gid = synchronized(c.lock) {
-                    calls.values.firstOrNull { it.callId == ci.callId }?.also { it.active = true }?.groupId
+                    calls.values.firstOrNull { it.callId == ci.callId }?.also {
+                        it.active = true
+                        if (ci.sessionUri.isNotBlank()) it.sessionUri = ci.sessionUri
+                    }?.groupId
                 } ?: return
                 synchronized(c.lock) { failures.remove(gid) }
                 publish()
@@ -376,6 +392,8 @@ internal class VideoPlane(private val c: PttController, context: Context) {
                     if (!call.leaving) c.feedback?.blocked(openFailText(ci.lastCode, ci.lastReason, ci.warningCode))
                 } else if (!call.leaving) {
                     // 내가 나간 게 아니면 다시 맞춘다 — 성립 전 거절은 물러나서, 성립 뒤 서버 해제는 잠깐 뒤(chat 세션은 다시 연다)
+                    if (CallRules.rejoinVideoSession(call.prearranged, call.active, ci.lastCode, call.sessionUri))
+                        synchronized(c.lock) { rejoin[call.groupId] = call.sessionUri }       // 망 끊김으로 잃은 prearranged 호
                     backoff(call.groupId, failed = !call.active || ci.lastCode >= 300)
                 }
                 publish()

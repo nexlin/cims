@@ -14,6 +14,14 @@ internal object CallRules {
         inviteGroup.isNotEmpty() && inviteGroup == videoChannel && !alreadyInCall
 
     /**
+     * 잃은 prearranged 영상 호에 세션 식별자로 재합류할 것인가(TS 24.281 §9.2.1.2.4.1 «커버리지 복귀 때»). 성립했던 호가 **망 문제로**
+     * 끊겼을 때만 — 요청 시한(408)·전송 실패(503)·세션 타이머(pjsip 은 408 로 끝낸다). 서버·상대의 정상 종료(BYE = 200)나
+     * 다른 거절이면 세션이 끝난 것이라 재합류하지 않는다(다음 초대를 기다린다). chat 호는 그냥 다시 합류하므로 대상이 아니다.
+     */
+    fun rejoinVideoSession(prearranged: Boolean, wasActive: Boolean, lastCode: Int, sessionUri: String): Boolean =
+        prearranged && wasActive && sessionUri.isNotBlank() && (lastCode == 408 || lastCode == 503)
+
+    /**
      * 호가 거절됐을 때 사용자에게 보일 사유 — 응답의 Warning 문구 번호(TS 24.379 §4.4.2 · TS 24.281 §4.4.2)로 가른다.
      * 모르는 번호·Warning 없는 실패는 null(호출자가 일반 문구를 쓴다).
      */
