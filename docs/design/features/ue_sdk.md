@@ -297,6 +297,9 @@ C++ 공개 표면은 `cimsue/engine.h` 의 `Engine` 하나이며 계정·호를 
   `SIP-If-Match` 로 싣는다. 412 를 받으면 그 ETag 를 버리고(§5 MUST) 같은 요청을 다시 보내지 않으며, `SIP-If-Match` 없는 초기 PUBLISH
   (§4.2)로 한 번 다시 알린다. 앱에는 412 가 올라가지 않고 재발행의 최종 응답이 `affiliate()` 가 돌려준 token 으로 온다(시험
   `AffiliationPublish.StaleEtag412FallsBackToInitialPublish`).
+- **speech 미디어의 `i=speech`**(TS 24.379 §6.2.1 2)d) · §6.2.2 3)e)) — MCPTT 호의 offer·answer 는 `m=audio` 바로 뒤에 `i=speech` 를 싣는다.
+  pjmedia SDP 가 미디어 `i=` 를 담지 못해 송신 직전 보정 모듈(`mod-cimsue-txfix`)이 넣고 multipart 파트의 Content-Length 를 고친다
+  (`mcptt::withSpeechInfo` — MCVideo 의 «… component of MCVideo» 와 같은 자리). floor 제어 채널이 없는 SDP(일반 전화)는 건드리지 않는다.
 - **착신 그룹**(TS 24.379 §10.1.1.4.1.1 4)b) · Annex F.1.3) — 그룹 호 초대의 그룹(`CallInfo.groupId`)은 mcptt-info `<mcptt-calling-group-id>` 다.
   From 은 그룹이 아닐 수 있다(제어 기능 PSI). 요소가 없는 초대만 From 의 user 로 본다.
 - **개별 호의 개시 방식 요청**(TS 24.379 §11.1.1.2.1.1 14) — RFC 5373). `startPrivateCall(peer, {commencement})`: `Auto`·`Manual` = `Answer-Mode`,

@@ -503,6 +503,15 @@ TEST(McpttAdhoc, SessionTypeAndReleaseReason) {
         adhoc.members = {"tel:+82500000002", "tel:+82500000003"};
         auto a = establish("adhoc-82500000001-1790000000", adhoc);
         EXPECT_NE(a.second.find("<session-type>adhoc</session-type>"), std::string::npos) << a.second;
+        // 전송 직전 보정 — speech 미디어의 i=speech(§6.2.1 2)d)), 고친 뒤에도 Content-Length = 본문 바이트
+        {
+            const size_t ma = a.second.find("\r\nm=audio ");
+            ASSERT_NE(ma, std::string::npos);
+            const size_t eol = a.second.find("\r\n", ma + 2);
+            EXPECT_EQ(a.second.compare(eol + 2, 10, "i=speech\r\n"), 0) << a.second.substr(ma, 120);
+            const size_t hb = a.second.find("\r\n\r\n");
+            EXPECT_EQ((size_t)std::atoi(headerOf(a.second, "Content-Length").c_str()), a.second.size() - (hb + 4));
+        }
         EXPECT_NE(a.second.find("resource-lists"), std::string::npos);
         ASSERT_TRUE(eng.hangup(a.first).ok);
         std::string bye = srv.recv("BYE ");
@@ -568,6 +577,18 @@ TEST(McpttPrivate, CommencementModeHeaders) {
         srv.recv("ACK ");
     }
     eng.stop();
+}
+
+// MCPTT speech 미디어의 i=speech(TS 24.379 §6.2.1 2)d) · §6.2.2 3)e)) — m=audio 바로 뒤, MCPTT SDP 에만, 이미 있으면 그대로
+TEST(McpttXml, SpeechInfoLine) {
+    const std::string floor = "m=application 4002 udp MCPTT\r\na=fmtp:MCPTT mc_queueing\r\n";
+    const std::string sdp = "v=0\r\ns=-\r\nc=IN IP4 1.2.3.4\r\nt=0 0\r\nm=audio 4000 RTP/AVP 96\r\na=rtpmap:96 AMR-WB/16000\r\n" + floor;
+    const std::string fixed = mcptt::withSpeechInfo(sdp);
+    EXPECT_NE(fixed.find("m=audio 4000 RTP/AVP 96\r\ni=speech\r\na=rtpmap:96"), std::string::npos) << fixed;
+    EXPECT_EQ(mcptt::withSpeechInfo(fixed), fixed);                                   // 두 번 넣지 않는다
+    EXPECT_EQ(fixed.find("i=speech", fixed.find("m=application")), std::string::npos);   // 제어 채널에는 넣지 않는다
+    const std::string volte = "v=0\r\nm=audio 4000 RTP/AVP 96\r\na=rtpmap:96 AMR-WB/16000\r\n";
+    EXPECT_EQ(mcptt::withSpeechInfo(volte), volte);                                   // MCPTT 호가 아니면 그대로(일반 전화)
 }
 
 TEST(McpttXml, AlertBuildAndParse) {

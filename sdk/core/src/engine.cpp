@@ -282,7 +282,9 @@ pj_status_t mcTxFix(pjsip_tx_data* tdata) {
     const bool mcv = text.find(" MCVideo") != std::string::npos;
     if (!mcv && !mcptt::isMcpttSdp(text)) return PJ_SUCCESS;
     requireTimer(tdata);
-    std::string fixed = !mcv ? text : sdp ? mcvideo::withMediaInfo(text) : mcvideo::withMediaInfoMultipart(text);   // 파트 Content-Length 도
+    // 미디어 성분 표시 i=(MCVideo «… component of MCVideo» · MCPTT «speech» — TS 24.379 §6.2.1 2)d)·§6.2.2 3)e)) — 파트 Content-Length 도 고친다
+    std::string fixed = mcv ? (sdp ? mcvideo::withMediaInfo(text) : mcvideo::withMediaInfoMultipart(text))
+                            : (sdp ? mcptt::withSpeechInfo(text) : mcvideo::mapSdpParts(text, &mcptt::withSpeechInfo));
     // 다이얼로그 안 offer(re-INVITE·UPDATE — pjsip 세션 갱신 포함)는 개시 전용 fmtp 를 뺀다(TS 24.581·24.380 §14.5). 이어지는 offer 는
     //   단일 SDP 다 — MCPTT 긴급·임박 격상 re-INVITE(mcptt-info 를 싣는 multipart)는 거치지 않는다.
     const pjsip_msg* msg = tdata->msg;

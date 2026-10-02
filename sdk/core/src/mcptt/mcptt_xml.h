@@ -86,6 +86,9 @@ bool isMcpttSdp(const std::string& sdp);
  *  multipart 라 이 보정을 거치지 않는다). pjsip 세션 갱신 re-INVITE 는 활성 로컬 SDP(개시 offer)를 그대로 보내므로 송신 직전에
  *  적용한다. 남는 파라미터가 없으면 fmtp 줄을 지운다. MCPTT SDP 가 아니면 그대로. */
 std::string forSubsequentOffer(const std::string& sdp);
+/** MCPTT speech 미디어의 `i=speech`(TS 24.379 §6.2.1 2)d) · §6.2.2 3)e)) — m=audio 바로 뒤에 넣는다(RFC 4566 순서). 이미 있으면 그대로,
+ *  MCPTT SDP 가 아니면 그대로. pjmedia SDP 는 미디어 i= 를 담지 못해 송신 직전에 넣는다. */
+std::string withSpeechInfo(const std::string& sdp);
 
 /** URI → bare id ("tel:+82..@d" / "sip:x@d" / "<...>" → "+82.."). */
 std::string bareId(const std::string& uri);

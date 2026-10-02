@@ -45,7 +45,7 @@ PTT(MCPTT) 서비스 구현을 3GPP 규격 원문과 대조해 **규격과 다�
 | 등록·서비스 인가 (REG) | 4 | — | 3 | — | 1 |
 | 제휴 (AFF) | 10 | 6 | 4 | — | — |
 | 그룹 호 — 서버 (GCS) | 14 | 7 | 4 | 3 | — |
-| 그룹 호 — 단말 (GCC) | 7 | — | 6 | — | 1 |
+| 그룹 호 — 단말 (GCC) | 6 | — | 6 | — | — |
 | 개별 호 (PRV) | 4 | 1 | 3 | — | — |
 | 애드혹 그룹 호 (ADH) | 1 | — | 1 | — | — |
 | 긴급·임박·경보 (EMG) | 3 | 1 | 1 | 1 | — |
@@ -53,9 +53,9 @@ PTT(MCPTT) 서비스 구현을 3GPP 규격 원문과 대조해 **규격과 다�
 | 발언권 SDP 협상 (SDP) | 2 | — | 2 | — | — |
 | 그룹 문서·GMS (GMS) | 6 | — | 6 | — | — |
 | 설정 문서·CMS (CMS) | 2 | — | 1 | 1 | — |
-| **계** | **72** | **17** | **40** | **10** | **5** |
+| **계** | **71** | **17** | **40** | **10** | **4** |
 
-확인 수준 — ◎ 38 · ○ 26 · △ 8.
+확인 수준 — ◎ 37 · ○ 26 · △ 8.
 
 읽는 순서 — §2(먼저 볼 것) → §3(영역별 전체) → §4(미구현 목록에 빠진 기능) → §5(문서 정정) → §6(묶음과 순서).
 
@@ -141,7 +141,6 @@ CSP 는 참여 기능과 제어 기능을 겸한다.
 | GCC-2 | B | SDK | §10.1.1.2.1.1 4) · §6.2.3.1.1 3)·4) — 개시 INVITE·착신 180/200 의 Contact 에 `g.3gpp.mcptt`·MCPTT icsi-ref (shall) | 호별 Contact 태그는 MCVideo 호에만 건다(`sdk/core/src/engine.cpp:1150`·`:1590`). MCPTT 는 계정 Contact 그대로 | 규격 제어 기능은 200 OK Contact 의 태그를 쓴다 | ◎ |
 | GCC-3 | B | SDK | §10.1.1.2.1.1 14)c) — mcptt-info 에 `<mcptt-client-id>`. NOTE 2 — 단말은 발신자 MCPTT ID 를 본문에 싣지 않는다 | `<mcptt-client-id>` 가 없고 `<mcptt-calling-user-id>` 를 싣는다 — `sdk/core/src/mcptt/mcptt_xml.cpp:36-52`. client-id 는 경보 MESSAGE 에만 있다 | 서버가 클라이언트를 가를 값이 없다(AFF-4 의 전제) | ◎ |
 | GCC-4 | B | SDK | §10.1.2.2.1.1 13)a) — chat 합류는 `<session-type>chat`. §17.2.2.1.1 10)a) — 애드혹은 `adhoc` | `isPrivate ? "private" : "prearranged"` — `sdk/core/src/engine.cpp:2666`. `GroupCallOptions` 에 호 종류가 없다(그룹 종류는 `GroupDoc.sessionType` 으로 이미 안다) | 규격 서버에서 chat 합류가 404(118). 짝 = GCS-9 | ◎ |
-| GCC-5 | D | SDK | §6.2.1 2)d) · §6.2.2 3)e) — m=audio 에 `i=speech` | `i=` 는 MCVideo SDP 에만 넣는다 — `sdk/core/src/engine.cpp:271` | 규격 서버·PCC 의 미디어 성분 판별 | ◎ |
 | GCC-7 | B | SDK | §10.1.3.2 2)~5)·8) — conference SUBSCRIBE: Request-URI = 세션 식별자 · P-Preferred-Service · Accept-Contact · Expires 4294967295 · mcptt-info `<mcptt-request-uri>` = 그룹 ID (shall) | `Event: conference`·`Expires: 3600` 만, Request-URI = 그룹 URI, 본문 없음 — `sdk/core/src/engine.cpp:3011-3022`. 앱은 세션 밖의 제휴 그룹 전체를 구독한다 | 규격 서버에서 로스터를 못 받는다. handoff §14.1 의 «구독 3600초 갱신은 규격대로» 는 conference 구독에는 맞지 않는다 | ◎ |
 | GCC-8 | B | SDK | §10.1.1.2.4.1 — 재합류 INVITE 의 Request-URI = 세션 식별자 (shall) | MCPTT 발신은 늘 그룹 URI — `sdk/core/src/engine.cpp:2682`. `CallInfo.sessionUri` 는 MCVideo 호에서만 채운다 | 끝난 세션에 «재합류» 하면 404 대신 새 세션이 열린다 | ◎ |
 

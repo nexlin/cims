@@ -352,6 +352,24 @@ bool isMcpttSdp(const std::string& sdp) {
     return false;
 }
 
+std::string withSpeechInfo(const std::string& sdp) {
+    if (!isMcpttSdp(sdp)) return sdp;
+    std::string out;
+    size_t pos = 0;
+    while (pos < sdp.size()) {
+        size_t nl = sdp.find('\n', pos);
+        const size_t end = nl == std::string::npos ? sdp.size() : nl + 1;
+        const std::string ln = sdp.substr(pos, end - pos);                 // 줄 끝(CRLF·LF) 포함
+        out += ln;
+        if (ln.rfind("m=audio ", 0) == 0 && sdp.compare(end, 2, "i=") != 0) {
+            const bool crlf = ln.size() >= 2 && ln[ln.size() - 2] == '\r';
+            out += std::string("i=speech") + (crlf ? "\r\n" : "\n");
+        }
+        pos = end;
+    }
+    return out;
+}
+
 std::string forSubsequentOffer(const std::string& sdp) {
     if (!isMcpttSdp(sdp)) return sdp;
     static const std::string pre = "a=fmtp:MCPTT";

@@ -270,7 +270,9 @@ static bool ieqPrefix(const std::string& line, const char* name) {
     return true;
 }
 
-std::string withMediaInfoMultipart(const std::string& text) {
+std::string withMediaInfoMultipart(const std::string& text) { return mapSdpParts(text, &mcvideo::withMediaInfo); }
+
+std::string mapSdpParts(const std::string& text, std::string (*fn)(const std::string&)) {
     size_t d0 = text.rfind("--", 0) == 0 ? 0 : text.find("\n--");
     if (d0 == std::string::npos) return text;
     if (d0 != 0) ++d0;
@@ -293,7 +295,7 @@ std::string withMediaInfoMultipart(const std::string& text) {
             for (const auto& h : hdrs)
                 if (ieqPrefix(h, "Content-Type:") && xmlscan::trim(h.substr(13)).rfind("application/sdp", 0) == 0) isSdp = true;
             if (isSdp) {
-                const std::string body = mcvideo::withMediaInfo(part.substr(hb + 4));
+                const std::string body = fn(part.substr(hb + 4));
                 std::string h2;
                 for (const auto& h : hdrs)
                     h2 += (ieqPrefix(h, "Content-Length:") ? "Content-Length: " + std::to_string(body.size()) : h) + "\r\n";

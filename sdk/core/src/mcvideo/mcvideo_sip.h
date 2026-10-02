@@ -104,6 +104,8 @@ std::string forSubsequentOffer(const std::string& sdp);
 /** multipart 본문 텍스트(pjsip 인쇄본 — 파트마다 Content-Type·Content-Length)에서 application/sdp 파트에 withMediaInfo 를 적용하고 그 파트의
  *  Content-Length 를 새 길이로 고친다. 구분자는 본문의 첫 `--` 줄. 다른 파트·서문·끝 구분자는 그대로. */
 std::string withMediaInfoMultipart(const std::string& text);
+/** 같은 일을 주어진 SDP 변환으로 한다 — application/sdp 파트 본문에 fn 을 적용하고 파트 Content-Length 를 고친다(MCPTT 의 `i=speech` 용). */
+std::string mapSdpParts(const std::string& text, std::string (*fn)(const std::string&));
 
 /** 계정 Contact(`"이름" <sip:…>;파라미터`)에서 URI 부분 `<…>` 만 — 서비스 호가 자기 특성 태그를 붙일 바탕. 꺾쇠가 없으면 전체. */
 std::string contactUriPart(const std::string& contact);
