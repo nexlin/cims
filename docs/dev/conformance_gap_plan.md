@@ -117,7 +117,7 @@
 
 | WP | 이름 | 항목 | 급 | 세션 | 선행 | 결정 | 짝 | 상태 |
 |---|---|---|---|---|---|---|---|---|
-| **C01** | MCPTT 설정·그룹 문서 값 | CMS-4 · GMS-7 · GMS-13 · GMS-11 · CMS-7 · CMS-6 · CMS-8 · GMS-12 · GMS-18 · GCC-10 | A4 · B3 · C3 | 1 | — | D2 | S01 · W01(GMS-11·GMS-18 폼) | 완료 (커밋 메시지 «C01») |
+| **C01** | MCPTT 설정·그룹 문서 값 | CMS-4 · GMS-7 · GMS-13 · GMS-11 · CMS-7 · CMS-6 · CMS-8 · GMS-12 · GMS-18 · GCC-10 | A4 · B3 · C3 | 1 | — | D2 | S01 · W01(GMS-11·GMS-18 폼) | 완료 647584ae |
 | **C02** | MCData·MCVideo 문서 값·선호 코덱 검증 | MCData GRP-1 · GRP-2 · GRP-3 / VCMS-3 · VCMS-5 · VGMS-3 · VSDP-1 | B3 · C1 · D3 | 1 | — | D7 | U09(VGU-4 — 단말 offer 가 그룹 선호를 따름) | 대기 |
 | **C03** | user profile·service config 인가 요소(+SDK «없음 = false») | CMS-3 · ADH-1 / VCMS-2 | A1 · B1 · C1 | 1 | — | — | S10 · S11 · W01 | 대기 |
 | **C04** | XCAP 주소·문서 이름(양쪽 수용) | GMS-1 · GMS-6 · CMS-1 · CMS-2 · CMS-9 · CMS-11 · CMS-12 / VCMS-4 · VCMS-6 | B5 · C2 · D2 | 1 | — | — | S19(NOTIFY `sel`) · U07 | 대기 |
