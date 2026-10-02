@@ -95,7 +95,7 @@
 | **S06** | SDP 협상값 집행(우선순위·큐잉 상한) | SDP-3 · PRV-9 · FCS-22 / TCS-4 · TCS-6 · RCS-3 | A1 · B1 · C2 · D2 | 1 | — | — | U02(SDK answer 값) | 완료 117d4a86 |
 | **S07** | MCVideo NAT 합류 알림(실측) | RCS-1 | A1 | 1 | — | — | — (서버만으로 닫힘 — CMP 가 latch 뒤 다시 알린다) | 완료 976d6d97 |
 | **S08** | Warning·응답 코드 — MCPTT | GCS-7 · GCS-8 · GCS-11 · REG-3 · ADH-4 · PRV-6 · PRV-7 · GCS-20 | B5 · C2 · D1 | 1 | — | D9 | U03 · W01(문구 사전) | 완료 a2837b34 (REG-3 enforce → S18 · PRV-7 본문 전달 남김) |
-| **S09** | Warning·응답 코드 — MCData·MCVideo | MCData WRN-1 · WRN-2 · WRN-3 · SDS-4 / VPRV-1 | C4 · D1 | 1 | — | — | W01(문구 사전) | 대기 |
+| **S09** | Warning·응답 코드 — MCData·MCVideo | MCData WRN-1 · WRN-2 · WRN-3 · SDS-4 / VPRV-1 | C4 · D1 | 1 | — | — | W01(문구 사전) | 완료 bdf3d172 (SDS-4 enforce → S18) |
 | **S10** | 개별·애드혹 인가 판정(CSP 몫) | PRV-2 · PRV-4 · PRV-5 · PRV-8 · EMG-4 · ADH-5 | A3 · B3 | 1 | C03 | — | W01(Capabilities 게이트) | 완료 95d7debb (PRV-4 단말 몫 → SDK 묶음 7 · 공유 DB 개별 호 열 마이그레이션 대기) |
 | **S11** | 애드혹 호 절차·인원 상한 | ADH-2 · ADH-3 · ADH-6 · ADH-7 · ADH-9 · ADH-10 | A4 · C1 · D1 | 1 | C03 | — | U04(SDK BYE Reason·`adhoc`) | 완료 096cd123 (ADH-7 SDK 몫 → U04) |
 | **S12** | 제휴 — 클라이언트 단위 키·해제·판정 | AFF-2 · AFF-4 · AFF-5 · AFF-6 / MCData AFF-6 / VAFF-1 · VAFF-2 · VAFF-4 · VAFF-5 · VGC-11 | A4 · B2 · C4 | 2 | — | — | U04(`<mcptt-client-id>`) · U06 | 대기 |
