@@ -90,7 +90,7 @@
 | **S01** | on-network-disabled·정원·N6 집행 | GCS-19 · GCS-5 · GCS-6 / VGC-3 | A3 · B1 | 1 | — | D2 | C01(`<on-network-disabled>`·정원·사용자별 N6 산출) · U03(SDK·앱이 N6 를 따르고 103 을 알림) · W01 | 완료 3309f08f |
 | **S02** | MCVideo 헤더·fmtp·Supported 한두 줄 | AFF-3 · GCS-15 / VGC-4 · VGC-5 · VGC-6 · VGC-7 · VSDP-4 · VAFF-3 | C8 | 1 | — | — | — | 완료 4cb4a0bc |
 | **S03** | 경보·긴급 인가 | EMG-1 · EMG-2 · EMG-5 / MCData EMG-1 / VGC-1 | A2 · B2 · C1 | 1 | — | — | U01(단말 경보 대상) | 완료 f2cc799c |
-| **S04** | 긴급 지시자·상태 통지 | EMG-10 · EMG-11 · EMG-13 · EMG-14 · EMG-15 · EMG-16 · EMG-17 | B1 · C6 | 1 | S03 | — | — | 대기 |
+| **S04** | 긴급 지시자·상태 통지 | EMG-10 · EMG-11 · EMG-13 · EMG-14 · EMG-15 · EMG-16 · EMG-17 | B1 · C6 | 1 | S03 | — | — | 완료 494fda56 (EMG-17 남김 — CSP↔CMP 암묵 발언 요청 계약) |
 | **S05** | MCData 인가·배포 대상 | MCData FD-1 · AFF-3 · AFF-4 · AFF-5 · DISP-2 | A1 · C3 · D1 | 1 | — | — | C07(FD-6 GET 수신 제어) | 완료 29bd2806 (FD-1 남은 몫 → S26) |
 | **S06** | SDP 협상값 집행(우선순위·큐잉 상한) | SDP-3 · PRV-9 · FCS-22 / TCS-4 · TCS-6 · RCS-3 | A1 · B1 · C2 · D2 | 1 | — | — | U02(SDK answer 값) | 완료 117d4a86 |
 | **S07** | MCVideo NAT 합류 알림(실측) | RCS-1 | A1 | 1 | — | — | — (서버만으로 닫힘 — CMP 가 latch 뒤 다시 알린다) | 완료 976d6d97 |
