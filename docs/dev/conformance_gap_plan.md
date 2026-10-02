@@ -105,7 +105,7 @@
 | **S16** | MCData 서버 산출 정합 | MCData SDS-2 · SDS-8 · MSRP-2 · MSRP-6 · FD-4 | B3 · C2 | 1 | — | — | U05(Mandatory download 따름) | 대기 |
 | **S17** | 규격형 요청 수용 — 전환기 | PRV-1 · PRV-3 · GCS-14 / MCData SDS-1 · SDS-5 · CFG-1 | A1 · B3 · C1 · D1 | 2 | — | D3 | U04 · U05 · C01(MCData PSI 광고) | 대기 |
 | **S18** | 엄격 검사 켜기 | GCS-9 · GCS-10 · EMG-12 / MCData MSRP-5 | B1 · C2 · D1 | 1 | U04·U05·외부 | D5 | — | 대기 |
-| **S19** | xcap-diff 구독·통지 | GMS-14 · GMS-15 · CMS-5 / VCMS-1 | B4 | 1 | C04 | — | U07 | 일부 b83c94e1 · a80dd27b (VCMS-1 · CMS-5 그룹 몫 · GMS-14 본문 몫 끝 — GMS-14 토큰 신원·GMS-15·CMS-5 CSC 몫 남음) |
+| **S19** | xcap-diff 구독·통지 | GMS-14 · GMS-15 · CMS-5 / VCMS-1 | B4 | 1 | C04 | — | U07 | 일부 b83c94e1 · a80dd27b · (GMS-15 삭제) (VCMS-1 · CMS-5 그룹 몫 · GMS-14 본문 몫 · GMS-15 삭제 몫 끝 — GMS-14 토큰 신원·GMS-15 ETag·직렬화·CMS-5 CSC 몫 남음) |
 | **S20** | 발언권 메시지 필드·타이머 | FCS-4 · FCS-5 · FCS-7 · FCS-8 · FCS-17 · FCS-18 · FCS-19 · FCS-20 · FCS-21 · FCS-23 · FCS-24 | A2 · B4 · C2 · D3 | 2 | — | D8 | U08(SDK Ack) | 대기 |
 | **S21** | 발언권 확장 형식·수신 전용 멤버 | FCS-6 · FCS-10 · FCS-11 · FCS-12 · FCS-13 · FCS-14 · FCS-15 · FCS-16 · SDP-2 / TCS-10 | B6 · C3 · D1 | 2 | S20 | — | U08(SDK 코덱 생성물) · C05(그룹 문서 요소) | 대기 |
 | **S22** | MCVideo 송출·수신 제어 서버 세부 | TCS-1 · TCS-2 · TCS-3 · TCS-5 · TCS-7 · TCS-8 · TCS-9 · TCS-11 · RCS-2 | C4 · D5 | 2 | — | — | U08(TCU-1) | 일부 1354591e · 7d77120f (TCS-3·5·7·9·11·RCS-2 끝 — TCS-1·TCS-2·TCS-8 남음) |

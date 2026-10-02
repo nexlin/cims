@@ -90,7 +90,7 @@ CCallDir gclsCallDir;
 
 // Forward Declaration for Notify Helpers
 void SendGroupDocNotify( const std::string &strGroupId, const std::set<std::string> &setUsers,
-                         const std::string &strEtag );
+                         const std::string &strEtag, bool bRemoved );
 void SendUserDocNotify( const std::string &strUri, const std::string &strEtag );
 void SendInitialNotify( const SubscriptionInfo &sub );
 void SendRegEventNotify( const std::string &strUserId, const char *pszEvent, const CUserInfo *pclsInfo );
@@ -1412,7 +1412,7 @@ static std::vector<std::string> SubscribedSels( const SubscriptionInfo &sub, F m
 }
 
 void SendGroupDocNotify( const std::string &strGroupId, const std::set<std::string> &setUsers,
-                         const std::string &strEtag ) {
+                         const std::string &strEtag, bool bRemoved ) {
     int nSent = 0;
     for ( const auto &strUser : setUsers ) {
         std::list<SubscriptionInfo> subList;
@@ -1422,7 +1422,15 @@ void SendGroupDocNotify( const std::string &strGroupId, const std::set<std::stri
                 const auto vecSel = SubscribedSels(
                     sub, [&]( const std::string &e ) { return CspXcapSelIsGroupDoc( e, strGroupId ); } );
                 if ( vecSel.empty() ) continue;
-                const std::string strBody = CspXcapDiffDocsBody( gclsCscEndpointCache.GetXcapRoot(), vecSel, strEtag );
+                const std::string strBody =
+                    CspXcapDiffDocsBody( gclsCscEndpointCache.GetXcapRoot(), vecSel, strEtag, bRemoved );
+                SendNotifyToSubscriber( sub, strEtag, strGroupId, NULL, NULL, &strBody );
+            } else if ( bRemoved ) {  // 지워진 그룹 문서 — previous-etag 만(RFC 5874 §3), 선택자는 본문 없는 구독의
+                                      // 고정 형식
+                const std::string strBody = CspXcapDiffDocsBody(
+                    gclsCscEndpointCache.GetXcapRoot(),
+                    { "org.openmobilealliance.groups/users/tel:" + sub.strUserId + "/tel:" + strGroupId }, strEtag,
+                    true );
                 SendNotifyToSubscriber( sub, strEtag, strGroupId, NULL, NULL, &strBody );
             } else {
                 SendNotifyToSubscriber( sub, strEtag, strGroupId );

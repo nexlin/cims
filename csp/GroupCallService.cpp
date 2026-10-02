@@ -52,7 +52,7 @@ extern void SendPttDialogEventNotify( const std::string &strWatchedAor, const st
 
 /** 그룹 문서(GMS) 변경 xcap-diff NOTIFY — setUsers 의 gms 구독자에게 (CspServer.cpp). */
 extern void SendGroupDocNotify( const std::string &strGroupId, const std::set<std::string> &setUsers,
-                                const std::string &strEtag );
+                                const std::string &strEtag, bool bRemoved );
 /** conference 구독자에게 참가자 NOTIFY 푸시 (CspServer.cpp) — 0 이면 구독자 없음(in-dialog 폴백). */
 extern int SendConferenceNotifyToSubscribers( const std::string &strGroupId, const std::string &strBody,
                                               std::set<std::string> *psetNotifiedUsers );
@@ -3169,7 +3169,7 @@ void CGroupCallService::ReloadGroupMap( const std::string &strChangedGroupId, co
         if ( itAfter == mapAfter.end() ) pszWhat = "deleted";
         CLog::Print( LOG_INFO, "ReloadGroupMap: group %s %s — notify %d member(s)", strId.c_str(), pszWhat,
                      (int)setUsers.size() );
-        SendGroupDocNotify( strId, setUsers, strDocEtag );
+        SendGroupDocNotify( strId, setUsers, strDocEtag, itAfter == mapAfter.end() );
     }
 }
 

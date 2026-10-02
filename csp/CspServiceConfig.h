@@ -352,14 +352,15 @@ inline std::string CspUeInitConfigSelector( const std::string &strMcsUeId ) {
     return "org.3gpp.mcptt.ue-init-config/users/sip:" + strId + "/" + strId;
 }
 
-/** xcap-diff 본문(RFC 5874) — 바뀐 문서들(바뀐 것만 — §4.2). strEtag 가 비면 new-etag 를 싣지 않는다. */
+/** xcap-diff 본문(RFC 5874) — 바뀐 문서들(바뀐 것만 — §4.2). strEtag 가 비면 ETag 속성을 싣지 않는다. 문서가 지워졌으면
+ *  (bRemoved) previous-etag 만 싣는다 — 삭제 통지에 new-etag 를 두지 않는다(§3 «MUST NOT be present»). */
 inline std::string CspXcapDiffDocsBody( const std::string &strXcapRoot, const std::vector<std::string> &vecSel,
-                                        const std::string &strEtag ) {
+                                        const std::string &strEtag, bool bRemoved = false ) {
     std::string s = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n";
     s += "<xcap-diff xmlns=\"urn:ietf:params:xml:ns:xcap-diff\" xcap-root=\"" + strXcapRoot + "\">\r\n";
-    for ( const auto &strSel : vecSel )
-        s += "  <document" + ( strEtag.empty() ? std::string() : " new-etag=\"" + strEtag + "\"" ) + " sel=\"" +
-             strSel + "\"/>\r\n";
+    const std::string strAttr =
+        strEtag.empty() ? std::string() : ( bRemoved ? " previous-etag=\"" : " new-etag=\"" ) + strEtag + "\"";
+    for ( const auto &strSel : vecSel ) s += "  <document" + strAttr + " sel=\"" + strSel + "\"/>\r\n";
     s += "</xcap-diff>\r\n";
     return s;
 }

@@ -276,7 +276,8 @@ T100 1 · T101 1 · T103 4 · T104 4 · T132 2 초(TS 24.380 표 11.1.1-1).
 MCS UE ID = 단말 instance ID, 등록 Contact `+sip.instance`). 단말은 그 선택자의 문서를 If-None-Match 로 다시 받는다.
 위 선택자는 본문 없는 구독의 것이다. **규격형 구독**(SUBSCRIBE 본문 `application/resource-lists+xml` 의 `<entry uri>` 마다 문서 하나 — TS 24.481
 §6.3.13.2.1 a) 그룹 문서 «XCAP root 를 base 로 한 상대 경로», TS 24.484 §6.3.13.2 설정 문서)은 NOTIFY `sel` 이 **구독한 entry 그대로**이고 구독하지
-않은 문서는 통지하지 않는다(RFC 5875 §4.6). gms·cms 는 entry 의 AUID 로 가른다(Request-URI = PSI).
+않은 문서는 통지하지 않는다(RFC 5875 §4.6). gms·cms 는 entry 의 AUID 로 가른다(Request-URI = PSI). 그룹 문서가 지워진 통지는 `previous-etag` 만
+싣는다(RFC 5874 §3 — `new-etag` 없음 = 삭제).
 
 ---
 

@@ -140,6 +140,9 @@ int main(){
      !CspXcapSelIsGroupDoc(ents[0],"g-0a1b2c3e") && !CspXcapSelIsGroupDoc(ents[2],"a"));
   CK("auid match",CspXcapSelIsAuid(ents[2],"org.3gpp.mcptt.user-profile") && !CspXcapSelIsAuid(ents[2],"org.3gpp.mcptt.user") &&
      !CspXcapSelIsAuid(ents[0],"org.3gpp.mcptt.user-profile"));
+  const std::string xr = CspXcapDiffDocsBody("r",{"org.openmobilealliance.groups/global/byGroupID/tel:g1"},"e9",true);
+  CK("removed document = previous-etag only (RFC 5874 §3)",xr.find("<document previous-etag=\"e9\" sel=")!=std::string::npos &&
+     xr.find("new-etag")==std::string::npos);
   CK("no body entries",CspXcapDiffEntries("").empty() && CspXcapDiffEntries("<presence entity=\"x\"/>").empty());
   CK("mcptt service config sel",CspMcpttServiceConfigSel("+8250")=="org.3gpp.mcptt.service-config/users/tel:+8250/service-config");
   printf("%s (%d fail)\n",fail?"FAIL":"PASS",fail); return fail?1:0;
