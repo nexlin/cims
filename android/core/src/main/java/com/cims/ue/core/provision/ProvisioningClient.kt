@@ -32,17 +32,45 @@ class ProvisioningClient(
         .apply { CimsTls.apply(this) }
         .build()
 
-    /** IdMS PKCE 로그인 → 토큰. */
+    /**
+     * IdMS PKCE 로그인 → 토큰. 인증 응답의 `state` 가 보낸 값과 다르면 인가 코드를 버리고(TS 33.180 B.4.2.3), 토큰 응답의
+     * ID token 을 검증한다(B.11.1 — [IdToken]). 어긋나면 예외 — 그 토큰은 쓰지 않는다.
+     */
     fun login(userName: String, password: String): TokenSet {
         val verifier = Pkce.newVerifier()
-        val code = requestAuthCode(userName, password, Pkce.challenge(verifier), Pkce.newState())
-        return requestToken(code, verifier)
+        val nonce = Pkce.newState()
+        val code = requestAuthCode(userName, password, Pkce.challenge(verifier), Pkce.newState(), nonce)
+        return requestToken(code, verifier).also { checkIdToken(it.idToken, nonce, required = true, what = "tokenreq") }
     }
 
-    private fun requestAuthCode(userName: String, password: String, challenge: String, state: String): String {
+    /** IdM 서버의 Issuer Identifier — `/.well-known/openid-configuration` 의 `issuer`(OIDC Discovery §3). 서버마다 한 번 받는다. */
+    private fun issuer(): String {
+        ISSUERS[csc.baseUrl]?.let { return it }
+        http.newCall(Request.Builder().url("${csc.baseUrl}/.well-known/openid-configuration").get().build()).execute().use { resp ->
+            val body = resp.body?.string().orEmpty()
+            check(resp.isSuccessful) { "discovery ${resp.code}: $body" }
+            val iss = JSONObject(body).optString("issuer")
+            check(iss.isNotEmpty()) { "discovery: no issuer" }
+            ISSUERS[csc.baseUrl] = iss
+            return iss
+        }
+    }
+
+    /** ID token 검증. [required] = 없으면 실패(로그인) / 있을 때만 본다(갱신 — OIDC Core §12.2). */
+    private fun checkIdToken(idToken: String?, nonce: String?, required: Boolean, what: String) {
+        if (idToken.isNullOrBlank() && !required) return
+        val why = IdToken.rejectReason(idToken, issuer(), csc.clientId, nonce)
+        check(why == null) { "$what: id_token rejected — $why" }
+    }
+
+    private fun requestAuthCode(userName: String, password: String, challenge: String, state: String, nonce: String): String {
         val url = "${csc.baseUrl}/idms/authreq".toHttpUrl().newBuilder()
             .addQueryParameter("user_name", userName)
             .addQueryParameter("user_password", password)
+            // 인증 요청 필수 파라미터(TS 33.180 표 B.4.2.2-1) + nonce(OIDC Core §3.1.2.1)
+            .addQueryParameter("response_type", "code")
+            .addQueryParameter("acr_values", "3gpp:acr:password")
+            .addQueryParameter("nonce", nonce)
             .addQueryParameter("client_id", csc.clientId)
             .addQueryParameter("redirect_uri", csc.redirectUri)
             .addQueryParameter("code_challenge", challenge)
@@ -53,7 +81,9 @@ class ProvisioningClient(
         http.newCall(Request.Builder().url(url).get().build()).execute().use { resp ->
             val body = resp.body?.string().orEmpty()
             check(resp.isSuccessful) { "authreq ${resp.code}: $body" }
-            return JSONObject(body).getString("code")
+            val j = JSONObject(body)
+            check(j.optString("state") == state) { "authreq: state mismatch — authorization code ignored" }
+            return j.getString("code")
         }
     }
 
@@ -101,7 +131,8 @@ class ProvisioningClient(
                 idToken = j.optString("id_token", null),
                 expiresInSec = j.optInt("expires_in", 3600),
                 scope = j.optString("scope", null),
-            )
+            // 갱신 응답의 ID token 은 iss·aud·exp 를 본다 — nonce 는 실리지 않는다(OIDC Core §12.2)
+            ).also { checkIdToken(it.idToken, nonce = null, required = false, what = "refresh") }
         }
     }
 
@@ -216,4 +247,9 @@ class ProvisioningClient(
     /** JSON 명시적 null 안전 문자열 추출 — org.json optString 은 명시적 null 을 "null" 문자열로 만든다. */
     private fun JSONObject.stringOrNull(name: String): String? =
         if (isNull(name)) null else optString(name, null)
+
+    private companion object {
+        /** baseUrl → Issuer Identifier. 프로세스 수명 동안 유지(서버 설정이 바뀌면 앱을 다시 띄운다). */
+        val ISSUERS = java.util.concurrent.ConcurrentHashMap<String, String>()
+    }
 }

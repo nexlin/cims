@@ -696,7 +696,8 @@ struct McVideoSession {
     bool incoming = false;               // 제어 기능의 멤버 초대(§9.2.1.3·§6.3.3.1) — 착신
     std::string sessionUri;              // 제어 기능 Contact 의 MCVideo 세션 식별자(재합류 R-URI — §9.2.1.2.4)
     bool implicitAwaitAnswer = false;    // 개시 INVITE 가 암묵적 송출 요청 — 200 OK answer 의 fmtp 로 판정(TS 24.581 §14.3.4·§14.3.5)
-    std::string pendingAppSdp;           // 송신 SDP 에 주입할 제어 채널 섹션(`m=application <port> udp MCVideo`)
+    std::string pendingAppSdp;           // 송신 SDP 에 주입할 제어 채널 섹션(`m=application <port> udp MCVideo`) — 이 단말의 offer 형식
+    bool queueing = true;                // 이 호에서 송출 요청 대기를 지원한다(발신 = GroupCallOptions.queueing) — answer `mc_queueing`(§14.3.2)
     std::unique_ptr<mcvideo::Participant> tc;
     bool remoteLearned = false;
     bool contactSet = false;             // 다이얼로그 Contact 에 MCVideo 특성 태그를 실었다(setDialogContactParams)
@@ -1053,6 +1054,7 @@ public:
             mcvideo->sessionUri = contact.substr(a + 1, b - a - 1);
         const bool implicitAccepted = mcvideo->implicitAwaitAnswer && f.implicitRequest;
         mcvideo->implicitAwaitAnswer = false;
+        mcvideo->tc->setNegotiatedPriority(f.priority, f.receptionPriority);              // answer 가 정한 상한(§14.3.3·§14.3.6)
         mcvideo->tc->onEstablished(implicitAccepted, implicitAccepted && f.granted, f.hasAudioSsrc ? f.audioSsrc : 0,
                                    f.hasVideoSsrc ? f.videoSsrc : 0);
     }
@@ -1182,12 +1184,21 @@ public:
                 if (whole.empty()) {
                     o_->log(1, "onCallSdpCreated: empty wholeSdp (SDP print buffer overflow) — skip mcvideo inject");
                 } else if (!mcvideo->pendingAppSdp.empty()) {
+                    // 상대 offer 에 답하는 SDP(첫 초대·다이얼로그 안 re-offer)는 그 offer 로 answer fmtp 를 만든다(TS 24.581 §14.3 —
+                    //   offer 에 없던 파라미터를 싣지 않고 mc_priority 를 되돌린다). 이 단말이 내는 offer 는 pendingAppSdp 그대로.
+                    std::string app = mcvideo->pendingAppSdp;
+                    mcvideo::TcFmtp offer;
+                    if (!prm.remSdp.wholeSdp.empty() && mcvideo->tc && learnTcRemote(prm.remSdp.wholeSdp, &offer)) {
+                        app = mcvideo::controlSdp(mcvideo->tc->localPort(),
+                                                  mcvideo::answerFmtp(offer, mcvideo->tc->localSsrc(), mcvideo->queueing));
+                        mcvideo->tc->setNegotiatedPriority(offer.priority, offer.receptionPriority);
+                    }
                     // 영상 없는 빌드 — offer 에 m=video 가 없으면 첫 text 슬롯이 port 0 영상 자리다(setMcVideoMedia)
                     if (prm.remSdp.wholeSdp.empty() && whole.find("m=video") == std::string::npos && whole.find("m=text") != std::string::npos)
                         whole = replaceMediaSection(whole, "m=text", mcvideo::kVideoPlaceholderSdp);
                     const char* slot = whole.find("m=application") != std::string::npos ? "m=application"
                                      : whole.find("m=text") != std::string::npos ? "m=text" : "\x01";
-                    prm.sdp.wholeSdp = replaceMediaSection(whole, slot, mcvideo->pendingAppSdp);
+                    prm.sdp.wholeSdp = replaceMediaSection(whole, slot, app);
                 }
                 if (!prm.remSdp.wholeSdp.empty()) learnTcRemote(prm.remSdp.wholeSdp);         // UAS: 제어 기능 offer
                 // 개시 INVITE Contact = MCVideo 특성 태그(§9.2.1.2.1.1) — pjsua 는 이 콜백 뒤에 INVITE 를 만든다
@@ -1684,12 +1695,9 @@ public:
         if (call->openTc(cfg.effectiveMcpttId())) {
             mcvideo::TcFmtp offer;
             call->learnTcRemote(whole, &offer);
-            mcvideo::TcFmtp ans;
-            ans.queueing = offer.queueing;
-            ans.priority = offer.priority;
-            ans.hasTcSsrc = true;
-            ans.tcSsrc = mv.tc->localSsrc();
-            mv.pendingAppSdp = mcvideo::controlSdp(mv.tc->localPort(), ans);
+            // 초대의 answer(§14.3) — onCallSdpCreated 가 같은 규칙으로 다시 만든다(다이얼로그 안 re-offer 포함)
+            mv.pendingAppSdp = mcvideo::controlSdp(mv.tc->localPort(), mcvideo::answerFmtp(offer, mv.tc->localSsrc(), mv.queueing));
+            mv.tc->setNegotiatedPriority(offer.priority, offer.receptionPriority);
         } else {
             o_->log(1, "mcvideo tc socket bind failed — answer without transmission control");
         }
@@ -2960,6 +2968,7 @@ static int startMcVideo(Engine::Impl* o, int accountId, const std::string& group
     // 제어 채널 소켓은 makeCall 전에 — makeCall 이 동기적으로 onCallSdpCreated 를 부르며 offer 에 포트를 광고한다.
     if (!call->openTc(cfg.effectiveMcpttId())) { o->log(1, "mcvideo tc socket bind failed"); return -1; }
     const bool implicitReq = opts.implicitTransmissionRequest && !rejoin;
+    mv.queueing = opts.queueing;
     mcvideo::TcFmtp f;                                                   // TS 24.581 §14.2
     f.queueing = opts.queueing;
     f.priority = opts.maxPriority;

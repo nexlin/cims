@@ -74,6 +74,10 @@ std::string fmtpString(const TcFmtp& f);
 bool parseControl(const std::string& sdp, std::string& ip, int& port, TcFmtp& fmtp);
 /** 주입할 제어 채널 섹션 `m=application <port> udp MCVideo` + `a=fmtp:MCVideo …`(TS 24.581 표 4.3.3.1-1 — proto 소문자 udp). */
 std::string controlSdp(int port, const TcFmtp& f);
+/** 단말이 내는 answer 의 fmtp(TS 24.581 §14.3) — offer 에 없던 파라미터는 싣지 않는다(§14.3.1). `mc_queueing` = offer 에 있고 이
+ *  단말이 대기를 지원할 때(§14.3.2), `mc_priority`·`mc_reception_priority` = offer 값 그대로(§14.3.3 끝 단락), `mc_transmission_ssrc`
+ *  = offer 에 있으면 이 단말이 고른 값(§14.3.9). `mc_granted`·`mc_implicit_request` 는 제어 기능이 answer 에 싣는 값이라 없다. */
+TcFmtp answerFmtp(const TcFmtp& offer, uint32_t localTcSsrc, bool queueingSupported);
 
 /** 영상 없는 엔진 빌드(PJMEDIA_HAS_VIDEO 0 — Linux 헤드리스·Windows 1차)의 m=video 자리 — port 0(RFC 3264 §5.1 «제안하되 쓰지 않는
  *  스트림»). MCVideo offer 는 m=video 를 빼지 않는다(§6.2.1 3)) — 음성·전송 제어는 그대로 협상된다. */

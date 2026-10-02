@@ -31,6 +31,10 @@ _PATHS = [
     "/idms/authreq",
     "/idms/tokenreq",
     "/provisioning/me",
+    "/.well-known/openid-configuration",     # ID token 의 iss 대조용 발급자(TS 33.180 B.11.1)
+    "acr_values",                             # 인증 요청 필수 파라미터(표 B.4.2.2-1)
+    "id_token rejected",                      # ID token 검증 실패 문구 — 양쪽이 같은 규칙을 쓴다
+    "state mismatch",                         # 인증 응답 state 대조(B.4.2.3)
 ]
 
 

@@ -67,6 +67,10 @@ public:
     void setRemote(const std::string& ip, int port, uint32_t remoteSsrc);
     /** 호 종류 지시자(§9.2.3.11) — 방송·system·긴급·임박 호면 요청에 싣는다. 일반 호는 0(싣지 않는다). */
     void setCallIndicator(int bits);
+    /** 협상한 우선순위 상한(SDP `mc_priority`·`mc_reception_priority` — 발신 = answer 값, 착신 = 되돌린 offer 값, TS 24.581 §14.3.3·
+     *  §14.3.6). 요청의 Transmission/Reception Priority 는 이 값을 넘지 않는다(§6.2.4.3.2 2)a) · §6.2.5.3.3 1)a)). <0 = 협상 없음 —
+     *  그때는 우선순위 필드를 싣지 않는다(기본 우선순위). */
+    void setNegotiatedPriority(int transmission, int reception);
 
     // ── 호 성립 (§6.2.4.2 · §6.2.5.2) ──
     /** 개시 INVITE 가 암묵적 송출 요청이다(offer `mc_implicit_request`) — 'U: pending request to transmit'(§6.2.4.2.2 4). */
@@ -152,6 +156,8 @@ private:
     // 송출('basic transmission control')
     TransmissionState state_ = TransmissionState::NoPermission;
     int priority_ = -1;                                   // 요청 우선순위(재전송에 같게)
+    int maxPriority_ = -1, maxReceptionPriority_ = -1;    // 협상 상한(setNegotiatedPriority)
+    static int capPriority(int asked, int negotiated) { return (asked < 0 || negotiated < 0) ? -1 : (asked < negotiated ? asked : negotiated); }
     int queuePosition_ = -1;
     bool sending_ = false;
     uint32_t txAudioSsrc_ = 0, txVideoSsrc_ = 0;

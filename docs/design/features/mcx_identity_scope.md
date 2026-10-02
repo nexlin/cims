@@ -182,6 +182,21 @@ introspection(`/idms/introspect`, RFC 7662): `active sub iss client_id mcptt_id 
 | SDK `libcimsue` (`csc.h CscEndpoint.scope`) | `openid cims:provisioning` + MC 8종 | — |
 | 외부 규격 SDK | 자체 설정(`3gpp:mc:*` 또는 구 별칭) | — |
 
+### 8.1 단말의 로그인 검증 (TS 33.180 B.4.2.3 · B.11.1 → OIDC Core §3.1.3.7)
+
+CIMS 단말의 로그인 구현은 둘이다 — SDK 코어 `CscClient::login`(`sdk/core/src/csc/csc_client.cpp` — 관제 앱·cimsue-cli)과 Android
+공용 `ProvisioningClient.login`(`android/core` — 로그인 앱·SSO). 둘이 같은 규칙을 쓴다(`S1-UE-CSC-XCHECK`).
+
+| 단계 | 규칙 |
+|---|---|
+| 인증 요청 | `response_type=code` · `client_id`(기본 `MCPTT_UE`) · `redirect_uri` · `scope`(openid 포함) · `state` · `acr_values=3gpp:acr:password`(표 B.4.2.2-1) + PKCE S256 + `nonce`(OIDC Core §3.1.2.1) |
+| 인증 응답 | `state` 가 보낸 값과 다르면 **인가 코드를 버리고 토큰 요청을 보내지 않는다**(B.4.2.3) |
+| ID token | `iss` = 발급자(`/.well-known/openid-configuration` 의 `issuer` — 서버마다 한 번 받는다)와 정확히 같다 · `aud` 에 자기 `client_id` 가 있고 다른 audience 가 없다 · 지금 < `exp`(시계 차 30초 허용 — 표 B.2.1.2-1) · `nonce` = 보낸 값. 어긋나면 로그인 실패, **받은 토큰을 쓰지 않는다** |
+| 갱신(refresh) 응답 | ID token 이 실려 있으면 `iss`·`aud`·`exp` 를 본다(`nonce` 는 실리지 않는다 — OIDC Core §12.2) |
+| 서명 | 검사하지 않는다 — 인가 코드 흐름의 ID token 은 토큰 엔드포인트와의 TLS 로 직접 받으므로 TLS 서버 검증이 서명 검증을 갈음한다(OIDC Core §3.1.3.7 6)). 공개 키는 `/idms/jwks`(§2.1) |
+
+단말 시각이 서버보다 토큰 수명(1시간) 넘게 앞서 있으면 `exp` 판정으로 로그인·갱신이 거절된다(사유 «id_token expired (check the device clock)»).
+
 ## 9. 검증
 
 - **S1-UNIT-CSC** `tests/test_csc_idms_scope.py`: 요청∩카탈로그·미지 제외·별칭 확장/병기·배열형 구 토큰 수용·claim(scope
@@ -189,6 +204,8 @@ introspection(`/idms/introspect`, RFC 7662): `active sub iss client_id mcptt_id 
   전화 전용 계정(MC scope·신원 없음, KMS 403, refresh 로도 못 얻음)·클라이언트 등록 3모드·필수 파라미터·토큰 요청 `redirect_uri` ·
   no-store · refresh 계정 재확인(비밀번호 변경·삭제 → 회수) · Bearer 없음 403 · 서명(RS256 헤더 `kid`·JWKS 의 n·e 로 세운 키로
   ID/access token 검증·키 영속·키 교체 뒤 previous 로 검증·HS256 전환기 수용/거절·다른 키·모르는 `kid`·알고리즘 바꿔치기·`alg none` 거절).
+- **S1-UE-UNIT** `sdk/core/test/csc_test.cpp`(`Csc.LoginValidatesStateAndIdToken`·`RefreshValidatesIdTokenWithoutNonce`·`IdToken.*`) ·
+  **S1-UE-TABLET-UNIT** `android/core` `IdTokenTest` — 인증 요청 파라미터·state 불일치·iss/aud/exp/nonce·ID token 없음·시계 차 30초.
 - **S3** `tests/csc_bootstrap_conformance.py --enforcement enforce|log|off`: Step 3 토큰 계약, Step 3c 카탈로그(video 제외)·
   scope 부족 403(`WWW-Authenticate` 에 필요 scope)·충분 200·refresh 축소/broad 보존·discovery 정합(issuer = 토큰 `iss`).
 

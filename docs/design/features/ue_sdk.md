@@ -341,7 +341,8 @@ C++ 공개 표면은 `cimsue/engine.h` 의 `Engine` 하나이며 계정·호를 
 
 ### 4.4 HTTP 전송 인터페이스
 
-코어가 **프로토콜**(PKCE·Bearer·XCAP 경로·ETag/304·프로비저닝 파싱·FD 업로드)을 소유하고, **전송**은
+코어가 **프로토콜**(PKCE·인증 응답 `state` 대조·ID token 검증(iss·aud·exp·nonce — TS 33.180 B.4.2.3·B.11.1,
+[mcx_identity_scope.md](mcx_identity_scope.md) §8.1)·Bearer·XCAP 경로·ETag/304·프로비저닝 파싱·FD 업로드)을 소유하고, **전송**은
 `http::ITransport{request(method, url, headers, body) → Response}` 로 추상한다. 구현은 OpenSSL 하나
 (`OpenSslTransport` — pjproject 가 이미 OpenSSL 을 링크하므로 추가 의존이 없다). TLS 트러스트(사설 CA)는
 `EngineConfig.trustAnchors`·`CscEndpoint.caPem` 으로 코어에 넘기고 SIP TLS 와 HTTPS 가 같은 앵커를 쓴다.
@@ -496,8 +497,11 @@ MCVideo PSI. 동작(구현 — 시험 `McvSip`·`McvCall`, 계약 K3 골든과 �
   앞)이 본문 인쇄본을 고친다(multipart 는 SDP 파트만 고치고 그 파트의 Content-Length 를 다시 센다). 200 OK 는 협상이 끝난 CONFIRMED 에서 처리한다(pjsip 은 2xx 에서 CONNECTING 을 SDP 협상보다 먼저 낸다) — answer 의 제어 채널
   목적지·`mc_transmission_ssrc`(보내는 전송 제어 헤더 SSRC), 제어 기능 Contact(isfocus)의 세션 식별자 → `CallInfo.sessionUri`, 암묵 요청 결과(§14.3.4·§14.3.5·
   §14.4) → 참여자 성립, 그 뒤에 `Active` 를 알린다(앱이 Active 를 보자마자 `requestTransmission` 할 수 있다). 이어지는 offer 에는 `mc_granted`·`mc_implicit_request`
-  를 싣지 않는다(§14.5). 제어 기능의 멤버 초대(§9.2.1.3)는 mcvideo-info 로 가려 받는다 — 참여자를 180 전에 열고, answer fmtp = offer `mc_priority` 되돌림·
-  offer 에 `mc_queueing` 이 있을 때만 그것·이 단말의 `mc_transmission_ssrc`(§14.3.1~§14.3.3·§14.3.9), 180·200 Contact = MCVideo 태그(§6.2.3.1.1 3)·4)),
+  를 싣지 않는다(§14.5). 제어 기능의 멤버 초대(§9.2.1.3)는 mcvideo-info 로 가려 받는다 — 참여자를 180 전에 열고, answer fmtp = offer `mc_priority`·`mc_reception_priority` 되돌림·
+  offer 에 `mc_queueing` 이 있을 때만 그것·offer 에 `mc_transmission_ssrc` 가 있을 때 이 단말의 값(§14.3.1~§14.3.3·§14.3.9 — `mcvideo::answerFmtp`).
+  **다이얼로그 안에서 제어 기능이 다시 offer 하면(re-INVITE) 그 offer 로 answer fmtp 를 다시 만든다** — 개시 때의 형식을 되풀이하지 않는다.
+  요청의 Transmission/Reception Priority 는 협상값(발신 = answer, 착신 = 되돌린 offer 값)을 넘지 않는다 — 넘으면 협상값으로 낮추고,
+  협상이 없으면 우선순위 필드를 싣지 않는다(§6.2.4.3.2 2)a)·§6.2.5.3.3 1)a) — `Participant::setNegotiatedPriority`), 180·200 Contact = MCVideo 태그(§6.2.3.1.1 3)·4)),
   `autoAnswerMcvideo` 면 곧바로 200(§6.2.3.1.2). 나가기 = `hangup`(MCPTT 호와 독립). 서비스 호 Contact 는 pjsua 에 호별 Contact 파라미터 API 가 없어
   다이얼로그 로컬 Contact 를 개시 INVITE 전(UAC onCallSdpCreated)·180 전(UAS)에 바꾼다(pjsua 내부 표).
 - **송출 게이트** — 마이크·카메라는 'U: has permission to transmit' 에서만 연다. 허가 밖에서 payload 있는 RTP 는 제어 기능이 버리고 회수 #3 을 되풀이하므로

@@ -93,6 +93,7 @@ add_library(cimsue_objs OBJECT
     src/mcdata/msrp.cpp
     src/http/https_client.cpp
     src/csc/csc_client.cpp
+    src/csc/id_token.cpp
     src/csc/group_doc.cpp
     src/csc/cms_doc.cpp
     src/c_api.cpp

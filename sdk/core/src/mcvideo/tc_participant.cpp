@@ -218,6 +218,12 @@ void Participant::onEstablished(bool implicitAccepted, bool granted, uint32_t au
     flush(out);
 }
 
+void Participant::setNegotiatedPriority(int transmission, int reception) {
+    std::lock_guard<std::mutex> lk(m_);
+    maxPriority_ = transmission;
+    maxReceptionPriority_ = reception;
+}
+
 // ── 사용자 조작 ──
 
 Result Participant::requestTransmission(int priority) {
@@ -226,7 +232,7 @@ Result Participant::requestTransmission(int priority) {
         std::lock_guard<std::mutex> lk(m_);
         if (!established_ || releasing_) return Result::fail(-2, "mcvideo call not established");
         if (state_ != TransmissionState::NoPermission) return Result::fail(-2, std::string("transmission ") + toString(state_));
-        priority_ = priority;
+        priority_ = capPriority(priority, maxPriority_);
         retries_ = 1;
         sendTransmissionRequest();
         state_ = TransmissionState::PendingRequest;
@@ -258,7 +264,7 @@ Result Participant::acceptReception(const std::string& transmitterId, int priori
     Reception* r = findReception(transmitterId, 0);
     if (!r) return Result::fail(-2, "no such transmission: " + transmitterId);
     if (r->t.state != ReceptionState::Notified) return Result::fail(-2, std::string("reception ") + toString(r->t.state));
-    r->priority = priority;
+    r->priority = capPriority(priority, maxReceptionPriority_);
     r->retries = 1;
     sendReceiveRequest(*r);
     r->t.state = ReceptionState::PendingRequest;

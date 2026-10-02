@@ -48,15 +48,15 @@ MCPTT 쪽 같은 뿌리의 결함은 [mcptt_conformance_gaps.md](mcptt_conforman
 | 그룹 호 — 단말 (VGU) | 6 | — | — | 2 | 4 |
 | 개별·그 밖의 호 (VPRV) | 1 | — | — | — | 1 |
 | 송출 제어 — 서버 (TCS) | 11 | — | — | 5 | 6 |
-| 송출 제어 — 단말 (TCU) | 4 | — | — | 1 | 3 |
+| 송출 제어 — 단말 (TCU) | 3 | — | — | 1 | 2 |
 | 수신 제어 — 서버 (RCS) | 3 | 1 | — | — | 2 |
 | 수신 제어 — 단말 (RCU) | 1 | — | — | 1 | — |
-| SDP (VSDP) | 3 | — | — | 3 | — |
+| SDP (VSDP) | 2 | — | — | 2 | — |
 | 그룹 문서 (VGMS) | 2 | — | 1 | — | 1 |
 | 설정 문서·CMS (VCMS) | 3 | — | 1 | 1 | 1 |
-| **계** | **57** | **2** | **5** | **30** | **20** |
+| **계** | **55** | **2** | **5** | **29** | **19** |
 
-확인 수준 — ◎ 41 · ○ 8 · △ 8.
+확인 수준 — ◎ 39 · ○ 8 · △ 8.
 
 읽는 순서 — §2(먼저 볼 것) → §3(영역별 전체) → §4(미구현 목록에 빠진 기능) → §5(문서 정정) → §6(묶음과 순서).
 
@@ -169,7 +169,6 @@ MCPTT 쪽 같은 뿌리의 결함은 [mcptt_conformance_gaps.md](mcptt_conforman
 | # | 급 | 대상 | 규격 | CIMS 지금 | 영향 | 확인 |
 |---|---|---|---|---|---|---|
 | TCU-1 | C | SDK·앱 | 표 11.1.1 — T100~T104 는 MCVideo service configuration `<tc-timers-counters-R14>` 값 | `McVideoServiceConfigDoc` 가 T100~T104 를 해석하지만(`sdk/core/src/csc/cms_doc.cpp:230-237`) 참여자는 늘 K5 기본값으로 만든다 — `sdk/core/src/engine.cpp:996` `new mcvideo::Participant(-1, mcvideoTcSsrc(), userId, cb)`(`TcTimers` 인자 없음). 값을 넣을 API 도 없고 앱도 MCVideo service config 를 받지 않는다 | 서버가 바꾼 단말 타이머가 반영되지 않는다(서버 쪽 짝 TCS-1) | ◎ |
-| TCU-2 | D | SDK | §6.2.4.3.2 2)a) · §6.2.5.3.3 1)a) — Transmission/Reception Priority 는 협상값(answer `mc_priority`·`mc_reception_priority`)을 넘지 않는다 | 요청 인자를 그대로 싣고 answer 상한으로 자르지 않는다(`sdk/core/src/mcvideo/tc_participant.cpp:223-235`·`:255-266`) | 지금 앱은 기본값(-1)만 써서 영향 없다. API 를 쓰면 규격 밖 값이 나간다 | ◎ |
 | TCU-3 | D | SDK | §6.2.4.5.1 NOTE — 대기에서 허가되면 송출 전에 사용자 확인 · §6.2.4.9.3 — 사용자의 Queue Position Request | 'U: queued' 에서 Granted 를 받으면 곧바로 카메라·마이크를 연다(`tc_participant.cpp:349-357`). 사용자가 위치를 묻는 API 가 없다(QPR 은 회수 #7 뒤에만) | 오래 기다린 대기 송출이 사용자 모르게 시작된다 | ◎ |
 | TCU-4 | D | SDK | 표 9.2.20-1 · 9.2.21-1 — Transmission End Request/Response 의 User ID of the Transmitting User·Audio SSRC·Video SSRC | 참여자가 보내는 End Request·End Response 에 그 필드가 없다(Indicator 만 — `sdk/core/src/mcvideo/tc_codec.cpp:170-177`) | 우리 CMP 는 제어 채널로 송출자를 가린다. 필드를 기대하는 규격 서버와는 다를 수 있다(필수 여부를 규격이 명시하지 않음) | △ |
 
@@ -191,7 +190,6 @@ MCPTT 쪽 같은 뿌리의 결함은 [mcptt_conformance_gaps.md](mcptt_conforman
 
 | # | 급 | 대상 | 규격 | CIMS 지금 | 영향 | 확인 |
 |---|---|---|---|---|---|---|
-| VSDP-2 | C | SDK | TS 24.581 §14.3.1 — answer 에 offer 에 없던 파라미터 금지 · §14.3.3 끝 단락 — 단말은 offer 의 `mc_priority` 를 되돌린다 | 다이얼로그 안 서버 re-offer 의 answer 에 고정된 `pendingAppSdp` 를 그대로 끼운다(`sdk/core/src/engine.cpp:1184`) — 발신 호는 개시 offer 형식(`mc_queueing`·자기 `mc_priority`·`mc_reception_priority`, `:2918-2920`), 착신 호는 첫 offer 기준 answer(`:1642-1647`)라 re-offer 내용을 보지 않는다 | 서버가 re-INVITE 로 제어 채널을 다시 협상하면 answer fmtp 가 규격 밖이다(긴급 격상 등 V8 경로에서 드러난다) | ◎ |
 | VSDP-3 | C | SDK·현장 | TS 24.581 §14.2.2 — 대기열을 지원하면 offer 에 `mc_queueing` (shall) | SDK 참여자는 'U: queued' 를 구현했는데 옵션 기본값이 false 다(`sdk/core/include/cimsue/types.h:196`). 현장 앱은 chat 합류·prearranged 개시 모두 지정하지 않는다(`PttVideo.kt:233`·`:241`). 관제 앱 두 벌은 true(`windows/dispatch-desktop/Services/DispatchSession.McVideo.cs:206`·`:320`, `VideoPlane.kt:784`·`:1252`) | 현장 앱은 상한에서 대기 대신 거절 #1 을 받는다 — 대기 화면(«대기 n»·[대기 취소])은 회수 #7 밖에서는 나오지 않는다 | ◎ |
 | VSDP-4 | C | CSP | TS 24.581 §14.2.2 — 제어 기능은 대기열을 지원하면 offer 에 `mc_queueing` (shall) | 편성 그룹 멤버 초대 offer fmtp = `mc_priority`·`mc_transmission_ssrc` 뿐이다(`csp/McVideoInfo.h:292-296`, 골든 07). answer 는 `mc_queueing` 을 되돌리고(`:272`, 골든 04) CMP 는 대기열을 쓴다 | 초대받은 멤버는 큐를 협상하지 못해 상한에서 거절 #1, 스스로 합류한 멤버는 대기열에 들어간다 | ◎ |
 
@@ -251,7 +249,7 @@ MCPTT 쪽 같은 뿌리의 결함은 [mcptt_conformance_gaps.md](mcptt_conforman
 | 8 | **그룹 문서 PUT 해석·CMS 문서** — 없음의 뜻(§7.2.8), `<mcvideo-mcvideo-id>`·`<group-media>` 검사, 문서 이름 검사 | VGMS-1 · VGMS-2 · VCMS-6 · VGC-10(CSC 기본값 몫) | .45 CSC |
 | 9 | **단말 호 절차** — poc-settings §7.2.3 송신(+ 서버 §7.3.4 수신과 짝), 계정 갱신 API(태그만 뺀 재-REGISTER), Answer-Mode 해석, 그룹 호 응답 모양, 거절 480 + 110, 제휴 상태 구독, preconfigured-group-use-only, 재합류 UI | VREG-1 · VREG-3 · VGU-1 · VGU-2 · VGU-3 · VGU-5 · VGU-6 · VAFF-8 · VGC-7(Answer-Mode 몫) | .45 SDK·현장 → Windows(관제 앱) |
 | 10 | **송출 제어 서버 세부** — 선점 순서·협상 조건, 이른 Granted, 기본 우선순위, 대기 위치 갱신, 무허가 송출 포기, Ack subtype·P 비트, SSRC 기본값, 별칭 전달 | TCS-2 · TCS-3 · TCS-4 · TCS-5 · TCS-6 · TCS-7 · TCS-8 · TCS-9 · TCS-11 · RCS-2 · RCS-3 | .45 CMP(·SDK 별칭) |
-| 11 | **단말 참여자 세부** — 우선순위 상한, 대기 허가 확인, End 필드, override, re-offer answer | TCU-2 · TCU-3 · TCU-4 · RCU-1 · VSDP-2 | .45 SDK |
+| 11 | **단말 참여자 세부** — 대기 허가 확인, End 필드, override | TCU-3 · TCU-4 · RCU-1 | .45 SDK |
 | 12 | **서버 사유 코드·신원 세부** — 그룹 호 밖 session-type 사유, PSI 고정, 로그오프 바인딩 판정·제휴 정리, conference 구독 서비스 분리, T5 | VPRV-1 · VGC-13 · VREG-2 · VREG-4 · VGC-10 · VGC-9 | .45 CSP |
 | 13 | **수신 전용 멤버** — 그룹 모델·문서 `<on-network-recvonly>` → CSP JOIN `recv_only`·answer `mc_priority` 생략. MCPTT FCS-14 와 같이 | TCS-10 | .45 CSC·CSP |
 

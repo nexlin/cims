@@ -1,4 +1,5 @@
 // libcimsue 단위시험 — CSC 프로비저닝 파서·dialog-info·SSRC 라벨 (S1-UE-UNIT)
+#include <functional>
 #include <gtest/gtest.h>
 
 #include "../src/mcptt/mcptt_xml.h"
@@ -608,6 +609,124 @@ struct FakeTransport : http::ITransport {
     }
 };
 }  // namespace
+
+// ── 로그인 — 인증 응답 state 대조(TS 33.180 B.4.2.3) · ID token 검증(B.11.1 → OIDC Core §3.1.3.7) ──
+#include "../src/csc/id_token.h"
+#include "../src/mcdata/sds_codec.h"
+
+namespace {
+std::string b64url(const std::string& raw) {
+    std::string b = mcdata::base64Encode(raw);
+    for (auto& c : b) { if (c == '+') c = '-'; else if (c == '/') c = '_'; }
+    while (!b.empty() && b.back() == '=') b.pop_back();
+    return b;
+}
+std::string jwt(const std::string& payload) { return b64url("{\"alg\":\"RS256\"}") + "." + b64url(payload) + ".sig"; }
+std::string queryOf(const std::string& url, const std::string& key) {
+    size_t p = url.find(key + "=");
+    if (p == std::string::npos) return std::string();
+    p += key.size() + 1;
+    return url.substr(p, url.find('&', p) - p);
+}
+
+/** IdMS 흉내 — discovery·authreq·tokenreq 를 요청 내용으로 답한다. 시험이 claim·state 를 비튼다. */
+struct FakeIdms : http::ITransport {
+    std::string issuer = "idms.ptt.example", tokenIss = "idms.ptt.example", aud = "MCPTT_UE";
+    bool echoState = true, echoNonce = true, withIdToken = true;
+    int64_t expDelta = 3600;
+    int discovery = 0, tokenreq = 0;
+    std::string authUrl, nonce;
+    http::Response request(const std::string& method, const std::string& url,
+                           const std::map<std::string, std::string>&, const std::string& body) override {
+        http::Response r; r.status = 200;
+        if (url.find("/.well-known/openid-configuration") != std::string::npos) {
+            ++discovery; r.body = "{\"issuer\":\"" + issuer + "\"}";
+        } else if (url.find("/idms/authreq") != std::string::npos) {
+            authUrl = url; nonce = queryOf(url, "nonce");
+            r.body = "{\"code\":\"c0de\",\"state\":\"" + (echoState ? queryOf(url, "state") : std::string("other")) + "\"}";
+        } else if (url.find("/idms/tokenreq") != std::string::npos) {
+            ++tokenreq;
+            bool refresh = body.find("grant_type=refresh_token") != std::string::npos;
+            std::string claims = "{\"iss\":\"" + tokenIss + "\",\"sub\":\"u\",\"aud\":\"" + aud + "\",\"exp\":" +
+                                 std::to_string((long long)std::time(nullptr) + expDelta) + ",\"iat\":1";
+            if (!refresh) claims += ",\"nonce\":\"" + (echoNonce ? nonce : std::string("stale")) + "\"";
+            claims += "}";
+            r.body = "{\"access_token\":\"at\",\"refresh_token\":\"rt\",\"expires_in\":3600";
+            if (withIdToken) r.body += ",\"id_token\":\"" + jwt(claims) + "\"";
+            r.body += "}";
+        } else r.status = 404;
+        (void)method;
+        return r;
+    }
+};
+}  // namespace
+
+TEST(Csc, LoginValidatesStateAndIdToken) {
+    CscEndpoint ep; ep.host = "csc.example";
+    auto run = [&](std::function<void(FakeIdms&)> tweak, TokenSet& t, FakeIdms** out = nullptr) {
+        auto tp = std::make_shared<FakeIdms>();
+        tweak(*tp);
+        static std::shared_ptr<FakeIdms> keep; keep = tp;
+        if (out) *out = tp.get();
+        CscClient c(ep, tp);
+        return c.login("u", "p", t);
+    };
+    TokenSet t; FakeIdms* f = nullptr;
+    Result r = run([](FakeIdms&) {}, t, &f);
+    ASSERT_TRUE(r.ok) << r.reason;
+    EXPECT_EQ(t.accessToken, "at");
+    // 인증 요청 — 표 B.4.2.2-1 의 필수 파라미터 + nonce
+    for (const char* k : {"response_type=code", "client_id=MCPTT_UE", "redirect_uri=", "scope=openid", "state=", "nonce=",
+                          "acr_values=3gpp%3Aacr%3Apassword", "code_challenge_method=S256"})
+        EXPECT_NE(f->authUrl.find(k), std::string::npos) << k;
+
+    // state 가 다르면 인가 코드를 버린다 — 토큰 요청을 보내지 않는다
+    r = run([](FakeIdms& s) { s.echoState = false; }, t, &f);
+    EXPECT_FALSE(r.ok); EXPECT_NE(r.reason.find("state mismatch"), std::string::npos); EXPECT_EQ(f->tokenreq, 0);
+
+    // ID token — iss·aud·exp·nonce 가 어긋나면 로그인 실패, 토큰은 넘기지 않는다
+    struct Case { const char* why; std::function<void(FakeIdms&)> tweak; };
+    for (const Case& c : {Case{"iss", [](FakeIdms& s) { s.tokenIss = "evil.example"; }},
+                          Case{"aud", [](FakeIdms& s) { s.aud = "OTHER_CLIENT"; }},
+                          Case{"expired", [](FakeIdms& s) { s.expDelta = -120; }},
+                          Case{"nonce", [](FakeIdms& s) { s.echoNonce = false; }},
+                          Case{"id_token missing", [](FakeIdms& s) { s.withIdToken = false; }}}) {
+        TokenSet bad;
+        r = run(c.tweak, bad);
+        EXPECT_FALSE(r.ok) << c.why;
+        EXPECT_NE(r.reason.find(c.why), std::string::npos) << r.reason;
+        EXPECT_TRUE(bad.accessToken.empty()) << c.why;
+    }
+    // exp 는 시계 차 30초까지 받는다(TS 33.180 표 B.2.1.2-1)
+    EXPECT_TRUE(run([](FakeIdms& s) { s.expDelta = -20; }, t).ok);
+}
+
+TEST(Csc, RefreshValidatesIdTokenWithoutNonce) {
+    CscEndpoint ep; ep.host = "csc.example";
+    auto tp = std::make_shared<FakeIdms>();
+    CscClient c(ep, tp);
+    TokenSet t;
+    ASSERT_TRUE(c.refresh("rt", t).ok);                       // 갱신 응답에는 nonce 가 없다(OIDC Core §12.2)
+    ASSERT_TRUE(c.refresh("rt", t).ok);
+    EXPECT_EQ(tp->discovery, 1);                              // 발급자는 한 번만 받아 온다
+    tp->tokenIss = "evil.example";
+    Result r = c.refresh("rt", t);
+    EXPECT_FALSE(r.ok); EXPECT_TRUE(t.accessToken.empty());
+}
+
+TEST(IdToken, AudienceArrayAndMalformed) {
+    std::string why;
+    auto tok = [](const std::string& aud) { return jwt("{\"iss\":\"i\",\"aud\":" + aud + ",\"exp\":2000}"); };
+    EXPECT_TRUE(idtoken::validate(tok("[\"MCPTT_UE\"]"), "i", "MCPTT_UE", "", 1000, &why)) << why;
+    EXPECT_FALSE(idtoken::validate(tok("[\"MCPTT_UE\",\"other\"]"), "i", "MCPTT_UE", "", 1000, &why));   // 믿지 않는 audience
+    EXPECT_FALSE(idtoken::validate(tok("[]"), "i", "MCPTT_UE", "", 1000, &why));
+    EXPECT_FALSE(idtoken::validate("not-a-jwt", "i", "MCPTT_UE", "", 1000, &why));
+    EXPECT_FALSE(idtoken::validate("a.!!!.c", "i", "MCPTT_UE", "", 1000, &why));
+    EXPECT_FALSE(idtoken::validate(jwt("{\"iss\":\"i\",\"aud\":\"MCPTT_UE\"}"), "i", "MCPTT_UE", "", 1000, &why));       // exp 없음
+    EXPECT_FALSE(idtoken::validate(tok("\"MCPTT_UE\""), "", "MCPTT_UE", "", 1000, &why));                    // 발급자를 모른다
+    EXPECT_TRUE(idtoken::validate(tok("\"MCPTT_UE\""), "i", "MCPTT_UE", "", 2029, &why));
+    EXPECT_FALSE(idtoken::validate(tok("\"MCPTT_UE\""), "i", "MCPTT_UE", "", 2030, &why));
+}
 
 TEST(Csc, FdUploadDownload) {
     auto tp = std::make_shared<FakeTransport>();

@@ -113,6 +113,16 @@ std::string fmtpString(const TcFmtp& f) {
     return s;
 }
 
+TcFmtp answerFmtp(const TcFmtp& offer, uint32_t localTcSsrc, bool queueingSupported) {
+    TcFmtp a;
+    a.queueing = offer.queueing && queueingSupported;
+    a.priority = offer.priority;
+    a.receptionPriority = offer.receptionPriority;
+    a.hasTcSsrc = offer.hasTcSsrc;
+    a.tcSsrc = localTcSsrc;
+    return a;
+}
+
 std::string controlSdp(int port, const TcFmtp& f) {
     std::string s = "m=application " + std::to_string(port) + " " + kSdpProto + " " + kSdpFmt;
     std::string p = fmtpString(f);

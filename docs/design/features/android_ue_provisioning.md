@@ -440,7 +440,7 @@ OAM 미도달 502 `oam_unreachable`. 구현 `csc/src/handlers/dispatch_recording
 
 ## 5. 클라이언트 구현 (core + 각 앱)
 
-- **core `provision/`** (공유): `Pkce`(PKCE S256), `ProvisioningClient`(IdMS 로그인 + `/provisioning/me` 조회, OkHttp), `ProvisioningModels`(ProvisioningProfile/ServiceProfile/SipServer/AccountInfo/TokenSet), `ServiceProfile.toSipAccountConfig(loginId, displayName, countryCode)`.
+- **core `provision/`** (공유): `Pkce`(PKCE S256), `ProvisioningClient`(IdMS 로그인 + `/provisioning/me` 조회, OkHttp — 인증 응답 `state` 대조·ID token 검증 `IdToken`(iss·aud·exp·nonce, [mcx_identity_scope.md](mcx_identity_scope.md) §8.1)), `ProvisioningModels`(ProvisioningProfile/ServiceProfile/SipServer/AccountInfo/TokenSet), `ServiceProfile.toSipAccountConfig(loginId, displayName, countryCode)`.
 - **volte-client / ptt-client**: 첫 진입 = `LoginScreen` → `ProvisioningClient` → 자기 kind 프로파일을 `ConfigStore` 에 저장 → 홈. 수동 설정은 §5-1 수동 설정 모드.
 - 토큰 수명(SSO): access_token 은 1시간(서버 `IdMs.AccessTokenTtl`), refresh_token 은 **7 일**(`IdMs.RefreshTokenTtl`, 기본
   604800 s)이며 오너앱이 공유 계정에 보관한다. refresh 그랜트마다 새 refresh_token 이 새 7 일로 회전 발급되므로 창은

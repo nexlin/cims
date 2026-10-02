@@ -54,10 +54,9 @@ PTT(MCPTT) 서비스 구현을 3GPP 규격 원문과 대조해 **규격과 다�
 | 발언권 SDP 협상 (SDP) | 3 | 1 | 2 | — | — |
 | 그룹 문서·GMS (GMS) | 13 | — | 12 | 1 | — |
 | 설정 문서·CMS (CMS) | 7 | — | 4 | 2 | 1 |
-| 신원 관리 (IDM) | 1 | 1 | — | — | — |
-| **계** | **116** | **26** | **56** | **25** | **9** |
+| **계** | **115** | **25** | **56** | **25** | **9** |
 
-확인 수준 — ◎ 60 · ○ 44 · △ 12.
+확인 수준 — ◎ 60 · ○ 43 · △ 12.
 
 읽는 순서 — §2(먼저 볼 것) → §3(영역별 전체) → §4(미구현 목록에 빠진 기능) → §5(문서 정정) → §6(묶음과 순서).
 
@@ -274,9 +273,7 @@ CSP 는 참여 기능과 제어 기능을 겸한다.
 
 ### 3.13 신원 관리 (IDM) — TS 24.482 · TS 33.180 부록 B
 
-| # | 급 | 대상 | 규격 | CIMS 지금 | 영향 | 확인 |
-|---|---|---|---|---|---|---|
-| IDM-5 | A | SDK | B.11.1 — 단말은 ID token 을 검증한다. B.4.2.3 — `state` 가 다르면 코드를 버린다 | `id_token` 은 보관만 하고(iss·aud·exp·nonce 검사 없음) `state` 를 응답과 비교하지 않는다 — `sdk/core/src/csc/csc_client.cpp:111-136` | 다른 사용자·발급자의 응답을 거르지 못한다(TLS 검증에만 기댄다) | ○ |
+남은 항목 없음 — 정본 [mcx_identity_scope.md](../design/features/mcx_identity_scope.md).
 
 ## 4. 미구현 기능 목록에 빠진 것
 
@@ -315,7 +312,7 @@ CSP 는 참여 기능과 제어 기능을 겸한다.
 |---|---|---|---|
 | 1 | **문서 값 한두 줄** — 문서 셋의 T2 제외 대상 | FCS-21(문서) | .48 |
 | 2 | **발언권 메시지 정합** — Ack 의 Message Type · 미대기 Queue Position 254 · Granted Duration | FCS-4 · FCS-8 · FCS-20 | .45 SDK·CMP |
-| 3 | **인가 구멍** | SDP-3 · ADH-3 · IDM-5 | .45 CSP·CMP·CSC·SDK |
+| 3 | **인가 구멍** | SDP-3 · ADH-3 | .45 CSP·CMP |
 | 4 | **user profile 인가 요소의 서버 판정** — 문서는 요소를 싣는다(`ptt_user_profile.allow_private_call*`), CSP 가 그 값으로 판정한다 | PRV-2 · PRV-4 · PRV-8 · EMG-4 · ADH-5 | .48 CSP → Windows(Capabilities) |
 | 5 | **Warning 코드** — 거절 사유를 규격 코드로. handoff §14 K1(SDK 가 Warning 을 올림)과 한 묶음 | GCS-7 · GCS-8 · GCS-11 · REG-3 · ADH-4 · PRV-6 · PRV-7 · EMG-5 | .45 CSP·SDK → Windows(문구 사전) |
 | 6 | **service configuration 요소의 서버 판정** — `<private-call>`·`<adhoc-group-call>` 값을 CSP 가 쓴다 | ADH-3 · PRV-5 | .48 CSP |

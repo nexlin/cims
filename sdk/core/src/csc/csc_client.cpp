@@ -9,6 +9,7 @@
 #include <cstdlib>
 #include <cstring>
 
+#include "csc/id_token.h"
 #include "http/https_client.h"
 #include "util/json_lite.h"
 #include "mcdata/sds_codec.h"   // base64Encode
@@ -75,6 +76,10 @@ struct CscClient::Impl {
     std::shared_ptr<http::ITransport> tp;
     mutable std::mutex peerM;
     TlsPeerExpiry peer;                  // 마지막 성공 TLS 요청의 서버 인증서 만료
+    std::mutex issM;
+    std::string issuerId;                // IdM 서버의 Issuer Identifier — discovery 로 한 번 받아 둔다
+    Result discoverIssuer(std::string& out);
+    Result checkIdToken(TokenSet& t, const std::string& nonce, const char* what);
     /** 모든 전송이 지나는 한 곳 — 응답의 peer 인증서 관측을 갱신한다. */
     http::Response request(const std::string& method, const std::string& url,
                            const std::map<std::string, std::string>& headers, const std::string& body) {
@@ -108,6 +113,34 @@ static Result httpFail(const http::Response& r, const char* what) {
     return Result::fail(r.status, std::string(what) + " " + std::to_string(r.status) + ": " + r.body.substr(0, 200));
 }
 
+// Issuer Identifier — `/.well-known/openid-configuration` 의 `issuer`(OIDC Discovery §3). ID token 의 `iss` 와 대조한다.
+Result CscClient::Impl::discoverIssuer(std::string& out) {
+    {
+        std::lock_guard<std::mutex> lk(issM);
+        if (!issuerId.empty()) { out = issuerId; return Result::success(); }
+    }
+    http::Response r = request("GET", ep.baseUrl() + "/.well-known/openid-configuration", {}, "");
+    if (r.status / 100 != 2) return httpFail(r, "discovery");
+    Json j(r.body);
+    out = j.root ? Json::str(j.root, "issuer") : std::string();
+    if (out.empty()) return Result::fail(-2, "discovery: no issuer");
+    std::lock_guard<std::mutex> lk(issM);
+    issuerId = out;
+    return Result::success();
+}
+
+/** 토큰 응답의 ID token 검증(TS 33.180 B.11.1). 실패하면 토큰을 버린다 — 호출자가 그 토큰을 쓰지 못하게. */
+Result CscClient::Impl::checkIdToken(TokenSet& t, const std::string& nonce, const char* what) {
+    std::string issuer, why;
+    Result d = discoverIssuer(issuer);
+    if (!d.ok) { t = TokenSet(); return d; }
+    if (!idtoken::validate(t.idToken, issuer, ep.clientId, nonce, (int64_t)std::time(nullptr), &why)) {
+        t = TokenSet();
+        return Result::fail(-2, std::string(what) + ": id_token rejected — " + why);
+    }
+    return Result::success();
+}
+
 static bool parseToken(const std::string& body, TokenSet& t) {
     Json j(body);
     if (!j.root) return false;
@@ -124,23 +157,28 @@ Result CscClient::login(const std::string& userName, const std::string& password
     // PKCE S256 (RFC 7636): verifier = base64url(32B 난수), challenge = base64url(SHA-256(verifier))
     std::string verifier = base64Url(randomBytes(32));
     std::string challenge = base64Url(sha256(verifier));
+    // 인증 요청(TS 33.180 표 B.4.2.2-1) — response_type·client_id·scope·redirect_uri·state·acr_values + nonce(OIDC Core §3.1.2.1).
     std::string state = base64Url(randomBytes(16));
+    std::string nonce = base64Url(randomBytes(16));
     std::string url = impl_->ep.baseUrl() + "/idms/authreq?user_name=" + enc(userName) + "&user_password=" + enc(password) +
-                      "&client_id=" + enc(impl_->ep.clientId) + "&redirect_uri=" + enc(impl_->ep.redirectUri) +
+                      "&response_type=code&client_id=" + enc(impl_->ep.clientId) + "&redirect_uri=" + enc(impl_->ep.redirectUri) +
                       "&code_challenge=" + challenge + "&code_challenge_method=S256&scope=" + enc(impl_->ep.scope) +
-                      "&state=" + state;
+                      "&acr_values=" + enc("3gpp:acr:password") + "&state=" + state + "&nonce=" + nonce;
     http::Response r = impl_->request("GET", url, {}, "");
     if (r.status / 100 != 2) return httpFail(r, "authreq");
-    std::string code;
-    { Json j(r.body); if (!j.root) return Result::fail(-2, "authreq: bad json"); code = Json::str(j.root, "code"); }
+    std::string code, gotState;
+    { Json j(r.body); if (!j.root) return Result::fail(-2, "authreq: bad json");
+      code = Json::str(j.root, "code"); gotState = Json::str(j.root, "state"); }
     if (code.empty()) return Result::fail(-2, "authreq: no code");
+    // 인증 응답의 state 가 보낸 값과 다르면 그 인가 코드를 버리고 토큰으로 바꾸지 않는다(B.4.2.3).
+    if (gotState != state) return Result::fail(-2, "authreq: state mismatch — authorization code ignored");
     std::string form = "grant_type=authorization_code&code=" + enc(code) + "&client_id=" + enc(impl_->ep.clientId) +
                        "&redirect_uri=" + enc(impl_->ep.redirectUri) + "&code_verifier=" + verifier;
     r = impl_->request("POST", impl_->ep.baseUrl() + "/idms/tokenreq",
                            {{"Content-Type", "application/x-www-form-urlencoded"}}, form);
     if (r.status / 100 != 2) return httpFail(r, "tokenreq");
     if (!parseToken(r.body, out)) return Result::fail(-2, "tokenreq: bad json");
-    return Result::success();
+    return impl_->checkIdToken(out, nonce, "tokenreq");
 }
 
 Result CscClient::refresh(const std::string& refreshToken, TokenSet& out) {
@@ -149,7 +187,8 @@ Result CscClient::refresh(const std::string& refreshToken, TokenSet& out) {
                                           {{"Content-Type", "application/x-www-form-urlencoded"}}, form);
     if (r.status / 100 != 2) return httpFail(r, "refresh");
     if (!parseToken(r.body, out)) return Result::fail(-2, "refresh: bad json");
-    return Result::success();
+    // 갱신 응답의 ID token 은 iss·aud·exp 를 본다 — nonce 는 실리지 않는다(OIDC Core §12.2).
+    return impl_->checkIdToken(out, std::string(), "refresh");
 }
 
 bool CscClient::parseProfile(const std::string& json, Profile& out, std::string* err) {

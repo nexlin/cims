@@ -142,6 +142,7 @@ TEST(McvParticipant, TransmitGrantedThenEnd) {
     Rec rec;
     Participant p(1, 0x11111111, kMe, rec.cb());
     wire(p, srv);
+    p.setNegotiatedPriority(5, -1);                           // answer mc_priority=5
     p.onEstablished();
 
     ASSERT_TRUE(p.requestTransmission(5).ok);
@@ -174,6 +175,42 @@ TEST(McvParticipant, TransmitGrantedThenEnd) {
     ASSERT_TRUE(waitFor([&] { return rec.hasTx(TransmissionEvent::Kind::Ended); }, 1000));
     EXPECT_EQ(p.info().state, TransmissionState::NoPermission);
     p.close();
+}
+
+// §6.2.4.3.2 2)a) · §6.2.5.3.3 1)a) — 요청의 우선순위는 협상값(SDP mc_priority·mc_reception_priority)을 넘지 않는다
+TEST(McvParticipant, PriorityCappedByNegotiatedValue) {
+    cimsue_test::PjScope pj;
+    FakeServer srv;
+    Rec rec;
+    Participant p(1, 0x11, kMe, rec.cb());
+    wire(p, srv);
+    p.setNegotiatedPriority(3, 1);
+    p.onEstablished();
+
+    ASSERT_TRUE(p.requestTransmission(9).ok);                 // 9 를 요청해도 협상 상한 3
+    Message m;
+    ASSERT_TRUE(srv.expect(AppName::MCV0, (uint8_t)Mcv0::TRANSMISSION_REQUEST, &m));
+    EXPECT_EQ(m.priority(), 3);
+
+    auto note = transmission(kPeer, 0xA2, 0xB2);
+    note.push_back(u16Field(Field::RECEPTION_MODE, (int)ReceptionMode::MANUAL));
+    srv.send(AppName::MCV1, (uint8_t)Mcv1::MEDIA_TRANSMISSION_NOTIFICATION, note);
+    ASSERT_TRUE(waitFor([&] { return rec.hasRx(ReceptionEvent::Kind::Notified); }, 1000));
+    ASSERT_TRUE(p.acceptReception(kPeer, 5).ok);
+    ASSERT_TRUE(srv.expect(AppName::MCV0, (uint8_t)Mcv0::RECEIVE_MEDIA_REQUEST, &m));
+    EXPECT_EQ(m.receptionPriority(), 1);
+    p.close();
+
+    // 협상하지 않았으면(answer 에 값 없음) 우선순위 필드를 싣지 않는다 — 기본 우선순위
+    FakeServer srv2;
+    Rec rec2;
+    Participant q(2, 0x12, kMe, rec2.cb());
+    wire(q, srv2);
+    q.onEstablished();
+    ASSERT_TRUE(q.requestTransmission(9).ok);
+    ASSERT_TRUE(srv2.expect(AppName::MCV0, (uint8_t)Mcv0::TRANSMISSION_REQUEST, &m));
+    EXPECT_LT(m.priority(), 0);
+    q.close();
 }
 
 // §6.2.4.4.3·§6.2.4.4.4 — T100 만료마다 재전송, C100 번째 만료에 시한 → 'U: has no permission'
@@ -281,6 +318,7 @@ TEST(McvParticipant, ManualReceptionAcceptThenEnd) {
     Rec rec;
     Participant p(1, 0x11, kMe, rec.cb());
     wire(p, srv);
+    p.setNegotiatedPriority(-1, 2);                           // answer mc_reception_priority=2
     p.onEstablished();
     auto note = transmission(kPeer, 0xA2, 0xB2);
     note.push_back(u16Field(Field::RECEPTION_MODE, (int)ReceptionMode::MANUAL));

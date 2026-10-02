@@ -499,6 +499,27 @@ TEST(McvSip, SubsequentOfferDropsInitialOnlyFmtp) {
     EXPECT_EQ(mcvideo::forSubsequentOffer(plain), plain);                      // MCVideo SDP 가 아니면 그대로
 }
 
+// 단말이 내는 answer(TS 24.581 §14.3) — offer 에 없던 파라미터는 싣지 않고(§14.3.1) mc_priority 는 offer 값을 되돌린다(§14.3.3)
+TEST(McvSip, AnswerFmtpFollowsOffer) {
+    mcvideo::TcFmtp offer;                                   // 제어 기능의 멤버 초대(골든 07 형) — mc_queueing 없음
+    offer.priority = 3; offer.hasTcSsrc = true; offer.tcSsrc = 0x0BADF00D;
+    mcvideo::TcFmtp a = mcvideo::answerFmtp(offer, 0x11112222, true);
+    EXPECT_FALSE(a.queueing);                                // offer 에 없으면 대기를 지원해도 싣지 않는다
+    EXPECT_EQ(a.priority, 3);
+    EXPECT_EQ(a.receptionPriority, -1);
+    EXPECT_TRUE(a.hasTcSsrc); EXPECT_EQ(a.tcSsrc, 0x11112222u);   // 이 단말이 고른 값(§14.3.9)
+    EXPECT_FALSE(a.granted); EXPECT_FALSE(a.implicitRequest);
+    EXPECT_EQ(mcvideo::controlSdp(40004, a), "m=application 40004 udp MCVideo\r\na=fmtp:MCVideo mc_priority=3;mc_transmission_ssrc=286335522");
+
+    offer = mcvideo::TcFmtp();                               // re-offer — 대기·수신 우선순위가 실렸고 SSRC 는 없다
+    offer.queueing = true; offer.priority = 7; offer.receptionPriority = 2; offer.granted = true; offer.implicitRequest = true;
+    a = mcvideo::answerFmtp(offer, 0x11112222, true);
+    EXPECT_TRUE(a.queueing); EXPECT_EQ(a.priority, 7); EXPECT_EQ(a.receptionPriority, 2);
+    EXPECT_FALSE(a.hasTcSsrc);
+    EXPECT_FALSE(a.granted); EXPECT_FALSE(a.implicitRequest);
+    EXPECT_FALSE(mcvideo::answerFmtp(offer, 1, false).queueing);   // 대기를 지원하지 않는 호(§14.3.2)
+}
+
 // «읽는 모양» — answer(04·06)·멤버 초대(07)의 제어 채널·fmtp·mcvideo-info
 TEST(McvSip, ParsesGoldenAnswersAndInvitation) {
     std::string ip;
