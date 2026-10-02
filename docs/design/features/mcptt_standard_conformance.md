@@ -46,7 +46,7 @@
 | S1 | OIDC `/.well-known/openid-configuration` 디스커버리 | CSC | TS 33.180 / OIDC | ✅ 정합 |
 | S2 | access_token 클레임(`sub`/`iss`/`iat`/`client_id`/`scope` 문자열 + `mcptt_id`/`mcdata_id`) + nonce, scope 카탈로그 `3gpp:mc:*`(B.4.2.2) 요청∩카탈로그 발급, 리소스 서버 scope 검사(B.10, `IdMs.ScopeEnforcement`) — 구 `3gpp:mcptt:ptt_server` 전환기 별칭 | CSC | TS 33.180 Annex B | ✅ 정합 — 정본 [mcx_identity_scope.md](mcx_identity_scope.md) |
 | S3 | XCAP-diff SUBSCRIBE/NOTIFY(GMS/CMS 변경통지) | CSC/CSP | TS 24.481/484 §8 | ✅ 정합 |
-| S4 | service-config (전역 정책 SoT + 문서 산출) | CSC | TS 24.484 §10.3 | ✅ 정합 |
+| S4 | service-config (전역 정책 SoT + 문서 산출 — 전역 문서 `…/global/service-config.xml`) | CSC | TS 24.484 §8.4 | ✅ 정합 |
 | S5 | KMS 가입자별 키 프로비저닝 | CSC | TS 33.180 §F | ⚠ 구조적 정합(참 ECCSI/SAKKE 후속) |
 
 > **interop 최소 조건 = F1**(+ C4) — 단말 `FloorCodec` 규약과 1:1 정합. S5 의 참값 ECCSI/SAKKE
@@ -171,13 +171,17 @@ transport 목록/선택 등 규격 문서에 없는 요구 때문). 자체 단�
 (openid-configuration 과 동일 규칙). 외부 단말의 SIP 등록 자격 전달은 규격 밖(ISIM 몫)이라
 문서함과 별개로 합의가 필요하다.
 
+**단말별 문서** — XCAP URI `…/org.3gpp.mcptt.ue-init-config/users/sip:<MCS UE ID>/<MCS UE ID>` 의 문서 이름이 그 단말의 UE ID 다. CMS 는
+master 문서에서 그 단말의 문서를 만들고 `<mcptt-UE-id><Instance-ID-URN>` 을 그 UE ID 로 채운다(TS 24.484 §7.2.1.1 — `ue_init_config_for`).
+ETag 는 그 문서의 것이다(master 가 바뀌면 같이 바뀐다).
+
 **ue-init-config 값의 3계층** — 상용은 고객사 단말 외 다른 규격 단말과도 호환돼야 하므로, 고객사
 필수 요소 외 규격 요소는 사용자지정으로 관리한다(`get_ue_init_config_xml`).
 
 | 계층 | 요소 | 출처 |
 |---|---|---|
 | ① 토폴로지 유도 | `domain`·PLMN(도메인 `mnc<3자리>.mcc<3자리>` — TS 23.003 §13 대로 세 자리 MNC 의 앞자리 0 하나만 떼어 두 자리로 읽는다(`mnc008` → `45008`). 앞자리 0 인 세 자리 MNC 는 도메인으로 가를 수 없어 ② 수동 지정, 지정값은 PLMN 코드(5·6자리)인지 검사)·idms-auth/token-endpoint·gms/cms/kms·GMS/CMS-XCAP-root-URI·GMS-URI(`sip:gms_psi@도메인`) | `Provisioning.Services.ptt.domain`/`IdMs.Domain` + 공개 base URL = **`McpttServer.PublicUrl`**(비면 요청 Host 유도). CSP 가 NOTIFY 로 광고하는 `xcap-root` 도 같은 값(내부 API 취득) |
-| ② 규격 파라미터값 | `<name>`·Timers T100/T101/T103/T104/T132(TS 24.380 단말 floor 타이머, unsignedByte — 기본 1/1/4/4/2 초, 표 11.1.1-1 NOTE 1·2 의 «재전송 총 시간 6초 미만» 안)·HPLMN PLMN 수동 지정·`*-to-con-ref`(APN/DNN)·`http-proxy`·`mutual-authentication`·`group-creation-XUI`·`integrity/confidentiality-protection-enabled` | csc `config_template.json` 섹션 **"MCS UE 초기 설정 문서"** = `UeInitConfig.*`(scope=service, `restart:false` — SIGUSR1 리로드, ETag 내용파생이라 자동 갱신). 빈 값 = 유도값/기본값 |
+| ② 규격 파라미터값 | `<name>`·Timers T100/T101/T103/T104/T132(TS 24.380 단말 floor 타이머, unsignedByte — 기본 1/1/4/4/2 초, 표 11.1.1-1 NOTE 1·2 의 «재전송 총 시간 6초 미만» 안)·HPLMN PLMN 수동 지정·`*-to-con-ref`(APN/DNN)·`http-proxy`(비우면 공개 base URL — 단말은 XCAP 을 home HTTP proxy 로 보낸다, TS 24.482 A.2.1.2)·`mutual-authentication`·`group-creation-XUI`·`integrity/confidentiality-protection-enabled` | csc `config_template.json` 섹션 **"MCS UE 초기 설정 문서"** = `UeInitConfig.*`(scope=service, `restart:false` — SIGUSR1 리로드, ETag 내용파생이라 자동 갱신). 빈 값 = 유도값/기본값 |
 | ③ 확장 요소 | `<on-network><anyExt>` 의 `MCPTT-Service-Details`(기본 on, Server-URI 기본 `sip:mcptt_psi@도메인` = CSP 의 MCPTT 서버 PSI) · `MCData-Service-Details`(기본 off) — `IPv6-Required` 는 false 고정 | `UeInitConfig.ServiceDetails.{Mcptt,McData}.{Enable,ServerUri}` |
 
 산출물은 값 `html.escape` 후 minidom well-formed 검사 — 실패하면 경고를 남기고 **마지막 정상
@@ -744,6 +748,12 @@ REGISTER/SUBSCRIBE/NOTIFY 의 헤더·본문을 상용 IMS 캡처 기준으로 �
   `allow-cancel-emergency-alert` — TS 24.379 §6.3.3.1.13.3·.4·.6)는 대상 결정과 AND 하지 않고 `ptt_user_profile.allow_cancel_*` 그대로 싣는다.
   규격상 **선택**이지만 필수로 읽는 단말이 있어 항상 싣는 것 = alias-entry 의 `index`·`xml:lang`, `<ParticipantType>`(§8.3.2.1 f). 값은 `UserProfile.ParticipantType`·`UserProfile.Language` 설정이고, `xml:lang` 은 `<Name>` 과 같은 값을 써 한 문서 안에서 어긋나지 않는다. 소유-비멤버 그룹과 자체 JSON 목록(`GET …/groups/users/{me}`)은
   전환기 공존 — 클라이언트가 MCPTTGroupInfo 로 옮기면 JSON 목록 제거([mcx_identity_scope.md](mcx_identity_scope.md) 와 같은 방식).
+- **XCAP 문서 주소**(`tests/test_csc_xcap_addresses.py`) — 규격 주소와 CIMS 단말의 옛 주소를 둘 다 받고 같은 문서를 준다:
+  service configuration = 전역 문서 `…/org.3gpp.mcptt.service-config/global/[<mc-org-name>/]service-config.xml`(TS 24.484 §8.4.2.8·§8.4.2.9 —
+  옛 주소 `…/users/<XUI>/service-config`), user profile = `…/users/sip:<MCPTT ID>/mcptt-user-profile-1.xml`(§8.3.1A·§8.3.2.8 — 옛 이름
+  `user-profile`, 다른 이름·index 404), 그룹 문서 = `…/org.openmobilealliance.groups/global/byGroupID/<그룹 ID>`(TS 24.481 §7.2.10.2 — users tree 와
+  같은 문서·같은 인가) + **멤버를 뺀 조회** POST GMOP `<get-excluding-memberlist>`(§6.3.16 — `<list>` 없이). 설정 문서는 읽기 전용 —
+  GET 밖의 메서드는 405(문서 생성·수정·삭제는 §0-R R4-2). xcap-diff NOTIFY 의 `sel` 은 CSP 가 싣는다(옛 주소 — conformance_gap_plan.md S19).
 - **S4 service-config**: 문서 = TS 24.484 §8.4.2.1·§8.4.2.3 스키마 — `<service-configuration-info>` ›
   `<service-configuration-params domain=<PTT 도메인>>` › `<common><broadcast-group>`(계층 수) · `<on-network>`
   (`<emergency-call><group-time-limit>` 선택 — 첫 자식, 진행 중 긴급 그룹 호 시한 = CSP TNG2(TS 24.379 §6.3.3.1.16), 값이 0 이면 생략 ·

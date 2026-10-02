@@ -49,14 +49,14 @@ MCPTT 쪽 같은 뿌리의 결함은 [mcptt_conformance_gaps.md](mcptt_conforman
 | 개별·그 밖의 호 (VPRV) | 1 | — | — | — | 1 |
 | 송출 제어 — 서버 (TCS) | 9 | — | — | 4 | 5 |
 | 송출 제어 — 단말 (TCU) | 3 | — | — | 1 | 2 |
-| 수신 제어 — 서버 (RCS) | 2 | 1 | — | — | 1 |
+| 수신 제어 — 서버 (RCS) | 1 | — | — | — | 1 |
 | 수신 제어 — 단말 (RCU) | 1 | — | — | 1 | — |
 | SDP (VSDP) | 2 | — | — | 2 | — |
 | 그룹 문서 (VGMS) | 2 | — | 1 | — | 1 |
-| 설정 문서·CMS (VCMS) | 3 | — | 1 | 1 | 1 |
-| **계** | **49** | **2** | **5** | **27** | **15** |
+| 설정 문서·CMS (VCMS) | 1 | — | 1 | — | — |
+| **계** | **46** | **1** | **5** | **26** | **14** |
 
-확인 수준 — ◎ 34 · ○ 8 · △ 7.
+확인 수준 — ◎ 32 · ○ 8 · △ 6.
 
 읽는 순서 — §2(먼저 볼 것) → §3(영역별 전체) → §4(미구현 목록에 빠진 기능) → §5(문서 정정) → §6(묶음과 순서).
 
@@ -197,8 +197,6 @@ MCPTT 쪽 같은 뿌리의 결함은 [mcptt_conformance_gaps.md](mcptt_conforman
 | # | 급 | 대상 | 규격 | CIMS 지금 | 영향 | 확인 |
 |---|---|---|---|---|---|---|
 | VCMS-1 | B | CSP·CSC | §9.3.2.12 · §9.4.2.12 — 두 MCVideo 문서는 변경 구독(§6.3.13.3)을 지원한다 (shall) | cms xcap-diff 본문 `sel` 이 MCPTT user-profile·service-config 둘로 고정이다(`csp/CspServer.cpp:723-729`). MCVideo service config 가 바뀌어도(`csc/src/services/mcptt.py:360-363` → `SERVICE_CONFIG_CHANGED`) 같은 MCPTT `sel` 로 통지하고(`csp/CspServer.cpp:1429-1437`), MCVideo 자격·N2·N6·그룹 목록 변경은 USER_CHANGED 의 MCPTT `sel` 만 남는다 | MCVideo 문서를 구독한 규격 단말이 변경을 알 수 없다(MCPTT GMS-14·15 의 형식 문제와 별개로 대상 자체가 빠졌다) | ◎ |
-| VCMS-4 | C | CSC | §9.2.1A — CMS 는 MCVideo UE configuration(`org.3gpp.mcvideo.ue-config`)을 낸다 (shall) | 라우트가 없다(`csc/src/services/mcptt.py:3838-3843` — MCPTT ue-config 도 없다) | 규격 단말은 404 를 받고 단말 상한(동시 호·송출)을 받지 못한다 | ◎ |
-| VCMS-6 | D | CSC | §9.3.1A · §9.3.2.8 — 문서 이름 `mcvideo-user-profile-<index>.xml` · §9.4.2.8 — `mcvideo-service-config.xml` | user profile 은 문서 이름을 보지 않고(`csc/src/services/mcptt.py:3019-3046`) service config 는 `/global/` 아래 어떤 경로든 같은 문서를 준다(`:3050-3064`) | 잘못된 URI 도 200, 없는 인덱스에 404 가 없다 | ◎ |
 
 ## 4. 미구현 기능 목록에 빠진 것
 
@@ -235,7 +233,7 @@ MCPTT 쪽 같은 뿌리의 결함은 [mcptt_conformance_gaps.md](mcptt_conforman
 | 5 | **진행 중 호와 제휴·그룹 변경** — late call entry, 제휴 해제·멤버 제거·서비스 끔 → BYE, 제휴 행 정리. MCPTT 묶음 9·10 의 결정과 같이 | VGC-2 · VGC-12 · VAFF-7 · VAFF-6(결정) | 결정 → .45 CSP |
 | 6 | **service configuration 값 결선** — CSP 가 `/internal/mcvideo/service-config` 를 받아 `tc_timers` 전부를 싣고 변경을 통지받는다, SDK 엔진이 `TcTimers` 를 문서에서 넣는다, xcap-diff `sel` 에 MCVideo 문서 | TCS-1 · TCU-1 · VCMS-1 | .45 CSP·SDK |
 | 7 | **코덱 선호의 한 줄기** — 그룹 선호 = 서버 집행 코덱(CSC·콘솔이 검증). 단말 offer·초대 offer 가 그 값을 쓴다 | VGU-4 · VGC-8 | .45 SDK · .48 CSP |
-| 8 | **그룹 문서 PUT 해석·CMS 문서** — 없음의 뜻(§7.2.8), `<mcvideo-mcvideo-id>`·`<group-media>` 검사, 문서 이름 검사 | VGMS-1 · VGMS-2 · VCMS-6 · VGC-10(CSC 기본값 몫) | .45 CSC |
+| 8 | **그룹 문서 PUT 해석·CMS 문서** — 없음의 뜻(§7.2.8), `<mcvideo-mcvideo-id>`·`<group-media>` 검사 | VGMS-1 · VGMS-2 · VGC-10(CSC 기본값 몫) | .45 CSC |
 | 9 | **단말 호 절차** — poc-settings §7.2.3 송신(+ 서버 §7.3.4 수신과 짝), 계정 갱신 API(태그만 뺀 재-REGISTER), 제휴 상태 구독, preconfigured-group-use-only, 재합류 UI | VREG-1 · VREG-3 · VGU-5 · VGU-6 · VAFF-8 · VGC-7(Answer-Mode 몫) | .45 SDK·현장 → Windows(관제 앱) |
 | 10 | **송출 제어 서버 세부** — 선점 순서, 이른 Granted, 대기 위치 갱신, 무허가 송출 포기, Ack subtype·P 비트, SSRC 기본값, 별칭 전달 | TCS-2 · TCS-3 · TCS-5 · TCS-7 · TCS-8 · TCS-9 · TCS-11 · RCS-2 | .45 CMP(·SDK 별칭) |
 | 11 | **단말 참여자 세부** — 대기 허가 확인, End 필드, override | TCU-3 · TCU-4 · RCU-1 | .45 SDK |

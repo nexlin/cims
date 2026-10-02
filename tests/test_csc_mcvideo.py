@@ -93,6 +93,7 @@ GOLDEN = {
     "mcvideo_user_profile.xml": lambda: mv.get_user_profile_xml(A)[0],
     "mcvideo_service_config.xml": lambda: mv.get_service_config_xml()[0],
     "ue_init_config.xml": lambda: m.get_ue_init_config_xml(BASE_URL)[0],
+    "mcvideo_ue_config.xml": lambda: mv.get_ue_config_xml(A, "urn:gsma:imei:35875810-123456-0")[0],
 }
 
 

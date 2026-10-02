@@ -1493,6 +1493,39 @@
           "default": "0",
           "restart": false,
           "reload_hint": "SIGUSR1 로 재로드."
+        },
+        {
+          "key": "McVideoUeConfig.MaxSimulCallNc10",
+          "label": "단말 상한 Nc10 — 동시 개별 영상 호",
+          "type": "int",
+          "default": 1,
+          "min": 1,
+          "max": 16,
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드 — 다음 GET 부터 새 문서·ETag.",
+          "help": "MCVideo UE configuration 문서(TS 24.484 §9.2.2.1 <common>)의 <Max-Simul-Call-Nc10> — 한 단말이 동시에 갖는 개별 영상 호 수."
+        },
+        {
+          "key": "McVideoUeConfig.MaxSimulCallNc4",
+          "label": "단말 상한 Nc4 — 동시 그룹 영상 호",
+          "type": "int",
+          "default": 1,
+          "min": 1,
+          "max": 16,
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드 — 다음 GET 부터 새 문서·ETag.",
+          "help": "<Max-Simul-Call-Nc4> — 한 단말이 동시에 갖는 그룹 영상 호 수. 사용자 단위 상한은 MCVideo user profile 의 N6."
+        },
+        {
+          "key": "McVideoUeConfig.MaxSimulTransNc5",
+          "label": "단말 상한 Nc5 — 그룹 호의 동시 송출",
+          "type": "int",
+          "default": 1,
+          "min": 1,
+          "max": 16,
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드 — 다음 GET 부터 새 문서·ETag.",
+          "help": "<Max-Simul-Trans-Nc5> — 한 단말이 그룹 영상 호에서 동시에 내는 송출 수."
         }
       ],
       "scope": "service"

@@ -53,10 +53,10 @@ PTT(MCPTT) 서비스 구현을 3GPP 규격 원문과 대조해 **규격과 다�
 | 발언권 — 단말 (FCC) | 1 | — | — | 1 | — |
 | 발언권 SDP 협상 (SDP) | 2 | — | 2 | — | — |
 | 그룹 문서·GMS (GMS) | 13 | — | 12 | 1 | — |
-| 설정 문서·CMS (CMS) | 7 | — | 4 | 2 | 1 |
-| **계** | **111** | **24** | **54** | **24** | **9** |
+| 설정 문서·CMS (CMS) | 2 | — | 1 | 1 | — |
+| **계** | **106** | **24** | **51** | **23** | **8** |
 
-확인 수준 — ◎ 58 · ○ 41 · △ 12.
+확인 수준 — ◎ 56 · ○ 39 · △ 11.
 
 읽는 순서 — §2(먼저 볼 것) → §3(영역별 전체) → §4(미구현 목록에 빠진 기능) → §5(문서 정정) → §6(묶음과 순서).
 
@@ -240,12 +240,12 @@ CSP 는 참여 기능과 제어 기능을 겸한다.
 
 | # | 급 | 대상 | 규격 | CIMS 지금 | 영향 | 확인 |
 |---|---|---|---|---|---|---|
-| GMS-1 | B | CSC·SDK | §6.2.2.2 · §7.2.10.2 — 그룹 ID 로 찾는 문서 = global tree `…/global/byGroupID/<그룹 ID>` | 라우트는 `/org.openmobilealliance.groups/users` 하나, 경로의 XUI 가 토큰과 다르면 403 — `csc/src/services/mcptt.py:3837`·`:2793-2796`. SDK 도 `users/{본인}/{그룹 URI}`(`sdk/core/include/cimsue/csc.h:388`) | 규격 단말·타 서버의 조회가 404. 우리 SDK 는 규격 GMS 에서 남이 만든 그룹 문서를 못 읽는다 | ◎ |
+| GMS-1 | B | SDK | §6.2.2.2 · §7.2.10.2 — 그룹 ID 로 찾는 문서 = global tree `…/global/byGroupID/<그룹 ID>` | SDK 는 `users/{본인}/{그룹 URI}` 로 읽는다(`sdk/core/include/cimsue/csc.h` `groupPath`). CSC 는 global tree 를 낸다(`handle_group_by_id`) | 우리 SDK 는 규격 GMS 에서 남이 만든 그룹 문서를 못 읽는다(우리 CSC 와는 동작) | ◎ |
 | GMS-2 | B | CSC·SDK | §6.3.2.2.1 — 생성 PUT 의 XUI = group creation XUI. §6.3.2.3 c) — `<list-service uri>` 가 정책과 다르면 409 `<uniqueness-failure>` + `<alt-value>` | 그룹 ID 는 경로 마지막 조각에서 뽑고 본문 `uri` 는 읽지 않는다(`mcptt.py:2836`). CSC 가 ue-init-config 로 알리는 `<group-creation-XUI>` 기본값(XCAP root URL — `:1905`)으로 PUT 하면 403. 오류는 400·409 JSON | 규격 단말은 CIMS 에 그룹을 만들 수 없다. GMS 가 그룹 ID 를 정해 주는 절차가 없다 | ○ |
 | GMS-3 | B | CSC | §6.3.4.2.1 → RFC 4825 §7.1 — PUT 은 문서를 **교체**한다 | 준 필드만 UPDATE 하고 `<list>` 가 없으면 멤버를 유지한다 — `mcptt.py:2687-2697` | 요소를 지워 기본값으로 되돌려도 반영되지 않고 200 이 온다. mcptt_api.md 는 이를 동작으로만 적었다 | ○ |
 | GMS-4 | C | CSC | RFC 4825 §8.2.2·§8.2.5 — 비정형·스키마·제약 위반 = 409 + `application/xcap-error+xml`, MIME 불일치 = 415 | 400 JSON(`invalid_group_document`·`unknown_member`), Content-Type 검사 없음 — `mcptt.py:2834-2893` | 규격 XDMC 가 원인을 가리지 못한다 | ○ |
 | GMS-5 | B | CSC | §5.2 · §6.3.6.3~§6.3.12.3 — 요소·속성 단위 XCAP(node selector) (GMS shall) | 경로를 `/` 로 잘라 마지막 조각을 그룹 URI 로 쓴다 — `mcptt.py:2787`·`:2813` | 규격 단말의 멤버 한 명 추가·삭제가 404/400. 문서 전체 PUT 만 통한다 | ○ |
-| GMS-6 | B | CSC·SDK | §6.3.16 — 그룹 문서의 기본 조회는 «멤버 제외»(HTTP POST + GMOP 본문) | POST 분기가 없다(GET·PUT·DELETE 만). SDK 는 늘 전체 GET | 규격 단말의 기본 조회가 실패한다. 우리 단말은 큰 그룹도 매번 멤버 전체를 받는다 | ◎ |
+| GMS-6 | B | SDK | §6.3.16 — 그룹 문서의 기본 조회는 «멤버 제외»(HTTP POST + GMOP 본문) | SDK 는 늘 전체 GET. CSC 는 POST GMOP `<get-excluding-memberlist>` 를 받는다(`handle_group_by_id`) | 우리 단말은 큰 그룹도 매번 멤버 전체를 받는다 | ◎ |
 | GMS-8 | B | CSC·SDK·관제 | §7.2.8 — 요소가 없을 때: `on-network-invite-members` = false(chat), `allow-MCPTT-emergency-alert` = false, `on-network-allow-conference-state` = false, group-priority = 최저 | XCAP 생성 기본값 = prearranged·경보 허용·conference 허용·우선순위 5(`mcptt.py:2633-2640`). SDK 구조체 기본 = prearranged·긴급 호/경보 허용(`sdk/core/include/cimsue/csc.h:145-148`) | 요소를 생략한 규격 문서가 반대 뜻으로 만들어진다(권한 확대). SDK 는 규격 GMS 문서를 반대로 읽는다. mcptt_api.md 의 «conference-state 기본 true» 는 규격과 반대다 | ◎ |
 | GMS-9 | B | CSC·CSP | §7.2.2 · §7.2.8 — `<rule>` 은 조건(`<identity>`·`<is-list-member>`)에 맞는 신원에 action 을 준다. `<allow-initiate-conference>`·`<join-handling>` | PUT 해석이 문서 안 첫 action 값을 그룹 전역 값으로 읽고(`mcptt.py:2581-2583`), 개시·합류 action 은 읽지 않고 늘 true 로 낸다(`:1499-1500`) | 특정 사용자에게만 긴급 호·경보를 준 문서가 전 멤버 허용으로 바뀐다. «합류만 가능» 을 담을 수 없다 | ○ |
 | GMS-10 | B | CSC·SDK | §7.2.4.2 — `urn:3gpp:ns:mcpttGroupInfo:1.0` 스키마에 없는 요소 | 규격 이름공간 `mcpttgi` 로 자체 요소 다섯을 싣는다 — `on-network-require-affiliation`(`mcptt.py:1478`)·`on-network-require-talker-id`(`:1484`)·`on-network-encryption`(`:1486`)·`org-code`(`:1531`)·`authorized-user`(`:1536`). 선언해 둔 `cims:` 이름공간은 `user-title` 에만 쓴다 | 규격 단말은 무시한다. 우리 SDK 가 규격 GMS 에 PUT 하면 스키마 위반이다 — `cims:` 로 옮긴다 | ○ |
@@ -258,12 +258,7 @@ CSP 는 참여 기능과 제어 기능을 겸한다.
 
 | # | 급 | 대상 | 규격 | CIMS 지금 | 영향 | 확인 |
 |---|---|---|---|---|---|---|
-| CMS-1 | B | CSC·CSP·SDK | §8.4.2.8·§8.4.2.9 — service configuration 은 global 문서, 이름 `service-config.xml` (`…/org.3gpp.mcptt.service-config/global/…/service-config.xml`) | 라우트는 `/org.3gpp.mcptt.service-config/users` 하나, `users/{xui}/service-config` + 본인 검사 — `csc/src/services/mcptt.py:3841`. SDK·CSP NOTIFY `sel` 도 같은 경로. MCVideo 문서는 global 로 서빙한다(`:3843`) | 규격 단말의 GET 이 404 — Resource-Priority·타이머·신호 보호 설정을 못 받는다 | ◎ |
-| CMS-2 | B | CSC·CSP·SDK | §8.3.1A · §8.3.2.8 — user profile 문서 = `…/users/sip:MCPTTID/mcptt-user-profile-<index>.xml` | 핸들러가 `/user-profile` 문자열로 XUI 를 자른다 — `mcptt.py:2955-2967`. 규격 이름이면 `tel:` XUI 는 403 | 규격 단말의 user profile 조회가 실패한다 | ◎ |
 | CMS-5 | B | CSC·CSP | §8.3.2.12 — user profile 문서의 변경을 구독자에게 통지 | 문서의 `<MCPTTGroupInfo>`·`<ImplicitAffiliations>`·`<PrivateCallList>` 는 그룹 멤버십에서 나오는데, 그룹 변경은 `GROUP_CHANGED`(gms 구독자 통지)만 낸다. `UserProfile.*` 설정 재적재도 통지가 없다(`mcptt.py:364-369`) | user profile 을 그룹 목록의 원천으로 쓰는 규격 단말은 편성 변경을 재로그인 전까지 모른다 | ○ |
-| CMS-9 | B | CSC | §5.2 — CMS 는 문서 생성·수정·삭제와 요소 단위 절차를 지원 | user profile·service config 핸들러가 메서드를 가리지 않는다 — PUT·DELETE 에도 200 + 문서 — `mcptt.py:2945-3017` | 규격 CMC 의 수정이 «성공한 것처럼» 보인다 | ○ |
-| CMS-11 | C | CSC | §7.2.1.1 — 만들어 준 UE initial configuration 의 `<mcptt-UE-id>` = 그 단말의 UE ID | 어떤 XUI 로 와도 같은 전역 문서이고 요소가 없다 — `mcptt.py:1925-1956` | UE ID 일치를 확인하는 단말이면 거절 가능 | ○ |
-| CMS-12 | D | CSC | TS 24.482 A.2.1.2 — 단말은 home HTTP proxy 로 XCAP 을 보낸다 | `<http-proxy>` 기본값이 빈 문자열 — `mcptt.py:199`·`:1941` | 프록시 주소로만 보내는 단말은 접속할 곳이 없다(공개 base URL 을 넣으면 해소) | △ |
 | CMS-13 | C | 관제 | §5.1 · §4.2.2.1.1 — 단말은 설정 문서의 변경을 구독한다 | Windows 관제 앱은 gms 축만 구독하고 CMS 는 5분 폴링 — `DispatchSession.cs:515-556` | 인가 변경이 최대 5분 늦게 버튼에 반영된다 | ○ |
 
 ### 3.13 신원 관리 (IDM) — TS 24.482 · TS 33.180 부록 B
@@ -289,7 +284,6 @@ CSP 는 참여 기능과 제어 기능을 겸한다.
 | 같은 문서 F4 · cmp_media_api.md §7.7 · mcptt_timers.md §5.2 | T2 에서 긴급·임박 화자 제외 | 코드는 긴급만(emergency_modes §3.1 과는 일치) | FCS-21 |
 | 같은 문서 F5 | MCPTT ID 는 `PTT_JOIN.user_uri` | MCPTT 경로는 `user_uri` 를 보내지 않는다 | FCS-5 |
 | 같은 문서 §0 S3 | xcap-diff SUBSCRIBE/NOTIFY 정합 | 본문 미해석·`sel` 고정·`new-etag` 불일치 | GMS-14·GMS-15 |
-| 같은 문서 §0 S4 · §3 CMS | service-config·user-profile 정합 | 문서 주소·이름이 규격과 다르다 | CMS-1·CMS-2 |
 | ptt_flows.md B4·B6 | 제휴 PUBLISH 도식의 `Event: poc-settings` · late entry 는 «UE 주도 = 규격 모델» · «서버는 개시 시 fan-out 만» · «de-affiliate 시 이탈» | poc-settings 는 489 · 규격은 서버 초대 · 합류 때마다 재초대 · 해제해도 leg 유지 | REG-2·GCS-3·GCS-4·GCS-22 |
 | mcptt_broadcast_group_call.md R4 | chat = 서버가 초대하지 않음 | 서버가 10초마다 초대 | GCS-1 |
 | server45_handoff.md §12.6 C12 | REGISTER Contact 의 MCPTT 태그 — «앱은 싣는다» | 앱도 싣지 않는다 | REG-1 |
@@ -315,7 +309,7 @@ CSP 는 참여 기능과 제어 기능을 겸한다.
 | 8 | **제휴를 클라이언트 단위로** — 행 키 통일, 클라이언트 단위 해제·판정, 암묵 제휴 취소. handoff §14 K3·S2 와 한 묶음 | AFF-2~AFF-8 · AFF-12 · EMG-3 | .45 CSP·SDK |
 | 9 | **호 모델 결정** — chat 그룹(초대 없이 합류·1명 이하 해제)과 편성 그룹의 재초대·late call entry·제휴 해제 시 이탈. 규격대로 바꿀지, 편차로 남기고 사유를 적을지 정한다 | GCS-1~GCS-4 · GCS-22 · AFF-11 | 결정 → .45 CSP |
 | 10 | **그룹 문서 집행** — 수신 전용 | FCS-14 | .45 CSP·CMP·CSC |
-| 11 | **XCAP 규격 주소·절차** — global tree·문서 이름·교체 PUT·오류 형식·구독 본문·etag | GMS-1~GMS-6 · GMS-14~GMS-17 · CMS-1 · CMS-2 · CMS-9 | .45 CSC·CSP·SDK |
+| 11 | **XCAP 규격 주소·절차** — global tree·문서 이름·교체 PUT·오류 형식·구독 본문·etag | GMS-1~GMS-6(GMS-1·GMS-6 은 SDK 몫) · GMS-14~GMS-17 | .45 CSC·CSP·SDK |
 | 12 | **발언권 메시지 형식** — MCPTT ID·Audio SSRC·Indicator·dual floor·Location·Revoke Request, SDP `mc_floor_ssrc` | FCS-5~FCS-7 · FCS-10~FCS-16 · SDP-2 | .45 CMP·CSP·SDK |
 
 **Windows 몫(관제 앱 두 벌)** — SDK·서버가 정해진 뒤 맞춘다.

@@ -513,6 +513,8 @@ XCAP 기반 그룹 관리.
 | GET | `/org.openmobilealliance.groups/users/{mcptt_id}/{group_uri}` | 그룹 문서(XML) — 멤버·소유자만 |
 | PUT | `/org.openmobilealliance.groups/users/{mcptt_id}/{group_uri}` | 생성(신규 uri — 프로파일 `allow_create_group`) / 수정(소유자). 본문 = GET 문서 포맷, DB 기록 |
 | DELETE | `/org.openmobilealliance.groups/users/{mcptt_id}/{group_uri}` | 삭제(소유자) |
+| GET | `/org.openmobilealliance.groups/global/byGroupID/{그룹 ID}` | 그룹 ID 로 찾는 그룹 문서(TS 24.481 §7.2.10.2 global tree) — 멤버·소유자만 |
+| POST | 같은 URI + `application/vnd.3gpp.GMOP+xml` `<get-excluding-memberlist>` | 멤버(`<list>`)를 뺀 그룹 문서(§6.3.16) |
 
 **쓰기 인가** — 가입자(관제사) 주체, TS 24.481 Ut. 토큰 = IdMS PKCE(콘솔 토큰 realm 과 분리). 신규 = 토큰 본인
 트리 + `ptt_user_profile.allow_create_group`(OAM 부여, CIMS 확장 `<cims:allow-create-group>`), 기존/삭제 =
@@ -582,10 +584,14 @@ XCAP 기반 사용자 프로파일/서비스 설정 관리.
 
 | Method | Path | 설명 |
 |--------|------|------|
-| GET | `/org.3gpp.mcptt.user-profile/users/{mcptt_id}/...` | 사용자 프로파일 |
-| GET | `/org.3gpp.mcptt.service-config/users/{mcptt_id}/...` | 서비스 설정 |
-| GET | `/org.3gpp.mcvideo.user-profile/users/{MCVideo ID}/mcvideo-user-profile-<n>.xml` | MCVideo 사용자 프로파일(TS 24.484 §9.3 — 자격 행 없으면 404, scope `video_config_management_service`) |
+| GET | `/org.3gpp.mcptt.user-profile/users/{sip:MCPTT ID}/mcptt-user-profile-1.xml` | 사용자 프로파일(TS 24.484 §8.3.1A — 옛 이름 `…/user-profile` 도 받는다, 다른 이름 404) |
+| GET | `/org.3gpp.mcptt.service-config/global/service-config.xml` | 서비스 설정 — 전역 문서(§8.4.2.9, `…/global/<mc-org-name>/…` 도). 옛 주소 `…/users/{mcptt_id}/service-config` 도 받는다 |
+| GET | `/org.3gpp.mcptt.ue-init-config/users/sip:{MCS UE ID}/{MCS UE ID}` | UE initial configuration(익명) — master 문서 + 그 단말의 `<mcptt-UE-id>`(§7.2.1.1). `<http-proxy>` 는 비우면 공개 base URL |
+| GET | `/org.3gpp.mcvideo.ue-config/users/sip:{MCVideo ID}/{MCS UE ID}` | MCVideo UE configuration(TS 24.484 §9.2 — 단말 상한 `McVideoUeConfig.*`, 자격 행 없으면 404) |
+| GET | `/org.3gpp.mcvideo.user-profile/users/{MCVideo ID}/mcvideo-user-profile-1.xml` | MCVideo 사용자 프로파일(TS 24.484 §9.3 — 자격 행 없으면 404, 다른 이름·index 404, scope `video_config_management_service`) |
 | GET | `/org.3gpp.mcvideo.service-config/global/mcvideo-service-config.xml` | MCVideo 서비스 설정(전역 문서 §9.4.2.9 — 설정 `McVideoServiceConfig.*`) |
+
+설정 문서는 읽기 전용이다 — GET 밖의 메서드는 405(`Allow: GET`). 규격 주소와 CIMS 단말의 옛 주소를 둘 다 받고 같은 문서를 준다.
 
 사용자 프로파일의 인가 `<cp:ruleset>` 은 `ptt_user_profile`(in-memory `PTT_PROFILES`, admin PUT 이 캐시 갱신) 에서 만든다 —
 긴급 계열은 규격 요소(§8.3.2.1 11) 목록 순 — 긴급 그룹콜·긴급 사설콜 개시 → 해제 인가 `allow_cancel_group_emergency`

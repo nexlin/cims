@@ -76,6 +76,7 @@ def _schemas(xs):
         "{urn:3gpp:ns:mcvideoServiceConfig:1.0}service-configuration-info":
             mk(os.path.join(XSD, "mcvideo-service-config.xsd")),
         "{urn:3gpp:mcptt:mcpttUEinitConfig:1.0}mcptt-UE-initial-configuration": mk(os.path.join(XSD, "ue-init-config.xsd")),
+        "{urn:3gpp:mcvideo:mcvideoUEConfig:1.0}mcvideo-UE-configuration": mk(os.path.join(XSD, "mcvideo-ue-config.xsd")),
         "{urn:3gpp:ns:mcvideoInfo:1.0}mcvideoinfo": mk(os.path.join(XSD, "mcvideoinfo.xsd")),
     }
 

@@ -158,15 +158,8 @@ def parse_mcdata_info(xml_bytes: bytes) -> dict:
 
 def _find_group(identity: str):
     """그룹 식별자(sip:·tel:·맨 id) → (GROUPS 키, 그룹). 없으면 (None, None)."""
-    from services.mcptt import GROUPS, _group_uri, _norm_mcptt_uri
-    for key in (identity, _group_uri(identity)):
-        if key in GROUPS:
-            return key, GROUPS[key]
-    want = _norm_mcptt_uri(identity)
-    for key, grp in GROUPS.items():
-        if want and _norm_mcptt_uri(key) == want:
-            return key, grp
-    return None, None
+    from services.mcptt import find_group
+    return find_group(identity)
 
 
 def _content_disposition(name: str) -> str:

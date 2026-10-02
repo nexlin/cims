@@ -19,7 +19,7 @@
     <App-Server-Info>
       <idms-auth-endpoint>https://csc.ptt.cims.example.kr:4430/idms/authreq</idms-auth-endpoint>
       <idms-token-endpoint>https://csc.ptt.cims.example.kr:4430/idms/tokenreq</idms-token-endpoint>
-      <http-proxy></http-proxy>
+      <http-proxy>https://csc.ptt.cims.example.kr:4430</http-proxy>
       <gms>https://csc.ptt.cims.example.kr:4430</gms>
       <cms>https://csc.ptt.cims.example.kr:4430</cms>
       <kms>https://csc.ptt.cims.example.kr:4430/keymanagement/identity/v1</kms>

@@ -29,6 +29,7 @@ PTT 도메인 `ptt.cims.example.kr`, CSC 공개 base `https://csc.ptt.cims.examp
 | `mcvideo_user_profile.xml` | MCVideo user profile(TS 24.484 §9.3) — `tel:+82510002001` | `XUI-URI` = 본인 · `<MCVideoGroupInfo>` 하나 = `tel:g101`(g102 는 없다) · `MaxSimultaneousVideoStreams` 1 · N6 1 · N2 4 · 긴급 대상 entry = `UseCurrentlySelectedGroup` tel:g101 · 모든 `<entry>` 에 `index` · `<ProSeUserID-entry index>` = `<DiscoveryGroupID>` 000000 + `<User-Info-ID>` 영값 · 인가 전부 false(1:1·긴급·임박·경보·원격 회수·ambient viewing·ad hoc — 1차 범위 밖) |
 | `mcvideo_service_config.xml` | MCVideo service configuration(TS 24.484 §9.4, 전역) | domain · `<signalling-protection>` false/false · `<protection-between-mcvideo-servers>` false/false · RP `mcpttp` 15/8/0 · `<tc-timers-counters-R14>` 17요소 = [mcvideo_tc_defs.yaml](../../../docs/design/features/mcvideo_tc_defs.yaml) 기본값(T100~T104 = 1 s, 1:1 T1·T5 = 30 s, T2·T3·T4·T6 = 1 s, T11 = 10 s, C2 10·C4 3·C6 3·C7 2·C11 4). C7 요소 이름은 XSD 표기 `C7-reception-accpeted` |
 | `ue_init_config.xml` | MCS UE initial configuration(TS 24.484 §7.2) | `<anyExt>` = MCPTT → **MCVideo** → MCData Service-Details. MCVideo Server-URI = `sip:mcvideo_psi@ptt.cims.example.kr` |
+| `mcvideo_ue_config.xml` | MCVideo UE configuration(TS 24.484 §9.2) — `tel:+82510002001` 의 단말 `urn:gsma:imei:35875810-123456-0` | `<mcvideo-UE-id><Instance-ID-URN>` = 그 단말 · `<common>` Nc10 1 · Nc4 1 · Nc5 1 · 그룹 우선순위 목록 = `tel:g101` 5 · `<on-network>` IPv6Preferred false · Relay-Service false(Relayed 그룹은 XSD 필수라 빈 값 한 줄) · 루트 끝 `<anyExt/>`. 요소 이름은 XSD 표기(`MCVIDEO-…`) |
 
 ## xsd/
 

@@ -44,6 +44,8 @@ XCAP(RFC 4825) 리소스 기반 — TS 24.481 Ut. 인증 = `Authorization: Beare
 |---|---|---|---|
 | GET  | `/org.openmobilealliance.groups/users/{xui}` | 본인 트리 | JSON 배열 — 멤버인 그룹 + **소유(`authorized_user_id`) 그룹**(비멤버라도). 항목 `{uri, display_name, etag, member_count, is_owner}` — `is_owner` = 편집·삭제 가능 |
 | GET  | `…/users/{xui}/{group_uri}` | 멤버 또는 소유자 | `application/vnd.oma.poc.groups+xml` + `ETag`; `If-None-Match` → 304 |
+| GET  | `/org.openmobilealliance.groups/global/byGroupID/{그룹 ID}` | 멤버 또는 소유자 | **그룹 ID 로 찾는 문서**(TS 24.481 §6.2.2.2·§7.2.10.2) — users tree 와 같은 문서. 그룹 ID 는 `tel:`·`sip:…@도메인`·맨 id 어느 표기든 |
+| POST | 같은 URI + `Content-Type: application/vnd.3gpp.GMOP+xml`(`<document><request><get-excluding-memberlist/>`) | 멤버 또는 소유자 | **멤버를 뺀 그룹 문서**(§6.3.16 — 규격 GMC 의 기본 조회): `<list>` 없이 200. 다른 GMOP 요청(regroup) 501, GMOP 아님 415·400 |
 | PUT  | `…/users/{xui}/{group_uri}` | **신규** = 프로파일 `allow_create_group`(OAM 부여, 프로비저닝 `ptt.allowCreateGroup`) **또는** 역할 관리 범위(`ptt_group_manage=scope|all`, mcptt_authorization.md §4.1) · **기존** = 소유자 또는 관리 범위 안 그룹(`org_code` 범위 — 소유권은 유지, [dispatch_center.md §3.4](../design/features/dispatch_center.md)) | 201(신규)/200(갱신) + 문서 + `ETag`. 403 `group_creation_not_allowed` / `not_group_owner`(소유자 없는 콘솔 그룹 포함), 409 `uri_taken`(타인 소유 id — 다른 id 로), 400 `invalid_group_id`·`reserved_prefix`·`invalid_group_document`·`unknown_member`·`required_exceeds_max_members`(필수 멤버 > 정원, TS 24.379 §6.3.5.5 NOTE 4), 412 `etag_mismatch`(`If-Match` 사용 시) |
 | DELETE | `…/users/{xui}/{group_uri}` | 소유자 또는 관리 범위 안 그룹 | 200. 403 `not_group_owner`, 404 |
 
@@ -144,11 +146,15 @@ MCPTT 설정 문서 (TS 24.484). ue-init-config 만 **익명 GET**(로그인 전
 
 | Method | Path | 인증 |
 |---|---|---|
-| GET  | `/org.3gpp.mcptt.ue-init-config/users/{instance}/{doc}` | 없음 (익명) |
-| GET  | `/org.3gpp.mcptt.user-profile/users/{user}/user-profile` | Bearer + 본인 + scope `ptt_config_management_service`. TS 24.484 §8.3.2 문서 — `<OnNetwork><MCPTTGroupInfo>` = 소속 그룹 목록(규격 단말의 그룹 소스, 없어도 빈 요소), `<PrivateCallList>` = 동료 연락처, 긴급 대상·`cp:ruleset` 인가, `<MaxSimultaneousCallsN6>` = 관제(역할 배정) 10 / 그 밖 5(콘솔 MCPTT 정책). 모든 `<entry>` 에 `index`. ETag 내용 파생 |
-| GET  | `/org.3gpp.mcptt.service-config/users/{user}/service-config` | Bearer + 본인. 전역 문서 — `<signalling-protection>`·`<protection-between-mcptt-servers>` false/false(없으면 true — 단말이 mcptt-info 를 암호화한다, TS 24.484 §8.4.2.6) · floor 타이머 · Resource-Priority |
-| GET  | `/org.3gpp.mcvideo.user-profile/users/{user}/mcvideo-user-profile-<n>.xml` | Bearer + 본인 + scope `video_config_management_service`. TS 24.484 §9.3 MCVideo user profile — MCVideo 이용 자격(`mcvideo_user_profile` 행)이 없으면 404. `<MCVideoGroupInfo>` = 멤버인 MCVideo 그룹, `<MaxSimultaneousVideoStreams>` = 수신 상한([mcvideo.md](../design/features/mcvideo.md) §5.1) |
+| GET  | `/org.3gpp.mcptt.ue-init-config/users/sip:{MCS UE ID}/{MCS UE ID}` | 없음 (익명). 문서 이름(MCS UE ID)이 그 단말 문서의 `<mcptt-UE-id><Instance-ID-URN>` 으로 실린다(TS 24.484 §7.2.1.1) — ETag 도 단말별 |
+| GET  | `/org.3gpp.mcptt.user-profile/users/{sip:MCPTT ID}/mcptt-user-profile-1.xml` (§8.3.1A — CIMS 단말의 옛 이름 `…/user-profile` 도 같은 문서, 다른 이름·index 는 404) | Bearer + 본인 + scope `ptt_config_management_service`. TS 24.484 §8.3.2 문서 — `<OnNetwork><MCPTTGroupInfo>` = 소속 그룹 목록(규격 단말의 그룹 소스, 없어도 빈 요소), `<PrivateCallList>` = 동료 연락처, 긴급 대상·`cp:ruleset` 인가, `<MaxSimultaneousCallsN6>` = 관제(역할 배정) 10 / 그 밖 5(콘솔 MCPTT 정책). 모든 `<entry>` 에 `index`. ETag 내용 파생 |
+| GET  | `/org.3gpp.mcptt.service-config/global/service-config.xml` (§8.4.2.8·§8.4.2.9 — `…/global/<mc-org-name>/service-config.xml` 도. CIMS 단말의 옛 주소 `…/users/{user}/service-config`(본인만)도 같은 문서) | Bearer + scope `ptt_config_management_service`. 전역 문서 — `<signalling-protection>`·`<protection-between-mcptt-servers>` false/false(없으면 true — 단말이 mcptt-info 를 암호화한다, TS 24.484 §8.4.2.6) · floor 타이머 · Resource-Priority |
+| GET  | `/org.3gpp.mcvideo.ue-config/users/sip:{MCVideo ID}/{MCS UE ID}` | Bearer + 본인 + scope `video_config_management_service`. TS 24.484 §9.2 MCVideo UE configuration — 단말 상한 Nc10·Nc4·Nc5(설정 `McVideoUeConfig.*`)·그룹 우선순위 목록, `<mcvideo-UE-id>` = 문서 이름. 자격 없으면 404 |
+| GET  | `/org.3gpp.mcvideo.user-profile/users/{user}/mcvideo-user-profile-1.xml` (다른 이름·index 는 404) | Bearer + 본인 + scope `video_config_management_service`. TS 24.484 §9.3 MCVideo user profile — MCVideo 이용 자격(`mcvideo_user_profile` 행)이 없으면 404. `<MCVideoGroupInfo>` = 멤버인 MCVideo 그룹, `<MaxSimultaneousVideoStreams>` = 수신 상한([mcvideo.md](../design/features/mcvideo.md) §5.1) |
 | GET  | `/org.3gpp.mcvideo.service-config/global/mcvideo-service-config.xml` | Bearer + scope `video_config_management_service`. **전역 문서**(TS 24.484 §9.4.2.9) — `<signalling-protection>`·`<protection-between-mcvideo-servers>` false · Resource-Priority · `<tc-timers-counters-R14>`(CSC 설정 `McVideoServiceConfig.*`) |
+
+설정 문서(user profile·service config·UE configuration)는 **읽기 전용**이다 — GET 밖의 메서드는 `405`(`Allow: GET`). 문서 생성·수정·삭제
+(TS 24.484 §6.3.2~§6.3.12 CMC 절차)는 지원하지 않는다. `mcvideo-service-config.xml` 밖의 이름은 404.
 
 user-profile 의 인가 `<cp:ruleset><cp:rule id="mcptt-user-authorisation"><cp:actions>` 값은 `ptt_user_profile`(admin API
 `…/users/{pid}/ptt/{msisdn}/profile`, [admin_api.md §6.8](admin_api.md))이다 — 규격 요소를 TS 24.484 §8.3.2.1 11) 목록 순으로 싣고

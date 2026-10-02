@@ -27,6 +27,9 @@ AUID_USER_PROFILE = "org.3gpp.mcvideo.user-profile"        # TS 24.484 §9.3.2.2
 AUID_SERVICE_CONFIG = "org.3gpp.mcvideo.service-config"    # TS 24.484 §9.4.2.2
 MIME_USER_PROFILE = "application/vnd.3gpp.mcvideo-user-profile+xml"      # TS 24.484 §9.3.2.5
 MIME_SERVICE_CONFIG = "application/vnd.3gpp.mcvideo-service-config+xml"  # §9.4.2.5 (본문은 "application/" 누락 — IANA 형)
+NS_UE_CONFIG = "urn:3gpp:mcvideo:mcvideoUEConfig:1.0"       # TS 24.484 §9.2.2.3
+AUID_UE_CONFIG = "org.3gpp.mcvideo.ue-config"               # TS 24.484 §9.2.2.2
+MIME_UE_CONFIG = "application/vnd.3gpp.mcvideo-ue-config+xml"            # §9.2.2.5
 
 # 그룹 속성 기본값 = DB 열 기본값(sql/migrate_mcvideo.sql). 보호 둘은 **요소가 없으면 true 로 읽히므로**(TS 24.481 §7.2.8)
 #   문서에 늘 명시한다 — E2E(GMK) 가 서기 전까지 false(mcvideo.md §7 D7).
@@ -106,13 +109,15 @@ def _xs_duration_ms(ms) -> str:
 
 
 def apply_config(config: dict) -> None:
-    """설정 McVideoServiceConfig.* 적용 — services.mcptt.apply_config 가 부른다(SIGUSR1 리로드 포함)."""
-    global SERVICE_CONFIG_PARAMS
+    """설정 McVideoServiceConfig.*·McVideoUeConfig.* 적용 — services.mcptt.apply_config 가 부른다(SIGUSR1 리로드 포함)."""
+    global SERVICE_CONFIG_PARAMS, UE_CONFIG_PARAMS
     v = (config or {}).get('McVideoServiceConfig') or {}
     if not isinstance(v, dict):
         logger.log_error("[CMS] McVideoServiceConfig 가 객체가 아님 — 기본값 사용")
         v = {}
     SERVICE_CONFIG_PARAMS = v
+    u = (config or {}).get('McVideoUeConfig') or {}
+    UE_CONFIG_PARAMS = u if isinstance(u, dict) else {}
 
 
 def _svc_param(section: str, key: str):
@@ -121,6 +126,19 @@ def _svc_param(section: str, key: str):
     if v is None or (isinstance(v, str) and not v.strip()):
         return _SERVICE_CONFIG_PARAM_DEFAULTS[section][key]
     return v
+
+
+# MCVideo UE configuration 의 단말 상한(TS 24.484 §9.2.2.1 <common> — 설정 McVideoUeConfig.*). 한 단말이 동시에 갖는 개별 호(Nc10)·
+#   그룹 호(Nc4)·그룹 호의 동시 송출(Nc5) 수. CIMS 1차 범위는 영상 호 하나·송출 하나(mcvideo.md §7 D8)라 기본 1.
+UE_CONFIG_PARAMS: dict = {}
+_UE_CONFIG_DEFAULTS = {"MaxSimulCallNc10": 1, "MaxSimulCallNc4": 1, "MaxSimulTransNc5": 1}
+
+
+def _ue_param(key: str) -> int:
+    try:
+        return max(1, int(UE_CONFIG_PARAMS.get(key) or _UE_CONFIG_DEFAULTS[key]))      # xs:positiveInteger
+    except (TypeError, ValueError):
+        return _UE_CONFIG_DEFAULTS[key]
 
 
 # ── 그룹 속성 (DB ↔ dict) ──────────────────────────────────────────────────────────────────────────────
@@ -733,3 +751,43 @@ def get_service_config_xml():
 </service-configuration-info>"""
     return xml, _m._content_etag(xml)
 
+
+def get_ue_config_xml(user_uri: str, ue_id: str = ''):
+    """MCVideo UE configuration 문서 (TS 24.484 §9.2 — AUID org.3gpp.mcvideo.ue-config) → (xml, etag). 자격 행이 없으면 (None, None).
+
+    XCAP URI = `…/org.3gpp.mcvideo.ue-config/users/sip:<MCVideo ID>/<MCS UE ID>`(§9.2.1A) — master 문서에서 만들고 `<mcvideo-UE-id>`
+    를 그 단말의 UE ID 로 채운다. 구조·요소 이름은 §9.2.2.3 XSD 를 따른다: 본문(§9.2.2.1)은 `MCVideo-…`, XSD 는 `MCVIDEO-…` 이고
+    XSD 는 루트 끝 `<anyExt>`·`<Prioritized-MCVIDEO-Group>` 항목 하나 이상·`<Relayed-MCVIDEO-Group>` 을 필수로 둔다(mcvideo.md §9).
+      - <common>: 단말 상한 Nc10·Nc4·Nc5(설정 McVideoUeConfig.*) + 그룹 우선순위 목록 = 이 사용자가 멤버인 MCVideo 그룹과 그 그룹
+        우선순위(없으면 본인 URI·0 한 줄 — XSD 가 한 줄 이상을 요구한다).
+      - <on-network>: IPv6Preferred false · Relay-Service false(UE-to-network relay 미지원) — 그래서 Relayed 그룹은 빈 값 한 줄."""
+    from services import mcptt as _m
+    from services import access_services as _access_services
+    user = _m.USERS.get(user_uri)
+    if not user or profile_of(user.get('msisdn', '')) is None:
+        return None, None
+    domain = (_access_services.ptt_domain(_m.PROVISIONING) or _m.IDMS_DOMAIN).strip()
+    my_groups = sorted(((g_uri, g) for g_uri, g in _m.GROUPS.items()
+                        if g.get('mcvideo') is not None
+                        and any(_m._uri_eq(mb.get('uri'), user_uri) for mb in g.get('members', []))),
+                       key=lambda x: x[0])
+    prios = [(g_uri, _m._priority_type(g.get('priority'), 0)) for g_uri, g in my_groups] or [(user_uri, 0)]
+    prio_xml = ''.join(f'<MCVIDEO-Group-Priority><MCVIDEO-Group-ID>{_esc(u)}</MCVIDEO-Group-ID>'
+                       f'<group-priority-hierarchy>{p}</group-priority-hierarchy></MCVIDEO-Group-Priority>' for u, p in prios)
+    ue_id = (ue_id or '').strip()
+    ue = f'<mcvideo-UE-id><Instance-ID-URN>{_esc(ue_id)}</Instance-ID-URN></mcvideo-UE-id>' if ue_id else ''
+    xml = (f'<?xml version="1.0" encoding="UTF-8"?>'
+           f'<mcvideo-UE-configuration xmlns="{NS_UE_CONFIG}" domain="{_esc(domain)}" XUI-URI="{_esc(user_uri)}">'
+           f'{ue}'
+           f'<common>'
+           f'<MCVIDEO-Private-Call><Max-Simul-Call-Nc10>{_ue_param("MaxSimulCallNc10")}</Max-Simul-Call-Nc10></MCVIDEO-Private-Call>'
+           f'<MCVIDEO-Group-Call><Max-Simul-Call-Nc4>{_ue_param("MaxSimulCallNc4")}</Max-Simul-Call-Nc4>'
+           f'<Max-Simul-Trans-Nc5>{_ue_param("MaxSimulTransNc5")}</Max-Simul-Trans-Nc5>'
+           f'<Prioritized-MCVIDEO-Group>{prio_xml}</Prioritized-MCVIDEO-Group></MCVIDEO-Group-Call>'
+           f'</common>'
+           f'<on-network><IPv6Preferred>false</IPv6Preferred><Relay-Service>false</Relay-Service>'
+           f'<Relayed-MCVIDEO-Group><MCVIDEO-Group-ID></MCVIDEO-Group-ID><Relay-Service-Code></Relay-Service-Code></Relayed-MCVIDEO-Group>'
+           f'</on-network>'
+           f'<anyExt/>'
+           f'</mcvideo-UE-configuration>')
+    return xml, _m._content_etag(xml)

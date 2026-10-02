@@ -130,6 +130,7 @@ MCPTT floor 는 «한 사람이 말하면 모두 듣는다». MCVideo 는 **송�
 | user profile (§9.3) | `<mcvideo-user-profile>` · `org.3gpp.mcvideo.user-profile` · `application/vnd.3gpp.mcvideo-user-profile+xml` (`urn:3gpp:ns:mcvideo:user-profile:1.0`) | `<MCVideoUserID>` · `<MCVideoGroupInfo>` · `<MaxAffiliationsN2>` · `<ImplicitAffiliations>` · `<MaxSimultaneousCallsN6>` · `<MaxSimultaneousVideoStreams>` · ruleset(allow-private-call · 긴급·임박·경보 발령/해제 · allow-revoke-transmit …, anyExt ambient viewing · ad hoc) |
 | service configuration (§9.4) | `<service-configuration-info>` · `org.3gpp.mcvideo.service-config` · `vnd.3gpp.mcvideo-service-config+xml` (`urn:3gpp:ns:mcvideoServiceConfig:1.0`) | on-network 긴급·임박·일반 resource-priority(필수) · `<tc-timers-counters-R14>` · 보호 요소 |
 | UE initial configuration (§7.2) | 기존 `org.3gpp.mcptt.ue-init-config` | `<on-network><anyExt><MCVideo-Service-Details>` — `<IPv6-Required>` · `<Server-URI>` |
+| UE configuration (§9.2) | `<mcvideo-UE-configuration>` · `org.3gpp.mcvideo.ue-config` · `application/vnd.3gpp.mcvideo-ue-config+xml` (`urn:3gpp:mcvideo:mcvideoUEConfig:1.0`) | 단말 상한 `<Max-Simul-Call-Nc10>`(개별 호) · `<Max-Simul-Call-Nc4>`(그룹 호) · `<Max-Simul-Trans-Nc5>`(동시 송출) · 그룹 우선순위 목록 · `<mcvideo-UE-id>` |
 
 그룹 호 개시 인가는 user profile 요소가 아니라 local policy + 그룹 문서 규칙이다(TS 24.281 §9.2.1.3.1.1 3), §6.3.5.3~.4).
 service configuration 에서 `<confidentiality-protection>`·`<integrity-protection>` 은 빠지면 켜진 것으로 읽힌다(TS 24.281 §6.6.2.1·§6.6.3.1) — 명시 false.
@@ -232,8 +233,11 @@ MCPTT 그룹 호는 **음성과 floor 만** 싣는다(TS 24.379·24.380 — MCPT
   false — V8) + entry `<mcvideo-mcvideo-id uri>`. MCData 서비스가 있으면 entry `<mcdata-mcdata-id uri>`(§7.2.2 MCData entry c)). XCAP PUT 해석
   (`parse_group_document_xml`) = MCVideo `<service>` 가 있으면 켜고 속성 반영(보호 true·범위 밖 400). **전환기 규칙** — MCVideo `<service>` 가 없는 PUT 은
   MCVideo 상태를 건드리지 않는다(MCVideo 를 모르는 옛 단말의 PUT 이 서비스를 지우지 않게. 끄기는 관리 API. «부재 = 끔» 은 관제 앱 그룹 편집이 MCVideo 몫을 보존·편집하게 된 뒤(W4)).
-- **CMS** — `CMSXCAPROOT/org.3gpp.mcvideo.user-profile/users/<MCVideo ID>/mcvideo-user-profile-<n>.xml`(본인만·scope `video_config_management_service`·
-  자격 행 없으면 404) · `CMSXCAPROOT/org.3gpp.mcvideo.service-config/global/mcvideo-service-config.xml`(전역 문서, TS 24.484 §9.4.2.9). user profile 의
+- **CMS** — `CMSXCAPROOT/org.3gpp.mcvideo.user-profile/users/<MCVideo ID>/mcvideo-user-profile-1.xml`(본인만·scope `video_config_management_service`·
+  자격 행 없으면 404, 다른 이름·index 는 404 — §9.3.2.8) · `CMSXCAPROOT/org.3gpp.mcvideo.service-config/global/mcvideo-service-config.xml`(전역 문서,
+  TS 24.484 §9.4.2.9 — `global/<mc-org-name>/…` 도, 다른 이름 404) · `CMSXCAPROOT/org.3gpp.mcvideo.ue-config/users/sip:<MCVideo ID>/<MCS UE ID>`
+  (UE configuration §9.2 — `services/mcvideo.py get_ue_config_xml`: 단말 상한 Nc10·Nc4·Nc5 = 설정 `McVideoUeConfig.*`(기본 1·1·1 — 영상 호 하나·송출 하나,
+  §7 D8), 그룹 우선순위 목록 = 이 사용자의 MCVideo 그룹과 그 우선순위, `<mcvideo-UE-id>` = 문서 이름의 UE ID). 설정 문서는 읽기 전용(GET 밖 405). user profile 의
   그룹 목록 = 이 사용자가 멤버인 MCVideo 그룹(`<MCVideoGroupInfo>` 하나에 하나), `<ImplicitAffiliations>` = 그중 멤버 `implicit_affiliation` 이 켜진 그룹
   (MCPTT 문서와 같은 표시 — 그룹 = 서비스 집합), 상한 = `MaxSimultaneousVideoStreams`·N6·N2(회선 값 — MCPTT service config N2 가 아니다).
   모든 `<entry>` 에 `index`, `<ProSeUserID-entry>` 는 `index`·`<DiscoveryGroupID>`(3옥텟)·`<User-Info-ID>`(6옥텟) 영값(§9.3.2.1 — off-network 미지원).
@@ -634,6 +638,11 @@ Indicator, automatic 수신; 1차 CSP 는 normal) · JOIN 응답 `audio_ssrc`·`
   (§9.4.2.5 — `application/` 누락, → `application/vnd.3gpp.mcvideo-service-config+xml`).
   개별 호 hang timer 는 본문 구조 목록이 `<private-call-hang-time>`(§9.4.2.1), XSD·의미 절(§9.4.2.7)이 `private-call-hang-timer`
   (→ XSD 표기, CSC 가 싣는 이름).
+- TS 24.484 MCVideo UE configuration(§9.2.2) — 본문 구조는 `<MCVideo-Private-Call>`·`<MCVideo-Group-Call>`·`<Prioritized-MCVideo-Group>`·
+  `<MCVideo-Group-Priority>`·`<MCVideo-Group-ID>`·`<Relayed-MCVideo-Group>`, XSD(§9.2.2.3)는 `MCVIDEO-…`(→ XSD 표기). XSD 는 루트 끝 `<anyExt>`,
+  `<MCVIDEO-Group-Priority>` 한 줄 이상, `<Relayed-MCVIDEO-Group>` 을 필수로 둔다(본문은 «may»·NOTE «Relay-Service 가 false 면 필요 없다») —
+  XSD 를 따른다: `<anyExt/>` 를 싣고, MCVideo 그룹이 없는 사용자는 본인 URI·0 한 줄, Relayed 그룹은 빈 값 한 줄. MIME 이름은 본문
+  «vnd.3gpp.mcvideo-ue-config+xml»(§9.2.2.5 — `application/` 누락, → `application/vnd.3gpp.mcvideo-ue-config+xml`).
 - TS 24.484 MCVideo user profile — 문서 이름 §9.3.2.6 «mcvideouserprofile<index>.xml» vs 같은 절 phrase·§9.3.1A «mcvideo-user-profile-<index>.xml»
   (→ 후자, CSC 는 이름을 가리지 않는다) · `<RemoteGroupSelectionURIList>` 본문 «one or more entry» vs XSD entry 0 개 허용(→ 원격 선택 권한이 없으면 빈 목록).
 - pre-established session — TS 24.281 §22.2.2.2 Editor's Note «will be defined in the future»(→ V8 까지 on-demand 만).

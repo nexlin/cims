@@ -1549,6 +1549,18 @@ def _is_group_member(group: dict, uri: str) -> bool:
     return _uri_eq(group.get('authorized_user'), uri)
 
 
+def find_group(identity: str):
+    """그룹 식별자(sip:·tel:·맨 id — 표기 무관) → (GROUPS 키, 그룹). 없으면 (None, None)."""
+    for key in (identity, _group_uri(identity)):
+        if key in GROUPS:
+            return key, GROUPS[key]
+    want = _norm_mcptt_uri(identity)
+    for key, grp in GROUPS.items():
+        if want and _norm_mcptt_uri(key) == want:
+            return key, grp
+    return None, None
+
+
 # 그룹 문서 <preferred-voice-encodings> 값 — CSP 그룹 호의 서비스 코덱(Setup.Media.Codecs 첫 항목, psip 기본 AMR-WB)과 같아야 한다.
 #   MCVideo 그룹의 선호 음성 코덱 기본(services.mcvideo.GROUP_ATTR_DEFAULTS audio_encodings)과도 같은 값이다.
 SERVICE_VOICE_ENCODING = "AMR-WB"
@@ -2299,7 +2311,7 @@ def _build_ue_init_config_xml(base_url: str) -> str:
     <App-Server-Info>
       <idms-auth-endpoint>{esc(base_url)}/idms/authreq</idms-auth-endpoint>
       <idms-token-endpoint>{esc(base_url)}/idms/tokenreq</idms-token-endpoint>
-      <http-proxy>{esc(_ue_init_cfg('HttpProxy', default=''))}</http-proxy>
+      <http-proxy>{esc(str(_ue_init_cfg('HttpProxy', default='')).strip() or base_url)}</http-proxy>
       <gms>{esc(base_url)}</gms>
       <cms>{esc(base_url)}</cms>
       <kms>{esc(base_url)}/keymanagement/identity/v1</kms>
@@ -2317,8 +2329,27 @@ def _build_ue_init_config_xml(base_url: str) -> str:
 </mcptt-UE-initial-configuration>"""
 
 
+def ue_init_config_for(base_url, ue_id: str = ''):
+    """그 단말의 UE initial configuration 문서(TS 24.484 §7.2.1.1) — master 문서에서 만들고 `<mcptt-UE-id>` 를 그 단말의 UE ID 로
+    채운다(«In this generated document, the <MCPTT-UE-id> element shall be set to the MCS client's UE ID»). UE ID = XCAP URI 의 문서
+    이름(`…/users/sip:<MCS UE ID>/<MCS UE ID>`). ETag 는 그 문서의 것 — master 가 바뀌면 같이 바뀐다."""
+    xml, etag = get_ue_init_config_xml(base_url)
+    ue_id = (ue_id or '').strip()
+    if not ue_id:
+        return xml, etag
+    import html as _html
+    ue_elem = ("  <mcptt-UE-id>\n"
+               f"    <Instance-ID-URN>{_html.escape(ue_id, quote=False)}</Instance-ID-URN>\n"
+               "  </mcptt-UE-id>\n")
+    marker = "  <name>"
+    if marker not in xml:
+        return xml, etag
+    doc = xml.replace(marker, ue_elem + marker, 1)
+    return doc, _content_etag(doc)
+
+
 def get_ue_init_config_xml(base_url):
-    """MCS UE 초기 설정 문서 (TS 24.484 §7.2) — **로그인 전** 부트스트랩, 시스템 전역 1건.
+    """MCS UE 초기 설정 문서 (TS 24.484 §7.2) — **로그인 전** 부트스트랩, 시스템 전역 1건(master — 단말별 문서는 ue_init_config_for).
 
     구조·요소명·네임스페이스는 §7.2.2.3 XSD 정본을 그대로 따른다 — <on-network> 는
     xs:sequence 라 **요소 순서가 강제**되고 나열 요소 전부 필수(minOccurs 기본 1)다.
@@ -3392,17 +3423,112 @@ async def handle_group_management(args: HandlerArgs, kwargs: dict) -> HandlerRes
 
 # CMS: User Profile
 # CMS: UE 초기 설정 (로그인 전 부트스트랩)
+GMOP_MIME = 'application/vnd.3gpp.GMOP+xml'
+GROUP_DOC_MIME = 'application/vnd.oma.poc.groups+xml'
+
+
+def group_xml_excluding_members(xml: str) -> str:
+    """멤버를 뺀 그룹 문서 — `<list-service>` 의 `<list>` 요소 없이(TS 24.481 §6.3.16.3 b))."""
+    return re.sub(r'\n[ \t]*<list>.*?</list>', '', xml, count=1, flags=re.S)
+
+
+def gmop_request(body) -> str:
+    """GMOP 문서(TS 24.481 §7.3 — `<document>` › `<request>`)의 요청 이름(`<request>` 의 첫 자식 요소 이름). 형식이 아니면 ''."""
+    if isinstance(body, (bytes, bytearray)):
+        text = bytes(body).decode('utf-8', 'replace')
+    else:
+        text = body if isinstance(body, str) else ''
+    if not text or '<!DOCTYPE' in text or '<!ENTITY' in text:
+        return ''
+    try:
+        root = _ET.fromstring(text)
+    except _ET.ParseError:
+        return ''
+    local = lambda el: el.tag.rsplit('}', 1)[-1]
+    if local(root) != 'document':
+        return ''
+    for child in root:
+        if local(child) == 'request':
+            for op in child:
+                return local(op)
+    return ''
+
+
+# GMS: 그룹 ID 로 찾는 그룹 문서 — global tree (TS 24.481 §6.2.2.2 · §7.2.10.2)
+#   GET  /org.openmobilealliance.groups/global/byGroupID/{그룹 ID}                       → 그룹 문서 전체
+#   POST 같은 URI + application/vnd.3gpp.GMOP+xml(<get-excluding-memberlist>)           → 멤버를 뺀 그룹 문서(§6.3.16 — GMC 의 기본 조회)
+#   읽을 수 있는 사람 = users tree 와 같다(그 그룹 멤버·소유자·관리 범위). 쓰기(PUT·DELETE)는 users tree 의 문서로 한다.
+async def handle_group_by_id(args: HandlerArgs, kwargs: dict) -> HandlerResult:
+    token_payload = extract_token(args.headers.get('authorization'))
+    if not token_payload:
+        return unauthorized(args)
+    deny = require_scope(args, token_payload, 'GMS', SCOPE_PTT_GMS, SCOPE_VIDEO_GMS, SCOPE_DATA_GMS)
+    if deny:
+        return deny
+    if args.method not in ('GET', 'POST'):
+        return _method_not_allowed('GET, POST')
+    seg = _xcap_segments(args.full_path, '/global/')
+    if len(seg) != 2 or seg[0] != 'byGroupID':
+        return HandlerResult(status=404)
+    group_uri, grp = find_group(seg[1])
+    if grp is None:
+        return HandlerResult(status=404)
+    requester = token_payload.get('mcptt_id')
+    if not _is_group_member(grp, requester) and not _admin_manages_group(token_payload, grp):
+        logger.log_error(f"[GMS] Forbidden: '{requester}' not a member of group '{group_uri}'")
+        return HandlerResult(status=403, body="Forbidden: not a member of this group")
+    xml, etag = get_group_xml(group_uri)
+    if not xml:
+        return HandlerResult(status=404)
+    if args.method == 'POST':
+        ctype = (args.headers.get('content-type') or '').split(';', 1)[0].strip().lower()
+        if ctype != GMOP_MIME.lower():
+            return HandlerResult(status=415, body={'error': 'unsupported_media_type', 'expected': GMOP_MIME},
+                                 media_type='application/json')
+        op = gmop_request(args.body)
+        if op != 'get-excluding-memberlist':
+            # 그룹 재편성(group-regroup-*) 등 다른 GMOP 요청 — 지원하지 않는다(mcptt_standard_conformance.md §0-R regroup)
+            return HandlerResult(status=400 if not op else 501, body={'error': 'unsupported_gmop_request', 'request': op},
+                                 media_type='application/json')
+        logger.log_info(f"[GMS] Group document excluding members: {group_uri}")
+        return HandlerResult(status=200, body=group_xml_excluding_members(xml), media_type=GROUP_DOC_MIME)
+    if_none_match = args.headers.get('if-none-match', '')
+    if if_none_match and if_none_match == etag:
+        return HandlerResult(status=304)
+    logger.log_info(f"[GMS] Group document by group ID: {group_uri}")
+    return HandlerResult(status=200, body=xml, media_type=GROUP_DOC_MIME, headers={'Etag': etag})
+
+
+def _xcap_segments(path: str, marker: str) -> list:
+    """XCAP 경로에서 `marker`(예 '/users/') 뒤의 조각들 — 각 조각을 URL 디코드한다. query 는 버린다."""
+    from urllib.parse import unquote as _unq
+    path = (path or '').split('?', 1)[0]
+    i = path.find(marker)
+    if i < 0:
+        return []
+    return [_unq(p) for p in path[i + len(marker):].split('/') if p]
+
+
+def _method_not_allowed(allow: str = 'GET') -> HandlerResult:
+    """읽기 전용 문서(CMS 설정 문서)의 쓰기 요청 — 200 으로 «된 것처럼» 답하지 않는다. 문서 생성·수정·삭제(TS 24.484 §6.3.2~
+    §6.3.12 CMC 절차)는 지원하지 않는다(mcptt_standard_conformance.md §0-R R4-2)."""
+    return HandlerResult(status=405, headers={'Allow': allow}, body={'error': 'method_not_allowed'},
+                         media_type='application/json')
+
+
 async def handle_ue_init_config(args: HandlerArgs, kwargs: dict) -> HandlerResult:
-    # GET /org.3gpp.mcptt.ue-init-config/users/{XUI}/{docname}
+    # GET /org.3gpp.mcptt.ue-init-config/users/sip:{MCS UE ID}/{MCS UE ID}   (TS 24.484 §7.2.1.1)
     #
     # **익명 GET** — 로그인 전 문서라 토큰이 없다(규격 순서상 인증보다 앞 단계). 내용이
     #   공개 주소뿐이라 민감도도 없다. XUI 는 UE 인스턴스 ID(UUID 등) — 사용자 신원이
-    #   아니므로 검증하지 않고, 어떤 XUI/문서명이 와도 같은 전역 문서를 준다.
+    #   아니므로 검증하지 않는다. 문서는 master 에서 만들고 `<mcptt-UE-id>` 만 그 단말의 UE ID(문서 이름)로 채운다.
     if args.method != 'GET':
-        return HandlerResult(status=405)
+        return _method_not_allowed()
 
     base = public_base_url(args)
-    xml, etag = get_ue_init_config_xml(base)
+    seg = _xcap_segments(args.full_path, '/users/')
+    ue_id = seg[1] if len(seg) >= 2 else ''
+    xml, etag = ue_init_config_for(base, ue_id)
 
     if_none_match = args.headers.get('if-none-match', '')
     if if_none_match and if_none_match == etag:
@@ -3413,29 +3539,38 @@ async def handle_ue_init_config(args: HandlerArgs, kwargs: dict) -> HandlerResul
                          headers={'Etag': etag})
 
 
+# MCPTT user profile 문서 이름(TS 24.484 §8.3.2.8) — "mcptt-user-profile-<user-profile-index>.xml". 프로파일은 하나(index 1)다.
+#   `user-profile` 은 규격 이름 이전의 CIMS 단말이 쓰는 이름(SDK `fetchUserProfile` — 같은 문서).
+USER_PROFILE_INDEX = 1
+_USER_PROFILE_DOC_NAMES = (f"mcptt-user-profile-{USER_PROFILE_INDEX}.xml", "user-profile")
+# service configuration 문서 이름(§8.4.2.8) — global tree 의 "service-config.xml". `…/users/<XUI>/service-config` 는 CIMS 단말의 옛 주소.
+SERVICE_CONFIG_DOC_NAME = "service-config.xml"
+
+
 async def handle_user_profile(args: HandlerArgs, kwargs: dict) -> HandlerResult:
-    # GET /org.3gpp.mcptt.user-profile/users/{user_id}/user-profile
+    # GET /org.3gpp.mcptt.user-profile/users/{sip:MCPTT ID}/mcptt-user-profile-{index}.xml   (TS 24.484 §8.3.1A)
+    #     …/users/{MCPTT ID}/user-profile                                                   (CIMS 단말의 옛 이름)
     # (로깅은 pi_http post_hook 에서 자동 처리)
+    if args.method != 'GET':
+        return _method_not_allowed()
     token_payload = extract_token(args.headers.get('authorization'))
     if not token_payload:
         return unauthorized(args)
     deny = require_scope(args, token_payload, 'CMS', SCOPE_PTT_CMS)
     if deny:
         return deny
-        
-    path = args.full_path
-    try:
-        start = path.find('/users/') + 7
-        end = path.find('/user-profile', start)
-        user_uri = path[start:end]
-    except:
-        return HandlerResult(status=400)
+
+    seg = _xcap_segments(args.full_path, '/users/')
+    if len(seg) != 2:
+        return HandlerResult(status=404)
+    user_uri, doc_name = seg
 
     # 인가 (item 2): 본인 user-profile 만 접근 (수평 권한 상승 방지).
-    from urllib.parse import unquote as _unq
-    if not _uri_eq(token_payload.get('mcptt_id'), _unq(user_uri)):
+    if not _uri_eq(token_payload.get('mcptt_id'), user_uri):
         logger.log_error(f"[CMS] Forbidden: token '{token_payload.get('mcptt_id')}' != user-profile '{user_uri}'")
         return HandlerResult(status=403, body="Forbidden: cannot access another user's profile")
+    if doc_name not in _USER_PROFILE_DOC_NAMES:
+        return HandlerResult(status=404)                 # 없는 문서(다른 index 등)
 
     logger.log_info(f"[CMS] User Profile: {user_uri}")
     # 문서 생성은 **토큰의 정본 신원**으로 — 경로 XUI 는 표기 변형(sip:user@domain 완전형 등)일
@@ -3451,62 +3586,86 @@ async def handle_user_profile(args: HandlerArgs, kwargs: dict) -> HandlerResult:
     else:
         return HandlerResult(status=404)
 
-# CMS: Service Config
+
+def _service_config_response(args: HandlerArgs, token_payload: dict) -> HandlerResult:
+    xml, etag = get_service_config_xml(token_payload.get('mcptt_id'))
+    if not xml:
+        return HandlerResult(status=404)
+    if_none_match = args.headers.get('if-none-match', '')
+    if if_none_match and if_none_match == etag:
+        return HandlerResult(status=304)
+    return HandlerResult(status=200, body=xml, media_type='application/vnd.3gpp.mcptt-service-config+xml', headers={'Etag': etag})
+
+
+# CMS: Service Config — CIMS 단말의 옛 주소(users tree). 규격 주소는 handle_service_config_global.
 async def handle_service_config(args: HandlerArgs, kwargs: dict) -> HandlerResult:
     # GET /org.3gpp.mcptt.service-config/users/{user_id}/service-config
     # (로깅은 pi_http post_hook 에서 자동 처리)
+    if args.method != 'GET':
+        return _method_not_allowed()
     token_payload = extract_token(args.headers.get('authorization'))
     if not token_payload:
         return unauthorized(args)
     deny = require_scope(args, token_payload, 'CMS', SCOPE_PTT_CMS)
     if deny:
         return deny
-        
-    path = args.full_path
-    try:
-        start = path.find('/users/') + 7
-        end = path.find('/service-config', start)
-        user_uri = path[start:end]
-    except:
-        return HandlerResult(status=400)
+
+    seg = _xcap_segments(args.full_path, '/users/')
+    if len(seg) != 2 or seg[1] not in ('service-config', SERVICE_CONFIG_DOC_NAME):
+        return HandlerResult(status=404)
+    user_uri = seg[0]
 
     # 인가 (item 2): 본인 service-config 만 접근 (수평 권한 상승 방지).
-    from urllib.parse import unquote as _unq
-    if not _uri_eq(token_payload.get('mcptt_id'), _unq(user_uri)):
+    if not _uri_eq(token_payload.get('mcptt_id'), user_uri):
         logger.log_error(f"[CMS] Forbidden: token '{token_payload.get('mcptt_id')}' != service-config '{user_uri}'")
         return HandlerResult(status=403, body="Forbidden: cannot access another user's service-config")
 
     logger.log_info(f"[CMS] Service Config: {user_uri}")
-    xml, etag = get_service_config_xml(user_uri)
+    return _service_config_response(args, token_payload)
 
-    if xml:
-        if_none_match = args.headers.get('if-none-match', '')
-        if if_none_match and if_none_match == etag:
-            return HandlerResult(status=304)
-        return HandlerResult(status=200, body=xml, media_type='application/vnd.3gpp.mcptt-service-config+xml', headers={'Etag': etag})
-    else:
+
+# CMS: MCPTT service configuration — **전역 문서**(TS 24.484 §8.4.2.9):
+#   CMSXCAPROOT/org.3gpp.mcptt.service-config/global/service-config.xml (또는 …/global/<mc-org-name>/service-config.xml).
+#   모든 사용자 읽기 전용(§8.4.2.9 «all users will have read-only access»).
+async def handle_service_config_global(args: HandlerArgs, kwargs: dict) -> HandlerResult:
+    if args.method != 'GET':
+        return _method_not_allowed()
+    token_payload = extract_token(args.headers.get('authorization'))
+    if not token_payload:
+        return unauthorized(args)
+    deny = require_scope(args, token_payload, 'CMS', SCOPE_PTT_CMS)
+    if deny:
+        return deny
+    seg = _xcap_segments(args.full_path, '/global/')
+    if len(seg) not in (1, 2) or seg[-1] != SERVICE_CONFIG_DOC_NAME:
         return HandlerResult(status=404)
+    logger.log_info(f"[CMS] Service Config (global): {token_payload.get('mcptt_id')}")
+    return _service_config_response(args, token_payload)
 
 # CMS: MCVideo user profile (TS 24.484 §9.3) — CMSXCAPROOT/org.3gpp.mcvideo.user-profile/users/{MCVideo ID}/{문서 이름}
-#   문서 이름 = mcvideo-user-profile-<index>.xml(§9.3.1A). 1건만 두므로 이름은 가리지 않는다.
+#   문서 이름 = mcvideo-user-profile-<index>.xml(§9.3.1A·§9.3.2.8). 프로파일은 하나(index 1) — 다른 이름·index 는 404.
+MCVIDEO_USER_PROFILE_DOC_NAME = "mcvideo-user-profile-1.xml"
+MCVIDEO_SERVICE_CONFIG_DOC_NAME = "mcvideo-service-config.xml"      # §9.4.2.8
+
+
 async def handle_mcvideo_user_profile(args: HandlerArgs, kwargs: dict) -> HandlerResult:
     if args.method != 'GET':
-        return HandlerResult(status=405)
+        return _method_not_allowed()
     token_payload = extract_token(args.headers.get('authorization'))
     if not token_payload:
         return unauthorized(args)
     deny = require_scope(args, token_payload, 'CMS', SCOPE_VIDEO_CMS)
     if deny:
         return deny
-    path = args.full_path
-    start = path.find('/users/')
-    if start < 0:
-        return HandlerResult(status=400)
-    xui = path[start + 7:].split('/', 1)[0]
-    from urllib.parse import unquote as _unq
-    if not _uri_eq(token_payload.get('mcptt_id'), _unq(xui)):
+    seg = _xcap_segments(args.full_path, '/users/')
+    if len(seg) != 2:
+        return HandlerResult(status=404)
+    xui, doc_name = seg
+    if not _uri_eq(token_payload.get('mcptt_id'), xui):
         logger.log_error(f"[CMS] Forbidden: token '{token_payload.get('mcptt_id')}' != mcvideo user-profile '{xui}'")
         return HandlerResult(status=403, body="Forbidden: cannot access another user's profile")
+    if doc_name != MCVIDEO_USER_PROFILE_DOC_NAME:
+        return HandlerResult(status=404)                 # 없는 문서(다른 index·이름)
     # 문서 생성은 토큰의 정본 신원으로(MCPTT user profile 과 같은 이유 — 경로 XUI 는 표기 변형일 수 있다).
     xml, etag = _mcvideo.get_user_profile_xml(token_payload.get('mcptt_id'))
     if not xml:
@@ -3517,17 +3676,47 @@ async def handle_mcvideo_user_profile(args: HandlerArgs, kwargs: dict) -> Handle
     return HandlerResult(status=200, body=xml, media_type=_mcvideo.MIME_USER_PROFILE, headers={'Etag': etag})
 
 
-# CMS: MCVideo service configuration (TS 24.484 §9.4) — **전역 문서**(§9.4.2.9):
-#   CMSXCAPROOT/org.3gpp.mcvideo.service-config/global/mcvideo-service-config.xml. 모든 사용자 읽기 전용.
-async def handle_mcvideo_service_config(args: HandlerArgs, kwargs: dict) -> HandlerResult:
+# CMS: MCVideo UE configuration (TS 24.484 §9.2) — CMSXCAPROOT/org.3gpp.mcvideo.ue-config/users/sip:{MCVideo ID}/{MCS UE ID}(§9.2.1A).
+#   문서 이름 = 그 단말의 MCS UE ID — master 에서 만든 문서의 <mcvideo-UE-id> 에 넣는다.
+async def handle_mcvideo_ue_config(args: HandlerArgs, kwargs: dict) -> HandlerResult:
     if args.method != 'GET':
-        return HandlerResult(status=405)
+        return _method_not_allowed()
     token_payload = extract_token(args.headers.get('authorization'))
     if not token_payload:
         return unauthorized(args)
     deny = require_scope(args, token_payload, 'CMS', SCOPE_VIDEO_CMS)
     if deny:
         return deny
+    seg = _xcap_segments(args.full_path, '/users/')
+    if len(seg) != 2:
+        return HandlerResult(status=404)
+    xui, ue_id = seg
+    if not _uri_eq(token_payload.get('mcptt_id'), xui):
+        logger.log_error(f"[CMS] Forbidden: token '{token_payload.get('mcptt_id')}' != mcvideo ue-config '{xui}'")
+        return HandlerResult(status=403, body="Forbidden: cannot access another user's UE configuration")
+    xml, etag = _mcvideo.get_ue_config_xml(token_payload.get('mcptt_id'), ue_id)
+    if not xml:
+        return HandlerResult(status=404)     # MCVideo 이용 자격 없음
+    inm = args.headers.get('if-none-match', '')
+    if inm and inm == etag:
+        return HandlerResult(status=304)
+    return HandlerResult(status=200, body=xml, media_type=_mcvideo.MIME_UE_CONFIG, headers={'Etag': etag})
+
+
+# CMS: MCVideo service configuration (TS 24.484 §9.4) — **전역 문서**(§9.4.2.9):
+#   CMSXCAPROOT/org.3gpp.mcvideo.service-config/global/mcvideo-service-config.xml. 모든 사용자 읽기 전용.
+async def handle_mcvideo_service_config(args: HandlerArgs, kwargs: dict) -> HandlerResult:
+    if args.method != 'GET':
+        return _method_not_allowed()
+    token_payload = extract_token(args.headers.get('authorization'))
+    if not token_payload:
+        return unauthorized(args)
+    deny = require_scope(args, token_payload, 'CMS', SCOPE_VIDEO_CMS)
+    if deny:
+        return deny
+    seg = _xcap_segments(args.full_path, '/global/')            # …/global/[<mc-org-name>/]mcvideo-service-config.xml(§9.4.2.9)
+    if len(seg) not in (1, 2) or seg[-1] != MCVIDEO_SERVICE_CONFIG_DOC_NAME:
+        return HandlerResult(status=404)
     xml, etag = _mcvideo.get_service_config_xml()
     inm = args.headers.get('if-none-match', '')
     if inm and inm == etag:
@@ -4319,10 +4508,13 @@ CSC_HANDLER_LIST = [
     ("/idms/jwks",        handle_idms_jwks,          {}),
     # GMS — list: GET /users/{user_uri}  |  CRUD: /users/{user_uri}/{group_uri}
     ("/org.openmobilealliance.groups/users", handle_group_management, {}),
+    ("/org.openmobilealliance.groups/global", handle_group_by_id, {}),            # 그룹 ID 로 찾는 문서 (TS 24.481 §7.2.10.2)
     # CMS (3GPP TS 24.484)
     ("/org.3gpp.mcptt.ue-init-config/users", handle_ue_init_config, {}),  # 로그인 전 — 익명
     ("/org.3gpp.mcptt.user-profile/users",   handle_user_profile,   {}),
-    ("/org.3gpp.mcptt.service-config/users", handle_service_config,  {}),
+    ("/org.3gpp.mcptt.service-config/users", handle_service_config,  {}),          # CIMS 단말의 옛 주소
+    ("/org.3gpp.mcptt.service-config/global", handle_service_config_global, {}),   # 전역 문서 (TS 24.484 §8.4.2.9)
+    ("/org.3gpp.mcvideo.ue-config/users",       handle_mcvideo_ue_config,      {}),   # MCVideo UE configuration (TS 24.484 §9.2)
     ("/org.3gpp.mcvideo.user-profile/users",    handle_mcvideo_user_profile,   {}),   # MCVideo (TS 24.484 §9.3)
     ("/org.3gpp.mcvideo.service-config/global", handle_mcvideo_service_config, {}),   # 전역 문서 (§9.4.2.9)
     # KMS (3GPP TS 33.180 / MIKEY-SAKKE)
