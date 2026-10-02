@@ -97,7 +97,7 @@
 | **S08** | Warning·응답 코드 — MCPTT | GCS-7 · GCS-8 · GCS-11 · REG-3 · ADH-4 · PRV-6 · PRV-7 · GCS-20 | B5 · C2 · D1 | 1 | — | D9 | U03 · W01(문구 사전) | 대기 |
 | **S09** | Warning·응답 코드 — MCData·MCVideo | MCData WRN-1 · WRN-2 · WRN-3 · SDS-4 / VPRV-1 | C4 · D1 | 1 | — | — | W01(문구 사전) | 대기 |
 | **S10** | 개별·애드혹 인가 판정(CSP 몫) | PRV-2 · PRV-4 · PRV-5 · PRV-8 · EMG-4 · ADH-5 | A3 · B3 | 1 | C03 | — | W01(Capabilities 게이트) | 대기 |
-| **S11** | 애드혹 호 절차·인원 상한 | ADH-2 · ADH-3 · ADH-6 · ADH-7 · ADH-9 · ADH-10 | A4 · C1 · D1 | 1 | C03 | — | U04(SDK BYE Reason·`adhoc`) | 대기 |
+| **S11** | 애드혹 호 절차·인원 상한 | ADH-2 · ADH-3 · ADH-6 · ADH-7 · ADH-9 · ADH-10 | A4 · C1 · D1 | 1 | C03 | — | U04(SDK BYE Reason·`adhoc`) | 완료 096cd123 (ADH-7 SDK 몫 → U04) |
 | **S12** | 제휴 — 클라이언트 단위 키·해제·판정 | AFF-2 · AFF-4 · AFF-5 · AFF-6 / MCData AFF-6 / VAFF-1 · VAFF-2 · VAFF-4 · VAFF-5 · VGC-11 | A4 · B2 · C4 | 2 | — | — | U04(`<mcptt-client-id>`) · U06 | 대기 |
 | **S13** | 제휴 — 통지·정리·서비스 분리 | AFF-7 · AFF-8 · AFF-9 · AFF-10 · EMG-3 / MCData AFF-1 · REG-2 / VAFF-6 · VAFF-7 · VREG-4 | A3 · B3 · C3 · D1 | 2 | S12 | — | U06 | 대기 |
 | **S14** | 그룹 호 모델(chat·재초대·late call entry) | GCS-1 · GCS-2 · GCS-3 · GCS-4 · GCS-21 · GCS-22 · AFF-11 / MCData AFF-2 / VGC-2 · VGC-12 | A7 · B1 · C2 | 3 | S12 | D1 | .45 현장 앱(conference NOTIFY 자체 합류) · W01 | 대기 |
