@@ -87,7 +87,7 @@
 
 | WP | 이름 | 항목 | 급 | 세션 | 선행 | 결정 | 짝 | 상태 |
 |---|---|---|---|---|---|---|---|---|
-| **S01** | on-network-disabled·정원·N6 집행 | GCS-19 · GCS-5 · GCS-6 / VGC-3 | A3 · B1 | 1 | — | D2 | C01(`<on-network-disabled>`·정원·사용자별 N6 산출) · U03(SDK·앱이 N6 를 따르고 103 을 알림) · W01 | 대기 |
+| **S01** | on-network-disabled·정원·N6 집행 | GCS-19 · GCS-5 · GCS-6 / VGC-3 | A3 · B1 | 1 | — | D2 | C01(`<on-network-disabled>`·정원·사용자별 N6 산출) · U03(SDK·앱이 N6 를 따르고 103 을 알림) · W01 | 완료 3309f08f |
 | **S02** | MCVideo 헤더·fmtp·Supported 한두 줄 | AFF-3 · GCS-15 / VGC-4 · VGC-5 · VGC-6 · VGC-7 · VSDP-4 · VAFF-3 | C8 | 1 | — | — | — | 대기 |
 | **S03** | 경보·긴급 인가 | EMG-1 · EMG-2 · EMG-5 / MCData EMG-1 / VGC-1 | A2 · B2 · C1 | 1 | — | — | U01(단말 경보 대상) | 완료 f2cc799c |
 | **S04** | 긴급 지시자·상태 통지 | EMG-10 · EMG-11 · EMG-13 · EMG-14 · EMG-15 · EMG-16 · EMG-17 | B1 · C6 | 1 | S03 | — | — | 대기 |
