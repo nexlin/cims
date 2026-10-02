@@ -21,6 +21,7 @@ from services import logger as _logger
 from services import subscriptions as _subs      # 가입 테이블 레지스트리(volte/voip/ptt — sip_service_model.md §2-9)
 from services import mcvideo as _mcvideo        # MCVideo 설정 평면(그룹 문서 조각·user profile·service config — mcvideo.md §5.1)
 from services import idms_keys as _idms_keys    # IdMS 토큰 서명 키(RS256 — TS 33.180 B.2.2.1)
+from services import xcap_node as _xcap_node    # XCAP node selector(RFC 4825 §6.3 — 요소·속성 단위 절차)
 
 # --- Configuration & Data ---
 # 토큰 서명 (TS 33.180 B.2.2.1 — access token 은 JSON web digital signature 프로파일 RFC 7515 · OIDC Core §15.1 — OP 는 ID token
@@ -3291,6 +3292,154 @@ async def handle_user_groups(args: HandlerArgs, kwargs: dict) -> HandlerResult:
     return HandlerResult(status=200, body=json.dumps(result), media_type='application/json')
 
 
+def _gms_store(gid: str, uri_key: str, doc: dict, existing: Optional[dict], my_uid, user_uri: str, requester) -> Tuple[int, dict]:
+    """해석한 그룹 문서를 저장한다 — DB(운영) 또는 파일 그룹(DB 없는 개발 환경). 반환 (0, {}) = 성공, (status, 오류 dict) = 실패."""
+    if _DB_CONFIG:
+        return gms_write_group(gid, doc, my_uid, create=existing is None)
+    # DB 없는 개발 환경 폴백 — 파일 그룹만 갱신. 운영은 항상 DB.
+    grp = existing or {"created_by": user_uri, "created_at": datetime.datetime.now().isoformat(),
+                       "members": [], "authorized_user": requester or "",
+                       "authorized_user_id": my_uid}
+    grp["display_name"] = doc.get('display_name') or grp.get('display_name') or gid
+    grp["etag"] = f"etag_{int(time.time())}"
+    if doc.get('members') is not None:
+        grp["members"] = [{"uri": m.get('mcptt_id') or f"tel:{m['user_id']}", "name": m['user_id'],
+                           "role": m['role'], "priority": m['priority'], "joined_at": ""} for m in doc['members']]
+    if doc.get('mcvideo') is not None:
+        mv = dict(_mcvideo.GROUP_ATTR_DEFAULTS, **(grp.get('mcvideo') or {}))
+        mv.update({k: v for k, v in doc['mcvideo'].items() if v is not None})
+        grp["mcvideo"] = mv
+    GROUPS[uri_key] = grp
+    save_group_to_file(uri_key, grp)
+    return 0, {}
+
+
+def _xcap_node_error(element: str, phrase: str = '', status: int = 409) -> HandlerResult:
+    return HandlerResult(status=status, body=xcap_error_xml(element, phrase), media_type=XCAP_ERROR_MIME)
+
+
+def _gms_node_request(args: HandlerArgs, token_payload: dict, user_uri: str, group_uri: str, node_selector: str) -> HandlerResult:
+    """그룹 문서의 요소·속성 단위 XCAP(TS 24.481 §6.3.6~§6.3.12 → RFC 4825 §7·§8) — `<문서 URI>/~~/<node selector>`.
+
+    읽기 = 그 요소(application/xcap-el+xml)·속성 값(application/xcap-att+xml)·이름공간 묶음(application/xcap-ns+xml). 쓰기 = 지금 문서에
+    그 노드 조작을 적용한 **문서 전체**를 문서 PUT 과 같은 해석·검사·저장으로 넣는다 — 인가도 문서 단위와 같다(읽기 = 멤버·소유자·
+    관리 범위, 쓰기 = 소유자·관리 범위). 쓴 뒤의 문서에서 그 조작이 반영되지 않았으면(문서 PUT 이 «없는 요소 = 기존값 유지» 라
+    지운 요소가 남는 경우) 409 `<cannot-delete>`."""
+    requester = (token_payload or {}).get('mcptt_id')
+    gid, _dom = _gms_gid_from_uri(group_uri)
+    uri_key = _group_uri(gid)
+    existing = GROUPS.get(uri_key)
+    if existing is None:
+        return HandlerResult(status=404)
+    write = args.method in ('PUT', 'DELETE')
+    if args.method not in ('GET', 'PUT', 'DELETE'):
+        return _method_not_allowed('GET, PUT, DELETE')
+    my_uid = _token_user_id(token_payload)
+    if write:
+        owner = existing.get('authorized_user_id')
+        if (my_uid is None or owner != my_uid) and not _admin_manages_group(token_payload, existing):
+            logger.log_error(f"[GMS] {args.method} node of {gid} denied: '{requester}' is not the owner (owner={owner})")
+            return _json_result(403, {'error': 'not_group_owner'})
+    elif not _is_group_member(existing, requester) and not _admin_manages_group(token_payload, existing) \
+            and not (my_uid is not None and existing.get('authorized_user_id') == my_uid):
+        return HandlerResult(status=403, body="Forbidden: not a member of this group")
+    xml, etag = get_group_xml(uri_key)
+    if not xml:
+        return HandlerResult(status=404)
+    if write:
+        if_match = args.headers.get('if-match', '')
+        if if_match and if_match.strip('"') != (etag or '').strip('"'):
+            return _json_result(412, {'error': 'etag_mismatch', 'etag': etag})
+    raw_query = '&'.join(f"{k}={v}" if v not in (None, '') else str(k) for k, v in (args.query_params or {}).items())
+    try:
+        sel = _xcap_node.parse(node_selector, _xcap_node.parse_bindings(raw_query), _NS['poc'])
+        for prefix, ns in (('', _NS['poc']), ('rl', _NS['rl']), ('cp', _NS['cp']), ('mcpttgi', _NS['gi']), ('cims', _NS['cims']),
+                           ('ocp', 'urn:oma:xml:xdm:common-policy'), ('oxe', 'urn:oma:xml:xdm:extensions')):
+            _ET.register_namespace(prefix, ns)
+        root = _ET.fromstring(xml)
+        parent, node = _xcap_node.locate(root, sel)
+    except _xcap_node.SelectorError as e:
+        return _json_result(400, {'error': 'invalid_node_selector', 'detail': str(e)})
+
+    if args.method == 'GET':
+        if node is None:
+            return HandlerResult(status=404)
+        if sel.kind == 'attribute':
+            val = node.get(sel.attribute)
+            if val is None:
+                return HandlerResult(status=404)
+            return HandlerResult(status=200, body=val, media_type=_xcap_node.MIME_ATTRIBUTE, headers={'Etag': etag})
+        if sel.kind == 'namespaces':
+            # 그 요소에서 보이는 이름공간 묶음(RFC 4825 §7.10) — 그룹 문서는 묶음을 루트에 다 선언한다
+            decl = ' '.join(_re.findall(r'xmlns(?::[\w.\-]+)?="[^"]*"', xml[:xml.find('>', xml.find('<group'))]))
+            local = node.tag.rsplit('}', 1)[-1]
+            return HandlerResult(status=200, body=f'<{local} {decl}/>', media_type=_xcap_node.MIME_NAMESPACES, headers={'Etag': etag})
+        import copy as _copy
+        el = _copy.copy(node)
+        el.tail = None                                         # 요소 뒤의 들여쓰기 공백은 그 요소가 아니다
+        return HandlerResult(status=200, body=_ET.tostring(el, encoding='unicode'), media_type=_xcap_node.MIME_ELEMENT,
+                             headers={'Etag': etag})
+
+    # ── 쓰기 — 노드 조작을 적용한 문서 전체를 저장한다 ──
+    created = False
+    body = args.body.decode('utf-8', 'replace') if isinstance(args.body, (bytes, bytearray)) else (args.body if isinstance(args.body, str) else '')
+    try:
+        if sel.kind == 'namespaces':
+            return _method_not_allowed('GET')
+        if sel.kind == 'attribute':
+            if node is None:
+                return _xcap_node_error('no-parent') if args.method == 'PUT' else HandlerResult(status=404)
+            import copy as _copy
+            new_root = _copy.deepcopy(root)
+            _p, target = _xcap_node.locate(new_root, _xcap_node.Selector(sel.steps))
+            if args.method == 'PUT':
+                created = target.get(sel.attribute) is None
+                target.set(sel.attribute, body.strip())
+            else:
+                if target.get(sel.attribute) is None:
+                    return HandlerResult(status=404)
+                del target.attrib[sel.attribute]
+        elif args.method == 'PUT':
+            if not body or '<!DOCTYPE' in body or '<!ENTITY' in body:
+                return _xcap_node_error('not-xml-frag')
+            try:
+                el = _ET.fromstring(body)
+            except _ET.ParseError as e:
+                return _xcap_node_error('not-xml-frag', str(e))
+            created, new_root = _xcap_node.put_element(root, sel, el)
+        else:
+            new_root = _xcap_node.delete_element(root, sel)
+            if new_root is None:
+                return HandlerResult(status=404)
+    except _xcap_node.SelectorError as e:
+        return _json_result(400, {'error': 'invalid_node_selector', 'detail': str(e)})
+    except ValueError as e:                                    # put_element: no-parent | cannot-insert
+        return _xcap_node_error(str(e))
+    new_xml = _ET.tostring(new_root, encoding='unicode')
+    try:
+        doc = parse_group_document_xml(new_xml)
+    except ValueError as ve:
+        return gms_doc_error(args, 400, {'error': 'invalid_group_document', 'detail': str(ve)}, force_xml=True)
+    # 그룹 ID 는 요소 단위로 바꿀 수 없다(문서 이름과 같아야 한다)
+    ls = new_root if new_root.tag == f"{{{_NS['poc']}}}list-service" else new_root.find('poc:list-service', _NS)
+    if ls is None or not _uri_eq(ls.get('uri'), uri_key):
+        return _xcap_node_error('constraint-failure', 'list-service uri cannot be changed')
+    st, err = _gms_store(gid, uri_key, doc, existing, my_uid, user_uri, requester)
+    if st:
+        return gms_doc_error(args, st, err, force_xml=True)
+    notify_csp("GROUP_CHANGED", uri_key, args.method, GROUPS.get(uri_key, {}).get('etag', ''))
+    xml2, etag2 = get_group_xml(uri_key)
+    try:
+        _p2, after = _xcap_node.locate(_ET.fromstring(xml2), _xcap_node.Selector(sel.steps))
+    except _xcap_node.SelectorError:
+        after = None
+    if args.method == 'DELETE' and sel.kind == 'element' and after is not None:
+        # 문서 쓰기가 «없는 요소 = 기존값 유지» 라 지운 요소가 다시 나왔다 — 그 요소는 요소 단위로 지울 수 없다
+        return _xcap_node_error('cannot-delete', 'this element is always present in the group document')
+    logger.log_info(f"[GMS] node {args.method} {uri_key} ~~ {node_selector}")
+    return HandlerResult(status=201 if (args.method == 'PUT' and created) else 200, headers={'Etag': etag2})
+
+
 def _gms_create_by_creation_xui(args: HandlerArgs, token_payload: dict) -> HandlerResult:
     """규격 GC 의 그룹 생성(TS 24.481 §6.3.2) — `PUT …/users/<group creation XUI>/<문서 이름>`. 그룹 ID 는 본문 `<list-service uri>` 다
     (문서 이름이 아니다). ID 가 비었거나(§6.3.2.2.2 NOTE — GMS 가 정해 주길 기다린다) 정책에 맞지 않거나 이미 쓰이면
@@ -3359,6 +3508,10 @@ async def handle_group_management(args: HandlerArgs, kwargs: dict) -> HandlerRes
         return deny
 
     path = args.full_path
+    # 요소·속성 단위 XCAP(`<문서 URI>/~~/<node selector>` — RFC 4825 §6) — 문서 URI 와 node selector 를 가른다
+    node_selector = ''
+    if _xcap_node.SEPARATOR in path:
+        path, node_selector = path.split(_xcap_node.SEPARATOR, 1)
     parts = [p for p in path.split('/') if p]
 
     # 인가 (item 2): XCAP 사용자 트리 소유 검사 — /users/{tree_owner}/ 는 토큰 본인 트리만 접근.
@@ -3392,6 +3545,10 @@ async def handle_group_management(args: HandlerArgs, kwargs: dict) -> HandlerRes
     if len(parts) == 3 and args.method == 'GET':
         # Delegate to list handler
         return await handle_user_groups(args, kwargs)
+    if node_selector:
+        if len(parts) != 4:
+            return HandlerResult(status=404)
+        return _gms_node_request(args, token_payload, _unq(parts[2]), _unq(parts[3]), node_selector)
 
     from urllib.parse import unquote
     group_uri = unquote(parts[-1])
@@ -3456,26 +3613,9 @@ async def handle_group_management(args: HandlerArgs, kwargs: dict) -> HandlerRes
                 doc = parse_group_document_xml(args.body.decode('utf-8', 'replace') if isinstance(args.body, (bytes, bytearray)) else (args.body if isinstance(args.body, str) else ''))
             except ValueError as ve:
                 return gms_doc_error(args, 400, {'error': 'invalid_group_document', 'detail': str(ve)})
-            if not _DB_CONFIG:
-                # DB 없는 개발 환경 폴백 — 파일 그룹만 갱신(종전 동작). 운영은 항상 DB.
-                grp = existing or {"created_by": user_uri, "created_at": datetime.datetime.now().isoformat(),
-                                   "members": [], "authorized_user": requester or "",
-                                   "authorized_user_id": my_uid}
-                grp["display_name"] = doc.get('display_name') or grp.get('display_name') or gid
-                grp["etag"] = f"etag_{int(time.time())}"
-                if doc.get('members') is not None:
-                    grp["members"] = [{"uri": m.get('mcptt_id') or f"tel:{m['user_id']}", "name": m['user_id'],
-                                       "role": m['role'], "priority": m['priority'], "joined_at": ""} for m in doc['members']]
-                if doc.get('mcvideo') is not None:
-                    mv = dict(_mcvideo.GROUP_ATTR_DEFAULTS, **(grp.get('mcvideo') or {}))
-                    mv.update({k: v for k, v in doc['mcvideo'].items() if v is not None})
-                    grp["mcvideo"] = mv
-                GROUPS[uri_key] = grp
-                save_group_to_file(uri_key, grp)
-            else:
-                st, err = gms_write_group(gid, doc, my_uid, create=existing is None)
-                if st:
-                    return gms_doc_error(args, st, err)
+            st, err = _gms_store(gid, uri_key, doc, existing, my_uid, user_uri, requester)
+            if st:
+                return gms_doc_error(args, st, err)
             notify_csp("GROUP_CHANGED", uri_key, "PUT", GROUPS.get(uri_key, {}).get('etag', ''))
             xml, etag = get_group_xml(uri_key)
             return HandlerResult(status=201 if existing is None else 200, body=xml,

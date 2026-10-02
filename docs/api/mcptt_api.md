@@ -51,6 +51,15 @@ XCAP(RFC 4825) 리소스 기반 — TS 24.481 Ut. 인증 = `Authorization: Beare
 
 - **신규 그룹 식별자는 클라이언트가 정한다**(XCAP 관습): `g-` + 소문자 hex 8자리(`tel:g-0a1b2c3d`). `adhoc-`/`priv-` 는
   즉석 세션 예약 접두사라 거부. 콘솔이 만든 `g001` 류는 형식이 달라도 소유자면 PUT/DELETE 가능.
+- **요소·속성 단위 XCAP**(TS 24.481 §6.3.6~§6.3.12 → RFC 4825 §6~§8) — `…/users/{xui}/{group_uri}/~~/{node selector}[?xmlns(p=ns)…]`.
+  node selector = `group/list-service/list/entry[@uri="tel:+82…"]` 같은 단계 경로(이름·`[n]`·`[@att="v"]`), 끝에 `@att`(속성)·`namespace::*`.
+  접두 없는 요소 이름은 `urn:oma:xml:poc:list-service`, 접두는 query `xmlns()` 로 묶는다.
+  GET = 요소(`application/xcap-el+xml`)·속성 값(`application/xcap-att+xml`)·이름공간(`application/xcap-ns+xml`), PUT = 요소 넣기(201)·바꾸기(200)·
+  속성 값, DELETE = 지우기. 쓰기는 **그 조작을 적용한 문서 전체**를 문서 PUT 과 같은 검사·저장으로 넣는다(인가도 같다 — 읽기 = 멤버·소유자,
+  쓰기 = 소유자·관리 범위, `If-Match`). 오류 = 409 xcap-error(`<no-parent>`·`<cannot-insert>`·`<not-xml-frag>`·`<schema-validation-error>`·
+  `<constraint-failure>`·`<cannot-delete>` — 그룹 문서에 늘 실리는 요소는 지울 수 없다), selector 문법 오류 400, 없는 노드 404.
+  예: 멤버 한 명 추가 = `PUT …/~~/group/list-service/list/entry[@uri="tel:+82500000003"]` 본문 `<entry uri="tel:+82500000003">…</entry>`,
+  삭제 = 같은 URI 에 DELETE.
 - **규격 GC 의 생성 경로**(TS 24.481 §6.3.2) — `PUT …/users/{group creation XUI}/{문서 이름}`(XUI = ue-init-config `<group-creation-XUI>` —
   `UeInitConfig.GroupCreationXui`, 비면 공개 base URL). 그룹 ID 는 본문 `<list-service uri>` 다. 비었거나(§6.3.2.2.2 NOTE) 형식이 아니거나 이미
   쓰이면 **409 + `application/xcap-error+xml` `<uniqueness-failure><exists field="group/list-service/@uri"><alt-value>tel:g-xxxxxxxx</alt-value>`**

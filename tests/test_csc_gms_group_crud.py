@@ -561,6 +561,106 @@ class XcapWriteTests(_Base):
         self.assertEqual(self._create("tel:g-0a1b2c3f", headers={"content-type": "text/plain"}).status, 415)
 
 
+class NodeSelectorTests(_Base):
+    """GMS-5 — 요소·속성 단위 XCAP(TS 24.481 §6.3.6~§6.3.12 → RFC 4825 §6·§7·§8): `<문서 URI>/~~/<node selector>`."""
+    GID = "g-0a1b2c3d"
+    NS_Q = {"xmlns(g": "urn:3gpp:ns:mcpttGroupInfo:1.0)xmlns(r=urn:ietf:params:xml:ns:resource-lists)"}
+
+    def setUp(self):
+        super().setUp()
+        self._existing(self.GID, OWNER_UID, members=["+82500000001", "+82500000002"])
+        m.GROUPS[f"tel:{self.GID}"].update({"priority": 5, "group_type": "prearranged"})
+
+    def _node(self, method, selector, body=None, xui=OWNER_PTT, headers=None, query=None, token=None):
+        if token is not None:
+            m.extract_token = lambda hdr: token if hdr else None
+        h = {"authorization": "Bearer x"}
+        h.update(headers or {})
+        path = f"/org.openmobilealliance.groups/users/tel:{xui}/tel:{self.GID}/~~/{selector}"
+        return _run(m.handle_group_management(
+            HandlerArgs(method, path, "127.0.0.1", 0, headers=h, query_params=query or {},
+                        body=body.encode() if isinstance(body, str) else body), {}))
+
+    def _members(self):
+        return [x["uri"] for x in m.GROUPS[f"tel:{self.GID}"]["members"]]
+
+    def test_get_element_attribute_and_namespaces(self):
+        r = self._node("GET", "group/list-service/display-name")
+        self.assertEqual((r.status, r.media_type), (200, "application/xcap-el+xml"))
+        self.assertIn(f">{self.GID}</", r.body)
+        r = self._node("GET", 'group/list-service/list/entry[@uri="tel:+82500000002"]')
+        self.assertEqual(r.status, 200)
+        self.assertIn('uri="tel:+82500000002"', r.body)
+        self.assertEqual(self._node("GET", "group/list-service/list/entry[2]/@uri").body, "tel:+82500000002")
+        self.assertEqual(self._node("GET", "group/list-service/list/entry[2]/@uri").media_type, "application/xcap-att+xml")
+        r = self._node("GET", "group/list-service/g:on-network-invite-members", query=self.NS_Q)
+        self.assertEqual(r.status, 200, r.body)
+        self.assertIn(">true<", r.body)
+        r = self._node("GET", "group/list-service/namespace::*")
+        self.assertEqual((r.status, r.media_type), (200, "application/xcap-ns+xml"))
+        self.assertIn('xmlns:mcpttgi="urn:3gpp:ns:mcpttGroupInfo:1.0"', r.body)
+        self.assertEqual(self._node("GET", 'group/list-service/list/entry[@uri="tel:+82500000009"]').status, 404)
+        self.assertEqual(self._node("GET", "group/list-service/list/entry[9]/@uri").status, 404)
+        self.assertEqual(self._node("GET", "group/list-service/x:y").status, 400, "묶이지 않은 접두")
+        self.assertEqual(self._node("GET", "group/list-service/list/entry[").status, 400)
+        self.assertEqual(self._node("GET", "group/list-service/list/entry").status, 400, "둘 이상을 고르는 selector")
+
+    def test_add_and_remove_one_member(self):
+        sel = 'group/list-service/list/entry[@uri="tel:+82500000003"]'
+        entry = ('<entry xmlns="urn:oma:xml:poc:list-service" xmlns:mcpttgi="urn:3gpp:ns:mcpttGroupInfo:1.0" uri="tel:+82500000003">'
+                 '<mcpttgi:participant-type>participant</mcpttgi:participant-type><mcpttgi:user-priority>3</mcpttgi:user-priority></entry>')
+        r = self._node("PUT", sel, entry, headers={"content-type": "application/xcap-el+xml"})
+        self.assertEqual(r.status, 201, r.body)
+        self.assertIn("Etag", r.headers)
+        self.assertEqual(self._members(), ["tel:+82500000001", "tel:+82500000002", "tel:+82500000003"])
+        r = self._node("PUT", sel, entry.replace(">3<", ">7<"))          # 같은 요소를 다시 = 교체
+        self.assertEqual(r.status, 200)
+        self.assertEqual(m.GROUPS[f"tel:{self.GID}"]["members"][2]["priority"], 7)
+        r = self._node("DELETE", 'group/list-service/list/entry[@uri="tel:+82500000001"]')
+        self.assertEqual(r.status, 200)
+        self.assertEqual(self._members(), ["tel:+82500000002", "tel:+82500000003"])
+        self.assertEqual(self._node("DELETE", 'group/list-service/list/entry[@uri="tel:+82500000001"]').status, 404)
+
+    def test_put_constraints(self):
+        sel = 'group/list-service/list/entry[@uri="tel:+82500000003"]'
+        other = '<entry xmlns="urn:oma:xml:poc:list-service" uri="tel:+82500000004"/>'
+        r = self._node("PUT", sel, other)                                # 넣은 요소를 selector 가 고르지 못한다
+        self.assertEqual((r.status, r.media_type), (409, "application/xcap-error+xml"))
+        self.assertIn("<cannot-insert", r.body)
+        r = self._node("PUT", 'group/list-service/nope/entry[@uri="tel:+82500000003"]', other)
+        self.assertIn("<no-parent", r.body)
+        r = self._node("PUT", sel, "<entry")
+        self.assertIn("<not-xml-frag", r.body)
+        bad = '<entry xmlns="urn:oma:xml:poc:list-service" xmlns:g="urn:3gpp:ns:mcpttGroupInfo:1.0" uri="tel:+82500000003"><g:participant-type>boss</g:participant-type></entry>'
+        r = self._node("PUT", sel, bad)
+        self.assertEqual(r.status, 409)
+        self.assertIn("schema-validation-error", r.body)
+        self.assertEqual(len(self._members()), 2, "거절한 쓰기는 반영하지 않는다")
+        r = self._node("PUT", "group/list-service/@uri", "tel:g-ffffffff")
+        self.assertIn("constraint-failure", r.body)
+        r = self._node("DELETE", "group/list-service/g:on-network-invite-members", query=self.NS_Q)
+        self.assertEqual(r.status, 409)
+        self.assertIn("<cannot-delete", r.body)
+
+    def test_replace_display_name_and_if_match(self):
+        new = '<display-name xmlns="urn:oma:xml:poc:list-service">작전 1팀</display-name>'
+        etag = self._node("GET", "group/list-service/display-name").headers["Etag"]
+        self.assertEqual(self._node("PUT", "group/list-service/display-name", new, headers={"if-match": '"stale"'}).status, 412)
+        r = self._node("PUT", "group/list-service/display-name", new, headers={"if-match": etag})
+        self.assertEqual(r.status, 200, r.body)
+        self.assertEqual(m.GROUPS[f"tel:{self.GID}"]["display_name"], "작전 1팀")
+
+    def test_authorisation_follows_document_rules(self):
+        other = {"sub": OTHER_LOGIN, "mcptt_id": f"tel:{OTHER_PTT}", "scope": m.SCOPE_PTT_GMS}
+        r = self._node("GET", "group/list-service/display-name", xui=OTHER_PTT, token=other)
+        self.assertEqual(r.status, 403, "비멤버는 읽지 못한다")
+        m.GROUPS[f"tel:{self.GID}"]["members"].append({"uri": f"tel:{OTHER_PTT}", "name": "o", "role": "participant", "priority": 0})
+        self.assertEqual(self._node("GET", "group/list-service/display-name", xui=OTHER_PTT, token=other).status, 200)
+        r = self._node("DELETE", 'group/list-service/list/entry[@uri="tel:+82500000001"]', xui=OTHER_PTT, token=other)
+        self.assertEqual(r.status, 403, "멤버라도 소유자가 아니면 쓰지 못한다")
+        self.assertEqual(self._node("POST", "group/list-service/display-name", "<x/>", token=self.token).status, 405)
+
+
 class DbWriteTests(unittest.TestCase):
     def setUp(self):
         self._saved = (m._db_connect, m.sync_group_from_db)
