@@ -164,11 +164,12 @@ struct FakeServer {
 }  // namespace
 
 /** 제어 기능의 멤버 초대(TS 24.379 §6.3.3.1.2 — mcptt-info + SDP, Session-Expires 는 refresher 생략 6)) — UE 주소로 보낸다. */
-static std::string memberInvite(int srvPort, int uePort, const std::string& callId, const std::string& sessionExpires) {
+static std::string memberInvite(int srvPort, int uePort, const std::string& callId, const std::string& sessionExpires,
+                                const std::string& fromUser = "g001", const std::string& group = "g001") {
     const std::string b = "mb1";
     const std::string info = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n<mcpttinfo xmlns=\"urn:3gpp:ns:mcpttInfo:1.0\"><mcptt-Params>"
                              "<session-type>prearranged</session-type><mcptt-calling-user-id>tel:+82500000002</mcptt-calling-user-id>"
-                             "<mcptt-calling-group-id>tel:g001</mcptt-calling-group-id></mcptt-Params></mcpttinfo>";
+                             + (group.empty() ? std::string() : "<mcptt-calling-group-id>tel:" + group + "</mcptt-calling-group-id>") + "</mcptt-Params></mcpttinfo>";
     const std::string sdpBody = "v=0\r\no=CSS 4 1 IN IP4 127.0.0.1\r\ns=-\r\nc=IN IP4 127.0.0.1\r\nt=0 0\r\n"
                                 "m=audio 40010 RTP/AVP 0\r\na=rtpmap:0 PCMU/8000\r\na=sendrecv\r\n"
                                 "m=application 40012 UDP MCPTT\r\na=floorid:0 mstrm:audio\r\na=fmtp:MCPTT mc_queueing;mc_priority=3\r\n";
@@ -176,7 +177,7 @@ static std::string memberInvite(int srvPort, int uePort, const std::string& call
                              "\r\nContent-Type: application/sdp\r\n\r\n" + sdpBody + "--" + b + "--\r\n";
     const std::string ue = "sip:+82500000001@127.0.0.1:" + std::to_string(uePort);
     return "INVITE " + ue + " SIP/2.0\r\nVia: SIP/2.0/UDP 127.0.0.1:" + std::to_string(srvPort) + ";branch=z9hG4bK" + callId + "\r\n" +
-           "Max-Forwards: 70\r\nFrom: <sip:g001@ptt.test>;tag=srv-" + callId + "\r\nTo: <" + ue + ">\r\nCall-ID: " + callId + "\r\n" +
+           "Max-Forwards: 70\r\nFrom: <sip:" + fromUser + "@ptt.test>;tag=srv-" + callId + "\r\nTo: <" + ue + ">\r\nCall-ID: " + callId + "\r\n" +
            "CSeq: 1 INVITE\r\nContact: <sip:g001@127.0.0.1:" + std::to_string(srvPort) + ";gr=s1>;+g.3gpp.mcptt;isfocus\r\n" +
            "Supported: timer\r\nSession-Expires: " + sessionExpires + "\r\nMin-SE: 90\r\n" +
            "Accept-Contact: *;+g.3gpp.mcptt;require;explicit\r\nP-Asserted-Service: urn:urn-7:3gpp-service.ims.icsi.mcptt\r\n" +
@@ -234,6 +235,24 @@ TEST(McpttInvite, MemberInvitationRefresherUas) {
                               headerOf(ok, "To") + "\r\nCall-ID: " + cid + "\r\nCSeq: 2 BYE\r\nContent-Length: 0\r\n\r\n";
             srv.send(bye);
             ASSERT_FALSE(srv.recv("SIP/2.0 200").empty()) << "BYE " << c.se;
+        }
+        // 착신 그룹 = <mcptt-calling-group-id>(§10.1.1.4.1.1 4)b)) — From 이 제어 기능 PSI 여도 그 그룹의 세션이다. 요소가 없으면 From 의 user
+        struct G { const char* from; const char* group; const char* want; };
+        for (const G& g : {G{"mcptt_psi", "g009", "g009"}, G{"g007", "", "g007"}}) {
+            const std::string cid = std::string("gi-") + g.want;
+            srv.send(memberInvite(srv.port, cfg.udpPort, cid, "1800", g.from, g.group));
+            std::string ok = srv.recv("SIP/2.0 200");
+            ASSERT_FALSE(ok.empty()) << g.want;
+            ASSERT_TRUE(l.wait([&] { return l.lastState.groupId == g.want; })) << "group " << l.lastState.groupId;
+            srv.callId = cid;
+            srv.ueContact = uriIn(headerOf(ok, "Contact"));
+            srv.cseq = 1;
+            srv.ackFor(ok);
+            std::string bye = "BYE " + srv.ueContact + " SIP/2.0\r\nVia: SIP/2.0/UDP 127.0.0.1:" + std::to_string(srv.port) +
+                              ";branch=z9hG4bKbye" + cid + "\r\nMax-Forwards: 70\r\nFrom: " + headerOf(ok, "From") + "\r\nTo: " +
+                              headerOf(ok, "To") + "\r\nCall-ID: " + cid + "\r\nCSeq: 2 BYE\r\nContent-Length: 0\r\n\r\n";
+            srv.send(bye);
+            ASSERT_FALSE(srv.recv("SIP/2.0 200").empty()) << "BYE " << g.want;
         }
     }
     eng.stop();

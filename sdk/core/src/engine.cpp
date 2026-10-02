@@ -1651,7 +1651,10 @@ public:
             call->mcptt.reset(new McpttSession);
             call->mcptt->isPrivate = mi.privateCall;
             call->mcptt->fullDuplex = mi.noFloorCtrl;
-            call->mcptt->groupId = mi.privateCall ? mcptt::bareId(mi.callingUserId) : mcptt::bareId(remote);
+            // 착신 그룹 = mcptt-info <mcptt-calling-group-id>(TS 24.379 §10.1.1.4.1.1 4)b) · Annex F.1.3). From 은 그룹이 아닐 수 있다
+            //   (제어 기능 PSI) — 요소가 없는 옛 서버의 초대만 From 의 user 로 본다.
+            call->mcptt->groupId = mi.privateCall ? mcptt::bareId(mi.callingUserId)
+                                 : mcptt::bareId(mi.callingGroupId.empty() ? remote : mi.callingGroupId);
             call->mcptt->emergency = mi.emergency;
             call->mcptt->imminentPeril = mi.imminentPeril && !mi.emergency;
             if (!mi.noFloorCtrl) {

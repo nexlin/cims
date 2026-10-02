@@ -297,6 +297,8 @@ C++ 공개 표면은 `cimsue/engine.h` 의 `Engine` 하나이며 계정·호를 
   `SIP-If-Match` 로 싣는다. 412 를 받으면 그 ETag 를 버리고(§5 MUST) 같은 요청을 다시 보내지 않으며, `SIP-If-Match` 없는 초기 PUBLISH
   (§4.2)로 한 번 다시 알린다. 앱에는 412 가 올라가지 않고 재발행의 최종 응답이 `affiliate()` 가 돌려준 token 으로 온다(시험
   `AffiliationPublish.StaleEtag412FallsBackToInitialPublish`).
+- **착신 그룹**(TS 24.379 §10.1.1.4.1.1 4)b) · Annex F.1.3) — 그룹 호 초대의 그룹(`CallInfo.groupId`)은 mcptt-info `<mcptt-calling-group-id>` 다.
+  From 은 그룹이 아닐 수 있다(제어 기능 PSI). 요소가 없는 초대만 From 의 user 로 본다.
 - **개별 호의 개시 방식 요청**(TS 24.379 §11.1.1.2.1.1 14) — RFC 5373). `startPrivateCall(peer, {commencement})`: `Auto`·`Manual` = `Answer-Mode`,
   `ForceAuto` = `Priv-Answer-Mode: Auto`(강제 자동 — 인가가 없으면 서버가 403 Warning 143), 기본 `Unspecified` = 헤더를 싣지 않는다(착신 단말 설정대로).
   서버는 user profile 의 개시 방식 인가로 판정하고(자동 125 · 수동 126) 받은 `Answer-Mode` 를 착신 INVITE 에 옮긴다 — 착신 단말은 그 값으로 자동·수동
