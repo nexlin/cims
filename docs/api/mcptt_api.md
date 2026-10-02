@@ -258,7 +258,22 @@ KmsCert(인증서 캐시) 엔드포인트는 없다.
 
 ---
 
-## 5. 관련 파일
+## 5. MCData FD 콘텐츠 서버 (media storage function — TS 24.282 §10.2.2·§10.2.3·§6.7.3)
+
+인증 = IdMS access token(scope `3gpp:mc:data_service`). 판정·저장·편차는 [mcdata_messaging.md](../design/features/mcdata_messaging.md) §4.5.
+
+| Method | Path | 용도 |
+|---|---|---|
+| POST | `/mcdata/fd` | 업로드. **규격형** `Content-Type: multipart/mixed` = `application/vnd.3gpp.mcdata-info+xml`(`<request-type>` `one-to-one-fd`\|`group-fd`·`<mcdata-request-uri>`(그룹)·`<mcdata-calling-user-id>`) + `application/octet-stream` / **간이형** `?name=&group=&type=` + 본문 `application/octet-stream`. → **201 + `Location`**(파일 URL) + `{id,url,size,name}` |
+| GET | `/mcdata/fd/{id}` | 다운로드 — 그룹에 올린 파일은 그 그룹 멤버·올린 사람만(403) |
+| HEAD | `/mcdata/fd/{id}` | 존재 확인 — 200 / 404, 본문 없음. 제어 기능(CSP)은 `Authorization: Bearer <InternalApi.Token>` → 응답 `X-Cims-Fd-Group`·`X-Cims-Fd-Uploader` |
+
+오류: 400(형식·`request-type`·group-fd 인데 그룹 없음) · 401(토큰 무효) · 403(토큰 없음·scope 부족·`<mcdata-calling-user-id>` ≠ 토큰·그룹 FD 꺼짐·
+비멤버·수신 제어) · 404(모르는 그룹·없는 파일) · 413(상한 `McDataFd.MaxBytes` 초과) · 501(`message/external-body`).
+
+---
+
+## 6. 관련 파일
 
 - 소스: `csc/src/handlers/idms.py`, `mcptt.py` 계열
 - 저장: `csc_idms` DB (auth_code, refresh_token)

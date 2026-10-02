@@ -1673,6 +1673,11 @@ def get_group_xml(group_uri):
     if max_sds > 0:
         xml += f"""
     <mcpttgi:mcdata-on-network-max-data-size-for-SDS>{max_sds}</mcpttgi:mcdata-on-network-max-data-size-for-SDS>"""
+    # FD 한 건의 상한(§7.2.2 l)) — 콘텐츠 서버가 그 값으로 업로드를 413 으로 막는다(TS 24.282 §10.2.2.2 1)b)). 값의 정본 = McDataFd.MaxBytes.
+    if group.get('allow_fd', False):
+        from services import mcdata_fd as _mcdata_fd
+        xml += f"""
+    <mcpttgi:mcdata-on-network-max-data-size-for-FD>{_mcdata_fd.max_bytes()}</mcpttgi:mcdata-on-network-max-data-size-for-FD>"""
     max_auto = int(group.get('max_auto_recv') or 0)
     if max_auto > 0:
         xml += f"""

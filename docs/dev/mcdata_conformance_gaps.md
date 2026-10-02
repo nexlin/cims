@@ -48,12 +48,12 @@ MCPTT 와 뿌리가 같은 것(제휴 클라이언트 단위·비제휴 멤버 �
 | SDS — 시그널링 평면 (SDS) | 10 | — | 4 | 3 | 3 |
 | SDS — 미디어 평면 (MSRP) | 6 | — | 2 | 3 | 1 |
 | disposition 통지 (DISP) | 1 | — | — | 1 | — |
-| 파일 배포 (FD) | 7 | — | 2 | 4 | 1 |
+| 파일 배포 (FD) | 3 | — | — | 2 | 1 |
 | 설정 문서 (CFG) | 1 | — | — | 1 | — |
 | 응답 코드·Warning (WRN) | 3 | — | — | 3 | — |
-| **계** | **35** | **1** | **12** | **17** | **5** |
+| **계** | **31** | **1** | **10** | **15** | **5** |
 
-확인 수준 — ◎ 30 · ○ 2 · △ 3.
+확인 수준 — ◎ 26 · ○ 2 · △ 3.
 
 읽는 순서 — §2(먼저 볼 것) → §3(영역별 전체) → §4(미구현 목록에 빠진 기능) → §5(문서 정정) → §6(묶음과 순서).
 
@@ -65,7 +65,6 @@ MCPTT 와 뿌리가 같은 것(제휴 클라이언트 단위·비제휴 멤버 �
 
 | 항목 | 내용 |
 |---|---|
-| FD-3 | FD 업로드 201 에 `Location` 이 없다 — 규격 클라이언트는 그 값을 FILEURL 로 쓴다 |
 | SDS-9 | disposition 상관 색인을 fan-out 뒤에 적는다 — 빠른 DELIVERED 가 216 으로 거절될 수 있다(실측 전 △) |
 
 **인가·보안 구멍**
@@ -73,7 +72,6 @@ MCPTT 와 뿌리가 같은 것(제휴 클라이언트 단위·비제휴 멤버 �
 | 항목 | 내용 |
 |---|---|
 | AFF-2 | `require_affiliation=false` 그룹은 제휴하지 않은(해제한) 멤버에게도 SDS·FD 를 배포한다(MCPTT AFF-11 과 같은 뿌리) |
-| FD-6 | 콘텐츠 서버 GET 에 수신 제어가 없다 — MCData scope 토큰이면 파일 id 만으로 누구나 받는다 |
 
 **규격 단말 연동을 통째로 막는 것**
 
@@ -81,7 +79,6 @@ MCPTT 와 뿌리가 같은 것(제휴 클라이언트 단위·비제휴 멤버 �
 |---|---|
 | SDS-1 · CFG-1 | 규격형 SDS(Request-URI = 참여 기능 PSI, 대상 = 본문)를 받지 못한다 — CSP 는 To 로만 대상을 정하고 `<mcdata-request-uri>` 를 읽지 않는다. ue-init-config 에 MCData PSI 를 광고하면 규격 단말의 SDS 가 404 가 된다 |
 | SDS-2 · MSRP-2 | 서버가 수신자에게 내는 MESSAGE·INVITE 의 mcdata-info 를 고쳐 쓰지 않는다 — 규격 단말은 그룹(`<mcdata-calling-group-id>`)·발신자(`<mcdata-calling-user-id>`)를 몰라 스레드도 disposition 통지도 못 만든다 |
-| FD-2 | 콘텐츠 서버가 규격 업로드 형식(multipart/mixed: mcdata-info + octet-stream)을 500 으로 거절한다 |
 | AFF-1 | MCData 제휴 PUBLISH(`mcdataPresInfo`)를 MCPTT 제휴로 읽어 MCPTT 제휴 집합을 교체한다 |
 | REG-1 | SDK REGISTER Contact 에 MCData ICSI·특성 태그(`icsi.mcdata`·`g.3gpp.mcdata.sds`·`.fd`)가 없다 |
 
@@ -143,11 +140,7 @@ CSP 는 참여 기능과 제어 기능을 겸한다.
 | # | 급 | 대상 | 규격 | CIMS 지금 | 영향 | 확인 |
 |---|---|---|---|---|---|---|
 | FD-1 | C | CSP·CSC | §10.2.4.4.2 7)b) · §6.7.3 — FILEURL 의 파일이 media storage function 에 없으면 403 `212`. 확인 = 제어 기능이 그 URL 에 HTTP HEAD(access token), 404 면 없음 | CSP 는 URL 이 콘텐츠 서버 base(`Setup.McData.FdUrlBase`·CSC PublicUrl)의 `/mcdata/fd/<id>` 인지만 본다(`csp/McDataGates.cpp` `McDataFdPayloadCheck` → `McDataFdUrlIsOurs`) — HEAD 를 보내지 않는다. CSC 콘텐츠 서버는 HEAD 가 없고(405) FD URL 을 요청 Host 헤더로 만든다(`csc/src/services/mcdata_fd.py`) | 없는 id 의 URL 도 배포된다(수신자 GET 이 404). 단말이 PublicUrl 과 다른 이름으로 CSC 에 붙으면 업로드 URL 이 base 와 달라 212 가 된다 | ◎ |
-| FD-2 | B | CSC | §10.2.2.1 4)~8) — 업로드 = POST multipart/mixed(mcdata-info `request-type`·`<mcdata-request-uri>`·`<mcdata-calling-user-id>` + `application/octet-stream`). §10.2.2.2 1) — 서버는 mcdata-info 로 그룹·크기 판정 | 그룹·이름·형식을 query(`?name=&group=&type=`)로, 본문은 octet-stream 또는 form-data(`csc/src/services/mcdata_fd.py:7`·`:76-100`). multipart/mixed 는 컨트롤러가 415 를 던지고 바깥 except 가 500 으로 바꾼다(`csc/src/httpsrv/controller.py:107`·`:112`) | 규격 단말은 업로드할 수 없다. 그룹 게이트(`allow_fd`·멤버십)는 query `group` 이 있을 때만 걸린다 | ◎ |
-| FD-3 | B | CSC | §10.2.2.1 끝 · §10.2.2.2 2)b) — 201 Created + `Location`(저장 위치 URL), 클라이언트는 그 값을 저장 | 201 에 Location 이 없고 URL 은 JSON 본문에만(`csc/src/services/mcdata_fd.py:120-124`) | 규격 클라이언트가 FILEURL 을 얻지 못한다 | ◎ |
 | FD-4 | C | CSP·SDK·현장 | §11.2 · §10.2.4.4.1 5) — 제어 기능이 파일 크기 ≤ 그룹 `<mcdata-on-network-max-data-size-auto-recv>`(1:1 = `<max-data-size-auto-recv-bytes>`)면 Mandatory download IE 를 넣는다. §10.2.1.2.2 — 단말은 그 IE 로 자동 다운로드 | CSP 는 IE 를 넣지 않는다. SDK 는 Mandatory download IE(0xA-)를 건너뛰고(`sdk/core/src/mcdata/sds_codec.cpp:376`) 앱이 그룹 문서 값과 Metadata 크기로 직접 정한다(`android/ptt-client/…/PttService.kt:556`) | 규격 단말은 우리 서버에서 자동 다운로드하지 않고, 우리 앱은 발신자가 요구한 필수 다운로드를 무시한다. 1:1 FD 는 자동 수신 기준이 없다 | ◎ |
-| FD-5 | C | CSC | §10.2.2.2 1)b) — 그룹 FD 는 그룹 `<mcdata-on-network-max-data-size-for-FD>`, 1:1 은 `<max-data-size-fd-bytes>` 초과 시 413 | 전역 `McDataFd.MaxBytes` 하나(`csc/src/services/mcdata_fd.py:87-88`). 그룹 문서에 FD 상한 요소를 싣지 않는다(`csc/src/services/mcptt.py:1463-1473`) | 그룹별 FD 크기 정책을 둘 수 없고 단말도 미리 알 수 없다 | ◎ |
-| FD-6 | C | CSC | §10.2.3.2 1) — 수신 제어 정책상 받을 수 없는 사용자는 403(적용 방법은 Editor's Note FFS) | GET 은 MCData scope 토큰이면 id 만으로 누구에게나 준다(`csc/src/services/mcdata_fd.py:126-144`) — 파일이 그룹·수신자에 묶여 있지 않다 | 그룹을 떠난 사용자·URL 을 전해 받은 사용자도 받는다. FD-1 과 겹치면 다른 그룹 파일 id 를 재배포할 수 있다 | ◎ |
 | FD-7 | D | SDK·CSP | §15.2.17 — Metadata = RFC 5547 `file-selector-attr`(name·size·type·hash) + file-date·file-availability·file-description | `name:"…" size:N type:…` 만, `file-selector:` 접두·hash·availability 없음(`sdk/core/src/mcdata/sds_codec.cpp:137-138`, `csp/McDataCodecBuild.cpp:67`) | 엄격한 규격 파서가 크기를 못 읽으면 FD-4 자동 수신 판정이 어긋난다. RFC 5547 원문 미대조 | △ |
 
 ### 3.8 설정 문서 (CFG) — TS 24.484 §7.2
@@ -208,11 +201,11 @@ mcdata_messaging.md §8 · mcptt_standard_conformance.md R4 · mcx_identity_scop
 
 | # | 묶음 | 항목 | 몫 |
 |---|---|---|---|
-| 2 | **인가·보안** — FILEURL 파일 존재 확인(212 HEAD), 제휴 멤버만 배포, GET 수신 제어 | FD-1 · AFF-2 · FD-6 | .45 CSP·CSC |
+| 2 | **인가·보안** — FILEURL 파일 존재 확인(212 HEAD), 제휴 멤버만 배포 | FD-1 · AFF-2 | .45 CSP |
 | 3 | **응답 코드·Warning** — MCPTT 묶음 5 와 한 묶음(같은 `McpttWarning`) | WRN-1~3 · SDS-4 | .45 CSP |
 | 4 | **서버가 내는 본문 규격화** — 수신자별 mcdata-info(request-uri = 수신자, calling-group-id, calling-user-id), PAI·P-Asserted-Service, MSRP 배포 INVITE 헤더, 폴백 FD 본문 | SDS-2 · MSRP-2 · MSRP-6 · SDS-8 | .45 CSP |
 | 5 | **규격형 요청 수용** — 서버가 PSI 형·그룹 URI 형을 둘 다 받는 전환기를 먼저 둔다. 서버 쪽 검사(MSRP-5)는 SDK 뒤 | SDS-1 · SDS-5 · CFG-1 → SDK: REG-1 · SDS-3 · MSRP-1 · SDS-10 | .45 CSP → SDK |
-| 6 | **콘텐츠 서버 규격 형식** — multipart/mixed 업로드·Location·그룹/1:1 상한, 기존 query 형은 전환기로 유지 | FD-2 · FD-3 · FD-5 · FD-7 | .45 CSC → SDK |
+| 6 | **FD Metadata 형식** — `file-selector:` 접두·hash (SDK 는 규격형 업로드·Location 사용과 함께 — U05) | FD-7 | .45 SDK · CSP |
 | 7 | **자동 수신** — CSP 가 Mandatory download 를 붙이고 SDK·앱은 그 IE 를 따른다 | FD-4 | .45 CSP·SDK → 앱 |
 | 8 | **제휴 서비스 분리** — MCData 제휴 표·`mcdataPresInfo`, 클라이언트 단위. MCPTT 묶음 8 과 한 묶음 | AFF-1 · AFF-6 · REG-2 | .45 CSP·SDK |
 | 9 | **서비스 인가·설정** — MCPTT REG 묶음과 한 묶음 | REG-3 · REG-4 · §4 앞 두 줄 | .45 CSP·SDK |
@@ -238,4 +231,4 @@ mcdata_messaging.md §8 · mcptt_standard_conformance.md R4 · mcx_identity_scop
 - **From 신원 결박** — 게이트가 From user 를 발신자로 쓰는데, 그 신원과 등록 flow 의 결박은 MCPTT 와 같은 경로(`EventIncomingRequestAuth`)라 보지 않았다.
 - **실행 확인** — 모든 항목이 코드 읽기다. △ 항목(SDS-8·SDS-9·FD-7)과 SDS-1(규격 단말이 To 에 무엇을 싣는지)·AFF-6(다중 단말 배포)은 실서버로 재현해 확정한다.
 - **cspsim·계측기(libcsim `McDataSds`·`McDataMsrp`)·`tests/msrp_sds_client.py`** — 시험 도구의 송신 형태는 보지 않았다. 서버 쪽 검사를 켜면(묶음 2·3·5) 도구도 함께 맞춰야 한다.
-- **콘솔** — 그룹 편집의 MCData 칸·메시지 이력 화면. FD-5 를 반영하면 그룹 편집에 칸이 따라가야 한다.
+- **콘솔** — 그룹 편집의 MCData 칸·메시지 이력 화면.

@@ -24,7 +24,9 @@
                                           GMS 관리 범위 확장(dispatch_center.md §3.4·§5.7b)
   · tests/test_csc_mcvideo.py             MCVideo 설정 평면(mcvideo.md §5.1) — 생성 = 계약 골든(tests/fixtures/mcvideo, K2)·
                                           그룹 문서 V0(MCPTT ICSI enabler·규칙)·MCVideo <service>·XCAP PUT 전환기 규칙·
-                                          MCVideo user profile·service config·ue-init-config·CMS 인가·mcvideo_id claim"""
+                                          MCVideo user profile·service config·ue-init-config·CMS 인가·mcvideo_id claim
+  · tests/test_csc_mcdata_fd.py           MCData FD 콘텐츠 서버(TS 24.282 §10.2.2·§10.2.3·§6.7.3) — 규격형 업로드(multipart/mixed)·
+                                          201 Location·전송 제어 403·크기 413·수신 제어·HEAD 존재 확인(내부 토큰)·그룹 문서 FD 상한"""
 from __future__ import annotations
 
 import os
@@ -41,7 +43,8 @@ _MODULES = ["tests.test_csc_dispatch_rbac", "tests.test_csc_subscription_realm",
             "tests.test_csc_gms_group_crud", "tests.test_csc_provisioning_dispatch",
             "tests.test_csc_provisioning_history", "tests.test_csc_idms_scope", "tests.test_csc_user_profile",
             "tests.test_csc_dispatch_management", "tests.test_csc_access_services",
-            "tests.test_csc_subscriptions", "tests.test_csc_mcvideo", "tests.test_csc_ue_init_config"]
+            "tests.test_csc_subscriptions", "tests.test_csc_mcvideo", "tests.test_csc_ue_init_config",
+            "tests.test_csc_mcdata_fd"]
 
 
 @verify_item(

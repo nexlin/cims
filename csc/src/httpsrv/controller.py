@@ -99,6 +99,10 @@ async def _get_body_from_request(req: Request) -> Optional[BodyData]:
                 # suffix = ".csv.gz" if "gzip" in content_encoding else ".csv"
                 # path = await HttpUtil.spool_body_to_temp(req.stream(), suffix=suffix)
                 # body_data = HttpUtil.iter_csv_rows_from_path(path, encoding=charset)
+            elif media_type == "multipart/mixed":
+                # MCData FD 규격형 업로드(TS 24.282 §10.2.2.1 — mcdata-info + octet-stream). 경계선 파싱은 핸들러가 한다
+                #   (Content-Type 의 boundary 가 필요하다) — 원시 바이트로 넘긴다.
+                body_data = await req.body()
             elif media_type.endswith("+xml") or media_type in ("application/xml", "text/xml"):
                 # XCAP Ut 문서 (TS 24.481 그룹 application/vnd.oma.poc.groups+xml 등) — 원시 바이트로
                 #   넘기고 파싱은 핸들러가 한다(스키마·크기·DTD 거부는 핸들러 몫).
@@ -108,6 +112,8 @@ async def _get_body_from_request(req: Request) -> Optional[BodyData]:
             return body_data
         else:
             return None
+    except HttpException:
+        raise                       # 415 등 — 뜻한 상태 코드 그대로
     except Exception as e:
         raise HttpException(f"exception : {e}", 500)
 

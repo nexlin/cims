@@ -55,6 +55,8 @@ DB `ptt_groups` 컬럼이 SoT (마이그레이션 `sql/migrate_mcdata_sds.sql`, 
   송신 권한은 멤버 단위로 가르지 않는다) · `<mcdata-on-network-group-priority>` = 그룹 우선순위(MCPTT 와 같은 값) ·
   `<mcdata-default-charset>` = 106(UTF-8 의 IANA MIBenum — 그룹 SDS TEXT payload 의 문자 집합, TS 24.282 §6.2.2.1).
   멤버별 `<mcdata-max-data-in-single-request>` 는 싣지 않는다 — 멤버 단위 상한을 두지 않는다(그룹 상한 = `max_sds_size`).
+  FD 를 허용한 그룹은 `<mcdata-on-network-max-data-size-for-FD>`(§7.2.2 l)) = 콘텐츠 서버의 FD 상한 `McDataFd.MaxBytes`(§4.5 —
+  단말이 미리 아는 값이자 업로드 413 의 기준. 그룹마다 다른 값은 두지 않는다).
 - admin API(`/api/v1/ptt/groups`)로 네 필드 CRUD 가능. PUT 시 기존 `GROUP_CHANGED` notify 로
   CSP 가 무중단 재적재(`CDbManager::SelectGroup`).
 - **콘솔 그룹 편집 폼**(`ems/service/console/src/pages/PttGroupsWorkbenchPage.tsx`)에서 메시징/
@@ -174,18 +176,39 @@ mcdata-info `<mcdata-calling-group-id>` 를 실어 보낸다(5)). CSP `CMcDataAs
 ## 4.5 대용량 파일 — FD via HTTP (TS 23.282)
 
 ```
-발신 앱 ── HTTPS POST /mcdata/fd (bytes) ──→ CSC 콘텐츠 서버(4430) ──→ {url}
+발신 앱 ── HTTPS POST /mcdata/fd (mcdata-info + 파일) ──→ CSC 콘텐츠 서버(4430) ──→ 201 Location: {url}
 발신 앱 ── SIP MESSAGE: FD SIGNALLING PAYLOAD(0x02, Payload IE=FILEURL + Metadata IE) ──→ CSP(allow_fd 게이트) ── fan-out
 수신 앱 ── (size ≤ auto-recv 면 자동) HTTPS GET {url} ──→ CSC ──→ 파일
 ```
 
-- **콘텐츠 서버 = CSC MCPTT 서버(4430) 동봉** (`csc/src/services/mcdata_fd.py`) — 단말이 이미
+- **콘텐츠 서버 = CSC MCPTT 서버(4430) 동봉** (`csc/src/services/mcdata_fd.py` — TS 23.282 media storage function) — 단말이 이미
   쓰는 포트·Bearer 토큰(IdMS) 그대로 — 토큰 scope `3gpp:mc:data_service` 검사(TS 33.180 B.10, `IdMs.ScopeEnforcement`),
   업로더 신원 = 토큰 `mcdata_id`(= `mcptt_id`, 단일 MC service ID — [mcx_identity_scope.md](mcx_identity_scope.md) §1).
-  업로드 시 서버가 게이트: 토큰 401 / scope 부족 403 `insufficient_scope` / 그룹 `allow_fd` 403 /
-  업로더 멤버십 403 / `McDataFd.MaxBytes`(기본 50MB) 413.
+- **업로드**(TS 24.282 §10.2.2) — 두 말투를 받는다.
+
+  | 말투 | 요청 | 그룹·발신자 |
+  |---|---|---|
+  | 규격형(§10.2.2.1 4)~8)) | `POST /mcdata/fd`, `Content-Type: multipart/mixed` — `application/vnd.3gpp.mcdata-info+xml` + `application/octet-stream`(Content-Length = 파일 크기) | mcdata-info `<request-type>` `one-to-one-fd`\|`group-fd` · `<mcdata-request-uri>`(그룹, group-fd 필수) · `<mcdata-calling-user-id>` |
+  | 간이형(자체 단말·계측기) | `POST /mcdata/fd?name=&group=&type=`, 본문 `application/octet-stream`(또는 multipart/form-data `file`) | query `group`(있으면 그룹 FD) |
+
+  응답 = **201 Created + `Location`**(저장한 파일의 URL — 단말은 이 값을 FD 의 FILEURL 로 쓴다, §10.2.2.2 2)b)) + JSON
+  `{id, url, size, name}`(`url` = Location). **URL 의 base = CSC 공개 base URL**(`McpttServer.PublicUrl`, 없으면 요청 Host) — CSP 가
+  FILEURL 을 같은 base 와 대조하므로(§4 게이트 0, 403 `212`) 단말이 CSC 에 붙은 이름과 무관하게 한 값이어야 한다. 파일 이름은 octet-stream
+  파트의 `Content-Disposition filename`(없으면 query `name`), 형식은 query `type`.
+- **업로드 판정**(§10.2.2.2 1)): 토큰 없음 403 / 무효 401 / scope 부족 403 `insufficient_scope` · `<mcdata-calling-user-id>` 가 토큰의
+  MCData ID 와 다르면 403 · 그룹 FD — 모르는 그룹 404, 그룹 `allow_fd` 꺼짐 403, 올리는 사람이 멤버 아님 403(전송 제어) · 크기 —
+  그룹 FD 는 그룹 문서 `<mcdata-on-network-max-data-size-for-FD>`, 1:1 은 service configuration `<max-data-size-fd-bytes>` 자리의 값을
+  넘으면 **413**. 두 값 모두 `McDataFd.MaxBytes`(기본 50 MB — `mcdata_fd.max_bytes()`). 형식 오류 400, `message/external-body`
+  (network-stored file — MCData message store 없음) 501.
+- **다운로드**(§10.2.3) `GET /mcdata/fd/{id}` — 수신 제어(§10.2.3.2 1)): **그룹에 올린 파일은 그 그룹의 지금 멤버와 올린 사람만**
+  (그 밖 403). 1:1 파일은 업로드에 수신자가 실리지 않으므로(§10.2.2.1 5)) MCData scope 토큰과 URL(추측 불가 id)로 받는다. 파일 이름은
+  `Content-Disposition`(RFC 6266 — ASCII 대체 이름 + `filename*=UTF-8''…`).
+- **존재 확인**(§6.7.3) `HEAD /mcdata/fd/{id}` — 200(본문 없음, `Content-Length`·`Content-Type`) / 404. 단말 토큰이면 GET 과 같은 수신
+  제어, **제어 기능(CSP)은 내부 토큰**(`Authorization: Bearer <InternalApi.Token>` — `/internal/*` 과 같은 값, HEAD 에만 통한다)으로
+  부르고 그때 응답에 `X-Cims-Fd-Group`(올린 그룹, 1:1 은 빈 값)·`X-Cims-Fd-Uploader` 가 실린다 — FILEURL 을 다른 그룹에 다시 돌리는 것을
+  거를 때 쓴다.
 - 저장: `{McDataFd.Dir | {Content.Dir}/mcdata_fd}/{YYYY}/{MM}/{DD}/{id}.bin` +
-  `index/{id}.json`(메타). 다운로드는 `GET /mcdata/fd/{id}` FileResponse 스트리밍.
+  `index/{id}.json`(메타 — name·size·type·group·uploader·ts). CMDP 의 media plane 저장분(§4.7)도 같은 스키마라 같은 수신 제어를 받는다.
 - **FD SIGNALLING PAYLOAD** (TS 24.282 §15.1.3): Payload IE(0x78)=FILEURL(0x04, URL 문자열),
   Metadata IE(0x79)=RFC 5547 file-selector 부분집합 `name:"…" size:N type:MIME`.
 - CSP MCDATA-AS 는 FD 를 `allow_fd` 로 게이트하고(SDS 크기 게이트 제외 — payload=URL),
@@ -355,6 +378,9 @@ CSP fan-out (하이브리드):
 | 착신 도달 불가 응답 | — | **480 Temporarily Unavailable** (가입자는 알지만 유효한 등록 바인딩 없음) / **404 Not Found** (가입자 자체를 모름) / **500** (전달 자체 실패) | RFC 3261 §21.4.18 이 "가입자는 알지만 유효한 전달 위치가 없음"을 480 으로 규정. TS 24.229 의 미등록 처리와 같은 구분. 603 Decline 은 "착신자가 거부했다"는 전역 실패라 포크·재시도까지 막으므로 쓰지 않는다 |
 | media plane SDS 대상 | 그룹·1:1 모두 | **그룹만** (`McDataMediaService` 가 그룹 조회 필수) — 1:1 은 크기와 무관하게 C-plane, C-plane 임계 게이트(§4.7)도 그룹 대상만 | 1:1 standalone 은 §8 |
 | FD 콘텐츠 서버 | media storage function (absolute URI discovery 등) | CSC 4430 `/mcdata/fd` 고정 경로 + IdMS Bearer | 단일 도메인. URL 은 FD SIGNALLING 으로 전달되므로 discovery 불필요 |
+| FD 크기 상한 | 그룹 FD = 그룹 문서 `<mcdata-on-network-max-data-size-for-FD>`, 1:1 = service configuration `<max-data-size-fd-bytes>` | 둘 다 콘텐츠 서버의 한 값 `McDataFd.MaxBytes` — 그룹 문서는 그 값을 싣는다 | 그룹마다 다른 상한을 두지 않는다(그룹 속성·DB 컬럼 없음). MCData service configuration 문서는 내지 않는다([mcx_identity_scope.md](mcx_identity_scope.md) §10) |
+| FD 1:1 수신 제어 | 수신 제어 정책상 받을 수 없는 사용자는 403(§10.2.3.2 1) — 적용 방법은 Editor's Note FFS) | 그룹 파일만 멤버십으로 가른다. 1:1 파일은 MCData scope 토큰 + URL | 규격 업로드에 1:1 수신자가 실리지 않는다(§10.2.2.1 5)) — 콘텐츠 서버가 수신자를 알 길이 없다 |
+| network-stored file 업로드 | `message/external-body`(MCData message store 의 파일을 가져와 저장, §10.2.2.2) | 501 | MCData message store 미구현 |
 | FD 통지 | FD NOTIFICATION(다운로드 완료 등) | 미사용 | 최소 프로파일 — 필요 시 후속 |
 | ICSI feature tag | Accept-Contact/P-Asserted-Service 로 요청 구분 | Content-Type 로 구분 | 단일 서비스 도메인이라 불필요 |
 | 성공 응답 | 참여기능 202/200 | 200 OK | psip `RecvMessageRequest` 는 `EventMessage` 가 **반환한 상태코드**로 응답한다 — 응용이 도달 가능성을 아는 유일한 주체이므로 코드 선택도 응용이 한다. 0 을 반환하면 콜백이 직접 응답했다는 뜻이라 psip 는 보내지 않는다(최종 응답 중복 방지) |
@@ -381,9 +407,11 @@ CSP fan-out (하이브리드):
 - 멤버 단위 송신권한 — 수신전용 멤버(지금은 멤버 전원 `<mcdata-allow-transmit-data-in-this-group>` true)·멤버별 `<mcdata-max-data-in-single-request>`
 - 메시지·FD 파일 retention/purge (녹취와 공통 정리 메커니즘)
 - FD NOTIFICATION(다운로드 완료)·READ 통지
-- **FD 파일 존재 확인**(TS 24.282 §6.7.3 — 제어 기능이 FILEURL 에 HTTP HEAD, 404 면 403 `212`): 지금은 URL 이 이 서버의 콘텐츠 서버를
-  가리키는지만 본다(§4 게이트 0). 콘텐츠 서버(CSC)의 HEAD 지원(§6.7.3.2)과 FD URL 을 PublicUrl base 로 내는 것(Host 헤더가 아니라 —
-  단말이 다른 이름으로 CSC 에 붙으면 URL 이 base 와 달라 212 가 된다) 뒤에 CSP 가 HEAD 로 확인한다(conformance_gap_plan.md S26)
+- **FD 파일 존재 확인**(TS 24.282 §6.7.3 — 제어 기능이 FILEURL 에 HTTP HEAD, 404 면 403 `212`): CSP 는 지금 URL 이 이 서버의 콘텐츠
+  서버를 가리키는지만 본다(§4 게이트 0). 콘텐츠 서버(CSC)는 HEAD 와 공개 base URL 의 FD URL 을 낸다(§4.5) — CSP 가 내부 토큰으로
+  HEAD 를 불러 확인하는 것이 남았다(conformance_gap_plan.md S26)
+- **단말 SDK 의 규격형 업로드** — `CscClient::uploadFd` 는 간이형(query)으로 올린다. multipart/mixed + mcdata-info·`Location` 사용과
+  Metadata 의 `file-selector:` 접두(TS 24.282 §15.2.17 · RFC 5547)는 conformance_gap_plan.md U05
 - **MCData 긴급 경보**(TS 24.282 §16.2 · 애드혹 그룹 경보 §16.2A — 미지원): 그룹 문서가 `<mcdata-allow-emergency-alert>` 를 싣지 않으므로 발령은 늘 미인가다
   (§6.3.7.2.1) — CSP `CMcDataAsModule::OnEmergencyAlert` 가 **403 + mcdata-info `<alert-ind>` false**(§16.2.3.1 4)a))로 답하고 배포하지
   않는다. 취소(`<alert-ind>` false, §16.2.3.2)는 남은 MCData 경보가 없어 지울 것도 보낼 통지도 없다 → 200. 지원할 때 = 그룹 문서 요소·
