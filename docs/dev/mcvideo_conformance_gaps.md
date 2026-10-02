@@ -45,7 +45,7 @@ MCPTT 쪽 같은 뿌리의 결함은 [mcptt_conformance_gaps.md](mcptt_conforman
 | 등록·서비스 인가 (VREG) | 4 | — | 1 | 2 | 1 |
 | 제휴 (VAFF) | 8 | 1 | 1 | 6 | — |
 | 그룹 호 — 서버 (VGC) | 11 | — | 1 | 9 | 1 |
-| 그룹 호 — 단말 (VGU) | 6 | — | — | 2 | 4 |
+| 그룹 호 — 단말 (VGU) | 3 | — | — | 1 | 2 |
 | 개별·그 밖의 호 (VPRV) | 1 | — | — | — | 1 |
 | 송출 제어 — 서버 (TCS) | 9 | — | — | 4 | 5 |
 | 송출 제어 — 단말 (TCU) | 3 | — | — | 1 | 2 |
@@ -54,9 +54,9 @@ MCPTT 쪽 같은 뿌리의 결함은 [mcptt_conformance_gaps.md](mcptt_conforman
 | SDP (VSDP) | 2 | — | — | 2 | — |
 | 그룹 문서 (VGMS) | 2 | — | 1 | — | 1 |
 | 설정 문서·CMS (VCMS) | 3 | — | 1 | 1 | 1 |
-| **계** | **52** | **2** | **5** | **28** | **17** |
+| **계** | **49** | **2** | **5** | **27** | **15** |
 
-확인 수준 — ◎ 37 · ○ 8 · △ 7.
+확인 수준 — ◎ 34 · ○ 8 · △ 7.
 
 읽는 순서 — §2(먼저 볼 것) → §3(영역별 전체) → §4(미구현 목록에 빠진 기능) → §5(문서 정정) → §6(묶음과 순서).
 
@@ -135,9 +135,6 @@ MCPTT 쪽 같은 뿌리의 결함은 [mcptt_conformance_gaps.md](mcptt_conforman
 
 | # | 급 | 대상 | 규격 | CIMS 지금 | 영향 | 확인 |
 |---|---|---|---|---|---|---|
-| VGU-1 | D | SDK | §9.2.1.2.1.2 7)·8) — 자동·수동 개시는 Answer-Mode·Priv-Answer-Mode 와 단말 설정의 조합으로 정한다 | Answer-Mode 를 읽지 않고 로컬 `autoAnswerMcvideo` 만 본다(`sdk/core/src/engine.cpp:1671`). 앱 셋 모두 true 고정 | 규격 서버가 수동(Manual)을 요구해도 자동 수락한다 — 규격의 «단말이 허용하면» 문언에 기대는 수준 | ◎ |
-| VGU-2 | D | SDK | §6.2.3.1.2 — 그룹 호 자동 개시는 곧바로 200. 그룹 호 수동 개시는 §6.2.3.2.2(선택 183 + `P-Answer-State: Unconfirmed`), 180 은 개별 호(§6.2.3.2.1) | 초대마다 180(`Require: timer`)을 먼저 보내고(`sdk/core/src/engine.cpp:1661-1668`) 자동이면 그 뒤 200. 주석 근거가 §6.2.3.2.1(개별 호)이다 | 자동 개시에 불필요한 임시 응답이 끼고, 그룹 호 수동 개시의 응답 모양이 규격과 다르다 | ◎ |
-| VGU-3 | C | SDK·앱 | §9.2.1.2.1.2 1)·2) · §6.2.3.2.2 2) — 거절은 적절한 코드 + Warning, 사용자 거절이면 480 + `110 user declined the call invitation` | `Engine::reject` 는 상태 코드만 받는다(`sdk/core/src/engine.cpp:2602`). 앱은 원치 않는 초대를 `hangup` 으로 끊는다 — 200 전이면 pjsua 기본 603, 자동 200 뒤면 BYE(`PttVideo.kt:336-345`, `android/dispatch-tablet/.../session/VideoPlane.kt:894-896`) | 규격 서버가 거절 사유를 못 가른다. 200 뒤 BYE 는 prearranged 첫 응답자면 개시자 200 → 곧바로 «참가자 1명 이하» 해제로 이어질 수 있다 | ◎(BYE 경합 △) |
 | VGU-4 | C | SDK | §6.2.1 2)b)·3)b) — 그룹 문서 선호 음성·영상 encoding 을 지원하면 offer rtpmap 에 넣는다 (shall) | `McVideoGroupAttrs.audioEncodings`·`videoEncodings`·`videoResolutions` 를 해석만 하고 쓰지 않는다 — offer 코덱은 전역 우선순위(AMR-WB 먼저, H.264)다(`sdk/core/src/engine.cpp:1864-1898`·`:2867-2943`) | CIMS 기본값(AMR-WB/H264)에서는 드러나지 않는다. 다른 GMS 의 그룹이나 바꾼 설정에서는 규격과 다른 offer 가 나간다(서버 쪽 짝 VSDP-1) | ◎ |
 | VGU-5 | D | SDK·앱 | §9.2.1.2.1.1 · §9.2.2.2.1.1 첫 단락 — 그룹 문서 `<preconfigured-group-use-only>` true 면 호를 열지 않고 알린다 | 요소를 해석하지도 보지도 않는다(SDK·앱에 없음) | 사전 구성 전용 그룹에서도 개시 INVITE 가 나간다(서버도 403 `167` 을 하지 않는다) | ◎ |
 | VGU-6 | D | 앱 | §9.2.1.2.4.1 — 사용자 요청·커버리지 복귀 때 세션 식별자로 재합류 INVITE | SDK 는 `VideoGroupCallOptions.sessionUri` 를 지원하지만 앱 셋 모두 쓰지 않는다. prearranged 호를 잃으면 초대를 기다리거나 [영상 보내기](송출 요청 겸 개시)뿐 | 망이 끊긴 뒤 prearranged 영상 호로 «보기만» 돌아갈 수 없다(서버 late call entry 도 없다 — VGC-2) | ○ |
@@ -227,7 +224,6 @@ MCPTT 쪽 같은 뿌리의 결함은 [mcptt_conformance_gaps.md](mcptt_conforman
 | mcvideo.md §5.5 PTT 단말 | «영상 n» 목록(이름·기능 별칭·경과) | 별칭이 서버에서 전달되지 않아 늘 비어 있다 | TCS-2 |
 | mcvideo.md §1.2 · `sdk/core/include/cimsue/types.h:113-116` | MCVideo 로그오프 = 태그를 뺀 재-REGISTER | SDK 는 계정을 다시 만든다(등록 해제 + 새 등록) | VREG-3 |
 | mcvideo.md §5.2 «등록» | poc-settings 는 §7.2.2(인가 겸용)로만 적음 | 단말 §7.2.3(서비스 설정만)이 규격 서버 착신의 전제다 — 단말 몫이 빠졌다 | VREG-1 |
-| ue_sdk.md §4.6(초대 수락 단락)·`sdk/core/src/engine.cpp:1665` 주석 | «autoAnswerMcvideo 면 곧바로 200» · 그룹 수동 개시 근거 §6.2.3.2.1 | 늘 180 을 먼저 보낸다. 그룹 호 수동 개시는 §6.2.3.2.2(183 허용, 180 아님) | VGU-2 |
 | `csp/CscfModule.cpp:830` 주석 · `:1885-1889` 문서 주석 | «N2 상한은 … 적용하지 않는다» | MCVideo 는 설정 그룹·PUBLISH 모두 N2 를 적용한다(`:859-867`·`:2038-2059`) — 주석이 MCPTT 몫만 맞다 | — |
 
 ## 6. 묶음과 순서 (권고)
@@ -243,7 +239,7 @@ MCPTT 쪽 같은 뿌리의 결함은 [mcptt_conformance_gaps.md](mcptt_conforman
 | 6 | **service configuration 값 결선** — CSP 가 `/internal/mcvideo/service-config` 를 받아 `tc_timers` 전부를 싣고 변경을 통지받는다, SDK 엔진이 `TcTimers` 를 문서에서 넣는다, xcap-diff `sel` 에 MCVideo 문서 | TCS-1 · TCU-1 · VCMS-1 | .45 CSP·SDK |
 | 7 | **코덱 선호의 한 줄기** — 그룹 선호 = 서버 집행 코덱(CSC·콘솔이 검증). 단말 offer·초대 offer 가 그 값을 쓴다 | VGU-4 · VGC-8 | .45 SDK · .48 CSP |
 | 8 | **그룹 문서 PUT 해석·CMS 문서** — 없음의 뜻(§7.2.8), `<mcvideo-mcvideo-id>`·`<group-media>` 검사, 문서 이름 검사 | VGMS-1 · VGMS-2 · VCMS-6 · VGC-10(CSC 기본값 몫) | .45 CSC |
-| 9 | **단말 호 절차** — poc-settings §7.2.3 송신(+ 서버 §7.3.4 수신과 짝), 계정 갱신 API(태그만 뺀 재-REGISTER), Answer-Mode 해석, 그룹 호 응답 모양, 거절 480 + 110, 제휴 상태 구독, preconfigured-group-use-only, 재합류 UI | VREG-1 · VREG-3 · VGU-1 · VGU-2 · VGU-3 · VGU-5 · VGU-6 · VAFF-8 · VGC-7(Answer-Mode 몫) | .45 SDK·현장 → Windows(관제 앱) |
+| 9 | **단말 호 절차** — poc-settings §7.2.3 송신(+ 서버 §7.3.4 수신과 짝), 계정 갱신 API(태그만 뺀 재-REGISTER), 제휴 상태 구독, preconfigured-group-use-only, 재합류 UI | VREG-1 · VREG-3 · VGU-5 · VGU-6 · VAFF-8 · VGC-7(Answer-Mode 몫) | .45 SDK·현장 → Windows(관제 앱) |
 | 10 | **송출 제어 서버 세부** — 선점 순서, 이른 Granted, 대기 위치 갱신, 무허가 송출 포기, Ack subtype·P 비트, SSRC 기본값, 별칭 전달 | TCS-2 · TCS-3 · TCS-5 · TCS-7 · TCS-8 · TCS-9 · TCS-11 · RCS-2 | .45 CMP(·SDK 별칭) |
 | 11 | **단말 참여자 세부** — 대기 허가 확인, End 필드, override | TCU-3 · TCU-4 · RCU-1 | .45 SDK |
 | 12 | **서버 사유 코드·신원 세부** — 그룹 호 밖 session-type 사유, PSI 고정, 로그오프 바인딩 판정·제휴 정리, conference 구독 서비스 분리, T5 | VPRV-1 · VGC-13 · VREG-2 · VREG-4 · VGC-10 · VGC-9 | .45 CSP |
@@ -251,7 +247,7 @@ MCPTT 쪽 같은 뿌리의 결함은 [mcptt_conformance_gaps.md](mcptt_conforman
 
 **Windows 몫(관제 앱 두 벌)** — SDK·서버가 정해진 뒤 맞춘다.
 
-- VGU-3 — 원치 않는 초대 거절을 `hangup` 대신 480 + Warning 110 으로(코어 `reject` 가 Warning 을 받게 된 뒤).
+- 원치 않는 MCVideo 초대 — 받기 전 `reject()`·`hangup()` 은 코어가 480 + Warning 110 으로 낸다(VGU-3 반영). 태블릿은 `autoAnswerMcvideo` 를 끄고 받을지 먼저 정한다(현장 앱 `CallRules.acceptVideoInvitation` 과 같은 규칙 — 자동 200 뒤 BYE 를 없앤다).
 - VAFF-8 — N2 자체 계산 대신 제휴 상태 NOTIFY 로.
 - VGU-6 — 재합류(세션 식별자)로 prearranged 영상 호에 «보기만» 돌아가기.
 - 묶음 6·7 이 들어오면 service config 타이머·그룹 선호 코덱 반영.
@@ -271,5 +267,4 @@ MCPTT 쪽 같은 뿌리의 결함은 [mcptt_conformance_gaps.md](mcptt_conforman
   - VGC-10 — MCVideo ICSI 를 단 conference SUBSCRIBE 가 MCPTT 로스터를 받는지.
   - TCS-5 — `mc_granted` 없이 암묵 요청만 보낼 때 · TCS-11 — `mc_transmission_ssrc` 없는 단말.
   - VAFF-6 — 설정 그룹 제휴가 갱신 REGISTER 마다 되살아나는지(현장 앱 PUBLISH 와의 반복).
-  - VGU-3 — 자동 200 뒤 BYE 가 prearranged 개시 직후 해제로 이어지는 경합.
   - 와이어 — pjsip 이 실제로 골든과 같은 Contact·`i=`·multipart 를 내는지.

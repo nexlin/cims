@@ -444,7 +444,8 @@ Indicator, automatic 수신; 1차 CSP 는 normal) · JOIN 응답 `audio_ssrc`·`
   pidf tuple id = MC client ID, 게시마다 유일 `p-id`). ⚠️ MCVideo 제휴를 서비스로 가르는 CSP(A9 — ICSI·mcvideo-info 로 갈라 `mcvideo_affiliations`)에만
   보낸다 — 그 전 CSP 는 `Event: presence` PUBLISH 를 MCPTT affiliation 으로 읽어 `ptt_affiliations` 를 덮는다.
 - **호**(구현) — `joinVideoGroupCall(groupId, {chat|prearranged, …})` → `CallInfo.service = McVideo`·`sessionUri`(제어 기능 Contact 의 세션 식별자), 재합류
-  = `VideoGroupCallOptions.sessionUri`(§9.2.1.2.4), 제어 기능 멤버 초대(§9.2.1.3) = mcvideo-info 로 가려 자동 수락(`autoAnswerMcvideo`), 나가기 = `hangup`.
+  = `VideoGroupCallOptions.sessionUri`(§9.2.1.2.4), 제어 기능 멤버 초대(§9.2.1.3) = mcvideo-info 로 가려 개시 방식(초대의 `Answer-Mode` + `autoAnswerMcvideo` — §9.2.1.2.1.2 7)·8))대로 자동 200 /
+  수동 183 뒤 앱의 `answer()`, 받기 전 `reject()`·`hangup()` = 480 + Warning 110(§6.2.3.2.2 2)), 나가기 = `hangup`.
   INVITE·answer 모양은 K3 골든 03·05·08(만드는 모양)과 04·06·07·09(읽는 모양)으로 대조한다 — SDK 산출 메시지는 `tests/mcvideo_fixture_check.py` 도 통과한다.
 - **전송 제어 참여자**(구현·결선) — `requestTransmission`·`releaseTransmission`(§6.2.4 상태 머신, T100·T101), 이벤트 `onTransmission`(Granted·Rejected·Revoked·Idle·
   Media Transmission Notification — 송출자·SSRC). 호 성립 = 개시 CONFIRMED(협상된 answer) · 착신 200 OK 송신, 성립 뒤에 `Active` 를 알린다.
@@ -483,7 +484,10 @@ Indicator, automatic 수신; 1차 CSP 는 normal) · JOIN 응답 `audio_ssrc`·`
 
 - **PTT 단말(ptt-client)**(구현 — [android_ue_client.md](android_ue_client.md) 주채널 탭) — 앱 평면 `VideoPlane`(`PttVideo.kt`)·화면 조각
   `ui/VideoViews.kt`. 서버가 MCVideo PSI 를 내면(ue-init-config) 등록 태그를 싣는다. 영상 채널(그룹 문서 MCVideo 몫)을 주채널로 고르면 MCVideo 호도
-  함께 합류하고(D10 — chat = 합류, prearranged = 멤버 초대 자동 수락), 채널을 나가거나 주채널을 바꾸면 함께 나간다. MCVideo affiliation 은 영상 채널
+  함께 합류하고(D10 — chat = 합류, prearranged = 멤버 초대를 앱이 받는다: 지금 영상 채널의 초대면 `answer`, 아니면 **받기 전에 거절** —
+  코어가 480 + Warning 110 으로 답한다(§6.2.3.2.2 2), `CallRules.acceptVideoInvitation`). 받고 나서 끊지 않는다 — 첫 응답자의 BYE 는 개시자 호를
+  성립 직후 «참가자 1명 이하» 로 풀 수 있다), 채널을 나가거나 주채널을 바꾸면 함께 나간다. 서버가 호를 거절하면 Warning 번호로 사유를
+  알린다(`CallRules.rejectionText` — 486 103 동시 호 수·486 122 정원·403 115 사용 중지 등, MCPTT 그룹 호도 같다). MCVideo affiliation 은 영상 채널
   하나만 명시로 싣고(chat 도 — 합류의 암묵적 affiliation 은 나갈 때 풀리지 않는다) 떠나면 뺀다 — PUBLISH 는 관심 그룹 전부라(§8.2.1.2) 빠진 그룹을
   서버가 해제한다, 채널을 바꿀 때는 새 그룹을 먼저 싣고 옛 그룹을 뺀다(빈 집합 = Expires 0 = 그 사용자 제휴 전부 해제를 거치지 않게).
   주채널 화면 = 발언 상태 줄 오른쪽 **[영상 보내기] 토글**(D11 — 켬 = 송출 요청, 끔 = 송출 끝내기, 요청 중·대기 n·보내는 중 — prearranged 그룹에

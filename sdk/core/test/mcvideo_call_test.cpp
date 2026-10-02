@@ -831,7 +831,7 @@ TEST(McvCall, RejoinAndWrongGroupType) {
     EXPECT_EQ(r.eng.callInfo(id2).lastCode, 404);
 }
 
-// 제어 기능의 멤버 초대(골든 07, §9.2.1.3) → 자동 수락: 180·200 Contact = MCVideo 태그, answer = 제어 채널 + fmtp(mc_priority 되돌림 ·
+// 제어 기능의 멤버 초대(골든 07, §9.2.1.3) → 자동 개시(§6.2.3.1.2): 임시 응답 없이 곧바로 200, Contact = MCVideo 태그, answer = 제어 채널 + fmtp(mc_priority 되돌림 ·
 //   이 단말의 mc_transmission_ssrc — §14.3.3·§14.3.9) · ACK 뒤 RR(헤더 SSRC = offer mc_transmission_ssrc)
 TEST(McvCall, MemberInvitationAutoAnswer) {
     Rig r;
@@ -854,16 +854,15 @@ TEST(McvCall, MemberInvitationAutoAnswer) {
                      "Via: SIP/2.0/UDP 127.0.0.1:" + std::to_string(r.csp.port) + ";branch=z9hG4bK-mcv-fan1");
     inv = localize(inv, 52012, audio.port, 56012, video.port, 58012, ctrl.port, r.csp.port);
     r.csp.send(inv);
-    std::string ringing = r.csp.recv("SIP/2.0 180");
-    ASSERT_FALSE(ringing.empty());
     std::string okr = r.csp.recv("SIP/2.0 200");
     ASSERT_FALSE(okr.empty());
+    EXPECT_TRUE(r.csp.recv("SIP/2.0 18", 300).empty());                // 자동 개시에는 180·183 이 없다
     dump("07r_member_answer_200", okr);
     // 세션 갱신 주체 = 단말(TS 24.281 §6.2.3.1.1 5) — 제어 기능 초대는 refresher 를 싣지 않는다(골든 07, §6.3.3.1.2 6))
     EXPECT_EQ(headerOf(inv, "Session-Expires"), "1800");
     EXPECT_EQ(headerOf(okr, "Session-Expires"), "1800;refresher=uas");
     EXPECT_NE(headerOf(okr, "Require").find("timer"), std::string::npos);
-    EXPECT_EQ(headersOf(okr, "Require").size(), 1u) << okr;           // 180 의 Require 가 200 에 남아도 한 줄
+    EXPECT_EQ(headersOf(okr, "Require").size(), 1u) << okr;
     ASSERT_TRUE(r.l.wait([&] { return !r.l.incoming.empty(); }));
     CallInfo in;
     { std::lock_guard<std::mutex> lk(r.l.m); in = r.l.incoming[0]; }
@@ -871,10 +870,10 @@ TEST(McvCall, MemberInvitationAutoAnswer) {
     EXPECT_EQ(in.groupId, "g103");
     EXPECT_FALSE(in.isMcptt);
     EXPECT_EQ(in.sessionUri, "sip:g103@127.0.0.1:" + std::to_string(r.csp.port) + ";transport=udp;gr=1790775900654321-1");
-    for (const std::string* resp : {&ringing, &okr}) {
-        const std::string c = headerOf(*resp, "Contact");
-        EXPECT_EQ(c.substr(c.find('>') + 1), mcvideo::contactFeatureParams()) << c;   // §6.2.3.1.1 3)·4) · §6.2.3.2.1 3)·4)
-        EXPECT_NE(headerOf(*resp, "Require").find("timer"), std::string::npos);        // §6.2.3.1.1 2) · §6.2.3.2.1 2)
+    {
+        const std::string c = headerOf(okr, "Contact");
+        EXPECT_EQ(c.substr(c.find('>') + 1), mcvideo::contactFeatureParams()) << c;   // §6.2.3.1.1 3)·4)
+        EXPECT_NE(headerOf(okr, "Require").find("timer"), std::string::npos);          // §6.2.3.1.1 2)
     }
     const std::string sdp = partOf(okr, "application/sdp");
     std::vector<std::string> m = sdpLines(sdp, "m=");
@@ -913,7 +912,7 @@ TEST(McvCall, MemberInvitationAutoAnswer) {
     r.csp.reply(bye, 200, "OK");
 }
 
-// 수동 개시(TS 24.281 §6.2.3.2.1 — autoAnswerMcvideo 끔): 180 만 보내고 앱의 answer() 를 기다린다. 앱이 영상 옵션 없이 받아도 MCVideo answer
+// 그룹 호 수동 개시(TS 24.281 §6.2.3.2.2 — autoAnswerMcvideo 끔): 183(P-Answer-State: Unconfirmed)만 보내고 앱의 answer() 를 기다린다. 앱이 영상 옵션 없이 받아도 MCVideo answer
 //   (audio + video + 제어 채널, §6.2.2)다. 이어서 제어 기능의 해제 BYE(§9.2.1.4.2) — 호가 끝나고 제어 채널 RR 이 멈춘다.
 TEST(McvCall, MemberInvitationManualAnswerAndServerRelease) {
     Rig r;
@@ -937,9 +936,14 @@ TEST(McvCall, MemberInvitationManualAnswerAndServerRelease) {
                      "Via: SIP/2.0/UDP 127.0.0.1:" + std::to_string(r.csp.port) + ";branch=z9hG4bK-mcv-fan1");
     inv = localize(inv, 52012, audio.port, 56012, video.port, 58012, ctrl.port, r.csp.port);
     r.csp.send(inv);
-    std::string ringing = r.csp.recv("SIP/2.0 180");
-    ASSERT_FALSE(ringing.empty());
-    EXPECT_NE(headerOf(ringing, "Require").find("timer"), std::string::npos);        // §6.2.3.2.1 2)
+    std::string progress = r.csp.recv("SIP/2.0 183");
+    ASSERT_FALSE(progress.empty());
+    EXPECT_EQ(headerOf(progress, "P-Answer-State"), "Unconfirmed");                // §6.2.3.2.2 2) — RFC 4964
+    {
+        const std::string c = headerOf(progress, "Contact");
+        EXPECT_EQ(c.substr(c.find('>') + 1), mcvideo::contactFeatureParams()) << c;  // §6.2.3.2.2 1)
+    }
+    EXPECT_TRUE(r.csp.recv("SIP/2.0 180", 300).empty());                          // 180 은 개별 호의 수동 개시(§6.2.3.2.1)
     EXPECT_TRUE(r.csp.recv("SIP/2.0 200", 800).empty());                          // 앱이 받기 전에는 200 이 없다
     ASSERT_TRUE(r.l.wait([&] { return !r.l.incoming.empty(); }));
     CallInfo in;
@@ -971,6 +975,62 @@ TEST(McvCall, MemberInvitationManualAnswerAndServerRelease) {
     ASSERT_TRUE(r.l.wait([&] { return r.l.hasState(in.callId, CallState::Disconnected); }));
     EXPECT_FALSE(ctrl.expectRr(rrSsrc, 2500));                                    // 1 s 간격 유지 RR 둘이 남아 있었다면 여기서 보인다
     EXPECT_EQ(r.eng.transmissionInfo(in.callId).localPort, 0);                     // 끝난 호 — 참여자 없음(기본값)
+}
+
+// 개시 방식(TS 24.281 §9.2.1.2.1.2 7)·8) · TS 24.379 §10.1.1.2.1.2 7)·8) · RFC 5373) — 초대의 Answer-Mode 와 단말 설정
+#include "../src/mcptt/commencement.h"
+
+TEST(McvSip, CommencementFollowsAnswerMode) {
+    using mcptt::autoCommencement;
+    EXPECT_TRUE(autoCommencement("Auto", "", true));              // 7)a)
+    EXPECT_FALSE(autoCommencement("Auto", "", false));            // 7)b) — 단말이 자동 응답을 허용하지 않는다
+    EXPECT_FALSE(autoCommencement("Manual", "", false));          // 8)a)
+    EXPECT_FALSE(autoCommencement("Manual", "", true));           // 8)b) — 서버의 수동 요구를 따른다
+    EXPECT_FALSE(autoCommencement(" manual;require", "", true));
+    EXPECT_TRUE(autoCommencement("", "", true));                  // 헤더 없음 = 단말 설정
+    EXPECT_FALSE(autoCommencement("", "", false));
+    EXPECT_TRUE(autoCommencement("Manual", "Auto", false));       // Priv-Answer-Mode: Auto 가 우선(RFC 5373 §4.2)
+    EXPECT_TRUE(autoCommencement("", "auto;require", false));
+}
+
+// `Answer-Mode: Manual` 초대는 단말 설정이 자동이어도 수동 개시(183) — 사용자가 거절하면 480 + Warning 110(§6.2.3.2.2 2)).
+//   reject()(코드 무관한 «거절»)와 받기 전 hangup() 둘 다 같은 응답이다.
+TEST(McvCall, ManualAnswerModeAndUserDecline) {
+    for (bool viaHangup : {false, true}) {
+        Rig r;
+        AccountConfig ac = r.account();
+        ac.msisdn = "+82510002002";
+        ac.authId = "450081000002002@ptt.cims.example.kr";          // autoAnswerMcvideo 는 기본값(자동)
+        r.addAccount(ac);
+        ASSERT_TRUE(r.eng.registerAccount(r.acc).ok);
+        std::string reg = r.csp.recv("REGISTER ");
+        ASSERT_FALSE(reg.empty());
+        const std::string ue = headerOf(reg, "Contact");
+        const std::string ueUri = ue.substr(ue.find('<') + 1, ue.find('>') - ue.find('<') - 1);
+        r.csp.reply(reg, 200, "OK", "Contact: " + ue + ";expires=3600\r\n");
+        ASSERT_TRUE(r.l.wait([&] { for (auto& i : r.l.regs) if (i.state == RegState::Registered) return true; return false; }));
+
+        FakeUdp ctrl, audio, video;
+        std::string inv = sipFixture("07_prearranged_member_invite.txt");
+        inv = "INVITE " + ueUri + " SIP/2.0" + inv.substr(inv.find("\r\n"));
+        inv = replaceAll(inv, "Via: SIP/2.0/TLS csp.ptt.cims.example.kr:5061;branch=z9hG4bK-mcv-fan1",
+                         "Via: SIP/2.0/UDP 127.0.0.1:" + std::to_string(r.csp.port) + ";branch=z9hG4bK-mcv-fan1");
+        inv = localize(inv, 52012, audio.port, 56012, video.port, 58012, ctrl.port, r.csp.port);
+        inv = replaceAll(inv, "\r\nSession-Expires:", "\r\nAnswer-Mode: Manual\r\nSession-Expires:");
+        ASSERT_NE(inv.find("Answer-Mode: Manual"), std::string::npos);
+        r.csp.send(inv);
+        ASSERT_FALSE(r.csp.recv("SIP/2.0 183").empty());
+        EXPECT_TRUE(r.csp.recv("SIP/2.0 200", 500).empty());           // 자동으로 받지 않는다
+        ASSERT_TRUE(r.l.wait([&] { return !r.l.incoming.empty(); }));
+        CallInfo in;
+        { std::lock_guard<std::mutex> lk(r.l.m); in = r.l.incoming[0]; }
+        ASSERT_TRUE((viaHangup ? r.eng.hangup(in.callId) : r.eng.reject(in.callId)).ok);
+        std::string declined = r.csp.recv("SIP/2.0 480");
+        ASSERT_FALSE(declined.empty()) << (viaHangup ? "hangup" : "reject");
+        const std::string w = headerOf(declined, "Warning");
+        EXPECT_EQ(w.rfind("399 ", 0), 0u) << w;
+        EXPECT_NE(w.find("\"110 user declined the call invitation\""), std::string::npos) << w;
+    }
 }
 
 // ── 영상 그림(F3 — 창 없는 프레임 렌더 엔진만: Windows) ─────────────────────────────────────────────────────────────────

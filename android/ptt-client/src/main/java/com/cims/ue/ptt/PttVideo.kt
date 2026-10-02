@@ -332,15 +332,24 @@ internal class VideoPlane(private val c: PttController, context: Context) {
 
     // ── 코어 이벤트 ──
 
-    /** 제어 기능의 멤버 초대(prearranged — §9.2.1.3) — 코어가 자동 수락한다(`autoAnswerMcvideo`). 영상 채널(주채널)이 아니면 나간다. */
+    /**
+     * 제어 기능의 멤버 초대(prearranged — §9.2.1.3). 받을지는 앱이 정한다(`autoAnswerMcvideo` 끔 — [CallRules.acceptVideoInvitation]):
+     * 지금 영상 채널의 초대면 받고(합류일 뿐 — 영상 보기는 [받기] 가 따로 정한다), 아니면 **받기 전에 거절한다**(코어가 480 + Warning 110,
+     * TS 24.281 §6.2.3.2.2 2)). 받은 뒤에 채널이 바뀌면 [sync] 가 나간다.
+     */
     fun onIncomingCall(ci: CallInfo) {
         val gid = bareId(ci.groupId)
+        val want = channel.takeIf { c.regState.value is RegState.Registered && serverUri.isNotEmpty() &&
+                                    c._groupDocs.value[it]?.mcvideo != null }
         val keep = synchronized(c.lock) {
             val cur = calls[gid]
-            if (cur != null && cur.callId >= 0 && cur.callId != ci.callId) false        // 이미 이 그룹 영상 호에 있다
-            else { calls.getOrPut(gid) { Call(gid) }.callId = ci.callId; true }
+            val inCall = cur != null && cur.callId >= 0 && cur.callId != ci.callId      // 이미 이 그룹 영상 호에 있다
+            CallRules.acceptVideoInvitation(gid, want, inCall).also { ok ->
+                if (ok) calls.getOrPut(gid) { Call(gid) }.callId = ci.callId
+            }
         }
-        if (!keep) { c.cmd("video hangup dup") { c.ue.call(ci.callId).hangup() }; return }
+        if (!keep) { c.cmd("video decline $gid") { c.ue.call(ci.callId).reject() }; return }
+        c.cmd("video answer $gid") { c.ue.call(ci.callId).answer() }
         if (voiceMuted) c.cmd("video mute") { c.ue.call(ci.callId).setMuted(true) }
         c._status.value = "영상 호 초대 $gid"
         publish()
@@ -364,7 +373,7 @@ internal class VideoPlane(private val c: PttController, context: Context) {
                 releaseCaptureIfIdle()
                 if (call.opening && !call.active) {
                     // 내가 연 prearranged 호가 성립하지 못했다 — 다시 열지 않는다(사용자가 다시 누른다)
-                    if (!call.leaving) c.feedback?.blocked(openFailText(ci.lastCode, ci.lastReason))
+                    if (!call.leaving) c.feedback?.blocked(openFailText(ci.lastCode, ci.lastReason, ci.warningCode))
                 } else if (!call.leaving) {
                     // 내가 나간 게 아니면 다시 맞춘다 — 성립 전 거절은 물러나서, 성립 뒤 서버 해제는 잠깐 뒤(chat 세션은 다시 연다)
                     backoff(call.groupId, failed = !call.active || ci.lastCode >= 300)
@@ -455,8 +464,9 @@ internal class VideoPlane(private val c: PttController, context: Context) {
     }
 
     /** 내가 연 prearranged 호의 실패 응답(§9.2.1.4.2) — 480 = 초대가 나가지 못했거나 아무도 붙지 않았다(MCVideo 로 affiliate 한 멤버가 없다). */
-    private fun openFailText(code: Int, reason: String): String = when (code) {
-        480 -> "영상 호를 열지 못했습니다 — 영상을 받을 멤버가 없습니다"
+    private fun openFailText(code: Int, reason: String, warningCode: Int = 0): String = when {
+        CallRules.rejectionText(code, warningCode) != null -> "영상 호를 열지 못했습니다 — " + CallRules.rejectionText(code, warningCode)
+        code == 480 -> "영상 호를 열지 못했습니다 — 영상을 받을 멤버가 없습니다"
         else -> "영상 호를 열지 못했습니다" + if (code > 0) " ($code${if (reason.isNotBlank()) " $reason" else ""})" else ""
     }
 

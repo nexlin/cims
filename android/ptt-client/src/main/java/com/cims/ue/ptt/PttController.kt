@@ -535,12 +535,12 @@ class PttController(
             mcpttServerUri = ueInit?.mcpttServerUri.orEmpty(),     // 경보 Request-URI(TS 24.379 §12.1.1.1 8))
             mcdataServerUri = ueInit?.mcdataServerUri.orEmpty(),   // disposition 통지 Request-URI(TS 24.282 §12.2.1.1)
             // MCVideo(TS 24.281) — 서버가 PSI 를 내줄 때만 등록 태그를 싣는다(영상 = MCVideo 호, MCPTT 호는 음성만 — mcvideo.md §7 D9).
-            //   멤버 초대(prearranged)는 자동 수락 — 합류일 뿐이고 영상 보기는 [받기](manual 수신)가 따로 정한다.
+            //   멤버 초대(prearranged)는 앱이 받는다(VideoPlane.onIncomingCall — 영상 채널의 초대만, 아니면 받기 전에 거절).
             mcvideoEnabled = !ueInit?.mcvideoServerUri.isNullOrEmpty(),
             mcvideoServerUri = ueInit?.mcvideoServerUri.orEmpty(),
             // 발언권 참여자 타이머 T100·T101·T103·T104·T132 = UE initial configuration <Timers>(TS 24.484 §7.2.2.7, TS 24.380 표 11.1.1-1)
             floorTimers = ueInit?.floorTimers ?: com.cims.ue.sdk.FloorTimers(),
-            autoAnswerMcvideo = true,
+            autoAnswerMcvideo = false,
         )
     }
 
@@ -625,6 +625,11 @@ class PttController(
             CallState.DISCONNECTED -> {
                 emergencyPlane.handleEmergencyDenied(c.callId, c.lastCode)   // 긴급 개시 403 → normal 재발신 폴백
                 groupsPlane.handleNotAffiliated(c.callId, c.lastCode, c.warningCode)   // 403 120 → 제휴 다시 싣고 한 번 더
+                // 서버 거절 사유(486 103 동시 호 수 · 486 122 정원 · 403 115 사용 중지 …)를 알린다 — 120 은 위에서 다시 시도한다
+                if (c.warningCode != 120) CallRules.rejectionText(c.lastCode, c.warningCode)?.let { why ->
+                    _status.value = why
+                    feedback?.blocked(why)
+                }
                 onCallEnded(c.callId)
             }
             else -> Unit

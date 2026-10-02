@@ -501,15 +501,21 @@ MCVideo PSI. 동작(구현 — 시험 `McvSip`·`McvCall`, 계약 K3 골든과 �
   offer 에 `mc_queueing` 이 있을 때만 그것·offer 에 `mc_transmission_ssrc` 가 있을 때 이 단말의 값(§14.3.1~§14.3.3·§14.3.9 — `mcvideo::answerFmtp`).
   **다이얼로그 안에서 제어 기능이 다시 offer 하면(re-INVITE) 그 offer 로 answer fmtp 를 다시 만든다** — 개시 때의 형식을 되풀이하지 않는다.
   요청의 Transmission/Reception Priority 는 협상값(발신 = answer, 착신 = 되돌린 offer 값)을 넘지 않는다 — 넘으면 협상값으로 낮추고,
-  협상이 없으면 우선순위 필드를 싣지 않는다(§6.2.4.3.2 2)a)·§6.2.5.3.3 1)a) — `Participant::setNegotiatedPriority`), 180·200 Contact = MCVideo 태그(§6.2.3.1.1 3)·4)),
-  `autoAnswerMcvideo` 면 곧바로 200(§6.2.3.1.2). 나가기 = `hangup`(MCPTT 호와 독립). 서비스 호 Contact 는 pjsua 에 호별 Contact 파라미터 API 가 없어
+  협상이 없으면 우선순위 필드를 싣지 않는다(§6.2.4.3.2 2)a)·§6.2.5.3.3 1)a) — `Participant::setNegotiatedPriority`), 200 Contact = MCVideo 태그(§6.2.3.1.1 3)·4)),
+  자동 개시면 **임시 응답 없이 곧바로 200**(§6.2.3.1.2). 나가기 = `hangup`(MCPTT 호와 독립). 서비스 호 Contact 는 pjsua 에 호별 Contact 파라미터 API 가 없어
   다이얼로그 로컬 Contact 를 개시 INVITE 전(UAC onCallSdpCreated)·180 전(UAS)에 바꾼다(pjsua 내부 표).
 - **송출 게이트** — 마이크·카메라는 'U: has permission to transmit' 에서만 연다. 허가 밖에서 payload 있는 RTP 는 제어 기능이 버리고 회수 #3 을 되풀이하므로
   (TS 24.581 §6.3.5.3.8) 브리지 결선만이 아니라 **오디오 인코더를 멈춘다**(무음 프레임도 내지 않는다 — `noVad`) — 새 스트림은 브리지 결선 전(onStreamCreated)
   에 멈추고 허가·재협상마다 다시 건다. 빈 RTP keep-alive(PJMEDIA_STREAM_ENABLE_KA)·RTCP 는 그대로라 NAT·CMP latch 는 유지된다. 제어 채널은 호 성립 때
   1회 + 1 s 간격 2회 + 15 s 주기로 빈 RTCP RR(헤더 SSRC = 전송 제어와 같은 값)을 보낸다(ue_nat_traversal.md §7.1).
-- **수동 개시**(`autoAnswerMcvideo` 끔 — TS 24.281 §6.2.3.2) — 180(`Require: timer` + MCVideo Contact 태그)만 보내고 앱의 `answer()` 를 기다린다. MCVideo 호의
-  수락은 `CallOptions.video` 와 무관하게 audio + video + 제어 채널이다(§6.2.2 — 자동 수락과 같은 미디어 구성).
+- **개시 방식**(MCPTT·MCVideo 공통 — TS 24.379 §10.1.1.2.1.2 7)·8) · TS 24.281 §9.2.1.2.1.2 7)·8), `mcptt/commencement.h`) — 초대의 `Answer-Mode`·
+  `Priv-Answer-Mode`(RFC 5373)와 단말 설정(`autoAnswerMcptt`·`autoAnswerMcvideo`)으로 정한다: `Priv-Answer-Mode: Auto` = 자동 ·
+  `Answer-Mode: Manual` = 수동(설정이 자동이어도 따른다) · `Answer-Mode: Auto` 또는 헤더 없음 = 단말 설정(설정이 수동이면 자동 응답을 허용하지 않는다).
+- **수동 개시**(TS 24.281 §6.2.3.2.2 — 그룹 호) — 183(`P-Answer-State: Unconfirmed` + MCVideo Contact 태그)만 보내고 앱의 `answer()` 를 기다린다
+  (180 은 개별 호의 수동 개시 §6.2.3.2.1 — MCVideo 개별 호는 V8). MCVideo 호의 수락은 `CallOptions.video` 와 무관하게 audio + video + 제어 채널이다
+  (§6.2.2 — 자동 수락과 같은 미디어 구성).
+- **거절**(MCPTT·MCVideo 공통) — 아직 받지 않은 MC 서비스 초대에 `reject()`(코드 0·480·486·603) 또는 `hangup()` 을 부르면 **480 + Warning
+  `399 <도메인> "110 user declined the call invitation"`** 으로 답한다(§6.2.3.2.1 1)·§6.2.3.2.2 2)). 그 밖의 코드를 준 `reject(code)` 와 일반 전화 호는 그대로다.
 - **세션 타이머**(MCPTT·MCVideo 공통) — 착신(멤버 초대·사설 호) 200 OK 는 `Session-Expires: …;refresher=uas` + `Require: timer` 이고 단말이 갱신한다
   (TS 24.379·24.281 §6.2.3.1.1 2)·5) — 그룹 호 §6.2.3.1.2, TS 24.281 §9.2.2.2.1.6 10) «요청에 없으면 uas, 있으면 그 값»; 제어·참여 기능 초대는 refresher 를
   싣지 않는다 — 두 규격 §6.3.3.1.2 6) · TS 24.379 §6.3.4.1.2). pjsip UAS 는 요청에 refresher 가 없으면 uac 를 고르므로 수신 모듈(`mod-cimsue-rxfix`, 트랜잭션

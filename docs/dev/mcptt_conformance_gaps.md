@@ -45,7 +45,7 @@ PTT(MCPTT) 서비스 구현을 3GPP 규격 원문과 대조해 **규격과 다�
 | 등록·서비스 인가 (REG) | 4 | — | 3 | — | 1 |
 | 제휴 (AFF) | 11 | 6 | 4 | 1 | — |
 | 그룹 호 — 서버 (GCS) | 19 | 7 | 6 | 5 | 1 |
-| 그룹 호 — 단말 (GCC) | 9 | — | 7 | — | 2 |
+| 그룹 호 — 단말 (GCC) | 8 | — | 6 | — | 2 |
 | 개별 호 (PRV) | 8 | 4 | 3 | 1 | — |
 | 애드혹 그룹 호 (ADH) | 9 | 4 | 3 | 1 | 1 |
 | 긴급·임박·경보 (EMG) | 10 | 1 | 2 | 7 | — |
@@ -54,9 +54,9 @@ PTT(MCPTT) 서비스 구현을 3GPP 규격 원문과 대조해 **규격과 다�
 | 발언권 SDP 협상 (SDP) | 2 | — | 2 | — | — |
 | 그룹 문서·GMS (GMS) | 13 | — | 12 | 1 | — |
 | 설정 문서·CMS (CMS) | 7 | — | 4 | 2 | 1 |
-| **계** | **112** | **24** | **55** | **24** | **9** |
+| **계** | **111** | **24** | **54** | **24** | **9** |
 
-확인 수준 — ◎ 59 · ○ 41 · △ 12.
+확인 수준 — ◎ 58 · ○ 41 · △ 12.
 
 읽는 순서 — §2(먼저 볼 것) → §3(영역별 전체) → §4(미구현 목록에 빠진 기능) → §5(문서 정정) → §6(묶음과 순서).
 
@@ -151,7 +151,6 @@ CSP 는 참여 기능과 제어 기능을 겸한다.
 | GCC-3 | B | SDK | §10.1.1.2.1.1 14)c) — mcptt-info 에 `<mcptt-client-id>`. NOTE 2 — 단말은 발신자 MCPTT ID 를 본문에 싣지 않는다 | `<mcptt-client-id>` 가 없고 `<mcptt-calling-user-id>` 를 싣는다 — `sdk/core/src/mcptt/mcptt_xml.cpp:36-52`. client-id 는 경보 MESSAGE 에만 있다 | 서버가 클라이언트를 가를 값이 없다(AFF-4 의 전제) | ◎ |
 | GCC-4 | B | SDK | §10.1.2.2.1.1 13)a) — chat 합류는 `<session-type>chat`. §17.2.2.1.1 10)a) — 애드혹은 `adhoc` | `isPrivate ? "private" : "prearranged"` — `sdk/core/src/engine.cpp:2666`. `GroupCallOptions` 에 호 종류가 없다(그룹 종류는 `GroupDoc.sessionType` 으로 이미 안다) | 규격 서버에서 chat 합류가 404(118). 짝 = GCS-9 | ◎ |
 | GCC-5 | D | SDK | §6.2.1 2)d) · §6.2.2 3)e) — m=audio 에 `i=speech` | `i=` 는 MCVideo SDP 에만 넣는다 — `sdk/core/src/engine.cpp:271` | 규격 서버·PCC 의 미디어 성분 판별 | ◎ |
-| GCC-6 | B | SDK·관제 | §10.1.1.2.1.2 7)·8) — 착신 수락 방식은 INVITE 의 Answer-Mode 와 단말 설정으로 정한다. §6.2.3.2.1 1) — 거절은 480 + Warning `110 user declined the call invitation` (shall) | 판정은 계정 설정 `autoAnswerMcptt` 하나(`sdk/core/src/engine.cpp:1520`) — Answer-Mode·Priv-Answer-Mode 를 읽지 않는다. 코어 `reject` 는 상태 코드만 받고 관제 앱은 486 을 쓴다(`windows/dispatch-desktop/Services/DispatchSession.cs:1592`, 태블릿 `PhonePlane.kt:580`) | `Answer-Mode: Manual` 초대에도 곧바로 200. 거절이 «통화 중» 과 구분되지 않는다 | ◎ |
 | GCC-7 | B | SDK | §10.1.3.2 2)~5)·8) — conference SUBSCRIBE: Request-URI = 세션 식별자 · P-Preferred-Service · Accept-Contact · Expires 4294967295 · mcptt-info `<mcptt-request-uri>` = 그룹 ID (shall) | `Event: conference`·`Expires: 3600` 만, Request-URI = 그룹 URI, 본문 없음 — `sdk/core/src/engine.cpp:3011-3022`. 앱은 세션 밖의 제휴 그룹 전체를 구독한다 | 규격 서버에서 로스터를 못 받는다. handoff §14.1 의 «구독 3600초 갱신은 규격대로» 는 conference 구독에는 맞지 않는다 | ◎ |
 | GCC-8 | B | SDK | §10.1.1.2.4.1 — 재합류 INVITE 의 Request-URI = 세션 식별자 (shall) | MCPTT 발신은 늘 그룹 URI — `sdk/core/src/engine.cpp:2682`. `CallInfo.sessionUri` 는 MCVideo 호에서만 채운다 | 끝난 세션에 «재합류» 하면 404 대신 새 세션이 열린다 | ◎ |
 | GCC-9 | D | SDK | §10.1.1.4.1.1 4)b) · Annex F.1.3 — 착신 그룹은 `<mcptt-calling-group-id>` | 그룹 = From URI 의 user — `sdk/core/src/engine.cpp:1511` (`callingGroupId` 는 해석만 한다. MCVideo 착신은 우선 쓴다) | From 이 그룹이 아닌 규격 서버에서 다른 채널로 세션이 선다 | ○ |
@@ -321,7 +320,7 @@ CSP 는 참여 기능과 제어 기능을 겸한다.
 
 **Windows 몫(관제 앱 두 벌)** — SDK·서버가 정해진 뒤 맞춘다.
 
-- GCC-6 — 거절을 480 + Warning 110 으로(코어 `reject` 가 Warning 을 받게 된 뒤).
+- 착신 거절 — 코어가 MC 서비스 초대의 `reject()`(0·480·486·603)·받기 전 `hangup()` 을 480 + Warning 110 으로 낸다(GCC-6 반영 — 앱 코드 변경 없음). 문구 사전에 110 을.
 - EMG-8 — 긴급 개시·상향·경보의 대상 그룹 판정(전용 긴급 그룹 — TS 24.379 §6.2.8.1.8 1)a) · §12.1.1.1 4)a)i). 현장 앱은 `EmergencyRules.targetGroup` 으로 반영).
 - GMS-11·GMS-18 — 그룹 편집 폼: 정원 0(무제한)을 되돌릴 수 있게(서버는 0 이면 요소를 싣지 않는다), 우선순위 0~255(서버가 범위 밖 400 — 앱의 0~15 절단을 없앤다).
 - CMS-13 — CMS 변경 구독(지금은 5분 폴링).

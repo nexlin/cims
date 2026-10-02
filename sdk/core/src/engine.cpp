@@ -42,6 +42,7 @@
 #include "mcdata/msrp.h"
 #include "mcdata/sds_codec.h"
 #include "mcptt/mcptt_xml.h"
+#include "mcptt/commencement.h"
 #include "mcvideo/mcvideo_sip.h"
 #include "mcvideo/tc_participant.h"
 #include "quality/call_quality.h"
@@ -1634,7 +1635,9 @@ public:
             } else {
                 call->mcptt->micOpen = true;                                                 // 전이중 — 마이크 상시
             }
-            autoAnswer = cfg.autoAnswerMcptt;
+            // 개시 방식 = 초대의 Answer-Mode·Priv-Answer-Mode 와 단말 설정(TS 24.379 §10.1.1.2.1.2 7)·8))
+            autoAnswer = mcptt::autoCommencement(detail::headerValue(whole, "Answer-Mode"),
+                                                 detail::headerValue(whole, "Priv-Answer-Mode"), cfg.autoAnswerMcptt);
         }
         CallInfo snap;
         o_->updateCall(prm.callId, [&](CallInfo& c) {
@@ -1712,16 +1715,24 @@ public:
             call->projectMcVideo(c);
         }, &snap);
         o_->ctl.post([o = o_, call, id = prm.callId] { o->calls[id].reset(call); });
-        try {
-            pj::CallOpParam p;
-            p.statusCode = PJSIP_SC_RINGING;
-            pj::SipHeader req; req.hName = "Require"; req.hValue = "timer";   // 수동 개시 180(TS 24.281 §6.2.3.2.1 2)) — 자동 개시도 같은 180
-            p.txOption.headers.push_back(req);
-            call->answer(p);
-        } catch (pj::Error& e) { o_->log(2, std::string("mcvideo 180 failed: ") + e.info(false)); }
+        // 개시 방식 = 초대의 Answer-Mode·Priv-Answer-Mode 와 단말 설정(TS 24.281 §9.2.1.2.1.2 7)·8)).
+        const bool autoAnswer = mcptt::autoCommencement(detail::headerValue(whole, "Answer-Mode"),
+                                                        detail::headerValue(whole, "Priv-Answer-Mode"), cfg.autoAnswerMcvideo);
+        if (!autoAnswer) {
+            // 그룹 호 수동 개시(§6.2.3.2.2) — 사용자 수락 전에 183(Contact = MCVideo 태그, P-Answer-State: Unconfirmed — RFC 4964).
+            //   180 은 개별 호의 수동 개시(§6.2.3.2.1)다. 자동 개시는 임시 응답 없이 곧바로 200(§6.2.3.1.2).
+            try {
+                pj::CallOpParam p;
+                p.statusCode = PJSIP_SC_PROGRESS;
+                pj::SipHeader pas; pas.hName = "P-Answer-State"; pas.hValue = "Unconfirmed";
+                p.txOption.headers.push_back(pas);
+                call->answer(p);
+            } catch (pj::Error& e) { o_->log(2, std::string("mcvideo 183 failed: ") + e.info(false)); }
+        }
         o_->emit([o = o_, snap] { o->listener->onIncomingCall(snap); });
-        o_->log(3, "mcvideo invitation " + mv.groupId + " (" + vi.sessionType + ") → call " + std::to_string(prm.callId));
-        if (!cfg.autoAnswerMcvideo) return;
+        o_->log(3, "mcvideo invitation " + mv.groupId + " (" + vi.sessionType + ") → call " + std::to_string(prm.callId) +
+                       (autoAnswer ? " auto" : " manual"));
+        if (!autoAnswer) return;
         o_->ctl.post([o = o_, id = prm.callId] {
             PjCall* c = o->findCall(id);
             if (!c) return;
@@ -2670,15 +2681,39 @@ Result Engine::answer(int callId, const CallOptions& opts) {
         c.answer(prm);
     });
 }
+/**
+ * 아직 받지 않은 MC 서비스 초대(MCPTT·MCVideo)의 사용자 거절 — 480 + Warning «110 user declined the call invitation»
+ * (TS 24.379·TS 24.281 §6.2.3.2.1 1)·§6.2.3.2.2 2)). Warning 형식 = §4.4: `399 <호스트> "<코드> <문구>"`. 거절했으면 true.
+ */
+static bool declineMcInvitation(Engine::Impl* o, PjCall& c) {
+    if (!c.mcptt && !c.mcvideo) return false;
+    pj::CallInfo ci = c.getInfo();
+    if (ci.role != PJSIP_ROLE_UAS || ci.state >= PJSIP_INV_STATE_CONNECTING) return false;
+    auto it = o->accountCfgs.find(c.accountId());
+    const std::string host = it != o->accountCfgs.end() && !it->second.domain.empty() ? it->second.domain : std::string("cimsue");
+    pj::CallOpParam prm;
+    prm.statusCode = PJSIP_SC_TEMPORARILY_UNAVAILABLE;
+    pj::SipHeader w; w.hName = "Warning"; w.hValue = "399 " + host + " \"" + mcptt::kWarnUserDeclinedText + "\"";
+    prm.txOption.headers.push_back(w);
+    c.hangup(prm);
+    return true;
+}
+
 Result Engine::reject(int callId, int statusCode) {
-    return withCall(impl_.get(), callId, [&](pj::Call& c) {
+    return withCall(impl_.get(), callId, [&](PjCall& c) {
+        // MC 서비스 초대의 «거절»(통화 중·사양 — 0·480·486·603)은 규격의 사용자 거절 응답으로 낸다. 다른 코드는 그대로.
+        if ((statusCode == 0 || statusCode == 480 || statusCode == 486 || statusCode == 603) && declineMcInvitation(impl_.get(), c)) return;
         pj::CallOpParam prm;
         prm.statusCode = (pjsip_status_code)statusCode;
         c.hangup(prm);
     });
 }
 Result Engine::hangup(int callId) {
-    return withCall(impl_.get(), callId, [](pj::Call& c) { pj::CallOpParam prm; c.hangup(prm); });
+    return withCall(impl_.get(), callId, [&](PjCall& c) {
+        if (declineMcInvitation(impl_.get(), c)) return;          // 받기 전의 초대를 끊는 것 = 거절(pjsua 기본 603 대신)
+        pj::CallOpParam prm;
+        c.hangup(prm);
+    });
 }
 Result Engine::hold(int callId) {
     return withCall(impl_.get(), callId, [](pj::Call& c) { pj::CallOpParam prm; c.setHold(prm); });
