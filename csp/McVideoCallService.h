@@ -105,8 +105,9 @@ private:
     /** session.json 의 디스크립터 — PTT 그룹 디스크립터와 같은 편성·멤버 필드 + MCVideo 몫(호 방식·동시 송출
      * 상한·수신 모드). MCPTT floor 축은 싣지 않는다 */
     static std::string _RecordDescriptor( const CspPttGroup &clsGroup, bool bPrearranged );
-    /** 검사 실패 응답 (Warning 은 비면 싣지 않는다) */
-    void _Reject( const char *pszCallId, int iStatus, int iWarnCode, const char *pszWarnText );
+    /** 검사 실패 응답 (Warning 은 비면 싣지 않는다) · strInfoBody = 응답에 실을 mcvideo-info 문서(비면 본문 없음) */
+    void _Reject( const char *pszCallId, int iStatus, int iWarnCode, const char *pszWarnText,
+                  const std::string &strInfoBody = std::string() );
     /** 개시 시도의 결말을 시도 장부에 한 번 남긴다 — 성립(개시자 200 OK) 또는 실패(pszReason·pszCause·iStatus 는
      * sip_statistics.md §2.3 어휘). 이미 남겼으면(bAttemptOpen false) 아무것도 하지 않는다. 호출자가 m_mutex 보유. */
     void _CloseAttempt( Session &clsSes, bool bEstablished, const char *pszReason = "", const char *pszCause = "",

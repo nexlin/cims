@@ -225,3 +225,40 @@ bool CMcDataAsModule::OnDispositionNotification( const char *pszFrom, CSipMessag
     iStatus = bSent ? SIP_OK : SIP_INTERNAL_SERVER_ERROR;
     return true;
 }
+
+int CMcDataAsModule::OnEmergencyAlert( const char *pszFrom, const char *pszTo, CSipMessage *pclsMessage,
+                                       const std::string &strInfo ) {
+    std::string strAlert, strTarget;
+    McpttElemValue( strInfo, "alert-ind", strAlert );
+    std::transform( strAlert.begin(), strAlert.end(), strAlert.begin(), ::tolower );
+    const bool bActivate = ( strAlert == "true" || strAlert == "1" );
+    McpttElemValue( strInfo, "mcdata-request-uri", strTarget );
+    const std::string strGroup = strTarget.empty() ? std::string( pszTo ? pszTo : "" ) : McpttBareId( strTarget );
+
+    if ( bActivate ) {
+        // §16.2.3.1 4)a) — 인가(§6.3.7.2.1) = MCData user profile allow-activate-emergency-alert ∧ 그룹 문서
+        //   <mcdata-allow-emergency-alert> true. 그룹 문서(CSC)는 그 요소를 싣지 않는다(MCData 긴급 경보 미지원 —
+        //   mcdata_messaging.md §8) → 미인가 = 403 + mcdata-info <alert-ind>false. MCPTT 경보로 바꿔 배포하지 않는다.
+        CLog::Print( LOG_INFO,
+                     "McDataAs: emergency alert from(%s) group(%s) — not authorised (mcdata-allow-emergency-alert) "
+                     "→ 403",
+                     pszFrom ? pszFrom : "", strGroup.c_str() );
+        CSipMessage *pclsResp = pclsMessage->CreateResponseWithToTag( SIP_FORBIDDEN );
+        if ( pclsResp ) {
+            pclsResp->m_strBody =
+                "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n"
+                "<mcdatainfo xmlns=\"urn:3gpp:ns:mcdataInfo:1.0\">\r\n"
+                "  <mcdata-Params>\r\n"
+                "    <alert-ind type=\"Normal\"><mcdataBoolean>false</mcdataBoolean></alert-ind>\r\n"
+                "  </mcdata-Params>\r\n</mcdatainfo>";
+            pclsResp->m_iContentLength = (int)pclsResp->m_strBody.size();
+            pclsResp->m_clsContentType.Set( "application", "vnd.3gpp.mcdata-info+xml" );
+            gclsUserAgent.m_clsSipStack.SendSipMessage( pclsResp );
+        }
+        return 0;
+    }
+    // §16.2.3.2 — 발령이 늘 미인가라 남은 MCData 경보가 없다: 지울 캐시(2)a)·b))도, 보낼 취소 통지(2)c))도 없다 → 200.
+    CLog::Print( LOG_INFO, "McDataAs: emergency alert cancel from(%s) group(%s) — no outstanding MCData alert → 200",
+                 pszFrom ? pszFrom : "", strGroup.c_str() );
+    return SIP_OK;
+}

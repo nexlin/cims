@@ -185,6 +185,40 @@ inline std::string McpttWarning( int iCode, const char *pszText, const std::stri
     return std::string( "399 " ) + ( strAgent.empty() ? "cims" : strAgent ) + " \"" + szCode + " " + pszText + "\"";
 }
 
+/** multipart 본문에서 Content-Type 이 subtype(예 "vnd.3gpp.mcptt-info+xml")인 파트 본문 — 없으면 "". 단일 본문이면
+ *  bodyCtype 가 그 subtype 일 때 본문 전체. 경계 문자열은 헤더 파라미터가 아니라 본문의 첫 "--" 줄에서 읽는다. */
+inline std::string McBodyPart( const std::string &body, const std::string &bodyCtype, const char *subtype ) {
+    if ( bodyCtype.find( subtype ) != std::string::npos ) return body;
+    if ( !bodyCtype.empty() && bodyCtype.find( "multipart" ) == std::string::npos ) return "";
+    const size_t b0 = body.find( "--" );
+    if ( b0 == std::string::npos ) return "";
+    const size_t e0 = body.find_first_of( "\r\n", b0 );
+    if ( e0 == std::string::npos ) return "";
+    const std::string boundary = body.substr( b0, e0 - b0 );
+    for ( size_t p = b0; p != std::string::npos; ) {
+        const size_t hs = p + boundary.size();
+        if ( body.compare( hs, 2, "--" ) == 0 ) break;  // 닫는 경계
+        size_t skip = 4;
+        size_t he = body.find( "\r\n\r\n", hs );
+        if ( he == std::string::npos ) {
+            skip = 2;
+            he = body.find( "\n\n", hs );
+        }
+        if ( he == std::string::npos ) break;
+        const size_t next = body.find( boundary, he + skip );
+        if ( body.substr( hs, he - hs ).find( subtype ) != std::string::npos ) {
+            std::string part = body.substr( he + skip, ( next == std::string::npos ? body.size() : next ) - he - skip );
+            while ( !part.empty() && ( part.back() == '\n' || part.back() == '\r' ) ) part.pop_back();
+            return part;
+        }
+        p = next;
+    }
+    return "";
+}
+
+/** 긴급 경보 MESSAGE 의 서비스 — McEmergencyAlertServiceOf. */
+enum class EMcAlertService { None, Mcptt, McData };
+
 // <tag> 값이 true/1 인지. tag 미존재 시 false.
 inline bool _McpttIndTrue( const std::string &body, const char *tag ) {
     std::string val;
@@ -210,6 +244,22 @@ inline CMcpttInfo ParseMcpttInfo( const std::string &body ) {
     McpttElemValue( body, "originated-by", info.strOriginatedBy );
     McpttElemValue( body, "mcptt-client-id", info.strClientId );
     return info;
+}
+
+/** 긴급 경보 MESSAGE 의 서비스 (TS 24.379 §12.1 · TS 24.282 §16.2) — 지시자는 서비스마다 그 info 문서 안에 있다.
+ *  mcdata-info 파트가 있으면 MCData 요청이다: <alert-ind> 가 있으면 MCData 경보, 없으면 경보가 아니다(SDS·FD). MCData
+ *  본문은 MCPTT 경보로 읽지 않는다(같은 요소 이름 <alert-ind> 를 쓴다). 그 밖은 mcptt-info 의 <alert-ind>(경보·경보
+ *  취소) 또는 <emergency-ind>false(호 없는 그룹 긴급 상태 해제, §12.1.3.3)면 MCPTT 경보 — mcptt-info Content-Type 을
+ *  싣지 않은 옛 본문도 받는다(전환기). ctype = "type/subtype". */
+inline EMcAlertService McEmergencyAlertServiceOf( const std::string &body, const std::string &ctype ) {
+    const std::string strMcData = McBodyPart( body, ctype, "vnd.3gpp.mcdata-info+xml" );
+    if ( !strMcData.empty() ) {
+        std::string v;
+        return McpttElemValue( strMcData, "alert-ind", v ) ? EMcAlertService::McData : EMcAlertService::None;
+    }
+    const CMcpttInfo mi = ParseMcpttInfo( body );
+    return ( mi.bHasAlertInd || ( mi.bHasEmergencyInd && !mi.bEmergency ) ) ? EMcAlertService::Mcptt
+                                                                            : EMcAlertService::None;
 }
 
 // ── affiliation-command 파싱 (application/vnd.3gpp.mcptt-affiliation-command+xml, TS 24.379 §9) ──

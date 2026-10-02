@@ -963,15 +963,25 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
     }
 
     // condition(긴급·임박) 개시 인가 (TS 24.379 §6.3.3.1.13.2) — 그룹 capability(emergency_call,
-    //   두 tier 공통) + 사용자 프로파일(개시 인가·DedicatedGroup 대상 일치). 미인가는 403 거절
-    //   (§6.3.3.1.14) — 단말이 normal 재발신으로 폴백한다.
+    //   두 tier 공통) + 사용자 프로파일(개시 인가·DedicatedGroup 대상 일치). 미인가는 403 + mcptt-info 로 거절한다 —
+    //   긴급(그룹 §10.1.1.4.2 10)·사설 §11.1.1.4.1 7))은 §6.3.3.1.14 대로 emergency-ind false + alert-ind false,
+    //   임박(§10.1.1.4.2 11)a))은 imminentperil-ind false. 단말은 이 본문으로 미인가 거절을 다른 403 과 가른다.
     int iCond = iCondition;
     if ( iCond >= 1 ) {
         std::string strReason;
         if ( !IsConditionInitAuthorized( clsGroup, pszCallerInfo, strReason ) ) {
             CLog::Print( LOG_INFO, "ProcessGroupCall: Group(%s) Caller(%s) condition(%d) denied (%s) → 403", pszGroupId,
                          pszCallerInfo, iCond, strReason.c_str() );
-            gclsUserAgent.StopCall( pszCallId, SIP_FORBIDDEN );
+            McpttIndicators clsDenied;
+            if ( iCond >= 2 ) {
+                clsDenied.iEmergency = 0;
+                clsDenied.iAlert = 0;
+            } else {
+                clsDenied.iImminent = 0;
+            }
+            static const std::vector<std::pair<std::string, std::string>> kNoHeaders;
+            gclsUserAgent.StopCall( pszCallId, SIP_FORBIDDEN, NULL, kNoHeaders, "application/vnd.3gpp.mcptt-info+xml",
+                                    McpttInfoDocument( McpttIndicatorElems( clsDenied ) ) );
             if ( gclsCallDir.IsEnabled() && !bListen )
                 gclsCallDir.PttAttempt( pszGroupId, std::to_string( clsGroup._dbId ), pszCallerInfo, "failed", "denied",
                                         "policy_denied", 403 );
@@ -989,19 +999,9 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
     if ( !bListen && clsGroup._requireAffiliation && clsGroup._groupType != "private" && gclsDbManager.IsConnected() &&
          !gclsDbManager.IsAffiliated( pszGroupId, pszCallerInfo ) ) {
         if ( iCond >= 1 || clsGroup._groupType == "chat" ) {
-            CUserInfo clsAffUser;
-            const std::string strClientId =
-                gclsUserMap.Select( pszCallerInfo, clsAffUser ) ? clsAffUser.m_strContactUri : std::string();
-            if ( gclsDbManager.InsertAffiliation( pszGroupId, pszCallerInfo, strClientId, kImplicitAffiliationSec ) ) {
-                EmitAffiliationChanged( pszGroupId, "affiliate", pszCallerInfo );
-                // §9.2.2.3.7 5) → §9.2.2.3.5 — 암묵적 제휴라 되돌릴 PUBLISH p-id 가 없다.
-                SendAffiliationNotify( pszCallerInfo, "" );
-                CLog::Print( LOG_INFO, "ProcessGroupCall: Group(%s) Caller(%s) implicit affiliation (%s)", pszGroupId,
-                             pszCallerInfo, iCond >= 1 ? "emergency/imminent peril" : "chat" );
-            } else {
+            if ( !ImplicitAffiliate( pszGroupId, pszCallerInfo, iCond >= 1 ? "emergency/imminent peril" : "chat" ) )
                 CLog::Print( LOG_ERROR, "ProcessGroupCall: Group(%s) Caller(%s) implicit affiliation 미기록 — 계속",
                              pszGroupId, pszCallerInfo );
-            }
         } else {
             CLog::Print( LOG_INFO, "ProcessGroupCall: Group(%s) Caller(%s) not affiliated → 403 (120)", pszGroupId,
                          pszCallerInfo );
@@ -1781,12 +1781,55 @@ bool CGroupCallService::HasOutstandingAlert( const std::string &strGroupId, cons
     return it != m_mapGroupAlerts.end() && it->second.count( strUserId ) > 0;
 }
 
-bool CGroupCallService::IsAlertActivateAuthorized( const CspPttGroup &clsGroup, const std::string &strUserId ) {
-    if ( !clsGroup._emergencyAlert ) return false;  // TS 24.481 allow-MCPTT-emergency-alert
+bool CGroupCallService::IsAlertActivateAuthorized( const CspPttGroup &clsGroup, const std::string &strUserId,
+                                                   std::string *pstrReason ) {
+    auto deny = [pstrReason]( const char *pszWhy ) {
+        if ( pstrReason ) *pstrReason = pszWhy;
+        return false;
+    };
+    if ( !clsGroup._emergencyAlert ) return deny( "group capability" );  // TS 24.481 allow-MCPTT-emergency-alert
     CspUserProfile clsProf;
     // DB 불가(-1)면 그룹 축만(개시 인가 IsConditionInitAuthorized 와 같은 fail-open)
     if ( gclsDbManager.SelectUserProfile( strUserId, clsProf ) < 0 ) return true;
-    return clsProf.m_bAllowEmergencyAlert;  // TS 24.484 allow-activate-emergency-alert
+    if ( !clsProf.m_bAllowEmergencyAlert ) return deny( "user not authorised" );  // allow-activate-emergency-alert
+    // §6.3.3.1.13.1 1)a)i) — <EmergencyAlert> entry 가 DedicatedGroup 이면 대상이 그 uri-entry 여야 한다. 사용자
+    //   프로파일 문서(CSC)는 전용 긴급 그룹을 그 entry 하나로 내고, 전용 그룹이 미지정이면
+    //   allow-activate-emergency-alert 를 false 로 낸다 — 긴급 호 개시(IsConditionInitAuthorized)와 같은 대상 판정.
+    if ( clsProf.m_strEmergencyGroupMode == "DedicatedGroup" && clsProf.m_strEmergencyGroupId != clsGroup._id )
+        return deny( clsProf.m_strEmergencyGroupId.empty() ? "dedicated group not provisioned"
+                                                           : "dedicated-group mismatch" );
+    return true;
+}
+
+bool CGroupCallService::ImplicitAffiliate( const std::string &strGroupId, const std::string &strUserId,
+                                           const char *pszWhy ) {
+    CUserInfo clsAffUser;
+    const std::string strClientId =
+        gclsUserMap.Select( strUserId.c_str(), clsAffUser ) ? clsAffUser.m_strContactUri : std::string();
+    if ( !gclsDbManager.InsertAffiliation( strGroupId, strUserId, strClientId, kImplicitAffiliationSec ) ) return false;
+    EmitAffiliationChanged( strGroupId, "affiliate", strUserId );
+    // §9.2.2.3.7 5) → §9.2.2.3.5 — 암묵적 제휴라 되돌릴 PUBLISH p-id 가 없다.
+    SendAffiliationNotify( strUserId, "" );
+    CLog::Print( LOG_INFO, "GroupCallService: Group(%s) user(%s) implicit affiliation (%s)", strGroupId.c_str(),
+                 strUserId.c_str(), pszWhy ? pszWhy : "" );
+    return true;
+}
+
+bool CGroupCallService::AffiliateForAlert( const CspPttGroup &clsGroup, const std::string &strUserId ) {
+    // 자격 (§9.2.2.3.6 → §9.2.2.3.8 3)·4)) = 그룹이 있고(호출측이 찾은 그룹) 그 멤버다. 멤버가 아니면 제휴할 수도 없다.
+    bool bMember = false;
+    for ( const auto &pUser : clsGroup._pusers )
+        if ( pUser && pUser->_id == strUserId ) bMember = true;
+    if ( !bMember ) return false;
+    // affiliation 을 쓰지 않는 그룹(require_affiliation off — 멤버 전원 배포)은 멤버십이 곧 affiliation 이다. DB
+    //   단절이면 배포(FanoutAlert)와 같이 제휴 판정을 건너뛴다.
+    if ( !clsGroup._requireAffiliation || !gclsDbManager.IsConnected() ) return true;
+    if ( gclsDbManager.IsAffiliated( clsGroup._id, strUserId ) ) return true;
+    // §12.1.3.1 4)b)i)III) — 자격이 있으면 암묵적 제휴. 기록 실패는 경보를 막지 않는다(긴급 경로 — §12.1.2.1 NOTE 4).
+    if ( !ImplicitAffiliate( clsGroup._id, strUserId, "emergency alert" ) )
+        CLog::Print( LOG_ERROR, "GroupCallService: Group(%s) user(%s) alert implicit affiliation 미기록 — 계속",
+                     clsGroup._id.c_str(), strUserId.c_str() );
+    return true;
 }
 
 bool CGroupCallService::IsAlertCancelAuthorized( const std::string &strUserId ) {

@@ -50,11 +50,10 @@ MCPTT 와 뿌리가 같은 것(제휴 클라이언트 단위·비제휴 멤버 �
 | disposition 통지 (DISP) | 2 | — | — | 1 | 1 |
 | 파일 배포 (FD) | 7 | 1 | 2 | 3 | 1 |
 | 설정 문서 (CFG) | 1 | — | — | 1 | — |
-| 긴급 경보 (EMG) | 1 | — | — | 1 | — |
 | 응답 코드·Warning (WRN) | 3 | — | — | 3 | — |
-| **계** | **40** | **2** | **12** | **20** | **6** |
+| **계** | **39** | **2** | **12** | **19** | **6** |
 
-확인 수준 — ◎ 34 · ○ 2 · △ 4.
+확인 수준 — ◎ 34 · ○ 2 · △ 3.
 
 읽는 순서 — §2(먼저 볼 것) → §3(영역별 전체) → §4(미구현 목록에 빠진 기능) → §5(문서 정정) → §6(묶음과 순서).
 
@@ -167,7 +166,6 @@ CSP 는 참여 기능과 제어 기능을 겸한다.
 
 | # | 급 | 대상 | 규격 | CIMS 지금 | 영향 | 확인 |
 |---|---|---|---|---|---|---|
-| EMG-1 | C | CSP | §16.2.1.1 · §16.2.3.1 — MCData 긴급 경보 = mcdata-info `<alert-ind>` + `<mcdata-request-uri>`(그룹), MCData 그룹 인가(`<mcdata-allow-emergency-alert>`) | MCPTT 경보 판별이 네임스페이스를 보지 않고 `<alert-ind>` 를 찾아(`csp/McpttInfo.h:196-205`) MCData 경보도 MCPTT 경보 분기로 간다(`csp/ModuleDispatcher.cpp:2656-2662`). 대상은 `<mcptt-request-uri>` 만 읽어 PSI 형은 404, 그룹 URI 형은 MCPTT 경보로 배포(`csp/PttAsModule.cpp:97-112`) | MCData 경보는 미구현인데(§4) 실패 응답이 아니라 MCPTT 경보로 바뀌어 나갈 수 있다 — 실측 | △ |
 
 ### 3.10 응답 코드·Warning (WRN) — TS 24.282 §4.9
 
@@ -186,7 +184,6 @@ mcdata_messaging.md §8 · mcptt_standard_conformance.md R4 · mcx_identity_scop
 | MCData 서비스 인가 — REGISTER `<mcdata-access-token>`·바인딩·다중 단말·141 | TS 24.282 §7.3.2 | 없음 (REG-3) — mcx_identity_scope.md §10 은 MCPTT 토큰 검증만 적었다 |
 | 서비스 설정 PUBLISH·구독(poc-settings) | §7.2.2~§7.2.4 · §7.3.3~§7.3.6 | 489 (REG-4) |
 | MCData 제휴(서비스별 제휴 표·`mcdataPresInfo` NOTIFY·제휴 구독·암묵 제휴) | §8 | MCPTT 제휴로 읽는다 (AFF-1) |
-| MCData 긴급 경보 · 애드혹 그룹 긴급 경보 | §16.2 · §16.2A | MCPTT 경보 분기에 걸린다 (EMG-1) |
 | SDS 세션(one-to-one·group SDS session) | §9.2.4 | 없음 |
 | 애드혹 그룹 SDS(`ad-hoc-group-sds`) · functional alias 대상(300 Multiple Choices) · regroup·TGI(`<associated-group-id>`) | §9.2.2.2.1 3A) · §9.2.2.4.2 5)b)ii)·6)b)·6)l) | 없음 |
 | UNDELIVERED 재전달(TD1) | §12.2.2.1 5)·6) | 중계만 (DISP-1) |
@@ -227,7 +224,7 @@ mcdata_messaging.md §8 · mcptt_standard_conformance.md R4 · mcx_identity_scop
 | 9 | **서비스 인가·설정** — MCPTT REG 묶음과 한 묶음 | REG-3 · REG-4 · §4 앞 두 줄 | .45 CSP·SDK |
 | 10 | **수신 파서** — Application ID·Extended application ID·content type·charset | SDS-6 · SDS-7 | .45 SDK |
 | 11 | **미디어 평면 수명** — 첫 멤버 응답 뒤 200, 단말 BYE + Reason. TS 24.582 확보 뒤 | MSRP-3 · MSRP-4 | .45 CSP·CMDP·SDK |
-| 12 | **나머지** — 색인 순서(실측 뒤), UNDELIVERED, MCData 경보 분리 | SDS-9 · DISP-1 · EMG-1 | .45 CSP |
+| 12 | **나머지** — 색인 순서(실측 뒤), UNDELIVERED | SDS-9 · DISP-1 | .45 CSP |
 
 **Windows 몫(관제 앱 두 벌)** — SDK·서버가 정해진 뒤 맞춘다.
 
@@ -245,6 +242,6 @@ mcdata_messaging.md §8 · mcptt_standard_conformance.md R4 · mcx_identity_scop
 - **TS 24.484 MCData user profile·service configuration 요소별 대조** — 문서 자체를 서빙하지 않아(로드맵) 요소마다 보지 않았다. 결과는 §5 의 mcx_identity_scope.md 줄에 적었다.
 - **off-network(§9.3·§12.3·§16.3)·MBMS/MBS** — 범위 밖.
 - **From 신원 결박** — 게이트가 From user 를 발신자로 쓰는데, 그 신원과 등록 flow 의 결박은 MCPTT 와 같은 경로(`EventIncomingRequestAuth`)라 보지 않았다.
-- **실행 확인** — 모든 항목이 코드 읽기다. △ 항목(SDS-8·SDS-9·FD-7·EMG-1)과 SDS-1(규격 단말이 To 에 무엇을 싣는지)·AFF-6(다중 단말 배포)은 실서버로 재현해 확정한다.
+- **실행 확인** — 모든 항목이 코드 읽기다. △ 항목(SDS-8·SDS-9·FD-7)과 SDS-1(규격 단말이 To 에 무엇을 싣는지)·AFF-6(다중 단말 배포)은 실서버로 재현해 확정한다.
 - **cspsim·계측기(libcsim `McDataSds`·`McDataMsrp`)·`tests/msrp_sds_client.py`** — 시험 도구의 송신 형태는 보지 않았다. 서버 쪽 검사를 켜면(묶음 2·3·5) 도구도 함께 맞춰야 한다.
 - **콘솔** — 그룹 편집의 MCData 칸·메시지 이력 화면. FD-5 를 반영하면 그룹 편집에 칸이 따라가야 한다.

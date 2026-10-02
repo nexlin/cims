@@ -132,8 +132,14 @@ public:
     /** 긴급 경보 캐시 (§12.1.3.1 4)b)iii)A)·§12.1.3.2 2)a)·b)) — 호와 무관하게 그룹·발령 사용자 단위로 남는다. */
     void SetAlertOutstanding( const std::string &strGroupId, const std::string &strUserId, bool bOn );
     bool HasOutstandingAlert( const std::string &strGroupId, const std::string &strUserId );
-    /** 경보 발령 인가 (§6.3.3.1.13.1) = 그룹 allow-MCPTT-emergency-alert ∧ 사용자 allow-activate-emergency-alert. */
-    bool IsAlertActivateAuthorized( const class CspPttGroup &clsGroup, const std::string &strUserId );
+    /** 경보 발령 인가 (§6.3.3.1.13.1) = 그룹 allow-MCPTT-emergency-alert ∧ 사용자 allow-activate-emergency-alert ∧
+     *  <EmergencyAlert> entry 가 DedicatedGroup 이면 대상 = 그 전용 그룹(1)a)i)). 거부면 pstrReason 에 사유. */
+    bool IsAlertActivateAuthorized( const class CspPttGroup &clsGroup, const std::string &strUserId,
+                                    std::string *pstrReason = nullptr );
+    /** 경보 대상 그룹 제휴 (§12.1.3.1 4)b)i)) — 제휴했으면 true. 아니면 암묵적 제휴 자격(§9.2.2.3.6 → §9.2.2.3.8 =
+     *  그룹 존재 + 멤버)을 보고 자격이 있으면 암묵적 제휴(§9.2.2.3.7)를 하고 true, 자격이 없으면 false(호출측 403 120).
+     */
+    bool AffiliateForAlert( const class CspPttGroup &clsGroup, const std::string &strUserId );
     /** 경보 취소 인가 (§6.3.3.1.13.3) = 사용자 allow-cancel-emergency-alert. */
     bool IsAlertCancelAuthorized( const std::string &strUserId );
 
@@ -417,6 +423,9 @@ private:
     /** 암묵적 affiliation 만료 (TS 24.379 §9.2.2.3.7 4)d)ii) — 로컬 정책). 명시 affiliation PUBLISH 의 기본 만료와
      * 같다. */
     static constexpr int kImplicitAffiliationSec = 3600;
+    /** 암묵적 affiliation 기록 (§9.2.2.3.7) — affiliation 행 + 제휴 변경 통지 + 사용자 제휴 상태 NOTIFY(§9.2.2.3.5).
+     *  자격(§9.2.2.3.6)은 호출측이 본다. pszWhy = 로그 사유. 기록에 실패하면 false. */
+    bool ImplicitAffiliate( const std::string &strGroupId, const std::string &strUserId, const char *pszWhy );
     std::map<std::string, GroupSession> m_mapGroupSession;
 
     /** 개시자 응답 게이트 — 새 세션 개시의 200 OK 를 멤버 응답 뒤로 미룬다.

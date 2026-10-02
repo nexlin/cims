@@ -82,7 +82,8 @@ SIP MESSAGE 본문 = `multipart/mixed;boundary=…` 3파트:
 
 ## 4. CSP 처리 흐름
 
-`CModuleDispatcher::EventMessage` 순서: ① 긴급경보(alert-ind, 기존 경로) → ② **MCDATA-AS
+`CModuleDispatcher::EventMessage` 순서: ① 긴급경보 — mcptt-info `<alert-ind>` 는 MCPTT 경보(기존 경로), mcdata-info
+`<alert-ind>` 는 MCData 경보(§8 — `McEmergencyAlertServiceOf`, mcdata-info 파트가 있는 MESSAGE 는 MCPTT 경보로 읽지 않는다) → ② **MCDATA-AS
 `OnMessage`** (규격형 disposition 통지 §4.4, 그룹 대상 SDS) → ③ 1:1 전달 (Content-Type 보존). 1:1 SDS/FD·옛 형식
 SDS NOTIFICATION 은 ③ — 상대의 등록 바인딩으로 본문 그대로 전달하며 게이트·보관은 없다(§8). 1:1 SDS 는 ③ 에서 disposition
 상관 색인(§4.4)에 오른다.
@@ -370,3 +371,7 @@ CSP fan-out (하이브리드):
 - 멤버 단위 송신권한 — 수신전용 멤버(지금은 멤버 전원 `<mcdata-allow-transmit-data-in-this-group>` true)·멤버별 `<mcdata-max-data-in-single-request>`
 - 메시지·FD 파일 retention/purge (녹취와 공통 정리 메커니즘)
 - FD NOTIFICATION(다운로드 완료)·READ 통지
+- **MCData 긴급 경보**(TS 24.282 §16.2 · 애드혹 그룹 경보 §16.2A — 미지원): 그룹 문서가 `<mcdata-allow-emergency-alert>` 를 싣지 않으므로 발령은 늘 미인가다
+  (§6.3.7.2.1) — CSP `CMcDataAsModule::OnEmergencyAlert` 가 **403 + mcdata-info `<alert-ind>` false**(§16.2.3.1 4)a))로 답하고 배포하지
+  않는다. 취소(`<alert-ind>` false, §16.2.3.2)는 남은 MCData 경보가 없어 지울 것도 보낼 통지도 없다 → 200. 지원할 때 = 그룹 문서 요소·
+  MCData user profile `<EmergencyAlert>`·발령자 제휴(§16.2.3.1 4)b)i))·경보 캐시·수신 확인(§6.3.7.1.5)

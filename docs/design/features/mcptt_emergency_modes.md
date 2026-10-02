@@ -39,8 +39,9 @@
 - `emergency_group_mode` — SOS(새 긴급콜) 대상 결정 (TS 24.484 `MCPTTGroupInitiation` entry-info):
   `DedicatedGroup`(기본, 전용 긴급그룹으로) | `UseCurrentlySelectedGroup`(단말 선택 그룹으로).
 - `emergency_group_id` — 전용 긴급그룹(`ptt_groups.mcptt_group_id` FK, 삭제 시 NULL). 콜·경보
-  (`EmergencyAlert` entry) 공통 대상. **DedicatedGroup 모드에서 미지정이면 긴급 개시가 전부
-  미인가**(403) — 콘솔이 지정을 필수화하고 미지정을 경고 배지로 표시한다.
+  (`EmergencyAlert` entry) 공통 대상 — 긴급 개시(§6.3.3.1.13.2)와 경보 발령(§6.3.3.1.13.1)이 같은 대상 판정을 쓴다.
+  **DedicatedGroup 모드에서 미지정이면 긴급 개시·경보 발령이 전부 미인가**(403) — 콘솔이 지정을 필수화하고 미지정을 경고
+  배지로 표시한다.
 - `allow_emergency_private_call` — 긴급 사설콜 개시 인가 (TS 24.484 ruleset
   `allow-emergency-private-call`, 기본 1). 사설콜은 그룹문서가 없어 capability 축이 공허 —
   사용자 축이 유일 게이트(§7).
@@ -129,9 +130,10 @@ mcptt-request-uri, mcptt-calling-user-id, (alert) originated-user-id, location(�
 - **개시**: 그룹 INVITE에 `emergency-ind=true` → `ProcessGroupCall(condition=EMERGENCY)`:
   1. **개시 인가 3중 판정** (TS 24.379 §6.3.3.1.13.2, `IsConditionInitAuthorized`) — condition
      (긴급·임박) 공통: ①그룹 capability `emergency_call` ②사용자 프로파일 `allow_emergency_call`
-     ③`DedicatedGroup` 모드면 호출 대상=전용 긴급그룹 일치. 미인가는 **403 거절**(§6.3.3.1.14) —
-     단말이 normal 재발신으로 폴백한다(강등 수용 아님). 프로파일 DB 불가 시 사용자 축은
-     fail-open(그룹 축만 판정).
+     ③`DedicatedGroup` 모드면 호출 대상=전용 긴급그룹 일치. 미인가는 **403 + mcptt-info** — 긴급은 `emergency-ind` false +
+     `alert-ind` false(§6.3.3.1.14 — 그룹 §10.1.1.4.2 10)·사설 §11.1.1.4.1 7)), 임박은 `imminentperil-ind` false
+     (§10.1.1.4.2 11)a)). 단말은 이 본문으로 미인가 거절을 다른 403 과 가르고 normal 재발신으로 폴백한다(강등 수용 아님).
+     프로파일 DB 불가 시 사용자 축은 fail-open(그룹 축만 판정).
   2. in-progress emergency 설정(메모리 + DB 미러), 개시자에 MCPTT emergency state.
   3. CMP `ADD/PTT_GROUP_MODIFY`에 `emergency=1`(+개시자 tier=emergency) → floor 선점 보장.
   4. fan-out INVITE의 `mcptt-info`에 `<emergency-ind>true` 광고(`BuildGroupInfoXml` 확장).
@@ -186,17 +188,25 @@ mcptt-request-uri, mcptt-calling-user-id, (alert) originated-user-id, location(�
 
 ### 4.3 emergency alert (SIP MESSAGE)
 
-`EventMessage` 가 mcptt-info 의 `<alert-ind>` 요소를 보면 SMS 경로와 갈라 `CPttAsModule::OnEmergencyAlert` 로 넘긴다. CSP 는
+`EventMessage` 가 mcptt-info 의 `<alert-ind>` 요소를 보면 SMS 경로와 갈라 `CPttAsModule::OnEmergencyAlert` 로 넘긴다
+(`McEmergencyAlertServiceOf` — mcdata-info 파트가 있는 MESSAGE 는 MCData 요청이라 MCPTT 경보로 읽지 않는다: MCData 경보는
+[mcdata_messaging.md](mcdata_messaging.md) §8, mcptt-info Content-Type 이 없는 옛 본문은 MCPTT 로 받는다). CSP 는
 참여 기능(§12.1.2.1)과 제어 기능(§12.1.3.1·§12.1.3.2·§12.1.3.3)을 겸한다. `<alert-ind>` 없이 `<emergency-ind>` false 만 실린
 MESSAGE(호 없는 그룹 긴급 상태 해제, §12.1.3.3)도 같은 곳으로 간다:
 - **대상 그룹** = 본문 `<mcptt-request-uri>` — 단말은 Request-URI 를 참여 기능 PSI(`sip:mcptt_psi@<PTT 도메인>` — ue-init-config
   `MCPTT-Service-Details/Server-URI`)로 보낸다(§12.1.1.1 4)a)·8)). Request-URI 가 그룹 URI 면 그 그룹으로 받는다(옛 단말 전환기).
   어느 쪽으로도 그룹을 찾지 못하면 404.
 - **발령 인가** = 그룹 capability(`emergency_alert`, TS 24.481 allow-MCPTT-emergency-alert) AND 사용자 프로파일
-  (`allow_emergency_alert`, TS 24.484 allow-activate-emergency-alert — §6.3.3.1.13.1). 미인가 발령은 **403 + `<alert-ind>` false**
-  (§12.1.3.1 4)a)) — 전파하지 않는다. 인가되면 경보 캐시(그룹·발령 사용자 단위, 호와 무관 — §12.1.3.1 4)b)iii)A))에 올린다.
+  (`allow_emergency_alert`, TS 24.484 allow-activate-emergency-alert) AND `<EmergencyAlert>` entry 가 DedicatedGroup 이면 대상 =
+  전용 긴급그룹(§6.3.3.1.13.1 1)a)i) — 긴급 개시와 같은 대상 판정, `IsAlertActivateAuthorized`). 미인가 발령은
+  **403 + `<alert-ind>` false**(§12.1.3.1 4)a)) — 전파하지 않는다.
+- **발령자 제휴**(§12.1.3.1 4)b)i)) — 인가된 발령의 발신자가 그 그룹에 제휴하지 않았으면 암묵적 제휴 자격(§9.2.2.3.6 →
+  §9.2.2.3.8 = 그룹 멤버)을 본다. 비멤버는 **403 + Warning `120 user is not affiliated to this group`**, 멤버는 암묵적 제휴
+  (§9.2.2.3.7 — 긴급 개시와 같은 기록·제휴 통지, 만료 3600 s) 뒤 배포한다 — 그 뒤로는 그룹 통지를 받는다(`AffiliateForAlert`).
+  제휴를 쓰지 않는 그룹(`require_affiliation` off)은 멤버십이 곧 제휴다. 참여 기능의 N2 검사(§12.1.2.1 4))는 긴급 경보라 받는다
+  (NOTE 4). 인가되면 경보 캐시(그룹·발령 사용자 단위, 호와 무관 — §12.1.3.1 4)b)iii)A))에 올린다.
 - **취소 인가** = 사용자 프로파일 `allow-cancel-emergency-alert`(§6.3.3.1.13.3 — 자기 경보 취소도 같은 인가, 제3자 취소는
-  `<originated-by>` 의 경보를 정리한다). 미인가 취소는 **403 + `<alert-ind>` true**(동봉한 그룹 긴급 해제도 비인가면
+  `<originated-by>` 의 경보를 정리한다). 규격의 취소 절차(§12.1.3.2)에는 멤버십·제휴 판정이 없다 — 관제사의 제3자 취소 경로다. 미인가 취소는 **403 + `<alert-ind>` true**(동봉한 그룹 긴급 해제도 비인가면
   `<emergency-ind>` true 도 — §12.1.3.2 1)a)).
 - **동봉·단독 긴급 해제** — 경보 취소에 실린 `<emergency-ind>` false(§12.1.3.2)·그 요소만 실린 MESSAGE(§12.1.3.3)는 §4.2 표와 같은
   판정(개시자 ∨ `allow-cancel-group-emergency`)을 거친다. 인가되고 그룹이 긴급이면 `CancelGroupEmergency` — 참여 멤버 re-INVITE

@@ -44,6 +44,7 @@
 #include "McDataGates.h"
 #include "McDataMediaService.h"
 #include "McVideoCallService.h"
+#include "McVideoInfo.h"
 #include "McpttInfo.h"
 #include "MemoryDebug.h"
 #include "NonceMap.h"
@@ -527,6 +528,28 @@ bool CModuleDispatcher::RecvRequest( int iThreadId, CSipMessage *pclsMessage ) {
                                  strGid.c_str(), strMid.c_str(), v.iStatus );
                     return true;
                 }
+            }
+        }
+        // MCVideo 진행 중 호의 우선순위 요청(re-INVITE 의 긴급·임박·경보 지시자, TS 24.281 §9.2.1.4.7 3)·4)) — 긴급
+        // 영상
+        //   호(V8)가 없어 늘 미인가: 403 + mcvideo-info(McVideoPriorityRejectBody). 재-INVITE 거절은 다이얼로그를 깨지
+        //   않아 호는 그대로다.
+        if ( pclsMessage->m_clsTo.SelectParam( SIP_TAG ) && gclsMcVideoCallService.IsMcVideoCall( strCallId ) ) {
+            const std::string strCt =
+                pclsMessage->m_clsContentType.m_strType + "/" + pclsMessage->m_clsContentType.m_strSubType;
+            const std::string strReject = McVideoPriorityRejectBody(
+                ParseMcVideoInfo( McVideoBodyPart( pclsMessage->m_strBody, strCt, kMcVideoInfoSubtype ) ) );
+            if ( !strReject.empty() ) {
+                CSipMessage *pclsResp = pclsMessage->CreateResponseWithToTag( SIP_FORBIDDEN );
+                if ( pclsResp ) {
+                    pclsResp->m_strBody = strReject;
+                    pclsResp->m_iContentLength = (int)pclsResp->m_strBody.size();
+                    pclsResp->m_clsContentType.Set( "application", "vnd.3gpp.mcvideo-info+xml" );
+                    gclsUserAgent.m_clsSipStack.SendSipMessage( pclsResp );
+                }
+                CLog::Print( LOG_INFO, "RecvRequest: MCVideo re-INVITE priority request (call %s) not authorised → 403",
+                             strCallId.c_str() );
+                return true;
             }
         }
 
@@ -2650,15 +2673,20 @@ int CModuleDispatcher::EventMessage( const char *pszFrom, const char *pszTo, CSi
             pszTo = strMsgCallee.c_str();
         }
     }
-    // MCPTT emergency alert (TS 24.379 §12.1) — mcptt-info <alert-ind>(경보·경보 취소) 또는 <emergency-ind>false(호
-    // 없는
-    //   그룹 긴급 상태 해제, §12.1.3.3) 판별 → SMS 와 분기. 단말은 Request-URI = 참여 기능 PSI, 대상 그룹 = 본문
-    //   <mcptt-request-uri>(§12.1.1.1 4)a)·8))로 보낸다. Request-URI 가 그룹인 형식도 전환기로 받는다(대상 그룹 =
-    //   Request-URI). 이 CSP 는 참여·제어 기능을 겸한다.
+    // 긴급 경보 판별 (McEmergencyAlertServiceOf) — mcdata-info 의 <alert-ind> 는 MCData 긴급 경보(TS 24.282 §16.2.3 —
+    //   MCDATA-AS), mcptt-info 의 <alert-ind> 또는 <emergency-ind>false 는 MCPTT emergency alert(TS 24.379 §12.1) → SMS
+    //   와 분기. 단말은 Request-URI = 참여 기능 PSI, 대상 그룹 = 본문 <mcptt-request-uri>(§12.1.1.1 4)a)·8))로 보낸다.
+    //   Request-URI 가 그룹인 형식도 전환기로 받는다(대상 그룹 = Request-URI). 이 CSP 는 참여·제어 기능을 겸한다.
     if ( pclsMessage ) {
-        CMcpttInfo clsMi = ParseMcpttInfo( pclsMessage->m_strBody );
-        if ( clsMi.bHasAlertInd || ( clsMi.bHasEmergencyInd && !clsMi.bEmergency ) )
-            return m_clsPttAs.OnEmergencyAlert( pszFrom, pszTo, pclsMessage, clsMi );
+        const std::string strCtype =
+            pclsMessage->m_clsContentType.m_strType + "/" + pclsMessage->m_clsContentType.m_strSubType;
+        const EMcAlertService eAlert = McEmergencyAlertServiceOf( pclsMessage->m_strBody, strCtype );
+        if ( eAlert == EMcAlertService::McData && m_clsMcDataAs.IsEnabled() )
+            return m_clsMcDataAs.OnEmergencyAlert(
+                pszFrom, pszTo, pclsMessage,
+                McBodyPart( pclsMessage->m_strBody, strCtype, "vnd.3gpp.mcdata-info+xml" ) );
+        if ( eAlert == EMcAlertService::Mcptt )
+            return m_clsPttAs.OnEmergencyAlert( pszFrom, pszTo, pclsMessage, ParseMcpttInfo( pclsMessage->m_strBody ) );
     }
 
     // MCData 그룹 SDS (TS 24.282) — 그룹 대상 MESSAGE 는 MCDATA-AS 가 게이트+fan-out.

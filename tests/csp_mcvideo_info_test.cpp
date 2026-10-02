@@ -332,6 +332,44 @@ int main() {
                        V({"g1", "g2"}));
   }
 
+  // 미인가 우선순위 요청의 403 본문 (McVideoPriorityRejectBody — TS 24.281
+  // §6.3.3.1.13 · §9.2.1.4.2 10)·11) · §9.2.2.4.1.1 6)·7) · §9.2.1.4.7
+  // 3)·4), S03 VGC-1)
+  {
+    auto info = [](const std::string &params) {
+      return ParseMcVideoInfo(McVideoInfoDocument(params));
+    };
+    const std::string emg =
+        McVideoPriorityRejectBody(info(McVideoInfoBool("emergency-ind", true)));
+    const CMcVideoInfo emgBack = ParseMcVideoInfo(emg);
+    CK("prio emergency → emergency-ind false + alert-ind false",
+       !emg.empty() && emgBack.bHasEmergencyInd && !emgBack.bEmergency &&
+           emgBack.bHasAlertInd && !emgBack.bAlert && !emgBack.bHasImminentInd);
+    CK("prio emergency body = contentType form",
+       emg.find("<emergency-ind type=\"Normal\"><mcvideoBoolean>false"
+                "</mcvideoBoolean></emergency-ind>") != std::string::npos);
+    const CMcVideoInfo alertBack = ParseMcVideoInfo(
+        McVideoPriorityRejectBody(info(McVideoInfoBool("alert-ind", true))));
+    CK("prio alert → emergency-ind false + alert-ind false",
+       alertBack.bHasEmergencyInd && !alertBack.bEmergency &&
+           alertBack.bHasAlertInd && !alertBack.bAlert);
+    const CMcVideoInfo impBack = ParseMcVideoInfo(McVideoPriorityRejectBody(
+        info(McVideoInfoBool("imminentperil-ind", true))));
+    CK("prio imminent → imminentperil-ind false only",
+       impBack.bHasImminentInd && !impBack.bImminent &&
+           !impBack.bHasEmergencyInd && !impBack.bHasAlertInd);
+    CK("prio cancel direction passes",
+       McVideoPriorityRejectBody(info(McVideoInfoBool("emergency-ind", false) +
+                                      McVideoInfoBool("alert-ind", false)))
+           .empty());
+    CK("prio broadcast passes",
+       McVideoPriorityRejectBody(info(McVideoInfoBool("broadcast-ind", true)))
+           .empty());
+    CK("prio none passes",
+       McVideoPriorityRejectBody(info(McVideoInfoValue("session-type", "chat")))
+           .empty());
+  }
+
   printf("%s (%d fail)\n", fail ? "FAIL" : "PASS", fail);
   return fail ? 1 : 0;
 }

@@ -336,6 +336,13 @@ chat|prearranged(그룹 속성 `invite_members`) · 개시자 · 시작 시각(T
 겹치지 않게). JOIN 응답에서 `port`·`video_port`·`control_port`·`tc_ssrc`·`granted`·`audio_ssrc`·`video_ssrc` 를 읽는다. `HandleEvent` 는 hdr.service 가
 mcvideo 인 `PTT_GROUP_ABORTED`·`TRANSMITTERS`·`TRANSMISSION_INACTIVITY` 를 MCVideo 서비스로 보낸다.
 
+**긴급·임박·경보 요청**(V8 전) — 사용자 프로파일·그룹 문서가 MCVideo 긴급·임박·경보 인가(`allow-*`)를 false 로 내므로 그 지시자를 true 로
+실은 요청은 늘 미인가다(TS 24.281 §6.3.3.1.12.1·.2·.5). 개시·합류 INVITE(§9.2.1.4.2 10)·11) · chat §9.2.2.4.1.1 6)·7) — 그룹 문서 초기 처리
+뒤·제휴 판정 앞)와 진행 중 호의 re-INVITE(§9.2.1.4.7 3)·4) — dispatcher 요청 훅)를 **403 + mcvideo-info** 로 거절한다: 긴급·경보 =
+`<emergency-ind>` false + `<alert-ind>` false(§6.3.3.1.13), 임박 = `<imminentperil-ind>` false(`McVideoPriorityRejectBody`). 규격 단말이 일반
+호 200 을 «긴급 호 허가»로 읽지 않게 하는 것이다(§6.2.8.1.4). 해제 방향(false) 지시자는 세울 수 없는 상태라 거절하지 않는다.
+`<broadcast-ind>` 는 규격에 거절 절차가 없어 V8 전까지 일반 그룹 호로 받는다(편차 — 방송 영상 호의 수신 automatic·105 구독 거절은 V8).
+
 **1차 범위 밖** — 긴급·임박·방송·ad hoc·private(V8), 확인 통화(required 멤버·TNG1 확인·min-number-to-start — 정원 팬아웃의 필수 멤버 우선 포함),
 conference 이벤트 NOTIFY, 전송 제어 SRTCP 키(`tc_crypto` — E2E CSK 트랙), 정원이 찼을 때 우선순위로 기존 참가자를 내보내는 로컬 정책.
 

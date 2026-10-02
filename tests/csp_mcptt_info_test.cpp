@@ -62,5 +62,27 @@ int main(){
   CK("psi sip uri",McpttPsiTarget("mcptt_psi","sip:g001@ptt.d")=="g001");
   CK("legacy same",McpttPsiTarget("g006","tel:g006").empty());       // 구형: Request-URI 에 그룹을 직접
   CK("no request-uri",McpttPsiTarget("mcptt_psi","").empty());
+  // 긴급 경보 서비스 판별 (McEmergencyAlertServiceOf — TS 24.379 §12.1 · TS 24.282 §16.2) — MCData 경보(mcdata-info
+  //   <alert-ind>)는 MCPTT 경보로 읽지 않는다(S03 MCData EMG-1). 본문 = 단말 §16.2.1.1 4)·5) 형식(mcdata-info +
+  //   mcdata-location-info multipart).
+  const std::string mdAlert =
+    "--b\r\nContent-Type: application/vnd.3gpp.mcdata-info+xml\r\n\r\n"
+    "<mcdatainfo xmlns=\"urn:3gpp:ns:mcdataInfo:1.0\"><mcdata-Params>"
+    "<mcdata-request-uri type=\"Normal\"><mcdataURI>sip:gap1@ptt.d</mcdataURI></mcdata-request-uri>"
+    "<alert-ind type=\"Normal\"><mcdataBoolean>true</mcdataBoolean></alert-ind></mcdata-Params></mcdatainfo>\r\n"
+    "--b\r\nContent-Type: application/vnd.3gpp.mcdata-location-info+xml\r\n\r\n<location-info/>\r\n--b--\r\n";
+  CK("alert svc mcdata",McEmergencyAlertServiceOf(mdAlert,"multipart/mixed")==EMcAlertService::McData);
+  const std::string mdSds =
+    "--b\r\nContent-Type: application/vnd.3gpp.mcdata-info+xml\r\n\r\n"
+    "<mcdatainfo><mcdata-Params><mcdata-request-uri>tel:gap1</mcdata-request-uri></mcdata-Params></mcdatainfo>\r\n"
+    "--b\r\nContent-Type: application/vnd.3gpp.mcdata-payload\r\n\r\n<alert-ind>true</alert-ind>\r\n--b--\r\n";
+  CK("alert svc mcdata sds (payload text not alert)",McEmergencyAlertServiceOf(mdSds,"multipart/mixed")==EMcAlertService::None);
+  CK("alert svc mcptt",McEmergencyAlertServiceOf(McpttInfoDocument(McpttInfoBool("alert-ind",true)),
+                                                 "application/vnd.3gpp.mcptt-info+xml")==EMcAlertService::Mcptt);
+  CK("alert svc mcptt emergency cancel",McEmergencyAlertServiceOf(McpttInfoDocument(McpttInfoBool("emergency-ind",false)),
+                                                 "application/vnd.3gpp.mcptt-info+xml")==EMcAlertService::Mcptt);
+  CK("alert svc mcptt legacy text/plain",McEmergencyAlertServiceOf("<mcpttinfo><mcptt-Params><alert-ind>true</alert-ind>"
+                                                 "</mcptt-Params></mcpttinfo>","text/plain")==EMcAlertService::Mcptt);
+  CK("alert svc none",McEmergencyAlertServiceOf("hello","text/plain")==EMcAlertService::None);
   printf("%s (%d fail)\n",fail?"FAIL":"PASS",fail); return fail?1:0;
 }

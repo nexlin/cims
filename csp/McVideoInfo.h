@@ -69,35 +69,9 @@ inline CMcVideoInfo ParseMcVideoInfo( const std::string &body ) {
     return i;
 }
 
-/** multipart 본문에서 Content-Type 이 subtype(예 "vnd.3gpp.mcvideo-info+xml")인 파트 본문 — 없으면 "". 단일 본문이면
- *  bodyCtype 가 그 subtype 일 때 본문 전체. 경계 문자열은 헤더 파라미터가 아니라 본문의 첫 "--" 줄에서 읽는다. */
+/** multipart 본문의 subtype 파트 — 구현은 MC 서비스 공용 McBodyPart(McpttInfo.h). */
 inline std::string McVideoBodyPart( const std::string &body, const std::string &bodyCtype, const char *subtype ) {
-    if ( bodyCtype.find( subtype ) != std::string::npos ) return body;
-    if ( !bodyCtype.empty() && bodyCtype.find( "multipart" ) == std::string::npos ) return "";
-    const size_t b0 = body.find( "--" );
-    if ( b0 == std::string::npos ) return "";
-    const size_t e0 = body.find_first_of( "\r\n", b0 );
-    if ( e0 == std::string::npos ) return "";
-    const std::string boundary = body.substr( b0, e0 - b0 );
-    for ( size_t p = b0; p != std::string::npos; ) {
-        const size_t hs = p + boundary.size();
-        if ( body.compare( hs, 2, "--" ) == 0 ) break;  // 닫는 경계
-        size_t skip = 4;
-        size_t he = body.find( "\r\n\r\n", hs );
-        if ( he == std::string::npos ) {
-            skip = 2;
-            he = body.find( "\n\n", hs );
-        }
-        if ( he == std::string::npos ) break;
-        const size_t next = body.find( boundary, he + skip );
-        if ( body.substr( hs, he - hs ).find( subtype ) != std::string::npos ) {
-            std::string part = body.substr( he + skip, ( next == std::string::npos ? body.size() : next ) - he - skip );
-            while ( !part.empty() && ( part.back() == '\n' || part.back() == '\r' ) ) part.pop_back();
-            return part;
-        }
-        p = next;
-    }
-    return "";
+    return McBodyPart( body, bodyCtype, subtype );
 }
 
 // ── mcvideo-info 생성 (Annex F.1 — contentType 요소는 암호화하지 않으면 type="Normal" + mcvideoURI/String/Boolean
@@ -128,6 +102,20 @@ inline std::string McVideoInfoDocument( const std::string &strParams ) {
            strParams +
            "  </mcvideo-Params>\r\n"
            "</mcvideoinfo>\r\n";
+}
+
+/** 미인가 우선순위 요청(긴급·임박·경보)의 403 본문 — 거절할 요청이면 mcvideo-info 문서, 아니면 "".
+ *  MCVideo 긴급·임박·경보는 V8 전까지 받지 않는다: 사용자 프로파일·그룹 문서(CSC)가 그 allow-* 를 false 로 내므로
+ * 지시자를 true 로 실은 요청은 늘 미인가다(TS 24.281 §6.3.3.1.12.1·.2·.5). 긴급·경보 = <emergency-ind>false +
+ * <alert-ind>false (§6.3.3.1.13 — 개시 §9.2.1.4.2 10)·chat §9.2.2.4.1.1 6)·re-INVITE §9.2.1.4.7 3)), 임박 =
+ * <imminentperil-ind>false (§9.2.1.4.2 11)a)·§9.2.2.4.1.1 7)a)·§9.2.1.4.7 4)a)). 해제 방향(false)은 거절하지 않는다 —
+ * 세울 수 없는 상태라 해제할 것이 없다. <broadcast-ind> 는 규격에 거절 절차가 없어 보지 않는다(일반 그룹 호 —
+ * mcvideo.md 편차). */
+inline std::string McVideoPriorityRejectBody( const CMcVideoInfo &i ) {
+    if ( i.bEmergency || i.bAlert )
+        return McVideoInfoDocument( McVideoInfoBool( "emergency-ind", false ) + McVideoInfoBool( "alert-ind", false ) );
+    if ( i.bImminent ) return McVideoInfoDocument( McVideoInfoBool( "imminentperil-ind", false ) );
+    return std::string();
 }
 
 // ── 서비스 판별 ──

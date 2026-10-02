@@ -142,11 +142,13 @@ std::string CMcVideoCallService::_NewSessionToken() {
            "-" + std::to_string( ++s_uSeq );
 }
 
-void CMcVideoCallService::_Reject( const char *pszCallId, int iStatus, int iWarnCode, const char *pszWarnText ) {
+void CMcVideoCallService::_Reject( const char *pszCallId, int iStatus, int iWarnCode, const char *pszWarnText,
+                                   const std::string &strInfoBody ) {
     std::vector<std::pair<std::string, std::string>> vecHdr;
     if ( iWarnCode > 0 && pszWarnText )
         vecHdr.emplace_back( "Warning", McpttWarning( iWarnCode, pszWarnText, PttDomain() ) );
-    gclsUserAgent.StopCall( pszCallId, iStatus, NULL, vecHdr );  // Warning = TS 24.281 §4.4
+    // Warning = TS 24.281 §4.4 · 본문 = 미인가 우선순위 요청의 mcvideo-info(§6.3.3.1.13)
+    gclsUserAgent.StopCall( pszCallId, iStatus, NULL, vecHdr, "application/vnd.3gpp.mcvideo-info+xml", strInfoBody );
 }
 
 void CMcVideoCallService::_CloseAttempt( Session &clsSes, bool bEstablished, const char *pszReason,
@@ -574,12 +576,12 @@ void CMcVideoCallService::OnIncomingInvite( const char *pszCallId, const char *p
     const bool bGroup = !strGroupId.empty() && gclsGroupMap.Select( strGroupId.c_str(), clsGroup );
     const bool bMcvGroup = bGroup && clsGroup._mcvideo;
     const std::string strGroupKey = bGroup && clsGroup._dbId > 0 ? std::to_string( clsGroup._dbId ) : "";
-    auto reject = [&]( int iStatus, int iWarnCode, const char *pszWarnText, const char *pszReason,
-                       const char *pszCause ) {
+    auto reject = [&]( int iStatus, int iWarnCode, const char *pszWarnText, const char *pszReason, const char *pszCause,
+                       const std::string &strInfoBody = std::string() ) {
         if ( bAttempt && gclsCallDir.IsEnabled() )
             gclsCallDir.PttAttempt( strGroupId, strGroupKey, strFrom, "failed", pszReason, pszCause, iStatus, "",
                                     "mcvideo" );
-        _Reject( pszCallId, iStatus, iWarnCode, pszWarnText );
+        _Reject( pszCallId, iStatus, iWarnCode, pszWarnText, strInfoBody );
     };
     // 호 방식 — 재합류는 그 세션의 것, 아니면 그룹 속성(mcvideo-on-network-invite-members). 참여 기능은 mcvideo-info
     //   session-type 으로 절차를 고른다(§9.2.1.3.1.1 prearranged · §9.2.2.3.1.1 chat) — 없으면 그룹 속성.
@@ -696,6 +698,18 @@ void CMcVideoCallService::OnIncomingInvite( const char *pszCallId, const char *p
         if ( !clsMvi.strSessionType.empty() && clsMvi.strSessionType != clsGroup._mcvideoAttrs.SessionType() ) {
             return bPrearranged ? reject( SIP_NOT_FOUND, 117, kMcVideoWarn117, "denied", "session_type_mismatch" )
                                 : reject( SIP_NOT_FOUND, 118, kMcVideoWarn118, "denied", "session_type_mismatch" );
+        }
+    }
+    // 미인가 긴급·임박·경보 (prearranged §9.2.1.4.2 10)·11) · chat §9.2.2.4.1.1 6)·7)) — 403 + mcvideo-info. 그룹 문서
+    //   초기 처리 뒤·제휴 판정 앞(규격 단계 순서). 긴급 영상 호(V8)가 없어 지시자를 true 로 실은 요청은 늘 미인가다.
+    {
+        const std::string strPrioReject = McVideoPriorityRejectBody( clsMvi );
+        if ( !strPrioReject.empty() ) {
+            CLog::Print( LOG_INFO,
+                         "MCVIDEO: INVITE from(%s) group(%s) — 긴급·임박·경보 미인가(emergency=%d imminent=%d "
+                         "alert=%d) → 403",
+                         strFrom.c_str(), strGroupId.c_str(), clsMvi.bEmergency, clsMvi.bImminent, clsMvi.bAlert );
+            return reject( SIP_FORBIDDEN, 0, NULL, "denied", "policy_denied", strPrioReject );
         }
     }
     // 제휴 — prearranged(개시·합류·재합류)는 제휴된 사용자만(§9.2.1.4.2 13)a)·14)a) · §9.2.1.4.5.1 8) — 일반 호에

@@ -69,6 +69,11 @@ public:
 	/** 위와 같되 최종 응답·BYE·CANCEL 에 부가 헤더를 싣는다 (예: TS 24.379 §4.4 Warning). */
 	bool StopCall( const char * pszCallId, int iSipCode, const char * pszReason,
 		const std::vector< std::pair<std::string, std::string> > & clsExtraHeaders );
+	/** 위와 같되 INVITE 최종 응답(거절)에 본문을 싣는다 — 예: TS 24.379 §6.3.3.1.14 403 + mcptt-info. pszContentType 은
+	 *  "type/subtype". 확립된 호의 BYE·CANCEL 에는 싣지 않는다. */
+	bool StopCall( const char * pszCallId, int iSipCode, const char * pszReason,
+		const std::vector< std::pair<std::string, std::string> > & clsExtraHeaders,
+		const char * pszContentType, const std::string & strBody );
 	bool StopCall( const char * pszCallId, const char * pszForward );
 	bool RingCall( const char * pszCallId, CSipCallRtp * pclsRtp );
 	bool RingCall( const char * pszCallId, int iSipStatus, CSipCallRtp * pclsRtp );

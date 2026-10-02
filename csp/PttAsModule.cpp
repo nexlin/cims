@@ -1,6 +1,7 @@
 #include "PttAsModule.h"
 
 #include "CallDir.h"
+#include "CspServiceMap.h"
 #include "CspUser.h"
 #include "DbManager.h"
 #include "GroupCallService.h"
@@ -55,6 +56,18 @@ namespace {
             pclsResp->m_strBody = McpttInfoDocument( McpttIndicatorElems( clsInd ) );
             pclsResp->m_iContentLength = (int)pclsResp->m_strBody.size();
             pclsResp->m_clsContentType.Set( "application", "vnd.3gpp.mcptt-info+xml" );
+            gclsUserAgent.m_clsSipStack.SendSipMessage( pclsResp );
+        }
+        return 0;
+    }
+
+    /** 거절 응답 + Warning (TS 24.379 §4.4 — 예: §12.1.3.1 4)b)i)II) 403 "120 user is not affiliated to this group").
+     */
+    int _RejectWithWarning( CSipMessage *pclsMessage, int iStatus, int iWarnCode, const char *pszWarnText ) {
+        CSipMessage *pclsResp = pclsMessage->CreateResponseWithToTag( iStatus );
+        if ( pclsResp ) {
+            pclsResp->AddHeader(
+                "Warning", McpttWarning( iWarnCode, pszWarnText, gclsServiceMap.GetDomainByKind( "ptt" ) ).c_str() );
             gclsUserAgent.m_clsSipStack.SendSipMessage( pclsResp );
         }
         return 0;
@@ -115,16 +128,25 @@ int CPttAsModule::OnEmergencyAlert( const char *pszFrom, const char *pszTo, CSip
     const bool bAlertFalse = clsMi.bHasAlertInd && !clsMi.bAlert;
     const bool bEmgFalse = clsMi.bHasEmergencyInd && !clsMi.bEmergency;
 
-    // ── 경보 발령 (§12.1.3.1 4)) — 인가 = 그룹 allow-MCPTT-emergency-alert(TS 24.481) ∧ 사용자
-    // allow-activate-emergency-
-    //    alert(TS 24.484, §6.3.3.1.13.1). 미인가는 403 + alert-ind false (4)a)). ──
+    // ── 경보 발령 (§12.1.3.1 4)) — 인가(§6.3.3.1.13.1) = 그룹 allow-MCPTT-emergency-alert(TS 24.481) ∧ 사용자
+    //    allow-activate-emergency-alert(TS 24.484) ∧ DedicatedGroup 대상 일치. 미인가는 403 + alert-ind false (4)a)).
+    //    인가된 경보의 발신자가 그 그룹에 제휴하지 않았으면 암묵적 제휴 자격(멤버)을 보고, 자격이 없으면
+    //    403 + Warning 120 (4)b)i)II)), 있으면 암묵적 제휴(4)b)i)III) — 참여 기능 §12.1.2.1 3)도 같은 제휴다). ──
     if ( bAlertTrue ) {
-        if ( !gclsGroupCallService.IsAlertActivateAuthorized( clsGroup, strFrom ) ) {
-            CLog::Print( LOG_INFO, "PTT-AS: alert by(%s) group(%s) not authorised → 403", strFrom.c_str(),
-                         strGroupId.c_str() );
+        std::string strWhy;
+        if ( !gclsGroupCallService.IsAlertActivateAuthorized( clsGroup, strFrom, &strWhy ) ) {
+            CLog::Print( LOG_INFO, "PTT-AS: alert by(%s) group(%s) not authorised (%s) → 403", strFrom.c_str(),
+                         strGroupId.c_str(), strWhy.c_str() );
             McpttIndicators b;
             b.iAlert = 0;
             return _RejectWithInfo( pclsMessage, SIP_FORBIDDEN, b );
+        }
+        if ( !gclsGroupCallService.AffiliateForAlert( clsGroup, strFrom ) ) {
+            CLog::Print( LOG_INFO,
+                         "PTT-AS: alert by(%s) group(%s) — not a member, not eligible for implicit affiliation → 403 "
+                         "(120)",
+                         strFrom.c_str(), strGroupId.c_str() );
+            return _RejectWithWarning( pclsMessage, SIP_FORBIDDEN, 120, "user is not affiliated to this group" );
         }
         gclsGroupCallService.SetAlertOutstanding( strGroupId, strFrom, true );  // 4)b)iii)A)
         const int iFanout = FanoutAlert( strFrom, strGroupId, clsGroup, pclsMessage, true, "" );

@@ -18,6 +18,11 @@ public:
 
     bool OnMessage( const char *pszFrom, const char *pszTo, CSipMessage *pclsMessage, int &iStatus ) override;
 
+    /** MCData 긴급 경보·경보 취소 MESSAGE (TS 24.282 §16.2.3) — mcdata-info 파트(strInfo)에 <alert-ind> 가 있는 요청.
+     *  디스패처가 MCPTT 경보(mcptt-info)와 가른 뒤 부른다. 돌려주는 값 = 보낼 최종 응답 코드(0 = 여기서 보냈다). */
+    int OnEmergencyAlert( const char *pszFrom, const char *pszTo, CSipMessage *pclsMessage,
+                          const std::string &strInfo );
+
 private:
     /** SDS disposition 통지의 규격 경로 (TS 24.282 §12.2.2.1·§12.2.3) — 본문에 resource-lists(대상 MCData ID 하나)와
      *  SDS NOTIFICATION 이 있으면 참여·제어 기능으로 처리해 원 발신자에게 새 MESSAGE 로 중계하고 true. 대상을

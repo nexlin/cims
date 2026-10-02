@@ -48,16 +48,16 @@ PTT(MCPTT) 서비스 구현을 3GPP 규격 원문과 대조해 **규격과 다�
 | 그룹 호 — 단말 (GCC) | 9 | — | 7 | — | 2 |
 | 개별 호 (PRV) | 9 | 4 | 4 | 1 | — |
 | 애드혹 그룹 호 (ADH) | 9 | 4 | 3 | 1 | 1 |
-| 긴급·임박·경보 (EMG) | 13 | 3 | 3 | 7 | — |
+| 긴급·임박·경보 (EMG) | 10 | 1 | 2 | 7 | — |
 | 발언권 — 서버 (FCS) | 20 | 2 | 9 | 6 | 3 |
 | 발언권 — 단말 (FCC) | 1 | — | — | 1 | — |
 | 발언권 SDP 협상 (SDP) | 3 | 1 | 2 | — | — |
 | 그룹 문서·GMS (GMS) | 13 | — | 12 | 1 | — |
 | 설정 문서·CMS (CMS) | 8 | — | 4 | 3 | 1 |
 | 신원 관리 (IDM) | 9 | 4 | 1 | 3 | 1 |
-| **계** | **131** | **33** | **59** | **29** | **10** |
+| **계** | **128** | **31** | **58** | **29** | **10** |
 
-확인 수준 — ◎ 69 · ○ 49 · △ 13.
+확인 수준 — ◎ 66 · ○ 49 · △ 13.
 
 읽는 순서 — §2(먼저 볼 것) → §3(영역별 전체) → §4(미구현 목록에 빠진 기능) → §5(문서 정정) → §6(묶음과 순서).
 
@@ -76,7 +76,6 @@ PTT(MCPTT) 서비스 구현을 3GPP 규격 원문과 대조해 **규격과 다�
 
 | 항목 | 내용 |
 |---|---|
-| EMG-1 | 긴급 경보 MESSAGE 가 발신자의 그룹 멤버십을 보지 않는다 — 비멤버가 임의 그룹에 경보를 내고 남의 경보를 취소할 수 있다 |
 | PRV-2 | 개별 호 발신 인가(`<allow-private-call>`)가 문서에도 서버 판정에도 없다 — 개별 호를 막을 설정이 없다 |
 | SDP-3 | offer 의 `mc_priority` 를 상한 없이 받아 Floor Priority 로 선점 서열을 올릴 수 있다 |
 | IDM-1 | PTT 가입이 없는 전화 계정에도 MC scope 토큰·MCPTT user profile·KMS 키가 나간다 |
@@ -196,11 +195,8 @@ CSP 는 참여 기능과 제어 기능을 겸한다.
 
 | # | 급 | 대상 | 규격 | CIMS 지금 | 영향 | 확인 |
 |---|---|---|---|---|---|---|
-| EMG-1 | A | CSP | §12.1.2.1 3) — 미제휴 발신자는 암묵적 제휴. §12.1.3.1 4)b)i) — 자격(멤버)이 없으면 403 + `120 user is not affiliated to this group` (shall) | 발령 인가는 그룹 능력 ∧ 사용자 프로파일뿐, 취소는 프로파일뿐 — 멤버십·제휴를 보지 않고 제휴도 적지 않는다 — `csp/PttAsModule.cpp:121-133`·`:147-183`, `csp/GroupCallService.cpp:1745-1757` | 등록된 PTT 가입자면 비멤버도 임의 그룹에 경보를 내고 `originated-by` 로 남의 경보를 취소할 수 있다. 미제휴 멤버는 경보 뒤에도 그 그룹 통지를 못 받는다 | ◎ |
-| EMG-2 | A | CSP | §6.3.3.1.13.1 1)a)i) — `<EmergencyAlert>` entry 가 DedicatedGroup 이면 경보 대상이 그 그룹이어야 인가 | 경보 인가에 대상 일치 판정이 없다(`csp/GroupCallService.cpp:1745-1751`). 호 인가는 본다(`:1643`). CSC 문서는 긴급 그룹 미지정이면 `allow-activate-emergency-alert` 를 false 로 내는데(`csc/src/services/mcptt.py:1751`) 서버는 받는다 | 전용 긴급 그룹 사용자가 다른 그룹에 낸 경보가 퍼진다. emergency_modes 문서의 «콜·경보 공통 판정» 과 다르다 | ◎ |
 | EMG-3 | A | CSP | §9.2.2.3.3 14) → §12.1.3.4 — 새로 제휴한 단말에 진행 중 경보를 MESSAGE 로 알린다 (shall) | 경보 캐시는 호 경로에서만 읽는다(`csp/GroupCallService.cpp:1327`·`:1344`·`:2002`). 제휴 경로는 NOTIFY 만 낸다(`csp/CscfModule.cpp:2028-2041`) | 경보 뒤에 로그인하거나 망 복귀로 제휴를 다시 실은 단말·관제석은 그 경보를 모른다 | ◎ |
 | EMG-4 | B | CSC | TS 24.484 §8.3.2.1 11)xvi) `<allow-imminent-peril-call>` · TS 24.379 §6.2.8.1.8 — true 가 아니면 임박 위험 호는 미인가 | user profile ruleset 에 요소가 없다 — `csc/src/services/mcptt.py:1746-1753` (`<ImminentPerilCall>` entry 는 싣는다) | 규격 단말은 임박 위험 호를 요청하지 않는다. SDK 는 «없으면 허용» 이라 드러나지 않는다 (CMS-3 과 한 묶음) | ◎ |
-| EMG-5 | B | CSP | §6.3.3.1.14 · §10.1.1.4.2 10)·11) — 미인가 긴급·임박 개시의 403 에 mcptt-info(`emergency-ind` false + `alert-ind` false / `imminentperil-ind` false) (shall) | 개시 INVITE 는 본문 없는 403 — `csp/GroupCallService.cpp:931-941`. re-INVITE 경로만 본문을 싣는다 | 단말이 긴급 미인가 403 을 다른 403 과 가르지 못한다(현장 앱은 403 이면 모두 일반 호로 다시 건다) | ◎ |
 | EMG-10 | C | CSP | §6.3.3.1.11 — 상태가 바뀌면 제휴 멤버에 통지 | 세션이 끝나면 긴급·임박 상태를 지우기만 한다 — `csp/GroupCallService.cpp:125-134` | 비참여 제휴 단말과 BYE 로 나간 단말이 그룹을 계속 긴급으로 본다(«그룹 긴급 상태의 수명» 편차의 부작용) | △ |
 | EMG-11 | C | CSP | §6.3.3.1.11 5) — 경보 팬아웃 MESSAGE 에 P-Asserted-Identity(제어 기능 PSI) | 헤더는 Accept-Contact 둘 + P-Asserted-Service 뿐 — `csp/PttAsModule.cpp:213-216`. 상태 통지 쪽은 싣는다 | 규격 단말·중간 노드에 사용자 발신 MESSAGE 로 보인다 | ◎ |
 | EMG-12 | C | CSP | §12.1.3.1 2) — Accept-Contact 에 MCPTT icsi-ref 가 없으면 403 | mcptt-info 지시자 유무만으로 경보 경로에 넣는다 — `csp/ModuleDispatcher.cpp:2658-2662` | 받아들이는 쪽이 넓다 | ○ |
@@ -336,7 +332,6 @@ mcptt_standard_conformance.md §0-R 은 통째 미구현 기능을 나열하는�
 | mcptt_broadcast_group_call.md R4 | chat = 서버가 초대하지 않음 | 서버가 10초마다 초대 | GCS-1 |
 | server45_handoff.md §12.6 C12 | REGISTER Contact 의 MCPTT 태그 — «앱은 싣는다» | 앱도 싣지 않는다 | REG-1 |
 | server45_handoff.md §14.1 | 구독의 3600초 갱신은 규격대로 | conference·제휴·그룹 동적 데이터 구독의 규격 값은 4294967295 | GCC-7 |
-| mcptt_emergency_modes.md §2·§5 · §4.2 | 경보 인가 = 콜과 공통 판정 · 미인가 403 은 §6.3.3.1.14 대로 | 경보는 대상 일치·멤버십을 보지 않는다 · 개시 403 에 본문이 없다 | EMG-1·EMG-2·EMG-5 |
 | android_ue_client.md U1·U7 | Floor Ack 정합 · Message Sequence Number 폐기 정합 | FCS-4 · FCC-5 | — |
 | ue_sdk.md §4 | API 표의 `presence(uri)` | 그런 API 가 없다 | AFF-12 |
 | mcptt_api.md | `on-network-allow-conference-state` 기본 true | 규격 기본 false | GMS-8 |
@@ -350,7 +345,7 @@ mcptt_standard_conformance.md §0-R 은 통째 미구현 기능을 나열하는�
 |---|---|---|---|
 | 1 | **문서 값 한두 줄** — 문서 셋의 T2 제외 대상 | FCS-21(문서) | .48 |
 | 2 | **발언권 메시지 정합** — Ack 의 Message Type · 미대기 Queue Position 254 · Granted Duration | FCS-4 · FCS-8 · FCS-20 | .45 SDK·CMP |
-| 3 | **인가 구멍** | EMG-1 · EMG-2 · SDP-3 · ADH-3 · IDM-1 · IDM-3 · IDM-4 · IDM-5 | .45 CSP·CMP·CSC·SDK |
+| 3 | **인가 구멍** | SDP-3 · ADH-3 · IDM-1 · IDM-3 · IDM-4 · IDM-5 | .45 CSP·CMP·CSC·SDK |
 | 4 | **user profile 인가 요소의 서버 판정** — 문서는 요소를 싣는다(`ptt_user_profile.allow_private_call*`), CSP 가 그 값으로 판정한다 | PRV-2 · PRV-4 · PRV-8 · EMG-4 · ADH-5 | .48 CSP → Windows(Capabilities) |
 | 5 | **Warning 코드** — 거절 사유를 규격 코드로. handoff §14 K1(SDK 가 Warning 을 올림)과 한 묶음 | GCS-7 · GCS-8 · GCS-11 · REG-3 · ADH-4 · PRV-6 · PRV-7 · EMG-5 | .45 CSP·SDK → Windows(문구 사전) |
 | 6 | **service configuration 요소의 서버 판정** — `<private-call>`·`<adhoc-group-call>` 값을 CSP 가 쓴다 | ADH-3 · PRV-5 | .48 CSP |

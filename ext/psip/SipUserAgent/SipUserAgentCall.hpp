@@ -70,8 +70,16 @@ bool CSipUserAgent::StopCall( const char * pszCallId, int iSipCode, const char *
 bool CSipUserAgent::StopCall( const char * pszCallId, int iSipCode, const char * pszReason,
 	const std::vector< std::pair<std::string, std::string> > & clsExtraHeaders )
 {
+	return StopCall( pszCallId, iSipCode, pszReason, clsExtraHeaders, NULL, std::string() );
+}
+
+bool CSipUserAgent::StopCall( const char * pszCallId, int iSipCode, const char * pszReason,
+	const std::vector< std::pair<std::string, std::string> > & clsExtraHeaders,
+	const char * pszContentType, const std::string & strBody )
+{
 	SIP_DIALOG_MAP::iterator		itMap;
 	bool	bRes = false;
+	bool	bInviteResponse = false;
 	CSipMessage * pclsMessage = NULL;
 
 	// 확립된 다이얼로그의 BYE 는 현재 도달 주소로 — 수신 당시 소스(승격 TCP)가 이미 닫혀 있을 수 있다.
@@ -103,6 +111,7 @@ bool CSipUserAgent::StopCall( const char * pszCallId, int iSipCode, const char *
 				{
 					pclsMessage = itMap->second.m_pclsInvite->CreateResponse( SIP_DECLINE );
 				}
+				bInviteResponse = true;
 				//gettimeofday( &itMap->second.m_sttEndTime, NULL );
 				Delete( itMap );
 			}
@@ -122,6 +131,17 @@ bool CSipUserAgent::StopCall( const char * pszCallId, int iSipCode, const char *
 		for( std::vector< std::pair<std::string, std::string> >::const_iterator itH = clsExtraHeaders.begin(); itH != clsExtraHeaders.end(); ++itH )
 		{
 			pclsMessage->AddHeader( itH->first.c_str(), itH->second.c_str() );
+		}
+		if( bInviteResponse && pszContentType && pszContentType[0] && !strBody.empty() )
+		{
+			const std::string strType = pszContentType;
+			const size_t iSlash = strType.find( '/' );
+			if( iSlash != std::string::npos )
+			{
+				pclsMessage->m_clsContentType.Set( strType.substr( 0, iSlash ).c_str(), strType.substr( iSlash + 1 ).c_str() );
+				pclsMessage->m_strBody = strBody;
+				pclsMessage->m_iContentLength = (int)strBody.size();
+			}
 		}
 		m_clsSipStack.SendSipMessage( pclsMessage );
 	}

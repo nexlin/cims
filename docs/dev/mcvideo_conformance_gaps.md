@@ -44,7 +44,7 @@ MCPTT 쪽 같은 뿌리의 결함은 [mcptt_conformance_gaps.md](mcptt_conforman
 |---|---|---|---|---|---|
 | 등록·서비스 인가 (VREG) | 4 | — | 1 | 2 | 1 |
 | 제휴 (VAFF) | 8 | 1 | 1 | 6 | — |
-| 그룹 호 — 서버 (VGC) | 13 | 1 | 2 | 9 | 1 |
+| 그룹 호 — 서버 (VGC) | 12 | 1 | 1 | 9 | 1 |
 | 그룹 호 — 단말 (VGU) | 6 | — | — | 2 | 4 |
 | 개별·그 밖의 호 (VPRV) | 1 | — | — | — | 1 |
 | 송출 제어 — 서버 (TCS) | 11 | — | — | 5 | 6 |
@@ -54,9 +54,9 @@ MCPTT 쪽 같은 뿌리의 결함은 [mcptt_conformance_gaps.md](mcptt_conforman
 | SDP (VSDP) | 3 | — | — | 3 | — |
 | 그룹 문서 (VGMS) | 2 | — | 1 | — | 1 |
 | 설정 문서·CMS (VCMS) | 3 | — | 1 | 1 | 1 |
-| **계** | **59** | **3** | **6** | **30** | **20** |
+| **계** | **58** | **3** | **5** | **30** | **20** |
 
-확인 수준 — ◎ 43 · ○ 8 · △ 8.
+확인 수준 — ◎ 42 · ○ 8 · △ 8.
 
 읽는 순서 — §2(먼저 볼 것) → §3(영역별 전체) → §4(미구현 목록에 빠진 기능) → §5(문서 정정) → §6(묶음과 순서).
 
@@ -76,7 +76,6 @@ MCPTT 쪽 같은 뿌리의 결함은 [mcptt_conformance_gaps.md](mcptt_conforman
 
 | 항목 | 내용 |
 |---|---|
-| VGC-1 | 긴급·임박·경보·방송 지시자가 있는 INVITE·re-INVITE 를 일반 호로 200 — 규격 단말은 «긴급 호 허가» 상태로 간다. V8 전까지는 403 + `<emergency-ind>false` 로 거절해야 한다 |
 | VREG-1 | 단말이 MCVideo 서비스 설정 PUBLISH(`poc-settings`, §7.2.3)를 보내지 않는다 — 규격 서버의 착신 참여 기능은 Answer-Mode 를 몰라 prearranged 초대를 늘 480 `146` 으로 거절한다 |
 | VGC-2 | late call entry 가 없다 — 개시 뒤에 제휴·재등록한 멤버는 진행 중 prearranged 영상 호를 받지 못한다 |
 | VAFF-2 | 제휴 판정이 사용자 단위다 — 제휴하지 않은 클라이언트로 개시·합류가 되고, 제휴한 단말 대신 마지막 등록 단말이 초대된다 |
@@ -121,7 +120,6 @@ MCPTT 쪽 같은 뿌리의 결함은 [mcptt_conformance_gaps.md](mcptt_conforman
 
 | # | 급 | 대상 | 규격 | CIMS 지금 | 영향 | 확인 |
 |---|---|---|---|---|---|---|
-| VGC-1 | B | CSP | §9.2.2.4.1.1 6)·7) · §9.2.1.4.2 10)·11) · §9.2.1.4.7 3)·4) · §6.3.3.1.13 — 인가되지 않은 긴급·임박 요청은 403 + mcvideo-info `<emergency-ind>false`·`<alert-ind>false`(임박은 `<imminentperil-ind>false`) | 지시자를 해석만 하고(`csp/McVideoInfo.h:64-68`) 개시·합류·re-INVITE 어디서도 보지 않는다 — 일반 호로 200 을 준다(`csp/McVideoCallService.cpp`, `OnReInvite` `:916-964`). `<broadcast-ind>` 도 같다. CSC 그룹 문서의 `mcvideo-allow-emergency-call` 은 false 다 | 규격 단말은 2xx 를 받으면 «MVEGC 3: emergency-call-granted» 로 간다(§6.2.8.1.4) — 서버는 일반 호(manual 수신·우선순위 없음)라 긴급 영상이 수신자에게 자동으로 열리지 않는다. 긴급을 V8 로 미룬 동안은 거절해야 한다 | ◎ |
 | VGC-2 | B | CSP | §9.2.1.4.6 — 새로 제휴했거나 돌아온 클라이언트를 진행 중 prearranged 호에 초대(late call entry) (shall) | MCVideo 제휴 PUBLISH(`csp/CscfModule.cpp:2060-2087`)·설정 그룹 암묵 제휴(`:873-883`) 어디에도 진행 중 세션 초대가 없다. 팬아웃은 새 세션 개시 때 한 번(`csp/McVideoCallService.cpp:786-815`) | 개시 뒤에 제휴·재등록한 멤버는 그 호를 받지 못한다 — 세션 식별자를 모르면 재합류도 못 한다(MCPTT GCS-4 의 MCVideo 경로) | ◎ |
 | VGC-3 | A | CSP·CSC | §6.3.5.2 5)a) — 그룹 문서에 `<on-network-disabled>` 가 있으면 403 + `115 group is disabled` (shall) | MCVideo 개시·합류 검사는 113·116·117/118 만 한다(`csp/McVideoCallService.cpp:688-700`). DB `on_network` 는 적재만 한다(`csp/DbManager.cpp:621`). 그룹 문서에도 요소가 없다 | 콘솔에서 on-network 를 꺼도 영상 호가 선다(MCPTT GCS-19 와 같은 결 — MCVideo 경로는 따로 고쳐야 한다) | ◎ |
 | VGC-4 | C | CSP | §9.2.1.4.2 14)j) — 진행 중 prearranged 호 합류의 200 OK 에 Warning `123 MCVideo session already exists` | 합류 200 에 Warning 이 없고(`csp/McVideoCallService.cpp:358-371`) 문구 상수도 없다(`csp/McVideoInfo.h:298-313`) | 단말이 «새 호» 와 «진행 중 호 합류» 를 가르지 못한다 | ◎ |
@@ -267,7 +265,6 @@ mcvideo.md §6 V8 은 통째 미구현 기능을 나열하는데 아래는 그 �
 | # | 묶음 | 항목 | 몫 |
 |---|---|---|---|
 | 1 | **헤더·fmtp 한두 줄** — Warning 123·122, Supported 옵션 태그, 초대 offer `mc_queueing`, 해제 200 Expires, 현장 앱 `queueing` 켬 | VGC-4 · VGC-5 · VGC-6 · VGC-7(Supported 몫) · VSDP-4 · VAFF-3 · VSDP-3 | .45 CSP · 현장 앱 |
-| 2 | **긴급·임박·방송 지시자 거절** — V8 전까지 403 + `<emergency-ind>false`(§6.3.3.1.13), re-INVITE 격상도 | VGC-1 | .45 CSP |
 | 3 | **NAT 합류 알림** — latch 뒤(또는 첫 RR 수신 때) 현재 상태(Idle·Notification)를 다시 보내거나, 단말이 200 OK 직후가 아니라 offer 직후 RR 로 경로를 연다 | RCS-1 | .45 CMP·SDK |
 | 4 | **제휴를 클라이언트 단위로** — 행 키 통일, 클라이언트 단위 해제·판정, 암묵 제휴 취소·완료 시점. MCPTT 묶음 8(AFF-1~8)과 한 작업 | VAFF-1 · VAFF-2 · VAFF-4 · VAFF-5 · VGC-11 | .45 CSP |
 | 5 | **진행 중 호와 제휴·그룹 변경** — late call entry, 제휴 해제·멤버 제거·서비스 끔 → BYE, 제휴 행 정리, on-network 꺼짐 115. MCPTT 묶음 9·10 의 결정과 같이 | VGC-2 · VGC-12 · VAFF-7 · VGC-3 · VAFF-6(결정) | 결정 → .45 CSP |
