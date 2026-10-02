@@ -59,9 +59,11 @@ public:
     /** 재합류 Request-URI 의 세션 식별자가 지금 진행 중인 이 그룹 세션인가 (§10.1.1.4.5.1 2) — 아니면 404). */
     bool IsSessionIdentityActive( const std::string &strGroupId, const std::string &strToken );
 
+    /** bRejoin = Request-URI 가 진행 중 세션 식별자(gr)인 재합류(TS 24.379 §10.1.1.4.5.1) — 비멤버 403 121, 200 OK 에
+     *  Warning 123 없음. */
     bool ProcessGroupCall( const char *pszGroupId, const char *pszCallerInfo, const char *pszCallId,
                            CSipCallRtp *pclsRtp, CSipCallRoute *pclsRoute, int iCondition = 0,
-                           bool bBroadcastInd = false );
+                           bool bBroadcastInd = false, bool bRejoin = false );
 
     /**
      * @brief Invite a member to a group call

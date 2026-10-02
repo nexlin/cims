@@ -517,6 +517,22 @@ PSI·MCPTT client ID 가 있는 계정. [ue_sdk.md](ue_sdk.md) §4.2) → ③구
 MCPTT/MCData 경고 코드와 문구다(`McpttWarning`). conference 구독 거절 105·138, 확인 통화 설정 111·112, MCData 203 이 같은 형식이다. 받는 쪽
 (libcsim)은 따옴표 안 앞 세 자리를 경고 코드로 읽는다.
 
+그룹·개별·애드혹 호의 응답 코드 — 같은 사유는 같은 코드로 낸다:
+
+| 사유 | 응답 | 근거 |
+|---|---|---|
+| 대상 그룹 없음(그룹 문서 없음) — 설정 그룹도 진행 중 세션도 아닌 대상, mcptt-info 를 실은 요청이면 발신자 등록과 무관 | 404 + `113 group document does not exist` | §6.3.5.2 2) |
+| 비멤버의 개시·합류 | 403 + `116 user is not part of the MCPTT group` (재합류 = `121 user is not authorised to join the group call`) | §6.3.5.2 5)b) · §10.1.1.4.5.1 6) |
+| 진행 중 편성·애드혹 세션에 그룹 URI 로 합류(chat·개별 호·청취·재합류 밖) | 200 + `123 MCPTT session already exists` | §10.1.1.4.2 15)j) · §17.4.7.1.1 |
+| 그룹 운용 시간 창(CIMS 그룹 속성 `session_start`·`session_end`) 밖 | 403 + `100 function not allowed due to local policy` | §4.4 |
+| 미디어 자원(CMP 그룹·포트) 확보·수락 실패 | 500 + `Retry-After: 5` | §10.1.1.4.2 1) |
+| 개별 호 착신자 미등록(서비스 인가 바인딩 없음) | 404 | §11.1.1.3.2 7) |
+| 애드혹 미지원(`Setup.PttAdhocEnabled` false) · 개시 미인가(user profile) | 403 + `186` · `185` | §17.4.2.2 5) · 4) |
+| 서비스 인가 바인딩 없는 요청자(등록 없음) | 404 + `141 user unknown to the participating function` — **엄격 검사 스위치 `Setup.Mcptt.StrictCheck`** 아래(기본 `log` = 로그만, `enforce` 면 거절, `off`) | §10.1.1.3.1.1 2a) · §11.1.1.3.1.1 4) · §17.3.2.1.1 3) — 결정 D5·D9 |
+
+개시자에게 가는 개별 호 180 은 제어 기능 P-Asserted-Identity 와 착신이 실은 Warning 을 싣고(§6.3.3.2.3.1 2) · §11.1.1.3.1.1), 개시 게이트가
+거절로 끝나면 최종 응답에 제어 기능 자신의 경고(112 등) 뒤에 멤버 응답의 Warning(110·127 등)을 잇는다.
+
 ### C4f. 멤버 확인 전 수락 · 미디어 버퍼링 — TS 24.379 §10.1.1.4.2 · §11.1.1.4.2 · RFC 4964
 
 CSP 는 멤버 쪽 참여 기능(participating function)을 겸한다. 멤버 단말은 자동 응답(automatic commencement, §6.3.2.2.5.2)이라
@@ -779,7 +795,7 @@ REGISTER/SUBSCRIBE/NOTIFY 의 헤더·본문을 상용 IMS 캡처 기준으로 �
   CSP 는 `<private-call>`·`<adhoc-group-call>` 의 시간 값을 개별·애드혹 세션의 T4(`floor_timers.t4_inactivity`)·최대 시간으로 쓴다.
   `<max-no-participants>` 는 CSP 도 쓴다 — 애드혹 개시 INVITE 의 초대 명단(개시자 밖)·참가자 변경 re-INVITE(개시자 밖 참가자 + 새 초대)가
   넘으면 403 + Warning `189`(§17.4.2.2 6) · §17.4.5.1.1 4)a)i)). `<allow-adhoc-group-call-support>` 는 단말에 알리는 값이고 CSP 개시
-  게이트는 csp.json `Setup.PttAdhocEnabled`(두 값을 같게 둔다) — 미지원 403 + `186`(§17.4.2.2 5))은 미구현.
+  게이트는 csp.json `Setup.PttAdhocEnabled`(두 값을 같게 둔다) — 꺼져 있으면 403 + `186`(§17.4.2.2 5)).
   값의 정본은 두 곳 — DB `mcptt_service_config` **단일 행**(id=1: N2 = user-profile `MaxAffiliationsN2` 기본값·N6 두 값(관제/그 밖 —
   user-profile `MaxSimultaneousCallsN6`, 열은 `sql/migrate_mcptt_n6.sql`, 열이 없는 DB 는 10·5)·계층 수, 관리 API
   `GET/PUT /api/v1/mcptt/service-config`·콘솔 **구성 > MCPTT 정책**)과 CSC 설정 `ServiceConfig.*`(`EmergencyCall.GroupTimeLimit` →

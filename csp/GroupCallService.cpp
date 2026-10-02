@@ -625,7 +625,10 @@ void CGroupCallService::AbortAckGate( const std::string &strGroupId, const AckGa
                  clsGate.strInitiator.c_str(), iSipStatus, pszReason );
     if ( iSipStatus > 0 ) {  // 개시자에게 최종 응답 (CANCEL 로 끝난 것이면 psip 이 이미 487 을 줬다)
         std::vector<std::pair<std::string, std::string>> vecHdr;
-        if ( !strWarning.empty() ) vecHdr.push_back( { "Warning", strWarning } );
+        // 제어 기능 자신의 경고(112 등) 뒤에 멤버 응답에서 받은 Warning(110·127 등 — 착신 측 사유)을 옮긴다
+        //   (TS 24.379 §6.3.3.2.3.1·§11.1.1.3.1.1 — 받은 응답의 Warning 을 개시자에게)
+        const std::string strAllWarnings = _joinWarnings( strWarning, clsGate.vecWarnings );
+        if ( !strAllWarnings.empty() ) vecHdr.push_back( { "Warning", strAllWarnings } );
         gclsUserAgent.StopCall( clsGate.strCallId.c_str(), iSipStatus, NULL, vecHdr );
     }
     const std::string strSesId = GetOrIssueGroupSesId( strGroupId );
@@ -661,7 +664,8 @@ void CGroupCallService::AbortAckGate( const std::string &strGroupId, const AckGa
 }
 
 bool CGroupCallService::OnAckGateRinging( const std::string &strCallId, int iSipStatus ) {
-    std::string strInitiatorCallId;
+    std::string strInitiatorCallId, strGroupId;
+    std::vector<std::string> vecWarnings;
     {
         std::unique_lock<std::recursive_mutex> lock( m_mutex );
         auto itS = m_mapCallSession.find( strCallId );
@@ -671,9 +675,20 @@ bool CGroupCallService::OnAckGateRinging( const std::string &strCallId, int iSip
         if ( itG->second.bPrivate && iSipStatus == SIP_RINGING && !itG->second.bRingSent ) {
             itG->second.bRingSent = true;
             strInitiatorCallId = itG->second.strCallId;
+            strGroupId = itS->second.strGroupId;
+            vecWarnings = itG->second.vecWarnings;
         }
     }
-    if ( !strInitiatorCallId.empty() ) gclsUserAgent.RingCall( strInitiatorCallId.c_str(), SIP_RINGING, NULL );
+    if ( !strInitiatorCallId.empty() ) {
+        // 개시자에게 가는 180 — P-Asserted-Identity = 제어 기능(200 OK 와 같은 신원, TS 24.379 §6.3.3.2.3.1 2)) +
+        //   착신이 실은 Warning(§11.1.1.3.1.1 — 받은 180 의 Warning 을 옮긴다)
+        std::vector<std::pair<std::string, std::string>> vecHdr;
+        vecHdr.push_back(
+            { "P-Asserted-Identity", "<sip:" + strGroupId + "@" + gclsServiceMap.GetDomainByKind( "ptt" ) + ">" } );
+        const std::string strW = _joinWarnings( "", vecWarnings );
+        if ( !strW.empty() ) vecHdr.push_back( { "Warning", strW } );
+        gclsUserAgent.RingCall( strInitiatorCallId.c_str(), SIP_RINGING, NULL, vecHdr );
+    }
     return true;
 }
 
@@ -893,7 +908,7 @@ static int _evalAnswerSdes( const ServiceInfo &svc, CSipCallRtp *pclsRtp, std::s
  */
 bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *pszCallerInfo, const char *pszCallId,
                                           CSipCallRtp *pclsRtp, CSipCallRoute *pclsRoute, int iCondition,
-                                          bool bBroadcastInd ) {
+                                          bool bBroadcastInd, bool bRejoin ) {
     CspPttGroup clsGroup;
 
     if ( gclsGroupMap.Select( pszGroupId, clsGroup ) == false ) {
@@ -902,7 +917,11 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
         //   성공률의 분모가 서지 않는다(§8 Y6). 청취 leg 은 시도가 아니므로 제외한다.
         if ( gclsCallDir.IsEnabled() )
             gclsCallDir.PttAttempt( pszGroupId, "", pszCallerInfo, "failed", "denied", "group_not_found", 404 );
-        return false;
+        // 그룹 문서가 없다 — 404 + 113 (TS 24.379 §6.3.5.2 2))
+        gclsUserAgent.StopCall( pszCallId, SIP_NOT_FOUND, NULL,
+                                { { "Warning", McpttWarning( 113, "group document does not exist",
+                                                             gclsServiceMap.GetDomainByKind( "ptt" ) ) } } );
+        return true;
     }
 
     // 그룹 문서 초기 처리 (TS 24.379 §6.3.5.2 5)a)) — on-network 를 끈 그룹(콘솔 — CSC 그룹 문서
@@ -968,8 +987,15 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
         }
         iCondition = 0;  // 청취자는 세션 조건(긴급/임박)을 개시·상향하지 않는다
     } else if ( !bIsMember ) {
-        CLog::Print( LOG_INFO, "ProcessGroupCall: Group(%s) Caller(%s) not a member → 403", pszGroupId, pszCallerInfo );
-        gclsUserAgent.StopCall( pszCallId, SIP_FORBIDDEN );
+        // 비멤버 403 + Warning 116(TS 24.379 §6.3.5.2 5)b)) — 재합류는 121(§10.1.1.4.5.1 6))
+        CLog::Print( LOG_INFO, "ProcessGroupCall: Group(%s) Caller(%s) not a member → 403 %d", pszGroupId,
+                     pszCallerInfo, bRejoin ? 121 : 116 );
+        gclsUserAgent.StopCall(
+            pszCallId, SIP_FORBIDDEN, NULL,
+            { { "Warning", bRejoin ? McpttWarning( 121, "user is not authorised to join the group call",
+                                                   gclsServiceMap.GetDomainByKind( "ptt" ) )
+                                   : McpttWarning( 116, "user is not part of the MCPTT group",
+                                                   gclsServiceMap.GetDomainByKind( "ptt" ) ) } } );
         if ( gclsCallDir.IsEnabled() )
             gclsCallDir.PttAttempt( pszGroupId, std::to_string( clsGroup._dbId ), pszCallerInfo, "failed", "denied",
                                     "not_member", 403 );
@@ -1229,14 +1255,21 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
         if ( gclsCallDir.IsEnabled() && !bListen )
             gclsCallDir.PttAttempt( pszGroupId, std::to_string( clsGroup._dbId ), pszCallerInfo, "failed", "denied",
                                     "session_not_started", SIP_FORBIDDEN );
-        return false;
+        // 그룹 운용 시간 창(CIMS 그룹 속성 session_start·session_end) 밖 — 로컬 정책 403 + 100 (TS 24.379 §4.4)
+        gclsUserAgent.StopCall( pszCallId, SIP_FORBIDDEN, NULL,
+                                { { "Warning", McpttWarning( 100, "function not allowed due to local policy",
+                                                             gclsServiceMap.GetDomainByKind( "ptt" ) ) } } );
+        return true;
     }
     if ( clsGroup._sessionEnd > 0 && tNow > clsGroup._sessionEnd ) {
         CLog::Print( LOG_INFO, "ProcessGroupCall: Group(%s) session expired → 403", pszGroupId );
         if ( gclsCallDir.IsEnabled() && !bListen )
             gclsCallDir.PttAttempt( pszGroupId, std::to_string( clsGroup._dbId ), pszCallerInfo, "failed", "denied",
                                     "session_expired", SIP_FORBIDDEN );
-        return false;
+        gclsUserAgent.StopCall( pszCallId, SIP_FORBIDDEN, NULL,
+                                { { "Warning", McpttWarning( 100, "function not allowed due to local policy",
+                                                             gclsServiceMap.GetDomainByKind( "ptt" ) ) } } );
+        return true;
     }
 
     // 1. CMP 그룹 자원 확보 (floor 공유 포트 + 멤버별 전용 포트)
@@ -1746,14 +1779,29 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
             return true;
         }
 
-        // 새 세션 개시인데 게이트가 없다 = 초대할 멤버가 없거나 최소 0 + 미디어 버퍼링 — 후자는 멤버 확인 전 수락이다
-        const int iAnswered = fnAnswer( strCapWarning, !vecGateInvite.empty() );
-        if ( iAnswered < 0 ) return false;
+        // 새 세션 개시인데 게이트가 없다 = 초대할 멤버가 없거나 최소 0 + 미디어 버퍼링 — 후자는 멤버 확인 전 수락이다.
+        //   진행 중 세션 합류(편성·애드혹 — chat·개별 호·청취·재합류 밖)의 200 OK 에는 Warning 123(TS 24.379
+        //   §10.1.1.4.2 15)j) · §17.4.7.1.1 5)).
+        std::string strAnswerWarning = strCapWarning;
+        if ( !bNewSession && !bListen && !bRejoin && !bPrivateCall && clsGroup._groupType != "chat" )
+            strAnswerWarning =
+                McpttWarning( 123, "MCPTT session already exists", gclsServiceMap.GetDomainByKind( "ptt" ) );
+        const int iAnswered = fnAnswer( strAnswerWarning, !vecGateInvite.empty() );
+        if ( iAnswered < 0 ) {
+            // 수락 실패(answer·CMP 합류) — 일시적 자원 문제로 본다: 500 + Retry-After(TS 24.379 §10.1.1.4.2 1))
+            gclsUserAgent.StopCall( pszCallId, SIP_INTERNAL_SERVER_ERROR, NULL, { { "Retry-After", "5" } } );
+            return true;
+        }
         bClaimedSession = false;  // 개시자 leg 확립으로 선점을 확정했다(fnAnswer)
         if ( iAnswered > 0 ) return true;
     } else {
-        CLog::Print( LOG_ERROR, "ProcessGroupCall: No shared RTP port for Group(%s)", pszGroupId );
-        return false;
+        CLog::Print( LOG_ERROR, "ProcessGroupCall: No shared RTP port for Group(%s) → 500", pszGroupId );
+        // 미디어 자원(CMP 그룹·포트) 확보 실패 — 500 + Retry-After (TS 24.379 §10.1.1.4.2 1) «lack of resources»)
+        if ( gclsCallDir.IsEnabled() && !bListen )
+            gclsCallDir.PttAttempt( pszGroupId, std::to_string( clsGroup._dbId ), pszCallerInfo, "failed", "error",
+                                    "media_resource", SIP_INTERNAL_SERVER_ERROR, strGroupSesId );
+        gclsUserAgent.StopCall( pszCallId, SIP_INTERNAL_SERVER_ERROR, NULL, { { "Retry-After", "5" } } );
+        return true;
     }
 
     // 3. 나머지 멤버들에게 INVITE (affiliation 요구 그룹은 affiliate 된 멤버만) — 새 세션은 위에서 정원 안으로 고른

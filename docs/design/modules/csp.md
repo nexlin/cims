@@ -601,7 +601,7 @@ fan-out·CMP 세션·teardown)를 그대로 재사용**한다(`ModuleDispatcher:
 INVITE 에 초대 명단(`application/resource-lists+xml`)이 있고 대상이 설정 그룹이 아니면(또는 요청자가 멤버가 아닌 진행 중 애드혹
 그룹이면) 임시 그룹을 만들어 ProcessGroupCall 경로로 보낸다(`ModuleDispatcher::EventIncomingCall` — `_isAdhoc=true`,
 `_groupType=prearranged` 수명, `_requireAffiliation=false` — 초대 멤버는 암묵적 제휴 §17.4.2.2 16)). 게이트 = `Setup.PttAdhocEnabled` ∧
-user profile `allow_adhoc_call`.
+user profile `allow_adhoc_call`(미지원 403 + `186`, 미인가 403 + `185`).
 
 - **명단** — `<entry uri>` 마다 MCPTT ID(`tel:`·`sip:` 어느 형이든, 같은 ID 는 한 번 — `ParseResourceListEntries`, §17.4.2.2 12)a)).
   개시자 밖 인원이 service configuration `<adhoc-group-call><max-no-participants>`(`GetAdhocMaxParticipants`)를 넘으면 403 + Warning

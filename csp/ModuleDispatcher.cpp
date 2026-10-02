@@ -1003,6 +1003,23 @@ void CModuleDispatcher::EventIncomingCall( const char *pszCallId, const char *ps
             }
         }
     }
+    // 서비스 인가 바인딩(TS 24.379 §7.3 — 등록 때의 MCPTT ID ↔ IMPU)이 없는 요청자의 MCPTT 요청 — 규격은 404 + 141
+    //   (§10.1.1.3.1.1 2a) · §11.1.1.3.1.1 4) · §17.3.2.1.1 3)). 계측기·cspsim 이 등록 없이 보내는 경로가 있어 엄격
+    //   검사 스위치(Setup.Mcptt.StrictCheck, 기본 log — 결정 D9) 아래 둔다.
+    if ( m_clsPttAs.IsEnabled() &&
+         ( !strMcpttSessionType.empty() || !strMcpttRequestUri.empty() || gclsGroupMap.Contains( pszTo ) ) ) {
+        CspUser clsBound;
+        if ( !gclsCspUserMap.isAlive( pszFrom, clsBound ) &&
+             gclsSetup.McpttStrict(
+                 "141 user unknown to the participating function",
+                 std::string( "INVITE from " ) + pszFrom + " → " + pszTo + " (서비스 인가 바인딩 없음)" ) ) {
+            gclsUserAgent.StopCall( pszCallId, SIP_NOT_FOUND, NULL,
+                                    { { "Warning", McpttWarning( 141, "user unknown to the participating function",
+                                                                 gclsServiceMap.GetDomainByKind( "ptt" ) ) } } );
+            return;
+        }
+    }
+
     // MCPTT private call (1:1, TS 24.379 §11.1 on-demand): mcptt-info session-type=private.
     //   합성 2인 ephemeral 그룹(priv-<caller>-<callee>)을 만들어 기존 ProcessGroupCall 경로
     //   (fan-out·CMP 세션·teardown)를 그대로 재사용한다 — 별도 CMP 명령 없음, 계약 §A.1
@@ -1052,7 +1069,7 @@ void CModuleDispatcher::EventIncomingCall( const char *pszCallId, const char *ps
             return rejectPriv( 144, "user not authorised to call this particular user", "private_callee_not_listed" );
         CspUser clsCallee;
         if ( !gclsCspUserMap.isAlive( pszTo, clsCallee ) ) {
-            CLog::Print( LOG_INFO, "EventIncomingCall: private call target(%s) not registered → 480 [PTT-AS]", pszTo );
+            CLog::Print( LOG_INFO, "EventIncomingCall: private call target(%s) not registered → 404 [PTT-AS]", pszTo );
             // 시도 장부 — 사설콜도 PTT 시도다(임시 그룹을 만들어 ProcessGroupCall 로 가므로).
             //   이 경로는 그 함수 앞에서 끝나 기록이 없었다.
             //   사유는 **VoLTE 와 같은 `no_answer`** 다(480·408 → CallDir::_ReasonOfStatus).
@@ -1060,10 +1077,11 @@ void CModuleDispatcher::EventIncomingCall( const char *pszCallId, const char *ps
             //   (_NER_USER_REASONS) — `denied`(정책 거부)나 `error`(자원 실패)에 넣으면 실패
             //   사유 분포가 왜곡되고, 우리 결함과 상대 사정이 한 칸에 섞인다.
             //   응답은 그대로 480 이다.
+            //   응답은 404 다 — 착신자의 서비스 인가 바인딩이 없다(TS 24.379 §11.1.1.3.2 7)).
             if ( gclsCallDir.IsEnabled() )
                 gclsCallDir.PttAttempt( pszTo, "", pszFrom, "failed", "no_answer", "private_callee_offline",
-                                        SIP_TEMPORARILY_UNAVAILABLE );
-            return StopCall( pszCallId, SIP_TEMPORARILY_UNAVAILABLE );
+                                        SIP_NOT_FOUND );
+            return StopCall( pszCallId, SIP_NOT_FOUND );
         }
         // §11.1.1.3.2 8) 착신 참가 인가(<allow-private-call-participation>) — 아니면 403 127.
         // IncomingPrivateCallList(9) — 159)는
@@ -1133,7 +1151,7 @@ void CModuleDispatcher::EventIncomingCall( const char *pszCallId, const char *ps
     //   아니면(또는 요청자가 멤버가 아닌 진행 중 애드혹 그룹이면) 임시 그룹을 만든다(in-memory, ephemeral — 그룹 문서
     //   없음). 이후 ProcessGroupCall(on-demand) 경로가 fan-out·teardown 을 한다. requireAffiliation=false(16) 초대
     //   멤버는 암묵적 제휴). 게이트: Setup.PttAdhocEnabled(시스템 정책) ∧ user profile allow_adhoc_call.
-    if ( m_clsPttAs.IsEnabled() && gclsSetup.m_bPttAdhocEnabled && pclsMessage ) {
+    if ( m_clsPttAs.IsEnabled() && pclsMessage ) {
         std::vector<std::string> vecAdhoc = ParseResourceListUsers( pclsMessage->m_strBody );
         CspPttGroup clsAdhocExisting;
         const bool bTargetExists = gclsGroupMap.Select( pszTo, clsAdhocExisting );
@@ -1141,16 +1159,35 @@ void CModuleDispatcher::EventIncomingCall( const char *pszCallId, const char *ps
         for ( const auto &pUser : clsAdhocExisting._pusers )
             if ( bOtherAdhoc && pUser && pUser->_id == pszFrom ) bOtherAdhoc = false;  // 내 애드혹 그룹 = 합류
         if ( !vecAdhoc.empty() && ( !bTargetExists || bOtherAdhoc ) ) {
-            // 사용자 단위 ad hoc 개시 인가 (프로파일 allow_adhoc_call — 시스템 정책과 AND)
+            const std::string strDomain = gclsServiceMap.GetDomainByKind( "ptt" );
+            // 5) 애드혹 그룹 호를 내지 않는 시스템(Setup.PttAdhocEnabled false) — 403 + 186
+            if ( !gclsSetup.m_bPttAdhocEnabled ) {
+                CLog::Print( LOG_INFO, "EventIncomingCall: ad-hoc by(%s) — 시스템 미지원 → 403 186 [PTT-AS]", pszFrom );
+                if ( gclsCallDir.IsEnabled() )
+                    gclsCallDir.PttAttempt( pszTo, "", pszFrom, "failed", "denied", "adhoc_not_supported",
+                                            SIP_FORBIDDEN );
+                gclsUserAgent.StopCall(
+                    pszCallId, SIP_FORBIDDEN, NULL,
+                    { { "Warning",
+                        McpttWarning( 186, "the MCPTT system do not support adhoc group call", strDomain ) } } );
+                return;
+            }
+            // 4) 사용자 단위 개시 인가 (user profile <allow-adhoc-group-call> = allow_adhoc_call) — 403 + 185.
+            //   프로파일 조회 실패(DB 불가)는 통과시킨다(그 전 동작).
             CspUserProfile clsAdhocProf;
             if ( gclsDbManager.SelectUserProfile( pszFrom, clsAdhocProf ) >= 0 && !clsAdhocProf.m_bAllowAdhocCall ) {
-                CLog::Print( LOG_INFO, "EventIncomingCall: ad-hoc by(%s) not authorised (user profile) → 403 [PTT-AS]",
+                CLog::Print( LOG_INFO,
+                             "EventIncomingCall: ad-hoc by(%s) not authorised (user profile) → 403 185 [PTT-AS]",
                              pszFrom );
                 // 시도 장부 — 이 경로도 `ProcessGroupCall` 앞에서 끝나므로 여기서 남긴다.
                 if ( gclsCallDir.IsEnabled() )
                     gclsCallDir.PttAttempt( pszTo, "", pszFrom, "failed", "denied", "adhoc_not_authorised",
                                             SIP_FORBIDDEN );
-                return StopCall( pszCallId, SIP_FORBIDDEN );
+                gclsUserAgent.StopCall(
+                    pszCallId, SIP_FORBIDDEN, NULL,
+                    { { "Warning",
+                        McpttWarning( 185, "user not authorised to initiate the adhoc group call", strDomain ) } } );
+                return;
             }
             // 6) 초대 인원 상한 — service configuration <adhoc-group-call><max-no-participants>. 넘으면 403 189.
             const int iAdhocMax = gclsCspServiceConfig.GetAdhocMaxParticipants();
@@ -1226,6 +1263,7 @@ void CModuleDispatcher::EventIncomingCall( const char *pszCallId, const char *ps
     if ( m_clsPttAs.IsEnabled() && gclsGroupMap.Contains( pszTo ) ) {
         // 재합류 — Request-URI 가 MCPTT 세션 식별자(GRUU `gr`)면 그 세션이 지금 진행 중이어야 한다
         //   (TS 24.379 §10.1.1.4.5.1 2) — 없으면 404). 지난 세션의 식별자로 새 세션을 열지 않는다.
+        bool bRejoin = false;
         if ( pclsMessage ) {
             const char *pszGr = SearchSipParameter( pclsMessage->m_clsReqUri.m_clsUriParamList, "gr" );
             const std::string strGr = pszGr ? pszGr : "";
@@ -1234,12 +1272,13 @@ void CModuleDispatcher::EventIncomingCall( const char *pszCallId, const char *ps
                              strGr.c_str() );
                 return StopCall( pszCallId, SIP_NOT_FOUND );
             }
+            bRejoin = pszGr != NULL;
         }
         SetCallOwner( pszCallId, &m_clsPttAs );
         CSipCallRoute clsGroupRoute;
         clsUserInfo.GetCallRoute( clsGroupRoute );
         if ( gclsGroupCallService.ProcessGroupCall( pszTo, pszFrom, pszCallId, pclsRtp, &clsGroupRoute, iMcpttCond,
-                                                    bMcpttBroadcast ) ) {
+                                                    bMcpttBroadcast, bRejoin ) ) {
             return;
         }
         CLog::Print( LOG_INFO, "EventIncomingCall: ProcessGroupCall(%s) failed for caller(%s) → 403 [PTT-AS]", pszTo,
@@ -1260,12 +1299,17 @@ void CModuleDispatcher::EventIncomingCall( const char *pszCallId, const char *ps
         //   현장에서 가장 흔한 고장이 이 경로다(단말 그룹 오설정·그룹 삭제 뒤 잔존 발신).
         //   **응답은 그대로 403 이다** — 와이어 동작은 바꾸지 않고 기록만 더한다.
         //   장부의 group 칸에 실제 발신 대상이 그대로 들어가므로 무엇을 눌렀는지 보인다.
+        //   응답 = 404 + Warning 113 — 대상 그룹의 그룹 문서가 없다(TS 24.379 §6.3.5.2 2)).
         auto RejectPtt = [&]() {
             if ( gclsCallDir.IsEnabled() )
-                gclsCallDir.PttAttempt( pszTo, "", pszFrom, "failed", "denied", "group_not_found", SIP_FORBIDDEN );
-            return StopCall( pszCallId, SIP_FORBIDDEN );
+                gclsCallDir.PttAttempt( pszTo, "", pszFrom, "failed", "denied", "group_not_found", SIP_NOT_FOUND );
+            gclsUserAgent.StopCall( pszCallId, SIP_NOT_FOUND, NULL,
+                                    { { "Warning", McpttWarning( 113, "group document does not exist",
+                                                                 gclsServiceMap.GetDomainByKind( "ptt" ) ) } } );
         };
         if ( mode == "ptt" ) return RejectPtt();
+        // mcptt-info 를 실은 INVITE 는 발신자 등록·서비스 종류와 무관하게 MCPTT 요청이다 — VoLTE 경로로 보내지 않는다
+        if ( !strMcpttSessionType.empty() || !strMcpttRequestUri.empty() ) return RejectPtt();
         if ( bFromKnown && !clsFromUser.m_strServiceType.empty() && clsFromUser.m_strServiceType == "ptt" )
             return RejectPtt();
     }

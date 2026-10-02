@@ -226,6 +226,14 @@ public:
     //   (이후 라우팅에서 비가입 착신으로 거절). 설정 키: Setup.PttAdhocEnabled (미지정 시 true).
     bool m_bPttAdhocEnabled;
 
+    /** MCPTT 규격 엄격 검사 스위치 — Setup.Mcptt.StrictCheck = enforce | log | off (미지정 log). 규격
+     * 단말·계측기·cspsim 이 아직 보내는 비규격 요청을 받는 동안 «규격대로면 거절» 할 검사를 이 스위치 아래 둔다 —
+     * 지금은 서비스 인가 바인딩 없는 요청 404 + 141(TS 24.379 §10.1.1.3.1.1 2a) 등). 결정
+     * D5·D9(docs/dev/conformance_gap_plan.md) — log 로 내보내고 요청이 바뀐 뒤 enforce. */
+    std::string m_strMcpttStrictCheck = "log";
+    /** 검사 하나가 어긋났다 — enforce 면 true(호출자가 규격 응답으로 거절), log 면 한 줄 남기고 false, off 면 false. */
+    bool McpttStrict( const char *pszCheck, const std::string &strDetail ) const;
+
     // ================================================================
     // IMS 역할 활성화 (기본값: 모두 true)
 
