@@ -164,20 +164,8 @@ CSP 는 참여 기능과 제어 기능을 겸한다.
 
 ## 4. 미구현 기능 목록에 빠진 것
 
-mcdata_messaging.md §8 · mcptt_standard_conformance.md R4 · mcx_identity_scope.md §10 은 MCData 의 미구현 기능을 나열하는데 아래는 그 목록에 없다. 항목을 더한다.
-
-| 기능 | 규격 | 지금 |
-|---|---|---|
-| MCData 서비스 인가 — REGISTER `<mcdata-access-token>`·바인딩·다중 단말·141 | TS 24.282 §7.3.2 | 없음 (REG-3) — mcx_identity_scope.md §10 은 MCPTT 토큰 검증만 적었다 |
-| 서비스 설정 PUBLISH·구독(poc-settings) | §7.2.2~§7.2.4 · §7.3.3~§7.3.6 | 489 (REG-4) |
-| MCData 제휴(서비스별 제휴 표·`mcdataPresInfo` NOTIFY·제휴 구독·암묵 제휴) | §8 | MCPTT 제휴로 읽는다 (AFF-1) |
-| SDS 세션(one-to-one·group SDS session) | §9.2.4 | 없음 |
-| 애드혹 그룹 SDS(`ad-hoc-group-sds`) · functional alias 대상(300 Multiple Choices) · regroup·TGI(`<associated-group-id>`) | §9.2.2.2.1 3A) · §9.2.2.4.2 5)b)ii)·6)b)·6)l) | 없음 |
-| UNDELIVERED 재전달(TD1) | §12.2.2.1 5)·6) | 중계만 (DISP-1) |
-| 파일 가용 시간(TDC2 · `<default-file-availability>`·`<max-file-availability>`) · FD NETWORK NOTIFICATION(만료) | §10.2.4.4.2 9)·13)·14) · §12.4 | 없음 — 잔여 과제 «retention/purge» 와 같은 자리지만 통지 절차는 적히지 않았다 |
-| FD HTTP 종료(FD HTTP TERMINATION) · 통신 해제 | §6.2.2.4 · §10.2.4.4.2 11)·17) · §13 | 없음 |
-| 연기한 FD 목록 조회(DEFERRED DATA REQUEST·RESPONSE) | §11.3 | 없음 |
-| Enhanced Status · 위치 보고 · pre-established session · IP connectivity · MBMS/MBS 배포 | §14 · §17 · §18 · §7.2.1 4) · §9.2.6·§10.2.6 | 없음 |
+통째 미구현 기능은 mcdata_messaging.md §8(«규격에 있으나 구현하지 않은 기능» 표) · mcx_identity_scope.md §10 에 있다 — 이 목록을 만들며 찾은 것도
+그리로 옮겼다.
 
 ## 5. 문서 정정
 
@@ -188,12 +176,10 @@ mcdata_messaging.md §8 · mcptt_standard_conformance.md R4 · mcx_identity_scop
 | mcdata_messaging.md §7 «라우팅» 행 | 그룹 URI 직행(mcdata-info 도 포함) · «서버는 양쪽 모두 수용» | CSP 는 `<mcdata-request-uri>` 를 읽지 않아 PSI 형 SDS 는 404. 미디어 평면 INVITE 에는 mcdata-info 가 없다 | SDS-1 · MSRP-1 |
 | 같은 문서 §4 | «미참여(비affiliated) 멤버는 규격상 배포 대상이 아니다» · «require_affiliation 그룹은 affiliate 멤버만» | 그 밖 그룹은 비제휴 멤버에게도 배포한다. 규격은 모든 그룹에서 제휴 멤버만 | AFF-2 |
 | 같은 문서 §4 게이트 표 | «controlling function 검사, TS 24.282 §9.2.2» — 403 · 403 · 413 | 규격 응답 = 403 + 206 · 403 + 116 · 403 + 217 | WRN-1~3 |
-| 같은 문서 §4.7 · `csp/McDataAsModule.cpp:52` | 203 거절 근거 «TS 24.282 §9.2.2 step 8» | §9.2.2.3.1 8) | — |
-| mcptt_standard_conformance.md C4e · `csp/McpttInfo.h:179` · `csp/McDataAsModule.cpp:58` | Warning 형식 «TS 24.282 §4.4» | V18 의 Warning 은 §4.9(§4.4 = Emergency Alerts) | — |
+| `csp/McDataAsModule.cpp:52` 주석 | 203 거절 근거 «TS 24.282 §9.2.2 step 8» | §9.2.2.3.1 8) — 문서(mcdata_messaging.md §4.7)는 고쳤다. 주석은 그 파일을 고치는 WP 가 | — |
+| `csp/McpttInfo.h:179` · `csp/McDataAsModule.cpp:58` 주석 | Warning 형식 «TS 24.282 §4.4» | V18 의 Warning 은 §4.9(§4.4 = Emergency Alerts) — 문서(mcptt_standard_conformance.md C4e)는 고쳤다. 주석은 그 파일을 고치는 WP 가 | — |
 | mcdata_messaging.md §2 표 `max_auto_recv` · §4.5 | «수신 단말 파일 자동 다운로드 임계» · «수신 앱: 그룹문서 max-data-size-auto-recv 이내면 자동 다운로드» | 규격 의미는 서버가 Mandatory download 를 붙이는 임계(§11.2, TS 24.481 §7.2.4.2), 단말은 그 IE 를 따른다 | FD-4 |
-| mcdata_messaging.md §3 · §5 | 코덱 = `android/ptt-client/…/mcdata/McDataCodec.kt`(+`McDataCodecTest.kt`), `PttService.threadKeyOf`·`sendGroupAttachment`·`mcdata/msrp/MsrpSession`·`debug.cims.msrp.*` | 그 파일·함수가 없다. 현장 앱은 SDK(`libcimsue` `mcdata/sds_codec`·`mcdata/msrp`, `PttMessaging.kt`)로 옮겼다 — `android/core-sip` 의 `makeMsrpInvite`·`acceptMsrpCall` 만 남았다 | — |
 | mcdata_messaging.md §7 «disposition 통지 — 단말» | 전환기 종료 = 모든 사이트 CSP 0.2.180 이상이면 CSC 에서 MCData 를 광고 | 광고하면 규격 단말의 SDS·MSRP·제휴도 그 PSI 로 온다 — CSP 는 SDS·MSRP 를 받지 못한다 | CFG-1 |
-| mcx_identity_scope.md §10 | MCData XCAP 문서는 «규격 MCData 클라이언트가 요구할 때» | MCData user profile 이 없으면 규격 단말은 `<allow-transmit-data>` 없음 = 1:1 송신 금지(§11.1 1))로 읽고, 콘텐츠 서버 주소(`<MCDataContentServerURI>`, §10.2.2.1)를 모른다 — 규격 단말의 1:1 SDS·FD 전부의 전제다 | — |
 
 ## 6. 묶음과 순서 (권고)
 

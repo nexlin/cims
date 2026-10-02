@@ -42,7 +42,7 @@
 | C6 | conference 이벤트 구독 인가 — 그룹 문서 `<on-network-allow-conference-state>` 판정, 불허 403 `Warning: 138` / 일제 통화 480 `Warning: 105` (비멤버 관제사 청취 범위는 CIMS 해석, [dispatch_center.md §5.6](dispatch_center.md)) | CSP/CSC | TS 24.379 §10.1.3.4.1 / TS 24.481 §7.2.4.2 | ✅ 정합 |
 | C7 | broadcast group call 발언권 — 개시자 외 Floor Request Deny #5(긴급 포함)·Floor Taken Permission 0·Floor Indicator B-bit | CMP | TS 24.380 §6.3.5.3.4·§6.3.5.4.4·§8.2.3.15 | ✅ 정합 |
 | C8 | broadcast group call 호 모델 — 호 단위 `<broadcast-ind>` 개시, 개시자 고정, 그룹 문서 그룹 종류(`on-network-invite-members`), 해제 정책(T4·참가자 1명 이하·TNG3) | CSP/CSC | TS 24.379 §4.12·§6.2.8.2·§6.3.8.1 / TS 24.481 §7.2.8 | ✅ 정합(서버) — 개시 단말의 발언 종료 후 호 해제(TS 24.380 §6.2.4.6.4)·B-bit Floor Request 는 단말 몫(미구현). 정본 [mcptt_broadcast_group_call.md](mcptt_broadcast_group_call.md) |
-| C9 | 설정 그룹 암시적 제휴 — user profile `<ImplicitAffiliations>` = 멤버별 `implicit_affiliation` 설정, PTT 서비스 인가(REGISTER) 때 참여 기능이 제휴 기록 · ad hoc 초대 = 제휴 | CSP/CSC | TS 24.379 §7.3.2 13) · §9.2.2.2.15 · §17.4.2.2 16) · TS 24.484 §8.3.2 | ✅ 정합 (편차 C9 참조) |
+| C9 | 설정 그룹 암시적 제휴 — user profile `<ImplicitAffiliations>` = 멤버별 `implicit_affiliation` 설정, PTT 서비스 인가(REGISTER) 때 참여 기능이 제휴 기록 · ad hoc 초대 = 제휴 | CSP/CSC | TS 24.379 §7.3.3 13)·§7.3.4 13) · §9.2.2.2.15 · §17.4.2.2 16) · TS 24.484 §8.3.2 | ✅ 정합 (편차 C9 참조) |
 | S1 | OIDC `/.well-known/openid-configuration` 디스커버리 | CSC | TS 33.180 / OIDC | ✅ 정합 |
 | S2 | access_token 클레임(`sub`/`iss`/`iat`/`client_id`/`scope` 문자열 + `mcptt_id`/`mcdata_id`) + nonce, scope 카탈로그 `3gpp:mc:*`(B.4.2.2) 요청∩카탈로그 발급, 리소스 서버 scope 검사(B.10, `IdMs.ScopeEnforcement`) — 구 `3gpp:mcptt:ptt_server` 전환기 별칭 | CSC | TS 33.180 Annex B | ✅ 정합 — 정본 [mcx_identity_scope.md](mcx_identity_scope.md) |
 | S3 | XCAP-diff SUBSCRIBE/NOTIFY(GMS/CMS 변경통지) | CSC/CSP | TS 24.481/484 §8 | ✅ 정합 |
@@ -79,6 +79,15 @@ CIMS 에 **아직 구현되지 않은** 기능을 규격 위치와 함께 나열
 | **Remotely initiated call** (원격 개시) | TS 24.379 | ✗ |
 | **User/Group regroup** (임시 그룹) | TS 24.379 + GMS(TS 24.481) | ✗ |
 | **Functional alias** 활성/비활성 | TS 24.379 / TS 24.484 | ✗ |
+| **서비스 설정** PUBLISH·구독(`Event: poc-settings` — Answer-Mode·선택한 user profile) | TS 24.379 §7.2.2~§7.2.4 · §7.3.3~§7.3.6 | ✗ — 489 (conformance_gap_plan.md S25) |
+| **협상 모드 제휴 변경**(타인 제휴 MESSAGE) · **규칙 기반 제휴** | TS 24.379 §9.2.1.4·§9.2.1.5 · §9.2.1.7 | ✗ |
+| **그룹 동적 데이터 구독**(그룹 상태·호 진행·제휴 멤버) | TS 24.379 §9.2.1.6 · §9.2.2.3.9~10 | ✗ — 그 구독을 제휴 구독으로 받는다(mcptt_conformance_gaps.md AFF-10) |
+| **XML 기밀성·무결성 보호**(mcptt-info 요소 암호화·서명) | TS 24.379 §4.8 · §6.6 | ✗ — service configuration 이 «꺼짐»(false)을 알린다 |
+| **우선순위 공유** · **MCPTT gateway server** | TS 24.379 §6.7 · §5.5·§6.8 | ✗ |
+| **호 없는 임박 위험 상태 해제**(MESSAGE) | TS 24.379 §10.1.6 | ✗ |
+| **애드혹 그룹 긴급 경보** | TS 24.379 §12.1A | ✗ |
+| **애드혹 참가자 변경** · **기준 기반 참가자 결정** | TS 24.379 §17.2.6·§17.4.5 · §17.3.6·§17.4.6 | ✗ — 참가자 변경 요청에 200 을 주고 아무것도 하지 않는다(mcptt_conformance_gaps.md ADH-6) |
+| **원격 긴급 발언 요청 트리거** | TS 24.379 §18 | ✗ |
 
 > 구현됨: prearranged/chat 그룹콜, 일제 통화(호 단위 `<broadcast-ind>` — C8), private call(on-demand), affiliation(C1/C2), emergency/imminent 게이팅·선점, ad-hoc.
 
@@ -87,6 +96,8 @@ CIMS 에 **아직 구현되지 않은** 기능을 규격 위치와 함께 나열
 | 기능 | 규격 | 상태 |
 |---|---|---|
 | **Pre-established session floor** | TS 24.380 | ✗ (Call Control 파트의 세션 2단 수명과 함께 착수) |
+| **Floor Revoke Request**(남의 발언 회수) | TS 24.380 §6.2.4.3.10 · §6.3.5.4.15 | ✗ — 받으면 버린다(mcptt_conformance_gaps.md FCS-12) |
+| **audio cut-in 그룹** · **수신 전용 멤버** · **동시 발언 허용 목록** | TS 24.380 §6.3.2.2 · TS 24.481 §7.2.2 | ✗ (mcptt_conformance_gaps.md FCS-13·FCS-14) |
 
 > 구현됨: subtype+TLV 인코딩(ack 변종 포함), Cause/Indicator/Duration/Queue, 큐잉, tier 선점,
 > 타이머 상태머신(T1/T2/T3/T7/T8/T20)과 pending Floor Revoke, **dual floor / multi-talker
@@ -176,6 +187,13 @@ transport 목록/선택 등 규격 문서에 없는 요구 때문). 자체 단�
 ([mcptt_timers.md](mcptt_timers.md) §4.3). 자유 XML 조각 주입(ExtraXml)은 두지
 않는다. 규격 사슬 회귀 = `tests/csc_bootstrap_conformance.py`, 생성기 단위시험 =
 `tests/csc_idms_authreq_unit.py` §A.
+
+### R4-2. GMS · CMS — XCAP 절차 범위
+
+| 기능 | 규격 | 상태 |
+|---|---|---|
+| **GMS** — global tree(`byGroupID`) · 요소 단위 XCAP · 멤버 제외 조회(POST) | TS 24.481 §6.2.2.2 · §6.3.6~§6.3.12 · §6.3.16 | ✗ — users tree 의 그룹 문서 통째 GET·PUT·DELETE 만(mcptt_conformance_gaps.md GMS-1·GMS-5·GMS-6) |
+| **CMS** — 문서 생성·수정·삭제 · 요소 단위 절차 | TS 24.484 §6.3.2~§6.3.12 | ✗ — 문서 GET 만(mcptt_conformance_gaps.md CMS-9) |
 
 ### R5. 시그널링 세부 (RFC/구독) — 부분 미반영
 
@@ -482,7 +500,7 @@ PSI·MCPTT client ID 가 있는 계정. [ue_sdk.md](ue_sdk.md) §4.2) → ③구
 멤버 leg INVITE·개시자 응답·이후 in-dialog 요청과 응답의 Contact 에 싣는다(psip `SetContactUriParams`). 재합류 INVITE 의 Request-URI 가
 세션 식별자면 그 세션이 진행 중이어야 한다 — 아니면 404(§10.1.1.4.5.1 2)).
 
-### C4e. Warning 헤더 형식 — TS 24.379 §4.4 · TS 24.282 §4.4
+### C4e. Warning 헤더 형식 — TS 24.379 §4.4 · TS 24.282 §4.9
 
 `Warning: 399 <agent> "<mcptt-warn-code> <text>"` — RFC 3261 §20.43 warning-value(warn-code 399 = 기타, warn-agent = PTT 도메인) 안의 warn-text 가
 MCPTT/MCData 경고 코드와 문구다(`McpttWarning`). conference 구독 거절 105·138, 확인 통화 설정 111·112, MCData 203 이 같은 형식이다. 받는 쪽
@@ -541,7 +559,7 @@ DB 단절이면 fan-out 과 같이 검사를 건너뛴다(affiliation 원천 = `
   종전 경로 그대로다. mcptt-info 가 없는 VoLTE 호는 판정 자체를 하지 않는다(가입자 조회 없음).
 - 검증: `tests/csp_mcptt_info_test.cpp`(`McpttPsiTarget` — HM-TRCP 실측 본문 포함, S1-UNIT-CSP).
 
-### C9. 암시적 제휴 — 설정 그룹(TS 24.379 §7.3.2 13) → §9.2.2.2.15) · ad hoc(§17.4.2.2 16))
+### C9. 암시적 제휴 — 설정 그룹(TS 24.379 §7.3.3 13)·§7.3.4 13) → §9.2.2.2.15) · ad hoc(§17.4.2.2 16))
 
 규격의 암시적 제휴는 셋이다 — ① 관리자가 사용자별로 정한 **설정 그룹**(user profile `<OnNetwork><ImplicitAffiliations>`)을
 서비스 인가 때, ② 제휴 없이 긴급·임박 위험 개시·chat 합류할 때(§9.2.2.2.12 — C4g), ③ ad hoc 그룹콜에 초대될 때. 이 절은 ①·③ 이다.
@@ -562,6 +580,7 @@ DB 단절이면 fan-out 과 같이 검사를 건너뛴다(affiliation 원천 = `
   | 만료 | candidate expiration interval(암시적 제휴용 값은 정의되지 않음 — PUBLISH Expires 로만 정의) · 이미 제휴된 그룹은 새로 넣지 않음(§9.2.2.2.15 8) b)) | **등록 수명**(부여 등록 만료)으로 기록하고 재등록마다 갱신 — 등록이 살아 있는 동안 끊기지 않게. 해지 REGISTER 는 제휴 전부 해제(종전 그대로) |
   | N2 상한 | 초과분을 정책으로 줄임(§9.2.2.2.15 9) c)) | 적용하지 않음 — PUBLISH 경로(C1)와 같다 |
   | 확정 | "affiliating" → 제어 기능 PUBLISH(§9.2.2.2.6) → affiliated | 참여·제어 기능이 한 서버라 곧바로 affiliated 로 기록 |
+  | 계기 | 서비스 인가·서비스 설정 PUBLISH 수신(§7.3.3 13) · §7.3.4 13)) — REGISTER 절차(§7.3.2)에는 이 단계가 없다 | **PTT REGISTER 200 뒤** — 서비스 설정 PUBLISH(poc-settings)를 받지 않는다(489 — §0-R «서비스 설정») |
 
 - **③ ad hoc** — 제어 기능은 초대한 멤버를 그 ad hoc 그룹에 암시적으로 제휴된 것으로 본다(§17.4.2.2 16), 참여자 변경 §17.4.5.1.1 vi)·
   §17.4.5.2.1 d)). CSP 는 ad hoc 그룹을 통화 때 만들며 `require_affiliation = false` 로 둬(`ModuleDispatcher.cpp`) 명단 전원을

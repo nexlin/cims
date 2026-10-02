@@ -1923,7 +1923,7 @@ def get_user_profile_xml(user_uri, owner_uid=None):
            ext=owner_ext if (owner_uid is not None and g.get('authorized_user_id') == owner_uid) else '', index=i)
         for i, (g_uri, g) in enumerate(my_groups, 1))
     # 암시적 제휴 = 관리자가 이 사용자·그룹에 정한 것만(멤버 implicit_affiliation) — 참여 기능이 서비스 인가 때 이 목록에
-    #   제휴를 기록한다(TS 24.379 §7.3.2 13) → §9.2.2.2.15, CSP _ApplyImplicitAffiliations). 소속 전부가 아니다.
+    #   제휴를 기록한다(TS 24.379 §7.3.3 13)·§7.3.4 13) → §9.2.2.2.15, CSP _ApplyImplicitAffiliations). 소속 전부가 아니다.
     implicit_entries = ''.join(
         et('entry', g_uri, g.get('display_name'), index=i) for i, (g_uri, g) in enumerate(
             [(g_uri, g) for g_uri, g in my_groups

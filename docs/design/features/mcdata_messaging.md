@@ -79,8 +79,8 @@ SIP MESSAGE 본문 = `multipart/mixed;boundary=…` 3파트:
 - **Message ID** = 발신 시 신규 UUID. delivered 통지 대사·로컬 저장 키.
 - **Disposition**: 발신 시 `DELIVERY`(0x81) 요청 → 수신 앱이 **SDS NOTIFICATION**(type 0x05,
   DELIVERED=0x02)을 원 발신자에게 1:1 MESSAGE 로 회신 → 발신 앱 말풍선에 ✓ 표시.
-- 코덱 구현: 앱 `android/ptt-client/src/main/java/com/cims/ue/ptt/mcdata/McDataCodec.kt`
-  (단위테스트 `McDataCodecTest.kt`), CSP 파서 `csp/McDataCodec.{h,cpp}` (게이트·flow 로깅용 필드만).
+- 코덱 구현: 단말 = SDK 코어 `sdk/core/src/mcdata/sds_codec.{h,cpp}`(단위시험 `sdk/core/test/sds_codec_test.cpp` — 현장 앱·관제 앱이
+  같은 코덱을 쓴다), CSP 파서 `csp/McDataCodec.{h,cpp}` (게이트·flow 로깅용 필드만).
 
 ## 4. CSP 처리 흐름
 
@@ -230,7 +230,7 @@ mcdata-info `<mcdata-calling-group-id>` 를 실어 보낸다(5)). CSP `CMcDataAs
 SDS payload 가 `<max-payload-size-sds-cplane-bytes>`(TS 24.484 서비스 설정) 를 초과하면
 단말은 **standalone SDS over media plane(MSRP, RFC 4975)** 을 써야 하고, CSP participating
 검사는 초과 C-plane MESSAGE 를 **403 + Warning `203 "message too large to send over
-signalling control plane"`** 으로 거절한다(TS 24.282 §9.2.2 step 8; `McDataAsModule` 게이트 0).
+signalling control plane"`** 으로 거절한다(TS 24.282 §9.2.2.3.1 8); `McDataAsModule` 게이트 0).
 임계 미설정(0)이면 무제한 — TS 24.484 "요소 미포함 = 제한 없음" 프로파일로 규격 적합.
 
 ```
@@ -312,47 +312,37 @@ CSP fan-out (하이브리드):
 
 ## 5. 앱 동작
 
+본문 조립·평면 선택(시그널링 / media plane)·수신 해석은 SDK 코어(`libcimsue` — [ue_sdk.md](ue_sdk.md) §4.2)가 하고, 앱은 저장·표시·통지
+판단만 한다. 아래 이름은 현장 앱(`android/ptt-client`)의 것이다 — 관제 앱 두 벌은 같은 SDK API 를 쓴다.
+
 - 발신: `PttService.sendMessage(peer)` 가 msgId 를 발급해 `MessageStore`(OUT, PENDING) 에 먼저
-  저장하고 `PttController.sendSds(peer, text, msgId)` 로 발신 — peer 가 프로비저닝 그룹이면
-  group-sds, 아니면 one-to-one-sds(항상 C-plane).
-  **SDK 경로도 같은 갈림**이다 — `libcimsue` 의 `Engine::sendGroupSds` / `Engine::sendSds`(1:1)로
-  나뉘고, 갈림 판정은 앱이 «받아 둔 편성 그룹 목록에 그 키가 있는가» 로 한다(번호 모양으로 추측하면
+  저장하고 `PttController.sendSds(peer, text, msgId)`(`PttMessaging.kt` `MessagingPlane.sendSds`)로 발신 — peer 가 받아 둔 편성
+  그룹이면 SDK `Account.sendGroupSds`(group-sds), 아니면 `Account.sendSds`(one-to-one-sds, 항상 C-plane).
+  갈림 판정은 앱이 «받아 둔 편성 그룹 목록에 그 키가 있는가» 로 한다(번호 모양으로 추측하면
   숫자 그룹 id 에서 틀린다). 관제 앱은 이 판정을 세션 한 곳에 둔다
   (`DispatchSession.sendSdsTo`, [android_dispatch_tablet.md](android_dispatch_tablet.md) §6.9a). 그룹 SDS 의 payload(UTF-8 텍스트 바이트, 서버
-  게이트와 동일 기준)가
-  프로비저닝 임계 `mcdata.maxPayloadSdsCplaneBytes`(0=무제한)를 초과하면 C-plane MESSAGE
-  대신 **MSRP 미디어평면 발신**(§4.7) — `SipController.makeMsrpInvite`(더미 m=audio +
-  `m=message TCP/MSRP` SDP 주입, Accept-Contact mcdata ICSI) → 200 OK `a=path` 로 TCP
-  out-connect(`mcdata/msrp/MsrpSession`) → SIGNALLING/PAYLOAD TLV(raw, base64 CTE 없음)
-  16KB 청크 SEND → 서버 BYE 로 완료. MSRP 호 상태는 `MsrpEvent` 플로우로 일반 통화
-  상태와 격리(그룹 URI 동일로 인한 PTT 세션 callId 오염 방지).
-  - **전송 상태 말풍선**: C-plane·MSRP 모두 PENDING(🕓, MSRP 는 +진행률%·진행 바) → 성공
-    SENT(✓)/실패 FAILED(⚠, 탭=같은 msgId 재전송) — `MessageStore.sendState`+`PttController.
-    sendResult/sendProgress`. C-plane 의 결과는 MESSAGE 트랜잭션 최종 응답(`sendRequest` token
-    상관 — 2xx=SENT, 403/404/408/480/500/503 등=FAILED). 401/407 은 native(`cims_send_request_reauth`)가 재발행하므로 앱에는
-    최종 결과만 온다. DELIVERED 통지 수신 시 ✓✓. 서비스 재기동 시 잔존 PENDING 은 FAILED 로
-    마감(재전송 유도). 첨부(FD) 발신은 업로드 성공 시 SENT.
-  - 진행률 육안 시험(릴리스 무영향): `adb shell setprop debug.cims.msrp.slow <청크간 ms>`
-    + `setprop debug.cims.msrp.chunk <청크 bytes>` — 0=끔.
-- 수신(MSRP 미디어평면): REGISTER Contact 에 `;+g.3gpp.icsi-ref="…icsi.mcdata.sds"` 광고
-  (`SipController.contactParams`) → 서버발 배포 INVITE(`TCP/MSRP`)를 `CimsAccount` 가 감지,
-  벨소리/통화 UI 없이 `msrpMode` 격리 → `acceptMsrpCall` — **완전한 answer SDP 를 수동 구성해
-  `CallOpParam.sdp`(answer_with_sdp)로 응답**(오퍼 오디오 payload 에코+inactive,
-  m=message a=setup:active/recvonly; pjsua UAS 는 착신 처리 시점에 answer SDP 를 미리
-  생성하므로 `onCallSdpCreated` 패치로는 늦고 m=message 가 포트 0 으로 나감 — 실기기 확인) →
-  서버 a=path 로 out-connect(`MsrpSession.receiveMessage`: bodiless 바인딩 SEND → 청크 수신·
-  200 응답·조립) → 코덱 파싱 → `incomingSds` → 아래 C-plane 수신과 동일 저장·통지 경로.
-  그룹/발신자는 INVITE mcdata-info(request-uri/calling-user-id), 구서버 폴백=From(그룹,
-  이때 DELIVERED 회신은 억제).
-- 수신(`PttService`): `multipart/mixed` → 코덱 파싱 —
-  - SDS 메시지: 스레드 키 = `request-type` 이 group-* 면 `mcdata-info` request-uri(그룹 ID, 발신자는
-    `sender` 필드), one-to-one-* 면 **발신자**(request-uri 는 수신자 자신이라 키로 쓰지 않는다 —
-    `PttService.threadKeyOf`). disposition 요청 시 DELIVERED 통지 자동 회신.
+  게이트와 동일 기준)가 프로비저닝 임계 `mcdata.maxPayloadSdsCplaneBytes`(SDK `AccountConfig.maxSdsCplaneBytes`, 0=무제한)를 초과하면
+  **코어가** C-plane MESSAGE 대신 **MSRP 미디어평면**(§4.7)으로 보낸다 — INVITE(`m=message TCP/MSRP`, Accept-Contact mcdata ICSI) →
+  200 OK `a=path` 로 TCP out-connect(`sdk/core/src/mcdata/msrp.{h,cpp}`) → SIGNALLING/PAYLOAD TLV(raw, base64 CTE 없음) 청크 SEND →
+  서버 BYE 로 완료. 최종 결과는 시그널링 평면과 같은 token 으로 method `MSRP` 가 온다(`MessagingPlane.onSendResult`).
+  - **전송 상태 말풍선**: C-plane·MSRP 모두 PENDING(🕓, media plane 은 진행률 — `PttService.sendProgress`) → 성공 SENT(✓)/실패 FAILED(⚠, 탭=같은 msgId 재전송 —
+    `PttService.resendMessage`) — `MessageStore.sendState` + `PttController.sendResult`. C-plane 의 결과는 MESSAGE 트랜잭션 최종 응답
+    (token 상관 — 2xx=SENT, 그 밖=FAILED). 401/407 재인증은 코어가 하므로 앱에는 최종 결과만 온다. DELIVERED 통지 수신 시 ✓✓.
+    서비스 재기동 시 잔존 PENDING 은 FAILED 로 마감(재전송 유도). 첨부(FD) 발신은 업로드 성공 시 SENT.
+- 수신(MSRP 미디어평면): 계정 설정 `AccountConfig.mcdataMsrp` 이면 코어가 REGISTER Contact 의 `+g.3gpp.icsi-ref` 목록에 ICSI
+  `mcdata.sds` 를 싣고, 서버발 배포 INVITE(`TCP/MSRP`)를 통화로 올리지 않고 받아(answer `m=message a=setup:active`) 서버 `a=path` 로
+  out-connect 해 청크를 조립한다 → 코덱 파싱 → 아래 C-plane 수신과 같은 `onSds`(`SdsMessage.mediaPlane = true`).
+  그룹/발신자는 INVITE mcdata-info(request-uri/calling-user-id) — 발신자를 알 수 없으면(발신자 = 그룹) DELIVERED 회신을 억제한다.
+- 수신(`PttService.onSds` ← `PttController.incomingSds`): 코어가 해석한 `SdsMessage` 한 건 —
+  - SDS 메시지: 스레드 키 = `groupUri` 가 있으면(group-*) 그룹 ID(발신자는 `sender` 필드), 비어 있으면(one-to-one-*) **발신자**
+    (1:1 의 request-uri 는 수신자 자신이라 키로 쓰지 않는다). disposition 요청 시 DELIVERED 통지 자동 회신
+    (`MessagingPlane.sendSdsNotification` — §4.4).
   - SDS NOTIFICATION(DELIVERED): 해당 msgId 발신 문자 `delivered` 마킹 → ✓ 표시.
-  - `text/plain`(구버전 앱): 종전대로 발신자 스레드 저장 (전환기 호환).
+  - FD: 첨부 말풍선으로 저장하고, 크기가 그룹 문서 `max-data-size-auto-recv` 이내면 바로 내려받는다.
 - UI(`MessagesScreen`): 그룹 스레드 수신 말풍선 위 발신자 라벨, 발신 말풍선 delivered ✓.
-- 첨부: 입력바 클립 버튼(포토 피커) → `PttService.sendGroupAttachment`(업로드+FD MESSAGE).
-  첨부 말풍선 = 📎 이름·크기·(받기/열기), 탭으로 다운로드/열기.
+- 첨부: 입력바 클립 버튼(포토 피커) → `PttService.sendAttachment` → `MessagingPlane.sendAttachment`(SDK `CscClient.uploadFd` 업로드 +
+  `Account.sendGroupFd`/`sendFd` FD MESSAGE). 첨부 말풍선 = 📎 이름·크기·(받기/열기), 탭으로 다운로드(`downloadAttachment`)/열기.
+- `android/core-sip` 에는 SDK 이전의 MSRP 호 조립(`SipController.makeMsrpInvite`·`acceptMsrpCall`)이 남아 있다 — 현장 앱은 쓰지 않는다.
 
 ## 6. 배포 순서
 
@@ -416,3 +406,19 @@ CSP fan-out (하이브리드):
   (§6.3.7.2.1) — CSP `CMcDataAsModule::OnEmergencyAlert` 가 **403 + mcdata-info `<alert-ind>` false**(§16.2.3.1 4)a))로 답하고 배포하지
   않는다. 취소(`<alert-ind>` false, §16.2.3.2)는 남은 MCData 경보가 없어 지울 것도 보낼 통지도 없다 → 200. 지원할 때 = 그룹 문서 요소·
   MCData user profile `<EmergencyAlert>`·발령자 제휴(§16.2.3.1 4)b)i))·경보 캐시·수신 확인(§6.3.7.1.5)
+
+**규격에 있으나 구현하지 않은 기능** (TS 24.282 — 위 항목 밖)
+
+| 기능 | 규격 | 지금 |
+|---|---|---|
+| MCData 서비스 인가 — REGISTER `<mcdata-access-token>`·MCData ID 바인딩·다중 단말·404 `141` | §7.3.2 | 없음([mcx_identity_scope.md](mcx_identity_scope.md) §10) |
+| 서비스 설정 PUBLISH·구독(`Event: poc-settings`) | §7.2.2~§7.2.4 · §7.3.3~§7.3.6 | 489 (conformance_gap_plan.md S25) |
+| MCData 제휴 — 서비스별 제휴 표·`mcdataPresInfo` NOTIFY·제휴 구독·암묵 제휴 | §8 | MCPTT 제휴로 읽는다 |
+| SDS 세션(one-to-one·group SDS session) | §9.2.4 | 없음 |
+| 애드혹 그룹 SDS(`ad-hoc-group-sds`) · functional alias 대상(300 Multiple Choices) · regroup·TGI(`<associated-group-id>`) | §9.2.2.2.1 3A) · §9.2.2.4.2 5)b)ii)·6)b)·6)l) | 없음 |
+| UNDELIVERED 재전달(TD1) | §12.2.2.1 5)·6) | 통지를 중계만 한다 |
+| 파일 가용 시간(TDC2 · `<default-file-availability>`·`<max-file-availability>`) · FD NETWORK NOTIFICATION(만료) | §10.2.4.4.2 9)·13)·14) · §12.4 | 없음 — 위 «retention/purge» 와 같은 자리 |
+| FD HTTP 종료(FD HTTP TERMINATION) · 통신 해제 | §6.2.2.4 · §10.2.4.4.2 11)·17) · §13 | 없음 |
+| 연기한 FD 목록 조회(DEFERRED DATA REQUEST·RESPONSE) | §11.3 | 없음 |
+| network-stored file 업로드(`message/external-body` — MCData message store) | §10.2.2.2 | 501 (§7) |
+| Enhanced Status · 위치 보고 · pre-established session · IP connectivity · MBMS/MBS 배포 | §14 · §17 · §18 · §7.2.1 4) · §9.2.6·§10.2.6 | 없음 |

@@ -196,8 +196,12 @@ introspection(`/idms/introspect`, RFC 7662): `active sub iss client_id mcptt_id 
 
 - **CSP REGISTER 토큰 검증** (TS 24.379 §7.3): `<mcptt-access-token>` 에서 MCPTT ID 를 식별해 IMPU 에 결박, `3gpp:mc:ptt_service`
   검사. CSP 의 CSC HTTP 클라이언트로 `/idms/introspect` 호출. 미탑재 단말 정책과 함께 3모드 스위치로 도입.
-- **MCData XCAP 문서** (TS 24.484 §10.2~10.4: UE config·user profile·service config) — 규격 MCData 클라이언트가 요구할 때.
+- **MCData XCAP 문서** (TS 24.484 §10.2~10.4: UE config·user profile·service config) — 내지 않는다. 규격 MCData 단말에게는
+  1:1 SDS·FD 전부의 전제다: MCData user profile 이 없으면 `<allow-transmit-data>` 없음 = 1:1 송신 금지로 읽고(TS 24.282 §11.1 1)),
+  콘텐츠 서버 주소 `<MCDataContentServerURI>`(§10.2.2.1)와 1:1 FD 상한 `<max-data-size-fd-bytes>`(service config)를 알 수 없다
+  (CIMS 단말은 `/provisioning/me` 와 CSC 주소로 대신한다 — [mcdata_messaging.md](mcdata_messaging.md) §4.5).
   `3gpp:mc:data_config_management_service` 검사 대상.
+- **MCData 서비스 인가** (TS 24.282 §7.3.2 — REGISTER `<mcdata-access-token>`·MCData ID 바인딩·다중 단말·404 `141`) — MCPTT 토큰 검증과 한 짝.
 - **별칭 제거** (§5 조건 충족 후).
 - 사용자 단위 MCData 자격 플래그(현재는 PTT 가입자 전체 허가).
 - `iss` URL 고정 = `McpttServer.PublicUrl` 운영 결정.

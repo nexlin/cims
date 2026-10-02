@@ -283,23 +283,7 @@ CSP 는 참여 기능과 제어 기능을 겸한다.
 
 ## 4. 미구현 기능 목록에 빠진 것
 
-mcptt_standard_conformance.md §0-R 은 통째 미구현 기능을 나열하는데 아래는 그 표에 없다. 항목을 더한다.
-
-| 기능 | 규격 | 지금 |
-|---|---|---|
-| 서비스 설정 PUBLISH·구독(poc-settings — Answer-Mode·선택한 user profile) | TS 24.379 §7.2.2~§7.2.4 · §7.3.3~§7.3.6 | 489 (REG-2) |
-| 협상 모드 제휴 변경(타인 제휴 MESSAGE) · 규칙 기반 제휴 | §9.2.1.4·§9.2.1.5 · §9.2.1.7 | 없음 |
-| 그룹 동적 데이터 구독(그룹 상태·호 진행·제휴 멤버) | §9.2.1.6 · §9.2.2.3.9~10 | 제휴 구독으로 잘못 받는다 (AFF-10) |
-| XML 기밀성·무결성 보호(mcptt-info 요소 암호화·서명) | §4.8 · §6.6 | 처리 코드 없음 — service configuration 이 «꺼짐»(false)을 알린다 |
-| 우선순위 공유 · MCPTT gateway server | §6.7 · §5.5·§6.8 | 없음 |
-| 호 없는 임박 위험 상태 해제 MESSAGE | §10.1.6 | CSP MESSAGE 분기에 없어 보인다(응답 코드 미확인) |
-| 애드혹 그룹 긴급 경보 | §12.1A | 없음 |
-| 애드혹 참가자 변경 · 기준 기반 참가자 결정 | §17.2.6·§17.4.5 · §17.3.6·§17.4.6 | 200 무동작 (ADH-6) |
-| 원격 긴급 발언 요청 트리거 | §18 | 없음 |
-| Floor Revoke Request(남의 발언 회수) | TS 24.380 §6.2.4.3.10 · §6.3.5.4.15 | 버린다 (FCS-12) |
-| audio cut-in 그룹 · 수신 전용 멤버 · 동시 발언 허용 목록 | TS 24.380 §6.3.2.2 · TS 24.481 §7.2.2 | 없음 (FCS-13·FCS-14) |
-| GMS — global tree(byGroupID) · 요소 단위 XCAP · 멤버 제외 조회(POST) | TS 24.481 §6.2.2.2 · §6.3.6~§6.3.12 · §6.3.16 | 없음 (GMS-1·5·6) |
-| CMS — 문서 생성·수정·삭제 · 요소 단위 절차 | TS 24.484 §6.3.2~§6.3.12 | GET 만(다른 메서드에 200 — CMS-9) |
+통째 미구현 기능은 mcptt_standard_conformance.md §0-R(R1·R2·R4-2)에 있다 — 이 목록을 만들며 찾은 것도 그 표로 옮겼다.
 
 ## 5. 문서 정정
 
@@ -311,7 +295,7 @@ mcptt_standard_conformance.md §0-R 은 통째 미구현 기능을 나열하는�
 | 같은 문서 C4 | `m=application … UDP MCPTT` + `a=floorid:0 mstrm:audio` 를 TS 24.380 §12 정합으로 | 규격 표는 `udp`, `floorid` 는 규격에 없다 | SDP-1 |
 | 같은 문서 C4g | «그 밖의 그룹은 멤버십이 곧 affiliation» | 규격은 제휴 멤버만 초대 | AFF-11 |
 | 같은 문서 C4h | 개별 통화 대상 = `<mcptt-request-uri>`, §11.1.1.2.1.1 정합 | 규격은 resource-lists | PRV-1 |
-| 같은 문서 C9 · CSP 주석 | 암시적 제휴 근거 «§7.3.2 13)» | 그 단계는 §7.3.3·§7.3.4 에 있다 | — |
+| `csp/CscfModule.cpp:764` 주석 | 암시적 제휴 근거 «§7.3.2 13)» | 그 단계는 §7.3.3·§7.3.4 에 있다 — 문서(mcptt_standard_conformance.md C9)와 CSC 주석은 고쳤다. 주석은 그 파일을 고치는 WP 가 | — |
 | 같은 문서 F1/F2 | Floor Ack = Source + Message Type 정합 · 받은 Indicator 의 긴급·임박 비트는 tier 로 승격 | Message Type 에 ack 비트가 섞인다 · 받은 Indicator 는 쓰지 않는다 | FCS-4·FCS-11 |
 | 같은 문서 F4 · cmp_media_api.md §7.7 · mcptt_timers.md §5.2 | T2 에서 긴급·임박 화자 제외 | 코드는 긴급만(emergency_modes §3.1 과는 일치) | FCS-21 |
 | 같은 문서 F5 | MCPTT ID 는 `PTT_JOIN.user_uri` | MCPTT 경로는 `user_uri` 를 보내지 않는다 | FCS-5 |
@@ -321,7 +305,7 @@ mcptt_standard_conformance.md §0-R 은 통째 미구현 기능을 나열하는�
 | mcptt_broadcast_group_call.md R4 | chat = 서버가 초대하지 않음 | 서버가 10초마다 초대 | GCS-1 |
 | server45_handoff.md §12.6 C12 | REGISTER Contact 의 MCPTT 태그 — «앱은 싣는다» | 앱도 싣지 않는다 | REG-1 |
 | server45_handoff.md §14.1 | 구독의 3600초 갱신은 규격대로 | conference·제휴·그룹 동적 데이터 구독의 규격 값은 4294967295 | GCC-7 |
-| android_ue_client.md U1·U7 | Floor Ack 정합 · Message Sequence Number 폐기 정합 | FCS-4 · FCC-5 | — |
+| android_ue_client.md U1·U7 | Floor Ack 정합 · Message Sequence Number 폐기 정합 | Ack 의 Message Type 에 ack 요구 비트가 섞인다 · Taken·Idle 공용 카운터로 폐기한다 | FCS-4·FCC-5 |
 | ue_sdk.md §4 | API 표의 `presence(uri)` | 그런 API 가 없다 | AFF-12 |
 | mcptt_api.md | `on-network-allow-conference-state` 기본 true | 규격 기본 false | GMS-8 |
 | csp.md · mcptt_csp_cmp_roadmap_contract.md · `sdk/core/include/cimsue/engine.h` 주석 | floor 없는 개별 호 = `mc_no_floor_ctrl` | on-demand 는 «m=application 없음» — SDK 발신은 실제로 그렇게 보내 CSP 판정과 어긋난다 | PRV-3 |

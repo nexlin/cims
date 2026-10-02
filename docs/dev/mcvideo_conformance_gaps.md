@@ -214,24 +214,7 @@ MCPTT 쪽 같은 뿌리의 결함은 [mcptt_conformance_gaps.md](mcptt_conforman
 
 ## 4. 미구현 기능 목록에 빠진 것
 
-mcvideo.md §6 V8 은 통째 미구현 기능을 나열하는데 아래는 그 표에 없다. 항목을 더한다.
-
-| 기능 | 규격 | 지금 |
-|---|---|---|
-| MCVideo 서비스 설정 PUBLISH·구독(Answer-Mode·선택 user profile) — 단말 송신과 서버 수신·통지 | TS 24.281 §7.2.3·§7.2.4 · §7.3.4·§7.3.6 | 단말 없음(VREG-1). 서버는 §7.2.2·§7.3.3(인가 겸용)만 «토큰 검증과 한 짝» 으로 적혀 있다 |
-| late call entry | §9.2.1.4.6 | 없음(VGC-2) |
-| 제휴 상태 결정 구독 — 단말 | §8.2.1.3 | 서버는 받지만 단말이 보내지 않는다(VAFF-8) |
-| 협상 모드 제휴 변경(타인 제휴 MESSAGE) · 규칙 기반 제휴 · `<manual-deaffiliation-not-allowed-if-affiliation-rules-are-met>` | §8.2.1.4·§8.2.1.5·§8.2.2.2.8~10 · §8.2.1.7 · §8.2.1.2 | 없음. 서버는 남의 제휴를 403 으로 막는다 |
-| 그룹 동적 데이터 구독(그룹 상태·호 진행·제휴 멤버) | §8.2.1.6 · §8.2.2.3.9·§8.2.2.3.10 | `Event: presence` + 그룹 `<mcvideo-request-uri>` 는 served ≠ 요청자 403 으로 끝난다(`csp/CscfModule.cpp:1355-1361`) |
-| MCVideo UE configuration 문서 | TS 24.484 §9.2 | 라우트 없음(VCMS-4) |
-| Media Reception Override(수신 무효화) | TS 24.581 §6.2.5.5.4 · §6.3.7 | 단말 버림(RCU-1), 서버 송신 없음 |
-| Functional Alias(호·송출 표시·바인딩) | TS 24.281 §9.2.1.3.1.1 6a) · TS 24.581 §6.3.4.4.2 3g | 별칭이 서버에서 전달되지 않는다(TCS-2) |
-| 원격 선택 그룹 변경 | TS 24.281 §9.2.4 | 없음 |
-| 위치 보고 | TS 24.281 §6.2.9 | 없음 |
-| regroup · 임시 그룹(TGI) · non-controlling 기능 · MCVideo gateway | §9.2.1.5 · §6.3.5.2 4)·6) · §6.9 | 없음(regroup 그룹이면 403 148 대상 — 판정 없음) |
-| 다중 단말 표시 · 동시 인가 상한 | §7.3.2 2a)·2b)·6) `<multiple-devices-ind>` · `<user-max-simultaneous-authorizations>` | 없음(REGISTER 인가 본문 자체가 미구현) |
-| 사전 구성 전용 그룹 | §9.2.1.4.2 5)b) · §9.2.2.4.1.1 2A) — 403 `167` | 서버·단말 모두 없음(VGU-5) |
-| 수신 전용 멤버 | TS 24.481 `<on-network-recvonly>` · TS 24.581 #5 | 그룹 모델·문서·CSP 에 없음 — CMP 만 받는다(TCS-10) |
+통째 미구현 기능은 mcvideo.md §6(V8 행과 그 아래 «V8 에 더해» 표)에 있다 — 이 목록을 만들며 찾은 것도 그 표로 옮겼다.
 
 ## 5. 문서 정정
 
@@ -253,9 +236,6 @@ mcvideo.md §6 V8 은 통째 미구현 기능을 나열하는데 아래는 그 �
 | mcvideo.md §1.2 · `sdk/core/include/cimsue/types.h:113-116` | MCVideo 로그오프 = 태그를 뺀 재-REGISTER | SDK 는 계정을 다시 만든다(등록 해제 + 새 등록) | VREG-3 |
 | mcvideo.md §5.2 «등록» | poc-settings 는 §7.2.2(인가 겸용)로만 적음 | 단말 §7.2.3(서비스 설정만)이 규격 서버 착신의 전제다 — 단말 몫이 빠졌다 | VREG-1 |
 | ue_sdk.md §4.6(초대 수락 단락)·`sdk/core/src/engine.cpp:1665` 주석 | «autoAnswerMcvideo 면 곧바로 200» · 그룹 수동 개시 근거 §6.2.3.2.1 | 늘 180 을 먼저 보낸다. 그룹 호 수동 개시는 §6.2.3.2.2(183 허용, 180 아님) | VGU-2 |
-| mcvideo_tc_defs.yaml 194-195행 주석 | C7·C11 은 한도에서 Receive Media Request 를 거절한다 | 수로만 쓴다(`cmp/PMcvControl.h:16-17`, mcvideo.md §5.3.1) | — |
-| `tests/fixtures/mcvideo/README.md` 해석 값 표 | user profile «N2 10» | 골든 파일은 `<MaxAffiliationsN2>4</MaxAffiliationsN2>` | — |
-| mcvideo.md §9 (누락) | — | TS 24.484 §9.4.2.1 본문 `<private-call-hang-time>` 과 XSD·§9.4.2.7 `private-call-hang-timer` 불일치 메모가 없다(CSC 는 XSD 를 따른다) | — |
 | `csp/CscfModule.cpp:830` 주석 · `:1885-1889` 문서 주석 | «N2 상한은 … 적용하지 않는다» | MCVideo 는 설정 그룹·PUBLISH 모두 N2 를 적용한다(`:859-867`·`:2038-2059`) — 주석이 MCPTT 몫만 맞다 | — |
 
 ## 6. 묶음과 순서 (권고)

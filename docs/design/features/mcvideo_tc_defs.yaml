@@ -192,7 +192,8 @@ server_timers:
   T11: {default_ms: 10000, origin: spec, name: "Stream Reception Idle", element: "T11-stream-reception-idle"}
 
 # §11.2.3 제어 기능 카운터. C9 = 참여자별 동시 수신 스트림 상한 — user profile `<MaxSimultaneousVideoStreams>`(1차 CIMS 값 1,
-# mcvideo_dev_plan.md §1), 없으면 4. C7(Reception Accepted)·C11(스트림당 활성 수신자)은 한도에서 Receive Media Request 를 거절한다.
+# mcvideo_dev_plan.md §1), 없으면 4. C7(Reception Accepted)·C11(스트림당 활성 수신자)은 수로만 쓴다(0 이냐 아니냐 — T5·T11 의 시작·정지,
+# 규격 본문에 두 카운터의 상한으로 Receive Media Request 를 거절하는 절차가 없다 — mcvideo.md §5.3.1). 수신 허가의 상한은 C9 다.
 # element 는 TS 24.484 XSD 표기를 따른다 — C7 은 XSD 가 «C7-reception-accpeted»(본문 §9.4.2.1·§9.4.2.7 은 accepted — mcvideo.md §9).
 server_counters:
   C2:  {default: 10, timer: T2, name: "Transmission Idle", element: "C2-transmission-idle"}
