@@ -3785,6 +3785,12 @@ void CGroupCallService::EmitPttListenAudit( const char *pszPhase, const std::str
     p.Set( "target_b", "" );
     p.Set( "tap_mode", "ptt_listen" );
     if ( iDurMs >= 0 ) p.Set( "dur_ms", iDurMs );
+    // 문구용 — 통화 감청과 같은 틀(`{kind_ko} {phase_ko} — {who_ko}`), 대상(그룹)을 앞에·사람(번호)은 괄호에.
+    const std::string strMon = FmUriNumber( strMonitor );
+    p.Set( "kind_ko", "PTT 그룹 청취" );
+    p.Set( "phase_ko", FmPhaseKo( pszPhase ? pszPhase : "" ) );
+    p.Set( "monitor_num", strMon );
+    p.Set( "who_ko", "그룹 " + strPttGroup + " (청취자 " + strMon + ")" );
     gclsFmReporter.SendEvent( "call_monitored", "audit", gclsFmReporter.Node() + "/csp", p );
 }
 
@@ -3797,6 +3803,8 @@ void CGroupCallService::EmitRegroupEvent( const char *pszAction, const std::stri
     p.Set( "action", pszAction );
     p.Set( "gid", strGroupId );
     p.Set( "scope", pszScope );
+    const std::string strAction = pszAction ? pszAction : "";
+    p.Set( "action_ko", strAction == "created" ? "생성" : strAction == "released" ? "해제" : strAction );
     gclsFmReporter.SendEvent( "regroup_changed", "audit", gclsFmReporter.Node() + "/csp", p );
 }
 
@@ -3810,6 +3818,9 @@ void CGroupCallService::EmitEmergencyModeEvent( const char *pszAction, int iTier
     SimpleJson::JsonNode p;
     p.Set( "action", pszAction );
     p.Set( "condition", iTier >= 2 ? "emergency" : "imminent-peril" );
+    const std::string strAction = pszAction ? pszAction : "";
+    p.Set( "action_ko", strAction == "activated" ? "선언" : strAction == "cancelled" ? "해제" : strAction );
+    p.Set( "condition_ko", iTier >= 2 ? "긴급" : "임박 위험" );
     p.Set( "gid", strGroupId );
     p.Set( "uri", strActor );
     p.Set( "tier", iTier );

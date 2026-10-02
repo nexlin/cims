@@ -72,7 +72,8 @@ public:
                 if ( clsInfo.bDegraded ) {
                     SimpleJson::JsonNode nodeParams;
                     nodeParams.Set( "path", strPath.c_str() );
-                    nodeParams.Set( "reason", clsInfo.strReason.c_str() );
+                    nodeParams.Set( "reason", FmStoreReasonKo( clsInfo.strReason, 0 ) );
+                    if ( !clsInfo.strReason.empty() ) nodeParams.Set( "reason_raw", clsInfo.strReason );
                     nodeParams.Set( "dropped", (int)clsInfo.ulDroppedOps );
                     gclsFmReporter.AlarmOpen( "A-PRC-013", strMo, nodeParams );
                 } else {

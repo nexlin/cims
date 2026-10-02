@@ -227,7 +227,7 @@ export function AlertRuleForm({ svc, index, onClose, onSaved }: {
               <div className="flex gap-2 mt-1.5 flex-wrap">
                 <Field label="metric(표시명)"><Input  className="w-[120px]" value={r.metric ?? ''}
                   onChange={e => up({ metric: e.target.value })} /></Field>
-                <Field label="발생 메시지" hint="({mo} 치환)"><Input  className="w-[200px]" value={r.msg_open ?? ''}
+                <Field label="발생 메시지" hint="({where}·{MODULE}·{mo} 치환)"><Input  className="w-[200px]" value={r.msg_open ?? ''}
                   onChange={e => up({ msg_open: e.target.value })} /></Field>
                 <Field label="해제 메시지"><Input  className="w-[160px]" value={r.msg_close ?? ''}
                   onChange={e => up({ msg_close: e.target.value })} /></Field>

@@ -2,6 +2,7 @@
 #define __FM_REPORTER_H__
 
 #include <arpa/inet.h>
+#include <errno.h>
 #include <netinet/in.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -45,6 +46,66 @@ struct FmActiveAlarm {
     std::string strSeverity;          // 단계 임계 알람의 현재 severity (빈 값 = 카탈로그 기본)
     SimpleJson::JsonNode nodeParams;  // msg 템플릿 치환 값
 };
+
+// 저장 경로 실패 사유의 한국어 구절 — 알람 감시창 문구의 `{reason}` 용 (alarm_catalog.md message 규칙).
+//   strRaw 는 ServiceLogWriter/StoreOpWriter 의 원문 사유, iErrno 는 그 OS 오류 번호(0 = OS 오류 아님).
+//   원문은 호출자가 `reason_raw` 로 함께 실어 상세 보기에서 그대로 복사·검색할 수 있게 한다.
+//   여기 없는 errno·사유는 원문을 그대로 돌려준다.
+// 이벤트 문구에 쓰는 사람·회선 표시 — SIP/tel URI 의 user 부분(번호)만. `sip:+8210…@도메인;파라미터` → `+8210…`.
+//   전체 URI 는 호출자가 원래 필드(monitor·uri 등)로 그대로 실어 상세에서 볼 수 있게 한다.
+inline std::string FmUriNumber( const std::string &strUri ) {
+    std::string s = strUri;
+    const size_t lt = s.find( '<' );
+    if ( lt != std::string::npos ) s = s.substr( lt + 1 );
+    for ( const char *pszScheme : { "sips:", "sip:", "tel:" } ) {
+        if ( s.compare( 0, strlen( pszScheme ), pszScheme ) == 0 ) {
+            s = s.substr( strlen( pszScheme ) );
+            break;
+        }
+    }
+    const size_t end = s.find_first_of( "@;>" );
+    if ( end != std::string::npos ) s = s.substr( 0, end );
+    return s.empty() ? strUri : s;
+}
+
+// 감청·청취 이벤트(E-AUD-016)의 phase 한국어 — started/ended/denied. 모르는 값은 원문.
+inline std::string FmPhaseKo( const std::string &strPhase ) {
+    if ( strPhase == "started" ) return "시작";
+    if ( strPhase == "ended" ) return "종료";
+    if ( strPhase == "denied" ) return "거절";
+    return strPhase;
+}
+
+inline std::string FmStoreReasonKo( const std::string &strRaw, int iErrno ) {
+    if ( iErrno != 0 ) {
+        const char *pszKo = nullptr;
+        switch ( iErrno ) {
+            case ENOSPC: pszKo = "디스크 공간 부족"; break;
+            case EDQUOT: pszKo = "디스크 할당량 초과"; break;
+            case EACCES:
+            case EPERM: pszKo = "권한 없음"; break;
+            case EROFS: pszKo = "읽기 전용 파일시스템"; break;
+            case ENOENT: pszKo = "경로 없음"; break;
+            case ENOTDIR: pszKo = "경로가 디렉터리가 아님"; break;
+            case EIO: pszKo = "입출력 오류"; break;
+            case ESTALE: pszKo = "NFS 연결 끊김(오래된 파일 핸들)"; break;
+            case ETIMEDOUT: pszKo = "시간 초과"; break;
+            case EMFILE:
+            case ENFILE: pszKo = "열린 파일 수 한도 초과"; break;
+            default: break;
+        }
+        if ( !pszKo ) return strRaw;
+        return strRaw.rfind( "replay failed", 0 ) == 0 ? std::string( "재반영 중 " ) + pszKo : std::string( pszKo );
+    }
+    if ( strRaw.empty() ) return "임시 저장 적체";
+    unsigned long ulNum = 0;
+    if ( sscanf( strRaw.c_str(), "stall: store op in-flight > %lums", &ulNum ) == 1 )
+        return "저장소 응답 지연 (" + std::to_string( ulNum ) + "ms 초과)";
+    if ( strRaw == "backlog: op queue full" ) return "기록 대기열 가득 참";
+    if ( sscanf( strRaw.c_str(), "store op failures (%lu consecutive)", &ulNum ) == 1 )
+        return "기록 " + std::to_string( ulNum ) + "회 연속 실패";
+    return strRaw;
+}
 
 class CFmReporter {
 public:
@@ -169,14 +230,19 @@ public:
     void AlarmClose( const std::string &strCode, const std::string &strMo ) {
         if ( !m_bRunning ) return;
         std::string strAkey = strCode + "@" + strMo;
+        SimpleJson::JsonNode nodeParams;
         {
             std::lock_guard<std::mutex> lock( m_mutex );
-            if ( m_mapActive.erase( strAkey ) == 0 ) return;  // open 아님 — 전이 아님
+            std::map<std::string, FmActiveAlarm>::iterator it = m_mapActive.find( strAkey );
+            if ( it == m_mapActive.end() ) return;  // open 아님 — 전이 아님
+            nodeParams = it->second.nodeParams;     // 해제 문구도 발생 때의 값으로 대상을 이름으로 쓴다
+            m_mapActive.erase( it );
         }
         SimpleJson::JsonNode nodePayload;
         nodePayload.Set( "action", "close" );
         nodePayload.Set( "code", strCode );
         nodePayload.Set( "mo_instance", strMo );
+        if ( nodeParams.type == SimpleJson::JSON_OBJECT ) nodePayload.Set( "params", nodeParams );
         nodePayload.Set( "ts", FmNowIso() );
         SendFm( "FM_ALARM", nodePayload );
         Log( FM_LOG_INFO, "ALARM CLOSE %s", strAkey.c_str() );

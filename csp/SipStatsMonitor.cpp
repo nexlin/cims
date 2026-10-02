@@ -175,7 +175,7 @@ void CSipStatsMonitor::Evaluate( time_t tNow, int iWindowSec ) {
             nodeParams.Set( "count", (int)clsDelta.ulParseError );
             nodeParams.Set( "window", iWindowSec );
             nodeParams.Set( "ip", strTopSrc.empty() ? "-" : strTopSrc.c_str() );
-            if ( ulTopSrcCount > 0 ) nodeParams.Set( "top_count", (int)ulTopSrcCount );
+            nodeParams.Set( "top_count", (int)ulTopSrcCount );
             gclsFmReporter.AlarmOpen( "A-QOS-011", strRxMo, nodeParams, "minor" );
         } else {
             gclsFmReporter.AlarmClose( "A-QOS-011", strRxMo );
@@ -189,7 +189,7 @@ void CSipStatsMonitor::Evaluate( time_t tNow, int iWindowSec ) {
             nodeParams.Set( "count", (int)ulViolation );
             nodeParams.Set( "window", iWindowSec );
             nodeParams.Set( "ip", strViolationTopSrc.empty() ? "-" : strViolationTopSrc.c_str() );
-            if ( ulViolationTopCount > 0 ) nodeParams.Set( "top_count", (int)ulViolationTopCount );
+            nodeParams.Set( "top_count", (int)ulViolationTopCount );
             gclsFmReporter.AlarmOpen( "A-SEC-003", strPolicyMo, nodeParams, "major" );
         } else {
             gclsFmReporter.AlarmClose( "A-SEC-003", strPolicyMo );
@@ -203,7 +203,7 @@ void CSipStatsMonitor::Evaluate( time_t tNow, int iWindowSec ) {
             nodeParams.Set( "count", (int)ulSecAgreeReject );
             nodeParams.Set( "window", iWindowSec );
             nodeParams.Set( "ip", strSecAgreeTopSrc.empty() ? "-" : strSecAgreeTopSrc.c_str() );
-            if ( ulSecAgreeTopCount > 0 ) nodeParams.Set( "top_count", (int)ulSecAgreeTopCount );
+            nodeParams.Set( "top_count", (int)ulSecAgreeTopCount );
             gclsFmReporter.AlarmOpen( "A-SEC-004", strSecAgreeMo, nodeParams, "major" );
         } else {
             gclsFmReporter.AlarmClose( "A-SEC-004", strSecAgreeMo );
@@ -287,7 +287,11 @@ void CSipStatsMonitor::FireRateAlarm( const char *pszCode, const char *pszCompon
     nodeParams.Set( "window", iWindowSec );
     nodeParams.Set( "finals", (int)clsRate.ulFinals );
     nodeParams.Set( "failed", (int)( clsRate.ulFinals - clsRate.ulEffective ) );
-    if ( clsRate.iTopFailCode > 0 ) nodeParams.Set( "top_code", clsRate.iTopFailCode );
+    // 문구의 「최다 실패 코드 {top_code}」 — 실패 응답 코드가 없으면(로컬 타임아웃만 등) "-".
+    if ( clsRate.iTopFailCode > 0 )
+        nodeParams.Set( "top_code", clsRate.iTopFailCode );
+    else
+        nodeParams.Set( "top_code", "-" );
     gclsFmReporter.AlarmOpen( pszCode, strMo, nodeParams, pszSev );
 }
 

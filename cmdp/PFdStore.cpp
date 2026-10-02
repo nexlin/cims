@@ -1,7 +1,9 @@
 #include "PFdStore.h"
 #include "PLog.h"
 #include "SimpleJson.h"
+#include <cerrno>
 #include <cstdio>
+#include <cstring>
 #include <ctime>
 #include <fstream>
 #include <sstream>
@@ -30,6 +32,15 @@ static std::string _jsonEsc(const std::string& s) {
     return r;
 }
 
+bool PFdStore::fail(const std::string& what, int err) {
+    std::string msg = err ? what + ": " + strerror(err) : what;
+    LOG_ERROR("PFdStore", "%s", msg.c_str());
+    std::lock_guard<std::mutex> lk(_errMtx);
+    _lastError = msg;
+    _lastErrno = err;
+    return false;
+}
+
 std::string PFdStore::newFileId() {
     unsigned char raw[16];
     bool ok = false;
@@ -53,7 +64,7 @@ bool PFdStore::Store(const std::string& binContent, const std::string& rawMsrpBo
                      const std::string& msrpContentType, const std::string& name,
                      const std::string& mime, const std::string& group,
                      const std::string& uploader, std::string& outId) {
-    if (_dir.empty()) return false;
+    if (_dir.empty()) return fail("store dir not set", 0);
 
     time_t now = time(nullptr);
     struct tm t;
@@ -61,20 +72,16 @@ bool PFdStore::Store(const std::string& binContent, const std::string& rawMsrpBo
     char dateDir[512];
     snprintf(dateDir, sizeof(dateDir), "%s/%04d/%02d/%02d", _dir.c_str(),
              t.tm_year + 1900, t.tm_mon + 1, t.tm_mday);
-    if (!_mkdirP(dateDir) || !_mkdirP(_dir + "/index")) {
-        LOG_ERROR("PFdStore", "mkdir failed under %s: %s", _dir.c_str(), strerror(errno));
-        return false;
-    }
+    if (!_mkdirP(dateDir) || !_mkdirP(_dir + "/index")) return fail("mkdir failed under " + _dir, errno);
 
     std::string id = newFileId();
     std::string binPath = std::string(dateDir) + "/" + id + ".bin";
     {
         std::ofstream f(binPath, std::ios::binary);
-        if (!f) {
-            LOG_ERROR("PFdStore", "open failed: %s", binPath.c_str());
-            return false;
-        }
+        if (!f) return fail("open failed: " + binPath, errno);
         f.write(binContent.data(), (std::streamsize)binContent.size());
+        f.close();
+        if (f.fail()) return fail("write failed: " + binPath, errno);
     }
     if (!rawMsrpBody.empty()) {
         std::string msrpPath = std::string(dateDir) + "/" + id + ".msrp";
@@ -103,16 +110,12 @@ bool PFdStore::Store(const std::string& binContent, const std::string& rawMsrpBo
     std::string tmpPath = metaPath + ".tmp";
     {
         std::ofstream f(tmpPath, std::ios::binary);
-        if (!f) {
-            LOG_ERROR("PFdStore", "open failed: %s", tmpPath.c_str());
-            return false;
-        }
+        if (!f) return fail("open failed: " + tmpPath, errno);
         f.write(meta.data(), (std::streamsize)meta.size());
+        f.close();
+        if (f.fail()) return fail("write failed: " + tmpPath, errno);
     }
-    if (rename(tmpPath.c_str(), metaPath.c_str()) != 0) {
-        LOG_ERROR("PFdStore", "rename %s failed: %s", metaPath.c_str(), strerror(errno));
-        return false;
-    }
+    if (rename(tmpPath.c_str(), metaPath.c_str()) != 0) return fail("rename failed: " + metaPath, errno);
 
     outId = id;
     return true;

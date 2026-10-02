@@ -82,6 +82,8 @@ void EmitAffiliationChanged( const std::string &strGroupId, const char *pszActio
     p.Set( "action", pszAction );
     p.Set( "uri", strUserId );
     p.Set( "service", McServiceName( eService ) );
+    const std::string strAction = pszAction ? pszAction : "";
+    p.Set( "action_ko", strAction == "affiliate" ? "제휴" : strAction == "de-affiliate" ? "제휴 해제" : strAction );
     gclsFmReporter.SendEvent( "affiliation_changed", "audit", gclsFmReporter.Node() + "/csp", p );
 }
 

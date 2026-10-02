@@ -13,6 +13,7 @@
 #ifndef _P_FD_STORE_H_
 #define _P_FD_STORE_H_
 
+#include <mutex>
 #include <string>
 
 class PFdStore {
@@ -34,6 +35,11 @@ public:
                const std::string& mime, const std::string& group,
                const std::string& uploader, std::string& outId);
 
+    /** 마지막 Store 실패의 원문 사유(`open failed: <path>: <strerror>` 등)와 그 errno(0 = OS 오류 아님).
+     *  A-PRC-002 알람이 원인 한국어 구절 + 원문(reason_raw)으로 쓴다. Store 가 실패한 직후에만 의미. */
+    std::string LastError() const { std::lock_guard<std::mutex> lk(_errMtx); return _lastError; }
+    int LastErrno() const { std::lock_guard<std::mutex> lk(_errMtx); return _lastErrno; }
+
     /** MSRP 재전달용 원문 로드 — index/{id}.json 경유 */
     bool LoadRaw(const std::string& id, std::string& body, std::string& contentType);
 
@@ -42,6 +48,11 @@ public:
 
 private:
     std::string _dir;
+    mutable std::mutex _errMtx;
+    std::string _lastError;
+    int _lastErrno = 0;
+
+    bool fail(const std::string& what, int err);   // 사유 기록 + 로그, 항상 false
 
     static std::string newFileId();  // uuid4().hex 동형 32-hex
 };

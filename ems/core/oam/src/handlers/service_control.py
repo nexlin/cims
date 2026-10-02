@@ -36,6 +36,10 @@ from services import service_registry
 logger = Logger()
 
 
+# 이벤트 문구의 한국어 동작 — 원래 값(action)은 params 에 그대로.
+_ACTION_KO = {'START': '시작', 'STOP': '중지', 'RESTART': '재시작'}
+
+
 def _audit_service_action(config: dict, actor: str, actor_ip: str,
                           service: str, action: str, reason: str = "") -> None:
     """서비스 제어 감사 — 이벤트 스트림(event_log, kind=audit)에 기록
@@ -51,8 +55,10 @@ def _audit_service_action(config: dict, actor: str, actor_ip: str,
             'source': {'mo_class': 'software',
                        'mo_instance': f"{(config or {}).get('SystemId', 'oam')}/{service}",
                        'detected_by': 'oam'},
-            'message': f"Service {service} {action} by {actor} from {actor_ip}",
+            'message': (f"서비스 제어 — {actor}({actor_ip}) 이(가) {str(service).upper()} "
+                        f"{_ACTION_KO.get(str(action).upper(), action)}"),
             'params': {'actor': actor, 'actor_ip': actor_ip, 'action': action,
+                       'action_ko': _ACTION_KO.get(str(action).upper(), action),
                        'reason': (reason or '')[:512] or None},
         })
     except Exception as e:

@@ -279,7 +279,7 @@ export function AlarmByCodeBlock() {
                       <tr key={s.key || `${s.type}-${i}`}>
                         <Td className="font-mono text-xs">{s.code || '-'}</Td>
                         <Td>{alarmTypeLabel(s.type)}</Td>
-                        <Td><code className="text-xs">{s.mo_instance || '-'}</code></Td>
+                        <Td><code className="text-xs" title={s.mo_instance || ''}>{s.mo_label || s.mo_instance || '-'}</code></Td>
                         <Td>
                           {s.perceived_severity
                             ? <Badge variant={sevBadgeClass(s.perceived_severity)} >{s.perceived_severity}</Badge>
@@ -381,7 +381,7 @@ function useEventAggs() {
   const bySource = useMemo(() => {
     const m = new Map<string, SourceAgg>()
     for (const e of events) {
-      const src = e.source?.mo_instance || '-'
+      const src = e.source?.mo_label || e.source?.mo_instance || '-'
       let t = m.get(src)
       if (!t) { t = { source: src, count: 0, last: '' }; m.set(src, t) }
       t.count++

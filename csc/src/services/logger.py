@@ -71,6 +71,7 @@ _store = {
     'replayed_lines': 0,
     'dropped_lines': 0,
     'last_error': '',          # (lock)
+    'last_errno': 0,           # last_error 의 OS 오류 번호 (0 = OS 오류 아님, lock) — 알람 문구 한국어화용
     'seed': {},                # msg_path → 기동 시점 줄 수 (flusher 가 채움)
     'seed_done': False,
     # 불변 설정 (init 에서 확정)
@@ -261,7 +262,8 @@ def _reconcile_degrade():
         return
     _degraded = degraded
     with s['lock']:
-        reason = s['last_error'] or 'spool backlog'
+        raw, raw_errno = s['last_error'], s['last_errno']
+    reason = raw or 'spool backlog'
     if degraded:
         print(f"[service-log] 저장 경로 폴백 전환 — 로컬 스풀로 우회 ({reason}, "
               f"spool={s['spool_dir']}). 회복되면 자동 재생됩니다.", flush=True)
@@ -274,9 +276,12 @@ def _reconcile_degrade():
         if fm:
             mo = f"{_system_id}/csc/service_log"
             if degraded:
-                fm.alarm_open('A-PRC-006', mo, params={
-                    'path': _service_log_dir, 'reason': reason,
-                    'spooled': s['spooled_lines'], 'dropped': s['dropped_lines']})
+                params = {'path': _service_log_dir,
+                          'reason': fm_reporter.store_reason_ko(raw, raw_errno),
+                          'spooled': s['spooled_lines'], 'dropped': s['dropped_lines']}
+                if raw:
+                    params['reason_raw'] = raw      # 상세 「원문」 줄·검색용 (alarm_self_reporting.md)
+                fm.alarm_open('A-PRC-006', mo, params=params)
             else:
                 fm.alarm_close('A-PRC-006', mo)
     except Exception:
@@ -302,6 +307,7 @@ def _writer_loop():
             s['last_op_ok'] = False
             with s['lock']:
                 s['last_error'] = f"stall: store op in-flight > {s['stall_sec']}s"
+                s['last_errno'] = 0
 
         if batch:
             if not _route_batch(batch, False):
@@ -341,6 +347,7 @@ def _flush_batch_to_store(batch):
             s['nas_healthy'] = False
             with s['lock']:
                 s['last_error'] = f"write failed: {e}"
+                s['last_errno'] = e.errno or 0
             _spool_append(target, data, n)
 
 
@@ -397,6 +404,7 @@ def _replay_spool_one():
         s['nas_healthy'] = False
         with s['lock']:
             s['last_error'] = f"replay failed: {e}"
+            s['last_errno'] = e.errno or 0
     return True
 
 

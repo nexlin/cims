@@ -29,7 +29,9 @@ import { NONE, fromSel, toSel } from '@core/components/custom/select-value'
 import { DataTable, Th, Td } from '@core/components/custom/data-table'
 import { Badge } from '@core/components/ui/badge'
 import { EmptyState } from '@core/components/custom/empty-state'
+import { SearchInput } from '@core/components/custom/search-input'
 import { Checkbox } from '@core/components/ui/checkbox'
+import AlarmRawText, { alarmRawValues } from '../components/AlarmRawText'
 
 const PAGE_SIZE = 20
 const FETCH_LIMIT = 5000   // 서버 상한 — 창 안 레코드가 이보다 많으면 최신순 절단(표기)
@@ -151,7 +153,8 @@ function useAlarmHistory() {
       if (f.sev && severityOf(r) !== f.sev) return false
       if (f.code && r.code !== f.code) return false
       if (f.type && r.type !== f.type) return false
-      if (needle && ![r.code, r.type, r.message, r.source?.mo_instance, r.source?.mo_label, r.source?.detected_by]
+      if (needle && ![r.code, r.type, r.message, r.source?.mo_instance, r.source?.mo_label, r.source?.detected_by,
+                      ...alarmRawValues(r.params)]
         .some(v => (v || '').toLowerCase().includes(needle))) return false
       return true
     })
@@ -201,8 +204,8 @@ export function AlarmHistoryFilter() {
           {types.map(t => <SelectItem key={t} value={t}>{alarmTypeLabel(t)}</SelectItem>)}
         </SelectContent>
       </Select>
-      <Input className="flex-1 w-[170px]" placeholder="소스/메시지 검색"
-             value={f.q} onChange={e => alertsFilter.setAlarm({ q: e.target.value })}/>
+      <SearchInput className="flex-1 w-[170px]" placeholder="소스/메시지/원문 검색"
+                   value={f.q} onChange={q => alertsFilter.setAlarm({ q })}/>
       <label className="flex items-center gap-1 text-md whitespace-nowrap">
         <Checkbox  checked={f.showResolved} onCheckedChange={(c) => alertsFilter.setAlarm({ showResolved: (c === true) })} />
         해소 포함
@@ -363,6 +366,7 @@ function AlarmHistoryDetail({ r, isOpen, onAck, onComment }: {
       <DetailItem label="probableCause" value={r.probable_cause} />
       <DetailItem label="영향" value={r.effect} />
       <DetailItem label="권장 조치" value={r.recommended_action} />
+      <AlarmRawText params={r.params} />
       {r.threshold_info && (
         <DetailItem label="관측값"
           value={`${r.threshold_info.observed}${r.threshold_info.unit || ''} (임계 ${r.threshold_info.threshold}${r.threshold_info.unit || ''})`} />
@@ -453,7 +457,7 @@ function useEventHistory() {
     return events.filter(e => {
       if (f.type && e.type !== f.type) return false
       if (f.kind && e.kind !== f.kind) return false
-      if (needle && ![e.code, e.type, e.message, e.source?.mo_instance]
+      if (needle && ![e.code, e.type, e.message, e.source?.mo_instance, e.source?.mo_label]
         .some(v => (v || '').toLowerCase().includes(needle))) return false
       return true
     })
@@ -491,8 +495,8 @@ export function EventHistoryFilter() {
           {types.map(t => <SelectItem key={t} value={t}>{eventTypeLabel(t)}</SelectItem>)}
         </SelectContent>
       </Select>
-      <Input className="flex-1 w-[180px]" placeholder="코드/소스/메시지 검색"
-             value={f.q} onChange={e => alertsFilter.setEvent({ q: e.target.value })}/>
+      <SearchInput className="flex-1 w-[180px]" placeholder="코드/소스/메시지 검색"
+                   value={f.q} onChange={q => alertsFilter.setEvent({ q })}/>
       <Button variant="ghost" onClick={exportCsv} disabled={filtered.length === 0}>CSV</Button>
       {/* 실시간 감시 — 켜면 30초마다 자동 조회. 갱신 시각을 함께 보여준다: 값이 안 바뀌는
           구간에서 "멈춘 것"과 "새 알람이 없는 것"을 구별할 수 없으면 토글을 믿지 못한다. */}
@@ -567,7 +571,8 @@ export function EventsSection() {
                       </Td>
                       <Td className="font-mono text-xs">{ev.code || '-'}</Td>
                       <Td>{eventTypeLabel(ev.type)}</Td>
-                      <Td><code className="text-xs">{ev.source?.mo_instance || '-'}</code></Td>
+                      <Td><code className="text-xs" title={ev.source?.mo_instance || ''}>
+                        {ev.source?.mo_label || ev.source?.mo_instance || '-'}</code></Td>
                       <Td title={ev.source?.detected_by}>
                         {ev.message}
                         {n > 1 && (

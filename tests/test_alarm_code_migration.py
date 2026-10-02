@@ -413,6 +413,203 @@ class TestSipStatsSelfReport(unittest.TestCase):
         self.assertEqual(ing.state[akey]['severity'], 'critical')
 
 
+class TestFmCloseMessageParams(unittest.TestCase):
+    """해제 문구도 발생 때의 params 로 대상을 이름으로 쓴다 (fm_ingest).
+
+    모듈이 close 에 params 를 실으면 그것을, 안 실으면(구 모듈·reconcile 종결) OAM 이
+    발생 때 기억해 둔 값을 쓴다."""
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp(prefix='fm_close_')
+        from services.fm_ingest import FmIngest
+        self.ing = FmIngest({'FmIngest': {}}, self.dir)
+        self.node = 'csp_01'
+        self.ing.catalogs[self.node] = self.ing._index_catalog({
+            'node': self.node, 'module': 'csp',
+            'alarms': [{'code': 'A-COM-003', 'type': 'connection_lost',
+                        'perceived_severity': 'major',
+                        'msg_open': '연동 상대 {peer} 응답 없음 — {reason} (경로 {route})',
+                        'msg_close': '연동 상대 {peer} 연결 복구 (경로 {route})'}]})
+        self.ent = self.ing.nodes.setdefault(self.node, {'boot_id': 1, 'module': 'csp',
+                                                         'akeys': set(), 'seq': {}, 'last_sync': 0})
+        self.rule = self.ing.catalogs[self.node]['alarms']['A-COM-003']
+        self.mo = f'{self.node}/csp/peer/PEER_KT'
+
+    def tearDown(self):
+        shutil.rmtree(self.dir, ignore_errors=True)
+
+    def _close_msg(self):
+        recs = [r for r in alert_log.read_recent(self.dir, days=1) if r.get('action') == 'close']
+        self.assertEqual(len(recs), 1)
+        return recs[0]['message']
+
+    def test_close_without_params_uses_open_params(self):
+        self.ing._transition(self.node, self.ent, self.rule, self.mo, True,
+                             params={'peer': 'PEER_KT', 'route': 'r-kt',
+                                     'reason': 'OPTIONS 2회 연속 무응답'})
+        self.ing._transition(self.node, self.ent, self.rule, self.mo, False)
+        self.assertEqual(self._close_msg(), '연동 상대 PEER_KT 연결 복구 (경로 r-kt)')
+        self.assertNotIn(f'A-COM-003@{self.mo}', self.ing._open_params)
+
+    def test_record_keeps_params_with_raw(self):
+        self.ing._transition(self.node, self.ent, self.rule, self.mo, True,
+                             params={'peer': 'PEER_KT', 'route': 'r-kt',
+                                     'reason': 'OPTIONS 2회 연속 무응답',
+                                     'reason_raw': 'no reply within interval'})
+        rec = [r for r in alert_log.read_recent(self.dir, days=1) if r.get('action') == 'open'][0]
+        self.assertEqual(rec['params']['reason_raw'], 'no reply within interval')
+        self.assertNotIn('mo', rec['params'])
+
+    def test_close_without_any_values_avoids_blanks(self):
+        # 값을 남기지 않던 옛 레코드(배포 전 열린 알람)의 해제 — 빈칸 문장 대신 짧게 닫는다.
+        self.ing._transition(self.node, self.ent, self.rule, self.mo, True)
+        self.ing._transition(self.node, self.ent, self.rule, self.mo, False)
+        self.assertEqual(self._close_msg(), f'{self.mo} 정상화')
+
+    def test_restore_brings_back_open_params(self):
+        from services.fm_ingest import FmIngest
+        self.ing._transition(self.node, self.ent, self.rule, self.mo, True,
+                             params={'peer': 'PEER_KT', 'route': 'r-kt'})
+        ing2 = FmIngest({'FmIngest': {}}, self.dir)
+        ing2._restore()
+        self.assertEqual(ing2._open_params.get(f'A-COM-003@{self.mo}', {}).get('peer'), 'PEER_KT')
+
+    def test_close_params_from_module_win(self):
+        self.ing._transition(self.node, self.ent, self.rule, self.mo, True,
+                             params={'peer': 'PEER_KT', 'route': 'r-old'})
+        self.ing._transition(self.node, self.ent, self.rule, self.mo, False,
+                             params={'peer': 'PEER_KT', 'route': 'r-new'})
+        self.assertEqual(self._close_msg(), '연동 상대 PEER_KT 연결 복구 (경로 r-new)')
+
+
+class TestCscStoreReasonKo(unittest.TestCase):
+    """CSC 서비스 로그 사유 한국어화 — C++ FmStoreReasonKo 와 같은 표, 모르는 사유는 원문."""
+
+    def _fn(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location(
+            'csc_fm_reporter', os.path.join(_REPO, 'csc', 'src', 'services', 'fm_reporter.py'))
+        m = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(m)
+        return m.store_reason_ko
+
+    def test_mapping(self):
+        import errno
+        f = self._fn()
+        self.assertEqual(f("write failed: [Errno 28] No space left on device: '/x'", errno.ENOSPC),
+                         '디스크 공간 부족')
+        self.assertEqual(f('replay failed: [Errno 13] Permission denied', errno.EACCES),
+                         '재반영 중 권한 없음')
+        self.assertEqual(f('write failed: [Errno 8] Exec format error', errno.ENOEXEC),
+                         'write failed: [Errno 8] Exec format error')
+        self.assertEqual(f('stall: store op in-flight > 5s', 0), '저장소 응답 지연 (5초 초과)')
+        self.assertEqual(f('', 0), '임시 저장 적체')
+
+
+class TestOamAlarmWording(unittest.TestCase):
+    """OAM 판정 알람 문구 — 서버 이름으로 시작, 코드가 넘기는 값만 쓴다(빈칸 금지), 옛 seed 문구 이행."""
+
+    # check → _eval_agent_rule / sweep_service_rules 가 넘기는 치환 키
+    _KW = {
+        'disk_high': {'mo', 'host', 'pct', 'threshold'},
+        'cpu_high': {'mo', 'host', 'pct', 'threshold'},
+        'mem_high': {'mo', 'host', 'pct', 'threshold'},
+        'load_high': {'mo', 'host', 'pct', 'threshold', 'load'},
+        'mount_high': {'mo', 'host', 'pct', 'threshold', 'mount'},
+        'store_unavailable': {'mo', 'host', 'path', 'reason', 'reason_raw'},
+        'module_down': {'mo', 'host', 'module', 'MODULE'},
+        'config_drift': {'mo', 'host', 'module', 'MODULE', 'expected', 'actual', 'hash_raw'},
+        'oam_url_misdirect': {'mo', 'host', 'actual', 'expected'},
+        'cert_expiring': {'mo', 'host', 'days_left', 'not_after', 'threshold', 'cert_name'},
+        'cert_renew_failed': {'mo', 'host', 'module', 'MODULE', 'reason', 'reason_raw', 'days_left'},
+        'ha_flap': {'mo', 'host', 'svc', 'count', 'threshold'},
+        'agent_lost': {'mo', 'host'},
+        'process_unresponsive': {'mo', 'where', 'MODULE', 'threshold', 'db_host', 'db_port', 'db'},
+        'db_down': {'mo', 'where', 'MODULE', 'threshold', 'db_host', 'db_port', 'db'},
+        'rtp_pct_gte': {'mo', 'where', 'MODULE', 'pct', 'threshold', 'db_host', 'db_port', 'db'},
+    }
+
+    def test_templates_use_only_passed_keys_and_no_id_prefix(self):
+        seed = [service_registry.normalize_alert_rule(r) for d in service_registry._load_seed_files()
+                for r in (d.get('alert_rules') or [])]
+        checked = set()
+        for r in service_registry.alert_rules({}) + seed:
+            checked.add(r.get('check'))
+            kw = self._KW.get(r.get('check'))
+            if kw is None:
+                continue
+            for k in ('msg_open', 'msg_close'):
+                t = r.get(k) or ''
+                self.assertFalse(alarm_sweeper.missing_fields(t, {x: '' for x in kw}),
+                                 f"{r.get('check')} {k}: {t}")
+                self.assertFalse(t.startswith('{mo}'), f"{r.get('check')} {k} 가 내부 경로로 시작: {t}")
+        self.assertTrue({'process_unresponsive', 'db_down', 'rtp_pct_gte'} <= checked, checked)
+
+    def test_where_resolver_prefixes_kind(self):
+        w = alarm_sweeper.build_where_resolver({})
+        self.assertEqual(w('a99/csp'), 'a99')          # 모르는 루트는 그대로
+
+    def test_migrate_only_untouched_seed_msgs(self):
+        doc = {'alert_rules': [{'check': 'db_down', 'msg_open': 'NEW-O', 'msg_close': 'NEW-C'}]}
+        cur = {'alert_rules': [{'check': 'db_down', 'msg_open': '{mo} 연결 끊김', 'msg_close': '운영자 문구'}]}
+        n = service_registry._migrate_seed_alert_msgs(cur, doc)
+        self.assertEqual(n, 1)
+        self.assertEqual(cur['alert_rules'][0]['msg_open'], 'NEW-O')
+        self.assertEqual(cur['alert_rules'][0]['msg_close'], '운영자 문구')   # 고친 문구는 보존
+
+
+class TestEventWording(unittest.TestCase):
+    """이벤트 문구 — 카탈로그 msg 자리표시자가 모듈/OAM 이 넘기는 값뿐인지, OAM 이 {MODULE}·{node} 를 채우는지."""
+
+    _BASE = {'mo', 'node', 'MODULE'}           # fm_ingest._on_event 가 채우는 값
+    _PARAMS = {                                # 모듈이 보내는 params (csp/cmp/csc 발신부)
+        'process_started': set(), 'process_stopping': set(),
+        'call_monitored': {'phase', 'monitor', 'role', 'session', 'sesid', 'target_a', 'target_b', 'tap_mode',
+                           'dur_ms', 'kind_ko', 'phase_ko', 'monitor_num', 'target_a_num', 'target_b_num', 'who_ko'},
+        'emergency_mode_changed': {'action', 'condition', 'gid', 'uri', 'tier', 'sesid', 'action_ko', 'condition_ko'},
+        'affiliation_changed': {'gid', 'count', 'action', 'uri', 'action_ko'},
+        'regroup_changed': {'action', 'gid', 'scope', 'action_ko'},
+        'session_reclaimed': {'sid', 'reason', 'reason_ko', 'held'},
+        'config_change': {'actor', 'actor_ip', 'entity', 'entity_id', 'action', 'entity_ko', 'action_ko'},
+    }
+
+    def test_catalog_event_msgs_use_only_sent_keys(self):
+        for m in ('csp', 'cmp', 'cmdp', 'csc'):
+            with open(os.path.join(_REPO, m, 'config', 'fm_catalog.json'), encoding='utf-8') as f:
+                d = json.load(f)
+            for e in d.get('events', []):
+                keys = self._BASE | self._PARAMS[e['type']]
+                self.assertFalse(alarm_sweeper.missing_fields(e['msg'], {k: '' for k in keys}),
+                                 f"{m} {e['type']}: {e['msg']}")
+                self.assertFalse(e['msg'].isascii(), f"{m} {e['type']} 영어 문구: {e['msg']}")
+
+    def test_csc_catalog_declares_call_monitored(self):
+        with open(os.path.join(_REPO, 'csc', 'config', 'fm_catalog.json'), encoding='utf-8') as f:
+            ev = {e['type']: e for e in json.load(f)['events']}
+        self.assertEqual(ev.get('call_monitored', {}).get('code'), 'E-AUD-016')
+
+    def test_ingest_fills_module_and_node(self):
+        from services.fm_ingest import FmIngest
+        d = tempfile.mkdtemp(prefix='fm_ev_')
+        try:
+            ing = FmIngest({'FmIngest': {}}, d)
+            ing.catalogs['csp_01'] = ing._index_catalog({'node': 'csp_01', 'module': 'csp', 'events': [
+                {'type': 'process_started', 'code': 'E-STC-001', 'kind': 'stateChange',
+                 'msg': '{MODULE} 기동 완료 ({node})'},
+                {'type': 'regroup_changed', 'code': 'E-AUD-010', 'kind': 'audit',
+                 'msg': '즉석 그룹 {action_ko} — 그룹 {gid}'}]})
+            ent = {'module': 'csp'}
+            ing._on_event('csp_01', ent, {}, {'type': 'process_started', 'mo_instance': 'csp_01/csp'})
+            ing._on_event('csp_01', ent, {}, {'type': 'regroup_changed', 'mo_instance': 'csp_01/csp',
+                                               'params': {'action': 'created', 'gid': 'g9'}})   # 구 모듈 — action_ko 없음
+            from services import event_log
+            msgs = sorted(r['message'] for r in event_log.read_recent(d, days=1))
+            self.assertIn('CSP 기동 완료 (csp_01)', msgs)
+            self.assertIn('regroup_changed (csp_01/csp)', msgs)     # 빈칸 문장 대신 기본값
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+
+
 class TestCatalogCsvInvariants(unittest.TestCase):
     """alarm_catalog.csv 불변식 (alarm_catalog.md §8)."""
 

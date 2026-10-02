@@ -8,8 +8,8 @@
       "probable_cause": "communicationsSubsystemFailure",
       "mo_class": "service",
       "metric": "CSP DB 연결",
-      "msg_open": "DB connection lost (host={host}, port={port}, db={db})",
-      "msg_close": "DB connection restored ({mo})",
+      "msg_open": "DB 연결 끊김 — {host}:{port} ({db}) 접속 실패",
+      "msg_close": "DB 연결 복구 — {host}:{port} ({db})",
       "effect": "가입자/그룹 DB 조회·호이력 기록 실패 — 신규 등록/호 설정 기능 저하 (파일 fallback 범위로 축소)",
       "recommended_action": "DB 서버 상태·네트워크·계정 확인, csp.json Database 설정 점검"
     },
@@ -21,8 +21,8 @@
       "probable_cause": "communicationsSubsystemFailure",
       "mo_class": "service",
       "metric": "CSP-CMP 제어 채널",
-      "msg_open": "Media plane (CMP) control lost — media setup/announcement/recording/floor control unavailable",
-      "msg_close": "Media plane (CMP) control restored ({mo})",
+      "msg_open": "CMP {cmp} 제어 연결 끊김 — 미디어 수립·안내방송·녹취·발언권 제어 불가",
+      "msg_close": "CMP {cmp} 제어 연결 복구",
       "effect": "경계/부가/그룹콜 미디어 기능 전면 불가 — 미디어 수립·안내방송/녹취·발언권 제어 (IBCF/TAS/PTT-AS 역할 합집합)",
       "recommended_action": "CMP 프로세스/제어 채널(UDP 9001 계열)·네트워크 확인"
     },
@@ -34,8 +34,8 @@
       "probable_cause": "thresholdCrossed",
       "mo_class": "service",
       "metric": "호 성공률 (INVITE 최종응답 유효율 — 로컬 합성 408/660 포함, 단계 임계는 통지 severity)",
-      "msg_open": "Call success rate is {observed}% (CRI:{crit}, MAJ:{maj}, MIN:{min})",
-      "msg_close": "Call success rate recovered ({mo})",
+      "msg_open": "호 성공률 {observed}% — 최근 {window}초 {finals}건 중 {failed}건 실패, 최다 실패 코드 {top_code} (기준 CRI {crit}% · MAJ {maj}% · MIN {min}%)",
+      "msg_close": "호 성공률 회복",
       "effect": "다수 호 실패 진행 중 — 원인 불문 서비스 품질 저하",
       "recommended_action": "실패 응답 코드 분포(params top_code)·flow 로그로 원인 축 식별, 원천(DB/CSC/CMP)·대국 상태 확인"
     },
@@ -47,8 +47,8 @@
       "probable_cause": "thresholdCrossed",
       "mo_class": "service",
       "metric": "등록 성공률 (REGISTER 최종응답 유효율 — 챌린지 401/407/423 제외)",
-      "msg_open": "Registration success rate is {observed}% (CRI:{crit}, MAJ:{maj}, MIN:{min})",
-      "msg_close": "Registration success rate recovered ({mo})",
+      "msg_open": "등록 성공률 {observed}% — 최근 {window}초 {finals}건 중 {failed}건 실패, 최다 실패 코드 {top_code} (기준 CRI {crit}% · MAJ {maj}% · MIN {min}%)",
+      "msg_close": "등록 성공률 회복",
       "effect": "단말 대량 이탈·착신 불가 확산",
       "recommended_action": "인증 실패/원천(DB·CSC) 장애/네트워크 축 구분, 실패 코드 분포 확인"
     },
@@ -60,8 +60,8 @@
       "probable_cause": "thresholdCrossed",
       "mo_class": "service",
       "metric": "신규 INVITE 유입 rate (CPS — 상한 단계 임계, 기본 off)",
-      "msg_open": "Signaling inflow is {observed} CPS (CRI:{crit}, MAJ:{maj}, MIN:{min})",
-      "msg_close": "Signaling inflow returned below threshold ({mo})",
+      "msg_open": "SIP 유입량 {observed} CPS — 임계 초과 (기준 CRI {crit} · MAJ {maj} · MIN {min} CPS)",
+      "msg_close": "SIP 유입량 정상 범위로 복귀",
       "effect": "처리 지연·과부하 진입 전조",
       "recommended_action": "유입원 확인·과부하 제어 준비, 수용량 대비 임계(SipStats.Cps*) 적정성 점검"
     },
@@ -73,8 +73,8 @@
       "probable_cause": "thresholdCrossed",
       "mo_class": "service",
       "metric": "SIP 수신 이상 (파싱 실패 건수/윈도우 — 소스 IP 동반)",
-      "msg_open": "SIP receive errors surging: {count} malformed/invalid messages in {window}s (top source {ip})",
-      "msg_close": "SIP receive errors subsided ({mo})",
+      "msg_open": "SIP 수신 오류 급증 — {window}초 동안 형식 오류 메시지 {count}건 (최다 발신지 {ip}, {top_count}건)",
+      "msg_close": "SIP 수신 오류 진정",
       "effect": "피어 오동작/공격/호환성 문제 진행",
       "recommended_action": "소스 IP 분포 확인·차단/억제 검토 (params ip/top_count)"
     },
@@ -86,8 +86,8 @@
       "probable_cause": "unauthorizedAccessAttempt",
       "mo_class": "service",
       "metric": "채널 정책(TLS 강제) 위반 반복 (게이트 403 건수/윈도우 — 소스 IP 동반)",
-      "msg_open": "Channel policy violations surging: {count} non-TLS requests for TLS-enforced identities in {window}s (top source {ip})",
-      "msg_close": "Channel policy violations subsided ({mo})",
+      "msg_open": "TLS 전용 가입자의 비TLS 접속 급증 — {window}초 동안 {count}건 거절 (최다 발신지 {ip}, {top_count}건)",
+      "msg_close": "TLS 전용 가입자의 비TLS 접속 진정",
       "effect": "보호 채널(TLS) 우회 시도(스캔) 또는 단말 대량 오설정 진행 — 위반 요청 자체는 게이트가 403 으로 차단 중",
       "recommended_action": "소스 IP 분포 확인(params ip/top_count)·차단 검토. 정상 단말이면 가입자 sip_transport 정책과 단말 TLS 프로비저닝 확인"
     },
@@ -99,8 +99,8 @@
       "probable_cause": "unauthorizedAccessAttempt",
       "mo_class": "service",
       "metric": "sec-agree 협상 거절 반복 (RFC 3329 494/421 건수/윈도우 — 소스 IP 동반)",
-      "msg_open": "Security agreement rejections surging: {count} sec-agree failures (494/421) in {window}s (top source {ip})",
-      "msg_close": "Security agreement rejections subsided ({mo})",
+      "msg_open": "보안 협상(sec-agree) 거절 급증 — {window}초 동안 494/421 응답 {count}건 (최다 발신지 {ip}, {top_count}건)",
+      "msg_close": "보안 협상(sec-agree) 거절 진정",
       "effect": "보안 메커니즘 강등(Security-Verify 변조) 시도 또는 단말 대량 오설정(제안 없음·Verify 생략) 진행 — 거절 요청 자체는 494/421 로 차단 중",
       "recommended_action": "소스 IP 분포 확인(params ip/top_count)·차단 검토. 정상 단말이면 단말의 Security-Client/Verify 구현과 Setup.SecAgree.Require 정책 확인"
     },
@@ -112,8 +112,8 @@
       "probable_cause": "communicationsSubsystemFailure",
       "mo_class": "peer",
       "metric": "트렁크/IBCF 피어(remote_node) OPTIONS 헬스체크",
-      "msg_open": "Peer {peer} unreachable: OPTIONS keepalive timeout ({fails} consecutive, route {route}, {reason})",
-      "msg_close": "Peer connectivity restored ({mo})",
+      "msg_open": "연동 상대 {peer} 응답 없음 — {reason} (경로 {route})",
+      "msg_close": "연동 상대 {peer} 연결 복구 (경로 {route})",
       "effect": "해당 Route 가 dead 로 전이해 RouteSet 분배에서 제외됨 — 이 피어 방향 호는 다른 멤버로 우회하거나(failover) 전원 dead 면 fallback_policy 로 거절",
       "recommended_action": "대국 상태·네트워크·방화벽(OPTIONS 응답) 확인. 회복은 recovery_probes 연속 성공 뒤 자동"
     },
@@ -125,8 +125,8 @@
       "probable_cause": "underlyingResourceUnavailable",
       "mo_class": "service",
       "metric": "호 이력(CDR)/실시간 상태 파일 기록 (call_dir)",
-      "msg_open": "Call history (CDR) writes failing on {path} ({reason}) — {dropped} ops dropped",
-      "msg_close": "Call history store recovered ({mo})",
+      "msg_open": "호 이력(CDR) 기록 실패 — {path}: {reason}, {dropped}건 유실",
+      "msg_close": "호 이력(CDR) 기록 복구 — {path}",
       "effect": "호 이력(call.json/session.json/events)·실시간 상태 파일 기록이 유실되는 중 — 과금/이력/콘솔 실시간 현황 공백 (호 처리 자체는 정상). 재생 불가 연산이라 장애 구간은 소급 복구되지 않는다",
       "recommended_action": "ServiceLogging.Dir 볼륨(NAS/NFS) 마운트·권한·용량 확인. 회복되면 이후 기록은 재개되나 장애 구간 유실분은 params.dropped 로 산정"
     },
@@ -138,8 +138,8 @@
       "probable_cause": "underlyingResourceUnavailable",
       "mo_class": "service",
       "metric": "서비스 로그(flow/msg) 저장 경로 기록",
-      "msg_open": "Service log writes failing on {path} ({reason}) — diverted to local spool ({spooled} lines, {dropped} dropped)",
-      "msg_close": "Service log store recovered — local spool drained ({mo})",
+      "msg_open": "서비스 로그 기록 실패 — {path}: {reason}, 로컬 임시 저장 {spooled}줄 (유실 {dropped}줄)",
+      "msg_close": "서비스 로그 기록 복구 — 임시 저장분 반영 완료 ({path})",
       "effect": "flow/msg 로그가 로컬 스풀로 우회 중 — 콘솔 Flow/이력 조회에 최신 구간 미표시 (회복 시 재생되어 자동 보완). SIP 처리에는 영향 없음",
       "recommended_action": "ServiceLogging.Dir 볼륨(NAS/NFS) 마운트·권한·용량 확인. 회복되면 스풀이 자동 재생되고 알람은 자연 회수된다"
     },
@@ -151,8 +151,8 @@
       "probable_cause": "thresholdCrossed",
       "mo_class": "service",
       "metric": "TLS 인증서 잔여 유효기간",
-      "msg_open": "TLS certificate for {listener} expires in {days_left} days (threshold {threshold}, notAfter {not_after})",
-      "msg_close": "TLS certificate for {mo} is within validity threshold",
+      "msg_open": "TLS 인증서 만료 임박 — {listener} {days_left}일 남음 (만료 {not_after}, 경보 기준 {threshold}일)",
+      "msg_close": "TLS 인증서 유효 기간 정상 — {listener}",
       "effect": "만료 시 서버 인증서를 검증하는 단말 전부가 동시에 등록 불가 — 접속점 단위 단일 장애점. 만료 전에는 서비스 영향 없음",
       "recommended_action": "인증서 재발급 후 local_nodes 의 tls_cert_path 갱신. ⚠ 인증서 경로는 기동 캡처 항목이라 SIGUSR1 만으로는 반영되지 않고 CSP 재기동이 필요하다. 잔여 7일 이하면 critical 로 상향된다"
     },
@@ -164,8 +164,8 @@
       "probable_cause": "configurationOrCustomizationError",
       "mo_class": "service",
       "metric": "SIP 리스너 개설",
-      "msg_open": "SIP listener open failed ({protocol} {bind_ip}:{port})",
-      "msg_close": "SIP listener restored ({mo})",
+      "msg_open": "SIP 수신점 열기 실패 — {protocol} {bind_ip}:{port}",
+      "msg_close": "SIP 수신점 복구 — {protocol} {bind_ip}:{port}",
       "effect": "해당 접속점만 서비스 불가 — 그 transport 로 등록/호 설정 불가. 다른 transport 는 정상",
       "recommended_action": "포트 점유·바인드 IP 확인. TLS 면 인증서/키 파일 경로와 짝(cert+key)·권한·만료 확인 (local_nodes 의 tls_cert_path/tls_key_path)"
     }
@@ -175,37 +175,37 @@
       "type": "process_started",
       "code": "E-STC-001",
       "kind": "stateChange",
-      "msg": "Process started: {mo}"
+      "msg": "{MODULE} 기동 완료 ({node})"
     },
     {
       "type": "process_stopping",
       "code": "E-STC-002",
       "kind": "stateChange",
-      "msg": "Process stopping (graceful): {mo}"
+      "msg": "{MODULE} 정상 종료 시작 ({node})"
     },
     {
       "type": "call_monitored",
       "code": "E-AUD-016",
       "kind": "audit",
-      "msg": "Call monitored: {monitor} → session {session} ({phase})"
+      "msg": "{kind_ko} {phase_ko} — {who_ko}"
     },
     {
       "type": "emergency_mode_changed",
       "code": "E-STC-007",
       "kind": "stateChange",
-      "msg": "Emergency mode {action} (group {gid}, user {uri})"
+      "msg": "{condition_ko} 모드 {action_ko} — 그룹 {gid}, 사용자 {uri}"
     },
     {
       "type": "affiliation_changed",
       "code": "E-AUD-009",
       "kind": "audit",
-      "msg": "Affiliation updated (group {gid}, {count} members)"
+      "msg": "그룹 {action_ko} — 사용자 {uri}, 그룹 {gid} (현재 {count}명)"
     },
     {
       "type": "regroup_changed",
       "code": "E-AUD-010",
       "kind": "audit",
-      "msg": "Regroup {action} (group {gid}, {scope})"
+      "msg": "즉석 그룹 {action_ko} — 그룹 {gid}"
     }
   ]
 }

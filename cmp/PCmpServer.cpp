@@ -206,11 +206,12 @@ void PCmpServer::fmMonitorLoop() {
             annTotal = _annPlayers;
             annFree = _annPlayers - countAnnPlayers();
         }
-        const struct { const char* comp; int freeN; int total; } pools[4] = {
-            {"rtp_pool", relayFree, relayTotal},
-            {"ptt_floor_pool", pttFree, pttTotal},
-            {"ptt_member_pool", memberFree, memberTotal},
-            {"ann_pool", annFree, annTotal},   // 안내 재생기 슬롯(announcements.md §10) — 같은 풀 고갈 알람
+        // nameKo — 알람 문구의 {pool_name}(감시창에 뜨는 사람 말). comp 는 mo·{pool} 의 식별자.
+        const struct { const char* comp; const char* nameKo; int freeN; int total; } pools[4] = {
+            {"rtp_pool", "RTP 중계 자원", relayFree, relayTotal},
+            {"ptt_floor_pool", "PTT 그룹 자원", pttFree, pttTotal},
+            {"ptt_member_pool", "PTT 멤버 자원", memberFree, memberTotal},
+            {"ann_pool", "안내 재생기", annFree, annTotal},   // 안내 재생기 슬롯(announcements.md §10) — 같은 풀 고갈 알람
         };
         for (const auto& p : pools) {
             if (p.total <= 0) continue;  // 미구성 풀은 판정 제외
@@ -218,6 +219,7 @@ void PCmpServer::fmMonitorLoop() {
             if (p.freeN == 0) {
                 SimpleJson::JsonNode params;
                 params.Set("pool", p.comp);
+                params.Set("pool_name", p.nameKo);
                 params.Set("used", p.total);
                 params.Set("total", p.total);
                 gclsFmReporter.AlarmOpen("A-QOS-002", mo, params);
@@ -1372,6 +1374,28 @@ void PCmpServer::reloadAnnouncements() {
              annRootPath().c_str(), annOpRootPath().c_str(), annOpCatalogPath().c_str(), (int)missing.size());
 }
 
+// A-PRC-034 문구의 {first} — PAnnCatalog 가 남긴 항목 오류(영문 원문)의 오류 종류만 한국어로 바꾼다.
+//   형식: `<id>/<codec>: <err>` 또는 `<catalog>:<line>: <err>`. 모르는 오류는 원문 그대로(first_raw 에 원문 보존).
+static std::string annMissingKo(const std::string& raw) {
+    static const struct { const char* en; const char* ko; } kMap[] = {
+        {": file not found (", " 파일 없음 ("},
+        {": size not a multiple of 160", " G.711 크기 오류(160 배수 아님)"},
+        {": bad AMR-WB frame type", " AMR-WB 프레임 형식 오류"},
+        {": truncated AMR-WB frame", " AMR-WB 프레임 잘림"},
+        {": no AMR-WB frames", " AMR-WB 프레임 없음"},
+        {": unsupported codec", " 지원하지 않는 코덱"},
+        {": not a JSON object", " 카탈로그 행 형식 오류"},
+        {": id required", " 카탈로그 행에 id 없음"},
+        {": files required", " 카탈로그 행에 files 없음"},
+        {": no usable codec file", " 쓸 수 있는 코덱 파일 없음"},
+    };
+    for (const auto& m : kMap) {
+        size_t pos = raw.find(m.en);
+        if (pos != std::string::npos) return raw.substr(0, pos) + m.ko + raw.substr(pos + strlen(m.en));
+    }
+    return raw;
+}
+
 // 카탈로그가 가리키는 파일 누락·형식 오류 — A-PRC-034 media_missing (announcements.md §10). 해소되면 close.
 void PCmpServer::updateAnnMissingAlarm(const std::vector<std::string>& missing) {
     if (!gclsFmReporter.IsEnabled()) return;
@@ -1381,7 +1405,8 @@ void PCmpServer::updateAnnMissingAlarm(const std::vector<std::string>& missing) 
         params.Set("count", (int)missing.size());
         std::string first = missing.front();
         if (first.size() > 160) first = first.substr(0, 160);
-        params.Set("first", first);
+        params.Set("first", annMissingKo(first));
+        params.Set("first_raw", first);
         params.Set("root", annRootPath());
         gclsFmReporter.AlarmOpen("A-PRC-034", mo, params);
         _annMissingAlarm = true;
@@ -2921,6 +2946,8 @@ void PCmpServer::timeoutLoop() {
                 SimpleJson::JsonNode fmParams;
                 fmParams.Set("sid", a.sid);
                 fmParams.Set("reason", a.reason);
+                fmParams.Set("reason_ko", a.reason == "hold_timeout" ? "점유 시간 초과"
+                                          : a.reason == "orphan_no_rtp" ? "RTP 없는 고아 세션" : a.reason);
                 fmParams.Set("held", a.heldSec);
                 gclsFmReporter.SendEvent("session_reclaimed", "audit",
                                          _systemId + "/" + _nodeName, fmParams);
@@ -3222,7 +3249,8 @@ void PCmpServer::startServiceLogWriter() {
             if (d.bDegraded) {
                 SimpleJson::JsonNode params;
                 params.Set("path", _serviceLogDir.c_str());
-                params.Set("reason", d.strReason.empty() ? "spool backlog" : d.strReason.c_str());
+                params.Set("reason", FmStoreReasonKo(d.strReason, d.iErrno));
+                if (!d.strReason.empty()) params.Set("reason_raw", d.strReason);
                 params.Set("spooled", (int)d.ulSpooledLines);
                 params.Set("dropped", (int)d.ulDroppedLines);
                 gclsFmReporter.AlarmOpen("A-PRC-006", mo, params);
@@ -3250,7 +3278,8 @@ void PCmpServer::startRecStoreWriter() {
             if (d.bDegraded) {
                 SimpleJson::JsonNode params;
                 params.Set("path", recPath.c_str());
-                params.Set("reason", d.strReason.c_str());
+                params.Set("reason", FmStoreReasonKo(d.strReason, 0));
+                if (!d.strReason.empty()) params.Set("reason_raw", d.strReason);
                 params.Set("dropped", (int)d.ulDroppedOps);
                 gclsFmReporter.AlarmOpen("A-PRC-017", mo, params);
             } else {

@@ -16,6 +16,8 @@ import { Input } from '@core/components/ui/input'
 import { DataTable, Th, Td } from '@core/components/custom/data-table'
 import { Badge } from '@core/components/ui/badge'
 import { EmptyState } from '@core/components/custom/empty-state'
+import { SearchInput } from '@core/components/custom/search-input'
+import AlarmRawText, { alarmRawValues } from '../components/AlarmRawText'
 
 function elapsedSince(ts?: string): string {
   const t = new Date(ts || '').getTime()
@@ -42,6 +44,7 @@ function AlarmDetail({ a, onAck, onComment }: {
       {item('probableCause', a.probable_cause)}
       {item('영향', a.effect)}
       {item('권장 조치', a.recommended_action)}
+      <AlarmRawText params={a.params} />
       {a.threshold_info && item('관측값', `${a.threshold_info.observed}${a.threshold_info.unit || ''} (임계 ${a.threshold_info.threshold}${a.threshold_info.unit || ''})`)}
       {(a.occurrences ?? 1) > 1 && item('재통지', `해제 없이 ${a.occurrences}회 — 최근 ${fmtTime(a.last_open_ts)}`)}
       {a.acked && item('승인', `${a.ackUser || ''}`)}
@@ -105,7 +108,7 @@ export function ActiveAlarmList() {
     const needle = q.trim().toLowerCase()
     return active.filter(a => {
       if (sevFilter && severityOf(a) !== sevFilter) return false
-      if (needle && ![a.code, a.type, a.message, a.source?.mo_instance, a.source?.mo_label]
+      if (needle && ![a.code, a.type, a.message, a.source?.mo_instance, a.source?.mo_label, ...alarmRawValues(a.params)]
         .some(v => (v || '').toLowerCase().includes(needle))) return false
       return true
     })
@@ -126,8 +129,8 @@ export function ActiveAlarmList() {
     <div className="widget-stack">
 
       <div className="toolbar flex items-center gap-2.5 border-b border-border bg-muted px-4 py-3 flex-wrap gap-2">
-        <Input className="flex-1 w-[260px]" placeholder="코드/소스/메시지 검색"
-               value={q} onChange={e => setQ(e.target.value)}/>
+        <SearchInput className="flex-1 w-[260px]" placeholder="코드/소스/메시지/원문 검색"
+                     value={q} onChange={setQ}/>
         <span style={{ marginLeft: 'auto', fontSize: 12, color: error ? 'var(--destructive)' : 'var(--muted-foreground)' }}>
           {error ? '갱신 실패 — 표시가 최신이 아닐 수 있음' : lastUpdated ? `갱신 ${fmtTime(new Date(lastUpdated).toISOString())} · 라이브` : ''}
         </span>

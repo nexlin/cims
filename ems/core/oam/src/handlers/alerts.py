@@ -234,7 +234,17 @@ async def handle_alerts(handler_args: HandlerArgs, kwargs: dict) -> HandlerResul
 
         if parts and parts[0] == 'summary':
             sdays = max(1, min(int(qp('days', '7')), 90))
-            return HandlerResult(status=200, body=alert_log.compute_summary(base, days=sdays))
+            summ = alert_log.compute_summary(base, days=sdays)
+            # 인스턴스별 행에도 표시 이름(mo_label) — 다른 알람 화면의 소스 칸과 같은 값.
+            try:
+                from services import alarm_sweeper
+                _label = alarm_sweeper.build_mo_label_resolver(config)
+                for row in summ.get('by_type') or []:
+                    if isinstance(row, dict) and row.get('mo_instance'):
+                        row['mo_label'] = _label(row['mo_instance'])
+            except Exception:
+                pass
+            return HandlerResult(status=200, body=summ)
 
         days = max(1, min(int(qp('days', '7')), 90))
         limit = max(1, min(int(qp('limit', '500')), 5000))

@@ -85,6 +85,7 @@ class FmIngest:
         self.catalogs: dict = {}          # node -> {'module', 'alarms': {code: rule}, 'events': {type: def}}
         self._responses: OrderedDict = OrderedDict()   # (node, trans_id) -> bytes
         self.state: dict = {}             # akey -> alarm_id (자기보고 계열만)
+        self._open_params: dict = {}      # akey -> 발생 때 params (해제 문구 렌더용 — 재기동 시 레코드 params 로 복원)
         self._sock = None
         self._thread = None
         self._stop = threading.Event()
@@ -139,6 +140,8 @@ class FmIngest:
                     node = seg[0] if seg and seg[0] else (mo or akey)
             self.state[akey] = {'alarm_id': m['alarm_id'],
                                 'severity': m.get('perceived_severity')}
+            if m.get('params'):
+                self._open_params[akey] = dict(m['params'])   # 재기동 뒤 해제 문구도 이름으로
             ent = self.nodes.setdefault(node, {'boot_id': None, 'module': '',
                                                'akeys': set(), 'seq': {}, 'last_sync': now})
             ent['akeys'].add(akey)
@@ -262,8 +265,13 @@ class FmIngest:
         mo = _normalize_mo(payload.get('mo_instance')) \
             or f"{node}/{ent.get('module') or node}"
         params = payload.get('params') or {}
-        from services.alarm_sweeper import fmt
-        message = payload.get('message') or fmt(cat.get('msg', ''), **{**params, 'mo': mo}) or etype
+        from services.alarm_sweeper import fmt, missing_fields
+        # 문구 치환 값 — 모듈 params + {mo} + OAM 이 채우는 {MODULE}(모듈 이름 대문자)·{node}(발신 노드).
+        kw = {**params, 'mo': mo, 'node': node, 'MODULE': str(ent.get('module') or '').upper()}
+        tmpl = cat.get('msg', '')
+        if missing_fields(tmpl, kw):
+            tmpl = ''   # 값이 모자란 송신(구 모듈 등) — 빈칸 문장 대신 아래 기본값
+        message = payload.get('message') or fmt(tmpl, **kw) or f"{etype} ({mo})"
         rec = {
             'ts': payload.get('ts') or _now_iso(),
             'type': etype,
@@ -295,15 +303,28 @@ class FmIngest:
             # X.733: 심각도 미지정은 indeterminate — 통지·카탈로그 둘 다 없을 때 warning
             # 으로 임의 판정하지 않는다 (emit_alarm 기본값 대체).
             r['perceived_severity'] = 'indeterminate'
-        kw = {**(params or {}), 'mo': mo}
+        akey = f"{r.get('code')}@{mo}"
+        # 해제 문구도 발생 때의 값으로 대상을 이름으로 쓴다 — 모듈이 close 에 params 를 실어
+        #   보내면 그것을, 없으면(구 모듈·reconcile 종결) 발생 때 기억해 둔 값을 쓴다.
+        if is_open:
+            if params:
+                self._open_params[akey] = dict(params)
+            kw = {**(params or {}), 'mo': mo}
+        else:
+            kw = {**self._open_params.pop(akey, {}), **(params or {}), 'mo': mo}
         msg_open = message or alarm_sweeper.fmt(r.get('msg_open', ''), **kw) \
             or f"{mo} {r.get('type')}"
-        msg_close = message or alarm_sweeper.fmt(r.get('msg_close', ''), **kw) \
+        # 해제 문구 자리를 채울 값이 없으면(값을 남기지 않던 옛 레코드의 해제 등) 빈칸 문장 대신 짧게.
+        tmpl_close = r.get('msg_close', '')
+        if not is_open and alarm_sweeper.missing_fields(tmpl_close, kw):
+            tmpl_close = ''
+        msg_close = message or alarm_sweeper.fmt(tmpl_close, **kw) \
             or f"{mo} 정상화"
-        akey = f"{r.get('code')}@{mo}"
         was = akey in self.state
+        rec_params = {k: v for k, v in kw.items() if k != 'mo'}
         alarm_sweeper.transition(self.state, self.dir, r, mo, 'self',
-                                 is_open, msg_open, msg_close, log=self.log)
+                                 is_open, msg_open, msg_close, log=self.log,
+                                 params=rec_params or None)
         if is_open and not was:
             ent['akeys'].add(akey)
         elif not is_open and was:
@@ -332,7 +353,7 @@ class FmIngest:
                 self._transition(node, ent, rule, mo, False)
             else:   # 카탈로그에서 사라진 클래스 — 최소 정보로 종결
                 self._transition(node, ent,
-                                 {'code': code, 'type': code, 'msg_close': '{mo} 정리'},
+                                 {'code': code, 'type': code, 'msg_close': '모듈 카탈로그에서 빠진 알람이라 닫음'},
                                  mo, False)
 
     def _check_stale(self):
@@ -351,7 +372,8 @@ class FmIngest:
                 code, mo = akey.split('@', 1)
                 rule = cat.get(code) or {'code': code, 'type': code}
                 self._transition(node, ent, dict(rule), mo, False,
-                                 message=f"{mo} 자기보고 두절 — 판정 불가 종결")
+                                 message=f"판정 불가로 닫음 — {node} 자기보고 끊김 "
+                                         f"(동기 {_STALE_SYNC_MISSES}회 연속 누락)")
             ent['last_sync'] = now    # 반복 종결 방지
 
     # ── helpers ──────────────────────────────────────────────────────────

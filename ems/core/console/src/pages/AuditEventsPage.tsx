@@ -84,7 +84,7 @@ export function AuditEventsSection() {
       if (filterType && e.type !== filterType) return false
       if (filterPhase && p.phase !== filterPhase) return false
       if (needle && ![e.code, e.type, e.message, p.monitor, p.role, p.group, p.session, p.target_a, p.target_b,
-                      e.source?.mo_instance]
+                      e.source?.mo_instance, e.source?.mo_label]
         .some(v => (v || '').toString().toLowerCase().includes(needle))) return false
       return true
     })

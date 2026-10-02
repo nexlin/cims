@@ -8,8 +8,8 @@
       "probable_cause": "storageCapacityProblem",
       "mo_class": "software",
       "metric": "MCData FD 스토어",
-      "msg_open": "FD/file store write failure ({path}) — incoming SDS/FD being lost",
-      "msg_close": "FD/file store write restored ({mo})",
+      "msg_open": "MCData 파일 저장 실패 — {path}: {reason}, 수신 중인 대용량 SDS·파일 유실",
+      "msg_close": "MCData 파일 저장 복구 — {path}",
       "effect": "대용량 SDS/FD 수신분 저장 실패 — MSRP_ABORTED(store_error) 로 세션 중단",
       "recommended_action": "스토어 디렉토리 권한/마운트/디스크 용량 확인 (McDataFd.Dir)"
     },
@@ -21,8 +21,8 @@
       "probable_cause": "underlyingResourceUnavailable",
       "mo_class": "service",
       "metric": "서비스 로그(flow/msg) 저장 경로 기록",
-      "msg_open": "Service log writes failing on {path} ({reason}) — diverted to local spool ({spooled} lines, {dropped} dropped)",
-      "msg_close": "Service log store recovered — local spool drained ({mo})",
+      "msg_open": "서비스 로그 기록 실패 — {path}: {reason}, 로컬 임시 저장 {spooled}줄 (유실 {dropped}줄)",
+      "msg_close": "서비스 로그 기록 복구 — 임시 저장분 반영 완료 ({path})",
       "effect": "flow/msg 로그가 로컬 스풀로 우회 중 — 콘솔 Flow/이력 조회에 최신 구간 미표시 (회복 시 재생되어 자동 보완). MSRP/제어 처리에는 영향 없음",
       "recommended_action": "ServiceLogging.Dir 볼륨(NAS/NFS) 마운트·권한·용량 확인. 회복되면 스풀이 자동 재생되고 알람은 자연 회수된다"
     }
@@ -32,13 +32,13 @@
       "type": "process_started",
       "code": "E-STC-001",
       "kind": "stateChange",
-      "msg": "Process started: {mo}"
+      "msg": "{MODULE} 기동 완료 ({node})"
     },
     {
       "type": "process_stopping",
       "code": "E-STC-002",
       "kind": "stateChange",
-      "msg": "Process stopping (graceful): {mo}"
+      "msg": "{MODULE} 정상 종료 시작 ({node})"
     }
   ]
 }

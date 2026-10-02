@@ -46,7 +46,8 @@ typedef std::function<void( EnumSlwLogLevel eLevel, const std::string &strMsg )>
 // 폴백 전이 통지 — bDegraded=true 진입(알람 open), false 회복(알람 close).
 struct SlwDegradeInfo {
     bool bDegraded;
-    std::string strReason;          // 마지막 실패 사유 (빈 값 = "spool backlog")
+    std::string strReason;          // 마지막 실패 사유 원문 (빈 값 = 스풀 적체)
+    int iErrno = 0;                 // strReason 이 OS 오류면 그 errno (0 = OS 오류 아님) — 알람 문구 한국어화용
     unsigned long ulSpooledLines;   // 폴백으로 스풀에 적재된 누적 줄 수
     unsigned long ulReplayedLines;  // 스풀→저장 경로 재생 완료 누적 줄 수
     unsigned long ulDroppedLines;   // 스풀 기록 실패/용량 폐기 누적 줄 수
@@ -218,6 +219,7 @@ private:
         std::atomic<unsigned long> ulReplayedLines{ 0 };  // 스풀→NAS 재생 완료 누적 줄 수
         std::atomic<unsigned long> ulDroppedLines{ 0 };   // 스풀 기록 실패/용량 폐기 줄 수
         std::string strLastError;                         // 마지막 실패 사유 (mtx 보호)
+        int iLastErrno = 0;                               // strLastError 의 errno (0 = OS 오류 아님, mtx 보호)
         // 시딩: flusher 가 기동 직후 시딩 대상 파일의 기존 줄 수를 계수 → 생산자가 합류
         std::vector<std::string> vecSeedPaths;
         std::vector<long long> vecSeedCounts;
@@ -260,6 +262,7 @@ private:
                 ctx.bLastOpOk.store( false );
                 std::lock_guard<std::mutex> lk( ctx.mtx );
                 ctx.strLastError = "stall: store op in-flight > " + std::to_string( ctx.iStallMs ) + "ms";
+                ctx.iLastErrno = 0;
             }
 
             if ( !batch.empty() ) {
@@ -341,6 +344,7 @@ private:
         {
             std::lock_guard<std::mutex> lk( ctx.mtx );
             info.strReason = ctx.strLastError;
+            info.iErrno = ctx.iLastErrno;
         }
         info.ulSpooledLines = ctx.ulSpooledLines.load();
         info.ulReplayedLines = ctx.ulReplayedLines.load();
@@ -511,6 +515,7 @@ private:
                 {
                     std::lock_guard<std::mutex> lk( ctx.mtx );
                     ctx.strLastError = std::string( "write failed: " ) + strerror( iErr );
+                    ctx.iLastErrno = iErr;
                 }
                 SpoolAppend( ctx, kv.first, kv.second.first, kv.second.second );
             }
@@ -641,6 +646,7 @@ private:
             ctx.bNasHealthy.store( false );
             std::lock_guard<std::mutex> lk( ctx.mtx );
             ctx.strLastError = std::string( "replay failed: " ) + strerror( iErr );
+            ctx.iLastErrno = iErr;
         }
         return true;
     }

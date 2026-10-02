@@ -748,6 +748,9 @@ void PCmdpServer::finishRecvSession(PMsrpSession* s) {
         // FM 자기보고 — 저장 실패 전이 (성공 경로가 close, AlarmOpen/Close 는 멱등)
         SimpleJson::JsonNode fmParams;
         fmParams.Set("path", _fdStore.BaseDir());
+        const std::string strWhy = _fdStore.LastError();
+        fmParams.Set("reason", FmStoreReasonKo(strWhy, _fdStore.LastErrno()));
+        if (!strWhy.empty()) fmParams.Set("reason_raw", strWhy);
         gclsFmReporter.AlarmOpen("A-PRC-002", _fmStoreMo, fmParams);
         SimpleJson::JsonNode p;
         p.Set("session_id", s->_sessionId);
@@ -1205,7 +1208,8 @@ void PCmdpServer::startServiceLogWriter() {
             if (d.bDegraded) {
                 SimpleJson::JsonNode params;
                 params.Set("path", _serviceLogDir.c_str());
-                params.Set("reason", d.strReason.empty() ? "spool backlog" : d.strReason.c_str());
+                params.Set("reason", FmStoreReasonKo(d.strReason, d.iErrno));
+                if (!d.strReason.empty()) params.Set("reason_raw", d.strReason);
                 params.Set("spooled", (int)d.ulSpooledLines);
                 params.Set("dropped", (int)d.ulDroppedLines);
                 gclsFmReporter.AlarmOpen("A-PRC-006", mo, params);

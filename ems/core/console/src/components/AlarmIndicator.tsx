@@ -12,6 +12,7 @@ import { useNavigate } from 'react-router-dom'
 import { alertsApi } from '../api/alerts'
 import { onAlarmTransition, refreshAlarms, severityOf, useAlarms } from '../widgets/useAlarms'
 import { useToast } from './Toast'
+import { EVENT_KIND_LABEL, eventTypeLabel } from '../utils/alarmLabels'
 import { Badge } from './ui/badge'
 import { Button } from '@core/components/ui/button'
 import { ToggleGroup, ToggleGroupItem } from '@core/components/ui/toggle-group'
@@ -123,8 +124,9 @@ export default function AlarmIndicator() {
                   </div>
                   <div className="mt-[3px]">{a.message}</div>
                   <div className="mt-1 flex gap-2 items-center">
-                    <span className="text-xs text-muted-foreground font-mono">
-                      {a.source?.mo_instance}
+                    {/* 활성 알람 표의 소스 칸과 같은 값 — 사람이 읽는 이름(mo_label), 원 경로는 툴팁. */}
+                    <span className="text-xs text-muted-foreground font-mono" title={a.source?.mo_instance || ''}>
+                      {a.source?.mo_label || a.source?.mo_instance}
                     </span>
                     <span className="ml-auto"/>
                     {a.acked
@@ -143,8 +145,9 @@ export default function AlarmIndicator() {
             {tab === 'events' && recentEvents.map((ev, i) => (
               <div key={i} className="border-b border-border px-3.5 py-2.5 text-md">
                 <div className="flex gap-1.5 items-center">
-                  <Badge variant="neutralSoft" >{ev.kind}</Badge>
-                  <span className="text-sm">{ev.type}</span>
+                  {/* 이력 화면 이벤트 탭과 같은 어휘 — 분류·유형 한국어 라벨(없는 슬러그는 그대로). */}
+                  <Badge variant="neutralSoft" >{(ev.kind && EVENT_KIND_LABEL[ev.kind]) || ev.kind}</Badge>
+                  <span className="text-sm">{eventTypeLabel(ev.type)}</span>
                   <span className="ml-auto text-xs text-muted-foreground">{ev.ts}</span>
                 </div>
                 <div className="mt-[3px] text-sm">{ev.message}</div>

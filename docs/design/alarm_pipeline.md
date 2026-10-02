@@ -237,6 +237,14 @@ api client 가 토큰을 동봉한다.
   구 2색(critical/warning)은 하위호환 읽기만.
 - 레코드의 `message` 는 수집측 렌더 결과를 그대로 표시한다(표시단 재조립 금지 —
   전 화면 동일 문자열).
+- **원문** — 알람 레코드는 문구 치환 값을 `params` 로 함께 남긴다(모듈 자기보고·OAM agent 판정·HA 정합 — X.733
+  additionalInformation, `alarm_sweeper.emit_alarm`). 그중 `*_raw` 키는 한국어 구절로 옮기기 전
+  원문(OS 오류 문장·원인 문자열 — 예: `reason` = 「디스크 공간 부족」, `reason_raw` =
+  `write failed: No space left on device`, 설정 불일치의 `hash_raw` = `node=…, 기대=…`)이다. OAM agent 판정은
+  여기에 `check` 를 더해, 평가가 멈춘 알람을 닫을 때 그 알람 자기 규칙의 해제 문구를 발생 때 값으로 다시 쓴다
+  (재기동 뒤에는 레코드 replay 로 복원, 값이 모자라면 「감시 대상에서 빠져 닫음」). 활성 알람·알람 이력의 행 상세는 이를 `원문` 줄 +
+  [복사]로 보이고(`components/AlarmRawText.tsx`), 두 화면의 검색 칸은 코드·소스·메시지와 함께
+  원문도 찾는다 — 로그·외부 문서에서 쓰는 원문을 그대로 붙여 넣어 같은 알람을 찾게.
 
 ## 9. 정합·수렴 (장애 시 수렴 경로)
 

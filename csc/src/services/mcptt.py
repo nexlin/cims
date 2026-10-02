@@ -1090,8 +1090,11 @@ def audit_config_change(db_cfg: dict, actor: str, actor_ip: str,
             "before": before, "after": after,
             "etag_before": etag_before, "etag_after": etag_after,
             "reason": (reason or "")[:512] if reason else None,
+            "entity_ko": getattr(_fm, "CONFIG_ENTITY_KO", {}).get(entity, entity),
+            "action_ko": getattr(_fm, "CONFIG_ACTION_KO", {}).get(action, action),
         }
-        message = f"{actor}({actor_ip}) {entity}/{entity_id} {action}"
+        message = (f"설정 변경 — {actor}({actor_ip}) 이(가) {params['entity_ko']} {entity_id} "
+                   f"{params['action_ko']}")
         r = _fm.get()
         if r is not None:
             # mo 는 발신 주체(csc) 서버명 루트 — <node>/csc/config/<entity> (표준화 §3.4(b)).
@@ -3727,8 +3730,11 @@ async def handle_provisioning_history(args: HandlerArgs, kwargs: dict) -> Handle
             r.send_event('call_monitored', kind='audit', mo=f"{r.node}/csc",
                          params={"monitor": msisdn, "role": scope["roleId"], "group": scope["groupId"],
                                  "tap_mode": "history", "hist_kind": kind, "count": len(wire),
-                                 "monitor_call": scope["monitorCall"], "ptt_listen": scope["pttListen"]},
-                         message=f"{msisdn} read {kind} history ({len(wire)}) role {scope['roleId']}")
+                                 "monitor_call": scope["monitorCall"], "ptt_listen": scope["pttListen"],
+                                 "kind_ko": f"{getattr(_fm, 'HIST_KIND_KO', {}).get(kind, kind)} 이력", "phase_ko": "열람",
+                                 "who_ko": f"{msisdn}, {len(wire)}건 (역할 {scope['roleId']})"},
+                         message=(f"{getattr(_fm, 'HIST_KIND_KO', {}).get(kind, kind)} 이력 열람 — {msisdn}, "
+                                  f"{len(wire)}건 (역할 {scope['roleId']})"))
     except Exception as e:
         logger.log_warning(f"[provisioning/history] audit emit failed: {e}")
 

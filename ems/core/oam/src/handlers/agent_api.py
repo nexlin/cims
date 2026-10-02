@@ -944,8 +944,8 @@ async def _metric(handler_args: HandlerArgs, config: dict, agent: dict) -> Handl
                     'type': 'process_died', 'code': 'E-STC-009', 'kind': 'stateChange',
                     'source': {'mo_class': 'software', 'mo_instance': f'{host}/{mod}',
                                'detected_by': 'agent'},
-                    'message': f'Process {mod} died on {host_name} (termination observed)',
-                    'params': {'module': mod},
+                    'message': f'서버 {host_name} {mod.upper()} 프로세스 종료됨 — agent 가 종료를 관측',
+                    'params': {'module': mod, 'host': host_name},
                 })
         try:
             await asyncio.to_thread(_record_module_events)

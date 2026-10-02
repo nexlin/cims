@@ -47,6 +47,15 @@ RouteConfig CCspTrunkRegistrar::_account( const std::string &strUser, const std:
     return anyNode;  // 접속점 미상(레거시 단일 리스너)이면 계정이 같은 첫 Route
 }
 
+// A-COM-003 의 원인 구절(한국어) — 등록형 트렁크는 OPTIONS 가 아니라 REGISTER 상태로 생존을 판정한다.
+static const char *_alarmReason( const char *pszWhy ) {
+    const std::string strWhy = pszWhy ? pszWhy : "";
+    if ( strWhy == "trunk not registered" ) return "트렁크 등록 안 됨";
+    if ( strWhy == "trunk unregistered" ) return "트렁크 등록 해제됨";
+    if ( strWhy == "trunk registration expired" ) return "트렁크 등록 만료";
+    return pszWhy ? pszWhy : "";
+}
+
 void CCspTrunkRegistrar::_setAlive( const RouteConfig &rc, bool bAlive, const char *pszWhy ) {
     bool bChanged = false;
     gclsRouteMap.SetAlive( rc.name, bAlive, bChanged );
@@ -59,7 +68,8 @@ void CCspTrunkRegistrar::_setAlive( const RouteConfig &rc, bool bAlive, const ch
         nodeParams.Set( "peer", rc.remote_node_ref.c_str() );
         nodeParams.Set( "route", rc.name.c_str() );
         nodeParams.Set( "fails", 0 );
-        nodeParams.Set( "reason", pszWhy );
+        nodeParams.Set( "reason", _alarmReason( pszWhy ) );
+        nodeParams.Set( "reason_raw", pszWhy ? pszWhy : "" );
         gclsFmReporter.AlarmOpen( "A-COM-003", strMo, nodeParams );
     }
 }

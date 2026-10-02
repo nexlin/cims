@@ -66,6 +66,16 @@ async def handle_events(handler_args: HandlerArgs, kwargs: dict) -> HandlerResul
         events = event_log.read_recent(base, days=days, type_filter=qp('type'),
                                        kind_filter=qp('kind'), limit=limit, code_filter=qp('code'),
                                        exclude_kinds=None if can_audit else {'audit'})
+        # 표시 이름 부착 — /alerts 와 같은 규칙(mo_instance 는 불변 id 루트, 보이는 것은 현재 이름).
+        try:
+            from services import alarm_sweeper
+            _label = alarm_sweeper.build_mo_label_resolver(config)
+            for ev in events:
+                src = ev.get('source')
+                if isinstance(src, dict) and src.get('mo_instance'):
+                    src['mo_label'] = _label(src['mo_instance'])
+        except Exception:
+            pass
         return HandlerResult(status=200, body={
             'days': days,
             'count': len(events),

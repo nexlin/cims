@@ -208,6 +208,25 @@ bool CCspRouteHealth::OnSendTimeout( CSipMessage *pclsMessage ) {
     return true;
 }
 
+// A-COM-003 의 원인 구절(한국어) — 알람 문구 `연동 상대 {peer} 응답 없음 — {reason} (경로 {route})` 에 들어간다.
+//   pszWhy 는 마지막 실패의 원인(무응답·전송 실패/시간 초과·5xx 상태 코드). 원문은 reason_raw 로 함께 보낸다.
+static std::string _alarmReason( const char *pszWhy, int iFails ) {
+    const std::string strWhy = pszWhy ? pszWhy : "";
+    char szBuf[128];
+    if ( strWhy == "no reply within interval" ) {
+        snprintf( szBuf, sizeof( szBuf ), "OPTIONS %d회 연속 무응답", iFails );
+    } else {
+        const char *pszLast = strWhy == "send timeout"  ? "전송 시간 초과"
+                              : strWhy == "send failed" ? "전송 실패"
+                                                        : nullptr;
+        if ( pszLast )
+            snprintf( szBuf, sizeof( szBuf ), "OPTIONS %d회 연속 실패, 마지막 %s", iFails, pszLast );
+        else
+            snprintf( szBuf, sizeof( szBuf ), "OPTIONS %d회 연속 실패, 마지막 %s 응답", iFails, strWhy.c_str() );
+    }
+    return szBuf;
+}
+
 void CCspRouteHealth::_onResult( const Probe &p, bool bOk, int iRttMs, const char *pszWhy ) {
     bool bChanged = false;
     if ( bOk ) {
@@ -226,7 +245,8 @@ void CCspRouteHealth::_onResult( const Probe &p, bool bOk, int iRttMs, const cha
             nodeParams.Set( "peer", p.remote_node.c_str() );
             nodeParams.Set( "route", p.route.c_str() );
             nodeParams.Set( "fails", rt.consecutive_failures.load() );
-            nodeParams.Set( "reason", pszWhy );
+            nodeParams.Set( "reason", _alarmReason( pszWhy, rt.consecutive_failures.load() ) );
+            nodeParams.Set( "reason_raw", pszWhy );
             gclsFmReporter.AlarmOpen( "A-COM-003", gclsFmReporter.Node() + "/csp/peer/" + p.remote_node, nodeParams );
         }
     }

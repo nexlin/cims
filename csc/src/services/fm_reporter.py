@@ -24,6 +24,45 @@ _EVENT_QUEUE_MAX = 32     # 미등록 구간 이벤트 버퍼 상한 (등록 시
 _INSTANCE = None          # init() 이 채우는 프로세스 싱글턴 (mcptt audit 등에서 get())
 
 
+# 저장 경로 실패 사유의 한국어 구절 — 알람 감시창 문구의 `{reason}` 용. C++ `FmStoreReasonKo`
+#   (include/FmReporter.h) 와 같은 표. 원문은 호출자가 `reason_raw` 로 함께 싣는다.
+#   여기 없는 errno·사유는 원문 그대로.
+_ERRNO_KO = {
+    'ENOSPC': '디스크 공간 부족', 'EDQUOT': '디스크 할당량 초과',
+    'EACCES': '권한 없음', 'EPERM': '권한 없음', 'EROFS': '읽기 전용 파일시스템',
+    'ENOENT': '경로 없음', 'ENOTDIR': '경로가 디렉터리가 아님', 'EIO': '입출력 오류',
+    'ESTALE': 'NFS 연결 끊김(오래된 파일 핸들)', 'ETIMEDOUT': '시간 초과',
+    'EMFILE': '열린 파일 수 한도 초과', 'ENFILE': '열린 파일 수 한도 초과',
+}
+
+
+# 이벤트 문구의 한국어 값(alarm_self_reporting.md — 영어 원래 값은 params 에 그대로, `*_ko` 를 더한다).
+#   모르는 값은 원문 그대로 쓴다.
+CONFIG_ENTITY_KO = {'phone_group': '전화 그룹', 'role': '역할', 'role_assignment': '역할 배정',
+                    'user': '사용자', 'subscription': '회선', 'ptt_profile': 'PTT 프로필',
+                    'organization': '조직'}
+CONFIG_ACTION_KO = {'create': '생성', 'update': '수정', 'delete': '삭제', 'member_add': '멤버 추가',
+                    'member_remove': '멤버 제거', 'assign': '배정', 'unassign': '배정 해제',
+                    'monitor_targets': '감청 대상 변경', 'ptt_targets': 'PTT 대상 변경'}
+HIST_KIND_KO = {'call': '통화', 'ptt': 'PTT', 'message': '메시지'}
+
+
+def store_reason_ko(raw: str, err_no: int = 0) -> str:
+    import errno as _errno
+    import re
+    if err_no:
+        ko = _ERRNO_KO.get(_errno.errorcode.get(err_no, ''))
+        if not ko:
+            return raw
+        return f"재반영 중 {ko}" if (raw or '').startswith('replay failed') else ko
+    if not raw:
+        return '임시 저장 적체'
+    m = re.fullmatch(r'stall: store op in-flight > (\d+)s', raw)
+    if m:
+        return f"저장소 응답 지연 ({m.group(1)}초 초과)"
+    return raw
+
+
 def _now_iso() -> str:
     from datetime import datetime
     return datetime.now().isoformat(timespec='seconds')
@@ -109,10 +148,13 @@ class FmReporter:
     def alarm_close(self, code: str, mo: str):
         akey = f"{code}@{mo}"
         with self._lock:
-            if self._active.pop(akey, None) is None:
+            ent = self._active.pop(akey, None)
+            if ent is None:
                 return
-        self._send('FM_ALARM', {'action': 'close', 'code': code, 'mo_instance': mo,
-                                'ts': _now_iso()})
+        payload = {'action': 'close', 'code': code, 'mo_instance': mo, 'ts': _now_iso()}
+        if ent.get('params'):
+            payload['params'] = ent['params']   # 해제 문구도 발생 때의 값으로 대상을 이름으로
+        self._send('FM_ALARM', payload)
         self._log_info(f"[fm] ALARM CLOSE {akey}")
 
     def send_event(self, etype: str, kind: str = 'stateChange', mo: str = None,

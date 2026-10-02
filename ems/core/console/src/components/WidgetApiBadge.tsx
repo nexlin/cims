@@ -12,6 +12,7 @@ import { cn } from '@core/lib/utils'
 import { useEffect, useState } from 'react'
 import { Code2 } from 'lucide-react'
 import { useDevMode } from '../hooks/useDevMode'
+import { copyText } from '../utils/clipboard'
 import { loadApiDocs, type ApiDoc, type ApiDocAuth } from '../api/apiDocs'
 import { useDataSourceCatalogPassive } from '../widgets/shapes/sourceRegistry'
 import { Button } from '@core/components/ui/button'
@@ -22,22 +23,6 @@ import Modal from '@core/components/Modal'
 
 const METHOD_COLOR: Record<string, BadgeTone> = {
   GET: 'successSoft', POST: 'brandSoft', PUT: 'warningSoft', DELETE: 'dangerSoft',
-}
-
-// navigator.clipboard 는 secure context 전용 — HTTP dev 환경은 execCommand fallback.
-async function copyText(text: string): Promise<boolean> {
-  try {
-    if (navigator.clipboard?.writeText) { await navigator.clipboard.writeText(text); return true }
-  } catch { /* fall through */ }
-  try {
-    const ta = document.createElement('textarea')
-    ta.value = text; ta.setAttribute('readonly', '')
-    ta.style.position = 'fixed'; ta.style.left = '-9999px'
-    document.body.appendChild(ta); ta.select()
-    const ok = document.execCommand('copy')
-    document.body.removeChild(ta)
-    return ok
-  } catch { return false }
 }
 
 // path 파라미터는 <name> 자리표시자로, 필수 query 는 name=<name> 로 채운 호출 예시.

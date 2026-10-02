@@ -392,7 +392,8 @@ if __name__ == '__main__':
                 is_open = days_left <= thr_w
                 sev = ('critical' if days_left <= thr_c else 'warning') if is_open else None
                 mo = f"{alarm_sweeper.mgmt_mo_root(config)}/oam-svc/cert/https"
-                kw = dict(mo=mo, days_left=days_left, not_after=not_after, threshold=thr_w)
+                kw = dict(mo=mo, days_left=days_left, not_after=not_after, threshold=thr_w,
+                          cert_name="OAM-SVC HTTPS 인증서")
                 alarm_sweeper.transition(
                     _alert_open, _service_log_dir,
                     dict(rule, perceived_severity=(sev or rule.get('perceived_severity'))),

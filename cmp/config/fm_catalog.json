@@ -8,8 +8,8 @@
       "probable_cause": "resourceAtOrNearingCapacity",
       "mo_class": "service",
       "metric": "미디어 자원 풀",
-      "msg_open": "Media resource pool {pool} exhausted ({used}/{total}) — new allocations rejected",
-      "msg_close": "Media resource pool restored ({mo})",
+      "msg_open": "미디어 자원 고갈 — {pool_name} {total}개 모두 사용 중, 새 할당 거절",
+      "msg_close": "미디어 자원 여유 회복 — {pool_name}",
       "effect": "신규 호/그룹/멤버의 미디어 자원 할당 실패 (NO_RESOURCE 거절)",
       "recommended_action": "동시 호 수 확인, 풀 크기(RtpPoolSize 등) 증설, stale 세션 sweep 점검"
     },
@@ -21,8 +21,8 @@
       "probable_cause": "underlyingResourceUnavailable",
       "mo_class": "service",
       "metric": "녹취(record) 저장 경로 기록",
-      "msg_open": "Recording writes failing on {path} ({reason}) — {dropped} ops dropped",
-      "msg_close": "Recording store recovered ({mo})",
+      "msg_open": "녹취 기록 실패 — {path}: {reason}, {dropped}건 유실",
+      "msg_close": "녹취 기록 복구 — {path}",
       "effect": "녹취 세그먼트/메타/floor 이벤트 기록이 유실되는 중 — 법적 보존 공백 (미디어 중계 자체는 정상). 장애 구간은 소급 복구되지 않는다",
       "recommended_action": "녹취 볼륨(NAS/NFS) 마운트·권한·용량 확인·유실 구간 산정 (params.dropped)"
     },
@@ -34,8 +34,8 @@
       "probable_cause": "underlyingResourceUnavailable",
       "mo_class": "service",
       "metric": "서비스 로그(flow/msg) 저장 경로 기록",
-      "msg_open": "Service log writes failing on {path} ({reason}) — diverted to local spool ({spooled} lines, {dropped} dropped)",
-      "msg_close": "Service log store recovered — local spool drained ({mo})",
+      "msg_open": "서비스 로그 기록 실패 — {path}: {reason}, 로컬 임시 저장 {spooled}줄 (유실 {dropped}줄)",
+      "msg_close": "서비스 로그 기록 복구 — 임시 저장분 반영 완료 ({path})",
       "effect": "flow/msg 로그가 로컬 스풀로 우회 중 — 콘솔 Flow/이력 조회에 최신 구간 미표시 (회복 시 재생되어 자동 보완). 미디어/제어 처리에는 영향 없음",
       "recommended_action": "ServiceLogging.Dir 볼륨(NAS/NFS) 마운트·권한·용량 확인. 회복되면 스풀이 자동 재생되고 알람은 자연 회수된다"
     },
@@ -47,8 +47,8 @@
       "probable_cause": "fileError",
       "mo_class": "service",
       "metric": "안내 음원 카탈로그",
-      "msg_open": "Announcement media missing or malformed: {count} item(s) under {root} (first: {first})",
-      "msg_close": "Announcement media catalog restored ({mo})",
+      "msg_open": "안내 음원 {count}개 재생 불가 — 첫 항목 {first} (음원 폴더 {root})",
+      "msg_close": "안내 음원 정상 — 재생 불가 항목 없음",
       "effect": "해당 음원을 참조하는 안내(통화중·무응답·보류 음악 등)가 재생되지 않고 응답 코드만 나간다(CSP 폴백 MEDIA_NOT_FOUND) — 통화 자체는 정상",
       "recommended_action": "STATS detail.ann_catalog.missing 확인 → 음원 재배포(콘솔 안내음성 라이브러리 [배포]) 또는 카탈로그 행 정리 뒤 SIGUSR1/ANN_RELOAD"
     }
@@ -58,19 +58,19 @@
       "type": "process_started",
       "code": "E-STC-001",
       "kind": "stateChange",
-      "msg": "Process started: {mo}"
+      "msg": "{MODULE} 기동 완료 ({node})"
     },
     {
       "type": "process_stopping",
       "code": "E-STC-002",
       "kind": "stateChange",
-      "msg": "Process stopping (graceful): {mo}"
+      "msg": "{MODULE} 정상 종료 시작 ({node})"
     },
     {
       "type": "session_reclaimed",
       "code": "E-AUD-011",
       "kind": "audit",
-      "msg": "Session {sid} force-reclaimed ({reason}, held {held}s)"
+      "msg": "미디어 세션 강제 회수 — {sid} ({reason_ko}, {held}초 점유)"
     }
   ]
 }

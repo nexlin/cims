@@ -106,7 +106,8 @@ function RecentEventsWidget() {
                   <tr key={`${e.code || e.type}-${e.ts}-${i}`}>
                     <Td><Badge variant={KIND_BADGE[kind] || 'neutralSoft'} >{KIND_LABEL[kind] || kind}</Badge></Td>
                     <Td><code className="text-xs">{e.code || e.type}</code></Td>
-                    <Td><code className="text-xs text-muted-foreground">{e.source?.mo_instance || '-'}</code></Td>
+                    <Td><code className="text-xs text-muted-foreground" title={e.source?.mo_instance || ''}>
+                      {e.source?.mo_label || e.source?.mo_instance || '-'}</code></Td>
                     <Td>{e.message}</Td>
                     <Td className="text-sm text-muted-foreground">{e.ts}</Td>
                   </tr>

@@ -194,8 +194,10 @@ async def handle_recordings(handler_args: HandlerArgs, kwargs: dict) -> HandlerR
                 fr.send_event('call_monitored', kind='audit', mo=f"{fr.node}/csc",
                               params={"monitor": msisdn, "role": scope.get("roleId", ""), "group": scope.get("groupId", ""),
                                       "tap_mode": "recording", "recording": rec_id, "segment": seq,
-                                      "slot": params.get('slot', '')},
-                              message=f"{msisdn} played recording {rec_id} seg {seq}")
+                                      "slot": params.get('slot', ''),
+                                      "kind_ko": "녹취", "phase_ko": "재생",
+                                      "who_ko": f"{msisdn}, 녹취 {rec_id} 구간 {seq}"},
+                              message=f"녹취 재생 — {msisdn}, 녹취 {rec_id} 구간 {seq}")
         except Exception as e:
             logger.log_warning(f"[provisioning/recordings] audit emit failed: {e}")
 
@@ -337,8 +339,10 @@ async def handle_ptt_session_detail(handler_args: HandlerArgs, kwargs: dict) -> 
         if fr is not None:
             fr.send_event('call_monitored', kind='audit', mo=f"{fr.node}/csc",
                           params={"monitor": msisdn, "role": scope.get("roleId", ""), "group": scope.get("groupId", ""),
-                                  "tap_mode": "history", "hist_kind": "ptt_session", "recording": rec_id, "count": 1},
-                          message=f"{msisdn} read ptt session {rec_id}")
+                                  "tap_mode": "history", "hist_kind": "ptt_session", "recording": rec_id, "count": 1,
+                                  "kind_ko": "PTT 세션 이력", "phase_ko": "열람",
+                                  "who_ko": f"{msisdn}, 세션 {rec_id}"},
+                          message=f"PTT 세션 이력 열람 — {msisdn}, 세션 {rec_id}")
     except Exception as e:
         logger.log_warning(f"[provisioning/history/ptt] audit emit failed: {e}")
     logger.log_info(f"[provisioning/history/ptt] {msisdn} {rec_id} → participants={len(body['participants'])} "

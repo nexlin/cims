@@ -45,6 +45,16 @@ def fmt(tmpl: str, **kw) -> str:
     return (tmpl or '').format_map(_Safe(kw))
 
 
+def missing_fields(tmpl: str, kw: dict) -> bool:
+    """템플릿 자리표시자 중 kw 에 없는 것이 있는가 — 있으면 fmt 결과에 빈칸이 생긴다."""
+    import string
+    try:
+        return any(f and f.split('.')[0].split('[')[0] not in kw
+                   for _, f, _, _ in string.Formatter().parse(tmpl or ''))
+    except ValueError:
+        return False
+
+
 def _is_legacy_service_akey(akey: str) -> bool:
     """구 mo 루트(cims/*) — detected_by 없는 구 레코드의 파티션 폴백 판정 전용."""
     mo = akey.split('@', 1)[1] if '@' in akey else ''
@@ -112,14 +122,17 @@ def restore_open_state(service_log_dir: str, scope: str = 'all', days: int = 30,
 
 def emit_alarm(service_log_dir: str, action: str, rule: dict, mo_instance: str,
                detected_by: str, message: str, alarm_id: str,
-               threshold_info: dict = None, trend_indication: str = None):
+               threshold_info: dict = None, trend_indication: str = None,
+               params: dict = None):
     """표준 알람 이벤트 기록 (code/severity/event_type/probable_cause/source/alarm_id).
 
     32.111 alarmRaisedTime/alarmClearedTime/alarmChangedTime: open 은 raised_time,
     close 는 clear_time, change 는 change_time — close/change 는 raised_time(alarm_id
     occurrence epoch 복원)도 함께 명시해 레코드 단독으로 지속시간 산출 가능.
     threshold_info 는 임계 계열의 구조화 {observed, threshold, unit} (X.733 thresholdInfo).
-    trend_indication 은 change(severity 변경, notifyChangedAlarm) 의 moreSevere|lessSevere."""
+    trend_indication 은 change(severity 변경, notifyChangedAlarm) 의 moreSevere|lessSevere.
+    params 는 발신 모듈이 보낸 msg 템플릿 치환 값(X.733 additionalInformation) — message 가 한국어
+    구절로 렌더돼도 원문(`*_raw`)을 상세 보기에서 그대로 복사·검색할 수 있게 레코드에 남긴다."""
     from datetime import datetime as _dt
     from services import alert_log
     sev = 'cleared' if action == 'close' else rule.get('perceived_severity', 'warning')
@@ -145,6 +158,8 @@ def emit_alarm(service_log_dir: str, action: str, rule: dict, mo_instance: str,
         rec['trend_indication'] = trend_indication
     if threshold_info:
         rec['threshold_info'] = threshold_info
+    if params:
+        rec['params'] = params
     if rule.get('effect'):
         rec['effect'] = rule['effect']
     if rule.get('recommended_action'):
@@ -154,7 +169,7 @@ def emit_alarm(service_log_dir: str, action: str, rule: dict, mo_instance: str,
 
 def transition(state: dict, service_log_dir: str, rule: dict, mo_instance: str,
                detected_by: str, is_open: bool, msg_open: str, msg_close: str,
-               threshold_info: dict = None, log=None):
+               threshold_info: dict = None, log=None, params: dict = None):
     """활성식별 akey=(code@mo_instance). open 시 alarm_id 생성, close 가 동일 alarm_id 참조.
 
     이미 열린 알람에 rule severity 가 달라진 open 판정이 오면 **action=change**
@@ -168,7 +183,7 @@ def transition(state: dict, service_log_dir: str, rule: dict, mo_instance: str,
         alarm_id = f"{akey}@{int(time.time())}"
         state[akey] = {'alarm_id': alarm_id, 'severity': sev, 'detected_by': detected_by}
         emit_alarm(service_log_dir, 'open', rule, mo_instance, detected_by, msg_open, alarm_id,
-                   threshold_info=threshold_info)
+                   threshold_info=threshold_info, params=params)
         if log:
             log.log_info(f"[alarm] OPEN {akey} sev={sev} — {msg_open}")
     elif is_open and cur is not None:
@@ -178,13 +193,14 @@ def transition(state: dict, service_log_dir: str, rule: dict, mo_instance: str,
         if cur_sev and sev != cur_sev:
             trend = 'moreSevere' if _sev_rank(sev) > _sev_rank(cur_sev) else 'lessSevere'
             emit_alarm(service_log_dir, 'change', rule, mo_instance, detected_by, msg_open,
-                       alarm_id, threshold_info=threshold_info, trend_indication=trend)
+                       alarm_id, threshold_info=threshold_info, trend_indication=trend,
+                       params=params)
             if log:
                 log.log_info(f"[alarm] CHANGE {akey} {cur_sev}→{sev} ({trend})")
     elif not is_open and cur is not None:
         alarm_id = _entry_alarm_id(state.pop(akey))
         emit_alarm(service_log_dir, 'close', rule, mo_instance, detected_by, msg_close, alarm_id,
-                   threshold_info=threshold_info)
+                   threshold_info=threshold_info, params=params)
         if log:
             log.log_info(f"[alarm] CLEAR {akey}")
 
@@ -332,6 +348,48 @@ def mo_root_of(akey: str) -> str:
     return mo.split('/', 1)[0]
 
 
+# 원인 코드 → 알람 문구 한국어 구절. 원문은 호출자가 `reason_raw` 로 함께 남긴다(상세 「원문」 줄).
+#   agent 공유 store 판정(agent/cims_agent.py `_shared_store_ready` — `not_writable:<Exc>` 처럼 접미 가능).
+_STORE_REASON_KO = {'not_mounted': '마운트 안 됨', 'unresponsive': '응답 없음(멈춤)',
+                    'not_writable': '쓰기 불가', 'probe_error': '점검 오류'}
+#   인증서 lifecycle 엔진(agent/lib/cert.sh `_cert_state_write`).
+CERT_RENEW_REASON_KO = {'renew_failed': '갱신 실패', 'issue_failed': '발급 실패',
+                        'site_ca_missing': '사이트 CA 교차 인증서 없음'}
+
+
+def store_reason_ko(raw: str) -> str:
+    head = str(raw or '').split(':', 1)[0]
+    return _STORE_REASON_KO.get(head, str(raw or ''))
+
+
+def build_where_resolver(config):
+    """mo 루트 → 알람 문구 앞머리(`{where}`) — 「서버 <이름>」 / 「그룹 <이름>」. 문구 전용.
+
+    mo_label 과 같은 이름 원천이지만 종류(서버/그룹)를 앞에 붙인다 — 문구가 `a1/…` 같은
+    불변 id 대신 사람이 아는 이름으로 시작하게(alarm_catalog.md message 규칙). 같은 서버의
+    다중 endpoint 루트(`a1:9001`)는 포트를 남긴다. 이름을 모르는 루트는 그대로."""
+    names: dict = {}
+    try:
+        from services import file_store, ha_lookup
+        for g in ha_lookup.ha_groups_all(config):
+            if g.get('name'):
+                names[group_mo_root(g)] = f"그룹 {g['name']}"
+        for a in file_store.load_all(file_store.domain_dir(config, 'agents')):
+            if a.get('name'):
+                names[server_mo_root(a)] = f"서버 {a['name']}"
+    except Exception:
+        pass
+
+    def where(mo) -> str:
+        root = str(mo or '').split('/', 1)[0]
+        base, sep, port = root.partition(':')
+        nm = names.get(base)
+        if not nm:
+            return root
+        return f"{nm}:{port}" if sep else nm
+    return where
+
+
 def build_mo_label_resolver(config):
     """mo 루트(`a<id>`/`g<id>`) → 사람이 읽는 이름. 표시 전용 (§3.4(b) userLabel).
     조회 시점에 해석하므로 이름이 바뀌면 과거 레코드의 표시도 현재 이름을 따른다."""
@@ -444,6 +502,14 @@ def sweep_service_rules(config: dict, state: dict, service_log_dir: str,
     from handlers.stats import (_get_csp_stats, _get_db,
                                 _media_endpoints, _probe_cmp)
     resolve = build_mo_root_resolver(config)
+    where = build_where_resolver(config)
+    _db = config.get('CimsDatabase') or {}
+    db_kw = {'db_host': _db.get('Host', '127.0.0.1'), 'db_port': _db.get('Port', 3306),
+             'db': _db.get('Db', 'cims')}
+
+    def kw_of(mo, module=None, **extra):
+        # 문구 치환 값 — {where}(서버/그룹 이름) · {MODULE} · DB 주소. {mo} 는 하위호환(운영자 편집 문구).
+        return dict(mo=mo, where=where(mo), MODULE=(module or '').upper(), **db_kw, **extra)
     csp = _get_csp_stats(config)
     csp_addr = (config.get('CspNotify') or {}).get('Ip', '127.0.0.1')
     cmp_configured = bool(((config.get('MediaServer') or {}).get('Endpoints'))
@@ -507,8 +573,8 @@ def sweep_service_rules(config: dict, state: dict, service_log_dir: str,
                 cur_mo.add(mo)
                 transition(state, service_log_dir, r, mo, detected_by,
                            not bool(stats),
-                           fmt(r.get('msg_open'), mo=mo, threshold=thr),
-                           fmt(r.get('msg_close'), mo=mo, threshold=thr), log=log)
+                           fmt(r.get('msg_open'), **kw_of(mo, 'cmp', threshold=thr)),
+                           fmt(r.get('msg_close'), **kw_of(mo, 'cmp', threshold=thr)), log=log)
             # 평가 대상에서 이탈한 인스턴스(endpoint 제거/신원 재해석)의 open 은 영영
             # 안 닫히므로 close. 같은 code 의 csp probe 계열과는 모듈 세그먼트로 구분.
             for akey in [k for k in list(state)
@@ -516,8 +582,7 @@ def sweep_service_rules(config: dict, state: dict, service_log_dir: str,
                          and k.split('@', 1)[1] not in cur_mo]:
                 mo = akey.split('@', 1)[1]
                 transition(state, service_log_dir, r, mo, detected_by, False, '',
-                           fmt(r.get('msg_close'), mo=mo, threshold=thr)
-                           or f"{mo} 관측 대상 제외 — 정리", log=log)
+                           "감시 대상에서 빠져 닫음", log=log)
             continue
         if chk == 'rtp_pct_gte':
             if not cmp_nodes:
@@ -541,8 +606,8 @@ def sweep_service_rules(config: dict, state: dict, service_log_dir: str,
                         thr_n = int(sthr)
                 tinfo = {'observed': pct, 'threshold': thr_n, 'unit': r.get('unit') or '%'}
                 transition(state, service_log_dir, rr, mo, detected_by, is_open,
-                           fmt(r.get('msg_open'), mo=mo, pct=pct, threshold=thr_n),
-                           fmt(r.get('msg_close'), mo=mo, pct=pct, threshold=thr_n),
+                           fmt(r.get('msg_open'), **kw_of(mo, 'cmp', pct=pct, threshold=thr_n)),
+                           fmt(r.get('msg_close'), **kw_of(mo, 'cmp', pct=pct, threshold=thr_n)),
                            threshold_info=tinfo, log=log)
             # 관측이 전무(전 probe 실패)하면 아무 판정도 하지 않는다 (표준화 §3.4(d)) —
             # stale 정리는 실제 관측된 노드가 있을 때만.
@@ -551,7 +616,7 @@ def sweep_service_rules(config: dict, state: dict, service_log_dir: str,
                              if k.startswith(f"{code}@") and k.split('@', 1)[1] not in cur_mo]:
                     mo = akey.split('@', 1)[1]
                     transition(state, service_log_dir, r, mo, detected_by, False, '',
-                               f"{mo} 관측 대상 제외 — 정리", log=log)
+                               "감시 대상에서 빠져 닫음", log=log)
             continue
         # 단일 인스턴스 규칙 — 관측 신원으로 mo 합성
         if chk == 'process_unresponsive':
@@ -562,8 +627,9 @@ def sweep_service_rules(config: dict, state: dict, service_log_dir: str,
         else:
             mo = r.get('mo_instance') or f"{mgmt_mo_root(config)}/{r.get('target', '')}"
         is_open = eval_service_rule(r, ctx, rtp_threshold)
-        msg_open = fmt(r.get('msg_open'), mo=mo, threshold=thr)
-        msg_close = fmt(r.get('msg_close'), mo=mo, threshold=thr)
+        _mod = r.get('target', 'csp') if chk == 'process_unresponsive' else r.get('target', '')
+        msg_open = fmt(r.get('msg_open'), **kw_of(mo, _mod, threshold=thr))
+        msg_close = fmt(r.get('msg_close'), **kw_of(mo, _mod, threshold=thr))
         transition(state, service_log_dir, r, mo, detected_by, is_open, msg_open, msg_close,
                    log=log)
         # 신원 재해석으로 이탈한 같은 계열 활성키 정리 — CMP·rtp_pct 분기에는 있고
@@ -595,4 +661,4 @@ def sweep_service_rules(config: dict, state: dict, service_log_dir: str,
                          and _mo_module_segment(k) == seg]:
                 stale = akey.split('@', 1)[1]
                 transition(state, service_log_dir, r, stale, detected_by, False, '',
-                           f"{stale} 관측 신원 재해석 — 정리", log=log)
+                           "감시 대상의 신원이 바뀌어 닫음 — 새 신원으로 다시 판정", log=log)

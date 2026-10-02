@@ -133,7 +133,8 @@ function ActiveAlarmsWidget() {
                         {(a.occurrences || 1) > 1 && <Badge variant="neutralSoft" >×{a.occurrences}</Badge>}
                       </span>
                     </Td>
-                    <Td><code className="text-xs text-muted-foreground">{a.source?.mo_instance || '-'}</code></Td>
+                    <Td><code className="text-xs text-muted-foreground" title={a.source?.mo_instance || ''}>
+                      {a.source?.mo_label || a.source?.mo_instance || '-'}</code></Td>
                     <Td>{a.message}</Td>
                     <Td>
                       {a.acked

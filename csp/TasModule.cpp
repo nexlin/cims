@@ -1679,6 +1679,15 @@ static void _emitCallMonitored( const CTasModule::MonitorLeg &m, const char *psz
     p.Set( "target_b", m.strTargetB );
     p.Set( "tap_mode", m.strTapMode );
     if ( iDurMs >= 0 ) p.Set( "dur_ms", iDurMs );
+    // 문구용(alarm_self_reporting.md — `{kind_ko} {phase_ko} — {who_ko}`): 사람은 번호만, 전체 URI 는 위 원래 필드.
+    const std::string strA = FmUriNumber( m.strTargetA ), strB = FmUriNumber( m.strTargetB ),
+                      strMon = FmUriNumber( m.strMonitor );
+    p.Set( "kind_ko", "통화 감청" );
+    p.Set( "phase_ko", FmPhaseKo( pszPhase ) );
+    p.Set( "monitor_num", strMon );
+    p.Set( "target_a_num", strA );
+    p.Set( "target_b_num", strB );
+    p.Set( "who_ko", strA + " ↔ " + strB + " (감청자 " + strMon + ")" );
     gclsFmReporter.SendEvent( "call_monitored", "audit", gclsFmReporter.Node() + "/csp", p );
 }
 

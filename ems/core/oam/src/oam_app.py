@@ -1029,6 +1029,16 @@ if __name__ == '__main__':
         # _alert_open: { akey(code@mo_instance) : alarm_id } — 자기 소유 계열만 추적.
         _alert_open: dict = alarm_sweeper.restore_open_state(
             _service_log, scope=('all' if role == 'all' else 'base'), log=logger)
+        # agent 계열 열린 알람의 발생 때 params(문구 치환 값 + check) — 평가가 멈춘 알람을 닫을 때
+        #   그 알람 자기 규칙의 해제 문구를 다시 쓰는 근거. 레코드 params 로 재기동 뒤에도 복원된다.
+        try:
+            from services import alert_log as _al
+            _agent_open_params: dict = {
+                k: dict(m.get('params') or {})
+                for k, m in _al.compute_open_state(_service_log, with_meta=True).items()
+                if m.get('detected_by') == 'agent' and m.get('params')}
+        except Exception:
+            _agent_open_params = {}
 
         # ── FM ingest (모듈 자기보고 — alarm_self_reporting.md) ─────────
         # 소유는 oam-svc — role=all 단일 프로세스에서만 base 가 대행 (sweeper 소유
@@ -1044,10 +1054,32 @@ if __name__ == '__main__':
         _fmt = alarm_sweeper.fmt
 
         def _transition(rule, mo_instance, detected_by, is_open, msg_open, msg_close,
-                        threshold_info=None):
+                        threshold_info=None, params=None):
+            akey = f"{rule.get('code')}@{mo_instance}"
+            if is_open and params:
+                _agent_open_params[akey] = dict(params)
+            elif not is_open:
+                params = params or _agent_open_params.pop(akey, None)
             alarm_sweeper.transition(_alert_open, _service_log, rule, mo_instance,
                                      detected_by, is_open, msg_open, msg_close,
-                                     threshold_info=threshold_info, log=logger)
+                                     threshold_info=threshold_info, log=logger, params=params)
+
+        def _close_rule_msg(agent_rules, akey, fallback):
+            """평가가 멈춘 agent 알람의 해제 — (규칙, 문구). 같은 code 를 여러 규칙(A-QOS-001 =
+            disk/cpu/mem/load/mount)이 나눠 쓰므로 code 가 아니라 발생 때 기록한 check 로 자기
+            규칙을 찾고, 그 해제 문구를 발생 때 값으로 렌더한다. 값이 모자라면 fallback."""
+            code, _, mo = akey.partition('@')
+            p = _agent_open_params.get(akey) or {}
+            r = next((x for x in agent_rules if x.get('code') == code and p.get('check')
+                      and x.get('check') == p.get('check')), None) \
+                or next((x for x in agent_rules if x.get('code') == code), None)
+            if r is None:
+                return None, fallback
+            kw = {**p, 'mo': mo}
+            tmpl = r.get('msg_close') or ''
+            if not p or alarm_sweeper.missing_fields(tmpl, kw):
+                return r, fallback
+            return r, _fmt(tmpl, **kw)
 
         def _cold_module_ha_sets() -> tuple:
             """AS 그룹 cold 모듈의 HA 상태별 module_down 평가 보정 집합 2개.
@@ -1104,6 +1136,12 @@ if __name__ == '__main__':
             host = alarm_sweeper.server_mo_root(agent)                  # 식별(불변)
             host_name = str(agent.get('name') or '').strip() or host    # 표시
             res = []
+
+            def _out(mo, is_open, kw, tinfo, sev):
+                # 7번째 = 레코드 params(문구 치환 값 + check) — 상세 「원문」 줄(*_raw)과, 평가가 멈춘
+                #   알람을 닫을 때 그 알람 자기 규칙의 해제 문구를 발생 때 값으로 다시 쓰는 근거.
+                res.append((mo, is_open, _fmt(rule.get('msg_open'), **kw), _fmt(rule.get('msg_close'), **kw),
+                            tinfo, sev, {**{k: v for k, v in kw.items() if k != 'mo'}, 'check': chk}))
             if chk == 'disk_high':
                 disk = metric.get('disk_pct')
                 if disk is None:
@@ -1121,7 +1159,7 @@ if __name__ == '__main__':
                 mo = f"{host}/disk"
                 kw = dict(mo=mo, host=host_name, pct=disk, threshold=thr)
                 tinfo = {'observed': disk, 'threshold': thr, 'unit': rule.get('unit') or '%'}
-                res.append((mo, is_open, _fmt(rule.get('msg_open'), **kw), _fmt(rule.get('msg_close'), **kw), tinfo, sev))
+                _out(mo, is_open, kw, tinfo, sev)
             elif chk in ('cpu_high', 'mem_high', 'load_high', 'mount_high'):
                 # 호스트 자원 임계 — disk_high 와 같은 단계 임계 평가, 객체만 다르다(§3.5). 관측값이 없으면 판정하지 않는다.
                 def _staged(observed, extra_kw, mo_sub):
@@ -1137,7 +1175,7 @@ if __name__ == '__main__':
                     mo = f"{host}/{mo_sub}"
                     kw = dict(mo=mo, host=host_name, pct=observed, threshold=thr, **extra_kw)
                     tinfo = {'observed': observed, 'threshold': thr, 'unit': rule.get('unit') or '%'}
-                    res.append((mo, is_open, _fmt(rule.get('msg_open'), **kw), _fmt(rule.get('msg_close'), **kw), tinfo, sev))
+                    _out(mo, is_open, kw, tinfo, sev)
                 if chk == 'cpu_high':
                     v = metric.get('cpu_pct')
                     if v is not None:
@@ -1174,10 +1212,10 @@ if __name__ == '__main__':
                 if not st.get('path'):
                     return res         # 공유 store 미구성 — 판정 대상 아님
                 mo = f"{host}/store"
+                _why = st.get('reason') or 'unknown'
                 kw = dict(mo=mo, host=host_name, path=st.get('path'),
-                          reason=st.get('reason') or 'unknown')
-                res.append((mo, not st.get('ok'), _fmt(rule.get('msg_open'), **kw),
-                            _fmt(rule.get('msg_close'), **kw), None, None))
+                          reason=alarm_sweeper.store_reason_ko(_why), reason_raw=_why)
+                _out(mo, not st.get('ok'), kw, None, None)
             elif chk == 'module_down':
                 running = {(m.get('name') or '').lower()
                            for m in (metric.get('modules') or []) if m.get('name')}
@@ -1204,8 +1242,8 @@ if __name__ == '__main__':
                     if (agent.get('id'), proc) in cold_skip:
                         continue
                     mo = f"{host}/{proc}"
-                    kw = dict(mo=mo, host=host_name, module=proc)
-                    res.append((mo, proc not in running, _fmt(rule.get('msg_open'), **kw), _fmt(rule.get('msg_close'), **kw), None, None))
+                    kw = dict(mo=mo, host=host_name, module=proc, MODULE=proc.upper())
+                    _out(mo, proc not in running, kw, None, None)
             elif chk == 'config_drift':
                 # 노드 실파일 hash (agent 보고) vs 배포기록 실체화본 hash — 불일치 = 드리프트.
                 # 구 agent(cfg_hashes 미보고)는 평가 자체를 건너뜀 (오알람 없음).
@@ -1223,8 +1261,9 @@ if __name__ == '__main__':
                     if not proc or not got or not exp:
                         continue        # 미보고 모듈/기대값 산출 실패 — 판정 보류
                     mo = f"{host}/{proc}/config"
-                    kw = dict(mo=mo, host=host_name, module=proc, expected=exp, actual=got)
-                    res.append((mo, got != exp, _fmt(rule.get('msg_open'), **kw), _fmt(rule.get('msg_close'), **kw), None, None))
+                    kw = dict(mo=mo, host=host_name, module=proc, MODULE=proc.upper(), expected=exp, actual=got,
+                              hash_raw=f"node={got}, 기대={exp}")   # 해시는 문장 밖 — 상세 「원문」 줄로
+                    _out(mo, got != exp, kw, None, None)
             elif chk == 'oam_url_misdirect':
                 # VIP 가 실제로 붙은 뒤에만 채워지는 맵(_agents_not_on_vip 가 그렇게 조여져
                 # 있다). 여기 없으면 정상이거나 판정 불가 → close 경로(미평가 아님).
@@ -1233,8 +1272,7 @@ if __name__ == '__main__':
                 kw = dict(mo=mo, host=host_name,
                           actual=(mis or {}).get('oam_url', '-'),
                           expected=(mis or {}).get('vip', '-'))
-                res.append((mo, mis is not None, _fmt(rule.get('msg_open'), **kw),
-                            _fmt(rule.get('msg_close'), **kw), None, None))
+                _out(mo, mis is not None, kw, None, None)
             elif chk == 'cert_expiring':
                 # agent 가 **서빙 중인** HTTPS 인증서의 만료 임박 — mTLS 배치면 mTLS cert,
                 #   아니면 self-signed. 만료되면 OAM→agent 명령 채널이 끊겨 배포·재시작·HA
@@ -1267,10 +1305,9 @@ if __name__ == '__main__':
                 sev = ('critical' if days_left <= thr_c else 'warning') if is_open else None
                 mo = f"{host}/agent/cert"
                 kw = dict(mo=mo, host=host_name, days_left=days_left,
-                          not_after=str(exp), threshold=thr_w)
+                          not_after=str(exp), threshold=thr_w, cert_name=f"서버 {host_name} agent 인증서")
                 tinfo = {'observed': days_left, 'threshold': thr_w, 'unit': rule.get('unit') or '일'}
-                res.append((mo, is_open, _fmt(rule.get('msg_open'), **kw),
-                            _fmt(rule.get('msg_close'), **kw), tinfo, sev))
+                _out(mo, is_open, kw, tinfo, sev)
             elif chk == 'cert_renew_failed':
                 # lifecycle 엔진(cert.sh) 일일 스윕 결과 — agent 원시 보고 metric.cert_renew{module:
                 #   {ok, reason, days_left, ts}}. 실패 = 기존 인증서를 유지한 채 만료가 조용히 진행 중
@@ -1291,12 +1328,13 @@ if __name__ == '__main__':
                     sev = None
                     if is_open:
                         sev = 'critical' if (days is not None and days <= thr_c) else 'warning'
-                    kw = dict(mo=mo, host=host_name, module=mod, reason=st.get('reason') or 'unknown',
+                    _why = st.get('reason') or 'unknown'
+                    kw = dict(mo=mo, host=host_name, module=mod, MODULE=str(mod).upper(),
+                              reason=alarm_sweeper.CERT_RENEW_REASON_KO.get(_why, _why), reason_raw=_why,
                               days_left=days if days is not None else '-')
                     tinfo = ({'observed': days, 'threshold': thr_c, 'unit': rule.get('unit') or '일'}
                              if days is not None else None)
-                    res.append((mo, is_open, _fmt(rule.get('msg_open'), **kw),
-                                _fmt(rule.get('msg_close'), **kw), tinfo, sev))
+                    _out(mo, is_open, kw, tinfo, sev)
             elif chk == 'ha_flap':
                 # 최근 10분 keepalived 전이 수 (agent 가 notify 로그 tail 로 집계).
                 # flap 정지 → 윈도 밖으로 밀려 미보고 → 미평가 close 경로로 자동 해제.
@@ -1321,7 +1359,7 @@ if __name__ == '__main__':
                     mo = f"{host}/ha/{svc}"
                     kw = dict(mo=mo, host=host_name, svc=svc, count=cnt, threshold=thr_svc)
                     tinfo = {'observed': cnt, 'threshold': thr_svc, 'unit': rule.get('unit') or '회/10분'}
-                    res.append((mo, is_open, _fmt(rule.get('msg_open'), **kw), _fmt(rule.get('msg_close'), **kw), tinfo, sev))
+                    _out(mo, is_open, kw, tinfo, sev)
             return res
 
         def _sweep_agent_alerts(agent_rules: list):
@@ -1400,16 +1438,15 @@ if __name__ == '__main__':
                 for r in agent_rules:
                     if r.get('check') == 'agent_lost':
                         continue    # 두절 규칙은 아래 별도 판정
-                    for mo, is_open, msg_open, msg_close, tinfo, sev in _eval_agent_rule(r, ag, metric, deps, cold_skip, cold_must_run, expected_cfg, misdirect):
+                    for mo, is_open, msg_open, msg_close, tinfo, sev, params in _eval_agent_rule(r, ag, metric, deps, cold_skip, cold_must_run, expected_cfg, misdirect):
                         active.add(f"{r.get('code')}@{mo}")
                         rr = {**r, 'perceived_severity': sev} if sev else r
                         # detected_by 는 주체 클래스만(표준화 §3.4(b)) — 호스트는 mo 가 보유.
-                        _transition(rr, mo, 'agent', is_open, msg_open, msg_close, tinfo)
-            agent_rule_by_code = {r.get('code'): r for r in agent_rules}
+                        _transition(rr, mo, 'agent', is_open, msg_open, msg_close, tinfo, params)
             # 관측 두절 판정 (agent_lost) — 노드 두절 알람 open/close + 두절 노드의
             # 잔여 알람 판정 불가 종결.
             lost_rule = next((r for r in agent_rules if r.get('check') == 'agent_lost'), None)
-            lost_hosts = set()
+            lost_hosts = {}          # 두절 호스트 루트 → 서버 이름
             if lost_rule is not None:
                 for ag in agents:
                     host = alarm_sweeper.server_mo_root(ag)
@@ -1418,7 +1455,7 @@ if __name__ == '__main__':
                     akey = f"{lost_rule.get('code')}@{mo}"
                     lost = host not in observed_hosts
                     if lost:
-                        lost_hosts.add(host)
+                        lost_hosts[host] = host_name
                         active.add(akey)   # 아래 미평가 close 에서 제외
                     _transition(lost_rule, mo, 'agent', lost,
                                 _fmt(lost_rule.get('msg_open'), mo=mo, host=host_name),
@@ -1430,11 +1467,11 @@ if __name__ == '__main__':
                     mo_part = akey.split('@', 1)[1] if '@' in akey else ''
                     if mo_part.split('/')[0] not in lost_hosts or akey in active:
                         continue
-                    r = agent_rule_by_code.get(akey.split('@', 1)[0])
+                    r, _ = _close_rule_msg(agent_rules, akey, '')
                     if r:
                         _transition(r, mo_part, 'agent', False, '',
-                                    f"{mo_part} 판정 불가 종결 — agent 관측 두절 "
-                                    f"(노드 두절 알람 {lost_rule.get('code')} 참조)")
+                                    f"판정 불가로 닫음 — 서버 {lost_hosts[mo_part.split('/')[0]]} "
+                                    f"관측 끊김 ({lost_rule.get('code')} 참조)")
             # agent 파티션 알람 중 이번에 평가 안 된 것 = 관측 불가 → close.
             # 자기 파티션(detected_by=agent)만 정리한다 (파이프라인 §4.3) — 서비스/drift
             # 계열(oam-svc/oam)은 mo 루트가 같은 서버명/그룹명 어휘라 mo 로는 구분 불가.
@@ -1445,10 +1482,9 @@ if __name__ == '__main__':
                 mo_part = akey.split('@', 1)[1] if '@' in akey else ''
                 if akey in active:
                     continue
-                r = agent_rule_by_code.get(akey.split('@', 1)[0])
+                r, msg = _close_rule_msg(agent_rules, akey, "감시 대상에서 빠져 닫음")
                 if r:
-                    _transition(r, mo_part, 'agent', False, '',
-                                _fmt(r.get('msg_close'), mo=mo_part))
+                    _transition(r, mo_part, 'agent', False, '', msg)
 
         def _sweep_cert_expiry():
             """관리평면 **파일** 인증서 만료 임박 (A-PRC-009) — 자기 HTTPS cert + agent mTLS CA.
@@ -1466,7 +1502,7 @@ if __name__ == '__main__':
                 root = alarm_sweeper.mgmt_mo_root(config)
                 targets = []
                 if ssl_certfile:
-                    targets.append((f"{root}/oam/cert/https", ssl_certfile))
+                    targets.append((f"{root}/oam/cert/https", ssl_certfile, "OAM HTTPS 인증서"))
                 # 관리평면 CA 두 축 — **용도가 다른 별개의 CA** 라 각각 제 이름으로 본다.
                 #   ca/          그룹 CA(cert.sh `_ensure_group_ca`) — oam·oam-svc·csc 의
                 #                HTTPS 서버 인증서를 서명. 항상 존재한다.
@@ -1476,22 +1512,24 @@ if __name__ == '__main__':
                 try:
                     from services import paths as _p
                     _sec = _p.secrets_dir(config)
-                    for _sub, _leaf in (('ca/ca.crt', 'group'), ('agent_mtls/ca.crt', 'agent_mtls')):
+                    for _sub, _leaf, _nm in (('ca/ca.crt', 'group', 'OAM 그룹 CA 인증서'),
+                                             ('agent_mtls/ca.crt', 'agent_mtls', 'agent mTLS CA 인증서')):
                         _cand = os.path.join(_sec, _sub)
                         if os.path.isfile(_cand):
-                            targets.append((f"{root}/oam/cert/ca/{_leaf}", _cand))
+                            targets.append((f"{root}/oam/cert/ca/{_leaf}", _cand, _nm))
                 except Exception:
                     pass
                 thr_w = int((rule.get('thresholds') or {}).get('warning', 30))
                 thr_c = int((rule.get('thresholds') or {}).get('critical', 7))
-                for mo, path in targets:
+                for mo, path, cert_name in targets:
                     days_left, not_after = alarm_sweeper.cert_earliest_days_left(path)
                     if days_left is None:
                         logger.log_warning(f"[cert-expiry] 인증서를 읽을 수 없음 ({path}) — 만료 판정 생략")
                         continue
                     is_open = days_left <= thr_w
                     sev = ('critical' if days_left <= thr_c else 'warning') if is_open else None
-                    kw = dict(mo=mo, days_left=days_left, not_after=not_after, threshold=thr_w)
+                    kw = dict(mo=mo, days_left=days_left, not_after=not_after, threshold=thr_w,
+                              cert_name=cert_name)
                     alarm_sweeper.transition(
                         _alert_open, _service_log, dict(rule, perceived_severity=(sev or rule.get('perceived_severity'))),
                         mo, 'oam', is_open,

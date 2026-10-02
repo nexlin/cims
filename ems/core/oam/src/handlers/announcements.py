@@ -20,14 +20,19 @@ from services import announcements as ann
 from services import event_log, paths
 
 
+# 이벤트 문구의 한국어 동작 — 원래 값(action)은 params 에 그대로.
+_ACTION_KO = {'registered': '등록', 'deployed': '배포', 'deleted': '삭제'}
+
+
 def _audit(config: dict, payload: dict, action: str, mid: str, extra: dict = None) -> None:
     """감사 이벤트 E-AUD-017 announcement_changed — 등록·삭제·배포 (alarm_catalog). best-effort."""
     try:
         actor = f"console:{(payload or {}).get('login_id') or (payload or {}).get('sub') or ''}"
         ev = {'type': 'announcement_changed', 'code': 'E-AUD-017', 'kind': 'audit',
               'source': {'mo_class': 'service', 'mo_instance': 'oam/announcements', 'detected_by': 'oam'},
-              'message': f'Announcement media {action}: {mid} by {actor}',
-              'params': {'action': action, 'id': mid, 'actor': actor, **(extra or {})}}
+              'message': f'안내 음원 {_ACTION_KO.get(action, action)} — {mid} ({actor})',
+              'params': {'action': action, 'action_ko': _ACTION_KO.get(action, action), 'id': mid,
+                         'actor': actor, **(extra or {})}}
         event_log.record_event(paths.service_log_dir(config), ev)
     except Exception:
         pass

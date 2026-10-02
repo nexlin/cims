@@ -33,6 +33,7 @@ export interface AlertEvent {
   change_time?: string
   trend_indication?: 'moreSevere' | 'lessSevere'   // change 동반
   threshold_info?: { observed: number; threshold: number; unit?: string }   // 임계 계열
+  params?: Record<string, unknown>   // 발신 모듈의 msg 치환 값 — `*_raw` = 한국어 구절의 원문 (AlarmRawText)
   // P1 ack/코멘트 라이프사이클
   ack_state?: 'acknowledged' | 'unacknowledged'
   ack_user?: string
@@ -53,6 +54,7 @@ export interface AlertSummaryByType {
   type: string
   code?: string
   mo_instance?: string
+  mo_label?: string             // 표시용 — /alerts/summary 가 부착 (소스 칸 공통 표기)
   perceived_severity?: PerceivedSeverity
   opens: number
   resolved: number

@@ -323,10 +323,20 @@ int ServiceMain() {
     gclsCmpClient.SetConnectionCallback( [mo = sysId + "/csp/cmp"]( bool bConnected ) {
         gclsGroupCallService.OnCmpStatusChanged( bConnected );
         if ( gclsFmReporter.IsEnabled() ) {
-            if ( bConnected )
+            if ( bConnected ) {
                 gclsFmReporter.AlarmClose( "A-COM-007", mo );
-            else
-                gclsFmReporter.AlarmOpen( "A-COM-007", mo );
+            } else {
+                // 문구의 {cmp} — 어느 CMP 와 끊겼는지(MediaServer.Endpoints 의 ip:port, 여럿이면 쉼표).
+                std::string strCmp;
+                for ( const auto &ep : gclsSetup.m_vecCmpEndpoints ) {
+                    if ( !strCmp.empty() ) strCmp += ", ";
+                    strCmp += ep.first + ":" + std::to_string( ep.second );
+                }
+                if ( strCmp.empty() ) strCmp = gclsSetup.m_strCmpIp + ":" + std::to_string( gclsSetup.m_iCmpPort );
+                SimpleJson::JsonNode nodeParams;
+                nodeParams.Set( "cmp", strCmp );
+                gclsFmReporter.AlarmOpen( "A-COM-007", mo, nodeParams );
+            }
         }
     } );
 

@@ -326,7 +326,7 @@ def emit_drift_alerts(config, scan_results: list[dict], service_log_dir: str,
     universe = {_akey(r) for r in scan_results}
     for akey in [k for k in list(open_state) if k not in universe]:
         _close(open_state, service_log_dir, akey,
-               f"HA drift 대상 소멸 (그룹/컬렉션 제거) — {akey.split('@', 1)[1]}")
+               "감시 대상(그룹·컬렉션)이 없어져 닫음")
         counts['closed'] += 1
     for r in scan_results:
         coll = r['collection']
@@ -339,8 +339,8 @@ def emit_drift_alerts(config, scan_results: list[dict], service_log_dir: str,
             n = _UNKNOWN_STREAK[akey] = _UNKNOWN_STREAK.get(akey, 0) + 1
             if akey in open_state and n >= _UNKNOWN_LIMIT:
                 _close(open_state, service_log_dir, akey,
-                       (f"HA drift 판정 불가 {n}회 연속 (멤버 컬렉션 조회 실패) — "
-                        f"알람 종료. group '{r.get('ha_group_name')}' / {coll}"))
+                       (f"판정 불가로 닫음 — HA 그룹 {r.get('ha_group_name')} {coll} "
+                        f"멤버 조회 {n}회 연속 실패"))
                 counts['closed'] += 1
             continue
         _UNKNOWN_STREAK.pop(akey, None)     # 정상 판정 → 스트릭 리셋
@@ -348,18 +348,18 @@ def emit_drift_alerts(config, scan_results: list[dict], service_log_dir: str,
         if r['drift']:
             counts['still_open'] += 1 if was else 0
             if not was:
+                # 멤버별 해시는 문장 밖 — 상세 「원문」 줄(hash_raw)로 (alarm_catalog.md message 규칙).
+                hashes = ", ".join(f"d{m['deployment_id']}={m['hash'] or 'err'}" for m in r['members'])
                 alarm_sweeper.transition(
                     open_state, service_log_dir, _DRIFT_RULE, mo, 'oam', True,
-                    (f"HA fan-out drift — group '{r.get('ha_group_name')}' "
-                     f"collection '{coll}': "
-                     + ", ".join(f"d{m['deployment_id']}={m['hash'] or 'err'}"
-                                 for m in r['members'])),
-                    '')
+                    (f"HA 그룹 {r.get('ha_group_name')} 설정 불일치 — {coll} 컬렉션이 멤버마다 다름 "
+                     f"(멤버 {len(r['members'])}대)"),
+                    '', params={'group': r.get('ha_group_name'), 'coll': coll, 'hash_raw': hashes})
                 counts['opened'] += 1
         else:
             if was:
                 _close(open_state, service_log_dir, akey,
-                       f"HA drift 해소 — group '{r.get('ha_group_name')}' / {coll}")
+                       f"HA 그룹 {r.get('ha_group_name')} 설정 일치 — {coll}")
                 counts['closed'] += 1
     return counts
 

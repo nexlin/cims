@@ -84,6 +84,16 @@ hdr 는 `{ver:2, trans_id, node, cmd, type:"event", service:"cims"}`. 호 문맥
 - 활성키·alarm_id·재통지 의미는 표준화 §3.4 그대로 — alarm_id 는 OAM 이 발급하므로 wire 에
   싣지 않는다. 메시지는 통상 OAM 이 카탈로그의 msg_open/msg_close 를 params 로 렌더한다
   (sweeper 규칙과 동일 관례 — 콘솔 표기 일관성).
+- **close 도 발생 때의 params 를 싣는다** — 해제 문구가 대상을 이름으로 쓰게(`연동 상대 {peer}
+  연결 복구`). C++ `CFmReporter::AlarmClose`·CSC `FmReporter.alarm_close` 는 활성 목록에 둔 open params 를 그대로 싣는다.
+  close 에 params 가 없으면(구 모듈·reconcile 종결) OAM ingest 가 같은 활성키의 발생 때 params
+  로 렌더한다 — 그 값은 알람 레코드의 `params` 라 OAM 재기동 뒤에도 replay 로 복원된다. 그래도
+  채울 값이 없으면(값을 남기지 않던 옛 레코드의 해제) 빈칸 문장 대신 `{mo} 정상화` 로 닫는다.
+- **원문 키 `*_raw`** — 한국어 구절로 옮긴 값은 원문을 `<키>_raw` 로 함께 싣는다(`reason` +
+  `reason_raw`). 저장 경로 실패 사유는 `FmStoreReasonKo(raw, errno)`(`include/FmReporter.h` — CSP·CMP·CMDP, CSC 는 같은 표의
+  `fm_reporter.store_reason_ko`) 가
+  옮긴다(ServiceLogWriter/StoreOpWriter 가 errno 를 보존), 목록에 없는 사유는 원문 그대로.
+  OAM 은 params 를 레코드에 남기고 콘솔은 상세 `원문` 줄·검색 대상으로 쓴다(alarm_pipeline.md §8.3).
 
 **FM_EVENT**:
 ```jsonc
@@ -198,9 +208,13 @@ graceful stop 핸들러가 이때 신설됨) · `service_control`(audit — OAM 
 - **이벤트**: 신규 event_log `{ServiceLogging.Dir}/events/YYYY/MM/DD.jsonl` — alert_log 의 일별
   JSONL 헬퍼를 공용화해 재사용. 레코드:
   `{ts, type, kind, source{mo_class, mo_instance, detected_by}, message, params}`.
+  message 는 카탈로그 `events[].msg` 를 params + `{mo}` + OAM 이 채우는 `{MODULE}`(모듈 이름 대문자)·
+  `{node}`(발신 노드)로 렌더한다(송신이 `message` 를 실으면 그것 — CSC). 자리를 채울 값이 모자라면(구 모듈)
+  빈칸 문장 대신 `<type> (<mo>)`. 문구 규칙(한국어 `*_ko`·사람은 번호만)은 alarm_catalog.md `message` 칸.
 - **API**: `GET /events`(days/type/kind 필터) · `GET /events/types` 신설.
   `GET /alerts/catalog` 에 모듈 등록 카탈로그 병합(origin 표기).
-- **UI**: AlertsPage 에 "이벤트" 탭 신설 — 라우트 제목 "알람·이벤트 이력"이 비로소 사실이
+- **UI**: 헤더 알람 드로어 「최근 이벤트」 탭과 이력 이벤트 탭은 분류·유형을 같은 한국어 라벨
+  (`utils/alarmLabels` `EVENT_KIND_LABEL`·`eventTypeLabel`)로 보인다. AlertsPage 에 "이벤트" 탭 신설 — 라우트 제목 "알람·이벤트 이력"이 비로소 사실이
   된다. 알람·이벤트는 표시단에서도 스트림을 구분한다(통합 타임라인은 후속 과제).
 
 ## 7. 구현 지점

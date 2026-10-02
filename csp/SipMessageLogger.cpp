@@ -65,7 +65,8 @@ void CSipMessageLogger::Init( const std::string &strLogDir, const std::string &s
             if ( clsInfo.bDegraded ) {
                 SimpleJson::JsonNode nodeParams;
                 nodeParams.Set( "path", m_strBaseDir.c_str() );
-                nodeParams.Set( "reason", clsInfo.strReason.empty() ? "spool backlog" : clsInfo.strReason.c_str() );
+                nodeParams.Set( "reason", FmStoreReasonKo( clsInfo.strReason, clsInfo.iErrno ) );
+                if ( !clsInfo.strReason.empty() ) nodeParams.Set( "reason_raw", clsInfo.strReason );
                 nodeParams.Set( "spooled", (int)clsInfo.ulSpooledLines );
                 nodeParams.Set( "dropped", (int)clsInfo.ulDroppedLines );
                 gclsFmReporter.AlarmOpen( "A-PRC-006", strMo, nodeParams );
