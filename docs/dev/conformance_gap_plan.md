@@ -93,7 +93,7 @@
 | **S04** | 긴급 지시자·상태 통지 | EMG-10 · EMG-11 · EMG-13 · EMG-14 · EMG-15 · EMG-16 · EMG-17 | B1 · C6 | 1 | S03 | — | — | 대기 |
 | **S05** | MCData 인가·배포 대상 | MCData FD-1 · AFF-3 · AFF-4 · AFF-5 · DISP-2 | A1 · C3 · D1 | 1 | — | — | C07(FD-6 GET 수신 제어) | 완료 29bd2806 (FD-1 남은 몫 → S26) |
 | **S06** | SDP 협상값 집행(우선순위·큐잉 상한) | SDP-3 · PRV-9 · FCS-22 / TCS-4 · TCS-6 · RCS-3 | A1 · B1 · C2 · D2 | 1 | — | — | U02(SDK answer 값) | 완료 117d4a86 |
-| **S07** | MCVideo NAT 합류 알림(실측) | RCS-1 | A1 | 1 | — | — | .45 SDK(RR 시점을 SDK 로 고칠 때) | 대기 |
+| **S07** | MCVideo NAT 합류 알림(실측) | RCS-1 | A1 | 1 | — | — | — (서버만으로 닫힘 — CMP 가 latch 뒤 다시 알린다) | 완료 976d6d97 |
 | **S08** | Warning·응답 코드 — MCPTT | GCS-7 · GCS-8 · GCS-11 · REG-3 · ADH-4 · PRV-6 · PRV-7 · GCS-20 | B5 · C2 · D1 | 1 | — | D9 | U03 · W01(문구 사전) | 대기 |
 | **S09** | Warning·응답 코드 — MCData·MCVideo | MCData WRN-1 · WRN-2 · WRN-3 · SDS-4 / VPRV-1 | C4 · D1 | 1 | — | — | W01(문구 사전) | 대기 |
 | **S10** | 개별·애드혹 인가 판정(CSP 몫) | PRV-2 · PRV-4 · PRV-5 · PRV-8 · EMG-4 · ADH-5 | A3 · B3 | 1 | C03 | — | W01(Capabilities 게이트) | 대기 |
