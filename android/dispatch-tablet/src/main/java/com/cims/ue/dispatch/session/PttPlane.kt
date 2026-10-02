@@ -72,6 +72,7 @@ suspend fun DispatchSession.refreshGroups(): CimsResult<Unit> {
     gone.forEach {
         if (it.isMember) ptt.affiliate(it.id, false)
         ptt.subscribeConference(it.id, false)
+        forgetUpkeep(it.id)
     }
     // 서버 pttTargets(ptt_listen=all 은 전 그룹)가 지워진 그룹을 아직 들고 있을 수 있다 — 편성 재조회를 당겨, 삭제된 그룹을
     //   청취 범위로 다시 구독하는 창을 없앤다(정상 주기는 60초).
@@ -81,13 +82,13 @@ suspend fun DispatchSession.refreshGroups(): CimsResult<Unit> {
         //   한 번 더 맞춘다(이번에는 «멤버였던 그룹» 이 아니라 범위 줄로 선다)
         if (dropped.isNotEmpty()) refreshGroups()
     }
+    // 제휴는 서버의 2xx 까지 본다(`affiliateConfirmed`) — 서지 못한 것·응답이 없던 것은 유지 평면이 다시 싣는다(§6.7a). 응답이
+    //   없으면(망이 없다) 남은 그룹은 기다리지 않는다 — 그룹마다 시한을 다 쓰면 목록이 그만큼 늦게 선다.
+    var answered = true
     fresh.forEach { (id, isMember) ->
         if (gen != loginGeneration.value) return CimsResult.fail(-1, "로그아웃됨")    // 구독을 거는 사이 로그아웃 — 더 걸지 않는다
-        // 범위 밖·자격 없음은 서버가 403 + Warning 138 로 거절한다 — 구독은 한 번, 재시도 루프는 없다.
-        if (isMember) {
-            val aff = ptt.affiliate(id, true)
-            updateGroup(id) { it.copy(affiliated = aff.ok) }
-        }
+        // 범위 밖·자격 없음은 서버가 403 + Warning 138 로 거절한다 — conference 구독은 여기서 한 번, 갱신은 유지 평면이 한다.
+        if (isMember && answered) answered = affiliateConfirmed(ptt, id) != 0
         ptt.subscribeConference(id, true)
     }
     requestVideoSync(groupsRefreshed = true)       // 영상 채널 표시·MCVideo affiliation·영상 호 합류를 다시 맞춘다(§6.14)
@@ -430,6 +431,8 @@ internal fun DispatchSession.applyCallState(c: CallInfo) {
         // 내가 거둔 호인가 — 연결 전에 끊으면 CANCEL → 487 로 끝나는데, 그것은 실패가 아니다(토스트도 «세션 실패» 도 아니다).
         val mine = takeLocalHangup(c.callId)
         sessionOf(c.callId)?.let { s ->
+            // 403 으로 거절된 [참여] — 제휴를 다시 싣고 한 번 더 건다(§6.7a). 그 끝은 실패가 아니다: 다시 건 호의 결과가 알린다.
+            if (!mine && rejoinsAfterAffiliation(s, c)) { removeSession(c.callId); return }
             if (!mine) noteFailedAttempt(s, c)
             if (s.kind.isPttCard || s.kind == SessionKind.PTT_LISTEN)
                 addActivity(s.info.groupId, channelNameOf(s),

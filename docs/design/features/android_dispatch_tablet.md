@@ -268,7 +268,7 @@ Windows 접점(`sdk/windows/dotnet/CimsUe/Platform/`)의 책임을 옮긴다. �
 | PTT 입력 | `HotKeys.cs`(전역 핫키) | `HwPtt` — 측면 하드키 `KeyEvent`(학습·반복, 문자 키보드의 기능 키는 측면 키로 읽지 않는다). 판정(`KeyMapping.classify`·`learnable`)은 Android 를 타지 않아 기기 없이 시험한다(§7). 화면이 꺼진 동안의 벤더 방송은 받지 않는다(§7) | `ptt-client/HwPtt.kt` |
 | 자격 저장 | `CredentialStore.cs`(DPAPI) | `SecureStore` — Android Keystore 의 AES/GCM 키로 암호화해 SharedPreferences 에 암호문만 둔다(의존을 늘리지 않으려 androidx.security-crypto 를 쓰지 않는다). 복호화 실패는 예외가 아니라 `null` — 앱이 재로그인을 요구한다. 화면 잠금과 묶지 않는다(부팅 뒤 무인 재등록) | `core/account/` |
 | 부팅 재등록 | `AutoStart.cs` | `BootRegister` — `BOOT_COMPLETED` | `core/boot/CimsBootReceiver.kt` |
-| 망 복귀 재등록 | `App.xaml.cs` `NetworkChange`(가용성·주소 변화) → `DispatchSession.NoteNetworkChange`(2초 합침·주소 지문) → 코어 `Engine.HandleNetworkChange` | SDK 접점 `NetworkWatcher`(기본 망 콜백 + 판정 `NetworkChangeFilter`, §6.1) → `DispatchSession.handleNetworkChange` → 코어 `Engine::handleNetworkChange`(TCP/TLS 연결 종료·계정별 재등록·앞 등록이 끝난 뒤 한 번 더, [ue_sdk.md](ue_sdk.md) §4.2) | — |
+| 망 복귀 재등록 | `App.xaml.cs` `NetworkChange`(가용성·주소 변화) → `DispatchSession.NoteNetworkChange`(2초 합침·주소 지문) → 코어 `Engine.HandleNetworkChange` | SDK 접점 `NetworkWatcher`(기본 망 콜백 + 판정 `NetworkChangeFilter`, §6.1) → `DispatchSession.handleNetworkChange` → 코어 `Engine::handleNetworkChange`(TCP/TLS 연결 종료·계정별 재등록·앞 등록이 끝난 뒤 한 번 더, [ue_sdk.md](ue_sdk.md) §4.2). 등록에 묶인 제휴·구독은 그 뒤 앱이 다시 싣는다(§6.7a) | — |
 | 등록 유지 | (데스크톱 프로세스 수명) | `UeForegroundService` — 알림·wakelock·**FGS 타입**(§6.1). 대기 중 타입은 **`specialUse`**(subtype 을 매니페스트에 선언), 캡처 중에는 `setMicrophoneActive` 가 **마이크를 더해 다시 승격**한다 — 알림만 다시 그리면 타입은 그대로다. `dataSync` 는 쓰지 않는다: Android 15+ 에서 하루 6시간 누적 제한이 걸리고 `BOOT_COMPLETED` 에서 시작할 수 없어 상주·부팅 재등록이 성립하지 않는다(기존 `ptt-client` 도 `microphone\|specialUse`). 승격 실패는 삼키지 않고 `onForegroundFailed` 로 올린다 | `ptt-client/PttService.kt` |
 | 서버 인증서 만료 | `Engine.TlsPeerExpiry` → 배너 | 같은 코어 API(`CimsUe.tlsPeerExpiry`·`CscClient.tlsPeerExpiry`) → 배너 + 설정 «서버 인증서» 행(§6.2a-3) | `core/net/TlsPeerObserver.kt` |
 | 단일 인스턴스 | `SingleInstance.cs` | 해당 없음 — Android 태스크 모델 | — |
@@ -317,6 +317,7 @@ UeForegroundService  ─ 프로세스 상주. 알림·wakelock. 여기서 CimsUe
   로 거절돼 요청이 사라진다. 변화 판정은 SDK 접점 `NetworkWatcher`(`NetworkChangeFilter`)가 한다 = 잃었던 뒤 다시 섰거나 기본 망이
   **다른 망으로** 바뀐 것. 콜백을 걸 때 지금의 망을 심어 두어(`seed`), 등록 직후 그 망의 첫 알림·같은 망의 재알림은 거르고
   **망 없이 기동했으면 처음 서는 망**은 변화로 본다. 바뀐 뒤 늦게 오는 옛 망의 소실은 무시한다.
+  **등록에 묶인 제휴·구독은 앱이 다시 싣는다**(§6.7a) — 코어의 재등록은 등록만 되살린다.
 - **초기화 절차는 수동·자동이 공유한다.** 그룹 조회·affiliation·conference 구독·dialog 감시는 `start()`
   안에 있다 — 자동 복귀(저장 자격 → `resume` → `start`)에서도 ①② 채널이 서야 하기 때문이다.
 - **ViewModel 은 화면 상태만** 갖는다. 서버 상태는 전부 `DispatchSession` 의 Flow 를 접어 만든다.
@@ -1572,6 +1573,49 @@ floor 를 **따로** 요청하고 코어가 승인된 세션마다 같은 마이
 - **참여 대기**(`pendingTargetId`)는 그 참여가 성립 없이 끝나면 거둔다 — 남겨 두면 한참 뒤 그 그룹에 선 착신 세션이 지금 말하던
   채널의 발언권을 놓게 한다.
 
+### 6.7a 등록에 묶인 것 — 제휴·구독의 복원과 갱신
+
+서버에 서 있는 내 상태 가운데 **등록에 묶인 것**과 **수명이 있는 것**은 앱이 지킨다(`session/UpkeepPlane.kt`, 데스크톱
+`Services/DispatchSession.Upkeep.cs` — 같은 규칙·같은 값). 코어는 제휴 PUBLISH·구독 SUBSCRIBE 를 한 번 보낼 뿐 유지하지 않는다
+([ue_sdk.md](ue_sdk.md) §4.2 — 목표 집합·재시도는 앱).
+
+| 서버 상태 | 사라지는 계기 | 사라지면 |
+|---|---|---|
+| MCPTT 제휴(멤버 그룹마다 PUBLISH, 수명 3600 초) | **등록이 사라질 때 전부**(TS 24.379 §9 — 제휴는 등록에 묶인다: 해지 REGISTER · 등록 만료 · TCP/TLS 연결이 끊긴 바인딩의 회수 — [registration_binding_set.md](registration_binding_set.md) §4 계기 2·3) · 수명 만료 | 편성 그룹 [참여]·개시가 **403 + Warning 120**(미제휴, TS 24.379 §10.1.1.4.2), 그 그룹의 호 초대도 오지 않는다 |
+| MCVideo 제휴(관심 그룹 전부를 한 PUBLISH, 수명 = 등록) | 등록이 사라질 때 전부(TS 24.281 §8.2.2.2) | 편성 영상 호의 초대가 오지 않는다(§6.14) |
+| conference 구독(그룹마다)·xcap-diff 구독(GMS PSI)·dialog 구독(대표번호·그룹원 회선) — 수명 3600 초 | 수명 만료 | 로스터·그룹 변경 통지·그룹원 상태·대기열이 조용히 멎는다 |
+
+**제휴의 «수명 3600 초» 는 규격이 아니라 우리 편차다.** 규격의 제휴에는 사실상 시간 만료가 없다 — 단말은 `Expires: 4294967295` 로
+싣고(TS 24.379 §9.2.1.2 5) a)), 서버는 그보다 작은 값을 423 으로 거절한다(§9.2.2.2.3 5)). 제휴가 끝나는 것은 해제 PUBLISH 와 로그오프
+(§7.3.5 NOTE — 서비스 설정 제거는 모든 그룹 제휴 제거를 포함)뿐이다. 그룹 호 세션의 해제(T4 Inactivity·TNG3 — §6.3.8.1)는 **세션만**
+끝내고 제휴는 남긴다. 우리 코어는 `Event: mcptt` 구형 PUBLISH 를 `Expires: 3600` 으로 보내고 CSP 가 상한 3600 초로 부여하므로
+([mcptt_standard_conformance.md](mcptt_standard_conformance.md) C1), 그 전환이 끝날 때까지 앱이 수명 절반마다 다시 싣는다(계기 ③ 의 제휴 몫).
+구독(conference·xcap-diff·dialog)의 갱신은 규격대로다(RFC 6665 §4.1.2.2).
+
+망이 끊겼다 돌아오는 것이 첫 줄의 전형이다 — TLS 연결이 끊기면 서버가 그 바인딩을 회수하며 제휴를 내리고, 코어의 재등록
+(`handleNetworkChange`)은 등록만 되살린다. 다시 싣지 않으면 «내 채널» 의 [참여] 가 «그룹 멤버가 아닙니다» 로 거절되고 앱을 다시
+켜야 풀린다.
+
+**다시 싣는 계기**(`UpkeepRules`):
+
+| # | 계기 | 판정 |
+|---|---|---|
+| ① | 등록이 끊겼다 다시 섰다 | **등록 이벤트**(`regState` — REGISTER 응답마다)로 본다. 상태 스냅샷(`registrations`)은 같은 값을 합쳐 Registered→Registered 를 못 본다 |
+| ② | 망이 바뀐 뒤의 첫 등록 성공 | `handleNetworkChange` 가 계정에 표시해 둔다 — 등록 상태가 줄곧 «등록됨» 으로만 보여도 서버의 바인딩은 새것일 수 있다 |
+| ③ | 수명 절반 경과 | 1분 틱. 제휴는 그룹마다 **서버의 2xx 를 받은 시각**, 구독은 건 시각 기준(RFC 3903 §4.1 · RFC 6665 §4.1.2.2) |
+| ④ | [참여] 가 403 | 멤버 그룹이면 제휴를 다시 싣고 **한 번 더** 건다 — 단말이 등록 변화를 못 본 채 서버만 제휴를 내린 경우의 유일한 신호다 |
+
+- ①② 는 그 계정의 것을 전부 낡은 것으로 본다 — PTT 계정 = 멤버 그룹 제휴(MCPTT·MCVideo) + conference(멤버·청취 범위) + xcap-diff,
+  전화 계정 = dialog 구독 전부(`watchAll`). 맞춤은 한 줄에서 돈다(`kick` — 요청이 몰려도 한 번).
+- **제휴는 최종 응답까지 본다**(`affiliateConfirmed`). 명령이 받아들여진 것은 제휴가 선 것이 아니다 — 2xx 만 제휴로 적고
+  (`GroupInfo.affiliated`), 거절·무응답은 1분부터 배로 최대 30분 물러나며 다시 싣는다. 응답이 없으면 그 맞춤은 거기서 멈춘다
+  (망이 없는 것이다 — 그룹마다 시한 8초를 다 쓰지 않는다).
+- ④ 의 [참여] 재시도는 **한 번**이다(같은 그룹 10초 안의 두 번째 403 은 그대로 알린다). 제휴 PUBLISH 까지 거절되면 처음의 거절을
+  알린다(정말 멤버가 아니다). 코어가 `Warning` 을 올리지 않으므로 «멤버인가» 는 GMS 목록으로 가른다. 일제 통화 개시는 누르는
+  동안만 유효한 호라 다시 걸지 않고 제휴만 다시 싣는다. 긴급 참여는 서버가 암묵적으로 제휴시키므로(TS 24.379 §9.2.2.3.7) 대상이 아니다.
+  다시 건 호는 «참여 대기»(§6.7 `pendingTargetId`)를 잇지 않는다 — 처음 시도가 끝나며 거둬졌다. 발언 대상(✓)은 관제사가 켠다.
+- 로그인 절차가 처음 구독을 건 시각이 갱신의 기준이다(`beginUpkeep`) — 로그인 직후 한 번 더 걸지 않는다. 로그아웃은 전부 비운다.
+
 ### 6.8 Windows ViewModel ↔ 태블릿 대응
 
 화면이 적은 만큼 VM 도 적다. **합친 곳은 상태가 하나이기 때문**이고, 나눈 곳은 수명이 다르기 때문이다.
@@ -1818,12 +1862,14 @@ id · 소속 · 오른쪽 **[채널로]** · **[편집]**(남색 알약) · **[�
 오른쪽 = **멤버** 카드(멤버 n · 줄마다 **[필수/선택]**·**[의장/참가자]** 토글 — 켜지면 채움 · [×] 빼기) / 바닥 고정 = 오류 + [취소]
 [저장 / 그룹 만들기]. 문서를 받는 동안은 본문을 비워 둔다(받기 전에 고친 값이 도착한 문서에 덮이지 않게).
 
+칸 이름은 규격의 타이머·카운터면 괄호에 규격 이름을 함께 적는다(T4·TNG3·TNG1·T5 — 규칙 정본 [dispatch_desktop_ui.md](dispatch_desktop_ui.md) §4.7 «규격 이름 병기»).
+
 | 절 | 칸 | `GroupDoc` | 범위·기본값 |
 |---|---|---|---|
 | 기본 | 그룹 이름 · 그룹 id(신규만 편집 — 아래에 `tel:<id>`) · 세션 종류 [편성(prearranged)][채팅(chat)] | `displayName` · `uri` · `sessionType` | 일제 통화는 그룹 종류가 아니라 호 속성이라 선택지에 없다([mcptt_broadcast_group_call.md](mcptt_broadcast_group_call.md) §5) |
 | 기본 | 그룹 우선순위 · 최대 참가자 | `priority` · `maxParticipants` | 0~15 · 0 = 무제한 |
 | 그룹 호 | 유지 시간(T4) | `hangTimerSec` | 0~3600초, 기본 30, 0 = 미사용(편성 그룹) |
-| 그룹 호 | 최대 통화 시간 | `maxDurationSec` | 0~86400초, 기본 3600, 0 = 무제한 |
+| 그룹 호 | 최대 통화 시간(TNG3) | `maxDurationSec` | 0~86400초, 기본 3600, 0 = 무제한 |
 | 그룹 호 | 시작 최소 응답 | `minNumberToStart` | 0~65535명, 기본 0 = 기다리지 않음(TS 24.379 §6.3.3.3) |
 | 그룹 호 | 필수 멤버 대기(TNG1) | `ackTimeoutSec` | 1~300초, 기본 5 |
 | 그룹 호 | 필수 멤버 대기가 끝나면 | `ackAction` | 통화 포기(abandon, 기본) / 없이 진행(proceed) |

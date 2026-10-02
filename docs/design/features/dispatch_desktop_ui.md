@@ -575,10 +575,12 @@ SIP transport 콤보는 **ANY** 를 포함한 넷(콘솔 라벨과 같다) — A
 
 **폼의 그룹 호·한도 칸**(TS 24.481 §7.2.2·§7.2.4.2 — 콘솔 서비스 › PTT 그룹과 같은 요소·범위·기본값, SDK `GroupDoc` 이 싣는다 — [ue_sdk.md](ue_sdk.md) §7):
 
+**규격 이름 병기** — 설정 값이 규격의 타이머·카운터면 한글 이름 뒤 괄호에 규격 이름을 적는다: «유지 시간(T4, 초)»·«최대 통화 시간(TNG3, 초)»·«필수 멤버 대기(TNG1, 초)»·«수신 유지 시간(T5, 초)», 한도 안내 «동시 영상 호 한도(N6 = n)»·«동시 제휴 그룹 한도(N2 = n)». 규격 문서·서버 로그·콘솔과 같은 이름으로 찾을 수 있게 하려는 것이다(T4 = TS 24.380 Inactivity · TNG1·TNG3 = TS 24.379 §6.3.3.3·§6.3.8.1 · T5 = TS 24.581 §11.1.3 · N2·N6 = TS 24.484 user profile). 규격에 짧은 이름이 없는 요소(시작 최소 응답·동시 송출 상한 등)는 요소 이름을 툴팁·도움말에 둔다. 콘솔도 같은 규칙이다.
+
 | 칸 | `GroupDoc` | 규격 요소 | 범위·기본값 |
 |---|---|---|---|
 | 유지 시간(T4) | `HangTimerSec` | on-network-hang-timer | 0~3600초, 기본 30, 0 = 미사용(편성 그룹만) |
-| 최대 통화 시간 | `MaxDurationSec` | on-network-maximum-duration | 0~86400초, 기본 3600, 0 = 무제한 |
+| 최대 통화 시간(TNG3) | `MaxDurationSec` | on-network-maximum-duration | 0~86400초, 기본 3600, 0 = 무제한(긴급 중에는 TNG2 가 대신 돈다 — TS 24.379 §6.3.3.5.2) |
 | 시작 최소 응답 | `MinNumberToStart` | on-network-minimum-number-to-start | 0~65535명, 기본 0 = 기다리지 않음(TS 24.379 §6.3.3.3) |
 | 필수 멤버 대기(TNG1) | `AckTimeoutSec` | on-network-timeout-for-acknowledgement-of-required-members | 1~300초, 기본 5 |
 | 대기 만료 시 | `AckAction` | on-network-action-upon-expiration-of-timeout-for-acknowledgement-of-required-members | 통화 포기(abandon, 기본) / 없이 진행(proceed) |
@@ -639,6 +641,15 @@ SIP transport 콤보는 **ANY** 를 포함한 넷(콘솔 라벨과 같다) — A
   계정별 REGISTER 만으로는 옛 주소의 TCP/TLS 연결로 다시 나간다. 통지(`NetworkChange.NetworkAvailabilityChanged`·`NetworkAddressChanged`)는 가상 어댑터·IPv6 임시
   주소로도 잦아 `DispatchSession.NoteNetworkChange` 가 2초 합친 뒤 유니캐스트 주소 지문(루프백·터널·링크 로컬 제외)이 바뀌었고 망이 있을 때만 알린다.
   진행 중 호의 유지는 코어 과제([ue_sdk.md §11](ue_sdk.md)).
+- **등록에 묶인 것 — 제휴·구독의 복원과 갱신**(`Services/DispatchSession.Upkeep.cs`, 태블릿 `UpkeepPlane.kt` 와 같은 규칙 — 정본 표
+  [android_dispatch_tablet.md §6.7a](android_dispatch_tablet.md)). 서버는 등록이 사라질 때(해지 REGISTER · 등록 만료 · TCP/TLS 연결이 끊긴 바인딩의 회수) 그 가입자의
+  제휴(affiliation)를 전부 내리고(TS 24.379 §9), 제휴 PUBLISH·구독(conference·xcap-diff·dialog)의 수명은 3600 초다. 코어는 한 번 보낼 뿐 유지하지 않는다
+  ([ue_sdk.md §4.2](ue_sdk.md)) — 앱이 다시 싣지 않으면 망이 끊겼다 돌아온 뒤 «내 채널» [참여] 가 403(Warning 120 — 미제휴) «그룹 멤버가 아닙니다» 로 거절되고,
+  한 시간 뒤 로스터·회선 감시·그룹 변경 통지가 조용히 멎는다. 다시 싣는 계기 넷(`UpkeepRules`): ① 등록이 끊겼다 다시 섰다(등록 이벤트 기준) ② 망이 바뀐
+  뒤의 첫 등록 성공(등록 상태가 줄곧 «등록됨» 이어도 — `NoteNetworkChange` 가 표시) ③ 수명 절반 경과(1분 맞춤 — 제휴는 그룹마다 서버 2xx 시각, 구독은 건 시각,
+  RFC 3903 §4.1 · RFC 6665 §4.1.2.2) ④ [참여] 가 403 — 멤버 그룹이면 제휴를 다시 싣고 **한 번 더** 건다(같은 그룹 10초 안의 두 번째 403 은 그대로 알림).
+  ①② 는 PTT 계정 = 멤버 그룹 제휴(MCPTT·MCVideo) + conference(멤버·청취 범위) + xcap-diff, 전화 계정 = dialog 구독 전부. 제휴는 **최종 응답 2xx 에서만**
+  선 것으로 적고(`GroupInfo.Affiliated`), 거절·무응답(시한 8초)은 1분부터 배로 최대 30분 물러나며 다시 싣는다.
 - **CMS 문서**(TS 24.484 user profile·service config — `CscClient.FetchUserProfile/FetchServiceConfig`, ETag 304) = 기동 때(PTT 계정을 올리기 전) + 5분마다.
   user profile ruleset → `Capabilities`(UX 선차단 — [긴급 호출]·[긴급 해제]·개별·애드혹·[경보 해제], 받지 못한 문서는 허용, 최종 판정은 서버 — 자격이 바뀌면
   카드·배너의 해제 버튼도 다시 판정한다), service config 의 `*-resource-priority` → PTT 계정 `Rp*`(없으면 코어 기본값). 엔진 `UdpNoTcpSwitch` = 올리는 서비스 중

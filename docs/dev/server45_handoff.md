@@ -854,3 +854,101 @@ Windows PC 가 관제 앱의 MCVideo 몫(W1' SDK 재빌드·시험 · W4 그룹 
   ↔ 관제 영상 보기·보내기(§12.5 .48 그룹 gmv1/gmv2). 영상 벽(W6)은 그 뒤.
 - **확인(Windows, W1')** — d1685a78 까지(b2a45e36 D6 · 6e9edd3a `setMuted` MCVideo 음성만) Windows 재빌드: `cimsue_test` 144/144 · `CimsUe.Tests` 85/85. 리눅스 149 와의 차 5건 =
   `FloorXCheck.*`(floor_xcheck_test.cpp — CMP `PFloorCodec` 이 pasf(pthread·semaphore)를 끌어 리눅스 전용, sdk/core/CMakeLists.txt). C API·헤더 변화 없음 → 앱 무변경.
+
+## 14. 망 복귀 뒤 «그룹 멤버가 아닙니다» — 등록에 묶인 제휴·구독의 재적재 (Windows → .45)
+
+관제 태블릿 실기에서 나온 증상이다. 원인은 관제 앱만의 것이 아니라 **단말 공통**(현장 앱 `android/ptt-client` 포함)이라, 관제 앱 두 벌은 Windows 에서
+고쳤고 현장 앱·SDK·서버 쪽 몫을 여기 넘긴다. 규칙 정본 = [android_dispatch_tablet.md](../design/features/android_dispatch_tablet.md) §6.7a ·
+[ue_sdk.md](../design/features/ue_sdk.md) §4.2 «등록에 묶인 것의 유지».
+
+### 14.1 증상과 원인
+
+- **증상** — 망이 끊겼다 다시 붙은 뒤 «내 채널» 의 편성 그룹 [참여] 가 «그룹 멤버가 아닙니다» 로 거절된다. 앱을 종료했다 다시 켜면 된다.
+- **원인(코드로 확인 — 서버 로그 대조는 .45 에서)**
+
+| 단계 | 일어나는 일 | 근거 |
+|---|---|---|
+| ① 연결 소실 | TLS/TCP 등록 단말의 연결이 끊긴다(망 단절, 또는 망 복귀 때 코어가 옛 연결을 닫음 — `Engine::handleNetworkChange` `pjsip_tpmgr_shutdown_all`) | `sdk/core/src/engine.cpp` |
+| ② 바인딩 회수 → 등록 해제 | 10초 스윕이 연결이 죽은 바인딩을 지운다(계기 2 — flow 실패). 마지막 바인딩이면 «등록 만료» 로 처리한다 — `Registration expired: user(…)` | `csp/CspServer.cpp` `gclsUserMap.DeleteTimeout` → `gclsCspUserMap.unregisterUser` · [registration_binding_set.md](../design/features/registration_binding_set.md) §4 |
+| ③ 제휴 전부 삭제 | `unregisterUser` → `CDbManager::UpdateLogoutTime` 이 그 가입자의 `ptt_affiliations`·`mcvideo_affiliations` 를 **전부 지운다** — `[Affiliation] de-register 회수 user=… rows=n` | `csp/DbManager.cpp` |
+| ④ 재등록 | 망이 돌아와 단말이 다시 등록한다 — **새 등록**이다. 서버가 다시 세우는 것은 암시적 제휴 그룹뿐(`_ApplyImplicitAffiliations`) | `csp/CscfModule.cpp` |
+| ⑤ 단말은 다시 싣지 않는다 | 코어는 제휴 PUBLISH·구독 SUBSCRIBE 를 부를 때 한 번 보낼 뿐이다. 앱은 «이미 실었다» 고 믿는다 | `sdk/core/src/engine.cpp` `sendAffiliation`·`subscribeConference` |
+| ⑥ [참여] 거절 | `require_affiliation` 편성 그룹 INVITE = **403 + Warning `120 user is not affiliated to this group`**. 관제 앱 문구 사전이 PTT 참여 403 을 «그룹 멤버가 아닙니다» 로 읽는다(코어가 `Warning` 을 올리지 않는다) | `csp/GroupCallService.cpp` `ProcessGroupCall` |
+
+  ①→② 사이에 재등록이 먼저 닿으면(스윕 전 — 짧은 순단) 같은 transport 재등록이 바인딩을 갈아 끼울 뿐이라 제휴가 남는다. 그래서 «가끔만» 난다.
+- **같은 뿌리의 다른 증상** — 제휴 PUBLISH 와 구독(conference·xcap-diff·dialog)은 `Expires: 3600` 이고(서버 상한 `SUBSCRIBE_MAX_EXPIRES_SEC`) 관제 앱은 갱신하지
+  않았다. 끊기지 않아도 한 시간 뒤 제휴(→ 403 120)·로스터·회선 감시·그룹 변경 통지가 조용히 사라진다.
+  제휴의 3600 초는 **규격 대비 편차**다 — 규격은 `Expires: 4294967295`(사실상 무기한)이고 T4 는 세션만 해제한다(§14.3 K3·S2). 구독의 3600 초 갱신은 규격대로(RFC 6665).
+
+### 14.2 Windows 에서 반영한 것 (관제 앱 두 벌)
+
+`android/dispatch-tablet` `session/UpkeepPlane.kt` · `windows/dispatch-desktop` `Services/DispatchSession.Upkeep.cs` — 같은 규칙·같은 값(`UpkeepRules`).
+
+| 계기 | 동작 |
+|---|---|
+| ① 등록이 끊겼다 다시 섬(등록 **이벤트** 기준) · ② 망 변경 뒤 첫 등록 성공 | 그 계정의 것 전부를 다시 싣는다 — PTT: 멤버 그룹 제휴(MCPTT·MCVideo) + conference + xcap-diff / 전화: dialog 구독 |
+| ③ 수명 절반(1분 맞춤) | 제휴는 그룹마다 **2xx 를 받은 시각**, 구독은 건 시각 기준 |
+| ④ [참여] 403 | 멤버 그룹이면 제휴를 다시 싣고 2xx 뒤 **한 번 더** 건다(10초 안의 두 번째 403 은 그대로 알림) |
+
+제휴는 최종 응답 2xx 에서만 선 것으로 적는다(거절·무응답 = 1분부터 배로 최대 30분 물러남). 확인 = 태블릿 단위시험 `UpkeepTest`(전체 586 통과) · Windows 빌드.
+**실기(망 끊김 → 복귀 → [참여])는 미확인.**
+
+### 14.3 .45 몫
+
+| # | 과제 | 내용 | 대상 |
+|---|---|---|---|
+| T1 | **현장 앱 — 등록이 다시 선 뒤 제휴 재적재** | `PttController.onReg` 는 등록이 다시 서면 `affiliateAll()` 을 부르지만, `ensureAffiliated` 가 `affValid(g)`(로컬 `affExpireAt` 잔여 > 수명 절반)이면 **건너뛴다**. 등록이 내려갈 때 `affExpireAt` 을 비우지 않으므로, 마지막 PUBLISH 뒤 30분 안에 등록이 끊겼다 서면 서버에는 제휴가 없는데 단말은 다시 싣지 않는다 → 그룹콜 초대가 오지 않고 [참여] 가 403 120. 등록이 내려가는 가지(`else if (was is RegState.Registered)`)에서 `affExpireAt.clear()`·`_affiliated` 비움(구독 쪽 `clearSubStateLocked()` 는 이미 한다) | `android/ptt-client/…/PttController.kt` `onReg` · `PttGroups.kt` |
+| T2 | **현장 앱 — 등록 상태가 줄곧 «등록됨» 인 경우** | `onReg` 는 `was is Registered` 면 곧바로 돌아간다. 망 전환·연결 재수립 뒤의 REGISTER 는 단말에 Registered→Registered 로만 보이는데 서버의 바인딩은 새것일 수 있다(§14.1 ②~④). 망 변경을 표시해 두고 그 뒤 첫 등록 성공을 T1 과 같이 처리한다(관제 앱 `UpkeepRules.renewed(was, registered, networkChanged)`) | 같은 파일 |
+| T3 | **현장 앱 — 망 변경을 코어에 알리지 않는다** | 이 트리의 `ptt-client` 에는 `NetworkWatcher` → `CimsUe.handleNetworkChange()` 연결이 없다(`volte-client` 는 `NetworkWatcher` → `reregister()`, 관제 태블릿은 `handleNetworkChange`). 옛 망의 TCP/TLS 연결을 재사용하는 문제([ue_sdk.md](../design/features/ue_sdk.md) §4.2)와 T2 의 표시가 여기서 함께 풀린다 — `PttService` 에 `NetworkWatcher` 를 걸어 `handleNetworkChange()` + 표시. `volte-client` 도 `reregister()` 대신 `handleNetworkChange()` 인지 확인 | `android/ptt-client/…/PttService.kt` · `volte-client/…/SipService.kt` |
+| T4 | **현장 앱 — 그룹콜 403 의 자기 복구** | 서버만 제휴를 내린 경우 단말이 알 수 있는 유일한 신호가 [참여]·개시의 403 이다. 멤버(편성) 그룹의 그룹콜이 403 으로 끝나면 `affExpireAt.remove(g)` → `affiliate(g)` 의 2xx 뒤 **한 번** 다시 건다(긴급 = 서버 암묵적 제휴라 제외, 일제 통화 = 제휴만 다시). 관제 앱 `rejoinsAfterAffiliation` 과 같은 규칙 | `PttGroups.kt` `joinGroupCall`·호 종료 경로 |
+| T5 | **현장 앱 — MCVideo 제휴** | `PttVideo` 가 등록 재성립 때 다시 싣는지와, T2(Registered→Registered) 경우도 덮는지 확인 | `PttVideo.kt` |
+| K1 | **SDK — 최종 응답의 `Warning` 을 올린다** | 403 120(미제휴)과 비멤버 403 을 앱이 가를 수 없어 GMS 목록의 멤버십으로 추정한다. `CallInfo` 에 최종 응답의 Warning(코드·문구)을 싣는다(C API·.NET·Kotlin) — 문구 사전이 «제휴가 서지 않았습니다» 와 «그룹 멤버가 아닙니다» 를 가르고, T4·④ 가 120 일 때만 다시 건다. MCVideo 의 117·118·120 도 같은 필드 | `sdk/core` `types.h CallInfo` · `cimsue_c.h` |
+| K2 | **SDK — 유지를 코어로 올릴지(결정)** | 지금 계약은 «목표 집합·재시도는 앱»(ue_sdk.md §4.2)이라 같은 유지 로직이 앱 세 벌(현장·태블릿·데스크톱)에 있다. 게시·구독의 갱신은 UA 의 일(RFC 3903 §4.1 EPA · RFC 6665 §4.1.2.2)이므로, 코어가 목표 집합을 들고 수명 절반·등록 재성립에 다시 싣게 하면 앱은 집합만 준다(`affiliate`·`subscribe*` 의 on/off = 집합 변경). 권고 = 코어로 올린다 — 올리면 관제 앱의 `Upkeep*` 는 ④(403 재시도)만 남긴다 | `sdk/core/src/engine.cpp` |
+| K3 | **SDK — 제휴 PUBLISH 를 규격형으로** | 규격의 제휴에는 사실상 시간 만료가 없다 — 단말은 `Event: presence` + pidf 로 `Expires: 4294967295` 를 싣는다(TS 24.379 §9.2.1.2 5) a) · NOTE 3). 지금 코어는 구형 `Event: mcptt` + `Expires: 3600` 이라 한 시간마다 제휴가 사라진다(관제 앱의 «수명 절반» 제휴 갱신은 이 편차의 임시 보완). mcptt_standard_conformance.md C1 이행 순서 ② | `sdk/core/src/engine.cpp` `sendAffiliation` |
+| S2 | **서버 — 제휴에 시간 만료를 두지 않는다** | §9.2.2.2.3 5) = Expires 가 없거나 0 이 아닌데 4294967295 미만이면 423 + `Min-Expires: 4294967295`. 지금 MCPTT 는 min(요청, 3600) 으로 줄여 부여한다(C1 «의도적 완화»). 규격형 요청에는 요청값 그대로(MCVideo 제휴처럼 만료 없음 — 끝은 해제 PUBLISH·로그오프) 부여하면 K3 와 함께 한 시간 만료가 없어진다. 그룹 호 세션 해제(T4 Inactivity·TNG3, §6.3.8.1)는 지금도 세션만 끝내고 제휴는 남긴다 — 그대로 | `csp/CscfModule.cpp` `RecvPublishAffiliationPidf` |
+| S1 | **서버 — flow 실패로 인한 등록 해제와 제휴 회수** | 계기 2(스트림 flow 실패)는 순단에도 마지막 바인딩을 지워 등록 해제로 이어지고 제휴를 전부 내린다. UDP 는 같은 이유로 침묵 바인딩을 지우지 않기로 했다(registration_binding_set.md §4.1 «단말이 잘 때마다 그룹 소속이 출렁인다»). 스트림에도 같은 출렁임이 있다 — 규격에서 제휴가 한꺼번에 내려가는 것은 로그오프다(TS 24.379 §7.3.5 — 서비스 설정 PUBLISH `Expires=0`, NOTE «Removal of MCPTT service settings includes removal of all group affiliations»). 연결 하나가 끊긴 것은 등록 해제가 아니다(IMS 등록은 만료·해지까지 산다) — flow 실패로 인한 회수는 **등록 수명(Expires+grace)까지 제휴를 남기는** 유예를 검토(해지 REGISTER·등록 만료는 지금대로). 단말 보완(T1~T4)과 독립이다 — 단말이 다시 싣더라도 그 사이 그룹콜 초대를 놓친다 | `csp/CspServer.cpp` 만료 스윕 · `DbManager::UpdateLogoutTime` |
+
+### 14.4 재현·확인
+
+1. TLS 등록 단말(관제 태블릿 또는 현장 앱)로 편성(`require_affiliation`) 그룹의 멤버로 로그인 — [참여] 가 되는지 먼저 본다.
+2. Wi-Fi 를 20초 넘게 끈다(스윕 10초 + 연결 소실 감지). CSP 로그에 `Registration expired: user(<번호>)` · `[Affiliation] de-register 회수 user=<번호> rows=n`.
+3. Wi-Fi 를 켠다 — 재등록(`RecvRequestRegister`) 뒤 **`[Affiliation/PUBLISH] affiliate user=<번호> group=…`** 가 멤버 그룹마다 다시 찍혀야 한다(보완 전에는 찍히지 않는다).
+4. [참여] — 보완 전 `ProcessGroupCall: Group(…) Caller(…) not affiliated → 403 (120)`, 보완 뒤 200.
+5. 한 시간 넘게 둔 뒤에도 [참여]·로스터·회선 감시가 사는지(수명 절반 갱신 — 30분마다 PUBLISH·SUBSCRIBE 가 다시 찍힌다).
+
+`cimsue-cli` 로는 `--affiliate g… register --hold N` 중에 연결을 끊었다 붙여 ②~④ 의 서버 쪽만 따로 볼 수 있다.
+
+## 15. 설정 값 이름에 규격 이름 병기 — 콘솔·현장 앱 (Windows → .45)
+
+설정 값이 규격의 타이머·카운터면 **한글 이름 뒤 괄호에 규격 이름을 적는다**(사용자 요청). 규격 문서·서버 로그·화면이 같은 이름으로 이어져야 «유지 시간» 과
+«최대 통화 시간» 을, 세션 해제와 제휴 만료를 헷갈리지 않는다(§14 의 논의가 그 예다). 규칙 정본 = [dispatch_desktop_ui.md](../design/features/dispatch_desktop_ui.md)
+§4.7 «규격 이름 병기». 관제 앱 두 벌(Windows·태블릿)은 Windows 에서 맞췄다 — 남은 것이 콘솔과 현장 앱이다.
+
+**이름표**
+
+| 한글 이름 | 규격 이름 | 규격 요소 · 근거 | 끝나면 |
+|---|---|---|---|
+| 유지 시간 | **T4**(Inactivity) | 그룹 문서 `on-network-hang-timer` · TS 24.380 · TS 24.379 §6.3.8.1 1) | 그룹 호 **세션** 해제(제휴는 남는다) |
+| 최대 통화 시간 | **TNG3**(group call timer) | 그룹 문서 `on-network-maximum-duration`(MCVideo = `mcvideo-on-network-maximum-duration`) · TS 24.379 §6.3.8.1 5) | 세션 해제 — §6.3.3.1.5 BYE(제휴는 남는다). 요소가 없으면 돌리지 않는다 |
+| 긴급 그룹콜 시간 한도 | **TNG2**(in-progress emergency group call timer) | service config `<emergency-call><group-time-limit>` · TS 24.379 §6.3.3.1.16·§6.3.3.5.2 | 긴급 상태 해제(호는 이어진다). 도는 동안 TNG3 는 돌리지 않고, 끝나면 TNG3 를 새로 센다 |
+| 필수 멤버 대기 | **TNG1**(acknowledged call setup timer) | 그룹 문서 `on-network-timeout-for-acknowledgement-of-required-members` · TS 24.379 §6.3.3.3 | 대기 만료 동작(진행/포기) |
+| 수신 유지 시간 | **T5**(MCVideo) | 그룹 문서 `on-network-reception-hang-timer` · TS 24.581 §11.1.3 | 수신 유휴 |
+| 동시 제휴 상한 | **N2** | user profile `MaxAffiliationsN2` · TS 24.484 | 넘는 제휴는 줄인다 |
+| 동시 영상 호 | **N6** | MCVideo user profile `MaxSimultaneousCallsN6` · TS 24.484 | 넘으면 486 |
+
+**.45 몫**
+
+| # | 화면 | 지금 | 바꿀 것 | 대상 |
+|---|---|---|---|---|
+| L1 | 콘솔 구성 › PTT 그룹 편집(MCPTT 절) | `최대 통화 시간(초)` | `최대 통화 시간(TNG3, 초)` | `ems/service/console/src/pages/PttGroupsWorkbenchPage.tsx` |
+| L2 | 같은 화면 — 접힌 요약 줄 | `유지 시간 30초` | `유지 시간(T4) 30초` | 같은 파일 |
+| L3 | 콘솔 서비스 › MCPTT 그룹 정보 | `최대 통화 시간` | `최대 통화 시간(TNG3)` | `PttGroupInfoPage.tsx` |
+| L4 | 콘솔 MCPTT 정책 | `동시 제휴 상한 N2` | `동시 제휴 상한(N2)` | `McpttPolicyPage.tsx` |
+| L5 | 콘솔 가입자 › MCVideo 이용 자격 | `동시 영상 호(1~16)` · `동시 제휴 그룹(1~1000)` — 규격 이름은 아래 작은 글에만 | `동시 영상 호(N6, 1~16)` · `동시 제휴 그룹(N2, 1~1000)` | `ProvisioningWorkbenchPage.tsx` |
+| L6 | TNG2 | 콘솔에 편집 칸이 없다(CSC service config 값) | 칸·조회 줄을 둘 때 `긴급 그룹콜 시간 한도(TNG2, 초)` | — |
+| L7 | 세션 종료 사유·통계 문구 | `무활동 만료(T4)` 는 이미 맞다. TNG3 만료가 따로 보이는 곳이 있으면 | `최대 통화 시간 만료(TNG3)` | `components/pttSession.tsx` · 통계 서술(`service_descriptors_seed/cims.json`) |
+| L8 | 현장 앱(`android/ptt-client`) | 이 트리에는 이 값들을 보이는 설정 칸이 없다 | 그룹 정보·설정에 이 값을 보이게 되면 같은 규칙 | — |
+| L9 | 콘솔 규칙 문서 | — | 규칙 한 줄을 콘솔 문서에(`ems/core/console/CLAUDE.md` 또는 console_design_system.md) | — |
+
+이미 맞는 곳(그대로): 콘솔 `유지 시간(T4, 초)`·`필수 멤버 대기(TNG1, 초)`·MCVideo `최대 통화 시간(TNG3, 초)`·`수신 유지 시간(T5, 초)`.
+규격에 짧은 이름이 없는 요소(시작 최소 응답·동시 송출 상한 등)는 지금처럼 요소 이름을 툴팁(`title`)에 둔다.

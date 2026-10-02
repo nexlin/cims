@@ -339,6 +339,8 @@ class DispatchSession(
 
     /** 영상 평면(MCVideo 영상 채널 — `VideoPlane.kt`)의 상태. 영상 호는 [sessions] 에 들지 않고 여기에 든다. */
     internal val video = VideoPlaneState()
+    /** 유지 평면(`UpkeepPlane.kt`) — 등록에 묶인 서버 상태(제휴·구독)를 등록이 새로 설 때·수명 절반마다 다시 싣는다. */
+    internal val upkeep = UpkeepState()
     /** UE initial configuration — 영상 평면이 MCVideo PSI 를 읽는다(TS 24.484 §7.2.2.1). */
     internal fun ueInitDoc(): UeInitConfigDoc? = ueInit
     /** 앱 컨텍스트 — 영상 평면이 카메라 방향(Camera2 센서 방향)을 맞출 때 쓴다. */
@@ -750,6 +752,7 @@ class DispatchSession(
         }
 
         observe()
+        beginUpkeep()                                  // 아래 단계가 처음 구독을 건다 — 갱신 기준 시각
         // **단계마다 세대를 본다.** 구독·조회가 이어지는 몇 초 사이(느린 CSC 면 더 길다) 로그아웃이 끼어들면, 남은 단계가 비운
         //   화면에 앞 사람의 주소록·보관 스레드·세션을 다시 싣는다 — 각 단계는 제 진입 때의 세대만 보므로 이미 지난 로그아웃을
         //   모른다. 다음 로그인은 그것을 «이미 있던 것» 으로 읽어 제 것 위에 얹는다.
@@ -1618,6 +1621,8 @@ class DispatchSession(
      * 거절된 것과 통화가 없는 것을 구분할 수 없다(감시 대상 통화가 «안 보이는» 가장 흔한 원인).
      */
     internal fun applyRequestResult(r: com.cims.ue.sdk.RequestResult) {
+        // 제휴 PUBLISH — 유지 평면이 최종 응답을 기다린다(2xx 만 제휴로 적는다, `affiliateConfirmed`).
+        upkeep.waiters.remove(r.token)?.let { it.complete(r); return }
         // SDS 전달 확인 회신 — 말풍선이 없는 발신이라 최종 거절은 로그로만 남는다(`applySds`).
         notificationTokens.remove(r.token)?.let { what -> logNotificationResult(what, r); return }
         // 경보 취소 — 배너는 보낼 때 먼저 내렸다. 서버가 거절(403)했으면 되살린다.
@@ -1795,6 +1800,7 @@ class DispatchSession(
         scope.launch { engine.emergencyAlert.collect { if (!loggedOut) guarded("emergencyAlert") { applyEmergencyAlert(it) } } }      // 긴급 경보(TS 24.379 §12.1.1.3)
         scope.launch { engine.nonAcknowledged.collect { if (!loggedOut) guarded("nonAcknowledged") { applyNonAcknowledged(it) } } }    // 미응답 필수 멤버(§6.3.3.3)
         observeVideo(engine)                    // MCVideo 송출·수신 제어(TS 24.581 §6.2.4·§6.2.5)·영상 채널 맞춤(§6.14)
+        observeUpkeep(engine)                   // 등록에 묶인 제휴·구독의 복원과 갱신(§6.7a)
         // 주기 재조회 — 관제 편성(`/provisioning/me`, 60초)과 CMS 문서(5분). 둘 다 ETag 라 안 바뀌었으면 304 로 끝난다.
         scope.launch {
             while (true) {
@@ -1841,6 +1847,7 @@ class DispatchSession(
         epoch++                     // 진행 중인 기동의 게시를 무효화한다(§F4)
         _loginGeneration.value++    // 화면 캐시·폼을 버리게 한다(계정 격리)
         resetVideo()                // 영상 채널 — 재합류하지 않게 호를 끊기 전에 먼저 비운다(§6.14)
+        upkeep.reset()              // 앞 사람의 제휴·구독을 다음 로그인이 «다시 세울 것» 으로 읽지 않게
         val engine = ue
         val accs = _accounts.value.values.toList() + extraAccounts
         extraAccounts = emptyList()
@@ -1984,10 +1991,15 @@ class DispatchSession(
      *
      * 계정마다 REGISTER 만 다시 거는 것(`refreshRegistration`)으로는 모자라다 — 옛 망의 연결을 재사용하고, 진행 중 등록이
      * 있으면 `PJSIP_EBUSY` 로 거절돼 요청이 사라진다. 망 콜백 스레드에서 불린다 — 엔진은 세션 스코프 안에서 읽는다.
+     *
+     * **등록에 묶인 것은 앱이 다시 싣는다** — 서버는 끊긴 연결의 바인딩을 회수하며 제휴(affiliation)를 내리고, 코어의 재등록은
+     * 등록만 되살린다. 망이 바뀐 것을 적어 두면 그 뒤 첫 등록 성공에 유지 평면이 제휴·구독을 다시 싣는다(`UpkeepPlane.kt` —
+     * 등록 상태가 줄곧 «등록됨» 으로만 보여도).
      */
     fun handleNetworkChange() {
         scope.launch {
             val engine = ue ?: return@launch
+            noteNetworkChanged()
             val r = engine.handleNetworkChange()
             if (!r.ok) android.util.Log.w("DispatchSession", "망 변경 처리 실패: ${r.code} ${r.reason}")
         }

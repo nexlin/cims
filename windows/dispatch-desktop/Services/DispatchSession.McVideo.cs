@@ -316,7 +316,7 @@ public sealed partial class DispatchSession
         if (!HasCamera) return Show(Result.Fail(-1, "카메라 없음"), ResponseText.Area.Video);
         if (Ptt is not { } ptt || !CanOpenVideo(g)) return Result.Fail(-1, "영상 호를 열 수 없는 상태");
         if (Sessions.Count(s => s.IsMcVideo && s.IsLive) + _videoJoining.Count >= McVideoN6)
-            return Show(Result.Fail(486, $"동시 영상 호 한도 N6 = {McVideoN6}"), ResponseText.Area.Video);
+            return Show(Result.Fail(486, $"동시 영상 호 한도(N6 = {McVideoN6})"), ResponseText.Area.Video);
         var r = ptt.JoinVideoGroupCall(g.Id, new VideoGroupCallOptions { Prearranged = true, ImplicitTransmissionRequest = true, Queueing = true });
         if (!r.Ok) { Log.Warn($"mcvideo open {g.Id}: {r}"); return Show(Result.Fail(r.Code, r.Reason), ResponseText.Area.Video); }
         _pendingOps[r.Value.Id] = Operation.VideoJoin;

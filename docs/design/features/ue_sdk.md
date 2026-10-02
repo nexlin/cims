@@ -260,6 +260,13 @@ C++ 공개 표면은 `cimsue/engine.h` 의 `Engine` 하나이며 계정·호를 
   건드리지 않는다(§11). `refreshRegistration` 은 망은 그대로인데 등록만 잃은 경우(서버 재기동)의 복구다. Android 는 접점
   `platform.NetworkWatcher` 가 변화를 판정한다(§5.3 — 걸 때의 망을 심어 등록 직후 그 망의 첫 통지는 넘기고, 망 없이 걸었으면
   처음 잡히는 망을 변화로 본다).
+- **등록에 묶인 것의 유지는 앱 세션 층이 한다.** 코어는 `affiliate`(PUBLISH `Expires: 3600`)·`subscribeConference`·`subscribeXcapDiff`·
+  `dialogWatch`(SUBSCRIBE `Expires: 3600`)를 **부를 때 한 번** 보낸다 — 수명 갱신도, 등록이 새로 선 뒤의 재적재도 하지 않는다. 서버는
+  등록이 사라질 때(해지 REGISTER · 등록 만료 · TCP/TLS 연결이 끊긴 바인딩의 회수) 그 가입자의 제휴를 전부 내리므로, 망이 끊겼다
+  돌아온 뒤 `handleNetworkChange` 가 등록을 되살려도 제휴는 비어 있다(편성 그룹 호 = 403 Warning 120). 앱은 ① 등록이 끊겼다 다시 선 때
+  ② 망 변경 뒤 첫 등록 성공(등록 상태는 줄곧 «등록됨» 으로만 보일 수 있다 — `onRegState` 는 REGISTER 응답마다 온다) ③ 수명 절반
+  ④ 그룹 호 403 에 다시 싣는다(관제 앱 [android_dispatch_tablet.md](android_dispatch_tablet.md) §6.7a · 현장 앱 `PttGroups`).
+  `affiliate()` 의 성공 반환은 «보냈다» 일 뿐이다 — 제휴가 섰는지는 token 의 최종 응답(`onRequestResult` 2xx)으로 본다.
 - **ABI.** 공개 헤더는 pjsua2 타입을 include 하지 않는다. 구현체는 pImpl.
 - **affiliation PUBLISH 의 entity-tag**(RFC 3903). 코어가 EPA 다 — 2xx 의 `SIP-ETag` 를 그룹별로 기억해 다음 `affiliate` 에
   `SIP-If-Match` 로 싣는다. 412 를 받으면 그 ETag 를 버리고(§5 MUST) 같은 요청을 다시 보내지 않으며, `SIP-If-Match` 없는 초기 PUBLISH

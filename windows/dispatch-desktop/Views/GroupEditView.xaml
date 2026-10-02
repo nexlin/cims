@@ -69,12 +69,12 @@
                         <StackPanel>
                             <TextBlock Style="{StaticResource FormTitle}" Text="그룹 호" />
                             <UniformGrid Columns="2" Margin="0,0,0,10">
-                                <StackPanel Margin="0,0,6,0" ToolTip="on-network-hang-timer — 발언 없이 이 시간이 지나면 그룹 호를 해제한다(0 = 미사용, 최대 3600). 일제 통화에 쓰는 그룹은 짧게 준다">
+                                <StackPanel Margin="0,0,6,0" ToolTip="on-network-hang-timer — 발언 없이 이 시간이 지나면 그룹 호를 해제한다(T4 Inactivity, TS 24.380 — 0 = 미사용, 최대 3600). 일제 통화에 쓰는 그룹은 짧게 준다">
                                     <TextBlock Style="{StaticResource FormLabel}" Text="유지 시간(T4, 초)" />
                                     <TextBox Style="{StaticResource Field.Form}" Text="{Binding HangTimerSec, UpdateSourceTrigger=PropertyChanged}" />
                                 </StackPanel>
-                                <StackPanel Margin="6,0,0,0" ToolTip="on-network-maximum-duration — 그룹 호 최대 시간(0 = 무제한, 최대 86400)">
-                                    <TextBlock Style="{StaticResource FormLabel}" Text="최대 통화 시간(초)" />
+                                <StackPanel Margin="6,0,0,0" ToolTip="on-network-maximum-duration — 그룹 호 최대 시간(TNG3 group call timer, TS 24.379 §6.3.8.1 — 0 = 무제한, 최대 86400). 긴급 중에는 TNG2 가 대신 돈다">
+                                    <TextBlock Style="{StaticResource FormLabel}" Text="최대 통화 시간(TNG3, 초)" />
                                     <TextBox Style="{StaticResource Field.Form}" Text="{Binding MaxDurationSec, UpdateSourceTrigger=PropertyChanged}" />
                                 </StackPanel>
                             </UniformGrid>
@@ -138,7 +138,7 @@
                                         <TextBox Style="{StaticResource Field.Form}" Text="{Binding McVideoMaxTransmitters, UpdateSourceTrigger=PropertyChanged}" />
                                     </StackPanel>
                                     <StackPanel Margin="6,0,0,0" ToolTip="mcvideo-on-network-maximum-duration — 영상 호 최대 시간(TNG3, 0 = 무제한, 최대 86400)">
-                                        <TextBlock Style="{StaticResource FormLabel}" Text="최대 통화 시간(초)" />
+                                        <TextBlock Style="{StaticResource FormLabel}" Text="최대 통화 시간(TNG3, 초)" />
                                         <TextBox Style="{StaticResource Field.Form}" Text="{Binding McVideoMaxDurationSec, UpdateSourceTrigger=PropertyChanged}" />
                                     </StackPanel>
                                 </UniformGrid>

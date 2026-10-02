@@ -532,14 +532,10 @@ internal fun DispatchSession.observeVideo(engine: CimsUe) {
             try { syncVideo() } catch (e: CancellationException) { throw e } catch (t: Throwable) { android.util.Log.w(TAG, "sync", t) }
         }
     }
-    // 영상 채널 합류(D10)는 PTT 등록 뒤. 등록이 새로 서면 MCVideo 제휴도 다시 싣는다 — 서버의 제휴는 등록에 묶여 있어 등록이
-    //   끊겼다 서면 사라져 있다(현장 앱 `PttVideo` 와 같은 규칙). 코어가 관심 그룹 집합을 다시 PUBLISH 한다(TS 24.281 §8.2.1.2).
+    // 영상 채널 합류(D10)는 PTT 등록 뒤. 등록이 **새로** 선 때의 MCVideo 제휴 재적재는 유지 평면이 한다([renewVideoAffiliations] —
+    //   등록 상태가 줄곧 «등록됨» 으로만 보이는 망 전환은 이 스냅샷 흐름에서 보이지 않는다, §6.7a).
     videoLaunch("registered") {
-        registrations.map { pttRegistered() }.distinctUntilChanged().collect { on ->
-            if (!on) return@collect
-            video.channels.value = video.channels.value.mapValues { it.value.copy(affiliated = false) }
-            requestVideoSync()
-        }
+        registrations.map { pttRegistered() }.distinctUntilChanged().collect { on -> if (on) requestVideoSync() }
     }
     // D12 음성 우선 — 무전 발언(요청·대기·발언)이 시작되고 끝날 때.
     videoLaunch("talking") {
@@ -565,6 +561,15 @@ internal fun DispatchSession.observeVideo(engine: CimsUe) {
 internal fun DispatchSession.requestVideoSync(groupsRefreshed: Boolean = false) {
     if (groupsRefreshed) video.docsDirty = true
     video.kick.trySend(Unit)
+}
+
+/**
+ * PTT 등록이 새로 섰다 — 서버의 MCVideo 제휴는 등록에 묶여 있어 등록과 함께 내려갔다(현장 앱 `PttVideo` 와 같은 규칙). 실은 것으로
+ * 적어 둔 표시를 지우고 다시 맞춘다 — 코어가 관심 그룹 집합을 다시 PUBLISH 한다(TS 24.281 §8.2.1.2). 유지 평면이 부른다.
+ */
+internal fun DispatchSession.renewVideoAffiliations() {
+    video.channels.value = video.channels.value.mapValues { it.value.copy(affiliated = false) }
+    requestVideoSync()
 }
 
 /** 로그아웃 — 재합류하지 않게 **먼저** 끊는다(호는 `logout()` 이 끊는다). */
@@ -1236,7 +1241,7 @@ private suspend fun DispatchSession.openVideoTx(groupId: String, displayRotation
     val ptt = pttAccount ?: return
     val n6 = n6()
     if (!VideoRules.withinN6(v.calls.value.count { it.isLive } + v.joining.size, n6)) {
-        report(TextArea.VIDEO, CimsResult.fail<Unit>(486, "동시 영상 호 한도 N6 = $n6"))
+        report(TextArea.VIDEO, CimsResult.fail<Unit>(486, "동시 영상 호 한도(N6 = $n6)"))
         return
     }
     val gen = loginGeneration.value

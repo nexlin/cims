@@ -82,7 +82,7 @@ internal fun GroupCallSection(f: EditForm, onChange: FormChange) {
                 NumberField(f.hangTimerSec, { v -> onChange { it.copy(hangTimerSec = v) } })
             }
             // on-network-maximum-duration
-            Labeled("최대 통화 시간(초)", Modifier.weight(1f)) {
+            Labeled("최대 통화 시간(TNG3, 초)", Modifier.weight(1f)) {
                 NumberField(f.maxDurationSec, { v -> onChange { it.copy(maxDurationSec = v) } })
             }
         }
@@ -105,7 +105,7 @@ internal fun GroupCallSection(f: EditForm, onChange: FormChange) {
         }
         // on-network-allow-conference-state — 끄면 멤버의 conference 구독이 403(관제사 청취 범위는 별도)
         FormSwitch("참가자 정보 구독 허용", f.allowConferenceState, { v -> onChange { it.copy(allowConferenceState = v) } })
-        FormHint("유지 시간(T4)은 편성 그룹에서 발언 없이 그 시간이 지나면 그룹 호를 해제합니다 — 0 = 미사용. 최대 통화 시간 0 = 무제한.")
+        FormHint("유지 시간(T4)은 편성 그룹에서 발언 없이 그 시간이 지나면 그룹 호를 해제합니다 — 0 = 미사용. 최대 통화 시간(TNG3) 0 = 무제한.")
     }
 }
 

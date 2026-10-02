@@ -105,7 +105,7 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
         Engine.DialogInfoReceived += (_, d) => OnDialog(d);
         Engine.SdsReceived += (_, m) => SdsReceived?.Invoke(this, m);
         Engine.MessageReceived += (_, m) => { SipMessageReceived?.Invoke(this, m); OnSipMessage(m); };
-        Engine.RequestCompleted += (_, r) => { OnAlertCancelResult(r); RequestCompleted?.Invoke(this, r); };
+        Engine.RequestCompleted += (_, r) => { OnAffiliationResult(r); OnAlertCancelResult(r); RequestCompleted?.Invoke(this, r); };
         Engine.HandlerFailed += (_, ex) => Log.Error("이벤트 핸들러 예외", ex);
         Engine.Stopped += (_, _) => Log.Info("engine stopped");
         Endpoints.Changed += (_, _) => OnEndpointsChanged();
@@ -503,6 +503,7 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
         OnPropertyChanged(nameof(CanSms));
         await SyncDirectoryAsync();
 
+        BeginUpkeep();                                           // 아래가 처음 구독을 건다 — 갱신 기준 시각(§6 «등록에 묶인 것»)
         // 관제 범위: 대표번호·감시 대상 전원 dialog 구독 (§4.3) — 대상 = 프로비저닝 members[](서버가 monitorScope 해석, 정본) 또는 CSV member 폴백
         if (HasDesk && Volte is not null) WatchAll();
         _nextDispatchPoll = DateTime.Now.AddSeconds(DispatchPollSec);
@@ -663,7 +664,7 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
             {
                 gi = new GroupInfo(id, g.Uri, name, g.MemberCount) { IsOwner = g.IsOwner, Etag = g.ETag, SessionType = _groupTypes.GetValueOrDefault(id, "") };
                 Groups.Add(gi);
-                gi.Affiliated = ptt.Affiliate(id, true).Ok;
+                AffiliateTracked(id);                               // 제휴는 서버의 2xx 에서 선다 — 서지 못한 것은 유지 맞춤이 다시 싣는다
                 var sc = ptt.SubscribeConference(id, true);
                 if (!sc.Ok) Log.Warn($"conference subscribe {id}: {sc}");
             }
@@ -673,6 +674,7 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
         foreach (var gone in Groups.Where(x => x.IsMember && !seen.Contains(x.Id)).ToList())
         {
             ptt.Affiliate(gone.Id, false);
+            ForgetUpkeep(gone.Id);
             if (gone.McVideo) LeaveVideoChannel(gone);                // 내 채널에서 빠졌다 = 영상 채널도 나간다(D10)
             if (gone.McVideoAffiliated) ptt.Affiliate(gone.Id, false, McService.McVideo);
             ptt.SubscribeConference(gone.Id, false);
@@ -886,7 +888,7 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
         CredentialWarning = false;
         Volte = null; Ptt = null; Profile = null;
         _accountKinds.Clear(); _watched.Clear(); _pendingOps.Clear(); _pendingConsult.Clear(); _adhocMembers.Clear(); _regRetryAt.Clear(); _regBackoff.Clear();
-        _broadcastPending.Clear(); _groupTypes.Clear(); _manageable.Clear(); _localHangups.Clear(); _conditionCancel.Clear(); _alertCancel.Clear(); _pttRegLost = false;
+        _broadcastPending.Clear(); _groupTypes.Clear(); _manageable.Clear(); _localHangups.Clear(); _conditionCancel.Clear(); _alertCancel.Clear(); ResetUpkeep();
         // 화면에 쌓인 것도 이 로그인의 것이다 — 다음 사람(다른 자리 ID)에게 앞 사람의 «이벤트»·«기록»·토스트가 보이지 않게. 앱 종료(자격을 남기는
         //   로그아웃)에서도 같다 — 보관은 메시지 보관소(로그인 ID 로 격리)와 서버 이력이 한다.
         Activity.Clear(); Notify.Toasts.Clear();
@@ -944,9 +946,6 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
     }
 
     // ── 등록 ──
-    /// <summary>PTT 등록이 한 번 내려갔다 — 다음 등록 성공 때 MCVideo 제휴를 다시 싣는다.</summary>
-    private bool _pttRegLost;
-
     private void OnRegistration(RegInfo r)
     {
         // 로그아웃 뒤 늦게 오는 un-REGISTER 실패 등 — 계정 표가 비어 있으면 이 세션의 것이 아니다(로그인 창에 토스트가 뜨지 않게)
@@ -956,24 +955,14 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
         if (kind == AccountKind.Ptt) PttReg = r; else VolteReg = r;
         string name = kind == AccountKind.Ptt ? "PTT" : "VoLTE";
         Log.Info($"reg {name} {r.State} {r.Code} {r.Reason}");
-        // PTT 등록이 내려갔다(실패·해제) — 다시 서면 제휴를 새로 싣는다(재시도는 Registering 을 거치므로 직전 상태가 아니라 깃발로 든다)
-        if (kind == AccountKind.Ptt && r.State is RegState.Failed or RegState.Unregistered) _pttRegLost = true;
+        // 등록이 끊겼다 다시 섰거나 망이 바뀐 뒤 다시 섰다 — 서버는 등록이 사라질 때 제휴(affiliation)를 내린다. 제휴(MCPTT·MCVideo)와 구독을
+        //   다음 틱의 유지 맞춤이 다시 싣는다(DispatchSession.Upkeep.cs).
+        NoteUpkeepRegistration(r, kind);
         if (r.State == RegState.Registered)
         {
             _regRetryAt.Remove(r.AccountId); _regBackoff.Remove(r.AccountId);
             if (IsReady) UpdateServerCertBanner();                 // TLS 등록 = 새 핸드셰이크 = 관측 갱신 시점
-            if (kind == AccountKind.Ptt)
-            {
-                // 등록이 끊겼다 다시 섰다 — 서버는 등록이 사라질 때 제휴(affiliation)도 내린다(TS 24.281 §8.2.2.2). 영상 채널의 MCVideo 제휴를
-                //   다시 싣는다(코어가 관심 그룹 전부를 한 PUBLISH 로) — 그러지 않으면 편성 영상 호의 초대가 오지 않는다.
-                bool lost = _pttRegLost; _pttRegLost = false;
-                if (lost && Groups.Any(g => g.McVideoAffiliated))
-                {
-                    foreach (var g in Groups.Where(g => g.McVideoAffiliated)) g.McVideoAffiliated = false;
-                    ApplyMcVideoGroups();                          // 제휴를 다시 걸고 영상 채널 합류를 맞춘다(§10.2)
-                }
-                else EnsureVideoChannels();                        // 영상 채널 합류(D10 — §10.2)는 PTT 등록 뒤
-            }
+            if (kind == AccountKind.Ptt) EnsureVideoChannels();    // 영상 채널 합류(D10 — §10.2)는 PTT 등록 뒤
             return;
         }
         if (r.State == RegState.Failed)
@@ -1007,6 +996,7 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
         if (!IsReady || !Engine.IsRunning || print == _netPrint) return;
         _netPrint = print;
         if (!NetworkInterface.GetIsNetworkAvailable()) { Log.Info("network lost — 복귀를 기다린다"); return; }
+        NoteUpkeepNetworkChange();                               // 그 뒤 첫 등록 성공에 제휴·구독을 다시 싣는다(등록 상태가 줄곧 «등록됨» 이어도)
         var r = Engine.HandleNetworkChange();
         Log.Info($"network changed → re-register {(r.Ok ? "" : r.ToString())} [{print}]");
     }
@@ -1185,6 +1175,8 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
         _broadcastPending.Remove(s.CallId);
         _conditionCancel.Remove(s.CallId);                       // 답을 못 받은 해제 요청 — 그 번호를 물려받은 다음 호의 거절 문구가 되지 않게
         bool mine = _localHangups.Remove(s.CallId);
+        // 403 으로 거절된 [참여] — 제휴를 다시 싣고 한 번 더 건다(§6 «등록에 묶인 것»). 그 끝은 실패가 아니다: 다시 건 호의 결과가 알린다.
+        bool rejoin = !mine && RejoinsAfterAffiliation(s);
         // 자동 합류한 영상 채널 호(내가 연 편성 호가 아니다)의 연속 실패는 처음만 알린다 — 물러나며 다시 붙을 때마다 오류 토스트가 쌓이지 않게
         bool videoAuto = s.IsMcVideo && !_videoOpening.Contains(s.CallId);
         bool videoRepeat = videoAuto && _videoFailures.GetValueOrDefault(s.Info.GroupId) > 0;
@@ -1230,6 +1222,9 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
             case SessionKind.PttAdhoc:
                 Activity.Add(ActivityPanel.Ptt, ActivityKind.SessionEnd, $"애드혹 종료 {s.Title}", $"{dur.Trim(' ', '·')} · 참가 {s.AdhocMembers.Count}");
                 break;
+            case SessionKind.PttChannel when rejoin:
+                _ducked.Remove(s.CallId);                           // 다시 거는 중 — 이 시도는 «이벤트» 에 적지 않는다
+                break;
             case SessionKind.PttChannel when s.IsBroadcast:
                 Activity.Add(ActivityPanel.Ptt, ActivityKind.SessionEnd, $"{s.Title} 일제 통화 종료", dur.Trim(' ', '·'));
                 break;
@@ -1244,7 +1239,7 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
         // 실패한 발신 동작의 사유(§9 사전) — 착신·정상 종료(BYE)는 제외
         bool quiet = s.IsMcVideo && QuietVideoEnd(s.CallId);                // 내가 거둔 영상 호 개시·내가 떠난 영상 채널
         //   내가 거둔 발신(연결 전 종료 = CANCEL → 487)은 실패가 아니다 — «취소됨» 오류를 띄우지 않는다.
-        if (s.ConnectedAt is null && ci.Dir == CallDir.Outgoing && ci.LastCode >= 300 && !quiet && !mine && !videoRepeat)
+        if (s.ConnectedAt is null && ci.Dir == CallDir.Outgoing && ci.LastCode >= 300 && !quiet && !mine && !videoRepeat && !rejoin)
         {
             var area = ResponseText.AreaOf(s.Operation);
             if (s.Operation == Operation.Dial && ci.IsMcptt) area = s.Kind == SessionKind.PttPrivate ? ResponseText.Area.PttPrivate : ResponseText.Area.PttJoin;
@@ -1896,6 +1891,7 @@ public sealed partial class DispatchSession : ObservableObject, IDisposable
         foreach (var d in Dialogs) d.Tick(now);
         Notify.Tick(now);
         TickMcVideo(now);
+        TickUpkeep();
         foreach (var (acc, at) in _regRetryAt.ToList())
             if (now >= at) { _regRetryAt.Remove(acc); Engine.GetAccount(acc).Register(); }
         if (now.Date != _lastPrune) { _lastPrune = now.Date; Activity.Prune(now); }   // 날짜가 바뀐 첫 틱 — 정각 틱을 놓쳐도 하루 밀리지 않게
