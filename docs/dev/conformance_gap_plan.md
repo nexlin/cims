@@ -122,7 +122,7 @@
 | **C02** | MCData·MCVideo 문서 값·선호 코덱 검증 | MCData GRP-1 · GRP-2 · GRP-3 / VCMS-3 · VCMS-5 · VGMS-3 · VSDP-1 | B3 · C1 · D3 | 1 | — | D7 | U09(VGU-4 — 단말 offer 가 그룹 선호를 따름) | 완료 e3ea9f97 |
 | **C03** | user profile·service config 인가 요소(+SDK «없음 = false») | CMS-3 · ADH-1 / VCMS-2 | A1 · B1 · C1 | 1 | — | — | S10 · S11 · W01 | 완료 d9a762a1 |
 | **C04** | XCAP 주소·문서 이름(양쪽 수용) | GMS-1 · GMS-6 · CMS-1 · CMS-2 · CMS-9 · CMS-11 · CMS-12 / VCMS-4 · VCMS-6 | B5 · C2 · D2 | 1 | — | — | S19(NOTIFY `sel`) · U07 | 완료 b8d64562 (GMS-1·GMS-6 의 SDK 몫 → U07) |
-| **C05** | XCAP 쓰기 의미·오류 형식 | GMS-2 · GMS-3 · GMS-4 · GMS-5 · GMS-8 · GMS-9 · GMS-10 / VGMS-1 · VGMS-2 | B7 · C1 · D1 | 2 | C04 | — | W01(그룹 편집 PUT 본문) | 진행 1f58b045(GMS-2·GMS-4·GMS-9·GMS-10 읽기·VGMS-2) · 298af175(GMS-5 요소 단위 XCAP) — 남은 것 GMS-3·GMS-8·GMS-10 쓰기·VGMS-1(관제 앱 전환과 함께 — `20261003-0453_45_note-C05-transition.md`) |
+| **C05** | XCAP 쓰기 의미·오류 형식 | GMS-2 · GMS-3 · GMS-4 · GMS-5 · GMS-8 · GMS-9 · GMS-10 / VGMS-1 · VGMS-2 | B7 · C1 · D1 | 2 | C04 | — | W01(그룹 편집 PUT 본문) | 진행 1f58b045(GMS-2·GMS-4·GMS-9·GMS-10 읽기·VGMS-2) · 298af175(GMS-5 요소 단위 XCAP) · 852fb430(GMS-10 — 자체 요소를 `cims:` 이름공간으로, CSC GET·SDK 쓰기) — 남은 것 GMS-3·GMS-8·VGMS-1(PUT = 교체·«없음» 의 뜻 — 관제 앱이 문서를 보존해 PUT 하게 된 뒤, `20261003-0453_45_note-C05-transition.md`) |
 | **C06** | IdMS·토큰 | IDM-1 · IDM-2 · IDM-3 · IDM-4 · IDM-6 · IDM-7 · IDM-8 · IDM-9 · CMS-10 | A3 · B1 · C4 · D1 | 2 | — | D4 | U02(IDM-5) · 앱 로그인(client_id 등록 목록) | 완료 ef37031a · 88f0f149 |
 | **C07** | MCData 콘텐츠 서버 | MCData FD-2 · FD-3 · FD-5 · FD-6 | B2 · C2 | 1 | — | — | U05(`uploadFd` 규격형·Location) · S26(HEAD) | 완료 082eaef9 (FD-7 → U05) |
 
