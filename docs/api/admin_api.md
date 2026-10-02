@@ -875,7 +875,7 @@ Content-Type: application/json
 | `max_talkers` | integer | N | `multi` 의 동시 발언자 수 (2~8, CMP 슬롯 상한). `single`/`dual` 은 미해석 — 2 로 정규화 |
 | `members` | array | N | 초기 멤버 목록 |
 | `members[].user_id` | string | Y | PTT 구독 MSISDN |
-| `members[].priority` | integer | Y | 우선순위 (0=최고, 숫자가 클수록 낮음) |
+| `members[].priority` | integer | Y | 멤버 우선순위 `<user-priority>` — priorityType 0~255, **클수록 높다**(TS 24.481 §7.2.4.2·§7.2.8 — CMP floor·MCVideo 송출 서열이 같은 방향). 범위 밖·정수 아님은 400. 그룹 `priority`(`<on-network-group-priority>`)도 같은 형·같은 검사 |
 | `mcvideo` | object\|null | N | MCVideo 서비스(TS 24.481 §7.2.2 — 한 그룹 = 서비스 집합, [mcvideo.md](../design/features/mcvideo.md) §5.1). 없거나 null = MCVideo 그룹 아님, 객체 = MCVideo 그룹(빠진 키는 기본값). 아래 표 |
 
 **`mcvideo` 필드** (그룹 문서 MCVideo `<list-service>` 요소 — TS 24.481 §7.2.2·§7.2.8):
@@ -1115,8 +1115,8 @@ CSP 에는 `PHONE_GROUP_CHANGED`(uri=그룹 id) 로 재적재를 알린다. 가�
 
 감사 = `E-AUD-006 config_change`(entity `role`|`role_assignment`, actor `console:<login>`).
 
-> PTT 프로파일(`PUT /api/v1/users/{pid}/ptt/{msisdn}/profile`)의 `allow_ambient_listening`(TS 24.484
-> allow-ambient-listening, 기본 false) 은 PTT 그룹콜 청취 **자격**이고 **역할 배정의 결과로만 바뀐다** — 이 API 에 실려 오면
+> PTT 프로파일(`PUT /api/v1/users/{pid}/ptt/{msisdn}/profile`)의 `allow_ambient_listening`(user profile 의 CIMS 확장
+> `<cims:allow-ambient-listening>`, 기본 false) 은 PTT 그룹콜 청취 **자격**이고 **역할 배정의 결과로만 바뀐다** — 이 API 에 실려 오면
 > 400 `not_editable`(mcptt_authorization.md §2.4). 범위는 역할 `ptt_listen` 이다(dispatch_center.md §5.6). 컬럼 미적용
 > DB(`sql/migrate_ptt_ambient_listening.sql`) 에서는 응답이 false.
 >
@@ -1233,7 +1233,7 @@ CSP 에는 `PHONE_GROUP_CHANGED`(uri=그룹 id) 로 재적재를 알린다. 가�
 |------|------|----------|--------|----------|------|
 | group_id | VARCHAR(32) | N | - | PK (복합), FK → ptt_groups.id ON DELETE CASCADE | 그룹 ID |
 | user_id | VARCHAR(32) | N | - | PK (복합), FK → ptt_subscriptions.id ON DELETE CASCADE | PTT 구독 MSISDN |
-| priority | INT | N | 0 | CHECK (priority >= 0) | 우선순위 (0=최고) |
+| priority | INT | N | 0 | CHECK (priority >= 0) | 멤버 우선순위 `<user-priority>` 0~255(클수록 높다, TS 24.481 §7.2.8) |
 
 ### phone_groups / phone_group_members · roles / role_assignments / role_monitor_targets / role_ptt_targets (전화 그룹 · 역할)
 

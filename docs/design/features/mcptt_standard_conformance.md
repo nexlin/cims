@@ -165,7 +165,7 @@ transport 목록/선택 등 규격 문서에 없는 요구 때문). 자체 단�
 
 | 계층 | 요소 | 출처 |
 |---|---|---|
-| ① 토폴로지 유도 | `domain`·PLMN(도메인 mnc/mcc)·idms-auth/token-endpoint·gms/cms/kms·GMS/CMS-XCAP-root-URI·GMS-URI(`sip:gms_psi@도메인`) | `Provisioning.Services.ptt.domain`/`IdMs.Domain` + 공개 base URL = **`McpttServer.PublicUrl`**(비면 요청 Host 유도). CSP 가 NOTIFY 로 광고하는 `xcap-root` 도 같은 값(내부 API 취득) |
+| ① 토폴로지 유도 | `domain`·PLMN(도메인 `mnc<3자리>.mcc<3자리>` — TS 23.003 §13 대로 세 자리 MNC 의 앞자리 0 하나만 떼어 두 자리로 읽는다(`mnc008` → `45008`). 앞자리 0 인 세 자리 MNC 는 도메인으로 가를 수 없어 ② 수동 지정, 지정값은 PLMN 코드(5·6자리)인지 검사)·idms-auth/token-endpoint·gms/cms/kms·GMS/CMS-XCAP-root-URI·GMS-URI(`sip:gms_psi@도메인`) | `Provisioning.Services.ptt.domain`/`IdMs.Domain` + 공개 base URL = **`McpttServer.PublicUrl`**(비면 요청 Host 유도). CSP 가 NOTIFY 로 광고하는 `xcap-root` 도 같은 값(내부 API 취득) |
 | ② 규격 파라미터값 | `<name>`·Timers T100/T101/T103/T104/T132(TS 24.380 단말 floor 타이머, unsignedByte — 기본 1/1/4/4/2 초, 표 11.1.1-1 NOTE 1·2 의 «재전송 총 시간 6초 미만» 안)·HPLMN PLMN 수동 지정·`*-to-con-ref`(APN/DNN)·`http-proxy`·`mutual-authentication`·`group-creation-XUI`·`integrity/confidentiality-protection-enabled` | csc `config_template.json` 섹션 **"MCS UE 초기 설정 문서"** = `UeInitConfig.*`(scope=service, `restart:false` — SIGUSR1 리로드, ETag 내용파생이라 자동 갱신). 빈 값 = 유도값/기본값 |
 | ③ 확장 요소 | `<on-network><anyExt>` 의 `MCPTT-Service-Details`(기본 on, Server-URI 기본 `sip:mcptt_psi@도메인` = CSP 의 MCPTT 서버 PSI) · `MCData-Service-Details`(기본 off) — `IPv6-Required` 는 false 고정 | `UeInitConfig.ServiceDetails.{Mcptt,McData}.{Enable,ServerUri}` |
 
@@ -652,6 +652,15 @@ REGISTER/SUBSCRIBE/NOTIFY 의 헤더·본문을 상용 IMS 캡처 기준으로 �
 - **S3 변경통지**: 그룹 CRUD 시 `notify_csp("GROUP_CHANGED")`(`handlers/admin.py`) → CSP `CscInterface`
   → `OnGroupConfigChanged` → `ReloadGroupMap`(그룹 맵 재적재 **뒤**, 재적재 전·후 멤버 합집합) → `SendGroupDocNotify`
   → GMS 구독자에 **xcap-diff NOTIFY**(RFC 5875). 60초 주기 재적재도 같은 전후 비교로 놓친 변경을 통지한다.
+- **그룹 문서 값**(`get_group_xml`, TS 24.481 §7.2.2·§7.2.8) — 이름·직함·조직 코드·URI 는 텍스트·속성 모두 escape(RFC 4825 well-formed).
+  `<protect-media>`·`<protect-floor-control-signalling>` 은 없으면 true(GMK 필수·floor 보호 필수)라 **false 를 명시**한다(E2E 미구현 —
+  [mcx_e2e_security.md](mcx_e2e_security.md)). 정원 `<on-network-max-participant-count>` 는 `max_members` 그대로, **0(무제한)은 요소
+  생략**(0 은 «0명» 으로 읽힌다). `<preferred-voice-encodings>` = CSP 서비스 코덱 AMR-WB(`SERVICE_VOICE_ENCODING` — CSP
+  `Setup.Media.Codecs` 첫 항목과 같아야 한다; 단말은 그룹 호 offer 에 넣는다 TS 24.379 §6.2.1 2)b), SDK 는 지원 코덱을 늘 offer 해 이미
+  따른다). on-network 를 끈 그룹(`on_network`=0)은 `<on-network-disabled/>`(§7.2.2 g)) — XCAP PUT 은 요소가 있으면 끄고 없으면 그대로
+  둔다(호의 403 115 판정은 CSP 몫 — 미구현). 멤버 규칙 actions 에 `<on-network-allow-getting-member-list>true`(없으면 false — 멤버가
+  명단을 못 읽는다, §7.2.12.1). 그룹·멤버 우선순위는 priorityType 0~255(§7.2.4.2, 값이 클수록 높다) — 관리 API·XCAP PUT 이 범위 밖을
+  400 으로 거절하고, 범위 밖 저장값은 문서에서 경계로 자른다.
 - **그룹 호 타이머 요소**(TS 24.481 §7.2.2 o)p)·§7.2.7) — 문서에 0 을 싣지 않는다: T4 0 = `<on-network-hang-timer>` 생략(요소가
   없으면 T4 를 걸지 않는다), chat 그룹 = `<on-network-maximum-duration>` 생략(TNG3 를 돌리지 않는다 — TS 24.379 §6.3.3.5.1 은
   요소가 있을 때만 켜고 chat 은 선택). XCAP PUT 은 요소가 없으면 기존값을 둔다.
@@ -669,6 +678,14 @@ REGISTER/SUBSCRIBE/NOTIFY 의 헤더·본문을 상용 IMS 캡처 기준으로 �
   `<cp:ruleset>`(RFC 4745) 사용자 인가, `<OnNetwork>` = **MCPTTGroupInfo(소속 그룹 = 규격 단말의 그룹 목록 소스, 소유 소속 그룹은
   anyExt `cims:authorized-user`)**·MaxAffiliationsN2(`mcptt_service_config.max_affiliations_n2`)·ImplicitAffiliations(멤버 `implicit_affiliation` 이 켜진 그룹만 — C9)·
   MaxSimultaneousTransmissionsN7·PrivateEmergencyAlert. 상수는 `UserProfile.*` 설정. 루트 `<Status>true</Status>`(§8.3.2.1 3)·alias-entry `index` 병기.
+  **N6**(`<MaxSimultaneousCallsN6>`, §8.3.2.1 8)e)i) — 동시 그룹 호 상한)는 사용자마다의 값이다: 그 PTT 회선의 사람에게 역할 배정
+  (`role_assignments`, [mcptt_authorization.md](mcptt_authorization.md))이 있으면 «관제» = `mcptt_service_config.max_calls_n6_dispatch`(기본 10),
+  아니면 `max_calls_n6`(기본 5) — `user_max_calls_n6`. 판정 데이터는 역할 배정 한 곳이고, CSP 의 역할 맵(`CCspRoleMap::SelectForLine`)과
+  같은 펼침이라 집행(486 + `103`, TS 24.379 §10.1.1.3.1.1 5))도 같은 판정을 쓴다(CSP 집행은 미구현 — 갭 GCS-6). 역할 배정·해제로 판정이
+  바뀌면 CSC 가 그 사람의 PTT 회선마다 `USER_CHANGED` 를 보내 user-profile xcap-diff 가 나간다. 모든 `<entry>` 에 `index`(§8.3.2.1 —
+  목록 안에서 유일), 소속 그룹이 없어도 `<MCPTTGroupInfo>` 를 싣는다(10)b), 빈 목록은 XSD 가 허용).
+  PTT 그룹 호 청취 자격은 `<cims:allow-ambient-listening>`(CIMS 확장) — 비멤버 관제사의 recvonly 합류 자격([dispatch_center.md](dispatch_center.md) §5.6)이라
+  규격 ambient listening(TS 24.379 원격·로컬 개시 1:1 호, anyExt `<allow-request-remote-/locally-initiated-ambient-listening>`)과 다른 것이다.
   §8.3.2.1 이 "shall" 로 요구하는 긴급 요소(8d ii·8e ii~iv·10f)는 **대상 미지정에도 항상 싣고**, 미지정은 entry-info 로 표현한다
   (그룹 `UseCurrentlySelectedGroup` + 폴백 uri-entry, 사설 `LocallyDetermined` + 폴백 uri-entry); 개시 인가는 요소 유무가 아니라
   `<cp:ruleset>` allow-* 가 말한다(DedicatedGroup 모드 긴급그룹 미지정 → 그룹 긴급·경보 false, UsePreConfigured 모드 수신자 미지정 →
@@ -681,14 +698,17 @@ REGISTER/SUBSCRIBE/NOTIFY 의 헤더·본문을 상용 IMS 캡처 기준으로 �
   (`<emergency-call><group-time-limit>` 선택 — 첫 자식, 진행 중 긴급 그룹 호 시한 = CSP TNG2(TS 24.379 §6.3.3.1.16), 값이 0 이면 생략 ·
   `<private-call>` 선택 — 개별 호 T4 `<hang-time>`·`<max-duration-with-floor-control>`·`<max-duration-without-floor-control>`(TS 24.379
   §6.3.8.2), 0 인 자식 생략 · `<transmit-time><time-limit>` · `<fc-timers-counters>` 17 요소 필수 · `<emergency-/imminent-peril-/normal-resource-priority>`
-  필수, 각 namespace·priority · `<anyExt><adhoc-group-call>` — 필수 `<allow-adhoc-group-call-support>`·`<max-no-participants>` 뒤 T4
+  필수, 각 namespace·priority · `<signalling-protection>` 의 `<confidentiality-protection>`·`<integrity-protection>` = false(없으면 true 로 읽혀
+  단말이 mcptt-info 를 CSK 로 암호화·서명한다 — §8.4.2.6·TS 24.379 §6.6.2.3.1·§6.6.3.3.1. CIMS 는 시그널링 XML 보호를 하지 않고 구간 보호는
+  SIP TLS) · `<anyExt><adhoc-group-call>` — 필수 `<allow-adhoc-group-call-support>`·`<max-no-participants>` 뒤 T4
   `<hang-time>`·일제 T4 `<broadcast-hang-time>`·TNG3 `<max-duration-of-call>`(§17.4.2.2 13)). 요소가 없으면 «애드혹 미지원»(§8.4.2.6)이라
   늘 싣는다). 값 = CSC 설정 `ServiceConfig.PrivateCall.*`·`ServiceConfig.AdhocGroupCall.*`(시간 ms, 0 = 요소 생략 = 미가동).
   CSP 는 `<private-call>`·`<adhoc-group-call>` 의 시간 값을 개별·애드혹 세션의 T4(`floor_timers.t4_inactivity`)·최대 시간으로 쓴다.
   `<allow-adhoc-group-call-support>`·`<max-no-participants>` 는 단말에 알리는 값이고 CSP 판정에는 아직 쓰지 않는다 — 애드혹 개시
   게이트는 csp.json `Setup.PttAdhocEnabled`(두 값을 같게 둔다), 인원 상한 403 + Warning `189`(§17.4.2.2 6))·미지원 403 + `186`(§17.4.2.2 5))
   은 미구현.
-  값의 정본은 두 곳 — DB `mcptt_service_config` **단일 행**(id=1: N2 = user-profile `MaxAffiliationsN2` 기본값·계층 수, 관리 API
+  값의 정본은 두 곳 — DB `mcptt_service_config` **단일 행**(id=1: N2 = user-profile `MaxAffiliationsN2` 기본값·N6 두 값(관제/그 밖 —
+  user-profile `MaxSimultaneousCallsN6`, 열은 `sql/migrate_mcptt_n6.sql`, 열이 없는 DB 는 10·5)·계층 수, 관리 API
   `GET/PUT /api/v1/mcptt/service-config`·콘솔 **구성 > MCPTT 정책**)과 CSC 설정 `ServiceConfig.*`(`EmergencyCall.GroupTimeLimit` →
   `<emergency-call><group-time-limit>`(ms, 기본 0 = 없음) · `<transmit-time><time-limit>`·
   `<fc-timers-counters>` — floor 제어 서버 파라미터, Resource-Priority — RFC 8101 `mcpttp` 15/8/0 = CSP fan-out). `get_service_config_xml`

@@ -6,6 +6,8 @@ import { api } from './client'
  *  floor 타이머·Resource-Priority 는 CSC 배포 설정 ServiceConfig.* 이다. */
 export interface McpttServiceConfig {
   max_affiliations_n2: number          // N2 — user-profile MaxAffiliationsN2 기본값
+  max_calls_n6: number                 // N6 — user-profile MaxSimultaneousCallsN6 (관제가 아닌 사용자)
+  max_calls_n6_dispatch: number        // N6 — 관제(역할 배정 사용자)
   num_levels_group_hierarchy: number   // common/broadcast-group/num-levels-group-hierarchy
   num_levels_user_hierarchy: number    // common/broadcast-group/num-levels-user-hierarchy
   update_time?: string | null

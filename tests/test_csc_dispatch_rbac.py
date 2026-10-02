@@ -543,6 +543,20 @@ class RoleApiTest(_Base):
         self.assertEqual(self.d.role_unassign(cur, "role-lsn", "user", "1").status, 404)
         self.assertEqual(self.d.role_unassign(cur, "role-lsn", "console", "admin").status, 400)
 
+    def test_dispatch_flip_notifies_user_profile_n6(self):
+        # D2 — «관제» = 역할 배정 유무. 바뀌면 그 사람의 PTT 전 회선 user profile 의 N6 가 바뀌므로 USER_CHANGED(→ xcap-diff)
+        cur = self._cur()
+        self.d.role_assign(cur, "role-adm", {"principal_type": "user", "principal_id": "1"})   # 청취 없는 역할 — 자격 동기 없음
+        self.assertEqual(cur.profiles, {})
+        self.assertEqual(sorted(u for u, _a in self._notify("USER_CHANGED")), ["tel:+82510001001", "tel:+82510001009"])
+        self.notified.clear()
+        self.d.role_assign(cur, "role-lsn", {"principal_type": "user", "principal_id": "1"})   # 역할 → 역할: 판정 그대로
+        self.assertEqual(sorted(u for u, _a in self._notify("USER_CHANGED")), ["tel:+82510001001", "tel:+82510001009"],
+                         "청취 자격 동기분만 — 같은 회선에 두 번 보내지 않는다")
+        self.notified.clear()
+        self.d.role_unassign(cur, "role-lsn", "user", "1")
+        self.assertEqual(sorted(u for u, _a in self._notify("USER_CHANGED")), ["tel:+82510001001", "tel:+82510001009"])
+
     def test_assign_validation(self):
         cur = self._cur()
         r = self.d.role_assign(cur, "role-lsn", {"principal_type": "console", "principal_id": "admin"})

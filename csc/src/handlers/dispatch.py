@@ -804,6 +804,17 @@ def sync_ambient_listening(cur, person_id) -> list:
     return changed
 
 
+def notify_dispatch_flip(cur, person_id, already=()) -> list:
+    """«관제» 판정(역할 배정 유무)이 바뀐 person 의 PTT 전 회선에 USER_CHANGED — user profile 의 N6(관제/그 밖 값,
+    services.mcptt.user_max_calls_n6)가 따라 바뀌므로 CSP 가 그 회선 구독자에게 xcap-diff 를 보내 단말이 문서를 다시 받는다.
+    already = 이미 USER_CHANGED 를 보낸 회선(sync_ambient_listening 의 결과) — 두 번 보내지 않는다."""
+    cur.execute("SELECT id FROM ptt_subscriptions WHERE user_id=%s ORDER BY id", (person_id,))
+    lines = [r['id'] for r in cur.fetchall() if r['id'] not in set(already)]
+    for msisdn in lines:
+        notify_csp("USER_CHANGED", f"tel:{msisdn}", "PUT")
+    return lines
+
+
 def role_assignments_get(cur, role_id: str) -> HandlerResult:
     if _role_row(cur, role_id) is None:
         return HandlerResult(status=404, body={'error': 'Role not found'})
@@ -853,6 +864,8 @@ def role_assign(cur, role_id: str, body) -> HandlerResult:
                 "ON DUPLICATE KEY UPDATE role_id=VALUES(role_id)", (ptype, pid, role_id))
     authz.invalidate()
     synced = sync_ambient_listening(cur, pid)
+    if prev is None:                                   # 역할 없음 → 있음 = «관제» 로 바뀐다(N6)
+        notify_dispatch_flip(cur, pid, synced)
     notify_csp("ROLE_CHANGED", pid, "PUT")
     return HandlerResult(status=200, body={'role_id': role_id, 'principal_type': ptype, 'principal_id': pid,
                                            'moved_from': prev if prev != role_id else None, 'ambient_synced': synced})
@@ -868,6 +881,7 @@ def role_unassign(cur, role_id: str, ptype: str, pid: str) -> HandlerResult:
         return HandlerResult(status=404, body={'error': 'Assignment not found'})
     authz.invalidate()
     synced = sync_ambient_listening(cur, pid)
+    notify_dispatch_flip(cur, pid, synced)             # 사람당 역할 하나 — 해제 = «그 밖» 으로 바뀐다(N6)
     notify_csp("ROLE_CHANGED", pid, "DELETE")
     return HandlerResult(status=200, body={'role_id': role_id, 'principal_type': ptype, 'principal_id': pid,
                                            'ambient_synced': synced})

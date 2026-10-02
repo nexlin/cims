@@ -512,6 +512,8 @@ XCAP 기반 그룹 관리.
 `sync_group_from_db` 로 in-memory `GROUPS` 동기화(관리 API 그룹 CRUD 와 공통) + CSP `GROUP_CHANGED` → xcap-diff NOTIFY.
 계약·오류 코드·XML 샘플 = [mcptt_api.md §2](../../api/mcptt_api.md), 인가 모델 = [mcptt_authorization.md §4.1](../features/mcptt_authorization.md).
 HTTP 계층은 `*+xml`/`application/xml` 본문을 원시 바이트로 핸들러에 넘긴다(그 외 미지 media type 은 415).
+그룹 문서(`get_group_xml`) 값 — 텍스트·속성 escape · 보호 둘 false · 정원 0 = 요소 생략 · 선호 음성 코덱 AMR-WB · 꺼진 그룹
+`<on-network-disabled/>` · 멤버 규칙 명단 열람 true · 우선순위 0~255(쓰기 경로 400). 정본 설명 = [mcptt_standard_conformance.md](../features/mcptt_standard_conformance.md) GMS.
 
 **그룹 목록 응답 (JSON):**
 
@@ -577,16 +579,19 @@ XCAP 기반 사용자 프로파일/서비스 설정 관리.
 | GET | `/org.3gpp.mcvideo.service-config/global/mcvideo-service-config.xml` | MCVideo 서비스 설정(전역 문서 §9.4.2.9 — 설정 `McVideoServiceConfig.*`) |
 
 사용자 프로파일의 인가 `<cp:ruleset>` 은 `ptt_user_profile`(in-memory `PTT_PROFILES`, admin PUT 이 캐시 갱신) 에서 만든다 —
-긴급 계열·`allow_ambient_listening` 은 규격 요소(§8.3.2.1 11) 목록 순 — 긴급 그룹콜·긴급 사설콜 개시 → 해제 인가 `allow_cancel_group_emergency`
+긴급 계열은 규격 요소(§8.3.2.1 11) 목록 순 — 긴급 그룹콜·긴급 사설콜 개시 → 해제 인가 `allow_cancel_group_emergency`
 → `<allow-cancel-group-emergency>`·`allow_cancel_imminent_peril` → `<allow-cancel-imminent-peril>` → 경보 발령·`allow_cancel_emergency_alert`
-→ `<allow-cancel-emergency-alert>` → 원격 청취. 해제 인가는 개시 인가와 달리 긴급 대상 결정 가능 여부와 AND 하지 않는다), `<anyExt>`
+→ `<allow-cancel-emergency-alert>`. 해제 인가는 개시 인가와 달리 긴급 대상 결정 가능 여부와 AND 하지 않는다), `<anyExt>`
 (TS 24.484 §8.3.2.1 11)xxxviii)) 에는 `allow_non_ack_users_info` →
 `<allow-to-receive-non-acknowledged-users-information>`(L, 그룹 호 개시자의 확인 통화 미응답 멤버 INFO 수신 자격 — TS 24.379 §6.3.3.3)·
-`allow_adhoc_call` → `<allow-adhoc-group-call>`(R), CIMS 확장 `<cims:allow-create-group>`. 뒤에 붙은 선택 컬럼
+`allow_adhoc_call` → `<allow-adhoc-group-call>`(R), CIMS 확장 `<cims:allow-create-group>`·`<cims:allow-ambient-listening>`(PTT 그룹 호
+청취 자격 `allow_ambient_listening` — 규격 ambient listening 과 다른 개념). N6 `<MaxSimultaneousCallsN6>` = 사용자마다 — 그 PTT 회선의 사람에게
+역할 배정이 있으면 `mcptt_service_config.max_calls_n6_dispatch`(기본 10), 없으면 `max_calls_n6`(기본 5)(`user_max_calls_n6`, CSP 와 같은
+판정 — 역할 배정·해제는 그 사람의 PTT 회선마다 `USER_CHANGED`). 모든 `<entry>` 에 `index`, `<MCPTTGroupInfo>` 는 비어도 싣는다. 뒤에 붙은 선택 컬럼
 (`allow_ambient_listening`·`allow_create_group`·`allow_non_ack_users_info`·`allow_cancel_*` — 각 `sql/migrate_ptt_*.sql`) 은 부재 시
 **부재 시 값**으로 읽는다(`services.mcptt.USER_PROFILE_OPT_ABSENT_SQL` — 대개 false, `allow_cancel_imminent_peril` = true,
 `allow_cancel_emergency_alert` = `allow_emergency_alert`). 서비스 설정 문서의 on-network 값은 CSC 설정 `ServiceConfig.*` 와
-DB `mcptt_service_config` 에서 만든다 — `EmergencyCall.GroupTimeLimit`(ms, 기본 0) 이 0 보다 크면 첫 자식
+DB `mcptt_service_config` 에서 만든다 — `<signalling-protection>` 둘은 늘 false(없으면 true 로 읽혀 단말이 mcptt-info 를 암호화한다, §8.4.2.6) · `EmergencyCall.GroupTimeLimit`(ms, 기본 0) 이 0 보다 크면 첫 자식
 `<emergency-call><group-time-limit>`(CSP TNG2, TS 24.379 §6.3.3.1.16)을 싣고, 0 이면 요소째 뺀다. 개별 호·애드혹 그룹 호의
 세션 타이머는 `ServiceConfig.PrivateCall.*` → `<private-call>`(T4·최대 통화 시간)·`ServiceConfig.AdhocGroupCall.*` →
 `<anyExt><adhoc-group-call>`(지원·인원·T4·일제 T4·TNG3)이고, 시간 값 0 인 요소는 싣지 않는다(CSP 가 그 타이머를 돌리지 않는다).

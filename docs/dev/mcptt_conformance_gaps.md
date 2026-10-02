@@ -45,19 +45,19 @@ PTT(MCPTT) 서비스 구현을 3GPP 규격 원문과 대조해 **규격과 다�
 | 등록·서비스 인가 (REG) | 4 | — | 3 | — | 1 |
 | 제휴 (AFF) | 11 | 6 | 4 | 1 | — |
 | 그룹 호 — 서버 (GCS) | 22 | 9 | 7 | 5 | 1 |
-| 그룹 호 — 단말 (GCC) | 10 | — | 8 | — | 2 |
+| 그룹 호 — 단말 (GCC) | 9 | — | 7 | — | 2 |
 | 개별 호 (PRV) | 9 | 4 | 4 | 1 | — |
 | 애드혹 그룹 호 (ADH) | 10 | 4 | 4 | 1 | 1 |
 | 긴급·임박·경보 (EMG) | 17 | 6 | 3 | 8 | — |
 | 발언권 — 서버 (FCS) | 20 | 2 | 9 | 6 | 3 |
 | 발언권 — 단말 (FCC) | 1 | — | — | 1 | — |
 | 발언권 SDP 협상 (SDP) | 3 | 1 | 2 | — | — |
-| 그룹 문서·GMS (GMS) | 18 | 3 | 13 | 2 | — |
-| 설정 문서·CMS (CMS) | 13 | 2 | 5 | 5 | 1 |
+| 그룹 문서·GMS (GMS) | 13 | — | 12 | 1 | — |
+| 설정 문서·CMS (CMS) | 9 | 1 | 4 | 3 | 1 |
 | 신원 관리 (IDM) | 9 | 4 | 1 | 3 | 1 |
-| **계** | **147** | **41** | **63** | **33** | **10** |
+| **계** | **137** | **37** | **60** | **30** | **10** |
 
-확인 수준 — ◎ 80 · ○ 53 · △ 14.
+확인 수준 — ◎ 73 · ○ 50 · △ 14.
 
 읽는 순서 — §2(먼저 볼 것) → §3(영역별 전체) → §4(미구현 목록에 빠진 기능) → §5(문서 정정) → §6(묶음과 순서).
 
@@ -69,11 +69,6 @@ PTT(MCPTT) 서비스 구현을 3GPP 규격 원문과 대조해 **규격과 다�
 
 | 항목 | 내용 |
 |---|---|
-| CMS-4 | MCPTT service configuration 에 `<signalling-protection>` 이 없다 — 규격 기본값이 «켜짐» 이라 규격 단말은 mcptt-info 를 암호화·서명해 보낸다. `false` 두 줄을 명시하면 된다(MCVideo 문서는 이미 그렇게 한다) |
-| GMS-7 | 그룹 문서에 `<protect-media>`·`<protect-floor-control-signalling>` 이 없다 — 기본값이 «GMK 필수» 다. `false` 명시 |
-| GMS-13 | 그룹 문서 산출에 XML 이스케이프가 없다 — 그룹·멤버 이름에 `&`·`<` 가 있으면 문서가 깨진다 |
-| GMS-11 | 그룹 문서가 정원 0(무제한)을 10 으로 내고, 관제 앱이 그룹을 저장하면 그 10 이 DB 에 굳는다 → MCVideo 호가 10명에서 486 |
-| CMS-7 | UE initial configuration 의 PLMN 유도가 MNC 앞자리 0 을 전부 지운다(`mnc008` → 무효 PLMN) |
 | FCS-21 | T2 제외 대상이 코드(긴급만)와 문서 세 곳(긴급·임박)이 다르다 |
 | FCS-20 | Floor Granted 의 Duration 이 늘 T2 다 — T2 에서 빼 준 긴급 화자도 단말이 그 시각에 스스로 끊는다 |
 
@@ -168,7 +163,6 @@ CSP 는 참여 기능과 제어 기능을 겸한다.
 | GCC-7 | B | SDK | §10.1.3.2 2)~5)·8) — conference SUBSCRIBE: Request-URI = 세션 식별자 · P-Preferred-Service · Accept-Contact · Expires 4294967295 · mcptt-info `<mcptt-request-uri>` = 그룹 ID (shall) | `Event: conference`·`Expires: 3600` 만, Request-URI = 그룹 URI, 본문 없음 — `sdk/core/src/engine.cpp:3011-3022`. 앱은 세션 밖의 제휴 그룹 전체를 구독한다 | 규격 서버에서 로스터를 못 받는다. handoff §14.1 의 «구독 3600초 갱신은 규격대로» 는 conference 구독에는 맞지 않는다 | ◎ |
 | GCC-8 | B | SDK | §10.1.1.2.4.1 — 재합류 INVITE 의 Request-URI = 세션 식별자 (shall) | MCPTT 발신은 늘 그룹 URI — `sdk/core/src/engine.cpp:2682`. `CallInfo.sessionUri` 는 MCVideo 호에서만 채운다 | 끝난 세션에 «재합류» 하면 404 대신 새 세션이 열린다 | ◎ |
 | GCC-9 | D | SDK | §10.1.1.4.1.1 4)b) · Annex F.1.3 — 착신 그룹은 `<mcptt-calling-group-id>` | 그룹 = From URI 의 user — `sdk/core/src/engine.cpp:1511` (`callingGroupId` 는 해석만 한다. MCVideo 착신은 우선 쓴다) | From 이 그룹이 아닌 규격 서버에서 다른 채널로 세션이 선다 | ○ |
-| GCC-10 | B | SDK·CSC·CSP | §6.2.1 2)b) — 그룹 문서 `<preferred-voice-encodings>` 가 있으면 그 코덱으로 offer | SDK 는 요소를 읽지 않고, CSC 는 싣지 않는데, CSP 는 서비스 코덱이 offer 에 없으면 488(`csp/GroupCallService.cpp:882-903`) | 규격 단말이 서버가 요구하는 코덱을 알 규격 경로가 없다 | ○ |
 
 ### 3.5 개별 호 (PRV) — TS 24.379 §11.1
 
@@ -272,18 +266,13 @@ CSP 는 참여 기능과 제어 기능을 겸한다.
 | GMS-4 | C | CSC | RFC 4825 §8.2.2·§8.2.5 — 비정형·스키마·제약 위반 = 409 + `application/xcap-error+xml`, MIME 불일치 = 415 | 400 JSON(`invalid_group_document`·`unknown_member`), Content-Type 검사 없음 — `mcptt.py:2834-2893` | 규격 XDMC 가 원인을 가리지 못한다 | ○ |
 | GMS-5 | B | CSC | §5.2 · §6.3.6.3~§6.3.12.3 — 요소·속성 단위 XCAP(node selector) (GMS shall) | 경로를 `/` 로 잘라 마지막 조각을 그룹 URI 로 쓴다 — `mcptt.py:2787`·`:2813` | 규격 단말의 멤버 한 명 추가·삭제가 404/400. 문서 전체 PUT 만 통한다 | ○ |
 | GMS-6 | B | CSC·SDK | §6.3.16 — 그룹 문서의 기본 조회는 «멤버 제외»(HTTP POST + GMOP 본문) | POST 분기가 없다(GET·PUT·DELETE 만). SDK 는 늘 전체 GET | 규격 단말의 기본 조회가 실패한다. 우리 단말은 큰 그룹도 매번 멤버 전체를 받는다 | ◎ |
-| GMS-7 | B | CSC | §7.2.8 — `<protect-media>`·`<protect-floor-control-signalling>` 은 **요소가 없으면 true**(GMK 필수·floor 보호) | MCPTT 몫에 두 요소가 없다(규격 밖 `<mcpttgi:on-network-encryption>` 만) — `mcptt.py:1463-1486`. MCVideo 몫은 false 를 명시한다(`csc/src/services/mcvideo.py:400-402`) | 규격 단말은 모든 CIMS 그룹을 보호 필수 그룹으로 읽는다(GMK 가 없어 호를 못 열거나 floor 보호를 요구) | ◎ |
 | GMS-8 | B | CSC·SDK·관제 | §7.2.8 — 요소가 없을 때: `on-network-invite-members` = false(chat), `allow-MCPTT-emergency-alert` = false, `on-network-allow-conference-state` = false, group-priority = 최저 | XCAP 생성 기본값 = prearranged·경보 허용·conference 허용·우선순위 5(`mcptt.py:2633-2640`). SDK 구조체 기본 = prearranged·긴급 호/경보 허용(`sdk/core/include/cimsue/csc.h:145-148`) | 요소를 생략한 규격 문서가 반대 뜻으로 만들어진다(권한 확대). SDK 는 규격 GMS 문서를 반대로 읽는다. mcptt_api.md 의 «conference-state 기본 true» 는 규격과 반대다 | ◎ |
 | GMS-9 | B | CSC·CSP | §7.2.2 · §7.2.8 — `<rule>` 은 조건(`<identity>`·`<is-list-member>`)에 맞는 신원에 action 을 준다. `<allow-initiate-conference>`·`<join-handling>` | PUT 해석이 문서 안 첫 action 값을 그룹 전역 값으로 읽고(`mcptt.py:2581-2583`), 개시·합류 action 은 읽지 않고 늘 true 로 낸다(`:1499-1500`) | 특정 사용자에게만 긴급 호·경보를 준 문서가 전 멤버 허용으로 바뀐다. «합류만 가능» 을 담을 수 없다 | ○ |
 | GMS-10 | B | CSC·SDK | §7.2.4.2 — `urn:3gpp:ns:mcpttGroupInfo:1.0` 스키마에 없는 요소 | 규격 이름공간 `mcpttgi` 로 자체 요소 다섯을 싣는다 — `on-network-require-affiliation`(`mcptt.py:1478`)·`on-network-require-talker-id`(`:1484`)·`on-network-encryption`(`:1486`)·`org-code`(`:1531`)·`authorized-user`(`:1536`). 선언해 둔 `cims:` 이름공간은 `user-title` 에만 쓴다 | 규격 단말은 무시한다. 우리 SDK 가 규격 GMS 에 PUT 하면 스키마 위반이다 — `cims:` 로 옮긴다 | ○ |
-| GMS-11 | A | CSC·관제 | §7.2.8 — `<on-network-max-participant-count>` = 세션 최대 참가자 | 0(무제한)을 10 으로 낸다 — `max_count = group.get('max_members') or 10`(`mcptt.py:1450`). 관제 앱은 읽은 값을 되돌려 저장하고(`GroupEditViewModel.cs:180`·`:278`), SDK 는 0 이면 요소를 생략해 0 으로 되돌릴 길이 없다 | 관제 앱에서 그룹을 한 번 저장하면 정원이 10 으로 굳는다 → MCVideo 호가 10명에서 486(122). MCPTT 미집행은 GCS-5 | ◎ |
-| GMS-12 | C | CSC | §7.2.12.1 — `<list>` 읽기는 `<on-network-allow-getting-member-list>` 가 있는 규칙의 신원만(없으면 false) | action 목록에 요소가 없고 멤버면 `<list>` 전체를 준다 — `mcptt.py:1498-1504`·`:2820-2830` | 요소로 판단하는 규격 단말은 «명단 열람 불가» 로 본다. 명단을 숨기는 그룹을 만들 수 없다 | ◎ |
-| GMS-13 | A | CSC | RFC 4825 — 문서는 well-formed XML | 그룹 이름·멤버 이름·직함·조직 코드를 이스케이프 없이 넣는다 — `mcptt.py:1407`·`:1413`·`:1433`·`:1531` (같은 파일의 다른 문서는 `html.escape` 를 쓴다) | 이름에 `&`·`<` 가 있으면 그 그룹 문서 전체가 깨진다 | ◎ |
 | GMS-14 | B | CSP | §6.3.13.3.2.2 — xcap-diff SUBSCRIBE 의 신원은 mcptt-info `<mcptt-access-token>`, 구독 대상은 resource-lists. RFC 5875 §4.6 — NOTIFY 의 `sel` 은 구독한 URI 와 같아야 한다 | 신원 = From, 분류 = Request-URI 문자열에 "gms"·"cms" 가 있나(`csp/CscfModule.cpp:1349-1364`), 본문은 읽지 않는다. `sel` 은 고정 형식(`csp/CspServer.cpp:696-711`) — CMS 구독도 같다 | 규격 단말이 구독한 문서와 NOTIFY 의 `sel` 이 맞지 않는다. 토큰 없이도 구독이 선다. conformance S3 은 «정합» 으로 적었다 | ○ |
 | GMS-15 | B | CSP·CSC | RFC 5874 — `new-etag` = 변경 뒤 문서의 ETag, 삭제는 `previous-etag` 만. RFC 5875 §4.7 — 앞 NOTIFY 의 200 전에 다음 NOTIFY 를 보내지 않는다 | `new-etag` 가 `init`·`etag_<gid>`·`change_<ts>`·빈 값이고 HTTP ETag(내용 해시)와 다르다. 삭제에도 `new-etag` 를 싣는다. 그룹마다 NOTIFY 를 연달아 보낸다 — `csp/CspServer.cpp:700-711`·`:1284-1289`·`:1409-1416` | `new-etag` 를 캐시와 견주는 단말은 늘 불일치이거나 «변경 없음» 으로 읽는다. 삭제를 변경으로 읽는다 | ○ |
 | GMS-16 | B | SDK·관제·현장 | §6.3.13.2.1 — 단말의 구독: resource-lists 본문 · mcptt-info 의 access token · P-Preferred-Service · Contact icsi-ref · Request-URI = 설정된 PSI | `Event: xcap-diff`·`Expires` 만 싣고 본문이 없다 — `sdk/core/src/engine.cpp:3024-3031`. PSI 는 ue-init-config 의 `<GMS-URI>` 가 아니라 `sip:gms_psi@<도메인>` 고정(`DispatchSession.cs:517`, `DiscoveryPlane.kt:20`) | 규격 GMS·CMS 는 이 구독을 받지 않거나 무엇을 통지할지 모른다 | ○ |
 | GMS-17 | B | SDK | TS 24.379 §6.3.5.4 3)·§6.3.5.3 2) — 개시·합류 인가는 `<is-list-member>` 조건 + `<allow-initiate-conference>`·`<join-handling>` 규칙. TS 24.481 §7.2.2 — MCData 그룹의 entry 는 `<mcdata-mcdata-id>` | SDK 가 만드는 PUT 본문의 규칙에 조건·개시/합류 action 이 없고 entry 에 `<mcdata-mcdata-id>` 가 없다 — `sdk/core/src/csc/group_doc.cpp:113-122`·`:182-196` | 규격 GMS 에 저장되면 누구도 그 그룹 호를 개시·합류할 인가가 없다(우리 서버는 문서를 다시 만들어 가려진다) | ○ |
-| GMS-18 | A | CSC·관제 | §7.2.4.2 — `priorityType` 0~255 | 서버는 범위를 검사하지 않고(`mcptt.py:2579`), 관제 앱은 0~15 로 잘라 저장한다(`GroupEditViewModel.cs:278`, 태블릿 `GroupForm.kt:48`) | 콘솔이 16 이상으로 둔 우선순위가 앱 저장 때 15 로 바뀐다. 범위 밖 값이 문서로 나간다 | ○ |
 
 ### 3.12 설정 문서·CMS (CMS) — TS 24.484
 
@@ -292,11 +281,7 @@ CSP 는 참여 기능과 제어 기능을 겸한다.
 | CMS-1 | B | CSC·CSP·SDK | §8.4.2.8·§8.4.2.9 — service configuration 은 global 문서, 이름 `service-config.xml` (`…/org.3gpp.mcptt.service-config/global/…/service-config.xml`) | 라우트는 `/org.3gpp.mcptt.service-config/users` 하나, `users/{xui}/service-config` + 본인 검사 — `csc/src/services/mcptt.py:3841`. SDK·CSP NOTIFY `sel` 도 같은 경로. MCVideo 문서는 global 로 서빙한다(`:3843`) | 규격 단말의 GET 이 404 — Resource-Priority·타이머·신호 보호 설정을 못 받는다 | ◎ |
 | CMS-2 | B | CSC·CSP·SDK | §8.3.1A · §8.3.2.8 — user profile 문서 = `…/users/sip:MCPTTID/mcptt-user-profile-<index>.xml` | 핸들러가 `/user-profile` 문자열로 XUI 를 자른다 — `mcptt.py:2955-2967`. 규격 이름이면 `tel:` XUI 는 403 | 규격 단말의 user profile 조회가 실패한다 | ◎ |
 | CMS-3 | A | CSC·CSP·SDK | §8.3.2.1 11) · 표 8.3.2.7 — ruleset 의 인가 요소. `<allow-private-call>` 등은 **요소가 없으면 false** | actions 에 일곱 요소 + anyExt 둘뿐이다 — `mcptt.py:1744-1762`. 없는 것: `allow-private-call`·`allow-private-call-to-any-user`·`allow-manual-commencement`·`allow-automatic-commencement`·`allow-force-auto-answer`·`allow-imminent-peril-call`·`allow-cancel-private-emergency-call`·`allow-private-call-participation`·`allow-adhoc-group-call-participation`·`allow-to-modify-adhoc-group-call-participants-info`. SDK 는 «없음 = 허용» 으로 읽는다(`sdk/core/src/csc/cms_doc.cpp:17-21`) | 규격 단말은 개별 호·임박 위험 호를 미인가로 본다. 운영자가 사용자별로 끌 수단이 없다(앱의 게이트는 늘 통과). 서버 판정은 PRV-2·PRV-4·PRV-8·EMG-4·ADH-5·ADH-6 | ◎ |
-| CMS-4 | B | CSC·CSP | §8.4.2.6 — `<signalling-protection>` 의 `<confidentiality-protection>`·`<integrity-protection>` 은 **기본 true**. TS 24.379 §6.6.2.3.1 — 요소가 없으면 단말은 mcptt-info 를 암호화한다 | `<on-network>` 에 요소가 없다 — `mcptt.py:1835-1857`. MCVideo 문서는 false 를 명시한다(`mcvideo.py:654-689`). CSP 는 암호화된 요소를 해석하지 못한다(`csp/McpttInfo.h:41-94`) | 규격 단말이 `mcptt-request-uri`·`mcptt-client-id` 등을 CSK 로 암호화·서명해 보내면 CSP 가 빈 값으로 읽는다(403 `140 unable to decrypt` 응답도 없다) | ◎ |
 | CMS-5 | B | CSC·CSP | §8.3.2.12 — user profile 문서의 변경을 구독자에게 통지 | 문서의 `<MCPTTGroupInfo>`·`<ImplicitAffiliations>`·`<PrivateCallList>` 는 그룹 멤버십에서 나오는데, 그룹 변경은 `GROUP_CHANGED`(gms 구독자 통지)만 낸다. `UserProfile.*` 설정 재적재도 통지가 없다(`mcptt.py:364-369`) | user profile 을 그룹 목록의 원천으로 쓰는 규격 단말은 편성 변경을 재로그인 전까지 모른다 | ○ |
-| CMS-6 | C | CSC | §8.3.2.1 11)xxxviii) — 청취 인가 요소는 anyExt 의 `<allow-request-remote-initiated-ambient-listening>`·`<allow-request-locally-initiated-ambient-listening>` | `<allow-ambient-listening>` 을 규격 이름공간으로 싣는다 — `mcptt.py:1753`. 이 이름은 TS 24.484·24.379·24.481 어디에도 없다 | 규격 단말은 모르는 요소다. mcptt_authorization.md·dispatch_center.md·CLAUDE.md 가 «TS 24.484 `allow_ambient_listening`» 으로 인용한다 — 자체 확장(`cims:`)으로 옮기거나 규격 요소 이름으로 | ◎ |
-| CMS-7 | A | CSC | §7.2.2.6 — `<HPLMN PLMN>` 은 유효한 PLMN 코드 | 도메인에서 유도할 때 MNC 의 앞자리 0 을 전부 지운다 — `plmn = m.group(2) + m.group(1).lstrip('0')`(`mcptt.py:1899`). `mnc008.mcc450` → `4508`, `mnc012.mcc310` → `31012` | MNC 가 0X·00X 인 사업자 도메인에서 무효하거나 다른 PLMN 을 광고한다(`mnc033` 처럼 0 이 하나면 맞는다) | ◎ |
-| CMS-8 | C | CSC | §8.3.2.1 — `<entry>` 는 `index` 속성을 가진다. 10)b) — `<MCPTTGroupInfo>` 하나 | entry 에 `index` 가 없고(`mcptt.py:1631-1635`) 그룹이 없으면 `<MCPTTGroupInfo>` 를 뺀다(`:1727-1728`) | `index` 를 키로 읽는 단말에서 entry 해석 실패 가능 | ○ |
 | CMS-9 | B | CSC | §5.2 — CMS 는 문서 생성·수정·삭제와 요소 단위 절차를 지원 | user profile·service config 핸들러가 메서드를 가리지 않는다 — PUT·DELETE 에도 200 + 문서 — `mcptt.py:2945-3017` | 규격 CMC 의 수정이 «성공한 것처럼» 보인다 | ○ |
 | CMS-10 | C | CSC | TS 24.482 A.2.3 — Bearer 가 없으면 403 | 401 + `WWW-Authenticate: Bearer` — `mcptt.py:1322-1327` | RFC 6750 관행과는 맞다. 401·403 분기가 규격과 반대 | ○ |
 | CMS-11 | C | CSC | §7.2.1.1 — 만들어 준 UE initial configuration 의 `<mcptt-UE-id>` = 그 단말의 UE ID | 어떤 XUI 로 와도 같은 전역 문서이고 요소가 없다 — `mcptt.py:1925-1956` | UE ID 일치를 확인하는 단말이면 거절 가능 | ○ |
@@ -326,7 +311,7 @@ mcptt_standard_conformance.md §0-R 은 통째 미구현 기능을 나열하는�
 | 서비스 설정 PUBLISH·구독(poc-settings — Answer-Mode·선택한 user profile) | TS 24.379 §7.2.2~§7.2.4 · §7.3.3~§7.3.6 | 489 (REG-2) |
 | 협상 모드 제휴 변경(타인 제휴 MESSAGE) · 규칙 기반 제휴 | §9.2.1.4·§9.2.1.5 · §9.2.1.7 | 없음 |
 | 그룹 동적 데이터 구독(그룹 상태·호 진행·제휴 멤버) | §9.2.1.6 · §9.2.2.3.9~10 | 제휴 구독으로 잘못 받는다 (AFF-10) |
-| XML 기밀성·무결성 보호(mcptt-info 요소 암호화·서명) | §4.8 · §6.6 | 처리 코드 없음 — 문서가 «꺼짐» 을 알려야 한다 (CMS-4) |
+| XML 기밀성·무결성 보호(mcptt-info 요소 암호화·서명) | §4.8 · §6.6 | 처리 코드 없음 — service configuration 이 «꺼짐»(false)을 알린다 |
 | 우선순위 공유 · MCPTT gateway server | §6.7 · §5.5·§6.8 | 없음 |
 | 호 없는 임박 위험 상태 해제 MESSAGE | §10.1.6 | CSP MESSAGE 분기에 없어 보인다(응답 코드 미확인) |
 | 애드혹 그룹 긴급 경보 | §12.1A | 없음 |
@@ -352,7 +337,7 @@ mcptt_standard_conformance.md §0-R 은 통째 미구현 기능을 나열하는�
 | 같은 문서 F4 · cmp_media_api.md §7.7 · mcptt_timers.md §5.2 | T2 에서 긴급·임박 화자 제외 | 코드는 긴급만(emergency_modes §3.1 과는 일치) | FCS-21 |
 | 같은 문서 F5 | MCPTT ID 는 `PTT_JOIN.user_uri` | MCPTT 경로는 `user_uri` 를 보내지 않는다 | FCS-5 |
 | 같은 문서 §0 S3 | xcap-diff SUBSCRIBE/NOTIFY 정합 | 본문 미해석·`sel` 고정·`new-etag` 불일치 | GMS-14·GMS-15 |
-| 같은 문서 §0 S4 · §3 CMS | service-config·user-profile 정합 | 문서 주소·이름이 규격과 다르고 필수 뜻을 가진 요소가 빠졌다 | CMS-1~CMS-4 |
+| 같은 문서 §0 S4 · §3 CMS | service-config·user-profile 정합 | 문서 주소·이름이 규격과 다르고 인가 요소가 빠졌다 | CMS-1~CMS-3 |
 | ptt_flows.md B4·B6 | 제휴 PUBLISH 도식의 `Event: poc-settings` · late entry 는 «UE 주도 = 규격 모델» · «서버는 개시 시 fan-out 만» · «de-affiliate 시 이탈» | poc-settings 는 489 · 규격은 서버 초대 · 합류 때마다 재초대 · 해제해도 leg 유지 | REG-2·GCS-3·GCS-4·GCS-22 |
 | mcptt_broadcast_group_call.md R4 | chat = 서버가 초대하지 않음 | 서버가 10초마다 초대 | GCS-1 |
 | server45_handoff.md §12.6 C12 | REGISTER Contact 의 MCPTT 태그 — «앱은 싣는다» | 앱도 싣지 않는다 | REG-1 |
@@ -360,8 +345,7 @@ mcptt_standard_conformance.md §0-R 은 통째 미구현 기능을 나열하는�
 | mcptt_emergency_modes.md §2·§5 · §4.2 | 경보 인가 = 콜과 공통 판정 · 미인가 403 은 §6.3.3.1.14 대로 | 경보는 대상 일치·멤버십을 보지 않는다 · 개시 403 에 본문이 없다 | EMG-1·EMG-2·EMG-5 |
 | android_ue_client.md U1·U7 | Floor Ack 정합 · Message Sequence Number 폐기 정합 | FCS-4 · FCC-5 | — |
 | ue_sdk.md §4 | API 표의 `presence(uri)` | 그런 API 가 없다 | AFF-12 |
-| mcptt_api.md | `on-network-allow-conference-state` 기본 true · «정원보다 많으면 400» | 규격 기본 false · XCAP 경로에는 그 검사가 없다 | GMS-8·GMS-11 |
-| mcptt_authorization.md · dispatch_center.md · db_schema.md · CLAUDE.md | «TS 24.484 `allow_ambient_listening`» | 규격에 없는 요소 이름 | CMS-6 |
+| mcptt_api.md | `on-network-allow-conference-state` 기본 true | 규격 기본 false | GMS-8 |
 | csp.md · mcptt_csp_cmp_roadmap_contract.md · `sdk/core/include/cimsue/engine.h` 주석 | floor 없는 개별 호 = `mc_no_floor_ctrl` | on-demand 는 «m=application 없음» — SDK 발신은 실제로 그렇게 보내 CSP 판정과 어긋난다 | PRV-3 |
 
 ## 6. 묶음과 순서 (권고)
@@ -370,7 +354,7 @@ mcptt_standard_conformance.md §0-R 은 통째 미구현 기능을 나열하는�
 
 | # | 묶음 | 항목 | 몫 |
 |---|---|---|---|
-| 1 | **문서 값 한두 줄** — 규격 기본값이 «켜짐» 인 요소를 명시, 깨진 산출 수정 | CMS-4 · GMS-7 · GMS-13 · GMS-11 · CMS-7 · FCS-21(문서) | .45 CSC |
+| 1 | **문서 값 한두 줄** — 문서 셋의 T2 제외 대상 | FCS-21(문서) | .48 |
 | 2 | **발언권 메시지 정합** — Ack 의 Message Type · 미대기 Queue Position 254 · Granted Duration | FCS-4 · FCS-8 · FCS-20 | .45 SDK·CMP |
 | 3 | **인가 구멍** | EMG-1 · EMG-2 · SDP-3 · ADH-3 · IDM-1 · IDM-3 · IDM-4 · IDM-5 | .45 CSP·CMP·CSC·SDK |
 | 4 | **user profile 인가 요소와 서버 판정** — 요소를 싣고(없음 = false), CSP 가 본다, SDK 의 «없음 = 허용» 을 뒤집는다 | CMS-3 · PRV-2 · PRV-4 · PRV-8 · EMG-4 · ADH-5 | .45 CSC·CSP·SDK → Windows(콘솔 칸은 .45) |
@@ -387,7 +371,7 @@ mcptt_standard_conformance.md §0-R 은 통째 미구현 기능을 나열하는�
 
 - GCC-6 — 거절을 480 + Warning 110 으로(코어 `reject` 가 Warning 을 받게 된 뒤).
 - EMG-8 — 긴급 개시·상향·경보의 대상 그룹 판정(전용 긴급 그룹).
-- GMS-11·GMS-18 — 그룹 편집 폼: 정원 0(무제한)을 되돌릴 수 있게, 우선순위 범위.
+- GMS-11·GMS-18 — 그룹 편집 폼: 정원 0(무제한)을 되돌릴 수 있게(서버는 0 이면 요소를 싣지 않는다), 우선순위 0~255(서버가 범위 밖 400 — 앱의 0~15 절단을 없앤다).
 - CMS-13 — CMS 변경 구독(지금은 5분 폴링).
 - 묶음 4·5 가 들어오면 Capabilities 게이트와 응답 문구 사전.
 

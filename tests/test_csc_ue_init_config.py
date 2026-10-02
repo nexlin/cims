@@ -7,6 +7,8 @@ mcptt_timers.md §7 D4·D10:
   · 재적재(apply_config 두 번째부터)로 문서 내용이 바뀌면 CSP 에 UE_INIT_CONFIG_CHANGED(etag = 새 문서 ETag)를 보낸다 —
     첫 적재(기동)·내용 불변 재적재는 보내지 않는다(TS 24.484 §7.2.2.12 → §6.3.13.3). 주소류(McpttServer.PublicUrl)만 바뀌어도
     문서가 바뀐다.
+  · <HPLMN PLMN> = MCC 3 + MNC 2·3자리(TS 24.484 §7.2.2.7 · TS 23.003 §2.2) — 설정이 정본, 없으면 도메인 `mnc<3자리>.mcc<3자리>`
+    에서 앞자리 0 하나만 뗀다(TS 23.003 §13 — 두 자리 MNC 는 0 을 하나 채워 쓴다).
 
   python3 -m unittest tests.test_csc_ue_init_config
 """
@@ -60,6 +62,31 @@ class UeInitTimersTest(unittest.TestCase):
         t = _timers(m.get_ue_init_config_xml(BASE)[0])
         self.assertEqual(t, {"T100": 1, "T101": 2, "T103": 4, "T104": 4, "T132": 255},
                          "설정 반영 · unsignedByte 절단(300→255) · 정수 아님 = 기본값")
+
+
+class UeInitHplmnTest(unittest.TestCase):
+    def test_derive_from_domain_strips_one_padding_zero(self):
+        # TS 23.003 §13 — 도메인의 MNC 는 세 자리, 두 자리 MNC 는 앞에 0 하나. 앞자리 0 을 전부 지우면 mnc008 → 4508(무효)
+        self.assertEqual(m.derive_hplmn("", "ptt.mnc008.mcc450.3gppnetwork.org"), "45008")
+        self.assertEqual(m.derive_hplmn("", "mnc033.mcc450.pub.3gppnetwork.org"), "45033")
+        self.assertEqual(m.derive_hplmn("", "ims.mnc410.mcc310.3gppnetwork.org"), "310410", "세 자리 MNC")
+        self.assertEqual(m.derive_hplmn("", "ptt.cims.example.kr"), "00101", "유도 불가 = 명목값")
+
+    def test_configured_plmn_wins_and_is_validated(self):
+        # 앞자리 0 인 세 자리 MNC(예 310-012)는 도메인으로 가를 수 없어 설정이 정본이다
+        self.assertEqual(m.derive_hplmn("310012", "mnc012.mcc310.3gppnetwork.org"), "310012")
+        self.assertEqual(m.derive_hplmn("45-08", "mnc008.mcc450.3gppnetwork.org"), "45008", "PLMN 코드가 아닌 설정 = 유도값")
+
+    def test_document_carries_plmn(self):
+        keep_cfg, keep_dom = m.UE_INIT_CONFIG, acs.ptt_domain
+        try:
+            m.UE_INIT_CONFIG = {}
+            acs.ptt_domain = lambda provisioning, config=None: "ptt.mnc008.mcc450.3gppnetwork.org"
+            hp = ET.fromstring(m.get_ue_init_config_xml(BASE + "/plmn")[0].encode()).find("ui:on-network/ui:HPLMN", NS)
+            self.assertEqual(hp.get("PLMN"), "45008")
+        finally:
+            m.UE_INIT_CONFIG, acs.ptt_domain = keep_cfg, keep_dom
+            m._UE_INIT_LAST_GOOD.pop(BASE + "/plmn", None)
 
 
 class UeInitChangeNotifyTest(unittest.TestCase):

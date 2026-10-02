@@ -432,8 +432,9 @@ UE-M ◄════ RTP (A ingress 복사 SSRC_A + B ingress 복사 SSRC_B, tap
   등)에 남기지 않고 감사(§5.7)로만 남긴다. affiliation 은 만들지 않는다(청취는 제휴가 아니다).
 - 비멤버의 일반(sendrecv) INVITE 는 403 (TS 24.379 §10.1.1 — 그룹 멤버가 아닌 사용자의 개시/합류 거절).
 
-**인가 — TS 24.484 프로파일 자격 + 역할 범위(규격형, 2단)**:
-- **자격 = `ptt_user_profile.allow_ambient_listening`**(TS 24.484 ruleset·TS 24.379 ambient listening 인가):
+**인가 — 프로파일 자격 + 역할 범위(2단)**:
+- **자격 = `ptt_user_profile.allow_ambient_listening`**(user profile ruleset 의 CIMS 확장 `<cims:allow-ambient-listening>` — 규격 ambient
+  listening(TS 24.379 원격·로컬 개시 1:1 호, TS 24.484 anyExt `allow-request-*-ambient-listening`)과 다른 개념이라 규격 요소로 싣지 않는다):
   이 사용자가 원격 청취를 수행할 자격. CSP 가 청취 개시 INVITE 에서 프로파일 행 하나를 읽어 판정한다
   (`SelectUserProfile` — 인덱스 단건, 다른 프로파일 게이트와 같은 경로. 값 0·행 부재·DB 불가는 모두 403 — 당사자
   모르게 미디어를 인도하는 동작이라 fail-closed). 값은 사람이 직접 켜지 않는다 — **`ptt_listen≠none` 역할에 배정되면
@@ -472,8 +473,8 @@ function, `CscfModule` SUBSCRIBE 초기 구독)는 구독자를 그룹 문서(TS
   SUBSCRIBE 결과를 `M_conf_sub`/`M_conf_warn` 마커로 낸다.
 
 TS 24.379 **ambient listening**(`session-type=ambient-listening`, remote-init — 특정 단말 주변음을
-원격 개시로 듣는 1:1 호)은 같은 `allow_ambient_listening` 자격을 재사용하되 단말의 무표시 자동응답이
-필요해 시그널링은 별도 과제다(§10).
+원격 개시로 듣는 1:1 호)은 규격 자격 요소(TS 24.484 §8.3.2.1 11)xxxviii)C)·D) `allow-request-remote-/locally-initiated-ambient-listening`)가
+따로 있고, 단말의 무표시 자동응답이 필요해 시그널링과 함께 별도 과제다(§10).
 
 ### 5.6a PTT 세션 가시성 — 타인 간 사설콜·애드혹 (dialog 이벤트, RFC 4235)
 
@@ -506,7 +507,7 @@ TS 24.379 **ambient listening**(`session-type=ambient-listening`, remote-init �
 
 **즉석 세션의 참가자 명단·청취** — 세션 URI 를 알게 된 관제사가 `Event: conference` 구독(로스터)·`a=recvonly` 합류(청취)를
 하면 CSP 는 **즉석 세션 관측 인가** `CGroupCallService::CanObserveEphemeral` 로 판정한다: 참가자(fan-out 대상)는 항상 허용,
-그 외는 자격 `allow_ambient_listening`(§5.6 과 같은 TS 24.484 자격) **+ 참가자 중 한 명의 전화 그룹이 관측자 역할의
+그 외는 자격 `allow_ambient_listening`(§5.6 과 같은 프로파일 자격) **+ 참가자 중 한 명의 전화 그룹이 관측자 역할의
 `monitor_call` 안**(`CanWatch` — VoLTE Join 의 "어느 한 당사자 범위 안" 과 같은 규칙). 즉석 세션에는 그룹 문서·
 `ptt_listen` 대상 항목이 없으므로 `ptt_listen` 축을 쓰지 않는다. 불허는 conference 403 + `Warning: 138`, 청취 INVITE
 403(사유 `ephemeral …`, 감사 `denied`). 종전 "즉석 세션은 게이트 없음" 은 폐기 — 세션 id 를 아는 것만으로 타인의
@@ -1066,9 +1067,9 @@ person(`users.id`)에 하고, 통지는 `PHONE_GROUP_CHANGED`/`ROLE_CHANGED`/`US
 
 - **끼어들기(barge-in)·3자 통화** — 관제사의 상향을 A/B 에 섞으려면 믹서가 필요하다. CMP MIX
   예약 기능(`(service, conf_id)`)의 실체화로 다룬다. tap 은 그 전 단계다.
-- **TS 24.379 ambient listening**(remote-init 1:1) — 그룹콜 청취와 같은 `allow_ambient_listening`
-  자격(§5.6)을 재사용하되, 단말 무표시 자동응답 + CSP `session-type=ambient-listening` 시그널링이
-  추가로 필요하다. 단말 파트 선행.
+- **TS 24.379 ambient listening**(remote-init 1:1) — 자격은 규격 요소(user profile anyExt
+  `allow-request-remote-/locally-initiated-ambient-listening`)로 싣고, 단말 무표시 자동응답 + CSP `session-type=ambient-listening`
+  시그널링이 추가로 필요하다. 단말 파트 선행.
 - **History-Info(RFC 7044)** — 대표번호 재타게팅 이력의 표준 표현(§4.3, 현재 `P-Called-Party-ID` 로 대체).
 - **3GPP LI 핸드오버(HI2/HI3·LEMF)** — 외부 사법기관 인도가 요구되면 별도 LI 게이트웨이(§5.8). 본 설계 범위 밖.
 - **전화 그룹 겸임(N:M 멤버십)** — 채택하지 않는다(§3.2 확정). 겸임 요구는 `overflow_target`·지정 픽업으로

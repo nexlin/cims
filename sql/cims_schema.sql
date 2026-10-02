@@ -177,7 +177,7 @@ CREATE TABLE IF NOT EXISTS ptt_groups (
     video_enabled       TINYINT(1)   NOT NULL DEFAULT 0 COMMENT 'H.264 비디오 릴레이 활성화',
     session_start       DATETIME              DEFAULT NULL COMMENT '그룹 세션 시작시간',
     session_end         DATETIME              DEFAULT NULL COMMENT '그룹 세션 종료시간 (NULL=무기한)',
-    priority            INT                   DEFAULT 5 COMMENT '그룹 우선순위 (1=최고, 10=최저)',
+    priority            INT                   DEFAULT 5 COMMENT '그룹 우선순위 <on-network-group-priority> 0~255 — 클수록 높다(TS 24.481 §7.2.8)',
     encryption          TINYINT(1)            DEFAULT 0 COMMENT '암호화 여부',
     emergency_call      TINYINT(1)            DEFAULT 0 COMMENT '긴급통화 허용 — condition(긴급·임박위험) 공통 게이트',
     org_code            VARCHAR(32)           DEFAULT NULL COMMENT '소속 조직 코드',
@@ -215,7 +215,7 @@ CREATE TABLE IF NOT EXISTS ptt_groups (
 CREATE TABLE IF NOT EXISTS ptt_group_members (
     group_id BIGINT      NOT NULL COMMENT 'ptt_groups.id (surrogate)',
     user_id  VARCHAR(64) NOT NULL COMMENT '멤버 가입자 ID',
-    priority INT         NOT NULL DEFAULT 0 COMMENT '발언권 우선순위 (낮을수록 높음)',
+    priority INT         NOT NULL DEFAULT 0 COMMENT '멤버 우선순위 <user-priority> 0~255 — 클수록 높다(TS 24.481 §7.2.8, CMP floor 서열)',
     role     ENUM('chair','participant') NOT NULL DEFAULT 'participant' COMMENT 'TS 24.380 participant type — chair 는 floor 우선 선점',
     mcptt_id VARCHAR(255)         DEFAULT NULL COMMENT '멤버 MCPTT ID URI (NULL=user_id 사용)',
     on_network_required TINYINT(1) NOT NULL DEFAULT 0 COMMENT '<on-network-required> (TS 24.481 §7.2.4.2) — 필수 멤버: 개시자 200 OK 전 응답을 기다린다(TNG1)',
@@ -360,6 +360,10 @@ CREATE TABLE IF NOT EXISTS mcptt_service_config (
         COMMENT '단일 행 고정(1) — service-config 은 시스템 전역 문서 1건이다(사용자별은 ptt_user_profile)',
     max_affiliations_n2        SMALLINT    NOT NULL DEFAULT 10
         COMMENT 'N2 — 동시 제휴(편성) 채널 상한. user-profile <MaxAffiliationsN2>(TS 24.484 §8.3.2.1) 의 기본값',
+    max_calls_n6               SMALLINT    NOT NULL DEFAULT 5
+        COMMENT 'N6 — 동시 그룹 호 상한(관제가 아닌 사용자). user-profile <MaxSimultaneousCallsN6>(TS 24.484 §8.3.2.1), 넘으면 486 103(TS 24.379 §10.1.1.3.1.1)',
+    max_calls_n6_dispatch      SMALLINT    NOT NULL DEFAULT 10
+        COMMENT 'N6 — 동시 그룹 호 상한(관제 = 역할 배정 사용자, mcptt_authorization.md). user-profile <MaxSimultaneousCallsN6>',
     num_levels_group_hierarchy TINYINT     NOT NULL DEFAULT 3 COMMENT 'common/broadcast-group/num-levels-group-hierarchy (TS 24.484 §8.4.2.1)',
     num_levels_user_hierarchy  TINYINT     NOT NULL DEFAULT 3 COMMENT 'common/broadcast-group/num-levels-user-hierarchy (TS 24.484 §8.4.2.1)',
     update_time                DATETIME    DEFAULT NULL,

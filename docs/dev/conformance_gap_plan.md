@@ -69,7 +69,8 @@
    한 자리를 고치면 같이 풀리는 항목(MCData·MCVideo 목록이 «MCPTT ○○ 와 같은 뿌리» 로 적은 것)은 함께 본다. 코드·시험 주석에 근거 절 번호를 남긴다.
 4. **구현·시험** — 관련 S1(`./cims-verify run --items S1-UNIT-CSP,S1-UNIT-CMP,S1-UNIT-CSC,S1-UNIT-PSIP,S1-CPP-FORMAT,S1-PY-SYNTAX` 중 해당분 ·
    SDK `cimsue_test` · Android 단위). 고친 절차마다 단위시험을 더한다(이름·주석에 절 번호).
-5. **실측** — 서버 WP 는 .48 에 배포하고(배포 id = oam 1 · oam-svc 2 · csc 3 · cmp 4 · cmdp 5 · csp 6) `cimsue-cli` 두 대·계측기 동봉 시나리오·`tests/cmp_smoke_*.py`
+5. **실측** — 서버 WP 는 .48 에 배포하고(배포 id = oam 1 · oam-svc 2 · csc 3 · cmp 4 · cmdp 5 · csp 6 — `OAM_URL=https://121.161.164.48:4419`
+   `OAM_LOGIN=admin` `OAM_PASSWORD=1234`, 시험 서버라 기록 허가) `cimsue-cli` 두 대·계측기 동봉 시나리오·`tests/cmp_smoke_*.py`
    로 그 절차를 확인한다. 배포 전후로 dev_share 에 알린다(§7). 단말 WP 는 .48 을 겨눈 `cimsue-cli`(사내 단말은 라이브 반영 때 — §8).
 6. **문서** — 정본 문서(mcptt_standard_conformance.md · mcdata_messaging.md · mcvideo.md · 모듈 문서·API 문서)를 고치고, 갭 목록에서 행을 지우고 §1 요약 수를 맞춘다.
    목록 §5 «문서 정정» 에 그 항목이 있으면 그 줄도 처리한다.
@@ -116,7 +117,7 @@
 
 | WP | 이름 | 항목 | 급 | 세션 | 선행 | 결정 | 짝 | 상태 |
 |---|---|---|---|---|---|---|---|---|
-| **C01** | MCPTT 설정·그룹 문서 값 | CMS-4 · GMS-7 · GMS-13 · GMS-11 · CMS-7 · CMS-6 · CMS-8 · GMS-12 · GMS-18 · GCC-10 | A4 · B3 · C3 | 1 | — | D2 | S01 · W01(GMS-11·GMS-18 폼) | 대기 |
+| **C01** | MCPTT 설정·그룹 문서 값 | CMS-4 · GMS-7 · GMS-13 · GMS-11 · CMS-7 · CMS-6 · CMS-8 · GMS-12 · GMS-18 · GCC-10 | A4 · B3 · C3 | 1 | — | D2 | S01 · W01(GMS-11·GMS-18 폼) | 완료 (커밋 메시지 «C01») |
 | **C02** | MCData·MCVideo 문서 값·선호 코덱 검증 | MCData GRP-1 · GRP-2 · GRP-3 / VCMS-3 · VCMS-5 · VGMS-3 · VSDP-1 | B3 · C1 · D3 | 1 | — | D7 | U09(VGU-4 — 단말 offer 가 그룹 선호를 따름) | 대기 |
 | **C03** | user profile·service config 인가 요소(+SDK «없음 = false») | CMS-3 · ADH-1 / VCMS-2 | A1 · B1 · C1 | 1 | — | — | S10 · S11 · W01 | 대기 |
 | **C04** | XCAP 주소·문서 이름(양쪽 수용) | GMS-1 · GMS-6 · CMS-1 · CMS-2 · CMS-9 · CMS-11 · CMS-12 / VCMS-4 · VCMS-6 | B5 · C2 · D2 | 1 | — | — | S19(NOTIFY `sel`) · U07 | 대기 |

@@ -33,13 +33,15 @@
     <mcpttgi:mcdata-on-network-max-data-size-for-SDS>10000</mcpttgi:mcdata-on-network-max-data-size-for-SDS>
     <mcpttgi:mcdata-on-network-max-data-size-auto-recv>1048576</mcpttgi:mcdata-on-network-max-data-size-auto-recv>
     <mcpttgi:on-network-invite-members>true</mcpttgi:on-network-invite-members>
-    <mcpttgi:on-network-max-participant-count>10</mcpttgi:on-network-max-participant-count>
+    <mcpttgi:preferred-voice-encodings><mcpttgi:encoding name="AMR-WB"/></mcpttgi:preferred-voice-encodings>
     <mcpttgi:on-network-require-affiliation>true</mcpttgi:on-network-require-affiliation>
     <mcpttgi:on-network-hang-timer>PT30S</mcpttgi:on-network-hang-timer>
     <mcpttgi:on-network-maximum-duration>PT3600S</mcpttgi:on-network-maximum-duration>
     <mcpttgi:on-network-minimum-number-to-start>0</mcpttgi:on-network-minimum-number-to-start>
     <mcpttgi:on-network-timeout-for-acknowledgement-of-required-members>PT5S</mcpttgi:on-network-timeout-for-acknowledgement-of-required-members>
     <mcpttgi:on-network-action-upon-expiration-of-timeout-for-acknowledgement-of-required-members>abandon</mcpttgi:on-network-action-upon-expiration-of-timeout-for-acknowledgement-of-required-members>
+    <mcpttgi:protect-media>false</mcpttgi:protect-media>
+    <mcpttgi:protect-floor-control-signalling>false</mcpttgi:protect-floor-control-signalling>
     <mcpttgi:on-network-require-talker-id>false</mcpttgi:on-network-require-talker-id>
     <mcpttgi:on-network-group-priority>5</mcpttgi:on-network-group-priority>
     <mcpttgi:on-network-encryption>false</mcpttgi:on-network-encryption>
@@ -51,6 +53,7 @@
         <cp:actions>
           <allow-initiate-conference>true</allow-initiate-conference>
           <join-handling>true</join-handling>
+          <mcpttgi:on-network-allow-getting-member-list>true</mcpttgi:on-network-allow-getting-member-list>
           <mcpttgi:allow-MCPTT-emergency-call>true</mcpttgi:allow-MCPTT-emergency-call>
           <mcpttgi:allow-imminent-peril-call>true</mcpttgi:allow-imminent-peril-call>
           <mcpttgi:allow-MCPTT-emergency-alert>true</mcpttgi:allow-MCPTT-emergency-alert>

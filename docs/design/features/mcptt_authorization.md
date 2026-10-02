@@ -85,7 +85,7 @@ CSP 는 SIP 경로에서 같은 역할 행을 인메모리로 든다(`CCspRoleMa
 
 - **`authz_manage` 는 위임되지 않는다.** 내장 `admin`·`manager` 에만 있고, 커스텀(한정 범위) 역할에는 켤 수 없다. 관제 앱에는
   역할·배정 API 가 없다. 그러므로 관리 범위(`directory_write`)가 있는 관제사도 감청·청취 권한을 만들거나 넓힐 수 없다.
-- **청취 자격은 배정의 결과다.** `ptt_user_profile.allow_ambient_listening`(TS 24.484)은 `ptt_listen≠none` 역할에 배정될 때
+- **청취 자격은 배정의 결과다.** `ptt_user_profile.allow_ambient_listening`(user profile 의 CIMS 확장 `<cims:allow-ambient-listening>`)은 `ptt_listen≠none` 역할에 배정될 때
   CSC 가 켜고 해제 시 끈다. 관제 앱 `PUT …/ptt/profile` 은 이 값의 변경을 400 `not_editable` 로 거절한다(현재값과 같은 값은
   무시 — 구 앱 호환; **구현 반영**, `dispatch_directory.py` `_LOCKED_PROFILE_KEYS`). 콘솔 프로파일 편집(manager)은 역할 모델
   도입 시 표시만으로 바뀐다. CSP 는 규격 자리(프로파일)에서 자격을 읽는다.
@@ -264,7 +264,9 @@ GMC→GMS **XCAP Ut PUT/DELETE** 다. 관제사는 콘솔 계정이 아니라 PT
 - 전화 그룹 멤버십([dispatch_center.md §3.1](dispatch_center.md)) = 유선 전화 기능(대표번호·픽업·BLF). 권한이 아니다.
 - `ptt_group_members.role` (chair/participant) = **통화 중 floor 권한** (TS 24.380) — 별개. 한 가입자가 관제 감독(권한) + 어떤 그룹의
   `chair`(발언통제)일 수 있음.
-- TS 24.484 프로파일 `allow-*` = 가입자 개인 자격. `allow_ambient_listening` 만 역할 배정에 종속(§2.4), 나머지는 관리 범위 편집 대상.
+- TS 24.484 프로파일 `allow-*` = 가입자 개인 자격. `allow_ambient_listening`(CIMS 확장) 만 역할 배정에 종속(§2.4), 나머지는 관리 범위 편집 대상.
+- 역할 배정은 user profile 의 N6(`<MaxSimultaneousCallsN6>`)도 정한다 — 배정이 있는 사람 = «관제»(`mcptt_service_config.max_calls_n6_dispatch`,
+  기본 10), 없으면 `max_calls_n6`(기본 5). CSC 문서와 CSP 집행이 같은 배정을 읽는다([mcptt_standard_conformance.md](mcptt_standard_conformance.md) CMS).
 
 ## 9. 미결/후속
 - **신원 통합(후속)**: 콘솔 `manager/operator/monitor` 계정을 IdMS 사용자(`users`, 전화 가입 없는 person)로 옮기고 콘솔 로그인을

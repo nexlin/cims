@@ -37,7 +37,7 @@ XCAP(RFC 4825) 리소스 기반 — TS 24.481 Ut. 인증 = `Authorization: Beare
 |---|---|---|---|
 | GET  | `/org.openmobilealliance.groups/users/{xui}` | 본인 트리 | JSON 배열 — 멤버인 그룹 + **소유(`authorized_user_id`) 그룹**(비멤버라도). 항목 `{uri, display_name, etag, member_count, is_owner}` — `is_owner` = 편집·삭제 가능 |
 | GET  | `…/users/{xui}/{group_uri}` | 멤버 또는 소유자 | `application/vnd.oma.poc.groups+xml` + `ETag`; `If-None-Match` → 304 |
-| PUT  | `…/users/{xui}/{group_uri}` | **신규** = 프로파일 `allow_create_group`(OAM 부여, 프로비저닝 `ptt.allowCreateGroup`) **또는** 역할 관리 범위(`ptt_group_manage=scope|all`, mcptt_authorization.md §4.1) · **기존** = 소유자 또는 관리 범위 안 그룹(`org_code` 범위 — 소유권은 유지, [dispatch_center.md §3.4](../design/features/dispatch_center.md)) | 201(신규)/200(갱신) + 문서 + `ETag`. 403 `group_creation_not_allowed` / `not_group_owner`(소유자 없는 콘솔 그룹 포함), 409 `uri_taken`(타인 소유 id — 다른 id 로), 400 `invalid_group_id`·`reserved_prefix`·`invalid_group_document`·`unknown_member`, 412 `etag_mismatch`(`If-Match` 사용 시) |
+| PUT  | `…/users/{xui}/{group_uri}` | **신규** = 프로파일 `allow_create_group`(OAM 부여, 프로비저닝 `ptt.allowCreateGroup`) **또는** 역할 관리 범위(`ptt_group_manage=scope|all`, mcptt_authorization.md §4.1) · **기존** = 소유자 또는 관리 범위 안 그룹(`org_code` 범위 — 소유권은 유지, [dispatch_center.md §3.4](../design/features/dispatch_center.md)) | 201(신규)/200(갱신) + 문서 + `ETag`. 403 `group_creation_not_allowed` / `not_group_owner`(소유자 없는 콘솔 그룹 포함), 409 `uri_taken`(타인 소유 id — 다른 id 로), 400 `invalid_group_id`·`reserved_prefix`·`invalid_group_document`·`unknown_member`·`required_exceeds_max_members`(필수 멤버 > 정원, TS 24.379 §6.3.5.5 NOTE 4), 412 `etag_mismatch`(`If-Match` 사용 시) |
 | DELETE | `…/users/{xui}/{group_uri}` | 소유자 또는 관리 범위 안 그룹 | 200. 403 `not_group_owner`, 404 |
 
 - **신규 그룹 식별자는 클라이언트가 정한다**(XCAP 관습): `g-` + 소문자 hex 8자리(`tel:g-0a1b2c3d`). `adhoc-`/`priv-` 는
@@ -62,8 +62,13 @@ XCAP(RFC 4825) 리소스 기반 — TS 24.481 Ut. 인증 = `Authorization: Beare
   `<mcpttgi:on-network-minimum-number-to-start>`(0~65535, 기본 0) · `<mcpttgi:on-network-timeout-for-acknowledgement-of-required-members>`
   (TNG1, xs:duration 1~300초, 기본 5초) · `<mcpttgi:on-network-action-upon-expiration-of-timeout-for-acknowledgement-of-required-members>`
   (`proceed`·`abandon`, 정의 밖 값 = abandon, 기본 abandon) — GET 은 셋을 늘 싣는다. 필수 멤버 = entry 의 `<mcpttgi:on-network-required/>`
-  (§7.2.4.2 — **필수 멤버에만** 싣고, PUT 의 `<list>` 교체도 이 표시를 그대로 읽는다. 정원보다 많으면 400). GET 은 `<session-type>`(prearranged/chat)을 단말이 invite-members 로
-  그룹 종류를 읽게 될 때까지 함께 싣는다.
+  (§7.2.4.2 — **필수 멤버에만** 싣고, PUT 의 `<list>` 교체도 이 표시를 그대로 읽는다. 정원보다 많으면 400).
+  정원 `<mcpttgi:on-network-max-participant-count>` — GET 은 0(무제한)이면 싣지 않는다. 우선순위 `<mcpttgi:on-network-group-priority>`·
+  entry `<mcpttgi:user-priority>` = priorityType 0~255(§7.2.4.2, 클수록 높다) — 범위 밖·정수 아님은 400. `<mcpttgi:on-network-disabled/>`
+  (§7.2.2 g)) = on-network 를 끈 그룹 — GET 은 꺼진 그룹에만 싣고, PUT 은 요소가 있으면 끈다(없으면 그대로).
+  GET 은 서버가 정하는 값을 더 싣는다 — `<mcpttgi:preferred-voice-encodings>`(서비스 코덱 AMR-WB, TS 24.379 §6.2.1 2)b) 단말 offer 가 따른다) ·
+  `<mcpttgi:protect-media>`·`<mcpttgi:protect-floor-control-signalling>` false(없으면 GMK 필수로 읽힌다, §7.2.8 — E2E 미구현) · 규칙
+  actions `<mcpttgi:on-network-allow-getting-member-list>true`(멤버의 명단 열람, §7.2.12.1). PUT 은 이 셋을 읽지 않는다.
   `<mcpttgi:authorized-user>` 는 서버가 정한다(본문의 값 무시). floor 정책(`floor_policy`/`max_talkers`)은 관리 API 전용.
   entry 의 `<mcpttgi:participant-type>` 를 생략하면 **`participant` 로 저장**된다 — 그룹 소유(chair 권한)는 member role 이
   아니라 `authorized_user_id`(= 생성자)로 판정하므로, 생성자를 chair 로 표기하려면 자기 entry 에 `chair` 를 명시한다(앱 기본 동작).
@@ -91,20 +96,23 @@ XCAP(RFC 4825) 리소스 기반 — TS 24.481 Ut. 인증 = `Authorization: Beare
         <mcpttgi:user-priority>5</mcpttgi:user-priority>
       </entry>
     </list>
-    <mcpttgi:session-type>prearranged</mcpttgi:session-type>
     <mcpttgi:mcdata-allow-short-data-service>true</mcpttgi:mcdata-allow-short-data-service>
     <mcpttgi:mcdata-allow-file-distribution>false</mcpttgi:mcdata-allow-file-distribution>
     <mcpttgi:on-network-invite-members>true</mcpttgi:on-network-invite-members>
     <mcpttgi:on-network-max-participant-count>10</mcpttgi:on-network-max-participant-count>
+    <mcpttgi:preferred-voice-encodings><mcpttgi:encoding name="AMR-WB"/></mcpttgi:preferred-voice-encodings>
     <mcpttgi:on-network-require-affiliation>true</mcpttgi:on-network-require-affiliation>
     <mcpttgi:on-network-hang-timer>PT30S</mcpttgi:on-network-hang-timer>
     <mcpttgi:on-network-maximum-duration>PT3600S</mcpttgi:on-network-maximum-duration>
     <mcpttgi:on-network-minimum-number-to-start>0</mcpttgi:on-network-minimum-number-to-start>
     <mcpttgi:on-network-timeout-for-acknowledgement-of-required-members>PT5S</mcpttgi:on-network-timeout-for-acknowledgement-of-required-members>
     <mcpttgi:on-network-action-upon-expiration-of-timeout-for-acknowledgement-of-required-members>abandon</mcpttgi:on-network-action-upon-expiration-of-timeout-for-acknowledgement-of-required-members>
+    <mcpttgi:protect-media>false</mcpttgi:protect-media>
+    <mcpttgi:protect-floor-control-signalling>false</mcpttgi:protect-floor-control-signalling>
     <mcpttgi:on-network-group-priority>5</mcpttgi:on-network-group-priority>
     <mcpttgi:on-network-encryption>false</mcpttgi:on-network-encryption>
     <cp:ruleset><cp:rule id="a7c"><cp:actions>
+      <mcpttgi:on-network-allow-getting-member-list>true</mcpttgi:on-network-allow-getting-member-list>
       <mcpttgi:allow-MCPTT-emergency-call>false</mcpttgi:allow-MCPTT-emergency-call>
       <mcpttgi:allow-MCPTT-emergency-alert>true</mcpttgi:allow-MCPTT-emergency-alert>
       <mcpttgi:on-network-allow-conference-state>true</mcpttgi:on-network-allow-conference-state>
@@ -127,8 +135,8 @@ MCPTT 설정 문서 (TS 24.484). ue-init-config 만 **익명 GET**(로그인 전
 | Method | Path | 인증 |
 |---|---|---|
 | GET  | `/org.3gpp.mcptt.ue-init-config/users/{instance}/{doc}` | 없음 (익명) |
-| GET  | `/org.3gpp.mcptt.user-profile/users/{user}/user-profile` | Bearer + 본인 + scope `ptt_config_management_service`. TS 24.484 §8.3.2 문서 — `<OnNetwork><MCPTTGroupInfo>` = 소속 그룹 목록(규격 단말의 그룹 소스), `<PrivateCallList>` = 동료 연락처, 긴급 대상·`cp:ruleset` 인가. ETag 내용 파생 |
-| GET  | `/org.3gpp.mcptt.service-config/users/{user}/service-config` | Bearer + 본인 |
+| GET  | `/org.3gpp.mcptt.user-profile/users/{user}/user-profile` | Bearer + 본인 + scope `ptt_config_management_service`. TS 24.484 §8.3.2 문서 — `<OnNetwork><MCPTTGroupInfo>` = 소속 그룹 목록(규격 단말의 그룹 소스, 없어도 빈 요소), `<PrivateCallList>` = 동료 연락처, 긴급 대상·`cp:ruleset` 인가, `<MaxSimultaneousCallsN6>` = 관제(역할 배정) 10 / 그 밖 5(콘솔 MCPTT 정책). 모든 `<entry>` 에 `index`. ETag 내용 파생 |
+| GET  | `/org.3gpp.mcptt.service-config/users/{user}/service-config` | Bearer + 본인. 전역 문서 — `<signalling-protection>` false/false(없으면 단말이 mcptt-info 를 암호화한다, TS 24.484 §8.4.2.6) · floor 타이머 · Resource-Priority |
 | GET  | `/org.3gpp.mcvideo.user-profile/users/{user}/mcvideo-user-profile-<n>.xml` | Bearer + 본인 + scope `video_config_management_service`. TS 24.484 §9.3 MCVideo user profile — MCVideo 이용 자격(`mcvideo_user_profile` 행)이 없으면 404. `<MCVideoGroupInfo>` = 멤버인 MCVideo 그룹, `<MaxSimultaneousVideoStreams>` = 수신 상한([mcvideo.md](../design/features/mcvideo.md) §5.1) |
 | GET  | `/org.3gpp.mcvideo.service-config/global/mcvideo-service-config.xml` | Bearer + scope `video_config_management_service`. **전역 문서**(TS 24.484 §9.4.2.9) — `<signalling-protection>` false · Resource-Priority · `<tc-timers-counters-R14>`(CSC 설정 `McVideoServiceConfig.*`) |
 
@@ -143,14 +151,18 @@ user-profile 의 인가 `<cp:ruleset><cp:rule id="mcptt-user-authorisation"><cp:
 <allow-cancel-imminent-peril>true</allow-cancel-imminent-peril>        <!-- allow_cancel_imminent_peril -->
 <allow-activate-emergency-alert>true</allow-activate-emergency-alert>  <!-- allow_emergency_alert ∧ 긴급 대상 결정 가능 -->
 <allow-cancel-emergency-alert>true</allow-cancel-emergency-alert>      <!-- allow_cancel_emergency_alert -->
-<allow-ambient-listening>false</allow-ambient-listening>                <!-- allow_ambient_listening -->
 <anyExt>
   <allow-to-receive-non-acknowledged-users-information>false</allow-to-receive-non-acknowledged-users-information>  <!-- L) allow_non_ack_users_info -->
   <allow-adhoc-group-call>true</allow-adhoc-group-call>                                                              <!-- R) allow_adhoc_call -->
 </anyExt>
 <cims:allow-adhoc-group-call>true</cims:allow-adhoc-group-call>   <!-- 전환기 별칭 -->
 <cims:allow-create-group>false</cims:allow-create-group>          <!-- CIMS 확장 — GMS 그룹 생성 자격 -->
+<cims:allow-ambient-listening>false</cims:allow-ambient-listening>  <!-- CIMS 확장 — PTT 그룹 호 청취 자격 allow_ambient_listening -->
 ```
+
+`<cims:allow-ambient-listening>` 은 비멤버 관제사의 PTT 그룹 호 recvonly 합류 자격(역할 배정의 결과, [dispatch_center.md](../design/features/dispatch_center.md) §5.6)이다 —
+규격 ambient listening(원격·로컬 개시 1:1 호 — anyExt `<allow-request-remote-/locally-initiated-ambient-listening>`, TS 24.484 §8.3.2.1 11)xxxviii)C)·D))과
+다른 것이라 CIMS 이름공간에 싣는다.
 
 `allow-to-receive-non-acknowledged-users-information`(표 8.3.2.7-49, 부재 = false) 가 true 면 이 사용자가 개시한 그룹 호에서 확인 통화
 설정이 필수 멤버 없이 진행될 때 controlling MCPTT function 이 응답하지 않은 멤버 목록을 SIP INFO 로 보낸다(TS 24.379 §6.3.3.3).

@@ -1422,18 +1422,8 @@
     {
       "key": "user_profile",
       "title": "MCPTT 사용자 프로파일 문서 (user-profile) 규격 파라미터값",
-      "description": "TS 24.484 §8.3.2 사용자 프로파일 문서의 상수 요소. 그룹 목록·연락처·긴급 대상·인가는 DB(그룹 멤버십·ptt_user_profile·mcptt_service_config)에서 유도되므로 여기 없다. 값이 바뀌면 문서 ETag 도 바뀌어 단말이 새 문서를 받는다.",
+      "description": "TS 24.484 §8.3.2 사용자 프로파일 문서의 상수 요소. 그룹 목록·연락처·긴급 대상·인가·N2·N6(동시 그룹 호 상한 — 관제/그 밖 두 값, 콘솔 MCPTT 정책)는 DB(그룹 멤버십·ptt_user_profile·mcptt_service_config·역할 배정)에서 유도되므로 여기 없다. 값이 바뀌면 문서 ETag 도 바뀌어 단말이 새 문서를 받는다.",
       "fields": [
-        {
-          "key": "UserProfile.MaxSimultaneousCallsN6",
-          "label": "동시 그룹콜 상한 (MaxSimultaneousCallsN6)",
-          "type": "int",
-          "default": 1,
-          "min": 1,
-          "max": 255,
-          "restart": false,
-          "reload_hint": "SIGUSR1 로 재로드 — 다음 GET 부터 새 문서·ETag."
-        },
         {
           "key": "UserProfile.MaxSimultaneousTransmissionsN7",
           "label": "동시 송신 상한 (MaxSimultaneousTransmissionsN7)",

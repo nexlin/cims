@@ -9,12 +9,16 @@ import { Input } from '@core/components/ui/input'
 
 // ── MCPTT 정책 (TS 24.484 §8.4 service-config) ──────────────────────────────
 //  시스템 전역 서비스 설정 1건. 인가(1:1·긴급·경보·그룹 생성)는 이 문서에 없다 — 가입자 화면의 user-profile(사람별)과
-//  PTT 그룹 편집(그룹 능력)이 정본이다. 여기 값은 N2 기본값과 broadcast-group 계층 수이고, floor 타이머·
+//  PTT 그룹 편집(그룹 능력)이 정본이다. 여기 값은 N2 기본값·N6 두 값(관제/그 밖)과 broadcast-group 계층 수이고, floor 타이머·
 //  Resource-Priority 는 CSC 배포 설정(ServiceConfig.*)이다.
 
 const NUMBERS: { key: keyof McpttServiceConfig; label: string; tag: string; min: number; max: number; desc: string }[] = [
   { key: 'max_affiliations_n2', label: '동시 제휴 상한(N2)', tag: 'user-profile MaxAffiliationsN2', min: 1, max: 1000,
     desc: '한 사용자가 동시에 제휴(편성)할 수 있는 채널 수 — 각 가입자 user-profile 에 실린다. 집행은 서버가 하고, 단말은 초과를 로그로만 남긴다.' },
+  { key: 'max_calls_n6', label: '동시 그룹 호 상한(N6)', tag: 'user-profile MaxSimultaneousCallsN6', min: 1, max: 255,
+    desc: '한 사용자가 동시에 받는 그룹 호 수 — 관제 역할이 없는 사용자의 값. 넘는 개시·합류는 서버가 486(Warning 103)으로 거절한다.' },
+  { key: 'max_calls_n6_dispatch', label: '동시 그룹 호 상한(N6) — 관제', tag: 'user-profile MaxSimultaneousCallsN6', min: 1, max: 255,
+    desc: '역할이 배정된 사용자(관제사)의 값. 판정은 역할 배정 하나다 — 배정·해제하면 그 사람의 PTT 회선 문서가 바로 바뀐다.' },
   { key: 'num_levels_group_hierarchy', label: '그룹 계층 깊이', tag: 'common/broadcast-group/num-levels-group-hierarchy', min: 1, max: 10,
     desc: '브로드캐스트 그룹 계층 최대 깊이.' },
   { key: 'num_levels_user_hierarchy', label: '사용자 계층 깊이', tag: 'common/broadcast-group/num-levels-user-hierarchy', min: 1, max: 10,

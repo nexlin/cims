@@ -34,7 +34,8 @@ from services.mcptt import (notify_csp, refresh_group_members, refresh_login_acc
                             get_service_config_xml, GROUP_TYPES, GROUP_HANG_TIMER_DEFAULT,
                             GROUP_HANG_TIMER_MAX, GROUP_MAX_DURATION_DEFAULT, GROUP_MAX_DURATION_MAX,
                             GROUP_MIN_TO_START_MAX, GROUP_ACK_TIMEOUT_DEFAULT, GROUP_ACK_TIMEOUT_MAX,
-                            GROUP_ACK_ACTIONS, norm_ack_action)
+                            GROUP_ACK_ACTIONS, norm_ack_action, PRIORITY_TYPE_MAX, service_config_opt_cols,
+                            SERVICE_CONFIG_OPT_COLS)
 from handlers import dispatch as _dispatch  # 전화 그룹 파생(pickup_group 409 게이트)
 from services import admin_auth
 from services.auc import auc as _auc
@@ -1351,6 +1352,9 @@ _SVC_CFG_BASE = '/api/v1/mcptt/service-config'
 
 #  숫자 항목의 수용 범위 — 규격이 상한을 정하지 않으므로 운영상 무의미한 값만 걸러낸다.
 _SVC_CFG_INTS = {'max_affiliations_n2': (1, 1000),
+                 # N6(<MaxSimultaneousCallsN6>, xs:positiveInteger) — 관제(역할 배정)·그 밖 두 값. 선택 열(migrate_mcptt_n6.sql).
+                 'max_calls_n6': (1, 255),
+                 'max_calls_n6_dispatch': (1, 255),
                  'num_levels_group_hierarchy': (1, 10),
                  'num_levels_user_hierarchy': (1, 10)}
 
@@ -1358,7 +1362,8 @@ _SVC_CFG_INTS = {'max_affiliations_n2': (1, 1000),
 async def handle_mcptt_service_config(handler_args: HandlerArgs, kwargs: dict) -> HandlerResult:
     """GET/PUT /api/v1/mcptt/service-config — **시스템 전역** MCPTT 서비스 설정 1건(단일 행 id=1).
 
-    값 = N2(user-profile MaxAffiliationsN2 기본값)·broadcast-group 계층 수(TS 24.484 §8.4.2.1). 인가(1:1·긴급·경보·
+    값 = N2(user-profile MaxAffiliationsN2 기본값)·N6 두 값(user-profile MaxSimultaneousCallsN6 — 관제 = 역할 배정 사용자 /
+    그 밖, CSP 가 같은 판정으로 486 + 103 집행)·broadcast-group 계층 수(TS 24.484 §8.4.2.1). 인가(1:1·긴급·경보·
     그룹 생성)는 여기가 아니라 /users/:pid/ptt/:msisdn/profile(user-profile ruleset)·그룹 문서다 — service-config
     문서(§8.4)에는 인가 요소가 없다. floor 타이머·Resource-Priority 는 CSC 설정 ServiceConfig.* 이다.
     """
@@ -1381,12 +1386,14 @@ async def handle_mcptt_service_config(handler_args: HandlerArgs, kwargs: dict) -
 
 
 async def _get_mcptt_service_config(config):
-    """현재 값 — DB 행이 없으면(마이그레이션 전) 코드 기본값을 exists=false 로 돌려준다."""
-    cols = list(_SVC_CFG_INTS)
-    row = None
+    """현재 값 — DB 행이 없으면(마이그레이션 전) 코드 기본값을 exists=false 로 돌려준다. 선택 열(N6)이 없으면 그 값은 코드 기본값."""
+    opt = set(SERVICE_CONFIG_OPT_COLS)
+    row, have = None, ()
     try:
         with _get_db(config) as conn:
             with conn.cursor() as cur:
+                have = service_config_opt_cols(cur)
+                cols = [k for k in _SVC_CFG_INTS if k not in opt or k in have]
                 cur.execute(f"SELECT {', '.join(cols)}, update_time "
                             "FROM mcptt_service_config WHERE id=1")
                 row = cur.fetchone()
@@ -1394,11 +1401,11 @@ async def _get_mcptt_service_config(config):
         logger.log_info(f"[ADMIN] mcptt_service_config 조회 실패(마이그레이션 전?): {e}")
 
     if row:
-        cfg = {k: int(row[k]) for k in _SVC_CFG_INTS}
+        cfg = {k: int(row[k]) if k in row else SERVICE_CONFIG_DEFAULTS[k] for k in _SVC_CFG_INTS}
         cfg['update_time'] = _dt(row['update_time'])
         cfg['exists'] = True
     else:
-        cfg = dict(SERVICE_CONFIG_DEFAULTS)
+        cfg = {k: SERVICE_CONFIG_DEFAULTS[k] for k in _SVC_CFG_INTS}
         cfg['update_time'] = None
         cfg['exists'] = False
     return HandlerResult(status=200, body=cfg)
@@ -1421,11 +1428,18 @@ async def _put_mcptt_service_config(body, config):
             return HandlerResult(status=400, body={'error': f'{k}: {lo}~{hi} 범위를 벗어났습니다'})
         new_cfg[k] = val
 
-    cols = list(_SVC_CFG_INTS)
-    vals = [new_cfg[k] for k in _SVC_CFG_INTS]
-    upd = ', '.join(f"{c}=VALUES({c})" for c in cols)
     with _get_db(config) as conn:
         with conn.cursor() as cur:
+            # 선택 열이 없는 DB — 그 값을 바꾸려 하면 400(마이그레이션 안내), 바꾸지 않으면 있는 열만 쓴다.
+            have = service_config_opt_cols(cur)
+            missing = [k for k in SERVICE_CONFIG_OPT_COLS if k not in have]
+            changed = [k for k in missing if k in body and new_cfg[k] != cur_cfg.get(k, SERVICE_CONFIG_DEFAULTS[k])]
+            if changed:
+                return HandlerResult(status=400, body={'error': f"{', '.join(changed)}: DB 열이 없습니다 — "
+                                                                "sql/migrate_mcptt_n6.sql 적용 뒤 바꿀 수 있습니다"})
+            cols = [k for k in _SVC_CFG_INTS if k not in missing]
+            vals = [new_cfg[k] for k in cols]
+            upd = ', '.join(f"{c}=VALUES({c})" for c in cols)
             cur.execute(
                 f"INSERT INTO mcptt_service_config (id, {', '.join(cols)}, update_time) "
                 f"VALUES (1, {', '.join(['%s'] * len(cols))}, NOW()) "
@@ -1599,6 +1613,21 @@ def _check_required_members(members, max_members):
     n_req = sum(1 for m in (members or []) if m.get('required'))
     if max_members and n_req > int(max_members):
         return f'required members ({n_req}) exceed max_members ({max_members})'
+    return None
+
+
+def _check_priorities(body: dict):
+    """그룹 우선순위(priority)·멤버 우선순위(members[].priority) = mcpttgi:priorityType 0..255(TS 24.481 §7.2.4.2) — 준 값만 본다."""
+    vals = [('priority', body['priority'])] if 'priority' in body else []
+    vals += [(f"members[{m.get('user_id', m.get('id', ''))}].priority", m['priority'])
+             for m in (body.get('members') or []) if isinstance(m, dict) and 'priority' in m]
+    for name, v in vals:
+        try:
+            ok = 0 <= int(v) <= PRIORITY_TYPE_MAX
+        except (TypeError, ValueError):
+            ok = False
+        if not ok:
+            return f'{name}: 0~{PRIORITY_TYPE_MAX} 범위의 정수여야 합니다 (TS 24.481 priorityType)'
     return None
 
 
@@ -1835,7 +1864,7 @@ async def _create_group(body, config, payload=None):
                                       'ack_action': 'abandon'})
     if err:
         return HandlerResult(status=400, body={'error': err})
-    err = _check_required_members(members, max_members)
+    err = _check_required_members(members, max_members) or _check_priorities(body)
     if err:
         return HandlerResult(status=400, body={'error': err})
     # MCVideo 서비스 — 없거나 null = MCVideo 그룹 아님, 객체 = MCVideo 그룹(속성, 빠진 키는 기본값) (mcvideo.md §5.1)
@@ -1909,6 +1938,9 @@ async def _update_group(group_id: str, body, config, payload=None):
     # MCVideo 서비스 — 키 없음 = 그대로 · null = 끔(속성 행 삭제) · 객체 = 켬/갱신(준 키만). 쓰기 전에 검사한다(autocommit — 부분 반영 방지).
     mcvideo_given = 'mcvideo' in body
     mcvideo_attrs, err = _mcvideo.api_group_attrs(body.get('mcvideo')) if mcvideo_given else (None, None)
+    if err:
+        return HandlerResult(status=400, body={'error': err})
+    err = _check_priorities(body)
     if err:
         return HandlerResult(status=400, body={'error': err})
 
@@ -2051,6 +2083,9 @@ async def _add_member(group_id: str, body, config):
     user_id  = body.get('user_id', '').strip()
     if not user_id:
         return HandlerResult(status=400, body={'error': 'user_id is required'})
+    err = _check_priorities({'priority': body['priority']} if 'priority' in body else {})
+    if err:
+        return HandlerResult(status=400, body={'error': err})
     priority = int(body.get('priority', 0))
     role = body.get('role', 'participant')
     if role not in ('chair', 'participant'):
@@ -2185,7 +2220,7 @@ _GROUP_FIELDS = [
     {'name': 'org_code', 'type': 'string', 'desc': '소속 조직 코드'},
     {'name': 'group_type', 'type': 'string', 'enum': ['prearranged', 'chat'],
      'desc': '그룹 종류 — 그룹 문서 on-network-invite-members (prearranged=true, chat=false). 일제 통화는 그룹 종류가 아니라 호 속성'},
-    {'name': 'priority', 'type': 'integer', 'desc': '그룹 우선순위'},
+    {'name': 'priority', 'type': 'integer', 'desc': '그룹 우선순위 <on-network-group-priority> — 0~255, 클수록 높다(TS 24.481 priorityType)'},
     {'name': 'encryption', 'type': 'boolean', 'desc': '암호화 사용'},
     {'name': 'emergency_call', 'type': 'boolean', 'desc': '긴급 통화 허용'},
     {'name': 'emergency_alert', 'type': 'boolean', 'desc': '긴급 알림 허용'},
@@ -2240,6 +2275,11 @@ _GROUP_EXAMPLE = {
 
 _SVC_CFG_FIELDS = [
     {'name': 'max_affiliations_n2', 'type': 'integer', 'desc': 'N2 — 동시 제휴(편성) 채널 상한, user-profile MaxAffiliationsN2 의 기본값 (1~1000)'},
+    {'name': 'max_calls_n6', 'type': 'integer',
+     'desc': 'N6 — 동시 그룹 호 상한(관제가 아닌 사용자), user-profile MaxSimultaneousCallsN6 (1~255, 기본 5). '
+             '열이 없는 DB(sql/migrate_mcptt_n6.sql 전)는 기본값을 돌려주고 변경은 400'},
+    {'name': 'max_calls_n6_dispatch', 'type': 'integer',
+     'desc': 'N6 — 관제(역할 배정 사용자)의 동시 그룹 호 상한 (1~255, 기본 10). CSP 가 같은 판정으로 486 103 을 집행한다'},
     {'name': 'num_levels_group_hierarchy', 'type': 'integer', 'desc': 'common/broadcast-group/num-levels-group-hierarchy (1~10)'},
     {'name': 'num_levels_user_hierarchy', 'type': 'integer', 'desc': 'common/broadcast-group/num-levels-user-hierarchy (1~10)'},
     {'name': 'update_time', 'type': 'string', 'desc': '마지막 변경 시각(ISO) — 행 부재면 null'},
@@ -2247,7 +2287,8 @@ _SVC_CFG_FIELDS = [
 ]
 
 _SVC_CFG_EXAMPLE = {
-    'max_affiliations_n2': 10, 'num_levels_group_hierarchy': 3, 'num_levels_user_hierarchy': 3,
+    'max_affiliations_n2': 10, 'max_calls_n6': 5, 'max_calls_n6_dispatch': 10,
+    'num_levels_group_hierarchy': 3, 'num_levels_user_hierarchy': 3,
     'update_time': '2026-08-19T18:00:00', 'exists': True,
 }
 

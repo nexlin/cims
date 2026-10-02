@@ -254,6 +254,87 @@ class ParseTests(unittest.TestCase):
         self.assertIsNone(d["members"][2]["mcptt_id"])
 
 
+class GroupDocValuesTests(unittest.TestCase):
+    """그룹 문서 값(TS 24.481 §7.2.2·§7.2.8) — C01: GMS-7 보호 false · GMS-11 정원 0 생략 · GMS-12 명단 열람 · GMS-13 escape ·
+    GMS-18 priorityType · GCC-10 선호 음성 코덱 · GCS-19 on-network-disabled."""
+    GID = "tel:g-0000c001"
+    NS = {"poc": "urn:oma:xml:poc:list-service", "gi": "urn:3gpp:ns:mcpttGroupInfo:1.0",
+          "cp": "urn:ietf:params:xml:ns:common-policy", "cims": "urn:cims:groupinfo:1.0"}
+
+    def setUp(self):
+        m.GROUPS[self.GID] = {
+            "display_name": "A&B <팀>", "etag": "e", "priority": 300, "encryption": False, "emergency_call": True,
+            "emergency_alert": True, "allow_conference_state": True, "allow_sds": True, "allow_fd": False,
+            "max_sds_size": 0, "max_auto_recv": 0, "org_code": "R&D", "group_type": "prearranged", "max_members": 0,
+            "require_affiliation": True, "on_network": True, "authorized_user": "",
+            "members": [{"uri": "tel:+82510001001", "name": "홍&길동 <1>", "role": "chair", "priority": -4, "title": "팀장 \"A\""}],
+        }
+
+    def tearDown(self):
+        m.GROUPS.pop(self.GID, None)
+
+    def _ls(self):
+        import xml.etree.ElementTree as ET
+        xml, _ = m.get_group_xml(self.GID)
+        return xml, ET.fromstring(xml.encode()).find("poc:list-service", self.NS)
+
+    def test_names_are_escaped_well_formed(self):
+        xml, ls = self._ls()                                   # fromstring 이 깨지지 않는다 = well-formed (RFC 4825)
+        self.assertEqual(ls.find("poc:display-name", self.NS).text, "A&B <팀>")
+        e = ls.find("poc:list/poc:entry", self.NS)
+        self.assertEqual(e.find("{urn:ietf:params:xml:ns:resource-lists}display-name").text, "홍&길동 <1>")
+        self.assertEqual(e.find("cims:user-title", self.NS).text, '팀장 "A"')
+        self.assertEqual(ls.find("gi:org-code", self.NS).text, "R&D")
+
+    def test_protection_false_and_preferred_voice(self):
+        _, ls = self._ls()
+        # 보호 둘은 없으면 true(GMK 필수) — false 명시(§7.2.8)
+        self.assertEqual(ls.find("gi:protect-media", self.NS).text, "false")
+        self.assertEqual(ls.find("gi:protect-floor-control-signalling", self.NS).text, "false")
+        # 선호 음성 코덱 = 서버 서비스 코덱(TS 24.379 §6.2.1 2)b) — 단말 offer 가 따른다)
+        enc = ls.findall("gi:preferred-voice-encodings/gi:encoding", self.NS)
+        self.assertEqual([x.get("name") for x in enc], [m.SERVICE_VOICE_ENCODING])
+        self.assertEqual(m.SERVICE_VOICE_ENCODING, "AMR-WB")
+
+    def test_unlimited_participants_omits_count(self):
+        _, ls = self._ls()
+        self.assertIsNone(ls.find("gi:on-network-max-participant-count", self.NS), "0 = 무제한 → 요소 생략(10 을 싣지 않는다)")
+        m.GROUPS[self.GID]["max_members"] = 12
+        _, ls = self._ls()
+        self.assertEqual(ls.find("gi:on-network-max-participant-count", self.NS).text, "12")
+
+    def test_member_list_rule_and_priority_clamp(self):
+        _, ls = self._ls()
+        acts = ls.find("cp:ruleset/cp:rule/cp:actions", self.NS)
+        self.assertEqual(acts.find("gi:on-network-allow-getting-member-list", self.NS).text, "true",
+                         "없으면 false — 멤버가 명단을 읽는 규칙(§7.2.12.1)")
+        self.assertEqual(ls.find("gi:on-network-group-priority", self.NS).text, "255", "저장값 300 → priorityType 상한")
+        self.assertEqual(ls.find("poc:list/poc:entry/gi:user-priority", self.NS).text, "0", "저장값 -4 → 하한")
+
+    def test_on_network_disabled_roundtrip(self):
+        _, ls = self._ls()
+        self.assertIsNone(ls.find("gi:on-network-disabled", self.NS))
+        m.GROUPS[self.GID]["on_network"] = False
+        xml, ls = self._ls()
+        self.assertIsNotNone(ls.find("gi:on-network-disabled", self.NS), "§7.2.2 g) — 꺼진 그룹 표시")
+        self.assertIs(m.parse_group_document_xml(xml)["on_network"], False)
+        m.GROUPS[self.GID]["on_network"] = True
+        xml, _ = self._ls()
+        self.assertIsNone(m.parse_group_document_xml(xml)["on_network"], "요소 없음 = 기존값 유지")
+
+    def test_put_rejects_out_of_range_priorities(self):
+        bad_member = _doc("tel:g-00000001", "n", [("tel:+82500000001", "participant", 256)])
+        with self.assertRaises(ValueError):
+            m.parse_group_document_xml(bad_member)
+        bad_group = _doc("tel:g-00000001", "n", [("tel:+82500000001", "participant", 255)],
+                         extra="<mcpttgi:on-network-group-priority>999</mcpttgi:on-network-group-priority>")
+        with self.assertRaises(ValueError):
+            m.parse_group_document_xml(bad_group)
+        ok = m.parse_group_document_xml(_doc("tel:g-00000001", "n", [("tel:+82500000001", "participant", 255)],
+                                             extra="<mcpttgi:on-network-group-priority>0</mcpttgi:on-network-group-priority>"))
+        self.assertEqual((ok["priority"], ok["members"][0]["priority"]), (0, 255))
+
+
 class IdTests(unittest.TestCase):
     def test_validate_new_group_id(self):
         self.assertIsNone(m.validate_new_gms_group_id("g-0a1b2c3d"))
@@ -378,6 +459,8 @@ class _FakeCursor:
             self._rows = [{"id": self.pk}] if self.pk else []
         elif q.startswith("DELETE FROM ptt_groups"):
             self.rowcount = 1 if self.pk else 0
+        elif q.startswith("SELECT g.max_members, (SELECT COUNT(*)"):
+            self._rows = [self.group_row] if getattr(self, "group_row", None) else []
         else:
             self._rows = []
 
@@ -402,6 +485,29 @@ class DbWriteTests(unittest.TestCase):
 
     def tearDown(self):
         m._db_connect, m.sync_group_from_db = self._saved
+
+    def test_required_members_cannot_exceed_max(self):
+        # TS 24.379 §6.3.5.5 NOTE 4 — 정원 < 필수 멤버 수는 GMS 가 거절한다(관리 API 와 같은 규칙, XCAP 경로도)
+        cur = _FakeCursor({"+82500000001", "+82500000002"})
+        m._db_connect = lambda: _FakeConn(cur)
+        req2 = _doc("tel:g-0a1b2c3d", "n", [("tel:+82500000001", "chair", 1), ("tel:+82500000002", "participant", 0)],
+                    extra="<mcpttgi:on-network-max-participant-count>1</mcpttgi:on-network-max-participant-count>")
+        req2 = req2.replace("<mcpttgi:participant-type>", "<mcpttgi:on-network-required/><mcpttgi:participant-type>")
+        st, err = m.gms_write_group("g-0a1b2c3d", m.parse_group_document_xml(req2), 5020, create=True)
+        self.assertEqual((st, err.get("error")), (400, "required_exceeds_max_members"))
+        self.assertFalse(any(q.startswith("INSERT INTO ptt_groups") for q, _ in cur.sql))
+        # 갱신 — 문서가 정원만 줄이면 DB 의 필수 멤버 수로 본다
+        cur = _FakeCursor(set(), existing_pk=9)
+        cur.group_row = {"max_members": 0, "n_req": 3}
+        m._db_connect = lambda: _FakeConn(cur)
+        only_max = m.parse_group_document_xml(
+            '<group xmlns="urn:oma:xml:poc:list-service" xmlns:mcpttgi="urn:3gpp:ns:mcpttGroupInfo:1.0">'
+            '<list-service uri="tel:g-0a1b2c3d"><mcpttgi:on-network-max-participant-count>2</mcpttgi:on-network-max-participant-count>'
+            '</list-service></group>')
+        st, err = m.gms_write_group("g-0a1b2c3d", only_max, 5020, create=False)
+        self.assertEqual(st, 400)
+        cur.group_row = {"max_members": 0, "n_req": 2}
+        self.assertEqual(m.gms_write_group("g-0a1b2c3d", only_max, 5020, create=False), (0, {}))
 
     def test_create_inserts_defaults_owner_and_members(self):
         cur = _FakeCursor({"+82500000001", "+82500000002"})

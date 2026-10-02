@@ -131,15 +131,22 @@ REFRESH_TOKEN_TTL = 7 * 24 * 3600  # 7일
 # S4: service-config (TS 24.484 §8.4) — 시스템 전역 문서 1건. 가입자별 오버라이드는 규격 근거가 없어 두지 않는다.
 #   인가(1:1·긴급·경보·그룹 생성)는 이 문서의 요소가 아니다 — user profile ruleset(§8.3.2.7)·그룹 문서(TS 24.481)가 정본.
 #   값의 SoT 두 곳:
-#     · DB `mcptt_service_config` 단일 행(콘솔 편집) — N2(user-profile MaxAffiliationsN2 기본값)·broadcast-group 계층 수.
-#       아래 기본값은 그 행이 없을 때의 폴백. 키는 DB 컬럼·관리 API JSON 과 같은 언더스코어 표기.
+#     · DB `mcptt_service_config` 단일 행(콘솔 편집) — N2(user-profile MaxAffiliationsN2 기본값)·N6(user-profile
+#       MaxSimultaneousCallsN6 — 관제/그 밖 두 값, user_max_calls_n6)·broadcast-group 계층 수.
+#       아래 기본값은 그 행(N6 는 그 열 — migrate_mcptt_n6.sql)이 없을 때의 폴백. 키는 DB 컬럼·관리 API JSON 과 같은 언더스코어 표기.
 #     · 설정 `ServiceConfig.*`(SERVICE_CONFIG_PARAMS) — on-network emergency-call·transmit-time·fc-timers-counters·Resource-Priority.
 #       기본값 = CMP floor 타이머 기본값·CSP fan-out 의 mcpttp 서열·긴급 그룹 호 시한 없음.
 SERVICE_CONFIG_DEFAULTS = {
     "max_affiliations_n2": 10,
+    # N6 = 동시 그룹 호 상한(TS 24.484 §8.3.2.1 8)e)i) <MaxSimultaneousCallsN6>, TS 24.379 §10.1.1.3.1.1 5) — 넘으면 486 + 103).
+    #   사용자마다의 값이고 판정은 «관제 = 그 회선의 사람에게 역할 배정이 있다» 하나다(user_max_calls_n6 — CSP 집행과 같은 판정).
+    "max_calls_n6": 5,
+    "max_calls_n6_dispatch": 10,
     "num_levels_group_hierarchy": 3,
     "num_levels_user_hierarchy": 3,
 }
+# mcptt_service_config 의 선택 열(마이그레이션이 더하는 것) — 열이 없는 DB 는 코드 기본값을 쓴다.
+SERVICE_CONFIG_OPT_COLS = ("max_calls_n6", "max_calls_n6_dispatch")
 # on-network 규격 파라미터 (config ServiceConfig.*). 타이머는 밀리초, 카운터는 횟수.
 #   FcTimersCounters·TransmitTime 은 floor 제어 서버(CMP)의 **정본**이다 — CSP 가 이 문서를 받아(TS 24.484 Annex A.2.3, 내부 API
 #   /internal/mcptt/service-config) 그룹 세션 개시 때 PTT_GROUP_ADD floor_timers 로 CMP 에 싣는다(T1·T2·T3·T7·T8·T20·C7·C20).
@@ -537,16 +544,16 @@ def load_shared_data(config):
                     # MCPTT 시스템 서비스 설정 (TS 24.484 service-config) — 단일 행(id=1).
                     #   행/테이블 부재는 기본값 유지.
                     try:
+                        opt = service_config_opt_cols(cur)
                         cur.execute(
-                            "SELECT max_affiliations_n2, num_levels_group_hierarchy, num_levels_user_hierarchy "
-                            "FROM mcptt_service_config WHERE id=1")
+                            "SELECT " + ", ".join(("max_affiliations_n2", "num_levels_group_hierarchy",
+                                                   "num_levels_user_hierarchy") + opt) +
+                            " FROM mcptt_service_config WHERE id=1")
                         row = cur.fetchone()
                         if row:
-                            SERVICE_CONFIG.update({
-                                "max_affiliations_n2": int(row['max_affiliations_n2']),
-                                "num_levels_group_hierarchy": int(row['num_levels_group_hierarchy']),
-                                "num_levels_user_hierarchy": int(row['num_levels_user_hierarchy']),
-                            })
+                            SERVICE_CONFIG.update({k: int(row[k]) for k in
+                                                   ("max_affiliations_n2", "num_levels_group_hierarchy",
+                                                    "num_levels_user_hierarchy") + opt})
                             logger.log_info(f"Loaded MCPTT service config: {SERVICE_CONFIG}")
                     except Exception as se:
                         logger.log_info(f"mcptt_service_config load skipped (pre-migration?): {se}")
@@ -731,6 +738,9 @@ GROUP_MIN_TO_START_MAX = 65535
 GROUP_ACK_TIMEOUT_DEFAULT = 5
 GROUP_ACK_TIMEOUT_MAX = 300
 GROUP_ACK_ACTIONS = ('proceed', 'abandon')
+# 그룹 우선순위 <on-network-group-priority>·멤버 우선순위 <user-priority> = mcpttgi:priorityType(0..255, TS 24.481 §7.2.4.2) — 값이
+#   클수록 높다(§7.2.8). 두 쓰기 경로(admin API·GMS XCAP PUT)가 범위 밖 값을 거절한다.
+PRIORITY_TYPE_MAX = 255
 
 
 def norm_ack_action(value) -> str:
@@ -1422,10 +1432,26 @@ def _is_group_member(group: dict, uri: str) -> bool:
     return _uri_eq(group.get('authorized_user'), uri)
 
 
+# 그룹 문서 <preferred-voice-encodings> 값 — CSP 그룹 호의 서비스 코덱(Setup.Media.Codecs 첫 항목, psip 기본 AMR-WB)과 같아야 한다.
+#   MCVideo 그룹의 선호 음성 코덱 기본(services.mcvideo.GROUP_ATTR_DEFAULTS audio_encodings)과도 같은 값이다.
+SERVICE_VOICE_ENCODING = "AMR-WB"
+
+
+def _priority_type(v, default: int = 0) -> int:
+    """mcpttgi:priorityType(xs:unsignedShort 0..255, TS 24.481 §7.2.4.2) — 범위 밖 저장값은 문서에서 경계로 자른다(쓰기 경로는 거절)."""
+    try:
+        return max(0, min(PRIORITY_TYPE_MAX, int(v)))
+    except (TypeError, ValueError):
+        return default
+
+
 def get_group_xml(group_uri):
     group = GROUPS.get(group_uri)
     if not group:
         return None, None
+    import html as _html
+    # 이름·직함·조직 코드·URI 는 운영자 입력이다 — 텍스트·속성 모두 escape 해 문서를 well-formed 로 지킨다(RFC 4825 §6)
+    esc = lambda v: _html.escape(str(v if v is not None else ''), quote=True)
 
     # 그룹 = 서비스 집합(TS 23.280 §3) — MCVideo 속성(mcvideo_group_attrs 행)이 있으면 MCPTT 그룹이자 MCVideo 그룹이다.
     mcvideo_attrs = group.get('mcvideo')
@@ -1439,14 +1465,14 @@ def get_group_xml(group_uri):
   xmlns:oxe="urn:oma:xml:xdm:extensions"
   xmlns:mcpttgi="urn:3gpp:ns:mcpttGroupInfo:1.0"
   xmlns:cims="urn:cims:groupinfo:1.0">
-  <list-service uri="{group_uri}">
-    <display-name xml:lang="en-us">{group['display_name']}</display-name>
+  <list-service uri="{esc(group_uri)}">
+    <display-name xml:lang="en-us">{esc(group['display_name'])}</display-name>
     <list>"""
 
     for member in group['members']:
         xml += f"""
-      <entry uri="{member['uri']}">
-        <rl:display-name>{member['name']}</rl:display-name>"""
+      <entry uri="{esc(member['uri'])}">
+        <rl:display-name>{esc(member['name'])}</rl:display-name>"""
         # 필수 멤버만 <on-network-required> — 있으면 제어 기능이 개시자 응답 전에 그 멤버의 200 을 기다린다(TNG1,
         #   TS 24.379 §6.3.3.3). 없으면 필수 멤버가 아니다(TS 24.481 §7.2.4.2).
         if member.get('required'):
@@ -1454,23 +1480,23 @@ def get_group_xml(group_uri):
         <mcpttgi:on-network-required/>"""
         xml += f"""
         <mcpttgi:participant-type>{member.get('role', 'participant')}</mcpttgi:participant-type>
-        <mcpttgi:user-priority>{member.get('priority', 5)}</mcpttgi:user-priority>"""
+        <mcpttgi:user-priority>{_priority_type(member.get('priority', 5))}</mcpttgi:user-priority>"""
         # 서비스별 신원 — MCVideo·MCData 그룹 문서의 entry 는 <mcvideo-mcvideo-id>·<mcdata-mcdata-id> 를 **반드시** 싣는다
         #   (TS 24.481 §7.2.2). 단일 MC service ID 라 값 = entry uri(MCPTT ID, TS 23.280 §10.1.4.1 — mcvideo.md §7 D1).
         if mcvideo_attrs is not None:
             xml += _mcvideo.entry_xml(member['uri'])
         if has_mcdata:
             xml += f"""
-        <mcpttgi:mcdata-mcdata-id uri="{member['uri']}"/>"""
+        <mcpttgi:mcdata-mcdata-id uri="{esc(member['uri'])}"/>"""
         # 직함 — 3GPP 미정의 필드라 CIMS 전용 네임스페이스 확장으로 전달
         # (<entry> 는 ##other lax 확장 허용, 표준 단말은 무시 — TS 24.481 정합)
         if member.get('title'):
             xml += f"""
-        <cims:user-title>{member['title']}</cims:user-title>"""
+        <cims:user-title>{esc(member['title'])}</cims:user-title>"""
         xml += """
       </entry>"""
 
-    grp_priority = group.get('priority', 5)
+    grp_priority = _priority_type(group.get('priority', 5))
     encryption_val = 'true' if group.get('encryption') else 'false'
     emergency_val = 'true' if group.get('emergency_call') else 'false'
     # allow-imminent-peril-call 은 emergency_call 미러 — condition(긴급·임박)은 단일 게이트.
@@ -1482,8 +1508,9 @@ def get_group_xml(group_uri):
     conf_state_val = 'true' if group.get('allow_conference_state', True) else 'false'
     org_code = group.get('org_code', '')
     group_type = group.get('group_type', 'prearranged')
-    # max_members 0(무제한) 이면 관례값 10 노출
-    max_count = group.get('max_members') or 10
+    # 정원 = <on-network-max-participant-count>(§7.2.8 — 그룹 세션 최대 참가자). 0 = 무제한이라 요소를 싣지 않는다(0 은 «0명» 으로
+    #   읽힌다). 관례값을 대신 실으면 그 값을 되돌려 저장하는 클라이언트가 정원을 굳힌다.
+    max_count = int(group.get('max_members') or 0)
     affil_required = 'true' if group.get('require_affiliation', True) else 'false'
     # MCData 그룹 메시징 게이트 (TS 24.481 §7.2.4.2 — mcpttgi 네임스페이스 표준 요소)
     sds_val = 'true' if group.get('allow_sds', True) else 'false'
@@ -1505,8 +1532,14 @@ def get_group_xml(group_uri):
     min_to_start = int(group.get('min_number_to_start') or 0)
     ack_timeout = int(group.get('ack_timeout_sec', GROUP_ACK_TIMEOUT_DEFAULT))
     ack_action = norm_ack_action(group.get('ack_action'))
+    xml += """
+    </list>"""
+    # on-network 를 끈 그룹 = <on-network-disabled/>(§7.2.2 g) · §7.2.8) — 제어 기능은 그 그룹의 호를 403 + 115 로 거절한다
+    #   (TS 24.379 §6.3.5.2 5)a)).
+    if not group.get('on_network', True):
+        xml += """
+    <mcpttgi:on-network-disabled/>"""
     xml += f"""
-    </list>
     <mcpttgi:mcdata-allow-short-data-service>{sds_val}</mcpttgi:mcdata-allow-short-data-service>
     <mcpttgi:mcdata-allow-file-distribution>{fd_val}</mcpttgi:mcdata-allow-file-distribution>"""
     if max_sds > 0:
@@ -1518,18 +1551,29 @@ def get_group_xml(group_uri):
     <mcpttgi:mcdata-on-network-max-data-size-auto-recv>{max_auto}</mcpttgi:mcdata-on-network-max-data-size-auto-recv>"""
     # 그룹 영상은 MCVideo <service>(TS 24.481 §7.2.8)로 싣는다 — MCPTT 몫에는 영상 요소가 없다(mcvideo.md §8).
     xml += f"""
-    <mcpttgi:on-network-invite-members>{invite_members}</mcpttgi:on-network-invite-members>
-    <mcpttgi:on-network-max-participant-count>{max_count}</mcpttgi:on-network-max-participant-count>
+    <mcpttgi:on-network-invite-members>{invite_members}</mcpttgi:on-network-invite-members>"""
+    if max_count > 0:
+        xml += f"""
+    <mcpttgi:on-network-max-participant-count>{max_count}</mcpttgi:on-network-max-participant-count>"""
+    # 선호 음성 코덱(§7.2.2 j) — 단말은 그룹 호 offer 에 이 코덱을 넣는다(TS 24.379 §6.2.1 2)b)). 값 = 서버가 집행하는 서비스 코덱
+    #   (CSP Setup.Media.Codecs 첫 항목, 기본 AMR-WB — 그 코덱이 없는 offer 는 488).
+    # 보호 둘 <protect-media>·<protect-floor-control-signalling>(§7.2.2 v)w)) 은 요소가 없으면 true(GMK 필수·floor 보호 필수, §7.2.8)
+    #   라 false 를 명시한다 — CIMS 는 E2E 미디어 보호(GMK)를 하지 않는다(mcx_e2e_security.md, MCVideo 몫과 같다).
+    xml += f"""
+    <mcpttgi:preferred-voice-encodings><mcpttgi:encoding name="{esc(SERVICE_VOICE_ENCODING)}"/></mcpttgi:preferred-voice-encodings>
     <mcpttgi:on-network-require-affiliation>{affil_required}</mcpttgi:on-network-require-affiliation>{timers}
     <mcpttgi:on-network-minimum-number-to-start>{min_to_start}</mcpttgi:on-network-minimum-number-to-start>
     <mcpttgi:on-network-timeout-for-acknowledgement-of-required-members>{xs_duration(ack_timeout)}</mcpttgi:on-network-timeout-for-acknowledgement-of-required-members>
     <mcpttgi:on-network-action-upon-expiration-of-timeout-for-acknowledgement-of-required-members>{ack_action}</mcpttgi:on-network-action-upon-expiration-of-timeout-for-acknowledgement-of-required-members>
+    <mcpttgi:protect-media>false</mcpttgi:protect-media>
+    <mcpttgi:protect-floor-control-signalling>false</mcpttgi:protect-floor-control-signalling>
     <mcpttgi:on-network-require-talker-id>false</mcpttgi:on-network-require-talker-id>
     <mcpttgi:on-network-group-priority>{grp_priority}</mcpttgi:on-network-group-priority>
     <mcpttgi:on-network-encryption>{encryption_val}</mcpttgi:on-network-encryption>"""
     if mcvideo_attrs is not None:
         xml += _mcvideo.list_service_xml(mcvideo_attrs)
-    # 규칙 — 멤버(<is-list-member>)에게 그룹 호 개시(<allow-initiate-conference>)·진행 중 세션 합류(<join-handling>)를 허용한다.
+    # 규칙 — 멤버(<is-list-member>)에게 그룹 호 개시(<allow-initiate-conference>)·진행 중 세션 합류(<join-handling>)·명단 열람
+    #   (<on-network-allow-getting-member-list> — 없으면 false 라 규격 단말은 명단을 못 읽는다, TS 24.481 §7.2.8·§7.2.12.1)을 허용한다.
     #   제어 기능이 개시·합류를 인가하는 근거 요소다(TS 24.379 §6.3.5.3·§6.3.5.4, TS 24.281 §6.3.5.3·§6.3.5.4). 요소 이름공간은
     #   OMA list-service(기본 이름공간, TS 24.481 Annex A.2.2 예시).
     xml += f"""
@@ -1541,6 +1585,7 @@ def get_group_xml(group_uri):
         <cp:actions>
           <allow-initiate-conference>true</allow-initiate-conference>
           <join-handling>true</join-handling>
+          <mcpttgi:on-network-allow-getting-member-list>true</mcpttgi:on-network-allow-getting-member-list>
           <mcpttgi:allow-MCPTT-emergency-call>{emergency_val}</mcpttgi:allow-MCPTT-emergency-call>
           <mcpttgi:allow-imminent-peril-call>{imminent_val}</mcpttgi:allow-imminent-peril-call>
           <mcpttgi:allow-MCPTT-emergency-alert>{alert_val}</mcpttgi:allow-MCPTT-emergency-alert>
@@ -1571,12 +1616,12 @@ def get_group_xml(group_uri):
     </oxe:supported-services>"""
     if org_code:
         xml += f"""
-    <mcpttgi:org-code>{org_code}</mcpttgi:org-code>"""
+    <mcpttgi:org-code>{esc(org_code)}</mcpttgi:org-code>"""
     # 그룹 소유 (3GPP TS 23.280 authorized user = 관리주체)
     authorized_user = group.get('authorized_user', '')
     if authorized_user:
         xml += f"""
-    <mcpttgi:authorized-user>{authorized_user}</mcpttgi:authorized-user>"""
+    <mcpttgi:authorized-user>{esc(authorized_user)}</mcpttgi:authorized-user>"""
     xml += """
   </list-service>
 </group>"""
@@ -1605,10 +1650,52 @@ def update_service_config_cache(cfg):
     SERVICE_CONFIG.update(cfg)
 
 
+def service_config_opt_cols(cur) -> tuple:
+    """mcptt_service_config 에 있는 선택 열(SERVICE_CONFIG_OPT_COLS) — 마이그레이션 전 DB 는 빈 튜플."""
+    cur.execute("SHOW COLUMNS FROM mcptt_service_config LIKE 'max_calls_n6%'")
+    have = {r['Field'] if isinstance(r, dict) else r[0] for r in cur.fetchall()}
+    return tuple(c for c in SERVICE_CONFIG_OPT_COLS if c in have)
+
+
+# «관제» 판정(D2) — 그 PTT 회선의 사람(ptt_subscriptions.user_id)에게 역할 배정(role_assignments principal_type='user', roles 행이
+#   있는 것)이 있다. CSP 의 판정(CCspRoleMap::SelectForLine — DbManager::LoadAllRoles 가 배정을 그 사람의 회선으로 펼친다)과
+#   같은 표·같은 펼침이다. 판정 데이터는 역할 배정 한 곳이고 N6 를 따로 적어 두지 않는다(mcptt_authorization.md §2.4).
+_DISPATCH_LINE_SQL = (
+    "SELECT 1 FROM role_assignments a JOIN roles r ON r.id = a.role_id "
+    "JOIN ptt_subscriptions s ON CAST(s.user_id AS CHAR) = a.principal_id "
+    "WHERE a.principal_type='user' AND s.id=%s LIMIT 1")
+
+
+def is_dispatch_line(msisdn: str) -> bool:
+    """PTT 회선 msisdn 의 사람이 역할을 배정받았는가. DB 없음·표 미적용·조회 실패 = False(그 밖 단말)."""
+    conn = _db_connect()
+    if conn is None or not msisdn:
+        return False
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute(_DISPATCH_LINE_SQL, (msisdn,))
+                return cur.fetchone() is not None
+    except Exception as e:
+        if '1146' not in str(e):            # ER_NO_SUCH_TABLE — 역할 표 미적용 DB 는 조용히 «그 밖»
+            logger.log_error(f"[CMS] dispatch role lookup for {msisdn} failed: {e}")
+        return False
+
+
+def user_max_calls_n6(msisdn: str) -> int:
+    """사용자의 N6(<MaxSimultaneousCallsN6>, TS 24.484 §8.3.2.1 8)e)i)) — 관제(역할 배정) = max_calls_n6_dispatch, 그 밖 =
+    max_calls_n6(mcptt_service_config, 기본 10·5). CSP 는 같은 두 값과 같은 판정으로 486 + 103 을 집행한다(TS 24.379 §10.1.1.3.1.1 5))."""
+    key = "max_calls_n6_dispatch" if is_dispatch_line(msisdn) else "max_calls_n6"
+    try:
+        return max(1, int(SERVICE_CONFIG.get(key) or SERVICE_CONFIG_DEFAULTS[key]))   # xs:positiveInteger
+    except (TypeError, ValueError):
+        return SERVICE_CONFIG_DEFAULTS[key]
+
+
 # ── MCPTT user profile 규격 파라미터값 (config UserProfile.*) — 문서 상수 요소. 빈/미지정 = 코드 기본값.
 USER_PROFILE_CONFIG = {}
+#   N6(<MaxSimultaneousCallsN6>)는 여기 없다 — 사용자마다의 값이라 mcptt_service_config 두 값과 역할 배정에서 낸다(user_max_calls_n6).
 _USER_PROFILE_DEFAULTS = {
-    "MaxSimultaneousCallsN6": 1,          # 동시 그룹콜 상한 (MCPTT-group-call)
     "MaxSimultaneousTransmissionsN7": 1,  # 동시 송신 상한 (OnNetwork)
     "Priority": 0,                        # 사용자 우선순위 (unsignedShort)
     "MissionCriticalOrganization": "",    # 빈값 = UeInitConfig.Name
@@ -1643,9 +1730,12 @@ def get_user_profile_xml(user_uri, owner_uid=None):
         개시·경보를, UsePreConfigured 모드에 수신자 미지정이면 긴급 사설콜을 false 로 내린다(CSP 의 403 판정과 일치,
         mcptt_emergency_modes.md). MCPTTPrivateRecipient 는 XSD sequence 상 ProSeUserID-entry(User-Info-ID 6옥텟 hex)가
         필수 자식이라 off-network 미지원인 우리는 영값(000000000000)을 싣는다.
-      - 상한 = mcptt_service_config.max_affiliations_n2(MaxAffiliationsN2) + UserProfile.*(N6·N7·Priority·조직명).
+      - 상한 = mcptt_service_config.max_affiliations_n2(MaxAffiliationsN2) · N6 = user_max_calls_n6(관제 = 역할 배정 → 
+        max_calls_n6_dispatch, 그 밖 → max_calls_n6 — CSP 집행과 같은 판정) + UserProfile.*(N7·Priority·조직명).
       - 인가 = <cp:ruleset>(RFC 4745 common-policy) — actions 자식은 규격 요소(§8.3.2.1 11) 목록 순: 긴급 그룹콜·긴급 사설콜
-        개시 → 그룹 긴급 해제·임박 위험 해제 → 경보 발령·경보 취소 → 원격 청취 → anyExt) + cims 확장(그룹 생성). 해제 인가
+        개시 → 그룹 긴급 해제·임박 위험 해제 → 경보 발령·경보 취소 → anyExt) + cims 확장(그룹 생성·PTT 그룹 호 청취 자격
+        <cims:allow-ambient-listening> — 비멤버 관제사의 recvonly 합류 자격(dispatch_center.md §5.6)이라 규격 ambient listening
+        (TS 24.379 §11 원격 개시 1:1 호, §8.3.2.1 11)xxxviii)C)·D))과 다른 것이다). 해제 인가
         <allow-cancel-group-emergency>(기본 false — 서버 판정은 local policy 개시자 ∨ 이 값, TS 24.379 §6.3.3.1.13.4)·
         <allow-cancel-imminent-peril>(기본 true, §6.3.3.1.13.6)·<allow-cancel-emergency-alert>(부재 = 발령 인가 값,
         §6.3.3.1.13.3)은 ptt_user_profile allow_cancel_* 그대로 — 개시 인가와 달리 대상 결정 가능 여부와 AND 하지 않는다
@@ -1671,9 +1761,11 @@ def get_user_profile_xml(user_uri, owner_uid=None):
     pmode = prof.get('private_emergency_mode') or 'LocallyDetermined'
     precip = prof.get('emergency_private_recipient')
 
-    def et(tag, uri, name=None, info=None, ext=''):
-        """EntryType — sequence(uri-entry, display-name?, anyExt?) + entry-info 속성."""
-        a = f' entry-info="{esc(info)}"' if info else ''
+    def et(tag, uri, name=None, info=None, ext='', index=None):
+        """EntryType — sequence(uri-entry, display-name?, anyExt?) + entry-info·index 속성. <entry> 는 "index" 를 가져야 한다
+        (§8.3.2.1 «The <entry> elements: 2) shall contain an "index" attribute» — 목록 안에서 유일하면 된다, §8.3.2.7)."""
+        a = f' index="{index}"' if index is not None else ''
+        a += f' entry-info="{esc(info)}"' if info else ''
         dn = f'<display-name>{esc(name)}</display-name>' if name else ''
         return f'<{tag}{a}><uri-entry>{esc(uri)}</uri-entry>{dn}{ext}</{tag}>'
 
@@ -1684,13 +1776,14 @@ def get_user_profile_xml(user_uri, owner_uid=None):
     owner_ext = '<anyExt><cims:authorized-user>true</cims:authorized-user></anyExt>'
     group_entries = ''.join(
         et('entry', g_uri, g.get('display_name'),
-           ext=owner_ext if (owner_uid is not None and g.get('authorized_user_id') == owner_uid) else '')
-        for g_uri, g in my_groups)
+           ext=owner_ext if (owner_uid is not None and g.get('authorized_user_id') == owner_uid) else '', index=i)
+        for i, (g_uri, g) in enumerate(my_groups, 1))
     # 암시적 제휴 = 관리자가 이 사용자·그룹에 정한 것만(멤버 implicit_affiliation) — 참여 기능이 서비스 인가 때 이 목록에
     #   제휴를 기록한다(TS 24.379 §7.3.2 13) → §9.2.2.2.15, CSP _ApplyImplicitAffiliations). 소속 전부가 아니다.
     implicit_entries = ''.join(
-        et('entry', g_uri, g.get('display_name')) for g_uri, g in my_groups
-        if any(_uri_eq(m.get('uri'), user_uri) and m.get('implicit_affiliation') for m in g.get('members', [])))
+        et('entry', g_uri, g.get('display_name'), index=i) for i, (g_uri, g) in enumerate(
+            [(g_uri, g) for g_uri, g in my_groups
+             if any(_uri_eq(m.get('uri'), user_uri) and m.get('implicit_affiliation') for m in g.get('members', []))], 1))
 
     # 연락처 = 동료 멤버(본인 제외, 정규화 키로 중복 제거, URI 순 — ETag 안정)
     contacts = {}
@@ -1708,13 +1801,13 @@ def get_user_profile_xml(user_uri, owner_uid=None):
     dedicated = bool(mode == 'DedicatedGroup' and egid)
     eg_uri = _group_uri(egid) if egid else (my_groups[0][0] if my_groups else user_uri)
     eg_entry = et('entry', eg_uri, GROUPS.get(eg_uri, {}).get('display_name'),
-                  'DedicatedGroup' if dedicated else 'UseCurrentlySelectedGroup')
+                  'DedicatedGroup' if dedicated else 'UseCurrentlySelectedGroup', index=1)
     # 긴급 사설콜 수신자 entry — 항상 존재(§8.3.2.1 8d·10f). 사전 지정이면 UsePreConfigured, 아니면 LocallyDetermined
     #   + 폴백 uri-entry(§8.3.2.7: 선택 상대가 없을 때 쓰는 값 — 지정 수신자 > 첫 연락처 > 본인 URI(퇴화)).
     preconfigured = bool(pmode == 'UsePreConfigured' and precip)
     first_contact = sorted(contacts.items())[0][1][0] if contacts else None
     pr_uri = f"tel:{precip}" if precip else (first_contact or user_uri)
-    pr_entry = et('entry', pr_uri, None, 'UsePreConfigured' if preconfigured else 'LocallyDetermined')
+    pr_entry = et('entry', pr_uri, None, 'UsePreConfigured' if preconfigured else 'LocallyDetermined', index=1)
     # ProSe(off-network) 미지원 — MCPTTPrivateRecipientEntryType 의 필수 자식 ProSeUserID-entry 는 User-Info-ID 영값
     #   (6옥텟 hex, §8.3.2.7 "shall be 6 octets")로 채운다.
     prose_entry = '<ProSeUserID-entry><User-Info-ID>000000000000</User-Info-ID></ProSeUserID-entry>'
@@ -1738,7 +1831,7 @@ def get_user_profile_xml(user_uri, owner_uid=None):
     org = str(_user_profile_cfg('MissionCriticalOrganization') or _ue_init_cfg('Name') or _UE_INIT_DEFAULTS['Name'])
     ptype = str(_user_profile_cfg('ParticipantType'))
     lang = str(_user_profile_cfg('Language'))
-    n6 = int(_user_profile_cfg('MaxSimultaneousCallsN6'))
+    n6 = user_max_calls_n6(user.get('msisdn', ''))
     n7 = int(_user_profile_cfg('MaxSimultaneousTransmissionsN7'))
     prio = int(_user_profile_cfg('Priority'))
     n2 = int(SERVICE_CONFIG.get('max_affiliations_n2') or 0)
@@ -1766,9 +1859,8 @@ def get_user_profile_xml(user_uri, owner_uid=None):
     common += f'<MissionCriticalOrganization>{esc(org)}</MissionCriticalOrganization>'
 
     # <OnNetwork>
-    on = ''
-    if group_entries:
-        on += f'<MCPTTGroupInfo>{group_entries}</MCPTTGroupInfo>'
+    # 10)b) «shall include one <MCPTTGroupInfo>» — 소속 그룹이 없어도 요소는 싣는다(ListEntryType 은 빈 내용을 허용, XSD).
+    on = f'<MCPTTGroupInfo>{group_entries}</MCPTTGroupInfo>'
     on += f'<MaxAffiliationsN2>{n2}</MaxAffiliationsN2>'
     if implicit_entries:
         on += f'<ImplicitAffiliations>{implicit_entries}</ImplicitAffiliations>'
@@ -1793,13 +1885,13 @@ def get_user_profile_xml(user_uri, owner_uid=None):
         <allow-cancel-imminent-peril>{_b('allow_cancel_imminent_peril', True)}</allow-cancel-imminent-peril>
         <allow-activate-emergency-alert>{_ba('allow_emergency_alert', group_target_ok)}</allow-activate-emergency-alert>
         <allow-cancel-emergency-alert>{_b('allow_cancel_emergency_alert', cancel_alert_dflt)}</allow-cancel-emergency-alert>
-        <allow-ambient-listening>{_b('allow_ambient_listening', False)}</allow-ambient-listening>
         <anyExt>  <!-- TS 24.484 §8.3.2.1 11)xxxviii) — 자식 순서는 그 목록(L → R) 순 -->
           <allow-to-receive-non-acknowledged-users-information>{_b('allow_non_ack_users_info', False)}</allow-to-receive-non-acknowledged-users-information>
           <allow-adhoc-group-call>{_b('allow_adhoc_call')}</allow-adhoc-group-call>
         </anyExt>
         <cims:allow-adhoc-group-call>{_b('allow_adhoc_call')}</cims:allow-adhoc-group-call>
         <cims:allow-create-group>{_b('allow_create_group', False)}</cims:allow-create-group>
+        <cims:allow-ambient-listening>{_b('allow_ambient_listening', False)}</cims:allow-ambient-listening>
       </cp:actions>
     </cp:rule>
   </cp:ruleset>
@@ -1833,6 +1925,8 @@ def get_service_config_xml(user_uri):
       ServiceConfig.EmergencyCall.GroupTimeLimit 이 0·빈 값·잘못된 값이면 요소째 생략(TNG2 미가동, TS 24.379 §6.3.3.1.16) ·
       <private-call> 선택 — 개별 호 <hang-time>(T4)·<max-duration-with-floor-control>·<max-duration-without-floor-control>,
       값이 0 인 자식은 싣지 않고 셋 다 0 이면 요소째 생략 · <transmit-time><time-limit> · <fc-timers-counters> 필수 ·
+      <signalling-protection> 둘 다 false(요소가 없으면 true 로 읽혀 단말이 mcptt-info 를 CSK 로 암호화·서명한다 — §8.4.2.6 ·
+      TS 24.379 §6.6.2.3.1·§6.6.3.3.1. CIMS 는 시그널링 XML 보호를 하지 않고 구간 보호는 SIP TLS 다 — MCVideo 문서와 같다) ·
       <emergency-/imminent-peril-/normal-resource-priority> 필수 — 각 <resource-priority-namespace>·<resource-priority-priority> ·
       <anyExt><adhoc-group-call> — 필수 자식 <allow-adhoc-group-call-support>·<max-no-participants> 뒤에 <hang-time>(T4)·
       <broadcast-hang-time>(일제 애드혹 호의 T4)·<max-duration-of-call>(TNG3), 값이 0 인 시간 요소는 싣지 않는다).
@@ -1928,6 +2022,10 @@ def get_service_config_xml(user_uri):
       <fc-timers-counters>
 {nl.join(fc)}
       </fc-timers-counters>
+      <signalling-protection>
+        <confidentiality-protection>false</confidentiality-protection>
+        <integrity-protection>false</integrity-protection>
+      </signalling-protection>
 {_rp('emergency-resource-priority', 'Emergency')}
 {_rp('imminent-peril-resource-priority', 'ImminentPeril')}
 {_rp('normal-resource-priority', 'Normal')}
@@ -1962,6 +2060,27 @@ def _xml_ubyte(v, dft) -> int:
     return max(0, min(255, n))
 
 
+def derive_hplmn(configured: str, domain: str) -> str:
+    """<HPLMN PLMN> = MCC(3자리)+MNC(2·3자리) PLMN 코드(TS 24.484 §7.2.2.7 · TS 23.003 §2.2) — 설정 UeInitConfig.Hplmn.Plmn 이 정본.
+
+    설정이 없거나 PLMN 코드가 아니면 도메인 표기 `mnc<MNC>.mcc<MCC>.…`(TS 23.003 §13 — MNC 는 세 자리로 쓰고 두 자리 MNC 는 앞에
+    0 을 하나 채운다)에서 유도한다: 세 자리 앞자리가 0 이면 그 0 하나만 떼어 두 자리 MNC 로 읽는다(`mnc008` → `08`, `mnc033` →
+    `33`). 도메인 표기만으로는 두 자리와 세 자리 MNC(`mnc012` 가 `12` 인지 `012` 인지)를 가를 수 없으므로 앞자리 0 인 세 자리 MNC
+    사업자는 설정에 적는다. 둘 다 없으면 시험용 명목값 00101."""
+    import re as _re
+    if configured:
+        if _re.fullmatch(r'\d{5,6}', configured):
+            return configured
+        logger.log_error(f"[CMS] UeInitConfig.Hplmn.Plmn '{configured}' 는 PLMN 코드(MCC 3 + MNC 2·3자리)가 아니다 — 도메인 유도값 사용")
+    mm = _re.search(r'(?:^|\.)mnc(\d{2,3})\.mcc(\d{3})(?:\.|$)', domain or '')
+    if not mm:
+        return '00101'
+    mnc = mm.group(1)
+    if len(mnc) == 3 and mnc.startswith('0'):
+        mnc = mnc[1:]
+    return mm.group(2) + mnc
+
+
 def _build_ue_init_config_xml(base_url: str) -> str:
     """설정(UeInitConfig.*)과 토폴로지 유도값으로 ue-init-config 문서를 조립한다 (검사 전 원문)."""
     import html as _html
@@ -1971,11 +2090,7 @@ def _build_ue_init_config_xml(base_url: str) -> str:
     from services import access_services as _access_services
     domain = (_access_services.ptt_domain(PROVISIONING) or IDMS_DOMAIN).strip()
 
-    # PLMN = MCC+MNC — 설정값 우선, 없으면 도메인 표기 ptt.mncXXX.mccYYY.… 에서 유도 (실패 시 명목값)
-    plmn = str(_ue_init_cfg('Hplmn', 'Plmn')).strip()
-    if not plmn:
-        m = _re.search(r'mnc(\d+)\.mcc(\d+)', domain)
-        plmn = (m.group(2) + m.group(1).lstrip('0')) if m else '00101'
+    plmn = derive_hplmn(str(_ue_init_cfg('Hplmn', 'Plmn')).strip(), domain)
 
     timers = ''.join(
         f"      <{t}>{_xml_ubyte(_ue_init_cfg('Timers', t), _UE_INIT_DEFAULTS['Timers'][t])}</{t}>\n"
@@ -2669,6 +2784,7 @@ def parse_group_document_xml(xml_text: str) -> dict:
         'emergency_alert': _xbool(ls, './/cp:actions/gi:allow-MCPTT-emergency-alert'),
         'allow_conference_state': _xbool(ls, './/cp:actions/gi:on-network-allow-conference-state'),
         'org_code': _xtext(ls, 'gi:org-code'),
+        'on_network': None,
         'members': None,
         # MCVideo 서비스 — None = 문서가 MCVideo 를 말하지 않음(기존 상태 유지), dict = MCVideo <service> 가 있어 켜고 속성 반영
         #   (services.mcvideo.parse_group_attrs — 전환기 규칙은 그 함수 설명).
@@ -2694,6 +2810,13 @@ def parse_group_document_xml(xml_text: str) -> dict:
             raise ValueError(f'{tag} is not an xs:duration')
         if out[k] is not None and not (lo <= out[k] <= hi):
             raise ValueError(f'{tag} out of range ({lo}..{hi} s)')
+    # priorityType 0..255(TS 24.481 §7.2.4.2) — 그룹 우선순위·멤버 우선순위 둘 다. 숫자가 아니거나 범위 밖이면 스키마 위반.
+    if _xtext(ls, 'gi:on-network-group-priority') is not None and not (
+            out['priority'] is not None and 0 <= out['priority'] <= PRIORITY_TYPE_MAX):
+        raise ValueError(f'on-network-group-priority is not a priorityType (0..{PRIORITY_TYPE_MAX})')
+    # <on-network-disabled/> 가 있으면 on-network 를 끈 그룹(§7.2.8). 없으면 그대로 둔다(갱신 = 기존값 유지).
+    if ls.find('gi:on-network-disabled', _NS) is not None:
+        out['on_network'] = False
     if _xtext(ls, 'gi:on-network-minimum-number-to-start') is not None and not (
             out['min_number_to_start'] is not None and 0 <= out['min_number_to_start'] <= GROUP_MIN_TO_START_MAX):
         raise ValueError('on-network-minimum-number-to-start is not an xs:unsignedShort')
@@ -2714,6 +2837,8 @@ def parse_group_document_xml(xml_text: str) -> dict:
             if role not in ('chair', 'participant'):
                 raise ValueError(f"participant-type '{role}' not one of chair/participant")
             prio = _xint(e, 'gi:user-priority')
+            if _xtext(e, 'gi:user-priority') is not None and not (prio is not None and 0 <= prio <= PRIORITY_TYPE_MAX):
+                raise ValueError(f'user-priority of {uri} is not a priorityType (0..{PRIORITY_TYPE_MAX})')
             members.append({'user_id': uid, 'mcptt_id': uri if uri.lower().startswith(('tel:', 'sip:')) else None,
                             'role': role, 'priority': prio if prio is not None else 0,
                             'required': e.find('gi:on-network-required', _NS) is not None})
@@ -2725,16 +2850,16 @@ _GMS_CREATE_DEFAULTS = {
     'priority': 5, 'encryption': False, 'emergency_call': False,
     'emergency_alert': True, 'allow_conference_state': True, 'allow_sds': True, 'allow_fd': False,
     'max_sds_size': 10000, 'max_auto_recv': 1048576, 'org_code': None, 'group_type': 'prearranged',
-    'max_members': 0, 'require_affiliation': True,
+    'max_members': 0, 'require_affiliation': True, 'on_network': True,
     'hang_timer_sec': GROUP_HANG_TIMER_DEFAULT, 'max_duration_sec': GROUP_MAX_DURATION_DEFAULT,
     'min_number_to_start': 0, 'ack_timeout_sec': GROUP_ACK_TIMEOUT_DEFAULT, 'ack_action': 'abandon',
 }
 _GMS_BOOL_COLS = ('encryption', 'emergency_call', 'emergency_alert', 'allow_conference_state',
-                  'allow_sds', 'allow_fd', 'require_affiliation')
+                  'allow_sds', 'allow_fd', 'require_affiliation', 'on_network')
 _GMS_ATTR_COLS = ('priority', 'encryption', 'emergency_call', 'emergency_alert',
                   'allow_conference_state', 'allow_sds', 'allow_fd', 'max_sds_size', 'max_auto_recv', 'org_code',
                   'group_type', 'max_members', 'require_affiliation', 'hang_timer_sec', 'max_duration_sec',
-                  'min_number_to_start', 'ack_timeout_sec', 'ack_action')
+                  'min_number_to_start', 'ack_timeout_sec', 'ack_action', 'on_network')
 
 
 def _gms_unknown_members(cur, members: list) -> list:
@@ -2759,6 +2884,21 @@ def gms_write_group(gid: str, doc: dict, owner_user_id: Optional[int], create: b
                     unknown = _gms_unknown_members(cur, doc['members'])
                     if unknown:
                         return 400, {'error': 'unknown_member', 'detail': unknown}
+                # 정원은 필수 멤버 수보다 작을 수 없다(TS 24.379 §6.3.5.5 NOTE 4 — GMS 검증 몫, 관리 API 와 같은 규칙). 준 값이 없으면
+                #   기존 값(갱신)·기본 0(생성)과 기존 멤버로 본다.
+                if doc.get('members') is not None or doc.get('max_members') is not None:
+                    mm, req = doc.get('max_members'), None
+                    if not create and (mm is None or doc.get('members') is None):
+                        cur.execute("SELECT g.max_members, (SELECT COUNT(*) FROM ptt_group_members m WHERE m.group_id=g.id "
+                                    "AND m.on_network_required=1) AS n_req FROM ptt_groups g WHERE g.mcptt_group_id=%s", (gid,))
+                        row = cur.fetchone() or {}
+                        mm = int(row.get('max_members') or 0) if mm is None else mm
+                        req = int(row.get('n_req') or 0)
+                    if doc.get('members') is not None:
+                        req = sum(1 for m in doc['members'] if m.get('required'))
+                    if mm and req and req > int(mm):
+                        return 400, {'error': 'required_exceeds_max_members',
+                                     'detail': f'required members ({req}) exceed on-network-max-participant-count ({mm})'}
                 if create:
                     vals = {k: (doc[k] if doc.get(k) is not None else _GMS_CREATE_DEFAULTS[k])
                             for k in _GMS_ATTR_COLS}
