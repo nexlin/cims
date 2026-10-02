@@ -306,12 +306,15 @@ class FmIngest:
         akey = f"{r.get('code')}@{mo}"
         # 해제 문구도 발생 때의 값으로 대상을 이름으로 쓴다 — 모듈이 close 에 params 를 실어
         #   보내면 그것을, 없으면(구 모듈·reconcile 종결) 발생 때 기억해 둔 값을 쓴다.
+        # 문구 치환 값 — 모듈 params + {mo} + OAM 이 채우는 {MODULE}(모듈 이름 대문자)·{node}(발신 노드).
+        #   같은 code 를 여러 모듈이 보내는 알람(DB 끊김·서비스 로그·인증서)은 {MODULE} 로 어느 모듈인지 밝힌다.
+        base = {'mo': mo, 'node': node, 'MODULE': str(ent.get('module') or '').upper()}
         if is_open:
             if params:
                 self._open_params[akey] = dict(params)
-            kw = {**(params or {}), 'mo': mo}
+            kw = {**(params or {}), **base}
         else:
-            kw = {**self._open_params.pop(akey, {}), **(params or {}), 'mo': mo}
+            kw = {**self._open_params.pop(akey, {}), **(params or {}), **base}
         msg_open = message or alarm_sweeper.fmt(r.get('msg_open', ''), **kw) \
             or f"{mo} {r.get('type')}"
         # 해제 문구 자리를 채울 값이 없으면(값을 남기지 않던 옛 레코드의 해제 등) 빈칸 문장 대신 짧게.
@@ -321,7 +324,7 @@ class FmIngest:
         msg_close = message or alarm_sweeper.fmt(tmpl_close, **kw) \
             or f"{mo} 정상화"
         was = akey in self.state
-        rec_params = {k: v for k, v in kw.items() if k != 'mo'}
+        rec_params = {k: v for k, v in kw.items() if k not in base}
         alarm_sweeper.transition(self.state, self.dir, r, mo, 'self',
                                  is_open, msg_open, msg_close, log=self.log,
                                  params=rec_params or None)

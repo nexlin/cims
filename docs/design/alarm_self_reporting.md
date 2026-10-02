@@ -82,7 +82,8 @@ hdr 는 `{ver:2, trans_id, node, cmd, type:"event", service:"cims"}`. 호 문맥
   "ts": "2026-08-10T09:31:05" }
 ```
 - 활성키·alarm_id·재통지 의미는 표준화 §3.4 그대로 — alarm_id 는 OAM 이 발급하므로 wire 에
-  싣지 않는다. 메시지는 통상 OAM 이 카탈로그의 msg_open/msg_close 를 params 로 렌더한다
+  싣지 않는다. 메시지는 통상 OAM 이 카탈로그의 msg_open/msg_close 를 params + `{mo}` + OAM 이 채우는
+  `{MODULE}`(모듈 이름 대문자)·`{node}`(발신 노드)로 렌더한다
   (sweeper 규칙과 동일 관례 — 콘솔 표기 일관성).
 - **close 도 발생 때의 params 를 싣는다** — 해제 문구가 대상을 이름으로 쓰게(`연동 상대 {peer}
   연결 복구`). C++ `CFmReporter::AlarmClose`·CSC `FmReporter.alarm_close` 는 활성 목록에 둔 open params 를 그대로 싣는다.

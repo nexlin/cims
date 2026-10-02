@@ -1,8 +1,8 @@
 // 알람/이벤트 표시 어휘 — 단일 정의 (AlertsPage / ActiveAlarmsPage / AlarmCatalogPage 공유).
-//   클래스(type) 한글 라벨은 alarm_catalog.md §4 의 25클래스 + 구 슬러그 하위호환.
+//   클래스(type) 한글 라벨은 alarm_catalog.md §4 의 26클래스 + 구 슬러그 하위호환.
 //   심각도 배지/서열은 X.733 perceived severity 6단계.
 
-// ── 알람 조건 클래스 (25종, alarm_catalog.md §4) ─────────────────────────────
+// ── 알람 조건 클래스 (26종, alarm_catalog.md §4) ─────────────────────────────
 import type { BadgeTone } from '@core/components/ui/badge'
 
 export const ALARM_TYPE_LABEL: Record<string, string> = {
@@ -33,6 +33,7 @@ export const ALARM_TYPE_LABEL: Record<string, string> = {
   dependency_unavailable: '의존물 부재',
   observability_lost: '관측 공백',
   cert_expiring: '인증서 만료 임박',
+  media_missing: '음원 누락',
   // SEC
   security_violation: '보안 위반 징후',
   // 구 type (하위호환 표시 — 레코드/규칙 read 시)

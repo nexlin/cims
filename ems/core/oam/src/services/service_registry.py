@@ -339,6 +339,8 @@ _LEGACY_SEED_ALERT_MSGS = frozenset({
     '{mo} 관리 프로브(STATS) 무응답', '{mo} 응답 정상화',
     '{mo} 연결 끊김', '{mo} 연결 복구',
     '{mo} 사용률 {pct}% ({threshold}% 초과)', '{mo} 사용률 {pct}% (정상)',
+    # 앞 세대 한국어 seed (모듈 이름 없이) — 같은 code 를 여러 모듈이 보내 OAM 판정분을 「OAM」 으로 밝힘
+    'DB 연결 끊김 — {db_host}:{db_port} ({db}) 접속 실패', 'DB 연결 복구 — {db_host}:{db_port} ({db})',
 })
 
 

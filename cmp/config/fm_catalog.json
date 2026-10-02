@@ -34,8 +34,8 @@
       "probable_cause": "underlyingResourceUnavailable",
       "mo_class": "service",
       "metric": "서비스 로그(flow/msg) 저장 경로 기록",
-      "msg_open": "서비스 로그 기록 실패 — {path}: {reason}, 로컬 임시 저장 {spooled}줄 (유실 {dropped}줄)",
-      "msg_close": "서비스 로그 기록 복구 — 임시 저장분 반영 완료 ({path})",
+      "msg_open": "{MODULE} 서비스 로그 기록 실패 — {path}: {reason}, 로컬 임시 저장 {spooled}줄 (유실 {dropped}줄)",
+      "msg_close": "{MODULE} 서비스 로그 기록 복구 — 임시 저장분 반영 완료 ({path})",
       "effect": "flow/msg 로그가 로컬 스풀로 우회 중 — 콘솔 Flow/이력 조회에 최신 구간 미표시 (회복 시 재생되어 자동 보완). 미디어/제어 처리에는 영향 없음",
       "recommended_action": "ServiceLogging.Dir 볼륨(NAS/NFS) 마운트·권한·용량 확인. 회복되면 스풀이 자동 재생되고 알람은 자연 회수된다"
     },

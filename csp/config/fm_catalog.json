@@ -8,8 +8,8 @@
       "probable_cause": "communicationsSubsystemFailure",
       "mo_class": "service",
       "metric": "CSP DB 연결",
-      "msg_open": "DB 연결 끊김 — {host}:{port} ({db}) 접속 실패",
-      "msg_close": "DB 연결 복구 — {host}:{port} ({db})",
+      "msg_open": "{MODULE} DB 연결 끊김 — {host}:{port} ({db}) 접속 실패",
+      "msg_close": "{MODULE} DB 연결 복구 — {host}:{port} ({db})",
       "effect": "가입자/그룹 DB 조회·호이력 기록 실패 — 신규 등록/호 설정 기능 저하 (파일 fallback 범위로 축소)",
       "recommended_action": "DB 서버 상태·네트워크·계정 확인, csp.json Database 설정 점검"
     },
@@ -138,8 +138,8 @@
       "probable_cause": "underlyingResourceUnavailable",
       "mo_class": "service",
       "metric": "서비스 로그(flow/msg) 저장 경로 기록",
-      "msg_open": "서비스 로그 기록 실패 — {path}: {reason}, 로컬 임시 저장 {spooled}줄 (유실 {dropped}줄)",
-      "msg_close": "서비스 로그 기록 복구 — 임시 저장분 반영 완료 ({path})",
+      "msg_open": "{MODULE} 서비스 로그 기록 실패 — {path}: {reason}, 로컬 임시 저장 {spooled}줄 (유실 {dropped}줄)",
+      "msg_close": "{MODULE} 서비스 로그 기록 복구 — 임시 저장분 반영 완료 ({path})",
       "effect": "flow/msg 로그가 로컬 스풀로 우회 중 — 콘솔 Flow/이력 조회에 최신 구간 미표시 (회복 시 재생되어 자동 보완). SIP 처리에는 영향 없음",
       "recommended_action": "ServiceLogging.Dir 볼륨(NAS/NFS) 마운트·권한·용량 확인. 회복되면 스풀이 자동 재생되고 알람은 자연 회수된다"
     },
@@ -151,8 +151,8 @@
       "probable_cause": "thresholdCrossed",
       "mo_class": "service",
       "metric": "TLS 인증서 잔여 유효기간",
-      "msg_open": "TLS 인증서 만료 임박 — {listener} {days_left}일 남음 (만료 {not_after}, 경보 기준 {threshold}일)",
-      "msg_close": "TLS 인증서 유효 기간 정상 — {listener}",
+      "msg_open": "{MODULE} TLS 인증서 만료 임박 — {listener} {days_left}일 남음 (만료 {not_after}, 경보 기준 {threshold}일)",
+      "msg_close": "{MODULE} TLS 인증서 유효 기간 정상 — {listener}",
       "effect": "만료 시 서버 인증서를 검증하는 단말 전부가 동시에 등록 불가 — 접속점 단위 단일 장애점. 만료 전에는 서비스 영향 없음",
       "recommended_action": "인증서 재발급 후 local_nodes 의 tls_cert_path 갱신. ⚠ 인증서 경로는 기동 캡처 항목이라 SIGUSR1 만으로는 반영되지 않고 CSP 재기동이 필요하다. 잔여 7일 이하면 critical 로 상향된다"
     },

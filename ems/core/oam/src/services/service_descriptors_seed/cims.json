@@ -156,8 +156,8 @@
       "mo_class": "service",
       "check": "db_down",
       "metric": "DB 연결",
-      "msg_open": "DB 연결 끊김 — {db_host}:{db_port} ({db}) 접속 실패",
-      "msg_close": "DB 연결 복구 — {db_host}:{db_port} ({db})",
+      "msg_open": "OAM DB 연결 끊김 — {db_host}:{db_port} ({db}) 접속 실패",
+      "msg_close": "OAM DB 연결 복구 — {db_host}:{db_port} ({db})",
       "effect": "가입자/그룹 조회·인증 실패",
       "recommended_action": "DB 가용성/방화벽/연결설정 확인"
     },

@@ -474,6 +474,20 @@ class TestFmCloseMessageParams(unittest.TestCase):
         ing2._restore()
         self.assertEqual(ing2._open_params.get(f'A-COM-003@{self.mo}', {}).get('peer'), 'PEER_KT')
 
+    def test_shared_code_names_module(self):
+        # 같은 code 를 여러 모듈이 보내는 알람은 OAM 이 채운 {MODULE} 로 어느 모듈인지 밝힌다.
+        rule = {'code': 'A-PRC-006', 'type': 'storage_failure', 'perceived_severity': 'major',
+                'msg_open': '{MODULE} 서비스 로그 기록 실패 — {path}: {reason}', 'msg_close': '{MODULE} 서비스 로그 기록 복구'}
+        ent = {'boot_id': 1, 'module': 'cmdp', 'akeys': set(), 'seq': {}, 'last_sync': 0}
+        mo = 'cmdp_01/cmdp/service_log'
+        self.ing._transition('cmdp_01', ent, rule, mo, True, params={'path': '/x', 'reason': '권한 없음'})
+        self.ing._transition('cmdp_01', ent, rule, mo, False)
+        recs = alert_log.read_recent(self.dir, days=1)
+        msgs = {r['action']: r['message'] for r in recs}
+        self.assertEqual(msgs['open'], 'CMDP 서비스 로그 기록 실패 — /x: 권한 없음')
+        self.assertEqual(msgs['close'], 'CMDP 서비스 로그 기록 복구')
+        self.assertNotIn('MODULE', recs[0].get('params') or {})
+
     def test_close_params_from_module_win(self):
         self.ing._transition(self.node, self.ent, self.rule, self.mo, True,
                              params={'peer': 'PEER_KT', 'route': 'r-old'})
