@@ -20,12 +20,12 @@
 
 | 호스트 | 맡는 것 | 소유 경로(이 트랙의 주 편집자) | 시험·배포 |
 |---|---|---|---|
-| **.48** (media01, 테스트베드) | 호 제어·미디어 서버 — S01~S25 | `csp/` · `cmp/` · `cmdp/` · `ext/psip/` · `docs/design/modules/{csp,cmp}.md` · `docs/api/cmp_media_api.md` · `docs/design/features/mcptt_floor_defs.yaml`(생성물 둘 다) · `tests/cmp_*`·`tests/fixtures/mcptt/sip/`(새 골든) | .48 배포본(마음대로 올리고 내린다) |
-| **.45** (라이브 · 단말 빌드 환경) | 설정 평면 서버 C01~C07 + 단말 U01~U09 + 준비·문서 X00·X01 + **.45 라이브 반영** | `csc/` · `sql/`(추가만) · `ems/*/console`(그룹 편집·가입자 칸) · `sdk/` · `android/ptt-client/` · `android/volte-client/` · `sdk/core/cli/` · `ext/pjproject/` · `docs/design/modules/csc.md` | 개발 시험은 .48 에 원격 배포(`scripts/oam-deploy.py`, `OAM_URL=https://121.161.164.48:4419`) · 단말은 .48 대상 `cimsue-cli` · .45 라이브는 §8 |
+| **.48** (media01, 테스트베드) | 호 제어·미디어 서버 — S01~S25 + 준비 X00 | `csp/` · `cmp/` · `cmdp/` · `ext/psip/` · `docs/design/modules/{csp,cmp}.md` · `docs/api/cmp_media_api.md` · `docs/design/features/mcptt_floor_defs.yaml`(생성물 둘 다) · `tests/cmp_*`·`tests/fixtures/mcptt/sip/`(새 골든) | .48 배포본(마음대로 올리고 내린다) |
+| **.45** (라이브 · 단말 빌드 환경) | 설정 평면 서버 C01~C07 + 단말 U01~U09 + 문서 X01 + **.45 라이브 반영** | `csc/` · `sql/`(추가만) · `ems/*/console`(그룹 편집·가입자 칸) · `sdk/` · `android/ptt-client/` · `android/volte-client/` · `sdk/core/cli/` · `ext/pjproject/` · `docs/design/modules/csc.md` | 개발 시험은 .48 에 원격 배포(`scripts/oam-deploy.py`, `OAM_URL=https://121.161.164.48:4419`) · 단말은 .48 대상 `cimsue-cli` · .45 라이브는 §8 |
 | **Windows** | 관제 앱 두 벌의 짝 — W01 | `windows/dispatch-desktop/` · `android/dispatch-tablet/` · `sdk/windows`(빌드) | 관제석 실기 |
 
 - CSC 를 .45 에 둔 까닭 — 설정 문서를 만드는 쪽(CSC)과 읽는 쪽(SDK)이 한 호스트라 문서 기본값·XCAP 경로 전환(C01·C03·C04 ↔ U07)을 한 세션 안에서 맞출 수 있고,
-  Python(CSC) 과 C++(CSP·CMP) 으로 경로가 겹치지 않으며, 일이 두 호스트에 고르게 나뉜다(.48 ≈ 34 세션 · .45 ≈ 21 세션).
+  Python(CSC) 과 C++(CSP·CMP) 으로 경로가 겹치지 않으며, 일이 두 호스트에 고르게 나뉜다(.48 ≈ 35 세션 · .45 ≈ 20 세션).
 - 한 호스트가 비면 상대 WP 를 넘겨받는다 — dev_share 로 묻고 답을 받은 뒤, 그 WP 동안만 상대 소유 경로를 편집한다(웨이브 5 는 .45 가 S22·S24 를 받을 수 있다).
 - 계측기(`ems/tester`·`tester/worker`·`cspsim`·libcsim)는 팀원 트랙이다 — 바꿀 일이 생기면 요구만 넘긴다(S18 선행).
 
@@ -157,7 +157,7 @@ W01 이 주인인 항목은 CMS-13(CMS 변경 구독, 지금 5분 폴링) 하나
 
 | WP | 이름 | 호스트 | 세션 | 할 일 | 상태 |
 |---|---|---|---|---|---|
-| **X00** | 준비 | .45 | 1 | ① 규격 원문 = `/mnt/cims/dev_share/spec/`(README 에 판·없는 것 — 갖춰짐) ② .48 worktree `/home/cims/work/.wt-gap` 와 첫 빌드, .48 배포 자격(사용자) ③ 시험 신원 — .48 `cimsue-cli`(M2 runbook 의 test023~025·gmv1/gmv2 방식으로 MCPTT·MCData 몫) · 계측기 시나리오 목록 | 대기 |
+| **X00** | 준비 | .48 | 1 | .48 첫 세션 — 지시 = dev_share `20261003-0027_45_kickoff-48-gap-track.md`. ① worktree `/home/cims/work/.wt-gap`(브랜치 `gap48`, 공유 트리는 팀원 계측기 트리라 pull 도 하지 않는다)·첫 빌드·S1 기준선(S1-UNIT-CSP·CMP·PSIP) ② 배포 id·`cimsue-cli` 시험 신원(MCPTT·MCData — M2 runbook 의 test023~025·gmv1/gmv2 방식)·계측기 시나리오 목록 ③ dev_share `…_48_done-X00-48.md`. 규격 원문은 `/mnt/cims/dev_share/spec/` 에 갖춰졌다 | 대기 |
 | **X01** | 문서 정정 잔여 | .45 | 1 | 세 목록 §5 중 항목 번호가 없는 줄(근거 절 번호·Warning 절 §4.4→§4.9·mcdata_messaging §3·§5 파일 이름·mcx_identity_scope §10·fixtures README N2·mcvideo.md §9 hang-time 메모) + 세 목록 §4 «미구현 목록에 빠진 기능» 을 정본 미구현 목록(mcptt_standard_conformance §0-R · mcdata_messaging §8 · mcvideo §6 V8)으로 옮긴다. 코드 주석 정정(`csp/CscfModule.cpp` N2 주석 등)은 그 파일을 고치는 WP(S13)가 함께 한다 | 대기 |
 
 ## 6. 순서 — 웨이브
@@ -175,7 +175,7 @@ flowchart LR
 
 | 웨이브 | .48 | .45 | Windows | 끝에 |
 |---|---|---|---|---|
-| **0** 준비 | — | X00 | — | — |
+| **0** 준비 | X00 | — | — | — |
 | **1** 급 A · 한두 줄 · 인가 구멍 | S03 · S05 · S01 · S06 · S07 · S02 (6) | C01 · C03 · U01 · C06(2) · X01 (6) | — | — |
 | **2** 응답 코드 · 인가 판정 · 애드혹 | S10 · S11 · S08 · S09 · S04 (5) | C02 · C07 · U02 · U03 (4) | W01 1차 | .48 회귀(계측기 동봉 시나리오) |
 | **3** 제휴 · 호 모델 | S12(2) · S13(2) · S14(3) (7) | C04 · U06 · U08 (3) | — | D1 이 이 웨이브 전 |
