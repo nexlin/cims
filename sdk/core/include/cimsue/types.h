@@ -327,8 +327,9 @@ struct CallInfo {
     float rxLevel = 1.f;
     int lastCode = 0;
     std::string lastReason;
-    /** 개시 INVITE 최종 응답의 Warning(RFC 3261 §20.43 — 첫 값의 warn-code·warn-text). 같은 응답 코드의 사유를 가른다 — 예: 편성 그룹
-     *  [참여] 403 의 120 «미제휴»(TS 24.379 §10.1.1.4.2 — 제휴를 다시 싣고 다시 건다)와 비멤버 403. 없으면 0·빈 값. */
+    /** 개시 INVITE 최종 응답의 Warning — **MC 문구 번호**와 문구. 규격 형식 `Warning: 399 <agent> "NNN text"`(TS 24.379 §4.4)의 NNN 과
+     *  뒤 문구다(warn-code 399 는 버린다 — 그 형식이 아니면 RFC 3261 §20.43 첫 값의 warn-code·warn-text 그대로). 같은 응답 코드의 사유를
+     *  가른다 — 예: 편성 그룹 [참여] 403 의 120 «미제휴»(§10.1.1.4.2 — 제휴를 다시 싣고 다시 건다)와 116 비멤버. 없으면 0·빈 값. */
     int warningCode = 0;
     std::string warningText;
     std::vector<MediaSource> sources;
@@ -524,6 +525,10 @@ struct RequestResult {
     int code = 0;
     std::string reason;
     std::string etag;                 // SIP-ETag (PUBLISH)
+    /** 최종 응답의 Warning 문구 번호(TS 24.379 §4.4.2 · TS 24.282 §4.9 · TS 24.281 §4.4.2 — `Warning: 399 <host> "NNN text"` 의 NNN, 없으면 0).
+     *  거절 사유를 가른다: 그룹 SDS 403 = 116 비멤버 · 206 SDS 꺼짐 · 213 FD 꺼짐 · 217 크기 초과, 경보 403 등. 호(INVITE)는 CallInfo.warningCode. */
+    int warningCode = 0;
+    std::string warningText;          // 그 문구(번호 뒤)
 };
 
 /** 감시 대상의 dialog 상태 (RFC 4235 dialog-info) — 관제 BLF·INVITE-Join 대상 식별 (dispatch_center.md §5.2·§5.3). */

@@ -56,4 +56,17 @@ internal object CallRules {
         190 -> "애드혹 통화 참가자를 바꿀 권한이 없습니다"                  // not authorised to modify adhoc group call participants
         else -> null
     }.takeIf { statusCode >= 300 }
+
+    /**
+     * 문자·파일(MCData) 전송이 거절됐을 때 사용자에게 보일 사유 — 응답의 Warning 문구 번호(TS 24.282 §4.9)로 가른다. 모르는 번호·Warning 없는
+     * 실패는 null(호출자가 일반 문구를 쓴다).
+     */
+    fun sendRejectionText(statusCode: Int, warningCode: Int): String? = when (warningCode) {
+        116 -> "이 그룹의 멤버가 아닙니다"                                // user is not part of the MCData group
+        120 -> "이 그룹에 참여(제휴)하지 않았습니다"                       // user is not affiliated to this group
+        206 -> "이 그룹은 문자를 쓸 수 없습니다"                          // short data service not allowed for this group
+        213 -> "이 그룹은 파일 전송을 쓸 수 없습니다"                      // file distribution not allowed for this group
+        217 -> "메시지가 너무 큽니다"                                    // unable to send due to message size
+        else -> null
+    }.takeIf { statusCode >= 300 }
 }

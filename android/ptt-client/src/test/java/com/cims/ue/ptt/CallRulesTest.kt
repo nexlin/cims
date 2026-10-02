@@ -55,6 +55,16 @@ class CallRulesTest {
         assertEquals("이 그룹에는 경보를 보낼 수 없습니다", CallRules.rejectionText(403, 168))
     }
 
+    // TS 24.282 §4.9 — 그룹 SDS·FD 거절 사유(403 116·206·213·217)
+    @Test fun `문자 전송 거절 사유는 Warning 번호로 가른다`() {
+        assertEquals("이 그룹의 멤버가 아닙니다", CallRules.sendRejectionText(403, 116))
+        assertEquals("이 그룹은 문자를 쓸 수 없습니다", CallRules.sendRejectionText(403, 206))
+        assertEquals("이 그룹은 파일 전송을 쓸 수 없습니다", CallRules.sendRejectionText(403, 213))
+        assertEquals("메시지가 너무 큽니다", CallRules.sendRejectionText(403, 217))
+        assertNull(CallRules.sendRejectionText(403, 0))
+        assertNull("성공 응답", CallRules.sendRejectionText(200, 217))
+    }
+
     @Test fun `성립한 호의 Warning 은 실패 사유가 아니다`() {
         // 200 OK 의 Warning 122 = «정원 때문에 일부만 불렀다» — 호는 성립했다
         assertNull(CallRules.rejectionText(200, 122))

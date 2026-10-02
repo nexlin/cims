@@ -34,6 +34,11 @@ std::string headerValue(const std::string& wholeMsg, const std::string& name);
  *  형식이 아니면 false(code 0·text 빈 값). */
 bool parseWarning(const std::string& value, int& code, std::string& text);
 
+/** MC 서비스 Warning 의 문구 번호와 문구 — 규격 형식은 `Warning: 399 <agent> "NNN text"`(TS 24.379 §4.4 · TS 24.281 §4.4 · TS 24.282 §4.9):
+ *  warn-code 는 늘 399 이고 사유는 warn-text 의 앞 세 자리 수다. 그 형식이면 code = NNN·text = 뒤 문구, 아니면 RFC 값 그대로
+ *  (parseWarning — warn-code 에 번호를 직접 실은 옛 형식 `120 <agent> "text"` 포함). 형식이 아니면 false. */
+bool parseMcWarning(const std::string& value, int& code, std::string& text);
+
 /** 헤더 값의 URI 사용자부(예: <sip:+8210@d>;x → +8210). */
 std::string uriUser(const std::string& headerVal);
 

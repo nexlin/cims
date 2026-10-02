@@ -46,8 +46,11 @@ internal class MessagingPlane(private val c: PttController) {
     fun onSendResult(r: RequestResult): Boolean {
         val msgId = c.sdsPending.remove(r.token) ?: return false
         val ok = r.code in 200..299
-        if (!ok) Log.w(TAG, "SDS ${r.method} $msgId 실패: ${r.code} ${r.reason}")
-        else if (r.method == "MSRP") c._status.value = "대용량 문자 전송 완료"
+        if (!ok) {
+            Log.w(TAG, "SDS ${r.method} $msgId 실패: ${r.code} ${r.reason} (Warning ${r.warningCode} ${r.warningText})")
+            // 서버가 사유를 준 거절(TS 24.282 §4.9 — 비멤버 116·SDS 꺼짐 206·FD 꺼짐 213·크기 217)은 그 사유를 알린다
+            CallRules.sendRejectionText(r.code, r.warningCode)?.let { why -> c._status.value = "전송 실패 — $why"; c.feedback?.blocked(why) }
+        } else if (r.method == "MSRP") c._status.value = "대용량 문자 전송 완료"
         c._sendResult.tryEmit(msgId to ok)
         return true
     }

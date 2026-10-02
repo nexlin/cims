@@ -931,6 +931,9 @@ TEST(McvCall, RejoinAndWrongGroupType) {
     ASSERT_FALSE(r.csp.recv("ACK ").empty());
     ASSERT_TRUE(r.l.wait([&] { return r.l.hasState(id2, CallState::Disconnected); }));
     EXPECT_EQ(r.eng.callInfo(id2).lastCode, 404);
+    // 사유 = Warning 의 문구 번호(`399 <agent> "117 …"` 의 117 — warn-code 399 가 아니다) · 문구는 번호 뒤
+    EXPECT_EQ(r.eng.callInfo(id2).warningCode, 117);
+    EXPECT_EQ(r.eng.callInfo(id2).warningText, "the group identity indicated in the request is a prearranged group");
 }
 
 // 제어 기능의 멤버 초대(골든 07, §9.2.1.3) → 자동 개시(§6.2.3.1.2): 임시 응답 없이 곧바로 200, Contact = MCVideo 태그, answer = 제어 채널 + fmtp(mc_priority 되돌림 ·

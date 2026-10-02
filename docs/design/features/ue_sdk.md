@@ -279,7 +279,11 @@ C++ 공개 표면은 `cimsue/engine.h` 의 `Engine` 하나이며 계정·호를 
   실패는 코어가 물러나 다시 싣는다). 구독 셋은 스택의 구독(evsub — §11)이라 응답이 코어로 오지 않는다: 유지는 보낸 것을 확인으로 치고
   ①·②·③에 같은 대상을 다시 부른다(살아 있으면 대화 안 갱신, 끝났으면 새 구독). 앱에 남는 것은 ④ 그룹 호가 **403 + Warning 120**
   (미제휴 — TS 24.379 §10.1.1.4.2)으로 끝났을 때 제휴를 다시 싣고 2xx 뒤 한 번 더 거는 것뿐이다 — `CallInfo.warningCode`·`warningText`
-  (개시 INVITE 최종 응답의 Warning, RFC 3261 §20.43)로 미제휴와 비멤버 403 을 가른다(현장 앱 `PttGroups.handleNotAffiliated`). `affiliate()`
+  (개시 INVITE 최종 응답의 Warning — **MC 문구 번호**: 규격 형식 `Warning: 399 <agent> "NNN text"`(TS 24.379 §4.4)의 NNN 과 뒤 문구.
+  warn-code 399 는 버린다, 그 형식이 아니면 RFC 3261 §20.43 값 그대로 — `detail::parseMcWarning`)로 미제휴 120 과 비멤버 116 을 가른다(현장 앱
+  `PttGroups.handleNotAffiliated`). 호 밖의 요청(MESSAGE·PUBLISH·MSRP)은 `RequestResult.warningCode`·`warningText` 가 같은 값을 싣는다 —
+  그룹 SDS 403 의 116 비멤버·206 SDS 꺼짐·213 FD 꺼짐·217 크기 초과(TS 24.282 §4.9), 경보 거절 사유(Kotlin `RequestResult.warningCode`,
+  `cimsue-cli` 출력 `warning`; C API `cimsue_request_result_t` 의 칸은 .NET 파사드와 배치를 맞춰 덧붙인다). `affiliate()`
   의 성공 반환은 «보냈다» 일 뿐이다 — 제휴가 섰는지는 token 의 최종 응답(`onRequestResult` 2xx)으로 본다. 시험 `Upkeep.*`(규칙)·
   `AffiliationUpkeep.SpecFormPublishAndRenewAfterNetworkChange`(가짜 서버 왕복).
 - **MCPTT 제휴 게시는 규격형이다**(TS 24.379 §9.2.1.2). `affiliate(acc, g, on)` 은 계정의 MCPTT 관심 그룹 집합을 바꾸고 **전부**를 한

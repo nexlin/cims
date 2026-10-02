@@ -213,6 +213,16 @@ bool parseWarning(const std::string& value, int& code, std::string& text) {
     return true;
 }
 
+bool parseMcWarning(const std::string& value, int& code, std::string& text) {
+    if (!parseWarning(value, code, text)) return false;
+    if (code == 399 && text.size() >= 3 && std::isdigit((unsigned char)text[0]) && std::isdigit((unsigned char)text[1]) &&
+        std::isdigit((unsigned char)text[2]) && (text.size() == 3 || text[3] == ' ')) {
+        code = std::atoi(text.substr(0, 3).c_str());
+        text = text.size() > 4 ? text.substr(4) : std::string();
+    }
+    return true;
+}
+
 std::string uriUser(const std::string& hv) {
     size_t s = hv.find(':');
     if (s == std::string::npos) return std::string();

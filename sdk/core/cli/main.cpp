@@ -817,6 +817,7 @@ int main(int argc, char** argv) {
             s.extra += qualityJson(eng.callQuality(callId));
             CallInfo ci = ls.calls.count(callId) ? ls.calls[callId] : CallInfo{};
             s.code = ci.lastCode; s.reason = ci.lastReason;
+            if (ci.warningCode) s.extra += ",\"warning\":" + std::to_string(ci.warningCode);   // MC 문구 번호(399 "NNN text" 의 NNN)
             if (ci.state != CallState::Disconnected) {
                 eng.hangup(callId);
                 ls.waitFor([&] { return disconnected(callId); }, 5);
@@ -1046,6 +1047,7 @@ int main(int argc, char** argv) {
         if (tok < 0) { s.outcome = "alert_send_failed"; rc = 7; return finish(-1); }
         bool got = ls.waitFor([&] { return ls.results.count(tok) > 0; }, o.timeoutSec);
         if (got) { s.code = ls.results[tok].code; s.reason = ls.results[tok].reason; }
+        if (got && ls.results[tok].warningCode) s.extra += ",\"warning\":" + std::to_string(ls.results[tok].warningCode);
         if (!got || s.code / 100 != 2) { s.outcome = got ? "alert_rejected" : "alert_timeout"; rc = 7; }
         return finish(-1);
     }
@@ -1062,6 +1064,7 @@ int main(int argc, char** argv) {
         if (plane == "media") std::this_thread::sleep_for(std::chrono::seconds(6));
         s.code = code;
         s.extra = ",\"msg_id\":\"" + sds.msgId + "\",\"plane\":\"" + plane + "\",\"bytes\":" + std::to_string(o.text.size());
+        if (got && ls.results[sds.token].warningCode) s.extra += ",\"warning\":" + std::to_string(ls.results[sds.token].warningCode);
         if (!got || code / 100 != 2) { s.outcome = got ? "sds_rejected" : "sds_timeout"; rc = 7; }
         else if (o.waitDispositionSec > 0) {
             // 전달 확인 통지(§12.2.1.2) — 같은 message ID 의 SDS NOTIFICATION. 그룹이면 멤버마다 하나씩 온다(집계 없음).

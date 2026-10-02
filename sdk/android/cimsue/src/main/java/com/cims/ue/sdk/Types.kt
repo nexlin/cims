@@ -592,9 +592,12 @@ data class SdsSend(val msgId: String, val token: Long) {
 
 /** 임의 요청(PUBLISH/MESSAGE/SUBSCRIBE)의 최종 응답 — token 으로 발신과 상관한다. */
 data class RequestResult(val accountId: Int, val token: Long, val method: String,
-                         val code: Int, val reason: String, val etag: String) {
+                         val code: Int, val reason: String, val etag: String,
+                         /** 최종 응답 Warning 의 MC 문구 번호(`399 <agent> "NNN text"` 의 NNN — TS 24.379 §4.4 · TS 24.282 §4.9, 없으면 0)와 문구.
+                          *  거절 사유를 가른다: 그룹 SDS 403 = 116 비멤버 · 206 SDS 꺼짐 · 213 FD 꺼짐 · 217 크기 초과. */
+                         val warningCode: Int = 0, val warningText: String = "") {
     internal companion object {
-        fun of(r: JniRequestResult) = RequestResult(r.accountId, r.token, r.method, r.code, r.reason, r.etag)
+        fun of(r: JniRequestResult) = RequestResult(r.accountId, r.token, r.method, r.code, r.reason, r.etag, r.warningCode, r.warningText)
     }
 }
 

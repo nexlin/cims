@@ -1435,7 +1435,7 @@ public:
                 prm.e.body.tsxState.tsx.role == PJSIP_ROLE_UAC && prm.e.body.tsxState.tsx.method == "INVITE" &&
                 prm.e.body.tsxState.tsx.statusCode >= 200) {
                 const std::string w = detail::headerValue(prm.e.body.tsxState.src.rdata.wholeMsg, "Warning");
-                warnSeen = !w.empty() && detail::parseWarning(w, warnCode, warnText);
+                warnSeen = !w.empty() && detail::parseMcWarning(w, warnCode, warnText);   // 문구 번호(399 "NNN text" 의 NNN)
             }
         } catch (...) {}
         if (msrp) {                                                       // 앱 호 목록 밖 — 끝나면 정리만
@@ -1785,6 +1785,7 @@ public:
             int64_t grantedSec = 0;                        // 2xx 의 Expires — 게시(RFC 3903 §6 8))·구독(RFC 6665 §4.2.1.1) 모두 싣는다
             if (ts.type == PJSIP_EVENT_RX_MSG) {
                 r.etag = detail::headerValue(ts.src.rdata.wholeMsg, "SIP-ETag");
+                detail::parseMcWarning(detail::headerValue(ts.src.rdata.wholeMsg, "Warning"), r.warningCode, r.warningText);
                 const std::string ex = detail::headerValue(ts.src.rdata.wholeMsg, "Expires");
                 if (!ex.empty()) grantedSec = std::strtoll(ex.c_str(), nullptr, 10);
             }

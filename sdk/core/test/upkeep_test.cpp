@@ -136,3 +136,21 @@ TEST(Warning, ParsesFirstValue) {
     EXPECT_FALSE(parseWarning("1200 host \"x\"", code, text));
     EXPECT_FALSE(parseWarning("", code, text));
 }
+
+// MC 서비스 Warning — 규격 형식은 `399 <agent> "NNN text"`(TS 24.379 §4.4): 앱이 보는 번호는 NNN 이다(CallInfo·RequestResult.warningCode)
+TEST(Warning, McPhraseNumberComesFromWarnText) {
+    int code = 0;
+    std::string text;
+    ASSERT_TRUE(parseMcWarning("399 ptt.cims.example.kr \"120 user is not affiliated to this group\"", code, text));
+    EXPECT_EQ(code, 120);
+    EXPECT_EQ(text, "user is not affiliated to this group");
+    ASSERT_TRUE(parseMcWarning("399 cims \"217\"", code, text));               // 번호만
+    EXPECT_EQ(code, 217); EXPECT_TRUE(text.empty());
+    ASSERT_TRUE(parseMcWarning("120 ptt.test \"user is not affiliated to this group\"", code, text));   // 옛 형식 — 그대로
+    EXPECT_EQ(code, 120); EXPECT_EQ(text, "user is not affiliated to this group");
+    ASSERT_TRUE(parseMcWarning("399 proxy \"Miscellaneous warning\"", code, text));   // MC 문구가 아닌 399 — RFC 값 그대로
+    EXPECT_EQ(code, 399); EXPECT_EQ(text, "Miscellaneous warning");
+    ASSERT_TRUE(parseMcWarning("399 x \"1234 not a phrase number\"", code, text));
+    EXPECT_EQ(code, 399);
+    EXPECT_FALSE(parseMcWarning("", code, text));
+}
