@@ -249,11 +249,17 @@ CREATE TABLE IF NOT EXISTS ptt_user_profile (
     emergency_private_recipient VARCHAR(64) DEFAULT NULL
         COMMENT '사전 지정 긴급 수신자 (ptt_subscriptions.id) — UsePreConfigured 모드 대상. NULL=미지정(그 모드에선 미인가)',
     allow_ambient_listening TINYINT(1) NOT NULL DEFAULT 0
-        COMMENT 'allow-ambient-listening (TS 24.484 ruleset) — 원격 청취 수행 자격 (관제사, dispatch_center.md §5.6)',
+        COMMENT 'cims:allow-ambient-listening (CIMS 확장, user profile ruleset 자리) — PTT 그룹 호 청취 자격 (관제사, dispatch_center.md §5.6)',
     allow_create_group    TINYINT(1)   NOT NULL DEFAULT 0
         COMMENT 'allow-create-group (CIMS 확장, TS 24.484 ruleset 자리) — GMS XCAP 그룹 생성 자격 (관제사, mcptt_authorization.md §3). 수정·삭제는 소유(authorized_user_id)로 판정',
     allow_non_ack_users_info TINYINT(1) NOT NULL DEFAULT 0
         COMMENT 'allow-to-receive-non-acknowledged-users-information (TS 24.484 ruleset anyExt, TS 24.483 AuthorisedReceiveNonAcknowledged) — 그룹 호 개시자로서 확인 통화 설정이 필수 멤버 없이 진행될 때 응답하지 않은 멤버 목록(INFO)을 받을 자격 (TS 24.379 §6.3.3.3)',
+    allow_private_call    TINYINT(1)   NOT NULL DEFAULT 1
+        COMMENT 'allow-private-call (TS 24.484 ruleset) — 개별 호 발신 인가 (TS 24.379 §11.1.1.3.1.1 — 0 이면 403 107)',
+    allow_private_call_to_any_user TINYINT(1) NOT NULL DEFAULT 1
+        COMMENT 'allow-private-call-to-any-user (TS 24.484 ruleset) — 개별 호 상대를 PrivateCallList 로 한정하지 않는다 (0 이면 목록 밖 403 144)',
+    allow_private_call_participation TINYINT(1) NOT NULL DEFAULT 1
+        COMMENT 'allow-private-call-participation (TS 24.484 ruleset) — 개별 호 착신 참가 인가 (TS 24.379 §11.1.1.3.2 — 0 이면 403 127)',
     update_time           DATETIME     DEFAULT NULL,
     PRIMARY KEY (ptt_id),
     CONSTRAINT fk_pup_ptt_sub FOREIGN KEY (ptt_id) REFERENCES ptt_subscriptions (id) ON DELETE CASCADE,

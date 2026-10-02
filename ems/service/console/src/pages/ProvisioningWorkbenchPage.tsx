@@ -669,7 +669,9 @@ function LineCard({ user, row, catalog, pttGroups, phoneGroups, canWrite, highli
       allow_ambient_listening: !!prof.allow_ambient_listening, allow_create_group: !!prof.allow_create_group, allow_non_ack_users_info: !!prof.allow_non_ack_users_info,
       allow_cancel_group_emergency: prof.allow_cancel_group_emergency ?? mcpttProfileOptDefault('allow_cancel_group_emergency', prof),
       allow_cancel_imminent_peril: prof.allow_cancel_imminent_peril ?? mcpttProfileOptDefault('allow_cancel_imminent_peril', prof),
-      allow_cancel_emergency_alert: prof.allow_cancel_emergency_alert ?? mcpttProfileOptDefault('allow_cancel_emergency_alert', prof) })
+      allow_cancel_emergency_alert: prof.allow_cancel_emergency_alert ?? mcpttProfileOptDefault('allow_cancel_emergency_alert', prof),
+      allow_private_call: prof.allow_private_call ?? true, allow_private_call_to_any_user: prof.allow_private_call_to_any_user ?? true,
+      allow_private_call_participation: prof.allow_private_call_participation ?? true })
     // 링백 음원 후보 — 서비스 음원 라이브러리(announcements.md §7). 못 읽으면 직접 입력만
     if (spec.showIcb && hasRingback && media === null) announcementsApi.list().then(r => setMedia(r.media.map(m => m.id))).catch(() => setMedia([]))
   }, [editing, sub, svc, prof, spec.showIcb, hasRingback, media])
@@ -795,6 +797,14 @@ function LineCard({ user, row, catalog, pttGroups, phoneGroups, canWrite, highli
                     ...(!prof.exists ? [['', <span className="text-xs text-muted-foreground">(저장된 프로파일 없음 — 서버 기본값)</span>] as [string, React.ReactNode]] : []),
                   ]} />}
               </Section>
+              {prof && (
+                <Section title="개별 통화">
+                  <KV rows={[
+                    ['발신', (prof.allow_private_call ?? true) ? ((prof.allow_private_call_to_any_user ?? true) ? '허용 — 누구에게나' : '허용 — 같은 그룹 동료만') : '차단'],
+                    ['착신', (prof.allow_private_call_participation ?? true) ? '허용' : '차단'],
+                  ]} />
+                </Section>
+              )}
               {prof && (
                 <Section title="그룹 통화">
                   <KV rows={[
@@ -938,8 +948,18 @@ function LineCard({ user, row, catalog, pttGroups, phoneGroups, canWrite, highli
                     )}
                   </div>
                 )}
-                <div className="text-xs text-muted-foreground">긴급 그룹은 소속 그룹 중에서 고른다(TS 24.484 entry-info). 해제 인가(allow-cancel-*): 긴급 해제 = 개시자가 아니어도 그룹의 긴급 상태를 푼다(개시자는 항상), 임박 위험 해제 = 개시자도 이 값을 따른다, 경보 취소 = 남의 경보 포함(TS 24.379 §6.3.3.1.13). 청취 자격(allow-ambient-listening)은 역할 배정으로 정해지며 여기서 편집하지 않는다.</div>
+                <div className="text-xs text-muted-foreground">긴급 그룹은 소속 그룹 중에서 고른다(TS 24.484 entry-info). 해제 인가(allow-cancel-*): 긴급 해제 = 개시자가 아니어도 그룹의 긴급 상태를 푼다(개시자는 항상), 임박 위험 해제 = 개시자도 이 값을 따른다, 경보 취소 = 남의 경보 포함(TS 24.379 §6.3.3.1.13). 청취 자격은 역할 배정으로 정해지며 여기서 편집하지 않는다.</div>
               </Section>
+              {pform && (
+                <Section title="개별 통화">
+                  <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-sm">
+                    <label className="flex items-center gap-2" title="allow-private-call"><Checkbox checked={pform.allow_private_call ?? true} onCheckedChange={c => setPform({ ...pform, allow_private_call: c === true })} /> 발신</label>
+                    <label className="flex items-center gap-2" title="allow-private-call-to-any-user"><Checkbox checked={pform.allow_private_call_to_any_user ?? true} disabled={!(pform.allow_private_call ?? true)} onCheckedChange={c => setPform({ ...pform, allow_private_call_to_any_user: c === true })} /> 목록 밖 상대에게도</label>
+                    <label className="flex items-center gap-2" title="allow-private-call-participation"><Checkbox checked={pform.allow_private_call_participation ?? true} onCheckedChange={c => setPform({ ...pform, allow_private_call_participation: c === true })} /> 착신 참가</label>
+                  </div>
+                  <div className="text-xs text-muted-foreground">개별 호 인가(TS 24.484 user profile). 발신을 끄면 서버가 403(Warning 107)으로 거절한다. «목록 밖 상대에게도» 를 끄면 같은 그룹 동료(PrivateCallList)에게만 걸 수 있다(목록 밖 144). 착신 참가를 끄면 이 사용자에게 오는 개별 호가 거절된다(127).</div>
+                </Section>
+              )}
               {pform && (
                 <Section title="그룹 통화">
                   <label className="flex items-center gap-2 text-sm"><Checkbox checked={!!pform.allow_non_ack_users_info} onCheckedChange={c => setPform({ ...pform, allow_non_ack_users_info: c === true })} /> 미응답 멤버 알림 수신</label>

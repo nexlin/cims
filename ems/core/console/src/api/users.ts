@@ -66,7 +66,7 @@ export interface McpttProfile {
   allow_emergency_private_call: boolean  // 긴급 사설콜(1:1) 개시 인가 (TS 24.379 §11)
   private_emergency_mode: 'LocallyDetermined' | 'UsePreConfigured'  // 긴급 사설콜 대상 결정
   emergency_private_recipient: string | null // UsePreConfigured 의 지정 수신자 (PTT 번호 — 서버가 존재검증)
-  // allow-ambient-listening (TS 24.484) — PTT 그룹콜 청취·원격 청취 수행 자격 (관제사, 기본 false).
+  // cims:allow-ambient-listening (CIMS 확장) — PTT 그룹콜 청취 수행 자격 (관제사, 기본 false).
   //   범위는 역할 ptt_listen, 값은 역할 배정의 결과로 CSC 가 동기(mcptt_authorization.md §2.4). 컬럼 미적용 DB 는 false.
   allow_ambient_listening?: boolean
   // allow-create-group (CIMS 확장) — GMS XCAP 그룹 생성 자격 (관제사, 기본 false, mcptt_authorization.md §3). 컬럼 미적용 DB 는 false.
@@ -81,18 +81,27 @@ export interface McpttProfile {
   allow_cancel_imminent_peril?: boolean
   //   allow-cancel-emergency-alert — 긴급 경보 취소 (남의 경보 포함 — §6.3.3.1.13.3, 기본 = allow_emergency_alert)
   allow_cancel_emergency_alert?: boolean
+  // 개별 호 인가 (TS 24.484 ruleset — 요소가 없으면 false 라 문서에 늘 싣는다). 컬럼 미적용 DB 는 true.
+  //   allow-private-call — 개별 호 발신 (false 면 서버 403 107 — TS 24.379 §11.1.1.3.1.1)
+  allow_private_call?: boolean
+  //   allow-private-call-to-any-user — 상대를 PrivateCallList(같은 그룹 동료)로 한정하지 않는다 (false 면 목록 밖 403 144)
+  allow_private_call_to_any_user?: boolean
+  //   allow-private-call-participation — 개별 호 착신 참가 (false 면 403 127 — §11.1.1.3.2)
+  allow_private_call_participation?: boolean
 }
 
 // 선택 컬럼(마이그레이션 의존) 자격 — 컬럼 미적용 DB 에 키를 실으면 PUT 이 400 schema_not_migrated, 키가 없으면 서버가
 //   부재 시 값(mcpttProfileOptDefault)으로 쓴다.
 export const MCPTT_PROFILE_OPT_KEYS = ['allow_ambient_listening', 'allow_create_group', 'allow_non_ack_users_info',
-  'allow_cancel_group_emergency', 'allow_cancel_imminent_peril', 'allow_cancel_emergency_alert'] as const
+  'allow_cancel_group_emergency', 'allow_cancel_imminent_peril', 'allow_cancel_emergency_alert',
+  'allow_private_call', 'allow_private_call_to_any_user', 'allow_private_call_participation'] as const
 export type McpttProfileOptKey = typeof MCPTT_PROFILE_OPT_KEYS[number]
 
-// 선택 컬럼의 부재 시 값 — 서버(CSC services.mcptt.user_profile_opt_default)와 같은 규칙: 대개 false, 임박 위험 해제 true,
-//   경보 취소 = 같은 프로파일의 발령 인가.
+// 선택 컬럼의 부재 시 값 — 서버(CSC services.mcptt.user_profile_opt_default)와 같은 규칙: 대개 false, 임박 위험 해제·개별 호
+//   인가 셋 true, 경보 취소 = 같은 프로파일의 발령 인가.
 export function mcpttProfileOptDefault(k: McpttProfileOptKey, p: Pick<McpttProfile, 'allow_emergency_alert'>): boolean {
   if (k === 'allow_cancel_imminent_peril') return true
+  if (k === 'allow_private_call' || k === 'allow_private_call_to_any_user' || k === 'allow_private_call_participation') return true
   if (k === 'allow_cancel_emergency_alert') return !!p.allow_emergency_alert
   return false
 }

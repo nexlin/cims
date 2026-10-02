@@ -47,17 +47,17 @@ PTT(MCPTT) 서비스 구현을 3GPP 규격 원문과 대조해 **규격과 다�
 | 그룹 호 — 서버 (GCS) | 22 | 9 | 7 | 5 | 1 |
 | 그룹 호 — 단말 (GCC) | 9 | — | 7 | — | 2 |
 | 개별 호 (PRV) | 9 | 4 | 4 | 1 | — |
-| 애드혹 그룹 호 (ADH) | 10 | 4 | 4 | 1 | 1 |
+| 애드혹 그룹 호 (ADH) | 9 | 4 | 3 | 1 | 1 |
 | 긴급·임박·경보 (EMG) | 17 | 6 | 3 | 8 | — |
 | 발언권 — 서버 (FCS) | 20 | 2 | 9 | 6 | 3 |
 | 발언권 — 단말 (FCC) | 1 | — | — | 1 | — |
 | 발언권 SDP 협상 (SDP) | 3 | 1 | 2 | — | — |
 | 그룹 문서·GMS (GMS) | 13 | — | 12 | 1 | — |
-| 설정 문서·CMS (CMS) | 9 | 1 | 4 | 3 | 1 |
+| 설정 문서·CMS (CMS) | 8 | — | 4 | 3 | 1 |
 | 신원 관리 (IDM) | 9 | 4 | 1 | 3 | 1 |
-| **계** | **137** | **37** | **60** | **30** | **10** |
+| **계** | **135** | **36** | **59** | **30** | **10** |
 
-확인 수준 — ◎ 73 · ○ 50 · △ 14.
+확인 수준 — ◎ 71 · ○ 50 · △ 14.
 
 읽는 순서 — §2(먼저 볼 것) → §3(영역별 전체) → §4(미구현 목록에 빠진 기능) → §5(문서 정정) → §6(묶음과 순서).
 
@@ -182,7 +182,6 @@ CSP 는 참여 기능과 제어 기능을 겸한다.
 
 | # | 급 | 대상 | 규격 | CIMS 지금 | 영향 | 확인 |
 |---|---|---|---|---|---|---|
-| ADH-1 | B | CSC·CSP·SDK | §17.2.2.1.1 — service configuration 에 `<allow-adhoc-group-call-support>` 가 없으면 단말은 개시하지 않는다. §17.4.2.2 5) — 서버는 403 + `186`. TS 24.484 §8.4.2.6 — `<adhoc-group-call>` 이 없으면 «미지원» | 문서에 `<adhoc-group-call>` 이 없다(`csc/src/services/mcptt.py:1845-1855`). 스위치는 csp.json `PttAdhocEnabled` 뿐이고 SDK 는 user profile 만 본다 | 규격 단말은 CIMS 에서 애드혹 호를 개시하지 않는다. 타이머 D5·D6 과 같은 요소 — 함께 넣는다 | ◎ |
 | ADH-2 | A | CSP | §17.4.2.2 10) — 서버가 애드혹 그룹 ID 를 만들고 200 OK `<mcptt-calling-group-id>` 로 돌려준다 | 그룹 id = Request-URI user(`clsAdhoc._id = pszTo`) — `csp/ModuleDispatcher.cpp:1010-1043`. 규격형(R-URI = PSI)이면 모든 애드혹 호가 PSI 이름 하나로 모인다 | 두 번째 동시 호가 «비멤버 403» 이거나 남의 세션에 합류한다. ID 서버 부여 미구현(이미 문서에 있음)의 실제 증상 | ◎ |
 | ADH-3 | A | CSP·CSC | §17.4.2.2 6) — 초대 인원이 `<max-no-participants>` 를 넘으면 403 + `189` | resource-lists 전원을 상한 없이 멤버로 넣는다 — `csp/ModuleDispatcher.cpp:1011-1039` | INVITE 한 건으로 수백 명 fan-out | ◎ |
 | ADH-4 | B | CSP | §17.3.2.1.1 9) — 미인가 403 + `185`. 4) — `184` | Warning 없는 403 — `csp/ModuleDispatcher.cpp:1015-1022`. 프로파일 조회 실패면 통과. 스위치가 꺼져 있으면 «없는 그룹» 403 | 단말이 «권한 없음»·«시스템 미지원»·«없는 그룹» 을 가르지 못한다 | ◎ |
@@ -280,7 +279,6 @@ CSP 는 참여 기능과 제어 기능을 겸한다.
 |---|---|---|---|---|---|---|
 | CMS-1 | B | CSC·CSP·SDK | §8.4.2.8·§8.4.2.9 — service configuration 은 global 문서, 이름 `service-config.xml` (`…/org.3gpp.mcptt.service-config/global/…/service-config.xml`) | 라우트는 `/org.3gpp.mcptt.service-config/users` 하나, `users/{xui}/service-config` + 본인 검사 — `csc/src/services/mcptt.py:3841`. SDK·CSP NOTIFY `sel` 도 같은 경로. MCVideo 문서는 global 로 서빙한다(`:3843`) | 규격 단말의 GET 이 404 — Resource-Priority·타이머·신호 보호 설정을 못 받는다 | ◎ |
 | CMS-2 | B | CSC·CSP·SDK | §8.3.1A · §8.3.2.8 — user profile 문서 = `…/users/sip:MCPTTID/mcptt-user-profile-<index>.xml` | 핸들러가 `/user-profile` 문자열로 XUI 를 자른다 — `mcptt.py:2955-2967`. 규격 이름이면 `tel:` XUI 는 403 | 규격 단말의 user profile 조회가 실패한다 | ◎ |
-| CMS-3 | A | CSC·CSP·SDK | §8.3.2.1 11) · 표 8.3.2.7 — ruleset 의 인가 요소. `<allow-private-call>` 등은 **요소가 없으면 false** | actions 에 일곱 요소 + anyExt 둘뿐이다 — `mcptt.py:1744-1762`. 없는 것: `allow-private-call`·`allow-private-call-to-any-user`·`allow-manual-commencement`·`allow-automatic-commencement`·`allow-force-auto-answer`·`allow-imminent-peril-call`·`allow-cancel-private-emergency-call`·`allow-private-call-participation`·`allow-adhoc-group-call-participation`·`allow-to-modify-adhoc-group-call-participants-info`. SDK 는 «없음 = 허용» 으로 읽는다(`sdk/core/src/csc/cms_doc.cpp:17-21`) | 규격 단말은 개별 호·임박 위험 호를 미인가로 본다. 운영자가 사용자별로 끌 수단이 없다(앱의 게이트는 늘 통과). 서버 판정은 PRV-2·PRV-4·PRV-8·EMG-4·ADH-5·ADH-6 | ◎ |
 | CMS-5 | B | CSC·CSP | §8.3.2.12 — user profile 문서의 변경을 구독자에게 통지 | 문서의 `<MCPTTGroupInfo>`·`<ImplicitAffiliations>`·`<PrivateCallList>` 는 그룹 멤버십에서 나오는데, 그룹 변경은 `GROUP_CHANGED`(gms 구독자 통지)만 낸다. `UserProfile.*` 설정 재적재도 통지가 없다(`mcptt.py:364-369`) | user profile 을 그룹 목록의 원천으로 쓰는 규격 단말은 편성 변경을 재로그인 전까지 모른다 | ○ |
 | CMS-9 | B | CSC | §5.2 — CMS 는 문서 생성·수정·삭제와 요소 단위 절차를 지원 | user profile·service config 핸들러가 메서드를 가리지 않는다 — PUT·DELETE 에도 200 + 문서 — `mcptt.py:2945-3017` | 규격 CMC 의 수정이 «성공한 것처럼» 보인다 | ○ |
 | CMS-10 | C | CSC | TS 24.482 A.2.3 — Bearer 가 없으면 403 | 401 + `WWW-Authenticate: Bearer` — `mcptt.py:1322-1327` | RFC 6750 관행과는 맞다. 401·403 분기가 규격과 반대 | ○ |
@@ -337,7 +335,7 @@ mcptt_standard_conformance.md §0-R 은 통째 미구현 기능을 나열하는�
 | 같은 문서 F4 · cmp_media_api.md §7.7 · mcptt_timers.md §5.2 | T2 에서 긴급·임박 화자 제외 | 코드는 긴급만(emergency_modes §3.1 과는 일치) | FCS-21 |
 | 같은 문서 F5 | MCPTT ID 는 `PTT_JOIN.user_uri` | MCPTT 경로는 `user_uri` 를 보내지 않는다 | FCS-5 |
 | 같은 문서 §0 S3 | xcap-diff SUBSCRIBE/NOTIFY 정합 | 본문 미해석·`sel` 고정·`new-etag` 불일치 | GMS-14·GMS-15 |
-| 같은 문서 §0 S4 · §3 CMS | service-config·user-profile 정합 | 문서 주소·이름이 규격과 다르고 인가 요소가 빠졌다 | CMS-1~CMS-3 |
+| 같은 문서 §0 S4 · §3 CMS | service-config·user-profile 정합 | 문서 주소·이름이 규격과 다르다 | CMS-1·CMS-2 |
 | ptt_flows.md B4·B6 | 제휴 PUBLISH 도식의 `Event: poc-settings` · late entry 는 «UE 주도 = 규격 모델» · «서버는 개시 시 fan-out 만» · «de-affiliate 시 이탈» | poc-settings 는 489 · 규격은 서버 초대 · 합류 때마다 재초대 · 해제해도 leg 유지 | REG-2·GCS-3·GCS-4·GCS-22 |
 | mcptt_broadcast_group_call.md R4 | chat = 서버가 초대하지 않음 | 서버가 10초마다 초대 | GCS-1 |
 | server45_handoff.md §12.6 C12 | REGISTER Contact 의 MCPTT 태그 — «앱은 싣는다» | 앱도 싣지 않는다 | REG-1 |
@@ -357,9 +355,9 @@ mcptt_standard_conformance.md §0-R 은 통째 미구현 기능을 나열하는�
 | 1 | **문서 값 한두 줄** — 문서 셋의 T2 제외 대상 | FCS-21(문서) | .48 |
 | 2 | **발언권 메시지 정합** — Ack 의 Message Type · 미대기 Queue Position 254 · Granted Duration | FCS-4 · FCS-8 · FCS-20 | .45 SDK·CMP |
 | 3 | **인가 구멍** | EMG-1 · EMG-2 · SDP-3 · ADH-3 · IDM-1 · IDM-3 · IDM-4 · IDM-5 | .45 CSP·CMP·CSC·SDK |
-| 4 | **user profile 인가 요소와 서버 판정** — 요소를 싣고(없음 = false), CSP 가 본다, SDK 의 «없음 = 허용» 을 뒤집는다 | CMS-3 · PRV-2 · PRV-4 · PRV-8 · EMG-4 · ADH-5 | .45 CSC·CSP·SDK → Windows(콘솔 칸은 .45) |
+| 4 | **user profile 인가 요소의 서버 판정** — 문서는 요소를 싣는다(`ptt_user_profile.allow_private_call*`), CSP 가 그 값으로 판정한다 | PRV-2 · PRV-4 · PRV-8 · EMG-4 · ADH-5 | .48 CSP → Windows(Capabilities) |
 | 5 | **Warning 코드** — 거절 사유를 규격 코드로. handoff §14 K1(SDK 가 Warning 을 올림)과 한 묶음 | GCS-7 · GCS-8 · GCS-11 · REG-3 · ADH-4 · PRV-6 · PRV-7 · EMG-5 | .45 CSP·SDK → Windows(문구 사전) |
-| 6 | **service configuration 요소** — `<private-call>`·`<adhoc-group-call>`. 타이머 D5·D6 과 같은 자리 | ADH-1 · ADH-3 · PRV-5 | .45 CSC·CSP |
+| 6 | **service configuration 요소의 서버 판정** — `<private-call>`·`<adhoc-group-call>` 값을 CSP 가 쓴다 | ADH-3 · PRV-5 | .48 CSP |
 | 7 | **SDK 요청 규격화** — REGISTER Contact 태그, INVITE 헤더·Request-URI(PSI)·`<mcptt-client-id>`·session-type, 개별 호 resource-lists, 재합류 세션 식별자, conference·xcap-diff SUBSCRIBE. 서버가 양쪽을 받는 전환기를 먼저 둔다(PRV-1) — 서버 쪽 검사(GCS-9·GCS-10)는 SDK 뒤 | REG-1 · GCC-1~GCC-4 · GCC-7 · GCC-8 · PRV-1 · ADH-8 · GMS-16 · SDP-1 | .45 SDK·CSP |
 | 8 | **제휴를 클라이언트 단위로** — 행 키 통일, 클라이언트 단위 해제·판정, 암묵 제휴 취소. handoff §14 K3·S2 와 한 묶음 | AFF-2~AFF-8 · AFF-12 · EMG-3 | .45 CSP·SDK |
 | 9 | **호 모델 결정** — chat 그룹(초대 없이 합류·1명 이하 해제)과 편성 그룹의 재초대·late call entry·제휴 해제 시 이탈. 규격대로 바꿀지, 편차로 남기고 사유를 적을지 정한다 | GCS-1~GCS-4 · GCS-22 · AFF-11 | 결정 → .45 CSP |

@@ -183,8 +183,11 @@ C++ 공개 표면은 `cimsue/engine.h` 의 `Engine` 하나이며 계정·호를 
   노출하고 앱은 버튼을 숨길 뿐이다. 최종 판정은 서버(403/Floor Deny). 문서를 아직 못 받았으면 게이트를 걸지
   않는다(android_ue_client §7 과 동일). 해석 = `CscClient::fetchUserProfile`·`fetchServiceConfig`(ETag·304 = `notModified`) →
   `UserProfileDoc`(TS 24.484 §8.3.2 — 긴급 대상 EntryType(`entry-info` 모드 + `uri-entry`)·제휴 그룹·N2·ruleset allow-*, **요소가 없으면
-  허용**)·`ServiceConfigDoc`(§8.4 — `service-configuration-info` 루트, domain·broadcast-group 계층 수·on-network Resource-Priority
-  r-value `mcpttp.15` 형식 — 받으면 앱이 `AccountConfig.rp*` 에 넣는다. 인가 요소는 없다) → `Capabilities::of(up, sc)`(nullptr = 미수신).
+  false** — 표 8.3.2.7 의 규격 기본값. 인가를 주는 것은 문서에 "true" 로 적힌 요소뿐이다)·`ServiceConfigDoc`(§8.4 — `service-configuration-info`
+  루트, domain·broadcast-group 계층 수·on-network Resource-Priority r-value `mcpttp.15` 형식 — 받으면 앱이 `AccountConfig.rp*` 에 넣는다 ·
+  `adhocGroupCallSupport` = `<anyExt><adhoc-group-call><allow-adhoc-group-call-support>`, 요소가 없으면 미지원(§8.4.2.6). 사용자 인가 요소는
+  없다) → `Capabilities::of(up, sc)`(nullptr = 미수신). 애드혹 = allow-adhoc-group-call ∧ 시스템 지원(TS 24.379 §17.2.2.1.1 — service
+  configuration 을 받은 경우만. C API·Kotlin 파사드는 지원 여부를 아직 옮기지 않는다).
   규칙은 코어 한 곳이다 — 긴급 사설콜 = allow-private-call ∧ allow-emergency-private-call(둘 다 user profile). ad hoc 인가는 규격
   `<anyExt><allow-adhoc-group-call>` 과 옛 서버 확장 `<cims:allow-adhoc-group-call>` 을 로컬 이름으로 함께 읽는다. 해제 인가 =
   `cancelGroupEmergency`(allow-cancel-group-emergency, TS 24.484 §8.3.2.1 11)xiv))·`cancelImminentPeril`(allow-cancel-imminent-peril, xvii))·
@@ -202,7 +205,7 @@ C++ 공개 표면은 `cimsue/engine.h` 의 `Engine` 하나이며 계정·호를 
   `<mcvideo-mcvideo-id>` 를 골든과 같은 순서로 낸다(TS 24.481 XSD 엄격 검증 통과). `present` 가 아니면 싣지 않고, 서버는 MCVideo `<service>` 가 없는
   PUT 으로 MCVideo 설정을 바꾸지 않는다(전환기). CMS 두 문서 = `fetchMcVideoUserProfile(token, mcvideoId)`(`/org.3gpp.mcvideo.user-profile/users/
   <MCVideo ID>/mcvideo-user-profile-1.xml`, 404 = 이용 자격 없음) → `McVideoUserProfileDoc`(MCVideo 그룹 목록·`MaxSimultaneousVideoStreams`·N2·N6·
-  긴급 대상·ruleset allow-* — 요소가 없으면 허용) · `fetchMcVideoServiceConfig(token)`(전역 `/org.3gpp.mcvideo.service-config/global/
+  긴급 대상·ruleset allow-* — 요소가 없으면 false, 표 9.3.2.7) · `fetchMcVideoServiceConfig(token)`(전역 `/org.3gpp.mcvideo.service-config/global/
   mcvideo-service-config.xml`) → `McVideoServiceConfigDoc`(RP·신호 보호 — 요소가 없으면 켜짐 — ·참여자 T100~T104 초). 토큰은 MCVideo scope 넷을
   요청한다(`CscEndpoint.scope` 기본값 — 서버는 자격 있는 사용자에게만 준다).
 - **긴급·임박 세션 조건**(TS 24.379 §10.1.1.2.1.3~6, [mcptt_emergency_modes.md](mcptt_emergency_modes.md) §4.2·§4.3). `CallInfo.condition` 이

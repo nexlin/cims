@@ -208,8 +208,10 @@ class UserProfileDocTest(unittest.TestCase):
         ext = root.find("cp:ruleset/cp:rule/cp:actions/up:anyExt", NS)
         self.assertEqual(ext.find("up:allow-to-receive-non-acknowledged-users-information", NS).text, "false")
         self.assertEqual([c.tag.split("}")[1] for c in ext],
-                         ["allow-to-receive-non-acknowledged-users-information", "allow-adhoc-group-call"],
-                         "anyExt 자식 순서 = §8.3.2.1 11)xxxviii) 목록 순(L → R)")
+                         ["allow-to-receive-private-call-from-any-user", "allow-to-receive-non-acknowledged-users-information",
+                          "allow-adhoc-group-call", "allow-adhoc-group-call-participation",
+                          "allow-to-modify-adhoc-group-call-participants-info"],
+                         "anyExt 자식 순서 = §8.3.2.1 11)xxxviii) 목록 순(K → L → R → S → AA)")
         m.PTT_PROFILES["+82500000001"] = dict(m.DEFAULT_USER_PROFILE, allow_non_ack_users_info=True)
         _, root, _ = self._doc()
         self.assertEqual(root.find("cp:ruleset/cp:rule/cp:actions/up:anyExt/"
@@ -219,8 +221,11 @@ class UserProfileDocTest(unittest.TestCase):
         _, root, _ = self._doc()
         self.assertEqual(root.find(".//up:allow-to-receive-non-acknowledged-users-information", NS).text, "false")
 
-    ACTIONS_ORDER = ["allow-emergency-group-call", "allow-emergency-private-call", "allow-cancel-group-emergency",
+    ACTIONS_ORDER = ["allow-private-call", "allow-manual-commencement", "allow-automatic-commencement", "allow-force-auto-answer",
+                     "allow-emergency-group-call", "allow-emergency-private-call", "allow-cancel-group-emergency",
+                     "allow-cancel-private-emergency-call", "allow-imminent-peril-call",
                      "allow-cancel-imminent-peril", "allow-activate-emergency-alert", "allow-cancel-emergency-alert",
+                     "allow-private-call-to-any-user", "allow-private-call-participation",
                      "anyExt", "allow-adhoc-group-call", "allow-create-group", "allow-ambient-listening"]
 
     def _acts(self):
@@ -228,7 +233,8 @@ class UserProfileDocTest(unittest.TestCase):
         return root.find("cp:ruleset/cp:rule/cp:actions", NS)
 
     def test_cancel_authorisation_order_and_defaults(self):
-        # TS 24.484 §8.3.2.1 11) 목록 순 — 긴급 개시 둘 → 해제 둘 → 경보 발령·취소 → anyExt, 그 뒤 cims 확장(애드혹 별칭·그룹 생성·청취)
+        # TS 24.484 §8.3.2.1 11) 목록 순(vii~x 개별 호 → xii~xix 긴급·임박·경보 → xxvii·xxix 개별 호 any-user·착신) → anyExt,
+        #   그 뒤 cims 확장(애드혹 별칭·그룹 생성·청취)
         acts = self._acts()
         self.assertEqual([c.tag.split("}")[1] for c in acts], self.ACTIONS_ORDER)
         self.assertEqual([c.tag.split("}")[0][1:] for c in acts][-3:], [NS["cims"]] * 3)
@@ -274,6 +280,35 @@ class UserProfileDocTest(unittest.TestCase):
 
     def test_unknown_user(self):
         self.assertEqual(m.get_user_profile_xml("tel:+0"), (None, None))
+
+    def test_private_call_authorisation_elements(self):
+        # CMS-3 — 개별 호·임박 위험·애드혹 참가 인가 요소는 없으면 false(TS 24.484 표 8.3.2.7-7·-16·-27·-29·-48)라 늘 싣는다
+        acts = self._acts()
+        t = lambda p: acts.find(p, NS).text
+        self.assertEqual([t("up:allow-private-call"), t("up:allow-manual-commencement"), t("up:allow-automatic-commencement"),
+                          t("up:allow-force-auto-answer")], ["true", "true", "true", "false"])
+        self.assertEqual([t("up:allow-private-call-to-any-user"), t("up:allow-private-call-participation"),
+                          t("up:anyExt/up:allow-to-receive-private-call-from-any-user")], ["true", "true", "true"])
+        self.assertEqual([t("up:anyExt/up:allow-adhoc-group-call-participation"),
+                          t("up:anyExt/up:allow-to-modify-adhoc-group-call-participants-info")], ["true", "false"])
+        # 임박 위험 호 = 긴급 그룹 호와 한 게이트(DedicatedGroup 미지정 → 둘 다 false), 긴급 사설콜 해제 = 개시 인가 값
+        self.assertEqual((t("up:allow-emergency-group-call"), t("up:allow-imminent-peril-call")), ("false", "false"))
+        self.assertEqual(t("up:allow-cancel-private-emergency-call"), "true")
+        m.PTT_PROFILES["+82500000001"] = dict(m.DEFAULT_USER_PROFILE, emergency_group_id="g001", allow_private_call=False,
+                                             allow_private_call_participation=False, allow_emergency_private_call=False)
+        acts = self._acts()
+        t = lambda p: acts.find(p, NS).text
+        self.assertEqual((t("up:allow-emergency-group-call"), t("up:allow-imminent-peril-call")), ("true", "true"))
+        self.assertEqual([t("up:allow-private-call"), t("up:allow-manual-commencement"), t("up:allow-automatic-commencement"),
+                          t("up:allow-private-call-to-any-user")], ["false"] * 4, "발신 미인가면 개시 방식·any-user 도 false")
+        self.assertEqual([t("up:allow-private-call-participation"),
+                          t("up:anyExt/up:allow-to-receive-private-call-from-any-user")], ["false", "false"])
+        self.assertEqual(t("up:allow-cancel-private-emergency-call"), "false")
+        m.PTT_PROFILES["+82500000001"] = dict(m.DEFAULT_USER_PROFILE, allow_private_call_to_any_user=False)
+        self.assertEqual(self._acts().find("up:allow-private-call-to-any-user", NS).text, "false", "목록(PrivateCallList) 한정")
+        # 옛 캐시 항목(키 없음) = 허용(열 부재 시 값 1)
+        m.PTT_PROFILES["+82500000001"] = {k: v for k, v in m.DEFAULT_USER_PROFILE.items() if not k.startswith("allow_private")}
+        self.assertEqual(self._acts().find("up:allow-private-call", NS).text, "true")
 
     def test_n6_dispatch_role_vs_others(self):
         # D2 — N6 = 사용자마다의 값(TS 24.484 §8.3.2.1 8)e)i)): 관제(역할 배정) = max_calls_n6_dispatch, 그 밖 = max_calls_n6.
@@ -337,14 +372,13 @@ class _ProfCur:
         elif s.startswith("SELECT allow_emergency_call") and "FROM ptt_user_profile WHERE ptt_id=%s" in s:
             if self.row is not None:
                 r = dict(self.row)
-                for c in ("allow_ambient_listening", "allow_create_group", "allow_non_ack_users_info",
-                          "allow_cancel_group_emergency"):
-                    if f"0 AS {c}" in s:
-                        r[c] = 0                     # 부재 컬럼 = 상수 0 별칭
-                if "1 AS allow_cancel_imminent_peril" in s:
-                    r["allow_cancel_imminent_peril"] = 1                          # 부재 = 1 (규격 기본 허용)
-                if "allow_emergency_alert AS allow_cancel_emergency_alert" in s:
-                    r["allow_cancel_emergency_alert"] = r["allow_emergency_alert"]  # 부재 = 발령 인가 값
+                # 부재 컬럼 = 별칭 «<식> AS <열>» — 상수 0(자격 없음)·1(규격 기본 허용 — 임박 위험 해제·개별 호 인가 셋)·
+                #   다른 열(경보 취소 = 발령 인가 값)
+                for expr, c in re.findall(r"(\w+) AS (allow_\w+)", s):
+                    r[c] = int(expr) if expr in ("0", "1") else r[expr]
+                for c in m.USER_PROFILE_OPT_COLS:
+                    if c not in r:
+                        r[c] = 1 if m.USER_PROFILE_OPT_ABSENT_SQL.get(c) == "1" else 0   # 있는 열인데 시험 행에 없는 값
                 for c in self._CANCEL:
                     if c not in r:
                         raise AssertionError(f"{c} 가 SELECT 에 없다: {s}")
@@ -681,6 +715,47 @@ class ServiceConfigDocTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AdminProfilePrivateCallTest(_AdminProfileBase):
+    """admin API 프로파일의 개별 호 인가 셋(CMS-3 — migrate_ptt_user_profile_private_call.sql) — 선택 컬럼 규약: 부재 시 값 1(허용),
+    열이 없는 DB 에 키를 주면 400, 캐시 반영 → user-profile 문서."""
+    COLS = ("allow_private_call", "allow_private_call_to_any_user", "allow_private_call_participation")
+
+    def test_put_writes_columns_and_profile_doc(self):
+        cur = _ProfCur(_ALL_OPT | set(self.COLS))
+        self._with(cur)
+        r = asyncio.run(self.adm._put_ptt_profile("7", self.MSISDN, {"allow_private_call": False,
+                                                                     "allow_private_call_participation": False}, {}))
+        self.assertEqual(r.status, 200, r.body)
+        self.assertEqual({c: cur.inserted.get(c) for c in self.COLS},
+                         {"allow_private_call": 0, "allow_private_call_to_any_user": 1, "allow_private_call_participation": 0},
+                         "본문에 없는 키 = 부재 시 값 1")
+        acts = ET.fromstring(m.get_user_profile_xml(ME)[0].encode()).find("cp:ruleset/cp:rule/cp:actions", NS)
+        self.assertEqual(acts.find("up:allow-private-call", NS).text, "false")
+        self.assertEqual(acts.find("up:allow-private-call-participation", NS).text, "false")
+
+    def test_absent_columns(self):
+        for c in self.COLS:
+            self.adm._OPT_COL_PRESENT.clear()
+            self._with(_ProfCur(_ALL_OPT))
+            r = asyncio.run(self.adm._put_ptt_profile("7", self.MSISDN, {c: False}, {}))
+            self.assertEqual((r.status, r.body["error"]), (400, "schema_not_migrated"))
+            self.assertIn("migrate_ptt_user_profile_private_call.sql", r.body["detail"])
+        self.adm._OPT_COL_PRESENT.clear()
+        cur = _ProfCur(_ALL_OPT)
+        self._with(cur)
+        r = asyncio.run(self.adm._put_ptt_profile("7", self.MSISDN, {"allow_adhoc_call": False}, {}))
+        self.assertEqual(r.status, 200, r.body)
+        self.assertNotIn("allow_private_call", cur.inserted, "없는 열은 쓰지 않는다")
+        self.assertTrue(r.body["allow_private_call"], "열 없는 DB = 허용(부재 시 값)")
+        self.adm._OPT_COL_PRESENT.clear()
+        row = {"allow_emergency_call": 1, "allow_emergency_alert": 1, "allow_adhoc_call": 1, "allow_emergency_private_call": 1,
+               "emergency_group_mode": "DedicatedGroup", "emergency_group_id": None,
+               "private_emergency_mode": "LocallyDetermined", "emergency_private_recipient": None}
+        self._with(_ProfCur(set(), row))
+        g = asyncio.run(self.adm._get_ptt_profile("7", self.MSISDN, {}))
+        self.assertEqual([g.body[c] for c in self.COLS], [True, True, True])
 
 
 class _SvcCur:

@@ -152,9 +152,11 @@ TEST(McvConfig, UserProfile) {
     EXPECT_FALSE(d.allowLocalAmbientViewing);
     EXPECT_FALSE(d.allowAdhocGroupCall);
 
-    McVideoUserProfileDoc bare;                             // ruleset 이 없으면 허용(서버가 최종 판정)
+    McVideoUserProfileDoc bare;                             // 요소가 없으면 false(TS 24.484 표 9.3.2.7 — VCMS-2)
     ASSERT_TRUE(McVideoUserProfileDoc::parse("<mcvideo-user-profile XUI-URI=\"tel:1\"/>", bare));
-    EXPECT_TRUE(bare.allowRevokeTransmit);
+    EXPECT_FALSE(bare.allowRevokeTransmit);
+    EXPECT_FALSE(bare.allowPrivateCall);
+    EXPECT_TRUE(McVideoUserProfileDoc().allowPrivateCall);  // 문서를 받지 못한 상태의 기본값 = 게이트 없음
     EXPECT_EQ(bare.maxSimultaneousVideoStreams, -1);
     EXPECT_FALSE(McVideoUserProfileDoc::parse("<mcptt-user-profile/>", bare));
 }

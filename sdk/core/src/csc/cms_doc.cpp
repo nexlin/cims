@@ -13,12 +13,16 @@ namespace {
 
 using namespace xmlscan;
 
-/** ruleset 불리언 — 요소가 없으면 허용(ue_sdk.md §4.2). */
-bool allowFlag(const std::string& s, const char* local) {
+/** 불리언 요소 — 요소가 없으면 dflt. */
+bool boolElem(const std::string& s, const char* local, bool dflt) {
     bool f = false;
     std::string v = elemText(s, local, &f);
-    return f ? isTrue(v) : true;
+    return f ? isTrue(v) : dflt;
 }
+
+/** user profile ruleset 의 인가(allow-*) — **요소가 없으면 false**(TS 24.484 표 8.3.2.7-7·-27·-48 등 «default value taken in the
+ *  absence of the element», MCVideo 표 9.3.2.7 도 같다). 인가를 주는 것은 문서에 "true" 로 적힌 요소뿐이다. */
+bool allowFlag(const std::string& s, const char* local) { return boolElem(s, local, false); }
 
 int intElem(const std::string& s, const char* local) {
     bool f = false;
@@ -110,6 +114,7 @@ bool ServiceConfigDoc::parse(const std::string& xml, ServiceConfigDoc& out, std:
     Elem params = elem(root.inner, "service-configuration-params");
     if (!params.found) { out = d; return true; }           // §8.4.2.3 — params 없으면 설정 없음
     d.domain = attrOf(params.openTag, "domain");
+    d.adhocGroupCallSupport = false;                       // 아래에서 <adhoc-group-call> 을 찾으면 그 값 — 없으면 미지원(§8.4.2.6)
     const std::string& s = params.inner;
     Elem common = elem(s, "common");
     if (common.found) {
@@ -131,6 +136,13 @@ bool ServiceConfigDoc::parse(const std::string& xml, ServiceConfigDoc& out, std:
         d.rpEmergency = rp("emergency-resource-priority");
         d.rpImminentPeril = rp("imminent-peril-resource-priority");
         d.rpNormal = rp("normal-resource-priority");
+        // <anyExt><adhoc-group-call> — 요소가 없거나 <allow-adhoc-group-call-support> 가 없거나 false 면 애드혹 그룹 호 미지원
+        //   (TS 24.484 §8.4.2.6 · TS 24.379 §17.2.2.1.1 — 단말은 개시하지 않는다).
+        Elem adhoc = elem(on.inner, "adhoc-group-call");
+        if (adhoc.found) {
+            d.adhocGroupCallSupport = boolElem(adhoc.inner, "allow-adhoc-group-call-support", false);
+            d.adhocMaxParticipants = intElem(adhoc.inner, "max-no-participants");
+        }
     }
     out = d;
     return true;
@@ -239,8 +251,8 @@ bool McVideoServiceConfigDoc::parse(const std::string& xml, McVideoServiceConfig
         d.rpNormal = rp("normal-resource-priority");
         Elem sp = elem(on.inner, "signalling-protection");
         if (sp.found) {                                    // 요소가 없으면 켜진 것으로 읽는다(TS 24.281 §6.6.2.1·§6.6.3.1)
-            d.confidentialityProtection = allowFlag(sp.inner, "confidentiality-protection");
-            d.integrityProtection = allowFlag(sp.inner, "integrity-protection");
+            d.confidentialityProtection = boolElem(sp.inner, "confidentiality-protection", true);
+            d.integrityProtection = boolElem(sp.inner, "integrity-protection", true);
         }
         Elem tc = elem(on.inner, "tc-timers-counters-R14");   // <anyExt> 안(§9.4.2.1 d)) — 참여자 T100~T104 는 초(unsignedByte)
         if (tc.found) {
@@ -259,7 +271,7 @@ Capabilities Capabilities::of(const UserProfileDoc* up, const ServiceConfigDoc* 
     Capabilities c;
     c.userProfileKnown = up != nullptr;
     c.serviceConfigKnown = sc != nullptr;
-    UserProfileDoc u;                                      // 기본값 = 전부 허용(미수신)
+    UserProfileDoc u;                                      // 기본값 = 전부 허용(미수신 — 게이트를 걸지 않는다)
     if (up) u = *up;
     c.privateCall = u.allowPrivateCall;
     c.emergencyGroupCall = u.allowEmergencyGroupCall;
@@ -269,7 +281,9 @@ Capabilities Capabilities::of(const UserProfileDoc* up, const ServiceConfigDoc* 
     c.emergencyPrivateCall = u.allowPrivateCall && u.allowEmergencyPrivateCall;
     c.emergencyAlert = u.allowActivateEmergencyAlert;
     c.cancelEmergencyAlert = u.allowCancelEmergencyAlert;
-    c.adhocGroupCall = u.allowAdhocGroupCall;
+    // 애드혹 그룹 호 = 사용자 인가 ∧ 시스템 지원(service configuration <allow-adhoc-group-call-support>, TS 24.379 §17.2.2.1.1).
+    //   service configuration 을 받지 못했으면 지원 여부로는 막지 않는다.
+    c.adhocGroupCall = u.allowAdhocGroupCall && (!sc || sc->adhocGroupCallSupport);
     c.maxAffiliationsN2 = u.maxAffiliationsN2 > 0 ? u.maxAffiliationsN2 : 0;
     return c;
 }

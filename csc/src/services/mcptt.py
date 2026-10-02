@@ -83,7 +83,7 @@ DEFAULT_USER_PROFILE = {
     "allow_emergency_private_call": True,
     "private_emergency_mode": "LocallyDetermined",
     "emergency_private_recipient": None,
-    "allow_ambient_listening": False,   # TS 24.484 allow-ambient-listening — 원격 청취 자격 (관제사, 기본 없음)
+    "allow_ambient_listening": False,   # CIMS 확장 cims:allow-ambient-listening — PTT 그룹 호 청취 자격 (관제사, 기본 없음)
     "allow_create_group": False,        # CIMS 확장 allow-create-group — GMS XCAP 그룹 생성 자격 (관제사, 기본 없음)
     "allow_non_ack_users_info": False,  # TS 24.484 anyExt allow-to-receive-non-acknowledged-users-information —
                                         #   그룹 호 개시자로서 미응답 멤버 INFO 수신 자격 (TS 24.379 §6.3.3.3, 부재 = false)
@@ -93,6 +93,10 @@ DEFAULT_USER_PROFILE = {
     "allow_cancel_imminent_peril": True,    # allow-cancel-imminent-peril — 임박 위험 해제 (§6.3.3.1.13.6, 개시자 예외 없음)
     "allow_cancel_emergency_alert": True,   # allow-cancel-emergency-alert — 긴급 경보 취소 (§6.3.3.1.13.3)
                                             #   = 부재 시 allow_emergency_alert 값
+    # 개별 호 인가 (TS 24.484 ruleset, migrate_ptt_user_profile_private_call.sql) — 요소가 없으면 false 로 읽히므로 문서에 늘 싣는다
+    "allow_private_call": True,                # allow-private-call — 개별 호 발신 (TS 24.379 §11.1.1.3.1.1 — false 면 403 107)
+    "allow_private_call_to_any_user": True,    # allow-private-call-to-any-user — PrivateCallList 밖 상대에게도 (false 면 목록 밖 403 144)
+    "allow_private_call_participation": True,  # allow-private-call-participation — 개별 호 착신 참가 (§11.1.1.3.2 — false 면 403 127)
 }
 # 마이그레이션으로 뒤에 붙은 프로파일 컬럼(선택 컬럼)의 **부재 시 값** — 컬럼 미적용 DB 의 SELECT 대체식이자 행·키가 없을 때의 값
 #   (user_profile_opt_default). 여기 없는 선택 컬럼은 상수 0(자격 없음). allow_cancel_emergency_alert 은 발령 인가
@@ -100,6 +104,21 @@ DEFAULT_USER_PROFILE = {
 USER_PROFILE_OPT_ABSENT_SQL = {
     "allow_cancel_imminent_peril": "1",
     "allow_cancel_emergency_alert": "allow_emergency_alert",
+    "allow_private_call": "1",
+    "allow_private_call_to_any_user": "1",
+    "allow_private_call_participation": "1",
+}
+# 선택 컬럼 전부(적재·관리 API 가 같은 목록을 쓴다) → 그 열을 더하는 마이그레이션.
+USER_PROFILE_OPT_COLS = {
+    "allow_ambient_listening": "sql/migrate_ptt_ambient_listening.sql",
+    "allow_create_group": "sql/migrate_ptt_allow_create_group.sql",
+    "allow_non_ack_users_info": "sql/migrate_ptt_non_ack_users_info.sql",
+    "allow_cancel_group_emergency": "sql/migrate_ptt_user_profile_cancel_authz.sql",
+    "allow_cancel_imminent_peril": "sql/migrate_ptt_user_profile_cancel_authz.sql",
+    "allow_cancel_emergency_alert": "sql/migrate_ptt_user_profile_cancel_authz.sql",
+    "allow_private_call": "sql/migrate_ptt_user_profile_private_call.sql",
+    "allow_private_call_to_any_user": "sql/migrate_ptt_user_profile_private_call.sql",
+    "allow_private_call_participation": "sql/migrate_ptt_user_profile_private_call.sql",
 }
 
 
@@ -505,9 +524,7 @@ def load_shared_data(config):
                         #   migrate_ptt_*.sql 이후에만 — 컬럼이 없으면 부재 시 값(USER_PROFILE_OPT_ABSENT_SQL, 없으면 상수 0 —
                         #   선행 배포 무해).
                         opt_cols = []
-                        for c in ("allow_ambient_listening", "allow_create_group", "allow_non_ack_users_info",
-                                  "allow_cancel_group_emergency", "allow_cancel_imminent_peril",
-                                  "allow_cancel_emergency_alert"):
+                        for c in USER_PROFILE_OPT_COLS:
                             cur.execute(f"SHOW COLUMNS FROM ptt_user_profile LIKE '{c}'")
                             opt_cols.append(c if cur.fetchone() else f"{USER_PROFILE_OPT_ABSENT_SQL.get(c, '0')} AS {c}")
                         cur.execute(
@@ -527,12 +544,7 @@ def load_shared_data(config):
                                 "allow_emergency_private_call": bool(r['allow_emergency_private_call']),
                                 "private_emergency_mode": r['private_emergency_mode'],
                                 "emergency_private_recipient": r['emergency_private_recipient'],
-                                "allow_ambient_listening": bool(r['allow_ambient_listening']),
-                                "allow_create_group": bool(r['allow_create_group']),
-                                "allow_non_ack_users_info": bool(r['allow_non_ack_users_info']),
-                                "allow_cancel_group_emergency": bool(r['allow_cancel_group_emergency']),
-                                "allow_cancel_imminent_peril": bool(r['allow_cancel_imminent_peril']),
-                                "allow_cancel_emergency_alert": bool(r['allow_cancel_emergency_alert']),
+                                **{c: bool(r[c]) for c in USER_PROFILE_OPT_COLS},
                             }
                         logger.log_info(f"Loaded {len(PTT_PROFILES)} user MCPTT profiles")
                     except Exception as pe:
@@ -1752,8 +1764,10 @@ def get_user_profile_xml(user_uri, owner_uid=None):
         필수 자식이라 off-network 미지원인 우리는 영값(000000000000)을 싣는다.
       - 상한 = mcptt_service_config.max_affiliations_n2(MaxAffiliationsN2) · N6 = user_max_calls_n6(관제 = 역할 배정 → 
         max_calls_n6_dispatch, 그 밖 → max_calls_n6 — CSP 집행과 같은 판정) + UserProfile.*(N7·Priority·조직명).
-      - 인가 = <cp:ruleset>(RFC 4745 common-policy) — actions 자식은 규격 요소(§8.3.2.1 11) 목록 순: 긴급 그룹콜·긴급 사설콜
-        개시 → 그룹 긴급 해제·임박 위험 해제 → 경보 발령·경보 취소 → anyExt) + cims 확장(그룹 생성·PTT 그룹 호 청취 자격
+      - 인가 = <cp:ruleset>(RFC 4745 common-policy) — actions 자식은 규격 요소(§8.3.2.1 11) 목록 순: 개별 호 발신·수동/자동 개시·
+        강제 자동 응답 → 긴급 그룹콜·긴급 사설콜 개시 → 그룹 긴급 해제·긴급 사설콜 해제(= 긴급 사설콜 개시 인가) → 임박 위험 호(= 긴급
+        그룹콜 인가 — 긴급·임박은 한 게이트)·임박 위험 해제 → 경보 발령·경보 취소 → 개별 호 any-user·착신 참가 → anyExt(K 착신
+        any-user · L · R · S 애드혹 참가 true · AA 애드혹 참가자 변경 false — 그 절차가 없다)) + cims 확장(그룹 생성·PTT 그룹 호 청취 자격
         <cims:allow-ambient-listening> — 비멤버 관제사의 recvonly 합류 자격(dispatch_center.md §5.6)이라 규격 ambient listening
         (TS 24.379 §11 원격 개시 1:1 호, §8.3.2.1 11)xxxviii)C)·D))과 다른 것이다). 해제 인가
         <allow-cancel-group-emergency>(기본 false — 서버 판정은 local policy 개시자 ∨ 이 값, TS 24.379 §6.3.3.1.13.4)·
@@ -1847,6 +1861,13 @@ def get_user_profile_xml(user_uri, owner_uid=None):
     # 해제 인가는 대상 결정 가능 여부와 AND 하지 않는다 — 이미 선 긴급 상태·경보를 푸는 자격이다. 경보 취소의 부재 시 값 =
     #   발령 인가(옛 캐시 항목·컬럼 미적용 DB 가 종전 문서와 같은 값을 낸다).
     cancel_alert_dflt = user_profile_opt_default('allow_cancel_emergency_alert', prof)
+    # 개별 호 인가(§8.3.2.1 11)vii)~x)·xxvii)·xxix)·anyExt K)) — 요소가 없으면 false(표 8.3.2.7-7·-27·-48)라 늘 싣는다.
+    #   발신 = allow_private_call, 수동·자동 개시는 발신 인가를 따르고(따로 가르지 않는다), 강제 자동 응답(Priv-Answer-Mode)은 주지 않는다.
+    #   any-user = 발신 인가 ∧ allow_private_call_to_any_user(false 면 상대는 PrivateCallList 로 한정). 착신 = allow_private_call_participation,
+    #   IncomingPrivateCallList 를 두지 않으므로 «누구에게서나 받는다»(allow-to-receive-private-call-from-any-user)도 같은 값.
+    priv_out = _b('allow_private_call')
+    priv_any = "true" if (prof.get('allow_private_call', True) and prof.get('allow_private_call_to_any_user', True)) else "false"
+    priv_in = _b('allow_private_call_participation')
 
     org = str(_user_profile_cfg('MissionCriticalOrganization') or _ue_init_cfg('Name') or _UE_INIT_DEFAULTS['Name'])
     ptype = str(_user_profile_cfg('ParticipantType'))
@@ -1899,15 +1920,26 @@ def get_user_profile_xml(user_uri, owner_uid=None):
   <cp:ruleset>
     <cp:rule id="mcptt-user-authorisation">
       <cp:actions>
+        <allow-private-call>{priv_out}</allow-private-call>
+        <allow-manual-commencement>{priv_out}</allow-manual-commencement>
+        <allow-automatic-commencement>{priv_out}</allow-automatic-commencement>
+        <allow-force-auto-answer>false</allow-force-auto-answer>
         <allow-emergency-group-call>{_ba('allow_emergency_call', group_target_ok)}</allow-emergency-group-call>
         <allow-emergency-private-call>{_ba('allow_emergency_private_call', private_target_ok)}</allow-emergency-private-call>
         <allow-cancel-group-emergency>{_b('allow_cancel_group_emergency', False)}</allow-cancel-group-emergency>
+        <allow-cancel-private-emergency-call>{_b('allow_emergency_private_call')}</allow-cancel-private-emergency-call>
+        <allow-imminent-peril-call>{_ba('allow_emergency_call', group_target_ok)}</allow-imminent-peril-call>
         <allow-cancel-imminent-peril>{_b('allow_cancel_imminent_peril', True)}</allow-cancel-imminent-peril>
         <allow-activate-emergency-alert>{_ba('allow_emergency_alert', group_target_ok)}</allow-activate-emergency-alert>
         <allow-cancel-emergency-alert>{_b('allow_cancel_emergency_alert', cancel_alert_dflt)}</allow-cancel-emergency-alert>
-        <anyExt>  <!-- TS 24.484 §8.3.2.1 11)xxxviii) — 자식 순서는 그 목록(L → R) 순 -->
+        <allow-private-call-to-any-user>{priv_any}</allow-private-call-to-any-user>
+        <allow-private-call-participation>{priv_in}</allow-private-call-participation>
+        <anyExt>  <!-- TS 24.484 §8.3.2.1 11)xxxviii) — 자식 순서는 그 목록(K → L → R → S → AA) 순 -->
+          <allow-to-receive-private-call-from-any-user>{priv_in}</allow-to-receive-private-call-from-any-user>
           <allow-to-receive-non-acknowledged-users-information>{_b('allow_non_ack_users_info', False)}</allow-to-receive-non-acknowledged-users-information>
           <allow-adhoc-group-call>{_b('allow_adhoc_call')}</allow-adhoc-group-call>
+          <allow-adhoc-group-call-participation>true</allow-adhoc-group-call-participation>
+          <allow-to-modify-adhoc-group-call-participants-info>false</allow-to-modify-adhoc-group-call-participants-info>
         </anyExt>
         <cims:allow-adhoc-group-call>{_b('allow_adhoc_call')}</cims:allow-adhoc-group-call>
         <cims:allow-create-group>{_b('allow_create_group', False)}</cims:allow-create-group>

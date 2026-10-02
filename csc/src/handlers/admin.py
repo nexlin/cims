@@ -29,7 +29,7 @@ import pymysql.cursors
 from httpsrv.handler import HandlerArgs, HandlerResult
 from services.mcptt import (notify_csp, refresh_group_members, refresh_login_accounts, sync_group_from_db,
                             DEFAULT_USER_PROFILE, USER_PROFILE_OPT_ABSENT_SQL, user_profile_opt_default,
-                            update_user_profile_cache, SERVICE_CONFIG_DEFAULTS,
+                            update_user_profile_cache, SERVICE_CONFIG_DEFAULTS, USER_PROFILE_OPT_COLS,
                             get_service_config, update_service_config_cache,
                             get_service_config_xml, GROUP_TYPES, GROUP_HANG_TIMER_DEFAULT,
                             GROUP_HANG_TIMER_MAX, GROUP_MAX_DURATION_DEFAULT, GROUP_MAX_DURATION_MAX,
@@ -363,12 +363,7 @@ async def _get_user(person_id: str, config):
                             'allow_emergency_private_call': bool(p['allow_emergency_private_call']),
                             'private_emergency_mode': p['private_emergency_mode'],
                             'emergency_private_recipient': p['emergency_private_recipient'],
-                            'allow_ambient_listening': bool(p['allow_ambient_listening']),
-                            'allow_create_group': bool(p['allow_create_group']),
-                            'allow_non_ack_users_info': bool(p['allow_non_ack_users_info']),
-                            'allow_cancel_group_emergency': bool(p['allow_cancel_group_emergency']),
-                            'allow_cancel_imminent_peril': bool(p['allow_cancel_imminent_peril']),
-                            'allow_cancel_emergency_alert': bool(p['allow_cancel_emergency_alert']),
+                            **{c: bool(p[c]) for c in _OPT_PROFILE_COLS},
                         }
                 except pymysql.Error:
                     pass
@@ -1140,9 +1135,7 @@ async def _delete_subscription(person_id: str, svc: str, msisdn: str, config, pa
 # ──────────────────────────────────────────────────────────────
 
 _PROFILE_BOOL_FIELDS = ('allow_emergency_call', 'allow_emergency_alert', 'allow_adhoc_call',
-                        'allow_emergency_private_call', 'allow_ambient_listening', 'allow_create_group',
-                        'allow_non_ack_users_info', 'allow_cancel_group_emergency', 'allow_cancel_imminent_peril',
-                        'allow_cancel_emergency_alert')
+                        'allow_emergency_private_call') + tuple(USER_PROFILE_OPT_COLS)
 
 # 마이그레이션으로 뒤에 붙은 프로파일 인가 컬럼 — 부재 시 SELECT 는 부재 시 값(services.mcptt.USER_PROFILE_OPT_ABSENT_SQL,
 #   없으면 상수 0 = 자격 없음), 쓰기 요청은 400.
@@ -1151,14 +1144,9 @@ _PROFILE_BOOL_FIELDS = ('allow_emergency_call', 'allow_emergency_alert', 'allow_
 #   allow_non_ack_users_info: migrate_ptt_non_ack_users_info.sql (TS 24.379 §6.3.3.3 — 미응답 멤버 INFO 수신 자격)
 #   allow_cancel_*         : migrate_ptt_user_profile_cancel_authz.sql (TS 24.484 해제 인가 — 그룹 긴급 §6.3.3.1.13.4 기본 0 ·
 #                            임박 위험 §6.3.3.1.13.6 기본 1 · 경보 취소 §6.3.3.1.13.3 기본 = allow_emergency_alert)
-_OPT_PROFILE_COLS = {
-    'allow_ambient_listening': 'sql/migrate_ptt_ambient_listening.sql',
-    'allow_create_group': 'sql/migrate_ptt_allow_create_group.sql',
-    'allow_non_ack_users_info': 'sql/migrate_ptt_non_ack_users_info.sql',
-    'allow_cancel_group_emergency': 'sql/migrate_ptt_user_profile_cancel_authz.sql',
-    'allow_cancel_imminent_peril': 'sql/migrate_ptt_user_profile_cancel_authz.sql',
-    'allow_cancel_emergency_alert': 'sql/migrate_ptt_user_profile_cancel_authz.sql',
-}
+#   allow_private_call*    : migrate_ptt_user_profile_private_call.sql (TS 24.484 개별 호 인가 — 발신 §11.1.1.3.1.1 107·any-user 144·
+#                            착신 참가 §11.1.1.3.2 127, 셋 다 기본 1)
+_OPT_PROFILE_COLS = USER_PROFILE_OPT_COLS
 _OPT_COL_PRESENT = {}   # 컬럼명 → bool 프로브 캐시
 
 
@@ -1276,10 +1264,14 @@ async def _put_ptt_profile(person_id: str, msisdn: str, body, config):
         "allow_ambient_listening": bool(opt_vals['allow_ambient_listening']) if 'allow_ambient_listening' in present else False,
         "allow_create_group": bool(opt_vals['allow_create_group']) if 'allow_create_group' in present else False,
         "allow_non_ack_users_info": bool(opt_vals['allow_non_ack_users_info']) if 'allow_non_ack_users_info' in present else False,
-        # 해제 인가 셋 — 컬럼 미적용 DB 면 본문에 키가 없었으므로(있으면 위에서 400) 부재 시 값 = 읽기 경로의 SELECT 대체식과 같다
+        # 해제 인가 셋·개별 호 인가 셋 — 컬럼 미적용 DB 면 본문에 키가 없었으므로(있으면 위에서 400) 부재 시 값 = 읽기 경로의 SELECT
+        #   대체식과 같다
         "allow_cancel_group_emergency": bool(opt_vals['allow_cancel_group_emergency']),
         "allow_cancel_imminent_peril": bool(opt_vals['allow_cancel_imminent_peril']),
         "allow_cancel_emergency_alert": bool(opt_vals['allow_cancel_emergency_alert']),
+        "allow_private_call": bool(opt_vals['allow_private_call']),
+        "allow_private_call_to_any_user": bool(opt_vals['allow_private_call_to_any_user']),
+        "allow_private_call_participation": bool(opt_vals['allow_private_call_participation']),
     }
     update_user_profile_cache(msisdn, prof)  # user-profile 문서 ETag 는 내용 파생 — 자동 갱신
     notify_csp("USER_CHANGED", f"tel:{msisdn}", "PUT")

@@ -1145,6 +1145,21 @@ CSP 에는 `PHONE_GROUP_CHANGED`(uri=그룹 id) 로 재적재를 알린다. 가�
 > 편집(PTT 회선 «긴급 (SOS)» 긴급 해제·임박 위험 해제·경보 취소)·관제 앱 관리 화면(`allowCancelGroupEmergency`·`allowCancelImminentPeril`·
 > `allowCancelEmergencyAlert`). 컬럼 미적용 DB(`sql/migrate_ptt_user_profile_cancel_authz.sql`) 에서는 응답이 기본값이고 입력 시 400
 > `schema_not_migrated`.
+>
+> 같은 프로파일의 **개별 호 인가** 셋(TS 24.484 ruleset — 요소가 없으면 false 로 읽히므로 CSC 가 user-profile 문서에 늘 싣는다. CSP 는
+> `ptt_user_profile` 에서 직접 읽는다):
+>
+> | 필드 | 규격 요소 | 기본값 | 의미 |
+> |---|---|---|---|
+> | `allow_private_call` | `<allow-private-call>`(+ `<allow-manual-commencement>`·`<allow-automatic-commencement>` 같은 값) | true | 개별 호 발신. false 면 서버가 403 `107`(TS 24.379 §11.1.1.3.1.1 10)) |
+> | `allow_private_call_to_any_user` | `<allow-private-call-to-any-user>` | true | 상대를 `<PrivateCallList>`(같은 그룹 동료)로 한정하지 않는다. false 면 목록 밖 상대는 403 `144`. 문서 값 = 발신 인가 ∧ 이 값 |
+> | `allow_private_call_participation` | `<allow-private-call-participation>` · `<anyExt><allow-to-receive-private-call-from-any-user>` | true | 개별 호 착신 참가. false 면 403 `127`(§11.1.1.3.2) |
+>
+> PUT 본문에 없는 키는 true 로 쓴다. 편집 경로는 이 API·콘솔 가입자 편집(PTT 회선 «개별 통화»)·관제 앱 관리 화면(`allowPrivateCall`·
+> `allowPrivateCallToAnyUser`·`allowPrivateCallParticipation`). 컬럼 미적용 DB(`sql/migrate_ptt_user_profile_private_call.sql`) 에서는 응답이
+> true 고 입력 시 400 `schema_not_migrated`. 문서의 나머지 인가 요소는 고정이거나 다른 값의 미러다 — `<allow-force-auto-answer>` false ·
+> `<allow-imminent-peril-call>` = 긴급 그룹콜 인가 · `<allow-cancel-private-emergency-call>` = 긴급 사설콜 인가 ·
+> `<allow-adhoc-group-call-participation>` true · `<allow-to-modify-adhoc-group-call-participants-info>` false.
 
 ---
 

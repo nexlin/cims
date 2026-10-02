@@ -477,7 +477,7 @@ TEST(CApi, McVideoProfileAndServiceConfig) {
     EXPECT_NE(cimsue_mcvideo_user_profile_parse("<mcptt-user-profile/>", &up), CIMSUE_OK);
     EXPECT_EQ(up.group_count, 0);
     ASSERT_EQ(cimsue_mcvideo_user_profile_parse("<mcvideo-user-profile XUI-URI=\"tel:1\"/>", &up), CIMSUE_OK);
-    EXPECT_EQ(up.allow_revoke_transmit, 1);                   // ruleset 이 없으면 허용
+    EXPECT_EQ(up.allow_revoke_transmit, 0);                   // 요소가 없으면 false(TS 24.484 표 9.3.2.7)
     EXPECT_EQ(up.max_simultaneous_video_streams, -1);
 
     cimsue_mcvideo_service_config_doc_t sc{};
@@ -553,10 +553,11 @@ TEST(CApi, McpttFieldsAndCmsDocs) {
     EXPECT_EQ(a.max_sds_cplane_bytes, 1500);                    // toAccount 가 옮긴다 — 넘는 그룹 SDS 는 MSRP
     EXPECT_STREQ(a.rp_emergency, "mcpttp.15");
 
-    // CMS — 규격 요소 · 요소 없음 = 허용 · 게이트는 Capabilities::of
+    // CMS — 규격 요소 · 요소 없음 = false(TS 24.484 표 8.3.2.7) · 게이트는 Capabilities::of
     cimsue_user_profile_doc_t up{};
     ASSERT_EQ(cimsue_user_profile_parse(
                   "<mcptt-user-profile XUI-URI=\"tel:+82500000001\"><ruleset><actions>"
+                  "<allow-activate-emergency-alert>true</allow-activate-emergency-alert>"
                   "<allow-cancel-emergency-alert>false</allow-cancel-emergency-alert>"
                   "<allow-cancel-group-emergency>true</allow-cancel-group-emergency>"
                   "<allow-cancel-imminent-peril>false</allow-cancel-imminent-peril></actions></ruleset>"

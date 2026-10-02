@@ -584,12 +584,14 @@ XCAP 기반 사용자 프로파일/서비스 설정 관리.
 → `<allow-cancel-emergency-alert>`. 해제 인가는 개시 인가와 달리 긴급 대상 결정 가능 여부와 AND 하지 않는다), `<anyExt>`
 (TS 24.484 §8.3.2.1 11)xxxviii)) 에는 `allow_non_ack_users_info` →
 `<allow-to-receive-non-acknowledged-users-information>`(L, 그룹 호 개시자의 확인 통화 미응답 멤버 INFO 수신 자격 — TS 24.379 §6.3.3.3)·
-`allow_adhoc_call` → `<allow-adhoc-group-call>`(R), CIMS 확장 `<cims:allow-create-group>`·`<cims:allow-ambient-listening>`(PTT 그룹 호
+`allow_adhoc_call` → `<allow-adhoc-group-call>`(R), 개별 호 인가 `allow_private_call`·`allow_private_call_to_any_user`·
+`allow_private_call_participation` → `<allow-private-call>`·`<allow-private-call-to-any-user>`·`<allow-private-call-participation>`(없으면 false 로
+읽히는 요소라 늘 싣는다 — 나머지 인가 요소의 값은 mcptt_standard_conformance.md CMS), CIMS 확장 `<cims:allow-create-group>`·`<cims:allow-ambient-listening>`(PTT 그룹 호
 청취 자격 `allow_ambient_listening` — 규격 ambient listening 과 다른 개념). N6 `<MaxSimultaneousCallsN6>` = 사용자마다 — 그 PTT 회선의 사람에게
 역할 배정이 있으면 `mcptt_service_config.max_calls_n6_dispatch`(기본 10), 없으면 `max_calls_n6`(기본 5)(`user_max_calls_n6`, CSP 와 같은
 판정 — 역할 배정·해제는 그 사람의 PTT 회선마다 `USER_CHANGED`). 모든 `<entry>` 에 `index`, `<MCPTTGroupInfo>` 는 비어도 싣는다. 뒤에 붙은 선택 컬럼
-(`allow_ambient_listening`·`allow_create_group`·`allow_non_ack_users_info`·`allow_cancel_*` — 각 `sql/migrate_ptt_*.sql`) 은 부재 시
-**부재 시 값**으로 읽는다(`services.mcptt.USER_PROFILE_OPT_ABSENT_SQL` — 대개 false, `allow_cancel_imminent_peril` = true,
+(`allow_ambient_listening`·`allow_create_group`·`allow_non_ack_users_info`·`allow_cancel_*`·`allow_private_call*` — 각 `sql/migrate_ptt_*.sql`) 은 부재 시
+**부재 시 값**으로 읽는다(`services.mcptt.USER_PROFILE_OPT_ABSENT_SQL` — 대개 false, `allow_cancel_imminent_peril`·`allow_private_call*` = true,
 `allow_cancel_emergency_alert` = `allow_emergency_alert`). 서비스 설정 문서의 on-network 값은 CSC 설정 `ServiceConfig.*` 와
 DB `mcptt_service_config` 에서 만든다 — `<signalling-protection>` 둘은 늘 false(없으면 true 로 읽혀 단말이 mcptt-info 를 암호화한다, §8.4.2.6) · `EmergencyCall.GroupTimeLimit`(ms, 기본 0) 이 0 보다 크면 첫 자식
 `<emergency-call><group-time-limit>`(CSP TNG2, TS 24.379 §6.3.3.1.16)을 싣고, 0 이면 요소째 뺀다. 개별 호·애드혹 그룹 호의

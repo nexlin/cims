@@ -148,15 +148,26 @@ user-profile 의 인가 `<cp:ruleset><cp:rule id="mcptt-user-authorisation"><cp:
 뒤에 `<anyExt>`(11)xxxviii), 자식은 그 목록 순):
 
 ```xml
+<allow-private-call>true</allow-private-call>                          <!-- allow_private_call -->
+<allow-manual-commencement>true</allow-manual-commencement>            <!-- = allow_private_call -->
+<allow-automatic-commencement>true</allow-automatic-commencement>      <!-- = allow_private_call -->
+<allow-force-auto-answer>false</allow-force-auto-answer>               <!-- 고정 — 강제 자동 응답은 주지 않는다 -->
 <allow-emergency-group-call>true</allow-emergency-group-call>          <!-- allow_emergency_call ∧ 긴급 대상 결정 가능 -->
 <allow-emergency-private-call>true</allow-emergency-private-call>      <!-- allow_emergency_private_call ∧ 수신자 결정 가능 -->
 <allow-cancel-group-emergency>false</allow-cancel-group-emergency>      <!-- allow_cancel_group_emergency (서버 판정 = 개시자 ∨ 이 값) -->
+<allow-cancel-private-emergency-call>true</allow-cancel-private-emergency-call>  <!-- = allow_emergency_private_call -->
+<allow-imminent-peril-call>true</allow-imminent-peril-call>            <!-- = allow-emergency-group-call (긴급·임박은 한 게이트) -->
 <allow-cancel-imminent-peril>true</allow-cancel-imminent-peril>        <!-- allow_cancel_imminent_peril -->
 <allow-activate-emergency-alert>true</allow-activate-emergency-alert>  <!-- allow_emergency_alert ∧ 긴급 대상 결정 가능 -->
 <allow-cancel-emergency-alert>true</allow-cancel-emergency-alert>      <!-- allow_cancel_emergency_alert -->
+<allow-private-call-to-any-user>true</allow-private-call-to-any-user>  <!-- allow_private_call ∧ allow_private_call_to_any_user -->
+<allow-private-call-participation>true</allow-private-call-participation>  <!-- allow_private_call_participation -->
 <anyExt>
+  <allow-to-receive-private-call-from-any-user>true</allow-to-receive-private-call-from-any-user>  <!-- K) = allow_private_call_participation -->
   <allow-to-receive-non-acknowledged-users-information>false</allow-to-receive-non-acknowledged-users-information>  <!-- L) allow_non_ack_users_info -->
   <allow-adhoc-group-call>true</allow-adhoc-group-call>                                                              <!-- R) allow_adhoc_call -->
+  <allow-adhoc-group-call-participation>true</allow-adhoc-group-call-participation>                                  <!-- S) 고정 -->
+  <allow-to-modify-adhoc-group-call-participants-info>false</allow-to-modify-adhoc-group-call-participants-info>    <!-- AA) 고정 — 절차 없음 -->
 </anyExt>
 <cims:allow-adhoc-group-call>true</cims:allow-adhoc-group-call>   <!-- 전환기 별칭 -->
 <cims:allow-create-group>false</cims:allow-create-group>          <!-- CIMS 확장 — GMS 그룹 생성 자격 -->
@@ -167,6 +178,7 @@ user-profile 의 인가 `<cp:ruleset><cp:rule id="mcptt-user-authorisation"><cp:
 규격 ambient listening(원격·로컬 개시 1:1 호 — anyExt `<allow-request-remote-/locally-initiated-ambient-listening>`, TS 24.484 §8.3.2.1 11)xxxviii)C)·D))과
 다른 것이라 CIMS 이름공간에 싣는다.
 
+인가 요소는 **없으면 false**(TS 24.484 표 8.3.2.7)라 쓰는 것을 전부 싣는다.
 `allow-to-receive-non-acknowledged-users-information`(표 8.3.2.7-49, 부재 = false) 가 true 면 이 사용자가 개시한 그룹 호에서 확인 통화
 설정이 필수 멤버 없이 진행될 때 controlling MCPTT function 이 응답하지 않은 멤버 목록을 SIP INFO 로 보낸다(TS 24.379 §6.3.3.3).
 해제 인가 셋(`allow-cancel-group-emergency`·`allow-cancel-imminent-peril`·`allow-cancel-emergency-alert`)은 개시 인가와 달리 긴급 대상 결정

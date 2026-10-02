@@ -465,7 +465,7 @@ PTT up(RELEASE): 🎤mic 슬롯 ──disconnect─ 통화 stream  (송신 중�
 | `ue-init-config` (로그인 전, TS 24.484 §7.2) | 등록 직전 한 번(`PttController.register` — MCS UE ID = instance ID, 토큰 없음) | `MCPTT-Service-Details/Server-URI` → 경보 MESSAGE Request-URI, `MCData-Service-Details/Server-URI` → SDS 전달 확인 통지 Request-URI(`AccountConfig.mcpttServerUri`·`mcdataServerUri`). 못 받거나 광고가 없으면 PSI 없이(경보 = 그룹 URI, 통지 = 원 발신자 직행) |
 
 - 인가 편집(서버): 가입자 화면의 user-profile(사람별)과 PTT 그룹 편집(그룹 능력). 콘솔 **구성 > MCPTT 정책**
-  (`PUT /api/v1/mcptt/service-config`)은 N2 기본값·broadcast-group 계층 수만 바꾼다.
+  (`PUT /api/v1/mcptt/service-config`)은 N2·N6 값·broadcast-group 계층 수만 바꾼다.
 - 게이트 지점: `startPrivateCall` · `startEmergency` · `sendAlert(activate=true)` · `startAdhocCall`. 전부 **UX 선차단**이고
   최종 판정은 서버(403 / Floor Deny)다. 문서를 아직 받지 못했으면 게이트를 걸지 않는다(프로파일 null = 허용) — 설정 취득
   실패가 기능 정지로 번지지 않게. 발언 요청(floor)은 문서로 막지 않는다 — 규격에 그런 요소가 없고 판정은 floor 제어 서버다.

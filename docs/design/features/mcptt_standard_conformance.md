@@ -676,7 +676,13 @@ REGISTER/SUBSCRIBE/NOTIFY 의 헤더·본문을 상용 IMS 캡처 기준으로 �
   **내용은 §8.3.2 XSD 대로**(`get_user_profile_xml`): 루트 `XUI-URI`·`user-profile-index`, `<Common>` = UserAlias·
   MCPTTUserID(uri-entry)·PrivateCall(PrivateCallList = 내 그룹 동료 멤버, EmergencyCall = MCPTTPrivateRecipient entry + ProSeUserID-entry User-Info-ID 영값 — ProSe 미지원)·
   MCPTT-group-call(MaxSimultaneousCallsN6·EmergencyCall/ImminentPerilCall/EmergencyAlert·Priority)·MissionCriticalOrganization,
-  `<cp:ruleset>`(RFC 4745) 사용자 인가, `<OnNetwork>` = **MCPTTGroupInfo(소속 그룹 = 규격 단말의 그룹 목록 소스, 소유 소속 그룹은
+  `<cp:ruleset>`(RFC 4745) 사용자 인가 — **인가 요소는 없으면 false**(표 8.3.2.7)라 쓰는 것을 전부 싣는다(§8.3.2.1 11) 목록 순): 개별 호
+  `<allow-private-call>`(`ptt_user_profile.allow_private_call`)·수동/자동 개시(같은 값)·`<allow-force-auto-answer>` false · 긴급·임박·경보 개시와
+  해제(`<allow-imminent-peril-call>` = 긴급 그룹콜 인가, `<allow-cancel-private-emergency-call>` = 긴급 사설콜 인가) ·
+  `<allow-private-call-to-any-user>`(발신 인가 ∧ `allow_private_call_to_any_user`)·`<allow-private-call-participation>`(`allow_private_call_participation`) ·
+  `<anyExt>` K `<allow-to-receive-private-call-from-any-user>`(= 착신 참가 — IncomingPrivateCallList 없음)·L·R·S
+  `<allow-adhoc-group-call-participation>` true · AA `<allow-to-modify-adhoc-group-call-participants-info>` false(그 절차 없음).
+  CSP 의 판정(107·144·127·188 등)은 미구현 — 갭 PRV-2·PRV-8·ADH-5. `<OnNetwork>` = **MCPTTGroupInfo(소속 그룹 = 규격 단말의 그룹 목록 소스, 소유 소속 그룹은
   anyExt `cims:authorized-user`)**·MaxAffiliationsN2(`mcptt_service_config.max_affiliations_n2`)·ImplicitAffiliations(멤버 `implicit_affiliation` 이 켜진 그룹만 — C9)·
   MaxSimultaneousTransmissionsN7·PrivateEmergencyAlert. 상수는 `UserProfile.*` 설정. 루트 `<Status>true</Status>`(§8.3.2.1 3)·alias-entry `index` 병기.
   **N6**(`<MaxSimultaneousCallsN6>`, §8.3.2.1 8)e)i) — 동시 그룹 호 상한)는 사용자마다의 값이다: 그 PTT 회선의 사람에게 역할 배정

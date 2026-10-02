@@ -53,10 +53,10 @@ MCPTT 쪽 같은 뿌리의 결함은 [mcptt_conformance_gaps.md](mcptt_conforman
 | 수신 제어 — 단말 (RCU) | 1 | — | — | 1 | — |
 | SDP (VSDP) | 3 | — | — | 3 | — |
 | 그룹 문서 (VGMS) | 2 | — | 1 | — | 1 |
-| 설정 문서·CMS (VCMS) | 4 | — | 1 | 2 | 1 |
-| **계** | **60** | **3** | **6** | **31** | **20** |
+| 설정 문서·CMS (VCMS) | 3 | — | 1 | 1 | 1 |
+| **계** | **59** | **3** | **6** | **30** | **20** |
 
-확인 수준 — ◎ 44 · ○ 8 · △ 8.
+확인 수준 — ◎ 43 · ○ 8 · △ 8.
 
 읽는 순서 — §2(먼저 볼 것) → §3(영역별 전체) → §4(미구현 목록에 빠진 기능) → §5(문서 정정) → §6(묶음과 순서).
 
@@ -211,7 +211,6 @@ MCPTT 쪽 같은 뿌리의 결함은 [mcptt_conformance_gaps.md](mcptt_conforman
 | # | 급 | 대상 | 규격 | CIMS 지금 | 영향 | 확인 |
 |---|---|---|---|---|---|---|
 | VCMS-1 | B | CSP·CSC | §9.3.2.12 · §9.4.2.12 — 두 MCVideo 문서는 변경 구독(§6.3.13.3)을 지원한다 (shall) | cms xcap-diff 본문 `sel` 이 MCPTT user-profile·service-config 둘로 고정이다(`csp/CspServer.cpp:723-729`). MCVideo service config 가 바뀌어도(`csc/src/services/mcptt.py:360-363` → `SERVICE_CONFIG_CHANGED`) 같은 MCPTT `sel` 로 통지하고(`csp/CspServer.cpp:1429-1437`), MCVideo 자격·N2·N6·그룹 목록 변경은 USER_CHANGED 의 MCPTT `sel` 만 남는다 | MCVideo 문서를 구독한 규격 단말이 변경을 알 수 없다(MCPTT GMS-14·15 의 형식 문제와 별개로 대상 자체가 빠졌다) | ◎ |
-| VCMS-2 | C | SDK | TS 24.484 표 9.3.2.7-6 등 — `allow-private-call` 등 인가 요소는 없으면 false | `McVideoUserProfileDoc` 가 allow-* 가 없으면 허용으로 읽는다(`sdk/core/src/csc/cms_doc.cpp:17-21`·`:190-198`, 주석 `sdk/core/include/cimsue/csc.h:244`) | CIMS CSC 는 false 를 명시해 드러나지 않는다. 규격 CMS 와 붙으면 반대 뜻(MCPTT PRV-2·CMS-3 의 MCVideo 짝) | ◎ |
 | VCMS-4 | C | CSC | §9.2.1A — CMS 는 MCVideo UE configuration(`org.3gpp.mcvideo.ue-config`)을 낸다 (shall) | 라우트가 없다(`csc/src/services/mcptt.py:3838-3843` — MCPTT ue-config 도 없다) | 규격 단말은 404 를 받고 단말 상한(동시 호·송출)을 받지 못한다 | ◎ |
 | VCMS-6 | D | CSC | §9.3.1A · §9.3.2.8 — 문서 이름 `mcvideo-user-profile-<index>.xml` · §9.4.2.8 — `mcvideo-service-config.xml` | user profile 은 문서 이름을 보지 않고(`csc/src/services/mcptt.py:3019-3046`) service config 는 `/global/` 아래 어떤 경로든 같은 문서를 준다(`:3050-3064`) | 잘못된 URI 도 200, 없는 인덱스에 404 가 없다 | ◎ |
 

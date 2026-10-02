@@ -995,7 +995,7 @@ typedef struct {
     const char* mode;
 } cimsue_cms_entry_t;
 
-/** MCPTT user profile(csc.h UserProfileDoc, TS 24.484 §8.3.2) — 인가 allow-* 는 요소가 없으면 허용(1). */
+/** MCPTT user profile(csc.h UserProfileDoc, TS 24.484 §8.3.2) — 인가 allow-* 는 요소가 없으면 false(0, 표 8.3.2.7 의 규격 기본값). */
 typedef struct {
     const char*        etag;
     int32_t            not_modified;        /* fetch 가 304 를 받았다 — 나머지는 비어 있다(호출자 사본 유지) */
@@ -1033,7 +1033,7 @@ typedef struct {
 } cimsue_service_config_doc_t;
 
 /** MCVideo user profile(csc.h McVideoUserProfileDoc, TS 24.484 §9.3) — 문서가 있으면 MCVideo 이용 자격이 있다(fetch 404 = 자격 없음).
- *  인가 allow-* 는 요소가 없으면 허용(1). */
+ *  인가 allow-* 는 요소가 없으면 false(0, 표 9.3.2.7 의 규격 기본값). */
 typedef struct {
     const char*        etag;
     int32_t            not_modified;

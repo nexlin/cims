@@ -315,13 +315,16 @@ static const char* kUserProfileXml = R"(<?xml version="1.0" encoding="UTF-8"?>
   <cp:ruleset>
     <cp:rule id="mcptt-user-authorisation">
       <cp:actions>
+        <allow-private-call>true</allow-private-call>
         <allow-emergency-group-call>true</allow-emergency-group-call>
+        <allow-emergency-private-call>true</allow-emergency-private-call>
         <allow-cancel-group-emergency>false</allow-cancel-group-emergency>
+        <allow-imminent-peril-call>true</allow-imminent-peril-call>
+        <allow-cancel-imminent-peril>true</allow-cancel-imminent-peril>
         <allow-activate-emergency-alert>false</allow-activate-emergency-alert>
         <allow-cancel-emergency-alert>false</allow-cancel-emergency-alert>
-        <allow-emergency-private-call>true</allow-emergency-private-call>
-        <allow-ambient-listening>false</allow-ambient-listening>
         <cims:allow-adhoc-group-call>false</cims:allow-adhoc-group-call>
+        <cims:allow-ambient-listening>false</cims:allow-ambient-listening>
       </cp:actions>
     </cp:rule>
   </cp:ruleset>
@@ -373,9 +376,10 @@ TEST(CmsDoc, ParseUserProfile) {
     ASSERT_EQ(d.implicitAffiliations.size(), 1u);
     EXPECT_EQ(d.maxAffiliationsN2, 8);
     EXPECT_TRUE(d.allowEmergencyGroupCall);
-    EXPECT_TRUE(d.allowImminentPerilCall);                     // 요소 없음 = 허용
+    EXPECT_TRUE(d.allowImminentPerilCall);
     EXPECT_FALSE(d.allowCancelGroupEmergency);                 // CSC 기본값(개시자만 — TS 24.379 §6.3.3.1.13.4)
-    EXPECT_TRUE(d.allowCancelImminentPeril);                   // 요소 없음 = 허용
+    EXPECT_TRUE(d.allowCancelImminentPeril);
+    EXPECT_TRUE(d.allowPrivateCall);
     EXPECT_FALSE(d.allowActivateEmergencyAlert);
     EXPECT_FALSE(d.allowCancelEmergencyAlert);
     EXPECT_TRUE(d.allowEmergencyPrivateCall);
@@ -386,6 +390,12 @@ TEST(CmsDoc, ParseUserProfile) {
     ASSERT_TRUE(UserProfileDoc::parse("<mcptt-user-profile><ruleset><actions><allow-adhoc-group-call>false</allow-adhoc-group-call>"
                                       "</actions></ruleset></mcptt-user-profile>", s));
     EXPECT_FALSE(s.allowAdhocGroupCall);
+    // 요소가 없으면 false — TS 24.484 표 8.3.2.7-7 등 «default value taken in the absence of the element»
+    EXPECT_FALSE(s.allowPrivateCall);
+    EXPECT_FALSE(s.allowImminentPerilCall);
+    EXPECT_FALSE(s.allowEmergencyGroupCall);
+    EXPECT_FALSE(s.allowCancelImminentPeril);
+    EXPECT_TRUE(UserProfileDoc().allowPrivateCall);            // 문서를 받지 못한 상태의 기본값 = 게이트 없음
     EXPECT_TRUE(s.emergencyGroup.uri.empty());
     EXPECT_EQ(s.maxAffiliationsN2, -1);
     EXPECT_FALSE(UserProfileDoc::parse("<group/>", s, &err));
@@ -402,6 +412,16 @@ TEST(CmsDoc, ParseServiceConfig) {
     EXPECT_EQ(d.rpEmergency, "mcpttp.14");                     // RFC 4412 r-value = namespace.priority
     EXPECT_EQ(d.rpImminentPeril, "mcpttp.8");
     EXPECT_EQ(d.rpNormal, "mcpttp.0");
+    // <anyExt><adhoc-group-call> 이 없으면 애드혹 그룹 호 미지원(TS 24.484 §8.4.2.6 · TS 24.379 §17.2.2.1.1)
+    EXPECT_FALSE(d.adhocGroupCallSupport);
+    ServiceConfigDoc ah;
+    ASSERT_TRUE(ServiceConfigDoc::parse("<service-configuration-info><service-configuration-params domain=\"d\"><on-network><anyExt>"
+                                        "<adhoc-group-call><allow-adhoc-group-call-support>true</allow-adhoc-group-call-support>"
+                                        "<max-no-participants>64</max-no-participants></adhoc-group-call></anyExt></on-network>"
+                                        "</service-configuration-params></service-configuration-info>", ah));
+    EXPECT_TRUE(ah.adhocGroupCallSupport);
+    EXPECT_EQ(ah.adhocMaxParticipants, 64);
+    EXPECT_TRUE(ServiceConfigDoc().adhocGroupCallSupport);     // 해석하지 않은 문서 = 게이트 없음(C API·파사드가 만든 문서)
     ServiceConfigDoc m;
     ASSERT_TRUE(ServiceConfigDoc::parse("<service-configuration-info/>", m));   // params 없음 = 설정 없음
     EXPECT_TRUE(m.rpEmergency.empty());
@@ -424,7 +444,7 @@ TEST(CmsDoc, CapabilitiesFromUserProfile) {
     EXPECT_TRUE(c.userProfileKnown && c.serviceConfigKnown);
     EXPECT_TRUE(c.emergencyGroupCall);                         // 인가는 user profile 만(service config 에 인가 요소 없음)
     EXPECT_TRUE(c.imminentPerilCall);
-    EXPECT_TRUE(c.privateCall && c.emergencyPrivateCall);      // allow-private-call 요소 없음 = 허용
+    EXPECT_TRUE(c.privateCall && c.emergencyPrivateCall);      // allow-private-call true
     EXPECT_FALSE(c.emergencyAlert);                            // 사용자 불허
     EXPECT_FALSE(c.cancelGroupEmergency);                      // 앱은 «내가 올린 조건» 과 OR 한다
     EXPECT_TRUE(c.cancelImminentPeril);
@@ -440,6 +460,15 @@ TEST(CmsDoc, CapabilitiesFromUserProfile) {
     Capabilities p = Capabilities::of(&np, nullptr);
     EXPECT_FALSE(p.privateCall);                               // 이름 경계 — -media-protection 을 잡지 않는다
     EXPECT_FALSE(p.emergencyPrivateCall);
+
+    // 애드혹 = 사용자 인가 ∧ 시스템 지원(service configuration). 문서를 받지 못했으면 지원 여부로 막지 않는다.
+    UserProfileDoc au;
+    ASSERT_TRUE(UserProfileDoc::parse("<mcptt-user-profile><ruleset><actions><anyExt><allow-adhoc-group-call>true</allow-adhoc-group-call>"
+                                      "</anyExt></actions></ruleset></mcptt-user-profile>", au));
+    EXPECT_TRUE(Capabilities::of(&au, nullptr).adhocGroupCall);
+    EXPECT_FALSE(Capabilities::of(&au, &sc).adhocGroupCall);   // kServiceConfigXml 에는 <adhoc-group-call> 이 없다 = 미지원
+    ServiceConfigDoc on; on.adhocGroupCallSupport = true;
+    EXPECT_TRUE(Capabilities::of(&au, &on).adhocGroupCall);
 }
 
 // 서버(csc _build_ue_init_config_xml) 산출 모양 — *-Service-Details 는 <on-network><anyExt> 안(TS 24.484 §7.2.2.3)

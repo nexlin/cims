@@ -184,8 +184,9 @@ constexpr const char* kCtGroupDoc = "application/vnd.oma.poc.groups+xml";
 struct CmsEntry { std::string uri, mode; };
 
 /** MCPTT user profile(TS 24.484 §8.3.2, CMS XCAP `application/vnd.3gpp.mcptt-user-profile+xml`) — 코어가 해석하는 요소만.
- *  인가는 `<cp:ruleset>` 의 allow-*(RFC 4745 actions)이고 **요소가 없으면 허용**으로 읽는다 — 서버가 최종 판정(403·Floor Deny)하므로
- *  앱은 UX 선차단만 한다(ue_sdk.md §4.2, android_ue_client.md §7). */
+ *  인가는 `<cp:ruleset>` 의 allow-*(RFC 4745 actions)이고 **요소가 없으면 false**(TS 24.484 표 8.3.2.7 — «default value taken in the
+ *  absence of the element»)로 읽는다. 아래 기본값 true 는 «문서를 받지 못했다» 의 값이다(게이트를 걸지 않는다 — Capabilities).
+ *  서버가 최종 판정(403·Floor Deny)하므로 앱은 UX 선차단만 한다(ue_sdk.md §4.2, android_ue_client.md §7). */
 struct UserProfileDoc {
     std::string etag;                          // 호출자가 XcapDoc.etag 로 채운다(parse 는 유지)
     bool notModified = false;                  // fetchUserProfile 이 304 를 받았다 — 나머지 필드는 호출자 사본 그대로
@@ -224,6 +225,11 @@ struct ServiceConfigDoc {
     std::string rpEmergency;
     std::string rpImminentPeril;
     std::string rpNormal;
+    /** on-network/anyExt/adhoc-group-call — <allow-adhoc-group-call-support>. 문서에 요소가 없으면 false = 애드혹 그룹 호 미지원
+     *  (TS 24.484 §8.4.2.6 · TS 24.379 §17.2.2.1.1 — 단말은 개시하지 않는다). C API·Kotlin 파사드는 이 값을 아직 옮기지 않는다
+     *  (거기서 만든 문서는 기본값 true — 지원 여부로 막지 않는다). */
+    bool adhocGroupCallSupport = true;         // 기본값 true = 문서를 해석하지 않은 상태(게이트 없음) — parse 가 문서 값으로 정한다
+    int adhocMaxParticipants = -1;             // adhoc-group-call/max-no-participants (-1 = 미기재)
     CIMSUE_API static bool parse(const std::string& xml, ServiceConfigDoc& out, std::string* err = nullptr);
 };
 
@@ -243,8 +249,8 @@ struct UeInitConfigDoc {
 };
 
 /** MCVideo user profile(TS 24.484 §9.3, CMS XCAP `application/vnd.3gpp.mcvideo-user-profile+xml`) — 코어가 해석하는 요소만. 문서가 있으면
- *  MCVideo 이용 자격이 있다(없으면 서버 404 — mcvideo.md §5.1). 인가 규약은 UserProfileDoc 과 같다 — ruleset allow-* 는 **요소가 없으면 허용**
- *  (서버가 최종 판정하고 앱은 UX 선차단만). */
+ *  MCVideo 이용 자격이 있다(없으면 서버 404 — mcvideo.md §5.1). 인가 규약은 UserProfileDoc 과 같다 — ruleset allow-* 는 **요소가 없으면 false**
+ *  (TS 24.484 표 9.3.2.7 — 아래 기본값 true 는 문서를 받지 못했을 때의 값. 서버가 최종 판정하고 앱은 UX 선차단만). */
 struct McVideoUserProfileDoc {
     std::string etag;
     bool notModified = false;                  // fetchMcVideoUserProfile 이 304 를 받았다
@@ -291,7 +297,8 @@ constexpr const char* kCtMcVideoServiceConfig = "application/vnd.3gpp.mcvideo-se
 constexpr const char* kCtUeInitConfig = "application/vnd.3gpp.mcptt-ue-init-config+xml";
 
 /** 정책 게이트 스냅샷(ue_sdk.md §4.2) — user profile ruleset 인가. **받지 못한 문서는 허용**으로 둔다(게이트를 걸지 않는다).
- *  UX 선차단(버튼 숨김·안내)용이며 최종 판정은 서버다. service config 는 인가를 담지 않는다(TS 24.484 §8.4) — 받았는지만 기록. */
+ *  UX 선차단(버튼 숨김·안내)용이며 최종 판정은 서버다. service config 는 사용자 인가를 담지 않는다(TS 24.484 §8.4) — 시스템의
+ *  애드혹 그룹 호 지원 여부(<allow-adhoc-group-call-support>)만 adhocGroupCall 에 AND 한다. */
 struct Capabilities {
     bool userProfileKnown = false, serviceConfigKnown = false;
     bool privateCall = true;                   // up.allow-private-call
@@ -304,7 +311,7 @@ struct Capabilities {
     bool emergencyPrivateCall = true;          // up.allow-private-call ∧ up.allow-emergency-private-call
     bool emergencyAlert = true;                // up.allow-activate-emergency-alert
     bool cancelEmergencyAlert = true;          // up.allow-cancel-emergency-alert
-    bool adhocGroupCall = true;                // up.allow-adhoc-group-call
+    bool adhocGroupCall = true;                // up.allow-adhoc-group-call ∧ sc.allow-adhoc-group-call-support (TS 24.379 §17.2.2.1.1)
     int maxAffiliationsN2 = 0;                 // up.MaxAffiliationsN2, 0 = 미지정(N2 는 앱이 경고만 — 강제하지 않는다)
     /** nullptr = 그 문서를 아직 못 받음. */
     CIMSUE_API static Capabilities of(const UserProfileDoc* userProfile, const ServiceConfigDoc* serviceConfig);

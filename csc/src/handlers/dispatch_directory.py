@@ -62,6 +62,9 @@ _PROFILE_KEYS = {                               # 와이어 camelCase → ptt_us
     # 해제 인가 (TS 24.484 ruleset allow-cancel-group-emergency·allow-cancel-imminent-peril·allow-cancel-emergency-alert)
     'allowCancelGroupEmergency': 'allow_cancel_group_emergency', 'allowCancelImminentPeril': 'allow_cancel_imminent_peril',
     'allowCancelEmergencyAlert': 'allow_cancel_emergency_alert',
+    # 개별 호 인가 (TS 24.484 ruleset allow-private-call·allow-private-call-to-any-user·allow-private-call-participation)
+    'allowPrivateCall': 'allow_private_call', 'allowPrivateCallToAnyUser': 'allow_private_call_to_any_user',
+    'allowPrivateCallParticipation': 'allow_private_call_participation',
 }
 # 관제 앱(관리 범위)이 바꿀 수 없는 자격 — 감청·청취 권한은 콘솔 manager 의 승인 사항(dispatch_center.md §5.6,
 #   mcptt_authorization.md §2.4 "청취 자격은 배정의 결과"). 관리 범위가 있는 관제사가 자기(또는 범위 안 구성원)에게 청취

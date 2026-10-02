@@ -275,8 +275,8 @@ data class CmsEntry(val uri: String = "", val mode: String = "") {
 }
 
 /**
- * MCPTT user profile(TS 24.484 §8.3.2) — 코어가 해석한 요소. 인가(allow-*)는 요소가 없으면 허용으로 읽는다
- * (서버가 최종 판정 — UX 선차단용, ue_sdk.md §4.2). 판정 스냅샷은 [Capabilities.of].
+ * MCPTT user profile(TS 24.484 §8.3.2) — 코어가 해석한 요소. 인가(allow-*)는 요소가 없으면 false 로 읽는다(표 8.3.2.7 의 규격
+ * 기본값 — 서버가 최종 판정, UX 선차단용, ue_sdk.md §4.2). 판정 스냅샷은 [Capabilities.of].
  */
 data class UserProfileDoc(
     val etag: String = "", val userUri: String = "",
@@ -366,7 +366,7 @@ data class ServiceConfigDoc(
 
 /**
  * MCVideo user profile(TS 24.484 §9.3) — 문서가 있으면 MCVideo 이용 자격이 있다(fetch 404 = 자격 없음). groups = MCVideo 로 affiliate 할 수
- * 있는 그룹. 인가(allow-*)는 요소가 없으면 허용. null = 미기재.
+ * 있는 그룹. 인가(allow-*)는 요소가 없으면 false(표 9.3.2.7). null = 미기재.
  */
 data class McVideoUserProfileDoc(
     val etag: String = "", val userUri: String = "", val mcvideoId: String = "",
