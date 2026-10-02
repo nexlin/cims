@@ -313,6 +313,75 @@ def _strip_rtp_to_h264(raw_rtp_path: str, out_h264_path: str) -> bool:
         return False
 
 
+# 영상 프레임 속도를 알 수 없을 때(프레임 2장 미만)의 값 — 단말 SDK 송출 기본(dispatch_desktop_ui.md §10·sdk_port_handoff 15 fps)
+_VIDEO_FPS_FALLBACK = 15.0
+
+
+def _rtp_video_fps(raw_rtp_path: str) -> float:
+    """raw RTP 기록의 RTP 시각으로 잰 실제 영상 프레임 속도.
+
+    `_strip_rtp_to_h264` 가 내는 H.264 Annex-B 에는 프레임 시각이 없어, ffmpeg 는 SPS VUI timing 이
+    있으면 그 값을, 없으면 25 fps 를 가정한다 — 실단말 인코더(OpenH264·MediaCodec)는 VUI timing 을 빼거나
+    명목값만 적는 경우가 많아 재생이 실제보다 빨라지고(15 fps 를 25 로 = 1.66배) 영상이 음성보다 먼저 끝났다.
+    H.264 RTP 의 timestamp 는 90 kHz 클록·한 access unit(프레임)의 패킷은 같은 값(RFC 6184 §5.1)이므로
+    서로 다른 timestamp 수 / 시간 폭 = 실제 평균 프레임 속도. 32비트 wrap 은 이어 붙인다.
+    알 수 없으면 _VIDEO_FPS_FALLBACK."""
+    try:
+        frames, last, base, first = 0, None, 0, None
+        with open(raw_rtp_path, 'rb') as fin:
+            while True:
+                hdr = fin.read(12)
+                if len(hdr) < 12:
+                    break
+                pkt_len = struct.unpack('<I', hdr[:4])[0]
+                pkt = fin.read(pkt_len)
+                if len(pkt) < pkt_len or pkt_len < 12:
+                    continue
+                ts = struct.unpack_from('>I', pkt, 4)[0]
+                if last is not None and ts == last:
+                    continue
+                if last is not None and ts < last and last - ts > 0x80000000:
+                    base += 0x100000000                                   # wrap
+                last = ts
+                t = base + ts
+                if first is None:
+                    first = t
+                frames += 1
+                span = t
+        if first is None or frames < 2 or span <= first:
+            return _VIDEO_FPS_FALLBACK
+        fps = (frames - 1) * 90000.0 / (span - first)
+        return min(60.0, max(1.0, fps))
+    except Exception as e:
+        logger.warning("_rtp_video_fps %s: %s", raw_rtp_path, e)
+        return _VIDEO_FPS_FALLBACK
+
+
+def _h264_input(h264_path: str, fps: float) -> list:
+    """raw H.264 입력 인자 — 프레임 속도를 RTP 로 잰 값으로 고정(VUI·25 fps 가정 대신)."""
+    return ['-f', 'h264', '-r', f'{fps:.3f}', '-i', h264_path]
+
+
+# 영상이 음성보다 조금 먼저 끝날 때(마지막 프레임 뒤 ~수백 ms) 마지막 장면을 멈춰 보여 주는 최대 시간.
+# 이보다 긴 공백(영상을 끈 구간)은 검은 바탕 그대로 — 멈춘 화면이 오래 남으면 영상이 이어지는 것처럼 보인다.
+_VIDEO_HOLD_SEC = 1.0
+_VIDEO_HOLD = f'tpad=stop_mode=clone:stop_duration={_VIDEO_HOLD_SEC}'
+
+
+def _video_timing_marker(mp4_path: str) -> str:
+    """영상 속도를 RTP 시각으로 맞춘 변환본 표식. 영상 세그먼트의 MP4 에 이 표식이 없으면 그 전 변환본이라
+    재생 요청 때 다시 만든다(_ensure_segment_ready)."""
+    return mp4_path + '.rtpfps'
+
+
+def _mark_video_timing(mp4_path: str) -> None:
+    try:
+        with open(_video_timing_marker(mp4_path), 'w') as f:
+            f.write('1')
+    except OSError as e:
+        logger.warning("video timing marker %s: %s", mp4_path, e)
+
+
 # ══════════════════════════════════════════════════════════════
 #  파일시스템 탐색 — 녹취 세션 디렉터리 검색
 # ══════════════════════════════════════════════════════════════
@@ -749,8 +818,36 @@ def _ffprobe_bin() -> str:
     return shutil.which('ffprobe') or 'ffprobe'
 
 
+_AMRWB_FRAME_BYTES = [17, 23, 32, 36, 40, 46, 50, 58, 60, 5, 0, 0, 0, 0, 0, 0]   # ToC FT → 음성 바이트(RFC 4867 표 1)
+
+
+def _amrwb_storage_seconds(path: str):
+    """AMR-WB storage 파일(`#!AMR-WB\n` + ToC·프레임, RFC 4867 §5) 의 정확한 길이 = 프레임 수 × 20 ms.
+    NO_DATA(FT 15)·SID 도 한 프레임 20 ms. AMR-WB storage 가 아니면 None."""
+    try:
+        with open(path, 'rb') as f:
+            data = f.read()
+    except OSError:
+        return None
+    magic = b'#!AMR-WB\n'
+    if not data.startswith(magic):
+        return None
+    i, n = len(magic), 0
+    while i < len(data):
+        i += 1 + _AMRWB_FRAME_BYTES[(data[i] >> 3) & 0x0F]
+        if i > len(data):
+            break
+        n += 1
+    return n * 0.02
+
+
 def _audio_duration(path: str, default: str = '60') -> str:
-    """오디오 파일 길이(초, 문자열). 영상 mux 시 동기화 기준."""
+    """오디오 파일 길이(초, 문자열). 영상 mux 시 동기화 기준.
+    변환 중간 파일(AMR-WB storage)은 프레임 수로 정확히 센다 — ffprobe 는 프레임 시각이 없는 storage 를
+    파일 크기로 어림해 실제보다 길게(10.02초를 10.36초로) 답해, 결과 끝에 소리·영상 없는 꼬리가 붙었다."""
+    exact = _amrwb_storage_seconds(path)
+    if exact is not None and exact > 0:
+        return f'{exact:.3f}'
     try:
         ret = subprocess.run([_ffprobe_bin(), '-v', 'error', '-show_entries', 'format=duration',
                               '-of', 'csv=p=0', path], capture_output=True, timeout=10)
@@ -758,6 +855,17 @@ def _audio_duration(path: str, default: str = '60') -> str:
         return d or default
     except Exception:
         return default
+
+
+def _audio_duration_max(paths: list, default: str = '60') -> str:
+    """여러 음성을 amix(duration=longest) 로 섞을 때의 길이 = 가장 긴 것."""
+    vals = []
+    for p in paths:
+        try:
+            vals.append(float(_audio_duration(p, '')))
+        except ValueError:
+            pass
+    return f'{max(vals):.3f}' if vals else default
 
 
 # 파형 피크 버킷 수 — 콘솔 파형 레인 폭(≈600px)에 맞춘 고정 해상도.
@@ -804,7 +912,7 @@ def _video_grid_filter(n: int, audio_dur: str):
     w, h = cols * cell, rows * cell
     parts = [f'color=c=black:s={w}x{h}:r=15:d={audio_dur}[bg]']
     for i in range(n):
-        parts.append(f'[v{i}]scale={cell}:{cell}:force_original_aspect_ratio=decrease,'
+        parts.append(f'[v{i}]{_VIDEO_HOLD},scale={cell}:{cell}:force_original_aspect_ratio=decrease,'
                      f'pad={cell}:{cell}:(ow-iw)/2:(oh-ih)/2:black[c{i}]')
     prev = 'bg'
     for i in range(n):
@@ -816,12 +924,13 @@ def _video_grid_filter(n: int, audio_dur: str):
 
 
 def _transcode_video_only(rec_dir: str, seg: dict, slot, h264s: list, out_path: str, tmp_out: str) -> bool:
-    """오디오 트랙이 없는 세션 세그먼트 → 영상만 MP4. 길이 = 세그먼트 duration_ms(H.264 raw 에 타임스탬프가 없다)."""
+    """오디오 트랙이 없는 세션 세그먼트 → 영상만 MP4. 길이 = 세그먼트 duration_ms(H.264 raw 에 타임스탬프가 없다).
+    h264s = [(H.264 경로, RTP 로 잰 fps)]."""
     seq = seg.get('seq', 0)
     dur = f"{max(0.04, (seg.get('duration_ms', 0) or 0) / 1000.0):.3f}"
     cmd = [_FFMPEG, '-y', '-hide_banner', '-loglevel', 'error']
-    for h in h264s:
-        cmd += ['-f', 'h264', '-r', '15', '-i', h]
+    for h, fps in h264s:
+        cmd += _h264_input(h, fps)
     if len(h264s) == 1:
         cmd += ['-map', '0:v', '-t', dur, '-c:v', 'copy']
     else:
@@ -836,6 +945,7 @@ def _transcode_video_only(rec_dir: str, seg: dict, slot, h264s: list, out_path: 
                        ret.stderr.decode(errors='replace')[:500])
     if os.path.exists(tmp_out) and os.path.getsize(tmp_out) > 256:
         os.replace(tmp_out, out_path)
+        _mark_video_timing(out_path)
         try: os.remove(_failed_marker_path(rec_dir, seq, slot))
         except OSError: pass
         return True
@@ -892,7 +1002,7 @@ def _transcode_ptt_multi(rec_dir: str, seg: dict, slot, out_path: str, tmp_out: 
             if os.path.exists(h):
                 tmp_files.append(h)
             if ok:
-                h264s.append(h)
+                h264s.append((h, _rtp_video_fps(raw)))
 
         if not amrs and not h264s:
             _write_failed_marker(rec_dir, seq, '녹취 음성·영상 데이터 없음(프레임 0)', slot)
@@ -902,14 +1012,14 @@ def _transcode_ptt_multi(rec_dir: str, seg: dict, slot, out_path: str, tmp_out: 
             # 영상만 있는 송출 구간(MCVideo — mcvideo.md D12) — 소리 없이 영상만 담는다. 파형 피크는 없다.
             return _transcode_video_only(rec_dir, seg, slot, h264s, out_path, tmp_out)
 
-        audio_dur = _audio_duration(amrs[0])
+        audio_dur = _audio_duration_max(amrs)
         pcm_out = tmp_out + '.pcm'
 
         cmd = [_FFMPEG, '-y', '-hide_banner', '-loglevel', 'error']
         for a in amrs:
             cmd += ['-i', a]
-        for h in h264s:
-            cmd += ['-f', 'h264', '-r', '15', '-i', h]
+        for h, fps in h264s:
+            cmd += _h264_input(h, fps)
 
         n_a, n_v = len(amrs), len(h264s)
         # 필터 출력 라벨은 한 번만 소비할 수 있으므로 asplit 으로 mp4/파형용을 나눈다.
@@ -949,6 +1059,8 @@ def _transcode_ptt_multi(rec_dir: str, seg: dict, slot, out_path: str, tmp_out: 
 
         if os.path.exists(tmp_out) and os.path.getsize(tmp_out) > 256:
             os.replace(tmp_out, out_path)
+            if n_v:
+                _mark_video_timing(out_path)
             try: os.remove(_failed_marker_path(rec_dir, seq, slot))
             except OSError: pass
             return True
@@ -1055,24 +1167,12 @@ def _transcode_segment_file(rec_dir: str, seg: dict, slot=None):
         if h264_b and os.path.exists(h264_b): tmp_files.append(h264_b)
 
         has_video = has_va or has_vb
+        fps_a = _rtp_video_fps(raw_va) if has_va else _VIDEO_FPS_FALLBACK
+        fps_b = _rtp_video_fps(raw_vb) if has_vb else _VIDEO_FPS_FALLBACK
 
-        # 음성 길이 결정 (영상 동기화 기준)
-        audio_dur = '60'  # 기본값
-        aud_ref = amr_a if has_a else (amr_b if has_b else '')
-        if aud_ref:
-            try:
-                _ffprobe = (_FFMPEG[:-len('ffmpeg')] + 'ffprobe') if _FFMPEG.endswith('ffmpeg') else 'ffprobe'
-                if not (os.path.isabs(_ffprobe) and os.path.exists(_ffprobe)):
-                    _ffprobe = shutil.which('ffprobe') or 'ffprobe'
-                dur_ret = subprocess.run(
-                    [_ffprobe, '-v', 'error', '-show_entries', 'format=duration',
-                     '-of', 'csv=p=0', aud_ref],
-                    capture_output=True, timeout=10)
-                d = dur_ret.stdout.decode().strip()
-                if d:
-                    audio_dur = d
-            except Exception:
-                pass
+        # 음성 길이 결정 (영상 동기화 기준) — 양쪽 음성은 amix(duration=longest) 로 섞으므로 긴 쪽,
+        # AMR-WB 프레임 수로 정확히(_audio_duration)
+        audio_dur = _audio_duration_max([a for a, ok in ((amr_a, has_a), (amr_b, has_b)) if ok])
 
         if has_video and has_a and has_b and has_va and has_vb:
             # ── VoLTE 영상: 발신(A)=왼쪽, 착신(B)=오른쪽 ──
@@ -1081,13 +1181,13 @@ def _transcode_segment_file(rec_dir: str, seg: dict, slot=None):
             cmd = [
                 _FFMPEG, '-y', '-hide_banner', '-loglevel', 'error',
                 '-i', amr_a, '-i', amr_b,
-                '-f', 'h264', '-i', h264_a,
-                '-f', 'h264', '-i', h264_b,
+                *_h264_input(h264_a, fps_a),
+                *_h264_input(h264_b, fps_b),
                 '-f', 'lavfi', '-i', f'color=c=black:s=1280x640:r=25:d={audio_dur}',
                 '-filter_complex',
                 '[0:a][1:a]amix=inputs=2:duration=longest:normalize=0,dynaudnorm[aout];'
-                '[2:v]scale=640:640:force_original_aspect_ratio=decrease,pad=640:640:(ow-iw)/2:(oh-ih)/2:black[va];'
-                '[3:v]scale=640:640:force_original_aspect_ratio=decrease,pad=640:640:(ow-iw)/2:(oh-ih)/2:black[vb];'
+                f'[2:v]{_VIDEO_HOLD},scale=640:640:force_original_aspect_ratio=decrease,pad=640:640:(ow-iw)/2:(oh-ih)/2:black[va];'
+                f'[3:v]{_VIDEO_HOLD},scale=640:640:force_original_aspect_ratio=decrease,pad=640:640:(ow-iw)/2:(oh-ih)/2:black[vb];'
                 '[4:v][va]overlay=0:0:eof_action=pass[left];'
                 '[left][vb]overlay=640:0:eof_action=pass[vout]',
                 '-map', '[vout]', '-map', '[aout]',
@@ -1106,7 +1206,7 @@ def _transcode_segment_file(rec_dir: str, seg: dict, slot=None):
             # H.264 raw에 타임스탬프가 없으므로 -shortest 대신 -t로 오디오 길이에 맞춤
             cmd = [
                 _FFMPEG, '-y', '-hide_banner', '-loglevel', 'error',
-                '-f', 'h264', '-r', '15', '-i', h264_a,
+                *_h264_input(h264_a, fps_a),
                 '-i', amr_a,
                 '-t', audio_dur,
                 '-c:v', 'copy',
@@ -1121,18 +1221,20 @@ def _transcode_segment_file(rec_dir: str, seg: dict, slot=None):
         elif has_video and (has_a or has_b) and (has_va or has_vb):
             # ── VoLTE 영상 (한쪽만): 발신=왼쪽, 착신=오른쪽 ──
             vid = h264_a if has_va else h264_b
+            vid_fps = fps_a if has_va else fps_b
             aud = amr_a if has_a else amr_b
+            aud_dur = _audio_duration(aud)                       # 이 경로는 음성 한쪽만 싣는다
             x_base = '0' if has_va else '640'
             cmd = [
                 _FFMPEG, '-y', '-hide_banner', '-loglevel', 'error',
                 '-i', aud,
-                '-f', 'h264', '-i', vid,
-                '-f', 'lavfi', '-i', f'color=c=black:s=1280x640:r=25:d={audio_dur}',
+                *_h264_input(vid, vid_fps),
+                '-f', 'lavfi', '-i', f'color=c=black:s=1280x640:r=25:d={aud_dur}',
                 '-filter_complex',
-                '[1:v]scale=640:640:force_original_aspect_ratio=decrease,pad=640:640:(ow-iw)/2:(oh-ih)/2:black[v1];'
+                f'[1:v]{_VIDEO_HOLD},scale=640:640:force_original_aspect_ratio=decrease,pad=640:640:(ow-iw)/2:(oh-ih)/2:black[v1];'
                 f'[2:v][v1]overlay=x={x_base}:y=0:eof_action=pass[vout]',
                 '-map', '[vout]', '-map', '0:a',
-                '-t', audio_dur,
+                '-t', aud_dur,
                 '-c:v', 'libx264', '-preset', 'fast', '-crf', '23',
                 '-c:a', 'aac', '-ar', '16000', '-ac', '1',
                 '-movflags', '+faststart',
@@ -1169,6 +1271,8 @@ def _transcode_segment_file(rec_dir: str, seg: dict, slot=None):
         # 이로써 _segment_status 가 mp4 존재만으로 'ready' 판정해도 항상 "완성된" 파일을 가리킨다.
         if os.path.exists(tmp_out) and os.path.getsize(tmp_out) > 256:
             os.replace(tmp_out, out_path)
+            if has_video:
+                _mark_video_timing(out_path)
             # 재시도 성공 시 이전 실패 마커 해제
             try: os.remove(_failed_marker_path(rec_dir, seq))
             except OSError: pass
@@ -1201,6 +1305,12 @@ def _ensure_segment_ready(rec_dir: str, seg: dict, slot=None) -> str:
         status = seg.get('status', _segment_status(rec_dir, seg))
     else:
         status = _segment_status(rec_dir, seg, slot)
+
+    # 영상 속도를 RTP 시각으로 맞추기 전에 만든 영상 변환본(표식 없음)은 다시 만든다 — 덮어쓰기는 변환이 끝날 때
+    # os.replace 로 하므로 그동안은 202(변환 중)다.
+    if status == 'ready' and _slot_has_video(seg, slot) and \
+            not os.path.exists(_video_timing_marker(_converted_path_mp4(rec_dir, seg.get('seq', 0), slot))):
+        status = 'raw'
 
     if status in ('recording', 'ready', 'transcoding', 'failed'):
         return status
@@ -1680,8 +1790,12 @@ def _slot_has_video(seg: dict, slot) -> bool:
     if slot is None:
         return bool(seg.get('has_video'))
     for t in seg.get('tracks', []) or []:
-        if t.get('kind') == 'audio' and t.get('slot') == slot:
-            return bool(t.get('has_video'))
+        if t.get('slot') != slot:
+            continue
+        if t.get('kind') == 'video':                       # 영상만 있는 송출 구간(MCVideo — mcvideo.md D12)
+            return True
+        if t.get('kind') == 'audio' and t.get('has_video'):
+            return True
     return False
 
 

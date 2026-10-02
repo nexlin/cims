@@ -292,6 +292,31 @@ leg 마다 다르므로(UE 동적 96, cspsim 99, 이종 단말 혼재) 변환기
   세그먼트 메타 참조 미기록·`has_video` 제외 (빈 트랙과 동일 취급).
 - **OAM**(기존 녹취 방어): 영상 raw 파일이 4KB 미만이면 payload 패킷 존재를 스캔해 판정 —
   keepalive 만 담긴 파일(레코드당 24B)은 영상 없음. 목록·세그먼트·변환·Content-Type 공통 적용.
+  영상만 있는 슬롯(MCVideo 송출 구간 — mcvideo.md D12)도 영상 있음이다(`_slot_has_video` — 영상 트랙 또는 영상 딸린 음성 트랙).
+
+### 영상 재생 속도 — RTP 시각으로 잰 fps
+
+raw RTP 에서 뽑은 H.264 Annex-B(`_strip_rtp_to_h264`)에는 프레임 시각이 없다. ffmpeg 는 그런 입력의 속도를
+SPS VUI timing(없으면 25 fps)으로 정하는데, 실단말 인코더(OpenH264·MediaCodec)는 VUI timing 을 빼거나 실제와 다른
+명목값을 적어 영상이 빨리 흘러 음성보다 먼저 끝나고 나머지가 검은 바탕만 남았다. 그래서 변환은 **영상 트랙마다
+RTP 시각으로 실제 평균 fps 를 재서**(`_rtp_video_fps` — H.264 RTP 는 90 kHz 클록·한 프레임의 패킷은 같은 timestamp,
+RFC 6184 §5.1 → 서로 다른 timestamp 수 / 시간 폭, 32비트 wrap 이음, 프레임 2장 미만이면 15 fps) 입력 속도로
+고정한다(`-f h264 -r <fps>` — VUI 보다 우선). VoIP 양쪽·한쪽 영상, MCVideo 슬롯 1개(copy mux)·N개(격자)·영상만 구간
+모두 같다.
+
+- 영상 변환본에는 표식 `seg_NNNN[_sK].mp4.rtpfps` 를 함께 둔다. 표식 없는 영상 변환본(이 규칙 전에 만든 것)은 재생
+  요청 때 다시 만든다(`_ensure_segment_ready` — 그동안 202 변환 중, 끝나면 원자적 교체). 음성만인 변환본은 그대로 쓴다.
+- **결과 길이 = 실제 음성 길이**: 변환 중간 음성(AMR-WB storage)은 프레임 시각이 없어 ffprobe 가 파일 크기로 어림해
+  실제보다 길게 답한다(10.02초를 10.36초로 — 결과 끝에 소리·영상 없는 꼬리). 그래서 길이는 프레임 수 × 20 ms 로
+  센다(`_audio_duration` — NO_DATA·SID 포함, RFC 4867 §5). 여러 음성을 `amix duration=longest` 로 섞는 경로는 가장 긴 것,
+  VoIP 한쪽 영상 경로는 싣는 음성 한쪽의 길이.
+- **마지막 장면 유지**: 영상이 음성보다 조금 먼저 끝나면(마지막 프레임 뒤 수백 ms) 검은 바탕 대신 마지막 장면을 멈춰
+  보인다 — 최대 `_VIDEO_HOLD_SEC`(1초, `tpad=stop_mode=clone`). 그보다 긴 공백(통화 중 영상을 끈 구간)은 검은 바탕 그대로
+  둔다(멈춘 화면이 오래 남으면 영상이 이어지는 것처럼 보인다). VoIP 양쪽·한쪽, MCVideo 격자(2개 이상) 합성에 적용.
+  슬롯 1개 copy mux 는 재인코딩이 없어 플레이어가 마지막 장면을 그대로 둔다.
+- 한계: 평균 속도라 통화 중 영상을 잠시 멈췄다 다시 보낸 구간(프레임 공백)은 공백 없이 이어 붙는다 — 프레임마다
+  RTP 시각을 싣는 변환(타임스탬프 있는 중간 컨테이너)은 향후 과제.
+- 시험 = `tests/oam_recording_video_timing_test.py`(S1-UNIT-OAM-PTT).
 
 ### 3.6.2 트랜스코딩 주체 = OAM + 번들 ffmpeg
 

@@ -3,6 +3,8 @@
   · tests/oam_ptt_index_test.py          인덱스 = 스캔 · 세션이 기록 단위(시간버킷 넘김·같은 시간대 두 세션)
   · tests/oam_ptt_sessions_live_test.py  진행중 세션은 조회 범위와 무관하게 전량 병합(어제 시작해 열린 세션)
   · tests/oam_recording_mcvideo_test.py  MCVideo 그룹 호 녹취 = PTT 세션 재생 경로(영상만 있는 송출 구간 포함)·세션 서비스 축
+  · tests/oam_recording_video_timing_test.py  녹취 영상 재생 속도 = RTP 시각으로 잰 실제 fps(통화·무전) · 옛 영상 변환본 재변환
+    (번들 ffmpeg 필요 — 없으면 SKIP 으로 0 반환)
 모두 실서버·녹취 트리 없이 tmp/대체 읽기 모델로 돈다.
 """
 from __future__ import annotations
@@ -14,8 +16,9 @@ from ...registry import verify_item, ItemResult, ItemStatus
 from ...context import VerifyContext
 
 _ID = "S1-UNIT-OAM-PTT"
-_NAME = "OAM PTT 세션 인덱스·이력 병합·MCVideo 녹취 unit test (tests/oam_ptt_index_test.py · oam_ptt_sessions_live_test.py · oam_recording_mcvideo_test.py)"
-_TESTS = ["tests/oam_ptt_index_test.py", "tests/oam_ptt_sessions_live_test.py", "tests/oam_recording_mcvideo_test.py"]
+_NAME = "OAM PTT 세션 인덱스·이력 병합·MCVideo 녹취·녹취 영상 속도 unit test (tests/oam_ptt_index_test.py · oam_ptt_sessions_live_test.py · oam_recording_mcvideo_test.py · oam_recording_video_timing_test.py)"
+_TESTS = ["tests/oam_ptt_index_test.py", "tests/oam_ptt_sessions_live_test.py", "tests/oam_recording_mcvideo_test.py",
+          "tests/oam_recording_video_timing_test.py"]
 
 
 @verify_item(
