@@ -3669,10 +3669,11 @@ void Engine::Impl::startMsrpRecv(int callId, int accountId, const MsrpLeg& leg) 
         if (!sp.empty() && msrp::receiveSds(sp, lp, 15, *cancel, ct, body, err)) {
             SdsMessage m;
             bool forApp = false;
-            if (mcdata::parse(ct, body, m, forApp) && forApp) {
+            const bool parsed = mcdata::parse(ct, body, m, forApp);       // 한 번만 해석한다(본문 payload 는 이어 붙는다)
+            if (parsed && forApp) {
                 // 응용 대상 메시지 — 사용자에게 알리지 않고 버린다(TS 24.282 §9.2.1.2 7)·8), 시그널링 평면과 같은 규칙)
                 log(3, "msrp recv call " + std::to_string(callId) + ": message for an application — discarded");
-            } else if (mcdata::parse(ct, body, m)) {
+            } else if (parsed) {
                 m.accountId = accountId;
                 if (m.fromUri.empty()) m.fromUri = from;          // 본문에 mcdata-info 가 없다 — 배포 INVITE 의 것
                 if (m.groupUri.empty()) m.groupUri = group;

@@ -347,3 +347,24 @@ TEST(SdsCodec, GroupRequestsCarryClientId) {
     b = mcdata::buildOneToOneSds("tel:+821", "hi", mcdata::conversationIdOneToOne("+820", "+821"), mcdata::newMessageId(), false, 1700000000L);
     EXPECT_EQ(b.body.find("mcdata-client-id"), std::string::npos);
 }
+
+// DATA PAYLOAD 의 Payload IE 여러 개(TS 24.282 §15.2.13 · §9.2.1.2 6)d)) — TEXT·HYPERLINKS 는 온 순서대로 잇는다(전엔 마지막 TEXT 만 남았다)
+TEST(SdsCodec, MultiplePayloadsAndHyperlinks) {
+    const std::string conv = mcdata::conversationIdOf("g001"), msg = mcdata::newMessageId();
+    mcdata::Body b = mcdata::buildGroupSds("tel:g001", "첫 줄", conv, msg, false, 1700000000L);
+    auto ie = [](int ctype, const std::string& data) {
+        std::string s; s += (char)0x78; s += (char)((data.size() + 1) >> 8); s += (char)((data.size() + 1) & 0xFF); s += (char)ctype; return s + data;
+    };
+    std::string payload;
+    payload += (char)mcdata::kMsgDataPayload; payload += (char)4;                 // payload 수 4
+    payload += ie(0x01, "첫 줄") + ie(0x03, "https://example.org/a") + ie(0x02, std::string("\x00\x01", 2)) + ie(0x01, "끝 줄");
+    std::string body = b.body;
+    const std::string was = mcdata::base64Encode(mcdata::sdsPayloadTlv("첫 줄"));
+    size_t p = body.find(was);
+    ASSERT_NE(p, std::string::npos);
+    body.replace(p, was.size(), mcdata::base64Encode(payload));
+    SdsMessage out;
+    ASSERT_TRUE(mcdata::parse(b.contentType, body, out));
+    EXPECT_EQ(out.text, "첫 줄\nhttps://example.org/a\n끝 줄");                    // BINARY 는 넘긴다
+    EXPECT_FALSE(out.fd);
+}

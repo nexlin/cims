@@ -332,6 +332,7 @@ bool parse(const std::string& contentType, const std::string& body, SdsMessage& 
 
 bool parse(const std::string& contentType, const std::string& body, SdsMessage& out, bool& forApplication) {
     forApplication = false;
+    out.text.clear();                                    // payload 를 이어 붙이므로 받은 구조체의 앞 값을 지운다
     std::string boundary = boundaryOf(contentType);
     if (boundary.empty()) {
         size_t nl = body.find_first_of("\r\n");
@@ -421,7 +422,10 @@ bool parse(const std::string& contentType, const std::string& body, SdsMessage& 
                 if (iei == 0x78 && l >= 1) {
                     int ctype = (unsigned char)raw[i + 3];
                     std::string data = raw.substr(i + 4, l - 1);
-                    if (ctype == 0x01) out.text = data;
+                    // Payload content type(표 15.2.13-2): TEXT 0x01 · HYPERLINKS 0x03 은 사용자에게 보일 글이다 — payload 가 여럿이면
+                    //   온 순서대로 줄을 바꿔 잇는다(§9.2.1.2 6)d) «render the contents of the Payload IE(s)»). FILEURL 0x04 = 파일.
+                    //   BINARY·LOCATION·CODED TEXT 등은 담을 자리가 없어 넘긴다.
+                    if (ctype == 0x01 || ctype == 0x03) out.text += (out.text.empty() ? "" : "\n") + data;
                     else if (ctype == 0x04) { out.fd = true; out.fileUrl = data; }
                 }
                 i += 3 + l;

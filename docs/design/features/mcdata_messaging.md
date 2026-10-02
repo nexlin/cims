@@ -81,6 +81,8 @@ SIP MESSAGE 본문 = `multipart/mixed;boundary=…` 3파트:
   DELIVERED=0x02)을 원 발신자에게 1:1 MESSAGE 로 회신 → 발신 앱 말풍선에 ✓ 표시.
 - **mcdata-info 의 client ID**: 그룹 SDS·그룹 FD 는 `<mcdata-client-id type="Normal"><mcdataString>` 로 MCData client ID(단일 MC client ID —
   `AccountConfig.effectiveMcpttClientId()`)를 싣는다(TS 24.282 §9.2.2.2.1 3)b)iv) · §10.2.4.2.1 3)b)iii) — 제어 기능의 클라이언트 단위 판정). 1:1 은 싣지 않는다.
+- **Payload 여러 개**(§15.2.13 · §9.2.1.2 6)d)): DATA PAYLOAD 의 Payload IE 가 여럿이면 TEXT(0x01)·HYPERLINKS(0x03)를 온 순서대로 줄을 바꿔 이어
+  `SdsMessage.text` 로 올린다. FILEURL(0x04)은 파일. BINARY·LOCATION·CODED TEXT 는 넘긴다(미구현).
 - **선택 IE 와 응용 대상 메시지**(표 15.1.2.1-1 · §9.2.1.2 7)·8)): SDS SIGNALLING PAYLOAD 의 선택 IE 는 InReplyTo `0x21` → Application ID `0x22`
   → disposition 요청 `0x8N` → Extended application ID `0x7D` → User location `0x7E` → Sender MCData user ID `0x51` → Application metadata container
   `0x53`(뒤 넷은 TLV-E) 순서로 읽는다. Application ID 나 Extended application ID 가 있는 메시지는 **사용자용이 아니다** — 단말은 사용자에게
