@@ -25,6 +25,7 @@ docs/
 │       ├── volte_flows.md           VoLTE 호처리 Flow
 │       ├── ptt_flows.md             PTT 그룹콜 Flow
 │       ├── mcptt_broadcast_group_call.md 일제 통화(broadcast group call) 규격 정합 — 판정·구현 위치 (서버·단말 코어 구현, 관제 앱 남음)
+│       ├── mcptt_timers.md          MCPTT 타이머 — 소유(CSP·CMP·단말) · 값의 정본 문서 · 설정·전달 경로 · 규격 대비 편차
 │       ├── ue_nat_traversal.md      단말 NAT traversal (leg 포트 · 목적지 latch · 정책)
 │       ├── leg_liveness.md          비정상 종료 leg 감지 (SIP 세션 타이머 RFC 4028 — 설계 정본)
 │       ├── dispatch_center.md       관제 센터 (전화 그룹·대표번호 병렬 호출 TS 24.239·역할 기반 통화 감청 RFC 3911 Join+CMP tap·PTT 그룹콜 청취 — 절차 구현 / 전화 그룹·역할 분해는 설계)
