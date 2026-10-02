@@ -55,6 +55,7 @@ bool CCspServiceConfig::Refresh() {
     CspCallTimerParams ct;
     ParseCallTimers( strBody, ct );
     const int iLevels = ParseNumLevelsPriorityHierarchy( strBody );
+    const int iAdhocMax = ParseAdhocMaxParticipants( strBody );
     {
         std::lock_guard<std::mutex> lock( m_clsMutex );
         m_clsFloor = f;
@@ -62,6 +63,7 @@ bool CCspServiceConfig::Refresh() {
         m_iTng2Sec = iTng2;
         m_clsCallTimers = ct;
         m_iNumLevelsPriority = iLevels;
+        m_iAdhocMaxParticipants = iAdhocMax;
     }
     CLog::Print( LOG_SYSTEM, "[service-config] num-levels-priority-hierarchy=%d%s", iLevels < 0 ? 4 : iLevels,
                  iLevels < 0 ? " (문서에 없음 — 스키마 최솟값)" : "" );
@@ -74,9 +76,9 @@ bool CCspServiceConfig::Refresh() {
                  iTng2 > 0 ? "" : " (문서에 없음 — TNG2 없음)" );
     CLog::Print( LOG_SYSTEM,
                  "[service-config] 개별 호 T4=%d 최대=%d/%d(발언권 제어 있음/없음) · 애드혹 T4=%d 일제 T4=%d "
-                 "TNG3=%d (s, -1=문서에 없음 — 그 타이머 없음)",
+                 "TNG3=%d (s, -1=문서에 없음 — 그 타이머 없음) · 애드혹 초대 상한=%d",
                  ct.iPrivateHangSec, ct.iPrivateMaxFloorSec, ct.iPrivateMaxNoFloorSec, ct.iAdhocHangSec,
-                 ct.iAdhocBroadcastHangSec, ct.iAdhocMaxDurationSec );
+                 ct.iAdhocBroadcastHangSec, ct.iAdhocMaxDurationSec, iAdhocMax );
     return true;
 }
 
@@ -104,6 +106,11 @@ CspCallTimerParams CCspServiceConfig::GetCallTimerParams() {
 int CCspServiceConfig::GetMaxCallsN6( bool bDispatch ) {
     std::lock_guard<std::mutex> lock( m_clsMutex );
     return bDispatch ? m_iMaxCallsN6Dispatch : m_iMaxCallsN6;
+}
+
+int CCspServiceConfig::GetAdhocMaxParticipants() {
+    std::lock_guard<std::mutex> lock( m_clsMutex );
+    return m_iAdhocMaxParticipants;
 }
 
 int CCspServiceConfig::GetNumLevelsPriorityHierarchy() {

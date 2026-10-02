@@ -11,6 +11,7 @@
 
 #include "ModuleDispatcher.h"
 
+#include <algorithm>
 #include <cctype>
 #include <cstdio>
 #include <set>
@@ -32,6 +33,7 @@
 #include "CspRouteSetMap.h"
 #include "CspRoutingPolicyEngine.h"
 #include "CspServer.h"
+#include "CspServiceConfig.h"
 #include "CspServiceMap.h"
 #include "CspTrunkRegistrar.h"
 #include "CspUser.h"
@@ -513,6 +515,21 @@ bool CModuleDispatcher::RecvRequest( int iThreadId, CSipMessage *pclsMessage ) {
         {
             std::string strGid, strMid;
             if ( gclsGroupCallService.GetGroupCallSession( strCallId, strGid, strMid ) ) {
+                // 애드혹 그룹 호 참가자 변경(resource-lists method=INVITE/BYE — TS 24.379 §17.4.5.1.1). 거절(190
+                // 권한·189
+                //   상한)은 403 + Warning, 받아들이면 흐름을 이어 스택이 200 OK 를 만든다(Supported 는 판정이 싣는다).
+                const CGroupCallService::AdhocModifyVerdict am =
+                    gclsGroupCallService.OnAdhocParticipantsModify( strCallId, strGid, strMid, pclsMessage->m_strBody );
+                if ( am.bHandled && am.iStatus >= 300 ) {
+                    CSipMessage *pclsResp = pclsMessage->CreateResponseWithToTag( am.iStatus );
+                    if ( pclsResp ) {
+                        if ( !am.strWarning.empty() ) pclsResp->AddHeader( "Warning", am.strWarning.c_str() );
+                        gclsUserAgent.m_clsSipStack.SendSipMessage( pclsResp );
+                    }
+                    CLog::Print( LOG_INFO, "RecvRequest: adhoc participants modify group(%s) member(%s) → %d",
+                                 strGid.c_str(), strMid.c_str(), am.iStatus );
+                    return true;
+                }
                 const CMcpttInfo clsMi = ParseMcpttInfo( pclsMessage->m_strBody );
                 const CGroupCallService::InCallConditionVerdict v =
                     gclsGroupCallService.OnInCallConditionRequest( strCallId, strGid, strMid, clsMi );
@@ -1026,13 +1043,18 @@ void CModuleDispatcher::EventIncomingCall( const char *pszCallId, const char *ps
         return StopCall( pszCallId, SIP_FORBIDDEN );
     }
 
-    // MCPTT ad hoc 그룹콜 (TS 22.179 Rel-18): 미프로비저닝 타겟 + INVITE resource-lists 멤버 →
-    //   임시 그룹을 동적 생성(in-memory, 비영속 ephemeral). 이후 기존 ProcessGroupCall(on-demand)
-    //   경로가 fan-out·teardown 까지 처리. requireAffiliation=false(사전 가입 없음).
-    //   게이트: Setup.PttAdhocEnabled (시스템 정책 — 사용자 단위 인가는 MCPTT 프로파일 트랙에서).
-    if ( m_clsPttAs.IsEnabled() && gclsSetup.m_bPttAdhocEnabled && !gclsGroupMap.Contains( pszTo ) && pclsMessage ) {
+    // MCPTT 애드혹 그룹 호 개시 (TS 24.379 §17.4.2.2) — INVITE 에 초대 명단(resource-lists)이 있고 대상이 설정 그룹이
+    //   아니면(또는 요청자가 멤버가 아닌 진행 중 애드혹 그룹이면) 임시 그룹을 만든다(in-memory, ephemeral — 그룹 문서
+    //   없음). 이후 ProcessGroupCall(on-demand) 경로가 fan-out·teardown 을 한다. requireAffiliation=false(16) 초대
+    //   멤버는 암묵적 제휴). 게이트: Setup.PttAdhocEnabled(시스템 정책) ∧ user profile allow_adhoc_call.
+    if ( m_clsPttAs.IsEnabled() && gclsSetup.m_bPttAdhocEnabled && pclsMessage ) {
         std::vector<std::string> vecAdhoc = ParseResourceListUsers( pclsMessage->m_strBody );
-        if ( !vecAdhoc.empty() ) {
+        CspPttGroup clsAdhocExisting;
+        const bool bTargetExists = gclsGroupMap.Select( pszTo, clsAdhocExisting );
+        bool bOtherAdhoc = bTargetExists && clsAdhocExisting._isAdhoc && clsAdhocExisting._groupType != "private";
+        for ( const auto &pUser : clsAdhocExisting._pusers )
+            if ( bOtherAdhoc && pUser && pUser->_id == pszFrom ) bOtherAdhoc = false;  // 내 애드혹 그룹 = 합류
+        if ( !vecAdhoc.empty() && ( !bTargetExists || bOtherAdhoc ) ) {
             // 사용자 단위 ad hoc 개시 인가 (프로파일 allow_adhoc_call — 시스템 정책과 AND)
             CspUserProfile clsAdhocProf;
             if ( gclsDbManager.SelectUserProfile( pszFrom, clsAdhocProf ) >= 0 && !clsAdhocProf.m_bAllowAdhocCall ) {
@@ -1044,10 +1066,42 @@ void CModuleDispatcher::EventIncomingCall( const char *pszCallId, const char *ps
                                             SIP_FORBIDDEN );
                 return StopCall( pszCallId, SIP_FORBIDDEN );
             }
+            // 6) 초대 인원 상한 — service configuration <adhoc-group-call><max-no-participants>. 넘으면 403 189.
+            const int iAdhocMax = gclsCspServiceConfig.GetAdhocMaxParticipants();
+            const int iInvitees = (int)std::count_if( vecAdhoc.begin(), vecAdhoc.end(),
+                                                      [&]( const std::string &m ) { return m != pszFrom; } );
+            if ( iAdhocMax > 0 && iInvitees > iAdhocMax ) {
+                CLog::Print( LOG_INFO, "EventIncomingCall: ad-hoc by(%s) 초대 %d 명 > 상한 %d → 403 189 [PTT-AS]",
+                             pszFrom, iInvitees, iAdhocMax );
+                if ( gclsCallDir.IsEnabled() )
+                    gclsCallDir.PttAttempt( pszTo, "", pszFrom, "failed", "denied", "adhoc_too_many_participants",
+                                            SIP_FORBIDDEN );
+                gclsUserAgent.StopCall(
+                    pszCallId, SIP_FORBIDDEN, NULL,
+                    { { "Warning", McpttWarning( 189, "maximum number of allowed adhoc group participants exceeded",
+                                                 gclsServiceMap.GetDomainByKind( "ptt" ) ) } } );
+                return;
+            }
+            // 10) 애드혹 그룹 식별자 — 요청이 <mcptt-request-uri> 로 제안한 식별자가 받아들일 만하면(그룹·진행 중
+            // 애드혹
+            //   그룹이 아니다) 그것, 아니면(없거나 쓰이는 중) 서버가 만든다. 200 OK 의 <mcptt-calling-group-id> 로
+            //   돌려준다(ProcessGroupCall — 애드혹 그룹 호의 개시자 200 OK).
+            std::string strAdhocId = McpttBareId( strMcpttRequestUri );
+            if ( strAdhocId.empty() || gclsGroupMap.Contains( strAdhocId.c_str() ) ) {
+                std::string strFromDigits;
+                for ( const char *pc = pszFrom; *pc; ++pc )
+                    if ( std::isdigit( (unsigned char)*pc ) ) strFromDigits += *pc;
+                const std::string strBase = "adhoc-" + strFromDigits + "-" + std::to_string( (long long)time( NULL ) );
+                strAdhocId = strBase;
+                for ( int n = 2; gclsGroupMap.Contains( strAdhocId.c_str() ); ++n )
+                    strAdhocId = strBase + "-" + std::to_string( n );
+                CLog::Print( LOG_INFO, "EventIncomingCall: ad-hoc 식별자 %s 를 서버가 정함(제안=%s) [PTT-AS]",
+                             strAdhocId.c_str(), strMcpttRequestUri.empty() ? "-" : strMcpttRequestUri.c_str() );
+            }
             CspPttGroup clsAdhoc;
             clsAdhoc.Clear();
-            clsAdhoc._id = pszTo;
-            clsAdhoc._name = std::string( "adhoc:" ) + pszTo;
+            clsAdhoc._id = strAdhocId;
+            clsAdhoc._name = std::string( "adhoc:" ) + strAdhocId;
             clsAdhoc._groupType = "prearranged";  // on-demand 수명(마지막 이탈 시 teardown)
             clsAdhoc._requireAffiliation = false;
             clsAdhoc._isAdhoc = true;        // 통화 종료 시 GroupMap 에서 제거(ephemeral)
@@ -1060,9 +1114,19 @@ void CModuleDispatcher::EventIncomingCall( const char *pszCallId, const char *ps
             if ( !bHasInit )
                 clsAdhoc._pusers.push_back( std::make_shared<CspPttUser>( pszFrom, 5, "participant", "" ) );
             gclsGroupMap.Insert( clsAdhoc );
-            CGroupCallService::EmitRegroupEvent( "created", pszTo, "ad-hoc" );
-            CLog::Print( LOG_INFO, "EventIncomingCall: ad-hoc group(%s) created %zu members init(%s) [PTT-AS]", pszTo,
-                         clsAdhoc._pusers.size(), pszFrom );
+            CGroupCallService::EmitRegroupEvent( "created", strAdhocId.c_str(), "ad-hoc" );
+            CLog::Print( LOG_INFO, "EventIncomingCall: ad-hoc group(%s) created %zu members init(%s) [PTT-AS]",
+                         strAdhocId.c_str(), clsAdhoc._pusers.size(), pszFrom );
+            SetCallOwner( pszCallId, &m_clsPttAs );
+            CSipCallRoute clsAdhocRoute;
+            clsUserInfo.GetCallRoute( clsAdhocRoute );
+            if ( gclsGroupCallService.ProcessGroupCall( strAdhocId.c_str(), pszFrom, pszCallId, pclsRtp, &clsAdhocRoute,
+                                                        iMcpttCond, bMcpttBroadcast ) )
+                return;
+            CLog::Print( LOG_INFO,
+                         "EventIncomingCall: ad-hoc ProcessGroupCall(%s) failed for caller(%s) → 403 [PTT-AS]",
+                         strAdhocId.c_str(), pszFrom );
+            return StopCall( pszCallId, SIP_FORBIDDEN );
         }
     }
 
@@ -2331,7 +2395,7 @@ void CModuleDispatcher::EventCallEnd( const char *pszCallId, int iSipStatus, con
             OnCallEnded( clsCallInfo.m_strPeerCallId.c_str(), iSipStatus );
 
         // CMP 리소스 해제 → BYE 순서 (리소스 먼저 해제 후 SIP 종료)
-        bool bIsGroup = gclsGroupCallService.OnCallTerminated( pszCallId );
+        bool bIsGroup = gclsGroupCallService.OnCallTerminated( pszCallId, pszReason );
         gclsCallMap.Delete( pszCallId, !bIsGroup );
         // 상대 leg 종료 — 종료 사유(Reason, RFC 3326 §2)와 최종 응답 코드를 그대로 옮긴다
         //   (TS 24.229 §5.4.3.2 — 미응답 착신 leg 는 발신 leg 의 실패 코드로 끝나야 통계·사용자 표시가 맞는다).
@@ -2344,7 +2408,7 @@ void CModuleDispatcher::EventCallEnd( const char *pszCallId, int iSipStatus, con
         // OnCallTerminated 미호출 시 m_mapCallSession에 1001 엔트리가 잔존 →
         // 마지막 fan-out BYE 처리 시 bStillActive=true → PTT_GROUP_REMOVE 누락 →
         // CheckGroupIntegrity 재-INVITE 폭주. 여기서 처리해야 정상 종료.
-        gclsGroupCallService.OnCallTerminated( pszCallId );
+        gclsGroupCallService.OnCallTerminated( pszCallId, pszReason );
         RemoveCallOwner( pszCallId );
     }
 }

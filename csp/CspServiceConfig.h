@@ -103,6 +103,14 @@ public:
     /** 문서 → on-network <num-levels-priority-hierarchy>. 없거나 범위(4~256) 밖이면 -1. */
     static int ParseNumLevelsPriorityHierarchy( const std::string &strXml );
 
+    /** 애드혹 그룹 호 초대 인원 상한 — on-network <anyExt><adhoc-group-call><max-no-participants> (TS 24.484 §8.4.2.1
+     *  13)d)). 0 이하 = 문서에 없음(상한을 두지 않는다). 개시 INVITE·참가자 변경 re-INVITE 가 넘으면 403 189
+     *  (TS 24.379 §17.4.2.2 6) · §17.4.5.1.1 4)a)i)). */
+    int GetAdhocMaxParticipants();
+
+    /** 문서 → <adhoc-group-call><max-no-participants>. 없거나 1 미만이면 -1. */
+    static int ParseAdhocMaxParticipants( const std::string &strXml );
+
     /** xs:duration("PT<h>H<m>M<s>S", 초는 소수 허용) → 밀리초. 형식 오류면 -1. */
     static long long DurationMs( const std::string &strDuration );
 
@@ -124,9 +132,10 @@ private:
     CspPriorityParams m_clsPriority;
     int m_iTng2Sec = -1;
     CspCallTimerParams m_clsCallTimers;
-    int m_iMaxCallsN6 = 5;           ///< 그 밖 단말 N6 (mcptt_service_config.max_calls_n6)
-    int m_iMaxCallsN6Dispatch = 10;  ///< 관제 N6 (max_calls_n6_dispatch)
-    int m_iNumLevelsPriority = -1;   ///< <num-levels-priority-hierarchy> (-1 = 문서에 없음 → 4)
+    int m_iMaxCallsN6 = 5;             ///< 그 밖 단말 N6 (mcptt_service_config.max_calls_n6)
+    int m_iMaxCallsN6Dispatch = 10;    ///< 관제 N6 (max_calls_n6_dispatch)
+    int m_iNumLevelsPriority = -1;     ///< <num-levels-priority-hierarchy> (-1 = 문서에 없음 → 4)
+    int m_iAdhocMaxParticipants = -1;  ///< <adhoc-group-call><max-no-participants> (-1 = 문서에 없음 → 상한 없음)
 };
 
 extern CCspServiceConfig gclsCspServiceConfig;
@@ -248,6 +257,11 @@ inline bool CCspServiceConfig::Parse( const std::string &strXml, CspFloorParams 
 inline int CCspServiceConfig::ParseNumLevelsPriorityHierarchy( const std::string &strXml ) {
     const int n = _CspScCount( _CspScOnNetwork( strXml ), "num-levels-priority-hierarchy" );
     return ( n >= 4 && n <= 256 ) ? n : -1;
+}
+
+inline int CCspServiceConfig::ParseAdhocMaxParticipants( const std::string &strXml ) {
+    const int n = _CspScCount( _CspScSection( _CspScOnNetwork( strXml ), "adhoc-group-call" ), "max-no-participants" );
+    return n >= 1 ? n : -1;
 }
 
 inline void CCspServiceConfig::ParseCallTimers( const std::string &strXml, CspCallTimerParams &clsOut ) {

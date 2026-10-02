@@ -101,5 +101,31 @@ int main(){
   CK("prio offer lower kept",McpttNegotiatedFloorPriority(2,5,256)==2);
   CK("prio capped by levels",McpttNegotiatedFloorPriority(9,9,4)==4);
   CK("prio not offered",McpttNegotiatedFloorPriority(0,9,256)==0);
+  // 애드혹 초대 명단 (ParseResourceListEntries — TS 24.379 §17.4.2.2 12)a) · §17.4.5.1.1 2)·3), S11 ADH-9·ADH-6)
+  { const std::string rl = "--b\r\nContent-Type: application/vnd.3gpp.mcptt-info+xml\r\n\r\n"
+        "<mcpttinfo><mcptt-request-uri><mcpttURI>tel:adhoc-1</mcpttURI></mcptt-request-uri></mcpttinfo>\r\n"
+        "--b\r\nContent-Type: application/resource-lists+xml\r\n\r\n"
+        "<resource-lists xmlns=\"urn:ietf:params:xml:ns:resource-lists\"><list>"
+        "<entry uri=\"tel:+82500000026\"><mcpttgi:participant-type>participant</mcpttgi:participant-type></entry>"
+        "<entry uri='sip:+82500000027@ptt.cims.example.kr'/>"
+        "<entry-ref ref=\"sip:x@y\"/>"
+        "<rl:entry uri=\"sip:+82500000028@ptt.cims.example.kr;method=BYE\"/>"
+        "<entry uri=\"tel:+82500000029;method=invite\"/>"
+        "<entry uri=\"tel:+82500000026\"/>"
+        "</list></resource-lists>\r\n--b--\r\n";
+    const std::vector<McpttListEntry> e = ParseResourceListEntries(rl);
+    CK("rl entries tel·sip·prefix, dedupe, no entry-ref, no mcptt-info", e.size()==4 && e[0].strId=="+82500000026" &&
+       e[1].strId=="+82500000027" && e[2].strId=="+82500000028" && e[3].strId=="+82500000029");
+    CK("rl method param", e[0].strMethod.empty() && e[1].strMethod.empty() && e[2].strMethod=="BYE" && e[3].strMethod=="INVITE");
+    const std::vector<std::string> u = ParseResourceListUsers(rl);
+    CK("rl users", u.size()==4 && u[1]=="+82500000027");
+    CK("rl none", ParseResourceListEntries("<mcpttinfo>tel:+8250</mcpttinfo>").empty());
+    CK("rl amp", ParseResourceListEntries("<resource-lists><entry uri=\"sip:a@d;x=1&amp;y=2;method=BYE\"/></resource-lists>")[0].strMethod=="BYE"); }
+  // 애드혹 호 해제 요청 Reason (McpttIsUserRequestedRelease — §17.2.3.1.1 · §6.3.3.2.4 3A), S11 ADH-7)
+  CK("release reason", McpttIsUserRequestedRelease("SIP;cause=200;text=\"User requested release\""));
+  CK("release reason spaces/case", McpttIsUserRequestedRelease("sip ; cause=200 ; text=\"user requested release\""));
+  CK("release reason other text", !McpttIsUserRequestedRelease("SIP;cause=200;text=\"Call completed elsewhere\""));
+  CK("release reason other cause", !McpttIsUserRequestedRelease("SIP;cause=2000;text=\"User requested release\"") &&
+     !McpttIsUserRequestedRelease("Q.850;cause=16;text=\"User requested release\"") && !McpttIsUserRequestedRelease(""));
   printf("%s (%d fail)\n",fail?"FAIL":"PASS",fail); return fail?1:0;
 }

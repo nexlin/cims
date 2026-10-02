@@ -591,6 +591,28 @@ fan-out·CMP 세션·teardown)를 그대로 재사용**한다(`ModuleDispatcher:
   유무와 무관해야 한다 — 미응답 단말이 그룹을 붙들면 안 된다). 마지막 leg 처리에서
   `_isAdhoc` 그룹을 GroupMap 에서도 제거한다(de-register 경로와 동일 계약).
 
+**Ad hoc group call — TS 24.379 §17.4**
+
+INVITE 에 초대 명단(`application/resource-lists+xml`)이 있고 대상이 설정 그룹이 아니면(또는 요청자가 멤버가 아닌 진행 중 애드혹
+그룹이면) 임시 그룹을 만들어 ProcessGroupCall 경로로 보낸다(`ModuleDispatcher::EventIncomingCall` — `_isAdhoc=true`,
+`_groupType=prearranged` 수명, `_requireAffiliation=false` — 초대 멤버는 암묵적 제휴 §17.4.2.2 16)). 게이트 = `Setup.PttAdhocEnabled` ∧
+user profile `allow_adhoc_call`.
+
+- **명단** — `<entry uri>` 마다 MCPTT ID(`tel:`·`sip:` 어느 형이든, 같은 ID 는 한 번 — `ParseResourceListEntries`, §17.4.2.2 12)a)).
+  개시자 밖 인원이 service configuration `<adhoc-group-call><max-no-participants>`(`GetAdhocMaxParticipants`)를 넘으면 403 + Warning
+  `189 maximum number of allowed adhoc group participants exceeded`(6)).
+- **식별자** — `<mcptt-request-uri>` 가 제안한 식별자가 설정·진행 중 그룹이 아니면 그것, 없거나 쓰이는 중이면 서버가
+  `adhoc-<개시자 번호>-<epoch>`(겹치면 `-<n>`)를 만든다(10)). Request-URI 가 참여 기능 PSI 여도 같다. 개시자 200 OK 는 늘 mcptt-info 를 싣는다 —
+  `<mcptt-calling-group-id>` = 그 식별자(200 OK 4)a)).
+- **참가자 변경**(§17.4.5.1.1) — 세션 re-INVITE 의 resource-lists `method=INVITE` 항목을 초대(임시 그룹 명단에 넣고 `InviteMember`)하고
+  `method=BYE` 항목을 내보낸다(BYE). 권한 = 로컬 정책 «그 호의 개시자»(user profile `<allow-to-modify-adhoc-group-call-participants-info>` 는
+  CSC 가 false 로 싣는다) — 아니면 403 + `190`. 개시자 밖 참가자 + 새 초대가 상한을 넘으면 403 + `189`. 받아들이면 스택의 200 OK 에
+  `Supported: tdialog, norefersub`(7)·8)).
+- **해제**(§6.3.8.1·§6.3.3.2.4) — T4(`<adhoc-group-call><hang-time>`, 일제면 `<broadcast-hang-time>`)·TNG3(`<max-duration-of-call>`)·전원 이탈.
+  «참가자 1명 이하» 는 애드혹 해제 사유가 아니다(2) 목록 밖) — 남은 사람은 그대로 두고 재합류(§17.2.5)를 받는다. 개시자 BYE 가
+  `Reason: SIP;cause=200;text="User requested release"`(RFC 3326, `McpttIsUserRequestedRelease`)를 실으면 전원 해제(3A) — «권한 있는 사용자»
+  로컬 정책 = 개시자. 다른 참가자의 BYE 는 그 사람만 나간다(§17.2.4).
+
 **Flow 메타 필드 (모든 Session/Group API 파라미터):**
 
 `CCmpClient` 의 Session/Group 메서드는 공통으로 다음 파라미터를 받고, `_SendOnEndpoint` 가

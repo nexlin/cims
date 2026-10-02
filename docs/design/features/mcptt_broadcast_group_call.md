@@ -10,7 +10,7 @@
 > **구현 상태** — 서버(CSP·CMP·CSC·DB·콘솔)·검증(cspsim·계측기·S3)·단말 코어(SDK·Android PTT — §4.4 U1~U5)·관제 앱 Windows 데스크톱(U6)은
 > 반영됐다(§2). 단말 코어는 암묵적 발언 요청(R14 — 개시 INVITE 로 발언까지)도 하고(U7), Windows 관제 앱의 [일제 통화] 는 그것을 쓰는 한 버튼이다(U6).
 > 관제 앱 Android 태블릿(U6)은 코드만 반영했고 Android 빌드·실기가 남았다. 애드혹(ad hoc) 일제 통화(R13)와 암묵적 발언 요청(R14)은 단말·관제 앱·CSP 가
-> 모두 반영했다. 남은 것은 최소 affiliation 인원 해제(R10 ③)·ad hoc 그룹 ID 서버 부여다(§7).
+> 모두 반영했다. 남은 것은 최소 affiliation 인원 해제(R10 ③)·단말의 ad hoc `session-type`·서버 부여 ID 사용이다(§7).
 
 ---
 
@@ -187,8 +187,9 @@ S3 `S3-SCN-PTT-BROADCAST`(`verify/lib/items/stage3/scn_ptt_broadcast.py` — csp
 - **Android 코어의 짧은 탭 처리** — `FloorClient` 에 §6.2.4.6.8(pending Release 중 Granted 무시)·§6.2.4.6.2(T100 재전송)를 반영했다. Android 빌드·실기 확인은 Android 빌드 환경에서 한다.
 - **Android PTT 앱 수신 멤버의 일제 통화 판정** — `android/ptt-client` 는 착신 mcptt-info `broadcast-ind` 를 파싱하지 않고 Permission 이 온 Taken 으로만 PTT 를 막는다(서버는 늦은 합류 Taken 에도 Permission 0 을 싣는다 — R6). 관제 태블릿은 SDK `McpttInfo.broadcast`·B-bit 로 판정한다.
 - **ad hoc 그룹 ID·session-type** — 규격은 ad hoc 그룹 ID 를 서버가 준다(TS 24.379 §17.1 "*provided by the MCPTT server*")·mcptt-info `session-type` 은 `adhoc`
-  (Annex F.1). CIMS 는 단말이 `adhoc-<번호>-<epoch>` 를 만들고([mcptt_emergency_modes.md](mcptt_emergency_modes.md) §6) `prearranged` + resource-lists 를 싣는다 —
-  단말·서버 동시 변경.
+  (Annex F.1). CSP 는 요청이 `<mcptt-request-uri>` 로 제안한 식별자를 받아들일 만하면 쓰고, 없거나 쓰이는 중이면 `adhoc-<번호>-<epoch>` 를 만들어 개시자
+  200 OK `<mcptt-calling-group-id>` 로 돌려준다(§17.4.2.2 10) — csp.md «Ad hoc group call»). 단말은 아직 스스로 `adhoc-<번호>-<epoch>` 를 만들어 제안하고
+  ([mcptt_emergency_modes.md](mcptt_emergency_modes.md) §6) `prearranged` + resource-lists 를 싣는다 — `session-type adhoc`·200 의 식별자 사용은 단말 몫(U04).
 - **계측기 ad hoc 그룹 통화** — 워커가 ad hoc INVITE 를 내지 않아 ad hoc 일제 통화 회귀는 S3 `S3-SCN-PTT-BROADCAST` BC7(cspsim `-adhoc -broadcast`)만 본다.
   ad hoc 일제 통화 중 conference 구독 480/105 는 실측 도구가 없어 코드 판정만 했다.
 - **최소 affiliation 인원 미달 해제**(R10 ③, TS 24.379 §6.3.8.1 4)) — 그룹 문서 `<on-network-minimum-number-of-affiliated-members>` 와 함께.

@@ -1404,7 +1404,11 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
                     // 진행 중 조건(긴급/임박) 세션이면 200 OK 에 mcptt-info 로 현재 상태를 동봉 — 조인/재조인
                     //   단말이 개시자의 다음 발언(floor TAKEN)을 기다리지 않고 즉시 세션 긴급 표시를 갖는다
                     //   (TS 24.379, §9-5 멤버 전파). normal 세션은 단일 SDP 200 OK 그대로.
-                    if ( iCondEff > 0 ) {
+                    // 애드혹 그룹 호는 늘 싣는다 — <mcptt-calling-group-id> = 애드혹 그룹 식별자(TS 24.379 §17.4.2.2
+                    // 200 OK
+                    //   4)a) — 제안 식별자를 받지 않았거나 없으면 서버가 만든 값이다).
+                    const bool bAdhocCall = clsGroup._isAdhoc && clsGroup._groupType != "private";
+                    if ( iCondEff > 0 || bAdhocCall ) {
                         std::string strCondActor = pszCallerInfo;
                         {
                             std::unique_lock<std::recursive_mutex> lock( m_mutex );
@@ -2107,6 +2111,91 @@ CGroupCallService::InCallConditionVerdict CGroupCallService::OnInCallConditionRe
     return v;
 }
 
+CGroupCallService::AdhocModifyVerdict CGroupCallService::OnAdhocParticipantsModify( const std::string &strCallId,
+                                                                                    const std::string &strGroupId,
+                                                                                    const std::string &strMemberId,
+                                                                                    const std::string &strBody ) {
+    AdhocModifyVerdict v;
+    CspPttGroup clsGroup;
+    if ( !gclsGroupMap.Select( strGroupId.c_str(), clsGroup ) || !clsGroup._isAdhoc ||
+         clsGroup._groupType == "private" )
+        return v;
+    // 2)·3) 초대할 사용자 = method=INVITE 항목, 내보낼 사용자 = method=BYE 항목 (같은 ID 는 한 번 — 4)a)ii)A))
+    std::vector<std::string> vecAdd, vecDel;
+    for ( const auto &e : ParseResourceListEntries( strBody ) ) {
+        if ( e.strMethod == "INVITE" )
+            vecAdd.push_back( e.strId );
+        else if ( e.strMethod == "BYE" )
+            vecDel.push_back( e.strId );
+    }
+    if ( vecAdd.empty() && vecDel.empty() ) return v;
+    v.bHandled = true;
+    const std::string strDomain = gclsServiceMap.GetDomainByKind( "ptt" );
+    // 3) 권한 — user profile 요소(CSC 는 false 로 싣는다)가 아니면 로컬 정책: 그 애드혹 호의 개시자만
+    if ( SessionOf( strGroupId ).strInitiator != strMemberId ) {
+        v.iStatus = SIP_FORBIDDEN;
+        v.strWarning =
+            McpttWarning( 190, "user is not authorised to initiate modify adhoc group call participants", strDomain );
+        CLog::Print( LOG_INFO, "AdhocModify: group(%s) by(%s) — 개시자가 아니다 → 403 190", strGroupId.c_str(),
+                     strMemberId.c_str() );
+        return v;
+    }
+    // 4)a)i) 상한 — 지금 참가자(개시자 밖) + 새로 초대할 사용자 ≤ <max-no-participants>(개시 INVITE 의 6) 과 같은 셈)
+    std::set<std::string> setIn;
+    {
+        std::unique_lock<std::recursive_mutex> lock( m_mutex );
+        for ( const auto &kv : m_mapCallSession )
+            if ( kv.second.strGroupId == strGroupId && !kv.second.bListenOnly ) setIn.insert( kv.second.strMemberId );
+    }
+    std::vector<std::string> vecNew;
+    for ( const auto &a : vecAdd )
+        if ( a != strMemberId && !setIn.count( a ) ) vecNew.push_back( a );
+    const int iMax = gclsCspServiceConfig.GetAdhocMaxParticipants();
+    const int iOthers = (int)setIn.size() - ( setIn.count( strMemberId ) ? 1 : 0 );
+    if ( iMax > 0 && iOthers + (int)vecNew.size() > iMax ) {
+        v.iStatus = SIP_FORBIDDEN;
+        v.strWarning = McpttWarning( 189, "maximum number of allowed adhoc group participants exceeded", strDomain );
+        CLog::Print( LOG_INFO, "AdhocModify: group(%s) — 참가자 %d + 초대 %zu > 상한 %d → 403 189", strGroupId.c_str(),
+                     iOthers, vecNew.size(), iMax );
+        return v;
+    }
+    // 4)a)ii)~iv) 반영 — 임시 그룹 명단을 고친 뒤 내보내고(§17.4.3.1.2.1 — BYE) 초대한다(§17.4.2.1.1)
+    for ( const auto &d : vecDel ) {
+        if ( d == strMemberId ) continue;  // 자기 자신은 BYE 로 나간다(§17.2.4)
+        clsGroup._pusers.erase(
+            std::remove_if( clsGroup._pusers.begin(), clsGroup._pusers.end(),
+                            [&]( const std::shared_ptr<CspPttUser> &u ) { return u && u->_id == d; } ),
+            clsGroup._pusers.end() );
+    }
+    for ( const auto &a : vecNew ) {
+        bool bListed = false;
+        for ( const auto &u : clsGroup._pusers ) bListed = bListed || ( u && u->_id == a );
+        if ( !bListed ) clsGroup._pusers.push_back( std::make_shared<CspPttUser>( a, 5, "participant", "" ) );
+    }
+    gclsGroupMap.Insert( clsGroup );
+    for ( const auto &d : vecDel ) {
+        if ( d == strMemberId ) continue;
+        std::vector<std::string> vecLegs;
+        {
+            std::unique_lock<std::recursive_mutex> lock( m_mutex );
+            for ( const auto &kv : m_mapCallSession )
+                if ( kv.second.strGroupId == strGroupId && kv.second.strMemberId == d ) vecLegs.push_back( kv.first );
+        }
+        for ( const auto &leg : vecLegs ) {
+            gclsUserAgent.StopCall( leg.c_str() );
+            OnCallTerminated( leg );
+        }
+    }
+    int iInvited = 0;
+    for ( const auto &a : vecNew )
+        if ( InviteMember( a.c_str(), strGroupId.c_str() ) ) ++iInvited;
+    // 7)·8) 받아들인 re-INVITE 의 200 OK(스택이 만든다) — Supported norefersub·tdialog
+    gclsUserAgent.AddReInviteAnswerHeader( strCallId.c_str(), "Supported", kMcMemberInviteSupported );
+    CLog::Print( LOG_INFO, "AdhocModify: group(%s) by(%s) — 초대 %d/%zu · 내보냄 %zu", strGroupId.c_str(),
+                 strMemberId.c_str(), iInvited, vecNew.size(), vecDel.size() );
+    return v;
+}
+
 CGroupCallService::InCallConditionVerdict CGroupCallService::EvaluateInCallCondition( const std::string &strGroupId,
                                                                                       const std::string &strMemberId,
                                                                                       const CMcpttInfo &clsMi ) {
@@ -2427,13 +2516,12 @@ void CGroupCallService::ClearUserCall( const std::string &strUserId ) {
         //   접속 명단에서 이 사용자가 사라진다 (teardown 앞에서 호출 — 버전 단조성).
         SendConferenceNotify( strGroupId, strUserId, "disconnected", "deleted" );
 
-        // on-demand 그룹 호(편성·ad hoc): 잔여 leg 1개 → 세션 해제 — OnCallTerminated(BYE) 경로와 동일 계약
-        //   (TS 24.379 §6.3.8.1 참가자 1명 이하. pending 초대가 있으면 count>1 로 유지).
+        // on-demand 편성 그룹 호: 잔여 leg 1개 → 세션 해제 — OnCallTerminated(BYE) 경로와 동일 계약
+        //   (TS 24.379 §6.3.8.1 2) 참가자 1명 이하 — 편성·일제·chat 만, 애드혹은 목록에 없다. pending 초대가 있으면
+        //   count>1 로 유지).
         if ( clsItem.bStillActive ) {
             CspPttGroup clsAdhocChk;
-            if ( gclsGroupMap.Select( strGroupId.c_str(), clsAdhocChk ) &&
-                 ( ( clsAdhocChk._isAdhoc && clsAdhocChk._groupType != "private" ) ||
-                   IsOnDemandGroupCall( clsAdhocChk ) ) ) {
+            if ( gclsGroupMap.Select( strGroupId.c_str(), clsAdhocChk ) && IsOnDemandGroupCall( clsAdhocChk ) ) {
                 std::vector<std::string> vecRemainLegs;
                 bool bGateOpen;  // 개시자 응답 대기 중 — 개시자가 아직 맵에 없어 참가자 수를 세지 않는다
                 {
@@ -3497,7 +3585,7 @@ int CGroupCallService::TerminateGroupLocal( const std::string &strGroupId ) {
     return (int)vecCallIds.size();
 }
 
-bool CGroupCallService::OnCallTerminated( const std::string &strCallId ) {
+bool CGroupCallService::OnCallTerminated( const std::string &strCallId, const char *pszReason ) {
     std::string strGroupId, strMemberId, strSessionId, strListenGroup;
     bool bStillActive = false;
     bool bFound = false;
@@ -3562,7 +3650,7 @@ bool CGroupCallService::OnCallTerminated( const std::string &strCallId ) {
     //   그룹을 붙들면 안 된다.
     //   **청취 leg 이탈은 이 규칙을 발동시키지 않는다**(dispatch_center.md §5.6·§5.10). 청취자는 참가자가
     //   아니라 관측자다 — 감청자가 빠졌다고 사설콜 당사자를 끊으면 «자격 회수» 가 «업무 통화 차단» 이 된다.
-    //   (ad hoc 의 «잔여 1명» 도 같다 — 참가자 수는 청취자 이탈로 변하지 않는다.)
+    //   (편성 호의 «잔여 1명» 도 같다 — 참가자 수는 청취자 이탈로 변하지 않는다.)
     std::vector<std::string> vecPrivPeerLegs;
     if ( bStillActive && !bListen ) {
         CspPttGroup clsPrivChk;
@@ -3593,10 +3681,20 @@ bool CGroupCallService::OnCallTerminated( const std::string &strCallId ) {
                 CLog::Print( LOG_INFO,
                              "OnCallTerminated: broadcast group(%s) — 개시자 %s 이탈, 잔여 leg %zu 개 종료(BYE)",
                              strGroupId.c_str(), strMemberId.c_str(), vecPrivPeerLegs.size() );
-            } else if ( ( clsPrivChk._isAdhoc || IsOnDemandGroupCall( clsPrivChk ) ) && vecRemainLegs.size() == 1 ) {
-                // 그룹 호 해제 정책 (TS 24.379 §6.3.8.1): 참가자 1명 이하 = 대화 상대가 없는 호 — 해제한다.
-                //   on-demand 그룹 호(편성·ad hoc)만 — chat 은 상시 채널이라 잔류를 허용한다. 미확립 fan-out
-                //   초대가 남아 있으면 맵에 함께 잡혀 여기 오지 않는다(합류 대기 유지). 청취 leg 는 참가자가 아니다.
+            } else if ( clsPrivChk._isAdhoc && pszReason && McpttIsUserRequestedRelease( pszReason ) &&
+                        clsSesNow.strInitiator == strMemberId ) {
+                // 애드혹 그룹 호 해제 요청 — BYE 의 Reason `SIP;cause=200;text="User requested release"` 를 «권한 있는
+                //   사용자»(로컬 정책 = 그 호의 개시자)가 실었으면 전원을 해제한다(TS 24.379 §6.3.3.2.4 3A) ·
+                //   §17.2.3.1.1). 다른 참가자의 BYE 는 그 사람만 나간다(§17.2.4).
+                vecPrivPeerLegs = vecRemainLegs;
+                CLog::Print( LOG_INFO,
+                             "OnCallTerminated: adhoc group(%s) — 개시자 %s 해제 요청, 잔여 leg %zu 개 종료(BYE)",
+                             strGroupId.c_str(), strMemberId.c_str(), vecPrivPeerLegs.size() );
+            } else if ( IsOnDemandGroupCall( clsPrivChk ) && vecRemainLegs.size() == 1 ) {
+                // 그룹 호 해제 정책 (TS 24.379 §6.3.8.1 2)): 참가자 1명 이하 = 대화 상대가 없는 호 — 해제한다.
+                //   편성 그룹 호(일제 통화 포함)만 — chat 은 상시 채널이라 잔류를 허용하고, 애드혹은 2) 목록에
+                //   없다(남은 사람은 T4·TNG3·이탈로 끝나고 그동안 재합류할 수 있다 — §17.2.5). 미확립 fan-out 초대가
+                //   남아 있으면 맵에 함께 잡혀 여기 오지 않는다(합류 대기 유지). 청취 leg 는 참가자가 아니다.
                 vecPrivPeerLegs = vecRemainLegs;
                 CLog::Print( LOG_INFO, "OnCallTerminated: group(%s) — 잔여 1 leg 종료(BYE, min-participants)",
                              strGroupId.c_str() );

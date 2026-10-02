@@ -108,6 +108,10 @@ int main(){
   CK("selector escapes non-pchar",CspUeInitConfigSelector("urn:x/y z&\"")==
      "org.3gpp.mcptt.ue-init-config/users/sip:urn:x%2Fy%20z%26%22/urn:x%2Fy%20z%26%22");
   CK("selector empty id",CspUeInitConfigSelector("").empty());
+  // 애드혹 초대 인원 상한 <adhoc-group-call><max-no-participants> (TS 24.484 §8.4.2.1 13)d) — S11 ADH-3)
+  CK("adhoc max participants",CCspServiceConfig::ParseAdhocMaxParticipants(ctdoc)==64);
+  CK("adhoc max absent",CCspServiceConfig::ParseAdhocMaxParticipants("<service-configuration-info><on-network></on-network></service-configuration-info>")==-1);
+  CK("adhoc max zero = absent",CCspServiceConfig::ParseAdhocMaxParticipants("<service-configuration-info><on-network><anyExt><adhoc-group-call><max-no-participants>0</max-no-participants></adhoc-group-call></anyExt></on-network></service-configuration-info>")==-1);
   const std::string xd = CspXcapDiffDocBody("https://csc:4430/","org.3gpp.mcptt.ue-init-config/users/sip:a/a","e1");
   CK("xcap-diff body",xd.find("<xcap-diff xmlns=\"urn:ietf:params:xml:ns:xcap-diff\" xcap-root=\"https://csc:4430/\">")!=std::string::npos &&
      xd.find("<document new-etag=\"e1\" sel=\"org.3gpp.mcptt.ue-init-config/users/sip:a/a\"/>")!=std::string::npos);

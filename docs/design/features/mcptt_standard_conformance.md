@@ -70,7 +70,7 @@ CIMS 에 **아직 구현되지 않은** 기능을 규격 위치와 함께 나열
 | **Private call (1:1)** — on-demand | TS 24.379 §11.1 | ✓ 구현 — mcptt-info `session-type=private` INVITE(상대 MCPTT ID 직접, affiliation 불요) → CSP 가 2인 세션(`private:<from>-<to>`)을 CMP `PTT_GROUP_ADD group_type:"private"` + `floor_control`(on/off — fmtp `mc_no_floor_ctrl`)로 세운다([mcptt_csp_cmp_roadmap_contract.md](mcptt_csp_cmp_roadmap_contract.md) §A.1). 착신 미등록 480 |
 | **Broadcast group call** — 호 단위 개시(`<broadcast-ind>`)·개시자 고정·개시자 발언 종료 후 호 해제 | TS 24.379 §4.12·§6.2.8.2, TS 24.380 §6.2.4.6.4 | ✓ 서버(C7·C8)·단말 코어(SDK·Android PTT — 일제 통화 발신·B-bit Floor Request·발언 종료 후 호 해제)·관제 앱 Windows(U6)·Android 태블릿(코드 반영, 빌드 미확인 — [mcptt_broadcast_group_call.md](mcptt_broadcast_group_call.md) §7) |
 | **Broadcast adhoc group call** — 애드혹(ad hoc) 호에 `<broadcast-ind>` | TS 24.379 §17.2.2.1.1 9)·§17.1 | ✓ 단말(SDK)·관제 앱·CSP(`IsBroadcastCapable` — 개시자 고정·Deny #5·B-bit·구독 480/105·개시자 이탈 해제, [mcptt_broadcast_group_call.md](mcptt_broadcast_group_call.md) R13). ad hoc 그룹 ID 서버 부여(§17.1)는 남음 |
-| **세션 해제 정책** — 그룹 호(T4(Inactivity) 만료·참가자 1명 이하·TNG3) · 개별 호(T4·최대 통화 시간) | TS 24.379 §6.3.8.1·§6.3.8.2 / TS 24.380 §6.3.4.3.5 | ✓ 편성·일제 그룹 호 — T4 = 그룹 `hang_timer_sec`(CMP `PTT_FLOOR_INACTIVITY`)·TNG3 = `max_duration_sec` · 애드혹 그룹 호 — T4·TNG3 = service configuration `<adhoc-group-call>`(일제면 `<broadcast-hang-time>`, 긴급·임박 개시 호는 TNG3 없음 — §17.4.2.2 13)) · 개별 호 — T4(발언권 제어 있는 호)·최대 통화 시간 = `<private-call>`. 정본 [mcptt_timers.md](mcptt_timers.md). 최소 affiliation 인원 미달 해제는 미구현 |
+| **세션 해제 정책** — 그룹 호(T4(Inactivity) 만료·참가자 1명 이하·TNG3) · 개별 호(T4·최대 통화 시간) | TS 24.379 §6.3.8.1·§6.3.8.2 / TS 24.380 §6.3.4.3.5 | ✓ 편성·일제 그룹 호 — T4 = 그룹 `hang_timer_sec`(CMP `PTT_FLOOR_INACTIVITY`)·TNG3 = `max_duration_sec` · 애드혹 그룹 호 — T4·TNG3 = service configuration `<adhoc-group-call>`(일제면 `<broadcast-hang-time>`, 긴급·임박 개시 호는 TNG3 없음 — §17.4.2.2 13)) — «참가자 1명 이하» 는 애드혹 해제 사유가 아니다(§6.3.8.1 2) 목록 밖 — 남은 사람은 T4·TNG3·이탈로 끝나고 그동안 재합류할 수 있다) · 개시자 BYE 의 `Reason: SIP;cause=200;text="User requested release"` = 전원 해제(§6.3.3.2.4 3A) — «권한 있는 사용자» 로컬 정책 = 그 호의 개시자) · 개별 호 — T4(발언권 제어 있는 호)·최대 통화 시간 = `<private-call>`. 정본 [mcptt_timers.md](mcptt_timers.md). 최소 affiliation 인원 미달 해제는 미구현 |
 | **Private call — pre-established session** | TS 24.379 §11.2 | ✗ |
 | **Private call call-back** (요청/취소) | TS 24.379 §11.3 | ✗ |
 | **Private emergency call** / 통화 중 emergency upgrade | TS 24.379 §11 | ✓ 개시 인가 구현 — 사용자 프로파일 `allow-emergency-private-call` + `MCPTTPrivateRecipient`(UsePreConfigured 모드는 사전 지정 수신자 일치까지, `IsConditionInitAuthorized` private 분기). 그룹콜 emergency 는 [mcptt_emergency_modes.md](mcptt_emergency_modes.md) |
@@ -86,7 +86,7 @@ CIMS 에 **아직 구현되지 않은** 기능을 규격 위치와 함께 나열
 | **우선순위 공유** · **MCPTT gateway server** | TS 24.379 §6.7 · §5.5·§6.8 | ✗ |
 | **호 없는 임박 위험 상태 해제**(MESSAGE) | TS 24.379 §10.1.6 | ✗ |
 | **애드혹 그룹 긴급 경보** | TS 24.379 §12.1A | ✗ |
-| **애드혹 참가자 변경** · **기준 기반 참가자 결정** | TS 24.379 §17.2.6·§17.4.5 · §17.3.6·§17.4.6 | ✗ — 참가자 변경 요청에 200 을 주고 아무것도 하지 않는다(mcptt_conformance_gaps.md ADH-6) |
+| **애드혹 참가자 변경** · **기준 기반 참가자 결정** | TS 24.379 §17.2.6·§17.4.5 · §17.3.6·§17.4.6 | 참가자 변경 ✓ CSP — re-INVITE 의 resource-lists `method=INVITE`·`BYE` 항목을 초대·내보낸다(`OnAdhocParticipantsModify`). 권한(§17.4.5.1.1 3)) = user profile `<allow-to-modify-adhoc-group-call-participants-info>`(CSC 는 false) 대신 로컬 정책 «그 호의 개시자» — 아니면 403 + `190`, 상한(4)a)i)) 403 + `189`, 받아들이면 200 OK `Supported: tdialog, norefersub`(7)·8)). 단말 송신(§17.2.6)·기준 기반 결정 ✗ |
 | **원격 긴급 발언 요청 트리거** | TS 24.379 §18 | ✗ |
 
 > 구현됨: prearranged/chat 그룹콜, 일제 통화(호 단위 `<broadcast-ind>` — C8), private call(on-demand), affiliation(C1/C2), emergency/imminent 게이팅·선점, ad-hoc.
@@ -772,9 +772,9 @@ REGISTER/SUBSCRIBE/NOTIFY 의 헤더·본문을 상용 IMS 캡처 기준으로 �
   `<hang-time>`·일제 T4 `<broadcast-hang-time>`·TNG3 `<max-duration-of-call>`(§17.4.2.2 13)). 요소가 없으면 «애드혹 미지원»(§8.4.2.6)이라
   늘 싣는다). 값 = CSC 설정 `ServiceConfig.PrivateCall.*`·`ServiceConfig.AdhocGroupCall.*`(시간 ms, 0 = 요소 생략 = 미가동).
   CSP 는 `<private-call>`·`<adhoc-group-call>` 의 시간 값을 개별·애드혹 세션의 T4(`floor_timers.t4_inactivity`)·최대 시간으로 쓴다.
-  `<allow-adhoc-group-call-support>`·`<max-no-participants>` 는 단말에 알리는 값이고 CSP 판정에는 아직 쓰지 않는다 — 애드혹 개시
-  게이트는 csp.json `Setup.PttAdhocEnabled`(두 값을 같게 둔다), 인원 상한 403 + Warning `189`(§17.4.2.2 6))·미지원 403 + `186`(§17.4.2.2 5))
-  은 미구현.
+  `<max-no-participants>` 는 CSP 도 쓴다 — 애드혹 개시 INVITE 의 초대 명단(개시자 밖)·참가자 변경 re-INVITE(개시자 밖 참가자 + 새 초대)가
+  넘으면 403 + Warning `189`(§17.4.2.2 6) · §17.4.5.1.1 4)a)i)). `<allow-adhoc-group-call-support>` 는 단말에 알리는 값이고 CSP 개시
+  게이트는 csp.json `Setup.PttAdhocEnabled`(두 값을 같게 둔다) — 미지원 403 + `186`(§17.4.2.2 5))은 미구현.
   값의 정본은 두 곳 — DB `mcptt_service_config` **단일 행**(id=1: N2 = user-profile `MaxAffiliationsN2` 기본값·N6 두 값(관제/그 밖 —
   user-profile `MaxSimultaneousCallsN6`, 열은 `sql/migrate_mcptt_n6.sql`, 열이 없는 DB 는 10·5)·계층 수, 관리 API
   `GET/PUT /api/v1/mcptt/service-config`·콘솔 **구성 > MCPTT 정책**)과 CSC 설정 `ServiceConfig.*`(`EmergencyCall.GroupTimeLimit` →

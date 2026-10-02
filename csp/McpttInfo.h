@@ -546,27 +546,88 @@ inline std::string BuildPidfAffiliationInfo( const std::string &strEntity,
     return s;
 }
 
-// 멀티파트 바디의 resource-lists+xml part 에서 멤버 식별자(tel: 뒤 숫자/+) 추출.
-//  ad hoc 그룹콜(TS 22.179 Rel-18): 개시자가 INVITE 에 동적 멤버 목록을 실어 보냄.
-//  mcptt-info part 의 tel: 는 제외(resource-lists 구간만 스캔).
-inline std::vector<std::string> ParseResourceListUsers( const std::string &body ) {
-    std::vector<std::string> out;
-    size_t rl = body.find( "resource-lists" );
+/** resource-lists 항목 하나 (RFC 4826 `<entry uri>`) — MCPTT ID(맨 값, McpttBareId) + SIP URI 파라미터 `method`
+ *  (애드혹 참가자 변경 re-INVITE 의 INVITE·BYE — TS 24.379 §17.4.5.1.1 2)·3)). */
+struct McpttListEntry {
+    std::string strId;
+    std::string strMethod;  ///< 대문자 (INVITE·BYE) — 없으면 빈 값
+};
+
+// 멀티파트 바디의 resource-lists+xml part 에서 `<entry uri="…">` 를 모두 읽는다 — 애드혹 그룹 호의 초대 명단(TS 24.379
+//  §17.4.2.2 12)a) «each entry»)과 참가자 변경(§17.4.5.1.1). uri 는 tel:·sip: 어느 형이든 MCPTT ID 맨 값으로
+//  줄이고(같은 ID 는 한 번), `<entry-ref>`·mcptt-info part 의 URI 는 읽지 않는다.
+inline std::vector<McpttListEntry> ParseResourceListEntries( const std::string &body ) {
+    std::vector<McpttListEntry> out;
+    const size_t rl = body.find( "resource-lists" );
     if ( rl == std::string::npos ) return out;
-    size_t end = body.find( "\r\n--", rl );  // resource-lists part 끝(다음 boundary)
-    std::string seg = body.substr( rl, ( end == std::string::npos ? body.size() : end ) - rl );
+    const size_t end = body.find( "\r\n--", rl );  // resource-lists part 끝(다음 boundary)
+    const std::string seg = body.substr( rl, ( end == std::string::npos ? body.size() : end ) - rl );
     size_t p = 0;
-    while ( ( p = seg.find( "tel:", p ) ) != std::string::npos ) {
-        p += 4;
-        size_t e = p;
-        while ( e < seg.size() && ( std::isdigit( (unsigned char)seg[e] ) || seg[e] == '+' ) ) e++;
-        if ( e > p ) {
-            std::string id = seg.substr( p, e - p );
-            if ( std::find( out.begin(), out.end(), id ) == out.end() ) out.push_back( id );
+    while ( ( p = seg.find( "entry", p ) ) != std::string::npos ) {
+        const size_t q = p + 5;
+        const bool bTag = p > 0 && ( seg[p - 1] == '<' || seg[p - 1] == ':' ) && q < seg.size() &&
+                          ( std::isspace( (unsigned char)seg[q] ) || seg[q] == '/' || seg[q] == '>' );
+        if ( !bTag ) {
+            p = q;
+            continue;
         }
-        p = e;
+        const size_t gt = seg.find( '>', q );
+        const std::string tag = seg.substr( q, ( gt == std::string::npos ? seg.size() : gt ) - q );
+        p = ( gt == std::string::npos ) ? seg.size() : gt;
+        size_t u = tag.find( "uri" );
+        while ( u != std::string::npos && ( u + 3 >= tag.size() || ( tag[u + 3] != '=' && tag[u + 3] != ' ' ) ) )
+            u = tag.find( "uri", u + 3 );
+        if ( u == std::string::npos ) continue;
+        const size_t qs = tag.find_first_of( "\"'", u );
+        if ( qs == std::string::npos ) continue;
+        const size_t qe = tag.find( tag[qs], qs + 1 );
+        if ( qe == std::string::npos ) continue;
+        std::string uri = tag.substr( qs + 1, qe - qs - 1 );
+        for ( size_t a; ( a = uri.find( "&amp;" ) ) != std::string::npos; ) uri.replace( a, 5, "&" );
+        McpttListEntry e;
+        std::string low = uri;
+        std::transform( low.begin(), low.end(), low.begin(), ::tolower );
+        const size_t m = low.find( ";method=" );
+        if ( m != std::string::npos ) {
+            const size_t v = m + 8;
+            const size_t ve = low.find_first_of( ";?&", v );
+            e.strMethod = uri.substr( v, ( ve == std::string::npos ? uri.size() : ve ) - v );
+            std::transform( e.strMethod.begin(), e.strMethod.end(), e.strMethod.begin(), ::toupper );
+        }
+        e.strId = McpttBareId( uri );
+        if ( e.strId.empty() ) continue;
+        bool bDup = false;
+        for ( const auto &x : out ) bDup = bDup || x.strId == e.strId;
+        if ( !bDup ) out.push_back( e );
     }
     return out;
+}
+
+// 애드혹 그룹 호 개시 INVITE 의 초대 명단 — resource-lists 항목의 MCPTT ID (ParseResourceListEntries).
+inline std::vector<std::string> ParseResourceListUsers( const std::string &body ) {
+    std::vector<std::string> out;
+    for ( const auto &e : ParseResourceListEntries( body ) ) out.push_back( e.strId );
+    return out;
+}
+
+/** BYE 의 Reason(RFC 3326, 첫 값)이 애드혹 호 해제 요청인가 — `SIP;cause=200;text="User requested release"`
+ *  (TS 24.379 §17.2.3.1.1 · §6.3.3.2.4 3A)). 프로토콜·cause·text 를 본다(대소문자·공백 무관). */
+inline bool McpttIsUserRequestedRelease( const std::string &strReason ) {
+    std::string s;
+    for ( char c : strReason )
+        if ( !std::isspace( (unsigned char)c ) ) s += (char)std::tolower( (unsigned char)c );
+    if ( s.compare( 0, 4, "sip;" ) != 0 ) return false;
+    const size_t c = s.find( ";cause=" );
+    if ( c == std::string::npos || s.compare( c + 7, 3, "200" ) != 0 ||
+         ( c + 10 < s.size() && std::isdigit( (unsigned char)s[c + 10] ) ) )
+        return false;
+    const size_t t = s.find( ";text=" );
+    if ( t == std::string::npos ) return false;
+    std::string text = s.substr( t + 6 );
+    const size_t semi = text.find( ';', text.size() > 0 && text[0] == '"' ? text.find( '"', 1 ) : 0 );
+    if ( semi != std::string::npos ) text = text.substr( 0, semi );
+    if ( text.size() >= 2 && text.front() == '"' && text.back() == '"' ) text = text.substr( 1, text.size() - 2 );
+    return text == "userrequestedrelease";
 }
 
 #endif  // _MCPTT_INFO_H_

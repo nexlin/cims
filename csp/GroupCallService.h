@@ -103,6 +103,18 @@ public:
      *  잇는다(Warning 이 있으면 스택의 200 OK 에 싣는다). */
     InCallConditionVerdict OnInCallConditionRequest( const std::string &strCallId, const std::string &strGroupId,
                                                      const std::string &strMemberId, const CMcpttInfo &clsMi );
+    /** 애드혹 그룹 호 참가자 변경 re-INVITE 판정·반영 결과 (TS 24.379 §17.4.5.1.1). */
+    struct AdhocModifyVerdict {
+        bool bHandled = false;   ///< 참가자 변경 요청이었다(애드혹 세션 + method=INVITE/BYE 항목)
+        int iStatus = 0;         ///< 0 = 받아들였다(스택이 200 OK) · 403 = 거절
+        std::string strWarning;  ///< 거절의 Warning 값(190 권한 · 189 상한 — §4.4)
+    };
+    /** 애드혹 그룹 호의 re-INVITE 에 실린 resource-lists 의 method=INVITE 항목을 초대하고 method=BYE 항목을 내보낸다
+     *  (§17.4.5.1.1 4)a)ii)~iv)). 권한(3)) = user profile <allow-to-modify-adhoc-group-call-participants-info>(CSC 는
+     *  false) 또는 로컬 정책 — CIMS 는 그 호의 개시자만. 상한(4)a)i)) = service configuration <max-no-participants>
+     *  (개시자 밖 참가자 + 새 초대). 받아들이면 스택의 200 OK 에 Supported norefersub·tdialog(7)·8)). */
+    AdhocModifyVerdict OnAdhocParticipantsModify( const std::string &strCallId, const std::string &strGroupId,
+                                                  const std::string &strMemberId, const std::string &strBody );
     /** 2xx ACK 수신 — Warning 149 로 답한 re-INVITE 면 같은 다이얼로그에 INFO(Info-Package g.3gpp.mcptt-info)를 보낸다
      *  (TS 24.379 §10.1.1.4.7 끝 · §6.3.3.1.18). 대기 INFO 가 없으면 무동작. */
     void OnInDialogAck( const std::string &strCallId );
@@ -163,7 +175,9 @@ public:
     void StartMonitor();
     void StopMonitor();
     void OnCmpStatusChanged( bool bConnected );
-    bool OnCallTerminated( const std::string &strCallId );
+    /** leg 종료. pszReason = 상대가 BYE 에 실은 Reason(RFC 3326, 첫 값 — 없으면 NULL) — 애드혹 그룹 호 개시자의
+     *  «User requested release» 면 전원을 해제한다(TS 24.379 §6.3.3.2.4 3A)). */
+    bool OnCallTerminated( const std::string &strCallId, const char *pszReason = nullptr );
     /** 개시자 응답 게이트의 leg 종료 — 개시자 CANCEL(세션 개시 중단) 또는 멤버 초대의 최종 실패 응답
      *  (TS 24.379 §6.3.3.3·§10.1.1.4.2). ModuleDispatcher::EventCallEnd 가 OnCallTerminated 전에 부른다. */
     void OnAckGateLegEnd( const std::string &strCallId, int iSipStatus );
