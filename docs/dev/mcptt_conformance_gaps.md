@@ -54,10 +54,10 @@ PTT(MCPTT) 서비스 구현을 3GPP 규격 원문과 대조해 **규격과 다�
 | 발언권 SDP 협상 (SDP) | 3 | 1 | 2 | — | — |
 | 그룹 문서·GMS (GMS) | 13 | — | 12 | 1 | — |
 | 설정 문서·CMS (CMS) | 7 | — | 4 | 2 | 1 |
-| 신원 관리 (IDM) | 2 | 1 | 1 | — | — |
-| **계** | **120** | **28** | **58** | **25** | **9** |
+| 신원 관리 (IDM) | 1 | 1 | — | — | — |
+| **계** | **119** | **28** | **57** | **25** | **9** |
 
-확인 수준 — ◎ 64 · ○ 44 · △ 12.
+확인 수준 — ◎ 63 · ○ 44 · △ 12.
 
 읽는 순서 — §2(먼저 볼 것) → §3(영역별 전체) → §4(미구현 목록에 빠진 기능) → §5(문서 정정) → §6(묶음과 순서).
 
@@ -280,7 +280,6 @@ CSP 는 참여 기능과 제어 기능을 겸한다.
 | # | 급 | 대상 | 규격 | CIMS 지금 | 영향 | 확인 |
 |---|---|---|---|---|---|---|
 | IDM-5 | A | SDK | B.11.1 — 단말은 ID token 을 검증한다. B.4.2.3 — `state` 가 다르면 코드를 버린다 | `id_token` 은 보관만 하고(iss·aud·exp·nonce 검사 없음) `state` 를 응답과 비교하지 않는다 — `sdk/core/src/csc/csc_client.cpp:111-136` | 다른 사용자·발급자의 응답을 거르지 못한다(TLS 검증에만 기댄다) | ○ |
-| IDM-6 | B | CSC | B.2.2.1 — 토큰은 JSON web **digital signature** 프로파일(예시 RS256) | HS256(공유 비밀 MAC)뿐 — `mcptt.py:1221`·`:1236`·`:3151` | 단말·분리 배치된 리소스 서버가 서명을 검증할 수 없다. RS256 만 받는 규격 단말은 ID token 검증에서 실패한다 | ◎ |
 
 ## 4. 미구현 기능 목록에 빠진 것
 
@@ -359,7 +358,7 @@ mcptt_standard_conformance.md §0-R 은 통째 미구현 기능을 나열하는�
 - **MCData(TS 24.282)·MCVideo(TS 24.281·24.581)** — 각자의 목록: [mcdata_conformance_gaps.md](mcdata_conformance_gaps.md) · [mcvideo_conformance_gaps.md](mcvideo_conformance_gaps.md).
 - **통째 미구현 절** — pre-established session, call-back, first-to-answer, 원격 개시, ambient listening, regroup, functional alias, MBMS, off-network, 위치 관리, 긴급 개별 호의 단말 절차 세부, 애드혹 긴급·임박.
 - **floor SRTCP(TS 24.380 §13)·KMS(TS 33.180 본문)** — placeholder 로 문서에 있어 내부를 읽지 않았다. 토큰 교환·파트너 도메인(부록 B.7~B.9)도.
-- **OMA XDM Group·RFC 원문 일부** — 그룹 문서의 OMA 스키마 시퀀스, RFC 6665·OIDC Core 의 해당 절은 규격 폴더에 없어 대조하지 못했다(AFF-9·IDM-6 의 근거 일부).
+- **OMA XDM Group·RFC 원문 일부** — 그룹 문서의 OMA 스키마 시퀀스, RFC 6665·OIDC Core 의 해당 절은 규격 폴더에 없어 대조하지 못했다(AFF-9 의 근거 일부).
 - **실행 확인** — 모든 항목이 코드 읽기다. △ 표시 항목과 PRV-3(전이중 개별 호)·AFF-5(제휴 행 키)는 실서버로 재현해 확정한다.
 - **cspsim·계측기(libcsim)** — 시험 도구의 MCPTT 송신 형태는 보지 않았다. 서버 쪽 검사를 켜면(GCS-9·GCS-10·REG-3·PRV-1) 도구도 함께 맞춰야 한다.
 - **콘솔·현장 앱 화면 규칙** — 인가 요소가 늘면(묶음 4) 콘솔 가입자 프로파일 칸이 따라가야 한다.

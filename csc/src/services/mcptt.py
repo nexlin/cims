@@ -20,13 +20,17 @@ from services.idms_storage import IdmsStorage
 from services import logger as _logger
 from services import subscriptions as _subs      # 가입 테이블 레지스트리(volte/voip/ptt — sip_service_model.md §2-9)
 from services import mcvideo as _mcvideo        # MCVideo 설정 평면(그룹 문서 조각·user profile·service config — mcvideo.md §5.1)
+from services import idms_keys as _idms_keys    # IdMS 토큰 서명 키(RS256 — TS 33.180 B.2.2.1)
 
 # --- Configuration & Data ---
-# JWT 서명 시크릿. 구 하드코딩 default("mcptt_jwt_secret_change_me") 제거 — 알려진 기본값은
-# 토큰 위조를 허용하므로 보안 결함. 기본값 = 프로세스 시작 시 임의 생성(예측 불가). 운영은
-# IdMs.JwtSecret 로 고정 권장(미설정 시 재기동마다 토큰 무효화). IdMS 가 발급하고 동일 프로세스의
-# XCAP 가 검증하므로 임의 시크릿으로도 정상 동작.
+# 토큰 서명 (TS 33.180 B.2.2.1 — access token 은 JSON web digital signature 프로파일 RFC 7515 · OIDC Core §15.1 — OP 는 ID token
+#   을 RS256 으로 서명한다). 서명 = RS256(`services/idms_keys` 의 RSA 키, 공개 키는 `GET /idms/jwks`) — 단말과 분리 배치된 리소스
+#   서버가 공개 키로 검증한다. `IdMs.SigningAlg=HS256` 은 공유 비밀 MAC 로 서명하는 옛 방식(서명 키를 못 읽을 때도 이쪽으로 선다).
+#   검증은 RS256 을 받고, HS256 토큰은 `IdMs.AcceptHs256`(전환기 — 판올림 전에 나간 토큰) 일 때만 받는다.
+# HS256 시크릿 — 기본값 = 프로세스 시작 시 임의 생성(예측 불가). `IdMs.JwtSecret` 로 고정한다(미설정 시 재기동마다 HS256 토큰 무효).
 SECRET_KEY = _secrets.token_urlsafe(32)
+SIGNING_ALG_CONFIG = "RS256"      # IdMs.SigningAlg
+ACCEPT_HS256 = True               # IdMs.AcceptHs256
 # KMS master secret — 가입자별 키 material 파생용(HKDF). 구 구현은 전 사용자 동일 고정 hex 였음.
 #   ⚠ 본 파생은 가입자별 **구조적 프로비저닝**(UserDecryptKey/SSK/PVT 가 사용자마다 다름)을 제공하나,
 #   참값 ECCSI/SAKKE(RFC 6507/6508)는 pairing 암호 라이브러리가 필요한 후속 과제다(E2E 암호화 도입 시).
@@ -377,6 +381,13 @@ def apply_config(config):
     else:
         logger.log_error("[IdMS] IdMs.JwtSecret 미설정 — 임의 시크릿 사용(재기동 시 토큰 무효화). "
                          "운영은 IdMs.JwtSecret 설정 권장.")
+    global SIGNING_ALG_CONFIG, ACCEPT_HS256
+    _alg = str(idms_config.get('SigningAlg') or 'RS256').strip().upper()
+    if _alg not in ('RS256', 'HS256'):
+        logger.log_error(f"[IdMS] IdMs.SigningAlg='{_alg}' 미지 값 — RS256 으로 동작")
+        _alg = 'RS256'
+    SIGNING_ALG_CONFIG = _alg
+    ACCEPT_HS256 = bool(idms_config.get('AcceptHs256', True))
     if idms_config.get('KmsClientReqUrl'):
         KMS_CLIENT_REQ_URL = idms_config['KmsClientReqUrl']
     if idms_config.get('AuthCodeTtl'):
@@ -520,6 +531,10 @@ def load_shared_data(config):
     # IdmsStorage: file_store 기반 (Phase 8). 전체 config 전달 (runtime_root 추출용).
     storage.init_db(config)
     logger.log_info("IdmsStorage initialized (file_store)")
+    # 토큰 서명 키 — runtime store 의 키를 읽는다(없으면 만든다). 못 읽으면 HS256 으로 선다(로그인은 계속 된다).
+    if SIGNING_ALG_CONFIG == 'RS256' and not _idms_keys.init(config):
+        logger.log_error("[IdMS] RS256 서명 키를 쓸 수 없다 — HS256(IdMs.JwtSecret)으로 서명한다. "
+                         "단말·외부 리소스 서버는 이 토큰의 서명을 검증할 수 없다(TS 33.180 B.2.2.1).")
     
     # Load users: DB primary, file fallback
     db_users_loaded = False
@@ -1325,7 +1340,7 @@ def create_tokens(subject, scope, client_id="mcptt_client", nonce=None, refresh_
     }
     if nonce:
         id_token_payload["nonce"] = nonce
-    id_token = jwt.encode(id_token_payload, SECRET_KEY, algorithm="HS256")
+    id_token = sign_token(id_token_payload)
 
     # Access Token — sub=login_id, mcptt_id/mcdata_id=MC 서비스 신원, client_id=요청 클라이언트(B.2.2.2).
     access_token_payload = {
@@ -1338,7 +1353,7 @@ def create_tokens(subject, scope, client_id="mcptt_client", nonce=None, refresh_
         "exp": now + ACCESS_TOKEN_TTL,
         "scope": scope
     }
-    access_token = jwt.encode(access_token_payload, SECRET_KEY, algorithm="HS256")
+    access_token = sign_token(access_token_payload)
 
     # Refresh Token (UUID + 영속성 저장) — subject/mcptt_id 보존(refresh 재발급 시 동일 신원).
     refresh_token = str(uuid.uuid4())
@@ -1357,9 +1372,34 @@ def create_tokens(subject, scope, client_id="mcptt_client", nonce=None, refresh_
     
     return id_token, access_token, refresh_token
 
+def signing_alg() -> str:
+    """지금 서명에 쓰는 방식 — 설정이 RS256 이고 서명 키가 준비됐으면 RS256, 아니면 HS256."""
+    return 'RS256' if SIGNING_ALG_CONFIG == 'RS256' and _idms_keys.ready() else 'HS256'
+
+
+def sign_token(payload: dict) -> str:
+    """ID token·access token 서명(JWS compact, RFC 7515). RS256 은 헤더에 `kid`(RFC 7638 thumbprint)를 싣는다 — 검증자가
+    JWKS 에서 키를 고른다."""
+    if signing_alg() == 'RS256':
+        return jwt.encode(payload, _idms_keys.signing_key(), algorithm="RS256", headers={"kid": _idms_keys.signing_kid()})
+    return jwt.encode(payload, SECRET_KEY, algorithm="HS256")
+
+
 def validate_access_token(token):
+    """access token 검증(TS 33.180 B.11.2). 헤더의 `alg` 로 키 종류를 고르고 그 방식 하나로만 검증한다 — RS256 은 `kid` 의 공개
+    키, HS256 은 공유 비밀(전환기 `IdMs.AcceptHs256` 또는 HS256 서명 구성일 때만). 그 밖의 `alg`(none 포함)는 거절한다."""
     try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=["HS256"], options={"verify_signature": True}, audience="mcptt_client")
+        header = jwt.get_unverified_header(token) or {}
+        alg = header.get('alg')
+        if alg == 'RS256':
+            key = _idms_keys.public_key(header.get('kid'))
+            if key is None:
+                raise ValueError(f"unknown kid {header.get('kid')!r}")
+        elif alg == 'HS256' and (ACCEPT_HS256 or signing_alg() == 'HS256'):
+            key = SECRET_KEY
+        else:
+            raise ValueError(f"alg {alg!r} not accepted")
+        payload = jwt.decode(token, key, algorithms=[alg], options={"verify_signature": True}, audience="mcptt_client")
         return payload
     except Exception as e:
         logger.log_error(f"Token validation error: {e}")
@@ -3570,6 +3610,7 @@ async def handle_openid_config(args: HandlerArgs, kwargs: dict) -> HandlerResult
         "authorization_endpoint": f"{base}/idms/authreq",
         "token_endpoint": f"{base}/idms/tokenreq",
         "introspection_endpoint": f"{base}/idms/introspect",
+        "jwks_uri": f"{base}/idms/jwks",
         "token_endpoint_auth_methods_supported": ["none"],
         "grant_types_supported": ["authorization_code", "refresh_token"],
         "response_types_supported": ["code"],
@@ -3578,11 +3619,18 @@ async def handle_openid_config(args: HandlerArgs, kwargs: dict) -> HandlerResult
         "scopes_supported": [SCOPE_OPENID, SCOPE_PROVISIONING, *SCOPE_MC_SERVICES, *SCOPE_VIDEO_SERVICES,
                              SCOPE_LEGACY_MCPTT],
         "subject_types_supported": ["public"],
-        "id_token_signing_alg_values_supported": ["HS256"],
+        "id_token_signing_alg_values_supported": [signing_alg()],
         "claims_supported": ["sub", "iss", "iat", "exp", "aud", "nonce", "scope", "client_id",
                              "mcptt_id", "mcvideo_id", "mcdata_id"],
     }
     return HandlerResult(status=200, body=doc, media_type="application/json")
+
+
+# JWKS — GET /idms/jwks (openid-configuration `jwks_uri`, OIDC Discovery §3 · RFC 7517). 토큰 서명 공개 키 — 단말(ID token 검증
+#   TS 33.180 B.11.1 · OIDC Core §3.1.3.7)과 분리 배치된 리소스 서버가 읽는다. 인증 없음(공개 키). HS256 구성이면 빈 집합.
+async def handle_idms_jwks(args: HandlerArgs, kwargs: dict) -> HandlerResult:
+    return HandlerResult(status=200, body=_idms_keys.jwks(), headers={"Cache-Control": "public, max-age=3600"},
+                         media_type="application/json")
 
 
 # ── 자동 프로비저닝 (GET /provisioning/me, android_ue_provisioning.md §3) ──
@@ -4263,6 +4311,7 @@ CSC_HANDLER_LIST = [
     ("/idms/authreq",     handle_auth_req,          {}),
     ("/idms/tokenreq",    handle_token_req,          {}),
     ("/idms/introspect",  handle_token_introspect,   {}),
+    ("/idms/jwks",        handle_idms_jwks,          {}),
     # GMS — list: GET /users/{user_uri}  |  CRUD: /users/{user_uri}/{group_uri}
     ("/org.openmobilealliance.groups/users", handle_group_management, {}),
     # CMS (3GPP TS 24.484)

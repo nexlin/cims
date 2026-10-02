@@ -29,7 +29,7 @@ MC 신원이 없으면 로그인 계정의 첫 회선(`line_id` — ptt → volt
 
 ## 2. 토큰 claim
 
-`create_tokens` 가 발급한다. 서명 = HS256(`IdMs.JwtSecret`), 수명 = `IdMs.AccessTokenTtl`(기본 3600 s).
+`create_tokens` 가 발급한다. 서명 = RS256(§2.1), 수명 = `IdMs.AccessTokenTtl`(기본 3600 s).
 
 | 토큰 | claim | 값 | 규격 |
 |---|---|---|---|
@@ -42,6 +42,22 @@ MC 신원이 없으면 로그인 계정의 첫 회선(`line_id` — ptt → volt
 
 토큰 응답(RFC 6749 §5.1)은 `access_token`·`id_token`·`refresh_token`·`token_type`·`expires_in`(=TTL)·**`scope`(실제 허가분)**
 를 항상 싣는다. refresh 토큰은 file_store 에 원 grant scope 를 보존한다(§4 축소 규칙).
+
+### 2.1 서명 (TS 33.180 B.2.2.1 · RFC 7515 · OIDC Core §15.1)
+
+access token 은 JSON web digital signature 프로파일을 싣고(B.2.2.1), OP 는 ID token 을 RS256 으로 서명한다(OIDC Core §15.1). ID token·
+access token 둘 다 **RS256** 으로 서명한다 — 단말(ID token 검증, B.11.1 · OIDC Core §3.1.3.7)과 분리 배치된 리소스 서버가 공개 키로
+검증한다.
+
+| 항목 | 규칙 |
+|---|---|
+| 서명 키 | RSA 2048. runtime store `idms_keys/signing.pem`(PKCS#8, 0600) — 없으면 처음 기동 때 만든다. HA 쌍은 같은 runtime store 라 같은 키. `IdMs.SigningKeyFile` 로 다른 경로 지정 (`services/idms_keys.py`) |
+| `kid` | JWS 헤더에 싣는다 — RFC 7638 JWK thumbprint |
+| 공개 키 | `GET /idms/jwks`(RFC 7517, 인증 없음) — discovery `jwks_uri`. `kty RSA`·`use sig`·`alg RS256`·`kid`·`n`·`e` |
+| 키 교체 | `signing.pem` 을 `previous-<이름>.pem` 으로 바꾸고 재기동 → 새 키로 서명, `previous-*.pem` 은 검증·JWKS 에만 쓰인다. 토큰 수명(`IdMs.AccessTokenTtl`)이 지나면 previous 를 지운다 |
+| 검증 (`validate_access_token`) | 헤더 `alg` 로 키 종류를 골라 **그 방식 하나로만** 검증 — `RS256` = `kid` 의 공개 키(모르는 `kid` 거절), `HS256` = 공유 비밀(아래 전환기), 그 밖(`none` 포함) 거절. 공개 키를 HMAC 비밀로 쓴 토큰(알고리즘 바꿔치기)은 걸러진다 |
+| 전환기 | `IdMs.AcceptHs256`(기본 true) — RS256 로 올리기 전에 나간 HS256 토큰을 만료까지 받는다. 끄면 401 `invalid_token` → 단말은 refresh 로 RS256 토큰을 받는다(refresh token 은 서명과 무관한 불투명 값) |
+| `IdMs.SigningAlg` | `RS256`(기본) / `HS256`(공유 비밀 `IdMs.JwtSecret` MAC — 옛 방식). 서명 키를 읽지 못하면 오류 로그를 남기고 HS256 으로 선다(로그인은 계속 된다) |
 
 ## 3. scope 카탈로그
 
@@ -152,8 +168,9 @@ TTL(1 h) 안에 소멸한다.
 이다. URL 형으로 고정하려면 `McpttServer.PublicUrl` 을 단말이 실제로 도달하는 하나의 주소로 명시한다(내부/공인 두 경로가
 있으면 그중 하나를 택해야 한다 — `iss` 는 하나).
 
-discovery(`/.well-known/openid-configuration`): `issuer`, 엔드포인트 3종(`public_base_url`), `scopes_supported`(§3 + §5),
-`claims_supported`(`sub iss iat exp aud nonce scope client_id mcptt_id mcdata_id`), PKCE `S256`, `HS256`.
+discovery(`/.well-known/openid-configuration`): `issuer`, 엔드포인트 3종 + `jwks_uri`(`public_base_url`), `scopes_supported`(§3 + §5),
+`claims_supported`(`sub iss iat exp aud nonce scope client_id mcptt_id mcdata_id`), PKCE `S256`,
+`id_token_signing_alg_values_supported` = `RS256`(§2.1).
 introspection(`/idms/introspect`, RFC 7662): `active sub iss client_id mcptt_id mcdata_id aud exp iat scope`(문자열).
 
 ## 8. 클라이언트 요청 문자열
@@ -170,7 +187,8 @@ introspection(`/idms/introspect`, RFC 7662): `active sub iss client_id mcptt_id 
 - **S1-UNIT-CSC** `tests/test_csc_idms_scope.py`: 요청∩카탈로그·미지 제외·별칭 확장/병기·배열형 구 토큰 수용·claim(scope
   문자열/`client_id`/`mcdata_id`)·refresh 축소(별칭 위)·검사 3모드·RFC 6750 헤더·issuer 유도·discovery·인프로세스 발급 흐름 ·
   전화 전용 계정(MC scope·신원 없음, KMS 403, refresh 로도 못 얻음)·클라이언트 등록 3모드·필수 파라미터·토큰 요청 `redirect_uri` ·
-  no-store · refresh 계정 재확인(비밀번호 변경·삭제 → 회수) · Bearer 없음 403.
+  no-store · refresh 계정 재확인(비밀번호 변경·삭제 → 회수) · Bearer 없음 403 · 서명(RS256 헤더 `kid`·JWKS 의 n·e 로 세운 키로
+  ID/access token 검증·키 영속·키 교체 뒤 previous 로 검증·HS256 전환기 수용/거절·다른 키·모르는 `kid`·알고리즘 바꿔치기·`alg none` 거절).
 - **S3** `tests/csc_bootstrap_conformance.py --enforcement enforce|log|off`: Step 3 토큰 계약, Step 3c 카탈로그(video 제외)·
   scope 부족 403(`WWW-Authenticate` 에 필요 scope)·충분 200·refresh 축소/broad 보존·discovery 정합(issuer = 토큰 `iss`).
 

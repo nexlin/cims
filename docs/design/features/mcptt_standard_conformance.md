@@ -624,7 +624,10 @@ REGISTER/SUBSCRIBE/NOTIFY 의 헤더·본문을 상용 IMS 캡처 기준으로 �
 
 ### IdMS (TS 33.180 / OIDC)
 - **S1 디스커버리**: `GET /.well-known/openid-configuration`(`handle_openid_config`) — issuer/authorization·
-  token·introspection endpoint·`code_challenge_methods_supported=[S256]`·grant types·claims 광고.
+  token·introspection endpoint·`jwks_uri`·`code_challenge_methods_supported=[S256]`·grant types·claims 광고.
+- **토큰 서명**(TS 33.180 B.2.2.1 «JSON web digital signature» RFC 7515 · OIDC Core §15.1): ID token·access token = **RS256**, JWS 헤더
+  `kid`(RFC 7638), 공개 키 `GET /idms/jwks`. 서명 키는 runtime store 에 영속(HA 쌍 공유). 검증은 `alg` 별 키 하나로만 — HS256 은
+  전환기 스위치 `IdMs.AcceptHs256` 일 때만. 상세 = [mcx_identity_scope.md](mcx_identity_scope.md) §2.1.
 - **S2a access_token 클레임**: `sub`(=login_id)/`iss`/`iat`/`exp`/`aud`/`client_id`/`scope`(공백 구분 문자열)/
   `mcptt_id`/`mcdata_id`(`create_tokens`). scope = 요청 ∩ 카탈로그(`grant_scope`, B.4.2.2 `3gpp:mc:*`), 리소스 서버 검사
   `require_scope`(B.10). 상세·별칭·롤아웃 = [mcx_identity_scope.md](mcx_identity_scope.md).

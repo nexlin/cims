@@ -668,6 +668,35 @@
           "help": "비우면 전부 허용(시험 기본). 채우면 authreq 의 redirect_uri 가 목록의 값과 **정확히 일치**(RFC 6749 §3.1.2.3)해야 하고 아니면 400. 클라이언트별 등록은 IdMs.Clients 가 정본이다 — 이 목록은 그와 별개로 늘 집행하는 전역 제한이다."
         },
         {
+          "key": "IdMs.SigningAlg",
+          "label": "토큰 서명 방식",
+          "type": "enum",
+          "options": [
+            "RS256",
+            "HS256"
+          ],
+          "default": "RS256",
+          "restart": true,
+          "help": "ID token·access token 의 서명 방식(TS 33.180 B.2.2.1 — JSON web digital signature · OIDC Core §15.1). RS256=RSA 서명 — 키는 runtime store idms_keys/signing.pem(없으면 처음 기동 때 생성), 공개 키는 GET /idms/jwks(openid-configuration jwks_uri)로 낸다. HS256=공유 비밀(IdMs.JwtSecret) MAC — 단말·외부 리소스 서버가 서명을 검증할 수 없다(옛 방식)."
+        },
+        {
+          "key": "IdMs.AcceptHs256",
+          "label": "HS256 토큰 수용 (전환기)",
+          "type": "bool",
+          "default": true,
+          "restart": false,
+          "reload_hint": "SIGUSR1 로 재로드 — 다음 요청부터.",
+          "help": "RS256 서명 구성에서 HS256(IdMs.JwtSecret) 토큰도 받는다 — RS256 로 올리기 전에 나간 토큰이 만료(IdMs.AccessTokenTtl)될 때까지의 전환기용. 끄면 HS256 토큰은 401 invalid_token(단말은 refresh 로 RS256 토큰을 다시 받는다)."
+        },
+        {
+          "key": "IdMs.SigningKeyFile",
+          "label": "서명 키 파일",
+          "type": "string",
+          "default": "",
+          "restart": true,
+          "help": "RS256 서명 개인 키(PEM, PKCS#8) 경로. 비우면 runtime store 의 idms_keys/signing.pem — HA 쌍이 같은 키를 쓴다. 키 교체 = signing.pem 을 previous-<이름>.pem 으로 바꾸고 재기동(previous 는 검증·JWKS 에만 쓰이고, 토큰 수명이 지나면 지운다)."
+        },
+        {
           "key": "IdMs.ClientEnforcement",
           "label": "클라이언트 등록·필수 파라미터 검사",
           "type": "enum",

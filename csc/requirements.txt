@@ -30,3 +30,7 @@ requests
 
 # Concurrency
 readerwriterlock
+
+# IdMS 토큰 서명 (RS256 — TS 33.180 B.2.2.1). PyJWT 의 RSA 알고리즘이 cryptography 를 쓴다(cffi·pycparser 동반).
+#   wheel = cryptography cp311-abi3 manylinux_2_34 · cffi cp314 manylinux2014 — 실행 조건(glibc 2.38+ · CPython 3.14) 안.
+cryptography

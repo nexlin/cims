@@ -221,8 +221,8 @@ class _MemStorage:
         return True
 
 
-class IssuanceFlowTest(unittest.TestCase):
-    """간이형 authreq(GET+자격) → tokenreq(authorization_code) → tokenreq(refresh_token) 를 핸들러 직접 호출로."""
+class _IssuanceFixture:
+    """발급 경로 픽스처 — 인메모리 저장소·시험 계정·PKCE 쌍 + 간이형 로그인/갱신 도우미."""
     LOGIN, PW, PTT = "unit-login", "pw", "tel:+82500009999"
 
     def setUp(self):
@@ -258,6 +258,10 @@ class IssuanceFlowTest(unittest.TestCase):
         r = self.run_(m.handle_token_req(HandlerArgs("POST", "/idms/tokenreq", "127.0.0.1", 0, body=body), {}))
         self.assertEqual(r.status, 200, r.body)
         return r.body
+
+
+class IssuanceFlowTest(_IssuanceFixture, unittest.TestCase):
+    """간이형 authreq(GET+자격) → tokenreq(authorization_code) → tokenreq(refresh_token) 를 핸들러 직접 호출로."""
 
     def test_legacy_request_expands_and_response_carries_scope(self):
         t = self._login("openid " + LEGACY)
@@ -449,6 +453,106 @@ class MemberOnlyAndClientRegistrationTest(IssuanceFlowTest):
             "grant_type": "refresh_token", "refresh_token": ref2, "client_id": "MCPTT_UE"}), {}))
         self.assertEqual(r.status, 400)
         self.assertTrue(m.storage.tokens[ref2]["revoked"])
+
+
+class SigningTest(_IssuanceFixture, unittest.TestCase):
+    """IDM-6 — 토큰 서명 RS256(TS 33.180 B.2.2.1 «JSON web digital signature», OIDC Core §15.1) · JWKS · 전환기 HS256 수용."""
+
+    def setUp(self):
+        super().setUp()
+        import tempfile
+        from services import idms_keys
+        self.keys = idms_keys
+        self.tmp = tempfile.mkdtemp(prefix="csc-idms-keys-")
+        self._sign_keep = (m.SIGNING_ALG_CONFIG, m.ACCEPT_HS256)
+        m.SIGNING_ALG_CONFIG, m.ACCEPT_HS256 = "RS256", True
+        self.assertTrue(idms_keys.init({"CimsRuntimeDir": self.tmp}))
+
+    def tearDown(self):
+        import shutil
+        m.SIGNING_ALG_CONFIG, m.ACCEPT_HS256 = self._sign_keep
+        self.keys.init({"IdMs": {"SigningKeyFile": os.path.join(self.tmp, "no-such-dir", "k.pem")}})   # 키 없음 = HS256 으로
+        self.assertFalse(self.keys.ready())
+        shutil.rmtree(self.tmp, ignore_errors=True)
+        super().tearDown()
+
+    def _jwks_key(self, kid):
+        """JWKS 의 n·e 만으로 공개 키를 다시 세운다 — 단말·외부 리소스 서버가 하는 일."""
+        import asyncio, base64
+        from cryptography.hazmat.primitives.asymmetric import rsa
+        r = asyncio.run(m.handle_idms_jwks(HandlerArgs("GET", "/idms/jwks", "127.0.0.1", 0), {}))
+        self.assertEqual(r.status, 200)
+        jwk = next(k for k in r.body["keys"] if k["kid"] == kid)
+        self.assertEqual((jwk["kty"], jwk["use"], jwk["alg"]), ("RSA", "sig", "RS256"))
+        num = lambda v: int.from_bytes(base64.urlsafe_b64decode(v + "=" * (-len(v) % 4)), "big")
+        return rsa.RSAPublicNumbers(num(jwk["e"]), num(jwk["n"])).public_key()
+
+    def test_tokens_are_rs256_and_verify_with_jwks(self):
+        t = self._login("openid 3gpp:mc:ptt_service")
+        for name, aud in (("id_token", "MCPTT_UE"), ("access_token", "mcptt_client")):
+            h = jwt.get_unverified_header(t[name])
+            self.assertEqual((h["alg"], h["kid"]), ("RS256", self.keys.signing_kid()), name)
+            claims = jwt.decode(t[name], self._jwks_key(h["kid"]), algorithms=["RS256"], audience=aud)
+            self.assertEqual(claims["mcptt_id"], self.PTT)
+        self.assertEqual(m.validate_access_token(t["access_token"])["sub"], self.LOGIN)
+        self.assertEqual(self._refresh(t["refresh_token"])["access_token"].count("."), 2)
+
+    def test_discovery_advertises_jwks_and_alg(self):
+        import asyncio
+        doc = asyncio.run(m.handle_openid_config(HandlerArgs("GET", "/x", "127.0.0.1", 0, headers={"host": "h:4430"}), {})).body
+        self.assertTrue(doc["jwks_uri"].endswith("/idms/jwks"))
+        self.assertEqual(doc["id_token_signing_alg_values_supported"], ["RS256"])
+
+    def test_key_persists_and_previous_key_still_verifies(self):
+        kid = self.keys.signing_kid()
+        tok = self._login("openid 3gpp:mc:ptt_service")["access_token"]
+        path = os.path.join(self.tmp, "idms_keys", "signing.pem")
+        self.assertEqual(os.stat(path).st_mode & 0o777, 0o600)
+        self.assertTrue(self.keys.init({"CimsRuntimeDir": self.tmp}))
+        self.assertEqual(self.keys.signing_kid(), kid, "재기동해도 같은 키")
+        os.rename(path, os.path.join(self.tmp, "idms_keys", "previous-1.pem"))          # 키 교체
+        self.assertTrue(self.keys.init({"CimsRuntimeDir": self.tmp}))
+        self.assertNotEqual(self.keys.signing_kid(), kid)
+        self.assertEqual({k["kid"] for k in self.keys.jwks()["keys"]}, {kid, self.keys.signing_kid()})
+        self.assertIsNotNone(m.validate_access_token(tok), "previous 키로 서명한 토큰은 수명 동안 유효")
+        os.unlink(os.path.join(self.tmp, "idms_keys", "previous-1.pem"))
+        self.assertTrue(self.keys.init({"CimsRuntimeDir": self.tmp}))
+        self.assertIsNone(m.validate_access_token(tok), "키를 지우면 무효")
+
+    def test_hs256_accepted_only_in_transition(self):
+        import time
+        hs = jwt.encode({"sub": self.LOGIN, "aud": "mcptt_client", "exp": int(time.time()) + 60, "scope": "openid"},
+                        m.SECRET_KEY, algorithm="HS256")
+        self.assertIsNotNone(m.validate_access_token(hs), "전환기 — 판올림 전에 나간 토큰")
+        m.ACCEPT_HS256 = False
+        self.assertIsNone(m.validate_access_token(hs))
+        m.SIGNING_ALG_CONFIG = "HS256"                    # HS256 서명 구성이면 수용 스위치와 무관하게 받는다
+        self.assertEqual(m.signing_alg(), "HS256")
+        self.assertIsNotNone(m.validate_access_token(hs))
+        self.assertEqual(jwt.get_unverified_header(self._login("openid")["access_token"])["alg"], "HS256")
+
+    def test_forged_tokens_rejected(self):
+        import base64, json, time
+        from cryptography.hazmat.primitives import serialization
+        from cryptography.hazmat.primitives.asymmetric import rsa
+        claims = {"sub": self.LOGIN, "aud": "mcptt_client", "exp": int(time.time()) + 60, "scope": "openid"}
+        other = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        kid = self.keys.signing_kid()
+        self.assertIsNone(m.validate_access_token(jwt.encode(claims, other, algorithm="RS256", headers={"kid": kid})),
+                          "다른 키로 서명")
+        self.assertIsNone(m.validate_access_token(jwt.encode(claims, other, algorithm="RS256", headers={"kid": "nope"})),
+                          "모르는 kid")
+        # 알고리즘 바꿔치기 — 공개 키(누구나 JWKS 에서 얻는다)를 HMAC 비밀로 쓴 HS256 토큰
+        pem = self.keys.public_key(kid).public_bytes(serialization.Encoding.PEM,
+                                                     serialization.PublicFormat.SubjectPublicKeyInfo)
+        b64 = lambda raw: base64.urlsafe_b64encode(raw).rstrip(b"=").decode()
+        import hashlib, hmac
+        head = b64(json.dumps({"alg": "HS256", "typ": "JWT", "kid": kid}).encode())
+        body = b64(json.dumps(claims).encode())
+        sig = b64(hmac.new(pem, f"{head}.{body}".encode(), hashlib.sha256).digest())
+        self.assertIsNone(m.validate_access_token(f"{head}.{body}.{sig}"), "공개 키를 HMAC 비밀로")
+        none = b64(json.dumps({"alg": "none"}).encode()) + "." + body + "."
+        self.assertIsNone(m.validate_access_token(none), "alg none")
 
 
 if __name__ == "__main__":

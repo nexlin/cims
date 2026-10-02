@@ -436,6 +436,7 @@ OAuth 2.0 PKCE 기반 단말 인증.
 | POST | `/idms/authreq` | 규격 로그인 폼 제출(form-urlencoded) → 302 `redirect_uri?code&state` / 실패 200 폼 재표시 |
 | POST | `/idms/tokenreq` | Token Request (code_verifier) — JSON·form-urlencoded |
 | GET | `/idms/introspect` | Token Introspection |
+| GET | `/idms/jwks` | 토큰 서명 공개 키(JWKS, RFC 7517 — discovery `jwks_uri`) |
 
 **인증 흐름 (두 말투 병행 — `handle_auth_req` 한 핸들러 안 분기, 검증·인증·코드 발급 공유):**
 
@@ -459,8 +460,10 @@ UE                    IdMS (CSC:4430)      UE                              IdMS 
 가 필수다(TS 33.180 B.12) — 인증서(`runtime/cert/server.key`·`server.crt`)가 없으면 CSC 는 평문으로 띄우지 않고 기동을 멈춘다
 (시험용 `McpttServer.AllowPlaintext`). 규격 대비는 [mcptt_standard_conformance.md §3](../features/mcptt_standard_conformance.md).
 
-**토큰 구조 (JWT, HS256)** — claim·scope 카탈로그·리소스 서버 검사 규칙의 정본은
-[mcx_identity_scope.md](../features/mcx_identity_scope.md). access token 예:
+**토큰 구조 (JWT, RS256)** — claim·scope 카탈로그·서명·리소스 서버 검사 규칙의 정본은
+[mcx_identity_scope.md](../features/mcx_identity_scope.md). ID token·access token 은 RS256 으로 서명하고(TS 33.180 B.2.2.1) 공개 키를
+`/idms/jwks` 로 낸다 — 서명 키는 runtime store `idms_keys/signing.pem`(없으면 처음 기동 때 생성, `IdMs.SigningAlg`·`IdMs.AcceptHs256`·
+`IdMs.SigningKeyFile`). access token 예:
 
 ```json
 {
@@ -484,7 +487,8 @@ Bearer 토큰이 없는 요청은 403, 토큰 검증 실패는 401 `invalid_toke
 
 **토큰 저장 (영속성 규칙):**
 
-- access/id 토큰 = **JWT(서명 검증)** — 서버에 저장하지 않는다. CSC 재기동과 무관하게 만료까지 유효.
+- access/id 토큰 = **JWT(서명 검증)** — 서버에 저장하지 않는다. CSC 재기동과 무관하게 만료까지 유효(서명 키가 runtime store 에
+  남는다 — `{CimsRuntimeDir}/idms_keys/`, 이 디렉터리를 잃으면 새 키가 만들어지고 나가 있던 토큰은 401 → 단말이 refresh 한다).
 - **refresh 토큰 = file_store** (`{CimsRuntimeDir}/refresh_tokens/`, auth code 도 동일 루트) — 갱신 시
   회전(rotated_to)·회수 기록. 갱신 때 계정을 다시 본다(TS 33.180 B.5.3) — 계정 삭제·비밀번호 변경이면 회수하고 `invalid_grant`. `CimsRuntimeDir` 는 **버전 무관 영속 경로**여야 한다: 버전 디렉터리나
   개발 트리 경로를 주면 업그레이드마다 저장소가 갈려 단말 refresh 가 "not found" 로 실패하고
