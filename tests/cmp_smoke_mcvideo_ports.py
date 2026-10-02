@@ -468,21 +468,26 @@ try:
     for n in (X, Y, Z):
         v, vrt = udp_pair()
         sk[n], vr[n] = (udp(), v, udp()), vrt
-    tcu = {X: 0x0C000001, Y: 0x0C000002, Z: 0x0C000003}
+    tcu = {X: 0x0C000001, Y: 0x0C000002, Z: 0}   # Z = mc_transmission_ssrc 없음(다중화 안 함)
     tcs = {}
     for n, uri, pt, vpt in ((X, UX, 96, 98), (Y, UY, 97, 100), (Z, UZ, 96, 98)):
         a, v, c = sk[n]
         body = {"group_id": "g105", "session_id": n, "user_ip": IP, "user_port": a.getsockname()[1],
                 "user_video_port": v.getsockname()[1], "user_control_port": c.getsockname()[1], "user_uri": uri,
-                "user_tc_ssrc": tcu[n], "user_pt": pt, "user_video_pt": vpt}
+                "user_pt": pt, "user_video_pt": vpt}
+        if tcu[n]:
+            body["user_tc_ssrc"] = tcu[n]
         if n == X:
             body.update({"user_audio_ssrc": 0x5A000001, "user_video_ssrc": 0x5A000002, "user_video_fb": ["pli", "fir"]})
             jx = dict(body)
         r = req("PTT_JOIN", body, sesid="mcv-smoke::5")
         tcs[n] = pl(r).get("tc_ssrc", 0)
     first = {n: msgs(sk[n][2]) for n in (X, Y, Z)}
-    idle_ok = all(len(has(first[n], "MCV1", 0xF)) == 1 and has(first[n], "MCV1", 0xF)[0]["ssrc"] == tcu[n] for n in (X, Y, Z))
+    idle_ok = all(len(has(first[n], "MCV1", 0xF)) == 1 and has(first[n], "MCV1", 0xF)[0]["ssrc"] == tcu[n] for n in (X, Y))
     check("join → Transmission Idle, header SSRC = user_tc_ssrc (§4.3.3.1)", idle_ok, f"{[(n, len(first[n])) for n in first]}")
+    iz = has(first[Z], "MCV1", 0xF)
+    check("no user_tc_ssrc → header SSRC = CMP's own, not the tc_ssrc it told Z to use (§4.3.3.1 NOTE 5 · RFC 3550 §8.2)",
+          len(iz) == 1 and iz[0]["ssrc"] not in (0, tcs[Z]), f"{[hex(m['ssrc']) for m in iz]} tc_ssrc={hex(tcs[Z])}")
 
     # 송출 요청 → Granted · Notification · TRANSMITTERS
     events.clear()

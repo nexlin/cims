@@ -147,6 +147,7 @@ private:
         std::string id;
         PMcvMemberPort* unit = nullptr;  // PCmpServer 소유 — 그룹은 참조만
         unsigned int tcSsrc = 0;         // CMP 가 이 멤버에게서 기대하는 RTCP 헤더 SSRC (JOIN 응답 tc_ssrc)
+        unsigned int srvSsrc = 0;        // 멤버가 mc_transmission_ssrc 를 주지 않았을 때 CMP → 멤버 헤더 SSRC (tc_ssrc 와 다른 값)
         bool addressed = false;          // addMember 로 주소 등록됨
         McvMemberDecl decl;              // 마지막 선언 원본 (latch 와 무관하게 보존)
         // 채널별 현재 목적지 — 선언 값에서 시작해 nat 멤버는 형식 검사를 통과한 소스로 추종한다

@@ -519,6 +519,15 @@ static void testImplicitAndRecvOnly() {
         h.ctl.addParticipant("A", h.decl("sip:A@mcv"), h.now, true, &res);
         CHECK(res.granted && res.audioSsrc && res.videoSsrc, "another participant present → granted at JOIN");
         CHECK(h.count("A", MCV_APP_1, MCV1_TRANSMISSION_GRANTED) == 1, "Granted sent (§6.3.4.2.2 3b → §6.3.4.4.2)");
+        h.clear();
+        h.advance(1000);
+        CHECK(h.count("A", MCV_APP_1, MCV1_TRANSMISSION_GRANTED) == 1,
+              "Granted at JOIN ② precedes 200 OK — T4 retransmits it (§6.3.5.2.2 1)");
+        unsigned int as = 0, vs = 0;
+        CHECK(h.ctl.onMedia("A", h.now, as, vs) && as == res.audioSsrc, "initiator media forwarded");
+        h.clear();
+        h.advance(3000);
+        CHECK(h.count("A", MCV_APP_1, MCV1_TRANSMISSION_GRANTED) == 0, "first media stops T4");
     }
     {
         Harness h;

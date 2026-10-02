@@ -250,6 +250,9 @@ void PMcvControl::addParticipant(const std::string& id, const McvParticipantDecl
 
     // 암묵적 송출 요청 — SSRC 쌍은 허가 여부와 무관하게 지금 예약한다(§14.3.7·§14.3.8 «irrespective of mc_granted»).
     //   다른 참가자가 있으면 곧바로 허가, 없으면 첫 초대 참가자가 수락할 때 허가한다(§6.3.2.2 — 미디어 버퍼링 없음).
+    //   곧바로 허가한 Granted 도 T4/C4 로 첫 미디어까지 다시 보낸다 — 참가자 상태 머신은 200 OK 로 서는데(§6.3.5.2.2 1)
+    //   JOIN ② 는 200 OK 보다 먼저라 첫 Granted 가 200 OK 를 앞지른다. offer 에 mc_granted 가 없는 단말은 앞지른 Granted 를
+    //   버리면 T100 재요청밖에 남지 않는다(§6.3.4.4.2 2 의 «queued» 밖 재송신 — mcvideo.md §5.3.1 편차).
     if (implicitRequest) {
         unsigned int a = AllocSsrc(decl.preferredAudioSsrc), v = AllocSsrc(decl.preferredVideoSsrc);
         bool others = _parts.size() > 1;
@@ -269,7 +272,7 @@ void PMcvControl::addParticipant(const std::string& id, const McvParticipantDecl
         }
         if (room) {
             if (res) res->granted = true;
-            _grant(p, _effectivePrio(p, nullptr), false, nowMs, a, v);
+            _grant(p, _effectivePrio(p, nullptr), true, nowMs, a, v);
             return;
         }
         // 새 세션의 요청이라 자리가 차 있을 수 없지만(§14.3.5) — 차 있으면 예약을 풀고 보통 합류로 둔다.

@@ -197,6 +197,7 @@ unsigned int PMcvideoGroup::reserveMember(const std::string& sessionId, PMcvMemb
     p.id = sessionId;
     p.unit = unit;
     p.tcSsrc = PMcvControl::AllocSsrc();
+    p.srvSsrc = PMcvControl::AllocSsrc();
     _members[sessionId] = p;
     LOG_INFO("PMcvideoGroup", "[%s] reserve member=%s tc_ssrc=%08x", _groupId.c_str(), sessionId.c_str(), p.tcSsrc);
     return p.tcSsrc;
@@ -310,10 +311,12 @@ void PMcvideoGroup::_cryptoDropLog(const char* what, const Peer& peer) {
 
 void PMcvideoGroup::_releasePeer(Peer& peer) {
     PMcvControl::FreeSsrc(peer.tcSsrc);
+    PMcvControl::FreeSsrc(peer.srvSsrc);
     peer.tcCrypto.reset();
     peer.mediaCrypto.reset();
     peer.mediaCryptoVideo.reset();
     peer.tcSsrc = 0;
+    peer.srvSsrc = 0;
     peer.unit = nullptr;
 }
 
@@ -766,7 +769,9 @@ void PMcvideoGroup::_distribute(const Peer& sender, McvChannel ch, unsigned int 
 }
 
 // 전송 제어 메시지 송신 — 헤더 SSRC = 멤버가 SDP 에 광고한 mc_transmission_ssrc(user_tc_ssrc, TS 24.581 §4.3.3.1 «defined by the
-//   receiving entity»), 없으면 tc_ssrc. 목적지 = 제어 채널(nat 멤버는 latch 한 소스).
+//   receiving entity»). 없으면(다중화 안 함 — §4.3.3.1 NOTE 5 «any value») CMP 자기 SSRC srvSsrc — 멤버에게 «이 값으로
+//   보내라» 고 준 tc_ssrc 를 되쓰면 양방향이 같은 SSRC 라 RFC 3550 §8.2 충돌 검출에 걸린다. 목적지 = 제어 채널(nat 멤버는
+//   latch 한 소스).
 void PMcvideoGroup::_sendControl(const std::string& memberId, int app, int subtype, const std::vector<McvTlv>& fields) {
     auto it = _members.find(memberId);
     if (it == _members.end() || !it->second.addressed || !it->second.unit) return;
@@ -778,7 +783,7 @@ void PMcvideoGroup::_sendControl(const std::string& memberId, int app, int subty
         return;
     }
     char buf[512];
-    unsigned int hdrSsrc = p.decl.userTcSsrc ? p.decl.userTcSsrc : p.tcSsrc;
+    unsigned int hdrSsrc = p.decl.userTcSsrc ? p.decl.userTcSsrc : p.srvSsrc;
     int n = BuildTransmissionMessage(buf, sizeof(buf), app, (unsigned char)subtype, hdrSsrc, fields);
     if (n <= 0) {
         LOG_ERROR("PMcvideoGroup", "[%s] member=%s MCV%d %s encode failed", _groupId.c_str(), memberId.c_str(), app, name);

@@ -390,7 +390,8 @@ conference 이벤트 NOTIFY, 전송 제어 SRTCP 키(`tc_crypto` — E2E CSK 트
 (`ParsedTransmission`)·미디어 도착 표시·시각(ms) 틱, 출력 = 훅(`send(member, app, subtype, fields)` · `inactivity("T1"|"T5")` · `transmittersChanged()` ·
 `receptionStarted(receiver, sender)` — 영상 키프레임 요청 계기, B6).
 `PMcvideoGroup` 이 그룹 락 아래 부르고, `send` 를 `BuildTransmissionMessage` → 멤버 유닛 `sendTo(MCV_CH_CONTROL)` 로 잇는다(헤더 SSRC = 멤버
-`user_tc_ssrc`, 없으면 `tc_ssrc`). 단위시험 `tests/cmp_mcvideo_control_test.cpp`(S1-UNIT-CMP — `PMcvControl.cpp` + `PTransmissionCodec.cpp` 만 링크).
+`user_tc_ssrc`(TS 24.581 §4.3.3.1 — 받는 쪽이 정한 값), 없으면 멤버마다 따로 할당한 CMP 자기 SSRC — 다중화 안 함이라 «any value»(NOTE 5)지만
+멤버에게 «이 값으로 보내라» 고 준 `tc_ssrc` 를 되쓰면 양방향이 같은 SSRC 라 RFC 3550 §8.2 충돌 검출에 걸린다). 단위시험 `tests/cmp_mcvideo_control_test.cpp`(S1-UNIT-CMP — `PMcvControl.cpp` + `PTransmissionCodec.cpp` 만 링크).
 SSRC 할당기(`AllocSsrc`·`FreeSsrc`)는 `PMcvControl` 로 옮겨 그룹·시험이 같이 쓴다. 틱 = 100 ms(`mediaBufferLoop` 20 ms 클록에서 MCVideo 그룹이 있을 때만,
 그룹 수는 atomic) — 1 s 틱으로는 T2~T6(기본 1 s)의 오차가 너무 크다.
 
@@ -403,7 +404,9 @@ Idle / Reception accepted, C7 = 송출별 C11 의 합) · 참가자 수신(U —
 |---|---|
 | 참가자 추가(JOIN ② — 주소 등록) | 진행 중 송출이 없으면 Transmission Idle 1회(§6.3.5.2.2 2a·4b, Message Sequence Number +1), 있으면 'not permitted and Transmit Taken' + 송출마다 Media Transmission Notification(§6.3.7.2.2 2b) |
 | NAT 멤버의 제어 채널 latch(목적지가 처음 잡히거나 바뀜 — `PMcvideoGroup::_natLatch`) | 합류 알림을 다시 보낸다(`resendJoinState`): 'not permitted and Transmit Idle' 이면 Transmission Idle(Message Sequence Number +1), 'not permitted and Transmit Taken' 이면 송출마다 Media Transmission Notification(§6.3.5.2.2 2a·4 · §6.3.7.2.2 2b ii · §6.3.7.3.3 1). JOIN ② 는 200 OK 전이라 그때의 알림은 SDP(사설) 주소로 나가 NAT 뒤 단말에 닿지 않고, 단말은 호가 선 뒤 빈 RR 로 하향 경로를 연다. 허가·요청·암묵 요청 대기 중인 참가자는 스스로 보냈으니 두고, 소스 경합 대비 멤버당 2 s 에 한 번 |
-| JOIN `implicit_request`(새 prearranged 세션) | SSRC 쌍을 JOIN 때 예약(응답 `audio_ssrc`·`video_ssrc` — §14.3.7·§14.3.8 «irrespective of mc_granted»). 주소 등록된 다른 참가자가 있으면 곧바로 허가(응답 `granted` 1 — CSP 가 offer 의 `mc_granted` 가 있었으면 answer 에 싣는다), 없으면 첫 초대 참가자가 등록될 때 허가하고 Transmission Granted 를 보낸다(§6.3.2.2 «granted … when the first invited MCVideo client accepts» — 미디어 버퍼링 없음). 기다린 요청이라 T4/C4 로 첫 미디어까지 재송신하고, 기다리는 동안 온 명시 요청(단말 T100 재요청)은 같은 요청으로 본다. 기다림은 참여자 T100×C100(기본 3 s — 참여자는 그 뒤 'U: has no permission' 이라 늦은 Granted 를 버린다, §6.2.4.4.4)까지 — 넘으면 예약을 풀고 Transmission Idle. CSP 는 암묵 요청 개시의 200 OK 를 첫 초대 멤버의 200 OK 뒤에 보내므로(A10) 보통은 JOIN 때 곧바로 허가된다 |
+| JOIN `implicit_request`(새 prearranged 세션) | SSRC 쌍을 JOIN 때 예약(응답 `audio_ssrc`·`video_ssrc` — §14.3.7·§14.3.8 «irrespective of mc_granted»). 주소 등록된 다른 참가자가 있으면 곧바로 허가(응답 `granted` 1 — CSP 가 offer 의 `mc_granted` 가 있었으면 answer 에 싣는다) — 이 Granted 도
+T4/C4 로 첫 미디어까지 재송신한다(참가자 상태 머신은 200 OK 로 서는데(§6.3.5.2.2 1) JOIN ② 는 200 OK 보다 먼저라 첫 Granted 가 200 OK 를 앞지른다 —
+offer 에 `mc_granted` 가 없는 단말이 앞지른 것을 버려도 200 OK 뒤의 재송신을 받는다. §6.3.4.4.2 2 는 «queued» 요청에만 T4 를 정한다 — 편차), 없으면 첫 초대 참가자가 등록될 때 허가하고 Transmission Granted 를 보낸다(§6.3.2.2 «granted … when the first invited MCVideo client accepts» — 미디어 버퍼링 없음). 기다린 요청이라 T4/C4 로 첫 미디어까지 재송신하고, 기다리는 동안 온 명시 요청(단말 T100 재요청)은 같은 요청으로 본다. 기다림은 참여자 T100×C100(기본 3 s — 참여자는 그 뒤 'U: has no permission' 이라 늦은 Granted 를 버린다, §6.2.4.4.4)까지 — 넘으면 예약을 풀고 Transmission Idle. CSP 는 암묵 요청 개시의 200 OK 를 첫 초대 멤버의 200 OK 뒤에 보내므로(A10) 보통은 JOIN 때 곧바로 허가된다 |
 | Transmission Request (MCV0 0) | 수신 전용(`recv_only` — 그룹 문서 `<on-network-recvonly>`)이면 Rejected #5. G: Idle 에서 참가자 1명이면 #3(§6.3.4.3.3). Cx < 상한이면 허가(§6.3.4.4.7A·§6.3.4.4.2): SSRC 쌍 할당(선호 = offer `a=ssrc`) → 요청자 Granted(Transmission Priority·Audio/Video SSRC) · 다른 참가자 Media Transmission Notification(Transmitting User ID·SSRC 쌍·Message Sequence Number·Permission 1·Reception Mode 0/1). 상한이면 선점 판정 — 선점이면 가장 약한 송출에 Revoked #4 + 요청을 큐 맨 앞(§6.3.4.4.7). 단 큐에 다른 선점 요청이 이미 있으면 선점하지 않고 보통 요청으로 다룬다(§6.3.5.4.4 5) — queueing 협상이면 우선순위 자리에 대기, 아니면 #1). 아니면 queueing 협상 시 큐(Queue Position Info), 미협상이면 Rejected #1(§6.3.5.4.4). 큐 삽입·선점으로 자리가 밀린 다른 대기자(queueing 협상)에게 Queue Position Info 갱신(§6.3.5.2.2 3c iv). 이미 허가된 참가자의 재요청 = Granted 재송신(§6.3.4.4.8) |
 | 유효 우선순위(§4.1.1.4 local policy) | MCPTT floor 와 같은 서열(`PMcpttGroup::_preempts`) — ① tier(긴급 > 임박 > 일반, **CSP 지시로만** 바뀐다 — 요청의 Transmission Indicator 는 호 단위 표식이라 판정에 쓰지 않는다) ② chair ③ 수치 우선순위 = `members` prio, 요청의 Transmission Priority 는 `mc_priority` 를 협상했을 때만 min(요청, 협상 상한)(§6.3.5.4.4 1a). 선점 = 요청 서열 > 가장 약한 송출 서열 |
 | Transmission End Request (MCV2 0) | ack 비트면 Ack. permitted/pending revoke → 송출 끝: Transmission End Response · 분배 중지 · SSRC 반환 · 다른 참가자 Transmission End Notify(User ID + SSRC 쌍) · Cx−1 → 0 이면 G: Idle(큐 맨 앞이 있으면 그것을 허가, 없으면 Transmission Idle 전원 · T2/C2 · T1)(§6.3.4.4.6·§6.3.4.5.4). not permitted(큐 대기) → 큐에서 빼고 Idle 또는 Notification(§6.3.5.3.7·§6.3.5.4.5) |
@@ -417,7 +420,7 @@ Idle / Reception accepted, C7 = 송출별 C11 의 합) · 참가자 수신(U —
 | 참가자 제거(LEAVE) | 송출 중이면 송출 끝(End Notify 전원 · Cx−1 · Idle/큐), 큐에서 빼고, 수신 몫(C11·C7) 정리(§6.3.3 · §6.3.4.4.11 · §6.3.5.8.2) |
 
 **타이머** — T1(Inactivity — G: Idle 동안, 만료 = `TRANSMISSION_INACTIVITY{timer:"T1"}`, 해제는 CSP) · T2/C2(Idle 재송신) · T3(Revoke/서버 End Request 재송신 —
-포기 = 5회 뒤 서버에서 송출을 끝낸다, 규격은 구현 선택·연결 해제 권고) · T4/C4(큐에서 허가한 Granted·늦게 내린 암묵 허가의 재송신 — 첫 미디어에 정지) · T5(Reception Inactivity — Gr: Idle
+포기 = 5회 뒤 서버에서 송출을 끝낸다, 규격은 구현 선택·연결 해제 권고) · T4/C4(큐에서 허가한 Granted·암묵 허가의 재송신 — 첫 미디어에 정지) · T5(Reception Inactivity — Gr: Idle
 동안, 이벤트 `"T5"`) · T6/C6(Receive Media Response(Granted) 재송신 — ack 비트를 세워 보내고 Ack 에 정지) · T11(Stream Reception Idle — manual 에서 Notification 뒤
 받는 이 없이 지나면 그 송출에 서버 End Request #8, §6.3.4.4.13).
 
