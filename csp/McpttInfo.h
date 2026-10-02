@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cstring>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -214,6 +215,22 @@ inline std::string McBodyPart( const std::string &body, const std::string &bodyC
         p = next;
     }
     return "";
+}
+
+/** 초대 대상을 정원 안으로 (TS 24.379 §6.3.5.5) — iSlots(개시자를 뺀 자리)를 넘으면 필수 멤버(<on-network-required>)를
+ *  먼저 두고 나머지는 받은 순서대로 자른다. 잘랐으면 bCapped. iSlots < 0 = 상한 없음. */
+inline std::vector<std::string> McpttCapInvitees( const std::vector<std::string> &vecIn,
+                                                  const std::set<std::string> &setRequired, int iSlots,
+                                                  bool &bCapped ) {
+    bCapped = false;
+    if ( iSlots < 0 || (int)vecIn.size() <= iSlots ) return vecIn;
+    std::vector<std::string> vecOut;
+    for ( const auto &m : vecIn )
+        if ( (int)vecOut.size() < iSlots && setRequired.count( m ) ) vecOut.push_back( m );
+    for ( const auto &m : vecIn )
+        if ( (int)vecOut.size() < iSlots && !setRequired.count( m ) ) vecOut.push_back( m );
+    bCapped = true;
+    return vecOut;
 }
 
 /** 긴급 경보 MESSAGE 의 서비스 — McEmergencyAlertServiceOf. */

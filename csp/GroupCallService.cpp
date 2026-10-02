@@ -861,6 +861,21 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
         return false;
     }
 
+    // 그룹 문서 초기 처리 (TS 24.379 §6.3.5.2 5)a)) — on-network 를 끈 그룹(콘솔 — CSC 그룹 문서
+    // <on-network-disabled>)은
+    //   403 115. 멤버십(5)b))보다 먼저 본다. 개별 호·애드혹 합성 그룹은 그룹 문서가 없다.
+    if ( !clsGroup._onNetwork && clsGroup._groupType != "private" && !clsGroup._isAdhoc ) {
+        CLog::Print( LOG_INFO, "ProcessGroupCall: Group(%s) Caller(%s) on-network disabled → 403 (115)", pszGroupId,
+                     pszCallerInfo );
+        const std::vector<std::pair<std::string, std::string>> vecHdr = {
+            { "Warning", McpttWarning( 115, "group is disabled", gclsServiceMap.GetDomainByKind( "ptt" ) ) } };
+        gclsUserAgent.StopCall( pszCallId, SIP_FORBIDDEN, NULL, vecHdr );
+        if ( gclsCallDir.IsEnabled() && !( pclsRtp && pclsRtp->m_eDirection == E_RTP_RECV ) )
+            gclsCallDir.PttAttempt( pszGroupId, std::to_string( clsGroup._dbId ), pszCallerInfo, "failed", "denied",
+                                    "group_disabled", 403 );
+        return true;
+    }
+
     // 개시자 멤버십·청취 leg 판정.
     //   청취 leg = offer 가 a=recvonly (RFC 3264) — 관제사가 진행 중 그룹콜을 듣기만 하는 합류
     //   (dispatch_center.md §5.6, TS 24.379 ambient listening 자격 재사용). 인가 2단 = 자격
@@ -940,6 +955,40 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
         }
     }
 
+    // N6 — 동시 MCPTT 그룹 호 상한(참여 기능 §10.1.1.3.1.1 5) · chat §10.1.2.3.1.1 5) · 애드혹 §17.3.2.1.1 6)): 이
+    // 사용자가
+    //   이미 N6 개 그룹 호에 있으면 486 103. N6 = 사용자마다(결정 D2 — 관제 = 역할 배정이 있는 회선, CSC user profile
+    //   <MaxSimultaneousCallsN6> 와 같은 판정·값). 이 그룹에 이미 있는 leg(재합류·re-INVITE)은 새 호가 아니다. 인가된
+    //   긴급·임박 요청은 상한 예외다(NOTE 3 — local policy).
+    if ( clsGroup._groupType != "private" ) {
+        CspRole clsCallerRole;
+        const bool bDispatch = gclsRoleMap.SelectForLine( pszCallerInfo, clsCallerRole );
+        const int iN6 = gclsCspServiceConfig.GetMaxCallsN6( bDispatch );
+        int iCalls;
+        {
+            std::unique_lock<std::recursive_mutex> lock( m_mutex );
+            iCalls = ActiveGroupCallsOfLocked( pszCallerInfo, pszGroupId );
+        }
+        if ( iN6 > 0 && iCalls >= iN6 ) {
+            std::string strWhy;
+            if ( iCondition >= 1 && IsConditionInitAuthorized( clsGroup, pszCallerInfo, strWhy ) ) {
+                CLog::Print( LOG_INFO, "ProcessGroupCall: Group(%s) Caller(%s) calls=%d ≥ N6=%d — 긴급·임박이라 예외",
+                             pszGroupId, pszCallerInfo, iCalls, iN6 );
+            } else {
+                CLog::Print( LOG_INFO, "ProcessGroupCall: Group(%s) Caller(%s) calls=%d ≥ N6=%d%s → 486 (103)",
+                             pszGroupId, pszCallerInfo, iCalls, iN6, bDispatch ? " [dispatch]" : "" );
+                const std::vector<std::pair<std::string, std::string>> vecHdr = {
+                    { "Warning", McpttWarning( 103, "maximum simultaneous MCPTT group calls reached",
+                                               gclsServiceMap.GetDomainByKind( "ptt" ) ) } };
+                gclsUserAgent.StopCall( pszCallId, SIP_BUSY_HERE, NULL, vecHdr );
+                if ( gclsCallDir.IsEnabled() && !( pclsRtp && pclsRtp->m_eDirection == E_RTP_RECV ) )
+                    gclsCallDir.PttAttempt( pszGroupId, std::to_string( clsGroup._dbId ), pszCallerInfo, "failed",
+                                            "denied", "max_calls_exceeded", SIP_BUSY_HERE );
+                return true;
+            }
+        }
+    }
+
     // 미디어 SRTP 협상 (SDES — media_security.md §4·§5): 접속서비스 정책 × 개시자 offer crypto.
     //   실패는 488 — required 인데 crypto 부재, off/optional 인데 성립 불가한 SAVP offer.
     std::string strCallerSuite, strCallerUeKey, strCallerSrvKey;
@@ -1012,6 +1061,29 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
             if ( gclsCallDir.IsEnabled() )
                 gclsCallDir.PttAttempt( pszGroupId, std::to_string( clsGroup._dbId ), pszCallerInfo, "failed", "denied",
                                         "not_affiliated", SIP_FORBIDDEN );
+            return true;
+        }
+    }
+    // 정원 (§10.1.1.4.2 15)d) · chat §10.1.2.4.1.1 12) · 재합류 §10.1.1.4.5.1 10)) — 진행 중 세션의 참가 leg(청취 제외,
+    //   확립·초대 중)이 <on-network-max-participant-count>(그룹 max_members, 0 = 상한 없음)에 찼으면 486 122. 이미 이
+    //   세션에 있는 사용자의 재합류는 자리를 새로 차지하지 않는다. 청취 leg(관제 — dispatch_center.md §5.6)은 정원에
+    //   세지도 막지도 않는다. 우선순위로 기존 참가자를 내보내는 선택(15)d)i) local policy)은 두지 않는다.
+    if ( !bListen && clsGroup._maxMembers > 0 ) {
+        bool bAlreadyIn = false;
+        int iLegs;
+        {
+            std::unique_lock<std::recursive_mutex> lock( m_mutex );
+            iLegs = ParticipantLegsLocked( pszGroupId, pszCallerInfo, &bAlreadyIn );
+        }
+        if ( !bAlreadyIn && iLegs > 0 && iLegs >= clsGroup._maxMembers ) {
+            CLog::Print( LOG_INFO, "ProcessGroupCall: Group(%s) Caller(%s) participants=%d ≥ max=%d → 486 (122)",
+                         pszGroupId, pszCallerInfo, iLegs, clsGroup._maxMembers );
+            const std::vector<std::pair<std::string, std::string>> vecHdr = {
+                { "Warning", McpttWarning( 122, "too many participants", gclsServiceMap.GetDomainByKind( "ptt" ) ) } };
+            gclsUserAgent.StopCall( pszCallId, SIP_BUSY_HERE, NULL, vecHdr );
+            if ( gclsCallDir.IsEnabled() )
+                gclsCallDir.PttAttempt( pszGroupId, std::to_string( clsGroup._dbId ), pszCallerInfo, "failed", "denied",
+                                        "too_many_participants", SIP_BUSY_HERE );
             return true;
         }
     }
@@ -1191,6 +1263,9 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
     //   서버 미디어 주소를 받지 못했다(peer 없음 → 무음, 08-04 실측). 멤버 포트 확보 성공을
     //   기준으로 응답한다 (floor 라인은 포트 0 이면 SDP 에서 자연 생략).
     int iCallerLocalAudio = 0;
+    std::vector<std::string>
+        vecNewSessionInvite;  // 새 세션의 초대 대상(정원 안 — §6.3.5.5) — 아래 3. 이 같은 목록을 쓴다
+    bool bNewSessionInviteSet = false;
     if ( GetOrAllocMemberPort( pszGroupId, pszCallerInfo, iCallerLocalAudio ) ) {
         // PTT 발신 Dialog 도 mcptt realm 사용 (200 OK 의 From/To/Contact 도메인)
         {
@@ -1534,6 +1609,27 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
                 if ( pUser->_onNetworkRequired ) setGateRequired.insert( pUser->_id );  // 필수 = affiliated·초대 대상
             }
         }
+        // 정원 (§6.3.5.5) — 개시자를 뺀 자리만큼만 초대한다(필수 멤버 먼저). 다 초대하지 못하면 개시자 200 OK 에
+        // Warning 122
+        //   (§10.1.1.4.2 «if all members were not invited because … exceeded the <on-network-max-participant-count>»).
+        std::string strCapWarning;
+        if ( !vecGateInvite.empty() && clsGroup._maxMembers > 0 ) {
+            bool bCapped = false;
+            vecGateInvite = CapInvitees( clsGroup, vecGateInvite, clsGroup._maxMembers - 1, bCapped );
+            if ( bCapped ) {
+                const std::set<std::string> setKept( vecGateInvite.begin(), vecGateInvite.end() );
+                for ( auto it = setGateRequired.begin(); it != setGateRequired.end(); )
+                    it = setKept.count( *it ) ? std::next( it ) : setGateRequired.erase( it );
+                strCapWarning = McpttWarning( 122, "too many participants", gclsServiceMap.GetDomainByKind( "ptt" ) );
+                CLog::Print( LOG_INFO,
+                             "ProcessGroupCall: Group(%s) Caller(%s) — 정원 %d: 초대 %zu 명으로 줄임 (Warning 122)",
+                             pszGroupId, pszCallerInfo, clsGroup._maxMembers, vecGateInvite.size() );
+            }
+        }
+        if ( bNewSession && !bListen && clsGroup._groupType != "chat" ) {
+            vecNewSessionInvite = vecGateInvite;
+            bNewSessionInviteSet = true;
+        }
         int iGateMin = bPrivateCall ? 1 : std::max( 0, clsGroup._minNumberToStart );
         // 멤버 확인 전 수락(최소 0) = 멤버 쪽 참여 기능의 자동 응답(183 Unconfirmed, §6.3.2.2.5.2)을 받아 미디어
         // 버퍼링으로
@@ -1554,6 +1650,7 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
             clsGate.bProceed = clsGroup._ackAction == "proceed";
             clsGate.bPrivate = bPrivateCall;
             clsGate.fnAnswer = fnAnswer;
+            if ( !strCapWarning.empty() ) clsGate.vecWarnings.push_back( strCapWarning );
             if ( !setGateRequired.empty() ) {  // §6.3.3.3 — TNG1 은 초대를 내보내기 전에 켠다
                 clsGate.bTng1 = true;
                 clsGate.tTng1End =
@@ -1594,7 +1691,7 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
         }
 
         // 새 세션 개시인데 게이트가 없다 = 초대할 멤버가 없거나 최소 0 + 미디어 버퍼링 — 후자는 멤버 확인 전 수락이다
-        const int iAnswered = fnAnswer( "", !vecGateInvite.empty() );
+        const int iAnswered = fnAnswer( strCapWarning, !vecGateInvite.empty() );
         if ( iAnswered < 0 ) return false;
         bClaimedSession = false;  // 개시자 leg 확립으로 선점을 확정했다(fnAnswer)
         if ( iAnswered > 0 ) return true;
@@ -1603,16 +1700,39 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
         return false;
     }
 
-    // 3. 나머지 멤버들에게 INVITE (affiliation 요구 그룹은 affiliate 된 멤버만)
-    for ( const auto &pUser : clsGroup._pusers ) {
-        if ( !pUser ) continue;
-        std::string strMember = pUser->_id;
-        if ( strMember == pszCallerInfo ) continue;
-        if ( clsGroup._requireAffiliation && gclsDbManager.IsConnected() &&
-             !gclsDbManager.IsAffiliated( pszGroupId, strMember ) ) {
-            CLog::Print( LOG_INFO, "ProcessGroupCall: member %s not affiliated to %s — skip invite", strMember.c_str(),
-                         pszGroupId );
-            continue;
+    // 3. 나머지 멤버들에게 INVITE (affiliation 요구 그룹은 affiliate 된 멤버만) — 새 세션은 위에서 정원 안으로 고른
+    // 목록,
+    //   그 밖은 정원(§6.3.5.5 — 세션의 참가 leg 수)에 닿으면 멈춘다.
+    std::vector<std::string> vecRest;
+    if ( bNewSessionInviteSet ) {
+        vecRest = vecNewSessionInvite;
+    } else {
+        for ( const auto &pUser : clsGroup._pusers ) {
+            if ( !pUser ) continue;
+            const std::string &strMember = pUser->_id;
+            if ( strMember == pszCallerInfo ) continue;
+            if ( clsGroup._requireAffiliation && gclsDbManager.IsConnected() &&
+                 !gclsDbManager.IsAffiliated( pszGroupId, strMember ) ) {
+                CLog::Print( LOG_INFO, "ProcessGroupCall: member %s not affiliated to %s — skip invite",
+                             strMember.c_str(), pszGroupId );
+                continue;
+            }
+            vecRest.push_back( strMember );
+        }
+    }
+    for ( const auto &strMember : vecRest ) {
+        if ( clsGroup._maxMembers > 0 ) {
+            bool bIn = false;
+            int iLegs;
+            {
+                std::unique_lock<std::recursive_mutex> lock( m_mutex );
+                iLegs = ParticipantLegsLocked( pszGroupId, strMember, &bIn );
+            }
+            if ( !bIn && iLegs >= clsGroup._maxMembers ) {
+                CLog::Print( LOG_INFO, "ProcessGroupCall: Group(%s) 정원 %d — %s 이후 초대하지 않음", pszGroupId,
+                             clsGroup._maxMembers, strMember.c_str() );
+                break;
+            }
         }
         InviteMember( strMember.c_str(), pszGroupId );
     }
@@ -3517,6 +3637,41 @@ bool CGroupCallService::OnCallTerminated( const std::string &strCallId ) {
 // ─────────────────────────────────────────────────────────
 // Conference Event Package (RFC 4575) — in-dialog NOTIFY
 // ─────────────────────────────────────────────────────────
+
+int CGroupCallService::ActiveGroupCallsOfLocked( const std::string &strUser, const std::string &strExceptGroup ) const {
+    std::set<std::string> setGroups;
+    for ( const auto &kv : m_mapCallSession ) {
+        const CallSessionInfo &c = kv.second;
+        if ( c.strMemberId != strUser || c.strGroupId == strExceptGroup ) continue;
+        if ( c.strGroupId.rfind( "priv-", 0 ) == 0 ) continue;  // 개별 호는 그룹 호가 아니다
+        if ( c.bEstablished || c.bInitiator ) setGroups.insert( c.strGroupId );
+    }
+    return (int)setGroups.size();
+}
+
+int CGroupCallService::ParticipantLegsLocked( const std::string &strGroupId, const std::string &strUser,
+                                              bool *pbUserIn ) const {
+    int n = 0;
+    for ( const auto &kv : m_mapCallSession ) {
+        const CallSessionInfo &c = kv.second;
+        if ( c.strGroupId != strGroupId || c.bListenOnly ) continue;
+        if ( !strUser.empty() && c.strMemberId == strUser ) {
+            if ( pbUserIn ) *pbUserIn = true;
+            continue;
+        }
+        ++n;
+    }
+    return n;
+}
+
+std::vector<std::string> CGroupCallService::CapInvitees( const CspPttGroup &clsGroup,
+                                                         const std::vector<std::string> &vecIn, int iSlots,
+                                                         bool &bCapped ) {
+    std::set<std::string> setRequired;
+    for ( const auto &p : clsGroup._pusers )
+        if ( p && p->_onNetworkRequired ) setRequired.insert( p->_id );
+    return McpttCapInvitees( vecIn, setRequired, iSlots, bCapped );
+}
 
 bool CGroupCallService::HasActiveLeg( const std::string &strGroupId ) const {
     // 개시자 응답 대기 중인 세션은 살아 있다 — 개시자 leg 이 아직 맵에 없어도 멤버 이탈이 세션을 해제하지 않게

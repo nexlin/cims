@@ -693,6 +693,12 @@ void CMcVideoCallService::OnIncomingInvite( const char *pszCallId, const char *p
                          strFrom.c_str(), strGroupId.c_str() );
             return reject( SIP_NOT_FOUND, 113, kMcVideoWarn113, "denied", "group_not_found" );
         }
+        // 5)a) 그룹 문서 <on-network-disabled>(콘솔 on-network 끔 — CSC 그룹 문서가 그 요소를 낸다) → 403 115
+        if ( !clsGroup._onNetwork ) {
+            CLog::Print( LOG_INFO, "MCVIDEO: INVITE from(%s) group(%s) — on-network 꺼짐 → 403 115", strFrom.c_str(),
+                         strGroupId.c_str() );
+            return reject( SIP_FORBIDDEN, 115, kMcVideoWarn115, "denied", "group_disabled" );
+        }
         if ( !IsMember( clsGroup, strFrom, &iPrio ) )
             return reject( SIP_FORBIDDEN, 116, kMcVideoWarn116, "denied", "not_member" );
         if ( !clsMvi.strSessionType.empty() && clsMvi.strSessionType != clsGroup._mcvideoAttrs.SessionType() ) {

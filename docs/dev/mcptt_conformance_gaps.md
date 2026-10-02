@@ -44,7 +44,7 @@ PTT(MCPTT) 서비스 구현을 3GPP 규격 원문과 대조해 **규격과 다�
 |---|---|---|---|---|---|
 | 등록·서비스 인가 (REG) | 4 | — | 3 | — | 1 |
 | 제휴 (AFF) | 11 | 6 | 4 | 1 | — |
-| 그룹 호 — 서버 (GCS) | 22 | 9 | 7 | 5 | 1 |
+| 그룹 호 — 서버 (GCS) | 19 | 7 | 6 | 5 | 1 |
 | 그룹 호 — 단말 (GCC) | 9 | — | 7 | — | 2 |
 | 개별 호 (PRV) | 9 | 4 | 4 | 1 | — |
 | 애드혹 그룹 호 (ADH) | 9 | 4 | 3 | 1 | 1 |
@@ -55,9 +55,9 @@ PTT(MCPTT) 서비스 구현을 3GPP 규격 원문과 대조해 **규격과 다�
 | 그룹 문서·GMS (GMS) | 13 | — | 12 | 1 | — |
 | 설정 문서·CMS (CMS) | 7 | — | 4 | 2 | 1 |
 | 신원 관리 (IDM) | 1 | 1 | — | — | — |
-| **계** | **119** | **28** | **57** | **25** | **9** |
+| **계** | **116** | **26** | **56** | **25** | **9** |
 
-확인 수준 — ◎ 63 · ○ 44 · △ 12.
+확인 수준 — ◎ 60 · ○ 44 · △ 12.
 
 읽는 순서 — §2(먼저 볼 것) → §3(영역별 전체) → §4(미구현 목록에 빠진 기능) → §5(문서 정정) → §6(묶음과 순서).
 
@@ -126,8 +126,6 @@ CSP 는 참여 기능과 제어 기능을 겸한다.
 | GCS-2 | A | CSP | §6.3.8.1 2) — chat 그룹 호도 참가자가 1명 이하면 해제 (shall) | 잔여 1 leg 해제는 on-demand(편성·애드혹)만 — `csp/GroupCallService.cpp:3327-3334`. chat 은 마지막 leg 뒤에도 CMP 그룹·세션을 남긴다 | 혼자 남은 단말이 세션에 묶인다(발언 요청은 Deny #3) | ◎ |
 | GCS-3 | A | CSP | §10.1.1.4.2 — 멤버 초대는 14) «호가 진행 중이 아닐 때» 만. 15) 진행 중 합류는 r) 에서 끝난다 | 합류 수락 뒤 그대로 fan-out 루프로 내려가 leg 이 없는 제휴 멤버 전원에 INVITE — `csp/GroupCallService.cpp:1557-1579` (`fnAnswer` 가 0 을 돌려주는 일반 합류) | 스스로 나갔거나 거절한 멤버가 남의 합류 때마다 자동 응답 INVITE 로 다시 끌려온다. ptt_flows.md B6 «서버는 개시 시 fan-out 만» 과 다르다 | ◎ |
 | GCS-4 | A | CSP | §10.1.1.4.6 — 새로 제휴했거나 통화권에 돌아온 단말을 진행 중 그룹 호에 초대 (shall) | 제휴 PUBLISH 경로는 기록·NOTIFY 만 한다. 주석은 «스윕이 한다» 고 적었지만(`csp/CscfModule.cpp:1678`) 스윕은 chat 이 아니면 초대 전에 돌아간다 — `csp/GroupCallService.cpp:2969-2972` | 호 도중 로그인·제휴한 규격 단말은 그 호에 못 들어간다. 우리 앱은 conference NOTIFY 를 보고 스스로 합류해 가려진다. ptt_flows.md 는 «late entry 는 UE 주도 = 규격 모델» 이라 적었으나 규격은 서버 초대다 | ◎ |
-| GCS-5 | A | CSP | §6.3.5.5 — 초대는 `<on-network-max-participant-count>` 까지(필수 멤버 우선). §10.1.1.4.2 15)d) — 정원이 찼으면 486 + `122 too many participants` (shall) | `_maxMembers` 는 읽기만 하고 MCPTT 호에서 쓰지 않는다(`csp/GroupCallService.cpp:2743`·`4021` — 지문·이력). 집행은 MCVideo 만. 그룹 문서 쪽 값 문제는 GMS-11 | 그룹 문서가 알린 정원과 무관하게 전원이 들어온다 | ◎ |
-| GCS-6 | B | CSP·CSC | §10.1.1.3.1.1 5) · §17.3.2.1.1 6) — `<MaxSimultaneousCallsN6>` 를 넘으면 486 + `103 maximum simultaneous MCPTT group calls reached` (shall) | N6·103 검사는 MCVideo 에만 있다(`csp/McVideoCallService.cpp:638-644`). CSC 는 MCPTT user profile 에 N6 = 1 을 싣는다(`csc/src/services/mcptt.py:1713`) | 문서는 «동시 1호», 서버는 무제한(다중 채널 동시 참여가 전제). 문서를 따르는 규격 단말은 둘째 그룹 호를 스스로 막는다 | ◎ |
 | GCS-7 | B | CSP | §6.3.5.2 2) — 그룹이 없으면 404 + `113 group document does not exist` (shall) | Warning 없는 403 — `csp/ModuleDispatcher.cpp:1090-1097` (`RejectPtt`) | 단말이 «권한 없음» 과 «그룹 없음(삭제·오설정)» 을 가르지 못한다 | ◎ |
 | GCS-8 | B | CSP | §6.3.5.2 5)b) — 비멤버 403 + `116 user is not part of the MCPTT group`. 재합류는 `121` (§10.1.1.4.5.1 6)) | Warning 없는 403 — `csp/GroupCallService.cpp:873-880` | 403 의 사유(비멤버·미제휴 120·긴급 미인가)를 가를 수 없다. SDK 가 Warning 을 올려도(handoff §14 K1) 116 은 오지 않는다 | ◎ |
 | GCS-9 | B | CSP | §6.3.5.2 5)c)·d) — `<session-type>` 이 그룹 종류와 다르면 404 + `117`(편성 그룹)·`118`(chat 그룹) (shall) | session-type 은 `private` 분기에만 쓴다. 그룹 경로는 값을 넘기지 않는다 — `csp/ModuleDispatcher.cpp:1053-1069` | 그룹 문서가 낡은 단말을 바로잡을 기회가 없다. 짝 = GCC-4(SDK 는 늘 prearranged) | ○ |
@@ -140,7 +138,6 @@ CSP 는 참여 기능과 제어 기능을 겸한다.
 | GCS-16 | B | CSP | §6.3.3.1.2 9)·10) — 받은 INVITE 의 Answer-Mode·Priv-Answer-Mode 를 그대로 옮긴다 (shall) | 초대 INVITE 에 무조건 `Answer-Mode: Auto` — `csp/GroupCallService.cpp:2506-2507` (개별 호 착신도 이 함수). 받은 헤더를 읽는 코드가 없다 | 헤더를 따르는 규격 단말은 개별 호를 벨 없이 자동 응답한다. 짝 = PRV-4 | ◎ |
 | GCS-17 | A | CSP | §10.1.1.4.1.1 4)b) — `<mcptt-calling-group-id>` = 그룹 ID | `"tel:" + 그룹 id` — `csp/GroupCallService.cpp:3975`. MCPTT group ID 규칙은 숫자뿐이면 `tel:+<id>`(`csp/McpttInfo.h:400-408`, CSC `_group_uri`) | 숫자뿐인 그룹 ID 는 INVITE 의 그룹 ID 와 그룹 문서·제휴 문서의 ID 가 달라진다(`g001` 형은 무관) | ○ |
 | GCS-18 | A | CSP·psip | §6.3.3.1.1 2) — 음성 스트림의 미디어 속성은 받은 offer 의 것 | 멤버 offer·개시자 answer 의 fmtp·ptime 이 서버 코덱 표 값(AMR-WB `octet-align=1`)이다 — `csp/GroupCallService.cpp:2407-2409`. 개시 게이트는 코덱 이름만 본다(`:885-893`) | 개시자가 대역 효율 모드나 다른 mode-set 으로 offer 하면 선언과 실제 페이로드가 어긋난다 — CMP 의 leg 별 형식 변환 유무를 확인해야 확정 | △ |
-| GCS-19 | A | CSP·CSC | §6.3.5.2 5)a) — 그룹 문서에 `<on-network-disabled>` 가 있으면 403 + `115 group is disabled` (shall) | DB `on_network` 값이 그룹 문서에도(산출 없음) 호 제어에도(`_onNetwork` 는 지문·이력만 — `csp/GroupCallService.cpp:2742`·`4020`) 닿지 않는다 | 콘솔에서 on-network 를 꺼도 그룹 호가 된다 | ◎ |
 | GCS-20 | D | CSP | §10.1.1.4.2 1) — 자원 부족은 500(+Retry-After) | CMP 포트 확보 실패·세션 시간 창 밖이 모두 Warning 없는 403 — `csp/GroupCallService.cpp:1069-1085`·`:1562-1565` | 일시적 문제를 단말이 «금지» 로 읽어 재시도하지 않는다 | ○ |
 | GCS-21 | C | CSP | §6.3.8.1 2) — 참가자 1명 이하면 해제 | 초대 대상이 0 이어도(멤버 미등록·미제휴) 곧바로 200 — `csp/GroupCallService.cpp:1557-1558`. «잔여 1 leg» 판정은 leg 이 끝날 때만 돈다 | 혼자 연 호가 T4 까지 남는다(그동안 Deny #3) | △ |
 | GCS-22 | A | CSP | §10.1.1.4.4.3 — 제휴 해제 등으로 단말을 세션에서 내보낼 때 BYE | 해제 PUBLISH 는 DB 삭제·NOTIFY 만 한다(`csp/CscfModule.cpp:1798-1802`·`:1934-1948`). `CheckMemberState` 는 멤버십만 본다 | 제휴를 해제한 단말이 그 호에 계속 남아 미디어를 받는다. ptt_flows.md 는 «de-affiliate 시 이탈» 이라 적었다 | ○ |
@@ -325,7 +322,7 @@ CSP 는 참여 기능과 제어 기능을 겸한다.
 | 7 | **SDK 요청 규격화** — REGISTER Contact 태그, INVITE 헤더·Request-URI(PSI)·`<mcptt-client-id>`·session-type, 개별 호 resource-lists, 재합류 세션 식별자, conference·xcap-diff SUBSCRIBE. 서버가 양쪽을 받는 전환기를 먼저 둔다(PRV-1) — 서버 쪽 검사(GCS-9·GCS-10)는 SDK 뒤 | REG-1 · GCC-1~GCC-4 · GCC-7 · GCC-8 · PRV-1 · ADH-8 · GMS-16 · SDP-1 | .45 SDK·CSP |
 | 8 | **제휴를 클라이언트 단위로** — 행 키 통일, 클라이언트 단위 해제·판정, 암묵 제휴 취소. handoff §14 K3·S2 와 한 묶음 | AFF-2~AFF-8 · AFF-12 · EMG-3 | .45 CSP·SDK |
 | 9 | **호 모델 결정** — chat 그룹(초대 없이 합류·1명 이하 해제)과 편성 그룹의 재초대·late call entry·제휴 해제 시 이탈. 규격대로 바꿀지, 편차로 남기고 사유를 적을지 정한다 | GCS-1~GCS-4 · GCS-22 · AFF-11 | 결정 → .45 CSP |
-| 10 | **그룹 문서 집행** — 정원·on-network-disabled·수신 전용·N6 | GCS-5 · GCS-6 · GCS-19 · FCS-14 | .45 CSP·CMP·CSC |
+| 10 | **그룹 문서 집행** — 수신 전용 | FCS-14 | .45 CSP·CMP·CSC |
 | 11 | **XCAP 규격 주소·절차** — global tree·문서 이름·교체 PUT·오류 형식·구독 본문·etag | GMS-1~GMS-6 · GMS-14~GMS-17 · CMS-1 · CMS-2 · CMS-9 | .45 CSC·CSP·SDK |
 | 12 | **발언권 메시지 형식** — MCPTT ID·Audio SSRC·Indicator·dual floor·Location·Revoke Request, SDP `mc_floor_ssrc`·`mc_priority` | FCS-5~FCS-7 · FCS-10~FCS-16 · SDP-2 · SDP-3 | .45 CMP·CSP·SDK |
 

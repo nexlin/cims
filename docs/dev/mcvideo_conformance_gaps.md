@@ -44,7 +44,7 @@ MCPTT 쪽 같은 뿌리의 결함은 [mcptt_conformance_gaps.md](mcptt_conforman
 |---|---|---|---|---|---|
 | 등록·서비스 인가 (VREG) | 4 | — | 1 | 2 | 1 |
 | 제휴 (VAFF) | 8 | 1 | 1 | 6 | — |
-| 그룹 호 — 서버 (VGC) | 12 | 1 | 1 | 9 | 1 |
+| 그룹 호 — 서버 (VGC) | 11 | — | 1 | 9 | 1 |
 | 그룹 호 — 단말 (VGU) | 6 | — | — | 2 | 4 |
 | 개별·그 밖의 호 (VPRV) | 1 | — | — | — | 1 |
 | 송출 제어 — 서버 (TCS) | 11 | — | — | 5 | 6 |
@@ -54,9 +54,9 @@ MCPTT 쪽 같은 뿌리의 결함은 [mcptt_conformance_gaps.md](mcptt_conforman
 | SDP (VSDP) | 3 | — | — | 3 | — |
 | 그룹 문서 (VGMS) | 2 | — | 1 | — | 1 |
 | 설정 문서·CMS (VCMS) | 3 | — | 1 | 1 | 1 |
-| **계** | **58** | **3** | **5** | **30** | **20** |
+| **계** | **57** | **2** | **5** | **30** | **20** |
 
-확인 수준 — ◎ 42 · ○ 8 · △ 8.
+확인 수준 — ◎ 41 · ○ 8 · △ 8.
 
 읽는 순서 — §2(먼저 볼 것) → §3(영역별 전체) → §4(미구현 목록에 빠진 기능) → §5(문서 정정) → §6(묶음과 순서).
 
@@ -70,7 +70,6 @@ MCPTT 쪽 같은 뿌리의 결함은 [mcptt_conformance_gaps.md](mcptt_conforman
 |---|---|
 | RCS-1 | NAT 뒤 단말이 송출 중인 영상 호에 들어가면 Media Transmission Notification 을 받지 못한다 — CMP 가 JOIN ② 때 SDP 사설 주소로 한 번만 보내고, latch 뒤 다시 알리지 않는다. 수동 수신이라 [보기] 를 못 하고, 받는 이가 없어 T11 이 10 s 뒤 그 송출을 끊는다(△ — 실측으로 확정) |
 | VAFF-1 | 제휴 `Expires: 0` 이 그 클라이언트가 아니라 사용자의 모든 클라이언트 제휴를 지운다 — 같은 MCVideo ID 의 다른 단말이 prearranged 초대에서 빠진다(MCPTT AFF-2 와 같은 코드) |
-| VGC-3 | on-network 를 끈 그룹에서도 MCVideo 호가 선다 — 403 `115 group is disabled` 판정이 없다(MCPTT GCS-19 의 MCVideo 경로) |
 
 **규격 단말·서버와 붙이면 막히는 것**
 
@@ -121,7 +120,6 @@ MCPTT 쪽 같은 뿌리의 결함은 [mcptt_conformance_gaps.md](mcptt_conforman
 | # | 급 | 대상 | 규격 | CIMS 지금 | 영향 | 확인 |
 |---|---|---|---|---|---|---|
 | VGC-2 | B | CSP | §9.2.1.4.6 — 새로 제휴했거나 돌아온 클라이언트를 진행 중 prearranged 호에 초대(late call entry) (shall) | MCVideo 제휴 PUBLISH(`csp/CscfModule.cpp:2060-2087`)·설정 그룹 암묵 제휴(`:873-883`) 어디에도 진행 중 세션 초대가 없다. 팬아웃은 새 세션 개시 때 한 번(`csp/McVideoCallService.cpp:786-815`) | 개시 뒤에 제휴·재등록한 멤버는 그 호를 받지 못한다 — 세션 식별자를 모르면 재합류도 못 한다(MCPTT GCS-4 의 MCVideo 경로) | ◎ |
-| VGC-3 | A | CSP·CSC | §6.3.5.2 5)a) — 그룹 문서에 `<on-network-disabled>` 가 있으면 403 + `115 group is disabled` (shall) | MCVideo 개시·합류 검사는 113·116·117/118 만 한다(`csp/McVideoCallService.cpp:688-700`). DB `on_network` 는 적재만 한다(`csp/DbManager.cpp:621`). 그룹 문서에도 요소가 없다 | 콘솔에서 on-network 를 꺼도 영상 호가 선다(MCPTT GCS-19 와 같은 결 — MCVideo 경로는 따로 고쳐야 한다) | ◎ |
 | VGC-4 | C | CSP | §9.2.1.4.2 14)j) — 진행 중 prearranged 호 합류의 200 OK 에 Warning `123 MCVideo session already exists` | 합류 200 에 Warning 이 없고(`csp/McVideoCallService.cpp:358-371`) 문구 상수도 없다(`csp/McVideoInfo.h:298-313`) | 단말이 «새 호» 와 «진행 중 호 합류» 를 가르지 못한다 | ◎ |
 | VGC-5 | C | CSP | §9.2.1.4.2(첫 2xx·TNG1 분기의 «122» 단계) — 정원 때문에 일부만 초대했으면 개시자 200 OK 에 Warning `122 too many participants` | 정원 − 1 명까지만 초대하고(`csp/McVideoCallService.cpp:792-798`) 개시자 200 에 Warning 을 싣지 않는다(`_ResolvePendingInitiator` → `_AcceptLeg` `:386-406`) | 개시자는 그룹 일부만 초대된 줄 모른다 | ◎ |
 | VGC-6 | C | CSP | §6.3.3.2.3.2 9)·10) — 제어 기능 200 OK 의 Supported 에 `norefersub`·`explicitsub`·`nosub` | `Supported: tdialog` 만 싣는다(`csp/McVideoCallService.cpp:368`, 골든 04) | 규격 단말의 REFER·구독 협상 판단(원격 송출 등 후속 절차)이 어긋난다 | ◎ |
@@ -247,7 +245,7 @@ MCPTT 쪽 같은 뿌리의 결함은 [mcptt_conformance_gaps.md](mcptt_conforman
 | 1 | **헤더·fmtp 한두 줄** — Warning 123·122, Supported 옵션 태그, 초대 offer `mc_queueing`, 해제 200 Expires, 현장 앱 `queueing` 켬 | VGC-4 · VGC-5 · VGC-6 · VGC-7(Supported 몫) · VSDP-4 · VAFF-3 · VSDP-3 | .45 CSP · 현장 앱 |
 | 3 | **NAT 합류 알림** — latch 뒤(또는 첫 RR 수신 때) 현재 상태(Idle·Notification)를 다시 보내거나, 단말이 200 OK 직후가 아니라 offer 직후 RR 로 경로를 연다 | RCS-1 | .45 CMP·SDK |
 | 4 | **제휴를 클라이언트 단위로** — 행 키 통일, 클라이언트 단위 해제·판정, 암묵 제휴 취소·완료 시점. MCPTT 묶음 8(AFF-1~8)과 한 작업 | VAFF-1 · VAFF-2 · VAFF-4 · VAFF-5 · VGC-11 | .45 CSP |
-| 5 | **진행 중 호와 제휴·그룹 변경** — late call entry, 제휴 해제·멤버 제거·서비스 끔 → BYE, 제휴 행 정리, on-network 꺼짐 115. MCPTT 묶음 9·10 의 결정과 같이 | VGC-2 · VGC-12 · VAFF-7 · VGC-3 · VAFF-6(결정) | 결정 → .45 CSP |
+| 5 | **진행 중 호와 제휴·그룹 변경** — late call entry, 제휴 해제·멤버 제거·서비스 끔 → BYE, 제휴 행 정리. MCPTT 묶음 9·10 의 결정과 같이 | VGC-2 · VGC-12 · VAFF-7 · VAFF-6(결정) | 결정 → .45 CSP |
 | 6 | **service configuration 값 결선** — CSP 가 `/internal/mcvideo/service-config` 를 받아 `tc_timers` 전부를 싣고 변경을 통지받는다, SDK 엔진이 `TcTimers` 를 문서에서 넣는다, xcap-diff `sel` 에 MCVideo 문서 | TCS-1 · TCU-1 · VCMS-1 | .45 CSP·SDK |
 | 7 | **코덱 선호의 한 줄기** — 그룹 선호 = 서버 집행 코덱(CSC·콘솔이 검증). 단말 offer·초대 offer 가 그 값을 쓴다 | VGU-4 · VGC-8 | .45 SDK · .48 CSP |
 | 8 | **그룹 문서 PUT 해석·CMS 문서** — 없음의 뜻(§7.2.8), `<mcvideo-mcvideo-id>`·`<group-media>` 검사, 문서 이름 검사 | VGMS-1 · VGMS-2 · VCMS-6 · VGC-10(CSC 기본값 몫) | .45 CSC |

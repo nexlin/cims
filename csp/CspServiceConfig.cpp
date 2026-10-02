@@ -1,6 +1,7 @@
 #include "CspServiceConfig.h"
 
 #include "CscEndpointCache.h"
+#include "DbManager.h"
 #include "HttpClient.h"
 #include "Log.h"
 #include "SipServerSetup.h"
@@ -8,6 +9,18 @@
 CCspServiceConfig gclsCspServiceConfig;
 
 bool CCspServiceConfig::Refresh() {
+    // N6 (user profile 공통 값 — 결정 D2) 는 문서가 아니라 DB 의 같은 열을 읽는다. CSC 문서 취득과 따로 갱신한다.
+    {
+        int iOther = 5, iDispatch = 10;
+        const bool bRow = gclsDbManager.IsConnected() && gclsDbManager.SelectMcpttN6( iOther, iDispatch );
+        {
+            std::lock_guard<std::mutex> lock( m_clsMutex );
+            m_iMaxCallsN6 = iOther;
+            m_iMaxCallsN6Dispatch = iDispatch;
+        }
+        CLog::Print( LOG_SYSTEM, "[service-config] N6 그 밖=%d 관제=%d%s", iOther, iDispatch,
+                     bRow ? "" : " (mcptt_service_config 없음 — 기본값)" );
+    }
     if ( gclsSetup.m_strCscInternalToken.empty() ) {
         CLog::Print( LOG_ERROR,
                      "[service-config] Setup.Csc.InternalToken 미설정 — 문서 취득 불가(CMP floor 값은 CMP 설정)" );
@@ -82,4 +95,9 @@ int CCspServiceConfig::GetEmergencyGroupTimeLimitSec() {
 CspCallTimerParams CCspServiceConfig::GetCallTimerParams() {
     std::lock_guard<std::mutex> lock( m_clsMutex );
     return m_clsCallTimers;
+}
+
+int CCspServiceConfig::GetMaxCallsN6( bool bDispatch ) {
+    std::lock_guard<std::mutex> lock( m_clsMutex );
+    return bDispatch ? m_iMaxCallsN6Dispatch : m_iMaxCallsN6;
 }

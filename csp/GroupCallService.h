@@ -575,6 +575,17 @@ private:
 
     /** 그룹의 활성(확립·비청취) leg 존재 — 세션 활성 판정 단일 기준. m_mutex 보유 상태에서 호출. */
     bool HasActiveLeg( const std::string &strGroupId ) const;
+    /** 사용자가 지금 들어 있는 MCPTT 그룹 호 수 — N6 판정(TS 24.379 §10.1.1.3.1.1 5)). 확립 leg 또는 그 사용자가 개시한
+     *  leg 이 있는 그룹을 센다(서버가 보낸 초대에 아직 답하지 않은 그룹은 아니다). 개별 호(priv-)와 strExceptGroup(같은
+     * 그룹 재합류·re-INVITE)은 빼고, 청취 leg 은 센다. 호출자가 m_mutex 보유. */
+    int ActiveGroupCallsOfLocked( const std::string &strUser, const std::string &strExceptGroup ) const;
+    /** 그룹 세션의 참가 leg 수(청취 leg 제외, 확립·초대 중 모두) — 정원 판정(§10.1.1.4.2 15)d)). strUser 의 leg 은 세지
+     * 않고 있으면 *pbUserIn = true. 호출자가 m_mutex 보유. */
+    int ParticipantLegsLocked( const std::string &strGroupId, const std::string &strUser, bool *pbUserIn ) const;
+    /** 초대 대상을 정원 안으로 (§6.3.5.5) — iSlots(개시자를 뺀 자리)를 넘으면 필수 멤버(<on-network-required>)를 먼저
+     * 두고 나머지는 순서대로 자른다. 잘랐으면 bCapped. iSlots < 0 = 상한 없음. */
+    static std::vector<std::string> CapInvitees( const class CspPttGroup &clsGroup,
+                                                 const std::vector<std::string> &vecIn, int iSlots, bool &bCapped );
     /** PTT 청취 감사 이벤트 (E-AUD-016 call_monitored, tap_mode=ptt_listen) — started/ended/denied.
      *  strRole = 청취자 역할 id (dispatch_center.md §5.7). */
     static void EmitPttListenAudit( const char *pszPhase, const std::string &strMonitor, const std::string &strRole,

@@ -67,6 +67,11 @@ public:
      *  @return 1=자격 있음(clsProfile 채움), 0=행 없음(자격 없음), -1=DB 오류·표 부재(마이그레이션 전) */
     int SelectMcVideoProfile( const std::string &strPttId, CspMcVideoProfile &clsProfile );
 
+    /** MCPTT 동시 그룹 호 상한 N6 (mcptt_service_config id=1 — max_calls_n6·max_calls_n6_dispatch, CSC user profile
+     *  `<MaxSimultaneousCallsN6>` 와 같은 값·결정 D2). 열은 이름으로 읽는다 — 없는 열(sql/migrate_mcptt_n6.sql 전)은
+     * 인자를 바꾸지 않는다(호출자가 기본 5·10 을 넣어 둔다). @return 행을 읽었으면 true */
+    bool SelectMcpttN6( int &iOther, int &iDispatch );
+
     /** MCVideo 표(mcvideo_group_attrs·mcvideo_user_profile·mcvideo_affiliations — sql/migrate_mcvideo.sql) 존재 여부 */
     bool HasMcVideoTables() const {
         return m_bHasMcVideoTables;

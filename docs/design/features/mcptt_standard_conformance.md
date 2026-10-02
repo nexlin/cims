@@ -687,10 +687,13 @@ REGISTER/SUBSCRIBE/NOTIFY 의 헤더·본문을 상용 IMS 캡처 기준으로 �
 - **그룹 문서 값**(`get_group_xml`, TS 24.481 §7.2.2·§7.2.8) — 이름·직함·조직 코드·URI 는 텍스트·속성 모두 escape(RFC 4825 well-formed).
   `<protect-media>`·`<protect-floor-control-signalling>` 은 없으면 true(GMK 필수·floor 보호 필수)라 **false 를 명시**한다(E2E 미구현 —
   [mcx_e2e_security.md](mcx_e2e_security.md)). 정원 `<on-network-max-participant-count>` 는 `max_members` 그대로, **0(무제한)은 요소
-  생략**(0 은 «0명» 으로 읽힌다). `<preferred-voice-encodings>` = CSP 서비스 코덱 AMR-WB(`SERVICE_VOICE_ENCODING` — CSP
+  생략**(0 은 «0명» 으로 읽힌다). CSP 는 정원을 집행한다 — 새 세션은 정원 − 1 명(개시자 포함 정원)까지만 초대하고 필수 멤버를 먼저 두며, 다 초대하지
+  못하면 개시자 200 OK 에 Warning `122 too many participants`(TS 24.379 §6.3.5.5 · §10.1.1.4.2), 참가 leg(청취 제외)이 찬 진행 중 세션에 들어오는
+  합류·재합류는 486 + `122`(§10.1.1.4.2 15)d) · chat §10.1.2.4.1.1 12) · §10.1.1.4.5.1 10)). 청취 leg 은 정원에 세지도 막지도 않고, 우선순위로
+  기존 참가자를 내보내는 선택(local policy)은 두지 않는다. `<preferred-voice-encodings>` = CSP 서비스 코덱 AMR-WB(`SERVICE_VOICE_ENCODING` — CSP
   `Setup.Media.Codecs` 첫 항목과 같아야 한다; 단말은 그룹 호 offer 에 넣는다 TS 24.379 §6.2.1 2)b), SDK 는 지원 코덱을 늘 offer 해 이미
   따른다). on-network 를 끈 그룹(`on_network`=0)은 `<on-network-disabled/>`(§7.2.2 g)) — XCAP PUT 은 요소가 있으면 끄고 없으면 그대로
-  둔다(호의 403 115 판정은 CSP 몫 — 미구현). 멤버 규칙 actions 에 `<on-network-allow-getting-member-list>true`(없으면 false — 멤버가
+  둔다. 호의 판정은 CSP 가 한다 — 그 그룹의 개시·합류 INVITE 는 403 + `115 group is disabled`(TS 24.379 §6.3.5.2 5)a) — 멤버십보다 먼저, MCVideo 호도 같다). 멤버 규칙 actions 에 `<on-network-allow-getting-member-list>true`(없으면 false — 멤버가
   명단을 못 읽는다, §7.2.12.1). 그룹·멤버 우선순위는 priorityType 0~255(§7.2.4.2, 값이 클수록 높다) — 관리 API·XCAP PUT 이 범위 밖을
   400 으로 거절하고, 범위 밖 저장값은 문서에서 경계로 자른다. MCData 그룹(SDS·FD 허용)의 서버 결정 값(보호 둘 false·송신 인가 true·
   그룹 우선순위·charset 106) = [mcdata_messaging.md](mcdata_messaging.md) §2.
@@ -720,7 +723,10 @@ REGISTER/SUBSCRIBE/NOTIFY 의 헤더·본문을 상용 IMS 캡처 기준으로 �
   **N6**(`<MaxSimultaneousCallsN6>`, §8.3.2.1 8)e)i) — 동시 그룹 호 상한)는 사용자마다의 값이다: 그 PTT 회선의 사람에게 역할 배정
   (`role_assignments`, [mcptt_authorization.md](mcptt_authorization.md))이 있으면 «관제» = `mcptt_service_config.max_calls_n6_dispatch`(기본 10),
   아니면 `max_calls_n6`(기본 5) — `user_max_calls_n6`. 판정 데이터는 역할 배정 한 곳이고, CSP 의 역할 맵(`CCspRoleMap::SelectForLine`)과
-  같은 펼침이라 집행(486 + `103`, TS 24.379 §10.1.1.3.1.1 5))도 같은 판정을 쓴다(CSP 집행은 미구현 — 갭 GCS-6). 역할 배정·해제로 판정이
+  같은 펼침이라 집행(486 + `103`, TS 24.379 §10.1.1.3.1.1 5) · chat §10.1.2.3.1.1 5) · 애드혹 §17.3.2.1.1 6))도 같은 판정을 쓴다 — CSP 는
+  개시·합류 INVITE 에서 그 사용자가 들어 있는 그룹 호 수(확립 leg 또는 그 사용자가 개시한 leg 이 있는 그룹 — 개별 호 제외·청취 leg 포함·같은
+  그룹 재합류는 새 호가 아니다)가 N6 이상이면 486 103, 인가된 긴급·임박 요청은 예외(NOTE 3). 값은 같은 열을 `CCspServiceConfig::GetMaxCallsN6`
+  이 읽는다(기동·`SERVICE_CONFIG_CHANGED`). 역할 배정·해제로 판정이
   바뀌면 CSC 가 그 사람의 PTT 회선마다 `USER_CHANGED` 를 보내 user-profile xcap-diff 가 나간다. 모든 `<entry>` 에 `index`(§8.3.2.1 —
   목록 안에서 유일)·`<ProSeUserID-entry>` 에도 `index`, 소속 그룹이 없어도 `<MCPTTGroupInfo>` 를 싣는다(10)b), 빈 목록은 XSD 가 허용).
   PTT 그룹 호 청취 자격은 `<cims:allow-ambient-listening>`(CIMS 확장) — 비멤버 관제사의 recvonly 합류 자격([dispatch_center.md](dispatch_center.md) §5.6)이라

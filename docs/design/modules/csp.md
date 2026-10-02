@@ -348,7 +348,9 @@ class CspPttGroup {
 ```
 INVITE to group@domain
   │
-  ├─ 그룹 존재/세션 시간 유효성 확인
+  ├─ 그룹 존재/세션 시간 유효성 확인 · on-network 꺼짐 403 115(TS 24.379 §6.3.5.2 5)a))
+  ├─ (참여 기능) N6 — 그 사용자의 그룹 호 수 ≥ N6(관제 10 / 그 밖 5) 이면 486 103, 인가된 긴급·임박은 예외(§10.1.1.3.1.1 5))
+  ├─ (진행 중 세션 합류) 참가 leg ≥ 정원(max_members) 이면 486 122(§10.1.1.4.2 15)d))
   ├─ CMP addGroup → 공유 RTP 포트 + Floor 포트 할당
   │   (record_dir 전달)
   ├─ 새 세션 개시 + 개시자 응답 게이트가 필요하면(필수 멤버·시작 최소 인원·사설 호 — mcptt_standard_conformance.md §C4c)
@@ -361,6 +363,7 @@ INVITE to group@domain
   │
   └─ 각 그룹 멤버에 대해 (게이트면 수락보다 먼저):
       ├─ (affiliation 게이트: require_affiliation 시 affiliate 된 멤버만)
+      ├─ (정원: 새 세션은 정원 − 1 명까지, 필수 멤버 먼저 — 잘랐으면 개시자 200 OK 에 Warning 122, §6.3.5.5)
       ├─ InviteMember() → Multipart INVITE
       │   ├─ Content-Type: multipart/mixed
       │   ├─ Part 1: application/vnd.3gpp.mcptt-info+xml
@@ -406,7 +409,7 @@ CMP 로스터는 붙는 멤버만 싣는다(멤버마다 `PTT_GROUP_ADD` members
 
 | 사건 | 처리 |
 |------|------|
-| MCVideo INVITE | 검사(500 CMP `resource.mcvideo` 없음 · 403 Accept-Contact/isfocus · 404 137 재합류 세션 없음 · 404 113 · 403 116 · 404 117/118 · 403 108/109 자격 · 486 103 N6 · 403 120 prearranged 미제휴 · 488 · chat 암묵 affiliation(실패 403 120)) → chat 은 곧바로 수락, prearranged 새 세션은 제휴된 MCVideo 등록 멤버 팬아웃 뒤 첫 멤버가 붙으면(200 OK 또는 스스로 합류) 개시자 수락 |
+| MCVideo INVITE | 검사(500 CMP `resource.mcvideo` 없음 · 403 Accept-Contact/isfocus · 404 137 재합류 세션 없음 · 404 113 · 403 115 on-network 꺼짐 · 403 116 · 404 117/118 · 403 108/109 자격 · 486 103 N6 · 403 120 prearranged 미제휴 · 488 · chat 암묵 affiliation(실패 403 120)) → chat 은 곧바로 수락, prearranged 새 세션은 제휴된 MCVideo 등록 멤버 팬아웃 뒤 첫 멤버가 붙으면(200 OK 또는 스스로 합류) 개시자 수락 |
 | 미디어 SRTP | 접속서비스 `media_srtp` × offer crypto 를 m= 라인마다(`MediaSdes::EvalRelayOfferSdes`/`EvalRelayAnswerSdes`/`ReadReinviteSdes` — VoLTE relay 와 같은 부품), 음성 실패 = 488/BYE · 영상 실패 = 영상 성분만 거절, 키 = JOIN ② `media_crypto[_video]`, psip 합성 SDP 의 video 키 = `CSipCallRtp::m_strLocalVideoCrypto*` |
 | 수락 | 로스터 등록(ADD) → CMP JOIN ①(포트·`tc_ssrc`) → JOIN ②(offer 주소·`a=ssrc`·fmtp — 암묵 요청 결과) → 200 OK(포커스 Contact + `gr`, PAI = `mcvideo_psi`, `Supported: tdialog`, answer fmtp = `BuildMcVideoAnswerFmtp`) |
 | 팬아웃 | `CreateCall` → Request-URI = 등록 Contact · Accept-Contact 둘 · `P-Asserted-Service` · 포커스 Contact · Session-Expires refresher 생략(TS 24.281 §6.3.3.1.2 6)) · multipart(SDP + mcvideo-info) · 응답 한도 30 s 뒤 CANCEL |

@@ -84,5 +84,17 @@ int main(){
   CK("alert svc mcptt legacy text/plain",McEmergencyAlertServiceOf("<mcpttinfo><mcptt-Params><alert-ind>true</alert-ind>"
                                                  "</mcptt-Params></mcpttinfo>","text/plain")==EMcAlertService::Mcptt);
   CK("alert svc none",McEmergencyAlertServiceOf("hello","text/plain")==EMcAlertService::None);
+  // 정원 안 초대 대상 (McpttCapInvitees — TS 24.379 §6.3.5.5, S01 GCS-5): 필수 멤버 먼저, 나머지는 순서대로
+  { bool cap=false;
+    auto v=McpttCapInvitees({"a","b","c","d"},{"c"},2,cap);
+    CK("cap required first",cap && v.size()==2 && v[0]=="c" && v[1]=="a");
+    v=McpttCapInvitees({"a","b"},{},2,cap);
+    CK("cap fits",!cap && v.size()==2);
+    v=McpttCapInvitees({"a","b","c"},{"b","c"},1,cap);
+    CK("cap only required kept",cap && v.size()==1 && v[0]=="b");
+    v=McpttCapInvitees({"a","b"},{},-1,cap);
+    CK("cap unlimited",!cap && v.size()==2);
+    v=McpttCapInvitees({"a"},{},0,cap);
+    CK("cap zero slots",cap && v.empty()); }
   printf("%s (%d fail)\n",fail?"FAIL":"PASS",fail); return fail?1:0;
 }

@@ -533,6 +533,30 @@ int CDbManager::SelectMcVideoProfile( const std::string &strPttId, CspMcVideoPro
     return 1;
 }
 
+bool CDbManager::SelectMcpttN6( int &iOther, int &iDispatch ) {
+    std::lock_guard<std::recursive_mutex> lock( m_mutex );
+    if ( !m_pMysql && !Reconnect() ) return false;
+    MYSQL_RES *pRes = ExecuteSelect( "SELECT * FROM mcptt_service_config WHERE id=1" );
+    if ( !pRes ) return false;
+    MYSQL_ROW row = mysql_fetch_row( pRes );
+    if ( !row ) {
+        mysql_free_result( pRes );
+        return false;
+    }
+    const unsigned int uFields = mysql_num_fields( pRes );
+    MYSQL_FIELD *pFields = mysql_fetch_fields( pRes );
+    for ( unsigned int i = 0; i < uFields; ++i ) {
+        const std::string strName = pFields[i].name ? pFields[i].name : "";
+        if ( !row[i] ) continue;
+        if ( strName == "max_calls_n6" )
+            iOther = std::max( 1, atoi( row[i] ) );
+        else if ( strName == "max_calls_n6_dispatch" )
+            iDispatch = std::max( 1, atoi( row[i] ) );
+    }
+    mysql_free_result( pRes );
+    return true;
+}
+
 bool CDbManager::UpdateRegisterTime( const std::string &strUserId ) {
     std::lock_guard<std::recursive_mutex> lock( m_mutex );
     if ( !m_pMysql && !Reconnect() ) return false;

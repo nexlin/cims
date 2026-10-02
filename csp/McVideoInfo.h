@@ -291,6 +291,7 @@ static const char *const kMcVideoWarn103 = "maximum simultaneous MCVideo group c
 static const char *const kMcVideoWarn108 = "user not authorised to make chat group calls";
 static const char *const kMcVideoWarn109 = "user not authorised to make prearranged group calls";
 static const char *const kMcVideoWarn113 = "group document does not exist";
+static const char *const kMcVideoWarn115 = "group is disabled";
 static const char *const kMcVideoWarn116 = "user is not part of the MCVideo group";
 static const char *const kMcVideoWarn117 = "the group identity indicated in the request is a prearranged group";
 static const char *const kMcVideoWarn118 = "the group identity indicated in the request is a chat group";

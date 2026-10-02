@@ -90,6 +90,11 @@ public:
     /** 개별 호·애드혹 그룹 호의 세션 타이머 (<private-call> · <anyExt><adhoc-group-call>). */
     CspCallTimerParams GetCallTimerParams();
 
+    /** 사용자의 MCPTT 동시 그룹 호 상한 N6 (TS 24.484 §8.3.2.1 `<MaxSimultaneousCallsN6>` — 결정 D2: 관제 = 역할 배정이
+     * 있는 회선, 그 밖 = 일반). 값 = mcptt_service_config(DB, CSC user profile 과 같은 열), 없으면 관제 10 · 그 밖 5.
+     * Refresh 가 다시 읽는다(기동·SERVICE_CONFIG_CHANGED). */
+    int GetMaxCallsN6( bool bDispatch );
+
     /** xs:duration("PT<h>H<m>M<s>S", 초는 소수 허용) → 밀리초. 형식 오류면 -1. */
     static long long DurationMs( const std::string &strDuration );
 
@@ -111,6 +116,8 @@ private:
     CspPriorityParams m_clsPriority;
     int m_iTng2Sec = -1;
     CspCallTimerParams m_clsCallTimers;
+    int m_iMaxCallsN6 = 5;           ///< 그 밖 단말 N6 (mcptt_service_config.max_calls_n6)
+    int m_iMaxCallsN6Dispatch = 10;  ///< 관제 N6 (max_calls_n6_dispatch)
 };
 
 extern CCspServiceConfig gclsCspServiceConfig;
