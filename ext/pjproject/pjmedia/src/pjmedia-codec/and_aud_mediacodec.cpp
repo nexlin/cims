@@ -38,6 +38,7 @@
             PJMEDIA_HAS_ANDROID_MEDIACODEC != 0
 
 #include <android/log.h>
+#include <unistd.h>
 /* Android AMediaCodec: */
 #include "media/NdkMediaCodec.h"
 
@@ -56,6 +57,22 @@ typedef struct and_med_buf_info {
     pj_int32_t size;
     pj_uint32_t flags;
 } and_med_buf_info;
+
+/* CIMS: 같은 프레임 출력(and_med_take_output) — 코덱 한 방향(인코더·디코더)의 상태. */
+#ifndef AND_MED_AUD_OUT_WAIT_MS
+/* 방금 넣은 프레임의 출력을 기다리는 한도(ms). 음성 코덱은 한 프레임을 1 ms 남짓에 낸다 — 인코드·디코드가 같은
+ * 20 ms 클록 틱에서 돌므로 둘을 합쳐 한 틱을 넘지 않게 둔다. */
+#  define AND_MED_AUD_OUT_WAIT_MS       8
+#endif
+#ifndef AND_MED_AUD_LATE_LIMIT
+/* 연속으로 한도를 넘기면 그 코덱은 출력이 늘 늦다(파이프라인 코덱) — 기다림을 끄고 있는 출력만 쓴다. */
+#  define AND_MED_AUD_LATE_LIMIT        50
+#endif
+typedef struct and_med_out_sync {
+    unsigned  inflight;      /**< 넣었는데 아직 출력을 꺼내지 않은 프레임 수 */
+    unsigned  late_streak;   /**< 연속 대기 한도 초과                        */
+    pj_bool_t no_wait;       /**< 이 코덱은 기다리지 않는다                  */
+} and_med_out_sync;
 
 /* Prototypes for Android MediaCodec codecs factory */
 static pj_status_t and_media_test_alloc(pjmedia_codec_factory *factory,
@@ -177,6 +194,10 @@ typedef struct and_media_private {
     int                  enc_err_status;    /**< Last on_error status (enc) */
     int                  enc_err_action;    /**< Last on_error actionCode   */
     pj_bool_t            enc_err_seen;      /**< on_error fired for encoder */
+
+    /* CIMS: same-frame output — and_med_take_output() */
+    and_med_out_sync     enc_sync;          /**< Encoder output sync        */
+    and_med_out_sync     dec_sync;          /**< Decoder output sync        */
 } and_media_private_t;
 
 /* CUSTOM CALLBACKS */
@@ -527,6 +548,7 @@ static pj_bool_t and_med_restart_encoder(and_media_private_t *codec_data)
     while (pj_atomic_queue_get(codec_data->enc_avail_output_buf, &stale) ==
            PJ_SUCCESS)
         ;
+    pj_bzero(&codec_data->enc_sync, sizeof(codec_data->enc_sync));
 
     codec_data->enc = AMediaCodec_createCodecByName(enc_name);
     if (!codec_data->enc) {
@@ -1097,6 +1119,8 @@ static pj_status_t and_media_codec_open(pjmedia_codec *codec,
     PJ_ASSERT_RETURN(codec_data != NULL, PJ_EINVALIDOP);
 
     PJ_LOG(5,(THIS_FILE, "Opening codec.."));
+    pj_bzero(&codec_data->enc_sync, sizeof(codec_data->enc_sync));   /* CIMS */
+    pj_bzero(&codec_data->dec_sync, sizeof(codec_data->dec_sync));
 
     codec_data->vad_enabled = (attr->setting.vad != 0);
     codec_data->plc_enabled = (attr->setting.plc != 0);
@@ -1310,6 +1334,69 @@ static pj_status_t and_media_codec_parse(pjmedia_codec *codec,
 /*
  * Encode frames.
  */
+/* CIMS: 방금 넣은 프레임의 출력을 꺼낸다. MediaCodec 출력은 비동기 콜백(and_med_on_output_avail)이 큐에 넣는다 —
+ * 입력을 넣자마자 큐를 보면 그 프레임의 출력은 아직 없어 이전 프레임의 출력을 꺼내게 되고, 한 번 놓치면 그 밀림
+ * (20 ms)이 통화 끝까지 남고 놓칠 때마다 쌓였다(첫 프레임에서는 늘 놓친다 — 실측 인코더·디코더 각 40 ms). 그래서
+ * 이 프레임의 출력이 올 때까지 잠깐(AND_MED_AUD_OUT_WAIT_MS) 기다리고, 앞서 놓친 프레임의 늦은 출력은 버린다(그
+ * 프레임 = 손실 — 디코더는 PLC 몫). 한도 안에 이 프레임 출력이 없으면 받아 둔 늦은 출력이라도 쓴다(다음 호출에서
+ * 따라잡는다). 출력이 늘 늦는 코덱은 AND_MED_AUD_LATE_LIMIT 번 뒤 기다리지 않는다(종전 동작). 돌려준 출력은
+ * 부른 쪽이 releaseOutputBuffer 한다. */
+static pj_bool_t and_med_take_output(and_media_private_t *codec_data,
+                                     pj_bool_t enc,
+                                     and_med_buf_info *out)
+{
+    AMediaCodec *mc = enc? codec_data->enc : codec_data->dec;
+    pj_atomic_queue_t *q = enc? codec_data->enc_avail_output_buf :
+                                codec_data->dec_avail_output_buf;
+    and_med_out_sync *sync = enc? &codec_data->enc_sync :
+                                  &codec_data->dec_sync;
+    and_med_buf_info bi;
+    pj_bool_t have = PJ_FALSE;
+    unsigned dropped = 0;
+    pj_timestamp t0, now;
+
+    pj_get_timestamp(&t0);
+    for (;;) {
+        while (pj_atomic_queue_get(q, &bi) == PJ_SUCCESS) {
+            if (bi.index < 0)
+                continue;
+            if (bi.flags & AMEDIACODEC_BUFFER_FLAG_CODEC_CONFIG) {
+                /* 설정 데이터 — 프레임 출력이 아니다 */
+                AMediaCodec_releaseOutputBuffer(mc, bi.index, 0);
+                continue;
+            }
+            if (have) {
+                AMediaCodec_releaseOutputBuffer(mc, out->index, 0);
+                dropped++;
+            }
+            *out = bi;
+            have = PJ_TRUE;
+            if (sync->inflight)
+                sync->inflight--;
+        }
+        if ((have && sync->inflight == 0) || sync->no_wait)
+            break;
+        pj_get_timestamp(&now);
+        if (pj_elapsed_msec(&t0, &now) >= AND_MED_AUD_OUT_WAIT_MS) {
+            if (++sync->late_streak == AND_MED_AUD_LATE_LIMIT) {
+                sync->no_wait = PJ_TRUE;
+                PJ_LOG(3, (THIS_FILE, "%s output is always later than %d ms "
+                           "— not waiting any more", enc? "Encoder" :
+                           "Decoder", AND_MED_AUD_OUT_WAIT_MS));
+            }
+            break;
+        }
+        usleep(500);
+    }
+    if (have && sync->inflight == 0)
+        sync->late_streak = 0;
+    if (dropped) {
+        PJ_LOG(4, (THIS_FILE, "%s dropped %u late output(s) — same-frame "
+                   "output kept", enc? "Encoder" : "Decoder", dropped));
+    }
+    return have;
+}
+
 static pj_status_t and_media_codec_encode(pjmedia_codec *codec,
                                           const struct pjmedia_frame *input,
                                           unsigned output_buf_len,
@@ -1394,6 +1481,7 @@ static pj_status_t and_media_codec_encode(pjmedia_codec *codec,
                 enc_fail_watchdog(codec_data, "queueInputBuffer");
                 goto on_return;
             }
+            codec_data->enc_sync.inflight++;
         } else {
             if (!input_buf) {
                 PJ_LOG(4,(THIS_FILE, "Encoder getInputBuffer "
@@ -1413,10 +1501,7 @@ static pj_status_t and_media_codec_encode(pjmedia_codec *codec,
         }
 
         pj_bzero(&buf_info, sizeof(buf_info));
-        queue = codec_data->enc_avail_output_buf;
-        if (pj_atomic_queue_get(queue, &buf_info) != PJ_SUCCESS ||
-            buf_info.index < 0)
-        {
+        if (!and_med_take_output(codec_data, PJ_TRUE, &buf_info)) {
             PJ_LOG(4, (THIS_FILE, "Encoder failed to get output Buffer[%d]",
                    buf_info.index));
             enc_fail_watchdog(codec_data, "out-queue");
@@ -1544,12 +1629,10 @@ static pj_status_t and_media_codec_decode(pjmedia_codec *codec,
                   am_status));
         goto on_return;
     }
+    codec_data->dec_sync.inflight++;
 
     pj_bzero(&buf_info, sizeof(buf_info));
-    queue = codec_data->dec_avail_output_buf;
-    if (pj_atomic_queue_get(queue, &buf_info) != PJ_SUCCESS ||
-        buf_info.index < 0)
-    {
+    if (!and_med_take_output(codec_data, PJ_FALSE, &buf_info)) {
         PJ_LOG(4, (THIS_FILE, "Decoder failed to get output Buffer[%d]",
                    buf_info.index));
         goto on_return;

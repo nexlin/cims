@@ -37,6 +37,13 @@
    assert (media_security.md §7). SDP 한 벌만 담으므로 SIP 메시지 상한과는 별개. */
 #define PJSUA2_MAX_SDP_BUF_LEN    4000
 
+/* 음성 패킷 크기: 오디오 SDP 에 a=ptime:20 · a=maxptime:240 — 받을 때 RTP 패킷당 음성 프레임 하나를 요청하고
+   12 프레임까지 받는다(GSMA IR.92 §3.2.5 Note 1). pjmedia 는 원래 ptime 을 싣지 않는다 — CIMS 패치
+   (pjmedia/src/pjmedia/endpoint.c). 보내는 쪽 크기는 상대 ptime 을 따르고(stream_info.c), 상대가 싣지 않으면
+   코어 코덱 정책의 frmPerPkt(AMR-WB 1)가 정한다(ue_sdk.md §4.5). */
+#define PJMEDIA_CIMS_SDP_PTIME    20
+#define PJMEDIA_CIMS_SDP_MAXPTIME 240
+
 /* 호 품질 측정: RTCP-XR(RFC 3611 VoIP Metrics — 손실/폐기율·버스트/갭·RTT·단말 지연) 생성·수신 통계.
    코어 quality/ 의 E-model 입력이자 상대에게 보내는 XR 보고 (ue_voice_quality.md §3.4). SRTP 호에서는 SRTCP 로 보호된다. */
 #define PJMEDIA_HAS_RTCP_XR       1

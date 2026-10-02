@@ -35,6 +35,7 @@
 #include <jni.h>
 #include <sys/resource.h>
 #include <sys/system_properties.h>
+#include <android/api-level.h>
 
 #define THIS_FILE       "android_jni_dev.c"
 #define DRIVER_NAME     "Android JNI"
@@ -149,6 +150,184 @@ static pjmedia_aud_stream_op android_strm_op =
 #define detach_jvm(attached)    pj_jni_detach_jvm(attached)
 #define THREAD_PRIORITY_AUDIO           -16
 #define THREAD_PRIORITY_URGENT_AUDIO    -19
+
+/* CIMS: 저지연 재생 트랙(ue_sdk.md §4.5 음성 지연). 옛 생성자(streamType, …)는 성능 모드를 줄 수 없고,
+ * getMinBufferSize 를 버퍼로 주면 재생 스레드의 블로킹 write 가 그 버퍼를 늘 가득 채워 전부가 지연이 된다(실측 MF52
+ * 1288 프레임 = 80 ms). API 26+ 는 AudioTrack.Builder 로 같은 스트림 종류(setLegacyStreamType — 속성·라우팅은 옛
+ * 생성자와 같다)에 PERFORMANCE_MODE_LOW_LATENCY 를 주고, API 24+ 는 setBufferSizeInFrames 로 채우는 양을
+ * PJMEDIA_CIMS_AND_PLAY_BUF_FRAMES 프레임으로 줄인다(용량은 그대로 — write 가 그만큼만 앞서 간다). */
+#ifndef PJMEDIA_CIMS_AND_PLAY_BUF_FRAMES
+#   define PJMEDIA_CIMS_AND_PLAY_BUF_FRAMES     2
+#endif
+
+static jboolean cims_jni_ok(JNIEnv *env)
+{
+    if ((*env)->ExceptionCheck(env)) {
+        (*env)->ExceptionDescribe(env);
+        (*env)->ExceptionClear(env);
+        return JNI_FALSE;
+    }
+    return JNI_TRUE;
+}
+
+/* builder.name(int) — 같은 builder 를 돌려받으므로 반환 지역 참조만 지운다. */
+static jboolean cims_builder_int(JNIEnv *env, jobject b, jclass c,
+                                 const char *name, const char *sig, jint v)
+{
+    jmethodID m = (*env)->GetMethodID(env, c, name, sig);
+    jobject r;
+
+    if (!m || !cims_jni_ok(env))
+        return JNI_FALSE;
+    r = (*env)->CallObjectMethod(env, b, m, v);
+    if (!cims_jni_ok(env))
+        return JNI_FALSE;
+    if (r)
+        (*env)->DeleteLocalRef(env, r);
+    return JNI_TRUE;
+}
+
+/* builder.name(Object) */
+static jboolean cims_builder_obj(JNIEnv *env, jobject b, jclass c,
+                                 const char *name, const char *sig, jobject v)
+{
+    jmethodID m = (*env)->GetMethodID(env, c, name, sig);
+    jobject r;
+
+    if (!m || !cims_jni_ok(env))
+        return JNI_FALSE;
+    r = (*env)->CallObjectMethod(env, b, m, v);
+    if (!cims_jni_ok(env))
+        return JNI_FALSE;
+    if (r)
+        (*env)->DeleteLocalRef(env, r);
+    return JNI_TRUE;
+}
+
+/* new X() → builder (실패 = NULL) */
+static jobject cims_new_builder(JNIEnv *env, jclass c)
+{
+    jmethodID m = (*env)->GetMethodID(env, c, "<init>", "()V");
+    jobject o;
+
+    if (!m || !cims_jni_ok(env))
+        return NULL;
+    o = (*env)->NewObject(env, c, m);
+    return cims_jni_ok(env)? o : NULL;
+}
+
+/* builder.build() */
+static jobject cims_build(JNIEnv *env, jobject b, jclass c, const char *sig)
+{
+    jmethodID m = (*env)->GetMethodID(env, c, "build", sig);
+    jobject o;
+
+    if (!m || !cims_jni_ok(env))
+        return NULL;
+    o = (*env)->CallObjectMethod(env, b, m);
+    return cims_jni_ok(env)? o : NULL;
+}
+
+/* 저지연 재생 트랙(API 26+). 못 만들면 NULL — 부른 쪽이 옛 생성자로 만든다. */
+static jobject cims_build_track(JNIEnv *env, int stream_type, int rate,
+                                int ch_mask, int encoding, int buf_bytes)
+{
+    jclass ab_c, fb_c, tb_c;
+    jobject ab = NULL, attrs = NULL, fb = NULL, fmt = NULL, tb = NULL;
+    jobject track = NULL;
+
+    ab_c = (*env)->FindClass(env, "android/media/AudioAttributes$Builder");
+    if (!cims_jni_ok(env)) ab_c = NULL;
+    fb_c = (*env)->FindClass(env, "android/media/AudioFormat$Builder");
+    if (!cims_jni_ok(env)) fb_c = NULL;
+    tb_c = (*env)->FindClass(env, "android/media/AudioTrack$Builder");
+    if (!cims_jni_ok(env)) tb_c = NULL;
+    if (!ab_c || !fb_c || !tb_c)
+        goto on_return;
+
+    ab = cims_new_builder(env, ab_c);
+    if (!ab || !cims_builder_int(env, ab, ab_c, "setLegacyStreamType",
+                     "(I)Landroid/media/AudioAttributes$Builder;", stream_type))
+        goto on_return;
+    attrs = cims_build(env, ab, ab_c, "()Landroid/media/AudioAttributes;");
+    if (!attrs)
+        goto on_return;
+
+    fb = cims_new_builder(env, fb_c);
+    if (!fb ||
+        !cims_builder_int(env, fb, fb_c, "setSampleRate",
+                          "(I)Landroid/media/AudioFormat$Builder;", rate) ||
+        !cims_builder_int(env, fb, fb_c, "setEncoding",
+                          "(I)Landroid/media/AudioFormat$Builder;", encoding) ||
+        !cims_builder_int(env, fb, fb_c, "setChannelMask",
+                          "(I)Landroid/media/AudioFormat$Builder;", ch_mask))
+        goto on_return;
+    fmt = cims_build(env, fb, fb_c, "()Landroid/media/AudioFormat;");
+    if (!fmt)
+        goto on_return;
+
+    tb = cims_new_builder(env, tb_c);
+    if (!tb ||
+        !cims_builder_obj(env, tb, tb_c, "setAudioAttributes",
+                          "(Landroid/media/AudioAttributes;)"
+                          "Landroid/media/AudioTrack$Builder;", attrs) ||
+        !cims_builder_obj(env, tb, tb_c, "setAudioFormat",
+                          "(Landroid/media/AudioFormat;)"
+                          "Landroid/media/AudioTrack$Builder;", fmt) ||
+        !cims_builder_int(env, tb, tb_c, "setBufferSizeInBytes",
+                          "(I)Landroid/media/AudioTrack$Builder;", buf_bytes) ||
+        !cims_builder_int(env, tb, tb_c, "setTransferMode",
+                          "(I)Landroid/media/AudioTrack$Builder;",
+                          1 /* MODE_STREAM */) ||
+        !cims_builder_int(env, tb, tb_c, "setPerformanceMode",
+                          "(I)Landroid/media/AudioTrack$Builder;",
+                          1 /* PERFORMANCE_MODE_LOW_LATENCY */))
+        goto on_return;
+    track = cims_build(env, tb, tb_c, "()Landroid/media/AudioTrack;");
+
+on_return:
+    if (tb) (*env)->DeleteLocalRef(env, tb);
+    if (fmt) (*env)->DeleteLocalRef(env, fmt);
+    if (fb) (*env)->DeleteLocalRef(env, fb);
+    if (attrs) (*env)->DeleteLocalRef(env, attrs);
+    if (ab) (*env)->DeleteLocalRef(env, ab);
+    if (tb_c) (*env)->DeleteLocalRef(env, tb_c);
+    if (fb_c) (*env)->DeleteLocalRef(env, fb_c);
+    if (ab_c) (*env)->DeleteLocalRef(env, ab_c);
+    return track;
+}
+
+/* 트랙이 채우는 양을 PJMEDIA_CIMS_AND_PLAY_BUF_FRAMES 프레임으로(API 24+) — 결과(실제 크기·용량·성능 모드)를 남긴다. */
+static void cims_trim_track_buffer(JNIEnv *env, jclass c, jobject track,
+                                   unsigned frames_per_frame)
+{
+    int api = android_get_device_api_level();
+    jint want = (jint)(PJMEDIA_CIMS_AND_PLAY_BUF_FRAMES * frames_per_frame);
+    jint got = -1, cap = -1, mode = -1;
+    jmethodID m;
+
+    if (api < 24)
+        return;
+    m = (*env)->GetMethodID(env, c, "setBufferSizeInFrames", "(I)I");
+    if (m && cims_jni_ok(env)) {
+        got = (*env)->CallIntMethod(env, track, m, want);
+        if (!cims_jni_ok(env)) got = -1;
+    }
+    m = (*env)->GetMethodID(env, c, "getBufferCapacityInFrames", "()I");
+    if (m && cims_jni_ok(env)) {
+        cap = (*env)->CallIntMethod(env, track, m);
+        if (!cims_jni_ok(env)) cap = -1;
+    }
+    if (api >= 26) {
+        m = (*env)->GetMethodID(env, c, "getPerformanceMode", "()I");
+        if (m && cims_jni_ok(env)) {
+            mode = (*env)->CallIntMethod(env, track, m);
+            if (!cims_jni_ok(env)) mode = -1;
+        }
+    }
+    PJ_LOG(4, (THIS_FILE, "Audio track buffer %d/%d frames (asked %d), "
+               "performance mode %d", got, cap, want, mode));
+}
 
 
 static int AndroidRecorderCallback(void *userData)
@@ -753,40 +932,53 @@ static pj_status_t android_create_stream(pjmedia_aud_dev_factory *f,
         else
             stream_type = 0;    /* STREAM_VOICE_CALL */
 
-        /* Get pointer to the constructor */
-        constructor_method = (*jni_env)->GetMethodID(jni_env,
-                                                     stream->track_class,
-                                                     "<init>", "(IIIIII)V");
-        if (constructor_method == 0) {
-            PJ_LOG(3, (THIS_FILE, "Unable to find audio track's constructor."));
-            status = PJMEDIA_EAUD_SYSERR;
-            goto on_error;
-        }
-
         PJ_LOG(4, (THIS_FILE, "Creating audio track, stream type: %d",
                    stream_type));
-        track_obj = (*jni_env)->NewObject(jni_env,
-                                          stream->track_class,
-                                          constructor_method,
-                                          stream_type,
-                                          param->clock_rate,
-                                          channelOutCfg,
-                                          sampleFormat,
-                                          inputBuffSizePlay,
-                                          1 /* MODE_STREAM */);
-        if (track_obj == 0) {
-            PJ_LOG(3, (THIS_FILE, "Unable to create audio track object."));
-            status = PJMEDIA_EAUD_INIT;
-            goto on_error;
+        /* CIMS: 저지연 재생 트랙(cims_build_track) — 못 만들면 옛 생성자 */
+        track_obj = NULL;
+        if (android_get_device_api_level() >= 26) {
+            track_obj = cims_build_track(jni_env, stream_type,
+                                         param->clock_rate, channelOutCfg,
+                                         sampleFormat, inputBuffSizePlay);
+            if (!track_obj)
+                PJ_LOG(4, (THIS_FILE, "Low-latency audio track not "
+                           "created — legacy constructor"));
         }
-        
-        exc = (*jni_env)->ExceptionOccurred(jni_env);
-        if (exc) {
-            (*jni_env)->ExceptionDescribe(jni_env);
-            (*jni_env)->ExceptionClear(jni_env);
-            PJ_LOG(3, (THIS_FILE, "Failure in audio track's constructor"));
-            status = PJMEDIA_EAUD_INIT;
-            goto on_error;
+        if (!track_obj) {
+            /* Get pointer to the constructor */
+            constructor_method = (*jni_env)->GetMethodID(jni_env,
+                                                     stream->track_class,
+                                                     "<init>", "(IIIIII)V");
+            if (constructor_method == 0) {
+                PJ_LOG(3, (THIS_FILE, "Unable to find audio track's "
+                           "constructor."));
+                status = PJMEDIA_EAUD_SYSERR;
+                goto on_error;
+            }
+
+            track_obj = (*jni_env)->NewObject(jni_env,
+                                              stream->track_class,
+                                              constructor_method,
+                                              stream_type,
+                                              param->clock_rate,
+                                              channelOutCfg,
+                                              sampleFormat,
+                                              inputBuffSizePlay,
+                                              1 /* MODE_STREAM */);
+            if (track_obj == 0) {
+                PJ_LOG(3, (THIS_FILE, "Unable to create audio track object."));
+                status = PJMEDIA_EAUD_INIT;
+                goto on_error;
+            }
+
+            exc = (*jni_env)->ExceptionOccurred(jni_env);
+            if (exc) {
+                (*jni_env)->ExceptionDescribe(jni_env);
+                (*jni_env)->ExceptionClear(jni_env);
+                PJ_LOG(3, (THIS_FILE, "Failure in audio track's constructor"));
+                status = PJMEDIA_EAUD_INIT;
+                goto on_error;
+            }
         }
         
         stream->track = (*jni_env)->NewGlobalRef(jni_env, track_obj);
@@ -819,6 +1011,9 @@ static pj_status_t android_create_stream(pjmedia_aud_dev_factory *f,
             status = PJMEDIA_EAUD_INIT;
             goto on_error;
         }
+        cims_trim_track_buffer(jni_env, stream->track_class, stream->track,
+                               stream->param.samples_per_frame /
+                               stream->param.channel_count);    /* CIMS */
 
         status = pj_sem_create(stream->pool, NULL, 0, 1, &stream->play_sem);
         if (status != PJ_SUCCESS)
@@ -1230,6 +1425,20 @@ static pj_status_t strm_destroy(pjmedia_aud_stream *s)
             stream->play_sem = NULL;
         }
         if (stream->track_class) {
+            /* CIMS: 재생 끊김 수 — 줄인 트랙 버퍼(cims_trim_track_buffer)의 실측 확인 */
+            if (android_get_device_api_level() >= 24) {
+                jmethodID um = (*jni_env)->GetMethodID(jni_env,
+                                                       stream->track_class,
+                                                       "getUnderrunCount",
+                                                       "()I");
+                if (um && cims_jni_ok(jni_env)) {
+                    jint n = (*jni_env)->CallIntMethod(jni_env, stream->track,
+                                                       um);
+                    if (cims_jni_ok(jni_env))
+                        PJ_LOG(4, (THIS_FILE, "Audio track underruns: %d",
+                                   (int)n));
+                }
+            }
             release_method = (*jni_env)->GetMethodID(jni_env, 
                                                      stream->track_class,
                                                      "release", "()V");

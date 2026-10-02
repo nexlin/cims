@@ -315,6 +315,17 @@ C++ 공개 표면은 `cimsue/engine.h` 의 `Engine` 하나이며 계정·호를 
 
 - **장치.** 코어는 pjmedia 장치 id 와 라우트 의미(`earpiece/speaker/headset/bluetooth/extra`)만 다룬다. Android
   의 AudioManager 모드·포커스·블루투스 SCO, Windows 의 WASAPI 엔드포인트 선택은 플랫폼 SDK 몫이다.
+- **음성 지연(입에서 귀).** 단말 몫을 줄이는 결정 셋.
+  ① **패킷당 한 프레임** — 오디오 SDP 에 `a=ptime:20`·`a=maxptime:240`(GSMA IR.92 §3.2.5 Note 1 — 받을 때 프레임 하나를 요청하고 12 프레임까지
+  받는다. config_site `PJMEDIA_CIMS_SDP_PTIME`/`PJMEDIA_CIMS_SDP_MAXPTIME`, pjmedia `endpoint.c` CIMS 패치 — offer·answer 모두). 보내는 크기는
+  상대 ptime 을 따르고(`stream_info.c`), 상대가 싣지 않으면 코어 코덱 정책의 AMR-WB `frmPerPkt = 1`(Android MediaCodec 백엔드 기본은 2 = 40 ms).
+  ② **MediaCodec 같은 프레임 출력**(Android) — 입력을 넣은 뒤 그 프레임의 출력을 최대 8 ms 기다리고, 앞서 놓친 프레임의 늦은 출력은 버린다
+  (`and_aud_mediacodec.cpp` `and_med_take_output`). 비동기 출력 큐를 곧바로 보면 이전 프레임의 출력을 꺼내 한 번 놓칠 때마다 20 ms 가 통화 끝까지
+  쌓였다(첫 프레임은 늘 놓친다 — 실측 인코더·디코더 각 40 ms). 출력이 늘 늦는 코덱은 50 번 뒤 기다리지 않는다.
+  ③ **Android 재생 트랙** — API 26+ `AudioTrack.Builder`(`setLegacyStreamType` 로 속성·라우팅은 옛 생성자와 같다) + `PERFORMANCE_MODE_LOW_LATENCY`,
+  API 24+ `setBufferSizeInFrames` = 2 프레임(`PJMEDIA_CIMS_AND_PLAY_BUF_FRAMES`, 용량은 최소 버퍼 그대로). 재생 스레드의 블로킹 write 가 최소 버퍼
+  (실측 MF52 1288 프레임 = 80 ms)를 늘 채워 전부가 지연이던 것을 40 ms 로 줄인다. 생성 때 실제 버퍼·용량·성능 모드를, 정지 때 끊김 수
+  (`getUnderrunCount`)를 엔진 로그(레벨 4)에 남긴다. 지터 버퍼는 pjmedia 적응형 그대로(상한 500 ms, 점진 버림). 남은 지연원은 §11.
 - **SSRC 소스.** U10 디먹스가 만든 서브스트림을 코어가 `MediaSources[]` 로 노출한다. 감청 leg 는 RFC 5576
   `a=ssrc … label` 을 파싱해 각 소스에 발신자/착신자 라벨을 붙인다. 믹싱은 pjmedia 안에서 끝나고(브리지 포트 1개)
   앱은 소스별 활성·레벨 표시만 한다(dispatch_center §5.4).
@@ -792,6 +803,11 @@ NDK/MSVC 빌드는 개발 서버 밖(WSL2·Windows 머신)에서 수행하고, �
   행을 비우지 못하고, `deactivated` 의 «즉시 재구독» 권고(RFC 6665 §4.1.3)도 성립하지 않는다. 필요한 것 =
   CIMS 콜백이 사유·자원을 코어로 올리고, 파사드가 `onSubscriptionEnded(event, resource, reason)` 로 공개하며,
   앱이 사유별로 화면 비우기/재구독을 정하는 것. 실기기 회귀가 필요해 별건으로 둔다.
+- **음성 지연 남은 것**(§4.5) — ① 소프트웨어 클록(`PJSUA_DEFAULT_SND_USE_SW_CLOCK`)의 녹음·재생 지연 버퍼(`sound_port.c` `cap_dbuf`·`play_dbuf`)와
+  클록 콜백 순서(재생 get → 녹음 put 이라 마이크 프레임이 다음 틱에 나간다, +20 ms) ② 녹음 경로(`AudioRecord` 최소 버퍼·VOICE_COMMUNICATION 전처리)
+  ③ Oboe/AAudio 백엔드(단말 기본 속도·FAST 경로) ④ 지터 버퍼의 TS 26.114 §8 최소 성능 요건 대조(GSMA IR.92 §3.2.6)·통화 중 Wi-Fi 저지연 잠금
+  ⑤ AMR-WB 대역 효율 형식 요청(IR.92 §3.2.5 — 지금은 octet-align 만 제안) ⑥ 단말 AEC 와 Speex AEC 이중(`common.h` 의 «Android 는 Speex AEC 가
+  빠져 있다» 주석과 달리 Android 빌드에도 Speex AEC 가 켜져 있다).
 - **Windows 오디오 이중 출력** — 재생 라우트(재생 전용 `ExtraAudioDevice`)의 WMME 지연·에코·장치 점유 실측. WMME 가 부족하면
   데스크톱 WASAPI 백엔드(`IMMDeviceEnumerator`+`IAudioClient` 공유 모드 — 2.16 의 UWP 전용 구현과 별개 파일)를 엔진 패치로 추가.
 - **Windows 영상 남은 것** — 카메라 핫플러그 재열거(장치는 엔진 기동 때 한 번 열거 — `pjmedia_vid_dev_refresh` 노출), MJPG·NV12 만 내는 카메라(DirectShow 형식 표에 없다 —

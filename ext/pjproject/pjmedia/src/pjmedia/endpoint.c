@@ -722,6 +722,29 @@ pjmedia_endpt_create_audio_sdp(pjmedia_endpt *endpt,
     }
 #endif
 
+#if defined(PJMEDIA_CIMS_SDP_PTIME) && PJMEDIA_CIMS_SDP_PTIME > 0
+    /* CIMS: 받을 패킷 크기를 SDP 로 요청한다 — GSMA IR.92 §3.2.5 «request to receive one speech frame
+     * encapsulated in each RTP packet, but must accept any number of frames per RTP packet, up to … 12»
+     * (Note 1: ptime 20 · maxptime 240). offer·answer 모두 이 함수가 만든다(RFC 3264 §5 — ptime 은 받고 싶은
+     * 크기). 상대가 보낸 ptime·maxptime 은 stream_info.c 가 송신 frm_per_pkt·tx_maxptime 으로 따른다. */
+    {
+        char pbuf[16];
+
+        pj_ansi_snprintf(pbuf, sizeof(pbuf), "%d", PJMEDIA_CIMS_SDP_PTIME);
+        attr = PJ_POOL_ZALLOC_T(pool, pjmedia_sdp_attr);
+        attr->name = pj_str("ptime");
+        attr->value = pj_strdup3(pool, pbuf);
+        m->attr[m->attr_count++] = attr;
+#  if defined(PJMEDIA_CIMS_SDP_MAXPTIME) && PJMEDIA_CIMS_SDP_MAXPTIME > 0
+        pj_ansi_snprintf(pbuf, sizeof(pbuf), "%d", PJMEDIA_CIMS_SDP_MAXPTIME);
+        attr = PJ_POOL_ZALLOC_T(pool, pjmedia_sdp_attr);
+        attr->name = pj_str("maxptime");
+        attr->value = pj_strdup3(pool, pbuf);
+        m->attr[m->attr_count++] = attr;
+#  endif
+    }
+#endif
+
     /* Put bandwidth info in media level using bandwidth modifier "TIAS"
      * (RFC3890).
      */

@@ -646,7 +646,7 @@ M1.3 영상통화에서 **발신 카메라 캡처와 셀프뷰**가 동작하려
 | clock/ch | 16000/1 | 코덱 등록 고정 | |
 | **octet-align** | **1** | enc_fmtp + dec_fmtp 양쪽 명시 주입 | And-Media 코덱 테이블 기본 fmtp가 `octet-align=1`(2.16 `:346`)이라 기본 정합 — 그래도 **양쪽 명시 주입 + 와이어샷 게이트 유지**(협상 경로가 수신 SDP 값을 enc/dec 양쪽에 그대로 적용하므로 상대 미광고/0 광고 시 흐트러질 수 있음) |
 | mode-set | 0,1,2 | fmtp 주입 | **opencore 인코더는 advertised mode-set 집합 내 최근접 모드 선택** → 양측이 0,1,2 광고하면 인코더 출력도 0,1,2로 수렴(별도 enc 클램프 코드 불필요). 서버가 mode-set 미광고 시 fallback만 verify |
-| ptime | 20 | 기본 20ms | 1프레임/패킷 |
+| ptime | 20 | SDP `a=ptime:20`·`a=maxptime:240`(pjmedia CIMS 패치) + 코어 `frmPerPkt = 1` | 1프레임/패킷 — GSMA IR.92 §3.2.5, [ue_sdk.md](ue_sdk.md) §4.5 |
 
 > **octet-align 불일치(0 vs 1)는 프레임 바운더리 오해석으로 즉시 음성 깨짐.** M1.2 첫 캡처에서 양 leg `a=fmtp:99 octet-align=1` 확인을 필수 게이트로.
 

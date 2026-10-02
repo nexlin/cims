@@ -14,6 +14,9 @@ psip·opencore-amr 처럼 "수정해서 쓰는 외부 소스는 `ext/` 에 커�
   |---|---|---|
   | AMR-WB codec_setting NULL 크래시 | `pjmedia/src/pjmedia-codec/and_aud_mediacodec.cpp` | upstream 2.16 버그 — And-Media AMR-WB 열기 시 NULL 역참조 방지 |
   | AMR 인코더 스톨 워치독 (`enc_fail_watchdog`) | 같은 파일 | MediaCodec 인코더 무응답 시 재기동 |
+  | 같은 프레임 출력 (`and_med_take_output`) | 같은 파일 | 입력을 넣은 뒤 그 프레임의 출력을 최대 8 ms 기다리고 앞서 놓친 늦은 출력은 버린다 — 비동기 출력 큐를 곧바로 보면 이전 프레임을 꺼내 밀림(20 ms × 놓친 수)이 통화 끝까지 남았다(ue_sdk.md §4.5) |
+  | 오디오 SDP `a=ptime`·`a=maxptime` (`PJMEDIA_CIMS_SDP_PTIME`/`MAXPTIME`) | `pjmedia/src/pjmedia/endpoint.c` | 받을 때 패킷당 프레임 하나 요청·12 프레임까지 수용 — GSMA IR.92 §3.2.5 (offer·answer 모두) |
+  | 저지연 재생 트랙 (`cims_build_track` — `AudioTrack.Builder` + `PERFORMANCE_MODE_LOW_LATENCY`, `cims_trim_track_buffer` — `setBufferSizeInFrames` 2 프레임, 정지 때 끊김 수 로그) | `pjmedia/src/pjmedia-audiodev/android_jni_dev.c` | Android 전용 — 블로킹 write 가 최소 버퍼를 늘 채워 전부가 재생 지연이던 것을 줄인다. 스트림 종류는 `setLegacyStreamType` 으로 옛 생성자와 같다(분리 라우팅 유지) |
   | H.264 IDR 주기 2초 (`KEYFRAME_INTERVAL 2`) · 발신 비트레이트 상한 500kbps + CBR (`cims_br`) | `pjmedia/src/pjmedia-codec/and_vid_mediacodec.cpp` | 영상 정합·대역 상한 |
   | pjsua2 `StreamInfo::fromPj` NULL codec-param 가드 · sockaddr AF 가드 (`cims_print_sockaddr_safe`) | `pjsip/src/pjsua2/call.cpp` | 협상 실패/비 RTP 슬롯에서의 SIGABRT 방지 |
   | `stream_info.c` si->param zero-init · `pjsua_txt` 비-RTP m=text 슬롯 스트림 생성 스킵 | `pjmedia/src/pjmedia/stream_info.c`, `pjsip/src/pjsua-lib/pjsua_txt.c` | MSRP(m=message/TCP) 슬롯을 RTP 스트림으로 열지 않음 |

@@ -1791,6 +1791,10 @@ void Engine::Impl::applyCodecPolicy() {
             f.push_back(oa); f.push_back(ms);
             cp.setting.encFmtp = f;
             cp.setting.decFmtp = f;
+            // 패킷당 한 프레임(20 ms) — 상대가 ptime 을 싣지 않았을 때 보내는 크기. Android MediaCodec 백엔드의 기본은 2(40 ms)라
+            //   송신 20 ms·상대 지터버퍼 몰림이 늘었다. 우리 SDP 는 ptime 20 을 요청한다(config_site PJMEDIA_CIMS_SDP_PTIME —
+            //   GSMA IR.92 §3.2.5), 상대가 ptime 을 실으면 stream_info 가 그 값을 따른다.
+            cp.setting.frmPerPkt = 1;
             ep->codecSetParam(amrwb, cp);
         } catch (pj::Error& e) { log(2, std::string("AMR-WB fmtp: ") + e.info(false)); }
     } else {
