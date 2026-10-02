@@ -660,7 +660,8 @@ REGISTER/SUBSCRIBE/NOTIFY 의 헤더·본문을 상용 IMS 캡처 기준으로 �
   따른다). on-network 를 끈 그룹(`on_network`=0)은 `<on-network-disabled/>`(§7.2.2 g)) — XCAP PUT 은 요소가 있으면 끄고 없으면 그대로
   둔다(호의 403 115 판정은 CSP 몫 — 미구현). 멤버 규칙 actions 에 `<on-network-allow-getting-member-list>true`(없으면 false — 멤버가
   명단을 못 읽는다, §7.2.12.1). 그룹·멤버 우선순위는 priorityType 0~255(§7.2.4.2, 값이 클수록 높다) — 관리 API·XCAP PUT 이 범위 밖을
-  400 으로 거절하고, 범위 밖 저장값은 문서에서 경계로 자른다.
+  400 으로 거절하고, 범위 밖 저장값은 문서에서 경계로 자른다. MCData 그룹(SDS·FD 허용)의 서버 결정 값(보호 둘 false·송신 인가 true·
+  그룹 우선순위·charset 106) = [mcdata_messaging.md](mcdata_messaging.md) §2.
 - **그룹 호 타이머 요소**(TS 24.481 §7.2.2 o)p)·§7.2.7) — 문서에 0 을 싣지 않는다: T4 0 = `<on-network-hang-timer>` 생략(요소가
   없으면 T4 를 걸지 않는다), chat 그룹 = `<on-network-maximum-duration>` 생략(TNG3 를 돌리지 않는다 — TS 24.379 §6.3.3.5.1 은
   요소가 있을 때만 켜고 chat 은 선택). XCAP PUT 은 요소가 없으면 기존값을 둔다.
@@ -683,7 +684,7 @@ REGISTER/SUBSCRIBE/NOTIFY 의 헤더·본문을 상용 IMS 캡처 기준으로 �
   아니면 `max_calls_n6`(기본 5) — `user_max_calls_n6`. 판정 데이터는 역할 배정 한 곳이고, CSP 의 역할 맵(`CCspRoleMap::SelectForLine`)과
   같은 펼침이라 집행(486 + `103`, TS 24.379 §10.1.1.3.1.1 5))도 같은 판정을 쓴다(CSP 집행은 미구현 — 갭 GCS-6). 역할 배정·해제로 판정이
   바뀌면 CSC 가 그 사람의 PTT 회선마다 `USER_CHANGED` 를 보내 user-profile xcap-diff 가 나간다. 모든 `<entry>` 에 `index`(§8.3.2.1 —
-  목록 안에서 유일), 소속 그룹이 없어도 `<MCPTTGroupInfo>` 를 싣는다(10)b), 빈 목록은 XSD 가 허용).
+  목록 안에서 유일)·`<ProSeUserID-entry>` 에도 `index`, 소속 그룹이 없어도 `<MCPTTGroupInfo>` 를 싣는다(10)b), 빈 목록은 XSD 가 허용).
   PTT 그룹 호 청취 자격은 `<cims:allow-ambient-listening>`(CIMS 확장) — 비멤버 관제사의 recvonly 합류 자격([dispatch_center.md](dispatch_center.md) §5.6)이라
   규격 ambient listening(TS 24.379 원격·로컬 개시 1:1 호, anyExt `<allow-request-remote-/locally-initiated-ambient-listening>`)과 다른 것이다.
   §8.3.2.1 이 "shall" 로 요구하는 긴급 요소(8d ii·8e ii~iv·10f)는 **대상 미지정에도 항상 싣고**, 미지정은 entry-info 로 표현한다
@@ -700,7 +701,8 @@ REGISTER/SUBSCRIBE/NOTIFY 의 헤더·본문을 상용 IMS 캡처 기준으로 �
   §6.3.8.2), 0 인 자식 생략 · `<transmit-time><time-limit>` · `<fc-timers-counters>` 17 요소 필수 · `<emergency-/imminent-peril-/normal-resource-priority>`
   필수, 각 namespace·priority · `<signalling-protection>` 의 `<confidentiality-protection>`·`<integrity-protection>` = false(없으면 true 로 읽혀
   단말이 mcptt-info 를 CSK 로 암호화·서명한다 — §8.4.2.6·TS 24.379 §6.6.2.3.1·§6.6.3.3.1. CIMS 는 시그널링 XML 보호를 하지 않고 구간 보호는
-  SIP TLS) · `<anyExt><adhoc-group-call>` — 필수 `<allow-adhoc-group-call-support>`·`<max-no-participants>` 뒤 T4
+  SIP TLS) · `<protection-between-mcptt-servers>` 의 `<allow-signalling-protection>`·`<allow-floor-control-protection>` = false(서버 간 보호 —
+  없으면 true, 서버 간 연동 없음) · `<anyExt><adhoc-group-call>` — 필수 `<allow-adhoc-group-call-support>`·`<max-no-participants>` 뒤 T4
   `<hang-time>`·일제 T4 `<broadcast-hang-time>`·TNG3 `<max-duration-of-call>`(§17.4.2.2 13)). 요소가 없으면 «애드혹 미지원»(§8.4.2.6)이라
   늘 싣는다). 값 = CSC 설정 `ServiceConfig.PrivateCall.*`·`ServiceConfig.AdhocGroupCall.*`(시간 ms, 0 = 요소 생략 = 미가동).
   CSP 는 `<private-call>`·`<adhoc-group-call>` 의 시간 값을 개별·애드혹 세션의 T4(`floor_timers.t4_inactivity`)·최대 시간으로 쓴다.

@@ -1435,6 +1435,8 @@ def _is_group_member(group: dict, uri: str) -> bool:
 # 그룹 문서 <preferred-voice-encodings> 값 — CSP 그룹 호의 서비스 코덱(Setup.Media.Codecs 첫 항목, psip 기본 AMR-WB)과 같아야 한다.
 #   MCVideo 그룹의 선호 음성 코덱 기본(services.mcvideo.GROUP_ATTR_DEFAULTS audio_encodings)과도 같은 값이다.
 SERVICE_VOICE_ENCODING = "AMR-WB"
+# 그룹 문서 <mcdata-default-charset> — IANA Character Sets 의 MIBenum(TS 24.282 §6.2.2.1). 106 = UTF-8.
+MCDATA_TEXT_CHARSET_MIBENUM = 106
 
 
 def _priority_type(v, default: int = 0) -> int:
@@ -1539,9 +1541,18 @@ def get_group_xml(group_uri):
     if not group.get('on_network', True):
         xml += """
     <mcpttgi:on-network-disabled/>"""
+    # MCData 몫(§7.2.2 MCData 목록 순) — 보호 둘은 없으면 true(GDK 로 보호 필수, §7.2.8)라 false 를 명시한다(E2E 미구현 — MCPTT·MCVideo
+    #   몫과 같다). 그룹 우선순위는 MCPTT 와 같은 값(한 그룹 = 서비스 집합, 없으면 «가장 낮음» 으로 읽힌다).
+    if has_mcdata:
+        xml += """
+    <mcpttgi:mcdata-protect-media>false</mcpttgi:mcdata-protect-media>
+    <mcpttgi:mcdata-protect-transmission-control>false</mcpttgi:mcdata-protect-transmission-control>"""
     xml += f"""
     <mcpttgi:mcdata-allow-short-data-service>{sds_val}</mcpttgi:mcdata-allow-short-data-service>
     <mcpttgi:mcdata-allow-file-distribution>{fd_val}</mcpttgi:mcdata-allow-file-distribution>"""
+    if has_mcdata:
+        xml += f"""
+    <mcpttgi:mcdata-on-network-group-priority>{grp_priority}</mcpttgi:mcdata-on-network-group-priority>"""
     if max_sds > 0:
         xml += f"""
     <mcpttgi:mcdata-on-network-max-data-size-for-SDS>{max_sds}</mcpttgi:mcdata-on-network-max-data-size-for-SDS>"""
@@ -1549,6 +1560,10 @@ def get_group_xml(group_uri):
     if max_auto > 0:
         xml += f"""
     <mcpttgi:mcdata-on-network-max-data-size-auto-recv>{max_auto}</mcpttgi:mcdata-on-network-max-data-size-auto-recv>"""
+    # 그룹 SDS 의 TEXT payload 문자 집합(§7.2.2 r) — IANA MIBenum, TS 24.282 §6.2.2.1). CIMS 의 SDS 본문은 UTF-8 이다.
+    if has_mcdata:
+        xml += f"""
+    <mcpttgi:mcdata-default-charset>{MCDATA_TEXT_CHARSET_MIBENUM}</mcpttgi:mcdata-default-charset>"""
     # 그룹 영상은 MCVideo <service>(TS 24.481 §7.2.8)로 싣는다 — MCPTT 몫에는 영상 요소가 없다(mcvideo.md §8).
     xml += f"""
     <mcpttgi:on-network-invite-members>{invite_members}</mcpttgi:on-network-invite-members>"""
@@ -1592,6 +1607,11 @@ def get_group_xml(group_uri):
           <mcpttgi:on-network-allow-conference-state>{conf_state_val}</mcpttgi:on-network-allow-conference-state>"""
     if mcvideo_attrs is not None:
         xml += _mcvideo.actions_xml(mcvideo_attrs)
+    # 멤버의 그룹 데이터 송신 인가(§7.2.2 MCData actions b)) — 없으면 false 라 규격 단말·제어 기능이 «이 그룹에는 아무도 못 보낸다»
+    #   로 읽는다(TS 24.282 §11.1 2)). CIMS 의 송신 권한은 멤버 단위로 가르지 않는다 — 멤버면 보낸다.
+    if has_mcdata:
+        xml += """
+          <mcpttgi:mcdata-allow-transmit-data-in-this-group>true</mcpttgi:mcdata-allow-transmit-data-in-this-group>"""
     # MCPTT <service> — enabler = MCPTT ICSI (TS 24.481 §7.2.2, ICSI 는 TS 24.379). MCVideo 그룹이면 MCVideo <service> 를 더한다.
     xml += f"""
         </cp:actions>
@@ -1809,8 +1829,8 @@ def get_user_profile_xml(user_uri, owner_uid=None):
     pr_uri = f"tel:{precip}" if precip else (first_contact or user_uri)
     pr_entry = et('entry', pr_uri, None, 'UsePreConfigured' if preconfigured else 'LocallyDetermined', index=1)
     # ProSe(off-network) 미지원 — MCPTTPrivateRecipientEntryType 의 필수 자식 ProSeUserID-entry 는 User-Info-ID 영값
-    #   (6옥텟 hex, §8.3.2.7 "shall be 6 octets")로 채운다.
-    prose_entry = '<ProSeUserID-entry><User-Info-ID>000000000000</User-Info-ID></ProSeUserID-entry>'
+    #   (6옥텟 hex, §8.3.2.7 "shall be 6 octets")로 채운다. "index" 속성은 필수다(§8.3.2.1 «The <ProSeUserID-entry> elements: 4)»).
+    prose_entry = '<ProSeUserID-entry index="1"><User-Info-ID>000000000000</User-Info-ID></ProSeUserID-entry>'
 
     def _b(k, default=True):
         return "true" if prof.get(k, default) else "false"
@@ -1927,6 +1947,7 @@ def get_service_config_xml(user_uri):
       값이 0 인 자식은 싣지 않고 셋 다 0 이면 요소째 생략 · <transmit-time><time-limit> · <fc-timers-counters> 필수 ·
       <signalling-protection> 둘 다 false(요소가 없으면 true 로 읽혀 단말이 mcptt-info 를 CSK 로 암호화·서명한다 — §8.4.2.6 ·
       TS 24.379 §6.6.2.3.1·§6.6.3.3.1. CIMS 는 시그널링 XML 보호를 하지 않고 구간 보호는 SIP TLS 다 — MCVideo 문서와 같다) ·
+      <protection-between-mcptt-servers> 둘 다 false(서버 간 보호 — 없으면 true, §8.4.2.6 NOTE 4. CIMS 는 서버 간 연동을 하지 않는다) ·
       <emergency-/imminent-peril-/normal-resource-priority> 필수 — 각 <resource-priority-namespace>·<resource-priority-priority> ·
       <anyExt><adhoc-group-call> — 필수 자식 <allow-adhoc-group-call-support>·<max-no-participants> 뒤에 <hang-time>(T4)·
       <broadcast-hang-time>(일제 애드혹 호의 T4)·<max-duration-of-call>(TNG3), 값이 0 인 시간 요소는 싣지 않는다).
@@ -2026,6 +2047,10 @@ def get_service_config_xml(user_uri):
         <confidentiality-protection>false</confidentiality-protection>
         <integrity-protection>false</integrity-protection>
       </signalling-protection>
+      <protection-between-mcptt-servers>
+        <allow-signalling-protection>false</allow-signalling-protection>
+        <allow-floor-control-protection>false</allow-floor-control-protection>
+      </protection-between-mcptt-servers>
 {_rp('emergency-resource-priority', 'Emergency')}
 {_rp('imminent-peril-resource-priority', 'ImminentPeril')}
 {_rp('normal-resource-priority', 'Normal')}

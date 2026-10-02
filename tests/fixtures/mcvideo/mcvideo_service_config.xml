@@ -6,6 +6,10 @@
         <confidentiality-protection>false</confidentiality-protection>
         <integrity-protection>false</integrity-protection>
       </signalling-protection>
+      <protection-between-mcvideo-servers>
+        <allow-signalling-protection>false</allow-signalling-protection>
+        <allow-transmission-control-protection>false</allow-transmission-control-protection>
+      </protection-between-mcvideo-servers>
       <emergency-resource-priority>
         <resource-priority-namespace>mcpttp</resource-priority-namespace>
         <resource-priority-priority>15</resource-priority-priority>

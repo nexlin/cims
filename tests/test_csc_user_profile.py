@@ -305,6 +305,7 @@ class UserProfileDocTest(unittest.TestCase):
         self.assertTrue(entries)
         for e in entries:
             self.assertTrue(e.get("index"), "모든 <entry> 에 index")
+        self.assertEqual(root.find(".//up:ProSeUserID-entry", NS).get("index"), "1", "§8.3.2.1 ProSeUserID-entry 도 index 필수")
         idx = [e.get("index") for e in root.findall("up:OnNetwork/up:MCPTTGroupInfo/up:entry", NS)]
         self.assertEqual(idx, ["1", "2"], "목록 안에서 유일")
         m.GROUPS.clear()
@@ -586,8 +587,11 @@ class ServiceConfigDocTest(unittest.TestCase):
         # 스키마 시퀀스(on-networkType) — private-call · transmit-time · fc-timers-counters · RP 셋 · anyExt, 그 순서
         tags = [c.tag.split("}")[1] for c in on]
         self.assertEqual(tags, ["private-call", "transmit-time", "fc-timers-counters", "signalling-protection",
-                                "emergency-resource-priority", "imminent-peril-resource-priority", "normal-resource-priority",
-                                "anyExt"])
+                                "protection-between-mcptt-servers", "emergency-resource-priority",
+                                "imminent-peril-resource-priority", "normal-resource-priority", "anyExt"])
+        # 서버 간 보호 둘도 없으면 true(§8.4.2.6 NOTE 4) — false 명시
+        self.assertEqual([(c.tag.split("}")[1], c.text) for c in on.find("sc:protection-between-mcptt-servers", SC)],
+                         [("allow-signalling-protection", "false"), ("allow-floor-control-protection", "false")])
         # <signalling-protection> 둘은 없으면 true(§8.4.2.6) — 단말이 mcptt-info 를 암호화·서명하지 않게 false 를 명시한다
         #   (TS 24.379 §6.6.2.3.1·§6.6.3.3.1)
         sp = on.find("sc:signalling-protection", SC)

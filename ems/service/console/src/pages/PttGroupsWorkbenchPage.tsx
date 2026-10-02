@@ -40,6 +40,10 @@ const ACK_TIMEOUT_MAX = 300
 const MCV_TRANSMITTERS_MAX = 16
 const MCV_RECEPTION_HANG_MAX = 3600
 const MCV_PRIORITY_MAX = 255
+/** MCVideo 그룹 선호 코덱 — 서버가 집행하는 코덱만 받는다(CSC services/mcvideo.py SUPPORTED_ENCODINGS, mcvideo.md §7 D13). 그 밖의 이름은
+ *  문서대로 offer 한 단말이 488 이 되므로 고르는 칸이 아니라 고정 표시다. */
+const MCV_AUDIO_ENCODINGS = ['AMR-WB']
+const MCV_VIDEO_ENCODINGS = ['H264']
 
 function Caret({ open }: { open: boolean }) {
   return <span className="text-muted-foreground inline-flex">
@@ -232,8 +236,6 @@ function GroupDrawer(p: GroupDrawerProps) {
   const mcvWas = !!existing?.mcvideo
   const [mcvOn, setMcvOn] = useState(mcvWas)
   const [mcv, setMcv] = useState<McVideoGroupAttrs>(() => ({ ...MCVIDEO_GROUP_DEFAULTS, ...(existing?.mcvideo || {}) }))
-  const [mcvAudio, setMcvAudio] = useState(() => mcv.audio_encodings.join(', '))
-  const [mcvVideo, setMcvVideo] = useState(() => mcv.video_encodings.join(', '))
   const [mcvPrio, setMcvPrio] = useState(() => mcv.group_priority == null ? '' : String(mcv.group_priority))
   // 소유자 표시명 (피커 선택 결과 보존)
   const [ownerName, setOwnerName] = useState<string>(existing?.authorized_user_name || '')
@@ -265,14 +267,11 @@ function GroupDrawer(p: GroupDrawerProps) {
     if (legacyVideo) body.video_enabled = legacyVideoOn
     // mcvideo: 켬 = 객체(이 화면이 다루는 키만 — 해상도·프레임률은 그대로 둔다) · 끔 = null · 처음부터 꺼져 있던 그룹은 키를 싣지 않는다
     if (mcvOn) {
-      const split = (t: string) => t.split(/[,\s]+/).map(x => x.trim()).filter(Boolean)
-      const audio = split(mcvAudio), video = split(mcvVideo)
-      if (!audio.length || !video.length) { show('MCVideo 선호 코덱은 음성·영상 각각 하나 이상 적는다', 'err'); return }
       const prio = mcvPrio.trim()
       body.mcvideo = {
         invite_members: mcv.invite_members, max_transmitters: mcv.max_transmitters, max_duration_sec: mcv.max_duration_sec,
         reception_hang_timer_sec: mcv.reception_hang_timer_sec, min_number_to_start: mcv.min_number_to_start,
-        group_priority: prio === '' ? null : Number(prio), audio_encodings: audio, video_encodings: video,
+        group_priority: prio === '' ? null : Number(prio), audio_encodings: MCV_AUDIO_ENCODINGS, video_encodings: MCV_VIDEO_ENCODINGS,
         allow_conference_state: mcv.allow_conference_state,
       }
     } else if (mcvWas) {
@@ -520,8 +519,8 @@ function GroupDrawer(p: GroupDrawerProps) {
                     </Field>
                     <Field label="선호 코덱(음성 · 영상)">
                       <div className="flex gap-1.5">
-                        <Input className="font-mono" title="mcvideo-preferred-audio-encodings — rtpmap 이름, 쉼표로 여럿" value={mcvAudio} onChange={e => setMcvAudio(e.target.value)} />
-                        <Input className="font-mono" title="mcvideo-preferred-video-encodings — rtpmap 이름, 쉼표로 여럿" value={mcvVideo} onChange={e => setMcvVideo(e.target.value)} />
+                        <Input className="font-mono" disabled title="mcvideo-preferred-audio-encodings — 서버가 받는 음성 코덱(고정)" value={MCV_AUDIO_ENCODINGS.join(', ')} />
+                        <Input className="font-mono" disabled title="mcvideo-preferred-video-encodings — 서버가 받는 영상 코덱(고정)" value={MCV_VIDEO_ENCODINGS.join(', ')} />
                       </div>
                     </Field>
                   </div>

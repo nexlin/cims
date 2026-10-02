@@ -885,7 +885,7 @@ Content-Type: application/json
 | `invite_members` | boolean | false | `<mcvideo-on-network-invite-members>` — true = prearranged(멤버 초대), false = chat |
 | `max_duration_sec` | integer | 0~86400, 3600 | `<mcvideo-on-network-maximum-duration>`(TNG3, 0 = 무제한) |
 | `max_transmitters` | integer | 1~16, 2 | `<mcvideo-maximum-simultaneous-mcvideo-transmitting-group-members>` — 동시 송출 상한 |
-| `audio_encodings` / `video_encodings` | array\|string | `["AMR-WB"]` / `["H264"]` | `<mcvideo-preferred-audio-encodings>`·`<mcvideo-preferred-video-encodings>` — rtpmap 인코딩 이름 선호순(쉼표 문자열도 받는다), 비울 수 없다 |
+| `audio_encodings` / `video_encodings` | array\|string | `["AMR-WB"]` / `["H264"]` | `<mcvideo-preferred-audio-encodings>`·`<mcvideo-preferred-video-encodings>` — rtpmap 인코딩 이름(쉼표 문자열도 받는다), 비울 수 없다. **서버가 집행하는 코덱만** 받는다(음성 `AMR-WB` · 영상 `H264`, 대소문자 무시) — 그 밖의 이름은 400(문서대로 offer 한 단말이 488 이 된다, mcvideo.md §7 D13) |
 | `video_resolutions` / `video_frame_rate` | string\|null | null | `<mcvideo-preferred-video-resolutions>`·`<mcvideo-preferred-video-frame-rate>` — null = 요소 생략 |
 | `reception_hang_timer_sec` | integer | 0~3600, 30 | `<on-network-reception-hang-timer>`(T5, TS 24.581 §11.1.3) |
 | `min_number_to_start` | integer | 0~65535, 0 | `<mcvideo-on-network-minimum-number-to-start>` |

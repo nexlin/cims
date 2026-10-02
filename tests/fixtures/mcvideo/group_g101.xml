@@ -31,10 +31,14 @@
         <mcpttgi:mcdata-mcdata-id uri="tel:+82510002003"/>
       </entry>
     </list>
+    <mcpttgi:mcdata-protect-media>false</mcpttgi:mcdata-protect-media>
+    <mcpttgi:mcdata-protect-transmission-control>false</mcpttgi:mcdata-protect-transmission-control>
     <mcpttgi:mcdata-allow-short-data-service>true</mcpttgi:mcdata-allow-short-data-service>
     <mcpttgi:mcdata-allow-file-distribution>false</mcpttgi:mcdata-allow-file-distribution>
+    <mcpttgi:mcdata-on-network-group-priority>5</mcpttgi:mcdata-on-network-group-priority>
     <mcpttgi:mcdata-on-network-max-data-size-for-SDS>10000</mcpttgi:mcdata-on-network-max-data-size-for-SDS>
     <mcpttgi:mcdata-on-network-max-data-size-auto-recv>1048576</mcpttgi:mcdata-on-network-max-data-size-auto-recv>
+    <mcpttgi:mcdata-default-charset>106</mcpttgi:mcdata-default-charset>
     <mcpttgi:on-network-invite-members>true</mcpttgi:on-network-invite-members>
     <mcpttgi:preferred-voice-encodings><mcpttgi:encoding name="AMR-WB"/></mcpttgi:preferred-voice-encodings>
     <mcpttgi:on-network-require-affiliation>true</mcpttgi:on-network-require-affiliation>
@@ -79,6 +83,7 @@
           <mcpttgi:mcvideo-allow-emergency-alert>false</mcpttgi:mcvideo-allow-emergency-alert>
           <mcpttgi:mcvideo-allow-imminent-peril-call>false</mcpttgi:mcvideo-allow-imminent-peril-call>
           <mcpttgi:mcvideo-on-network-allow-conference-state>true</mcpttgi:mcvideo-on-network-allow-conference-state>
+          <mcpttgi:mcdata-allow-transmit-data-in-this-group>true</mcpttgi:mcdata-allow-transmit-data-in-this-group>
         </cp:actions>
       </cp:rule>
     </cp:ruleset>

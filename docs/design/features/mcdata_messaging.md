@@ -49,6 +49,12 @@ DB `ptt_groups` 컬럼이 SoT (마이그레이션 `sql/migrate_mcdata_sds.sql`, 
 - CSC 그룹문서 생성(`csc/src/services/mcptt.py get_group_xml`)이 위 요소 + `supported-services`
   의 MCData 서비스 enabler(`urn:urn-7:3gpp-service.ims.icsi.mcdata.sds` / `.fd`, allow 시에만)를
   방출한다.
+- MCData 그룹(SDS 또는 FD 허용)이면 **서버가 정하는 값**을 더 싣는다(TS 24.481 §7.2.2 MCData 목록·§7.2.8):
+  `<mcdata-protect-media>`·`<mcdata-protect-transmission-control>` = false(없으면 «GDK 로 보호 필수» 로 읽힌다 — E2E 미구현) ·
+  규칙 actions `<mcdata-allow-transmit-data-in-this-group>` = true(없으면 false = «이 그룹에는 아무도 못 보낸다», TS 24.282 §11.1 2) —
+  송신 권한은 멤버 단위로 가르지 않는다) · `<mcdata-on-network-group-priority>` = 그룹 우선순위(MCPTT 와 같은 값) ·
+  `<mcdata-default-charset>` = 106(UTF-8 의 IANA MIBenum — 그룹 SDS TEXT payload 의 문자 집합, TS 24.282 §6.2.2.1).
+  멤버별 `<mcdata-max-data-in-single-request>` 는 싣지 않는다 — 멤버 단위 상한을 두지 않는다(그룹 상한 = `max_sds_size`).
 - admin API(`/api/v1/ptt/groups`)로 네 필드 CRUD 가능. PUT 시 기존 `GROUP_CHANGED` notify 로
   CSP 가 무중단 재적재(`CDbManager::SelectGroup`).
 - **콘솔 그룹 편집 폼**(`ems/service/console/src/pages/PttGroupsWorkbenchPage.tsx`)에서 메시징/
@@ -361,6 +367,6 @@ CSP fan-out (하이브리드):
 - MSRPS(TLS)·배포 레그 실패 시 FILEURL 재시도 정책·media-plane disposition
 - Late entry(부재중 수신): 서버 보관분(§4.1 messages.jsonl) 기반 단말 pull API — 규격
   message store(IMAP)는 비실용, 자체 정의
-- 멤버 단위 송신권한 `<mcdata-allow-transmit-data-in-this-group>` (수신전용 멤버)
+- 멤버 단위 송신권한 — 수신전용 멤버(지금은 멤버 전원 `<mcdata-allow-transmit-data-in-this-group>` true)·멤버별 `<mcdata-max-data-in-single-request>`
 - 메시지·FD 파일 retention/purge (녹취와 공통 정리 메커니즘)
 - FD NOTIFICATION(다운로드 완료)·READ 통지

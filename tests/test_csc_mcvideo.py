@@ -308,15 +308,41 @@ class AdminApiTest(unittest.TestCase):
 
     def test_api_group_attrs_validation(self):
         self.assertEqual(mv.api_group_attrs(None), (None, None))
-        a, err = mv.api_group_attrs({"invite_members": True, "video_encodings": "H264, VP8", "video_resolutions": " "})
+        a, err = mv.api_group_attrs({"invite_members": True, "video_encodings": "h264", "audio_encodings": "amr-wb, AMR-WB",
+                                     "video_resolutions": " "})
         self.assertIsNone(err)
-        self.assertEqual(a["video_encodings"], ["H264", "VP8"], "쉼표 문자열도 목록으로")
+        self.assertEqual(a["video_encodings"], ["H264"], "쉼표 문자열도 목록으로 · 이름은 정본 표기로(대소문자 무시)")
+        self.assertEqual(a["audio_encodings"], ["AMR-WB", "AMR-WB"])
         self.assertIsNone(a["video_resolutions"], "빈 문자열 = 요소 생략(None)")
         for bad in ("on", [], {"max_transmitters": 17}, {"max_transmitters": 0}, {"invite_members": "yes"},
                     {"protect_media": True}, {"protect_transmission_control": True}, {"bogus": 1},
                     {"audio_encodings": []}, {"group_priority": 256}, {"video_frame_rate": 30}):
             with self.subTest(bad=bad):
                 self.assertIsNotNone(mv.api_group_attrs(bad)[1])
+
+    def test_preferred_encodings_only_server_codecs(self):
+        # mcvideo.md §7 D13(VSDP-1) — 그룹 선호 코덱은 서버가 집행하는 코덱(음성 AMR-WB · 영상 H.264)만. 그 밖의 이름을 받으면 문서대로 offer 한
+        #   단말이 488 이 된다(TS 24.281 §6.2.1 2)b)·3)b) · §9.2.2.4.1.1 9)).
+        for bad in ({"video_encodings": "H264, VP8"}, {"audio_encodings": ["EVS"]}, {"video_encodings": ["H265"]}):
+            with self.subTest(bad=bad):
+                a, err = mv.api_group_attrs(bad)
+                self.assertIsNone(a)
+                self.assertIn("not a codec the server accepts", err)
+        # XCAP PUT 도 같은 검사(공통 validate_attrs)
+        keep = FIXTURE_SCENARIO()
+        try:
+            doc = m.get_group_xml("tel:g101")[0]
+            self.assertIn('<mcpttgi:encoding name="H264"/>', doc)
+            with self.assertRaises(ValueError):
+                m.parse_group_document_xml(doc.replace('<mcpttgi:encoding name="H264"/>', '<mcpttgi:encoding name="H265"/>'))
+            self.assertEqual(m.parse_group_document_xml(doc)["mcvideo"]["video_encodings"], ["H264"])
+        finally:
+            _restore(keep)
+        # 옛 저장분에 다른 이름이 남아 있어도 문서에는 싣지 않는다
+        ls = ET.fromstring(mv.list_service_xml(dict(mv.GROUP_ATTR_DEFAULTS, audio_encodings="EVS,AMR-WB", video_encodings="H265")
+                                               ).join(('<x xmlns:mcpttgi="%s">' % mv.NS_GI, '</x>')))
+        self.assertEqual([e.get("name") for e in ls.find("gi:mcvideo-preferred-audio-encodings", NS)], ["AMR-WB"])
+        self.assertEqual([e.get("name") for e in ls.find("gi:mcvideo-preferred-video-encodings", NS)], ["H264"], "하나도 안 남으면 기본값")
 
     def test_update_without_mcvideo_key_leaves_mcvideo(self):
         cur = self._db()

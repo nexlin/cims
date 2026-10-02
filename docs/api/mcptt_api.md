@@ -68,7 +68,10 @@ XCAP(RFC 4825) 리소스 기반 — TS 24.481 Ut. 인증 = `Authorization: Beare
   (§7.2.2 g)) = on-network 를 끈 그룹 — GET 은 꺼진 그룹에만 싣고, PUT 은 요소가 있으면 끈다(없으면 그대로).
   GET 은 서버가 정하는 값을 더 싣는다 — `<mcpttgi:preferred-voice-encodings>`(서비스 코덱 AMR-WB, TS 24.379 §6.2.1 2)b) 단말 offer 가 따른다) ·
   `<mcpttgi:protect-media>`·`<mcpttgi:protect-floor-control-signalling>` false(없으면 GMK 필수로 읽힌다, §7.2.8 — E2E 미구현) · 규칙
-  actions `<mcpttgi:on-network-allow-getting-member-list>true`(멤버의 명단 열람, §7.2.12.1). PUT 은 이 셋을 읽지 않는다.
+  actions `<mcpttgi:on-network-allow-getting-member-list>true`(멤버의 명단 열람, §7.2.12.1) · MCData 그룹이면 `<mcpttgi:mcdata-protect-media>`·
+  `<mcpttgi:mcdata-protect-transmission-control>` false · `<mcpttgi:mcdata-on-network-group-priority>` · `<mcpttgi:mcdata-default-charset>` 106 ·
+  actions `<mcpttgi:mcdata-allow-transmit-data-in-this-group>true`([mcdata_messaging.md](../design/features/mcdata_messaging.md) §2). PUT 은 이 값들을 읽지 않는다.
+  MCVideo 선호 코덱은 서버가 집행하는 이름(AMR-WB·H264)만 — 그 밖은 400.
   `<mcpttgi:authorized-user>` 는 서버가 정한다(본문의 값 무시). floor 정책(`floor_policy`/`max_talkers`)은 관리 API 전용.
   entry 의 `<mcpttgi:participant-type>` 를 생략하면 **`participant` 로 저장**된다 — 그룹 소유(chair 권한)는 member role 이
   아니라 `authorized_user_id`(= 생성자)로 판정하므로, 생성자를 chair 로 표기하려면 자기 entry 에 `chair` 를 명시한다(앱 기본 동작).
@@ -136,9 +139,9 @@ MCPTT 설정 문서 (TS 24.484). ue-init-config 만 **익명 GET**(로그인 전
 |---|---|---|
 | GET  | `/org.3gpp.mcptt.ue-init-config/users/{instance}/{doc}` | 없음 (익명) |
 | GET  | `/org.3gpp.mcptt.user-profile/users/{user}/user-profile` | Bearer + 본인 + scope `ptt_config_management_service`. TS 24.484 §8.3.2 문서 — `<OnNetwork><MCPTTGroupInfo>` = 소속 그룹 목록(규격 단말의 그룹 소스, 없어도 빈 요소), `<PrivateCallList>` = 동료 연락처, 긴급 대상·`cp:ruleset` 인가, `<MaxSimultaneousCallsN6>` = 관제(역할 배정) 10 / 그 밖 5(콘솔 MCPTT 정책). 모든 `<entry>` 에 `index`. ETag 내용 파생 |
-| GET  | `/org.3gpp.mcptt.service-config/users/{user}/service-config` | Bearer + 본인. 전역 문서 — `<signalling-protection>` false/false(없으면 단말이 mcptt-info 를 암호화한다, TS 24.484 §8.4.2.6) · floor 타이머 · Resource-Priority |
+| GET  | `/org.3gpp.mcptt.service-config/users/{user}/service-config` | Bearer + 본인. 전역 문서 — `<signalling-protection>`·`<protection-between-mcptt-servers>` false/false(없으면 true — 단말이 mcptt-info 를 암호화한다, TS 24.484 §8.4.2.6) · floor 타이머 · Resource-Priority |
 | GET  | `/org.3gpp.mcvideo.user-profile/users/{user}/mcvideo-user-profile-<n>.xml` | Bearer + 본인 + scope `video_config_management_service`. TS 24.484 §9.3 MCVideo user profile — MCVideo 이용 자격(`mcvideo_user_profile` 행)이 없으면 404. `<MCVideoGroupInfo>` = 멤버인 MCVideo 그룹, `<MaxSimultaneousVideoStreams>` = 수신 상한([mcvideo.md](../design/features/mcvideo.md) §5.1) |
-| GET  | `/org.3gpp.mcvideo.service-config/global/mcvideo-service-config.xml` | Bearer + scope `video_config_management_service`. **전역 문서**(TS 24.484 §9.4.2.9) — `<signalling-protection>` false · Resource-Priority · `<tc-timers-counters-R14>`(CSC 설정 `McVideoServiceConfig.*`) |
+| GET  | `/org.3gpp.mcvideo.service-config/global/mcvideo-service-config.xml` | Bearer + scope `video_config_management_service`. **전역 문서**(TS 24.484 §9.4.2.9) — `<signalling-protection>`·`<protection-between-mcvideo-servers>` false · Resource-Priority · `<tc-timers-counters-R14>`(CSC 설정 `McVideoServiceConfig.*`) |
 
 user-profile 의 인가 `<cp:ruleset><cp:rule id="mcptt-user-authorisation"><cp:actions>` 값은 `ptt_user_profile`(admin API
 `…/users/{pid}/ptt/{msisdn}/profile`, [admin_api.md §6.8](admin_api.md))이다 — 규격 요소를 TS 24.484 §8.3.2.1 11) 목록 순으로 싣고

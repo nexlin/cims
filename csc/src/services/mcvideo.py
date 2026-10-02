@@ -45,6 +45,10 @@ GROUP_ATTR_DEFAULTS = {
     "protect_transmission_control": False,   # mcvideo-protect-transmission-control
     "allow_conference_state": True,          # mcvideo-on-network-allow-conference-state
 }
+# 그룹 선호 코덱으로 받는 이름 = 서버가 집행하는 코덱뿐이다(mcvideo.md §7 D13 — CSP 는 음성 AMR-WB · 영상 H.264 만 받고 그 밖의 offer 는
+#   488, TS 24.281 §9.2.2.4.1.1 9)). 그 밖의 이름을 그룹 선호로 두면 문서대로 offer 한 단말이 거절된다. 비교는 대소문자 무시
+#   (rtpmap encoding name — RFC 4566 §6), 저장·문서는 이 표기.
+SUPPORTED_ENCODINGS = {"audio_encodings": ("AMR-WB",), "video_encodings": ("H264",)}
 MAX_DURATION_MAX = 86400
 MAX_TRANSMITTERS_MAX = 16                    # CMP 동시 송출 상한(자원) — K6 계약 범위 1..16
 RECEPTION_HANG_TIMER_MAX = 3600
@@ -273,8 +277,23 @@ def validate_attrs(attrs: dict) -> Optional[str]:
         if err:
             return err
     for k in ("audio_encodings", "video_encodings"):
-        if k in attrs and attrs[k] is not None and not _split_list(attrs[k]):
-            return f"{k} needs at least one encoding name"
+        if k in attrs and attrs[k] is not None:
+            names = _split_list(attrs[k])
+            if not names:
+                return f"{k} needs at least one encoding name"
+            bad = [n for n in names if supported_encoding(k, n) is None]
+            if bad:
+                return (f"{k}: {', '.join(bad)} is not a codec the server accepts "
+                        f"(supported: {', '.join(SUPPORTED_ENCODINGS[k])})")
+            attrs[k] = [supported_encoding(k, n) for n in names]          # 정본 표기로
+    return None
+
+
+def supported_encoding(kind: str, name: str) -> Optional[str]:
+    """그룹 선호 코덱 이름 → 서버 집행 코덱의 정본 표기(대소문자 무시). 받지 않는 이름은 None."""
+    for c in SUPPORTED_ENCODINGS[kind]:
+        if c.lower() == (name or '').strip().lower():
+            return c
     return None
 
 
@@ -402,7 +421,8 @@ def list_service_xml(attrs: dict) -> str:
          f"</mcpttgi:mcvideo-protect-transmission-control>"
     for tag, key in (('mcvideo-preferred-audio-encodings', 'audio_encodings'),
                      ('mcvideo-preferred-video-encodings', 'video_encodings')):
-        names = _split_list(a[key]) or list(GROUP_ATTR_DEFAULTS[key])
+        # 저장값에 서버가 받지 않는 이름이 남아 있어도(옛 저장분) 문서에는 싣지 않는다 — 하나도 안 남으면 기본값
+        names = [n for n in (supported_encoding(key, x) for x in _split_list(a[key])) if n] or list(GROUP_ATTR_DEFAULTS[key])
         enc = "".join(f'<mcpttgi:encoding name="{_esc(n)}"/>' for n in names)
         x += f"\n    <mcpttgi:{tag}>{enc}</mcpttgi:{tag}>"
     if a.get('video_resolutions'):
@@ -521,9 +541,11 @@ def parse_group_attrs(ls, ns: dict):
     for k in ('protect_media', 'protect_transmission_control'):
         if attrs.get(k):
             raise ValueError(f'mcvideo-{k.replace("_", "-")} true needs end-to-end keys (not supported)')
-    err = validate_attrs({k: v for k, v in attrs.items() if v is not None})
+    given = {k: v for k, v in attrs.items() if v is not None}
+    err = validate_attrs(given)
     if err:
         raise ValueError(err)
+    attrs.update(given)                       # 선호 코덱 이름은 정본 표기로 바뀌어 온다
     return True, attrs
 
 
@@ -578,8 +600,10 @@ def get_user_profile_xml(user_uri: str):
     n6 = max(1, int(prof.get('max_calls_n6') or PROFILE_DEFAULTS['max_calls_n6']))
     streams = max(1, int(prof.get('max_video_streams') or PROFILE_DEFAULTS['max_video_streams']))
 
-    def et(tag, uri, name=None, info=None):
-        a = f' entry-info="{_esc(info)}"' if info else ''
+    def et(tag, uri, name=None, info=None, index=None):
+        # <entry> 는 "index" 를 가져야 한다(§9.3.2.1 «The <entry> elements: 2)» — 목록 안에서 유일)
+        a = f' index="{index}"' if index is not None else ''
+        a += f' entry-info="{_esc(info)}"' if info else ''
         dn = f'<display-name>{_esc(name)}</display-name>' if name else ''
         return f'<{tag}{a}><uri-entry>{_esc(uri)}</uri-entry>{dn}</{tag}>'
 
@@ -589,9 +613,12 @@ def get_user_profile_xml(user_uri: str):
                        key=lambda x: x[0])
     fallback_group = my_groups[0][0] if my_groups else user_uri
     fallback_name = my_groups[0][1].get('display_name') if my_groups else None
-    eg_entry = et('entry', fallback_group, fallback_name, 'UseCurrentlySelectedGroup')
-    pr_entry = et('entry', user_uri, None, 'LocallyDetermined')
-    prose = '<ProSeUserID-entry><User-Info-ID>000000000000</User-Info-ID></ProSeUserID-entry>'
+    eg_entry = et('entry', fallback_group, fallback_name, 'UseCurrentlySelectedGroup', index=1)
+    pr_entry = et('entry', user_uri, None, 'LocallyDetermined', index=1)
+    # <ProSeUserID-entry> = <DiscoveryGroupID>(3옥텟 hex)·<User-Info-ID>(6옥텟 hex)·"index" 필수(§9.3.2.1 «The <ProSeUserID-entry>
+    #   elements»). off-network(ProSe) 미지원이라 영값.
+    prose = ('<ProSeUserID-entry index="1"><DiscoveryGroupID>000000</DiscoveryGroupID>'
+             '<User-Info-ID>000000000000</User-Info-ID></ProSeUserID-entry>')
 
     common = f'<UserAlias><alias-entry index="1" xml:lang="{_esc(lang)}">{_esc(display_name)}</alias-entry></UserAlias>'
     common += et('MCVideoUserID', user_uri)
@@ -610,9 +637,9 @@ def get_user_profile_xml(user_uri: str):
     on = ''.join(f'<MCVideoGroupInfo>{et("MCVideo-Group-ID", g_uri, g.get("display_name"))}</MCVideoGroupInfo>'
                  for g_uri, g in my_groups)
     on += f'<MaxAffiliationsN2>{n2}</MaxAffiliationsN2>'
-    implicit = ''.join(et('entry', g_uri, g.get('display_name')) for g_uri, g in my_groups
-                       if any(_m._uri_eq(mb.get('uri'), user_uri) and mb.get('implicit_affiliation')
-                              for mb in g.get('members', [])))
+    implicit = ''.join(et('entry', g_uri, g.get('display_name'), index=i) for i, (g_uri, g) in enumerate(
+        [(g_uri, g) for g_uri, g in my_groups
+         if any(_m._uri_eq(mb.get('uri'), user_uri) and mb.get('implicit_affiliation') for mb in g.get('members', []))], 1))
     if implicit:
         on += f'<ImplicitAffiliations>{implicit}</ImplicitAffiliations>'
     on += f'<MaxSimultaneousVideoStreams>{streams}</MaxSimultaneousVideoStreams>'
@@ -652,7 +679,9 @@ def get_service_config_xml():
     """MCVideo service configuration 문서 (TS 24.484 §9.4.2) — 시스템 전역 1건 → (xml, etag).
 
     구조 = <service-configuration-info> › <service-configuration-params domain> › <on-network>(시퀀스: <signalling-protection>
-    선택 → emergency·imminent-peril·normal resource-priority 필수 → <anyExt><tc-timers-counters-R14>).
+    선택 → <protection-between-mcvideo-servers> 선택 → emergency·imminent-peril·normal resource-priority 필수 →
+    <anyExt><tc-timers-counters-R14>). <protection-between-mcvideo-servers> 의 둘도 없으면 true(§9.4.2.7 NOTE 1)라 false 를 명시한다
+    (서버 간 연동 없음).
     <signalling-protection> 의 둘은 **없으면 true**(XSD default, TS 24.281 §6.6.2.1·§6.6.3.1)라 false 를 명시한다 — CIMS 는
     MCVideo 시그널링 XML 보호(CSK)를 하지 않는다(구간 보호는 SIP TLS, mcvideo.md §7 D7). R14 요소 이름은 XSD 를 따른다
     (본문 "C7-reception-accepted"·"T103-receive-media-requset" 는 XSD 와 다르다 — mcvideo.md §9)."""
@@ -687,6 +716,10 @@ def get_service_config_xml():
         <confidentiality-protection>false</confidentiality-protection>
         <integrity-protection>false</integrity-protection>
       </signalling-protection>
+      <protection-between-mcvideo-servers>
+        <allow-signalling-protection>false</allow-signalling-protection>
+        <allow-transmission-control-protection>false</allow-transmission-control-protection>
+      </protection-between-mcvideo-servers>
 {_rp('emergency-resource-priority', 'Emergency')}
 {_rp('imminent-peril-resource-priority', 'ImminentPeril')}
 {_rp('normal-resource-priority', 'Normal')}

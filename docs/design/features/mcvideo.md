@@ -80,8 +80,8 @@ REGISTER 를 공유하는 독립 다이얼로그이고(TS 24.281 §7.1 «shares 
 | 긴급·임박·경보 | §4.6, §6.2.8.1.x, §11.2 | re-INVITE 상향·해제, MESSAGE 경보 — MCPTT 와 같은 모양, mcvideo-info 지시자 |
 | 1:1 · 방송 · pull · push · ambient viewing · ad hoc | §10.2 · §6.2.8.2 · §12.2 · §13.2 · §15 · §22 | 후속(§6 V8) |
 
-- **SDP offer**(§6.2.1): `m=audio`(코덱 = 그룹 `mcvideo-preferred-audio-encodings`, 구현 기본 AMR-WB) · `m=video`(코덱 = `mcvideo-preferred-video-encodings`,
-  구현 기본 H.264) · 전송 제어를 쓰면 `m=application <RTCP 포트> udp MCVideo` + `a=fmtp:MCVideo …`(TS 24.581 §4.3.3.1). answer 규칙 §6.2.2,
+- **SDP offer**(§6.2.1): `m=audio`(코덱 = 그룹 `mcvideo-preferred-audio-encodings` — CIMS 는 AMR-WB 만 받는다) · `m=video`(코덱 = `mcvideo-preferred-video-encodings`
+  — H.264 만. 그룹 선호는 서버가 집행하는 코덱으로만 둘 수 있다, §7 D13) · 전송 제어를 쓰면 `m=application <RTCP 포트> udp MCVideo` + `a=fmtp:MCVideo …`(TS 24.581 §4.3.3.1). answer 규칙 §6.2.2,
   참여 기능의 IP·포트·`mc_transmission_ssrc` 재작성 §6.3.2.1.1.1.
 - **fmtp**(TS 24.581 §12.1.2·§14): `mc_queueing` · `mc_priority`(1~255) · `mc_reception_priority` · `mc_granted` · `mc_implicit_request` · `mc_audio_ssrc` ·
   `mc_video_ssrc` · `mc_transmission_ssrc`. answer 는 파라미터를 더하지 않는다(§14.3.1), 제어 기능 `mc_priority` = min(offer, `<user-priority>`, 계층 수)
@@ -226,15 +226,19 @@ MCPTT 그룹 호는 **음성과 floor 만** 싣는다(TS 24.379·24.380 — MCPT
   MCPTT N2 와 따로 — 열은 `sql/migrate_mcvideo_n2.sql`, 열이 없는 DB 는 기본 4 로 집행하고 바꿀 수만 없다). 우선순위·조직명은 MCPTT 와 같은 설정. 마이그레이션이 `video_enabled=1` 그룹과 기존 PTT 회선 전부에 행을 만든다(§8).
 - **그룹 문서(GMS)** — `get_group_xml`: MCPTT `<service enabler>` = MCPTT ICSI, 규칙 = `<is-list-member>` 조건에 `<allow-initiate-conference>`·`<join-handling>`
   true(제어 기능의 개시·합류 인가 근거 — TS 24.281·24.379 §6.3.5.3·§6.3.5.4). MCVideo 그룹이면 MCVideo `<service>`(ICSI enabler, `<mcvideo-video-media>`) +
-  `<list-service>` MCVideo 속성(TS 24.481 §7.2.2 목록 순, 보호 둘 false 명시, 실시간 모드 = 비긴급 실시간 고정) + 규칙 action `mcvideo-*`(긴급·임박·경보
+  `<list-service>` MCVideo 속성(TS 24.481 §7.2.2 목록 순, 보호 둘 false 명시, 실시간 모드 = 비긴급 실시간 고정, 선호 코덱 = 서버 집행 코덱
+  `SUPPORTED_ENCODINGS`(음성 AMR-WB · 영상 H264)만 — 관리 API·XCAP PUT 이 그 밖의 이름을 400 으로 거절하고(대소문자 무시, 정본 표기로 저장),
+  옛 저장분의 다른 이름은 문서에 싣지 않는다) + 규칙 action `mcvideo-*`(긴급·임박·경보
   false — V8) + entry `<mcvideo-mcvideo-id uri>`. MCData 서비스가 있으면 entry `<mcdata-mcdata-id uri>`(§7.2.2 MCData entry c)). XCAP PUT 해석
   (`parse_group_document_xml`) = MCVideo `<service>` 가 있으면 켜고 속성 반영(보호 true·범위 밖 400). **전환기 규칙** — MCVideo `<service>` 가 없는 PUT 은
   MCVideo 상태를 건드리지 않는다(MCVideo 를 모르는 옛 단말의 PUT 이 서비스를 지우지 않게. 끄기는 관리 API. «부재 = 끔» 은 관제 앱 그룹 편집이 MCVideo 몫을 보존·편집하게 된 뒤(W4)).
 - **CMS** — `CMSXCAPROOT/org.3gpp.mcvideo.user-profile/users/<MCVideo ID>/mcvideo-user-profile-<n>.xml`(본인만·scope `video_config_management_service`·
   자격 행 없으면 404) · `CMSXCAPROOT/org.3gpp.mcvideo.service-config/global/mcvideo-service-config.xml`(전역 문서, TS 24.484 §9.4.2.9). user profile 의
   그룹 목록 = 이 사용자가 멤버인 MCVideo 그룹(`<MCVideoGroupInfo>` 하나에 하나), `<ImplicitAffiliations>` = 그중 멤버 `implicit_affiliation` 이 켜진 그룹
-  (MCPTT 문서와 같은 표시 — 그룹 = 서비스 집합), 상한 = `MaxSimultaneousVideoStreams`·N6·N2(회선 값 — MCPTT service config N2 가 아니다). service config =
-  `<signalling-protection>` false 명시 · Resource-Priority(MCPTT 네임스페이스 재사용, TS 24.281 §6.2.8.1.16) · `<tc-timers-counters-R14>` 17요소 전부
+  (MCPTT 문서와 같은 표시 — 그룹 = 서비스 집합), 상한 = `MaxSimultaneousVideoStreams`·N6·N2(회선 값 — MCPTT service config N2 가 아니다).
+  모든 `<entry>` 에 `index`, `<ProSeUserID-entry>` 는 `index`·`<DiscoveryGroupID>`(3옥텟)·`<User-Info-ID>`(6옥텟) 영값(§9.3.2.1 — off-network 미지원).
+  MCVideo 그룹 멤버가 아닌 자격자는 `<MCVideoGroupInfo>` 가 없고 긴급 대상 entry 는 본인 URI 다(그룹 호를 할 수 없는 퇴화 경우). service config =
+  `<signalling-protection>`·`<protection-between-mcvideo-servers>` false 명시(둘 다 없으면 true — §9.4.2.7 NOTE 1) · Resource-Priority(MCPTT 네임스페이스 재사용, TS 24.281 §6.2.8.1.16) · `<tc-timers-counters-R14>` 17요소 전부
   (설정 `McVideoServiceConfig.*`, 기본값 정본 = [mcvideo_tc_defs.yaml](mcvideo_tc_defs.yaml)). CSP 는 같은 문서를 `/internal/mcvideo/service-config` 로 받는다.
   xcap-diff 통지 축에 두 문서를 싣는 것은 CSP 몫(§5.2).
 - **ue-init-config** — `<anyExt><MCVideo-Service-Details>`(MCPTT → MCVideo → MCData 순, 설정 `UeInitConfig.ServiceDetails.McVideo.{Enable,ServerUri}` —
@@ -249,7 +253,7 @@ MCPTT 그룹 호는 **음성과 floor 만** 싣는다(TS 24.379·24.380 — MCPT
 - **콘솔** (위 API 를 쓴다) — 그룹 편집 «서비스» 절(`PttGroupsWorkbenchPage`): **MCPTT 음성** 카드(항상 켬 — 호 방식·동시 발언·T4·최대 통화 시간·
   확인 통화·긴급콜/긴급경보·참가자 정보 구독)와 **MCVideo 영상** 카드(켬/끔 = 저장 본문 `mcvideo` 객체/`null`, 처음부터 꺼져 있던 그룹은 키를 싣지
   않는다 · 호 방식 chat «원하는 사람이 합류»/prearranged «제휴 멤버를 초대» · 동시 송출 상한·TNG3·T5·시작 최소 응답·그룹 우선순위(비우면 생략)·
-  선호 코덱(음성·영상)·참가자 정보 구독 · 종단간 보호는 E2E(GMK) 전까지 비활성 · 해상도·프레임률은 화면에 없고 저장도 건드리지 않는다).
+  선호 코덱(음성·영상 — 서버가 받는 코덱 고정 표시, 고르는 칸이 아니다)·참가자 정보 구독 · 종단간 보호는 E2E(GMK) 전까지 비활성 · 해상도·프레임률은 화면에 없고 저장도 건드리지 않는다).
   그룹 목록·MCPTT 그룹 정보 화면(`/service/ptt-groups`, OAM 응답 `mcvideo` = `mcvideo_group_attrs` 행 유무)은 서비스 칩 MCPTT·MCVideo 로 보인다.
   가입자 PTT 회선 카드 «MCVideo 이용 자격»(`ProvisioningWorkbenchPage`) — 스위치 = 곧바로 부여(PUT)·회수(DELETE), 부여된 회선만 동시 수신 영상(C9)·
   동시 영상 호(N6) [상한 저장] · 표 없음(400 `schema_not_migrated`)은 «DB 마이그레이션 전»으로 표시. 진행 중 MCVideo 호는 다음 개시부터 반영된다.
@@ -537,6 +541,7 @@ Indicator, automatic 수신; 1차 CSP 는 normal) · JOIN 응답 `audio_ssrc`·`
 | D10 | 영상 채널 진입 | **확정 — «영상 참여» 단계 없음.** MCVideo 그룹(그룹 문서 MCVideo 몫)을 주채널로 고르면 MCVideo 호도 함께 합류한다(chat = 합류, prearranged = MCVideo affiliation + 멤버 초대 자동 수락), 채널을 나가거나 주채널을 바꾸면 함께 나간다 — TS 22.280 R-8.4.2-002(여러 서비스를 한 번의 논리적 제휴로). **MCVideo affiliation 도 채널을 따른다** — 들어가면 싣고 떠나면 단말이 푼다(chat 합류의 암묵적 affiliation 은 나갈 때 서버가 풀지 않는다 — 규격에 그런 절차가 없고 해제는 클라이언트 몫, TS 24.281 §8.2.1.2. 풀지 않으면 옮겨 다닌 채널이 쌓여 N2 를 넘는다 → 486 Warning 102). 1차 = 주채널만(영상 칸·수신 창이 주채널에만 있다). «채널» = 사용자가 고른 주채널이지 MCPTT 세션의 수명이 아니다 — T4·TNG3 해제(TS 24.379 §6.3.8.1)는 호 해제일 뿐 그룹을 떠나는 것이 아니므로 영상 호는 이어지고, 다른 그룹의 팬아웃 착신은 고른 주채널을 바꾸지 않는다(TS 22.179 그룹 스캐닝) |
 | D11 | 영상 송출 조작 | **확정 — [PTT]·측면 PTT 키 = MCPTT 음성만, 영상 = 화면 [영상 보내기] 토글**(MCVideo 송출 요청·해제). TS 22.280 R-8.2.2-001~-004(서비스·발언권 제어 독립) · TS 22.281 §4.2·§4.4 — MCVideo 송출은 오디오+영상(TS 24.281 §6.2.1, TS 24.581 §6.2.5.3.2 Audio·Video SSRC)이라 PTT 로 묶으면 음성이 두 호로 겹친다 |
 | D12 | 마이크 경합 | **확정 — 기본 = 음성 우선:** 영상을 보내는 중 PTT 를 누르면 그동안 마이크는 MCPTT 음성으로 가고 MCVideo 호 오디오 송신은 멈춘다(영상은 계속 — SDK `setMuted` 가 MCVideo 호에서는 음성 송신만 멈춘다). 설정으로 «영상 우선»(영상 보내는 중 PTT 는 무전 발언을 요청하지 않는다)으로 바꿀 수 있다(TS 22.280 R-8.3-003). 긴급은 설정과 무관하게 음성 우선(R-8.3-004) |
+| D13 | 그룹 선호 코덱 | **확정 — 서버가 집행하는 코덱만**(음성 AMR-WB · 영상 H264). CSC 관리 API·XCAP PUT·콘솔이 그 밖의 이름을 받지 않는다(400). CSP 가 그 코덱이 없는 offer 를 488 로 거절하므로(TS 24.281 §9.2.2.4.1.1 9)) 다른 이름을 그룹 선호로 두면 문서대로 offer 한 단말(§6.2.1 2)b)·3)b))이 거절된다. 코덱을 늘리면 CSP 집행과 이 목록(`SUPPORTED_ENCODINGS`)을 함께 늘린다 |
 
 ## 8. 전환 — 현행 PTT 영상 → MCVideo (전환 기간 없음)
 
