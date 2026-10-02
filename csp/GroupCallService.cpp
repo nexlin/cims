@@ -118,14 +118,50 @@ bool CGroupCallService::IsSessionIdentityActive( const std::string &strGroupId, 
 }
 
 void CGroupCallService::RemoveGroupSesId( const std::string &strGroupId ) {
-    std::unique_lock<std::recursive_mutex> lock( m_mutex );
-    m_mapGroupSesId.erase( strGroupId );
-    m_mapGroupSession.erase( strGroupId );  // 세션 속성(개시자·일제 통화)도 세션과 함께 끝난다
-    m_mapGroupTalkers.erase( strGroupId );
-    // 세션 정체성이 끝나면 런타임 condition(긴급/임박)·TNG2 도 함께 끝난다 — 잔존 조건이 다음 세션의
-    //   fan-out(InviteMember 경로 포함)에 상속되는 것을 막는다.
-    if ( m_mapGroupCond.erase( strGroupId ) )
-        CLog::Print( LOG_INFO, "RemoveGroupSesId: group(%s) 잔존 condition 정리 (세션 종료)", strGroupId.c_str() );
+    GroupCondition clsEnded;
+    bool bCondEnded = false;
+    {
+        std::unique_lock<std::recursive_mutex> lock( m_mutex );
+        m_mapGroupSesId.erase( strGroupId );
+        m_mapGroupSession.erase( strGroupId );  // 세션 속성(개시자·일제 통화)도 세션과 함께 끝난다
+        m_mapGroupTalkers.erase( strGroupId );
+        // 세션 정체성이 끝나면 런타임 condition(긴급/임박)·TNG2 도 함께 끝난다 — 잔존 조건이 다음 세션의
+        //   fan-out(InviteMember 경로 포함)에 상속되는 것을 막는다.
+        auto it = m_mapGroupCond.find( strGroupId );
+        if ( it != m_mapGroupCond.end() ) {
+            clsEnded = it->second;
+            bCondEnded = true;
+            m_mapGroupCond.erase( it );
+            CLog::Print( LOG_INFO, "RemoveGroupSesId: group(%s) 잔존 condition 정리 (세션 종료)", strGroupId.c_str() );
+        }
+    }
+    // 상태가 바뀌었다(긴급·임박 → 아님) — 제휴 멤버에 상태 통지(TS 24.379 §6.3.3.1.11 «status … has changed»). 세션이
+    // 끝나
+    //   참가자가 없으니 제휴 멤버 전원이다(그룹 긴급 상태의 수명을 세션에 묶은 편차의 짝 — mcptt_emergency_modes.md).
+    //   부르는 쪽이 m_mutex 를 쥐고 있을 수 있어 보내기는 감시 스레드(DrainConditionEndNotices)가 한다.
+    if ( bCondEnded && clsEnded.iCond > 0 ) {
+        std::unique_lock<std::recursive_mutex> lock( m_mutex );
+        m_vecCondEndNotices.push_back( { strGroupId, clsEnded } );
+    }
+}
+
+void CGroupCallService::DrainConditionEndNotices() {
+    std::vector<std::pair<std::string, GroupCondition>> vec;
+    {
+        std::unique_lock<std::recursive_mutex> lock( m_mutex );
+        if ( m_vecCondEndNotices.empty() ) return;
+        vec.swap( m_vecCondEndNotices );
+    }
+    for ( const auto &kv : vec ) {
+        McpttIndicators clsInd;
+        if ( kv.second.iCond >= 2 )
+            clsInd.iEmergency = 0;
+        else
+            clsInd.iImminent = 0;
+        const int iSent = NotifyConditionToAffiliated( kv.first, kv.second.strInitiator, clsInd, false, "" );
+        CLog::Print( LOG_INFO, "GroupCall: group(%s) 세션 종료로 %s 상태 해제 통지 %d 건 (TS 24.379 §6.3.3.1.11)",
+                     kv.first.c_str(), kv.second.iCond >= 2 ? "긴급" : "임박 위험", iSent );
+    }
 }
 
 void CGroupCallService::OnGroupAborted( const std::string &strGroupId ) {
@@ -1539,6 +1575,13 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
                 else
                     clsNotify.iImminent = 1;
                 NotifyConditionToAffiliated( pszGroupId, pszCallerInfo, clsNotify, true, pszCallerInfo );
+            } else if ( bActiveSession && iCondition == 1 && iPrevCond == 1 && iCond == 1 ) {
+                // 임박 위험 진행 중 그룹에 임박 표시로 합류 — 나머지 제휴 멤버에 통지(§10.1.1.4.2 15)g)iii) — re-INVITE
+                // 의
+                //   §10.1.1.4.8 1)a) 와 같은 통지)
+                McpttIndicators clsNotify;
+                clsNotify.iImminent = 1;
+                NotifyConditionToAffiliated( pszGroupId, pszCallerInfo, clsNotify, false, pszCallerInfo );
             } else if ( bNewEmergencyUser ) {
                 // 다른 사용자의 새 긴급 표시 — 나머지 제휴 멤버 전원에 통지(§10.1.1.4.7 6)c)i) — 참여 여부 무관)
                 gclsCmpClient.SetFloorTier( pszGroupId, pszCallerInfo, 2, GetOrIssueGroupSesId( pszGroupId ) );
@@ -1918,6 +1961,8 @@ void CGroupCallService::SetGroupConditionLocked( const std::string &strGroupId, 
                                                  const std::string &strUser ) {
     GroupCondition &c = m_mapGroupCond[strGroupId];
     const bool bEmergencyStart = ( iCond >= 2 && c.iCond < 2 );
+    if ( bEmergencyStart ) c.bImminentSuperseded = ( c.iCond == 1 );
+    if ( iCond < 2 ) c.bImminentSuperseded = false;
     c.iCond = iCond;
     c.strInitiator = strUser;
     if ( iCond >= 2 ) {
@@ -2339,19 +2384,20 @@ CGroupCallService::InCallConditionVerdict CGroupCallService::EvaluateInCallCondi
 
     // ── 임박 위험 상향 (§10.1.1.4.7 4)·9) → §10.1.1.4.8 1)) ──
     if ( bImmTrue ) {
+        // 4) 인가부터 — 미인가 임박 요청은 긴급 진행 여부와 무관하게 403(§10.1.1.4.7 4))
+        std::string strReason;
+        if ( !IsConditionInitAuthorized( clsGroup, strMemberId, strReason ) ) {
+            McpttIndicators b;  // 4)a) imminentperil-ind false
+            b.iImminent = 0;
+            reject( b, ( "imminent peril not authorised: " + strReason ).c_str() );
+            return v;
+        }
         if ( iCur >= 2 ) {
             // 200 OK 7) — 긴급이 이미 진행 중: 임박 요청은 받아들이지 않고 긴급 수준으로 받는다(NOTE 5)
             McpttIndicators i;  // §6.3.3.1.18 3)c)
             i.iEmergency = 1;
             i.iImminent = 0;
             infoPending( i );
-            return v;
-        }
-        std::string strReason;
-        if ( !IsConditionInitAuthorized( clsGroup, strMemberId, strReason ) ) {
-            McpttIndicators b;  // 4)a) imminentperil-ind false
-            b.iImminent = 0;
-            reject( b, ( "imminent peril not authorised: " + strReason ).c_str() );
             return v;
         }
         if ( iCur == 1 ) {
@@ -2433,10 +2479,13 @@ CGroupCallService::InCallConditionVerdict CGroupCallService::EvaluateInCallCondi
         EmitEmergencyModeEvent( "cancelled", 1, strGroupId, strMemberId, strSesId );
         CLog::Print( LOG_INFO, "InCallCondition: imminent_cancelled group(%s) by(%s)", strGroupId.c_str(),
                      strMemberId.c_str() );
-        McpttIndicators r;  // §6.3.3.1.15 — imminentperil-ind false
+        McpttIndicators r;  // §6.3.3.1.15 5)b) — re-INVITE 는 emergency-ind false + imminentperil-ind false
+        r.iEmergency = 0;
         r.iImminent = 0;
-        PropagateConditionToMembers( strGroupId, 0, strMemberId, r );                  // 3)c)
-        NotifyConditionToAffiliated( strGroupId, strMemberId, r, true, strMemberId );  // 3)d)
+        PropagateConditionToMembers( strGroupId, 0, strMemberId, r );  // 3)c)
+        McpttIndicators n;                                             // 상태 통지 MESSAGE 는 imminentperil-ind false
+        n.iImminent = 0;
+        NotifyConditionToAffiliated( strGroupId, strMemberId, n, true, strMemberId );  // 3)d)
         return v;
     }
 
@@ -2860,12 +2909,27 @@ bool CGroupCallService::InviteMember( const char *pszUserId, const char *pszGrou
                 clsSes.strInitiator.empty() ? std::string( pszGroupId ) : clsSes.strInitiator;
 
             int iGroupCond = 0;
+            bool bImminentSuperseded = false;
             {
                 auto itCond = m_mapGroupCond.find( pszGroupId );
-                if ( itCond != m_mapGroupCond.end() ) iGroupCond = itCond->second.iCond;
+                if ( itCond != m_mapGroupCond.end() ) {
+                    iGroupCond = itCond->second.iCond;
+                    bImminentSuperseded = itCond->second.bImminentSuperseded;
+                }
             }
-            std::string strGroupXml =
-                BuildGroupInfoXml( clsGroup, pszUserId, strCallerId, iGroupCond, NULL, clsSes.bBroadcast );
+            // 긴급 그룹 호 초대(TS 24.379 §6.3.3.1.7 6)) — emergency-ind true + alert-ind(인가된 경보면 true, 아니면
+            // false — c)) +
+            //   임박 위험에서 올랐으면 imminentperil-ind false(d)). 임박만이면 imminentperil-ind true(7)).
+            McpttIndicators clsFanInd;
+            if ( iGroupCond >= 2 ) {
+                clsFanInd.iEmergency = 1;
+                clsFanInd.iAlert = HasOutstandingAlert( pszGroupId, strCallerId ) ? 1 : 0;
+                if ( bImminentSuperseded ) clsFanInd.iImminent = 0;
+            } else if ( iGroupCond == 1 ) {
+                clsFanInd.iImminent = 1;
+            }
+            std::string strGroupXml = BuildGroupInfoXml( clsGroup, pszUserId, strCallerId, iGroupCond,
+                                                         iGroupCond > 0 ? &clsFanInd : NULL, clsSes.bBroadcast );
             // CMP floor port 사용 (m_mapGroupRtp에서 조회)
             int iFloorPort = iSharedFloorPortIM > 0 ? iSharedFloorPortIM : iMemberAudioPort + 1;  // fallback
             {
@@ -3012,9 +3076,10 @@ void CGroupCallService::MonitorLoop() {
         if ( !m_bMonitorRunning ) break;
         ++iTickSec;
 
-        RetryPendingLeaves();  // 실패한 PTT_LEAVE 재시도 — 대기열이 비면 즉시 반환한다
-        CheckSessionLimits();  // TNG3(그룹 호 최대 시간) — 세션이 없으면 즉시 반환한다
-        CheckAckGates();       // TNG1(확인 통화 설정) — 게이트가 없으면 즉시 반환한다
+        RetryPendingLeaves();        // 실패한 PTT_LEAVE 재시도 — 대기열이 비면 즉시 반환한다
+        DrainConditionEndNotices();  // 세션 종료로 풀린 긴급·임박 상태 통지 — 대기열이 비면 즉시 반환한다
+        CheckSessionLimits();        // TNG3(그룹 호 최대 시간) — 세션이 없으면 즉시 반환한다
+        CheckAckGates();             // TNG1(확인 통화 설정) — 게이트가 없으면 즉시 반환한다
 
         // Periodic member state check (every 10s) — detects dead calls
         if ( iTickSec % 10 == 0 ) {

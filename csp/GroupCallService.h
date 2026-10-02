@@ -407,8 +407,13 @@ private:
         std::string strInitiator;                 ///< 상태를 세운 사용자 — 재광고 mcptt-calling-user-id(§6.3.3.1.6 2))
         std::set<std::string> setEmergencyUsers;  ///< 긴급 상태 사용자 캐시(§10.1.1.4.7 6)a)·c)·8)b)) — 7a) 판정·tier
         time_t tTng2Start = 0;                    ///< TNG2 기점 (§6.3.3.1.16 — 긴급 첫 설정)
+        bool bImminentSuperseded =
+            false;  ///< 임박 위험 상태에서 긴급으로 올랐다 — 긴급 초대에 imminentperil-ind false(§6.3.3.1.7 6)d))
     };
     std::map<std::string, GroupCondition> m_mapGroupCond;
+    /** 세션 종료(RemoveGroupSesId)로 풀린 긴급·임박 상태 — 감시 스레드가 제휴 멤버에 통지한다(§6.3.3.1.11). */
+    std::vector<std::pair<std::string, GroupCondition>> m_vecCondEndNotices;
+    void DrainConditionEndNotices();
     /** 긴급 경보 발령 사용자 (group → MCPTT ID) — 세션과 무관(경보는 호 없이도 선다, §12.1.3.1). */
     std::map<std::string, std::set<std::string>> m_mapGroupAlerts;
     /** CMP 발언자 집합 (FLOOR_TALKERS) */

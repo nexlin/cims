@@ -48,14 +48,14 @@ PTT(MCPTT) 서비스 구현을 3GPP 규격 원문과 대조해 **규격과 다�
 | 그룹 호 — 단말 (GCC) | 8 | — | 6 | — | 2 |
 | 개별 호 (PRV) | 4 | 1 | 3 | — | — |
 | 애드혹 그룹 호 (ADH) | 1 | — | 1 | — | — |
-| 긴급·임박·경보 (EMG) | 9 | 1 | 1 | 7 | — |
+| 긴급·임박·경보 (EMG) | 3 | 1 | 1 | 1 | — |
 | 발언권 — 서버 (FCS) | 19 | 2 | 9 | 5 | 3 |
 | 발언권 SDP 협상 (SDP) | 2 | — | 2 | — | — |
 | 그룹 문서·GMS (GMS) | 6 | — | 6 | — | — |
 | 설정 문서·CMS (CMS) | 2 | — | 1 | 1 | — |
-| **계** | **79** | **17** | **40** | **16** | **6** |
+| **계** | **73** | **17** | **40** | **10** | **6** |
 
-확인 수준 — ◎ 44 · ○ 26 · △ 9.
+확인 수준 — ◎ 39 · ○ 26 · △ 8.
 
 읽는 순서 — §2(먼저 볼 것) → §3(영역별 전체) → §4(미구현 목록에 빠진 기능) → §5(문서 정정) → §6(묶음과 순서).
 
@@ -166,13 +166,7 @@ CSP 는 참여 기능과 제어 기능을 겸한다.
 | # | 급 | 대상 | 규격 | CIMS 지금 | 영향 | 확인 |
 |---|---|---|---|---|---|---|
 | EMG-3 | A | CSP | §9.2.2.3.3 14) → §12.1.3.4 — 새로 제휴한 단말에 진행 중 경보를 MESSAGE 로 알린다 (shall) | 경보 캐시는 호 경로에서만 읽는다(`csp/GroupCallService.cpp:1327`·`:1344`·`:2002`). 제휴 경로는 NOTIFY 만 낸다(`csp/CscfModule.cpp:2028-2041`) | 경보 뒤에 로그인하거나 망 복귀로 제휴를 다시 실은 단말·관제석은 그 경보를 모른다 | ◎ |
-| EMG-10 | C | CSP | §6.3.3.1.11 — 상태가 바뀌면 제휴 멤버에 통지 | 세션이 끝나면 긴급·임박 상태를 지우기만 한다 — `csp/GroupCallService.cpp:125-134` | 비참여 제휴 단말과 BYE 로 나간 단말이 그룹을 계속 긴급으로 본다(«그룹 긴급 상태의 수명» 편차의 부작용) | △ |
-| EMG-11 | C | CSP | §6.3.3.1.11 5) — 경보 팬아웃 MESSAGE 에 P-Asserted-Identity(제어 기능 PSI) | 헤더는 Accept-Contact 둘 + P-Asserted-Service 뿐 — `csp/PttAsModule.cpp:213-216`. 상태 통지 쪽은 싣는다 | 규격 단말·중간 노드에 사용자 발신 MESSAGE 로 보인다 | ◎ |
 | EMG-12 | C | CSP | §12.1.3.1 2) — Accept-Contact 에 MCPTT icsi-ref 가 없으면 403 | mcptt-info 지시자 유무만으로 경보 경로에 넣는다 — `csp/ModuleDispatcher.cpp:2658-2662` | 받아들이는 쪽이 넓다 | ○ |
-| EMG-13 | C | CSP | §6.3.3.1.7 6)c)·d) — 긴급 fan-out INVITE 에 `<alert-ind>`(경보가 아니면 false), 임박이었으면 `<imminentperil-ind>` false | `emergency-ind` true 만 싣는다 — `csp/GroupCallService.cpp:3978-3983` | 지시자 조합을 검증하는 수신 구현과 어긋난다 | ◎ |
-| EMG-14 | C | CSP | §6.3.3.1.15 5)b) — 임박 해제 재광고에 `<emergency-ind>` false + `<imminentperil-ind>` false | `imminentperil-ind` false 만 — `csp/GroupCallService.cpp:2045-2047` | 작다 | ◎ |
-| EMG-15 | C | CSP | §10.1.1.4.7 4) — 미인가 임박 상향은 403 | 긴급 진행 중이면 인가 판정 전에 200 + 149 로 답한다 — `csp/GroupCallService.cpp:1950-1958` | 결과 상태는 같다(임박 불수용) | ◎ |
-| EMG-16 | C | CSP | §10.1.1.4.2 15)g)iii) — 임박 진행 중 그룹에 임박 표시로 합류하면 다른 제휴 멤버에 통지 | INVITE 합류의 «새 표시 통지» 는 긴급만 — `csp/GroupCallService.cpp:1050-1057` (re-INVITE 경로에는 있다) | 두 번째 임박 사용자를 다른 멤버가 모른다 | ◎ |
 | EMG-17 | B | CSP·CMP | TS 24.380 §6.3.5.3.9 · §6.3.5.4.8 — 긴급 격상 re-INVITE 의 `mc_implicit_request` 는 암묵적 발언 요청이다 | 암묵 요청은 새 세션 개시에서만 받는다 — `csp/GroupCallService.cpp:176-179`. 격상은 tier 만 바꾼다(`csp/CmpClient.cpp:874-885`) | 규격 단말은 격상 직후 Floor Granted 를 기다리지만 오지 않는다 | △ |
 
 ### 3.8 발언권 — 서버 (FCS) — TS 24.380 §6.3 · §8

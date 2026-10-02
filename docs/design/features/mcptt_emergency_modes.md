@@ -153,7 +153,13 @@ mcptt-request-uri, mcptt-calling-user-id, (alert) originated-user-id, location(�
      (`RemoveGroupSesId`). 활성 세션 조인이 조건을 상향시키면(normal 진행 중 긴급 조인)
      기존 확립 참여 leg 에 re-INVITE 재광고(아래)·참여하지 않은 제휴 멤버에 상태 통지 MESSAGE — fan-out INVITE 는 미참여
      멤버만 커버. 긴급 진행 중 그룹에 다른 사용자가 긴급으로 합류하면 긴급 사용자 캐시에 더하고(floor tier 도 긴급) 나머지 제휴
-     멤버에 통지한다(§10.1.1.4.7 6)c) 와 같은 뜻).
+     멤버에 통지한다(§10.1.1.4.7 6)c) 와 같은 뜻). 임박 위험 진행 중 그룹에 다른 사용자가 임박 표시로 합류해도 나머지 제휴
+     멤버에 통지한다(§10.1.1.4.2 15)g)iii)).
+  7a. **긴급 초대 INVITE 의 지시자**(§6.3.3.1.7 6)) — `emergency-ind` true + `alert-ind`(개시자의 인가된 경보가 있으면 true, 아니면
+     false) + 임박 위험에서 긴급으로 올랐으면 `imminentperil-ind` false(그룹 상태의 `bImminentSuperseded`). 임박만이면
+     `imminentperil-ind` true. 임박 해제 재광고 re-INVITE 는 `emergency-ind` false + `imminentperil-ind` false(§6.3.3.1.15 5)b)).
+     미인가 임박 상향 re-INVITE 는 긴급 진행 여부와 무관하게 먼저 403(§10.1.1.4.7 4)). 경보 팬아웃 MESSAGE 는 상태 통지와 같이
+     P-Asserted-Identity = 제어 기능(그룹 URI — §6.3.3.1.11 5)).
 - **진행 중 호의 조건 요청**(re-INVITE, TS 24.379 §10.1.1.4.7·§10.1.1.4.8): dispatcher `RecvRequest` 의 PTT 인지 분기가
   `CGroupCallService::OnInCallConditionRequest` 한 곳에 넘긴다 — 인가·상태 전이·재광고·비참여 멤버 통지를 거기서 하고, 거절이면
   403 + mcptt-info 를 보낸다(재-INVITE 거절은 다이얼로그를 깨지 않아 호는 이전 조건 그대로 — 단말은 낙관 latch 를 되돌린다).
@@ -286,7 +292,7 @@ MESSAGE(호 없는 그룹 긴급 상태 해제, §12.1.3.3)도 같은 곳으로 
   |---|---|---|---|
   | 경보 통지 `<mc-org>` | 제어 기능이 발신자 user profile 의 `<MissionCriticalOrganization>` 을 싣는다(§6.3.3.1.12 2)·3)) | 싣지 않는다 — 값의 정본이 CSC 사이트 설정(`UserProfile.MissionCriticalOrganization`)이라 CSP 에 없다 | CSC→CSP 전달 경로(설정 캐시)를 둔 뒤 |
   | 경보 수신 확인 | 제어 기능이 발신 단말에 `<alert-ind-rcvd>`·`<emergency-ind-rcvd>` MESSAGE(§6.3.3.1.20 — 경보·경보 취소·긴급 상태 해제 수신 확인) | 보내지 않는다(200 OK 만) | 후속 |
-  | 그룹 긴급 상태의 수명 | 명시 해제·TNG2 만료까지 유지 — 호가 끝나도 남는다(호 없는 해제 §12.1.3.3·호 없는 TNG2 만료 §6.3.3.1.16 2) 가 전제) | 그룹 세션 수명 — 세션 종료(`RemoveGroupSesId`)가 지운다 | TNG2 가 기본값 없이(0 = 없음) 쓰이는 동안은 남은 상태가 다음 호에 긴급 우선순위를 물려준다. 상태 영속은 TNG2 기본값을 정한 뒤 |
+  | 그룹 긴급 상태의 수명 | 명시 해제·TNG2 만료까지 유지 — 호가 끝나도 남는다(호 없는 해제 §12.1.3.3·호 없는 TNG2 만료 §6.3.3.1.16 2) 가 전제) | 그룹 세션 수명 — 세션 종료(`RemoveGroupSesId`)가 지우고, 상태가 바뀐 것이니 제휴 멤버 전원에 상태 통지 MESSAGE(`emergency-ind`/`imminentperil-ind` false — §6.3.3.1.11, 감시 스레드가 보낸다) | TNG2 가 기본값 없이(0 = 없음) 쓰이는 동안은 남은 상태가 다음 호에 긴급 우선순위를 물려준다. 상태 영속은 TNG2 기본값을 정한 뒤 |
   | 임박 해제 거절 본문 | §10.1.1.4.8 2)b) 원문은 403 에 `<imminentperil-ind>` **false** | **true**(현재 상태) | 단말 절차 §10.1.1.2.1.5(4xx 에 `imminentperil-ind` true 또는 요소 없음 = 상태 유지)와 긴급 해제 거절(§10.1.1.4.7 7)b) true)에 맞춘다 — 원문대로면 단말이 해제된 것으로 볼 수 있다 |
   | 조건 조합 검증 | §6.3.3.1.17 — 허용되지 않는 지시자 조합은 403 + Warning `150 invalid combinations of data received in MIME body` | 검증하지 않는다(요소별로 판정) | 단말 SDK 코어는 규격 조합으로 보낸다(긴급 = `emergency-ind` true + `alert-ind`, 임박 지시자 없음 — ue_sdk.md §4.2). 옛 SDK 단말(임박→긴급 상향에 `imminentperil-ind` false 동봉)이 남아 있는 동안은 검증을 켜면 그 단말의 상향이 403 150 이 된다 — 단말 전환 뒤 |
   | Resource-Priority 검증 | §10.1.1.4.7 5) — 긴급 값인데 긴급 지시자 없고 상태도 아니면 403 | 받은 Resource-Priority 를 보지 않는다 | 후속 |
