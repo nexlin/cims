@@ -52,7 +52,7 @@ MCPTT 와 뿌리가 같은 것(제휴 클라이언트 단위·비제휴 멤버 �
 | 설정 문서 (CFG) | 1 | — | — | 1 | — |
 | **계** | **25** | **1** | **9** | **10** | **5** |
 
-확인 수준 — ◎ 20 · ○ 2 · △ 3.
+확인 수준 — ◎ 19 · ○ 3 · △ 3.
 
 읽는 순서 — §2(먼저 볼 것) → §3(영역별 전체) → §4(미구현 목록에 빠진 기능) → §5(문서 정정) → §6(묶음과 순서).
 
@@ -113,7 +113,7 @@ CSP 는 참여 기능과 제어 기능을 겸한다.
 | SDS-7 | D | SDK | §15.2.13 · §6.2.2.1 3) — Payload content type BINARY·LOCATION·CODED TEXT, TEXT charset = 단말 설정 또는 그룹 `<mcdata-default-charset>` | TEXT·HYPERLINKS 는 온 순서대로 이어 `text` 로 올리고 FILEURL 은 파일로 읽는다(`sdk/core/src/mcdata/sds_codec.cpp`). **BINARY·LOCATION(6 octet 위경도)·CODED TEXT 는 넘긴다**(`SdsMessage` 에 담을 칸이 없다). charset 은 UTF-8 고정 | 규격 단말의 LOCATION·CODED TEXT SDS 가 빈 메시지가 된다 | ◎ |
 | SDS-8 | B | CSP·SDK | TS 24.481 §7.2 — MCData group ID 는 그룹 문서의 `list-service uri` 와 같은 값 | 숫자 그룹 ID 를 SDK `"tel:" + groupId`(`sdk/core/src/engine.cpp:3454`), CSP `_TelOf`(`csp/McDataAsModule.cpp:122-124`)·`_TelUriOf`(`csp/McDataMediaService.cpp:114-117`)가 `tel:123` 으로, 그룹 문서는 `tel:+123`(`csc/src/services/mcptt.py:261-270`), FILEURL 폴백은 `sip:<gid>@<도메인>`(`csp/McDataMediaService.cpp:410-416`) | 규격 단말은 같은 그룹으로 묶지 못한다. 우리 앱도 `bareId` 가 `+123`/`123` 으로 갈려 스레드가 나뉠 수 있다 — 실측(MCPTT GCS-17 과 같은 뿌리) | △ |
 | SDS-9 | C | CSP | §9.2.2.4.2 4) — 제어 기능은 대화·메시지 ID 를 저장해 통지와 상관한다(§12.2.3 4)·5)) | 그룹 SDS 는 fan-out 루프를 다 돈 뒤에 색인을 적는다(`csp/McDataAsModule.cpp:87-104` → `csp/McDataGates.cpp:80-81`). 1:1 은 전달 전에 적는다(`csp/ModuleDispatcher.cpp:2688-2692`). MESSAGE 는 다중 스레드로 처리된다(psip `RecvMessageRequest(iThreadId…)`) | 멤버가 많은 그룹에서 먼저 받은 단말의 DELIVERED 가 색인보다 먼저 오면 403 216 — 발신자 ✓ 누락. 실측으로 확정되면 A | △ |
-| SDS-10 | D | SDK | §9.2.1.1 1) · §11.1 2)·5) · §9.2.2.2.1 3)a) — 단말은 보내기 전에 송신 권한·그룹 크기 상한·`AllowedSDS` 를 보고 거절한다 | `sendGroupSds` 는 c-plane 임계만 본다(`sdk/core/src/engine.cpp:3447-3453`) — 그룹 문서 `allowSds`·`maxSdsSize` 를 읽어 두고(`sdk/core/src/csc/group_doc.cpp:256-271`) 쓰지 않는다 | 서버 거절(403·413)에 맡긴다 | ◎ |
+| SDS-10 | D | 관제 | §9.2.1.1 1) · §11.1 2)·5) · §9.2.2.2.1 3)a) — 단말은 보내기 전에 송신 권한·그룹 크기 상한·`AllowedSDS` 를 보고 거절한다 | 현장 앱은 그룹 문서의 문자 허용·크기 상한을 보고 보내기 전에 막는다(`CallRules.sdsBlockReason`). **관제 앱 두 벌은 서버 거절(403 206·217)에 맡긴다** (코어 `sendGroupSds` 는 c-plane 임계만 본다 — 그룹 문서를 들고 있지 않다) | 관제 앱은 보낸 뒤에야 거절을 안다 | ○ |
 
 ### 3.4 SDS — 미디어 평면 (MSRP) — TS 24.282 §9.2.3 (TS 24.582 미확인)
 
@@ -182,7 +182,7 @@ CSP 는 참여 기능과 제어 기능을 겸한다.
 | 2 | **인가·보안** — 제휴 멤버만 배포 | AFF-2 | .45 CSP |
 | 3 | **응답 코드·Warning** — MCPTT 묶음 5 와 한 묶음(같은 `McpttWarning`) | SDS-4(enforce) | .45 CSP |
 | 4 | **서버가 내는 본문 규격화** — 수신자별 mcdata-info(request-uri = 수신자, calling-group-id, calling-user-id), PAI·P-Asserted-Service, MSRP 배포 INVITE 헤더, 폴백 FD 본문 | SDS-2 · MSRP-2 · MSRP-6 · SDS-8 | .45 CSP |
-| 5 | **규격형 요청 수용** — 서버가 PSI 형·그룹 URI 형을 둘 다 받는 전환기를 먼저 둔다. 서버 쪽 검사(MSRP-5)는 SDK 뒤 | SDS-1 · SDS-5 · CFG-1 → SDK: REG-1 · MSRP-1 · SDS-10 | .45 CSP → SDK |
+| 5 | **규격형 요청 수용** — 서버가 PSI 형·그룹 URI 형을 둘 다 받는 전환기를 먼저 둔다. 서버 쪽 검사(MSRP-5)는 SDK 뒤 | SDS-1 · SDS-5 · CFG-1 → SDK: REG-1 · MSRP-1 | .45 CSP → SDK |
 | 6 | **FD Metadata 형식** — `file-selector:` 접두·hash (SDK 는 규격형 업로드·Location 사용과 함께 — U05) | FD-7 | .45 SDK · CSP |
 | 7 | **자동 수신** — CSP 가 Mandatory download 를 붙이고 SDK·앱은 그 IE 를 따른다 | FD-4 | .45 CSP·SDK → 앱 |
 | 8 | **제휴 서비스 분리** — MCData 제휴 표·`mcdataPresInfo`, 클라이언트 단위. MCPTT 묶음 8 과 한 묶음 | AFF-1 · AFF-6 · REG-2 | .45 CSP·SDK |

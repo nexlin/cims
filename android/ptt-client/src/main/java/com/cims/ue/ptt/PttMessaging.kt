@@ -23,6 +23,16 @@ internal class MessagingPlane(private val c: PttController) {
     fun sendSds(peer: String, text: String, msgId: String): String {
         if (text.isBlank() || msgId.isBlank()) return ""
         val group = c.isGroupId(peer)
+        if (group) {
+            // 보내기 전 검사(TS 24.282 §9.2.1.1 1) → §11.1) — 그룹 문서가 문자를 막거나 크기 상한을 넘으면 보내지 않고 알린다
+            val doc = c._groupDocs.value[peer]
+            CallRules.sdsBlockReason(doc?.allowSds, doc?.maxSdsBytes, text.toByteArray(Charsets.UTF_8).size)?.let { why ->
+                c._status.value = "전송 실패 — $why"
+                c.feedback?.blocked(why)
+                c._sendResult.tryEmit(msgId to false)          // 서비스가 PENDING 으로 저장해 둔 말풍선을 실패로 확정한다
+                return ""
+            }
+        }
         c.ctl.launch {
             val acc = c.account
             val r = when {

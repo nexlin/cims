@@ -65,6 +65,16 @@ class CallRulesTest {
         assertNull("성공 응답", CallRules.sendRejectionText(200, 217))
     }
 
+    // TS 24.282 §9.2.1.1 1) → §11.1 — 보내기 전에 그룹 문서의 문자 허용·크기 상한을 본다
+    @Test fun `그룹 문자는 보내기 전에 허용과 크기를 본다`() {
+        assertNull(CallRules.sdsBlockReason(allowSds = true, maxSdsBytes = 100, payloadBytes = 100))
+        assertEquals("메시지가 너무 큽니다(최대 100바이트)", CallRules.sdsBlockReason(true, 100, 101))
+        assertEquals("이 그룹은 문자를 쓸 수 없습니다", CallRules.sdsBlockReason(false, null, 1))
+        assertNull("상한 없음", CallRules.sdsBlockReason(true, null, 1_000_000))
+        assertNull("0 = 상한 없음", CallRules.sdsBlockReason(true, 0, 1_000_000))
+        assertNull("문서를 아직 받지 못했다 — 서버가 판정한다", CallRules.sdsBlockReason(null, null, 5))
+    }
+
     @Test fun `성립한 호의 Warning 은 실패 사유가 아니다`() {
         // 200 OK 의 Warning 122 = «정원 때문에 일부만 불렀다» — 호는 성립했다
         assertNull(CallRules.rejectionText(200, 122))

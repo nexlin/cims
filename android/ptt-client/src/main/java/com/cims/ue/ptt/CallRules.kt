@@ -69,4 +69,15 @@ internal object CallRules {
         217 -> "메시지가 너무 큽니다"                                    // unable to send due to message size
         else -> null
     }.takeIf { statusCode >= 300 }
+
+    /**
+     * 그룹 문자(SDS)를 보내기 전의 단말 검사(TS 24.282 §9.2.1.1 1) → §11.1) — 그룹 문서가 문자를 허용하지 않거나 본문이 그룹의 크기 상한
+     * (`mcdata-on-network-max-data-size-for-SDS`)을 넘으면 보내지 않고 사유를 돌려준다. 보낼 수 있으면 null. 문서를 아직 받지 못했으면
+     * (allowSds = null) 막지 않는다 — 서버가 403 206·217 로 판정한다.
+     */
+    fun sdsBlockReason(allowSds: Boolean?, maxSdsBytes: Int?, payloadBytes: Int): String? = when {
+        allowSds == false -> "이 그룹은 문자를 쓸 수 없습니다"
+        maxSdsBytes != null && maxSdsBytes > 0 && payloadBytes > maxSdsBytes -> "메시지가 너무 큽니다(최대 ${maxSdsBytes}바이트)"
+        else -> null
+    }
 }

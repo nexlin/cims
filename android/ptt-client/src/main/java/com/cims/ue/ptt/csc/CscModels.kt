@@ -45,6 +45,10 @@ data class GroupDoc(
     val mcvideo: McVideoAttrs? = null,
     /** `<preconfigured-group-use-only>`(TS 24.481 §7.2.4.2) — 재편성의 설정 원본으로만 쓰는 그룹. 호·경보를 열지 않는다([CallRules.groupUsable]). */
     val preconfiguredOnly: Boolean = false,
+    /** mcdata-allow-short-data-service — 이 그룹에 문자(SDS)를 보낼 수 있는가(TS 24.481 §7.2.2). */
+    val allowSds: Boolean = true,
+    /** mcdata-on-network-max-data-size-for-SDS(octet) — null·0 = 상한 없음. */
+    val maxSdsBytes: Int? = null,
 ) {
     companion object {
         fun of(d: com.cims.ue.sdk.GroupDoc) = GroupDoc(
@@ -60,6 +64,8 @@ data class GroupDoc(
             etag = d.etag.ifBlank { null },
             mcvideo = d.mcvideo?.let { McVideoAttrs(prearranged = it.inviteMembers, maxTransmitters = it.maxTransmitters) },
             preconfiguredOnly = d.preconfiguredGroupUseOnly,
+            allowSds = d.allowSds,
+            maxSdsBytes = d.maxSdsSize?.takeIf { it > 0 },
         )
     }
 }
