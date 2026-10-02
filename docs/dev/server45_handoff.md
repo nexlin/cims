@@ -952,3 +952,46 @@ Windows PC 가 관제 앱의 MCVideo 몫(W1' SDK 재빌드·시험 · W4 그룹 
 
 이미 맞는 곳(그대로): 콘솔 `유지 시간(T4, 초)`·`필수 멤버 대기(TNG1, 초)`·MCVideo `최대 통화 시간(TNG3, 초)`·`수신 유지 시간(T5, 초)`.
 규격에 짧은 이름이 없는 요소(시작 최소 응답·동시 송출 상한 등)는 지금처럼 요소 이름을 툴팁(`title`)에 둔다.
+
+## 16. MCPTT 타이머 — 규격 대비 편차 (Windows → .45)
+
+정본 [../design/features/mcptt_timers.md](../design/features/mcptt_timers.md) — 타이머를 누가 돌리는지, 값이 어느 문서에서 오는지, 콘솔·관제 앱에서 바꾼 값이
+서버와 단말에 닿는 경로를 규격 원문(TS 24.379 V19.8.0 · TS 24.380 V19.3.0 · TS 24.481 V19.3.0 · TS 24.484 V19.6.0)과 코드로 대조했다.
+아래 번호는 그 문서 §7 의 편차 번호 그대로다. Windows 에서는 대조·문서화만 했고 코드는 건드리지 않았다(실서버 실측 없음).
+
+### 16.1 요지
+
+- 세션 타이머(T4·TNG3)와 개시 타이머(TNG1)는 서버 것이고 값은 그룹 문서에 있다 — 이 경로는 맞게 돈다(편집 → `GROUP_CHANGED` → CSP → CMP · xcap-diff).
+- **단말 타이머(T100·T101·T103·T104·T132)는 경로가 중간에서 끊겨 있다.** CSC 는 UE initial configuration `<Timers>` 에 값을 싣는데
+  단말 코어가 읽지 않고 상수를 쓴다. 콘솔에서 `UeInitConfig.Timers.*` 를 바꿔도 단말 동작은 변하지 않는다.
+- 개별 호·애드혹 그룹 호에는 T4(유휴 해제)가 돌지 않는다 — 값의 출처인 service configuration 요소가 문서에 없다.
+
+### 16.2 .45 몫
+
+| # | 과제 | 내용 | 대상 |
+|---|---|---|---|
+| D4 | **CSC — `<Timers>` 기본값을 규격 범위로** (D1 보다 먼저) | 지금 기본값 T100 = 4초는 C100(기본 3)과 곱하면 12초라 «Floor Release 재전송 총 시간 6초 미만»(TS 24.380 표 11.1.1-1 NOTE 1)에 어긋나고, T132 = 6초는 규격 기본 2초와 다르다. 단위가 초(unsignedByte)라 6초 미만이 되는 값은 T100 = 1 이다. T101 도 같은 권고(NOTE 2 — 6초 미만 권장)라 1, T103 = T1 과 같게(4 — 지금 값 그대로), T132 = 2. T104 는 규격 기본값이 없다(사이트 값). D1 이 들어가면 단말이 이 값을 그대로 쓰므로 기본값을 먼저 고친다 — 배포 사이트의 저장된 설정값도 확인 | `csc/src/services/mcptt.py` `_UE_INIT_DEFAULTS` · `csc/config/config_template.json` `UeInitConfig.Timers.*` |
+| D1 | **SDK — `<Timers>` 를 읽어 발언권 참여자에 싣는다** | `UeInitConfigDoc` 이 `<on-network><Timers>` 의 T100·T101·T103·T104·T132(초, 0~255)를 해석하고, 발언권 참여자가 상수(`kRequestTimeoutMs` 3000 · `kReleaseRetxMs` 800 · `kReleaseRetxMax` 2) 대신 그 값을 쓴다. 문서를 못 받았을 때의 폴백 = 지금 상수. C API·.NET·Kotlin 에 필드 추가(C 구조체는 끝에 덧붙인다) — 값을 싣는 자리가 계정 설정이면 관제 앱 두 벌은 Windows 에서 맞춘다 | `sdk/core/include/cimsue/csc.h` `UeInitConfigDoc` · `sdk/core/src/csc/cms_doc.cpp` · `sdk/core/src/floor/floor_participant.*` · `cimsue_c.h` |
+| D2 | **SDK — T101 재전송** | 지금은 Floor Request 를 한 번 보내고 3초 뒤 포기한다. 규격은 T101 만료마다 재전송하고 C101(기본 3)에 닿으면 멈춘다(§11.1.1 · §11.2.1). 유실 한 번에 «요청 시간 초과» 가 뜨는 원인이다. 암묵 요청(개시 INVITE)으로 건 T101 도 같은 규칙 | `floor_participant.cpp` `sendRequest`·`tick` · `floor_participant_test.cpp` |
+| D3 | **SDK — T103 · T104 · T132** | T103 = Floor Taken 뒤 미디어가 끊기면 그 발언이 끝난 것으로 판정(지금은 서버의 Floor Idle 로만 알아, 그 메시지가 유실되면 «남이 말하는 중» 에 머물 수 있다). T104·C104 = 대기열 위치 요청 재전송. T132 = 대기 끝에 승인됐는데 PTT 를 누르지 않으면 Floor Release(기본 2초). 앱이 대기 승인 뒤 자동으로 말하게 하는 동작이면 T132 는 그 정책과 함께 정한다 | `floor_participant.*` |
+| D5 | **CSC·CSP — 개별 호·애드혹 그룹 호의 T4** | 규격의 T4 출처는 호 종류별이다(TS 24.380 표 11.1.3-1): 개별 호 = service configuration `<on-network><private-call><hang-time>`, 애드혹 그룹 호 = `<adhoc-group-call><hang-time>`(`<anyExt>`). 지금 문서에는 두 요소가 없고 `CmpSessionOf` 가 편성 그룹 호 밖에는 T4 = 0 을 싣는다. CSC 설정 키(예 `ServiceConfig.PrivateCall.HangTime`·`ServiceConfig.AdhocGroupCall.HangTime`)와 문서 요소를 두고, CSP 가 호 종류에 맞는 값을 `floor_timers.t4_inactivity` 로 싣는다. 만료 처리 = 개별 호는 TS 24.379 §6.3.8.2 1), 애드혹은 §6.3.8.1 1). 개별 호의 최대 시간(§6.3.8.2 2) — `<private-call><max-duration-with-floor-control>`)도 같은 자리에서 함께 본다 | `csc/src/services/mcptt.py` `get_service_config_xml` · `config_template.json` · `csp/CspServiceConfig.*` · `csp/GroupCallService.cpp` `CmpSessionOf`·`OnFloorInactivity` |
+| D6 | **CSC·CSP — 애드혹 그룹 호의 TNG3** | 값 = `<adhoc-group-call><max-duration-of-call>`(TS 24.379 표 B.2.1-1 · §17.4.2.2 13)). 지금 `CheckSessionLimits` 는 편성 그룹 호만 본다. D5 와 같은 자리에 요소·설정 키를 두고 애드혹 세션에도 건다 | 같은 파일 · `CheckSessionLimits` |
+| D7 | **CSC·CSP — chat 그룹의 TNG3 (결정)** | 규격은 그룹 문서에 `<on-network-maximum-duration>` 이 있으면 TNG3 를 켠다(§6.3.3.5.1 — chat 은 요소가 선택). 지금 그룹 문서는 chat 그룹에도 요소를 싣는데 CSP 는 돌리지 않는다. 둘 중 하나로 맞춘다 — ① chat 그룹 문서에서 요소를 뺀다(상시 세션이라는 지금 동작 유지) ② chat 세션에도 TNG3 를 돌린다. 권고 = ①(콘솔·관제 앱 폼은 chat 일 때 칸을 잠근다 — 폼은 Windows 몫) | `csc/src/services/mcptt.py` 그룹 문서 산출 |
+| D8 | **CSC — 0 의 표기 (결정)** | «0 = 미사용/무제한» 은 우리 약속이고 규격에는 없다. T4 0 은 `PT0S` 를 실으면 규격 단말이 «유휴 0초» 로 읽을 수 있다. 권고 = T4 0 이면 `<on-network-hang-timer>` 를 생략, TNG3 는 편성 그룹에 값이 필수(TS 24.481 검증 제약)라 0 을 받지 않거나 문서에는 상한값을 싣는다. 편차로 남길 것이면 mcptt_standard_conformance.md 편차 표에 사유와 함께 적는다 | 같은 파일 · `csc/src/handlers/admin.py` `_norm_group_timer` |
+| D9 | **SDK — 최종 응답의 `Warning`** | §14 K1 과 같은 과제다 — TNG1 포기의 480 + Warning `112`, 진행의 200 + Warning `111` 도 같은 필드로 올라와야 앱이 «필수 멤버가 응답하지 않아 취소됐습니다» 를 다른 480 과 가른다 | `sdk/core` `types.h CallInfo` · `cimsue_c.h` |
+| D10 | **CSC·CSP — UE initial configuration 변경 통지** | 규격은 이 문서의 application usage 도 변경 구독을 지원하게 한다(TS 24.484 §7.2.2.12 → §6.3.13.3). 지금 CSC 는 `UeInitConfig.*` 재적재로 문서 ETag 가 바뀌어도 알리지 않는다(service configuration 은 `SERVICE_CONFIG_CHANGED`). 같은 방식으로 통지하고 CSP 가 cms 구독 단말에 xcap-diff(문서 선택자 = `org.3gpp.mcptt.ue-init-config/…`)를 보낸다. 단말은 그 선택자를 보면 문서를 다시 받는다 — D1 이 들어간 뒤에야 의미가 있다(지금 단말이 이 문서에서 쓰는 것은 로그인 때의 PSI 뿐) | `csc/src/services/mcptt.py` 설정 재적재 · `csp/CscInterface.cpp` · `csp/CspServer.cpp` |
+
+순서 권고 = D4 → D1 → D2 → D3(단말 타이머 한 묶음) · D5·D6(service configuration 요소 한 묶음) · D7·D8(결정 뒤 문서 산출) · D10(D1 뒤).
+
+### 16.3 Windows 몫 (.45 반영 뒤)
+
+- D1 의 SDK API 가 정해지면 관제 앱 두 벌이 ue-init-config 의 타이머를 계정에 싣는다(지금은 PSI 만 싣는다).
+- D7 을 ① 로 정하면 그룹 편집 폼의 «최대 통화 시간(TNG3, 초)» 칸을 chat 그룹에서 잠근다(두 앱).
+- D9 가 올라오면 응답 문구 사전에 111·112 를 넣는다.
+
+### 16.4 확인
+
+1. 단위시험 — `floor_participant_test`(T101 재전송 횟수·간격, T103 만료로 유휴 판정, T132 만료 Release) · `csc_test` `CmsDoc.ParseUeInitConfig`(`<Timers>` 다섯 값).
+2. `cimsue-cli` — 그룹 호에서 Floor Request 를 서버가 한 번 버리게 하고(또는 CMP 를 잠깐 막고) 재전송으로 승인되는지.
+3. 콘솔에서 `UeInitConfig.Timers.T101` 을 바꾸고 재로그인 → 단말의 재전송 간격이 따라오는지(D1), 재로그인 없이 따라오는지(D10).
+4. 개별 호를 걸어 두고 말하지 않기 → `<private-call><hang-time>` 뒤 서버가 호를 끝내는지(D5).
