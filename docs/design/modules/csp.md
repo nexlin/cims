@@ -571,6 +571,11 @@ mcptt-info `session-type:private` INVITE 를 받으면(타겟=그룹이 아닌 �
 fan-out·CMP 세션·teardown)를 그대로 재사용**한다(`ModuleDispatcher::EventIncomingCall`, 계약
 [../features/mcptt_csp_cmp_roadmap_contract.md](../features/mcptt_csp_cmp_roadmap_contract.md) §A.1).
 
+- **인가**(TS 24.379 §11.1.1.3.1.1 10)·11)·18) · §11.1.1.3.2 8)) — 그룹을 만들기 전에 user profile(ptt_user_profile — CSC 문서와
+  같은 열)로: 발신 `allow_private_call` 거짓 403 + `107` · `Priv-Answer-Mode: Auto` 403 + `143`(강제 자동 응답 인가 없음) ·
+  `allow_private_call_to_any_user` 거짓이면 상대가 PrivateCallList(같은 그룹 동료 멤버, 없으면 지정 긴급 수신자 —
+  `PrivateCallListContains`) 밖일 때 403 + `144` · (상대 미등록 480) · 착신 `allow_private_call_participation` 거짓 403 + `127`.
+  착신 INVITE 의 `Answer-Mode` = 발신 INVITE 값(그룹 `_answerMode`, 없으면 `Auto` — 18)d)).
 - **affiliation 불요** — `_requireAffiliation=false` 로 멤버십 게이트를 우회한다(상대 MCPTT ID
   직접 지정). `_isAdhoc=true` 라 통화 종료 시 GroupMap 에서 제거된다(ephemeral).
 - **floor 유무** — 발신 offer 의 fmtp `mc_no_floor_ctrl`(G17) 협상 시

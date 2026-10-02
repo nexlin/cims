@@ -100,6 +100,9 @@ public:
     bool _allowConferenceState;
     /** ad hoc 동적 그룹(Rel-18) — 비영속 in-memory, 통화 종료 시 GroupMap 에서 제거 */
     bool _isAdhoc;
+    /** 즉석 개별 호(private)의 착신 INVITE 에 실을 Answer-Mode — 발신 INVITE 의 값(Auto·Manual, TS 24.379 §11.1.1.3.1.1
+     *  18)d)). 비면 Auto(poc-settings 를 받지 않아 자동 개시로 본다). */
+    std::string _answerMode;
 
     // ── MCData 그룹 메시징 게이트 (TS 24.481 §7.2.4.2) ──
     /** SDS 메시징 허용 (mcdata-allow-short-data-service) */

@@ -733,7 +733,12 @@ REGISTER/SUBSCRIBE/NOTIFY 의 헤더·본문을 상용 IMS 캡처 기준으로 �
   `<allow-private-call-to-any-user>`(발신 인가 ∧ `allow_private_call_to_any_user`)·`<allow-private-call-participation>`(`allow_private_call_participation`) ·
   `<anyExt>` K `<allow-to-receive-private-call-from-any-user>`(= 착신 참가 — IncomingPrivateCallList 없음)·L·R·S
   `<allow-adhoc-group-call-participation>` true · AA `<allow-to-modify-adhoc-group-call-participants-info>` false(그 절차 없음).
-  CSP 의 판정(107·144·127·188 등)은 미구현 — 갭 PRV-2·PRV-8·ADH-5. `<OnNetwork>` = **MCPTTGroupInfo(소속 그룹 = 규격 단말의 그룹 목록 소스, 소유 소속 그룹은
+  CSP 는 같은 열(ptt_user_profile)로 판정한다(`ModuleDispatcher` 개별 호 분기 — TS 24.379 §11.1.1.3.1.1 10)·11)·18) · §11.1.1.3.2 8)): 발신
+  인가 거짓 403 `107`(수동·자동 개시 인가가 같은 값이라 `125`·`126` 은 따로 서지 않는다) · `Priv-Answer-Mode: Auto` 403 `143`(강제 자동 응답 인가
+  false) · 목록 밖 상대 인가 거짓이면 PrivateCallList(위와 같은 목록 — 동료 멤버, 없으면 지정 긴급 수신자) 밖 403 `144` · 착신 참가 인가 거짓 403
+  `127`(IncomingPrivateCallList 는 싣지 않아 `159` 는 서지 않는다). 착신 INVITE 의 `Answer-Mode` = 발신 값(없으면 `Auto` — 18)d)),
+  `Priv-Answer-Mode: Manual` 은 옮기지 않는다(18)a)). 열(`migrate_ptt_user_profile_private_call.sql`)이 없는 DB 에서는 셋 다 허용으로 읽는다.
+  애드혹 참가 자격은 true 고정이라 `188`(§17.3.2.1.2 6))은 서지 않는다. `<OnNetwork>` = **MCPTTGroupInfo(소속 그룹 = 규격 단말의 그룹 목록 소스, 소유 소속 그룹은
   anyExt `cims:authorized-user`)**·MaxAffiliationsN2(`mcptt_service_config.max_affiliations_n2`)·ImplicitAffiliations(멤버 `implicit_affiliation` 이 켜진 그룹만 — C9)·
   MaxSimultaneousTransmissionsN7·PrivateEmergencyAlert. 상수는 `UserProfile.*` 설정. 루트 `<Status>true</Status>`(§8.3.2.1 3)·alias-entry `index` 병기.
   **N6**(`<MaxSimultaneousCallsN6>`, §8.3.2.1 8)e)i) — 동시 그룹 호 상한)는 사용자마다의 값이다: 그 PTT 회선의 사람에게 역할 배정

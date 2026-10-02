@@ -59,6 +59,13 @@ struct CspUserProfile {
     /** allow-to-receive-non-acknowledged-users-information (TS 24.484 anyExt) — 그룹 호 개시자로서 확인 통화 설정이
      * 필수 멤버 없이 진행됐을 때 응답하지 않은 멤버 목록 INFO 를 받을 자격 (TS 24.379 §6.3.3.3). 기본 false. */
     bool m_bAllowNonAckUsersInfo = false;
+    /** 개별 호 (TS 24.484 ruleset — CSC user profile 과 같은 열). 발신 = allow-private-call(수동·자동 개시 인가도 같은
+     * 값 — CSC 가 그렇게 낸다), 목록 밖 상대 = allow-private-call-to-any-user, 착신 참가 =
+     * allow-private-call-participation. 행 부재·컬럼 미적용 = 허용. 판정 = TS 24.379 §11.1.1.3.1.1 10)·11) ·
+     * §11.1.1.3.2 8) (403 107·144·127). */
+    bool m_bAllowPrivateCall = true;
+    bool m_bAllowPrivateCallToAnyUser = true;
+    bool m_bAllowPrivateCallParticipation = true;
 };
 
 /** MCVideo 이용 자격 — mcvideo_user_profile 행(TS 24.484 §9.3, docs/design/features/mcvideo.md §5.1). 행이 없으면

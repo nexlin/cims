@@ -144,6 +144,7 @@ void CspPttGroup::Clear() {
     _emergencyAlert = true;
     _allowConferenceState = true;
     _isAdhoc = false;
+    _answerMode.clear();
     _allowSds = true;
     _allowFd = false;
     _maxSdsSize = 10000;

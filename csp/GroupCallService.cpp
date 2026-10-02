@@ -2846,8 +2846,11 @@ bool CGroupCallService::InviteMember( const char *pszUserId, const char *pszGrou
             // P-Asserted-Service: MCPTT ICSI — 제어 기능은 신뢰 영역 안이라 단언한다 (TS 24.379 §6.3.3.1.2 3)).
             //   헤더 이름은 RFC 6050 §4.1 의 P-Asserted-Service — 본문의 "-Id" 는 표기, 부록 A.1.3-7 예시도 이 이름.
             pclsInvite->AddHeader( "P-Asserted-Service", "urn:urn-7:3gpp-service.ims.icsi.mcptt" );
-            // 단말 자동 응답 요구 (3GPP TS 24.379 §6.3.3.1)
-            pclsInvite->AddHeader( "Answer-Mode", "Auto" );
+            // 개시 방식 (TS 24.379 §6.3.2.2.5.2·§6.3.2.2.6.2) — 그룹 호는 poc-settings 를 받지 않아 자동 개시로 본다.
+            //   개별 호는 발신 INVITE 의 Answer-Mode 를 옮긴다(§11.1.1.3.1.1 18)d) — 없으면 Auto).
+            pclsInvite->AddHeader( "Answer-Mode", ( clsGroup._groupType == "private" && !clsGroup._answerMode.empty() )
+                                                      ? clsGroup._answerMode.c_str()
+                                                      : "Auto" );
             // 참여 기능의 단말 INVITE — Supported: tdialog·norefersub (TS 24.379 §6.3.2.2.3 5)·6)), timer 는 스택 몫
             pclsInvite->AddHeader( "Supported", kMcMemberInviteSupported );
             // Resource-Priority (RFC 4412/8101) — 값은 service-config 의

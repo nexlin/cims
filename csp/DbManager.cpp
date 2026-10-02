@@ -177,6 +177,15 @@ void CDbManager::ProbeSchema() {
         CLog::Print( LOG_INFO,
                      "[DB] ptt_user_profile.allow_cancel_* columns absent — migrate_ptt_user_profile_cancel_authz.sql "
                      "미적용. 긴급 해제는 개시자만, 경보 취소는 발령 인가로 판정" );
+    // 개별 호 인가 (TS 24.484 allow-private-call·-to-any-user·-participation — CSC 가 같은 열로 user profile 을 낸다).
+    //   미적용이면 셋 다 허용(그 전 동작).
+    pRes = ExecuteSelect( "SHOW COLUMNS FROM ptt_user_profile LIKE 'allow_private_call'" );
+    m_bHasPrivateCallColumns = pRes && mysql_num_rows( pRes ) > 0;
+    if ( pRes ) mysql_free_result( pRes );
+    if ( !m_bHasPrivateCallColumns )
+        CLog::Print( LOG_INFO,
+                     "[DB] ptt_user_profile.allow_private_call* columns absent — "
+                     "migrate_ptt_user_profile_private_call.sql 미적용. 개별 호 발신·착신은 모두 허용" );
     // MCVideo 서비스 표 (mcvideo_group_attrs·mcvideo_user_profile·mcvideo_affiliations —
     // docs/design/features/mcvideo.md §5.1).
     //   세 표는 한 마이그레이션(sql/migrate_mcvideo.sql)이 함께 만든다 — 대표 표 하나로 판정한다.
@@ -475,6 +484,10 @@ int CDbManager::SelectUserProfile( const std::string &strUserId, CspUserProfile 
         std::string( m_bHasCancelAuthzColumns
                          ? "allow_cancel_group_emergency, allow_cancel_imminent_peril, allow_cancel_emergency_alert"
                          : "0, 1, allow_emergency_alert" ) +
+        ", " +
+        std::string( m_bHasPrivateCallColumns
+                         ? "allow_private_call, allow_private_call_to_any_user, allow_private_call_participation"
+                         : "1, 1, 1" ) +
         " FROM ptt_user_profile WHERE ptt_id='" + Escape( strUserId ) + "'";
 
     MYSQL_RES *pRes = ExecuteSelect( strSql );
@@ -498,6 +511,9 @@ int CDbManager::SelectUserProfile( const std::string &strUserId, CspUserProfile 
     clsProfile.m_bAllowCancelGroupEmergency = row[10] ? ( atoi( row[10] ) != 0 ) : false;
     clsProfile.m_bAllowCancelImminentPeril = row[11] ? ( atoi( row[11] ) != 0 ) : true;
     clsProfile.m_bAllowCancelEmergencyAlert = row[12] ? ( atoi( row[12] ) != 0 ) : clsProfile.m_bAllowEmergencyAlert;
+    clsProfile.m_bAllowPrivateCall = row[13] ? ( atoi( row[13] ) != 0 ) : true;
+    clsProfile.m_bAllowPrivateCallToAnyUser = row[14] ? ( atoi( row[14] ) != 0 ) : true;
+    clsProfile.m_bAllowPrivateCallParticipation = row[15] ? ( atoi( row[15] ) != 0 ) : true;
     mysql_free_result( pRes );
     return 1;
 }

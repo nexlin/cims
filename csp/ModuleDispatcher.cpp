@@ -840,6 +840,33 @@ static void NoteOfferCodecs( const char *pszFrom, const SDP_MEDIA_LIST &clsList 
     gclsCallDir.DeviceMedia( pszFrom, strAudio, strVideo );
 }
 
+/** 개별 호 상대가 발신자의 PrivateCallList 에 있는가 — CSC user profile 의 <PrivateCall><PrivateCallList> 와 같은 목록:
+ *  발신자가 멤버인 (설정) 그룹의 동료 멤버, 그런 동료가 없으면 지정 긴급 수신자(없으면 본인 — 퇴화). TS 24.379
+ *  §11.1.1.3.1.1 11)e)i)A). */
+static bool PrivateCallListContains( const char *pszCaller, const char *pszCallee, const CspUserProfile &clsProf ) {
+    const std::string strCaller = pszCaller ? pszCaller : "", strCallee = pszCallee ? pszCallee : "";
+    bool bAnyPeer = false, bFound = false;
+    gclsGroupMap.IterateInternal( [&]( const CspPttGroup &g ) {
+        if ( g._isAdhoc ) return;
+        bool bMine = false, bCallee = false;
+        for ( const auto &u : g._pusers ) {
+            if ( !u ) continue;
+            if ( u->_id == strCaller ) bMine = true;
+            if ( u->_id == strCallee ) bCallee = true;
+        }
+        if ( !bMine ) return;
+        for ( const auto &u : g._pusers )
+            if ( u && u->_id != strCaller ) bAnyPeer = true;
+        if ( bCallee ) bFound = true;
+    } );
+    if ( bFound ) return true;
+    if ( bAnyPeer ) return false;
+    const std::string strFallback = clsProf.m_strEmergencyPrivateRecipient.empty()
+                                        ? strCaller
+                                        : McpttBareId( clsProf.m_strEmergencyPrivateRecipient );
+    return strFallback == strCallee;
+}
+
 void CModuleDispatcher::EventIncomingCall( const char *pszCallId, const char *pszFrom, const char *pszTo,
                                            CSipCallRtp *pclsRtp, CSipMessage *pclsMessage ) {
     CLog::Print( LOG_DEBUG, "EventIncomingCall: CallId=%s From=%s To=%s", pszCallId, pszFrom, pszTo );
@@ -982,6 +1009,47 @@ void CModuleDispatcher::EventIncomingCall( const char *pszCallId, const char *ps
     //   (mcptt_csp_cmp_roadmap_contract.md). affiliation 불요(멤버십 게이트 우회).
     //   floor 유무는 발신 offer 의 fmtp mc_no_floor_ctrl(G17)로 정한다 — off=full-duplex.
     if ( m_clsPttAs.IsEnabled() && strMcpttSessionType == "private" && !gclsGroupMap.Contains( pszTo ) ) {
+        // 개별 호 인가 (TS 24.379 §11.1.1.3.1.1 10)·11)·18) · §11.1.1.3.2 8)) — user profile = ptt_user_profile, CSC 가
+        // 같은
+        //   열로 문서를 낸다. 거절 = 403 + Warning(§4.4), 시도 장부는 denied.
+        auto rejectPriv = [&]( int iWarn, const char *pszText, const char *pszCause ) {
+            CLog::Print( LOG_INFO, "EventIncomingCall: private call %s → %s → 403 %d [PTT-AS]", pszFrom, pszTo, iWarn );
+            if ( gclsCallDir.IsEnabled() )
+                gclsCallDir.PttAttempt( pszTo, "", pszFrom, "failed", "denied", pszCause, SIP_FORBIDDEN );
+            gclsUserAgent.StopCall(
+                pszCallId, SIP_FORBIDDEN, NULL,
+                { { "Warning", McpttWarning( iWarn, pszText, gclsServiceMap.GetDomainByKind( "ptt" ) ) } } );
+        };
+        CspUserProfile clsCallerProf;  // 행 부재·DB 오류 = 기본값(허용)
+        gclsDbManager.SelectUserProfile( pszFrom, clsCallerProf );
+        // 10) 발신 인가. 11)a)b) 수동·자동 개시 인가는 CSC 가 발신 인가와 같은 값으로 낸다 — 여기를 지나면 125·126 은
+        // 서지 않는다.
+        if ( !clsCallerProf.m_bAllowPrivateCall )
+            return rejectPriv( 107, "user not authorised to make private calls", "private_not_authorised" );
+        // 18)a)b) Priv-Answer-Mode — 강제 자동 응답 인가(<allow-force-auto-answer>)는 CSC 가 false 로 낸다: Auto 면 403
+        // 143,
+        //   Manual 은 착신 INVITE 에 옮기지 않는다(Priv-Answer-Mode 를 싣지 않는다).
+        std::string strPrivAm, strAm;
+        if ( pclsMessage ) {
+            if ( CSipHeader *pH = pclsMessage->GetHeader( "Priv-Answer-Mode" ) ) strPrivAm = pH->m_strValue;
+            if ( CSipHeader *pH = pclsMessage->GetHeader( "Answer-Mode" ) ) strAm = pH->m_strValue;
+        }
+        auto amIs = []( const std::string &v, const char *pszWant ) {
+            std::string t;
+            for ( char c : v )
+                if ( !std::isspace( (unsigned char)c ) && c != ';' )
+                    t += (char)std::tolower( (unsigned char)c );
+                else if ( c == ';' )
+                    break;
+            return t == pszWant;
+        };
+        if ( amIs( strPrivAm, "auto" ) )
+            return rejectPriv( 143, "not authorised to force auto answer", "force_auto_answer_not_authorised" );
+        // 11)e) 목록 밖 상대 — <allow-private-call-to-any-user> 가 없으면 상대가 PrivateCallList(CSC 와 같은 목록 =
+        // 같은 그룹의
+        //   동료 멤버, 없으면 지정 긴급 수신자)에 있어야 한다. 아니면 403 144.
+        if ( !clsCallerProf.m_bAllowPrivateCallToAnyUser && !PrivateCallListContains( pszFrom, pszTo, clsCallerProf ) )
+            return rejectPriv( 144, "user not authorised to call this particular user", "private_callee_not_listed" );
         CspUser clsCallee;
         if ( !gclsCspUserMap.isAlive( pszTo, clsCallee ) ) {
             CLog::Print( LOG_INFO, "EventIncomingCall: private call target(%s) not registered → 480 [PTT-AS]", pszTo );
@@ -996,6 +1064,16 @@ void CModuleDispatcher::EventIncomingCall( const char *pszCallId, const char *ps
                 gclsCallDir.PttAttempt( pszTo, "", pszFrom, "failed", "no_answer", "private_callee_offline",
                                         SIP_TEMPORARILY_UNAVAILABLE );
             return StopCall( pszCallId, SIP_TEMPORARILY_UNAVAILABLE );
+        }
+        // §11.1.1.3.2 8) 착신 참가 인가(<allow-private-call-participation>) — 아니면 403 127.
+        // IncomingPrivateCallList(9) — 159)는
+        //   CSC 가 싣지 않아(목록 없음 = 제한 없음) 서지 않는다.
+        {
+            CspUserProfile clsCalleeProf;
+            gclsDbManager.SelectUserProfile( pszTo, clsCalleeProf );
+            if ( !clsCalleeProf.m_bAllowPrivateCallParticipation )
+                return rejectPriv( 127, "user not authorised to be called in private call",
+                                   "private_callee_not_authorised" );
         }
         std::string strPrivId = std::string( "priv-" ) + pszFrom + "-" + pszTo;
         // 새 발신의 floor 모드 — 싱글(floor on, 기본) vs 멀티(mc_no_floor_ctrl → off).
@@ -1032,6 +1110,14 @@ void CModuleDispatcher::EventIncomingCall( const char *pszCallId, const char *ps
             gclsGroupMap.Insert( clsPriv );
             CLog::Print( LOG_INFO, "EventIncomingCall: private call session(%s) created floor_control=%s [PTT-AS]",
                          strPrivId.c_str(), clsPriv._floorControl.empty() ? "on" : clsPriv._floorControl.c_str() );
+        }
+        // 18)d) 착신 INVITE 의 Answer-Mode = 발신 값(Auto·Manual) — 잔존 그룹을 다시 쓰면 이번 호의 값으로 바꾼다
+        {
+            CspPttGroup clsPrivAm;
+            if ( gclsGroupMap.Select( strPrivId.c_str(), clsPrivAm ) ) {
+                clsPrivAm._answerMode = amIs( strAm, "manual" ) ? "Manual" : ( amIs( strAm, "auto" ) ? "Auto" : "" );
+                gclsGroupMap.Insert( clsPrivAm );
+            }
         }
         SetCallOwner( pszCallId, &m_clsPttAs );
         CSipCallRoute clsPrivRoute;

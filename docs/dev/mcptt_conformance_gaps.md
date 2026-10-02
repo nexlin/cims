@@ -46,16 +46,16 @@ PTT(MCPTT) 서비스 구현을 3GPP 규격 원문과 대조해 **규격과 다�
 | 제휴 (AFF) | 10 | 6 | 4 | — | — |
 | 그룹 호 — 서버 (GCS) | 18 | 7 | 6 | 4 | 1 |
 | 그룹 호 — 단말 (GCC) | 8 | — | 6 | — | 2 |
-| 개별 호 (PRV) | 8 | 4 | 3 | 1 | — |
-| 애드혹 그룹 호 (ADH) | 4 | 1 | 3 | — | — |
-| 긴급·임박·경보 (EMG) | 10 | 1 | 2 | 7 | — |
+| 개별 호 (PRV) | 5 | 1 | 3 | 1 | — |
+| 애드혹 그룹 호 (ADH) | 3 | 1 | 2 | — | — |
+| 긴급·임박·경보 (EMG) | 9 | 1 | 1 | 7 | — |
 | 발언권 — 서버 (FCS) | 19 | 2 | 9 | 5 | 3 |
 | 발언권 SDP 협상 (SDP) | 2 | — | 2 | — | — |
 | 그룹 문서·GMS (GMS) | 8 | — | 8 | — | — |
 | 설정 문서·CMS (CMS) | 2 | — | 1 | 1 | — |
-| **계** | **93** | **21** | **47** | **18** | **7** |
+| **계** | **88** | **18** | **45** | **18** | **7** |
 
-확인 수준 — ◎ 52 · ○ 32 · △ 9.
+확인 수준 — ◎ 49 · ○ 30 · △ 9.
 
 읽는 순서 — §2(먼저 볼 것) → §3(영역별 전체) → §4(미구현 목록에 빠진 기능) → §5(문서 정정) → §6(묶음과 순서).
 
@@ -74,7 +74,6 @@ PTT(MCPTT) 서비스 구현을 3GPP 규격 원문과 대조해 **규격과 다�
 
 | 항목 | 내용 |
 |---|---|
-| PRV-2 | 개별 호 발신 인가(`<allow-private-call>`)가 문서에도 서버 판정에도 없다 — 개별 호를 막을 설정이 없다 |
 
 **호 모델이 규격과 다른 것 (결정이 필요)**
 
@@ -156,20 +155,16 @@ CSP 는 참여 기능과 제어 기능을 겸한다.
 | # | 급 | 대상 | 규격 | CIMS 지금 | 영향 | 확인 |
 |---|---|---|---|---|---|---|
 | PRV-1 | B | CSP·SDK | §11.1.1.2.1.1 9) — 착신자는 `application/resource-lists+xml` 본문. §11.1.1.3.1.1 8) — 없으면 403 + `145 unable to determine called party` (shall) | CSP 는 착신자를 Request-URI 또는 `<mcptt-request-uri>` 에서만 잡는다(`csp/ModuleDispatcher.cpp:944-958`). SDK 는 resource-lists 를 싣지 않는다(`sdk/core/src/engine.cpp:2676-2681` — 애드혹만) | 규격 단말(R-URI = PSI + resource-lists)의 개별 호가 480 이 된다. conformance C4h 는 «개별 통화 = `<mcptt-request-uri>`, 정합» 이라 적었다 | ◎ |
-| PRV-2 | A | CSC·CSP·SDK | §11.1.1.3.1.1 10)·11) — `<allow-private-call>` 이 없거나 false 면 403 + `107`, 목록 밖 상대면 `144`. TS 24.484 표 8.3.2.7-7 — 요소가 없으면 false | user profile 에 요소가 없고(CMS-3) CSP 는 프로파일을 보지 않는다(csp 에 107·144 없음). SDK 는 «요소 없음 = 허용» 으로 읽는다(`sdk/core/src/csc/cms_doc.cpp:17-21`) | 개별 호 발신을 막을 설정이 없고 PrivateCallList 밖 상대에게도 걸린다. 규격 단말은 이 문서로는 개별 호를 미인가로 읽는다 | ◎ |
 | PRV-3 | A | CSP·SDK | §11.1.2.2 — floor 없는 개별 호는 offer 에 `m=application` 을 싣지 않는다. `mc_no_floor_ctrl` 은 pre-established session 용(TS 24.380 §14.2.6) | CSP 는 fmtp `mc_no_floor_ctrl` 로만 floor off 를 정한다(`csp/ModuleDispatcher.cpp:961-964`). SDK 발신 전이중은 `m=application` 을 싣지 않고(`sdk/core/src/engine.cpp:2646-2655`), 착신 판정은 문자열 `mc_no_floor_ctrl`(`sdk/core/src/mcptt/mcptt_xml.cpp:227`) | SDK 가 건 전이중 호를 CSP 가 floor 있는 호로 세운다. 규격 단말·서버와도 서로 반대로 읽는다. 실호 증상은 실측 필요 | ○ |
-| PRV-4 | B | CSP·SDK | §11.1.1.2.1.1 14) — 발신 단말이 Answer-Mode(Auto·Manual) 또는 Priv-Answer-Mode 를 싣는다. §11.1.1.3.1.1 11)·18) — 인가 403 `125`·`126`·`143` | SDK 는 헤더를 싣지 않고, CSP 는 읽지 않으며 착신에 늘 `Answer-Mode: Auto`(GCS-16). 인가 요소도 없다(CMS-3) | 수동 수락·강제 자동 응답 요청이 동작하지 않는다 | ◎ |
-| PRV-5 | A | CSP·CSC | §11.1.1.4.1 10) · §6.3.8.2 2) — 개별 호 최대 통화 시간(service configuration `<private-call>` `<max-duration-with/without-floor-control>`) | 최대 시간 검사는 편성 그룹 호만 — `csp/GroupCallService.cpp:305-311`. 문서에 `<private-call>` 요소가 없다 | 개별 호는 한쪽이 끊을 때까지 이어진다(T4 도 돌지 않는다 — 타이머 D5 와 한 묶음) | ○ |
+| PRV-4 | B | SDK | §11.1.1.2.1.1 14) — 발신 단말이 Answer-Mode(Auto·Manual) 또는 Priv-Answer-Mode 를 싣는다 | SDK 는 헤더를 싣지 않는다 — CSP 는 받은 Answer-Mode 를 착신 INVITE 에 옮기고 `Priv-Answer-Mode: Auto` 는 403 `143` 으로 막는다(csp.md «Private call», 125·126 = 발신 인가와 같은 값) | 수동 수락·자동 응답 요청을 단말이 고르지 못한다 | ◎ |
 | PRV-6 | C | CSP | §11.1.1.3.2 7) — 착신자의 바인딩이 없으면 404 | 미등록 = 480 — `csp/ModuleDispatcher.cpp:945-958` | 없는 MCPTT ID 와 일시 부재를 가르지 못한다 | ◎ |
 | PRV-7 | B | CSP | §6.3.3.2.3.1 2) — 개시자에게 가는 응답에 P-Asserted-Identity. §11.1.1.3.1.1 — 받은 180 의 Warning 을 옮긴다. §11.1.1.4.2 — SDP 없는 응답은 본문째 전달 | 개시자 180 은 헤더 없이 낸다(`csp/GroupCallService.cpp:594`). 거절 최종 응답에는 CSP 의 112 만 실리고 멤버 응답의 Warning 은 200 OK 에만 쓴다(`:439-447`·`:540-548`) | 착신 측이 준 사유(110·127 등)가 발신 단말에 닿지 않는다 | ○ |
-| PRV-8 | A | CSC·CSP | §11.1.1.3.2 8)·9) — 착신 인가(`<allow-private-call-participation>`, IncomingPrivateCallList) 403 `127`·`159` | 착신 검사는 등록 여부뿐. 문서에 요소가 없다 | 개별 호 착신을 막을 설정이 없다 | ○ |
 
 ### 3.6 애드혹 그룹 호 (ADH) — TS 24.379 §17
 
 | # | 급 | 대상 | 규격 | CIMS 지금 | 영향 | 확인 |
 |---|---|---|---|---|---|---|
 | ADH-4 | B | CSP | §17.3.2.1.1 9) — 미인가 403 + `185`. 4) — `184` | Warning 없는 403 — `csp/ModuleDispatcher.cpp:1015-1022`. 프로파일 조회 실패면 통과. 스위치가 꺼져 있으면 «없는 그룹» 403 | 단말이 «권한 없음»·«시스템 미지원»·«없는 그룹» 을 가르지 못한다 | ◎ |
-| ADH-5 | B | CSC·CSP | §17.3.2.1.2 6) — `<allow-adhoc-group-call-participation>` 이 없거나 false 면 403 + `188` | 문서에 요소가 없고 명단의 누구든 초대한다 | 규격대로 읽으면 이 문서로는 아무도 애드혹 호에 참가할 수 없다 | ◎ |
 | ADH-7 | A | SDK | §17.2.3.1.1 — 호 해제는 BYE + `Reason: SIP;cause=200;text="User requested release"`. §6.3.3.2.4 3A) — 서버는 전원 해제 | SDK BYE 에 Reason 이 없다 — CSP 는 개시자 BYE 의 이 Reason 으로 전원을 해제한다(csp.md «Ad hoc group call») | 개시자가 애드혹 호를 끝낼 수 없다(본인만 나간다) | ○ |
 | ADH-8 | B | CSP·SDK | §17.2.2.1.1 10)a) · §17.4.2.1.1 — `<session-type>adhoc` (Annex F.1) | SDK 개시도 CSP 멤버 INVITE 도 `prearranged` 로 싣는다 — `sdk/core/src/engine.cpp:2666`, `csp/ModuleDispatcher.cpp:1028` → `csp/GroupCallService.cpp:3966` | 규격 단말이 애드혹 호를 편성 그룹 호로 다룬다(그룹 문서를 찾는다) | ◎ |
 
@@ -178,7 +173,6 @@ CSP 는 참여 기능과 제어 기능을 겸한다.
 | # | 급 | 대상 | 규격 | CIMS 지금 | 영향 | 확인 |
 |---|---|---|---|---|---|---|
 | EMG-3 | A | CSP | §9.2.2.3.3 14) → §12.1.3.4 — 새로 제휴한 단말에 진행 중 경보를 MESSAGE 로 알린다 (shall) | 경보 캐시는 호 경로에서만 읽는다(`csp/GroupCallService.cpp:1327`·`:1344`·`:2002`). 제휴 경로는 NOTIFY 만 낸다(`csp/CscfModule.cpp:2028-2041`) | 경보 뒤에 로그인하거나 망 복귀로 제휴를 다시 실은 단말·관제석은 그 경보를 모른다 | ◎ |
-| EMG-4 | B | CSC | TS 24.484 §8.3.2.1 11)xvi) `<allow-imminent-peril-call>` · TS 24.379 §6.2.8.1.8 — true 가 아니면 임박 위험 호는 미인가 | user profile ruleset 에 요소가 없다 — `csc/src/services/mcptt.py:1746-1753` (`<ImminentPerilCall>` entry 는 싣는다) | 규격 단말은 임박 위험 호를 요청하지 않는다. SDK 는 «없으면 허용» 이라 드러나지 않는다 (CMS-3 과 한 묶음) | ◎ |
 | EMG-10 | C | CSP | §6.3.3.1.11 — 상태가 바뀌면 제휴 멤버에 통지 | 세션이 끝나면 긴급·임박 상태를 지우기만 한다 — `csp/GroupCallService.cpp:125-134` | 비참여 제휴 단말과 BYE 로 나간 단말이 그룹을 계속 긴급으로 본다(«그룹 긴급 상태의 수명» 편차의 부작용) | △ |
 | EMG-11 | C | CSP | §6.3.3.1.11 5) — 경보 팬아웃 MESSAGE 에 P-Asserted-Identity(제어 기능 PSI) | 헤더는 Accept-Contact 둘 + P-Asserted-Service 뿐 — `csp/PttAsModule.cpp:213-216`. 상태 통지 쪽은 싣는다 | 규격 단말·중간 노드에 사용자 발신 MESSAGE 로 보인다 | ◎ |
 | EMG-12 | C | CSP | §12.1.3.1 2) — Accept-Contact 에 MCPTT icsi-ref 가 없으면 403 | mcptt-info 지시자 유무만으로 경보 경로에 넣는다 — `csp/ModuleDispatcher.cpp:2658-2662` | 받아들이는 쪽이 넓다 | ○ |
@@ -286,10 +280,8 @@ CSP 는 참여 기능과 제어 기능을 겸한다.
 |---|---|---|---|
 | 1 | **문서 값 한두 줄** — 문서 셋의 T2 제외 대상 | FCS-21(문서) | .48 |
 | 2 | **발언권 메시지 정합** — Ack 의 Message Type · 미대기 Queue Position 254 · Granted Duration | FCS-4 · FCS-8 · FCS-20 | .45 SDK·CMP |
-| 4 | **user profile 인가 요소의 서버 판정** — 문서는 요소를 싣는다(`ptt_user_profile.allow_private_call*`), CSP 가 그 값으로 판정한다 | PRV-2 · PRV-4 · PRV-8 · EMG-4 · ADH-5 | .48 CSP → Windows(Capabilities) |
 | 5 | **Warning 코드** — 거절 사유를 규격 코드로. handoff §14 K1(SDK 가 Warning 을 올림)과 한 묶음 | GCS-7 · GCS-8 · GCS-11 · REG-3 · ADH-4 · PRV-6 · PRV-7 · EMG-5 | .45 CSP·SDK → Windows(문구 사전) |
-| 6 | **service configuration 요소의 서버 판정** — `<private-call>`·`<adhoc-group-call>` 값을 CSP 가 쓴다 | PRV-5 | .48 CSP |
-| 7 | **SDK 요청 규격화** — REGISTER Contact 태그, INVITE 헤더·Request-URI(PSI)·`<mcptt-client-id>`·session-type, 개별 호 resource-lists, 재합류 세션 식별자, conference·xcap-diff SUBSCRIBE. 서버가 양쪽을 받는 전환기를 먼저 둔다(PRV-1) — 서버 쪽 검사(GCS-9·GCS-10)는 SDK 뒤 | REG-1 · GCC-1~GCC-4 · GCC-7 · GCC-8 · PRV-1 · ADH-8 · GMS-16 · SDP-1 | .45 SDK·CSP |
+| 7 | **SDK 요청 규격화** — REGISTER Contact 태그, INVITE 헤더·Request-URI(PSI)·`<mcptt-client-id>`·session-type, 개별 호 resource-lists, 재합류 세션 식별자, conference·xcap-diff SUBSCRIBE. 서버가 양쪽을 받는 전환기를 먼저 둔다(PRV-1) — 서버 쪽 검사(GCS-9·GCS-10)는 SDK 뒤 | REG-1 · GCC-1~GCC-4 · GCC-7 · GCC-8 · PRV-1 · PRV-4 · ADH-8 · GMS-16 · SDP-1 | .45 SDK·CSP |
 | 8 | **제휴를 클라이언트 단위로** — 행 키 통일, 클라이언트 단위 해제·판정, 암묵 제휴 취소. handoff §14 K3·S2 와 한 묶음 | AFF-2~AFF-8 · AFF-12 · EMG-3 | .45 CSP·SDK |
 | 9 | **호 모델 결정** — chat 그룹(초대 없이 합류·1명 이하 해제)과 편성 그룹의 재초대·late call entry·제휴 해제 시 이탈. 규격대로 바꿀지, 편차로 남기고 사유를 적을지 정한다 | GCS-1~GCS-4 · GCS-22 · AFF-11 | 결정 → .45 CSP |
 | 10 | **그룹 문서 집행** — 수신 전용 | FCS-14 | .45 CSP·CMP·CSC |

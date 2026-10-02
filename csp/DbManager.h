@@ -270,6 +270,9 @@ private:
     /** 해제 인가 컬럼 3종(allow_cancel_group_emergency·allow_cancel_imminent_peril·allow_cancel_emergency_alert —
      *  migrate_ptt_user_profile_cancel_authz.sql) 존재 여부 */
     bool m_bHasCancelAuthzColumns = false;
+    /** 개별 호 인가 컬럼 3종(allow_private_call·allow_private_call_to_any_user·allow_private_call_participation —
+     *  migrate_ptt_user_profile_private_call.sql) 존재 여부 */
+    bool m_bHasPrivateCallColumns = false;
     /** MCVideo 표 3종(sql/migrate_mcvideo.sql) 존재 여부 — 없으면 MCVideo 그룹·자격·affiliation 이 없다 */
     bool m_bHasMcVideoTables = false;
     /** eService 의 affiliation 표를 쓸 수 있는가 — MCVideo 는 표가 있어야 한다 */
