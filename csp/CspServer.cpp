@@ -511,6 +511,7 @@ int ServiceMain() {
     // service-config(TS 24.484 §8.4) — floor 제어 서버 파라미터의 정본을 CSC 에서 받는다(Annex A.2.3). 실패하면 CMP
     // 설정값.
     gclsCspServiceConfig.Refresh();
+    gclsCspServiceConfig.RefreshMcVideo();
     // IMS AKA+IPsec (P4) — 잔류 SA 회수 + 자기점검. IPSEC 접속점이 없거나 특권이 없으면 ipsec-3gpp 미제시.
     gclsIpsecSaSetMap.Init();
     // identity(Via/Contact) 송신 fallback 포트를 primary 포트로 보정 (스택 m_clsSetup 은 복사본이라
@@ -566,6 +567,7 @@ int ServiceMain() {
             gclsListenerManager.CheckCertExpiry();  // 경로 변경 반영 (A-PRC-009)
             gclsCscEndpointCache.Refresh();         // CSC 주소/PublicUrl 변경 추종
             gclsCspServiceConfig.Refresh();         // service-config floor 값 재취득
+            gclsCspServiceConfig.RefreshMcVideo();
             // R6 (2026-06-08): 무중단 포트 변경 — primary 포트가 바뀌었으면 identity fallback 도 추종.
             {
                 LocalNodeInfo pri = gclsLocalNodeMap.GetPrimary();

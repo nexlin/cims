@@ -58,6 +58,15 @@ struct CspPriorityParams {
 };
 
 /** 개별 호·애드혹 그룹 호의 세션 타이머 (초, 1 s 미만은 버린다). -1 = 문서에 없음(그 타이머를 돌리지 않는다). */
+// MCVideo service configuration 의 전송 제어 서버 타이머·카운터 — on-network <anyExt><tc-timers-counters-R14>(TS 24.484
+// §9.4.2.1
+//   on-network 6 d)·TS 24.581 표 11.1.3-1·§11.2.3). 그룹 호의 T1·T5 는 그룹 문서 값이라 여기 없다(§11.1.3). -1 = 문서에
+//   없음(CMP K5 기본값).
+struct CspMcvTcParams {
+    int iT2Ms = -1, iT3Ms = -1, iT4Ms = -1, iT6Ms = -1, iT11Ms = -1;
+    int iC2 = -1, iC4 = -1, iC6 = -1, iC7 = -1, iC11 = -1;
+};
+
 struct CspCallTimerParams {
     int iPrivateHangSec = -1;         // <private-call><hang-time> — 개별 호 T4 (TS 24.380 표 11.1.3-1)
     int iPrivateMaxFloorSec = -1;     // <private-call><max-duration-with-floor-control> (TS 24.379 §6.3.8.2 2))
@@ -127,6 +136,15 @@ public:
     /** 문서 → on-network <private-call>·<anyExt><adhoc-group-call> 의 세션 타이머. 없는 요소는 -1. */
     static void ParseCallTimers( const std::string &strXml, CspCallTimerParams &clsOut );
 
+    /** MCVideo service configuration(CSC `/internal/mcvideo/service-config`)을 다시 받는다 — 전송 제어 서버
+     * 타이머·카운터를 CMP 그룹 ADD 의 tc_timers 로 싣는다(다음 호부터). 실패하면 이전 값 유지. */
+    bool RefreshMcVideo();
+    CspMcvTcParams GetMcVideoTcParams();
+
+    /** MCVideo service configuration 문서 → <tc-timers-counters-R14> 서버 값. 루트가 service-configuration-info 가
+     * 아니면 false. C7 은 XSD 철자(`C7-reception-accpeted`)와 본문 철자(`C7-reception-accepted`)를 둘 다 받는다. */
+    static bool ParseMcVideoTc( const std::string &strXml, CspMcvTcParams &clsOut );
+
 private:
     std::mutex m_clsMutex;
     CspFloorParams m_clsFloor;
@@ -137,6 +155,7 @@ private:
     int m_iMaxCallsN6Dispatch = 10;    ///< 관제 N6 (max_calls_n6_dispatch)
     int m_iNumLevelsPriority = -1;     ///< <num-levels-priority-hierarchy> (-1 = 문서에 없음 → 4)
     int m_iAdhocMaxParticipants = -1;  ///< <adhoc-group-call><max-no-participants> (-1 = 문서에 없음 → 상한 없음)
+    CspMcvTcParams m_clsMcvTc;         ///< MCVideo <tc-timers-counters-R14> 서버 값
 };
 
 extern CCspServiceConfig gclsCspServiceConfig;
@@ -263,6 +282,30 @@ inline int CCspServiceConfig::ParseNumLevelsPriorityHierarchy( const std::string
 inline int CCspServiceConfig::ParseAdhocMaxParticipants( const std::string &strXml ) {
     const int n = _CspScCount( _CspScSection( _CspScOnNetwork( strXml ), "adhoc-group-call" ), "max-no-participants" );
     return n >= 1 ? n : -1;
+}
+
+inline bool CCspServiceConfig::ParseMcVideoTc( const std::string &strXml, CspMcvTcParams &clsOut ) {
+    if ( strXml.find( "service-configuration-info" ) == std::string::npos ) return false;
+    const std::string s = _CspScSection( strXml, "tc-timers-counters-R14" );
+    if ( s.empty() ) return true;
+    auto ms = [&s]( const char *pszTag ) {
+        std::string v;
+        if ( !McpttElemValue( s, pszTag, v ) ) return -1;
+        const long long l = CCspServiceConfig::DurationMs( v );
+        return l < 0 || l > 3600000 ? -1 : (int)l;
+    };
+    clsOut.iT2Ms = ms( "T2-transmission-idle" );
+    clsOut.iT3Ms = ms( "T3-transmission-revoke" );
+    clsOut.iT4Ms = ms( "T4-transmission-granted" );
+    clsOut.iT6Ms = ms( "T6-reception-granted" );
+    clsOut.iT11Ms = ms( "T11-stream-reception-idle" );
+    clsOut.iC2 = _CspScCount( s, "C2-transmission-idle" );
+    clsOut.iC4 = _CspScCount( s, "C4-transmission-granted" );
+    clsOut.iC6 = _CspScCount( s, "C6-reception-granted" );
+    clsOut.iC7 = _CspScCount( s, "C7-reception-accpeted" );
+    if ( clsOut.iC7 < 0 ) clsOut.iC7 = _CspScCount( s, "C7-reception-accepted" );
+    clsOut.iC11 = _CspScCount( s, "C11-media-receivers" );
+    return true;
 }
 
 inline void CCspServiceConfig::ParseCallTimers( const std::string &strXml, CspCallTimerParams &clsOut ) {

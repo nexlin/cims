@@ -281,6 +281,7 @@ void CCscInterface::ProcessMessage( const std::string &strMsg, const struct sock
         // CSC 재기동 = 설정 재로드 계기 — 단말용 MCPTT 서비스 주소(xcap-root) 재취득.
         gclsCscEndpointCache.Refresh();
         gclsCspServiceConfig.Refresh();  // service-config floor 값
+        gclsCspServiceConfig.RefreshMcVideo();
 
         // Resync user map from DB — 사용자 캐시도 판정 근거다(EffectiveGroupOf 의 폴백이 pickup_group).
         //   실패를 흘려보내면 낡은 소속으로 스윕이 돌아 이미 그룹을 옮긴 사람을 «그대로» 로 본다.
@@ -314,6 +315,7 @@ void CCscInterface::ProcessMessage( const std::string &strMsg, const struct sock
         // 부터
         //   CMP 로 전달), cms 구독자 전원에게 재조회를 통지한다.
         gclsCspServiceConfig.Refresh();
+        if ( strUri == "mcvideo" ) gclsCspServiceConfig.RefreshMcVideo();  // MCVideo 전송 제어 서버 값(다음 호부터)
         extern void SendServiceConfigNotify( const std::string &etag, const std::string &strUri );
         SendServiceConfigNotify( strEtag, strUri );
     } else if ( strEvent == "UE_INIT_CONFIG_CHANGED" ) {

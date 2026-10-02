@@ -46,12 +46,12 @@ MCPTT 쪽 같은 뿌리의 결함은 [mcptt_conformance_gaps.md](mcptt_conforman
 | 제휴 (VAFF) | 7 | 1 | 1 | 5 | — |
 | 그룹 호 — 서버 (VGC) | 5 | — | 1 | 4 | — |
 | 그룹 호 — 단말 (VGU) | 2 | — | — | — | 2 |
-| 송출 제어 — 서버 (TCS) | 4 | — | — | 2 | 2 |
+| 송출 제어 — 서버 (TCS) | 3 | — | — | 1 | 2 |
 | 송출 제어 — 단말 (TCU) | 1 | — | — | 1 | — |
 | 그룹 문서 (VGMS) | 1 | — | 1 | — | — |
-| **계** | **23** | **1** | **4** | **13** | **5** |
+| **계** | **22** | **1** | **4** | **12** | **5** |
 
-확인 수준 — ◎ 12 · ○ 8 · △ 3.
+확인 수준 — ◎ 11 · ○ 8 · △ 3.
 
 읽는 순서 — §2(먼저 볼 것) → §3(영역별 전체) → §4(미구현 목록에 빠진 기능) → §5(문서 정정) → §6(묶음과 순서).
 
@@ -127,7 +127,6 @@ MCPTT 쪽 같은 뿌리의 결함은 [mcptt_conformance_gaps.md](mcptt_conforman
 
 | # | 급 | 대상 | 규격 | CIMS 지금 | 영향 | 확인 |
 |---|---|---|---|---|---|---|
-| TCS-1 | C | CSP·CMP | 표 11.1.3-1 — T2·T3·T4·T6·T11 은 MCVideo service configuration 값 · §11.2.3 — C2·C4·C6·C7·C11 도 같다 | CSP 는 `tc_timers` 에 `t1_ms`·`t5_ms` 만 싣는다(`csp/CmpClientMcvideo.cpp:52-58`). CSC `/internal/mcvideo/service-config`(`csc/src/handlers/internal_api.py:14-39`)를 읽는 CSP 코드가 없다. `SERVICE_CONFIG_CHANGED` 는 MCPTT 문서만 다시 받는다(`csp/CscInterface.cpp:312-318`) | 운영자가 `McVideoServiceConfig.*` 를 바꾸면 단말 문서만 바뀌고 CMP 는 K5 기본값으로 돈다(지금은 값이 같아 드러나지 않는다) | ◎ |
 | TCS-2 | C | CMP·SDK | §6.3.4.4.2 3g · §6.3.7.3.3 3 · §6.3.7.4.5 5 — Transmission Request 에 Functional Alias 가 있으면 Media Transmission Notification 에 싣는다 (shall) | `_sendNotification` 이 별칭을 싣지 않고 송출 기록(`Tx`)에 자리도 없다(`cmp/PMcvControl.cpp:498-506`, `cmp/PMcvControl.h:162-176`). SDK Transmission Request 도 별칭을 보내지 않는다(`sdk/core/src/mcvideo/tc_codec.cpp:164-169`) | 앱의 «영상 n» 목록이 별칭 칸을 그리지만(`android/ptt-client/.../ui/VideoViews.kt:171`) 늘 비어 있고, 규격 단말이 보낸 별칭도 버려진다 | ◎ |
 | TCS-8 | D | CMP | §6.3.5.7.3 NOTE — 허가 없이 계속 보내는 참여자를 포기할 때는 호에서 내보내기를 권고 | 5회 재송신 뒤 Idle/Taken 으로 되돌리고, 다음 payload 가 오면 다시 Revoked #3 — 회수가 끝없이 되풀이된다(`cmp/PMcvControl.cpp:901-911`) | 무허가 송출 단말이 남는다. mcvideo.md 는 허가된 송출의 포기만 적었다 | ◎ |
 | TCS-10 | D | CSP·CMP·CSC | §6.3.4.3.3 1b · §6.3.4.4.7A 1b — `<on-network-recvonly>` 멤버의 송출 요청은 거절 #5 · §14.3.3 1. — 그 멤버 answer 에 `mc_priority` 없음 | CMP 는 JOIN `recv_only` 를 받지만 CSP 가 `CmpMcvMemberDecl::bRecvOnly` 를 채우는 곳이 없다(`csp/CmpClientMcvideo.cpp:121` 은 읽기만). CSP 그룹 모델·그룹 문서에도 그 요소가 없고, answer 는 offer 에 있으면 늘 `mc_priority` 를 싣는다(`csp/McVideoInfo.h:273-277`) | 수신 전용 멤버를 둘 수 없다(MCPTT FCS-14 와 같은 뿌리). cmp_media_api.md §7.9 의 #5 경로는 쓰이지 않는다 | ◎ |
@@ -173,7 +172,6 @@ MCPTT 쪽 같은 뿌리의 결함은 [mcptt_conformance_gaps.md](mcptt_conforman
 
 | 문서 | 적힌 것 | 실제 | 항목 |
 |---|---|---|---|
-| mcvideo.md §5.1 CMS 단락 · cmp_media_api.md §7.9 `tc_timers` 행 · `csc/src/services/mcptt.py:357` 주석 | CSP 가 `/internal/mcvideo/service-config` 를 받고, T1·T5 밖의 타이머는 service configuration 값 | CSP 에 그 코드가 없고 T1·T5 만 보낸다 — CMP 는 K5 기본값 | TCS-1 |
 | mcvideo.md §5.3.1 Transmission Request 행 · cmp_media_api.md §7.9 `recv_only` | 그룹 문서 `<on-network-recvonly>` 면 거절 #5 | 그룹 문서에 그 요소가 없고 CSP 가 보내지 않는다 | TCS-10 |
 | mcvideo.md §5.5 PTT 단말 | «빈 집합 = Expires 0 = 그 사용자 제휴 전부 해제» 를 피하는 이유로 적음 | 그 서버 동작이 규격(클라이언트 단위 해제)과 다르다 — 편차로 적거나 서버를 고친다 | VAFF-1 |
 | mcvideo.md §5.5 PTT 단말 | «영상 n» 목록(이름·기능 별칭·경과) | 별칭이 서버에서 전달되지 않아 늘 비어 있다 | TCS-2 |
@@ -187,7 +185,7 @@ MCPTT 쪽 같은 뿌리의 결함은 [mcptt_conformance_gaps.md](mcptt_conforman
 |---|---|---|---|
 | 4 | **제휴를 클라이언트 단위로** — 행 키 통일, 클라이언트 단위 해제·판정, 암묵 제휴 취소·완료 시점. MCPTT 묶음 8(AFF-1~8)과 한 작업 | VAFF-1 · VAFF-2 · VAFF-4 · VAFF-5 · VGC-11 | .45 CSP |
 | 5 | **진행 중 호와 제휴·그룹 변경** — late call entry, 제휴 해제·멤버 제거·서비스 끔 → BYE, 제휴 행 정리. MCPTT 묶음 9·10 의 결정과 같이 | VGC-2 · VGC-12 · VAFF-7 · VAFF-6(결정) | 결정 → .45 CSP |
-| 6 | **service configuration 값 결선** — CSP 가 `/internal/mcvideo/service-config` 를 받아 `tc_timers` 전부를 싣고 변경을 통지받는다, 관제 앱이 MCVideo service config 를 받아 계정 타이머로 싣는다(현장 앱·Kotlin 파사드는 한다, C API 는 `cimsue_engine_set_tc_timers`) | TCS-1 · TCU-1 | .45 CSP·SDK |
+| 6 | **service configuration 값 결선(단말)** — 관제 앱이 MCVideo service config 를 받아 계정 타이머로 싣는다(현장 앱·Kotlin 파사드는 한다, C API 는 `cimsue_engine_set_tc_timers`) | TCU-1 | .45 SDK·win |
 | 7 | **코덱 선호의 한 줄기** — 그룹 선호 = 서버 집행 코덱(CSC·콘솔이 검증). 초대 offer 가 그 값을 쓴다(단말 offer 는 지원 encoding 을 전부 싣는다) | VGC-8 | .48 CSP |
 | 8 | **그룹 문서 PUT 해석** — 없음의 뜻(§7.2.8) | VGMS-1 · VGC-10(CSC 기본값 몫) | .45 CSC |
 | 9 | **단말 호 절차** — poc-settings §7.2.3 송신(+ 서버 §7.3.4 수신과 짝 — 받은 Answer-Mode Indication 으로 멤버 초대의 `Answer-Mode` 를 정한다, 지금은 늘 `Auto`), 제휴 상태 구독, preconfigured-group-use-only, 재합류 UI | VREG-1 · VGU-5 · VGU-6 · VAFF-8 | .45 SDK·현장 → Windows(관제 앱) |

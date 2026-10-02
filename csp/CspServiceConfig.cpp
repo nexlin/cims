@@ -98,6 +98,39 @@ int CCspServiceConfig::GetEmergencyGroupTimeLimitSec() {
     return m_iTng2Sec;
 }
 
+bool CCspServiceConfig::RefreshMcVideo() {
+    if ( !gclsSetup.m_bRoleMcVideo || gclsSetup.m_strCscInternalToken.empty() ) return false;
+    HTTP_HEADER_LIST clsHeaders;
+    clsHeaders.push_back( CHttpHeader( "Authorization", ( "Bearer " + gclsSetup.m_strCscInternalToken ).c_str() ) );
+    CHttpClient clsClient;
+    const int iSec = ( gclsSetup.m_iCscTimeoutMs + 999 ) / 1000;
+    clsClient.SetRecvTimeout( iSec < 1 ? 1 : iSec );
+    const std::string strUrl = CscEndpoint::AdminBaseUrl() + "/internal/mcvideo/service-config";
+    std::string strOutType, strBody;
+    clsClient.DoGet( strUrl.c_str(), &clsHeaders, strOutType, strBody );
+    const int iStatus = clsClient.GetStatusCode();
+    CspMcvTcParams tc;
+    if ( iStatus != 200 || !ParseMcVideoTc( strBody, tc ) ) {
+        CLog::Print( LOG_ERROR, "[service-config] MCVideo 문서 응답 %d url=%s — 이전 값 유지(CMP K5 기본값)", iStatus,
+                     strUrl.c_str() );
+        return false;
+    }
+    {
+        std::lock_guard<std::mutex> lock( m_clsMutex );
+        m_clsMcvTc = tc;
+    }
+    CLog::Print( LOG_SYSTEM,
+                 "[service-config] MCVideo 전송 제어 값 적재 T2=%d T3=%d T4=%d T6=%d T11=%d ms C2=%d C4=%d C6=%d C7=%d "
+                 "C11=%d (-1=문서에 없음)",
+                 tc.iT2Ms, tc.iT3Ms, tc.iT4Ms, tc.iT6Ms, tc.iT11Ms, tc.iC2, tc.iC4, tc.iC6, tc.iC7, tc.iC11 );
+    return true;
+}
+
+CspMcvTcParams CCspServiceConfig::GetMcVideoTcParams() {
+    std::lock_guard<std::mutex> lock( m_clsMutex );
+    return m_clsMcvTc;
+}
+
 CspCallTimerParams CCspServiceConfig::GetCallTimerParams() {
     std::lock_guard<std::mutex> lock( m_clsMutex );
     return m_clsCallTimers;

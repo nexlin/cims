@@ -143,6 +143,20 @@ int main(){
   const std::string xr = CspXcapDiffDocsBody("r",{"org.openmobilealliance.groups/global/byGroupID/tel:g1"},"e9",true);
   CK("removed document = previous-etag only (RFC 5874 §3)",xr.find("<document previous-etag=\"e9\" sel=")!=std::string::npos &&
      xr.find("new-etag")==std::string::npos);
+  // MCVideo service configuration <tc-timers-counters-R14> 서버 값(TS 24.484 §9.4.2.1 · S22 TCS-1)
+  CspMcvTcParams tc;
+  const char* mdoc = "<service-configuration-info xmlns=\"urn:3gpp:ns:mcvideoServiceConfig:1.0\"><service-configuration-params><on-network>"
+    "<anyExt><tc-timers-counters-R14><T100-transmission-request>1</T100-transmission-request><private-call-hang-timer>PT30S</private-call-hang-timer>"
+    "<T2-transmission-idle>PT1S</T2-transmission-idle><T3-transmission-revoke>PT2S</T3-transmission-revoke><T4-transmission-granted>PT1.5S</T4-transmission-granted>"
+    "<T6-reception-granted>PT1S</T6-reception-granted><T11-stream-reception-idle>PT10S</T11-stream-reception-idle>"
+    "<C2-transmission-idle>10</C2-transmission-idle><C4-transmission-granted>3</C4-transmission-granted><C6-reception-granted>3</C6-reception-granted>"
+    "<C7-reception-accpeted>2</C7-reception-accpeted><C11-media-receivers>4</C11-media-receivers></tc-timers-counters-R14></anyExt>"
+    "</on-network></service-configuration-params></service-configuration-info>";
+  CK("mcvideo tc parse",CCspServiceConfig::ParseMcVideoTc(mdoc,tc) && tc.iT2Ms==1000 && tc.iT3Ms==2000 && tc.iT4Ms==1500 &&
+     tc.iT6Ms==1000 && tc.iT11Ms==10000 && tc.iC2==10 && tc.iC4==3 && tc.iC6==3 && tc.iC7==2 && tc.iC11==4);
+  CspMcvTcParams tc2;
+  CK("mcvideo tc absent = -1",CCspServiceConfig::ParseMcVideoTc("<service-configuration-info/>",tc2) && tc2.iT2Ms==-1 && tc2.iC7==-1);
+  CK("mcvideo tc not a service config",!CCspServiceConfig::ParseMcVideoTc("<x/>",tc2));
   CK("no body entries",CspXcapDiffEntries("").empty() && CspXcapDiffEntries("<presence entity=\"x\"/>").empty());
   CK("mcptt service config sel",CspMcpttServiceConfigSel("+8250")=="org.3gpp.mcptt.service-config/users/tel:+8250/service-config");
   printf("%s (%d fail)\n",fail?"FAIL":"PASS",fail); return fail?1:0;

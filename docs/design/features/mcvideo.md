@@ -328,7 +328,7 @@ psip 합성 SDP 프로파일(`CSipCallRtp::m_eMcMediaProfile = E_MC_MEDIA_MCVIDE
 chat|prearranged(그룹 속성 `invite_members`) · 개시자 · 시작 시각(TNG3 = `max_duration_sec`) · leg 표(Call-ID → 멤버·역할 initiator|joiner|invited·확립
 여부·CMP 주소 등록 여부·초대 응답 한도) · prearranged 개시 대기(개시자 Call-ID·offer 사본·암묵 요청 여부·대기 한도). CMP 로스터는 **붙는 멤버만** 싣는다 —
 멤버가 붙을 때마다(수락·초대 직전) `PTT_GROUP_ADD service:mcvideo`(members = 그 멤버 `id:prio:role` 하나 · `group_type` · `max_transmitters`(1~16) ·
-`reception_mode manual` · `call_type normal` · `tc_timers{t1_ms = 그룹 hang timer(0 = 미사용), t5_ms = reception hang timer}`)를 보낸다. CMP 는 로스터 멤버마다
+`reception_mode manual` · `call_type normal` · `tc_timers{t1_ms = 그룹 hang timer(0 = 미사용), t5_ms = reception hang timer, 나머지 t2/t3/t4/t6/t11_ms·c2/c4/c6/c7/c11 = MCVideo service configuration `<tc-timers-counters-R14>`(CSP 가 기동·`SERVICE_CONFIG_CHANGED` uri `mcvideo` 때 CSC `/internal/mcvideo/service-config` 로 받는다 — `CCspServiceConfig::RefreshMcVideo`, 문서에 없거나 CMP 범위 밖이면 그 키를 싣지 않아 K5 기본값)}`)를 보낸다. CMP 는 로스터 멤버마다
 포트 유닛을 잡고 로스터를 병합하므로(`updateRoster`) 첫 ADD 가 그룹을 세우고 뒤 ADD 는 멤버를 더한다 — 그룹 전원을 실으면 참가하지 않는 멤버의 유닛까지 점유된다.
 세션이 끝나면 `PTT_GROUP_REMOVE`.
 

@@ -2,6 +2,7 @@
 //   명령은 MCPTT 와 같은 PTT_* 이고 payload.service = "mcvideo" 가 hdr.service 로 간다(_SendOnEndpoint). 세션·끝점 캐시
 //   키는 McvKey(group) — 같은 그룹 id 의 MCPTT 그룹 호와 동시에 서므로 group id 만으로 두지 않는다(mcvideo.md §7 D6).
 #include "CmpClient.h"
+#include "CspServiceConfig.h"
 #include "Log.h"
 #include "SipMessageLogger.h"
 
@@ -49,12 +50,33 @@ bool CCmpClient::McvAddGroup( const std::string &strGroupId, const CmpMcvGroupSp
     req.Set( "max_transmitters", clsSpec.iMaxTransmitters > 0 ? clsSpec.iMaxTransmitters : 1 );
     req.Set( "reception_mode", clsSpec.bReceptionAutomatic ? "automatic" : "manual" );
     if ( !clsSpec.strCallType.empty() ) req.Set( "call_type", clsSpec.strCallType );
-    // 서버 타이머 — T1 = 그룹 hang timer, T5 = reception hang timer(TS 24.581 §11.1.3). 나머지는 CMP 의 K5 기본값.
-    if ( clsSpec.iT1Ms >= 0 || clsSpec.iT5Ms >= 0 ) {
+    // 서버 타이머 — T1 = 그룹 hang timer, T5 = reception hang timer(TS 24.581 §11.1.3), 나머지 = MCVideo service
+    // configuration
+    //   <tc-timers-counters-R14>(§11.1.3·§11.2.3 — gclsCspServiceConfig.RefreshMcVideo). 문서에 없거나 CMP
+    //   범위(cmp_media_api.md §7.9) 밖인 값은 싣지 않는다 — CMP 가 그 값만 K5 기본값으로 둔다(범위 밖 하나가 ADD 전체를
+    //   BAD_REQUEST 로 만들지 않게).
+    {
         SimpleJson::JsonNode tt;
-        if ( clsSpec.iT1Ms >= 0 ) tt.Set( "t1_ms", clsSpec.iT1Ms );
-        if ( clsSpec.iT5Ms >= 0 ) tt.Set( "t5_ms", clsSpec.iT5Ms );
-        req.Set( "tc_timers", tt );
+        bool bAny = false;
+        auto put = [&]( const char *pszKey, int v, int lo, int hi ) {
+            if ( v < lo || v > hi ) return;
+            tt.Set( pszKey, v );
+            bAny = true;
+        };
+        if ( clsSpec.iT1Ms >= 0 ) put( "t1_ms", clsSpec.iT1Ms, 0, 3600000 );
+        if ( clsSpec.iT5Ms >= 0 ) put( "t5_ms", clsSpec.iT5Ms, 0, 3600000 );
+        const CspMcvTcParams tc = gclsCspServiceConfig.GetMcVideoTcParams();
+        put( "t2_ms", tc.iT2Ms, 100, 60000 );
+        put( "t3_ms", tc.iT3Ms, 100, 60000 );
+        put( "t4_ms", tc.iT4Ms, 100, 60000 );
+        put( "t6_ms", tc.iT6Ms, 100, 60000 );
+        put( "t11_ms", tc.iT11Ms, 100, 600000 );
+        put( "c2", tc.iC2, 1, 255 );
+        put( "c4", tc.iC4, 1, 255 );
+        put( "c6", tc.iC6, 1, 255 );
+        put( "c7", tc.iC7, 1, 255 );
+        put( "c11", tc.iC11, 1, 255 );
+        if ( bAny ) req.Set( "tc_timers", tt );
     }
     req.Set( "members", clsSpec.strMembers );
     if ( !clsSpec.strRecordDir.empty() ) req.Set( "record_dir", clsSpec.strRecordDir );
