@@ -144,12 +144,12 @@ class TestStoreAlarmRule(unittest.TestCase):
     def test_message_renders_reason_and_path(self):
         """운영자가 화면만 보고 '어디가 왜' 를 알아야 한다."""
         r = self._rule()
-        # 문구는 서버 이름으로 시작하고, 원인은 한국어 구절(원문은 reason_raw — 상세 「원문」 줄).
+        # 「어디서」(서버)는 소스 칸이 맡아 문장에 없고, 원인은 한국어 구절(원문은 reason_raw — 상세 「원문」 줄).
         from services import alarm_sweeper
         msg = r['msg_open'].format(mo='a1/store', host='ctrl01',
                                    reason=alarm_sweeper.store_reason_ko('unresponsive'),
                                    path='/mnt/cims')
-        self.assertTrue(msg.startswith('서버 ctrl01 '), msg)
+        self.assertNotIn('ctrl01', msg)
         self.assertIn('응답 없음', msg)
         self.assertIn('/mnt/cims', msg)
         self.assertEqual(alarm_sweeper.store_reason_ko('not_writable:PermissionError'), '쓰기 불가')

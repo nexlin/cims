@@ -32,7 +32,9 @@ function useAlarmToasts() {
  for (const t of ts) {
  const sev = severityOf(t.alarm)
  const head = t.kind === 'moreSevere' ? `알람 승격(${sev})` : `알람 발생(${sev})`
- show(`${head} — ${t.alarm.message || t.alarm.type}`, 'alarm',
+ // 메시지에는 「어디서」가 없다(alarm_catalog.md message 규칙) — 소스 칸이 없는 토스트는 소스를 함께 보인다.
+ const src = t.alarm.source?.mo_label || t.alarm.source?.mo_instance
+ show(`${head}${src ? ` · ${src}` : ''} — ${t.alarm.message || t.alarm.type}`, 'alarm',
            { sticky: true, onClick: () => navigate('/alerts/active') })
     }
   }), [show, navigate])
@@ -151,6 +153,11 @@ export default function AlarmIndicator() {
                   <span className="ml-auto text-xs text-muted-foreground">{ev.ts}</span>
                 </div>
                 <div className="mt-[3px] text-sm">{ev.message}</div>
+                {(ev.source?.mo_label || ev.source?.mo_instance) && (
+                  <div className="mt-0.5 text-xs text-muted-foreground font-mono" title={ev.source?.mo_instance || ''}>
+                    {ev.source?.mo_label || ev.source?.mo_instance}
+                  </div>
+                )}
               </div>
             ))}
           </div>

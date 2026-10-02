@@ -375,7 +375,7 @@ class FmIngest:
                 code, mo = akey.split('@', 1)
                 rule = cat.get(code) or {'code': code, 'type': code}
                 self._transition(node, ent, dict(rule), mo, False,
-                                 message=f"판정 불가로 닫음 — {node} 자기보고 끊김 "
+                                 message=f"판정 불가로 닫음 — 자기보고 끊김 "
                                          f"(동기 {_STALE_SYNC_MISSES}회 연속 누락)")
             ent['last_sync'] = now    # 반복 종결 방지
 

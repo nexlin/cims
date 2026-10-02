@@ -8,8 +8,8 @@
       "probable_cause": "communicationsSubsystemFailure",
       "mo_class": "service",
       "metric": "CSC DB 연결",
-      "msg_open": "{MODULE} DB 연결 끊김 — {host}:{port} ({db}) 접속 실패",
-      "msg_close": "{MODULE} DB 연결 복구 — {host}:{port} ({db})",
+      "msg_open": "DB 연결 끊김 — {host}:{port} ({db}) 접속 실패",
+      "msg_close": "DB 연결 복구 — {host}:{port} ({db})",
       "effect": "가입자/조직 CRUD·MCPTT(GMS/CMS) 조회 실패 — 관리 API 5xx",
       "recommended_action": "DB 서버 상태·네트워크·계정 확인, csc.json CimsDatabase 설정 점검"
     },
@@ -21,8 +21,8 @@
       "probable_cause": "underlyingResourceUnavailable",
       "mo_class": "service",
       "metric": "서비스 로그(flow/msg) 저장 경로 기록",
-      "msg_open": "{MODULE} 서비스 로그 기록 실패 — {path}: {reason}, 로컬 임시 저장 {spooled}줄 (유실 {dropped}줄)",
-      "msg_close": "{MODULE} 서비스 로그 기록 복구 — 임시 저장분 반영 완료 ({path})",
+      "msg_open": "서비스 로그 기록 실패 — {path}: {reason}, 로컬 임시 저장 {spooled}줄 (유실 {dropped}줄)",
+      "msg_close": "서비스 로그 기록 복구 — 임시 저장분 반영 완료 ({path})",
       "effect": "flow/msg 로그가 로컬 스풀로 우회 중 — 콘솔 Flow/이력 조회에 최신 구간 미표시 (회복 시 재생되어 자동 보완). 가입자/MCPTT API 처리에는 영향 없음",
       "recommended_action": "ServiceLogging.Dir 볼륨(NAS/NFS) 마운트·권한·용량 확인. 회복되면 스풀이 자동 재생되고 알람은 자연 회수된다"
     },
@@ -33,8 +33,8 @@
       "event_type": "processingError",
       "probable_cause": "keyExpired",
       "mo_class": "software",
-      "msg_open": "{MODULE} HTTPS 인증서 만료 임박 — {days_left}일 남음 (만료 {not_after}, 경보 기준 {threshold}일)",
-      "msg_close": "{MODULE} HTTPS 인증서 유효 기간 정상",
+      "msg_open": "HTTPS 인증서 만료 임박 — {days_left}일 남음 (만료 {not_after}, 경보 기준 {threshold}일)",
+      "msg_close": "HTTPS 인증서 유효 기간 정상",
       "effect": "만료 시 가입자/MCPTT API(IdMS·GMS·CMS·XCAP) HTTPS 접속 전면 실패 예고",
       "recommended_action": "server.crt 재발급(배포 lifecycle cert.sh)·모듈 재시작"
     }
@@ -44,13 +44,13 @@
       "type": "process_started",
       "code": "E-STC-001",
       "kind": "stateChange",
-      "msg": "{MODULE} 기동 완료 ({node})"
+      "msg": "{MODULE} 기동 완료"
     },
     {
       "type": "process_stopping",
       "code": "E-STC-002",
       "kind": "stateChange",
-      "msg": "{MODULE} 정상 종료 시작 ({node})"
+      "msg": "{MODULE} 정상 종료 시작"
     },
     {
       "type": "config_change",

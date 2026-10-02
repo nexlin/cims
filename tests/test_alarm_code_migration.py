@@ -474,8 +474,8 @@ class TestFmCloseMessageParams(unittest.TestCase):
         ing2._restore()
         self.assertEqual(ing2._open_params.get(f'A-COM-003@{self.mo}', {}).get('peer'), 'PEER_KT')
 
-    def test_shared_code_names_module(self):
-        # 같은 code 를 여러 모듈이 보내는 알람은 OAM 이 채운 {MODULE} 로 어느 모듈인지 밝힌다.
+    def test_ingest_fills_module_for_module_subject(self):
+        # 모듈이 곧 대상인 문구용으로 OAM 이 {MODULE} 을 채운다(레코드 params 에는 안 남김).
         rule = {'code': 'A-PRC-006', 'type': 'storage_failure', 'perceived_severity': 'major',
                 'msg_open': '{MODULE} 서비스 로그 기록 실패 — {path}: {reason}', 'msg_close': '{MODULE} 서비스 로그 기록 복구'}
         ent = {'boot_id': 1, 'module': 'cmdp', 'akeys': set(), 'seq': {}, 'last_sync': 0}
@@ -557,6 +557,9 @@ class TestOamAlarmWording(unittest.TestCase):
                 self.assertFalse(alarm_sweeper.missing_fields(t, {x: '' for x in kw}),
                                  f"{r.get('check')} {k}: {t}")
                 self.assertFalse(t.startswith('{mo}'), f"{r.get('check')} {k} 가 내부 경로로 시작: {t}")
+                # 「어디서」(서버·그룹·내부 경로)는 소스 칸이 맡는다 — 문장에 넣지 않는다
+                for loc in ('{mo}', '{host}', '{where}'):
+                    self.assertNotIn(loc, t, f"{r.get('check')} {k} 에 위치 {loc}: {t}")
         self.assertTrue({'process_unresponsive', 'db_down', 'rtp_pct_gte'} <= checked, checked)
 
     def test_where_resolver_prefixes_kind(self):
@@ -591,7 +594,12 @@ class TestEventWording(unittest.TestCase):
         for m in ('csp', 'cmp', 'cmdp', 'csc'):
             with open(os.path.join(_REPO, m, 'config', 'fm_catalog.json'), encoding='utf-8') as f:
                 d = json.load(f)
+            for a in d.get('alarms', []):    # 「어디서」(노드·내부 경로)는 소스 칸 — 알람 문장에 없다
+                for k in ('msg_open', 'msg_close'):
+                    for loc in ('{mo}', '{node}'):
+                        self.assertNotIn(loc, a.get(k) or '', f"{m} {a['code']} {k}")
             for e in d.get('events', []):
+                self.assertNotIn('{node}', e['msg'], f"{m} {e['type']}")
                 keys = self._BASE | self._PARAMS[e['type']]
                 self.assertFalse(alarm_sweeper.missing_fields(e['msg'], {k: '' for k in keys}),
                                  f"{m} {e['type']}: {e['msg']}")
@@ -609,7 +617,7 @@ class TestEventWording(unittest.TestCase):
             ing = FmIngest({'FmIngest': {}}, d)
             ing.catalogs['csp_01'] = ing._index_catalog({'node': 'csp_01', 'module': 'csp', 'events': [
                 {'type': 'process_started', 'code': 'E-STC-001', 'kind': 'stateChange',
-                 'msg': '{MODULE} 기동 완료 ({node})'},
+                 'msg': '{MODULE} 기동 완료'},
                 {'type': 'regroup_changed', 'code': 'E-AUD-010', 'kind': 'audit',
                  'msg': '즉석 그룹 {action_ko} — 그룹 {gid}'}]})
             ent = {'module': 'csp'}
@@ -618,7 +626,7 @@ class TestEventWording(unittest.TestCase):
                                                'params': {'action': 'created', 'gid': 'g9'}})   # 구 모듈 — action_ko 없음
             from services import event_log
             msgs = sorted(r['message'] for r in event_log.read_recent(d, days=1))
-            self.assertIn('CSP 기동 완료 (csp_01)', msgs)
+            self.assertIn('CSP 기동 완료', msgs)
             self.assertIn('regroup_changed (csp_01/csp)', msgs)     # 빈칸 문장 대신 기본값
         finally:
             shutil.rmtree(d, ignore_errors=True)

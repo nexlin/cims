@@ -1305,7 +1305,7 @@ if __name__ == '__main__':
                 sev = ('critical' if days_left <= thr_c else 'warning') if is_open else None
                 mo = f"{host}/agent/cert"
                 kw = dict(mo=mo, host=host_name, days_left=days_left,
-                          not_after=str(exp), threshold=thr_w, cert_name=f"서버 {host_name} agent 인증서")
+                          not_after=str(exp), threshold=thr_w, cert_name="agent 인증서")
                 tinfo = {'observed': days_left, 'threshold': thr_w, 'unit': rule.get('unit') or '일'}
                 _out(mo, is_open, kw, tinfo, sev)
             elif chk == 'cert_renew_failed':
@@ -1470,8 +1470,7 @@ if __name__ == '__main__':
                     r, _ = _close_rule_msg(agent_rules, akey, '')
                     if r:
                         _transition(r, mo_part, 'agent', False, '',
-                                    f"판정 불가로 닫음 — 서버 {lost_hosts[mo_part.split('/')[0]]} "
-                                    f"관측 끊김 ({lost_rule.get('code')} 참조)")
+                                    f"판정 불가로 닫음 — 서버 관측 끊김 ({lost_rule.get('code')} 참조)")
             # agent 파티션 알람 중 이번에 평가 안 된 것 = 관측 불가 → close.
             # 자기 파티션(detected_by=agent)만 정리한다 (파이프라인 §4.3) — 서비스/drift
             # 계열(oam-svc/oam)은 mo 루트가 같은 서버명/그룹명 어휘라 mo 로는 구분 불가.
