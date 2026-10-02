@@ -385,6 +385,7 @@ INVITE to group@domain
 - `Session-Expires: <SE>;refresher=uac` — §6.3.3.1.2 는 refresher 생략을 권고하고 싣는다면 `uac` 로 정한다. CIMS 는 서버가
   갱신자를 맡도록 `uac` 를 싣는다([leg_liveness.md](../features/leg_liveness.md) §5.3, 편차 표 [mcptt_standard_conformance.md](../features/mcptt_standard_conformance.md))
 - `Answer-Mode: Auto`
+- `Supported: tdialog, norefersub` — 참여 기능의 단말 INVITE(§6.3.2.2.3 5)·6)). `timer` 는 스택이 따로 싣는다
 
 **멤버 생명주기:**
 
@@ -411,8 +412,8 @@ CMP 로스터는 붙는 멤버만 싣는다(멤버마다 `PTT_GROUP_ADD` members
 |------|------|
 | MCVideo INVITE | 검사(500 CMP `resource.mcvideo` 없음 · 403 Accept-Contact/isfocus · 404 137 재합류 세션 없음 · 404 113 · 403 115 on-network 꺼짐 · 403 116 · 404 117/118 · 403 108/109 자격 · 486 103 N6 · 403 120 prearranged 미제휴 · 488 · chat 암묵 affiliation(실패 403 120)) → chat 은 곧바로 수락, prearranged 새 세션은 제휴된 MCVideo 등록 멤버 팬아웃 뒤 첫 멤버가 붙으면(200 OK 또는 스스로 합류) 개시자 수락 |
 | 미디어 SRTP | 접속서비스 `media_srtp` × offer crypto 를 m= 라인마다(`MediaSdes::EvalRelayOfferSdes`/`EvalRelayAnswerSdes`/`ReadReinviteSdes` — VoLTE relay 와 같은 부품), 음성 실패 = 488/BYE · 영상 실패 = 영상 성분만 거절, 키 = JOIN ② `media_crypto[_video]`, psip 합성 SDP 의 video 키 = `CSipCallRtp::m_strLocalVideoCrypto*` |
-| 수락 | 로스터 등록(ADD) → CMP JOIN ①(포트·`tc_ssrc`) → JOIN ②(offer 주소·`a=ssrc`·fmtp — 암묵 요청 결과) → 200 OK(포커스 Contact + `gr`, PAI = `mcvideo_psi`, `Supported: tdialog`, answer fmtp = `BuildMcVideoAnswerFmtp`) |
-| 팬아웃 | `CreateCall` → Request-URI = 등록 Contact · Accept-Contact 둘 · `P-Asserted-Service` · 포커스 Contact · Session-Expires refresher 생략(TS 24.281 §6.3.3.1.2 6)) · multipart(SDP + mcvideo-info) · 응답 한도 30 s 뒤 CANCEL |
+| 수락 | 로스터 등록(ADD) → CMP JOIN ①(포트·`tc_ssrc`) → JOIN ②(offer 주소·`a=ssrc`·fmtp — 암묵 요청 결과) → 200 OK(포커스 Contact + `gr`, PAI = `mcvideo_psi`, `Supported: tdialog, norefersub, explicitsub, nosub`, answer fmtp = `BuildMcVideoAnswerFmtp`, Warning 122 = 정원으로 일부만 초대한 개시 · 123 = 진행 중 prearranged 세션에 그룹 URI 로 합류 — TS 24.281 §9.2.1.4.2) |
+| 팬아웃 | `CreateCall` → Request-URI = 등록 Contact · Accept-Contact 둘 · `P-Asserted-Service` · `Supported: tdialog, norefersub` · `Answer-Mode: Auto` · 포커스 Contact · Session-Expires refresher 생략(TS 24.281 §6.3.3.1.2 6)) · multipart(SDP + mcvideo-info) · 응답 한도 30 s 뒤 CANCEL |
 | 멤버 200 OK | JOIN ②(answer) → 대기 중 개시자 수락 (JOIN 실패 = BYE) |
 | re-INVITE (미디어 변경) | JOIN ② 재선언 — answer 는 스택의 직전 로컬 선언 |
 | BYE·실패 | CMP LEAVE · prearranged 참가자 1명 이하 / chat 0명이면 세션 해제(남은 leg BYE · CMP REMOVE) |

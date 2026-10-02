@@ -142,6 +142,10 @@ int main() {
                              kMcVideoFocusContactParams) != std::string::npos);
   CK("04 session identity gr",
      hdr(ok, "Contact")[0].find(";gr=") != std::string::npos);
+  // TS 24.281 §6.3.3.2.3.2 8)~10) — 제어 기능 200 OK 의 Supported (RFC 4538·4488·7614)
+  CK("04 Supported tdialog·norefersub·explicitsub·nosub",
+     hdr(ok, "Supported").size() == 1 &&
+         hdr(ok, "Supported")[0] == kMcFocusOkSupported);
 
   // ── 05 prearranged 개시 + 암묵 요청 → 06 answer(수락·허가·SSRC 쌍) ──
   const Msg pinv = load("05_prearranged_initiate_invite.txt");
@@ -179,6 +183,18 @@ int main() {
   CK("07 invite fmtp = builder",
      fmtpLine(McVideoBodyPart(fan.body, ctype(fan), "application/sdp")) ==
          "a=fmtp:MCVideo " + BuildMcVideoInviteFmtp(5, 2863311532u));
+  // TS 24.581 §14.2.2 — 대기열을 지원하는 제어 기능은 offer 에 mc_queueing (shall)
+  CK("07 offer mc_queueing (§14.2.2)",
+     BuildMcVideoInviteFmtp(5, 1).rfind("mc_queueing;", 0) == 0 &&
+         BuildMcVideoInviteFmtp(-1, 1) == "mc_queueing;mc_transmission_ssrc=1");
+  // TS 24.281 §6.3.2.2.3 5)·6) Supported tdialog·norefersub (+ §6.3.3.1.2 7) timer) · §6.3.2.2.5.2 8) Answer-Mode
+  {
+    const std::vector<std::string> sup = hdr(fan, "Supported");
+    CK("07 Supported timer + tdialog·norefersub",
+       sup.size() == 2 && sup[0] == "timer" && sup[1] == kMcMemberInviteSupported);
+    CK("07 Answer-Mode Auto", hdr(fan, "Answer-Mode").size() == 1 &&
+                                  hdr(fan, "Answer-Mode")[0] == "Auto");
+  }
   const CMcVideoInfo fmi = ParseMcVideoInfo(
       McVideoBodyPart(fan.body, ctype(fan), kMcVideoInfoSubtype));
   CK("07 ids", fmi.strRequestUri == "tel:+82510002002" &&

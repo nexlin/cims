@@ -30,6 +30,9 @@ CLIENT_A = "urn:uuid:2f6b8c4e-1a2b-4c3d-9e8f-0a1b2c3d4e5f"
 TOKEN_A = "eyJhbGciOiJIUzI1NiJ9.eyJtY3ZpZGVvX2lkIjoidGVsOis4MjUxMDAwMjAwMSJ9.c2lnbmF0dXJl"
 MCVIDEO_TAGS = f'+g.3gpp.mcvideo;+g.3gpp.icsi-ref="{ICSI_ENC}"'
 FOCUS = f"{MCVIDEO_TAGS};isfocus"
+# Supported 옵션 태그 (TS 24.281 §6.3.3.2.3.2 8)~10) 제어 기능 200 OK · §6.3.2.2.3 5)·6) 참여 기능의 단말 INVITE) — csp/McpttInfo.h 와 같은 값
+FOCUS_SUPPORTED = "tdialog, norefersub, explicitsub, nosub"
+MEMBER_INVITE_SUPPORTED = "tdialog, norefersub"
 
 
 def mcvideo_info(*params: str) -> str:
@@ -159,7 +162,7 @@ def build():
                           string("mcvideo-client-id", CLIENT_A)))]))
 
     # 04 — 그 200 OK (TS 24.281 §9.2.2.4.1.1 15)~20)·§9.2.2.3.1.1 5)): Contact = 세션 식별자 + MCVideo 태그 + isfocus, Require timer,
-    #   Supported tdialog, PAI = 참여 기능 PSI, SDP answer = CMP 멤버 포트(cmp_media_api.md §7.9)·fmtp = offer 에 있던 것만(mc_queueing 은
+    #   Supported tdialog·norefersub·explicitsub·nosub(§6.3.3.2.3.2 8)~10)), PAI = 참여 기능 PSI, SDP answer = CMP 멤버 포트(cmp_media_api.md §7.9)·fmtp = offer 에 있던 것만(mc_queueing 은
     #   CMP 가 송출 큐를 쓰므로 되돌린다 — TS 24.581 §14.3.2) + mc_transmission_ssrc = CMP tc_ssrc(§6.3.3.2.1 2)b)).
     #   Session-Expires refresher=uac — 단말이 갱신한다(§6.3.3.2.3.2 2)).
     msgs["04_chat_join_200.txt"] = message(
@@ -167,7 +170,7 @@ def build():
         [via(IP_A, 50601, "-mcv-inv1").replace(";rport", ";rport=50601;received=" + IP_A),
          f"From: <sip:{UE_A}@{DOMAIN}>;tag=inv-a1", f"To: <{PSI}>;tag=csp-7f3a",
          f"Call-ID: mcv-join-a1@{IP_A}", "CSeq: 1 INVITE", f"Contact: <{SESSION_ID}>;{FOCUS}",
-         "Require: timer", "Supported: tdialog", "Session-Expires: 1800;refresher=uac",
+         "Require: timer", f"Supported: {FOCUS_SUPPORTED}", "Session-Expires: 1800;refresher=uac",
          f"P-Asserted-Identity: <{PSI}>"],
         "application/sdp", A_ANSWER)
 
@@ -193,7 +196,8 @@ def build():
         [via(IP_A, 50601, "-mcv-inv2").replace(";rport", ";rport=50601;received=" + IP_A),
          f"From: <sip:{UE_A}@{DOMAIN}>;tag=inv-a2", f"To: <{PSI}>;tag=csp-8b21",
          f"Call-ID: mcv-pre-a1@{IP_A}", "CSeq: 1 INVITE", f"Contact: <{SESSION_ID_103}>;{FOCUS}",
-         "Require: timer", "Supported: tdialog", "Session-Expires: 1800;refresher=uac", f"P-Asserted-Identity: <{PSI}>"],
+         "Require: timer", f"Supported: {FOCUS_SUPPORTED}", "Session-Expires: 1800;refresher=uac",
+         f"P-Asserted-Identity: <{PSI}>"],
         "application/sdp",
         sdp(IP_CMP, f"o=CSS 4 1 IN IP4 {IP_CMP}", 52010, 56010, 58010,
             "mc_priority=5;mc_granted;mc_implicit_request;mc_audio_ssrc=1111638594;mc_video_ssrc=1111638595;"
@@ -202,19 +206,22 @@ def build():
     # 07 — prearranged 멤버 초대 (TS 24.281 §6.3.3.1.2·§9.2.1.4.1.1): Contact = 세션 식별자 + isfocus, Accept-Contact 둘,
     #   P-Asserted-Service = MCVideo ICSI(RFC 6050 헤더 이름 — 본문의 «P-Asserted-Service-Id» 는 오기, mcvideo.md §9), P-Asserted-Identity = 제어 기능
     #   PSI(§9.2.1.4.1.1 3) — 04·06 의 200 OK 와 같은 신원),
+    #   Supported timer(§6.3.3.1.2 7)) + tdialog·norefersub(참여 기능 §6.3.2.2.3 5)·6)), Answer-Mode: Auto(§6.3.2.2.5.2 8) — poc-settings 를
+    #   받지 않아 자동 개시로 본다, mcvideo.md §5.2),
     #   mcvideo-info = request-uri(초대받는 MCVideo ID)·calling-user-id·calling-group-id, SDP offer = CMP 가 이 멤버에게 준 포트 +
-    #   fmtp mc_priority=<user-priority>(TS 24.581 §14.2.3)·mc_transmission_ssrc(§6.3.3.1.1 4)). Session-Expires 는 refresher 를
-    #   싣지 않는다(§6.3.3.1.2 6)) — 단말이 200 OK 에서 refresher=uas 로 정한다(§6.2.3.1.1 5)).
+    #   fmtp mc_queueing(CMP 송출 대기열 — TS 24.581 §14.2.2)·mc_priority=<user-priority>(§14.2.3)·mc_transmission_ssrc(§6.3.3.1.1 4)).
+    #   Session-Expires 는 refresher 를 싣지 않는다(§6.3.3.1.2 6)) — 단말이 200 OK 에서 refresher=uas 로 정한다(§6.2.3.1.1 5)).
     msgs["07_prearranged_member_invite.txt"] = message(
         f"INVITE sip:{UE_B}@{IP_B}:50602;transport=tls SIP/2.0",
         [f"Via: SIP/2.0/TLS {CSP}:5061;branch=z9hG4bK-mcv-fan1", "Max-Forwards: 70",
          f"From: <sip:g103@{DOMAIN}>;tag=csp-fan1", f"To: <sip:{UE_B}@{DOMAIN}>",
          "Call-ID: csp-mcv-fan-b1@csp", "CSeq: 1 INVITE", f"Contact: <{SESSION_ID_103}>;{FOCUS}", *ACCEPT,
-         f"P-Asserted-Service: {ICSI}", f"P-Asserted-Identity: <{PSI}>", "Supported: timer", "Session-Expires: 1800"],
+         f"P-Asserted-Service: {ICSI}", f"P-Asserted-Identity: <{PSI}>", "Supported: timer",
+         f"Supported: {MEMBER_INVITE_SUPPORTED}", "Answer-Mode: Auto", "Session-Expires: 1800"],
         "multipart/mixed;boundary=mcv-fan-1",
         multipart("mcv-fan-1", [
             ("application/sdp", sdp(IP_CMP, f"o=CSS 4 1 IN IP4 {IP_CMP}", 52012, 56012, 58012,
-                                    "mc_priority=5;mc_transmission_ssrc=2863311532")),
+                                    "mc_queueing;mc_priority=5;mc_transmission_ssrc=2863311532")),
             ("application/vnd.3gpp.mcvideo-info+xml",
              mcvideo_info("<session-type>prearranged</session-type>", uri("mcvideo-request-uri", f"tel:{UE_B}"),
                           uri("mcvideo-calling-user-id", f"tel:{UE_A}"), uri("mcvideo-calling-group-id", "tel:g103")))]))

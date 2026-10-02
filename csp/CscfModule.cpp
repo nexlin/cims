@@ -67,6 +67,35 @@ extern void SendRegEventNotify( const std::string &strUserId, const char *pszEve
 static std::map<std::string, std::string> s_mapEtag;
 static std::mutex s_etagMutex;
 
+// PUBLISH 200 OK — RFC 3903 §6 6. «MUST contain an Expires header field indicating the expiration interval chosen» +
+//   «MUST also contain a SIP-ETag … new entity-tag for each successful publication». 해제(Expires 0)·본문을 반영하지
+//   않은 publication(entity 불일치 — TS 24.379 §9.2.2.2.3 9) · TS 24.281 §8.2.2.2.3 9))도 성공한 publication 이라 같은
+//   모양이다 (TS 24.379 §9.2.2.2.3 8)a) · TS 24.281 §8.2.2.2.3 8)a) — Expires = 후보 만료 시간). iExpires < 0 = «지울
+//   때까지»(Expires 4294967295), 0 = 해제(저장한 ETag 를 지운다 — 남길 상태가 없다, §6 5.).
+static void _SendPublishOk( CSipMessage *pclsMessage, const std::string &strEtagKey, int iExpires ) {
+    struct timespec ts;
+    clock_gettime( CLOCK_REALTIME, &ts );
+    char szEtag[64];
+    snprintf( szEtag, sizeof( szEtag ), "aff-%llx%08x",
+              (unsigned long long)ts.tv_sec * 1000ULL + (unsigned long long)ts.tv_nsec / 1000000ULL,
+              (unsigned)( ts.tv_nsec ^ (uintptr_t)pclsMessage ) );
+    {
+        std::unique_lock<std::mutex> lock( s_etagMutex );
+        if ( iExpires == 0 )
+            s_mapEtag.erase( strEtagKey );
+        else
+            s_mapEtag[strEtagKey] = szEtag;
+    }
+    CSipMessage *pclsResponse = pclsMessage->CreateResponseWithToTag( 200 );
+    if ( !pclsResponse ) return;
+    pclsResponse->AddHeader( "SIP-ETag", szEtag );
+    if ( iExpires < 0 )
+        pclsResponse->AddHeader( "Expires", "4294967295" );
+    else
+        pclsResponse->AddHeader( "Expires", iExpires );
+    gclsUserAgent.m_clsSipStack.SendSipMessage( pclsResponse );
+}
+
 // TS 24.379 §9 — 제휴 변경 감사(E-AUD-009 affiliation_changed).
 //   **사용자 단위가 아니라 그룹 단위 요약 1건**이다: 등록/해제가 몰리면 사용자마다 쏘는 순간
 //   이벤트가 그 수만큼 불어나는데, 운용이 실제로 묻는 것은 "그 그룹에 지금 몇 명 붙어 있나" 다.
@@ -1842,34 +1871,8 @@ bool CCscfModule::RecvRequestPublish( int iThreadId, CSipMessage *pclsMessage ) 
         SendAffiliationNotify( strFromId, "" );
     }
 
-    // de-affiliate: ETag 저장소에서 제거 후 200 반환
-    if ( bDeaffiliate ) {
-        std::unique_lock<std::mutex> lock( s_etagMutex );
-        s_mapEtag.erase( strEtagKey );
-        SendResponse( pclsMessage, 200 );
-        return true;
-    }
-
-    // F-04: SIP-ETag 생성 — 밀리초 + 포인터 기반 랜덤 비트 (초 단위 충돌 방지)
-    struct timespec ts;
-    clock_gettime( CLOCK_REALTIME, &ts );
-    unsigned uRnd = (unsigned)( ts.tv_nsec ^ (uintptr_t)pclsMessage );
-    char szEtag[64];
-    snprintf( szEtag, sizeof( szEtag ), "aff-%llx%08x",
-              (unsigned long long)ts.tv_sec * 1000ULL + (unsigned long long)ts.tv_nsec / 1000000ULL, uRnd );
-
-    // ETag 저장 (initial 또는 refresh 모두 갱신)
-    {
-        std::unique_lock<std::mutex> lock( s_etagMutex );
-        s_mapEtag[strEtagKey] = szEtag;
-    }
-
-    CSipMessage *pclsResponse = pclsMessage->CreateResponseWithToTag( 200 );
-    if ( pclsResponse ) {
-        pclsResponse->AddHeader( "SIP-ETag", szEtag );
-        pclsResponse->AddHeader( "Expires", iExpires > 0 ? iExpires : 3600 );
-        gclsUserAgent.m_clsSipStack.SendSipMessage( pclsResponse );
-    }
+    // 200 OK (SIP-ETag · Expires) — de-affiliate 는 Expires 0 이고 ETag 저장소에서 지운다.
+    _SendPublishOk( pclsMessage, strEtagKey, bDeaffiliate ? 0 : ( iExpires > 0 ? iExpires : 3600 ) );
     return true;
 }
 
@@ -1973,6 +1976,9 @@ bool CCscfModule::RecvPublishAffiliationPidf( CSipMessage *pclsMessage, const st
         }
     }
 
+    // SIP-ETag 키 — 규격형 publication 은 그룹이 아니라 클라이언트 단위라 구형(사용자:그룹)과 키를 따로 쓴다.
+    const std::string strEtagKey = strFromId + ( bMcv ? ":#pidf:mcvideo" : ":#pidf" );
+
     // Expires:0 = 그 사용자의 제휴 전부 해제 (본문 유무 무관 — RFC 3903 의 remove).
     if ( iExpires == 0 ) {
         if ( gclsDbManager.IsConnected() ) {
@@ -1982,12 +1988,8 @@ bool CCscfModule::RecvPublishAffiliationPidf( CSipMessage *pclsMessage, const st
         }
         CLog::Print( LOG_INFO, "[Affiliation/PUBLISH:pidf] de-affiliate ALL user=%s service=%s", strFromId.c_str(),
                      pszSvc );
-        std::string strEtagKey = strFromId + ( bMcv ? ":#pidf:mcvideo" : ":#pidf" );
-        {
-            std::unique_lock<std::mutex> lock( s_etagMutex );
-            s_mapEtag.erase( strEtagKey );
-        }
-        return SendResponse( pclsMessage, 200 );
+        _SendPublishOk( pclsMessage, strEtagKey, 0 );
+        return true;
     }
 
     // 본문이 pidf 가 아니면 이 절차를 수행할 수 없다(§9.2.2.2.3 조건 5).
@@ -2002,7 +2004,8 @@ bool CCscfModule::RecvPublishAffiliationPidf( CSipMessage *pclsMessage, const st
     if ( !clsPidf.strEntity.empty() && McpttBareId( clsPidf.strEntity ) != strFromId ) {
         CLog::Print( LOG_INFO, "[Affiliation/PUBLISH:pidf] entity=%s ≠ 요청자 %s — 상태 변경 없이 200",
                      clsPidf.strEntity.c_str(), strFromId.c_str() );
-        return SendResponse( pclsMessage, 200 );
+        _SendPublishOk( pclsMessage, strEtagKey, iExpires );  // 8)a) 은 9) 앞이다 — 후보 만료 시간을 싣는다
+        return true;
     }
 
     // 원하는 제휴 집합(그룹 식별자) — URI 형(sip:g@d)·평문(g) 모두 수용.
@@ -2096,25 +2099,6 @@ bool CCscfModule::RecvPublishAffiliationPidf( CSipMessage *pclsMessage, const st
                  "[Affiliation/PUBLISH:pidf] service=%s user=%s client=%s 요청 %d개 → 제휴 %d · 해제 %d (expires=%d)",
                  pszSvc, strFromId.c_str(), clsPidf.strClientId.c_str(), (int)vecWant.size(), iAff, iDeaff, iExpires );
 
-    // SIP-ETag — 규격형 publication 은 그룹이 아니라 클라이언트 단위라 키를 따로 쓴다.
-    struct timespec ts;
-    clock_gettime( CLOCK_REALTIME, &ts );
-    char szEtag[64];
-    snprintf( szEtag, sizeof( szEtag ), "aff-%llx%08x",
-              (unsigned long long)ts.tv_sec * 1000ULL + (unsigned long long)ts.tv_nsec / 1000000ULL,
-              (unsigned)( ts.tv_nsec ^ (uintptr_t)pclsMessage ) );
-    {
-        std::unique_lock<std::mutex> lock( s_etagMutex );
-        s_mapEtag[strFromId + ( bMcv ? ":#pidf:mcvideo" : ":#pidf" )] = szEtag;
-    }
-    CSipMessage *pclsResponse = pclsMessage->CreateResponseWithToTag( 200 );
-    if ( pclsResponse ) {
-        pclsResponse->AddHeader( "SIP-ETag", szEtag );
-        if ( iExpires < 0 )
-            pclsResponse->AddHeader( "Expires", "4294967295" );  // 지울 때까지(TS 24.379·24.281 §8/9.2.2.2.3 8)a))
-        else
-            pclsResponse->AddHeader( "Expires", iExpires );
-        gclsUserAgent.m_clsSipStack.SendSipMessage( pclsResponse );
-    }
+    _SendPublishOk( pclsMessage, strEtagKey, iExpires );
     return true;
 }

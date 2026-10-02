@@ -274,12 +274,12 @@ inline std::string BuildMcVideoAnswerFmtp( const CMcVideoFmtp &offer, int iUserP
     return s;
 }
 
-/** 제어 기능의 멤버 초대 offer fmtp (TS 24.281 §6.3.3.1.1 4)·5), TS 24.581 §14.2.3): mc_priority = 그룹
- * <user-priority>, mc_transmission_ssrc = CMP tc_ssrc. mc_granted·mc_implicit_request 는 싣지 않는다(초대받는 쪽은
- * 요청자가 아니다). */
+/** 제어 기능의 멤버 초대 offer fmtp (TS 24.281 §6.3.3.1.1 4)·5), TS 24.581 §14.2): mc_queueing = CMP 가 송출 대기열을
+ * 지원한다(§14.2.2 shall — mcvideo.md §5.3.1), mc_priority = 그룹 <user-priority>(§14.2.3), mc_transmission_ssrc = CMP
+ * tc_ssrc(§14.2.7). mc_granted·mc_implicit_request 는 싣지 않는다(초대받는 쪽은 요청자가 아니다). */
 inline std::string BuildMcVideoInviteFmtp( int iUserPriority, uint32_t uTcSsrc ) {
-    std::string s;
-    if ( iUserPriority >= 0 ) s = "mc_priority=" + std::to_string( iUserPriority ) + ";";
+    std::string s = "mc_queueing;";
+    if ( iUserPriority >= 0 ) s += "mc_priority=" + std::to_string( iUserPriority ) + ";";
     return s + "mc_transmission_ssrc=" + std::to_string( uTcSsrc );
 }
 
@@ -299,6 +299,7 @@ static const char *const kMcVideoWarn120 = "user is not affiliated to this group
 // 121 — 표 4.4.2-2 문구. §9.2.1.4.2 14)b) 본문은 «not allowed to join» 이라 어긋난다(표를 따른다 — mcvideo.md §9 편차)
 static const char *const kMcVideoWarn121 = "user is not authorised to join the group call";
 static const char *const kMcVideoWarn122 = "too many participants";
+static const char *const kMcVideoWarn123 = "MCVideo session already exists";
 static const char *const kMcVideoWarn137 = "the indicated group call does not exist";
 
 #endif  // _MCVIDEO_INFO_H_

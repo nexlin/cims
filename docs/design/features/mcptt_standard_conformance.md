@@ -478,7 +478,7 @@ PSI·MCPTT client ID 가 있는 계정. [ue_sdk.md](ue_sdk.md) §4.2) → ③구
 | 세션 타이머 | 2) refresher = `uac` · 3) `Require: timer` | 개시자가 refresher 를 지정하지 않았으면 `uac`(단말 갱신, CSP 만료 감시) + `Require: timer`. 개시자가 지정했거나 timer 미지원이면 RFC 4028 §9 Table 2(미지원 = `uas`) — [leg_liveness.md](leg_liveness.md) §5.3 |
 | re-INVITE answer fmtp | TS 24.380 §14.3.1 — answer 의 fmtp 는 offer 에 없던 파라미터를 싣지 않는다 · §14.3.5 암묵 요청은 새 세션 개시에서만 | 개시자·멤버 leg 의 re-INVITE(세션 갱신 포함) answer 는 `a=fmtp:MCPTT` 를 그 re-offer 로 다시 짓는다(`RebuildReInviteFloorFmtp` — 개시 answer 의 `mc_implicit_request`·초대 offer 의 `mc_priority` 를 되풀이하지 않는다). 내용이 바뀌면 `o=` 버전을 올린다(RFC 3264 §8). 제어 기능의 조건 재광고 offer 는 개시 전용 `mc_granted`·`mc_implicit_request` 를 뺀다(§14.5) |
 | P-Asserted-Identity | 4) 제어 기능 PSI | 그룹 URI(`<sip:<그룹>@<PTT 도메인>>`) — 멤버 leg INVITE 의 PAI 와 같은 신원 |
-| Supported | 8) `tdialog`(RFC 4538) | `Supported: tdialog` |
+| Supported | 8) `tdialog`(RFC 4538) · 9) `norefersub`(RFC 4488) · 10) `explicitsub`·`nosub`(RFC 7614) | `Supported: tdialog, norefersub, explicitsub, nosub`(`kMcFocusOkSupported` — MCVideo 제어 기능 200 OK 도 같다) |
 | Warning | 7) 받은 응답의 Warning 을 옮긴다 · 확인 통화 설정의 111 (C4c) | 개시자 응답 게이트 동안 멤버 초대 leg 의 응답(18x·최종)에 실린 Warning 값을 모아 200 OK 에 싣는다(중복 제외, 제어 기능 자신의 111 이 앞 — RFC 3261 §20.43 쉼표 연결). 필수 멤버 없이 진행하면 `Warning: 399 <agent> "111 group call proceeded without all required group members"`. 게이트 없이 곧바로 수락한 200 은 받은 응답이 아직 없다 |
 | 응답 시점 | §10.1.1.4.2 · §6.3.3.3 · §11.1.1.4.2 | 새 세션 개시의 200 OK 는 **개시자 응답 게이트** 뒤다 — C4c. 진행 중 세션 합류·청취·chat 은 곧바로 |
 | P-Answer-State | §10.1.1.4.2 · RFC 4964 | 멤버 확인 전 수락이면 `P-Answer-State: Unconfirmed` — C4f |

@@ -43,8 +43,8 @@ PTT(MCPTT) 서비스 구현을 3GPP 규격 원문과 대조해 **규격과 다�
 | 영역 | 항목 | A | B | C | D |
 |---|---|---|---|---|---|
 | 등록·서비스 인가 (REG) | 4 | — | 3 | — | 1 |
-| 제휴 (AFF) | 11 | 6 | 4 | 1 | — |
-| 그룹 호 — 서버 (GCS) | 19 | 7 | 6 | 5 | 1 |
+| 제휴 (AFF) | 10 | 6 | 4 | — | — |
+| 그룹 호 — 서버 (GCS) | 18 | 7 | 6 | 4 | 1 |
 | 그룹 호 — 단말 (GCC) | 8 | — | 6 | — | 2 |
 | 개별 호 (PRV) | 8 | 4 | 3 | 1 | — |
 | 애드혹 그룹 호 (ADH) | 9 | 4 | 3 | 1 | 1 |
@@ -53,9 +53,9 @@ PTT(MCPTT) 서비스 구현을 3GPP 규격 원문과 대조해 **규격과 다�
 | 발언권 SDP 협상 (SDP) | 2 | — | 2 | — | — |
 | 그룹 문서·GMS (GMS) | 13 | — | 12 | 1 | — |
 | 설정 문서·CMS (CMS) | 2 | — | 1 | 1 | — |
-| **계** | **105** | **24** | **51** | **22** | **8** |
+| **계** | **103** | **24** | **51** | **20** | **8** |
 
-확인 수준 — ◎ 56 · ○ 39 · △ 10.
+확인 수준 — ◎ 55 · ○ 38 · △ 10.
 
 읽는 순서 — §2(먼저 볼 것) → §3(영역별 전체) → §4(미구현 목록에 빠진 기능) → §5(문서 정정) → §6(묶음과 순서).
 
@@ -102,7 +102,6 @@ PTT(MCPTT) 서비스 구현을 3GPP 규격 원문과 대조해 **규격과 다�
 | # | 급 | 대상 | 규격 | CIMS 지금 | 영향 | 확인 |
 |---|---|---|---|---|---|---|
 | AFF-2 | A | CSP | §9.2.2.2.3 13)·15) — Expires 0 은 **그 클라이언트**의 목록만 해제 (shall) | `RemoveAffiliationsByUser` — 그 사용자의 모든 클라이언트 행(암시적 제휴 포함)을 지운다 — `csp/CscfModule.cpp:1934-1948` | 한 MCPTT ID 가 단말 둘이면 한 단말의 전체 해제가 다른 단말의 초대를 끊는다 | ◎ |
-| AFF-3 | C | CSP | §9.2.2.2.3 8)a) — 200 OK 에 Expires (shall) | 해제(Expires 0)·entity 불일치의 200 에 Expires 가 없다 — `csp/CscfModule.cpp:1947`·`:1962`, 구형 `:1827` | RFC 3903 게시자가 해제 확인을 못 한다(우리 SDK 는 읽지 않는다) | ◎ |
 | AFF-4 | B | CSP | §6.3.6 3. · §9.2.2.2.11 2) — 제휴는 사용자 × **클라이언트**(mcptt-info `<mcptt-client-id>`) 단위로 판정 (shall) | `IsAffiliated(group, user)` 가 client_id 를 보지 않는다 — `csp/DbManager.cpp:1022-1038`. 개시 검사 `csp/GroupCallService.cpp:951`, fan-out `:1491`·`:1572` | 제휴하지 않은 단말로 개시·합류가 되고 초대가 간다(한 사용자 한 단말이면 증상 없음) | ◎ |
 | AFF-5 | A | CSP | §9.2.2.2.12 1) · §9.2.2.2.15 2) · §9.2.2.2.3 10) — 암묵·암시·명시 제휴가 같은 client information entry 를 다룬다 | 행의 client 키가 경로마다 다르다 — 긴급·chat 암묵 제휴 = 등록 Contact URI(`csp/GroupCallService.cpp:954-957`), 설정 그룹 암시 제휴 = client-id > `+sip.instance` > Contact(`csp/CscfModule.cpp:756-793`), 구형 PUBLISH = Contact(`:1799`), 규격형 = tuple id(`:1989`) | 암시 제휴 그룹은 한 단말이 tuple 둘로 보이고, 해제 PUBLISH 가 자기 키 행만 지워 초대가 계속 온다. 지워져도 재등록 때 되살아난다(`:1194`) | △ |
 | AFF-6 | A | CSP | §9.2.2.2.14 — 암묵적 제휴를 부른 요청이 거절되면 그 제휴를 지운다 (shall) | 세션 생성 전에 제휴를 적고(`csp/GroupCallService.cpp:953-960`) 뒤의 거절(세션 시간 창 403 `:1069-1085`·CMP 자원 실패·개시 게이트 480)에서 되돌리지 않는다 — 이 파일에 `RemoveAffiliation` 호출이 없다 | 거절된 긴급·chat 시도 뒤 3600초 동안 제휴로 남아 남의 그룹 호·경보·SDS 를 받는다 | ◎ |
@@ -131,7 +130,6 @@ CSP 는 참여 기능과 제어 기능을 겸한다.
 | GCS-12 | B | CSP | §6.3.3.4 — conference NOTIFY 에 P-Asserted-Identity(제어 기능 PSI)·P-Preferred-Service·mcptt-info 본문(`<mcptt-calling-group-id>`·`<mcptt-request-uri>`) (shall) | 헤더는 Event·Subscription-State·Contact 뿐, 본문은 conference-info 하나 — `csp/CspServer.cpp:1016-1039` | 규격 단말·참여 기능이 NOTIFY 를 그룹·대상 사용자에 묶을 근거가 없다 | ◎ |
 | GCS-13 | C | CSP | §6.3.3.4 — `<conference-info entity>` = MCPTT group ID, `<user entity>` = MCPTT ID | `sip:<id>@<PTT 도메인>` — `csp/GroupCallService.cpp:3891-3905`. 같은 서버가 mcptt-info·pidf 에서는 `tel:` 표기를 쓴다 | ID 를 문자열로 대조하는 규격 단말은 로스터를 자기 목록과 맞추지 못한다 | ◎ |
 | GCS-14 | B | CSP | §10.1.3.3 2) — Request-URI 가 진행 중 세션 식별자가 아니면 404 + `137 the indicated group call does not exist`. 구독자 = 그 세션의 참가자. 200 OK Contact = 세션 식별자 | R-URI user = 그룹 ID 로만 읽는다(`gr` 토큰·세션 유무·참가 여부를 보지 않음) — `csp/CscfModule.cpp:1303-1344`. 세션이 끝나도 구독이 남는다 | 지난 세션 식별자로 온 구독이 다음 세션 로스터에 붙는다. ptt_flows.md 는 «구독은 참여보다 오래 산다» 를 설계로 적었다 — 편차로 올릴 것 | ○ |
-| GCS-15 | C | CSP·psip | §6.3.2.2.3 5)·6) — 멤버 INVITE 의 `Supported` 에 `tdialog`·`norefersub` (shall) | 멤버 INVITE 에는 `timer`(+100rel)뿐 — `csp/GroupCallService.cpp:2499-2516` | 그룹 세션 REFER 를 쓰지 않아 실해는 작다 | ○ |
 | GCS-16 | B | CSP | §6.3.3.1.2 9)·10) — 받은 INVITE 의 Answer-Mode·Priv-Answer-Mode 를 그대로 옮긴다 (shall) | 초대 INVITE 에 무조건 `Answer-Mode: Auto` — `csp/GroupCallService.cpp:2506-2507` (개별 호 착신도 이 함수). 받은 헤더를 읽는 코드가 없다 | 헤더를 따르는 규격 단말은 개별 호를 벨 없이 자동 응답한다. 짝 = PRV-4 | ◎ |
 | GCS-17 | A | CSP | §10.1.1.4.1.1 4)b) — `<mcptt-calling-group-id>` = 그룹 ID | `"tel:" + 그룹 id` — `csp/GroupCallService.cpp:3975`. MCPTT group ID 규칙은 숫자뿐이면 `tel:+<id>`(`csp/McpttInfo.h:400-408`, CSC `_group_uri`) | 숫자뿐인 그룹 ID 는 INVITE 의 그룹 ID 와 그룹 문서·제휴 문서의 ID 가 달라진다(`g001` 형은 무관) | ○ |
 | GCS-18 | A | CSP·psip | §6.3.3.1.1 2) — 음성 스트림의 미디어 속성은 받은 offer 의 것 | 멤버 offer·개시자 answer 의 fmtp·ptime 이 서버 코덱 표 값(AMR-WB `octet-align=1`)이다 — `csp/GroupCallService.cpp:2407-2409`. 개시 게이트는 코덱 이름만 본다(`:885-893`) | 개시자가 대역 효율 모드나 다른 mode-set 으로 offer 하면 선언과 실제 페이로드가 어긋난다 — CMP 의 leg 별 형식 변환 유무를 확인해야 확정 | △ |

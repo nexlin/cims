@@ -1396,11 +1396,11 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
                     //   CMP 가 첫 수신자까지 버퍼링한다(TS 24.379 §10.1.1.4.2 · §6.3.2.2.5.2 · RFC 4964).
                     if ( bUnconfirmed ) pclsOk->AddHeader( "P-Answer-State", "Unconfirmed" );
                     // §6.3.3.2.3.2 4) P-Asserted-Identity = 제어 기능 PSI(그룹 URI — 멤버 leg INVITE 의 PAI 와 같다),
-                    //   8) Supported: tdialog (RFC 4538)
+                    //   8)~10) Supported: tdialog·norefersub·explicitsub·nosub (RFC 4538·4488·7614)
                     const std::string strPsi =
                         "<sip:" + std::string( pszGroupId ) + "@" + gclsServiceMap.GetDomainByKind( "ptt" ) + ">";
                     pclsOk->AddHeader( "P-Asserted-Identity", strPsi.c_str() );
-                    pclsOk->AddHeader( "Supported", "tdialog" );
+                    pclsOk->AddHeader( "Supported", kMcFocusOkSupported );
                     // 진행 중 조건(긴급/임박) 세션이면 200 OK 에 mcptt-info 로 현재 상태를 동봉 — 조인/재조인
                     //   단말이 개시자의 다음 발언(floor TAKEN)을 기다리지 않고 즉시 세션 긴급 표시를 갖는다
                     //   (TS 24.379, §9-5 멤버 전파). normal 세션은 단일 SDP 200 OK 그대로.
@@ -2760,6 +2760,8 @@ bool CGroupCallService::InviteMember( const char *pszUserId, const char *pszGrou
             pclsInvite->AddHeader( "P-Asserted-Service", "urn:urn-7:3gpp-service.ims.icsi.mcptt" );
             // 단말 자동 응답 요구 (3GPP TS 24.379 §6.3.3.1)
             pclsInvite->AddHeader( "Answer-Mode", "Auto" );
+            // 참여 기능의 단말 INVITE — Supported: tdialog·norefersub (TS 24.379 §6.3.2.2.3 5)·6)), timer 는 스택 몫
+            pclsInvite->AddHeader( "Supported", kMcMemberInviteSupported );
             // Resource-Priority (RFC 4412/8101) — 값은 service-config 의
             // emergency-/imminent-peril-/normal-resource-priority
             //   (TS 24.379 §6.3.3.1.19 — 단말과 같은 문서, 없으면 mcpttp.15/8/0).

@@ -11,9 +11,11 @@ Accept-Contact: *;+g.3gpp.icsi-ref="urn%3Aurn-7%3A3gpp-service.ims.icsi.mcvideo"
 P-Asserted-Service: urn:urn-7:3gpp-service.ims.icsi.mcvideo
 P-Asserted-Identity: <sip:mcvideo_psi@ptt.cims.example.kr>
 Supported: timer
+Supported: tdialog, norefersub
+Answer-Mode: Auto
 Session-Expires: 1800
 Content-Type: multipart/mixed;boundary=mcv-fan-1
-Content-Length: 1176
+Content-Length: 1188
 
 --mcv-fan-1
 Content-Type: application/sdp
@@ -38,7 +40,7 @@ a=rtcp-fb:97 nack pli
 a=rtcp-fb:97 ccm fir
 a=sendrecv
 m=application 58012 udp MCVideo
-a=fmtp:MCVideo mc_priority=5;mc_transmission_ssrc=2863311532
+a=fmtp:MCVideo mc_queueing;mc_priority=5;mc_transmission_ssrc=2863311532
 --mcv-fan-1
 Content-Type: application/vnd.3gpp.mcvideo-info+xml
 

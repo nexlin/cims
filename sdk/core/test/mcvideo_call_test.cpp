@@ -501,7 +501,7 @@ TEST(McvSip, SubsequentOfferDropsInitialOnlyFmtp) {
 
 // 단말이 내는 answer(TS 24.581 §14.3) — offer 에 없던 파라미터는 싣지 않고(§14.3.1) mc_priority 는 offer 값을 되돌린다(§14.3.3)
 TEST(McvSip, AnswerFmtpFollowsOffer) {
-    mcvideo::TcFmtp offer;                                   // 제어 기능의 멤버 초대(골든 07 형) — mc_queueing 없음
+    mcvideo::TcFmtp offer;                                   // 대기열을 지원하지 않는 제어 기능의 멤버 초대 — mc_queueing 없음
     offer.priority = 3; offer.hasTcSsrc = true; offer.tcSsrc = 0x0BADF00D;
     mcvideo::TcFmtp a = mcvideo::answerFmtp(offer, 0x11112222, true);
     EXPECT_FALSE(a.queueing);                                // offer 에 없으면 대기를 지원해도 싣지 않는다
@@ -920,7 +920,8 @@ TEST(McvCall, MemberInvitationAutoAnswer) {
     EXPECT_EQ(sdpLines(sdp, "i=").size(), 2u) << sdp;
     std::vector<std::string> fm = sdpLines(sdp, "a=fmtp:MCVideo ");
     ASSERT_EQ(fm.size(), 1u);
-    EXPECT_EQ(fm[0].rfind("a=fmtp:MCVideo mc_priority=5;mc_transmission_ssrc=", 0), 0u) << fm[0];   // offer 에 없던 것은 싣지 않는다(§14.3.1)
+    // offer 의 mc_queueing 은 되돌리고(§14.3.2 — 'U: queued' 지원), offer 에 없던 것은 싣지 않는다(§14.3.1)
+    EXPECT_EQ(fm[0].rfind("a=fmtp:MCVideo mc_queueing;mc_priority=5;mc_transmission_ssrc=", 0), 0u) << fm[0];
     r.csp.send(ackFor(inv, okr, r.csp.port));
     uint32_t rrSsrc = 0;
     ASSERT_TRUE(ctrl.expectRr(rrSsrc, 1000));
@@ -999,7 +1000,7 @@ TEST(McvCall, MemberInvitationManualAnswerAndServerRelease) {
     EXPECT_NE(std::atoi(m[2].c_str() + 14), 0);
     std::vector<std::string> fm = sdpLines(sdp, "a=fmtp:MCVideo ");
     ASSERT_EQ(fm.size(), 1u);
-    EXPECT_EQ(fm[0].rfind("a=fmtp:MCVideo mc_priority=5;mc_transmission_ssrc=", 0), 0u) << fm[0];
+    EXPECT_EQ(fm[0].rfind("a=fmtp:MCVideo mc_queueing;mc_priority=5;mc_transmission_ssrc=", 0), 0u) << fm[0];
     r.csp.send(ackFor(inv, okr, r.csp.port));
     uint32_t rrSsrc = 0;
     ASSERT_TRUE(ctrl.expectRr(rrSsrc, 1000));                                     // 참여자 성립 — 제어 채널 유지 RR
@@ -1053,7 +1054,7 @@ TEST(McvCall, ManualAnswerModeAndUserDecline) {
         inv = replaceAll(inv, "Via: SIP/2.0/TLS csp.ptt.cims.example.kr:5061;branch=z9hG4bK-mcv-fan1",
                          "Via: SIP/2.0/UDP 127.0.0.1:" + std::to_string(r.csp.port) + ";branch=z9hG4bK-mcv-fan1");
         inv = localize(inv, 52012, audio.port, 56012, video.port, 58012, ctrl.port, r.csp.port);
-        inv = replaceAll(inv, "\r\nSession-Expires:", "\r\nAnswer-Mode: Manual\r\nSession-Expires:");
+        inv = replaceAll(inv, "\r\nAnswer-Mode: Auto\r\n", "\r\nAnswer-Mode: Manual\r\n");   // 골든 07 = Auto(§6.3.2.2.5.2 8))
         ASSERT_NE(inv.find("Answer-Mode: Manual"), std::string::npos);
         r.csp.send(inv);
         ASSERT_FALSE(r.csp.recv("SIP/2.0 183").empty());

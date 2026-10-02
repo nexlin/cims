@@ -87,6 +87,7 @@ private:
         time_t tInitiatorDeadline = 0;
         CSipCallRtp *pclsInitiatorOffer = nullptr;  // 소유 — 대기 중 개시자 offer 사본
         bool bInitiatorImplicit = false;            // 개시자 offer 의 mc_implicit_request (TS 24.581 §14.2.5)
+        bool bInviteCapped = false;  // 정원 때문에 제휴 멤버 일부를 초대하지 않았다 — 개시자 200 OK 에 Warning 122
         // 녹취(recording.md §3.3 — 같은 폴더 recordings/ptt/{id}, session.json type mcvideo). 비면 녹취 없음
         std::string strRecKey;      // CallDir 세션 키 (PttSessionKey("mcvideo", 그룹))
         std::string strRecordDir;   // 그룹 base — PTT_GROUP_ADD record_dir
@@ -112,9 +113,10 @@ private:
      * sip_statistics.md §2.3 어휘). 이미 남겼으면(bAttemptOpen false) 아무것도 하지 않는다. 호출자가 m_mutex 보유. */
     void _CloseAttempt( Session &clsSes, bool bEstablished, const char *pszReason = "", const char *pszCause = "",
                         int iStatus = 0 );
-    /** 개시자·합류자 수락 — 로스터 등록 → JOIN ①·② → 200 OK(answer). 성공이면 true. 호출자가 m_mutex 보유. */
+    /** 개시자·합류자 수락 — 로스터 등록 → JOIN ①·② → 200 OK(answer). iWarnCode·pszWarnText = 200 OK 의 Warning
+     * (0 이면 없음 — 122 정원 · 123 진행 중 세션 합류). 성공이면 true. 호출자가 m_mutex 보유. */
     bool _AcceptLeg( Session &clsSes, const std::string &strCallId, const std::string &strMember,
-                     CSipCallRtp *pclsOffer, bool bImplicit );
+                     CSipCallRtp *pclsOffer, bool bImplicit, int iWarnCode = 0, const char *pszWarnText = nullptr );
     /** 대기 중 개시자에게 답한다(첫 멤버가 붙었다) — 실패면 세션 해제. 호출자가 m_mutex 보유. */
     void _ResolvePendingInitiator( const std::string strGroupId );
     /** 대기 중 개시자 — 남은 초대 leg 가 없으면 480 으로 개시를 끝낸다(§9.2.1.4.2). 호출자가 m_mutex 보유. */

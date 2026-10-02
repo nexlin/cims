@@ -6,7 +6,7 @@ Call-ID: mcv-pre-a1@10.10.1.21
 CSeq: 1 INVITE
 Contact: <sip:g103@csp.ptt.cims.example.kr:5061;transport=tls;gr=1790775900654321-1>;+g.3gpp.mcvideo;+g.3gpp.icsi-ref="urn%3Aurn-7%3A3gpp-service.ims.icsi.mcvideo";isfocus
 Require: timer
-Supported: tdialog
+Supported: tdialog, norefersub, explicitsub, nosub
 Session-Expires: 1800;refresher=uac
 P-Asserted-Identity: <sip:mcvideo_psi@ptt.cims.example.kr>
 Content-Type: application/sdp

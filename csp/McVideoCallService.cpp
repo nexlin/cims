@@ -311,7 +311,7 @@ void CMcVideoCallService::_FillDecl( CmpMcvMemberDecl &d, const std::string &str
 }
 
 bool CMcVideoCallService::_AcceptLeg( Session &clsSes, const std::string &strCallId, const std::string &strMember,
-                                      CSipCallRtp *pclsOffer, bool bImplicit ) {
+                                      CSipCallRtp *pclsOffer, bool bImplicit, int iWarnCode, const char *pszWarnText ) {
     CspPttGroup clsGroup;
     int iPrio = 0;
     std::string strRole;
@@ -362,8 +362,9 @@ bool CMcVideoCallService::_AcceptLeg( Session &clsSes, const std::string &strCal
     leg.bVideo = clsAns.m_iVideoPort > 0;
 
     // 제어 기능의 200 OK (TS 24.281 §6.3.3.2.3.2) — Contact = 세션 식별자 + 포커스 태그,
-    //   세션 갱신은 단말(refresher=uac), PAI = 참여 MCVideo 기능 PSI(골든 04), Supported: tdialog.
-    //   Require: timer 는 스택이 세션 타이머 협상으로 싣는다.
+    //   세션 갱신은 단말(refresher=uac), PAI = 참여 MCVideo 기능 PSI(골든 04), Supported = kMcFocusOkSupported(8)~10)).
+    //   Require: timer 는 스택이 세션 타이머 협상으로 싣는다. Warning = 122(정원 — 첫 2xx 단계)·123(진행 중 prearranged
+    //   세션 합류 — §9.2.1.4.2 14)j)).
     const std::string strDomain = PttDomain();
     if ( !strDomain.empty() ) gclsUserAgent.SetCallDomain( strCallId.c_str(), strDomain.c_str() );
     gclsUserAgent.SetContactParams( strCallId.c_str(), kMcVideoFocusContactParams );
@@ -371,7 +372,9 @@ bool CMcVideoCallService::_AcceptLeg( Session &clsSes, const std::string &strCal
     gclsUserAgent.SetSessionRefresher( strCallId.c_str(), E_SESSION_REFRESHER_REMOTE );
     CSipMessage *pclsOk = NULL;
     if ( !gclsUserAgent.AcceptCall( strCallId.c_str(), &clsAns, &pclsOk ) || !pclsOk ) return false;
-    pclsOk->AddHeader( "Supported", "tdialog" );
+    pclsOk->AddHeader( "Supported", kMcFocusOkSupported );
+    if ( iWarnCode > 0 && pszWarnText )
+        pclsOk->AddHeader( "Warning", McpttWarning( iWarnCode, pszWarnText, strDomain ).c_str() );
     pclsOk->AddHeader( "P-Asserted-Identity",
                        ( std::string( "<sip:" ) + kMcVideoPsiUser + "@" + strDomain + ">" ).c_str() );
     if ( !gclsUserAgent.m_clsSipStack.SendSipMessage( pclsOk ) ) return false;
@@ -397,7 +400,8 @@ void CMcVideoCallService::_ResolvePendingInitiator( const std::string strGroupId
     const std::string strInit = clsSes.strInitiatorCallId;
     CSipCallRtp *pOffer = clsSes.pclsInitiatorOffer;
     clsSes.pclsInitiatorOffer = nullptr;
-    const bool bOk = pOffer && _AcceptLeg( clsSes, strInit, clsSes.strInitiator, pOffer, clsSes.bInitiatorImplicit );
+    const bool bOk = pOffer && _AcceptLeg( clsSes, strInit, clsSes.strInitiator, pOffer, clsSes.bInitiatorImplicit,
+                                           clsSes.bInviteCapped ? 122 : 0, kMcVideoWarn122 );
     delete pOffer;
     if ( bOk ) {
         _CloseAttempt( clsSes, true );  // 개시자 200 OK = 성립(sip_statistics.md §2.1)
@@ -494,6 +498,12 @@ bool CMcVideoCallService::_InviteMember( Session &clsSes, const CspPttGroup &cls
         "Accept-Contact",
         ( std::string( "*;+g.3gpp.icsi-ref=\"" ) + kMcVideoIcsiEnc + "\";require;explicit" ).c_str() );
     pclsInvite->AddHeader( "P-Asserted-Service", kMcVideoIcsi );
+    // 참여 기능의 단말 INVITE (§6.3.2.2.3 5)·6)) — Supported: tdialog·norefersub(timer 는 스택이 싣는다).
+    //   Answer-Mode (§6.3.2.2.5.2 8)) — 그룹 호 개시자는 Answer-Mode 를 싣지 않고(§10.2.2.2.1 은 개별 호만) 참여 기능이
+    //   단말의 poc-settings Answer-Mode Indication 으로 정한다. CIMS 는 poc-settings 를 받지 않아(mcvideo.md §5.2) 자동
+    //   개시로 본다 — MCPTT 팬아웃과 같은 값. 단말은 자기 설정에 따라 수동으로 받을 수 있다(§9.2.1.2.1.2 7)·8)).
+    pclsInvite->AddHeader( "Supported", kMcMemberInviteSupported );
+    pclsInvite->AddHeader( "Answer-Mode", "Auto" );
     // P-Asserted-Identity = 제어 기능 PSI (TS 24.281 §9.2.1.4.1.1 3) — 개시자 200 OK 의 PAI 와 같은 신원, 골든 07).
     //   스택이 From(그룹)으로 먼저 넣은 PAI 는 지운다(RFC 3325 §9.1 — SIP URI 하나)
     McvReplaceHeader( pclsInvite->m_clsHeaderList, "P-Asserted-Identity",
@@ -813,13 +823,21 @@ void CMcVideoCallService::OnIncomingInvite( const char *pszCallId, const char *p
         //   (§6.3.5.5 — 필수 멤버 우선은 MCVideo 확인 통화와 함께 1차 범위 밖)
         std::vector<std::string> vecAff;
         gclsDbManager.SelectAffiliatedMembers( strGroupId, vecAff, EMcService::McVideo );
+        //   다 초대하지 못하면 개시자 200 OK 에 Warning 122(§9.2.1.4.2 첫 2xx 단계 «more than
+        //   <on-network-max-participant-count>» — MCPTT §10.1.1.4.2 와 같은 판정: 초대하지 못한 제휴 멤버가 남았다).
         const int iInviteCap = clsGroup._maxMembers > 0 ? std::max( 0, clsGroup._maxMembers - 1 ) : -1;
         int iInvited = 0;
         for ( const auto &strMember : vecAff ) {
-            if ( iInviteCap >= 0 && iInvited >= iInviteCap ) break;
             if ( strMember == strFrom || !IsMember( clsGroup, strMember ) ) continue;
+            if ( iInviteCap >= 0 && iInvited >= iInviteCap ) {
+                clsSes.bInviteCapped = true;
+                break;
+            }
             if ( _InviteMember( clsSes, clsGroup, strMember ) ) ++iInvited;
         }
+        if ( clsSes.bInviteCapped )
+            CLog::Print( LOG_INFO, "MCVIDEO: group(%s) — 정원 %d: 초대 %d 명으로 줄임 (Warning 122)",
+                         strGroupId.c_str(), clsGroup._maxMembers, iInvited );
         if ( iInvited == 0 ) {
             CLog::Print( LOG_INFO, "MCVIDEO: group(%s) prearranged — 초대할 제휴·등록 멤버 없음 → 480",
                          strGroupId.c_str() );
@@ -838,7 +856,10 @@ void CMcVideoCallService::OnIncomingInvite( const char *pszCallId, const char *p
         return;
     }
     // chat · prearranged 합류 — 곧바로 수락. 암묵 요청은 새 prearranged 세션 개시만(TS 24.581 §14.3.5).
-    if ( !_AcceptLeg( clsSes, strCallId, strFrom, pclsRtp, false ) ) {
+    //   진행 중 prearranged 세션에 그룹 URI 로 합류하면 200 OK 에 Warning 123(§9.2.1.4.2 14)j)) — 재합류(세션 식별자,
+    //   §9.2.1.4.5.1)·chat(§9.2.2.4.1.1)에는 그 단계가 없다.
+    const bool bJoinExisting = leg.eRole == E_LEG_JOINER && clsSes.bPrearranged && !bRejoin;
+    if ( !_AcceptLeg( clsSes, strCallId, strFrom, pclsRtp, false, bJoinExisting ? 123 : 0, kMcVideoWarn123 ) ) {
         CLog::Print( LOG_ERROR, "MCVIDEO: group(%s) member(%s) accept 실패 → 500", strGroupId.c_str(),
                      strFrom.c_str() );
         _Reject( pszCallId, SIP_INTERNAL_SERVER_ERROR, 0, NULL );

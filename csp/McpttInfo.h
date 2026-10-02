@@ -13,6 +13,13 @@
 //  만든다(McpttInfo*). namespace prefix(mcpttinfo:/mcpttgi: 등) 무관하게 태그 substring 으로 매칭 — 외부 XML 파서 의존
 //  없음. emergency/imminent·broadcast 는 session-type(그룹 종류)과 직교하는 호 단위 표식이다.
 
+// ── Supported 옵션 태그 — MCPTT·MCVideo 공통(두 규격의 절 번호가 같다) ──
+// 제어 기능의 200 OK (TS 24.379·24.281 §6.3.3.2.3.2 8)~10)) — tdialog(RFC 4538)·norefersub(RFC 4488)·explicitsub·nosub
+//   (RFC 7614). timer 는 Require 로 스택이 싣는다(3)).
+static const char *const kMcFocusOkSupported = "tdialog, norefersub, explicitsub, nosub";
+// 참여 기능이 단말에 보내는 INVITE (§6.3.2.2.3 5)·6)) — timer(3))는 스택이 Supported 줄 하나로 따로 싣는다.
+static const char *const kMcMemberInviteSupported = "tdialog, norefersub";
+
 struct CMcpttInfo {
     // session-type (TS 24.379 Annex F.1 의미 2) — chat|prearranged|private|first-to-answer|ambient-listening|adhoc
     std::string strSessionType;

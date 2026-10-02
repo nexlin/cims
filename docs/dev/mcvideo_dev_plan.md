@@ -13,7 +13,7 @@
   서비스별 affiliation·chat/prearranged 그룹 호), CMP 송출·수신 제어(TS 24.581 MCV0/1/2·동시 송출 상한·수신 manual), 단말 SDK·바인딩·cimsue-cli,
   PTT 앱 [영상 참여]·[영상 보내기]·[받기], 검증 게이트, **현행 PTT 영상 제거(V7 — 1차 배포와 같은 창)**. 사용 시나리오 = mcvideo.md §1.7 의
   «현장 영상 공유»·«여러 카메라 동시 송출».
-- **제외(V8 백로그, §8)** — 긴급·임박·경보, 방송, 1:1, pull·push, ambient viewing, 원격 송출 요청, 송출 큐, ad hoc, pre-established, E2E, MBMS·off-network.
+- **제외(V8 백로그, §8)** — 긴급·임박·경보, 방송, 1:1, pull·push, ambient viewing, 원격 송출 요청, ad hoc, pre-established, E2E, MBMS·off-network.
 - **단말 1차 제약** — PTT 앱은 수신 스트림 **1개**(user profile `MaxSimultaneousVideoStreams` = 1)로 시작한다. 한 `m=video` 에 여러 SSRC 를 받아 나눠 그리려면
   엔진 확장이 필요하다(§7 R1).
 
@@ -172,7 +172,7 @@ flowchart LR
 | video pull · push · 서버 저장/재생 | 호 절차·URL·서버 원천·저장 | UI | 영상 가져오기·저장 영상 보기 |
 | ambient viewing · 원격 송출 · 그룹에 원격 영상 | 인가·PSI·Remote Transmission | 무표시 자동 수락 | 원격 영상 보기·송출 요청 |
 | 다중 스트림 수신(R1) | 스트림별 분배 | 엔진 SSRC 분리·스트림별 렌더 | 스트림 격자(W6) |
-| 송출 큐 · 화질 조정 · ad hoc | 그룹 속성·절차·큐 | UI | UI |
+| 화질 조정 · ad hoc | 그룹 속성·절차 | UI | UI |
 | E2E(보호 true) | GMK·암호문 전달 | 키 | 키 |
 
 ## 9. 1차 완료 기준
