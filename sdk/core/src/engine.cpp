@@ -2987,6 +2987,13 @@ static int startMcptt(Engine::Impl* o, int accountId, const std::string& id, boo
             rp.hValue = call->mcptt->emergency ? cfg.rpEmergency : cfg.rpImminentPeril;
             if (!rp.hValue.empty()) prm.txOption.headers.push_back(rp);
         }
+        // 개별 호의 개시 방식 요청(§11.1.1.2.1.1 14) — RFC 5373): 강제 자동 = Priv-Answer-Mode, 자동·수동 = Answer-Mode
+        if (isPrivate && opts.commencement != CommencementMode::Unspecified) {
+            pj::SipHeader am;
+            am.hName = opts.commencement == CommencementMode::ForceAuto ? "Priv-Answer-Mode" : "Answer-Mode";
+            am.hValue = opts.commencement == CommencementMode::Manual ? "Manual" : "Auto";
+            prm.txOption.headers.push_back(am);
+        }
         if (!opts.members.empty()) {
             pj::SipMultipartPart p2;
             p2.contentType.type = "application"; p2.contentType.subType = "resource-lists+xml";

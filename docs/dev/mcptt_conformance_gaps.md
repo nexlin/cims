@@ -55,7 +55,7 @@ PTT(MCPTT) 서비스 구현을 3GPP 규격 원문과 대조해 **규격과 다�
 | 설정 문서·CMS (CMS) | 2 | — | 1 | 1 | — |
 | **계** | **73** | **17** | **40** | **10** | **6** |
 
-확인 수준 — ◎ 39 · ○ 26 · △ 8.
+확인 수준 — ◎ 38 · ○ 27 · △ 8.
 
 읽는 순서 — §2(먼저 볼 것) → §3(영역별 전체) → §4(미구현 목록에 빠진 기능) → §5(문서 정정) → §6(묶음과 순서).
 
@@ -152,7 +152,7 @@ CSP 는 참여 기능과 제어 기능을 겸한다.
 |---|---|---|---|---|---|---|
 | PRV-1 | B | CSP·SDK | §11.1.1.2.1.1 9) — 착신자는 `application/resource-lists+xml` 본문. §11.1.1.3.1.1 8) — 없으면 403 + `145 unable to determine called party` (shall) | CSP 는 착신자를 Request-URI 또는 `<mcptt-request-uri>` 에서만 잡는다(`csp/ModuleDispatcher.cpp:944-958`). SDK 는 resource-lists 를 싣지 않는다(`sdk/core/src/engine.cpp:2676-2681` — 애드혹만) | 규격 단말(R-URI = PSI + resource-lists)의 개별 호가 480 이 된다. conformance C4h 는 «개별 통화 = `<mcptt-request-uri>`, 정합» 이라 적었다 | ◎ |
 | PRV-3 | A | CSP·SDK | §11.1.2.2 — floor 없는 개별 호는 offer 에 `m=application` 을 싣지 않는다. `mc_no_floor_ctrl` 은 pre-established session 용(TS 24.380 §14.2.6) | CSP 는 fmtp `mc_no_floor_ctrl` 로만 floor off 를 정한다(`csp/ModuleDispatcher.cpp:961-964`). SDK 발신 전이중은 `m=application` 을 싣지 않고(`sdk/core/src/engine.cpp:2646-2655`), 착신 판정은 문자열 `mc_no_floor_ctrl`(`sdk/core/src/mcptt/mcptt_xml.cpp:227`) | SDK 가 건 전이중 호를 CSP 가 floor 있는 호로 세운다. 규격 단말·서버와도 서로 반대로 읽는다. 실호 증상은 실측 필요 | ○ |
-| PRV-4 | B | SDK | §11.1.1.2.1.1 14) — 발신 단말이 Answer-Mode(Auto·Manual) 또는 Priv-Answer-Mode 를 싣는다 | SDK 는 헤더를 싣지 않는다 — CSP 는 받은 Answer-Mode 를 착신 INVITE 에 옮기고 `Priv-Answer-Mode: Auto` 는 403 `143` 으로 막는다(csp.md «Private call», 125·126 = 발신 인가와 같은 값) | 수동 수락·자동 응답 요청을 단말이 고르지 못한다 | ◎ |
+| PRV-4 | B | 앱 | §11.1.1.2.1.1 14) — 발신 단말이 Answer-Mode(Auto·Manual) 또는 Priv-Answer-Mode 를 싣는다 | SDK 는 싣는다(`GroupCallOptions.commencement` — Auto·Manual·ForceAuto, Kotlin 포함. 기본 미지정 = 헤더 없음). **앱 셋이 고르지 않는다** — 개별 호 발신 화면에 개시 방식 선택이 없고, C API 옵션 구조체에 칸이 없다 | 수동 수락·자동 응답 요청을 사용자가 고르지 못한다(착신 단말 설정대로 받는다) | ○ |
 | PRV-7 | B | CSP | §11.1.1.4.2 — SDP 없는 응답(거절 최종 응답 등)은 본문째 개시자에게 | 개시자 180 의 PAI·착신 Warning, 거절 최종 응답의 멤버 Warning 은 옮긴다(S08). 멤버 응답의 본문(mcptt-info 등)은 옮기지 않는다 | 착신 측이 본문으로 준 정보가 발신 단말에 닿지 않는다 | ○ |
 
 ### 3.6 애드혹 그룹 호 (ADH) — TS 24.379 §17
@@ -266,7 +266,7 @@ CSP 는 참여 기능과 제어 기능을 겸한다.
 | 1 | **문서 값 한두 줄** — 문서 셋의 T2 제외 대상 | FCS-21(문서) | .48 |
 | 2 | **발언권 메시지 정합** — Ack 의 Message Type · 미대기 Queue Position 254 · Granted Duration | FCS-4 · FCS-8 · FCS-20 | .45 SDK·CMP |
 | 5 | **Warning 코드** — 거절 사유를 규격 코드로. handoff §14 K1(SDK 가 Warning 을 올림)과 한 묶음 | REG-3(enforce) · PRV-7(본문) | .45 CSP·SDK → Windows(문구 사전) |
-| 7 | **SDK 요청 규격화** — REGISTER Contact 태그, INVITE 헤더·Request-URI(PSI)·`<mcptt-client-id>`·session-type, 개별 호 resource-lists, 재합류 세션 식별자, conference·xcap-diff SUBSCRIBE. 서버가 양쪽을 받는 전환기를 먼저 둔다(PRV-1) — 서버 쪽 검사(GCS-9·GCS-10)는 SDK 뒤 | REG-1 · GCC-1~GCC-4 · GCC-7 · GCC-8 · PRV-1 · PRV-4 · ADH-8(CSP 멤버 INVITE) · GMS-16 · SDP-1 | .45 SDK·CSP |
+| 7 | **SDK 요청 규격화** — REGISTER Contact 태그, INVITE 헤더·Request-URI(PSI)·`<mcptt-client-id>`·session-type, 개별 호 resource-lists, 재합류 세션 식별자, conference·xcap-diff SUBSCRIBE. 서버가 양쪽을 받는 전환기를 먼저 둔다(PRV-1) — 서버 쪽 검사(GCS-9·GCS-10)는 SDK 뒤 | REG-1 · GCC-1~GCC-4 · GCC-7 · GCC-8 · PRV-1 · PRV-4(앱) · ADH-8(CSP 멤버 INVITE) · GMS-16 · SDP-1 | .45 SDK·CSP |
 | 8 | **제휴를 클라이언트 단위로** — 행 키 통일, 클라이언트 단위 해제·판정, 암묵 제휴 취소. handoff §14 K3·S2 와 한 묶음 | AFF-2~AFF-8 · AFF-12 · EMG-3 | .45 CSP·SDK |
 | 9 | **호 모델 결정** — chat 그룹(초대 없이 합류·1명 이하 해제)과 편성 그룹의 재초대·late call entry·제휴 해제 시 이탈. 규격대로 바꿀지, 편차로 남기고 사유를 적을지 정한다 | GCS-1~GCS-4 · GCS-22 · AFF-11 | 결정 → .45 CSP |
 | 10 | **그룹 문서 집행** — 수신 전용 | FCS-14 | .45 CSP·CMP·CSC |

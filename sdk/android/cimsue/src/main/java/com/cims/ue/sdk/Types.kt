@@ -284,6 +284,10 @@ data class CallOptions(val video: Boolean = false, val emergency: Boolean = fals
     }
 }
 
+/** 개별 호 발신이 착신 단말에 요청하는 개시 방식(RFC 5373, 서수 = 코어 CommencementMode) — AUTO·MANUAL = `Answer-Mode`, FORCE_AUTO =
+ *  `Priv-Answer-Mode: Auto`(인가가 없으면 서버 403 Warning 143). 서버는 user profile 의 개시 방식 인가로 판정한다(자동 125 · 수동 126). */
+enum class CommencementMode { UNSPECIFIED, AUTO, MANUAL, FORCE_AUTO }
+
 data class GroupCallOptions(
     val emergency: Boolean = false,
     val imminentPeril: Boolean = false,
@@ -297,8 +301,11 @@ data class GroupCallOptions(
     val broadcast: Boolean = false,
     /** 암묵적 발언 요청(TS 24.380 §14.2.5 mc_implicit_request + §14.2.4 mc_granted) — 개시 INVITE 가 발언 요청을 싣는다. */
     val implicitFloorRequest: Boolean = false,
+    /** 개별 호의 개시 방식 요청(TS 24.379 §11.1.1.2.1.1 14)) — `startPrivateCall` 전용. 기본은 싣지 않는다(착신 단말 설정대로). */
+    val commencement: CommencementMode = CommencementMode.UNSPECIFIED,
 ) {
     internal fun toJni(): JniGroupCallOptions = JniGroupCallOptions().also {
+        it.commencement = com.cims.ue.sdk.jni.CommencementMode.swigToEnum(commencement.ordinal)
         it.emergency = emergency; it.imminentPeril = imminentPeril
         it.listenOnly = listenOnly; it.fullDuplex = fullDuplex; it.broadcast = broadcast
         it.implicitFloorRequest = implicitFloorRequest

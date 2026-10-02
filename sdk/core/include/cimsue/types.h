@@ -205,6 +205,11 @@ struct CallOptions {
 };
 
 /** 그룹콜/사설콜(MCPTT) 개시 옵션 (TS 24.379). */
+/** 개별 호 발신이 착신 단말에 요청하는 개시 방식(TS 24.379 §11.1.1.2.1.1 14) — RFC 5373). Unspecified = 헤더를 싣지 않는다(착신 단말 설정대로).
+ *  Auto = `Answer-Mode: Auto` · Manual = `Answer-Mode: Manual` · ForceAuto = `Priv-Answer-Mode: Auto`(강제 자동 — 인가가 없으면 서버가 403 `143`).
+ *  서버는 user profile 의 개시 방식 인가로 판정한다(자동 125 · 수동 126). */
+enum class CommencementMode { Unspecified, Auto, Manual, ForceAuto };
+
 struct GroupCallOptions {
     bool emergency = false;           // mcptt-info emergency-ind=true
     bool imminentPeril = false;       // mcptt-info imminentperil-ind=true
@@ -226,6 +231,8 @@ struct GroupCallOptions {
      *  코어가 명시 Floor Request 로 잇는다. 승인 전·호 성립 전에 floorRelease 하면 발언권을 돌려준다(Release 는 answer 에서).
      *  누르는 동안 개시하고 말하는 한 버튼 발신(일제 통화 등)용. listenOnly·fullDuplex 에는 뜻이 없어 무시한다. */
     bool implicitFloorRequest = false;
+    /** 개별 호의 개시 방식 요청 — startPrivateCall 전용(그룹 호의 멤버 초대 개시 방식은 제어 기능이 정한다). */
+    CommencementMode commencement = CommencementMode::Unspecified;
 };
 
 /** MCVideo 그룹 호 개시·합류 옵션(TS 24.281 §9.2.1 prearranged · §9.2.2 chat, 제어 채널 fmtp = TS 24.581 §14.2). */

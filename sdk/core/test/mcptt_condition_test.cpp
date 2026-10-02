@@ -503,6 +503,54 @@ TEST(McpttAdhoc, SessionTypeAndReleaseReason) {
     eng.stop();
 }
 
+// 개별 호 발신의 개시 방식 요청(TS 24.379 §11.1.1.2.1.1 14) — RFC 5373): 자동·수동 = Answer-Mode, 강제 자동 = Priv-Answer-Mode, 미지정 = 없음
+TEST(McpttPrivate, CommencementModeHeaders) {
+    Engine eng;
+    CondListener l;
+    EngineConfig cfg;
+    cfg.logLevel = 0;
+    cfg.nullAudioDevice = true;
+    ASSERT_TRUE(eng.start(cfg, &l).ok);
+    {
+        cimsue_test::PjScope pj("priv-test");
+        FakeServer srv;
+        AccountConfig ac;
+        ac.serverHost = "127.0.0.1"; ac.serverPort = srv.port; ac.transport = Transport::UDP;
+        ac.domain = "ptt.test"; ac.msisdn = "+82500000001"; ac.authId = "450000000000001@ptt.test"; ac.password = "x";
+        int acc = eng.addAccount(ac);
+        ASSERT_GE(acc, 0);
+        struct Case { CommencementMode mode; const char* answerMode; const char* privAnswerMode; const char* peer; };
+        const Case cases[] = {{CommencementMode::Unspecified, "", "", "+82500000002"},
+                              {CommencementMode::Auto, "Auto", "", "+82500000003"},
+                              {CommencementMode::Manual, "Manual", "", "+82500000004"},
+                              {CommencementMode::ForceAuto, "", "Auto", "+82500000005"}};
+        for (const Case& c : cases) {
+            GroupCallOptions o;
+            o.commencement = c.mode;
+            int id = eng.startPrivateCall(acc, c.peer, o);
+            ASSERT_GE(id, 0);
+            std::string inv = srv.recv("INVITE ");
+            ASSERT_FALSE(inv.empty());
+            EXPECT_EQ(headerOf(inv, "Answer-Mode"), c.answerMode) << c.peer;
+            EXPECT_EQ(headerOf(inv, "Priv-Answer-Mode"), c.privAnswerMode) << c.peer;
+            EXPECT_NE(inv.find("<session-type>private</session-type>"), std::string::npos);
+            srv.reply(inv, 403, "Forbidden");
+            ASSERT_FALSE(srv.recv("ACK ").empty());
+            ASSERT_TRUE(l.wait([&] { return l.lastState.callId == id && l.lastState.state == CallState::Disconnected; }));
+        }
+        GroupCallOptions g;                                                // 그룹 호에는 싣지 않는다(멤버 초대의 개시 방식은 제어 기능 몫)
+        g.commencement = CommencementMode::Auto;
+        int gid = eng.joinGroupCall(acc, "g001", g);
+        ASSERT_GE(gid, 0);
+        std::string ginv = srv.recv("INVITE ");
+        ASSERT_FALSE(ginv.empty());
+        EXPECT_EQ(headerOf(ginv, "Answer-Mode"), "");
+        srv.reply(ginv, 403, "Forbidden");
+        srv.recv("ACK ");
+    }
+    eng.stop();
+}
+
 TEST(McpttXml, AlertBuildAndParse) {
     std::string b = mcptt::alertInfo("tel:g002", "tel:+82500000002", "urn:uuid:abc", false, "tel:+82500000013", -1);
     // 요소 순서 = TS 24.379 §F.1 mcptt-ParamsType(request-uri → calling-user-id → emergency-ind → alert-ind → originated-by → client-id)

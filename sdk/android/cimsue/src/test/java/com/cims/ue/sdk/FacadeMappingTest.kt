@@ -109,6 +109,12 @@ class FacadeMappingTest {
             "Other" to com.cims.ue.sdk.jni.ReceptionEvent.Kind.Other.swigValue(),
             // 코어가 끝에 더한 값(TS 24.581 §6.2.5.5.4) — 서수가 모자라면 그 이벤트에서 파사드가 죽는다
             "Overridden" to com.cims.ue.sdk.jni.ReceptionEvent.Kind.Overridden.swigValue()))
+        // 개별 호 개시 방식 요청 — AUTO 와 MANUAL 이 뒤바뀌면 상대가 반대로 받는다
+        check(CommencementMode.entries.map { it.name.replace("_", "") }, listOf(
+            "Unspecified" to com.cims.ue.sdk.jni.CommencementMode.Unspecified.swigValue(),
+            "Auto" to com.cims.ue.sdk.jni.CommencementMode.Auto.swigValue(),
+            "Manual" to com.cims.ue.sdk.jni.CommencementMode.Manual.swigValue(),
+            "ForceAuto" to com.cims.ue.sdk.jni.CommencementMode.ForceAuto.swigValue()))
         // floor 이벤트 종류 — Denied 와 Revoked 가 뒤바뀌면 발언 거절과 회수 표시가 반대가 된다
         check(FloorEventKind.entries.map { it.name.replace("_", "") }, listOf(
             "Granted" to com.cims.ue.sdk.jni.FloorEvent.Kind.Granted.swigValue(),

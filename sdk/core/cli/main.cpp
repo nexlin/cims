@@ -8,6 +8,7 @@
 //   cimsue-cli [계정 옵션] call <번호|sip:URI> [--duration S] [--video]
 //   cimsue-cli [계정 옵션] answer [--duration S] [--transfer-to X --transfer-after S]
 //   cimsue-cli [계정 옵션] group-call <groupId> [--duration S] [--ptt-at S --ptt-len S] [--listen-only] [--emergency] [--broadcast] [--implicit]
+//              (--private = MCPTT 개별 호(대상 = 상대 번호), --answer-mode auto|manual|force = 개시 방식 요청 Answer-Mode·Priv-Answer-Mode, §11.1.1.2.1.1 14))
 //              (--members tel:..,tel:.. = 애드혹 그룹 호 — 명단을 싣고 session-type adhoc. 끝낼 때 BYE + Reason 으로 호 전체를 해제, TS 24.379 §17)
 //              (MCPTT 그룹콜은 음성만 — 그룹 영상은 video-call(MCVideo 호, mcvideo.md §8))
 //              (--broadcast = 일제 통화 개시 — 발언을 놓은 뒤 서버 Floor Idle(B-bit)이면 코어가 호를 해제, outcome 에 broadcast_released)
@@ -127,6 +128,8 @@ struct Opts {
     // GMS 그룹 관리(group-put)
     std::string groupName;
     std::vector<std::string> groupMembers;
+    bool privateCall = false;                                           // group-call --private — MCPTT 개별 호
+    std::string answerMode;                                             // --answer-mode auto|manual|force (개별 호 개시 방식 요청)
     // 구동·계측 링크(ue_voice_quality.md §5)
     std::string service;              // 회선 서비스 이름(volte·voip·ptt) — 비면 --mcptt-id 유무로
     std::string sampleFile;           // `media sample` 기본 WAV
@@ -229,9 +232,11 @@ bool parse(int argc, char** argv, Opts& o) {
             if (opt("--transmit-at", [&](const std::string& v) { o.transmitAt = std::stoi(v); })) continue;
             if (opt("--transmit-len", [&](const std::string& v) { o.transmitLen = std::stoi(v); })) continue;
             if (opt("--rejoin", [&](const std::string& v) { o.rejoinUri = v; })) continue;
+            if (opt("--answer-mode", [&](const std::string& v) { o.answerMode = v; })) continue;
             if (opt("--members", [&](const std::string& v) { std::stringstream ss(v); std::string m; while (std::getline(ss, m, ',')) if (!m.empty()) o.groupMembers.push_back(m); })) continue;
         } catch (std::exception& e) { std::fprintf(stderr, "%s\n", e.what()); return false; }
         if (a == "--no-tls-verify") o.tlsVerify = false;
+        else if (a == "--private") o.privateCall = true;
         else if (a == "--json") o.json = true;
         else if (a == "--video") o.video = true;
         else if (a == "--listen-only") o.listenOnly = true;
@@ -905,7 +910,10 @@ int main(int argc, char** argv) {
         GroupCallOptions go; go.listenOnly = o.listenOnly; go.emergency = o.emergency; go.broadcast = o.broadcast;
         go.implicitFloorRequest = o.implicit;             // --ptt-at 의 floorRequest 는 이미 요청 중이라 무시된다
         go.members = o.groupMembers;                      // --members = 애드혹 그룹 호의 초대 명단(TS 24.379 §17 — session-type adhoc)
-        s.callId = eng.joinGroupCall(acc, o.target, go);
+        go.commencement = o.answerMode == "auto" ? CommencementMode::Auto : o.answerMode == "manual" ? CommencementMode::Manual
+                        : o.answerMode == "force" ? CommencementMode::ForceAuto : CommencementMode::Unspecified;
+        // --private = 개별 호(TS 24.379 §11.1.1.2.1.1) — 대상은 상대 번호. --answer-mode 로 개시 방식 요청(RFC 5373)
+        s.callId = o.privateCall ? eng.startPrivateCall(acc, o.target, go) : eng.joinGroupCall(acc, o.target, go);
         if (s.callId < 0) { s.outcome = "invite_failed"; rc = 4; return finish(-1); }
         bool up = waitActive(ls, s.callId, o.timeoutSec);
         CallInfo ci = ls.calls.count(s.callId) ? ls.calls[s.callId] : CallInfo{};

@@ -297,6 +297,10 @@ C++ 공개 표면은 `cimsue/engine.h` 의 `Engine` 하나이며 계정·호를 
   `SIP-If-Match` 로 싣는다. 412 를 받으면 그 ETag 를 버리고(§5 MUST) 같은 요청을 다시 보내지 않으며, `SIP-If-Match` 없는 초기 PUBLISH
   (§4.2)로 한 번 다시 알린다. 앱에는 412 가 올라가지 않고 재발행의 최종 응답이 `affiliate()` 가 돌려준 token 으로 온다(시험
   `AffiliationPublish.StaleEtag412FallsBackToInitialPublish`).
+- **개별 호의 개시 방식 요청**(TS 24.379 §11.1.1.2.1.1 14) — RFC 5373). `startPrivateCall(peer, {commencement})`: `Auto`·`Manual` = `Answer-Mode`,
+  `ForceAuto` = `Priv-Answer-Mode: Auto`(강제 자동 — 인가가 없으면 서버가 403 Warning 143), 기본 `Unspecified` = 헤더를 싣지 않는다(착신 단말 설정대로).
+  서버는 user profile 의 개시 방식 인가로 판정하고(자동 125 · 수동 126) 받은 `Answer-Mode` 를 착신 INVITE 에 옮긴다 — 착신 단말은 그 값으로 자동·수동
+  개시를 정한다(`mcptt/commencement.h`). 그룹 호에는 싣지 않는다(멤버 초대의 개시 방식은 제어 기능 몫). `cimsue-cli group-call <번호> --private --answer-mode auto|manual|force`.
 - **애드혹 그룹 호**(TS 24.379 §17). `joinGroupCall({members})` — 명단(resource-lists)을 실은 개시는 mcptt-info `<session-type>adhoc`
   (§17.2.2.1.1 10)a)). 이렇게 연 호를 개시자가 `hangup` 하면 **호 전체를 끝낸다** — BYE 에 `Reason: SIP;cause=200;text="User requested release"`
   (§17.2.3.1.1 1)), 제어 기능이 전원을 해제한다(§6.3.3.2.4 3A)). 초대받은 참가자의 `hangup` 은 Reason 없는 BYE = 자기만 나가기(§17.2.4.1.1)이고,
