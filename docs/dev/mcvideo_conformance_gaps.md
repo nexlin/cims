@@ -46,15 +46,14 @@ MCPTT 쪽 같은 뿌리의 결함은 [mcptt_conformance_gaps.md](mcptt_conforman
 | 제휴 (VAFF) | 7 | 1 | 1 | 5 | — |
 | 그룹 호 — 서버 (VGC) | 7 | — | 1 | 5 | 1 |
 | 그룹 호 — 단말 (VGU) | 2 | — | — | — | 2 |
-| 개별·그 밖의 호 (VPRV) | 1 | — | — | — | 1 |
 | 송출 제어 — 서버 (TCS) | 9 | — | — | 4 | 5 |
 | 송출 제어 — 단말 (TCU) | 1 | — | — | 1 | — |
 | 수신 제어 — 서버 (RCS) | 1 | — | — | — | 1 |
 | 그룹 문서 (VGMS) | 1 | — | 1 | — | — |
 | 설정 문서·CMS (VCMS) | 1 | — | 1 | — | — |
-| **계** | **33** | **1** | **5** | **16** | **11** |
+| **계** | **32** | **1** | **5** | **16** | **10** |
 
-확인 수준 — ◎ 19 · ○ 9 · △ 5.
+확인 수준 — ◎ 18 · ○ 9 · △ 5.
 
 읽는 순서 — §2(먼저 볼 것) → §3(영역별 전체) → §4(미구현 목록에 빠진 기능) → §5(문서 정정) → §6(묶음과 순서).
 
@@ -128,7 +127,6 @@ MCPTT 쪽 같은 뿌리의 결함은 [mcptt_conformance_gaps.md](mcptt_conforman
 
 | # | 급 | 대상 | 규격 | CIMS 지금 | 영향 | 확인 |
 |---|---|---|---|---|---|---|
-| VPRV-1 | D | CSP | 부록 F.1.3 `<session-type>`(private·ambient-viewing·pull-*·push-*·adhoc) · 표 4.4.2-2 `107 user not authorised to make private calls`·`154`·`186 the MCVideo system do not support adhoc group call`·`100 function not allowed due to local policy` | 그룹 호가 아닌 session-type 도 그룹 호 경로를 탄다 — `<mcvideo-request-uri>`(사용자 id)를 그룹으로 찾아 404 `113 group document does not exist`, 그 전에 N2 486 `102` 가 날 수도 있다(`csp/McVideoCallService.cpp:566`·`:645-659`·`:689-693`) | 1:1·pull·push·ad hoc 을 시도한 규격 단말이 엉뚱한 사유를 표시한다(V8 까지 미지원은 맞다 — 사유 코드 문제) | ◎ |
 
 ### 3.6 송출 제어 — 서버 (TCS) — TS 24.581 §6.3.4 · §6.3.5 · §9 · §11.1.3
 
@@ -209,7 +207,7 @@ MCPTT 쪽 같은 뿌리의 결함은 [mcptt_conformance_gaps.md](mcptt_conforman
 | 8 | **그룹 문서 PUT 해석** — 없음의 뜻(§7.2.8) | VGMS-1 · VGC-10(CSC 기본값 몫) | .45 CSC |
 | 9 | **단말 호 절차** — poc-settings §7.2.3 송신(+ 서버 §7.3.4 수신과 짝 — 받은 Answer-Mode Indication 으로 멤버 초대의 `Answer-Mode` 를 정한다, 지금은 늘 `Auto`), 제휴 상태 구독, preconfigured-group-use-only, 재합류 UI | VREG-1 · VGU-5 · VGU-6 · VAFF-8 | .45 SDK·현장 → Windows(관제 앱) |
 | 10 | **송출 제어 서버 세부** — 선점 순서, 이른 Granted, 대기 위치 갱신, 무허가 송출 포기, Ack subtype·P 비트, SSRC 기본값, 별칭 전달 | TCS-2 · TCS-3 · TCS-5 · TCS-7 · TCS-8 · TCS-9 · TCS-11 · RCS-2 | .45 CMP(·SDK 별칭) |
-| 12 | **서버 사유 코드·신원 세부** — 그룹 호 밖 session-type 사유, PSI 고정, 로그오프 바인딩 판정·제휴 정리, conference 구독 서비스 분리, T5 | VPRV-1 · VGC-13 · VREG-2 · VREG-4 · VGC-10 · VGC-9 | .45 CSP |
+| 12 | **서버 사유 코드·신원 세부** — PSI 고정, 로그오프 바인딩 판정·제휴 정리, conference 구독 서비스 분리, T5 | VGC-13 · VREG-2 · VREG-4 · VGC-10 · VGC-9 | .45 CSP |
 | 13 | **수신 전용 멤버** — 그룹 모델·문서 `<on-network-recvonly>` → CSP JOIN `recv_only`·answer `mc_priority` 생략. MCPTT FCS-14 와 같이 | TCS-10 | .45 CSC·CSP |
 
 **Windows 몫(관제 앱 두 벌)** — SDK·서버가 정해진 뒤 맞춘다.
@@ -221,7 +219,7 @@ MCPTT 쪽 같은 뿌리의 결함은 [mcptt_conformance_gaps.md](mcptt_conforman
 
 ## 7. 보지 못한 것
 
-- **V8·통째 미구현 절** — 긴급·임박·경보·방송·1:1·pull·push·ambient viewing·ad hoc·pre-established·MBMS·off-network(TS 24.581 §7·§9.3~§9.5)·non-controlling 기능(§6.5)·Track Info. 거절 사유만 VGC-1·VPRV-1 로 봤다.
+- **V8·통째 미구현 절** — 긴급·임박·경보·방송·1:1·pull·push·ambient viewing·ad hoc·pre-established·MBMS·off-network(TS 24.581 §7·§9.3~§9.5)·non-controlling 기능(§6.5)·Track Info. 거절 사유만 봤다.
 - **전송 제어 SRTCP 키 유도(TS 24.581 §13)·KMS·GMK** — mcx_e2e_security.md 에 placeholder 로 있어 내부를 읽지 않았다. 단말은 `protect-media` true 를 무시한다(D7 범위).
 - **OMA list-service 실 스키마** — `tests/fixtures/mcvideo/xsd/aux-*` 는 CIMS 가 만든 보조 틀이다. 그룹 문서의 자식 순서(`list`·`ruleset`·`supported-services`·mcpttgi 확장 위치)는 원문 스키마로 검증하지 못했다.
 - **XDM collection·여러 user profile** — 디렉터리 GET, `<Pre-selected-indication>` 동작.

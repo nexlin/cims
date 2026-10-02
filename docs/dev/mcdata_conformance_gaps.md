@@ -50,10 +50,9 @@ MCPTT 와 뿌리가 같은 것(제휴 클라이언트 단위·비제휴 멤버 �
 | disposition 통지 (DISP) | 1 | — | — | 1 | — |
 | 파일 배포 (FD) | 2 | — | — | 1 | 1 |
 | 설정 문서 (CFG) | 1 | — | — | 1 | — |
-| 응답 코드·Warning (WRN) | 3 | — | — | 3 | — |
-| **계** | **30** | **1** | **10** | **14** | **5** |
+| **계** | **27** | **1** | **10** | **11** | **5** |
 
-확인 수준 — ◎ 25 · ○ 2 · △ 3.
+확인 수준 — ◎ 22 · ○ 2 · △ 3.
 
 읽는 순서 — §2(먼저 볼 것) → §3(영역별 전체) → §4(미구현 목록에 빠진 기능) → §5(문서 정정) → §6(묶음과 순서).
 
@@ -110,7 +109,7 @@ CSP 는 참여 기능과 제어 기능을 겸한다.
 | SDS-1 | B | CSP | §6.2.4.1 4) — Request-URI = 참여 기능 PSI. §9.2.2.2.1 3)b)ii) — 그룹 = `<mcdata-request-uri>`, 2)a) — 1:1 대상 = resource-lists. §9.2.2.3.1 4) — 참여 기능은 본문으로 제어 기능을 정한다 | 대상 = To user(psip `SipUserAgentMessage.hpp:31`) → 그룹이면 MCDATA-AS(`csp/McDataAsModule.cpp:33`), 아니면 1:1 전달(`csp/ModuleDispatcher.cpp:2669-2679`). `<mcdata-request-uri>` 는 파싱만 하고 읽는 곳이 없다(`csp/McDataCodec.cpp:295`) | To 가 PSI 인 규격 단말의 그룹·1:1 SDS 가 404. mcdata_messaging.md §7 «서버는 양쪽 모두 수용» 과 다르다(규격 단말의 To 값은 실측) | ◎ |
 | SDS-2 | B | CSP | §9.2.2.4.1.1 5) — 수신자별 mcdata-info `<mcdata-request-uri>` = 수신자 MCData ID, 그룹이면 `<mcdata-calling-group-id>` = 그룹. §9.2.2.3.1 12) — `<mcdata-calling-user-id>` = 발신자. 7)·8) — P-Asserted-Identity = 제어 기능 PSI, P-Asserted-Service | fan-out 은 받은 본문·Content-Type 을 그대로 복사(`csp/McDataAsModule.cpp:94`, psip `SendSms` — 헤더 추가 없음). request-uri 는 그룹으로 남고 calling-group-id·calling-user-id 가 없다. 우리 SDK 는 request-uri·From 으로 보정한다(`sdk/core/src/mcdata/sds_codec.cpp:339-343`, `engine.cpp:1784`) | 규격 단말은 그룹·발신자를 알 수 없어 스레드를 못 묶고, §12.2.1.1 의 통지 대상(`<mcdata-calling-user-id>`)이 없어 DELIVERED 를 못 보낸다 | ◎ |
 | SDS-3 | B | SDK | §9.2.2.2.1 3)b)iv) · §10.2.4.2.1 3)b)iii) — 그룹 SDS·FD 의 mcdata-info 에 `<mcdata-client-id>` (shall) | mcdata-info = `request-type`·`mcdata-request-uri` 둘뿐(`sdk/core/src/mcdata/sds_codec.cpp:155-163`) | 규격 제어 기능이 §6.3.5 제휴 판정(클라이언트 단위)을 못 한다(MCPTT GCC-3 과 같은 결) | ◎ |
-| SDS-4 | C | CSP | §9.2.2.4.2 2) — mcdata-info·mcdata-signalling·mcdata-payload 가 없으면 403 + `199 expected MIME bodies not in the request` | `text/plain` 과 signalling 파트 없는 multipart 를 «text» 로 보고 본문 전체를 payload 삼아 그대로 fan-out(`csp/McDataAsModule.cpp:46-49`·`:101`) | 구버전 앱 호환(§6 배포 순서)이 편차 표·제거 조건 없이 남아 있다. 형식이 깨진 본문도 그룹 전원에게 간다 | ◎ |
+| SDS-4 | C | CSP | §9.2.2.4.2 2) — mcdata-info·mcdata-signalling·mcdata-payload 가 없으면 403 + `199 expected MIME bodies not in the request` | CSP 가 판정·응답을 낸다 — 엄격 검사 스위치 `Setup.Mcptt.StrictCheck` 기본 `log`(구버전 앱의 `text/plain` 은 로그만 남기고 그대로 배포, 결정 D5). `enforce` 전환은 앱이 규격형으로 바뀐 뒤(S18 과 같이) | 스위치가 log 인 동안 형식이 깨진 본문도 그룹 전원에게 간다 | ◎ |
 | SDS-5 | D | CSP | §9.2.2.4.2 5)·6) — `<request-type>`(one-to-one-sds·group-sds·ad-hoc-group-sds)로 절차를 가른다 | request-type 을 읽지 않는다 — To 가 그룹이면 그룹 절차(`csp/McDataAsModule.cpp:33`) | `one-to-one-sds` 본문을 그룹 URI 로 보내면 그룹 배포 | ◎ |
 | SDS-6 | C | SDK | §9.2.1.2 7)·8) — Application ID·Extended application ID 가 있으면 사용자용이 아니다(알리지 않음, 모르는 값이면 버림). 표 15.1.2.1-1 순서 = 0x21 → 0x22 → 8- → 7D… | SDS 파서는 8-·0x21 만 알고 0x22 에서 멈춘다(`sdk/core/src/mcdata/sds_codec.cpp:352-357`) | 앱 대상 SDS(명령·위치 등)가 사용자 말풍선으로 보이고, 0x22 뒤의 disposition 요청을 잃어 수신 확인이 안 간다 | ◎ |
 | SDS-7 | D | SDK | §15.2.13 · §6.2.2.1 3) — Payload content type TEXT·BINARY·HYPERLINKS·FILEURL·LOCATION·CODED TEXT, payload 여러 개. TEXT charset = 단말 설정 또는 그룹 `<mcdata-default-charset>` | TEXT·FILEURL 만 읽고 나머지는 버린다, TEXT 가 여럿이면 마지막 것만(`sdk/core/src/mcdata/sds_codec.cpp:393-407`). charset 은 UTF-8 고정 | 규격 단말의 HYPERLINKS·CODED TEXT·LOCATION SDS 가 빈 메시지가 된다 | ◎ |
@@ -157,9 +156,6 @@ CSP 는 참여 기능과 제어 기능을 겸한다.
 
 | # | 급 | 대상 | 규격 | CIMS 지금 | 영향 | 확인 |
 |---|---|---|---|---|---|---|
-| WRN-1 | C | CSP | §9.2.2.4.2 6)e) · §9.2.3.4.4 7)c) · §10.2.4.4.2 12)c) — 비멤버는 403 + `116 user is not part of the MCData group` | Warning 없는 403(`csp/McDataGates.cpp:57-61`, C-plane·media plane 공용). disposition 경로는 116 을 싣는다(`csp/McDataAsModule.cpp:179`) | 같은 판정이 경로마다 다르다. 단말이 403 의 사유를 가르지 못한다 | ◎ |
-| WRN-2 | C | CSP | §9.2.2.4.2 6)f) · §9.2.3.4.4 7)d) — SDS 꺼짐 403 + `206 short data service not allowed for this group`. §10.2.4.4.2 12)d) — FD 꺼짐 403 + `213 file distribution not allowed for this group` | Warning 없는 403(`csp/McDataGates.cpp:50-54`) | «권한 없음» 과 «그룹에서 꺼짐» 을 가르지 못한다 | ◎ |
-| WRN-3 | C | CSP | §9.2.2.4.2 6)i)iii) · §11.1 5) — 그룹 SDS 크기 초과는 403 + `217 user not authorised for SDS communications on this group identity due to message size` | 413(`csp/McDataAsModule.cpp:78-83`). media plane 은 cmdp 의 MSRP 413 뒤 BYE | 규격 단말은 413 을 일반 실패로 본다 — 받아들이는 쪽은 넓다 | ◎ |
 
 ## 4. 미구현 기능 목록에 빠진 것
 
@@ -174,7 +170,6 @@ CSP 는 참여 기능과 제어 기능을 겸한다.
 |---|---|---|---|
 | mcdata_messaging.md §7 «라우팅» 행 | 그룹 URI 직행(mcdata-info 도 포함) · «서버는 양쪽 모두 수용» | CSP 는 `<mcdata-request-uri>` 를 읽지 않아 PSI 형 SDS 는 404. 미디어 평면 INVITE 에는 mcdata-info 가 없다 | SDS-1 · MSRP-1 |
 | 같은 문서 §4 | «미참여(비affiliated) 멤버는 규격상 배포 대상이 아니다» · «require_affiliation 그룹은 affiliate 멤버만» | 그 밖 그룹은 비제휴 멤버에게도 배포한다. 규격은 모든 그룹에서 제휴 멤버만 | AFF-2 |
-| 같은 문서 §4 게이트 표 | «controlling function 검사, TS 24.282 §9.2.2» — 403 · 403 · 413 | 규격 응답 = 403 + 206 · 403 + 116 · 403 + 217 | WRN-1~3 |
 | `csp/McDataAsModule.cpp:52` 주석 | 203 거절 근거 «TS 24.282 §9.2.2 step 8» | §9.2.2.3.1 8) — 문서(mcdata_messaging.md §4.7)는 고쳤다. 주석은 그 파일을 고치는 WP 가 | — |
 | `csp/McpttInfo.h:179` · `csp/McDataAsModule.cpp:58` 주석 | Warning 형식 «TS 24.282 §4.4» | V18 의 Warning 은 §4.9(§4.4 = Emergency Alerts) — 문서(mcptt_standard_conformance.md C4e)는 고쳤다. 주석은 그 파일을 고치는 WP 가 | — |
 | mcdata_messaging.md §2 표 `max_auto_recv` · §4.5 | «수신 단말 파일 자동 다운로드 임계» · «수신 앱: 그룹문서 max-data-size-auto-recv 이내면 자동 다운로드» | 규격 의미는 서버가 Mandatory download 를 붙이는 임계(§11.2, TS 24.481 §7.2.4.2), 단말은 그 IE 를 따른다 | FD-4 |
@@ -187,7 +182,7 @@ CSP 는 참여 기능과 제어 기능을 겸한다.
 | # | 묶음 | 항목 | 몫 |
 |---|---|---|---|
 | 2 | **인가·보안** — 제휴 멤버만 배포 | AFF-2 | .45 CSP |
-| 3 | **응답 코드·Warning** — MCPTT 묶음 5 와 한 묶음(같은 `McpttWarning`) | WRN-1~3 · SDS-4 | .45 CSP |
+| 3 | **응답 코드·Warning** — MCPTT 묶음 5 와 한 묶음(같은 `McpttWarning`) | SDS-4(enforce) | .45 CSP |
 | 4 | **서버가 내는 본문 규격화** — 수신자별 mcdata-info(request-uri = 수신자, calling-group-id, calling-user-id), PAI·P-Asserted-Service, MSRP 배포 INVITE 헤더, 폴백 FD 본문 | SDS-2 · MSRP-2 · MSRP-6 · SDS-8 | .45 CSP |
 | 5 | **규격형 요청 수용** — 서버가 PSI 형·그룹 URI 형을 둘 다 받는 전환기를 먼저 둔다. 서버 쪽 검사(MSRP-5)는 SDK 뒤 | SDS-1 · SDS-5 · CFG-1 → SDK: REG-1 · SDS-3 · MSRP-1 · SDS-10 | .45 CSP → SDK |
 | 6 | **FD Metadata 형식** — `file-selector:` 접두·hash (SDK 는 규격형 업로드·Location 사용과 함께 — U05) | FD-7 | .45 SDK · CSP |

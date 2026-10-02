@@ -571,6 +571,17 @@ void CMcVideoCallService::OnIncomingInvite( const char *pszCallId, const char *p
         ParseMcVideoInfo( McVideoBodyPart( pclsMessage->m_strBody, strCtype, kMcVideoInfoSubtype ) );
 
     std::lock_guard<std::recursive_mutex> lock( m_mutex );
+    // 그룹 호가 아닌 호 종류(1:1·ambient viewing·pull·push·ad hoc — V8 미구현)는 그룹 호 경로로 보내지 않는다(VPRV-1)
+    {
+        const char *pszNgText = NULL;
+        const int iNgWarn = McVideoNonGroupSessionWarn( clsMvi.strSessionType, &pszNgText );
+        if ( iNgWarn > 0 ) {
+            CLog::Print( LOG_INFO, "MCVIDEO: INVITE from(%s) session-type=%s — 지원하지 않는 호 종류 → 403 %d",
+                         strFrom.c_str(), clsMvi.strSessionType.c_str(), iNgWarn );
+            _Reject( pszCallId, SIP_FORBIDDEN, iNgWarn, pszNgText );
+            return;
+        }
+    }
     // 대상 — Request-URI 의 gr(재합류, §9.2.1.4.5.1) 이면 그 세션, 아니면 <mcvideo-request-uri>
     std::string strGroupId;
     const char *pszGr = SearchSipParameter( pclsMessage->m_clsReqUri.m_clsUriParamList, "gr" );

@@ -63,6 +63,18 @@ bool CMcDataAsModule::OnMessage( const char *pszFrom, const char *pszTo, CSipMes
     int iPayloadSize = bMcData ? clsInfo.m_iPayloadSize : (int)pclsMessage->m_strBody.size();
     int iWarn = 0;
 
+    // 2) mcdata-info·mcdata-signalling·mcdata-payload 가 없는 본문(text/plain·signalling 없는 multipart) — 규격은 403 +
+    // 199.
+    //   구버전 앱이 평문을 보내는 동안은 엄격 검사 스위치(Setup.Mcptt.StrictCheck, 기본 log) 아래 두고 본문 전체를
+    //   payload 로 전달한다(결정 D5 — 앱이 규격형으로 바뀐 뒤 enforce).
+    if ( !bMcData &&
+         gclsSetup.McpttStrict( "199 expected MIME bodies not in the request",
+                                std::string( "MESSAGE from " ) + pszFrom + " → " + pszTo + " ct=" + szContentType ) ) {
+        _RejectWithWarning( pclsMessage, SIP_FORBIDDEN, 199, McDataWarnText( 199 ) );
+        iStatus = 0;
+        return true;
+    }
+
     // FD Payload 검사 (§10.2.4.4.2 6)·7)) — 그룹 판정(12))보다 먼저: Payload 하나 · FILEURL · 이 서버의 파일
     if ( bFd && McDataFdPayloadCheck( clsInfo, &iWarn ) != 0 ) {
         _RejectWithWarning( pclsMessage, SIP_FORBIDDEN, iWarn, McDataWarnText( iWarn ) );
@@ -103,9 +115,11 @@ bool CMcDataAsModule::OnMessage( const char *pszFrom, const char *pszTo, CSipMes
     // 게이트 3 — mcdata-on-network-max-data-size-for-SDS (TS 24.481). FD 는 payload=URL 이라 제외
     //   (파일 크기 상한은 CSC 업로드 단에서 강제).
     if ( !bFd && clsGroup._maxSdsSize > 0 && iPayloadSize > clsGroup._maxSdsSize ) {
-        CLog::Print( LOG_INFO, "McDataAs: group(%s) payload %d > max %d — reject 413", pszTo, iPayloadSize,
+        // §9.2.2.4.2 6)i)iii) · §11.1 5) — 403 + 217 (그룹 SDS 크기)
+        CLog::Print( LOG_INFO, "McDataAs: group(%s) payload %d > max %d — reject 403 217", pszTo, iPayloadSize,
                      clsGroup._maxSdsSize );
-        iStatus = SIP_REQUEST_ENTITY_TOO_LARGE;
+        _RejectWithWarning( pclsMessage, SIP_FORBIDDEN, 217, McDataWarnText( 217 ) );
+        iStatus = 0;
         return true;
     }
 

@@ -386,6 +386,18 @@ int main() {
            .empty());
   }
 
+  // 그룹 호가 아닌 호 종류의 거절 사유 (McVideoNonGroupSessionWarn — TS 24.281 표 4.4.2-2, S09 VPRV-1)
+  {
+    const char *t = nullptr;
+    CK("ng chat/prearranged/empty pass",
+       McVideoNonGroupSessionWarn("chat", &t) == 0 && McVideoNonGroupSessionWarn("prearranged", &t) == 0 &&
+           McVideoNonGroupSessionWarn("", &t) == 0);
+    CK("ng private 107", McVideoNonGroupSessionWarn("private", &t) == 107 && std::string(t) == kMcVideoWarn107);
+    CK("ng ambient-viewing 154", McVideoNonGroupSessionWarn("ambient-viewing", &t) == 154);
+    CK("ng adhoc 186", McVideoNonGroupSessionWarn("adhoc", &t) == 186 && std::string(t) == kMcVideoWarn186);
+    CK("ng pull/push 100", McVideoNonGroupSessionWarn("pull-recorded", &t) == 100 &&
+                               McVideoNonGroupSessionWarn("push", &t) == 100 && std::string(t) == kMcVideoWarn100);
+  }
   printf("%s (%d fail)\n", fail ? "FAIL" : "PASS", fail);
   return fail ? 1 : 0;
 }

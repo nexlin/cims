@@ -50,20 +50,24 @@ static std::string _jesc( const std::string &s ) {
 
 int McDataGateCheck( const CspPttGroup &clsGroup, const char *pszFrom, bool bFd, int *piWarn ) {
     if ( piWarn ) *piWarn = 0;
-    // 게이트 1 — 그룹문서 mcdata-allow-short-data-service / mcdata-allow-file-distribution (TS 24.481)
-    if ( bFd ? clsGroup._allowFd == false : clsGroup._allowSds == false ) {
-        CLog::Print( LOG_INFO, "McDataGate: group(%s) %s disabled — 403 from(%s)", clsGroup._id.c_str(),
-                     bFd ? "FD" : "SDS", pszFrom );
-        return SIP_FORBIDDEN;
-    }
-
-    // 게이트 2 — 발신자 그룹 멤버십 (controlling function 검사)
+    // 규격 순서(TS 24.282 §9.2.2.4.2 6)e)·f) · §9.2.3.4.4 7)c)·d) · §10.2.4.4.2 12)c)·d)) — 멤버십 → 서비스 → 제휴.
+    // 게이트 1 — 발신자 그룹 멤버십 (controlling function 검사) — 403 + 116
     bool bMember = false;
     for ( const auto &pUser : clsGroup._pusers )
         if ( pUser && pUser->_id == pszFrom ) bMember = true;
     if ( !bMember ) {
-        CLog::Print( LOG_INFO, "McDataGate: from(%s) is not a member of group(%s) — 403", pszFrom,
+        CLog::Print( LOG_INFO, "McDataGate: from(%s) is not a member of group(%s) — 403 (116)", pszFrom,
                      clsGroup._id.c_str() );
+        if ( piWarn ) *piWarn = 116;
+        return SIP_FORBIDDEN;
+    }
+
+    // 게이트 2 — 그룹문서 mcdata-allow-short-data-service / mcdata-allow-file-distribution (TS 24.481) — 403 + 206 /
+    // 213
+    if ( bFd ? clsGroup._allowFd == false : clsGroup._allowSds == false ) {
+        CLog::Print( LOG_INFO, "McDataGate: group(%s) %s disabled — 403 (%d) from(%s)", clsGroup._id.c_str(),
+                     bFd ? "FD" : "SDS", bFd ? 213 : 206, pszFrom );
+        if ( piWarn ) *piWarn = bFd ? 213 : 206;
         return SIP_FORBIDDEN;
     }
 
@@ -148,16 +152,26 @@ int McDataFdPayloadCheck( const CMcDataSdsInfo &clsInfo, int *piWarn ) {
 
 const char *McDataWarnText( int iWarn ) {
     switch ( iWarn ) {  // TS 24.282 §4.9 표 4.9-1
+        case 116:
+            return "user is not part of the MCData group";
         case 120:
             return "user is not affiliated to this group";
         case 198:
             return "no users are affiliated to this group";
+        case 199:
+            return "expected MIME bodies not in the request";
+        case 206:
+            return "short data service not allowed for this group";
         case 210:
             return "Only one File URL must be present in the FD request";
         case 211:
             return "payload for an FD request is not FILEURL";
         case 212:
             return "file referenced by file URL does not exist";
+        case 213:
+            return "file distribution not allowed for this group";
+        case 217:
+            return "user not authorised for SDS communications on this group identity due to message size";
         default:
             return "";
     }

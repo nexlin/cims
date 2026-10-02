@@ -288,6 +288,7 @@ static const char *const kMcVideoWarn100 = "function not allowed due to local po
 static const char *const kMcVideoWarn101 = "service authorisation failed";
 static const char *const kMcVideoWarn102 = "too many simultaneous affiliations";
 static const char *const kMcVideoWarn103 = "maximum simultaneous MCVideo group calls reached";
+static const char *const kMcVideoWarn107 = "user not authorised to make private calls";
 static const char *const kMcVideoWarn108 = "user not authorised to make chat group calls";
 static const char *const kMcVideoWarn109 = "user not authorised to make prearranged group calls";
 static const char *const kMcVideoWarn113 = "group document does not exist";
@@ -301,5 +302,29 @@ static const char *const kMcVideoWarn121 = "user is not authorised to join the g
 static const char *const kMcVideoWarn122 = "too many participants";
 static const char *const kMcVideoWarn123 = "MCVideo session already exists";
 static const char *const kMcVideoWarn137 = "the indicated group call does not exist";
+static const char *const kMcVideoWarn154 = "user not authorised to make ambient viewing call";
+static const char *const kMcVideoWarn186 = "the MCVideo system do not support adhoc group call";
+
+/** 그룹 호가 아닌 호 종류(부록 F.1.3 session-type)의 거절 사유 — CIMS 는 MCVideo 1:1·ambient viewing·pull·push·ad hoc
+ * 을 내지 않는다(mcvideo.md V8). 그룹 호 경로(그룹 조회 404 113·N2 486 102)로 보내지 않고 그 종류의 사유로 403 을 준다
+ *  (TS 24.281 표 4.4.2-2). 그룹 호(chat·prearranged)·빈 값이면 0. */
+inline int McVideoNonGroupSessionWarn( const std::string &strSessionType, const char **ppszText ) {
+    const std::string &t = strSessionType;
+    if ( t.empty() || t == "chat" || t == "prearranged" ) return 0;
+    if ( t == "private" ) {
+        *ppszText = kMcVideoWarn107;
+        return 107;
+    }
+    if ( t == "ambient-viewing" ) {
+        *ppszText = kMcVideoWarn154;
+        return 154;
+    }
+    if ( t == "adhoc" ) {
+        *ppszText = kMcVideoWarn186;
+        return 186;
+    }
+    *ppszText = kMcVideoWarn100;  // pull-*·push-*·broadcast 등 — 로컬 정책
+    return 100;
+}
 
 #endif  // _MCVIDEO_INFO_H_

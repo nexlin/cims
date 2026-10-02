@@ -98,17 +98,21 @@ MCDATA-AS 게이트 (모두 controlling function 검사 — SDS TS 24.282 §9.2.
    host·port 가 같고 경로가 `/mcdata/fd/<32 hex>`(`McDataFdUrlIsOurs`). 규격 단말은 받은 URL 로 Bearer 토큰을 실어 GET 하므로(§10.2.3.1)
    다른 호스트의 URL 은 배포하지 않는다. 그 다음 그 URL 에 HEAD(§6.7.3.1 — CSC 내부 토큰, §4.5)로 파일이 있는지 보고 404 면 `212`, 그 밖의
    실패(401·연결 실패·옛 CSC 405)는 확인하지 못한 것이라 배포하고 로그를 남긴다(psip `CHttpClient::DoHead`).
-1. `allow_sds`(FD 는 `allow_fd`)=false → **403 Forbidden**
-2. 발신자가 그룹 멤버가 아님 → **403 Forbidden**
+1. 발신자가 그룹 멤버가 아님 → **403 `116 user is not part of the MCData group`**(6)e) · 7)c) · 12)c))
+2. `allow_sds`=false → **403 `206 short data service not allowed for this group`**, FD 는 `allow_fd`=false → **403 `213 file distribution
+   not allowed for this group`**(6)f) · 7)d) · 12)d))
 3. 발신자가 그 그룹에 제휴하지 않음 → **403 `120 user is not affiliated to this group`**(6)j) · 7)g) · 12)g))
-4. payload 크기(MCData 는 TLV payload 합, text/plain 은 본문 길이) > `max_sds_size` → **413**
+4. payload 크기(MCData 는 TLV payload 합, text/plain 은 본문 길이) > `max_sds_size` → **403 `217 user not authorised for SDS communications
+   on this group identity due to message size`**(6)i)iii) · §11.1 5)) — media plane 은 cmdp 가 MSRP 413 + BYE(아래 §4.7)
 5. 배포 대상(발신자 제외 제휴 멤버, §6.3.4)이 없음 → **403 `198 no users are affiliated to this group`**(6)k)ii) · 7)i) · 12)i)) —
    media plane 은 INVITE 를 받을 때 3·5 를 본다
 
 제휴는 `require_affiliation` 그룹만 본다 — 그 밖의 그룹은 멤버 전원을 초대하는 그룹이라 멤버십이 곧 제휴다(긴급경보·그룹 호와 같은
 규칙). 제휴 저장소(DB)에 닿지 못하면 제휴를 판정할 수 없어 **500**(§9.2.2.4.2 1) — 그룹 전원에게 보내지 않는다). 통과 시 배포 대상에게 fan-out. 원본 본문·Content-Type(boundary 포함) 그대로 전달(`SendSms` 5-인자
 오버로드, `ext/psip/SipUserAgent/SipUserAgentSms.hpp`). `text/plain` 그룹 문자(구버전 앱)도
-같은 게이트·fan-out 을 통과한다.
+같은 게이트·fan-out 을 통과한다 — 규격은 mcdata-info·mcdata-signalling·mcdata-payload 가 없는 MESSAGE 를 403 `199 expected MIME bodies not in
+the request` 로 거절한다(§9.2.2.4.2 2)). 앱이 규격형으로 바뀔 때까지 이 검사는 엄격 검사 스위치 `Setup.Mcptt.StrictCheck`(기본 `log` —
+로그만, `enforce` 면 403 199) 아래 둔다(결정 D5).
 
 - 이벤트 로깅: 그룹 `events.jsonl` 에 `message_sent`(actor·conv_id·msg_id·payload_size·fanout)
   — 녹취/이력과 동일한 서비스 로그 경로. SIP 원문은 기존 SipMessageLogger jsonl 에 남는다.
