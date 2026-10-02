@@ -158,7 +158,7 @@ W01 이 주인인 항목은 CMS-13(CMS 변경 구독, 지금 5분 폴링) 하나
 
 | WP | 이름 | 호스트 | 세션 | 할 일 | 상태 |
 |---|---|---|---|---|---|
-| **X00** | 준비 | .48 | 1 | .48 첫 세션 — 지시 = dev_share `20261003-0027_45_kickoff-48-gap-track.md`. ① worktree `/home/cims/work/.wt-gap`(브랜치 `gap48`, 공유 트리는 팀원 계측기 트리라 pull 도 하지 않는다)·첫 빌드·S1 기준선(S1-UNIT-CSP·CMP·PSIP) ② 배포 id·`cimsue-cli` 시험 신원(MCPTT·MCData — M2 runbook 의 test023~025·gmv1/gmv2 방식)·계측기 시나리오 목록 ③ dev_share `…_48_done-X00-48.md`. 규격 원문은 `/mnt/cims/dev_share/spec/` 에 갖춰졌다 | 완료 1efbcd2d |
+| **X00** | 준비 | .48 | 1 | .48 첫 세션 — 지시 = dev_share `20261003-0027_45_kickoff-48-gap-track.md`. ① worktree `/home/cims/work/.wt-gap`(브랜치 `gap48`, 공유 트리는 팀원 계측기 트리라 pull 도 하지 않는다)·첫 빌드·S1 기준선(S1-UNIT-CSP·CMP·PSIP) ② 배포 id·`cimsue-cli` 시험 신원(MCPTT·MCData — M2 runbook 의 test023~025·gmv1/gmv2 방식)·계측기 시나리오 목록 ③ dev_share `…_48_done-X00-48.md`. 규격 원문은 `/mnt/cims/dev_share/spec/` 에 갖춰졌다 | 완료 4fa3b567 |
 | **X01** | 문서 정정 잔여 | .45 | 1 | 세 목록 §5 중 항목 번호가 없는 줄(근거 절 번호·Warning 절 §4.4→§4.9·mcdata_messaging §3·§5 파일 이름·mcx_identity_scope §10·fixtures README N2·mcvideo.md §9 hang-time 메모) + 세 목록 §4 «미구현 목록에 빠진 기능» 을 정본 미구현 목록(mcptt_standard_conformance §0-R · mcdata_messaging §8 · mcvideo §6 V8)으로 옮긴다. 코드 주석 정정(`csp/CscfModule.cpp` N2 주석 등)은 그 파일을 고치는 WP(S13)가 함께 한다 | 대기 |
 
 ## 6. 순서 — 웨이브
