@@ -28,7 +28,7 @@
 - CSC 를 .45 에 둔 까닭 — 설정 문서를 만드는 쪽(CSC)과 읽는 쪽(SDK)이 한 호스트라 문서 기본값·XCAP 경로 전환(C01·C03·C04 ↔ U07)을 한 세션 안에서 맞출 수 있고,
   Python(CSC) 과 C++(CSP·CMP) 으로 경로가 겹치지 않으며, 일이 두 호스트에 고르게 나뉜다(.48 ≈ 35 세션 · .45 ≈ 20 세션).
 - 한 호스트가 비면 상대 WP 를 넘겨받는다 — dev_share 로 묻고 답을 받은 뒤, 그 WP 동안만 상대 소유 경로를 편집한다(웨이브 5 는 .45 가 S22·S24 를 받을 수 있다).
-- 계측기(`ems/tester`·`tester/worker`·`cspsim`·libcsim)는 팀원 트랙이다 — 바꿀 일이 생기면 요구만 넘긴다(S18 선행).
+- 계측기(`ems/tester`·`tester/worker`·`cspsim`·libcsim)는 팀원 트랙이다 — 바꿀 일이 생기면 요구만 넘긴다(S18 선행) — 요구서 = [mcx_tester_requirements.md](mcx_tester_requirements.md)(MCPTT·MCData) · [mcvideo_tester_requirements.md](mcvideo_tester_requirements.md).
 
 ## 3. 결정
 
@@ -106,7 +106,7 @@
 | **S10** | 개별·애드혹 인가 판정(CSP 몫) | PRV-2 · PRV-4 · PRV-5 · PRV-8 · EMG-4 · ADH-5 | A3 · B3 | 1 | C03 | — | W01(Capabilities 게이트) | 완료 95d7debb (PRV-4 단말 몫 → SDK 묶음 7 · 공유 DB 개별 호 열 마이그레이션 대기) |
 | **S11** | 애드혹 호 절차·인원 상한 | ADH-2 · ADH-3 · ADH-6 · ADH-7 · ADH-9 · ADH-10 | A4 · C1 · D1 | 1 | C03 | — | U04(SDK BYE Reason·`adhoc`) | 완료 096cd123 (ADH-7 SDK 몫 → U04) |
 | **S12** | 제휴 — 클라이언트 단위 키·해제·판정 | AFF-2 · AFF-4 · AFF-5 · AFF-6 / MCData AFF-6 / VAFF-1 · VAFF-2 · VAFF-4 · VAFF-5 · VGC-11 | A4 · B2 · C4 | 2 | — | D11 | U04(`<mcptt-client-id>`) · U06 | 대기 |
-| **S13** | 제휴 — 통지·정리·서비스 분리 | AFF-7 · AFF-8 · AFF-9 · AFF-10 · EMG-3 / MCData AFF-1 · REG-2 / VAFF-6 · VAFF-7 · VREG-4 | A3 · B3 · C3 · D1 | 2 | S12 | D11 | U06 | 대기 |
+| **S13** | 제휴 — 통지·정리·서비스 분리 | AFF-7 · AFF-8 · AFF-9 · AFF-10 · EMG-3 / MCData AFF-1 · REG-2 / VAFF-7 · VREG-4 | A3 · B3 · C3 · D1 | 2 | S12 | D11 | U06 | 대기 |
 | **S14** | 그룹 호 모델(chat·재초대·late call entry) | GCS-1 · GCS-2 · GCS-3 · GCS-4 · GCS-21 · GCS-22 · AFF-11 / MCData AFF-2 / VGC-2 · VGC-12 | A7 · B1 · C2 | 3 | S12 | D1 | .45 현장 앱(conference NOTIFY 자체 합류) · W01 | 대기 |
 | **S15** | MCPTT 서버 산출 정합(NOTIFY·ID·SDP) | GCS-12 · GCS-13 · GCS-16 · GCS-17 · GCS-18 | A2 · B2 · C1 | 1 | — | D12 | — | 대기 |
 | **S16** | MCData 서버 산출 정합 | MCData SDS-2 · SDS-8 · MSRP-2 · MSRP-6 · FD-4 | B3 · C2 | 1 | — | D12 | U05(Mandatory download 따름) | 대기 |
@@ -118,7 +118,7 @@
 | **S22** | MCVideo 송출·수신 제어 서버 세부 | TCS-1 · TCS-2 · TCS-3 · TCS-5 · TCS-7 · TCS-8 · TCS-9 · TCS-11 · RCS-2 | C4 · D5 | 2 | — | — | U08(TCU-1) | 일부 1354591e · 7d77120f · 9e395281 (TCS-1·3·5·7·9·11·RCS-2 끝 — TCS-2·TCS-8 남음) |
 | **S23** | MCVideo 호 세부(초대 offer·T5·conference·PSI) | VGC-8 · VGC-9 · VGC-10 · VGC-13 | C3 · D1 | 1 | — | — | — | 일부 02e3e4de · CSC 짝 80cc816b (VGC-9·VGC-13 끝 — VGC-8·VGC-10 남음) |
 | **S24** | MCData 미디어 평면 수명·색인·재전달 | MCData MSRP-3 · SDS-9 · DISP-1 | C3 | 1 | — | — | U05(MSRP-4) | 대기 |
-| **S25** | 서비스 설정·인가(poc-settings) | REG-2 · REG-4 / MCData REG-3 · REG-4 / VREG-2 | B3 · C1 · D1 | 2 | — | D6 · D10 | U09(VREG-1) · U03(Answer-Mode) | 단계 A 완료 d5042add (csp 0.2.222 .48 실측 15/15 — 인가+설정 200·SIP-ETag·Expires 2^32-1 · 위조 토큰 403 101 · 구독 NOTIFY · 설정만 If-Match 200·모르는 ETag 412·바인딩 없는 클라이언트 404 141 · 남의 설정 구독 403 · 초대 Answer-Mode = poc-settings · 바인딩 둘 multiple-devices-ind · Expires 0 · 태그 뺀 재등록 = 로그오프 · REGISTER 본문 토큰 · MCVideo·MCData 인가). 단계 B(141 = 바인딩 기준·설정 없는 착신 480 146·태그 없는 바인딩 팬아웃 제외) = .45 U09 done 뒤 |
+| **S25** | 서비스 설정·인가(poc-settings) | REG-2 · REG-4 / MCData REG-3 · REG-4 / VREG-2 | B3 · C1 · D1 | 2 | — | D6 · D10 | U09(VREG-1) · U03(Answer-Mode) | 완료 d5042add(단계 A — 인가·설정 수용, csp 0.2.222 실측 15/15) · a3548bcf(단계 B — 판정, csp 0.2.224 .48 실측 12/12: 인가 전 MCPTT INVITE·경보·MCData SDS·MCVideo INVITE 404 141 · 설정 없는 착신자 개별 호 480 146·그룹 호 미초대 · 설정 보낸 멤버 초대(Answer-Mode Manual) · 인가 뒤 141 없음 · 설정 그룹 암시적 제휴 = 인가 PUBLISH 때(등록만으로는 없음)). VAFF-6 도 여기서 끝(S13 에서 뺌). 계측기 libcsim 요구서 `docs/dev/mcx_tester_requirements.md` |
 | **S26** | MCData FD 파일 존재 확인(§6.7.3 HEAD) | MCData FD-1(S05 의 남은 몫) | C1 | 1 | C07(콘텐츠 서버 HEAD §6.7.3.2 · FD URL 을 PublicUrl base 로) | — | — | 완료 25870583 |
 | **S27** | conference 구독 = 진행 중 세션(S17 에서 뗌) | GCS-14 | B1 | 1 | — | D13 | U04(GCC-7 — Request-URI 세션 식별자·Expires 2^32-1·mcptt-info) · 계측기(그룹 AoR conference 구독 시나리오) · W01 | 완료 1daddb75 (csp 0.2.219 .48 배포·실측 — 세션 식별자는 gr 로 찾음. SDK GCC-7 짝 75d22446) · 26bd7a9c 재합류 gr 해석·세션 식별자 한 URI(모든 leg 그룹 AoR + gr) 골든 12·13 — GCC-8 의 서버 짝(csp 0.2.220 .48 실측 7/7 — PSI 개시 200 OK Contact = 그룹 AoR · PSI 형·그룹 형 식별자 재합류 200 · 다른 그룹 `<mcptt-request-uri>` 404 · 끝난 세션 404·새 초대 없음) |
 | **S28** | 남은 편차 — 응답 본문 전달·긴급 격상 암묵 발언 요청(S04·S08 에서 뗌) | PRV-7 · EMG-17 | B2 | 1 | — | — | — (EMG-17 = CSP↔CMP 계약 `PTT_*` 확장, cmp_media_api.md) | 대기 |
