@@ -43,13 +43,16 @@
 |---|---|---|---|
 | D1 | 그룹 호 모델 | **규격대로** — chat 은 서버 초대 없이 각자 합류·참가자 1명 이하면 해제(TS 23.379 §10.6.2.3.1.2.1 · TS 24.379 §6.3.8.1), 편성 그룹은 합류 때 재초대를 멈추고 새로 제휴·복귀한 단말을 서버가 초대(late call entry, §10.1.1.4.6), 제휴 해제 = 그 호에서 BYE(§10.1.1.4.4.3), 제휴한 멤버에게만 초대·배포(§6.3.5.5 · TS 24.282 §6.3.4 — `require_affiliation` 스위치는 없앤다). 현장 앱의 conference NOTIFY 자체 합류는 S14 의 짝으로 정리한다 | S14 |
 | D2 | 동시 그룹 호 상한 N6 | **규격대로** — N6 는 사용자마다의 MCPTT user profile 값이다(TS 24.484 §8.3.2.1 `<MCPTT-group-call>` `<MaxSimultaneousCallsN6>`). 서버는 그 사용자의 N6 를 넘는 개시·합류에 486 + `103`(TS 24.379 §10.1.1.3.1.1 5) 등), 단말·앱은 문서의 N6 를 읽어 그 안에서 동작하고 103 을 사용자에게 알린다. **기본값 = 관제 10 · 그 밖의 단말 5**(설정 키 둘, 사이트에서 바꿀 수 있다). «관제» = 관제 역할이 배정된 사용자([mcptt_authorization.md](../design/features/mcptt_authorization.md) 역할) — CSC(문서)와 CSP(집행)가 같은 판정을 쓰도록 판정 자리를 한 곳으로 정한다(C01·S01 재확인) | S01 · C01 |
-| D3 | 전이중 개별 호 SDP | TS 24.379 §11.1.2.2(`m=application` 없음)를 정본으로, CSP 는 전환기 동안 `mc_no_floor_ctrl` 도 받는다 | S17 |
+| D3 | 전이중 개별 호 SDP | TS 24.379 §11.1.2.2(`m=application` 없음)가 정본 — `mc_no_floor_ctrl` 등 옛 형식은 받지 않는다(D10) | S17 |
 | D4 | IdMS 클라이언트 등록·서명 | IDM-3·IDM-4 = 클라이언트 등록 저장소 + `enforce·log·off` 3단(`IdMs.ScopeEnforcement` 와 같은 방식), **처음에는 `log`**(어떤 client_id·redirect_uri 가 쓰이는지 모은 뒤 `enforce`) · IDM-6 = RS256 서명을 더하고 검증 쪽은 전환기 동안 HS256 도 받는다(끝 = 모든 소비자가 RS256 검증) | C06 |
 | D5 | 엄격 검사 시점 | 스위치(`enforce·log·off`)로 만들어 `log` 로 내보내고, 협력업체 APK·계측기·cspsim 이 규격형 요청으로 바뀐 뒤 `enforce`(§8 3단계) | S18 |
 | D6 | 서비스 설정(poc-settings) | **이번 트랙에 넣는다** — 웨이브 5 | S25 · U09 |
 | D7 | MCVideo 선호 코덱 | **(a)** — CSC 관리 API·XCAP PUT·콘솔이 서버가 집행하는 코덱(음성 AMR-WB · 영상 H.264)만 그룹 선호로 받는다(VSDP-1 → C02). 단말 offer 는 그룹 선호를 따른다(VGU-4) | C02 · U09 |
 | D8 | T2 제외 대상 | 코드대로 긴급만 — 문서 셋(conformance F4 · cmp_media_api §7.7 · mcptt_timers §5.2)을 고친다 | S20 |
 | D9 | 서비스 인가 바인딩 없는 요청 404 + 141 | S18 의 엄격 검사 스위치 안에 넣는다(계측기·cspsim 이 등록 없이 보내는 경로가 있다) — S08 은 판정·응답을 만들고 스위치는 `log` | S08 |
+| D10 | 규격형 요청·서비스 설정의 전환기 | **두지 않는다** — S17·S25 는 규격 형식만 받도록 바로 적용한다(옛 단말 요청을 함께 받는 경로를 만들지 않는다). 짝인 SDK 몫(U04·U05·U09)과 배포 순서를 맞춘다 — 서버를 먼저 올리면 옛 SDK 의 해당 요청이 거절된다 | S17 · S25 |
+| D11 | 공유 DB 제휴 키 | **바꿔도 된다** — 제휴를 클라이언트 단위 키로(마이그레이션은 공유 DB 에 적용, .45·.48 공용이라 적용 시점을 dev_share 로 알린다) | S12 · S13 |
+| D12 | 서버 산출 형식 변경(SDK 가 읽는 것) | **.45 와 협의해 정한다** — 형식이 바뀌는 항목 목록을 dev_share 로 보내 SDK 짝과 함께 고른다 | S15 · S16 |
 
 ## 4. 세션 절차
 
@@ -98,12 +101,12 @@
 | **S09** | Warning·응답 코드 — MCData·MCVideo | MCData WRN-1 · WRN-2 · WRN-3 · SDS-4 / VPRV-1 | C4 · D1 | 1 | — | — | W01(문구 사전) | 완료 bdf3d172 (SDS-4 enforce → S18) |
 | **S10** | 개별·애드혹 인가 판정(CSP 몫) | PRV-2 · PRV-4 · PRV-5 · PRV-8 · EMG-4 · ADH-5 | A3 · B3 | 1 | C03 | — | W01(Capabilities 게이트) | 완료 95d7debb (PRV-4 단말 몫 → SDK 묶음 7 · 공유 DB 개별 호 열 마이그레이션 대기) |
 | **S11** | 애드혹 호 절차·인원 상한 | ADH-2 · ADH-3 · ADH-6 · ADH-7 · ADH-9 · ADH-10 | A4 · C1 · D1 | 1 | C03 | — | U04(SDK BYE Reason·`adhoc`) | 완료 096cd123 (ADH-7 SDK 몫 → U04) |
-| **S12** | 제휴 — 클라이언트 단위 키·해제·판정 | AFF-2 · AFF-4 · AFF-5 · AFF-6 / MCData AFF-6 / VAFF-1 · VAFF-2 · VAFF-4 · VAFF-5 · VGC-11 | A4 · B2 · C4 | 2 | — | — | U04(`<mcptt-client-id>`) · U06 | 대기 |
-| **S13** | 제휴 — 통지·정리·서비스 분리 | AFF-7 · AFF-8 · AFF-9 · AFF-10 · EMG-3 / MCData AFF-1 · REG-2 / VAFF-6 · VAFF-7 · VREG-4 | A3 · B3 · C3 · D1 | 2 | S12 | — | U06 | 대기 |
+| **S12** | 제휴 — 클라이언트 단위 키·해제·판정 | AFF-2 · AFF-4 · AFF-5 · AFF-6 / MCData AFF-6 / VAFF-1 · VAFF-2 · VAFF-4 · VAFF-5 · VGC-11 | A4 · B2 · C4 | 2 | — | D11 | U04(`<mcptt-client-id>`) · U06 | 대기 |
+| **S13** | 제휴 — 통지·정리·서비스 분리 | AFF-7 · AFF-8 · AFF-9 · AFF-10 · EMG-3 / MCData AFF-1 · REG-2 / VAFF-6 · VAFF-7 · VREG-4 | A3 · B3 · C3 · D1 | 2 | S12 | D11 | U06 | 대기 |
 | **S14** | 그룹 호 모델(chat·재초대·late call entry) | GCS-1 · GCS-2 · GCS-3 · GCS-4 · GCS-21 · GCS-22 · AFF-11 / MCData AFF-2 / VGC-2 · VGC-12 | A7 · B1 · C2 | 3 | S12 | D1 | .45 현장 앱(conference NOTIFY 자체 합류) · W01 | 대기 |
-| **S15** | MCPTT 서버 산출 정합(NOTIFY·ID·SDP) | GCS-12 · GCS-13 · GCS-16 · GCS-17 · GCS-18 | A2 · B2 · C1 | 1 | — | — | — | 대기 |
-| **S16** | MCData 서버 산출 정합 | MCData SDS-2 · SDS-8 · MSRP-2 · MSRP-6 · FD-4 | B3 · C2 | 1 | — | — | U05(Mandatory download 따름) | 대기 |
-| **S17** | 규격형 요청 수용 — 전환기 | PRV-1 · PRV-3 · GCS-14 / MCData SDS-1 · SDS-5 · CFG-1 | A1 · B3 · C1 · D1 | 2 | — | D3 | U04 · U05 · C01(MCData PSI 광고) | 대기 |
+| **S15** | MCPTT 서버 산출 정합(NOTIFY·ID·SDP) | GCS-12 · GCS-13 · GCS-16 · GCS-17 · GCS-18 | A2 · B2 · C1 | 1 | — | D12 | — | 대기 |
+| **S16** | MCData 서버 산출 정합 | MCData SDS-2 · SDS-8 · MSRP-2 · MSRP-6 · FD-4 | B3 · C2 | 1 | — | D12 | U05(Mandatory download 따름) | 대기 |
+| **S17** | 규격형 요청 수용 | PRV-1 · PRV-3 · GCS-14 / MCData SDS-1 · SDS-5 · CFG-1 | A1 · B3 · C1 · D1 | 2 | — | D3 · D10 | U04 · U05 · C01(MCData PSI 광고) | 대기 |
 | **S18** | 엄격 검사 켜기 | GCS-9 · GCS-10 · EMG-12 / MCData MSRP-5 | B1 · C2 · D1 | 1 | U04·U05·외부 | D5 | — | 대기 |
 | **S19** | xcap-diff 구독·통지 | GMS-14 · GMS-15 · CMS-5 / VCMS-1 | B4 | 1 | C04 | — | U07 | 일부 b83c94e1 · a80dd27b · 84f9583b (VCMS-1 · CMS-5 그룹 몫 · GMS-14 본문 몫 · GMS-15 삭제 몫 끝 — GMS-14 토큰 신원·GMS-15 ETag·직렬화·CMS-5 CSC 몫 남음) |
 | **S20** | 발언권 메시지 필드·타이머 | FCS-4 · FCS-5 · FCS-7 · FCS-8 · FCS-17 · FCS-18 · FCS-19 · FCS-20 · FCS-21 · FCS-23 · FCS-24 | A2 · B4 · C2 · D3 | 2 | — | D8 | U08(SDK Ack) | 대기 |
@@ -111,7 +114,7 @@
 | **S22** | MCVideo 송출·수신 제어 서버 세부 | TCS-1 · TCS-2 · TCS-3 · TCS-5 · TCS-7 · TCS-8 · TCS-9 · TCS-11 · RCS-2 | C4 · D5 | 2 | — | — | U08(TCU-1) | 일부 1354591e · 7d77120f · 9e395281 (TCS-1·3·5·7·9·11·RCS-2 끝 — TCS-2·TCS-8 남음) |
 | **S23** | MCVideo 호 세부(초대 offer·T5·conference·PSI) | VGC-8 · VGC-9 · VGC-10 · VGC-13 | C3 · D1 | 1 | — | — | — | 일부 02e3e4de · CSC 짝 80cc816b (VGC-9·VGC-13 끝 — VGC-8·VGC-10 남음) |
 | **S24** | MCData 미디어 평면 수명·색인·재전달 | MCData MSRP-3 · SDS-9 · DISP-1 | C3 | 1 | — | — | U05(MSRP-4) | 대기 |
-| **S25** | 서비스 설정·인가(poc-settings) | REG-2 · REG-4 / MCData REG-3 · REG-4 / VREG-2 | B3 · C1 · D1 | 2 | — | D6 | U09(VREG-1) · U03(Answer-Mode) | 대기 |
+| **S25** | 서비스 설정·인가(poc-settings) | REG-2 · REG-4 / MCData REG-3 · REG-4 / VREG-2 | B3 · C1 · D1 | 2 | — | D6 · D10 | U09(VREG-1) · U03(Answer-Mode) | 대기 |
 | **S26** | MCData FD 파일 존재 확인(§6.7.3 HEAD) | MCData FD-1(S05 의 남은 몫) | C1 | 1 | C07(콘텐츠 서버 HEAD §6.7.3.2 · FD URL 을 PublicUrl base 로) | — | — | 완료 25870583 |
 
 ### 5.2 .45 — 설정 평면 서버 CSC (7 WP · 52 항목 · ≈ 9 세션)
