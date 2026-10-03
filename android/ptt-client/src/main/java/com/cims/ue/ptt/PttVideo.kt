@@ -397,7 +397,7 @@ internal class VideoPlane(private val c: PttController, context: Context) {
                     if (!call.leaving) c.feedback?.blocked(openFailText(ci.lastCode, ci.lastReason, ci.warningCode))
                 } else if (!call.leaving) {
                     // 내가 나간 게 아니면 다시 맞춘다 — 성립 전 거절은 물러나서, 성립 뒤 서버 해제는 잠깐 뒤(chat 세션은 다시 연다)
-                    if (CallRules.rejoinVideoSession(call.prearranged, call.active, ci.lastCode, call.sessionUri))
+                    if (CallRules.rejoinLostSession(call.prearranged, call.active, ci.lastCode, call.sessionUri))
                         synchronized(c.lock) { rejoin[call.groupId] = call.sessionUri }       // 망 끊김으로 잃은 prearranged 호
                     backoff(call.groupId, failed = !call.active || ci.lastCode >= 300)
                 }

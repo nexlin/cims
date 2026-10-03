@@ -107,6 +107,9 @@ std::string withSpeechInfo(const std::string& sdp);
  *  SDP 만으로는 MCPTT 호를 알아볼 수 없다. */
 std::string withSpeechInfoAlways(const std::string& sdp);
 
+/** 제어 기능 Contact 의 MC 세션 식별자 — `<URI>;…;isfocus` 의 URI(GRUU, TS 24.379 §4.5 · TS 24.281 §4.5). 제어 기능은 세션 개시
+ *  최종 응답(§6.3.3.2.3.2 5))·멤버 초대(§6.3.3.1.2 1))의 Contact 에 싣는다. 값은 Contact 헤더 값(이름 있어도 됨), isfocus 가 없으면 빈 값. */
+std::string sessionIdentity(const std::string& contact);
 /** URI → bare id ("tel:+82..@d" / "sip:x@d" / "<...>" → "+82.."). */
 std::string bareId(const std::string& uri);
 std::string xmlEscape(const std::string& s);

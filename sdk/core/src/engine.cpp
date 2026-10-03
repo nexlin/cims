@@ -736,6 +736,8 @@ struct McpttSession {
     int condLastCode = 0;
     bool broadcast = false;              // 일제 통화 개시(<broadcast-ind>) — 이 단말이 개시자
     bool adhoc = false;                  // 애드혹 그룹 호(TS 24.379 §17) — 이 단말이 명단을 실어 개시했다(session-type adhoc)
+    std::string sessionType;             // 개시 mcptt-info session-type(Annex F.1) — 발신 호의 CallInfo.mcptt.sessionType
+    std::string sessionUri;              // 제어 기능 Contact(isfocus)의 MCPTT 세션 식별자(§4.5) — 재합류 R-URI(§10.1.1.2.4.1)
     bool contactSet = false;             // 다이얼로그 Contact 에 MCPTT 특성 태그를 실었다(§10.1.1.2.1.1 4) · §6.2.3.1.1 3)·4))
     bool micOpen = false;                // floor Granted 로 열림
     bool implicitAwaitAnswer = false;    // 개시 INVITE 가 암묵적 발언 요청 — 200 OK answer 의 fmtp 로 판정(TS 24.380 §14.3.4·§14.3.5)
@@ -999,11 +1001,14 @@ public:
 
     /** MCPTT 세션 신원을 CallInfo 에 투영. 발신은 makeCall 이 동기적으로 onCallState(CALLING) 를 부르므로
      *  첫 스냅샷부터 isMcptt/groupId 가 실려야 앱이 호 종류를 잠시라도 VoLTE 로 읽지 않는다 — startMcptt 의
-     *  사후 기록과 onCallState 가 같은 값을 쓴다. 착신은 INVITE 의 mcptt-info(mi) 가 이미 채웠으므로 건드리지 않는다. */
+     *  사후 기록과 onCallState 가 같은 값을 쓴다. 착신은 INVITE 의 mcptt-info(mi) 가 이미 채웠으므로 건드리지 않는다.
+     *  세션 식별자만은 늦게 온다(개시 200 OK Contact) — 매번 옮긴다. */
     void projectMcptt(CallInfo& c) const {
-        if (!mcptt || c.isMcptt) return;
+        if (!mcptt) return;
+        if (!mcptt->sessionUri.empty()) c.sessionUri = mcptt->sessionUri;
+        if (c.isMcptt) return;
         c.isMcptt = true; c.groupId = mcptt->groupId;
-        c.mcptt.present = true; c.mcptt.sessionType = mcptt->isPrivate ? "private" : "prearranged";
+        c.mcptt.present = true; c.mcptt.sessionType = mcptt->sessionType;
         c.mcptt.privateCall = mcptt->isPrivate; c.mcptt.noFloorCtrl = mcptt->fullDuplex;
         c.mcptt.emergency = mcptt->emergency; c.mcptt.imminentPeril = mcptt->imminentPeril;
         c.mcptt.broadcast = mcptt->broadcast;
@@ -1092,6 +1097,18 @@ public:
         return true;
     }
 
+    /** 다이얼로그의 상대 Contact 헤더(2xx 의 target refresh 반영) — pjsua 공개 API 에 없어 내부 표를 읽는다(onCallState 안 —
+     *  다이얼로그 락 아래). 없으면 빈 값. */
+    std::string dialogRemoteContact() {
+        const int id = getId();
+        if (id < 0 || id >= (int)PJSUA_MAX_CALLS) return std::string();
+        pjsip_inv_session* inv = pjsua_var.calls[id].inv;
+        if (!inv || !inv->dlg || !inv->dlg->remote.contact) return std::string();
+        char buf[PJSIP_MAX_URL_SIZE + 256];
+        int n = pjsip_hdr_print_on(inv->dlg->remote.contact, buf, sizeof(buf) - 1);
+        return n > 0 ? std::string(buf, (size_t)n) : std::string();
+    }
+
     /**
      * MCVideo 호 성립(TS 24.581 §6.2.4.2 · §6.2.5.2) — 한 번. 개시 = 200 OK 수신: 협상된 answer 의 제어 채널 목적지·헤더 SSRC, 제어 기능
      * Contact 의 세션 식별자(isfocus — TS 24.281 §9.2.2.4.1.1 19)), 암묵적 송출 요청의 결과(§14.3.4 mc_granted · §14.3.5
@@ -1103,7 +1120,7 @@ public:
         mcvideo->established = true;
         if (!mcvideo->tc) return;
         if (role == PJSIP_ROLE_UAS) { mcvideo->tc->onEstablished(); return; }
-        std::string sdp, contact;
+        std::string sdp;
         const int id = getId();
         if (id >= 0 && id < (int)PJSUA_MAX_CALLS) {
             pjsip_inv_session* inv = pjsua_var.calls[id].inv;
@@ -1114,17 +1131,11 @@ public:
                 int n = pjmedia_sdp_print(rem, buf.data(), buf.size());
                 if (n > 0) sdp.assign(buf.data(), (size_t)n);
             }
-            if (inv && inv->dlg && inv->dlg->remote.contact) {
-                char buf[PJSIP_MAX_URL_SIZE + 256];
-                int n = pjsip_hdr_print_on(inv->dlg->remote.contact, buf, sizeof(buf) - 1);
-                if (n > 0) contact.assign(buf, (size_t)n);
-            }
         }
         mcvideo::TcFmtp f;
         if (!learnTcRemote(sdp, &f)) o_->log(2, "mcvideo call " + std::to_string(id) + ": answer has no transmission control channel");
-        const size_t a = contact.find('<'), b = contact.find('>');
-        if (a != std::string::npos && b != std::string::npos && contact.find("isfocus") != std::string::npos)
-            mcvideo->sessionUri = contact.substr(a + 1, b - a - 1);
+        const std::string sid = mcptt::sessionIdentity(dialogRemoteContact());
+        if (!sid.empty()) mcvideo->sessionUri = sid;
         const bool implicitAccepted = mcvideo->implicitAwaitAnswer && f.implicitRequest;
         mcvideo->implicitAwaitAnswer = false;
         mcvideo->tc->setNegotiatedPriority(f.priority, f.receptionPriority);              // answer 가 정한 상한(§14.3.3·§14.3.6)
@@ -1514,6 +1525,11 @@ public:
         const bool mcvUacPending = mcvideo && ci.role == PJSIP_ROLE_UAC && ci.state == PJSIP_INV_STATE_CONNECTING;
         if (mcvideo && !mcvUacPending && (ci.state == PJSIP_INV_STATE_CONNECTING || ci.state == PJSIP_INV_STATE_CONFIRMED))
             establishMcVideo(ci.role);
+        // MCPTT 개시 호의 세션 식별자 = 제어 기능 최종 응답의 Contact(isfocus, TS 24.379 §4.5 · §6.3.3.2.3.2 5)) — 재합류 R-URI(§10.1.1.2.4.1)
+        if (mcptt && ci.role == PJSIP_ROLE_UAC && (ci.state == PJSIP_INV_STATE_CONNECTING || ci.state == PJSIP_INV_STATE_CONFIRMED)) {
+            const std::string sid = mcptt::sessionIdentity(dialogRemoteContact());
+            if (!sid.empty()) mcptt->sessionUri = sid;
+        }
         o_->updateCall(id, [&](CallInfo& c) {
             c.accountId = accountId_;
             projectMcptt(c);
@@ -1707,6 +1723,7 @@ public:
             // 200 에 재사용하므로, 늦으면 m=application 0 이 나가 CSP 가 착신 leg 의 floor 포트를 모른다).
             call->mcptt.reset(new McpttSession);
             call->mcptt->isPrivate = mi.privateCall;
+            call->mcptt->sessionType = mi.sessionType;
             call->mcptt->fullDuplex = mi.noFloorCtrl;
             // 착신 그룹 = mcptt-info <mcptt-calling-group-id>(TS 24.379 §10.1.1.4.1.1 4)b) · Annex F.1.3). From 은 그룹이 아닐 수 있다
             //   (제어 기능 PSI) — 요소가 없는 옛 서버의 초대만 From 의 user 로 본다.
@@ -1714,6 +1731,8 @@ public:
                                  : mcptt::bareId(mi.callingGroupId.empty() ? remote : mi.callingGroupId);
             call->mcptt->emergency = mi.emergency;
             call->mcptt->imminentPeril = mi.imminentPeril && !mi.emergency;
+            // 제어 기능의 초대 Contact = 세션 식별자(§6.3.3.1.2 1)) — 나갔다가 재합류할 때 R-URI(§10.1.1.2.4.1)
+            call->mcptt->sessionUri = mcptt::sessionIdentity(detail::headerValue(whole, "Contact"));
             if (!mi.noFloorCtrl) {
                 if (call->openFloor(cfg.effectiveMcpttId()))
                     call->mcptt->pendingAppSdp = mcptt::floorSdp(call->mcptt->floor->localPort(), false);
@@ -1735,6 +1754,7 @@ public:
             c.calledParty = detail::uriUser(detail::headerValue(whole, "P-Called-Party-ID"));
             if (mi.present) {
                 c.isMcptt = true; c.mcptt = mi; c.groupId = call->mcptt->groupId;
+                c.sessionUri = call->mcptt->sessionUri;
                 c.halfDuplex = !mi.noFloorCtrl;
                 c.condition.emergency = call->mcptt->emergency; c.condition.imminentPeril = call->mcptt->imminentPeril;
             }
@@ -1778,9 +1798,7 @@ public:
         mv.incoming = true;
         mv.prearranged = vi.sessionType == "prearranged";
         mv.groupId = mcptt::bareId(vi.callingGroupId.empty() ? remote : vi.callingGroupId);
-        const std::string fc = detail::headerValue(whole, "Contact");               // 제어 기능 Contact = 세션 식별자(§6.3.3.1.2 1))
-        const size_t a = fc.find('<'), b = fc.find('>');
-        if (a != std::string::npos && b != std::string::npos && fc.find("isfocus") != std::string::npos) mv.sessionUri = fc.substr(a + 1, b - a - 1);
+        mv.sessionUri = mcptt::sessionIdentity(detail::headerValue(whole, "Contact"));   // 제어 기능 Contact = 세션 식별자(§6.3.3.1.2 1))
         if (call->openTc(cfg.effectiveMcpttId())) {
             mcvideo::TcFmtp offer;
             call->learnTcRemote(whole, &offer);
@@ -3017,8 +3035,14 @@ static int startMcptt(Engine::Impl* o, int accountId, const std::string& id, boo
     call->mcptt->emergency = opts.emergency;
     call->mcptt->imminentPeril = opts.imminentPeril && !opts.emergency;       // 긴급이 임박을 대체
     call->mcptt->condMine = opts.emergency || opts.imminentPeril;
-    call->mcptt->broadcast = !isPrivate && opts.broadcast;               // 일제 통화는 그룹 호 속성(TS 24.379 §4.12)
-    call->mcptt->adhoc = !isPrivate && !opts.members.empty();           // 명단을 실은 개시 = 애드혹 그룹 호(§17.2.2.1.1)
+    // 재합류(TS 24.379 §10.1.1.2.4.1) — 진행 중 편성 그룹 세션에 세션 식별자로 다시 붙는다: §10.1.1.2.1.1 그대로이되 10) Request-URI =
+    //   세션 식별자. 진행 중 세션 합류라 개시 속성(일제 통화·애드혹 명단·chat)은 싣지 않는다(서버는 없는 세션이면 404 — §10.1.1.4.5.1 2))
+    const bool rejoin = !isPrivate && !opts.sessionUri.empty();
+    call->mcptt->sessionUri = rejoin ? opts.sessionUri : std::string();
+    call->mcptt->broadcast = !isPrivate && !rejoin && opts.broadcast;    // 일제 통화는 그룹 호 속성(TS 24.379 §4.12)
+    call->mcptt->adhoc = !isPrivate && !rejoin && !opts.members.empty();  // 명단을 실은 개시 = 애드혹 그룹 호(§17.2.2.1.1)
+    // session-type(Annex F.1) — 개별 호 private · 애드혹 그룹 호 adhoc(§17.2.2.1.1 10)a)) · chat 합류 chat(§10.1.2.2.1.1 13)a)) · 그 밖 prearranged
+    call->mcptt->sessionType = isPrivate ? "private" : call->mcptt->adhoc ? "adhoc" : opts.chat && !rejoin ? "chat" : "prearranged";
     const std::string mcpttId = cfg.effectiveMcpttId();
     // floor 소켓은 makeCall 전에 — makeCall 이 동기적으로 onCallSdpCreated 를 부르며 로컬 offer 에 포트를 광고한다.
     if (!call->mcptt->fullDuplex) {
@@ -3042,14 +3066,13 @@ static int startMcptt(Engine::Impl* o, int accountId, const std::string& id, boo
         p1.contentType.type = "application"; p1.contentType.subType = "vnd.3gpp.mcptt-info+xml";
         // 지시자 조합(TS 24.379 §6.3.3.1.17) — 긴급 개시는 alert-ind 를 함께 싣고(경보를 요청하지 않았으면 false, §6.2.8.1.1 4)),
         //   임박은 긴급·경보 지시자 없이(§6.2.8.1.9). 둘 다 요청하면 긴급이 임박을 대체한다(위 mcptt->imminentPeril).
-        // session-type(Annex F.1) — 개별 호 private · 애드혹 그룹 호 adhoc(§17.2.2.1.1 10)a)) · chat 합류 chat(§10.1.2.2.1.1 13)a)) · 그 밖 prearranged.
-        //   그룹 호는 §10.1.1.2.1.1 14) 의 모양 — 그룹 ID · MCPTT client ID, 발신자 ID 는 싣지 않는다(NOTE 2).
+        // session-type = 위 mcptt->sessionType. 그룹 호는 §10.1.1.2.1.1 14) 의 모양 — 그룹 ID · MCPTT client ID, 발신자 ID 는 싣지 않는다(NOTE 2).
         //   개별 호는 §11.1.1.2.1.1 14)c) — session-type private 와 조건 지시자만(착신자 = resource-lists 9), 발신자는 참여 기능이 정한다).
         if (isPrivate)
             p1.body = mcptt::mcpttInfoOriginating("private", std::string(), std::string(), call->mcptt->emergency ? 1 : 0,
                                                   call->mcptt->imminentPeril ? 1 : 0, false, call->mcptt->emergency ? -1 : 0);
         else
-            p1.body = mcptt::mcpttInfoOriginating(call->mcptt->adhoc ? "adhoc" : opts.chat ? "chat" : "prearranged", "tel:" + id,
+            p1.body = mcptt::mcpttInfoOriginating(call->mcptt->sessionType, "tel:" + id,
                                                   cfg.effectiveMcpttClientId(), call->mcptt->emergency ? 1 : 0,
                                                   call->mcptt->imminentPeril ? 1 : 0, call->mcptt->broadcast, call->mcptt->emergency ? -1 : 0);
         prm.txOption.multipartParts.push_back(p1);
@@ -3067,7 +3090,7 @@ static int startMcptt(Engine::Impl* o, int accountId, const std::string& id, boo
             prm.txOption.headers.push_back(am);
         }
         // resource-lists — 개별 호의 착신자 MCPTT ID 하나(§11.1.1.2.1.1 9)) · 애드혹 그룹 호의 초대 명단(§17.2.2.1.1)
-        if (isPrivate || !opts.members.empty()) {
+        if (isPrivate || call->mcptt->adhoc) {
             pj::SipMultipartPart p2;
             p2.contentType.type = "application"; p2.contentType.subType = "resource-lists+xml";
             p2.body = isPrivate ? mcptt::recipientList(id.find(':') == std::string::npos ? "tel:" + id : id) : mcptt::resourceLists(opts.members);
@@ -3080,9 +3103,12 @@ static int startMcptt(Engine::Impl* o, int accountId, const std::string& id, boo
         }
         { pj::SipHeader h; h.hName = "P-Preferred-Service"; h.hValue = mcptt::kIcsiMcptt; prm.txOption.headers.push_back(h); }
         // 10)(개별 호 §11.1.1.2.1.1 1)) Request-URI = 참여 MCPTT 기능 PSI — 대상은 본문(그룹 = mcptt-info request-uri, 개별 = resource-lists).
-        //   PSI 를 모르는 계정은 대상 URI 로
-        const std::string ruri = !cfg.mcpttServerUri.empty() ? cfg.mcpttServerUri : "sip:" + id + "@" + cfg.domain;
-        call->makeCall(ruri, prm);
+        //   PSI 를 모르는 계정은 대상 URI 로. 재합류는 세션 식별자(§10.1.1.2.4.1) — name-addr 로 넘긴다: addr-spec 이면 pjsip 이 To 를
+        //   꺾쇠 없이 찍어 GRUU 의 `;gr=` 가 To 헤더 파라미터로 읽힌다(RFC 3261 §20). R-URI 는 그대로 URI 다
+        if (rejoin)
+            call->makeCall(opts.sessionUri.front() == '<' ? opts.sessionUri : "<" + opts.sessionUri + ">", prm);
+        else
+            call->makeCall(!cfg.mcpttServerUri.empty() ? cfg.mcpttServerUri : "sip:" + id + "@" + cfg.domain, prm);
         if (call->mcptt->fullDuplex) markNoFloorCall(call->getInfo().callIdString, true);   // 이어지는 offer·answer 의 i=speech·timer
         // makeCall 이 개시 offer 를 동기적으로 만들었다 — 이어지는 offer(re-INVITE)·answer 는 암묵 요청·mc_granted 없이(§14.5)
         if (call->mcptt->floor) call->mcptt->pendingAppSdp = mcptt::floorSdp(call->mcptt->floor->localPort(), false);
@@ -3099,8 +3125,8 @@ static int startMcptt(Engine::Impl* o, int accountId, const std::string& id, boo
     });
     const bool broadcast = call->mcptt->broadcast;
     o->calls[callId] = std::move(call);
-    o->log(3, std::string(isPrivate ? "private call " : broadcast ? "broadcast group call " : "group call ") + id + " → call " +
-                  std::to_string(callId));
+    o->log(3, std::string(isPrivate ? "private call " : broadcast ? "broadcast group call " : rejoin ? "group call rejoin " : "group call ") + id +
+                  " → call " + std::to_string(callId));
     return callId;
 }
 

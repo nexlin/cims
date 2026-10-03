@@ -116,7 +116,7 @@ MCPTT 쪽 같은 뿌리의 결함은 [mcptt_conformance_gaps.md](mcptt_conforman
 | # | 급 | 대상 | 규격 | CIMS 지금 | 영향 | 확인 |
 |---|---|---|---|---|---|---|
 | VGU-5 | D | 관제 | §9.2.1.2.1.1 · §9.2.2.2.1.1 첫 단락 — 그룹 문서 `<preconfigured-group-use-only>` true 면 호를 열지 않고 알린다 | SDK(`GroupDoc.preconfiguredGroupUseOnly` — Kotlin 포함)·현장 앱(`CallRules.groupUsable`)은 따른다. **관제 앱 두 벌은 보지 않고**, C API 그룹 문서 구조체에 칸이 없다(.NET 파사드와 배치를 맞춰 덧붙일 것) | 관제 앱에서는 사전 구성 전용 그룹에도 개시 INVITE 가 나간다(서버도 403 `167` 을 하지 않는다) | ○ |
-| VGU-6 | D | 관제 | §9.2.1.2.4.1 — 사용자 요청·커버리지 복귀 때 세션 식별자로 재합류 INVITE | SDK 는 `VideoGroupCallOptions.sessionUri` 를 지원한다. 현장 앱은 망 끊김으로 잃은 prearranged 호를 한 번 재합류한다(`CallRules.rejoinVideoSession`). 관제 앱 두 벌은 쓰지 않는다 | 관제 앱은 망이 끊긴 뒤 prearranged 영상 호로 «보기만» 돌아갈 수 없다(서버 late call entry 도 없다 — VGC-2) | ○ |
+| VGU-6 | D | 관제 | §9.2.1.2.4.1 — 사용자 요청·커버리지 복귀 때 세션 식별자로 재합류 INVITE | SDK 는 `VideoGroupCallOptions.sessionUri` 를 지원한다. 현장 앱은 망 끊김으로 잃은 prearranged 호를 한 번 재합류한다(`CallRules.rejoinLostSession`). 관제 앱 두 벌은 쓰지 않는다 | 관제 앱은 망이 끊긴 뒤 prearranged 영상 호로 «보기만» 돌아갈 수 없다(서버 late call entry 도 없다 — VGC-2) | ○ |
 
 ### 3.5 개별·그 밖의 호 (VPRV) — TS 24.281 부록 F.1.3 · §10~§15
 

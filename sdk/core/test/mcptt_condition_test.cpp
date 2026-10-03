@@ -79,6 +79,7 @@ struct FakeServer {
     int port = 0;
     pj_sockaddr_in peer;
     std::string callId, ueFrom, ueContact;                 // 첫 INVITE 에서 배운 dialog
+    std::string contact;                                   // 응답 Contact(빈 값 = <sip:srv@…>) — 제어 기능의 세션 식별자 자리
     int cseq = 100;
     FakeServer() {
         pj_sock_socket(pj_AF_INET(), pj_SOCK_DGRAM(), 0, &s);
@@ -126,7 +127,8 @@ struct FakeServer {
         std::string to = headerOf(req, "To");
         if (to.find(";tag=") == std::string::npos) to += ";tag=srv";
         r += "From: " + headerOf(req, "From") + "\r\nTo: " + to + "\r\nCall-ID: " + headerOf(req, "Call-ID") + "\r\n" +
-             "CSeq: " + headerOf(req, "CSeq") + "\r\nContact: <sip:srv@127.0.0.1:" + std::to_string(port) + ">\r\n";
+             "CSeq: " + headerOf(req, "CSeq") + "\r\nContact: " +
+             (contact.empty() ? "<sip:srv@127.0.0.1:" + std::to_string(port) + ">" : contact) + "\r\n";
         if (!ct.empty()) r += "Content-Type: " + ct + "\r\n";
         r += "Content-Length: " + std::to_string(body.size()) + "\r\n\r\n" + body;
         send(r);
@@ -245,6 +247,8 @@ TEST(McpttInvite, MemberInvitationRefresherUas) {
             std::string ok = srv.recv("SIP/2.0 200");
             ASSERT_FALSE(ok.empty()) << g.want;
             ASSERT_TRUE(l.wait([&] { return l.lastState.groupId == g.want; })) << "group " << l.lastState.groupId;
+            // 초대 Contact(isfocus)의 세션 식별자(§6.3.3.1.2 1)) — 나갔다가 재합류할 때 Request-URI(§10.1.1.2.4.1)
+            EXPECT_EQ(l.lastState.sessionUri, "sip:g001@127.0.0.1:" + std::to_string(srv.port) + ";gr=s1");
             srv.callId = cid;
             srv.ueContact = uriIn(headerOf(ok, "Contact"));
             srv.cseq = 1;
@@ -641,6 +645,7 @@ TEST(McpttGroupInvite, StandardRequestShape) {
         chat.chat = true;
         inv = invite(acc, "g002", chat);
         EXPECT_NE(inv.find("<session-type>chat</session-type>"), std::string::npos) << inv;
+        EXPECT_EQ(l.lastState.mcptt.sessionType, "chat");                      // CallInfo 는 보낸 session-type 그대로
         EXPECT_NE(inv.find("<mcpttURI>tel:g002</mcpttURI>"), std::string::npos);
 
         // 개별 호(§11.1.1.2.1.1) — 1) Request-URI = PSI · 9) 착신자 = resource-lists · 14)c) mcptt-info = session-type private(대상·발신자 ID 없음).
@@ -696,6 +701,99 @@ TEST(McpttGroupInvite, StandardRequestShape) {
         ASSERT_FALSE(srv.recv("SIP/2.0 200").empty());
     }
     eng.stop();
+}
+
+// 재합류(TS 24.379 §10.1.1.2.4.1) — 개시 200 OK Contact(isfocus)의 세션 식별자(§4.5 · §6.3.3.2.3.2 5))를 CallInfo.sessionUri 로 배우고,
+//   GroupCallOptions.sessionUri 로 다시 걸면 Request-URI·To = 세션 식별자, 나머지는 §10.1.1.2.1.1 그대로(session-type prearranged · 그룹 ID ·
+//   client ID · Accept-Contact 둘 · P-Preferred-Service). 진행 중 세션 합류라 개시 속성(일제 통화·명단·chat)은 싣지 않는다.
+//   끝난 세션은 서버가 404(§10.1.1.4.5.1 2)) — 호는 그대로 끝난다(새 세션을 열지 않는다)
+TEST(McpttRejoin, SessionIdentityRequestUri) {
+    Engine eng;
+    CondListener l;
+    EngineConfig cfg;
+    cfg.logLevel = std::getenv("COND_LOG") ? 5 : 0;
+    cfg.nullAudioDevice = true;
+    ASSERT_TRUE(eng.start(cfg, &l).ok);
+    {
+        cimsue_test::PjScope pj("rejoin-test");
+        FakeServer srv;
+        AccountConfig ac;
+        ac.serverHost = "127.0.0.1"; ac.serverPort = srv.port; ac.transport = Transport::UDP;
+        ac.domain = "ptt.test"; ac.msisdn = "+82500000001"; ac.authId = "450000000000001@ptt.test"; ac.password = "x";
+        ac.instanceId = "urn:uuid:00000000-0000-4000-8000-000000000001";
+        ac.mcpttServerUri = "sip:mcptt-psi@ptt.test";
+        ac.mcpttEnabled = true;
+        int acc = eng.addAccount(ac);
+        ASSERT_GE(acc, 0);
+
+        int id1 = eng.joinGroupCall(acc, "g001");
+        ASSERT_GE(id1, 0);
+        std::string inv = srv.recv("INVITE ");
+        ASSERT_FALSE(inv.empty());
+        EXPECT_EQ(inv.compare(0, 37, "INVITE sip:mcptt-psi@ptt.test SIP/2.0"), 0) << inv.substr(0, 80);
+        EXPECT_TRUE(eng.callInfo(id1).sessionUri.empty());                      // 세션 식별자는 최종 응답이 준다
+        srv.callId = headerOf(inv, "Call-ID");
+        srv.ueFrom = headerOf(inv, "From");
+        srv.ueContact = uriIn(headerOf(inv, "Contact"));
+        const std::string sid = "sip:mcptt-psi@127.0.0.1:" + std::to_string(srv.port) + ";gr=s-0001";
+        srv.contact = "<" + sid + ">;+g.3gpp.mcptt;+g.3gpp.icsi-ref=\"urn%3Aurn-7%3A3gpp-service.ims.icsi.mcptt\";isfocus";
+        srv.reply(inv, 200, "OK", "application/sdp", sdp(1));
+        ASSERT_FALSE(srv.recv("ACK ").empty());
+        ASSERT_TRUE(l.wait([&] { return l.lastState.callId == id1 && l.lastState.state == CallState::Active; }));
+        EXPECT_EQ(l.lastState.sessionUri, sid);
+        EXPECT_EQ(eng.callInfo(id1).sessionUri, sid);
+
+        // 나가기 — BYE 는 세션 식별자로 간다(다이얼로그 원격 대상 = 최종 응답 Contact)
+        ASSERT_TRUE(eng.hangup(id1).ok);
+        std::string bye = srv.recv("BYE ");
+        ASSERT_FALSE(bye.empty());
+        EXPECT_EQ(bye.compare(0, 4 + sid.size() + 1, "BYE " + sid + " "), 0) << bye.substr(0, 80);
+        srv.reply(bye, 200, "OK");
+        ASSERT_TRUE(l.wait([&] { return l.lastState.callId == id1 && l.lastState.state == CallState::Disconnected; }));
+
+        // 재합류 — 개시 속성을 줘도 싣지 않는다
+        srv.contact.clear();
+        GroupCallOptions ro;
+        ro.sessionUri = sid;
+        ro.broadcast = true; ro.chat = true; ro.members = {"tel:+82500000002"};
+        int id2 = eng.joinGroupCall(acc, "g001", ro);
+        ASSERT_GE(id2, 0);
+        EXPECT_EQ(eng.callInfo(id2).sessionUri, sid);
+        EXPECT_EQ(eng.callInfo(id2).mcptt.sessionType, "prearranged");
+        std::string rj = srv.recv("INVITE ");
+        ASSERT_FALSE(rj.empty());
+        EXPECT_EQ(rj.compare(0, 7 + sid.size() + 10, "INVITE " + sid + " SIP/2.0\r\n"), 0) << rj.substr(0, 100);
+        EXPECT_NE(uriIn(headerOf(rj, "To")).find(";gr=s-0001"), std::string::npos) << headerOf(rj, "To");   // gr 는 URI 안(포트는 pjsip 이 뺀다)
+        EXPECT_NE(rj.find("<session-type>prearranged</session-type>"), std::string::npos) << rj;
+        EXPECT_NE(rj.find("<mcptt-request-uri type=\"Normal\"><mcpttURI>tel:g001</mcpttURI>"), std::string::npos) << rj;
+        EXPECT_NE(rj.find("<mcptt-client-id type=\"Normal\"><mcpttString>urn:uuid:00000000-0000-4000-8000-000000000001</mcpttString>"),
+                  std::string::npos) << rj;
+        EXPECT_EQ(rj.find("broadcast-ind"), std::string::npos) << rj;
+        EXPECT_EQ(rj.find("resource-lists"), std::string::npos) << rj;
+        EXPECT_EQ(countHeader(rj, "Accept-Contact"), 2) << rj;
+        EXPECT_EQ(headerOf(rj, "P-Preferred-Service"), "urn:urn-7:3gpp-service.ims.icsi.mcptt");
+        EXPECT_NE(rj.find(" udp MCPTT\r\n"), std::string::npos) << rj;
+        srv.reply(rj, 404, "Not Found");
+        srv.recv("ACK ");
+        ASSERT_TRUE(l.wait([&] { return l.lastState.callId == id2 && l.lastState.state == CallState::Disconnected; }));
+        EXPECT_EQ(l.lastState.lastCode, 404);
+        EXPECT_TRUE(srv.recv("INVITE ", 500).empty());                          // 새 세션을 열지 않는다
+    }
+    eng.stop();
+}
+
+// 제어 기능 Contact 의 세션 식별자(TS 24.379 §4.5) — isfocus 가 붙은 name-addr 의 URI. isfocus 는 헤더 파라미터만 본다(대소문자 무관)
+TEST(McpttXml, SessionIdentityFromContact) {
+    using mcptt::sessionIdentity;
+    EXPECT_EQ(sessionIdentity("<sip:mcptt_psi@ptt.test;gr=a1>;+g.3gpp.mcptt;+g.3gpp.icsi-ref=\"urn%3Aurn-7%3A3gpp-service.ims.icsi.mcptt\";isfocus"),
+              "sip:mcptt_psi@ptt.test;gr=a1");
+    EXPECT_EQ(sessionIdentity("Contact: <sip:g001@10.0.0.1:5060;gr=s1>;IsFocus"), "sip:g001@10.0.0.1:5060;gr=s1");
+    EXPECT_EQ(sessionIdentity("<sip:g001@10.0.0.1;gr=s1>;isfocus;+g.3gpp.mcptt"), "sip:g001@10.0.0.1;gr=s1");
+    EXPECT_EQ(sessionIdentity("<sip:g001@10.0.0.1;gr=s1>;+g.3gpp.mcptt"), "");      // 세션 초점이 아니다(단말 Contact)
+    EXPECT_EQ(sessionIdentity("<sip:isfocus@10.0.0.1;isfocus>"), "");               // URI 안의 글자는 보지 않는다
+    EXPECT_EQ(sessionIdentity("<sip:g001@10.0.0.1;gr=s1>;isfocused"), "");
+    EXPECT_EQ(sessionIdentity("sip:g001@10.0.0.1;isfocus"), "");                    // addr-spec — 파라미터가 URI 의 것인지 가를 수 없다
+    EXPECT_EQ(sessionIdentity(""), "");
 }
 
 // floor 없는 개별 호의 판정(TS 24.379 §11.1.2.2) — 개별 호 offer 에 floor 제어 채널(m=application … MCPTT)이 없으면 floor 없음.

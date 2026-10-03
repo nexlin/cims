@@ -95,7 +95,8 @@ public:
 
     // ── MCPTT 그룹콜·사설콜 (TS 24.379) ──
     /** 그룹콜 참여(발신 INVITE, multipart mcptt-info[+resource-lists], SDP m=application floor).
-     *  groupId 는 bare id(예 "g001"). 반환 callId. 이미 같은 그룹 세션이 있으면 그 callId. */
+     *  groupId 는 bare id(예 "g001"). 반환 callId. 이미 같은 그룹 세션이 있으면 그 callId.
+     *  opts.sessionUri 를 주면 진행 중 세션 재합류(TS 24.379 §10.1.1.2.4.1 — Request-URI = 세션 식별자). */
     int joinGroupCall(int accountId, const std::string& groupId, const GroupCallOptions& opts = GroupCallOptions());
     /** 1:1 사설콜(session-type=private, TS 24.379 §11.1.1.2.1.1 — Request-URI = 참여 기능 PSI, 착신자 = resource-lists). peer 는 bare 번호.
      *  fullDuplex 면 floor 없는 개별 호 — offer 에 floor 제어 채널(m=application)을 싣지 않는다(§11.1.2.2). */

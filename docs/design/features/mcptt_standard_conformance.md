@@ -512,6 +512,8 @@ PSI·MCPTT client ID 가 있는 계정. [ue_sdk.md](ue_sdk.md) §4.2) → ③구
 세션을 가리키는 URI = `sip:<그룹>@<CSP>;gr=<세션 토큰>`(RFC 5627 GRUU 형 — 토큰 = 세션 sesid 의 시각·순번, 세션마다 새로 나고 세션이 끝나면 사라진다).
 멤버 leg INVITE·개시자 응답·이후 in-dialog 요청과 응답의 Contact 에 싣는다(psip `SetContactUriParams`). 재합류 INVITE 의 Request-URI 가
 세션 식별자면 그 세션이 진행 중이어야 한다 — 아니면 404(§10.1.1.4.5.1 2)).
+단말(SDK)은 그 Contact(isfocus)의 URI 를 `CallInfo.sessionUri` 로 받아 재합류 INVITE 의 Request-URI 로 쓴다(§10.1.1.2.4.1 — `GroupCallOptions.sessionUri`,
+[ue_sdk.md](ue_sdk.md) §4.2). PSI 로 개시한 호의 식별자는 사용자부가 PSI(`sip:mcptt_psi@<CSP>;gr=…`)이고, 재합류 INVITE 의 `<mcptt-request-uri>` 가 그룹을 준다.
 
 ### C4e. Warning 헤더 형식 — TS 24.379 §4.4 · TS 24.282 §4.9
 

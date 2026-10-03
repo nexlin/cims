@@ -313,12 +313,15 @@ data class GroupCallOptions(
     /** chat 그룹 합류 — 그룹 문서 [GroupDoc.sessionType] 이 "chat" 인 그룹이면 켠다: mcptt-info session-type `chat`
      *  (TS 24.379 §10.1.2.2.1.1 13)a)). 아니면 prearranged. `joinGroupCall` 전용. */
     val chat: Boolean = false,
+    /** 진행 중 편성 그룹 세션 재합류(TS 24.379 §10.1.1.2.4.1) — 앞 호의 [CallInfo.sessionUri]. Request-URI = 세션 식별자, 세션이 끝났으면
+     *  서버가 404(새 세션을 열지 않는다). broadcast·members·chat 은 싣지 않는다. 빈 값 = 새 개시·합류. `joinGroupCall` 전용. */
+    val sessionUri: String = "",
 ) {
     internal fun toJni(): JniGroupCallOptions = JniGroupCallOptions().also {
         it.commencement = com.cims.ue.sdk.jni.CommencementMode.swigToEnum(commencement.ordinal)
         it.emergency = emergency; it.imminentPeril = imminentPeril
         it.listenOnly = listenOnly; it.fullDuplex = fullDuplex; it.broadcast = broadcast
-        it.implicitFloorRequest = implicitFloorRequest; it.chat = chat
+        it.implicitFloorRequest = implicitFloorRequest; it.chat = chat; it.sessionUri = sessionUri
         it.members = StringVector().apply { members.forEach { m -> add(m) } }
     }
 }
@@ -396,7 +399,8 @@ data class CallInfo(
     val videoSend: Boolean = true,
     /** MC 호의 서비스 — MCVideo 그룹 호면 MCVIDEO(그때 [isMcptt] 는 false, 제어는 전송 제어 — `transmission`·`reception` 이벤트). */
     val service: McService = McService.MCPTT,
-    /** MC 세션 식별자 — 제어 기능 Contact(isfocus)의 세션 URI, 재합류([VideoGroupCallOptions.sessionUri])에 쓴다. */
+    /** MC 세션 식별자 — 제어 기능 Contact(isfocus)의 세션 URI(MCPTT·MCVideo), 재합류([GroupCallOptions.sessionUri] ·
+     *  [VideoGroupCallOptions.sessionUri])에 쓴다. 개시 호는 200 OK 뒤에 채워진다. */
     val sessionUri: String = "",
     /** 통화 중 영상 전환 요청의 진행(1:1 호) — SENT = 내 요청 응답 대기, RECEIVED = 상대 요청에 답할 차례. */
     val videoRequest: VideoRequestState = VideoRequestState.NONE,

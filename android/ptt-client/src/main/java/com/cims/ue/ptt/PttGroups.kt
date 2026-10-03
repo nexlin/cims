@@ -5,6 +5,7 @@ import android.util.Log
 import com.cims.ue.core.sip.ImMessage
 import com.cims.ue.core.sip.RegState
 import com.cims.ue.ptt.PttController.Companion.SUB_CONFIRM_TIMEOUT_MS
+import com.cims.ue.ptt.PttController.Companion.LOST_REJOIN_DELAY_MS
 import com.cims.ue.ptt.PttController.Companion.REJOIN_GAP_MS
 import com.cims.ue.ptt.PttController.Companion.SUB_REASSERT_MS
 import com.cims.ue.ptt.PttController.Companion.TAG
@@ -37,9 +38,11 @@ internal class GroupPlane(private val c: PttController) {
 
     /** [takePrimary] = 주채널 세션이 없을 때 이 그룹을 주채널로 삼는다(사용자 참여). 채널 복원은 고른 주채널에만 준다 — 다른 그룹 복원이
      *  고른 주채널(영상 채널, [VideoPlane])을 덮지 않게. [implicitFloor] = 개시 INVITE 에 암묵적 발언 요청(TS 24.380 §14.2.4 —
-     *  PTT 를 누른 채 호를 여는 경우, 성립과 함께 발언권). */
+     *  PTT 를 누른 채 호를 여는 경우, 성립과 함께 발언권). [sessionUri] = 진행 중 세션 재합류(TS 24.379 §10.1.1.2.4.1 — Request-URI =
+     *  세션 식별자, 끝난 세션이면 서버 404 로 끝나고 새 세션을 열지 않는다). */
     fun joinGroupCall(groupId: String, members: List<String> = emptyList(), emergency: Boolean = false,
-                      broadcast: Boolean = false, takePrimary: Boolean = true, implicitFloor: Boolean = false) {
+                      broadcast: Boolean = false, takePrimary: Boolean = true, implicitFloor: Boolean = false,
+                      sessionUri: String = "") {
         // 사전 구성 전용 그룹 — 호를 열지 않고 알린다(TS 24.379 §10.1.1.2.1.1·§10.1.2.2.1.1)
         if (!CallRules.groupUsable(c._groupDocs.value[groupId]?.preconfiguredOnly)) {
             c._status.value = "통화할 수 없는 그룹 $groupId"
@@ -54,6 +57,7 @@ internal class GroupPlane(private val c: PttController) {
                 it.emergency = emergency
                 it.emergencyMine = emergency
                 it.broadcast = broadcast
+                it.rejoinUri = sessionUri
                 if (implicitFloor) it.floorState = FloorState.REQUESTING
                 c.sessionMap[groupId] = it
             }
@@ -72,7 +76,7 @@ internal class GroupPlane(private val c: PttController) {
             //   session-type chat 으로 합류한다(TS 24.379 §10.1.2.2.1.1 13)a)) — 문서를 아직 모르면 prearranged
             val chat = !adhoc && c._groupDocs.value[groupId]?.sessionType == "chat"
             val r = acc?.joinGroupCall(groupId, GroupCallOptions(emergency = emergency, broadcast = broadcast, members = members,
-                implicitFloorRequest = implicitFloor, chat = chat))
+                implicitFloorRequest = implicitFloor, chat = chat, sessionUri = sessionUri))
             if (r != null && r.ok) { c.bindCall(groupId, r.value!!.id); return@launch }
             Log.w(TAG, "joinGroupCall $groupId 실패: ${r?.code} ${r?.reason ?: "not registered"}")
             synchronized(c.lock) { if (c.sessionMap[groupId] === s) c.sessionMap.remove(groupId) }
@@ -83,6 +87,7 @@ internal class GroupPlane(private val c: PttController) {
         c._status.value = when {
             emergency -> "🚨 긴급 그룹콜 개시 $groupId"
             broadcast -> "일제 통화 개시 $groupId"
+            sessionUri.isNotEmpty() -> "그룹콜 재합류 $groupId"
             else -> "그룹콜 참여 $groupId"
         }
         c.emit(PttEventKind.JOIN, groupId)
@@ -252,6 +257,7 @@ internal class GroupPlane(private val c: PttController) {
     /** 그룹별 나가기. */
     fun leaveGroup(groupId: String) {
         c.channelStore?.remove(groupId)                 // 명시적 이탈 = 재조인 의도 해제
+        lostSessions.remove(groupId)
         // orphan leg 회수 — 앱 세션이 추적하는 callId 와 무관하게, 그 그룹으로 살아 있는 호를 모두 끊는다(재설치 후 서버가
         //   세션 타이머로 살려 둔 옛 leg 을 엔진이 자동 수락해 유지하는 경우). 제휴는 유지 — 새 그룹콜이 오면 다시 초대받는다.
         val tracked = synchronized(c.lock) { c.sessionMap[groupId]?.callId ?: -1 }
@@ -604,6 +610,7 @@ internal class GroupPlane(private val c: PttController) {
     private val rejoinPending: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
     private val rejoinAt = java.util.concurrent.ConcurrentHashMap<String, Long>()
     private val rejoinPrimary: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
+    private val rejoinSession = java.util.concurrent.ConcurrentHashMap<String, String>()   // 다시 걸 그룹 → 재합류 세션 식별자
 
     /**
      * 편성 그룹의 [참여]·개시가 403 + Warning 120(미제휴 — TS 24.379 §10.1.1.4.2 «user is not affiliated to this group»)으로 끝났다.
@@ -627,6 +634,7 @@ internal class GroupPlane(private val c: PttController) {
         rejoinAt[gid] = now
         rejoinPending.add(gid)
         if (s.role == ChannelRole.PRIMARY) rejoinPrimary.add(gid) else rejoinPrimary.remove(gid)
+        if (s.rejoinUri.isNotEmpty()) rejoinSession[gid] = s.rejoinUri else rejoinSession.remove(gid)   // 재합류였으면 다시 재합류로
         Log.i(TAG, "[$gid] 403 120(미제휴) — 제휴를 다시 싣고 한 번 더 건다")
         c._status.value = "[$gid] 제휴 다시 싣는 중"
         affiliate(gid, true)
@@ -634,11 +642,41 @@ internal class GroupPlane(private val c: PttController) {
 
     private fun rejoinAfterAffiliation(groupId: String) {
         val primary = rejoinPrimary.remove(groupId)
+        val sessionUri = rejoinSession.remove(groupId).orEmpty()
         c.scope.launch {
             delay(300)                 // 거절 세션 teardown(onCallEnded) 정리 후
             if (c.regState.value !is RegState.Registered) return@launch
             Log.i(TAG, "[$groupId] 제휴 2xx — 그룹콜 다시 건다")
-            joinGroupCall(groupId, takePrimary = primary)
+            joinGroupCall(groupId, takePrimary = primary, sessionUri = sessionUri)
+        }
+    }
+
+    // ── 커버리지 복귀 재합류(TS 24.379 §10.1.1.2.4.1) ──
+
+    /** 망 문제로 잃은 편성 그룹 세션 — 그룹 → (세션 식별자, 주채널이었나). 등록이 서 있으면 [LOST_REJOIN_DELAY_MS] 뒤, 아니면 다시 선 뒤
+     *  한 번 재합류한다([rejoinLost]). 채널을 떠나면 버린다([leaveGroup]). */
+    private val lostSessions = java.util.concurrent.ConcurrentHashMap<String, Pair<String, Boolean>>()
+
+    /** 호가 끝났다 — 성립했던 편성 그룹 세션을 망 문제로 잃었으면([CallRules.rejoinLostSession]) 세션 식별자를 기억한다. 앱 세션을
+     *  지우기 전에(onCallEnded 앞에서) 부른다. 영상 호의 같은 규칙은 [VideoPlane]. */
+    fun onCallLost(ci: CallInfo) {
+        val s = synchronized(c.lock) { c.sessionMap.values.firstOrNull { it.callId == ci.callId } } ?: return
+        if (s.privatePeer || isAdhocId(s.groupId)) return
+        if (!CallRules.rejoinLostSession(ci.mcptt.sessionType == "prearranged", s.active, ci.lastCode, ci.sessionUri)) return
+        lostSessions[s.groupId] = ci.sessionUri to (s.role == ChannelRole.PRIMARY)
+        Log.i(TAG, "[${s.groupId}] 세션을 망 문제로 잃음(${ci.lastCode}) — 세션 식별자로 재합류한다")
+        if (c.regState.value is RegState.Registered) c.scope.launch { delay(LOST_REJOIN_DELAY_MS); rejoinLost() }
+    }
+
+    /** 기억한 세션마다 한 번 재합류 — 등록이 서 있을 때(등록이 다시 서면 컨트롤러가 부른다). 세션이 끝났으면 서버가 404 로 끝낸다
+     *  (새 세션을 열지 않는다). 그 사이 서버 초대로 다시 들어온 그룹은 건너뛴다. */
+    fun rejoinLost() {
+        if (c.regState.value !is RegState.Registered) return
+        for (g in lostSessions.keys.toList()) {
+            val (uri, primary) = lostSessions.remove(g) ?: continue
+            if (synchronized(c.lock) { c.sessionMap.containsKey(g) }) continue
+            Log.i(TAG, "[$g] 잃은 세션 재합류 $uri")
+            joinGroupCall(g, takePrimary = primary, sessionUri = uri)
         }
     }
 

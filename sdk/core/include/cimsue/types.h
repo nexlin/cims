@@ -242,6 +242,11 @@ struct GroupCallOptions {
     bool chat = false;
     /** 개별 호의 개시 방식 요청 — startPrivateCall 전용(그룹 호의 멤버 초대 개시 방식은 제어 기능이 정한다). */
     CommencementMode commencement = CommencementMode::Unspecified;
+    /** 진행 중 편성 그룹 세션 재합류(TS 24.379 §10.1.1.2.4.1) — 앞 호의 CallInfo.sessionUri(제어 기능이 준 MCPTT 세션 식별자). 주면
+     *  INVITE Request-URI·To = 이 값(그 밖은 §10.1.1.2.1.1 그대로 — mcptt-info 그룹 ID·client ID, session-type prearranged)이고 진행 중
+     *  세션 합류라 broadcast·members·chat 은 싣지 않는다. 세션이 끝났으면 서버가 404(§10.1.1.4.5.1 2)) — 새 세션을 열지 않는다.
+     *  joinGroupCall 전용. 비면 참여 기능 PSI 로 개시·합류. */
+    std::string sessionUri;
 };
 
 /** 규격형 문서 변경 구독(RFC 5875 subscription proxy — TS 24.481 §6.3.13.2.1 · TS 24.484 §6.3.13.2.2)의 본문. documents = 구독할 문서
@@ -360,8 +365,9 @@ struct CallInfo {
     /** MC 호의 서비스 — MCVideo 그룹 호면 McVideo(그때 isMcptt 는 false, 제어는 전송 제어 — onTransmission·onReception),
      *  그 밖의 호는 Mcptt(MCPTT 세션인지는 isMcptt). 나가기는 둘 다 hangup(두 호는 독립 다이얼로그 — TS 24.281 §7.1). */
     McService service = McService::Mcptt;
-    /** MC 세션 식별자 — 제어 기능이 200 OK·멤버 초대 Contact(isfocus)로 준 세션 URI(TS 24.281 §6.3.3.1.2 1)·§9.2.2.4.1.1 19)). 재합류
-     *  (VideoGroupCallOptions.sessionUri)에 쓴다. MCVideo 호에서 채운다. */
+    /** MC 세션 식별자 — 제어 기능이 개시 최종 응답·멤버 초대의 Contact(isfocus)로 준 세션 URI(GRUU — TS 24.379 §4.5 · §6.3.3.2.3.2 5) ·
+     *  §6.3.3.1.2 1), TS 24.281 §6.3.3.1.2 1)·§9.2.2.4.1.1 19)). 재합류(GroupCallOptions.sessionUri · VideoGroupCallOptions.sessionUri)에
+     *  쓴다. MCPTT·MCVideo 호에서 채운다(개시 호는 200 OK 뒤, 재합류 호는 처음부터). 모르면 빈 값. */
     std::string sessionUri;
     // ── MCPTT ──
     bool isMcptt = false;             // 그룹콜/사설콜 세션(mcptt-info 가 있다 — floor 없는 개별 호 포함)

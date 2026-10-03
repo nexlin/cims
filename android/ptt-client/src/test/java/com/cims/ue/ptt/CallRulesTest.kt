@@ -17,16 +17,16 @@ class CallRulesTest {
         assertFalse(CallRules.acceptVideoInvitation("", videoChannel = "", alreadyInCall = false))
     }
 
-    // TS 24.281 §9.2.1.2.4.1 — 망 끊김으로 잃은 prearranged 영상 호는 세션 식별자로 재합류한다
+    // TS 24.379 §10.1.1.2.4.1 · TS 24.281 §9.2.1.2.4.1 — 망 끊김으로 잃은 prearranged 호(무전·영상)는 세션 식별자로 재합류한다
     @Test fun `재합류는 망 문제로 잃은 prearranged 호만`() {
         val uri = "sip:g103@csp;gr=1790-1"
-        assertTrue(CallRules.rejoinVideoSession(prearranged = true, wasActive = true, lastCode = 408, sessionUri = uri))
-        assertTrue(CallRules.rejoinVideoSession(true, true, 503, uri))
-        assertFalse("서버의 정상 해제(BYE)", CallRules.rejoinVideoSession(true, true, 200, uri))
-        assertFalse("성립한 적 없는 호", CallRules.rejoinVideoSession(true, false, 408, uri))
-        assertFalse("chat 은 그냥 다시 합류한다", CallRules.rejoinVideoSession(false, true, 408, uri))
-        assertFalse("세션 식별자를 모른다", CallRules.rejoinVideoSession(true, true, 408, ""))
-        assertFalse("거절", CallRules.rejoinVideoSession(true, true, 403, uri))
+        assertTrue(CallRules.rejoinLostSession(prearranged = true, wasActive = true, lastCode = 408, sessionUri = uri))
+        assertTrue(CallRules.rejoinLostSession(true, true, 503, uri))
+        assertFalse("서버의 정상 해제(BYE)", CallRules.rejoinLostSession(true, true, 200, uri))
+        assertFalse("성립한 적 없는 호", CallRules.rejoinLostSession(true, false, 408, uri))
+        assertFalse("chat 은 그냥 다시 합류한다", CallRules.rejoinLostSession(false, true, 408, uri))
+        assertFalse("세션 식별자를 모른다", CallRules.rejoinLostSession(true, true, 408, ""))
+        assertFalse("거절", CallRules.rejoinLostSession(true, true, 403, uri))
     }
 
     // TS 24.379 §4.4.2 — 서버 거절 사유(486 103 · 486 122 · 403 115 …)

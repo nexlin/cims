@@ -469,6 +469,20 @@ FloorFmtp parseFloorFmtp(const std::string& sdp) {
     return f;
 }
 
+std::string sessionIdentity(const std::string& contact) {
+    const size_t a = contact.find('<');
+    const size_t b = a == std::string::npos ? std::string::npos : contact.find('>', a);
+    if (b == std::string::npos) return std::string();                   // GRUU 는 URI 파라미터(gr)가 있어 늘 name-addr 다
+    // isfocus 는 기본 특성 태그(RFC 3840 §9 — `+` 없음), 헤더 파라미터 이름은 대소문자 무관
+    for (size_t p = contact.find(';', b); p != std::string::npos; p = contact.find(';', p + 1)) {
+        size_t e = contact.find_first_of(";=, \t\r\n", p + 1);
+        std::string name = contact.substr(p + 1, e == std::string::npos ? std::string::npos : e - p - 1);
+        for (char& ch : name) ch = (char)std::tolower((unsigned char)ch);
+        if (name == "isfocus") return contact.substr(a + 1, b - a - 1);
+    }
+    return std::string();
+}
+
 std::string bareId(const std::string& uri) {
     std::string s = uri;
     size_t lt = s.find('<');

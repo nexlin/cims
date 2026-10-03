@@ -260,6 +260,7 @@ class PttController(
         var privatePeer: Boolean = false      // 1:1 private call — groupId=상대 번호
         var broadcast: Boolean = false        // 내가 연 일제 통화(TS 24.379 §4.12) — 미제휴 403 뒤 다시 걸지 않는다
         var fullDuplex: Boolean = false       // 전이중 1:1 — floor 없음, PTT 가 로컬 마이크 게이트(setMuted)
+        var rejoinUri: String = ""            // 재합류로 연 세션의 식별자(TS 24.379 §10.1.1.2.4.1) — 미제휴 403 뒤 다시 걸 때도 재합류로
 
         /** 이 세션이 동시 발언을 허용하는가 — 서버 Floor Indicator 의 I-bit(multi-talker)/
          *  G-bit(dual floor) 로 판정한다(TS 24.380 §8.2.3.15). multi 정책은 모든 floor 메시지에
@@ -569,6 +570,7 @@ class PttController(
             groupsPlane.subscribeXcap(XCAP_GMS, true)
             groupsPlane.subscribeXcap(XCAP_CMS, true)
             maybeRestoreChannels()
+            groupsPlane.rejoinLost()                          // 커버리지 복귀 — 잃은 편성 세션에 재합류(TS 24.379 §10.1.1.2.4.1)
         } else if (was is RegState.Registered) {
             // 등록이 끊기면 서버측 구독도 사라진다 — 확인 상태를 비워 재등록 시 다시 걸리게 한다. 제휴 확인(affConfirmed)은 두고 —
             //   다시 선 등록에 코어가 관심 그룹 전부를 다시 싣는다(같은 게시를 앱이 겹쳐 보내지 않는다).
@@ -631,6 +633,7 @@ class PttController(
                 applyProximity()                              // 귀에 대면 화면 꺼짐(하드웨어 PTT 단말)
             }
             CallState.DISCONNECTED -> {
+                groupsPlane.onCallLost(c)                                    // 망 문제로 잃은 편성 세션 → 세션 식별자로 재합류(§10.1.1.2.4.1)
                 emergencyPlane.handleEmergencyDenied(c.callId, c.lastCode)   // 긴급 개시 403 → normal 재발신 폴백
                 groupsPlane.handleNotAffiliated(c.callId, c.lastCode, c.warningCode)   // 403 120 → 제휴 다시 싣고 한 번 더
                 // 서버 거절 사유(486 103 동시 호 수 · 486 122 정원 · 403 115 사용 중지 …)를 알린다 — 120 은 위에서 다시 시도한다
@@ -986,6 +989,8 @@ class PttController(
         internal const val SUB_REASSERT_MS = 600_000L
         /** 미제휴 403(120) 뒤 같은 그룹을 다시 거는 최소 간격 — 다시 건 것까지 120 이면 그대로 둔다(관제 앱 UpkeepRules 와 같은 값). */
         internal const val REJOIN_GAP_MS = 10_000L
+        /** 등록이 선 채 잃은 편성 세션의 재합류 지연 — 끊긴 호의 정리(onCallEnded)와 망 회복을 잠깐 기다린다(TS 24.379 §10.1.1.2.4.1). */
+        internal const val LOST_REJOIN_DELAY_MS = 2_000L
 
         /** 채널 복원 전 양보 — 재로그인 경로에서 서버 fan-out INVITE 가 먼저 오면 그 세션을 쓴다. */
         internal const val RESTORE_YIELD_MS = 3000L

@@ -525,7 +525,8 @@ class Account internal constructor(private val ue: CimsUe, val id: Int) {
     suspend fun dial(target: String, opts: CallOptions = CallOptions()): CimsResult<Call> =
         ue.command { callOrFail(ue.jni.dial(id, target, opts.toJni()), "dial") }
 
-    /** 그룹콜 참여. groupId 는 bare id(예 "g001"). 같은 그룹 세션이 있으면 그 호를 돌려준다. */
+    /** 그룹콜 참여. groupId 는 bare id(예 "g001"). 같은 그룹 세션이 있으면 그 호를 돌려준다.
+     *  opts.sessionUri 를 주면 진행 중 세션 재합류(TS 24.379 §10.1.1.2.4.1). */
     suspend fun joinGroupCall(groupId: String, opts: GroupCallOptions = GroupCallOptions()): CimsResult<Call> =
         ue.command { callOrFail(ue.jni.joinGroupCall(id, groupId, opts.toJni()), "joinGroupCall") }
 

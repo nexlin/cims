@@ -337,6 +337,13 @@ C++ 공개 표면은 `cimsue/engine.h` 의 `Engine` 하나이며 계정·호를 
   mcptt-info = `<session-type>` prearranged·chat(`GroupCallOptions.chat` — 그룹 문서 `on-network-invite-members` false 인 그룹, §10.1.2.2.1.1 13)a))·
   adhoc + `<mcptt-request-uri>` 그룹 ID + `<mcptt-client-id>`(`effectiveMcpttClientId`) — 발신자 MCPTT ID 는 싣지 않는다(14) NOTE 2, 참여 기능이 정한다).
   floor 제어 채널 = `m=application <port> udp MCPTT` + `a=fmtp:MCPTT …`(TS 24.380 표 4.3.3.1-1 — `a=floorid` 없음). 시험 `McpttGroupInvite.StandardRequestShape`.
+  `CallInfo.mcptt.sessionType` 은 발신 호에서도 실제로 보낸 session-type(prearranged·chat·adhoc·private)이다.
+- **세션 식별자·재합류**(TS 24.379 §4.5 · §10.1.1.2.4.1) — 제어 기능이 개시 최종 응답(§6.3.3.2.3.2 5))·멤버 초대(§6.3.3.1.2 1))의 Contact 에
+  `isfocus` 와 함께 준 GRUU 를 `CallInfo.sessionUri` 로 올린다(개시 호는 200 OK 뒤 — `mcptt::sessionIdentity`, MCVideo 호와 같은 자리).
+  `joinGroupCall({sessionUri})` 는 진행 중 편성 그룹 세션 재합류다 — §10.1.1.2.1.1 그대로이되 Request-URI·To = 세션 식별자(10), To 는 `gr` 가
+  헤더 파라미터로 읽히지 않게 name-addr), mcptt-info = session-type prearranged·그룹 ID·client ID. 진행 중 세션 합류라 broadcast·members·chat 은
+  싣지 않는다. 세션이 끝났으면 제어 기능이 404(§10.1.1.4.5.1 2)) — 새 세션을 열지 않는다. 사전 설정 세션의 REFER 재합류(§10.1.1.2.4.2)는 사전
+  설정 세션과 함께 미구현. 시험 `McpttRejoin.SessionIdentityRequestUri`, `cimsue-cli group-call <id> --rejoin <session_uri>`.
 - **개별 호 요청**(TS 24.379 §11.1.1.2.1.1) — `startPrivateCall` 의 INVITE 도 Request-URI = 참여 MCPTT 기능 PSI(1)), Accept-Contact 둘·PPS·Contact
   태그(5)~8))를 싣고, 착신자는 `application/resource-lists+xml` entry 하나 = 상대 MCPTT ID(9)), mcptt-info 는 `<session-type>private` 와 조건
   지시자뿐이다(14)c) — 대상·발신자 ID 를 싣지 않는다). **floor 없는 개별 호**(`GroupCallOptions.fullDuplex`, §11.1.2.2)는 offer 에 floor 제어 채널
@@ -612,9 +619,10 @@ SDS·Join·픽업으로 확장)를 명령행으로 구동한다. cspsim 은 서�
 ```
 cimsue-cli [계정] register [--hold S]            # 200 OK → (hold) → de-REGISTER
 cimsue-cli [계정] call <번호|sip:URI> [--duration S] [--video]
-cimsue-cli [계정] answer [--duration S]          # 착신 대기 → 200 → 상대 BYE 또는 duration (MCPTT 착신은 자동 수락)
+cimsue-cli [계정] answer [--duration S]          # 착신 대기 → 200 → 상대 BYE 또는 duration (MCPTT 착신은 자동 수락, outcome session_uri)
 cimsue-cli [계정] group-call <groupId> [--duration S] [--ptt-at S --ptt-len S] [--listen-only] [--emergency] [--broadcast] [--implicit]
                   [--upgrade-at S] [--cancel-at S]   # 진행 중 긴급 상향·하향 re-INVITE — outcome conditions[{cause,emergency,code}]
+                  [--rejoin URI]                     # 진행 중 세션 재합류(§10.1.1.2.4.1) — URI = 앞 호 outcome 의 session_uri, 끝난 세션 = 404
 cimsue-cli [계정] video-call <groupId> [--prearranged] [--queueing] [--priority N] [--implicit] [--rejoin URI]
                   [--transmit-at S --transmit-len S] [--accept] [--duration S]
                   # MCVideo 그룹 호(TS 24.281 §9.2.1·§9.2.2) — transmit-at 에 Transmission Request → transmit-len 뒤 End Request,

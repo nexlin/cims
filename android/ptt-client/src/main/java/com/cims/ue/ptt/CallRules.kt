@@ -14,11 +14,12 @@ internal object CallRules {
         inviteGroup.isNotEmpty() && inviteGroup == videoChannel && !alreadyInCall
 
     /**
-     * 잃은 prearranged 영상 호에 세션 식별자로 재합류할 것인가(TS 24.281 §9.2.1.2.4.1 «커버리지 복귀 때»). 성립했던 호가 **망 문제로**
-     * 끊겼을 때만 — 요청 시한(408)·전송 실패(503)·세션 타이머(pjsip 은 408 로 끝낸다). 서버·상대의 정상 종료(BYE = 200)나
-     * 다른 거절이면 세션이 끝난 것이라 재합류하지 않는다(다음 초대를 기다린다). chat 호는 그냥 다시 합류하므로 대상이 아니다.
+     * 잃은 prearranged 호(무전 = MCPTT · 영상 = MCVideo)에 세션 식별자로 재합류할 것인가(TS 24.379 §10.1.1.2.4.1 · TS 24.281 §9.2.1.2.4.1
+     * «커버리지 복귀 때»). 성립했던 호가 **망 문제로** 끊겼을 때만 — 요청 시한(408)·전송 실패(503)·세션 타이머(pjsip 은 408 로 끝낸다).
+     * 서버·상대의 정상 종료(BYE = 200)나 다른 거절이면 세션이 끝난 것이라 재합류하지 않는다(다음 초대를 기다린다). chat 호는 그냥 다시
+     * 합류하므로, 애드혹·개별 호는 재합류 대상이 아니다(prearranged 만).
      */
-    fun rejoinVideoSession(prearranged: Boolean, wasActive: Boolean, lastCode: Int, sessionUri: String): Boolean =
+    fun rejoinLostSession(prearranged: Boolean, wasActive: Boolean, lastCode: Int, sessionUri: String): Boolean =
         prearranged && wasActive && sessionUri.isNotBlank() && (lastCode == 408 || lastCode == 503)
 
     /**

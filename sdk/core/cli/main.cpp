@@ -13,6 +13,7 @@
 //              (MCPTT 그룹콜은 음성만 — 그룹 영상은 video-call(MCVideo 호, mcvideo.md §8))
 //              (--broadcast = 일제 통화 개시 — 발언을 놓은 뒤 서버 Floor Idle(B-bit)이면 코어가 호를 해제, outcome 에 broadcast_released)
 //              (--implicit = 개시 INVITE 가 암묵적 발언 요청 — mc_implicit_request+mc_granted, TS 24.380 §14.2.4·§14.2.5. --ptt-at 0 과 함께)
+//              (--rejoin SESSION_URI = 진행 중 세션 재합류 — Request-URI = 앞 호 출력의 session_uri, TS 24.379 §10.1.1.2.4.1. 끝난 세션이면 404)
 //              (--chat = chat 그룹 합류 — session-type chat, TS 24.379 §10.1.2.2.1.1 13)a))
 //              (--private --full-duplex = floor 없는 개별 호 — offer 에 m=application 없음, TS 24.379 §11.1.2.2)
 //              [--upgrade-at S] [--cancel-at S]  (진행 중 긴급 상향·하향 re-INVITE, TS 24.379 §10.1.1.2.1.3·§10.1.1.2.1.4 — outcome 에 conditions)
@@ -118,7 +119,7 @@ struct Opts {
     bool prearranged = false, queueing = false, accept = false;
     int priority = -1;
     int transmitAt = -1, transmitLen = 3;
-    std::string rejoinUri;            // 재합류 — 앞 호의 세션 식별자(TS 24.281 §9.2.1.2.4)
+    std::string rejoinUri;            // 재합류 — 앞 호의 세션 식별자(group-call TS 24.379 §10.1.1.2.4.1 · video-call TS 24.281 §9.2.1.2.4)
     int upgradeAt = -1, cancelAt = -1;  // 진행 중 긴급 상향·하향 시각(TS 24.379 §10.1.1.2.1.3·§10.1.1.2.1.4)
     bool alertCancel = false, cancelGroupEmergency = false;
     bool notifyDelivered = false;     // sds-recv — 전달 확인 요청에 DELIVERED 통지(TS 24.282 §12.2.1.1)
@@ -159,7 +160,7 @@ void usage() {
         "        또는 --csc-host H [--csc-port N] --user U (--pw P | --pw-env VAR) [--csc-ca FILE] --from-profile volte|ptt\n"
         "  register [--hold S] | call TARGET [--duration S] [--video] | answer [--duration S] [--transfer-to X]\n"
         "  group-call GROUP [--duration S] [--ptt-at S --ptt-len S] [--listen-only] [--emergency] [--broadcast] [--implicit]\n"
-        "             [--chat] [--private [--full-duplex] [--answer-mode auto|manual|force]] [--upgrade-at S] [--cancel-at S]\n"
+        "             [--chat] [--rejoin URI] [--private [--full-duplex] [--answer-mode auto|manual|force]] [--upgrade-at S] [--cancel-at S]\n"
         "  video-call GROUP [--prearranged] [--queueing] [--priority N] [--implicit] [--rejoin URI] [--transmit-at S --transmit-len S]\n"
         "             [--accept] [--duration S]   (MCVideo 그룹 호 — 계정 --mcvideo --mcvideo-psi URI)\n"
         "  video-answer [--transmit-at S --transmit-len S] [--accept] [--duration S]   (MCVideo 멤버 초대 대기 — 코어가 자동 수락)\n"
@@ -916,6 +917,8 @@ int main(int argc, char** argv) {
         }
         ls.waitFor([&] { return disconnected(s.callId); }, o.durationSec);
         mediaCheck(s.callId);
+        // 멤버 초대 Contact(isfocus)의 세션 식별자(TS 24.379 §6.3.3.1.2 1)) — group-call --rejoin 에 쓴다
+        if (ls.incoming.isMcptt) s.extra += ",\"session_uri\":\"" + jsonEsc(eng.callInfo(s.callId).sessionUri) + "\"";
         return finish(s.callId);
     }
 
@@ -939,6 +942,7 @@ int main(int argc, char** argv) {
         go.chat = o.chat;                                 // session-type chat(§10.1.2.2.1.1 13)a))
         go.fullDuplex = o.fullDuplex;                     // floor 없는 개별 호(§11.1.2.2) — startPrivateCall 만 본다
         go.members = o.groupMembers;                      // --members = 애드혹 그룹 호의 초대 명단(TS 24.379 §17 — session-type adhoc)
+        go.sessionUri = o.rejoinUri;                      // --rejoin = 진행 중 세션 재합류(§10.1.1.2.4.1 — Request-URI = 세션 식별자)
         go.commencement = o.answerMode == "auto" ? CommencementMode::Auto : o.answerMode == "manual" ? CommencementMode::Manual
                         : o.answerMode == "force" ? CommencementMode::ForceAuto : CommencementMode::Unspecified;
         // --private = 개별 호(TS 24.379 §11.1.1.2.1.1) — 대상은 상대 번호. --answer-mode 로 개시 방식 요청(RFC 5373)
@@ -985,8 +989,9 @@ int main(int argc, char** argv) {
         }
         FloorInfo fi = eng.floorInfo(s.callId);
         s.st = eng.streamStats(s.callId);
-        s.extra = ",\"floor_local_port\":" + std::to_string(fi.localPort) + ",\"floor_remote\":\"" + fi.remoteIp + ":" +
-                  std::to_string(fi.remotePort) + "\",\"rosters\":" + std::to_string(ls.rosters);
+        s.extra = ",\"session_uri\":\"" + jsonEsc(eng.callInfo(s.callId).sessionUri) + "\",\"floor_local_port\":" +
+                  std::to_string(fi.localPort) + ",\"floor_remote\":\"" + fi.remoteIp + ":" + std::to_string(fi.remotePort) +
+                  "\",\"rosters\":" + std::to_string(ls.rosters);
         {
             std::string cs;
             for (auto& c : ls.conditions)
