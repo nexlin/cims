@@ -136,8 +136,8 @@
 | **U01** | 긴급·경보 단말 | EMG-6 · EMG-7 · EMG-8 · EMG-9 | A3 · C1 | 1 | — | — | W01(EMG-8) | 완료 df892fa2 |
 | **U02** | SDK 보안·협상 상한 | IDM-5 / VSDP-2 · TCU-2 | A1 · C1 · D1 | 1 | — | — | — | 완료 43421903 |
 | **U03** | 거절 응답·Answer-Mode 해석 | GCC-6 / VGU-1 · VGU-2 · VGU-3 | B1 · C1 · D2 | 1 | — | — | S01(N6·103 의 단말 몫) · W01(GCC-6·VGU-3) | 완료 b5149796 · 45acbc7f(Warning 문구 번호 해석 정정 — `399 "NNN text"` 의 NNN 을 `CallInfo`·`RequestResult.warningCode` 로) |
-| **U04** | MCPTT 요청 규격화 | REG-1 · GCC-1 · GCC-2 · GCC-3 · GCC-4 · GCC-5 · GCC-7 · GCC-8 · GCC-9 · ADH-8 · SDP-1 | B9 · D2 | 2 | S17 | — | W01(엔진 재빌드) | 진행 e1767d20(ADH-7 애드혹 해제 BYE Reason·ADH-8 SDK `session-type adhoc`·현장 앱 거절 문구 — S11·S08 의 짝) · c6c534b1(PRV-4 SDK — 개별 호 개시 방식 요청 옵션) · c053e4b6(GCC-9 착신 그룹 = `<mcptt-calling-group-id>`) · 0f611de0(GCC-5 `i=speech`) — 남은 것 S17 뒤(REG-1·GCC-1~4·7·8·SDP-1) · ADH-8 CSP 멤버 INVITE(.48) · PRV-4 앱 선택 UI |
-| **U05** | MCData 요청 규격화·수신 파서 | MCData REG-1 · SDS-3 · SDS-6 · SDS-7 · SDS-10 · MSRP-1 · MSRP-4 · FD-7(SDK — Metadata `file-selector:`·`uploadFd` 규격형, CSP 생성분은 S16) | B3 · C2 · D3 | 1 | S17 | — | — | 진행 e6f50241(SDS-3 그룹 SDS·FD `<mcdata-client-id>` · SDS-6 선택 IE·응용 대상 메시지) · 453d7c37(SDS-7 일부 — TEXT·HYPERLINKS payload 여러 개) · 7b476278(SDS-10 현장 앱 — 보내기 전 검사) — 남은 것 S17 뒤(REG-1·MSRP-1) · SDS-7(LOCATION·CODED TEXT·BINARY) · MSRP-4 · FD-7 |
+| **U04** | MCPTT 요청 규격화 | REG-1 · GCC-1 · GCC-2 · GCC-3 · GCC-4 · GCC-5 · GCC-7 · GCC-8 · GCC-9 · ADH-8 · SDP-1 | B9 · D2 | 2 | S17 | — | W01(엔진 재빌드) | 진행 e1767d20(ADH-7 애드혹 해제 BYE Reason·ADH-8 SDK `session-type adhoc`·현장 앱 거절 문구 — S11·S08 의 짝) · c6c534b1(PRV-4 SDK — 개별 호 개시 방식 요청 옵션) · c053e4b6(GCC-9 착신 그룹 = `<mcptt-calling-group-id>`) · 0f611de0(GCC-5 `i=speech`) · 9d8ae0ab(S17 짝 묶음 A/B — REG-1 등록 태그 · GCC-1 PSI·Accept-Contact·PPS · GCC-2 Contact 태그 · GCC-3 client-id · GCC-4 chat · SDP-1 SDK 몫 `udp MCPTT`, .48 0.2.215 실측) — 남은 것 묶음 C(PRV-1·PRV-3) · GCC-7·GCC-8 · C API·.NET 칸(W01) · ADH-8 CSP 멤버 INVITE(.48) · PRV-4 앱 선택 UI |
+| **U05** | MCData 요청 규격화·수신 파서 | MCData REG-1 · SDS-3 · SDS-6 · SDS-7 · SDS-10 · MSRP-1 · MSRP-4 · FD-7(SDK — Metadata `file-selector:`·`uploadFd` 규격형, CSP 생성분은 S16) | B3 · C2 · D3 | 1 | S17 | — | — | 진행 e6f50241(SDS-3 그룹 SDS·FD `<mcdata-client-id>` · SDS-6 선택 IE·응용 대상 메시지) · 453d7c37(SDS-7 일부 — TEXT·HYPERLINKS payload 여러 개) · 7b476278(SDS-10 현장 앱 — 보내기 전 검사) · 9d8ae0ab(REG-1 — SDS·FD 등록 태그 `mcdataMsrp`·`mcdataFd`) — 남은 것 묶음 C(SDS-1·SDS-5·MSRP-1·CFG-1 광고) · SDS-7(LOCATION·CODED TEXT·BINARY) · MSRP-4 · FD-7 |
 | **U06** | 제휴 상태 구독 | AFF-12 / VAFF-8 | B1 · C1 | 1 | S13 | — | W01(VAFF-8) | 대기 |
 | **U07** | XCAP 단말 전환 | GMS-16 · GMS-17 · GMS-1(SDK — global tree 조회) · GMS-6(SDK — 멤버 제외 조회) | B4 | 1 | C04·S19 | — | W01(GMS-16 PSI) | 완료 65046fec(GMS-1·GMS-17·GMS-6 코어) · 1c475d6e(GMS-6 바인딩) · 161e338d(GMS-16 규격형 xcap-diff 구독 — 엔진·SDK·현장 앱) — 관제 앱 두 벌의 구독 전환은 W01 |
 | **U08** | 발언권·송출 제어 단말 세부 | FCC-5 / TCU-1(코어) · TCU-3 · TCU-4 · RCU-1 | C3 · D2 | 1 | — | — | — | 완료 9e9a8169 (TCU-1 앱 결선 → U09) |
@@ -210,9 +210,9 @@ flowchart LR
 
 - **.48** — 트랙의 개발·실측 대상 전부. 서버 WP 마다 올린다(§4 5단계). .45 의 CSC·단말 WP 도 .48 에 원격 배포해 시험한다.
   단말 시험은 .48 을 겨눈 `cimsue-cli` 로 한다 — 사내 단말(W999·MF52)은 .45 라이브에 붙어 있어 새 SDK 를 깔면 아직 반영되지 않은 서버와 어긋난다.
-  - **시험 신원** = test026 · test027 · test028(`+82500000026~28`, 로그인 비밀번호 `1234`, MCVideo 자격 있음) · 그룹 `gap1`(prearranged, T4 10 s) ·
+  - **시험 신원** = test026 · test027 · test028(`+82500000026~28`, 로그인 비밀번호 = 계측기 `creds/volte.jsonl` 의 같은 login 행 `loginPw`, MCVideo 자격 있음) · 그룹 `gap1`(prearranged, T4 10 s) ·
     `gap2`(chat) — 세 신원만 멤버, SDS·FD·긴급 허용, MCVideo 속성 있음. 계측기 PTT 신원(test001~006·011·012·023~025)은 팀원 워커가 등록을
-    잡고 있어 쓰지 않는다. 계정 = `cimsue-cli --csc-host 127.0.0.1 --user test026 --pw 1234 --no-tls-verify --from-profile ptt
+    잡고 있어 쓰지 않는다. 계정 = `cimsue-cli --csc-host 127.0.0.1 --user test026 --pw-env <변수> --no-tls-verify --from-profile ptt
     --server 121.161.164.48 --port 15060 --affiliate gap1 …`(프로파일이 주는 `127.0.0.1:15060` 에는 CSP 가 없어 `--server` 가 필요하다).
     OAM 관리자 = [oam_api_deploy_runbook.md](oam_api_deploy_runbook.md) §0.
 - **.45 라이브 반영**(협력업체 단말) — 웨이브 6 의 .48 전체 회귀가 통과한 뒤 한 번, 사용자 go·시각 지정 뒤. 실행은 사용자가 `!` 로 한 줄씩
