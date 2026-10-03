@@ -13,6 +13,7 @@
 //              (MCPTT 그룹콜은 음성만 — 그룹 영상은 video-call(MCVideo 호, mcvideo.md §8))
 //              (--broadcast = 일제 통화 개시 — 발언을 놓은 뒤 서버 Floor Idle(B-bit)이면 코어가 호를 해제, outcome 에 broadcast_released)
 //              (--implicit = 개시 INVITE 가 암묵적 발언 요청 — mc_implicit_request+mc_granted, TS 24.380 §14.2.4·§14.2.5. --ptt-at 0 과 함께)
+//              (--chat = chat 그룹 합류 — session-type chat, TS 24.379 §10.1.2.2.1.1 13)a))
 //              [--upgrade-at S] [--cancel-at S]  (진행 중 긴급 상향·하향 re-INVITE, TS 24.379 §10.1.1.2.1.3·§10.1.1.2.1.4 — outcome 에 conditions)
 //   cimsue-cli [계정 옵션] video-call <groupId> [--prearranged] [--queueing] [--priority N] [--implicit] [--rejoin SESSION_URI]
 //              [--transmit-at S --transmit-len S] [--accept] [--duration S]
@@ -110,6 +111,7 @@ struct Opts {
     bool emergency = false;
     bool broadcast = false;           // 일제 통화 개시(TS 24.379 §4.12)
     bool implicit = false;            // 암묵적 발언 요청(TS 24.380 §14.2.5) · MCVideo 암묵적 송출 요청(TS 24.581 §14.2.5)
+    bool chat = false;                // group-call --chat — chat 그룹 합류(TS 24.379 §10.1.2.2.1.1)
     // MCVideo 그룹 호(video-call · video-answer)
     bool prearranged = false, queueing = false, accept = false;
     int priority = -1;
@@ -155,7 +157,7 @@ void usage() {
         "        또는 --csc-host H [--csc-port N] --user U (--pw P | --pw-env VAR) [--csc-ca FILE] --from-profile volte|ptt\n"
         "  register [--hold S] | call TARGET [--duration S] [--video] | answer [--duration S] [--transfer-to X]\n"
         "  group-call GROUP [--duration S] [--ptt-at S --ptt-len S] [--listen-only] [--emergency] [--broadcast] [--implicit]\n"
-        "             [--upgrade-at S] [--cancel-at S]\n"
+        "             [--chat] [--upgrade-at S] [--cancel-at S]\n"
         "  video-call GROUP [--prearranged] [--queueing] [--priority N] [--implicit] [--rejoin URI] [--transmit-at S --transmit-len S]\n"
         "             [--accept] [--duration S]   (MCVideo 그룹 호 — 계정 --mcvideo --mcvideo-psi URI)\n"
         "  video-answer [--transmit-at S --transmit-len S] [--accept] [--duration S]   (MCVideo 멤버 초대 대기 — 코어가 자동 수락)\n"
@@ -165,7 +167,7 @@ void usage() {
         "  drive [--sample-file WAV] [--service volte|voip|ptt]   (구동 모드 — stdin 명령 / stdout JSON 이벤트; cimsue/drive.h 명령표)\n"
         "  link HOST[:PORT] [--pair-key K] [--link-ca PEM | --link-pin FILE] [--sample-file WAV] [--service S] [--duration S]\n"
         "          (계측 링크 — 등록 뒤 계측기 워커에 TLS 로 붙어 워커 명령을 실행, 앱 시험 모드와 같은 경로)\n"
-        "  groups | group-get URI | group-info URI(멤버 제외) | group-put URI --name N [--members tel:..,tel:..] | group-delete URI   (--csc-host --user --pw)\n");
+        "  groups | group-get URI | group-info URI(멤버 제외) | group-put URI --name N [--members tel:..,tel:..] [--chat] | group-delete URI   (--csc-host --user --pw)\n");
 }
 
 bool parse(int argc, char** argv, Opts& o) {
@@ -245,6 +247,7 @@ bool parse(int argc, char** argv, Opts& o) {
         else if (a == "--emergency") o.emergency = true;
         else if (a == "--broadcast") o.broadcast = true;
         else if (a == "--implicit") o.implicit = true;
+        else if (a == "--chat") o.chat = true;
         else if (a == "--cancel") o.alertCancel = true;
         else if (a == "--msrp") o.acc.mcdataMsrp = true;
         else if (a == "--notify-delivered") o.notifyDelivered = true;
@@ -711,6 +714,7 @@ int main(int argc, char** argv) {
                 if (!r.ok) { d = GroupDoc(); d.uri = o.target; }
                 if (!o.groupName.empty()) d.displayName = o.groupName;
                 if (d.displayName.empty()) d.displayName = o.target;
+                if (o.chat) d.sessionType = "chat";                           // --chat = chat 그룹(on-network-invite-members false)
                 if (!o.groupMembers.empty()) {
                     d.members.clear();
                     for (auto& m : o.groupMembers) { GroupMember gm; gm.uri = m; d.members.push_back(gm); }
@@ -929,6 +933,7 @@ int main(int argc, char** argv) {
     if (o.cmd == "group-call") {
         GroupCallOptions go; go.listenOnly = o.listenOnly; go.emergency = o.emergency; go.broadcast = o.broadcast;
         go.implicitFloorRequest = o.implicit;             // --ptt-at 의 floorRequest 는 이미 요청 중이라 무시된다
+        go.chat = o.chat;                                 // session-type chat(§10.1.2.2.1.1 13)a))
         go.members = o.groupMembers;                      // --members = 애드혹 그룹 호의 초대 명단(TS 24.379 §17 — session-type adhoc)
         go.commencement = o.answerMode == "auto" ? CommencementMode::Auto : o.answerMode == "manual" ? CommencementMode::Manual
                         : o.answerMode == "force" ? CommencementMode::ForceAuto : CommencementMode::Unspecified;

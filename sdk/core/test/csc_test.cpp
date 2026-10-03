@@ -555,7 +555,8 @@ TEST(SsrcLabels, ParseFromSdp) {
 TEST(FloorSdp, OfferFmtp) {
     EXPECT_NE(mcptt::floorSdp(5000, false, true).find("a=fmtp:MCPTT mc_queueing;mc_implicit_request;mc_granted"), std::string::npos);
     std::string plain = mcptt::floorSdp(5000, false);
-    EXPECT_NE(plain.find("m=application 5000 UDP MCPTT"), std::string::npos);
+    EXPECT_NE(plain.find("m=application 5000 udp MCPTT\r\n"), std::string::npos);   // TS 24.380 §14.1 — proto "udp"
+    EXPECT_EQ(plain.find("a=floorid"), std::string::npos);                              // floorid 는 BFCP(RFC 4583) 속성 — MCPTT 엔 없다
     EXPECT_EQ(plain.find("mc_implicit_request"), std::string::npos);
     EXPECT_EQ(plain.find("mc_granted"), std::string::npos);
     std::string full = mcptt::floorSdp(5000, true, true);                    // 전이중엔 floor 가 없다 — 암묵 요청 무시
@@ -581,7 +582,7 @@ TEST(FloorSdp, SubsequentOfferDropsInitialOnlyFmtp) {
     const std::string offer = "v=0\r\nm=audio 4000 RTP/AVP 96\r\na=fmtp:96 mode-set=2\r\n" + mcptt::floorSdp(4002, false, true) + "\r\n";
     EXPECT_TRUE(mcptt::isMcpttSdp(offer));
     const std::string sub = mcptt::forSubsequentOffer(offer);
-    EXPECT_NE(sub.find("a=floorid:0 mstrm:audio\r\na=fmtp:MCPTT mc_queueing\r\n"), std::string::npos) << sub;
+    EXPECT_NE(sub.find("m=application 4002 udp MCPTT\r\na=fmtp:MCPTT mc_queueing\r\n"), std::string::npos) << sub;
     EXPECT_EQ(sub.find("mc_implicit_request"), std::string::npos);
     EXPECT_EQ(sub.find("mc_granted"), std::string::npos);
     EXPECT_EQ(mcptt::forSubsequentOffer(sub), sub);                           // 두 번 적용해도 같다

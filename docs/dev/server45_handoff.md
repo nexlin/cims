@@ -751,7 +751,7 @@ csc 0.2.139(dep 3, `UeInitConfig.ServiceDetails.McVideo.Enable=true`). 공유 DB
 동안만(T3 A 250 패킷 = 5 s), 수신자는 [받기] 뒤(손실 0, MOS-LQ 4.3). 팬아웃 INVITE `Session-Expires` refresher 없음 · 멤버 200 `refresher=uas`·`Require: timer`.
 실측이 드러내 고친 것: CSP 팬아웃 INVITE PAI 둘(→ 제어 기능 PSI 하나, 9d6c63c8) · SDK 착신 200 `Require: timer` 중복(9d6c63c8) · cimsue-cli 종료 때 늦은 해제 PUBLISH
 응답 abort(eece42b4 — 엔진 가드는 사용자 결정 그대로). 관찰(결함 아님): 제어 기능 Contact 의 세션 식별자 사용자부가 그룹이 아니라 `mcvideo_psi`(골든 04 는 `g101@`) —
-재합류는 `gr` 로 가르므로 동작은 같다. cli PTT 계정 REGISTER 에 MCPTT 태그가 없다(TS 24.379 §7.2.1 대조 과제 — 앱은 싣는다).
+재합류는 `gr` 로 가르므로 동작은 같다. PTT 계정 REGISTER 의 MCPTT 태그는 SDK `AccountConfig.mcpttEnabled`(프로파일 kind ptt 면 켬 — cli·현장 앱·관제 태블릿) 가 싣는다(TS 24.379 §7.2.1AA, C12).
 
 **D3 콘솔 도안** — 두 장(Artifact «MCVideo 콘솔 도안»): ① PTT 그룹 편집 «서비스» 절 = MCPTT 음성(항상 켬 — 기존 속성) · MCVideo 영상(체크 = 서비스 켬/끔 →
 `mcvideo` 객체/null, 호 방식 chat/prearranged 세그먼트 · 동시 송출 상한 · TNG3 · T5 · 시작 최소 응답 · 그룹 우선순위 · 선호 코덱 · 참가자 정보 구독 · E2E 보호는 사유 병기
@@ -806,7 +806,7 @@ ptt-client APK(V7 SDK) W999·MF52. 새 CSP 위 VoLTE 호(001↔002) relay 확인
 | R11 | CMP Media Reception Notification(TS 24.581 §9.2.16) — 지금 안 보내 송출자 «보는 사람 n» = 0(앱은 0 이면 숨김). §6.3 에 서버 절차가 없어 위반은 아니고, 보내면 TS 22.280 R-5.20.2-001 을 채운다 | .45 | **사용자 결정 대기** |
 | R12 | OAM 배포 job 인덱스 캐시 경합(`_job_create`/`_job_pick_pending` 잠금 없는 갱신 — §12.4) 근본 수정 | .45 | 미착수 |
 | C10 | verify S3 `S3-SCN-MCVIDEO-CHAT`·`-TRANSMIT`·`-RECEPTION`·`-MAX-TX`(cimsue-cli 두 대) | .45 | 미착수 — M4 전제 |
-| C12 | cimsue-cli PTT 계정 REGISTER 에 MCPTT 태그 없음(TS 24.379 §7.2.1 대조) | .45 | 미착수 |
+| C12 | cimsue-cli PTT 계정 REGISTER 에 MCPTT 태그 없음(TS 24.379 §7.2.1 대조) | .45 | 완료 — 규격 갭 U04(REG-1) `AccountConfig.mcpttEnabled`. Windows 관제 앱은 C API 칸이 들어간 뒤(W01) |
 | D6 실측 | .48 은 csp 0.2.182(D6 전) — .45 는 0.2.183 로 이미 D6 | .45 | .48 은 따라 올릴 때(관리자 자격 = 사용자) |
 | W1'·W4·W5 | 관제 앱 MCVideo(데스크톱·태블릿) | **Windows** | 착수 문서 전달, 응답 대기 |
 | B10 | 계측기 MCVideo 단말·시나리오 | 팀원 트랙 | 요구서 = [mcvideo_tester_requirements.md](mcvideo_tester_requirements.md), 계측기 코드 미착수. V7 뒤 PTT 영상 시나리오(`ems/tester/oam/scenarios/ptt/group_call_video.yaml`·워커 group_call `media.video`)는 무효 — 서버가 MCPTT `m=video` 를 port 0 으로 거절한다(dev_share «to: 48» 안내) |

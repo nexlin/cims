@@ -204,6 +204,8 @@ class FacadeMappingTest {
         assertEquals(MediaSecurity.REQUIRED, a.mediaSecurity)
         assertEquals("tel:+8250", a.mcpttId)
         assertEquals("ptt.example", a.domain)
+        assertTrue(a.mcpttEnabled)                                          // REGISTER MCPTT 태그(TS 24.379 §7.2.1AA)
+        assertFalse(svc("volte").toAccountConfig().mcpttEnabled)
     }
 
     // ── ⑤ 관제 데스크 범위 — 없으면 관리 화면이 비활성 (dispatch_center.md §3.4) ──

@@ -143,10 +143,13 @@ suspend fun DispatchSession.joinGroup(groupId: String, emergency: Boolean = fals
     // 정책 게이트(user profile ruleset, TS 24.484 §8.3.2.7) — UX 선차단, 최종 판정은 서버(403)
     if (emergency && !capabilities.value.emergencyGroupCall)
         return report(area, CimsResult.fail(-1, NO_EMERGENCY_GROUP_CALL))
-    val r = ptt.joinGroupCall(groupId, GroupCallOptions(emergency = emergency))
+    val r = ptt.joinGroupCall(groupId, GroupCallOptions(emergency = emergency, chat = isChatGroup(groupId)))
     if (r.ok) noteOperation(r.value!!.id, if (emergency) Operation.EMERGENCY else Operation.PTT_JOIN)
     return report(area, if (r.ok) CimsResult.ok(Unit) else CimsResult.fail(r.code, r.reason))
 }
+
+/** chat 그룹(그룹 문서 on-network-invite-members false) 합류는 session-type chat(TS 24.379 §10.1.2.2.1.1 13)a)). 종류를 모르면 prearranged. */
+private fun DispatchSession.isChatGroup(groupId: String): Boolean = groups.value.firstOrNull { it.id == groupId }?.sessionType == "chat"
 
 /** 청취 합류 — ② 카드의 [청취]. `a=recvonly` 라 발언 버튼이 비활성된다. */
 suspend fun DispatchSession.listenGroup(groupId: String): CimsResult<Unit> {
@@ -154,7 +157,7 @@ suspend fun DispatchSession.listenGroup(groupId: String): CimsResult<Unit> {
     // 상한은 앱에서 먼저 본다 — 넘겨 보내면 서버가 486 으로 거절하고 관제사는 이유를 모른다(§6.5).
     if (listenLimitReached())
         return report(TextArea.PTT_LISTEN, CimsResult.fail(-1, "동시 청취 상한 ${settingsSnapshot().maxListen}"))
-    val r = ptt.joinGroupCall(groupId, GroupCallOptions(listenOnly = true))
+    val r = ptt.joinGroupCall(groupId, GroupCallOptions(listenOnly = true, chat = isChatGroup(groupId)))
     if (r.ok) noteOperation(r.value!!.id, Operation.PTT_LISTEN)
     return report(TextArea.PTT_LISTEN, if (r.ok) CimsResult.ok(Unit) else CimsResult.fail(r.code, r.reason))
 }

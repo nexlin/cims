@@ -713,6 +713,7 @@ struct McpttSession {
     int condLastCode = 0;
     bool broadcast = false;              // 일제 통화 개시(<broadcast-ind>) — 이 단말이 개시자
     bool adhoc = false;                  // 애드혹 그룹 호(TS 24.379 §17) — 이 단말이 명단을 실어 개시했다(session-type adhoc)
+    bool contactSet = false;             // 다이얼로그 Contact 에 MCPTT 특성 태그를 실었다(§10.1.1.2.1.1 4) · §6.2.3.1.1 3)·4))
     bool micOpen = false;                // floor Granted 로 열림
     bool implicitAwaitAnswer = false;    // 개시 INVITE 가 암묵적 발언 요청 — 200 OK answer 의 fmtp 로 판정(TS 24.380 §14.3.4·§14.3.5)
     std::string pendingAppSdp;           // 송신 SDP 에 주입할 m=application 섹션
@@ -1267,6 +1268,8 @@ public:
         try {
             if (recvOnly && !prm.sdp.wholeSdp.empty()) prm.sdp.wholeSdp = forceRecvOnly(prm.sdp.wholeSdp);
             if (!mcptt) return;
+            // MCPTT 호 다이얼로그 Contact = 특성 태그(§10.1.1.2.1.1 4) · 착신 180/200 §6.2.3.1.1 3)·4)) — pjsua 는 이 콜백 뒤에 메시지를 만든다
+            if (!mcptt->contactSet) mcptt->contactSet = setDialogContactParams(getId(), mcptt::contactFeatureParams());
             if (!mcptt->pendingAppSdp.empty()) {
                 std::string whole = prm.sdp.wholeSdp;
                 if (whole.empty()) {
@@ -3008,10 +3011,15 @@ static int startMcptt(Engine::Impl* o, int accountId, const std::string& id, boo
         p1.contentType.type = "application"; p1.contentType.subType = "vnd.3gpp.mcptt-info+xml";
         // 지시자 조합(TS 24.379 §6.3.3.1.17) — 긴급 개시는 alert-ind 를 함께 싣고(경보를 요청하지 않았으면 false, §6.2.8.1.1 4)),
         //   임박은 긴급·경보 지시자 없이(§6.2.8.1.9). 둘 다 요청하면 긴급이 임박을 대체한다(위 mcptt->imminentPeril).
-        // session-type(Annex F.1) — 개별 호 private · 애드혹 그룹 호 adhoc(§17.2.2.1.1 10)a)) · 그 밖 prearranged
-        p1.body = mcptt::mcpttInfo(isPrivate ? "private" : call->mcptt->adhoc ? "adhoc" : "prearranged", "tel:" + id, mcpttId, "tel:" + id,
-                                   call->mcptt->emergency ? 1 : 0, call->mcptt->imminentPeril ? 1 : 0, call->mcptt->broadcast,
-                                   call->mcptt->emergency ? -1 : 0);
+        // session-type(Annex F.1) — 개별 호 private · 애드혹 그룹 호 adhoc(§17.2.2.1.1 10)a)) · chat 합류 chat(§10.1.2.2.1.1 13)a)) · 그 밖 prearranged.
+        //   그룹 호는 §10.1.1.2.1.1 14) 의 모양 — 그룹 ID · MCPTT client ID, 발신자 ID 는 싣지 않는다(NOTE 2).
+        if (isPrivate)
+            p1.body = mcptt::mcpttInfo("private", "tel:" + id, mcpttId, "tel:" + id, call->mcptt->emergency ? 1 : 0,
+                                       call->mcptt->imminentPeril ? 1 : 0, false, call->mcptt->emergency ? -1 : 0);
+        else
+            p1.body = mcptt::mcpttInfoOriginating(call->mcptt->adhoc ? "adhoc" : opts.chat ? "chat" : "prearranged", "tel:" + id,
+                                                  cfg.effectiveMcpttClientId(), call->mcptt->emergency ? 1 : 0,
+                                                  call->mcptt->imminentPeril ? 1 : 0, call->mcptt->broadcast, call->mcptt->emergency ? -1 : 0);
         prm.txOption.multipartParts.push_back(p1);
         // 우선 그룹콜의 Resource-Priority(TS 24.379 §6.2.8.1.2·§6.2.8.1.12) — 값 = service-config(§6.2.8.1.15, AccountConfig.rp*)
         if (call->mcptt->emergency || call->mcptt->imminentPeril) {
@@ -3032,7 +3040,15 @@ static int startMcptt(Engine::Impl* o, int accountId, const std::string& id, boo
             p2.body = mcptt::resourceLists(opts.members);
             prm.txOption.multipartParts.push_back(p2);
         }
-        call->makeCall("sip:" + id + "@" + cfg.domain, prm);
+        // §10.1.1.2.1.1 5)·6)·7) — Accept-Contact 둘(특성 태그·ICSI, require;explicit) · P-Preferred-Service
+        for (const char* ac : {"*;+g.3gpp.mcptt;require;explicit",
+                               "*;+g.3gpp.icsi-ref=\"urn%3Aurn-7%3A3gpp-service.ims.icsi.mcptt\";require;explicit"}) {
+            pj::SipHeader h; h.hName = "Accept-Contact"; h.hValue = ac; prm.txOption.headers.push_back(h);
+        }
+        { pj::SipHeader h; h.hName = "P-Preferred-Service"; h.hValue = mcptt::kIcsiMcptt; prm.txOption.headers.push_back(h); }
+        // 10) Request-URI = 참여 MCPTT 기능 PSI(그룹은 mcptt-info 의 request-uri) — PSI 를 모르는 계정은 그룹 URI 로. 개별 호는 상대 URI
+        const std::string ruri = !isPrivate && !cfg.mcpttServerUri.empty() ? cfg.mcpttServerUri : "sip:" + id + "@" + cfg.domain;
+        call->makeCall(ruri, prm);
         // makeCall 이 개시 offer 를 동기적으로 만들었다 — 이어지는 offer(re-INVITE)·answer 는 암묵 요청·mc_granted 없이(§14.5)
         if (call->mcptt->floor) call->mcptt->pendingAppSdp = mcptt::floorSdp(call->mcptt->floor->localPort(), false);
     } catch (pj::Error& e) {

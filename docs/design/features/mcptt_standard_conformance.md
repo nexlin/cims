@@ -441,9 +441,10 @@ PSI·MCPTT client ID 가 있는 계정. [ue_sdk.md](ue_sdk.md) §4.2) → ③구
 
 ### C4. floor SDP 토큰
 
-- `m=application {port} UDP MCPTT` + `c=IN IP4 ...` + `a=floorid:0 mstrm:audio` +
+- 규격 표기 = `m=application {port} udp MCPTT` + `a=fmtp:MCPTT …`(TS 24.380 표 4.3.3.1-1 — proto `udp`, `a=floorid` 는 규격에 없다). 단말(SDK
+  `mcptt::floorSdp`)은 이 표기로 offer·answer 한다. **서버 offer 는 아직 `UDP MCPTT` + `a=floorid:0 mstrm:audio`**(편차 — 규격 갭 SDP-1 CSP 몫) +
   `a=fmtp:MCPTT mc_queueing;mc_priority=<그 멤버의 그룹 우선순위>` + **`a=mcptt-floor-request-uri:sip:{group}@{domain}`**
-  (`GroupCallService.cpp` `MemberFloorOfferFmtp`). 단말은 floor 목적지를 이 `m=application` 포트에서 학습.
+  (`GroupCallService.cpp` `MemberFloorOfferFmtp`). 수신 쪽은 둘 다 proto 대소문자와 무관하게 `m=application` 포트로 floor 목적지를 학습한다.
   이 fmtp 는 서버 **offer**(fan-out INVITE)의 값이다 — TS 24.380 §14.2.3 `mc_priority` = 그 멤버 entry 의 `<user-priority>`,
   §14.2.2 `mc_queueing` 은 큐잉을 지원하는 호만(개별 호는 CMP 가 큐를 끄므로 개별 호 offer 에는 floor fmtp 를 싣지 않는다).
 - **개시자 200 OK answer**(psip `CSipDialog::AddSdp`, CSP 가 `CSipCallRtp::m_strApplicationFmtp` 로 정한다) — offer 에 있던 파라미터만(§14.3.1): `mc_queueing`

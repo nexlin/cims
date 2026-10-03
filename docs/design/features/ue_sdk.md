@@ -245,8 +245,8 @@ C++ 공개 표면은 `cimsue/engine.h` 의 `Engine` 하나이며 계정·호를 
 - **media plane SDS**(TS 24.282 §9.2.3, [mcdata_messaging.md](mcdata_messaging.md) §4.7). `AccountConfig.maxSdsCplaneBytes`(프로비저닝
   `mcdata.maxPayloadSdsCplaneBytes` — `ServiceProfile::toAccount` 가 채운다)를 넘는 **그룹** SDS 는 `sendGroupSds` 가 MSRP 로 보낸다(INVITE
   더미 audio + m=message sendonly actpass → 200 의 cmdp a=path → SEND 2건) — 반환·상관은 C-plane 과 같고 최종 결과가 `onRequestResult`
-  method `MSRP` 로 온다. 1:1 은 늘 시그널링 평면(서버 media plane 이 그룹만 받는다). 수신 = `AccountConfig.mcdataMsrp` 가 REGISTER Contact
-  `+g.3gpp.icsi-ref` 에 ICSI mcdata.sds 를 합치고(기존 목록에 쉼표로), 서버발 배포 INVITE 는 코어가 받아(m=message active recvonly,
+  method `MSRP` 로 온다. 1:1 은 늘 시그널링 평면(서버 media plane 이 그룹만 받는다). 수신 = `AccountConfig.mcdataMsrp`(SDS 지원) 가 REGISTER Contact 에
+  `+g.3gpp.mcdata.sds` 와 ICSI mcdata·mcdata.sds 를 싣고(TS 24.282 §7.2.1 2) — icsi-ref 목록에 쉼표로), 서버발 배포 INVITE 는 코어가 받아(m=message active recvonly,
   더미 오디오 inactive) `onSds`(`mediaPlane=true`, 발신자·그룹 = 배포 INVITE 의 mcdata-info)로 낸다. MSRP 호는 앱 호 목록·호 이벤트에
   나오지 않고, 서버 BYE 가 없으면 5 s 뒤 코어가 끊는다. m=message 는 pjsua 가 만든 m=text 슬롯(발신)·포트 0 섹션(수신) 자리에 넣는다
   (미디어 수가 늘면 pjsua `med_prov_cnt` assert).
@@ -314,6 +314,18 @@ C++ 공개 표면은 `cimsue/engine.h` 의 `Engine` 하나이며 계정·호를 
   `ForceAuto` = `Priv-Answer-Mode: Auto`(강제 자동 — 인가가 없으면 서버가 403 Warning 143), 기본 `Unspecified` = 헤더를 싣지 않는다(착신 단말 설정대로).
   서버는 user profile 의 개시 방식 인가로 판정하고(자동 125 · 수동 126) 받은 `Answer-Mode` 를 착신 INVITE 에 옮긴다 — 착신 단말은 그 값으로 자동·수동
   개시를 정한다(`mcptt/commencement.h`). 그룹 호에는 싣지 않는다(멤버 초대의 개시 방식은 제어 기능 몫). `cimsue-cli group-call <번호> --private --answer-mode auto|manual|force`.
+- **MC 서비스 등록 태그**(TS 24.379 §7.2.1AA · TS 24.282 §7.2.1) — 서비스마다 특성 태그 하나를 REGISTER Contact 에 싣고 ICSI 는 `+g.3gpp.icsi-ref`
+  한 목록에 모은다: `AccountConfig.mcpttEnabled` = `+g.3gpp.mcptt` + ICSI mcptt(`ServiceProfile::toAccount` 가 kind ptt 에 켠다 — 빼고 다시 등록하면
+  MCPTT 로그오프) · `mcdataMsrp` = SDS 지원 `+g.3gpp.mcdata.sds` + ICSI mcdata·mcdata.sds(SDS 클라이언트는 서버발 MSRP 배포도 받는다) ·
+  `mcdataFd` = FD 지원 `+g.3gpp.mcdata.fd` + ICSI mcdata·mcdata.fd · `mcvideoEnabled`(아래 MCVideo). CSP 는 지금 ICSI 목록에 «mcdata» 가 있으면
+  MSRP 배포 대상으로 보므로(MCData REG-2 — CSP 몫) 현장 앱·관제 태블릿은 FD 를 SDS 와 같이만 켠다.
+- **그룹 호 개시·합류 요청**(TS 24.379 §10.1.1.2.1.1 · §10.1.2.2.1.1 · §17.2.2.1.1) — `joinGroupCall` 의 INVITE: Request-URI = 참여 MCPTT 기능 PSI
+  (`AccountConfig.mcpttServerUri`, 10) — 비면 그룹 URI), Accept-Contact 둘(`*;+g.3gpp.mcptt;require;explicit` · MCPTT icsi-ref, 5)·6)),
+  `P-Preferred-Service` MCPTT ICSI(7)), 다이얼로그 Contact = 계정 Contact + MCPTT 특성 태그(4) — 멤버 초대에 답하는 180·200 도, §6.2.3.1.1 3)·4)),
+  mcptt-info = `<session-type>` prearranged·chat(`GroupCallOptions.chat` — 그룹 문서 `on-network-invite-members` false 인 그룹, §10.1.2.2.1.1 13)a))·
+  adhoc + `<mcptt-request-uri>` 그룹 ID + `<mcptt-client-id>`(`effectiveMcpttClientId`) — 발신자 MCPTT ID 는 싣지 않는다(14) NOTE 2, 참여 기능이 정한다).
+  floor 제어 채널 = `m=application <port> udp MCPTT` + `a=fmtp:MCPTT …`(TS 24.380 표 4.3.3.1-1 — `a=floorid` 없음). 개별 호(`startPrivateCall`)는
+  Accept-Contact·PPS·Contact 태그를 같이 싣고, Request-URI·대상 표기는 서버 S17 짝(PRV-1)에서 바뀐다. 시험 `McpttGroupInvite.StandardRequestShape`.
 - **애드혹 그룹 호**(TS 24.379 §17). `joinGroupCall({members})` — 명단(resource-lists)을 실은 개시는 mcptt-info `<session-type>adhoc`
   (§17.2.2.1.1 10)a)). 이렇게 연 호를 개시자가 `hangup` 하면 **호 전체를 끝낸다** — BYE 에 `Reason: SIP;cause=200;text="User requested release"`
   (§17.2.3.1.1 1)), 제어 기능이 전원을 해제한다(§6.3.3.2.4 3A)). 초대받은 참가자의 `hangup` 은 Reason 없는 BYE = 자기만 나가기(§17.2.4.1.1)이고,
@@ -518,7 +530,7 @@ MCVideo PSI. 동작(구현 — 시험 `McvSip`·`McvCall`, 계약 K3 골든과 �
 
 - **등록**(TS 24.281 §7.2.1AA — 서비스 인가 본문 없는 REGISTER) — `mcvideoEnabled` 면 REGISTER Contact 에 `+g.3gpp.mcvideo` 와 `+g.3gpp.icsi-ref`
   목록의 mcvideo ICSI. **서비스 태그는 REGISTER 에만 모은다**(§7.1 — MC 서비스 등록은 한 REGISTER): icsi-ref 는 한 파라미터의 쉼표 목록(RFC 3840 —
-  CSP 는 첫 icsi-ref 하나만 읽는다)으로 mcvideo·mcdata.sds(`mcdataMsrp`)·앱 `contactParams` 의 icsi-ref 를 합치고, 모든 요청에 붙는 계정 Contact
+  CSP 는 첫 icsi-ref 하나만 읽는다)으로 mcptt(`mcpttEnabled`)·mcvideo·mcdata·mcdata.sds(`mcdataMsrp`)·mcdata.fd(`mcdataFd`)·앱 `contactParams` 의 icsi-ref 를 합치고, 모든 요청에 붙는 계정 Contact
   파라미터에는 서비스 ICSI 를 두지 않는다 — 서비스 호의 Contact 는 그 호가 자기 태그를 싣는다. 서비스 인가(mcvideo-info 토큰·client ID)는 MCPTT 와
   함께 CSP 토큰 검증과 한 짝으로 넣는다(mcx_identity_scope.md §10 — CSP 는 지금 REGISTER 본문을 읽지 않는다).
 - **affiliation**(§8.2.1.2) — `affiliate(acc, g, on, McVideo)` 는 계정의 MCVideo 관심 그룹 집합을 바꾸고 **전부**를 한 PUBLISH 로 보낸다:

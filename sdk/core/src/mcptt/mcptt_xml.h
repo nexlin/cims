@@ -30,6 +30,12 @@ constexpr const char* kAffiliationExpires = "4294967295";                      /
 std::string mcpttInfo(const std::string& sessionType, const std::string& requestUri,
                       const std::string& callingUserId, const std::string& callingGroupId,
                       int emergency = 0, int imminentPeril = 0, bool broadcast = false, int alert = 0);
+/** 단말이 여는 그룹 호(편성·chat·애드혹)의 mcptt-info(TS 24.379 §10.1.1.2.1.1 14) · §10.1.2.2.1.1 13) · §17.2.2.1.1 10)) —
+ *  session-type · `<mcptt-request-uri>` = 그룹 ID · `<mcptt-client-id>` · 지시자. 발신자 MCPTT ID 는 싣지 않는다(NOTE 2 — 참여 기능이 정한다). */
+std::string mcpttInfoOriginating(const std::string& sessionType, const std::string& requestUri, const std::string& clientId,
+                                 int emergency = 0, int imminentPeril = 0, bool broadcast = false, int alert = 0);
+/** MCPTT 호 다이얼로그 Contact 의 서비스 특성 태그 — `;+g.3gpp.mcptt;+g.3gpp.icsi-ref="…mcptt"`(§10.1.1.2.1.1 4) · §6.2.3.1.1 3)·4)). */
+std::string contactFeatureParams();
 /** resource-lists (애드혹 멤버). uri 는 tel:/sip: URI. */
 std::string resourceLists(const std::vector<std::string>& memberUris);
 /** 규격형 문서 변경 구독의 문서 목록(RFC 5875 · TS 24.481 §6.3.13.2.1 a) · TS 24.484 §6.3.13.2.2 b)1)) — `<entry uri>` 마다 문서 하나

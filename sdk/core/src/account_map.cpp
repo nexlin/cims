@@ -89,8 +89,11 @@ pj::AccountConfig buildPjAccountConfig(const AccountConfig& c, std::string* note
     std::vector<std::string> icsis;
     const std::string shared = mcvideo::withoutIcsiRef(c.contactParams, &icsis);
     auto addIcsi = [&icsis](const char* v) { if (std::find(icsis.begin(), icsis.end(), v) == icsis.end()) icsis.push_back(v); };
+    if (c.mcpttEnabled) addIcsi("urn%3Aurn-7%3A3gpp-service.ims.icsi.mcptt");              // TS 24.379 §7.2.1AA 2)
     if (c.mcvideoEnabled) addIcsi(mcvideo::kIcsiEnc);                                      // TS 24.281 §7.2.1AA 2)
-    if (c.mcdataMsrp) addIcsi("urn%3Aurn-7%3A3gpp-service.ims.icsi.mcdata.sds");          // TS 24.282 §9.2.3 수신 능력
+    if (c.mcdataMsrp || c.mcdataFd) addIcsi("urn%3Aurn-7%3A3gpp-service.ims.icsi.mcdata");  // TS 24.282 §7.2.1 1)
+    if (c.mcdataMsrp) addIcsi("urn%3Aurn-7%3A3gpp-service.ims.icsi.mcdata.sds");          // 2)b) — SDS(미디어 평면 수신 포함)
+    if (c.mcdataFd) addIcsi("urn%3Aurn-7%3A3gpp-service.ims.icsi.mcdata.fd");             // 3)b)
     if (!shared.empty()) ac.sipConfig.contactParams = shared;
     std::string reg;
     // 인스턴스 ID(TS 24.229 §5.1.1.2.1 c) — 모든 transport 에서 REGISTER Contact 파라미터로 직접 싣고 pjsua outbound(RFC 5626)는 끈다.
@@ -102,10 +105,16 @@ pj::AccountConfig buildPjAccountConfig(const AccountConfig& c, std::string* note
         reg += ";+sip.instance=\"<" + c.instanceId + ">\"";
         if (note) *note += "instance ";
     }
+    if (c.mcpttEnabled) {                                                                  // TS 24.379 §7.2.1AA 1) — 빼면 MCPTT 로그오프
+        reg += ";+g.3gpp.mcptt";
+        if (note) *note += "mcptt ";
+    }
     if (c.mcvideoEnabled) {                                                                // TS 24.281 §7.2.1AA 1) — 빼면 MCVideo 로그오프
         reg += std::string(";") + mcvideo::kFeatureTag;
         if (note) *note += "mcvideo ";
     }
+    if (c.mcdataMsrp) reg += ";+g.3gpp.mcdata.sds";                                       // TS 24.282 §7.2.1 2)a)
+    if (c.mcdataFd) reg += ";+g.3gpp.mcdata.fd";                                          // 3)a)
     if (!icsis.empty()) {
         std::string list;
         for (const auto& v : icsis) list += (list.empty() ? "" : ",") + v;

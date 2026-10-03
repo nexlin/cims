@@ -155,7 +155,7 @@ PJSIP 미디어 파이프라인은 **[RTP/RTCP]→[지터버퍼]→[AEC]→[conf
 
 ## 5. m=application / Floor Control 설계 (가장 프로젝트-특화)
 
-PJSIP의 SDP 협상기는 표준 audio/video만 생성/이해한다. MCPTT의 `m=application <port> UDP MCPTT` + `a=floorid:0 mstrm:audio` 는 PJSIP이 다루지 않으므로 **하이브리드**로 처리한다.
+PJSIP의 SDP 협상기는 표준 audio/video만 생성/이해한다. MCPTT의 `m=application <port> udp MCPTT` + `a=fmtp:MCPTT …`(TS 24.380 표 4.3.3.1-1 — `a=floorid` 는 규격에 없다) 는 PJSIP이 다루지 않으므로 **하이브리드**로 처리한다.
 
 ### 5.1 처리 방식
 

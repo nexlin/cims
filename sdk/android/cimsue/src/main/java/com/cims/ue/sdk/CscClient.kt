@@ -85,7 +85,8 @@ data class ServiceProfile(
         password = if (sipHa1.isEmpty()) loginPw else "",
         authScheme = authScheme, akaK = akaK, akaOpc = akaOpc, akaAmf = akaAmf,
         secMechanisms = secMechanisms, mediaSecurity = mediaSecurity, mcpttId = mcpttId,
-        maxSdsCplaneBytes = maxPayloadSdsCplaneBytes)
+        maxSdsCplaneBytes = maxPayloadSdsCplaneBytes,
+        mcpttEnabled = kind == "ptt")                                      // REGISTER 의 MCPTT 특성 태그(TS 24.379 §7.2.1AA)
 }
 
 /** 관제 그룹원·감시 대상(dispatch members[]) — groupId 가 내 그룹이면 그룹원 띠, 그 밖은 감시 전용. */

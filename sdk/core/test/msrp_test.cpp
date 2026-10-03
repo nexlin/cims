@@ -322,7 +322,9 @@ TEST(Msrp, EngineReceivesServerDeliveryOverMediaPlane) {
         ASSERT_TRUE(eng.registerAccount(acc).ok);
         std::string reg = sip.recv("REGISTER ");
         ASSERT_FALSE(reg.empty());
-        EXPECT_NE(headerOf(reg, "Contact").find("+g.3gpp.icsi-ref=\"urn%3Aurn-7%3A3gpp-service.ims.icsi.mcdata.sds\""), std::string::npos);
+        EXPECT_NE(headerOf(reg, "Contact").find("+g.3gpp.mcdata.sds"), std::string::npos);    // TS 24.282 §7.2.1 2)
+        EXPECT_NE(headerOf(reg, "Contact").find("+g.3gpp.icsi-ref=\"urn%3Aurn-7%3A3gpp-service.ims.icsi.mcdata,"
+                                                "urn%3Aurn-7%3A3gpp-service.ims.icsi.mcdata.sds\""), std::string::npos);
         sip.reply(reg, 200, "OK");
         const std::string ue = uriIn(headerOf(reg, "Contact"));
 

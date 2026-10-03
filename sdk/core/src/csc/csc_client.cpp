@@ -56,6 +56,7 @@ AccountConfig ServiceProfile::toAccount(const std::string& loginPw) const {
     a.secMechanisms = secMechanisms; a.mediaSecurity = mediaSecurity;
     a.mcpttId = mcpttId;
     a.maxSdsCplaneBytes = maxPayloadSdsCplaneBytes;                       // 넘는 그룹 SDS 는 media plane(TS 24.282 §9.2.3)
+    a.mcpttEnabled = kind == "ptt";                                        // REGISTER 의 MCPTT 특성 태그(TS 24.379 §7.2.1AA)
     return a;
 }
 

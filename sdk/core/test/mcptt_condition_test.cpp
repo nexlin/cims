@@ -580,6 +580,101 @@ TEST(McpttPrivate, CommencementModeHeaders) {
     eng.stop();
 }
 
+// 단말이 여는 그룹 호의 INVITE(TS 24.379 §10.1.1.2.1.1) — 4) Contact = MCPTT 특성 태그 · 5)·6) Accept-Contact 둘(require;explicit) ·
+//   7) P-Preferred-Service · 10) Request-URI = 참여 MCPTT 기능 PSI · 14) mcptt-info = session-type·그룹 ID·`<mcptt-client-id>`, 발신자 ID 없음
+//   (NOTE 2) · chat 합류 session-type chat(§10.1.2.2.1.1 13)a)) · 제어 채널 `m=application <port> udp MCPTT`(TS 24.380 표 4.3.3.1-1).
+//   PSI 를 모르는 계정은 Request-URI = 그룹 URI. 멤버 초대에 답하는 180·200 의 Contact 도 특성 태그(§6.2.3.1.1 3)·4)).
+TEST(McpttGroupInvite, StandardRequestShape) {
+    Engine eng;
+    CondListener l;
+    EngineConfig cfg;
+    cfg.logLevel = std::getenv("COND_LOG") ? 5 : 0;
+    cfg.nullAudioDevice = true;
+    {
+        cimsue_test::PjScope pj("ginv-port");
+        FakeServer probe;
+        cfg.udpPort = probe.port;
+    }
+    ASSERT_TRUE(eng.start(cfg, &l).ok);
+    {
+        cimsue_test::PjScope pj("ginv-test");
+        FakeServer srv;
+        AccountConfig ac;
+        ac.serverHost = "127.0.0.1"; ac.serverPort = srv.port; ac.transport = Transport::UDP;
+        ac.domain = "ptt.test"; ac.msisdn = "+82500000001"; ac.authId = "450000000000001@ptt.test"; ac.password = "x";
+        ac.instanceId = "urn:uuid:00000000-0000-4000-8000-000000000001";
+        ac.mcpttServerUri = "sip:mcptt-psi@ptt.test";
+        ac.mcpttEnabled = true;
+        int acc = eng.addAccount(ac);
+        ASSERT_GE(acc, 0);
+        const std::string tags = ";+g.3gpp.mcptt;+g.3gpp.icsi-ref=\"urn%3Aurn-7%3A3gpp-service.ims.icsi.mcptt\"";
+
+        auto invite = [&](int account, const std::string& group, const GroupCallOptions& o) {
+            int id = eng.joinGroupCall(account, group, o);
+            EXPECT_GE(id, 0);
+            std::string inv = srv.recv("INVITE ");
+            EXPECT_FALSE(inv.empty()) << group;
+            srv.reply(inv, 403, "Forbidden");
+            srv.recv("ACK ");
+            EXPECT_TRUE(l.wait([&] { return l.lastState.callId == id && l.lastState.state == CallState::Disconnected; }));
+            return inv;
+        };
+
+        std::string inv = invite(acc, "g001", GroupCallOptions());
+        EXPECT_EQ(inv.compare(0, 37, "INVITE sip:mcptt-psi@ptt.test SIP/2.0"), 0) << inv.substr(0, 80);
+        EXPECT_EQ(countHeader(inv, "Accept-Contact"), 2) << inv;
+        EXPECT_NE(inv.find("\r\nAccept-Contact: *;+g.3gpp.mcptt;require;explicit\r\n"), std::string::npos) << inv;
+        EXPECT_NE(inv.find("\r\nAccept-Contact: *;+g.3gpp.icsi-ref=\"urn%3Aurn-7%3A3gpp-service.ims.icsi.mcptt\";require;explicit\r\n"),
+                  std::string::npos) << inv;
+        EXPECT_EQ(headerOf(inv, "P-Preferred-Service"), "urn:urn-7:3gpp-service.ims.icsi.mcptt");
+        EXPECT_NE(headerOf(inv, "Contact").find(tags), std::string::npos) << headerOf(inv, "Contact");
+        EXPECT_NE(inv.find("<session-type>prearranged</session-type>"), std::string::npos);
+        EXPECT_NE(inv.find("<mcptt-request-uri type=\"Normal\"><mcpttURI>tel:g001</mcpttURI>"), std::string::npos) << inv;
+        EXPECT_NE(inv.find("<mcptt-client-id type=\"Normal\"><mcpttString>urn:uuid:00000000-0000-4000-8000-000000000001</mcpttString>"),
+                  std::string::npos) << inv;
+        EXPECT_EQ(inv.find("mcptt-calling-user-id"), std::string::npos) << inv;
+        EXPECT_NE(inv.find("\r\nm=application "), std::string::npos) << inv;
+        EXPECT_NE(inv.find(" udp MCPTT\r\n", inv.find("\r\nm=application ")), std::string::npos) << inv;
+        EXPECT_EQ(inv.find("a=floorid"), std::string::npos);
+
+        GroupCallOptions chat;
+        chat.chat = true;
+        inv = invite(acc, "g002", chat);
+        EXPECT_NE(inv.find("<session-type>chat</session-type>"), std::string::npos) << inv;
+        EXPECT_NE(inv.find("<mcpttURI>tel:g002</mcpttURI>"), std::string::npos);
+
+        AccountConfig old = ac;                                             // PSI 를 모르는 계정 — Request-URI = 그룹 URI
+        old.mcpttServerUri.clear();
+        int acc2 = eng.addAccount(old);
+        ASSERT_GE(acc2, 0);
+        inv = invite(acc2, "g003", GroupCallOptions());
+        EXPECT_EQ(inv.compare(0, 31, "INVITE sip:g003@ptt.test SIP/2."), 0) << inv.substr(0, 80);
+        EXPECT_EQ(countHeader(inv, "Accept-Contact"), 2);
+
+        // 멤버 초대 — 180·200 의 Contact = 특성 태그(§6.2.3.1.1 3)·4))
+        srv.peer = pj_sockaddr_in();
+        pj_str_t ip = pj_str(const_cast<char*>("127.0.0.1"));
+        pj_sockaddr_in_init(&srv.peer, &ip, (pj_uint16_t)cfg.udpPort);
+        srv.send(memberInvite(srv.port, cfg.udpPort, "mi-tags", "1800"));
+        std::string ringing = srv.recv("SIP/2.0 180");
+        ASSERT_FALSE(ringing.empty());
+        EXPECT_NE(headerOf(ringing, "Contact").find(tags), std::string::npos) << headerOf(ringing, "Contact");
+        std::string ok = srv.recv("SIP/2.0 200");
+        ASSERT_FALSE(ok.empty());
+        EXPECT_NE(headerOf(ok, "Contact").find(tags), std::string::npos) << headerOf(ok, "Contact");
+        srv.callId = "mi-tags";
+        srv.ueContact = uriIn(headerOf(ok, "Contact"));
+        srv.cseq = 1;
+        srv.ackFor(ok);
+        std::string bye = "BYE " + srv.ueContact + " SIP/2.0\r\nVia: SIP/2.0/UDP 127.0.0.1:" + std::to_string(srv.port) +
+                          ";branch=z9hG4bKbye-tags\r\nMax-Forwards: 70\r\nFrom: " + headerOf(ok, "From") + "\r\nTo: " + headerOf(ok, "To") +
+                          "\r\nCall-ID: mi-tags\r\nCSeq: 2 BYE\r\nContent-Length: 0\r\n\r\n";
+        srv.send(bye);
+        ASSERT_FALSE(srv.recv("SIP/2.0 200").empty());
+    }
+    eng.stop();
+}
+
 // MCPTT speech 미디어의 i=speech(TS 24.379 §6.2.1 2)d) · §6.2.2 3)e)) — m=audio 바로 뒤, MCPTT SDP 에만, 이미 있으면 그대로
 TEST(McpttXml, SpeechInfoLine) {
     const std::string floor = "m=application 4002 udp MCPTT\r\na=fmtp:MCPTT mc_queueing\r\n";

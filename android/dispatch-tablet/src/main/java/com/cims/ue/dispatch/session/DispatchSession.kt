@@ -794,6 +794,8 @@ class DispatchSession(
             instanceId = instanceId.ifEmpty { base.instanceId },     // PTT·전화 계정이 같은 기기 값(RFC 5626 — 한 UA 인스턴스)
             // 큰 그룹 SDS 는 media plane(MSRP) — 상한은 프로파일 mcdata(`toAccountConfig` 가 옮긴다), 서버발 MSRP 배포도 받는다(TS 24.282 §9.2.3)
             mcdataMsrp = ptt || base.mcdataMsrp,
+            // MCData FD 지원(TS 24.282 §7.2.1 3), FilePlane) — SDS 와 같이만: CSP 는 ICSI 목록의 «mcdata» 로 MSRP 대상을 가른다(MCData REG-2)
+            mcdataFd = ptt || base.mcdataFd,
             // 참여 기능 PSI(ue-init-config) — 광고하지 않은 서비스는 비워 둔다(경보 = 그룹 URI, 통지 = 원 발신자 직행 — 코어 전환기 경로)
             mcpttServerUri = ui?.mcpttServerUri?.ifEmpty { null } ?: base.mcpttServerUri,
             mcdataServerUri = ui?.mcdataServerUri?.ifEmpty { null } ?: base.mcdataServerUri,

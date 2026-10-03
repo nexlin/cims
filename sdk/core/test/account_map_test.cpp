@@ -123,15 +123,43 @@ TEST(AccountMap, ServiceTagsOnRegisterOnly) {
     ac = buildPjAccountConfig(c);
     EXPECT_EQ(ac.sipConfig.contactParams, ";video");
     EXPECT_EQ(ac.regConfig.contactParams,
-              inst + ";+g.3gpp.mcvideo;+g.3gpp.icsi-ref=\"urn%3Aurn-7%3A3gpp-service.ims.icsi.mcptt,"
-                     "urn%3Aurn-7%3A3gpp-service.ims.icsi.mcvideo,urn%3Aurn-7%3A3gpp-service.ims.icsi.mcdata.sds\"");
+              inst + ";+g.3gpp.mcvideo;+g.3gpp.mcdata.sds;+g.3gpp.icsi-ref=\"urn%3Aurn-7%3A3gpp-service.ims.icsi.mcptt,"
+                     "urn%3Aurn-7%3A3gpp-service.ims.icsi.mcvideo,urn%3Aurn-7%3A3gpp-service.ims.icsi.mcdata,"
+                     "urn%3Aurn-7%3A3gpp-service.ims.icsi.mcdata.sds\"");
 
     // MCVideo 로그오프 = 태그를 뺀 재-REGISTER(§7.2.1 NOTE 1) — mcvideo 특성 태그·ICSI 가 함께 빠진다
     c.mcvideoEnabled = false;
     c.contactParams.clear();
     ac = buildPjAccountConfig(c);
-    EXPECT_EQ(ac.regConfig.contactParams, inst + ";+g.3gpp.icsi-ref=\"urn%3Aurn-7%3A3gpp-service.ims.icsi.mcdata.sds\"");
+    EXPECT_EQ(ac.regConfig.contactParams, inst + ";+g.3gpp.mcdata.sds;+g.3gpp.icsi-ref=\"urn%3Aurn-7%3A3gpp-service.ims.icsi.mcdata,"
+                                                 "urn%3Aurn-7%3A3gpp-service.ims.icsi.mcdata.sds\"");
     EXPECT_EQ(ac.regConfig.contactParams.find("mcvideo"), std::string::npos);
+}
+
+// MCPTT 등록(TS 24.379 §7.2.1AA 1)·2)) + MCData SDS·FD(TS 24.282 §7.2.1 1)~3)) — 서비스마다 특성 태그 하나, ICSI 는 한 목록에
+//   MCData 기본 ICSI(mcdata) + 기능 ICSI(mcdata.sds·mcdata.fd). MCPTT 를 빼고 다시 등록하면 MCPTT 로그오프(§7.2.1AA NOTE).
+TEST(AccountMap, McpttAndMcDataRegisterTags) {
+    AccountConfig c = base();
+    c.mcpttEnabled = true;
+    c.mcdataMsrp = true;
+    c.mcdataFd = true;
+    pj::AccountConfig ac = buildPjAccountConfig(c);
+    EXPECT_EQ(ac.regConfig.contactParams,
+              ";+g.3gpp.mcptt;+g.3gpp.mcdata.sds;+g.3gpp.mcdata.fd;+g.3gpp.icsi-ref=\"urn%3Aurn-7%3A3gpp-service.ims.icsi.mcptt,"
+              "urn%3Aurn-7%3A3gpp-service.ims.icsi.mcdata,urn%3Aurn-7%3A3gpp-service.ims.icsi.mcdata.sds,"
+              "urn%3Aurn-7%3A3gpp-service.ims.icsi.mcdata.fd\"");
+    EXPECT_TRUE(ac.sipConfig.contactParams.empty());
+
+    // 앱이 contactParams 로 같은 MCPTT ICSI 를 실어도 목록에는 한 번
+    c.contactParams = ";+g.3gpp.icsi-ref=\"urn%3Aurn-7%3A3gpp-service.ims.icsi.mcptt\"";
+    c.mcdataMsrp = c.mcdataFd = false;
+    ac = buildPjAccountConfig(c);
+    EXPECT_EQ(ac.regConfig.contactParams, ";+g.3gpp.mcptt;+g.3gpp.icsi-ref=\"urn%3Aurn-7%3A3gpp-service.ims.icsi.mcptt\"");
+
+    c.mcpttEnabled = false;
+    c.contactParams.clear();
+    ac = buildPjAccountConfig(c);
+    EXPECT_EQ(ac.regConfig.contactParams.find("mcptt"), std::string::npos);
 }
 
 // RFC 7254 IMEI URN — TAC 8 · SNR 6 · spare. 셋째 칸은 검사 숫자가 아니라 spare 라 항상 0(RFC 7254 §4.2.3 예 90420156-025763-0)

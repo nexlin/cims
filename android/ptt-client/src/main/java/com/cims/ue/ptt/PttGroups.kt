@@ -68,9 +68,11 @@ internal class GroupPlane(private val c: PttController) {
         }
         c.ctl.launch {
             val acc = c.account
-            // 음성만 — 그룹 영상은 MCVideo 호다([VideoPlane], mcvideo.md §7 D9)
+            // 음성만 — 그룹 영상은 MCVideo 호다([VideoPlane], mcvideo.md §7 D9). chat 그룹(문서 on-network-invite-members false)은
+            //   session-type chat 으로 합류한다(TS 24.379 §10.1.2.2.1.1 13)a)) — 문서를 아직 모르면 prearranged
+            val chat = !adhoc && c._groupDocs.value[groupId]?.sessionType == "chat"
             val r = acc?.joinGroupCall(groupId, GroupCallOptions(emergency = emergency, broadcast = broadcast, members = members,
-                implicitFloorRequest = implicitFloor))
+                implicitFloorRequest = implicitFloor, chat = chat))
             if (r != null && r.ok) { c.bindCall(groupId, r.value!!.id); return@launch }
             Log.w(TAG, "joinGroupCall $groupId 실패: ${r?.code} ${r?.reason ?: "not registered"}")
             synchronized(c.lock) { if (c.sessionMap[groupId] === s) c.sessionMap.remove(groupId) }

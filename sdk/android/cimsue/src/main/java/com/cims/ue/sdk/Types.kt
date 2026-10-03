@@ -200,8 +200,14 @@ data class AccountConfig(
     /** 그룹 SDS 의 시그널링 평면 상한(octet, 프로비저닝 mcdata.maxPayloadSdsCplaneBytes) — 넘으면 `sendGroupSds` 가 MSRP(TS 24.282 §9.2.3)로
      *  보내고 최종 결과는 `requestResult` 의 method "MSRP" 로 온다. 0 = 제한 없음. */
     val maxSdsCplaneBytes: Int = 0,
-    /** 서버발 MSRP 배포 수신 — REGISTER Contact 에 ICSI mcdata.sds 를 싣는다(코어가 contactParams 에 합친다). 끄면 서버가 FILEURL 로 폴백. */
+    /** MCData SDS 지원 — REGISTER Contact `+g.3gpp.mcdata.sds` + ICSI mcdata·mcdata.sds(TS 24.282 §7.2.1 1)·2)). SDS 클라이언트는 서버발
+     *  MSRP 배포도 받는다 — 끄면 서버가 큰 그룹 SDS 를 FILEURL 로 폴백. */
     val mcdataMsrp: Boolean = false,
+    /** MCData FD 지원 — REGISTER Contact `+g.3gpp.mcdata.fd` + ICSI mcdata·mcdata.fd(TS 24.282 §7.2.1 3)). */
+    val mcdataFd: Boolean = false,
+    /** MCPTT 서비스 사용 — REGISTER Contact `+g.3gpp.mcptt` + MCPTT ICSI(TS 24.379 §7.2.1AA). PTT 계정은 켠다 — 빼고 다시 등록하면
+     *  MCPTT 로그오프. */
+    val mcpttEnabled: Boolean = false,
     /** 참여 MCPTT 기능 PSI — 긴급 경보 Request-URI(TS 24.379 §12.1.1.1 8)). 정본 = ue-init-config [UeInitConfigDoc.mcpttServerUri]
      *  (TS 24.484 §7.2). 비면 그룹 URI(옛 서버 전환기). */
     val mcpttServerUri: String = "",
@@ -239,7 +245,8 @@ data class AccountConfig(
         it.autoAnswerMcptt = autoAnswerMcptt; it.instanceId = instanceId
         it.mcpttClientId = mcpttClientId
         it.rpEmergency = rpEmergency; it.rpImminentPeril = rpImminentPeril; it.rpNormal = rpNormal
-        it.maxSdsCplaneBytes = maxSdsCplaneBytes; it.mcdataMsrp = mcdataMsrp
+        it.maxSdsCplaneBytes = maxSdsCplaneBytes; it.mcdataMsrp = mcdataMsrp; it.mcdataFd = mcdataFd
+        it.mcpttEnabled = mcpttEnabled
         it.mcpttServerUri = mcpttServerUri; it.mcdataServerUri = mcdataServerUri
         it.mcvideoEnabled = mcvideoEnabled; it.mcvideoServerUri = mcvideoServerUri; it.autoAnswerMcvideo = autoAnswerMcvideo
         it.floorTimers = floorTimers.toJni()
@@ -303,12 +310,15 @@ data class GroupCallOptions(
     val implicitFloorRequest: Boolean = false,
     /** 개별 호의 개시 방식 요청(TS 24.379 §11.1.1.2.1.1 14)) — `startPrivateCall` 전용. 기본은 싣지 않는다(착신 단말 설정대로). */
     val commencement: CommencementMode = CommencementMode.UNSPECIFIED,
+    /** chat 그룹 합류 — 그룹 문서 [GroupDoc.sessionType] 이 "chat" 인 그룹이면 켠다: mcptt-info session-type `chat`
+     *  (TS 24.379 §10.1.2.2.1.1 13)a)). 아니면 prearranged. `joinGroupCall` 전용. */
+    val chat: Boolean = false,
 ) {
     internal fun toJni(): JniGroupCallOptions = JniGroupCallOptions().also {
         it.commencement = com.cims.ue.sdk.jni.CommencementMode.swigToEnum(commencement.ordinal)
         it.emergency = emergency; it.imminentPeril = imminentPeril
         it.listenOnly = listenOnly; it.fullDuplex = fullDuplex; it.broadcast = broadcast
-        it.implicitFloorRequest = implicitFloorRequest
+        it.implicitFloorRequest = implicitFloorRequest; it.chat = chat
         it.members = StringVector().apply { members.forEach { m -> add(m) } }
     }
 }

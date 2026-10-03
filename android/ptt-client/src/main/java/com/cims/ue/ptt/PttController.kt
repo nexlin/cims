@@ -536,7 +536,10 @@ class PttController(
             autoAnswerMcptt = true,                                // 그룹콜·사설콜 착신 자동 수락(ptt_ue.md §12.3)
             instanceId = instanceId.orEmpty(),
             maxSdsCplaneBytes = c.maxPayloadSdsCplaneBytes,        // 넘는 그룹 SDS 는 media plane(TS 24.282 §9.2.3)
-            mcdataMsrp = true,                                     // 서버발 MSRP 배포 수신(REGISTER Contact ICSI mcdata.sds)
+            mcpttEnabled = true,                                   // REGISTER Contact +g.3gpp.mcptt·ICSI mcptt(TS 24.379 §7.2.1AA)
+            mcdataMsrp = true,                                     // MCData SDS 지원 — 서버발 MSRP 배포 수신 포함(TS 24.282 §7.2.1 2))
+            // MCData FD 지원(TS 24.282 §7.2.1 3)) — SDS 와 같이만 싣는다: CSP 는 ICSI 목록의 «mcdata» 로 MSRP 대상을 가른다(MCData REG-2)
+            mcdataFd = true,
             mcpttServerUri = ueInit?.mcpttServerUri.orEmpty(),     // 경보 Request-URI(TS 24.379 §12.1.1.1 8))
             mcdataServerUri = ueInit?.mcdataServerUri.orEmpty(),   // disposition 통지 Request-URI(TS 24.282 §12.2.1.1)
             // MCVideo(TS 24.281) — 서버가 PSI 를 내줄 때만 등록 태그를 싣는다(영상 = MCVideo 호, MCPTT 호는 음성만 — mcvideo.md §7 D9).

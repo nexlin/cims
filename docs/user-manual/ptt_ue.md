@@ -335,10 +335,12 @@ a=rtpmap:0 PCMU/8000
 a=rtpmap:101 telephone-event/8000
 a=fmtp:101 0-15
 a=sendrecv
-m=application 30001 UDP MCPTT
-a=floorid:0 mstrm:audio
+m=application 30001 udp MCPTT
 a=fmtp:MCPTT mc_queueing
 ```
+
+단말의 floor 제어 채널 표기는 TS 24.380 표 4.3.3.1-1 그대로다(proto `udp`, `a=floorid` 없음). 서버 offer 의 `UDP MCPTT`·`a=floorid` 는 서버 쪽 남은 편차다
+([mcptt_standard_conformance.md](../design/features/mcptt_standard_conformance.md) C4).
 
 단말은 `m=audio`에 자신의 오디오 RTP 포트, `m=application`에 Floor Control 수신 포트를 기재한다.
 

@@ -43,16 +43,16 @@ MCPTT 와 뿌리가 같은 것(제휴 클라이언트 단위·비제휴 멤버 �
 
 | 영역 | 항목 | A | B | C | D |
 |---|---|---|---|---|---|
-| 등록·서비스 인가 (REG) | 4 | — | 3 | 1 | — |
+| 등록·서비스 인가 (REG) | 3 | — | 2 | 1 | — |
 | 제휴·배포 대상 (AFF) | 3 | 1 | 1 | 1 | — |
 | SDS — 시그널링 평면 (SDS) | 8 | — | 3 | 2 | 3 |
 | SDS — 미디어 평면 (MSRP) | 6 | — | 2 | 3 | 1 |
 | disposition 통지 (DISP) | 1 | — | — | 1 | — |
 | 파일 배포 (FD) | 2 | — | — | 1 | 1 |
 | 설정 문서 (CFG) | 1 | — | — | 1 | — |
-| **계** | **25** | **1** | **9** | **10** | **5** |
+| **계** | **24** | **1** | **8** | **10** | **5** |
 
-확인 수준 — ◎ 19 · ○ 3 · △ 3.
+확인 수준 — ◎ 18 · ○ 3 · △ 3.
 
 읽는 순서 — §2(먼저 볼 것) → §3(영역별 전체) → §4(미구현 목록에 빠진 기능) → §5(문서 정정) → §6(묶음과 순서).
 
@@ -79,7 +79,6 @@ MCPTT 와 뿌리가 같은 것(제휴 클라이언트 단위·비제휴 멤버 �
 | SDS-1 · CFG-1 | 규격형 SDS(Request-URI = 참여 기능 PSI, 대상 = 본문)를 받지 못한다 — CSP 는 To 로만 대상을 정하고 `<mcdata-request-uri>` 를 읽지 않는다. ue-init-config 에 MCData PSI 를 광고하면 규격 단말의 SDS 가 404 가 된다 |
 | SDS-2 · MSRP-2 | 서버가 수신자에게 내는 MESSAGE·INVITE 의 mcdata-info 를 고쳐 쓰지 않는다 — 규격 단말은 그룹(`<mcdata-calling-group-id>`)·발신자(`<mcdata-calling-user-id>`)를 몰라 스레드도 disposition 통지도 못 만든다 |
 | AFF-1 | MCData 제휴 PUBLISH(`mcdataPresInfo`)를 MCPTT 제휴로 읽어 MCPTT 제휴 집합을 교체한다 |
-| REG-1 | SDK REGISTER Contact 에 MCData ICSI·특성 태그(`icsi.mcdata`·`g.3gpp.mcdata.sds`·`.fd`)가 없다 |
 
 ## 3. 영역별 목록
 
@@ -87,7 +86,6 @@ MCPTT 와 뿌리가 같은 것(제휴 클라이언트 단위·비제휴 멤버 �
 
 | # | 급 | 대상 | 규격 | CIMS 지금 | 영향 | 확인 |
 |---|---|---|---|---|---|---|
-| REG-1 | B | SDK | §7.2.1 1)~3) — REGISTER Contact 에 `g.3gpp.icsi-ref` `…icsi.mcdata`, SDS 지원이면 `g.3gpp.mcdata.sds` + `…icsi.mcdata.sds`, FD 지원이면 `g.3gpp.mcdata.fd` + `…icsi.mcdata.fd` (shall) | `mcdataMsrp` 일 때 icsi-ref 목록에 `mcdata.sds` 하나만 더한다 — 기본 ICSI·특성 태그·FD 없음(`sdk/core/src/account_map.cpp:93`·`:109-113`) | 규격 IMS 코어의 iFC 가 MCData 서버로 넘기지 않고, 규격 서버는 이 단말을 MCData 클라이언트로 보지 않는다. 우리 CSP 는 이 값을 «MSRP 수신 가능» 표시로만 쓴다 | ◎ |
 | REG-2 | C | CSP | §7.2.1 · NOTE 1 — 서비스별 특성 태그로 MCData 클라이언트·SDS/FD 지원을 가른다. 태그를 뺀 재등록 = MCData 로그오프 | 첫 Contact 의 첫 `+g.3gpp.icsi-ref` 값에 «mcdata» 문자열이 있으면 MSRP 배포 대상(`csp/UserMap.cpp:195-200`) — `mcdata.fd`·기본 ICSI 만 실은 단말도 MSRP INVITE 를 받는다. `g.3gpp.mcdata.sds` 태그는 보지 않는다 | FD 만 지원하는 규격 단말에 SDS 미디어 평면 INVITE 가 간다. MCData 로그오프 개념이 없다(MCPTT REG-4 와 같은 결) | ◎ |
 | REG-3 | B | CSP | §7.3.2 — 제3자 REGISTER 의 mcdata-info `<mcdata-access-token>`·`<mcdata-client-id>` 로 서비스 인가·바인딩(MCData ID·client ID·IMPU). §9.2.2.3.1 3)·§12.2.2.1 3) — 바인딩이 없으면 404 + `141 user unknown to the participating function` | `mcdata-access-token`·141 을 다루는 코드가 CSP 에 없다. 발신자 = From user, 미등록이어도 Digest 신원으로 처리(PUBLISH 는 `csp/CscfModule.cpp:1712` 로그 그대로) | 규격 단말이 재인가를 시작할 신호가 없다. mcx_identity_scope.md §10 은 MCPTT 토큰 검증만 향후 과제로 적었다(MCPTT REG-3 과 같은 뿌리) | ◎ |
 | REG-4 | B | CSP | §7.2.1A·§7.2.2~§7.2.3 · §7.3.3~§7.3.6 — `Event: poc-settings` PUBLISH(P-Preferred-Service `…icsi.mcdata`, Expires 4294967295/0)와 그 SUBSCRIBE 로 서비스 인가·설정 | PUBLISH 는 Event 가 `mcptt`·`presence` 밖이면 489(`csp/CscfModule.cpp:1719-1724`), SUBSCRIBE 도 489(`:1376-1383`) | PUBLISH 로 서비스 인가하는 규격 MCData 단말은 489 를 인가 실패로 본다(MCPTT REG-2 와 같은 뿌리) | ◎ |

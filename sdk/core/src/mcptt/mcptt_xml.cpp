@@ -51,6 +51,24 @@ std::string mcpttInfo(const std::string& sessionType, const std::string& request
     return s;
 }
 
+std::string mcpttInfoOriginating(const std::string& sessionType, const std::string& requestUri, const std::string& clientId,
+                                 int emergency, int imminentPeril, bool broadcast, int alert) {
+    std::string s = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n";
+    s += std::string("<mcpttinfo xmlns=\"") + kNsMcpttInfo + "\">\n  <mcptt-Params>\n";
+    // 요소 순서 = mcptt-ParamsType sequence(Annex F.1) — session-type · mcptt-request-uri · … · mcptt-client-id · 지시자
+    s += "    <session-type>" + xmlEscape(sessionType) + "</session-type>\n";
+    s += infoUri("mcptt-request-uri", requestUri);
+    if (emergency) s += infoBool("emergency-ind", emergency > 0);
+    if (alert) s += infoBool("alert-ind", alert > 0);
+    if (imminentPeril) s += infoBool("imminentperil-ind", imminentPeril > 0);
+    if (broadcast) s += "    <broadcast-ind>true</broadcast-ind>\n";
+    if (!clientId.empty()) s += infoString("mcptt-client-id", clientId);
+    s += "  </mcptt-Params>\n</mcpttinfo>\n";
+    return s;
+}
+
+std::string contactFeatureParams() { return ";+g.3gpp.mcptt;+g.3gpp.icsi-ref=\"urn%3Aurn-7%3A3gpp-service.ims.icsi.mcptt\""; }
+
 std::string alertInfo(const std::string& groupUri, const std::string& callingUserId, const std::string& clientId,
                       bool activate, const std::string& originatedBy, int emergency) {
     std::string s = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n";
@@ -354,8 +372,8 @@ std::string floorSdp(int localPort, bool fullDuplex, bool implicitRequest) {
     std::string fmtp = "a=fmtp:MCPTT mc_queueing";
     if (fullDuplex) fmtp += ";mc_no_floor_ctrl";
     else if (implicitRequest) fmtp += ";mc_implicit_request;mc_granted";
-    return "m=application " + std::to_string(localPort) + " UDP MCPTT\r\n"
-           "a=floorid:0 mstrm:audio\r\n" + fmtp;
+    // TS 24.380 표 4.3.3.1-1 — `m=application <port> udp MCPTT`(proto = "udp"). floor 채널은 fmtp 하나로 협상한다(a=floorid 는 규격에 없다).
+    return "m=application " + std::to_string(localPort) + " udp MCPTT\r\n" + fmtp;
 }
 
 bool isMcpttSdp(const std::string& sdp) {

@@ -125,8 +125,9 @@ struct AccountConfig {
      *  본문이 넘으면 sendGroupSds 가 media plane(MSRP, TS 24.282 §9.2.3)으로 보낸다 — 서버는 초과 MESSAGE 를 403 으로 거절한다(§9.2.2 8)).
      *  0 = 제한 없음. 1:1 SDS 는 늘 시그널링 평면이다(서버 media plane 이 그룹만 받는다 — mcdata_messaging.md §4.7). */
     int maxSdsCplaneBytes = 0;
-    /** 서버발 MSRP 배포를 받는다 — REGISTER Contact 의 `+g.3gpp.icsi-ref` 목록에 ICSI mcdata.sds 를 싣는다(서비스 ICSI 는 한 목록 —
-     *  RFC 3840). false 면 서버가 큰 그룹 SDS 를 FILEURL(FD)로 폴백해 보낸다. */
+    /** MCData SDS 지원 — REGISTER Contact `+g.3gpp.mcdata.sds` + `+g.3gpp.icsi-ref` 목록의 ICSI mcdata·mcdata.sds(TS 24.282 §7.2.1 1)·2) —
+     *  서비스 ICSI 는 한 목록, RFC 3840). SDS 클라이언트는 미디어 평면(MSRP)도 받는다 — 서버는 이 표시로 큰 그룹 SDS 를 MSRP 로 배포하고,
+     *  false 면 FILEURL(FD)로 폴백해 보낸다. */
     bool mcdataMsrp = false;
     /** 참여 MCPTT 기능의 PSI — ue-init-config `<anyExt><MCPTT-Service-Details><Server-URI>`(TS 24.484 §7.2.2.3).
      *  긴급 경보 MESSAGE 의 Request-URI(TS 24.379 §12.1.1.1 8)). 비면 그룹 URI 로 보낸다(CSP 0.2.166 전 서버와의 전환기). */
@@ -135,6 +136,11 @@ struct AccountConfig {
      *  SDS disposition 통지 MESSAGE 의 Request-URI(TS 24.282 §6.2.4.1 4)·§12.2.1.1). 비면 통지를 원 발신자 AoR 로 곧장 보낸다
      *  (CSP 0.2.180 전 서버와의 전환기 — 그 서버는 PSI 로 온 통지를 상관하지 못한다). */
     std::string mcdataServerUri;
+    /** MCPTT 서비스 사용 — REGISTER Contact 에 `+g.3gpp.mcptt` 와 `+g.3gpp.icsi-ref` 목록의 MCPTT ICSI 를 싣는다(TS 24.379 §7.2.1AA). PTT 계정은
+     *  켠다(ServiceProfile::toAccount 가 kind ptt 에 켠다). 빼고 다시 등록하면 MCPTT 로그오프(같은 절 NOTE). */
+    bool mcpttEnabled = false;
+    /** MCData FD 지원 — REGISTER Contact `+g.3gpp.mcdata.fd` + ICSI mcdata·mcdata.fd(TS 24.282 §7.2.1 3)). SDS 지원은 mcdataMsrp. */
+    bool mcdataFd = false;
     /** MCVideo 서비스 사용(mcvideo.md §5.4) — REGISTER Contact 에 `+g.3gpp.mcvideo` 와 `+g.3gpp.icsi-ref` 목록의 mcvideo ICSI 를
      *  싣는다(TS 24.281 §7.2.1AA — 서비스 인가 본문 없는 등록. MCVideo 로그오프 = 태그를 뺀 재-REGISTER, §7.2.1AA NOTE — 등록 뒤에 켜고
      *  끌 때는 Engine::setMcVideoEnabled: 계정·등록·다른 MC 서비스는 그대로 두고 Contact 의 MCVideo 태그만 바꾼다). MCVideo ID 는 effectiveMcpttId(), MCVideo client ID 는 effectiveMcpttClientId()(단일 MC 서비스
@@ -231,6 +237,9 @@ struct GroupCallOptions {
      *  코어가 명시 Floor Request 로 잇는다. 승인 전·호 성립 전에 floorRelease 하면 발언권을 돌려준다(Release 는 answer 에서).
      *  누르는 동안 개시하고 말하는 한 버튼 발신(일제 통화 등)용. listenOnly·fullDuplex 에는 뜻이 없어 무시한다. */
     bool implicitFloorRequest = false;
+    /** chat 그룹 합류 — 그룹 문서 on-network-invite-members 가 false 인 그룹(GroupDoc.sessionType "chat")이면 켠다: mcptt-info session-type
+     *  `chat`(TS 24.379 §10.1.2.2.1.1 13)a)). 아니면 prearranged. joinGroupCall 전용(members 가 있으면 adhoc 이 우선). */
+    bool chat = false;
     /** 개별 호의 개시 방식 요청 — startPrivateCall 전용(그룹 호의 멤버 초대 개시 방식은 제어 기능이 정한다). */
     CommencementMode commencement = CommencementMode::Unspecified;
 };
