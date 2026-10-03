@@ -14,6 +14,7 @@
 //              (--broadcast = 일제 통화 개시 — 발언을 놓은 뒤 서버 Floor Idle(B-bit)이면 코어가 호를 해제, outcome 에 broadcast_released)
 //              (--implicit = 개시 INVITE 가 암묵적 발언 요청 — mc_implicit_request+mc_granted, TS 24.380 §14.2.4·§14.2.5. --ptt-at 0 과 함께)
 //              (--chat = chat 그룹 합류 — session-type chat, TS 24.379 §10.1.2.2.1.1 13)a))
+//              (--private --full-duplex = floor 없는 개별 호 — offer 에 m=application 없음, TS 24.379 §11.1.2.2)
 //              [--upgrade-at S] [--cancel-at S]  (진행 중 긴급 상향·하향 re-INVITE, TS 24.379 §10.1.1.2.1.3·§10.1.1.2.1.4 — outcome 에 conditions)
 //   cimsue-cli [계정 옵션] video-call <groupId> [--prearranged] [--queueing] [--priority N] [--implicit] [--rejoin SESSION_URI]
 //              [--transmit-at S --transmit-len S] [--accept] [--duration S]
@@ -25,7 +26,7 @@
 //   cimsue-cli [계정 옵션] video-answer [--transmit-at S --transmit-len S] [--accept] [--duration S]
 //              (제어 기능의 MCVideo 멤버 초대(§9.2.1.3)를 기다린다 — 코어가 자동 수락(autoAnswerMcvideo), 뒤는 video-call 과 같다)
 //   cimsue-cli [계정 옵션] alert <groupId> [--cancel] [--originated-by ID] [--cancel-group-emergency]   (긴급 경보 MESSAGE, §12.1.1.1·§12.1.1.2)
-//   cimsue-cli [계정 옵션] sds <groupId> <text> [--wait-disposition S]   (MESSAGE 최종 응답까지 대기 — --cplane-max N 을 넘으면 MSRP, 결과
+//   cimsue-cli [계정 옵션] sds <groupId|--private 상대 번호> <text> [--wait-disposition S]   (MESSAGE 최종 응답까지 대기 — --cplane-max N 을 넘으면 MSRP, 결과
 //              plane=media. --wait-disposition = 그 메시지의 전달 확인 통지(TS 24.282 §12.2.1.2)를 S 초까지 기다린다)
 //   cimsue-cli [계정 옵션] xcap-watch <그룹,…> [--duration S]   (규격형 xcap-diff 구독 — GMS = 그 그룹들, CMS = 내 설정 문서, 통지 sel 을
 //              JSON 줄로. TS 24.481 §6.3.13.2.1 · TS 24.484 §6.3.13.2.2, --from-profile ptt 필요)
@@ -112,6 +113,7 @@ struct Opts {
     bool broadcast = false;           // 일제 통화 개시(TS 24.379 §4.12)
     bool implicit = false;            // 암묵적 발언 요청(TS 24.380 §14.2.5) · MCVideo 암묵적 송출 요청(TS 24.581 §14.2.5)
     bool chat = false;                // group-call --chat — chat 그룹 합류(TS 24.379 §10.1.2.2.1.1)
+    bool fullDuplex = false;          // group-call --private --full-duplex — floor 없는 개별 호(§11.1.2.2)
     // MCVideo 그룹 호(video-call · video-answer)
     bool prearranged = false, queueing = false, accept = false;
     int priority = -1;
@@ -157,12 +159,12 @@ void usage() {
         "        또는 --csc-host H [--csc-port N] --user U (--pw P | --pw-env VAR) [--csc-ca FILE] --from-profile volte|ptt\n"
         "  register [--hold S] | call TARGET [--duration S] [--video] | answer [--duration S] [--transfer-to X]\n"
         "  group-call GROUP [--duration S] [--ptt-at S --ptt-len S] [--listen-only] [--emergency] [--broadcast] [--implicit]\n"
-        "             [--chat] [--upgrade-at S] [--cancel-at S]\n"
+        "             [--chat] [--private [--full-duplex] [--answer-mode auto|manual|force]] [--upgrade-at S] [--cancel-at S]\n"
         "  video-call GROUP [--prearranged] [--queueing] [--priority N] [--implicit] [--rejoin URI] [--transmit-at S --transmit-len S]\n"
         "             [--accept] [--duration S]   (MCVideo 그룹 호 — 계정 --mcvideo --mcvideo-psi URI)\n"
         "  video-answer [--transmit-at S --transmit-len S] [--accept] [--duration S]   (MCVideo 멤버 초대 대기 — 코어가 자동 수락)\n"
         "  alert GROUP [--cancel] [--originated-by ID] [--cancel-group-emergency]\n"
-        "  sds GROUP TEXT [--wait-disposition S] | sds-recv [--duration S] [--notify-delivered] | login\n"
+        "  sds GROUP TEXT [--private] [--wait-disposition S] | sds-recv [--duration S] [--notify-delivered] | login\n"
         "  dialog-watch AOR [--duration S] | join AOR [--duration S] | pickup [NUMBER] --code CODE | transfer PEER --to X\n"
         "  drive [--sample-file WAV] [--service volte|voip|ptt]   (구동 모드 — stdin 명령 / stdout JSON 이벤트; cimsue/drive.h 명령표)\n"
         "  link HOST[:PORT] [--pair-key K] [--link-ca PEM | --link-pin FILE] [--sample-file WAV] [--service S] [--duration S]\n"
@@ -248,6 +250,7 @@ bool parse(int argc, char** argv, Opts& o) {
         else if (a == "--broadcast") o.broadcast = true;
         else if (a == "--implicit") o.implicit = true;
         else if (a == "--chat") o.chat = true;
+        else if (a == "--full-duplex") o.fullDuplex = true;
         else if (a == "--cancel") o.alertCancel = true;
         else if (a == "--msrp") o.acc.mcdataMsrp = true;
         else if (a == "--notify-delivered") o.notifyDelivered = true;
@@ -934,6 +937,7 @@ int main(int argc, char** argv) {
         GroupCallOptions go; go.listenOnly = o.listenOnly; go.emergency = o.emergency; go.broadcast = o.broadcast;
         go.implicitFloorRequest = o.implicit;             // --ptt-at 의 floorRequest 는 이미 요청 중이라 무시된다
         go.chat = o.chat;                                 // session-type chat(§10.1.2.2.1.1 13)a))
+        go.fullDuplex = o.fullDuplex;                     // floor 없는 개별 호(§11.1.2.2) — startPrivateCall 만 본다
         go.members = o.groupMembers;                      // --members = 애드혹 그룹 호의 초대 명단(TS 24.379 §17 — session-type adhoc)
         go.commencement = o.answerMode == "auto" ? CommencementMode::Auto : o.answerMode == "manual" ? CommencementMode::Manual
                         : o.answerMode == "force" ? CommencementMode::ForceAuto : CommencementMode::Unspecified;
@@ -1086,7 +1090,8 @@ int main(int argc, char** argv) {
     }
 
     if (o.cmd == "sds") {
-        SdsSend sds = eng.sendGroupSds(acc, o.target, o.text);
+        // --private = 1:1 SDS(대상 = resource-lists, TS 24.282 §9.2.2.2.1 2)) — 그 밖은 그룹 SDS
+        SdsSend sds = o.privateCall ? eng.sendSds(acc, o.target, o.text) : eng.sendGroupSds(acc, o.target, o.text);
         if (!sds.ok) { s.outcome = "sds_send_failed"; rc = 7; return finish(-1); }
         // 최종 결과는 발신 token 으로 — 시그널링 평면 = MESSAGE 응답, media plane = MSRP(저장소 200/REPORT)
         bool got = ls.waitFor([&] { return ls.results.count(sds.token) > 0; }, o.timeoutSec);

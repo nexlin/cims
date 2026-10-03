@@ -30,8 +30,9 @@ constexpr const char* kAffiliationExpires = "4294967295";                      /
 std::string mcpttInfo(const std::string& sessionType, const std::string& requestUri,
                       const std::string& callingUserId, const std::string& callingGroupId,
                       int emergency = 0, int imminentPeril = 0, bool broadcast = false, int alert = 0);
-/** 단말이 여는 그룹 호(편성·chat·애드혹)의 mcptt-info(TS 24.379 §10.1.1.2.1.1 14) · §10.1.2.2.1.1 13) · §17.2.2.1.1 10)) —
- *  session-type · `<mcptt-request-uri>` = 그룹 ID · `<mcptt-client-id>` · 지시자. 발신자 MCPTT ID 는 싣지 않는다(NOTE 2 — 참여 기능이 정한다). */
+/** 단말이 여는 호의 mcptt-info — 그룹 호(편성·chat·애드혹, TS 24.379 §10.1.1.2.1.1 14) · §10.1.2.2.1.1 13) · §17.2.2.1.1 10)) =
+ *  session-type · `<mcptt-request-uri>` = 그룹 ID · `<mcptt-client-id>` · 지시자, 개별 호(§11.1.1.2.1.1 14)c)) = session-type private · 지시자
+ *  (requestUri·clientId 를 비우면 그 요소를 싣지 않는다). 발신자 MCPTT ID 는 싣지 않는다(NOTE 2 — 참여 기능이 정한다). */
 std::string mcpttInfoOriginating(const std::string& sessionType, const std::string& requestUri, const std::string& clientId,
                                  int emergency = 0, int imminentPeril = 0, bool broadcast = false, int alert = 0);
 /** MCPTT 호 다이얼로그 Contact 의 서비스 특성 태그 — `;+g.3gpp.mcptt;+g.3gpp.icsi-ref="…mcptt"`(§10.1.1.2.1.1 4) · §6.2.3.1.1 3)·4)). */

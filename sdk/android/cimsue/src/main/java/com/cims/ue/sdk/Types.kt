@@ -300,7 +300,7 @@ data class GroupCallOptions(
     val imminentPeril: Boolean = false,
     /** 청취 전용 합류(a=recvonly) — 관제 PTT 청취. */
     val listenOnly: Boolean = false,
-    /** 사설콜 전이중(mc_no_floor_ctrl). */
+    /** 사설콜 전이중 = floor 없는 개별 호(offer 에 floor 제어 채널 없음, TS 24.379 §11.1.2.2). */
     val fullDuplex: Boolean = false,
     /** 애드혹 참가자 목록(resource-lists). */
     val members: List<String> = emptyList(),

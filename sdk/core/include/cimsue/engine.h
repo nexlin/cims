@@ -67,7 +67,7 @@ public:
     Result hold(int callId);
     Result resume(int callId);
     /** 마이크 → 호 송신 차단/복구. 반이중 MCPTT 세션에서는 floor 가 마이크를 게이트하므로 무시되고, 전이중 사설콜
-     *  (mc_no_floor_ctrl)에서는 앱의 PTT 로컬 게이트로 쓴다(누르면 승인 톤 뒤 false, 떼면 true). MCVideo 호는 송출 허가 중
+     *  (floor 없는 개별 호)에서는 앱의 PTT 로컬 게이트로 쓴다(누르면 승인 톤 뒤 false, 떼면 true). MCVideo 호는 송출 허가 중
      *  음성 송신만 멈춘다(오디오 인코더 정지 — 영상은 계속, 마이크 경합 정책 mcvideo.md §7 D12). */
     Result setMuted(int callId, bool muted);
     /** 호 → 스피커 청취 on/off (멀티 채널 듣기 정책). */
@@ -97,7 +97,8 @@ public:
     /** 그룹콜 참여(발신 INVITE, multipart mcptt-info[+resource-lists], SDP m=application floor).
      *  groupId 는 bare id(예 "g001"). 반환 callId. 이미 같은 그룹 세션이 있으면 그 callId. */
     int joinGroupCall(int accountId, const std::string& groupId, const GroupCallOptions& opts = GroupCallOptions());
-    /** 1:1 사설콜(session-type=private). peer 는 bare 번호. fullDuplex 면 mc_no_floor_ctrl. */
+    /** 1:1 사설콜(session-type=private, TS 24.379 §11.1.1.2.1.1 — Request-URI = 참여 기능 PSI, 착신자 = resource-lists). peer 는 bare 번호.
+     *  fullDuplex 면 floor 없는 개별 호 — offer 에 floor 제어 채널(m=application)을 싣지 않는다(§11.1.2.2). */
     int startPrivateCall(int accountId, const std::string& peer, const GroupCallOptions& opts = GroupCallOptions());
     /** 세션 이탈(BYE). */
     Result leaveGroupCall(int callId) { return hangup(callId); }

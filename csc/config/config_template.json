@@ -928,10 +928,10 @@
           "key": "UeInitConfig.ServiceDetails.McData.Enable",
           "label": "MCData-Service-Details 포함",
           "type": "bool",
-          "default": false,
+          "default": true,
           "restart": false,
           "reload_hint": "SIGUSR1 로 재로드.",
-          "help": "MCData 를 규격 단말에 광고할 때만 켠다(§7.2.2.7 13~14)."
+          "help": "MCData 참여 기능 PSI 광고(TS 24.484 §7.2.2.1 14)) — 단말은 SDS·FD·통지를 이 PSI 로 보낸다. CSP 가 PSI 형 요청을 받는 판(S17)과 짝."
         },
         {
           "key": "UeInitConfig.ServiceDetails.McData.ServerUri",
@@ -940,7 +940,7 @@
           "default": "",
           "restart": false,
           "reload_hint": "SIGUSR1 로 재로드.",
-          "help": "비우면 sip:mcdata_psi@<PTT 도메인> (명목값 — 켤 때 실제 PSI 로 맞춘다)."
+          "help": "비우면 sip:mcdata_psi@<PTT 도메인> — CSP 는 같은 값을 내부 endpoint 로 받는다."
         }
       ],
       "scope": "service"

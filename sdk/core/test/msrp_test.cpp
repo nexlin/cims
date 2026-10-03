@@ -243,9 +243,18 @@ TEST(Msrp, EngineSendsLargeGroupSdsOverMediaPlane) {
         ASSERT_TRUE(sent.ok) << sent.reason;
         std::string inv = sip.recv("INVITE ");
         ASSERT_FALSE(inv.empty());
+        // TS 24.282 §9.2.3.2.3 — PSI 를 모르는 계정은 Request-URI = 그룹(9)), Accept-Contact 둘(2)·3)) · PPS(4)) · Contact 태그(1)) ·
+        //   mcdata-info group-sds · 그룹 ID · client ID(8)b))
         EXPECT_EQ(inv.rfind("INVITE sip:g005@ptt.test", 0), 0u);
-        EXPECT_NE(headerOf(inv, "Accept-Contact").find("icsi.mcdata.sds\";require;explicit"), std::string::npos);
+        EXPECT_NE(inv.find("\r\nAccept-Contact: *;+g.3gpp.mcdata.sds;require;explicit\r\n"), std::string::npos) << inv;
+        EXPECT_NE(inv.find("\r\nAccept-Contact: *;+g.3gpp.icsi-ref=\"urn%3Aurn-7%3A3gpp-service.ims.icsi.mcdata.sds\";require;explicit\r\n"),
+                  std::string::npos);
         EXPECT_EQ(headerOf(inv, "P-Preferred-Service"), "urn:urn-7:3gpp-service.ims.icsi.mcdata.sds");
+        EXPECT_NE(headerOf(inv, "Contact").find(";+g.3gpp.mcdata.sds;+g.3gpp.icsi-ref=\"urn%3Aurn-7%3A3gpp-service.ims.icsi.mcdata.sds\""),
+                  std::string::npos) << headerOf(inv, "Contact");
+        EXPECT_NE(headerOf(inv, "Content-Type").find("multipart/mixed"), std::string::npos);
+        EXPECT_NE(inv.find("<request-type>group-sds</request-type>"), std::string::npos);
+        EXPECT_NE(inv.find("<mcdataURI>tel:g005</mcdataURI>"), std::string::npos);
         EXPECT_NE(inv.find("m=message 2855 TCP/MSRP *"), std::string::npos);
         EXPECT_NE(inv.find("a=setup:actpass\r\na=sendonly"), std::string::npos);
         const std::string uePath = msrp::pathOfSdp(inv);
@@ -294,11 +303,71 @@ TEST(Msrp, EngineSendsLargeGroupSdsOverMediaPlane) {
         SdsMessage parsed;
         ASSERT_TRUE(mcdata::parse(headerOf(msg, "Content-Type"), sipBodyOf(msg), parsed));
         EXPECT_EQ(parsed.msgId, small.msgId);
+        // §6.2.4.1 — Accept-Contact(특성 태그·ICSI mcdata.sds) · PPS. PSI 를 모르는 계정은 Request-URI = 그룹
+        EXPECT_EQ(msg.rfind("MESSAGE sip:g005@ptt.test", 0), 0u);
+        EXPECT_EQ(headerOf(msg, "Accept-Contact"), "*;+g.3gpp.mcdata.sds;require;explicit, "
+                                                    "*;+g.3gpp.icsi-ref=\"urn%3Aurn-7%3A3gpp-service.ims.icsi.mcdata.sds\";require;explicit");
+        EXPECT_EQ(headerOf(msg, "P-Preferred-Service"), "urn:urn-7:3gpp-service.ims.icsi.mcdata.sds");
         sip.reply(msg, 200, "OK");
         // 그 200 을 엔진이 처리한 뒤에 끝낸다 — 먼저 stop 이 계정을 지우면 늦은 응답이 무효 계정으로 올라와 pjsua2 on_acc_send_request 의
         //   pjsua_acc_get_user_data 가 assert 한다(pjsua 에 계정 유효 검사가 없다 — server45_handoff §11 «엔진 결함 하나»)
         ASSERT_TRUE(l.wait([&] { for (auto& r : l.results) if (r.token == small.token) return true; return false; }));
         EXPECT_FALSE(eng.sendGroupSds(acc, "g005", "hi", true, "not-hex").ok);
+    }
+    eng.stop();
+}
+
+// MCData MESSAGE 의 규격형(TS 24.282 §6.2.4.1 · §9.2.2.2.1 · §10.2.4.2.1) — Request-URI = 참여 MCData 기능 PSI, 대상 = 본문(1:1 = resource-lists
+//   entry + request-type 만, 그룹 = <mcdata-request-uri>), Accept-Contact·PPS = SDS 는 mcdata.sds, FD 는 mcdata.fd
+TEST(McDataRequest, PsiRequestUriAndOneToOneRecipient) {
+    Engine eng;
+    MsrpListener l;
+    EngineConfig cfg;
+    cfg.logLevel = std::getenv("MSRP_LOG") ? 5 : 0;
+    cfg.nullAudioDevice = true;
+    ASSERT_TRUE(eng.start(cfg, &l).ok);
+    {
+        cimsue_test::PjScope pj("mcdata-req");
+        FakeSip sip;
+        AccountConfig ac = account(sip.port);
+        ac.mcdataServerUri = "sip:mcdata-psi@ptt.test";
+        int acc = eng.addAccount(ac);
+        ASSERT_GE(acc, 0);
+        auto expectSent = [&](int64_t token, const char* svc) {
+            std::string msg = sip.recv("MESSAGE ");
+            EXPECT_EQ(msg.rfind("MESSAGE sip:mcdata-psi@ptt.test SIP/2.0", 0), 0u) << msg.substr(0, 80);
+            EXPECT_EQ(headerOf(msg, "P-Preferred-Service"), std::string("urn:urn-7:3gpp-service.ims.icsi.mcdata.") + svc);
+            EXPECT_EQ(headerOf(msg, "Accept-Contact"), std::string("*;+g.3gpp.mcdata.") + svc + ";require;explicit, *;+g.3gpp.icsi-ref=\""
+                                                       "urn%3Aurn-7%3A3gpp-service.ims.icsi.mcdata." + svc + "\";require;explicit");
+            sip.reply(msg, 200, "OK");
+            EXPECT_TRUE(l.wait([&] { for (auto& r : l.results) if (r.token == token) return true; return false; }));
+            return msg;
+        };
+        SdsSend s = eng.sendSds(acc, "+82500000002", "hi");
+        ASSERT_TRUE(s.ok);
+        std::string m = expectSent(s.token, "sds");
+        EXPECT_NE(m.find("<request-type>one-to-one-sds</request-type>"), std::string::npos);
+        EXPECT_EQ(m.find("mcdata-request-uri"), std::string::npos);
+        EXPECT_NE(m.find("<entry uri=\"tel:+82500000002\"/>"), std::string::npos);
+
+        FdFile f; f.url = "https://csc/mcdata/fd/ab"; f.name = "a.txt"; f.size = 3; f.type = "text/plain";
+        s = eng.sendFd(acc, "+82500000002", f);
+        ASSERT_TRUE(s.ok);
+        m = expectSent(s.token, "fd");
+        EXPECT_NE(m.find("<request-type>one-to-one-fd</request-type>"), std::string::npos);
+        EXPECT_NE(m.find("<entry uri=\"tel:+82500000002\"/>"), std::string::npos);
+
+        s = eng.sendGroupFd(acc, "g005", f);
+        ASSERT_TRUE(s.ok);
+        m = expectSent(s.token, "fd");
+        EXPECT_NE(m.find("<request-type>group-fd</request-type>"), std::string::npos);
+        EXPECT_NE(m.find("<mcdataURI>tel:g005</mcdataURI>"), std::string::npos);
+        EXPECT_EQ(m.find("resource-lists"), std::string::npos);
+
+        s = eng.sendGroupSds(acc, "g005", "hello");
+        ASSERT_TRUE(s.ok);
+        m = expectSent(s.token, "sds");
+        EXPECT_NE(m.find("<request-type>group-sds</request-type>"), std::string::npos);
     }
     eng.stop();
 }

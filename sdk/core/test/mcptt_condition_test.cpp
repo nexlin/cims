@@ -643,6 +643,29 @@ TEST(McpttGroupInvite, StandardRequestShape) {
         EXPECT_NE(inv.find("<session-type>chat</session-type>"), std::string::npos) << inv;
         EXPECT_NE(inv.find("<mcpttURI>tel:g002</mcpttURI>"), std::string::npos);
 
+        // 개별 호(§11.1.1.2.1.1) — 1) Request-URI = PSI · 9) 착신자 = resource-lists · 14)c) mcptt-info = session-type private(대상·발신자 ID 없음).
+        //   floor 없는 개별 호는 offer 에 m=application 을 싣지 않는다(§11.1.2.2)
+        for (bool full : {false, true}) {
+            GroupCallOptions po;
+            po.fullDuplex = full;
+            int pid = eng.startPrivateCall(acc, "+82500000002", po);
+            ASSERT_GE(pid, 0);
+            std::string pinv = srv.recv("INVITE ");
+            ASSERT_FALSE(pinv.empty());
+            EXPECT_EQ(pinv.compare(0, 37, "INVITE sip:mcptt-psi@ptt.test SIP/2.0"), 0) << pinv.substr(0, 80);
+            EXPECT_NE(pinv.find("<session-type>private</session-type>"), std::string::npos);
+            EXPECT_EQ(pinv.find("mcptt-request-uri"), std::string::npos) << pinv;
+            EXPECT_EQ(pinv.find("mcptt-calling-user-id"), std::string::npos);
+            EXPECT_NE(pinv.find("application/resource-lists+xml"), std::string::npos);
+            EXPECT_NE(pinv.find("<entry uri=\"tel:+82500000002\""), std::string::npos) << pinv;
+            EXPECT_EQ(countHeader(pinv, "Accept-Contact"), 2);
+            EXPECT_EQ(pinv.find("m=application") == std::string::npos, full) << pinv;
+            EXPECT_EQ(pinv.find("mc_no_floor_ctrl"), std::string::npos);
+            srv.reply(pinv, 403, "Forbidden");
+            srv.recv("ACK ");
+            ASSERT_TRUE(l.wait([&] { return l.lastState.callId == pid && l.lastState.state == CallState::Disconnected; }));
+        }
+
         AccountConfig old = ac;                                             // PSI 를 모르는 계정 — Request-URI = 그룹 URI
         old.mcpttServerUri.clear();
         int acc2 = eng.addAccount(old);
@@ -673,6 +696,22 @@ TEST(McpttGroupInvite, StandardRequestShape) {
         ASSERT_FALSE(srv.recv("SIP/2.0 200").empty());
     }
     eng.stop();
+}
+
+// floor 없는 개별 호의 판정(TS 24.379 §11.1.2.2) — 개별 호 offer 에 floor 제어 채널(m=application … MCPTT)이 없으면 floor 없음.
+//   mc_no_floor_ctrl 은 사전 설정 세션 용(TS 24.380 §14.2.6)이라 보지 않는다. 그룹 호·SDP 없는 초대는 floor 없음으로 보지 않는다
+TEST(McpttXml, PrivateCallWithoutFloorControlBySdp) {
+    auto info = [](const char* type) {
+        return std::string("Content-Type: application/vnd.3gpp.mcptt-info+xml\r\n\r\n<mcpttinfo xmlns=\"urn:3gpp:ns:mcpttInfo:1.0\"><mcptt-Params>"
+                           "<session-type>") + type + "</session-type></mcptt-Params></mcpttinfo>\r\n";
+    };
+    const std::string audio = "Content-Type: application/sdp\r\n\r\nv=0\r\nm=audio 4000 RTP/AVP 96\r\na=rtpmap:96 AMR-WB/16000\r\n";
+    const std::string floor = "m=application 4002 udp MCPTT\r\na=fmtp:MCPTT mc_queueing\r\n";
+    EXPECT_TRUE(mcptt::parseMcpttInfo(info("private") + audio).noFloorCtrl);
+    EXPECT_FALSE(mcptt::parseMcpttInfo(info("private") + audio + floor).noFloorCtrl);
+    EXPECT_FALSE(mcptt::parseMcpttInfo(info("private") + audio + "m=application 4002 UDP MCPTT\r\na=fmtp:MCPTT mc_no_floor_ctrl\r\n").noFloorCtrl);
+    EXPECT_FALSE(mcptt::parseMcpttInfo(info("prearranged") + audio).noFloorCtrl);
+    EXPECT_FALSE(mcptt::parseMcpttInfo(info("private")).noFloorCtrl);
 }
 
 // MCPTT speech 미디어의 i=speech(TS 24.379 §6.2.1 2)d) · §6.2.2 3)e)) — m=audio 바로 뒤, MCPTT SDP 에만, 이미 있으면 그대로

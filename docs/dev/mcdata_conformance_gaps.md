@@ -46,13 +46,12 @@ MCPTT 와 뿌리가 같은 것(제휴 클라이언트 단위·비제휴 멤버 �
 | 등록·서비스 인가 (REG) | 3 | — | 2 | 1 | — |
 | 제휴·배포 대상 (AFF) | 3 | 1 | 1 | 1 | — |
 | SDS — 시그널링 평면 (SDS) | 8 | — | 3 | 2 | 3 |
-| SDS — 미디어 평면 (MSRP) | 6 | — | 2 | 3 | 1 |
+| SDS — 미디어 평면 (MSRP) | 5 | — | 1 | 3 | 1 |
 | disposition 통지 (DISP) | 1 | — | — | 1 | — |
 | 파일 배포 (FD) | 2 | — | — | 1 | 1 |
-| 설정 문서 (CFG) | 1 | — | — | 1 | — |
-| **계** | **24** | **1** | **8** | **10** | **5** |
+| **계** | **22** | **1** | **7** | **9** | **5** |
 
-확인 수준 — ◎ 18 · ○ 3 · △ 3.
+확인 수준 — ◎ 16 · ○ 3 · △ 3.
 
 읽는 순서 — §2(먼저 볼 것) → §3(영역별 전체) → §4(미구현 목록에 빠진 기능) → §5(문서 정정) → §6(묶음과 순서).
 
@@ -117,7 +116,6 @@ CSP 는 참여 기능과 제어 기능을 겸한다.
 
 | # | 급 | 대상 | 규격 | CIMS 지금 | 영향 | 확인 |
 |---|---|---|---|---|---|---|
-| MSRP-1 | B | SDK | §9.2.3.2.3 1)~4)·8)·9) — Contact 에 `g.3gpp.mcdata.sds`·icsi-ref, Accept-Contact 둘(특성 태그·ICSI), P-Preferred-Service, mcdata-info(`group-sds`·`<mcdata-request-uri>`·`<mcdata-client-id>`), Request-URI = PSI | Accept-Contact 는 icsi-ref 하나, 본문은 SDP 만, Request-URI = 그룹(`sdk/core/src/engine.cpp:3404-3411`). MSRP 호에는 Contact 특성 태그를 걸지 않는다(SDP 주입만 — `:1151-1166`) | 규격 서버는 그룹을 본문에서 찾으므로 성립하지 않는다. mcdata_messaging.md §7 «mcdata-info 도 포함» 은 미디어 평면에서 틀리다 | ◎ |
 | MSRP-2 | B | CSP | §9.2.3.4.3 4)~11) — 배포 INVITE 에 Accept-Contact 둘, Referred-By, Contact = 세션 식별자 + isfocus·특성 태그, mcdata-info `<mcdata-request-uri>` = 수신자·`<mcdata-calling-group-id>` = 그룹, P-Asserted-Identity = 제어 기능 PSI, P-Asserted-Service-Id | Accept-Contact icsi-ref 하나·`P-Preferred-Service`·`Answer-Mode: Auto`(`csp/McDataMediaService.cpp:471-477`), mcdata-info 의 request-uri = 그룹·calling-group-id 없음(`:124-152`) | 규격 단말이 배포를 «SDS over media plane» 으로 판별(§6.2.1.2)하지 못하고 그룹을 모른다 | ◎ |
 | MSRP-3 | C | CSP·CMDP | §9.2.3.4.4 끝 — 제어 기능은 첫 멤버의 200 을 받은 뒤 개시자에게 200(§6.3.7.1.23) | cmdp 수신 세션을 잡자마자 개시자에게 200(`csp/McDataMediaService.cpp:214-244`) — 수신자 INVITE 는 MSRP 수신을 마친 뒤 연다(종단·재배포) | 받을 단말이 하나도 없어도 개시자는 성공으로 본다. 종단 설계는 §4.7 에 있으나 편차 표에 없다 | ○ |
 | MSRP-4 | C | SDK·CSP | §9.2.3.2.3 끝 — 단말이 전송 결과에 따라 BYE + `Reason: SIP;cause=200;text="transmission succeeded"`(실패면 cause=480 "transmission failed") | 서버가 배포를 마친 뒤 BYE(`csp/McDataMediaService.cpp:364-375`), SDK 는 5 s 안에 BYE 가 없을 때만 Reason 없이 끊는다(`sdk/core/src/engine.cpp:3340-3349`) | 규격 서버는 단말 BYE 의 Reason 으로 결과를 안다 — 우리 SDK 의 실패가 서버에 닿지 않는다 | ◎ |
@@ -141,7 +139,6 @@ CSP 는 참여 기능과 제어 기능을 겸한다.
 
 | # | 급 | 대상 | 규격 | CIMS 지금 | 영향 | 확인 |
 |---|---|---|---|---|---|---|
-| CFG-1 | C | CSC·CSP | TS 24.484 §7.2.2.1 14) · TS 24.282 §4.2.1 — `MCData-Service-Details/Server-URI` = 참여 MCData 기능 PSI. 단말은 SDS·FD·제휴·서비스 인가를 모두 이 PSI 로 | 기본 off(`csc/src/services/mcptt.py:206`·`:1913-1922`). mcdata_messaging.md §7 은 «모든 사이트 CSP 0.2.180 이상이면 광고» 로 적었는데, CSP 가 그 PSI 로 받는 것은 disposition 통지뿐이다 — SDS 는 404(SDS-1), MSRP INVITE 는 그룹이 아니라 403(`csp/McDataMediaService.cpp:194-197`) | 적힌 조건대로 광고하면 규격 단말의 MCData 가 전부 막힌다. 광고 조건에 SDS-1·MSRP 수용이 빠졌다 | ◎ |
 
 ### 3.9 긴급 경보 (EMG) — TS 24.282 §16
 

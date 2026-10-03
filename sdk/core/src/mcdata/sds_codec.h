@@ -37,15 +37,18 @@ struct Body { std::string contentType; std::string body; };
  *  mcdata-info `<mcdata-client-id>` 로 싣는다(TS 24.282 §9.2.2.2.1 3)b)iv) · 그룹 FD §10.2.4.2.1 3)b)iii) — 제어 기능의 클라이언트 단위 제휴 판정). */
 Body buildGroupSds(const std::string& groupUri, const std::string& text, const std::string& convId,
                    const std::string& msgId, bool requestDelivery, int64_t timeSec, const std::string& clientId = std::string());
-/** 1:1 SDS 발신 본문(request-type one-to-one-sds). peerUri 예 "tel:1002" — 받는 사람. */
+/** 1:1 SDS 발신 본문 — mcdata-info(request-type one-to-one-sds) + resource-lists entry = peerUri(받는 사람, 예 "tel:1002") —
+ *  TS 24.282 §9.2.2.2.1 2). 대상을 Request-URI·<mcdata-request-uri> 로 싣지 않는다. */
 Body buildOneToOneSds(const std::string& peerUri, const std::string& text, const std::string& convId,
                       const std::string& msgId, bool requestDelivery, int64_t timeSec);
 /** 그룹 FD 발신 본문(request-type group-fd) — mcdata-info + FD SIGNALLING PAYLOAD 두 파트(DATA PAYLOAD 없음, §4.5). */
 Body buildGroupFd(const std::string& groupUri, const FdFile& file, const std::string& convId,
                   const std::string& msgId, int64_t timeSec, const std::string& clientId = std::string());
-/** 1:1 FD 발신 본문(request-type one-to-one-fd). peerUri = 받는 사람. */
+/** 1:1 FD 발신 본문 — mcdata-info(request-type one-to-one-fd) + resource-lists entry = peerUri(받는 사람) — §10.2.4.2.1 2). */
 Body buildOneToOneFd(const std::string& peerUri, const FdFile& file, const std::string& convId,
                      const std::string& msgId, int64_t timeSec);
+/** 미디어 평면 그룹 SDS INVITE 의 mcdata-info(TS 24.282 §9.2.3.2.3 8)b)) — group-sds · <mcdata-request-uri> · <mcdata-client-id>. */
+std::string groupSdsInfo(const std::string& groupUri, const std::string& clientId);
 /** SDS NOTIFICATION(전달/읽음 통지) 본문. targetUri 가 있으면 규격형(TS 24.282 §12.2.1.1 — 참여 기능 PSI 로 보낸다):
  *  [mcdata-info <mcdata-calling-group-id> — groupUri 가 있을 때] + SDS NOTIFICATION + resource-lists(entry = targetUri).
  *  targetUri 가 비면 SDS NOTIFICATION 한 파트(원 발신자 AoR 로 곧장 보내는 전환기 형식). */

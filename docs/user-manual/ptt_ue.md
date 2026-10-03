@@ -350,8 +350,8 @@ a=fmtp:MCPTT mc_queueing
 > Ack 학습)에 의존해서만 도달하므로, latch 실패 시 착신자는 GRANT/TAKEN 을 받지 못한다.
 > 단말 구현 주의 — SIP 스택은 대개 INVITE 수신 처리(180 응답) 시점에 응답 SDP 를 **한 번**
 > 만들어 200 OK 에 재사용한다. floor 소켓은 **그 전에** 바인드해 두어야 한다.
-> 단, 서버가 floor 없는 세션(`mc_no_floor_ctrl` 협상)으로 **포트 0** 을 offer 한 경우에는
-> RFC 3264 §6 에 따라 answer 도 포트 0 이어야 한다(거절된 스트림은 되살릴 수 없다).
+> floor 없는 개별 호는 offer 에 `m=application` 자체가 없다(TS 24.379 §11.1.2.2) — 단말은 그것으로 floor 없음을 알고 answer 에도 싣지 않는다.
+> 서버가 floor 스트림을 **포트 0** 으로 offer 한 경우에는 RFC 3264 §6 에 따라 answer 도 포트 0 이어야 한다(거절된 스트림은 되살릴 수 없다).
 
 **fmtp 협상**(TS 24.380 §12.1.2.3) — `a=fmtp:MCPTT` 파라미터가 floor 동작을 정한다.
 

@@ -256,7 +256,9 @@ _UE_INIT_DEFAULTS = {
     "GroupCreationXui": "",
     "ServiceDetails": {"Mcptt": {"Enable": True, "ServerUri": ""},
                        "McVideo": {"Enable": False, "ServerUri": ""},
-                       "McData": {"Enable": False, "ServerUri": ""}},
+                       # MCData 참여 기능 PSI 광고(TS 24.484 §7.2.2.1 14) · TS 24.282 §4.2.1) — CSP 가 PSI 로 온 SDS·FD·MSRP INVITE 를
+                       #   본문 대상으로 받는다(S17 — 규격 갭 CFG-1). 단말은 SDS·FD·통지를 이 PSI 로 보낸다
+                       "McData": {"Enable": True, "ServerUri": ""}},
 }
 _UE_INIT_LAST_GOOD = {}      # base_url → (xml, etag): 설정값이 문서를 깨뜨렸을 때 유지할 마지막 정상 문서
 _UE_INIT_LOADED = False      # 첫 적재 뒤 재적재(SIGUSR1)에서만 변경 통지(UE_INIT_CONFIG_CHANGED)
@@ -2290,8 +2292,8 @@ def _build_ue_init_config_xml(base_url: str) -> str:
     group_creation_xui = str(_ue_init_cfg('GroupCreationXui')).strip() or base_url
 
     # 계층③ 확장 요소 — <on-network><anyExt> 아래 *-Service-Details (§7.2.2.3 "can be added under anyExt").
-    #   Server-URI = participating function 의 PSI. 비우면 sip:{svc}_psi@도메인 (mcptt_psi 는 CSP 의
-    #   affiliation notifier PSI 그대로, mcdata_psi 는 명목값).
+    #   Server-URI = participating function 의 PSI. 비우면 sip:{svc}_psi@도메인 — CSP 는 같은 값을 `/internal/mcptt/endpoint`
+    #   `psi{}` 로 받아 그 PSI 로 온 요청을 해당 서비스로 판정한다(service_psis).
     ext = ''
     #   MCVideo-Service-Details = MCVideo participating function PSI(TS 24.484 §7.2.2.1 b, TS 24.281 §4.2 1)). 순서 = §7.2.2.1
     #   목록(MCPTT → MCVideo → MCData). mcvideo_psi 는 CSP MCVideo 모듈(Roles.MCVIDEO)이 받는 PSI 다.

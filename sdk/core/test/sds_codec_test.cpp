@@ -155,10 +155,12 @@ TEST(SdsCodec, OneToOneSdsRoundTrip) {
     EXPECT_EQ(out.msgId, msg);
     EXPECT_EQ(out.text, "안녕 1:1");
     EXPECT_FALSE(out.notification);
-    // 그룹과 갈리는 자리 — mcdata-info 의 request-type 과 request-uri(받는 사람).
+    // 그룹과 갈리는 자리(TS 24.282 §9.2.2.2.1 2)) — request-type 과 대상 = resource-lists entry(받는 사람). <mcdata-request-uri> 는 싣지 않는다
     EXPECT_NE(b.body.find("<request-type>one-to-one-sds</request-type>"), std::string::npos);
     EXPECT_EQ(b.body.find("group-sds"), std::string::npos);
-    EXPECT_NE(b.body.find("<mcdataURI>tel:1002</mcdataURI>"), std::string::npos);
+    EXPECT_EQ(b.body.find("mcdata-request-uri"), std::string::npos);
+    EXPECT_NE(b.body.find("Content-Type: application/resource-lists+xml\r\nContent-Disposition: recipient-list"), std::string::npos);
+    EXPECT_NE(b.body.find("<entry uri=\"tel:1002\"/>"), std::string::npos);
     // 받는 쪽에서 request-uri 는 나 자신이다 — 그룹으로 오인하지 않는다(내 번호 스레드가 생기지 않게).
     EXPECT_EQ(out.groupUri, "");
 }
@@ -202,6 +204,8 @@ TEST(SdsCodec, OneToOneFdHasNoGroupUri) {
     FdFile f; f.url = "https://csc/mcdata/fd/ab"; f.name = "a.txt"; f.size = 3; f.type = "text/plain";
     mcdata::Body b = mcdata::buildOneToOneFd("tel:1002", f, conv, msg, 1700000000L);
     EXPECT_NE(b.body.find("<request-type>one-to-one-fd</request-type>"), std::string::npos);
+    EXPECT_EQ(b.body.find("mcdata-request-uri"), std::string::npos);                  // 대상 = resource-lists(§10.2.4.2.1 2))
+    EXPECT_NE(b.body.find("<entry uri=\"tel:1002\"/>"), std::string::npos);
     SdsMessage out;
     ASSERT_TRUE(mcdata::parse(b.contentType, b.body, out));
     EXPECT_TRUE(out.fd);
@@ -240,7 +244,7 @@ TEST(McpttXml, InfoBuildParseAndBareId) {
     EXPECT_EQ(mi.callingUserId, "tel:+82500000001");
     EXPECT_TRUE(mi.emergency);
     EXPECT_FALSE(mi.privateCall);
-    EXPECT_TRUE(mi.noFloorCtrl);
+    EXPECT_FALSE(mi.noFloorCtrl);            // floor 없음 = 개별 호 offer 에 m=application 이 없을 때만(TS 24.379 §11.1.2.2) — fmtp 는 보지 않는다
     EXPECT_FALSE(mcptt::parseMcpttInfo("INVITE sip:x SIP/2.0\r\n\r\nv=0").present);
     EXPECT_EQ(mcptt::bareId("<sip:g001@ims.example.org>;tag=1"), "g001");
     EXPECT_EQ(mcptt::bareId("tel:+82500000001"), "+82500000001");

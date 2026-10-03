@@ -221,7 +221,7 @@ struct GroupCallOptions {
     bool imminentPeril = false;       // mcptt-info imminentperil-ind=true
     /** 청취 전용 합류(a=recvonly) — 관제 PTT 청취(dispatch_center.md §5.6). floor 요청 불가. */
     bool listenOnly = false;
-    /** 전이중 1:1(mc_no_floor_ctrl) — floor 없이 마이크 상시 개방. startPrivateCall 전용. */
+    /** 전이중 1:1 = floor 없는 개별 호(TS 24.379 §11.1.2.2 — offer 에 floor 제어 채널 m=application 없음) — 마이크 상시 개방. startPrivateCall 전용. */
     bool fullDuplex = false;
     /** 애드혹 그룹 호의 초대 명단(tel: URI) — resource-lists 로 실리고 mcptt-info session-type 이 `adhoc` 이 된다(TS 24.379 §17.2.2.1.1).
      *  joinGroupCall 전용. 이렇게 연 호를 개시자가 Engine::hangup 하면 **호 전체를 끝낸다**(BYE + Reason «User requested release»,
@@ -278,7 +278,7 @@ struct McpttInfo {
     bool emergency = false, imminentPeril = false;
     bool broadcast = false;           // <broadcast-ind> — 일제 통화(호 속성, 그룹 종류 아님)
     bool privateCall = false;
-    bool noFloorCtrl = false;         // fmtp mc_no_floor_ctrl — 전이중 1:1
+    bool noFloorCtrl = false;         // floor 없는 개별 호 — 개별 호 offer 에 floor 제어 채널(m=application)이 없다(TS 24.379 §11.1.2.2)
 };
 
 /** MCPTT 세션 조건 — 그룹의 긴급·임박 상태(TS 24.379 §6.2.8.1 MEG/MIG)를 이 호에서 본 값. 개시 mcptt-info 로 시작해
@@ -364,7 +364,7 @@ struct CallInfo {
      *  (VideoGroupCallOptions.sessionUri)에 쓴다. MCVideo 호에서 채운다. */
     std::string sessionUri;
     // ── MCPTT ──
-    bool isMcptt = false;             // 그룹콜/사설콜 세션(floor 평면 있음 또는 mc_no_floor_ctrl)
+    bool isMcptt = false;             // 그룹콜/사설콜 세션(mcptt-info 가 있다 — floor 없는 개별 호 포함)
     std::string groupId;              // 그룹 id(bare) 또는 사설콜 상대(bare)
     McpttInfo mcptt;                  // 개시·착신 INVITE 의 mcptt-info(호 종류 — 이후 불변)
     McpttCondition condition;         // 세션 조건의 현재값(긴급·임박 — 바뀌면 onMcpttCondition)

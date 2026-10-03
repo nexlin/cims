@@ -702,7 +702,7 @@ namespace {
 struct McpttSession {
     std::string groupId;                 // bare id (그룹) 또는 상대 번호(사설콜)
     bool isPrivate = false;
-    bool fullDuplex = false;             // mc_no_floor_ctrl — floor 없이 마이크 상시
+    bool fullDuplex = false;             // floor 없는 개별 호(§11.1.2.2 — m=application 없음) — 마이크 상시
     bool listenOnly = false;
     bool emergency = false, imminentPeril = false;   // 세션 조건 현재값 — 개시 옵션·착신 mcptt-info 로 시작(CallInfo.condition 의 원본)
     bool condMine = false;               // 이 단말이 올린 조건
@@ -745,6 +745,7 @@ struct MsrpLeg {
     std::string localPath;                 // 첫 SDP 를 만들 때 c= 주소로 정한다 — 주입 섹션·MSRP From-Path 가 같은 값
     std::string serverPath;                // cmdp a=path — 발신 = 200 OK answer, 수신 = offer
     bool started = false;                  // 입출력 스레드를 띄웠다
+    bool contactSet = false;               // 발신 다이얼로그 Contact 에 SDS 특성 태그를 실었다(TS 24.282 §9.2.3.2.3 1))
     std::shared_ptr<std::atomic<bool>> cancel = std::make_shared<std::atomic<bool>>(false);
     // 발신
     int64_t token = -1;
@@ -1222,6 +1223,10 @@ public:
                                                                         : msrp::sdpSection(msrp->localPath, "active", "recvonly"));
                 if (!msrp->outgoing) whole = msrp::audioInactive(whole);
                 prm.sdp.wholeSdp = whole;
+                // §9.2.3.2.3 1) — 발신 INVITE 의 Contact = SDS 특성 태그·ICSI
+                if (msrp->outgoing && !msrp->contactSet)
+                    msrp->contactSet = setDialogContactParams(
+                        getId(), ";+g.3gpp.mcdata.sds;+g.3gpp.icsi-ref=\"urn%3Aurn-7%3A3gpp-service.ims.icsi.mcdata.sds\"");
             } catch (...) {}
             return;
         }
@@ -3013,9 +3018,10 @@ static int startMcptt(Engine::Impl* o, int accountId, const std::string& id, boo
         //   임박은 긴급·경보 지시자 없이(§6.2.8.1.9). 둘 다 요청하면 긴급이 임박을 대체한다(위 mcptt->imminentPeril).
         // session-type(Annex F.1) — 개별 호 private · 애드혹 그룹 호 adhoc(§17.2.2.1.1 10)a)) · chat 합류 chat(§10.1.2.2.1.1 13)a)) · 그 밖 prearranged.
         //   그룹 호는 §10.1.1.2.1.1 14) 의 모양 — 그룹 ID · MCPTT client ID, 발신자 ID 는 싣지 않는다(NOTE 2).
+        //   개별 호는 §11.1.1.2.1.1 14)c) — session-type private 와 조건 지시자만(착신자 = resource-lists 9), 발신자는 참여 기능이 정한다).
         if (isPrivate)
-            p1.body = mcptt::mcpttInfo("private", "tel:" + id, mcpttId, "tel:" + id, call->mcptt->emergency ? 1 : 0,
-                                       call->mcptt->imminentPeril ? 1 : 0, false, call->mcptt->emergency ? -1 : 0);
+            p1.body = mcptt::mcpttInfoOriginating("private", std::string(), std::string(), call->mcptt->emergency ? 1 : 0,
+                                                  call->mcptt->imminentPeril ? 1 : 0, false, call->mcptt->emergency ? -1 : 0);
         else
             p1.body = mcptt::mcpttInfoOriginating(call->mcptt->adhoc ? "adhoc" : opts.chat ? "chat" : "prearranged", "tel:" + id,
                                                   cfg.effectiveMcpttClientId(), call->mcptt->emergency ? 1 : 0,
@@ -3034,10 +3040,12 @@ static int startMcptt(Engine::Impl* o, int accountId, const std::string& id, boo
             am.hValue = opts.commencement == CommencementMode::Manual ? "Manual" : "Auto";
             prm.txOption.headers.push_back(am);
         }
-        if (!opts.members.empty()) {
+        // resource-lists — 개별 호의 착신자 MCPTT ID 하나(§11.1.1.2.1.1 9)) · 애드혹 그룹 호의 초대 명단(§17.2.2.1.1)
+        if (isPrivate || !opts.members.empty()) {
             pj::SipMultipartPart p2;
             p2.contentType.type = "application"; p2.contentType.subType = "resource-lists+xml";
-            p2.body = mcptt::resourceLists(opts.members);
+            p2.body = mcptt::resourceLists(isPrivate ? std::vector<std::string>{id.find(':') == std::string::npos ? "tel:" + id : id}
+                                                     : opts.members);
             prm.txOption.multipartParts.push_back(p2);
         }
         // §10.1.1.2.1.1 5)·6)·7) — Accept-Contact 둘(특성 태그·ICSI, require;explicit) · P-Preferred-Service
@@ -3046,8 +3054,9 @@ static int startMcptt(Engine::Impl* o, int accountId, const std::string& id, boo
             pj::SipHeader h; h.hName = "Accept-Contact"; h.hValue = ac; prm.txOption.headers.push_back(h);
         }
         { pj::SipHeader h; h.hName = "P-Preferred-Service"; h.hValue = mcptt::kIcsiMcptt; prm.txOption.headers.push_back(h); }
-        // 10) Request-URI = 참여 MCPTT 기능 PSI(그룹은 mcptt-info 의 request-uri) — PSI 를 모르는 계정은 그룹 URI 로. 개별 호는 상대 URI
-        const std::string ruri = !isPrivate && !cfg.mcpttServerUri.empty() ? cfg.mcpttServerUri : "sip:" + id + "@" + cfg.domain;
+        // 10)(개별 호 §11.1.1.2.1.1 1)) Request-URI = 참여 MCPTT 기능 PSI — 대상은 본문(그룹 = mcptt-info request-uri, 개별 = resource-lists).
+        //   PSI 를 모르는 계정은 대상 URI 로
+        const std::string ruri = !cfg.mcpttServerUri.empty() ? cfg.mcpttServerUri : "sip:" + id + "@" + cfg.domain;
         call->makeCall(ruri, prm);
         // makeCall 이 개시 offer 를 동기적으로 만들었다 — 이어지는 offer(re-INVITE)·answer 는 암묵 요청·mc_granted 없이(§14.5)
         if (call->mcptt->floor) call->mcptt->pendingAppSdp = mcptt::floorSdp(call->mcptt->floor->localPort(), false);
@@ -3758,6 +3767,21 @@ void Engine::Impl::startMsrpRecv(int callId, int accountId, const MsrpLeg& leg) 
     });
 }
 
+/** MCData MESSAGE 의 Request-URI·헤더(TS 24.282 §6.2.4.1) — Request-URI = 참여 MCData 기능 PSI(4)), 대상은 본문이 정한다(그룹 =
+ *  <mcdata-request-uri>, 1:1 = resource-lists). PSI 를 모르는 계정(광고 전 사이트)은 대상 URI 로 보낸다. Accept-Contact 둘·P-Preferred-Service =
+ *  SDS·통지면 ICSI mcdata.sds(1)), FD 면 mcdata.fd(2)). */
+static std::string mcdataTarget(const AccountConfig& cfg, const std::string& fallbackUser) {
+    return cfg.mcdataServerUri.empty() ? "sip:" + fallbackUser + "@" + cfg.domain : cfg.mcdataServerUri;
+}
+static std::map<std::string, std::string> mcdataHeaders(bool fd) {
+    const std::string svc = fd ? "fd" : "sds";
+    std::map<std::string, std::string> h;
+    h["Accept-Contact"] = "*;+g.3gpp.mcdata." + svc + ";require;explicit, *;+g.3gpp.icsi-ref=\"urn%3Aurn-7%3A3gpp-service.ims.icsi.mcdata." +
+                          svc + "\";require;explicit";
+    h["P-Preferred-Service"] = "urn:urn-7:3gpp-service.ims.icsi.mcdata." + svc;
+    return h;
+}
+
 bool Engine::Impl::startMsrpInvite(int accountId, const std::string& groupId, int64_t token, const std::string& sigTlv,
                                    const std::string& payTlv) {
     auto it = accounts.find(accountId);
@@ -3774,11 +3798,20 @@ bool Engine::Impl::startMsrpInvite(int accountId, const std::string& groupId, in
         pj::CallOpParam prm(true);
         prm.opt.audioCount = 1;                                          // 더미 오디오(서버는 포트 9 inactive 로 답한다)
         prm.opt.videoCount = 0;
+        // TS 24.282 §9.2.3.2.3 — 2)·3) Accept-Contact 둘 · 4) P-Preferred-Service · 10) P-Preferred-Identity · 8)b) mcdata-info(group-sds·그룹 ID·
+        //   client ID) · 9) Request-URI = 참여 MCData 기능 PSI(모르면 그룹 URI). 1) Contact 태그는 다이얼로그 Contact 에(onCallSdpCreated)
         auto hdr = [&](const char* n, const std::string& v) { pj::SipHeader h; h.hName = n; h.hValue = v; prm.txOption.headers.push_back(h); };
+        hdr("Accept-Contact", "*;+g.3gpp.mcdata.sds;require;explicit");
         hdr("Accept-Contact", std::string("*;+g.3gpp.icsi-ref=\"urn%3Aurn-7%3A3gpp-service.ims.icsi.mcdata.sds\";require;explicit"));
         hdr("P-Preferred-Service", msrp::kIcsiMcDataSds);
         hdr("P-Preferred-Identity", "<" + cfg.aor() + ">");
-        call->makeCall("sip:" + groupId + "@" + cfg.domain, prm);        // offer = pjsua audio + m=message(onCallSdpCreated)
+        prm.txOption.multipartContentType.type = "multipart";
+        prm.txOption.multipartContentType.subType = "mixed";
+        pj::SipMultipartPart info;
+        info.contentType.type = "application"; info.contentType.subType = "vnd.3gpp.mcdata-info+xml";
+        info.body = mcdata::groupSdsInfo("tel:" + groupId, cfg.effectiveMcpttClientId());
+        prm.txOption.multipartParts.push_back(info);
+        call->makeCall(mcdataTarget(cfg, groupId), prm);                 // offer = pjsua audio + m=message(onCallSdpCreated)
     } catch (pj::Error& e) {
         log(1, "msrp invite " + groupId + ": " + e.info(false));
         return false;
@@ -3824,7 +3857,8 @@ SdsSend Engine::sendGroupSds(int accountId, const std::string& groupId, const st
         // mcdata-info 에 MCData client ID(§9.2.2.2.1 3)b)iv) — 단일 MC client ID, 없으면 싣지 않는다)
         mcdata::Body b = mcdata::buildGroupSds("tel:" + groupId, text, mcdata::conversationIdOf(groupId), msgId, requestDelivery, now,
                                                ic->second.effectiveMcpttClientId());
-        return o->doSendRequest(accountId, "MESSAGE", "sip:" + groupId + "@" + ic->second.domain, b.contentType, b.body, {}, token) >= 0;
+        return o->doSendRequest(accountId, "MESSAGE", mcdataTarget(ic->second, groupId), b.contentType, b.body, mcdataHeaders(false),
+                                token) >= 0;
     });
     if (!ok) { out.code = -3; out.reason = "send failed"; return out; }
     out.ok = true;
@@ -3850,8 +3884,8 @@ SdsSend Engine::sendSds(int accountId, const std::string& peer, const std::strin
         // conversation ID 는 **나와 상대의 쌍**으로 짓는다 — 상대가 답장할 때 같은 값이 나와야 한 대화다.
         std::string me = mcptt::bareId(ic->second.effectiveMcpttId());
         mcdata::Body b = mcdata::buildOneToOneSds("tel:" + to, text, mcdata::conversationIdOneToOne(me, to),
-                                                  msgId, requestDelivery, (int64_t)std::time(nullptr));
-        return o->doSendRequest(accountId, "MESSAGE", "sip:" + to + "@" + ic->second.domain, b.contentType, b.body, {}, token) >= 0;
+                                                  msgId, requestDelivery, (int64_t)std::time(nullptr));        // 대상 = resource-lists
+        return o->doSendRequest(accountId, "MESSAGE", mcdataTarget(ic->second, to), b.contentType, b.body, mcdataHeaders(false), token) >= 0;
     });
     if (!ok) { out.code = -3; out.reason = "send failed"; return out; }
     out.ok = true;
@@ -3873,7 +3907,8 @@ SdsSend Engine::sendGroupFd(int accountId, const std::string& groupId, const FdF
         // 그룹 SDS 와 같은 대화(conversation ID) — 파일도 그 그룹 스레드에 놓인다.
         mcdata::Body b = mcdata::buildGroupFd("tel:" + groupId, file, mcdata::conversationIdOf(groupId), msgId,
                                               (int64_t)std::time(nullptr), ic->second.effectiveMcpttClientId());   // §10.2.4.2.1 3)b)iii)
-        return o->doSendRequest(accountId, "MESSAGE", "sip:" + groupId + "@" + ic->second.domain, b.contentType, b.body, {}, token) >= 0;
+        return o->doSendRequest(accountId, "MESSAGE", mcdataTarget(ic->second, groupId), b.contentType, b.body, mcdataHeaders(true),
+                                token) >= 0;
     });
     if (!ok) { out.code = -3; out.reason = "send failed"; return out; }
     out.ok = true;
@@ -3896,8 +3931,8 @@ SdsSend Engine::sendFd(int accountId, const std::string& peer, const FdFile& fil
         if (ic == o->accountCfgs.end()) return false;
         std::string me = mcptt::bareId(ic->second.effectiveMcpttId());
         mcdata::Body b = mcdata::buildOneToOneFd("tel:" + to, file, mcdata::conversationIdOneToOne(me, to), msgId,
-                                                 (int64_t)std::time(nullptr));
-        return o->doSendRequest(accountId, "MESSAGE", "sip:" + to + "@" + ic->second.domain, b.contentType, b.body, {}, token) >= 0;
+                                                 (int64_t)std::time(nullptr));                                 // 대상 = resource-lists
+        return o->doSendRequest(accountId, "MESSAGE", mcdataTarget(ic->second, to), b.contentType, b.body, mcdataHeaders(true), token) >= 0;
     });
     if (!ok) { out.code = -3; out.reason = "send failed"; return out; }
     out.ok = true;
@@ -3926,11 +3961,7 @@ SdsSend Engine::sendSdsNotification(int accountId, const std::string& peer, cons
             auto tel = [](const std::string& id) { return id.find(':') == std::string::npos ? "tel:" + id : id; };
             const std::string gid = mcptt::bareId(groupId);
             mcdata::Body b = mcdata::buildNotification(convId, msgId, notifType, now, tel(to), gid.empty() ? std::string() : tel(gid));
-            std::map<std::string, std::string> h;
-            h["Accept-Contact"] = "*;+g.3gpp.mcdata.sds;require;explicit, "
-                                  "*;+g.3gpp.icsi-ref=\"urn%3Aurn-7%3A3gpp-service.ims.icsi.mcdata.sds\";require;explicit";
-            h["P-Preferred-Service"] = msrp::kIcsiMcDataSds;
-            rc = o->doSendRequest(accountId, "MESSAGE", cfg.mcdataServerUri, b.contentType, b.body, h, token);
+            rc = o->doSendRequest(accountId, "MESSAGE", cfg.mcdataServerUri, b.contentType, b.body, mcdataHeaders(false), token);
         } else {
             mcdata::Body b = mcdata::buildNotification(convId, msgId, notifType, now);
             rc = o->doSendRequest(accountId, "MESSAGE", "sip:" + to + "@" + cfg.domain, b.contentType, b.body, {}, token);

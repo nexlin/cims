@@ -57,7 +57,7 @@ std::string mcpttInfoOriginating(const std::string& sessionType, const std::stri
     s += std::string("<mcpttinfo xmlns=\"") + kNsMcpttInfo + "\">\n  <mcptt-Params>\n";
     // 요소 순서 = mcptt-ParamsType sequence(Annex F.1) — session-type · mcptt-request-uri · … · mcptt-client-id · 지시자
     s += "    <session-type>" + xmlEscape(sessionType) + "</session-type>\n";
-    s += infoUri("mcptt-request-uri", requestUri);
+    if (!requestUri.empty()) s += infoUri("mcptt-request-uri", requestUri);
     if (emergency) s += infoBool("emergency-ind", emergency > 0);
     if (alert) s += infoBool("alert-ind", alert > 0);
     if (imminentPeril) s += infoBool("imminentperil-ind", imminentPeril > 0);
@@ -278,7 +278,9 @@ McpttInfo parseMcpttInfo(const std::string& whole) {
     mi.imminentPeril = textIsTrue(localText(x, "imminentperil-ind", &f));
     mi.broadcast = textIsTrue(localText(x, "broadcast-ind", &f));
     mi.privateCall = mi.sessionType == "private";
-    mi.noFloorCtrl = whole.find("mc_no_floor_ctrl") != std::string::npos;
+    // floor 없는 개별 호 = offer 에 floor 제어 채널(m=application … MCPTT)이 없다(TS 24.379 §11.1.2.2). `mc_no_floor_ctrl` 은 사전 설정 세션
+    //   용이라(TS 24.380 §14.2.6) 이 판정에 쓰지 않는다. SDP 가 없는 초대는 판정하지 않는다.
+    mi.noFloorCtrl = mi.privateCall && whole.find("m=audio") != std::string::npos && !isMcpttSdp(whole);
     return mi;
 }
 

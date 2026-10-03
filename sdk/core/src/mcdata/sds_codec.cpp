@@ -152,17 +152,22 @@ std::string fdSignallingTlv(const std::string& convId, const std::string& msgId,
     return s;
 }
 
+// mcdata-info 발신 본문(Annex D) — request-type · <mcdata-request-uri>(그룹 요청만 — 1:1 대상은 resource-lists) · <mcdata-client-id>(그룹 요청만)
 static std::string infoXml(const std::string& requestType, const std::string& uri, const std::string& clientId = std::string()) {
     return "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
            "<mcdatainfo xmlns=\"urn:3gpp:ns:mcdataInfo:1.0\">\n"
            "  <mcdata-Params>\n"
-           "    <request-type>" + requestType + "</request-type>\n"
-           "    <mcdata-request-uri type=\"Normal\"><mcdataURI>" + uri + "</mcdataURI></mcdata-request-uri>\n" +
+           "    <request-type>" + requestType + "</request-type>\n" +
+           (uri.empty() ? std::string()
+                        : "    <mcdata-request-uri type=\"Normal\"><mcdataURI>" + xmlscan::esc(uri) + "</mcdataURI></mcdata-request-uri>\n") +
            (clientId.empty() ? std::string()
-                             : "    <mcdata-client-id type=\"Normal\"><mcdataString>" + clientId + "</mcdataString></mcdata-client-id>\n") +
+                             : "    <mcdata-client-id type=\"Normal\"><mcdataString>" + xmlscan::esc(clientId) +
+                                   "</mcdataString></mcdata-client-id>\n") +
            "  </mcdata-Params>\n"
            "</mcdatainfo>";
 }
+
+std::string groupSdsInfo(const std::string& groupUri, const std::string& clientId) { return infoXml("group-sds", groupUri, clientId); }
 
 static void appendPart(std::string& b, const std::string& boundary, const std::string& ct, const char* cte,
                        const std::string& content) {
@@ -174,49 +179,65 @@ static void appendPart(std::string& b, const std::string& boundary, const std::s
     b += "\r\n";
 }
 
-// 그룹과 1:1 은 **mcdata-info 의 request-type·request-uri 만** 다르다(TS 24.282 Annex D) — 서명·payload
-//   파트는 같다. 그래서 한 함수로 짓고 둘은 그 앞에서 갈린다.
-static Body buildSds(const char* requestType, const std::string& uri, const std::string& text,
+// 대상 MCData ID 하나 — resource-lists entry(RFC 4826 · RFC 5366 recipient-list). 1:1 SDS·FD 의 대상(§9.2.2.2.1 2)a) · §10.2.4.2.1 2)a))와
+//   통지 대상(§12.2.1.1 3))이 같은 모양이다.
+static void appendRecipient(std::string& b, const std::string& boundary, const std::string& uri) {
+    b += "--" + boundary + "\r\n";
+    b += std::string("Content-Type: ") + kCtResourceLists + "\r\n";
+    b += "Content-Disposition: recipient-list\r\n\r\n";
+    b += "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+         "<resource-lists xmlns=\"urn:ietf:params:xml:ns:resource-lists\">\n"
+         "  <list>\n"
+         "    <entry uri=\"" + xmlscan::esc(uri) + "\"/>\n"
+         "  </list>\n"
+         "</resource-lists>\r\n";
+}
+
+// 그룹과 1:1 은 **대상 표기만** 다르다 — 그룹 = mcdata-info <mcdata-request-uri>·<mcdata-client-id>(TS 24.282 §9.2.2.2.1 3)b) ·
+//   §10.2.4.2.1 3)b)), 1:1 = resource-lists entry(2)a)) 와 request-type 만 실은 mcdata-info(2)b)). 서명·payload 파트는 같다.
+static Body buildSds(const char* requestType, const std::string& groupUri, const std::string& peerUri, const std::string& text,
                      const std::string& convId, const std::string& msgId, bool requestDelivery, int64_t timeSec,
                      const std::string& clientId = std::string()) {
     std::string boundary = "mcdata-" + msgId.substr(0, 16);
     std::string body;
-    appendPart(body, boundary, kCtInfo, nullptr, infoXml(requestType, uri, clientId));
+    appendPart(body, boundary, kCtInfo, nullptr, infoXml(requestType, groupUri, clientId));
     appendPart(body, boundary, kCtSignalling, "base64", base64Encode(sdsSignallingTlv(convId, msgId, requestDelivery, timeSec)));
     appendPart(body, boundary, kCtPayload, "base64", base64Encode(sdsPayloadTlv(text)));
+    if (!peerUri.empty()) appendRecipient(body, boundary, peerUri);
     body += "--" + boundary + "--\r\n";
     return Body{"multipart/mixed;boundary=" + boundary, body};
 }
 
 Body buildGroupSds(const std::string& groupUri, const std::string& text, const std::string& convId,
                    const std::string& msgId, bool requestDelivery, int64_t timeSec, const std::string& clientId) {
-    return buildSds("group-sds", groupUri, text, convId, msgId, requestDelivery, timeSec, clientId);
+    return buildSds("group-sds", groupUri, std::string(), text, convId, msgId, requestDelivery, timeSec, clientId);
 }
 
 Body buildOneToOneSds(const std::string& peerUri, const std::string& text, const std::string& convId,
                       const std::string& msgId, bool requestDelivery, int64_t timeSec) {
-    return buildSds("one-to-one-sds", peerUri, text, convId, msgId, requestDelivery, timeSec);
+    return buildSds("one-to-one-sds", std::string(), peerUri, text, convId, msgId, requestDelivery, timeSec);
 }
 
-static Body buildFd(const char* requestType, const std::string& uri, const FdFile& file,
+static Body buildFd(const char* requestType, const std::string& groupUri, const std::string& peerUri, const FdFile& file,
                     const std::string& convId, const std::string& msgId, int64_t timeSec,
                     const std::string& clientId = std::string()) {
     std::string boundary = "mcdata-fd-" + msgId.substr(0, 14);
     std::string body;
-    appendPart(body, boundary, kCtInfo, nullptr, infoXml(requestType, uri, clientId));
+    appendPart(body, boundary, kCtInfo, nullptr, infoXml(requestType, groupUri, clientId));
     appendPart(body, boundary, kCtSignalling, "base64", base64Encode(fdSignallingTlv(convId, msgId, file, timeSec)));
+    if (!peerUri.empty()) appendRecipient(body, boundary, peerUri);
     body += "--" + boundary + "--\r\n";
     return Body{"multipart/mixed;boundary=" + boundary, body};
 }
 
 Body buildGroupFd(const std::string& groupUri, const FdFile& file, const std::string& convId,
                   const std::string& msgId, int64_t timeSec, const std::string& clientId) {
-    return buildFd("group-fd", groupUri, file, convId, msgId, timeSec, clientId);
+    return buildFd("group-fd", groupUri, std::string(), file, convId, msgId, timeSec, clientId);
 }
 
 Body buildOneToOneFd(const std::string& peerUri, const FdFile& file, const std::string& convId,
                      const std::string& msgId, int64_t timeSec) {
-    return buildFd("one-to-one-fd", peerUri, file, convId, msgId, timeSec);
+    return buildFd("one-to-one-fd", std::string(), peerUri, file, convId, msgId, timeSec);
 }
 
 Body buildNotification(const std::string& convId, const std::string& msgId, int notifType, int64_t timeSec,
@@ -240,18 +261,7 @@ Body buildNotification(const std::string& convId, const std::string& msgId, int 
                    "  </mcdata-Params>\n"
                    "</mcdatainfo>");
     appendPart(body, boundary, kCtSignalling, "base64", base64Encode(tlv));                          // 6) SDS NOTIFICATION
-    // 3) 통지 대상 MCData ID — resource-lists entry 하나(RFC 5366 recipient-list)
-    if (!targetUri.empty()) {
-        body += "--" + boundary + "\r\n";
-        body += std::string("Content-Type: ") + kCtResourceLists + "\r\n";
-        body += "Content-Disposition: recipient-list\r\n\r\n";
-        body += "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
-                "<resource-lists xmlns=\"urn:ietf:params:xml:ns:resource-lists\">\n"
-                "  <list>\n"
-                "    <entry uri=\"" + xmlscan::esc(targetUri) + "\"/>\n"
-                "  </list>\n"
-                "</resource-lists>\r\n";
-    }
+    if (!targetUri.empty()) appendRecipient(body, boundary, targetUri);                              // 3) 통지 대상 MCData ID
     body += "--" + boundary + "--\r\n";
     return Body{"multipart/mixed;boundary=" + boundary, body};
 }

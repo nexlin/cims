@@ -175,7 +175,7 @@ typedef struct {
     int32_t            emergency;
     int32_t            imminent_peril;
     int32_t            listen_only;     /* a=recvonly 청취 합류 — floor 요청 불가 */
-    int32_t            full_duplex;     /* mc_no_floor_ctrl — start_private_call 전용 */
+    int32_t            full_duplex;     /* floor 없는 개별 호(offer 에 m=application 없음, TS 24.379 §11.1.2.2) — start_private_call 전용 */
     const char* const* members;         /* 애드혹 임시 그룹 멤버(tel: URI) — join_group_call 전용 */
     int32_t            member_count;
     int32_t            broadcast;       /* 일제 통화 개시(<broadcast-ind>true, TS 24.379 §4.12) — join_group_call 전용 */
