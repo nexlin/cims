@@ -181,8 +181,6 @@ static CSdpMedia _BuildMsrpMedia( int iPort, const std::string &strProtocol, con
 
 void CMcDataMediaService::OnIncomingMsrpInvite( const char *pszCallId, const char *pszFrom, const char *pszTo,
                                                 CSipCallRtp *pclsRtp, CSipMessage *pclsMessage ) {
-    (void)pclsMessage;
-
     if ( !IsEnabled() || !gclsCmdpClient.IsConnected() ) {
         CLog::Print( LOG_ERROR, "McDataMedia: MSRP INVITE from(%s) but cmdp %s — 500", pszFrom,
                      IsEnabled() ? "disconnected" : "disabled" );
@@ -190,13 +188,50 @@ void CMcDataMediaService::OnIncomingMsrpInvite( const char *pszCallId, const cha
         return;
     }
 
-    // phase 1: 그룹 SDS 만 (1:1 standalone 은 후속)
-    CspPttGroup clsGroup;
-    if ( gclsGroupMap.Select( pszTo, clsGroup ) == false ) {
-        CLog::Print( LOG_INFO, "McDataMedia: MSRP INVITE target(%s) is not a group — 403", pszTo );
+    // 대상 — Request-URI 는 참여 기능 PSI, 그룹은 mcdata-info <mcdata-request-uri>(TS 24.282 §9.2.3.2.3 · §9.2.3.3.3
+    //   4)a)). request-type 이 없으면 제어 기능을 정하지 못한다 — 404 + 142(5)), 결정 D10 — Request-URI 를 그룹으로
+    //   읽는 옛 형식은 받지 않는다). 1:1 standalone SDS over media plane(4)b))은 아직 없다 — 403.
+    auto rejectWarn = [&]( int iStatus, int iWarn ) {
+        std::vector<std::pair<std::string, std::string>> vecHdr;
+        if ( iWarn > 0 )
+            vecHdr.emplace_back(
+                "Warning", McpttWarning( iWarn, McDataWarnText( iWarn ), gclsServiceMap.GetDomainByKind( "ptt" ) ) );
+        gclsUserAgent.StopCall( pszCallId, iStatus, NULL, vecHdr );
+    };
+    CMcDataSdsInfo clsReq;
+    if ( pclsMessage ) {
+        const std::string strCtype =
+            pclsMessage->m_clsContentType.m_strType + "/" + pclsMessage->m_clsContentType.m_strSubType;
+        McDataParseInfo( McBodyPart( pclsMessage->m_strBody, strCtype, "vnd.3gpp.mcdata-info+xml" ), clsReq );
+    }
+    if ( clsReq.m_strRequestType == "one-to-one-sds" ) {
+        CLog::Print( LOG_INFO, "McDataMedia: MSRP INVITE from(%s) one-to-one-sds — 미디어 평면 1:1 미제공 → 403",
+                     pszFrom );
         gclsUserAgent.StopCall( pszCallId, SIP_FORBIDDEN );
         return;
     }
+    bool bGroupReq = false;
+    std::string strGroupId;
+    int iTargetWarn = 0;
+    const int iTarget = clsReq.m_strRequestType == "group-sds"
+                            ? McDataRequestTarget( clsReq, bGroupReq, strGroupId, &iTargetWarn )
+                            : ( iTargetWarn = 142, SIP_NOT_FOUND );
+    if ( iTarget != 0 ) {
+        CLog::Print( LOG_INFO, "McDataMedia: MSRP INVITE from(%s) request-type(%s) — 대상 없음 → %d %d", pszFrom,
+                     clsReq.m_strRequestType.empty() ? "-" : clsReq.m_strRequestType.c_str(), iTarget, iTargetWarn );
+        rejectWarn( iTarget, iTargetWarn );
+        return;
+    }
+    // §6.3.3 2) — 그룹 문서가 없으면 404 + 113
+    CspPttGroup clsGroup;
+    if ( gclsGroupMap.Select( strGroupId.c_str(), clsGroup ) == false &&
+         ( !gclsGroupMap.LoadOneFromDb( strGroupId.c_str() ) ||
+           gclsGroupMap.Select( strGroupId.c_str(), clsGroup ) == false ) ) {
+        CLog::Print( LOG_INFO, "McDataMedia: MSRP INVITE group(%s) — 그룹 문서 없음 → 404 113", strGroupId.c_str() );
+        rejectWarn( SIP_NOT_FOUND, 113 );
+        return;
+    }
+    pszTo = strGroupId.c_str();
 
     // 게이트 — allow_sds·멤버십·발신자 제휴(§9.2.3.4.4 7)c)·d)·g)), 그 뒤 배포 대상(7)h)·i) — 제휴 멤버가 없으면 403
     // 198,
@@ -208,11 +243,7 @@ void CMcDataMediaService::OnIncomingMsrpInvite( const char *pszCallId, const cha
         iGate = McDataDeliveryTargets( clsGroup, pszFrom, pszTo, vecProbe, &iWarn );
     }
     if ( iGate != 0 ) {
-        std::vector<std::pair<std::string, std::string>> vecHdr;
-        if ( iWarn > 0 )
-            vecHdr.emplace_back(
-                "Warning", McpttWarning( iWarn, McDataWarnText( iWarn ), gclsServiceMap.GetDomainByKind( "ptt" ) ) );
-        gclsUserAgent.StopCall( pszCallId, iGate, NULL, vecHdr );
+        rejectWarn( iGate, iWarn );
         return;
     }
 
@@ -242,11 +273,15 @@ void CMcDataMediaService::OnIncomingMsrpInvite( const char *pszCallId, const cha
         return;
     }
 
-    // 200 OK answer — 세션 c= 는 cmdp IP. 오디오는 오퍼 에코(포트 9, inactive), message 는 cmdp 종단.
+    // 200 OK answer — 세션 c= 는 cmdp IP, message 는 cmdp 종단. 오디오는 offer 에 있을 때만 에코(포트 9, inactive) —
+    //   answer 의 m= 수·순서 = offer(RFC 3264 §6). 규격형 offer 는 m=message 뿐이다(TS 24.282 §9.2.3.2.1).
     CSipCallRtp clsAnswer;
     clsAnswer.m_strIp = strCmdpIp;
     clsAnswer.m_iPort = 9;
-    clsAnswer.m_clsMediaList.push_back( _BuildInactiveAudio( pclsAudio ) );
+    // 음성 방향 = inactive — psip 는 media-list SDP 의 audio·video 방향을 다이얼로그 방향(m_eDirection)으로 다시 쓴다.
+    //   SetDirection 은 m=message 방향까지 바꾸므로 값만 둔다.
+    clsAnswer.m_eDirection = E_RTP_INACTIVE;
+    if ( pclsAudio ) clsAnswer.m_clsMediaList.push_back( _BuildInactiveAudio( pclsAudio ) );
     clsAnswer.m_clsMediaList.push_back(
         _BuildMsrpMedia( iCmdpMsrpPort, "TCP/MSRP", strMsrpPath, "passive", "recvonly" ) );
 
@@ -461,6 +496,7 @@ bool CMcDataMediaService::InviteMsrpReceiver( const std::string &strGroup, const
     CSipCallRtp clsOffer;
     clsOffer.m_strIp = strCmdpIp;
     clsOffer.m_iPort = 9;
+    clsOffer.m_eDirection = E_RTP_INACTIVE;  // 더미 오디오 방향(위 answer 와 같은 까닭)
     clsOffer.m_clsMediaList.push_back( _BuildInactiveAudio( NULL ) );
     clsOffer.m_clsMediaList.push_back(
         _BuildMsrpMedia( iCmdpMsrpPort, "TCP/MSRP", strMsrpPath, "passive", "sendonly" ) );

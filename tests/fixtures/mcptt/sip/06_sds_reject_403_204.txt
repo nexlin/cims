@@ -1,0 +1,9 @@
+SIP/2.0 403 Forbidden
+Via: SIP/2.0/TLS 10.10.1.21:50601;branch=z9hG4bK-sds-o2;rport=50601;received=10.10.1.21
+From: <sip:+82510002001@ptt.cims.example.kr>;tag=sds-o2-f
+To: <sip:mcdata_psi@ptt.cims.example.kr>;tag=csp-e204
+Call-ID: sds-o2@10.10.1.21
+CSeq: 1 MESSAGE
+Warning: 399 ptt.cims.example.kr "204 unable to determine targeted user for one-to-one SDS"
+Content-Length: 0
+

@@ -452,9 +452,9 @@ bool CSipDialog::AddSdp( CSipMessage * pclsMessage, bool bKeepSdpVersion )
 	else if( strstr( szSdp, "m=application" ) == NULL && HasRemoteApplicationMedia() )
 	{
 		// RFC 3264 §6: answer 의 m= 라인 개수·순서는 offer 와 같아야 하고, 쓰지 않는 스트림은
-		//   라인을 지우는 것이 아니라 **포트 0** 으로 거절한다. floor 없는 세션(private 멀티 —
-		//   mc_no_floor_ctrl 협상 결과)은 광고할 floor 포트가 없지만, 상대가 제안한 floor
-		//   스트림을 라인째 생략하면 m= 개수가 어긋나 엄격한 단말이 answer 를 거부한다.
+		//   라인을 지우는 것이 아니라 **포트 0** 으로 거절한다. floor 없는 세션은 광고할 floor 포트가
+		//   없지만, 상대가 제안한 floor 스트림을 라인째 생략하면 m= 개수가 어긋나 엄격한 단말이
+		//   answer 를 거부한다.
 		//   세션 중 offer(re-INVITE)도 같은 규칙 — 이미 협상된 m= 라인은 제거할 수 없다.
 		iLen += snprintf( szSdp + iLen, sizeof(szSdp)-iLen, "m=application 0 UDP MCPTT\r\n" );
 	}

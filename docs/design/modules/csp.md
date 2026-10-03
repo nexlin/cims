@@ -260,16 +260,17 @@ CMP AddGroup 응답 → {ip, floor_port, member_ports}
             └→ CMP McpttGroup::addMember(floorPort=UE floor 포트)
 ```
 
-floor 없는 세션(`floor_control:"off"` — private 멀티)은 CMP 가 `floor_port` 를 주지 않는다.
-이때 fan-out SDP 의 floor 라인은 **`m=application 0`**(미사용, RFC 3264 §6)으로 내고
-`a=fmtp:MCPTT mc_no_floor_ctrl` 만 에코한다 — 관례 fallback(멤버 audio+1)을 그대로 두면
-멤버 RTCP 포트가 floor 로 오광고되어 단말이 그 포트로 floor 연결을 시도한다.
+floor 없는 세션(`floor_control:"off"` — floor 없는 개별 호)은 CMP 가 `floor_port` 를 주지 않는다.
+이때 착신 INVITE offer 에는 **발언권 제어 채널(`m=application`)을 싣지 않는다** — 착신 단말은
+`m=application` 이 없는 offer 로 floor 없는 개별 호를 안다(TS 24.379 §11.1.2.2 끝 문단 ·
+§11.1.2.3.2, `WrapMultipartBody`). 관례 fallback(멤버 audio+1)을 광고하면 멤버 RTCP 포트가
+floor 로 오광고되므로 floor 포트도 0 으로 둔다.
 
-발신자에게 주는 **200 OK answer 도 같은 규칙**을 따른다 — psip `CSipDialog::AddSdp` 는 광고할
-floor 포트가 없어도 상대 offer 에 `m=application` 이 있었으면 **포트 0 라인을 반드시 넣는다**
-(RFC 3264 §6: answer 의 m= 라인 개수·순서는 offer 와 같아야 하고, 쓰지 않는 스트림은 라인을
-지우는 것이 아니라 포트 0 으로 거절한다). 라인을 생략하면 m= 개수가 어긋나 협상을 엄격히
-구현한 단말이 answer 를 거부한다. 세션 중 offer(re-INVITE)에도 같은 규칙이 적용된다.
+발신자에게 주는 **200 OK answer** 는 offer 의 m= 를 따른다 — floor 없는 개별 호의 offer 에는
+`m=application` 이 없으므로 answer 에도 없다. psip `CSipDialog::AddSdp` 는 광고할 floor 포트가
+없어도 상대 offer 에 `m=application` 이 있었으면 **포트 0 라인을 반드시 넣는다**(RFC 3264 §6:
+answer 의 m= 라인 개수·순서는 offer 와 같아야 하고, 쓰지 않는 스트림은 라인을 지우는 것이 아니라
+포트 0 으로 거절한다). 세션 중 offer(re-INVITE)에도 같은 규칙이 적용된다.
 
 **그룹 단위 통일 sesid:**
 
@@ -566,22 +567,28 @@ answer(psip `CSipDialog::AddSdp`)의 fmtp 는 `AnswerFloorFmtp` 가 정해 `CSip
 
 **Private call (1:1) — TS 24.379 §11.1 on-demand**
 
-mcptt-info `session-type:private` INVITE 를 받으면(타겟=그룹이 아닌 등록 PTT 가입자, 미등록이면
-480) 합성 2인 ephemeral 그룹 `priv-<발신>-<착신>` 을 만들어 **기존 그룹콜 경로(ProcessGroupCall
-fan-out·CMP 세션·teardown)를 그대로 재사용**한다(`ModuleDispatcher::EventIncomingCall`, 계약
+mcptt-info `session-type:private` INVITE 를 받으면 합성 2인 ephemeral 그룹 `priv-<발신>-<착신>` 을 만들어 **기존 그룹콜
+경로(ProcessGroupCall fan-out·CMP 세션·teardown)를 그대로 재사용**한다(`ModuleDispatcher::EventIncomingCall`, 계약
 [../features/mcptt_csp_cmp_roadmap_contract.md](../features/mcptt_csp_cmp_roadmap_contract.md) §A.1).
+
+- **착신자**(TS 24.379 §11.1.1.2.1.1 1)·9)) — Request-URI 는 참여 기능 PSI, 착신자는 `application/resource-lists+xml` 의
+  entry 하나(`McpttPrivateCalledParty`). resource-lists 가 없거나 entry 가 둘 이상이면 403 + `145 unable to determine called
+  party`(§11.1.1.3.1.1 8)·9)) — Request-URI·`<mcptt-request-uri>` 를 착신자로 읽는 옛 형식은 받지 않는다(규격 갭 계획 결정 D10).
+  요청 형식 골든 = `tests/fixtures/mcptt/sip/`(01·02·03). 착신자의 등록 바인딩이 없으면 404(§11.1.1.3.2 7)).
 
 - **인가**(TS 24.379 §11.1.1.3.1.1 10)·11)·18) · §11.1.1.3.2 8)) — 그룹을 만들기 전에 user profile(ptt_user_profile — CSC 문서와
   같은 열)로: 발신 `allow_private_call` 거짓 403 + `107` · `Priv-Answer-Mode: Auto` 403 + `143`(강제 자동 응답 인가 없음) ·
   `allow_private_call_to_any_user` 거짓이면 상대가 PrivateCallList(같은 그룹 동료 멤버, 없으면 지정 긴급 수신자 —
-  `PrivateCallListContains`) 밖일 때 403 + `144` · (상대 미등록 480) · 착신 `allow_private_call_participation` 거짓 403 + `127`.
+  `PrivateCallListContains`) 밖일 때 403 + `144` · (상대 미등록 404) · 착신 `allow_private_call_participation` 거짓 403 + `127`.
   착신 INVITE 의 `Answer-Mode` = 발신 INVITE 값(그룹 `_answerMode`, 없으면 `Auto` — 18)d)).
 - **affiliation 불요** — `_requireAffiliation=false` 로 멤버십 게이트를 우회한다(상대 MCPTT ID
   직접 지정). `_isAdhoc=true` 라 통화 종료 시 GroupMap 에서 제거된다(ephemeral).
-- **floor 유무** — 발신 offer 의 fmtp `mc_no_floor_ctrl`(G17) 협상 시
-  `PTT_GROUP_ADD.floor_control:"off"`(full-duplex, `floor_port` 미광고). 기본은 on(2인 floor).
+- **floor 유무** — 발신 offer 에 발언권 제어 채널(`m=application <port≠0> udp MCPTT`, TS 24.380 표 4.3.3.1-1)이 있으면
+  on(2인 floor), 없으면 floor 없는 개별 호(TS 24.379 §11.1.2.2 1)·§11.1.2.3.1) — `PTT_GROUP_ADD.floor_control:"off"`
+  (full-duplex, `floor_port` 미광고, 착신 offer 에도 `m=application` 없음). 판정 = `McpttFloorChannelOffered`(`McpttSdp.h`).
+  fmtp `mc_no_floor_ctrl` 은 pre-established session 의 표시(TS 24.380 §14.2.6)라 on-demand 호의 floor 유무로 읽지 않는다.
 - **싱글/멀티 토커** — 단말이 거는 1:1 은 두 가지다. **싱글**=`floor_control:"on"`(한 번에 한
-  명, 2인 floor 절차). **멀티**=규격 `mc_no_floor_ctrl` 세션(`off`)에 단말이 로컬 마이크
+  명, 2인 floor 절차). **멀티**=floor 없는 개별 호(`off`)에 단말이 로컬 마이크
   게이트를 얹어 동시 발언을 허용한다 — 서버는 양방향 상시 중계만 하고 발언 중재를 하지
   않는다. 멀티에서도 마이크는 상시 개방이 아니라 단말 PTT 로 여닫는다(단말 책임). 멀티토커를
   floor 절차로 1:1 에 넣는 것은 규격 밖이다(동시 발언은 그룹 전용 `floor_policy` 축).

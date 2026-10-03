@@ -17,7 +17,7 @@ MCData(SDS·FD) 구현을 3GPP 규격 원문과 대조해 **규격과 다른 지
 코드 = `main` `8cd89604` 에 handoff §14·§16 반영분을 얹은 트리(이 목록과 같은 변경 묶음). 서버(CSP·CMDP·CSC)와 단말(SDK `sdk/core`·현장 앱
 `android/ptt-client`·관제 앱 두 벌)을 함께 봤다. 줄 번호는 그 트리 기준이다. 전부 **코드 읽기**다 — 실서버·실기·와이어 캡처로 확인한 항목은 없다.
 
-**이미 있는 판정 (여기 싣지 않음)** — mcdata_messaging.md §7 편차 표 전부(TLV base64 CTE · 그룹 URI 직행 · 1:1 상대 AoR 직행·게이트 없음 ·
+**이미 있는 판정 (여기 싣지 않음)** — mcdata_messaging.md §7 편차 표 전부(TLV base64 CTE · Request-URI PSI 미대조 · 1:1 게이트 없음 ·
 480/404/500 · media plane 그룹만 · FD 콘텐츠 서버 고정 경로·URI 탐색 없음 · FD NOTIFICATION 미사용 · ICSI 특성 태그 대신 Content-Type 판별 ·
 성공 200 · E2E 미적용 · READ·InReplyTo 미사용 · disposition 옛 형식 전환기 · 집계(TDC1) 없음 · 더미 `m=audio` · 하이브리드 배포 · a=path 광고용 ·
 c-plane 임계 이중 설정) · 같은 문서 §8 잔여 과제 · [mcptt_standard_conformance.md](../design/features/mcptt_standard_conformance.md) R4(MSRP relay·MSRPS,
@@ -45,13 +45,13 @@ MCPTT 와 뿌리가 같은 것(제휴 클라이언트 단위·비제휴 멤버 �
 |---|---|---|---|---|---|
 | 등록·서비스 인가 (REG) | 3 | — | 2 | 1 | — |
 | 제휴·배포 대상 (AFF) | 3 | 1 | 1 | 1 | — |
-| SDS — 시그널링 평면 (SDS) | 8 | — | 3 | 2 | 3 |
+| SDS — 시그널링 평면 (SDS) | 6 | — | 2 | 2 | 2 |
 | SDS — 미디어 평면 (MSRP) | 5 | — | 1 | 3 | 1 |
 | disposition 통지 (DISP) | 1 | — | — | 1 | — |
 | 파일 배포 (FD) | 2 | — | — | 1 | 1 |
-| **계** | **22** | **1** | **7** | **9** | **5** |
+| **계** | **20** | **1** | **6** | **9** | **4** |
 
-확인 수준 — ◎ 16 · ○ 3 · △ 3.
+확인 수준 — ◎ 14 · ○ 3 · △ 3.
 
 읽는 순서 — §2(먼저 볼 것) → §3(영역별 전체) → §4(미구현 목록에 빠진 기능) → §5(문서 정정) → §6(묶음과 순서).
 
@@ -75,7 +75,6 @@ MCPTT 와 뿌리가 같은 것(제휴 클라이언트 단위·비제휴 멤버 �
 
 | 항목 | 내용 |
 |---|---|
-| SDS-1 · CFG-1 | 규격형 SDS(Request-URI = 참여 기능 PSI, 대상 = 본문)를 받지 못한다 — CSP 는 To 로만 대상을 정하고 `<mcdata-request-uri>` 를 읽지 않는다. ue-init-config 에 MCData PSI 를 광고하면 규격 단말의 SDS 가 404 가 된다 |
 | SDS-2 · MSRP-2 | 서버가 수신자에게 내는 MESSAGE·INVITE 의 mcdata-info 를 고쳐 쓰지 않는다 — 규격 단말은 그룹(`<mcdata-calling-group-id>`)·발신자(`<mcdata-calling-user-id>`)를 몰라 스레드도 disposition 통지도 못 만든다 |
 | AFF-1 | MCData 제휴 PUBLISH(`mcdataPresInfo`)를 MCPTT 제휴로 읽어 MCPTT 제휴 집합을 교체한다 |
 
@@ -103,10 +102,8 @@ CSP 는 참여 기능과 제어 기능을 겸한다.
 
 | # | 급 | 대상 | 규격 | CIMS 지금 | 영향 | 확인 |
 |---|---|---|---|---|---|---|
-| SDS-1 | B | CSP | §6.2.4.1 4) — Request-URI = 참여 기능 PSI. §9.2.2.2.1 3)b)ii) — 그룹 = `<mcdata-request-uri>`, 2)a) — 1:1 대상 = resource-lists. §9.2.2.3.1 4) — 참여 기능은 본문으로 제어 기능을 정한다 | 대상 = To user(psip `SipUserAgentMessage.hpp:31`) → 그룹이면 MCDATA-AS(`csp/McDataAsModule.cpp:33`), 아니면 1:1 전달(`csp/ModuleDispatcher.cpp:2669-2679`). `<mcdata-request-uri>` 는 파싱만 하고 읽는 곳이 없다(`csp/McDataCodec.cpp:295`) | To 가 PSI 인 규격 단말의 그룹·1:1 SDS 가 404. mcdata_messaging.md §7 «서버는 양쪽 모두 수용» 과 다르다(규격 단말의 To 값은 실측) | ◎ |
 | SDS-2 | B | CSP | §9.2.2.4.1.1 5) — 수신자별 mcdata-info `<mcdata-request-uri>` = 수신자 MCData ID, 그룹이면 `<mcdata-calling-group-id>` = 그룹. §9.2.2.3.1 12) — `<mcdata-calling-user-id>` = 발신자. 7)·8) — P-Asserted-Identity = 제어 기능 PSI, P-Asserted-Service | fan-out 은 받은 본문·Content-Type 을 그대로 복사(`csp/McDataAsModule.cpp:94`, psip `SendSms` — 헤더 추가 없음). request-uri 는 그룹으로 남고 calling-group-id·calling-user-id 가 없다. 우리 SDK 는 request-uri·From 으로 보정한다(`sdk/core/src/mcdata/sds_codec.cpp:339-343`, `engine.cpp:1784`) | 규격 단말은 그룹·발신자를 알 수 없어 스레드를 못 묶고, §12.2.1.1 의 통지 대상(`<mcdata-calling-user-id>`)이 없어 DELIVERED 를 못 보낸다 | ◎ |
 | SDS-4 | C | CSP | §9.2.2.4.2 2) — mcdata-info·mcdata-signalling·mcdata-payload 가 없으면 403 + `199 expected MIME bodies not in the request` | CSP 가 판정·응답을 낸다 — 엄격 검사 스위치 `Setup.Mcptt.StrictCheck` 기본 `log`(구버전 앱의 `text/plain` 은 로그만 남기고 그대로 배포, 결정 D5). `enforce` 전환은 앱이 규격형으로 바뀐 뒤(S18 과 같이) | 스위치가 log 인 동안 형식이 깨진 본문도 그룹 전원에게 간다 | ◎ |
-| SDS-5 | D | CSP | §9.2.2.4.2 5)·6) — `<request-type>`(one-to-one-sds·group-sds·ad-hoc-group-sds)로 절차를 가른다 | request-type 을 읽지 않는다 — To 가 그룹이면 그룹 절차(`csp/McDataAsModule.cpp:33`) | `one-to-one-sds` 본문을 그룹 URI 로 보내면 그룹 배포 | ◎ |
 | SDS-7 | D | SDK | §15.2.13 · §6.2.2.1 3) — Payload content type BINARY·LOCATION·CODED TEXT, TEXT charset = 단말 설정 또는 그룹 `<mcdata-default-charset>` | TEXT·HYPERLINKS 는 온 순서대로 이어 `text` 로 올리고 FILEURL 은 파일로 읽는다(`sdk/core/src/mcdata/sds_codec.cpp`). **BINARY·LOCATION(6 octet 위경도)·CODED TEXT 는 넘긴다**(`SdsMessage` 에 담을 칸이 없다). charset 은 UTF-8 고정 | 규격 단말의 LOCATION·CODED TEXT SDS 가 빈 메시지가 된다 | ◎ |
 | SDS-8 | B | CSP·SDK | TS 24.481 §7.2 — MCData group ID 는 그룹 문서의 `list-service uri` 와 같은 값 | 숫자 그룹 ID 를 SDK `"tel:" + groupId`(`sdk/core/src/engine.cpp:3454`), CSP `_TelOf`(`csp/McDataAsModule.cpp:122-124`)·`_TelUriOf`(`csp/McDataMediaService.cpp:114-117`)가 `tel:123` 으로, 그룹 문서는 `tel:+123`(`csc/src/services/mcptt.py:261-270`), FILEURL 폴백은 `sip:<gid>@<도메인>`(`csp/McDataMediaService.cpp:410-416`) | 규격 단말은 같은 그룹으로 묶지 못한다. 우리 앱도 `bareId` 가 `+123`/`123` 으로 갈려 스레드가 나뉠 수 있다 — 실측(MCPTT GCS-17 과 같은 뿌리) | △ |
 | SDS-9 | C | CSP | §9.2.2.4.2 4) — 제어 기능은 대화·메시지 ID 를 저장해 통지와 상관한다(§12.2.3 4)·5)) | 그룹 SDS 는 fan-out 루프를 다 돈 뒤에 색인을 적는다(`csp/McDataAsModule.cpp:87-104` → `csp/McDataGates.cpp:80-81`). 1:1 은 전달 전에 적는다(`csp/ModuleDispatcher.cpp:2688-2692`). MESSAGE 는 다중 스레드로 처리된다(psip `RecvMessageRequest(iThreadId…)`) | 멤버가 많은 그룹에서 먼저 받은 단말의 DELIVERED 가 색인보다 먼저 오면 403 216 — 발신자 ✓ 누락. 실측으로 확정되면 A | △ |
@@ -161,12 +158,10 @@ CSP 는 참여 기능과 제어 기능을 겸한다.
 
 | 문서 | 적힌 것 | 실제 | 항목 |
 |---|---|---|---|
-| mcdata_messaging.md §7 «라우팅» 행 | 그룹 URI 직행(mcdata-info 도 포함) · «서버는 양쪽 모두 수용» | CSP 는 `<mcdata-request-uri>` 를 읽지 않아 PSI 형 SDS 는 404. 미디어 평면 INVITE 에는 mcdata-info 가 없다 | SDS-1 · MSRP-1 |
 | 같은 문서 §4 | «미참여(비affiliated) 멤버는 규격상 배포 대상이 아니다» · «require_affiliation 그룹은 affiliate 멤버만» | 그 밖 그룹은 비제휴 멤버에게도 배포한다. 규격은 모든 그룹에서 제휴 멤버만 | AFF-2 |
 | `csp/McDataAsModule.cpp:52` 주석 | 203 거절 근거 «TS 24.282 §9.2.2 step 8» | §9.2.2.3.1 8) — 문서(mcdata_messaging.md §4.7)는 고쳤다. 주석은 그 파일을 고치는 WP 가 | — |
 | `csp/McpttInfo.h:179` · `csp/McDataAsModule.cpp:58` 주석 | Warning 형식 «TS 24.282 §4.4» | V18 의 Warning 은 §4.9(§4.4 = Emergency Alerts) — 문서(mcptt_standard_conformance.md C4e)는 고쳤다. 주석은 그 파일을 고치는 WP 가 | — |
 | mcdata_messaging.md §2 표 `max_auto_recv` · §4.5 | «수신 단말 파일 자동 다운로드 임계» · «수신 앱: 그룹문서 max-data-size-auto-recv 이내면 자동 다운로드» | 규격 의미는 서버가 Mandatory download 를 붙이는 임계(§11.2, TS 24.481 §7.2.4.2), 단말은 그 IE 를 따른다 | FD-4 |
-| mcdata_messaging.md §7 «disposition 통지 — 단말» | 전환기 종료 = 모든 사이트 CSP 0.2.180 이상이면 CSC 에서 MCData 를 광고 | 광고하면 규격 단말의 SDS·MSRP·제휴도 그 PSI 로 온다 — CSP 는 SDS·MSRP 를 받지 못한다 | CFG-1 |
 
 ## 6. 묶음과 순서 (권고)
 
@@ -177,7 +172,6 @@ CSP 는 참여 기능과 제어 기능을 겸한다.
 | 2 | **인가·보안** — 제휴 멤버만 배포 | AFF-2 | .45 CSP |
 | 3 | **응답 코드·Warning** — MCPTT 묶음 5 와 한 묶음(같은 `McpttWarning`) | SDS-4(enforce) | .45 CSP |
 | 4 | **서버가 내는 본문 규격화** — 수신자별 mcdata-info(request-uri = 수신자, calling-group-id, calling-user-id), PAI·P-Asserted-Service, MSRP 배포 INVITE 헤더, 폴백 FD 본문 | SDS-2 · MSRP-2 · MSRP-6 · SDS-8 | .45 CSP |
-| 5 | **규격형 요청 수용** — 서버가 PSI 형·그룹 URI 형을 둘 다 받는 전환기를 먼저 둔다. 서버 쪽 검사(MSRP-5)는 SDK 뒤 | SDS-1 · SDS-5 · CFG-1 → SDK: REG-1 · MSRP-1 | .45 CSP → SDK |
 | 6 | **FD Metadata 형식** — `file-selector:` 접두·hash (SDK 는 규격형 업로드·Location 사용과 함께 — U05) | FD-7 | .45 SDK · CSP |
 | 7 | **자동 수신** — CSP 가 Mandatory download 를 붙이고 SDK·앱은 그 IE 를 따른다 | FD-4 | .45 CSP·SDK → 앱 |
 | 8 | **제휴 서비스 분리** — MCData 제휴 표·`mcdataPresInfo`, 클라이언트 단위. MCPTT 묶음 8 과 한 묶음 | AFF-1 · AFF-6 · REG-2 | .45 CSP·SDK |
@@ -202,6 +196,6 @@ CSP 는 참여 기능과 제어 기능을 겸한다.
 - **TS 24.484 MCData user profile·service configuration 요소별 대조** — 문서 자체를 서빙하지 않아(로드맵) 요소마다 보지 않았다. 결과는 §5 의 mcx_identity_scope.md 줄에 적었다.
 - **off-network(§9.3·§12.3·§16.3)·MBMS/MBS** — 범위 밖.
 - **From 신원 결박** — 게이트가 From user 를 발신자로 쓰는데, 그 신원과 등록 flow 의 결박은 MCPTT 와 같은 경로(`EventIncomingRequestAuth`)라 보지 않았다.
-- **실행 확인** — 모든 항목이 코드 읽기다. △ 항목(SDS-8·SDS-9·FD-7)과 SDS-1(규격 단말이 To 에 무엇을 싣는지)·AFF-6(다중 단말 배포)은 실서버로 재현해 확정한다.
-- **cspsim·계측기(libcsim `McDataSds`·`McDataMsrp`)·`tests/msrp_sds_client.py`** — 시험 도구의 송신 형태는 보지 않았다. 서버 쪽 검사를 켜면(묶음 2·3·5) 도구도 함께 맞춰야 한다.
+- **실행 확인** — 모든 항목이 코드 읽기다. △ 항목(SDS-8·SDS-9·FD-7)과 AFF-6(다중 단말 배포)은 실서버로 재현해 확정한다.
+- **cspsim·계측기(libcsim `McDataSds`·`McDataMsrp`)·`tests/msrp_sds_client.py`** — 서버는 S17 부터 1:1 SDS·FD 의 resource-lists 와 미디어 평면 INVITE 의 mcdata-info(request-type)를 요구한다. libcsim 은 1:1 대상을 `<mcdata-request-uri>` 에 싣고 MSRP INVITE 에 mcdata-info 를 싣지 않아(옛 형식) 그 시나리오가 거절된다 — 계측기 몫으로 넘긴다. 남은 서버 쪽 검사(묶음 2·3)를 켤 때도 도구를 함께 맞춘다.
 - **콘솔** — 그룹 편집의 MCData 칸·메시지 이력 화면.

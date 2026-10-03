@@ -161,6 +161,7 @@ def my_check(ctx: VerifyContext) -> ItemResult:
 | S1-UE-FLOOR-CODEC | floor 정의 정본 일치 | `scripts/gen_floor_defs.py --check` (정본 = `mcptt_floor_defs.yaml`) |
 | S1-UE-MCVIDEO-TC-DEFS | MCVideo 전송 제어 정의 정본 일치 | `scripts/gen_mcvideo_tc_defs.py --check` (정본 = `mcvideo_tc_defs.yaml`, 생성물 = `sdk/core/src/mcvideo/tc_defs.h`·`cmp/PTransmissionDefs.h`) |
 | S1-MCVIDEO-CONTRACT | MCVideo 계약 골든 규격 스키마 검증 | `python3 tests/mcvideo_fixture_check.py` (골든 = `tests/fixtures/mcvideo/` 설정 문서·SIP 본문, 스키마 = 같은 곳 `xsd/` — TS 24.481·24.484·24.281. xmlschema 없으면 SKIP) |
+| S1-MCX-REQUEST-CONTRACT | MCPTT·MCData 요청 형식 골든 최신성 | `python3 tests/fixtures/mcptt/sip/build_goldens.py --check` (골든 = `tests/fixtures/mcptt/sip/*.txt` — 규격형 개별 호 INVITE·SDS·FD MESSAGE·미디어 평면 SDS INVITE·거절 응답. 서버 해석은 S1-UNIT-CSP `tests/csp_mcptt_request_test.cpp`) |
 | S1-UE-ANDROID-BIND | SWIG 바인딩 건전성 | 생성 Java 에 `SWIGTYPE_p_*` 부재 + `HttpResult.body=byte[]` + `cimsue.i` 타입맵 본문에 맨 `#` 지시문 없음(`%#` 로 써야 생성 코드에 남는다) |
 | S1-UE-ENGINE-SINGLE | 엔진 단일 제공처 | 커밋된 엔진 산출물 부재 + `org.pjsip` 제공처가 `:cimsue-engine` 하나 |
 | S1-UE-CSC-XCHECK | CSC 경로 드리프트 | 코어 `csc_client.cpp`+`csc.h` ↔ `:core` `ProvisioningClient.kt`(IdMS·`/provisioning/me` — 로그인 앱·SSO 가 코어 없이 쓴다) |

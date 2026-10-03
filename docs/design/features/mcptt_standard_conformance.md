@@ -17,7 +17,7 @@
 >
 > **보완 목록** — 규격 원문(R19)과 코드를 절차 단계별로 다시 대조해 나온 미정합 지점은
 > [../../dev/mcptt_conformance_gaps.md](../../dev/mcptt_conformance_gaps.md) 에 모았다. 아래 «✅ 정합» 서술 가운데 그 목록 §5 가
-> 짚은 곳(C1·C4·C4g·C4h·F1·F2·F4·F5·S3·S4)은 실제와 다르다 — 항목이 반영되면 이 문서를 고치고 목록에서 지운다.
+> 짚은 곳(C1·C4·C4g·F1·F2·F4·F5·S3·S4)은 실제와 다르다 — 항목이 반영되면 이 문서를 고치고 목록에서 지운다.
 
 ---
 
@@ -38,7 +38,7 @@
 | C4b~C4e | 멤버 leg INVITE·개시자 응답(Contact·PAI·Warning 전달)·확인 통화 설정(TNG1·최소 인원·미응답 멤버 INFO)·세션 식별자 GRUU·Warning 형식 | CSP | TS 24.379 §4.4·§4.5·§6.3.3.1.2·§6.3.3.2.3.2·§6.3.3.3 | ✅ 정합 (Supported norefersub/explicitsub 미광고 — §C4g 남은 편차) |
 | C4f | 멤버 확인 전 수락 `P-Answer-State: Unconfirmed` + 미디어 버퍼링(CMP) · 멤버 183 Unconfirmed · 신뢰성 18x PRACK | CSP/CMP | TS 24.379 §10.1.1.4.2·§11.1.1.4.2 / RFC 4964·3262 | ✅ 정합 |
 | C4g | 개시·합류·재합류 affiliation 검사 403 `120` · 긴급/임박·chat 암묵적 affiliation | CSP | TS 24.379 §10.1.1.4.2 14)a)·§10.1.1.4.5.1 8)·§9.2.2.3.7 | ✅ 정합 (`require_affiliation` 그룹) |
-| C4h | 개시 INVITE 대상 — Request-URI = 참여 기능 PSI + mcptt-info `<mcptt-request-uri>`(그룹콜·개별 통화), Request-URI 에 대상을 직접 싣는 구형 단말 양립 | CSP | TS 24.379 §10.1.1.2.1.1 1)·2) · §11.1.1.2.1.1 | ✅ 정합 |
+| C4h | 개시 INVITE 대상 — Request-URI = 참여 기능 PSI · 그룹콜 = mcptt-info `<mcptt-request-uri>`(Request-URI 에 그룹을 직접 싣는 구형 단말 양립) · 개별 통화 = resource-lists entry 하나(없거나 둘이면 403 145) · floor 없는 개별 호 = offer 에 `m=application` 없음 | CSP | TS 24.379 §10.1.1.2.1.1 1)·2) · §11.1.1.2.1.1 1)·9) · §11.1.1.3.1.1 8)·9) · §11.1.2 | ✅ 정합 |
 | C6 | conference 이벤트 구독 인가 — 그룹 문서 `<on-network-allow-conference-state>` 판정, 불허 403 `Warning: 138` / 일제 통화 480 `Warning: 105` (비멤버 관제사 청취 범위는 CIMS 해석, [dispatch_center.md §5.6](dispatch_center.md)) | CSP/CSC | TS 24.379 §10.1.3.4.1 / TS 24.481 §7.2.4.2 | ✅ 정합 |
 | C7 | broadcast group call 발언권 — 개시자 외 Floor Request Deny #5(긴급 포함)·Floor Taken Permission 0·Floor Indicator B-bit | CMP | TS 24.380 §6.3.5.3.4·§6.3.5.4.4·§8.2.3.15 | ✅ 정합 |
 | C8 | broadcast group call 호 모델 — 호 단위 `<broadcast-ind>` 개시, 개시자 고정, 그룹 문서 그룹 종류(`on-network-invite-members`), 해제 정책(T4·참가자 1명 이하·TNG3) | CSP/CSC | TS 24.379 §4.12·§6.2.8.2·§6.3.8.1 / TS 24.481 §7.2.8 | ✅ 정합(서버) — 개시 단말의 발언 종료 후 호 해제(TS 24.380 §6.2.4.6.4)·B-bit Floor Request 는 단말 몫(미구현). 정본 [mcptt_broadcast_group_call.md](mcptt_broadcast_group_call.md) |
@@ -67,7 +67,7 @@ CIMS 에 **아직 구현되지 않은** 기능을 규격 위치와 함께 나열
 
 | 기능 | 규격 | 상태 |
 |---|---|---|
-| **Private call (1:1)** — on-demand | TS 24.379 §11.1 | ✓ 구현 — mcptt-info `session-type=private` INVITE(상대 MCPTT ID 직접, affiliation 불요) → CSP 가 2인 세션(`private:<from>-<to>`)을 CMP `PTT_GROUP_ADD group_type:"private"` + `floor_control`(on/off — fmtp `mc_no_floor_ctrl`)로 세운다([mcptt_csp_cmp_roadmap_contract.md](mcptt_csp_cmp_roadmap_contract.md) §A.1). 착신 미등록 480 |
+| **Private call (1:1)** — on-demand | TS 24.379 §11.1 | ✓ 구현 — mcptt-info `session-type=private` INVITE(Request-URI = 참여 기능 PSI, 착신자 = resource-lists entry 하나, affiliation 불요) → CSP 가 2인 세션(`private:<from>-<to>`)을 CMP `PTT_GROUP_ADD group_type:"private"` + `floor_control`(on/off — offer 의 `m=application` 유무, §11.1.2)로 세운다([mcptt_csp_cmp_roadmap_contract.md](mcptt_csp_cmp_roadmap_contract.md) §A.1). 착신자 불명 403 145 · 착신 미등록 404 |
 | **Broadcast group call** — 호 단위 개시(`<broadcast-ind>`)·개시자 고정·개시자 발언 종료 후 호 해제 | TS 24.379 §4.12·§6.2.8.2, TS 24.380 §6.2.4.6.4 | ✓ 서버(C7·C8)·단말 코어(SDK·Android PTT — 일제 통화 발신·B-bit Floor Request·발언 종료 후 호 해제)·관제 앱 Windows(U6)·Android 태블릿(코드 반영, 빌드 미확인 — [mcptt_broadcast_group_call.md](mcptt_broadcast_group_call.md) §7) |
 | **Broadcast adhoc group call** — 애드혹(ad hoc) 호에 `<broadcast-ind>` | TS 24.379 §17.2.2.1.1 9)·§17.1 | ✓ 단말(SDK)·관제 앱·CSP(`IsBroadcastCapable` — 개시자 고정·Deny #5·B-bit·구독 480/105·개시자 이탈 해제, [mcptt_broadcast_group_call.md](mcptt_broadcast_group_call.md) R13). ad hoc 그룹 ID 서버 부여(§17.1)는 남음 |
 | **세션 해제 정책** — 그룹 호(T4(Inactivity) 만료·참가자 1명 이하·TNG3) · 개별 호(T4·최대 통화 시간) | TS 24.379 §6.3.8.1·§6.3.8.2 / TS 24.380 §6.3.4.3.5 | ✓ 편성·일제 그룹 호 — T4 = 그룹 `hang_timer_sec`(CMP `PTT_FLOOR_INACTIVITY`)·TNG3 = `max_duration_sec` · 애드혹 그룹 호 — T4·TNG3 = service configuration `<adhoc-group-call>`(일제면 `<broadcast-hang-time>`, 긴급·임박 개시 호는 TNG3 없음 — §17.4.2.2 13)) — «참가자 1명 이하» 는 애드혹 해제 사유가 아니다(§6.3.8.1 2) 목록 밖 — 남은 사람은 T4·TNG3·이탈로 끝나고 그동안 재합류할 수 있다) · 개시자 BYE 의 `Reason: SIP;cause=200;text="User requested release"` = 전원 해제(§6.3.3.2.4 3A) — «권한 있는 사용자» 로컬 정책 = 그 호의 개시자) · 개별 호 — T4(발언권 제어 있는 호)·최대 통화 시간 = `<private-call>`. 정본 [mcptt_timers.md](mcptt_timers.md). 최소 affiliation 인원 미달 해제는 미구현 |
@@ -131,7 +131,8 @@ CIMS 에 **아직 구현되지 않은** 기능을 규격 위치와 함께 나열
 > **인용 정정**: TS 24.380 **클라우즈 7은 off-network floor control** 이다. 온넷 private call 은
 > 클라우즈 6.3 의 일반 floor 절차를 그대로 쓰며, 별도 private-call floor 절차는 없다. 이전
 > 문서·주석의 "TS 24.380 §7 private-call floor" 인용은 잘못된 것으로 §6.3 + fmtp
-> (`mc_granted`/`mc_no_floor_ctrl`) 기준으로 대체한다.
+> (`mc_granted`) 기준으로 대체한다. floor 없는 개별 호는 fmtp 가 아니라 offer 에 발언권 제어 채널
+> (`m=application`)이 없는 것으로 정해진다(TS 24.379 §11.1.2 — `mc_no_floor_ctrl` 은 pre-established session 용, TS 24.380 §14.2.6).
 
 ### R3. 미디어 평면 / 전송
 
@@ -574,18 +575,23 @@ DB 단절이면 fan-out 과 같이 검사를 건너뛴다(affiliation 원천 = `
   미달 시 480 + 112)는 그룹 문서 요소가 없어 하지 않는다.
 - 멤버별 응답 방식(poc-settings Answer-Mode, §6.3.2.2.5·§6.3.2.2.6)을 받지 않는다 — 모든 멤버를 자동 응답으로 본다(C4f).
 
-### C4h. 개시 INVITE 대상 — 참여 기능 PSI + `<mcptt-request-uri>` (TS 24.379 §10.1.1.2.1.1 · §11.1.1.2.1.1)
+### C4h. 개시 INVITE 대상 — 참여 기능 PSI + 본문 (TS 24.379 §10.1.1.2.1.1 · §11.1.1.2.1.1 · §11.1.2)
 
-- 규격형 개시 INVITE 는 **Request-URI = 원발 참여 MCPTT 기능의 PSI**, 대상은 mcptt-info `<mcptt-request-uri>`
-  (prearranged·chat 그룹콜 = MCPTT group ID `tel:g006`, 개별 통화 = 상대 MCPTT ID `tel:+8250…`)다.
-- `ModuleDispatcher::EventIncomingCall` 이 mcptt-info 해석 직후 대상을 정한다 — `<mcptt-request-uri>` 의 식별자
-  (`McpttPsiTarget`, `McpttInfo.h`)가 Request-URI user 와 다르고 **Request-URI 가 그룹도 가입자도 아니면** PSI 로 보고
-  대상을 그 식별자로 바꾼다. 이후 경로(그룹 lazy-load·개별 통화·그룹콜 fan-out·affiliation 검사 C4g)는 같다.
+- 규격형 개시 INVITE 는 **Request-URI = 원발 참여 MCPTT 기능의 PSI** 이고 대상은 본문이다 — 그룹콜(prearranged·chat)은 mcptt-info
+  `<mcptt-request-uri>` = MCPTT group ID(`tel:g006`), 개별 통화는 `application/resource-lists+xml` 의 entry 하나 = 상대 MCPTT ID
+  (§11.1.1.2.1.1 9)).
+- 그룹콜 — `ModuleDispatcher::EventIncomingCall` 이 mcptt-info 해석 직후 대상을 정한다. `<mcptt-request-uri>` 의 식별자
+  (`McpttPsiTarget`, `McpttInfo.h`)가 Request-URI user 와 다르고 **Request-URI 가 그룹도 가입자도 아니면** PSI 로 보고 대상을 그
+  식별자로 바꾼다. 이후 경로(그룹 lazy-load·그룹콜 fan-out·affiliation 검사 C4g)는 같다. 구형 단말(Request-URI = `sip:<그룹>@<PTT 도메인>`)은
+  두 값이 같거나 `<mcptt-request-uri>` 가 없어 종전 경로 그대로다(그룹콜 Request-URI 엄격 검사는 S18 — GCS-9·GCS-10).
+- 개별 통화 — 착신자 = resource-lists entry 하나(`McpttPrivateCalledParty`). 없거나 둘 이상이면 403 + `145 unable to determine called
+  party`(§11.1.1.3.1.1 8)·9)). Request-URI·`<mcptt-request-uri>` 를 착신자로 읽는 옛 형식은 받지 않는다(규격 갭 계획 결정 D10 — 전환기 없음).
+  floor 유무 = offer 의 발언권 제어 채널(`m=application <port≠0> udp MCPTT`) 유무(§11.1.2.2 1)·§11.1.2.3.1 — `McpttFloorChannelOffered`).
+  floor 없는 호의 착신 offer 에도 `m=application` 을 싣지 않는다(§11.1.2.3.2).
 - PSI 이름은 대조하지 않는다 — CSC ue-init-config 가 알리는 `sip:mcptt_psi@<PTT 도메인>` 도, 단말 설정 PSI(예
-  `mcptt1_opf_psi`)도 같은 규칙으로 받는다.
-- 구형 단말(Request-URI = `sip:<그룹>@<PTT 도메인>` 또는 상대 번호)은 두 값이 같거나 `<mcptt-request-uri>` 가 없어
-  종전 경로 그대로다. mcptt-info 가 없는 VoLTE 호는 판정 자체를 하지 않는다(가입자 조회 없음).
-- 검증: `tests/csp_mcptt_info_test.cpp`(`McpttPsiTarget` — HM-TRCP 실측 본문 포함, S1-UNIT-CSP).
+  `mcptt1_opf_psi`)도 같은 규칙으로 받는다. mcptt-info 가 없는 VoLTE 호는 판정 자체를 하지 않는다(가입자 조회 없음).
+- 요청 형식 골든 = `tests/fixtures/mcptt/sip/`(개별 호 01·02·03 — SDK 생성 시험과 같은 파일). 검증: `tests/csp_mcptt_info_test.cpp`
+  (`McpttPsiTarget` — HM-TRCP 실측 본문 포함) · `tests/csp_mcptt_request_test.cpp`(착신자·floor 판정, S1-UNIT-CSP).
 
 ### C9. 암시적 제휴 — 설정 그룹(TS 24.379 §7.3.3 13)·§7.3.4 13) → §9.2.2.2.15) · ad hoc(§17.4.2.2 16))
 

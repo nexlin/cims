@@ -61,7 +61,11 @@ public:
     /** 첫 TEXT payload (UTF-8) — flow 이벤트 로깅용 */
     std::string m_strText;
 
-    /** mcdata-info <mcdata-request-uri> (그룹 URI) */
+    /** mcdata-info <request-type> — 요청 종류(TS 24.282 Annex D.2: group-sds·one-to-one-sds·group-fd·one-to-one-fd …).
+     *  참여·제어 기능이 이것으로 절차를 가른다(§9.2.2.3.1 4) · §9.2.2.4.2 5)·6)) */
+    std::string m_strRequestType;
+
+    /** mcdata-info <mcdata-request-uri> (그룹 요청이면 MCData group ID) */
     std::string m_strGroupUri;
 
     /** mcdata-info <mcdata-calling-user-id>·<mcdata-calling-group-id> — disposition 통지의 그룹 문맥
@@ -88,6 +92,23 @@ public:
     long long m_llFileSize = 0;
     std::string m_strFileType;
 };
+
+/** mcdata-info+xml 본문 하나를 읽는다 — <request-type>·<mcdata-request-uri>·<mcdata-calling-user-id>·
+ *  <mcdata-calling-group-id>. 미디어 평면 INVITE(SDP 와 같이 오는 mcdata-info — TS 24.282 §9.2.3.2.3)도 같은 함수로 */
+void McDataParseInfo( const std::string &strXml, CMcDataSdsInfo &clsInfo );
+
+/**
+ * @brief MCData 요청의 대상 — Request-URI 는 참여 기능 PSI 이고(TS 24.282 §6.2.4.1 4)) 대상은 본문이다.
+ *        request-type 이 절차를 가른다(§9.2.2.3.1 4) · §9.2.2.4.2 5)·6) · §10.2.4.4.2 10)·12) · §9.2.3.3.3 4)):
+ *        group-sds·group-fd = <mcdata-request-uri> 의 group ID, one-to-one-sds·one-to-one-fd = resource-lists 의
+ *        entry 하나(없거나 둘 이상이면 403 + 204·205). 그 밖(request-type 없음·ad hoc 그룹 등 이 서버가 맡지 않는
+ *        요청)은 제어 기능을 정하지 못한다 — 404 + 142(§9.2.2.3.1 5)).
+ * @param bGroup [out] 그룹 요청이면 true
+ * @param strTargetId [out] 대상 식별자(맨 값 — group ID 또는 MCData ID)
+ * @param piWarn [out] 거절이면 Warning 번호
+ * @return 0 = 대상을 정함, 아니면 보낼 SIP 상태
+ */
+int McDataRequestTarget( const CMcDataSdsInfo &clsInfo, bool &bGroup, std::string &strTargetId, int *piWarn );
 
 /** Content-Type 이 multipart/mixed 인지 (MCData SDS 판별 1차 조건) */
 bool McDataIsMultipartMixed( const std::string &strContentType );

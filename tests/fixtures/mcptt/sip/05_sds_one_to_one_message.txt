@@ -1,0 +1,42 @@
+MESSAGE sip:mcdata_psi@ptt.cims.example.kr SIP/2.0
+Via: SIP/2.0/TLS 10.10.1.21:50601;branch=z9hG4bK-sds-o1;rport
+Max-Forwards: 70
+From: <sip:+82510002001@ptt.cims.example.kr>;tag=sds-o1-f
+To: <sip:mcdata_psi@ptt.cims.example.kr>
+Call-ID: sds-o1@10.10.1.21
+CSeq: 1 MESSAGE
+Accept-Contact: *;+g.3gpp.mcdata.sds;require;explicit
+Accept-Contact: *;+g.3gpp.icsi-ref="urn%3Aurn-7%3A3gpp-service.ims.icsi.mcdata.sds";require;explicit
+P-Preferred-Service: urn:urn-7:3gpp-service.ims.icsi.mcdata.sds
+Content-Type: multipart/mixed;boundary=sds-o1
+Content-Length: 790
+
+--sds-o1
+Content-Type: application/vnd.3gpp.mcdata-info+xml
+
+<?xml version="1.0" encoding="UTF-8"?>
+<mcdatainfo xmlns="urn:3gpp:ns:mcdataInfo:1.0">
+  <mcdata-Params>
+    <request-type>one-to-one-sds</request-type>
+  </mcdata-Params>
+</mcdatainfo>
+--sds-o1
+Content-Type: application/resource-lists+xml
+
+<?xml version="1.0" encoding="UTF-8"?>
+<resource-lists xmlns="urn:ietf:params:xml:ns:resource-lists">
+  <list>
+    <entry uri="tel:+82510002002"/>
+  </list>
+</resource-lists>
+--sds-o1
+Content-Type: application/vnd.3gpp.mcdata-signalling
+Content-Transfer-Encoding: base64
+
+AQBqvREwfGtaSThHNqW0w9Lh8AkYJ6EAAAAAAEAAgAAAAAAAAAKB
+--sds-o1
+Content-Type: application/vnd.3gpp.mcdata-payload
+Content-Transfer-Encoding: base64
+
+AwF4AA4B7ZmV7J24IOuwlOuejA==
+--sds-o1--

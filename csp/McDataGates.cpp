@@ -152,14 +152,22 @@ int McDataFdPayloadCheck( const CMcDataSdsInfo &clsInfo, int *piWarn ) {
 
 const char *McDataWarnText( int iWarn ) {
     switch ( iWarn ) {  // TS 24.282 §4.9 표 4.9-1
+        case 113:
+            return "group document does not exist";
         case 116:
             return "user is not part of the MCData group";
         case 120:
             return "user is not affiliated to this group";
+        case 142:
+            return "unable to determine the controlling function";
         case 198:
             return "no users are affiliated to this group";
         case 199:
             return "expected MIME bodies not in the request";
+        case 204:
+            return "unable to determine targeted user for one-to-one SDS";
+        case 205:
+            return "unable to determine targeted user for one-to-one FD";
         case 206:
             return "short data service not allowed for this group";
         case 210:

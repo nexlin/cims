@@ -122,7 +122,7 @@ CSP 는 참여 기능과 제어 기능을 겸한다.
 | GCS-10 | C | CSP | §10.1.1.4.2 3) — Accept-Contact 에 `g.3gpp.mcptt`·MCPTT icsi-ref 가 없으면 403 (chat 은 Contact `isfocus` 도) | MCPTT 경로에 검사가 없다(MCVideo 만 — `csp/McVideoCallService.cpp:667-675`) | 받아들이는 쪽이 넓다. SDK 는 Accept-Contact 둘을 싣는다(U04 — GCC-1). 옛 SDK 단말이 남아 있는 동안은 켜면 막힌다 | ○ |
 | GCS-12 | B | CSP | §6.3.3.4 — conference NOTIFY 에 P-Asserted-Identity(제어 기능 PSI)·P-Preferred-Service·mcptt-info 본문(`<mcptt-calling-group-id>`·`<mcptt-request-uri>`) (shall) | 헤더는 Event·Subscription-State·Contact 뿐, 본문은 conference-info 하나 — `csp/CspServer.cpp:1016-1039` | 규격 단말·참여 기능이 NOTIFY 를 그룹·대상 사용자에 묶을 근거가 없다 | ◎ |
 | GCS-13 | C | CSP | §6.3.3.4 — `<conference-info entity>` = MCPTT group ID, `<user entity>` = MCPTT ID | `sip:<id>@<PTT 도메인>` — `csp/GroupCallService.cpp:3891-3905`. 같은 서버가 mcptt-info·pidf 에서는 `tel:` 표기를 쓴다 | ID 를 문자열로 대조하는 규격 단말은 로스터를 자기 목록과 맞추지 못한다 | ◎ |
-| GCS-14 | B | CSP | §10.1.3.3 2) — Request-URI 가 진행 중 세션 식별자가 아니면 404 + `137 the indicated group call does not exist`. 구독자 = 그 세션의 참가자. 200 OK Contact = 세션 식별자 | R-URI user = 그룹 ID 로만 읽는다(`gr` 토큰·세션 유무·참가 여부를 보지 않음) — `csp/CscfModule.cpp:1303-1344`. 세션이 끝나도 구독이 남는다 | 지난 세션 식별자로 온 구독이 다음 세션 로스터에 붙는다. ptt_flows.md 는 «구독은 참여보다 오래 산다» 를 설계로 적었다 — 편차로 올릴 것 | ○ |
+| GCS-14 | B | CSP | §10.1.3.3 2) — Request-URI 가 진행 중 세션 식별자가 아니면 404 + `137 the indicated group call does not exist`. 구독자 = 그 세션의 참가자. 200 OK Contact = 세션 식별자 | R-URI user = 그룹 ID 로만 읽는다(`gr` 토큰·세션 유무·참가 여부를 보지 않음) — `csp/CscfModule.cpp:1303-1344`. 세션이 끝나도 구독이 남는다 | 지난 세션 식별자로 온 구독이 다음 세션 로스터에 붙는다. ptt_flows.md 는 «구독은 참여보다 오래 산다» 를 설계로 적었다 — 편차로 올릴 것. **S17 에서 미룸** — 세션 밖 채널 접속자 표시의 규격 자리(제휴 상태 구독 §9.2.1.3 — AFF-12·VAFF-8)가 없어 지금 404 137 을 넣으면 현장·관제 앱의 접속자 표시가 사라진다. S13·U06 뒤 WP S27(SDK GCC-7·계측기 conference 구독과 함께, .45 제안 dev_share 20261003-1046) | ○ |
 | GCS-16 | B | CSP | §6.3.3.1.2 9)·10) — 받은 INVITE 의 Answer-Mode·Priv-Answer-Mode 를 그대로 옮긴다 (shall) | 초대 INVITE 에 무조건 `Answer-Mode: Auto` — `csp/GroupCallService.cpp:2506-2507` (개별 호 착신도 이 함수). 받은 헤더를 읽는 코드가 없다 | 헤더를 따르는 규격 단말은 개별 호를 벨 없이 자동 응답한다. 짝 = PRV-4 | ◎ |
 | GCS-17 | A | CSP | §10.1.1.4.1.1 4)b) — `<mcptt-calling-group-id>` = 그룹 ID | `"tel:" + 그룹 id` — `csp/GroupCallService.cpp:3975`. MCPTT group ID 규칙은 숫자뿐이면 `tel:+<id>`(`csp/McpttInfo.h:400-408`, CSC `_group_uri`) | 숫자뿐인 그룹 ID 는 INVITE 의 그룹 ID 와 그룹 문서·제휴 문서의 ID 가 달라진다(`g001` 형은 무관) | ○ |
 | GCS-18 | A | CSP·psip | §6.3.3.1.1 2) — 음성 스트림의 미디어 속성은 받은 offer 의 것 | 멤버 offer·개시자 answer 의 fmtp·ptime 이 서버 코덱 표 값(AMR-WB `octet-align=1`)이다 — `csp/GroupCallService.cpp:2407-2409`. 개시 게이트는 코덱 이름만 본다(`:885-893`) | 개시자가 대역 효율 모드나 다른 mode-set 으로 offer 하면 선언과 실제 페이로드가 어긋난다 — CMP 의 leg 별 형식 변환 유무를 확인해야 확정 | △ |
@@ -231,7 +231,6 @@ CSP 는 참여 기능과 제어 기능을 겸한다.
 |---|---|---|---|
 | mcptt_standard_conformance.md C1 | `Expires: 0` = 그 사용자의 제휴 전부 해제 | 규격은 그 클라이언트의 것만 | AFF-2 |
 | 같은 문서 C4g | «그 밖의 그룹은 멤버십이 곧 affiliation» | 규격은 제휴 멤버만 초대 | AFF-11 |
-| 같은 문서 C4h | 개별 통화 대상 = `<mcptt-request-uri>`, §11.1.1.2.1.1 정합 | 규격은 resource-lists | PRV-1 |
 | `csp/CscfModule.cpp:764` 주석 | 암시적 제휴 근거 «§7.3.2 13)» | 그 단계는 §7.3.3·§7.3.4 에 있다 — 문서(mcptt_standard_conformance.md C9)와 CSC 주석은 고쳤다. 주석은 그 파일을 고치는 WP 가 | — |
 | 같은 문서 F1/F2 | Floor Ack = Source + Message Type 정합 · 받은 Indicator 의 긴급·임박 비트는 tier 로 승격 | Message Type 에 ack 비트가 섞인다 · 받은 Indicator 는 쓰지 않는다 | FCS-4·FCS-11 |
 | 같은 문서 F4 · cmp_media_api.md §7.7 · mcptt_timers.md §5.2 | T2 에서 긴급·임박 화자 제외 | 코드는 긴급만(emergency_modes §3.1 과는 일치) | FCS-21 |
@@ -243,7 +242,7 @@ CSP 는 참여 기능과 제어 기능을 겸한다.
 | android_ue_client.md U1 | Floor Ack 정합 | Ack 의 Message Type 에 ack 요구 비트가 섞인다 | FCS-4 |
 | ue_sdk.md §4 | API 표의 `presence(uri)` | 그런 API 가 없다 | AFF-12 |
 | mcptt_api.md | `on-network-allow-conference-state` 기본 true | 규격 기본 false | GMS-8 |
-| csp.md · mcptt_csp_cmp_roadmap_contract.md · `sdk/core/include/cimsue/engine.h` 주석 | floor 없는 개별 호 = `mc_no_floor_ctrl` | on-demand 는 «m=application 없음» — SDK 발신은 실제로 그렇게 보내 CSP 판정과 어긋난다 | PRV-3 |
+| `sdk/windows/dotnet/CimsUe/Types.cs`(FullDuplex)·`Call.cs`(SetMuted) 주석 | floor 없는 개별 호 = `mc_no_floor_ctrl` | on-demand 는 «m=application 없음»(TS 24.379 §11.1.2) — 서버·SDK 코어·앱 문서는 고쳤다(S17·U04 묶음 C). .NET 주석은 W01 | — |
 
 ## 6. 묶음과 순서 (권고)
 
@@ -254,7 +253,7 @@ CSP 는 참여 기능과 제어 기능을 겸한다.
 | 1 | **문서 값 한두 줄** — 문서 셋의 T2 제외 대상 | FCS-21(문서) | .48 |
 | 2 | **발언권 메시지 정합** — Ack 의 Message Type · 미대기 Queue Position 254 · Granted Duration | FCS-4 · FCS-8 · FCS-20 | .45 SDK·CMP |
 | 5 | **Warning 코드** — 거절 사유를 규격 코드로. handoff §14 K1(SDK 가 Warning 을 올림)과 한 묶음 | REG-3(enforce) · PRV-7(본문) | .45 CSP·SDK → Windows(문구 사전) |
-| 7 | **SDK 요청 규격화** — REGISTER Contact 태그, INVITE 헤더·Request-URI(PSI)·`<mcptt-client-id>`·session-type, 개별 호 resource-lists, 재합류 세션 식별자, conference·xcap-diff SUBSCRIBE. 서버가 양쪽을 받는 전환기를 먼저 둔다(PRV-1) — 서버 쪽 검사(GCS-9·GCS-10)는 SDK 뒤 | REG-1 · GCC-1~GCC-4 · GCC-7 · GCC-8 · PRV-1 · PRV-4(앱) · ADH-8(CSP 멤버 INVITE) · GMS-16 · SDP-1 | .45 SDK·CSP |
+| 7 | **SDK 요청 규격화(남은 것)** — conference SUBSCRIBE(세션 식별자 — S27 과 같이), 재합류 세션 식별자, 개별 호 개시 방식 선택(앱), 애드혹 멤버 INVITE, xcap-diff 구독 본문. 등록 태그·그룹/개별 호·MCData 요청은 규격형이 됐다(S17 + U04·U05 묶음 A~C) — 그룹 호 Request-URI 검사(GCS-9·GCS-10)는 SDK 배포 뒤(S18) | GCC-7 · GCC-8 · PRV-4(앱) · ADH-8(CSP 멤버 INVITE) · GMS-16 · SDP-1 | .45 SDK·CSP |
 | 8 | **제휴를 클라이언트 단위로** — 행 키 통일, 클라이언트 단위 해제·판정, 암묵 제휴 취소. handoff §14 K3·S2 와 한 묶음 | AFF-2~AFF-8 · AFF-12 · EMG-3 | .45 CSP·SDK |
 | 9 | **호 모델 결정** — chat 그룹(초대 없이 합류·1명 이하 해제)과 편성 그룹의 재초대·late call entry·제휴 해제 시 이탈. 규격대로 바꿀지, 편차로 남기고 사유를 적을지 정한다 | GCS-1~GCS-4 · GCS-22 · AFF-11 | 결정 → .45 CSP |
 | 10 | **그룹 문서 집행** — 수신 전용 | FCS-14 | .45 CSP·CMP·CSC |
@@ -275,6 +274,6 @@ CSP 는 참여 기능과 제어 기능을 겸한다.
 - **통째 미구현 절** — pre-established session, call-back, first-to-answer, 원격 개시, ambient listening, regroup, functional alias, MBMS, off-network, 위치 관리, 긴급 개별 호의 단말 절차 세부, 애드혹 긴급·임박.
 - **floor SRTCP(TS 24.380 §13)·KMS(TS 33.180 본문)** — placeholder 로 문서에 있어 내부를 읽지 않았다. 토큰 교환·파트너 도메인(부록 B.7~B.9)도.
 - **OMA XDM Group·RFC 원문 일부** — 그룹 문서의 OMA 스키마 시퀀스, RFC 6665·OIDC Core 의 해당 절은 규격 폴더에 없어 대조하지 못했다(AFF-9 의 근거 일부).
-- **실행 확인** — 모든 항목이 코드 읽기다. △ 표시 항목과 PRV-3(전이중 개별 호)·AFF-5(제휴 행 키)는 실서버로 재현해 확정한다.
-- **cspsim·계측기(libcsim)** — 시험 도구의 MCPTT 송신 형태는 보지 않았다. 서버 쪽 검사를 켜면(GCS-9·GCS-10·REG-3·PRV-1) 도구도 함께 맞춰야 한다.
+- **실행 확인** — 모든 항목이 코드 읽기다. △ 표시 항목과 AFF-5(제휴 행 키)는 실서버로 재현해 확정한다.
+- **cspsim·계측기(libcsim)** — 시험 도구의 MCPTT 송신 형태는 보지 않았다. 서버 쪽 검사를 켜면(GCS-9·GCS-10·REG-3) 도구도 함께 맞춰야 한다 — 개별 호(PRV-1)는 S17 부터 규격형만 받는데 도구에는 개별 호 경로가 없다.
 - **콘솔·현장 앱 화면 규칙** — 인가 요소가 늘면(묶음 4) 콘솔 가입자 프로파일 칸이 따라가야 한다.

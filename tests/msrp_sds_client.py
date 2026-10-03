@@ -5,7 +5,8 @@ MCData SDS over media plane (MSRP, TS 24.282 §9.2.3) E2E 테스트 클라이언
 라이브 CSP+cmdp 를 상대로 표준 단말 역할을 흉내낸다 (raw socket, 의존성 없음).
 
 모드:
-  sender    REGISTER → INVITE(더미 m=audio + m=message TCP/MSRP sendonly)
+  sender    REGISTER → INVITE(Request-URI = 참여 MCData 기능 PSI · mcdata-info group-sds + 그룹 · SDP 더미 m=audio +
+            m=message TCP/MSRP sendonly — TS 24.282 §9.2.3.2.3)
             → 200 의 a=path 로 TCP 접속 → SDS TLV 2건 SEND → 200/REPORT → 서버 BYE 수신
   receiver  MCData ICSI feature tag 로 REGISTER → 서버발 INVITE 대기 → 200 answer
             (audio inactive + m=message recvonly, a=setup:active) → 서버 path 접속
@@ -41,7 +42,8 @@ ACCEPT_TYPES = ("multipart/mixed application/vnd.3gpp.mcdata-signalling "
 def _md5(s): return hashlib.md5(s.encode()).hexdigest()
 
 def digest(username, realm, password, method, uri, nonce, qop="auth", cnonce="1", nc="00000001"):
-    ha1 = _md5(f"{username}:{realm}:{password}")
+    # password 가 "ha1:<hex>" 면 H(A1) 그대로(가입자 자격이 H(A1) 로만 있을 때 — sip_access_security.md P1)
+    ha1 = password[4:] if password.startswith("ha1:") else _md5(f"{username}:{realm}:{password}")
     ha2 = _md5(f"{method}:{uri}")
     if qop:
         return _md5(f"{ha1}:{nonce}:{nc}:{cnonce}:{qop}:{ha2}")
@@ -100,7 +102,7 @@ class SipUa:
         return c
 
     # ── REGISTER (401 digest 재시도) ──
-    def register(self):
+    def register(self, expires=600):
         call_id = uuid.uuid4().hex
         tag = uuid.uuid4().hex[:8]
         uri = f"sip:{self.domain}"
@@ -114,7 +116,7 @@ class SipUa:
                 f"Call-ID: {call_id}",
                 f"CSeq: {cseq} REGISTER",
                 f"Contact: {self.contact()}",
-                "Max-Forwards: 70", "Expires: 600",
+                "Max-Forwards: 70", f"Expires: {expires}",
                 "User-Agent: MSRP-SDS-Test/1.0",
             ]
             if auth:
@@ -154,10 +156,16 @@ class SipUa:
         self.send(req)
         return self.wait_for(lambda m: m.startswith("SIP/2.0") and call_id in m) or ""
 
-    # ── UAC INVITE — (최종응답, dialog dict) ──
-    def invite(self, to, sdp, extra_headers=()):
+    # ── UAC INVITE — (최종응답, dialog dict). info = mcdata-info 본문이면 SDP 와 multipart/mixed 로 ──
+    def invite(self, to, sdp, extra_headers=(), info=""):
         call_id = uuid.uuid4().hex
         tag = uuid.uuid4().hex[:8]
+        ctype, body = "application/sdp", sdp
+        if info:
+            b = "msrp-" + call_id[:12]
+            ctype = f"multipart/mixed;boundary={b}"
+            body = (f"--{b}\r\nContent-Type: application/sdp\r\n\r\n{sdp}\r\n"
+                    f"--{b}\r\nContent-Type: application/vnd.3gpp.mcdata-info+xml\r\n\r\n{info}\r\n--{b}--\r\n")
         lines = [
             f"INVITE sip:{to}@{self.domain} SIP/2.0",
             f"Via: {self._via()}",
@@ -168,8 +176,8 @@ class SipUa:
             f"Contact: {self.contact()}",
             "Max-Forwards: 70",
         ] + list(extra_headers) + [
-            "Content-Type: application/sdp",
-            f"Content-Length: {len(sdp.encode())}", "", sdp]
+            f"Content-Type: {ctype}",
+            f"Content-Length: {len(body.encode())}", "", body]
         self.send("\r\n".join(lines))
 
         final = ""
@@ -309,9 +317,15 @@ def mode_sender(args):
     ok(f"REGISTER {args.user}")
 
     session = uuid.uuid4().hex[:12]
-    final, dlg = ua.invite(args.group, msrp_offer_sdp(ua.local_ip, session),
-                           [f'Accept-Contact: *;+g.3gpp.icsi-ref="{MCDATA_ICSI}";require;explicit',
-                            "P-Preferred-Service: urn:urn-7:3gpp-service.ims.icsi.mcdata.sds"])
+    # 규격형 — Request-URI = 참여 MCData 기능 PSI, 그룹 = mcdata-info <mcdata-request-uri>(TS 24.282 §9.2.3.2.3 · §9.2.3.3.3 4)a))
+    mcdata_info = ('<?xml version="1.0" encoding="UTF-8"?>\r\n<mcdatainfo xmlns="urn:3gpp:ns:mcdataInfo:1.0"><mcdata-Params>'
+                   '<request-type>group-sds</request-type>'
+                   f'<mcdata-request-uri type="Normal"><mcdataURI>tel:{args.group}</mcdataURI></mcdata-request-uri>'
+                   '</mcdata-Params></mcdatainfo>')
+    final, dlg = ua.invite(args.psi, msrp_offer_sdp(ua.local_ip, session),
+                           ["Accept-Contact: *;+g.3gpp.mcdata.sds;require;explicit",
+                            f'Accept-Contact: *;+g.3gpp.icsi-ref="{MCDATA_ICSI}";require;explicit',
+                            "P-Preferred-Service: urn:urn-7:3gpp-service.ims.icsi.mcdata.sds"], info=mcdata_info)
     if not final.startswith("SIP/2.0 200"):
         fail(f"INVITE 최종응답: {final.splitlines()[0] if final else 'timeout'}")
         return 1
@@ -346,6 +360,7 @@ def mode_sender(args):
     else:
         fail("서버 BYE 미수신")
     info(f"conv={conv} msg={msgid} bytes={len(args.text.encode())}")
+    ua.register(expires=0)  # 이 시험 바인딩을 남기지 않는다
     return 0
 
 
@@ -462,8 +477,9 @@ def main():
     ap.add_argument("--port", type=int, default=15060)
     ap.add_argument("--user", default="1001")
     ap.add_argument("--group", default="9001")
+    ap.add_argument("--psi", default="mcdata_psi", help="참여 MCData 기능 PSI 의 user 부(Request-URI — sender)")
     ap.add_argument("--domain", default="ptt.cims.example.kr")
-    ap.add_argument("--password", default="1234")
+    ap.add_argument("--password", default="1234", help='평문 비밀번호 또는 "ha1:<hex>"')
     ap.add_argument("--auth-user", default="", help="digest username (기본: user; CIMS v3 는 imsi@svc-domain)")
     ap.add_argument("--text", default="MSRP 대용량 SDS 시험 " + "x" * 2500)
     ap.add_argument("--oversize", type=int, default=20000, help="negative 모드 payload 크기")

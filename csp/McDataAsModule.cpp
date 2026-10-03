@@ -36,18 +36,21 @@ namespace {
     }
 }  // namespace
 
+bool CMcDataAsModule::OnMessage( const char *pszFrom, const char *pszTo, CSipMessage *pclsMessage, int &iStatus ) {
+    std::string strOneToOneTarget;
+    return OnMcDataMessage( pszFrom, pszTo, pclsMessage, iStatus, strOneToOneTarget );
+}
+
 /**
- * 그룹 SDS 처리 (TS 24.282 group standard SDS, controlling function).
+ * MCData 요청 처리 (TS 24.282 group standalone SDS·FD, participating + controlling function).
  * 처리했으면(성공·거부 모두) true 이고, 보낼 최종 응답 코드를 iStatus 로 돌려준다.
  * Warning 헤더가 필요한 거부만 여기서 직접 응답하고 iStatus=0 으로 표시한다.
  */
-bool CMcDataAsModule::OnMessage( const char *pszFrom, const char *pszTo, CSipMessage *pclsMessage, int &iStatus ) {
+bool CMcDataAsModule::OnMcDataMessage( const char *pszFrom, const char *pszTo, CSipMessage *pclsMessage, int &iStatus,
+                                       std::string &strOneToOneTarget ) {
+    strOneToOneTarget.clear();
     if ( pclsMessage == NULL ) return false;
     if ( OnDispositionNotification( pszFrom, pclsMessage, iStatus ) ) return true;
-    if ( gclsGroupMap.Contains( pszTo ) == false ) return false;  // 1:1 → 디스패처 기본 경로
-
-    CspPttGroup clsGroup;
-    if ( gclsGroupMap.Select( pszTo, clsGroup ) == false ) return false;
 
     // Content-Type 원문 (boundary 포함) — fan-out 시 그대로 보존
     char szContentType[512];
@@ -62,6 +65,49 @@ bool CMcDataAsModule::OnMessage( const char *pszFrom, const char *pszTo, CSipMes
     bool bFd = bMcData && clsInfo.m_iMsgType == MCDATA_MSG_FD_SIGNALLING;
     int iPayloadSize = bMcData ? clsInfo.m_iPayloadSize : (int)pclsMessage->m_strBody.size();
     int iWarn = 0;
+
+    // 대상 — Request-URI 는 참여 기능 PSI 이고(§6.2.4.1 4)) 대상은 본문이다. request-type 이 절차를 가른다
+    //   (§9.2.2.3.1 4) · §9.2.2.4.2 5)·6) · §10.2.4.3.1 4) · §10.2.4.4.2 10)·12)): 그룹 = <mcdata-request-uri>,
+    //   1:1 = resource-lists 의 entry 하나 → 디스패처 1:1 경로. Request-URI 를 대상으로 읽는 옛 형식은 받지 않는다
+    //   (결정 D10 — 1:1 에 resource-lists 가 없으면 403 204·205, request-type 이 없으면 404 142).
+    std::string strGroupId;
+    if ( bMcData &&
+         ( clsInfo.m_iMsgType == MCDATA_MSG_SDS_SIGNALLING || clsInfo.m_iMsgType == MCDATA_MSG_FD_SIGNALLING ) ) {
+        bool bGroup = false;
+        std::string strTarget;
+        const int iTarget = McDataRequestTarget( clsInfo, bGroup, strTarget, &iWarn );
+        if ( iTarget != 0 ) {
+            CLog::Print( LOG_INFO, "McDataAs: %s from(%s) request-type(%s) — 대상 없음 → %d %d", bFd ? "FD" : "SDS",
+                         pszFrom, clsInfo.m_strRequestType.empty() ? "-" : clsInfo.m_strRequestType.c_str(), iTarget,
+                         iWarn );
+            _RejectWithWarning( pclsMessage, iTarget, iWarn, McDataWarnText( iWarn ) );
+            iStatus = 0;
+            return true;
+        }
+        if ( !bGroup ) {
+            strOneToOneTarget = strTarget;
+            return false;
+        }
+        strGroupId = strTarget;
+    } else if ( !bMcData ) {
+        // 평문 본문 — 대상은 Request-URI(그룹이면 아래 199 엄격 검사, 아니면 1:1 문자 메시지)
+        if ( gclsGroupMap.Contains( pszTo ) == false ) return false;
+        strGroupId = pszTo;
+    } else {
+        return false;  // 그 밖의 MCData 메시지(옛 형식 disposition 통지 등) → 디스패처 1:1 경로(Request-URI 대상)
+    }
+
+    // §6.3.3 2) — 그룹 문서가 없으면 404 + 113. 막 만든 그룹(GROUP_CHANGED 전)은 DB 에서 한 건 읽는다
+    CspPttGroup clsGroup;
+    if ( gclsGroupMap.Select( strGroupId.c_str(), clsGroup ) == false &&
+         ( !gclsGroupMap.LoadOneFromDb( strGroupId.c_str() ) ||
+           gclsGroupMap.Select( strGroupId.c_str(), clsGroup ) == false ) ) {
+        CLog::Print( LOG_INFO, "McDataAs: from(%s) group(%s) — 그룹 문서 없음 → 404 113", pszFrom, strGroupId.c_str() );
+        _RejectWithWarning( pclsMessage, SIP_NOT_FOUND, 113, McDataWarnText( 113 ) );
+        iStatus = 0;
+        return true;
+    }
+    pszTo = strGroupId.c_str();
 
     // 2) mcdata-info·mcdata-signalling·mcdata-payload 가 없는 본문(text/plain·signalling 없는 multipart) — 규격은 403 +
     // 199.

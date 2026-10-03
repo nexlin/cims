@@ -610,6 +610,18 @@ inline std::vector<std::string> ParseResourceListUsers( const std::string &body 
     return out;
 }
 
+/** 개별 호 개시 INVITE 의 착신자 (TS 24.379 §11.1.1.2.1.1 9) — application/resource-lists+xml 의 entry 하나,
+ * Request-URI 는 참여 기능 PSI). resource-lists 가 없거나 entry 가 하나가 아니면 false — 참여 기능은 403 + `145 unable
+ * to determine called party`(§11.1.1.3.1.1 8)·9)). 착신자를 Request-URI·<mcptt-request-uri> 로 읽지 않는다(결정 D10).
+ */
+inline bool McpttPrivateCalledParty( const std::string &body, std::string &strCallee ) {
+    strCallee.clear();
+    const std::vector<McpttListEntry> vec = ParseResourceListEntries( body );
+    if ( vec.size() != 1 ) return false;
+    strCallee = vec[0].strId;
+    return !strCallee.empty();
+}
+
 /** BYE 의 Reason(RFC 3326, 첫 값)이 애드혹 호 해제 요청인가 — `SIP;cause=200;text="User requested release"`
  *  (TS 24.379 §17.2.3.1.1 · §6.3.3.2.4 3A)). 프로토콜·cause·text 를 본다(대소문자·공백 무관). */
 inline bool McpttIsUserRequestedRelease( const std::string &strReason ) {

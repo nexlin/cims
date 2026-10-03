@@ -1,0 +1,30 @@
+MESSAGE sip:mcdata_psi@ptt.cims.example.kr SIP/2.0
+Via: SIP/2.0/TLS 10.10.1.21:50601;branch=z9hG4bK-fd-g1;rport
+Max-Forwards: 70
+From: <sip:+82510002001@ptt.cims.example.kr>;tag=fd-g1-f
+To: <sip:mcdata_psi@ptt.cims.example.kr>
+Call-ID: fd-g1@10.10.1.21
+CSeq: 1 MESSAGE
+Accept-Contact: *;+g.3gpp.mcdata.fd;require;explicit
+Accept-Contact: *;+g.3gpp.icsi-ref="urn%3Aurn-7%3A3gpp-service.ims.icsi.mcdata.fd";require;explicit
+P-Preferred-Service: urn:urn-7:3gpp-service.ims.icsi.mcdata.fd
+Content-Type: multipart/mixed;boundary=fd-g1
+Content-Length: 813
+
+--fd-g1
+Content-Type: application/vnd.3gpp.mcdata-info+xml
+
+<?xml version="1.0" encoding="UTF-8"?>
+<mcdatainfo xmlns="urn:3gpp:ns:mcdataInfo:1.0">
+  <mcdata-Params>
+    <request-type>group-fd</request-type>
+    <mcdata-request-uri type="Normal"><mcdataURI>tel:g101</mcdataURI></mcdata-request-uri>
+    <mcdata-client-id type="Normal"><mcdataString>urn:uuid:2f6b8c4e-1a2b-4c3d-9e8f-0a1b2c3d4e5f</mcdataString></mcdata-client-id>
+  </mcdata-Params>
+</mcdatainfo>
+--fd-g1
+Content-Type: application/vnd.3gpp.mcdata-signalling
+Content-Transfer-Encoding: base64
+
+AgBqvREwPyobDE1eT2ChssPU5fYHGKEAAAAAAEAAgAAAAAAAAAN4AFAEaHR0cHM6Ly9jc2MucHR0LmNpbXMuZXhhbXBsZS5rcjo0NDMwL21jZGF0YS9mZC8wMTIzNDU2Nzg5YWJjZGVmMDEyMzQ1Njc4OWFiY2RlZnkALW5hbWU6InNpdGUtbWFwLnBuZyIgc2l6ZTo0ODIxMyB0eXBlOmltYWdlL3BuZw==
+--fd-g1--

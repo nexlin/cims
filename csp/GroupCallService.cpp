@@ -895,7 +895,7 @@ void CGroupCallService::ParseMcpttFmtp( CSipCallRtp *pclsRtp, McpttFmtp &clsFmtp
                 std::string strTok = strParams.substr( iPos, iEnd - iPos );
                 iPos = iEnd + 1;
                 // 공백 trim — CR/LF 포함 (SDP 마지막 라인의 잔존 \r 이 마지막 토큰 매칭을
-                //   깨뜨린다: "mc_no_floor_ctrl\r" != "mc_no_floor_ctrl")
+                //   깨뜨린다: "mc_granted\r" != "mc_granted")
                 size_t iB = strTok.find_first_not_of( " \t\r\n" );
                 if ( iB == std::string::npos ) continue;
                 strTok = strTok.substr( iB, strTok.find_last_not_of( " \t\r\n" ) - iB + 1 );
@@ -908,9 +908,10 @@ void CGroupCallService::ParseMcpttFmtp( CSipCallRtp *pclsRtp, McpttFmtp &clsFmtp
                     clsFmtp.iImplicit = 1;  // 발언 요청(§14.2.5) — 받아들일지는 호출자가 세션 상태로 정한다
                 } else if ( strcasecmp( strTok.c_str(), "mc_granted" ) == 0 ) {
                     clsFmtp.iGrantedCap = 1;  // 능력 표시(§14.2.4) — 요청으로 읽지 않는다(§12.1.2.2 NOTE 2)
-                } else if ( strcasecmp( strTok.c_str(), "mc_no_floor_ctrl" ) == 0 ) {
-                    clsFmtp.iNoFloorCtrl = 1;
                 }
+                // mc_no_floor_ctrl 은 읽지 않는다 — pre-established session 의 표시다(TS 24.380 §14.2.6).
+                //   on-demand 개별 호의 floor 유무 = m=application 유무(TS 24.379 §11.1.2.3.1 —
+                //   McpttFloorChannelOffered).
             }
             return;
         }
@@ -2937,10 +2938,10 @@ bool CGroupCallService::InviteMember( const char *pszUserId, const char *pszGrou
                 if ( itRtp2 != m_mapGroupRtp.end() && itRtp2->second.iFloorPort > 0 )
                     iFloorPort = itRtp2->second.iFloorPort;
             }
-            // floor 없는 세션(floor_control=off)은 floor 포트가 없다 — 관례 fallback(audio+1)을
-            //   그대로 두면 멤버 RTCP 포트가 floor 로 오광고되어 단말이 거기로 floor 연결을
-            //   시도한다(08-05 실측 52199). m=application 은 mc_no_floor_ctrl 에코를 실어야
-            //   하므로 라인은 유지하되 포트 0(미사용)으로 내린다 (RFC 3264 §6).
+            // floor 없는 세션(floor_control=off — floor 없는 개별 호)은 floor 포트가 없다 — 관례 fallback(audio+1)을
+            //   그대로 두면 멤버 RTCP 포트가 floor 로 오광고되어 단말이 거기로 floor 연결을 시도한다(08-05 실측 52199).
+            //   착신 offer 에 발언권 제어 채널을 싣지 않는다 — 착신 단말은 m=application 이 없는 것으로 floor 없는 호를
+            //   안다(TS 24.379 §11.1.2.2 끝 문단 · §11.1.2.3.2, WrapMultipartBody).
             if ( clsGroup._floorControl == "off" ) iFloorPort = 0;
             std::string strGroupUri = "sip:" + std::string( pszGroupId ) + "@" + strMcpttDomain;
             const std::string strFloorOfferFmtp = MemberFloorOfferFmtp( clsGroup, pszUserId );
@@ -4601,19 +4602,19 @@ void CGroupCallService::WrapMultipartBody( CSipMessage *pclsInvite, const std::s
     std::string strSdp = pclsInvite->m_strBody;
 
     // SDP 끝에 MCPTT floor control 미디어 라인 추가 (3GPP TS 24.379)
-    // m=application: PTT floor control (Grant/Deny/Release) 전용 UDP 포트
-    std::ostringstream sdpFloor;
-    sdpFloor << "m=application " << iFloorPort << " UDP MCPTT\r\n"
-             << "c=IN IP4 " << strFloorIp << "\r\n"
-             << "a=floorid:0 mstrm:audio\r\n";
-    // floor 없는 세션(private full-duplex)은 fan-out 에도 mc_no_floor_ctrl 을 광고해야
-    //   수신 단말이 전이중(마이크 상시)으로 수락한다 (G17 — 협상 결과의 양방향 정합).
-    if ( bNoFloorCtrl )
-        sdpFloor << "a=fmtp:MCPTT mc_queueing;mc_no_floor_ctrl\r\n";
-    else if ( !strFloorFmtp.empty() )
-        sdpFloor << "a=fmtp:MCPTT " << strFloorFmtp << "\r\n";
-    if ( !strGroupUri.empty() ) sdpFloor << "a=mcptt-floor-request-uri:" << strGroupUri << "\r\n";  // TS 24.379 §C.3
-    strSdp += sdpFloor.str();
+    // m=application: PTT floor control (Grant/Deny/Release) 전용 UDP 포트. floor 없는 세션(floor 없는 개별 호)은 이
+    //   줄을 싣지 않는다 — 착신 단말은 발언권 제어 채널이 없는 offer 로 floor 없는 호를 안다(TS 24.379 §11.1.2.2 끝
+    //   문단 · §11.1.2.3.2).
+    if ( !bNoFloorCtrl ) {
+        std::ostringstream sdpFloor;
+        sdpFloor << "m=application " << iFloorPort << " UDP MCPTT\r\n"
+                 << "c=IN IP4 " << strFloorIp << "\r\n"
+                 << "a=floorid:0 mstrm:audio\r\n";
+        if ( !strFloorFmtp.empty() ) sdpFloor << "a=fmtp:MCPTT " << strFloorFmtp << "\r\n";
+        if ( !strGroupUri.empty() )
+            sdpFloor << "a=mcptt-floor-request-uri:" << strGroupUri << "\r\n";  // TS 24.379 §C.3
+        strSdp += sdpFloor.str();
+    }
 
     std::ostringstream oss;
     // Part 1: mcptt-info XML (3GPP MCPTT call control)

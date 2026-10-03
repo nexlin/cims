@@ -1,0 +1,41 @@
+INVITE sip:mcdata_psi@ptt.cims.example.kr SIP/2.0
+Via: SIP/2.0/TLS 10.10.1.21:50601;branch=z9hG4bK-sdsm-g1;rport
+Max-Forwards: 70
+From: <sip:+82510002001@ptt.cims.example.kr>;tag=sdsm-g1-f
+To: <sip:mcdata_psi@ptt.cims.example.kr>
+Call-ID: sdsm-g1@10.10.1.21
+CSeq: 1 INVITE
+Contact: <sip:+82510002001@10.10.1.21:50601;transport=tls>;+g.3gpp.mcdata.sds;+g.3gpp.icsi-ref="urn%3Aurn-7%3A3gpp-service.ims.icsi.mcdata.sds"
+Accept-Contact: *;+g.3gpp.mcdata.sds;require;explicit
+Accept-Contact: *;+g.3gpp.icsi-ref="urn%3Aurn-7%3A3gpp-service.ims.icsi.mcdata.sds";require;explicit
+P-Preferred-Service: urn:urn-7:3gpp-service.ims.icsi.mcdata.sds
+Supported: timer
+Session-Expires: 1800
+Content-Type: multipart/mixed;boundary=sdsm-g1
+Content-Length: 808
+
+--sdsm-g1
+Content-Type: application/sdp
+
+v=0
+o=- 3900001009 3900001009 IN IP4 10.10.1.21
+s=-
+c=IN IP4 10.10.1.21
+t=0 0
+m=message 40200 TCP/MSRP *
+a=sendonly
+a=path:msrp://10.10.1.21:40200/s1a2b3c4;tcp
+a=accept-types:application/vnd.3gpp.mcdata-signalling application/vnd.3gpp.mcdata-payload
+a=setup:actpass
+--sdsm-g1
+Content-Type: application/vnd.3gpp.mcdata-info+xml
+
+<?xml version="1.0" encoding="UTF-8"?>
+<mcdatainfo xmlns="urn:3gpp:ns:mcdataInfo:1.0">
+  <mcdata-Params>
+    <request-type>group-sds</request-type>
+    <mcdata-request-uri type="Normal"><mcdataURI>tel:g101</mcdataURI></mcdata-request-uri>
+    <mcdata-client-id type="Normal"><mcdataString>urn:uuid:2f6b8c4e-1a2b-4c3d-9e8f-0a1b2c3d4e5f</mcdataString></mcdata-client-id>
+  </mcdata-Params>
+</mcdatainfo>
+--sdsm-g1--

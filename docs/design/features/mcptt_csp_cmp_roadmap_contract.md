@@ -67,8 +67,8 @@ TS 24.379 §11(call control) + TS 24.380 §6.3(floor control 공통). private ca
 > `group_type:"private"` 는 "2인 세션" 이라는 사실만 전달하고, CMP 는 그 위에 정원 1·큐 없음·
 > chair 미적용을 **로컬 정책**으로 적용한다 — private 은 2인이므로 `floor_policy`
 > (single/dual/multi)를 해석하지 않는다. private 의 floor 유무는 오직 `floor_control` 로 정한다.
-> 규격상 초기 발언권은 fmtp `mc_granted`, floor 없는 세션은 `mc_no_floor_ctrl` 협상 결과여야
-> 한다([mcptt_standard_conformance.md](mcptt_standard_conformance.md) §0-R G17).
+> 규격상 초기 발언권은 fmtp `mc_granted`, floor 없는 개별 호는 offer 에 발언권 제어 채널(`m=application`)이 없는 호다
+> (TS 24.379 §11.1.2 — CSP 가 그것으로 `floor_control:"off"` 를 정한다, [../modules/csp.md](../modules/csp.md) «Private call»).
 
 | 모드 | 파라미터 | 응답 | floor 절차 |
 |---|---|---|---|
@@ -210,7 +210,7 @@ STATS `detail.groups[].floor_holders`(배열)와 이벤트 `FLOOR_TALKERS`(발�
 | cmd | 신규 필드 | 소유 | 기능 | 상태 |
 |---|---|---|---|---|
 | `PTT_GROUP_ADD`/`_MODIFY` | `group_type:"private"` | A | Private call (1:1) | 완료 — CSP 가 mcptt-info `session-type:private` INVITE 를 합성 2인 ephemeral 그룹(`priv-<발신>-<착신>`)으로 발행 ([../modules/csp.md](../modules/csp.md) 「Private call」) |
-| `PTT_GROUP_ADD`/`_MODIFY` | `floor_control`(`on`/`off`) | B | Floor 유무 (private no-floor 포함) | 완료 — CSP 는 발신 offer 의 fmtp `mc_no_floor_ctrl`(G17)로 `off` 를 발행. 실기기 1:1 멀티(전이중) 양방향 중계·귀검증·teardown·녹취 슬롯 트랙까지 검증 완료 |
+| `PTT_GROUP_ADD`/`_MODIFY` | `floor_control`(`on`/`off`) | B | Floor 유무 (private no-floor 포함) | 완료 — CSP 는 발신 offer 에 `m=application`(발언권 제어 채널)이 없으면 `off` 를 발행(TS 24.379 §11.1.2.3.1). 실기기 1:1 멀티(전이중) 양방향 중계·귀검증·teardown·녹취 슬롯 트랙까지 검증 완료 |
 | `PTT_GROUP_ADD`/`_MODIFY` | `floor_policy`(`single`/`dual`/`multi`), `max_talkers` | B | Dual / Multi-talker (그룹 전용) | 완료 (CSP 발행 완료 — DB `ptt_groups.floor_policy`/`max_talkers` 원천) |
 | `PTT_GROUP_ADD`/`_MODIFY` | `floor_crypto` | B | Floor E2E 보호 | 완료 (CSC KMS 연결 대기) |
 | `PTT_GROUP_ADD` | `distribution`, `multicast_*` | B(예약) | MBMS/멀티캐스트 | 미구현 |

@@ -38,8 +38,6 @@ struct McpttFmtp {
     int iGrantedCap =
         0;  // 1=offer 의 mc_granted — 200 OK 로 승인 표시를 받을 수 있다는 **능력**(§14.2.4 · §12.1.2.2 NOTE 2 —
             //   발언 요청이 아니다)
-    int iNoFloorCtrl = 0;  // 1=mc_no_floor_ctrl 협상 — floor 없는 세션 제안(G17). private call 의
-                           //   floor_control:"off"(full-duplex) 판정 입력 — PTT_JOIN 필드 아님
 };
 
 // PTT 그룹 세션 속성 (mcptt_broadcast_group_call.md §4.5) — 정본은 CSP 세션 캐시(CGroupCallService)이고

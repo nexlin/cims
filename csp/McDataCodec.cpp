@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "Base64.h"
+#include "McpttInfo.h"
 
 // ── 내부 유틸 ──────────────────────────────────────────────
 
@@ -294,8 +295,32 @@ static std::string _mcdataUriOf( const std::string &xml, const char *pszTag ) {
     return _trim( xml.substr( uriB, uriE - uriB ) );
 }
 
-/** mcdata-info+xml 에서 <mcdata-request-uri>·<mcdata-calling-user-id>·<mcdata-calling-group-id> 추출 */
+/** mcdata-info+xml 의 문자열 요소 값 — <request-type> 은 값을 바로 싣는다(Annex D.2 스키마). contentType 자식
+ * (<mcdataString>)으로 실은 것도 읽는다 */
+static std::string _mcdataTextOf( const std::string &xml, const char *pszTag ) {
+    const std::string strOpen = std::string( "<" ) + pszTag;
+    size_t p = xml.find( strOpen );
+    while ( p != std::string::npos ) {  // 이름 경계
+        const char c = p + strOpen.size() < xml.size() ? xml[p + strOpen.size()] : '\0';
+        if ( c == '>' || c == ' ' || c == '\t' || c == '\r' || c == '\n' ) break;
+        p = xml.find( strOpen, p + strOpen.size() );
+    }
+    if ( p == std::string::npos ) return std::string();
+    const size_t gt = xml.find( '>', p );
+    const size_t close = xml.find( std::string( "</" ) + pszTag, p );
+    if ( gt == std::string::npos || close == std::string::npos || close < gt ) return std::string();
+    std::string v = xml.substr( gt + 1, close - gt - 1 );
+    const size_t s = v.find( "<mcdataString>" );
+    if ( s != std::string::npos ) {
+        const size_t e = v.find( "</mcdataString>", s );
+        v = v.substr( s + 14, ( e == std::string::npos ? v.size() : e ) - s - 14 );
+    }
+    return _trim( v );
+}
+
+/** mcdata-info+xml 에서 <request-type>·<mcdata-request-uri>·<mcdata-calling-user-id>·<mcdata-calling-group-id> 추출 */
 static void _parseMcDataInfo( const std::string &xml, CMcDataSdsInfo &clsInfo ) {
+    clsInfo.m_strRequestType = _mcdataTextOf( xml, "request-type" );
     clsInfo.m_strGroupUri = _mcdataUriOf( xml, "mcdata-request-uri" );
     clsInfo.m_strCallingUserId = _mcdataUriOf( xml, "mcdata-calling-user-id" );
     clsInfo.m_strCallingGroupId = _mcdataUriOf( xml, "mcdata-calling-group-id" );
@@ -320,6 +345,38 @@ static void _parseResourceLists( const std::string &xml, CMcDataSdsInfo &clsInfo
 }
 
 // ── 공개 API ──────────────────────────────────────────────
+
+void McDataParseInfo( const std::string &strXml, CMcDataSdsInfo &clsInfo ) {
+    _parseMcDataInfo( strXml, clsInfo );
+}
+
+int McDataRequestTarget( const CMcDataSdsInfo &clsInfo, bool &bGroup, std::string &strTargetId, int *piWarn ) {
+    bGroup = false;
+    strTargetId.clear();
+    if ( piWarn ) *piWarn = 0;
+    const std::string &t = clsInfo.m_strRequestType;
+    if ( t == "group-sds" || t == "group-fd" ) {
+        // §9.2.2.3.1 4)a)ii) · §10.2.4.3.1 4)a) — 그룹 = <mcdata-request-uri>
+        strTargetId = McpttBareId( clsInfo.m_strGroupUri );
+        if ( strTargetId.empty() ) {
+            if ( piWarn ) *piWarn = 142;
+            return 404;
+        }
+        bGroup = true;
+        return 0;
+    }
+    if ( t == "one-to-one-sds" || t == "one-to-one-fd" ) {
+        // §9.2.2.4.2 5)b)i) · §10.2.4.4.2 10)a) — resource-lists 의 entry 하나
+        if ( clsInfo.m_vecListUris.size() != 1 || McpttBareId( clsInfo.m_vecListUris[0] ).empty() ) {
+            if ( piWarn ) *piWarn = t == "one-to-one-sds" ? 204 : 205;
+            return 403;
+        }
+        strTargetId = McpttBareId( clsInfo.m_vecListUris[0] );
+        return 0;
+    }
+    if ( piWarn ) *piWarn = 142;  // §9.2.2.3.1 5) — 제어 기능을 정하지 못한다
+    return 404;
+}
 
 bool McDataIsMultipartMixed( const std::string &strContentType ) {
     return _lower( strContentType ).find( "multipart/mixed" ) != std::string::npos;

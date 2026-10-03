@@ -7,3 +7,6 @@ android/tablet.sh text eol=lf
 
 # MCVideo SIP 골든(계약 K3) — 전송 바이트 그대로(CRLF·Content-Length). 줄 끝 변환을 막는다(생성 = tests/fixtures/mcvideo/sip/build_goldens.py)
 tests/fixtures/mcvideo/sip/*.txt -text
+
+# MCPTT·MCData 요청 형식 골든(S17 계약) — 전송 바이트 그대로(생성 = tests/fixtures/mcptt/sip/build_goldens.py)
+tests/fixtures/mcptt/sip/*.txt -text

@@ -48,6 +48,7 @@
 #include "McVideoCallService.h"
 #include "McVideoInfo.h"
 #include "McpttInfo.h"
+#include "McpttSdp.h"
 #include "MemoryDebug.h"
 #include "NonceMap.h"
 #include "RelayCodec.h"
@@ -944,6 +945,14 @@ void CModuleDispatcher::EventIncomingCall( const char *pszCallId, const char *ps
          m_clsMcVideoAs.OnIncomingCall( pszCallId, pszFrom, pszTo, pclsRtp, pclsMessage ) == E_ROUTE_HANDLED )
         return;
 
+    // MCData media plane — SDP 에 m=message TCP/MSRP 가 있으면 그룹콜이 아닌 대용량 SDS INVITE(TS 24.282 §9.2.3).
+    //   MCPTT 판정(mcptt-info·PSI·resource-lists)보다 먼저 가른다 — Request-URI 가 참여 기능 PSI 이고 대상이 본문에
+    //   있는 규격형 요청이 MCPTT 개별·애드혹 호로 잡히지 않게.
+    if ( m_clsMcDataAs.IsEnabled() && gclsMcDataMediaService.IsMsrpInvite( pclsRtp ) ) {
+        gclsMcDataMediaService.OnIncomingMsrpInvite( pszCallId, pszFrom, pszTo, pclsRtp, pclsMessage );
+        return;
+    }
+
     // MCPTT condition(emergency/imminent)·session-type 파싱 — INVITE 의 mcptt-info+xml (TS 24.379).
     //   condition 은 session-type 과 직교. ProcessGroupCall 로 전달해 floor tier·fan-out 광고에 반영.
     int iMcpttCond = 0;
@@ -963,8 +972,9 @@ void CModuleDispatcher::EventIncomingCall( const char *pszCallId, const char *ps
     //   가입자도 아니면 PSI 로 보고 대상을 mcptt-request-uri 로 잡는다 — PSI 이름(mcptt_psi·단말 설정값)을 따로
     //   대조하지 않는다. Request-URI 에 대상을 직접 싣는 구형 단말은 두 값이 같거나 mcptt-request-uri 가 없어 이 분기를
     //   타지 않는다.
+    //   개별 호는 이 분기를 타지 않는다 — 착신자 = resource-lists(아래 개별 호 분기, §11.1.1.2.1.1 9)).
     std::string strPsiTarget;  // pszTo 가 가리키므로 함수 끝까지 산다
-    if ( m_clsPttAs.IsEnabled() && !strMcpttRequestUri.empty() ) {
+    if ( m_clsPttAs.IsEnabled() && !strMcpttRequestUri.empty() && strMcpttSessionType != "private" ) {
         const std::string strCandidate = McpttPsiTarget( pszTo, strMcpttRequestUri );
         if ( !strCandidate.empty() ) {
             CspUser clsRuriUser;
@@ -993,7 +1003,7 @@ void CModuleDispatcher::EventIncomingCall( const char *pszCallId, const char *ps
         //   + 맵 Clear/재구축)가 일어나 SIP 수신스레드를 블록 → 소켓 버퍼 overflow·호 실패(408). 그래서:
         //   (1) 착신이 '등록된 가입자' 면 1:1 호이므로 DB 조회 자체를 생략(그룹 아님 — 폭풍 원천 차단).
         //   (2) 미등록 타겟(신규 그룹일 수 있음)만 전체가 아니라 '해당 id 단건' 만 DB 조회·로드.
-        if ( !gclsGroupMap.Contains( pszTo ) && gclsDbManager.IsConnected() ) {
+        if ( strMcpttSessionType != "private" && !gclsGroupMap.Contains( pszTo ) && gclsDbManager.IsConnected() ) {
             CspUser clsToUser;
             bool bToIsRegisteredUser = gclsCspUserMap.isAlive( pszTo, clsToUser );
             if ( !bToIsRegisteredUser ) {
@@ -1024,8 +1034,10 @@ void CModuleDispatcher::EventIncomingCall( const char *pszCallId, const char *ps
     //   합성 2인 ephemeral 그룹(priv-<caller>-<callee>)을 만들어 기존 ProcessGroupCall 경로
     //   (fan-out·CMP 세션·teardown)를 그대로 재사용한다 — 별도 CMP 명령 없음, 계약 §A.1
     //   (mcptt_csp_cmp_roadmap_contract.md). affiliation 불요(멤버십 게이트 우회).
-    //   floor 유무는 발신 offer 의 fmtp mc_no_floor_ctrl(G17)로 정한다 — off=full-duplex.
-    if ( m_clsPttAs.IsEnabled() && strMcpttSessionType == "private" && !gclsGroupMap.Contains( pszTo ) ) {
+    //   Request-URI = 참여 기능 PSI, 착신자 = resource-lists 의 entry 하나(§11.1.1.2.1.1 1)·9)).
+    //   floor 유무 = offer 의 m=application(발언권 제어 채널) 유무(§11.1.2.2 1)·§11.1.2.3.1) — 없으면 full-duplex.
+    std::string strPrivCallee;  // pszTo 가 가리키므로 함수 끝까지 산다
+    if ( m_clsPttAs.IsEnabled() && strMcpttSessionType == "private" ) {
         // 개별 호 인가 (TS 24.379 §11.1.1.3.1.1 10)·11)·18) · §11.1.1.3.2 8)) — user profile = ptt_user_profile, CSC 가
         // 같은
         //   열로 문서를 낸다. 거절 = 403 + Warning(§4.4), 시도 장부는 denied.
@@ -1037,6 +1049,11 @@ void CModuleDispatcher::EventIncomingCall( const char *pszCallId, const char *ps
                 pszCallId, SIP_FORBIDDEN, NULL,
                 { { "Warning", McpttWarning( iWarn, pszText, gclsServiceMap.GetDomainByKind( "ptt" ) ) } } );
         };
+        // 8)·9) 착신자 — resource-lists 가 없거나 entry 가 하나가 아니면 403 145. Request-URI·<mcptt-request-uri> 로
+        //   착신자를 읽지 않는다(결정 D10 — 옛 형식 전환기 없음).
+        if ( !McpttPrivateCalledParty( pclsMessage ? pclsMessage->m_strBody : std::string(), strPrivCallee ) )
+            return rejectPriv( 145, "unable to determine called party", "private_called_party_unknown" );
+        pszTo = strPrivCallee.c_str();
         CspUserProfile clsCallerProf;  // 행 부재·DB 오류 = 기본값(허용)
         gclsDbManager.SelectUserProfile( pszFrom, clsCallerProf );
         // 10) 발신 인가. 11)a)b) 수동·자동 개시 인가는 CSC 가 발신 인가와 같은 값으로 낸다 — 여기를 지나면 125·126 은
@@ -1094,20 +1111,19 @@ void CModuleDispatcher::EventIncomingCall( const char *pszCallId, const char *ps
                                    "private_callee_not_authorised" );
         }
         std::string strPrivId = std::string( "priv-" ) + pszFrom + "-" + pszTo;
-        // 새 발신의 floor 모드 — 싱글(floor on, 기본) vs 멀티(mc_no_floor_ctrl → off).
-        McpttFmtp clsPrivFmtpChk;
-        CGroupCallService::ParseMcpttFmtp( pclsRtp, clsPrivFmtpChk );
-        const char *pszWantFloorCtl = clsPrivFmtpChk.iNoFloorCtrl ? "off" : "";
+        // 새 발신의 floor 모드 — offer 에 발언권 제어 채널(m=application … MCPTT)이 있으면 floor on(반이중), 없으면
+        //   floor 없는 개별 호(§11.1.2.3.1 — full-duplex, floor_control off).
+        const bool bPrivFloor = pclsRtp && McpttFloorChannelOffered( pclsRtp->m_clsMediaList );
+        const char *pszWantFloorCtl = bPrivFloor ? "" : "off";
         // 잔존 ephemeral 그룹의 모드가 이번 발신과 다르면 재사용하지 않는다 — 이전 호의
         //   그룹이 남아(경합·앱 강제종료 등) 이후 모든 1:1 이 그 모드로 고정되는 오염 방지.
         //   CMP 그룹도 REMOVE 로 확실히 재생성한다 (ADD 멱등 경로는 floor_control 을 갱신하지 않음).
         {
             CspPttGroup clsPrivOld;
             if ( gclsGroupMap.Select( strPrivId.c_str(), clsPrivOld ) && clsPrivOld._floorControl != pszWantFloorCtl ) {
-                CLog::Print( LOG_INFO,
-                             "EventIncomingCall: private(%s) 잔존 그룹 모드 불일치(%s→%s) — 제거 후 재생성 [PTT-AS]",
-                             strPrivId.c_str(), clsPrivOld._floorControl.empty() ? "on" : "off",
-                             clsPrivFmtpChk.iNoFloorCtrl ? "off" : "on" );
+                CLog::Print(
+                    LOG_INFO, "EventIncomingCall: private(%s) 잔존 그룹 모드 불일치(%s→%s) — 제거 후 재생성 [PTT-AS]",
+                    strPrivId.c_str(), clsPrivOld._floorControl.empty() ? "on" : "off", bPrivFloor ? "on" : "off" );
                 gclsCmpClient.RemoveGroup( strPrivId );
                 gclsGroupMap.Remove( strPrivId.c_str() );
             }
@@ -1122,7 +1138,7 @@ void CModuleDispatcher::EventIncomingCall( const char *pszCallId, const char *ps
             clsPriv._isAdhoc = true;              // 통화 종료 시 GroupMap 에서 제거(ephemeral)
             clsPriv._emergencyCall = true;        // 그룹문서 없음 — capability 축 공허, 긴급은 사용자 축
                                                   // 게이트(IsConditionInitAuthorized private 분기)
-            if ( clsPrivFmtpChk.iNoFloorCtrl ) clsPriv._floorControl = "off";
+            if ( !bPrivFloor ) clsPriv._floorControl = "off";
             clsPriv._pusers.push_back( std::make_shared<CspPttUser>( pszFrom, 5, "participant", "" ) );
             clsPriv._pusers.push_back( std::make_shared<CspPttUser>( pszTo, 5, "participant", "" ) );
             gclsGroupMap.Insert( clsPriv );
@@ -1251,13 +1267,6 @@ void CModuleDispatcher::EventIncomingCall( const char *pszCallId, const char *ps
                          strAdhocId.c_str(), pszFrom );
             return StopCall( pszCallId, SIP_FORBIDDEN );
         }
-    }
-
-    // MCData media plane — SDP 에 m=message TCP/MSRP 가 있으면 그룹콜이 아닌 대용량 SDS
-    //   INVITE (TS 24.282 §9.2.3). PTT-AS 그룹 분기보다 먼저 선점해야 한다.
-    if ( m_clsMcDataAs.IsEnabled() && gclsMcDataMediaService.IsMsrpInvite( pclsRtp ) ) {
-        gclsMcDataMediaService.OnIncomingMsrpInvite( pszCallId, pszFrom, pszTo, pclsRtp, pclsMessage );
-        return;
     }
 
     if ( m_clsPttAs.IsEnabled() && gclsGroupMap.Contains( pszTo ) ) {
@@ -2883,10 +2892,15 @@ int CModuleDispatcher::EventMessage( const char *pszFrom, const char *pszTo, CSi
             return m_clsPttAs.OnEmergencyAlert( pszFrom, pszTo, pclsMessage, ParseMcpttInfo( pclsMessage->m_strBody ) );
     }
 
-    // MCData 그룹 SDS (TS 24.282) — 그룹 대상 MESSAGE 는 MCDATA-AS 가 게이트+fan-out.
+    // MCData SDS·FD (TS 24.282) — 대상은 본문이다(Request-URI = 참여 기능 PSI, §6.2.4.1 4)). 그룹 요청은 MCDATA-AS 가
+    //   게이트+fan-out 하고, 1:1 요청은 resource-lists 의 MCData ID 를 착신자로 아래 1:1 전달을 탄다
+    //   (§9.2.2.4.2 5)b)iii)).
     int iMcStatus = SIP_OK;
-    if ( m_clsMcDataAs.IsEnabled() && m_clsMcDataAs.OnMessage( pszFrom, pszTo, pclsMessage, iMcStatus ) )
+    std::string strMcOneToOne;
+    if ( m_clsMcDataAs.IsEnabled() &&
+         m_clsMcDataAs.OnMcDataMessage( pszFrom, pszTo, pclsMessage, iMcStatus, strMcOneToOne ) )
         return iMcStatus;
+    if ( !strMcOneToOne.empty() ) pszTo = strMcOneToOne.c_str();
 
     CUserInfo clsUserInfo;
     CSipCallRoute clsRoute;
