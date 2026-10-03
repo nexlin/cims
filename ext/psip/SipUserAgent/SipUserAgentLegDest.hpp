@@ -239,6 +239,25 @@ bool CSipUserAgent::SetContactUriParams( const char * pszCallId, const char * ps
 	return bRes;
 }
 
+bool CSipUserAgent::SetContactUser( const char * pszCallId, const char * pszUser )
+{
+	if( pszCallId == NULL || pszUser == NULL ) return false;
+
+	bool bRes = false;
+
+	m_clsDialogMutex.acquire();
+	SIP_DIALOG_MAP::iterator itMap = m_clsDialogMap.find( pszCallId );
+	if( itMap != m_clsDialogMap.end() )
+	{
+		itMap->second.m_strContactUser = pszUser;
+		if( itMap->second.m_pclsInvite ) itMap->second.m_pclsInvite->m_strContactUser = pszUser;
+		bRes = true;
+	}
+	m_clsDialogMutex.release();
+
+	return bRes;
+}
+
 bool CSipUserAgent::SetSessionRefresher( const char * pszCallId, int iRefresher )
 {
 	if( pszCallId == NULL ) return false;

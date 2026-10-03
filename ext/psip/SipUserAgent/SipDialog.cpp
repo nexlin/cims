@@ -716,6 +716,7 @@ CSipMessage * CSipDialog::CreateMessage( const char * pszSipMethod )
 	pclsMessage->m_iContactTransport = m_iContactTransport;
 	pclsMessage->m_clsContactParams = m_clsContactParams;
 	pclsMessage->m_clsContactUriParams = m_clsContactUriParams;
+	pclsMessage->m_strContactUser = m_strContactUser;
 	pclsMessage->m_strSipMethod = pszSipMethod;
 
 	if( m_strContactUri.empty() == false )

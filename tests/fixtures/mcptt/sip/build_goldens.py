@@ -8,7 +8,7 @@
   python3 tests/fixtures/mcptt/sip/build_goldens.py --check    # *.txt 가 최신인지(S1-MCX-REQUEST-CONTRACT 가 부른다)
 
 시나리오 = README.md(같은 디렉터리). 규격 = TS 24.379 V20.0.0(§11.1.1.2.1.1 개별 호 개시 · §11.1.2.2 floor 없는 개별 호 ·
-§11.1.1.3.1.1 8)·9) 145 · §10.1.3 conference 구독 · §6.2.1 SDP · §4.4 Warning · Annex F.1 mcptt-info) · TS 24.380 V20.0.0(표 4.3.3.1-1 · §14 fmtp) ·
+§11.1.1.3.1.1 8)·9) 145 · §10.1.3 conference 구독 · §10.1.1.2.4.1·§10.1.1.4.5.1 재합류 · §6.2.1 SDP · §4.4 Warning · Annex F.1 mcptt-info) · TS 24.380 V20.0.0(표 4.3.3.1-1 · §14 fmtp) ·
 TS 24.282 V19.8.0(§6.2.4.1 · §9.2.2.2.1 SDS · §10.2.4.2.1 FD · §9.2.3.2.1·§9.2.3.2.3 미디어 평면 SDS · §9.2.2.4.2 5) 204 ·
 §15 메시지 · Annex D mcdata-info).
 """
@@ -279,6 +279,30 @@ def build():
         [via_resp("-conf-s2"), f"From: <sip:{UE_A}@{DOMAIN}>;tag=conf-a2-f", f"To: <sip:g101@{DOMAIN}>;tag=csp-e137",
          f"Call-ID: conf-a2@{IP_A}", "CSeq: 1 SUBSCRIBE",
          f'Warning: 399 {DOMAIN} "137 the indicated group call does not exist"'])
+
+    # 12 — 재합류(TS 24.379 §10.1.1.2.4.1): 편성 그룹 호 개시(§10.1.1.2.1.1)와 같고 Request-URI 만 진행 중 세션 식별자(10)의
+    #   clarification — 개시 200 OK·멤버 INVITE Contact 의 URI 그대로)다. Contact 특성 태그(4)), Accept-Contact 둘(5)·7)),
+    #   P-Preferred-Service(6)), timer(8)·9)), mcptt-info session-type prearranged · <mcptt-request-uri> = 그룹 · client ID(14)),
+    #   SDP offer(15)). 제어 기능은 세션 식별자에 연결된 그룹으로 처리한다(§10.1.1.4.5.1).
+    msgs["12_rejoin_invite.txt"] = message(
+        f"INVITE {SESSION_ID} SIP/2.0",
+        [via("-rejoin-i1"), "Max-Forwards: 70", f"From: <sip:{UE_A}@{DOMAIN}>;tag=rejoin-a1-f", f"To: <{SESSION_ID_TO}>",
+         f"Call-ID: rejoin-a1@{IP_A}", "CSeq: 1 INVITE", ue_contact(MCPTT_TAGS), *ACCEPT_MCPTT,
+         f"P-Preferred-Service: {ICSI_MCPTT}", "Supported: timer", "Session-Expires: 1800"],
+        "multipart/mixed;boundary=rejoin-a1",
+        multipart("rejoin-a1", [
+            ("application/sdp", mcptt_sdp(True)),
+            ("application/vnd.3gpp.mcptt-info+xml",
+             mcptt_info("<session-type>prearranged</session-type>",
+                        f'<mcptt-request-uri type="Normal"><mcpttURI>{GROUP}</mcpttURI></mcptt-request-uri>',
+                        f'<mcptt-client-id type="Normal"><mcpttString>{CLIENT_A}</mcpttString></mcptt-client-id>'))]))
+
+    # 13 — 세션 식별자가 가리키는 그룹 호가 없는 재합류(끝난 세션의 gr · <mcptt-request-uri> 가 다른 그룹): 404, Warning 없음
+    #   (§10.1.1.4.5.1 2)). 새 세션을 열지 않는다 — 단말은 그룹 호 개시(§10.1.1.2.1.1)로 다시 건다.
+    msgs["13_rejoin_reject_404.txt"] = message(
+        "SIP/2.0 404 Not Found",
+        [via_resp("-rejoin-i2"), f"From: <sip:{UE_A}@{DOMAIN}>;tag=rejoin-a2-f", f"To: <{SESSION_ID_TO}>;tag=csp-r404",
+         f"Call-ID: rejoin-a2@{IP_A}", "CSeq: 1 INVITE"])
     return msgs
 
 

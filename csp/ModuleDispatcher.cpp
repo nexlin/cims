@@ -967,6 +967,33 @@ void CModuleDispatcher::EventIncomingCall( const char *pszCallId, const char *ps
         strMcpttRequestUri = clsMi.strRequestUri;
     }
 
+    // 재합류 (TS 24.379 §10.1.1.2.4.1 · §10.1.1.4.5.1) — 개시 INVITE(§10.1.1.2.1.1)와 같고 Request-URI 만 MCPTT 세션
+    //   식별자(GRUU `gr`, §4.5)다. 그룹 = 그 세션 식별자에 연결된 그룹 — 사용자부로 가르지 않고 gr 로 진행 중 세션을
+    //   찾는다(conference 구독과 같은 해석 — CscfModule). 진행 중 세션이 아니면 404(§10.1.1.4.5.1 2)) — 지난 세션의
+    //   식별자로 새 세션을 열지 않는다. <mcptt-request-uri>(참여 기능이 제휴·N6 를 보는 그룹, §10.1.1.3.1.1)가 다른
+    //   그룹이면 그 그룹의 세션은 없다 — 404. MCVideo 세션 식별자는 위 MCVideo 분기가 먼저 가져갔고 CSP 는 단말 GRUU 를
+    //   내지 않으므로 여기의 gr 은 MCPTT 세션 식별자다.
+    std::string strRejoinGroup;  // pszTo 가 가리키므로 함수 끝까지 산다
+    bool bRejoin = false;
+    if ( m_clsPttAs.IsEnabled() && pclsMessage ) {
+        const char *pszGr = SearchSipParameter( pclsMessage->m_clsReqUri.m_clsUriParamList, "gr" );
+        if ( pszGr ) {
+            strRejoinGroup = gclsGroupCallService.GroupOfSessionIdentity( pszGr );
+            const std::string strMiGroup = McpttBareId( strMcpttRequestUri );
+            if ( strRejoinGroup.empty() || ( !strMiGroup.empty() && strMiGroup != strRejoinGroup ) ) {
+                CLog::Print( LOG_INFO,
+                             "EventIncomingCall: rejoin %s gr=%s (mcptt-request-uri=%s) — 진행 중 세션 아님 → 404 "
+                             "[PTT-AS]",
+                             pszTo, pszGr, strMiGroup.empty() ? "-" : strMiGroup.c_str() );
+                return StopCall( pszCallId, SIP_NOT_FOUND );
+            }
+            CLog::Print( LOG_INFO, "EventIncomingCall: rejoin %s gr=%s → group %s [PTT-AS]", pszTo, pszGr,
+                         strRejoinGroup.c_str() );
+            pszTo = strRejoinGroup.c_str();
+            bRejoin = true;
+        }
+    }
+
     // 참여 기능 PSI 로 온 개시 INVITE — 규격형은 Request-URI 가 원발 참여 MCPTT 기능의 PSI 이고 대상(그룹·개별 통화
     //   상대)은 mcptt-info <mcptt-request-uri> 다(TS 24.379 §10.1.1.2.1.1 1)·2), §11.1.1.2.1.1). Request-URI 가 그룹도
     //   가입자도 아니면 PSI 로 보고 대상을 mcptt-request-uri 로 잡는다 — PSI 이름(mcptt_psi·단말 설정값)을 따로
@@ -1270,19 +1297,7 @@ void CModuleDispatcher::EventIncomingCall( const char *pszCallId, const char *ps
     }
 
     if ( m_clsPttAs.IsEnabled() && gclsGroupMap.Contains( pszTo ) ) {
-        // 재합류 — Request-URI 가 MCPTT 세션 식별자(GRUU `gr`)면 그 세션이 지금 진행 중이어야 한다
-        //   (TS 24.379 §10.1.1.4.5.1 2) — 없으면 404). 지난 세션의 식별자로 새 세션을 열지 않는다.
-        bool bRejoin = false;
-        if ( pclsMessage ) {
-            const char *pszGr = SearchSipParameter( pclsMessage->m_clsReqUri.m_clsUriParamList, "gr" );
-            const std::string strGr = pszGr ? pszGr : "";
-            if ( pszGr && !gclsGroupCallService.IsSessionIdentityActive( pszTo, strGr ) ) {
-                CLog::Print( LOG_INFO, "EventIncomingCall: group(%s) session identity gr=%s 진행 중 아님 → 404", pszTo,
-                             strGr.c_str() );
-                return StopCall( pszCallId, SIP_NOT_FOUND );
-            }
-            bRejoin = pszGr != NULL;
-        }
+        // 재합류(bRejoin)는 위에서 gr 로 세션의 그룹을 정했다
         SetCallOwner( pszCallId, &m_clsPttAs );
         CSipCallRoute clsGroupRoute;
         clsUserInfo.GetCallRoute( clsGroupRoute );

@@ -176,6 +176,7 @@ bool CSipUserAgent::RecvInviteRequest( int iThreadId, CSipMessage * pclsMessage 
 				pclsResponse->m_iContactTransport = itMap->second.m_iContactTransport;
 				pclsResponse->m_clsContactParams = itMap->second.m_clsContactParams;
 				pclsResponse->m_clsContactUriParams = itMap->second.m_clsContactUriParams;
+				pclsResponse->m_strContactUser = itMap->second.m_strContactUser;
 				for( const auto & clsHeader : itMap->second.m_vecNextReInviteAnswerHeaders )
 				{
 					pclsResponse->AddHeader( clsHeader.first.c_str(), clsHeader.second.c_str() );
@@ -425,6 +426,7 @@ bool CSipUserAgent::AnswerHeldReInvite( const char * pszCallId, int iStatus, CSi
 				pclsResponse->m_iContactTransport = itMap->second.m_iContactTransport;
 				pclsResponse->m_clsContactParams = itMap->second.m_clsContactParams;
 				pclsResponse->m_clsContactUriParams = itMap->second.m_clsContactUriParams;
+				pclsResponse->m_strContactUser = itMap->second.m_strContactUser;
 				for( const auto & clsHeader : itMap->second.m_vecNextReInviteAnswerHeaders )
 				{
 					pclsResponse->AddHeader( clsHeader.first.c_str(), clsHeader.second.c_str() );

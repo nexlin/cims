@@ -149,6 +149,9 @@ public:
 	CSipParameterList		m_clsContactParams;
 	/** 같은 경로로 전파되는 Contact **URI** 파라미터(`<sip:…;gr=…>` — RFC 5627 GRUU 등). */
 	CSipParameterList		m_clsContactUriParams;
+	/** 같은 경로로 전파되는 Contact URI 사용자부 — 비어 있으면 스택이 정한다(요청 = From, 응답 = To 사용자부).
+	 *  GRUU 처럼 Contact 가 다이얼로그 상대 주소가 아닌 자원을 가리킬 때 응용이 정한다(RFC 5627 §3.1). */
+	std::string			m_strContactUser;
 
 	// SIP 메시지를 전송한 클라이언트의 IP 주소
 	std::string			m_strClientIp;

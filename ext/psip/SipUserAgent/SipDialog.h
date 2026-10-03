@@ -80,6 +80,8 @@ public:
 	CSipParameterList	m_clsContactParams;
 	/** 같은 경로의 Contact URI 파라미터(GRUU `gr` 등) — CSipMessage::m_clsContactUriParams 로 전파 */
 	CSipParameterList	m_clsContactUriParams;
+	/** 같은 경로의 Contact URI 사용자부(비면 스택이 정함) — CSipMessage::m_strContactUser 로 전파 */
+	std::string			m_strContactUser;
 	/** 다음 re-INVITE 200 OK 에만 실을 헤더 (name, value) — 응답을 만들면 비운다 (CSipUserAgent::AddReInviteAnswerHeader) */
 	std::vector< std::pair< std::string, std::string > >	m_vecNextReInviteAnswerHeaders;
 

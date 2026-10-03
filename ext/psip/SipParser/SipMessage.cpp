@@ -672,6 +672,7 @@ void CSipMessage::Clear() {
   m_iContactTransport = -1;
   m_clsContactParams.ClearParam();
   m_clsContactUriParams.ClearParam();
+  m_strContactUser.clear();
   m_strSendDestIp.clear();
   m_iSendDestPort = 0;
 
@@ -1018,6 +1019,7 @@ CSipMessage *CSipMessage::CreateResponse(int iStatus, const char *pszToTag) {
   pclsResponse->m_iContactTransport = m_iContactTransport;   // 다이얼로그가 정한 Contact transport 계승
   pclsResponse->m_clsContactParams = m_clsContactParams;     // 다이얼로그가 정한 Contact 파라미터 계승
   pclsResponse->m_clsContactUriParams = m_clsContactUriParams;
+  pclsResponse->m_strContactUser = m_strContactUser;
 
   if (iStatus != SIP_TRYING) {
     // 100 Trying 은 SIP Record-Route 헤더를 포함하지 않아도 된다.
@@ -1059,6 +1061,7 @@ CSipMessage *CSipMessage::CreateResponseWithToTag(int iStatus) {
   pclsResponse->m_iContactTransport = m_iContactTransport;   // 다이얼로그가 정한 Contact transport 계승
   pclsResponse->m_clsContactParams = m_clsContactParams;     // 다이얼로그가 정한 Contact 파라미터 계승
   pclsResponse->m_clsContactUriParams = m_clsContactUriParams;
+  pclsResponse->m_strContactUser = m_strContactUser;
 
   if (pclsResponse->m_clsTo.SelectParam(SIP_TAG) == false) {
     pclsResponse->m_clsTo.InsertTag();

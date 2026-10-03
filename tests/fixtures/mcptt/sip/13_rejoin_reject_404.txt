@@ -1,0 +1,8 @@
+SIP/2.0 404 Not Found
+Via: SIP/2.0/TLS 10.10.1.21:50601;branch=z9hG4bK-rejoin-i2;rport=50601;received=10.10.1.21
+From: <sip:+82510002001@ptt.cims.example.kr>;tag=rejoin-a2-f
+To: <sip:g101@csp.ptt.cims.example.kr;gr=1790775600123456-7>;tag=csp-r404
+Call-ID: rejoin-a2@10.10.1.21
+CSeq: 1 INVITE
+Content-Length: 0
+

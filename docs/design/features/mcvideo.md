@@ -324,7 +324,8 @@ psip 합성 SDP 프로파일(`CSipCallRtp::m_eMcMediaProfile = E_MC_MEDIA_MCVIDE
 넘기고, `ModuleDispatcher` 가 `EventCallStart`·`EventCallEnd`·`EventCallRing`·`EventReInvite`(세션 갱신 판정 뒤) 맨 앞에서 서비스에 먼저 묻는다. psip 의
 `StopCall` 은 `EventCallEnd` 를 부르지 않으므로(로컬 종료) 서비스가 끝낸 leg 는 그 자리에서 정리한다. 1 s 틱(`ModuleDispatcher::Tick`, 역할 on 일 때)이 한도·TNG3 를 본다.
 
-**세션** — 그룹마다 하나: `sesid`(CMP·로그 상관) · MCVideo 세션 식별자 토큰 `gr`(TS 24.281 §4.5 — 포커스 Contact 의 GRUU, 재합류 Request-URI) · 종류
+**세션** — 그룹마다 하나: `sesid`(CMP·로그 상관) · MCVideo 세션 식별자 토큰 `gr`(TS 24.281 §4.5 — 포커스 Contact 의 GRUU, 재합류 Request-URI. 세션
+식별자 = `sip:<그룹>@<CSP>;gr=<토큰>` 하나 — 개시자 200 OK·멤버 INVITE·in-dialog Contact 모두, MCVideo PSI 로 개시해도 사용자부는 그룹) · 종류
 chat|prearranged(그룹 속성 `invite_members`) · 개시자 · 시작 시각(TNG3 = `max_duration_sec`) · leg 표(Call-ID → 멤버·역할 initiator|joiner|invited·확립
 여부·CMP 주소 등록 여부·초대 응답 한도) · prearranged 개시 대기(개시자 Call-ID·offer 사본·암묵 요청 여부·대기 한도). CMP 로스터는 **붙는 멤버만** 싣는다 —
 멤버가 붙을 때마다(수락·초대 직전) `PTT_GROUP_ADD service:mcvideo`(members = 그 멤버 `id:prio:role` 하나 · `group_type` · `max_transmitters`(1~16) ·

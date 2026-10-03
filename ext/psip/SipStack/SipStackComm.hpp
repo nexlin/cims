@@ -545,6 +545,11 @@ void CSipStack::CheckSipMessage( CSipMessage * pclsMessage )
 		{
 			clsContact.m_clsUri.m_strUser = pclsMessage->m_clsTo.m_clsUri.m_strUser;
 		}
+		// 응용이 정한 사용자부가 우선한다(GRUU 등 — CSipMessage::m_strContactUser)
+		if( pclsMessage->m_strContactUser.empty() == false )
+		{
+			clsContact.m_clsUri.m_strUser = pclsMessage->m_strContactUser;
+		}
 
 		// (C): 응답의 경우 incoming listener id 가 carry-over 되어있다면 그 listener 의
 		//   bind_ip:bind_port 를 자기 주소로 사용 → 단말이 다른 NIC/listener 로 보낸 메시지에

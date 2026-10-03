@@ -1600,8 +1600,8 @@ bool CCscfModule::RecvRequestSubscribe( int iThreadId, CSipMessage *pclsMessage 
     }
 
     // conference 구독 = 진행 중 MCPTT 세션의 것(TS 24.379 §10.1.3.2 2)·§10.1.3.3).
-    //   Request-URI 는 세션 식별자(개시 200 OK·멤버 INVITE 의 Contact)다. 세션은 gr 로 찾는다 — PSI 로 개시한 호의
-    //   세션 식별자는 사용자부가 PSI 다. 진행 중 세션으로 풀리지 않으면(그룹 URI 만·끝난 세션의 gr) 404 + 137
+    //   Request-URI 는 세션 식별자(개시 200 OK·멤버 INVITE 의 Contact)다. 세션은 gr 로 찾는다 — 사용자부로 가르지
+    //   않는다(재합류 INVITE 와 같은 해석). 진행 중 세션으로 풀리지 않으면(그룹 URI 만·끝난 세션의 gr) 404 + 137
     //   (§10.1.3.3 2)), 본문 <mcptt-request-uri> 가 다른 그룹이어도 같다. 구독자는 그 세션의 참가자여야 한다
     //   (§10.1.3.4.1 1)a)i)) — 아니면 403 + 138. 갱신은 같은 세션의 구독이다(세션이 끝나면 noresource 로 끝났다).
     std::string strConfGr = bRefresh ? clsPrev.strSessionGr : std::string();

@@ -477,7 +477,7 @@ PSI·MCPTT client ID 가 있는 계정. [ue_sdk.md](ue_sdk.md) §4.2) → ③구
 
 | 요소 | 규격 | 동작 |
 |---|---|---|
-| Contact | §6.3.3.2.3.2 5)·6) — 세션 식별자 + `g.3gpp.mcptt`·`g.3gpp.icsi-ref`·`isfocus` | C4a 와 같은 태그. 주소는 psip 이 수신 listener 로 정하고 CSP 는 태그만 준다(`SetContactParams`) — 갱신 re-INVITE 2xx·이후 in-dialog 요청(조건 재광고·BYE)에도 실린다 |
+| Contact | §6.3.3.2.3.2 5)·6) — 세션 식별자 + `g.3gpp.mcptt`·`g.3gpp.icsi-ref`·`isfocus` | C4a 와 같은 URI·태그. 주소는 psip 이 수신 listener 로 정하고 CSP 는 사용자부(= 그룹 — PSI 로 개시해도)·`gr`·태그를 준다(`SetContactUser`·`SetContactUriParams`·`SetContactParams`) — 갱신 re-INVITE 2xx·이후 in-dialog 요청(조건 재광고·BYE)에도 실린다 |
 | 세션 타이머 | 2) refresher = `uac` · 3) `Require: timer` | 개시자가 refresher 를 지정하지 않았으면 `uac`(단말 갱신, CSP 만료 감시) + `Require: timer`. 개시자가 지정했거나 timer 미지원이면 RFC 4028 §9 Table 2(미지원 = `uas`) — [leg_liveness.md](leg_liveness.md) §5.3 |
 | re-INVITE answer fmtp | TS 24.380 §14.3.1 — answer 의 fmtp 는 offer 에 없던 파라미터를 싣지 않는다 · §14.3.5 암묵 요청은 새 세션 개시에서만 | 개시자·멤버 leg 의 re-INVITE(세션 갱신 포함) answer 는 `a=fmtp:MCPTT` 를 그 re-offer 로 다시 짓는다(`RebuildReInviteFloorFmtp` — 개시 answer 의 `mc_implicit_request`·초대 offer 의 `mc_priority` 를 되풀이하지 않는다). 내용이 바뀌면 `o=` 버전을 올린다(RFC 3264 §8). 제어 기능의 조건 재광고 offer 는 개시 전용 `mc_granted`·`mc_implicit_request` 를 뺀다(§14.5) |
 | P-Asserted-Identity | 4) 제어 기능 PSI | 그룹 URI(`<sip:<그룹>@<PTT 도메인>>`) — 멤버 leg INVITE 의 PAI 와 같은 신원 |
@@ -510,10 +510,16 @@ PSI·MCPTT client ID 가 있는 계정. [ue_sdk.md](ue_sdk.md) §4.2) → ③구
 ### C4d. MCPTT 세션 식별자 — TS 24.379 §4.5 (GRUU)
 
 세션을 가리키는 URI = `sip:<그룹>@<CSP>;gr=<세션 토큰>`(RFC 5627 GRUU 형 — 토큰 = 세션 sesid 의 시각·순번, 세션마다 새로 나고 세션이 끝나면 사라진다).
-멤버 leg INVITE·개시자 응답·이후 in-dialog 요청과 응답의 Contact 에 싣는다(psip `SetContactUriParams`). 재합류 INVITE 의 Request-URI 가
-세션 식별자면 그 세션이 진행 중이어야 한다 — 아니면 404(§10.1.1.4.5.1 2)).
+세션 하나에 URI 하나다 — 멤버 leg INVITE·개시·합류 응답·이후 in-dialog 요청과 응답의 Contact 가 모두 이 URI 다(psip `SetContactUser`·
+`SetContactUriParams` — PSI 로 개시한 호도 사용자부는 그룹). conference 구독 200 OK·NOTIFY Contact 도 같다(C6).
 단말(SDK)은 그 Contact(isfocus)의 URI 를 `CallInfo.sessionUri` 로 받아 재합류 INVITE 의 Request-URI 로 쓴다(§10.1.1.2.4.1 — `GroupCallOptions.sessionUri`,
-[ue_sdk.md](ue_sdk.md) §4.2). PSI 로 개시한 호의 식별자는 사용자부가 PSI(`sip:mcptt_psi@<CSP>;gr=…`)이고, 재합류 INVITE 의 `<mcptt-request-uri>` 가 그룹을 준다.
+[ue_sdk.md](ue_sdk.md) §4.2).
+
+**재합류**(§10.1.1.2.4.1 · §10.1.1.4.5.1) — 단말은 개시 INVITE(§10.1.1.2.1.1)를 그대로 보내되 Request-URI 만 세션 식별자로 한다. CSP 는 Request-URI 의
+`gr` 로 진행 중 세션을 찾아 그 세션의 그룹으로 처리한다(«the MCPTT group ID associated with the MCPTT session identity» — 사용자부로 가르지 않는다,
+conference 구독과 같은 해석). 진행 중 세션이 아니면(끝난 세션의 gr) 404, Warning 없음(2)) — 지난 세션의 식별자로 새 세션을 열지 않는다. 본문
+`<mcptt-request-uri>`(참여 기능이 제휴·N6 를 보는 그룹)가 그 세션의 그룹과 다르면 그 그룹의 세션은 없는 것으로 보아 같이 404 다. 이어지는 판정 =
+비멤버 403 `121`(6)) · 미제휴 403 `120`(8)) · 정원 486 `122`(10)) · 200 OK 에 Warning 123 없음. 골든 = `tests/fixtures/mcptt/sip/12_rejoin_invite.txt`·`13_rejoin_reject_404.txt`.
 
 ### C4e. Warning 헤더 형식 — TS 24.379 §4.4 · TS 24.282 §4.9
 

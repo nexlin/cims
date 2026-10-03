@@ -374,7 +374,9 @@ INVITE to group@domain
       └─ 매핑: memberCallId → {groupId, memberId, sessionId}
 ```
 
-재합류 INVITE 의 Request-URI 가 세션 식별자(`gr`)면 진행 중인 그 세션이어야 한다 — 아니면 404(§10.1.1.4.5.1 2)).
+세션 식별자는 세션 하나에 URI 하나다 — 발신자 200 OK·멤버 INVITE·in-dialog Contact 모두 `sip:<그룹>@<CSP>;gr=<토큰>`(PSI 로 개시해도 사용자부는 그룹).
+재합류 INVITE(Request-URI = 세션 식별자)는 `gr` 로 진행 중 세션을 찾아 그 세션의 그룹으로 처리한다(`GroupOfSessionIdentity` — 사용자부로 가르지
+않는다). 진행 중 세션이 아니거나 `<mcptt-request-uri>` 가 다른 그룹이면 404(§10.1.1.4.5.1 2), Warning 없음 — mcptt_standard_conformance.md C4d).
 
 **MCPTT INVITE 헤더 주입 (3GPP 규격 준수):**
 

@@ -56,13 +56,15 @@ public:
      */
     /** MCPTT 세션 식별자(TS 24.379 §4.5 — GRUU) 의 `gr` 토큰. bIssue=false 면 세션이 없을 때 빈 값. */
     std::string SessionIdentityToken( const std::string &strGroupId, bool bIssue = true );
-    /** 재합류 Request-URI 의 세션 식별자가 지금 진행 중인 이 그룹 세션인가 (§10.1.1.4.5.1 2) — 아니면 404). */
+    /** gr 토큰이 지금 진행 중인 이 그룹 세션의 것인가 (GroupOfSessionIdentity 의 판정). */
     bool IsSessionIdentityActive( const std::string &strGroupId, const std::string &strToken );
     /** 사용자가 이 그룹의 진행 중 세션 참가자인가 — 확립 leg(청취 leg 포함) 또는 개시자 leg. conference 구독자 판정
      *  (TS 24.379 §10.1.3.4.1 1)a)i) «the MCPTT ID of a participant in the group session»). */
     bool IsSessionParticipant( const std::string &strGroupId, const std::string &strUserId );
-    /** 세션 식별자의 gr 이 가리키는 진행 중 세션의 그룹 — 없으면 빈 값. 세션 식별자의 사용자부는 개시 Request-URI 를
-     * 따라 그룹이거나 PSI 라 gr 로 찾는다(conference 구독 Request-URI 해석 — TS 24.379 §10.1.3.3 1)). */
+    /** 세션 식별자의 gr 이 가리키는 진행 중 세션의 그룹 — 없으면 빈 값. 재합류 INVITE(§10.1.1.4.5.1 — «the MCPTT group
+     * ID associated with the MCPTT session identity»)·conference 구독(§10.1.3.3 1))의 Request-URI 해석. 사용자부로
+     * 가르지 않는다 — 세션 식별자는 모든 leg 에서 `<그룹>@<CSP>;gr=<토큰>` 이지만 요청자가 사용자부를 바꿔 실어도 gr
+     * 이 세션을 가리킨다. */
     std::string GroupOfSessionIdentity( const std::string &strToken );
 
     /** bRejoin = Request-URI 가 진행 중 세션 식별자(gr)인 재합류(TS 24.379 §10.1.1.4.5.1) — 비멤버 403 121, 200 OK 에

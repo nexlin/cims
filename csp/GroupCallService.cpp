@@ -1430,7 +1430,10 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
         //   refresher 는 개시자가 지정하지 않았을 때만 정한다 — 지정했거나 timer 미지원이면 RFC 4028 §9 Table 2 가
         //   정한 값이다(미지원 UAC 는 갱신할 수 없어 uas). 단말이 갱신하고 CSP 는 만료를 감시한다(leg_liveness.md
         //   §5.3).
+        //   Contact = 세션 식별자(§4.5) — 멤버 leg 와 같은 URI 여야 한다. 스택 기본 사용자부(응답 = To)는 PSI 로 개시한
+        //   호에서 PSI 가 되므로 그룹으로 정한다(RFC 5627 §3.1 — GRUU 는 자원 하나에 URI 하나).
         gclsUserAgent.SetContactParams( pszCallId, kFocusContactParams );
+        gclsUserAgent.SetContactUser( pszCallId, pszGroupId );
         gclsUserAgent.SetContactUriParams( pszCallId, ( "gr=" + SessionIdentityToken( pszGroupId ) ).c_str() );
         gclsUserAgent.SetSessionRefresher( pszCallId, E_SESSION_REFRESHER_REMOTE );
         CSipCallRtp clsCallerRtp;
@@ -3015,6 +3018,7 @@ bool CGroupCallService::InviteMember( const char *pszUserId, const char *pszGrou
             //   re-INVITE·BYE)도 같은 태그를 싣도록 다이얼로그에도 둔다.
             gclsUserAgent.SetContactParams( strCallId.c_str(), kFocusContactParams );
             const std::string strGr = SessionIdentityToken( pszGroupId );
+            gclsUserAgent.SetContactUser( strCallId.c_str(), pszGroupId );
             gclsUserAgent.SetContactUriParams( strCallId.c_str(), ( "gr=" + strGr ).c_str() );
             // INVITE 의 Contact 는 정확히 1개여야 한다(RFC 3261 §8.1.1.8). 스택은 전송 직전
             // m_clsContactList 가 비어 있을 때만 자동 Contact 를 넣으므로(SipStackComm),

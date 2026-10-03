@@ -177,6 +177,25 @@ int main() {
                std::string::npos);
   }
 
+  // ── 재합류 (TS 24.379 §10.1.1.2.4.1 · §10.1.1.4.5.1) ──
+  {
+    const Golden g = Load("12_rejoin_invite.txt");
+    CK("12 Request-URI = 세션 식별자(그룹 AoR + gr)",
+       g.strStart.rfind("INVITE sip:g101@", 0) == 0 &&
+           g.strStart.find(";gr=1790775600123456-7") != std::string::npos);
+    const CMcpttInfo mi =
+        ParseMcpttInfo(McBodyPart(g.strBody, g.strCtype, "vnd.3gpp.mcptt-info+xml"));
+    CK("12 mcptt-info prearranged · <mcptt-request-uri> = 그룹 · client ID",
+       mi.strSessionType == "prearranged" &&
+           McpttBareId(mi.strRequestUri) == "g101" && !mi.strClientId.empty());
+    bool bFloor = false;
+    CK("12 SDP offer 에 발언권 제어 채널", OfferFloor(g, bFloor) && bFloor);
+    const Golden r = Load("13_rejoin_reject_404.txt");
+    CK("13 404 · Warning 없음",
+       r.strStart == "SIP/2.0 404 Not Found" &&
+           r.strHead.find("Warning:") == std::string::npos);
+  }
+
   // ── MCData (TS 24.282) ──
   {
     const Golden g = Load("04_sds_group_message.txt");

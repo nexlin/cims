@@ -366,7 +366,9 @@ bool CMcVideoCallService::_AcceptLeg( Session &clsSes, const std::string &strCal
     //   세션 합류 — §9.2.1.4.2 14)j)).
     const std::string strDomain = PttDomain();
     if ( !strDomain.empty() ) gclsUserAgent.SetCallDomain( strCallId.c_str(), strDomain.c_str() );
+    //   세션 식별자는 멤버 leg 와 같은 URI(그룹 + gr) — 스택 기본 사용자부(응답 = To = MCVideo PSI)를 쓰지 않는다.
     gclsUserAgent.SetContactParams( strCallId.c_str(), kMcVideoFocusContactParams );
+    gclsUserAgent.SetContactUser( strCallId.c_str(), clsSes.strGroupId.c_str() );
     gclsUserAgent.SetContactUriParams( strCallId.c_str(), ( "gr=" + clsSes.strGr ).c_str() );
     gclsUserAgent.SetSessionRefresher( strCallId.c_str(), E_SESSION_REFRESHER_REMOTE );
     CSipMessage *pclsOk = NULL;
@@ -510,6 +512,7 @@ bool CMcVideoCallService::_InviteMember( Session &clsSes, const CspPttGroup &cls
                       std::string( "<sip:" ) + gclsCscEndpointCache.GetPsiUser( true ) + "@" + strDomain + ">" );
     McStripSessionRefresher( pclsInvite->m_clsHeaderList );
     gclsUserAgent.SetContactParams( strCallId.c_str(), kMcVideoFocusContactParams );
+    gclsUserAgent.SetContactUser( strCallId.c_str(), clsSes.strGroupId.c_str() );
     gclsUserAgent.SetContactUriParams( strCallId.c_str(), ( "gr=" + clsSes.strGr ).c_str() );
     {
         CSipFrom clsContact;

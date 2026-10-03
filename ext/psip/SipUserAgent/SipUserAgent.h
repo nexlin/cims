@@ -163,6 +163,9 @@ public:
 	bool SetContactParams( const char * pszCallId, const char * pszParams );
 	/** 같은 다이얼로그의 Contact **URI** 파라미터(`;` 구분 원문 — 예 `gr=…`, RFC 5627 GRUU). */
 	bool SetContactUriParams( const char * pszCallId, const char * pszParams );
+	/** 같은 다이얼로그의 Contact URI 사용자부 — 응답·in-dialog 요청의 자동 Contact 에 쓴다(비면 스택이 정함: 요청 = From,
+	 *  응답 = To). Contact 가 GRUU 처럼 다이얼로그 상대 주소가 아닌 자원을 가리킬 때(RFC 5627 §3.1). */
+	bool SetContactUser( const char * pszCallId, const char * pszUser );
 	/** 다이얼로그의 세션 타이머 refresher 정책(E_SESSION_REFRESHER_*) — 수신 INVITE 가 refresher 를 지정하지 않았을
 	 *  때 2xx 에서 누가 갱신할지. AcceptCall 전에 부른다. */
 	bool SetSessionRefresher( const char * pszCallId, int iRefresher );
