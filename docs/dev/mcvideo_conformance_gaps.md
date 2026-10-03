@@ -42,16 +42,16 @@ MCPTT 쪽 같은 뿌리의 결함은 [mcptt_conformance_gaps.md](mcptt_conforman
 
 | 영역 | 항목 | A | B | C | D |
 |---|---|---|---|---|---|
-| 등록·서비스 인가 (VREG) | 2 | — | — | 1 | 1 |
-| 제휴 (VAFF) | 7 | 1 | 1 | 5 | — |
+| 등록·서비스 인가 (VREG) | 1 | — | — | — | 1 |
+| 제휴 (VAFF) | 6 | 1 | 1 | 4 | — |
 | 그룹 호 — 서버 (VGC) | 5 | — | 1 | 4 | — |
 | 그룹 호 — 단말 (VGU) | 2 | — | — | — | 2 |
 | 송출 제어 — 서버 (TCS) | 3 | — | — | 1 | 2 |
 | 송출 제어 — 단말 (TCU) | 1 | — | — | 1 | — |
 | 그룹 문서 (VGMS) | 1 | — | 1 | — | — |
-| **계** | **21** | **1** | **3** | **12** | **5** |
+| **계** | **19** | **1** | **3** | **10** | **5** |
 
-확인 수준 — ◎ 10 · ○ 8 · △ 3.
+확인 수준 — ◎ 9 · ○ 8 · △ 2.
 
 읽는 순서 — §2(먼저 볼 것) → §3(영역별 전체) → §4(미구현 목록에 빠진 기능) → §5(문서 정정) → §6(묶음과 순서).
 
@@ -84,7 +84,6 @@ MCPTT 쪽 같은 뿌리의 결함은 [mcptt_conformance_gaps.md](mcptt_conforman
 
 | # | 급 | 대상 | 규격 | CIMS 지금 | 영향 | 확인 |
 |---|---|---|---|---|---|---|
-| VREG-2 | C | CSP | §7.2.1 NOTE 1 · §9.2.2.3.1.1 2) · §9.2.1.3.1.1 2) — MCVideo ID 는 서비스 인가 때 IMPU 에 묶이고 그 묶임으로 요청자를 인가한다. 묶임이 없으면 표 4.4.2-2 `141 user unknown to the participating function` | 서비스 인가 바인딩은 선다(S25 단계 A — 태그를 빼면 지운다). 판정은 단계 B — 지금은 MCVideo 태그 없는 바인딩(로그오프한 클라이언트 포함)의 INVITE·제휴 PUBLISH 도 그대로 처리한다 — 개시 검사는 이용 자격 행만(`csp/McVideoCallService.cpp:598-602`), PUBLISH 는 역할·자격만(`csp/CscfModule.cpp:1914-1953`) 본다. 바인딩 능력 `m_bMcVideo`(`csp/UserMap.cpp:206`)는 팬아웃 대상 선별에만 쓴다(`csp/McVideoCallService.cpp:425`) | 로그오프한 단말이 MCVideo 호를 열고 제휴를 바꾼다 — 초대는 못 받는데 개시·제휴는 된다 | ◎ |
 | VREG-4 | D | CSP | §7.1 · §7.3.5 3) NOTE «Removal of MCVideo service settings includes removal of all group affiliations» | poc-settings Expires 0(§7.3.5)은 설정·바인딩과 그 사용자의 MCVideo 제휴를 지운다(S25 단계 A). 태그를 뺀 재-REGISTER 는 서비스 인가 바인딩·바인딩 능력만 지우고 `mcvideo_affiliations` 행은 등록 해제 때만 지운다(`csp/DbManager.cpp:564-571`) | 로그오프한 클라이언트가 제휴 NOTIFY·N2 계산에 남는다(초대 대상 선별은 `m_bMcVideo` 가 걸러 영향 없음). 규격의 해제 계기는 poc-settings Expires 0 이라 REGISTER 로그오프에 같은 뜻을 줄지는 원문 재확인 | △ |
 
 ### 3.2 제휴 (VAFF) — TS 24.281 §8
@@ -94,8 +93,7 @@ MCPTT 쪽 같은 뿌리의 결함은 [mcptt_conformance_gaps.md](mcptt_conforman
 | VAFF-1 | A | CSP | §8.2.2.2.3 15)·16) — Expires 0 은 **그 클라이언트**(pidf tuple id)의 제휴 목록만 해제 | `Expires: 0` = `RemoveAffiliationsByUser` — 그 사용자의 모든 클라이언트 행(설정 그룹·chat 암묵 제휴 포함)을 지운다(`csp/CscfModule.cpp:1977-1991`, `csp/DbManager.cpp:1117-1124`). MCPTT AFF-2 와 같은 코드 | 한 MCVideo ID 를 두 클라이언트에서 쓰면(§6.8) 한쪽의 전체 해제가 다른 쪽 제휴를 지워 prearranged 초대가 끊긴다. mcvideo.md §5.5 는 이 동작을 사실로 적고 앱이 피해 가게 했지만 편차로 적지 않았다 | ◎ |
 | VAFF-2 | B | CSP | §6.3.6 3. · §8.2.2.2.11 2) — 제휴 판정은 MCVideo ID × **클라이언트**(INVITE `<mcvideo-client-id>`) | `IsAffiliated(group, user, McVideo)` 가 client_id 를 보지 않는다(`csp/DbManager.cpp:1023-1039`). 개시·합류 판정 `csp/McVideoCallService.cpp:648`, prearranged 팬아웃은 제휴 사용자의 등록 바인딩 하나로 보낸다(`:791`·`:425`) | 제휴하지 않은 클라이언트로 개시·합류가 되고, 제휴한 단말이 아니라 마지막 등록 단말이 초대된다(MCPTT AFF-4 의 MCVideo 경로) | ◎ |
 | VAFF-4 | C | CSP | §8.2.2.2.13 · §8.2.2.2.14 — 암묵 제휴는 2xx 뒤에 «affiliated» + 통지, 요청이 거절되면 그 항목을 지운다 | chat 합류의 암묵 제휴를 정원 검사 직후 기록·NOTIFY 하고(`csp/McVideoCallService.cpp:721-729`) 뒤의 수락 실패 500(`:817-824`)에서 되돌리지 않는다 — 이 파일에 `RemoveAffiliation` 이 없다 | 실패한 합류의 제휴가 남아 N2 를 먹고(다음 합류 486 102), 구독자는 성립 전 제휴를 본다(MCPTT AFF-6 의 MCVideo 경로) | ◎ |
-| VAFF-5 | C | CSP | §8.2.2.2.12 1) — 암묵 제휴의 클라이언트 = INVITE `<mcvideo-client-id>`. 명시·암묵·설정 그룹 제휴가 같은 client information entry 를 다룬다 | 행 client 키가 경로마다 다르다 — chat 암묵 = `<mcvideo-client-id>`, 없으면 **사용자 id**(`csp/McVideoCallService.cpp:722`) · 설정 그룹 = client-id > `+sip.instance` > Contact(`csp/CscfModule.cpp:856-858`) · PUBLISH = tuple id > Contact(`:2032`) | client-id 없는 INVITE 로 생긴 행은 클라이언트 단위 해제(`:2081`)로 지워지지 않고 NOTIFY tuple id 가 사용자 id 로 나간다(MCPTT AFF-5 와 같은 결). 우리 SDK 는 client-id 를 싣는다(골든 03) | ○ |
-| VAFF-6 | C | CSP | §8.2.2.2.15 — 설정 그룹 암묵 제휴는 서비스 인가에 성공했을 때 | 재-REGISTER(갱신)마다 다시 건다 — 갱신 여부를 보지 않는다(`csp/CscfModule.cpp:1216-1219`) | 단말이 PUBLISH 로 뺀 설정 그룹이 다음 갱신에 되살아나 해제·제휴 NOTIFY 가 갱신 주기로 반복된다(현장 앱은 영상 채널 하나만 싣는다 — mcvideo.md §5.5). 갱신 REGISTER 를 «서비스 인가» 로 볼지는 원문 재확인 | △ |
+| VAFF-5 | C | CSP | §8.2.2.2.12 1) — 암묵 제휴의 클라이언트 = INVITE `<mcvideo-client-id>`. 명시·암묵·설정 그룹 제휴가 같은 client information entry 를 다룬다 | 행 client 키가 경로마다 다르다 — chat 암묵 = `<mcvideo-client-id>`, 없으면 **사용자 id**(`csp/McVideoCallService.cpp:722`) · 설정 그룹 = poc-settings PUBLISH 의 `<mcvideo-client-id>`(S25) · PUBLISH = tuple id > Contact | client-id 없는 INVITE 로 생긴 행은 클라이언트 단위 해제(`:2081`)로 지워지지 않고 NOTIFY tuple id 가 사용자 id 로 나간다(MCPTT AFF-5 와 같은 결). 우리 SDK 는 client-id 를 싣는다(골든 03) | ○ |
 | VAFF-7 | C | CSP | §8.2.2.3.8 — 제휴 적격 = 그룹 존재 · 멤버 · MCVideo 그룹 | 그룹 변경(멤버 제거·MCVideo 서비스 끔·그룹 삭제)이 `mcvideo_affiliations` 행에 닿지 않는다 — 그룹 동기화는 MCPTT 만 본다(`csp/GroupCallService.cpp:2757-`), MCVideo 쪽 처리기가 없다 | 빠진 멤버·MCVideo 를 끈 그룹의 제휴가 NOTIFY·N2 에 남는다(MCPTT AFF-7 의 MCVideo 경로) | ○ |
 | VAFF-8 | C | SDK·앱 | §8.2.1.1 · §8.2.1.3 — 제휴 결과는 상태 결정 SUBSCRIBE(`Event: presence`, MCVideo ICSI, Expires 2^32-1)의 NOTIFY 로 안다 | MCVideo 제휴 SUBSCRIBE 가 없다 — PUBLISH 200 만 보고 제휴됐다고 여긴다(`sdk/core/src/engine.cpp:3123-3161`). 현장 앱 주석도 «결과는 NOTIFY 로만 온다» 고 적는다(`android/ptt-client/src/main/java/com/cims/ue/ptt/PttVideo.kt:160-162`) | 서버가 N2 로 줄인 그룹·MCVideo 를 끈 그룹·자격 없음을 단말이 모른다. 관제 앱 두 벌은 N2 를 자체 계산으로 대신한다 | ◎ |
 
@@ -188,7 +186,7 @@ MCPTT 쪽 같은 뿌리의 결함은 [mcptt_conformance_gaps.md](mcptt_conforman
 | 8 | **그룹 문서 PUT 해석** — 없음의 뜻(§7.2.8) | VGMS-1 · VGC-10(CSC 기본값 몫) | .45 CSC |
 | 9 | **단말 호 절차** — 제휴 상태 구독, preconfigured-group-use-only, 재합류 UI | VGU-5 · VGU-6 · VAFF-8 | .45 SDK·현장 → Windows(관제 앱) |
 | 10 | **송출 제어 서버 세부** — 무허가 송출 포기, 별칭 전달 | TCS-2 · TCS-8 | .45 CMP(·SDK 별칭) |
-| 12 | **서버 사유 코드·신원 세부** — 로그오프 바인딩 판정·제휴 정리, conference 구독 서비스 분리 | VREG-2 · VREG-4 · VGC-10 | .48 CSP |
+| 12 | **서버 사유 코드·신원 세부** — 로그오프 바인딩 판정·제휴 정리, conference 구독 서비스 분리 | VREG-4 · VGC-10 | .48 CSP |
 | 13 | **수신 전용 멤버** — 그룹 모델·문서 `<on-network-recvonly>` → CSP JOIN `recv_only`·answer `mc_priority` 생략. MCPTT FCS-14 와 같이 | TCS-10 | .45 CSC·CSP |
 
 **Windows 몫(관제 앱 두 벌)** — SDK·서버가 정해진 뒤 맞춘다.
@@ -207,8 +205,7 @@ MCPTT 쪽 같은 뿌리의 결함은 [mcptt_conformance_gaps.md](mcptt_conforman
 - **영상 RTCP 동기** — CMP 가 송출자 SR 을 수신자에게 옮기지 않아(mcvideo.md B6) 단말의 음성·영상 동기(RFC 3550 §6.4.1)에 영향이 있을 수 있다. TS 24.581 밖이라 항목으로 올리지 않았다.
 - **멤버 포트 배치·SDP 표 4.3.3.1-1 대조** — 하지 않았다.
 - **Windows .NET/C API 바인딩 내부·태블릿 `VideoPlane.kt`·현장 `ui/VideoViews.kt` 화면** — grep 수준으로만 봤다.
-- **cimsue-cli drive·libcsim(계측기)** — 시험 도구의 MCVideo 송신 형태는 보지 않았다. 서버 검사를 켜면(VREG-2·VAFF-2) 도구도 함께 맞춰야 한다.
+- **cimsue-cli drive·libcsim(계측기)** — 시험 도구의 MCVideo 송신 형태는 보지 않았다. 서버가 서비스 인가 바인딩으로 판정하므로(S25) 도구도 poc-settings 인가를 보내야 한다(VAFF-2 도 같은 결).
 - **실행 확인** — 모든 항목이 코드 읽기다. 단위시험·스모크는 돌리지 않았다. 확정하려면 실측이 필요하다:
   - VGC-10 — MCVideo ICSI 를 단 conference SUBSCRIBE 가 MCPTT 로스터를 받는지.
-  - VAFF-6 — 설정 그룹 제휴가 갱신 REGISTER 마다 되살아나는지(현장 앱 PUBLISH 와의 반복).
   - 와이어 — pjsip 이 실제로 골든과 같은 Contact·`i=`·multipart 를 내는지.

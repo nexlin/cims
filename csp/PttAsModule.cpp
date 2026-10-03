@@ -9,6 +9,7 @@
 #include "GroupCallService.h"
 #include "GroupMap.h"
 #include "Log.h"
+#include "McServiceAuth.h"
 #include "ModuleDispatcher.h"
 #include "SipServerSetup.h"
 #include "UserMap.h"
@@ -111,8 +112,7 @@ int CPttAsModule::OnEmergencyAlert( const char *pszFrom, const char *pszTo, CSip
 
     // 참여 기능 2a) (§12.1.2.1) — 서비스 인가 바인딩(§7.3)이 없으면 404 + 141
     {
-        CspUser clsBound;
-        if ( !gclsCspUserMap.isAlive( strFrom.c_str(), clsBound ) ) {
+        if ( !gclsMcServiceAuth.HasBinding( EMcService::Mcptt, strFrom ) ) {
             CLog::Print( LOG_INFO, "PTT-AS: emergency alert from(%s) — 서비스 인가 바인딩 없음 → 404 141",
                          strFrom.c_str() );
             return _RejectWithWarning( pclsMessage, SIP_NOT_FOUND, 141, "user unknown to the participating function" );
@@ -271,8 +271,11 @@ int CPttAsModule::FanoutAlert( const std::string &strFrom, const std::string &st
         if ( clsGroup._requireAffiliation && gclsDbManager.IsConnected() &&
              !gclsDbManager.IsAffiliated( strGroupId, pUser->_id ) )
             continue;
+        // 착신 참여 기능 — 서비스 인가 바인딩이 있는 멤버의 MCPTT 클라이언트 바인딩으로만(TS 24.379 §7.3 · §7.2.1)
         CUserInfo clsMemInfo;
-        if ( !gclsUserMap.Select( pUser->_id.c_str(), clsMemInfo ) ) continue;
+        if ( !gclsMcServiceAuth.HasBinding( EMcService::Mcptt, pUser->_id ) ||
+             !gclsUserMap.SelectService( pUser->_id.c_str(), EMcService::Mcptt, clsMemInfo ) )
+            continue;
         CSipCallRoute clsMemRoute;
         clsMemInfo.GetCallRoute( clsMemRoute );
 

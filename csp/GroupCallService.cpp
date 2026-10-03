@@ -494,7 +494,7 @@ static std::string _joinWarnings( const std::string &strOwn, const std::vector<s
 }
 
 void CGroupCallService::AckGateMemberResult( const std::string &strGroupId, const std::string &strMemberId,
-                                             int iSipStatus ) {
+                                             int iSipStatus, const std::string &strWarning ) {
     bool bAbandon = false;
     AckGate clsTaken;
     int iForward = 0;
@@ -505,6 +505,9 @@ void CGroupCallService::AckGateMemberResult( const std::string &strGroupId, cons
         AckGate &g = it->second;
         if ( g.setPending.erase( strMemberId ) == 0 ) return;
         const bool bRequired = g.setRequiredPending.erase( strMemberId ) > 0;
+        if ( !strWarning.empty() &&
+             std::find( g.vecWarnings.begin(), g.vecWarnings.end(), strWarning ) == g.vecWarnings.end() )
+            g.vecWarnings.push_back( strWarning );
         if ( iSipStatus >= 200 && iSipStatus < 300 ) {
             ++g.iOkCount;  // §10.1.1.4.1.1 3) — 멤버 200 누계
             g.setAnswered.insert( strMemberId );
@@ -1864,10 +1867,14 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
                          pszGroupId, pszCallerInfo, vecGateInvite.size(), setGateRequired.size(), iGateMin,
                          setGateRequired.empty() ? 0 : clsGroup._ackTimeoutSec, clsGroup._ackAction.c_str(),
                          bPrivateCall ? " [private]" : "" );
-            std::vector<std::string> vecNotInvited;
-            for ( const auto &strMember : vecGateInvite )
-                if ( !InviteMember( strMember.c_str(), pszGroupId ) ) vecNotInvited.push_back( strMember );
-            // 초대하지 못한 멤버(미등록 등)는 최종 거절(480)로 센다 — 필수 멤버면 §6.3.3.3 의 거절 규칙을 탄다.
+            std::vector<std::pair<std::string, std::string>> vecNotInvited;  // (멤버, 착신 참여 기능의 Warning)
+            for ( const auto &strMember : vecGateInvite ) {
+                std::string strWarn;
+                if ( !InviteMember( strMember.c_str(), pszGroupId, &strWarn ) )
+                    vecNotInvited.push_back( { strMember, strWarn } );
+            }
+            // 초대하지 못한 멤버(미등록·서비스 설정 없음 등)는 최종 거절(480)로 센다 — 필수 멤버면 §6.3.3.3 의
+            //   거절 규칙을 탄다. 서비스 설정이 없는 멤버는 480 + 146(§10.1.1.3.2 3)) — 그 Warning 을 개시자에게.
             //   이미 이 그룹 leg 이 확립돼 있어 새 초대를 내지 않은 멤버는 200 으로 센다(응답이 다시 오지 않는다).
             std::vector<std::string> vecAlready;
             {
@@ -1881,8 +1888,8 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
                 }
             }
             for ( const auto &strMember : vecAlready ) AckGateMemberResult( pszGroupId, strMember, SIP_OK );
-            for ( const auto &strMember : vecNotInvited )
-                AckGateMemberResult( pszGroupId, strMember, SIP_TEMPORARILY_UNAVAILABLE );
+            for ( const auto &n : vecNotInvited )
+                AckGateMemberResult( pszGroupId, n.first, SIP_TEMPORARILY_UNAVAILABLE, n.second );
             AckGateEvaluate( pszGroupId );
             return true;
         }
@@ -2197,8 +2204,11 @@ int CGroupCallService::NotifyConditionToAffiliated( const std::string &strGroupI
         if ( clsGroup._requireAffiliation && gclsDbManager.IsConnected() &&
              !gclsDbManager.IsAffiliated( strGroupId, pUser->_id ) )
             continue;  // 제휴 멤버만
+        // 서비스 인가 바인딩이 있는 멤버의 MCPTT 클라이언트 바인딩으로만(TS 24.379 §7.3 · §7.2.1)
         CUserInfo clsMemInfo;
-        if ( !gclsUserMap.Select( pUser->_id.c_str(), clsMemInfo ) ) continue;  // 등록(온라인) 멤버만
+        if ( !gclsMcServiceAuth.HasBinding( EMcService::Mcptt, pUser->_id ) ||
+             !gclsUserMap.SelectService( pUser->_id.c_str(), EMcService::Mcptt, clsMemInfo ) )
+            continue;
         CSipCallRoute clsRoute;
         clsMemInfo.GetCallRoute( clsRoute );
         std::string strParams = McpttInfoUri( "mcptt-request-uri", "tel:" + pUser->_id );  // 7) 대상 MCPTT ID
@@ -2730,7 +2740,7 @@ void CGroupCallService::ClearUserCall( const std::string &strUserId ) {
 /**
  * @brief Invite a member to a group call using Shared RTP Session
  */
-bool CGroupCallService::InviteMember( const char *pszUserId, const char *pszGroupId ) {
+bool CGroupCallService::InviteMember( const char *pszUserId, const char *pszGroupId, std::string *pstrWarning ) {
     std::unique_lock<std::recursive_mutex> lock( m_mutex );
 
     // 같은 그룹에 기존 콜이 있으면: 다이얼로그가 살아있는 한 이미 세션 참여 중 — 재초대하지 않는다.
@@ -2811,11 +2821,25 @@ bool CGroupCallService::InviteMember( const char *pszUserId, const char *pszGrou
         return false;
     }
 
-    // 1. Check User
-    if ( !gclsUserMap.Select( pszUserId, clsUserInfo ) ) {
-        // CspUser (JSON) does not store dynamic IP/Port. Only UserMap (Cache) does.
-        // If not in UserMap, user is not registered/active.
-        CLog::Print( LOG_ERROR, "InviteMember(%s) User not found in UserMap", pszUserId );
+    // 착신 참여 기능 3) (TS 24.379 §10.1.1.3.2 3) 편성 · §11.1.1.3.2 7a) 개별 · §17.3.2.2.2 3) 애드혹) — 초대받는
+    //   클라이언트의 Answer-Mode Indication(poc-settings — §7.3.3·§7.3.4)을 받지 못했으면 480 + 146 으로 거절한다
+    //   (초대하지 않는다). 설정은 서비스 인가 바인딩에 붙어 있다 — 인가하지 않은 사용자도 여기서 걸린다.
+    {
+        std::string strAm;
+        if ( !gclsMcServiceAuth.AnswerModeOf( EMcService::Mcptt, pszUserId, strAm ) ) {
+            CLog::Print( LOG_INFO, "InviteMember(%s) Group(%s) — 서비스 설정(Answer-Mode) 없음 → 480 146", pszUserId,
+                         pszGroupId );
+            if ( pstrWarning )
+                *pstrWarning = McpttWarning( 146, "T-PF unable to determine the service settings for the called user",
+                                             gclsServiceMap.GetDomainByKind( "ptt" ) );
+            return false;
+        }
+    }
+
+    // 1. MCPTT 클라이언트 바인딩 — 서비스 태그(+g.3gpp.mcptt·MCPTT icsi-ref)를 실은 등록 바인딩으로만 보낸다
+    //    (TS 24.379 §7.2.1 — 태그 없는 바인딩 = VoLTE 단말·MCPTT 를 로그오프한 클라이언트)
+    if ( !gclsUserMap.SelectService( pszUserId, EMcService::Mcptt, clsUserInfo ) ) {
+        CLog::Print( LOG_ERROR, "InviteMember(%s) MCPTT 클라이언트 등록 바인딩 없음", pszUserId );
         return false;
     }
     clsUserInfo.GetCallRoute( clsRoute );

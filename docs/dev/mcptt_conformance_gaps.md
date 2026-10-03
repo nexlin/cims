@@ -42,7 +42,7 @@ PTT(MCPTT) 서비스 구현을 3GPP 규격 원문과 대조해 **규격과 다�
 
 | 영역 | 항목 | A | B | C | D |
 |---|---|---|---|---|---|
-| 등록·서비스 인가 (REG) | 1 | — | — | — | 1 |
+| 등록·서비스 인가 (REG) | 0 | — | — | — | — |
 | 제휴 (AFF) | 10 | 6 | 4 | — | — |
 | 그룹 호 — 서버 (GCS) | 11 | 7 | 2 | 2 | — |
 | 개별 호 (PRV) | 2 | — | 2 | — | — |
@@ -52,9 +52,9 @@ PTT(MCPTT) 서비스 구현을 3GPP 규격 원문과 대조해 **규격과 다�
 | 발언권 SDP 협상 (SDP) | 2 | — | 2 | — | — |
 | 그룹 문서·GMS (GMS) | 6 | — | 6 | — | — |
 | 설정 문서·CMS (CMS) | 2 | — | 1 | 1 | — |
-| **계** | **56** | **16** | **28** | **8** | **4** |
+| **계** | **55** | **16** | **28** | **8** | **3** |
 
-확인 수준 — ◎ 28 · ○ 20 · △ 8.
+확인 수준 — ◎ 28 · ○ 19 · △ 8.
 
 읽는 순서 — §2(먼저 볼 것) → §3(영역별 전체) → §4(미구현 목록에 빠진 기능) → §5(문서 정정) → §6(묶음과 순서).
 
@@ -88,7 +88,6 @@ PTT(MCPTT) 서비스 구현을 3GPP 규격 원문과 대조해 **규격과 다�
 
 | # | 급 | 대상 | 규격 | CIMS 지금 | 영향 | 확인 |
 |---|---|---|---|---|---|---|
-| REG-4 | D | CSP | §7.1 · §7.2.1 NOTE 1 — MCPTT 태그를 뺀 재-REGISTER 는 MCPTT 로그오프다 | 태그를 뺀 재-REGISTER 는 MCPTT 서비스 인가 바인딩을 지운다(S25 단계 A). 요청 판정(141)·팬아웃은 아직 등록 기준이다 — 단계 B | MCVideo·MCData 를 남기고 MCPTT 만 로그오프할 수 없다 | ○ |
 
 ### 3.2 제휴 (AFF) — TS 24.379 §9
 
@@ -96,7 +95,7 @@ PTT(MCPTT) 서비스 구현을 3GPP 규격 원문과 대조해 **규격과 다�
 |---|---|---|---|---|---|---|
 | AFF-2 | A | CSP | §9.2.2.2.3 13)·15) — Expires 0 은 **그 클라이언트**의 목록만 해제 (shall) | `RemoveAffiliationsByUser` — 그 사용자의 모든 클라이언트 행(암시적 제휴 포함)을 지운다 — `csp/CscfModule.cpp:1934-1948` | 한 MCPTT ID 가 단말 둘이면 한 단말의 전체 해제가 다른 단말의 초대를 끊는다 | ◎ |
 | AFF-4 | B | CSP | §6.3.6 3. · §9.2.2.2.11 2) — 제휴는 사용자 × **클라이언트**(mcptt-info `<mcptt-client-id>`) 단위로 판정 (shall) | `IsAffiliated(group, user)` 가 client_id 를 보지 않는다 — `csp/DbManager.cpp:1022-1038`. 개시 검사 `csp/GroupCallService.cpp:951`, fan-out `:1491`·`:1572` | 제휴하지 않은 단말로 개시·합류가 되고 초대가 간다(한 사용자 한 단말이면 증상 없음) | ◎ |
-| AFF-5 | A | CSP | §9.2.2.2.12 1) · §9.2.2.2.15 2) · §9.2.2.2.3 10) — 암묵·암시·명시 제휴가 같은 client information entry 를 다룬다 | 행의 client 키가 경로마다 다르다 — 긴급·chat 암묵 제휴 = 등록 Contact URI(`csp/GroupCallService.cpp:954-957`), 설정 그룹 암시 제휴 = client-id > `+sip.instance` > Contact(`csp/CscfModule.cpp:756-793`), 구형 PUBLISH = Contact(`:1799`), 규격형 = tuple id(`:1989`) | 암시 제휴 그룹은 한 단말이 tuple 둘로 보이고, 해제 PUBLISH 가 자기 키 행만 지워 초대가 계속 온다. 지워져도 재등록 때 되살아난다(`:1194`) | △ |
+| AFF-5 | A | CSP | §9.2.2.2.12 1) · §9.2.2.2.15 2) · §9.2.2.2.3 10) — 암묵·암시·명시 제휴가 같은 client information entry 를 다룬다 | 행의 client 키가 경로마다 다르다 — 긴급·chat 암묵 제휴 = 등록 Contact URI(`csp/GroupCallService.cpp:954-957`), 설정 그룹 암시 제휴 = poc-settings PUBLISH 의 `<mcptt-client-id>`(`_ApplyImplicitAffiliations` — 서비스 인가 때, S25), 구형 PUBLISH = Contact, 규격형 = tuple id | 암시 제휴 그룹은 한 단말이 키 둘로 보일 수 있고(client ID ≠ tuple id 면), 해제 PUBLISH 가 자기 키 행만 지워 초대가 계속 온다 | △ |
 | AFF-6 | A | CSP | §9.2.2.2.14 — 암묵적 제휴를 부른 요청이 거절되면 그 제휴를 지운다 (shall) | 세션 생성 전에 제휴를 적고(`csp/GroupCallService.cpp:953-960`) 뒤의 거절(세션 시간 창 403 `:1069-1085`·CMP 자원 실패·개시 게이트 480)에서 되돌리지 않는다 — 이 파일에 `RemoveAffiliation` 호출이 없다 | 거절된 긴급·chat 시도 뒤 3600초 동안 제휴로 남아 남의 그룹 호·경보·SDS 를 받는다 | ◎ |
 | AFF-7 | A | CSP·CSC | §9.2.2.2.4 — 구독 동안 제휴 정보의 변화를 통지 (shall) | 통지는 PUBLISH·암시·암묵 제휴 때만. 시간 만료는 SQL 필터로만 사라지고, 멤버 제거는 호만 끊고 제휴 행을 남긴다(`csp/GroupCallService.cpp:2843-2886`), 그룹 삭제는 FK cascade | 구독 단말이 만료·멤버 제거·그룹 삭제로 내려간 제휴를 모른다. 제거된 멤버가 만료 전까지 «제휴» 로 남는다 | △ |
 | AFF-8 | A | CSP | §9.2.1.2 — 제휴 변경은 PUBLISH. §9.2.2.3.3 5) — 멤버가 아니면 403 | `SUBSCRIBE`(Event presence, R-URI = 그룹)가 멤버십 검사 없이 제휴를 만들고(`csp/CscfModule.cpp:1463-1472`) 해지 때 지운다(`:1450-1455`) | 비멤버가 임의 그룹에 제휴 행을 만든다. 구독만 하려던 단말의 제휴가 바뀐다 | ◎ |

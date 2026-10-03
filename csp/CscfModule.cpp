@@ -799,34 +799,15 @@ static void _NoteDeviceSeen( CSipMessage *pclsMessage, const std::string &strUse
                             gclsFmReporter.Node(), strFeatures );
 }
 
-// 설정 그룹 암시적 제휴 (TS 24.379 §7.3.2 13) → §9.2.2.2.15) — PTT 서비스 인가(REGISTER) 성공 때, 가입자가 멤버이고
-//   관리자가 암시적 제휴로 정한 그룹(user profile <ImplicitAffiliations>, ptt_group_members.implicit_affiliation)에
-//   제휴를 기록한다. 클라이언트 ID = REGISTER mcptt-info <mcptt-client-id>(§9.2.2.2.15 2)) > Contact +sip.instance >
-//   Contact URI. 만료 = 부여한 등록 만료 — 규격은 암시적 제휴의 만료 간격을 정하지 않는다(candidate expiration interval
-//   은 PUBLISH Expires 로만 정의). 그래서 등록 수명에 묶고 재등록마다 갱신한다(해지 REGISTER 는 제휴 전부 해제).
-//   N2 상한은 PUBLISH 경로와 같이 적용하지 않는다(편차 — mcptt_standard_conformance.md C9).
-
-// 암시적 제휴의 클라이언트 ID — 서비스 인가 본문의 client-id(TS 24.379·24.281 §9.2.2.2.15 2)·§8.2.2.2.15 2)) > Contact
-//   +sip.instance > Contact URI
-static std::string _ImplicitClientId( CSipMessage *pclsMessage, const std::string &strInfoClientId ) {
-    std::string strClient = strInfoClientId;
-    if ( strClient.empty() && !pclsMessage->m_clsContactList.empty() ) {
-        CSipFrom &clsContact = pclsMessage->m_clsContactList.front();
-        std::string strInstance;
-        clsContact.SelectParam( "+sip.instance", strInstance );
-        for ( char c : strInstance )
-            if ( c != '"' && c != '<' && c != '>' ) strClient += c;
-        if ( strClient.empty() ) {
-            char szC[256];
-            clsContact.m_clsUri.ToString( szC, sizeof( szC ) );
-            strClient = szC;
-        }
-    }
-    return strClient;
-}
-
-static void _ApplyImplicitAffiliations( CSipMessage *pclsMessage, const std::string &strUserId, int iExpires ) {
-    if ( iExpires <= 0 || !gclsDbManager.IsConnected() ) return;
+// 설정 그룹 암시적 제휴 (TS 24.379 §7.3.3 13) · §7.3.4 13) → §9.2.2.2.15) — poc-settings PUBLISH(서비스 인가·설정)가
+//   성공한 때, 가입자가 멤버이고 관리자가 암시적 제휴로 정한 그룹(user profile <ImplicitAffiliations>,
+//   ptt_group_members.implicit_affiliation)에 제휴를 기록한다. 클라이언트 = 그 PUBLISH 의 <mcptt-client-id>
+//   (§9.2.2.2.15 2)). 이미 제휴한 그룹은 다시 넣지 않는다(8) b)). 만료 없음 — 규격은 암시적 제휴의 만료 간격을 정하지
+//   않는다(candidate expiration interval 은 PUBLISH Expires 로만 정의). 그래서 등록 수명에 묶는다: 등록 해제·서비스
+//   설정 제거(§7.3.5)가 지운다. 단말이 PUBLISH 로 뺀 설정 그룹은 다음 인가 때까지 되살아나지 않는다. N2 상한은
+//   PUBLISH 경로와 같이 적용하지 않는다(편차 — mcptt_standard_conformance.md C9).
+static void _ApplyImplicitAffiliations( const std::string &strUserId, const std::string &strClient ) {
+    if ( !gclsDbManager.IsConnected() ) return;
     std::vector<std::string> vecGroups;
     gclsGroupMap.IterateInternal( [&]( const CspPttGroup &clsGroup ) {
         for ( const auto &pUser : clsGroup._pusers ) {
@@ -839,41 +820,30 @@ static void _ApplyImplicitAffiliations( CSipMessage *pclsMessage, const std::str
     } );
     if ( vecGroups.empty() ) return;
 
-    const std::string strClient =
-        _ImplicitClientId( pclsMessage, ParseMcpttInfo( pclsMessage->m_strBody ).strClientId );
-
     int iNew = 0;
     for ( const auto &strGroup : vecGroups ) {
-        const bool bWas = gclsDbManager.IsAffiliated( strGroup, strUserId );
-        if ( !gclsDbManager.InsertAffiliation( strGroup, strUserId, strClient, iExpires ) ) {
+        if ( gclsDbManager.IsAffiliated( strGroup, strUserId ) ) continue;  // §9.2.2.2.15 8) b)
+        if ( !gclsDbManager.InsertAffiliation( strGroup, strUserId, strClient, 0 ) ) {
             CLog::Print( LOG_ERROR, "[Affiliation/implicit] 미기록 user=%s group=%s", strUserId.c_str(),
                          strGroup.c_str() );
             continue;
         }
-        if ( !bWas ) {
-            EmitAffiliationChanged( strGroup, "affiliate", strUserId );
-            iNew++;
-        }
+        EmitAffiliationChanged( strGroup, "affiliate", strUserId );
+        iNew++;
     }
     if ( iNew > 0 ) SendAffiliationNotify( strUserId, "" );
-    CLog::Print( LOG_INFO, "[Affiliation/implicit] user=%s client=%s 설정 그룹 %d개 → 새 제휴 %d (expires=%d)",
-                 strUserId.c_str(), strClient.c_str(), (int)vecGroups.size(), iNew, iExpires );
+    CLog::Print( LOG_INFO, "[Affiliation/implicit] user=%s client=%s 설정 그룹 %d개 → 새 제휴 %d", strUserId.c_str(),
+                 strClient.c_str(), (int)vecGroups.size(), iNew );
 }
 
-// MCVideo 설정 그룹 암시적 제휴 (TS 24.281 §8.2.2.2.15) — 서비스 인가(REGISTER) 성공 때, 이 바인딩이 MCVideo
-//   클라이언트이고(Contact 특성 태그 둘 — §7.2.1AA) 이용 자격(MCVideo user profile)이 있으면, 가입자가 멤버이고
-//   관리자가 암시적 제휴로 정한 MCVideo 그룹(user profile <OnNetwork><ImplicitAffiliations> — MCPTT 와 같은 멤버 표시
-//   ptt_group_members.implicit_affiliation, 그룹이 MCVideo 서비스를 가질 때)에 MCVideo 제휴를 기록한다. 제휴는 한
-//   그룹의 서비스마다 따로다(표 mcvideo_affiliations). 만료 없음 — MCVideo 제휴의 수명은 등록이다(등록 해제가 지운다,
-//   PUBLISH 의 Expires 2^32-1 과 같은 뜻). N2 상한은 MCPTT 와 같이 적용하지 않는다(편차 — mcvideo.md §9).
-static void _ApplyImplicitMcVideoAffiliations( CSipMessage *pclsMessage, const std::string &strUserId, int iExpires ) {
-    if ( iExpires <= 0 || !gclsSetup.m_bRoleMcVideo || !gclsDbManager.IsConnected() ||
-         !gclsDbManager.HasMcVideoTables() || pclsMessage->m_clsContactList.empty() )
-        return;
-    std::string strParams;
-    for ( const auto &clsParam : pclsMessage->m_clsContactList.front().m_clsParamList )
-        strParams += ";" + clsParam.m_strName + ( clsParam.m_strValue.empty() ? "" : "=" + clsParam.m_strValue );
-    if ( !McVideoContactCapable( strParams ) ) return;
+// MCVideo 설정 그룹 암시적 제휴 (TS 24.281 §7.3.3 13) · §7.3.4 13) → §8.2.2.2.15) — MCVideo poc-settings PUBLISH 가
+//   성공한 때, 이용 자격(MCVideo user profile)이 있으면, 가입자가 멤버이고 관리자가 암시적 제휴로 정한 MCVideo 그룹
+//   (user profile <OnNetwork><ImplicitAffiliations> — MCPTT 와 같은 멤버 표시 ptt_group_members.implicit_affiliation,
+//   그룹이 MCVideo 서비스를 가질 때)에 MCVideo 제휴를 기록한다. 제휴는 한 그룹의 서비스마다 따로다(표
+//   mcvideo_affiliations). 만료 없음 — MCVideo 제휴의 수명은 등록이다(등록 해제가 지운다, PUBLISH 의 Expires 2^32-1
+//   과 같은 뜻). N2 는 §8.2.2.2.15 9) 대로 줄인다.
+static void _ApplyImplicitMcVideoAffiliations( const std::string &strUserId, const std::string &strClient ) {
+    if ( !gclsSetup.m_bRoleMcVideo || !gclsDbManager.IsConnected() || !gclsDbManager.HasMcVideoTables() ) return;
     CspMcVideoProfile clsProf;
     if ( gclsDbManager.SelectMcVideoProfile( strUserId, clsProf ) != 1 ) return;
     std::vector<std::string> vecGroups;
@@ -889,11 +859,6 @@ static void _ApplyImplicitMcVideoAffiliations( CSipMessage *pclsMessage, const s
     } );
     if ( vecGroups.empty() ) return;
 
-    const std::string strCtype =
-        pclsMessage->m_clsContentType.m_strType + "/" + pclsMessage->m_clsContentType.m_strSubType;
-    const std::string strClient = _ImplicitClientId(
-        pclsMessage,
-        ParseMcVideoInfo( McVideoBodyPart( pclsMessage->m_strBody, strCtype, kMcVideoInfoSubtype ) ).strClientId );
     // N2 (§8.2.2.2.15 9)) — 이 사용자의 지금 MCVideo 제휴(모든 클라이언트 — 이 등록이 지우지 않는다)와 합쳐 N2 를
     // 넘으면
     //   설정 그룹을 그룹 목록 순서대로 줄인다(이미 제휴한 그룹은 자리를 더 쓰지 않는다)
@@ -1307,10 +1272,8 @@ bool CCscfModule::RecvRequestRegister( int iThreadId, CSipMessage *pclsMessage )
             CLog::Print( LOG_INFO, "[Affiliation] 재등록 — flow 실패 유예 중이던 제휴 유지 user=%s",
                          clsUser.m_strId.c_str() );
         _NoteDeviceSeen( pclsMessage, clsUser.m_strId, clsUser.m_strServiceType, iGrantedExpires );
-        if ( clsUser.m_strServiceType == "ptt" ) {
-            _ApplyImplicitAffiliations( pclsMessage, clsUser.m_strId, iGrantedExpires );
-            _ApplyImplicitMcVideoAffiliations( pclsMessage, clsUser.m_strId, iGrantedExpires );
-        }
+        // 설정 그룹 암시적 제휴는 REGISTER 가 아니라 서비스 인가·설정 PUBLISH 성공 때다(§7.3.3 13) —
+        // RecvPublishPocSettings)
 
         // reg-event 구독자에게 등록 갱신 통지 (partial — RFC 3680).
         //   최초 등록은 구독이 있을 수 없어 통상 no-op, 구독 잔존 상태의 재등록이면 created.
@@ -2222,6 +2185,13 @@ bool CCscfModule::RecvPublishPocSettings( CSipMessage *pclsMessage, const std::s
             pclsOk->m_clsContentType.Set( "application", ( std::string( McInfoSubtype( e ) ) ).c_str() );
         }
         gclsUserAgent.m_clsSipStack.SendSipMessage( pclsOk );
+    }
+    // §7.3.3 13) · §7.3.4 13) — 설정 그룹 암시적 제휴(§9.2.2.2.15 · MCVideo §8.2.2.2.15). 본문 없는 갱신은 빼고.
+    if ( !pclsMessage->m_strBody.empty() ) {
+        if ( e == EMcService::Mcptt )
+            _ApplyImplicitAffiliations( strImpu, strClientId );
+        else if ( e == EMcService::McVideo )
+            _ApplyImplicitMcVideoAffiliations( strImpu, strClientId );
     }
     SendPocSettingsNotify( e, strImpu );
     return true;

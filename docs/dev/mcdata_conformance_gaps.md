@@ -43,15 +43,15 @@ MCPTT 와 뿌리가 같은 것(제휴 클라이언트 단위·비제휴 멤버 �
 
 | 영역 | 항목 | A | B | C | D |
 |---|---|---|---|---|---|
-| 등록·서비스 인가 (REG) | 2 | — | 1 | 1 | — |
+| 등록·서비스 인가 (REG) | 1 | — | — | 1 | — |
 | 제휴·배포 대상 (AFF) | 3 | 1 | 1 | 1 | — |
 | SDS — 시그널링 평면 (SDS) | 5 | — | 2 | 1 | 2 |
 | SDS — 미디어 평면 (MSRP) | 4 | — | 1 | 3 | — |
 | disposition 통지 (DISP) | 1 | — | — | 1 | — |
 | 파일 배포 (FD) | 2 | — | — | 1 | 1 |
-| **계** | **17** | **1** | **5** | **8** | **3** |
+| **계** | **16** | **1** | **4** | **8** | **3** |
 
-확인 수준 — ◎ 11 · ○ 3 · △ 3.
+확인 수준 — ◎ 10 · ○ 3 · △ 3.
 
 읽는 순서 — §2(먼저 볼 것) → §3(영역별 전체) → §4(미구현 목록에 빠진 기능) → §5(문서 정정) → §6(묶음과 순서).
 
@@ -85,7 +85,6 @@ MCPTT 와 뿌리가 같은 것(제휴 클라이언트 단위·비제휴 멤버 �
 | # | 급 | 대상 | 규격 | CIMS 지금 | 영향 | 확인 |
 |---|---|---|---|---|---|---|
 | REG-2 | C | CSP | §7.2.1 · NOTE 1 — 서비스별 특성 태그로 MCData 클라이언트·SDS/FD 지원을 가른다. 태그를 뺀 재등록 = MCData 로그오프 | 첫 Contact 의 첫 `+g.3gpp.icsi-ref` 값에 «mcdata» 문자열이 있으면 MSRP 배포 대상(`csp/UserMap.cpp:195-200`) — `mcdata.fd`·기본 ICSI 만 실은 단말도 MSRP INVITE 를 받는다. `g.3gpp.mcdata.sds` 태그는 보지 않는다 | FD 만 지원하는 규격 단말에 SDS 미디어 평면 INVITE 가 간다. MCData 로그오프 개념이 없다(MCPTT REG-4 와 같은 결) | ◎ |
-| REG-3 | B | CSP | §7.3.2 — 제3자 REGISTER 의 mcdata-info `<mcdata-access-token>`·`<mcdata-client-id>` 로 서비스 인가·바인딩(MCData ID·client ID·IMPU). §9.2.2.3.1 3)·§12.2.2.1 3) — 바인딩이 없으면 404 + `141 user unknown to the participating function` | REGISTER·poc-settings 의 `<mcdata-access-token>` 인가·바인딩은 한다(S25 단계 A — IdMS 검증). 바인딩으로 요청을 가르는 141(§9.2.2.3.1 3))은 아직 없다 — 단계 B | 규격 단말이 재인가를 시작할 신호가 없다. mcx_identity_scope.md §10 은 MCPTT 토큰 검증만 향후 과제로 적었다(MCPTT REG-3 과 같은 뿌리) | ◎ |
 
 ### 3.2 제휴·배포 대상 (AFF) — TS 24.282 §8 · §6.3.4 · §6.3.5
 
@@ -171,7 +170,7 @@ CSP 는 참여 기능과 제어 기능을 겸한다.
 | 6 | **FD Metadata 형식** — `file-selector:` 접두·hash (SDK 는 규격형 업로드·Location 사용과 함께 — U05) | FD-7 | .45 SDK · CSP |
 | 7 | **자동 수신** — CSP 가 Mandatory download 를 붙이고 SDK·앱은 그 IE 를 따른다 | FD-4 | .45 CSP·SDK → 앱 |
 | 8 | **제휴 서비스 분리** — MCData 제휴 표·`mcdataPresInfo`, 클라이언트 단위. MCPTT 묶음 8 과 한 묶음 | AFF-1 · AFF-6 · REG-2 | .45 CSP·SDK |
-| 9 | **서비스 인가·설정** — MCPTT REG 묶음과 한 묶음 | REG-3 · §4 앞 두 줄 | .48 CSP(S25 단계 B — SDK 인가 송신은 U09 에서 반영) |
+| 9 | **서비스 인가·설정** — MCPTT REG 묶음과 한 묶음 | §4 앞 두 줄 | .48 CSP(바인딩 판정은 S25 에서 반영 — 남은 것은 §4) |
 | 10 | **수신 파서** — content type·charset | SDS-7 | .45 SDK |
 | 11 | **미디어 평면 수명** — 첫 멤버 응답 뒤 200, 단말 BYE + Reason. TS 24.582 확보 뒤 | MSRP-3 · MSRP-4 | .45 CSP·CMDP·SDK |
 | 12 | **나머지** — 색인 순서(실측 뒤), UNDELIVERED | SDS-9 · DISP-1 | .45 CSP |

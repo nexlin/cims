@@ -433,9 +433,20 @@ void CMcVideoCallService::_FailPendingIfNoInvitee( const std::string strGroupId 
     _ReleaseSession( strGroupId, "all invites failed" );
 }
 
-bool CMcVideoCallService::_InviteMember( Session &clsSes, const CspPttGroup &clsGroup, const std::string &strMember ) {
+bool CMcVideoCallService::_InviteMember( Session &clsSes, const CspPttGroup &clsGroup, const std::string &strMember,
+                                         bool *pbNoSettings ) {
+    // 착신 참여 기능 3) (TS 24.281 §9.2.1.3.2 3)) — 초대받는 클라이언트의 Answer-Mode Indication(poc-settings §7.3.3·
+    //   §7.3.4)을 받지 못했으면 480 + 146 — 초대하지 않는다
+    std::string strAm;
+    if ( !gclsMcServiceAuth.AnswerModeOf( EMcService::McVideo, strMember, strAm ) ) {
+        CLog::Print( LOG_INFO, "MCVIDEO: group(%s) member(%s) — 서비스 설정(Answer-Mode) 없음 → 480 146",
+                     clsSes.strGroupId.c_str(), strMember.c_str() );
+        if ( pbNoSettings ) *pbNoSettings = true;
+        return false;
+    }
+    // MCVideo 클라이언트 바인딩 — 서비스 태그(§7.2.1AA)를 실은 등록 바인딩으로만
     CUserInfo clsInfo;
-    if ( !gclsUserMap.Select( strMember.c_str(), clsInfo ) || !clsInfo.m_bMcVideo ) return false;
+    if ( !gclsUserMap.SelectService( strMember.c_str(), EMcService::McVideo, clsInfo ) ) return false;
     int iPrio = 0;
     IsMember( clsGroup, strMember, &iPrio );
     if ( !_CmpAddMember( clsSes, clsGroup, strMember ) ) return false;
@@ -631,6 +642,12 @@ void CMcVideoCallService::OnIncomingInvite( const char *pszCallId, const char *p
     if ( !gclsCmpClient.SupportsMcVideo() ) {
         CLog::Print( LOG_INFO, "MCVIDEO: INVITE from(%s) — CMP resource.mcvideo 없음 → 500", strFrom.c_str() );
         return reject( SIP_INTERNAL_SERVER_ERROR, 0, NULL, "error", "media_unavailable" );
+    }
+    // 2) 서비스 인가 바인딩(§7.3 — (MCVideo ID, client ID, IMPU))이 없으면 404 + 141 (§9.2.1.3.1.1 2) · §9.2.2.3.1.1
+    //    2)). 바인딩은 서비스 인가(poc-settings PUBLISH §7.3.3 · REGISTER 본문 §7.3.2)가 세운다.
+    if ( !gclsMcServiceAuth.HasBinding( EMcService::McVideo, strFrom ) ) {
+        CLog::Print( LOG_INFO, "MCVIDEO: INVITE from(%s) — 서비스 인가 바인딩 없음 → 404 141", strFrom.c_str() );
+        return reject( SIP_NOT_FOUND, 141, kMcVideoWarn141, "denied", "service_unauthorized" );
     }
     // 3) 이용 자격 (MCVideo user profile) — 403 108(chat)·109(prearranged)
     CspMcVideoProfile clsProf;
@@ -848,21 +865,24 @@ void CMcVideoCallService::OnIncomingInvite( const char *pszCallId, const char *p
         //   <on-network-max-participant-count>» — MCPTT §10.1.1.4.2 와 같은 판정: 초대하지 못한 제휴 멤버가 남았다).
         const int iInviteCap = clsGroup._maxMembers > 0 ? std::max( 0, clsGroup._maxMembers - 1 ) : -1;
         int iInvited = 0;
+        bool bNoSettings = false;  // 서비스 설정이 없어 480 + 146 으로 거절된 멤버가 있다
         for ( const auto &strMember : vecAff ) {
             if ( strMember == strFrom || !IsMember( clsGroup, strMember ) ) continue;
             if ( iInviteCap >= 0 && iInvited >= iInviteCap ) {
                 clsSes.bInviteCapped = true;
                 break;
             }
-            if ( _InviteMember( clsSes, clsGroup, strMember ) ) ++iInvited;
+            if ( _InviteMember( clsSes, clsGroup, strMember, &bNoSettings ) ) ++iInvited;
         }
         if ( clsSes.bInviteCapped )
             CLog::Print( LOG_INFO, "MCVIDEO: group(%s) — 정원 %d: 초대 %d 명으로 줄임 (Warning 122)",
                          strGroupId.c_str(), clsGroup._maxMembers, iInvited );
         if ( iInvited == 0 ) {
-            CLog::Print( LOG_INFO, "MCVIDEO: group(%s) prearranged — 초대할 제휴·등록 멤버 없음 → 480",
-                         strGroupId.c_str() );
-            _Reject( pszCallId, SIP_TEMPORARILY_UNAVAILABLE, 0, NULL );
+            CLog::Print( LOG_INFO, "MCVIDEO: group(%s) prearranged — 초대할 제휴·등록 멤버 없음 → 480%s",
+                         strGroupId.c_str(), bNoSettings ? " 146" : "" );
+            // 멤버 착신 참여 기능의 480 + 146 을 개시자에게 옮긴다(받은 응답의 Warning — MCPTT 와 같은 규칙)
+            _Reject( pszCallId, SIP_TEMPORARILY_UNAVAILABLE, bNoSettings ? 146 : 0,
+                     bNoSettings ? kMcVideoWarn146 : NULL );
             _CloseAttempt( clsSes, false, "no_answer", "no_member_available", SIP_TEMPORARILY_UNAVAILABLE );
             m_mapCallGroup.erase( strCallId );
             clsSes.mapLegs.erase( strCallId );

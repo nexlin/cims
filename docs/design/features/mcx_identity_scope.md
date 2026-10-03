@@ -219,8 +219,6 @@ CIMS 단말의 로그인 구현은 둘이다 — SDK 코어 `CscClient::login`(`
 
 ## 10. 향후 과제
 
-- **서비스 인가 바인딩으로 요청 판정** — 141(바인딩 없는 MCPTT·MCData·MCVideo 요청)을 등록 대신 §6.1 바인딩으로 본다. 우리 단말이
-  poc-settings 인가를 보낸 뒤(규격 갭 S25 단계 B · U09).
 - **MCData XCAP 문서** (TS 24.484 §10.2~10.4: UE config·user profile·service config) — 내지 않는다. 규격 MCData 단말에게는
   1:1 SDS·FD 전부의 전제다: MCData user profile 이 없으면 `<allow-transmit-data>` 없음 = 1:1 송신 금지로 읽고(TS 24.282 §11.1 1)),
   콘텐츠 서버 주소 `<MCDataContentServerURI>`(§10.2.2.1)와 1:1 FD 상한 `<max-data-size-fd-bytes>`(service config)를 알 수 없다

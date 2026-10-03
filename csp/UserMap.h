@@ -24,6 +24,7 @@
 #include <vector>
 
 #include "CspUser.h"
+#include "McService.h"
 #include "SipMessage.h"
 #include "SipMutex.h"
 #include "SipUserAgent.h"
@@ -99,6 +100,11 @@ public:
      * 초대 대상 판정에 쓴다. */
     bool m_bMcVideo;
 
+    /** REGISTER Contact 가 MCPTT 클라이언트를 싣는다 — +g.3gpp.mcptt 와 icsi-ref 의 MCPTT ICSI 둘 다(TS 24.379 §7.2.1).
+     * 태그를 뺀 재-REGISTER 는 MCPTT 로그오프다(§7.2.1 NOTE 1) — 재등록마다 다시 판정한다. MCPTT 초대 대상 바인딩
+     * 선별(SelectService)에 쓴다. */
+    bool m_bMcptt;
+
     /** REGISTER Security-Client 에 sdes-srtp(mediasec 파라미터) 선언 — 미디어 SRTP 능력
      *  (TS 33.328 e2ae / TS 24.229, media_security.md §4.1). media_srtp=optional 서비스의
      *  발신 offer 형태(SAVP/AVP)를 이 바인딩 플래그로 결정한다 — per-call 폴백 없음. */
@@ -159,6 +165,10 @@ public:
     bool IsIntegrityProtected( const char *pszUserId );
     bool Select( const char *pszUserId, CUserInfo &clsInfo );
     bool Select( const char *pszUserId );
+    /** 그 MC 서비스의 클라이언트를 실은 바인딩(m_bMcptt·m_bMcVideo·m_bMcDataMsrp) 가운데 고른다 — 서비스 태그 없는
+     *  바인딩(VoLTE 단말·그 서비스를 로그오프한 클라이언트)에는 그 서비스의 요청을 보내지 않는다(TS 24.379 §7.2.1 ·
+     *  TS 24.281 §7.2.1AA). 고를 바인딩이 없으면 false. */
+    bool SelectService( const char *pszUserId, EMcService eService, CUserInfo &clsInfo );
 
     /** 이 가입자의 바인딩 가운데 **Contact 가 다이얼로그 remote target 과 같은 것**(같은 단말) — 살아 있을 때만.
      *  in-dialog 요청 목적지 재해석용(leg_liveness.md §6.3): 같은 단말이면 latch(승격 TCP 가 닫힌 뒤의 등록 flow·NAT
@@ -209,7 +219,8 @@ private:
      *  생존 판정은 스트림 transport 만 스택에 묻는다(UDP 는 연결 개념이 없어 항상 살아있는
      *  것으로 취급하고 등록 만료에 맡긴다) — registration_binding_set.md §2.1.
      *  호출 전 m_clsMutex 를 잡고 있어야 한다. */
-    static size_t _pickBinding( const USER_BINDING_LIST &clsList, const char *pszExcludeContact = NULL );
+    static size_t _pickBinding( const USER_BINDING_LIST &clsList, const char *pszExcludeContact = NULL,
+                                const EMcService *pService = NULL );
 
     /** _pickBinding 이 "고를 수 있는 경로가 없다" 를 알리는 값. */
     static const size_t NO_BINDING = (size_t)-1;

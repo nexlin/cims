@@ -302,6 +302,8 @@ static const char *const kMcVideoWarn121 = "user is not authorised to join the g
 static const char *const kMcVideoWarn122 = "too many participants";
 static const char *const kMcVideoWarn123 = "MCVideo session already exists";
 static const char *const kMcVideoWarn137 = "the indicated group call does not exist";
+static const char *const kMcVideoWarn141 = "user unknown to the participating function";
+static const char *const kMcVideoWarn146 = "T-PF unable to determine the service settings for the called user";
 static const char *const kMcVideoWarn154 = "user not authorised to make ambient viewing call";
 static const char *const kMcVideoWarn186 = "the MCVideo system do not support adhoc group call";
 

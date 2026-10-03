@@ -897,7 +897,10 @@ struct SubscriptionInfo {
 (MC ID, client ID, IMPU) 바인딩과 클라이언트의 poc-settings(Answer-Mode·선택 user profile·multiplex)를 메모리에 둔다. 처리기 =
 `CCscfModule::RecvPublishPocSettings`(§7.3.3~§7.3.5 — SIP-ETag 별도 표) · SUBSCRIBE 분류 `poc-settings`/`mcvideo_poc-settings`/`mcdata_poc-settings`
 (NOTIFY = `SendPocSettingsNotify`) · REGISTER `_RegisterServiceAuthorization`(태그를 뺀 재등록 = 그 서비스 바인딩 제거). 등록 해제·만료가
-바인딩을 지운다. 자세한 것은 [mcptt_standard_conformance.md](../features/mcptt_standard_conformance.md) C10.
+바인딩을 지운다. MC 요청은 이 바인딩으로 판정한다 — 바인딩 없는 요청자 404 141(디스패처·`PttAsModule`·`McVideoCallService`·`McDataAsModule`·
+`McDataMediaService`), Answer-Mode 를 받지 못한 멤버는 초대하지 않는다(`InviteMember` 480 146), 초대·알림은 서비스 태그를 실은 등록 바인딩으로만
+(`CUserMap::SelectService` — `m_bMcptt`·`m_bMcVideo`), 설정 그룹 암시적 제휴는 인가·설정 PUBLISH 200 때. 자세한 것은
+[mcptt_standard_conformance.md](../features/mcptt_standard_conformance.md) C10.
 REGISTER 는 `GetRegisterExpires` 로 Contact `;expires` 를 Expires 헤더보다 우선해 읽고(§10.2.1.1), 둘 다 없으면
 `REGISTER_DEFAULT_EXPIRES_SEC`=3600(§10.2.4 — 없음은 해제가 아니다), 요청값은 그대로 수락하되 내부 표현(int 초)의
 범위로만 자른다(운영 상한은 별도 정책). 종전의 int + `-1`(미지정) 표지 구조는 `4294967295` 같은 값이 -1 로 넘쳐

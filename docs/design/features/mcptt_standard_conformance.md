@@ -79,7 +79,7 @@ CIMS 에 **아직 구현되지 않은** 기능을 규격 위치와 함께 나열
 | **Remotely initiated call** (원격 개시) | TS 24.379 | ✗ |
 | **User/Group regroup** (임시 그룹) | TS 24.379 + GMS(TS 24.481) | ✗ |
 | **Functional alias** 활성/비활성 | TS 24.379 / TS 24.484 | ✗ |
-| **서비스 인가·서비스 설정** PUBLISH·구독(`Event: poc-settings` — 접근 토큰·Answer-Mode·선택한 user profile) | TS 24.379 §7.2·§7.3 | △ 받는다(C10) — 141 판정을 바인딩 기준으로·설정 없는 착신 480 146 은 단말 짝(U09) 뒤(conformance_gap_plan.md S25 단계 B) |
+| **서비스 인가·서비스 설정** PUBLISH·구독(`Event: poc-settings` — 접근 토큰·Answer-Mode·선택한 user profile) | TS 24.379 §7.2·§7.3 | ○ 받고 판정한다(C10) — 인가 바인딩 없는 요청 404 141 · 설정 없는 착신 480 146 · 서비스 태그 바인딩 팬아웃. 동시 인가 상한·CSK 내려받기는 안 함 |
 | **협상 모드 제휴 변경**(타인 제휴 MESSAGE) · **규칙 기반 제휴** | TS 24.379 §9.2.1.4·§9.2.1.5 · §9.2.1.7 | ✗ |
 | **그룹 동적 데이터 구독**(그룹 상태·호 진행·제휴 멤버) | TS 24.379 §9.2.1.6 · §9.2.2.3.9~10 | ✗ — 그 구독을 제휴 구독으로 받는다(mcptt_conformance_gaps.md AFF-10) |
 | **XML 기밀성·무결성 보호**(mcptt-info 요소 암호화·서명) | TS 24.379 §4.8 · §6.6 | ✗ — service configuration 이 «꺼짐»(false)을 알린다 |
@@ -615,18 +615,19 @@ DB 단절이면 fan-out 과 같이 검사를 건너뛴다(affiliation 원천 = `
   멤버를 통째로 다시 쓰는 경로(관리 API 그룹 갱신 `members`·GMS XCAP 그룹 문서 PUT)는 값이 없는 멤버의 설정을 잇는다 —
   그룹 문서(TS 24.481)에는 이 요소가 없다.
 - **CSC** user profile `<ImplicitAffiliations>` = 그 사용자의 멤버 행에 설정이 켜진 그룹만(없으면 요소 생략).
-- **CSP** `_ApplyImplicitAffiliations`(`CscfModule.cpp`) — PTT REGISTER 200 뒤, 설정이 켜진 멤버 그룹마다 제휴를 기록하고
-  새로 생긴 제휴가 있으면 제휴 상태 NOTIFY(C2). 클라이언트 ID = REGISTER mcptt-info `<mcptt-client-id>`(§9.2.2.2.15 2)) >
-  Contact `+sip.instance` > Contact URI.
+- **CSP** `_ApplyImplicitAffiliations`(`CscfModule.cpp`) — 서비스 인가·서비스 설정 PUBLISH(poc-settings, C10) 200 뒤(§7.3.3 13) ·
+  §7.3.4 13)), 설정이 켜진 멤버 그룹 가운데 아직 제휴하지 않은 그룹(§9.2.2.2.15 8) b))에 제휴를 기록하고 새로 생긴 제휴가 있으면
+  제휴 상태 NOTIFY(C2). 클라이언트 ID = 그 PUBLISH 의 `<mcptt-client-id>`(§9.2.2.2.15 2)). REGISTER 는 암시적 제휴를 만들지
+  않는다 — 단말이 PUBLISH 로 뺀 설정 그룹은 다음 서비스 인가 때까지 되살아나지 않는다. MCVideo 도 같다(`_ApplyImplicitMcVideoAffiliations` —
+  TS 24.281 §7.3.3 13) → §8.2.2.2.15, N2 는 규격대로 줄인다).
 - **규격 대비 편차**
 
   | 항목 | 규격 | CIMS |
   |---|---|---|
-  | 만료 | candidate expiration interval(암시적 제휴용 값은 정의되지 않음 — PUBLISH Expires 로만 정의) · 이미 제휴된 그룹은 새로 넣지 않음(§9.2.2.2.15 8) b)) | **등록 수명**(부여 등록 만료)으로 기록하고 재등록마다 갱신 — 등록이 살아 있는 동안 끊기지 않게. 해지 REGISTER 는 제휴 전부 해제(종전 그대로) |
+  | 만료 | candidate expiration interval(암시적 제휴용 값은 정의되지 않음 — PUBLISH Expires 로만 정의) · 이미 제휴된 그룹은 새로 넣지 않음(§9.2.2.2.15 8) b)) | **만료 없음**(등록 수명에 묶는다) — 등록 해제·서비스 설정 제거(§7.3.5)가 지운다. 서비스 인가는 등록 갱신마다 오지 않으므로 등록 만료로 적으면 첫 등록 주기 뒤 끊긴다 |
   | N2 상한 | 초과분을 정책으로 줄임(§9.2.2.2.15 9) c)) | 적용하지 않음 — PUBLISH 경로(C1)와 같다 |
   | 확정 | "affiliating" → 제어 기능 PUBLISH(§9.2.2.2.6) → affiliated | 참여·제어 기능이 한 서버라 곧바로 affiliated 로 기록 |
-  | 계기 | 서비스 인가·서비스 설정 PUBLISH 수신(§7.3.3 13) · §7.3.4 13)) — REGISTER 절차(§7.3.2)에는 이 단계가 없다 | **PTT REGISTER 200 뒤** — 우리 단말이 poc-settings 를 보내기 전(S25 단계 B 에서 §7.3.3 13) 계기로 옮긴다, C10) |
-
+  
 - **③ ad hoc** — 제어 기능은 초대한 멤버를 그 ad hoc 그룹에 암시적으로 제휴된 것으로 본다(§17.4.2.2 16), 참여자 변경 §17.4.5.1.1 vi)·
   §17.4.5.2.1 d)). CSP 는 ad hoc 그룹을 통화 때 만들며 `require_affiliation = false` 로 둬(`ModuleDispatcher.cpp`) 명단 전원을
   초대하고, 명단 밖 재합류는 멤버십 검사로 막으며, 제휴 멤버 최소 인원 조건(§17.4.3.1.1.1 1))은 쓰지 않는다 — 결과가 같다.
@@ -648,15 +649,22 @@ DB 단절이면 fan-out 과 같이 검사를 건너뛴다(affiliation 원천 = `
 | 설정 구독 — SUBSCRIBE `Event: poc-settings` · info `<…-request-uri>` = 자기 MC ID | 남의 설정 구독 403. 200 + NOTIFY(`application/poc-settings+xml` — 그 사용자 클라이언트들의 entity: `am-settings`·`mcs10Set:selected-user-profile-index`·`multiplex-support`), 설정이 바뀔 때마다 NOTIFY. 갱신·해지(in-dialog)는 본문 없이 받는다 | §7.3.6 · RFC 4354 |
 | 서비스 태그를 뺀 재-REGISTER | 그 서비스의 로그오프 — 바인딩 제거(MCPTT = `+g.3gpp.mcptt`·MCPTT icsi-ref, MCVideo = §7.2.1AA 태그, MCData = icsi-ref `mcdata`) | §7.1 · §7.2.1 NOTE 1 |
 | 등록 해제·만료 | 모든 서비스의 바인딩 제거(flow 실패는 제휴와 같이 유예 뒤 — registration_binding_set.md §4.4) | §7.3.5 NOTE |
-| 초대 INVITE 의 `Answer-Mode` | 그 멤버의 Answer-Mode Indication(`manual` → `Manual`), 받지 못했으면 `Auto` — MCPTT 그룹 호·MCVideo 그룹 호. 개별 호는 발신 값을 옮긴다(C4a) | §7.3.3 10) · §6.3.2.2.5.2 |
+| 초대 INVITE 의 `Answer-Mode` | 그 멤버의 Answer-Mode Indication(`manual` → `Manual`, `automatic` → `Auto`) — MCPTT 그룹 호·MCVideo 그룹 호(받지 못한 멤버는 초대하지 않는다 — 아래 «요청 판정»). 개별 호는 발신 값을 옮긴다(C4a) | §7.3.3 10) · §6.3.2.2.5.2 |
 
 - 골든 = `tests/fixtures/mcptt/sip/14~19`(인가+설정·설정만·제거·구독·403 101·404 141). 단위시험 `tests/csp_mcptt_request_test.cpp`(S1-UNIT-CSP).
 - CIMS 는 단일 MC service ID(TS 23.280 §10.1.4.1 — [mcx_identity_scope.md](mcx_identity_scope.md) §1)라 토큰의 MC ID 가 요청 IMPU 와 같아야
   인가한다. 바인딩은 메모리에 두고 등록과 함께 산다(재기동 뒤에는 단말의 다음 인가로 다시 선다).
-- **배포 두 단계**(K4 — 스위치 없이 배포 순서만 맞춘다): 지금(단계 A) 141 판정은 «등록 있음» 이고 설정이 없는 단말에게도 초대가 간다.
-  **단계 B**(우리 SDK·앱이 poc-settings 인가를 보낸 뒤 — U09) = 141 을 서비스 인가 바인딩 기준으로(§10.1.1.3.1.1 2a) 등), 설정을 받지 못한
-  단말에게 가는 초대는 480 + `146 T-PF unable to determine the service settings for the called user`(§10.1.1.3.2 3) · §11.1.1.3.2 7a) ·
-  §17.3.2.2.2 3)), 서비스 태그 없는 바인딩은 팬아웃에서 뺀다, 설정 그룹 암시적 제휴 계기를 §7.3.3 13) 로(C9).
+- **요청 판정**(서비스 인가 바인딩 기준 — 등록만으로는 서지 않는다):
+
+  | 판정 | 처리 | 근거 |
+  |---|---|---|
+  | 발신 — 바인딩 없는 요청자 | 404 + `141 user unknown to the participating function` — MCPTT 그룹·개별·애드혹 INVITE(`ModuleDispatcher`)·경보 MESSAGE(`PttAsModule`) · MCVideo INVITE(`McVideoCallService` — 자원 500 뒤, 이용 자격 앞) · MCData SDS·FD MESSAGE(`McDataAsModule`)·SDS MSRP INVITE(`McDataMediaService`) — request-type 142 앞 | TS 24.379 §10.1.1.3.1.1 2a) · §11.1.1.3.1.1 4) · §17.3.2.1.1 3) · §12.1.2.1 2a) · TS 24.281 §9.2.1.3.1.1 2) · TS 24.282 §9.2.2.3.1 3) · §9.2.3.3.3 3) |
+  | 착신 — 초대받는 클라이언트의 Answer-Mode Indication 없음 | 초대하지 않고 480 + `146 T-PF unable to determine the service settings for the called user` 로 센다(`InviteMember` — 편성·애드혹·개별 호 착신자). 확인 통화 게이트가 멤버 응답처럼 받아 개시자 최종 응답에 Warning 을 옮긴다 — 개별 호는 발신자에게 480 + 146. MCVideo prearranged 도 같다(초대할 멤버가 없으면 개시자 480 + 146) | TS 24.379 §10.1.1.3.2 3) · §11.1.1.3.2 7a) · §17.3.2.2.2 3) · TS 24.281 §9.2.1.3.2 3) |
+  | 팬아웃 바인딩 | 초대·경보·긴급 상태 알림은 그 서비스 태그를 실은 등록 바인딩으로만(`CUserMap::SelectService` — MCPTT = `m_bMcptt`, MCVideo = `m_bMcVideo`), 경보·알림 MESSAGE 는 인가 바인딩이 없는 멤버를 건너뛴다 | TS 24.379 §7.2.1 · §10.1.1.3.2 5) · TS 24.281 §7.2.1AA |
+
+  서비스 태그 없는 REGISTER 는 그 IMPU 의 그 서비스 바인딩을 클라이언트 구분 없이 지운다 — 클라이언트 단위 정리는 제휴 키와 함께
+  규격 갭 WP S12. 계측기 가상 단말(libcsim)·cspsim 은 서비스 인가를 보내지 않아 MC 요청이 404 141 이다(K4 — 요구서
+  `docs/dev/mcx_tester_requirements.md`).
 - **규격 대비 편차**: 동시 인가 상한(`<user-max-simultaneous-authorizations>`·`<max-simultaneous-authorizations>` → 486 164, §7.3.3 3a)·3b)) ·
   XML 기밀성·무결성(140 — §7.3.1A, service configuration 이 «꺼짐») · CSK 내려받기(§7.3.7)는 하지 않는다. 선택 user profile 은 캐시만 한다
   (CIMS user profile 은 사용자당 하나 — NOTE 3).

@@ -444,6 +444,7 @@ VoLTE 표에는 `rejected`(거절)·`no_answer`(무응답) 두 열이 없어, �
 |---|---|---|---|
 | `media_unavailable` | 미디어 평면이 MCVideo 자원(`resource.mcvideo`)을 광고하지 않음 (TS 24.281 §9.2.2.4.1.1 1)) | `error` | 500 |
 | `invalid_request` | Accept-Contact 에 MCVideo feature·ICSI 가 없거나 Contact 에 `isfocus` (§9.2.2.4.1.1 2)) | `denied` | 403 |
+| `service_unauthorized` | 서비스 인가 바인딩(poc-settings 인가 — TS 24.281 §7.3)이 없는 개시·합류 — Warning 141 (§9.2.1.3.1.1 2) · §9.2.2.3.1.1 2)) | `denied` | 404 |
 | `group_not_found` | MCVideo 그룹 문서가 없음 — Warning 113 | `denied` | 404 |
 | `not_member` | 그룹 멤버가 아님 — Warning 116 | `denied` | 403 |
 | `session_type_mismatch` | mcvideo-info `session-type` 이 그룹 호 방식과 다름 — Warning 117/118 (§6.3.5.2 5)) | `denied` | 404 |

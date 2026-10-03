@@ -45,6 +45,7 @@
 #include "McDataCodec.h"
 #include "McDataGates.h"
 #include "McDataMediaService.h"
+#include "McServiceAuth.h"
 #include "McVideoCallService.h"
 #include "McVideoInfo.h"
 #include "McpttInfo.h"
@@ -1067,12 +1068,12 @@ void CModuleDispatcher::EventIncomingCall( const char *pszCallId, const char *ps
             }
         }
     }
-    // 서비스 인가 바인딩(TS 24.379 §7.3 — 등록 때의 MCPTT ID ↔ IMPU)이 없는 요청자의 MCPTT 요청 — 404 + 141
-    //   (§10.1.1.3.1.1 2a) 편성 · §10.1.2.3.1.1 chat · §11.1.1.3.1.1 4) 개별 · §17.3.2.1.1 3) 애드혹).
+    // 서비스 인가 바인딩(TS 24.379 §7.3 — (MCPTT ID, client ID, IMPU))이 없는 요청자의 MCPTT 요청 — 404 + 141
+    //   (§10.1.1.3.1.1 2a) 편성 · §10.1.2.3.1.1 chat · §11.1.1.3.1.1 4) 개별 · §17.3.2.1.1 3) 애드혹). 바인딩은 서비스
+    //   인가(poc-settings PUBLISH §7.3.3 · REGISTER 본문 §7.3.2)가 세운다 — 등록만으로는 서지 않는다.
     if ( m_clsPttAs.IsEnabled() &&
          ( !strMcpttSessionType.empty() || !strMcpttRequestUri.empty() || gclsGroupMap.Contains( pszTo ) ) ) {
-        CspUser clsBound;
-        if ( !gclsCspUserMap.isAlive( pszFrom, clsBound ) ) {
+        if ( !gclsMcServiceAuth.HasBinding( EMcService::Mcptt, pszFrom ) ) {
             CLog::Print( LOG_INFO, "EventIncomingCall: MCPTT INVITE from(%s) → %s — 서비스 인가 바인딩 없음 → 404 141",
                          pszFrom, pszTo );
             gclsUserAgent.StopCall( pszCallId, SIP_NOT_FOUND, NULL,

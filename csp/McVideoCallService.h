@@ -121,8 +121,10 @@ private:
     void _ResolvePendingInitiator( const std::string strGroupId );
     /** 대기 중 개시자 — 남은 초대 leg 가 없으면 480 으로 개시를 끝낸다(§9.2.1.4.2). 호출자가 m_mutex 보유. */
     void _FailPendingIfNoInvitee( const std::string strGroupId );
-    /** 멤버 팬아웃 INVITE (골든 07) — 호출자가 m_mutex 보유 */
-    bool _InviteMember( Session &clsSes, const CspPttGroup &clsGroup, const std::string &strMember );
+    /** 멤버 팬아웃 INVITE (골든 07) — 호출자가 m_mutex 보유. pbNoSettings = 멤버의 Answer-Mode Indication 이 없어
+     * 착신 참여 기능이 480 + 146 으로 거절했다(TS 24.281 §9.2.1.3.2 3)) */
+    bool _InviteMember( Session &clsSes, const CspPttGroup &clsGroup, const std::string &strMember,
+                        bool *pbNoSettings = nullptr );
     /** 세션 해제 — 남은 leg 에 BYE/CANCEL, CMP REMOVE (§6.3.8.1). 호출자가 m_mutex 보유. */
     void _ReleaseSession( const std::string strGroupId, const char *pszWhy );
     /** leg 하나를 세션에서 뺀다(CMP LEAVE) — 해제 정책에 걸리면 세션 해제. 호출자가 m_mutex 보유. */

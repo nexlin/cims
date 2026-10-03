@@ -47,6 +47,9 @@ UE B `+82510002002`, 그룹 `tel:g101`. 참여 기능 PSI = MCPTT `sip:mcptt_psi
 - 서비스 인가 = 접근 토큰(PUBLISH poc-settings §7.3.3 또는 REGISTER 본문 §7.3.2)을 IdMS 에 introspection(RFC 7662)으로 검증 — 활성 ·
   scope `3gpp:mc:ptt_service` · 토큰의 MCPTT ID = 요청 IMPU 사용자부(단일 MC service ID) — 이면 (MCPTT ID, client ID, IMPU) 바인딩. 아니면 403 101.
   설정만 PUBLISH 는 바인딩이 있어야 한다(404 141). Expires 0 = 설정·제휴·바인딩 제거. 단말의 Answer-Mode 는 그 단말에게 가는 초대의 `Answer-Mode` 다.
+- 요청 판정 = 그 서비스의 서비스 인가 바인딩 — 없으면 MCPTT·MCVideo INVITE·경보 MESSAGE·MCData MESSAGE·SDS MSRP INVITE 가 404 141(골든 19 와 같은
+  Warning). Answer-Mode Indication 을 보내지 않은 단말은 초대하지 않는다(480 + `"146 T-PF unable to determine the service settings for the called user"`
+  — 개별 호는 발신자가 받는다). 설정 그룹 암시적 제휴 = 서비스 인가·설정 PUBLISH 200 때.
 - 재합류 = Request-URI 의 gr 로 진행 중 세션을 찾고 그 세션의 그룹으로 처리한다(사용자부로 가르지 않는다). 없거나 `<mcptt-request-uri>` 가 다른 그룹이면 404(Warning 없음).
 - 개별 호 floor = offer 에 `m=application <port≠0> udp MCPTT` 가 있으면 있음(반이중), 없으면 없음(전이중 — CMP `floor_control:"off"`, 착신 offer 에도 `m=application` 없음).
 - MCData 대상 = `request-type` — `group-sds`·`group-fd` → `<mcdata-request-uri>`(없으면 404 142, 그룹 문서가 없으면 404 113) · `one-to-one-sds`·`one-to-one-fd` → resource-lists entry 하나(아니면 403 204·205) · 그 밖(request-type 없음·`ad-hoc-group-sds`) → 404 142.

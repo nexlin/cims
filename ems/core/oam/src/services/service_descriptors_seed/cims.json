@@ -1195,6 +1195,7 @@
                 "not_affiliated": "제휴 안 됨 — prearranged(403·120)",
                 "affiliation_failed": "암묵적 제휴 실패 — chat(403·120)",
                 "not_entitled": "MCVideo 이용 자격 없음(403·108/109)",
+                "service_unauthorized": "서비스 인가 없음(404·141)",
                 "session_type_mismatch": "호 방식 불일치(404·117/118)",
                 "max_calls_exceeded": "동시 영상 호 상한 N6(486·103)",
                 "invalid_request": "MCVideo 요청 조건 불일치(403)"
@@ -1202,7 +1203,7 @@
               "statusFrom": "mcvideo.statuses",
               "statusLabels": {
                 "403": "403 비멤버·자격·제휴 없음",
-                "404": "404 MCVideo 그룹 아님·호 방식 불일치",
+                "404": "404 MCVideo 그룹 아님·호 방식 불일치·서비스 인가 없음",
                 "486": "486 동시 영상 호 상한"
               },
               "detailUnknownLabel": "원인 미기록(응답코드 없음)",

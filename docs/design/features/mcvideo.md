@@ -289,6 +289,9 @@ psip 합성 SDP 프로파일(`CSipCallRtp::m_eMcMediaProfile = E_MC_MEDIA_MCVIDE
   mcvideo-info 토큰·client ID(§7.3.2) 또는 `Event: poc-settings` PUBLISH(§7.3.3) — 토큰을 IdMS 에 검증해(scope `3gpp:mc:video_service`)
   (MCVideo ID, client ID, IMPU) 를 묶고, **서비스 설정만 싣는 PUBLISH(§7.3.4 — Answer-Mode·선택한 user profile)** 는 그 바인딩이 있어야
   받는다(없으면 404 141). 받은 Answer-Mode 는 그 멤버의 팬아웃 INVITE `Answer-Mode` 다([mcptt_standard_conformance.md](mcptt_standard_conformance.md) C10).
+  판정은 이 바인딩으로 한다 — 바인딩 없는 개시·합류 INVITE 404 141(§9.2.1.3.1.1 2) · §9.2.2.3.1.1 2)), Answer-Mode 를 받지 못한 멤버는 prearranged
+  초대에서 빼고 480 146 으로 센다(§9.2.1.3.2 3) — 초대할 멤버가 없으면 개시자 480 + 146), 팬아웃은 MCVideo 태그를 실은 등록 바인딩으로만,
+  설정 그룹 암시적 제휴는 이 PUBLISH 200 때(§7.3.3 13)).
   단말 코어는 등록이 설 때마다(첫 등록·재성립·망 변경 뒤) 서비스 인가 + 서비스 설정 PUBLISH(§7.2.2)를 보낸다 — `Event: poc-settings`·`Expires:
   4294967295`·P-Preferred-Service MCVideo ICSI, 본문 = mcvideo-info(`<mcvideo-access-token>` = `AccountConfig.accessToken` · `<mcvideo-client-id>`) +
   `application/poc-settings+xml`(`<entity id>` = instance ID, `<answer-mode>` = `autoAnswerMcvideo` 에 따라 automatic|manual,
@@ -461,7 +464,7 @@ Indicator, automatic 수신; 1차 CSP 는 normal) · JOIN 응답 `audio_ssrc`·`
 ### 5.4 단말 SDK (`libcimsue`)
 
 - **계정·등록**(구현) — `AccountConfig.mcvideoServerUri`(ue-init-config), `mcvideoEnabled` 면 REGISTER Contact 에 `+g.3gpp.mcvideo` + icsi-ref 목록의
-  mcvideo ICSI(TS 24.281 §7.2.1AA — 서비스 인가 본문 없음, CSP 판정 = Contact 태그 + 이용 자격). 서비스 태그는 REGISTER 에만 모으고 icsi-ref 는 한 목록 —
+  mcvideo ICSI(TS 24.281 §7.2.1AA — CSP 판정 = 서비스 인가 바인딩 + 이용 자격, §5.2 «등록»). 서비스 태그는 REGISTER 에만 모으고 icsi-ref 는 한 목록 —
   서비스 호 Contact 는 호가 자기 태그를 싣는다([ue_sdk.md](ue_sdk.md) §4.6). 서비스 인가 본문(mcptt-info·mcvideo-info 토큰)은 CSP 토큰 검증과 한 짝으로 뒤에.
 - **설정 해석**(구현 — [ue_sdk.md](ue_sdk.md) §4.2) — `UeInitConfigDoc.mcvideoServerUri` · 그룹 문서 `GroupDoc.mcvideo`(`McVideoGroupAttrs`, 생성도 골든과
   같은 순서) · `McVideoUserProfileDoc`·`McVideoServiceConfigDoc`(`CscClient::fetchMcVideoUserProfile`·`fetchMcVideoServiceConfig`) · 토큰 scope 에

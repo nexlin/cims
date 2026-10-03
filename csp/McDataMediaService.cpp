@@ -12,6 +12,7 @@
 #include "Log.h"
 #include "McDataCodec.h"
 #include "McDataGates.h"
+#include "McServiceAuth.h"
 #include "McpttInfo.h"
 #include "SipServer.h"
 #include "SipServerSetup.h"
@@ -199,6 +200,12 @@ void CMcDataMediaService::OnIncomingMsrpInvite( const char *pszCallId, const cha
                 "Warning", McpttWarning( iWarn, McDataWarnText( iWarn ), gclsServiceMap.GetDomainByKind( "ptt" ) ) );
         gclsUserAgent.StopCall( pszCallId, iStatus, NULL, vecHdr );
     };
+    // 참여 기능 3) — 서비스 인가 바인딩(§7.3)이 없으면 404 + 141
+    if ( !gclsMcServiceAuth.HasBinding( EMcService::McData, pszFrom ) ) {
+        CLog::Print( LOG_INFO, "McDataMedia: MSRP INVITE from(%s) — 서비스 인가 바인딩 없음 → 404 141", pszFrom );
+        rejectWarn( SIP_NOT_FOUND, 141 );
+        return;
+    }
     CMcDataSdsInfo clsReq;
     if ( pclsMessage ) {
         const std::string strCtype =

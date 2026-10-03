@@ -22,6 +22,7 @@
 #include "IpsecSaSet.h"
 #include "Log.h"
 #include "McVideoInfo.h"  // McVideoContactCapable
+#include "McpttInfo.h"    // McpttContactCapable
 #include "MemoryDebug.h"
 #include "SipParserDefine.h"
 #include "SipServer.h"
@@ -41,6 +42,7 @@ CUserInfo::CUserInfo()
       m_bKeepAliveSeen( false ),
       m_bMcDataMsrp( false ),
       m_bMcVideo( false ),
+      m_bMcptt( false ),
       m_bMediaSecSdes( false ),
       m_iRegisterCSeq( 0 ),
       m_bIntegrityProtected( false ),
@@ -101,7 +103,14 @@ static bool _isUdpSilent( const CUserInfo &clsBind, time_t iNow ) {
 
 static bool _sameContact( const std::string &strA, const std::string &strB );
 
-size_t CUserMap::_pickBinding( const USER_BINDING_LIST &clsList, const char *pszExcludeContact ) {
+/** 바인딩이 그 MC 서비스의 클라이언트를 싣는가 (SelectService) */
+static bool _servesMc( const CUserInfo &clsBind, EMcService e ) {
+    return e == EMcService::McVideo ? clsBind.m_bMcVideo
+                                    : ( e == EMcService::McData ? clsBind.m_bMcDataMsrp : clsBind.m_bMcptt );
+}
+
+size_t CUserMap::_pickBinding( const USER_BINDING_LIST &clsList, const char *pszExcludeContact,
+                               const EMcService *pService ) {
     size_t iBest = 0;
     bool bFoundAlive = false;
     time_t iNow;
@@ -123,6 +132,8 @@ size_t CUserMap::_pickBinding( const USER_BINDING_LIST &clsList, const char *psz
         if ( _isUdpSilent( clsList[i], iNow ) ) continue;
         // 뺄 단말(자기 번호 발신의 발신 단말) — SelectOtherDevice
         if ( pszExcludeContact && _sameContact( clsList[i].m_strContactUri, pszExcludeContact ) ) continue;
+        // 그 MC 서비스의 클라이언트가 아닌 바인딩 — SelectService
+        if ( pService && !_servesMc( clsList[i], *pService ) ) continue;
 
         if ( !bFoundAlive || clsList[i].m_iLoginTime > clsList[iBest].m_iLoginTime ) {
             iBest = i;
@@ -204,6 +215,7 @@ bool CUserMap::Insert( CSipMessage *pclsMessage, CspUser *pclsXmlUser, bool bInt
         for ( const auto &clsParam : pclsMessage->m_clsContactList.front().m_clsParamList )
             strParams += ";" + clsParam.m_strName + ( clsParam.m_strValue.empty() ? "" : "=" + clsParam.m_strValue );
         clsInfo.m_bMcVideo = McVideoContactCapable( strParams );
+        clsInfo.m_bMcptt = McpttContactCapable( strParams );  // TS 24.379 §7.2.1
 
         // as-registered Contact URI·파라미터 보관 (200 OK 에코·reginfo <uri>/<unknown-param> 용)
         char szContactUri[256];
@@ -298,6 +310,7 @@ bool CUserMap::Insert( CSipMessage *pclsMessage, CspUser *pclsXmlUser, bool bInt
             clsBind.m_iLoginTimeout = clsInfo.m_iLoginTimeout;
             clsBind.m_bMcDataMsrp = clsInfo.m_bMcDataMsrp;
             clsBind.m_bMcVideo = clsInfo.m_bMcVideo;
+            clsBind.m_bMcptt = clsInfo.m_bMcptt;
             clsBind.m_bMediaSecSdes = clsInfo.m_bMediaSecSdes;
             if ( pclsIpsec ) {
                 // 같은 flow 의 재등록 — 재인증이면 새 SA 셋으로 결부가 바뀐다 (구 셋은 IpsecSaSet 이 retiring)
@@ -411,6 +424,21 @@ bool CUserMap::Select( const char *pszUserId, CUserInfo &clsInfo ) {
     }
     m_clsMutex.release();
 
+    return bRes;
+}
+
+bool CUserMap::SelectService( const char *pszUserId, EMcService eService, CUserInfo &clsInfo ) {
+    bool bRes = false;
+    m_clsMutex.acquire();
+    USER_MAP::iterator itMap = m_clsMap.find( pszUserId );
+    if ( itMap != m_clsMap.end() && !itMap->second.empty() ) {
+        const size_t iIdx = _pickBinding( itMap->second, NULL, &eService );
+        if ( iIdx != NO_BINDING ) {
+            clsInfo = itMap->second[iIdx];
+            bRes = true;
+        }
+    }
+    m_clsMutex.release();
     return bRes;
 }
 

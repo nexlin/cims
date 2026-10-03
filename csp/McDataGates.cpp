@@ -158,6 +158,8 @@ const char *McDataWarnText( int iWarn ) {
             return "user is not part of the MCData group";
         case 120:
             return "user is not affiliated to this group";
+        case 141:
+            return "user unknown to the participating function";
         case 142:
             return "unable to determine the controlling function";
         case 198:

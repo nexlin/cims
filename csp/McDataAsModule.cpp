@@ -12,6 +12,7 @@
 #include "Log.h"
 #include "McDataCodec.h"
 #include "McDataGates.h"
+#include "McServiceAuth.h"
 #include "McpttInfo.h"
 #include "ModuleDispatcher.h"
 #include "SipServerSetup.h"
@@ -72,6 +73,15 @@ bool CMcDataAsModule::OnMcDataMessage( const char *pszFrom, const char *pszTo, C
         CLog::Print( LOG_INFO, "McDataAs: MESSAGE from(%s) to group(%s) ct=%s — MCData 본문 없음 → 403 199", pszFrom,
                      pszTo, szContentType );
         _RejectWithWarning( pclsMessage, SIP_FORBIDDEN, 199, McDataWarnText( 199 ) );
+        iStatus = 0;
+        return true;
+    }
+
+    // 참여 기능 3) — 서비스 인가 바인딩(§7.3 — (MCData ID, client ID, IMPU))이 없으면 404 + 141 (§9.2.2.3.1 3) SDS ·
+    //   §10.2.4.3.1 3) FD). 바인딩은 서비스 인가(poc-settings PUBLISH §7.3.3 · REGISTER 본문 §7.3.2)가 세운다.
+    if ( !gclsMcServiceAuth.HasBinding( EMcService::McData, pszFrom ) ) {
+        CLog::Print( LOG_INFO, "McDataAs: MESSAGE from(%s) — 서비스 인가 바인딩 없음 → 404 141", pszFrom );
+        _RejectWithWarning( pclsMessage, SIP_NOT_FOUND, 141, McDataWarnText( 141 ) );
         iStatus = 0;
         return true;
     }

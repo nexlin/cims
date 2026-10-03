@@ -79,9 +79,11 @@ public:
      * @brief Invite a member to a group call
      * @param pszUserId User ID to invite
      * @param pszGroupId Group ID
+     * @param pstrWarning [out, 선택] 착신 참여 기능의 거절 Warning — Answer-Mode Indication 이 없는 클라이언트는
+     *        480 + 146 (TS 24.379 §10.1.1.3.2 3)). 게이트가 멤버 응답의 Warning 처럼 개시자에게 옮긴다
      * @return true if invitation initiated
      */
-    bool InviteMember( const char *pszUserId, const char *pszGroupId );
+    bool InviteMember( const char *pszUserId, const char *pszGroupId, std::string *pstrWarning = nullptr );
 
     /**
      * @brief Forcibly clear any stale active call entry for userId.
@@ -502,8 +504,10 @@ private:
      * 예약한다. */
     void QueueNonAckInfo( const std::string &strGroupId, const AckGate &clsGate );
     void SendDueNonAckInfo();
-    /** 멤버 초대 결과(200 또는 최종 거절 코드)를 게이트에 반영하고 판정한다. */
-    void AckGateMemberResult( const std::string &strGroupId, const std::string &strMemberId, int iSipStatus );
+    /** 멤버 초대 결과(200 또는 최종 거절 코드)를 게이트에 반영하고 판정한다. strWarning = 그 거절의 Warning 값(멤버
+     * 응답의 Warning 과 같이 개시자 응답에 옮긴다 — §6.3.3.2.3.2 7)). */
+    void AckGateMemberResult( const std::string &strGroupId, const std::string &strMemberId, int iSipStatus,
+                              const std::string &strWarning = "" );
     /** 게이트 판정 — 응답·중단·대기. m_mutex 밖에서 부른다. */
     void AckGateEvaluate( const std::string &strGroupId );
     /** TNG1 만료 검사 — MonitorLoop 1초 주기. */
