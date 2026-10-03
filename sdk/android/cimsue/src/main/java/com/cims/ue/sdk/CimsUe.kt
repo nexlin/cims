@@ -550,9 +550,23 @@ class Account internal constructor(private val ue: CimsUe, val id: Int) {
     suspend fun subscribeConference(groupId: String, on: Boolean): CimsResult<Unit> =
         ue.command { CimsResult.of(ue.jni.subscribeConference(id, groupId, on)) }
 
-    /** 문서 변경 구독(RFC 5875 xcap-diff) — 본문은 `message` 로 온다. */
+    /** 문서 변경 구독(RFC 5875 xcap-diff) — 본문 없는 구독(서버가 정한 고정 문서 — 옛 형식). 본문은 `message` 로 온다. */
     suspend fun subscribeXcapDiff(psiUri: String, on: Boolean): CimsResult<Unit> =
         ue.command { CimsResult.of(ue.jni.subscribeXcapDiff(id, psiUri, on)) }
+
+    /**
+     * 규격형 문서 변경 구독(TS 24.481 §6.3.13.2.1 · TS 24.484 §6.3.13.2.2) — Request-URI = [psiUri](GMS = [UeInitConfigDoc.gmsUri], CMS = 설정된
+     * CMS 구독 프록시 PSI), 본문 = 액세스 토큰 + 문서 목록([CscClient.gmsSubscriptionDocuments]·[CscClient.cmsSubscriptionDocuments]).
+     * 같은 PSI 로 다시 부르면 re-SUBSCRIBE(새 목록·새 토큰). 통지 `sel` = 구독한 문서. on=false 면 해지.
+     */
+    suspend fun subscribeXcapDiff(psiUri: String, documents: List<String>, accessToken: String, on: Boolean): CimsResult<Unit> =
+        ue.command {
+            val sub = com.cims.ue.sdk.jni.XcapDiffSubscription().also {
+                it.documents = com.cims.ue.sdk.jni.StringVector().apply { documents.forEach { d -> add(d) } }
+                it.accessToken = accessToken
+            }
+            CimsResult.of(ue.jni.subscribeXcapDiff(id, psiUri, sub, on))
+        }
 
     /** 임의 SIP 요청(MESSAGE/PUBLISH/SUBSCRIBE …). 반환 token 으로 `requestResult` 와 상관한다. */
     suspend fun sendRequest(method: String, targetUri: String, contentType: String, body: String,

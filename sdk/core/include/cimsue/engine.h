@@ -136,8 +136,17 @@ public:
     int64_t affiliate(int accountId, const std::string& groupId, bool on, McService service = McService::Mcptt);
     /** 그룹 로스터 구독(RFC 4575 conference, 엔진 패치 evsub) — 확인 신호는 onRoster NOTIFY. */
     Result subscribeConference(int accountId, const std::string& groupId, bool on);
-    /** 문서 변경 구독(RFC 5875 xcap-diff) — psiUri 예 sip:gms_psi@domain. 본문은 onMessage 로. */
+    /** 문서 변경 구독(RFC 5875 xcap-diff) — psiUri 예 sip:gms_psi@domain. 본문 없는 구독(서버가 정한 고정 문서 — 옛 형식).
+     *  NOTIFY 본문은 onMessage 로. */
     Result subscribeXcapDiff(int accountId, const std::string& psiUri, bool on);
+    /**
+     * 규격형 문서 변경 구독(TS 24.481 §6.3.13.2.1 · TS 24.484 §6.3.13.2.2 — RFC 5875 subscription proxy). Request-URI = psiUri(GMS =
+     * UE initial configuration `<GMS-URI>`, CMS = 설정된 CMS 구독 프록시 PSI), 본문 = mcptt-info `<mcptt-access-token>` + resource-lists
+     * (문서마다 `<entry uri>`), `P-Preferred-Service` = MCPTT ICSI, 구독 다이얼로그 Contact 에 MCPTT `g.3gpp.icsi-ref`. 같은 PSI 로 다시
+     * 부르면 re-SUBSCRIBE 다 — 문서 목록이 바뀌었으면 새 목록, 토큰이 바뀌었으면 새 토큰을 싣는다. 등록 유지가 다시 보낼 때도 마지막
+     * 본문을 싣는다. NOTIFY 의 `sel` = 구독한 문서 문자열. on=false 면 해지(Expires 0, 본문 없음).
+     */
+    Result subscribeXcapDiff(int accountId, const std::string& psiUri, const XcapDiffSubscription& sub, bool on);
     /** 임의 SIP 요청(MESSAGE/PUBLISH/SUBSCRIBE …). 반환 token. */
     int64_t sendRequest(int accountId, const std::string& method, const std::string& targetUri,
                         const std::string& contentType, const std::string& body,

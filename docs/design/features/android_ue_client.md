@@ -308,8 +308,11 @@ subtype 에서 비트를 걷어내 기본 타입으로 다루고(`FloorMessage.t
   - **미조인 채널 로스터**는 세션이 없으므로 `PttController.rosterMap`(→ `channelRosters` StateFlow)에 담아 목록/상세 화면이 소비한다. 참여 중인 채널은 세션 `participants` 와 같은 값이다. ⚠️"본인은 항상 접속"은 **참여 중일 때만** 적용한다 — 미조인 채널에 자신을 넣으면 참여하지도 않은 채널에 내가 있는 것으로 보인다.
   - ⚠️**멱등 필수**: 등록·제휴·조인이 각자 구독을 트리거하므로 가드가 없으면 같은 그룹에 SUBSCRIBE 가 동시에 두 번 나가 서버에 구독이 중복 생성된다(실측). native 의 `cims_conf_find` 가 URI 로 기존 구독을 찾아 in-dialog 갱신하지만, 첫 구독이 테이블에 등록되기 전 두 번째 호출이 들어오면 경합한다 → 앱이 1회만 발행한다. 단 그 가드는 **발행 후 확인까지의 창**에만 걸린다 — 확인(NOTIFY) 없이 `SUB_CONFIRM_TIMEOUT_MS`(15s) 가 지나면 재발행 대상으로 되돌린다. 단말은 **200 OK** 로 응답하고 본문은 `Account.onInstantMessage` → `SipController.incomingMessage`(contentType=`application/conference-info+xml`, fromUri=그룹 AoR=focus) 로 올라와 그룹 키로 세션을 찾아 반영한다. 구독 생성·**in-dialog 갱신**·종료·매칭 없는 NOTIFY 의 481 응답은 native pjsip evsub 이 담당하므로(빌드 패치 [2-13]) 앱은 "언제 어느 그룹을 구독할지"만 정한다 — `Account::sendRequest` 를 그대로 쓰기 때문에 **SWIG 인터페이스 변경이 없다**. ⚠️구독은 단발 트랜잭션이 아니어서 결과가 `sendReqResults` 로 오지 않는다(확인 신호 = NOTIFY 도착).
 - **설정 변경 push = XCAP 구독 2축(RFC 5875 xcap-diff)**: 등록 완료 시(그리고 60s 주기 루프의 재확인) 서버 PSI 두 곳으로
-  `SUBSCRIBE (Event: xcap-diff)` 각 1건 — `sip:gms_psi@<domain>`(편성)과 `sip:cms_psi@<domain>`
-  (사용자 프로파일·시스템 설정). `PttController.subscribeXcap(kind, on)` 하나가 두 축을 다루고
+  `SUBSCRIBE (Event: xcap-diff)` 각 1건 — GMS 구독 프록시(UE initial configuration `<GMS-URI>`, 없으면 `sip:gms_psi@<domain>` — 편성)와
+  `sip:cms_psi@<domain>`(사용자 프로파일·시스템 설정). **규격형 구독**(TS 24.481 §6.3.13.2.1 · TS 24.484 §6.3.13.2.2) — 본문에 액세스 토큰과
+  문서 목록(GMS = 편성 그룹마다 그룹 ID 문서, CMS = UE initial configuration·user profile·service configuration, MCVideo 를 쓰면 그 두 문서도)을
+  싣는다. 서버는 구독한 문서만 통지하므로 **편성 목록이 바뀌면 GMS 를 새 목록으로 re-SUBSCRIBE** 하고(`loadGroups`), user profile 통지가 오면
+  목록을 다시 받는다(새 그룹 소속은 GMS 가 아니라 user profile 변경으로 온다). 토큰이 아직 없으면 본문 없는 구독(옛 형식). `PttController.subscribeXcap(kind, on)` 하나가 두 축을 다루고
   확인/재확인 상태도 축별로 관리한다(`xcapConfirmedAt`/`xcapPendingAt` — 로스터 구독과 같은 규율:
   확인 신호는 그 축의 NOTIFY 도착, 15s 무확인이면 재발행, 10분마다 재확인). CSP 는 **SUBSCRIBE 의
   Request-URI** 로 축을 가르므로(`CscfModule` 의 gms/cms 판별) PSI 이름 자체가 계약이다.

@@ -341,10 +341,12 @@ data class UeInitConfigDoc(
     val mcvideoServerUri: String = "",
     /** on-network/Timers(초 → ms) → [AccountConfig.floorTimers]. */
     val floorTimers: FloorTimers = FloorTimers(),
+    /** on-network/GMS-URI — GMS 구독 프록시 PSI(TS 24.484 §7.2.2.7) = 규격형 그룹 문서 구독([Account.subscribeXcapDiff])의 Request-URI. */
+    val gmsUri: String = "",
 ) {
     internal companion object {
         fun of(d: JniUeInitConfigDoc) = UeInitConfigDoc(d.etag, d.domain, d.mcpttServerUri, d.mcdataServerUri, d.mcvideoServerUri,
-            FloorTimers.of(d.floorTimers))
+            FloorTimers.of(d.floorTimers), d.gmsUri)
     }
 }
 
@@ -675,6 +677,14 @@ class CscClient(
         /** XCAP 그룹 문서 경로. */
         fun groupPath(userUri: String, groupUri: String): String = JniCscClient.groupPath(userUri, groupUri)
         fun urlEncode(s: String): String = JniCscClient.enc(s)
+
+        /** 규격형 그룹 문서 구독의 문서 목록 — 그룹마다 그룹 ID 로 찾는 문서(XCAP root 기준 상대 경로, TS 24.481 §6.3.13.2.1 a)1)). */
+        fun gmsSubscriptionDocuments(groupUris: List<String>): List<String> =
+            JniCscClient.gmsSubscriptionDocuments(StringVector().apply { groupUris.forEach { add(it) } }).let { v -> List(v.size) { v[it] } }
+
+        /** 규격형 설정 문서 구독의 문서 목록 — UE initial configuration · user profile · service configuration(+ MCVideo 두 문서). */
+        fun cmsSubscriptionDocuments(userUri: String, mcsUeId: String, mcvideoId: String = ""): List<String> =
+            JniCscClient.cmsSubscriptionDocuments(userUri, mcsUeId, mcvideoId).let { v -> List(v.size) { v[it] } }
 
         /** /provisioning/me 응답 JSON → Profile (시험용). */
         fun parseProfile(json: String): Profile? {

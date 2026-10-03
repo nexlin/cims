@@ -32,6 +32,11 @@ std::string mcpttInfo(const std::string& sessionType, const std::string& request
                       int emergency = 0, int imminentPeril = 0, bool broadcast = false, int alert = 0);
 /** resource-lists (애드혹 멤버). uri 는 tel:/sip: URI. */
 std::string resourceLists(const std::vector<std::string>& memberUris);
+/** 규격형 문서 변경 구독의 문서 목록(RFC 5875 · TS 24.481 §6.3.13.2.1 a) · TS 24.484 §6.3.13.2.2 b)1)) — `<entry uri>` 마다 문서 하나
+ *  (XCAP root 기준 상대 경로). */
+std::string xcapDiffResourceLists(const std::vector<std::string>& documents);
+/** 같은 구독의 mcptt-info — `<mcptt-access-token>`(§6.3.13.2.1 c) · TS 24.484 §6.3.13.2.2 c) — 인증에서 받은 액세스 토큰). */
+std::string accessTokenInfo(const std::string& accessToken);
 /** affiliation-command (TS 24.379 §F.3). */
 std::string affiliationCommand(const std::string& groupUri, bool affiliate);
 /** 제휴 게시의 mcptt-info — `<mcptt-request-uri>` = 대상 MCPTT ID 만(TS 24.379 §9.2.1.2 2)). */

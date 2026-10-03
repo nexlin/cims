@@ -26,6 +26,8 @@
 //   cimsue-cli [계정 옵션] alert <groupId> [--cancel] [--originated-by ID] [--cancel-group-emergency]   (긴급 경보 MESSAGE, §12.1.1.1·§12.1.1.2)
 //   cimsue-cli [계정 옵션] sds <groupId> <text> [--wait-disposition S]   (MESSAGE 최종 응답까지 대기 — --cplane-max N 을 넘으면 MSRP, 결과
 //              plane=media. --wait-disposition = 그 메시지의 전달 확인 통지(TS 24.282 §12.2.1.2)를 S 초까지 기다린다)
+//   cimsue-cli [계정 옵션] xcap-watch <그룹,…> [--duration S]   (규격형 xcap-diff 구독 — GMS = 그 그룹들, CMS = 내 설정 문서, 통지 sel 을
+//              JSON 줄로. TS 24.481 §6.3.13.2.1 · TS 24.484 §6.3.13.2.2, --from-profile ptt 필요)
 //   cimsue-cli [계정 옵션] sds-recv [--duration S] [--notify-delivered]   (수신 SDS 를 JSON 줄로 출력 — --notify-delivered = 전달 확인을
 //              요청한 SDS 에 DELIVERED 통지, §12.2.1.1. 계정에 MCData PSI 가 있으면 규격형)
 //   cimsue-cli [계정 옵션] dialog-watch <aor> [--duration S]      (RFC 4235 NOTIFY 를 JSON 줄로)
@@ -259,7 +261,7 @@ bool parse(int argc, char** argv, Opts& o) {
     if (pos.empty()) return false;
     o.cmd = pos[0];
     static const char* needTarget[] = {"call", "group-call", "video-call", "alert", "dialog-watch", "join", "transfer", "group-get", "group-info",
-                                       "group-put", "group-delete", "link"};
+                                       "group-put", "group-delete", "link", "xcap-watch"};
     for (auto n : needTarget) if (o.cmd == n) { if (pos.size() < 2) return false; o.target = pos[1]; }
     if (o.cmd == "sds") { if (pos.size() < 3) return false; o.target = pos[1]; for (size_t i = 2; i < pos.size(); ++i) o.text += (i > 2 ? " " : "") + pos[i]; }
     if (o.cmd == "pickup") { if (pos.size() >= 2) o.target = pos[1]; if (o.code.empty()) return false; }
@@ -267,13 +269,15 @@ bool parse(int argc, char** argv, Opts& o) {
     if (o.cmd == "transfer" && o.transferTo.empty()) return false;
     static const char* known[] = {"register", "call", "answer", "group-call", "video-call", "video-answer", "alert", "sds", "sds-recv", "login",
                                   "dialog-watch", "join", "pickup", "transfer", "groups", "group-get", "group-info", "group-put", "group-delete", "drive",
-                                  "link"};
+                                  "link", "xcap-watch"};
     bool ok = false;
     for (auto k : known) if (o.cmd == k) ok = true;
     return ok;
 }
 
 /** 상태를 모아 조건 대기하는 리스너 — 이벤트 스레드가 쓰고 main 이 기다린다. */
+std::string jsonEsc(const std::string& s);
+
 class CliListener : public Listener {
 public:
     CliListener(int logLevel, bool json) : logLevel_(logLevel), json_(json) {}
@@ -388,7 +392,20 @@ public:
     }
     void onMessage(int, const std::string& from, const std::string& ct, const std::string& body) override {
         std::fprintf(stderr, "[cimsue-cli] message from=%s ct=%s len=%zu\n", from.c_str(), ct.c_str(), body.size());
+        if (ct.find("xcap-diff") == std::string::npos) return;
+        // 문서 변경 통지(RFC 5875) — sel 마다(xcap-watch)
+        std::string sels;
+        for (size_t p = body.find("sel=\""); p != std::string::npos; p = body.find("sel=\"", p + 5)) {
+            size_t q = body.find('"', p + 5);
+            if (q == std::string::npos) break;
+            sels += std::string(sels.empty() ? "" : ",") + "\"" + jsonEsc(body.substr(p + 5, q - p - 5)) + "\"";
+        }
+        std::lock_guard<std::mutex> lk(m_);
+        xcapNotifies++;
+        if (json_) std::printf("{\"event\":\"xcap-diff\",\"from\":\"%s\",\"sel\":[%s]}\n", jsonEsc(from).c_str(), sels.c_str());
+        std::fflush(stdout);
     }
+    int xcapNotifies = 0;
 
     template <typename Pred>
     bool waitFor(Pred p, int timeoutSec) {
@@ -646,11 +663,13 @@ int main(int argc, char** argv) {
     // ── CSC 로그인 / 프로파일 (login 명령 또는 --from-profile) ──
     const bool groupCmd = o.cmd == "groups" || o.cmd == "group-get" || o.cmd == "group-info" || o.cmd == "group-put" ||
                           o.cmd == "group-delete";
+    std::string loginToken, gmsPsi;                                  // xcap-watch — 로그인 토큰·GMS 구독 프록시 PSI(ue-init-config <GMS-URI>)
     if (o.cmd == "login" || groupCmd || !o.fromProfile.empty()) {
         if (o.cscHost.empty() || o.user.empty()) { std::fprintf(stderr, "need --csc-host --user --pw\n"); return 2; }
         Profile prof; TokenSet tok;
         int rc = cscLogin(o, prof, tok);
         if (rc) return rc;
+        loginToken = tok.accessToken;
         if (groupCmd) {
             // GMS 그룹 관리(TS 24.481 XCAP) — 자기 트리(ptt 서비스 mcptt_id)에서 목록/문서/PUT/DELETE. 출력은 JSON 한 줄.
             const ServiceProfile* ptt = prof.service("ptt");
@@ -742,6 +761,7 @@ int main(int argc, char** argv) {
             if (ur.ok) {
                 a.mcpttServerUri = ui.mcpttServerUri; a.mcdataServerUri = ui.mcdataServerUri; a.mcvideoServerUri = ui.mcvideoServerUri;
                 a.floorTimers = ui.floorTimers;                   // 발언권 참여자 타이머(<Timers>, TS 24.484 §7.2.2.7)
+                gmsPsi = ui.gmsUri;
             }
             else std::fprintf(stderr, "[cimsue-cli] ue-init-config: %s\n", ur.reason.c_str());
         }
@@ -1084,6 +1104,29 @@ int main(int argc, char** argv) {
             s.extra += ",\"disposition\":" + std::to_string(notif);
             if (!notif) { s.outcome = "no_disposition"; rc = 7; }
         }
+        return finish(-1);
+    }
+
+    if (o.cmd == "xcap-watch") {
+        // 규격형 문서 변경 구독(TS 24.481 §6.3.13.2.1 · TS 24.484 §6.3.13.2.2) — GMS = target 의 그룹들(쉼표), CMS = 내 설정 문서.
+        //   통지 sel 을 JSON 줄로. --from-profile ptt 로 로그인해야 토큰이 있다.
+        if (loginToken.empty()) { s.outcome = "no_token"; rc = 2; return finish(-1); }
+        std::vector<std::string> groups;
+        { std::stringstream ss(o.target); std::string g; while (std::getline(ss, g, ',')) if (!g.empty()) groups.push_back(g.rfind("tel:", 0) == 0 ? g : "tel:" + g); }
+        XcapDiffSubscription gms, cms;
+        gms.documents = CscClient::gmsSubscriptionDocuments(groups);
+        gms.accessToken = cms.accessToken = loginToken;
+        cms.documents = CscClient::cmsSubscriptionDocuments(o.acc.effectiveMcpttId(), o.acc.instanceId);
+        const std::string gpsi = gmsPsi.empty() ? "sip:gms_psi@" + o.acc.domain : gmsPsi;
+        const std::string cpsi = "sip:cms_psi@" + o.acc.domain;                // CMS 구독 프록시 PSI 는 설정값(TS 24.484 §6.3.13.3.1)
+        Result g1 = eng.subscribeXcapDiff(acc, gpsi, gms, true), c1 = eng.subscribeXcapDiff(acc, cpsi, cms, true);
+        std::fprintf(stderr, "[cimsue-cli] xcap-watch gms=%s(%zu docs %s) cms=%s(%zu docs %s)\n", gpsi.c_str(), gms.documents.size(),
+                     g1.ok ? "ok" : g1.reason.c_str(), cpsi.c_str(), cms.documents.size(), c1.ok ? "ok" : c1.reason.c_str());
+        ls.waitFor([&] { return false; }, o.durationSec);
+        eng.subscribeXcapDiff(acc, gpsi, gms, false);
+        eng.subscribeXcapDiff(acc, cpsi, cms, false);
+        s.extra = ",\"xcap_notifies\":" + std::to_string(ls.xcapNotifies);
+        if (!ls.xcapNotifies) { s.outcome = "no_notify"; rc = 8; }
         return finish(-1);
     }
 

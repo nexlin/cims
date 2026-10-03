@@ -163,6 +163,7 @@ bool UeInitConfigDoc::parse(const std::string& xml, UeInitConfigDoc& out, std::s
         if (mcdata.found) d.mcdataServerUri = elemText(mcdata.inner, "Server-URI");
         Elem mcvideo = elem(on.inner, "MCVideo-Service-Details");
         if (mcvideo.found) d.mcvideoServerUri = elemText(mcvideo.inner, "Server-URI");
+        d.gmsUri = elemText(on.inner, "GMS-URI");
         // 발언권 참여자 타이머(초, unsignedByte 0~255 — §7.2.2.7, TS 24.380 표 11.1.1-1). 0·없음 = 기본값.
         Elem t = elem(on.inner, "Timers");
         if (t.found) {

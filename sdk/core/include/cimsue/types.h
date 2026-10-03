@@ -235,6 +235,13 @@ struct GroupCallOptions {
     CommencementMode commencement = CommencementMode::Unspecified;
 };
 
+/** 규격형 문서 변경 구독(RFC 5875 subscription proxy — TS 24.481 §6.3.13.2.1 · TS 24.484 §6.3.13.2.2)의 본문. documents = 구독할 문서
+ *  (XCAP root 기준 상대 경로 — CscClient::gmsSubscriptionDocuments·cmsSubscriptionDocuments), accessToken = 인증에서 받은 액세스 토큰. */
+struct XcapDiffSubscription {
+    std::vector<std::string> documents;
+    std::string accessToken;
+};
+
 /** MCVideo 그룹 호 개시·합류 옵션(TS 24.281 §9.2.1 prearranged · §9.2.2 chat, 제어 채널 fmtp = TS 24.581 §14.2). */
 struct VideoGroupCallOptions {
     /** 호 종류 — mcvideo-info session-type. 그룹 문서 `mcvideo-on-network-invite-members` 와 맞아야 한다(true = prearranged만,

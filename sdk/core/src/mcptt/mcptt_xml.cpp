@@ -78,6 +78,22 @@ std::string resourceLists(const std::vector<std::string>& members) {
     return s;
 }
 
+std::string xcapDiffResourceLists(const std::vector<std::string>& documents) {
+    std::string s = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n";
+    s += std::string("<resource-lists xmlns=\"") + kNsResourceLists + "\">\n  <list>\n";
+    for (auto& d : documents) s += "    <entry uri=\"" + xmlEscape(d) + "\"/>\n";
+    s += "  </list>\n</resource-lists>\n";
+    return s;
+}
+
+std::string accessTokenInfo(const std::string& accessToken) {
+    std::string s = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n";
+    s += std::string("<mcpttinfo xmlns=\"") + kNsMcpttInfo + "\">\n  <mcptt-Params>\n";
+    s += infoString("mcptt-access-token", accessToken);
+    s += "  </mcptt-Params>\n</mcpttinfo>\n";
+    return s;
+}
+
 std::string affiliationCommand(const std::string& groupUri, bool affiliate) {
     std::string s = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n";
     s += std::string("<affiliation-command xmlns=\"") + kNsAffiliation + "\">\n  <actions>\n";

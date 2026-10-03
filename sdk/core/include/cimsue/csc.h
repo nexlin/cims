@@ -250,6 +250,7 @@ struct UeInitConfigDoc {
     std::string mcpttServerUri;                // MCPTT-Service-Details/Server-URI — 참여 MCPTT 기능 PSI
     std::string mcdataServerUri;               // MCData-Service-Details/Server-URI — 참여 MCData 기능 PSI
     std::string mcvideoServerUri;              // MCVideo-Service-Details/Server-URI — 참여 MCVideo 기능 PSI(AccountConfig.mcvideoServerUri)
+    std::string gmsUri;                        // on-network/GMS-URI — GMS 구독 프록시 PSI(§7.2.2.7 5)) = 규격형 그룹 문서 구독의 Request-URI
     /** on-network/Timers — T100·T101·T103·T104·T132(초 → ms, TS 24.484 §7.2.2.7). 없는 요소는 0(기본값) → AccountConfig.floorTimers. */
     FloorTimers floorTimers;
     CIMSUE_API static bool parse(const std::string& xml, UeInitConfigDoc& out, std::string* err = nullptr);
@@ -413,6 +414,33 @@ public:
     Result putGroup(const std::string& accessToken, const std::string& userUri, const GroupDoc& doc, const std::string& ifMatch, GroupDoc& out);
     /** 그룹 삭제 — 본인 소유만(403). */
     Result deleteGroup(const std::string& accessToken, const std::string& userUri, const std::string& groupUri);
+    /** MCPTT user profile 문서 경로(TS 24.484 §8.3.1A — `/org.3gpp.mcptt.user-profile/users/<XUI>/mcptt-user-profile-1.xml`). */
+    static std::string userProfileDocPath(const std::string& userUri) {
+        return "/org.3gpp.mcptt.user-profile/users/" + enc(userUri) + "/mcptt-user-profile-1.xml";
+    }
+    /** MCPTT service configuration 문서 경로(§8.4.2.9 — 전역 문서 `/org.3gpp.mcptt.service-config/global/service-config.xml`). */
+    static std::string serviceConfigDocPath() { return "/org.3gpp.mcptt.service-config/global/service-config.xml"; }
+    /** 규격형 문서 변경 구독(Engine::subscribeXcapDiff — XcapDiffSubscription.documents)의 문서 목록 — XCAP root 기준 상대 경로
+     *  (RFC 5875 · TS 24.481 §6.3.13.2.1 a)1)). GMS = 그룹마다 그룹 ID 로 찾는 문서(§7.2.10.2). */
+    static std::vector<std::string> gmsSubscriptionDocuments(const std::vector<std::string>& groupUris) {
+        std::vector<std::string> v;
+        for (const auto& g : groupUris) v.push_back(groupByIdPath(g).substr(1));
+        return v;
+    }
+    /** CMS = UE initial configuration · MCPTT user profile · MCPTT service configuration(TS 24.484 §6.2.2 «enabled MCS 마다»),
+     *  mcvideoId 가 있으면 MCVideo user profile · service configuration 도. mcsUeId 가 비면 UE initial configuration 은 뺀다. */
+    static std::vector<std::string> cmsSubscriptionDocuments(const std::string& userUri, const std::string& mcsUeId,
+                                                             const std::string& mcvideoId = std::string()) {
+        std::vector<std::string> v;
+        if (!mcsUeId.empty()) v.push_back(ueInitConfigPath(mcsUeId).substr(1));
+        v.push_back(userProfileDocPath(userUri).substr(1));
+        v.push_back(serviceConfigDocPath().substr(1));
+        if (!mcvideoId.empty()) {
+            v.push_back(mcvideoUserProfilePath(mcvideoId).substr(1));
+            v.push_back(mcvideoServiceConfigPath().substr(1));
+        }
+        return v;
+    }
     /** 그룹 ID 로 찾는 그룹 문서 경로(/org.openmobilealliance.groups/global/byGroupID/{group} — TS 24.481 §7.2.10.2). 읽기 주소. */
     static std::string groupByIdPath(const std::string& groupUri) {
         return "/org.openmobilealliance.groups/global/byGroupID/" + enc(groupUri);

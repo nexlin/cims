@@ -269,6 +269,14 @@ C++ 공개 표면은 `cimsue/engine.h` 의 `Engine` 하나이며 계정·호를 
   처음 잡히는 망을 변화로 본다).
 - **등록에 묶인 것의 유지는 코어가 한다**(게시 갱신 = EPA 의 일 RFC 3903 §4.1 · 구독 갱신 = 구독자의 일 RFC 6665 §4.1.2.2).
   앱은 **목표 집합**만 준다 — `affiliate(on/off)`·`subscribeConference`·`subscribeXcapDiff`·`dialogWatch` 의 on/off 가 집합 변경이다.
+  **문서 변경 구독은 규격형**(TS 24.481 §6.3.13.2.1 · TS 24.484 §6.3.13.2.2) — `subscribeXcapDiff(account, psi, {documents, accessToken}, on)`:
+  Request-URI = 구독 프록시 PSI(GMS = UE initial configuration `<GMS-URI>` — `UeInitConfigDoc.gmsUri`, CMS = 설정값 `sip:cms_psi@<도메인>`),
+  본문 = mcptt-info `<mcptt-access-token>` + resource-lists(문서마다 `<entry uri>` — XCAP root 기준 상대 경로,
+  `CscClient::gmsSubscriptionDocuments(그룹들)` · `cmsSubscriptionDocuments(MCPTT ID, MCS UE ID, MCVideo ID)`), `P-Preferred-Service` = MCPTT ICSI,
+  구독 다이얼로그 Contact 에 MCPTT `g.3gpp.icsi-ref`. 같은 PSI 로 다시 부르면 같은 다이얼로그의 re-SUBSCRIBE(새 목록·새 토큰), 유지가 다시 보낼
+  때도 마지막 본문을 싣는다. 통지의 `sel` = 구독한 문서 — GMS 는 **구독한 그룹 문서만** 통지하므로 새 그룹 소속은 CMS user profile 변경으로
+  알고 목록을 다시 받아 re-SUBSCRIBE 한다. 본문 없는 `subscribeXcapDiff(account, psi, on)` 은 서버가 정한 고정 문서를 받는 옛 형식(전환기).
+  엔진(`ext/pjproject` 구독 경로)이 앱이 실은 헤더·본문을 구독 요청에 옮긴다. `cimsue-cli xcap-watch <그룹,…>`.
   코어(`src/upkeep.h` `detail::Upkeep`)는 켠 것을 들고 세 계기에 다시 싣는다: ① 등록이 끊겼다 다시 섰다(등록 **이벤트** 기준 —
   `onRegState` 는 REGISTER 응답마다 온다) ② `handleNetworkChange` 뒤 첫 등록 성공(상태는 줄곧 «등록됨» 으로만 보여도 서버 바인딩은
   새것일 수 있다) ③ 부여된 수명의 절반(1분 틱 — 응답 `Expires`, 없으면 요청값 3600. 만료 없는 부여 2^32-1 은 갱신하지 않는다).

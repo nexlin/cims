@@ -2858,10 +2858,50 @@ static pjsip_evsub_user cims_conf_cb =
  *  expires == PJSIP_EXPIRES_NOT_SPECIFIED : 패키지 기본값 사용
  *  ev == NULL                         : conference (하위호환 기본값)
  */
+/* CIMS: 앱이 실은 msg_data 를 구독 요청에 옮긴다 — Event·Expires 는 evsub 가 이미 넣었고(같은 값), Contact 는 다이얼로그의
+ * Contact 다(새 구독일 때 cims_msg_contact 로 따로 읽는다). 나머지 헤더(P-Preferred-Service 등)와 본문(규격형 구독의
+ * resource-lists·mcptt-info multipart — TS 24.481 §6.3.13.2.1 · TS 24.484 §6.3.13.2.2)을 싣는다.
+ */
+static void cims_apply_msg_data(pjsip_tx_data *tdata, const pjsua_msg_data *msg_data)
+{
+    pjsua_msg_data md;
+    const pjsip_hdr *h;
+
+    if (!msg_data) {
+        pjsua_process_msg_data(tdata, NULL);
+        return;
+    }
+    md = *msg_data;
+    pj_list_init(&md.hdr_list);
+    for (h = msg_data->hdr_list.next; h != &msg_data->hdr_list; h = h->next) {
+        if (pj_stricmp2(&h->name, "Event") == 0 || pj_stricmp2(&h->name, "Expires") == 0 ||
+            pj_stricmp2(&h->name, "Contact") == 0)
+            continue;
+        pj_list_push_back(&md.hdr_list, pjsip_hdr_clone(tdata->pool, h));
+    }
+    pjsua_process_msg_data(tdata, &md);
+}
+
+/* CIMS: msg_data 의 Contact 헤더 값(새 구독 다이얼로그의 Contact — 예: 서비스 특성 태그를 붙인 계정 Contact). 없으면 slen 0. */
+static pj_str_t cims_msg_contact(const pjsua_msg_data *msg_data)
+{
+    pj_str_t none = { NULL, 0 };
+    const pjsip_hdr *h;
+
+    if (!msg_data)
+        return none;
+    for (h = msg_data->hdr_list.next; h != &msg_data->hdr_list; h = h->next) {
+        if (pj_stricmp2(&h->name, "Contact") == 0 && h->type == PJSIP_H_OTHER)
+            return ((const pjsip_generic_string_hdr*)h)->hvalue;
+    }
+    return none;
+}
+
 pj_status_t pjsua_cims_conf_subscribe(pjsua_acc_id acc_id,
                                       const pj_str_t *target,
                                       const pj_str_t *ev,
-                                      pj_uint32_t expires)
+                                      pj_uint32_t expires,
+                                      const pjsua_msg_data *msg_data)
 {
     pjsua_acc *acc;
     cims_conf_sub *cs;
@@ -2899,7 +2939,8 @@ pj_status_t pjsua_cims_conf_subscribe(pjsua_acc_id acc_id,
         pjsip_dlg_inc_lock(cdlg);
         status = pjsip_evsub_initiate(csub, NULL, expires, &tdata);
         if (status == PJ_SUCCESS) {
-            pjsua_process_msg_data(tdata, NULL);
+            /* 갱신·해지도 같은 본문을 싣는다 — 문서 목록이 바뀌었으면 그것이 re-SUBSCRIBE 의 새 목록이다(§6.3.13.2.1) */
+            cims_apply_msg_data(tdata, expires == 0 ? NULL : msg_data);
             status = pjsip_evsub_send_request(csub, tdata);
         }
         pjsip_dlg_dec_lock(cdlg);
@@ -2936,8 +2977,11 @@ pj_status_t pjsua_cims_conf_subscribe(pjsua_acc_id acc_id,
               (int)target->slen, target->ptr));
     pj_log_push_indent();
 
-    /* Contact — 계정에 이미 있으면 그것을 쓴다(MWI 와 동일) */
-    if (acc->contact.slen) {
+    /* Contact — 앱이 실었으면 그것(서비스 특성 태그를 붙인 계정 Contact), 아니면 계정에 이미 있는 것(MWI 와 동일) */
+    contact = cims_msg_contact(msg_data);
+    if (contact.slen) {
+        /* 그대로 쓴다 */
+    } else if (acc->contact.slen) {
         contact = acc->contact;
     } else {
         tmp_pool = pjsua_pool_create("tmpconf", 512, 256);
@@ -3022,7 +3066,7 @@ pj_status_t pjsua_cims_conf_subscribe(pjsua_acc_id acc_id,
         goto on_return;
     }
 
-    pjsua_process_msg_data(tdata, NULL);
+    cims_apply_msg_data(tdata, msg_data);
 
     status = pjsip_evsub_send_request(sub, tdata);
     if (status != PJ_SUCCESS) {

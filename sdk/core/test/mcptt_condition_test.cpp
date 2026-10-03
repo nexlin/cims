@@ -21,6 +21,7 @@
 
 #include "../src/mcptt/mcptt_xml.h"
 #include "cimsue/cimsue.h"
+#include "cimsue/csc.h"
 #include "pj_scope.h"
 
 using namespace cimsue;
@@ -589,6 +590,86 @@ TEST(McpttXml, SpeechInfoLine) {
     EXPECT_EQ(fixed.find("i=speech", fixed.find("m=application")), std::string::npos);   // 제어 채널에는 넣지 않는다
     const std::string volte = "v=0\r\nm=audio 4000 RTP/AVP 96\r\na=rtpmap:96 AMR-WB/16000\r\n";
     EXPECT_EQ(mcptt::withSpeechInfo(volte), volte);                                   // MCPTT 호가 아니면 그대로(일반 전화)
+}
+
+// 규격형 문서 변경 구독(TS 24.481 §6.3.13.2.1 · TS 24.484 §6.3.13.2.2) — Request-URI = PSI, 본문 = mcptt-info 액세스 토큰 + resource-lists,
+//   P-Preferred-Service, 다이얼로그 Contact 의 MCPTT icsi-ref, Event·Expires 는 한 번씩. 다시 부르면 같은 다이얼로그의 re-SUBSCRIBE 가 새 목록을 싣는다
+static int countHeaderLines(const std::string& msg, const std::string& name) {
+    int n = 0;
+    for (size_t p = msg.find("\r\n" + name + ":"); p != std::string::npos; p = msg.find("\r\n" + name + ":", p + 2)) ++n;
+    return n;
+}
+TEST(McpttXcapDiff, StandardSubscriptionBodyAndResubscribe) {
+    Engine eng;
+    CondListener l;
+    EngineConfig cfg;
+    cfg.logLevel = std::getenv("COND_LOG") ? 5 : 0;
+    cfg.nullAudioDevice = true;
+    ASSERT_TRUE(eng.start(cfg, &l).ok);
+    {
+        cimsue_test::PjScope pj("xcap-test");
+        FakeServer srv;
+        AccountConfig ac;
+        ac.serverHost = "127.0.0.1"; ac.serverPort = srv.port; ac.transport = Transport::UDP;
+        ac.domain = "ptt.test"; ac.msisdn = "+82500000001"; ac.authId = "450000000000001@ptt.test"; ac.password = "x";
+        int acc = eng.addAccount(ac);
+        ASSERT_GE(acc, 0);
+
+        XcapDiffSubscription sub;
+        sub.documents = CscClient::gmsSubscriptionDocuments({"tel:g001", "tel:g-0a1b2c3d"});
+        sub.accessToken = "eyJ.tok.1";
+        ASSERT_TRUE(eng.subscribeXcapDiff(acc, "sip:gms_psi@ptt.test", sub, true).ok);
+        std::string s1 = srv.recv("SUBSCRIBE ");
+        ASSERT_FALSE(s1.empty());
+        EXPECT_EQ(s1.substr(0, s1.find("\r\n")), "SUBSCRIBE sip:gms_psi@ptt.test SIP/2.0");         // b) 구독 프록시 PSI
+        EXPECT_EQ(headerOf(s1, "Event"), "xcap-diff");
+        EXPECT_EQ(countHeaderLines(s1, "Event"), 1) << s1;                                            // evsub 가 넣은 것 하나
+        EXPECT_EQ(countHeaderLines(s1, "Expires"), 1) << s1;
+        EXPECT_EQ(countHeaderLines(s1, "Contact"), 1) << s1;
+        EXPECT_EQ(headerOf(s1, "P-Preferred-Service"), "urn:urn-7:3gpp-service.ims.icsi.mcptt");      // e)
+        EXPECT_NE(headerOf(s1, "Contact").find("+g.3gpp.icsi-ref=\"urn%3Aurn-7%3A3gpp-service.ims.icsi.mcptt\""), std::string::npos)
+            << headerOf(s1, "Contact");                                                               // f)
+        EXPECT_EQ(headerOf(s1, "Content-Type").rfind("multipart/mixed;boundary=", 0), 0u) << headerOf(s1, "Content-Type");
+        EXPECT_NE(s1.find("<mcptt-access-token type=\"Normal\"><mcpttString>eyJ.tok.1</mcpttString></mcptt-access-token>"),
+                  std::string::npos);                                                                 // c)
+        EXPECT_NE(s1.find("<entry uri=\"org.openmobilealliance.groups/global/byGroupID/tel%3Ag001\"/>"), std::string::npos) << s1;   // a)
+        EXPECT_NE(s1.find("byGroupID/tel%3Ag-0a1b2c3d\"/>"), std::string::npos);
+        const size_t hb = s1.find("\r\n\r\n");
+        EXPECT_EQ((size_t)std::atoi(headerOf(s1, "Content-Length").c_str()), s1.size() - (hb + 4));
+        srv.reply(s1, 200, "OK", "", "", "Expires: 3600\r\n");
+        std::this_thread::sleep_for(std::chrono::milliseconds(300));                       // 스택이 200 으로 다이얼로그를 세운다
+
+        // 문서 목록이 바뀌었다 — 같은 다이얼로그(Call-ID)의 re-SUBSCRIBE 가 새 목록·새 토큰을 싣는다(§6.3.13.2.1 «re-subscribe … modified list»)
+        sub.documents = CscClient::gmsSubscriptionDocuments({"tel:g001"});
+        sub.accessToken = "eyJ.tok.2";
+        ASSERT_TRUE(eng.subscribeXcapDiff(acc, "sip:gms_psi@ptt.test", sub, true).ok);
+        std::string s2 = srv.recv("SUBSCRIBE ");
+        ASSERT_FALSE(s2.empty());
+        EXPECT_EQ(headerOf(s2, "Call-ID"), headerOf(s1, "Call-ID"));
+        EXPECT_NE(headerOf(s2, "To").find("tag=srv"), std::string::npos);
+        EXPECT_EQ(countHeaderLines(s2, "Event"), 1) << s2;
+        EXPECT_NE(s2.find("eyJ.tok.2"), std::string::npos);
+        EXPECT_EQ(s2.find("g-0a1b2c3d"), std::string::npos);
+        srv.reply(s2, 200, "OK", "", "", "Expires: 3600\r\n");
+
+        // 해지 — Expires 0, 본문 없음
+        ASSERT_TRUE(eng.subscribeXcapDiff(acc, "sip:gms_psi@ptt.test", sub, false).ok);
+        std::string s3 = srv.recv("SUBSCRIBE ");
+        ASSERT_FALSE(s3.empty());
+        EXPECT_EQ(headerOf(s3, "Expires"), "0");
+        EXPECT_EQ(headerOf(s3, "Content-Type"), "");
+        srv.reply(s3, 200, "OK", "", "", "Expires: 0\r\n");
+
+        // 본문 없는 구독(옛 형식) — 그대로
+        ASSERT_TRUE(eng.subscribeXcapDiff(acc, "sip:cms_psi@ptt.test", true).ok);
+        std::string s4 = srv.recv("SUBSCRIBE ");
+        ASSERT_FALSE(s4.empty());
+        EXPECT_EQ(headerOf(s4, "Content-Type"), "");
+        EXPECT_EQ(headerOf(s4, "P-Preferred-Service"), "");
+        srv.reply(s4, 200, "OK", "", "", "Expires: 3600\r\n");
+        EXPECT_FALSE(eng.subscribeXcapDiff(acc, "sip:gms_psi@ptt.test", XcapDiffSubscription(), true).ok);   // 문서 없음
+    }
+    eng.stop();
 }
 
 TEST(McpttXml, AlertBuildAndParse) {

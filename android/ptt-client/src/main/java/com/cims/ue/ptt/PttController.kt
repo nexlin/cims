@@ -417,6 +417,10 @@ class PttController(
     internal val messaging = MessagingPlane(this)
     internal val emergencyPlane = EmergencyPlane(this)
     internal val videoPlane = VideoPlane(this, context)
+    /** GMS 구독 프록시 PSI — UE initial configuration `<GMS-URI>`(TS 24.484 §7.2.2.7). 비면 `sip:gms_psi@<도메인>`. */
+    @Volatile internal var gmsPsi: String = ""
+    /** MCS UE ID(= instance ID) — UE initial configuration 문서 이름(규격형 cms 구독 목록). */
+    internal val mcsUeId: String get() = instanceId.orEmpty()
 
     init {
         // 번호 로컬 표기(+82→0…)용 홈 국가코드 — 프로비저닝 countryCode 우선, 내 msisdn 유도 폴백
@@ -486,6 +490,7 @@ class PttController(
         //   (경보 = 그룹 URI, disposition 통지 = 원 발신자 직행 — 코어 전환기 경로).
         val ueInit = instanceId?.takeIf { it.isNotEmpty() }?.let { id -> csc?.fetchUeInitConfig(id)?.getOrNull() }
         videoPlane.setServer(ueInit?.mcvideoServerUri.orEmpty())
+        gmsPsi = ueInit?.gmsUri.orEmpty()
         val acc = ue.addAccount(accountConfig(ueInit)).getOrNull()
             ?: run { _reg.value = RegState.Failed("addAccount"); return@launch }
         account = acc

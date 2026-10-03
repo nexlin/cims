@@ -1612,11 +1612,13 @@ static void on_send_request(void *request_data, pjsip_event *event)
         (pjsua_var.ua_cfg.cb.on_acc_send_request)(data->acc_id, data->token, event);
 }
 
-/* CIMS: 이벤트 구독 (구현 = pjsua_pres.c) */
+/* CIMS: 이벤트 구독 (구현 = pjsua_pres.c) — msg_data 는 앱이 실은 헤더·본문(Event·Expires 는 evsub 가 넣으므로 빼고,
+ * Contact 는 새 구독 다이얼로그의 Contact 로 쓴다). NULL 이면 본문 없는 구독. */
 pj_status_t pjsua_cims_conf_subscribe(pjsua_acc_id acc_id,
                                       const pj_str_t *target,
                                       const pj_str_t *ev,
-                                      pj_uint32_t expires);
+                                      pj_uint32_t expires,
+                                      const pjsua_msg_data *msg_data);
 
 /* CIMS: 앱이 보낸 SUBSCRIBE 가 우리가 다루는 이벤트면 evsub 기반 구독으로 넘긴다.
  *   conference (RFC 4575) — 그룹 참가자 로스터
@@ -1678,7 +1680,7 @@ static pj_bool_t cims_intercept_subscribe(pjsua_acc_id acc_id,
     if (!ev)
         return PJ_FALSE;
 
-    *p_status = pjsua_cims_conf_subscribe(acc_id, dest_uri, ev, expires);
+    *p_status = pjsua_cims_conf_subscribe(acc_id, dest_uri, ev, expires, msg_data);
     return PJ_TRUE;
 }
 

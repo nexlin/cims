@@ -16,6 +16,7 @@ import com.cims.ue.ptt.csc.GroupDoc
 import com.cims.ue.ptt.csc.GroupSummary
 import com.cims.ue.sdk.FloorState
 import com.cims.ue.sdk.CallInfo
+import com.cims.ue.sdk.CscClient
 import com.cims.ue.sdk.GroupCallOptions
 import com.cims.ue.sdk.RequestResult
 import com.cims.ue.sdk.RosterUpdate
@@ -396,10 +397,12 @@ internal class GroupPlane(private val c: PttController) {
 
     /** 축마다 서버 PSI 하나에 대한 단일 구독 — [XCAP_GMS]=편성, [XCAP_CMS]=사용자 프로파일·시스템 설정.
      *  멱등·재확인 규율은 로스터 구독과 같다. 확인 신호는 **그 축의 NOTIFY 도착**. */
-    fun subscribeXcap(kind: String, on: Boolean) {
+    fun subscribeXcap(kind: String, on: Boolean, force: Boolean = false) {
         val now = SystemClock.elapsedRealtime()
         synchronized(c.lock) {
-            if (on) {
+            if (on && force) {
+                c.xcapPendingAt[kind] = now                       // 문서 목록이 바뀌었다 — 재확인 간격과 무관하게 re-SUBSCRIBE
+            } else if (on) {
                 val confirmedAt = c.xcapConfirmedAt[kind]
                 if (confirmedAt != null) {
                     if (now - confirmedAt < SUB_REASSERT_MS) return
@@ -416,7 +419,17 @@ internal class GroupPlane(private val c: PttController) {
             }
         }
         c.ctl.launch {
-            val r = c.account?.subscribeXcapDiff(xcapPsiAor(kind), on)
+            // 규격형 구독(TS 24.481 §6.3.13.2.1 · TS 24.484 §6.3.13.2.2) — 액세스 토큰 + 문서 목록. 토큰이 아직 없으면 본문 없는 구독(옛 형식)
+            val acc = c.account
+            val token = c.token
+            val docs = if (on && token != null) xcapDocuments(kind) else emptyList()
+            val r = when {
+                acc == null -> null
+                !on -> acc.subscribeXcapDiff(xcapPsi(kind), emptyList(), "", false)
+                token == null -> acc.subscribeXcapDiff(xcapPsi(kind), true)
+                docs.isEmpty() -> { synchronized(c.lock) { c.xcapPendingAt.remove(kind) }; return@launch }   // 구독할 문서가 아직 없다(그룹 0개)
+                else -> acc.subscribeXcapDiff(xcapPsi(kind), docs, token, true)
+            }
             if (r == null || !r.ok) {
                 Log.w(TAG, "$kind 구독($on) 실패: ${r?.reason}")
                 synchronized(c.lock) { if (on) c.xcapPendingAt.remove(kind) }
@@ -426,6 +439,15 @@ internal class GroupPlane(private val c: PttController) {
 
     /** 서버 PSI — CSP 는 SUBSCRIBE Request-URI 의 `gms`/`cms` 로 이벤트 축을 판별한다. */
     private fun xcapPsiAor(kind: String) = "sip:${kind}_psi@${c.sipConfig.domain}"
+
+    /** 축의 구독 프록시 PSI — GMS 는 UE initial configuration `<GMS-URI>`, CMS 는 설정값(`sip:cms_psi@<도메인>` — TS 24.484 §6.3.13.3.1). */
+    private fun xcapPsi(kind: String) = if (kind == XCAP_GMS) c.gmsPsi.ifBlank { xcapPsiAor(kind) } else xcapPsiAor(kind)
+
+    /** 축의 구독 문서 — GMS = 편성 그룹마다 그룹 ID 로 찾는 문서, CMS = UE initial configuration·user profile·service configuration
+     *  (MCVideo 를 쓰면 그 두 문서도). */
+    private fun xcapDocuments(kind: String): List<String> =
+        if (kind == XCAP_GMS) CscClient.gmsSubscriptionDocuments(c._groups.value.map { it.uri })
+        else CscClient.cmsSubscriptionDocuments(c.mcpttId, c.mcsUeId, if (c.videoPlane.available.value) c.mcpttId else "")
 
     private fun xcapConfirmed(kind: String) = synchronized(c.lock) { c.xcapConfirmedAt.containsKey(kind) }
 
@@ -466,7 +488,10 @@ internal class GroupPlane(private val c: PttController) {
         if (mcvSvcCfgChanged) loadMcVideoServiceConfig()
         if (ueInitChanged) c.reloadUeInitConfig()
         if (changed.isEmpty() && (profileChanged || svcCfgChanged || mcvSvcCfgChanged || ueInitChanged)) {
-            c._status.value = "설정 변경 통지"   // CMS 축 — 편성은 건드리지 않는다
+            c._status.value = "설정 변경 통지"
+            // user profile 변경은 편성(소속 그룹)이 바뀐 것일 수 있다 — 규격형 GMS 구독은 구독하지 않은 새 그룹을 통지하지 않으므로
+            //   목록을 다시 받는다(바뀌었으면 loadGroups 가 GMS 를 새 목록으로 re-SUBSCRIBE)
+            if (profileChanged) loadGroups()
             return
         }
         c._status.value = if (changed.isEmpty()) "편성 변경 통지" else "편성 변경: ${changed.joinToString()}"
@@ -656,7 +681,10 @@ internal class GroupPlane(private val c: PttController) {
         val r = c.withToken { cl, t -> cl.listGroups(t, c.mcpttId) }
         if (r.ok) {
             val list = r.value.orEmpty().map { GroupSummary.of(it) }
+            val before = c._groups.value.map { it.uri }.toSet()
             c._groups.value = list
+            // 규격형 구독은 구독한 그룹 문서만 통지한다 — 편성 목록이 바뀌면 새 목록으로 re-SUBSCRIBE(TS 24.481 §6.3.13.2.1)
+            if (list.map { it.uri }.toSet() != before && c.regState.value is RegState.Registered) subscribeXcap(XCAP_GMS, true, force = true)
             val ids = list.map { bareId(it.uri) }
             dropRemovedChannels(ids.toSet())
             // 선택 그룹(TS 24.484 currently-selected group) 복원 — 마지막 주채널 우선,

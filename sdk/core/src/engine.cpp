@@ -191,6 +191,22 @@ std::string sipBody(const std::string& whole) {
  * 호·다이얼로그 락을 이미 잡고 있다. 공개 API 에 호의 다이얼로그 조회가 없어 pjsua 내부 표(`pjsua_var`)를 읽는다 — ext/pjproject 는
  * 모든 플랫폼이 같은 트리다(ue_sdk.md §6).
  */
+/** 계정의 Contact(pjsua 가 요청에 쓰는 값 — 등록 뒤 NAT 재작성 반영). 없으면 빈 문자열. */
+std::string pjAccountContact(int pjAccId) {
+    if (pjAccId < 0 || pjAccId >= (int)PJSUA_MAX_ACC || !pjsua_var.acc[pjAccId].valid) return std::string();
+    const pj_str_t& c = pjsua_var.acc[pjAccId].contact;
+    if (c.slen > 0) return std::string(c.ptr, (size_t)c.slen);
+    // 아직 등록하지 않은 계정 — 요청을 보낼 때 pjsua 가 만드는 것과 같은 Contact 를 만든다
+    pj_pool_t* pool = pjsua_pool_create("cimsct", 512, 256);
+    if (!pool) return std::string();
+    pj_str_t made;
+    std::string out;
+    if (pjsua_acc_create_uac_contact(pool, &made, pjAccId, &pjsua_var.acc[pjAccId].cfg.id) == PJ_SUCCESS && made.slen > 0)
+        out.assign(made.ptr, (size_t)made.slen);
+    pj_pool_release(pool);
+    return out;
+}
+
 bool setDialogContactParams(int callId, const std::string& params) {
     if (callId < 0 || callId >= (int)PJSUA_MAX_CALLS) return false;
     pjsua_call* call = &pjsua_var.calls[callId];
@@ -484,6 +500,11 @@ struct Engine::Impl {
     static constexpr unsigned kFloorMediaTickMs = 1000;
     /** 구독 SUBSCRIBE(conference·xcap-diff·dialog — 스택 evsub 구독) — ue-ctl 에서. 켜는 요청만 유지 단위로 적는다. */
     int64_t sendSubscribe(const detail::UpkeepKey& k, bool on, int64_t token, bool internal);
+    /** 계정의 Contact(규격형 xcap-diff 구독의 다이얼로그 Contact 바탕) — 없으면 빈 문자열. ue-ctl 에서. */
+    std::string accountContact(int accountId) {
+        auto it = accounts.find(accountId);
+        return it == accounts.end() ? std::string() : pjAccountContact(it->second->getId());
+    }
 
     // 스냅샷 — 콜백(pjsip 스레드)이 쓰고 조회(임의 스레드)가 읽는다
     std::mutex snapM;
@@ -511,6 +532,8 @@ struct Engine::Impl {
     std::map<int64_t, Tracked> tracked;
     /** MCVideo 관심 그룹(bare, 계정별) — affiliation PUBLISH 는 늘 전부를 싣는다(TS 24.281 §8.2.1.2 6)a)). ue-ctl 에서만. */
     std::map<int, std::set<std::string>> mcvideoAffiliations;
+    /** 규격형 xcap-diff 구독의 본문(문서 목록·토큰) — 키 = (계정, XcapDiff, PSI). 없으면 본문 없는 구독(옛 형식). 유지가 다시 보낼 때도 싣는다. */
+    std::map<detail::UpkeepKey, XcapDiffSubscription> xcapSubs;
     static std::string publishKey(int accountId, const std::string& groupId, McService service) {
         // MCVideo 는 게시 하나가 관심 그룹 전부라 그룹이 비어 있다 — 값이 있으면 다른 게시(서비스 설정 "poc-settings")의 열쇠다
         if (service == McService::McVideo) return std::to_string(accountId) + ":mcvideo" + (groupId.empty() ? "" : ":" + groupId);
@@ -3506,7 +3529,21 @@ int64_t Engine::Impl::sendSubscribe(const detail::UpkeepKey& k, bool on, int64_t
     }
     std::map<std::string, std::string> h{{"Event", event}, {"Expires", on ? "3600" : "0"}};
     (void)internal;
-    int64_t r = doSendRequest(k.account, "SUBSCRIBE", target, "", "", h, token);
+    std::string ct, body;
+    auto xs = k.kind == detail::UpkeepKind::XcapDiff ? xcapSubs.find(k) : xcapSubs.end();
+    if (on && xs != xcapSubs.end()) {
+        // 규격형 구독(TS 24.481 §6.3.13.2.1 · TS 24.484 §6.3.13.2.2) — c) mcptt-info 액세스 토큰 + a)·b)1) resource-lists 문서 목록,
+        //   e) P-Preferred-Service, f) 구독 다이얼로그 Contact 의 MCPTT icsi-ref(엔진이 새 구독의 다이얼로그 Contact 로 쓰고 헤더로는 싣지 않는다)
+        const std::string boundary = "xcap-" + mcdata::newMessageId().substr(0, 12);
+        ct = "multipart/mixed;boundary=" + boundary;
+        body = "--" + boundary + "\r\nContent-Type: application/vnd.3gpp.mcptt-info+xml\r\n\r\n" + mcptt::accessTokenInfo(xs->second.accessToken) +
+               "\r\n--" + boundary + "\r\nContent-Type: application/resource-lists+xml\r\n\r\n" +
+               mcptt::xcapDiffResourceLists(xs->second.documents) + "\r\n--" + boundary + "--\r\n";
+        h["P-Preferred-Service"] = mcptt::kIcsiMcptt;
+        const std::string contact = accountContact(k.account);
+        if (!contact.empty()) h["Contact"] = contact + ";+g.3gpp.icsi-ref=\"urn%3Aurn-7%3A3gpp-service.ims.icsi.mcptt\"";
+    }
+    int64_t r = doSendRequest(k.account, "SUBSCRIBE", target, ct, body, h, token);
     // 이 세 이벤트는 스택의 구독(evsub — pjsua_cims_conf_subscribe)으로 나간다: 같은 대상을 다시 부르면 대화 안 갱신, 구독이
     //   끝났으면(서버 종료·갱신 실패) 새 구독이다. 응답은 코어로 올라오지 않고 만료 전 갱신은 스택이 한다(RFC 6665 §4.1.2.2).
     //   그래서 유지는 보낸 것을 확인으로 치고 수명 절반마다·등록이 다시 설 때 다시 부른다 — 서버가 잃었거나 스택이 끝낸 구독을
@@ -3538,7 +3575,22 @@ Result Engine::subscribeXcapDiff(int accountId, const std::string& psiUri, bool 
         Impl* o = impl_.get();
         if (!o->accountCfgs.count(accountId)) return Result::fail(-2, "no such account");
         const detail::UpkeepKey k{accountId, detail::UpkeepKind::XcapDiff, psiUri};
+        o->xcapSubs.erase(k);                                   // 본문 없는 구독(옛 형식)
         if (on) o->upkeep.want(k); else o->upkeep.unwant(k);
+        return o->sendSubscribe(k, on, token, false) < 0 ? Result::fail(-3, "subscribe failed") : Result::success();
+    });
+}
+
+Result Engine::subscribeXcapDiff(int accountId, const std::string& psiUri, const XcapDiffSubscription& sub, bool on) {
+    if (!impl_->running) return Result::fail(-1, "not running");
+    if (on && sub.documents.empty()) return Result::fail(-2, "no documents to subscribe");
+    int64_t token = impl_->nextToken++;
+    return impl_->ctl.runSync([=]() -> Result {
+        Impl* o = impl_.get();
+        if (!o->accountCfgs.count(accountId)) return Result::fail(-2, "no such account");
+        const detail::UpkeepKey k{accountId, detail::UpkeepKind::XcapDiff, psiUri};
+        if (on) { o->xcapSubs[k] = sub; o->upkeep.want(k); }
+        else { o->xcapSubs.erase(k); o->upkeep.unwant(k); }
         return o->sendSubscribe(k, on, token, false) < 0 ? Result::fail(-3, "subscribe failed") : Result::success();
     });
 }
