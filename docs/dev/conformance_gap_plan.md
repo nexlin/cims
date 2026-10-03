@@ -147,7 +147,7 @@
 | **U06** | 제휴 상태 구독 | AFF-12 / VAFF-8 | B1 · C1 | 1 | S13 | — | W01(VAFF-8) | 대기 |
 | **U07** | XCAP 단말 전환 | GMS-16 · GMS-17 · GMS-1(SDK — global tree 조회) · GMS-6(SDK — 멤버 제외 조회) | B4 | 1 | C04·S19 | — | W01(GMS-16 PSI) | 완료 65046fec(GMS-1·GMS-17·GMS-6 코어) · 1c475d6e(GMS-6 바인딩) · 161e338d(GMS-16 규격형 xcap-diff 구독 — 엔진·SDK·현장 앱) — 관제 앱 두 벌의 구독 전환은 W01 |
 | **U08** | 발언권·송출 제어 단말 세부 | FCC-5 / TCU-1(코어) · TCU-3 · TCU-4 · RCU-1 | C3 · D2 | 1 | — | — | — | 완료 9e9a8169 (TCU-1 앱 결선 → U09) |
-| **U09** | MCVideo 단말 호 절차 | VREG-1 · VREG-3 · VGU-4 · VGU-5 · VGU-6 · VSDP-3 · TCU-1(앱 결선 — Kotlin 파사드·C API·현장 앱) | B1 · C3 · D2 | 1 | — | D7 | W01(VGU-6) | 진행 6c2c411a(VSDP-3·VGU-6 현장 앱) · 0251aa8e(VREG-1 코어 — 선택 옵션) · 354bc013(VREG-3 코어·VGU-5 코어·VGU-4 재확인 충족) · 1c475d6e(Kotlin 파사드·C API 함수·현장 앱 결선 — TCU-1·VGU-5·VREG-3) — 남은 것 VREG-1 켜기(S25 뒤) · C API 구조체 칸(W01 과 배치 맞춤) |
+| **U09** | MCVideo 단말 호 절차 | VREG-1 · VREG-3 · VGU-4 · VGU-5 · VGU-6 · VSDP-3 · TCU-1(앱 결선 — Kotlin 파사드·C API·현장 앱) | B1 · C3 · D2 | 1 | — | D7 | W01(VGU-6) | 진행 6c2c411a(VSDP-3·VGU-6 현장 앱) · 0251aa8e(VREG-1 코어 — 선택 옵션) · 354bc013(VREG-3 코어·VGU-5 코어·VGU-4 재확인 충족) · 1c475d6e(Kotlin 파사드·C API 함수·현장 앱 결선 — TCU-1·VGU-5·VREG-3) · a409b053(VREG-1 + MCPTT REG-2 SDK 몫 — 서비스 인가·설정 PUBLISH §7.2.2 MCPTT·MCData·MCVideo, 인가 전 제휴 보류·141 재인가·101 토큰 갱신, 현장 앱·태블릿 계기 = 인가, .48 csp 0.2.223 실측) — 남은 것 C API 구조체 칸(W01 과 배치 맞춤 — `access_token`·`on_service_auth` 포함) |
 
 ### 5.4 Windows — 관제 앱 (W01)
 
