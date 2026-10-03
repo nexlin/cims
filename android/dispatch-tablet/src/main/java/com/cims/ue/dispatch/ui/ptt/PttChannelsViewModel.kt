@@ -32,12 +32,14 @@ import com.cims.ue.dispatch.session.setEmergency
 import com.cims.ue.dispatch.session.cancelCondition
 import com.cims.ue.dispatch.session.toggleMuted
 import com.cims.ue.dispatch.session.videoCalls
+import com.cims.ue.sdk.CommencementMode
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -582,6 +584,19 @@ class PttChannelsViewModel(private val s: DispatchSession) : ScreenViewModel() {
 
     /** PTT 주소록 — 개별·애드혹 대상 후보. 세션이 로그인 때 받아 둔 것을 본다. */
     val pttBook: StateFlow<DirectoryBook> = s.pttBook
+
+    /**
+     * 개별 통화 «상대 응답»(TS 24.379 §11.1.1.2.1.1 14) — 고를 수 있는 방식(user profile 인가 — 지정 안 함은 개별 통화 인가만 본다)과
+     * 지금 고른 값(설정 [com.cims.ue.dispatch.session.Settings.privateCommencement] — 인가가 없으면 지정 안 함으로 보인다).
+     */
+    val commencementChoices: StateFlow<List<CommencementMode>> =
+        s.capabilities.map { k -> CommencementMode.entries.filter(k::allowsCommencement) }
+            .stateIn(scope, SharingStarted.Eagerly, CommencementMode.entries)
+    val commencement: StateFlow<CommencementMode> =
+        combine(s.settingsFlow, s.capabilities) { st, k ->
+            st.privateCommencement.takeIf(k::allowsCommencement) ?: CommencementMode.UNSPECIFIED
+        }.stateIn(scope, SharingStarted.Eagerly, CommencementMode.UNSPECIFIED)
+    fun setCommencement(m: CommencementMode) = s.updateSettings { it.copy(privateCommencement = m) }
 
     /** 영상 호(MCVideo) — 카드 1줄 «영상 n» 태그의 원천(§6.14). 영상 호는 카드를 만들지 않는다. */
     val videoCalls: StateFlow<List<com.cims.ue.dispatch.session.VideoCall>> get() = s.videoCalls

@@ -439,6 +439,10 @@ data class CallInfo(
      *  (TS 24.379 §10.1.1.4.2 — 제휴를 다시 싣고 다시 건다), 그 밖의 403 = 비멤버 등. 없으면 0·빈 값. */
     val warningCode: Int = 0,
     val warningText: String = "",
+    /** MC 호의 개시 방식(TS 24.379 §11.1.1.2.1.1 14)·§11.1.1.2.1.2 9)·10)) — 발신 개별 호 = 요청한 방식([GroupCallOptions.commencement]),
+     *  착신 MC 호 = 코어가 따른 방식: AUTO·FORCE_AUTO 면 코어가 200 을 보낸다, **MANUAL 이면 사용자 수락을 기다린다**([Call.answer] /
+     *  [Call.reject] — 480 + Warning 110). 그 밖 UNSPECIFIED. */
+    val commencement: CommencementMode = CommencementMode.UNSPECIFIED,
 ) {
     val active: Boolean get() = state == CallState.ACTIVE
     val ended: Boolean get() = state == CallState.DISCONNECTED
@@ -450,7 +454,8 @@ data class CallInfo(
             c.isMcptt, c.groupId, McpttInfo.of(c.mcptt), c.halfDuplex, c.listenOnly, c.joinedDialog,
             McpttCondition.of(c.condition), c.rxLevel, c.videoSend,
             ordinalOf(c.service.swigValue()), c.sessionUri, ordinalOf(c.videoRequest.swigValue()),
-            c.answerState, c.nonAcknowledgedUsers.let { v -> List(v.size) { v[it] } }, c.warningCode, c.warningText)
+            c.answerState, c.nonAcknowledgedUsers.let { v -> List(v.size) { v[it] } }, c.warningCode, c.warningText,
+            ordinalOf(c.commencement.swigValue()))
     }
 }
 

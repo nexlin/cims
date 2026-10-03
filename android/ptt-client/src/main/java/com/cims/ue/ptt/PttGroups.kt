@@ -16,7 +16,11 @@ import com.cims.ue.ptt.PttController.Companion.isAdhocId
 import com.cims.ue.ptt.csc.GroupDoc
 import com.cims.ue.ptt.csc.GroupSummary
 import com.cims.ue.sdk.FloorState
+import com.cims.ue.sdk.CallDir
 import com.cims.ue.sdk.CallInfo
+import com.cims.ue.sdk.CallState
+import com.cims.ue.sdk.Capabilities
+import com.cims.ue.sdk.CommencementMode
 import com.cims.ue.sdk.CscClient
 import com.cims.ue.sdk.GroupCallOptions
 import com.cims.ue.sdk.RequestResult
@@ -148,7 +152,9 @@ internal class GroupPlane(private val c: PttController) {
         // 편성 채널이 아니므로 channelStore/affiliation/roster 구독 없음 — 즉석 세션.
         c.ctl.launch {
             val acc = c.account
-            val r = acc?.startPrivateCall(target, GroupCallOptions(fullDuplex = fullDuplex, emergency = emergency))
+            // 상대 응답 방식(§11.1.1.2.1.1 14)) — 사용자가 고른 값, 인가가 없는 방식은 싣지 않는다(서버 403 125·126·143 전에)
+            val mode = CallRules.effectiveCommencement(c.privateCommencement.value, userProfile.value?.commencements)
+            val r = acc?.startPrivateCall(target, GroupCallOptions(fullDuplex = fullDuplex, emergency = emergency, commencement = mode))
             if (r != null && r.ok) {
                 val id = r.value!!.id
                 c.bindCall(target, id)
@@ -201,13 +207,32 @@ internal class GroupPlane(private val c: PttController) {
                 it.fullDuplex = ci.mcptt.noFloorCtrl
                 it.emergency = ci.condition.emergency || ci.mcptt.emergency
                 it.role = ChannelRole.NONE                          // 1:1 은 주채널 비점유
+                // 상대가 수동 응답을 요청했다(§11.1.1.2.1.2 10)) — 코어는 180 만 보냈다, 사용자가 받을 때까지 기다린다
+                it.awaitingAnswer = CallRules.awaitingAnswer(ci.dir == CallDir.INCOMING, ci.state == CallState.INCOMING, ci.commencement)
                 c.sessionMap[peer] = it
             }
         }
         if (s.fullDuplex) c.cmd("setMuted(1:1)") { c.ue.call(ci.callId).setMuted(true) }
-        c._status.value = if (s.fullDuplex) "1:1 통화 수신: $peer" else "1:1 무전 수신: $peer"
+        c._status.value = when {
+            s.awaitingAnswer -> "1:1 통화 요청: $peer — 받기를 누르세요"
+            s.fullDuplex -> "1:1 통화 수신: $peer"
+            else -> "1:1 무전 수신: $peer"
+        }
+        if (s.awaitingAnswer) c.feedback?.privateCallRingTone()
         c.emit(PttEventKind.JOIN, peer)
         c.publish()
+    }
+
+    /** 수동 응답 요청 착신 1:1 받기 — 코어가 200 을 보낸다(성립하면 bindCall 이 대기 표시를 내린다). */
+    fun answerPrivateCall(peer: String) {
+        val id = synchronized(c.lock) { c.sessionMap[peer]?.takeIf { it.awaitingAnswer }?.callId } ?: return
+        c.cmd("answer 1:1 $peer") { c.ue.call(id).answer() }
+    }
+
+    /** 수동 응답 요청 착신 1:1 거절 — 코어가 480 + Warning «110 user declined the call invitation»(TS 24.379 §6.2.3.2.1 1)). */
+    fun declinePrivateCall(peer: String) {
+        val id = synchronized(c.lock) { c.sessionMap[peer]?.takeIf { it.awaitingAnswer }?.callId } ?: return
+        c.cmd("decline 1:1") { c.ue.call(id).reject() }
     }
 
     /** 그룹콜 착신 — 미참여 그룹이면 세션 생성. fan-out INVITE 의 emergency-ind → 긴급 표시 + 경고 톤. */
@@ -741,6 +766,7 @@ internal class GroupPlane(private val c: PttController) {
             allowEmergencyPrivateCall = d.allowEmergencyPrivateCall,
             privateEmergencyMode = d.emergencyPrivateRecipient.mode.ifBlank { "LocallyDetermined" },
             emergencyPrivateRecipient = bareId(d.emergencyPrivateRecipient.uri).ifBlank { null },
+            commencements = Capabilities.of(d, null).let { k -> CommencementMode.entries.filter(k::allowsCommencement).toSet() },
         )
         _userProfile.value = p
         Log.i(TAG, "user-profile 적재 — 긴급대상=${p.emergencyGroupMode}/${p.emergencyGroupId}" +

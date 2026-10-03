@@ -599,7 +599,9 @@ TEST(CApi, McpttFieldsAndCmsDocs) {
                   "<allow-activate-emergency-alert>true</allow-activate-emergency-alert>"
                   "<allow-cancel-emergency-alert>false</allow-cancel-emergency-alert>"
                   "<allow-cancel-group-emergency>true</allow-cancel-group-emergency>"
-                  "<allow-cancel-imminent-peril>false</allow-cancel-imminent-peril></actions></ruleset>"
+                  "<allow-cancel-imminent-peril>false</allow-cancel-imminent-peril>"
+                  "<allow-private-call>true</allow-private-call><allow-manual-commencement>true</allow-manual-commencement>"
+                  "</actions></ruleset>"
                   "<OnNetwork><MCPTTGroupInfo><entry><uri-entry>sip:g1@ptt</uri-entry></entry></MCPTTGroupInfo></OnNetwork>"
                   "</mcptt-user-profile>", &up), CIMSUE_OK) << cimsue_last_error();
     EXPECT_STREQ(up.user_uri, "tel:+82500000001");
@@ -610,6 +612,9 @@ TEST(CApi, McpttFieldsAndCmsDocs) {
     EXPECT_EQ(up.allow_cancel_group_emergency, 1);
     EXPECT_EQ(up.allow_cancel_imminent_peril, 0);
     EXPECT_EQ(up.max_affiliations_n2, -1);
+    EXPECT_EQ(up.allow_manual_commencement, 1);                 // 개시 방식 요청 인가 — 요소 없음 = 0
+    EXPECT_EQ(up.allow_automatic_commencement, 0);
+    EXPECT_EQ(up.allow_force_auto_answer, 0);
     cimsue_capabilities_t k{};
     cimsue_capabilities_of(&up, nullptr, &k);
     EXPECT_EQ(k.user_profile_known, 1);
@@ -618,10 +623,14 @@ TEST(CApi, McpttFieldsAndCmsDocs) {
     EXPECT_EQ(k.emergency_alert, 1);
     EXPECT_EQ(k.cancel_group_emergency, 1);
     EXPECT_EQ(k.cancel_imminent_peril, 0);
+    EXPECT_EQ(k.private_call_manual, 1);                        // allow-private-call ∧ 방식별 인가
+    EXPECT_EQ(k.private_call_auto, 0);
+    EXPECT_EQ(k.private_call_force_auto, 0);
     cimsue_capabilities_of(nullptr, nullptr, &k);
     EXPECT_EQ(k.user_profile_known, 0);
     EXPECT_EQ(k.cancel_emergency_alert, 1);                     // 못 받은 문서는 허용
     EXPECT_EQ(k.cancel_imminent_peril, 1);
+    EXPECT_EQ(k.private_call_force_auto, 1);
     EXPECT_NE(cimsue_user_profile_parse("<group/>", &up), CIMSUE_OK);
 
     cimsue_service_config_doc_t sc{};
@@ -711,6 +720,15 @@ TEST(CApi, ServiceAuthAndCallOptionFields) {
     go.chat = 1;
     go.commencement = CIMSUE_COMMENCEMENT_MANUAL;
     (void)cimsue_engine_join_group_call(e, acc, "sip:g1@ptt.example.org", &go);
+    // 개별 호의 개시 방식 — 요청한 방식이 호 정보에 남는다(CallInfo.commencement)
+    cimsue_group_call_options_t po;
+    cimsue_group_call_options_default(&po);
+    po.commencement = CIMSUE_COMMENCEMENT_MANUAL;
+    const int32_t pc = cimsue_engine_start_private_call(e, acc, "+82500000002", &po);
+    ASSERT_GE(pc, 0) << cimsue_last_error();
+    cimsue_call_info_t pci{};
+    cimsue_engine_call_info(e, pc, &pci);
+    EXPECT_EQ(pci.commencement, CIMSUE_COMMENCEMENT_MANUAL);
     cimsue_engine_stop(e);
     cimsue_engine_destroy(e);
 

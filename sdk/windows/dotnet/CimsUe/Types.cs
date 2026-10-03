@@ -315,7 +315,10 @@ public sealed record CallInfo(
     VideoRequestState VideoRequest = VideoRequestState.None,
     // 개시 INVITE 최종 응답의 Warning MC 문구 번호 — `399 <agent> "NNN text"` 의 NNN(TS 24.379 §4.4)과 그 뒤 문구. 403 의 120 «미제휴»와
     //   116 비멤버를 가른다. 없으면 0·빈 값.
-    int WarningCode = 0, string WarningText = "")
+    int WarningCode = 0, string WarningText = "",
+    // MC 호의 개시 방식 — 발신 개별 호 = 요청한 방식(GroupCallOptions.Commencement), 착신 MC 호 = 코어가 따른 방식(Manual 이면 사용자 수락 대기 —
+    //   Call.Answer 로 받고 Reject 로 거절, TS 24.379 §11.1.1.2.1.2 9)·10)). 그 밖 Unspecified.
+    CommencementMode Commencement = CommencementMode.Unspecified)
 {
     public static CallInfo Empty { get; } = new(-1, -1, CallDir.Outgoing, CallState.Null, "", "", false, false, false, true, 0, 0, "",
                                                 Array.Empty<MediaSource>(), false, "", McpttInfo.None, false, false, "");

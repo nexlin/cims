@@ -7,6 +7,7 @@ package com.cims.ue.dispatch.session
 import com.cims.ue.sdk.CallInfo
 import com.cims.ue.sdk.CallState
 import com.cims.ue.sdk.CimsResult
+import com.cims.ue.sdk.CommencementMode
 import com.cims.ue.sdk.FloorEvent
 import com.cims.ue.sdk.FloorEventKind
 import com.cims.ue.sdk.FloorState
@@ -703,6 +704,9 @@ internal fun isAdhocId(groupId: String): Boolean = groupId.startsWith(SessionKin
  *
  * 반이중(floor)이 기본이다. 전이중(`fullDuplex` = `mc_no_floor_ctrl`)은 마이크가 늘 열려 있어
  * 발언 대상 체크가 비활성되고 카드의 [음소거]로 다룬다(§4.1).
+ *
+ * 상대 응답 방식(§11.1.1.2.1.1 14) — `Answer-Mode`·`Priv-Answer-Mode`)은 설정 «상대 응답»([Settings.privateCommencement])이다.
+ * user profile 이 인가하지 않은 방식은 싣지 않는다 — 실으면 서버가 403(125·126·143)으로 거절한다.
  */
 suspend fun DispatchSession.startPrivateCall(peer: String, fullDuplex: Boolean = false,
                                              emergency: Boolean = false): CimsResult<Unit> {
@@ -713,7 +717,9 @@ suspend fun DispatchSession.startPrivateCall(peer: String, fullDuplex: Boolean =
     if (!caps.privateCall) return CimsResult.fail(-1, "개별 통화 자격이 없습니다 (user profile allow-private-call)")
     if (emergency && !caps.emergencyPrivateCall)
         return CimsResult.fail(-1, "긴급 개별 통화 자격이 없습니다 (user profile allow-emergency-private-call)")
-    val r = ptt.startPrivateCall(target, GroupCallOptions(fullDuplex = fullDuplex, emergency = emergency))
+    val chosen = settingsSnapshot().privateCommencement
+    val mode = if (caps.allowsCommencement(chosen)) chosen else CommencementMode.UNSPECIFIED
+    val r = ptt.startPrivateCall(target, GroupCallOptions(fullDuplex = fullDuplex, emergency = emergency, commencement = mode))
     if (r.ok) noteOperation(r.value!!.id, if (emergency) Operation.EMERGENCY else Operation.PTT_PRIVATE)
     // 곧바로 실패하면 [채널 추가] 패널이 그 자리에 적는다 — 토스트를 겹치지 않고 사유만 사전 문장으로 바꿔 준다.
     val area = if (emergency) TextArea.EMERGENCY else TextArea.PTT_PRIVATE

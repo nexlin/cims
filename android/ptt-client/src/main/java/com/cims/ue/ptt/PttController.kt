@@ -18,6 +18,7 @@ import com.cims.ue.sdk.CallInfo
 import com.cims.ue.sdk.CallState
 import com.cims.ue.sdk.CimsResult
 import com.cims.ue.sdk.CimsUe
+import com.cims.ue.sdk.CommencementMode
 import com.cims.ue.sdk.CscClient
 import com.cims.ue.sdk.CscEndpoint
 import com.cims.ue.sdk.EngineConfig
@@ -101,6 +102,9 @@ data class GroupCallState(
     val privatePeer: Boolean = false,
     /** 전이중 1:1(mc_no_floor_ctrl 협상) — floor 없음, PTT 가 로컬 마이크 게이트. PTT 버튼 대신 통화 UI. */
     val fullDuplex: Boolean = false,
+    /** 착신 1:1 이 내 수락을 기다린다 — 상대가 수동 응답을 요청했다(TS 24.379 §11.1.1.2.1.2 10), [CallRules.awaitingAnswer]).
+     *  1:1 화면이 [받기]([PttController.answerPrivateCall])·[거절]([PttController.declinePrivateCall])을 보인다. */
+    val awaitingAnswer: Boolean = false,
 )
 
 /**
@@ -264,6 +268,7 @@ class PttController(
         var broadcast: Boolean = false        // 내가 연 일제 통화(TS 24.379 §4.12) — 미제휴 403 뒤 다시 걸지 않는다
         var fullDuplex: Boolean = false       // 전이중 1:1 — floor 없음, PTT 가 로컬 마이크 게이트(setMuted)
         var rejoinUri: String = ""            // 재합류로 연 세션의 식별자(TS 24.379 §10.1.1.2.4.1) — 미제휴 403 뒤 다시 걸 때도 재합류로
+        var awaitingAnswer: Boolean = false   // 착신 1:1 수동 개시 — 받기 전(성립하면 내린다)
 
         /** 이 세션이 동시 발언을 허용하는가 — 서버 Floor Indicator 의 I-bit(multi-talker)/
          *  G-bit(dual floor) 로 판정한다(TS 24.380 §8.2.3.15). multi 정책은 모든 floor 메시지에
@@ -276,7 +281,7 @@ class PttController(
             audible, emergency, emergencyMine, volume, canRequestFloor, speakDeadlineMs,
             // 대기 위치는 QUEUED 상태에서만 의미가 있다 — 상태로 파생해 지난 값이 새지 않게 한다.
             queuePosition.takeIf { floorState == FloorState.QUEUED }, talkers, floorIndicator,
-            privatePeer, fullDuplex)
+            privatePeer, fullDuplex, awaitingAnswer)
         fun close() { talkWarn?.cancel() }
     }
 
@@ -715,8 +720,24 @@ class PttController(
     fun startAdhocCall(members: List<String>) = groupsPlane.startAdhocCall(members)
     fun startPrivateCall(peer: String, fullDuplex: Boolean = false, emergency: Boolean = false) =
         groupsPlane.startPrivateCall(peer, fullDuplex, emergency)
+
+    /** 개별 통화에서 상대에게 요청하는 응답 방식(TS 24.379 §11.1.1.2.1.1 14) — RFC 5373). 기본 = 지정 안 함(상대 단말 설정대로 —
+     *  헤더를 싣지 않는다). 고른 값은 `ptt_call` 에 남고 모든 개별 통화 발신(연락처·메시지·긴급)이 쓴다 — 인가가 없는 방식은 싣지 않는다
+     *  ([CallRules.effectiveCommencement]). */
+    val privateCommencement: StateFlow<CommencementMode> get() = _privateCommencement
+    fun setPrivateCommencement(m: CommencementMode) {
+        _privateCommencement.value = m
+        callPrefs.edit().putString(PREF_PRIVATE_COMMENCEMENT, m.name).apply()
+    }
+    private val callPrefs = context.getSharedPreferences(CALL_PREFS, Context.MODE_PRIVATE)
+    private val _privateCommencement = MutableStateFlow(
+        runCatching { CommencementMode.valueOf(callPrefs.getString(PREF_PRIVATE_COMMENCEMENT, null) ?: "") }
+            .getOrDefault(CommencementMode.UNSPECIFIED))
     fun startEmergencyPrivateCall(peer: String, fullDuplex: Boolean = false) =
         emergencyPlane.startEmergencyPrivateCall(peer, fullDuplex)
+    /** 수동 응답을 요청한 착신 1:1 받기·거절([GroupCallState.awaitingAnswer]). 거절 = 코어가 480 + Warning «110 user declined». */
+    fun answerPrivateCall(peer: String) = groupsPlane.answerPrivateCall(peer)
+    fun declinePrivateCall(peer: String) = groupsPlane.declinePrivateCall(peer)
     fun leaveGroup(groupId: String) { groupsPlane.leaveGroup(groupId); videoPlane.requestSync() }   // 채널을 나가면 영상 호도(D10)
     fun login(userName: String, password: String) = groupsPlane.login(userName, password)
     fun setAccessToken(accessToken: String) = groupsPlane.setAccessToken(accessToken)
@@ -777,6 +798,9 @@ class PttController(
         val allowEmergencyPrivateCall: Boolean,   // allow-emergency-private-call (긴급 1:1 개시 인가)
         val privateEmergencyMode: String,         // MCPTTPrivateRecipient: LocallyDetermined | UsePreConfigured
         val emergencyPrivateRecipient: String?,   // 사전 지정 긴급 수신자 (bare id, UsePreConfigured 모드 대상)
+        /** 개별 통화에 요청할 수 있는 상대 응답 방식(allow-private-call ∧ allow-manual-commencement·allow-automatic-commencement·
+         *  allow-force-auto-answer — 코어 Capabilities). 비어 있으면 개별 통화 인가가 없다. */
+        val commencements: Set<CommencementMode> = CommencementMode.entries.toSet(),
     )
 
     /** 시스템 서비스 설정(TS 24.484 §8.4 service-config) — 시스템 전역 문서. 인가 요소는 없다(인가 = [UserProfile]
@@ -804,7 +828,7 @@ class PttController(
                 }
                 ?: run { Log.w(TAG, "bindCall miss: key=$groupId call=$callId"); return }
             s.callId = callId
-            if (active) s.active = true
+            if (active) { s.active = true; s.awaitingAnswer = false }
         }
         publish()
     }
@@ -1009,6 +1033,10 @@ class PttController(
 
         /** MCVideo 영상을 받는 동안 무전(MCPTT) 수신 배율 — 영상 호 음성 우선(mcvideo.md §7 D6). */
         internal const val VIDEO_DUCK = 0.3f
+
+        /** 개별 통화 발신 설정 저장소 — 상대 응답 방식([privateCommencement]). */
+        private const val CALL_PREFS = "ptt_call"
+        private const val PREF_PRIVATE_COMMENCEMENT = "private_commencement"
 
         /** 오디오 라우팅 — 저장값(AudioRoutePrefs)과 같은 수. 0~2 는 엔진 라우트, 3 = 이어폰(유선/BT 장치 지정). */
         const val AUDIO_ROUTE_DEFAULT = 0   // 자동(이어폰 연결 시 이어폰)

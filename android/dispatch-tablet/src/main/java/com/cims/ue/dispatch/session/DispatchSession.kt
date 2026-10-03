@@ -18,6 +18,7 @@ import com.cims.ue.sdk.CallInfo
 import com.cims.ue.sdk.Capabilities
 import com.cims.ue.sdk.CimsResult
 import com.cims.ue.sdk.CimsUe
+import com.cims.ue.sdk.CommencementMode
 import com.cims.ue.sdk.CscClient
 import com.cims.ue.sdk.CscEndpoint
 import com.cims.ue.sdk.DispatchProfile
@@ -424,11 +425,11 @@ class DispatchSession(
      */
     val incoming: StateFlow<List<SessionItem>> =
         _sessions.map { list ->
-            // 개별 통화도 같은 배너를 쓴다(§3.2 청록). 지금은 코어가 MCPTT 를 자동 수락해 거의 뜨지 않지만,
-            // 자동 수락 플래그가 갈라지면(§11) 조건 하나 없이 그대로 동작한다.
+            // 개별 통화도 같은 배너를 쓴다(§3.2 청록) — 상대가 수동 응답을 요청한 착신만(코어가 따른 개시 방식 MANUAL,
+            //   TS 24.379 §11.1.1.2.1.2 10)). 자동 개시는 코어가 곧바로 받으므로 배너가 깜박이지 않게 거른다.
             list.filter {
-                (it.kind == SessionKind.PHONE_CALL || it.kind == SessionKind.PTT_PRIVATE) &&
-                    it.info.state == CallState.INCOMING
+                it.info.state == CallState.INCOMING && (it.kind == SessionKind.PHONE_CALL ||
+                    (it.kind == SessionKind.PTT_PRIVATE && it.info.commencement == CommencementMode.MANUAL))
             }
                 .sortedByDescending { it.startedAtMs }
         }.stateIn(scope, SharingStarted.Eagerly, emptyList())

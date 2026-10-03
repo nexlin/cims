@@ -131,7 +131,9 @@ public sealed record UserProfileDoc(
     CmsEntry EmergencyPrivateRecipient, IReadOnlyList<string> Groups, IReadOnlyList<string> ImplicitAffiliations, int MaxAffiliationsN2,
     bool AllowPrivateCall, bool AllowEmergencyGroupCall, bool AllowImminentPerilCall, bool AllowActivateEmergencyAlert,
     bool AllowCancelEmergencyAlert, bool AllowEmergencyPrivateCall, bool AllowAdhocGroupCall,
-    bool AllowCancelGroupEmergency = true, bool AllowCancelImminentPeril = true)
+    bool AllowCancelGroupEmergency = true, bool AllowCancelImminentPeril = true,
+    // 개별 호의 개시 방식 요청 인가(§8.3.2.1 11)viii)~x)) — GroupCallOptions.Commencement 의 Manual·Auto·ForceAuto
+    bool AllowManualCommencement = true, bool AllowAutomaticCommencement = true, bool AllowForceAutoAnswer = true)
 {
     /// <summary>XML → 문서(코어 파서). 루트가 mcptt-user-profile 이 아니면 실패.</summary>
     public static Result<UserProfileDoc> Parse(string xml) => CscClient.ParseUserProfile(xml);
@@ -184,8 +186,11 @@ public sealed record UeInitConfigDoc(string ETag, bool NotModified, string Domai
 /// UX 선차단(버튼 비활성·안내)용이고 최종 판정은 서버다. MaxAffiliationsN2 0 = 미지정.</summary>
 public sealed record Capabilities(bool UserProfileKnown, bool ServiceConfigKnown, bool PrivateCall, bool EmergencyGroupCall, bool ImminentPerilCall,
                                   bool EmergencyPrivateCall, bool EmergencyAlert, bool CancelEmergencyAlert, bool AdhocGroupCall, int MaxAffiliationsN2,
-                                  bool CancelGroupEmergency = true, bool CancelImminentPeril = true)
+                                  bool CancelGroupEmergency = true, bool CancelImminentPeril = true,
+                                  bool PrivateCallManual = true, bool PrivateCallAuto = true, bool PrivateCallForceAuto = true)
 {
+    // PrivateCall* = 개별 호에 요청할 수 있는 개시 방식(GroupCallOptions.Commencement, TS 24.379 §11.1.1.2.1.1 14)) — allow-private-call ∧
+    //   allow-manual-commencement·allow-automatic-commencement·allow-force-auto-answer. 앱은 허용된 방식만 고르게 한다(Unspecified 는 PrivateCall 만 본다).
     // CancelGroupEmergency = allow-cancel-group-emergency — 그룹 긴급 해제는 local policy(TS 24.379 §6.2.8.1.7), 서버 판정 = 개시자 ∨ 이 값
     //   (§6.3.3.1.13.4) → 앱은 «내가 올린 조건(McpttCondition.Mine)» 과 OR 해서 [긴급 해제] 를 연다. CancelImminentPeril 은 개시자 예외 없음(§6.2.8.1.10).
     /// <summary>규칙은 코어 한 곳(Capabilities::of). null = 그 문서를 아직 못 받음.</summary>
@@ -618,6 +623,8 @@ public sealed unsafe class CscClient : IDisposable
             u.allow_cancel_emergency_alert = Engine.B(up.AllowCancelEmergencyAlert); u.allow_emergency_private_call = Engine.B(up.AllowEmergencyPrivateCall);
             u.allow_adhoc_group_call = Engine.B(up.AllowAdhocGroupCall);
             u.allow_cancel_group_emergency = Engine.B(up.AllowCancelGroupEmergency); u.allow_cancel_imminent_peril = Engine.B(up.AllowCancelImminentPeril);
+            u.allow_manual_commencement = Engine.B(up.AllowManualCommencement); u.allow_automatic_commencement = Engine.B(up.AllowAutomaticCommencement);
+            u.allow_force_auto_answer = Engine.B(up.AllowForceAutoAnswer);
         }
         if (sc is not null)
         {
@@ -629,7 +636,8 @@ public sealed unsafe class CscClient : IDisposable
         cimsue_capabilities_of(up is null ? null : &u, sc is null ? null : &c, &k);
         return new Capabilities(k.user_profile_known != 0, k.service_config_known != 0, k.private_call != 0, k.emergency_group_call != 0,
                                 k.imminent_peril_call != 0, k.emergency_private_call != 0, k.emergency_alert != 0, k.cancel_emergency_alert != 0,
-                                k.adhoc_group_call != 0, k.max_affiliations_n2, k.cancel_group_emergency != 0, k.cancel_imminent_peril != 0);
+                                k.adhoc_group_call != 0, k.max_affiliations_n2, k.cancel_group_emergency != 0, k.cancel_imminent_peril != 0,
+                                k.private_call_manual != 0, k.private_call_auto != 0, k.private_call_force_auto != 0);
     }
 
     // 비동기 편의 — 블록 호출을 스레드 풀로.
@@ -705,7 +713,8 @@ public sealed unsafe class CscClient : IDisposable
             StrArray(d->implicit_affiliations, d->implicit_affiliation_count), d->max_affiliations_n2,
             d->allow_private_call != 0, d->allow_emergency_group_call != 0, d->allow_imminent_peril_call != 0,
             d->allow_activate_emergency_alert != 0, d->allow_cancel_emergency_alert != 0, d->allow_emergency_private_call != 0,
-            d->allow_adhoc_group_call != 0, d->allow_cancel_group_emergency != 0, d->allow_cancel_imminent_peril != 0);
+            d->allow_adhoc_group_call != 0, d->allow_cancel_group_emergency != 0, d->allow_cancel_imminent_peril != 0,
+            d->allow_manual_commencement != 0, d->allow_automatic_commencement != 0, d->allow_force_auto_answer != 0);
 
     private static ServiceConfigDoc ToManaged(cimsue_service_config_doc_t* d) =>
         new(Utf8.Str(d->etag), d->not_modified != 0, Utf8.Str(d->domain), d->num_levels_group_hierarchy, d->num_levels_user_hierarchy,

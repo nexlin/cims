@@ -77,6 +77,12 @@ class PttFeedback(context: Context) {
         vibrate(longArrayOf(0, 40, 60, 40))
     }
 
+    /** 수동 수락 개별 통화 착신(상대가 `Answer-Mode: Manual` 요청 — TS 24.379 §11.1.1.2.1.2 10)) — 1:1 화면이 [받기] 를 기다린다. 링 1회 + 긴 진동. */
+    fun privateCallRingTone() {
+        play(ToneGenerator.TONE_SUP_RINGTONE, 1500)
+        vibrate(longArrayOf(0, 400, 200, 400))
+    }
+
     private fun play(toneType: Int, durationMs: Int = -1) {
         val t = tone ?: run { android.util.Log.w("PttFeedback", "ToneGenerator unavailable"); return }
         runCatching {

@@ -383,6 +383,10 @@ struct CallInfo {
     bool halfDuplex = false;          // floor 로 마이크를 게이트한다(Granted 에서만 송신)
     bool listenOnly = false;          // a=recvonly 청취 leg (PTT 청취·감청 Join)
     std::string joinedDialog;         // INVITE-Join 으로 합류한 대상 dialog 의 Call-ID
+    /** MC 호의 개시 방식(TS 24.379 §11.1.1.2.1.1 14)·§11.1.1.2.1.2 9)·10) · RFC 5373). 발신 개별 호 = 요청한 방식(GroupCallOptions.commencement).
+     *  착신 MC 호(MCPTT·MCVideo) = 코어가 따른 방식 — Auto·ForceAuto 면 코어가 200 을 보낸다, **Manual 이면 사용자 수락을 기다린다**
+     *  (앱이 Engine::answer 로 받거나 reject 로 거절 — 480 + Warning 110). 그 밖은 Unspecified. */
+    CommencementMode commencement = CommencementMode::Unspecified;
     /** 개시 200 OK 의 P-Answer-State(RFC 4964) — "Unconfirmed" = 멤버 확인 전 수락(서버가 미디어 버퍼링, TS 24.379 §10.1.1.4.2),
      *  "Confirmed" 또는 빈 값 = 확인. 사용자에게 알릴 수 있다(§10.1.1.2.1.1 2A)). */
     std::string answerState;

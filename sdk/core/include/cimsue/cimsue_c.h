@@ -315,6 +315,8 @@ typedef struct {
     int32_t                      warning_code;      /* 개시 INVITE 최종 응답의 Warning **MC 문구 번호** — `399 <agent> "NNN text"` 의 NNN(TS 24.379 §4.4,
                                                      * 그 형식이 아니면 RFC 3261 §20.43 warn-code), 없으면 0. 403 120 = 미제휴 */
     const char*                  warning_text;      /* 그 문구(번호 뒤) */
+    cimsue_commencement_t        commencement;      /* MC 호의 개시 방식(types.h CallInfo.commencement) — 발신 개별 호 = 요청한 방식, 착신 MC 호 = 코어가 따른
+                                                     * 방식(MANUAL 이면 사용자 수락 대기 — answer 로 받고 reject 로 거절), 그 밖 UNSPECIFIED */
 } cimsue_call_info_t;
 
 /** 통화 중 영상 전환 이벤트(types.h VideoRequestEvent — 1:1 호, RFC 3264 §8.1·§8.2). RECEIVED 면 앱이 사용자에게 묻고
@@ -1108,6 +1110,10 @@ typedef struct {
     int32_t            allow_adhoc_group_call;
     int32_t            allow_cancel_group_emergency;  /* allow-cancel-group-emergency (TS 24.484 §8.3.2.1 11)xiv)) */
     int32_t            allow_cancel_imminent_peril;   /* allow-cancel-imminent-peril (11)xvii)) */
+    /* 끝에 덧붙였다 — 개별 호 개시 방식 요청 인가(§8.3.2.1 11)viii)~x)) */
+    int32_t            allow_manual_commencement;
+    int32_t            allow_automatic_commencement;
+    int32_t            allow_force_auto_answer;
 } cimsue_user_profile_doc_t;
 
 /** MCPTT service configuration(csc.h ServiceConfigDoc, TS 24.484 §8.4) — 인가 요소 없음. 요소가 없으면 빈 값/-1. */
@@ -1194,6 +1200,10 @@ typedef struct {
     int32_t max_affiliations_n2;            /* 0 = 미지정 */
     int32_t cancel_group_emergency;         /* up.allow-cancel-group-emergency — 앱은 «내가 올린 조건» 과 OR (§6.3.3.1.13.4) */
     int32_t cancel_imminent_peril;          /* up.allow-cancel-imminent-peril */
+    /* 끝에 덧붙였다 — 개별 호에 요청할 수 있는 개시 방식(group_call_options.commencement): allow-private-call ∧ 방식별 인가 */
+    int32_t private_call_manual;            /* allow-manual-commencement */
+    int32_t private_call_auto;              /* allow-automatic-commencement */
+    int32_t private_call_force_auto;        /* allow-force-auto-answer */
 } cimsue_capabilities_t;
 
 CIMSUE_API void CIMSUE_CALL cimsue_csc_endpoint_default(cimsue_csc_endpoint_t* ep);

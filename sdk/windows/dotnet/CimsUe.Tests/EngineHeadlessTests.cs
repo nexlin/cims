@@ -50,7 +50,7 @@ public class EngineHeadlessTests
         Assert.True(st.Ok, st.Reason);
         Assert.True(e.IsRunning);
         Assert.False(e.Start(new EngineConfig { NullAudioDevice = true }).Ok);      // already running
-        Assert.True(logs > 0);
+        Assert.True(SpinWait.SpinUntil(() => Volatile.Read(ref logs) > 0, 2000));    // 로그는 엔진 스레드에서 비동기로 온다
 
         // 계정 — 미완성 설정은 실패, 완성 설정은 id 발급 + 조회 스냅샷
         Assert.False(e.AddAccount(new AccountConfig()).Ok);

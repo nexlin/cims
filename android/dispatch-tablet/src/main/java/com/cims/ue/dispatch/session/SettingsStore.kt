@@ -4,6 +4,7 @@
 package com.cims.ue.dispatch.session
 
 import android.content.Context
+import com.cims.ue.sdk.CommencementMode
 import com.cims.ue.sdk.platform.Route
 
 /** 저장되는 설정 한 벌. 기본값은 "처음 켠 관제석" 기준. */
@@ -67,6 +68,11 @@ data class Settings(
     val videoMicPolicy: String = VideoMicPolicy.VOICE,
     /** [영상 보내기] 카메라 — `front`(기본 — 엔진의 처음 카메라) | `back`([VideoCamera]). */
     val videoCamera: String = VideoCamera.FRONT,
+    /**
+     * 개별 통화의 «상대 응답» — 상대 단말에 요청하는 개시 방식(TS 24.379 §11.1.1.2.1.1 14) — RFC 5373). 기본 = 지정 안 함(상대 설정대로).
+     * [채널 추가] 패널이 바꾸고 모든 개별 통화 발신(패널·사람 메뉴)이 쓴다 — 인가가 없는 방식은 싣지 않는다([startPrivateCall]).
+     */
+    val privateCommencement: CommencementMode = CommencementMode.UNSPECIFIED,
 ) {
     val dark: Boolean get() = theme == THEME_DARK
 
@@ -115,6 +121,7 @@ class SettingsStore(context: Context) {
             .putInt(K_PANEL_W, next.panelWidthDp)
             .putString(K_VIDEO_MIC, next.videoMicPolicy)
             .putString(K_VIDEO_CAM, next.videoCamera)
+            .putString(K_COMMENCEMENT, next.privateCommencement.name)
             .apply()
     }
 
@@ -151,7 +158,9 @@ class SettingsStore(context: Context) {
         autoReturnHeadset = prefs.getBoolean(K_AUTORETURN, true),
         panelWidthDp = prefs.getInt(K_PANEL_W, 400).coerceIn(320, 1200),
         videoMicPolicy = if (prefs.getString(K_VIDEO_MIC, null) == VideoMicPolicy.VIDEO) VideoMicPolicy.VIDEO else VideoMicPolicy.VOICE,
-        videoCamera = if (prefs.getString(K_VIDEO_CAM, null) == VideoCamera.BACK) VideoCamera.BACK else VideoCamera.FRONT)
+        videoCamera = if (prefs.getString(K_VIDEO_CAM, null) == VideoCamera.BACK) VideoCamera.BACK else VideoCamera.FRONT,
+        privateCommencement = runCatching { CommencementMode.valueOf(prefs.getString(K_COMMENCEMENT, null) ?: "") }
+            .getOrDefault(CommencementMode.UNSPECIFIED))
 
     private companion object {
         const val K_HOST = "csc_host"; const val K_PORT = "csc_port"; const val K_LOGIN = "login_id"
@@ -166,5 +175,6 @@ class SettingsStore(context: Context) {
         const val K_HEADSET = "preferred_headset"; const val K_AUTORETURN = "auto_return_headset"
         const val K_PANEL_W = "panel_width_dp"
         const val K_VIDEO_MIC = "video_mic_policy"; const val K_VIDEO_CAM = "video_camera"
+        const val K_COMMENCEMENT = "private_commencement"
     }
 }

@@ -248,7 +248,8 @@ public class CscTests
         var up = UserProfileDoc.Parse("""
             <mcptt-user-profile XUI-URI="tel:+82500000001"><ruleset><actions>
             <allow-cancel-emergency-alert>false</allow-cancel-emergency-alert>
-            <allow-cancel-group-emergency>false</allow-cancel-group-emergency></actions></ruleset>
+            <allow-cancel-group-emergency>false</allow-cancel-group-emergency>
+            <allow-private-call>true</allow-private-call><allow-automatic-commencement>true</allow-automatic-commencement></actions></ruleset>
             <Common><MCPTT-group-call><EmergencyAlert><entry entry-info="DedicatedGroup"><uri-entry>sip:g002@ptt</uri-entry></entry></EmergencyAlert></MCPTT-group-call></Common>
             <OnNetwork><MCPTTGroupInfo><entry><uri-entry>sip:g1@ptt</uri-entry></entry></MCPTTGroupInfo></OnNetwork></mcptt-user-profile>
             """);
@@ -268,9 +269,15 @@ public class CscTests
         Assert.False(k.EmergencyAlert);
         Assert.False(k.CancelGroupEmergency);                       // 앱은 «내가 올린 조건» 과 OR (TS 24.379 §6.3.3.1.13.4)
         Assert.False(k.CancelImminentPeril);
+        Assert.True(up.Value.AllowAutomaticCommencement);
+        Assert.False(up.Value.AllowManualCommencement);
+        Assert.True(k.PrivateCallAuto);                             // allow-private-call ∧ 방식별 인가(TS 24.484 표 8.3.2.7-8~10)
+        Assert.False(k.PrivateCallManual);
+        Assert.False(k.PrivateCallForceAuto);
         var none = Capabilities.Of(null, null);
         Assert.False(none.UserProfileKnown);
         Assert.True(none.CancelEmergencyAlert);                     // 못 받은 문서는 허용
+        Assert.True(none.PrivateCallForceAuto);
         Assert.False(UserProfileDoc.Parse("<group/>").Ok);
 
         var sc = ServiceConfigDoc.Parse("""

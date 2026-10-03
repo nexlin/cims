@@ -317,6 +317,9 @@ static const char* kUserProfileXml = R"(<?xml version="1.0" encoding="UTF-8"?>
     <cp:rule id="mcptt-user-authorisation">
       <cp:actions>
         <allow-private-call>true</allow-private-call>
+        <allow-manual-commencement>true</allow-manual-commencement>
+        <allow-automatic-commencement>true</allow-automatic-commencement>
+        <allow-force-auto-answer>false</allow-force-auto-answer>
         <allow-emergency-group-call>true</allow-emergency-group-call>
         <allow-emergency-private-call>true</allow-emergency-private-call>
         <allow-cancel-group-emergency>false</allow-cancel-group-emergency>
@@ -385,6 +388,9 @@ TEST(CmsDoc, ParseUserProfile) {
     EXPECT_FALSE(d.allowCancelEmergencyAlert);
     EXPECT_TRUE(d.allowEmergencyPrivateCall);
     EXPECT_FALSE(d.allowAdhocGroupCall);                       // cims: 확장도 로컬 이름으로 읽힌다
+    EXPECT_TRUE(d.allowManualCommencement);                    // 개시 방식 요청 인가(§8.3.2.1 11)viii)~x))
+    EXPECT_TRUE(d.allowAutomaticCommencement);
+    EXPECT_FALSE(d.allowForceAutoAnswer);
 
     // 규격 요소 <allow-adhoc-group-call>(TS 24.484 §8.3.2.1) 도 같은 필드로
     UserProfileDoc s;
@@ -396,6 +402,7 @@ TEST(CmsDoc, ParseUserProfile) {
     EXPECT_FALSE(s.allowImminentPerilCall);
     EXPECT_FALSE(s.allowEmergencyGroupCall);
     EXPECT_FALSE(s.allowCancelImminentPeril);
+    EXPECT_FALSE(s.allowManualCommencement || s.allowAutomaticCommencement || s.allowForceAutoAnswer);
     EXPECT_TRUE(UserProfileDoc().allowPrivateCall);            // 문서를 받지 못한 상태의 기본값 = 게이트 없음
     EXPECT_TRUE(s.emergencyGroup.uri.empty());
     EXPECT_EQ(s.maxAffiliationsN2, -1);
@@ -461,6 +468,17 @@ TEST(CmsDoc, CapabilitiesFromUserProfile) {
     Capabilities p = Capabilities::of(&np, nullptr);
     EXPECT_FALSE(p.privateCall);                               // 이름 경계 — -media-protection 을 잡지 않는다
     EXPECT_FALSE(p.emergencyPrivateCall);
+
+    // 개별 호 개시 방식 = allow-private-call ∧ 방식별 인가(TS 24.484 표 8.3.2.7-8~10) — 미수신이면 전부 허용
+    EXPECT_TRUE(c.privateCallManual && c.privateCallAuto);
+    EXPECT_FALSE(c.privateCallForceAuto);
+    EXPECT_TRUE(none.privateCallManual && none.privateCallAuto && none.privateCallForceAuto);
+    UserProfileDoc fa;
+    ASSERT_TRUE(UserProfileDoc::parse("<mcptt-user-profile><ruleset><actions><allow-private-call>false</allow-private-call>"
+                                      "<allow-force-auto-answer>true</allow-force-auto-answer><allow-manual-commencement>true"
+                                      "</allow-manual-commencement></actions></ruleset></mcptt-user-profile>", fa));
+    Capabilities f = Capabilities::of(&fa, nullptr);
+    EXPECT_FALSE(f.privateCallForceAuto || f.privateCallManual || f.privateCallAuto);   // 개별 호 인가가 없으면 방식도 없다
 
     // 애드혹 = 사용자 인가 ∧ 시스템 지원(service configuration). 문서를 받지 못했으면 지원 여부로 막지 않는다.
     UserProfileDoc au;

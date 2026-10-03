@@ -929,7 +929,12 @@ int main(int argc, char** argv) {
         s.callId = ls.incoming.callId;
         if (o.roster && ls.incoming.isMcptt && !ls.incoming.mcptt.privateCall)   // 성립하면 코어가 세션 식별자로 구독한다
             eng.subscribeConference(acc, ls.incoming.groupId, true);
-        if (!ls.incoming.isMcptt) {
+        // MC 착신은 코어가 개시 방식대로 받는다 — 수동(상대가 Answer-Mode: Manual 요청, TS 24.379 §11.1.1.2.1.2 10))이면 사용자 대신 받는다
+        const CommencementMode cm = ls.incoming.commencement;
+        s.extra += std::string(",\"commencement\":\"") +
+                   (cm == CommencementMode::Auto ? "auto" : cm == CommencementMode::Manual ? "manual"
+                    : cm == CommencementMode::ForceAuto ? "force" : "") + "\"";
+        if (!ls.incoming.isMcptt || cm == CommencementMode::Manual) {
             CallOptions co; co.video = ls.incoming.video && o.video;
             r = eng.answer(s.callId, co);
             if (!r.ok) { s.outcome = "answer_failed"; s.code = r.code; s.reason = r.reason; rc = 4; return finish(s.callId); }

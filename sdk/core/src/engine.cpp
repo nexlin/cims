@@ -1768,6 +1768,7 @@ public:
         }
         McpttInfo mi = mcptt::parseMcpttInfo(whole);
         bool autoAnswer = false;
+        CommencementMode commencement = CommencementMode::Unspecified;
         if (mi.present) {
             // MCPTT 착신 — floor 소켓은 **180 전에** 바인드해야 한다(pjsua 는 여기서 응답 SDP 를 한 번 만들고
             // 200 에 재사용하므로, 늦으면 m=application 0 이 나가 CSP 가 착신 leg 의 floor 포트를 모른다).
@@ -1790,9 +1791,10 @@ public:
                 call->mcptt->micOpen = true;                                                 // 전이중 — 마이크 상시
                 try { markNoFloorCall(call->getInfo().callIdString, true); } catch (pj::Error&) {}   // answer 의 i=speech·timer
             }
-            // 개시 방식 = 초대의 Answer-Mode·Priv-Answer-Mode 와 단말 설정(TS 24.379 §10.1.1.2.1.2 7)·8))
-            autoAnswer = mcptt::autoCommencement(detail::headerValue(whole, "Answer-Mode"),
+            // 개시 방식 = 초대의 Answer-Mode·Priv-Answer-Mode 와 단말 설정(TS 24.379 §10.1.1.2.1.2 7)·8) · §11.1.1.2.1.2 9)·10))
+            commencement = mcptt::commencementOf(detail::headerValue(whole, "Answer-Mode"),
                                                  detail::headerValue(whole, "Priv-Answer-Mode"), cfg.autoAnswerMcptt);
+            autoAnswer = commencement != CommencementMode::Manual;
         }
         CallInfo snap;
         o_->updateCall(prm.callId, [&](CallInfo& c) {
@@ -1804,6 +1806,7 @@ public:
             c.calledParty = detail::uriUser(detail::headerValue(whole, "P-Called-Party-ID"));
             if (mi.present) {
                 c.isMcptt = true; c.mcptt = mi; c.groupId = call->mcptt->groupId;
+                c.commencement = commencement;
                 c.sessionUri = call->mcptt->sessionUri;
                 c.halfDuplex = !mi.noFloorCtrl;
                 c.condition.emergency = call->mcptt->emergency; c.condition.imminentPeril = call->mcptt->imminentPeril;
@@ -1859,6 +1862,10 @@ public:
             o_->log(1, "mcvideo tc socket bind failed — answer without transmission control");
         }
         mv.contactSet = setDialogContactParams(prm.callId, mcvideo::contactFeatureParams());
+        // 개시 방식 = 초대의 Answer-Mode·Priv-Answer-Mode 와 단말 설정(TS 24.281 §9.2.1.2.1.2 7)·8)).
+        const CommencementMode commencement = mcptt::commencementOf(detail::headerValue(whole, "Answer-Mode"),
+                                                                    detail::headerValue(whole, "Priv-Answer-Mode"), cfg.autoAnswerMcvideo);
+        const bool autoAnswer = commencement != CommencementMode::Manual;
         CallInfo snap;
         o_->updateCall(prm.callId, [&](CallInfo& c) {
             c.accountId = accountId_;
@@ -1866,12 +1873,10 @@ public:
             c.state = CallState::Incoming;
             c.remoteUri = remote;
             c.video = true;                                                   // 초대 offer 에 m=video 가 있다
+            c.commencement = commencement;
             call->projectMcVideo(c);
         }, &snap);
         o_->ctl.post([o = o_, call, id = prm.callId] { o->calls[id].reset(call); });
-        // 개시 방식 = 초대의 Answer-Mode·Priv-Answer-Mode 와 단말 설정(TS 24.281 §9.2.1.2.1.2 7)·8)).
-        const bool autoAnswer = mcptt::autoCommencement(detail::headerValue(whole, "Answer-Mode"),
-                                                        detail::headerValue(whole, "Priv-Answer-Mode"), cfg.autoAnswerMcvideo);
         if (!autoAnswer) {
             // 그룹 호 수동 개시(§6.2.3.2.2) — 사용자 수락 전에 183(Contact = MCVideo 태그, P-Answer-State: Unconfirmed — RFC 4964).
             //   180 은 개별 호의 수동 개시(§6.2.3.2.1)다. 자동 개시는 임시 응답 없이 곧바로 200(§6.2.3.1.2).
@@ -3242,6 +3247,7 @@ static int startMcptt(Engine::Impl* o, int accountId, const std::string& id, boo
     o->updateCall(callId, [&](CallInfo& c) {
         c.accountId = accountId; c.dir = CallDir::Outgoing; c.state = CallState::Outgoing;
         c.remoteUri = "sip:" + id + "@" + cfg.domain;
+        if (isPrivate) c.commencement = opts.commencement;               // 요청한 개시 방식(§11.1.1.2.1.1 14))
         call->projectMcptt(c);                                            // onCallState(CALLING) 가 먼저 투영했으면 no-op
     });
     const bool broadcast = call->mcptt->broadcast;

@@ -220,6 +220,7 @@ internal unsafe struct cimsue_call_info_t
     public int video_request;
     public int warning_code;
     public byte* warning_text;
+    public int commencement;
 }
 
 [StructLayout(LayoutKind.Sequential)]
@@ -775,6 +776,9 @@ internal unsafe struct cimsue_user_profile_doc_t
     public int allow_adhoc_group_call;
     public int allow_cancel_group_emergency;
     public int allow_cancel_imminent_peril;
+    public int allow_manual_commencement;
+    public int allow_automatic_commencement;
+    public int allow_force_auto_answer;
 }
 
 [StructLayout(LayoutKind.Sequential)]
@@ -863,6 +867,9 @@ internal struct cimsue_capabilities_t
     public int max_affiliations_n2;
     public int cancel_group_emergency;
     public int cancel_imminent_peril;
+    public int private_call_manual;
+    public int private_call_auto;
+    public int private_call_force_auto;
 }
 
 /// <summary>cimsue_struct_id_t — ABI 자기검사용 구조체 id (헤더와 같은 순서).</summary>

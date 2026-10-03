@@ -47,10 +47,12 @@ import androidx.activity.compose.BackHandler
 import com.cims.ue.core.account.SsoProvisioner
 import com.cims.ue.core.contacts.CompanyContact
 import com.cims.ue.core.contacts.CompanyDirectoryStore
+import com.cims.ue.ptt.CallRules
 import com.cims.ue.ptt.HwPtt
 import com.cims.ue.ptt.GroupCallState
 import com.cims.ue.ptt.PttController
 import com.cims.ue.ptt.R
+import com.cims.ue.sdk.CommencementMode
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -256,6 +258,8 @@ private fun ContactDetailView(
                 RoundAction("긴급", Ct.Red) { st.ctl?.startEmergencyPrivateCall(peer) }
                 RoundAction("문자", Ct.TextDim) { onOpenThread(peer) }
             }
+            Spacer(Modifier.height(18.dp))
+            CommencementRow(st)
         }
         Spacer(Modifier.height(30.dp))
         HorizontalDivider(color = Ct.Border, thickness = 0.5.dp)
@@ -264,6 +268,40 @@ private fun ContactDetailView(
         if (orgName.isNotBlank()) {
             InfoRow("소속", orgName)
             HorizontalDivider(color = Ct.Border, thickness = 0.5.dp)
+        }
+    }
+}
+
+/**
+ * 개별 통화의 «상대 응답» — 상대 단말에 요청하는 개시 방식(TS 24.379 §11.1.1.2.1.1 14) — RFC 5373). 상대 설정(헤더 없음) · 자동 응답
+ * (`Answer-Mode: Auto`) · 수동 응답(`Answer-Mode: Manual`) · 강제 자동(`Priv-Answer-Mode: Auto`). user profile 이 인가한 방식만 보인다
+ * (allow-*-commencement·allow-force-auto-answer). 고른 값은 남아 이 화면·목록·메시지의 모든 개별 통화 발신이 쓴다.
+ */
+@Composable
+private fun CommencementRow(st: PttUiState) {
+    val ctl = st.ctl ?: return
+    val chosen by ctl.privateCommencement.collectAsState()
+    val profile by ctl.userProfile.collectAsState()
+    val allowed = profile?.commencements
+    val modes = listOf(CommencementMode.UNSPECIFIED to "상대 설정", CommencementMode.AUTO to "자동 응답",
+                       CommencementMode.MANUAL to "수동 응답", CommencementMode.FORCE_AUTO to "강제 자동")
+        .filter { (m, _) -> allowed == null || m in allowed }
+    if (modes.size < 2) return                                      // 고를 것이 없다(개별 통화 인가 없음 또는 한 방식뿐)
+    val shown = CallRules.effectiveCommencement(chosen, allowed)
+    Column(Modifier.fillMaxWidth().padding(horizontal = 4.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        Text("상대 응답", color = Ct.TextFaint, fontSize = 11.sp)
+        Row(Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            modes.forEach { (m, label) ->
+                val on = m == shown
+                Box(
+                    Modifier.clip(RoundedCornerShape(8.dp))
+                        .background(if (on) Ct.Mint else Ct.GrayDim)
+                        .clickable(enabled = !on) { ctl.setPrivateCommencement(m) }
+                        .padding(horizontal = 10.dp, vertical = 7.dp),
+                ) {
+                    Text(label, color = if (on) Ct.OnMint else Ct.TextDim, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                }
+            }
         }
     }
 }
@@ -293,15 +331,33 @@ fun PrivateCallOverlay(st: PttUiState, s: GroupCallState) {
             val talking = s.speaker
             Text(
                 when {
+                    s.awaitingAnswer -> "통화 요청 — 받으면 연결됩니다"
                     !s.active && s.callId < 0 -> "연결 중…"
                     talking?.self == true -> "발언 중"
                     talking != null -> "상대 발언 중"
                     s.fullDuplex -> "PTT 를 누르고 말하세요 (동시 발화 가능)"
                     else -> "PTT 를 누르고 말하세요"
                 },
-                color = if (talking != null) Ct.Mint else Ct.TextDim, fontSize = 13.sp,
+                color = if (talking != null || s.awaitingAnswer) Ct.Mint else Ct.TextDim, fontSize = 13.sp,
             )
             Spacer(Modifier.weight(1f))
+            if (s.awaitingAnswer) {
+                // 상대가 수동 응답을 요청한 착신(TS 24.379 §11.1.1.2.1.2 10)) — 받기 전에는 PTT 가 없다
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                    Text("거절", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.weight(1f).clip(RoundedCornerShape(50)).background(Ct.Red)
+                            .clickable { st.ctl?.declinePrivateCall(s.groupId) }
+                            .padding(vertical = 14.dp))
+                    Text("받기", color = Ct.OnMint, fontSize = 15.sp, fontWeight = FontWeight.Bold,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.weight(1f).clip(RoundedCornerShape(50)).background(Ct.Mint)
+                            .clickable { st.ctl?.answerPrivateCall(s.groupId) }
+                            .padding(vertical = 14.dp))
+                }
+                Spacer(Modifier.height(10.dp))
+                return@Column
+            }
             // 화면 PTT 바 — 1:1 통화 화면에서는 HW 키 단말에도 함께 제공(둘 다 동작).
             PttBar(floor = s.floorState, enabled = true, listenOnly = false,
                 queuePosition = s.queuePosition, modifier = Modifier.fillMaxWidth(),

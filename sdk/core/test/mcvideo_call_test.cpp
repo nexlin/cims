@@ -1093,6 +1093,13 @@ TEST(McvSip, CommencementFollowsAnswerMode) {
     EXPECT_FALSE(autoCommencement("", "", false));
     EXPECT_TRUE(autoCommencement("Manual", "Auto", false));       // Priv-Answer-Mode: Auto 가 우선(RFC 5373 §4.2)
     EXPECT_TRUE(autoCommencement("", "auto;require", false));
+    // 방식 — 강제 자동 = Priv-Answer-Mode: Auto, Priv-Answer-Mode: Manual = 수동(TS 24.379 §11.1.1.2.1.2 9)c)·10)c))
+    using mcptt::commencementOf;
+    EXPECT_EQ(commencementOf("", "Auto", false), CommencementMode::ForceAuto);
+    EXPECT_EQ(commencementOf("Auto", "Manual", true), CommencementMode::Manual);
+    EXPECT_EQ(commencementOf("Auto", "", true), CommencementMode::Auto);
+    EXPECT_EQ(commencementOf("Auto", "", false), CommencementMode::Manual);
+    EXPECT_EQ(commencementOf("", "", true), CommencementMode::Auto);
 }
 
 // `Answer-Mode: Manual` 초대는 단말 설정이 자동이어도 수동 개시(183) — 사용자가 거절하면 480 + Warning 110(§6.2.3.2.2 2)).

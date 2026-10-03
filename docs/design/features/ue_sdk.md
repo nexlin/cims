@@ -195,6 +195,10 @@ C++ 공개 표면은 `cimsue/engine.h` 의 `Engine` 하나이며 계정·호를 
   `cancelEmergencyAlert` — 그룹 긴급 해제는 단말 쪽이 local policy(TS 24.379 §6.2.8.1.7)이고 서버 판정이 개시자 ∨ allow-cancel-group-emergency
   (§6.3.3.1.13.4)라, 앱은 `cancelGroupEmergency` ∨ `McpttCondition.mine` 으로 [긴급 해제] 를 연다. 임박 해제는 개시자 예외가 없다(§6.2.8.1.10).
   C API(`cimsue_capabilities_t.cancel_group_emergency`·`cancel_imminent_peril`)·.NET(`Capabilities.CancelGroupEmergency`·`CancelImminentPeril`)·Kotlin 같은 이름.
+  개별 호 개시 방식 인가 = `privateCallManual`·`privateCallAuto`·`privateCallForceAuto`(allow-private-call ∧ allow-manual-commencement·
+  allow-automatic-commencement·allow-force-auto-answer, TS 24.484 §8.3.2.1 11)viii)~x)) — 앱의 «상대 응답» 선택은 허용된 방식만 보인다(지정 안 함은
+  `privateCall` 만 본다, Kotlin `allowsCommencement(mode)`). C API `private_call_manual`·`private_call_auto`·`private_call_force_auto`
+  (문서 `allow_manual_commencement`·`allow_automatic_commencement`·`allow_force_auto_answer`), .NET `PrivateCallManual`·`PrivateCallAuto`·`PrivateCallForceAuto`.
 - **UE initial configuration**(TS 24.484 §7.2) — `CscClient::fetchUeInitConfig(mcsUeId)` = 로그인 전 문서(토큰 없음), XCAP URI
   `/org.3gpp.mcptt.ue-init-config/users/sip:<MCS UE ID>/<MCS UE ID>`(§7.2.1.1, MCS UE ID = `AccountConfig.instanceId`) → `UeInitConfigDoc` 의
   참여 기능 PSI 셋(`<on-network><anyExt>` 의 `MCPTT-Service-Details`·`MCVideo-Service-Details`·`MCData-Service-Details` `Server-URI`,
@@ -367,6 +371,10 @@ C++ 공개 표면은 `cimsue/engine.h` 의 `Engine` 하나이며 계정·호를 
   서버는 user profile 의 개시 방식 인가로 판정하고(자동 125 · 수동 126) 받은 `Answer-Mode` 를 착신 INVITE 에 옮긴다 — 착신 단말은 그 값으로 자동·수동
   개시를 정한다(`mcptt/commencement.h`). 그룹 호에는 싣지 않는다(멤버 초대의 개시 방식은 제어 기능 몫). `cimsue-cli group-call <번호> --private --answer-mode auto|manual|force`.
   C API `cimsue_group_call_options_t.commencement`(`cimsue_commencement_t`), .NET `GroupCallOptions.Commencement`(`CommencementMode`).
+  요청한 방식은 `CallInfo.commencement` 에 남는다. 앱은 user profile 이 인가한 방식만 고르게 한다(`Capabilities.privateCall*` — 위 «정책 게이트»).
+- **착신 MC 호의 개시 방식 노출** — `CallInfo.commencement` = 코어가 따른 방식(아래 «개시 방식»): `Auto`·`ForceAuto` 면 코어가 200 을 보내고,
+  **`Manual` 이면 180 만 보내고 앱의 `answer()`·`reject()` 를 기다린다**. 앱은 이 값으로 받기 화면을 띄운다(자동 개시 호에 받기 화면이 깜박이지 않게).
+  C API `cimsue_call_info_t.commencement`, .NET `CallInfo.Commencement`. `cimsue-cli answer` 는 수동이면 대신 받고 결과에 `commencement` 를 싣는다.
 - **MC 서비스 등록 태그**(TS 24.379 §7.2.1AA · TS 24.282 §7.2.1) — 서비스마다 특성 태그 하나를 REGISTER Contact 에 싣고 ICSI 는 `+g.3gpp.icsi-ref`
   한 목록에 모은다: `AccountConfig.mcpttEnabled` = `+g.3gpp.mcptt` + ICSI mcptt(`ServiceProfile::toAccount` 가 kind ptt 에 켠다 — 빼고 다시 등록하면
   MCPTT 로그오프) · `mcdataMsrp` = SDS 지원 `+g.3gpp.mcdata.sds` + ICSI mcdata·mcdata.sds(SDS 클라이언트는 서버발 MSRP 배포도 받는다) ·
@@ -632,8 +640,9 @@ MCVideo PSI. 동작(구현 — 시험 `McvSip`·`McvCall`, 계약 K3 골든과 �
 - **MCVideo 서비스 인가·서비스 설정**(TS 24.281 §7.2.2) — 위 «MC 서비스 인가·서비스 설정» 의 MCVideo 몫: mcvideo-info 토큰·client ID +
   poc-settings(Answer-Mode = `autoAnswerMcvideo`). 규격의 착신 참여 기능은 이 설정을 받기 전의 초대를 480 `146` 으로 거절한다(§9.2.1.3.2 3)).
 - **개시 방식**(MCPTT·MCVideo 공통 — TS 24.379 §10.1.1.2.1.2 7)·8) · TS 24.281 §9.2.1.2.1.2 7)·8), `mcptt/commencement.h`) — 초대의 `Answer-Mode`·
-  `Priv-Answer-Mode`(RFC 5373)와 단말 설정(`autoAnswerMcptt`·`autoAnswerMcvideo`)으로 정한다: `Priv-Answer-Mode: Auto` = 자동 ·
-  `Answer-Mode: Manual` = 수동(설정이 자동이어도 따른다) · `Answer-Mode: Auto` 또는 헤더 없음 = 단말 설정(설정이 수동이면 자동 응답을 허용하지 않는다).
+  `Priv-Answer-Mode`(RFC 5373)와 단말 설정(`autoAnswerMcptt`·`autoAnswerMcvideo`)으로 정한다: `Priv-Answer-Mode: Auto` = 강제 자동 ·
+  `Priv-Answer-Mode: Manual` = 수동 · `Answer-Mode: Manual` = 수동(설정이 자동이어도 따른다) · `Answer-Mode: Auto` 또는 헤더 없음 = 단말 설정
+  (설정이 수동이면 자동 응답을 허용하지 않는다) — 개별 호는 TS 24.379 §11.1.1.2.1.2 9)·10). 결과는 `CallInfo.commencement`.
 - **수동 개시**(TS 24.281 §6.2.3.2.2 — 그룹 호) — 183(`P-Answer-State: Unconfirmed` + MCVideo Contact 태그)만 보내고 앱의 `answer()` 를 기다린다
   (180 은 개별 호의 수동 개시 §6.2.3.2.1 — MCVideo 개별 호는 V8). MCVideo 호의 수락은 `CallOptions.video` 와 무관하게 audio + video + 제어 채널이다
   (§6.2.2 — 자동 수락과 같은 미디어 구성).

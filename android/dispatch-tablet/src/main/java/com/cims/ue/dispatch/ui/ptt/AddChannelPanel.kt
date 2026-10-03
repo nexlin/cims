@@ -49,6 +49,7 @@ import com.cims.ue.dispatch.ui.PillButton
 import com.cims.ue.dispatch.ui.SidePanelFrame
 import com.cims.ue.dispatch.ui.Tokens
 import com.cims.ue.dispatch.ui.Type
+import com.cims.ue.sdk.CommencementMode
 
 /** 사용자 한 줄. */
 data class UserRowUi(
@@ -183,6 +184,8 @@ fun AddChannelPanel(
     var query by remember { mutableStateOf("") }
     var emergency by remember { mutableStateOf(false) }
     var fullDuplex by remember { mutableStateOf(false) }
+    val commencement by channels.commencement.collectAsStateWithLifecycle()
+    val commencementChoices by channels.commencementChoices.collectAsStateWithLifecycle()
     val actions = addChannelActions(book, query, picked, canCreate, holding)
 
     // 걸었다 — 고름·입력을 비우고 패널을 닫는다(새 카드가 내 채널에 선다). 실패면 남겨 두고 사유를 적는다.
@@ -202,6 +205,7 @@ fun AddChannelPanel(
         actions = actions, targetLabel = actions.privateTarget?.let { book.nameOf(it).ifBlank { it } }.orEmpty(),
         emergency = emergency, onEmergency = { emergency = !emergency },
         fullDuplex = fullDuplex, onFullDuplex = { fullDuplex = !fullDuplex },
+        commencement = commencement, commencementChoices = commencementChoices, onCommencement = channels::setCommencement,
         holding = holding, error = error,
         pinned = pinned, onPin = onPin, onClose = onClose,
         onPrivate = { actions.privateTarget?.let { channels.startPrivate(it, fullDuplex, emergency, done) } },
@@ -210,6 +214,11 @@ fun AddChannelPanel(
         onGroup = onGroup,
         personAt = channels::personAt, onPerson = onPerson)
 }
+
+/** «상대 응답» 알약 글 — 개별 통화가 상대 단말에 요청하는 개시 방식(RFC 5373). */
+private val COMMENCEMENT_LABEL = mapOf(
+    CommencementMode.UNSPECIFIED to "상대 설정", CommencementMode.AUTO to "자동",
+    CommencementMode.MANUAL to "수동", CommencementMode.FORCE_AUTO to "강제 자동")
 
 /** 채널 추가 본문 — **순수 컴포저블**(거르기만 제 상태). */
 @Composable
@@ -227,6 +236,10 @@ fun AddChannelPanelContent(
     onEmergency: () -> Unit = {},
     fullDuplex: Boolean = false,
     onFullDuplex: () -> Unit = {},
+    /** 개별 통화 «상대 응답» — 지금 값과 고를 수 있는 방식(인가). 둘 이상일 때만 줄이 선다. */
+    commencement: CommencementMode = CommencementMode.UNSPECIFIED,
+    commencementChoices: List<CommencementMode> = emptyList(),
+    onCommencement: (CommencementMode) -> Unit = {},
     holding: Boolean = false,
     error: String? = null,
     pinned: Boolean = false,
@@ -289,6 +302,16 @@ fun AddChannelPanelContent(
                 FilterPill("전이중(개별)", fullDuplex, onClick = onFullDuplex)
                 if (picked.isNotEmpty()) TextButton(onClick = onClear, enabled = !holding,
                     contentPadding = PaddingValues(horizontal = 6.dp)) { Text("선택 해제", fontSize = Type.meta) }
+            }
+            // 상대 응답(개별 통화만 — TS 24.379 §11.1.1.2.1.1 14)): 상대 설정 · 자동 응답 · 수동 응답 · 강제 자동. 인가된 방식만, 고른 값은 남는다.
+            if (actions.privateTarget != null && commencementChoices.size > 1) {
+                Row(Modifier.horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("상대 응답", fontSize = Type.meta, color = p.muted)
+                    commencementChoices.forEach { m ->
+                        FilterPill(COMMENCEMENT_LABEL.getValue(m), m == commencement, onClick = { onCommencement(m) })
+                    }
+                }
             }
             error?.let { Text(it, fontSize = Type.meta, color = p.emg) }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

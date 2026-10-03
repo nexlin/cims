@@ -228,6 +228,9 @@ UserProfileDoc toCxx(const cimsue_user_profile_doc_t* c) {
     u.allowAdhocGroupCall = c->allow_adhoc_group_call != 0;
     u.allowCancelGroupEmergency = c->allow_cancel_group_emergency != 0;
     u.allowCancelImminentPeril = c->allow_cancel_imminent_peril != 0;
+    u.allowManualCommencement = c->allow_manual_commencement != 0;
+    u.allowAutomaticCommencement = c->allow_automatic_commencement != 0;
+    u.allowForceAutoAnswer = c->allow_force_auto_answer != 0;
     return u;
 }
 
@@ -304,6 +307,7 @@ void fill(cimsue_call_info_t& o, const CallInfo& c, std::vector<cimsue_media_sou
     o.video_request = (cimsue_video_request_state_t)c.videoRequest;
     o.warning_code = c.warningCode;
     o.warning_text = C(c.warningText);
+    o.commencement = (cimsue_commencement_t)c.commencement;
 }
 
 void fill(cimsue_video_request_event_t& o, const VideoRequestEvent& e) {
@@ -555,6 +559,9 @@ struct UserProfileHolder {
         out.allow_adhoc_group_call = B(cxx.allowAdhocGroupCall);
         out.allow_cancel_group_emergency = B(cxx.allowCancelGroupEmergency);
         out.allow_cancel_imminent_peril = B(cxx.allowCancelImminentPeril);
+        out.allow_manual_commencement = B(cxx.allowManualCommencement);
+        out.allow_automatic_commencement = B(cxx.allowAutomaticCommencement);
+        out.allow_force_auto_answer = B(cxx.allowForceAutoAnswer);
     }
 };
 
@@ -1899,6 +1906,8 @@ void CIMSUE_CALL cimsue_capabilities_of(const cimsue_user_profile_doc_t* user_pr
     out->emergency_alert = B(k.emergencyAlert); out->cancel_emergency_alert = B(k.cancelEmergencyAlert);
     out->adhoc_group_call = B(k.adhocGroupCall); out->max_affiliations_n2 = k.maxAffiliationsN2;
     out->cancel_group_emergency = B(k.cancelGroupEmergency); out->cancel_imminent_peril = B(k.cancelImminentPeril);
+    out->private_call_manual = B(k.privateCallManual); out->private_call_auto = B(k.privateCallAuto);
+    out->private_call_force_auto = B(k.privateCallForceAuto);
 }
 
 namespace {

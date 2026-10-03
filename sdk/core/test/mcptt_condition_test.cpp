@@ -36,7 +36,9 @@ struct CondListener : Listener {
     std::vector<EmergencyAlert> alerts;
     std::vector<RequestResult> results;
     CallInfo lastState;
+    std::vector<CallInfo> incoming;
     void onCallState(const CallInfo& i) override { { std::lock_guard<std::mutex> lk(m); lastState = i; } cv.notify_all(); }
+    void onIncomingCall(const CallInfo& i) override { { std::lock_guard<std::mutex> lk(m); incoming.push_back(i); } cv.notify_all(); }
     void onMcpttCondition(const CallInfo& i, ConditionCause c) override {
         { std::lock_guard<std::mutex> lk(m); conds.emplace_back(i, c); }
         cv.notify_all();
@@ -263,6 +265,72 @@ TEST(McpttInvite, MemberInvitationRefresherUas) {
                               headerOf(ok, "To") + "\r\nCall-ID: " + cid + "\r\nCSeq: 2 BYE\r\nContent-Length: 0\r\n\r\n";
             srv.send(bye);
             ASSERT_FALSE(srv.recv("SIP/2.0 200").empty()) << "BYE " << g.want;
+        }
+    }
+    eng.stop();
+}
+
+// 착신 개별 호의 개시 방식(TS 24.379 §11.1.1.2.1.2 9)·10) · RFC 5373) — 단말 설정이 자동이어도 `Answer-Mode: Manual`·`Priv-Answer-Mode:
+//   Manual` 이면 180 만 보내고 사용자 수락(Engine::answer)을 기다린다 — CallInfo.commencement = Manual. `Answer-Mode: Auto` 는 곧바로 200.
+TEST(McpttInvite, PrivateCallCommencement) {
+    Engine eng;
+    CondListener l;
+    EngineConfig cfg;
+    cfg.logLevel = std::getenv("COND_LOG") ? 5 : 0;
+    cfg.nullAudioDevice = true;
+    {
+        cimsue_test::PjScope pj("pcm-port");
+        FakeServer probe;
+        cfg.udpPort = probe.port;
+    }
+    ASSERT_TRUE(eng.start(cfg, &l).ok);
+    {
+        cimsue_test::PjScope pj("pcm-test");
+        FakeServer srv;
+        AccountConfig ac;
+        ac.serverHost = "127.0.0.1"; ac.serverPort = srv.port; ac.transport = Transport::UDP;
+        ac.domain = "ptt.test"; ac.msisdn = "+82500000001"; ac.authId = "450000000000001@ptt.test"; ac.password = "x";
+        ac.instanceId = "urn:uuid:00000000-0000-4000-8000-000000000001";
+        ac.autoAnswerMcptt = true;
+        ASSERT_GE(eng.addAccount(ac), 0);
+        srv.peer = pj_sockaddr_in();
+        pj_str_t ip = pj_str(const_cast<char*>("127.0.0.1"));
+        pj_sockaddr_in_init(&srv.peer, &ip, (pj_uint16_t)cfg.udpPort);
+        struct Case { const char* header; CommencementMode want; };
+        int n = 0;
+        for (const Case& c : {Case{"Answer-Mode: Manual", CommencementMode::Manual}, Case{"Priv-Answer-Mode: Manual", CommencementMode::Manual},
+                              Case{"Answer-Mode: Auto", CommencementMode::Auto}}) {
+            const std::string cid = "pc-" + std::to_string(++n);
+            std::string inv = memberInvite(srv.port, cfg.udpPort, cid, "1800", "mcptt_psi", "");
+            const std::string pre = "<session-type>prearranged</session-type>";
+            inv.replace(inv.find(pre), pre.size(), "<session-type>private</session-type>");
+            inv.insert(inv.find("Supported: timer\r\n"), std::string(c.header) + "\r\n");
+            const size_t cl = inv.find("Content-Length: ");                            // 본문이 짧아졌다 — 길이를 다시 적는다
+            const size_t bodyLen = inv.size() - (inv.find("\r\n\r\n") + 4);
+            inv = inv.substr(0, cl) + "Content-Length: " + std::to_string(bodyLen) + inv.substr(inv.find("\r\n", cl));
+            srv.send(inv);
+            ASSERT_FALSE(srv.recv("SIP/2.0 180").empty()) << c.header;
+            ASSERT_TRUE(l.wait([&] { return l.incoming.size() == (size_t)n; })) << c.header;
+            CallInfo in;
+            { std::lock_guard<std::mutex> lk(l.m); in = l.incoming.back(); }
+            EXPECT_TRUE(in.mcptt.privateCall);
+            EXPECT_EQ(in.commencement, c.want) << c.header;
+            std::string ok;
+            if (c.want == CommencementMode::Manual) {
+                EXPECT_TRUE(srv.recv("SIP/2.0 200", 500).empty()) << c.header;   // 자동으로 받지 않는다
+                ASSERT_TRUE(eng.answer(in.callId).ok);
+            }
+            ok = srv.recv("SIP/2.0 200");
+            ASSERT_FALSE(ok.empty()) << c.header;
+            srv.callId = cid;
+            srv.ueContact = uriIn(headerOf(ok, "Contact"));
+            srv.cseq = 1;
+            srv.ackFor(ok);
+            std::string bye = "BYE " + srv.ueContact + " SIP/2.0\r\nVia: SIP/2.0/UDP 127.0.0.1:" + std::to_string(srv.port) +
+                              ";branch=z9hG4bKbye" + cid + "\r\nMax-Forwards: 70\r\nFrom: " + headerOf(ok, "From") + "\r\nTo: " +
+                              headerOf(ok, "To") + "\r\nCall-ID: " + cid + "\r\nCSeq: 2 BYE\r\nContent-Length: 0\r\n\r\n";
+            srv.send(bye);
+            ASSERT_FALSE(srv.recv("SIP/2.0 200").empty()) << "BYE " << c.header;
         }
     }
     eng.stop();
@@ -567,6 +635,7 @@ TEST(McpttPrivate, CommencementModeHeaders) {
             o.commencement = c.mode;
             int id = eng.startPrivateCall(acc, c.peer, o);
             ASSERT_GE(id, 0);
+            EXPECT_EQ(eng.callInfo(id).commencement, c.mode) << c.peer;      // 요청한 방식이 호에 남는다
             std::string inv = srv.recv("INVITE ");
             ASSERT_FALSE(inv.empty());
             EXPECT_EQ(headerOf(inv, "Answer-Mode"), c.answerMode) << c.peer;

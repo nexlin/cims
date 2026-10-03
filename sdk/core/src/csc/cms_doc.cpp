@@ -102,6 +102,9 @@ bool UserProfileDoc::parse(const std::string& xml, UserProfileDoc& out, std::str
     d.allowCancelEmergencyAlert = allowFlag(r, "allow-cancel-emergency-alert");
     d.allowEmergencyPrivateCall = allowFlag(r, "allow-emergency-private-call");
     d.allowAdhocGroupCall = allowFlag(r, "allow-adhoc-group-call");
+    d.allowManualCommencement = allowFlag(r, "allow-manual-commencement");
+    d.allowAutomaticCommencement = allowFlag(r, "allow-automatic-commencement");
+    d.allowForceAutoAnswer = allowFlag(r, "allow-force-auto-answer");
     out = d;
     return true;
 }
@@ -286,6 +289,9 @@ Capabilities Capabilities::of(const UserProfileDoc* up, const ServiceConfigDoc* 
     //   service configuration 을 받지 못했으면 지원 여부로는 막지 않는다.
     c.adhocGroupCall = u.allowAdhocGroupCall && (!sc || sc->adhocGroupCallSupport);
     c.maxAffiliationsN2 = u.maxAffiliationsN2 > 0 ? u.maxAffiliationsN2 : 0;
+    c.privateCallManual = u.allowPrivateCall && u.allowManualCommencement;
+    c.privateCallAuto = u.allowPrivateCall && u.allowAutomaticCommencement;
+    c.privateCallForceAuto = u.allowPrivateCall && u.allowForceAutoAnswer;
     return c;
 }
 

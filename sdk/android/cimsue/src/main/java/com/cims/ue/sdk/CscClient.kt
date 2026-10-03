@@ -305,6 +305,10 @@ data class UserProfileDoc(
     val allowCancelGroupEmergency: Boolean = true,
     /** allow-cancel-imminent-peril (11)xvii)) — 개시자 예외 없음(§6.2.8.1.10). */
     val allowCancelImminentPeril: Boolean = true,
+    /** 개별 호의 개시 방식 요청 인가(§8.3.2.1 11)viii)~x)) — [GroupCallOptions.commencement] 의 MANUAL·AUTO·FORCE_AUTO. */
+    val allowManualCommencement: Boolean = true,
+    val allowAutomaticCommencement: Boolean = true,
+    val allowForceAutoAnswer: Boolean = true,
 ) {
     internal fun toJni(): JniUserProfileDoc = JniUserProfileDoc().also { d ->
         d.etag = etag; d.userUri = userUri
@@ -318,6 +322,8 @@ data class UserProfileDoc(
         d.allowEmergencyPrivateCall = allowEmergencyPrivateCall; d.allowAdhocGroupCall = allowAdhocGroupCall
         d.allowPrivateCall = allowPrivateCall
         d.allowCancelGroupEmergency = allowCancelGroupEmergency; d.allowCancelImminentPeril = allowCancelImminentPeril
+        d.allowManualCommencement = allowManualCommencement; d.allowAutomaticCommencement = allowAutomaticCommencement
+        d.allowForceAutoAnswer = allowForceAutoAnswer
     }
     internal companion object {
         fun of(d: JniUserProfileDoc) = UserProfileDoc(d.etag, d.userUri,
@@ -327,7 +333,8 @@ data class UserProfileDoc(
             d.maxAffiliationsN2.takeIf { it >= 0 },
             d.allowEmergencyGroupCall, d.allowImminentPerilCall, d.allowActivateEmergencyAlert,
             d.allowCancelEmergencyAlert, d.allowEmergencyPrivateCall, d.allowAdhocGroupCall, d.allowPrivateCall,
-            d.allowCancelGroupEmergency, d.allowCancelImminentPeril)
+            d.allowCancelGroupEmergency, d.allowCancelImminentPeril,
+            d.allowManualCommencement, d.allowAutomaticCommencement, d.allowForceAutoAnswer)
     }
 }
 
@@ -454,7 +461,20 @@ data class Capabilities(
     val cancelGroupEmergency: Boolean = true,
     /** up.allow-cancel-imminent-peril. */
     val cancelImminentPeril: Boolean = true,
+    /** 개별 호에 요청할 수 있는 개시 방식([GroupCallOptions.commencement], TS 24.379 §11.1.1.2.1.1 14)) — up.allow-private-call ∧
+     *  allow-manual-commencement · allow-automatic-commencement · allow-force-auto-answer. 앱은 허용된 방식만 고르게 한다(UNSPECIFIED 는
+     *  [privateCall] 만 본다). */
+    val privateCallManual: Boolean = true,
+    val privateCallAuto: Boolean = true,
+    val privateCallForceAuto: Boolean = true,
 ) {
+    /** [mode] 를 개별 호에 요청할 수 있는가 — UNSPECIFIED(헤더 없음)는 [privateCall]. */
+    fun allowsCommencement(mode: CommencementMode): Boolean = privateCall && when (mode) {
+        CommencementMode.UNSPECIFIED -> true
+        CommencementMode.AUTO -> privateCallAuto
+        CommencementMode.MANUAL -> privateCallManual
+        CommencementMode.FORCE_AUTO -> privateCallForceAuto
+    }
     companion object {
         /** null = 그 문서를 아직 못 받음. */
         fun of(userProfile: UserProfileDoc?, serviceConfig: ServiceConfigDoc?): Capabilities {
@@ -462,7 +482,8 @@ data class Capabilities(
             val c = JniCapabilities.of(userProfile?.toJni(), serviceConfig?.toJni())
             return Capabilities(c.userProfileKnown, c.serviceConfigKnown, c.privateCall, c.emergencyGroupCall,
                 c.imminentPerilCall, c.emergencyPrivateCall, c.emergencyAlert, c.cancelEmergencyAlert,
-                c.adhocGroupCall, c.maxAffiliationsN2, c.cancelGroupEmergency, c.cancelImminentPeril)
+                c.adhocGroupCall, c.maxAffiliationsN2, c.cancelGroupEmergency, c.cancelImminentPeril,
+                c.privateCallManual, c.privateCallAuto, c.privateCallForceAuto)
         }
     }
 }

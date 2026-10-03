@@ -214,6 +214,11 @@ struct UserProfileDoc {
     bool allowCancelEmergencyAlert = true;     // allow-cancel-emergency-alert
     bool allowEmergencyPrivateCall = true;     // allow-emergency-private-call
     bool allowAdhocGroupCall = true;           // anyExt/allow-adhoc-group-call (§8.3.2.1 11)xxxviii)R), Rel-18 — 옛 서버 cims: 별칭도 같은 이름)
+    // 개별 호의 개시 방식 요청 인가(§8.3.2.1 11)viii)~x) · 표 8.3.2.7-8~10) — GroupCallOptions.commencement 의 Manual·Auto·ForceAuto.
+    //   서버 판정 = 403 126·125·143(TS 24.379 §11.1.1.3.1.1 11)·18)).
+    bool allowManualCommencement = true;       // allow-manual-commencement
+    bool allowAutomaticCommencement = true;    // allow-automatic-commencement
+    bool allowForceAutoAnswer = true;          // allow-force-auto-answer
     /** XML → 문서. 루트가 mcptt-user-profile 이 아니면 false. */
     CIMSUE_API static bool parse(const std::string& xml, UserProfileDoc& out, std::string* err = nullptr);
 };
@@ -327,6 +332,12 @@ struct Capabilities {
     bool cancelEmergencyAlert = true;          // up.allow-cancel-emergency-alert
     bool adhocGroupCall = true;                // up.allow-adhoc-group-call ∧ sc.allow-adhoc-group-call-support (TS 24.379 §17.2.2.1.1)
     int maxAffiliationsN2 = 0;                 // up.MaxAffiliationsN2, 0 = 미지정(N2 는 앱이 경고만 — 강제하지 않는다)
+    /** 개별 호에 요청할 수 있는 개시 방식(GroupCallOptions.commencement, TS 24.379 §11.1.1.2.1.1 14)) — 각각 up.allow-private-call ∧
+     *  up.allow-manual-commencement · allow-automatic-commencement · allow-force-auto-answer. 앱은 허용된 방식만 고르게 한다
+     *  (지정 안 함 = 헤더 없음은 privateCall 만 본다 — 착신 단말 설정대로). */
+    bool privateCallManual = true;
+    bool privateCallAuto = true;
+    bool privateCallForceAuto = true;
     /** nullptr = 그 문서를 아직 못 받음. */
     CIMSUE_API static Capabilities of(const UserProfileDoc* userProfile, const ServiceConfigDoc* serviceConfig);
 };

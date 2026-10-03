@@ -506,7 +506,8 @@ public sealed unsafe class Engine : IDisposable
                             c->rx_level, new McpttCondition(c->condition.emergency != 0, c->condition.imminent_peril != 0, c->condition.mine != 0,
                                                             c->condition.pending != 0, c->condition.last_code),
                             Utf8.Str(c->answer_state), NonAck(c), (McService)c->service, Utf8.Str(c->session_uri), c->video_send != 0,
-                            (VideoRequestState)c->video_request, c->warning_code, Utf8.Str(c->warning_text));
+                            (VideoRequestState)c->video_request, c->warning_code, Utf8.Str(c->warning_text),
+                            (CommencementMode)c->commencement);
     }
 
     private static string[] NonAck(cimsue_call_info_t* c)

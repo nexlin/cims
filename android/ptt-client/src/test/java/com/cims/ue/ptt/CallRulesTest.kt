@@ -1,5 +1,6 @@
 package com.cims.ue.ptt
 
+import com.cims.ue.sdk.CommencementMode
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -15,6 +16,27 @@ class CallRulesTest {
         assertFalse("영상 채널 없음", CallRules.acceptVideoInvitation("g103", videoChannel = null, alreadyInCall = false))
         assertFalse("이미 그 그룹 영상 호에 있다", CallRules.acceptVideoInvitation("g103", videoChannel = "g103", alreadyInCall = true))
         assertFalse(CallRules.acceptVideoInvitation("", videoChannel = "", alreadyInCall = false))
+    }
+
+    // TS 24.379 §11.1.1.2.1.1 14) — 상대 응답 방식은 고른 값, 인가가 없는 방식은 싣지 않는다(서버 403 125·126·143 전에)
+    @Test fun `개별 통화 상대 응답은 인가된 방식만`() {
+        val all = CommencementMode.entries.toSet()
+        val noForce = setOf(CommencementMode.UNSPECIFIED, CommencementMode.AUTO, CommencementMode.MANUAL)
+        assertEquals(CommencementMode.MANUAL, CallRules.effectiveCommencement(CommencementMode.MANUAL, all))
+        assertEquals(CommencementMode.UNSPECIFIED, CallRules.effectiveCommencement(CommencementMode.FORCE_AUTO, noForce))
+        assertEquals("프로파일 미수신 — 고른 값 그대로", CommencementMode.FORCE_AUTO,
+            CallRules.effectiveCommencement(CommencementMode.FORCE_AUTO, null))
+        assertEquals("개별 통화 인가 없음", CommencementMode.UNSPECIFIED,
+            CallRules.effectiveCommencement(CommencementMode.AUTO, emptySet()))
+    }
+
+    // TS 24.379 §11.1.1.2.1.2 10) — 수동 응답 요청 착신은 받기 전까지 [받기]·[거절]
+    @Test fun `수동 응답 착신만 수락을 기다린다`() {
+        assertTrue(CallRules.awaitingAnswer(incoming = true, ringing = true, commencement = CommencementMode.MANUAL))
+        assertFalse("코어가 자동으로 받는다", CallRules.awaitingAnswer(true, true, CommencementMode.AUTO))
+        assertFalse("강제 자동", CallRules.awaitingAnswer(true, true, CommencementMode.FORCE_AUTO))
+        assertFalse("이미 받았다", CallRules.awaitingAnswer(true, false, CommencementMode.MANUAL))
+        assertFalse("발신", CallRules.awaitingAnswer(false, true, CommencementMode.MANUAL))
     }
 
     // TS 24.379 §10.1.1.2.4.1 · TS 24.281 §9.2.1.2.4.1 — 망 끊김으로 잃은 prearranged 호(무전·영상)는 세션 식별자로 재합류한다

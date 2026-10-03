@@ -1,5 +1,7 @@
 package com.cims.ue.ptt
 
+import com.cims.ue.sdk.CommencementMode
+
 /**
  * 호 수락·거절 사유의 순수 판정 — 기기 없이 시험한다([CallRulesTest]).
  */
@@ -21,6 +23,21 @@ internal object CallRules {
      */
     fun rejoinLostSession(prearranged: Boolean, wasActive: Boolean, lastCode: Int, sessionUri: String): Boolean =
         prearranged && wasActive && sessionUri.isNotBlank() && (lastCode == 408 || lastCode == 503)
+
+    /**
+     * 개별 통화 발신에 실을 상대 응답 방식(TS 24.379 §11.1.1.2.1.1 14) — RFC 5373) — 사용자가 고른 [chosen] 이 user profile 인가([allowed] —
+     * allow-*-commencement·allow-force-auto-answer)에 있으면 그대로, 없으면 지정 안 함(헤더 없음 — 상대 단말 설정대로). 인가가 바뀌어
+     * 고른 방식이 막혔는데도 그대로 실으면 서버가 403(125·126·143)으로 호를 거절한다. 프로파일을 아직 못 받았으면(null) 고른 값 그대로.
+     */
+    fun effectiveCommencement(chosen: CommencementMode, allowed: Set<CommencementMode>?): CommencementMode =
+        if (allowed == null || chosen in allowed) chosen else CommencementMode.UNSPECIFIED
+
+    /**
+     * 착신 개별 통화가 사용자 수락을 기다리는가 — 코어가 따른 개시 방식이 수동(상대가 `Answer-Mode: Manual` 을 요청, TS 24.379
+     * §11.1.1.2.1.2 10))이고 아직 받지 않았다. 그동안 1:1 화면은 [받기]·[거절] 을 보인다(거절 = 코어가 480 + Warning 110).
+     */
+    fun awaitingAnswer(incoming: Boolean, ringing: Boolean, commencement: CommencementMode): Boolean =
+        incoming && ringing && commencement == CommencementMode.MANUAL
 
     /**
      * 이 그룹으로 호·경보를 열어도 되는가 — 그룹 문서의 `<preconfigured-group-use-only>` 가 true 면 열지 않고 사용자에게 알린다
