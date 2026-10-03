@@ -45,13 +45,13 @@ MCPTT 와 뿌리가 같은 것(제휴 클라이언트 단위·비제휴 멤버 �
 |---|---|---|---|---|---|
 | 등록·서비스 인가 (REG) | 1 | — | — | 1 | — |
 | 제휴·배포 대상 (AFF) | 3 | 1 | 1 | 1 | — |
-| SDS — 시그널링 평면 (SDS) | 5 | — | 2 | 1 | 2 |
+| SDS — 시그널링 평면 (SDS) | 4 | — | 2 | 1 | 1 |
 | SDS — 미디어 평면 (MSRP) | 4 | — | 1 | 3 | — |
 | disposition 통지 (DISP) | 1 | — | — | 1 | — |
 | 파일 배포 (FD) | 2 | — | — | 1 | 1 |
-| **계** | **16** | **1** | **4** | **8** | **3** |
+| **계** | **15** | **1** | **4** | **8** | **2** |
 
-확인 수준 — ◎ 10 · ○ 3 · △ 3.
+확인 수준 — ◎ 10 · ○ 3 · △ 2.
 
 읽는 순서 — §2(먼저 볼 것) → §3(영역별 전체) → §4(미구현 목록에 빠진 기능) → §5(문서 정정) → §6(묶음과 순서).
 
@@ -101,7 +101,6 @@ CSP 는 참여 기능과 제어 기능을 겸한다.
 | # | 급 | 대상 | 규격 | CIMS 지금 | 영향 | 확인 |
 |---|---|---|---|---|---|---|
 | SDS-2 | B | CSP | §9.2.2.4.1.1 5) — 수신자별 mcdata-info `<mcdata-request-uri>` = 수신자 MCData ID, 그룹이면 `<mcdata-calling-group-id>` = 그룹. §9.2.2.3.1 12) — `<mcdata-calling-user-id>` = 발신자. 7)·8) — P-Asserted-Identity = 제어 기능 PSI, P-Asserted-Service | fan-out 은 받은 본문·Content-Type 을 그대로 복사(`csp/McDataAsModule.cpp:94`, psip `SendSms` — 헤더 추가 없음). request-uri 는 그룹으로 남고 calling-group-id·calling-user-id 가 없다. 우리 SDK 는 request-uri·From 으로 보정한다(`sdk/core/src/mcdata/sds_codec.cpp:339-343`, `engine.cpp:1784`) | 규격 단말은 그룹·발신자를 알 수 없어 스레드를 못 묶고, §12.2.1.1 의 통지 대상(`<mcdata-calling-user-id>`)이 없어 DELIVERED 를 못 보낸다 | ◎ |
-| SDS-7 | D | SDK | §15.2.13 · §6.2.2.1 3) — Payload content type BINARY·LOCATION·CODED TEXT, TEXT charset = 단말 설정 또는 그룹 `<mcdata-default-charset>` | TEXT·HYPERLINKS 는 온 순서대로 이어 `text` 로 올리고 FILEURL 은 파일로 읽는다(`sdk/core/src/mcdata/sds_codec.cpp`). **BINARY·LOCATION(6 octet 위경도)·CODED TEXT 는 넘긴다**(`SdsMessage` 에 담을 칸이 없다). charset 은 UTF-8 고정 | 규격 단말의 LOCATION·CODED TEXT SDS 가 빈 메시지가 된다 | ◎ |
 | SDS-8 | B | CSP·SDK | TS 24.481 §7.2 — MCData group ID 는 그룹 문서의 `list-service uri` 와 같은 값 | 숫자 그룹 ID 를 SDK `"tel:" + groupId`(`sdk/core/src/engine.cpp:3454`), CSP `_TelOf`(`csp/McDataAsModule.cpp:122-124`)·`_TelUriOf`(`csp/McDataMediaService.cpp:114-117`)가 `tel:123` 으로, 그룹 문서는 `tel:+123`(`csc/src/services/mcptt.py:261-270`), FILEURL 폴백은 `sip:<gid>@<도메인>`(`csp/McDataMediaService.cpp:410-416`) | 규격 단말은 같은 그룹으로 묶지 못한다. 우리 앱도 `bareId` 가 `+123`/`123` 으로 갈려 스레드가 나뉠 수 있다 — 실측(MCPTT GCS-17 과 같은 뿌리) | △ |
 | SDS-9 | C | CSP | §9.2.2.4.2 4) — 제어 기능은 대화·메시지 ID 를 저장해 통지와 상관한다(§12.2.3 4)·5)) | 그룹 SDS 는 fan-out 루프를 다 돈 뒤에 색인을 적는다(`csp/McDataAsModule.cpp:87-104` → `csp/McDataGates.cpp:80-81`). 1:1 은 전달 전에 적는다(`csp/ModuleDispatcher.cpp:2688-2692`). MESSAGE 는 다중 스레드로 처리된다(psip `RecvMessageRequest(iThreadId…)`) | 멤버가 많은 그룹에서 먼저 받은 단말의 DELIVERED 가 색인보다 먼저 오면 403 216 — 발신자 ✓ 누락. 실측으로 확정되면 A | △ |
 | SDS-10 | D | 관제 | §9.2.1.1 1) · §11.1 2)·5) · §9.2.2.2.1 3)a) — 단말은 보내기 전에 송신 권한·그룹 크기 상한·`AllowedSDS` 를 보고 거절한다 | 현장 앱은 그룹 문서의 문자 허용·크기 상한을 보고 보내기 전에 막는다(`CallRules.sdsBlockReason`). **관제 앱 두 벌은 서버 거절(403 206·217)에 맡긴다** (코어 `sendGroupSds` 는 c-plane 임계만 본다 — 그룹 문서를 들고 있지 않다) | 관제 앱은 보낸 뒤에야 거절을 안다 | ○ |
@@ -112,7 +111,7 @@ CSP 는 참여 기능과 제어 기능을 겸한다.
 |---|---|---|---|---|---|---|
 | MSRP-2 | B | CSP | §9.2.3.4.3 4)~11) — 배포 INVITE 에 Accept-Contact 둘, Referred-By, Contact = 세션 식별자 + isfocus·특성 태그, mcdata-info `<mcdata-request-uri>` = 수신자·`<mcdata-calling-group-id>` = 그룹, P-Asserted-Identity = 제어 기능 PSI, P-Asserted-Service-Id | Accept-Contact icsi-ref 하나·`P-Preferred-Service`·`Answer-Mode: Auto`(`csp/McDataMediaService.cpp:471-477`), mcdata-info 의 request-uri = 그룹·calling-group-id 없음(`:124-152`) | 규격 단말이 배포를 «SDS over media plane» 으로 판별(§6.2.1.2)하지 못하고 그룹을 모른다 | ◎ |
 | MSRP-3 | C | CSP·CMDP | §9.2.3.4.4 끝 — 제어 기능은 첫 멤버의 200 을 받은 뒤 개시자에게 200(§6.3.7.1.23) | cmdp 수신 세션을 잡자마자 개시자에게 200(`csp/McDataMediaService.cpp:214-244`) — 수신자 INVITE 는 MSRP 수신을 마친 뒤 연다(종단·재배포) | 받을 단말이 하나도 없어도 개시자는 성공으로 본다. 종단 설계는 §4.7 에 있으나 편차 표에 없다 | ○ |
-| MSRP-4 | C | SDK·CSP | §9.2.3.2.3 끝 — 단말이 전송 결과에 따라 BYE + `Reason: SIP;cause=200;text="transmission succeeded"`(실패면 cause=480 "transmission failed") | 서버가 배포를 마친 뒤 BYE(`csp/McDataMediaService.cpp:364-375`), SDK 는 5 s 안에 BYE 가 없을 때만 Reason 없이 끊는다(`sdk/core/src/engine.cpp:3340-3349`) | 규격 서버는 단말 BYE 의 Reason 으로 결과를 안다 — 우리 SDK 의 실패가 서버에 닿지 않는다 | ◎ |
+| MSRP-4 | C | CSP | §9.2.3.2.3 끝 — 단말이 전송 결과에 따라 BYE + `Reason: SIP;cause=200;text="transmission succeeded"`(실패면 cause=480 "transmission failed") | SDK 는 규격대로 BYE + Reason 을 낸다. 서버는 배포를 마친 뒤 스스로 BYE 하고(`csp/McDataMediaService.cpp` `HandleMsgReceived`) 단말 BYE 의 Reason 을 읽지 않는다 | 단말이 «못 보냄»(480)을 알려도 서버 기록·통지에 반영되지 않는다 | ◎ |
 | MSRP-6 | C | CSP | §6.2.2.2 · §10.2.4.4.1 — FD 는 `request-type` `group-fd`, FD SIGNALLING 의 disposition 요청은 원본대로 | FILEURL 폴백 본문이 `request-type` `group-sds` 에 FD SIGNALLING PAYLOAD 를 싣고, 원 SDS 의 disposition 요청을 버린다(`csp/McDataCodecBuild.cpp:59-110`) | 폴백 수신자에게서 DELIVERED 가 오지 않아 발신자 ✓ 가 빠진다. 규격 단말은 request-type 과 본문이 어긋난 요청을 받는다 | ◎ |
 
 ### 3.5 disposition 통지 (DISP) — TS 24.282 §12.2
@@ -126,7 +125,7 @@ CSP 는 참여 기능과 제어 기능을 겸한다.
 | # | 급 | 대상 | 규격 | CIMS 지금 | 영향 | 확인 |
 |---|---|---|---|---|---|---|
 | FD-4 | C | CSP·SDK·현장 | §11.2 · §10.2.4.4.1 5) — 제어 기능이 파일 크기 ≤ 그룹 `<mcdata-on-network-max-data-size-auto-recv>`(1:1 = `<max-data-size-auto-recv-bytes>`)면 Mandatory download IE 를 넣는다. §10.2.1.2.2 — 단말은 그 IE 로 자동 다운로드 | CSP 는 IE 를 넣지 않는다. SDK 는 Mandatory download IE(0xA-)를 건너뛰고(`sdk/core/src/mcdata/sds_codec.cpp:376`) 앱이 그룹 문서 값과 Metadata 크기로 직접 정한다(`android/ptt-client/…/PttService.kt:556`) | 규격 단말은 우리 서버에서 자동 다운로드하지 않고, 우리 앱은 발신자가 요구한 필수 다운로드를 무시한다. 1:1 FD 는 자동 수신 기준이 없다 | ◎ |
-| FD-7 | D | SDK·CSP | §15.2.17 — Metadata = RFC 5547 `file-selector-attr`(name·size·type·hash) + file-date·file-availability·file-description | `name:"…" size:N type:…` 만, `file-selector:` 접두·hash·availability 없음(`sdk/core/src/mcdata/sds_codec.cpp:137-138`, `csp/McDataCodecBuild.cpp:67`) | 엄격한 규격 파서가 크기를 못 읽으면 FD-4 자동 수신 판정이 어긋난다. RFC 5547 원문 미대조 | △ |
+| FD-7 | D | CSP | §15.2.17 — Metadata = RFC 5547 `file-selector-attr`(name·size·type·hash) + file-date·file-availability·file-description | SDK 는 `file-selector:name:"…" size:N type:… hash:sha-1:…`(이름 퍼센트 인코딩, RFC 5547 §6 원문 대조)를 내고 받는다. CSP 폴백 FD 본문은 `name:"…" size:N type:…` 만 — `file-selector:` 접두·hash 없음, 이름 퍼센트 인코딩 없음(`csp/McDataCodecBuild.cpp:67`), CSP 파서는 이름의 `%XX` 를 풀지 않는다(`csp/McDataCodec.cpp:216-230`) | 엄격한 규격 파서가 크기를 못 읽으면 FD-4 자동 수신 판정이 어긋난다 | ◎ |
 
 ### 3.8 설정 문서 (CFG) — TS 24.484 §7.2
 
@@ -167,18 +166,17 @@ CSP 는 참여 기능과 제어 기능을 겸한다.
 |---|---|---|---|
 | 2 | **인가·보안** — 제휴 멤버만 배포 | AFF-2 | .45 CSP |
 | 4 | **서버가 내는 본문 규격화** — 수신자별 mcdata-info(request-uri = 수신자, calling-group-id, calling-user-id), PAI·P-Asserted-Service, MSRP 배포 INVITE 헤더, 폴백 FD 본문 | SDS-2 · MSRP-2 · MSRP-6 · SDS-8 | .45 CSP |
-| 6 | **FD Metadata 형식** — `file-selector:` 접두·hash (SDK 는 규격형 업로드·Location 사용과 함께 — U05) | FD-7 | .45 SDK · CSP |
+| 6 | **FD Metadata 형식** — CSP 폴백 FD 의 `file-selector:` 접두·이름 퍼센트 인코딩(SDK 는 U05 에서 끝 — 규격형 업로드·Location·hash 포함) | FD-7 | .45 CSP |
 | 7 | **자동 수신** — CSP 가 Mandatory download 를 붙이고 SDK·앱은 그 IE 를 따른다 | FD-4 | .45 CSP·SDK → 앱 |
 | 8 | **제휴 서비스 분리** — MCData 제휴 표·`mcdataPresInfo`, 클라이언트 단위. MCPTT 묶음 8 과 한 묶음 | AFF-1 · AFF-6 · REG-2 | .45 CSP·SDK |
 | 9 | **서비스 인가·설정** — MCPTT REG 묶음과 한 묶음 | §4 앞 두 줄 | .48 CSP(바인딩 판정은 S25 에서 반영 — 남은 것은 §4) |
-| 10 | **수신 파서** — content type·charset | SDS-7 | .45 SDK |
 | 11 | **미디어 평면 수명** — 첫 멤버 응답 뒤 200, 단말 BYE + Reason. TS 24.582 확보 뒤 | MSRP-3 · MSRP-4 | .45 CSP·CMDP·SDK |
 | 12 | **나머지** — 색인 순서(실측 뒤), UNDELIVERED | SDS-9 · DISP-1 | .45 CSP |
 
 **Windows 몫(관제 앱 두 벌)** — SDK·서버가 정해진 뒤 맞춘다.
 
 - FD-4 — 데스크톱은 자동 다운로드를 하지 않으므로([받기]) Mandatory download 가 오면 바로 받는 규칙만 더한다. 태블릿은 그룹 문서 값 대신 IE 를 따른다.
-- SDS-7 — HYPERLINKS·LOCATION 표시(앱 대상 SDS 는 코어가 올리지 않는다 — 앱이 할 일 없음).
+- SDS-7 — 위치·이진 payload 표시(`SdsMessage.Payloads` — 글 뒤에 «위치 위도, 경도»·«이진 데이터 N바이트» 한 줄씩, 두 Android 앱과 같은 규칙. 앱 대상 SDS 는 코어가 올리지 않는다).
 - 묶음 3 이 들어오면 SDS·FD 거절 문구 사전(116·206·213·217·120·198).
 - 묶음 6 이 들어오면 FD 업로드 결과의 URL 출처(Location)만 바뀐다 — 앱 코드는 SDK `uploadFd` 를 그대로 쓴다.
 
@@ -187,10 +185,10 @@ CSP 는 참여 기능과 제어 기능을 겸한다.
 - **TS 24.582 (MCData media plane)** — 원문이 없다. MSRP 항목은 TS 24.282 시그널링 절차만으로 판정했고, cmdp 의 MSRP 프레이밍(RFC 4975 청크·Success-/Failure-Report·REPORT)·signalling/payload 를 SEND 두 건으로 나눠 보내는 방식·in-band disposition 은 대조하지 않았다.
 - **TS 23.282 (MCData stage 2)** — 규격 폴더에 없다. 종단(store-and-forward) 배포의 근거 대조(MSRP-3)는 하지 못했다.
 - **TS 24.483 (MO)·TS 29.582(연동)·TS 33.180 MCData 절(DPPK·SPK·서명)** — E2E 미적용이 문서에 있어 보지 않았다.
-- **RFC 원문** — RFC 5547(file-selector ABNF)·RFC 4975·RFC 6135·RFC 3841 은 폴더에 없어 기억으로 판정했다(FD-7 은 △).
+- **RFC 원문** — 처음 판정 때 RFC 5547·RFC 4975·RFC 6135·RFC 3841 이 폴더에 없어 기억으로 판정했다. 지금은 폴더(`spec/rfc/`)에 있고 FD-7 은 RFC 5547 §6 ABNF 로 다시 대조했다(◎).
 - **TS 24.484 MCData user profile·service configuration 요소별 대조** — 문서 자체를 서빙하지 않아(로드맵) 요소마다 보지 않았다. 결과는 §5 의 mcx_identity_scope.md 줄에 적었다.
 - **off-network(§9.3·§12.3·§16.3)·MBMS/MBS** — 범위 밖.
 - **From 신원 결박** — 게이트가 From user 를 발신자로 쓰는데, 그 신원과 등록 flow 의 결박은 MCPTT 와 같은 경로(`EventIncomingRequestAuth`)라 보지 않았다.
-- **실행 확인** — 모든 항목이 코드 읽기다. △ 항목(SDS-8·SDS-9·FD-7)과 AFF-6(다중 단말 배포)은 실서버로 재현해 확정한다.
+- **실행 확인** — 모든 항목이 코드 읽기다. △ 항목(SDS-8·SDS-9)과 AFF-6(다중 단말 배포)은 실서버로 재현해 확정한다.
 - **cspsim·계측기(libcsim `McDataSds`·`McDataMsrp`)·`tests/msrp_sds_client.py`** — 서버는 S17 부터 1:1 SDS·FD 의 resource-lists 와 미디어 평면 INVITE 의 mcdata-info(request-type)를 요구한다. libcsim 은 1:1 대상을 `<mcdata-request-uri>` 에 싣고 MSRP INVITE 에 mcdata-info 를 싣지 않아(옛 형식) 그 시나리오가 거절된다 — 계측기 몫으로 넘긴다. 남은 서버 쪽 검사(묶음 2·3)를 켤 때도 도구를 함께 맞춘다.
 - **콘솔** — 그룹 편집의 MCData 칸·메시지 이력 화면.

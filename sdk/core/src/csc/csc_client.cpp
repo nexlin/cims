@@ -427,21 +427,39 @@ Result CscClient::request(const std::string& accessToken, const std::string& met
 }
 
 Result CscClient::uploadFd(const std::string& accessToken, const std::string& data, const std::string& name,
-                           const std::string& mime, const std::string& groupId, FdUpload& out) {
+                           const std::string& mime, const std::string& groupId, FdUpload& out, const std::string& callingUserId) {
     if (data.empty()) return Result::fail(-2, "uploadFd: empty file");
-    std::string path = "/mcdata/fd?name=" + enc(name.empty() ? "file.bin" : name) +
-                       "&type=" + enc(mime.empty() ? "application/octet-stream" : mime);
-    if (!groupId.empty()) path += "&group=" + enc(groupId);
+    const std::string fname = name.empty() ? "file.bin" : name;
+    // TS 24.282 §10.2.2.1 4)~8) — multipart/mixed: mcdata-info(그룹 = group-fd + mcdata-request-uri, 1:1 = one-to-one-fd) + 파일 octet-stream
+    const std::string group = groupId.empty() ? std::string()
+                                              : (groupId.find(':') == std::string::npos ? "tel:" + groupId : groupId);
+    std::string boundary = "fd-" + mcdata::newMessageId().substr(0, 16);
+    std::string quoted;
+    for (char c : fname) { if (c == '"' || c == '\\') quoted += '\\'; if (c != '\r' && c != '\n') quoted += c; }
+    std::string body = "--" + boundary + "\r\nContent-Type: " + mcdata::kCtInfo + "\r\n\r\n" + mcdata::fdUploadInfo(group, callingUserId) +
+                       "\r\n--" + boundary + "\r\nContent-Type: application/octet-stream\r\nContent-Length: " + std::to_string(data.size()) +
+                       "\r\nContent-Disposition: attachment; filename=\"" + quoted + "\"\r\n\r\n";
+    body += data;
+    body += "\r\n--" + boundary + "--\r\n";
+    // 저장 MIME(내려받기의 Content-Type) — 규격의 요청에는 자리가 없어 쿼리로 준다(CIMS 확장 — 수신자에게는 Metadata type 이 정본)
+    const std::string path = "/mcdata/fd?type=" + enc(mime.empty() ? "application/octet-stream" : mime);
     http::Response r = impl_->request("POST", impl_->ep.baseUrl() + path,
-                                      {{"Authorization", "Bearer " + accessToken}, {"Content-Type", "application/octet-stream"},
-                                       {"Accept", "application/json"}}, data);
+                                      {{"Authorization", "Bearer " + accessToken}, {"Content-Type", "multipart/mixed; boundary=" + boundary},
+                                       {"Accept", "application/json"}}, body);
     if (r.status / 100 != 2) return httpFail(r, "uploadFd");
-    Json j(r.body);
-    if (!j.root) return Result::fail(-2, "uploadFd: bad json");
     FdUpload u;
-    u.id = Json::str(j.root, "id"); u.url = Json::str(j.root, "url"); u.name = Json::str(j.root, "name", name);
-    u.size = Json::num(j.root, "size", (int)data.size());
-    if (u.url.empty()) return Result::fail(-2, "uploadFd: no url");
+    // 파일 URL = 201 Created 의 Location(§10.2.2.1 끝 «shall store this information»). 본문 JSON(id·name·size)은 CIMS 확장 — 있으면 읽는다.
+    auto loc = r.headers.find("location");
+    if (loc != r.headers.end()) u.url = loc->second;
+    Json j(r.body);
+    if (j.root) { u.id = Json::str(j.root, "id"); u.name = Json::str(j.root, "name", fname); u.size = Json::num(j.root, "size", (int)data.size()); }
+    else { u.name = fname; u.size = (int64_t)data.size(); }
+    if (u.url.empty()) return Result::fail(-2, "uploadFd: no Location");
+    // RFC 5547 hash-selector 의 값(sha-1, 대문자 16진을 ':' 로) — FD Metadata 의 file-selector(TS 24.282 §15.2.17)
+    unsigned char md[SHA_DIGEST_LENGTH];
+    SHA1(reinterpret_cast<const unsigned char*>(data.data()), data.size(), md);
+    static const char* hx = "0123456789ABCDEF";
+    for (unsigned char b : md) { if (!u.hash.empty()) u.hash += ':'; u.hash += hx[b >> 4]; u.hash += hx[b & 0xF]; }
     // 서버가 Host 헤더 없이 상대 경로를 주면 이 CSC 의 절대 URL 로 — 받는 쪽이 FILEURL 을 그대로 쓴다.
     if (u.url[0] == '/') u.url = impl_->ep.baseUrl() + u.url;
     out = u;

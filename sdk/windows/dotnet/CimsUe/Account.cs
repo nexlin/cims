@@ -209,7 +209,7 @@ public sealed unsafe class Account
     }
 
     private static cimsue_fd_file_t ToNative(FdFile f, NativeStrings s) =>
-        new() { url = s.Add(f.Url), name = s.Add(f.Name), type = s.Add(f.Type), size = f.Size };
+        new() { url = s.Add(f.Url), name = s.Add(f.Name), type = s.Add(f.Type), size = f.Size, hash = s.Add(f.Hash) };
 
     /// <summary>SDS disposition 통지(TS 24.282 §12.2.1.1) — peer = 받은 SDS 의 <see cref="SdsMessage.FromUri"/>(mcdata-calling-user-id),
     /// groupUri = 받은 SDS 의 <see cref="SdsMessage.GroupUri"/>(mcdata-calling-group-id, 1:1 이면 null). notifType 1~4.

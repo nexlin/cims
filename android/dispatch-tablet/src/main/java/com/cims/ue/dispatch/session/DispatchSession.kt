@@ -1560,7 +1560,7 @@ class DispatchSession(
     internal fun addIncomingMessage(groupId: String, msg: com.cims.ue.sdk.SdsMessage): Boolean {
         val m = Message(
             id = msg.msgId.ifEmpty { "in-" + System.nanoTime() }, groupId = groupId,
-            fromUri = msg.fromUri, fromName = displayName(msg.fromUri), text = msg.text,
+            fromUri = msg.fromUri, fromName = displayName(msg.fromUri), text = sdsDisplayText(msg.text, msg.payloads),
             atMs = if (msg.timeSec > 0) msg.timeSec * 1000L else System.currentTimeMillis(),
             outgoing = false, msgId = msg.msgId, read = false,
             fileName = msg.fileName.ifEmpty { if (msg.fd) FileRules.DEFAULT_NAME else "" }, fileUrl = msg.fileUrl,

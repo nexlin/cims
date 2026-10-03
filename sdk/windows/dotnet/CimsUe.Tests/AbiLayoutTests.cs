@@ -67,6 +67,7 @@ public unsafe class AbiLayoutTests
         new object[] { cimsue_struct_id_t.TC_TIMERS, sizeof(cimsue_tc_timers_t) },
         new object[] { cimsue_struct_id_t.SERVICE_AUTH_INFO, sizeof(cimsue_service_auth_info_t) },
         new object[] { cimsue_struct_id_t.XCAP_DIFF_SUBSCRIPTION, sizeof(cimsue_xcap_diff_subscription_t) },
+        new object[] { cimsue_struct_id_t.SDS_PAYLOAD, sizeof(cimsue_sds_payload_t) },
     };
 
     [Theory]

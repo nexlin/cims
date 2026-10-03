@@ -5,7 +5,10 @@
 package com.cims.ue.dispatch
 
 import com.cims.ue.dispatch.session.deliveryReplyTo
+import com.cims.ue.dispatch.session.sdsDisplayText
 import com.cims.ue.sdk.SdsMessage
+import com.cims.ue.sdk.SdsPayload
+import com.cims.ue.sdk.SdsPayloadType
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
@@ -17,6 +20,14 @@ class SdsDeliveryTest {
         accountId = 0, fromUri = from, groupUri = "sip:g1@cims", convId = "c1", msgId = msgId, timeSec = 0,
         dispositionReq = disposition, text = "도착", notification = notification, notifType = 0,
         fd = false, fileUrl = "", fileName = "", fileType = "", fileSize = 0)
+
+    // TS 24.282 §9.2.1.2 6)d) · §15.2.13 — 위치·이진 payload 도 말풍선에 한 줄씩(현장 앱 CallRules.sdsDisplayText 와 같은 규칙)
+    @Test fun `말풍선 글에 위치와 이진 payload 를 덧붙인다`() {
+        val loc = SdsPayload(SdsPayloadType.LOCATION, ByteArray(6), "", 0, true, -33.8688, 151.2093)
+        assertEquals("도착\n위치 -33.86880, 151.20930", sdsDisplayText("도착", listOf(loc)))
+        assertEquals("이진 데이터 4바이트", sdsDisplayText("", listOf(SdsPayload(SdsPayloadType.BINARY, ByteArray(4), "", 0, false, 0.0, 0.0))))
+        assertEquals("도착", sdsDisplayText("도착", emptyList()))
+    }
 
     @Test fun `전달 확인을 요청했으면 발신자에게 되돌린다`() {
         assertEquals("1003", deliveryReplyTo(msg(disposition = 1)))

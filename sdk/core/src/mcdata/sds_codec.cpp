@@ -4,7 +4,9 @@
 
 #include <openssl/evp.h>
 
+#include <algorithm>
 #include <cctype>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <random>
@@ -129,13 +131,55 @@ std::string sdsPayloadTlv(const std::string& text) {
     return s;
 }
 
+std::string fileSelector(const FdFile& file) {
+    // file-selector-attr = "file-selector" ":" selector *(SP selector)(RFC 5547 §6) — 이름은 filename-string: NUL·CR·LF·'"'·'%' 만
+    //   퍼센트 인코딩(그 밖 바이트는 그대로 — UTF-8 이름 포함). type = MIME, hash = sha-1(FdFile.hash 가 있을 때).
+    static const char* hx = "0123456789ABCDEF";
+    std::string name;
+    for (unsigned char c : file.name) {
+        if (c == 0 || c == '\r' || c == '\n' || c == '"' || c == '%') { name += '%'; name += hx[c >> 4]; name += hx[c & 0xF]; }
+        else name += (char)c;
+    }
+    std::string s = "file-selector:name:\"" + name + "\" size:" + std::to_string(file.size) + " type:" +
+                    (file.type.empty() ? std::string("application/octet-stream") : file.type);
+    if (!file.hash.empty()) s += " hash:sha-1:" + file.hash;
+    return s;
+}
+
+void parseFileSelector(const std::string& meta, std::string& name, int64_t& size, std::string& type) {
+    // Metadata = file-selector · file-date · file-availability · file-description 를 이은 것(§15.2.17) — file-selector 의 선택자만 읽는다.
+    //   접두가 없는 «선택자만» 형식도 같은 규칙으로 읽는다(선택자 이름이 같다).
+    size_t i = meta.find("file-selector:");
+    i = i == std::string::npos ? 0 : i + 14;
+    auto hexv = [](char c) { return c >= '0' && c <= '9' ? c - '0' : (c | 0x20) >= 'a' && (c | 0x20) <= 'f' ? (c | 0x20) - 'a' + 10 : -1; };
+    while (i < meta.size()) {
+        while (i < meta.size() && meta[i] == ' ') ++i;
+        if (meta.compare(i, 6, "name:\"") == 0) {
+            const size_t q = meta.find('"', i + 6);
+            if (q == std::string::npos) return;
+            name.clear();
+            for (size_t k = i + 6; k < q; ++k) {
+                if (meta[k] == '%' && k + 2 < q && hexv(meta[k + 1]) >= 0 && hexv(meta[k + 2]) >= 0) {
+                    name += (char)(hexv(meta[k + 1]) * 16 + hexv(meta[k + 2])); k += 2;
+                } else name += meta[k];
+            }
+            i = q + 1;
+            continue;
+        }
+        size_t e = meta.find(' ', i);
+        if (e == std::string::npos) e = meta.size();
+        const std::string tok = meta.substr(i, e - i);
+        if (tok.compare(0, 5, "size:") == 0) size = std::atoll(tok.c_str() + 5);
+        else if (tok.compare(0, 5, "type:") == 0) type = tok.substr(5);
+        else if (tok.compare(0, 5, "hash:") != 0) return;          // 다음 성분(file-date: 등) — file-selector 끝
+        i = e;
+    }
+}
+
 std::string fdSignallingTlv(const std::string& convId, const std::string& msgId, const FdFile& file, int64_t timeSec) {
     // FD SIGNALLING PAYLOAD(§15.1.3) = 유형·Date-time·ConvID·MsgID + Payload IE 0x78(TLV-E, content-type FILEURL 0x04 + URL)
-    //   + Metadata IE 0x79(TLV-E, RFC 5547 file-selector name/size/type). 원천 cspsim McDataSds.cpp·Android McDataCodec.kt 와 같은 바이트.
-    std::string name = file.name;
-    for (size_t p; (p = name.find('"')) != std::string::npos;) name.erase(p, 1);
-    std::string meta = "name:\"" + name + "\" size:" + std::to_string(file.size) + " type:" +
-                       (file.type.empty() ? std::string("application/octet-stream") : file.type);
+    //   + Metadata IE 0x79(TLV-E, §15.2.17 — RFC 5547 file-selector-attr).
+    const std::string meta = fileSelector(file);
     std::string s;
     s += (char)kMsgFdSignalling;
     putDateTime(s, timeSec);
@@ -168,6 +212,22 @@ static std::string infoXml(const std::string& requestType, const std::string& ur
 }
 
 std::string groupSdsInfo(const std::string& groupUri, const std::string& clientId) { return infoXml("group-sds", groupUri, clientId); }
+
+std::string fdUploadInfo(const std::string& groupUri, const std::string& callingUserId) {
+    // TS 24.282 §10.2.2.1 5)·6) — request-type(1:1 one-to-one-fd · 그룹 group-fd) · <mcdata-request-uri>(그룹만) · <mcdata-calling-user-id>.
+    //   요소 순서 = mcdata-ParamsType(Annex D.1): request-type → mcdata-request-uri → mcdata-calling-user-id
+    return "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+           "<mcdatainfo xmlns=\"urn:3gpp:ns:mcdataInfo:1.0\">\n"
+           "  <mcdata-Params>\n"
+           "    <request-type>" + std::string(groupUri.empty() ? "one-to-one-fd" : "group-fd") + "</request-type>\n" +
+           (groupUri.empty() ? std::string()
+                             : "    <mcdata-request-uri type=\"Normal\"><mcdataURI>" + xmlscan::esc(groupUri) + "</mcdataURI></mcdata-request-uri>\n") +
+           (callingUserId.empty() ? std::string()
+                                  : "    <mcdata-calling-user-id type=\"Normal\"><mcdataURI>" + xmlscan::esc(callingUserId) +
+                                        "</mcdataURI></mcdata-calling-user-id>\n") +
+           "  </mcdata-Params>\n"
+           "</mcdatainfo>";
+}
 
 static void appendPart(std::string& b, const std::string& boundary, const std::string& ct, const char* cte,
                        const std::string& content) {
@@ -335,6 +395,88 @@ static std::string elemText(const std::string& xml, const std::string& elem) {
     return b == std::string::npos ? std::string() : v.substr(b, t - b + 1);
 }
 
+namespace {
+
+void appendUtf8(std::string& o, uint32_t cp) {
+    if (cp < 0x80) o += (char)cp;
+    else if (cp < 0x800) { o += (char)(0xC0 | (cp >> 6)); o += (char)(0x80 | (cp & 0x3F)); }
+    else if (cp < 0x10000) { o += (char)(0xE0 | (cp >> 12)); o += (char)(0x80 | ((cp >> 6) & 0x3F)); o += (char)(0x80 | (cp & 0x3F)); }
+    else { o += (char)(0xF0 | (cp >> 18)); o += (char)(0x80 | ((cp >> 12) & 0x3F)); o += (char)(0x80 | ((cp >> 6) & 0x3F)); o += (char)(0x80 | (cp & 0x3F)); }
+}
+
+/** UTF-16 → UTF-8. bigEndian 은 BOM 이 없을 때의 바이트 순서(RFC 2781 §4.3 — 없으면 big-endian). */
+std::string utf16ToUtf8(const std::string& in, bool bigEndian, bool allowBom) {
+    size_t i = 0;
+    if (allowBom && in.size() >= 2) {
+        const unsigned char a = (unsigned char)in[0], b = (unsigned char)in[1];
+        if (a == 0xFE && b == 0xFF) { bigEndian = true; i = 2; }
+        else if (a == 0xFF && b == 0xFE) { bigEndian = false; i = 2; }
+    }
+    std::string o;
+    auto unit = [&](size_t k) -> uint32_t {
+        const unsigned char a = (unsigned char)in[k], b = (unsigned char)in[k + 1];
+        return bigEndian ? (uint32_t)(a << 8 | b) : (uint32_t)(b << 8 | a);
+    };
+    for (; i + 1 < in.size(); i += 2) {
+        uint32_t u = unit(i);
+        if (u >= 0xD800 && u <= 0xDBFF && i + 3 < in.size()) {
+            const uint32_t lo = unit(i + 2);
+            if (lo >= 0xDC00 && lo <= 0xDFFF) { appendUtf8(o, 0x10000 + ((u - 0xD800) << 10) + (lo - 0xDC00)); i += 2; continue; }
+        }
+        appendUtf8(o, u);
+    }
+    return o;
+}
+
+/** CODED TEXT 의 글 — IANA MIBenum(§15.2.13 표 15.2.13-3)으로 UTF-8 로. 모르는 집합이면 빈 값(원문은 SdsPayload.data). */
+std::string decodeCharset(int mib, const std::string& in) {
+    switch (mib) {
+        case 106: case 3: return in;                                  // UTF-8 · US-ASCII
+        case 4: { std::string o; for (unsigned char c : in) appendUtf8(o, c); return o; }   // ISO-8859-1
+        case 1013: return utf16ToUtf8(in, true, false);               // UTF-16BE
+        case 1014: return utf16ToUtf8(in, false, false);              // UTF-16LE
+        case 1015: return utf16ToUtf8(in, true, true);                // UTF-16(BOM, 없으면 BE)
+        default: return std::string();
+    }
+}
+
+}  // namespace
+
+SdsPayload decodePayload(int contentType, const std::string& data) {
+    SdsPayload p;
+    p.type = contentType;
+    p.data = data;
+    switch (contentType) {
+        case kSdsPayloadText: case kSdsPayloadHyperlinks: case kSdsPayloadFileUrl: p.text = data; break;
+        case kSdsPayloadCodedText:
+            // 앞 2 octet = 문자 집합 MIBenum(양의 정수, 망 바이트 순서) — §6.2.2.1 3)a)ii)
+            if (data.size() >= 2) {
+                p.charset = ((unsigned char)data[0] << 8) | (unsigned char)data[1];
+                p.data = data.substr(2);
+                p.text = decodeCharset(p.charset, p.data);
+            }
+            break;
+        case kSdsPayloadLocation:
+            // 6 octet = 위도 3 · 경도 3(TS 23.032 §6.1)
+            if (data.size() == 6) {
+                auto u = [&](size_t k) { return (uint32_t)(unsigned char)data[k]; };
+                const uint32_t latN = ((u(0) & 0x7F) << 16) | (u(1) << 8) | u(2);
+                int32_t lonN = (int32_t)((u(3) << 16) | (u(4) << 8) | u(5));
+                if (lonN & 0x800000) lonN -= 0x1000000;                // 24비트 2의 보수
+                p.latitude = latN * 90.0 / 8388608.0 * ((u(0) & 0x80) ? -1 : 1);
+                p.longitude = lonN * 360.0 / 16777216.0;
+                p.hasLocation = true;
+            }
+            break;
+        case kSdsPayloadLocationTimestamp:
+            // 첫 octet = 길이, 나머지 = "yyyy-mm-dd hh:mm:ss.fffff"(ISO 8601)
+            if (!data.empty()) p.text = data.substr(1, std::min<size_t>((unsigned char)data[0], data.size() - 1));
+            break;
+        default: break;
+    }
+    return p;
+}
+
 bool parse(const std::string& contentType, const std::string& body, SdsMessage& out) {
     bool forApplication = false;
     return parse(contentType, body, out, forApplication);
@@ -343,6 +485,7 @@ bool parse(const std::string& contentType, const std::string& body, SdsMessage& 
 bool parse(const std::string& contentType, const std::string& body, SdsMessage& out, bool& forApplication) {
     forApplication = false;
     out.text.clear();                                    // payload 를 이어 붙이므로 받은 구조체의 앞 값을 지운다
+    out.payloads.clear();
     std::string boundary = boundaryOf(contentType);
     if (boundary.empty()) {
         size_t nl = body.find_first_of("\r\n");
@@ -413,12 +556,7 @@ bool parse(const std::string& contentType, const std::string& body, SdsMessage& 
                     if (i + 3 + l > raw.size()) break;
                     std::string v = raw.substr(i + 3, l);
                     if (iei == 0x78 && !v.empty() && (unsigned char)v[0] == 0x04) out.fileUrl = v.substr(1);   // FILEURL
-                    else if (iei == 0x79) {
-                        // name:"x" size:N type:mime (RFC 5547 file-selector)
-                        size_t n = v.find("name:\""); if (n != std::string::npos) { size_t q = v.find('"', n + 6); if (q != std::string::npos) out.fileName = v.substr(n + 6, q - n - 6); }
-                        size_t sz = v.find("size:"); if (sz != std::string::npos) out.fileSize = std::atoll(v.c_str() + sz + 5);
-                        size_t ty = v.find("type:"); if (ty != std::string::npos) { size_t te = v.find(' ', ty); out.fileType = v.substr(ty + 5, te == std::string::npos ? std::string::npos : te - ty - 5); }
-                    }
+                    else if (iei == 0x79) parseFileSelector(v, out.fileName, out.fileSize, out.fileType);   // §15.2.17
                     i += 3 + l;
                 }
             }
@@ -430,13 +568,13 @@ bool parse(const std::string& contentType, const std::string& body, SdsMessage& 
                 size_t l = ((unsigned char)raw[i + 1] << 8) | (unsigned char)raw[i + 2];
                 if (i + 3 + l > raw.size()) break;
                 if (iei == 0x78 && l >= 1) {
-                    int ctype = (unsigned char)raw[i + 3];
-                    std::string data = raw.substr(i + 4, l - 1);
-                    // Payload content type(표 15.2.13-2): TEXT 0x01 · HYPERLINKS 0x03 은 사용자에게 보일 글이다 — payload 가 여럿이면
-                    //   온 순서대로 줄을 바꿔 잇는다(§9.2.1.2 6)d) «render the contents of the Payload IE(s)»). FILEURL 0x04 = 파일.
-                    //   BINARY·LOCATION·CODED TEXT 등은 담을 자리가 없어 넘긴다.
-                    if (ctype == 0x01 || ctype == 0x03) out.text += (out.text.empty() ? "" : "\n") + data;
-                    else if (ctype == 0x04) { out.fd = true; out.fileUrl = data; }
+                    // Payload content type(표 15.2.13-2)마다 해석해 차례대로 싣는다. 글(TEXT·HYPERLINKS·CODED TEXT)은 text 에도 줄을 바꿔
+                    //   잇는다(§9.2.1.2 6)d) «render the contents of the Payload IE(s)»). FILEURL = 파일.
+                    SdsPayload pl = decodePayload((unsigned char)raw[i + 3], raw.substr(i + 4, l - 1));
+                    if ((pl.type == kSdsPayloadText || pl.type == kSdsPayloadHyperlinks || pl.type == kSdsPayloadCodedText) && !pl.text.empty())
+                        out.text += (out.text.empty() ? "" : "\n") + pl.text;
+                    else if (pl.type == kSdsPayloadFileUrl) { out.fd = true; out.fileUrl = pl.data; }
+                    out.payloads.push_back(std::move(pl));
                 }
                 i += 3 + l;
             }

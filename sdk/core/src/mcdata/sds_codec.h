@@ -47,6 +47,9 @@ Body buildGroupFd(const std::string& groupUri, const FdFile& file, const std::st
 /** 1:1 FD 발신 본문 — mcdata-info(request-type one-to-one-fd) + resource-lists entry = peerUri(받는 사람) — §10.2.4.2.1 2). */
 Body buildOneToOneFd(const std::string& peerUri, const FdFile& file, const std::string& convId,
                      const std::string& msgId, int64_t timeSec);
+/** FD 업로드(HTTP POST multipart/mixed)의 mcdata-info(TS 24.282 §10.2.2.1 5)·6)) — groupUri 가 비면 one-to-one-fd, 아니면 group-fd +
+ *  <mcdata-request-uri>. callingUserId = 발신 MCData ID(<mcdata-calling-user-id>, 비면 싣지 않는다). */
+std::string fdUploadInfo(const std::string& groupUri, const std::string& callingUserId);
 /** 미디어 평면 그룹 SDS INVITE 의 mcdata-info(TS 24.282 §9.2.3.2.3 8)b)) — group-sds · <mcdata-request-uri> · <mcdata-client-id>. */
 std::string groupSdsInfo(const std::string& groupUri, const std::string& clientId);
 /** SDS NOTIFICATION(전달/읽음 통지) 본문. targetUri 가 있으면 규격형(TS 24.282 §12.2.1.1 — 참여 기능 PSI 로 보낸다):
@@ -62,6 +65,9 @@ bool parse(const std::string& contentType, const std::string& body, SdsMessage& 
  *  응용 대상 메시지는 사용자용이 아니다 — 사용자에게 알리지 않고, 그 응용을 모르면 버린다(TS 24.282 §9.2.1.2 7)·8)). */
 bool parse(const std::string& contentType, const std::string& body, SdsMessage& out, bool& forApplication);
 
+/** Payload IE 의 content type·data(TS 24.282 §15.2.13) → SdsPayload(형식별 해석 — 글·문자 집합·위경도). */
+SdsPayload decodePayload(int contentType, const std::string& data);
+
 // 유틸(시험용 공개)
 std::string base64Encode(const std::string& raw);
 std::string base64Decode(const std::string& b64);
@@ -70,6 +76,10 @@ std::string hexDecode(const std::string& hex);
 std::string sdsSignallingTlv(const std::string& convId, const std::string& msgId, bool requestDelivery, int64_t timeSec);
 std::string sdsPayloadTlv(const std::string& text);
 std::string fdSignallingTlv(const std::string& convId, const std::string& msgId, const FdFile& file, int64_t timeSec);
+/** FD Metadata 의 file-selector(TS 24.282 §15.2.17 · RFC 5547 file-selector-attr) — `file-selector:name:"…" size:N type:… [hash:sha-1:…]`. */
+std::string fileSelector(const FdFile& file);
+/** Metadata 에서 file-selector 의 이름(퍼센트 복원)·크기·종류를 읽는다 — 없는 선택자는 그대로 둔다. */
+void parseFileSelector(const std::string& meta, std::string& name, int64_t& size, std::string& type);
 
 }  // namespace mcdata
 }  // namespace cimsue

@@ -391,13 +391,29 @@ public sealed record RosterEntry(string Uri, string Status);
 public sealed record RosterUpdate(int AccountId, string GroupId, IReadOnlyList<RosterEntry> Users, bool Full);
 
 /// <summary>MCData FD 로 알릴 파일(types.h FdFile) — Url = CscClient.UploadFd 결과, Type = MIME(빈 값 = application/octet-stream).</summary>
-public sealed record FdFile(string Url, string Name, string Type, long Size);
+/// <summary>FD 로 알릴 파일. Hash = <see cref="FdUpload.Hash"/>(빈 값 = Metadata file-selector 에 싣지 않음).</summary>
+public sealed record FdFile(string Url, string Name, string Type, long Size, string Hash = "");
 
 /// <summary>MCData SDS (TS 24.282) — 수신 메시지·disposition 통지·FD. GroupUri = 그룹 SDS·FD 의 request-uri(1:1 은 빈 값 — FromUri 가 상대).
 /// DispositionReq: 0 없음/1 delivery/2 read/3 both. NotifType: 1 undelivered/2 delivered/3 read/4 delivered+read. MediaPlane = media plane(MSRP) 배포로 받았다.</summary>
+/// <summary>SDS 수신. Text = 글 payload(TEXT·HYPERLINKS·CODED TEXT)를 줄을 바꿔 이은 것, Payloads = DATA PAYLOAD 의 Payload IE 전부(받은 차례 —
+/// 위치·이진 등은 여기에만, TS 24.282 §15.2.13).</summary>
 public sealed record SdsMessage(int AccountId, string FromUri, string GroupUri, string ConvId, string MsgId, long TimeSec,
                                 int DispositionReq, string Text, bool Notification, int NotifType,
-                                bool Fd, string FileUrl, string FileName, string FileType, long FileSize, bool MediaPlane = false);
+                                bool Fd, string FileUrl, string FileName, string FileType, long FileSize, bool MediaPlane = false,
+                                IReadOnlyList<SdsPayload>? Payloads = null);
+
+/// <summary>DATA PAYLOAD 의 Payload IE 하나(TS 24.282 §15.2.13, types.h SdsPayload). Type = Payload content type(<see cref="SdsPayloadType"/> 값,
+/// 모르는 값도 그대로). Data = 원문(CODED TEXT 는 charset 2 octet 을 뗀 나머지), Text = 읽을 글(UTF-8 로 푼 것 — 없으면 ""),
+/// Charset = CODED TEXT 의 IANA MIBenum, 위경도 = LOCATION(TS 23.032 §6.1).</summary>
+public sealed record SdsPayload(int Type, byte[] Data, string Text, int Charset, bool HasLocation, double Latitude, double Longitude);
+
+/// <summary>Payload content type(TS 24.282 표 15.2.13-2).</summary>
+public static class SdsPayloadType
+{
+    public const int Text = 1, Binary = 2, Hyperlinks = 3, FileUrl = 4, Location = 5, EnhancedStatus = 6,
+                     LocationAltitude = 8, LocationTimestamp = 9, CodedText = 10;
+}
 
 public sealed record StreamStats(uint RxPackets, uint RxBytes, uint RxLoss, uint RxDiscard, uint TxPackets, uint TxBytes, bool Valid);
 

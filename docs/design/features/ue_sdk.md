@@ -124,7 +124,7 @@ sdk/core/
                         서버(cmdp)가 passive 라 늘 out-connect, 전송 = net/tls_stream 평문 TCP — 원천 android msrp/·cspsim McDataMsrp
     csc/                csc_client — IdMS OAuth2 PKCE(S256) 로그인·refresh, `/provisioning/me`(services→AccountConfig,
                         dispatch 블록), GMS 그룹 목록, XCAP GET(ETag/304), MCData FD 콘텐츠 서버(`uploadFd` = POST /mcdata/fd
-                        octet-stream·group 지정 시 서버 게이트, `downloadFd` = FILEURL 의 경로만 취해 자기 CSC 로 — Bearer 를 다른 호스트로
+                        규격형 multipart/mixed(mcdata-info + octet-stream, TS 24.282 §10.2.2.1)·201 Location·SHA-1 hash·group 지정 시 서버 게이트, `downloadFd` = FILEURL 의 경로만 취해 자기 CSC 로 — Bearer 를 다른 호스트로
                         보내지 않음). 공개 헤더 `cimsue/csc.h` — Engine 과 독립, 동기 호출, 자체 JSON 파서(pjlib 비의존)
                         group_doc(GMS 그룹 문서) · cms_doc(CMS user-profile·service-config 해석 + `Capabilities::of`) — 스캔 도구 xml_scan.h 공유
     http/               https_client — ITransport(주입 가능) + OpenSSL 기본 구현(HTTP/1.1, chunked, 신뢰 앵커 PEM)

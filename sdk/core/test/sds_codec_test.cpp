@@ -179,9 +179,28 @@ TEST(SdsCodec, FdSignallingTlvLayout) {
     EXPECT_EQ(tlv.substr(42, f.url.size()), f.url);
     size_t m = 41 + l;
     ASSERT_EQ((uint8_t)tlv[m], 0x79);                        // Metadata IE (TLV-E)
-    EXPECT_EQ(tlv.substr(m + 3), "name:\"현장사진.jpg\" size:1234 type:image/jpeg");   // 이름의 따옴표는 뺀다
+    // §15.2.17 — RFC 5547 file-selector-attr: 이름의 '"'·'%' 는 퍼센트 인코딩(UTF-8 은 그대로), hash 는 있을 때만
+    EXPECT_EQ(tlv.substr(m + 3), "file-selector:name:\"현장%22사진%22.jpg\" size:1234 type:image/jpeg");
     FdFile noType = f; noType.type.clear();
     EXPECT_NE(mcdata::fdSignallingTlv(conv, msg, noType, 0).find("type:application/octet-stream"), std::string::npos);
+    FdFile hashed = f; hashed.name = "100%.txt"; hashed.hash = "AB:CD";
+    EXPECT_EQ(mcdata::fileSelector(hashed), "file-selector:name:\"100%25.txt\" size:1234 type:image/jpeg hash:sha-1:AB:CD");
+}
+
+// Metadata 해석(§15.2.17) — file-selector 의 선택자(이름 퍼센트 복원·크기·종류), 뒤따르는 file-date 등은 읽지 않는다. 접두 없는 선택자만도 읽는다.
+TEST(SdsCodec, FdMetadataFileSelectorParse) {
+    std::string name, type; int64_t size = 0;
+    mcdata::parseFileSelector("file-selector:name:\"a%22b%25.txt\" size:42 type:text/plain;charset=\"utf-8\" hash:sha-1:AB:CD"
+                              "file-date:creation:\"Sat, 03 Oct 2026 22:00:00 +0900\"", name, size, type);
+    EXPECT_EQ(name, "a\"b%.txt");
+    EXPECT_EQ(size, 42);
+    EXPECT_EQ(type, "text/plain;charset=\"utf-8\"");
+    std::string n2, t2; int64_t s2 = 0;
+    mcdata::parseFileSelector("name:\"보고서 1.pdf\" size:7 type:application/pdf", n2, s2, t2);   // 접두 없는 선택자만
+    EXPECT_EQ(n2, "보고서 1.pdf"); EXPECT_EQ(s2, 7); EXPECT_EQ(t2, "application/pdf");
+    std::string n3, t3; int64_t s3 = 0;
+    mcdata::parseFileSelector("file-selector:size:5 file-description:size:9", n3, s3, t3);          // 다른 성분의 같은 낱말을 읽지 않는다
+    EXPECT_EQ(s3, 5);
 }
 
 TEST(SdsCodec, GroupFdRoundTrip) {
@@ -367,6 +386,39 @@ TEST(SdsCodec, MultiplePayloadsAndHyperlinks) {
     body.replace(p, was.size(), mcdata::base64Encode(payload));
     SdsMessage out;
     ASSERT_TRUE(mcdata::parse(b.contentType, body, out));
-    EXPECT_EQ(out.text, "첫 줄\nhttps://example.org/a\n끝 줄");                    // BINARY 는 넘긴다
+    EXPECT_EQ(out.text, "첫 줄\nhttps://example.org/a\n끝 줄");                    // BINARY 는 글이 아니다
     EXPECT_FALSE(out.fd);
+    ASSERT_EQ(out.payloads.size(), 4u);                                              // 전부 받은 차례대로
+    EXPECT_EQ(out.payloads[2].type, kSdsPayloadBinary);
+    EXPECT_EQ(out.payloads[2].data, std::string("\x00\x01", 2));
+    EXPECT_TRUE(out.payloads[2].text.empty());
+    EXPECT_EQ(out.payloads[1].type, kSdsPayloadHyperlinks);
+}
+
+// Payload content type 별 해석(TS 24.282 §15.2.13 표 15.2.13-2·15.2.13-3) — CODED TEXT = 앞 2 octet MIBenum 으로 디코드,
+//   LOCATION = 6 octet 위경도(TS 23.032 §6.1), LOCATION TIMESTAMP = 길이 + ISO 8601 문자열, 모르는 문자 집합은 글 없이 원문만
+TEST(SdsCodec, PayloadContentTypes) {
+    // CODED TEXT — UTF-16BE(1013) «가나» = AC00 B098
+    SdsPayload ct = mcdata::decodePayload(kSdsPayloadCodedText, std::string("\x03\xF5\xAC\x00\xB0\x98", 6));
+    EXPECT_EQ(ct.charset, 1013);
+    EXPECT_EQ(ct.text, "가나");
+    EXPECT_EQ(ct.data, std::string("\xAC\x00\xB0\x98", 4));
+    // UTF-16(1015) BOM LE · ISO-8859-1(4) · UTF-8(106)
+    EXPECT_EQ(mcdata::decodePayload(kSdsPayloadCodedText, std::string("\x03\xF7\xFF\xFE\x41\x00", 6)).text, "A");
+    EXPECT_EQ(mcdata::decodePayload(kSdsPayloadCodedText, std::string("\x00\x04\xE9", 3)).text, "é");
+    EXPECT_EQ(mcdata::decodePayload(kSdsPayloadCodedText, std::string("\x00\x6A", 2) + "한").text, "한");
+    SdsPayload unknown = mcdata::decodePayload(kSdsPayloadCodedText, std::string("\x00\x26\xB0\xA1", 4));   // EUC-KR(38) — 디코드 안 함
+    EXPECT_EQ(unknown.charset, 38);
+    EXPECT_TRUE(unknown.text.empty());
+    EXPECT_EQ(unknown.data, std::string("\xB0\xA1", 2));
+    // LOCATION — 위도 +45°(N = 2^22 = 0x400000) · 경도 -90°(N = -2^22 = 0xC00000), 남위는 부호 비트
+    SdsPayload loc = mcdata::decodePayload(kSdsPayloadLocation, std::string("\x40\x00\x00\xC0\x00\x00", 6));
+    ASSERT_TRUE(loc.hasLocation);
+    EXPECT_DOUBLE_EQ(loc.latitude, 45.0);
+    EXPECT_DOUBLE_EQ(loc.longitude, -90.0);
+    EXPECT_DOUBLE_EQ(mcdata::decodePayload(kSdsPayloadLocation, std::string("\xC0\x00\x00\x40\x00\x00", 6)).latitude, -45.0);
+    EXPECT_FALSE(mcdata::decodePayload(kSdsPayloadLocation, std::string("\x40\x00\x00", 3)).hasLocation);   // 길이가 6 이 아니다
+    // LOCATION TIMESTAMP — 첫 octet 길이
+    const std::string ts = "2026-10-03 22:58:00.00000";
+    EXPECT_EQ(mcdata::decodePayload(kSdsPayloadLocationTimestamp, std::string(1, (char)ts.size()) + ts).text, ts);
 }

@@ -447,7 +447,7 @@ void fill(cimsue_dialog_info_t& o, const DialogInfo& d) {
     o.full = B(d.full);
 }
 
-void fill(cimsue_sds_message_t& o, const SdsMessage& m) {
+void fill(cimsue_sds_message_t& o, const SdsMessage& m, std::vector<cimsue_sds_payload_t>& payloadBuf) {
     o.account_id = m.accountId;
     o.from_uri = C(m.fromUri);
     o.group_uri = C(m.groupUri);
@@ -461,6 +461,17 @@ void fill(cimsue_sds_message_t& o, const SdsMessage& m) {
     o.file_url = C(m.fileUrl); o.file_name = C(m.fileName); o.file_type = C(m.fileType);
     o.file_size = m.fileSize;
     o.media_plane = B(m.mediaPlane);
+    payloadBuf.clear();
+    for (const auto& p : m.payloads) {
+        cimsue_sds_payload_t c{};
+        c.type = p.type;
+        c.data = reinterpret_cast<const uint8_t*>(p.data.data()); c.data_len = (int32_t)p.data.size();
+        c.text = C(p.text); c.charset = p.charset;
+        c.has_location = B(p.hasLocation); c.latitude = p.latitude; c.longitude = p.longitude;
+        payloadBuf.push_back(c);
+    }
+    o.payloads = payloadBuf.empty() ? nullptr : payloadBuf.data();
+    o.payload_count = (int32_t)payloadBuf.size();
 }
 
 void fill(cimsue_stream_stats_t& o, const StreamStats& s) {
@@ -932,7 +943,8 @@ public:
     }
     void onSds(const SdsMessage& msg) override {
         if (!cb.on_sds) return;
-        cimsue_sds_message_t o{}; fill(o, msg);
+        std::vector<cimsue_sds_payload_t> pl;
+        cimsue_sds_message_t o{}; fill(o, msg, pl);
         cb.on_sds(cb.user, &o);
     }
     void onRequestResult(const RequestResult& r) override {
@@ -1047,7 +1059,7 @@ void fillHttp(cimsue_csc_t* c) {
 
 FdFile fdFileOf(const cimsue_fd_file_t* f) {
     FdFile o;
-    if (f) { o.url = S(f->url); o.name = S(f->name); o.type = S(f->type); o.size = f->size; }
+    if (f) { o.url = S(f->url); o.name = S(f->name); o.type = S(f->type); o.size = f->size; o.hash = S(f->hash); }
     return o;
 }
 
@@ -1747,12 +1759,13 @@ cimsue_status_t CIMSUE_CALL cimsue_csc_request(cimsue_csc_t* c, const char* acce
 
 cimsue_status_t CIMSUE_CALL cimsue_csc_upload_fd(cimsue_csc_t* c, const char* access_token, const uint8_t* data,
                                                  int32_t data_len, const char* name, const char* mime,
-                                                 const char* group_id, cimsue_fd_upload_t* out) {
+                                                 const char* group_id, const char* calling_user_id, cimsue_fd_upload_t* out) {
     if (!c) return -1;
     c->fd = FdUpload();
     std::string d = (data && data_len > 0) ? std::string(reinterpret_cast<const char*>(data), (size_t)data_len) : std::string();
-    cimsue_status_t st = ret(c->cli->uploadFd(S(access_token), d, S(name), S(mime), S(group_id), c->fd));
+    cimsue_status_t st = ret(c->cli->uploadFd(S(access_token), d, S(name), S(mime), S(group_id), c->fd, S(calling_user_id)));
     c->fdC.id = C(c->fd.id); c->fdC.url = C(c->fd.url); c->fdC.name = C(c->fd.name); c->fdC.size = c->fd.size;
+    c->fdC.hash = C(c->fd.hash);
     if (out) *out = c->fdC;
     return st;
 }
@@ -2036,6 +2049,7 @@ int32_t CIMSUE_CALL cimsue_struct_size(cimsue_struct_id_t id) {
     case CIMSUE_STRUCT_TC_TIMERS: return (int32_t)sizeof(cimsue_tc_timers_t);
     case CIMSUE_STRUCT_SERVICE_AUTH_INFO: return (int32_t)sizeof(cimsue_service_auth_info_t);
     case CIMSUE_STRUCT_XCAP_DIFF_SUBSCRIPTION: return (int32_t)sizeof(cimsue_xcap_diff_subscription_t);
+    case CIMSUE_STRUCT_SDS_PAYLOAD: return (int32_t)sizeof(cimsue_sds_payload_t);
     default:                              return -1;
     }
 }

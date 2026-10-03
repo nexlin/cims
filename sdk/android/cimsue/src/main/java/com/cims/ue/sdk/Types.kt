@@ -34,6 +34,7 @@ import com.cims.ue.sdk.jni.RegInfo as JniRegInfo
 import com.cims.ue.sdk.jni.RequestResult as JniRequestResult
 import com.cims.ue.sdk.jni.Result as JniResult
 import com.cims.ue.sdk.jni.SdsMessage as JniSdsMessage
+import com.cims.ue.sdk.jni.SdsPayload as JniSdsPayload
 import com.cims.ue.sdk.jni.SdsSend as JniSdsSend
 import com.cims.ue.sdk.jni.ServiceAuthInfo as JniServiceAuthInfo
 import com.cims.ue.sdk.jni.StreamStats as JniStreamStats
@@ -611,6 +612,8 @@ data class RosterUpdate(val accountId: Int, val groupId: String, val users: List
     }
 }
 
+/** SDS 수신. [text] = 글 payload(TEXT·HYPERLINKS·CODED TEXT)를 줄을 바꿔 이은 것, [payloads] = DATA PAYLOAD 의 Payload IE 전부(받은 차례 —
+ *  위치·이진 등은 여기에만, TS 24.282 §15.2.13). */
 data class SdsMessage(
     val accountId: Int, val fromUri: String, val groupUri: String,
     val convId: String, val msgId: String, val timeSec: Long,
@@ -619,21 +622,43 @@ data class SdsMessage(
     val fd: Boolean, val fileUrl: String, val fileName: String, val fileType: String, val fileSize: Long,
     /** media plane(MSRP) 배포로 받았다(TS 24.282 §9.2.3). */
     val mediaPlane: Boolean = false,
+    val payloads: List<SdsPayload> = emptyList(),
 ) {
     internal companion object {
         fun of(m: JniSdsMessage) = SdsMessage(m.accountId, m.fromUri, m.groupUri, m.convId, m.msgId,
             m.timeSec, m.dispositionReq, m.text, m.notification, m.notifType,
-            m.fd, m.fileUrl, m.fileName, m.fileType, m.fileSize, m.mediaPlane)
+            m.fd, m.fileUrl, m.fileName, m.fileType, m.fileSize, m.mediaPlane,
+            m.payloads.let { v -> List(v.size) { SdsPayload.of(v[it]) } })
     }
 }
 
+/** DATA PAYLOAD 의 Payload IE 하나(TS 24.282 §15.2.13). [type] = Payload content type([SdsPayloadType] 값, 모르는 값도 그대로),
+ *  [data] = 원문(CODED TEXT 는 charset 2 octet 을 뗀 나머지), [text] = 읽을 글(UTF-8 로 푼 것 — 없으면 빈 값), [charset] = CODED TEXT 의
+ *  IANA MIBenum, 위경도 = LOCATION(TS 23.032 §6.1). */
+class SdsPayload(val type: Int, val data: ByteArray, val text: String, val charset: Int,
+                 val hasLocation: Boolean, val latitude: Double, val longitude: Double) {
+    internal companion object {
+        fun of(p: JniSdsPayload) = SdsPayload(p.type, p.data ?: ByteArray(0), p.text, p.charset, p.hasLocation, p.latitude, p.longitude)
+    }
+}
+
+/** Payload content type(TS 24.282 표 15.2.13-2). */
+object SdsPayloadType {
+    const val TEXT = 1; const val BINARY = 2; const val HYPERLINKS = 3; const val FILEURL = 4; const val LOCATION = 5
+    const val ENHANCED_STATUS = 6; const val LOCATION_ALTITUDE = 8; const val LOCATION_TIMESTAMP = 9; const val CODED_TEXT = 10
+}
+
 /** MCData FD 로 알릴 파일(TS 24.282 FD SIGNALLING — FILEURL·Metadata). url = [CscClient.uploadFd] 결과, type = MIME(빈 값 = application/octet-stream). */
-data class FdFile(val url: String, val name: String, val type: String = "", val size: Long = 0) {
-    internal fun toJni(): JniFdFile = JniFdFile().also { it.url = url; it.name = name; it.type = type; it.size = size }
+data class FdFile(val url: String, val name: String, val type: String = "", val size: Long = 0,
+                  /** [FdUpload.hash](SHA-1, RFC 5547 hash-value) — 빈 값이면 FD Metadata file-selector 에 싣지 않는다(TS 24.282 §15.2.17). */
+                  val hash: String = "") {
+    internal fun toJni(): JniFdFile = JniFdFile().also { it.url = url; it.name = name; it.type = type; it.size = size; it.hash = hash }
 }
 
 /** FD 업로드 결과(POST /mcdata/fd 201) — url 을 [FdFile.url] 로 넘긴다. */
-data class FdUpload(val id: String, val url: String, val name: String, val size: Long)
+data class FdUpload(val id: String, val url: String, val name: String, val size: Long,
+                    /** 올린 바이트의 SHA-1(RFC 5547 hash-value) → [FdFile.hash]. */
+                    val hash: String = "")
 
 /** SDS 발신의 즉시 결과 — 최종 응답은 `requestResult` 에 같은 token 으로 온다. */
 data class SdsSend(val msgId: String, val token: Long) {

@@ -339,6 +339,21 @@ internal unsafe struct cimsue_sds_message_t
     public byte* file_type;
     public long file_size;
     public int media_plane;    // 끝에 덧붙였다
+    public cimsue_sds_payload_t* payloads;
+    public int payload_count;
+}
+
+[StructLayout(LayoutKind.Sequential)]
+internal unsafe struct cimsue_sds_payload_t
+{
+    public int type;
+    public byte* data;
+    public int data_len;
+    public byte* text;
+    public int charset;
+    public int has_location;
+    public double latitude;
+    public double longitude;
 }
 
 [StructLayout(LayoutKind.Sequential)]
@@ -654,6 +669,7 @@ internal unsafe struct cimsue_fd_file_t
     public byte* name;
     public byte* type;
     public long size;
+    public byte* hash;     // 끝에 덧붙였다
 }
 
 [StructLayout(LayoutKind.Sequential)]
@@ -663,6 +679,7 @@ internal unsafe struct cimsue_fd_upload_t
     public byte* url;
     public byte* name;
     public long size;
+    public byte* hash;     // 끝에 덧붙였다
 }
 
 [StructLayout(LayoutKind.Sequential)]
@@ -887,5 +904,6 @@ internal enum cimsue_struct_id_t
     VIDEO_FRAME,
     VIDEO_REQUEST_EVENT,
     FLOOR_TIMERS, TC_TIMERS, SERVICE_AUTH_INFO, XCAP_DIFF_SUBSCRIPTION,
+    SDS_PAYLOAD,
     COUNT_,
 }

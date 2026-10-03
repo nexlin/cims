@@ -136,6 +136,8 @@ using namespace cimsue;
 %#endif
 }
 
+// SdsPayload.data(Payload data 원문 — BINARY 등 이진, TS 24.282 §15.2.13)도 byte[] 다. 멤버 한정이라 types.h 의 다른 문자열은 그대로 String.
+%apply const std::string& BINARY { const std::string& cimsue::SdsPayload::data };
 %include "cimsue/types.h"
 %include "cimsue/listener.h"
 // engine.h 를 먼저 — Engine::sendRequest 의 SIP 본문은 텍스트라 아래 이진 적용 전에 통과시킨다.
@@ -170,3 +172,4 @@ using namespace cimsue;
 %template(DriveAccountVector)   std::vector<cimsue::DriveAccount>;
 %template(VideoDeviceVector)    std::vector<cimsue::VideoDeviceInfo>;
 %template(VideoTransmitterVector) std::vector<cimsue::VideoTransmitter>;
+%template(SdsPayloadVector)     std::vector<cimsue::SdsPayload>;

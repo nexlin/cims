@@ -1,6 +1,8 @@
 package com.cims.ue.ptt
 
 import com.cims.ue.sdk.CommencementMode
+import com.cims.ue.sdk.SdsPayload
+import com.cims.ue.sdk.SdsPayloadType
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -28,6 +30,18 @@ class CallRulesTest {
             CallRules.effectiveCommencement(CommencementMode.FORCE_AUTO, null))
         assertEquals("개별 통화 인가 없음", CommencementMode.UNSPECIFIED,
             CallRules.effectiveCommencement(CommencementMode.AUTO, emptySet()))
+    }
+
+    // TS 24.282 §9.2.1.2 6)d) — 글이 아닌 payload(위치·이진)도 말풍선에 한 줄씩
+    @Test fun `문자 말풍선은 위치와 이진 payload 를 덧붙인다`() {
+        fun p(type: Int, data: ByteArray = ByteArray(0), text: String = "", charset: Int = 0, loc: Boolean = false,
+              lat: Double = 0.0, lon: Double = 0.0) = SdsPayload(type, data, text, charset, loc, lat, lon)
+        val loc = p(SdsPayloadType.LOCATION, loc = true, lat = 37.5665, lon = 126.978)
+        assertEquals("안녕\n위치 37.56650, 126.97800", CallRules.sdsDisplayText("안녕", listOf(p(SdsPayloadType.TEXT, text = "안녕"), loc)))
+        assertEquals("위치 37.56650, 126.97800", CallRules.sdsDisplayText("", listOf(loc)))
+        assertEquals("이진 데이터 3바이트", CallRules.sdsDisplayText("", listOf(p(SdsPayloadType.BINARY, ByteArray(3)))))
+        assertEquals("읽을 수 없는 문자 집합(38)", CallRules.sdsDisplayText("", listOf(p(SdsPayloadType.CODED_TEXT, ByteArray(2), charset = 38))))
+        assertEquals("", CallRules.sdsDisplayText("", listOf(p(SdsPayloadType.LOCATION_ALTITUDE, ByteArray(2)))))
     }
 
     // TS 24.379 §11.1.1.2.1.2 10) — 수동 응답 요청 착신은 받기 전까지 [받기]·[거절]

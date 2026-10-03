@@ -94,7 +94,9 @@ struct XcapDoc { std::string body, etag; bool notModified = false; };
 /** 임의 HTTP 요청 산출(request) — status 는 HTTP 상태(0 = 전송 실패), body 는 바이트 그대로(이진 가능). */
 struct HttpResult { int status = 0; std::string contentType, etag, body; };
 /** MCData FD 업로드 결과(POST /mcdata/fd 201) — url 이 FD SIGNALLING 의 FILEURL(Engine::sendGroupFd/sendFd 의 FdFile.url). */
-struct FdUpload { std::string id, url, name; int64_t size = 0; };
+/** FD 업로드 결과. hash = 올린 바이트의 SHA-1(RFC 5547 hash-value — 대문자 16진 octet 을 ':' 로 이은 것) — FdFile.hash 로 넘기면 FD Metadata 의
+ *  file-selector 에 `hash:sha-1:…` 로 실린다(TS 24.282 §15.2.17). */
+struct FdUpload { std::string id, url, name; int64_t size = 0; std::string hash; };
 
 /** 그룹 문서 멤버(list/entry). role = chair | participant (mcpttgi:participant-type). */
 struct GroupMember {
@@ -365,10 +367,13 @@ public:
                    const std::string& contentType, const std::string& body, const std::string& accept,
                    const std::string& ifMatch, const std::string& ifNoneMatch, HttpResult& out);
     // ── MCData FD 콘텐츠 서버(TS 24.282 §10.2 — mcdata_messaging.md §4.5, 토큰 scope 3gpp:mc:data_service) ──
-    /** 파일 업로드(octet-stream). groupId 가 비지 않으면 그룹 FD — 서버가 그룹 allow_fd·업로더 멤버십으로 게이트(403, 없는 그룹 404).
-     *  비면 1:1. 413 = 서버 상한(McDataFd.MaxBytes) 초과. 실패 code = HTTP 상태(전송 실패 -1). */
+    /** 파일 업로드 — TS 24.282 §10.2.2.1 규격형: POST multipart/mixed = mcdata-info(request-type one-to-one-fd | group-fd · 그룹이면
+     *  <mcdata-request-uri> = groupId · <mcdata-calling-user-id> = callingUserId(발신 MCData ID — 비면 싣지 않는다)) + application/octet-stream
+     *  (Content-Length = 파일 크기, Content-Disposition filename = name). 서버 저장 MIME 은 쿼리 `type`(CIMS 확장). 201 의 `Location` 이 파일
+     *  URL(FdUpload.url → FD 의 FILEURL). 그룹 FD 는 서버가 그룹 allow_fd·업로더 멤버십으로 게이트(403, 없는 그룹 404), 413 = 서버 상한 초과.
+     *  실패 code = HTTP 상태(전송 실패 -1). */
     Result uploadFd(const std::string& accessToken, const std::string& data, const std::string& name,
-                    const std::string& mime, const std::string& groupId, FdUpload& out);
+                    const std::string& mime, const std::string& groupId, FdUpload& out, const std::string& callingUserId = std::string());
     /** 파일 다운로드 — url 은 받은 FD 의 FILEURL. 경로(/mcdata/fd/{id})만 취해 **이 CSC** 에 요청한다: Bearer 를 다른 호스트로
      *  보내지 않고, 발신자가 다른 주소(FQDN·다른 노드)로 올렸어도 같은 사이트 저장소에서 받는다. 경로가 FD 가 아니면 fail(-2).
      *  out.body = 파일 바이트, out.contentType = 저장 MIME. */

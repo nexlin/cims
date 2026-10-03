@@ -556,8 +556,9 @@ class PttService : Service() {
                 if (m.fileSize in 1..autoRecv.toLong()) downloadAttachment(m.msgId, m.fileUrl, m.fileName)
             }
             else -> {
-                if (m.text.isNotEmpty()) {
-                    messages.add(gid, m.text, com.cims.ue.core.message.MsgDirection.IN, sender = sender, msgId = m.msgId)
+                val text = CallRules.sdsDisplayText(m.text, m.payloads)      // 위치·이진 payload 도 한 줄씩(§9.2.1.2 6)d))
+                if (text.isNotEmpty()) {
+                    messages.add(gid, text, com.cims.ue.core.message.MsgDirection.IN, sender = sender, msgId = m.msgId)
                     _messageTick.value++
                 }
                 // 발신자 미상(media plane 배포에 mcdata-info 가 없어 발신자 = 그룹)이면 통지 대상이 그룹이 되므로 회신 억제.

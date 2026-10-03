@@ -661,13 +661,15 @@ class CscClient(
 
     // ── MCData FD 콘텐츠 서버(TS 24.282 §10.2, mcdata_messaging.md §4.5) ──
     /**
-     * 파일 업로드(POST /mcdata/fd) — 결과 [FdUpload.url] 을 [FdFile.url] 로 넘겨 `Account.sendGroupFd`/`sendFd` 로 알린다.
-     * groupId 를 주면 서버가 그 그룹의 FD 게이트를 적용하고, 비우면 1:1. 413 = 서버 상한 초과. 실패 code = HTTP 상태(전송 실패 -1).
+     * 파일 업로드 — TS 24.282 §10.2.2.1 규격형(POST multipart/mixed = mcdata-info + octet-stream, 파일 URL = 201 Location). 결과 [FdUpload.url]·
+     * [FdUpload.hash] 를 [FdFile] 로 넘겨 `Account.sendGroupFd`/`sendFd` 로 알린다. groupId 를 주면 그룹 FD(group-fd — 서버가 그 그룹의 FD 게이트를
+     * 적용), 비우면 1:1. callingUserId = 발신 MCData ID(`<mcdata-calling-user-id>`). 413 = 서버 상한 초과. 실패 code = HTTP 상태(전송 실패 -1).
      */
     suspend fun uploadFd(accessToken: String, data: ByteArray, name: String, mime: String = "",
-                         groupId: String = ""): CimsResult<FdUpload> = call {
+                         groupId: String = "", callingUserId: String = ""): CimsResult<FdUpload> = call {
         val out = JniFdUpload()
-        CimsResult.of(jni.uploadFd(accessToken, data, name, mime, groupId, out), FdUpload(out.id, out.url, out.name, out.size))
+        CimsResult.of(jni.uploadFd(accessToken, data, name, mime, groupId, out, callingUserId),
+            FdUpload(out.id, out.url, out.name, out.size, out.hash))
     }
 
     /** 받은 FD 의 FILEURL 다운로드 — 경로만 취해 자기 CSC 로 보낸다(Bearer 를 다른 호스트로 보내지 않는다). 본문 = 파일 바이트. */

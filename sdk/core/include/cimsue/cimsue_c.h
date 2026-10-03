@@ -465,6 +465,27 @@ typedef struct {
     const char* status;
 } cimsue_roster_entry_t;
 
+/** DATA PAYLOAD 의 Payload IE 하나(types.h SdsPayload, TS 24.282 §15.2.13). type = CIMSUE_SDS_PAYLOAD_*(모르는 값도 그대로). */
+#define CIMSUE_SDS_PAYLOAD_TEXT 1
+#define CIMSUE_SDS_PAYLOAD_BINARY 2
+#define CIMSUE_SDS_PAYLOAD_HYPERLINKS 3
+#define CIMSUE_SDS_PAYLOAD_FILEURL 4
+#define CIMSUE_SDS_PAYLOAD_LOCATION 5
+#define CIMSUE_SDS_PAYLOAD_ENHANCED_STATUS 6
+#define CIMSUE_SDS_PAYLOAD_LOCATION_ALTITUDE 8
+#define CIMSUE_SDS_PAYLOAD_LOCATION_TIMESTAMP 9
+#define CIMSUE_SDS_PAYLOAD_CODED_TEXT 10
+typedef struct {
+    int32_t        type;
+    const uint8_t* data;                /* Payload data 원문(이진) — CODED TEXT 는 charset 2 octet 을 뗀 나머지 (ptr, len) */
+    int32_t        data_len;
+    const char*    text;                /* 읽을 글(UTF-8) — TEXT·HYPERLINKS·CODED TEXT(아는 charset)·FILEURL·LOCATION TIMESTAMP, 그 밖 "" */
+    int32_t        charset;             /* CODED TEXT 의 IANA MIBenum, 그 밖 0 */
+    int32_t        has_location;        /* LOCATION — 위경도(TS 23.032 §6.1) */
+    double         latitude;
+    double         longitude;
+} cimsue_sds_payload_t;
+
 typedef struct {
     int32_t     account_id;
     const char* from_uri;
@@ -482,6 +503,8 @@ typedef struct {
     const char* file_type;
     int64_t     file_size;
     int32_t     media_plane;            /* media plane(MSRP) 배포로 받았다(TS 24.282 §9.2.3) — 끝에 덧붙였다 */
+    const cimsue_sds_payload_t* payloads;   /* DATA PAYLOAD 의 Payload IE 전부(받은 차례) (ptr, count) — 끝에 덧붙였다 */
+    int32_t     payload_count;
 } cimsue_sds_message_t;
 
 /** MCData FD 로 알릴 파일(types.h FdFile) — send_group_fd/send_fd 입력. url = csc_upload_fd 결과, 문자열 NULL = 빈 값. */
@@ -490,6 +513,7 @@ typedef struct {
     const char* name;
     const char* type;                   /* MIME (NULL·빈 값 = application/octet-stream) */
     int64_t     size;
+    const char* hash;                   /* SHA-1 — RFC 5547 hash-value(cimsue_fd_upload_t.hash 그대로), NULL·빈 값 = 싣지 않음 — 끝에 덧붙였다 */
 } cimsue_fd_file_t;
 
 typedef struct {
@@ -996,6 +1020,7 @@ typedef struct {
     const char* url;
     const char* name;
     int64_t     size;
+    const char* hash;                   /* 올린 바이트의 SHA-1(RFC 5547 hash-value) → cimsue_fd_file_t.hash — 끝에 덧붙였다 */
 } cimsue_fd_upload_t;
 
 /** 그룹 문서 멤버 — role = chair | participant. */
@@ -1232,11 +1257,13 @@ CIMSUE_API cimsue_status_t CIMSUE_CALL cimsue_csc_request(cimsue_csc_t* c, const
                                                           const char* path, const char* content_type, const uint8_t* body,
                                                           int32_t body_len, const char* accept, const char* if_match,
                                                           const char* if_none_match, cimsue_http_result_t* out);
-/** MCData FD 업로드(octet-stream). group_id(NULL·빈 값 = 1:1)면 서버가 allow_fd·멤버십으로 게이트. 반환 = cimsue_csc_request 규약
- *  (0 / HTTP 상태 — 403 게이트·404 그룹·413 상한 / -1 전송 실패). *out 은 핸들 스냅샷. */
+/** MCData FD 업로드 — TS 24.282 §10.2.2.1 규격형(csc.h CscClient::uploadFd — multipart/mixed = mcdata-info + octet-stream, 파일 URL = 201 Location).
+ *  group_id(NULL·빈 값 = 1:1)면 group-fd — 서버가 allow_fd·멤버십으로 게이트. calling_user_id = 발신 MCData ID(NULL·빈 값 = 싣지 않음).
+ *  반환 = cimsue_csc_request 규약(0 / HTTP 상태 — 403 게이트·404 그룹·413 상한 / -1 전송 실패). *out 은 핸들 스냅샷(hash → fd_file.hash). */
 CIMSUE_API cimsue_status_t CIMSUE_CALL cimsue_csc_upload_fd(cimsue_csc_t* c, const char* access_token, const uint8_t* data,
                                                             int32_t data_len, const char* name, const char* mime,
-                                                            const char* group_id, cimsue_fd_upload_t* out);
+                                                            const char* group_id, const char* calling_user_id,
+                                                            cimsue_fd_upload_t* out);
 /** MCData FD 다운로드 — url = 받은 FILEURL. 경로(/mcdata/fd/{id})만 취해 이 CSC 에 요청(Bearer 를 다른 호스트로 보내지 않음),
  *  FD 경로가 아니면 -2. 산출 = cimsue_csc_request 와 같은 핸들 스냅샷(body = 파일 바이트). */
 CIMSUE_API cimsue_status_t CIMSUE_CALL cimsue_csc_download_fd(cimsue_csc_t* c, const char* access_token, const char* url,
@@ -1343,6 +1370,7 @@ typedef enum {
     CIMSUE_STRUCT_VIDEO_FRAME,
     CIMSUE_STRUCT_VIDEO_REQUEST_EVENT,
     CIMSUE_STRUCT_FLOOR_TIMERS, CIMSUE_STRUCT_TC_TIMERS, CIMSUE_STRUCT_SERVICE_AUTH_INFO, CIMSUE_STRUCT_XCAP_DIFF_SUBSCRIPTION,
+    CIMSUE_STRUCT_SDS_PAYLOAD,
     CIMSUE_STRUCT_COUNT_
 } cimsue_struct_id_t;
 /** 구조체의 sizeof(이 DLL 의 컴파일 결과). 모르는 id 는 -1. */

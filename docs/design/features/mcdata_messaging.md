@@ -83,8 +83,17 @@ SIP MESSAGE 본문 = `multipart/mixed;boundary=…` 3파트:
   DELIVERED=0x02)을 원 발신자에게 1:1 MESSAGE 로 회신 → 발신 앱 말풍선에 ✓ 표시.
 - **mcdata-info 의 client ID**: 그룹 SDS·그룹 FD 는 `<mcdata-client-id type="Normal"><mcdataString>` 로 MCData client ID(단일 MC client ID —
   `AccountConfig.effectiveMcpttClientId()`)를 싣는다(TS 24.282 §9.2.2.2.1 3)b)iv) · §10.2.4.2.1 3)b)iii) — 제어 기능의 클라이언트 단위 판정). 1:1 은 싣지 않는다.
-- **Payload 여러 개**(§15.2.13 · §9.2.1.2 6)d)): DATA PAYLOAD 의 Payload IE 가 여럿이면 TEXT(0x01)·HYPERLINKS(0x03)를 온 순서대로 줄을 바꿔 이어
-  `SdsMessage.text` 로 올린다. FILEURL(0x04)은 파일. BINARY·LOCATION·CODED TEXT 는 넘긴다(미구현).
+- **Payload 여러 개·형식별 해석**(§15.2.13 표 15.2.13-2·15.2.13-3 · §9.2.1.2 6)d)): DATA PAYLOAD 의 Payload IE 는 전부 받은 차례대로
+  `SdsMessage.payloads`(`SdsPayload` — type·원문 data·읽을 글 text·charset·위경도)에 싣는다. 글 payload — TEXT(0x01)·HYPERLINKS(0x03)·
+  CODED TEXT(0x0A, 앞 2 octet = IANA MIBenum — UTF-8 106·US-ASCII 3·ISO-8859-1 4·UTF-16BE 1013/LE 1014/BOM 1015 을 UTF-8 로 푼다, 모르는 집합은
+  글 없이 원문만) — 는 온 순서대로 줄을 바꿔 이어 `SdsMessage.text` 로도 올린다. FILEURL(0x04)은 파일. LOCATION(0x05)은 6 octet 위경도
+  (TS 23.032 §6.1 타원체 점 — 위도 = 부호 1비트 + 23비트 × 90/2^23, 경도 = 24비트 2의 보수 × 360/2^24; TS 23.032 원문은 대조 폴더에 없어 그 절의
+  부호화를 기억으로 옮겼다), LOCATION TIMESTAMP(0x09)는 길이 octet 뒤 ISO 8601 문자열을 text 로. BINARY·ENHANCED STATUS·LOCATION ALTITUDE 는
+  원문 data 만. TEXT 는 단말 설정 문자 집합 UTF-8 로 읽는다(§6.2.2.1 3)a)i) — CIMS 그룹 문서의 `<mcdata-default-charset>` 는 106) —
+  그룹 기본 집합이 다른 타 서버 그룹의 TEXT 는 `data` 원문으로 앱이 푼다. 두 Android 앱은 글 뒤에 위치(«위치 위도, 경도»)·이진(«이진 데이터
+  N바이트»)·모르는 집합의 CODED TEXT 를 한 줄씩 덧붙여 말풍선에 보인다(현장 앱 `CallRules.sdsDisplayText`·태블릿 `sdsDisplayText`).
+  C API `cimsue_sds_message_t.payloads`(`cimsue_sds_payload_t`, `CIMSUE_SDS_PAYLOAD_*`) · .NET `SdsMessage.Payloads`(`SdsPayloadType`) ·
+  Kotlin `SdsMessage.payloads`(`SdsPayloadType`, data = ByteArray). 보내는 쪽은 TEXT 하나다(UTF-8 — 단말 설정 문자 집합).
 - **선택 IE 와 응용 대상 메시지**(표 15.1.2.1-1 · §9.2.1.2 7)·8)): SDS SIGNALLING PAYLOAD 의 선택 IE 는 InReplyTo `0x21` → Application ID `0x22`
   → disposition 요청 `0x8N` → Extended application ID `0x7D` → User location `0x7E` → Sender MCData user ID `0x51` → Application metadata container
   `0x53`(뒤 넷은 TLV-E) 순서로 읽는다. Application ID 나 Extended application ID 가 있는 메시지는 **사용자용이 아니다** — 단말은 사용자에게
@@ -217,7 +226,10 @@ mcdata-info `<mcdata-calling-group-id>` 를 실어 보낸다(5)). CSP `CMcDataAs
   | 말투 | 요청 | 그룹·발신자 |
   |---|---|---|
   | 규격형(§10.2.2.1 4)~8)) | `POST /mcdata/fd`, `Content-Type: multipart/mixed` — `application/vnd.3gpp.mcdata-info+xml` + `application/octet-stream`(Content-Length = 파일 크기) | mcdata-info `<request-type>` `one-to-one-fd`\|`group-fd` · `<mcdata-request-uri>`(그룹, group-fd 필수) · `<mcdata-calling-user-id>` |
-  | 간이형(자체 단말·계측기) | `POST /mcdata/fd?name=&group=&type=`, 본문 `application/octet-stream`(또는 multipart/form-data `file`) | query `group`(있으면 그룹 FD) |
+  | 간이형(계측기) | `POST /mcdata/fd?name=&group=&type=`, 본문 `application/octet-stream`(또는 multipart/form-data `file`) | query `group`(있으면 그룹 FD) |
+
+  단말 SDK 는 규격형으로 올린다(`CscClient::uploadFd` — mcdata-info + octet-stream, 파일 이름 = 파일 파트의 `Content-Disposition` filename,
+  저장 MIME = 쿼리 `type`(CIMS 확장 — 규격 요청에 자리가 없다, 받는 쪽의 정본은 FD Metadata type), 파일 URL = 201 의 `Location`).
 
   응답 = **201 Created + `Location`**(저장한 파일의 URL — 단말은 이 값을 FD 의 FILEURL 로 쓴다, §10.2.2.2 2)b)) + JSON
   `{id, url, size, name}`(`url` = Location). **URL 의 base = CSC 공개 base URL**(`McpttServer.PublicUrl`, 없으면 요청 Host) — CSP 가
@@ -238,12 +250,16 @@ mcdata-info `<mcdata-calling-group-id>` 를 실어 보낸다(5)). CSP `CMcDataAs
 - 저장: `{McDataFd.Dir | {Content.Dir}/mcdata_fd}/{YYYY}/{MM}/{DD}/{id}.bin` +
   `index/{id}.json`(메타 — name·size·type·group·uploader·ts). CMDP 의 media plane 저장분(§4.7)도 같은 스키마라 같은 수신 제어를 받는다.
 - **FD SIGNALLING PAYLOAD** (TS 24.282 §15.1.3): Payload IE(0x78)=FILEURL(0x04, URL 문자열),
-  Metadata IE(0x79)=RFC 5547 file-selector 부분집합 `name:"…" size:N type:MIME`.
+  Metadata IE(0x79)=§15.2.17 — RFC 5547 `file-selector-attr`: 단말 SDK 는 `file-selector:name:"…" size:N type:MIME hash:sha-1:XX:…`
+  (이름의 NUL·CR·LF·`"`·`%` 는 퍼센트 인코딩, hash = 올린 바이트의 SHA-1 — `FdUpload.hash` → `FdFile.hash`, 모르면 싣지 않는다; file-date·
+  file-availability·file-description 은 싣지 않는다 — 단말이 모르는 값). 받는 쪽은 file-selector 의 선택자(이름 퍼센트 복원·크기·종류)만 읽는다 —
+  접두 없는 선택자만의 형식(CSP 폴백 FD)도 같은 규칙으로 읽는다(`mcdata::parseFileSelector`).
 - CSP MCDATA-AS 는 FD 를 `allow_fd` 로 게이트하고(SDS 크기 게이트 제외 — payload=URL),
   보관 레코드에 file_* 필드를 남긴다. 파일 크기 상한의 실효 강제 지점은 CSC 업로드 단.
 - 수신 앱: 그룹문서 `max-data-size-auto-recv` 이내면 자동 다운로드, 초과분은 말풍선 탭으로
   수동 다운로드 → FileProvider ACTION_VIEW 로 열기 (`files/mcdata/`).
-- **단말 SDK(`libcimsue`, [ue_sdk.md](ue_sdk.md))**: `CscClient::uploadFd`(그룹 FD 면 `group` 지정 → 서버 게이트, 1:1 은 없음) →
+- **단말 SDK(`libcimsue`, [ue_sdk.md](ue_sdk.md))**: `CscClient::uploadFd`(규격형 — 그룹 FD 면 group-fd + `<mcdata-request-uri>` → 서버 게이트,
+  1:1 은 one-to-one-fd, 발신 MCData ID `callingUserId` = 앱의 MCPTT ID) →
   `Engine::sendGroupFd`/`sendFd`(request-type `group-fd`/`one-to-one-fd`, 두 파트) · 수신 `onSds(fd=true, fileUrl·fileName·fileSize·fileType)` ·
   `CscClient::downloadFd`(FILEURL 의 **경로만** 취해 자기 CSC 로 — Bearer 를 FILEURL 의 호스트로 보내지 않고, 발신자가 다른 주소로 올렸어도 같은
   NAS 저장소에서 받는다). C API `cimsue_csc_upload_fd/download_fd`·`cimsue_engine_send_group_fd/send_fd`, .NET `CscClient.UploadFd/DownloadFd`·
@@ -355,7 +371,10 @@ CSP fan-out (하이브리드):
   게이트와 동일 기준)가 프로비저닝 임계 `mcdata.maxPayloadSdsCplaneBytes`(SDK `AccountConfig.maxSdsCplaneBytes`, 0=무제한)를 초과하면
   **코어가** C-plane MESSAGE 대신 **MSRP 미디어평면**(§4.7)으로 보낸다 — INVITE(`m=message TCP/MSRP`, Accept-Contact mcdata ICSI) →
   200 OK `a=path` 로 TCP out-connect(`sdk/core/src/mcdata/msrp.{h,cpp}`) → SIGNALLING/PAYLOAD TLV(raw, base64 CTE 없음) 청크 SEND →
-  서버 BYE 로 완료. 최종 결과는 시그널링 평면과 같은 token 으로 method `MSRP` 가 온다(`MessagingPlane.onSendResult`).
+  미디어 평면 결과대로 **단말이 BYE** 로 놓는다(TS 24.282 §9.2.3.2.3 끝 — 보냄 = `Reason: SIP;cause=200;text="transmission succeeded"`,
+  못 보냄(a=path 없음·MSRP 실패) = `cause=480;text="transmission failed"`; 서버가 먼저 BYE 했으면 그것으로 끝). 받는 쪽(서버발 배포)은 해제 의무가
+  없어(§9.2.3.2.4) 서버 BYE 를 기다리고, 5 s 안에 없으면 자원을 거두려고 끊는다. 최종 결과는 시그널링 평면과 같은 token 으로 method `MSRP` 가 온다
+  (`MessagingPlane.onSendResult`).
   - **전송 상태 말풍선**: C-plane·MSRP 모두 PENDING(🕓, media plane 은 진행률 — `PttService.sendProgress`) → 성공 SENT(✓)/실패 FAILED(⚠, 탭=같은 msgId 재전송 —
     `PttService.resendMessage`) — `MessageStore.sendState` + `PttController.sendResult`. C-plane 의 결과는 MESSAGE 트랜잭션 최종 응답
     (token 상관 — 2xx=SENT, 그 밖=FAILED). 401/407 재인증은 코어가 하므로 앱에는 최종 결과만 온다. DELIVERED 통지 수신 시 ✓✓.
@@ -428,8 +447,6 @@ CSP fan-out (하이브리드):
 - 멤버 단위 송신권한 — 수신전용 멤버(지금은 멤버 전원 `<mcdata-allow-transmit-data-in-this-group>` true)·멤버별 `<mcdata-max-data-in-single-request>`
 - 메시지·FD 파일 retention/purge (녹취와 공통 정리 메커니즘)
 - FD NOTIFICATION(다운로드 완료)·READ 통지
-- **단말 SDK 의 규격형 업로드** — `CscClient::uploadFd` 는 간이형(query)으로 올린다. multipart/mixed + mcdata-info·`Location` 사용과
-  Metadata 의 `file-selector:` 접두(TS 24.282 §15.2.17 · RFC 5547)는 conformance_gap_plan.md U05
 - **MCData 긴급 경보**(TS 24.282 §16.2 · 애드혹 그룹 경보 §16.2A — 미지원): 그룹 문서가 `<mcdata-allow-emergency-alert>` 를 싣지 않으므로 발령은 늘 미인가다
   (§6.3.7.2.1) — CSP `CMcDataAsModule::OnEmergencyAlert` 가 **403 + mcdata-info `<alert-ind>` false**(§16.2.3.1 4)a))로 답하고 배포하지
   않는다. 취소(`<alert-ind>` false, §16.2.3.2)는 남은 MCData 경보가 없어 지울 것도 보낼 통지도 없다 → 200. 지원할 때 = 그룹 문서 요소·

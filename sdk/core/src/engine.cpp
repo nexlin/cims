@@ -3997,14 +3997,32 @@ void Engine::Impl::runMsrpThread(std::shared_ptr<std::atomic<bool>> cancel, std:
     }).detach();
 }
 
-/** 입출력이 끝난 MSRP 호 — 서버가 저장·전달 뒤 BYE 한다(mcdata_messaging.md §4.7). 5 s 안에 끊기지 않으면 우리가 끊는다. */
-static void finishMsrpCall(Engine::Impl* o, int callId, const std::atomic<bool>& cancel) {
+/** 받기가 끝난 media plane SDS 호 — 착신 단말에는 해제 의무가 없고 서버가 놓는다(TS 24.282 §9.2.3.2.4). 5 s 안에 끊기지 않으면
+ *  자원을 거두려고 우리가 끊는다. */
+static void finishMsrpRecvCall(Engine::Impl* o, int callId, const std::atomic<bool>& cancel) {
     for (int i = 0; i < 25 && !cancel; ++i) std::this_thread::sleep_for(std::chrono::milliseconds(200));
     if (cancel) return;
     o->ctl.post([o, callId] {
         PjCall* c = o->findCall(callId);
         if (!c) return;
         try { pj::CallOpParam p; c->hangup(p); } catch (pj::Error&) {}
+    });
+}
+
+/** 보내기가 끝난 media plane SDS 호를 단말이 놓는다(TS 24.282 §9.2.3.2.3 끝) — 미디어 평면의 결과대로 BYE 에 Reason 을 싣는다:
+ *  보냄 = `SIP;cause=200;text="transmission succeeded"`, 못 보냄 = `SIP;cause=480;text="transmission failed"`. 서버가 먼저 BYE 했으면 호가 없다. */
+static void releaseMsrpSendCall(Engine::Impl* o, int callId, bool sent, const std::atomic<bool>& cancel) {
+    if (cancel) return;
+    o->ctl.post([o, callId, sent] {
+        PjCall* c = o->findCall(callId);
+        if (!c) return;
+        try {
+            pj::CallOpParam p;
+            pj::SipHeader h; h.hName = "Reason";
+            h.hValue = sent ? "SIP;cause=200;text=\"transmission succeeded\"" : "SIP;cause=480;text=\"transmission failed\"";
+            p.txOption.headers.push_back(h);
+            c->hangup(p);
+        } catch (pj::Error&) {}
     });
 }
 
@@ -4020,7 +4038,7 @@ void Engine::Impl::startMsrpSend(int callId, int accountId, const MsrpLeg& leg) 
         r.accountId = accountId; r.token = token; r.method = "MSRP"; r.code = code;
         r.reason = !err.empty() ? err : code == 200 ? "OK" : sp.empty() ? "no a=path in answer" : "";
         emit([this, r] { listener->onRequestResult(r); });
-        finishMsrpCall(this, callId, *cancel);
+        releaseMsrpSendCall(this, callId, code == 200, *cancel);
     });
 }
 
@@ -4049,7 +4067,7 @@ void Engine::Impl::startMsrpRecv(int callId, int accountId, const MsrpLeg& leg) 
         } else {
             log(2, "msrp recv call " + std::to_string(callId) + " " + sp + ": " + (sp.empty() ? "no a=path" : err));
         }
-        finishMsrpCall(this, callId, *cancel);
+        finishMsrpRecvCall(this, callId, *cancel);
     });
 }
 

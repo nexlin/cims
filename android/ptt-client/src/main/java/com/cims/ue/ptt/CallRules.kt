@@ -1,6 +1,8 @@
 package com.cims.ue.ptt
 
 import com.cims.ue.sdk.CommencementMode
+import com.cims.ue.sdk.SdsPayload
+import com.cims.ue.sdk.SdsPayloadType
 
 /**
  * 호 수락·거절 사유의 순수 판정 — 기기 없이 시험한다([CallRulesTest]).
@@ -87,6 +89,23 @@ internal object CallRules {
         217 -> "메시지가 너무 큽니다"                                    // unable to send due to message size
         else -> null
     }.takeIf { statusCode >= 300 }
+
+    /**
+     * 받은 문자(SDS)의 말풍선 글 — 코어가 이은 글 payload([text] — TEXT·HYPERLINKS·CODED TEXT) 뒤에 글이 아닌 payload 를 한 줄씩 덧붙인다
+     * (TS 24.282 §9.2.1.2 6)d) «render the contents of the Payload IE(s)» · §15.2.13): 위치 = «위치 위도, 경도»(소수 5자리), 이진 = «이진 데이터
+     * N바이트». 위치 고도·시각·상태 등은 말풍선에 싣지 않는다. 빈 값이면 보일 것이 없다(저장하지 않는다).
+     */
+    fun sdsDisplayText(text: String, payloads: List<SdsPayload>): String {
+        val extra = payloads.mapNotNull { p ->
+            when {
+                p.type == SdsPayloadType.LOCATION && p.hasLocation -> "위치 %.5f, %.5f".format(java.util.Locale.ROOT, p.latitude, p.longitude)
+                p.type == SdsPayloadType.BINARY -> "이진 데이터 ${p.data.size}바이트"
+                p.type == SdsPayloadType.CODED_TEXT && p.text.isEmpty() -> "읽을 수 없는 문자 집합(${p.charset})"
+                else -> null
+            }
+        }
+        return (listOf(text).filter { it.isNotEmpty() } + extra).joinToString("\n")
+    }
 
     /**
      * 그룹 문자(SDS)를 보내기 전의 단말 검사(TS 24.282 §9.2.1.1 1) → §11.1) — 그룹 문서가 문자를 허용하지 않거나 본문이 그룹의 크기 상한

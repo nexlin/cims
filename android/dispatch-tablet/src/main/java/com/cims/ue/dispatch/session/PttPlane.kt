@@ -380,7 +380,8 @@ internal fun DispatchSession.applySds(msg: SdsMessage) {
     val groupId = userPart(msg.groupUri).ifEmpty { userPart(msg.fromUri) }
     // 이미 받은 메시지(재전송·중복 배달)면 ⑤ 줄도 또 남기지 않는다 — 전달 확인만 다시 돌려준다(상대는 그것을 못 받아 다시 보냈다).
     if (addIncomingMessage(groupId, msg))
-        addActivity(groupId, groupNameOf(groupId), sdsEventText(displayName(msg.fromUri), msg.text, msg.fileName), ActivityKind.SDS)
+        addActivity(groupId, groupNameOf(groupId), sdsEventText(displayName(msg.fromUri), sdsDisplayText(msg.text, msg.payloads), msg.fileName),
+            ActivityKind.SDS)
     deliveryReplyTo(msg)?.let { peer ->
         val ptt = pttAccount ?: return@let
         scopeLaunch {
@@ -401,6 +402,24 @@ internal fun DispatchSession.applySds(msg: SdsMessage) {
 }
 
 internal const val SDS_TAG = "DispatchSds"
+
+/**
+ * 받은 SDS 의 말풍선 글 — 코어가 이은 글 payload(TEXT·HYPERLINKS·CODED TEXT) 뒤에 글이 아닌 payload 를 한 줄씩 덧붙인다(TS 24.282 §9.2.1.2 6)d)
+ * · §15.2.13): 위치 = «위치 위도, 경도»(소수 5자리), 이진 = «이진 데이터 N바이트», 모르는 문자 집합의 CODED TEXT = 그 사실. 현장 앱 `CallRules.sdsDisplayText`
+ * 와 같은 규칙이다.
+ */
+internal fun sdsDisplayText(text: String, payloads: List<com.cims.ue.sdk.SdsPayload>): String {
+    val extra = payloads.mapNotNull { p ->
+        when {
+            p.type == com.cims.ue.sdk.SdsPayloadType.LOCATION && p.hasLocation ->
+                "위치 %.5f, %.5f".format(java.util.Locale.ROOT, p.latitude, p.longitude)
+            p.type == com.cims.ue.sdk.SdsPayloadType.BINARY -> "이진 데이터 ${p.data.size}바이트"
+            p.type == com.cims.ue.sdk.SdsPayloadType.CODED_TEXT && p.text.isEmpty() -> "읽을 수 없는 문자 집합(${p.charset})"
+            else -> null
+        }
+    }
+    return (listOf(text).filter { it.isNotEmpty() } + extra).joinToString("\n")
+}
 
 /** ⑤ 의 SDS 한 줄 — «메시지 · 보낸 사람 — 본문 앞머리». 파일(FD)이면 본문 자리에 파일 이름(데스크톱 `McDataMessagesViewModel.OnSds`). */
 internal fun sdsEventText(from: String, text: String, fileName: String = ""): String {

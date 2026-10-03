@@ -74,7 +74,8 @@ public sealed record HttpResponse(int Status, string ContentType, string ETag, b
     public string Text => System.Text.Encoding.UTF8.GetString(Body);
 }
 /// <summary>MCData FD 업로드 결과(csc.h FdUpload) — Url 을 FdFile.Url 로 넘겨 Account.SendGroupFd/SendFd 로 알린다.</summary>
-public sealed record FdUpload(string Id, string Url, string Name, long Size);
+/// <summary>FD 업로드 결과. Hash = 올린 바이트의 SHA-1(RFC 5547 hash-value) — <see cref="FdFile.Hash"/> 로 넘기면 FD Metadata 에 실린다(TS 24.282 §15.2.17).</summary>
+public sealed record FdUpload(string Id, string Url, string Name, long Size, string Hash = "");
 
 /// <summary>그룹 문서 멤버 — Role = chair | participant.</summary>
 public sealed class GroupMember
@@ -430,9 +431,10 @@ public sealed unsafe class CscClient : IDisposable
         }
     }
 
-    /// <summary>MCData FD 업로드(octet-stream, TS 24.282 §10.2). groupId 가 있으면 그룹 FD — 서버가 allow_fd·업로더 멤버십으로 게이트(403, 없는 그룹 404),
-    /// null 이면 1:1. 413 = 서버 상한 초과. 실패 Code = HTTP 상태(전송 실패 -1).</summary>
-    public Result<FdUpload> UploadFd(string accessToken, byte[] data, string name, string? mime, string? groupId)
+    /// <summary>MCData FD 업로드 — TS 24.282 §10.2.2.1 규격형(multipart/mixed = mcdata-info + octet-stream, 파일 URL = 201 Location). groupId 가 있으면
+    /// 그룹 FD(group-fd — 서버가 allow_fd·업로더 멤버십으로 게이트, 403·없는 그룹 404), null 이면 1:1. callingUserId = 발신 MCData ID(&lt;mcdata-calling-user-id&gt;).
+    /// 413 = 서버 상한 초과. 실패 Code = HTTP 상태(전송 실패 -1). 결과 Hash 를 <see cref="FdFile.Hash"/> 로 넘긴다.</summary>
+    public Result<FdUpload> UploadFd(string accessToken, byte[] data, string name, string? mime, string? groupId, string? callingUserId = null)
     {
         ArgumentNullException.ThrowIfNull(data);
         lock (_gate)
@@ -440,8 +442,8 @@ public sealed unsafe class CscClient : IDisposable
             cimsue_fd_upload_t u;
             int st;
             fixed (byte* d = data)
-                st = cimsue_csc_upload_fd(Handle, accessToken, d, data.Length, name, mime, groupId, &u);
-            return st == 0 ? Result<FdUpload>.Success(new FdUpload(Utf8.Str(u.id), Utf8.Str(u.url), Utf8.Str(u.name), u.size))
+                st = cimsue_csc_upload_fd(Handle, accessToken, d, data.Length, name, mime, groupId, callingUserId, &u);
+            return st == 0 ? Result<FdUpload>.Success(new FdUpload(Utf8.Str(u.id), Utf8.Str(u.url), Utf8.Str(u.name), u.size, Utf8.Str(u.hash)))
                            : Result<FdUpload>.Fail(st, Engine.LastError());
         }
     }

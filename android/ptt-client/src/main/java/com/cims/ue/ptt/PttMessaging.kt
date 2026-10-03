@@ -73,13 +73,14 @@ internal class MessagingPlane(private val c: PttController) {
     suspend fun sendAttachment(peer: String, data: ByteArray, fileName: String, mime: String): PttController.FdSent? {
         if (c.token == null) { c._status.value = "첨부: 토큰 없음"; return null }
         val group = c.isGroupId(peer)
-        val up = c.withToken { cl, t -> cl.uploadFd(t, data, fileName, mime, if (group) peer else "") }
+        // 규격형 업로드(TS 24.282 §10.2.2.1) — 발신 MCData ID = MCPTT ID(단일 MC 서비스 ID, mcx_identity_scope.md)
+        val up = c.withToken { cl, t -> cl.uploadFd(t, data, fileName, mime, if (group) peer else "", c.mcpttId) }
         val u = up.getOrNull() ?: run {
             Log.w(TAG, "FD 업로드 실패: ${up.code} ${up.reason}")
             c._status.value = "첨부 업로드 실패"
             return null
         }
-        val file = FdFile(url = u.url, name = u.name.ifBlank { fileName }, type = mime, size = u.size)
+        val file = FdFile(url = u.url, name = u.name.ifBlank { fileName }, type = mime, size = u.size, hash = u.hash)   // Metadata file-selector(§15.2.17)
         val acc = c.account ?: return null
         val r = if (group) acc.sendGroupFd(peer, file) else acc.sendFd(peer, file)
         val sent = r.getOrNull() ?: run { Log.w(TAG, "FD 알림 실패: ${r.code} ${r.reason}"); return null }

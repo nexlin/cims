@@ -612,6 +612,25 @@ struct RosterEntry {
 };
 
 /** MCData SDS (TS 24.282) — 수신 메시지·disposition 통지·FD. */
+/** DATA PAYLOAD 의 Payload IE 하나(TS 24.282 §15.2.13). type = Payload content type(표 15.2.13-2) — 아래 kSdsPayload* 값, 모르는 값도
+ *  그대로 온다. 받은 차례대로 SdsMessage.payloads 에 실린다(응용 대상 메시지는 onSds 로 오지 않는다 — §9.2.1.2 7)·8)). */
+constexpr int kSdsPayloadText = 1, kSdsPayloadBinary = 2, kSdsPayloadHyperlinks = 3, kSdsPayloadFileUrl = 4, kSdsPayloadLocation = 5,
+              kSdsPayloadEnhancedStatus = 6, kSdsPayloadLocationAltitude = 8, kSdsPayloadLocationTimestamp = 9, kSdsPayloadCodedText = 10;
+struct SdsPayload {
+    int type = 0;
+    /** Payload data 원문 octet(이진) — CODED TEXT 는 앞 2 octet(charset)을 뗀 나머지. */
+    std::string data;
+    /** 읽을 글(UTF-8) — TEXT·HYPERLINKS = 원문(TEXT 의 문자 집합 = 단말 설정 UTF-8, §6.2.2.1 3)a)i)) · CODED TEXT = [charset] 으로 디코드
+     *  (UTF-8·US-ASCII·ISO-8859-1·UTF-16BE/LE/BOM, 모르는 집합이면 빈 값 — data 로 앱이 푼다) · FILEURL = URL · LOCATION TIMESTAMP = 시각 문자열.
+     *  그 밖(BINARY·LOCATION·…)은 빈 값. */
+    std::string text;
+    /** CODED TEXT 의 문자 집합 — IANA MIBenum(§15.2.13 표 15.2.13-3, 예 106 UTF-8 · 1015 UTF-16). 그 밖 0. */
+    int charset = 0;
+    /** LOCATION — 6 octet = 위도 3 · 경도 3(TS 23.032 §6.1 타원체 점: 위도 = 부호 1비트 + 23비트 × 90/2^23, 경도 = 24비트 2의 보수 × 360/2^24). */
+    bool hasLocation = false;
+    double latitude = 0, longitude = 0;
+};
+
 struct SdsMessage {
     int accountId = -1;
     /** 보낸 MCData 사용자 — mcdata-info `<mcdata-calling-user-id>`(TS 24.282 §12.2.1.1 — 통지 대상), 없으면 From. */
@@ -622,7 +641,11 @@ struct SdsMessage {
     std::string convId, msgId;        // UUID hex32
     int64_t timeSec = 0;
     int dispositionReq = 0;           // 0 없음 / 1 delivery / 2 read / 3 both
+    /** 사용자에게 보일 글 — TEXT·HYPERLINKS·CODED TEXT(디코드한 것) payload 를 온 차례대로 줄을 바꿔 잇는다(§9.2.1.2 6)d)). 위치·이진 등은
+     *  [payloads] 에만 있다(앱이 그린다). */
     std::string text;
+    /** DATA PAYLOAD 의 Payload IE 전부(받은 차례) — 형식별 원문·해석(SdsPayload). FD 의 FILEURL 은 fileUrl 이 정본이다. */
+    std::vector<SdsPayload> payloads;
     bool notification = false;        // SDS NOTIFICATION
     int notifType = 0;                // 1 undelivered / 2 delivered / 3 read / 4 delivered+read
     bool fd = false;                  // FD SIGNALLING (파일 URL)
@@ -631,11 +654,13 @@ struct SdsMessage {
     int64_t fileSize = 0;
 };
 
-/** MCData FD 로 알릴 파일 — FD SIGNALLING PAYLOAD 의 Payload(FILEURL)·Metadata(name/size/type) (TS 24.282 §15.1.3·
+/** MCData FD 로 알릴 파일 — FD SIGNALLING PAYLOAD 의 Payload(FILEURL)·Metadata(RFC 5547 file-selector — name/size/type/hash) (TS 24.282 §15.1.3·
  *  mcdata_messaging.md §4.5). url 은 콘텐츠 서버 업로드 결과(CscClient::uploadFd 의 FdUpload.url). */
 struct FdFile {
     std::string url, name, type;      // type = MIME(비면 application/octet-stream)
     int64_t size = 0;
+    /** SHA-1 — RFC 5547 hash-value(대문자 16진 octet 을 ':' 로, FdUpload.hash 그대로). 비면 file-selector 에 hash 를 싣지 않는다. */
+    std::string hash;
 };
 
 /** SDS 발신의 즉시 결과. 최종 응답은 onRequestResult(MESSAGE, token) 으로 오므로 앱이 token 으로 상관한다

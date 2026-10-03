@@ -184,6 +184,7 @@ suspend fun DispatchSession.resendFile(m: Message) {
 private suspend fun DispatchSession.sendFileCore(id: String) {
     var m = patchMessage(id, persist = false) { it.copy(state = SendState.PENDING) } ?: return
     val group = isPttGroup(m.groupId)
+    var hash = ""                                   // 올린 바이트의 SHA-1 — 이번에 올렸을 때만 안다(재전송은 싣지 않는다, RFC 5547 hash 는 선택)
     if (FileRules.needsUpload(m)) {
         if (!m.hasLocalFile) return failFile(id, "원본 파일이 없어 다시 보낼 수 없습니다", m.localPath)
         patchMessage(id, persist = false) { it.copy(transferNote = FileRules.UPLOADING) }
@@ -194,13 +195,14 @@ private suspend fun DispatchSession.sendFileCore(id: String) {
         val up = uploadFile(data, m.fileName, m.fileType, if (group) m.groupId else "")
         patchMessage(id, persist = false) { it.copy(transferNote = "") } ?: return
         val url = up.value?.url?.takeIf { up.ok } ?: return failFile(id, null)   // 사유는 [uploadFile] 이 토스트로 냈다
+        hash = up.value?.hash.orEmpty()
         m = patchMessage(id) { it.copy(fileUrl = url) } ?: return
     }
     val ptt = pttAccount ?: run {
         failFile(id, null)
         report(TextArea.SDS, CimsResult.fail<Unit>(-1, "PTT 계정 없음")); return
     }
-    val file = FdFile(url = m.fileUrl, name = m.fileName, type = m.fileType, size = m.fileSize)
+    val file = FdFile(url = m.fileUrl, name = m.fileName, type = m.fileType, size = m.fileSize, hash = hash)   // Metadata file-selector(§15.2.17)
     val target = m.groupId
     val (r, early) = sendTracked({ it.token }) {
         if (group) ptt.sendGroupFd(target, file) else ptt.sendFd(userPart(target).ifEmpty { target }, file)
@@ -232,9 +234,10 @@ internal suspend fun DispatchSession.uploadFile(data: ByteArray, name: String, m
     val csc = fdCscOrNull()
     val tk = if (csc == null) null else accessToken()
     if (csc == null || tk == null) return report(TextArea.FILE, CimsResult.fail(-1, "로그인 전"))
-    var r = csc.uploadFd(tk, data, name, mime, groupId)
+    // 규격형 업로드(TS 24.282 §10.2.2.1) — 발신 MCData ID = PTT 신원(단일 MC 서비스 ID)
+    var r = csc.uploadFd(tk, data, name, mime, groupId, myPttId)
     if (!r.ok && r.code == 401) renewAccessToken()?.takeIf { it != tk }?.let { fresh ->
-        r = csc.uploadFd(fresh, data, name, mime, groupId)
+        r = csc.uploadFd(fresh, data, name, mime, groupId, myPttId)
     }
     if (r.ok) android.util.Log.i(FILE_TAG, "fd upload $name ${data.size}B group=${groupId.ifEmpty { "-" }} → ${r.value?.id}")
     else {

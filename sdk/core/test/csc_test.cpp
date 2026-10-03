@@ -752,30 +752,46 @@ TEST(Csc, FdUploadDownload) {
     CscEndpoint ep; ep.host = "csc.example"; ep.port = 4430;
     CscClient c(ep, tp);
 
-    // 그룹 FD 업로드 — octet-stream 본문 그대로, 쿼리 name·type·group(인코딩), 201 → url/size
+    // 그룹 FD 업로드 — TS 24.282 §10.2.2.1 규격형: multipart/mixed = mcdata-info(group-fd · request-uri · calling-user-id) + octet-stream
+    //   (Content-Length · 파일 이름), 저장 MIME 은 쿼리 type, 파일 URL = 201 의 Location
     tp->next.status = 201;
-    tp->next.body = "{\"id\":\"0123456789abcdef0123456789abcdef\",\"url\":\"https://10.0.0.1:4430/mcdata/fd/0123456789abcdef0123456789abcdef\",\"size\":5,\"name\":\"현장 1.jpg\"}";
+    tp->next.headers = {{"location", "https://10.0.0.1:4430/mcdata/fd/0123456789abcdef0123456789abcdef"}};
+    tp->next.body = "{\"id\":\"0123456789abcdef0123456789abcdef\",\"url\":\"https://ignored/\",\"size\":5,\"name\":\"현장 1.jpg\"}";
     FdUpload up;
-    Result r = c.uploadFd("tok", std::string("\x00\x01\x02\x03\x04", 5), "현장 1.jpg", "image/jpeg", "g001", up);
+    const std::string bytes("\x00\x01\x02\x03\x04", 5);
+    Result r = c.uploadFd("tok", bytes, "현장 1.jpg", "image/jpeg", "g001", up, "tel:+82500000001");
     ASSERT_TRUE(r.ok) << r.reason;
     EXPECT_EQ(tp->lastMethod, "POST");
-    EXPECT_EQ(tp->lastUrl.rfind(ep.baseUrl() + "/mcdata/fd?name=", 0), 0u);
-    EXPECT_NE(tp->lastUrl.find("&type=image%2Fjpeg"), std::string::npos);
-    EXPECT_NE(tp->lastUrl.find("&group=g001"), std::string::npos);
-    EXPECT_EQ(tp->lastUrl.find(' '), std::string::npos);
-    EXPECT_EQ(tp->lastHeaders.at("Content-Type"), "application/octet-stream");
+    EXPECT_EQ(tp->lastUrl, ep.baseUrl() + "/mcdata/fd?type=image%2Fjpeg");
+    const std::string ct = tp->lastHeaders.at("Content-Type");
+    ASSERT_EQ(ct.rfind("multipart/mixed; boundary=", 0), 0u) << ct;
+    const std::string bd = "--" + ct.substr(ct.find('=') + 1);
     EXPECT_EQ(tp->lastHeaders.at("Authorization"), "Bearer tok");
-    EXPECT_EQ(tp->lastBody.size(), 5u);
+    const std::string& body = tp->lastBody;
+    EXPECT_EQ(body.rfind(bd + "\r\nContent-Type: application/vnd.3gpp.mcdata-info+xml\r\n", 0), 0u);
+    const size_t rt = body.find("<request-type>group-fd</request-type>"), ru = body.find("<mcdata-request-uri type=\"Normal\"><mcdataURI>tel:g001</mcdataURI>"),
+                 cu = body.find("<mcdata-calling-user-id type=\"Normal\"><mcdataURI>tel:+82500000001</mcdataURI>");
+    ASSERT_NE(rt, std::string::npos); ASSERT_NE(ru, std::string::npos); ASSERT_NE(cu, std::string::npos);
+    EXPECT_LT(rt, ru); EXPECT_LT(ru, cu);                                         // Annex D.1 순서
+    EXPECT_NE(body.find("\r\nContent-Type: application/octet-stream\r\nContent-Length: 5\r\nContent-Disposition: attachment; filename=\"현장 1.jpg\"\r\n\r\n" +
+                        bytes + "\r\n" + bd + "--\r\n"), std::string::npos);
     EXPECT_EQ(up.id, "0123456789abcdef0123456789abcdef"); EXPECT_EQ(up.size, 5); EXPECT_EQ(up.name, "현장 1.jpg");
-    EXPECT_EQ(up.url, "https://10.0.0.1:4430/mcdata/fd/0123456789abcdef0123456789abcdef");
+    EXPECT_EQ(up.url, "https://10.0.0.1:4430/mcdata/fd/0123456789abcdef0123456789abcdef");   // 본문 url 이 아니라 Location
 
-    // 1:1 — group 쿼리 없음. 서버가 Host 없이 상대 경로를 주면 이 CSC 절대 URL 로 채운다
-    tp->next.body = "{\"id\":\"ab\",\"url\":\"/mcdata/fd/ab\",\"size\":1}";
+    // 1:1 — one-to-one-fd, request-uri 없음. Location 이 상대 경로면 이 CSC 절대 URL 로 채운다
+    tp->next.headers = {{"location", "/mcdata/fd/ab"}};
+    tp->next.body = "{\"id\":\"ab\",\"size\":1}";
     r = c.uploadFd("tok", "x", "a.txt", "", "", up);
     ASSERT_TRUE(r.ok);
-    EXPECT_EQ(tp->lastUrl.find("group="), std::string::npos);
+    EXPECT_NE(tp->lastBody.find("<request-type>one-to-one-fd</request-type>"), std::string::npos);
+    EXPECT_EQ(tp->lastBody.find("mcdata-request-uri"), std::string::npos);
+    EXPECT_EQ(tp->lastBody.find("mcdata-calling-user-id"), std::string::npos);   // 주지 않으면 싣지 않는다
+    // 올린 바이트의 SHA-1 — RFC 5547 hash-value(대문자 16진 ':' 구분), FD Metadata file-selector 의 hash(TS 24.282 §15.2.17)
+    EXPECT_EQ(up.hash, "11:F6:AD:8E:C5:2A:29:84:AB:AA:FD:7C:3B:51:65:03:78:5C:20:72");
     EXPECT_NE(tp->lastUrl.find("type=application%2Foctet-stream"), std::string::npos);
     EXPECT_EQ(up.url, ep.baseUrl() + "/mcdata/fd/ab");
+    tp->next.headers.clear();                                                    // Location 이 없으면 실패
+    EXPECT_FALSE(c.uploadFd("tok", "x", "a.txt", "", "", up).ok);
 
     // 게이트 거부 = HTTP 상태 그대로
     tp->next = http::Response(); tp->next.status = 403; tp->next.body = "{\"error\":\"file distribution disabled for this group\"}";

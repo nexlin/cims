@@ -573,7 +573,20 @@ public sealed unsafe class Engine : IDisposable
     internal static SdsMessage ToManaged(cimsue_sds_message_t* m) =>
         new(m->account_id, Utf8.Str(m->from_uri), Utf8.Str(m->group_uri), Utf8.Str(m->conv_id), Utf8.Str(m->msg_id), m->time_sec,
             m->disposition_req, Utf8.Str(m->text), m->notification != 0, m->notif_type, m->fd != 0, Utf8.Str(m->file_url),
-            Utf8.Str(m->file_name), Utf8.Str(m->file_type), m->file_size, m->media_plane != 0);
+            Utf8.Str(m->file_name), Utf8.Str(m->file_type), m->file_size, m->media_plane != 0, Payloads(m));
+
+    private static SdsPayload[] Payloads(cimsue_sds_message_t* m)
+    {
+        var a = new SdsPayload[Math.Max(0, m->payload_count)];
+        for (int i = 0; i < a.Length; ++i)
+        {
+            var p = m->payloads[i];
+            var data = new byte[Math.Max(0, p.data_len)];
+            if (data.Length > 0) new ReadOnlySpan<byte>(p.data, data.Length).CopyTo(data);
+            a[i] = new SdsPayload(p.type, data, Utf8.Str(p.text), p.charset, p.has_location != 0, p.latitude, p.longitude);
+        }
+        return a;
+    }
 
     // ── 콜백 → 이벤트 ──
 

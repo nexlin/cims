@@ -292,9 +292,10 @@ TEST(Msrp, EngineSendsLargeGroupSdsOverMediaPlane) {
         EXPECT_EQ(l.results[0].code, 200);
         EXPECT_TRUE(eng.calls().empty());                                    // 앱 호 목록 밖
         EXPECT_EQ(l.callStates, 0);
-        // 서버가 BYE 하지 않으면 코어가 끊는다(5 s)
-        std::string bye = sip.recv("BYE ", 8000);
+        // 보냈으면 단말이 곧바로 놓는다 — BYE + Reason «transmission succeeded»(TS 24.282 §9.2.3.2.3)
+        std::string bye = sip.recv("BYE ", 3000);
         ASSERT_FALSE(bye.empty());
+        EXPECT_EQ(headerOf(bye, "Reason"), "SIP;cause=200;text=\"transmission succeeded\"");
         sip.reply(bye, 200, "OK");
 
         // 상한 아래는 그대로 시그널링 평면(MESSAGE) — 호출자가 준 message ID(재전송)가 본문에 실린다
@@ -317,6 +318,41 @@ TEST(Msrp, EngineSendsLargeGroupSdsOverMediaPlane) {
         //   pjsua_acc_get_user_data 가 assert 한다(pjsua 에 계정 유효 검사가 없다 — server45_handoff §11 «엔진 결함 하나»)
         ASSERT_TRUE(l.wait([&] { for (auto& r : l.results) if (r.token == small.token) return true; return false; }));
         EXPECT_FALSE(eng.sendGroupSds(acc, "g005", "hi", true, "not-hex").ok);
+    }
+    eng.stop();
+}
+
+// 못 보냈으면 BYE + Reason «transmission failed»(TS 24.282 §9.2.3.2.3) — answer 에 a=path 가 없어 MSRP 를 열지 못한 경우
+TEST(Msrp, FailedMediaPlaneSendReleasesWith480Reason) {
+    Engine eng;
+    MsrpListener l;
+    EngineConfig cfg;
+    cfg.logLevel = std::getenv("MSRP_LOG") ? 5 : 0;
+    cfg.nullAudioDevice = true;
+    ASSERT_TRUE(eng.start(cfg, &l).ok);
+    {
+        cimsue_test::PjScope pj("msrp-fail");
+        FakeSip sip;
+        FakeCmdp cmdp;
+        AccountConfig ac = account(sip.port);
+        ac.maxSdsCplaneBytes = 10;
+        int acc = eng.addAccount(ac);
+        ASSERT_GE(acc, 0);
+        SdsSend sent = eng.sendGroupSds(acc, "g005", std::string(64, 'y'));
+        ASSERT_TRUE(sent.ok) << sent.reason;
+        std::string inv = sip.recv("INVITE ");
+        ASSERT_FALSE(inv.empty());
+        std::string sdp = answerSdp(cmdp, "passive", "recvonly");
+        sdp.erase(sdp.find("a=path:"), sdp.find("\r\n", sdp.find("a=path:")) + 2 - sdp.find("a=path:"));
+        sip.reply(inv, 200, "OK", "application/sdp", sdp);
+        ASSERT_FALSE(sip.recv("ACK ").empty());
+        ASSERT_TRUE(l.wait([&] { return !l.results.empty(); }));
+        EXPECT_EQ(l.results[0].token, sent.token);
+        EXPECT_NE(l.results[0].code, 200);
+        std::string bye = sip.recv("BYE ", 3000);
+        ASSERT_FALSE(bye.empty());
+        EXPECT_EQ(headerOf(bye, "Reason"), "SIP;cause=480;text=\"transmission failed\"");
+        sip.reply(bye, 200, "OK");
     }
     eng.stop();
 }
