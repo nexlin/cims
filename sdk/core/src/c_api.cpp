@@ -1213,6 +1213,17 @@ cimsue_status_t CIMSUE_CALL cimsue_engine_set_tc_timers(cimsue_engine_t* e, int3
 cimsue_status_t CIMSUE_CALL cimsue_engine_set_mcvideo_enabled(cimsue_engine_t* e, int32_t account_id, int32_t enabled) {
     return e ? ret(e->eng.setMcVideoEnabled(account_id, enabled != 0)) : -1;
 }
+cimsue_status_t CIMSUE_CALL cimsue_engine_set_access_token(cimsue_engine_t* e, int32_t account_id, const char* access_token) {
+    return e ? ret(e->eng.setAccessToken(account_id, S(access_token))) : -1;
+}
+cimsue_service_auth_state_t CIMSUE_CALL cimsue_engine_service_auth(const cimsue_engine_t* e, int32_t account_id, cimsue_mc_service_t service,
+                                                                  int32_t* code, int32_t* warning_code, int32_t* multiple_devices) {
+    const ServiceAuthInfo i = e ? e->eng.serviceAuth(account_id, (McService)service) : ServiceAuthInfo();
+    if (code) *code = i.code;
+    if (warning_code) *warning_code = i.warningCode;
+    if (multiple_devices) *multiple_devices = i.multipleDevices ? 1 : 0;
+    return (cimsue_service_auth_state_t)i.state;
+}
 
 void CIMSUE_CALL cimsue_engine_floor_info(const cimsue_engine_t* e, int32_t call_id, cimsue_floor_info_t* out) {
     if (!out) return;
@@ -1479,6 +1490,7 @@ const char* CIMSUE_CALL cimsue_floor_state_str(cimsue_floor_state_t s) { return 
 const char* CIMSUE_CALL cimsue_floor_kind_str(cimsue_floor_kind_t k) { return toString((FloorEvent::Kind)k); }
 const char* CIMSUE_CALL cimsue_condition_cause_str(cimsue_condition_cause_t c) { return toString((ConditionCause)c); }
 const char* CIMSUE_CALL cimsue_mc_service_str(cimsue_mc_service_t s) { return toString((McService)s); }
+const char* CIMSUE_CALL cimsue_service_auth_state_str(cimsue_service_auth_state_t s) { return toString((ServiceAuthState)s); }
 const char* CIMSUE_CALL cimsue_transmission_state_str(cimsue_transmission_state_t s) { return toString((TransmissionState)s); }
 const char* CIMSUE_CALL cimsue_reception_state_str(cimsue_reception_state_t s) { return toString((ReceptionState)s); }
 const char* CIMSUE_CALL cimsue_transmission_kind_str(cimsue_transmission_kind_t k) { return toString((TransmissionEvent::Kind)k); }

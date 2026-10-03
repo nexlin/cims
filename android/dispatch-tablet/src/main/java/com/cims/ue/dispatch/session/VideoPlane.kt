@@ -35,6 +35,7 @@ import com.cims.ue.sdk.ReceptionEvent
 import com.cims.ue.sdk.ReceptionEventKind
 import com.cims.ue.sdk.ReceptionState
 import com.cims.ue.sdk.RegState
+import com.cims.ue.sdk.ServiceAuthState
 import com.cims.ue.sdk.TransmissionEvent
 import com.cims.ue.sdk.TransmissionEventKind
 import com.cims.ue.sdk.TransmissionInfo
@@ -48,6 +49,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.sync.Mutex
@@ -434,15 +436,17 @@ fun DispatchSession.canOpenVideo(groupId: String): Boolean {
     val v = video
     val ch = v.channels.value[groupId] ?: return false
     return v.enabled.value && ch.isPrearranged && ch.affiliated && videoOfGroup(groupId) == null && groupId !in v.joining &&
-        v.cameras.value.isNotEmpty() && pttRegistered() && groups.value.any { it.id == groupId && it.isMember && it.mcVideo }
+        v.cameras.value.isNotEmpty() && videoReady() && groups.value.any { it.id == groupId && it.isMember && it.mcVideo }
 }
 
 // ── 기동·계정 ────────────────────────────────────────────────────────────────
 
 private fun DispatchSession.videoPsi(): String = ueInitDoc()?.mcvideoServerUri.orEmpty()
 
-private fun DispatchSession.pttRegistered(): Boolean =
-    pttAccount?.let { registrations.value[it.id]?.state == RegState.REGISTERED } == true
+/** 영상 채널을 쓸 수 있다 — PTT 계정이 등록됐고 MCVideo 서비스가 인가됐다(TS 24.281 §7.2.2 — 묶임 없는 MCVideo 요청은 404 141). */
+private fun DispatchSession.videoReady(): Boolean =
+    pttAccount?.let { registrations.value[it.id]?.state == RegState.REGISTERED &&
+                      it.serviceAuth(McService.MCVIDEO).state == ServiceAuthState.AUTHORIZED } == true
 
 private fun DispatchSession.n2(): Int = VideoRules.limitOf(video.profile?.maxAffiliationsN2)
 private fun DispatchSession.n6(): Int = VideoRules.limitOf(video.profile?.maxSimultaneousCallsN6)
@@ -532,10 +536,10 @@ internal fun DispatchSession.observeVideo(engine: CimsUe) {
             try { syncVideo() } catch (e: CancellationException) { throw e } catch (t: Throwable) { android.util.Log.w(TAG, "sync", t) }
         }
     }
-    // 영상 채널 합류(D10)는 PTT 등록 뒤. 등록이 **새로** 선 때의 MCVideo 제휴 재적재는 유지 평면이 한다([renewVideoAffiliations] —
+    // 영상 채널 합류(D10)는 PTT 등록·MCVideo 서비스 인가 뒤. 등록이 **새로** 선 때의 MCVideo 제휴 재적재는 유지 평면이 한다([renewVideoAffiliations] —
     //   등록 상태가 줄곧 «등록됨» 으로만 보이는 망 전환은 이 스냅샷 흐름에서 보이지 않는다, §6.7a).
     videoLaunch("registered") {
-        registrations.map { pttRegistered() }.distinctUntilChanged().collect { on -> if (on) requestVideoSync() }
+        combine(registrations, engine.serviceAuths) { _, _ -> videoReady() }.distinctUntilChanged().collect { on -> if (on) requestVideoSync() }
     }
     // D12 음성 우선 — 무전 발언(요청·대기·발언)이 시작되고 끝날 때.
     videoLaunch("talking") {
@@ -755,12 +759,12 @@ private suspend fun DispatchSession.refreshVideoDocs(gen: Int) {
 /**
  * 내 채널의 영상 채널마다 영상 호를 맞춘다(D10) — chat 은 합류(INVITE, 합류가 곧 affiliation — TS 24.281 §9.2.2), 편성은 초대를
  * 기다린다(멤버 초대 자동 수락 — §9.2.1.3; 앱이 호를 열어 두지 않는다 — 전원 초대라 보낼 사람이 연다, [openVideoTx]). 동시 MCVideo 호
- * 상한 N6 안에서 카드 순서대로, PTT 등록 뒤에만.
+ * 상한 N6 안에서 카드 순서대로, PTT 등록·MCVideo 인가 뒤에만.
  */
 private suspend fun DispatchSession.ensureVideoChannels(gen: Int) {
     val v = video
     val ptt = pttAccount ?: return
-    if (!v.enabled.value || !pttRegistered()) return
+    if (!v.enabled.value || !videoReady()) return
     for (g in memberGroups().filter { it.mcVideo }) {
         val id = g.id
         if (id !in v.channels.value || videoOfGroup(id) != null || id in v.joining || id in v.overN2) continue

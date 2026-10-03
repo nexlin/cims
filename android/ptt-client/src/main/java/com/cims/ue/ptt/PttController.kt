@@ -23,9 +23,12 @@ import com.cims.ue.sdk.CscEndpoint
 import com.cims.ue.sdk.EngineConfig
 import com.cims.ue.sdk.FloorIndicator
 import com.cims.ue.sdk.FloorState
+import com.cims.ue.sdk.McService
 import com.cims.ue.sdk.MediaSecurity
 import com.cims.ue.sdk.RegInfo
 import com.cims.ue.sdk.SdsMessage
+import com.cims.ue.sdk.ServiceAuthInfo
+import com.cims.ue.sdk.ServiceAuthState
 import com.cims.ue.sdk.Transport
 import com.cims.ue.sdk.UeInitConfigDoc
 import kotlinx.coroutines.CoroutineExceptionHandler
@@ -151,7 +154,7 @@ class PttController(
     var channelStore: ChannelStore? = null
         set(value) {
             field = value
-            if (value != null && regState.value is RegState.Registered) maybeRestoreChannels()
+            if (value != null && mcpttAuthorized) maybeRestoreChannels()
         }
 
     /** 이어폰(유선/BT) 장치 열거·지정 — 서비스가 주입. */
@@ -377,7 +380,14 @@ class PttController(
     internal val csc: CscClient? = cscConfig?.let {
         CscClient(CscEndpoint(host = it.host, port = it.port, caPem = CimsTrustStore.CA_BUNDLE, verifyServer = true))
     }
+    /** CSC(IdMS) 액세스 토큰 — XCAP·FD 와 MC 서비스 인가(TS 24.379 §7.2.2 — 코어가 등록마다 싣는다)에 쓴다. 바뀌면 계정에도 넣는다
+     *  — 인가되지 않은 서비스가 있으면 코어가 그 토큰으로 다시 인가한다. */
     @Volatile internal var token: String? = null
+        set(v) {
+            field = v
+            val a = account
+            if (v != null && a != null) ctl.launch { a.setAccessToken(v) }
+        }
     /** CSC 토큰 보유 여부 — 서비스의 SSO 주입 중복 방지용(주입은 [setAccessToken]). */
     val hasAccessToken: Boolean get() = token != null
 
@@ -431,6 +441,7 @@ class PttController(
             scope.launch(start = CoroutineStart.UNDISPATCHED) { flow.collect { runCatching { f(it) }.onFailure { e -> Log.w(TAG, "event", e) } } }
         on(ue.log) { Log.println(pjPriority(it.level), "PJ", it.message.trimEnd()) }
         on(ue.regState) { onReg(it) }
+        on(ue.serviceAuth) { onServiceAuth(it) }
         on(ue.incomingCall) { if (VideoPlane.isVideo(it)) videoPlane.onIncomingCall(it) else groupsPlane.onIncomingCall(it) }
         on(ue.callState) { if (VideoPlane.isVideo(it)) videoPlane.onCallState(it) else onCallState(it) }
         on(ue.floor) { floorPlane.onFloorEvent(it) }
@@ -446,7 +457,7 @@ class PttController(
         scope.launch {
             while (true) {
                 delay(60_000)
-                if (regState.value is RegState.Registered) {
+                if (regState.value is RegState.Registered && mcpttAuthorized) {
                     groupsPlane.affiliateAll()
                     groupsPlane.syncRosterSubs()   // 편성 변경으로 채널이 늘/줄었으면 구독도 따라간다
                     // 문서 구독 재확인(SUB_REASSERT_MS) — 서버가 재기동으로 구독을 잃어도 등록은 갱신으로 이어져
@@ -494,6 +505,7 @@ class PttController(
         val acc = ue.addAccount(accountConfig(ueInit)).getOrNull()
             ?: run { _reg.value = RegState.Failed("addAccount"); return@launch }
         account = acc
+        token?.let { acc.setAccessToken(it) }           // 계정을 만드는 사이 받은 토큰(같으면 코어가 무시)
         groupsPlane.resetRosterWants()                   // 코어의 목표 집합은 계정마다다
         applyAudioRouteNow()
         val r = acc.register()
@@ -550,6 +562,8 @@ class PttController(
             // 발언권 참여자 타이머 T100·T101·T103·T104·T132 = UE initial configuration <Timers>(TS 24.484 §7.2.2.7, TS 24.380 표 11.1.1-1)
             floorTimers = ueInit?.floorTimers ?: com.cims.ue.sdk.FloorTimers(),
             autoAnswerMcvideo = false,
+            // MC 서비스 인가(TS 24.379 §7.2.2) — 등록이 서면 코어가 이 토큰으로 MCPTT·MCData·MCVideo 를 인가한다(결과 = onServiceAuth)
+            accessToken = token.orEmpty(),
         )
     }
 
@@ -563,20 +577,52 @@ class PttController(
         }
         _reg.value = now
         if (now is RegState.Registered) {
-            if (was is RegState.Registered) return
-            // 등록 완료 — 편성 채널 전체 affiliation(CSP 는 affiliation 된 멤버에게만 fan-out), 로스터·문서 구독, 채널 복원
-            groupsPlane.affiliateAll()
-            groupsPlane.syncRosterSubs()
-            groupsPlane.subscribeXcap(XCAP_GMS, true)
-            groupsPlane.subscribeXcap(XCAP_CMS, true)
-            maybeRestoreChannels()
-            groupsPlane.rejoinLost()                          // 커버리지 복귀 — 잃은 편성 세션에 재합류(TS 24.379 §10.1.1.2.4.1)
+            // MCPTT 를 쓰는 일(제휴·구독·채널 복원)은 서비스 인가 뒤다 — onServiceAuth. 등록만으로는 서버가 MC 요청을 받지 않는다(404 141).
+            return
         } else if (was is RegState.Registered) {
             // 등록이 끊기면 서버측 문서 구독도 사라진다 — 확인 상태를 비워 재등록 시 다시 걸리게 한다. 제휴 확인(affConfirmed)은 두고 —
             //   다시 선 등록에 코어가 관심 그룹 전부를 다시 싣는다(같은 게시를 앱이 겹쳐 보내지 않는다). 세션 참가자 구독은 호에 묶여 그대로다.
             synchronized(lock) { groupsPlane.clearSubStateLocked() }
         }
     }
+
+    /** MCPTT·MCVideo 서비스가 인가돼 있다(TS 24.379 §7.2.2 · TS 24.281 §7.2.2 — 코어 onServiceAuth). 등록이 끊기면 코어가 인가 안 됨으로 알린다. */
+    @Volatile internal var mcpttAuthorized = false
+    @Volatile internal var mcvideoAuthorized = false
+
+    private fun onServiceAuth(a: ServiceAuthInfo) {
+        if (a.accountId != account?.id) return
+        if (a.service == McService.MCVIDEO) {
+            // 영상 채널(제휴·chat 합류)은 MCVideo 인가 뒤 — 바뀌면 영상 평면이 다시 맞춘다
+            val ok = a.state == ServiceAuthState.AUTHORIZED
+            if (ok != mcvideoAuthorized) { mcvideoAuthorized = ok; videoPlane.requestSync() }
+            return
+        }
+        if (a.service != McService.MCPTT) return
+        val was = mcpttAuthorized
+        mcpttAuthorized = a.state == ServiceAuthState.AUTHORIZED
+        if (mcpttAuthorized && !was) {
+            // 인가 완료 — 편성 채널 전체 affiliation(CSP 는 affiliation 된 멤버에게만 fan-out), 로스터·문서 구독, 채널 복원
+            _status.value = "MCPTT 서비스 인가"
+            groupsPlane.affiliateAll()
+            groupsPlane.syncRosterSubs()
+            groupsPlane.subscribeXcap(XCAP_GMS, true)
+            groupsPlane.subscribeXcap(XCAP_CMS, true)
+            maybeRestoreChannels()
+            groupsPlane.rejoinLost()                          // 커버리지 복귀 — 잃은 편성 세션에 재합류(TS 24.379 §10.1.1.2.4.1)
+            return
+        }
+        if (a.state != ServiceAuthState.UNAUTHORIZED || a.code == 0) return
+        // 인가 거절(§7.2.2 끝 — 인가 안 됨). 토큰이 만료됐으면(101) 한 번 새로 받는다 — 새 토큰이 계정에 들어가면 코어가 다시 인가한다.
+        _status.value = "MCPTT 서비스 인가 실패: ${a.code}${if (a.warningCode != 0) " ${a.warningCode} ${a.warningText}" else ""}"
+        Log.w(TAG, "MCPTT 서비스 인가 실패 ${a.code} ${a.warningCode} ${a.warningText}")
+        val stale = token ?: return
+        val now = SystemClock.elapsedRealtime()
+        if (a.code != 403 || a.warningCode != 101 || now - authRenewAt < AUTH_RENEW_GAP_MS) return   // 새 토큰도 거절되면 되풀이하지 않는다
+        authRenewAt = now
+        scope.launch(Dispatchers.IO) { renewToken(stale) }
+    }
+    @Volatile private var authRenewAt = -AUTH_RENEW_GAP_MS
 
     // ── 참여 채널 자동 복원 ──
 
@@ -984,6 +1030,8 @@ class PttController(
         internal const val REJOIN_GAP_MS = 10_000L
         /** 등록이 선 채 잃은 편성 세션의 재합류 지연 — 끊긴 호의 정리(onCallEnded)와 망 회복을 잠깐 기다린다(TS 24.379 §10.1.1.2.4.1). */
         internal const val LOST_REJOIN_DELAY_MS = 2_000L
+        /** MCPTT 서비스 인가 거절(403 101 — 토큰 만료)로 토큰을 새로 받는 최소 간격(새 토큰도 거절되면 되풀이하지 않는다). */
+        internal const val AUTH_RENEW_GAP_MS = 5 * 60_000L
 
         /** 채널 복원 전 양보 — 재로그인 경로에서 서버 fan-out INVITE 가 먼저 오면 그 세션을 쓴다. */
         internal const val RESTORE_YIELD_MS = 3000L

@@ -35,6 +35,7 @@ import com.cims.ue.sdk.jni.RequestResult as JniRequestResult
 import com.cims.ue.sdk.jni.Result as JniResult
 import com.cims.ue.sdk.jni.SdsMessage as JniSdsMessage
 import com.cims.ue.sdk.jni.SdsSend as JniSdsSend
+import com.cims.ue.sdk.jni.ServiceAuthInfo as JniServiceAuthInfo
 import com.cims.ue.sdk.jni.StreamStats as JniStreamStats
 import com.cims.ue.sdk.jni.CallQuality as JniCallQuality
 import com.cims.ue.sdk.jni.QualityDirection as JniQualityDirection
@@ -106,8 +107,33 @@ object FloorIndicator {
 
 /** 오디오 라우트 — 입력의 EARPIECE = 내장 기본(하단) 마이크 고정, DEFAULT = 정책(고정 해제). 서수 = 코어 AudioRoute. */
 enum class AudioRoute { DEFAULT, EARPIECE, LOUDSPEAKER }
-/** MC 서비스(서수 = 코어 McService) — 호·affiliation 은 서비스마다 따로다(TS 23.280 §5.2.5). */
-enum class McService { MCPTT, MCVIDEO }
+/** MC 서비스(서수 = 코어 McService) — 호·affiliation 은 서비스마다 따로다(TS 23.280 §5.2.5). MCDATA 는 서비스 인가([ServiceAuthInfo])에만. */
+enum class McService { MCPTT, MCVIDEO, MCDATA }
+/** MC 서비스 인가 상태(서수 = 코어 ServiceAuthState) — PENDING 동안 그 서비스의 제휴 게시는 코어가 보류한다. */
+enum class ServiceAuthState { UNAUTHORIZED, PENDING, AUTHORIZED }
+
+/**
+ * MC 서비스 인가 결과(TS 24.379 §7.2.2 · TS 24.282 §7.2.2 · TS 24.281 §7.2.2 — 서비스 인가 + 서비스 설정 PUBLISH 의 최종 응답) — `serviceAuth`.
+ * 앱은 AUTHORIZED 를 본 뒤 그 서비스를 쓴다(제휴·채널 복원). 거절(403 `101` · 486 `164`)이면 인가 안 됨 — 새 토큰을 받으면
+ * [Account.setAccessToken]. code 0 = 보내지 않았다(토큰 없음·등록 끊김).
+ */
+data class ServiceAuthInfo(
+    val accountId: Int,
+    val service: McService,
+    val state: ServiceAuthState,
+    val code: Int,
+    val warningCode: Int,
+    val warningText: String,
+    /** 같은 MC ID 의 다른 클라이언트도 인가돼 있다(200 OK `<multiple-devices-ind>`, §7.3.3 9)a)). */
+    val multipleDevices: Boolean,
+) {
+    internal companion object {
+        fun of(j: JniServiceAuthInfo) = ServiceAuthInfo(
+            j.accountId, ordinalOf(j.service.swigValue()), ordinalOf(j.state.swigValue()), j.code, j.warningCode, j.warningText,
+            j.multipleDevices,
+        )
+    }
+}
 /** MCVideo 내 송출 상태(TS 24.581 §6.2.4 'U: …', 서수 = 코어 TransmissionState). */
 enum class TransmissionState { NO_PERMISSION, PENDING_REQUEST, PERMITTED, PENDING_END, QUEUED }
 /** 한 송출의 내 수신 상태(§6.2.5, 서수 = 코어 ReceptionState). */
@@ -222,9 +248,10 @@ data class AccountConfig(
     val autoAnswerMcvideo: Boolean = true,
     /** 발언권 참여자 타이머 — ue-init-config `<Timers>`([UeInitConfigDoc.floorTimers])를 싣는다. 다음 MCPTT 호부터 쓴다. */
     val floorTimers: FloorTimers = FloorTimers(),
-    /** MCVideo 서비스 설정 PUBLISH(TS 24.281 §7.2.3 — `Event: poc-settings`, Answer-Mode·선택 프로파일). 등록이 설 때마다 한 번.
-     *  받지 않는 서버는 489 로 답한다 — 서버가 받게 된 뒤에 켠다. */
-    val mcvideoServiceSettings: Boolean = false,
+    /** MC 서비스 인가 토큰 — 사용자 인증(CSC IdMS)의 액세스 토큰(TS 24.482). 등록이 서면 켠 MC 서비스(MCPTT·MCData·MCVideo — 그
+     *  서비스 PSI 가 있을 때)마다 서비스 인가 + 서비스 설정 PUBLISH(TS 24.379 §7.2.2)에 싣는다 — 결과는 `serviceAuth`. 묶임이 없는 MC
+     *  요청은 서버가 404 `141` 로 거절한다. 토큰을 새로 받으면 [Account.setAccessToken]. */
+    val accessToken: String = "",
     /** MCVideo 전송 제어 참여자 타이머 — MCVideo service configuration([McVideoServiceConfigDoc.tcTimers])을 싣는다. 다음 MCVideo 호부터. */
     val tcTimers: McVideoTcTimers = McVideoTcTimers(),
     /** 대기 끝에 허가된 송출을 사용자 확인 뒤에 시작한다(TS 24.581 §6.2.4.5.1 NOTE) — `transmission`(GRANTED, awaitingConfirmation)
@@ -250,7 +277,7 @@ data class AccountConfig(
         it.mcpttServerUri = mcpttServerUri; it.mcdataServerUri = mcdataServerUri
         it.mcvideoEnabled = mcvideoEnabled; it.mcvideoServerUri = mcvideoServerUri; it.autoAnswerMcvideo = autoAnswerMcvideo
         it.floorTimers = floorTimers.toJni()
-        it.mcvideoServiceSettings = mcvideoServiceSettings
+        it.accessToken = accessToken
         it.tcTimers = tcTimers.toJni()
         it.confirmQueuedTransmission = confirmQueuedTransmission
     }

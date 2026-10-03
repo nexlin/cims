@@ -105,6 +105,11 @@ struct DriveSession::Impl : public Listener {
         emit("{\"event\":\"reg\",\"service\":\"" + serviceOf(r.accountId) + "\",\"state\":\"" + st + "\",\"code\":" + std::to_string(r.code) + ",\"reason\":\"" +
              drive::jsonEscape(r.reason) + "\",\"expires\":" + std::to_string(r.expiresSec) + ",\"rrd_ms\":" + std::to_string(ms) + "}");
     }
+    void onServiceAuth(const ServiceAuthInfo& i) override {
+        emit("{\"event\":\"service_auth\",\"service\":\"" + std::string(toString(i.service)) + "\",\"state\":\"" + toString(i.state) +
+             "\",\"code\":" + std::to_string(i.code) + ",\"warning\":" + std::to_string(i.warningCode) + ",\"multiple_devices\":" +
+             b(i.multipleDevices) + "}");
+    }
     void onIncomingCall(const CallInfo& c) override {
         { std::lock_guard<std::mutex> lk(m); active.insert(c.callId); }
         emit("{\"event\":\"incoming\",\"call\":" + std::to_string(c.callId) + ",\"from\":\"" + drive::jsonEscape(c.remoteUri) + "\",\"called\":\"" +

@@ -586,18 +586,12 @@ TEST(McvSip, MediaInfoInserted) {
     EXPECT_EQ(icsis[1], "urn%3Ab");
 }
 
-// 서비스 설정 PUBLISH(TS 24.281 §7.2.3 · §7.2.1A · §7.4.1.2 — RFC 4354 poc-settings): 등록이 서면 한 번, 설정했을 때만
-TEST(McvCall, ServiceSettingsPublishedAfterRegistration) {
-    {
-        const std::string xml = mcvideo::pocSettings("urn:uuid:a<1>", false, 1, false);
-        EXPECT_NE(xml.find("<poc-settings xmlns=\"urn:oma:params:xml:ns:poc:poc-settings\""), std::string::npos);
-        EXPECT_NE(xml.find("<entity id=\"urn:uuid:a&lt;1&gt;\">"), std::string::npos) << xml;
-        EXPECT_NE(xml.find("<am-settings><answer-mode>manual</answer-mode></am-settings>"), std::string::npos);
-        EXPECT_NE(xml.find("xmlns:mcs10Set=\"urn:3gpp:mcsSettings:1.0\""), std::string::npos);
-    }
+// 서비스 인가 + 서비스 설정 PUBLISH(TS 24.281 §7.2.2 · §7.2.1A · §7.4.1.2 — RFC 4354 poc-settings): 등록이 서면 한 번, 토큰이 있을 때만.
+// 받지 않는 서버(489)는 인가 안 됨 — 같은 토큰으로 다시 보내지 않고, 코어의 요청이라 onRequestResult 로 올리지 않는다.
+TEST(McvCall, ServiceAuthorisationPublishedAfterRegistration) {
     Rig r;
     AccountConfig ac = r.account();
-    ac.mcvideoServiceSettings = true;
+    ac.accessToken = "mcv-token";
     r.addAccount(ac);
     ASSERT_TRUE(r.eng.registerAccount(r.acc).ok);
     std::string reg = r.csp.recv("REGISTER ");
@@ -611,16 +605,18 @@ TEST(McvCall, ServiceSettingsPublishedAfterRegistration) {
     EXPECT_EQ(headerOf(pub, "Expires"), "4294967295");                                          // 4)
     EXPECT_NE(headerOf(pub, "P-Preferred-Service").find("icsi.mcvideo"), std::string::npos);    // 2)
     const std::string info = partOf(pub, mcvideo::kCtInfo);
-    EXPECT_NE(info.find("<mcvideo-request-uri type=\"Normal\"><mcvideoURI>tel:"), std::string::npos) << info;   // §7.2.3 3)a) — 자기 MCVideo ID
-    EXPECT_NE(info.find(std::string("<mcvideoString>") + kClientId), std::string::npos) << info;               // 3)b) — client ID
-    const std::string set = partOf(pub, mcvideo::kCtPocSettings);
+    EXPECT_NE(info.find("<mcvideo-access-token type=\"Normal\"><mcvideoString>mcv-token"), std::string::npos) << info;   // §7.2.2 5)a)
+    EXPECT_NE(info.find(std::string("<mcvideoString>") + kClientId), std::string::npos) << info;                          // 5)b)
+    const std::string set = partOf(pub, "application/poc-settings+xml");
     EXPECT_NE(set.find(std::string("<entity id=\"") + kClientId + "\">"), std::string::npos) << set;
-    EXPECT_NE(set.find("<answer-mode>automatic</answer-mode>"), std::string::npos);            // 4)a) — autoAnswerMcvideo(기본 자동)
-    EXPECT_NE(set.find("<mcs10Set:user-profile-index>1</mcs10Set:user-profile-index>"), std::string::npos);   // 4)b)
-    EXPECT_NE(set.find("<mcs10Set:multiplex-support>false</mcs10Set:multiplex-support>"), std::string::npos); // 4)c)
-    r.csp.reply(pub, 489, "Bad Event", "");                   // 받지 않는 서버 — 다시 보내지 않는다, 앱에 결과를 올리지 않는다
+    EXPECT_NE(set.find("<answer-mode>automatic</answer-mode>"), std::string::npos);            // 6)a) — autoAnswerMcvideo(기본 자동)
+    EXPECT_NE(set.find("<mcs10Set:user-profile-index>1</mcs10Set:user-profile-index>"), std::string::npos);   // 6)b)
+    EXPECT_NE(set.find("<mcs10Set:multiplex-support>false</mcs10Set:multiplex-support>"), std::string::npos); // 6)c)
+    r.csp.reply(pub, 489, "Bad Event", "");
     EXPECT_TRUE(r.csp.recv("PUBLISH ", 700).empty());
     EXPECT_TRUE(r.l.results.empty());
+    EXPECT_EQ(r.eng.serviceAuth(r.acc, McService::McVideo).state, ServiceAuthState::Unauthorized);
+    EXPECT_EQ(r.eng.serviceAuth(r.acc, McService::McVideo).code, 489);
 }
 
 // ── 엔진 — 등록·affiliation (C3) ─────────────────────────────────────────────────

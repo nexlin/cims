@@ -15,6 +15,9 @@ public:
     /** pjsip/코어 로그 한 줄. level 은 pjsip 레벨(1=error … 6=trace). */
     virtual void onLog(int level, const std::string& msg) { (void)level; (void)msg; }
     virtual void onRegState(const RegInfo& info) { (void)info; }
+    /** MC 서비스 인가 상태 변화(TS 24.379 §7.2.2 — AccountConfig.accessToken). 등록이 서면 코어가 켠 서비스마다 인가하고 그 결과를
+     *  알린다 — 앱은 Authorized 뒤에 그 서비스를 쓴다(제휴·채널 복원). 등록이 끊기면 Unauthorized(code 0). */
+    virtual void onServiceAuth(const ServiceAuthInfo& info) { (void)info; }
     /** 착신 — 180 은 코어가 이미 보냈다. MCPTT 착신은 autoAnswerMcptt 면 코어가 200 까지 보낸다. */
     virtual void onIncomingCall(const CallInfo& info) { (void)info; }
     virtual void onCallState(const CallInfo& info) { (void)info; }

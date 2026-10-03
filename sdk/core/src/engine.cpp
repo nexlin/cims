@@ -47,6 +47,7 @@
 #include "mcvideo/tc_participant.h"
 #include "quality/call_quality.h"
 #include "reg_recovery.h"
+#include "service_auth.h"
 #include "upkeep.h"
 
 // 창 없는 프레임 렌더(Windows 엔진 — config_site PJMEDIA_VIDEO_DEV_HAS_CIMS_FRAME): 디코드 프레임(BGRA)이 렌더 장치 콜백으로 와서
@@ -419,6 +420,7 @@ public:
     }
     void onLog(int level, const std::string& msg) override { each([&](Listener* l) { l->onLog(level, msg); }); }
     void onRegState(const RegInfo& i) override { each([&](Listener* l) { l->onRegState(i); }); }
+    void onServiceAuth(const ServiceAuthInfo& i) override { each([&](Listener* l) { l->onServiceAuth(i); }); }
     void onIncomingCall(const CallInfo& i) override { each([&](Listener* l) { l->onIncomingCall(i); }); }
     void onCallState(const CallInfo& i) override { each([&](Listener* l) { l->onCallState(i); }); }
     void onCallMedia(const CallInfo& i) override { each([&](Listener* l) { l->onCallMedia(i); }); }
@@ -582,8 +584,8 @@ struct Engine::Impl {
         return std::string();
     }
     static std::string publishKey(int accountId, const std::string& groupId, McService service) {
-        // MCVideo 는 게시 하나가 관심 그룹 전부라 그룹이 비어 있다 — 값이 있으면 다른 게시(서비스 설정 "poc-settings")의 열쇠다
-        if (service == McService::McVideo) return std::to_string(accountId) + ":mcvideo" + (groupId.empty() ? "" : ":" + groupId);
+        // MCVideo 는 게시 하나가 관심 그룹 전부라 그룹이 비어 있다(서비스 인가 게시의 ETag 는 ServiceAuth 가 든다)
+        if (service == McService::McVideo) return std::to_string(accountId) + ":mcvideo";
         return std::to_string(accountId) + ":" + groupId;
     }
     // media plane SDS(MSRP) 입출력 스레드 — 분리 실행, stop() 이 취소하고 모두 끝날 때까지 기다린다.
@@ -706,9 +708,31 @@ struct Engine::Impl {
     int64_t sendMcpttAffiliationSet(int accountId, int64_t token, int64_t appToken, bool allowConditional, bool internal = false);
     /** MCVideo affiliation PUBLISH(TS 24.281 §8.2.1.2) — 관심 그룹 전부(mcvideoAffiliations)를 한 게시로. ue-ctl 에서. */
     int64_t sendMcVideoAffiliation(int accountId, int64_t token, int64_t appToken, bool allowConditional, bool internal = false);
-    /** MCVideo 서비스 설정 PUBLISH(TS 24.281 §7.2.3) — 등록이 선 뒤 한 번(AccountConfig.mcvideoServiceSettings). */
-    void publishMcVideoServiceSettings(int accountId, bool remove = false);
-    std::set<int> mcvideoSettingsSent;                     // 이 등록에서 서비스 설정을 올린 계정(등록이 끊기면 지운다)
+    // ── MC 서비스 인가·서비스 설정(TS 24.379 §7.2.2 · TS 24.282 §7.2.2 · TS 24.281 §7.2.2 — ue_sdk.md §4.2 «서비스 인가») ──
+    /** 계정 × 서비스의 인가 판정(ue-ctl 에서만). 조회용 사본은 svcAuthSnap(snapM). */
+    detail::ServiceAuth svcAuth;
+    std::map<detail::ServiceAuth::Key, ServiceAuthInfo> svcAuthSnap;
+    /** 응답을 기다리는 인가 PUBLISH — token → (계정, 서비스). 콜백(pjsip 스레드)이 읽는다(snapM). */
+    std::map<int64_t, detail::ServiceAuth::Key> svcAuthTokens;
+    /** 인가 응답을 기다리는 동안 미룬 앱의 제휴 요청 — affiliate() 의 token. 인가가 끝나면 그 token 으로 보낸다(ue-ctl). */
+    std::map<detail::ServiceAuth::Key, std::vector<int64_t>> svcAuthHeldApp;
+    /** 그 계정이 켠 서비스인가 — 서비스 등록 표시 + 참여 기능 PSI(인가 PUBLISH 의 Request-URI, §7.2.1A 1)). */
+    static bool serviceEnabled(const AccountConfig& cfg, McService s);
+    /** 계기 t 로 켠 서비스마다 인가가 필요하면 보낸다(등록돼 있을 때만). */
+    void authorizeServices(int accountId, detail::AuthTrigger t);
+    void sendServiceAuth(int accountId, McService s);
+    /** 인가 PUBLISH 최종 응답(ue-ctl). */
+    void onServiceAuthResult(const detail::ServiceAuth::Key& k, int64_t token, int code, int warningCode, const std::string& warningText,
+                             bool multipleDevices, const std::string& etag, int retryAfterSec);
+    /** 인가 상태를 사본에 옮기고 앱에 알린다. */
+    void notifyServiceAuth(const detail::ServiceAuth::Key& k);
+    /** 인가가 끝났다(성공·실패) — 미룬 앱 제휴 요청을 내보내고, resendUpkeep 이면 그동안 붙든 그 서비스의 유지 대상도 다시 싣는다
+     *  (등록이 끊긴 때·보내지도 않은 판정은 붙든 것이 없다 — 다시 싣는 것은 다음 등록·유지가 한다). */
+    void flushServiceAuthHeld(const detail::ServiceAuth::Key& k, bool resendUpkeep = true);
+    /** 서비스 설정 제거 = 그 서비스 로그오프(Expires 0 + SIP-If-Match — §7.2.1A 4) · §7.3.5). 인가된 적이 없으면 보낼 것이 없다. */
+    void removeServiceAuth(int accountId, McService s);
+    /** 유지 대상이 속한 MC 서비스 — 인가 응답을 기다리는 동안 보류할지 판정. 서비스 밖(dialog 구독)이면 false. */
+    static bool upkeepService(const detail::UpkeepKey& k, McService& out);
     /** 영상 미디어가 활성된 호 — 수신 창 결선 + (계정 videoAutoTransmit 면) 카메라 송신 개시. 영상 없는 빌드면 아무것도 안 한다. */
     void attachVideo(PjCall* call, int accountId);
     /** 내 영상 송출 개폐 — MCVideo 호는 허용(videoSend)·송출 허가(sendOn)가 둘 다일 때만, 그 밖의 호는 허용만 본다(ue_sdk.md §4.5).
@@ -1521,6 +1545,10 @@ public:
                 warnSeen = !w.empty() && detail::parseMcWarning(w, warnCode, warnText);   // 문구 번호(399 "NNN text" 의 NNN)
             }
         } catch (...) {}
+        if (warnSeen && warnCode == 141 && ci.lastStatusCode == 404) {
+            // 묶임 없음(§10.1.1.3.1.1 2a) 등) — 서버가 서비스 인가를 잃었다: 다시 인가(ServiceAuth BindingLost). 이 호는 거절된 그대로다.
+            o_->ctl.post([o = o_, acc = accountId_] { if (o->upkeep.registered(acc)) o->authorizeServices(acc, detail::AuthTrigger::BindingLost); });
+        }
         if (msrp) {                                                       // 앱 호 목록 밖 — 끝나면 정리만
             if (ci.state != PJSIP_INV_STATE_DISCONNECTED) return;
             msrp->cancel->store(true);
@@ -1682,10 +1710,15 @@ public:
         o_->ctl.post([o = o_, id = accountId_, reg = ri.state == RegState::Registered] {
             if (!o->running) return;
             if (o->regRecovery.settled(id)) o->reRegister(id);
-            // MCVideo 서비스 설정(§7.2.3) — 등록이 설 때 한 번. 등록이 끊기면 다음 등록에서 다시 올린다.
-            if (!reg) o->mcvideoSettingsSent.erase(id);
-            else if (o->mcvideoSettingsSent.insert(id).second) o->publishMcVideoServiceSettings(id);
-            if (o->upkeep.onRegEvent(id, reg)) {
+            const bool renewed = o->upkeep.onRegEvent(id, reg);
+            // MC 서비스 인가(§7.2.2) — 등록이 설 때(첫 등록·재성립·망 변경 뒤) 켠 서비스마다. 등록이 끊기면 서버가 묶임을 지운다 —
+            //   인가 안 됨으로 알리고 다음 등록에서 다시 인가한다. 인가 응답 전에는 그 서비스의 제휴 게시를 보류한다(아래 다시 싣기 포함).
+            if (!reg) {
+                for (const auto& k : o->svcAuth.unregistered(id)) { o->notifyServiceAuth(k); o->flushServiceAuthHeld(k, false); }
+            } else {
+                o->authorizeServices(id, renewed ? detail::AuthTrigger::Renewed : detail::AuthTrigger::Registered);
+            }
+            if (renewed) {
                 const std::vector<detail::UpkeepKey> keys = o->upkeep.wantedFor(id);
                 if (!keys.empty()) o->log(3, "upkeep: registration renewed — re-sending " + std::to_string(keys.size()) + " item(s)");
                 for (const auto& k : keys) o->upkeepResend(k, true);
@@ -1879,13 +1912,37 @@ public:
             r.code = ts.tsx.statusCode;
             r.reason = ts.tsx.statusText;
             int64_t grantedSec = 0;                        // 2xx 의 Expires — 게시(RFC 3903 §6 8))·구독(RFC 6665 §4.2.1.1) 모두 싣는다
+            int retryAfterSec = 0;
+            bool multipleDevices = false;
             if (ts.type == PJSIP_EVENT_RX_MSG) {
                 r.etag = detail::headerValue(ts.src.rdata.wholeMsg, "SIP-ETag");
                 detail::parseMcWarning(detail::headerValue(ts.src.rdata.wholeMsg, "Warning"), r.warningCode, r.warningText);
                 const std::string ex = detail::headerValue(ts.src.rdata.wholeMsg, "Expires");
                 if (!ex.empty()) grantedSec = std::strtoll(ex.c_str(), nullptr, 10);
+                retryAfterSec = std::atoi(detail::headerValue(ts.src.rdata.wholeMsg, "Retry-After").c_str());
+                if (r.code / 100 == 2) multipleDevices = detail::multipleDevicesInd(sipBody(ts.src.rdata.wholeMsg));
             }
             const int64_t reqToken = r.token;
+            {
+                // MC 서비스 인가 PUBLISH(§7.2.2) — 코어의 요청이다: 결과는 onServiceAuth 로(onRequestResult 아님)
+                bool auth = false;
+                detail::ServiceAuth::Key ak;
+                {
+                    std::lock_guard<std::mutex> lk(o_->snapM);
+                    auto at = o_->svcAuthTokens.find(reqToken);
+                    if (at != o_->svcAuthTokens.end()) { ak = at->second; auth = true; o_->svcAuthTokens.erase(at); }
+                }
+                if (auth) {
+                    o_->ctl.post([o = o_, ak, reqToken, r, multipleDevices, retryAfterSec] {
+                        o->onServiceAuthResult(ak, reqToken, r.code, r.warningCode, r.warningText, multipleDevices, r.etag, retryAfterSec);
+                    });
+                    return;
+                }
+            }
+            if (r.code == 404 && r.warningCode == 141) {
+                // 묶임 없음(TS 24.379 §4.4.2 — «user unknown to the participating function»): 서버가 인가를 잃었다(재기동 등) — 다시 인가
+                o_->ctl.post([o = o_, acc = accountId_] { if (o->upkeep.registered(acc)) o->authorizeServices(acc, detail::AuthTrigger::BindingLost); });
+            }
             Engine::Impl::PendingPublish retry;
             int64_t retryToken = -1;
             bool hasKey = false, internal = false;
@@ -2437,6 +2494,8 @@ void Engine::Impl::track(int64_t token, const detail::UpkeepKey& k, bool interna
 }
 
 void Engine::Impl::upkeepResend(const detail::UpkeepKey& k, bool renew) {
+    McService svc;
+    if (upkeepService(k, svc) && svcAuth.pending({k.account, svc})) return;   // 인가 응답 뒤 flushServiceAuthHeld 가 싣는다
     const int64_t token = nextToken++;
     switch (k.kind) {
         case detail::UpkeepKind::McpttAffiliation:
@@ -2605,6 +2664,8 @@ void Engine::stop() {
         o->routes.clear();                       // ~ExtraAudioDevice → close (libDestroy 전)
         o->accounts.clear();                     // ~Account → shutdown
         o->mcvideoAffiliations.clear();
+        o->svcAuth.clear();
+        o->svcAuthHeldApp.clear();
         try { o->ep->libDestroy(); } catch (...) {}               // LogWriter 도 여기서 pjsua2 가 delete
 #if CIMSUE_FRAME_SINK
         pjmedia_cims_frame_dev_set_callback(nullptr, nullptr);       // 렌더 스트림이 모두 사라진 뒤
@@ -2632,6 +2693,8 @@ void Engine::stop() {
     impl_->publishPending.clear();
     impl_->publishEtag.clear();
     impl_->tracked.clear();
+    impl_->svcAuthSnap.clear();
+    impl_->svcAuthTokens.clear();
 }
 
 int Engine::addAccount(const AccountConfig& cfg) {
@@ -2730,7 +2793,7 @@ Result Engine::setMcVideoEnabled(int id, bool enabled) {
                 { std::lock_guard<std::mutex> lk(o->snapM); o->tracked[t] = Impl::Tracked{k, true}; }   // 앱의 요청이 아니다 — 결과를 올리지 않는다
                 o->sendMcVideoAffiliation(id, t, t, true, true);
             }
-            if (o->mcvideoSettingsSent.erase(id)) o->publishMcVideoServiceSettings(id, true);
+            o->removeServiceAuth(id, McService::McVideo);
         }
         AccountConfig cfg = ic->second;
         cfg.mcvideoEnabled = enabled;
@@ -2750,10 +2813,33 @@ Result Engine::setMcVideoEnabled(int id, bool enabled) {
         }
         ic->second = cfg;
         o->log(3, "account " + std::to_string(id) + " mcvideo " + (enabled ? "on" : "off") + " — re-REGISTER without unregistering");
-        if (enabled) o->mcvideoSettingsSent.erase(id);       // 켠 뒤 첫 등록 성공에 서비스 설정을 올린다(§7.2.3)
+        // 켠 뒤의 등록 응답에서 MCVideo 를 인가한다(§7.2.2 — 그 서비스의 첫 판정)
         if (o->regRecovery.wanted(id)) o->reRegister(id);
         return Result::success();
     });
+}
+
+Result Engine::setAccessToken(int id, const std::string& accessToken) {
+    if (!impl_->running) return Result::fail(-1, "not running");
+    return impl_->ctl.runSync([this, id, accessToken]() -> Result {
+        Impl* o = impl_.get();
+        auto ic = o->accountCfgs.find(id);
+        if (ic == o->accountCfgs.end()) return Result::fail(-2, "no such account");
+        if (ic->second.accessToken == accessToken) return Result::success();
+        ic->second.accessToken = accessToken;
+        o->authorizeServices(id, detail::AuthTrigger::TokenChanged);         // 인가 안 된 서비스만(인가된 묶임은 등록과 함께 산다)
+        return Result::success();
+    });
+}
+
+ServiceAuthInfo Engine::serviceAuth(int id, McService service) const {
+    std::lock_guard<std::mutex> lk(impl_->snapM);
+    auto it = impl_->svcAuthSnap.find({id, service});
+    if (it != impl_->svcAuthSnap.end()) return it->second;
+    ServiceAuthInfo none;
+    none.accountId = id;
+    none.service = service;
+    return none;
 }
 
 Result Engine::removeAccount(int id) {
@@ -2775,8 +2861,13 @@ Result Engine::removeAccount(int id) {
         o->mcpttAffiliations.erase(id);
         o->upkeep.dropAccount(id);
         o->regRecovery.unwant(id);
+        o->svcAuth.dropAccount(id);
+        for (auto it = o->svcAuthHeldApp.begin(); it != o->svcAuthHeldApp.end();)
+            it = it->first.first == id ? o->svcAuthHeldApp.erase(it) : std::next(it);
         std::lock_guard<std::mutex> lk(o->snapM);
         o->regInfos.erase(id);
+        for (auto it = o->svcAuthSnap.begin(); it != o->svcAuthSnap.end();)
+            it = it->first.first == id ? o->svcAuthSnap.erase(it) : std::next(it);
         return Result::success();
     });
 }
@@ -3487,63 +3578,144 @@ int64_t Engine::Impl::sendMcpttAffiliationSet(int accountId, int64_t token, int6
     return r < 0 ? -1 : appToken;
 }
 
-void Engine::Impl::publishMcVideoServiceSettings(int accountId, bool remove) {
+bool Engine::Impl::serviceEnabled(const AccountConfig& cfg, McService s) {
+    switch (s) {
+        case McService::Mcptt: return cfg.mcpttEnabled && !cfg.mcpttServerUri.empty();
+        case McService::McData: return (cfg.mcdataMsrp || cfg.mcdataFd) && !cfg.mcdataServerUri.empty();
+        case McService::McVideo: return cfg.mcvideoEnabled && !cfg.mcvideoServerUri.empty();
+    }
+    return false;
+}
+
+bool Engine::Impl::upkeepService(const detail::UpkeepKey& k, McService& out) {
+    switch (k.kind) {
+        case detail::UpkeepKind::McpttAffiliation:
+        case detail::UpkeepKind::XcapDiff: out = McService::Mcptt; return true;      // 그룹·문서 구독도 MCPTT 서비스 요청(TS 24.481 §6.3.13)
+        case detail::UpkeepKind::McVideoAffiliation: out = McService::McVideo; return true;
+        case detail::UpkeepKind::Dialog: return false;
+    }
+    return false;
+}
+
+void Engine::Impl::authorizeServices(int accountId, detail::AuthTrigger t) {
+    auto ic = accountCfgs.find(accountId);
+    if (ic == accountCfgs.end() || !upkeep.registered(accountId)) return;
+    const int64_t now = upkeepNowMs();
+    for (McService s : {McService::Mcptt, McService::McData, McService::McVideo}) {
+        if (!serviceEnabled(ic->second, s)) continue;
+        if (svcAuth.shouldAuthorize({accountId, s}, t, now)) sendServiceAuth(accountId, s);
+    }
+}
+
+void Engine::Impl::sendServiceAuth(int accountId, McService s) {
     auto ic = accountCfgs.find(accountId);
     if (ic == accountCfgs.end()) return;
     const AccountConfig& cfg = ic->second;
-    if (!cfg.mcvideoEnabled || !cfg.mcvideoServiceSettings || cfg.mcvideoServerUri.empty()) return;
-    if (remove) {
-        // 서비스 설정 지우기 — Expires 0(§7.2.1A 4)). 본문 없이, 받은 entity-tag 로(RFC 3903 §4.5). 서버가 받은 적이 없으면 지울 것도 없다.
-        std::string etag;
-        {
-            std::lock_guard<std::mutex> lk(snapM);
-            auto et = publishEtag.find(publishKey(accountId, "poc-settings", McService::McVideo));
-            if (et == publishEtag.end()) return;
-            etag = et->second;
-            publishEtag.erase(et);
-        }
-        std::map<std::string, std::string> rh;
-        rh["P-Preferred-Service"] = mcvideo::kIcsi;
-        rh["Event"] = "poc-settings";
-        rh["Expires"] = "0";
-        rh["SIP-If-Match"] = etag;
-        const int64_t rt = nextToken++;
-        { std::lock_guard<std::mutex> lk(snapM); tracked[rt] = Tracked{detail::UpkeepKey{accountId, detail::UpkeepKind::McVideoAffiliation, "poc-settings"}, true}; }
-        if (doSendRequest(accountId, "PUBLISH", cfg.mcvideoServerUri, "", "", rh, rt) < 0) {
-            std::lock_guard<std::mutex> lk(snapM);
-            tracked.erase(rt);
-        }
-        return;
-    }
+    const detail::ServiceAuth::Key k{accountId, s};
+    const std::string psi = s == McService::Mcptt ? cfg.mcpttServerUri : s == McService::McData ? cfg.mcdataServerUri : cfg.mcvideoServerUri;
     const std::string clientId = cfg.effectiveMcpttClientId();
     const std::string entity = !cfg.instanceId.empty() ? cfg.instanceId : clientId;
-    if (entity.empty()) { log(2, "mcvideo service settings: no instance ID — not published"); return; }
-    // TS 24.281 §7.2.1A — R-URI = 참여 MCVideo 기능 PSI(1), ICSI(2), Event poc-settings(3), Expires 2^32-1(4).
-    //   §7.2.3 3) — mcvideo-info: request-uri = 자기 MCVideo ID · client-id, 4) — poc-settings: Answer-Mode·선택 프로파일·multiplex.
-    std::map<std::string, std::string> h;
-    h["P-Preferred-Service"] = mcvideo::kIcsi;
-    h["Event"] = "poc-settings";
-    h["Expires"] = mcvideo::kSettingsExpires;
-    const int64_t token = nextToken++;
-    {
-        std::lock_guard<std::mutex> lk(snapM);
-        PendingPublish p;
-        p.accountId = accountId; p.groupId = "poc-settings"; p.on = true; p.appToken = token; p.service = McService::McVideo; p.internal = true;
-        publishPending[token] = p;
-        tracked[token] = Tracked{detail::UpkeepKey{accountId, detail::UpkeepKind::McVideoAffiliation, "poc-settings"}, true};
+    if (cfg.accessToken.empty() || clientId.empty() || entity.empty()) {
+        // §7.2.2 1)·2) — 사용자 인증을 마쳐 토큰이 있어야 한다. 앱이 setAccessToken 으로 줄 때 다시 본다.
+        log(2, std::string(toString(s)) + " service authorisation: " + (cfg.accessToken.empty() ? "no access token" : "no MC client ID") +
+                   " — not authorised");
+        svcAuth.notSent(k, false, upkeepNowMs());
+        notifyServiceAuth(k);
+        flushServiceAuthHeld(k, false);
+        return;
     }
-    mcvideo::InfoParams ip;
-    ip.requestUri = cfg.effectiveMcpttId();
-    ip.clientId = clientId;
-    const std::string boundary = "mcv-set-" + mcdata::newMessageId().substr(0, 12);
-    const std::string body = "--" + boundary + "\r\nContent-Type: " + mcvideo::kCtInfo + "\r\n\r\n" + mcvideo::info(ip) + "\r\n" +
-                             "--" + boundary + "\r\nContent-Type: " + mcvideo::kCtPocSettings + "\r\n\r\n" +
-                             mcvideo::pocSettings(entity, cfg.autoAnswerMcvideo, 1, false) + "\r\n" +
-                             "--" + boundary + "--\r\n";
-    if (doSendRequest(accountId, "PUBLISH", cfg.mcvideoServerUri, "multipart/mixed;boundary=" + boundary, body, h, token) < 0) {
+    // §7.2.1A — 1) R-URI = 참여 기능 PSI · 2) P-Preferred-Service = 서비스 ICSI · 3) Event poc-settings · 4) Expires 2^32-1.
+    //   §7.2.2 5) 서비스 info(<…-access-token> · <…-client-id>) · 6) poc-settings(Answer-Mode · 선택 user profile · multiplex).
+    std::map<std::string, std::string> h;
+    h["P-Preferred-Service"] = detail::serviceIcsi(s);
+    h["Event"] = "poc-settings";
+    h["Expires"] = mcptt::kAffiliationExpires;
+    const bool autoAnswer = s == McService::McVideo ? cfg.autoAnswerMcvideo : cfg.autoAnswerMcptt;
+    const detail::ServiceAuthBody b = detail::serviceAuthBody(s, cfg.accessToken, clientId, entity, autoAnswer,
+                                                              "poc-" + mcdata::newMessageId().substr(0, 12));
+    const int64_t token = nextToken++;
+    svcAuth.sent(k, token, upkeepNowMs());
+    { std::lock_guard<std::mutex> lk(snapM); svcAuthTokens[token] = k; }
+    notifyServiceAuth(k);
+    log(3, std::string(toString(s)) + " service authorisation → " + psi);
+    if (doSendRequest(accountId, "PUBLISH", psi, b.contentType, b.body, h, token) < 0) {
+        { std::lock_guard<std::mutex> lk(snapM); svcAuthTokens.erase(token); }
+        onServiceAuthResult(k, token, 0, 0, std::string(), false, std::string(), 0);
+    }
+}
+
+void Engine::Impl::onServiceAuthResult(const detail::ServiceAuth::Key& k, int64_t token, int code, int warningCode,
+                                       const std::string& warningText, bool multipleDevices, const std::string& etag, int retryAfterSec) {
+    const int64_t now = upkeepNowMs();
+    // 등록이 끊긴 뒤·설정을 지운 뒤의 응답은 버린다
+    if (!svcAuth.result(k, token, code, warningCode, warningText, multipleDevices, etag, retryAfterSec, now)) return;
+    const detail::ServiceAuth::Entry* e = svcAuth.find(k);
+    const bool transient = e && e->transient;
+    const int64_t retryInMs = e ? e->retryAtMs - now : 0;
+    log(code / 100 == 2 ? 3 : 2, std::string(toString(k.second)) + " service authorisation → " + std::to_string(code) +
+                                     (warningCode ? " " + std::to_string(warningCode) + " " + warningText : std::string()));
+    notifyServiceAuth(k);
+    flushServiceAuthHeld(k);
+    if (transient) {
+        // 5xx·408·응답 없음 — 물러나 다시(Retry-After 가 있으면 그만큼)
+        later((unsigned)(retryInMs > 0 ? retryInMs : 0), [this, k] {
+            if (upkeep.registered(k.first) && accountCfgs.count(k.first) && serviceEnabled(accountCfgs[k.first], k.second) &&
+                svcAuth.shouldAuthorize(k, detail::AuthTrigger::Retry, upkeepNowMs()))
+                sendServiceAuth(k.first, k.second);
+        });
+    }
+}
+
+void Engine::Impl::notifyServiceAuth(const detail::ServiceAuth::Key& k) {
+    const detail::ServiceAuth::Entry* e = svcAuth.find(k);
+    ServiceAuthInfo info;
+    info.accountId = k.first;
+    info.service = k.second;
+    if (e) info = e->info;
+    { std::lock_guard<std::mutex> lk(snapM); svcAuthSnap[k] = info; }
+    emit([this, info] { listener->onServiceAuth(info); });
+}
+
+void Engine::Impl::flushServiceAuthHeld(const detail::ServiceAuth::Key& k, bool resendUpkeep) {
+    if (svcAuth.pending(k)) return;
+    // 미룬 앱 요청은 앱의 token 으로(결과는 onRequestResult), 나머지 유지 대상은 초기 게시·구독으로 다시 싣는다 — 인가가 서버의
+    //   이 서비스 상태를 새로 열었을 수 있다(묶임 제거는 제휴 제거를 포함한다 — §7.3.5 NOTE).
+    std::vector<int64_t> app;
+    auto ha = svcAuthHeldApp.find(k);
+    if (ha != svcAuthHeldApp.end()) { app.swap(ha->second); svcAuthHeldApp.erase(ha); }
+    for (int64_t t : app) {
+        if (k.second == McService::McVideo) sendMcVideoAffiliation(k.first, t, t, true);
+        else sendMcpttAffiliationSet(k.first, t, t, true);
+    }
+    if (!resendUpkeep) return;
+    for (const auto& u : upkeep.wantedFor(k.first)) {
+        McService s;
+        if (!upkeepService(u, s) || s != k.second) continue;
+        if (!app.empty() && (u.kind == detail::UpkeepKind::McpttAffiliation || u.kind == detail::UpkeepKind::McVideoAffiliation)) continue;
+        upkeepResend(u, true);
+    }
+}
+
+void Engine::Impl::removeServiceAuth(int accountId, McService s) {
+    auto ic = accountCfgs.find(accountId);
+    if (ic == accountCfgs.end()) return;
+    const detail::ServiceAuth::Key k{accountId, s};
+    const std::string etag = svcAuth.removed(k);
+    notifyServiceAuth(k);
+    if (etag.empty()) return;
+    const AccountConfig& cfg = ic->second;
+    const std::string psi = s == McService::Mcptt ? cfg.mcpttServerUri : s == McService::McData ? cfg.mcdataServerUri : cfg.mcvideoServerUri;
+    // §7.2.1A 4) — Expires 0, 본문 없이 받은 entity-tag 로(RFC 3903 §4.5). 서버는 설정·제휴·묶임을 지운다(§7.3.5).
+    std::map<std::string, std::string> h;
+    h["P-Preferred-Service"] = detail::serviceIcsi(s);
+    h["Event"] = "poc-settings";
+    h["Expires"] = "0";
+    h["SIP-If-Match"] = etag;
+    const int64_t token = nextToken++;
+    { std::lock_guard<std::mutex> lk(snapM); svcAuthTokens[token] = k; }      // 코어의 요청 — 응답은 앱에 올리지 않는다(인가 기록은 이미 없다)
+    if (doSendRequest(accountId, "PUBLISH", psi, "", "", h, token) < 0) {
         std::lock_guard<std::mutex> lk(snapM);
-        publishPending.erase(token); tracked.erase(token);
-        mcvideoSettingsSent.erase(accountId);
+        svcAuthTokens.erase(token);
     }
 }
 
@@ -3593,6 +3765,7 @@ int64_t Engine::Impl::sendMcVideoAffiliation(int accountId, int64_t token, int64
 int64_t Engine::affiliate(int accountId, const std::string& groupId, bool on, McService service) {
     if (!impl_->running) return -1;
     int64_t token = impl_->nextToken++;
+    if (service == McService::McData) return -1;                // MCData 제휴 게시는 없다(McService 주석)
     if (service == McService::McVideo) {
         return impl_->ctl.runSync([=]() -> int64_t {
             Impl* o = impl_.get();
@@ -3602,6 +3775,10 @@ int64_t Engine::affiliate(int accountId, const std::string& groupId, bool on, Mc
             if (on) groups.insert(gid); else groups.erase(gid);
             const detail::UpkeepKey k{accountId, detail::UpkeepKind::McVideoAffiliation, std::string()};
             if (groups.empty()) o->upkeep.unwant(k); else o->upkeep.want(k);
+            if (o->svcAuth.pending({accountId, McService::McVideo})) {          // 인가 응답 뒤 이 token 으로 보낸다
+                o->svcAuthHeldApp[{accountId, McService::McVideo}].push_back(token);
+                return token;
+            }
             return o->sendMcVideoAffiliation(accountId, token, token, true);
         });
     }
@@ -3616,6 +3793,10 @@ int64_t Engine::affiliate(int accountId, const std::string& groupId, bool on, Mc
             if (on) groups.insert(gid); else groups.erase(gid);
             const detail::UpkeepKey k{accountId, detail::UpkeepKind::McpttAffiliation, std::string()};
             if (groups.empty()) o->upkeep.unwant(k); else o->upkeep.want(k);
+            if (o->svcAuth.pending({accountId, McService::Mcptt})) {            // 인가 응답 뒤 이 token 으로 보낸다(§7.2.2 — 묶임이 먼저)
+                o->svcAuthHeldApp[{accountId, McService::Mcptt}].push_back(token);
+                return token;
+            }
             return o->sendMcpttAffiliationSet(accountId, token, token, true);
         }
         const detail::UpkeepKey k{accountId, detail::UpkeepKind::McpttAffiliation, gid};

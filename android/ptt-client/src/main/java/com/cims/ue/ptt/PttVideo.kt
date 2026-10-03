@@ -164,7 +164,8 @@ internal class VideoPlane(private val c: PttController, context: Context) {
      * 기록되지 않을 수 있는데(PUBLISH 는 200 — 결과는 NOTIFY 로만 온다, TS 24.281 §8.2.2.2.3), 물러남이 2 분까지 커지면 그동안 영상을 못 쓴다.
      */
     private fun sync() {
-        val registered = c.regState.value is RegState.Registered
+        // MCVideo 를 쓰는 일(제휴·합류)은 MCVideo 서비스 인가 뒤다(TS 24.281 §7.2.2 — 묶임 없는 요청은 404 141)
+        val registered = c.regState.value is RegState.Registered && c.mcvideoAuthorized
         val g = channel
         val doc = g?.let { c._groupDocs.value[it] }
         val mv = doc?.mcvideo

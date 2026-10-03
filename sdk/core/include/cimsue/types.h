@@ -20,8 +20,11 @@ enum class RegState { Unregistered, Registering, Registered, Failed };
 enum class CallState { Null, Outgoing, Incoming, Active, Held, Disconnected };
 enum class CallDir { Outgoing, Incoming };
 /** MC 서비스 — 한 그룹 = 서비스 집합(TS 23.280 §3). 호·affiliation 은 서비스마다 따로다(ICSI·세션·제어 기능, mcvideo.md §1.1).
- *  MCVideo ID = MCPTT ID(단일 MC service ID — TS 23.280 §10.1.4.1, mcvideo.md §7 D1)라 요청은 ICSI 로 가른다. */
-enum class McService { Mcptt, McVideo };
+ *  MCVideo ID = MCData ID = MCPTT ID(단일 MC service ID — TS 23.280 §10.1.4.1, mcvideo.md §7 D1)라 요청은 ICSI 로 가른다.
+ *  McData 는 서비스 인가(ServiceAuthInfo)에만 쓴다 — MCData 요청(SDS·FD)은 자기 API 가 있고 제휴 게시는 없다. */
+enum class McService { Mcptt, McVideo, McData };
+/** MC 서비스 인가 상태(ServiceAuthInfo). Pending = 인가 PUBLISH 의 응답을 기다린다 — 그동안 그 서비스의 제휴 게시는 내보내지 않는다. */
+enum class ServiceAuthState { Unauthorized, Pending, Authorized };
 
 /** 명령의 즉시 결과 — 인자·상태 오류. 프로토콜 결과는 Listener 이벤트로 온다. */
 struct Result {
@@ -152,10 +155,13 @@ struct AccountConfig {
     /** MCVideo 그룹 호 초대(제어 기능의 prearranged 멤버 초대 — TS 24.281 §9.2.1.3) 자동 수락 = 자동 개시(§6.2.3.1.2). 수락은 세션
      *  합류일 뿐이고 영상 보기는 수신 제어(acceptReception — manual 수신)가 따로 정한다. false 면 앱이 answer/reject(수동 개시 §6.2.3.2.2). */
     bool autoAnswerMcvideo = true;
-    /** MCVideo 서비스 설정 PUBLISH(TS 24.281 §7.2.3 — `Event: poc-settings`: Answer-Mode 설정·선택한 user profile·multiplex 지원)를
-     *  등록이 설 때마다 낸다. 규격의 착신 참여 기능은 이 설정을 받기 전의 초대를 480 + Warning 146 으로 거절한다(§9.2.1.3.2 3)).
-     *  서비스 설정 PUBLISH 를 받지 않는 서버는 489 로 답한다 — 서버가 받게 된 뒤 켠다(기본 false). */
-    bool mcvideoServiceSettings = false;
+    /** MC 서비스 인가 토큰 — 사용자 인증(TS 24.482 — CSC IdMS)에서 받은 액세스 토큰. 등록이 서면(첫 등록·등록 재성립·망 변경 뒤)
+     *  켠 MC 서비스(mcpttEnabled · mcdataMsrp/mcdataFd · mcvideoEnabled — 그 서비스의 참여 기능 PSI 가 있을 때)마다 서비스 인가 +
+     *  서비스 설정 PUBLISH(`Event: poc-settings` — TS 24.379 §7.2.2 · TS 24.282 §7.2.2 · TS 24.281 §7.2.2)에 싣는다. 서버는 이것으로
+     *  (MC ID, client ID, IMPU) 를 묶고(§7.3.3 5)), 묶임이 없는 MC 요청은 404 `141` 로 거절한다. 서비스 설정의 Answer-Mode =
+     *  autoAnswerMcptt·autoAnswerMcvideo(착신 참여 기능은 설정을 받기 전의 초대를 480 `146` 으로 거절한다 — §10.1.1.3.2 3)).
+     *  결과 = Listener::onServiceAuth. 토큰이 바뀌면 Engine::setAccessToken. 비면 인가하지 않는다(Unauthorized, code 0). */
+    std::string accessToken;
     /** 발언권 참여자 타이머 — ue-init-config `<Timers>`(UeInitConfigDoc.floorTimers)를 싣는다. 계정의 다음 MCPTT 호부터 쓴다
      *  (Engine::setFloorTimers 로 바꿀 수 있다 — 문서 변경 통지 뒤). */
     FloorTimers floorTimers;
@@ -560,6 +566,23 @@ struct RequestResult {
     std::string warningText;          // 그 문구(번호 뒤)
 };
 
+/**
+ * MC 서비스 인가 결과(TS 24.379 §7.2.2 · TS 24.282 §7.2.2 · TS 24.281 §7.2.2 — 서비스 인가 + 서비스 설정 PUBLISH 의 최종 응답) —
+ * Listener::onServiceAuth. 앱은 Authorized 를 본 뒤 그 서비스를 쓴다(제휴·채널 복원 — 등록만으로는 서버가 MC 요청을 받지 않는다).
+ * 실패(403 `101` 인가 실패 · 486 `164` 동시 인가 상한 등)면 «인가 안 됨» 이다(§7.2.2 끝 — 2)) — 새 토큰을 받으면
+ * Engine::setAccessToken. 5xx·408 은 코어가 물러나 다시 보낸다. 등록이 끊기면 Unauthorized(code 0)로 알린다.
+ */
+struct ServiceAuthInfo {
+    int accountId = -1;
+    McService service = McService::Mcptt;
+    ServiceAuthState state = ServiceAuthState::Unauthorized;
+    int code = 0;                     // 인가 PUBLISH 최종 응답 코드(0 = 보내지 않았다 — 토큰·PSI 없음, 등록 끊김)
+    int warningCode = 0;              // Warning 문구 번호(101·164 …, 없으면 0)
+    std::string warningText;
+    /** 같은 MC ID 의 다른 클라이언트도 인가돼 있다 — 200 OK 의 `<multiple-devices-ind>true`(§7.3.3 9)a)). */
+    bool multipleDevices = false;
+};
+
 /** 감시 대상의 dialog 상태 (RFC 4235 dialog-info) — 관제 BLF·INVITE-Join 대상 식별 (dispatch_center.md §5.2·§5.3). */
 struct DialogInfo {
     int accountId = -1;
@@ -713,6 +736,7 @@ CIMSUE_API const char* toString(FloorState s);
 CIMSUE_API const char* toString(FloorEvent::Kind k);
 CIMSUE_API const char* toString(ConditionCause c);
 CIMSUE_API const char* toString(McService s);
+CIMSUE_API const char* toString(ServiceAuthState s);
 CIMSUE_API const char* toString(TransmissionState s);
 CIMSUE_API const char* toString(ReceptionState s);
 CIMSUE_API const char* toString(TransmissionEvent::Kind k);

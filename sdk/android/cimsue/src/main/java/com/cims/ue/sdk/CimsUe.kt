@@ -126,6 +126,7 @@ class CimsUe(private val io: CoroutineDispatcher = Dispatchers.IO) : AutoCloseab
 
     private val _log = MutableSharedFlow<LogLine>(extraBufferCapacity = 128, onBufferOverflow = BufferOverflow.DROP_OLDEST)
     private val _regState = lossy<RegInfo>()
+    private val _serviceAuth = lossy<ServiceAuthInfo>()
     private val _incomingCall = lossy<CallInfo>()
     private val _callState = lossy<CallInfo>()
     private val _callMedia = lossy<CallInfo>()
@@ -147,6 +148,8 @@ class CimsUe(private val io: CoroutineDispatcher = Dispatchers.IO) : AutoCloseab
 
     val log: SharedFlow<LogLine> = _log.asSharedFlow()
     val regState: SharedFlow<RegInfo> = _regState.asSharedFlow()
+    /** MC 서비스 인가 상태 변화(TS 24.379 §7.2.2 — [AccountConfig.accessToken]). 권위는 [serviceAuths]. 앱은 AUTHORIZED 뒤에 그 서비스를 쓴다. */
+    val serviceAuth: SharedFlow<ServiceAuthInfo> = _serviceAuth.asSharedFlow()
     /** 착신 — 180 은 코어가 이미 보냈다. MCPTT 착신은 autoAnswerMcptt 면 200 까지 코어가 보낸다. */
     val incomingCall: SharedFlow<CallInfo> = _incomingCall.asSharedFlow()
     val callState: SharedFlow<CallInfo> = _callState.asSharedFlow()
@@ -186,6 +189,10 @@ class CimsUe(private val io: CoroutineDispatcher = Dispatchers.IO) : AutoCloseab
     /** 계정별 최신 등록 상태. 이벤트가 버려져도 여기는 맞다. */
     val registrations: StateFlow<Map<Int, RegInfo>> = _registrations.asStateFlow()
 
+    private val _serviceAuths = MutableStateFlow<Map<Pair<Int, McService>, ServiceAuthInfo>>(emptyMap())
+    /** (계정, MC 서비스)별 최신 인가 상태. 이벤트가 버려져도 여기는 맞다. */
+    val serviceAuths: StateFlow<Map<Pair<Int, McService>, ServiceAuthInfo>> = _serviceAuths.asStateFlow()
+
     private val _callIds = MutableStateFlow<List<Int>>(emptyList())
     /** 살아 있는 호 목록. 화면 재구성은 여기서 `callInfo(id)` 로 다시 그린다. */
     val callIds: StateFlow<List<Int>> = _callIds.asStateFlow()
@@ -210,6 +217,7 @@ class CimsUe(private val io: CoroutineDispatcher = Dispatchers.IO) : AutoCloseab
         _running.value = false
         _callIds.value = emptyList()
         _registrations.value = emptyMap()
+        _serviceAuths.value = emptyMap()
         accountCache.clear()
         callCache.clear()
     }
@@ -257,6 +265,10 @@ class CimsUe(private val io: CoroutineDispatcher = Dispatchers.IO) : AutoCloseab
     fun account(accountId: Int): Account = accountCache.getOrPut(accountId) { Account(this, accountId) }
     fun regInfo(accountId: Int): RegInfo =
         guarded { RegInfo.of(engine.regInfo(accountId)) } ?: RegInfo(accountId, RegState.UNREGISTERED, 0, "closed", 0)
+
+    fun serviceAuth(accountId: Int, service: McService): ServiceAuthInfo =
+        guarded { ServiceAuthInfo.of(engine.serviceAuth(accountId, com.cims.ue.sdk.jni.McService.swigToEnum(service.ordinal))) }
+            ?: ServiceAuthInfo(accountId, service, ServiceAuthState.UNAUTHORIZED, 0, 0, "closed", false)
 
     // ── 호 ────────────────────────────────────────────────────────────────────
     /** id 를 감싼 호 핸들. 같은 id·같은 세대면 같은 객체다. */
@@ -428,6 +440,12 @@ class CimsUe(private val io: CoroutineDispatcher = Dispatchers.IO) : AutoCloseab
             _regState.emitLossy(r)
         }
 
+        override fun onServiceAuth(info: com.cims.ue.sdk.jni.ServiceAuthInfo) {
+            val a = ServiceAuthInfo.of(info)
+            _serviceAuths.value = _serviceAuths.value + ((a.accountId to a.service) to a)
+            _serviceAuth.emitLossy(a)
+        }
+
         override fun onIncomingCall(info: JniCallInfo) {
             val c = CallInfo.of(info)
             newEpoch(c.callId)
@@ -515,6 +533,11 @@ class Account internal constructor(private val ue: CimsUe, val id: Int) {
     /** MCVideo 서비스만 켜고 끈다(TS 24.281 §7.2.1AA NOTE) — 등록 해제 없이 REGISTER Contact 의 MCVideo 태그만 넣고 뺀다. MCPTT·MCData 제휴와
      *  진행 중 호는 그대로다. 끌 때 코어가 MCVideo 제휴를 먼저 내린다. 진행 중 MCVideo 호는 앱이 먼저 끝낸다. */
     suspend fun setMcVideoEnabled(enabled: Boolean): CimsResult<Unit> = ue.command { CimsResult.of(ue.jni.setMcVideoEnabled(id, enabled)) }
+    /** MC 서비스 인가 토큰을 바꾼다(사용자 인증의 액세스 토큰을 새로 받았을 때 — [AccountConfig.accessToken]). 인가되지 않은 서비스가
+     *  있으면 코어가 지금 다시 인가한다(TS 24.379 §7.2.2). 인가된 서비스는 그대로다. */
+    suspend fun setAccessToken(accessToken: String): CimsResult<Unit> = ue.command { CimsResult.of(ue.jni.setAccessToken(id, accessToken)) }
+    /** MC 서비스 인가 상태 — 마지막 `serviceAuth` 와 같다. */
+    fun serviceAuth(service: McService): ServiceAuthInfo = ue.serviceAuth(id, service)
     suspend fun remove(): CimsResult<Unit> = ue.command { CimsResult.of(ue.jni.removeAccount(id)) }
 
     private fun callOrFail(callId: Int, what: String): CimsResult<Call> =

@@ -75,6 +75,16 @@ const char* toString(McService s) {
     switch (s) {
         case McService::Mcptt: return "mcptt";
         case McService::McVideo: return "mcvideo";
+        case McService::McData: return "mcdata";
+    }
+    return "?";
+}
+
+const char* toString(ServiceAuthState s) {
+    switch (s) {
+        case ServiceAuthState::Unauthorized: return "unauthorized";
+        case ServiceAuthState::Pending: return "pending";
+        case ServiceAuthState::Authorized: return "authorized";
     }
     return "?";
 }

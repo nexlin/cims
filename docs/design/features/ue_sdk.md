@@ -319,6 +319,28 @@ C++ 공개 표면은 `cimsue/engine.h` 의 `Engine` 하나이며 계정·호를 
   `cimsue-cli` 출력 `warning`; C API `cimsue_request_result_t` 의 칸은 .NET 파사드와 배치를 맞춰 덧붙인다). `affiliate()`
   의 성공 반환은 «보냈다» 일 뿐이다 — 제휴가 섰는지는 token 의 최종 응답(`onRequestResult` 2xx)으로 본다. 시험 `Upkeep.*`(규칙)·
   `AffiliationUpkeep.SpecFormPublishAndRenewAfterNetworkChange`(가짜 서버 왕복).
+- **MC 서비스 인가·서비스 설정은 코어가 한다**(TS 24.379 §7.2.2·§7.2.1A · TS 24.282 §7.2.2 · TS 24.281 §7.2.2, `src/service_auth.h`). 서버는 서비스
+  인가 때 (MC ID, client ID, IMPU) 를 묶고 묶임이 없는 MC 요청을 404 `141` 로 거절한다 — 등록만으로는 MC 서비스를 쓸 수 없다. 앱은 사용자 인증
+  (TS 24.482 — CSC IdMS)의 액세스 토큰을 `AccountConfig.accessToken` 에 넣고, 새로 받을 때마다 `Engine::setAccessToken` 한다. 코어는 등록이 설 때
+  (첫 등록·등록 재성립·망 변경 뒤 — 위 유지의 ①·②) 켠 서비스마다 — MCPTT = `mcpttEnabled` · MCData = `mcdataMsrp`/`mcdataFd` · MCVideo =
+  `mcvideoEnabled`, 그 서비스의 참여 기능 PSI 가 있을 때 — **서비스 인가 + 서비스 설정 PUBLISH** 를 보낸다: Request-URI = 그 PSI · `P-Preferred-Service`
+  = 서비스 ICSI · `Event: poc-settings` · `Expires: 4294967295`, multipart = 서비스 info(`<…-access-token>` · `<…-client-id>` — 암호화하지 않는 형식)
+  + poc-settings(entity id = Instance ID URN · Answer-Mode `automatic|manual` = `autoAnswerMcptt`·`autoAnswerMcvideo` · `mcs10Set:selected-user-profile-index`
+  1(CIMS user profile 은 하나) · `mcs10Set:multiplex-support` false — MCData 는 선택 user profile 만). 계약 골든 `tests/fixtures/mcptt/sip/14` 대조.
+  결과 = `Listener::onServiceAuth(ServiceAuthInfo{service, state Unauthorized|Pending|Authorized, code, warningCode, multipleDevices})`(조회
+  `Engine::serviceAuth`) — 앱은 **Authorized 뒤에** 그 서비스를 쓴다(제휴·구독·채널 복원). 인가 응답을 기다리는 동안(Pending) 그 서비스의 제휴
+  게시는 코어가 내보내지 않는다 — 앱의 `affiliate` 도 받아 두었다가 응답 뒤 앱의 token 으로 보내고(결과는 `onRequestResult`), 유지가 다시 실을
+  것(MCPTT 제휴·문서 구독, MCVideo 제휴)도 그 뒤에 초기 게시로 싣는다(묶임이 먼저 — 서버는 요청을 병렬로 처리한다). 거절(403 `101` 인가 실패 ·
+  486 `164` 동시 인가 상한 등)은 «인가 안 됨»(§7.2.2 끝)이고 새 토큰을 받을 때까지 다시 보내지 않는다 — 5xx·408·응답 없음은 5 s 부터 배로 최대
+  5분(Retry-After 가 있으면 그만큼) 물러나 다시. 인가된 줄 알았던 서비스의 MC 요청(INVITE·PUBLISH·MESSAGE …)이 404 `141` 이면 서버가 묶임을
+  잃은 것으로 보고 다시 인가한다(인가를 보낸 뒤 2 s 안의 거절은 인가 전에 보낸 요청의 것 — 빼고). 등록이 끊기면 Unauthorized(code 0)로
+  알린다(서버가 등록과 함께 묶임을 지운다). 200 OK 의 `<multiple-devices-ind>true`(§7.3.3 9)a))는 `multipleDevices` 로. 서비스 로그오프 = 설정 제거
+  PUBLISH(`Expires: 0` + 받은 `SIP-If-Match`, 본문 없음 — §7.2.1A 4)·NOTE 3, 골든 16) — `setMcVideoEnabled(false)` 가 MCVideo 태그를 빼기 전에 보낸다.
+  인가 PUBLISH 의 결과는 `onRequestResult` 로 오지 않는다. 서비스 설정만 PUBLISH(§7.2.3 — Answer-Mode 를 바꿀 때)·설정 구독(§7.2.4)은 쓰지 않는다
+  (Answer-Mode 는 계정 값이라 인가 때 함께 간다). REGISTER 본문 인가(§7.2.1)는 쓰지 않는다. C API `cimsue_engine_set_access_token`·
+  `cimsue_engine_service_auth`, Kotlin `AccountConfig.accessToken`·`Account.setAccessToken`·`serviceAuth`·흐름 `serviceAuth`/`serviceAuths`, `cimsue-cli`
+  (`--from-profile` 의 로그인 토큰 · `--access-token-env VAR` · 출력 `service-auth` 줄·요약 `service_auth`), 구동 이벤트 `service_auth`. 시험
+  `ServiceAuthRules.*`·`ServiceAuthBody.*`·`ServiceAuthEngine.*`(가짜 서버 — 골든 14·16, 보류·141·101·새 토큰).
 - **MCPTT 제휴 게시는 규격형이다**(TS 24.379 §9.2.1.2). `affiliate(acc, g, on)` 은 계정의 MCPTT 관심 그룹 집합을 바꾸고 **전부**를 한
   PUBLISH 로 보낸다 — Request-URI = 참여 MCPTT 기능 PSI(`AccountConfig.mcpttServerUri`), `Event: presence`, P-Preferred-Service = MCPTT ICSI,
   `Expires` = 관심 그룹이 있으면 4294967295·없으면 0, 본문 multipart = mcptt-info(`<mcptt-request-uri>` = 자기 MCPTT ID) + pidf(entity = MCPTT ID,
@@ -545,8 +567,8 @@ select ≤100 ms → 해석·전이·타이머, 공개 메서드는 mutex, 콜�
 `TransmissionEvent.awaitingConfirmation` 으로 알린다 → `Engine::confirmTransmission(callId, accept)`(받으면 송출, 아니면 Transmission End Request). 끄면
 (기본) 곧바로 송출한다. Transmission End Request·Response 는 끝낼 송출(= 내 송출)의 User ID·Audio SSRC·Video SSRC 를 싣는다(표 9.2.20-1·9.2.21-1).
 **수신 무효화**(Media Reception Override Notification — §6.2.5.5.4) = 그 수신을 닫고 Media Reception End Request + T104 → `PendingRelease`,
-이벤트 `ReceptionEvent::Overridden`(`overridingId`). 규격이 비워 둔 곳의 해석은 [mcvideo.md](mcvideo.md) §5.4. 바인딩 — Kotlin `AccountConfig.tcTimers`·`confirmQueuedTransmission`·
-`mcvideoServiceSettings`, `Account.setTcTimers`·`setMcVideoEnabled`, `Call.confirmTransmission`·`requestQueuePosition`, `McVideoServiceConfigDoc.tcTimers`(초 → ms),
+이벤트 `ReceptionEvent::Overridden`(`overridingId`). 규격이 비워 둔 곳의 해석은 [mcvideo.md](mcvideo.md) §5.4. 바인딩 — Kotlin `AccountConfig.tcTimers`·`confirmQueuedTransmission`,
+`Account.setTcTimers`·`setMcVideoEnabled`, `Call.confirmTransmission`·`requestQueuePosition`, `McVideoServiceConfigDoc.tcTimers`(초 → ms),
 이벤트 `TransmissionEvent.awaitingConfirmation`·`ReceptionEventKind.OVERRIDDEN`(`overridingId`), `CscClient.getGroupExcludingMembers`·`GroupDoc.preconfiguredGroupUseOnly`
 (`usableForCalls`). C API 는 구조체 배치를 바꾸지 않는 함수만 덧붙였다 — `cimsue_engine_set_tc_timers`(스칼라 ms)·`cimsue_engine_set_mcvideo_enabled`·
 `cimsue_engine_confirm_transmission`·`cimsue_engine_request_queue_position`·`cimsue_csc_get_group_excluding_members`. 계정·이벤트·그룹 문서 구조체의 새 칸
@@ -569,8 +591,8 @@ MCVideo PSI. 동작(구현 — 시험 `McvSip`·`McvCall`, 계약 K3 골든과 �
 - **등록**(TS 24.281 §7.2.1AA — 서비스 인가 본문 없는 REGISTER) — `mcvideoEnabled` 면 REGISTER Contact 에 `+g.3gpp.mcvideo` 와 `+g.3gpp.icsi-ref`
   목록의 mcvideo ICSI. **서비스 태그는 REGISTER 에만 모은다**(§7.1 — MC 서비스 등록은 한 REGISTER): icsi-ref 는 한 파라미터의 쉼표 목록(RFC 3840 —
   CSP 는 첫 icsi-ref 하나만 읽는다)으로 mcptt(`mcpttEnabled`)·mcvideo·mcdata·mcdata.sds(`mcdataMsrp`)·mcdata.fd(`mcdataFd`)·앱 `contactParams` 의 icsi-ref 를 합치고, 모든 요청에 붙는 계정 Contact
-  파라미터에는 서비스 ICSI 를 두지 않는다 — 서비스 호의 Contact 는 그 호가 자기 태그를 싣는다. 서비스 인가(mcvideo-info 토큰·client ID)는 MCPTT 와
-  함께 CSP 토큰 검증과 한 짝으로 넣는다(mcx_identity_scope.md §10 — CSP 는 지금 REGISTER 본문을 읽지 않는다).
+  파라미터에는 서비스 ICSI 를 두지 않는다 — 서비스 호의 Contact 는 그 호가 자기 태그를 싣는다. 서비스 인가(mcvideo-info 토큰·client ID)는
+  REGISTER 본문이 아니라 등록 뒤 서비스 인가 PUBLISH(§7.2.2 — 위 «MC 서비스 인가·서비스 설정»)로 한다.
 - **affiliation**(§8.2.1.2) — `affiliate(acc, g, on, McVideo)` 는 계정의 MCVideo 관심 그룹 집합을 바꾸고 **전부**를 한 PUBLISH 로 보낸다:
   Request-URI = `mcvideoServerUri`, `P-Preferred-Service` MCVideo ICSI, `Event: presence`, `Expires` = 관심 그룹이 있으면 4294967295 · 없으면 0,
   multipart = mcvideo-info(`<mcvideo-request-uri>` = 자기 MCVideo ID) + pidf(entity = MCVideo ID, tuple id = MC client ID(`effectiveMcpttClientId`),
@@ -596,9 +618,8 @@ MCVideo PSI. 동작(구현 — 시험 `McvSip`·`McvCall`, 계약 K3 골든과 �
   1회 + 1 s 간격 2회 + 15 s 주기로 빈 RTCP RR(헤더 SSRC = 전송 제어와 같은 값)을 보낸다(ue_nat_traversal.md §7.1).
 - **MCVideo 만 켜고 끄기**(TS 24.281 §7.2.1AA NOTE — `Engine::setMcVideoEnabled(account, on)`) — 계정·등록·MCPTT/MCData 제휴·진행 중 호를 그대로 두고 REGISTER Contact 의 `+g.3gpp.mcvideo`·mcvideo ICSI 만 넣거나 뺀 REGISTER 를 같은 바인딩으로 보낸다. **등록 해제(Expires 0)를 보내지 않는다** — pjsua 는 등록 Contact 파라미터가 바뀌면 해제부터 보내므로(`pjsua_acc_modify`) `disableRegOnModify` 로 설정만 바꾸고 코어가 다시 등록한다. 끌 때는 그 앞에 MCVideo 제휴를 내리고(§8.2.1.2 5) — Expires 0, 결과는 앱에 올리지 않는다) 받아들여진 서비스 설정을 지운다(§7.2.1A 4) — entity-tag 가 있을 때). 등록을 켜지 않은 계정이면 값만 바꾼다. 구동 명령 `mcvideo on|off`(`cimsue/drive.h`).
 - **사전 구성 전용 그룹**(TS 24.481 §7.2.4.2 `<preconfigured-group-use-only>`) — `GroupDoc.preconfiguredGroupUseOnly`·`usableForCalls()`. true 면 그 그룹으로 호·경보를 열지 않고 사용자에게 알린다(TS 24.281 §9.2.1.2.1.1·§9.2.2.2.1.1·§12.1.1.1, TS 24.379 §10.1.1.2.1.1 — 판정은 앱이 그룹 문서로 한다). 읽은 값은 PUT 에 되돌린다.
-- **MCVideo 서비스 설정 PUBLISH**(TS 24.281 §7.2.3 — `AccountConfig.mcvideoServiceSettings`, 기본 false) — 등록이 설 때마다 한 번
-  `Event: poc-settings` 로 Answer-Mode 설정·선택한 user profile 을 올린다([mcvideo.md](mcvideo.md) §5.2). 결과는 앱에 올리지 않는다
-  (받지 않는 서버의 489 는 로그만 — 다음 등록에서 다시 올린다).
+- **MCVideo 서비스 인가·서비스 설정**(TS 24.281 §7.2.2) — 위 «MC 서비스 인가·서비스 설정» 의 MCVideo 몫: mcvideo-info 토큰·client ID +
+  poc-settings(Answer-Mode = `autoAnswerMcvideo`). 규격의 착신 참여 기능은 이 설정을 받기 전의 초대를 480 `146` 으로 거절한다(§9.2.1.3.2 3)).
 - **개시 방식**(MCPTT·MCVideo 공통 — TS 24.379 §10.1.1.2.1.2 7)·8) · TS 24.281 §9.2.1.2.1.2 7)·8), `mcptt/commencement.h`) — 초대의 `Answer-Mode`·
   `Priv-Answer-Mode`(RFC 5373)와 단말 설정(`autoAnswerMcptt`·`autoAnswerMcvideo`)으로 정한다: `Priv-Answer-Mode: Auto` = 자동 ·
   `Answer-Mode: Manual` = 수동(설정이 자동이어도 따른다) · `Answer-Mode: Auto` 또는 헤더 없음 = 단말 설정(설정이 수동이면 자동 응답을 허용하지 않는다).
@@ -666,6 +687,8 @@ cimsue-cli --csc-host H --user U --pw P [--no-tls-verify] login          # PKCE 
 cimsue-cli --csc-host H --user U --pw P --from-profile volte|ptt [--server IP --port N] <command>   # 프로파일로 계정 채움(--pw-env VAR = 환경변수에서 — 명령행에 비밀을 두지 않는다)
                                                  #   ptt 면 ue-init-config(TS 24.484 §7.2)로 참여 기능 PSI 도 — [--instance-id URN]
                                                  #   = MCS UE ID, 명시 [--mcptt-psi URI]·[--mcdata-psi URI] 가 덮는다
+                                                 #   로그인 토큰 = 서비스 인가 토큰(§4.2 — 인가가 끝난 뒤 명령을 잇는다,
+                                                 #   요약 service_auth{서비스: 최종 코드}) · [--access-token-env VAR] 가 덮는다
 ```
 
 오디오 장치는 null(헤드리스) — 브리지는 돌고 RTP 는 흐른다. 통계는 스트림 소멸 시점(`onStreamDestroyed`)에
@@ -683,7 +706,8 @@ cimsue-cli [계정] drive [--sample-file WAV] [--service volte|voip|ptt]
         floor_release <call> | affiliate <group> on|off [mcvideo] | pickup <code> [number] | media mic|sample [<wav>] | stats [call] | quality <call> | quit
         video_call <group> [prearranged] [queueing] [implicit] | transmit_request <call> [priority] | transmit_release <call>
         reception_accept <call> <userId> | reception_end <call> <userId>   (MCVideo 호·전송 제어 — MCVideo affiliation = `affiliate <group> on mcvideo`)
-  이벤트: ready{version,aor} · reg{service,state,code,reason,expires,rrd_ms} · incoming{call,from,called,video,mcptt,service,group}
+  이벤트: ready{version,aor} · reg{service,state,code,reason,expires,rrd_ms} · service_auth{service,state,code,warning,multiple_devices}
+        · incoming{call,from,called,video,mcptt,service,group}
         · call{call,dir,state outgoing|incoming|active|held|disconnected,code,reason,media,mcptt,service mcptt|mcvideo,video,by_us,group,srd_ms|sdd_ms,
           (disconnected: 통계 + 품질)} · transmission{call,kind,state,cause,t_us} · reception{call,kind,from,state,auto,cause,t_us}
         · floor{call,kind,subtype(TS 24.380 §8.2),t_us,cause,queue_position,duration} · request{method,op,on,code,reason,ms,token}(affiliate PUBLISH)

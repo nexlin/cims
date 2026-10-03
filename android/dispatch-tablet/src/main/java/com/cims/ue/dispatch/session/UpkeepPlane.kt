@@ -22,9 +22,12 @@ import com.cims.ue.sdk.CallDir
 import com.cims.ue.sdk.CallInfo
 import com.cims.ue.sdk.CimsResult
 import com.cims.ue.sdk.CimsUe
+import com.cims.ue.sdk.McService
 import com.cims.ue.sdk.RegInfo
 import com.cims.ue.sdk.RegState
 import com.cims.ue.sdk.RequestResult
+import com.cims.ue.sdk.ServiceAuthInfo
+import com.cims.ue.sdk.ServiceAuthState
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.channels.Channel
@@ -43,6 +46,8 @@ object UpkeepRules {
     const val CONFIRM_TIMEOUT_MS = 8_000L
     /** 같은 그룹의 [참여] 를 제휴 재적재 뒤 다시 거는 최소 간격 — 다시 건 것까지 403 이면 그대로 알린다(되풀이하지 않는다). */
     const val REJOIN_GAP_MS = 10_000L
+    /** 서비스 인가 거절(403 101 — 토큰 만료)로 토큰을 새로 받는 최소 간격 — 새 토큰도 거절되면 되풀이하지 않는다. */
+    const val AUTH_RENEW_GAP_MS = 5 * 60_000L
     private const val RETRY_BASE_MS = 60_000L
     private const val RETRY_MAX_MS = 30 * 60_000L
 
@@ -94,10 +99,12 @@ internal class UpkeepState {
     var watchAtMs = 0L
     /** 그룹별 — 제휴 재적재 뒤 [참여] 를 다시 건 시각. */
     val rejoinAtMs = HashMap<String, Long>()
+    /** 서비스 인가 거절로 토큰을 새로 받은 시각. */
+    var authRenewAtMs = 0L
 
     fun reset() {
         registered.clear(); networkChanged.clear(); pttOwed = false; phoneOwed = false
-        aff.clear(); rejoinAtMs.clear(); subsAtMs = 0L; watchAtMs = 0L
+        aff.clear(); rejoinAtMs.clear(); subsAtMs = 0L; watchAtMs = 0L; authRenewAtMs = 0L
         waiters.clear()                 // 기다리던 쪽은 시한으로 풀린다 — 취소하면 그 코루틴(맞춤 한 줄)이 함께 끝난다
     }
 }
@@ -144,6 +151,27 @@ internal fun DispatchSession.applyRegEvent(r: RegInfo) {
         else -> return
     }
     st.kick.trySend(Unit)
+}
+
+/**
+ * MC 서비스 인가 결과(TS 24.379 §7.2.2 — 코어가 등록마다 보낸다). 서버는 묶임이 없는 MC 요청을 404 `141` 로 거절한다 — 로그인 절차가
+ * 인가 응답보다 먼저 건 제휴·구독이 그렇게 거절됐을 수 있으므로 MCPTT 가 인가되면 PTT 계정에 묶인 것을 전부 다시 세운다(①과 같다).
+ * 인가 거절이 토큰 만료(403 `101`)면 토큰을 새로 받는다 — 새 토큰이 계정에 들어가면 코어가 다시 인가한다([noteTokens]).
+ */
+internal suspend fun DispatchSession.applyServiceAuth(a: ServiceAuthInfo) {
+    if (a.accountId != pttAccount?.id) return
+    if (a.service == McService.MCPTT && a.state == ServiceAuthState.AUTHORIZED) {
+        upkeep.pttOwed = true
+        upkeep.kick.trySend(Unit)
+        return
+    }
+    if (a.state != ServiceAuthState.UNAUTHORIZED || a.code == 0) return
+    android.util.Log.w(TAG, "${a.service} service authorisation ${a.code} ${a.warningCode} ${a.warningText}")
+    // 새 토큰도 거절되면(자격·scope 문제) 되풀이하지 않는다 — 간격을 두고 한 번씩
+    val t = now()
+    if (a.code != 403 || a.warningCode != 101 || t - upkeep.authRenewAtMs < UpkeepRules.AUTH_RENEW_GAP_MS) return
+    upkeep.authRenewAtMs = t
+    accessToken(force = true)
 }
 
 private fun DispatchSession.registeredNow(a: Account): Boolean = registrations.value[a.id]?.state == RegState.REGISTERED

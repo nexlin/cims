@@ -289,10 +289,12 @@ psip 합성 SDP 프로파일(`CSipCallRtp::m_eMcMediaProfile = E_MC_MEDIA_MCVIDE
   mcvideo-info 토큰·client ID(§7.3.2) 또는 `Event: poc-settings` PUBLISH(§7.3.3) — 토큰을 IdMS 에 검증해(scope `3gpp:mc:video_service`)
   (MCVideo ID, client ID, IMPU) 를 묶고, **서비스 설정만 싣는 PUBLISH(§7.3.4 — Answer-Mode·선택한 user profile)** 는 그 바인딩이 있어야
   받는다(없으면 404 141). 받은 Answer-Mode 는 그 멤버의 팬아웃 INVITE `Answer-Mode` 다([mcptt_standard_conformance.md](mcptt_standard_conformance.md) C10).
-  단말 코어는 보낼 수 있다: `AccountConfig.mcvideoServiceSettings`(기본 false)를 켜면 등록이 설 때마다 `Event: poc-settings`·`Expires:
-  4294967295`·P-Preferred-Service MCVideo ICSI 로, 본문 = mcvideo-info(자기 MCVideo ID·client ID) + `application/poc-settings+xml`
-  (`<entity id>` = instance ID, `<answer-mode>` = `autoAnswerMcvideo` 에 따라 automatic|manual, `<mcs10Set:selected-user-profile-index>` 1,
-  `<mcs10Set:multiplex-support>` false — §7.4.1.2). 이 설정만 PUBLISH 앞에 서비스 인가(토큰)가 있어야 한다 — 짝 U09(cimsue-cli `--mcvideo-service-settings`).
+  단말 코어는 등록이 설 때마다(첫 등록·재성립·망 변경 뒤) 서비스 인가 + 서비스 설정 PUBLISH(§7.2.2)를 보낸다 — `Event: poc-settings`·`Expires:
+  4294967295`·P-Preferred-Service MCVideo ICSI, 본문 = mcvideo-info(`<mcvideo-access-token>` = `AccountConfig.accessToken` · `<mcvideo-client-id>`) +
+  `application/poc-settings+xml`(`<entity id>` = instance ID, `<answer-mode>` = `autoAnswerMcvideo` 에 따라 automatic|manual,
+  `<mcs10Set:selected-user-profile-index>` 1, `<mcs10Set:multiplex-support>` false — §7.4.1.2). 응답 전에는 MCVideo 제휴를 내보내지 않고, 앱은 인가
+  (`onServiceAuth` Authorized) 뒤에 영상 채널을 연다. 로그오프(`setMcVideoEnabled(false)`)는 태그를 빼기 전에 설정 제거(`Expires: 0` + SIP-If-Match)를
+  보낸다(ue_sdk.md §4.2 «MC 서비스 인가·서비스 설정»).
 - **affiliation** (구현 — §8.2.2.2.3~§8.2.2.2.5) — 규격형 PUBLISH·SUBSCRIBE(`Event: presence`)를 서비스로 먼저 갈라 MCVideo 는 표 `mcvideo_affiliations`
   (§5.1)에 쓴다: served ID = mcvideo-info `<mcvideo-request-uri>`(요청자와 다르면 403 — 남의 제휴를 바꾸는 권한은 두지 않는다), Expires 없음·0 이 아닌데
   2^32-1 미만 423(Min-Expires 4294967295), 이용 자격(`mcvideo_user_profile` 행) 없음 403, 대상 = MCVideo 서비스를 가진 그룹, 만료 없음(등록 해제가 행을 지운다),
@@ -567,7 +569,7 @@ Indicator, automatic 수신; 1차 CSP 는 normal) · JOIN 응답 `audio_ssrc`·`
 
 | 기능 | 규격 | 지금 |
 |---|---|---|
-| MCVideo 서비스 설정 PUBLISH·구독(Answer-Mode·선택 user profile) — 단말 송신과 서버 수신·통지 | TS 24.281 §7.2.3·§7.2.4 · §7.3.4·§7.3.6 | 단말 없음(VREG-1). 서버는 §7.2.2·§7.3.3(인가 겸용)만 «토큰 검증과 한 짝» 으로 적혀 있다 |
+| MCVideo 서비스 설정만 PUBLISH·설정 구독 — 단말 송신 | TS 24.281 §7.2.3·§7.2.4 | 단말은 Answer-Mode 를 인가 PUBLISH(§7.2.2)에 함께 싣고 바꾸는 API 가 없어 설정만 PUBLISH·구독을 쓰지 않는다(서버는 받는다 — §7.3.4·§7.3.6) |
 | late call entry | §9.2.1.4.6 | 없음(VGC-2) |
 | 제휴 상태 결정 구독 — 단말 | §8.2.1.3 | 서버는 받지만 단말이 보내지 않는다(VAFF-8) |
 | 협상 모드 제휴 변경(타인 제휴 MESSAGE) · 규칙 기반 제휴 · `<manual-deaffiliation-not-allowed-if-affiliation-rules-are-met>` | §8.2.1.4·§8.2.1.5·§8.2.2.2.8~10 · §8.2.1.7 · §8.2.1.2 | 없음. 서버는 남의 제휴를 403 으로 막는다 |

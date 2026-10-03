@@ -73,7 +73,12 @@ class FacadeMappingTest {
         // MCVideo(TS 24.581 §6.2.4·§6.2.5) — 송출·수신 상태가 뒤바뀌면 [영상 보내기]·[받기] 표시가 반대가 된다
         check(McService.entries.map { it.name }, listOf(
             "Mcptt" to com.cims.ue.sdk.jni.McService.Mcptt.swigValue(),
-            "McVideo" to com.cims.ue.sdk.jni.McService.McVideo.swigValue()))
+            "McVideo" to com.cims.ue.sdk.jni.McService.McVideo.swigValue(),
+            "McData" to com.cims.ue.sdk.jni.McService.McData.swigValue()))
+        check(ServiceAuthState.entries.map { it.name }, listOf(
+            "Unauthorized" to com.cims.ue.sdk.jni.ServiceAuthState.Unauthorized.swigValue(),
+            "Pending" to com.cims.ue.sdk.jni.ServiceAuthState.Pending.swigValue(),
+            "Authorized" to com.cims.ue.sdk.jni.ServiceAuthState.Authorized.swigValue()))
         check(TransmissionState.entries.map { it.name.replace("_", "") }, listOf(
             "NoPermission" to com.cims.ue.sdk.jni.TransmissionState.NoPermission.swigValue(),
             "PendingRequest" to com.cims.ue.sdk.jni.TransmissionState.PendingRequest.swigValue(),

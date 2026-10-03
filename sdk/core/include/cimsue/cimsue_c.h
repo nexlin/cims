@@ -71,7 +71,11 @@ typedef enum {
     CIMSUE_COND_LOCAL = 0, CIMSUE_COND_CONFIRMED = 1, CIMSUE_COND_DENIED = 2, CIMSUE_COND_ADVERTISED = 3
 } cimsue_condition_cause_t;
 /** MC 서비스(types.h McService) — 호·affiliation 은 서비스마다 따로다(TS 23.280 §5.2.5). */
-typedef enum { CIMSUE_MC_SERVICE_MCPTT = 0, CIMSUE_MC_SERVICE_MCVIDEO = 1 } cimsue_mc_service_t;
+typedef enum { CIMSUE_MC_SERVICE_MCPTT = 0, CIMSUE_MC_SERVICE_MCVIDEO = 1, CIMSUE_MC_SERVICE_MCDATA = 2 } cimsue_mc_service_t;
+/** MC 서비스 인가 상태(types.h ServiceAuthState) — PENDING = 인가 PUBLISH 응답 대기(그동안 그 서비스의 제휴 게시는 코어가 보류한다). */
+typedef enum {
+    CIMSUE_SERVICE_AUTH_UNAUTHORIZED = 0, CIMSUE_SERVICE_AUTH_PENDING = 1, CIMSUE_SERVICE_AUTH_AUTHORIZED = 2
+} cimsue_service_auth_state_t;
 /** MCVideo 내 송출 상태(types.h TransmissionState — TS 24.581 §6.2.4 'U: …'). */
 typedef enum {
     CIMSUE_TX_NO_PERMISSION = 0, CIMSUE_TX_PENDING_REQUEST = 1, CIMSUE_TX_PERMITTED = 2, CIMSUE_TX_PENDING_END = 3, CIMSUE_TX_QUEUED = 4
@@ -613,6 +617,15 @@ CIMSUE_API cimsue_status_t CIMSUE_CALL cimsue_engine_set_tc_timers(cimsue_engine
 /** MCVideo 서비스만 켜고 끈다(Engine::setMcVideoEnabled, TS 24.281 §7.2.1AA NOTE) — 등록 해제 없이 REGISTER Contact 의 MCVideo 태그만
  *  넣고 뺀다. MCPTT·MCData 제휴와 진행 중 호는 그대로다. 끌 때 코어가 MCVideo 제휴를 먼저 내린다. */
 CIMSUE_API cimsue_status_t CIMSUE_CALL cimsue_engine_set_mcvideo_enabled(cimsue_engine_t* e, int32_t account_id, int32_t enabled);
+/** MC 서비스 인가 토큰(Engine::setAccessToken — 사용자 인증의 액세스 토큰, TS 24.482). 코어는 등록이 서면 켠 MC 서비스마다 이 토큰으로
+ *  서비스 인가 + 서비스 설정 PUBLISH(TS 24.379 §7.2.2)를 보내고, 인가되지 않은 서비스가 있으면 지금 다시 보낸다. 계정을 만든 뒤
+ *  등록 전에 불러 첫 토큰을 주고, 토큰을 새로 받을 때마다 다시 부른다. */
+CIMSUE_API cimsue_status_t CIMSUE_CALL cimsue_engine_set_access_token(cimsue_engine_t* e, int32_t account_id, const char* access_token);
+/** MC 서비스 인가 상태(Engine::serviceAuth) — code = 인가 PUBLISH 최종 응답(0 = 보내지 않았다), warning_code = Warning 문구 번호(101 인가 실패 ·
+ *  164 동시 인가 상한 …), multiple_devices = 200 OK 의 multiple-devices-ind. 출력 포인터가 NULL 이면 그 칸은 건너뛴다. */
+CIMSUE_API cimsue_service_auth_state_t CIMSUE_CALL cimsue_engine_service_auth(const cimsue_engine_t* e, int32_t account_id,
+                                                                             cimsue_mc_service_t service, int32_t* code,
+                                                                             int32_t* warning_code, int32_t* multiple_devices);
 CIMSUE_API void CIMSUE_CALL cimsue_engine_floor_info(const cimsue_engine_t* e, int32_t call_id,
                                                      cimsue_floor_info_t* out);
 /** 진행 중 그룹콜의 조건 상향·하향(Engine::setCallCondition, TS 24.379 §10.1.1.2.1.3~5) — 결과는 on_mcptt_condition
@@ -765,6 +778,7 @@ CIMSUE_API const char* CIMSUE_CALL cimsue_floor_state_str(cimsue_floor_state_t s
 CIMSUE_API const char* CIMSUE_CALL cimsue_floor_kind_str(cimsue_floor_kind_t k);
 CIMSUE_API const char* CIMSUE_CALL cimsue_condition_cause_str(cimsue_condition_cause_t c);
 CIMSUE_API const char* CIMSUE_CALL cimsue_mc_service_str(cimsue_mc_service_t s);
+CIMSUE_API const char* CIMSUE_CALL cimsue_service_auth_state_str(cimsue_service_auth_state_t s);
 CIMSUE_API const char* CIMSUE_CALL cimsue_transmission_state_str(cimsue_transmission_state_t s);
 CIMSUE_API const char* CIMSUE_CALL cimsue_reception_state_str(cimsue_reception_state_t s);
 CIMSUE_API const char* CIMSUE_CALL cimsue_transmission_kind_str(cimsue_transmission_kind_t k);

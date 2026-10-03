@@ -83,6 +83,7 @@ add_library(cimsue_objs OBJECT
     src/account_map.cpp
     src/call_video.cpp
     src/types.cpp
+    src/service_auth.cpp
     src/floor/floor_codec.cpp
     src/floor/floor_participant.cpp
     src/mcvideo/tc_codec.cpp
@@ -173,6 +174,7 @@ if(DEFINED GTEST_DIR)
         test/engine_route_test.cpp
         test/reg_recovery_test.cpp
         test/upkeep_test.cpp
+        test/service_auth_test.cpp
         test/affiliation_upkeep_test.cpp
         test/c_api_test.cpp
         test/quality_test.cpp

@@ -171,7 +171,7 @@ CSP 는 참여 기능과 제어 기능을 겸한다.
 | 6 | **FD Metadata 형식** — `file-selector:` 접두·hash (SDK 는 규격형 업로드·Location 사용과 함께 — U05) | FD-7 | .45 SDK · CSP |
 | 7 | **자동 수신** — CSP 가 Mandatory download 를 붙이고 SDK·앱은 그 IE 를 따른다 | FD-4 | .45 CSP·SDK → 앱 |
 | 8 | **제휴 서비스 분리** — MCData 제휴 표·`mcdataPresInfo`, 클라이언트 단위. MCPTT 묶음 8 과 한 묶음 | AFF-1 · AFF-6 · REG-2 | .45 CSP·SDK |
-| 9 | **서비스 인가·설정** — MCPTT REG 묶음과 한 묶음 | REG-3 · §4 앞 두 줄 | .48 CSP(S25 단계 B) · .45 SDK(U09) |
+| 9 | **서비스 인가·설정** — MCPTT REG 묶음과 한 묶음 | REG-3 · §4 앞 두 줄 | .48 CSP(S25 단계 B — SDK 인가 송신은 U09 에서 반영) |
 | 10 | **수신 파서** — content type·charset | SDS-7 | .45 SDK |
 | 11 | **미디어 평면 수명** — 첫 멤버 응답 뒤 200, 단말 BYE + Reason. TS 24.582 확보 뒤 | MSRP-3 · MSRP-4 | .45 CSP·CMDP·SDK |
 | 12 | **나머지** — 색인 순서(실측 뒤), UNDELIVERED | SDS-9 · DISP-1 | .45 CSP |

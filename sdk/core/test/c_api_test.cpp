@@ -53,6 +53,9 @@ TEST(CApi, EnumValuesMatchCxx) {
     EXPECT_EQ((int)CIMSUE_RXEV_REQUEST_TIMEOUT, (int)ReceptionEvent::Kind::RequestTimeout);
     EXPECT_EQ((int)CIMSUE_RXEV_OTHER, (int)ReceptionEvent::Kind::Other);
     EXPECT_STREQ(cimsue_mc_service_str(CIMSUE_MC_SERVICE_MCVIDEO), "mcvideo");
+    EXPECT_EQ((int)CIMSUE_MC_SERVICE_MCDATA, (int)McService::McData);
+    EXPECT_EQ((int)CIMSUE_SERVICE_AUTH_AUTHORIZED, (int)ServiceAuthState::Authorized);
+    EXPECT_STREQ(cimsue_service_auth_state_str(CIMSUE_SERVICE_AUTH_PENDING), "pending");
     EXPECT_STREQ(cimsue_transmission_kind_str(CIMSUE_TXEV_GRANTED), toString(TransmissionEvent::Kind::Granted));
     EXPECT_STREQ(cimsue_reception_state_str(CIMSUE_RX_RECEIVING), toString(ReceptionState::Receiving));
 }
@@ -261,6 +264,15 @@ TEST(CApi, EngineLifecycleHeadless) {
     EXPECT_STREQ(cimsue_last_error(), "no such account");
     EXPECT_EQ(cimsue_engine_set_tc_timers(e, 99, 2000, 0, 0, 0, 0), -2);
     EXPECT_EQ(cimsue_engine_set_mcvideo_enabled(nullptr, 0, 1), -1);
+    // 서비스 인가(TS 24.379 §7.2.2) — 토큰은 계정에, 상태는 조회. 등록 전이라 보내지 않는다(인가 안 됨, code 0)
+    EXPECT_EQ(cimsue_engine_set_access_token(e, 99, "t"), -2);
+    EXPECT_EQ(cimsue_engine_set_access_token(e, acc, "t"), 0);
+    int32_t code = -1, warn = -1, multi = -1;
+    EXPECT_EQ(cimsue_engine_service_auth(e, acc, CIMSUE_MC_SERVICE_MCPTT, &code, &warn, &multi), CIMSUE_SERVICE_AUTH_UNAUTHORIZED);
+    EXPECT_EQ(code, 0);
+    EXPECT_EQ(warn, 0);
+    EXPECT_EQ(multi, 0);
+    EXPECT_EQ(cimsue_engine_service_auth(nullptr, 0, CIMSUE_MC_SERVICE_MCDATA, nullptr, nullptr, nullptr), CIMSUE_SERVICE_AUTH_UNAUTHORIZED);
     EXPECT_EQ(cimsue_csc_get_group_excluding_members(nullptr, "t", "tel:g1", nullptr), -1);
     cimsue_transmission_info_t ti{};
     cimsue_engine_transmission_info(e, 7, &ti);

@@ -85,18 +85,6 @@ InfoRx parseInfo(const std::string& s) {
 
 // ── affiliation pidf (§8.3.1) ──
 
-std::string pocSettings(const std::string& entityId, bool autoAnswer, int userProfileIndex, bool multiplexSupport) {
-    // 확장 요소는 XML 스키마(표 7.4.1.2.2-2 — targetNamespace urn:3gpp:mcsSettings:1.0, qualified)의 이름공간에 둔다.
-    return std::string("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n") +
-           "<poc-settings xmlns=\"urn:oma:params:xml:ns:poc:poc-settings\" xmlns:mcs10Set=\"urn:3gpp:mcsSettings:1.0\">" +
-           "<entity id=\"" + xmlscan::esc(entityId) + "\">" +
-           "<am-settings><answer-mode>" + (autoAnswer ? "automatic" : "manual") + "</answer-mode></am-settings>" +
-           "<mcs10Set:selected-user-profile-index><mcs10Set:user-profile-index>" + std::to_string(userProfileIndex) +
-           "</mcs10Set:user-profile-index></mcs10Set:selected-user-profile-index>" +
-           "<mcs10Set:multiplex-support>" + (multiplexSupport ? "true" : "false") + "</mcs10Set:multiplex-support>" +
-           "</entity></poc-settings>";
-}
-
 std::string affiliationPidf(const std::string& entity, const std::string& clientId, const std::vector<std::string>& groupUris,
                             const std::string& pid) {
     std::string s = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n";

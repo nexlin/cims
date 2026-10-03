@@ -42,16 +42,16 @@ MCPTT 쪽 같은 뿌리의 결함은 [mcptt_conformance_gaps.md](mcptt_conforman
 
 | 영역 | 항목 | A | B | C | D |
 |---|---|---|---|---|---|
-| 등록·서비스 인가 (VREG) | 3 | — | 1 | 1 | 1 |
+| 등록·서비스 인가 (VREG) | 2 | — | — | 1 | 1 |
 | 제휴 (VAFF) | 7 | 1 | 1 | 5 | — |
 | 그룹 호 — 서버 (VGC) | 5 | — | 1 | 4 | — |
 | 그룹 호 — 단말 (VGU) | 2 | — | — | — | 2 |
 | 송출 제어 — 서버 (TCS) | 3 | — | — | 1 | 2 |
 | 송출 제어 — 단말 (TCU) | 1 | — | — | 1 | — |
 | 그룹 문서 (VGMS) | 1 | — | 1 | — | — |
-| **계** | **22** | **1** | **4** | **12** | **5** |
+| **계** | **21** | **1** | **3** | **12** | **5** |
 
-확인 수준 — ◎ 11 · ○ 8 · △ 3.
+확인 수준 — ◎ 10 · ○ 8 · △ 3.
 
 읽는 순서 — §2(먼저 볼 것) → §3(영역별 전체) → §4(미구현 목록에 빠진 기능) → §5(문서 정정) → §6(묶음과 순서).
 
@@ -69,7 +69,6 @@ MCPTT 쪽 같은 뿌리의 결함은 [mcptt_conformance_gaps.md](mcptt_conforman
 
 | 항목 | 내용 |
 |---|---|
-| VREG-1 | 단말(앱)이 MCVideo 서비스 설정 PUBLISH(`poc-settings`, §7.2.3)를 켜지 않는다(코어는 보낼 수 있다 — 서버 S25 뒤) — 규격 서버의 착신 참여 기능은 Answer-Mode 를 몰라 prearranged 초대를 늘 480 `146` 으로 거절한다 |
 | VGC-2 | late call entry 가 없다 — 개시 뒤에 제휴·재등록한 멤버는 진행 중 prearranged 영상 호를 받지 못한다 |
 | VAFF-2 | 제휴 판정이 사용자 단위다 — 제휴하지 않은 클라이언트로 개시·합류가 되고, 제휴한 단말 대신 마지막 등록 단말이 초대된다 |
 | VGMS-1 | 그룹 문서 PUT 이 빠진 MCVideo 요소를 «기존값 유지» 로 읽는다 — 규격 기본값(없음 = chat·보호 켬·conference 불허)과 반대로 저장된다 |
@@ -85,7 +84,6 @@ MCPTT 쪽 같은 뿌리의 결함은 [mcptt_conformance_gaps.md](mcptt_conforman
 
 | # | 급 | 대상 | 규격 | CIMS 지금 | 영향 | 확인 |
 |---|---|---|---|---|---|---|
-| VREG-1 | B | 앱·CSP | §7.2.3 — MCVideo 서비스 설정 PUBLISH(`Event: poc-settings`, P-Preferred-Service = MCVideo ICSI, `<am-settings>`). 규격 착신 참여 기능은 Answer-Mode Indication 을 받기 전이면 480 + `146 T-PF unable to determine the service settings for the called user`(§9.2.1.3.2 3)) | 코어는 보낼 수 있다(`AccountConfig.mcvideoServiceSettings` — 등록마다 한 번, `Engine::Impl::publishMcVideoServiceSettings`). **기본 꺼짐**. CSP 는 받는다(S25 단계 A) — 설정만 PUBLISH 는 서비스 인가 바인딩이 있어야 한다(없으면 404 141 — 토큰 인가 §7.2.2 먼저). 앱 셋 모두 켜지 않는다 | 규격 서버에 붙으면 prearranged 멤버 초대가 늘 480 146 으로 끝난다(옵션을 켜면 해소). MCPTT REG-2 와 따로인 MCVideo 몫 | ◎ |
 | VREG-2 | C | CSP | §7.2.1 NOTE 1 · §9.2.2.3.1.1 2) · §9.2.1.3.1.1 2) — MCVideo ID 는 서비스 인가 때 IMPU 에 묶이고 그 묶임으로 요청자를 인가한다. 묶임이 없으면 표 4.4.2-2 `141 user unknown to the participating function` | 서비스 인가 바인딩은 선다(S25 단계 A — 태그를 빼면 지운다). 판정은 단계 B — 지금은 MCVideo 태그 없는 바인딩(로그오프한 클라이언트 포함)의 INVITE·제휴 PUBLISH 도 그대로 처리한다 — 개시 검사는 이용 자격 행만(`csp/McVideoCallService.cpp:598-602`), PUBLISH 는 역할·자격만(`csp/CscfModule.cpp:1914-1953`) 본다. 바인딩 능력 `m_bMcVideo`(`csp/UserMap.cpp:206`)는 팬아웃 대상 선별에만 쓴다(`csp/McVideoCallService.cpp:425`) | 로그오프한 단말이 MCVideo 호를 열고 제휴를 바꾼다 — 초대는 못 받는데 개시·제휴는 된다 | ◎ |
 | VREG-4 | D | CSP | §7.1 · §7.3.5 3) NOTE «Removal of MCVideo service settings includes removal of all group affiliations» | poc-settings Expires 0(§7.3.5)은 설정·바인딩과 그 사용자의 MCVideo 제휴를 지운다(S25 단계 A). 태그를 뺀 재-REGISTER 는 서비스 인가 바인딩·바인딩 능력만 지우고 `mcvideo_affiliations` 행은 등록 해제 때만 지운다(`csp/DbManager.cpp:564-571`) | 로그오프한 클라이언트가 제휴 NOTIFY·N2 계산에 남는다(초대 대상 선별은 `m_bMcVideo` 가 걸러 영향 없음). 규격의 해제 계기는 poc-settings Expires 0 이라 REGISTER 로그오프에 같은 뜻을 줄지는 원문 재확인 | △ |
 
@@ -188,7 +186,7 @@ MCPTT 쪽 같은 뿌리의 결함은 [mcptt_conformance_gaps.md](mcptt_conforman
 | 6 | **service configuration 값 결선(단말)** — 관제 앱이 MCVideo service config 를 받아 계정 타이머로 싣는다(현장 앱·Kotlin 파사드는 한다, C API 는 `cimsue_engine_set_tc_timers`) | TCU-1 | .45 SDK·win |
 | 7 | **코덱 선호의 한 줄기** — 그룹 선호 = 서버 집행 코덱(CSC·콘솔이 검증). 초대 offer 가 그 값을 쓴다(단말 offer 는 지원 encoding 을 전부 싣는다) | VGC-8 | .48 CSP |
 | 8 | **그룹 문서 PUT 해석** — 없음의 뜻(§7.2.8) | VGMS-1 · VGC-10(CSC 기본값 몫) | .45 CSC |
-| 9 | **단말 호 절차** — poc-settings §7.2.3 송신(+ 서버 §7.3.4 수신과 짝 — 받은 Answer-Mode Indication 으로 멤버 초대의 `Answer-Mode` 를 정한다, 지금은 늘 `Auto`), 제휴 상태 구독, preconfigured-group-use-only, 재합류 UI | VREG-1 · VGU-5 · VGU-6 · VAFF-8 | .45 SDK·현장 → Windows(관제 앱) |
+| 9 | **단말 호 절차** — 제휴 상태 구독, preconfigured-group-use-only, 재합류 UI | VGU-5 · VGU-6 · VAFF-8 | .45 SDK·현장 → Windows(관제 앱) |
 | 10 | **송출 제어 서버 세부** — 무허가 송출 포기, 별칭 전달 | TCS-2 · TCS-8 | .45 CMP(·SDK 별칭) |
 | 12 | **서버 사유 코드·신원 세부** — 로그오프 바인딩 판정·제휴 정리, conference 구독 서비스 분리 | VREG-2 · VREG-4 · VGC-10 | .48 CSP |
 | 13 | **수신 전용 멤버** — 그룹 모델·문서 `<on-network-recvonly>` → CSP JOIN `recv_only`·answer `mc_priority` 생략. MCPTT FCS-14 와 같이 | TCS-10 | .45 CSC·CSP |

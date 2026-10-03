@@ -157,9 +157,10 @@ void usage() {
         "        [--mcdata-psi URI]  (참여 MCData 기능 PSI — disposition 통지 Request-URI, TS 24.282 §12.2.1.1)\n"
         "        [--instance-id URN] (+sip.instance · ue-init-config 의 MCS UE ID. --from-profile ptt 면 ue-init-config 로 PSI 를 채운다)\n"
         "        [--mcvideo] [--mcvideo-psi URI]   (MCVideo 등록 태그 · 참여 MCVideo 기능 PSI — TS 24.281 §7.2.1AA·§9.2.1.2.1.1)\n"
-        "        [--mcvideo-service-settings]   (등록 뒤 MCVideo 서비스 설정 PUBLISH — Event: poc-settings, TS 24.281 §7.2.3)\n"
         "        [--affiliate-mcvideo G,..]   (MCVideo affiliation — 관심 그룹 전부를 한 PUBLISH 로, TS 24.281 §8.2.1.2)\n"
         "        또는 --csc-host H [--csc-port N] --user U (--pw P | --pw-env VAR) [--csc-ca FILE] --from-profile volte|ptt\n"
+        "        (--from-profile 은 로그인 토큰으로 등록 뒤 MC 서비스 인가 — PUBLISH poc-settings, TS 24.379 §7.2.2. 인가가 끝난 뒤 명령을 잇는다.\n"
+        "         --access-token-env VAR = 그 토큰 대신 환경변수 값)\n"
         "  register [--hold S] | call TARGET [--duration S] [--video] | answer [--duration S] [--transfer-to X]\n"
         "  group-call GROUP [--duration S] [--ptt-at S --ptt-len S] [--listen-only] [--emergency] [--broadcast] [--implicit]\n"
         "             [--chat] [--rejoin URI] [--roster] [--private [--full-duplex] [--answer-mode auto|manual|force]] [--upgrade-at S] [--cancel-at S]\n"
@@ -226,6 +227,8 @@ bool parse(int argc, char** argv, Opts& o) {
             // 비밀을 명령행(프로세스 목록)에 두지 않는 경로 — 값은 환경변수에서(계측기 비밀 규약 *_env 와 같은 방식)
             if (opt("--pw-env", [&](const std::string& v) { const char* e = std::getenv(v.c_str()); o.pw = e ? e : ""; })) continue;
             if (opt("--csc-ca", [&](const std::string& v) { o.cscCaFile = v; })) continue;
+            // 서비스 인가 토큰(TS 24.379 §7.2.2) — 값은 환경변수에서. --from-profile 의 로그인 토큰을 덮는다(수동 계정·거절 시험)
+            if (opt("--access-token-env", [&](const std::string& v) { const char* e = std::getenv(v.c_str()); o.acc.accessToken = e ? e : ""; })) continue;
             if (opt("--from-profile", [&](const std::string& v) { o.fromProfile = v; })) continue;
             if (opt("--name", [&](const std::string& v) { o.groupName = v; })) continue;
             if (opt("--upgrade-at", [&](const std::string& v) { o.upgradeAt = std::stoi(v); })) continue;
@@ -260,7 +263,6 @@ bool parse(int argc, char** argv, Opts& o) {
         else if (a == "--notify-delivered") o.notifyDelivered = true;
         else if (a == "--cancel-group-emergency") o.cancelGroupEmergency = true;
         else if (a == "--mcvideo") o.acc.mcvideoEnabled = true;
-        else if (a == "--mcvideo-service-settings") o.acc.mcvideoServiceSettings = true;   // 서비스 설정 PUBLISH(TS 24.281 §7.2.3)
         else if (a == "--prearranged") o.prearranged = true;
         else if (a == "--queueing") o.queueing = true;
         else if (a == "--accept") o.accept = true;
@@ -298,6 +300,12 @@ public:
         std::fprintf(stderr, "[cimsue-cli] reg acc=%d %s code=%d %s expires=%d\n", r.accountId, toString(r.state),
                      r.code, r.reason.c_str(), r.expiresSec);
         set([&] { reg = r; });
+    }
+    void onServiceAuth(const ServiceAuthInfo& i) override {
+        const std::string warn = i.warningCode ? " warning=" + std::to_string(i.warningCode) + " " + i.warningText : std::string();
+        std::fprintf(stderr, "[cimsue-cli] service-auth acc=%d %s %s code=%d%s%s\n", i.accountId, toString(i.service), toString(i.state),
+                     i.code, warn.c_str(), i.multipleDevices ? " multiple-devices" : "");
+        set([&] { auth[(int)i.service] = i; });
     }
     void onIncomingCall(const CallInfo& c) override {
         std::fprintf(stderr, "[cimsue-cli] incoming call=%d from=%s called=%s video=%d mcptt=%d service=%s group=%s\n", c.callId,
@@ -423,6 +431,7 @@ public:
         return cv_.wait_for(lk, std::chrono::seconds(timeoutSec), [&] { return p(); });
     }
     RegInfo reg;
+    std::map<int, ServiceAuthInfo> auth;                              // McService → 마지막 인가 알림
     CallInfo incoming;
     bool haveIncoming = false;
     std::map<int, CallInfo> calls;
@@ -780,7 +789,7 @@ int main(int argc, char** argv) {
         if (!o.acc.mcdataServerUri.empty()) a.mcdataServerUri = o.acc.mcdataServerUri;
         if (!o.acc.mcvideoServerUri.empty()) a.mcvideoServerUri = o.acc.mcvideoServerUri;
         a.mcvideoEnabled = o.acc.mcvideoEnabled;                          // MCVideo 등록은 명시할 때만(--mcvideo)
-        a.mcvideoServiceSettings = o.acc.mcvideoServiceSettings;
+        a.accessToken = !o.acc.accessToken.empty() ? o.acc.accessToken : loginToken;   // 서비스 인가(TS 24.379 §7.2.2 — 사용자 인증의 토큰)
         if (!a.mcpttServerUri.empty() || !a.mcdataServerUri.empty() || !a.mcvideoServerUri.empty())
             std::fprintf(stderr, "[cimsue-cli] psi mcptt=%s mcdata=%s mcvideo=%s\n", a.mcpttServerUri.c_str(), a.mcdataServerUri.c_str(),
                          a.mcvideoServerUri.c_str());
@@ -832,6 +841,22 @@ int main(int argc, char** argv) {
         print(o, s); eng.stop(); return 3;
     }
     s.code = ls.reg.code; s.reason = ls.reg.reason;
+    // MC 서비스 인가(TS 24.379 §7.2.2) — 토큰이 있으면 코어가 등록 뒤 켠 서비스마다 보낸다. 끝난 뒤 명령을 잇는다(묶임이 먼저 —
+    //   묶임 없는 MC 요청은 404 141). 결과는 요약 service_auth 에 서비스별 최종 응답 코드로.
+    if (!o.acc.accessToken.empty()) {
+        std::vector<McService> svcs;
+        if (o.acc.mcpttEnabled && !o.acc.mcpttServerUri.empty()) svcs.push_back(McService::Mcptt);
+        if ((o.acc.mcdataMsrp || o.acc.mcdataFd) && !o.acc.mcdataServerUri.empty()) svcs.push_back(McService::McData);
+        if (o.acc.mcvideoEnabled && !o.acc.mcvideoServerUri.empty()) svcs.push_back(McService::McVideo);
+        auto done = [&](McService v) { auto it = ls.auth.find((int)v); return it != ls.auth.end() && it->second.state != ServiceAuthState::Pending; };
+        ls.waitFor([&] { for (McService v : svcs) if (!done(v)) return false; return true; }, o.timeoutSec);
+        std::string sa;
+        for (McService v : svcs) {
+            const ServiceAuthInfo i = eng.serviceAuth(acc, v);
+            sa += std::string(sa.empty() ? "" : ",") + "\"" + toString(v) + "\":" + std::to_string(i.code);
+        }
+        if (!sa.empty()) s.extra += ",\"service_auth\":{" + sa + "}";
+    }
 
     // affiliation — MCPTT(--affiliate) · MCVideo(--affiliate-mcvideo, 관심 그룹 전부를 한 PUBLISH 로 — TS 24.281 §8.2.1.2)
     auto affiliateAll = [&](const std::vector<std::string>& groups, McService svc, const char* name) {
@@ -916,7 +941,7 @@ int main(int argc, char** argv) {
             std::fprintf(stderr, "[cimsue-cli] REFER → %s: %s\n", o.transferTo.c_str(), r.ok ? "sent" : r.reason.c_str());
             if (!r.ok) { s.outcome = "transfer_failed"; rc = 8; return finish(s.callId); }
             bool ended = ls.waitFor([&] { return disconnected(s.callId); }, o.durationSec);
-            s.extra = std::string(",\"transferred\":") + (ended ? "true" : "false");
+            s.extra += std::string(",\"transferred\":") + (ended ? "true" : "false");
             if (!ended) { s.outcome = "transfer_not_completed"; rc = 8; }
             return finish(s.callId);
         }
@@ -937,7 +962,7 @@ int main(int argc, char** argv) {
         std::fprintf(stderr, "[cimsue-cli] REFER → %s: %s\n", o.transferTo.c_str(), r.ok ? "sent" : r.reason.c_str());
         if (!r.ok) { s.outcome = "transfer_failed"; rc = 8; return finish(s.callId); }
         bool ended = ls.waitFor([&] { return disconnected(s.callId); }, o.durationSec);
-        s.extra = std::string(",\"transferred\":") + (ended ? "true" : "false");
+        s.extra += std::string(",\"transferred\":") + (ended ? "true" : "false");
         if (!ended) { s.outcome = "transfer_not_completed"; rc = 8; }
         return finish(s.callId);
     }
@@ -997,7 +1022,7 @@ int main(int argc, char** argv) {
         }
         FloorInfo fi = eng.floorInfo(s.callId);
         s.st = eng.streamStats(s.callId);
-        s.extra = ",\"session_uri\":\"" + jsonEsc(eng.callInfo(s.callId).sessionUri) + "\",\"floor_local_port\":" +
+        s.extra += ",\"session_uri\":\"" + jsonEsc(eng.callInfo(s.callId).sessionUri) + "\",\"floor_local_port\":" +
                   std::to_string(fi.localPort) + ",\"floor_remote\":\"" + fi.remoteIp + ":" + std::to_string(fi.remotePort) +
                   "\",\"rosters\":" + std::to_string(ls.rosters);
         {
@@ -1080,7 +1105,7 @@ int main(int argc, char** argv) {
         using K = TransmissionEvent::Kind;
         using R = ReceptionEvent::Kind;
         const int granted = count(ls.transmissions, K::Granted);
-        s.extra = ",\"session_uri\":\"" + jsonEsc(ci.sessionUri) + "\",\"tc_local_port\":" + std::to_string(ti.localPort) +
+        s.extra += ",\"session_uri\":\"" + jsonEsc(ci.sessionUri) + "\",\"tc_local_port\":" + std::to_string(ti.localPort) +
                   ",\"tc_remote\":\"" + ti.remoteIp + ":" + std::to_string(ti.remotePort) + "\",\"tx_granted\":" + std::to_string(granted) +
                   ",\"tx_rejected\":" + std::to_string(count(ls.transmissions, K::Rejected)) +
                   ",\"tx_revoked\":" + std::to_string(count(ls.transmissions, K::Revoked)) +
@@ -1114,7 +1139,7 @@ int main(int argc, char** argv) {
         // media plane 은 서버가 저장·배포 뒤 발신 leg 를 BYE 한다 — 그 전에 엔진을 내리면 배포가 끊긴다. 코어의 자체 해제(5 s)까지 기다린다.
         if (plane == "media") std::this_thread::sleep_for(std::chrono::seconds(6));
         s.code = code;
-        s.extra = ",\"msg_id\":\"" + sds.msgId + "\",\"plane\":\"" + plane + "\",\"bytes\":" + std::to_string(o.text.size());
+        s.extra += ",\"msg_id\":\"" + sds.msgId + "\",\"plane\":\"" + plane + "\",\"bytes\":" + std::to_string(o.text.size());
         if (got && ls.results[sds.token].warningCode) s.extra += ",\"warning\":" + std::to_string(ls.results[sds.token].warningCode);
         if (!got || code / 100 != 2) { s.outcome = got ? "sds_rejected" : "sds_timeout"; rc = 7; }
         else if (o.waitDispositionSec > 0) {
@@ -1148,7 +1173,7 @@ int main(int argc, char** argv) {
         ls.waitFor([&] { return false; }, o.durationSec);
         eng.subscribeXcapDiff(acc, gpsi, gms, false);
         eng.subscribeXcapDiff(acc, cpsi, cms, false);
-        s.extra = ",\"xcap_notifies\":" + std::to_string(ls.xcapNotifies);
+        s.extra += ",\"xcap_notifies\":" + std::to_string(ls.xcapNotifies);
         if (!ls.xcapNotifies) { s.outcome = "no_notify"; rc = 8; }
         return finish(-1);
     }
@@ -1175,7 +1200,7 @@ int main(int argc, char** argv) {
                 if (n.ok) notified++;
             }
         }
-        s.extra = ",\"sds_received\":" + std::to_string(ls.sds.size()) + ",\"alerts\":" + std::to_string(ls.alerts.size()) +
+        s.extra += ",\"sds_received\":" + std::to_string(ls.sds.size()) + ",\"alerts\":" + std::to_string(ls.alerts.size()) +
                   ",\"notified\":" + std::to_string(notified);
         if (ls.sds.empty() && ls.alerts.empty()) { s.outcome = "no_sds"; rc = 7; }   // 경보만 받은 경우도 수신이다
         return finish(-1);
@@ -1188,7 +1213,7 @@ int main(int argc, char** argv) {
         // SUBSCRIBE 거절(403 등)은 onRequestResult 가 아니라 evsub 종료로 온다 — NOTIFY 부재로 판정
         if (o.cmd == "dialog-watch") {
             ls.waitFor([&] { return false; }, o.durationSec);
-            s.extra = ",\"dialogs\":" + std::to_string(ls.dialogs.size());
+            s.extra += ",\"dialogs\":" + std::to_string(ls.dialogs.size());
             if (!anyNotify) { s.outcome = "no_dialog_notify"; rc = 8; }
             eng.dialogWatch(acc, o.target, false);
             return finish(-1);
@@ -1208,7 +1233,7 @@ int main(int argc, char** argv) {
         ci = ls.calls.count(s.callId) ? ls.calls[s.callId] : CallInfo{};
         std::string src;
         for (auto& m : ci.sources) src += std::string(src.empty() ? "" : ",") + "{\"ssrc\":" + std::to_string(m.ssrc) + ",\"label\":\"" + m.label + "\"}";
-        s.extra = ",\"join_call_id\":\"" + target.callId + "\",\"sources\":[" + src + "]";
+        s.extra += ",\"join_call_id\":\"" + target.callId + "\",\"sources\":[" + src + "]";
         eng.dialogWatch(acc, o.target, false);
         return finish(s.callId);
     }

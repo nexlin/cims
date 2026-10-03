@@ -54,6 +54,16 @@ public:
      * 등록을 켜지 않은 계정이면 값만 바꾼다(다음 등록에 반영). AccountConfig.mcvideoServerUri 등 나머지 값은 addAccount 때 것 그대로다.
      */
     Result setMcVideoEnabled(int accountId, bool enabled);
+    /**
+     * MC 서비스 인가 토큰을 바꾼다(AccountConfig.accessToken — 사용자 인증의 액세스 토큰을 새로 받았을 때, TS 24.482).
+     *
+     * 다음 서비스 인가(등록 재성립·망 변경·서버가 묶임을 잃은 404 `141` 뒤)부터 새 토큰을 싣는다. 등록돼 있고 인가되지 않은
+     * 서비스(앞 인가가 거절됐거나 토큰이 없어 보내지 않은 것)가 있으면 지금 그 서비스를 다시 인가한다(TS 24.379 §7.2.2). 인가된
+     * 서비스는 다시 보내지 않는다 — 서버의 묶임은 인가 때 토큰으로 생기고 등록과 함께 산다.
+     */
+    Result setAccessToken(int accountId, const std::string& accessToken);
+    /** MC 서비스 인가 상태 — 마지막으로 알린 onServiceAuth 와 같다. 계정이 없거나 그 서비스를 켜지 않았으면 Unauthorized(code 0). */
+    ServiceAuthInfo serviceAuth(int accountId, McService service) const;
     Result removeAccount(int accountId);
     RegInfo regInfo(int accountId) const;
     std::vector<int> accounts() const;

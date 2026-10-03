@@ -143,6 +143,10 @@ class DispatchSession(
         tokenExpiresAtMs =
             if (t == null || t.expiresInSec <= 0) 0L
             else System.currentTimeMillis() + (t.expiresInSec - 60).coerceAtLeast(30) * 1000L
+        // MC 서비스 인가 토큰(TS 24.379 §7.2.2) — 코어는 다음 인가부터 새 토큰을 싣고, 인가 안 된 서비스는 지금 다시 인가한다
+        val access = t?.accessToken.orEmpty()
+        val ptt = pttAccount
+        if (access.isNotEmpty() && ptt != null) scope.launch { ptt.setAccessToken(access) }
     }
 
     /**
@@ -722,6 +726,8 @@ class DispatchSession(
                 val acc = a.value!!
                 created.add(acc)                               // 등록을 걸기 **전에** 소유로 잡는다
                 accountKinds[acc.id] = kind
+                // MC 서비스 인가 토큰 — 등록이 서면 코어가 이것으로 MCPTT·MCData·MCVideo 를 인가한다(TS 24.379 §7.2.2, 결과 = serviceAuth)
+                if (kind == AccountKind.PTT) accessToken()?.let { acc.setAccessToken(it) }
                 // 종류마다 **첫** 계정이 그 축의 계정이다 — PTT 서비스가 둘이어도 `pttAccount`·`myPttId` 는 첫 서비스다(데스크톱
                 //   `PttService`). 나머지는 등록만 하고 로그아웃이 함께 푼다(`extraAccounts`).
                 if (kind !in added) added[kind] = acc
@@ -1788,6 +1794,7 @@ class DispatchSession(
         // 이벤트는 건마다 받는다([guarded]) — 하나가 던져도 그 종류의 수집이 끝나지 않는다.
         // 로그아웃한 뒤(다음 로그인 전)에 늦게 닿은 이벤트는 버린다([loggedOut]) — 로그아웃은 호를 끊고 등록을 푸는 동안에도
         //   이벤트가 오고, 그것을 접으면 비운 화면에 앞 사람의 말풍선·경보·통화 줄이 다시 선다.
+        scope.launch { engine.serviceAuth.collect { if (!loggedOut) guarded("serviceAuth") { applyServiceAuth(it) } } }
         scope.launch { engine.callState.collect { if (!loggedOut) guarded("callState") { applyCallState(it) } } }
         scope.launch { engine.incomingCall.collect { if (!loggedOut) guarded("incomingCall") { applyCallSnapshot(it, incoming = true) } } }
         scope.launch { engine.callMedia.collect { if (!loggedOut) guarded("callMedia") { applyCallSnapshot(it, incoming = false) } } }
