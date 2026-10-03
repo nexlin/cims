@@ -93,7 +93,8 @@ typedef enum {
 /** on_reception 의 종류(types.h ReceptionEvent::Kind). */
 typedef enum {
     CIMSUE_RXEV_NOTIFIED = 0, CIMSUE_RXEV_GRANTED = 1, CIMSUE_RXEV_REJECTED = 2, CIMSUE_RXEV_ENDED = 3, CIMSUE_RXEV_RELEASED = 4,
-    CIMSUE_RXEV_END_REQUESTED = 5, CIMSUE_RXEV_REQUEST_TIMEOUT = 6, CIMSUE_RXEV_OTHER = 7
+    CIMSUE_RXEV_END_REQUESTED = 5, CIMSUE_RXEV_REQUEST_TIMEOUT = 6, CIMSUE_RXEV_OTHER = 7,
+    CIMSUE_RXEV_OVERRIDDEN = 8      /* Media Reception Override Notification(§6.2.5.5.4) — 다른 송출에 밀렸다(overriding_id) */
 } cimsue_reception_kind_t;
 /** 통화 중 영상 전환 요청의 진행(types.h VideoRequestState — 1:1 호, RFC 3264 §8.1). */
 typedef enum {
@@ -104,6 +105,11 @@ typedef enum {
     CIMSUE_VIDEO_REQEV_RECEIVED = 0, CIMSUE_VIDEO_REQEV_ACCEPTED = 1, CIMSUE_VIDEO_REQEV_DECLINED = 2, CIMSUE_VIDEO_REQEV_FAILED = 3,
     CIMSUE_VIDEO_REQEV_WITHDRAWN = 4
 } cimsue_video_request_kind_t;
+/** 개별 호의 개시 방식 요청(types.h CommencementMode — TS 24.379 §11.1.1.2.1.1 14), RFC 5373). UNSPECIFIED = 헤더 없음 ·
+ *  AUTO = Answer-Mode: Auto · MANUAL = Answer-Mode: Manual · FORCE_AUTO = Priv-Answer-Mode: Auto(인가가 없으면 서버 403 143). */
+typedef enum {
+    CIMSUE_COMMENCEMENT_UNSPECIFIED = 0, CIMSUE_COMMENCEMENT_AUTO = 1, CIMSUE_COMMENCEMENT_MANUAL = 2, CIMSUE_COMMENCEMENT_FORCE_AUTO = 3
+} cimsue_commencement_t;
 /** 오디오 라우트(types.h AudioRoute) — 입력의 EARPIECE = 내장 기본 마이크 고정, DEFAULT = 정책. */
 typedef enum { CIMSUE_ROUTE_DEFAULT = 0, CIMSUE_ROUTE_EARPIECE = 1, CIMSUE_ROUTE_LOUDSPEAKER = 2 } cimsue_audio_route_t;
 /** 마이크 AGC 기본 목표(types.h kMicAgcTargetDbov) — ITU-T P.56 활성 레벨 -26 dBov. */
@@ -130,6 +136,12 @@ typedef struct {
     int32_t t100_ms, t101_ms, t103_ms, t104_ms, t132_ms;
     int32_t c100, c101, c104;
 } cimsue_floor_timers_t;
+
+/** MCVideo 전송 제어 참여자 타이머(cimsue/types.h McVideoTcTimers, TS 24.581 표 11.1.1-1) — ms, 0 = 기본값(1 s). 값의 출처 =
+ *  MCVideo service configuration `<tc-timers-counters-R14>`(cimsue_mcvideo_service_config_doc_t 의 t10x_sec × 1000). */
+typedef struct {
+    int32_t t100_ms, t101_ms, t102_ms, t103_ms, t104_ms;
+} cimsue_tc_timers_t;
 
 typedef struct {
     const char*             server_host;
@@ -168,6 +180,14 @@ typedef struct {
     const char*             mcvideo_server_uri; /* 참여 MCVideo 기능 PSI — MCVideo 그룹 호·affiliation Request-URI(§9.2.1.2.1.1·§8.2) */
     int32_t                 auto_answer_mcvideo; /* MCVideo 멤버 초대 자동 수락(§6.2.3.1.2) — 기본 1 */
     cimsue_floor_timers_t   floor_timers;       /* 발언권 참여자 타이머 — ue-init-config <Timers>(끝에 덧붙였다) */
+    /* 끝에 덧붙였다(types.h AccountConfig 의 MC 서비스 등록·인가·송출 확인 필드) */
+    int32_t                 mcptt_enabled;      /* REGISTER Contact 에 MCPTT 태그(TS 24.379 §7.2.1AA) — PTT 계정은 켠다(to_account 가 kind ptt 에 켠다) */
+    int32_t                 mcdata_fd;          /* MCData FD 지원 — REGISTER Contact +g.3gpp.mcdata.fd(TS 24.282 §7.2.1 3)). SDS 지원은 mcdata_msrp */
+    const char*             access_token;       /* MC 서비스 인가 토큰(사용자 인증의 액세스 토큰 — TS 24.379 §7.2.2). 등록이 서면 켠 서비스마다 인가하고
+                                                 * 결과를 on_service_auth 로 알린다. 새 토큰 = cimsue_engine_set_access_token. NULL·빈 값 = 인가하지 않는다 */
+    cimsue_tc_timers_t      tc_timers;          /* MCVideo 전송 제어 참여자 타이머 — 다음 MCVideo 호부터(cimsue_engine_set_tc_timers 로 바꾼다) */
+    int32_t                 confirm_queued_transmission; /* 대기 끝 송출 허가의 사용자 확인(TS 24.581 §6.2.4.5.1 NOTE) — GRANTED 의
+                                                 * awaiting_confirmation → cimsue_engine_confirm_transmission */
 } cimsue_account_config_t;
 
 typedef struct {
@@ -184,6 +204,11 @@ typedef struct {
     int32_t            member_count;
     int32_t            broadcast;       /* 일제 통화 개시(<broadcast-ind>true, TS 24.379 §4.12) — join_group_call 전용 */
     int32_t            implicit_floor_request; /* 암묵적 발언 요청(mc_implicit_request+mc_granted, TS 24.380 §14.2.4·§14.2.5) */
+    /* 끝에 덧붙였다 */
+    int32_t            chat;            /* chat 그룹 합류(session-type chat, TS 24.379 §10.1.2.2.1.1) — 그룹 문서 session_type "chat" 이면 켠다. join_group_call 전용 */
+    cimsue_commencement_t commencement; /* 개별 호의 개시 방식 요청 — start_private_call 전용 */
+    const char*        session_uri;     /* 진행 중 편성 그룹 세션 재합류(§10.1.1.2.4.1) — 앞 호의 call_info.session_uri. NULL·빈 값 = 새 개시·합류.
+                                         * 세션이 끝났으면 서버가 404(새 세션을 열지 않는다). join_group_call 전용 */
 } cimsue_group_call_options_t;
 
 /** MCVideo 그룹 호 개시·합류 옵션(types.h VideoGroupCallOptions — TS 24.281 §9.2.1·§9.2.2, fmtp TS 24.581 §14.2). */
@@ -287,8 +312,9 @@ typedef struct {
     const char*                  session_uri;       /* MC 세션 식별자 — 제어 기능 Contact(isfocus), 재합류에 쓴다 */
     int32_t                      video_send;        /* 내 영상 송출 허용(set_video_send, 기본 1) — MCPTT 반이중은 발언권을 가진 동안만 실제로 보낸다 */
     cimsue_video_request_state_t video_request;     /* 통화 중 영상 전환 요청의 진행(1:1 호) — 결과는 on_video_request */
-    int32_t                      warning_code;      /* 개시 INVITE 최종 응답의 Warning 코드(RFC 3261 §20.43, 없으면 0) — 403 120 = 미제휴(TS 24.379) */
-    const char*                  warning_text;      /* 그 Warning 의 문구(따옴표를 벗긴 warn-text) */
+    int32_t                      warning_code;      /* 개시 INVITE 최종 응답의 Warning **MC 문구 번호** — `399 <agent> "NNN text"` 의 NNN(TS 24.379 §4.4,
+                                                     * 그 형식이 아니면 RFC 3261 §20.43 warn-code), 없으면 0. 403 120 = 미제휴 */
+    const char*                  warning_text;      /* 그 문구(번호 뒤) */
 } cimsue_call_info_t;
 
 /** 통화 중 영상 전환 이벤트(types.h VideoRequestEvent — 1:1 호, RFC 3264 §8.1·§8.2). RECEIVED 면 앱이 사용자에게 묻고
@@ -359,6 +385,7 @@ typedef struct {
     uint32_t                    audio_ssrc, video_ssrc;
     const char*                 receiver_id;     /* ReceiverJoined */
     int32_t                     raw_type;
+    int32_t                     awaiting_confirmation; /* GRANTED — 대기 끝 허가라 사용자 확인을 기다린다(계정 confirm_queued_transmission). 끝에 덧붙였다 */
 } cimsue_transmission_event_t;
 
 /** 수신 제어 이벤트(types.h ReceptionEvent — §6.2.5). */
@@ -369,6 +396,7 @@ typedef struct {
     int32_t                    cause;
     const char*                cause_text;
     int32_t                    raw_type;
+    const char*                overriding_id;   /* OVERRIDDEN — 수신을 밀어낸 송출자(Overriding ID, 없으면 빈 값). 끝에 덧붙였다 */
 } cimsue_reception_event_t;
 
 /** MCVideo 호의 전송 제어 현재값(types.h TransmissionInfo). */
@@ -380,6 +408,7 @@ typedef struct {
     int32_t                           local_port;
     const char*                       remote_ip;
     int32_t                           remote_port;
+    int32_t                           awaiting_confirmation; /* 허가됐지만 사용자 확인 전 — 송출은 닫혀 있다(confirm_transmission). 끝에 덧붙였다 */
 } cimsue_transmission_info_t;
 
 typedef struct {
@@ -389,7 +418,31 @@ typedef struct {
     int32_t     code;
     const char* reason;
     const char* etag;                   /* SIP-ETag (PUBLISH) */
+    /* 끝에 덧붙였다 */
+    int32_t     warning_code;           /* 최종 응답의 Warning 문구 번호(`399 <host> "NNN text"` 의 NNN, 없으면 0) — 그룹 SDS 403 116·206·213·217 등 */
+    const char* warning_text;           /* 그 문구(번호 뒤) */
 } cimsue_request_result_t;
+
+/** MC 서비스 인가 결과(types.h ServiceAuthInfo — 서비스 인가 + 서비스 설정 PUBLISH 의 최종 응답, TS 24.379·24.282·24.281 §7.2.2).
+ *  앱은 AUTHORIZED 를 본 뒤 그 서비스를 쓴다(제휴·채널 복원). 403 101·486 164 등 = 인가 안 됨 — 새 토큰이면 set_access_token.
+ *  5xx·408 은 코어가 물러나 다시 보낸다. 등록이 끊기면 UNAUTHORIZED(code 0). */
+typedef struct {
+    int32_t                     account_id;
+    cimsue_mc_service_t         service;
+    cimsue_service_auth_state_t state;
+    int32_t                     code;             /* 인가 PUBLISH 최종 응답(0 = 보내지 않았다 — 토큰·PSI 없음, 등록 끊김) */
+    int32_t                     warning_code;     /* Warning 문구 번호(101·164 …, 없으면 0) */
+    const char*                 warning_text;
+    int32_t                     multiple_devices; /* 200 OK 의 <multiple-devices-ind>true(§7.3.3 9)a)) */
+} cimsue_service_auth_info_t;
+
+/** 규격형 문서 변경 구독의 본문(types.h XcapDiffSubscription — TS 24.481 §6.3.13.2.1 · TS 24.484 §6.3.13.2.2). documents = XCAP root
+ *  기준 상대 경로 (ptr, count) — cimsue_csc_gms_subscription_documents·cimsue_csc_cms_subscription_documents, access_token = 인증 토큰. */
+typedef struct {
+    const char* const* documents;
+    int32_t            document_count;
+    const char*        access_token;
+} cimsue_xcap_diff_subscription_t;
 
 /** 감시 대상의 dialog 상태 (RFC 4235) — Join 대상 식별의 입력. */
 typedef struct {
@@ -537,6 +590,8 @@ typedef struct {
     void (CIMSUE_CALL* on_video_frame)(void* user, const cimsue_video_frame_t* frame);
     /** 통화 중 영상 전환(Listener::onVideoRequest, RFC 3264 §8.1) — 상대의 요청(RECEIVED → answer_video_request)·내 요청의 결과. */
     void (CIMSUE_CALL* on_video_request)(void* user, const cimsue_video_request_event_t* ev);
+    /** MC 서비스 인가 상태 변화(Listener::onServiceAuth, TS 24.379 §7.2.2 — 계정 access_token). AUTHORIZED 뒤에 그 서비스를 쓴다. */
+    void (CIMSUE_CALL* on_service_auth)(void* user, const cimsue_service_auth_info_t* info);
 } cimsue_listener_t;
 
 /* ── 엔진 (engine.h 1:1) ── */
@@ -610,10 +665,9 @@ CIMSUE_API cimsue_status_t CIMSUE_CALL cimsue_engine_floor_queue_position(cimsue
 /** 계정의 발언권 참여자 타이머를 바꾼다(Engine::setFloorTimers) — 다음 MCPTT 호부터. */
 CIMSUE_API cimsue_status_t CIMSUE_CALL cimsue_engine_set_floor_timers(cimsue_engine_t* e, int32_t account_id,
                                                                      const cimsue_floor_timers_t* timers);
-/** 계정의 MCVideo 전송 제어 참여자 타이머를 바꾼다(Engine::setTcTimers — TS 24.581 표 11.1.1-1, ms · 0 = 기본값 1 s). 값의 출처 =
- *  MCVideo service configuration `<tc-timers-counters-R14>`(cimsue_mcvideo_service_config_doc_t 의 t10x_sec × 1000). 다음 MCVideo 호부터. */
-CIMSUE_API cimsue_status_t CIMSUE_CALL cimsue_engine_set_tc_timers(cimsue_engine_t* e, int32_t account_id, int32_t t100_ms,
-                                                                  int32_t t101_ms, int32_t t102_ms, int32_t t103_ms, int32_t t104_ms);
+/** 계정의 MCVideo 전송 제어 참여자 타이머를 바꾼다(Engine::setTcTimers — TS 24.581 표 11.1.1-1) — 다음 MCVideo 호부터. */
+CIMSUE_API cimsue_status_t CIMSUE_CALL cimsue_engine_set_tc_timers(cimsue_engine_t* e, int32_t account_id,
+                                                                  const cimsue_tc_timers_t* timers);
 /** MCVideo 서비스만 켜고 끈다(Engine::setMcVideoEnabled, TS 24.281 §7.2.1AA NOTE) — 등록 해제 없이 REGISTER Contact 의 MCVideo 태그만
  *  넣고 뺀다. MCPTT·MCData 제휴와 진행 중 호는 그대로다. 끌 때 코어가 MCVideo 제휴를 먼저 내린다. */
 CIMSUE_API cimsue_status_t CIMSUE_CALL cimsue_engine_set_mcvideo_enabled(cimsue_engine_t* e, int32_t account_id, int32_t enabled);
@@ -621,11 +675,10 @@ CIMSUE_API cimsue_status_t CIMSUE_CALL cimsue_engine_set_mcvideo_enabled(cimsue_
  *  서비스 인가 + 서비스 설정 PUBLISH(TS 24.379 §7.2.2)를 보내고, 인가되지 않은 서비스가 있으면 지금 다시 보낸다. 계정을 만든 뒤
  *  등록 전에 불러 첫 토큰을 주고, 토큰을 새로 받을 때마다 다시 부른다. */
 CIMSUE_API cimsue_status_t CIMSUE_CALL cimsue_engine_set_access_token(cimsue_engine_t* e, int32_t account_id, const char* access_token);
-/** MC 서비스 인가 상태(Engine::serviceAuth) — code = 인가 PUBLISH 최종 응답(0 = 보내지 않았다), warning_code = Warning 문구 번호(101 인가 실패 ·
- *  164 동시 인가 상한 …), multiple_devices = 200 OK 의 multiple-devices-ind. 출력 포인터가 NULL 이면 그 칸은 건너뛴다. */
-CIMSUE_API cimsue_service_auth_state_t CIMSUE_CALL cimsue_engine_service_auth(const cimsue_engine_t* e, int32_t account_id,
-                                                                             cimsue_mc_service_t service, int32_t* code,
-                                                                             int32_t* warning_code, int32_t* multiple_devices);
+/** MC 서비스 인가 상태(Engine::serviceAuth) — 마지막으로 알린 on_service_auth 와 같다. 계정이 없거나 그 서비스를 켜지 않았으면
+ *  UNAUTHORIZED(code 0). 문자열은 스레드별 스냅샷. */
+CIMSUE_API void CIMSUE_CALL cimsue_engine_service_auth(const cimsue_engine_t* e, int32_t account_id, cimsue_mc_service_t service,
+                                                       cimsue_service_auth_info_t* out);
 CIMSUE_API void CIMSUE_CALL cimsue_engine_floor_info(const cimsue_engine_t* e, int32_t call_id,
                                                      cimsue_floor_info_t* out);
 /** 진행 중 그룹콜의 조건 상향·하향(Engine::setCallCondition, TS 24.379 §10.1.1.2.1.3~5) — 결과는 on_mcptt_condition
@@ -668,8 +721,16 @@ CIMSUE_API void CIMSUE_CALL cimsue_engine_transmission_info(const cimsue_engine_
 /** 그룹 세션 참가자 구독을 원한다(Engine::subscribeConference — 진행 중 세션에 참가한 동안만 엔진이 세션 식별자로 구독한다). */
 CIMSUE_API cimsue_status_t CIMSUE_CALL cimsue_engine_subscribe_conference(cimsue_engine_t* e, int32_t account_id,
                                                                           const char* group_id, int32_t on);
+/** 문서 변경 구독(RFC 5875 xcap-diff) — 본문 없는 구독(서버가 정한 고정 문서). NOTIFY 본문은 on_message. */
 CIMSUE_API cimsue_status_t CIMSUE_CALL cimsue_engine_subscribe_xcap_diff(cimsue_engine_t* e, int32_t account_id,
                                                                          const char* psi_uri, int32_t on);
+/** 규격형 문서 변경 구독(Engine::subscribeXcapDiff(…, sub, on) — TS 24.481 §6.3.13.2.1 · TS 24.484 §6.3.13.2.2). psi_uri = GMS 는
+ *  ue-init-config gms_uri, CMS 는 CMS 구독 프록시 PSI. 본문 = 토큰 + 문서 목록. 같은 PSI 로 다시 부르면 re-SUBSCRIBE(새 목록·새 토큰).
+ *  on = 0 이면 해지(sub 는 보지 않는다 — NULL 가능). */
+CIMSUE_API cimsue_status_t CIMSUE_CALL cimsue_engine_subscribe_xcap_diff_documents(cimsue_engine_t* e, int32_t account_id,
+                                                                                   const char* psi_uri,
+                                                                                   const cimsue_xcap_diff_subscription_t* sub,
+                                                                                   int32_t on);
 /** 임의 SIP 요청. headers 는 (ptr, count) — 없으면 NULL/0. 반환 token(on_request_result 상관), 실패 -1. */
 CIMSUE_API int64_t CIMSUE_CALL cimsue_engine_send_request(cimsue_engine_t* e, int32_t account_id, const char* method,
                                                           const char* target_uri, const char* content_type,
@@ -1014,6 +1075,8 @@ typedef struct {
     int32_t                      ack_timeout_sec;       /* on-network-timeout-for-acknowledgement-of-required-members (TNG1) */
     const char*                  ack_action;            /* proceed | abandon */
     cimsue_mcvideo_group_attrs_t mcvideo;               /* MCVideo 몫 — present = 0 이면 PUT 에 싣지 않는다. 끝에 덧붙였다 */
+    int32_t                      preconfigured_group_use_only; /* <preconfigured-group-use-only>(TS 24.481 §7.2.4.2) — 1 이면 재편성 설정 원본으로만
+                                                         * 쓰는 그룹: 이 그룹으로 호·경보를 열지 않는다(서버 403 167·168). 읽은 값을 되돌린다. 끝에 덧붙였다 */
 } cimsue_group_doc_t;
 
 /** CMS 대상 항목(csc.h CmsEntry, TS 24.484 §8.3.2.7 EntryType) — mode = entry-info 속성. */
@@ -1057,6 +1120,10 @@ typedef struct {
     const char* rp_emergency;               /* Resource-Priority r-value — 빈 값 = 미기재(계정 기본값 유지) */
     const char* rp_imminent_peril;
     const char* rp_normal;
+    /* 끝에 덧붙였다 — on-network/anyExt/adhoc-group-call(TS 24.484 §8.4.2.6) */
+    int32_t     adhoc_group_call_support;   /* <allow-adhoc-group-call-support> — 요소가 없으면 0 = 미지원(단말은 개시하지 않는다, TS 24.379 §17.2.2.1.1).
+                                             * capabilities_of 가 adhoc_group_call 에 AND 한다 */
+    int32_t     adhoc_max_participants;     /* max-no-participants(-1 = 미기재) */
 } cimsue_service_config_doc_t;
 
 /** MCVideo user profile(csc.h McVideoUserProfileDoc, TS 24.484 §9.3) — 문서가 있으면 MCVideo 이용 자격이 있다(fetch 404 = 자격 없음).
@@ -1110,6 +1177,7 @@ typedef struct {
     const char* mcdata_server_uri;          /* MCData-Service-Details/Server-URI → 계정 mcdata_server_uri */
     const char* mcvideo_server_uri;         /* MCVideo-Service-Details/Server-URI → 계정 mcvideo_server_uri(끝에 덧붙였다) */
     cimsue_floor_timers_t floor_timers;     /* on-network/Timers(초 → ms) → 계정 floor_timers(끝에 덧붙였다) */
+    const char* gms_uri;                    /* on-network/GMS-URI — GMS 구독 프록시 PSI(§7.2.2.7 5)) = 규격형 그룹 문서 구독의 Request-URI(끝에 덧붙였다) */
 } cimsue_ue_init_config_doc_t;
 
 /** 정책 게이트 스냅샷(csc.h Capabilities) — 받지 못한 문서는 허용. UX 선차단용, 최종 판정은 서버. */
@@ -1203,6 +1271,13 @@ CIMSUE_API void CIMSUE_CALL cimsue_mcvideo_group_attrs_default(cimsue_mcvideo_gr
 CIMSUE_API void CIMSUE_CALL cimsue_capabilities_of(const cimsue_user_profile_doc_t* user_profile,
                                                    const cimsue_service_config_doc_t* service_config,
                                                    cimsue_capabilities_t* out);
+/** 규격형 문서 변경 구독(cimsue_engine_subscribe_xcap_diff_documents)의 문서 목록(CscClient::gmsSubscriptionDocuments·cmsSubscriptionDocuments) —
+ *  XCAP root 기준 상대 경로. 반환 개수, *out 은 스레드별 스냅샷 배열. GMS = 그룹마다 그룹 ID 로 찾는 문서(TS 24.481 §7.2.10.2). CMS = UE initial
+ *  configuration(mcs_ue_id 가 NULL·빈 값이면 뺀다) · MCPTT user profile · service configuration, mcvideo_id 가 있으면 MCVideo 둘도(TS 24.484 §6.2.2). */
+CIMSUE_API int32_t CIMSUE_CALL cimsue_csc_gms_subscription_documents(const char* const* group_uris, int32_t group_count,
+                                                                    const char* const** out);
+CIMSUE_API int32_t CIMSUE_CALL cimsue_csc_cms_subscription_documents(const char* user_uri, const char* mcs_ue_id, const char* mcvideo_id,
+                                                                    const char* const** out);
 
 /* ── GMS 그룹 관리(TS 24.481 XCAP PUT/DELETE — authorized user = 토큰 주체) ── */
 /** 그룹 문서 GET → *out (핸들 스냅샷). */
@@ -1257,6 +1332,7 @@ typedef enum {
     CIMSUE_STRUCT_MCVIDEO_GROUP_ATTRS, CIMSUE_STRUCT_MCVIDEO_USER_PROFILE_DOC, CIMSUE_STRUCT_MCVIDEO_SERVICE_CONFIG_DOC,
     CIMSUE_STRUCT_VIDEO_FRAME,
     CIMSUE_STRUCT_VIDEO_REQUEST_EVENT,
+    CIMSUE_STRUCT_FLOOR_TIMERS, CIMSUE_STRUCT_TC_TIMERS, CIMSUE_STRUCT_SERVICE_AUTH_INFO, CIMSUE_STRUCT_XCAP_DIFF_SUBSCRIPTION,
     CIMSUE_STRUCT_COUNT_
 } cimsue_struct_id_t;
 /** 구조체의 sizeof(이 DLL 의 컴파일 결과). 모르는 id 는 -1. */

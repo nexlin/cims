@@ -30,7 +30,7 @@ public sealed class Call
     public Result Hangup() => Engine.Status(cimsue_engine_hangup(Engine.Handle, Id));
     public Result Hold() => Engine.Status(cimsue_engine_hold(Engine.Handle, Id));
     public Result Resume() => Engine.Status(cimsue_engine_resume(Engine.Handle, Id));
-    /// <summary>마이크 → 호 송신 차단/복구. 반이중 MCPTT 세션에서는 floor 가 마이크를 게이트하므로 무시되고, 전이중 개별 통화(mc_no_floor_ctrl)에는 적용된다.</summary>
+    /// <summary>마이크 → 호 송신 차단/복구. 반이중 MCPTT 세션에서는 floor 가 마이크를 게이트하므로 무시되고, floor 없는 개별 호(m=application 없음 — TS 24.379 §11.1.2.2)에는 적용된다.</summary>
     public Result SetMuted(bool muted) => Engine.Status(cimsue_engine_set_muted(Engine.Handle, Id, Engine.B(muted)));
     /// <summary>호 → 스피커 청취 on/off.</summary>
     public Result SetListen(bool listen) => Engine.Status(cimsue_engine_set_listen(Engine.Handle, Id, Engine.B(listen)));
@@ -65,6 +65,11 @@ public sealed class Call
     public Result RequestTransmission(int priority = -1) => Engine.Status(cimsue_engine_request_transmission(Engine.Handle, Id, priority));
     /// <summary>[보내기 끝] — Transmission End Request(§6.2.4.5.3). 대기·요청 중이면 요청을 거둔다. 완료 = TransmissionChanged(Ended).</summary>
     public Result ReleaseTransmission() => Engine.Status(cimsue_engine_release_transmission(Engine.Handle, Id));
+    /// <summary>대기 끝에 허가된 송출의 사용자 확인(§6.2.4.5.1 NOTE — 계정 ConfirmQueuedTransmission, TransmissionChanged Granted·AwaitingConfirmation).
+    /// accept = 송출 시작, false = 허가를 거둔다(Transmission End Request).</summary>
+    public Result ConfirmTransmission(bool accept) => Engine.Status(cimsue_engine_confirm_transmission(Engine.Handle, Id, Engine.B(accept)));
+    /// <summary>대기 중인 송출 요청의 순번을 묻는다(§6.2.4.9.3) — 답은 TransmissionChanged(QueuePosition).</summary>
+    public Result RequestQueuePosition() => Engine.Status(cimsue_engine_request_queue_position(Engine.Handle, Id));
     /// <summary>[받기] — Receive Media Request(§6.2.5.3.3). transmitterId = ReceptionChanged(Notified) 의 Transmitter.UserId.</summary>
     public Result AcceptReception(string transmitterId, int priority = -1) =>
         Engine.Status(cimsue_engine_accept_reception(Engine.Handle, Id, transmitterId, priority));

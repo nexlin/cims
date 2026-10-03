@@ -26,6 +26,21 @@ public sealed unsafe class Account
         var n = Engine.ToNative(t);
         return Engine.Status(cimsue_engine_set_floor_timers(Engine.Handle, Id, in n));
     }
+    /// <summary>MCVideo 전송 제어 참여자 타이머를 바꾼다(MCVideo service configuration 이 바뀌었을 때 — <see cref="McVideoServiceConfigDoc.TcTimers"/>). 다음 MCVideo 호부터.</summary>
+    public Result SetTcTimers(McVideoTcTimers t)
+    {
+        ArgumentNullException.ThrowIfNull(t);
+        var n = Engine.ToNative(t);
+        return Engine.Status(cimsue_engine_set_tc_timers(Engine.Handle, Id, in n));
+    }
+    /// <summary>MCVideo 서비스만 켜고 끈다(TS 24.281 §7.2.1AA NOTE) — 등록 해제 없이 REGISTER Contact 의 MCVideo 태그만 넣고 뺀다. MCPTT·MCData 제휴와
+    /// 진행 중 호는 그대로다. 끌 때 코어가 MCVideo 제휴를 먼저 내린다(진행 중 MCVideo 호는 앱이 먼저 끝낸다).</summary>
+    public Result SetMcVideoEnabled(bool enabled) => Engine.Status(cimsue_engine_set_mcvideo_enabled(Engine.Handle, Id, Engine.B(enabled)));
+    /// <summary>MC 서비스 인가 토큰을 바꾼다(액세스 토큰을 새로 받을 때마다 — <see cref="AccountConfig.AccessToken"/>). 등록돼 있고 인가되지 않은 서비스가 있으면
+    /// 지금 다시 인가한다(TS 24.379 §7.2.2). 인가된 서비스는 다시 보내지 않는다 — 서버의 묶임은 인가 때 생기고 등록과 함께 산다.</summary>
+    public Result SetAccessToken(string accessToken) => Engine.Status(cimsue_engine_set_access_token(Engine.Handle, Id, accessToken));
+    /// <summary>MC 서비스 인가 상태 — 마지막으로 알린 <see cref="Engine.ServiceAuthChanged"/> 와 같다. 그 서비스를 켜지 않았으면 Unauthorized(Code 0).</summary>
+    public ServiceAuthInfo ServiceAuth(McService service) => Engine.ServiceAuthOf(Id, service);
     public Result Remove() => Engine.Status(cimsue_engine_remove_account(Engine.Handle, Id));
 
     // ── 호 (VoLTE 1:1) ──
@@ -46,7 +61,8 @@ public sealed unsafe class Account
         return Engine.CallResult(cimsue_engine_join_group_call(Engine.Handle, Id, groupId, &o));
     }
 
-    /// <summary>1:1 사설콜(session-type=private). peer 는 bare 번호. FullDuplex 면 mc_no_floor_ctrl.</summary>
+    /// <summary>1:1 개별 호(session-type=private). peer 는 bare 번호. FullDuplex 면 floor 없는 개별 호(offer 에 m=application 없음 — TS 24.379 §11.1.2.2),
+    /// Commencement = 착신 단말에 요청하는 개시 방식(§11.1.1.2.1.1 14)).</summary>
     public Result<Call> StartPrivateCall(string peer, GroupCallOptions? opts = null)
     {
         using var s = new NativeStrings();
@@ -88,9 +104,21 @@ public sealed unsafe class Account
     public Result SubscribeConference(string groupId, bool on) =>
         Engine.Status(cimsue_engine_subscribe_conference(Engine.Handle, Id, groupId, Engine.B(on)));
 
-    /// <summary>문서 변경 구독(RFC 5875 xcap-diff). 본문은 MessageReceived 로.</summary>
+    /// <summary>문서 변경 구독(RFC 5875 xcap-diff) — 본문 없는 구독(서버가 정한 고정 문서). 본문은 MessageReceived 로.</summary>
     public Result SubscribeXcapDiff(string psiUri, bool on) =>
         Engine.Status(cimsue_engine_subscribe_xcap_diff(Engine.Handle, Id, psiUri, Engine.B(on)));
+
+    /// <summary>규격형 문서 변경 구독(TS 24.481 §6.3.13.2.1 · TS 24.484 §6.3.13.2.2 — RFC 5875 subscription proxy). psiUri = GMS 는
+    /// <see cref="UeInitConfigDoc.GmsUri"/>, CMS 는 CMS 구독 프록시 PSI. 본문 = 액세스 토큰 + 문서 목록(<see cref="CscClient.GmsSubscriptionDocuments"/>·
+    /// <see cref="CscClient.CmsSubscriptionDocuments"/>). 같은 PSI 로 다시 부르면 re-SUBSCRIBE(새 목록·새 토큰). on=false 면 해지. NOTIFY 본문은 MessageReceived.</summary>
+    public Result SubscribeXcapDiff(string psiUri, IReadOnlyList<string> documents, string accessToken, bool on)
+    {
+        using var s = new NativeStrings();
+        cimsue_xcap_diff_subscription_t x = default;
+        x.documents = s.AddArray(documents, out x.document_count);
+        x.access_token = s.Add(accessToken);
+        return Engine.Status(cimsue_engine_subscribe_xcap_diff_documents(Engine.Handle, Id, psiUri, &x, Engine.B(on)));
+    }
 
     /// <summary>임의 SIP 요청(MESSAGE/PUBLISH/SUBSCRIBE …). 반환 token — 최종 응답은 RequestCompleted.</summary>
     public Result<long> SendRequest(string method, string targetUri, string contentType, string body,
@@ -216,6 +244,9 @@ public sealed unsafe class Account
         n.members = s.AddArray(o.Members, out n.member_count);
         n.broadcast = Engine.B(o.Broadcast);
         n.implicit_floor_request = Engine.B(o.ImplicitFloorRequest);
+        n.chat = Engine.B(o.Chat);
+        n.commencement = (int)o.Commencement;
+        n.session_uri = s.Add(o.SessionUri);
         return n;
     }
 

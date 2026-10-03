@@ -187,7 +187,8 @@ C++ 공개 표면은 `cimsue/engine.h` 의 `Engine` 하나이며 계정·호를 
   루트, domain·broadcast-group 계층 수·on-network Resource-Priority r-value `mcpttp.15` 형식 — 받으면 앱이 `AccountConfig.rp*` 에 넣는다 ·
   `adhocGroupCallSupport` = `<anyExt><adhoc-group-call><allow-adhoc-group-call-support>`, 요소가 없으면 미지원(§8.4.2.6). 사용자 인가 요소는
   없다) → `Capabilities::of(up, sc)`(nullptr = 미수신). 애드혹 = allow-adhoc-group-call ∧ 시스템 지원(TS 24.379 §17.2.2.1.1 — service
-  configuration 을 받은 경우만. C API·Kotlin 파사드는 지원 여부를 아직 옮기지 않는다).
+  configuration 을 받은 경우만 — C API `cimsue_service_config_doc_t.adhoc_group_call_support`·`adhoc_max_participants`, Kotlin·.NET
+  `ServiceConfigDoc.adhocGroupCallSupport`·`adhocMaxParticipants`(직접 지은 문서의 기본값 true = 해석하지 않은 문서)).
   규칙은 코어 한 곳이다 — 긴급 사설콜 = allow-private-call ∧ allow-emergency-private-call(둘 다 user profile). ad hoc 인가는 규격
   `<anyExt><allow-adhoc-group-call>` 과 옛 서버 확장 `<cims:allow-adhoc-group-call>` 을 로컬 이름으로 함께 읽는다. 해제 인가 =
   `cancelGroupEmergency`(allow-cancel-group-emergency, TS 24.484 §8.3.2.1 11)xiv))·`cancelImminentPeril`(allow-cancel-imminent-peril, xvii))·
@@ -289,7 +290,10 @@ C++ 공개 표면은 `cimsue/engine.h` 의 `Engine` 하나이며 계정·호를 
   구독 다이얼로그 Contact 에 MCPTT `g.3gpp.icsi-ref`. 같은 PSI 로 다시 부르면 같은 다이얼로그의 re-SUBSCRIBE(새 목록·새 토큰), 유지가 다시 보낼
   때도 마지막 본문을 싣는다. 통지의 `sel` = 구독한 문서 — GMS 는 **구독한 그룹 문서만** 통지하므로 새 그룹 소속은 CMS user profile 변경으로
   알고 목록을 다시 받아 re-SUBSCRIBE 한다. 본문 없는 `subscribeXcapDiff(account, psi, on)` 은 서버가 정한 고정 문서를 받는 옛 형식(전환기).
-  엔진(`ext/pjproject` 구독 경로)이 앱이 실은 헤더·본문을 구독 요청에 옮긴다. `cimsue-cli xcap-watch <그룹,…>`.
+  엔진(`ext/pjproject` 구독 경로)이 앱이 실은 헤더·본문을 구독 요청에 옮긴다. `cimsue-cli xcap-watch <그룹,…>`. C API
+  `cimsue_engine_subscribe_xcap_diff_documents`(`cimsue_xcap_diff_subscription_t`)·`cimsue_csc_gms_subscription_documents`·`cimsue_csc_cms_subscription_documents`·
+  `cimsue_ue_init_config_doc_t.gms_uri`, .NET `Account.SubscribeXcapDiff(psi, documents, accessToken, on)`·`CscClient.GmsSubscriptionDocuments`·
+  `CmsSubscriptionDocuments`·`UeInitConfigDoc.GmsUri`.
   **세션 참가자 구독(conference)은 세션에 묶인다**(TS 24.379 §10.1.3.2) — `subscribeConference(account, group, on)` 은 «이 그룹의 세션에
   참가하면 참가자를 받겠다» 는 목표다. 코어는 그 그룹의 MCPTT 그룹 호(편성·chat·애드혹)가 성립해 세션 식별자(`CallInfo.sessionUri` — §4.5)를
   알면 구독한다: Request-URI = 세션 식별자(2)) · `P-Preferred-Service` MCPTT ICSI(3)) · Accept-Contact MCPTT icsi-ref `require;explicit`(4)) ·
@@ -316,7 +320,7 @@ C++ 공개 표면은 `cimsue/engine.h` 의 `Engine` 하나이며 계정·호를 
   warn-code 399 는 버린다, 그 형식이 아니면 RFC 3261 §20.43 값 그대로 — `detail::parseMcWarning`)로 미제휴 120 과 비멤버 116 을 가른다(현장 앱
   `PttGroups.handleNotAffiliated`). 호 밖의 요청(MESSAGE·PUBLISH·MSRP)은 `RequestResult.warningCode`·`warningText` 가 같은 값을 싣는다 —
   그룹 SDS 403 의 116 비멤버·206 SDS 꺼짐·213 FD 꺼짐·217 크기 초과(TS 24.282 §4.9), 경보 거절 사유(Kotlin `RequestResult.warningCode`,
-  `cimsue-cli` 출력 `warning`; C API `cimsue_request_result_t` 의 칸은 .NET 파사드와 배치를 맞춰 덧붙인다). `affiliate()`
+  `cimsue-cli` 출력 `warning`, C API `cimsue_request_result_t.warning_code`·`warning_text`, .NET `RequestResult.WarningCode`·`WarningText`). `affiliate()`
   의 성공 반환은 «보냈다» 일 뿐이다 — 제휴가 섰는지는 token 의 최종 응답(`onRequestResult` 2xx)으로 본다. 시험 `Upkeep.*`(규칙)·
   `AffiliationUpkeep.SpecFormPublishAndRenewAfterNetworkChange`(가짜 서버 왕복).
 - **MC 서비스 인가·서비스 설정은 코어가 한다**(TS 24.379 §7.2.2·§7.2.1A · TS 24.282 §7.2.2 · TS 24.281 §7.2.2, `src/service_auth.h`). 서버는 서비스
@@ -337,8 +341,9 @@ C++ 공개 표면은 `cimsue/engine.h` 의 `Engine` 하나이며 계정·호를 
   알린다(서버가 등록과 함께 묶임을 지운다). 200 OK 의 `<multiple-devices-ind>true`(§7.3.3 9)a))는 `multipleDevices` 로. 서비스 로그오프 = 설정 제거
   PUBLISH(`Expires: 0` + 받은 `SIP-If-Match`, 본문 없음 — §7.2.1A 4)·NOTE 3, 골든 16) — `setMcVideoEnabled(false)` 가 MCVideo 태그를 빼기 전에 보낸다.
   인가 PUBLISH 의 결과는 `onRequestResult` 로 오지 않는다. 서비스 설정만 PUBLISH(§7.2.3 — Answer-Mode 를 바꿀 때)·설정 구독(§7.2.4)은 쓰지 않는다
-  (Answer-Mode 는 계정 값이라 인가 때 함께 간다). REGISTER 본문 인가(§7.2.1)는 쓰지 않는다. C API `cimsue_engine_set_access_token`·
-  `cimsue_engine_service_auth`, Kotlin `AccountConfig.accessToken`·`Account.setAccessToken`·`serviceAuth`·흐름 `serviceAuth`/`serviceAuths`, `cimsue-cli`
+  (Answer-Mode 는 계정 값이라 인가 때 함께 간다). REGISTER 본문 인가(§7.2.1)는 쓰지 않는다. C API 계정 `access_token`·`cimsue_engine_set_access_token`·
+  `cimsue_engine_service_auth`(`cimsue_service_auth_info_t`)·리스너 `on_service_auth`, .NET `AccountConfig.AccessToken`·`Account.SetAccessToken`·
+  `Account.ServiceAuth`·`Engine.ServiceAuthChanged`(`McService.McData` 포함), Kotlin `AccountConfig.accessToken`·`Account.setAccessToken`·`serviceAuth`·흐름 `serviceAuth`/`serviceAuths`, `cimsue-cli`
   (`--from-profile` 의 로그인 토큰 · `--access-token-env VAR` · 출력 `service-auth` 줄·요약 `service_auth`), 구동 이벤트 `service_auth`. 시험
   `ServiceAuthRules.*`·`ServiceAuthBody.*`·`ServiceAuthEngine.*`(가짜 서버 — 골든 14·16, 보류·141·101·새 토큰).
 - **MCPTT 제휴 게시는 규격형이다**(TS 24.379 §9.2.1.2). `affiliate(acc, g, on)` 은 계정의 MCPTT 관심 그룹 집합을 바꾸고 **전부**를 한
@@ -361,18 +366,21 @@ C++ 공개 표면은 `cimsue/engine.h` 의 `Engine` 하나이며 계정·호를 
   `ForceAuto` = `Priv-Answer-Mode: Auto`(강제 자동 — 인가가 없으면 서버가 403 Warning 143), 기본 `Unspecified` = 헤더를 싣지 않는다(착신 단말 설정대로).
   서버는 user profile 의 개시 방식 인가로 판정하고(자동 125 · 수동 126) 받은 `Answer-Mode` 를 착신 INVITE 에 옮긴다 — 착신 단말은 그 값으로 자동·수동
   개시를 정한다(`mcptt/commencement.h`). 그룹 호에는 싣지 않는다(멤버 초대의 개시 방식은 제어 기능 몫). `cimsue-cli group-call <번호> --private --answer-mode auto|manual|force`.
+  C API `cimsue_group_call_options_t.commencement`(`cimsue_commencement_t`), .NET `GroupCallOptions.Commencement`(`CommencementMode`).
 - **MC 서비스 등록 태그**(TS 24.379 §7.2.1AA · TS 24.282 §7.2.1) — 서비스마다 특성 태그 하나를 REGISTER Contact 에 싣고 ICSI 는 `+g.3gpp.icsi-ref`
   한 목록에 모은다: `AccountConfig.mcpttEnabled` = `+g.3gpp.mcptt` + ICSI mcptt(`ServiceProfile::toAccount` 가 kind ptt 에 켠다 — 빼고 다시 등록하면
   MCPTT 로그오프) · `mcdataMsrp` = SDS 지원 `+g.3gpp.mcdata.sds` + ICSI mcdata·mcdata.sds(SDS 클라이언트는 서버발 MSRP 배포도 받는다) ·
   `mcdataFd` = FD 지원 `+g.3gpp.mcdata.fd` + ICSI mcdata·mcdata.fd · `mcvideoEnabled`(아래 MCVideo). CSP 는 지금 ICSI 목록에 «mcdata» 가 있으면
-  MSRP 배포 대상으로 보므로(MCData REG-2 — CSP 몫) 현장 앱·관제 태블릿은 FD 를 SDS 와 같이만 켠다.
+  MSRP 배포 대상으로 보므로(MCData REG-2 — CSP 몫) 현장 앱·관제 태블릿은 FD 를 SDS 와 같이만 켠다. C API 계정 `mcptt_enabled`·`mcdata_fd`
+  (`cimsue_service_profile_to_account` 가 kind ptt 에 `mcptt_enabled` 를 켠다), .NET `AccountConfig.McpttEnabled`·`McdataFd`.
 - **그룹 호 개시·합류 요청**(TS 24.379 §10.1.1.2.1.1 · §10.1.2.2.1.1 · §17.2.2.1.1) — `joinGroupCall` 의 INVITE: Request-URI = 참여 MCPTT 기능 PSI
   (`AccountConfig.mcpttServerUri`, 10) — 비면 그룹 URI), Accept-Contact 둘(`*;+g.3gpp.mcptt;require;explicit` · MCPTT icsi-ref, 5)·6)),
   `P-Preferred-Service` MCPTT ICSI(7)), 다이얼로그 Contact = 계정 Contact + MCPTT 특성 태그(4) — 멤버 초대에 답하는 180·200 도, §6.2.3.1.1 3)·4)),
   mcptt-info = `<session-type>` prearranged·chat(`GroupCallOptions.chat` — 그룹 문서 `on-network-invite-members` false 인 그룹, §10.1.2.2.1.1 13)a))·
   adhoc + `<mcptt-request-uri>` 그룹 ID + `<mcptt-client-id>`(`effectiveMcpttClientId`) — 발신자 MCPTT ID 는 싣지 않는다(14) NOTE 2, 참여 기능이 정한다).
   floor 제어 채널 = `m=application <port> udp MCPTT` + `a=fmtp:MCPTT …`(TS 24.380 표 4.3.3.1-1 — `a=floorid` 없음). 시험 `McpttGroupInvite.StandardRequestShape`.
-  `CallInfo.mcptt.sessionType` 은 발신 호에서도 실제로 보낸 session-type(prearranged·chat·adhoc·private)이다.
+  `CallInfo.mcptt.sessionType` 은 발신 호에서도 실제로 보낸 session-type(prearranged·chat·adhoc·private)이다. C API `cimsue_group_call_options_t.chat`,
+  .NET `GroupCallOptions.Chat`.
 - **세션 식별자·재합류**(TS 24.379 §4.5 · §10.1.1.2.4.1) — 제어 기능이 개시 최종 응답(§6.3.3.2.3.2 5))·멤버 초대(§6.3.3.1.2 1))의 Contact 에
   `isfocus` 와 함께 준 GRUU 를 `CallInfo.sessionUri` 로 올린다(개시 호는 200 OK 뒤 — `mcptt::sessionIdentity`, MCVideo 호와 같은 자리).
   `joinGroupCall({sessionUri})` 는 진행 중 편성 그룹 세션 재합류다 — §10.1.1.2.1.1 그대로이되 Request-URI·To = 세션 식별자(10), To 는 `gr` 가
@@ -570,9 +578,12 @@ select ≤100 ms → 해석·전이·타이머, 공개 메서드는 mutex, 콜�
 이벤트 `ReceptionEvent::Overridden`(`overridingId`). 규격이 비워 둔 곳의 해석은 [mcvideo.md](mcvideo.md) §5.4. 바인딩 — Kotlin `AccountConfig.tcTimers`·`confirmQueuedTransmission`,
 `Account.setTcTimers`·`setMcVideoEnabled`, `Call.confirmTransmission`·`requestQueuePosition`, `McVideoServiceConfigDoc.tcTimers`(초 → ms),
 이벤트 `TransmissionEvent.awaitingConfirmation`·`ReceptionEventKind.OVERRIDDEN`(`overridingId`), `CscClient.getGroupExcludingMembers`·`GroupDoc.preconfiguredGroupUseOnly`
-(`usableForCalls`). C API 는 구조체 배치를 바꾸지 않는 함수만 덧붙였다 — `cimsue_engine_set_tc_timers`(스칼라 ms)·`cimsue_engine_set_mcvideo_enabled`·
-`cimsue_engine_confirm_transmission`·`cimsue_engine_request_queue_position`·`cimsue_csc_get_group_excluding_members`. 계정·이벤트·그룹 문서 구조체의 새 칸
-(`tc_timers`·`confirm_queued_transmission`·`awaiting_confirmation`·`overriding_id`·`preconfigured_group_use_only`)은 .NET 파사드와 배치를 맞춰 끝에 덧붙인다(남음). `cimsue_test` `McvParticipant`(루프백 가짜 서버 —
+(`usableForCalls`). C API — `cimsue_engine_set_tc_timers`(`cimsue_tc_timers_t`)·`cimsue_engine_set_mcvideo_enabled`·`cimsue_engine_confirm_transmission`·
+`cimsue_engine_request_queue_position`·`cimsue_csc_get_group_excluding_members`, 계정 `tc_timers`·`confirm_queued_transmission`, 이벤트·조회
+`awaiting_confirmation`·`overriding_id`(`CIMSUE_RXEV_OVERRIDDEN`), 그룹 문서 `preconfigured_group_use_only`. .NET — `Account.SetTcTimers`·`SetMcVideoEnabled`,
+`Call.ConfirmTransmission`·`RequestQueuePosition`, `AccountConfig.TcTimers`·`ConfirmQueuedTransmission`, `McVideoServiceConfigDoc.TcTimers`,
+`TransmissionEvent`·`TransmissionInfo.AwaitingConfirmation`·`ReceptionEventKind.Overridden`(`OverridingId`), `CscClient.GetGroupExcludingMembers`·
+`GroupDoc.PreconfiguredGroupUseOnly`(`UsableForCalls`). `cimsue_test` `McvParticipant`(루프백 가짜 서버 —
 허가·종료·재전송 시한·거절·회수 #4/#7·서버 종료 요청·manual/automatic 수신·수신 거절·서버 수신 종료·암묵 요청 셋·상태 가드).
 
 **MCVideo 공개 표면**(계약 K7 — [../../dev/mcvideo_dev_plan.md](../../dev/mcvideo_dev_plan.md) §3) — `McService`(Mcptt·McVideo)·
@@ -789,7 +800,7 @@ android_ue_client §13 그대로.
 | P0a 코어·파사드 보강(VoLTE 몫) | 파사드 기본값 코어와 일치(`noVad`) · affiliation 412(§4.2) · FD·floor 이벤트 종류·`userAgentOf`/`imeiUrn` 파사드 · 프로파일 `udpNoTcpSwitch` · 마이크 게이트(§4.5 `setCaptureEnabled`) · 영상(수신 Surface·셀프뷰·카메라 전환·H.264 설정·`PjCamera` 클래스를 `:cimsue` 로) · 망 변경 재등록(Android 접점) | `S1-UE-*` PASS · 관제 태블릿 회귀 · `cimsue-cli` S3(등록·1:1·영상·SRTP) |
 | P1 `:core` 분리 | `:core`(비 SIP) / `:core-sip`(자체 래퍼, 이행용) — 앱 코드 무변경 | APK 빌드·동작 불변, 로그인 앱에서 `libpjsua2.so` 빠짐 |
 | P2 volte-client 전환 | 세션 어댑터 `VoltePhone` 이 기존 래퍼 계약(등록·호 상태 StateFlow·호 명령·영상·캡처 게이트·MESSAGE)을 SDK 로 낸다 — `SipService`(FGS·오디오 모드·라우팅 협조·알림)와 화면은 그대로, 호 상태는 기존과 같은 마지막 호 이벤트 투영, 망 변경은 `NetworkWatcher`. 모듈 `:cimsue` + `:core` | 사내 단말 실기: UDP/TCP/TLS 등록·음성·영상·SRTP·SMS·망 전환·PTT 양보 |
-| P0b 코어 보강(PTT 몫) | MSRP 미디어평면 SDS(TS 24.282, RFC 4975) · 긴급 re-INVITE 상향/하향·긴급 재광고 수신·403 긴급 거부·경보(alert-ind) 빌더/파서(TS 24.379) · 승인 톤 뒤 마이크 · 장치 게인(호 수신 음량 기억 — AGC 목표 환산은 앱, [ue_audio_level.md](ue_audio_level.md) §6) · CMS user-profile/service-config 해석 — 코어·Android 파사드 반영(§4.2 규약), C API·.NET 은 Windows 몫 | 단위시험(`mcptt_condition_test`·`msrp_test`·`csc_test` CmsDoc·`floor_participant_test`) + `cimsue-cli` S3(긴급·MSRP) |
+| P0b 코어 보강(PTT 몫) | MSRP 미디어평면 SDS(TS 24.282, RFC 4975) · 긴급 re-INVITE 상향/하향·긴급 재광고 수신·403 긴급 거부·경보(alert-ind) 빌더/파서(TS 24.379) · 승인 톤 뒤 마이크 · 장치 게인(호 수신 음량 기억 — AGC 목표 환산은 앱, [ue_audio_level.md](ue_audio_level.md) §6) · CMS user-profile/service-config 해석 — 코어·Android 파사드·C API·.NET 반영(§4.2 규약 · §6.4) | 단위시험(`mcptt_condition_test`·`msrp_test`·`csc_test` CmsDoc·`floor_participant_test`) + `cimsue-cli` S3(긴급·MSRP) |
 | P3 ptt-client 전환 | `PttController` = SDK 세션 + 평면 넷(`PttGroups` 참여·로스터·affiliation·CSC 문서 · `PttFloor` · `PttMessaging` SDS·FD·MSRP · `PttEmergency` SOS·경보·조건), Kotlin 프로토콜 사본(floor·mcdata·msrp·mcptt XML·CSC) 제거·대조 검사 정리(`S1-UE-CSC-XCHECK` = `:core` 프로비저닝만). ViewModel 분리는 후속 | 사내 단말 실기(MF52·W999, 상대 = 계측기 013, g005 · 긴급 = 프로파일 대상 g002): 그룹콜·발언권 인계·HW PTT·화면 꺼짐 착신·긴급 확정/거절·경보·일제 통화·SDS/MSRP 송수신 — FD·깊은 Doze·VoLTE 양보·이어폰 분리는 남음([sdk_port_handoff.md](../../dev/sdk_port_handoff.md) §5) |
 | P4 시험 모드(Q4) | `android/core` 공통 진입·설정·링크 서비스·오버레이 → 앱 3종([ue_voice_quality.md](ue_voice_quality.md) §4) | 계측기 실기기 링크·`VOLTE-CALL-DEVICE-*` |
 | P5 정리 | `:core-sip` 삭제 · `:cimsue-engine` 존치 결정 · 문서 | `S1` 전체 PASS |
@@ -866,7 +877,10 @@ P0a·P0b·P3 코어 보강분(§4.2)도 같은 규칙으로 C API·.NET 에 나 
 `mcptt_server_uri`, 엔진 `grant_mic_delay_ms`), CMS 해석(`cimsue_csc_fetch_user_profile/service_config`·`cimsue_capabilities_of` → .NET
 `UserProfileDoc`·`ServiceConfigDoc`·`Capabilities.Of`), 장치(`set_capture_enabled`·`set_device_audio_levels`·`set_audio_route`·`reopen_audio_device`·
 `set_video_window`·`switch_camera`·`video_devices`·`set_video_preview`·`set_video_capture_device`·`set_video_send`, 영상 프레임 `on_video_frame`(`cimsue_video_frame_t` — 영상 스레드에서 곧바로,
-.NET `Engine.VideoFrameReceived`(`VideoFrameHandler(Engine, in VideoFrame)` — ref struct `Pixels` 는 핸들러 동안만, 마샬링 없음)), `cimsue_call_info_t.video_send`), 프로파일(`udp_no_tcp_switch`·`sms_gateway`), 그룹 멤버 `title`. 구조체 필드는 끝에 덧붙이고
+.NET `Engine.VideoFrameReceived`(`VideoFrameHandler(Engine, in VideoFrame)` — ref struct `Pixels` 는 핸들러 동안만, 마샬링 없음)), `cimsue_call_info_t.video_send`), 프로파일(`udp_no_tcp_switch`·`sms_gateway`), 그룹 멤버 `title`.
+규격 요청·MC 서비스 인가 보강분도 같다 — MC 서비스 등록 태그(`mcptt_enabled`·`mcdata_fd`)·서비스 인가(`access_token`·`set_access_token`·`service_auth`·`on_service_auth`)·
+그룹 호 옵션(`chat`·`commencement`·`session_uri` 재합류)·요청 결과 Warning(`warning_code`·`warning_text`)·규격형 문서 변경 구독(`subscribe_xcap_diff_documents`·
+`gms_uri`·구독 문서 목록)·MCVideo 송출 확인·수신 무효화·사전 구성 전용 그룹·애드혹 지원(`adhoc_group_call_support`) — 이름은 위 각 절. 구조체 필드는 끝에 덧붙이고
 구조체 id 도 `CIMSUE_STRUCT_COUNT_` 앞에 붙여 `AbiLayoutTests` 가 크기를 대조한다.
 Android 앱은 아직 이 코어 위로 이행하지 않아(pjsua2 직접) 같은 규칙을 Kotlin 으로 둔다 — `core` 의 `CimsEndpoint.onTransportState`
 ·`CimsTls` OkHttp 인터셉터 → `TlsPeerObserver`/`TlsPeerExpiry`(임계 30/7·`worst`). 이행 시 이 자리가 `Engine::tlsPeerExpiry()` 바인딩으로 바뀐다.
@@ -954,7 +968,7 @@ NDK/MSVC 빌드는 개발 서버 밖(WSL2·Windows 머신)에서 수행하고, �
 | D. csc + domain + 관제 API | PKCE/XCAP/프로비저닝(dispatch 블록)·`Capabilities`·dialogWatch·join·pickup·transfer·listenGroupCall·`MediaSources` 라벨 | `S3-UE-CLI` Join/픽업/PTT 청취 PASS |
 | E. 관제 태블릿 앱 | `android/dispatch-tablet` — §7 다섯 구획. **구현 완료** — 정본 [android_dispatch_tablet.md](android_dispatch_tablet.md). 왼쪽 레일 셋([관제]·[이력]·[더보기]) + [관제] 안 [무전|통화]·하위 탭(6패널을 면 여섯 장으로 — [통화] 는 왼쪽 고정 칸 + 면 셋)·오른쪽 사이드 패널(채널 상세·채널 추가·새 그룹·이벤트 상세·주소록), [PTT 그룹]·[관리]·감청(«진행 중» 행)·착신 배너/알림. 엔진 단일화(`:cimsue-engine` 하나, 커밋 산출물 폐기)와 SWIG 이진 typemap 이 여기서 들어왔다. 실기 확인 = 로그인·등록·그룹콜 floor·SDS·감청(Join)·착신/발신·통화 내역 | 실기기 실측(§9) — 남은 것: [이력]·[PTT 그룹]·[관리] 세 화면이 서버 응답으로 미검증, 무전/통화 분리 출력, 6시간·부팅 상주 |
 | F1. Windows 엔진·코어 | `sdk/windows` 슈퍼빌드로 pjproject(WMME)·AMR-WB·`cimsue.dll`·`cimsue-cli.exe` MSVC 빌드 — **빌드 확정**(§6.1 엔진 빌드 확정·CRT 행). 남은 것: WMME 장치 열거 실측 | Windows 에서 `cimsue-cli` 등록·1:1(TLS+SRTP)·그룹콜 floor·Join 이 Linux 와 같은 결과 (S3 실측 전) |
-| F2. Windows C API·.NET 파사드·관제 앱 | C API `cimsue_c.h`(§6.4) — **구현·단위시험 반영**(`cimsue.dll` 이 114 함수 export — `cimsue_struct_size` ABI 자기검사 포함, `cimsue_test` 가 슈퍼빌드의 googletest 로 Windows 에서도 돈다) → `sdk/windows/dotnet/CimsUe`(파사드 + 접점: 엔드포인트·핫플러그·핫키·DPAPI·단일 인스턴스 — **구현·단위시험 50건 통과**: ABI 레이아웃 27 구조체 대조·헤드리스 엔진 수명·컨텍스트 마샬링·프로파일 파싱·접점. 네이티브 `cimsue.dll` 은 관리 `CimsUe.dll` 과 이름이 겹치므로 출력·패키지 모두 `runtimes/win-x64/native/` 에 두고 로더가 그곳을 먼저 본다) → `windows/dispatch-desktop`(WPF, §6.1 — **구현·빌드 완료**, [dispatch_desktop_ui.md](dispatch_desktop_ui.md) §11 구조 그대로. 로그인·메인 창 기동 확인, `--ui-preview` 로 로그인 없이 화면 점검) | 파사드로 `cimsue-cli` 와 같은 S3 시나리오 재현, 재생 라우트 이중 출력·핫플러그 실측, 관제 시나리오(BLF→Join→픽업→전달→PTT 청취) 실기 — **앱 실기 시험은 서버(CSC/CSP) 연결 후 일괄** |
+| F2. Windows C API·.NET 파사드·관제 앱 | C API `cimsue_c.h`(§6.4) — **구현·단위시험 반영**(`cimsue.dll` 이 155 함수 export — `cimsue_struct_size` ABI 자기검사 포함, `cimsue_test` 가 슈퍼빌드의 googletest 로 Windows 에서도 돈다) → `sdk/windows/dotnet/CimsUe`(파사드 + 접점: 엔드포인트·핫플러그·핫키·DPAPI·단일 인스턴스 — **구현·단위시험 반영**: ABI 레이아웃(등록 구조체 전부 대조)·헤드리스 엔진 수명·컨텍스트 마샬링·프로파일 파싱·접점 — `sdk/windows/dotnet/README.md`. 네이티브 `cimsue.dll` 은 관리 `CimsUe.dll` 과 이름이 겹치므로 출력·패키지 모두 `runtimes/win-x64/native/` 에 두고 로더가 그곳을 먼저 본다) → `windows/dispatch-desktop`(WPF, §6.1 — **구현·빌드 완료**, [dispatch_desktop_ui.md](dispatch_desktop_ui.md) §11 구조 그대로. 로그인·메인 창 기동 확인, `--ui-preview` 로 로그인 없이 화면 점검) | 파사드로 `cimsue-cli` 와 같은 S3 시나리오 재현, 재생 라우트 이중 출력·핫플러그 실측, 관제 시나리오(BLF→Join→픽업→전달→PTT 청취) 실기 — **앱 실기 시험은 서버(CSC/CSP) 연결 후 일괄** |
 | F3. Windows 영상 | `PJMEDIA_HAS_VIDEO 1` + OpenH264 + DSHOW + CIMS 프레임 렌더 장치 → `onVideoFrame`·셀프뷰·카메라 선택(C API·.NET 포함) — **구현·단위시험 반영**(`McvCall.VideoTransmitSelfViewAndReceiveFrames` = 합성 캡처 송출 H.264 RTP·셀프뷰 BGRA 640×480·가짜 CMP 가 되돌린 RTP 의 디코드 프레임, `CIMSUE_TEST_CAMERA=1` 이면 실카메라로 같은 경로 · `CimsUe.Tests` `VideoEngineIsFrameSink`) | 현장 앱 ↔ 관제 실기(영상 보기·보내기) · 감청 영상 격자 |
 | G. 기존 앱 전환 | `volte-client` → `ptt-client` 를 파사드로 — §5.3 이행 단계 P0a~P5(VoLTE 먼저) | 단계별 완료 조건(§5.3) |
 

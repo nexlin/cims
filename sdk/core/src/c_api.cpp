@@ -92,6 +92,18 @@ cimsue_floor_timers_t toC(const FloorTimers& t) {
     return o;
 }
 
+McVideoTcTimers toCxx(const cimsue_tc_timers_t& t) {
+    McVideoTcTimers o;
+    o.t100Ms = t.t100_ms; o.t101Ms = t.t101_ms; o.t102Ms = t.t102_ms; o.t103Ms = t.t103_ms; o.t104Ms = t.t104_ms;
+    return o;
+}
+
+cimsue_tc_timers_t toC(const McVideoTcTimers& t) {
+    cimsue_tc_timers_t o{};
+    o.t100_ms = t.t100Ms; o.t101_ms = t.t101Ms; o.t102_ms = t.t102Ms; o.t103_ms = t.t103Ms; o.t104_ms = t.t104Ms;
+    return o;
+}
+
 AccountConfig toCxx(const cimsue_account_config_t* c) {
     AccountConfig a;
     if (!c) return a;
@@ -127,6 +139,11 @@ AccountConfig toCxx(const cimsue_account_config_t* c) {
     assignIf(a.mcvideoServerUri, c->mcvideo_server_uri);
     a.autoAnswerMcvideo = c->auto_answer_mcvideo != 0;
     a.floorTimers = toCxx(c->floor_timers);
+    a.mcpttEnabled = c->mcptt_enabled != 0;
+    a.mcdataFd = c->mcdata_fd != 0;
+    assignIf(a.accessToken, c->access_token);
+    a.tcTimers = toCxx(c->tc_timers);
+    a.confirmQueuedTransmission = c->confirm_queued_transmission != 0;
     return a;
 }
 
@@ -148,6 +165,9 @@ GroupCallOptions toCxx(const cimsue_group_call_options_t* c) {
     o.members = strList(c->members, c->member_count);
     o.broadcast = c->broadcast != 0;
     o.implicitFloorRequest = c->implicit_floor_request != 0;
+    o.chat = c->chat != 0;
+    o.commencement = (CommencementMode)c->commencement;
+    assignIf(o.sessionUri, c->session_uri);
     return o;
 }
 
@@ -218,6 +238,8 @@ ServiceConfigDoc toCxx(const cimsue_service_config_doc_t* c) {
     s.numLevelsGroupHierarchy = c->num_levels_group_hierarchy;
     s.numLevelsUserHierarchy = c->num_levels_user_hierarchy;
     s.rpEmergency = S(c->rp_emergency); s.rpImminentPeril = S(c->rp_imminent_peril); s.rpNormal = S(c->rp_normal);
+    s.adhocGroupCallSupport = c->adhoc_group_call_support != 0;
+    s.adhocMaxParticipants = c->adhoc_max_participants;
     return s;
 }
 
@@ -312,6 +334,7 @@ void fill(cimsue_transmission_event_t& o, const TransmissionEvent& e) {
     o.audio_ssrc = e.audioSsrc; o.video_ssrc = e.videoSsrc;
     o.receiver_id = C(e.receiverId);
     o.raw_type = e.rawType;
+    o.awaiting_confirmation = B(e.awaitingConfirmation);
 }
 
 void fill(cimsue_reception_event_t& o, const ReceptionEvent& e) {
@@ -321,6 +344,7 @@ void fill(cimsue_reception_event_t& o, const ReceptionEvent& e) {
     o.cause = e.cause;
     o.cause_text = C(e.causeText);
     o.raw_type = e.rawType;
+    o.overriding_id = C(e.overridingId);
 }
 
 void fill(cimsue_transmission_info_t& o, const TransmissionInfo& t, std::vector<cimsue_video_transmitter_t>& buf) {
@@ -333,6 +357,7 @@ void fill(cimsue_transmission_info_t& o, const TransmissionInfo& t, std::vector<
     o.local_port = t.localPort;
     o.remote_ip = C(t.remoteIp);
     o.remote_port = t.remotePort;
+    o.awaiting_confirmation = B(t.awaitingConfirmation);
 }
 
 void fill(cimsue_emergency_alert_t& o, const EmergencyAlert& a) {
@@ -394,6 +419,18 @@ void fill(cimsue_request_result_t& o, const RequestResult& r) {
     o.code = r.code;
     o.reason = C(r.reason);
     o.etag = C(r.etag);
+    o.warning_code = r.warningCode;
+    o.warning_text = C(r.warningText);
+}
+
+void fill(cimsue_service_auth_info_t& o, const ServiceAuthInfo& i) {
+    o.account_id = i.accountId;
+    o.service = (cimsue_mc_service_t)i.service;
+    o.state = (cimsue_service_auth_state_t)i.state;
+    o.code = i.code;
+    o.warning_code = i.warningCode;
+    o.warning_text = C(i.warningText);
+    o.multiple_devices = B(i.multipleDevices);
 }
 
 void fill(cimsue_dialog_info_t& o, const DialogInfo& d) {
@@ -480,6 +517,11 @@ void fill(cimsue_account_config_t& o, const AccountConfig& a, std::vector<const 
     o.mcvideo_server_uri = C(a.mcvideoServerUri);
     o.auto_answer_mcvideo = B(a.autoAnswerMcvideo);
     o.floor_timers = toC(a.floorTimers);
+    o.mcptt_enabled = B(a.mcpttEnabled);
+    o.mcdata_fd = B(a.mcdataFd);
+    o.access_token = C(a.accessToken);
+    o.tc_timers = toC(a.tcTimers);
+    o.confirm_queued_transmission = B(a.confirmQueuedTransmission);
 }
 
 /** CMS 문서의 C 스냅샷 — 핸들(fetch)과 스레드 스크래치(parse) 양쪽이 쓴다. */
@@ -572,6 +614,8 @@ struct ServiceConfigHolder {
         out.num_levels_group_hierarchy = cxx.numLevelsGroupHierarchy;
         out.num_levels_user_hierarchy = cxx.numLevelsUserHierarchy;
         out.rp_emergency = C(cxx.rpEmergency); out.rp_imminent_peril = C(cxx.rpImminentPeril); out.rp_normal = C(cxx.rpNormal);
+        out.adhoc_group_call_support = B(cxx.adhocGroupCallSupport);
+        out.adhoc_max_participants = cxx.adhocMaxParticipants;
     }
 };
 
@@ -585,6 +629,7 @@ struct UeInitConfigHolder {
         out.mcptt_server_uri = C(cxx.mcpttServerUri); out.mcdata_server_uri = C(cxx.mcdataServerUri);
         out.mcvideo_server_uri = C(cxx.mcvideoServerUri);
         out.floor_timers = toC(cxx.floorTimers);
+        out.gms_uri = C(cxx.gmsUri);
     }
 };
 
@@ -699,6 +744,7 @@ struct GroupDocHolder {
         o.allow_emergency_call = v.allowEmergencyCall;
         o.allow_emergency_alert = v.allowEmergencyAlert;
         o.allow_imminent_peril_call = v.allowImminentPerilCall;
+        out.preconfigured_group_use_only = B(cxx.preconfiguredGroupUseOnly);
     }
 };
 
@@ -733,6 +779,7 @@ GroupDoc toCxx(const cimsue_group_doc_t* d) {
     g.ackTimeoutSec = opt(d->has_ack_timeout, d->ack_timeout_sec);
     if (d->ack_action && *d->ack_action) g.ackAction = std::string(d->ack_action) == "proceed" ? "proceed" : "abandon";
     g.mcvideo = toCxx(d->mcvideo);
+    g.preconfiguredGroupUseOnly = d->preconfigured_group_use_only != 0;
     return g;
 }
 
@@ -831,6 +878,9 @@ struct Scratch {
     TransmissionInfo                        tx;
     cimsue_transmission_info_t              txC{};
     std::vector<cimsue_video_transmitter_t> txTransmitters;
+    ServiceAuthInfo                         auth;
+    std::vector<std::string>                docs;
+    std::vector<const char*>                docsC;
 };
 thread_local Scratch g_s;
 
@@ -847,6 +897,11 @@ public:
         if (!cb.on_reg_state) return;
         cimsue_reg_info_t o{}; fill(o, info);
         cb.on_reg_state(cb.user, &o);
+    }
+    void onServiceAuth(const ServiceAuthInfo& info) override {
+        if (!cb.on_service_auth) return;
+        cimsue_service_auth_info_t o{}; fill(o, info);
+        cb.on_service_auth(cb.user, &o);
     }
     void onIncomingCall(const CallInfo& info) override { call(cb.on_incoming_call, info); }
     void onCallState(const CallInfo& info) override { call(cb.on_call_state, info); }
@@ -1047,6 +1102,10 @@ void CIMSUE_CALL cimsue_account_config_default(cimsue_account_config_t* cfg) {
     cfg->mcdata_msrp = B(d.mcdataMsrp);
     cfg->mcvideo_enabled = B(d.mcvideoEnabled);
     cfg->auto_answer_mcvideo = B(d.autoAnswerMcvideo);
+    cfg->mcptt_enabled = B(d.mcpttEnabled);
+    cfg->mcdata_fd = B(d.mcdataFd);
+    cfg->tc_timers = toC(d.tcTimers);
+    cfg->confirm_queued_transmission = B(d.confirmQueuedTransmission);
 }
 
 int32_t CIMSUE_CALL cimsue_engine_add_account(cimsue_engine_t* e, const cimsue_account_config_t* cfg) {
@@ -1171,6 +1230,8 @@ void CIMSUE_CALL cimsue_group_call_options_default(cimsue_group_call_options_t* 
     opts->full_duplex = B(d.fullDuplex);
     opts->broadcast = B(d.broadcast);
     opts->implicit_floor_request = B(d.implicitFloorRequest);
+    opts->chat = B(d.chat);
+    opts->commencement = (cimsue_commencement_t)d.commencement;
 }
 
 int32_t CIMSUE_CALL cimsue_engine_join_group_call(cimsue_engine_t* e, int32_t account_id, const char* group_id,
@@ -1203,12 +1264,9 @@ cimsue_status_t CIMSUE_CALL cimsue_engine_set_floor_timers(cimsue_engine_t* e, i
     if (!e || !timers) return -1;
     return ret(e->eng.setFloorTimers(account_id, toCxx(*timers)));
 }
-cimsue_status_t CIMSUE_CALL cimsue_engine_set_tc_timers(cimsue_engine_t* e, int32_t account_id, int32_t t100_ms, int32_t t101_ms,
-                                                        int32_t t102_ms, int32_t t103_ms, int32_t t104_ms) {
-    if (!e) return -1;
-    McVideoTcTimers t;
-    t.t100Ms = t100_ms; t.t101Ms = t101_ms; t.t102Ms = t102_ms; t.t103Ms = t103_ms; t.t104Ms = t104_ms;
-    return ret(e->eng.setTcTimers(account_id, t));
+cimsue_status_t CIMSUE_CALL cimsue_engine_set_tc_timers(cimsue_engine_t* e, int32_t account_id, const cimsue_tc_timers_t* timers) {
+    if (!e || !timers) return -1;
+    return ret(e->eng.setTcTimers(account_id, toCxx(*timers)));
 }
 cimsue_status_t CIMSUE_CALL cimsue_engine_set_mcvideo_enabled(cimsue_engine_t* e, int32_t account_id, int32_t enabled) {
     return e ? ret(e->eng.setMcVideoEnabled(account_id, enabled != 0)) : -1;
@@ -1216,13 +1274,13 @@ cimsue_status_t CIMSUE_CALL cimsue_engine_set_mcvideo_enabled(cimsue_engine_t* e
 cimsue_status_t CIMSUE_CALL cimsue_engine_set_access_token(cimsue_engine_t* e, int32_t account_id, const char* access_token) {
     return e ? ret(e->eng.setAccessToken(account_id, S(access_token))) : -1;
 }
-cimsue_service_auth_state_t CIMSUE_CALL cimsue_engine_service_auth(const cimsue_engine_t* e, int32_t account_id, cimsue_mc_service_t service,
-                                                                  int32_t* code, int32_t* warning_code, int32_t* multiple_devices) {
-    const ServiceAuthInfo i = e ? e->eng.serviceAuth(account_id, (McService)service) : ServiceAuthInfo();
-    if (code) *code = i.code;
-    if (warning_code) *warning_code = i.warningCode;
-    if (multiple_devices) *multiple_devices = i.multipleDevices ? 1 : 0;
-    return (cimsue_service_auth_state_t)i.state;
+void CIMSUE_CALL cimsue_engine_service_auth(const cimsue_engine_t* e, int32_t account_id, cimsue_mc_service_t service,
+                                            cimsue_service_auth_info_t* out) {
+    if (!out) return;
+    g_s.auth = e ? e->eng.serviceAuth(account_id, (McService)service) : ServiceAuthInfo();
+    cimsue_service_auth_info_t o{};
+    fill(o, g_s.auth);
+    *out = o;
 }
 
 void CIMSUE_CALL cimsue_engine_floor_info(const cimsue_engine_t* e, int32_t call_id, cimsue_floor_info_t* out) {
@@ -1306,6 +1364,16 @@ cimsue_status_t CIMSUE_CALL cimsue_engine_subscribe_conference(cimsue_engine_t* 
 cimsue_status_t CIMSUE_CALL cimsue_engine_subscribe_xcap_diff(cimsue_engine_t* e, int32_t account_id,
                                                               const char* psi_uri, int32_t on) {
     return e ? ret(e->eng.subscribeXcapDiff(account_id, S(psi_uri), on != 0)) : -1;
+}
+cimsue_status_t CIMSUE_CALL cimsue_engine_subscribe_xcap_diff_documents(cimsue_engine_t* e, int32_t account_id, const char* psi_uri,
+                                                                        const cimsue_xcap_diff_subscription_t* sub, int32_t on) {
+    if (!e) return -1;
+    XcapDiffSubscription x;
+    if (sub) {
+        x.documents = strList(sub->documents, sub->document_count);
+        x.accessToken = S(sub->access_token);
+    }
+    return ret(e->eng.subscribeXcapDiff(account_id, S(psi_uri), x, on != 0));
 }
 
 int64_t CIMSUE_CALL cimsue_engine_send_request(cimsue_engine_t* e, int32_t account_id, const char* method,
@@ -1833,6 +1901,25 @@ void CIMSUE_CALL cimsue_capabilities_of(const cimsue_user_profile_doc_t* user_pr
     out->cancel_group_emergency = B(k.cancelGroupEmergency); out->cancel_imminent_peril = B(k.cancelImminentPeril);
 }
 
+namespace {
+int32_t docsOut(const std::vector<std::string>& docs, const char* const** out) {
+    g_s.docs = docs;
+    g_s.docsC.clear();
+    for (const auto& d : g_s.docs) g_s.docsC.push_back(C(d));
+    if (out) *out = g_s.docsC.empty() ? nullptr : g_s.docsC.data();
+    return (int32_t)g_s.docsC.size();
+}
+}  // namespace
+
+int32_t CIMSUE_CALL cimsue_csc_gms_subscription_documents(const char* const* group_uris, int32_t group_count, const char* const** out) {
+    return docsOut(CscClient::gmsSubscriptionDocuments(strList(group_uris, group_count)), out);
+}
+
+int32_t CIMSUE_CALL cimsue_csc_cms_subscription_documents(const char* user_uri, const char* mcs_ue_id, const char* mcvideo_id,
+                                                         const char* const** out) {
+    return docsOut(CscClient::cmsSubscriptionDocuments(S(user_uri), S(mcs_ue_id), S(mcvideo_id)), out);
+}
+
 void CIMSUE_CALL cimsue_csc_tls_peer_expiry(cimsue_csc_t* c, cimsue_tls_peer_expiry_t* out) {
     if (!out) return;
     if (!c) { *out = cimsue_tls_peer_expiry_t{}; return; }
@@ -1936,6 +2023,10 @@ int32_t CIMSUE_CALL cimsue_struct_size(cimsue_struct_id_t id) {
     case CIMSUE_STRUCT_MCVIDEO_SERVICE_CONFIG_DOC: return (int32_t)sizeof(cimsue_mcvideo_service_config_doc_t);
     case CIMSUE_STRUCT_VIDEO_FRAME: return (int32_t)sizeof(cimsue_video_frame_t);
     case CIMSUE_STRUCT_VIDEO_REQUEST_EVENT: return (int32_t)sizeof(cimsue_video_request_event_t);
+    case CIMSUE_STRUCT_FLOOR_TIMERS: return (int32_t)sizeof(cimsue_floor_timers_t);
+    case CIMSUE_STRUCT_TC_TIMERS: return (int32_t)sizeof(cimsue_tc_timers_t);
+    case CIMSUE_STRUCT_SERVICE_AUTH_INFO: return (int32_t)sizeof(cimsue_service_auth_info_t);
+    case CIMSUE_STRUCT_XCAP_DIFF_SUBSCRIPTION: return (int32_t)sizeof(cimsue_xcap_diff_subscription_t);
     default:                              return -1;
     }
 }

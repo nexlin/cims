@@ -90,6 +90,39 @@ public class EngineHeadlessTests
         Assert.Equal(1, stopped);
     }
 
+    /// <summary>W01 — MC 서비스 인가·송출 확인·규격형 구독 명령이 코어 결과를 그대로 돌려주고, 계정 칸이 왕복한다(c_api_test ServiceAuthAndCallOptionFields).</summary>
+    [Fact]
+    public void ServiceAuthAndAccountFields()
+    {
+        using var e = Inline();
+        Assert.True(e.Start(new EngineConfig { LogLevel = 1, NullAudioDevice = true }).Ok);
+        var cfg = CompleteAccount();
+        cfg.McpttEnabled = true; cfg.McdataFd = true; cfg.AccessToken = "tok"; cfg.McpttServerUri = "sip:mcptt_psi@ptt.example.org";
+        cfg.TcTimers = new McVideoTcTimers(T100Ms: 3000); cfg.ConfirmQueuedTransmission = true;
+        var acc = e.AddAccount(cfg);
+        Assert.True(acc.Ok, acc.Reason);
+        var a = acc.Value;
+
+        // 등록 전 — 보내지 않았다(Unauthorized, Code 0)
+        var auth = a.ServiceAuth(McService.Mcptt);
+        Assert.Equal(ServiceAuthState.Unauthorized, auth.State);
+        Assert.Equal(a.Id, auth.AccountId);
+        Assert.Equal(McService.Mcptt, auth.Service);
+        Assert.Equal(0, auth.Code);
+        Assert.True(a.SetAccessToken("tok2").Ok);
+        Assert.Equal(-2, e.GetAccount(99).SetAccessToken("t").Code);        // 없는 계정 — 코어 결과 그대로
+        Assert.True(a.SetTcTimers(new McVideoTcTimers(T100Ms: 2000)).Ok);
+        Assert.Equal("no such account", e.GetAccount(99).SetMcVideoEnabled(true).Reason);
+        Assert.Equal(-2, e.GetAccount(99).SubscribeXcapDiff("sip:gms@ptt", new[] { "doc" }, "tok", true).Code);
+        Assert.Equal(-2, e.GetCall(7).ConfirmTransmission(true).Code);       // 없는 호
+        Assert.Equal(-2, e.GetCall(7).RequestQueuePosition().Code);
+        Assert.False(e.GetCall(7).TransmissionInfo.AwaitingConfirmation);
+
+        // 계정 칸 왕복 — 코어 헬퍼가 같은 구조체를 본다
+        Assert.True(cfg.IsComplete());
+        e.Stop();
+    }
+
     [Fact]
     public void EventsAreMarshalledThroughSynchronizationContext()
     {

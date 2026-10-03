@@ -58,6 +58,9 @@ TEST(CApi, EnumValuesMatchCxx) {
     EXPECT_STREQ(cimsue_service_auth_state_str(CIMSUE_SERVICE_AUTH_PENDING), "pending");
     EXPECT_STREQ(cimsue_transmission_kind_str(CIMSUE_TXEV_GRANTED), toString(TransmissionEvent::Kind::Granted));
     EXPECT_STREQ(cimsue_reception_state_str(CIMSUE_RX_RECEIVING), toString(ReceptionState::Receiving));
+    EXPECT_EQ((int)CIMSUE_RXEV_OVERRIDDEN, (int)ReceptionEvent::Kind::Overridden);
+    EXPECT_EQ((int)CIMSUE_COMMENCEMENT_FORCE_AUTO, (int)CommencementMode::ForceAuto);
+    EXPECT_EQ((int)CIMSUE_COMMENCEMENT_MANUAL, (int)CommencementMode::Manual);
 }
 
 // ── ABI 자기검사 — 바인딩이 대조할 sizeof 가 실제 구조체와 같고, 등록된 id 는 전부 답하며, 모르는 id 는 -1 ──
@@ -262,17 +265,33 @@ TEST(CApi, EngineLifecycleHeadless) {
     EXPECT_EQ(cimsue_engine_request_queue_position(e, 7), -2);
     EXPECT_EQ(cimsue_engine_set_mcvideo_enabled(e, 99, 0), -2);
     EXPECT_STREQ(cimsue_last_error(), "no such account");
-    EXPECT_EQ(cimsue_engine_set_tc_timers(e, 99, 2000, 0, 0, 0, 0), -2);
+    cimsue_tc_timers_t tc99{2000, 0, 0, 0, 0};
+    EXPECT_EQ(cimsue_engine_set_tc_timers(e, 99, &tc99), -2);
     EXPECT_EQ(cimsue_engine_set_mcvideo_enabled(nullptr, 0, 1), -1);
     // 서비스 인가(TS 24.379 §7.2.2) — 토큰은 계정에, 상태는 조회. 등록 전이라 보내지 않는다(인가 안 됨, code 0)
     EXPECT_EQ(cimsue_engine_set_access_token(e, 99, "t"), -2);
     EXPECT_EQ(cimsue_engine_set_access_token(e, acc, "t"), 0);
-    int32_t code = -1, warn = -1, multi = -1;
-    EXPECT_EQ(cimsue_engine_service_auth(e, acc, CIMSUE_MC_SERVICE_MCPTT, &code, &warn, &multi), CIMSUE_SERVICE_AUTH_UNAUTHORIZED);
-    EXPECT_EQ(code, 0);
-    EXPECT_EQ(warn, 0);
-    EXPECT_EQ(multi, 0);
-    EXPECT_EQ(cimsue_engine_service_auth(nullptr, 0, CIMSUE_MC_SERVICE_MCDATA, nullptr, nullptr, nullptr), CIMSUE_SERVICE_AUTH_UNAUTHORIZED);
+    cimsue_service_auth_info_t sa{};
+    sa.code = -1; sa.warning_code = -1; sa.multiple_devices = -1;
+    cimsue_engine_service_auth(e, acc, CIMSUE_MC_SERVICE_MCPTT, &sa);
+    EXPECT_EQ(sa.state, CIMSUE_SERVICE_AUTH_UNAUTHORIZED);
+    EXPECT_EQ(sa.account_id, acc);
+    EXPECT_EQ(sa.service, CIMSUE_MC_SERVICE_MCPTT);
+    EXPECT_EQ(sa.code, 0);
+    EXPECT_EQ(sa.warning_code, 0);
+    EXPECT_EQ(sa.multiple_devices, 0);
+    ASSERT_NE(sa.warning_text, nullptr);
+    cimsue_engine_service_auth(nullptr, 0, CIMSUE_MC_SERVICE_MCDATA, &sa);
+    EXPECT_EQ(sa.state, CIMSUE_SERVICE_AUTH_UNAUTHORIZED);
+    cimsue_engine_service_auth(e, acc, CIMSUE_MC_SERVICE_MCDATA, nullptr);   // 출력 NULL — 무해
+    // 규격형 문서 변경 구독 — 미등록 계정이라도 C++ 결과 그대로, 없는 계정·NULL 엔진
+    const char* docs[] = {"org.openmobilealliance.groups/global/byGroupID/sip%3Ag1%40ptt"};
+    cimsue_xcap_diff_subscription_t xs{docs, 1, "tok"};
+    EXPECT_EQ(cimsue_engine_subscribe_xcap_diff_documents(nullptr, acc, "sip:gms@ptt", &xs, 1), -1);
+    EXPECT_EQ(cimsue_engine_subscribe_xcap_diff_documents(e, 99, "sip:gms@ptt", &xs, 1), -2);
+    cimsue_tc_timers_t tct{2000, 0, 0, 0, 0};
+    EXPECT_EQ(cimsue_engine_set_tc_timers(e, acc, &tct), CIMSUE_OK) << cimsue_last_error();
+    EXPECT_EQ(cimsue_engine_set_tc_timers(e, acc, nullptr), -1);
     EXPECT_EQ(cimsue_csc_get_group_excluding_members(nullptr, "t", "tel:g1", nullptr), -1);
     cimsue_transmission_info_t ti{};
     cimsue_engine_transmission_info(e, 7, &ti);
@@ -631,4 +650,126 @@ TEST(CApi, McpttFieldsAndCmsDocs) {
     EXPECT_EQ((int)CIMSUE_COND_ADVERTISED, (int)ConditionCause::Advertised);
     EXPECT_EQ((int)CIMSUE_ROUTE_LOUDSPEAKER, (int)AudioRoute::Loudspeaker);
     EXPECT_EQ(CIMSUE_MIC_AGC_TARGET_DBOV, kMicAgcTargetDbov);
+}
+
+// ── W01 노출분 — MC 서비스 등록·인가·송출 확인 계정 칸, 그룹 호 옵션(chat·개시 방식·재합류), 서비스 인가 콜백, 요청 결과 Warning,
+//    그룹 문서 사전 구성 전용, service config 애드혹 지원, ue-init GMS-URI, 규격형 구독 문서 목록 — C++ 표면과 1:1 ──
+namespace {
+void CIMSUE_CALL onAuth(void* u, const cimsue_service_auth_info_t*) { ++*(int*)u; }   // 자리만 — 인가 왕복은 ServiceAuth.* 가 본다
+}  // namespace
+
+TEST(CApi, ServiceAuthAndCallOptionFields) {
+    // 기본값 = C++ 기본값
+    const AccountConfig da;
+    cimsue_account_config_t ac;
+    cimsue_account_config_default(&ac);
+    EXPECT_EQ(ac.mcptt_enabled != 0, da.mcpttEnabled);
+    EXPECT_EQ(ac.mcdata_fd != 0, da.mcdataFd);
+    EXPECT_EQ(ac.access_token, nullptr);
+    EXPECT_EQ(ac.confirm_queued_transmission != 0, da.confirmQueuedTransmission);
+    EXPECT_EQ(ac.tc_timers.t100_ms, da.tcTimers.t100Ms);
+    const GroupCallOptions dg;
+    cimsue_group_call_options_t go;
+    cimsue_group_call_options_default(&go);
+    EXPECT_EQ(go.chat != 0, dg.chat);
+    EXPECT_EQ((int)go.commencement, (int)dg.commencement);
+    EXPECT_EQ(go.session_uri, nullptr);
+
+    // to_account — PTT 서비스는 MCPTT 태그를 켠다(ServiceProfile::toAccount, TS 24.379 §7.2.1AA), 전화 서비스는 끈다
+    cimsue_profile_t p{};
+    ASSERT_EQ(cimsue_csc_parse_profile(kProfile, &p), CIMSUE_OK) << cimsue_last_error();
+    cimsue_account_config_t a{};
+    cimsue_service_profile_to_account(cimsue_profile_service(&p, "ptt"), nullptr, &a);
+    EXPECT_EQ(a.mcptt_enabled, 1);
+    EXPECT_STREQ(a.access_token, "");
+    cimsue_service_profile_to_account(cimsue_profile_service(&p, "volte"), nullptr, &a);
+    EXPECT_EQ(a.mcptt_enabled, 0);
+
+    // 엔진 — 계정 칸이 C++ 로 들어가고(토큰 → 인가 상태 조회), 서비스 인가 콜백 자리가 리스너에 있다
+    cimsue_engine_t* e = cimsue_engine_create();
+    ASSERT_NE(e, nullptr);
+    int auths = 0;
+    cimsue_listener_t l{};
+    l.user = &auths; l.on_service_auth = onAuth;
+    cimsue_engine_config_t cfg;
+    cimsue_engine_config_default(&cfg);
+    cfg.log_level = 1; cfg.null_audio_device = 1;
+    ASSERT_EQ(cimsue_engine_start(e, &cfg, &l), CIMSUE_OK) << cimsue_last_error();
+    cimsue_account_config_default(&ac);
+    ac.server_host = "127.0.0.1"; ac.server_port = 65000; ac.domain = "ptt.example.org";
+    ac.msisdn = "+82500000001"; ac.imsi = "4503382500000001"; ac.ha1 = "0123456789abcdef0123456789abcdef";
+    ac.mcptt_enabled = 1; ac.mcptt_server_uri = "sip:mcptt_psi@ptt.example.org"; ac.access_token = "tok";
+    ac.tc_timers.t100_ms = 3000; ac.confirm_queued_transmission = 1;
+    int32_t acc = cimsue_engine_add_account(e, &ac);
+    ASSERT_GE(acc, 0) << cimsue_last_error();
+    cimsue_service_auth_info_t sa{};
+    cimsue_engine_service_auth(e, acc, CIMSUE_MC_SERVICE_MCPTT, &sa);
+    EXPECT_EQ(sa.state, CIMSUE_SERVICE_AUTH_UNAUTHORIZED);          // 등록 전 — 보내지 않았다
+    EXPECT_EQ(sa.code, 0);
+    // 재합류 옵션 — 계정에 등록이 없어도 옵션 변환은 C++ 로 들어간다(실패 사유는 C++ 의 것)
+    go.session_uri = "sip:mcptt_psi@ptt.example.org;gr=s1";
+    go.chat = 1;
+    go.commencement = CIMSUE_COMMENCEMENT_MANUAL;
+    (void)cimsue_engine_join_group_call(e, acc, "sip:g1@ptt.example.org", &go);
+    cimsue_engine_stop(e);
+    cimsue_engine_destroy(e);
+
+    // 그룹 문서 — 사전 구성 전용 왕복(TS 24.481 §7.2.4.2), 0 초기화 = false(PUT 에 싣지 않는다)
+    cimsue_group_doc_t d{};
+    d.uri = "sip:g1@ptt.example.org"; d.display_name = "G1";
+    char xml[4096];
+    cimsue_group_doc_to_xml(&d, xml, sizeof xml);
+    EXPECT_EQ(std::string(xml).find("preconfigured-group-use-only"), std::string::npos);
+    d.preconfigured_group_use_only = 1;
+    ASSERT_LT(cimsue_group_doc_to_xml(&d, xml, sizeof xml), (int32_t)sizeof xml);
+    EXPECT_NE(std::string(xml).find("preconfigured-group-use-only>true"), std::string::npos);
+    cimsue_group_doc_t back{};
+    ASSERT_EQ(cimsue_group_doc_parse(xml, &back), CIMSUE_OK) << cimsue_last_error();
+    EXPECT_EQ(back.preconfigured_group_use_only, 1);
+
+    // service config — 애드혹 지원(TS 24.484 §8.4.2.6): 요소 없음 = 미지원 → 게이트가 막는다, 있으면 값 그대로
+    cimsue_service_config_doc_t sc{};
+    ASSERT_EQ(cimsue_service_config_parse(
+                  "<service-configuration-info><service-configuration-params domain=\"ptt.example.org\"><on-network/>"
+                  "</service-configuration-params></service-configuration-info>", &sc), CIMSUE_OK) << cimsue_last_error();
+    EXPECT_EQ(sc.adhoc_group_call_support, 0);
+    EXPECT_EQ(sc.adhoc_max_participants, -1);
+    cimsue_capabilities_t k{};
+    cimsue_capabilities_of(nullptr, &sc, &k);
+    EXPECT_EQ(k.adhoc_group_call, 0);
+    ASSERT_EQ(cimsue_service_config_parse(
+                  "<service-configuration-info><service-configuration-params domain=\"ptt.example.org\"><on-network><anyExt>"
+                  "<adhoc-group-call><allow-adhoc-group-call-support>true</allow-adhoc-group-call-support>"
+                  "<max-no-participants>8</max-no-participants></adhoc-group-call></anyExt></on-network>"
+                  "</service-configuration-params></service-configuration-info>", &sc), CIMSUE_OK) << cimsue_last_error();
+    EXPECT_EQ(sc.adhoc_group_call_support, 1);
+    EXPECT_EQ(sc.adhoc_max_participants, 8);
+    cimsue_capabilities_of(nullptr, &sc, &k);
+    EXPECT_EQ(k.adhoc_group_call, 1);
+
+    // ue-init GMS-URI → 규격형 그룹 문서 구독의 Request-URI
+    cimsue_ue_init_config_doc_t ui{};
+    ASSERT_EQ(cimsue_ue_init_config_parse(
+                  "<mcptt-UE-initial-configuration domain=\"ptt.example.org\"><on-network>"
+                  "<GMS-URI>sip:gms_psi@ptt.example.org</GMS-URI></on-network></mcptt-UE-initial-configuration>", &ui), CIMSUE_OK)
+        << cimsue_last_error();
+    EXPECT_STREQ(ui.gms_uri, "sip:gms_psi@ptt.example.org");
+
+    // 구독 문서 목록 = CscClient 정적 함수 그대로
+    const char* groups[] = {"sip:g1@ptt.example.org", "sip:g2@ptt.example.org"};
+    const char* const* docs = nullptr;
+    ASSERT_EQ(cimsue_csc_gms_subscription_documents(groups, 2, &docs), 2);
+    const auto gms = CscClient::gmsSubscriptionDocuments({groups[0], groups[1]});
+    EXPECT_EQ(std::string(docs[1]), gms[1]);
+    const auto cms = CscClient::cmsSubscriptionDocuments("tel:+82500000001", "urn:uuid:1", "tel:+82500000001");
+    ASSERT_EQ(cimsue_csc_cms_subscription_documents("tel:+82500000001", "urn:uuid:1", "tel:+82500000001", &docs), (int32_t)cms.size());
+    for (size_t i = 0; i < cms.size(); ++i) EXPECT_EQ(std::string(docs[i]), cms[i]);
+    EXPECT_EQ(cimsue_csc_cms_subscription_documents("tel:+82500000001", nullptr, nullptr, &docs), 2);   // UE init·MCVideo 없음
+    EXPECT_EQ(cimsue_csc_gms_subscription_documents(nullptr, 0, &docs), 0);
+    EXPECT_EQ(docs, nullptr);
+
+    for (cimsue_struct_id_t id : {CIMSUE_STRUCT_FLOOR_TIMERS, CIMSUE_STRUCT_TC_TIMERS, CIMSUE_STRUCT_SERVICE_AUTH_INFO,
+                                  CIMSUE_STRUCT_XCAP_DIFF_SUBSCRIPTION})
+        EXPECT_GT(cimsue_struct_size(id), 0);
+    EXPECT_EQ(cimsue_struct_size(CIMSUE_STRUCT_SERVICE_AUTH_INFO), (int32_t)sizeof(cimsue_service_auth_info_t));
 }

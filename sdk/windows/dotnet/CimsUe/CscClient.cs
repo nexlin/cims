@@ -124,8 +124,8 @@ public sealed class McVideoGroupAttrs
 /// <summary>CMS 대상 항목(TS 24.484 §8.3.2.7 EntryType) — Mode = entry-info(DedicatedGroup | UseCurrentlySelectedGroup | UsePreConfigured | LocallyDetermined).</summary>
 public sealed record CmsEntry(string Uri, string Mode);
 
-/// <summary>MCPTT user profile(TS 24.484 §8.3.2, csc.h UserProfileDoc) — 코어가 해석하는 요소만. 인가 Allow* 는 요소가 없으면 허용이다 —
-/// 서버가 최종 판정하므로 앱은 UX 선차단만 한다. NotModified = 304(나머지는 비어 있다 — 가진 사본을 유지). MaxAffiliationsN2 -1 = 미기재.</summary>
+/// <summary>MCPTT user profile(TS 24.484 §8.3.2, csc.h UserProfileDoc) — 코어가 해석하는 요소만. 인가 Allow* 는 요소가 없으면 false 다(표 8.3.2.7 의
+/// 규격 기본값 — 문서를 아직 못 받은 상태는 <see cref="Capabilities.Of"/> 에 null 로 넘겨 허용으로 둔다). 서버가 최종 판정하므로 앱은 UX 선차단만 한다. NotModified = 304(나머지는 비어 있다 — 가진 사본을 유지). MaxAffiliationsN2 -1 = 미기재.</summary>
 public sealed record UserProfileDoc(
     string ETag, bool NotModified, string UserUri, CmsEntry EmergencyGroup, CmsEntry ImminentPerilGroup, CmsEntry EmergencyAlertGroup,
     CmsEntry EmergencyPrivateRecipient, IReadOnlyList<string> Groups, IReadOnlyList<string> ImplicitAffiliations, int MaxAffiliationsN2,
@@ -138,15 +138,17 @@ public sealed record UserProfileDoc(
 }
 
 /// <summary>MCPTT service configuration(TS 24.484 §8.4, csc.h ServiceConfigDoc) — 인가 요소는 없다. Rp* = Resource-Priority r-value(빈 값 = 미기재 —
-/// 계정 기본값 유지). 요소가 없으면 빈 값/-1.</summary>
+/// 계정 기본값 유지). 요소가 없으면 빈 값/-1. AdhocGroupCallSupport = &lt;allow-adhoc-group-call-support&gt;(§8.4.2.6) — 해석한 문서에 요소가 없으면 false
+/// = 애드혹 그룹 호 미지원(단말은 개시하지 않는다, TS 24.379 §17.2.2.1.1), <see cref="Capabilities.AdhocGroupCall"/> 에 AND 된다. 기본값 true 는 «해석하지 않은 문서».</summary>
 public sealed record ServiceConfigDoc(string ETag, bool NotModified, string Domain, int NumLevelsGroupHierarchy, int NumLevelsUserHierarchy,
-                                      string RpEmergency, string RpImminentPeril, string RpNormal)
+                                      string RpEmergency, string RpImminentPeril, string RpNormal,
+                                      bool AdhocGroupCallSupport = true, int AdhocMaxParticipants = -1)
 {
     public static Result<ServiceConfigDoc> Parse(string xml) => CscClient.ParseServiceConfig(xml);
 }
 
 /// <summary>MCVideo user profile(TS 24.484 §9.3, csc.h McVideoUserProfileDoc) — 문서가 있으면 MCVideo 이용 자격이 있다(Fetch 404 = 자격 없음).
-/// Groups = MCVideo 로 affiliate 할 수 있는 그룹. 인가 Allow* 는 요소가 없으면 허용. 정수 -1 = 미기재.</summary>
+/// Groups = MCVideo 로 affiliate 할 수 있는 그룹. 인가 Allow* 는 요소가 없으면 false(표 9.3.2.7). 정수 -1 = 미기재.</summary>
 public sealed record McVideoUserProfileDoc(
     string ETag, bool NotModified, string UserUri, string McvideoId, IReadOnlyList<string> Groups, IReadOnlyList<string> ImplicitAffiliations,
     int MaxAffiliationsN2, int MaxSimultaneousVideoStreams, int MaxSimultaneousCallsN6, CmsEntry EmergencyGroup, CmsEntry ImminentPerilGroup,
@@ -164,12 +166,16 @@ public sealed record McVideoServiceConfigDoc(string ETag, bool NotModified, stri
                                              int T100Sec, int T101Sec, int T102Sec, int T103Sec, int T104Sec)
 {
     public static Result<McVideoServiceConfigDoc> Parse(string xml) => CscClient.ParseMcVideoServiceConfig(xml);
+    /// <summary>참여자 타이머(TS 24.581 표 11.1.1-1) → <see cref="AccountConfig.TcTimers"/> / <see cref="Account.SetTcTimers"/>. 문서에 없는 값은 0(기본값).</summary>
+    public McVideoTcTimers TcTimers => new(Ms(T100Sec), Ms(T101Sec), Ms(T102Sec), Ms(T103Sec), Ms(T104Sec));
+    private static int Ms(int sec) => sec > 0 ? sec * 1000 : 0;
 }
 
 /// <summary>MCS UE initial configuration(TS 24.484 §7.2, csc.h UeInitConfigDoc) — 참여 기능 PSI(`&lt;anyExt&gt;` 의 *-Service-Details/Server-URI).
-/// 광고하지 않은 서비스는 빈 값 — 계정의 해당 PSI 도 비워 둔다(<see cref="AccountConfig.McpttServerUri"/>·<see cref="AccountConfig.McdataServerUri"/>).</summary>
+/// 광고하지 않은 서비스는 빈 값 — 계정의 해당 PSI 도 비워 둔다(<see cref="AccountConfig.McpttServerUri"/>·<see cref="AccountConfig.McdataServerUri"/>).
+/// GmsUri = on-network/GMS-URI — GMS 구독 프록시 PSI(§7.2.2.7 5)) = 규격형 그룹 문서 구독(<see cref="Account.SubscribeXcapDiff(string, IReadOnlyList{string}, string, bool)"/>)의 Request-URI.</summary>
 public sealed record UeInitConfigDoc(string ETag, bool NotModified, string Domain, string McpttServerUri, string McdataServerUri,
-                                     string McvideoServerUri = "", FloorTimers? FloorTimers = null)
+                                     string McvideoServerUri = "", FloorTimers? FloorTimers = null, string GmsUri = "")
 {
     public static Result<UeInitConfigDoc> Parse(string xml) => CscClient.ParseUeInitConfig(xml);
 }
@@ -230,6 +236,11 @@ public sealed class GroupDoc
     public string? AckAction { get; set; }
     /// <summary>MCVideo 몫 — null = MCVideo 그룹 아님(PUT 에 싣지 않는다). 서비스 집합 = MCPTT + MCVideo(TS 23.280 §3).</summary>
     public McVideoGroupAttrs? Mcvideo { get; set; }
+    /// <summary>&lt;preconfigured-group-use-only&gt;(TS 24.481 §7.2.4.2 — 없으면 false). true 면 재편성(regroup)의 설정 원본으로만 쓰는 그룹이다: 이 그룹으로
+    /// 호·경보를 열지 않고 사용자에게 알린다(서버는 403 Warning 167·168). 읽은 값을 그대로 되돌린다(true 일 때만 PUT 에 싣는다).</summary>
+    public bool PreconfiguredGroupUseOnly { get; set; }
+    /// <summary>이 그룹으로 호·경보를 열 수 있는가 — 개시·합류·경보 조작 앞에서 본다.</summary>
+    public bool UsableForCalls => !PreconfiguredGroupUseOnly;
 
     /// <summary>문서 → XML(PUT 본문) — 직렬화 규칙은 코어.</summary>
     public string ToXml() => CscClient.GroupDocToXml(this);
@@ -338,6 +349,18 @@ public sealed unsafe class CscClient : IDisposable
         {
             cimsue_group_doc_t d;
             int st = cimsue_csc_get_group(Handle, accessToken, userUri, groupUri, &d);
+            return st == 0 ? Result<GroupDoc>.Success(ToManaged(&d)) : Result<GroupDoc>.Fail(st, Engine.LastError());
+        }
+    }
+
+    /// <summary>멤버를 뺀 그룹 문서 — POST + GMOP &lt;get-excluding-memberlist&gt;(TS 24.481 §6.3.16.2). 규격의 기본 조회다: 그룹 속성(종류·타이머·규칙)만 볼 때
+    /// 쓰고, 명단이 필요할 때만 <see cref="GetGroup"/>. Members 는 비고 ETag 도 없다(문서 전체의 ETag 가 아니다).</summary>
+    public Result<GroupDoc> GetGroupExcludingMembers(string accessToken, string groupUri)
+    {
+        lock (_gate)
+        {
+            cimsue_group_doc_t d;
+            int st = cimsue_csc_get_group_excluding_members(Handle, accessToken, groupUri, &d);
             return st == 0 ? Result<GroupDoc>.Success(ToManaged(&d)) : Result<GroupDoc>.Fail(st, Engine.LastError());
         }
     }
@@ -600,6 +623,7 @@ public sealed unsafe class CscClient : IDisposable
         {
             c.domain = s.Add(sc.Domain); c.num_levels_group_hierarchy = sc.NumLevelsGroupHierarchy; c.num_levels_user_hierarchy = sc.NumLevelsUserHierarchy;
             c.rp_emergency = s.Add(sc.RpEmergency); c.rp_imminent_peril = s.Add(sc.RpImminentPeril); c.rp_normal = s.Add(sc.RpNormal);
+            c.adhoc_group_call_support = Engine.B(sc.AdhocGroupCallSupport); c.adhoc_max_participants = sc.AdhocMaxParticipants;
         }
         cimsue_capabilities_t k;
         cimsue_capabilities_of(up is null ? null : &u, sc is null ? null : &c, &k);
@@ -628,6 +652,26 @@ public sealed unsafe class CscClient : IDisposable
 
     /// <summary>XCAP 경로용 percent-encoding(코어 규칙).</summary>
     public static string Encode(string s) => Utf8.Call((buf, cap) => cimsue_csc_enc(s, buf, cap));
+
+    /// <summary>규격형 그룹 문서 구독의 문서 목록(XCAP root 기준 상대 경로) — 그룹마다 그룹 ID 로 찾는 문서(TS 24.481 §7.2.10.2). 경로 규칙은 코어.</summary>
+    public static IReadOnlyList<string> GmsSubscriptionDocuments(IReadOnlyList<string> groupUris)
+    {
+        ArgumentNullException.ThrowIfNull(groupUris);
+        using var s = new NativeStrings();
+        byte** g = s.AddArray(groupUris, out int n);
+        byte** docs;
+        int count = cimsue_csc_gms_subscription_documents(g, n, &docs);
+        return StrArray(docs, count);
+    }
+
+    /// <summary>규격형 CMS 문서 구독의 문서 목록 — UE initial configuration(mcsUeId 가 null·빈 값이면 뺀다) · MCPTT user profile · service configuration,
+    /// mcvideoId 가 있으면 MCVideo user profile · service configuration 도(TS 24.484 §6.2.2 «enabled MCS 마다»).</summary>
+    public static IReadOnlyList<string> CmsSubscriptionDocuments(string userUri, string? mcsUeId, string? mcvideoId = null)
+    {
+        byte** docs;
+        int count = cimsue_csc_cms_subscription_documents(userUri, mcsUeId, mcvideoId, &docs);
+        return StrArray(docs, count);
+    }
 
     internal static AccountConfig ToAccountConfig(ServiceProfile sp, string? loginPw)
     {
@@ -665,7 +709,8 @@ public sealed unsafe class CscClient : IDisposable
 
     private static ServiceConfigDoc ToManaged(cimsue_service_config_doc_t* d) =>
         new(Utf8.Str(d->etag), d->not_modified != 0, Utf8.Str(d->domain), d->num_levels_group_hierarchy, d->num_levels_user_hierarchy,
-            Utf8.Str(d->rp_emergency), Utf8.Str(d->rp_imminent_peril), Utf8.Str(d->rp_normal));
+            Utf8.Str(d->rp_emergency), Utf8.Str(d->rp_imminent_peril), Utf8.Str(d->rp_normal),
+            d->adhoc_group_call_support != 0, d->adhoc_max_participants);
 
     private static McVideoUserProfileDoc ToManaged(cimsue_mcvideo_user_profile_doc_t* d) =>
         new(Utf8.Str(d->etag), d->not_modified != 0, Utf8.Str(d->user_uri), Utf8.Str(d->mcvideo_id), StrArray(d->groups, d->group_count),
@@ -727,7 +772,7 @@ public sealed unsafe class CscClient : IDisposable
 
     private static UeInitConfigDoc ToManaged(cimsue_ue_init_config_doc_t* d) =>
         new(Utf8.Str(d->etag), d->not_modified != 0, Utf8.Str(d->domain), Utf8.Str(d->mcptt_server_uri), Utf8.Str(d->mcdata_server_uri),
-            Utf8.Str(d->mcvideo_server_uri), Engine.ToManaged(d->floor_timers));
+            Utf8.Str(d->mcvideo_server_uri), Engine.ToManaged(d->floor_timers), Utf8.Str(d->gms_uri));
 
     private static ServiceProfile ToManaged(cimsue_service_profile_t* s)
     {
@@ -781,6 +826,7 @@ public sealed unsafe class CscClient : IDisposable
             AckTimeoutSec = d->has_ack_timeout != 0 ? d->ack_timeout_sec : null,
             AckAction = Utf8.Str(d->ack_action) is { Length: > 0 } act ? act : null,
             Mcvideo = ToManaged(d->mcvideo),
+            PreconfiguredGroupUseOnly = d->preconfigured_group_use_only != 0,
         };
         for (int i = 0; i < d->member_count; ++i)
             g.Members.Add(new GroupMember
@@ -826,6 +872,7 @@ public sealed unsafe class CscClient : IDisposable
         if (g.AckTimeoutSec is int tng1 && tng1 >= 0) { n.has_ack_timeout = 1; n.ack_timeout_sec = tng1; }
         if (!string.IsNullOrEmpty(g.AckAction)) n.ack_action = s.Add(g.AckAction);
         ToNative(g.Mcvideo, s, &n.mcvideo);
+        n.preconfigured_group_use_only = Engine.B(g.PreconfiguredGroupUseOnly);
         return n;
     }
 

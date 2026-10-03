@@ -63,6 +63,10 @@ public unsafe class AbiLayoutTests
         new object[] { cimsue_struct_id_t.MCVIDEO_SERVICE_CONFIG_DOC, sizeof(cimsue_mcvideo_service_config_doc_t) },
         new object[] { cimsue_struct_id_t.VIDEO_FRAME, sizeof(cimsue_video_frame_t) },
         new object[] { cimsue_struct_id_t.VIDEO_REQUEST_EVENT, sizeof(cimsue_video_request_event_t) },
+        new object[] { cimsue_struct_id_t.FLOOR_TIMERS, sizeof(cimsue_floor_timers_t) },
+        new object[] { cimsue_struct_id_t.TC_TIMERS, sizeof(cimsue_tc_timers_t) },
+        new object[] { cimsue_struct_id_t.SERVICE_AUTH_INFO, sizeof(cimsue_service_auth_info_t) },
+        new object[] { cimsue_struct_id_t.XCAP_DIFF_SUBSCRIPTION, sizeof(cimsue_xcap_diff_subscription_t) },
     };
 
     [Theory]
@@ -86,5 +90,7 @@ public unsafe class AbiLayoutTests
         Assert.Equal("REGISTERED", Engine.ToText(RegState.Registered).ToUpperInvariant());
         Assert.False(string.IsNullOrEmpty(Engine.ToText(FloorEventKind.Granted)));
         Assert.False(string.IsNullOrEmpty(Engine.Version));
+        Assert.Equal("mcvideo", Engine.ToText(McService.McVideo));
+        Assert.Equal("pending", Engine.ToText(ServiceAuthState.Pending));
     }
 }

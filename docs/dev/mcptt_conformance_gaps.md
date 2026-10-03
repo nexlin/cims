@@ -131,7 +131,7 @@ CSP 는 참여 기능과 제어 기능을 겸한다.
 
 | # | 급 | 대상 | 규격 | CIMS 지금 | 영향 | 확인 |
 |---|---|---|---|---|---|---|
-| PRV-4 | B | 앱 | §11.1.1.2.1.1 14) — 발신 단말이 Answer-Mode(Auto·Manual) 또는 Priv-Answer-Mode 를 싣는다 | SDK 는 싣는다(`GroupCallOptions.commencement` — Auto·Manual·ForceAuto, Kotlin 포함. 기본 미지정 = 헤더 없음). **앱 셋이 고르지 않는다** — 개별 호 발신 화면에 개시 방식 선택이 없고, C API 옵션 구조체에 칸이 없다 | 수동 수락·자동 응답 요청을 사용자가 고르지 못한다(착신 단말 설정대로 받는다) | ○ |
+| PRV-4 | B | 앱 | §11.1.1.2.1.1 14) — 발신 단말이 Answer-Mode(Auto·Manual) 또는 Priv-Answer-Mode 를 싣는다 | SDK 는 싣는다(`GroupCallOptions.commencement` — Auto·Manual·ForceAuto, Kotlin 포함. 기본 미지정 = 헤더 없음). **앱 셋이 고르지 않는다** — 개별 호 발신 화면에 개시 방식 선택이 없다(C API `commencement`·.NET `GroupCallOptions.Commencement` 는 있다) | 수동 수락·자동 응답 요청을 사용자가 고르지 못한다(착신 단말 설정대로 받는다) | ○ |
 | PRV-7 | B | CSP | §11.1.1.4.2 — SDP 없는 응답(거절 최종 응답 등)은 본문째 개시자에게 | 개시자 180 의 PAI·착신 Warning, 거절 최종 응답의 멤버 Warning 은 옮긴다(S08). 멤버 응답의 본문(mcptt-info 등)은 옮기지 않는다 | 착신 측이 본문으로 준 정보가 발신 단말에 닿지 않는다 | ○ |
 
 ### 3.6 애드혹 그룹 호 (ADH) — TS 24.379 §17
@@ -194,7 +194,7 @@ CSP 는 참여 기능과 제어 기능을 겸한다.
 | GMS-8 | B | CSC·SDK·관제 | §7.2.8 — 요소가 없을 때: `on-network-invite-members` = false(chat), `allow-MCPTT-emergency-alert` = false, `on-network-allow-conference-state` = false, group-priority = 최저 | XCAP 생성 기본값 = prearranged·경보 허용·conference 허용·우선순위 5(`mcptt.py:2633-2640`). SDK 구조체 기본 = prearranged·긴급 호/경보 허용(`sdk/core/include/cimsue/csc.h:145-148`) | 요소를 생략한 규격 문서가 반대 뜻으로 만들어진다(권한 확대). SDK 는 규격 GMS 문서를 반대로 읽는다. mcptt_api.md 의 «conference-state 기본 true» 는 규격과 반대다 | ◎ |
 | GMS-14 | B | CSP | §6.3.13.3.2.2 — xcap-diff SUBSCRIBE 의 신원은 mcptt-info `<mcptt-access-token>`, 구독 대상은 resource-lists. RFC 5875 §4.6 — NOTIFY 의 `sel` 은 구독한 URI 와 같아야 한다 | (본문 resource-lists 는 읽는다 — 분류·`sel` = 구독한 entry, S19.) 신원 = From(등록·Digest)이고 `<mcptt-access-token>` 은 읽지 않는다 — 토큰 검증 경로가 CSP 에 없다 | 토큰 없이도 구독이 선다 · 토큰의 MCPTT ID 와 SIP 신원이 다른 구성(규격 단말)에서 인가 대상이 어긋난다 | ○ |
 | GMS-15 | B | CSP·CSC | RFC 5874 — `new-etag` = 변경 뒤 문서의 ETag, 삭제는 `previous-etag` 만. RFC 5875 §4.7 — 앞 NOTIFY 의 200 전에 다음 NOTIFY 를 보내지 않는다 | `new-etag` 가 `init`·`etag_<gid>`·`change_<ts>`·빈 값이고 HTTP ETag(내용 해시)와 다르다(삭제 통지는 `previous-etag` 만 — S19). 그룹마다 NOTIFY 를 연달아 보낸다(앞 NOTIFY 의 200 을 기다리지 않는다) — `csp/CspServer.cpp` `BuildXcapDiffBody`·`SendInitialNotify`·`SendGroupDocNotify` | `new-etag` 를 캐시와 견주는 단말은 늘 불일치이거나 «변경 없음» 으로 읽는다 | ○ |
-| GMS-16 | B | 관제 | §6.3.13.2.1 — 단말의 구독: resource-lists 본문 · mcptt-info 의 access token · P-Preferred-Service · Contact icsi-ref · Request-URI = 설정된 PSI | SDK(`Engine::subscribeXcapDiff(…, XcapDiffSubscription, …)` — 엔진 구독 경로가 본문·헤더를 싣는다)·현장 앱은 규격형으로 구독한다. **관제 앱 두 벌은 본문 없는 구독**이고 PSI 가 `sip:gms_psi@<도메인>` 고정이다(`DispatchSession.cs`, `DiscoveryPlane.kt`) — C API·.NET 파사드에 새 칸이 없다 | 규격 GMS·CMS 는 관제 앱의 구독을 받지 않거나 무엇을 통지할지 모른다 | ○ |
+| GMS-16 | B | 관제 | §6.3.13.2.1 — 단말의 구독: resource-lists 본문 · mcptt-info 의 access token · P-Preferred-Service · Contact icsi-ref · Request-URI = 설정된 PSI | SDK(`Engine::subscribeXcapDiff(…, XcapDiffSubscription, …)` — 엔진 구독 경로가 본문·헤더를 싣는다)·현장 앱은 규격형으로 구독한다. **관제 앱 두 벌은 본문 없는 구독**이고 PSI 가 `sip:gms_psi@<도메인>` 고정이다(`DispatchSession.cs`, `DiscoveryPlane.kt`) — 바인딩은 있다(C API `cimsue_engine_subscribe_xcap_diff_documents`·.NET `Account.SubscribeXcapDiff(psi, documents, token, on)`·`UeInitConfigDoc.GmsUri`) | 규격 GMS·CMS 는 관제 앱의 구독을 받지 않거나 무엇을 통지할지 모른다 | ○ |
 
 ### 3.12 설정 문서·CMS (CMS) — TS 24.484
 
@@ -229,7 +229,6 @@ CSP 는 참여 기능과 제어 기능을 겸한다.
 | android_ue_client.md U1 | Floor Ack 정합 | Ack 의 Message Type 에 ack 요구 비트가 섞인다 | FCS-4 |
 | ue_sdk.md §4 | API 표의 `presence(uri)` | 그런 API 가 없다 | AFF-12 |
 | mcptt_api.md | `on-network-allow-conference-state` 기본 true | 규격 기본 false | GMS-8 |
-| `sdk/windows/dotnet/CimsUe/Types.cs`(FullDuplex)·`Call.cs`(SetMuted) 주석 | floor 없는 개별 호 = `mc_no_floor_ctrl` | on-demand 는 «m=application 없음»(TS 24.379 §11.1.2) — 서버·SDK 코어·앱 문서는 고쳤다(S17·U04 묶음 C). .NET 주석은 W01 | — |
 
 ## 6. 묶음과 순서 (권고)
 

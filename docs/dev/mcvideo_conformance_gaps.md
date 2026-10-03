@@ -113,7 +113,7 @@ MCPTT 쪽 같은 뿌리의 결함은 [mcptt_conformance_gaps.md](mcptt_conforman
 
 | # | 급 | 대상 | 규격 | CIMS 지금 | 영향 | 확인 |
 |---|---|---|---|---|---|---|
-| VGU-5 | D | 관제 | §9.2.1.2.1.1 · §9.2.2.2.1.1 첫 단락 — 그룹 문서 `<preconfigured-group-use-only>` true 면 호를 열지 않고 알린다 | SDK(`GroupDoc.preconfiguredGroupUseOnly` — Kotlin 포함)·현장 앱(`CallRules.groupUsable`)은 따른다. **관제 앱 두 벌은 보지 않고**, C API 그룹 문서 구조체에 칸이 없다(.NET 파사드와 배치를 맞춰 덧붙일 것) | 관제 앱에서는 사전 구성 전용 그룹에도 개시 INVITE 가 나간다(서버도 403 `167` 을 하지 않는다) | ○ |
+| VGU-5 | D | 관제 | §9.2.1.2.1.1 · §9.2.2.2.1.1 첫 단락 — 그룹 문서 `<preconfigured-group-use-only>` true 면 호를 열지 않고 알린다 | SDK(`GroupDoc.preconfiguredGroupUseOnly` — Kotlin 포함)·현장 앱(`CallRules.groupUsable`)은 따른다. **관제 앱 두 벌은 보지 않는다**(C API `preconfigured_group_use_only`·.NET `GroupDoc.PreconfiguredGroupUseOnly` 는 있다) | 관제 앱에서는 사전 구성 전용 그룹에도 개시 INVITE 가 나간다(서버도 403 `167` 을 하지 않는다) | ○ |
 | VGU-6 | D | 관제 | §9.2.1.2.4.1 — 사용자 요청·커버리지 복귀 때 세션 식별자로 재합류 INVITE | SDK 는 `VideoGroupCallOptions.sessionUri` 를 지원한다. 현장 앱은 망 끊김으로 잃은 prearranged 호를 한 번 재합류한다(`CallRules.rejoinLostSession`). 관제 앱 두 벌은 쓰지 않는다 | 관제 앱은 망이 끊긴 뒤 prearranged 영상 호로 «보기만» 돌아갈 수 없다(서버 late call entry 도 없다 — VGC-2) | ○ |
 
 ### 3.5 개별·그 밖의 호 (VPRV) — TS 24.281 부록 F.1.3 · §10~§15
@@ -133,7 +133,7 @@ MCPTT 쪽 같은 뿌리의 결함은 [mcptt_conformance_gaps.md](mcptt_conforman
 
 | # | 급 | 대상 | 규격 | CIMS 지금 | 영향 | 확인 |
 |---|---|---|---|---|---|---|
-| TCU-1 | C | 관제 | 표 11.1.1 — T100~T104 는 MCVideo service configuration `<tc-timers-counters-R14>` 값 | 코어·Kotlin 파사드·현장 앱은 싣는다(`Account.setTcTimers` ← `PttGroups.loadMcVideoServiceConfig`). C API 는 `cimsue_engine_set_tc_timers` 만 있고 **관제 앱 두 벌이 문서를 받아 싣지 않는다** | 관제 앱에서는 서버가 바꾼 단말 타이머가 반영되지 않는다(서버 쪽 짝 TCS-1) | ○ |
+| TCU-1 | C | 관제 | 표 11.1.1 — T100~T104 는 MCVideo service configuration `<tc-timers-counters-R14>` 값 | 코어·Kotlin 파사드·현장 앱은 싣는다(`Account.setTcTimers` ← `PttGroups.loadMcVideoServiceConfig`). C API(`tc_timers`·`cimsue_engine_set_tc_timers`)·.NET(`AccountConfig.TcTimers`·`Account.SetTcTimers`·`McVideoServiceConfigDoc.TcTimers`)도 있다. **관제 앱 두 벌이 문서를 받아 싣지 않는다** | 관제 앱에서는 서버가 바꾼 단말 타이머가 반영되지 않는다(서버 쪽 짝 TCS-1) | ○ |
 
 ### 3.8 수신 제어 — 서버 (RCS) — TS 24.581 §6.3.6 · §6.3.7
 
@@ -183,7 +183,7 @@ MCPTT 쪽 같은 뿌리의 결함은 [mcptt_conformance_gaps.md](mcptt_conforman
 |---|---|---|---|
 | 4 | **제휴를 클라이언트 단위로** — 행 키 통일, 클라이언트 단위 해제·판정, 암묵 제휴 취소·완료 시점. MCPTT 묶음 8(AFF-1~8)과 한 작업 | VAFF-1 · VAFF-2 · VAFF-4 · VAFF-5 · VGC-11 | .45 CSP |
 | 5 | **진행 중 호와 제휴·그룹 변경** — late call entry, 제휴 해제·멤버 제거·서비스 끔 → BYE, 제휴 행 정리. MCPTT 묶음 9·10 의 결정과 같이 | VGC-2 · VGC-12 · VAFF-7 · VAFF-6(결정) | 결정 → .45 CSP |
-| 6 | **service configuration 값 결선(단말)** — 관제 앱이 MCVideo service config 를 받아 계정 타이머로 싣는다(현장 앱·Kotlin 파사드는 한다, C API 는 `cimsue_engine_set_tc_timers`) | TCU-1 | .45 SDK·win |
+| 6 | **service configuration 값 결선(단말)** — 관제 앱이 MCVideo service config 를 받아 계정 타이머로 싣는다(현장 앱·Kotlin 파사드는 한다, C API·.NET 바인딩도 있다) | TCU-1 | .45 SDK·win |
 | 7 | **코덱 선호의 한 줄기** — 그룹 선호 = 서버 집행 코덱(CSC·콘솔이 검증). 초대 offer 가 그 값을 쓴다(단말 offer 는 지원 encoding 을 전부 싣는다) | VGC-8 | .48 CSP |
 | 8 | **그룹 문서 PUT 해석** — 없음의 뜻(§7.2.8) | VGMS-1 · VGC-10(CSC 기본값 몫) | .45 CSC |
 | 9 | **단말 호 절차** — 제휴 상태 구독, preconfigured-group-use-only, 재합류 UI | VGU-5 · VGU-6 · VAFF-8 | .45 SDK·현장 → Windows(관제 앱) |

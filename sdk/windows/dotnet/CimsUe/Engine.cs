@@ -42,6 +42,9 @@ public sealed unsafe class Engine : IDisposable
     // ── 이벤트 (Listener 1:1) ──
     public event EventHandler<LogLine>? Log;
     public event EventHandler<RegInfo>? RegistrationChanged;
+    /// <summary>MC 서비스 인가 상태 변화(TS 24.379 §7.2.2 — <see cref="AccountConfig.AccessToken"/>). 등록이 서면 코어가 켠 서비스마다 인가하고 결과를
+    /// 알린다 — 앱은 Authorized 뒤에 그 서비스를 쓴다(제휴·채널 복원). 현재값 = <see cref="Account.ServiceAuth"/>.</summary>
+    public event EventHandler<ServiceAuthInfo>? ServiceAuthChanged;
     /// <summary>착신 — 180 은 코어가 이미 보냈다. MCPTT 착신은 AutoAnswerMcptt 면 코어가 200 까지 보낸다.</summary>
     public event EventHandler<CallInfo>? IncomingCall;
     public event EventHandler<CallInfo>? CallStateChanged;
@@ -176,6 +179,13 @@ public sealed unsafe class Engine : IDisposable
         cimsue_call_info_t c;
         cimsue_engine_call_info(Handle, callId, &c);
         return ToManaged(&c);
+    }
+
+    internal ServiceAuthInfo ServiceAuthOf(int accountId, McService service)
+    {
+        cimsue_service_auth_info_t i;
+        cimsue_engine_service_auth(Handle, accountId, (int)service, &i);
+        return ToManaged(&i);
     }
 
     internal FloorInfo FloorInfoOf(int callId)
@@ -349,6 +359,8 @@ public sealed unsafe class Engine : IDisposable
     public static string ToText(FloorState s) => Utf8.Str(cimsue_floor_state_str((int)s));
     public static string ToText(FloorEventKind k) => Utf8.Str(cimsue_floor_kind_str((int)k));
     public static string ToText(ConditionCause c) => Utf8.Str(cimsue_condition_cause_str((int)c));
+    public static string ToText(McService s) => Utf8.Str(cimsue_mc_service_str((int)s));
+    public static string ToText(ServiceAuthState s) => Utf8.Str(cimsue_service_auth_state_str((int)s));
 
     /// <summary>REGISTER User-Agent 규약 `&lt;제품&gt;/&lt;앱 버전&gt; (&lt;OS&gt;; &lt;모델&gt;)`(mcptt_management_views.md §4.1) — 코어 userAgentOf
     /// (괄호·역슬래시·제어 문자 정리 포함). Windows 기기 값을 채운 결과는 <see cref="Platform.DeviceIdentity.UserAgent"/>.</summary>
@@ -416,6 +428,11 @@ public sealed unsafe class Engine : IDisposable
         n.mcvideo_server_uri = s.Add(a.McvideoServerUri);
         n.auto_answer_mcvideo = B(a.AutoAnswerMcvideo);
         n.floor_timers = ToNative(a.FloorTimers);
+        n.mcptt_enabled = B(a.McpttEnabled);
+        n.mcdata_fd = B(a.McdataFd);
+        n.access_token = s.Add(a.AccessToken);
+        n.tc_timers = ToNative(a.TcTimers);
+        n.confirm_queued_transmission = B(a.ConfirmQueuedTransmission);
         return n;
     }
 
@@ -427,6 +444,13 @@ public sealed unsafe class Engine : IDisposable
 
     internal static FloorTimers ToManaged(in cimsue_floor_timers_t t) =>
         new(t.t100_ms, t.t101_ms, t.t103_ms, t.t104_ms, t.t132_ms, t.c100, t.c101, t.c104);
+
+    internal static cimsue_tc_timers_t ToNative(McVideoTcTimers t) => new()
+    {
+        t100_ms = t.T100Ms, t101_ms = t.T101Ms, t102_ms = t.T102Ms, t103_ms = t.T103Ms, t104_ms = t.T104Ms,
+    };
+
+    internal static McVideoTcTimers ToManaged(in cimsue_tc_timers_t t) => new(t.t100_ms, t.t101_ms, t.t102_ms, t.t103_ms, t.t104_ms);
 
     /// <summary>산출 AccountConfig(to_account) → 관리. 빈 문자열은 null(코어 기본값)로 — 다시 넣어도 같은 뜻이다.</summary>
     internal static AccountConfig FromNative(cimsue_account_config_t* n)
@@ -448,6 +472,8 @@ public sealed unsafe class Engine : IDisposable
             McpttServerUri = Opt(n->mcptt_server_uri), McdataServerUri = Opt(n->mcdata_server_uri),
             McvideoEnabled = n->mcvideo_enabled != 0, McvideoServerUri = Opt(n->mcvideo_server_uri),
             AutoAnswerMcvideo = n->auto_answer_mcvideo != 0, FloorTimers = ToManaged(n->floor_timers),
+            McpttEnabled = n->mcptt_enabled != 0, McdataFd = n->mcdata_fd != 0, AccessToken = Opt(n->access_token),
+            TcTimers = ToManaged(n->tc_timers), ConfirmQueuedTransmission = n->confirm_queued_transmission != 0,
         };
     }
 
@@ -514,10 +540,12 @@ public sealed unsafe class Engine : IDisposable
 
     internal static TransmissionEvent ToManaged(cimsue_transmission_event_t* e) =>
         new((TransmissionEventKind)e->kind, e->call_id, (TransmissionState)e->state, e->cause, Utf8.Str(e->cause_text), e->duration_sec,
-            e->priority, e->queue_position, e->indicator, e->audio_ssrc, e->video_ssrc, Utf8.Str(e->receiver_id), e->raw_type);
+            e->priority, e->queue_position, e->indicator, e->audio_ssrc, e->video_ssrc, Utf8.Str(e->receiver_id), e->raw_type,
+            e->awaiting_confirmation != 0);
 
     internal static ReceptionEvent ToManaged(cimsue_reception_event_t* e) =>
-        new((ReceptionEventKind)e->kind, e->call_id, ToManaged(e->transmitter), e->cause, Utf8.Str(e->cause_text), e->raw_type);
+        new((ReceptionEventKind)e->kind, e->call_id, ToManaged(e->transmitter), e->cause, Utf8.Str(e->cause_text), e->raw_type,
+            Utf8.Str(e->overriding_id));
 
     internal static VideoRequestEvent ToManaged(cimsue_video_request_event_t* e) =>
         new((VideoRequestEventKind)e->kind, e->call_id, e->code, Utf8.Str(e->reason));
@@ -526,11 +554,16 @@ public sealed unsafe class Engine : IDisposable
     {
         var arr = new VideoTransmitter[Math.Max(0, t->transmitter_count)];
         for (int i = 0; i < arr.Length; ++i) arr[i] = ToManaged(t->transmitters[i]);
-        return new TransmissionInfo((TransmissionState)t->state, arr, t->queue_position, t->local_port, Utf8.Str(t->remote_ip), t->remote_port);
+        return new TransmissionInfo((TransmissionState)t->state, arr, t->queue_position, t->local_port, Utf8.Str(t->remote_ip), t->remote_port,
+                                    t->awaiting_confirmation != 0);
     }
 
     internal static RequestResult ToManaged(cimsue_request_result_t* r) =>
-        new(r->account_id, r->token, Utf8.Str(r->method), r->code, Utf8.Str(r->reason), Utf8.Str(r->etag));
+        new(r->account_id, r->token, Utf8.Str(r->method), r->code, Utf8.Str(r->reason), Utf8.Str(r->etag), r->warning_code, Utf8.Str(r->warning_text));
+
+    internal static ServiceAuthInfo ToManaged(cimsue_service_auth_info_t* i) =>
+        new(i->account_id, (McService)i->service, (ServiceAuthState)i->state, i->code, i->warning_code, Utf8.Str(i->warning_text),
+            i->multiple_devices != 0);
 
     internal static DialogInfo ToManaged(cimsue_dialog_info_t* d) =>
         new(d->account_id, Utf8.Str(d->watched), Utf8.Str(d->id), Utf8.Str(d->call_id), Utf8.Str(d->local_tag),
@@ -565,6 +598,7 @@ public sealed unsafe class Engine : IDisposable
         on_reception = &Cb.OnReception,
         on_video_frame = &Cb.OnVideoFrame,
         on_video_request = &Cb.OnVideoRequest,
+        on_service_auth = &Cb.OnServiceAuth,
     };
 
     /// <summary>앱 스레드로 넘긴다. 컨텍스트가 없으면 이벤트 스레드에서 직접 — 예외는 네이티브 경계 밖으로 새지 않게 잡는다.</summary>
@@ -596,6 +630,13 @@ public sealed unsafe class Engine : IDisposable
         {
             var e = Of(user); if (e is null) return;
             try { var r = ToManaged(*info); e.Dispatch(() => e.RegistrationChanged?.Invoke(e, r)); } catch { }
+        }
+
+        [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
+        public static void OnServiceAuth(void* user, cimsue_service_auth_info_t* info)
+        {
+            var e = Of(user); if (e is null) return;
+            try { var a = ToManaged(info); e.Dispatch(() => e.ServiceAuthChanged?.Invoke(e, a)); } catch { }
         }
 
         [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]

@@ -40,8 +40,14 @@ public enum ConditionCause
 /// <summary>오디오 라우트(types.h AudioRoute) — 모바일 라우트. 데스크톱 장치는 무시할 수 있다.</summary>
 public enum AudioRoute { Default = 0, Earpiece = 1, Loudspeaker = 2 }
 
-/// <summary>MC 서비스 — 호·affiliation 은 서비스마다 따로다(TS 23.280 §5.2.5). MCVideo 그룹 호는 MCPTT 호와 독립 다이얼로그.</summary>
-public enum McService { Mcptt = 0, McVideo = 1 }
+/// <summary>MC 서비스 — 호·affiliation 은 서비스마다 따로다(TS 23.280 §5.2.5). MCVideo 그룹 호는 MCPTT 호와 독립 다이얼로그.
+/// McData 는 서비스 인가(<see cref="ServiceAuthInfo"/>)에만 쓴다 — MCData 요청(SDS·FD)은 자기 API 가 있고 제휴 게시는 없다.</summary>
+public enum McService { Mcptt = 0, McVideo = 1, McData = 2 }
+/// <summary>MC 서비스 인가 상태(types.h ServiceAuthState). Pending = 인가 PUBLISH 의 응답 대기 — 그동안 그 서비스의 제휴 게시는 코어가 보류한다.</summary>
+public enum ServiceAuthState { Unauthorized = 0, Pending = 1, Authorized = 2 }
+/// <summary>개별 호가 착신 단말에 요청하는 개시 방식(TS 24.379 §11.1.1.2.1.1 14), RFC 5373) — Unspecified = 헤더 없음(착신 단말 설정대로),
+/// Auto = Answer-Mode: Auto, Manual = Answer-Mode: Manual, ForceAuto = Priv-Answer-Mode: Auto(인가가 없으면 서버 403 143).</summary>
+public enum CommencementMode { Unspecified = 0, Auto = 1, Manual = 2, ForceAuto = 3 }
 /// <summary>MCVideo 내 송출 상태(TS 24.581 §6.2.4 'U: …').</summary>
 public enum TransmissionState { NoPermission = 0, PendingRequest = 1, Permitted = 2, PendingEnd = 3, Queued = 4 }
 /// <summary>한 송출의 내 수신 상태(§6.2.5).</summary>
@@ -51,7 +57,12 @@ public enum TransmissionEventKind
     Granted = 0, Rejected = 1, Revoked = 2, QueuePosition = 3, EndRequested = 4, Ended = 5, ReceiverJoined = 6, Idle = 7,
     QueueCancelled = 8, RequestTimeout = 9, Other = 10
 }
-public enum ReceptionEventKind { Notified = 0, Granted = 1, Rejected = 2, Ended = 3, Released = 4, EndRequested = 5, RequestTimeout = 6, Other = 7 }
+public enum ReceptionEventKind
+{
+    Notified = 0, Granted = 1, Rejected = 2, Ended = 3, Released = 4, EndRequested = 5, RequestTimeout = 6, Other = 7,
+    /// <summary>Media Reception Override Notification(§6.2.5.5.4) — 이 수신이 다른 송출에 밀렸다(<see cref="ReceptionEvent.OverridingId"/>). 코어가 수신을 닫았다.</summary>
+    Overridden = 8,
+}
 /// <summary>통화 중 영상 전환 요청의 진행(1:1 호, RFC 3264 §8.1) — 결과는 <see cref="Engine.VideoRequestChanged"/>.</summary>
 public enum VideoRequestState { None = 0, Sent = 1, Received = 2 }
 /// <summary>통화 중 영상 전환 이벤트 종류 — Received 면 사용자에게 묻고 <see cref="Engine.AnswerVideoRequest"/>(20 s 안에 답이 없으면 코어가 거절 — Withdrawn).</summary>
@@ -177,6 +188,20 @@ public sealed class AccountConfig
     public bool AutoAnswerMcvideo { get; set; } = true;
     /// <summary>발언권 참여자 타이머 — ue-init-config &lt;Timers&gt;(<see cref="UeInitConfigDoc.FloorTimers"/>)를 싣는다. 다음 MCPTT 호부터 쓴다.</summary>
     public FloorTimers FloorTimers { get; set; } = new();
+    /// <summary>MCPTT 서비스 사용 — REGISTER Contact 에 +g.3gpp.mcptt 와 MCPTT ICSI(TS 24.379 §7.2.1AA). PTT 계정은 켠다
+    /// (<see cref="ServiceProfile.ToAccountConfig"/> 가 kind ptt 에 켠다). 빼고 다시 등록하면 MCPTT 로그오프.</summary>
+    public bool McpttEnabled { get; set; }
+    /// <summary>MCData FD 지원 — REGISTER Contact +g.3gpp.mcdata.fd + ICSI mcdata.fd(TS 24.282 §7.2.1 3)). SDS 지원은 <see cref="McdataMsrp"/>.</summary>
+    public bool McdataFd { get; set; }
+    /// <summary>MC 서비스 인가 토큰 — 사용자 인증(CSC IdMS)의 액세스 토큰. 등록이 서면(첫 등록·재성립·망 변경 뒤) 켠 MC 서비스(MCPTT·MCData·MCVideo —
+    /// 그 서비스의 참여 기능 PSI 가 있을 때)마다 서비스 인가 + 서비스 설정 PUBLISH(TS 24.379·24.282·24.281 §7.2.2)에 싣는다. 서버는 인가되지 않은
+    /// 클라이언트의 MC 요청을 404 141 로 거절한다. 결과 = <see cref="Engine.ServiceAuthChanged"/>, 새 토큰 = <see cref="Account.SetAccessToken"/>. null·빈 값 = 인가하지 않는다.</summary>
+    public string? AccessToken { get; set; }
+    /// <summary>MCVideo 전송 제어 참여자 타이머 — MCVideo service configuration(<see cref="McVideoServiceConfigDoc.TcTimers"/>)를 싣는다. 다음 MCVideo 호부터.</summary>
+    public McVideoTcTimers TcTimers { get; set; } = new();
+    /// <summary>대기 끝에 허가된 송출을 사용자 확인 뒤에 시작한다(TS 24.581 §6.2.4.5.1 NOTE) — Granted 에 <see cref="TransmissionEvent.AwaitingConfirmation"/>,
+    /// 앱이 <see cref="Call.ConfirmTransmission"/> 으로 받거나 거둔다. false(기본) = 곧바로 송출.</summary>
+    public bool ConfirmQueuedTransmission { get; set; }
 
     /// <summary>"sip:msisdn@domain".</summary>
     public string Aor() => Engine.AccountConfigString(this, Engine.AccountStringKind.Aor);
@@ -201,7 +226,7 @@ public sealed class GroupCallOptions
     public bool ImminentPeril { get; set; }
     /// <summary>청취 전용 합류(a=recvonly) — 관제 PTT 청취. floor 요청 불가.</summary>
     public bool ListenOnly { get; set; }
-    /// <summary>전이중 1:1(mc_no_floor_ctrl). StartPrivateCall 전용.</summary>
+    /// <summary>전이중 1:1 = floor 없는 개별 호(TS 24.379 §11.1.2.2 — offer 에 floor 제어 채널 m=application 없음) — 마이크 상시 개방. StartPrivateCall 전용.</summary>
     public bool FullDuplex { get; set; }
     /// <summary>애드혹 임시 그룹 멤버(tel: URI). JoinGroupCall 전용.</summary>
     public IReadOnlyList<string>? Members { get; set; }
@@ -212,6 +237,14 @@ public sealed class GroupCallOptions
     /// floor 는 호 성립 전부터 Requesting, 200 OK 의 mc_granted 나 Floor Granted 로 Speaking. 승인·성립 전에 FloorRelease 하면
     /// 발언권을 돌려준다. 누르는 동안 개시하고 말하는 한 버튼 발신(일제 통화)용.</summary>
     public bool ImplicitFloorRequest { get; set; }
+    /// <summary>chat 그룹 합류(session-type chat, TS 24.379 §10.1.2.2.1.1) — 그룹 문서 <see cref="GroupDoc.SessionType"/> 이 "chat" 이면 켠다. 아니면 prearranged.
+    /// JoinGroupCall 전용(Members 가 있으면 adhoc 이 우선).</summary>
+    public bool Chat { get; set; }
+    /// <summary>개별 호의 개시 방식 요청 — StartPrivateCall 전용(그룹 호의 멤버 초대 개시 방식은 제어 기능이 정한다).</summary>
+    public CommencementMode Commencement { get; set; }
+    /// <summary>진행 중 편성 그룹 세션 재합류(TS 24.379 §10.1.1.2.4.1) — 앞 호의 <see cref="CallInfo.SessionUri"/>. Request-URI·To = 이 값, broadcast·members·chat 은
+    /// 싣지 않는다. 세션이 끝났으면 서버가 404(새 세션을 열지 않는다). null = 새 개시·합류. JoinGroupCall 전용.</summary>
+    public string? SessionUri { get; set; }
 }
 
 /// <summary>MCVideo 그룹 호 개시·합류 옵션(TS 24.281 §9.2.1 prearranged · §9.2.2 chat, 제어 채널 fmtp TS 24.581 §14.2).</summary>
@@ -268,6 +301,10 @@ public sealed record MediaSource(uint Ssrc, string Label, bool Active, float Lev
 public sealed record FloorTimers(int T100Ms = 0, int T101Ms = 0, int T103Ms = 0, int T104Ms = 0, int T132Ms = 0,
                                  int C100 = 0, int C101 = 0, int C104 = 0);
 
+/// <summary>MCVideo 전송 제어 참여자 타이머(TS 24.581 표 11.1.1-1, ms) — 0 = 기본값(1 s). 값의 출처 = MCVideo service configuration
+/// &lt;tc-timers-counters-R14&gt;(<see cref="McVideoServiceConfigDoc.TcTimers"/>).</summary>
+public sealed record McVideoTcTimers(int T100Ms = 0, int T101Ms = 0, int T102Ms = 0, int T103Ms = 0, int T104Ms = 0);
+
 public sealed record CallInfo(
     int CallId, int AccountId, CallDir Dir, CallState State, string RemoteUri, string CalledParty,
     bool Video, bool MediaActive, bool Muted, bool Listen, int PlaybackRoute,
@@ -276,7 +313,8 @@ public sealed record CallInfo(
     float RxLevel = 1f, McpttCondition Condition = default, string AnswerState = "", IReadOnlyList<string>? NonAcknowledgedUsers = null,
     McService Service = McService.Mcptt, string SessionUri = "", bool VideoSend = true,
     VideoRequestState VideoRequest = VideoRequestState.None,
-    // 개시 INVITE 최종 응답의 Warning(RFC 3261 §20.43) — 403 의 120 «미제휴»(TS 24.379)와 비멤버 403 을 가른다. 없으면 0·빈 값.
+    // 개시 INVITE 최종 응답의 Warning MC 문구 번호 — `399 <agent> "NNN text"` 의 NNN(TS 24.379 §4.4)과 그 뒤 문구. 403 의 120 «미제휴»와
+    //   116 비멤버를 가른다. 없으면 0·빈 값.
     int WarningCode = 0, string WarningText = "")
 {
     public static CallInfo Empty { get; } = new(-1, -1, CallDir.Outgoing, CallState.Null, "", "", false, false, false, true, 0, 0, "",
@@ -299,26 +337,38 @@ public sealed record FloorInfo(FloorState State, IReadOnlyList<Talker> Talkers, 
 /// <summary>MCVideo 한 송출 — 송출자 한 명의 audio·video 흐름 쌍(Media Transmission Notification §9.2.13). UserId 가 AcceptReception·EndReception 인자.</summary>
 public sealed record VideoTransmitter(string UserId, uint AudioSsrc, uint VideoSsrc, string FunctionalAlias, bool Automatic, ReceptionState State);
 
-/// <summary>MCVideo 송출 제어 이벤트(TS 24.581 §6.2.4) — 송출(마이크·카메라) 게이트는 코어가 이미 처리했다.</summary>
+/// <summary>MCVideo 송출 제어 이벤트(TS 24.581 §6.2.4) — 송출(마이크·카메라) 게이트는 코어가 이미 처리했다.
+/// AwaitingConfirmation = Granted 가 대기 끝 허가라 사용자 확인을 기다린다(<see cref="AccountConfig.ConfirmQueuedTransmission"/> — 송출은 닫혀 있다).</summary>
 public sealed record TransmissionEvent(TransmissionEventKind Kind, int CallId, TransmissionState State, int Cause, string CauseText,
                                        int DurationSec, int Priority, int QueuePosition, int Indicator, uint AudioSsrc, uint VideoSsrc,
-                                       string ReceiverId, int RawType);
+                                       string ReceiverId, int RawType, bool AwaitingConfirmation = false);
 
-/// <summary>MCVideo 수신 제어 이벤트(§6.2.5) — 새 송출 알림(manual 이면 앱이 [받기])·수신 허가·종료.</summary>
-public sealed record ReceptionEvent(ReceptionEventKind Kind, int CallId, VideoTransmitter Transmitter, int Cause, string CauseText, int RawType);
+/// <summary>MCVideo 수신 제어 이벤트(§6.2.5) — 새 송출 알림(manual 이면 앱이 [받기])·수신 허가·종료.
+/// OverridingId = Overridden 의 밀어낸 송출자(Overriding ID, 없으면 빈 값).</summary>
+public sealed record ReceptionEvent(ReceptionEventKind Kind, int CallId, VideoTransmitter Transmitter, int Cause, string CauseText, int RawType,
+                                    string OverridingId = "");
 
 /// <summary>통화 중 영상 전환 이벤트(1:1 호 — RFC 3264 §8.1 추가·§8.2 제거). Code = Failed 의 최종 응답 코드(로컬 송신 실패 = 0).</summary>
 public sealed record VideoRequestEvent(VideoRequestEventKind Kind, int CallId, int Code, string Reason);
 
-/// <summary>MCVideo 호의 전송 제어 현재값. Transmitters = 알려진 송출(내 것 제외).</summary>
+/// <summary>MCVideo 호의 전송 제어 현재값. Transmitters = 알려진 송출(내 것 제외). AwaitingConfirmation = 허가됐지만 사용자 확인 전(송출은 닫혀 있다).</summary>
 public sealed record TransmissionInfo(TransmissionState State, IReadOnlyList<VideoTransmitter> Transmitters, int QueuePosition,
-                                      int LocalPort, string RemoteIp, int RemotePort)
+                                      int LocalPort, string RemoteIp, int RemotePort, bool AwaitingConfirmation = false)
 {
     public static TransmissionInfo Empty { get; } = new(TransmissionState.NoPermission, Array.Empty<VideoTransmitter>(), -1, 0, "", 0);
 }
 
-/// <summary>임의 SIP 요청(PUBLISH/MESSAGE 등)의 최종 응답 — token 으로 상관.</summary>
-public sealed record RequestResult(int AccountId, long Token, string Method, int Code, string Reason, string ETag);
+/// <summary>임의 SIP 요청(PUBLISH/MESSAGE 등)의 최종 응답 — token 으로 상관. WarningCode = 최종 응답의 Warning 문구 번호(`399 &lt;host&gt; "NNN text"` 의 NNN —
+/// TS 24.379 §4.4.2·TS 24.282 §4.9, 없으면 0) — 그룹 SDS 403 의 116 비멤버·206 SDS 꺼짐·213 FD 꺼짐·217 크기 초과 등을 가른다.</summary>
+public sealed record RequestResult(int AccountId, long Token, string Method, int Code, string Reason, string ETag,
+                                   int WarningCode = 0, string WarningText = "");
+
+/// <summary>MC 서비스 인가 결과(TS 24.379·24.282·24.281 §7.2.2 — 서비스 인가 + 서비스 설정 PUBLISH 의 최종 응답). 앱은 Authorized 를 본 뒤 그 서비스를 쓴다
+/// (제휴·채널 복원 — 등록만으로는 서버가 MC 요청을 받지 않는다). 403 101 인가 실패·486 164 동시 인가 상한 등 = 인가 안 됨 — 새 토큰이면
+/// <see cref="Account.SetAccessToken"/>. 5xx·408 은 코어가 물러나 다시 보낸다. 등록이 끊기면 Unauthorized(Code 0). Code 0 = 보내지 않았다(토큰·PSI 없음).
+/// MultipleDevices = 같은 MC ID 의 다른 클라이언트도 인가돼 있다(200 OK 의 multiple-devices-ind, §7.3.3 9)a)).</summary>
+public sealed record ServiceAuthInfo(int AccountId, McService Service, ServiceAuthState State, int Code, int WarningCode, string WarningText,
+                                     bool MultipleDevices);
 
 /// <summary>그룹 SDS 발신 결과 — MsgId 는 disposition 통지 상관, Token 은 RequestCompleted 상관.</summary>
 public sealed record SdsSend(string MsgId, long Token);

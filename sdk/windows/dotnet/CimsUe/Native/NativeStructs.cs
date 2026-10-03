@@ -63,6 +63,12 @@ internal unsafe struct cimsue_account_config_t
     public byte* mcvideo_server_uri;
     public int auto_answer_mcvideo;
     public cimsue_floor_timers_t floor_timers;
+    // 끝에 덧붙였다(MC 서비스 등록·인가·송출 확인)
+    public int mcptt_enabled;
+    public int mcdata_fd;
+    public byte* access_token;
+    public cimsue_tc_timers_t tc_timers;
+    public int confirm_queued_transmission;
 }
 
 [StructLayout(LayoutKind.Sequential)]
@@ -70,6 +76,12 @@ internal struct cimsue_floor_timers_t
 {
     public int t100_ms, t101_ms, t103_ms, t104_ms, t132_ms;
     public int c100, c101, c104;
+}
+
+[StructLayout(LayoutKind.Sequential)]
+internal struct cimsue_tc_timers_t
+{
+    public int t100_ms, t101_ms, t102_ms, t103_ms, t104_ms;
 }
 
 [StructLayout(LayoutKind.Sequential)]
@@ -90,6 +102,10 @@ internal unsafe struct cimsue_group_call_options_t
     public int member_count;
     public int broadcast;
     public int implicit_floor_request;
+    // 끝에 덧붙였다
+    public int chat;
+    public int commencement;
+    public byte* session_uri;
 }
 
 [StructLayout(LayoutKind.Sequential)]
@@ -256,6 +272,29 @@ internal unsafe struct cimsue_request_result_t
     public int code;
     public byte* reason;
     public byte* etag;
+    // 끝에 덧붙였다
+    public int warning_code;
+    public byte* warning_text;
+}
+
+[StructLayout(LayoutKind.Sequential)]
+internal unsafe struct cimsue_service_auth_info_t
+{
+    public int account_id;
+    public int service;
+    public int state;
+    public int code;
+    public int warning_code;
+    public byte* warning_text;
+    public int multiple_devices;
+}
+
+[StructLayout(LayoutKind.Sequential)]
+internal unsafe struct cimsue_xcap_diff_subscription_t
+{
+    public byte** documents;
+    public int document_count;
+    public byte* access_token;
 }
 
 [StructLayout(LayoutKind.Sequential)]
@@ -403,6 +442,7 @@ internal unsafe struct cimsue_transmission_event_t
     public uint audio_ssrc, video_ssrc;
     public byte* receiver_id;
     public int raw_type;
+    public int awaiting_confirmation;   // 끝에 덧붙였다
 }
 
 [StructLayout(LayoutKind.Sequential)]
@@ -414,6 +454,7 @@ internal unsafe struct cimsue_reception_event_t
     public int cause;
     public byte* cause_text;
     public int raw_type;
+    public byte* overriding_id;         // 끝에 덧붙였다
 }
 
 [StructLayout(LayoutKind.Sequential)]
@@ -435,6 +476,7 @@ internal unsafe struct cimsue_transmission_info_t
     public int local_port;
     public byte* remote_ip;
     public int remote_port;
+    public int awaiting_confirmation;   // 끝에 덧붙였다
 }
 
 [StructLayout(LayoutKind.Sequential)]
@@ -461,6 +503,7 @@ internal unsafe struct cimsue_listener_t
     public delegate* unmanaged[Cdecl]<void*, cimsue_reception_event_t*, void> on_reception;
     public delegate* unmanaged[Cdecl]<void*, cimsue_video_frame_t*, void> on_video_frame;
     public delegate* unmanaged[Cdecl]<void*, cimsue_video_request_event_t*, void> on_video_request;
+    public delegate* unmanaged[Cdecl]<void*, cimsue_service_auth_info_t*, void> on_service_auth;
 }
 
 // ── CSC 설정 평면 (csc.h) ──
@@ -698,6 +741,7 @@ internal unsafe struct cimsue_group_doc_t
     public int ack_timeout_sec;
     public byte* ack_action;
     public cimsue_mcvideo_group_attrs_t mcvideo;   // MCVideo 몫 — present = 0(0 초기화)이면 PUT 에 싣지 않는다. 끝에 덧붙였다
+    public int preconfigured_group_use_only;       // 사전 구성 전용(TS 24.481 §7.2.4.2) — 0 초기화 = false. 끝에 덧붙였다
 }
 
 [StructLayout(LayoutKind.Sequential)]
@@ -744,6 +788,9 @@ internal unsafe struct cimsue_service_config_doc_t
     public byte* rp_emergency;
     public byte* rp_imminent_peril;
     public byte* rp_normal;
+    // 끝에 덧붙였다 — 애드혹 그룹 호 지원(TS 24.484 §8.4.2.6)
+    public int adhoc_group_call_support;
+    public int adhoc_max_participants;
 }
 
 [StructLayout(LayoutKind.Sequential)]
@@ -798,6 +845,7 @@ internal unsafe struct cimsue_ue_init_config_doc_t
     public byte* mcdata_server_uri;
     public byte* mcvideo_server_uri;
     public cimsue_floor_timers_t floor_timers;
+    public byte* gms_uri;               // 끝에 덧붙였다
 }
 
 [StructLayout(LayoutKind.Sequential)]
@@ -831,5 +879,6 @@ internal enum cimsue_struct_id_t
     MCVIDEO_GROUP_ATTRS, MCVIDEO_USER_PROFILE_DOC, MCVIDEO_SERVICE_CONFIG_DOC,
     VIDEO_FRAME,
     VIDEO_REQUEST_EVENT,
+    FLOOR_TIMERS, TC_TIMERS, SERVICE_AUTH_INFO, XCAP_DIFF_SUBSCRIPTION,
     COUNT_,
 }

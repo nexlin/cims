@@ -362,16 +362,22 @@ data class ServiceConfigDoc(
     /** common/broadcast-group 계층 수 — null = 미기재. */
     val numLevelsGroupHierarchy: Int? = null, val numLevelsUserHierarchy: Int? = null,
     val rpEmergency: String = "", val rpImminentPeril: String = "", val rpNormal: String = "",
+    /** on-network/anyExt/adhoc-group-call `<allow-adhoc-group-call-support>`(§8.4.2.6) — 해석한 문서에 요소가 없으면 false = 애드혹 그룹 호
+     *  미지원(단말은 개시하지 않는다, TS 24.379 §17.2.2.1.1), [Capabilities.adhocGroupCall] 에 AND 된다. 기본값 true = 해석하지 않은 문서. */
+    val adhocGroupCallSupport: Boolean = true,
+    /** adhoc-group-call/max-no-participants — null = 미기재. */
+    val adhocMaxParticipants: Int? = null,
 ) {
     internal fun toJni(): JniServiceConfigDoc = JniServiceConfigDoc().also { d ->
         d.etag = etag; d.domain = domain
         d.numLevelsGroupHierarchy = numLevelsGroupHierarchy ?: -1; d.numLevelsUserHierarchy = numLevelsUserHierarchy ?: -1
         d.rpEmergency = rpEmergency; d.rpImminentPeril = rpImminentPeril; d.rpNormal = rpNormal
+        d.adhocGroupCallSupport = adhocGroupCallSupport; d.adhocMaxParticipants = adhocMaxParticipants ?: -1
     }
     internal companion object {
         fun of(d: JniServiceConfigDoc) = ServiceConfigDoc(d.etag, d.domain,
             d.numLevelsGroupHierarchy.takeIf { it >= 0 }, d.numLevelsUserHierarchy.takeIf { it >= 0 },
-            d.rpEmergency, d.rpImminentPeril, d.rpNormal)
+            d.rpEmergency, d.rpImminentPeril, d.rpNormal, d.adhocGroupCallSupport, d.adhocMaxParticipants.takeIf { it >= 0 })
     }
 }
 

@@ -33,6 +33,7 @@ DLL 을 열어 `EntryPointNotFound`). 빌드 출력·NuGet 패키지 모두 `run
 의존 DLL 을 먼저 올린 뒤(하나라도 없으면 cimsue.dll 이 안 올라 관리 DLL 이 잡힌다)
 `CIMSUE_NATIVE_DIR` → `runtimes/win-x64/native` → 앱 디렉터리 순으로 찾는다. 원본은 `Directory.Build.props` 의 `CimsUeNativeDir`(기본 `build-win/sdk/bin`).
 
-**시험**: `dotnet test CimsUe.Tests` — 63건(ABI 레이아웃 35 구조체 대조 `cimsue_struct_size`·헤드리스 엔진 수명·SynchronizationContext 마샬링·프로파일 파싱·
-그룹 문서 왕복·FD 가드·접점·단말 속성). xunit 은 `SynchronizationContext.Current` 를 두므로 "이벤트 스레드 직접 수신" 시험은 컨텍스트를 명시적으로 비운다.
+**시험**: `dotnet test CimsUe.Tests` — 94건(ABI 레이아웃 = 등록 구조체 59 전부를 `cimsue_struct_size` 와 대조·헤드리스 엔진 수명·SynchronizationContext 마샬링·
+프로파일 파싱·그룹 문서 왕복·FD 가드·CMS·MCVideo 문서·서비스 인가·규격형 구독 문서·접점·단말 속성). Windows 전용 접점(DPAPI·레지스트리·명명 뮤텍스·오디오 엔드포인트)과
+프레임 렌더 엔진 시험은 Windows 에서만 통과한다. xunit 은 `SynchronizationContext.Current` 를 두므로 "이벤트 스레드 직접 수신" 시험은 컨텍스트를 명시적으로 비운다.
 floor Indicator 상수(`FloorIndicator`)는 `scripts/gen_floor_defs.py --check`(S1-UE-FLOOR-CODEC)가 정본 테이블과 대조한다.

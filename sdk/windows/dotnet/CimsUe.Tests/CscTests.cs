@@ -258,16 +258,16 @@ public class CscTests
         Assert.Equal("sip:g002@ptt", up.Value.EmergencyAlertGroup.Uri);
         Assert.Equal("DedicatedGroup", up.Value.EmergencyAlertGroup.Mode);
         Assert.False(up.Value.AllowCancelEmergencyAlert);
-        Assert.True(up.Value.AllowActivateEmergencyAlert);          // 요소 없음 = 허용
+        Assert.False(up.Value.AllowActivateEmergencyAlert);         // 요소 없음 = false(TS 24.484 표 8.3.2.7)
         Assert.False(up.Value.AllowCancelGroupEmergency);
-        Assert.True(up.Value.AllowCancelImminentPeril);
+        Assert.False(up.Value.AllowCancelImminentPeril);
         var k = Capabilities.Of(up.Value, null);
         Assert.True(k.UserProfileKnown);
         Assert.False(k.ServiceConfigKnown);
         Assert.False(k.CancelEmergencyAlert);
-        Assert.True(k.EmergencyAlert);
+        Assert.False(k.EmergencyAlert);
         Assert.False(k.CancelGroupEmergency);                       // 앱은 «내가 올린 조건» 과 OR (TS 24.379 §6.3.3.1.13.4)
-        Assert.True(k.CancelImminentPeril);
+        Assert.False(k.CancelImminentPeril);
         var none = Capabilities.Of(null, null);
         Assert.False(none.UserProfileKnown);
         Assert.True(none.CancelEmergencyAlert);                     // 못 받은 문서는 허용
@@ -336,7 +336,7 @@ public class CscTests
         Assert.Equal("tel:+82510002001", up.Value!.McvideoId);
         Assert.Equal(new[] { "tel:g101" }, up.Value.Groups);
         Assert.Equal(1, up.Value.MaxSimultaneousVideoStreams);
-        Assert.True(up.Value.AllowRevokeTransmit);                  // ruleset 이 없으면 허용
+        Assert.False(up.Value.AllowRevokeTransmit);                 // 요소 없음 = false(TS 24.484 표 9.3.2.7)
         Assert.False(McVideoUserProfileDoc.Parse("<mcptt-user-profile/>").Ok);
 
         var sc = McVideoServiceConfigDoc.Parse("""
@@ -348,5 +348,65 @@ public class CscTests
         Assert.Equal(2, sc.Value!.T100Sec);
         Assert.Equal(-1, sc.Value.T101Sec);
         Assert.True(sc.Value.ConfidentialityProtection);            // 없으면 켜진 것
+    }
+    // W01 — 서비스 인가·규격형 구독·사전 구성 전용·애드혹 지원이 코어와 같은 답을 내는지
+    [Fact]
+    public void ServiceAuthSubscriptionAndGroupFlagsFollowCore()
+    {
+        // PTT 서비스의 계정은 MCPTT 태그를 켠다(코어 ServiceProfile::toAccount — TS 24.379 §7.2.1AA), 전화 서비스는 끈다
+        var p = CscClient.ParseProfile(ProfileJson);
+        Assert.True(p.Ok, p.Reason);
+        Assert.True(p.Value.Service("ptt")!.ToAccountConfig().McpttEnabled);
+        Assert.False(p.Value.Service("volte")!.ToAccountConfig().McpttEnabled);
+
+        // service config 애드혹 지원(TS 24.484 §8.4.2.6) — 요소 없음 = 미지원 → 게이트가 막는다
+        var none = ServiceConfigDoc.Parse("""
+            <service-configuration-info><service-configuration-params domain="ptt.example.org"><on-network/></service-configuration-params></service-configuration-info>
+            """);
+        Assert.True(none.Ok, none.Reason);
+        Assert.False(none.Value.AdhocGroupCallSupport);
+        Assert.Equal(-1, none.Value.AdhocMaxParticipants);
+        Assert.False(Capabilities.Of(null, none.Value).AdhocGroupCall);
+        var yes = ServiceConfigDoc.Parse("""
+            <service-configuration-info><service-configuration-params domain="ptt.example.org"><on-network><anyExt><adhoc-group-call>
+            <allow-adhoc-group-call-support>true</allow-adhoc-group-call-support><max-no-participants>8</max-no-participants>
+            </adhoc-group-call></anyExt></on-network></service-configuration-params></service-configuration-info>
+            """);
+        Assert.True(yes.Ok, yes.Reason);
+        Assert.True(yes.Value.AdhocGroupCallSupport);
+        Assert.Equal(8, yes.Value.AdhocMaxParticipants);
+        Assert.True(Capabilities.Of(null, yes.Value).AdhocGroupCall);
+
+        // ue-init GMS-URI → 규격형 그룹 문서 구독 Request-URI · 문서 목록은 코어 경로 규칙
+        var ui = UeInitConfigDoc.Parse("""
+            <mcptt-UE-initial-configuration domain="ptt.example.org"><on-network><GMS-URI>sip:gms_psi@ptt.example.org</GMS-URI></on-network></mcptt-UE-initial-configuration>
+            """);
+        Assert.True(ui.Ok, ui.Reason);
+        Assert.Equal("sip:gms_psi@ptt.example.org", ui.Value.GmsUri);
+        var gms = CscClient.GmsSubscriptionDocuments(new[] { "sip:g1@ptt.example.org", "sip:g2@ptt.example.org" });
+        Assert.Equal(2, gms.Count);
+        Assert.Equal("org.openmobilealliance.groups/global/byGroupID/" + CscClient.Encode("sip:g2@ptt.example.org"), gms[1]);
+        Assert.Empty(CscClient.GmsSubscriptionDocuments(Array.Empty<string>()));
+        Assert.Equal(5, CscClient.CmsSubscriptionDocuments("tel:+82500000001", "urn:uuid:1", "tel:+82500000001").Count);
+        Assert.Equal(2, CscClient.CmsSubscriptionDocuments("tel:+82500000001", null).Count);   // UE init·MCVideo 없음
+
+        // 사전 구성 전용 그룹(TS 24.481 §7.2.4.2) — false 면 싣지 않고, true 는 왕복한다
+        var g = new GroupDoc { Uri = "sip:g1@ptt.example.org", DisplayName = "G1" };
+        Assert.DoesNotContain("preconfigured-group-use-only", g.ToXml());
+        Assert.True(g.UsableForCalls);
+        g.PreconfiguredGroupUseOnly = true;
+        var back = GroupDoc.Parse(g.ToXml());
+        Assert.True(back.Ok, back.Reason);
+        Assert.True(back.Value.PreconfiguredGroupUseOnly);
+        Assert.False(back.Value.UsableForCalls);
+
+        // MCVideo 참여자 타이머 — 초 → ms, 미기재 = 0(기본값)
+        var mv = McVideoServiceConfigDoc.Parse("""
+            <service-configuration-info><service-configuration-params domain="ptt.example.org"><on-network><anyExt><tc-timers-counters-R14>
+            <T100-transmission-request>3</T100-transmission-request></tc-timers-counters-R14></anyExt></on-network></service-configuration-params></service-configuration-info>
+            """);
+        Assert.True(mv.Ok, mv.Reason);
+        Assert.Equal(3, mv.Value.T100Sec);
+        Assert.Equal(new McVideoTcTimers(T100Ms: 3000), mv.Value.TcTimers);
     }
 }

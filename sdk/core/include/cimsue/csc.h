@@ -233,8 +233,7 @@ struct ServiceConfigDoc {
     std::string rpImminentPeril;
     std::string rpNormal;
     /** on-network/anyExt/adhoc-group-call — <allow-adhoc-group-call-support>. 문서에 요소가 없으면 false = 애드혹 그룹 호 미지원
-     *  (TS 24.484 §8.4.2.6 · TS 24.379 §17.2.2.1.1 — 단말은 개시하지 않는다). C API·Kotlin 파사드는 이 값을 아직 옮기지 않는다
-     *  (거기서 만든 문서는 기본값 true — 지원 여부로 막지 않는다). */
+     *  (TS 24.484 §8.4.2.6 · TS 24.379 §17.2.2.1.1 — 단말은 개시하지 않는다). Capabilities::of 가 adhocGroupCall 에 AND 한다. */
     bool adhocGroupCallSupport = true;         // 기본값 true = 문서를 해석하지 않은 상태(게이트 없음) — parse 가 문서 값으로 정한다
     int adhocMaxParticipants = -1;             // adhoc-group-call/max-no-participants (-1 = 미기재)
     CIMSUE_API static bool parse(const std::string& xml, ServiceConfigDoc& out, std::string* err = nullptr);
