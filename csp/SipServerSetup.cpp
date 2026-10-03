@@ -561,15 +561,6 @@ bool CSipServerSetup::Read( const char *pszFileName ) {
                 m_bTestEnvOpenTermination = ( setup.GetString( "TestEnvOpenTermination" ) == "true" );
             }
 
-            // MCPTT 규격 엄격 검사 스위치 (enforce | log | off — 그 밖의 값은 log)
-            if ( setup.Has( "Mcptt" ) ) {
-                SimpleJson::JsonNode mp = setup.Get( "Mcptt" );
-                if ( mp.Has( "StrictCheck" ) ) {
-                    const std::string v = mp.GetString( "StrictCheck" );
-                    m_strMcpttStrictCheck = ( v == "enforce" || v == "off" ) ? v : "log";
-                }
-            }
-
             // MCPTT ad hoc 그룹콜 시스템 정책 (미지정 시 허용).
             if ( setup.Has( "PttAdhocEnabled" ) ) {
                 m_bPttAdhocEnabled = ( setup.GetString( "PttAdhocEnabled" ) != "false" );
@@ -884,10 +875,3 @@ void CSipServerSetup::SetFileSizeTime() {
 
 // v3 (2026-04-22): GetDomainForService / GetServiceForDomain 제거.
 //   대체: gclsServiceMap.GetDomainByKind() / gclsServiceMap.GetByDomain().kind
-
-bool CSipServerSetup::McpttStrict( const char *pszCheck, const std::string &strDetail ) const {
-    if ( m_strMcpttStrictCheck == "enforce" ) return true;
-    if ( m_strMcpttStrictCheck == "log" )
-        CLog::Print( LOG_INFO, "[StrictCheck:log] %s — %s (enforce 면 거절)", pszCheck, strDetail.c_str() );
-    return false;
-}

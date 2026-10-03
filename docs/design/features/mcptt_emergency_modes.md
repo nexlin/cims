@@ -345,7 +345,7 @@ MESSAGE(호 없는 그룹 긴급 상태 해제, §12.1.3.3)도 같은 곳으로 
   멤버 fan-out, CMP `PTT_GROUP_ADD`. emergency 조건은 ad-hoc 위에 얹힌다(일제 통화 `<broadcast-ind>` 는 편성 그룹 호만 — ad hoc 에서는 무시).
 - **수명**: 마지막 멤버 이탈 시 즉시 teardown(on-demand와 동일) + GroupMap 에서 제거(ephemeral).
   단말도 대칭 — 애드혹 세션은 채널 영속(ChannelStore)·affiliation·로스터 구독 대상이 아니고
-  (참가자는 in-dialog NOTIFY 폴백), 통화 중엔 전용 오버레이(`AdhocCallOverlay`)가 전면 표시되며
+  (참가자 정보는 세션 식별자로 conference 를 구독해 받는다 — TS 24.379 §10.1.3), 통화 중엔 전용 오버레이(`AdhocCallOverlay`)가 전면 표시되며
   PTT 는 애드혹 세션을 주채널보다 우선한다. chat형 ad-hoc은 비범위.
 - **권한**: 시스템 정책 `Setup.PttAdhocEnabled`(csp.json, 미지정 시 허용) AND 사용자 프로파일
   `allow_adhoc_call`(합성 직전 판정 — 시스템 미지원 403 + Warning `186`, 사용자 미인가 403 + `185`, TS 24.379 §17.4.2.2 5)·4)). 판정 시점에 그룹이 존재하지 않으므로 그룹

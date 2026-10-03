@@ -1,5 +1,7 @@
 #include "PttAsModule.h"
 
+#include <strings.h>
+
 #include "CallDir.h"
 #include "CspServiceMap.h"
 #include "CspUser.h"
@@ -107,11 +109,19 @@ int CPttAsModule::OnEmergencyAlert( const char *pszFrom, const char *pszTo, CSip
                                     const CMcpttInfo &clsMi ) {
     const std::string strFrom = pszFrom ? pszFrom : "";
 
-    // 대상 그룹 — 본문 <mcptt-request-uri>(§12.1.1.1 4)a)), Request-URI 가 그룹이면 그 그룹(전환기).
+    // 참여 기능 2a) (§12.1.2.1) — 서비스 인가 바인딩(§7.3)이 없으면 404 + 141
+    {
+        CspUser clsBound;
+        if ( !gclsCspUserMap.isAlive( strFrom.c_str(), clsBound ) ) {
+            CLog::Print( LOG_INFO, "PTT-AS: emergency alert from(%s) — 서비스 인가 바인딩 없음 → 404 141",
+                         strFrom.c_str() );
+            return _RejectWithWarning( pclsMessage, SIP_NOT_FOUND, 141, "user unknown to the participating function" );
+        }
+    }
+
+    // 대상 그룹 — 본문 <mcptt-request-uri>(§12.1.1.1 4)a)). Request-URI 는 참여 기능 PSI 다.
     std::string strGroupId;
-    if ( pszTo && gclsGroupMap.Contains( pszTo ) ) {
-        strGroupId = pszTo;
-    } else {
+    {
         const std::string strBody = McpttBareId( clsMi.strRequestUri );
         if ( !strBody.empty() && gclsGroupMap.Contains( strBody.c_str() ) ) strGroupId = strBody;
     }
@@ -122,6 +132,20 @@ int CPttAsModule::OnEmergencyAlert( const char *pszFrom, const char *pszTo, CSip
         CLog::Print( LOG_INFO, "PTT-AS: emergency alert from(%s) R-URI(%s) request-uri(%s) — unknown group → 404",
                      strFrom.c_str(), pszTo ? pszTo : "", clsMi.strRequestUri.c_str() );
         return SIP_NOT_FOUND;
+    }
+
+    // 제어 기능 2) (§12.1.3.1 — 경보 취소 §12.1.3.2·긴급 해제 §12.1.3.3 도 이 절로 들어온다) — Accept-Contact 에 MCPTT
+    //   icsi-ref 가 없으면 403
+    {
+        std::string strAccept;
+        for ( const auto &h : pclsMessage->m_clsHeaderList )
+            if ( strcasecmp( h.m_strName.c_str(), "Accept-Contact" ) == 0 ) strAccept += h.m_strValue + ",";
+        if ( !McIcsiIn( strAccept, kMcpttIcsi, kMcpttIcsiEnc ) ) {
+            CLog::Print( LOG_INFO,
+                         "PTT-AS: emergency alert from(%s) group(%s) — Accept-Contact MCPTT icsi-ref 없음 → 403",
+                         strFrom.c_str(), strGroupId.c_str() );
+            return SIP_FORBIDDEN;
+        }
     }
 
     const bool bAlertTrue = clsMi.bHasAlertInd && clsMi.bAlert;

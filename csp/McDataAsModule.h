@@ -32,9 +32,9 @@ public:
                           const std::string &strInfo );
 
 private:
-    /** SDS disposition 통지의 규격 경로 (TS 24.282 §12.2.2.1·§12.2.3) — 본문에 resource-lists(대상 MCData ID 하나)와
-     *  SDS NOTIFICATION 이 있으면 참여·제어 기능으로 처리해 원 발신자에게 새 MESSAGE 로 중계하고 true. 대상을
-     *  Request-URI 에 싣는 옛 형식(resource-lists 없음)은 false — 디스패처 1:1 경로가 그대로 전달한다(전환기). */
+    /** SDS disposition 통지 (TS 24.282 §12.2.2.1·§12.2.3) — signalling 이 SDS NOTIFICATION 이면 참여·제어 기능으로
+     *  처리하고 true: Accept-Contact SDS·FD icsi-ref(2) — 없으면 403), 대상 = resource-lists 의 entry 하나(3) — 없거나
+     *  둘이면 403 145), 원 SDS 와 상관(4)·5) — 216) 뒤 원 발신자에게 새 MESSAGE 로 중계. */
     bool OnDispositionNotification( const char *pszFrom, CSipMessage *pclsMessage, int &iStatus );
 };
 

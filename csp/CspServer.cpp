@@ -1585,21 +1585,17 @@ void SendAffiliationNotify( const std::string &strUserId, const std::string &str
 }
 
 /**
- * @brief 그룹의 conference 구독자에게 참가자 정보 NOTIFY 를 푸시한다 (RFC 4575/6665 정합 경로).
+ * @brief 그룹의 conference 구독자에게 참가자 정보 NOTIFY 를 푸시한다 (TS 24.379 §10.1.3 · RFC 4575/6665).
  *   본문은 호출자(GroupCallService)가 만든 로스터 스냅샷.
- * @returns 전송한 구독자 수. 0 이면 구독자가 없으므로 호출자가 in-dialog 폴백을 쓴다
- *   (구독 미구현 구 단말 호환 — 전환기 병행).
+ * @returns 전송한 구독자 수
  */
-int SendConferenceNotifyToSubscribers( const std::string &strGroupId, const std::string &strBody,
-                                       std::set<std::string> *psetNotifiedUsers ) {
+int SendConferenceNotifyToSubscribers( const std::string &strGroupId, const std::string &strBody ) {
     std::list<SubscriptionInfo> subList;
     gclsSubscriptionManager.GetSubscriptionsByResource( strGroupId, "conference", subList );
     if ( subList.empty() ) return 0;
     CLog::Print( LOG_INFO, "SendConferenceNotify(sub): Group=%s subs=%d", strGroupId.c_str(), (int)subList.size() );
     for ( auto &sub : subList ) {
         SendNotifyToSubscriber( sub, "", "", NULL, NULL, &strBody );
-        // 같은 멤버에게 in-dialog 폴백까지 중복 발송하지 않도록 호출자에 통지 대상을 알린다
-        if ( psetNotifiedUsers ) psetNotifiedUsers->insert( sub.strUserId );
     }
     return (int)subList.size();
 }

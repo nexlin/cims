@@ -81,8 +81,8 @@ int main(){
                                                  "application/vnd.3gpp.mcptt-info+xml")==EMcAlertService::Mcptt);
   CK("alert svc mcptt emergency cancel",McEmergencyAlertServiceOf(McpttInfoDocument(McpttInfoBool("emergency-ind",false)),
                                                  "application/vnd.3gpp.mcptt-info+xml")==EMcAlertService::Mcptt);
-  CK("alert svc mcptt legacy text/plain",McEmergencyAlertServiceOf("<mcpttinfo><mcptt-Params><alert-ind>true</alert-ind>"
-                                                 "</mcptt-Params></mcpttinfo>","text/plain")==EMcAlertService::Mcptt);
+  CK("alert svc mcptt-info 파트 아님(text/plain) → 경보 아님",McEmergencyAlertServiceOf("<mcpttinfo><mcptt-Params><alert-ind>true</alert-ind>"
+                                                 "</mcptt-Params></mcpttinfo>","text/plain")==EMcAlertService::None);
   CK("alert svc none",McEmergencyAlertServiceOf("hello","text/plain")==EMcAlertService::None);
   // 정원 안 초대 대상 (McpttCapInvitees — TS 24.379 §6.3.5.5, S01 GCS-5): 필수 멤버 먼저, 나머지는 순서대로
   { bool cap=false;

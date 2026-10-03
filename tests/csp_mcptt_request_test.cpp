@@ -12,6 +12,10 @@
 //     §9.2.2.3.1 4)·5) · §9.2.2.4.2 5)·6) · §10.2.4.4.2 10)·12) · §9.2.3.3.3
 //     4)): request-type 이 절차를 가른다 — 그룹 = <mcdata-request-uri>, 1:1 =
 //     resource-lists, 없으면 403 204·205 / request-type 없음 404 142
+//   · 엄격 검사(WP S18 — csp/McpttInfo.h McpttAcceptContactOk ·
+//     McDataSdsAcceptContactOk · McEmergencyAlertServiceOf, csp/McDataCodec.cpp
+//     McDataMissingBodies): 그룹 호·미디어 평면 SDS Accept-Contact 403 · MCData
+//     MIME 본문 199 · 경보는 mcptt-info 파트만
 #include <cstdio>
 #include <fstream>
 #include <sstream>
@@ -82,6 +86,18 @@ static bool SynthFloor(const char *pszApp) {
   CSdpMessage clsSdp;
   clsSdp.Parse(s.c_str(), (int)s.size());
   return McpttFloorChannelOffered(clsSdp.m_clsMediaList);
+}
+
+/** 골든 헤더의 Accept-Contact 값들을 ',' 로 잇는다(CSP JoinedHeaderValues 와 같은 모양). */
+static std::string Accept(const Golden &g) {
+  std::string s;
+  size_t p = 0;
+  while ((p = g.strHead.find("\r\nAccept-Contact: ", p)) != std::string::npos) {
+    const size_t v = p + 18;
+    s += g.strHead.substr(v, g.strHead.find("\r\n", v) - v) + ",";
+    p = v;
+  }
+  return s;
 }
 
 static int Target(const Golden &g, bool &bGroup, std::string &strId,
@@ -324,6 +340,73 @@ int main() {
                     j);
     CK("request-type 이름 경계(<request-type-x> 는 아니다)",
        j.m_strRequestType.empty());
+  }
+
+  // ── 엄격 검사 (WP S18 — 스위치 없이 늘 규격대로) ──
+  {
+    // 그룹 호 제어 기능 Accept-Contact (TS 24.379 §10.1.1.4.2 3) · §10.1.1.4.5.1
+    // 4) · §10.1.2.4.1.1 2) · §17.4.2.2 3))
+    CK("12 재합류 Accept-Contact 둘 → 통과",
+       McpttAcceptContactOk(Accept(Load("12_rejoin_invite.txt"))));
+    CK("01 개별 호 Accept-Contact 둘 → 통과",
+       McpttAcceptContactOk(Accept(Load("01_private_invite.txt"))));
+    CK("10 icsi-ref 만(g.3gpp.mcptt 없음) → 403",
+       !McpttAcceptContactOk(Accept(Load("10_conference_subscribe.txt"))));
+    CK("g.3gpp.mcptt 만(icsi-ref 없음) → 403",
+       !McpttAcceptContactOk("*;+g.3gpp.mcptt;require;explicit,"));
+    CK("특성 태그 접두사 일치(+g.3gpp.mcptt-x)는 아니다",
+       !McpttAcceptContactOk(
+           "*;+g.3gpp.mcptt-x;require;explicit,*;+g.3gpp.icsi-ref=\"urn%3Aurn-"
+           "7%3A3gpp-service.ims.icsi.mcptt\";require;explicit,"));
+    CK("ICSI 접두사 일치(…icsi.mcpttx)는 아니다",
+       !McIcsiIn("*;+g.3gpp.icsi-ref=\"urn%3Aurn-7%3A3gpp-service.ims.icsi."
+                 "mcpttx\"",
+                 kMcpttIcsi, kMcpttIcsiEnc));
+    CK("원 표기 ICSI(P-Preferred-Service 형)도 읽는다",
+       McIcsiIn("urn:urn-7:3gpp-service.ims.icsi.mcptt", kMcpttIcsi,
+                kMcpttIcsiEnc));
+    // 미디어 평면 SDS INVITE (TS 24.282 §9.2.3.4.4 3))
+    CK("09 MSRP INVITE Accept-Contact mcdata.sds 둘 → 통과",
+       McDataSdsAcceptContactOk(Accept(Load("09_sds_media_group_invite.txt"))));
+    CK("MSRP INVITE icsi-ref 만 → 403",
+       !McDataSdsAcceptContactOk(
+           "*;+g.3gpp.icsi-ref=\"urn%3Aurn-7%3A3gpp-service.ims.icsi.mcdata."
+           "sds\";require;explicit,"));
+    CK("mcdata ICSI 는 mcdata.sds 가 아니다",
+       !McIcsiIn("\"urn%3Aurn-7%3A3gpp-service.ims.icsi.mcdata.fd\"",
+                 kMcDataSdsIcsi, kMcDataSdsIcsiEnc));
+    // MIME 본문 (TS 24.282 §9.2.2.4.2 2) · §10.2.4.4.2 3)) — 199
+    {
+      const Golden g = Load("04_sds_group_message.txt");
+      CMcDataSdsInfo i;
+      const bool b = McDataParseBody(g.strCtype, g.strBody, i);
+      CK("04 SDS info·signalling·payload → 199 아님",
+         b && i.m_bHasInfo && i.m_bHasPayload && !McDataMissingBodies(b, i));
+      i.m_bHasPayload = false;
+      CK("SDS payload 없음 → 199", McDataMissingBodies(b, i));
+      i.m_bHasPayload = true;
+      i.m_bHasInfo = false;
+      CK("SDS mcdata-info 없음 → 199", McDataMissingBodies(b, i));
+      CK("signalling 없음 → 199", McDataMissingBodies(false, i));
+    }
+    {
+      const Golden g = Load("07_fd_group_message.txt");
+      CMcDataSdsInfo i;
+      const bool b = McDataParseBody(g.strCtype, g.strBody, i);
+      CK("07 FD info·signalling(payload 없음) → 199 아님",
+         b && !i.m_bHasPayload && !McDataMissingBodies(b, i));
+    }
+    // 경보 판별은 mcptt-info 파트에서만 (TS 24.379 §12.1)
+    CK("mcptt-info 파트의 alert-ind → MCPTT 경보",
+       McEmergencyAlertServiceOf(
+           "<mcpttinfo><mcptt-Params><alert-ind>true</alert-ind></mcptt-Params>"
+           "</mcpttinfo>",
+           "application/vnd.3gpp.mcptt-info+xml") == EMcAlertService::Mcptt);
+    CK("mcptt-info 파트가 아닌 본문의 alert-ind → 경보 아님",
+       McEmergencyAlertServiceOf(
+           "<mcpttinfo><mcptt-Params><alert-ind>true</alert-ind></mcptt-Params>"
+           "</mcpttinfo>",
+           "text/plain") == EMcAlertService::None);
   }
 
   printf(g_fail ? "FAILED %d\n" : "ALL PASS\n", g_fail);

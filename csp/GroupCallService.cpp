@@ -53,9 +53,8 @@ extern void SendPttDialogEventNotify( const std::string &strWatchedAor, const st
 /** 그룹 문서(GMS) 변경 xcap-diff NOTIFY — setUsers 의 gms 구독자에게 (CspServer.cpp). */
 extern void SendGroupDocNotify( const std::string &strGroupId, const std::set<std::string> &setUsers,
                                 const std::string &strEtag, bool bRemoved );
-/** conference 구독자에게 참가자 NOTIFY 푸시 (CspServer.cpp) — 0 이면 구독자 없음(in-dialog 폴백). */
-extern int SendConferenceNotifyToSubscribers( const std::string &strGroupId, const std::string &strBody,
-                                              std::set<std::string> *psetNotifiedUsers );
+/** conference 구독자에게 참가자 NOTIFY 푸시 (CspServer.cpp) — 보낸 구독 수. */
+extern int SendConferenceNotifyToSubscribers( const std::string &strGroupId, const std::string &strBody );
 /** 끝난 세션(gr)의 conference 구독을 noresource 로 끝낸다 (CspServer.cpp, RFC 4575 §3.3) — 끝낸 구독 수. */
 extern int TerminateConferenceSubscriptions( const std::string &strGroupId, const std::string &strSessionGr );
 
@@ -981,7 +980,7 @@ static int _evalAnswerSdes( const ServiceInfo &svc, CSipCallRtp *pclsRtp, std::s
  */
 bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *pszCallerInfo, const char *pszCallId,
                                           CSipCallRtp *pclsRtp, CSipCallRoute *pclsRoute, int iCondition,
-                                          bool bBroadcastInd, bool bRejoin ) {
+                                          bool bBroadcastInd, bool bRejoin, const std::string &strSessionType ) {
     CspPttGroup clsGroup;
 
     if ( gclsGroupMap.Select( pszGroupId, clsGroup ) == false ) {
@@ -1073,6 +1072,31 @@ bool CGroupCallService::ProcessGroupCall( const char *pszGroupId, const char *ps
             gclsCallDir.PttAttempt( pszGroupId, std::to_string( clsGroup._dbId ), pszCallerInfo, "failed", "denied",
                                     "not_member", 403 );
         return true;
+    }
+
+    // 그룹 문서 초기 처리 5)c)d) (TS 24.379 §6.3.5.2) — 요청의 <session-type> 이 그룹
+    // 종류(<on-network-invite-members>)와
+    //   다르면 404: 편성 그룹(true)에 prearranged 가 아니면 117, chat 그룹(false)에 chat 이 아니면 118. 요소가 없으면
+    //   보지 않는다. 재합류는 이 초기 처리를 거치지 않고(§10.1.1.4.5.1 — 합류 규칙 §6.3.5.3), 애드혹·개별 호는 그룹
+    //   문서가 없다.
+    if ( !strSessionType.empty() && !bRejoin && !clsGroup._isAdhoc && clsGroup._groupType != "private" ) {
+        const bool bChat = clsGroup._groupType == "chat";
+        if ( strSessionType != ( bChat ? "chat" : "prearranged" ) ) {
+            const int iWarn = bChat ? 118 : 117;
+            CLog::Print( LOG_INFO, "ProcessGroupCall: Group(%s) Caller(%s) session-type=%s ≠ %s 그룹 → 404 %d",
+                         pszGroupId, pszCallerInfo, strSessionType.c_str(), bChat ? "chat" : "prearranged", iWarn );
+            gclsUserAgent.StopCall(
+                pszCallId, SIP_NOT_FOUND, NULL,
+                { { "Warning",
+                    McpttWarning( iWarn,
+                                  bChat ? "the group identity indicated in the request is a chat group"
+                                        : "the group identity indicated in the request is a prearranged group",
+                                  gclsServiceMap.GetDomainByKind( "ptt" ) ) } } );
+            if ( gclsCallDir.IsEnabled() )
+                gclsCallDir.PttAttempt( pszGroupId, std::to_string( clsGroup._dbId ), pszCallerInfo, "failed", "denied",
+                                        "session_type_mismatch", SIP_NOT_FOUND );
+            return true;
+        }
     }
 
     // 협상 게이트 (RFC 3264): 개시자 오퍼에 서비스 코덱(코덱 테이블 최우선, 기본 AMR-WB)이 없으면
@@ -4386,13 +4410,12 @@ void CGroupCallService::EmitEmergencyModeEvent( const char *pszAction, int iTier
     gclsFmReporter.SendEvent( "emergency_mode_changed", "stateChange", gclsFmReporter.Node() + "/csp", p );
 }
 
-std::string CGroupCallService::BuildConferenceInfoBody(
-    const std::string &strGroupId, const std::string &strChangedUser, const std::string &strStatus,
-    const std::string &strJoining, std::vector<std::pair<std::string, std::string>> *pvecLegsOut ) {
+std::string CGroupCallService::BuildConferenceInfoBody( const std::string &strGroupId,
+                                                        const std::string &strChangedUser, const std::string &strStatus,
+                                                        const std::string &strJoining ) {
     // 1. Collect established legs for this group + bump version
-    //    확립 leg(200 OK 수신)만 대상 — 미확립(pending) fan-out 초대는 ①다이얼로그가 없어 NOTIFY 가
-    //    성립하지 않고 ②참가자 명단에 실리면 '아직 참여하지 않은 초대 대상'이 참여자로 표시된다.
-    std::vector<std::pair<std::string, std::string>> vecLegs;
+    //    확립 leg(200 OK 수신)만 대상 — 미확립(pending) fan-out 초대가 참가자 명단에 실리면 '아직 참여하지 않은 초대
+    //    대상'이 참여자로 표시된다.
     // 로스터는 **사용자 단위**다 — RFC 4575 는 참가자당 <user> 하나이고, 그 사람의 단말들은
     //   그 안의 <endpoint> 로 표현한다. leg 단위로 만들면 재조인 과도기에 같은 사용자가 여러 번
     //   실려(실측: 로스터[3] = 001·002·001) 수신측에서 상태가 뒤집힐 수 있다.
@@ -4412,8 +4435,6 @@ std::string CGroupCallService::BuildConferenceInfoBody(
 
         for ( const auto &kv : m_mapCallSession ) {
             if ( kv.second.strGroupId == strGroupId && kv.second.bEstablished ) {
-                // leg 목록은 leg 단위 유지 — NOTIFY 는 다이얼로그(leg)마다 보내야 한다.
-                vecLegs.push_back( std::make_pair( kv.first, kv.second.strMemberId ) );
                 // 은닉 청취 leg 는 로스터에 실리지 않는다(통지는 받는다 — dispatch_center.md §5.6 hidden).
                 if ( kv.second.bListenOnly && kv.second.bListenHidden ) continue;
                 if ( kv.second.bListenOnly ) setListeners.insert( kv.second.strMemberId );
@@ -4423,8 +4444,6 @@ std::string CGroupCallService::BuildConferenceInfoBody(
             }
         }
     }
-    if ( pvecLegsOut ) *pvecLegsOut = vecLegs;
-
     // 같은 사용자에 확립 leg 가 둘 이상 = 재조인 과정에서 이전 leg 가 정리되지 않은 상태.
     //   로스터는 사용자 단위로 합쳐 내보내지만, 원인은 세션 정리 쪽이므로 관측 가능하게 남긴다.
     for ( const auto &kv : mapUserLegs ) {
@@ -4483,30 +4502,13 @@ std::string CGroupCallService::BuildConferenceInfoBody(
 
 void CGroupCallService::SendConferenceNotify( const std::string &strGroupId, const std::string &strChangedUser,
                                               const std::string &strStatus, const std::string &strJoining ) {
-    std::vector<std::pair<std::string, std::string>> vecLegs;
-    std::string strBody = BuildConferenceInfoBody( strGroupId, strChangedUser, strStatus, strJoining, &vecLegs );
-
-    // 전송 경로는 **멤버 단위**로 갈린다.
-    //   ① conference 구독자 → 구독 경로(RFC 4575/6665 정합, 단말이 200 OK 로 응답).
-    //   ② 구독 없는 멤버 → 통화 dialog in-dialog NOTIFY 폴백. 구독 미구현 단말(구 APK)은 이 경로로만
-    //      참가자 화면이 갱신되며, 그 단말 스택은 usage 없음으로 500 을 응답한다(무해·재전송 중단).
-    //   구독자가 하나라도 있으면 폴백 전체를 생략하던 종전 방식은 구·신 APK 혼재 시 구 APK 단말의
-    //   명단을 멈추게 한다 — 그래서 구독자 집합을 받아 그 멤버만 폴백에서 제외한다.
-    std::set<std::string> setNotified;
-    int iSubs = SendConferenceNotifyToSubscribers( strGroupId, strBody, &setNotified );
-
-    int iFallback = 0;
-    for ( const auto &leg : vecLegs ) {
-        if ( setNotified.count( leg.second ) > 0 ) continue;  // 구독 경로로 이미 통지됨
-        gclsUserAgent.SendNotifyWithBody( leg.first.c_str(), "conference", "application", "conference-info+xml",
-                                          strBody );
-        ++iFallback;
-    }
-
-    if ( iSubs == 0 && iFallback == 0 ) return;
-    CLog::Print( LOG_INFO,
-                 "SendConferenceNotify: Group(%s) User(%s) Status(%s) Joining(%s) → %d subscribers + %d in-dialog",
-                 strGroupId.c_str(), strChangedUser.c_str(), strStatus.c_str(), strJoining.c_str(), iSubs, iFallback );
+    // 참가자 정보는 conference 이벤트 패키지 구독자에게만 간다(TS 24.379 §10.1.3 — 명시 구독, RFC 6665). 호
+    //   다이얼로그 안으로는 보내지 않는다 — 구독 없는 NOTIFY 는 RFC 6665 의 usage 가 아니다.
+    const std::string strBody = BuildConferenceInfoBody( strGroupId, strChangedUser, strStatus, strJoining );
+    const int iSubs = SendConferenceNotifyToSubscribers( strGroupId, strBody );
+    if ( iSubs == 0 ) return;
+    CLog::Print( LOG_INFO, "SendConferenceNotify: Group(%s) User(%s) Status(%s) Joining(%s) → %d subscribers",
+                 strGroupId.c_str(), strChangedUser.c_str(), strStatus.c_str(), strJoining.c_str(), iSubs );
 }
 
 /**

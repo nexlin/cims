@@ -538,7 +538,10 @@ MCPTT/MCData 경고 코드와 문구다(`McpttWarning`). conference 구독 거�
 | 미디어 자원(CMP 그룹·포트) 확보·수락 실패 | 500 + `Retry-After: 5` | §10.1.1.4.2 1) |
 | 개별 호 착신자 미등록(서비스 인가 바인딩 없음) | 404 | §11.1.1.3.2 7) |
 | 애드혹 미지원(`Setup.PttAdhocEnabled` false) · 개시 미인가(user profile) | 403 + `186` · `185` | §17.4.2.2 5) · 4) |
-| 서비스 인가 바인딩 없는 요청자(등록 없음) | 404 + `141 user unknown to the participating function` — **엄격 검사 스위치 `Setup.Mcptt.StrictCheck`** 아래(기본 `log` = 로그만, `enforce` 면 거절, `off`) | §10.1.1.3.1.1 2a) · §11.1.1.3.1.1 4) · §17.3.2.1.1 3) — 결정 D5·D9 |
+| 서비스 인가 바인딩 없는 요청자(등록 없음) — INVITE · 경보 MESSAGE | 404 + `141 user unknown to the participating function` | §10.1.1.3.1.1 2a) · §11.1.1.3.1.1 4) · §17.3.2.1.1 3) · §12.1.2.1 2a) |
+| 그룹 호(편성·chat·애드혹·재합류) INVITE 의 Accept-Contact 에 `+g.3gpp.mcptt`·MCPTT icsi-ref 가 둘 다 있지 않다 · chat 개시·합류 Contact 에 `isfocus` | 403 | §10.1.1.4.2 3) · §10.1.2.4.1.1 2) · §10.1.1.4.5.1 4) · §17.4.2.2 3) |
+| `<session-type>` 이 그룹 종류와 다르다(재합류·애드혹·개별 호 제외, 요소가 있을 때만) | 404 + `117 the group identity indicated in the request is a prearranged group` · `118 … is a chat group` | §6.3.5.2 5)c)d) |
+| 경보·경보 취소·긴급 해제 MESSAGE 의 Accept-Contact 에 MCPTT icsi-ref 없음 | 403 | §12.1.3.1 2) |
 
 개시자에게 가는 개별 호 180 은 제어 기능 P-Asserted-Identity 와 착신이 실은 Warning 을 싣고(§6.3.3.2.3.1 2) · §11.1.1.3.1.1), 개시 게이트가
 거절로 끝나면 최종 응답에 제어 기능 자신의 경고(112 등) 뒤에 멤버 응답의 Warning(110·127 등)을 잇는다.
@@ -658,9 +661,8 @@ REGISTER/SUBSCRIBE/NOTIFY 의 헤더·본문을 상용 IMS 캡처 기준으로 �
 
 - **conference-info NOTIFY (RFC 4575, 그룹콜 참가자)**: 로스터 변경을 `Event: conference` /
   `application/conference-info+xml` NOTIFY 로 통지한다. 경로는 멤버 단위로 갈린다 —
-  **구독(SUBSCRIBE `Event: conference`)을 건 단말은 그 구독 dialog 로**(RFC 6665 정합, 단말이 200 OK),
-  구독이 없는 확립 leg 는 통화 dialog in-dialog NOTIFY 폴백으로 받는다(구독 미구현 단말 호환,
-  전 단말 구독 구현 후 제거). 구독 취급 규칙(갱신 시 자원·이벤트 Call-ID 승계, To tag 유지, notifier
+  **구독(SUBSCRIBE `Event: conference`)을 건 단말에게만 그 구독 dialog 로** 보낸다(RFC 6665, 단말이 200 OK) —
+  호 다이얼로그 안으로는 보내지 않는다. 구독 취급 규칙(갱신 시 자원·이벤트 Call-ID 승계, To tag 유지, notifier
   신원 고정, 제휴 불변)은 [ptt_flows.md](ptt_flows.md) "참가자 로스터 통지 경로"가 정본.
   통지 대상은 —
   **개시자(caller) 조인·fan-out 멤버(callee) 조인·이탈 모두** 통지한다(개시자 조인 누락 시 늦은

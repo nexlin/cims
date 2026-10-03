@@ -2,6 +2,7 @@
 
 #include <stdint.h>
 #include <stdlib.h>
+#include <strings.h>
 #include <time.h>
 
 #include "CmdpClient.h"
@@ -188,9 +189,9 @@ void CMcDataMediaService::OnIncomingMsrpInvite( const char *pszCallId, const cha
         return;
     }
 
-    // 대상 — Request-URI 는 참여 기능 PSI, 그룹은 mcdata-info <mcdata-request-uri>(TS 24.282 §9.2.3.2.3 · §9.2.3.3.3
-    //   4)a)). request-type 이 없으면 제어 기능을 정하지 못한다 — 404 + 142(5)), 결정 D10 — Request-URI 를 그룹으로
-    //   읽는 옛 형식은 받지 않는다). 1:1 standalone SDS over media plane(4)b))은 아직 없다 — 403.
+    // 참여 기능 (TS 24.282 §9.2.3.3.3) — Request-URI 는 참여 기능 PSI, 그룹은 mcdata-info <mcdata-request-uri>(4)a)).
+    //   request-type 이 SDS 가 아니면 제어 기능을 정하지 못한다 — 404 + 142(5)). 제어 기능(§9.2.3.4.4) = 2) MSRP offer
+    //   488 → 3) Accept-Contact 403 → 6) 1:1(미디어 평면 1:1 은 아직 없다 — 403) → 7) 그룹 게이트.
     auto rejectWarn = [&]( int iStatus, int iWarn ) {
         std::vector<std::pair<std::string, std::string>> vecHdr;
         if ( iWarn > 0 )
@@ -204,6 +205,34 @@ void CMcDataMediaService::OnIncomingMsrpInvite( const char *pszCallId, const cha
             pclsMessage->m_clsContentType.m_strType + "/" + pclsMessage->m_clsContentType.m_strSubType;
         McDataParseInfo( McBodyPart( pclsMessage->m_strBody, strCtype, "vnd.3gpp.mcdata-info+xml" ), clsReq );
     }
+    if ( clsReq.m_strRequestType != "group-sds" && clsReq.m_strRequestType != "one-to-one-sds" ) {
+        CLog::Print( LOG_INFO, "McDataMedia: MSRP INVITE from(%s) request-type(%s) → 404 142", pszFrom,
+                     clsReq.m_strRequestType.empty() ? "-" : clsReq.m_strRequestType.c_str() );
+        rejectWarn( SIP_NOT_FOUND, 142 );
+        return;
+    }
+    // 제어 기능 2) — MSRP URI(a=path)가 있는 offer 여야 한다
+    std::string strRemotePath;
+    const CSdpMedia *pclsAudio = NULL;
+    if ( !ExtractMsrpOffer( pclsRtp, strRemotePath, &pclsAudio ) ) {
+        CLog::Print( LOG_INFO, "McDataMedia: MSRP INVITE from(%s) without a=path — 488", pszFrom );
+        gclsUserAgent.StopCall( pszCallId, SIP_NOT_ACCEPTABLE_HERE );
+        return;
+    }
+    // 제어 기능 3) — Accept-Contact 에 g.3gpp.mcdata.sds 와 SDS icsi-ref 가 없으면 403
+    {
+        std::string strAccept;
+        if ( pclsMessage )
+            for ( const auto &h : pclsMessage->m_clsHeaderList )
+                if ( strcasecmp( h.m_strName.c_str(), "Accept-Contact" ) == 0 ) strAccept += h.m_strValue + ",";
+        if ( !McDataSdsAcceptContactOk( strAccept ) ) {
+            CLog::Print( LOG_INFO,
+                         "McDataMedia: MSRP INVITE from(%s) — Accept-Contact mcdata.sds 태그·icsi-ref 없음 → 403",
+                         pszFrom );
+            gclsUserAgent.StopCall( pszCallId, SIP_FORBIDDEN );
+            return;
+        }
+    }
     if ( clsReq.m_strRequestType == "one-to-one-sds" ) {
         CLog::Print( LOG_INFO, "McDataMedia: MSRP INVITE from(%s) one-to-one-sds — 미디어 평면 1:1 미제공 → 403",
                      pszFrom );
@@ -213,9 +242,7 @@ void CMcDataMediaService::OnIncomingMsrpInvite( const char *pszCallId, const cha
     bool bGroupReq = false;
     std::string strGroupId;
     int iTargetWarn = 0;
-    const int iTarget = clsReq.m_strRequestType == "group-sds"
-                            ? McDataRequestTarget( clsReq, bGroupReq, strGroupId, &iTargetWarn )
-                            : ( iTargetWarn = 142, SIP_NOT_FOUND );
+    const int iTarget = McDataRequestTarget( clsReq, bGroupReq, strGroupId, &iTargetWarn );
     if ( iTarget != 0 ) {
         CLog::Print( LOG_INFO, "McDataMedia: MSRP INVITE from(%s) request-type(%s) — 대상 없음 → %d %d", pszFrom,
                      clsReq.m_strRequestType.empty() ? "-" : clsReq.m_strRequestType.c_str(), iTarget, iTargetWarn );
@@ -244,14 +271,6 @@ void CMcDataMediaService::OnIncomingMsrpInvite( const char *pszCallId, const cha
     }
     if ( iGate != 0 ) {
         rejectWarn( iGate, iWarn );
-        return;
-    }
-
-    std::string strRemotePath;
-    const CSdpMedia *pclsAudio = NULL;
-    if ( !ExtractMsrpOffer( pclsRtp, strRemotePath, &pclsAudio ) ) {
-        CLog::Print( LOG_INFO, "McDataMedia: MSRP INVITE from(%s) without a=path — 488", pszFrom );
-        gclsUserAgent.StopCall( pszCallId, SIP_NOT_ACCEPTABLE_HERE );
         return;
     }
 

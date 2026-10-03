@@ -841,6 +841,33 @@ static void NoteOfferCodecs( const char *pszFrom, const SDP_MEDIA_LIST &clsList 
     gclsCallDir.DeviceMedia( pszFrom, strAudio, strVideo );
 }
 
+/** 같은 이름 헤더(여러 줄) 값을 ',' 로 이은 문자열 — Accept-Contact 판정(McpttAcceptContactOk 등)에 쓴다. */
+static std::string JoinedHeaderValues( CSipMessage *pclsMessage, const char *pszName ) {
+    std::string s;
+    if ( pclsMessage )
+        for ( const auto &h : pclsMessage->m_clsHeaderList )
+            if ( strcasecmp( h.m_strName.c_str(), pszName ) == 0 ) s += h.m_strValue + ",";
+    return s;
+}
+
+/** 그룹 호 제어 기능의 요청 형식 (TS 24.379 §10.1.1.4.2 3) · §10.1.1.4.5.1 4) · §10.1.2.4.1.1 2) · §17.4.2.2 3) ·
+ *  §17.4.4.1.1 4)) — Accept-Contact 에 g.3gpp.mcptt·MCPTT icsi-ref 가 둘 다 있고, chat 그룹이면 요청 Contact 에 isfocus
+ * 가 없어야 한다. 어긋나면 false + 사유(호출자가 403, Warning 없음). */
+static bool McpttGroupCallFormOk( CSipMessage *pclsMessage, bool bChat, const char **ppszWhy ) {
+    if ( !pclsMessage ) return true;
+    if ( !McpttAcceptContactOk( JoinedHeaderValues( pclsMessage, "Accept-Contact" ) ) ) {
+        *ppszWhy = "Accept-Contact 에 g.3gpp.mcptt·MCPTT icsi-ref 없음";
+        return false;
+    }
+    if ( bChat && !pclsMessage->m_clsContactList.empty() )
+        for ( const auto &p : pclsMessage->m_clsContactList.front().m_clsParamList )
+            if ( strcasecmp( p.m_strName.c_str(), "isfocus" ) == 0 ) {
+                *ppszWhy = "chat 개시·합류 Contact 에 isfocus";
+                return false;
+            }
+    return true;
+}
+
 /** 개별 호 상대가 발신자의 PrivateCallList 에 있는가 — CSC user profile 의 <PrivateCall><PrivateCallList> 와 같은 목록:
  *  발신자가 멤버인 (설정) 그룹의 동료 멤버, 그런 동료가 없으면 지정 긴급 수신자(없으면 본인 — 퇴화). TS 24.379
  *  §11.1.1.3.1.1 11)e)i)A). */
@@ -1040,16 +1067,14 @@ void CModuleDispatcher::EventIncomingCall( const char *pszCallId, const char *ps
             }
         }
     }
-    // 서비스 인가 바인딩(TS 24.379 §7.3 — 등록 때의 MCPTT ID ↔ IMPU)이 없는 요청자의 MCPTT 요청 — 규격은 404 + 141
-    //   (§10.1.1.3.1.1 2a) · §11.1.1.3.1.1 4) · §17.3.2.1.1 3)). 계측기·cspsim 이 등록 없이 보내는 경로가 있어 엄격
-    //   검사 스위치(Setup.Mcptt.StrictCheck, 기본 log — 결정 D9) 아래 둔다.
+    // 서비스 인가 바인딩(TS 24.379 §7.3 — 등록 때의 MCPTT ID ↔ IMPU)이 없는 요청자의 MCPTT 요청 — 404 + 141
+    //   (§10.1.1.3.1.1 2a) 편성 · §10.1.2.3.1.1 chat · §11.1.1.3.1.1 4) 개별 · §17.3.2.1.1 3) 애드혹).
     if ( m_clsPttAs.IsEnabled() &&
          ( !strMcpttSessionType.empty() || !strMcpttRequestUri.empty() || gclsGroupMap.Contains( pszTo ) ) ) {
         CspUser clsBound;
-        if ( !gclsCspUserMap.isAlive( pszFrom, clsBound ) &&
-             gclsSetup.McpttStrict(
-                 "141 user unknown to the participating function",
-                 std::string( "INVITE from " ) + pszFrom + " → " + pszTo + " (서비스 인가 바인딩 없음)" ) ) {
+        if ( !gclsCspUserMap.isAlive( pszFrom, clsBound ) ) {
+            CLog::Print( LOG_INFO, "EventIncomingCall: MCPTT INVITE from(%s) → %s — 서비스 인가 바인딩 없음 → 404 141",
+                         pszFrom, pszTo );
             gclsUserAgent.StopCall( pszCallId, SIP_NOT_FOUND, NULL,
                                     { { "Warning", McpttWarning( 141, "user unknown to the participating function",
                                                                  gclsServiceMap.GetDomainByKind( "ptt" ) ) } } );
@@ -1248,6 +1273,14 @@ void CModuleDispatcher::EventIncomingCall( const char *pszCallId, const char *ps
                                                  gclsServiceMap.GetDomainByKind( "ptt" ) ) } } );
                 return;
             }
+            // 제어 기능 3) (§17.4.2.2) — Accept-Contact 에 g.3gpp.mcptt·MCPTT icsi-ref 가 없으면 403
+            const char *pszFormWhy = "";
+            if ( !McpttGroupCallFormOk( pclsMessage, false, &pszFormWhy ) ) {
+                CLog::Print( LOG_INFO, "EventIncomingCall: ad-hoc by(%s) — %s → 403 [PTT-AS]", pszFrom, pszFormWhy );
+                if ( gclsCallDir.IsEnabled() )
+                    gclsCallDir.PttAttempt( pszTo, "", pszFrom, "failed", "denied", "invalid_request", SIP_FORBIDDEN );
+                return StopCall( pszCallId, SIP_FORBIDDEN );
+            }
             // 10) 애드혹 그룹 식별자 — 요청이 <mcptt-request-uri> 로 제안한 식별자가 받아들일 만하면(그룹·진행 중
             // 애드혹
             //   그룹이 아니다) 그것, 아니면(없거나 쓰이는 중) 서버가 만든다. 200 OK 의 <mcptt-calling-group-id> 로
@@ -1297,12 +1330,28 @@ void CModuleDispatcher::EventIncomingCall( const char *pszCallId, const char *ps
     }
 
     if ( m_clsPttAs.IsEnabled() && gclsGroupMap.Contains( pszTo ) ) {
-        // 재합류(bRejoin)는 위에서 gr 로 세션의 그룹을 정했다
+        // 재합류(bRejoin)는 위에서 gr 로 세션의 그룹을 정했다.
+        // 제어 기능의 요청 형식 — 편성 §10.1.1.4.2 3) · 재합류 §10.1.1.4.5.1 4) · chat §10.1.2.4.1.1 2) — 403, Warning
+        // 없음.
+        //   그룹 문서 초기 처리(115·116·117·118)보다 먼저다.
+        {
+            CspPttGroup clsFormGroup;
+            const bool bChat = gclsGroupMap.Select( pszTo, clsFormGroup ) && clsFormGroup._groupType == "chat";
+            const char *pszFormWhy = "";
+            if ( !McpttGroupCallFormOk( pclsMessage, bChat, &pszFormWhy ) ) {
+                CLog::Print( LOG_INFO, "EventIncomingCall: group(%s) caller(%s) — %s → 403 [PTT-AS]", pszTo, pszFrom,
+                             pszFormWhy );
+                if ( gclsCallDir.IsEnabled() && !bRejoin )
+                    gclsCallDir.PttAttempt( pszTo, std::to_string( clsFormGroup._dbId ), pszFrom, "failed", "denied",
+                                            "invalid_request", SIP_FORBIDDEN );
+                return StopCall( pszCallId, SIP_FORBIDDEN );
+            }
+        }
         SetCallOwner( pszCallId, &m_clsPttAs );
         CSipCallRoute clsGroupRoute;
         clsUserInfo.GetCallRoute( clsGroupRoute );
         if ( gclsGroupCallService.ProcessGroupCall( pszTo, pszFrom, pszCallId, pclsRtp, &clsGroupRoute, iMcpttCond,
-                                                    bMcpttBroadcast, bRejoin ) ) {
+                                                    bMcpttBroadcast, bRejoin, strMcpttSessionType ) ) {
             return;
         }
         CLog::Print( LOG_INFO, "EventIncomingCall: ProcessGroupCall(%s) failed for caller(%s) → 403 [PTT-AS]", pszTo,
@@ -2894,7 +2943,7 @@ int CModuleDispatcher::EventMessage( const char *pszFrom, const char *pszTo, CSi
     // 긴급 경보 판별 (McEmergencyAlertServiceOf) — mcdata-info 의 <alert-ind> 는 MCData 긴급 경보(TS 24.282 §16.2.3 —
     //   MCDATA-AS), mcptt-info 의 <alert-ind> 또는 <emergency-ind>false 는 MCPTT emergency alert(TS 24.379 §12.1) → SMS
     //   와 분기. 단말은 Request-URI = 참여 기능 PSI, 대상 그룹 = 본문 <mcptt-request-uri>(§12.1.1.1 4)a)·8))로 보낸다.
-    //   Request-URI 가 그룹인 형식도 전환기로 받는다(대상 그룹 = Request-URI). 이 CSP 는 참여·제어 기능을 겸한다.
+    //   이 CSP 는 참여·제어 기능을 겸한다.
     if ( pclsMessage ) {
         const std::string strCtype =
             pclsMessage->m_clsContentType.m_strType + "/" + pclsMessage->m_clsContentType.m_strSubType;
@@ -2904,7 +2953,9 @@ int CModuleDispatcher::EventMessage( const char *pszFrom, const char *pszTo, CSi
                 pszFrom, pszTo, pclsMessage,
                 McBodyPart( pclsMessage->m_strBody, strCtype, "vnd.3gpp.mcdata-info+xml" ) );
         if ( eAlert == EMcAlertService::Mcptt )
-            return m_clsPttAs.OnEmergencyAlert( pszFrom, pszTo, pclsMessage, ParseMcpttInfo( pclsMessage->m_strBody ) );
+            return m_clsPttAs.OnEmergencyAlert(
+                pszFrom, pszTo, pclsMessage,
+                ParseMcpttInfo( McBodyPart( pclsMessage->m_strBody, strCtype, "vnd.3gpp.mcptt-info+xml" ) ) );
     }
 
     // MCData SDS·FD (TS 24.282) — 대상은 본문이다(Request-URI = 참여 기능 PSI, §6.2.4.1 4)). 그룹 요청은 MCDATA-AS 가
@@ -2957,22 +3008,19 @@ int CModuleDispatcher::EventMessage( const char *pszFrom, const char *pszTo, CSi
         McDataRememberSds( clsInfo.m_strConvId, clsInfo.m_strMsgId, pszFrom, "" );
 
     // 관제 데스크 통합 이력용 1:1 SDS/SMS 보관 (dispatch_center.md §5.6, mcdata_messaging.md §4.3).
-    //   Setup.McData.StoreOneToOneSds 가 켜졌을 때만. 전량 보관 — 열람 범위는 CSC 조회 시점 게이트.
-    //   disposition 통지(수신확인)는 이력이 아니므로 제외한다(사람 메시지·파일만).
+    //   Setup.McData.StoreOneToOneSds 가 켜졌을 때만. 전량 보관 — 열람 범위는 CSC 조회 시점 게이트. disposition
+    //   통지(수신확인)는 이 경로로 오지 않는다(MCDATA-AS — §12.2.3).
     if ( gclsSetup.m_bStoreOneToOneSds && gclsCallDir.IsEnabled() ) {
-        bool bDisposition = bMc && ( clsInfo.m_iMsgType == MCDATA_MSG_SDS_NOTIFICATION );
-        if ( !bDisposition ) {
-            std::string strText = bMc ? clsInfo.m_strText : pclsMessage->m_strBody;
-            const char *pszType = bMc ? ( clsInfo.m_iMsgType == MCDATA_MSG_FD_SIGNALLING ? "fd" : "sds" ) : "text";
-            int iSize = bMc ? clsInfo.m_iPayloadSize : (int)pclsMessage->m_strBody.size();
-            std::string strRec = std::string( "{\"from\":\"" ) + CCallDir::JsonEsc( pszFrom ) + "\",\"to\":\"" +
-                                 CCallDir::JsonEsc( pszTo ) + "\",\"msg_type\":\"" + pszType + "\",\"conv_id\":\"" +
-                                 CCallDir::JsonEsc( clsInfo.m_strConvId ) + "\",\"msg_id\":\"" +
-                                 CCallDir::JsonEsc( clsInfo.m_strMsgId ) + "\",\"text\":\"" +
-                                 CCallDir::JsonEsc( strText ) + "\",\"size\":" + std::to_string( iSize ) +
-                                 ",\"disposition_req\":" + std::to_string( clsInfo.m_iDispositionReq ) + "}";
-            gclsCallDir.McData1to1Log( strRec );
-        }
+        std::string strText = bMc ? clsInfo.m_strText : pclsMessage->m_strBody;
+        const char *pszType = bMc ? ( clsInfo.m_iMsgType == MCDATA_MSG_FD_SIGNALLING ? "fd" : "sds" ) : "text";
+        int iSize = bMc ? clsInfo.m_iPayloadSize : (int)pclsMessage->m_strBody.size();
+        std::string strRec = std::string( "{\"from\":\"" ) + CCallDir::JsonEsc( pszFrom ) + "\",\"to\":\"" +
+                             CCallDir::JsonEsc( pszTo ) + "\",\"msg_type\":\"" + pszType + "\",\"conv_id\":\"" +
+                             CCallDir::JsonEsc( clsInfo.m_strConvId ) + "\",\"msg_id\":\"" +
+                             CCallDir::JsonEsc( clsInfo.m_strMsgId ) + "\",\"text\":\"" + CCallDir::JsonEsc( strText ) +
+                             "\",\"size\":" + std::to_string( iSize ) +
+                             ",\"disposition_req\":" + std::to_string( clsInfo.m_iDispositionReq ) + "}";
+        gclsCallDir.McData1to1Log( strRec );
     }
 
     if ( gclsUserAgent.SendSms( pszFrom, pszTo, pclsMessage->m_strBody.c_str(), &clsRoute,

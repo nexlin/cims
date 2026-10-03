@@ -399,14 +399,22 @@ bool McDataParseBody( const std::string &strContentType, const std::string &strB
                 clsInfo.m_strSignallingPart = vecParts[i].strRaw;
             }
         } else if ( ct == "application/vnd.3gpp.mcdata-payload" ) {
+            clsInfo.m_bHasPayload = true;
             _parseDataPayload( vecParts[i].strContent, clsInfo );
         } else if ( ct == "application/vnd.3gpp.mcdata-info+xml" ) {
+            clsInfo.m_bHasInfo = true;
             _parseMcDataInfo( vecParts[i].strContent, clsInfo );
         } else if ( ct == "application/resource-lists+xml" ) {
             _parseResourceLists( vecParts[i].strContent, clsInfo );
         }
     }
     return bSignalling;
+}
+
+bool McDataMissingBodies( bool bParsed, const CMcDataSdsInfo &clsInfo ) {
+    if ( !bParsed || !clsInfo.m_bHasInfo ) return true;
+    if ( clsInfo.m_iMsgType == MCDATA_MSG_SDS_SIGNALLING ) return !clsInfo.m_bHasPayload;
+    return false;
 }
 
 namespace {

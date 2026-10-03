@@ -380,22 +380,14 @@ chat (상시):
   다이얼로그를 정리한다. ⚠️이때 **CMP LEAVE 는 보내지 않는다** — 멤버 키가 `(group, user)` 라
   방금 JOIN 한 자기 멤버십·포트까지 회수되어 미디어가 끊긴다.
 - **참가자 명단(conference NOTIFY)도 확립 leg 만** 싣는다 — 아직 200 OK 가 오지 않은 fan-out 초대
-  대상이 "참여 중"으로 표시되는 것을 막는다. in-dialog 폴백 발송도 확립 leg 에만 한다(다이얼로그
-  없는 leg 로는 보낼 수 없다). 반면 **구독 경로 발송은 leg 유무와 무관**하다 — 아래 통지 대상 규칙 참조.
+  대상이 "참여 중"으로 표시되는 것을 막는다. 발송은 **구독 경로뿐이고 leg 유무와 무관**하다 — 아래 통지 대상 규칙 참조.
 
-#### 참가자 로스터 통지 경로 (RFC 4575 / RFC 6665)
+#### 참가자 로스터 통지 경로 (TS 24.379 §10.1.3 · RFC 4575 / RFC 6665)
 
-`CGroupCallService::SendConferenceNotify` 는 로스터 스냅샷 1건을 만들어 **멤버 단위로 경로를
-갈라** 발송한다.
-
-| 대상 | 경로 | 단말 응답 |
-|---|---|---|
-| `Event: conference` 구독자 | 구독 dialog (`SendConferenceNotifyToSubscribers` → `SendNotifyToSubscriber`) | 200 OK |
-| 구독 없는 확립 leg | 통화 dialog in-dialog NOTIFY (폴백) | 구독 usage 없음 → 500 (무해, 재전송 중단) |
-
-구독자가 있으면 폴백 전체를 생략하던 방식은 구독 구현/미구현 단말이 섞인 채널에서 미구현
-단말의 명단을 멈추게 하므로, 구독 경로로 통지한 **사용자 집합만** 폴백에서 제외한다.
-폴백 가지는 전환기 조치이며 전 단말이 구독을 구현하면 제거한다.
+`CGroupCallService::SendConferenceNotify` 는 로스터 스냅샷 1건을 만들어 `Event: conference` 구독자에게
+구독 dialog 로 보낸다(`SendConferenceNotifyToSubscribers` → `SendNotifyToSubscriber`, 단말은 200 OK).
+구독하지 않은 참가자에게는 보내지 않는다 — 호 다이얼로그 안의 NOTIFY 는 RFC 6665 의 usage 가 아니다.
+참가자 정보가 필요한 단말은 세션 식별자로 conference 를 구독한다(§10.1.3.2).
 
 구독 취급 규칙 — 어긋나면 구독자 스택이 NOTIFY 를 481 로 거절해 구독이 조용히 죽는다:
 

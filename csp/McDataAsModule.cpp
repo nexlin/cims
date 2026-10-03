@@ -57,29 +57,58 @@ bool CMcDataAsModule::OnMcDataMessage( const char *pszFrom, const char *pszTo, C
     szContentType[0] = '\0';
     pclsMessage->m_clsContentType.ToString( szContentType, sizeof( szContentType ) );
 
-    // MCData multipart 면 signalling TLV 파싱 (conv/msg id·disposition·payload 크기),
-    // 평문(text/plain 등)이면 본문 전체를 payload 로 간주.
+    // MCData multipart 면 signalling TLV 파싱 (conv/msg id·disposition·payload 크기)
     CMcDataSdsInfo clsInfo;
-    bool bMcData =
-        McDataIsMultipartMixed( szContentType ) && McDataParseBody( szContentType, pclsMessage->m_strBody, clsInfo );
-    bool bFd = bMcData && clsInfo.m_iMsgType == MCDATA_MSG_FD_SIGNALLING;
-    int iPayloadSize = bMcData ? clsInfo.m_iPayloadSize : (int)pclsMessage->m_strBody.size();
+    const bool bMultipart = McDataIsMultipartMixed( szContentType );
+    const bool bMcData = bMultipart && McDataParseBody( szContentType, pclsMessage->m_strBody, clsInfo );
+    const bool bFd = bMcData && clsInfo.m_iMsgType == MCDATA_MSG_FD_SIGNALLING;
+    const int iPayloadSize = clsInfo.m_iPayloadSize;
     int iWarn = 0;
 
-    // 대상 — Request-URI 는 참여 기능 PSI 이고(§6.2.4.1 4)) 대상은 본문이다. request-type 이 절차를 가른다
-    //   (§9.2.2.3.1 4) · §9.2.2.4.2 5)·6) · §10.2.4.3.1 4) · §10.2.4.4.2 10)·12)): 그룹 = <mcdata-request-uri>,
-    //   1:1 = resource-lists 의 entry 하나 → 디스패처 1:1 경로. Request-URI 를 대상으로 읽는 옛 형식은 받지 않는다
-    //   (결정 D10 — 1:1 에 resource-lists 가 없으면 403 204·205, request-type 이 없으면 404 142).
+    // MCData 본문(mcdata-info·signalling·payload 파트)이 하나도 없으면 MCData 요청이 아니다 — 1:1 문자(SIP MESSAGE
+    //   text/plain)는 디스패처 1:1 경로. 다만 그룹 Request-URI 로 온 평문(그룹 SDS 의 형식이 아니다)은 403 + 199.
+    if ( !( bMcData || clsInfo.m_bHasInfo || clsInfo.m_bHasPayload ) ) {
+        if ( gclsGroupMap.Contains( pszTo ) == false ) return false;
+        CLog::Print( LOG_INFO, "McDataAs: MESSAGE from(%s) to group(%s) ct=%s — MCData 본문 없음 → 403 199", pszFrom,
+                     pszTo, szContentType );
+        _RejectWithWarning( pclsMessage, SIP_FORBIDDEN, 199, McDataWarnText( 199 ) );
+        iStatus = 0;
+        return true;
+    }
+
+    // 참여 기능 — request-type 이 절차를 가른다(§9.2.2.3.1 4) · §10.2.4.3.1 4)). SDS·FD 가
+    // 아니면(없음·ad-hoc-group-sds)
+    //   제어 기능을 정하지 못한다 — 404 142.
+    const std::string &strReqType = clsInfo.m_strRequestType;
+    if ( strReqType != "group-sds" && strReqType != "one-to-one-sds" && strReqType != "group-fd" &&
+         strReqType != "one-to-one-fd" ) {
+        CLog::Print( LOG_INFO, "McDataAs: MESSAGE from(%s) request-type(%s) → 404 142", pszFrom,
+                     strReqType.empty() ? "-" : strReqType.c_str() );
+        _RejectWithWarning( pclsMessage, SIP_NOT_FOUND, 142, McDataWarnText( 142 ) );
+        iStatus = 0;
+        return true;
+    }
+
+    // 제어 기능 2) — mcdata-info·mcdata-signalling·mcdata-payload(FD 는 info·signalling)가 없으면 403 + 199
+    //   (§9.2.2.4.2 2) · §10.2.4.4.2 3)). 대상 판정(5)·6))보다 먼저다.
+    if ( McDataMissingBodies( bMcData, clsInfo ) ) {
+        CLog::Print( LOG_INFO, "McDataAs: %s from(%s) — info=%d signalling=%d payload=%d → 403 199", strReqType.c_str(),
+                     pszFrom, clsInfo.m_bHasInfo, bMcData, clsInfo.m_bHasPayload );
+        _RejectWithWarning( pclsMessage, SIP_FORBIDDEN, 199, McDataWarnText( 199 ) );
+        iStatus = 0;
+        return true;
+    }
+
+    // 대상 — Request-URI 는 참여 기능 PSI 이고(§6.2.4.1 4)) 대상은 본문이다(§9.2.2.4.2 5)·6) · §10.2.4.4.2 10)·12)):
+    //   그룹 = <mcdata-request-uri>, 1:1 = resource-lists 의 entry 하나 → 디스패처 1:1 경로(없거나 둘이면 403 204·205).
     std::string strGroupId;
-    if ( bMcData &&
-         ( clsInfo.m_iMsgType == MCDATA_MSG_SDS_SIGNALLING || clsInfo.m_iMsgType == MCDATA_MSG_FD_SIGNALLING ) ) {
+    {
         bool bGroup = false;
         std::string strTarget;
         const int iTarget = McDataRequestTarget( clsInfo, bGroup, strTarget, &iWarn );
         if ( iTarget != 0 ) {
             CLog::Print( LOG_INFO, "McDataAs: %s from(%s) request-type(%s) — 대상 없음 → %d %d", bFd ? "FD" : "SDS",
-                         pszFrom, clsInfo.m_strRequestType.empty() ? "-" : clsInfo.m_strRequestType.c_str(), iTarget,
-                         iWarn );
+                         pszFrom, strReqType.c_str(), iTarget, iWarn );
             _RejectWithWarning( pclsMessage, iTarget, iWarn, McDataWarnText( iWarn ) );
             iStatus = 0;
             return true;
@@ -89,12 +118,6 @@ bool CMcDataAsModule::OnMcDataMessage( const char *pszFrom, const char *pszTo, C
             return false;
         }
         strGroupId = strTarget;
-    } else if ( !bMcData ) {
-        // 평문 본문 — 대상은 Request-URI(그룹이면 아래 199 엄격 검사, 아니면 1:1 문자 메시지)
-        if ( gclsGroupMap.Contains( pszTo ) == false ) return false;
-        strGroupId = pszTo;
-    } else {
-        return false;  // 그 밖의 MCData 메시지(옛 형식 disposition 통지 등) → 디스패처 1:1 경로(Request-URI 대상)
     }
 
     // §6.3.3 2) — 그룹 문서가 없으면 404 + 113. 막 만든 그룹(GROUP_CHANGED 전)은 DB 에서 한 건 읽는다
@@ -108,18 +131,6 @@ bool CMcDataAsModule::OnMcDataMessage( const char *pszFrom, const char *pszTo, C
         return true;
     }
     pszTo = strGroupId.c_str();
-
-    // 2) mcdata-info·mcdata-signalling·mcdata-payload 가 없는 본문(text/plain·signalling 없는 multipart) — 규격은 403 +
-    // 199.
-    //   구버전 앱이 평문을 보내는 동안은 엄격 검사 스위치(Setup.Mcptt.StrictCheck, 기본 log) 아래 두고 본문 전체를
-    //   payload 로 전달한다(결정 D5 — 앱이 규격형으로 바뀐 뒤 enforce).
-    if ( !bMcData &&
-         gclsSetup.McpttStrict( "199 expected MIME bodies not in the request",
-                                std::string( "MESSAGE from " ) + pszFrom + " → " + pszTo + " ct=" + szContentType ) ) {
-        _RejectWithWarning( pclsMessage, SIP_FORBIDDEN, 199, McDataWarnText( 199 ) );
-        iStatus = 0;
-        return true;
-    }
 
     // FD Payload 검사 (§10.2.4.4.2 6)·7)) — 그룹 판정(12))보다 먼저: Payload 하나 · FILEURL · 이 서버의 파일
     if ( bFd && McDataFdPayloadCheck( clsInfo, &iWarn ) != 0 ) {
@@ -194,15 +205,10 @@ bool CMcDataAsModule::OnMcDataMessage( const char *pszFrom, const char *pszTo, C
         }
     }
 
-    {
-        const char *pszType = bFd ? "fd" : ( bMcData ? "sds" : "text" );
-        CMcDataSdsInfo clsArcInfo = clsInfo;
-        if ( !bMcData ) clsArcInfo.m_strText = pclsMessage->m_strBody;
-        McDataArchiveMessage( pszTo, pszFrom, pszType, clsArcInfo, iPayloadSize, iFanout, "", "", bMcData );
-    }
+    McDataArchiveMessage( pszTo, pszFrom, bFd ? "fd" : "sds", clsInfo, iPayloadSize, iFanout, "", "", true );
 
-    CLog::Print( LOG_INFO, "McDataAs: group SDS from(%s) to(%s) mcdata=%d size=%d fanout=%d conv(%s) msg(%s)", pszFrom,
-                 pszTo, bMcData, iPayloadSize, iFanout, clsInfo.m_strConvId.c_str(), clsInfo.m_strMsgId.c_str() );
+    CLog::Print( LOG_INFO, "McDataAs: group %s from(%s) to(%s) size=%d fanout=%d conv(%s) msg(%s)", bFd ? "FD" : "SDS",
+                 pszFrom, pszTo, iPayloadSize, iFanout, clsInfo.m_strConvId.c_str(), clsInfo.m_strMsgId.c_str() );
     iStatus = SIP_OK;
     return true;
 }
@@ -214,24 +220,24 @@ bool CMcDataAsModule::OnDispositionNotification( const char *pszFrom, CSipMessag
     if ( !McDataIsMultipartMixed( szContentType ) ) return false;
     CMcDataSdsInfo clsInfo;
     if ( !McDataParseBody( szContentType, pclsMessage->m_strBody, clsInfo ) ) return false;
-    if ( clsInfo.m_iMsgType != MCDATA_MSG_SDS_NOTIFICATION || !clsInfo.m_bHasResourceLists ) return false;
+    if ( clsInfo.m_iMsgType != MCDATA_MSG_SDS_NOTIFICATION ) return false;
 
     const std::string strNotifier = pszFrom ? pszFrom : "";  // 참여 기능이 정한 통지자 MCData ID(§12.2.2.1 2)·10))
     iStatus = 0;                                             // 아래 거절은 Warning 을 실어 여기서 보낸다
 
-    // §12.2.3 2) — ICSI mcdata.sds Accept-Contact (§6.2.4.1 1)b))
-    bool bIcsi = false;
+    // §12.2.3 2) — Accept-Contact 에 SDS 또는 FD icsi-ref (§6.2.4.1 1)b))
+    std::string strAccept;
     for ( const auto &h : pclsMessage->m_clsHeaderList )
-        if ( strcasecmp( h.m_strName.c_str(), "Accept-Contact" ) == 0 &&
-             h.m_strValue.find( "3gpp-service.ims.icsi.mcdata.sds" ) != std::string::npos )
-            bIcsi = true;
-    if ( !bIcsi ) {
-        CLog::Print( LOG_INFO, "McDataAs: disposition from(%s) — Accept-Contact ICSI mcdata.sds 없음 → 403",
+        if ( strcasecmp( h.m_strName.c_str(), "Accept-Contact" ) == 0 ) strAccept += h.m_strValue + ",";
+    if ( !McIcsiIn( strAccept, kMcDataSdsIcsi, kMcDataSdsIcsiEnc ) &&
+         !McIcsiIn( strAccept, kMcDataFdIcsi, kMcDataFdIcsiEnc ) ) {
+        CLog::Print( LOG_INFO, "McDataAs: disposition from(%s) — Accept-Contact ICSI mcdata.sds·fd 없음 → 403",
                      strNotifier.c_str() );
         iStatus = SIP_FORBIDDEN;
         return true;
     }
-    // 3) 대상 MCData ID 는 하나 — 없거나 둘 이상이면 145
+    // 3) 대상 MCData ID 는 resource-lists 의 entry 하나 — 본문이 없거나(Request-URI 를 대상으로 읽는 옛 통지) entry 가
+    //   둘 이상이면 145
     if ( clsInfo.m_vecListUris.size() != 1 ) {
         CLog::Print( LOG_INFO, "McDataAs: disposition from(%s) resource-lists entries=%zu → 403 (145)",
                      strNotifier.c_str(), clsInfo.m_vecListUris.size() );

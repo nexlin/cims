@@ -42,19 +42,19 @@ PTT(MCPTT) 서비스 구현을 3GPP 규격 원문과 대조해 **규격과 다�
 
 | 영역 | 항목 | A | B | C | D |
 |---|---|---|---|---|---|
-| 등록·서비스 인가 (REG) | 3 | — | 2 | — | 1 |
+| 등록·서비스 인가 (REG) | 2 | — | 1 | — | 1 |
 | 제휴 (AFF) | 10 | 6 | 4 | — | — |
-| 그룹 호 — 서버 (GCS) | 13 | 7 | 3 | 3 | — |
+| 그룹 호 — 서버 (GCS) | 11 | 7 | 2 | 2 | — |
 | 개별 호 (PRV) | 2 | — | 2 | — | — |
 | 애드혹 그룹 호 (ADH) | 1 | — | 1 | — | — |
-| 긴급·임박·경보 (EMG) | 3 | 1 | 1 | 1 | — |
+| 긴급·임박·경보 (EMG) | 2 | 1 | 1 | — | — |
 | 발언권 — 서버 (FCS) | 19 | 2 | 9 | 5 | 3 |
 | 발언권 SDP 협상 (SDP) | 2 | — | 2 | — | — |
 | 그룹 문서·GMS (GMS) | 6 | — | 6 | — | — |
 | 설정 문서·CMS (CMS) | 2 | — | 1 | 1 | — |
-| **계** | **61** | **16** | **31** | **10** | **4** |
+| **계** | **57** | **16** | **29** | **8** | **4** |
 
-확인 수준 — ◎ 29 · ○ 24 · △ 8.
+확인 수준 — ◎ 29 · ○ 20 · △ 8.
 
 읽는 순서 — §2(먼저 볼 것) → §3(영역별 전체) → §4(미구현 목록에 빠진 기능) → §5(문서 정정) → §6(묶음과 순서).
 
@@ -89,7 +89,6 @@ PTT(MCPTT) 서비스 구현을 3GPP 규격 원문과 대조해 **규격과 다�
 | # | 급 | 대상 | 규격 | CIMS 지금 | 영향 | 확인 |
 |---|---|---|---|---|---|---|
 | REG-2 | B | CSP·SDK | §7.3.3~§7.3.6 · §7.2.2~§7.2.4 — `Event: poc-settings` PUBLISH(서비스 인가·서비스 설정·Expires 0 로그오프)와 SUBSCRIBE 를 받는다 (shall) | PUBLISH 는 Event 가 `mcptt`·`presence` 밖이면 489(`csp/CscfModule.cpp:1697-1703`), SUBSCRIBE 도 489(`:1353-1361`). SDK 는 보내지 않는다 | 규격 단말은 489 를 «인가 실패» 로 본다. Answer-Mode·선택한 user profile index 가 서버에 닿지 않는다. 우리 SDK 는 규격 서버에서 착신 480(146) | ◎ |
-| REG-3 | B | CSP | §10.1.1.3.1.1 2a) 등 — 서비스 인가 바인딩이 없으면 404 + Warning `141 user unknown to the participating function` (shall) | CSP 가 판정·응답을 낸다(INVITE — 개시·개별·애드혹) — 엄격 검사 스위치 `Setup.Mcptt.StrictCheck` 기본 `log`(로그만, 결정 D5·D9). `enforce` 전환(계측기·cspsim 이 등록 뒤 보내게 된 뒤)과 PUBLISH·SUBSCRIBE 경로는 S18 | 규격 단말이 재인가를 시작할 신호가 없다(스위치가 log 인 동안) | ○ |
 | REG-4 | D | CSP | §7.1 · §7.2.1 NOTE 1 — MCPTT 태그를 뺀 재-REGISTER 는 MCPTT 로그오프다 | MCPTT 사용자 여부 = 가입 종류(`csp/CscfModule.cpp:1194`). Contact 태그로 가르는 것은 MCData·MCVideo 뿐(`csp/UserMap.cpp:193-206`) | MCVideo·MCData 를 남기고 MCPTT 만 로그오프할 수 없다 | ○ |
 
 ### 3.2 제휴 (AFF) — TS 24.379 §9
@@ -117,8 +116,6 @@ CSP 는 참여 기능과 제어 기능을 겸한다.
 | GCS-2 | A | CSP | §6.3.8.1 2) — chat 그룹 호도 참가자가 1명 이하면 해제 (shall) | 잔여 1 leg 해제는 on-demand(편성·애드혹)만 — `csp/GroupCallService.cpp:3327-3334`. chat 은 마지막 leg 뒤에도 CMP 그룹·세션을 남긴다 | 혼자 남은 단말이 세션에 묶인다(발언 요청은 Deny #3) | ◎ |
 | GCS-3 | A | CSP | §10.1.1.4.2 — 멤버 초대는 14) «호가 진행 중이 아닐 때» 만. 15) 진행 중 합류는 r) 에서 끝난다 | 합류 수락 뒤 그대로 fan-out 루프로 내려가 leg 이 없는 제휴 멤버 전원에 INVITE — `csp/GroupCallService.cpp:1557-1579` (`fnAnswer` 가 0 을 돌려주는 일반 합류) | 스스로 나갔거나 거절한 멤버가 남의 합류 때마다 자동 응답 INVITE 로 다시 끌려온다. ptt_flows.md B6 «서버는 개시 시 fan-out 만» 과 다르다 | ◎ |
 | GCS-4 | A | CSP | §10.1.1.4.6 — 새로 제휴했거나 통화권에 돌아온 단말을 진행 중 그룹 호에 초대 (shall) | 제휴 PUBLISH 경로는 기록·NOTIFY 만 한다. 주석은 «스윕이 한다» 고 적었지만(`csp/CscfModule.cpp:1678`) 스윕은 chat 이 아니면 초대 전에 돌아간다 — `csp/GroupCallService.cpp:2969-2972` | 호 도중 로그인·제휴한 규격 단말은 그 호에 못 들어간다. 우리 앱은 conference NOTIFY 를 보고 스스로 합류해 가려진다. ptt_flows.md 는 «late entry 는 UE 주도 = 규격 모델» 이라 적었으나 규격은 서버 초대다 | ◎ |
-| GCS-9 | B | CSP | §6.3.5.2 5)c)·d) — `<session-type>` 이 그룹 종류와 다르면 404 + `117`(편성 그룹)·`118`(chat 그룹) (shall) | session-type 은 `private` 분기에만 쓴다. 그룹 경로는 값을 넘기지 않는다 — `csp/ModuleDispatcher.cpp:1053-1069` | 그룹 문서가 낡은 단말을 바로잡을 기회가 없다. 짝 = GCC-4(SDK 는 chat·adhoc 을 싣는다 — U04) | ○ |
-| GCS-10 | C | CSP | §10.1.1.4.2 3) — Accept-Contact 에 `g.3gpp.mcptt`·MCPTT icsi-ref 가 없으면 403 (chat 은 Contact `isfocus` 도) | MCPTT 경로에 검사가 없다(MCVideo 만 — `csp/McVideoCallService.cpp:667-675`) | 받아들이는 쪽이 넓다. SDK 는 Accept-Contact 둘을 싣는다(U04 — GCC-1). 옛 SDK 단말이 남아 있는 동안은 켜면 막힌다 | ○ |
 | GCS-12 | B | CSP | §6.3.3.4 — conference NOTIFY 에 P-Asserted-Identity(제어 기능 PSI)·P-Preferred-Service·mcptt-info 본문(`<mcptt-calling-group-id>`·`<mcptt-request-uri>`) (shall) | 헤더는 Event·Subscription-State·Contact 뿐, 본문은 conference-info 하나 — `csp/CspServer.cpp:1016-1039` | 규격 단말·참여 기능이 NOTIFY 를 그룹·대상 사용자에 묶을 근거가 없다 | ◎ |
 | GCS-13 | C | CSP | §6.3.3.4 — `<conference-info entity>` = MCPTT group ID, `<user entity>` = MCPTT ID | `sip:<id>@<PTT 도메인>` — `csp/GroupCallService.cpp:3891-3905`. 같은 서버가 mcptt-info·pidf 에서는 `tel:` 표기를 쓴다 | ID 를 문자열로 대조하는 규격 단말은 로스터를 자기 목록과 맞추지 못한다 | ◎ |
 | GCS-16 | B | CSP | §6.3.3.1.2 9)·10) — 받은 INVITE 의 Answer-Mode·Priv-Answer-Mode 를 그대로 옮긴다 (shall) | 초대 INVITE 에 무조건 `Answer-Mode: Auto` — `csp/GroupCallService.cpp:2506-2507` (개별 호 착신도 이 함수). 받은 헤더를 읽는 코드가 없다 | 헤더를 따르는 규격 단말은 개별 호를 벨 없이 자동 응답한다. 짝 = PRV-4 | ◎ |
@@ -149,7 +146,6 @@ CSP 는 참여 기능과 제어 기능을 겸한다.
 | # | 급 | 대상 | 규격 | CIMS 지금 | 영향 | 확인 |
 |---|---|---|---|---|---|---|
 | EMG-3 | A | CSP | §9.2.2.3.3 14) → §12.1.3.4 — 새로 제휴한 단말에 진행 중 경보를 MESSAGE 로 알린다 (shall) | 경보 캐시는 호 경로에서만 읽는다(`csp/GroupCallService.cpp:1327`·`:1344`·`:2002`). 제휴 경로는 NOTIFY 만 낸다(`csp/CscfModule.cpp:2028-2041`) | 경보 뒤에 로그인하거나 망 복귀로 제휴를 다시 실은 단말·관제석은 그 경보를 모른다 | ◎ |
-| EMG-12 | C | CSP | §12.1.3.1 2) — Accept-Contact 에 MCPTT icsi-ref 가 없으면 403 | mcptt-info 지시자 유무만으로 경보 경로에 넣는다 — `csp/ModuleDispatcher.cpp:2658-2662` | 받아들이는 쪽이 넓다 | ○ |
 | EMG-17 | B | CSP·CMP | TS 24.380 §6.3.5.3.9 · §6.3.5.4.8 — 긴급 격상 re-INVITE 의 `mc_implicit_request` 는 암묵적 발언 요청이다 | 암묵 요청은 새 세션 개시에서만 받는다 — `csp/GroupCallService.cpp:176-179`. 격상은 tier 만 바꾼다(`csp/CmpClient.cpp:874-885`) | 규격 단말은 격상 직후 Floor Granted 를 기다리지만 오지 않는다 | △ |
 
 ### 3.8 발언권 — 서버 (FCS) — TS 24.380 §6.3 · §8
@@ -244,8 +240,8 @@ CSP 는 참여 기능과 제어 기능을 겸한다.
 |---|---|---|---|
 | 1 | **문서 값 한두 줄** — 문서 셋의 T2 제외 대상 | FCS-21(문서) | .48 |
 | 2 | **발언권 메시지 정합** — Ack 의 Message Type · 미대기 Queue Position 254 · Granted Duration | FCS-4 · FCS-8 · FCS-20 | .45 SDK·CMP |
-| 5 | **Warning 코드** — 거절 사유를 규격 코드로. handoff §14 K1(SDK 가 Warning 을 올림)과 한 묶음 | REG-3(enforce) · PRV-7(본문) | .45 CSP·SDK → Windows(문구 사전) |
-| 7 | **SDK 요청 규격화(남은 것)** — 개별 호 개시 방식 선택(앱), 애드혹 멤버 INVITE, xcap-diff 구독 본문. 등록 태그·그룹/개별 호·MCData 요청·재합류(세션 식별자)·conference 구독(세션 식별자 — S27 의 짝)은 규격형이 됐다(S17 + U04·U05 묶음 A~C · GCC-8 · GCC-7) — 그룹 호 Request-URI 검사(GCS-9·GCS-10)는 SDK 배포 뒤(S18) | PRV-4(앱) · ADH-8(CSP 멤버 INVITE) · GMS-16 · SDP-1 | .45 SDK·CSP |
+| 5 | **Warning 코드** — 거절 사유를 규격 코드로. handoff §14 K1(SDK 가 Warning 을 올림)과 한 묶음 | PRV-7(본문) | .45 CSP·SDK → Windows(문구 사전) |
+| 7 | **SDK 요청 규격화(남은 것)** — 개별 호 개시 방식 선택(앱), 애드혹 멤버 INVITE, xcap-diff 구독 본문. 등록 태그·그룹/개별 호·MCData 요청·재합류(세션 식별자)·conference 구독(세션 식별자 — S27 의 짝)은 규격형이 됐다(S17 + U04·U05 묶음 A~C · GCC-8 · GCC-7) — 그룹 호 Request-URI 검사(GCS-9·GCS-10)는 S18 로 켰다 | PRV-4(앱) · ADH-8(CSP 멤버 INVITE) · GMS-16 · SDP-1 | .45 SDK·CSP |
 | 8 | **제휴를 클라이언트 단위로** — 행 키 통일, 클라이언트 단위 해제·판정, 암묵 제휴 취소. handoff §14 K3·S2 와 한 묶음 | AFF-2~AFF-8 · AFF-12 · EMG-3 | .45 CSP·SDK |
 | 9 | **호 모델 결정** — chat 그룹(초대 없이 합류·1명 이하 해제)과 편성 그룹의 재초대·late call entry·제휴 해제 시 이탈. 규격대로 바꿀지, 편차로 남기고 사유를 적을지 정한다 | GCS-1~GCS-4 · GCS-22 · AFF-11 | 결정 → .45 CSP |
 | 10 | **그룹 문서 집행** — 수신 전용 | FCS-14 | .45 CSP·CMP·CSC |
@@ -267,5 +263,5 @@ CSP 는 참여 기능과 제어 기능을 겸한다.
 - **floor SRTCP(TS 24.380 §13)·KMS(TS 33.180 본문)** — placeholder 로 문서에 있어 내부를 읽지 않았다. 토큰 교환·파트너 도메인(부록 B.7~B.9)도.
 - **OMA XDM Group·RFC 원문 일부** — 그룹 문서의 OMA 스키마 시퀀스, RFC 6665·OIDC Core 의 해당 절은 규격 폴더에 없어 대조하지 못했다(AFF-9 의 근거 일부).
 - **실행 확인** — 모든 항목이 코드 읽기다. △ 표시 항목과 AFF-5(제휴 행 키)는 실서버로 재현해 확정한다.
-- **cspsim·계측기(libcsim)** — 시험 도구의 MCPTT 송신 형태는 보지 않았다. 서버 쪽 검사를 켜면(GCS-9·GCS-10·REG-3) 도구도 함께 맞춰야 한다 — 개별 호(PRV-1)는 S17 부터 규격형만 받는데 도구에는 개별 호 경로가 없다.
+- **cspsim·계측기(libcsim)** — 시험 도구의 MCPTT 송신 형태는 보지 않았다. 서버는 규격 형식만 받으므로(결정 K4 — 등록 없는 요청 404 141·Accept-Contact 403·session-type 404 117/118) 도구도 함께 맞춰야 한다 — 개별 호(PRV-1)는 S17 부터 규격형만 받는데 도구에는 개별 호 경로가 없다.
 - **콘솔·현장 앱 화면 규칙** — 인가 요소가 늘면(묶음 4) 콘솔 가입자 프로파일 칸이 따라가야 한다.

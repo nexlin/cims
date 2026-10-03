@@ -73,6 +73,11 @@ public:
     std::string m_strCallingUserId;
     std::string m_strCallingGroupId;
 
+    /** application/vnd.3gpp.mcdata-info+xml · application/vnd.3gpp.mcdata-payload 파트 유무 — 제어 기능의 본문 검사
+     *  (McDataMissingBodies) */
+    bool m_bHasInfo = false;
+    bool m_bHasPayload = false;
+
     /** application/resource-lists+xml 파트 유무와 <entry uri> 목록 — disposition 통지 대상 MCData ID(§12.2.1.1 3)) */
     bool m_bHasResourceLists = false;
     std::vector<std::string> m_vecListUris;
@@ -145,5 +150,13 @@ std::string McDataBuildFdSignallingBody( std::string &strContentTypeOut, const s
  * @return mcdata-signalling 파트를 찾아 파싱했으면 true
  */
 bool McDataParseBody( const std::string &strContentType, const std::string &strBody, CMcDataSdsInfo &clsInfo );
+
+/**
+ * SDS·FD MESSAGE 에 있어야 할 MIME 본문이 빠졌는가 — 빠졌으면 제어 기능이 403 + 199 "expected MIME bodies not in the
+ * request" 로 거절한다. SDS = mcdata-info·mcdata-signalling·mcdata-payload(TS 24.282 §9.2.2.4.2 2)), FD = mcdata-info·
+ * mcdata-signalling(§10.2.4.4.2 3)). bParsed = McDataParseBody 의 결과(signalling 파트를 읽었는가). signalling 이
+ * 없으면 어느 쪽이든 빠진 것이다.
+ */
+bool McDataMissingBodies( bool bParsed, const CMcDataSdsInfo &clsInfo );
 
 #endif

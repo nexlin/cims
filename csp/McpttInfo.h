@@ -20,6 +20,54 @@ static const char *const kMcFocusOkSupported = "tdialog, norefersub, explicitsub
 // 참여 기능이 단말에 보내는 INVITE (§6.3.2.2.3 5)·6)) — timer(3))는 스택이 Supported 줄 하나로 따로 싣는다.
 static const char *const kMcMemberInviteSupported = "tdialog, norefersub";
 
+// ── 서비스 표시 — ICSI·특성 태그 (TS 24.379 Annex D·E · TS 24.282 Annex D — RFC 3840/3841, RFC 6050) ──
+static const char *const kMcpttIcsi = "urn:urn-7:3gpp-service.ims.icsi.mcptt";
+static const char *const kMcpttIcsiEnc = "urn%3Aurn-7%3A3gpp-service.ims.icsi.mcptt";  // 특성 태그 값 표기
+static const char *const kMcDataSdsIcsi = "urn:urn-7:3gpp-service.ims.icsi.mcdata.sds";
+static const char *const kMcDataSdsIcsiEnc = "urn%3Aurn-7%3A3gpp-service.ims.icsi.mcdata.sds";
+static const char *const kMcDataFdIcsi = "urn:urn-7:3gpp-service.ims.icsi.mcdata.fd";
+static const char *const kMcDataFdIcsiEnc = "urn%3Aurn-7%3A3gpp-service.ims.icsi.mcdata.fd";
+
+/** 헤더 값에 특성 태그(예 "+g.3gpp.mcptt")가 파라미터로 있는가 — 다른 태그의 접두사 일치는 아니다(뒤가 ';' ',' '='
+ *  공백·'>'·줄 끝·끝). */
+inline bool McFeatureTagIn( const std::string &v, const char *tag ) {
+    const std::string t = tag;
+    for ( size_t p = v.find( t ); p != std::string::npos; p = v.find( t, p + 1 ) ) {
+        const size_t e = p + t.size();
+        if ( e >= v.size() || v[e] == ';' || v[e] == ',' || v[e] == '=' || v[e] == ' ' || v[e] == '>' || v[e] == '\r' ||
+             v[e] == '\n' )
+            return true;
+    }
+    return false;
+}
+
+/** 헤더 값에 ICSI 가 있는가 — P-Preferred-Service 는 원 표기, Accept-Contact·Contact 의 icsi-ref 는 퍼센트 표기(RFC
+ * 3840)라 둘 다 본다. 더 긴 ICSI 의 접두사 일치(예 mcdata 와 mcdata.sds)는 아니다. */
+inline bool McIcsiIn( const std::string &v, const char *icsi, const char *icsiEnc ) {
+    for ( const char *t : { icsi, icsiEnc } ) {
+        const size_t n = strlen( t );
+        for ( size_t p = v.find( t ); p != std::string::npos; p = v.find( t, p + 1 ) ) {
+            const char c = p + n < v.size() ? v[p + n] : '\0';
+            if ( !std::isalnum( (unsigned char)c ) && c != '.' && c != '-' && c != '_' ) return true;
+        }
+    }
+    return false;
+}
+
+/** 그룹 호 제어 기능의 Accept-Contact 검사 — `g.3gpp.mcptt` 특성 태그와 MCPTT icsi-ref 가 둘 다 있어야 한다. 없으면 403
+ *  (TS 24.379 §10.1.1.4.2 3) 편성 개시·합류 · §10.1.1.4.5.1 4) 재합류 · §10.1.2.4.1.1 2)a)b) chat · §17.4.2.2 3) 애드혹
+ * 개시 · §17.4.4.1.1 4) 애드혹 재합류). acceptContacts = Accept-Contact 헤더 값들을 이은 문자열. */
+inline bool McpttAcceptContactOk( const std::string &acceptContacts ) {
+    return McFeatureTagIn( acceptContacts, "+g.3gpp.mcptt" ) && McIcsiIn( acceptContacts, kMcpttIcsi, kMcpttIcsiEnc );
+}
+
+/** 미디어 평면 SDS INVITE 의 Accept-Contact 검사 — `g.3gpp.mcdata.sds` 특성 태그와 SDS icsi-ref 가 둘 다 있어야 한다.
+ * 없으면 403 (TS 24.282 §9.2.3.4.4 3)). */
+inline bool McDataSdsAcceptContactOk( const std::string &acceptContacts ) {
+    return McFeatureTagIn( acceptContacts, "+g.3gpp.mcdata.sds" ) &&
+           McIcsiIn( acceptContacts, kMcDataSdsIcsi, kMcDataSdsIcsiEnc );
+}
+
 struct CMcpttInfo {
     // session-type (TS 24.379 Annex F.1 의미 2) — chat|prearranged|private|first-to-answer|ambient-listening|adhoc
     std::string strSessionType;
@@ -280,15 +328,15 @@ inline CMcpttInfo ParseMcpttInfo( const std::string &body ) {
 /** 긴급 경보 MESSAGE 의 서비스 (TS 24.379 §12.1 · TS 24.282 §16.2) — 지시자는 서비스마다 그 info 문서 안에 있다.
  *  mcdata-info 파트가 있으면 MCData 요청이다: <alert-ind> 가 있으면 MCData 경보, 없으면 경보가 아니다(SDS·FD). MCData
  *  본문은 MCPTT 경보로 읽지 않는다(같은 요소 이름 <alert-ind> 를 쓴다). 그 밖은 mcptt-info 의 <alert-ind>(경보·경보
- *  취소) 또는 <emergency-ind>false(호 없는 그룹 긴급 상태 해제, §12.1.3.3)면 MCPTT 경보 — mcptt-info Content-Type 을
- *  싣지 않은 옛 본문도 받는다(전환기). ctype = "type/subtype". */
+ *  취소) 또는 <emergency-ind>false(호 없는 그룹 긴급 상태 해제, §12.1.3.3)면 MCPTT 경보 — 지시자는 mcptt-info 파트
+ *  (application/vnd.3gpp.mcptt-info+xml)에서만 읽는다. ctype = "type/subtype". */
 inline EMcAlertService McEmergencyAlertServiceOf( const std::string &body, const std::string &ctype ) {
     const std::string strMcData = McBodyPart( body, ctype, "vnd.3gpp.mcdata-info+xml" );
     if ( !strMcData.empty() ) {
         std::string v;
         return McpttElemValue( strMcData, "alert-ind", v ) ? EMcAlertService::McData : EMcAlertService::None;
     }
-    const CMcpttInfo mi = ParseMcpttInfo( body );
+    const CMcpttInfo mi = ParseMcpttInfo( McBodyPart( body, ctype, "vnd.3gpp.mcptt-info+xml" ) );
     return ( mi.bHasAlertInd || ( mi.bHasEmergencyInd && !mi.bEmergency ) ) ? EMcAlertService::Mcptt
                                                                             : EMcAlertService::None;
 }
