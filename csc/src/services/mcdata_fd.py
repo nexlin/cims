@@ -21,6 +21,7 @@ import re
 import uuid
 import datetime
 import xml.etree.ElementTree as ET
+from urllib.parse import unquote
 
 from httpsrv.handler import HandlerArgs, HandlerResult
 from util.log_util import Logger
@@ -162,6 +163,22 @@ def _find_group(identity: str):
     return find_group(identity)
 
 
+def part_filename(disposition: str) -> str:
+    """파일 파트 `Content-Disposition` 의 이름(RFC 2183 · RFC 6266 §4.3) — `filename*`(RFC 8187 — charset''pct-encoded)가 있으면 그것,
+    없으면 `filename`(quoted-string 이면 `\\` 이스케이프를 푼다 — RFC 9110 §5.6.4, 아니면 token). 없으면 빈 값."""
+    m = re.search(r"filename\*\s*=\s*([^';\s]*)'[^']*'([^;\s]+)", disposition, re.I)
+    if m:
+        try:
+            return unquote(m.group(2), encoding=m.group(1) or 'utf-8', errors='strict').strip()
+        except (LookupError, UnicodeDecodeError):
+            pass
+    m = re.search(r'filename\s*=\s*"((?:[^"\\]|\\.)*)"', disposition, re.I)
+    if m:
+        return re.sub(r'\\(.)', r'\1', m.group(1)).strip()
+    m = re.search(r'filename\s*=\s*([^;\s]+)', disposition, re.I)
+    return m.group(1).strip() if m else ''
+
+
 def _content_disposition(name: str) -> str:
     """파일 이름 헤더(RFC 6266) — HTTP 헤더는 latin-1 이라 ASCII 대체 이름 + `filename*`(UTF-8 percent-encoding)을 함께 싣는다."""
     from urllib.parse import quote
@@ -259,8 +276,7 @@ async def handle_mcdata_fd(args: HandlerArgs, kwargs: dict) -> HandlerResult:
             gid = info['group'] if req_type == REQ_GROUP_FD else ''
             if req_type == REQ_GROUP_FD and not gid:
                 return _err(400, 'mcdata-request-uri (group identity) required for group-fd')
-            m = re.search(r'filename\s*=\s*"?([^";]+)"?', fhead.get('content-disposition', ''), re.I)
-            fname = (m.group(1).strip() if m else '') or fname
+            fname = part_filename(fhead.get('content-disposition', '')) or fname
         elif isinstance(body, dict):
             # 간이형 — multipart/form-data {"file": bytes}
             data = body.get('file')

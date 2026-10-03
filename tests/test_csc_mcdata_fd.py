@@ -99,6 +99,17 @@ class McDataFdTest(unittest.TestCase):
         self.assertIn("filename*=UTF-8''%EB%B3%B4%EA%B3%A0%EC%84%9C.pdf", g.headers["Content-Disposition"])
         g.headers["Content-Disposition"].encode("latin-1")          # HTTP 헤더로 실을 수 있다
 
+    def test_part_filename_quoted_string_and_ext_value(self):
+        # RFC 6266 §4.3 · RFC 9110 §5.6.4 — quoted-string 의 `\` 이스케이프를 푼다(SDK 가 이름의 `"` 를 `\"` 로 싣는다), filename* 가 앞선다
+        self.assertEqual(fd.part_filename('attachment; filename="시험 \\"이름\\" 100%.txt"'), '시험 "이름" 100%.txt')
+        self.assertEqual(fd.part_filename('attachment; filename="a\\\\b.txt"'), 'a\\b.txt')
+        self.assertEqual(fd.part_filename("attachment; filename=\"x.bin\"; filename*=UTF-8''%EB%B3%B4.pdf"), '보.pdf')
+        self.assertEqual(fd.part_filename('attachment; filename=plain.txt; size=3'), 'plain.txt')
+        self.assertEqual(fd.part_filename('attachment'), '')
+        r = self._upload_group(extra_file_headers='Content-Disposition: attachment; filename="q\\"uote.txt"\r\n')
+        self.assertEqual(r.status, 201, r.body)
+        self.assertEqual(r.body["name"], 'q"uote.txt')
+
     def test_binary_body_with_newlines_survives(self):
         data = b"\r\n--not-the-boundary\r\n\x00\xff\n\n--" + bytes(range(256))
         for nl in (b"\r\n", b"\n"):
