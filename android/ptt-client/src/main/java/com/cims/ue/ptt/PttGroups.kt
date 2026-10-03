@@ -62,8 +62,7 @@ internal class GroupPlane(private val c: PttController) {
                 c.sessionMap[groupId] = it
             }
         }
-        // 애드혹 임시 그룹은 편성 자산이 아니다 — affiliation(사전 가입 없음)·채널 영속·
-        //   로스터 구독(참가자는 in-dialog NOTIFY 로 수신)을 모두 건너뛴다.
+        // 애드혹 임시 그룹은 편성 자산이 아니다 — affiliation(사전 가입 없음)·채널 영속을 건너뛴다.
         val adhoc = isAdhocId(groupId)
         if (!adhoc) {
             ensureAffiliated(groupId)
@@ -83,7 +82,7 @@ internal class GroupPlane(private val c: PttController) {
             c._status.value = "그룹콜 발신 실패 $groupId"
             c.publish()
         }
-        if (!adhoc) subscribeRoster(groupId, true)
+        subscribeRoster(groupId, true)                 // 세션 참가자 — 코어가 세션이 성립하면 건다(애드혹 포함)
         c._status.value = when {
             emergency -> "🚨 긴급 그룹콜 개시 $groupId"
             broadcast -> "일제 통화 개시 $groupId"
@@ -241,9 +240,9 @@ internal class GroupPlane(private val c: PttController) {
                 c.sessionMap[groupId] = it
             }
         }
-        // 애드혹 임시 그룹 수신 — 편성 채널이 아니므로 영속/구독 제외 (발신측 joinGroupCall 과 대칭)
+        subscribeRoster(groupId, true)                 // 세션 참가자(애드혹 포함) — 코어가 세션 식별자로 건다
+        // 애드혹 임시 그룹 수신 — 편성 채널이 아니므로 영속 제외 (발신측 joinGroupCall 과 대칭)
         if (!isAdhocId(groupId)) {
-            subscribeRoster(groupId, true)
             c.channelStore?.let { st -> st.add(groupId); if (s.role == ChannelRole.PRIMARY) st.primary = groupId }
             if (s.role == ChannelRole.PRIMARY) c._selectedGroup.value = groupId
         }
@@ -268,99 +267,59 @@ internal class GroupPlane(private val c: PttController) {
         if (tracked < 0) {
             synchronized(c.lock) {
                 c.sessionMap.remove(groupId)?.close()
-                // 미참여 채널의 접속 인원은 "나 외의" 참여자 — 나가는 즉시 본인을 지워 stale(1) 박제 방지.
-                c.rosterMap[groupId]?.let { m ->
-                    c.rosterMap[groupId] = m.toMutableMap().apply { remove(bareId(c.mcpttId)) }.toMap()
-                }
+                c.rosterMap.remove(groupId)             // 세션 밖 참가자는 알 수 없다(구독은 세션 안에서만)
             }
             publishRosters()
-            invalidateRosterConfirm(groupId)
-            syncRosterSubs()   // 편성 채널이면 구독 유지 (인원수 표시 계속)
+            syncRosterSubs()
             c.publish()
         }
         // 호가 있으면 끊긴 뒤 onCallEnded 가 세션/로스터를 정리한다
     }
 
-    /** 세션이 끝난 그룹 — 로스터에서 본인을 지우고 구독을 재확인한다. */
+    /** 세션이 끝난 그룹 — 그 세션의 참가자 목록을 지운다. 구독은 코어가 호와 함께 거뒀다(세션 해제면 서버가 noresource 로 먼저).
+     *  세션 밖 참가자는 알 수 없다 — 참여하지 않은 채널의 접속 인원은 규격 자리인 제휴 상태 구독(TS 24.379 §9.2.1.3)의 몫이다. */
     fun onSessionLeft(gid: String) {
-        // 나가는 순간의 마지막 이탈 NOTIFY 는 통화 다이얼로그 teardown 과 겹쳐 앱까지 못 오는 경우가 있어(특히 마지막
-        //   이탈자 — 08-11 W999 실측), 그 NOTIFY 에 의존하면 본인이 로스터에 남아 접속 인원이 stale(1) 로 박제된다.
-        synchronized(c.lock) {
-            c.rosterMap[gid]?.let { m ->
-                c.rosterMap[gid] = m.toMutableMap().apply { remove(bareId(c.mcpttId)) }.toMap()
-            }
-        }
+        synchronized(c.lock) { c.rosterMap.remove(gid) }
         publishRosters()
-        // 세션 종료 시점은 서버측 구독이 사라진 채 발견된 실측 지점이다 — 확인을 무효화해 즉시 재확인한다(살아 있으면
-        //   엔진이 in-dialog 갱신으로 흡수, 죽었으면 여기서 되살아난다).
-        invalidateRosterConfirm(gid)
-        syncRosterSubs()   // 이탈해도 편성 채널이면 구독 유지 — 인원수는 계속 보여야 한다
+        if (isAdhocId(gid)) subscribeRoster(gid, false)  // 애드혹 임시 그룹은 그 세션으로 끝이다
     }
 
-    // ── 로스터 구독 (RFC 4575 conference) ──
+    // ── 로스터 구독 (RFC 4575 conference — TS 24.379 §10.1.3.2) ──
 
-    /** 채널 참가자 로스터 구독 시작/해지. 갱신은 엔진이 in-dialog 로 자동 수행한다.
-     *  구독 대상은 **참여 채널이 아니라 제휴(편성) 채널 전체**다 — 참여하지 않은 채널의 접속 인원도 목록에 표시한다.
-     *  멱등이 필요하다(등록·제휴·조인이 각자 부른다 — 확인 전 두 번 나가면 서버에 구독이 중복된다). 그 가드는 발행 후
-     *  확인까지의 창에만 걸리고, 확인 없이 [SUB_CONFIRM_TIMEOUT_MS] 가 지나면 재발행 대상으로 되돌린다. */
+    /** 세션 참가자를 원하는 그룹 — 코어에 목표 집합으로 준다. 구독은 코어가 그 그룹의 **진행 중 세션에 참가한 동안만** 세션 식별자로
+     *  건다(세션 밖 구독은 서버가 404 137 — §10.1.3.3). 갱신·해지·세션 끝은 코어 몫이라 여기는 집합만 맞춘다(확인·재발행 없음). */
+    private val rosterWanted = mutableSetOf<String>()      // c.lock
+
     fun subscribeRoster(groupId: String, on: Boolean) {
-        if (on) {
-            val now = SystemClock.elapsedRealtime()
-            synchronized(c.lock) {
-                val confirmedAt = c.confirmedRosters[groupId]
-                if (confirmedAt != null) {
-                    if (now - confirmedAt < SUB_REASSERT_MS) return    // 아직 유효 — 재확인 시점 아님
-                    c.confirmedRosters[groupId] = now                  // 재확인 발행 — 다음 주기까지 유효 취급
-                } else {
-                    val at = c.pendingRosters[groupId]
-                    if (at != null && now - at < SUB_CONFIRM_TIMEOUT_MS) return   // 첫 확인 대기 중
-                    c.pendingRosters[groupId] = now
-                }
-            }
-        } else {
-            synchronized(c.lock) {
-                val wasConfirmed = c.confirmedRosters.remove(groupId) != null
-                val wasPending = c.pendingRosters.remove(groupId) != null
-                if (!wasConfirmed && !wasPending) return   // 걸어둔 적 없는 구독 — 해지 불필요
-                c.rosterMap.remove(groupId)
-            }
-            publishRosters()
+        synchronized(c.lock) {
+            if (on && !rosterWanted.add(groupId)) return
+            if (!on && !rosterWanted.remove(groupId)) return
         }
-        Log.i(TAG, "conference 구독 ${if (on) "발행" else "해지"} $groupId")
+        Log.i(TAG, "conference 구독 ${if (on) "원함" else "그만"} $groupId")
         c.ctl.launch {
             val r = c.account?.subscribeConference(groupId, on)
             if (r == null || !r.ok) {
                 Log.w(TAG, "conference 구독($on) 실패 $groupId: ${r?.reason}")
-                synchronized(c.lock) { if (on) c.pendingRosters.remove(groupId) }
+                if (on) synchronized(c.lock) { rosterWanted.remove(groupId) }   // 다음 맞춤에서 다시
             }
         }
     }
 
-    /** 특정 그룹의 구독 확인만 무효화 — 다음 [syncRosterSubs] 가 재확인(SUBSCRIBE)을 발행한다. */
-    fun invalidateRosterConfirm(groupId: String) {
-        if (groupId.isBlank()) return
-        synchronized(c.lock) { c.confirmedRosters.remove(groupId); c.pendingRosters.remove(groupId) }
-    }
+    /** 새 계정(로그인) — 코어의 목표 집합은 계정마다다. 호출자는 [PttController.lock] 을 보유하지 않는다. */
+    fun resetRosterWants() = synchronized(c.lock) { rosterWanted.clear(); c.rosterMap.clear() }
 
-    /** 구독 확인 상태 일괄 초기화 — 서버가 우리 상태를 잃었다고 판단했을 때만. 호출자는 [PttController.lock] 을 보유한다. */
+    /** 등록이 서버에서 사라졌다고 볼 때 — 문서 구독 확인을 비운다(다음 맞춤이 다시 던진다). 세션 참가자 구독은 호에 묶여 그대로다.
+     *  호출자는 [PttController.lock] 을 보유한다. */
     fun clearSubStateLocked() {
-        c.confirmedRosters.clear()
-        c.pendingRosters.clear()
-        c.rosterMap.clear()
         c.xcapConfirmedAt.clear()
         c.xcapPendingAt.clear()
     }
 
-    /** 제휴(편성) 채널 집합에 로스터 구독을 맞춘다 — 새로 편성된 채널은 구독하고, 빠진 채널은 해지. */
+    /** 편성 채널 집합에 로스터 목표를 맞춘다 — 새로 편성된 채널은 원하고, 빠진 채널은 그만. 애드혹 세션은 세션이 끝날 때 뺀다. */
     fun syncRosterSubs() {
         if (c.regState.value !is RegState.Registered) return
         val want = desiredAffiliations()
-        val have = synchronized(c.lock) { c.confirmedRosters.keys + c.pendingRosters.keys }
-        val drop = have - want
-        if (drop.isNotEmpty()) {
-            Log.i(TAG, "syncRosterSubs 해지 대상=$drop (want=$want have=$have " +
-                    "groups=${c._groups.value.map { bareId(it.uri) }} joined=${c.channelStore?.joined} sel=${c._selectedGroup.value})")
-        }
+        val drop = synchronized(c.lock) { rosterWanted.filter { it !in want && !isAdhocId(it) } }
         want.forEach { subscribeRoster(it, true) }
         drop.forEach { subscribeRoster(it, false) }
     }
@@ -369,18 +328,15 @@ internal class GroupPlane(private val c: PttController) {
         c._channelRosters.value = synchronized(c.lock) { c.rosterMap.mapValues { it.value.toMap() } }
     }
 
-    /** 로스터 NOTIFY(구독·in-dialog) — 도착 = 구독 확인. 참여 중이면 세션 participants 도 같은 값으로 맞춘다.
-     *  ⚠️"본인은 항상 접속"은 **참여 중일 때만** 성립한다 — 미조인 채널에 자신을 넣으면 참여하지도 않은 채널에 내가 있는
-     *  것으로 보인다. */
+    /** 세션 참가자 NOTIFY(conference 구독 — 참가한 세션의 것) — 세션 participants 와 채널 접속 인원을 같은 값으로 맞춘다.
+     *  세션이 이미 끝났으면(늦게 온 통지) 버린다 — 끝난 세션의 인원을 남기지 않는다. */
     fun onRoster(u: RosterUpdate) {
         val gid = bareId(u.groupId)
         if (gid.isBlank()) return
         val me = bareId(c.mcpttId)
         synchronized(c.lock) {
-            c.pendingRosters.remove(gid)
-            c.confirmedRosters[gid] = SystemClock.elapsedRealtime()
-            val s = c.sessionMap[gid]
-            val base = if (u.full) mutableMapOf() else (s?.participants ?: c.rosterMap[gid]?.toMutableMap() ?: mutableMapOf())
+            val s = c.sessionMap[gid] ?: return
+            val base = if (u.full) mutableMapOf() else s.participants.toMutableMap()
             var selfDisconnected = false
             for (e in u.users) {
                 val id = bareId(e.uri)
@@ -393,8 +349,8 @@ internal class GroupPlane(private val c: PttController) {
             }
             // 참여 중이면 본인은 항상 포함 — 단, 이 NOTIFY 가 본인 이탈을 명시하면 재추가하지 않는다(나가기 직후의 마지막
             //   NOTIFY 가 세션 제거보다 먼저 처리되는 레이스 — 08-11 실측).
-            if (s != null && !selfDisconnected) base[me] = "connected"
-            s?.participants = base
+            if (!selfDisconnected) base[me] = "connected"
+            s.participants = base
             c.rosterMap[gid] = base.toMap()
         }
         publishRosters()
@@ -586,9 +542,8 @@ internal class GroupPlane(private val c: PttController) {
             if (SystemClock.elapsedRealtime() - c.affReRegisterAt > 60_000L) {
                 c.affReRegisterAt = SystemClock.elapsedRealtime()
                 Log.w(TAG, "affiliate 403 — 등록 소실 추정, 등록 갱신 요청")
-                // 등록이 서버에서 사라졌다면 구독도 함께 사라졌다 — 확인 상태를 직접 비워 다음 syncRosterSubs 가 재발행하게 한다.
+                // 등록이 서버에서 사라졌다면 문서 구독도 함께 사라졌다 — 확인 상태를 직접 비워 다음 맞춤이 다시 던지게 한다.
                 synchronized(c.lock) { clearSubStateLocked() }
-                publishRosters()
                 c.cmd("refreshRegistration") { c.account?.refreshRegistration() ?: com.cims.ue.sdk.CimsResult.ok(Unit) }
             }
             return true

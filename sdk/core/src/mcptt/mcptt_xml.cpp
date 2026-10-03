@@ -125,10 +125,10 @@ std::string affiliationCommand(const std::string& groupUri, bool affiliate) {
     return s;
 }
 
-std::string affiliationInfo(const std::string& targetMcpttId) {
+std::string requestUriInfo(const std::string& uri) {
     std::string s = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n";
     s += std::string("<mcpttinfo xmlns=\"") + kNsMcpttInfo + "\">\n  <mcptt-Params>\n";
-    s += infoUri("mcptt-request-uri", targetMcpttId);
+    s += infoUri("mcptt-request-uri", uri);
     s += "  </mcptt-Params>\n</mcpttinfo>\n";
     return s;
 }
@@ -479,6 +479,23 @@ std::string sessionIdentity(const std::string& contact) {
         std::string name = contact.substr(p + 1, e == std::string::npos ? std::string::npos : e - p - 1);
         for (char& ch : name) ch = (char)std::tolower((unsigned char)ch);
         if (name == "isfocus") return contact.substr(a + 1, b - a - 1);
+    }
+    return std::string();
+}
+
+std::string sessionGr(const std::string& uri) {
+    std::string s = uri;
+    const size_t a = s.find('<');
+    if (a != std::string::npos) {
+        const size_t b = s.find('>', a);
+        s = s.substr(a + 1, b == std::string::npos ? std::string::npos : b - a - 1);
+    }
+    s = s.substr(0, s.find('?'));                                       // URI 헤더 부분 앞까지
+    for (size_t p = s.find(';'); p != std::string::npos; p = s.find(';', p + 1)) {
+        const size_t e = s.find(';', p + 1);
+        const std::string param = s.substr(p + 1, e == std::string::npos ? std::string::npos : e - p - 1);
+        if (param.size() > 3 && (param[0] == 'g' || param[0] == 'G') && (param[1] == 'r' || param[1] == 'R') && param[2] == '=')
+            return param.substr(3);
     }
     return std::string();
 }

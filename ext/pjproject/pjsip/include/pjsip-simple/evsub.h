@@ -377,6 +377,20 @@ PJ_DECL(pj_uint32_t) pjsip_evsub_get_expires(const pjsip_evsub *sub);
 
 
 /**
+ * CIMS: set the subscription duration that the next SUBSCRIBE created by
+ * pjsip_evsub_initiate() with PJSIP_EXPIRES_NOT_SPECIFIED will request.
+ * Unlike the initiate argument, every value is taken literally, including
+ * 4294967295 (2^32-1, the largest Expires value of RFC 3261), which has the
+ * same bits as PJSIP_EXPIRES_NOT_SPECIFIED. 3GPP TS 24.379 uses that value for
+ * subscriptions that last for the session (conference event, 10.1.3.2 5)).
+ *
+ * @param sub           Client subscription instance.
+ * @param expires       Subscription duration, in seconds.
+ */
+PJ_DECL(void) pjsip_evsub_set_expires(pjsip_evsub *sub, pj_uint32_t expires);
+
+
+/**
  * Call this function to create request to initiate subscription, to 
  * refresh subcription, or to request subscription termination.
  *

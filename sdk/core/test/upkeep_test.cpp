@@ -10,7 +10,7 @@ using namespace cimsue::detail;
 
 namespace {
 const UpkeepKey kAff{1, UpkeepKind::McpttAffiliation, ""};
-const UpkeepKey kConf{1, UpkeepKind::Conference, "g001"};
+const UpkeepKey kSub{1, UpkeepKind::XcapDiff, "sip:gms_psi@ptt.test"};
 }  // namespace
 
 TEST(Upkeep, RenewsWhenRegistrationComesBack) {
@@ -36,14 +36,14 @@ TEST(Upkeep, RenewsAfterNetworkChangeEvenIfStillRegistered) {
 TEST(Upkeep, RefreshesAtHalfLifetime) {
     Upkeep u;
     u.onRegEvent(1, true);
-    u.want(kConf);
-    u.sent(kConf, 0);
+    u.want(kSub);
+    u.sent(kSub, 0);
     EXPECT_TRUE(u.due(10).empty());              // 응답 대기
-    u.result(kConf, 200, 3600, 1000);
+    u.result(kSub, 200, 3600, 1000);
     EXPECT_TRUE(u.due(1000 + 1799 * 1000).empty());
     auto d = u.due(1000 + 1800 * 1000);          // 수명 절반(③)
     ASSERT_EQ(d.size(), 1u);
-    EXPECT_EQ(d[0], kConf);
+    EXPECT_EQ(d[0], kSub);
 }
 
 TEST(Upkeep, NoRefreshForUnlimitedGrant) {
@@ -58,8 +58,8 @@ TEST(Upkeep, NoRefreshForUnlimitedGrant) {
 TEST(Upkeep, MissingExpiresUsesRequestedLifetime) {
     Upkeep u;
     u.onRegEvent(1, true);
-    u.want(kConf);
-    u.result(kConf, 202, 0, 0);
+    u.want(kSub);
+    u.result(kSub, 202, 0, 0);
     EXPECT_EQ(u.due(Upkeep::kDefaultLifetimeSec * 500).size(), 1u);
 }
 
@@ -84,25 +84,25 @@ TEST(Upkeep, BacksOffAfterRejection) {
 TEST(Upkeep, NoAnswerCountsAsFailure) {
     Upkeep u;
     u.onRegEvent(1, true);
-    u.want(kConf);
-    u.sent(kConf, 0);
+    u.want(kSub);
+    u.sent(kSub, 0);
     EXPECT_TRUE(u.due(Upkeep::kInflightTimeoutMs - 1).empty());
     EXPECT_TRUE(u.due(Upkeep::kInflightTimeoutMs).empty());     // 실패로 바뀌고 물러남이 시작된다(보낸 시각부터 1분)
-    EXPECT_TRUE(u.failing(kConf));
+    EXPECT_TRUE(u.failing(kSub));
     EXPECT_EQ(u.due(60000).size(), 1u);
 }
 
 TEST(Upkeep, OnlyRegisteredAccountsAndWantedItems) {
     Upkeep u;
-    u.want(kConf);
-    u.result(kConf, 200, 60, 0);
+    u.want(kSub);
+    u.result(kSub, 200, 60, 0);
     EXPECT_TRUE(u.due(60000).empty());           // 등록 안 된 계정은 싣지 않는다(등록되면 ①이 싣는다)
     u.onRegEvent(1, true);
     EXPECT_EQ(u.due(60000).size(), 1u);
-    u.unwant(kConf);                             // 앱이 껐다 — 되살리지 않는다
+    u.unwant(kSub);                             // 앱이 껐다 — 되살리지 않는다
     EXPECT_TRUE(u.due(60000).empty());
-    u.result(kConf, 200, 60, 0);                 // 해지 요청의 결과는 무시
-    EXPECT_FALSE(u.wanted(kConf));
+    u.result(kSub, 200, 60, 0);                 // 해지 요청의 결과는 무시
+    EXPECT_FALSE(u.wanted(kSub));
     EXPECT_TRUE(u.wantedFor(1).empty());
 }
 
@@ -110,7 +110,7 @@ TEST(Upkeep, DropAccountForgetsEverything) {
     Upkeep u;
     u.onRegEvent(1, true);
     u.want(kAff);
-    u.want(kConf);
+    u.want(kSub);
     u.want({2, UpkeepKind::Dialog, "sip:+8213000000002@volte.test"});
     EXPECT_EQ(u.wantedFor(1).size(), 2u);
     u.dropAccount(1);

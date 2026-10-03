@@ -24,7 +24,7 @@ public:
     virtual void onVideoRequest(const VideoRequestEvent& ev) { (void)ev; }
     /** floor participant 상태 전이 (TS 24.380 §6.2.4). 마이크 게이트는 코어가 이미 처리했다. */
     virtual void onFloor(const FloorEvent& ev) { (void)ev; }
-    /** 그룹 로스터(RFC 4575 conference-info) — 구독 NOTIFY 또는 in-dialog NOTIFY. full=전체 스냅샷. */
+    /** 그룹 세션 참가자(RFC 4575 conference-info) — conference 구독의 NOTIFY(Engine::subscribeConference). full=전체 스냅샷. */
     virtual void onRoster(int accountId, const std::string& groupId, const std::vector<RosterEntry>& users,
                           bool full) { (void)accountId; (void)groupId; (void)users; (void)full; }
     /** 감시 대상 dialog 상태(RFC 4235 NOTIFY) — dialog 하나당 1회. Join 대상 선택의 입력. */

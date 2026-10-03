@@ -45,7 +45,6 @@ PTT(MCPTT) 서비스 구현을 3GPP 규격 원문과 대조해 **규격과 다�
 | 등록·서비스 인가 (REG) | 3 | — | 2 | — | 1 |
 | 제휴 (AFF) | 10 | 6 | 4 | — | — |
 | 그룹 호 — 서버 (GCS) | 13 | 7 | 3 | 3 | — |
-| 그룹 호 — 단말 (GCC) | 1 | — | 1 | — | — |
 | 개별 호 (PRV) | 2 | — | 2 | — | — |
 | 애드혹 그룹 호 (ADH) | 1 | — | 1 | — | — |
 | 긴급·임박·경보 (EMG) | 3 | 1 | 1 | 1 | — |
@@ -53,9 +52,9 @@ PTT(MCPTT) 서비스 구현을 3GPP 규격 원문과 대조해 **규격과 다�
 | 발언권 SDP 협상 (SDP) | 2 | — | 2 | — | — |
 | 그룹 문서·GMS (GMS) | 6 | — | 6 | — | — |
 | 설정 문서·CMS (CMS) | 2 | — | 1 | 1 | — |
-| **계** | **62** | **16** | **32** | **10** | **4** |
+| **계** | **61** | **16** | **31** | **10** | **4** |
 
-확인 수준 — ◎ 30 · ○ 24 · △ 8.
+확인 수준 — ◎ 29 · ○ 24 · △ 8.
 
 읽는 순서 — §2(먼저 볼 것) → §3(영역별 전체) → §4(미구현 목록에 빠진 기능) → §5(문서 정정) → §6(묶음과 순서).
 
@@ -130,11 +129,7 @@ CSP 는 참여 기능과 제어 기능을 겸한다.
 
 ### 3.4 그룹 호 — 단말 (GCC) — TS 24.379 §6.2 · §10.1
 
-현장 앱·관제 앱 두 벌은 MCPTT SIP 를 직접 만들지 않는다 — 전부 SDK 경유라 아래는 세 앱 공통이다. 개별 호·애드혹 개시도 같은 함수(`startMcptt`)다.
-
-| # | 급 | 대상 | 규격 | CIMS 지금 | 영향 | 확인 |
-|---|---|---|---|---|---|---|
-| GCC-7 | B | SDK | §10.1.3.2 2)~5)·8) — conference SUBSCRIBE: Request-URI = 세션 식별자 · P-Preferred-Service · Accept-Contact · Expires 4294967295 · mcptt-info `<mcptt-request-uri>` = 그룹 ID (shall) | `Event: conference`·`Expires: 3600` 만, Request-URI = 그룹 URI, 본문 없음 — `sdk/core/src/engine.cpp:3011-3022`. 앱은 세션 밖의 제휴 그룹 전체를 구독한다 | 규격 서버에서 로스터를 못 받는다. handoff §14.1 의 «구독 3600초 갱신은 규격대로» 는 conference 구독에는 맞지 않는다 | ◎ |
+남은 항목 없음 — 단말 그룹 호 요청(등록 태그·개시·chat·재합류·conference 구독)의 정본은 [ue_sdk.md](../design/features/ue_sdk.md) §4.2.
 
 ### 3.5 개별 호 (PRV) — TS 24.379 §11.1
 
@@ -236,7 +231,6 @@ CSP 는 참여 기능과 제어 기능을 겸한다.
 | 같은 문서 §0 S3 | xcap-diff SUBSCRIBE/NOTIFY 정합 | 신원 = From(토큰 미검증)·`new-etag` 불일치 | GMS-14·GMS-15 |
 | ptt_flows.md B4·B6 | 제휴 PUBLISH 도식의 `Event: poc-settings` · late entry 는 «UE 주도 = 규격 모델» · «서버는 개시 시 fan-out 만» · «de-affiliate 시 이탈» | poc-settings 는 489 · 규격은 서버 초대 · 합류 때마다 재초대 · 해제해도 leg 유지 | REG-2·GCS-3·GCS-4·GCS-22 |
 | mcptt_broadcast_group_call.md R4 | chat = 서버가 초대하지 않음 | 서버가 10초마다 초대 | GCS-1 |
-| server45_handoff.md §14.1 | 구독의 3600초 갱신은 규격대로 | conference·제휴·그룹 동적 데이터 구독의 규격 값은 4294967295 | GCC-7 |
 | android_ue_client.md U1 | Floor Ack 정합 | Ack 의 Message Type 에 ack 요구 비트가 섞인다 | FCS-4 |
 | ue_sdk.md §4 | API 표의 `presence(uri)` | 그런 API 가 없다 | AFF-12 |
 | mcptt_api.md | `on-network-allow-conference-state` 기본 true | 규격 기본 false | GMS-8 |
@@ -251,7 +245,7 @@ CSP 는 참여 기능과 제어 기능을 겸한다.
 | 1 | **문서 값 한두 줄** — 문서 셋의 T2 제외 대상 | FCS-21(문서) | .48 |
 | 2 | **발언권 메시지 정합** — Ack 의 Message Type · 미대기 Queue Position 254 · Granted Duration | FCS-4 · FCS-8 · FCS-20 | .45 SDK·CMP |
 | 5 | **Warning 코드** — 거절 사유를 규격 코드로. handoff §14 K1(SDK 가 Warning 을 올림)과 한 묶음 | REG-3(enforce) · PRV-7(본문) | .45 CSP·SDK → Windows(문구 사전) |
-| 7 | **SDK 요청 규격화(남은 것)** — conference SUBSCRIBE(세션 식별자 — S27 의 짝), 개별 호 개시 방식 선택(앱), 애드혹 멤버 INVITE, xcap-diff 구독 본문. 등록 태그·그룹/개별 호·MCData 요청·재합류(세션 식별자)는 규격형이 됐다(S17 + U04·U05 묶음 A~C · GCC-8) — 그룹 호 Request-URI 검사(GCS-9·GCS-10)는 SDK 배포 뒤(S18) | GCC-7 · PRV-4(앱) · ADH-8(CSP 멤버 INVITE) · GMS-16 · SDP-1 | .45 SDK·CSP |
+| 7 | **SDK 요청 규격화(남은 것)** — 개별 호 개시 방식 선택(앱), 애드혹 멤버 INVITE, xcap-diff 구독 본문. 등록 태그·그룹/개별 호·MCData 요청·재합류(세션 식별자)·conference 구독(세션 식별자 — S27 의 짝)은 규격형이 됐다(S17 + U04·U05 묶음 A~C · GCC-8 · GCC-7) — 그룹 호 Request-URI 검사(GCS-9·GCS-10)는 SDK 배포 뒤(S18) | PRV-4(앱) · ADH-8(CSP 멤버 INVITE) · GMS-16 · SDP-1 | .45 SDK·CSP |
 | 8 | **제휴를 클라이언트 단위로** — 행 키 통일, 클라이언트 단위 해제·판정, 암묵 제휴 취소. handoff §14 K3·S2 와 한 묶음 | AFF-2~AFF-8 · AFF-12 · EMG-3 | .45 CSP·SDK |
 | 9 | **호 모델 결정** — chat 그룹(초대 없이 합류·1명 이하 해제)과 편성 그룹의 재초대·late call entry·제휴 해제 시 이탈. 규격대로 바꿀지, 편차로 남기고 사유를 적을지 정한다 | GCS-1~GCS-4 · GCS-22 · AFF-11 | 결정 → .45 CSP |
 | 10 | **그룹 문서 집행** — 수신 전용 | FCS-14 | .45 CSP·CMP·CSC |

@@ -2855,7 +2855,8 @@ static pjsip_evsub_user cims_conf_cb =
  * CIMS 이벤트 구독 시작/갱신/종료 (conference / xcap-diff 공용).
  *  expires > 0                        : 신규 생성 또는 in-dialog 갱신
  *  expires == 0                       : 구독 해지 (SUBSCRIBE Expires: 0)
- *  expires == PJSIP_EXPIRES_NOT_SPECIFIED : 패키지 기본값 사용
+ *  msg_data 에 Expires 가 없음         : 패키지 기본값 사용
+ *  msg_data 에 Expires 가 있음         : expires 를 글자 그대로(4294967295 포함 — cims_initiate)
  *  ev == NULL                         : conference (하위호환 기본값)
  */
 /* CIMS: 앱이 실은 msg_data 를 구독 요청에 옮긴다 — Event·Expires 는 evsub 가 이미 넣었고(같은 값), Contact 는 다이얼로그의
@@ -2897,6 +2898,34 @@ static pj_str_t cims_msg_contact(const pjsua_msg_data *msg_data)
     return none;
 }
 
+/* CIMS: 앱이 Expires 헤더를 실었는가 — 실었으면 그 값을 글자 그대로 구독 기간으로 쓴다(cims_initiate). */
+static pj_bool_t cims_msg_has_expires(const pjsua_msg_data *msg_data)
+{
+    const pjsip_hdr *h;
+
+    if (!msg_data)
+        return PJ_FALSE;
+    for (h = msg_data->hdr_list.next; h != &msg_data->hdr_list; h = h->next) {
+        if (pj_stricmp2(&h->name, "Expires") == 0)
+            return PJ_TRUE;
+    }
+    return PJ_FALSE;
+}
+
+/* CIMS: 구독 요청 생성 — 앱이 Expires 를 실었으면(literal) 그 값을 구독에 먼저 넣고 initiate 는 그 값을 싣는다.
+ * 4294967295(2^32-1 — TS 24.379 §10.1.3.2 5) conference 구독 «세션 동안»)는 PJSIP_EXPIRES_NOT_SPECIFIED 와 같은 비트라
+ * initiate 인자로 넘기면 패키지 기본값(3600)으로 읽힌다(pjsip_evsub_set_expires).
+ */
+static pj_status_t cims_initiate(pjsip_evsub *sub, pj_uint32_t expires,
+                                 pj_bool_t literal, pjsip_tx_data **p_tdata)
+{
+    if (literal) {
+        pjsip_evsub_set_expires(sub, expires);
+        expires = PJSIP_EXPIRES_NOT_SPECIFIED;
+    }
+    return pjsip_evsub_initiate(sub, NULL, expires, p_tdata);
+}
+
 pj_status_t pjsua_cims_conf_subscribe(pjsua_acc_id acc_id,
                                       const pj_str_t *target,
                                       const pj_str_t *ev,
@@ -2912,6 +2941,7 @@ pj_status_t pjsua_cims_conf_subscribe(pjsua_acc_id acc_id,
     pjsip_tx_data *tdata;
     pjsip_tpselector tp_sel;
     pj_status_t status;
+    pj_bool_t literal = cims_msg_has_expires(msg_data);
     unsigned i;
 
     PJ_ASSERT_RETURN(target && target->slen, PJ_EINVAL);
@@ -2937,7 +2967,7 @@ pj_status_t pjsua_cims_conf_subscribe(pjsua_acc_id acc_id,
         pjsip_evsub *csub = cs->sub;
 
         pjsip_dlg_inc_lock(cdlg);
-        status = pjsip_evsub_initiate(csub, NULL, expires, &tdata);
+        status = cims_initiate(csub, expires, literal, &tdata);
         if (status == PJ_SUCCESS) {
             /* 갱신·해지도 같은 본문을 싣는다 — 문서 목록이 바뀌었으면 그것이 re-SUBSCRIBE 의 새 목록이다(§6.3.13.2.1) */
             cims_apply_msg_data(tdata, expires == 0 ? NULL : msg_data);
@@ -3055,7 +3085,7 @@ pj_status_t pjsua_cims_conf_subscribe(pjsua_acc_id acc_id,
 
     pjsip_evsub_set_mod_data(sub, mod_cims_conf.id, cs);
 
-    status = pjsip_evsub_initiate(sub, NULL, expires, &tdata);
+    status = cims_initiate(sub, expires, literal, &tdata);
     if (status != PJ_SUCCESS) {
         pjsua_perror(THIS_FILE, "Unable to create CIMS SUBSCRIBE",
                      status);

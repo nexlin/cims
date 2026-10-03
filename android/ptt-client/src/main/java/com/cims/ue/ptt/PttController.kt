@@ -280,20 +280,19 @@ class PttController(
     internal val lock = Any()
     internal val sessionMap = LinkedHashMap<String, Session>()   // groupId → Session (참여 순서 유지)
 
-    // 구독 상태는 **서버 확인 기반**으로 관리한다 — SUBSCRIBE 를 보냈다는 사실만으로 "구독 중"
+    // 문서 구독 상태는 **서버 확인 기반**으로 관리한다 — SUBSCRIBE 를 보냈다는 사실만으로 "구독 중"
     // 으로 취급하면, 서버가 구독을 잃고(예: CSP 재기동으로 in-memory 구독 소멸) 단말이 등록
-    // 끊김을 관측하지 못한 경우 멱등 가드가 재발행을 영구히 막아 로스터·편성 push 가 앱 재시작
+    // 끊김을 관측하지 못한 경우 멱등 가드가 재발행을 영구히 막아 편성 push 가 앱 재시작
     // 전까지 얼어붙는다(실측). affiliation 의 [affiliated] 와 같은 원칙이다.
-    //   확인 신호 = **NOTIFY 도착**(코어 onRoster·onMessage). 나아가 확인 상태에 **재확인 주기**를 둔다 — 구독 소멸을
+    //   확인 신호 = **NOTIFY 도착**(코어 onMessage). 나아가 확인 상태에 **재확인 주기**를 둔다 — 구독 소멸을
     //   앱이 감지할 수단이 아직 없다(ue_sdk.md §11 «구독 종료 사유»). [SUB_REASSERT_MS] 마다 SUBSCRIBE 를 다시
     //   던지면 살아 있는 구독은 엔진이 in-dialog 갱신으로 흡수하고, 죽은 구독은 새로 만들어진다.
-    internal val confirmedRosters = mutableMapOf<String, Long>() // groupId → 마지막 확인/재확인 시각(ms)
-    internal val pendingRosters = mutableMapOf<String, Long>()   // groupId → 최초 SUBSCRIBE 발행 시각(ms)
+    //   세션 참가자(conference) 구독은 코어가 세션에 묶어 다룬다 — 앱은 원하는 그룹만 준다([GroupPlane.subscribeRoster]).
     // xcap-diff 구독은 **문서 축마다 하나**다 — 서버 PSI 가 축별로 다르고(sip:gms_psi=편성,
     //   sip:cms_psi=사용자 프로파일·시스템 설정), CSP 는 SUBSCRIBE 의 Request-URI 로 축을 가른다.
     internal val xcapConfirmedAt = mutableMapOf<String, Long>()  // kind → 마지막 확인/재확인 시각(ms)
     internal val xcapPendingAt = mutableMapOf<String, Long>()    // kind → 최초 SUBSCRIBE 발행 시각(ms)
-    internal val rosterMap = mutableMapOf<String, Map<String, String>>()  // groupId → 접속 인원(미조인 포함)
+    internal val rosterMap = mutableMapOf<String, Map<String, String>>()  // groupId → 참가한 세션의 접속 인원
 
     internal val _sessions = MutableStateFlow<List<GroupCallState>>(emptyList())
     /** 참여 중인 그룹 세션들(참여 순). */
@@ -353,9 +352,9 @@ class PttController(
     val affiliated: StateFlow<Set<String>> = _affiliated.asStateFlow()
 
     internal val _channelRosters = MutableStateFlow<Map<String, Map<String, String>>>(emptyMap())
-    /** 채널별 접속 인원 — groupId → (참가자ID → status). conference 구독(RFC 4575) NOTIFY 로 갱신되며
-     *  **미조인 채널도 포함**한다(제휴 채널 전체를 구독하므로). 참여 중인 채널의 로스터는
-     *  [sessions] 의 participants 와 같은 값이다. */
+    /** 채널별 접속 인원 — groupId → (참가자ID → status). 참가한 세션의 conference 구독(RFC 4575 · TS 24.379 §10.1.3.2) NOTIFY 로
+     *  갱신되며 [sessions] 의 participants 와 같은 값이다. 참여하지 않은 채널은 없다 — 세션 밖 구독은 서버가 404 137 로 거절한다
+     *  (그 자리는 제휴 상태 구독 TS 24.379 §9.2.1.3). */
     val channelRosters: StateFlow<Map<String, Map<String, String>>> = _channelRosters.asStateFlow()
 
     // ── affiliation 목표 집합(TS 24.379 §9) — 편성 채널 전체를 서버 확인 기반으로 유지(정책은 앱, PUBLISH·ETag 는 코어) ──
@@ -495,6 +494,7 @@ class PttController(
         val acc = ue.addAccount(accountConfig(ueInit)).getOrNull()
             ?: run { _reg.value = RegState.Failed("addAccount"); return@launch }
         account = acc
+        groupsPlane.resetRosterWants()                   // 코어의 목표 집합은 계정마다다
         applyAudioRouteNow()
         val r = acc.register()
         if (!r.ok) _reg.value = RegState.Failed("${r.code} ${r.reason}")
@@ -572,10 +572,9 @@ class PttController(
             maybeRestoreChannels()
             groupsPlane.rejoinLost()                          // 커버리지 복귀 — 잃은 편성 세션에 재합류(TS 24.379 §10.1.1.2.4.1)
         } else if (was is RegState.Registered) {
-            // 등록이 끊기면 서버측 구독도 사라진다 — 확인 상태를 비워 재등록 시 다시 걸리게 한다. 제휴 확인(affConfirmed)은 두고 —
-            //   다시 선 등록에 코어가 관심 그룹 전부를 다시 싣는다(같은 게시를 앱이 겹쳐 보내지 않는다).
+            // 등록이 끊기면 서버측 문서 구독도 사라진다 — 확인 상태를 비워 재등록 시 다시 걸리게 한다. 제휴 확인(affConfirmed)은 두고 —
+            //   다시 선 등록에 코어가 관심 그룹 전부를 다시 싣는다(같은 게시를 앱이 겹쳐 보내지 않는다). 세션 참가자 구독은 호에 묶여 그대로다.
             synchronized(lock) { groupsPlane.clearSubStateLocked() }
-            groupsPlane.publishRosters()
         }
     }
 
@@ -583,12 +582,11 @@ class PttController(
 
     private var channelsRestored = false
 
-    /** 프로세스 재시작(강제종료·재설치·리부팅) 후 참여 채널 자동 재조인 — 등록 완료 시 1회, **진행 중 세션에만**(late entry).
-     *  prearranged INVITE 는 세션이 없으면 새로 개시해 affiliate 멤버 전원에게 fan-out 하므로(TS 24.379 §10.1.1) 진행 여부를
-     *  먼저 본다 — 판단 근거는 그룹 conference 구독의 NOTIFY(확립 leg 만 싣는다, ptt_flows.md). 명단이 비었으면 복원하지 않고
-     *  참여 의도는 그대로 둔다(누가 세션을 열면 fan-out 착신으로 자동 합류한다). NOTIFY 가 [RESTORE_ROSTER_WAIT_MS] 안에
-     *  오지 않은 채널도 복원하지 않는다 — 모르는 채로 새 세션을 열지 않는다.
-     *  재로그인 경로는 affiliation 후 서버 fan-out INVITE 가 먼저 올 수 있어 [RESTORE_YIELD_MS] 양보하고,
+    /** 프로세스 재시작(강제종료·재설치·리부팅) 후 참여 채널 자동 복원 — 등록 완료 시 1회, **재시작 전에 참가해 있던 세션에만**:
+     *  저장해 둔 세션 식별자([ChannelStore.sessionUri])로 재합류한다(TS 24.379 §10.1.1.2.4.1 — Request-URI = 세션 식별자). 세션이 아직
+     *  진행 중이면 그 세션에 붙고, 끝났으면 서버가 404 로 답해 새 세션을 열지 않는다(그룹 URI 로 걸면 세션이 없을 때 새로 개시해 제휴
+     *  멤버 전원에게 fan-out 한다 — TS 24.379 §10.1.1). 저장한 식별자가 없는 채널은 복원하지 않고 참여 의도만 둔다 — 누가 세션을 열면
+     *  fan-out 착신으로 자동 합류한다. 재로그인 경로는 affiliation 후 서버 fan-out INVITE 가 먼저 올 수 있어 [RESTORE_YIELD_MS] 양보하고,
      *  그 사이 생긴 세션은 존중한다([joinGroupCall] 이 중복 참여 무시). */
     internal fun maybeRestoreChannels() {
         if (channelsRestored) return
@@ -596,24 +594,15 @@ class PttController(
         // 배선 시점에 channelStore setter 가 재호출(플래그는 실제 복원 착수에서만 소모).
         val st = channelStore ?: return
         channelsRestored = true
-        val want = st.joined
+        val want = st.joined.mapNotNull { g -> st.sessionUri(g)?.let { g to it } }
         if (want.isEmpty()) return
         val primary = st.primary
         scope.launch {
             delay(RESTORE_YIELD_MS)
-            val deadline = SystemClock.elapsedRealtime() + RESTORE_ROSTER_WAIT_MS
-            while (SystemClock.elapsedRealtime() < deadline && synchronized(lock) { want.any { it !in confirmedRosters } })
-                delay(200)
-            val ordered = if (primary != null) listOf(primary) + (want - primary) else want
-            for (g in ordered) {
-                val (joined, known, ongoing) = synchronized(lock) {
-                    Triple(sessionMap.containsKey(g), g in confirmedRosters, rosterMap[g]?.isNotEmpty() == true)
-                }
-                if (joined) continue
-                if (!known) { Log.i(TAG, "채널 복원 보류 $g — 로스터 미확인(진행 여부 모름)"); continue }
-                if (!ongoing) { Log.i(TAG, "채널 복원 생략 $g — 진행 중 세션 없음"); continue }
+            for ((g, uri) in want.sortedBy { if (it.first == primary) 0 else 1 }) {
+                if (synchronized(lock) { sessionMap.containsKey(g) }) continue
                 _status.value = "채널 자동 복원: $g"
-                groupsPlane.joinGroupCall(g, takePrimary = primary == null || g == primary)
+                groupsPlane.joinGroupCall(g, takePrimary = primary == null || g == primary, sessionUri = uri)
                 delay(300)
             }
             primary?.let { p -> if (synchronized(lock) { sessionMap.containsKey(p) }) setPrimary(p) }
@@ -628,6 +617,9 @@ class PttController(
             CallState.OUTGOING -> bindCall(c.groupId, c.callId)
             CallState.ACTIVE -> {
                 bindCall(c.groupId, c.callId, active = true)
+                // 참가한 그룹 세션의 식별자 — 프로세스가 죽었다 다시 서면 이것으로 재합류한다([maybeRestoreChannels]). 끝나면 지운다(onCallEnded)
+                if (!c.mcptt.privateCall && !c.mcptt.broadcast && c.sessionUri.isNotBlank() && !isAdhocId(bareId(c.groupId)))
+                    channelStore?.setSessionUri(bareId(c.groupId), c.sessionUri)
                 enterCallAudio()
                 applyListenPolicy()
                 applyProximity()                              // 귀에 대면 화면 꺼짐(하드웨어 PTT 단말)
@@ -783,6 +775,7 @@ class PttController(
                 sessionMap.values.firstOrNull()?.role = ChannelRole.PRIMARY
             s.groupId
         }
+        channelStore?.setSessionUri(gid, null)          // 세션이 끝났다 — 재시작 복원 대상 아님
         leaveCallAudioIfIdle()
         applyProximity()
         groupsPlane.onSessionLeft(gid)
@@ -995,8 +988,6 @@ class PttController(
         /** 채널 복원 전 양보 — 재로그인 경로에서 서버 fan-out INVITE 가 먼저 오면 그 세션을 쓴다. */
         internal const val RESTORE_YIELD_MS = 3000L
 
-        /** 채널 복원이 로스터 NOTIFY(진행 여부)를 기다리는 상한 — 양보 뒤부터. 정상 경로는 등록 직후 수십 ms 안에 온다. */
-        internal const val RESTORE_ROSTER_WAIT_MS = 5000L
 
         /** xcap-diff 문서 축 — 서버 PSI 이름(`{kind}_psi`)·CSP 이벤트 판별 키와 같은 문자열. */
         internal const val XCAP_GMS = "gms"

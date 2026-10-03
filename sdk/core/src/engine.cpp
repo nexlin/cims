@@ -521,7 +521,7 @@ struct Engine::Impl {
     /** 1초 틱(ue-ctl) — MCPTT 호의 수신 RTP 패킷 수가 늘었으면 발언권 참여자에 알린다(T103 — TS 24.380 §6.2.4.3.4). */
     void floorMediaTick();
     static constexpr unsigned kFloorMediaTickMs = 1000;
-    /** 구독 SUBSCRIBE(conference·xcap-diff·dialog — 스택 evsub 구독) — ue-ctl 에서. 켜는 요청만 유지 단위로 적는다. */
+    /** 구독 SUBSCRIBE(xcap-diff·dialog — 스택 evsub 구독) — ue-ctl 에서. 켜는 요청만 유지 단위로 적는다. */
     int64_t sendSubscribe(const detail::UpkeepKey& k, bool on, int64_t token, bool internal);
     /** 계정의 Contact(규격형 xcap-diff 구독의 다이얼로그 Contact 바탕) — 없으면 빈 문자열. ue-ctl 에서. */
     std::string accountContact(int accountId) {
@@ -557,6 +557,30 @@ struct Engine::Impl {
     std::map<int, std::set<std::string>> mcvideoAffiliations;
     /** 규격형 xcap-diff 구독의 본문(문서 목록·토큰) — 키 = (계정, XcapDiff, PSI). 없으면 본문 없는 구독(옛 형식). 유지가 다시 보낼 때도 싣는다. */
     std::map<detail::UpkeepKey, XcapDiffSubscription> xcapSubs;
+    /** conference 구독(TS 24.379 §10.1.3.2) = 앱이 원하는 그룹(목표 집합 — subscribeConference) × 그 그룹의 진행 중 세션에 참가한 호.
+     *  구독은 참가한 세션 안에서만 한다(§10.1.3.1 — Request-URI = 세션 식별자, 세션 밖은 서버가 404 137): 호가 성립해 세션 식별자를
+     *  알면 걸고, 호가 끝나거나 앱이 그만 원하면 거둔다. 기간 = 2^32-1(5)), 갱신은 스택(evsub)이, 수명은 세션이 정한다 — 등록 유지
+     *  (upkeep)에 넣지 않는다. ue-ctl 에서만. */
+    std::set<std::pair<int, std::string>> conferenceWants;   // (계정, 그룹 bare id)
+    struct ConferenceSub {
+        int accountId = -1;
+        std::string groupId;                                 // bare id — mcptt-info <mcptt-request-uri>(8))
+        std::string target;                                  // 세션 식별자 name-addr — Request-URI(2)), 스택 구독의 열쇠
+    };
+    std::map<int, ConferenceSub> conferenceSubs;             // 호 id → 그 세션의 구독
+    /** 호 하나의 구독을 원하는 상태(성립한 그룹 세션 ∧ 원하는 그룹)에 맞춘다 — 호 상태가 바뀔 때·앱이 목표를 바꿀 때. 보내지 못했으면 false. */
+    bool syncConference(int callId);
+    int64_t sendConferenceSubscribe(const ConferenceSub& s, bool on);
+    /** conference 통지의 From(= 구독한 세션 식별자, §10.1.3.3) → 그 세션 호의 그룹. 세션은 GRUU 의 gr 로 맞춘다(사용자부는 서버가
+     *  정한다). 모르면 빈 값. snapM 을 잡는다. */
+    std::string groupOfSession(const std::string& uri) {
+        const std::string gr = mcptt::sessionGr(uri);
+        if (gr.empty()) return std::string();
+        std::lock_guard<std::mutex> lk(snapM);
+        for (const auto& kv : callInfos)
+            if (kv.second.isMcptt && mcptt::sessionGr(kv.second.sessionUri) == gr) return mcptt::bareId(kv.second.groupId);
+        return std::string();
+    }
     static std::string publishKey(int accountId, const std::string& groupId, McService service) {
         // MCVideo 는 게시 하나가 관심 그룹 전부라 그룹이 비어 있다 — 값이 있으면 다른 게시(서비스 설정 "poc-settings")의 열쇠다
         if (service == McService::McVideo) return std::to_string(accountId) + ":mcvideo" + (groupId.empty() ? "" : ":" + groupId);
@@ -1478,14 +1502,6 @@ public:
                     }
                 }
             }
-            if (msg.rfind("NOTIFY ", 0) == 0 && msg.find("conference-info") != std::string::npos) {
-                std::vector<RosterEntry> users; bool full = false;
-                if (mcptt::parseConferenceInfo(sipBody(msg), users, full)) {
-                    std::string gid = mcptt ? mcptt->groupId : std::string();
-                    int acc = accountId_;
-                    o_->emit([o = o_, acc, gid, users, full] { o->listener->onRoster(acc, gid, users, full); });
-                }
-            }
         } catch (...) {}
     }
 
@@ -1560,6 +1576,7 @@ public:
             c.state = ns;
         }, &snap);
         if (changed) o_->emit([o = o_, snap] { o->listener->onCallState(snap); });
+        if (changed && mcptt) o_->ctl.post([o = o_, id] { o->syncConference(id); });   // 세션에 들고 나는 때 — conference 구독(§10.1.3.2)
         if (ci.state == PJSIP_INV_STATE_DISCONNECTED && (videoReq.inPending || videoReq.outPending)) {
             const bool held = videoReq.inPending;                         // 붙잡은 상대 요청 — 답하지 못하고 끝났다
             videoReq = VideoReq();
@@ -1973,7 +1990,9 @@ public:
         if (ct.find("conference-info") != std::string::npos) {
             std::vector<RosterEntry> users; bool full = false;
             if (mcptt::parseConferenceInfo(body, users, full)) {
-                std::string gid = mcptt::bareId(from);
+                // From = 구독한 세션 식별자(TS 24.379 §10.1.3.3) — 그 세션 호의 그룹, 모르는 세션이면 사용자부
+                std::string gid = o_->groupOfSession(from);
+                if (gid.empty()) gid = mcptt::bareId(from);
                 o_->emit([o = o_, acc, gid, users, full] { o->listener->onRoster(acc, gid, users, full); });
                 return;
             }
@@ -2579,6 +2598,8 @@ void Engine::stop() {
     }
     impl_->ctl.runSync([this] {
         Impl* o = impl_.get();
+        o->conferenceWants.clear();              // 스택 구독은 libDestroy 가 거둔다 — 호 종료가 해지를 보내지 않게 먼저
+        o->conferenceSubs.clear();
         o->calls.clear();                        // ~Call → hangup, floor participant close
         o->txPlayer.reset();                     // ~AudioMediaPlayer → bridge 포트 해제 (libDestroy 전)
         o->routes.clear();                       // ~ExtraAudioDevice → close (libDestroy 전)
@@ -2739,7 +2760,16 @@ Result Engine::removeAccount(int id) {
     if (!impl_->running) return Result::fail(-1, "not running");
     return impl_->ctl.runSync([this, id]() -> Result {
         Impl* o = impl_.get();
-        if (!o->accounts.erase(id)) return Result::fail(-2, "no such account");
+        if (!o->accounts.count(id)) return Result::fail(-2, "no such account");
+        // conference 구독은 계정이 있어야 거둘 수 있다 — 먼저
+        for (auto it = o->conferenceSubs.begin(); it != o->conferenceSubs.end();) {
+            if (it->second.accountId != id) { ++it; continue; }
+            o->sendConferenceSubscribe(it->second, false);
+            it = o->conferenceSubs.erase(it);
+        }
+        for (auto it = o->conferenceWants.begin(); it != o->conferenceWants.end();)
+            it = it->first == id ? o->conferenceWants.erase(it) : std::next(it);
+        o->accounts.erase(id);
         o->accountCfgs.erase(id);
         o->mcvideoAffiliations.erase(id);
         o->mcpttAffiliations.erase(id);
@@ -3599,7 +3629,6 @@ int64_t Engine::Impl::sendSubscribe(const detail::UpkeepKey& k, bool on, int64_t
     if (ic == accountCfgs.end()) return -1;
     std::string event, target;
     switch (k.kind) {
-        case detail::UpkeepKind::Conference: event = "conference"; target = "sip:" + k.target + "@" + ic->second.domain; break;
         case detail::UpkeepKind::XcapDiff: event = "xcap-diff"; target = k.target; break;
         case detail::UpkeepKind::Dialog: event = "dialog"; target = detail::normalizeTarget(k.target, ic->second.domain); break;
         default: return -1;
@@ -3621,7 +3650,7 @@ int64_t Engine::Impl::sendSubscribe(const detail::UpkeepKey& k, bool on, int64_t
         if (!contact.empty()) h["Contact"] = contact + ";+g.3gpp.icsi-ref=\"urn%3Aurn-7%3A3gpp-service.ims.icsi.mcptt\"";
     }
     int64_t r = doSendRequest(k.account, "SUBSCRIBE", target, ct, body, h, token);
-    // 이 세 이벤트는 스택의 구독(evsub — pjsua_cims_conf_subscribe)으로 나간다: 같은 대상을 다시 부르면 대화 안 갱신, 구독이
+    // 이 두 이벤트는 스택의 구독(evsub — pjsua_cims_conf_subscribe)으로 나간다: 같은 대상을 다시 부르면 대화 안 갱신, 구독이
     //   끝났으면(서버 종료·갱신 실패) 새 구독이다. 응답은 코어로 올라오지 않고 만료 전 갱신은 스택이 한다(RFC 6665 §4.1.2.2).
     //   그래서 유지는 보낸 것을 확인으로 치고 수명 절반마다·등록이 다시 설 때 다시 부른다 — 서버가 잃었거나 스택이 끝낸 구독을
     //   되살리는 몫이다. 보내지도 못했으면 물러나 다시.
@@ -3633,15 +3662,69 @@ int64_t Engine::Impl::sendSubscribe(const detail::UpkeepKey& k, bool on, int64_t
     return r;
 }
 
+// conference 구독(TS 24.379 §10.1.3.2) — 진행 중 그룹 세션 안에서: 2) Request-URI = 세션 식별자 · 3) P-Preferred-Service · 4) Accept-Contact
+//   MCPTT icsi-ref(require;explicit) · 5) Expires 4294967295(현재 상태와 이후 통지) · 7) Accept conference-info(스택 패키지가 싣는다) ·
+//   8) mcptt-info <mcptt-request-uri> = 그룹 ID. 다이얼로그 Contact 에 MCPTT 특성 태그. 해지 = Expires 0(본문 없음 — RFC 6665 §4.1.2.3).
+int64_t Engine::Impl::sendConferenceSubscribe(const ConferenceSub& s, bool on) {
+    std::map<std::string, std::string> h{{"Event", "conference"}, {"Expires", on ? mcptt::kAffiliationExpires : "0"}};
+    std::string ct, body;
+    if (on) {
+        h["P-Preferred-Service"] = mcptt::kIcsiMcptt;
+        h["Accept-Contact"] = "*;+g.3gpp.icsi-ref=\"urn%3Aurn-7%3A3gpp-service.ims.icsi.mcptt\";require;explicit";
+        const std::string contact = accountContact(s.accountId);
+        if (!contact.empty()) h["Contact"] = contact + mcptt::contactFeatureParams();
+        ct = mcptt::kCtMcpttInfo;
+        body = mcptt::requestUriInfo("tel:" + s.groupId);
+    }
+    const int64_t r = doSendRequest(s.accountId, "SUBSCRIBE", s.target, ct, body, h, nextToken++);
+    log(3, std::string("conference ") + (on ? "subscribe " : "unsubscribe ") + s.groupId + " " + s.target + (r < 0 ? " failed" : ""));
+    return r;
+}
+
+bool Engine::Impl::syncConference(int callId) {
+    const CallInfo c = snapshotCall(callId);
+    // 세션 = 성립한 MCPTT 그룹 호(편성·chat·애드혹 — 개별 호는 conference 가 없다)의 세션 식별자. 일제 통화는 구독하지 않는다(§10.1.3.2 · §10.1.3.4.1 480 105)
+    const bool inSession = c.isMcptt && !c.mcptt.privateCall && !c.mcptt.broadcast && !c.groupId.empty() && !c.sessionUri.empty() &&
+                           (c.state == CallState::Active || c.state == CallState::Held);
+    const bool want = inSession && conferenceWants.count({c.accountId, mcptt::bareId(c.groupId)}) > 0;
+    // name-addr 로 넘긴다 — addr-spec 이면 pjsip 이 To 를 꺾쇠 없이 찍어 GRUU 의 `;gr=` 가 To 헤더 파라미터로 읽힌다(RFC 3261 §20)
+    const std::string target = !want ? std::string() : c.sessionUri.front() == '<' ? c.sessionUri : "<" + c.sessionUri + ">";
+    auto it = conferenceSubs.find(callId);
+    if (it != conferenceSubs.end() && it->second.target != target) {
+        // 세션을 떠났다(또는 호 id 를 다른 세션이 이어 썼다). 세션이 끝났으면 서버가 noresource 로 먼저 끝냈을 수 있다 — 그러면 스택에
+        //   구독이 없어 아무것도 나가지 않는다
+        sendConferenceSubscribe(it->second, false);
+        conferenceSubs.erase(it);
+        it = conferenceSubs.end();
+    }
+    if (want && it == conferenceSubs.end()) {
+        ConferenceSub sub;
+        sub.accountId = c.accountId;
+        sub.groupId = mcptt::bareId(c.groupId);
+        sub.target = target;
+        if (sendConferenceSubscribe(sub, true) < 0) return false;
+        conferenceSubs[callId] = sub;
+    }
+    return true;
+}
+
 Result Engine::subscribeConference(int accountId, const std::string& groupId, bool on) {
     if (!impl_->running) return Result::fail(-1, "not running");
-    int64_t token = impl_->nextToken++;
     return impl_->ctl.runSync([=]() -> Result {
         Impl* o = impl_.get();
         if (!o->accountCfgs.count(accountId)) return Result::fail(-2, "no such account");
-        const detail::UpkeepKey k{accountId, detail::UpkeepKind::Conference, groupId};
-        if (on) o->upkeep.want(k); else o->upkeep.unwant(k);
-        return o->sendSubscribe(k, on, token, false) < 0 ? Result::fail(-3, "subscribe failed") : Result::success();
+        const std::pair<int, std::string> key{accountId, mcptt::bareId(groupId)};
+        if (on) o->conferenceWants.insert(key); else o->conferenceWants.erase(key);
+        // 그 그룹의 세션에 이미 참가해 있으면 지금 — 아니면 세션이 성립할 때(onCallState)
+        std::set<int> ids;
+        for (const auto& kv : o->calls) ids.insert(kv.first);
+        for (const auto& kv : o->conferenceSubs) ids.insert(kv.first);
+        bool ok = true;
+        for (int id : ids) {
+            const CallInfo c = o->snapshotCall(id);
+            if (c.accountId == accountId && mcptt::bareId(c.groupId) == key.second) ok = o->syncConference(id) && ok;
+        }
+        return ok ? Result::success() : Result::fail(-3, "subscribe failed");
     });
 }
 

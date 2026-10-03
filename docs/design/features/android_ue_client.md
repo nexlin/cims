@@ -274,54 +274,32 @@ subtype 에서 비트를 걷어내 기본 타입으로 다루고(`FloorMessage.t
   - **응답 기반 확정**: 코어가 규격형 PUBLISH(TS 24.379 §9.2.1.2 — 참여 기능 PSI 로 관심 그룹 전부, `Expires: 4294967295`)를 보내고 token 으로 최종 응답과 상관한다(`onRequestResult`). 2xx 에서만 [affiliated] 확정 — **송신만으로 성공 처리하지 않는다**(과거 낙관 기록이 403 후 영구 미재시도 사고의 원인).
   - **미제휴 거절의 자기 복구**: 편성 그룹 [참여]·개시가 **403 + Warning 120**(TS 24.379 §10.1.1.4.2 — `CallInfo.warningCode`)으로 끝나면 서버만 제휴를 잃은 경우다 — 그 그룹 확정을 지우고 다시 싣고, 2xx 뒤 **한 번** 다시 건다(`PttGroups.handleNotAffiliated`, 10초 안의 두 번째 120 은 그대로). 비멤버 403·긴급(서버 암묵적 제휴)·애드혹·1:1 은 대상이 아니고 일제 통화는 제휴만 다시 싣는다. 그룹 문자는 보내기 전에 그룹 문서의 문자 허용(`mcdata-allow-short-data-service`)과 크기 상한(`mcdata-on-network-max-data-size-for-SDS`)을 보고, 걸리면 보내지 않고 알린다(`CallRules.sdsBlockReason` — TS 24.282 §9.2.1.1 1)·§11.1, 문서를 아직 못 받았으면 서버 판정에 맡긴다). 문자·파일 전송이 거절되면 응답의 Warning 번호(`RequestResult.warningCode`)로 사유를 알린다 — 116 비멤버·206 문자 꺼짐·213 파일 전송 꺼짐·217 크기 초과(`CallRules.sendRejectionText`, TS 24.282 §4.9).
   - **실패 재시도**: 403(비멤버 — 그룹 편성이 PUBLISH 보다 늦는 레이스 포함)·오류는 지수 백오프(30s→60s→120s→240s, cap 300s) 재시도. 무응답은 40s 후 pending 회수(주기 루프가 재발행). 백오프 대기 중인 그룹은 주기 루프가 발행을 생략한다(두 경로 중복 발사 억제).
-  - **403 = 등록 소실 대응**: 서버가 등록을 잃으면(CSP 재기동 등) PUBLISH 는 `not registered` 403 으로 **시간이 지나도 낫지 않는다** → 백오프와 별개로 `SipController.refreshRegistration()`(60s 스로틀)로 **즉시 등록 갱신**을 트리거한다. 미조치 시 단말 자체 갱신 시점(Expires ≈1h)까지 제휴·fan-out 공백(= require_affiliation 그룹에서 무전 불가)이 이어진다. 등록이 서버에서 사라졌다면 **구독도 함께 사라졌다** — `refreshRegistration()` 은 성공 시 pjsua 계정 상태를 Registered 에서 내리지 않아 `regState` 전이 기반 정리가 돌지 않으므로, 이 지점에서 구독 확인 상태(conference/gms)도 함께 비워 다음 `syncRosterSubs()`(60s 주기·조인·그룹목록 적재)가 재발행하게 한다. ⚠️`register()` 는 Account 재생성이라 프로세스 내 PJSIP 재부팅 지뢰 — 등록 갱신에는 쓰지 않는다. 남은 갭: 망은 그대로인데 서버만 등록을 잃은 경우(CSP 재기동)는 다음 PUBLISH·등록 갱신 때에야 감지 — 능동 감지(짧은 Expires·OPTIONS·reg-event 구독)는 후속.
+  - **403 = 등록 소실 대응**: 서버가 등록을 잃으면(CSP 재기동 등) PUBLISH 는 `not registered` 403 으로 **시간이 지나도 낫지 않는다** → 백오프와 별개로 `SipController.refreshRegistration()`(60s 스로틀)로 **즉시 등록 갱신**을 트리거한다. 미조치 시 단말 자체 갱신 시점(Expires ≈1h)까지 제휴·fan-out 공백(= require_affiliation 그룹에서 무전 불가)이 이어진다. 등록이 서버에서 사라졌다면 **구독도 함께 사라졌다** — `refreshRegistration()` 은 성공 시 pjsua 계정 상태를 Registered 에서 내리지 않아 `regState` 전이 기반 정리가 돌지 않으므로, 이 지점에서 문서 구독 확인 상태(gms·cms)도 함께 비워 다음 맞춤(60s 주기)이 다시 던지게 한다. ⚠️`register()` 는 Account 재생성이라 프로세스 내 PJSIP 재부팅 지뢰 — 등록 갱신에는 쓰지 않는다. 남은 갭: 망은 그대로인데 서버만 등록을 잃은 경우(CSP 재기동)는 다음 PUBLISH·등록 갱신 때에야 감지 — 능동 감지(짧은 Expires·OPTIONS·reg-event 구독)는 후속.
   - **주기 맞춤**: 60s 루프가 목표 집합 중 서버가 아직 받지 않은 그룹만 PUBLISH 한다(편성이 늘었을 때 등). 수명 갱신은 코어 몫이다 — 규격형 제휴는 만료가 없고, 짧게 부여하는 옛 서버면 코어가 부여 수명 절반에 다시 싣는다. de-affiliate(Expires:0)는 명시 호출 시에만.
-- **참여 채널 자동 복원**(`ChannelStore` — `ptt_channels` SharedPreferences): 참여 "의도"(joined 목록+주채널)를 영속화해 프로세스 재시작(강제종료·재설치·리부팅) 후 등록 완료 시 1회 재조인한다(재로그인 경로는 서버 fan-out INVITE 가 먼저 올 수 있어 3s 양보). **재조인은 진행 중 세션에만(late entry)** — prearranged INVITE 는 세션이 없으면 새로 개시해 affiliate 멤버 전원에게 fan-out 하므로(TS 24.379), 그룹 conference 구독의 NOTIFY(확립 leg 만 — [ptt_flows.md](ptt_flows.md))가 참가자를 싣는 채널만 다시 들어간다. 명단이 비었거나 NOTIFY 가 5s 안에 오지 않은 채널은 복원하지 않고 의도만 남긴다(누가 세션을 열면 fan-out 착신으로 자동 합류). 크래시로 BYE 없이 남은 자기 leg 가 명단에 있으면 진행 중으로 보고 다시 들어간다(서버가 옛 leg 를 정리). **주채널 역할은 고른 주채널에만 준다** — 고른 주채널에 진행 중 세션이 없어 그것만 건너뛰어도, 다시 들어간 다른 채널은 주채널이 되지 않고 저장된 주채널도 그대로다(`joinGroupCall(takePrimary = false)`). 고른 주채널은 MCVideo 영상 채널이기도 해서([mcvideo.md](mcvideo.md) §7 D10), 덮이면 영상 호가 그 그룹에서 빠진다. 참여 목록에는 착신 자동 합류한 채널도 들어간다. 서버/네트워크 사정으로 세션이 끊겨도 지우지 않으며, **사용자가 명시적으로 나가면 제거**(재조인 의도 해제) — 로그아웃 시에는 `SuiteLogoutReceiver` 가 `clear`. 🔑복원 1회 플래그는 **스토어 배선 확인 뒤에** 소모하고, 스토어가 늦게 주입되면 setter 가 복원을 재트리거한다 — force-stop 후 접근성(PttKeyService) 리바인드가 프로세스를 **헤드리스**(UI·서비스 미배선)로 먼저 살리면 등록·제휴는 진행되지만 스토어가 없어, 플래그를 먼저 세우면 이후 사용자가 앱을 열어도 복원이 영구 스킵된다.
+- **참여 채널 자동 복원**(`ChannelStore` — `ptt_channels` SharedPreferences): 참여 "의도"(joined 목록+주채널)와 **지금 참가한 그룹 세션의 식별자**(`sessionUri(그룹)` — 성립한 편성·chat 그룹 호의 `CallInfo.sessionUri`, 세션이 끝나면 지운다)를 영속화한다. 프로세스 재시작(강제종료·재설치·리부팅) 후 등록 완료 시 1회, **재시작 전에 참가해 있던 세션에만** 그 식별자로 재합류한다(TS 24.379 §10.1.1.2.4.1 — Request-URI = 세션 식별자, 재로그인 경로는 서버 fan-out INVITE 가 먼저 올 수 있어 3s 양보). 세션이 아직 진행 중이면 그 세션에 붙고, 끝났으면 서버가 404 로 끝낸다 — 그룹 URI 로 걸면 세션이 없을 때 새로 개시해 affiliate 멤버 전원에게 fan-out 하므로(TS 24.379 §10.1.1) 그렇게 하지 않는다. 식별자가 남지 않은 채널(세션 밖에서 죽었다)은 복원하지 않고 의도만 남긴다(누가 세션을 열면 fan-out 착신으로 자동 합류). 세션 진행 여부를 세션 밖에서 알아볼 길은 없다 — 세션 밖 conference 구독은 서버가 404 137 로 거절한다(§10.1.3.3). **주채널 역할은 고른 주채널에만 준다** — 고른 주채널이 복원되지 않아도, 다시 들어간 다른 채널은 주채널이 되지 않고 저장된 주채널도 그대로다(`joinGroupCall(takePrimary = false)`). 고른 주채널은 MCVideo 영상 채널이기도 해서([mcvideo.md](mcvideo.md) §7 D10), 덮이면 영상 호가 그 그룹에서 빠진다. 참여 목록에는 착신 자동 합류한 채널도 들어간다. 서버/네트워크 사정으로 세션이 끊겨도 참여 의도는 지우지 않으며, **사용자가 명시적으로 나가면 제거**(재조인 의도 해제) — 로그아웃 시에는 `SuiteLogoutReceiver` 가 `clear`. 🔑복원 1회 플래그는 **스토어 배선 확인 뒤에** 소모하고, 스토어가 늦게 주입되면 setter 가 복원을 재트리거한다 — force-stop 후 접근성(PttKeyService) 리바인드가 프로세스를 **헤드리스**(UI·서비스 미배선)로 먼저 살리면 등록·제휴는 진행되지만 스토어가 없어, 플래그를 먼저 세우면 이후 사용자가 앱을 열어도 복원이 영구 스킵된다.
 - **망 끊김 재합류**(TS 24.379 §10.1.1.2.4.1 «커버리지 복귀 때»): 성립했던 **편성(prearranged) 그룹 세션**이 망 문제로 끝나면(408 요청 시한·세션 타이머, 503 전송 실패 — `CallRules.rejoinLostSession`, 영상 호와 같은 규칙) 그 호의 세션 식별자(`CallInfo.sessionUri` — 제어 기능 Contact 의 GRUU)를 기억했다가, 등록이 서 있으면 2초 뒤·아니면 등록이 다시 선 뒤 **한 번** `joinGroupCall(sessionUri = …)` 로 재합류한다(Request-URI = 세션 식별자). 세션이 이미 끝났으면 서버가 404 로 끝낸다 — 새 세션을 열어 멤버 전원을 부르지 않는다. 서버의 정상 해제(BYE)·거절·chat·애드혹·개별 호는 대상이 아니고, 채널을 나가면 버린다. 재합류가 403 120(미제휴)이면 제휴를 다시 싣고 **재합류로** 한 번 더 건다(`PttGroups.onCallLost`·`rejoinLost`).
-- **참가자 목록 = conference 정식 구독(RFC 4575 / RFC 6665)**: `PttController.subscribeRoster` 가 그룹 AoR 로 `SUBSCRIBE (Event: conference)` 를 보내고, CSP 는 그 구독 dialog 로 로스터 NOTIFY 를 보낸다.
-  - **구독 상태는 서버 확인 기반으로 관리한다** — affiliation 의 `affiliated` 와 같은 원칙.
-    SUBSCRIBE 를 보냈다는 사실만으로 "구독 중"으로 취급하면, 서버가 구독을 잃고(CSP 재기동 =
-    in-memory 구독 소멸) 단말이 등록 끊김을 관측하지 못한 경우 멱등 가드가 재발행을 영구히 막아
-    **로스터·편성 push 가 앱 재시작 전까지 얼어붙는다**(실측). 확인 신호는 **NOTIFY 도착**이다
-    (네이티브가 SUBSCRIBE 응답을 앱에 올려주지 않고, CSP 는 구독 수락 직후 초기 NOTIFY 를 항상
-    보낸다 — conference 는 로스터가 비어도, gms 는 그룹별로). 따라서 `confirmedRosters`(NOTIFY 로
-    확인) 와 `pendingRosters`(발행 시각) 를 분리하고, 확인 대기가 시한을 넘기면 다음 트리거가
-    재발행한다. 확인 판정은 **그룹 AoR 발신 NOTIFY 경로만** 근거로 삼는다 — 통화 다이얼로그로 오는
-    in-dialog 폴백 NOTIFY 는 구독의 증거가 아니다.
-  - **재확인은 주기적으로 한다 — 구독 소멸은 감지할 수 없다.** native evsub 이 in-dialog 갱신 중
-    481 을 받아 구독을 접어도 앱에는 통지가 없다. 따라서 `SUB_REASSERT_MS`(10분)마다 SUBSCRIBE 를
-    다시 던진다: 살아 있는 구독은 native `cims_conf_find` 가 in-dialog 갱신으로 흡수하고(CSP 는
-    갱신에도 `SendInitialNotify` 를 보내므로 확인 시각이 갱신된다), 죽은 구독은 새로 만들어진다 —
-    감지 없이 수렴한다. 코어도 등록 재성립·망 변경·수명 절반에 같은 대상을 다시 부른다(ue_sdk.md §4.2).
-  - **세션 종료 시점에는 확인을 무효화한다.** 그룹콜 세션이 끝나는 순간은 서버측 구독이 사라진 채
-    발견된 실측 지점이다(단말은 구독이 살아 있다고 믿는데 서버엔 없어 로스터가 죽는다 — 그 상태의
-    단말은 통화 dialog in-dialog 폴백으로만 로스터를 받으므로, **자기가 마지막으로 이탈하면 leg 이
-    사라져 아무 통지도 못 받고 자기 화면에 자신이 접속 중으로 남는다**). 그래서 세션 종료 경로에서
-    해당 그룹의 확인을 무효화해(`invalidateRosterConfirm`) 바로 뒤의 `syncRosterSubs()` 가 즉시
-    재확인하게 한다 — 해지가 아니며, 살아 있으면 in-dialog 갱신으로 흡수된다. 재확인 주기(10분)를
-    기다리면 그 사이 로스터가 죽은 채 남는다.
-  - ⚠️**구독 복구는 등록 복구에 종속된다.** CSP 는 미등록 사용자의 SUBSCRIBE 를 401 로 거절한다
-    (`CscfModule::RecvRequestSubscribe`). CSP 재기동은 등록과 구독을 동시에 날리므로, 재확인이
-    돌아도 등록이 살아나기 전에는 401 이다. 즉 실질 복구 시한은 **등록 소실 감지 latency**(제휴 PUBLISH 의
-    403 또는 등록 갱신 주기)가 지배한다 — 위 "403 = 등록 소실 대응" 참조. 미등록 중의
-    재확인 실패는 10분 뒤 재시도 또는 403 경로의 상태 초기화로 흡수된다.
-  - **구독 대상 = 참여 채널이 아니라 제휴(편성) 채널 전체.** 등록 완료·그룹 목록 적재·60s 제휴 루프에서 `syncRosterSubs()` 가 희망 제휴 집합과 구독 집합의 차이만 맞춘다(신규 구독 / 빠진 채널 `Expires: 0`). 따라서 **채널을 이탈해도 구독은 유지**되고, 참여하지 않은 채널의 접속 인원도 계속 보인다. 해지는 편성에서 빠지거나 등록이 끊길 때만.
-  - **미조인 채널 로스터**는 세션이 없으므로 `PttController.rosterMap`(→ `channelRosters` StateFlow)에 담아 목록/상세 화면이 소비한다. 참여 중인 채널은 세션 `participants` 와 같은 값이다. ⚠️"본인은 항상 접속"은 **참여 중일 때만** 적용한다 — 미조인 채널에 자신을 넣으면 참여하지도 않은 채널에 내가 있는 것으로 보인다.
-  - ⚠️**멱등 필수**: 등록·제휴·조인이 각자 구독을 트리거하므로 가드가 없으면 같은 그룹에 SUBSCRIBE 가 동시에 두 번 나가 서버에 구독이 중복 생성된다(실측). native 의 `cims_conf_find` 가 URI 로 기존 구독을 찾아 in-dialog 갱신하지만, 첫 구독이 테이블에 등록되기 전 두 번째 호출이 들어오면 경합한다 → 앱이 1회만 발행한다. 단 그 가드는 **발행 후 확인까지의 창**에만 걸린다 — 확인(NOTIFY) 없이 `SUB_CONFIRM_TIMEOUT_MS`(15s) 가 지나면 재발행 대상으로 되돌린다. 단말은 **200 OK** 로 응답하고 본문은 `Account.onInstantMessage` → `SipController.incomingMessage`(contentType=`application/conference-info+xml`, fromUri=그룹 AoR=focus) 로 올라와 그룹 키로 세션을 찾아 반영한다. 구독 생성·**in-dialog 갱신**·종료·매칭 없는 NOTIFY 의 481 응답은 native pjsip evsub 이 담당하므로(빌드 패치 [2-13]) 앱은 "언제 어느 그룹을 구독할지"만 정한다 — `Account::sendRequest` 를 그대로 쓰기 때문에 **SWIG 인터페이스 변경이 없다**. ⚠️구독은 단발 트랜잭션이 아니어서 결과가 `sendReqResults` 로 오지 않는다(확인 신호 = NOTIFY 도착).
+- **참가자 목록 = 참가한 세션의 conference 구독**(TS 24.379 §10.1.3.2 · RFC 4575 / RFC 6665): 앱은 원하는 그룹(제휴(편성) 채널 전체 + 참가한 애드혹 세션)을
+  코어에 목표 집합으로 줄 뿐이다(`GroupPlane.subscribeRoster` → `Account.subscribeConference` — 등록 완료·그룹 목록 적재·60s 제휴 루프의
+  `syncRosterSubs()` 가 차이만 맞춘다). 구독은 코어가 **그 그룹의 진행 중 세션에 참가한 동안만** 건다 — 호가 성립하면 세션 식별자를
+  Request-URI 로(Expires 2^32-1 · mcptt-info 그룹 ID · `P-Preferred-Service` · Accept-Contact), 호가 끝나면 거둔다(ue_sdk.md §4.2). 그래서
+  앱에는 확인·재확인·재발행 규율이 없고, 등록이 끊겨도 세션 참가자 구독은 호와 함께 남는다. 로스터 NOTIFY(`roster` — 그룹 = 그 세션 호의 그룹)는
+  세션 `participants` 와 채널 접속 인원(`rosterMap` → `channelRosters`)을 같은 값으로 맞춘다. 세션이 끝나면 그 채널의 접속 인원을 지운다 —
+  **참여하지 않은 채널의 접속 인원은 없다**(세션 밖 구독은 서버가 404 137 — 그 자리는 제휴 상태 구독 TS 24.379 §9.2.1.3, 규격 갭 U06).
+  ⚠️"본인은 항상 접속"은 참여 중인 세션에만 적용하고, 끝난 세션의 늦은 통지는 버린다. 통화 dialog 안 NOTIFY 는 없다(로스터는 구독으로만).
 - **설정 변경 push = XCAP 구독 2축(RFC 5875 xcap-diff)**: 등록 완료 시(그리고 60s 주기 루프의 재확인) 서버 PSI 두 곳으로
   `SUBSCRIBE (Event: xcap-diff)` 각 1건 — GMS 구독 프록시(UE initial configuration `<GMS-URI>`, 없으면 `sip:gms_psi@<domain>` — 편성)와
   `sip:cms_psi@<domain>`(사용자 프로파일·시스템 설정). **규격형 구독**(TS 24.481 §6.3.13.2.1 · TS 24.484 §6.3.13.2.2) — 본문에 액세스 토큰과
   문서 목록(GMS = 편성 그룹마다 그룹 ID 문서, CMS = UE initial configuration·user profile·service configuration, MCVideo 를 쓰면 그 두 문서도)을
   싣는다. 서버는 구독한 문서만 통지하므로 **편성 목록이 바뀌면 GMS 를 새 목록으로 re-SUBSCRIBE** 하고(`loadGroups`), user profile 통지가 오면
   목록을 다시 받는다(새 그룹 소속은 GMS 가 아니라 user profile 변경으로 온다). 토큰이 아직 없으면 본문 없는 구독(옛 형식). `PttController.subscribeXcap(kind, on)` 하나가 두 축을 다루고
-  확인/재확인 상태도 축별로 관리한다(`xcapConfirmedAt`/`xcapPendingAt` — 로스터 구독과 같은 규율:
-  확인 신호는 그 축의 NOTIFY 도착, 15s 무확인이면 재발행, 10분마다 재확인). CSP 는 **SUBSCRIBE 의
+  확인/재확인 상태도 축별로 관리한다(`xcapConfirmedAt`/`xcapPendingAt` — 확인 신호는 그 축의 NOTIFY 도착,
+  15s 무확인이면 재발행, 10분마다 재확인. 코어가 확인을 올려 주지 않고 서버가 구독을 잃어도 앱이 알 수 없어서다). CSP 는 **SUBSCRIBE 의
   Request-URI** 로 축을 가르므로(`CscfModule` 의 gms/cms 판별) PSI 이름 자체가 계약이다.
   NOTIFY 본문은 **"어느 문서가 바뀌었고 새 ETag 는 무엇"뿐**이라(2단 구조) 앱은 `onXcapDiff` 에서
   `sel` 로 축을 갈라 실제 문서를 XCAP HTTP GET 한다(전부 ETag 캐시):
   - `org.openmobilealliance.groups/...` → 마지막 `tel:` 세그먼트가 바뀐 그룹 → **`loadGroups()` +
     `loadGroupDetail(그룹)`**. `loadGroups()` 는 이어서 `affiliateAll()`·`syncRosterSubs()` 까지
-    부르므로 **새로 편성된 채널이 제휴·로스터 구독까지 자동으로 따라온다**.
+    부르므로 **새로 편성된 채널이 제휴·로스터 목표까지 자동으로 따라온다**.
   - `org.3gpp.mcptt.user-profile/...` → **`loadUserProfile()`** · `org.3gpp.mcptt.service-config/...`
     → **`loadServiceConfig()`**. CSP 는 cms 축 NOTIFY 에 두 sel 을 항상 함께 싣고 구독 수락 직후의
     초기 NOTIFY 에도 싣는다 — 그래서 **구독 성립만으로 두 설정 문서가 즉시 적재**된다.
@@ -340,7 +318,6 @@ subtype 에서 비트를 걷어내 기본 타입으로 다루고(`FloorMessage.t
   두 축 구독도 60s 주기 루프에서 재확인한다(`SUB_REASSERT_MS` 10분). 재확인은 살아 있는 dialog 의 in-dialog
   갱신이고, CSP 는 상태 없는 갱신 SUBSCRIBE 를 To URI(PSI)로 복원해 받는다 — 서버 재기동 뒤 최대 약 11분 안에
   통지가 돌아온다. 앱 화면을 닫았다 여는 것(최근 앱 목록 밀기 포함)은 포그라운드 서비스가 남아 재시작이 아니다.
-- **폴백(구 버전 서버·구독 미구현 단말 혼재용)**: CSP 가 구독 없는 leg 에 보내는 통화 dialog in-dialog NOTIFY 는 `CimsCall.onCallTsxState` 의 수신 원문에서 파싱한다(`SipController.conferenceInfo` SharedFlow). pjsip 은 evsub 미소유 NOTIFY 에 500 을 응답하지만 invite usage 의 tsx 이벤트로 원문이 전달된다. 본문이 항상 full 스냅샷이라 두 경로가 겹쳐도 결과가 같다.
 - **NAT 경로 개방** (요건 정본: [ue_nat_traversal.md §7.1](ue_nat_traversal.md#71-ue-구현-요건-ptt)): PTT 는 발언 중에만 상향이 흐르므로, 청취 전용 상태의 하향(floor 알림·오디오)은 단말이 각 소켓의 NAT 매핑을 열고 **유지**해야 성립한다. ①floor — 연결 직후 1회 + 1 s 간격 2회 + 주기 15s **Floor Ack(User ID 포함)** 송신(첫 Ack 가 서버 JOIN 보다 먼저 닿아 버려져도 1 s 안에 latch)(`FloorClient` 내장 keepalive, `connectRemote` 시 시작) → CMP 가 User ID 로 멤버를 식별해 floor 주소 latch(TAKEN/GRANT 수신 가능). ②오디오 — PJSIP RTP keepalive(RFC 6263, empty RTP 주기 5s): `m1_build_pjsip.sh` 가 생성하는 config_site.h 의 `PJMEDIA_STREAM_ENABLE_KA=1`(pjsip 기본값 0 — CIMS 빌드가 활성) → CMP 목적지 latch. UAC 발신 응답의 floor 목적지는 `onCallTsxState` 의 200 OK 원문에서 학습(onCallSdpCreated 는 로컬 SDP 생성 시에만 호출됨). floor UDP 송신은 전용 스레드(main 스레드 send 는 NetworkOnMainThreadException).
 - **멀티그룹 동시 참여**(TS 22.179 group scanning): 한 단말이 N개 그룹에 동시 참여한다. 그룹별로 독립 SIP 다이얼로그+floor 소켓+FloorClient 를 가지며(`PttController.Session`), UI 는 주채널 탭(주채널 전면 패널)과 전체채널 목록으로 나열한다. **주채널(primary)** 지정은 주채널 탭의 선택 시트·채널 상세의 버튼(`setPrimary` — 나머지 참여 그룹은 일반 참여, 별도 역할 없음), **듣기 정책**(주채널만 / 전체듣기)은 주채널 탭 컨트롤 행·설정 화면 토글로 그룹별 `setCallListen`(하향 오디오 mix on/off)을 적용한다. **PTT 발언은 주채널 세션만** 대상(`pttDown`/`pttUp`). 그룹별 나가기(채널 상세)·참여는 독립적. 발언 상태 패널은 주채널 기준으로 파생하되 비주채널 화자는 `[gNNN]` 태그를 붙인다. per-call 문맥 분리 필수: floor 목적지/conference 정보는 callId 로 구분, SDP 주입은 `CimsCall.pendingAppSdp`(전역이면 그룹 간 혼선).
 - **서버측 멀티그룹 정합**(CSP `GroupCallService`): 활성 콜 추적 키가 `(userId, groupId)` — 사용자가 여러 그룹에 동시 참여하는 것을 전제한다. 다른 멤버가 같은 그룹을 개시(originate)해 fan-out INVITE 가 와도, 이미 **라이브 SIP 다이얼로그**(UA 다이얼로그 맵으로 판정 — 개시자 AcceptCall 레그·CSP StartCall 레그 모두 포함)를 가진 멤버는 재초대하지 않는다(과거엔 선참여 멤버를 stale 로 오판해 LEAVE+재INVITE → 단말이 재INVITE 미응답 → CMP 멤버십 이탈하는 좀비 상태였음). `ClearUserCall` 은 해당 사용자의 **모든** 그룹 콜을 정리.

@@ -13,10 +13,10 @@ namespace cimsue {
 namespace detail {
 
 /** 유지하는 것의 종류 — 제휴 게시(PUBLISH, RFC 3903)와 구독(SUBSCRIBE, RFC 6665). */
-enum class UpkeepKind { McpttAffiliation, McVideoAffiliation, Conference, XcapDiff, Dialog };
+enum class UpkeepKind { McpttAffiliation, McVideoAffiliation, XcapDiff, Dialog };
 
 /** 유지 단위. 제휴 게시는 집합 하나가 게시 하나라 target 이 비고(규격형 — TS 24.379 §9.2.1.2·TS 24.281 §8.2.1.2), 구형
- *  MCPTT 제휴(그룹마다 게시)는 그룹, 구독은 구독 대상(그룹·PSI·감시 AoR)이다. */
+ *  MCPTT 제휴(그룹마다 게시)는 그룹, 구독은 구독 대상(PSI·감시 AoR)이다. conference 구독은 세션에 묶여 여기 없다(엔진 conferenceSubs). */
 struct UpkeepKey {
     int account = -1;
     UpkeepKind kind = UpkeepKind::McpttAffiliation;

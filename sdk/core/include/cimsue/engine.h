@@ -136,7 +136,11 @@ public:
      *  (ICSI mcvideo · `urn:3gpp:ns:mcvideoPresInfo:1.0`, Request-URI = AccountConfig.mcvideoServerUri). on=false 면 Expires:0.
      *  반환 token(onRequestResult 상관), 실패 -1. */
     int64_t affiliate(int accountId, const std::string& groupId, bool on, McService service = McService::Mcptt);
-    /** 그룹 로스터 구독(RFC 4575 conference, 엔진 패치 evsub) — 확인 신호는 onRoster NOTIFY. */
+    /** 그룹 세션 참가자 구독(RFC 4575 conference — TS 24.379 §10.1.3.2)을 원한다/그만 원한다 — 목표 집합(ue_sdk.md §4.2). 구독은
+     *  그 그룹의 **진행 중 세션에 참가한 동안만** 엔진이 건다: 호가 성립해 세션 식별자(CallInfo.sessionUri)를 알면 그것을 Request-URI 로
+     *  (Expires 2^32-1 · mcptt-info 그룹 ID · P-Preferred-Service · Accept-Contact), 호가 끝나면 거둔다(세션 해제는 서버가 noresource 로).
+     *  일제 통화·개별 호는 구독하지 않는다. 세션 밖 참가자 표시는 규격 자리가 제휴 상태 구독(§9.2.1.3)이다. 통지 = onRoster(groupId =
+     *  그 세션 호의 그룹). 실패 = 계정 없음, 또는 진행 중 세션에 바로 보내지 못했다. */
     Result subscribeConference(int accountId, const std::string& groupId, bool on);
     /** 문서 변경 구독(RFC 5875 xcap-diff) — psiUri 예 sip:gms_psi@domain. 본문 없는 구독(서버가 정한 고정 문서 — 옛 형식).
      *  NOTIFY 본문은 onMessage 로. */

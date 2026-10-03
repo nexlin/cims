@@ -83,7 +83,8 @@ public sealed unsafe class Account
         return Engine.CallResult(cimsue_engine_join_video_group_call(Engine.Handle, Id, groupId, &o));
     }
 
-    /// <summary>그룹 로스터 구독(RFC 4575 conference) — 확인 신호는 RosterChanged.</summary>
+    /// <summary>그룹 세션 참가자 구독을 원한다(RFC 4575 conference — TS 24.379 §10.1.3.2). 엔진은 그 그룹의 진행 중 세션에 참가한 동안만
+    /// 세션 식별자로 구독하고 호가 끝나면 거둔다 — 세션 밖에서는 아무것도 보내지 않는다. 통지 = RosterChanged.</summary>
     public Result SubscribeConference(string groupId, bool on) =>
         Engine.Status(cimsue_engine_subscribe_conference(Engine.Handle, Id, groupId, Engine.B(on)));
 

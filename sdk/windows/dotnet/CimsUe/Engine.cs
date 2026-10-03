@@ -65,7 +65,7 @@ public sealed unsafe class Engine : IDisposable
     public event VideoFrameHandler? VideoFrameReceived;
     /// <summary>통화 중 영상 전환(1:1 호, RFC 3264 §8.1) — 상대의 요청(Received → <see cref="AnswerVideoRequest"/>)·내 요청의 결과.</summary>
     public event EventHandler<VideoRequestEvent>? VideoRequestChanged;
-    /// <summary>그룹 로스터(RFC 4575) — 구독 NOTIFY 또는 in-dialog NOTIFY.</summary>
+    /// <summary>그룹 세션 참가자(RFC 4575) — conference 구독의 NOTIFY(<see cref="Account.SubscribeConference"/>).</summary>
     public event EventHandler<RosterUpdate>? RosterChanged;
     /// <summary>감시 대상 dialog 상태(RFC 4235 NOTIFY) — dialog 하나당 1회.</summary>
     public event EventHandler<DialogInfo>? DialogInfoReceived;

@@ -280,7 +280,8 @@ C++ 공개 표면은 `cimsue/engine.h` 의 `Engine` 하나이며 계정·호를 
   `platform.NetworkWatcher` 가 변화를 판정한다(§5.3 — 걸 때의 망을 심어 등록 직후 그 망의 첫 통지는 넘기고, 망 없이 걸었으면
   처음 잡히는 망을 변화로 본다).
 - **등록에 묶인 것의 유지는 코어가 한다**(게시 갱신 = EPA 의 일 RFC 3903 §4.1 · 구독 갱신 = 구독자의 일 RFC 6665 §4.1.2.2).
-  앱은 **목표 집합**만 준다 — `affiliate(on/off)`·`subscribeConference`·`subscribeXcapDiff`·`dialogWatch` 의 on/off 가 집합 변경이다.
+  앱은 **목표 집합**만 준다 — `affiliate(on/off)`·`subscribeConference`·`subscribeXcapDiff`·`dialogWatch` 의 on/off 가 집합 변경이다
+  (conference 는 등록이 아니라 세션에 묶인다 — 아래).
   **문서 변경 구독은 규격형**(TS 24.481 §6.3.13.2.1 · TS 24.484 §6.3.13.2.2) — `subscribeXcapDiff(account, psi, {documents, accessToken}, on)`:
   Request-URI = 구독 프록시 PSI(GMS = UE initial configuration `<GMS-URI>` — `UeInitConfigDoc.gmsUri`, CMS = 설정값 `sip:cms_psi@<도메인>`),
   본문 = mcptt-info `<mcptt-access-token>` + resource-lists(문서마다 `<entry uri>` — XCAP root 기준 상대 경로,
@@ -289,6 +290,18 @@ C++ 공개 표면은 `cimsue/engine.h` 의 `Engine` 하나이며 계정·호를 
   때도 마지막 본문을 싣는다. 통지의 `sel` = 구독한 문서 — GMS 는 **구독한 그룹 문서만** 통지하므로 새 그룹 소속은 CMS user profile 변경으로
   알고 목록을 다시 받아 re-SUBSCRIBE 한다. 본문 없는 `subscribeXcapDiff(account, psi, on)` 은 서버가 정한 고정 문서를 받는 옛 형식(전환기).
   엔진(`ext/pjproject` 구독 경로)이 앱이 실은 헤더·본문을 구독 요청에 옮긴다. `cimsue-cli xcap-watch <그룹,…>`.
+  **세션 참가자 구독(conference)은 세션에 묶인다**(TS 24.379 §10.1.3.2) — `subscribeConference(account, group, on)` 은 «이 그룹의 세션에
+  참가하면 참가자를 받겠다» 는 목표다. 코어는 그 그룹의 MCPTT 그룹 호(편성·chat·애드혹)가 성립해 세션 식별자(`CallInfo.sessionUri` — §4.5)를
+  알면 구독한다: Request-URI = 세션 식별자(2)) · `P-Preferred-Service` MCPTT ICSI(3)) · Accept-Contact MCPTT icsi-ref `require;explicit`(4)) ·
+  `Expires: 4294967295`(5)) · `Accept: application/conference-info+xml`(7) — 스택 패키지) · mcptt-info `<mcptt-request-uri>` = 그룹 ID(8)) ·
+  다이얼로그 Contact 에 MCPTT 특성 태그. 호가 끝나거나 앱이 그만 원하면 `Expires: 0` 으로 거둔다(세션 해제는 서버가
+  `terminated;reason=noresource` 로 먼저 끝낼 수 있다 — 그러면 스택에 구독이 없어 아무것도 나가지 않는다). 일제 통화·개별 호는 구독하지 않는다
+  (§10.1.3.4.1 — 일제 통화 480 105). 세션 밖에서는 보내지 않는다 — 서버가 404 137(§10.1.3.3 2))로 거절하고, 참여하지 않은 채널의 참가자 표시는
+  규격 자리가 제휴 상태 구독(§9.2.1.3 — 규격 갭 U06)이다. 아래 등록 유지에 넣지 않는다 — 갱신은 스택(evsub)이 서버가 준 `Expires` 로 하고
+  수명은 세션이 정한다. 통지(`onRoster`)의 그룹 = 통지 From(세션 식별자)의 GRUU `gr` 로 맞춘 그 세션 호의 그룹(사용자부는 서버가 정한다).
+  엔진은 4294967295 를 글자 그대로 싣는다 — 이 값은 `PJSIP_EXPIRES_NOT_SPECIFIED` 와 같은 비트라 `pjsip_evsub_initiate` 인자로는 «패키지 기본값»
+  이 되므로, 앱이 Expires 를 실었으면 `pjsip_evsub_set_expires`(CIMS 추가)로 먼저 넣는다. 서버가 그 값을 그대로 주면 갱신 타이머는 하루 상한에서
+  건다(LLP64 `pj_time_val.sec` 넘침 방지). 계약 골든 `tests/fixtures/mcptt/sip/10` 대조(`McxRequestGolden`). `cimsue-cli group-call|answer --roster`.
   코어(`src/upkeep.h` `detail::Upkeep`)는 켠 것을 들고 세 계기에 다시 싣는다: ① 등록이 끊겼다 다시 섰다(등록 **이벤트** 기준 —
   `onRegState` 는 REGISTER 응답마다 온다) ② `handleNetworkChange` 뒤 첫 등록 성공(상태는 줄곧 «등록됨» 으로만 보여도 서버 바인딩은
   새것일 수 있다) ③ 부여된 수명의 절반(1분 틱 — 응답 `Expires`, 없으면 요청값 3600. 만료 없는 부여 2^32-1 은 갱신하지 않는다).
@@ -343,7 +356,8 @@ C++ 공개 표면은 `cimsue/engine.h` 의 `Engine` 하나이며 계정·호를 
   `joinGroupCall({sessionUri})` 는 진행 중 편성 그룹 세션 재합류다 — §10.1.1.2.1.1 그대로이되 Request-URI·To = 세션 식별자(10), To 는 `gr` 가
   헤더 파라미터로 읽히지 않게 name-addr), mcptt-info = session-type prearranged·그룹 ID·client ID. 진행 중 세션 합류라 broadcast·members·chat 은
   싣지 않는다. 세션이 끝났으면 제어 기능이 404(§10.1.1.4.5.1 2)) — 새 세션을 열지 않는다. 사전 설정 세션의 REFER 재합류(§10.1.1.2.4.2)는 사전
-  설정 세션과 함께 미구현. 시험 `McpttRejoin.SessionIdentityRequestUri`, `cimsue-cli group-call <id> --rejoin <session_uri>`.
+  설정 세션과 함께 미구현. 시험 `McpttRejoin.SessionIdentityRequestUri`, `cimsue-cli group-call <id> --rejoin <session_uri>`. 같은 식별자가
+  세션 참가자 구독(conference — 위 «등록에 묶인 것의 유지» 끝)의 Request-URI 다(§10.1.3.2 2), 시험 `McpttConference.SubscriptionWithinOngoingSession`).
 - **개별 호 요청**(TS 24.379 §11.1.1.2.1.1) — `startPrivateCall` 의 INVITE 도 Request-URI = 참여 MCPTT 기능 PSI(1)), Accept-Contact 둘·PPS·Contact
   태그(5)~8))를 싣고, 착신자는 `application/resource-lists+xml` entry 하나 = 상대 MCPTT ID(9)), mcptt-info 는 `<session-type>private` 와 조건
   지시자뿐이다(14)c) — 대상·발신자 ID 를 싣지 않는다). **floor 없는 개별 호**(`GroupCallOptions.fullDuplex`, §11.1.2.2)는 offer 에 floor 제어 채널

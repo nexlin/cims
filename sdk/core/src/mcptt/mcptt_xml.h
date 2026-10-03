@@ -48,8 +48,11 @@ std::string xcapDiffResourceLists(const std::vector<std::string>& documents);
 std::string accessTokenInfo(const std::string& accessToken);
 /** affiliation-command (TS 24.379 §F.3). */
 std::string affiliationCommand(const std::string& groupUri, bool affiliate);
+/** `<mcptt-request-uri>` 하나만 실은 mcptt-info — 제휴 게시(대상 MCPTT ID, TS 24.379 §9.2.1.2 2)) · conference 구독(그룹 ID,
+ *  §10.1.3.2 8)). */
+std::string requestUriInfo(const std::string& uri);
 /** 제휴 게시의 mcptt-info — `<mcptt-request-uri>` = 대상 MCPTT ID 만(TS 24.379 §9.2.1.2 2)). */
-std::string affiliationInfo(const std::string& targetMcpttId);
+inline std::string affiliationInfo(const std::string& targetMcpttId) { return requestUriInfo(targetMcpttId); }
 /** 제휴 게시의 pidf(TS 24.379 §9.3.1 per-user affiliation information) — entity = 대상 MCPTT ID, tuple id = MCPTT client ID,
  *  관심 그룹 전부(§9.2.1.2 5)b)i)·ii)), `<affiliation>` 에 status·expires 없음(iii)), 유일 p-id(iv)). */
 std::string affiliationPidf(const std::string& entity, const std::string& clientId, const std::vector<std::string>& groupUris,
@@ -110,6 +113,8 @@ std::string withSpeechInfoAlways(const std::string& sdp);
 /** 제어 기능 Contact 의 MC 세션 식별자 — `<URI>;…;isfocus` 의 URI(GRUU, TS 24.379 §4.5 · TS 24.281 §4.5). 제어 기능은 세션 개시
  *  최종 응답(§6.3.3.2.3.2 5))·멤버 초대(§6.3.3.1.2 1))의 Contact 에 싣는다. 값은 Contact 헤더 값(이름 있어도 됨), isfocus 가 없으면 빈 값. */
 std::string sessionIdentity(const std::string& contact);
+/** MC 세션 식별자(GRUU)의 `gr` URI 파라미터 값 — 세션을 가르는 값이다(사용자부는 서버가 정한다). URI 든 name-addr 든, 없으면 빈 값. */
+std::string sessionGr(const std::string& uri);
 /** URI → bare id ("tel:+82..@d" / "sip:x@d" / "<...>" → "+82.."). */
 std::string bareId(const std::string& uri);
 std::string xmlEscape(const std::string& s);

@@ -116,6 +116,13 @@ static pj_str_t evsub_state_names[] =
  */
 #define TIME_UAC_WAIT_NOTIFY    PJSIP_EVSUB_TIME_UAC_WAIT_NOTIFY
 
+/* CIMS: upper bound of the UAC refresh timer. A notifier may grant a very
+ * long duration (4294967295 = 2^32-1, 3GPP TS 24.379 10.1.3.2 5)); the
+ * timer seconds would overflow pj_time_val.sec where long is 32 bits (LLP64).
+ * The refresh is then sent at this bound with the same duration.
+ */
+#define TIME_UAC_REFRESH_MAX    (24*60*60)
+
 
 /*
  * Timer id
@@ -513,6 +520,12 @@ static void set_timer( pjsip_evsub *sub, int timer_id,
                   timer_names[sub->timer.id]));
         pjsip_endpt_cancel_timer(sub->endpt, &sub->timer);
         sub->timer.id = TIMER_TYPE_NONE;
+    }
+
+    if (timer_id == TIMER_TYPE_UAC_REFRESH &&
+        seconds != PJSIP_EXPIRES_NOT_SPECIFIED && seconds > TIME_UAC_REFRESH_MAX)
+    {
+        seconds = TIME_UAC_REFRESH_MAX;     /* CIMS: see TIME_UAC_REFRESH_MAX */
     }
 
     if (timer_id != TIMER_TYPE_NONE && seconds != PJSIP_EXPIRES_NOT_SPECIFIED)
@@ -1087,6 +1100,15 @@ PJ_DEF(const pj_str_t*) pjsip_evsub_get_termination_reason(
 PJ_DEF(pj_uint32_t) pjsip_evsub_get_expires(const pjsip_evsub *sub)
 {
     return sub->expires->ivalue;
+}
+
+/*
+ * CIMS: set the duration the next SUBSCRIBE requests (taken literally).
+ */
+PJ_DEF(void) pjsip_evsub_set_expires(pjsip_evsub *sub, pj_uint32_t expires)
+{
+    PJ_ASSERT_ON_FAIL(sub != NULL, return);
+    sub->expires->ivalue = expires;
 }
 
 /*

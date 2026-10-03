@@ -15,6 +15,7 @@
 //              (--implicit = 개시 INVITE 가 암묵적 발언 요청 — mc_implicit_request+mc_granted, TS 24.380 §14.2.4·§14.2.5. --ptt-at 0 과 함께)
 //              (--rejoin SESSION_URI = 진행 중 세션 재합류 — Request-URI = 앞 호 출력의 session_uri, TS 24.379 §10.1.1.2.4.1. 끝난 세션이면 404)
 //              (--chat = chat 그룹 합류 — session-type chat, TS 24.379 §10.1.2.2.1.1 13)a))
+//              (--roster = 세션 참가자 구독 — 호가 성립하면 코어가 세션 식별자로 conference SUBSCRIBE, TS 24.379 §10.1.3.2. answer 에도. outcome 에 rosters)
 //              (--private --full-duplex = floor 없는 개별 호 — offer 에 m=application 없음, TS 24.379 §11.1.2.2)
 //              [--upgrade-at S] [--cancel-at S]  (진행 중 긴급 상향·하향 re-INVITE, TS 24.379 §10.1.1.2.1.3·§10.1.1.2.1.4 — outcome 에 conditions)
 //   cimsue-cli [계정 옵션] video-call <groupId> [--prearranged] [--queueing] [--priority N] [--implicit] [--rejoin SESSION_URI]
@@ -114,6 +115,7 @@ struct Opts {
     bool broadcast = false;           // 일제 통화 개시(TS 24.379 §4.12)
     bool implicit = false;            // 암묵적 발언 요청(TS 24.380 §14.2.5) · MCVideo 암묵적 송출 요청(TS 24.581 §14.2.5)
     bool chat = false;                // group-call --chat — chat 그룹 합류(TS 24.379 §10.1.2.2.1.1)
+    bool roster = false;              // group-call·answer --roster — 세션 참가자 구독(TS 24.379 §10.1.3.2)
     bool fullDuplex = false;          // group-call --private --full-duplex — floor 없는 개별 호(§11.1.2.2)
     // MCVideo 그룹 호(video-call · video-answer)
     bool prearranged = false, queueing = false, accept = false;
@@ -160,7 +162,7 @@ void usage() {
         "        또는 --csc-host H [--csc-port N] --user U (--pw P | --pw-env VAR) [--csc-ca FILE] --from-profile volte|ptt\n"
         "  register [--hold S] | call TARGET [--duration S] [--video] | answer [--duration S] [--transfer-to X]\n"
         "  group-call GROUP [--duration S] [--ptt-at S --ptt-len S] [--listen-only] [--emergency] [--broadcast] [--implicit]\n"
-        "             [--chat] [--rejoin URI] [--private [--full-duplex] [--answer-mode auto|manual|force]] [--upgrade-at S] [--cancel-at S]\n"
+        "             [--chat] [--rejoin URI] [--roster] [--private [--full-duplex] [--answer-mode auto|manual|force]] [--upgrade-at S] [--cancel-at S]\n"
         "  video-call GROUP [--prearranged] [--queueing] [--priority N] [--implicit] [--rejoin URI] [--transmit-at S --transmit-len S]\n"
         "             [--accept] [--duration S]   (MCVideo 그룹 호 — 계정 --mcvideo --mcvideo-psi URI)\n"
         "  video-answer [--transmit-at S --transmit-len S] [--accept] [--duration S]   (MCVideo 멤버 초대 대기 — 코어가 자동 수락)\n"
@@ -251,6 +253,7 @@ bool parse(int argc, char** argv, Opts& o) {
         else if (a == "--broadcast") o.broadcast = true;
         else if (a == "--implicit") o.implicit = true;
         else if (a == "--chat") o.chat = true;
+        else if (a == "--roster") o.roster = true;
         else if (a == "--full-duplex") o.fullDuplex = true;
         else if (a == "--cancel") o.alertCancel = true;
         else if (a == "--msrp") o.acc.mcdataMsrp = true;
@@ -899,6 +902,8 @@ int main(int argc, char** argv) {
         bool got = ls.waitFor([&] { return ls.haveIncoming; }, o.timeoutSec);
         if (!got) { s.outcome = "no_incoming"; rc = 4; return finish(-1); }
         s.callId = ls.incoming.callId;
+        if (o.roster && ls.incoming.isMcptt && !ls.incoming.mcptt.privateCall)   // 성립하면 코어가 세션 식별자로 구독한다
+            eng.subscribeConference(acc, ls.incoming.groupId, true);
         if (!ls.incoming.isMcptt) {
             CallOptions co; co.video = ls.incoming.video && o.video;
             r = eng.answer(s.callId, co);
@@ -918,7 +923,8 @@ int main(int argc, char** argv) {
         ls.waitFor([&] { return disconnected(s.callId); }, o.durationSec);
         mediaCheck(s.callId);
         // 멤버 초대 Contact(isfocus)의 세션 식별자(TS 24.379 §6.3.3.1.2 1)) — group-call --rejoin 에 쓴다
-        if (ls.incoming.isMcptt) s.extra += ",\"session_uri\":\"" + jsonEsc(eng.callInfo(s.callId).sessionUri) + "\"";
+        if (ls.incoming.isMcptt)
+            s.extra += ",\"session_uri\":\"" + jsonEsc(eng.callInfo(s.callId).sessionUri) + "\",\"rosters\":" + std::to_string(ls.rosters);
         return finish(s.callId);
     }
 
@@ -945,6 +951,8 @@ int main(int argc, char** argv) {
         go.sessionUri = o.rejoinUri;                      // --rejoin = 진행 중 세션 재합류(§10.1.1.2.4.1 — Request-URI = 세션 식별자)
         go.commencement = o.answerMode == "auto" ? CommencementMode::Auto : o.answerMode == "manual" ? CommencementMode::Manual
                         : o.answerMode == "force" ? CommencementMode::ForceAuto : CommencementMode::Unspecified;
+        // --roster = 세션 참가자 구독을 원한다 — 호가 성립하면 코어가 세션 식별자로 건다(TS 24.379 §10.1.3.2)
+        if (o.roster && !o.privateCall) eng.subscribeConference(acc, o.target, true);
         // --private = 개별 호(TS 24.379 §11.1.1.2.1.1) — 대상은 상대 번호. --answer-mode 로 개시 방식 요청(RFC 5373)
         s.callId = o.privateCall ? eng.startPrivateCall(acc, o.target, go) : eng.joinGroupCall(acc, o.target, go);
         if (s.callId < 0) { s.outcome = "invite_failed"; rc = 4; return finish(-1); }

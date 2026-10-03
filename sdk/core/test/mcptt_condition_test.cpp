@@ -43,6 +43,11 @@ struct CondListener : Listener {
     }
     void onEmergencyAlert(const EmergencyAlert& a) override { { std::lock_guard<std::mutex> lk(m); alerts.push_back(a); } cv.notify_all(); }
     void onRequestResult(const RequestResult& r) override { { std::lock_guard<std::mutex> lk(m); results.push_back(r); } cv.notify_all(); }
+    std::vector<std::pair<std::string, size_t>> rosters;   // (groupId, 참가자 수)
+    void onRoster(int, const std::string& gid, const std::vector<RosterEntry>& users, bool) override {
+        { std::lock_guard<std::mutex> lk(m); rosters.emplace_back(gid, users.size()); }
+        cv.notify_all();
+    }
     template <class P> bool wait(P pred, int ms = 3000) {
         std::unique_lock<std::mutex> lk(m);
         return cv.wait_for(lk, std::chrono::milliseconds(ms), [&] { return pred(); });
@@ -782,9 +787,160 @@ TEST(McpttRejoin, SessionIdentityRequestUri) {
     eng.stop();
 }
 
+// conference 구독(TS 24.379 §10.1.3.2) — 참가한 진행 중 그룹 세션 안에서만: 세션 밖에서는 원하기만 하고 보내지 않는다(§10.1.3.1 · 서버는
+//   404 137 — §10.1.3.3 2)). 호가 성립하면 2) Request-URI = 세션 식별자(GRUU — 사용자부는 서버가 정한다) · 3) P-Preferred-Service ·
+//   4) Accept-Contact icsi-ref · 5) Expires 4294967295 · 7) Accept · 8) mcptt-info 그룹 ID. 통지의 그룹 = 그 세션 호의 그룹(gr 로 맞춘다).
+//   세션을 떠나면 Expires 0 으로 거두고, 서버가 noresource 로 먼저 끝냈으면(RFC 4575 §3.3) 아무것도 보내지 않는다. 일제 통화는 구독하지 않는다
+TEST(McpttConference, SubscriptionWithinOngoingSession) {
+    Engine eng;
+    CondListener l;
+    EngineConfig cfg;
+    cfg.logLevel = std::getenv("COND_LOG") ? 5 : 0;
+    cfg.nullAudioDevice = true;
+    ASSERT_TRUE(eng.start(cfg, &l).ok);
+    {
+        cimsue_test::PjScope pj("conf-test");
+        FakeServer srv;
+        AccountConfig ac;
+        ac.serverHost = "127.0.0.1"; ac.serverPort = srv.port; ac.transport = Transport::UDP;
+        ac.domain = "ptt.test"; ac.msisdn = "+82500000001"; ac.authId = "450000000000001@ptt.test"; ac.password = "x";
+        ac.instanceId = "urn:uuid:00000000-0000-4000-8000-000000000001";
+        ac.mcpttServerUri = "sip:mcptt-psi@ptt.test";
+        ac.mcpttEnabled = true;
+        int acc = eng.addAccount(ac);
+        ASSERT_GE(acc, 0);
+
+        ASSERT_TRUE(eng.subscribeConference(acc, "g001", true).ok);
+        EXPECT_TRUE(srv.recv("SUBSCRIBE ", 300).empty());                     // 세션 밖 — 보내지 않는다
+
+        // 세션 성립 — 세션 식별자의 사용자부는 PSI(서버가 정한다), 그룹은 호의 것
+        auto establish = [&](const std::string& gr, const GroupCallOptions& o) {
+            int id = eng.joinGroupCall(acc, "g001", o);
+            EXPECT_GE(id, 0);
+            std::string inv = srv.recv("INVITE ");
+            EXPECT_FALSE(inv.empty());
+            srv.callId = headerOf(inv, "Call-ID");
+            srv.ueFrom = headerOf(inv, "From");
+            srv.ueContact = uriIn(headerOf(inv, "Contact"));
+            srv.contact = "<sip:mcptt-psi@127.0.0.1:" + std::to_string(srv.port) + ";gr=" + gr + ">;+g.3gpp.mcptt;isfocus";
+            srv.reply(inv, 200, "OK", "application/sdp", sdp(1));       // ACK 는 받지 않는다 — 구독이 ACK 보다 먼저 닿을 수 있다(recv 가 버린다)
+            EXPECT_TRUE(l.wait([&] { return l.lastState.callId == id && l.lastState.state == CallState::Active; }));
+            srv.contact.clear();
+            return id;
+        };
+        const std::string sid = "sip:mcptt-psi@127.0.0.1:" + std::to_string(srv.port) + ";gr=s-0001";
+        int id1 = establish("s-0001", GroupCallOptions());
+        std::string s1 = srv.recv("SUBSCRIBE ");
+        ASSERT_FALSE(s1.empty());
+        EXPECT_EQ(s1.substr(0, s1.find("\r\n")), "SUBSCRIBE " + sid + " SIP/2.0");                       // 2)
+        EXPECT_NE(headerOf(s1, "To").find(";gr=s-0001>"), std::string::npos) << headerOf(s1, "To");       // gr 는 URI 안
+        EXPECT_EQ(headerOf(s1, "Event"), "conference");
+        EXPECT_EQ(headerOf(s1, "Expires"), "4294967295");                                                 // 5)
+        EXPECT_EQ(countHeader(s1, "Expires"), 1) << s1;
+        EXPECT_EQ(headerOf(s1, "Accept"), "application/conference-info+xml");                             // 7)
+        EXPECT_EQ(headerOf(s1, "P-Preferred-Service"), "urn:urn-7:3gpp-service.ims.icsi.mcptt");          // 3)
+        EXPECT_EQ(headerOf(s1, "Accept-Contact"), "*;+g.3gpp.icsi-ref=\"urn%3Aurn-7%3A3gpp-service.ims.icsi.mcptt\";require;explicit");   // 4)
+        EXPECT_EQ(countHeader(s1, "Accept-Contact"), 1) << s1;
+        EXPECT_NE(headerOf(s1, "Contact").find(";+g.3gpp.mcptt;"), std::string::npos) << headerOf(s1, "Contact");
+        EXPECT_EQ(headerOf(s1, "Content-Type"), "application/vnd.3gpp.mcptt-info+xml");
+        EXPECT_NE(s1.find("<mcptt-request-uri type=\"Normal\"><mcpttURI>tel:g001</mcpttURI></mcptt-request-uri>"), std::string::npos) << s1;   // 8)
+        srv.reply(s1, 200, "OK", "", "", "Expires: 3600\r\n");
+        // 통지 — From = 세션 식별자(사용자부 PSI) → 그룹 g001
+        int branch = 0;                                                          // NOTIFY 마다 새 트랜잭션
+        auto notify = [&](const std::string& sub, const std::string& state, int seq) {
+            const std::string info = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n<conference-info xmlns=\"urn:ietf:params:xml:ns:conference-info\" "
+                                     "entity=\"" + sid + "\" state=\"full\" version=\"" + std::to_string(seq) + "\"><users>"
+                                     "<user entity=\"tel:+82500000001\"><endpoint><status>connected</status></endpoint></user>"
+                                     "<user entity=\"tel:+82500000002\"><endpoint><status>connected</status></endpoint></user>"
+                                     "</users></conference-info>";
+            std::string from = headerOf(sub, "To");
+            if (from.find(";tag=") == std::string::npos) from += ";tag=srv";
+            std::string r = "NOTIFY " + uriIn(headerOf(sub, "Contact")) + " SIP/2.0\r\n" +
+                            "Via: SIP/2.0/UDP 127.0.0.1:" + std::to_string(srv.port) + ";branch=z9hG4bKntf" + std::to_string(++branch) + "\r\n" +
+                            "Max-Forwards: 70\r\nFrom: " + from + "\r\nTo: " + headerOf(sub, "From") + "\r\nCall-ID: " + headerOf(sub, "Call-ID") +
+                            "\r\nCSeq: " + std::to_string(seq) + " NOTIFY\r\nContact: <" + sid + ">\r\nEvent: conference\r\n" +
+                            "Subscription-State: " + state + "\r\nContent-Type: application/conference-info+xml\r\n" +
+                            "Content-Length: " + std::to_string(info.size()) + "\r\n\r\n" + info;
+            srv.send(r);
+            EXPECT_FALSE(srv.recv("SIP/2.0 200").empty());
+        };
+        notify(s1, "active;expires=3600", 1);
+        ASSERT_TRUE(l.wait([&] { return !l.rosters.empty(); }));
+        {
+            std::lock_guard<std::mutex> lk(l.m);
+            EXPECT_EQ(l.rosters.back().first, "g001");
+            EXPECT_EQ(l.rosters.back().second, 2u);
+        }
+
+        // 세션을 떠난다 — 같은 구독 다이얼로그로 Expires 0
+        ASSERT_TRUE(eng.hangup(id1).ok);
+        std::string bye = srv.recv("BYE ");
+        ASSERT_FALSE(bye.empty());
+        srv.reply(bye, 200, "OK");
+        std::string u1 = srv.recv("SUBSCRIBE ");
+        ASSERT_FALSE(u1.empty());
+        EXPECT_EQ(headerOf(u1, "Call-ID"), headerOf(s1, "Call-ID"));
+        EXPECT_EQ(headerOf(u1, "Expires"), "0");
+        EXPECT_EQ(headerOf(u1, "Content-Type"), "");
+        srv.reply(u1, 200, "OK", "", "", "Expires: 0\r\n");
+        notify(s1, "terminated;reason=timeout", 2);                              // 해지의 마지막 통지(RFC 6665 §4.2.2)
+
+        // 두 번째 세션 — 서버가 세션 해제로 구독을 먼저 끝낸다(noresource) → 해지를 보내지 않는다
+        int id2 = establish("s-0002", GroupCallOptions());
+        std::string s2 = srv.recv("SUBSCRIBE ");
+        ASSERT_FALSE(s2.empty());
+        EXPECT_NE(s2.find(";gr=s-0002 SIP/2.0"), std::string::npos) << s2.substr(0, 100);
+        srv.reply(s2, 200, "OK", "", "", "Expires: 3600\r\n");
+        notify(s2, "terminated;reason=noresource", 1);
+        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+        std::string sbye = "BYE " + srv.ueContact + " SIP/2.0\r\nVia: SIP/2.0/UDP 127.0.0.1:" + std::to_string(srv.port) +
+                           ";branch=z9hG4bKbye2\r\nMax-Forwards: 70\r\nFrom: <sip:g001@ptt.test>;tag=srv\r\nTo: " + srv.ueFrom +
+                           "\r\nCall-ID: " + srv.callId + "\r\nCSeq: 200 BYE\r\nContent-Length: 0\r\n\r\n";
+        srv.send(sbye);
+        ASSERT_TRUE(l.wait([&] { return l.lastState.callId == id2 && l.lastState.state == CallState::Disconnected; }));
+        EXPECT_TRUE(srv.recv("SUBSCRIBE ", 400).empty());
+
+        // 세 번째 세션 — 앱이 그만 원하면 세션 중에도 거둔다
+        int id3 = establish("s-0003", GroupCallOptions());
+        std::string s3 = srv.recv("SUBSCRIBE ");
+        ASSERT_FALSE(s3.empty());
+        srv.reply(s3, 200, "OK", "", "", "Expires: 3600\r\n");
+        ASSERT_TRUE(eng.subscribeConference(acc, "g001", false).ok);
+        std::string u3 = srv.recv("SUBSCRIBE ");
+        ASSERT_FALSE(u3.empty());
+        EXPECT_EQ(headerOf(u3, "Expires"), "0");
+        srv.reply(u3, 200, "OK", "", "", "Expires: 0\r\n");
+        notify(s3, "terminated;reason=timeout", 1);
+        ASSERT_TRUE(eng.subscribeConference(acc, "g001", true).ok);                // 다시 원하면 진행 중 세션에 바로
+        std::string s3b = srv.recv("SUBSCRIBE ");
+        ASSERT_FALSE(s3b.empty());
+        EXPECT_EQ(headerOf(s3b, "Expires"), "4294967295");
+        EXPECT_NE(headerOf(s3b, "Call-ID"), headerOf(s3, "Call-ID"));            // 새 다이얼로그
+        srv.reply(s3b, 200, "OK", "", "", "Expires: 3600\r\n");
+        ASSERT_TRUE(eng.hangup(id3).ok);
+        bye = srv.recv("BYE ");
+        ASSERT_FALSE(bye.empty());
+        srv.reply(bye, 200, "OK");
+        std::string u3b = srv.recv("SUBSCRIBE ");
+        ASSERT_FALSE(u3b.empty());
+        srv.reply(u3b, 200, "OK", "", "", "Expires: 0\r\n");
+
+        // 일제 통화(TS 24.379 §10.1.3.2 — broadcast 로 개시한 호는 구독하지 않는다, 서버는 480 105)
+        GroupCallOptions bo;
+        bo.broadcast = true;
+        int id4 = establish("s-0004", bo);
+        EXPECT_TRUE(srv.recv("SUBSCRIBE ", 400).empty());
+        ASSERT_TRUE(eng.hangup(id4).ok);
+        bye = srv.recv("BYE ");
+        if (!bye.empty()) srv.reply(bye, 200, "OK");
+    }
+    eng.stop();
+}
+
 // 제어 기능 Contact 의 세션 식별자(TS 24.379 §4.5) — isfocus 가 붙은 name-addr 의 URI. isfocus 는 헤더 파라미터만 본다(대소문자 무관)
 TEST(McpttXml, SessionIdentityFromContact) {
     using mcptt::sessionIdentity;
+    using mcptt::sessionGr;
     EXPECT_EQ(sessionIdentity("<sip:mcptt_psi@ptt.test;gr=a1>;+g.3gpp.mcptt;+g.3gpp.icsi-ref=\"urn%3Aurn-7%3A3gpp-service.ims.icsi.mcptt\";isfocus"),
               "sip:mcptt_psi@ptt.test;gr=a1");
     EXPECT_EQ(sessionIdentity("Contact: <sip:g001@10.0.0.1:5060;gr=s1>;IsFocus"), "sip:g001@10.0.0.1:5060;gr=s1");
@@ -793,6 +949,11 @@ TEST(McpttXml, SessionIdentityFromContact) {
     EXPECT_EQ(sessionIdentity("<sip:isfocus@10.0.0.1;isfocus>"), "");               // URI 안의 글자는 보지 않는다
     EXPECT_EQ(sessionIdentity("<sip:g001@10.0.0.1;gr=s1>;isfocused"), "");
     EXPECT_EQ(sessionIdentity("sip:g001@10.0.0.1;isfocus"), "");                    // addr-spec — 파라미터가 URI 의 것인지 가를 수 없다
+    // 세션을 가르는 값 = GRUU 의 gr(conference 통지 From → 그 세션 호의 그룹)
+    EXPECT_EQ(sessionGr("sip:mcptt_psi@ptt.test:5061;transport=tls;gr=1790-7"), "1790-7");
+    EXPECT_EQ(sessionGr("<sip:g001@10.0.0.1;GR=s1>;tag=a"), "s1");
+    EXPECT_EQ(sessionGr("<sip:g001@10.0.0.1>;gr=s1"), "");                         // 헤더 파라미터는 아니다
+    EXPECT_EQ(sessionGr("sip:g001@10.0.0.1;grx=1"), "");
     EXPECT_EQ(sessionIdentity(""), "");
 }
 

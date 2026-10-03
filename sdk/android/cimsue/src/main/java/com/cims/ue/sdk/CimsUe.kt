@@ -547,7 +547,8 @@ class Account internal constructor(private val ue: CimsUe, val id: Int) {
     suspend fun joinVideoGroupCall(groupId: String, opts: VideoGroupCallOptions = VideoGroupCallOptions()): CimsResult<Call> =
         ue.command { callOrFail(ue.jni.joinVideoGroupCall(id, groupId, opts.toJni()), "joinVideoGroupCall") }
 
-    /** 그룹 로스터 구독(RFC 4575 conference) — 확인 신호는 `roster` NOTIFY. */
+    /** 그룹 세션 참가자 구독을 원한다(RFC 4575 conference — TS 24.379 §10.1.3.2). 엔진은 그 그룹의 진행 중 세션에 참가한 동안만
+     *  세션 식별자로 구독하고 호가 끝나면 거둔다 — 세션 밖에서는 아무것도 보내지 않는다. 통지 = `roster`. */
     suspend fun subscribeConference(groupId: String, on: Boolean): CimsResult<Unit> =
         ue.command { CimsResult.of(ue.jni.subscribeConference(id, groupId, on)) }
 

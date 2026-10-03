@@ -197,11 +197,9 @@ TEST(AffiliationUpkeep, SpecFormPublishAndRenewAfterNetworkChange) {
         EXPECT_EQ(headerOf(p2, "SIP-If-Match"), "e1");
         srv.reply(p2, 200, "SIP-ETag: e2\r\nExpires: 4294967295\r\n");
         ASSERT_TRUE(l.waitResults(2, 3000));
+        // conference 구독은 참가한 세션 안에서만(TS 24.379 §10.1.3.1) — 세션이 없으면 원하기만 하고 보내지 않는다(등록 유지 대상도 아니다)
         ASSERT_TRUE(eng.subscribeConference(acc, "g001", true).ok);
-        std::string s1 = srv.recv("SUBSCRIBE");
-        ASSERT_FALSE(s1.empty());
-        EXPECT_EQ(headerOf(s1, "Event"), "conference");
-        srv.reply(s1, 200, "Contact: <sip:srv@127.0.0.1:" + std::to_string(srv.port) + ">\r\nExpires: 3600\r\n");                                 // 구독은 스택(evsub)이 다루고 결과는 올라오지 않는다
+        EXPECT_TRUE(srv.none("SUBSCRIBE", 300));
         {
             std::lock_guard<std::mutex> lk(l.m);
             EXPECT_EQ(l.results[0].token, t1);
@@ -222,11 +220,8 @@ TEST(AffiliationUpkeep, SpecFormPublishAndRenewAfterNetworkChange) {
         EXPECT_NE(p3.find("group=\"tel:g001\""), std::string::npos);
         EXPECT_NE(p3.find("group=\"tel:g002\""), std::string::npos);
         srv.reply(p3, 200, "SIP-ETag: e3\r\nExpires: 4294967295\r\n");
-        std::string s2 = srv.recv("SUBSCRIBE");
-        ASSERT_FALSE(s2.empty()) << "재등록 뒤 conference 재구독이 없다";
-        EXPECT_EQ(headerOf(s2, "Event"), "conference");
-        srv.reply(s2, 200, "Contact: <sip:srv@127.0.0.1:" + std::to_string(srv.port) + ">\r\nExpires: 3600\r\n");
-        std::this_thread::sleep_for(std::chrono::milliseconds(300));
+        EXPECT_TRUE(srv.none("SUBSCRIBE", 300)) << "세션 밖 conference 구독";
+
         EXPECT_EQ(l.resultCount(), before);                                        // 내부 요청 결과는 올라가지 않는다
 
         // 같은 등록의 갱신은 다시 싣지 않는다

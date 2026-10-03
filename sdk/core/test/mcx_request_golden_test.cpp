@@ -3,6 +3,7 @@
 //   (UE A +82510002001 · B +82510002002 · 그룹 g101 · MCPTT/MCData PSI · client ID)에서 만든 요청이 «같은 요청» 인지 본다.
 //   의미 비교(README) — 헤더 순서·o=·태그·branch·boundary·포트는 보지 않는다. Accept-Contact 는 줄을 나눠도 쉼표 목록이어도 같다(RFC 3261 §7.3.1).
 //   응답 골든(03 · 06)은 SDK 해석 쪽 — Warning 문구 번호가 CallInfo·RequestResult 의 warningCode 로 올라오는지 본다.
+//   10 conference 구독은 개시 200 OK 의 Contact(골든의 Request-URI = 세션 식별자)로 그룹 세션을 세운 뒤 엔진이 거는 구독이다.
 //   SDK 쪽 편차: 미디어 평면 SDS INVITE 의 더미 m=audio(a=inactive — mcdata_messaging.md §7 «media plane SDS 의 SDP»)는 골든에 없다.
 #include <gtest/gtest.h>
 
@@ -157,6 +158,19 @@ void expectSameRequest(const std::string& sdk, const std::string& gold, const ch
         EXPECT_FALSE(header(sdk, "Session-Expires").empty());
         EXPECT_NE(header(sdk, "Supported").find("timer"), std::string::npos);
     }
+    for (const char* h : {"Event", "Expires", "Accept"})                  // 구독(SUBSCRIBE)
+        if (!header(gold, h).empty()) EXPECT_EQ(header(sdk, h), header(gold, h)) << h;
+    const std::string gct = header(gold, "Content-Type");
+    if (gct.rfind("multipart/", 0) != 0) {                                // 본문 하나(conference 구독 — mcptt-info)
+        EXPECT_EQ(header(sdk, "Content-Type"), gct);
+        auto bodyOf = [](std::string m) {
+            m = m.substr(m.find("\r\n\r\n") + 4);
+            for (size_t q; (q = m.find("\r\n")) != std::string::npos;) m.erase(q, 1);
+            return trim(m);
+        };
+        EXPECT_EQ(bodyOf(sdk), bodyOf(gold));
+        return;
+    }
     EXPECT_EQ(header(sdk, "Content-Type").rfind("multipart/mixed", 0), 0u);
     const auto gp = parts(gold), sp = parts(sdk);
     for (const auto& g : gp) {
@@ -215,13 +229,13 @@ struct FakeSip {
         }
         return "";
     }
-    void reply(const std::string& req, int code, const char* reason, const std::string& extra = "") {
+    void reply(const std::string& req, int code, const char* reason, const std::string& extra = "", const std::string& body = "") {
         std::string r = "SIP/2.0 " + std::to_string(code) + " " + reason + "\r\n" + extra;
         for (const auto& v : headers(req, "Via")) r += "Via: " + v + "\r\n";
         std::string to = header(req, "To");
         if (to.find(";tag=") == std::string::npos) to += ";tag=srv";
         r += "From: " + header(req, "From") + "\r\nTo: " + to + "\r\nCall-ID: " + header(req, "Call-ID") + "\r\nCSeq: " +
-             header(req, "CSeq") + "\r\nContent-Length: 0\r\n\r\n";
+             header(req, "CSeq") + "\r\nContent-Length: " + std::to_string(body.size()) + "\r\n\r\n" + body;
         pj_ssize_t len = (pj_ssize_t)r.size();
         pj_sock_sendto(s, r.data(), &len, 0, &peer, sizeof(peer));
     }
@@ -314,6 +328,26 @@ TEST(McxRequestGolden, SdkRequestsMatchContract) {
         sip.reply(inv, 488, "Not Acceptable Here");
         sip.recv("ACK ");
         ASSERT_TRUE(l.wait([&] { for (auto& r : l.results) if (r.token == big.token) return true; return false; }));
+
+        // 10 conference 구독 — 진행 중 그룹 세션 안에서(개시 200 OK Contact = 세션 식별자, TS 24.379 §10.1.3.2 2))
+        const std::string g10 = golden("10_conference_subscribe.txt");
+        const std::string rl = g10.substr(0, g10.find("\r\n"));
+        const std::string sid = rl.substr(10, rl.rfind(" SIP/2.0") - 10);     // "SUBSCRIBE " … " SIP/2.0"
+        ASSERT_TRUE(eng.subscribeConference(acc, "g101", true).ok);
+        const int gc = eng.joinGroupCall(acc, "g101");
+        ASSERT_GE(gc, 0);
+        const std::string ginv = sip.recv("INVITE ");
+        ASSERT_FALSE(ginv.empty());
+        const std::string answer = "v=0\r\no=- 1 1 IN IP4 127.0.0.1\r\ns=-\r\nc=IN IP4 127.0.0.1\r\nt=0 0\r\n"
+                                   "m=audio 40000 RTP/AVP 0\r\na=rtpmap:0 PCMU/8000\r\na=sendrecv\r\n"
+                                   "m=application 40002 udp MCPTT\r\na=fmtp:MCPTT mc_queueing\r\n";
+        sip.reply(ginv, 200, "OK",
+                  "Contact: <" + sid + ">;+g.3gpp.mcptt;+g.3gpp.icsi-ref=\"urn%3Aurn-7%3A3gpp-service.ims.icsi.mcptt\";isfocus\r\n"
+                  "Content-Type: application/sdp\r\n", answer);
+        const std::string sub = sip.recv("SUBSCRIBE ");
+        expectSameRequest(sub, g10, "10");
+        EXPECT_NE(header(sub, "To").find(";gr=1790775600123456-7>"), std::string::npos) << header(sub, "To");   // gr 는 URI 안
+        sip.reply(sub, 200, "OK", "Expires: 3600\r\n");                   // 수명(떠나면 거둔다)은 McpttConference 가 본다
     }
     eng.stop();
 }

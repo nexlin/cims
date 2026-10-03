@@ -652,6 +652,7 @@ CIMSUE_API cimsue_status_t CIMSUE_CALL cimsue_engine_accept_reception(cimsue_eng
 /** [그만 보기] — Media Reception End Request(§6.2.5.5). */
 CIMSUE_API cimsue_status_t CIMSUE_CALL cimsue_engine_end_reception(cimsue_engine_t* e, int32_t call_id, const char* transmitter_id);
 CIMSUE_API void CIMSUE_CALL cimsue_engine_transmission_info(const cimsue_engine_t* e, int32_t call_id, cimsue_transmission_info_t* out);
+/** 그룹 세션 참가자 구독을 원한다(Engine::subscribeConference — 진행 중 세션에 참가한 동안만 엔진이 세션 식별자로 구독한다). */
 CIMSUE_API cimsue_status_t CIMSUE_CALL cimsue_engine_subscribe_conference(cimsue_engine_t* e, int32_t account_id,
                                                                           const char* group_id, int32_t on);
 CIMSUE_API cimsue_status_t CIMSUE_CALL cimsue_engine_subscribe_xcap_diff(cimsue_engine_t* e, int32_t account_id,
