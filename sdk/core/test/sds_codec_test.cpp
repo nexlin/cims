@@ -249,8 +249,6 @@ TEST(McpttXml, InfoBuildParseAndBareId) {
     EXPECT_EQ(mcptt::bareId("<sip:g001@ims.example.org>;tag=1"), "g001");
     EXPECT_EQ(mcptt::bareId("tel:+82500000001"), "+82500000001");
     EXPECT_EQ(mcptt::bareId("\"name\" <sip:+8210@d>"), "+8210");
-    std::string aff = mcptt::affiliationCommand("tel:g001", false);
-    EXPECT_NE(aff.find("<de-affiliate group=\"tel:g001\"/>"), std::string::npos);
     EXPECT_FALSE(mi.broadcast);
 }
 

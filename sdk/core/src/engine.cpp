@@ -512,8 +512,9 @@ struct Engine::Impl {
     detail::Upkeep upkeep;
     /** MCPTT 관심 그룹(bare, 계정별) — 규격형 제휴 게시는 늘 전부를 싣는다(TS 24.379 §9.2.1.2 5)b)i)). ue-ctl 에서만. */
     std::map<int, std::set<std::string>> mcpttAffiliations;
-    /** 규격형 MCPTT 제휴 게시를 쓰는 계정 — 참여 MCPTT 기능 PSI 와 MCPTT client ID 가 있다. 없으면 구형(그룹마다 Event: mcptt). */
-    static bool mcpttSetForm(const AccountConfig& c) { return !c.mcpttServerUri.empty() && !c.effectiveMcpttClientId().empty(); }
+    /** MCPTT 제휴를 게시할 수 있는 계정 — 참여 MCPTT 기능 PSI(Request-URI)와 MCPTT client ID(pidf tuple id)가 있다(TS 24.379 §9.2.1.2 1)·5)b)).
+     *  없으면 제휴를 보내지 않는다(affiliate = -1). */
+    static bool mcpttAffiliable(const AccountConfig& c) { return !c.mcpttServerUri.empty() && !c.effectiveMcpttClientId().empty(); }
     /** 유지 단위의 요청을 보냈다 — 응답을 그 단위로 돌려받게 적는다. internal = 유지가 다시 실은 요청(결과를 앱에 올리지 않는다). */
     void track(int64_t token, const detail::UpkeepKey& k, bool internal);
     /** 유지가 다시 싣는다(ue-ctl) — renew = 등록 재성립·망 변경(서버가 잃었을 수 있어 조건부 게시가 아니라 초기 게시로). */
@@ -541,8 +542,6 @@ struct Engine::Impl {
     /** 응답을 기다리는 affiliation PUBLISH — 내부 token 별. 412 초기 재발행은 새 내부 token 이고 앱에는 appToken 으로 알린다. */
     struct PendingPublish {
         int accountId = -1;
-        std::string groupId;                               // 규격형(MCPTT·MCVideo)은 비어 있다 — 게시 하나가 관심 그룹 전부다
-        bool on = false;
         bool conditional = false;                          // SIP-If-Match 를 실었다(ETag 조건부 갱신)
         int64_t appToken = -1;                             // affiliate() 가 돌려준 token
         McService service = McService::Mcptt;
@@ -583,10 +582,9 @@ struct Engine::Impl {
             if (kv.second.isMcptt && mcptt::sessionGr(kv.second.sessionUri) == gr) return mcptt::bareId(kv.second.groupId);
         return std::string();
     }
-    static std::string publishKey(int accountId, const std::string& groupId, McService service) {
-        // MCVideo 는 게시 하나가 관심 그룹 전부라 그룹이 비어 있다(서비스 인가 게시의 ETag 는 ServiceAuth 가 든다)
-        if (service == McService::McVideo) return std::to_string(accountId) + ":mcvideo";
-        return std::to_string(accountId) + ":" + groupId;
+    /** 제휴 게시의 ETag 열쇠 — 계정 × 서비스(게시 하나가 관심 그룹 전부다. 서비스 인가 게시의 ETag 는 ServiceAuth 가 든다). */
+    static std::string publishKey(int accountId, McService service) {
+        return std::to_string(accountId) + (service == McService::McVideo ? ":mcvideo" : ":mcptt");
     }
     // media plane SDS(MSRP) 입출력 스레드 — 분리 실행, stop() 이 취소하고 모두 끝날 때까지 기다린다.
     std::mutex msrpM;
@@ -700,11 +698,7 @@ struct Engine::Impl {
     int64_t doSendRequest(int accountId, const std::string& method, const std::string& targetUri,
                        const std::string& contentType, const std::string& body,
                        const std::map<std::string, std::string>& headers, int64_t token);
-    /** 구형 affiliation PUBLISH(그룹마다 Event: mcptt) — ue-ctl 에서. allowConditional 이면 저장된 ETag 로 SIP-If-Match(RFC 3903 §4.4).
-     *  참여 기능 PSI·client ID 가 없는 계정만(mcpttSetForm) — 전환기. */
-    int64_t sendAffiliation(int accountId, const std::string& groupId, bool on, int64_t token, int64_t appToken, bool allowConditional,
-                            bool internal = false);
-    /** 규격형 MCPTT affiliation PUBLISH(TS 24.379 §9.2.1.2) — 관심 그룹 전부(mcpttAffiliations)를 한 게시로. ue-ctl 에서. */
+    /** MCPTT affiliation PUBLISH(TS 24.379 §9.2.1.2) — 관심 그룹 전부(mcpttAffiliations)를 한 게시로. ue-ctl 에서. */
     int64_t sendMcpttAffiliationSet(int accountId, int64_t token, int64_t appToken, bool allowConditional, bool internal = false);
     /** MCVideo affiliation PUBLISH(TS 24.281 §8.2.1.2) — 관심 그룹 전부(mcvideoAffiliations)를 한 게시로. ue-ctl 에서. */
     int64_t sendMcVideoAffiliation(int accountId, int64_t token, int64_t appToken, bool allowConditional, bool internal = false);
@@ -1959,7 +1953,7 @@ public:
                 auto it = o_->publishPending.find(r.token);
                 if (it != o_->publishPending.end()) {
                     const Engine::Impl::PendingPublish p = it->second;
-                    const std::string key = Engine::Impl::publishKey(p.accountId, p.groupId, p.service);
+                    const std::string key = Engine::Impl::publishKey(p.accountId, p.service);
                     r.token = p.appToken;                  // 앱은 affiliate() 의 token 으로 상관한다
                     if (r.code == PJSIP_SC_CONDITIONAL_REQUEST_FAILED) {
                         // RFC 3903 §5 — 412 를 낸 entity-tag 는 버리고(MUST) 같은 요청을 다시 보내지 않는다(MUST NOT).
@@ -1977,10 +1971,7 @@ public:
                     const int64_t t =
                         retry.service == McService::McVideo
                             ? o->sendMcVideoAffiliation(retry.accountId, retryToken, retry.appToken, false, retry.internal)
-                        : retry.groupId.empty()
-                            ? o->sendMcpttAffiliationSet(retry.accountId, retryToken, retry.appToken, false, retry.internal)
-                            : o->sendAffiliation(retry.accountId, retry.groupId, retry.on, retryToken, retry.appToken, false,
-                                                 retry.internal);
+                            : o->sendMcpttAffiliationSet(retry.accountId, retryToken, retry.appToken, false, retry.internal);
                     if (t >= 0) return;
                     if (hasKey) o->upkeep.result(key, r.code, 0, upkeepNowMs());
                     if (!retry.internal) o->emit([o, r] { o->listener->onRequestResult(r); });   // 재발행을 못 만들면 412 를 그대로
@@ -2510,11 +2501,10 @@ void Engine::Impl::upkeepResend(const detail::UpkeepKey& k, bool renew) {
             //   갱신(③)은 조건부 게시(§4.4) — 규격형은 본문을 함께 싣는다(TS 24.379 §9.2.1.2 NOTE 4).
             if (renew || upkeep.failing(k)) {
                 std::lock_guard<std::mutex> lk(snapM);
-                publishEtag.erase(publishKey(k.account, k.target, mcv ? McService::McVideo : McService::Mcptt));
+                publishEtag.erase(publishKey(k.account, mcv ? McService::McVideo : McService::Mcptt));
             }
             if (mcv) sendMcVideoAffiliation(k.account, token, token, true, true);
-            else if (k.target.empty()) sendMcpttAffiliationSet(k.account, token, token, true, true);
-            else sendAffiliation(k.account, k.target, true, token, token, true, true);
+            else sendMcpttAffiliationSet(k.account, token, token, true, true);
             break;
         }
         default: sendSubscribe(k, true, token, true); break;
@@ -3521,32 +3511,6 @@ int64_t Engine::sendRequest(int accountId, const std::string& method, const std:
     return impl_->ctl.runSync([=] { return impl_->doSendRequest(accountId, method, targetUri, contentType, body, headers, token); });
 }
 
-int64_t Engine::Impl::sendAffiliation(int accountId, const std::string& groupId, bool on, int64_t token, int64_t appToken,
-                                      bool allowConditional, bool internal) {
-    auto ic = accountCfgs.find(accountId);
-    if (ic == accountCfgs.end()) return -1;
-    std::map<std::string, std::string> h;
-    h["Event"] = "mcptt";                                              // 구형 자체 규약 — 없으면 CSP 489
-    h["Expires"] = on ? "3600" : "0";
-    {
-        std::lock_guard<std::mutex> lk(snapM);
-        PendingPublish p;
-        p.accountId = accountId; p.groupId = groupId; p.on = on; p.appToken = appToken; p.internal = internal;
-        auto et = publishEtag.find(publishKey(accountId, groupId, McService::Mcptt));
-        if (allowConditional && et != publishEtag.end()) { h["SIP-If-Match"] = et->second; p.conditional = true; }
-        publishPending[token] = p;
-    }
-    const detail::UpkeepKey k{accountId, detail::UpkeepKind::McpttAffiliation, mcptt::bareId(groupId)};
-    if (on) track(token, k, internal);
-    int64_t r = doSendRequest(accountId, "PUBLISH", "sip:" + groupId + "@" + ic->second.domain, mcptt::kCtAffiliation,
-                              mcptt::affiliationCommand("tel:" + groupId, on), h, token);
-    if (r < 0) {
-        { std::lock_guard<std::mutex> lk(snapM); publishPending.erase(token); tracked.erase(token); }
-        if (on) upkeep.result(k, 0, 0, upkeepNowMs());
-    }
-    return r < 0 ? -1 : appToken;
-}
-
 int64_t Engine::Impl::sendMcpttAffiliationSet(int accountId, int64_t token, int64_t appToken, bool allowConditional, bool internal) {
     auto ic = accountCfgs.find(accountId);
     if (ic == accountCfgs.end()) return -1;
@@ -3563,8 +3527,8 @@ int64_t Engine::Impl::sendMcpttAffiliationSet(int accountId, int64_t token, int6
     {
         std::lock_guard<std::mutex> lk(snapM);
         PendingPublish p;
-        p.accountId = accountId; p.on = !groups.empty(); p.appToken = appToken; p.internal = internal;
-        auto et = publishEtag.find(publishKey(accountId, std::string(), McService::Mcptt));
+        p.accountId = accountId; p.appToken = appToken; p.internal = internal;
+        auto et = publishEtag.find(publishKey(accountId, McService::Mcptt));
         if (allowConditional && et != publishEtag.end()) { h["SIP-If-Match"] = et->second; p.conditional = true; }
         publishPending[token] = p;
     }
@@ -3746,8 +3710,8 @@ int64_t Engine::Impl::sendMcVideoAffiliation(int accountId, int64_t token, int64
     {
         std::lock_guard<std::mutex> lk(snapM);
         PendingPublish p;
-        p.accountId = accountId; p.on = !groups.empty(); p.appToken = appToken; p.service = McService::McVideo; p.internal = internal;
-        auto et = publishEtag.find(publishKey(accountId, std::string(), McService::McVideo));
+        p.accountId = accountId; p.appToken = appToken; p.service = McService::McVideo; p.internal = internal;
+        auto et = publishEtag.find(publishKey(accountId, McService::McVideo));
         if (allowConditional && et != publishEtag.end()) { h["SIP-If-Match"] = et->second; p.conditional = true; }
         publishPending[token] = p;
     }
@@ -3792,22 +3756,22 @@ int64_t Engine::affiliate(int accountId, const std::string& groupId, bool on, Mc
         Impl* o = impl_.get();
         auto ic = o->accountCfgs.find(accountId);
         if (ic == o->accountCfgs.end()) return -1;
-        const std::string gid = mcptt::bareId(groupId);
-        if (Impl::mcpttSetForm(ic->second)) {
-            // 규격형 — 관심 그룹 집합을 바꾸고 집합 전부를 한 게시로(TS 24.379 §9.2.1.2)
-            std::set<std::string>& groups = o->mcpttAffiliations[accountId];
-            if (on) groups.insert(gid); else groups.erase(gid);
-            const detail::UpkeepKey k{accountId, detail::UpkeepKind::McpttAffiliation, std::string()};
-            if (groups.empty()) o->upkeep.unwant(k); else o->upkeep.want(k);
-            if (o->svcAuth.pending({accountId, McService::Mcptt})) {            // 인가 응답 뒤 이 token 으로 보낸다(§7.2.2 — 묶임이 먼저)
-                o->svcAuthHeldApp[{accountId, McService::Mcptt}].push_back(token);
-                return token;
-            }
-            return o->sendMcpttAffiliationSet(accountId, token, token, true);
+        // Request-URI = 참여 MCPTT 기능 PSI, pidf tuple = MCPTT client ID(TS 24.379 §9.2.1.2) — 없으면 보내지 않는다
+        if (!Impl::mcpttAffiliable(ic->second)) {
+            o->log(2, "affiliate " + groupId + ": 참여 MCPTT 기능 PSI·MCPTT client ID 가 없는 계정 — 제휴를 보내지 않는다");
+            return -1;
         }
-        const detail::UpkeepKey k{accountId, detail::UpkeepKind::McpttAffiliation, gid};
-        if (on) o->upkeep.want(k); else o->upkeep.unwant(k);
-        return o->sendAffiliation(accountId, groupId, on, token, token, true);
+        // 관심 그룹 집합을 바꾸고 집합 전부를 한 게시로(§9.2.1.2 5)b)i))
+        const std::string gid = mcptt::bareId(groupId);
+        std::set<std::string>& groups = o->mcpttAffiliations[accountId];
+        if (on) groups.insert(gid); else groups.erase(gid);
+        const detail::UpkeepKey k{accountId, detail::UpkeepKind::McpttAffiliation, std::string()};
+        if (groups.empty()) o->upkeep.unwant(k); else o->upkeep.want(k);
+        if (o->svcAuth.pending({accountId, McService::Mcptt})) {                // 인가 응답 뒤 이 token 으로 보낸다(§7.2.2 — 묶임이 먼저)
+            o->svcAuthHeldApp[{accountId, McService::Mcptt}].push_back(token);
+            return token;
+        }
+        return o->sendMcpttAffiliationSet(accountId, token, token, true);
     });
 }
 

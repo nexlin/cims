@@ -355,9 +355,9 @@ C++ 공개 표면은 `cimsue/engine.h` 의 `Engine` 하나이며 계정·호를 
   `Expires` = 관심 그룹이 있으면 4294967295·없으면 0, 본문 multipart = mcptt-info(`<mcptt-request-uri>` = 자기 MCPTT ID) + pidf(entity = MCPTT ID,
   tuple id = MCPTT client ID, `<affiliation group>` 에 status·expires 없음, 유일 p-id). 서버는 제휴에 시간 만료를 두지 않는다
   ([mcptt_standard_conformance.md](mcptt_standard_conformance.md) C1). PSI 나 MCPTT client ID 가 없는 계정(ue-init-config 를 받지 못한 단말·
-  `--mcptt-psi` 없는 cimsue-cli)만 구형(그룹마다 R-URI = 그룹, `Event: mcptt`, `Expires: 3600`)으로 보낸다 — 전환기.
+  `--mcptt-psi` 없는 cimsue-cli)은 제휴를 보내지 않는다(`affiliate` = -1) — 다른 형식으로 대신 보내지 않는다.
 - **ABI.** 공개 헤더는 pjsua2 타입을 include 하지 않는다. 구현체는 pImpl.
-- **affiliation PUBLISH 의 entity-tag**(RFC 3903). 코어가 EPA 다 — 2xx 의 `SIP-ETag` 를 게시별로(규격형 = 계정·서비스마다 하나, 구형 = 그룹마다) 기억해 다음 `affiliate` 에
+- **affiliation PUBLISH 의 entity-tag**(RFC 3903). 코어가 EPA 다 — 2xx 의 `SIP-ETag` 를 게시별로(계정·서비스마다 하나) 기억해 다음 `affiliate` 에
   `SIP-If-Match` 로 싣는다. 412 를 받으면 그 ETag 를 버리고(§5 MUST) 같은 요청을 다시 보내지 않으며, `SIP-If-Match` 없는 초기 PUBLISH
   (§4.2)로 한 번 다시 알린다. 앱에는 412 가 올라가지 않고 재발행의 최종 응답이 `affiliate()` 가 돌려준 token 으로 온다(시험
   `AffiliationPublish.StaleEtag412FallsBackToInitialPublish`).
@@ -697,7 +697,7 @@ cimsue-cli [계정] sds-recv [--duration S]        # 수신 SDS 를 JSON 줄로 
 ```
 
 결과는 stdout 에 JSON 한 줄(`outcome`·`rx_pkts`·`tx_pkts`·`granted`·`taken`·`denied`·`code`), 종료코드 0/2/3/4/5/6/7
-(성공/인자/등록/호/미디어 없음/floor·송출 미획득/SDS 실패). `--affiliate` 는 시작 시 PUBLISH(규격형 — `--mcptt-psi`·provisioning 의 PSI 가 있을 때, 없으면 구형 Event: mcptt), 종료 시 de-affiliate.
+(성공/인자/등록/호/미디어 없음/floor·송출 미획득/SDS 실패). `--affiliate` 는 시작 시 PUBLISH(`--mcptt-psi`·provisioning 의 PSI 가 있어야 한다), 종료 시 de-affiliate.
 ```
 cimsue-cli [계정] dialog-watch <aor> [--duration S]   # RFC 4235 구독 → dialog-info 를 JSON 줄로
 cimsue-cli [계정] join <aor> [--duration S]           # 감시 → confirmed dialog 에 INVITE-Join(recvonly) → 수신 RTP·SSRC 라벨

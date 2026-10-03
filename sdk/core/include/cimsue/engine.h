@@ -142,9 +142,10 @@ public:
      *  반환 token(onRequestResult MESSAGE 상관), 실패 -1. 경보 인가는 서버가 판정한다(미인가 = 전파 없음). */
     int64_t sendEmergencyAlert(int accountId, const std::string& groupId, bool activate,
                                const std::string& originatedBy = std::string(), bool cancelGroupEmergency = false);
-    /** affiliation PUBLISH — 서비스마다 따로다(TS 23.280 §5.2.5). Mcptt = TS 24.379 §9(Event: mcptt), McVideo = TS 24.281 §8.2
-     *  (ICSI mcvideo · `urn:3gpp:ns:mcvideoPresInfo:1.0`, Request-URI = AccountConfig.mcvideoServerUri). on=false 면 Expires:0.
-     *  반환 token(onRequestResult 상관), 실패 -1. */
+    /** affiliation PUBLISH — 서비스마다 따로다(TS 23.280 §5.2.5). 관심 그룹 집합을 바꾸고 전부를 한 PUBLISH 로(Event: presence) —
+     *  Mcptt = TS 24.379 §9.2.1.2(Request-URI = AccountConfig.mcpttServerUri, tuple id = MCPTT client ID — 둘 중 하나라도 없으면 -1),
+     *  McVideo = TS 24.281 §8.2.1.2(ICSI mcvideo · `urn:3gpp:ns:mcvideoPresInfo:1.0`, Request-URI = AccountConfig.mcvideoServerUri).
+     *  관심 그룹이 없어지면 Expires:0. 반환 token(onRequestResult 상관), 실패 -1. */
     int64_t affiliate(int accountId, const std::string& groupId, bool on, McService service = McService::Mcptt);
     /** 그룹 세션 참가자 구독(RFC 4575 conference — TS 24.379 §10.1.3.2)을 원한다/그만 원한다 — 목표 집합(ue_sdk.md §4.2). 구독은
      *  그 그룹의 **진행 중 세션에 참가한 동안만** 엔진이 건다: 호가 성립해 세션 식별자(CallInfo.sessionUri)를 알면 그것을 Request-URI 로

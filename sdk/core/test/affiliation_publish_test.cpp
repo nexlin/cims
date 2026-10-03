@@ -127,6 +127,14 @@ TEST(AffiliationPublish, StaleEtag412FallsBackToInitialPublish) {
         ac.msisdn = "+82500000001";
         ac.authId = "450000000000001@ptt.test";                          // IMPI 는 필수(isComplete)
         ac.password = "x";
+        // 제휴 게시 = Request-URI 참여 MCPTT 기능 PSI · pidf tuple = MCPTT client ID(TS 24.379 §9.2.1.2) — 없는 계정은 보내지 않는다
+        AccountConfig bare = ac;
+        bare.msisdn = "+82500000009"; bare.authId = "450000000000009@ptt.test";
+        int accBare = eng.addAccount(bare);
+        ASSERT_GE(accBare, 0);
+        EXPECT_EQ(eng.affiliate(accBare, "g001", true), -1);
+        ac.mcpttServerUri = "sip:mcptt_psi@ptt.test";
+        ac.mcpttClientId = "urn:uuid:00000000-0000-4000-8000-000000000001";
         int acc = eng.addAccount(ac);
         ASSERT_GE(acc, 0);
 
@@ -135,6 +143,8 @@ TEST(AffiliationPublish, StaleEtag412FallsBackToInitialPublish) {
         ASSERT_GE(t1, 0);
         std::string p1 = esc.recvPublish();
         ASSERT_FALSE(p1.empty());
+        EXPECT_EQ(p1.rfind("PUBLISH sip:mcptt_psi@ptt.test SIP/2.0", 0), 0u) << p1.substr(0, 80);
+        EXPECT_EQ(headerOf(p1, "Event"), "presence");
         EXPECT_EQ(headerOf(p1, "SIP-If-Match"), "");
         esc.reply(p1, 200, "OK", "e1");
         ASSERT_TRUE(l.waitCount(1, 3000));

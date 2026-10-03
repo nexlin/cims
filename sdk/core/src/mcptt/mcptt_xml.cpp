@@ -117,14 +117,6 @@ std::string accessTokenInfo(const std::string& accessToken) {
     return s;
 }
 
-std::string affiliationCommand(const std::string& groupUri, bool affiliate) {
-    std::string s = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n";
-    s += std::string("<affiliation-command xmlns=\"") + kNsAffiliation + "\">\n  <actions>\n";
-    s += std::string("    <") + (affiliate ? "affiliate" : "de-affiliate") + " group=\"" + xmlEscape(groupUri) + "\"/>\n";
-    s += "  </actions>\n</affiliation-command>\n";
-    return s;
-}
-
 std::string requestUriInfo(const std::string& uri) {
     std::string s = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n";
     s += std::string("<mcpttinfo xmlns=\"") + kNsMcpttInfo + "\">\n  <mcptt-Params>\n";

@@ -13,10 +13,8 @@ namespace mcptt {
 constexpr const char* kNsMcpttInfo = "urn:3gpp:ns:mcpttInfo:1.0";
 constexpr const char* kNsGroupInfo = "urn:3gpp:ns:mcpttGroupInfo:1.0";
 constexpr const char* kNsResourceLists = "urn:ietf:params:xml:ns:resource-lists";
-constexpr const char* kNsAffiliation = "urn:3gpp:ns:mcpttAffiliation:1.0";
 constexpr const char* kCtMcpttInfo = "application/vnd.3gpp.mcptt-info+xml";
 constexpr const char* kCtResourceLists = "application/resource-lists+xml";
-constexpr const char* kCtAffiliation = "application/vnd.3gpp.mcptt-affiliation-command+xml";
 constexpr const char* kCtConferenceInfo = "application/conference-info+xml";
 constexpr const char* kIcsiMcptt = "urn:urn-7:3gpp-service.ims.icsi.mcptt";
 constexpr const char* kNsPresInfo = "urn:3gpp:ns:mcpttPresInfo:1.0";          // TS 24.379 §9.3.1.1
@@ -46,8 +44,6 @@ std::string resourceLists(const std::vector<std::string>& memberUris);
 std::string xcapDiffResourceLists(const std::vector<std::string>& documents);
 /** 같은 구독의 mcptt-info — `<mcptt-access-token>`(§6.3.13.2.1 c) · TS 24.484 §6.3.13.2.2 c) — 인증에서 받은 액세스 토큰). */
 std::string accessTokenInfo(const std::string& accessToken);
-/** affiliation-command (TS 24.379 §F.3). */
-std::string affiliationCommand(const std::string& groupUri, bool affiliate);
 /** `<mcptt-request-uri>` 하나만 실은 mcptt-info — 제휴 게시(대상 MCPTT ID, TS 24.379 §9.2.1.2 2)) · conference 구독(그룹 ID,
  *  §10.1.3.2 8)). */
 std::string requestUriInfo(const std::string& uri);

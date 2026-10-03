@@ -81,8 +81,8 @@ public sealed unsafe class Account
 
     private static string? NullIfEmpty(string? s) => string.IsNullOrEmpty(s) ? null : s;
 
-    /// <summary>affiliation PUBLISH — 서비스마다 따로다. MCPTT = Event: mcptt(on=false 면 Expires:0), MCVideo = 관심 그룹 전부를 한 PUBLISH 로
-    /// (TS 24.281 §8.2.1.2 — Event: presence, 그룹이 없으면 Expires:0). 반환 token — RequestCompleted 로 상관.</summary>
+    /// <summary>affiliation PUBLISH — 서비스마다 따로다. 관심 그룹 전부를 한 PUBLISH 로(Event: presence, 그룹이 없으면 Expires:0) —
+    /// MCPTT = TS 24.379 §9.2.1.2(계정에 McpttServerUri·MCPTT client ID 가 없으면 실패), MCVideo = TS 24.281 §8.2.1.2. 반환 token — RequestCompleted 로 상관.</summary>
     public Result<long> Affiliate(string groupId, bool on, McService service = McService.Mcptt)
     {
         long t = cimsue_engine_affiliate_service(Engine.Handle, Id, groupId, Engine.B(on), (int)service);
