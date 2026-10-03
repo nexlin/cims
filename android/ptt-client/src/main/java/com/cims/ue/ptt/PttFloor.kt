@@ -24,7 +24,8 @@ internal class FloorPlane(private val c: PttController) {
 
     /** PTT 발언 대상 — 활성 1:1 이 있으면 그것이 우선(전화>무전 규칙), 애드혹 진행 중이면 애드혹, 없으면 주채널. */
     fun talkSession(): PttController.Session? = synchronized(c.lock) {
-        c.sessionMap.values.firstOrNull { v -> v.privatePeer && v.callId >= 0 }
+        // 받기 전의 수동 응답 1:1([GroupCallState.awaitingAnswer])은 발언 대상이 아니다 — [받기] 로 성립한 뒤부터
+        c.sessionMap.values.firstOrNull { v -> v.privatePeer && v.callId >= 0 && !v.awaitingAnswer }
             // 애드혹 진행 중엔 전용 오버레이가 전면이라 PTT 도 애드혹 세션을 향한다(주채널보다 우선).
             ?: c.sessionMap.values.firstOrNull { v -> isAdhocId(v.groupId) && v.callId >= 0 }
     } ?: c.primarySession()
