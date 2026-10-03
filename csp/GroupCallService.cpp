@@ -56,6 +56,8 @@ extern void SendGroupDocNotify( const std::string &strGroupId, const std::set<st
 /** conference 구독자에게 참가자 NOTIFY 푸시 (CspServer.cpp) — 0 이면 구독자 없음(in-dialog 폴백). */
 extern int SendConferenceNotifyToSubscribers( const std::string &strGroupId, const std::string &strBody,
                                               std::set<std::string> *psetNotifiedUsers );
+/** 끝난 세션(gr)의 conference 구독을 noresource 로 끝낸다 (CspServer.cpp, RFC 4575 §3.3) — 끝낸 구독 수. */
+extern int TerminateConferenceSubscriptions( const std::string &strGroupId, const std::string &strSessionGr );
 
 // CscfModule.cpp — 제휴 변경 감사(E-AUD-009)·affiliation-info 구독자 NOTIFY (TS 24.379 §9.2.2.3.5)
 extern void EmitAffiliationChanged( const std::string &strGroupId, const char *pszAction, const std::string &strUserId,
@@ -117,11 +119,36 @@ bool CGroupCallService::IsSessionIdentityActive( const std::string &strGroupId, 
     return SessionIdentityToken( strGroupId, false ) == strToken;
 }
 
+std::string CGroupCallService::GroupOfSessionIdentity( const std::string &strToken ) {
+    if ( strToken.empty() ) return "";
+    std::vector<std::string> vecGroups;
+    {
+        std::unique_lock<std::recursive_mutex> lock( m_mutex );
+        for ( const auto &kv : m_mapGroupSesId ) vecGroups.push_back( kv.first );
+    }
+    for ( const auto &strGroupId : vecGroups )
+        if ( IsSessionIdentityActive( strGroupId, strToken ) ) return strGroupId;
+    return "";
+}
+
+bool CGroupCallService::IsSessionParticipant( const std::string &strGroupId, const std::string &strUserId ) {
+    std::unique_lock<std::recursive_mutex> lock( m_mutex );
+    for ( const auto &kv : m_mapCallSession )
+        if ( kv.second.strGroupId == strGroupId && kv.second.strMemberId == strUserId &&
+             ( kv.second.bEstablished || kv.second.bInitiator ) )
+            return true;
+    return false;
+}
+
 void CGroupCallService::RemoveGroupSesId( const std::string &strGroupId ) {
     GroupCondition clsEnded;
     bool bCondEnded = false;
     {
         std::unique_lock<std::recursive_mutex> lock( m_mutex );
+        // 세션이 끝나면 그 세션의 conference 구독도 끝난다 — noresource(RFC 4575 §3.3). 구독은 세션 식별자에 걸린다
+        //   (TS 24.379 §10.1.3.3) — 다음 세션 로스터에 붙지 않는다.
+        const std::string strEndedGr = SessionIdentityToken( strGroupId, false );
+        if ( !strEndedGr.empty() ) m_vecConfSessionEnds.push_back( { strGroupId, strEndedGr } );
         m_mapGroupSesId.erase( strGroupId );
         m_mapGroupSession.erase( strGroupId );  // 세션 속성(개시자·일제 통화)도 세션과 함께 끝난다
         m_mapGroupTalkers.erase( strGroupId );
@@ -147,10 +174,19 @@ void CGroupCallService::RemoveGroupSesId( const std::string &strGroupId ) {
 
 void CGroupCallService::DrainConditionEndNotices() {
     std::vector<std::pair<std::string, GroupCondition>> vec;
+    std::vector<std::pair<std::string, std::string>> vecConfEnds;
     {
         std::unique_lock<std::recursive_mutex> lock( m_mutex );
-        if ( m_vecCondEndNotices.empty() ) return;
+        if ( m_vecCondEndNotices.empty() && m_vecConfSessionEnds.empty() ) return;
         vec.swap( m_vecCondEndNotices );
+        vecConfEnds.swap( m_vecConfSessionEnds );
+    }
+    for ( const auto &kv : vecConfEnds ) {
+        const int iEnded = TerminateConferenceSubscriptions( kv.first, kv.second );
+        if ( iEnded > 0 )
+            CLog::Print( LOG_INFO,
+                         "GroupCall: group(%s) 세션(gr=%s) 종료 — conference 구독 %d 건 noresource (RFC 4575 §3.3)",
+                         kv.first.c_str(), kv.second.c_str(), iEnded );
     }
     for ( const auto &kv : vec ) {
         McpttIndicators clsInd;
@@ -3835,10 +3871,9 @@ bool CGroupCallService::OnCallTerminated( const std::string &strCallId, const ch
     }
 
     // RFC 4575: 이탈을 conference 구독자 + 잔여 참가자에게 통지.
-    //   구독은 참여보다 오래 산다 — 단말은 이탈 후에도 conference 구독을 유지하고 미조인
-    //   채널까지 구독한다. 따라서 "잔여 확립 leg 없음"이 "통지 대상 없음"을 뜻하지 않으며,
-    //   마지막 멤버 이탈도 반드시 통지해야 구독자의 로스터가 빈 상태로 수렴한다. (통지를
-    //   in-dialog 로만 보내던 시절엔 leg=0 이면 실을 다이얼로그가 없어 생략이 맞았다.)
+    //   구독은 세션의 것이라(TS 24.379 §10.1.3.3) 이탈한 참가자의 구독이 세션 끝까지 남을 수 있다.
+    //   따라서 "잔여 확립 leg 없음"이 "통지 대상 없음"을 뜻하지 않으며, 마지막 멤버 이탈도 통지해야
+    //   구독자의 로스터가 빈 상태로 수렴한다 — 그 뒤 세션 종료가 구독을 noresource 로 끝낸다(RemoveGroupSesId).
     //   ⚠ teardown 앞에서 호출한다 — BuildConferenceInfoBody 가 m_mapGroupRtp 의
     //   iConfVersion 을 증가시키므로 erase 뒤에 부르면 version 이 0 으로 되돌아가고
     //   수신측이 stale 로 버릴 수 있다.
@@ -3958,8 +3993,8 @@ bool CGroupCallService::HasActiveLeg( const std::string &strGroupId ) const {
 //   규격: controlling function 이 구독자(<mcptt-calling-user-id> ≒ From)를 그룹 문서(TS 24.481)의
 //   <on-network-allow-conference-state> 로 판정, 불허 시 403 + Warning "138 subscription of conference events not
 //   allowed". 일제 통화로 개시된 호는 480 + Warning 105. CIMS 해석: 그룹 멤버 = 그룹 속성값(기본 허용), 비멤버
-//   관제사 = 청취 leg 와 같은 2단 인가(프로파일 allow_ambient_listening + 관제 그룹 ptt_listen 범위) — 합류 전
-//   사전 모니터링 구독(진행 중·참가자 수)을 같은 축으로 허용한다. 프로파일 부재·DB 불가는 불허(fail-closed).
+//   관제사(청취 leg 로 합류한 참가자 — 구독자는 세션 참가자여야 한다, §10.1.3.4.1 1)a)i)) = 청취 leg 와 같은 2단
+//   인가(프로파일 allow_ambient_listening + 관제 그룹 ptt_listen 범위). 프로파일 부재·DB 불가는 불허(fail-closed).
 //   즉석 세션(adhoc-/priv-)은 그룹 문서가 없고 참가자 = fan-out 대상이라 통과, 미지 자원은 기존 처리에 맡긴다.
 int CGroupCallService::CheckConferenceSubscribe( const std::string &strGroupId, const std::string &strUserId,
                                                  std::string &strWarning, std::string &strReason, bool *pbUnavailable,

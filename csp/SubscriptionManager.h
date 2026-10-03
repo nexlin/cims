@@ -23,10 +23,13 @@ struct SubscriptionInfo {
     std::string strCallId;         // SIP Dialog Call-ID
     std::string strEventType;      // "reg"|"affiliation"|"conference"|"gms"|"cms"|"dialog"
     std::string strResourceId;     // 구독 대상 자원 (Req-URI user) — conference 는 그룹 ID
-    int iExpires;                  // Expires in seconds
-    time_t tStartTime;             // Subscription Start Time
-    int iNotifySeq;                // CSeq counter for NOTIFY messages
-    int iInboundListenerId = 0;    // SUBSCRIBE 수신 listener (NOTIFY Via/Contact 자기 주소 결정)
+    // conference — 구독한 MCPTT 세션 식별자의 gr(TS 24.379 §10.1.3.3 — Request-URI). 200 OK·NOTIFY Contact 가 같은 세션
+    //   식별자를 싣고, 그 세션이 끝나면 구독도 noresource 로 끝난다(RFC 4575 §3.3).
+    std::string strSessionGr;
+    int iExpires;                // Expires in seconds
+    time_t tStartTime;           // Subscription Start Time
+    int iNotifySeq;              // CSeq counter for NOTIFY messages
+    int iInboundListenerId = 0;  // SUBSCRIBE 수신 listener (NOTIFY Via/Contact 자기 주소 결정)
     // 구독 요청의 수신 주소(received/rport·transport) — 등록 바인딩이 없는 구독자(재기동 뒤 재REGISTER 전, Digest 로
     //   수락)에게 NOTIFY 를 보낼 폴백 목적지. RFC 6665 의 dialog remote target 을 NAT 뒤에서 등록 latch 와 같은
     //   원리로 고정한다 — Contact 가 사설주소여도 도달한다.

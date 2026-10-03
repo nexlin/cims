@@ -463,9 +463,11 @@ function, `CscfModule` SUBSCRIBE 초기 구독)는 구독자를 그룹 문서(TS
 **480 + Warning 105** 로 거절한다(`CGroupCallService::CheckConferenceSubscribe`). CIMS 해석:
 - **멤버** = 그룹 속성 `ptt_groups.allow_conference_state`(기본 1 — GMS 문서 `<cp:actions>` 요소로 노출, 관리 API·GMS PUT·콘솔
   편집). 0 이면 멤버도 403.
-- **비멤버 관제사** = 청취 leg 와 같은 2단 인가(자격 `allow_ambient_listening` + 역할 범위 `ptt_listen`)를 같은 요소의 해석으로
-  두어 **합류 전 사전 모니터링 구독**을 허용한다(규격 흐름은 "세션 참가자"의 구독이고 청취 leg 로 합류한 관제사는
-  참가자이므로 규격 그대로 — 합류 전 구독만 CIMS 확장). 프로파일 부재·DB 불가는 불허(fail-closed).
+- **구독 = 진행 중 세션의 참가자**(TS 24.379 §10.1.3.3·§10.1.3.4.1 1)a)i)) — Request-URI 는 세션 식별자(개시 200 OK·멤버 INVITE 의
+  Contact, gr)이고, 진행 중 세션이 아니면 404 + `137`, 참가자가 아니면 403 + `138`. 세션이 끝나면 구독은 `noresource` 로 끝난다
+  (RFC 4575 §3.3). 합류 전 사전 모니터링 구독은 없다 — 세션 밖 채널의 접속 상태는 제휴 상태 구독(TS 24.379 §9.2.1.3)의 자리다.
+- **비멤버 관제사**(청취 leg 로 합류한 참가자) = 청취 leg 와 같은 2단 인가(자격 `allow_ambient_listening` + 역할 범위 `ptt_listen`)를
+  같은 요소의 해석으로 본다. 프로파일 부재·DB 불가는 불허(fail-closed).
 - 즉석 세션(`adhoc-`/`priv-`)은 그룹 문서가 없다 — 참가자(fan-out 대상)는 허용, 그 외는 §5.6a 의 즉석 세션 관측
   인가(자격 + 참가자 전화 그룹이 관측자 역할 `monitor_call` 안). in-dialog refresh 는 재검사하지 않는다(RFC 6665 — 자원·이벤트 불변). 구독자에게
   가는 로스터는 `listen_visibility` 규칙 그대로(청취 leg 은닉/공개).

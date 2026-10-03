@@ -1031,6 +1031,11 @@ static void SendNotifyToSubscriber( const SubscriptionInfo &sub, const std::stri
     {
         CSipFrom clsSelfContact;
         CspAddressing::FillSelfContact( clsSelfContact, pMsg->m_eTransport );
+        // conference — Contact = 구독한 MCPTT 세션 식별자(구독 200 OK 와 같다, TS 24.379 §10.1.3.3)
+        if ( sub.strEventType == "conference" && !sub.strSessionGr.empty() ) {
+            clsSelfContact.m_clsUri.m_strUser = sub.strResourceId;
+            clsSelfContact.m_clsUri.InsertParam( "gr", sub.strSessionGr.c_str() );
+        }
         pMsg->m_clsContactList.push_back( clsSelfContact );
     }
 
@@ -1168,6 +1173,11 @@ void SendTerminatedNotify( const SubscriptionInfo &sub, const char *pszReason ) 
     {
         CSipFrom clsSelfContact;
         CspAddressing::FillSelfContact( clsSelfContact, pMsg->m_eTransport );
+        // conference — Contact = 구독한 MCPTT 세션 식별자(구독 200 OK 와 같다, TS 24.379 §10.1.3.3)
+        if ( sub.strEventType == "conference" && !sub.strSessionGr.empty() ) {
+            clsSelfContact.m_clsUri.m_strUser = sub.strResourceId;
+            clsSelfContact.m_clsUri.InsertParam( "gr", sub.strSessionGr.c_str() );
+        }
         pMsg->m_clsContactList.push_back( clsSelfContact );
     }
 
@@ -1592,6 +1602,25 @@ int SendConferenceNotifyToSubscribers( const std::string &strGroupId, const std:
         if ( psetNotifiedUsers ) psetNotifiedUsers->insert( sub.strUserId );
     }
     return (int)subList.size();
+}
+
+/**
+ * @brief 끝난 MCPTT 세션의 conference 구독을 끝낸다 — Subscription-State: terminated;reason=noresource (RFC 4575 §3.3).
+ *   구독은 세션 식별자에 걸려 있으므로(TS 24.379 §10.1.3.3) 같은 그룹의 다음 세션으로 이어지지 않는다. strSessionGr 가
+ *   다른 구독(이미 시작된 다음 세션)은 두고, gr 이 없는 구독(세션 식별자 도입 전 기록)은 함께 끝낸다.
+ * @returns 끝낸 구독 수
+ */
+int TerminateConferenceSubscriptions( const std::string &strGroupId, const std::string &strSessionGr ) {
+    std::list<SubscriptionInfo> subList;
+    gclsSubscriptionManager.GetSubscriptionsByResource( strGroupId, "conference", subList );
+    int iEnded = 0;
+    for ( auto &sub : subList ) {
+        if ( !sub.strSessionGr.empty() && sub.strSessionGr != strSessionGr ) continue;
+        SendTerminatedNotify( sub, "noresource" );
+        gclsSubscriptionManager.RemoveSubscription( sub.strCallId );
+        ++iEnded;
+    }
+    return iEnded;
 }
 
 /**

@@ -58,6 +58,12 @@ public:
     std::string SessionIdentityToken( const std::string &strGroupId, bool bIssue = true );
     /** 재합류 Request-URI 의 세션 식별자가 지금 진행 중인 이 그룹 세션인가 (§10.1.1.4.5.1 2) — 아니면 404). */
     bool IsSessionIdentityActive( const std::string &strGroupId, const std::string &strToken );
+    /** 사용자가 이 그룹의 진행 중 세션 참가자인가 — 확립 leg(청취 leg 포함) 또는 개시자 leg. conference 구독자 판정
+     *  (TS 24.379 §10.1.3.4.1 1)a)i) «the MCPTT ID of a participant in the group session»). */
+    bool IsSessionParticipant( const std::string &strGroupId, const std::string &strUserId );
+    /** 세션 식별자의 gr 이 가리키는 진행 중 세션의 그룹 — 없으면 빈 값. 세션 식별자의 사용자부는 개시 Request-URI 를
+     * 따라 그룹이거나 PSI 라 gr 로 찾는다(conference 구독 Request-URI 해석 — TS 24.379 §10.1.3.3 1)). */
+    std::string GroupOfSessionIdentity( const std::string &strToken );
 
     /** bRejoin = Request-URI 가 진행 중 세션 식별자(gr)인 재합류(TS 24.379 §10.1.1.4.5.1) — 비멤버 403 121, 200 OK 에
      *  Warning 123 없음. */
@@ -413,6 +419,9 @@ private:
     std::map<std::string, GroupCondition> m_mapGroupCond;
     /** 세션 종료(RemoveGroupSesId)로 풀린 긴급·임박 상태 — 감시 스레드가 제휴 멤버에 통지한다(§6.3.3.1.11). */
     std::vector<std::pair<std::string, GroupCondition>> m_vecCondEndNotices;
+    /** 끝난 세션의 (그룹, 세션 식별자 gr) — 그 세션의 conference 구독을 noresource 로 끝낸다(RFC 4575 §3.3). 세션 종료
+     *  (RemoveGroupSesId)는 m_mutex 를 쥔 채 불릴 수 있어 보내기는 감시 스레드가 한다. */
+    std::vector<std::pair<std::string, std::string>> m_vecConfSessionEnds;
     void DrainConditionEndNotices();
     /** 긴급 경보 발령 사용자 (group → MCPTT ID) — 세션과 무관(경보는 호 없이도 선다, §12.1.3.1). */
     std::map<std::string, std::set<std::string>> m_mapGroupAlerts;

@@ -1,0 +1,9 @@
+SIP/2.0 404 Not Found
+Via: SIP/2.0/TLS 10.10.1.21:50601;branch=z9hG4bK-conf-s2;rport=50601;received=10.10.1.21
+From: <sip:+82510002001@ptt.cims.example.kr>;tag=conf-a2-f
+To: <sip:g101@ptt.cims.example.kr>;tag=csp-e137
+Call-ID: conf-a2@10.10.1.21
+CSeq: 1 SUBSCRIBE
+Warning: 399 ptt.cims.example.kr "137 the indicated group call does not exist"
+Content-Length: 0
+

@@ -44,7 +44,7 @@ PTT(MCPTT) 서비스 구현을 3GPP 규격 원문과 대조해 **규격과 다�
 |---|---|---|---|---|---|
 | 등록·서비스 인가 (REG) | 3 | — | 2 | — | 1 |
 | 제휴 (AFF) | 10 | 6 | 4 | — | — |
-| 그룹 호 — 서버 (GCS) | 14 | 7 | 4 | 3 | — |
+| 그룹 호 — 서버 (GCS) | 13 | 7 | 3 | 3 | — |
 | 그룹 호 — 단말 (GCC) | 2 | — | 2 | — | — |
 | 개별 호 (PRV) | 2 | — | 2 | — | — |
 | 애드혹 그룹 호 (ADH) | 1 | — | 1 | — | — |
@@ -53,9 +53,9 @@ PTT(MCPTT) 서비스 구현을 3GPP 규격 원문과 대조해 **규격과 다�
 | 발언권 SDP 협상 (SDP) | 2 | — | 2 | — | — |
 | 그룹 문서·GMS (GMS) | 6 | — | 6 | — | — |
 | 설정 문서·CMS (CMS) | 2 | — | 1 | 1 | — |
-| **계** | **64** | **16** | **34** | **10** | **4** |
+| **계** | **63** | **16** | **33** | **10** | **4** |
 
-확인 수준 — ◎ 31 · ○ 25 · △ 8.
+확인 수준 — ◎ 31 · ○ 24 · △ 8.
 
 읽는 순서 — §2(먼저 볼 것) → §3(영역별 전체) → §4(미구현 목록에 빠진 기능) → §5(문서 정정) → §6(묶음과 순서).
 
@@ -122,7 +122,6 @@ CSP 는 참여 기능과 제어 기능을 겸한다.
 | GCS-10 | C | CSP | §10.1.1.4.2 3) — Accept-Contact 에 `g.3gpp.mcptt`·MCPTT icsi-ref 가 없으면 403 (chat 은 Contact `isfocus` 도) | MCPTT 경로에 검사가 없다(MCVideo 만 — `csp/McVideoCallService.cpp:667-675`) | 받아들이는 쪽이 넓다. SDK 는 Accept-Contact 둘을 싣는다(U04 — GCC-1). 옛 SDK 단말이 남아 있는 동안은 켜면 막힌다 | ○ |
 | GCS-12 | B | CSP | §6.3.3.4 — conference NOTIFY 에 P-Asserted-Identity(제어 기능 PSI)·P-Preferred-Service·mcptt-info 본문(`<mcptt-calling-group-id>`·`<mcptt-request-uri>`) (shall) | 헤더는 Event·Subscription-State·Contact 뿐, 본문은 conference-info 하나 — `csp/CspServer.cpp:1016-1039` | 규격 단말·참여 기능이 NOTIFY 를 그룹·대상 사용자에 묶을 근거가 없다 | ◎ |
 | GCS-13 | C | CSP | §6.3.3.4 — `<conference-info entity>` = MCPTT group ID, `<user entity>` = MCPTT ID | `sip:<id>@<PTT 도메인>` — `csp/GroupCallService.cpp:3891-3905`. 같은 서버가 mcptt-info·pidf 에서는 `tel:` 표기를 쓴다 | ID 를 문자열로 대조하는 규격 단말은 로스터를 자기 목록과 맞추지 못한다 | ◎ |
-| GCS-14 | B | CSP | §10.1.3.3 2) — Request-URI 가 진행 중 세션 식별자가 아니면 404 + `137 the indicated group call does not exist`. 구독자 = 그 세션의 참가자. 200 OK Contact = 세션 식별자 | R-URI user = 그룹 ID 로만 읽는다(`gr` 토큰·세션 유무·참가 여부를 보지 않음) — `csp/CscfModule.cpp:1303-1344`. 세션이 끝나도 구독이 남는다 | 지난 세션 식별자로 온 구독이 다음 세션 로스터에 붙는다. ptt_flows.md 는 «구독은 참여보다 오래 산다» 를 설계로 적었다 — 편차로 올릴 것. **S17 에서 미룸** — 세션 밖 채널 접속자 표시의 규격 자리(제휴 상태 구독 §9.2.1.3 — AFF-12·VAFF-8)가 없어 지금 404 137 을 넣으면 현장·관제 앱의 접속자 표시가 사라진다. S13·U06 뒤 WP S27(SDK GCC-7·계측기 conference 구독과 함께, .45 제안 dev_share 20261003-1046) | ○ |
 | GCS-16 | B | CSP | §6.3.3.1.2 9)·10) — 받은 INVITE 의 Answer-Mode·Priv-Answer-Mode 를 그대로 옮긴다 (shall) | 초대 INVITE 에 무조건 `Answer-Mode: Auto` — `csp/GroupCallService.cpp:2506-2507` (개별 호 착신도 이 함수). 받은 헤더를 읽는 코드가 없다 | 헤더를 따르는 규격 단말은 개별 호를 벨 없이 자동 응답한다. 짝 = PRV-4 | ◎ |
 | GCS-17 | A | CSP | §10.1.1.4.1.1 4)b) — `<mcptt-calling-group-id>` = 그룹 ID | `"tel:" + 그룹 id` — `csp/GroupCallService.cpp:3975`. MCPTT group ID 규칙은 숫자뿐이면 `tel:+<id>`(`csp/McpttInfo.h:400-408`, CSC `_group_uri`) | 숫자뿐인 그룹 ID 는 INVITE 의 그룹 ID 와 그룹 문서·제휴 문서의 ID 가 달라진다(`g001` 형은 무관) | ○ |
 | GCS-18 | A | CSP·psip | §6.3.3.1.1 2) — 음성 스트림의 미디어 속성은 받은 offer 의 것 | 멤버 offer·개시자 answer 의 fmtp·ptime 이 서버 코덱 표 값(AMR-WB `octet-align=1`)이다 — `csp/GroupCallService.cpp:2407-2409`. 개시 게이트는 코덱 이름만 본다(`:885-893`) | 개시자가 대역 효율 모드나 다른 mode-set 으로 offer 하면 선언과 실제 페이로드가 어긋난다 — CMP 의 leg 별 형식 변환 유무를 확인해야 확정 | △ |

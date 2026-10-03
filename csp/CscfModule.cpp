@@ -1599,11 +1599,42 @@ bool CCscfModule::RecvRequestSubscribe( int iThreadId, CSipMessage *pclsMessage 
         }
     }
 
+    // conference 구독 = 진행 중 MCPTT 세션의 것(TS 24.379 §10.1.3.2 2)·§10.1.3.3).
+    //   Request-URI 는 세션 식별자(개시 200 OK·멤버 INVITE 의 Contact)다. 세션은 gr 로 찾는다 — PSI 로 개시한 호의
+    //   세션 식별자는 사용자부가 PSI 다. 진행 중 세션으로 풀리지 않으면(그룹 URI 만·끝난 세션의 gr) 404 + 137
+    //   (§10.1.3.3 2)), 본문 <mcptt-request-uri> 가 다른 그룹이어도 같다. 구독자는 그 세션의 참가자여야 한다
+    //   (§10.1.3.4.1 1)a)i)) — 아니면 403 + 138. 갱신은 같은 세션의 구독이다(세션이 끝나면 noresource 로 끝났다).
+    std::string strConfGr = bRefresh ? clsPrev.strSessionGr : std::string();
+    if ( strEventType == "conference" && !bRefresh ) {
+        const char *pszGr = SearchSipParameter( pclsMessage->m_clsReqUri.m_clsUriParamList, "gr" );
+        strConfGr = pszGr ? pszGr : "";
+        const std::string strSessGroup = gclsGroupCallService.GroupOfSessionIdentity( strConfGr );
+        if ( !strSessGroup.empty() ) strReqUriUser = strSessGroup;
+        const std::string strMiGroup = McpttBareId( ParseMcpttInfo( pclsMessage->m_strBody ).strRequestUri );
+        const std::string strPtt = gclsServiceMap.GetDomainByKind( "ptt" );
+        if ( strSessGroup.empty() || ( !strMiGroup.empty() && strMiGroup != strSessGroup ) ) {
+            CLog::Print( LOG_INFO, "SUBSCRIBE conference from %s — %s gr=%s 진행 중 세션 아님 → 404 137",
+                         strFromId.c_str(), pclsMessage->m_clsReqUri.m_strUser.c_str(),
+                         strConfGr.empty() ? "-" : strConfGr.c_str() );
+            SendResponseWithWarning( pclsMessage, SIP_NOT_FOUND,
+                                     McpttWarning( 137, "the indicated group call does not exist", strPtt ).c_str() );
+            return true;
+        }
+        if ( !gclsGroupCallService.IsSessionParticipant( strReqUriUser, strFromId ) ) {
+            CLog::Print( LOG_INFO, "SUBSCRIBE conference from %s — group %s 세션 참가자 아님 → 403 138",
+                         strFromId.c_str(), strReqUriUser.c_str() );
+            SendResponseWithWarning(
+                pclsMessage, SIP_FORBIDDEN,
+                McpttWarning( 138, "subscription of conference events not allowed", strPtt ).c_str() );
+            return true;
+        }
+    }
+
     // conference-event 인가 (TS 24.379 §10.1.3.4.1, dispatch_center.md §5.6) — 초기 구독과 refresh 둘 다
     //   (§5.10 — 청취 자격을 거둬도 갱신으로 살아남지 않게). 규격 = 그룹 문서 <on-network-allow-conference-state> 로
-    //   구독자를 판정, 불허 403 + Warning 138, 브로드캐스트 그룹 480 + Warning 105. CIMS 확장 = 비멤버 관제사의 청취
-    //   범위(allow_ambient_listening + ptt_listen)를 같은 요소의 해석으로 두어 합류 전 사전 모니터링 구독을 허용한다.
-    //   판정 본체는 CGroupCallService::CheckConferenceSubscribe(청취 leg 게이트와 같은 축).
+    //   구독자를 판정, 불허 403 + Warning 138, 브로드캐스트 그룹 480 + Warning 105. 구독자는 위에서 세션
+    //   참가자로 걸렀다 — 비멤버 관제사(청취 leg 참가자)는 청취 범위(allow_ambient_listening + ptt_listen)를
+    //   같은 요소의 해석으로 본다. 판정 본체는 CGroupCallService::CheckConferenceSubscribe(청취 leg 게이트와 같은 축).
     if ( strEventType == "conference" && !strReqUriUser.empty() ) {
         std::string strWarning, strReason;
         bool bUnavail = false;
@@ -1647,6 +1678,7 @@ bool CCscfModule::RecvRequestSubscribe( int iThreadId, CSipMessage *pclsMessage 
     info.strEventType = strEventType;
     info.strResourceId = strReqUriUser;  // 자원 기준 조회용 (conference = 그룹 ID)
     info.vecXcapEntries = vecXcapEntries;
+    info.strSessionGr = strConfGr;
     info.iExpires = ( iExpires > 0 ) ? iExpires : 3600;
     info.tStartTime = time( NULL );
     // 상태 없는 in-dialog 갱신(재기동 후 옛 dialog 승계 — 위 To tag 승계 분기)은 RFC 3261 §12.2.2 의 수용 조건대로
@@ -1728,6 +1760,12 @@ bool CCscfModule::RecvRequestSubscribe( int iThreadId, CSipMessage *pclsMessage 
             CspAddressing::FillSelfContact( clsSelfContact, pclsMessage->m_eTransport );
             const int iListenerId = GetCurrentInboundListenerId();
             if ( iListenerId > 0 ) clsSelfContact.m_clsUri.m_strHost = CspAddressing::GetLocalSipAddress( iListenerId );
+            // conference — Contact = 구독한 MCPTT 세션 식별자(TS 24.379 §10.1.3.3 «Contact … an MCPTT session
+            // identity»)
+            if ( strEventType == "conference" && !info.strSessionGr.empty() ) {
+                clsSelfContact.m_clsUri.m_strUser = info.strResourceId;
+                clsSelfContact.m_clsUri.InsertParam( "gr", info.strSessionGr.c_str() );
+            }
             pclsResponse->m_clsContactList.push_back( clsSelfContact );
         }
         gclsUserAgent.m_clsSipStack.SendSipMessage( pclsResponse );

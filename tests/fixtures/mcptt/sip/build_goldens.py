@@ -8,7 +8,7 @@
   python3 tests/fixtures/mcptt/sip/build_goldens.py --check    # *.txt 가 최신인지(S1-MCX-REQUEST-CONTRACT 가 부른다)
 
 시나리오 = README.md(같은 디렉터리). 규격 = TS 24.379 V20.0.0(§11.1.1.2.1.1 개별 호 개시 · §11.1.2.2 floor 없는 개별 호 ·
-§11.1.1.3.1.1 8)·9) 145 · §6.2.1 SDP · §4.4 Warning · Annex F.1 mcptt-info) · TS 24.380 V20.0.0(표 4.3.3.1-1 · §14 fmtp) ·
+§11.1.1.3.1.1 8)·9) 145 · §10.1.3 conference 구독 · §6.2.1 SDP · §4.4 Warning · Annex F.1 mcptt-info) · TS 24.380 V20.0.0(표 4.3.3.1-1 · §14 fmtp) ·
 TS 24.282 V19.8.0(§6.2.4.1 · §9.2.2.2.1 SDS · §10.2.4.2.1 FD · §9.2.3.2.1·§9.2.3.2.3 미디어 평면 SDS · §9.2.2.4.2 5) 204 ·
 §15 메시지 · Annex D mcdata-info).
 """
@@ -35,6 +35,9 @@ IP_A = "10.10.1.21"
 CLIENT_A = "urn:uuid:2f6b8c4e-1a2b-4c3d-9e8f-0a1b2c3d4e5f"
 GROUP = "tel:g101"
 FD_URL = f"https://csc.{DOMAIN}:4430/mcdata/fd/0123456789abcdef0123456789abcdef"
+# MCPTT 세션 식별자(TS 24.379 §4.5 — 개시 200 OK·멤버 INVITE Contact). To 에는 port·transport 를 두지 않는다(RFC 3261 §19.1.1 표 1)
+SESSION_ID = f"sip:g101@{CSP}:5061;transport=tls;gr=1790775600123456-7"
+SESSION_ID_TO = f"sip:g101@{CSP};gr=1790775600123456-7"
 
 MCPTT_TAGS = f'+g.3gpp.mcptt;+g.3gpp.icsi-ref="{ICSI_MCPTT_ENC}"'
 ACCEPT_MCPTT = ["Accept-Contact: *;+g.3gpp.mcptt;require;explicit",
@@ -257,6 +260,25 @@ def build():
             ("application/vnd.3gpp.mcdata-info+xml",
              mcdata_info("<request-type>group-sds</request-type>", mcdata_uri("mcdata-request-uri", GROUP),
                          mcdata_string("mcdata-client-id", CLIENT_A)))]))
+    # 10 — conference 구독(TS 24.379 §10.1.3.2): Request-URI = 진행 중 세션 식별자(개시 200 OK Contact — 그룹 AoR + gr, 2)),
+    #   P-Preferred-Service(3)), Accept-Contact icsi-ref(4)), Expires 4294967295(5)), Accept conference-info(7)), mcptt-info
+    #   <mcptt-request-uri> = 그룹(8)). 구독자는 그 세션의 참가자(§10.1.3.4.1 1)a)i)). 200 OK·NOTIFY Contact = 같은 세션 식별자.
+    msgs["10_conference_subscribe.txt"] = message(
+        f"SUBSCRIBE {SESSION_ID} SIP/2.0",
+        [via("-conf-s1"), "Max-Forwards: 70", f"From: <sip:{UE_A}@{DOMAIN}>;tag=conf-a1-f", f"To: <{SESSION_ID_TO}>",
+         f"Call-ID: conf-a1@{IP_A}", "CSeq: 1 SUBSCRIBE", ue_contact(MCPTT_TAGS),
+         f'Accept-Contact: *;+g.3gpp.icsi-ref="{ICSI_MCPTT_ENC}";require;explicit',
+         f"P-Preferred-Service: {ICSI_MCPTT}", "Event: conference", "Expires: 4294967295",
+         "Accept: application/conference-info+xml"],
+        "application/vnd.3gpp.mcptt-info+xml",
+        mcptt_info(f'<mcptt-request-uri type="Normal"><mcpttURI>{GROUP}</mcpttURI></mcptt-request-uri>'))
+
+    # 11 — 진행 중 세션으로 풀리지 않는 conference 구독(그룹 URI 만·끝난 세션의 gr): 404 + Warning 137(§10.1.3.3 2)).
+    msgs["11_conference_reject_404_137.txt"] = message(
+        "SIP/2.0 404 Not Found",
+        [via_resp("-conf-s2"), f"From: <sip:{UE_A}@{DOMAIN}>;tag=conf-a2-f", f"To: <sip:g101@{DOMAIN}>;tag=csp-e137",
+         f"Call-ID: conf-a2@{IP_A}", "CSeq: 1 SUBSCRIBE",
+         f'Warning: 399 {DOMAIN} "137 the indicated group call does not exist"'])
     return msgs
 
 

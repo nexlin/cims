@@ -158,6 +158,25 @@ int main() {
      SynthFloor("m=application 4002 udp MCPTT\r\na=fmtp:MCPTT "
                 "mc_queueing;mc_no_floor_ctrl\r\n"));
 
+  // ── conference 구독 (TS 24.379 §10.1.3.2·§10.1.3.3) ──
+  {
+    const Golden g = Load("10_conference_subscribe.txt");
+    CK("10 Request-URI = 세션 식별자(그룹 AoR + gr)",
+       g.strStart.rfind("SUBSCRIBE sip:g101@", 0) == 0 &&
+           g.strStart.find(";gr=1790775600123456-7") != std::string::npos);
+    CK("10 mcptt-info <mcptt-request-uri> = 그룹",
+       McpttBareId(ParseMcpttInfo(g.strBody).strRequestUri) == "g101");
+    CK("10 Expires 4294967295 · Accept conference-info",
+       g.strHead.find("Expires: 4294967295") != std::string::npos &&
+           g.strHead.find("Accept: application/conference-info+xml") !=
+               std::string::npos);
+    const Golden r = Load("11_conference_reject_404_137.txt");
+    CK("11 404 + Warning 137",
+       r.strStart == "SIP/2.0 404 Not Found" &&
+           r.strHead.find("\"137 the indicated group call does not exist\"") !=
+               std::string::npos);
+  }
+
   // ── MCData (TS 24.282) ──
   {
     const Golden g = Load("04_sds_group_message.txt");

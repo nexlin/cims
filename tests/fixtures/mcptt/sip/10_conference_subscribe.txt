@@ -1,0 +1,22 @@
+SUBSCRIBE sip:g101@csp.ptt.cims.example.kr:5061;transport=tls;gr=1790775600123456-7 SIP/2.0
+Via: SIP/2.0/TLS 10.10.1.21:50601;branch=z9hG4bK-conf-s1;rport
+Max-Forwards: 70
+From: <sip:+82510002001@ptt.cims.example.kr>;tag=conf-a1-f
+To: <sip:g101@csp.ptt.cims.example.kr;gr=1790775600123456-7>
+Call-ID: conf-a1@10.10.1.21
+CSeq: 1 SUBSCRIBE
+Contact: <sip:+82510002001@10.10.1.21:50601;transport=tls>;+g.3gpp.mcptt;+g.3gpp.icsi-ref="urn%3Aurn-7%3A3gpp-service.ims.icsi.mcptt"
+Accept-Contact: *;+g.3gpp.icsi-ref="urn%3Aurn-7%3A3gpp-service.ims.icsi.mcptt";require;explicit
+P-Preferred-Service: urn:urn-7:3gpp-service.ims.icsi.mcptt
+Event: conference
+Expires: 4294967295
+Accept: application/conference-info+xml
+Content-Type: application/vnd.3gpp.mcptt-info+xml
+Content-Length: 226
+
+<?xml version="1.0" encoding="UTF-8"?>
+<mcpttinfo xmlns="urn:3gpp:ns:mcpttInfo:1.0">
+  <mcptt-Params>
+    <mcptt-request-uri type="Normal"><mcpttURI>tel:g101</mcpttURI></mcptt-request-uri>
+  </mcptt-Params>
+</mcpttinfo>
