@@ -101,7 +101,19 @@ int CSubscriptionManager::IncrementNotifySeq( const std::string &strCallId ) {
     if ( it != m_mapSubs.end() ) {
         return ++( it->second.iNotifySeq );
     }
-    return 1;
+    return 0;
+}
+
+int CSubscriptionManager::TakeFinalNotifySeq( const std::string &strCallId ) {
+    std::unique_lock<std::recursive_mutex> lock( m_mutex );
+
+    auto it = m_mapSubs.find( strCallId );
+    if ( it == m_mapSubs.end() ) return 0;
+    const int iSeq = ++( it->second.iNotifySeq );
+    CLog::Print( LOG_INFO, "Subscription Terminated: User=%s Type=%s CallId=%s CSeq=%d", it->second.strUserId.c_str(),
+                 it->second.strEventType.c_str(), strCallId.c_str(), iSeq );
+    m_mapSubs.erase( it );
+    return iSeq;
 }
 
 void CSubscriptionManager::CheckExpired() {

@@ -722,8 +722,7 @@ CSP                                    CMP
 | CSC → CSP/PSP | UDP JSON | 4421 | group_change(CSP+PSP broadcast), user_change, stats |
 | UE ↔ CMP (Audio) | RTP/UDP | 52000-52018 | PTT 음성 데이터 (PPttTrans._rtpSock) |
 | UE ↔ CMP (Floor) | RTCP APP/UDP | 54000-54018 | MCPTT Floor Control (PPttTrans._floorSock) |
-| CSP → UE (subscription) | SIP NOTIFY | (구독 dialog) | Event: conference, conference-info+xml |
-| CSP → UE (in-dialog) | SIP NOTIFY | (통화 dialog) | Event: conference — 구독 없는 단말용 폴백 |
+| CSP → UE (subscription) | SIP NOTIFY | (구독 dialog) | Event: conference, conference-info+xml — 진행 중 세션의 참가자가 세션 식별자로 구독한 동안만(TS 24.379 §10.1.3) |
 | CSP → UE (out-dialog) | SIP NOTIFY | (subscription) | Event: xcap-diff (xcap-root=https://{CSC}:4430/) |
 
 > **참고:** VoIP 1:1 통화는 별도의 PRtpTrans 풀(50000-50079)을 사용한다.

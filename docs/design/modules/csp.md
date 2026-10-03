@@ -843,6 +843,11 @@ UTC 경과 초 ×8)로 시작한다. (3) 이 §12.2.2 의 수용 조건이다 �
 기억하므로 1부터 세면 후속 NOTIFY 가 전부 500(하위 CSeq)으로 거절되고, 단말은 갱신이 200 이라 새로 구독하지도
 않아 로스터·xcap-diff 통지가 영구 stale 된다. 로그 `SUBSCRIBE stateless refresh accepted — NOTIFY CSeq seeded N`.
 
+**terminated NOTIFY 가 그 다이얼로그의 마지막 NOTIFY 다**(RFC 6665 §4.2.2). `SendTerminatedNotify` 는 CSeq 를 받으면서 구독을
+표에서 지운다(`TakeFinalNotifySeq` — 한 잠금). 통지 송신자(로스터·제휴·xcap-diff 팬아웃)는 구독 목록 복사본을 들고 보내므로, 그
+사이 끝난 구독(해지·인가 회수·세션 끝 noresource)에는 `IncrementNotifySeq` 가 0 을 돌려 보내지 않는다 — 보내면 구독자가 terminated
+뒤의 NOTIFY 를 하위 CSeq 500·481 로 거절한다(참가자 이탈 BYE 와 해지가 겹칠 때).
+
 **SUBSCRIBE/PUBLISH 의 인가 축은 등록 상태가 아니라 신원이다.** 요청자가 등록표(`CUserMap`, 메모리)에 있으면 그 등록이
 신원을 대신한다(종전과 같음). 없으면 — 재기동으로 등록이 소실됐거나 아직 REGISTER 전 — `CCscfModule::CheckAuthrization`
 으로 **Digest 인증**을 거친다(RFC 6665 §4.2.1: notifier 가 구독자를 인증하며 REGISTER 는 전제가 아니다 · RFC 3903 §6.3

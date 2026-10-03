@@ -102,8 +102,17 @@ public:
 
     /**
      * @brief Increment NOTIFY CSeq for a subscription and return the new value
+     * @returns 0 = 그 다이얼로그의 구독이 이미 끝났다(해지·만료·terminated 통지) — 보내지 않는다. 송신자는 구독 목록
+     *   복사본을 들고 있으므로 그 사이에 끝난 구독에 NOTIFY 를 내지 않게 하는 마지막 관문이다(RFC 6665 §4.2.2).
      */
     int IncrementNotifySeq( const std::string &strCallId );
+
+    /**
+     * @brief terminated NOTIFY 의 CSeq 를 받으면서 구독을 지운다 — 한 잠금 안에서. 그 뒤 같은 다이얼로그의 NOTIFY 는
+     *   IncrementNotifySeq 가 0 을 돌려 나가지 않는다(terminated 가 다이얼로그의 마지막 NOTIFY — RFC 6665 §4.2.2).
+     * @returns 0 = 이미 끝난 구독(다른 경로가 먼저 끝냈다)
+     */
+    int TakeFinalNotifySeq( const std::string &strCallId );
 
     /**
      * @brief Check and remove expired subscriptions

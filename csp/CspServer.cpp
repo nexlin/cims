@@ -975,8 +975,14 @@ static void SendNotifyToSubscriber( const SubscriptionInfo &sub, const std::stri
     const std::string strLocalIp = CspAddressing::GetLocalSipAddress( iListenerId );
     const int iLocalPort = CspAddressing::GetLocalSipPort( iListenerId, iFallbackPort );
 
-    // Get NOTIFY CSeq (increment in manager)
+    // Get NOTIFY CSeq (increment in manager) — 0 = 복사본을 든 사이 구독이 끝났다(해지·terminated). 끝난
+    //   다이얼로그에는 NOTIFY 를 내지 않는다(RFC 6665 §4.2.2) — 내면 단말이 CSeq 역행으로 500 을 준다.
     int iSeq = gclsSubscriptionManager.IncrementNotifySeq( sub.strCallId );
+    if ( iSeq == 0 ) {
+        CLog::Print( LOG_DEBUG, "SendNotifyToSubscriber: User=%s Type=%s CallId=%s — 끝난 구독, 보내지 않음",
+                     sub.strUserId.c_str(), sub.strEventType.c_str(), sub.strCallId.c_str() );
+        return;
+    }
 
     // Request-URI = subscriber's Contact URI
     std::string strTarget = sub.strContact.empty() ? sub.strSubscriberUri : sub.strContact;
@@ -1133,6 +1139,8 @@ static void SendNotifyToSubscriber( const SubscriptionInfo &sub, const std::stri
  *        인가 회수는 "rejected" — 규격이 "the subscription has been terminated due to change in
  *        authorization policy" 로 정의한 값이고, 구독자에게 **재구독하지 말라**는 뜻까지 실어 보낸다
  *        (dispatch_center.md §5.10).
+ *        구독은 여기서 끝난다 — CSeq 를 받으면서 구독 표에서 지운다(TakeFinalNotifySeq). 그 뒤 같은 다이얼로그로
+ *        가려던 통지(복사본을 든 다른 스레드)는 나가지 않는다. 다른 경로가 먼저 끝냈으면 아무것도 보내지 않는다.
  */
 void SendTerminatedNotify( const SubscriptionInfo &sub, const char *pszReason ) {
     const int iListenerId = sub.iInboundListenerId;
@@ -1140,7 +1148,12 @@ void SendTerminatedNotify( const SubscriptionInfo &sub, const char *pszReason ) 
     const std::string strLocalIp = CspAddressing::GetLocalSipAddress( iListenerId );
     const int iLocalPort = CspAddressing::GetLocalSipPort( iListenerId, iFallbackPort );
 
-    int iSeq = gclsSubscriptionManager.IncrementNotifySeq( sub.strCallId );
+    const int iSeq = gclsSubscriptionManager.TakeFinalNotifySeq( sub.strCallId );
+    if ( iSeq == 0 ) {
+        CLog::Print( LOG_DEBUG, "SendTerminatedNotify: User=%s Type=%s CallId=%s — 이미 끝난 구독",
+                     sub.strUserId.c_str(), sub.strEventType.c_str(), sub.strCallId.c_str() );
+        return;
+    }
 
     std::string strTarget = sub.strContact.empty() ? sub.strSubscriberUri : sub.strContact;
 
