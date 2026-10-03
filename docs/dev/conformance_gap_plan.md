@@ -120,7 +120,7 @@
 | **S24** | MCData 미디어 평면 수명·색인·재전달 | MCData MSRP-3 · SDS-9 · DISP-1 | C3 | 1 | — | — | U05(MSRP-4) | 대기 |
 | **S25** | 서비스 설정·인가(poc-settings) | REG-2 · REG-4 / MCData REG-3 · REG-4 / VREG-2 | B3 · C1 · D1 | 2 | — | D6 · D10 | U09(VREG-1) · U03(Answer-Mode) | 대기 |
 | **S26** | MCData FD 파일 존재 확인(§6.7.3 HEAD) | MCData FD-1(S05 의 남은 몫) | C1 | 1 | C07(콘텐츠 서버 HEAD §6.7.3.2 · FD URL 을 PublicUrl base 로) | — | — | 완료 25870583 |
-| **S27** | conference 구독 = 진행 중 세션(S17 에서 뗌) | GCS-14 | B1 | 1 | — | D13 | U04(GCC-7 — Request-URI 세션 식별자·Expires 2^32-1·mcptt-info) · 계측기(그룹 AoR conference 구독 시나리오) · W01 | 완료 1daddb75 (csp 0.2.219 .48 배포·실측 — 세션 식별자는 gr 로 찾음. SDK GCC-7 짝 75d22446) · 재합류 gr 해석·세션 식별자 한 URI(모든 leg 그룹 AoR + gr) 골든 12·13 — GCC-8 의 서버 짝 |
+| **S27** | conference 구독 = 진행 중 세션(S17 에서 뗌) | GCS-14 | B1 | 1 | — | D13 | U04(GCC-7 — Request-URI 세션 식별자·Expires 2^32-1·mcptt-info) · 계측기(그룹 AoR conference 구독 시나리오) · W01 | 완료 1daddb75 (csp 0.2.219 .48 배포·실측 — 세션 식별자는 gr 로 찾음. SDK GCC-7 짝 75d22446) · bd2daa93 재합류 gr 해석·세션 식별자 한 URI(모든 leg 그룹 AoR + gr) 골든 12·13 — GCC-8 의 서버 짝(csp 0.2.220 .48 실측 7/7 — PSI 개시 200 OK Contact = 그룹 AoR · PSI 형·그룹 형 식별자 재합류 200 · 다른 그룹 `<mcptt-request-uri>` 404 · 끝난 세션 404·새 초대 없음) |
 
 ### 5.2 .45 — 설정 평면 서버 CSC (7 WP · 52 항목 · ≈ 9 세션)
 
