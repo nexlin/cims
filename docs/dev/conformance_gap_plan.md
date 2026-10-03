@@ -90,19 +90,19 @@
 «항목» 은 MCPTT 번호가 앞, `MCData` 접두가 MCData, `V…`·`TCS`·`TCU`·`RCS`·`RCU` 가 MCVideo 다. «급» 은 그 WP 의 급별 항목 수, «세션» 은 추정.
 «상태» = 대기 · 완료 <커밋> · 보류(<이유>) — 진행 중인지는 dev_share 의 claim 메시지로 본다.
 
-### 5.1 .48 — 호 제어·미디어 서버 (27 WP · 157 항목 · ≈ 36 세션)
+### 5.1 .48 — 호 제어·미디어 서버 (28 WP · 157 항목 · ≈ 37 세션)
 
 | WP | 이름 | 항목 | 급 | 세션 | 선행 | 결정 | 짝 | 상태 |
 |---|---|---|---|---|---|---|---|---|
 | **S01** | on-network-disabled·정원·N6 집행 | GCS-19 · GCS-5 · GCS-6 / VGC-3 | A3 · B1 | 1 | — | D2 | C01(`<on-network-disabled>`·정원·사용자별 N6 산출) · U03(SDK·앱이 N6 를 따르고 103 을 알림) · W01 | 완료 3309f08f |
 | **S02** | MCVideo 헤더·fmtp·Supported 한두 줄 | AFF-3 · GCS-15 / VGC-4 · VGC-5 · VGC-6 · VGC-7 · VSDP-4 · VAFF-3 | C8 | 1 | — | — | — | 완료 4cb4a0bc |
 | **S03** | 경보·긴급 인가 | EMG-1 · EMG-2 · EMG-5 / MCData EMG-1 / VGC-1 | A2 · B2 · C1 | 1 | — | — | U01(단말 경보 대상) | 완료 f2cc799c |
-| **S04** | 긴급 지시자·상태 통지 | EMG-10 · EMG-11 · EMG-13 · EMG-14 · EMG-15 · EMG-16 · EMG-17 | B1 · C6 | 1 | S03 | — | — | 완료 494fda56 (EMG-17 남김 — CSP↔CMP 암묵 발언 요청 계약) |
+| **S04** | 긴급 지시자·상태 통지 | EMG-10 · EMG-11 · EMG-13 · EMG-14 · EMG-15 · EMG-16 · EMG-17 | B1 · C6 | 1 | S03 | — | — | 완료 494fda56 (EMG-17 → S28) |
 | **S05** | MCData 인가·배포 대상 | MCData FD-1 · AFF-3 · AFF-4 · AFF-5 · DISP-2 | A1 · C3 · D1 | 1 | — | — | C07(FD-6 GET 수신 제어) | 완료 29bd2806 (FD-1 남은 몫 → S26) |
 | **S06** | SDP 협상값 집행(우선순위·큐잉 상한) | SDP-3 · PRV-9 · FCS-22 / TCS-4 · TCS-6 · RCS-3 | A1 · B1 · C2 · D2 | 1 | — | — | U02(SDK answer 값) | 완료 117d4a86 |
 | **S07** | MCVideo NAT 합류 알림(실측) | RCS-1 | A1 | 1 | — | — | — (서버만으로 닫힘 — CMP 가 latch 뒤 다시 알린다) | 완료 976d6d97 |
-| **S08** | Warning·응답 코드 — MCPTT | GCS-7 · GCS-8 · GCS-11 · REG-3 · ADH-4 · PRV-6 · PRV-7 · GCS-20 | B5 · C2 · D1 | 1 | — | D9 | U03 · W01(문구 사전) | 완료 a2837b34 (REG-3 enforce → S18 · PRV-7 본문 전달 남김) |
-| **S09** | Warning·응답 코드 — MCData·MCVideo | MCData WRN-1 · WRN-2 · WRN-3 · SDS-4 / VPRV-1 | C4 · D1 | 1 | — | — | W01(문구 사전) | 완료 bdf3d172 (SDS-4 enforce → S18) |
+| **S08** | Warning·응답 코드 — MCPTT | GCS-7 · GCS-8 · GCS-11 · REG-3 · ADH-4 · PRV-6 · PRV-7 · GCS-20 | B5 · C2 · D1 | 1 | — | D9 | U03 · W01(문구 사전) | 완료 a2837b34 (REG-3 → S18 완료 · PRV-7 → S28) |
+| **S09** | Warning·응답 코드 — MCData·MCVideo | MCData WRN-1 · WRN-2 · WRN-3 · SDS-4 / VPRV-1 | C4 · D1 | 1 | — | — | W01(문구 사전) | 완료 bdf3d172 (SDS-4 → S18 완료) |
 | **S10** | 개별·애드혹 인가 판정(CSP 몫) | PRV-2 · PRV-4 · PRV-5 · PRV-8 · EMG-4 · ADH-5 | A3 · B3 | 1 | C03 | — | W01(Capabilities 게이트) | 완료 95d7debb (PRV-4 단말 몫 → SDK 묶음 7 · 공유 DB 개별 호 열 마이그레이션 대기) |
 | **S11** | 애드혹 호 절차·인원 상한 | ADH-2 · ADH-3 · ADH-6 · ADH-7 · ADH-9 · ADH-10 | A4 · C1 · D1 | 1 | C03 | — | U04(SDK BYE Reason·`adhoc`) | 완료 096cd123 (ADH-7 SDK 몫 → U04) |
 | **S12** | 제휴 — 클라이언트 단위 키·해제·판정 | AFF-2 · AFF-4 · AFF-5 · AFF-6 / MCData AFF-6 / VAFF-1 · VAFF-2 · VAFF-4 · VAFF-5 · VGC-11 | A4 · B2 · C4 | 2 | — | D11 | U04(`<mcptt-client-id>`) · U06 | 대기 |
@@ -111,7 +111,7 @@
 | **S15** | MCPTT 서버 산출 정합(NOTIFY·ID·SDP) | GCS-12 · GCS-13 · GCS-16 · GCS-17 · GCS-18 | A2 · B2 · C1 | 1 | — | D12 | — | 대기 |
 | **S16** | MCData 서버 산출 정합 | MCData SDS-2 · SDS-8 · MSRP-2 · MSRP-6 · FD-4 | B3 · C2 | 1 | — | D12 | U05(Mandatory download 따름) | 대기 |
 | **S17** | 규격형 요청 수용 | PRV-1 · PRV-3 · GCS-14 / MCData SDS-1 · SDS-5 · CFG-1 | A1 · B3 · C1 · D1 | 2 | — | D3 · D10 | U04 · U05 · C01(MCData PSI 광고) | 완료 036c4594 (GCS-14 → S27 · csp 0.2.217 .48 배포 · SDK 짝 U04·U05 묶음 C 4a5b64e4 실측 통과) |
-| **S18** | 엄격 검사 켜기 | GCS-9 · GCS-10 · EMG-12 · REG-3 / MCData MSRP-5 · SDS-4 | B2 · C3 · D1 | 1 | U04·U05 | D5 · D9 | — | 대기 |
+| **S18** | 엄격 검사 켜기 | GCS-9 · GCS-10 · EMG-12 · REG-3 / MCData MSRP-5 · SDS-4 | B2 · C3 · D1 | 1 | U04·U05 | D5 · D9 | — | 완료 b7d00e1e (K4 — 스위치 `Setup.Mcptt.StrictCheck` 제거, csp 0.2.221 .48 실측 21/21 · 잔재 정리 같은 커밋: resource-lists 없는 disposition 통지 403 145 · 그룹 호 다이얼로그 안 conference NOTIFY 폴백 제거 · 경보 R-URI 그룹 전환기 제거. 계측기(libcsim·cspsim)의 옛 형식은 거절된다 — 팀원에게 넘김) |
 | **S19** | xcap-diff 구독·통지 | GMS-14 · GMS-15 · CMS-5 / VCMS-1 | B4 | 1 | C04 | — | U07 | 일부 b83c94e1 · a80dd27b · 84f9583b (VCMS-1 · CMS-5 그룹 몫 · GMS-14 본문 몫 · GMS-15 삭제 몫 끝 — GMS-14 토큰 신원·GMS-15 ETag·직렬화·CMS-5 CSC 몫 남음) |
 | **S20** | 발언권 메시지 필드·타이머 | FCS-4 · FCS-5 · FCS-7 · FCS-8 · FCS-17 · FCS-18 · FCS-19 · FCS-20 · FCS-21 · FCS-23 · FCS-24 | A2 · B4 · C2 · D3 | 2 | — | D8 | U08(SDK Ack) | 대기 |
 | **S21** | 발언권 확장 형식·수신 전용 멤버 | FCS-6 · FCS-10 · FCS-11 · FCS-12 · FCS-13 · FCS-14 · FCS-15 · FCS-16 · SDP-2 / TCS-10 | B6 · C3 · D1 | 2 | S20 | — | U08(SDK 코덱 생성물) · C05(그룹 문서 요소) | 대기 |
@@ -121,6 +121,7 @@
 | **S25** | 서비스 설정·인가(poc-settings) | REG-2 · REG-4 / MCData REG-3 · REG-4 / VREG-2 | B3 · C1 · D1 | 2 | — | D6 · D10 | U09(VREG-1) · U03(Answer-Mode) | 대기 |
 | **S26** | MCData FD 파일 존재 확인(§6.7.3 HEAD) | MCData FD-1(S05 의 남은 몫) | C1 | 1 | C07(콘텐츠 서버 HEAD §6.7.3.2 · FD URL 을 PublicUrl base 로) | — | — | 완료 25870583 |
 | **S27** | conference 구독 = 진행 중 세션(S17 에서 뗌) | GCS-14 | B1 | 1 | — | D13 | U04(GCC-7 — Request-URI 세션 식별자·Expires 2^32-1·mcptt-info) · 계측기(그룹 AoR conference 구독 시나리오) · W01 | 완료 1daddb75 (csp 0.2.219 .48 배포·실측 — 세션 식별자는 gr 로 찾음. SDK GCC-7 짝 75d22446) · bd2daa93 재합류 gr 해석·세션 식별자 한 URI(모든 leg 그룹 AoR + gr) 골든 12·13 — GCC-8 의 서버 짝(csp 0.2.220 .48 실측 7/7 — PSI 개시 200 OK Contact = 그룹 AoR · PSI 형·그룹 형 식별자 재합류 200 · 다른 그룹 `<mcptt-request-uri>` 404 · 끝난 세션 404·새 초대 없음) |
+| **S28** | 남은 편차 — 응답 본문 전달·긴급 격상 암묵 발언 요청(S04·S08 에서 뗌) | PRV-7 · EMG-17 | B2 | 1 | — | — | — (EMG-17 = CSP↔CMP 계약 `PTT_*` 확장, cmp_media_api.md) | 대기 |
 
 ### 5.2 .45 — 설정 평면 서버 CSC (7 WP · 52 항목 · ≈ 9 세션)
 
@@ -190,7 +191,7 @@ flowchart LR
 | **2** 응답 코드 · 인가 판정 · 애드혹 | S10 · S11 · S08 · S09 · S04 (5) | C02 · C07 · U02 · U03 (4) | W01 1차 | .48 회귀(계측기 동봉 시나리오) |
 | **3** 제휴 · 호 모델 | S12(2) · S13(2) · S14(3) (7) | C04 · U06 · U08 (3) | — | D1 이 이 웨이브 전 |
 | **4** 요청 규격화 · XCAP | S17(2) · S15 · S16 · S19 · S27 (6) | C05(2) · U04(2) · U05 · U07 (6) | W01 2차 | .48 회귀 |
-| **5** 발언권 · 송출 제어 · 나머지 | S20(2) · S21(2) · S22(2) · S23 · S24 · S25(2) · S26 (11) | U09 (1) + .48 WP 넘겨받기(S22·S24) | — | — |
+| **5** 발언권 · 송출 제어 · 나머지 | S20(2) · S21(2) · S22(2) · S23 · S24 · S25(2) · S26 · S28 (12) | U09 (1) + .48 WP 넘겨받기(S22·S24) | — | — |
 | **6** 마감 | S18 (1) | S3 회귀 · 남은 편차 정본화 | 관제 실기(.48) | .48 전체 회귀 → 라이브 반영(§8) |
 
 - 웨이브 안에서는 급 A 가 많은 WP 부터 고른다. 선행이 없는 WP 는 웨이브를 앞당겨도 된다.
