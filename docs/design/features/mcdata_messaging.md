@@ -439,8 +439,8 @@ CSP fan-out (하이브리드):
 
 | 기능 | 규격 | 지금 |
 |---|---|---|
-| MCData 서비스 인가 — REGISTER `<mcdata-access-token>`·MCData ID 바인딩·다중 단말·404 `141` | §7.3.2 | 없음([mcx_identity_scope.md](mcx_identity_scope.md) §10) |
-| 서비스 설정 PUBLISH·구독(`Event: poc-settings`) | §7.2.2~§7.2.4 · §7.3.3~§7.3.6 | 489 (conformance_gap_plan.md S25) |
+| MCData 서비스 인가 — REGISTER `<mcdata-access-token>`·MCData ID 바인딩·다중 단말 | §7.3.2 | 받는다 — IdMS 검증(scope `3gpp:mc:data_service`·`mcdata_id`)·바인딩·multiple-devices-ind([mcptt_standard_conformance.md](mcptt_standard_conformance.md) C10). 바인딩 없는 요청 404 `141` 은 S25 단계 B |
+| 서비스 설정 PUBLISH·구독(`Event: poc-settings` — P-Preferred-Service `…icsi.mcdata`) | §7.2.2~§7.2.4 · §7.3.3~§7.3.6 | 받는다(C10 — 선택 user profile 캐시, 구독 NOTIFY) |
 | MCData 제휴 — 서비스별 제휴 표·`mcdataPresInfo` NOTIFY·제휴 구독·암묵 제휴 | §8 | MCPTT 제휴로 읽는다 |
 | SDS 세션(one-to-one·group SDS session) | §9.2.4 | 없음 |
 | 애드혹 그룹 SDS(`ad-hoc-group-sds`) · functional alias 대상(300 Multiple Choices) · regroup·TGI(`<associated-group-id>`) | §9.2.2.2.1 3A) · §9.2.2.4.2 5)b)ii)·6)b)·6)l) | 없음 |

@@ -68,6 +68,7 @@ CCallDir gclsCallDir;
 #include "IpsecSaSet.h"
 #include "Log.h"
 #include "McDataMediaService.h"
+#include "McServiceAuth.h"
 #include "McVideoCallService.h"
 #include "McpttInfo.h"
 #include "MemoryDebug.h"
@@ -625,6 +626,7 @@ int ServiceMain() {
                 else
                     gclsAffiliationGrace.Cancel( strUserId );
                 gclsCspUserMap.unregisterUser( strUserId, !bFlowLoss );
+                if ( !bFlowLoss ) gclsMcServiceAuth.UnbindAll( strUserId );  // 서비스 인가 바인딩도 등록과 함께
                 gclsGroupCallService.ClearUserCall( strUserId );
                 // reg-event 구독자에게 만료 통지 (partial, 삭제 직전 바인딩)
                 SendRegEventNotify( strUserId, "expired", &clsExpired.second );
@@ -634,6 +636,7 @@ int ServiceMain() {
             for ( const std::string &strUserId : gclsAffiliationGrace.TakeDue( time( NULL ) ) ) {
                 if ( gclsUserMap.Select( strUserId.c_str() ) ) continue;  // 그새 다시 등록했다(유예를 거두기 전 경합)
                 ReclaimUserAffiliations( strUserId, "flow 실패 유예 만료" );
+                gclsMcServiceAuth.UnbindAll( strUserId );
             }
 
             gclsUserMap.SendOptions();
@@ -934,6 +937,33 @@ static std::string BuildDialogInfoBodyMulti( const std::string &strWatchedAor,
     return s;
 }
 
+/** poc-settings 구독의 이벤트 종류 — 서비스마다 따로 (TS 24.379 §7.3.6 · TS 24.282·TS 24.281 같은 절) */
+const char *PocSettingsEventType( EMcService e ) {
+    return e == EMcService::McVideo ? "mcvideo_poc-settings"
+                                    : ( e == EMcService::McData ? "mcdata_poc-settings" : "poc-settings" );
+}
+static bool PocSettingsEventOf( const std::string &strType, EMcService &e ) {
+    for ( EMcService c : { EMcService::Mcptt, EMcService::McVideo, EMcService::McData } )
+        if ( strType == PocSettingsEventType( c ) ) {
+            e = c;
+            return true;
+        }
+    return false;
+}
+
+/** PSI 형 notifier 의 사용자부 — 그룹 문서(gms)·설정 문서(cms)·제휴·서비스 설정 구독 (참여 기능 PSI = ue-init-config)
+ */
+static std::string NotifierPsiUser( const std::string &strType ) {
+    EMcService e;
+    if ( PocSettingsEventOf( strType, e ) )
+        return e == EMcService::McData ? std::string( "mcdata_psi" )
+                                       : gclsCscEndpointCache.GetPsiUser( e == EMcService::McVideo );
+    return ( strType == "gms" )                   ? "gms_psi"
+           : ( strType == "affiliation" )         ? gclsCscEndpointCache.GetPsiUser( false )
+           : ( strType == "mcvideo_affiliation" ) ? gclsCscEndpointCache.GetPsiUser( true )
+                                                  : "cms_psi";
+}
+
 static void SendNotifyToSubscriber( const SubscriptionInfo &sub, const std::string &etag,
                                     const std::string &strChangedId, const char *pszRegEvent = NULL,
                                     const CUserInfo *pclsRegInfo = NULL, const std::string *pstrPrebuiltBody = NULL,
@@ -970,11 +1000,7 @@ static void SendNotifyToSubscriber( const SubscriptionInfo &sub, const std::stri
         // dialog-event: notifier = 감시 대상 AoR (RFC 4235, watched resource)
         pMsg->m_clsFrom.m_clsUri.Set( "sip", sub.strResourceId.c_str(), strLocalIp.c_str(), iLocalPort );
     } else {
-        std::string strServerPsi = ( sub.strEventType == "gms" )           ? "gms_psi"
-                                   : ( sub.strEventType == "affiliation" ) ? gclsCscEndpointCache.GetPsiUser( false )
-                                   : ( sub.strEventType == "mcvideo_affiliation" )
-                                       ? gclsCscEndpointCache.GetPsiUser( true )
-                                       : "cms_psi";
+        const std::string strServerPsi = NotifierPsiUser( sub.strEventType );
         pMsg->m_clsFrom.m_clsUri.Set( "sip", strServerPsi.c_str(), strLocalIp.c_str(), iLocalPort );
     }
     if ( !sub.strToTag.empty() ) {
@@ -1044,6 +1070,7 @@ static void SendNotifyToSubscriber( const SubscriptionInfo &sub, const std::stri
     pMsg->AddHeader( "Subscription-State", ( "active;expires=" + std::to_string( (int)tRemaining ) ).c_str() );
 
     std::string strBody;
+    EMcService ePoc = EMcService::Mcptt;
     if ( sub.strEventType == "reg" ) {
         pMsg->AddHeader( "Event", "reg" );
         // reginfo version 은 구독 내 0 부터 시작 (RFC 3680) — 첫 NOTIFY 의 iSeq 가 2 이므로 -2
@@ -1058,6 +1085,13 @@ static void SendNotifyToSubscriber( const SubscriptionInfo &sub, const std::stri
         strBody =
             ( pstrPrebuiltBody != NULL ) ? *pstrPrebuiltBody : BuildAffiliationInfoBody( sub.strUserId, "", eSvc );
         pMsg->m_clsContentType.Set( "application", "pidf+xml" );
+    } else if ( PocSettingsEventOf( sub.strEventType, ePoc ) ) {
+        // 서비스 설정 (TS 24.379 §7.3.6.2 · RFC 4354) — 그 사용자 클라이언트들의 am-settings·선택 user
+        // profile·multiplex
+        pMsg->AddHeader( "Event", "poc-settings" );
+        strBody = ( pstrPrebuiltBody != NULL ) ? *pstrPrebuiltBody
+                                               : gclsMcServiceAuth.SettingsDocument( ePoc, sub.strUserId );
+        pMsg->m_clsContentType.Set( "application", "poc-settings+xml" );
     } else if ( sub.strEventType == "conference" ) {
         // 참가자 정보 (RFC 4575) — 본문은 호출자(GroupCallService)가 만든 로스터 스냅샷
         pMsg->AddHeader( "Event", "conference" );
@@ -1129,11 +1163,7 @@ void SendTerminatedNotify( const SubscriptionInfo &sub, const char *pszReason ) 
         // dialog-event: notifier = 감시 대상 AoR (RFC 4235, watched resource)
         pMsg->m_clsFrom.m_clsUri.Set( "sip", sub.strResourceId.c_str(), strLocalIp.c_str(), iLocalPort );
     } else {
-        std::string strServerPsi = ( sub.strEventType == "gms" )           ? "gms_psi"
-                                   : ( sub.strEventType == "affiliation" ) ? gclsCscEndpointCache.GetPsiUser( false )
-                                   : ( sub.strEventType == "mcvideo_affiliation" )
-                                       ? gclsCscEndpointCache.GetPsiUser( true )
-                                       : "cms_psi";
+        const std::string strServerPsi = NotifierPsiUser( sub.strEventType );
         pMsg->m_clsFrom.m_clsUri.Set( "sip", strServerPsi.c_str(), strLocalIp.c_str(), iLocalPort );
     }
     if ( !sub.strToTag.empty() ) {
@@ -1181,12 +1211,14 @@ void SendTerminatedNotify( const SubscriptionInfo &sub, const char *pszReason ) 
         pMsg->m_clsContactList.push_back( clsSelfContact );
     }
 
-    pMsg->AddHeader( "Event", sub.strEventType == "reg"                   ? "reg"
-                              : sub.strEventType == "affiliation"         ? "presence"
-                              : sub.strEventType == "mcvideo_affiliation" ? "presence"
-                              : sub.strEventType == "conference"          ? "conference"
-                              : sub.strEventType == "dialog"              ? "dialog"
-                                                                          : "xcap-diff" );
+    EMcService ePocEnd;
+    pMsg->AddHeader( "Event", sub.strEventType == "reg"                         ? "reg"
+                              : sub.strEventType == "affiliation"               ? "presence"
+                              : sub.strEventType == "mcvideo_affiliation"       ? "presence"
+                              : sub.strEventType == "conference"                ? "conference"
+                              : sub.strEventType == "dialog"                    ? "dialog"
+                              : PocSettingsEventOf( sub.strEventType, ePocEnd ) ? "poc-settings"
+                                                                                : "xcap-diff" );
     pMsg->AddHeader(
         "Subscription-State",
         ( std::string( "terminated;reason=" ) + ( pszReason && *pszReason ? pszReason : "timeout" ) ).c_str() );
@@ -1277,6 +1309,12 @@ void SendInitialNotify( const SubscriptionInfo &sub ) {
     if ( sub.strEventType == "affiliation" || sub.strEventType == "mcvideo_affiliation" ) {
         // C2: 제휴상태 초기 NOTIFY (현재 affiliated 그룹 목록 — 서비스는 구독의 것, TS 24.281 §8.2.2.2.4).
         SendNotifyToSubscriber( sub, "init", "" );
+        return;
+    }
+    EMcService ePoc = EMcService::Mcptt;
+    if ( PocSettingsEventOf( sub.strEventType, ePoc ) ) {
+        // 서비스 설정 초기 NOTIFY (TS 24.379 §7.3.6.1 4) · RFC 6665 §4.1.1) — 현재 설정
+        SendNotifyToSubscriber( sub, "", "" );
         return;
     }
     if ( sub.strEventType == "conference" ) {
@@ -1582,6 +1620,20 @@ void SendAffiliationNotify( const std::string &strUserId, const std::string &str
     for ( auto &sub : subList ) {
         SendNotifyToSubscriber( sub, "aff", "", NULL, NULL, &strBody );
     }
+}
+
+/**
+ * @brief 서비스 설정이 바뀌었다 — 그 사용자의 poc-settings 구독자에게 NOTIFY (TS 24.379 §7.3.6.2 · TS 24.282·TS 24.281
+ *   같은 절). PUBLISH poc-settings(§7.3.3~§7.3.5)가 부른다.
+ */
+void SendPocSettingsNotify( EMcService eService, const std::string &strMcId ) {
+    std::list<SubscriptionInfo> subList;
+    gclsSubscriptionManager.GetSubscriptionsByUser( strMcId, PocSettingsEventType( eService ), subList );
+    if ( subList.empty() ) return;
+    const std::string strBody = gclsMcServiceAuth.SettingsDocument( eService, strMcId );
+    for ( auto &sub : subList ) SendNotifyToSubscriber( sub, "", "", NULL, NULL, &strBody );
+    CLog::Print( LOG_INFO, "SendPocSettingsNotify(%s): User=%s subs=%d", McServiceName( eService ), strMcId.c_str(),
+                 (int)subList.size() );
 }
 
 /**

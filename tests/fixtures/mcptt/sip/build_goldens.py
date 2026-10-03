@@ -8,7 +8,7 @@
   python3 tests/fixtures/mcptt/sip/build_goldens.py --check    # *.txt 가 최신인지(S1-MCX-REQUEST-CONTRACT 가 부른다)
 
 시나리오 = README.md(같은 디렉터리). 규격 = TS 24.379 V20.0.0(§11.1.1.2.1.1 개별 호 개시 · §11.1.2.2 floor 없는 개별 호 ·
-§11.1.1.3.1.1 8)·9) 145 · §10.1.3 conference 구독 · §10.1.1.2.4.1·§10.1.1.4.5.1 재합류 · §6.2.1 SDP · §4.4 Warning · Annex F.1 mcptt-info) · TS 24.380 V20.0.0(표 4.3.3.1-1 · §14 fmtp) ·
+§11.1.1.3.1.1 8)·9) 145 · §10.1.3 conference 구독 · §10.1.1.2.4.1·§10.1.1.4.5.1 재합류 · §7.2·§7.3 서비스 인가·설정(poc-settings) · §6.2.1 SDP · §4.4 Warning · Annex F.1 mcptt-info) · TS 24.380 V20.0.0(표 4.3.3.1-1 · §14 fmtp) ·
 TS 24.282 V19.8.0(§6.2.4.1 · §9.2.2.2.1 SDS · §10.2.4.2.1 FD · §9.2.3.2.1·§9.2.3.2.3 미디어 평면 SDS · §9.2.2.4.2 5) 204 ·
 §15 메시지 · Annex D mcdata-info).
 """
@@ -35,6 +35,8 @@ IP_A = "10.10.1.21"
 CLIENT_A = "urn:uuid:2f6b8c4e-1a2b-4c3d-9e8f-0a1b2c3d4e5f"
 GROUP = "tel:g101"
 FD_URL = f"https://csc.{DOMAIN}:4430/mcdata/fd/0123456789abcdef0123456789abcdef"
+# IdMS 접근 토큰(TS 33.180 B.2.2 — JWS compact, 값은 자리표시. 서버는 IdMS 에 introspection 으로 검증한다 — 형식을 읽지 않는다)
+ACCESS_TOKEN = "eyJhbGciOiJSUzI1NiIsImtpZCI6ImNpbXMifQ.eyJtY3B0dF9pZCI6IiI4MjUxMDAwMjAwMSJ9.c2lnbmF0dXJl"
 # MCPTT 세션 식별자(TS 24.379 §4.5 — 개시 200 OK·멤버 INVITE Contact). To 에는 port·transport 를 두지 않는다(RFC 3261 §19.1.1 표 1)
 SESSION_ID = f"sip:g101@{CSP}:5061;transport=tls;gr=1790775600123456-7"
 SESSION_ID_TO = f"sip:g101@{CSP};gr=1790775600123456-7"
@@ -303,6 +305,64 @@ def build():
         "SIP/2.0 404 Not Found",
         [via_resp("-rejoin-i2"), f"From: <sip:{UE_A}@{DOMAIN}>;tag=rejoin-a2-f", f"To: <{SESSION_ID_TO}>;tag=csp-r404",
          f"Call-ID: rejoin-a2@{IP_A}", "CSeq: 1 INVITE"])
+
+    # 14~19 — 서비스 인가·서비스 설정 (TS 24.379 §7.2·§7.3, RFC 3903 · RFC 4354 · §7.4.1.2.2). 공통(§7.2.1A) = Request-URI 참여 기능 PSI ·
+    #   P-Preferred-Service MCPTT ICSI · Event poc-settings · Expires 4294967295(설정 제거·로그오프 = 0). poc-settings 의 entity id = 클라이언트의
+    #   Instance ID URN(NOTE 2), Answer-Mode = <am-settings><answer-mode>automatic|manual · 확장 요소는 mcs10Set 이름공간(표 7.4.1.2.2-2).
+    pub_hdr = lambda branch, cid, cseq, expires, extra=(): (
+        [via(branch), "Max-Forwards: 70", f"From: <sip:{UE_A}@{DOMAIN}>;tag={cid}-f", f"To: <sip:{UE_A}@{DOMAIN}>",
+         f"Call-ID: {cid}@{IP_A}", f"CSeq: {cseq} PUBLISH", f"P-Preferred-Service: {ICSI_MCPTT}", "Event: poc-settings",
+         f"Expires: {expires}", *extra])
+    poc = ('<?xml version="1.0" encoding="UTF-8"?>\n<poc-settings xmlns="urn:oma:params:xml:ns:poc:poc-settings" '
+           'xmlns:mcs10Set="urn:3gpp:mcsSettings:1.0">\n'
+           f'  <entity id="{CLIENT_A}">\n'
+           '    <am-settings><answer-mode>manual</answer-mode></am-settings>\n'
+           '    <mcs10Set:selected-user-profile-index><mcs10Set:user-profile-index>1</mcs10Set:user-profile-index>'
+           '</mcs10Set:selected-user-profile-index>\n'
+           '    <mcs10Set:multiplex-support>false</mcs10Set:multiplex-support>\n'
+           '  </entity>\n</poc-settings>\n')
+    client_id = f'<mcptt-client-id type="Normal"><mcpttString>{CLIENT_A}</mcpttString></mcptt-client-id>'
+    # 14 — 서비스 인가 + 서비스 설정(§7.2.2): mcptt-info <mcptt-access-token>(인증에서 받은 접근 토큰) · <mcptt-client-id> + poc-settings.
+    #   서버(§7.3.3) = 토큰 검증 → MCPTT ID 를 IMPU 에 결박(실패 403 101) → 설정 캐시 → 200(SIP-ETag, 바인딩 둘 이상이면 multiple-devices-ind).
+    msgs["14_poc_settings_publish_auth.txt"] = message(
+        f"PUBLISH {MCPTT_PSI} SIP/2.0", pub_hdr("-poc-p1", "poc-a1", 1, 4294967295),
+        "multipart/mixed;boundary=poc-a1",
+        multipart("poc-a1", [
+            ("application/vnd.3gpp.mcptt-info+xml",
+             mcptt_info(f'<mcptt-access-token type="Normal"><mcpttString>{ACCESS_TOKEN}</mcpttString></mcptt-access-token>',
+                        client_id)),
+            ("application/poc-settings+xml", poc)]))
+    # 15 — 서비스 설정만(§7.2.3): mcptt-info <mcptt-request-uri> = 자기 MCPTT ID · <mcptt-client-id> + poc-settings. 서버(§7.3.4) = 그 IMPU 와
+    #   MCPTT ID 의 바인딩이 있어야 한다(없으면 404 141). SIP-If-Match = 14 의 200 OK 가 준 SIP-ETag(RFC 3903 §4.4 갱신).
+    msgs["15_poc_settings_publish_settings.txt"] = message(
+        f"PUBLISH {MCPTT_PSI} SIP/2.0", pub_hdr("-poc-p2", "poc-a1", 2, 4294967295, ["SIP-If-Match: poc-etag-1"]),
+        "multipart/mixed;boundary=poc-a2",
+        multipart("poc-a2", [
+            ("application/vnd.3gpp.mcptt-info+xml",
+             mcptt_info(f'<mcptt-request-uri type="Normal"><mcpttURI>tel:{UE_A}</mcpttURI></mcptt-request-uri>', client_id)),
+            ("application/poc-settings+xml", poc)]))
+    # 16 — 설정 제거 = MCPTT 로그오프(§7.2.1A 4) NOTE 3 · §7.3.5): Expires 0 + SIP-If-Match, 본문 없음(RFC 3903 §4.5). 서버 = 설정·제휴·바인딩 제거.
+    msgs["16_poc_settings_publish_remove.txt"] = message(
+        f"PUBLISH {MCPTT_PSI} SIP/2.0", pub_hdr("-poc-p3", "poc-a1", 3, 0, ["SIP-If-Match: poc-etag-1"]))
+    # 17 — 서비스 설정 구독(§7.2.4 · §7.3.6): Request-URI = 참여 기능 PSI · mcptt-info <mcptt-request-uri> = 자기 MCPTT ID · Accept poc-settings ·
+    #   Expires 4294967295(0 = fetch). 서버 = 구독자 MCPTT ID 가 대상과 같아야 한다(아니면 403) → NOTIFY 본문 = 그 사용자 클라이언트들의 entity.
+    msgs["17_poc_settings_subscribe.txt"] = message(
+        f"SUBSCRIBE {MCPTT_PSI} SIP/2.0",
+        [via("-poc-s1"), "Max-Forwards: 70", f"From: <sip:{UE_A}@{DOMAIN}>;tag=poc-s1-f", f"To: <{MCPTT_PSI}>",
+         f"Call-ID: poc-s1@{IP_A}", "CSeq: 1 SUBSCRIBE", ue_contact(MCPTT_TAGS), f"P-Preferred-Service: {ICSI_MCPTT}",
+         "Event: poc-settings", "Expires: 4294967295", "Accept: application/poc-settings+xml"],
+        "application/vnd.3gpp.mcptt-info+xml",
+        mcptt_info(f'<mcptt-request-uri type="Normal"><mcpttURI>tel:{UE_A}</mcpttURI></mcptt-request-uri>'))
+    # 18 — 서비스 인가 실패(§7.3.3 6)): 403 + 101 (토큰이 무효·만료·scope 3gpp:mc:ptt_service 없음·토큰의 MCPTT ID ≠ 요청 IMPU).
+    msgs["18_poc_settings_reject_403_101.txt"] = message(
+        "SIP/2.0 403 Forbidden",
+        [via_resp("-poc-p1"), f"From: <sip:{UE_A}@{DOMAIN}>;tag=poc-a1-f", f"To: <sip:{UE_A}@{DOMAIN}>;tag=csp-e101",
+         f"Call-ID: poc-a1@{IP_A}", "CSeq: 1 PUBLISH", f'Warning: 399 {DOMAIN} "101 service authorisation failed"'])
+    # 19 — 바인딩 없는 설정만 PUBLISH(§7.3.4 6)): 404 + 141.
+    msgs["19_poc_settings_reject_404_141.txt"] = message(
+        "SIP/2.0 404 Not Found",
+        [via_resp("-poc-p2"), f"From: <sip:{UE_A}@{DOMAIN}>;tag=poc-a1-f", f"To: <sip:{UE_A}@{DOMAIN}>;tag=csp-e141",
+         f"Call-ID: poc-a1@{IP_A}", "CSeq: 2 PUBLISH", f'Warning: 399 {DOMAIN} "141 user unknown to the participating function"'])
     return msgs
 
 

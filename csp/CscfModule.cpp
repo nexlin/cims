@@ -34,6 +34,7 @@
 #include "GroupMap.h"
 #include "IpsecSaSet.h"
 #include "Log.h"
+#include "McServiceAuth.h"    // 서비스 인가·서비스 설정 (TS 24.379 §7.3)
 #include "McVideoAsModule.h"  // IsMcVideoRequest — 서비스별 affiliation (TS 24.281 §8)
 #include "McVideoInfo.h"      // ParseMcVideoInfo · McVideoBodyPart
 #include "McpttInfo.h"        // ParseAffiliationCommand (TS 24.379 §9 affiliation-command)
@@ -136,6 +137,13 @@ void ReclaimUserAffiliations( const std::string &strUserId, const char *pszWhy )
 
 // 요청의 MC 서비스 — MCPTT 와 MCVideo 는 같은 메서드·Event 를 쓰므로 서비스 표시(ICSI·mcvideo-info·pidf 네임스페이스)로
 //   가른다(TS 24.281 §8.2.2.2.3 3)·§8.2.2.2.4 3)). 표시가 없으면 MCPTT(기존 단말).
+namespace {
+    /** poc-settings 요청의 서비스 — P-Preferred-Service 의 ICSI(§7.2.1A 2)), 없으면 info 본문 (아래 PUBLISH 처리기) */
+    bool _PocSettingsService( CSipMessage *pclsMessage, EMcService &e );
+}  // namespace
+/** poc-settings 구독의 이벤트 종류 (CspServer.cpp) */
+extern const char *PocSettingsEventType( EMcService e );
+
 static EMcService _RequestMcService( CSipMessage *pclsMessage ) {
     return CMcVideoAsModule::IsMcVideoRequest( pclsMessage ) ? EMcService::McVideo : EMcService::Mcptt;
 }
@@ -915,6 +923,59 @@ static void _ApplyImplicitMcVideoAffiliations( CSipMessage *pclsMessage, const s
                  strUserId.c_str(), strClient.c_str(), (int)vecGroups.size(), iNew );
 }
 
+// REGISTER 의 서비스 인가 (TS 24.379 §7.3.2 · TS 24.282 §7.3.2 · TS 24.281 §7.3.2) — 서비스 태그(§7.2.1)를 실은
+// 서비스마다
+//   본문 <service>-info 의 접근 토큰·client ID 로 인가해 바인딩한다. 인가 실패는 등록을 막지 않는다(§7.3.2 에 거절이
+//   없다 — 바인딩이 없을 뿐). 태그를 뺀 재등록은 그 서비스의 로그오프다(§7.1 · §7.2.1 NOTE 1 — 바인딩 제거). 바인딩이
+//   둘 이상인 서비스는 200 OK 에 <multiple-devices-ind>(6)). Contact 없는 REGISTER(바인딩 조회)는 아무것도 바꾸지
+//   않는다.
+static void _RegisterServiceAuthorization( CSipMessage *pclsMessage, CSipMessage *pclsResponse,
+                                           const std::string &strUser ) {
+    if ( pclsMessage->m_clsContactList.empty() ) return;
+    std::string strParams;
+    for ( const auto &p : pclsMessage->m_clsContactList.front().m_clsParamList )
+        strParams += ";" + p.m_strName + ( p.m_strValue.empty() ? "" : "=" + p.m_strValue );
+    const std::string strCt =
+        pclsMessage->m_clsContentType.m_strType + "/" + pclsMessage->m_clsContentType.m_strSubType;
+    std::vector<EMcService> vecMulti;
+    for ( EMcService e : { EMcService::Mcptt, EMcService::McVideo, EMcService::McData } ) {
+        const bool bTagged = e == EMcService::McVideo  ? McVideoContactCapable( strParams )
+                             : e == EMcService::McData ? strParams.find( "icsi.mcdata" ) != std::string::npos
+                                                       : McpttContactCapable( strParams );
+        if ( !bTagged ) {
+            gclsMcServiceAuth.Unbind( e, strUser );
+            continue;
+        }
+        const std::string strInfo = McBodyPart( pclsMessage->m_strBody, strCt, McInfoSubtype( e ) );
+        if ( strInfo.empty() ) continue;
+        const std::string strPre = McInfoPrefix( e );
+        std::string strToken, strClientId, strWhy;
+        McpttElemValue( strInfo, ( strPre + "-access-token" ).c_str(), strToken );
+        McpttElemValue( strInfo, ( strPre + "-client-id" ).c_str(), strClientId );
+        if ( strToken.empty() ) continue;
+        if ( gclsMcServiceAuth.Authorize( e, strUser, strToken, strClientId, strWhy ) != EMcAuthResult::Ok ) {
+            CLog::Print( LOG_INFO, "REGISTER %s — %s 서비스 인가 안 됨(%s) — 등록은 그대로", strUser.c_str(),
+                         McServiceName( e ), strWhy.c_str() );
+            continue;
+        }
+        if ( gclsMcServiceAuth.BindingCount( e, strUser ) > 1 ) vecMulti.push_back( e );
+    }
+    if ( vecMulti.empty() ) return;
+    if ( vecMulti.size() == 1 ) {
+        pclsResponse->m_strBody = McMultipleDevicesDoc( vecMulti.front() );
+        pclsResponse->m_clsContentType.Set( "application", McInfoSubtype( vecMulti.front() ) );
+    } else {
+        const std::string strB = "mdi-" + strUser;
+        for ( EMcService e : vecMulti )
+            pclsResponse->m_strBody += "--" + strB + "\r\nContent-Type: application/" + McInfoSubtype( e ) +
+                                       "\r\n\r\n" + McMultipleDevicesDoc( e ) + "\r\n";
+        pclsResponse->m_strBody += "--" + strB + "--\r\n";
+        pclsResponse->m_clsContentType.Set( "multipart", "mixed" );
+        pclsResponse->m_clsContentType.InsertParam( "boundary", strB.c_str() );
+    }
+    pclsResponse->m_iContentLength = (int)pclsResponse->m_strBody.size();
+}
+
 bool CCscfModule::RecvRequestRegister( int iThreadId, CSipMessage *pclsMessage ) {
     // 요청 수명 (RFC 3261 §10.2.1.1: Contact ;expires > Expires 헤더). 형식 오류 → 400 (§21.4.1).
     uint32_t uiReqExpires = 0;
@@ -1109,6 +1170,7 @@ bool CCscfModule::RecvRequestRegister( int iThreadId, CSipMessage *pclsMessage )
         // DB logout_time 갱신 + CspUserMap 캐시 업데이트 — 해지는 즉시 회수다(flow 실패 유예가 걸려 있었으면 거둔다)
         gclsAffiliationGrace.Cancel( strUserId );
         gclsCspUserMap.unregisterUser( strUserId );
+        gclsMcServiceAuth.UnbindAll( strUserId );  // 서비스 인가 바인딩은 등록과 함께 산다(McServiceAuth.h)
         if ( gclsCallDir.IsEnabled() ) gclsCallDir.DeviceSeen( "unregister", strUserId, "", "", "", "", "", 0, "" );
         // PTT 그룹콜 세션 정리 (활성 호 있으면 BYE + DB 갱신)
         gclsGroupCallService.ClearUserCall( strUserId );
@@ -1234,6 +1296,8 @@ bool CCscfModule::RecvRequestRegister( int iThreadId, CSipMessage *pclsMessage )
             snprintf( szPAUri, sizeof( szPAUri ), "<sip:%s@%s>", strUser.c_str(), strRegDomain.c_str() );
             pclsResponse->AddHeader( "P-Associated-URI", szPAUri );
         }
+
+        _RegisterServiceAuthorization( pclsMessage, pclsResponse, clsUser.m_strId );
 
         gclsUserAgent.m_clsSipStack.SendSipMessage( pclsResponse );
 
@@ -1414,6 +1478,30 @@ bool CCscfModule::RecvRequestSubscribe( int iThreadId, CSipMessage *pclsMessage 
         strEventType = "gms";
     } else if ( strReqUri.find( "cms" ) != std::string::npos ) {
         strEventType = "cms";
+    } else if ( strEventHdr == "poc-settings" ) {
+        // 서비스 설정 구독 (TS 24.379 §7.3.6.1 · TS 24.282 · TS 24.281 같은 절) — 서비스 = ICSI, 대상 =
+        // <…-request-uri>.
+        //   요청자 MC ID 와 대상이 다르면 403(3)). 대상이 없으면 이 절차의 요청이 아니다 — 400.
+        EMcService ePoc = EMcService::Mcptt;
+        if ( !_PocSettingsService( pclsMessage, ePoc ) ) return SendResponse( pclsMessage, SIP_BAD_REQUEST );
+        const std::string strCt =
+            pclsMessage->m_clsContentType.m_strType + "/" + pclsMessage->m_clsContentType.m_strSubType;
+        std::string strServed;
+        McpttElemValue( McBodyPart( pclsMessage->m_strBody, strCt, McInfoSubtype( ePoc ) ),
+                        ( std::string( McInfoPrefix( ePoc ) ) + "-request-uri" ).c_str(), strServed );
+        strServed = McpttBareId( strServed );
+        SubscriptionInfo clsPocPrev;  // 갱신·해지(in-dialog, §7.2.4)는 본문이 없다 — 앞 구독의 것
+        if ( strServed.empty() && !gclsSubscriptionManager.GetSubscriptionByCallId( strSubCallId, clsPocPrev ) ) {
+            CLog::Print( LOG_INFO, "SUBSCRIBE poc-settings(%s) from %s — <%s-request-uri> 없음 → 400",
+                         McServiceName( ePoc ), strFromId.c_str(), McInfoPrefix( ePoc ) );
+            return SendResponse( pclsMessage, SIP_BAD_REQUEST );
+        }
+        if ( !strServed.empty() && strServed != strFromId ) {
+            CLog::Print( LOG_INFO, "SUBSCRIBE poc-settings(%s) from %s for %s → 403 (§7.3.6.1 3))",
+                         McServiceName( ePoc ), strFromId.c_str(), strServed.c_str() );
+            return SendResponse( pclsMessage, SIP_FORBIDDEN );
+        }
+        strEventType = PocSettingsEventType( ePoc );
     } else if ( !strEventHdr.empty() && strEventHdr != "xcap-diff" ) {
         // RFC 6665 §8.2.1 — 지원하지 않는 이벤트 패키지는 489 Bad Event. 구 구현은 미지 Event 를
         //   조용히 gms 로 오분류해 엉뚱한 xcap-diff NOTIFY 를 냈다. gms/cms 는 Event: xcap-diff +
@@ -1795,6 +1883,13 @@ bool CCscfModule::RecvRequestPublish( int iThreadId, CSipMessage *pclsMessage ) 
         CLog::Print( LOG_INFO, "PUBLISH from unregistered %s accepted by Digest identity", strFromId.c_str() );
     }
 
+    // 서비스 인가·서비스 설정 (TS 24.379 §7.3.3~§7.3.5 · TS 24.282 · TS 24.281 같은 절)
+    {
+        CSipHeader *pclsPocEv = pclsMessage->GetHeader( "Event" );
+        if ( pclsPocEv && pclsPocEv->m_strValue == "poc-settings" )
+            return RecvPublishPocSettings( pclsMessage, strFromId );
+    }
+
     // Event 헤더 검증 — 두 형태를 받는다(전환기).
     //   규격형 "presence" = TS 24.379 §9.2.2.2.3 (R-URI=참여 기능 PSI, 본문 pidf+xml 이 제휴 그룹 집합 전체).
     //   구형   "mcptt"    = 우리 자체 규약 (R-URI=그룹, 본문 affiliation-command+xml). 우리 SDK·앱이 아직 이 형태다.
@@ -1927,6 +2022,208 @@ bool CCscfModule::RecvRequestPublish( int iThreadId, CSipMessage *pclsMessage ) 
 
     // 200 OK (SIP-ETag · Expires) — de-affiliate 는 Expires 0 이고 ETag 저장소에서 지운다.
     _SendPublishOk( pclsMessage, strEtagKey, bDeaffiliate ? 0 : ( iExpires > 0 ? iExpires : 3600 ) );
+    return true;
+}
+
+// ──────────────────────────────────────────────────────────────
+//  PUBLISH poc-settings — 서비스 인가·서비스 설정 (TS 24.379 §7.3.3~§7.3.5 · TS 24.282 §7.3.3~§7.3.5 ·
+//   TS 24.281 §7.3.3~§7.3.5, RFC 3903 · RFC 4354). 서비스 = P-Preferred-Service 의 ICSI(§7.2.1A 2)), 없으면 info 본문.
+// ──────────────────────────────────────────────────────────────
+namespace {
+    struct PocPublication {
+        EMcService e = EMcService::Mcptt;
+        std::string strMcId, strClientId;
+    };
+    std::mutex s_pocEtagMutex;
+    std::map<std::string, PocPublication> s_mapPocEtag;  ///< SIP-ETag → publication (RFC 3903 §6)
+
+    bool _PocSettingsService( CSipMessage *pclsMessage, EMcService &e ) {
+        std::string strSvc;
+        for ( const char *pszName : { "P-Preferred-Service", "P-Asserted-Service" } )
+            if ( CSipHeader *pH = pclsMessage->GetHeader( pszName ) ) strSvc += pH->m_strValue + ",";
+        if ( strSvc.find( "icsi.mcvideo" ) != std::string::npos ) {
+            e = EMcService::McVideo;
+            return true;
+        }
+        if ( strSvc.find( "icsi.mcdata" ) != std::string::npos ) {
+            e = EMcService::McData;
+            return true;
+        }
+        if ( strSvc.find( "icsi.mcptt" ) != std::string::npos ) {
+            e = EMcService::Mcptt;
+            return true;
+        }
+        const std::string strCt =
+            pclsMessage->m_clsContentType.m_strType + "/" + pclsMessage->m_clsContentType.m_strSubType;
+        for ( EMcService c : { EMcService::Mcptt, EMcService::McVideo, EMcService::McData } )
+            if ( !McBodyPart( pclsMessage->m_strBody, strCt, McInfoSubtype( c ) ).empty() ) {
+                e = c;
+                return true;
+            }
+        return false;
+    }
+
+    std::string _NewPocEtag( CSipMessage *pclsMessage ) {
+        struct timespec ts;
+        clock_gettime( CLOCK_REALTIME, &ts );
+        char szEtag[64];
+        snprintf( szEtag, sizeof( szEtag ), "poc-%llx%08x",
+                  (unsigned long long)ts.tv_sec * 1000ULL + (unsigned long long)ts.tv_nsec / 1000000ULL,
+                  (unsigned)( ts.tv_nsec ^ (uintptr_t)pclsMessage ) );
+        return szEtag;
+    }
+}  // namespace
+
+/** poc-settings 구독자에게 설정 변화 통지 (TS 24.379 §7.3.6.2 — CspServer.cpp) */
+extern void SendPocSettingsNotify( EMcService eService, const std::string &strMcId );
+
+bool CCscfModule::RecvPublishPocSettings( CSipMessage *pclsMessage, const std::string &strImpu ) {
+    EMcService e = EMcService::Mcptt;
+    if ( !_PocSettingsService( pclsMessage, e ) ) {
+        CLog::Print( LOG_INFO, "PUBLISH poc-settings from %s — 서비스 표시(ICSI·info 본문) 없음 → 400",
+                     strImpu.c_str() );
+        return SendResponse( pclsMessage, SIP_BAD_REQUEST );
+    }
+    const char *pszSvc = McServiceName( e );
+    const std::string strPtt = gclsServiceMap.GetDomainByKind( "ptt" );
+    uint32_t uiExpires = 0;
+    const ESipExpiresResult eExp = pclsMessage->GetExpires( uiExpires );
+    if ( eExp == E_SIP_EXPIRES_INVALID ) return SendResponse( pclsMessage, SIP_BAD_REQUEST );
+    const bool bRemove = eExp == E_SIP_EXPIRES_VALID && uiExpires == 0;
+
+    // RFC 3903 §6 2)·3) — SIP-If-Match 는 이 서버가 준 publication 의 갱신·제거다. 모르는 ETag 면 412, 남의 것이면 403.
+    PocPublication clsPrev;
+    std::string strPrevEtag;
+    if ( CSipHeader *pIf = pclsMessage->GetHeader( "SIP-If-Match" ) ) {
+        strPrevEtag = pIf->m_strValue;
+        std::lock_guard<std::mutex> lock( s_pocEtagMutex );
+        auto it = s_mapPocEtag.find( strPrevEtag );
+        if ( it == s_mapPocEtag.end() ) {
+            CLog::Print( LOG_INFO, "PUBLISH poc-settings(%s) from %s — SIP-If-Match %s 모름 → 412", pszSvc,
+                         strImpu.c_str(), strPrevEtag.c_str() );
+            return SendResponse( pclsMessage, 412 );
+        }
+        clsPrev = it->second;
+        if ( clsPrev.strMcId != strImpu || clsPrev.e != e ) return SendResponse( pclsMessage, SIP_FORBIDDEN );
+    }
+
+    // §7.3.5 — Expires 0 = 설정 제거 = 그 클라이언트의 로그오프: 설정·제휴·바인딩을 지운다(NOTE — 제휴 제거 포함).
+    //   제휴는 아직 사용자 단위 키다(클라이언트 단위 = 규격 갭 WP S12) — 그 사용자의 그 서비스 제휴를 지운다.
+    if ( bRemove ) {
+        if ( strPrevEtag.empty() ) return SendResponse( pclsMessage, SIP_BAD_REQUEST );  // RFC 3903 §6 2)
+        gclsMcServiceAuth.Unbind( e, strImpu, clsPrev.strClientId );
+        if ( e != EMcService::McData && gclsDbManager.IsConnected() ) {
+            std::vector<std::string> vecGroups;
+            gclsDbManager.SelectAffiliatedGroupsByUser( strImpu, vecGroups, e );
+            if ( !vecGroups.empty() ) {
+                gclsDbManager.RemoveAffiliationsByUser( strImpu, e );
+                for ( const auto &g : vecGroups ) EmitAffiliationChanged( g, "de-affiliate", strImpu, e );
+                SendAffiliationNotify( strImpu, "", e );
+            }
+        }
+        {
+            std::lock_guard<std::mutex> lock( s_pocEtagMutex );
+            s_mapPocEtag.erase( strPrevEtag );
+        }
+        CLog::Print( LOG_INFO, "PUBLISH poc-settings(%s) from %s client %s — 설정 제거·로그오프", pszSvc,
+                     strImpu.c_str(), clsPrev.strClientId.c_str() );
+        CSipMessage *pclsOk = pclsMessage->CreateResponseWithToTag( SIP_OK );
+        if ( pclsOk ) {
+            pclsOk->AddHeader( "SIP-ETag", _NewPocEtag( pclsMessage ).c_str() );
+            pclsOk->AddHeader( "Expires", "0" );
+            gclsUserAgent.m_clsSipStack.SendSipMessage( pclsOk );
+        }
+        SendPocSettingsNotify( e, strImpu );
+        return true;
+    }
+
+    // 본문 — <service>-info(접근 토큰 또는 request-uri · client ID) + poc-settings. 본문 없는 갱신(RFC 3903 §4.3)은
+    //   ETag 만 새로 낸다.
+    const std::string strCt =
+        pclsMessage->m_clsContentType.m_strType + "/" + pclsMessage->m_clsContentType.m_strSubType;
+    const std::string strInfo = McBodyPart( pclsMessage->m_strBody, strCt, McInfoSubtype( e ) );
+    const std::string strPoc = McBodyPart( pclsMessage->m_strBody, strCt, "poc-settings+xml" );
+    std::string strClientId = clsPrev.strClientId;
+    if ( pclsMessage->m_strBody.empty() ) {
+        if ( strPrevEtag.empty() ) return SendResponse( pclsMessage, SIP_BAD_REQUEST );
+    } else {
+        if ( strInfo.empty() || strPoc.empty() ) {
+            CLog::Print( LOG_INFO, "PUBLISH poc-settings(%s) from %s — %s-info·poc-settings 본문 없음 → 400", pszSvc,
+                         strImpu.c_str(), McInfoPrefix( e ) );
+            return SendResponse( pclsMessage, SIP_BAD_REQUEST );
+        }
+        const std::string strPre = McInfoPrefix( e );
+        std::string strToken, strReqUri;
+        McpttElemValue( strInfo, ( strPre + "-access-token" ).c_str(), strToken );
+        McpttElemValue( strInfo, ( strPre + "-client-id" ).c_str(), strClientId );
+        McpttElemValue( strInfo, ( strPre + "-request-uri" ).c_str(), strReqUri );
+        if ( strClientId.empty() ) return SendResponse( pclsMessage, SIP_BAD_REQUEST );
+        if ( !strToken.empty() ) {
+            // §7.3.3 — 서비스 인가 + 설정: 토큰 검증 → (MC ID, client ID, IMPU) 바인딩. 실패 403 101, IdMS 에 닿지
+            // 못하면
+            //   요청을 처리할 수 없다 — 500 + Retry-After(§7.3.3 1) 와 같은 응답).
+            std::string strWhy;
+            const EMcAuthResult r = gclsMcServiceAuth.Authorize( e, strImpu, strToken, strClientId, strWhy );
+            if ( r == EMcAuthResult::Failed ) {
+                CLog::Print( LOG_INFO, "PUBLISH poc-settings(%s) from %s — 서비스 인가 실패(%s) → 403 101", pszSvc,
+                             strImpu.c_str(), strWhy.c_str() );
+                return SendResponseWithWarning( pclsMessage, SIP_FORBIDDEN,
+                                                McpttWarning( 101, "service authorisation failed", strPtt ).c_str() );
+            }
+            if ( r == EMcAuthResult::Unavailable ) {
+                CLog::Print( LOG_ERROR, "PUBLISH poc-settings(%s) from %s — 서비스 인가 판정 불능(%s) → 500", pszSvc,
+                             strImpu.c_str(), strWhy.c_str() );
+                CSipMessage *pclsResp = pclsMessage->CreateResponseWithToTag( SIP_INTERNAL_SERVER_ERROR );
+                if ( pclsResp ) {
+                    pclsResp->AddHeader( "Retry-After", "5" );
+                    gclsUserAgent.m_clsSipStack.SendSipMessage( pclsResp );
+                }
+                return true;
+            }
+        } else if ( McpttBareId( strReqUri ) != strImpu || !gclsMcServiceAuth.HasBinding( e, strImpu, strClientId ) ) {
+            // §7.3.4 4)·6) — 설정만: 그 IMPU 와 MC ID(<…-request-uri>)·클라이언트의 바인딩이 있어야 한다
+            CLog::Print( LOG_INFO, "PUBLISH poc-settings(%s) from %s request-uri(%s) client %s — 바인딩 없음 → 404 141",
+                         pszSvc, strImpu.c_str(), strReqUri.c_str(), strClientId.c_str() );
+            return SendResponseWithWarning(
+                pclsMessage, SIP_NOT_FOUND,
+                McpttWarning( 141, "user unknown to the participating function", strPtt ).c_str() );
+        }
+        // 설정 캐시(§7.3.3 8)·10) · §7.3.4 8)·10)) — entity id = 그 클라이언트(Instance ID URN), 없으면 첫 entity
+        const std::vector<McPocEntity> vecEnt = ParsePocSettings( strPoc );
+        const McPocEntity *pEnt = vecEnt.empty() ? NULL : &vecEnt.front();
+        for ( const auto &ent : vecEnt )
+            if ( ent.strId == strClientId ) pEnt = &ent;
+        if ( pEnt ) gclsMcServiceAuth.SetSettings( e, strImpu, strClientId, *pEnt );
+        CLog::Print( LOG_INFO, "PUBLISH poc-settings(%s) from %s client %s — answer-mode=%s profile=%d", pszSvc,
+                     strImpu.c_str(), strClientId.c_str(), pEnt ? pEnt->strAnswerMode.c_str() : "-",
+                     pEnt ? pEnt->iUserProfileIndex : -1 );
+    }
+
+    // 200 OK — SIP-ETag(새 값) · Expires(요청 값, 없으면 2^32-1 — §7.2.1A 4)) · 바인딩이 둘 이상이면
+    // multiple-devices-ind
+    const std::string strEtag = _NewPocEtag( pclsMessage );
+    {
+        std::lock_guard<std::mutex> lock( s_pocEtagMutex );
+        if ( !strPrevEtag.empty() ) s_mapPocEtag.erase( strPrevEtag );
+        PocPublication pub;
+        pub.e = e;
+        pub.strMcId = strImpu;
+        pub.strClientId = strClientId;
+        s_mapPocEtag[strEtag] = pub;
+    }
+    CSipMessage *pclsOk = pclsMessage->CreateResponseWithToTag( SIP_OK );
+    if ( pclsOk ) {
+        pclsOk->AddHeader( "SIP-ETag", strEtag.c_str() );
+        pclsOk->AddHeader( "Expires",
+                           eExp == E_SIP_EXPIRES_VALID ? std::to_string( uiExpires ).c_str() : "4294967295" );
+        if ( gclsMcServiceAuth.BindingCount( e, strImpu ) > 1 ) {
+            pclsOk->m_strBody = McMultipleDevicesDoc( e );
+            pclsOk->m_iContentLength = (int)pclsOk->m_strBody.size();
+            pclsOk->m_clsContentType.Set( "application", ( std::string( McInfoSubtype( e ) ) ).c_str() );
+        }
+        gclsUserAgent.m_clsSipStack.SendSipMessage( pclsOk );
+    }
+    SendPocSettingsNotify( e, strImpu );
     return true;
 }
 

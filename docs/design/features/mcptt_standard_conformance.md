@@ -79,7 +79,7 @@ CIMS 에 **아직 구현되지 않은** 기능을 규격 위치와 함께 나열
 | **Remotely initiated call** (원격 개시) | TS 24.379 | ✗ |
 | **User/Group regroup** (임시 그룹) | TS 24.379 + GMS(TS 24.481) | ✗ |
 | **Functional alias** 활성/비활성 | TS 24.379 / TS 24.484 | ✗ |
-| **서비스 설정** PUBLISH·구독(`Event: poc-settings` — Answer-Mode·선택한 user profile) | TS 24.379 §7.2.2~§7.2.4 · §7.3.3~§7.3.6 | ✗ — 489 (conformance_gap_plan.md S25) |
+| **서비스 인가·서비스 설정** PUBLISH·구독(`Event: poc-settings` — 접근 토큰·Answer-Mode·선택한 user profile) | TS 24.379 §7.2·§7.3 | △ 받는다(C10) — 141 판정을 바인딩 기준으로·설정 없는 착신 480 146 은 단말 짝(U09) 뒤(conformance_gap_plan.md S25 단계 B) |
 | **협상 모드 제휴 변경**(타인 제휴 MESSAGE) · **규칙 기반 제휴** | TS 24.379 §9.2.1.4·§9.2.1.5 · §9.2.1.7 | ✗ |
 | **그룹 동적 데이터 구독**(그룹 상태·호 진행·제휴 멤버) | TS 24.379 §9.2.1.6 · §9.2.2.3.9~10 | ✗ — 그 구독을 제휴 구독으로 받는다(mcptt_conformance_gaps.md AFF-10) |
 | **XML 기밀성·무결성 보호**(mcptt-info 요소 암호화·서명) | TS 24.379 §4.8 · §6.6 | ✗ — service configuration 이 «꺼짐»(false)을 알린다 |
@@ -584,7 +584,7 @@ DB 단절이면 fan-out 과 같이 검사를 건너뛴다(affiliation 원천 = `
 - 필수 멤버 없이 진행한 뒤의 in-dialog MESSAGE 안내(§6.3.3.3 1)b)·c) "may")는 보내지 않는다.
 - 개시 전 affiliation 인원 검사(§10.1.1.4.2 14)g)i) — `<on-network-minimum-number-of-affiliated-members>`·`<on-network-affiliation-to-group-required>`
   미달 시 480 + 112)는 그룹 문서 요소가 없어 하지 않는다.
-- 멤버별 응답 방식(poc-settings Answer-Mode, §6.3.2.2.5·§6.3.2.2.6)을 받지 않는다 — 모든 멤버를 자동 응답으로 본다(C4f).
+- 멤버별 응답 방식 = 그 멤버의 poc-settings Answer-Mode(§6.3.2.2.5·§6.3.2.2.6 — C10), 받지 못한 멤버는 자동 응답으로 본다(C4f).
 
 ### C4h. 개시 INVITE 대상 — 참여 기능 PSI + 본문 (TS 24.379 §10.1.1.2.1.1 · §11.1.1.2.1.1 · §11.1.2)
 
@@ -625,13 +625,41 @@ DB 단절이면 fan-out 과 같이 검사를 건너뛴다(affiliation 원천 = `
   | 만료 | candidate expiration interval(암시적 제휴용 값은 정의되지 않음 — PUBLISH Expires 로만 정의) · 이미 제휴된 그룹은 새로 넣지 않음(§9.2.2.2.15 8) b)) | **등록 수명**(부여 등록 만료)으로 기록하고 재등록마다 갱신 — 등록이 살아 있는 동안 끊기지 않게. 해지 REGISTER 는 제휴 전부 해제(종전 그대로) |
   | N2 상한 | 초과분을 정책으로 줄임(§9.2.2.2.15 9) c)) | 적용하지 않음 — PUBLISH 경로(C1)와 같다 |
   | 확정 | "affiliating" → 제어 기능 PUBLISH(§9.2.2.2.6) → affiliated | 참여·제어 기능이 한 서버라 곧바로 affiliated 로 기록 |
-  | 계기 | 서비스 인가·서비스 설정 PUBLISH 수신(§7.3.3 13) · §7.3.4 13)) — REGISTER 절차(§7.3.2)에는 이 단계가 없다 | **PTT REGISTER 200 뒤** — 서비스 설정 PUBLISH(poc-settings)를 받지 않는다(489 — §0-R «서비스 설정») |
+  | 계기 | 서비스 인가·서비스 설정 PUBLISH 수신(§7.3.3 13) · §7.3.4 13)) — REGISTER 절차(§7.3.2)에는 이 단계가 없다 | **PTT REGISTER 200 뒤** — 우리 단말이 poc-settings 를 보내기 전(S25 단계 B 에서 §7.3.3 13) 계기로 옮긴다, C10) |
 
 - **③ ad hoc** — 제어 기능은 초대한 멤버를 그 ad hoc 그룹에 암시적으로 제휴된 것으로 본다(§17.4.2.2 16), 참여자 변경 §17.4.5.1.1 vi)·
   §17.4.5.2.1 d)). CSP 는 ad hoc 그룹을 통화 때 만들며 `require_affiliation = false` 로 둬(`ModuleDispatcher.cpp`) 명단 전원을
   초대하고, 명단 밖 재합류는 멤버십 검사로 막으며, 제휴 멤버 최소 인원 조건(§17.4.3.1.1.1 1))은 쓰지 않는다 — 결과가 같다.
   ad hoc 그룹은 DB 그룹이 아니라(임시) `ptt_affiliations` 행을 남기지 않는다.
 - 우리 단말 앱은 소속 그룹 전부에 스스로 PUBLISH 한다(C1) — 설정과 무관하게 동작이 같다.
+
+### C10. 서비스 인가·서비스 설정 — TS 24.379 §7.3 (MCData TS 24.282 §7.3 · MCVideo TS 24.281 §7.3 같은 틀)
+
+참여 기능(`CMcServiceAuth` — `csp/McServiceAuth.{h,cpp}`·`McServiceAuthDoc.cpp`)이 서비스마다 (MC ID, MC client ID, IMPU) **바인딩**과
+그 클라이언트의 **서비스 설정**을 둔다.
+
+| 요청 | 처리 | 근거 |
+|---|---|---|
+| 서비스 인가 — REGISTER 본문 `<…-info>` 의 `<…-access-token>`·`<…-client-id>`(서비스 태그를 실은 서비스만) | 토큰을 IdMS `POST /idms/introspect`(RFC 7662, CSC 공개 base)로 검증 — `active` · 서비스 scope(`3gpp:mc:ptt_service`·`data_service`·`video_service`) · 토큰 MC ID(MCData = `mcdata_id`, 그 밖 `mcptt_id`) = IMPU 사용자부 → 바인딩. 실패는 등록을 막지 않는다(바인딩이 없을 뿐). 바인딩 둘 이상이면 200 OK 에 `<multiple-devices-ind>true` | §7.3.2 |
+| 서비스 인가 + 설정 — PUBLISH `Event: poc-settings` · R-URI = 참여 기능 PSI · `P-Preferred-Service` = 서비스 ICSI · 본문 = info(토큰·client ID) + poc-settings | 위 검증 → 바인딩 → 설정 캐시 → 200 OK(`SIP-ETag`·`Expires` = 요청 값, 없으면 4294967295·바인딩 둘 이상이면 multiple-devices-ind) → poc-settings 구독자 NOTIFY. 인가 실패 403 + `101 service authorisation failed`, IdMS 에 닿지 못하면 500 + `Retry-After: 5` | §7.3.3 |
+| 설정만 — info `<…-request-uri>` = 자기 MC ID · client ID + poc-settings | 그 IMPU·MC ID·client 의 바인딩이 있어야 한다 — 없으면 404 + `141`. 설정 캐시 → 200 | §7.3.4 |
+| 설정 제거(= 그 클라이언트의 로그오프) — `Expires: 0` + `SIP-If-Match` | 설정·바인딩 제거, 그 사용자의 그 서비스 제휴 제거(제휴는 아직 사용자 단위 키 — WP S12) → 200 | §7.3.5 · RFC 3903 §4.5 |
+| 갱신 — `SIP-If-Match` | 이 서버가 낸 ETag 여야 한다 — 모르면 412, 남의 publication 이면 403. 본문 없는 갱신은 ETag 만 새로 | RFC 3903 §6 |
+| 설정 구독 — SUBSCRIBE `Event: poc-settings` · info `<…-request-uri>` = 자기 MC ID | 남의 설정 구독 403. 200 + NOTIFY(`application/poc-settings+xml` — 그 사용자 클라이언트들의 entity: `am-settings`·`mcs10Set:selected-user-profile-index`·`multiplex-support`), 설정이 바뀔 때마다 NOTIFY. 갱신·해지(in-dialog)는 본문 없이 받는다 | §7.3.6 · RFC 4354 |
+| 서비스 태그를 뺀 재-REGISTER | 그 서비스의 로그오프 — 바인딩 제거(MCPTT = `+g.3gpp.mcptt`·MCPTT icsi-ref, MCVideo = §7.2.1AA 태그, MCData = icsi-ref `mcdata`) | §7.1 · §7.2.1 NOTE 1 |
+| 등록 해제·만료 | 모든 서비스의 바인딩 제거(flow 실패는 제휴와 같이 유예 뒤 — registration_binding_set.md §4.4) | §7.3.5 NOTE |
+| 초대 INVITE 의 `Answer-Mode` | 그 멤버의 Answer-Mode Indication(`manual` → `Manual`), 받지 못했으면 `Auto` — MCPTT 그룹 호·MCVideo 그룹 호. 개별 호는 발신 값을 옮긴다(C4a) | §7.3.3 10) · §6.3.2.2.5.2 |
+
+- 골든 = `tests/fixtures/mcptt/sip/14~19`(인가+설정·설정만·제거·구독·403 101·404 141). 단위시험 `tests/csp_mcptt_request_test.cpp`(S1-UNIT-CSP).
+- CIMS 는 단일 MC service ID(TS 23.280 §10.1.4.1 — [mcx_identity_scope.md](mcx_identity_scope.md) §1)라 토큰의 MC ID 가 요청 IMPU 와 같아야
+  인가한다. 바인딩은 메모리에 두고 등록과 함께 산다(재기동 뒤에는 단말의 다음 인가로 다시 선다).
+- **배포 두 단계**(K4 — 스위치 없이 배포 순서만 맞춘다): 지금(단계 A) 141 판정은 «등록 있음» 이고 설정이 없는 단말에게도 초대가 간다.
+  **단계 B**(우리 SDK·앱이 poc-settings 인가를 보낸 뒤 — U09) = 141 을 서비스 인가 바인딩 기준으로(§10.1.1.3.1.1 2a) 등), 설정을 받지 못한
+  단말에게 가는 초대는 480 + `146 T-PF unable to determine the service settings for the called user`(§10.1.1.3.2 3) · §11.1.1.3.2 7a) ·
+  §17.3.2.2.2 3)), 서비스 태그 없는 바인딩은 팬아웃에서 뺀다, 설정 그룹 암시적 제휴 계기를 §7.3.3 13) 로(C9).
+- **규격 대비 편차**: 동시 인가 상한(`<user-max-simultaneous-authorizations>`·`<max-simultaneous-authorizations>` → 486 164, §7.3.3 3a)·3b)) ·
+  XML 기밀성·무결성(140 — §7.3.1A, service configuration 이 «꺼짐») · CSK 내려받기(§7.3.7)는 하지 않는다. 선택 user profile 은 캐시만 한다
+  (CIMS user profile 은 사용자당 하나 — NOTE 3).
 
 ### C5. 등록/구독 SIP 메시지 — 실망(상용 IMS) 패킷 형태 정합
 

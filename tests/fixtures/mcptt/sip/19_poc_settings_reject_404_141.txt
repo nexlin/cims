@@ -1,0 +1,9 @@
+SIP/2.0 404 Not Found
+Via: SIP/2.0/TLS 10.10.1.21:50601;branch=z9hG4bK-poc-p2;rport=50601;received=10.10.1.21
+From: <sip:+82510002001@ptt.cims.example.kr>;tag=poc-a1-f
+To: <sip:+82510002001@ptt.cims.example.kr>;tag=csp-e141
+Call-ID: poc-a1@10.10.1.21
+CSeq: 2 PUBLISH
+Warning: 399 ptt.cims.example.kr "141 user unknown to the participating function"
+Content-Length: 0
+

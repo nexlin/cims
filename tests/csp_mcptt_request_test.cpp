@@ -21,6 +21,7 @@
 #include <sstream>
 
 #include "McDataCodec.h"
+#include "McServiceAuth.h"
 #include "McpttInfo.h"
 #include "McpttSdp.h"
 #include "SdpMessage.h"
@@ -407,6 +408,76 @@ int main() {
            "<mcpttinfo><mcptt-Params><alert-ind>true</alert-ind></mcptt-Params>"
            "</mcpttinfo>",
            "text/plain") == EMcAlertService::None);
+  }
+
+  // ── 서비스 인가·서비스 설정 (TS 24.379 §7.3 · RFC 4354 · RFC 7662 — WP S25) ──
+  {
+    const Golden g = Load("14_poc_settings_publish_auth.txt");
+    CK("14 PUBLISH poc-settings · PSI · Expires 2^32-1",
+       g.strStart == "PUBLISH sip:mcptt_psi@ptt.cims.example.kr SIP/2.0" &&
+           g.strHead.find("Event: poc-settings") != std::string::npos &&
+           g.strHead.find("Expires: 4294967295") != std::string::npos);
+    std::string strTok, strCid;
+    const std::string strInfo =
+        McBodyPart(g.strBody, g.strCtype, McInfoSubtype(EMcService::Mcptt));
+    CK("14 mcptt-info 접근 토큰 · client ID",
+       McpttElemValue(strInfo, "mcptt-access-token", strTok) &&
+           !strTok.empty() &&
+           McpttElemValue(strInfo, "mcptt-client-id", strCid) &&
+           strCid == "urn:uuid:2f6b8c4e-1a2b-4c3d-9e8f-0a1b2c3d4e5f");
+    const std::vector<McPocEntity> v =
+        ParsePocSettings(McBodyPart(g.strBody, g.strCtype, "poc-settings+xml"));
+    CK("14 poc-settings entity = client · manual · profile 1 · multiplex false",
+       v.size() == 1 && v[0].strId == strCid && v[0].strAnswerMode == "manual" &&
+           v[0].iUserProfileIndex == 1 && v[0].bHasMultiplex && !v[0].bMultiplex);
+    const std::vector<McPocEntity> w = ParsePocSettings(BuildPocSettingsDoc(v));
+    CK("poc-settings 조립·해석 왕복",
+       w.size() == 1 && w[0].strId == strCid && w[0].strAnswerMode == "manual" &&
+           w[0].iUserProfileIndex == 1);
+    const Golden g15 = Load("15_poc_settings_publish_settings.txt");
+    std::string strReq;
+    CK("15 설정만 — <mcptt-request-uri> = 자기 MCPTT ID",
+       McpttElemValue(McBodyPart(g15.strBody, g15.strCtype,
+                                 McInfoSubtype(EMcService::Mcptt)),
+                      "mcptt-request-uri", strReq) &&
+           McpttBareId(strReq) == "+82510002001" &&
+           g15.strHead.find("SIP-If-Match:") != std::string::npos);
+    const Golden g16 = Load("16_poc_settings_publish_remove.txt");
+    CK("16 설정 제거 — Expires 0 · 본문 없음",
+       g16.strHead.find("Expires: 0") != std::string::npos && g16.strBody.empty());
+    CK("18 403 101 · 19 404 141",
+       Load("18_poc_settings_reject_403_101.txt").strHead.find("\"101 service authorisation failed\"") !=
+               std::string::npos &&
+           Load("19_poc_settings_reject_404_141.txt").strHead.find("\"141 user unknown") != std::string::npos);
+    // introspection 판정 (RFC 7662 — CSC /idms/introspect 응답 모양)
+    std::string why;
+    const std::string ok =
+        "{\"active\": true, \"mcptt_id\": \"tel:+82510002001\", \"mcdata_id\": "
+        "\"tel:+82510002001\", \"scope\": \"openid 3gpp:mc:ptt_service 3gpp:mc:data_service\"}";
+    CK("인가 — active·scope·MCPTT ID = IMPU",
+       McAuthVerdict(ok, EMcService::Mcptt, "+82510002001", why) == EMcAuthResult::Ok);
+    CK("인가 — MCData 는 mcdata_id·data_service",
+       McAuthVerdict(ok, EMcService::McData, "+82510002001", why) == EMcAuthResult::Ok);
+    CK("인가 실패 — MCVideo scope 없음",
+       McAuthVerdict(ok, EMcService::McVideo, "+82510002001", why) == EMcAuthResult::Failed);
+    CK("인가 실패 — 토큰 MC ID ≠ IMPU",
+       McAuthVerdict(ok, EMcService::Mcptt, "+82510002002", why) == EMcAuthResult::Failed);
+    CK("인가 실패 — 비활성 토큰",
+       McAuthVerdict("{\"active\": false}", EMcService::Mcptt, "+82510002001", why) ==
+           EMcAuthResult::Failed);
+    CK("scope 낱말 단위(3gpp:mc:ptt_service_x 는 아니다)",
+       McAuthVerdict("{\"active\": true, \"mcptt_id\": \"+82510002001\", \"scope\": "
+                     "\"3gpp:mc:ptt_service_x\"}",
+                     EMcService::Mcptt, "+82510002001", why) == EMcAuthResult::Failed);
+    CK("판정 불능 — JSON 아님",
+       McAuthVerdict("<html>502</html>", EMcService::Mcptt, "+82510002001", why) ==
+           EMcAuthResult::Unavailable);
+    CK("multiple-devices-ind 문서",
+       McMultipleDevicesDoc(EMcService::Mcptt).find("<multiple-devices-ind type=\"Normal\"><mcpttBoolean>true") !=
+           std::string::npos);
+    CK("REGISTER Contact MCPTT 태그 둘 → MCPTT 클라이언트",
+       McpttContactCapable(";+g.3gpp.mcptt;+g.3gpp.icsi-ref=\"urn%3Aurn-7%3A3gpp-service.ims.icsi.mcptt\"") &&
+           !McpttContactCapable(";+g.3gpp.icsi-ref=\"urn%3Aurn-7%3A3gpp-service.ims.icsi.mcvideo\""));
   }
 
   printf(g_fail ? "FAILED %d\n" : "ALL PASS\n", g_fail);

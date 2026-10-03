@@ -88,8 +88,8 @@ PTT(MCPTT) 서비스 구현을 3GPP 규격 원문과 대조해 **규격과 다�
 
 | # | 급 | 대상 | 규격 | CIMS 지금 | 영향 | 확인 |
 |---|---|---|---|---|---|---|
-| REG-2 | B | CSP·SDK | §7.3.3~§7.3.6 · §7.2.2~§7.2.4 — `Event: poc-settings` PUBLISH(서비스 인가·서비스 설정·Expires 0 로그오프)와 SUBSCRIBE 를 받는다 (shall) | PUBLISH 는 Event 가 `mcptt`·`presence` 밖이면 489(`csp/CscfModule.cpp:1697-1703`), SUBSCRIBE 도 489(`:1353-1361`). SDK 는 보내지 않는다 | 규격 단말은 489 를 «인가 실패» 로 본다. Answer-Mode·선택한 user profile index 가 서버에 닿지 않는다. 우리 SDK 는 규격 서버에서 착신 480(146) | ◎ |
-| REG-4 | D | CSP | §7.1 · §7.2.1 NOTE 1 — MCPTT 태그를 뺀 재-REGISTER 는 MCPTT 로그오프다 | MCPTT 사용자 여부 = 가입 종류(`csp/CscfModule.cpp:1194`). Contact 태그로 가르는 것은 MCData·MCVideo 뿐(`csp/UserMap.cpp:193-206`) | MCVideo·MCData 를 남기고 MCPTT 만 로그오프할 수 없다 | ○ |
+| REG-2 | B | CSP·SDK | §7.3.3~§7.3.6 · §7.2.2~§7.2.4 — `Event: poc-settings` PUBLISH(서비스 인가·서비스 설정·Expires 0 로그오프)와 SUBSCRIBE 를 받는다 (shall) | CSP 는 받는다(S25 단계 A — 인가·설정·제거·구독, mcptt_standard_conformance.md C10). SDK 는 보내지 않는다(U09) — 그 전까지 141·146 은 켜지 않는다(단계 B) | 규격 단말은 489 를 «인가 실패» 로 본다. Answer-Mode·선택한 user profile index 가 서버에 닿지 않는다. 우리 SDK 는 규격 서버에서 착신 480(146) | ◎ |
+| REG-4 | D | CSP | §7.1 · §7.2.1 NOTE 1 — MCPTT 태그를 뺀 재-REGISTER 는 MCPTT 로그오프다 | 태그를 뺀 재-REGISTER 는 MCPTT 서비스 인가 바인딩을 지운다(S25 단계 A). 요청 판정(141)·팬아웃은 아직 등록 기준이다 — 단계 B | MCVideo·MCData 를 남기고 MCPTT 만 로그오프할 수 없다 | ○ |
 
 ### 3.2 제휴 (AFF) — TS 24.379 §9
 

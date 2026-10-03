@@ -1,0 +1,13 @@
+PUBLISH sip:mcptt_psi@ptt.cims.example.kr SIP/2.0
+Via: SIP/2.0/TLS 10.10.1.21:50601;branch=z9hG4bK-poc-p3;rport
+Max-Forwards: 70
+From: <sip:+82510002001@ptt.cims.example.kr>;tag=poc-a1-f
+To: <sip:+82510002001@ptt.cims.example.kr>
+Call-ID: poc-a1@10.10.1.21
+CSeq: 3 PUBLISH
+P-Preferred-Service: urn:urn-7:3gpp-service.ims.icsi.mcptt
+Event: poc-settings
+Expires: 0
+SIP-If-Match: poc-etag-1
+Content-Length: 0
+

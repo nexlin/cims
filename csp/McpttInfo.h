@@ -54,6 +54,12 @@ inline bool McIcsiIn( const std::string &v, const char *icsi, const char *icsiEn
     return false;
 }
 
+/** REGISTER Contact 의 MCPTT 특성 태그 둘(g.3gpp.mcptt · MCPTT icsi-ref — TS 24.379 §7.2.1 · §7.2.1AA). 빼고 다시
+ * 등록하면 MCPTT 로그오프다(§7.1 · §7.2.1 NOTE 1). contactParams = Contact 헤더 파라미터를 이은 문자열. */
+inline bool McpttContactCapable( const std::string &contactParams ) {
+    return McFeatureTagIn( contactParams, "+g.3gpp.mcptt" ) && McIcsiIn( contactParams, kMcpttIcsi, kMcpttIcsiEnc );
+}
+
 /** 그룹 호 제어 기능의 Accept-Contact 검사 — `g.3gpp.mcptt` 특성 태그와 MCPTT icsi-ref 가 둘 다 있어야 한다. 없으면 403
  *  (TS 24.379 §10.1.1.4.2 3) 편성 개시·합류 · §10.1.1.4.5.1 4) 재합류 · §10.1.2.4.1.1 2)a)b) chat · §17.4.2.2 3) 애드혹
  * 개시 · §17.4.4.1.1 4) 애드혹 재합류). acceptContacts = Accept-Contact 헤더 값들을 이은 문자열. */

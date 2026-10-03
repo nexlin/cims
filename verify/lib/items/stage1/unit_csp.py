@@ -31,7 +31,8 @@
                                    resource-lists entry 하나·없거나 둘이면 145(TS 24.379 §11.1.1.3.1.1 8)·9)) · floor 유무 = offer 의
                                    m=application … MCPTT(§11.1.2.3.1 — 포트 0·MCVideo 채널 제외, mc_no_floor_ctrl 무시) · MCData 대상 =
                                    request-type 으로(그룹 <mcdata-request-uri>·1:1 resource-lists, 403 204·205, 404 142 — TS 24.282
-                                   §9.2.2.3.1·§9.2.2.4.2·§10.2.4.4.2·§9.2.3.3.3)
+                                   §9.2.2.3.1·§9.2.2.4.2·§10.2.4.4.2·§9.2.3.3.3) · 서비스 인가·설정(poc-settings 해석·조립, IdMS
+                                   introspection 판정 — TS 24.379 §7.3, csp/McServiceAuthDoc.cpp)
   · tests/csp_rule_field_test.cpp  Rule field `<원천>.<부분>`(csp/CspRuleField.cpp — sip_service_model.md §2-5, RFC 3261 §7.3 ·
                                    §19.1.4 · §20.10, RFC 3325): 헤더 이름 대소문자·compact form · 여러 값 · host 대소문자 ·
                                    user %xx · 믿지 않는 원천의 PAI 무시 · 옛 이름 종전 값
@@ -73,7 +74,7 @@ _TESTS = {
     # MCVideo SDP·헤더 읽기(McVideoSdp.h — 헤더 전용) — 골든 SDP 를 psip SDP 파서로 읽는다
     "tests/csp_mcvideo_sdp_test.cpp": ([], ["libSdpParser.a", "libSipParser.a", "libSipPlatform.a"]),
     # 규격형 요청의 대상·floor 판정(McpttInfo.h·McpttSdp.h·McDataCodec.cpp) — 요청 형식 골든 tests/fixtures/mcptt/sip/ 를 읽는다
-    "tests/csp_mcptt_request_test.cpp": (["csp/McDataCodec.cpp"], ["libSdpParser.a", "libSipParser.a", "libSipPlatform.a"]),
+    "tests/csp_mcptt_request_test.cpp": (["csp/McDataCodec.cpp", "csp/McServiceAuthDoc.cpp"], ["libSdpParser.a", "libSipParser.a", "libSipPlatform.a"]),
 }
 _INCS = ["csp", "include", "ext/psip/SipParser", "ext/psip/SipPlatform", "ext/psip/SdpParser"]
 

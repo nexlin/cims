@@ -32,12 +32,21 @@ UE B `+82510002002`, 그룹 `tel:g101`. 참여 기능 PSI = MCPTT `sip:mcptt_psi
 | `11_conference_reject_404_137.txt` | CSP → UE | §10.1.3.3 2) · §4.4 | 진행 중 세션으로 풀리지 않는 구독(그룹 URI 만·끝난 세션의 gr·다른 그룹의 `<mcptt-request-uri>`) — 404 + `"137 the indicated group call does not exist"`. 참가자가 아니면 403 + `138` |
 | `12_rejoin_invite.txt` | UE → CSP | TS 24.379 §10.1.1.2.4.1 · §10.1.1.2.1.1 | 재합류 — 편성 그룹 호 개시 INVITE 와 같고 **Request-URI = 진행 중 세션 식별자**(개시 200 OK·멤버 INVITE Contact 의 URI 그대로 — 그룹 AoR + `gr`). Contact 특성 태그 · Accept-Contact 둘 · `P-Preferred-Service` · timer · mcptt-info `session-type prearranged` + `<mcptt-request-uri>` = 그룹 + `<mcptt-client-id>` · SDP offer(발언권 제어 채널 포함) |
 | `13_rejoin_reject_404.txt` | CSP → UE | §10.1.1.4.5.1 2) | 세션 식별자가 가리키는 그룹 호가 없다(끝난 세션의 gr · `<mcptt-request-uri>` 가 다른 그룹) — 404, **Warning 없음**. 새 세션을 열지 않는다(단말은 그룹 호 개시로 다시 건다) |
+| `14_poc_settings_publish_auth.txt` | UE → CSP | TS 24.379 §7.2.2 · §7.2.1A | 서비스 인가 + 서비스 설정 — Request-URI = MCPTT PSI · `P-Preferred-Service` · `Event: poc-settings` · `Expires: 4294967295` · multipart = mcptt-info `<mcptt-access-token>`·`<mcptt-client-id>` + poc-settings(entity id = Instance ID URN · `<am-settings><answer-mode>` · `mcs10Set:selected-user-profile-index` · `mcs10Set:multiplex-support`) |
+| `15_poc_settings_publish_settings.txt` | UE → CSP | §7.2.3 | 서비스 설정만 — mcptt-info `<mcptt-request-uri>` = 자기 MCPTT ID · `<mcptt-client-id>` + poc-settings, `SIP-If-Match`(RFC 3903 갱신) |
+| `16_poc_settings_publish_remove.txt` | UE → CSP | §7.2.1A 4) NOTE 3 · §7.3.5 | 설정 제거 = MCPTT 로그오프 — `Expires: 0` + `SIP-If-Match`, 본문 없음. 서버는 설정·제휴·바인딩을 지운다 |
+| `17_poc_settings_subscribe.txt` | UE → CSP | §7.2.4 · §7.3.6 | 서비스 설정 구독 — Request-URI = PSI · mcptt-info `<mcptt-request-uri>` = 자기 MCPTT ID · `Accept: application/poc-settings+xml` · `Expires: 4294967295`(0 = fetch) |
+| `18_poc_settings_reject_403_101.txt` | CSP → UE | §7.3.3 6) | 서비스 인가 실패 — 403 + `"101 service authorisation failed"` |
+| `19_poc_settings_reject_404_141.txt` | CSP → UE | §7.3.4 6) | 바인딩 없는 설정만 PUBLISH — 404 + `"141 user unknown to the participating function"` |
 
 서버가 정하는 값(CSP — [csp.md](../../../../docs/design/modules/csp.md) «Private call» · [mcdata_messaging.md](../../../../docs/design/features/mcdata_messaging.md) §4):
 
 - 개별 호 착신자 = resource-lists entry 하나(없거나 둘이면 403 145). Request-URI·`<mcptt-request-uri>` 는 착신자로 읽지 않는다.
 - conference 구독 = 진행 중 세션 식별자(gr)로, 참가자만 — 아니면 404 137 · 403 138. Contact = 세션 식별자, 세션 끝 = noresource 종료.
 - 세션 식별자 = 모든 leg(개시·합류 200 OK, 멤버 INVITE, in-dialog)의 Contact 에서 같은 URI `sip:<그룹>@<CSP>;gr=<토큰>` — PSI 로 개시해도 사용자부는 그룹.
+- 서비스 인가 = 접근 토큰(PUBLISH poc-settings §7.3.3 또는 REGISTER 본문 §7.3.2)을 IdMS 에 introspection(RFC 7662)으로 검증 — 활성 ·
+  scope `3gpp:mc:ptt_service` · 토큰의 MCPTT ID = 요청 IMPU 사용자부(단일 MC service ID) — 이면 (MCPTT ID, client ID, IMPU) 바인딩. 아니면 403 101.
+  설정만 PUBLISH 는 바인딩이 있어야 한다(404 141). Expires 0 = 설정·제휴·바인딩 제거. 단말의 Answer-Mode 는 그 단말에게 가는 초대의 `Answer-Mode` 다.
 - 재합류 = Request-URI 의 gr 로 진행 중 세션을 찾고 그 세션의 그룹으로 처리한다(사용자부로 가르지 않는다). 없거나 `<mcptt-request-uri>` 가 다른 그룹이면 404(Warning 없음).
 - 개별 호 floor = offer 에 `m=application <port≠0> udp MCPTT` 가 있으면 있음(반이중), 없으면 없음(전이중 — CMP `floor_control:"off"`, 착신 offer 에도 `m=application` 없음).
 - MCData 대상 = `request-type` — `group-sds`·`group-fd` → `<mcdata-request-uri>`(없으면 404 142, 그룹 문서가 없으면 404 113) · `one-to-one-sds`·`one-to-one-fd` → resource-lists entry 하나(아니면 403 204·205) · 그 밖(request-type 없음·`ad-hoc-group-sds`) → 404 142.

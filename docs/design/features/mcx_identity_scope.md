@@ -67,14 +67,14 @@ TS 33.180 B.4.2.2 의 MC 서비스 scope 중 CIMS 가 제공하는 서비스 분
 |---|---|---|
 | `openid` | ID token 발급 (OIDC) | — |
 | `cims:provisioning` | 자체 부트스트랩 `/provisioning/me`·`/directory`·`/history` | provisioning 핸들러 |
-| `3gpp:mc:ptt_service` | MCPTT 서비스 사용자 자격 | (P5 이후 CSP REGISTER — §10) |
-| `3gpp:mc:data_service` | MCData 서비스 — FD 업로드/다운로드 | `/mcdata/fd` |
+| `3gpp:mc:ptt_service` | MCPTT 서비스 사용자 자격 | CSP 서비스 인가(§6.1) |
+| `3gpp:mc:data_service` | MCData 서비스 — FD 업로드/다운로드 · 서비스 인가 | `/mcdata/fd` · CSP 서비스 인가(§6.1) |
 | `3gpp:mc:ptt_group_management_service` / `3gpp:mc:data_group_management_service` | GMS XCAP 그룹 문서 | `/org.openmobilealliance.groups` (둘 중 하나) |
 | `3gpp:mc:ptt_config_management_service` | CMS user-profile · service-config | `/org.3gpp.mcptt.*` |
 | `3gpp:mc:data_config_management_service` | (MCData 문서 서빙 시 — §10) | — |
 | `3gpp:mc:ptt_key_management_service` / `3gpp:mc:data_key_management_service` | KMS | `/keymanagement/*` (둘 중 하나) |
 
-| `3gpp:mc:video_service` | MCVideo 서비스 사용자 자격 | (CSP REGISTER — §10) |
+| `3gpp:mc:video_service` | MCVideo 서비스 사용자 자격 | CSP 서비스 인가(§6.1) |
 | `3gpp:mc:video_group_management_service` | GMS XCAP 그룹 문서(MCVideo 몫 포함 — 한 문서) | `/org.openmobilealliance.groups` (ptt·video·data 중 하나) |
 | `3gpp:mc:video_config_management_service` | CMS MCVideo user profile · service config | `/org.3gpp.mcvideo.*` |
 | `3gpp:mc:video_key_management_service` | KMS | `/keymanagement/*` (ptt·video·data 중 하나) |
@@ -153,6 +153,14 @@ Windows 관제 앱·협력업체 단말 APK·외부 SDK) 로그인/refresh 와 G
 확인 → 콘솔에서 `enforce` 로 전환(update_config, 재기동 없음) → 문제 시 `log` 로 즉시 복귀. 이행 전 발급된 access token 은
 TTL(1 h) 안에 소멸한다.
 
+### 6.1 CSP 서비스 인가 (TS 24.379·24.282·24.281 §7.3)
+
+CSP(참여 기능)는 단말이 REGISTER 본문(§7.3.2) 또는 poc-settings PUBLISH(§7.3.3)에 실은 `<mcptt-access-token>`·`<mcdata-access-token>`·
+`<mcvideo-access-token>` 을 `POST /idms/introspect`(RFC 7662 — CSC 공개 base, 호출자 인증 없음)로 검증한다 — `active` · 서비스 scope
+(`3gpp:mc:ptt_service`·`data_service`·`video_service`) · 토큰 MC ID(MCData = `mcdata_id`, MCPTT·MCVideo = `mcptt_id` — 단일 MC
+service ID) = 요청 IMPU 사용자부. 통과하면 (MC ID, client ID, IMPU) 를 바인딩하고, 아니면 403 `101 service authorisation failed`
+([mcptt_standard_conformance.md](mcptt_standard_conformance.md) C10). 스위치는 두지 않는다(규격 갭 계획 K4).
+
 ## 7. issuer · 도메인 · discovery
 
 `resolve_idms_identity` — 설정 명시값 > 유도값. 템플릿 기본값이 비어 있어 배포 overlay 에 실리지 않으므로, 운영자가
@@ -211,14 +219,13 @@ CIMS 단말의 로그인 구현은 둘이다 — SDK 코어 `CscClient::login`(`
 
 ## 10. 향후 과제
 
-- **CSP REGISTER 토큰 검증** (TS 24.379 §7.3): `<mcptt-access-token>` 에서 MCPTT ID 를 식별해 IMPU 에 결박, `3gpp:mc:ptt_service`
-  검사. CSP 의 CSC HTTP 클라이언트로 `/idms/introspect` 호출. 미탑재 단말 정책과 함께 3모드 스위치로 도입.
+- **서비스 인가 바인딩으로 요청 판정** — 141(바인딩 없는 MCPTT·MCData·MCVideo 요청)을 등록 대신 §6.1 바인딩으로 본다. 우리 단말이
+  poc-settings 인가를 보낸 뒤(규격 갭 S25 단계 B · U09).
 - **MCData XCAP 문서** (TS 24.484 §10.2~10.4: UE config·user profile·service config) — 내지 않는다. 규격 MCData 단말에게는
   1:1 SDS·FD 전부의 전제다: MCData user profile 이 없으면 `<allow-transmit-data>` 없음 = 1:1 송신 금지로 읽고(TS 24.282 §11.1 1)),
   콘텐츠 서버 주소 `<MCDataContentServerURI>`(§10.2.2.1)와 1:1 FD 상한 `<max-data-size-fd-bytes>`(service config)를 알 수 없다
   (CIMS 단말은 `/provisioning/me` 와 CSC 주소로 대신한다 — [mcdata_messaging.md](mcdata_messaging.md) §4.5).
   `3gpp:mc:data_config_management_service` 검사 대상.
-- **MCData 서비스 인가** (TS 24.282 §7.3.2 — REGISTER `<mcdata-access-token>`·MCData ID 바인딩·다중 단말·404 `141`) — MCPTT 토큰 검증과 한 짝.
 - **별칭 제거** (§5 조건 충족 후).
 - 사용자 단위 MCData 자격 플래그(현재는 PTT 가입자 전체 허가).
 - `iss` URL 고정 = `McpttServer.PublicUrl` 운영 결정.

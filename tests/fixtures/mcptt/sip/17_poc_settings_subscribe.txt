@@ -1,0 +1,21 @@
+SUBSCRIBE sip:mcptt_psi@ptt.cims.example.kr SIP/2.0
+Via: SIP/2.0/TLS 10.10.1.21:50601;branch=z9hG4bK-poc-s1;rport
+Max-Forwards: 70
+From: <sip:+82510002001@ptt.cims.example.kr>;tag=poc-s1-f
+To: <sip:mcptt_psi@ptt.cims.example.kr>
+Call-ID: poc-s1@10.10.1.21
+CSeq: 1 SUBSCRIBE
+Contact: <sip:+82510002001@10.10.1.21:50601;transport=tls>;+g.3gpp.mcptt;+g.3gpp.icsi-ref="urn%3Aurn-7%3A3gpp-service.ims.icsi.mcptt"
+P-Preferred-Service: urn:urn-7:3gpp-service.ims.icsi.mcptt
+Event: poc-settings
+Expires: 4294967295
+Accept: application/poc-settings+xml
+Content-Type: application/vnd.3gpp.mcptt-info+xml
+Content-Length: 234
+
+<?xml version="1.0" encoding="UTF-8"?>
+<mcpttinfo xmlns="urn:3gpp:ns:mcpttInfo:1.0">
+  <mcptt-Params>
+    <mcptt-request-uri type="Normal"><mcpttURI>tel:+82510002001</mcpttURI></mcptt-request-uri>
+  </mcptt-Params>
+</mcpttinfo>

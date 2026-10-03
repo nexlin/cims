@@ -80,6 +80,8 @@ private:
     /** 규격형 제휴 PUBLISH (Event: presence + application/pidf+xml, TS 24.379 §9.2.2.2.3 · MCVideo TS 24.281
      * §8.2.2.2.3). pidf 가 그 클라이언트의 제휴 그룹 **집합 전체**를 싣는다 — 목록에 없는 기존 그룹은 해제한다.
      * eService 마다 제휴 표가 따로다(ptt_affiliations · mcvideo_affiliations). */
+    /** 서비스 인가·서비스 설정 PUBLISH (Event: poc-settings — TS 24.379 §7.3.3~§7.3.5 · TS 24.282·TS 24.281 같은 절) */
+    bool RecvPublishPocSettings( CSipMessage *pclsMessage, const std::string &strImpu );
     bool RecvPublishAffiliationPidf( CSipMessage *pclsMessage, const std::string &strFromId,
                                      const std::string &strContactUri, EMcService eService );
 

@@ -1,0 +1,35 @@
+PUBLISH sip:mcptt_psi@ptt.cims.example.kr SIP/2.0
+Via: SIP/2.0/TLS 10.10.1.21:50601;branch=z9hG4bK-poc-p1;rport
+Max-Forwards: 70
+From: <sip:+82510002001@ptt.cims.example.kr>;tag=poc-a1-f
+To: <sip:+82510002001@ptt.cims.example.kr>
+Call-ID: poc-a1@10.10.1.21
+CSeq: 1 PUBLISH
+P-Preferred-Service: urn:urn-7:3gpp-service.ims.icsi.mcptt
+Event: poc-settings
+Expires: 4294967295
+Content-Type: multipart/mixed;boundary=poc-a1
+Content-Length: 1087
+
+--poc-a1
+Content-Type: application/vnd.3gpp.mcptt-info+xml
+
+<?xml version="1.0" encoding="UTF-8"?>
+<mcpttinfo xmlns="urn:3gpp:ns:mcpttInfo:1.0">
+  <mcptt-Params>
+    <mcptt-access-token type="Normal"><mcpttString>eyJhbGciOiJSUzI1NiIsImtpZCI6ImNpbXMifQ.eyJtY3B0dF9pZCI6IiI4MjUxMDAwMjAwMSJ9.c2lnbmF0dXJl</mcpttString></mcptt-access-token>
+    <mcptt-client-id type="Normal"><mcpttString>urn:uuid:2f6b8c4e-1a2b-4c3d-9e8f-0a1b2c3d4e5f</mcpttString></mcptt-client-id>
+  </mcptt-Params>
+</mcpttinfo>
+--poc-a1
+Content-Type: application/poc-settings+xml
+
+<?xml version="1.0" encoding="UTF-8"?>
+<poc-settings xmlns="urn:oma:params:xml:ns:poc:poc-settings" xmlns:mcs10Set="urn:3gpp:mcsSettings:1.0">
+  <entity id="urn:uuid:2f6b8c4e-1a2b-4c3d-9e8f-0a1b2c3d4e5f">
+    <am-settings><answer-mode>manual</answer-mode></am-settings>
+    <mcs10Set:selected-user-profile-index><mcs10Set:user-profile-index>1</mcs10Set:user-profile-index></mcs10Set:selected-user-profile-index>
+    <mcs10Set:multiplex-support>false</mcs10Set:multiplex-support>
+  </entity>
+</poc-settings>
+--poc-a1--

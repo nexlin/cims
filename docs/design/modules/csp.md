@@ -887,6 +887,12 @@ struct SubscriptionInfo {
 `mcvideo_affiliations` 에 만료 없음(NULL — «지울 때까지», 등록 해제가 행을 지운다)으로 쓰고 200 OK `Expires: 4294967295` · 통지는
 `mcvideo_affiliation` 구독자에게 `mcvideoPresInfo` 문서. 제휴 감사 이벤트(E-AUD-009)는 `service` 를 싣는다. pidf 해석은 시작태그의 `>` 뒤로
 넘어가며 찾는다(접두사 길이와 무관).
+**서비스 인가·서비스 설정**(`Event: poc-settings` PUBLISH·SUBSCRIBE, REGISTER 본문 `<…-access-token>` — TS 24.379·24.282·24.281 §7.3) —
+`CMcServiceAuth`(`McServiceAuth.{h,cpp}` · 순수 부품 `McServiceAuthDoc.cpp`)가 토큰을 IdMS `/idms/introspect` 로 검증해 서비스마다
+(MC ID, client ID, IMPU) 바인딩과 클라이언트의 poc-settings(Answer-Mode·선택 user profile·multiplex)를 메모리에 둔다. 처리기 =
+`CCscfModule::RecvPublishPocSettings`(§7.3.3~§7.3.5 — SIP-ETag 별도 표) · SUBSCRIBE 분류 `poc-settings`/`mcvideo_poc-settings`/`mcdata_poc-settings`
+(NOTIFY = `SendPocSettingsNotify`) · REGISTER `_RegisterServiceAuthorization`(태그를 뺀 재등록 = 그 서비스 바인딩 제거). 등록 해제·만료가
+바인딩을 지운다. 자세한 것은 [mcptt_standard_conformance.md](../features/mcptt_standard_conformance.md) C10.
 REGISTER 는 `GetRegisterExpires` 로 Contact `;expires` 를 Expires 헤더보다 우선해 읽고(§10.2.1.1), 둘 다 없으면
 `REGISTER_DEFAULT_EXPIRES_SEC`=3600(§10.2.4 — 없음은 해제가 아니다), 요청값은 그대로 수락하되 내부 표현(int 초)의
 범위로만 자른다(운영 상한은 별도 정책). 종전의 int + `-1`(미지정) 표지 구조는 `4294967295` 같은 값이 -1 로 넘쳐

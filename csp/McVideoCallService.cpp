@@ -28,6 +28,7 @@
 #include "DbManager.h"
 #include "GroupMap.h"
 #include "Log.h"
+#include "McServiceAuth.h"
 #include "McVideoInfo.h"
 #include "McVideoSdp.h"
 #include "ModuleDispatcher.h"
@@ -502,10 +503,16 @@ bool CMcVideoCallService::_InviteMember( Session &clsSes, const CspPttGroup &cls
     pclsInvite->AddHeader( "P-Asserted-Service", kMcVideoIcsi );
     // 참여 기능의 단말 INVITE (§6.3.2.2.3 5)·6)) — Supported: tdialog·norefersub(timer 는 스택이 싣는다).
     //   Answer-Mode (§6.3.2.2.5.2 8)) — 그룹 호 개시자는 Answer-Mode 를 싣지 않고(§10.2.2.2.1 은 개별 호만) 참여 기능이
-    //   단말의 poc-settings Answer-Mode Indication 으로 정한다. CIMS 는 poc-settings 를 받지 않아(mcvideo.md §5.2) 자동
-    //   개시로 본다 — MCPTT 팬아웃과 같은 값. 단말은 자기 설정에 따라 수동으로 받을 수 있다(§9.2.1.2.1.2 7)·8)).
+    //   단말의 poc-settings Answer-Mode Indication(TS 24.281 §7.3.3)으로 정한다 — manual 이면 Manual, 받지 못했으면
+    //   Auto.
     pclsInvite->AddHeader( "Supported", kMcMemberInviteSupported );
-    pclsInvite->AddHeader( "Answer-Mode", "Auto" );
+    {
+        std::string strAm;
+        pclsInvite->AddHeader(
+            "Answer-Mode", gclsMcServiceAuth.AnswerModeOf( EMcService::McVideo, strMember, strAm ) && strAm == "manual"
+                               ? "Manual"
+                               : "Auto" );
+    }
     // P-Asserted-Identity = 제어 기능 PSI (TS 24.281 §9.2.1.4.1.1 3) — 개시자 200 OK 의 PAI 와 같은 신원, 골든 07).
     //   스택이 From(그룹)으로 먼저 넣은 PAI 는 지운다(RFC 3325 §9.1 — SIP URI 하나)
     McvReplaceHeader( pclsInvite->m_clsHeaderList, "P-Asserted-Identity",
