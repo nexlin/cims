@@ -286,6 +286,25 @@ void requireTimer(pjsip_tx_data* tdata) {
     pjsip_tx_data_invalidate_msg(tdata);
 }
 
+/** floor 없는 개별 호(TS 24.379 §11.1.2.2 — floor 제어 채널이 없다)의 Call-ID. 송신 보정이 SDP 만으로 MCPTT 호를 알아보지 못하는 유일한
+ *  경우다 — 개시 INVITE 는 mcptt-info 파트로 알고, 착신 200 OK·세션 갱신 offer 는 이 표로 안다. 호 표를 보지 않으려고(워커 스레드) 따로 둔다. */
+std::mutex g_noFloorCallsM;
+std::set<std::string> g_noFloorCalls;
+
+void markNoFloorCall(const std::string& callId, bool on) {
+    if (callId.empty()) return;
+    std::lock_guard<std::mutex> lk(g_noFloorCallsM);
+    if (on) g_noFloorCalls.insert(callId);
+    else g_noFloorCalls.erase(callId);
+}
+
+bool isNoFloorCall(const pjsip_tx_data* tdata) {
+    auto* cid = static_cast<const pjsip_cid_hdr*>(pjsip_msg_find_hdr(tdata->msg, PJSIP_H_CALL_ID, nullptr));
+    if (!cid) return false;
+    std::lock_guard<std::mutex> lk(g_noFloorCallsM);
+    return !g_noFloorCalls.empty() && g_noFloorCalls.count(std::string(cid->id.ptr, (size_t)cid->id.slen)) > 0;
+}
+
 pj_status_t mcTxFix(pjsip_tx_data* tdata) {
     pjsip_msg_body* body = tdata && tdata->msg ? tdata->msg->body : nullptr;
     if (!body || !body->print_body) return PJ_SUCCESS;
@@ -296,11 +315,15 @@ pj_status_t mcTxFix(pjsip_tx_data* tdata) {
     if (n <= 0) return PJ_SUCCESS;
     const std::string text(buf.data(), (size_t)n);
     const bool mcv = text.find(" MCVideo") != std::string::npos;
-    if (!mcv && !mcptt::isMcpttSdp(text)) return PJ_SUCCESS;
+    // MCPTT 호 = floor 제어 채널이 있다 · 개시 multipart 에 mcptt-info 가 있다 · floor 없는 개별 호로 표시된 다이얼로그다
+    const bool mc = mcv || mcptt::isMcpttSdp(text) ||
+                    (text.find("m=audio") != std::string::npos &&
+                     (text.find("application/vnd.3gpp.mcptt-info+xml") != std::string::npos || isNoFloorCall(tdata)));
+    if (!mc) return PJ_SUCCESS;
     requireTimer(tdata);
     // 미디어 성분 표시 i=(MCVideo «… component of MCVideo» · MCPTT «speech» — TS 24.379 §6.2.1 2)d)·§6.2.2 3)e)) — 파트 Content-Length 도 고친다
     std::string fixed = mcv ? (sdp ? mcvideo::withMediaInfo(text) : mcvideo::withMediaInfoMultipart(text))
-                            : (sdp ? mcptt::withSpeechInfo(text) : mcvideo::mapSdpParts(text, &mcptt::withSpeechInfo));
+                            : (sdp ? mcptt::withSpeechInfoAlways(text) : mcvideo::mapSdpParts(text, &mcptt::withSpeechInfoAlways));
     // 다이얼로그 안 offer(re-INVITE·UPDATE — pjsip 세션 갱신 포함)는 개시 전용 fmtp 를 뺀다(TS 24.581·24.380 §14.5). 이어지는 offer 는
     //   단일 SDP 다 — MCPTT 긴급·임박 격상 re-INVITE(mcptt-info 를 싣는 multipart)는 거치지 않는다.
     const pjsip_msg* msg = tdata->msg;
@@ -1531,6 +1554,7 @@ public:
             }
         }
         if (ci.state == PJSIP_INV_STATE_DISCONNECTED) {
+            if (mcptt && mcptt->fullDuplex) markNoFloorCall(ci.callIdString, false);
             o_->ctl.post([o = o_, id] {                    // 콜백 안에서 자기 객체를 지우지 않는다
                 o->calls.erase(id);                        // ~PjCall → floor participant close
                 o->syncPreview();                          // 송출하던 호가 끝났으면 셀프뷰도 닫는다(카메라를 놓는다)
@@ -1695,6 +1719,7 @@ public:
                     call->mcptt->pendingAppSdp = mcptt::floorSdp(call->mcptt->floor->localPort(), false);
             } else {
                 call->mcptt->micOpen = true;                                                 // 전이중 — 마이크 상시
+                try { markNoFloorCall(call->getInfo().callIdString, true); } catch (pj::Error&) {}   // answer 의 i=speech·timer
             }
             // 개시 방식 = 초대의 Answer-Mode·Priv-Answer-Mode 와 단말 설정(TS 24.379 §10.1.1.2.1.2 7)·8))
             autoAnswer = mcptt::autoCommencement(detail::headerValue(whole, "Answer-Mode"),
@@ -3010,6 +3035,7 @@ static int startMcptt(Engine::Impl* o, int accountId, const std::string& id, boo
         pj::CallOpParam prm(true);
         prm.opt.audioCount = 1;
         prm.opt.videoCount = 0;                                          // MCPTT 호는 음성만 — 그룹 영상은 MCVideo 호(mcvideo.md §8)
+        if (call->mcptt->fullDuplex) prm.opt.textCount = 0;              // floor 제어 채널 자리(text 슬롯)도 없다(§11.1.2.2 1))
         prm.txOption.multipartContentType.type = "multipart";
         prm.txOption.multipartContentType.subType = "mixed";
         pj::SipMultipartPart p1;
@@ -3044,8 +3070,7 @@ static int startMcptt(Engine::Impl* o, int accountId, const std::string& id, boo
         if (isPrivate || !opts.members.empty()) {
             pj::SipMultipartPart p2;
             p2.contentType.type = "application"; p2.contentType.subType = "resource-lists+xml";
-            p2.body = mcptt::resourceLists(isPrivate ? std::vector<std::string>{id.find(':') == std::string::npos ? "tel:" + id : id}
-                                                     : opts.members);
+            p2.body = isPrivate ? mcptt::recipientList(id.find(':') == std::string::npos ? "tel:" + id : id) : mcptt::resourceLists(opts.members);
             prm.txOption.multipartParts.push_back(p2);
         }
         // §10.1.1.2.1.1 5)·6)·7) — Accept-Contact 둘(특성 태그·ICSI, require;explicit) · P-Preferred-Service
@@ -3058,6 +3083,7 @@ static int startMcptt(Engine::Impl* o, int accountId, const std::string& id, boo
         //   PSI 를 모르는 계정은 대상 URI 로
         const std::string ruri = !cfg.mcpttServerUri.empty() ? cfg.mcpttServerUri : "sip:" + id + "@" + cfg.domain;
         call->makeCall(ruri, prm);
+        if (call->mcptt->fullDuplex) markNoFloorCall(call->getInfo().callIdString, true);   // 이어지는 offer·answer 의 i=speech·timer
         // makeCall 이 개시 offer 를 동기적으로 만들었다 — 이어지는 offer(re-INVITE)·answer 는 암묵 요청·mc_granted 없이(§14.5)
         if (call->mcptt->floor) call->mcptt->pendingAppSdp = mcptt::floorSdp(call->mcptt->floor->localPort(), false);
     } catch (pj::Error& e) {

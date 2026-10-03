@@ -162,7 +162,8 @@ std::string localPath(const std::string& ip, const std::string& session) {
 }
 
 std::string sdpSection(const std::string& lp, const char* setup, const char* direction) {
-    return "m=message " + std::to_string(kNominalPort) + " TCP/MSRP *\r\na=path:" + lp + "\r\na=accept-types:" + kAcceptTypes +
+    const char* types = std::string(direction) == "sendonly" ? kAcceptTypesOffer : kAcceptTypes;   // 발신 offer · 수신 answer
+    return "m=message " + std::to_string(kNominalPort) + " TCP/MSRP *\r\na=path:" + lp + "\r\na=accept-types:" + types +
            "\r\na=setup:" + setup + "\r\na=" + direction + "\r\n";
 }
 

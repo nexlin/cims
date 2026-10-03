@@ -37,6 +37,8 @@ std::string mcpttInfoOriginating(const std::string& sessionType, const std::stri
                                  int emergency = 0, int imminentPeril = 0, bool broadcast = false, int alert = 0);
 /** MCPTT 호 다이얼로그 Contact 의 서비스 특성 태그 — `;+g.3gpp.mcptt;+g.3gpp.icsi-ref="…mcptt"`(§10.1.1.2.1.1 4) · §6.2.3.1.1 3)·4)). */
 std::string contactFeatureParams();
+/** 개별 호의 착신자 — resource-lists entry 하나(TS 24.379 §11.1.1.2.1.1 9), RFC 5366). 계약 골든 tests/fixtures/mcptt/sip/01 의 모양. */
+std::string recipientList(const std::string& uri);
 /** resource-lists (애드혹 멤버). uri 는 tel:/sip: URI. */
 std::string resourceLists(const std::vector<std::string>& memberUris);
 /** 규격형 문서 변경 구독의 문서 목록(RFC 5875 · TS 24.481 §6.3.13.2.1 a) · TS 24.484 §6.3.13.2.2 b)1)) — `<entry uri>` 마다 문서 하나
@@ -101,6 +103,9 @@ std::string forSubsequentOffer(const std::string& sdp);
 /** MCPTT speech 미디어의 `i=speech`(TS 24.379 §6.2.1 2)d) · §6.2.2 3)e)) — m=audio 바로 뒤에 넣는다(RFC 4566 순서). 이미 있으면 그대로,
  *  MCPTT SDP 가 아니면 그대로. pjmedia SDP 는 미디어 i= 를 담지 못해 송신 직전에 넣는다. */
 std::string withSpeechInfo(const std::string& sdp);
+/** withSpeechInfo 와 같되 MCPTT 호인지를 호출자가 이미 안다 — floor 없는 개별 호(TS 24.379 §11.1.2.2)의 SDP 에는 floor 제어 채널이 없어
+ *  SDP 만으로는 MCPTT 호를 알아볼 수 없다. */
+std::string withSpeechInfoAlways(const std::string& sdp);
 
 /** URI → bare id ("tel:+82..@d" / "sip:x@d" / "<...>" → "+82.."). */
 std::string bareId(const std::string& uri);

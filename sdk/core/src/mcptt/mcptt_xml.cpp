@@ -96,6 +96,11 @@ std::string resourceLists(const std::vector<std::string>& members) {
     return s;
 }
 
+std::string recipientList(const std::string& uri) {
+    return std::string("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<resource-lists xmlns=\"") + kNsResourceLists + "\">\n  <list>\n"
+           "    <entry uri=\"" + xmlEscape(uri) + "\"/>\n  </list>\n</resource-lists>\n";
+}
+
 std::string xcapDiffResourceLists(const std::vector<std::string>& documents) {
     std::string s = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n";
     s += std::string("<resource-lists xmlns=\"") + kNsResourceLists + "\">\n  <list>\n";
@@ -388,8 +393,9 @@ bool isMcpttSdp(const std::string& sdp) {
     return false;
 }
 
-std::string withSpeechInfo(const std::string& sdp) {
-    if (!isMcpttSdp(sdp)) return sdp;
+std::string withSpeechInfo(const std::string& sdp) { return isMcpttSdp(sdp) ? withSpeechInfoAlways(sdp) : sdp; }
+
+std::string withSpeechInfoAlways(const std::string& sdp) {
     std::string out;
     size_t pos = 0;
     while (pos < sdp.size()) {

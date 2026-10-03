@@ -15,8 +15,12 @@
 namespace cimsue {
 namespace msrp {
 
+/** 수신 answer 의 accept-types — 규격 두 형식(TS 24.282 §9.2.3.2.2 1)f)) + multipart/mixed(cmdp 가 받은 두 파트를 한 multipart SEND 로
+ *  재배포한다 — mcdata_messaging.md §4.7 «편차»). */
 constexpr const char* kAcceptTypes =
     "multipart/mixed application/vnd.3gpp.mcdata-signalling application/vnd.3gpp.mcdata-payload";
+/** 발신 offer 의 accept-types — 규격 그대로(§9.2.3.2.1 1)f)). 발신은 두 파트를 SEND 2건으로 보낸다. */
+constexpr const char* kAcceptTypesOffer = "application/vnd.3gpp.mcdata-signalling application/vnd.3gpp.mcdata-payload";
 constexpr const char* kIcsiMcDataSds = "urn:urn-7:3gpp-service.ims.icsi.mcdata.sds";
 /** a=path·m=message 에 광고하는 명목 포트 — 서버가 passive 라 이 포트로 붙어 오지 않는다. */
 constexpr int kNominalPort = 2855;
@@ -47,7 +51,8 @@ std::string buildResponse(const std::string& tid, int code, const std::string& t
 /** msrp://host:port/session;tcp → host·port. 여러 URI(릴레이)면 첫 URI. */
 bool parsePath(const std::string& path, std::string& host, int& port);
 std::string localPath(const std::string& ip, const std::string& session);
-/** SDP m=message 섹션(TS 24.282 §9.2.3 — m=message TCP/MSRP *, a=path·accept-types·setup·방향). */
+/** SDP m=message 섹션(TS 24.282 §9.2.3 — m=message TCP/MSRP *, a=path·accept-types·setup·방향). accept-types = 방향 sendonly(발신 offer)면
+ *  kAcceptTypesOffer, 아니면 kAcceptTypes. */
 std::string sdpSection(const std::string& localPath, const char* setup, const char* direction);
 /** SDP 의 m=message 섹션 a=path(첫 URI). 없으면 빈 문자열. */
 std::string pathOfSdp(const std::string& sdp);

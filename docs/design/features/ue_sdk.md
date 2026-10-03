@@ -238,6 +238,10 @@ C++ 공개 표면은 `cimsue/engine.h` 의 `Engine` 하나이며 계정·호를 
   P-Preferred-Service 를 싣는다. 대상은 본문이 정한다 — 그룹 = mcdata-info `group-sds`/`group-fd` + `<mcdata-request-uri>` + `<mcdata-client-id>`,
   1:1(`sendSds`·`sendFd`) = `one-to-one-sds`/`one-to-one-fd`(request-type 만) + `application/resource-lists+xml` entry 하나(상대 MCData ID).
   시험 `McDataRequest.PsiRequestUriAndOneToOneRecipient`, `cimsue-cli sds <번호> <글> --private`.
+- **요청 형식 계약**(docs/dev/conformance_gap_plan.md §7) — `McxRequestGolden.SdkRequestsMatchContract` 가 계약 골든 `tests/fixtures/mcptt/sip/`
+  (CSP 해석 시험과 같은 파일, 정본 `build_goldens.py`)과 같은 시나리오로 엔진이 만든 개별 호 INVITE(floor 있음/없음)·SDS·FD MESSAGE·미디어 평면
+  SDS INVITE 를 의미 비교한다(요청 줄·Accept-Contact·PPS·Contact 태그·Answer-Mode·timer·XML 파트 글자 그대로·이진 파트 형식·SDP m= 줄). 거절 응답
+  골든(403 145·204)은 `CallInfo.warningCode`·`RequestResult.warningCode` 로 읽히는지 본다. SDK 편차 = 미디어 평면 INVITE 의 더미 `m=audio`(아래).
 - **SDS disposition 통지**(TS 24.282 §12.2.1.1, [mcdata_messaging.md](mcdata_messaging.md) §4.4). 받은 SDS 의 `SdsMessage.fromUri` =
   `<mcdata-calling-user-id>`(없으면 From), `groupUri` = `<mcdata-calling-group-id>`(없으면 그룹 request-type 의 request-uri — 중계된 통지는
   calling-group-id 만)이고, 앱은 이 둘을 `sendSdsNotification(peer, conv, msg, type, groupId)` 에 그대로 넘긴다. `AccountConfig.mcdataServerUri`
@@ -250,7 +254,8 @@ C++ 공개 표면은 `cimsue/engine.h` 의 `Engine` 하나이며 계정·호를 
 - **media plane SDS**(TS 24.282 §9.2.3, [mcdata_messaging.md](mcdata_messaging.md) §4.7). `AccountConfig.maxSdsCplaneBytes`(프로비저닝
   `mcdata.maxPayloadSdsCplaneBytes` — `ServiceProfile::toAccount` 가 채운다)를 넘는 **그룹** SDS 는 `sendGroupSds` 가 MSRP 로 보낸다 — INVITE 는
   §9.2.3.2.3 그대로: Request-URI = MCData PSI(9)), Contact 태그 `+g.3gpp.mcdata.sds`·ICSI(1)), Accept-Contact 둘(2)·3)), PPS(4)), multipart 의
-  mcdata-info `group-sds`·그룹 ID·client ID(8)b)) + SDP(INVITE
+  mcdata-info `group-sds`·그룹 ID·client ID(8)b)) + SDP(m=message 의 accept-types 는 규격 두 형식 — §9.2.3.2.1 1)f), 수신 answer 는 cmdp 의
+  multipart 재배포 때문에 multipart/mixed 를 더한다)(INVITE
   더미 audio + m=message sendonly actpass → 200 의 cmdp a=path → SEND 2건) — 반환·상관은 C-plane 과 같고 최종 결과가 `onRequestResult`
   method `MSRP` 로 온다. 1:1 은 늘 시그널링 평면(서버 media plane 이 그룹만 받는다). 수신 = `AccountConfig.mcdataMsrp`(SDS 지원) 가 REGISTER Contact 에
   `+g.3gpp.mcdata.sds` 와 ICSI mcdata·mcdata.sds 를 싣고(TS 24.282 §7.2.1 2) — icsi-ref 목록에 쉼표로), 서버발 배포 INVITE 는 코어가 받아(m=message active recvonly,
@@ -335,7 +340,8 @@ C++ 공개 표면은 `cimsue/engine.h` 의 `Engine` 하나이며 계정·호를 
 - **개별 호 요청**(TS 24.379 §11.1.1.2.1.1) — `startPrivateCall` 의 INVITE 도 Request-URI = 참여 MCPTT 기능 PSI(1)), Accept-Contact 둘·PPS·Contact
   태그(5)~8))를 싣고, 착신자는 `application/resource-lists+xml` entry 하나 = 상대 MCPTT ID(9)), mcptt-info 는 `<session-type>private` 와 조건
   지시자뿐이다(14)c) — 대상·발신자 ID 를 싣지 않는다). **floor 없는 개별 호**(`GroupCallOptions.fullDuplex`, §11.1.2.2)는 offer 에 floor 제어 채널
-  `m=application` 을 싣지 않는다. 착신은 반대로 판정한다 — 개별 호 초대의 offer 에 floor `m=application` 이 없으면 floor 없는 호(`McpttInfo.noFloorCtrl`,
+  `m=application` 을 싣지 않는다(그 자리인 pjsua text 슬롯도 만들지 않는다). floor 채널이 없어 SDP 로는 MCPTT 호를 알아볼 수 없으므로 송신 보정
+  모듈은 개시 INVITE 를 mcptt-info 파트로, 이어지는 offer·착신 200 OK 를 그 다이얼로그의 Call-ID 표시로 알아보고 `i=speech`·`Require: timer` 를 단다. 착신은 반대로 판정한다 — 개별 호 초대의 offer 에 floor `m=application` 이 없으면 floor 없는 호(`McpttInfo.noFloorCtrl`,
   마이크 상시)다. `mc_no_floor_ctrl` 은 사전 설정 세션 용(TS 24.380 §14.2.6)이라 이 판정에 쓰지 않는다. `cimsue-cli group-call <번호> --private [--full-duplex]`.
 - **애드혹 그룹 호**(TS 24.379 §17). `joinGroupCall({members})` — 명단(resource-lists)을 실은 개시는 mcptt-info `<session-type>adhoc`
   (§17.2.2.1.1 10)a)). 이렇게 연 호를 개시자가 `hangup` 하면 **호 전체를 끝낸다** — BYE 에 `Reason: SIP;cause=200;text="User requested release"`

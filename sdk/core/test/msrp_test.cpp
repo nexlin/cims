@@ -56,7 +56,11 @@ TEST(Msrp, FramingAndSdpTools) {
     std::string sec = msrp::sdpSection("msrp://1.2.3.4:2855/s;tcp", "active", "recvonly");
     EXPECT_EQ(sec.rfind("m=message 2855 TCP/MSRP *\r\n", 0), 0u);
     EXPECT_NE(sec.find("a=setup:active\r\na=recvonly\r\n"), std::string::npos);
-    EXPECT_NE(sec.find("a=accept-types:multipart/mixed"), std::string::npos);
+    EXPECT_NE(sec.find("a=accept-types:multipart/mixed"), std::string::npos);    // 수신 answer — cmdp 의 multipart 재배포까지
+    // 발신 offer 는 규격 두 형식만(TS 24.282 §9.2.3.2.1 1)f))
+    EXPECT_NE(msrp::sdpSection("msrp://1.2.3.4:2855/s;tcp", "actpass", "sendonly")
+                  .find("a=accept-types:application/vnd.3gpp.mcdata-signalling application/vnd.3gpp.mcdata-payload\r\n"),
+              std::string::npos);
 
     EXPECT_EQ(msrp::mcdataInfoUri("<mcdatainfo><mcdata-Params><mcdata-calling-user-id><mcdataURI>tel:+82500000014</mcdataURI>"
                                   "</mcdata-calling-user-id></mcdata-Params></mcdatainfo>", "mcdata-calling-user-id"), "tel:+82500000014");
